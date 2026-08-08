@@ -1,18 +1,22 @@
-import { useState, useRef, useEffect, useCallback } from 'react'
+import { useState, useEffect, useCallback } from 'react'
 import { GeneralSettings } from '@/components/settings/GeneralSettings'
 import { GitSettings } from '@/components/settings/GitSettings'
 import { KeyboardShortcuts } from '@/components/settings/KeyboardShortcuts'
 import { OpenCodeConfigManager } from '@/components/settings/OpenCodeConfigManager'
+import { OpenCodeServerAuthSettings } from '@/components/settings/OpenCodeServerAuthSettings'
+import { ManagerTokenSettings } from '@/components/settings/ManagerTokenSettings'
+import { ServerEnvVarsSettings } from '@/components/settings/ServerEnvVarsSettings'
+import { ServerHealthStatus } from '@/components/settings/ServerHealthStatus'
 import { ProviderSettings } from '@/components/settings/ProviderSettings'
 import { AccountSettings } from '@/components/settings/AccountSettings'
 import { VoiceSettings } from '@/components/settings/VoiceSettings'
 import { NotificationSettings } from '@/components/settings/NotificationSettings'
-import { Dialog, DialogContent } from '@/components/ui/dialog'
+import { VersionSelectDialog } from '@/components/settings/VersionSelectDialog'
+import { Dialog, DialogContent, DialogTitle } from '@/components/ui/dialog'
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs'
 import { ResizableHandle, ResizablePanel, ResizablePanelGroup } from '@/components/ui/resizable'
 import { Settings2, Keyboard, Code, ChevronLeft, Key, GitBranch, User, Volume2, Bell, X, type LucideIcon } from 'lucide-react'
 import { Button } from '@/components/ui/button'
-import { useSwipeBack } from '@/hooks/useMobile'
 import { useSettingsDialog } from '@/hooks/useSettingsDialog'
 import { cn } from '@/lib/utils'
 
@@ -29,36 +33,63 @@ interface SettingsMenuItem {
 export function SettingsDialog() {
   const { isOpen, close, activeTab, setActiveTab } = useSettingsDialog()
   const [mobileView, setMobileView] = useState<SettingsView>('menu')
-  const contentRef = useRef<HTMLDivElement>(null)
+  const [isVersionDialogOpen, setIsVersionDialogOpen] = useState(false)
+  const [sectionHistory, setSectionHistory] = useState<SettingsView[]>([])
+  const [authSectionsOpen, setAuthSectionsOpen] = useState(true)
+  const toggleAuthSections = useCallback(() => setAuthSectionsOpen((open) => !open), [])
 
-  const handleSwipeBack = useCallback(() => {
+  const pushSectionHistory = useCallback((view: SettingsView) => {
+    if (view === 'menu') return
+    setSectionHistory((history) => {
+      if (history.at(-1) === view) return history
+      return [...history, view]
+    })
+  }, [])
+
+  const handleSettingsBack = useCallback(() => {
     if (mobileView === 'menu') {
-      setMobileView('menu')
       close()
-    } else {
-      setMobileView('menu')
+      return
     }
-  }, [mobileView, close])
 
-  const { bind: bindSwipe, swipeStyles } = useSwipeBack(handleSwipeBack, {
-    enabled: isOpen,
-  })
+    const currentIndex = sectionHistory.lastIndexOf(mobileView)
+    const previousHistory = currentIndex >= 0
+      ? sectionHistory.slice(0, currentIndex)
+      : sectionHistory
+    const previousView = previousHistory.at(-1)
+
+    if (previousView) {
+      setSectionHistory(previousHistory)
+      setMobileView(previousView)
+      setActiveTab(previousView)
+      return
+    }
+
+    setSectionHistory([])
+    setMobileView('menu')
+  }, [mobileView, sectionHistory, close, setActiveTab])
 
   useEffect(() => {
-    return bindSwipe(contentRef.current)
-  }, [bindSwipe])
-
-  useEffect(() => {
-    if (!isOpen) return
+    if (!isOpen) {
+      setMobileView('menu')
+      setSectionHistory([])
+      return
+    }
     const handleKeyDown = (e: KeyboardEvent) => {
-      if (e.key === 'Escape') {
-        e.stopPropagation()
+      if (e.key === 'Escape' && !isVersionDialogOpen) {
+        const target = e.target
+        if (target instanceof Element) {
+          const closestDialog = target.closest('[role="dialog"]')
+          if (closestDialog && !closestDialog.hasAttribute('data-settings-dialog')) {
+            return
+          }
+        }
         close()
       }
     }
-    document.addEventListener('keydown', handleKeyDown)
-    return () => document.removeEventListener('keydown', handleKeyDown)
-  }, [isOpen, close])
+    document.addEventListener('keydown', handleKeyDown, { capture: true })
+    return () => document.removeEventListener('keydown', handleKeyDown, { capture: true })
+  }, [isOpen, close, isVersionDialogOpen])
 
   const menuItems: SettingsMenuItem[] = [
     { id: 'account', icon: User, label: 'Account', description: 'Profile, passkeys, and sign out' },
@@ -70,6 +101,12 @@ export function SettingsDialog() {
     { id: 'opencode', icon: Code, label: 'OpenCode Config', description: 'Manage OpenCode configurations, commands, and agents' },
     { id: 'providers', icon: Key, label: 'Providers', description: 'Manage AI provider API keys' },
   ]
+
+  const handleOpenMobileView = useCallback((view: SettingsView) => {
+    setMobileView(view)
+    setActiveTab(view)
+    pushSectionHistory(view)
+  }, [setActiveTab, pushSectionHistory])
 
   const handleTabChange = (tab: string) => {
     setActiveTab(tab as SettingsSection)
@@ -279,6 +316,10 @@ export function SettingsDialog() {
              </div>
          </div>
       </DialogContent>
+      <VersionSelectDialog
+        open={isVersionDialogOpen}
+        onOpenChange={setIsVersionDialogOpen}
+      />
     </Dialog>
   )
 }

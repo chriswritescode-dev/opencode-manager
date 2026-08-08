@@ -21,18 +21,36 @@ export interface ApiErrorResponse {
   code?: string
   detail?: string
   details?: unknown
+  validationIssues?: Array<{ path: string; message: string }>
+  removedFields?: string[]
 }
 
 export class FetchError extends Error {
   statusCode?: number
   code?: string
   detail?: string
+  details?: unknown
+  validationIssues?: Array<{ path: string; message: string }>
+  removedFields?: string[]
 
-  constructor(message: string, statusCode?: number, code?: string, detail?: string) {
+  constructor(
+    message: string,
+    statusCode?: number,
+    code?: string,
+    detail?: string,
+    options?: {
+      details?: unknown
+      validationIssues?: Array<{ path: string; message: string }>
+      removedFields?: string[]
+    }
+  ) {
     super(message)
     this.name = 'FetchError'
     this.statusCode = statusCode
     this.code = code
     this.detail = detail
+    this.details = options?.details
+    this.validationIssues = options?.validationIssues
+    this.removedFields = options?.removedFields
   }
 }

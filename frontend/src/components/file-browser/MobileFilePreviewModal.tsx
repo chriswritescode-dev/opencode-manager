@@ -22,7 +22,17 @@ export const MobileFilePreviewModal = memo(function MobileFilePreviewModal({
   const isClosingRef = useRef(false);
   const containerRef = useRef<HTMLDivElement>(null);
   
-  const { bind, swipeStyles } = useSwipeBack(onClose, {
+  const handleClose = useCallback(() => {
+    if (isClosingRef.current) return;
+    isClosingRef.current = true;
+    onClose();
+    setTimeout(() => {
+      setLocalFile(null);
+      isClosingRef.current = false;
+    }, MODAL_TRANSITION_MS);
+  }, [onClose]);
+  
+  const { bind, swipeStyles } = useSwipeBack(handleClose, {
     enabled: isOpen,
   });
   
@@ -37,15 +47,21 @@ export const MobileFilePreviewModal = memo(function MobileFilePreviewModal({
     }
   }, [isOpen, file]);
 
-  const handleClose = useCallback(() => {
-    if (isClosingRef.current) return;
-    isClosingRef.current = true;
-    onClose();
-    setTimeout(() => {
-      setLocalFile(null);
-      isClosingRef.current = false;
-    }, MODAL_TRANSITION_MS);
-  }, [onClose]);
+  useEffect(() => {
+    const handleEscape = (e: KeyboardEvent) => {
+      if (e.key === 'Escape' && isOpen) {
+        handleClose();
+      }
+    };
+
+    if (isOpen) {
+      document.addEventListener('keydown', handleEscape);
+    }
+
+    return () => {
+      document.removeEventListener('keydown', handleEscape);
+    };
+  }, [isOpen, handleClose]);
 
   if (!isOpen || !localFile) {
     return null;

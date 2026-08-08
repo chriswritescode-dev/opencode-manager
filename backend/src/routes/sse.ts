@@ -4,6 +4,7 @@ import { sseAggregator } from '../services/sse-aggregator'
 import { SSESubscribeSchema, SSEVisibilitySchema } from '@opencode-manager/shared/schemas'
 import { logger } from '../utils/logger'
 import { DEFAULTS } from '@opencode-manager/shared/config'
+import { createQueuedSSEWriter } from './sse-writer'
 
 const { HEARTBEAT_INTERVAL_MS } = DEFAULTS.SSE
 
@@ -21,42 +22,39 @@ export function createSSERoutes() {
     c.header('X-Accel-Buffering', 'no')
 
     return stream(c, async (writer) => {
-      const encoder = new TextEncoder()
-      const writeSSE = (event: string, data: string) => {
-        const lines = []
-        if (event) lines.push(`event: ${event}`)
-        lines.push(`data: ${data}`)
-        lines.push('')
-        lines.push('')
-        writer.write(encoder.encode(lines.join('\n')))
-      }
+      let cleanup: () => void = () => {}
 
-      const cleanup = sseAggregator.addClient(
+      const queuedWriter = createQueuedSSEWriter({
+        write: (chunk) => writer.write(chunk),
+        onError: (error) => {
+          logger.error(`SSE write failed for ${clientId}:`, error)
+          clearInterval(heartbeatInterval)
+          cleanup()
+        },
+      })
+
+      const heartbeatInterval = setInterval(() => {
+        queuedWriter.writeSSE('heartbeat', JSON.stringify({ timestamp: Date.now() }))
+      }, HEARTBEAT_INTERVAL_MS)
+
+      cleanup = sseAggregator.addClient(
         clientId,
         (event, data) => {
-          writeSSE(event, data)
+          queuedWriter.writeSSE(event, data)
+        },
+        (frame) => {
+          queuedWriter.writeFrame(frame)
         },
         directories
       )
 
-      const heartbeatInterval = setInterval(() => {
-        try {
-          writeSSE('heartbeat', JSON.stringify({ timestamp: Date.now() }))
-        } catch {
-          clearInterval(heartbeatInterval)
-        }
-      }, HEARTBEAT_INTERVAL_MS)
-
       writer.onAbort(() => {
+        queuedWriter.close()
         clearInterval(heartbeatInterval)
         cleanup()
       })
 
-      try {
-        writeSSE('connected', JSON.stringify({ clientId, directories, ...sseAggregator.getConnectionStatus() }))
-      } catch (err) {
-        logger.error(`Failed to send SSE connected event for ${clientId}:`, err)
-      }
+      queuedWriter.writeSSE('connected', JSON.stringify({ clientId, directories, ...sseAggregator.getConnectionStatus() }))
 
       await new Promise(() => {})
     })

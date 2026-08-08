@@ -1,6 +1,5 @@
 import { describe, it, expect, beforeEach, vi } from 'vitest'
 import * as db from '../../src/db/queries'
-import * as schema from '../../src/db/schema'
 
 const mockDb = {
   prepare: vi.fn(),
@@ -21,6 +20,7 @@ describe('Database Queries', () => {
 
   describe('createRepo', () => {
     it('should insert new repo record', () => {
+      const clonedAt = Date.now()
       const repo = {
         repoUrl: 'https://github.com/test/repo',
         localPath: 'repos/test-repo',
@@ -28,7 +28,7 @@ describe('Database Queries', () => {
         branch: 'main',
         defaultBranch: 'main',
         cloneStatus: 'ready' as const,
-        clonedAt: Date.now(),
+        clonedAt,
         isWorktree: false,
         isLocal: true,
       }
@@ -55,6 +55,7 @@ describe('Database Queries', () => {
           default_branch: repo.defaultBranch,
           clone_status: repo.cloneStatus,
           cloned_at: repo.clonedAt,
+          last_accessed_at: clonedAt,
           is_worktree: 0
         })
       }
@@ -76,6 +77,7 @@ describe('Database Queries', () => {
         repo.defaultBranch,
         repo.cloneStatus,
         repo.clonedAt,
+        clonedAt,
         repo.isWorktree ? 1 : 0,
         1
       )
@@ -86,6 +88,7 @@ describe('Database Queries', () => {
   describe('getRepoById', () => {
     it('should retrieve repo by ID', () => {
       const clonedAt = Date.now()
+      const lastAccessedAt = Date.now()
       const repoRow = {
         id: 1,
         repo_url: 'https://github.com/test/repo',
@@ -96,6 +99,7 @@ describe('Database Queries', () => {
         clone_status: 'ready',
         cloned_at: clonedAt,
         last_pulled: null,
+        last_accessed_at: lastAccessedAt,
         opencode_config_name: null,
         is_worktree: 0,
         is_local: 0
@@ -119,6 +123,7 @@ describe('Database Queries', () => {
         cloneStatus: 'ready',
         clonedAt: clonedAt,
         lastPulled: null,
+        lastAccessedAt: lastAccessedAt,
         openCodeConfigName: null,
         isWorktree: undefined,
         isLocal: undefined
@@ -226,32 +231,61 @@ describe('Database Queries', () => {
     })
   })
 
-  describe('deleteRepo', () => {
-    it('should delete repo by ID', () => {
+  describe('updateLastAccessed', () => {
+    it('should update repo last accessed timestamp', () => {
       const stmt = {
         run: vi.fn().mockReturnValue({ changes: 1 })
       }
       mockDb.prepare.mockReturnValue(stmt)
 
-      db.deleteRepo(mockDb, 1)
+      db.updateLastAccessed(mockDb, 1)
 
       expect(mockDb.prepare).toHaveBeenCalledWith(
+        'UPDATE repos SET last_accessed_at = ? WHERE id = ?'
+      )
+      expect(stmt.run).toHaveBeenCalledWith(expect.any(Number), 1)
+    })
+
+    it('should throw error when repo not found', () => {
+      const stmt = {
+        run: vi.fn().mockReturnValue({ changes: 0 })
+      }
+      mockDb.prepare.mockReturnValue(stmt)
+
+      expect(() => db.updateLastAccessed(mockDb, 999)).toThrow('Repository with id 999 not found')
+    })
+  })
+
+  describe('deleteRepo', () => {
+    it('should delete repo schedules before deleting repo by ID', () => {
+      const deleteRunsStmt = { run: vi.fn().mockReturnValue({ changes: 2 }) }
+      const deleteJobsStmt = { run: vi.fn().mockReturnValue({ changes: 1 }) }
+      const deleteSettingsStmt = { run: vi.fn().mockReturnValue({ changes: 0 }) }
+      const deleteRepoStmt = { run: vi.fn().mockReturnValue({ changes: 1 }) }
+      mockDb.prepare
+        .mockReturnValueOnce(deleteRunsStmt)
+        .mockReturnValueOnce(deleteJobsStmt)
+        .mockReturnValueOnce(deleteSettingsStmt)
+        .mockReturnValueOnce(deleteRepoStmt)
+
+      db.deleteRepo(mockDb, 1)
+
+      expect(mockDb.prepare).toHaveBeenNthCalledWith(1, 'DELETE FROM schedule_jobs WHERE repo_id = ?')
+      expect(deleteJobsStmt.run).toHaveBeenCalledWith(1)
+      expect(mockDb.prepare).toHaveBeenNthCalledWith(2, 'DELETE FROM schedule_runs WHERE repo_id = ?')
+      expect(deleteRunsStmt.run).toHaveBeenCalledWith(1)
+      expect(mockDb.prepare).toHaveBeenNthCalledWith(3, 'DELETE FROM repo_settings WHERE repo_id = ?')
+      expect(deleteSettingsStmt.run).toHaveBeenCalledWith(1)
+      expect(mockDb.prepare).toHaveBeenNthCalledWith(4,
         'DELETE FROM repos WHERE id = ?'
       )
-      expect(stmt.run).toHaveBeenCalledWith(1)
+      expect(deleteRepoStmt.run).toHaveBeenCalledWith(1)
     })
-  })
 
-  describe('Database Schema', () => {
-    it('should have schema module available', () => {
-      expect(schema.initializeDatabase).toBeDefined()
-      expect(typeof schema.initializeDatabase).toBe('function')
-    })
-  })
+    it('should not delete the assistant repo', () => {
+      db.deleteRepo(mockDb, 0)
 
-  describe('Transaction Support', () => {
-    it('should support transaction existence', () => {
-      expect(typeof mockDb.transaction).toBe('function')
+      expect(mockDb.prepare).not.toHaveBeenCalled()
     })
   })
 })

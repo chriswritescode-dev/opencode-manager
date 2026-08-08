@@ -1,8 +1,19 @@
-import { useState, useEffect } from 'react'
+import { useQuery } from '@tanstack/react-query'
 import { createOpenCodeClient } from '@/api/opencode'
 import type { components } from '@/api/opencode-types'
 
 type CommandType = components['schemas']['Command']
+
+function sortCommandsByName(commands: CommandType[]): CommandType[] {
+  return [...commands].sort((a, b) => a.name.localeCompare(b.name))
+}
+
+function rankCommandMatch(command: CommandType, searchTerm: string): number {
+  const name = command.name.toLowerCase()
+  if (name === searchTerm) return 0
+  if (name.startsWith(searchTerm)) return 1
+  return 2
+}
 
 // Built-in OpenCode commands
 const BUILTIN_COMMANDS: CommandType[] = [
@@ -152,50 +163,41 @@ const BUILTIN_COMMANDS: CommandType[] = [
   }
 ]
 
+const SORTED_BUILTIN_COMMANDS = sortCommandsByName(BUILTIN_COMMANDS)
+
 export function useCommands(opcodeUrl: string | null) {
-  const [commands, setCommands] = useState<CommandType[]>(BUILTIN_COMMANDS)
-  const [loading, setLoading] = useState(false)
-  const [error, setError] = useState<string | null>(null)
-
-  useEffect(() => {
-    if (!opcodeUrl) return
-
-    const fetchCommands = async () => {
-      setLoading(true)
-      setError(null)
-      
-      try {
-        const client = createOpenCodeClient(opcodeUrl)
-        const commandList = await client.listCommands()
-        const allCommands = [...BUILTIN_COMMANDS, ...commandList]
-        const uniqueCommands = allCommands.filter((command, index, self) =>
-          index === self.findIndex((c) => c.name === command.name)
-        )
-        setCommands(uniqueCommands)
-      } catch {
-        setError('Failed to load commands')
-        setCommands(BUILTIN_COMMANDS)
-      } finally {
-        setLoading(false)
-      }
-    }
-
-    fetchCommands()
-  }, [opcodeUrl])
+  const { data: commands, isLoading: loading, error } = useQuery({
+    queryKey: ['opencode', 'commands', opcodeUrl],
+    queryFn: async () => {
+      const client = createOpenCodeClient(opcodeUrl!)
+      const commandList = await client.listCommands()
+      const allCommands = [...BUILTIN_COMMANDS, ...commandList]
+      const uniqueCommands = allCommands.filter((command, index, self) =>
+        index === self.findIndex((c) => c.name === command.name)
+      )
+      return sortCommandsByName(uniqueCommands)
+    },
+    enabled: !!opcodeUrl,
+    initialData: SORTED_BUILTIN_COMMANDS,
+  })
 
   const filterCommands = (query: string) => {
     if (!query.trim()) return commands
     
     const searchTerm = query.toLowerCase()
-    return commands.filter(command =>
-      command.name.toLowerCase().includes(searchTerm)
-    )
+    return commands
+      .filter(command => command.name.toLowerCase().includes(searchTerm))
+      .sort((a, b) => {
+        const rankDifference = rankCommandMatch(a, searchTerm) - rankCommandMatch(b, searchTerm)
+        if (rankDifference !== 0) return rankDifference
+        return a.name.localeCompare(b.name)
+      })
   }
 
   return {
     commands,
     loading,
-    error,
+    error: error ? 'Failed to load commands' : null,
     filterCommands
   }
 }

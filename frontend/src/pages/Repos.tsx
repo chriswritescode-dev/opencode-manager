@@ -7,15 +7,21 @@ import { Header } from "@/components/ui/header";
 import { Button } from "@/components/ui/button";
 import { Plus, FolderOpen, CalendarClock } from "lucide-react";
 import { PendingActionsGroup } from "@/components/notifications/PendingActionsGroup";
+import { useSidebarAction } from "@/hooks/useSidebarAction";
+import { useDialogParam } from "@/hooks/useDialogParam";
 
 export function Repos() {
   const navigate = useNavigate();
   const [addRepoOpen, setAddRepoOpen] = useState(false);
-  const [fileBrowserOpen, setFileBrowserOpen] = useState(false);
+  const [fileBrowserOpen, setFileBrowserOpen] = useDialogParam('files');
 
   const handleCloseFileBrowser = () => {
     setFileBrowserOpen(false);
   };
+
+  useSidebarAction('new-repo', () => {
+    setAddRepoOpen(true);
+  });
 
   return (
     <div className="h-dvh max-h-dvh overflow-hidden bg-gradient-to-br from-background via-background to-background flex flex-col">
@@ -24,22 +30,17 @@ export function Repos() {
           <Header.Title logo>OpenCode</Header.Title>
         </div>
         <Header.Actions>
-          <PendingActionsGroup />
+          <div className="flex items-center gap-1">
+            <PendingActionsGroup />
+          </div>
           <Button
             variant="ghost"
             size="icon"
             onClick={() => setFileBrowserOpen(true)}
-            className="text-muted-foreground hover:text-foreground hover:bg-accent transition-all duration-200 h-8 w-8"
+            aria-label="Open files"
+            className="hidden sm:flex text-muted-foreground hover:text-foreground hover:bg-accent transition-all duration-200 h-8 w-8"
           >
             <FolderOpen className="w-4 h-4" />
-          </Button>
-          <Button
-            variant="ghost"
-            onClick={() => navigate('/schedules')}
-            size="icon"
-            className="sm:hidden text-muted-foreground hover:text-foreground hover:bg-accent transition-all duration-200 h-8 w-8"
-          >
-            <CalendarClock className="w-4 h-4" />
           </Button>
           <Button
             variant="outline"
@@ -54,10 +55,12 @@ export function Repos() {
             <Plus className="w-4 h-4 mr-1" />
             Repo
           </Button>
-          <Header.Settings />
+          <span>
+            <Header.Settings />
+          </span>
         </Header.Actions>
       </Header>
-      <div className="container mx-auto flex-1 pt-2 px-2 min-h-0 overflow-auto">
+      <div className="container mx-auto flex-1 pt-2 px-2 min-h-0 overflow-auto pb-[calc(env(safe-area-inset-bottom)+60px)] sm:pb-0">
 
         <RepoList />
       </div>
@@ -67,6 +70,7 @@ export function Repos() {
         onClose={handleCloseFileBrowser}
         basePath=""
         repoName="Workspace Root"
+        allowNavigateAboveBase={true}
       />
     </div>
   );

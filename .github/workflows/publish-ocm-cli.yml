@@ -1,0 +1,70 @@
+name: Publish ocm-cli
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - 'ocm-cli/**'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  id-token: write
+
+jobs:
+  publish:
+    name: Build and publish @opencode-manager/ocm-cli
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Bun
+        uses: oven-sh/setup-bun@v2
+
+      - name: Setup pnpm
+        uses: pnpm/action-setup@v4
+        with:
+          version: 10.28.1
+
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: 'pnpm'
+          registry-url: 'https://registry.npmjs.org'
+
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+
+      - name: Read package version
+        id: pkg
+        working-directory: ocm-cli
+        run: |
+          VERSION=$(node -p "require('./package.json').version")
+          NAME=$(node -p "require('./package.json').name")
+          echo "version=${VERSION}" >> $GITHUB_OUTPUT
+          echo "name=${NAME}" >> $GITHUB_OUTPUT
+
+      - name: Check if version already published
+        id: check
+        run: |
+          if npm view "${{ steps.pkg.outputs.name }}@${{ steps.pkg.outputs.version }}" version >/dev/null 2>&1; then
+            echo "already_published=true" >> $GITHUB_OUTPUT
+            echo "Version ${{ steps.pkg.outputs.version }} already on npm; skipping publish."
+          else
+            echo "already_published=false" >> $GITHUB_OUTPUT
+            echo "Version ${{ steps.pkg.outputs.version }} not yet on npm; will publish."
+          fi
+
+      - name: Build
+        if: steps.check.outputs.already_published == 'false'
+        working-directory: ocm-cli
+        run: bun scripts/build.ts
+
+      - name: Publish to npm
+        if: steps.check.outputs.already_published == 'false'
+        working-directory: ocm-cli
+        run: pnpm publish --access public --no-git-checks
+        env:
+          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}

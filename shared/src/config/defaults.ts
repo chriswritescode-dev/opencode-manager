@@ -13,6 +13,10 @@ export const DEFAULTS = {
   OPENCODE: {
     PORT: 5551,
     HOST: '127.0.0.1',
+    PUBLIC_URL: '', // Optional: public URL for OAuth callbacks (e.g., https://mydomain.com)
+    HEALTH_WATCH_ENABLED: true,
+    HEALTH_POLL_MS: 30000,
+    HEALTH_FAILURE_THRESHOLD: 2,
   },
 
   DATABASE: {
@@ -22,6 +26,7 @@ export const DEFAULTS = {
   WORKSPACE: {
     BASE_PATH: './workspace',
     REPOS_DIR: 'repos',
+    SCHEDULE_WORKTREES_DIR: 'schedule-worktrees',
     CONFIG_DIR: '.config/opencode',
     AUTH_FILE: '.opencode/state/opencode/auth.json',
   },
@@ -29,7 +34,6 @@ export const DEFAULTS = {
   TIMEOUTS: {
     PROCESS_START_WAIT_MS: 2000,
     PROCESS_VERIFY_WAIT_MS: 1000,
-    HEALTH_CHECK_INTERVAL_MS: 5000,
     HEALTH_CHECK_TIMEOUT_MS: 30000,
   },
 
@@ -46,8 +50,11 @@ export const DEFAULTS = {
   SSE: {
     RECONNECT_DELAY_MS: 1000,
     MAX_RECONNECT_DELAY_MS: 30000,
+    CONNECT_TIMEOUT_MS: 10000,
     IDLE_GRACE_PERIOD_MS: 5000,
-    HEARTBEAT_INTERVAL_MS: 60000,
+    HEARTBEAT_INTERVAL_MS: 30000,
+    STALL_THRESHOLD_MS: 90000,
+    WATCHDOG_TICK_MS: 15000,
   },
 } as const
 

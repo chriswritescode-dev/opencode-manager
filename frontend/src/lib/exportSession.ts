@@ -78,7 +78,7 @@ function formatPatchPart(part: Part): string {
   return content
 }
 
-export function generateSessionMarkdown(
+function generateSessionMarkdown(
   messages: MessageWithParts[],
   session: Session
 ): string {

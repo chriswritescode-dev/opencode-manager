@@ -18,7 +18,7 @@ interface SwipeState {
 
 export function useSwipe(options: SwipeOptions = {}) {
   const {
-    threshold = 80,
+    threshold = 60,
     directionRatio = 1.5,
     enabled = true,
     onSwipeStart,

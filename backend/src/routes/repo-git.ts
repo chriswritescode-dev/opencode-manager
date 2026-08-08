@@ -1,23 +1,25 @@
 import { Hono } from 'hono'
 import type { Database } from 'bun:sqlite'
 import type { ContentfulStatusCode } from 'hono/utils/http-status'
-import * as db from '../db/queries'
+import { getRepoById } from '../db/queries'
 import { logger } from '../utils/logger'
 import { parseGitError } from '../utils/git-errors'
 import { GitService } from '../services/git/GitService'
 import type { GitAuthService } from '../services/git-auth'
 import { SettingsService } from '../services/settings'
+import { CredentialProvider } from '../services/credential-provider'
 import type { GitStatusResponse } from '../types/git'
 
 export function createRepoGitRoutes(database: Database, gitAuthService: GitAuthService) {
   const app = new Hono()
   const settingsService = new SettingsService(database)
-  const git = new GitService(gitAuthService, settingsService)
+  const credentialProvider = new CredentialProvider(database)
+  const git = new GitService(gitAuthService, settingsService, credentialProvider)
 
   app.get('/:id/git/status', async (c) => {
     try {
       const id = parseInt(c.req.param('id'))
-      const repo = db.getRepoById(database, id)
+      const repo = getRepoById(database, id)
 
       if (!repo) {
         return c.json({ error: 'Repo not found' }, 404)
@@ -94,7 +96,7 @@ export function createRepoGitRoutes(database: Database, gitAuthService: GitAuthS
         return c.json({ error: 'path query parameter is required' }, 400)
       }
 
-      const repo = db.getRepoById(database, id)
+      const repo = getRepoById(database, id)
 
       if (!repo) {
         return c.json({ error: 'Repo not found' }, 404)
@@ -124,7 +126,7 @@ export function createRepoGitRoutes(database: Database, gitAuthService: GitAuthS
         return c.json({ error: 'path query parameter is required' }, 400)
       }
 
-      const repo = db.getRepoById(database, id)
+      const repo = getRepoById(database, id)
       if (!repo) {
         return c.json({ error: 'Repo not found' }, 404)
       }
@@ -144,7 +146,7 @@ export function createRepoGitRoutes(database: Database, gitAuthService: GitAuthS
   app.post('/:id/git/fetch', async (c) => {
     try {
       const id = parseInt(c.req.param('id'))
-      const repo = db.getRepoById(database, id)
+      const repo = getRepoById(database, id)
 
       if (!repo) {
         return c.json({ error: 'Repo not found' }, 404)
@@ -167,7 +169,7 @@ export function createRepoGitRoutes(database: Database, gitAuthService: GitAuthS
   app.post('/:id/git/pull', async (c) => {
     try {
       const id = parseInt(c.req.param('id'))
-      const repo = db.getRepoById(database, id)
+      const repo = getRepoById(database, id)
 
       if (!repo) {
         return c.json({ error: 'Repo not found' }, 404)
@@ -190,7 +192,7 @@ export function createRepoGitRoutes(database: Database, gitAuthService: GitAuthS
   app.post('/:id/git/commit', async (c) => {
     try {
       const id = parseInt(c.req.param('id'))
-      const repo = db.getRepoById(database, id)
+      const repo = getRepoById(database, id)
 
       if (!repo) {
         return c.json({ error: 'Repo not found' }, 404)
@@ -220,7 +222,7 @@ export function createRepoGitRoutes(database: Database, gitAuthService: GitAuthS
   app.post('/:id/git/push', async (c) => {
     try {
       const id = parseInt(c.req.param('id'))
-      const repo = db.getRepoById(database, id)
+      const repo = getRepoById(database, id)
 
       if (!repo) {
         return c.json({ error: 'Repo not found' }, 404)
@@ -246,7 +248,7 @@ export function createRepoGitRoutes(database: Database, gitAuthService: GitAuthS
   app.post('/:id/git/stage', async (c) => {
     try {
       const id = parseInt(c.req.param('id'))
-      const repo = db.getRepoById(database, id)
+      const repo = getRepoById(database, id)
 
       if (!repo) {
         return c.json({ error: 'Repo not found' }, 404)
@@ -276,7 +278,7 @@ export function createRepoGitRoutes(database: Database, gitAuthService: GitAuthS
   app.post('/:id/git/unstage', async (c) => {
     try {
       const id = parseInt(c.req.param('id'))
-      const repo = db.getRepoById(database, id)
+      const repo = getRepoById(database, id)
 
       if (!repo) {
         return c.json({ error: 'Repo not found' }, 404)
@@ -306,7 +308,7 @@ export function createRepoGitRoutes(database: Database, gitAuthService: GitAuthS
   app.post('/:id/git/discard', async (c) => {
     try {
       const id = parseInt(c.req.param('id'))
-      const repo = db.getRepoById(database, id)
+      const repo = getRepoById(database, id)
 
       if (!repo) {
         return c.json({ error: 'Repo not found' }, 404)
@@ -337,7 +339,7 @@ export function createRepoGitRoutes(database: Database, gitAuthService: GitAuthS
     try {
       const id = parseInt(c.req.param('id'))
       const hash = c.req.param('hash')
-      const repo = db.getRepoById(database, id)
+      const repo = getRepoById(database, id)
 
       if (!repo) {
         return c.json({ error: 'Repo not found' }, 404)
@@ -369,7 +371,7 @@ export function createRepoGitRoutes(database: Database, gitAuthService: GitAuthS
       const id = parseInt(c.req.param('id'))
       const hash = c.req.param('hash')
       const filePath = c.req.query('path')
-      const repo = db.getRepoById(database, id)
+      const repo = getRepoById(database, id)
 
       if (!repo) {
         return c.json({ error: 'Repo not found' }, 404)
@@ -398,14 +400,15 @@ export function createRepoGitRoutes(database: Database, gitAuthService: GitAuthS
   app.get('/:id/git/log', async (c) => {
     try {
       const id = parseInt(c.req.param('id'))
-      const repo = db.getRepoById(database, id)
+      const repo = getRepoById(database, id)
 
       if (!repo) {
         return c.json({ error: 'Repo not found' }, 404)
       }
 
       const limit = parseInt(c.req.query('limit') || '10', 10)
-      const commits = await git.getLog(id, database, limit)
+      const branch = c.req.query('branch') || undefined
+      const commits = await git.getLog(id, database, limit, branch)
 
       return c.json({ commits })
     } catch (error: unknown) {
@@ -421,7 +424,7 @@ export function createRepoGitRoutes(database: Database, gitAuthService: GitAuthS
   app.post('/:id/git/reset', async (c) => {
     try {
       const id = parseInt(c.req.param('id'))
-      const repo = db.getRepoById(database, id)
+      const repo = getRepoById(database, id)
 
       if (!repo) {
         return c.json({ error: 'Repo not found' }, 404)
@@ -451,7 +454,7 @@ export function createRepoGitRoutes(database: Database, gitAuthService: GitAuthS
   app.get('/:id/git/branches', async (c) => {
     try {
       const id = parseInt(c.req.param('id'))
-      const repo = db.getRepoById(database, id)
+      const repo = getRepoById(database, id)
 
       if (!repo) {
         return c.json({ error: 'Repo not found' }, 404)

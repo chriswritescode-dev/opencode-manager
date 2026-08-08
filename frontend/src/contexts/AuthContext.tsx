@@ -1,5 +1,5 @@
 /* eslint-disable react-refresh/only-export-components */
-import { createContext, useEffect, useState, useCallback, type ReactNode } from 'react'
+import { createContext, useEffect, useMemo, useState, useCallback, type ReactNode } from 'react'
 import { useSession, signIn, signUp, signOut, authClient, type AuthUser } from '@/lib/auth-client'
 import { useNavigate, useLocation } from 'react-router-dom'
 
@@ -125,7 +125,7 @@ export function AuthProvider({ children }: AuthProviderProps) {
     await refetch()
   }, [refetch])
 
-  const value: AuthContextValue = {
+  const value = useMemo<AuthContextValue>(() => ({
     user: session?.user ?? null,
     isAuthenticated: !!session?.user,
     isLoading: isPending,
@@ -137,7 +137,18 @@ export function AuthProvider({ children }: AuthProviderProps) {
     addPasskey,
     logout,
     refreshSession,
-  }
+  }), [
+    session,
+    isPending,
+    config,
+    signInWithEmail,
+    signInWithProvider,
+    signInWithPasskey,
+    signUpWithEmail,
+    addPasskey,
+    logout,
+    refreshSession,
+  ])
 
   return (
     <AuthContext.Provider value={value}>

@@ -1,6 +1,6 @@
 import { exec } from 'child_process'
-import { readFile } from 'fs/promises'
-import { fileExists } from './file-operations'
+import path from 'path'
+import { resolveOpenCodeProjectId } from '@opencode-manager/shared/project-id'
 
 const projectIdCache = new Map<string, string>()
 
@@ -21,48 +21,31 @@ export async function resolveProjectId(repoFullPath: string): Promise<string | n
     return projectIdCache.get(repoFullPath) ?? null
   }
 
-  const cacheFile = `${repoFullPath}/.git/opencode`
-  const cacheExists = await fileExists(cacheFile)
-
-  if (cacheExists) {
-    try {
-      const cachedId = (await readFile(cacheFile, 'utf-8')).trim()
-      if (cachedId) {
-        projectIdCache.set(repoFullPath, cachedId)
-        return cachedId
-      }
-    } catch {
-      // cache file may not exist or be readable
-    }
-  }
-
-  try {
-    const gitDir = `${repoFullPath}/.git`
-    const gitDirExists = await fileExists(gitDir)
-    if (!gitDirExists) {
-      return null
-    }
-
-    const output = await executeGitCommand(repoFullPath, [
-      'rev-list',
-      '--max-parents=0',
-      '--all',
-    ])
-
-    if (!output) {
-      return null
-    }
-
-    const commits = output.split('\n').filter(Boolean).sort()
-    const projectId = commits[0]
-
-    if (!projectId) {
-      return null
-    }
-
+  const projectId = await resolveOpenCodeProjectId(repoFullPath)
+  if (projectId) {
     projectIdCache.set(repoFullPath, projectId)
-    return projectId
+  }
+  return projectId
+}
+
+const mainCheckoutCache = new Map<string, boolean>()
+
+export async function isGitMainCheckout(repoFullPath: string): Promise<boolean> {
+  if (mainCheckoutCache.has(repoFullPath)) {
+    return mainCheckoutCache.get(repoFullPath) ?? false
+  }
+  try {
+    const gitDir = await executeGitCommand(repoFullPath, ['rev-parse', '--absolute-git-dir'])
+    const commonDir = await executeGitCommand(repoFullPath, [
+      'rev-parse',
+      '--path-format=absolute',
+      '--git-common-dir',
+    ])
+    const isMain = !!gitDir && !!commonDir && path.resolve(gitDir) === path.resolve(commonDir)
+    mainCheckoutCache.set(repoFullPath, isMain)
+    return isMain
   } catch {
-    return null
+    mainCheckoutCache.set(repoFullPath, false)
+    return false
   }
 }

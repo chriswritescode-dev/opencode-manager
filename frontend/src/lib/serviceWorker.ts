@@ -4,19 +4,23 @@ type UpdateCallback = () => void;
 
 let updateCallback: UpdateCallback | null = null;
 let updatePending = false;
+let updateNotified = false;
 
 function notifyUpdate() {
+  if (updateNotified) return;
   if (!updateCallback) {
     updatePending = true;
     return;
   }
+  updateNotified = true;
   updatePending = false;
   updateCallback();
 }
 
 export function onServiceWorkerUpdate(callback: UpdateCallback): void {
   updateCallback = callback;
-  if (updatePending) {
+  if (updatePending && !updateNotified) {
+    updateNotified = true;
     updatePending = false;
     callback();
   }
@@ -26,8 +30,30 @@ export function offServiceWorkerUpdate(): void {
   updateCallback = null;
 }
 
+const UPDATE_CHECK_INTERVAL_MS = 60 * 1000;
+
+async function unregisterServiceWorkerAndClearCaches(): Promise<void> {
+  try {
+    const registrations = await navigator.serviceWorker.getRegistrations();
+    await Promise.all(registrations.map((registration) => registration.unregister()));
+    if ("caches" in window) {
+      const keys = await caches.keys();
+      await Promise.all(keys.map((key) => caches.delete(key)));
+    }
+  } catch {
+    return;
+  }
+}
+
 export function registerServiceWorker(): void {
   if (!("serviceWorker" in navigator)) return;
+
+  if (import.meta.env.DEV) {
+    void unregisterServiceWorkerAndClearCaches();
+    return;
+  }
+
+  const hadController = !!navigator.serviceWorker.controller;
 
   navigator.serviceWorker.addEventListener("message", (event) => {
     if (event.data?.type === "SW_UPDATED") {
@@ -35,28 +61,38 @@ export function registerServiceWorker(): void {
     }
   });
 
-  navigator.serviceWorker.ready.then((registration) => {
-    if (registration.waiting) {
-      notifyUpdate();
-    }
-  });
-
   navigator.serviceWorker
     .register("/sw.js", { scope: "/" })
     .then((registration) => {
+      if (registration.waiting && hadController) {
+        notifyUpdate();
+      }
+
       registration.addEventListener("updatefound", () => {
         const installing = registration.installing;
         if (!installing) return;
         installing.addEventListener("statechange", () => {
-          if (installing.state === "installed" && navigator.serviceWorker.controller) {
+          if (installing.state === "installed" && hadController) {
             notifyUpdate();
           }
         });
       });
 
-      setInterval(() => {
+      let lastUpdateCheck = 0;
+      const checkForUpdate = () => {
+        const now = Date.now();
+        if (now - lastUpdateCheck < UPDATE_CHECK_INTERVAL_MS) return;
+        lastUpdateCheck = now;
         registration.update().catch(() => {});
-      }, 60 * 60 * 1000);
+      };
+
+      const onVisibilityChange = () => {
+        if (document.visibilityState === "visible") checkForUpdate();
+      };
+
+      document.addEventListener("visibilitychange", onVisibilityChange);
+      window.addEventListener("focus", checkForUpdate);
+      setInterval(checkForUpdate, UPDATE_CHECK_INTERVAL_MS);
     })
     .catch(() => {});
 }

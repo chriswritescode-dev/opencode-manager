@@ -60,7 +60,6 @@ opencode-manager/
 │   │   └── contexts/     # React contexts
 │   └── public/           # Static assets
 ├── shared/               # @opencode-manager/shared types and utilities
-├── packages/memory/      # Memory plugin package
 ├── workspace/            # Runtime workspace for OpenCode
 ├── docs/                 # Documentation
 ├── scripts/              # Build and utility scripts

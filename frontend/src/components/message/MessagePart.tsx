@@ -7,6 +7,7 @@ import { ToolCallPart } from './ToolCallPart'
 import { RetryPart } from './RetryPart'
 import { useTTS } from '@/hooks/useTTS'
 import { useMobile } from '@/hooks/useMobile'
+import { useSettings } from '@/hooks/useSettings'
 import { CopyButton } from '@/components/ui/copy-button'
 
 type RetryPartType = components['schemas']['RetryPart']
@@ -42,6 +43,8 @@ function getCopyableContent(part: Part, allParts?: Part[]): string {
       return part.snapshot || ''
     case 'agent':
       return `Agent: ${part.name}`
+    case 'subtask':
+      return `${part.agent}: ${part.description}\n\n${part.prompt}`.trim()
     case 'step-finish':
       if (allParts) {
         return allParts
@@ -59,24 +62,25 @@ function getCopyableContent(part: Part, allParts?: Part[]): string {
 }
 
 interface TTSButtonProps {
+  messageId: string
   content: string
   className?: string
 }
 
-function TTSButton({ content, className = "" }: TTSButtonProps) {
-  const { speak, stop, isEnabled, isPlaying, isLoading, originalText } = useTTS()
+function TTSButton({ messageId, content, className = "" }: TTSButtonProps) {
+  const { speakMessage, stop, isEnabled, isPlaying, isLoading, activeMessageId } = useTTS()
   
   if (!isEnabled || !content.trim()) {
     return null
   }
   
-  const isThisPlaying = (isPlaying || isLoading) && originalText === content
+  const isThisPlaying = (isPlaying || isLoading) && activeMessageId === messageId
   
   const handleClick = () => {
     if (isThisPlaying) {
       stop()
     } else {
-      speak(content)
+      speakMessage(messageId, content)
     }
   }
 
@@ -85,7 +89,7 @@ function TTSButton({ content, className = "" }: TTSButtonProps) {
       onClick={handleClick}
       className={`p-1.5 rounded ${isThisPlaying ? 'bg-destructive/12 text-destructive hover:bg-destructive/18' : 'bg-card hover:bg-card-hover text-muted-foreground hover:text-foreground'} ${className}`}
       title={isThisPlaying ? "Stop playback" : "Read aloud"}
-      disabled={isLoading && originalText !== content}
+      disabled={isLoading && !isThisPlaying}
     >
       {isLoading && isThisPlaying ? (
         <Loader2 className="w-4 h-4 animate-spin" />
@@ -99,11 +103,15 @@ function TTSButton({ content, className = "" }: TTSButtonProps) {
 }
 
 export const MessagePart = memo(function MessagePart({ part, role, allParts, partIndex, onFileClick, onChildSessionClick, messageTextContent }: MessagePartProps) {
+  const { preferences } = useSettings()
+  const simpleChatMode = preferences?.simpleChatMode ?? false
+  const showReasoning = preferences?.showReasoning ?? false
   const copyableContent = getCopyableContent(part, allParts)
   const isMobile = useMobile()
   
   switch (part.type) {
     case 'text':
+      if (part.synthetic) return null
       if (role === 'user' && allParts && partIndex !== undefined) {
         const nextPart = allParts[partIndex + 1]
         if (nextPart && nextPart.type === 'file') {
@@ -112,10 +120,13 @@ export const MessagePart = memo(function MessagePart({ part, role, allParts, par
       }
       return <TextPart part={part} />
     case 'patch':
+      if (simpleChatMode) return null
       return <PatchPart part={part} onFileClick={onFileClick} />
     case 'tool':
+      if (simpleChatMode && part.tool !== 'task') return null
       return <ToolCallPart part={part} onFileClick={onFileClick} onChildSessionClick={onChildSessionClick} />
     case 'reasoning':
+      if (simpleChatMode || !showReasoning) return null
       return (
         <details className="border border-border rounded-lg my-2">
           <summary className="px-4 py-2 bg-muted hover:bg-accent cursor-pointer text-sm font-medium">
@@ -127,29 +138,33 @@ export const MessagePart = memo(function MessagePart({ part, role, allParts, par
         </details>
       )
     case 'snapshot':
+      if (simpleChatMode) return null
       return (
         <div className="border border-border rounded-lg p-4 my-2 bg-card">
           <div className="text-xs text-muted-foreground font-mono">Snapshot: {part.snapshot}</div>
         </div>
       )
     case 'agent':
+      if (simpleChatMode) return null
       return (
         <div className="border border-border rounded-lg p-4 my-2 bg-card">
           <div className="text-sm font-medium text-info">Agent: {part.name}</div>
         </div>
       )
-    case 'step-finish': {
-      const isFree = part.cost === 0
-      const totalTokens = part.tokens.input + part.tokens.output + (part.tokens.cache?.read || 0)
-      const costText = isMobile && isFree ? null : <span>${part.cost.toFixed(4)} • {totalTokens} tokens</span>
-      return (
-        <div className="text-xs text-muted-foreground my-1 flex items-center gap-2">
-          {costText}
-          <CopyButton content={copyableContent} title="Copy step complete" />
-          {messageTextContent && <TTSButton content={messageTextContent} />}
-        </div>
-      )
-    }
+    case 'step-finish':
+      if (simpleChatMode) return null
+      {
+        const isFree = part.cost === 0
+        const totalTokens = part.tokens.input + part.tokens.output + (part.tokens.cache?.read || 0)
+        const costText = isMobile && isFree ? null : <span>${part.cost.toFixed(4)} • {totalTokens} tokens</span>
+        return (
+          <div className="text-xs text-muted-foreground my-1 flex items-center gap-2">
+            {costText}
+            <CopyButton content={copyableContent} title="Copy step complete" />
+            {messageTextContent && part.messageID && <TTSButton messageId={part.messageID} content={messageTextContent} />}
+          </div>
+        )
+      }
     case 'file':
       return (
         <span className="inline-flex items-center gap-1 px-2 py-1 rounded bg-muted border border-border text-sm text-foreground">
@@ -159,7 +174,21 @@ export const MessagePart = memo(function MessagePart({ part, role, allParts, par
       )
     case 'retry':
       return <RetryPart part={part as RetryPartType} />
+    case 'subtask': {
+      const label = part.description || part.prompt || 'Sub-agent task'
+      return (
+        <div className="my-1 w-full rounded-lg border border-blue-500/20 bg-blue-500/5 px-3 py-1.5 text-left text-xs text-muted-foreground shadow-sm shadow-blue-500/5">
+          <div className="flex items-center gap-2 min-w-0">
+            <span className="truncate">{label}</span>
+            <span className="ml-auto shrink-0 text-[11px] text-muted-foreground">sub-agent</span>
+          </div>
+        </div>
+      )
+    }
+    case 'step-start':
+    case 'compaction':
+      return null
     default:
-      return 
+      return null
   }
 })

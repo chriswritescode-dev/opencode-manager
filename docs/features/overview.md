@@ -29,6 +29,8 @@ OpenCode Manager provides a comprehensive web interface for managing OpenCode AI
 - **Slash Commands** - Built-in (`/help`, `/new`, `/compact`) and custom commands
 - **File Mentions** - Reference files with `@filename` autocomplete
 - **Plan/Build Modes** - Toggle between read-only and file-change modes
+- **Per-Agent Model Selection** — Each agent retains its own model selection independently
+- **Session Pinning** — Pin important sessions to a dedicated section at the top of the session list
 - **Mermaid Diagrams** - Visual diagram rendering in chat
 
 [Learn more →](chat.md)
@@ -60,17 +62,6 @@ OpenCode Manager provides a comprehensive web interface for managing OpenCode AI
 - **Management** - Enable, disable, and configure servers
 
 [Learn more →](mcp.md)
-
-### Memory Plugin (Optional)
-
-- **Semantic Search** - Store and retrieve project knowledge using vector embeddings (requires plugin installation)
-- **Memory Scopes** - Categorize as convention, decision, or context
-- **Automatic Extraction** - Durable knowledge extracted after session compaction
-- **Compaction Awareness** - Injects project memories into compaction context
-- **Architect → Code** - Plan with a smart model, execute with a fast model for cost-optimized workflows
-- **Loops** - Iterative development with automatic auditing in isolated worktrees
-
-[Learn more →](memory.md)
 
 ### Text-to-Speech
 
@@ -105,3 +96,20 @@ OpenCode Manager provides a comprehensive web interface for managing OpenCode AI
 - **Customizable** - Control which events trigger notifications
 
 [Learn more →](notifications.md)
+
+### Assistant Mode
+
+- **Dedicated AI Workspace** — Isolated assistant directory with managed configuration and a built-in bearer-token API
+- **Auto-Provisioned Skills** — Schedule management, notifications, settings, and repo listing skills available out of the box
+- **Session Continuity** — Navigating to the assistant always resumes the most recent session or creates one automatically
+
+[Learn more →](assistant-mode.md)
+
+### OpenCode Server Health
+
+- **Live Status** — Server health indicator in Settings (Healthy/Unhealthy/Starting)
+- **Graceful Restart** — Active sessions are aborted and resumed with `continue` after restart
+- **Auto-Recovery** — Configurable health monitoring with automatic recovery on failure
+- **Version Management** — View current versions and trigger OpenCode upgrades from the UI
+
+[Learn more →](server-health.md)

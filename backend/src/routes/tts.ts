@@ -2,18 +2,16 @@ import { Hono } from 'hono'
 import { z } from 'zod'
 import { Database } from 'bun:sqlite'
 import { createHash } from 'crypto'
-import { mkdir, readFile, writeFile, readdir, stat, unlink } from 'fs/promises'
+import { readFile, writeFile, readdir, stat, unlink } from 'fs/promises'
 import { join } from 'path'
 import { SettingsService } from '../services/settings'
 import { logger } from '../utils/logger'
+import { mkdirSafe } from '../utils/fs-safe'
 import { getWorkspacePath } from '@opencode-manager/shared/config/env'
 import {
   normalizeToBaseUrl,
-  ensureDiscoveryCacheDir,
-  getCachedDiscovery,
-  cacheDiscovery,
-  generateDiscoveryCacheKey,
-  fetchAvailableModels,
+  discoverModelsCached,
+  discoverCached,
 } from '../utils/discovery-cache'
 
 const TTS_CACHE_DIR = join(getWorkspacePath(), 'cache', 'tts')
@@ -32,7 +30,7 @@ function generateCacheKey(text: string, voice: string, model: string, speed: num
 }
 
 async function ensureCacheDir(): Promise<void> {
-  await mkdir(TTS_CACHE_DIR, { recursive: true })
+  await mkdirSafe(TTS_CACHE_DIR)
 }
 
 async function getCachedAudio(cacheKey: string): Promise<Buffer | null> {
@@ -357,40 +355,26 @@ export function createTTSRoutes(db: Database) {
         return c.json({ error: 'TTS not configured' }, 400)
       }
       
-      const cacheKey = generateDiscoveryCacheKey(ttsConfig.endpoint, ttsConfig.apiKey, 'models')
-      
-      // Check cache first (unless force refresh)
-      if (!forceRefresh) {
-        const cachedModels = await getCachedDiscovery<string[]>(cacheKey)
-        if (cachedModels) {
-          logger.info(`Models cache hit for user ${userId}`)
-          return c.json({ models: cachedModels, cached: true })
-        }
+      const { models, cached } = await discoverModelsCached({
+        baseUrl: ttsConfig.endpoint,
+        apiKey: ttsConfig.apiKey,
+        type: 'models',
+        filterPattern: /tts|audio|speech/,
+        defaultModels: ['tts-1', 'tts-1-hd'],
+        forceRefresh,
+      })
+
+      if (!cached) {
+        await settingsService.updateSettings({
+          tts: {
+            ...ttsConfig,
+            availableModels: models,
+            lastModelsFetch: Date.now(),
+          },
+        }, userId)
       }
-      
-      // Fetch from API
-      await ensureDiscoveryCacheDir()
-      logger.info(`Fetching TTS models for user ${userId}`)
-      
-      const models = await fetchAvailableModels(
-        ttsConfig.endpoint,
-        ttsConfig.apiKey,
-        /tts|audio|speech/,
-        ['tts-1', 'tts-1-hd'],
-      )
-      await cacheDiscovery(cacheKey, models)
-      
-      // Update user preferences with available models
-      await settingsService.updateSettings({
-        tts: {
-          ...ttsConfig,
-          availableModels: models,
-          lastModelsFetch: Date.now()
-        }
-      }, userId)
-      
-      logger.info(`Fetched ${models.length} TTS models`)
-      return c.json({ models, cached: false })
+
+      return c.json({ models, cached })
     } catch (error) {
       logger.error('Failed to fetch TTS models:', error)
       return c.json({ error: 'Failed to fetch models' }, 500)
@@ -410,35 +394,25 @@ export function createTTSRoutes(db: Database) {
         return c.json({ error: 'TTS not configured' }, 400)
       }
       
-      const cacheKey = generateDiscoveryCacheKey(ttsConfig.endpoint, ttsConfig.apiKey, 'voices')
-      
-      // Check cache first (unless force refresh)
-      if (!forceRefresh) {
-        const cachedVoices = await getCachedDiscovery<string[]>(cacheKey)
-        if (cachedVoices) {
-          logger.info(`Voices cache hit for user ${userId}`)
-          return c.json({ voices: cachedVoices, cached: true })
-        }
+      const { value: voices, cached } = await discoverCached({
+        baseUrl: ttsConfig.endpoint,
+        apiKey: ttsConfig.apiKey,
+        type: 'voices',
+        forceRefresh,
+        fetcher: () => fetchAvailableVoices(ttsConfig.endpoint, ttsConfig.apiKey),
+      })
+
+      if (!cached) {
+        await settingsService.updateSettings({
+          tts: {
+            ...ttsConfig,
+            availableVoices: voices,
+            lastVoicesFetch: Date.now(),
+          },
+        }, userId)
       }
-      
-      // Fetch from API
-      await ensureDiscoveryCacheDir()
-      logger.info(`Fetching TTS voices for user ${userId}`)
-      
-      const voices = await fetchAvailableVoices(ttsConfig.endpoint, ttsConfig.apiKey)
-      await cacheDiscovery(cacheKey, voices)
-      
-      // Update user preferences with available voices
-      await settingsService.updateSettings({
-        tts: {
-          ...ttsConfig,
-          availableVoices: voices,
-          lastVoicesFetch: Date.now()
-        }
-      }, userId)
-      
-      logger.info(`Fetched ${voices.length} TTS voices`)
-      return c.json({ voices, cached: false })
+
+      return c.json({ voices, cached })
     } catch (error) {
       logger.error('Failed to fetch TTS voices:', error)
       return c.json({ error: 'Failed to fetch voices' }, 500)

@@ -1,15 +1,19 @@
-import { useState, useRef, useEffect, useMemo, useImperativeHandle, forwardRef, memo, type KeyboardEvent } from 'react'
+import { useState, useRef, useEffect, useMemo, useImperativeHandle, forwardRef, memo, useCallback, type KeyboardEvent, type PointerEvent as ReactPointerEvent } from 'react'
 import { useSendPrompt, useAbortSession, useSendShell, useAgents } from '@/hooks/useOpenCode'
 import { useCommands } from '@/hooks/useCommands'
 import { useCommandHandler } from '@/hooks/useCommandHandler'
 import { useFileSearch } from '@/hooks/useFileSearch'
 import { useModelSelection } from '@/hooks/useModelSelection'
+import { useOpenCodeClient } from '@/hooks/useOpenCode'
 import { useVariants } from '@/hooks/useVariants'
 import { useSessionAgent } from '@/hooks/useSessionAgent'
 import { useSTT } from '@/hooks/useSTT'
 
 import { useUserBash } from '@/stores/userBashStore'
+import { useModelStore } from '@/stores/modelStore'
 import { useSessionAgentStore } from '@/stores/sessionAgentStore'
+import { useUIState } from '@/stores/uiStateStore'
+import { useSendErrorStore } from '@/stores/sendErrorStore'
 import { useMobile } from '@/hooks/useMobile'
 
 import { usePermissions } from '@/contexts/EventContext'
@@ -22,7 +26,12 @@ import { MentionSuggestions, type MentionItem } from './MentionSuggestions'
 import { SessionStatusIndicator } from '@/components/ui/session-status-indicator'
 import { ModelQuickSelect } from '@/components/model/ModelQuickSelect'
 import { AgentQuickSelect } from '@/components/agent/AgentQuickSelect'
+import { VoiceStatusOverlay, type VoiceStatusOverlayState } from './VoiceStatusOverlay'
 import { detectMentionTrigger, parsePromptToParts, getFilename, filterAgentsByQuery } from '@/lib/promptParser'
+import { randomId } from '@/lib/utils'
+import { showToast } from '@/lib/toast'
+import { formatModelName, getProviders } from '@/api/providers'
+import { useQuery } from '@tanstack/react-query'
 
 
 import type { components } from '@/api/opencode-types'
@@ -41,6 +50,10 @@ const revokeBlobUrls = (attachments: ImageAttachment[]) => {
 
 const ACCEPTED_FILE_TYPES = [...ACCEPTED_IMAGE_TYPES, "application/pdf"]
 
+const VOICE_SEND_SWIPE_ARM_THRESHOLD = 24
+const VOICE_SEND_SWIPE_DISARM_THRESHOLD = 8
+type VoiceButtonVariant = 'desktop' | 'mobile'
+
 
 type CommandType = components['schemas']['Command']
 
@@ -54,13 +67,11 @@ interface PromptInputProps {
   opcodeUrl: string
   directory?: string
   sessionID: string
-  repoId?: number
-  disabled?: boolean
   showScrollButton?: boolean
-  hasActiveStream?: boolean
-  onScrollToBottom?: () => void
+  isSessionActive?: boolean
+  isStreamingResponse?: boolean
+  onScrollToBottom: () => void
   onShowSessionsDialog?: () => void
-  onShowModelsDialog?: () => void
   onShowHelpDialog?: () => void
   onToggleDetails?: () => boolean
   onExportSession?: () => void
@@ -71,13 +82,11 @@ export const PromptInput = memo(forwardRef<PromptInputHandle, PromptInputProps>(
   opcodeUrl,
   directory,
   sessionID,
-  repoId,
-  disabled,
   showScrollButton,
-  hasActiveStream = false,
+  isSessionActive = false,
+  isStreamingResponse = false,
   onScrollToBottom,
   onShowSessionsDialog,
-  onShowModelsDialog,
   onShowHelpDialog,
   onToggleDetails,
   onExportSession,
@@ -97,9 +106,24 @@ export const PromptInput = memo(forwardRef<PromptInputHandle, PromptInputProps>(
   const [selectedCommandIndex, setSelectedCommandIndex] = useState(0)
   const [selectedAgent, setSelectedAgent] = useState<string | null>(null)
   const [localMode, setLocalMode] = useState<string | null>(null)
-  const [isFocused, setIsFocused] = useState(false)
   const [isTogglingRecording, setIsTogglingRecording] = useState(false)
+  const [isVoiceSwipeArmed, setIsVoiceSwipeArmed] = useState(false)
+  const [isVoiceAutoSendPending, setIsVoiceAutoSendPending] = useState(false)
+  const [isVoiceAutoSendWaitingForTranscript, setIsVoiceAutoSendWaitingForTranscript] = useState(false)
   const lastAddedTranscriptRef = useRef('')
+  const voiceGestureStartYRef = useRef<number | null>(null)
+  const voiceSwipeArmedRef = useRef(false)
+  const pendingVoiceAutoSubmitRef = useRef(false)
+  const ignoreVoiceClickUntilRef = useRef(0)
+  const voiceStartRequestRef = useRef(0)
+  const handleSubmitRef = useRef<() => void>(() => {})
+  const promptRef = useRef(prompt)
+  const attachedFilesRef = useRef(attachedFiles)
+  const imageAttachmentsRef = useRef(imageAttachments)
+  const pendingPromptCommand = useUIState((state) => state.pendingPromptCommand)
+  const pendingPromptFile = useUIState((state) => state.pendingPromptFile)
+  const clearPendingPromptCommand = useUIState((state) => state.clearPendingPromptCommand)
+  const clearPendingPromptFile = useUIState((state) => state.clearPendingPromptFile)
 
   const {
     isRecording,
@@ -116,7 +140,55 @@ export const PromptInput = memo(forwardRef<PromptInputHandle, PromptInputProps>(
 
   const textareaRef = useRef<HTMLTextAreaElement>(null)
   const fileInputRef = useRef<HTMLInputElement>(null)
-  
+  const voiceButtonContainerRef = useRef<HTMLDivElement | null>(null)
+
+  const resetVoiceGestureState = useCallback(() => {
+    voiceGestureStartYRef.current = null
+    voiceSwipeArmedRef.current = false
+    pendingVoiceAutoSubmitRef.current = false
+    ignoreVoiceClickUntilRef.current = 0
+    setIsVoiceSwipeArmed(false)
+    setIsVoiceAutoSendPending(false)
+    setIsVoiceAutoSendWaitingForTranscript(false)
+  }, [])
+
+  useEffect(() => {
+    promptRef.current = prompt
+    attachedFilesRef.current = attachedFiles
+    imageAttachmentsRef.current = imageAttachments
+  }, [attachedFiles, imageAttachments, prompt])
+
+  const clearSubmittedPrompt = useCallback((submittedPrompt: string, submittedAttachedFiles: Map<string, FileAttachmentInfo>, submittedImageAttachments: ImageAttachment[]) => {
+    if (
+      promptRef.current !== submittedPrompt ||
+      attachedFilesRef.current !== submittedAttachedFiles ||
+      imageAttachmentsRef.current !== submittedImageAttachments
+    ) {
+      return
+    }
+
+    setPrompt('')
+    setAttachedFiles(new Map())
+    revokeBlobUrls(submittedImageAttachments)
+    setImageAttachments([])
+    setSelectedAgent(null)
+    clearSTT()
+  }, [clearSTT])
+
+  const pendingConfirmClearRef = useRef<{
+    prompt: string
+    files: Map<string, FileAttachmentInfo>
+    images: ImageAttachment[]
+  } | null>(null)
+
+  useEffect(() => {
+    if (!isStreamingResponse) return
+    const pending = pendingConfirmClearRef.current
+    if (!pending) return
+    pendingConfirmClearRef.current = null
+    clearSubmittedPrompt(pending.prompt, pending.files, pending.images)
+  }, [isStreamingResponse, clearSubmittedPrompt])
+
   useImperativeHandle(ref, () => ({
     setPromptValue: (value: string) => {
       setPrompt(value)
@@ -128,6 +200,7 @@ export const PromptInput = memo(forwardRef<PromptInputHandle, PromptInputProps>(
       revokeBlobUrls(imageAttachments)
       setImageAttachments([])
       setSelectedAgent(null)
+      resetVoiceGestureState()
       if (isRecording) {
         abortRecording()
       } else {
@@ -138,21 +211,25 @@ export const PromptInput = memo(forwardRef<PromptInputHandle, PromptInputProps>(
     triggerFileUpload: () => {
       fileInputRef.current?.click()
     }
-  }), [imageAttachments, clearSTT, isRecording, abortRecording])
+  }), [imageAttachments, clearSTT, isRecording, abortRecording, resetVoiceGestureState])
+  const sessionAgent = useSessionAgent(opcodeUrl, sessionID, directory)
+  const currentMode = localMode ?? sessionAgent.agent
+  const setStoredAgent = useSessionAgentStore((s) => s.setAgent)
   const sendPrompt = useSendPrompt(opcodeUrl, directory)
   const sendShell = useSendShell(opcodeUrl, directory)
-  const abortSession = useAbortSession(opcodeUrl, directory, sessionID, repoId)
+  const isPromptSubmitPending = sendPrompt.isPending || sendShell.isPending
+  const abortSession = useAbortSession(opcodeUrl, directory, sessionID)
   const { filterCommands } = useCommands(opcodeUrl)
   const { executeCommand } = useCommandHandler({
     opcodeUrl,
     sessionID,
     directory,
     onShowSessionsDialog,
-    onShowModelsDialog,
+    onShowModelsDialog: undefined,
     onShowHelpDialog,
     onToggleDetails,
     onExportSession,
-    currentAgent: localMode || undefined
+    currentAgent: currentMode
   })
   
   const { files: searchResults } = useFileSearch(
@@ -163,6 +240,25 @@ export const PromptInput = memo(forwardRef<PromptInputHandle, PromptInputProps>(
   )
   
   const { data: agents = [] } = useAgents(opcodeUrl, directory)
+  const failedPrompt = useSendErrorStore((state) => state.errors[sessionID]?.failedPrompt)
+  const restoredFailedPromptRef = useRef<string | null>(null)
+
+  useEffect(() => {
+    if (failedPrompt) {
+      if (restoredFailedPromptRef.current === failedPrompt) return
+      restoredFailedPromptRef.current = failedPrompt
+      if (promptRef.current) return
+      setPrompt(failedPrompt)
+      textareaRef.current?.focus()
+      return
+    }
+    if (restoredFailedPromptRef.current !== null) {
+      if (promptRef.current === restoredFailedPromptRef.current) {
+        setPrompt('')
+      }
+      restoredFailedPromptRef.current = null
+    }
+  }, [failedPrompt])
   
   const mentionItems = useMemo((): MentionItem[] => {
     const filteredAgents = filterAgentsByQuery(
@@ -191,41 +287,60 @@ export const PromptInput = memo(forwardRef<PromptInputHandle, PromptInputProps>(
   const addUserBashCommand = useUserBash((s) => s.addUserBashCommand)
 
   const handleSubmit = () => {
-    if (disabled) return
     if (!prompt.trim() && imageAttachments.length === 0) return
 
-    if (hasActiveStream) {
+    pendingVoiceAutoSubmitRef.current = false
+    setIsVoiceAutoSendPending(false)
+
+    if (isStreamingResponse) {
+      onScrollToBottom()
       const parts = parsePromptToParts(prompt, attachedFiles, imageAttachments)
       const agentUsed = selectedAgent || currentMode
-      sendPrompt.mutate({
-        sessionID,
-        parts,
-        model: currentModel,
-        agent: agentUsed,
-        variant: currentVariant
-      })
+      const submittedPrompt = prompt
+      const submittedAttachedFiles = attachedFiles
+      const submittedImageAttachments = imageAttachments
+      sendPrompt.mutate(
+        {
+          sessionID,
+          prompt: submittedPrompt,
+          parts,
+          model: currentModel,
+          agent: agentUsed,
+          variant: currentVariant,
+        },
+        {
+          onSuccess: () => clearSubmittedPrompt(submittedPrompt, submittedAttachedFiles, submittedImageAttachments)
+        }
+      )
       setStoredAgent(sessionID, agentUsed)
-      setPrompt('')
-      setAttachedFiles(new Map())
-      revokeBlobUrls(imageAttachments)
-      setImageAttachments([])
-      setSelectedAgent(null)
-      clearSTT()
+      if (model) {
+        setStoredModel({ providerID: model.providerID, modelID: model.modelID })
+      }
       return
     }
+
+    if (isPromptSubmitPending) return
 
     if (isBashMode) {
       const command = prompt.startsWith('!') ? prompt.slice(1) : prompt
       addUserBashCommand(command)
-      sendShell.mutate({
-        sessionID,
-        command,
-        agent: currentMode
-      })
+      const submittedPrompt = prompt
+      sendShell.mutate(
+        {
+          sessionID,
+          command,
+          agent: currentMode
+        },
+        {
+          onSuccess: () => {
+            if (promptRef.current !== submittedPrompt) return
+            setPrompt('')
+            setIsBashMode(false)
+            clearSTT()
+          }
+        }
+      )
       setStoredAgent(sessionID, currentMode)
-      setPrompt('')
-      setIsBashMode(false)
-      clearSTT()
       return
     }
 
@@ -246,29 +361,51 @@ export const PromptInput = memo(forwardRef<PromptInputHandle, PromptInputProps>(
 
     const parts = parsePromptToParts(prompt, attachedFiles, imageAttachments)
     const agentUsed = selectedAgent || currentMode
+    const submittedPrompt = prompt
+    const submittedAttachedFiles = attachedFiles
+    const submittedImageAttachments = imageAttachments
 
-    sendPrompt.mutate({
-      sessionID,
-      parts,
-      model: currentModel,
-      agent: agentUsed,
-      variant: currentVariant
-    })
+    pendingConfirmClearRef.current = {
+      prompt: submittedPrompt,
+      files: submittedAttachedFiles,
+      images: submittedImageAttachments
+    }
+
+    sendPrompt.mutate(
+      {
+        sessionID,
+        prompt: submittedPrompt,
+        parts,
+        model: currentModel,
+        agent: agentUsed,
+        variant: currentVariant
+      },
+      {
+        onSuccess: () => {
+          pendingConfirmClearRef.current = null
+          clearSubmittedPrompt(submittedPrompt, submittedAttachedFiles, submittedImageAttachments)
+        },
+        onError: () => {
+          pendingConfirmClearRef.current = null
+        }
+      }
+    )
+
+    onScrollToBottom()
 
     setStoredAgent(sessionID, agentUsed)
-    setPrompt('')
-    setAttachedFiles(new Map())
-    revokeBlobUrls(imageAttachments)
-    setImageAttachments([])
-    setSelectedAgent(null)
-    clearSTT()
+    if (model) {
+      setStoredModel({ providerID: model.providerID, modelID: model.modelID })
+    }
   }
+
+  handleSubmitRef.current = handleSubmit
 
   const handleStop = () => {
     abortSession.mutate(sessionID)
   }
 
-  const handleCommandSelect = async (command: CommandType) => {
+  const handleCommandSelect = useCallback(async (command: CommandType) => {
     if (!textareaRef.current) return
     
     setShowSuggestions(false)
@@ -293,25 +430,68 @@ export const PromptInput = memo(forwardRef<PromptInputHandle, PromptInputProps>(
       const cursorPosition = textareaRef.current.selectionStart
       const commandMatch = prompt.slice(0, cursorPosition).match(/(^|\s)\/([a-zA-Z0-9_-]*)$/)
       
-      if (commandMatch) {
-        const beforeCommand = prompt.slice(0, commandMatch.index)
-        const afterCommand = prompt.slice(cursorPosition)
-        const newPrompt = beforeCommand + '/' + command.name + ' ' + afterCommand
-        
-        setPrompt(newPrompt)
-        
-        setTimeout(() => {
-          if (textareaRef.current) {
-            const newCursorPos = beforeCommand.length + command.name.length + 2
-            textareaRef.current.focus()
-            textareaRef.current.setSelectionRange(newCursorPos, newCursorPos)
-            textareaRef.current.scrollTop = textareaRef.current.scrollHeight
-          }
-        }, 0)
-      }
+      const beforeCommand = commandMatch ? prompt.slice(0, commandMatch.index) : ''
+      const afterCommand = commandMatch ? prompt.slice(cursorPosition) : ''
+      const newPrompt = beforeCommand + '/' + command.name + ' ' + afterCommand
+      
+      setPrompt(newPrompt)
+      
+      setTimeout(() => {
+        if (textareaRef.current) {
+          const newCursorPos = beforeCommand.length + command.name.length + 2
+          textareaRef.current.focus()
+          textareaRef.current.setSelectionRange(newCursorPos, newCursorPos)
+          textareaRef.current.scrollTop = textareaRef.current.scrollHeight
+        }
+      }, 0)
     }
-  }
-  
+  }, [prompt])
+
+  useEffect(() => {
+    if (!pendingPromptCommand) return
+    handleCommandSelect(pendingPromptCommand.command)
+    clearPendingPromptCommand()
+  }, [pendingPromptCommand, handleCommandSelect, clearPendingPromptCommand])
+
+  const insertFileMention = useCallback((filePath: string, range: { start: number, end: number } | null = mentionRange) => {
+    const filename = getFilename(filePath)
+    const beforeMention = range ? prompt.slice(0, range.start) : `${prompt}${prompt.trim() ? ' ' : ''}`
+    const afterMention = range ? prompt.slice(range.end) : ''
+    const newPrompt = beforeMention + '@' + filename + ' ' + afterMention
+
+    setPrompt(newPrompt)
+
+    const absolutePath = filePath.startsWith('/')
+      ? filePath
+      : directory
+        ? `${directory}/${filePath}`
+        : filePath
+
+    setAttachedFiles(prev => {
+      const next = new Map(prev)
+      next.set(filename.toLowerCase(), {
+        path: absolutePath,
+        name: filename
+      })
+      return next
+    })
+
+    setTimeout(() => {
+      if (textareaRef.current) {
+        const newCursorPos = beforeMention.length + filename.length + 2
+        textareaRef.current.focus()
+        textareaRef.current.setSelectionRange(newCursorPos, newCursorPos)
+        textareaRef.current.scrollTop = textareaRef.current.scrollHeight
+      }
+    }, 0)
+  }, [directory, mentionRange, prompt])
+
+  useEffect(() => {
+    if (!pendingPromptFile) return
+    insertFileMention(pendingPromptFile.path, null)
+    clearPendingPromptFile()
+  }, [pendingPromptFile, insertFileMention, clearPendingPromptFile])
+
   const handleMentionSelect = (item: MentionItem) => {
     if (!mentionRange || !textareaRef.current) return
     
@@ -332,33 +512,7 @@ export const PromptInput = memo(forwardRef<PromptInputHandle, PromptInputProps>(
         }
       }, 0)
     } else {
-      const filename = getFilename(item.value)
-      const newPrompt = beforeMention + '@' + filename + ' ' + afterMention
-      setPrompt(newPrompt)
-      
-      const absolutePath = item.value.startsWith('/') 
-        ? item.value 
-        : directory 
-          ? `${directory}/${item.value}` 
-          : item.value
-      
-      setAttachedFiles(prev => {
-        const next = new Map(prev)
-        next.set(filename.toLowerCase(), {
-          path: absolutePath,
-          name: filename
-        })
-        return next
-      })
-      
-      setTimeout(() => {
-        if (textareaRef.current) {
-          const newCursorPos = beforeMention.length + filename.length + 2
-          textareaRef.current.focus()
-          textareaRef.current.setSelectionRange(newCursorPos, newCursorPos)
-          textareaRef.current.scrollTop = textareaRef.current.scrollHeight
-        }
-      }, 0)
+      insertFileMention(item.value, mentionRange)
     }
     
     setShowMentionSuggestions(false)
@@ -366,26 +520,195 @@ export const PromptInput = memo(forwardRef<PromptInputHandle, PromptInputProps>(
     setMentionRange(null)
   }
 
-  const handleAgentChange = (agent: string) => {
-    setLocalMode(agent)
-    setStoredAgent(sessionID, agent)
+  const handleAgentChange = (agentName: string) => {
+    setLocalMode(agentName)
+    setStoredAgent(sessionID, agentName)
+    const agent = agents.find(a => a.name === agentName)
+    if (agent?.model) {
+      setStoredModel({ providerID: agent.model.providerID, modelID: agent.model.modelID })
+    }
   }
 
-  const handleVoiceToggle = async () => {
+  const startVoiceRecording = async () => {
+    if (isRecording || isProcessing || isTogglingRecording) {
+      return
+    }
+
+    const startRequestId = voiceStartRequestRef.current + 1
+    voiceStartRequestRef.current = startRequestId
+    pendingVoiceAutoSubmitRef.current = false
+    setIsVoiceAutoSendPending(false)
+    setIsVoiceAutoSendWaitingForTranscript(false)
+    setIsVoiceSwipeArmed(false)
+    voiceSwipeArmedRef.current = false
+    setIsTogglingRecording(true)
+
+    const started = await startRecording()
+    if (voiceStartRequestRef.current !== startRequestId) {
+      setIsTogglingRecording(false)
+      if (started) {
+        abortRecording()
+      }
+      return
+    }
+
+    if (!started) {
+      setIsTogglingRecording(false)
+      return
+    }
+
+    if (typeof navigator !== 'undefined' && navigator.vibrate) {
+      navigator.vibrate(10)
+    }
+    textareaRef.current?.blur()
+  }
+
+  const handleVoiceClick = async () => {
+    if (Date.now() < ignoreVoiceClickUntilRef.current) {
+      return
+    }
+
     if (isRecording) {
+      pendingVoiceAutoSubmitRef.current = false
+      setIsVoiceAutoSendPending(false)
+      setIsVoiceAutoSendWaitingForTranscript(false)
+      setIsVoiceSwipeArmed(false)
+      voiceSwipeArmedRef.current = false
       stopRecording()
-    } else {
-      setIsTogglingRecording(true)
-      try {
-        await startRecording()
-        if (textareaRef.current) {
-          textareaRef.current.blur()
-        }
-      } catch {
-        setIsTogglingRecording(false)
+      return
+    }
+
+    await startVoiceRecording()
+  }
+
+  const handleVoicePointerDown = (event: ReactPointerEvent<HTMLDivElement>) => {
+    if ((event.pointerType === 'mouse' && event.button !== 0) || isProcessing || !isRecording) {
+      return
+    }
+
+    event.preventDefault()
+    voiceGestureStartYRef.current = event.clientY
+    voiceSwipeArmedRef.current = false
+    setIsVoiceSwipeArmed(false)
+
+    if (event.currentTarget.setPointerCapture) {
+      event.currentTarget.setPointerCapture(event.pointerId)
+    }
+  }
+
+  const handleVoicePointerMove = (event: ReactPointerEvent<HTMLDivElement>) => {
+    if (!isRecording || voiceGestureStartYRef.current === null) {
+      return
+    }
+
+    event.preventDefault()
+    const deltaY = voiceGestureStartYRef.current - event.clientY
+    const nextIsSwipeArmed = voiceSwipeArmedRef.current
+      ? deltaY >= VOICE_SEND_SWIPE_DISARM_THRESHOLD
+      : deltaY >= VOICE_SEND_SWIPE_ARM_THRESHOLD
+
+    if (nextIsSwipeArmed !== voiceSwipeArmedRef.current) {
+      voiceSwipeArmedRef.current = nextIsSwipeArmed
+      setIsVoiceSwipeArmed(nextIsSwipeArmed)
+
+      if (nextIsSwipeArmed && typeof navigator !== 'undefined' && navigator.vibrate) {
+        navigator.vibrate(10)
       }
     }
   }
+
+  const handleVoicePointerEnd = (event: ReactPointerEvent<HTMLDivElement>, canceled = false) => {
+    if (event.currentTarget.releasePointerCapture && event.currentTarget.hasPointerCapture(event.pointerId)) {
+      event.currentTarget.releasePointerCapture(event.pointerId)
+    }
+
+    if (voiceGestureStartYRef.current === null) {
+      return
+    }
+
+    event.preventDefault()
+    voiceGestureStartYRef.current = null
+
+    if (canceled || !voiceSwipeArmedRef.current) {
+      ignoreVoiceClickUntilRef.current = Date.now() + 400
+      voiceSwipeArmedRef.current = false
+      setIsVoiceSwipeArmed(false)
+      pendingVoiceAutoSubmitRef.current = false
+      setIsVoiceAutoSendPending(false)
+      setIsVoiceAutoSendWaitingForTranscript(false)
+      stopRecording()
+      return
+    }
+
+    ignoreVoiceClickUntilRef.current = Date.now() + 400
+    voiceSwipeArmedRef.current = false
+    setIsVoiceSwipeArmed(false)
+    pendingVoiceAutoSubmitRef.current = true
+    setIsVoiceAutoSendPending(true)
+    setIsVoiceAutoSendWaitingForTranscript(true)
+
+    if (typeof navigator !== 'undefined' && navigator.vibrate) {
+      navigator.vibrate([10, 20, 10])
+    }
+
+    stopRecording()
+  }
+
+  const cancelVoiceInput = useCallback(() => {
+    voiceStartRequestRef.current += 1
+    resetVoiceGestureState()
+    setIsTogglingRecording(false)
+
+    if (isRecording || isTogglingRecording || isProcessing) {
+      abortRecording()
+    }
+  }, [abortRecording, isProcessing, isRecording, isTogglingRecording, resetVoiceGestureState])
+
+  useEffect(() => {
+    const isVoiceFeedbackVisible = isRecording || isTogglingRecording || isProcessing || isVoiceAutoSendPending
+
+    if (!isVoiceFeedbackVisible) {
+      return
+    }
+
+    const handleOutsidePointerDown = (event: PointerEvent) => {
+      const target = event.target
+
+      if (!(target instanceof Node)) {
+        return
+      }
+
+      if (voiceButtonContainerRef.current?.contains(target)) {
+        return
+      }
+
+      if (isRecording) {
+        voiceGestureStartYRef.current = null
+        voiceSwipeArmedRef.current = false
+        pendingVoiceAutoSubmitRef.current = false
+        setIsVoiceSwipeArmed(false)
+        setIsVoiceAutoSendPending(false)
+        setIsVoiceAutoSendWaitingForTranscript(false)
+        stopRecording()
+        return
+      }
+
+      if (isProcessing || isVoiceAutoSendPending) {
+        pendingVoiceAutoSubmitRef.current = false
+        setIsVoiceAutoSendPending(false)
+        setIsVoiceAutoSendWaitingForTranscript(false)
+        return
+      }
+
+      cancelVoiceInput()
+    }
+
+    document.addEventListener('pointerdown', handleOutsidePointerDown, true)
+
+    return () => {
+      document.removeEventListener('pointerdown', handleOutsidePointerDown, true)
+    }
+  }, [cancelVoiceInput, isProcessing, isRecording, isTogglingRecording, isVoiceAutoSendPending, stopRecording])
 
   useEffect(() => {
     const textToUse = transcript || interimTranscript
@@ -398,7 +721,12 @@ export const PromptInput = memo(forwardRef<PromptInputHandle, PromptInputProps>(
           setPrompt(prev => `${prev} ${trimmedTranscript}`)
         }
         lastAddedTranscriptRef.current = trimmedTranscript
-        textareaRef.current?.focus()
+
+        if (!pendingVoiceAutoSubmitRef.current) {
+          textareaRef.current?.focus()
+        } else {
+          setIsVoiceAutoSendWaitingForTranscript(false)
+        }
       }
     }
   }, [isRecording, interimTranscript, transcript, prompt])
@@ -415,14 +743,26 @@ export const PromptInput = memo(forwardRef<PromptInputHandle, PromptInputProps>(
     }
   }, [isTogglingRecording])
 
-  const addImageAttachment = (file: File) => {
-    const generateId = () => {
-      if (typeof crypto !== 'undefined' && crypto.randomUUID) {
-        return crypto.randomUUID()
-      }
-      return `${Date.now()}-${Math.random().toString(36).substring(2, 11)}`
+  useEffect(() => {
+    if (!pendingVoiceAutoSubmitRef.current || isVoiceAutoSendWaitingForTranscript || isRecording || isProcessing || !prompt.trim()) {
+      return
     }
 
+    pendingVoiceAutoSubmitRef.current = false
+    setIsVoiceAutoSendPending(false)
+    setIsVoiceAutoSendWaitingForTranscript(false)
+    handleSubmitRef.current()
+  }, [prompt, isRecording, isProcessing, isVoiceAutoSendWaitingForTranscript])
+
+  useEffect(() => {
+    if (pendingVoiceAutoSubmitRef.current && !isRecording && !isProcessing && !transcript.trim() && !interimTranscript.trim()) {
+      pendingVoiceAutoSubmitRef.current = false
+      setIsVoiceAutoSendPending(false)
+      setIsVoiceAutoSendWaitingForTranscript(false)
+    }
+  }, [isRecording, isProcessing, transcript, interimTranscript])
+
+  const addImageAttachment = (file: File) => {
     try {
       const reader = new FileReader()
       
@@ -435,7 +775,7 @@ export const PromptInput = memo(forwardRef<PromptInputHandle, PromptInputProps>(
           if (!dataUrl) {
             const blobUrl = URL.createObjectURL(file)
             const attachment: ImageAttachment = {
-              id: generateId(),
+              id: randomId(),
               filename: file.name,
               mime: file.type || 'image/png',
               dataUrl: blobUrl,
@@ -445,7 +785,7 @@ export const PromptInput = memo(forwardRef<PromptInputHandle, PromptInputProps>(
           }
           
           const attachment: ImageAttachment = {
-            id: generateId(),
+            id: randomId(),
             filename: file.name,
             mime: file.type || 'image/png',
             dataUrl,
@@ -476,6 +816,14 @@ export const PromptInput = memo(forwardRef<PromptInputHandle, PromptInputProps>(
     })
   }
 
+  const addFileAttachment = (file: File) => {
+    if (ACCEPTED_FILE_TYPES.includes(file.type)) {
+      addImageAttachment(file)
+    } else {
+      showToast.error(`Only images and PDFs can be attached (${file.name})`)
+    }
+  }
+
   const handlePaste = async (event: React.ClipboardEvent<HTMLTextAreaElement>) => {
     const clipboardData = event.clipboardData
     if (!clipboardData) return
@@ -503,7 +851,7 @@ if (isIOS && isSecureContext && navigator.clipboard && navigator.clipboard.read)
               try {
                 const blob = await item.getType(type)
                 const file = new File([blob], `pasted-${Date.now()}.${type.split('/')[1]}`, { type })
-                addImageAttachment(file)
+                addFileAttachment(file)
               } catch (err) {
                 console.error('Failed to read clipboard item type:', err)
               }
@@ -517,30 +865,15 @@ if (isIOS && isSecureContext && navigator.clipboard && navigator.clipboard.read)
     }
 
     const items = Array.from(clipboardData.items)
-    
-    const imageItems = items.filter((item) => {
-      if (item.kind !== 'file') return false
-      
-      const hasKnownType = ACCEPTED_FILE_TYPES.includes(item.type)
-      const isLikelyImage = item.type.startsWith('image/')
-      const hasNoType = !item.type || item.type === ''
-      
-      return hasKnownType || isLikelyImage || hasNoType
-    })
 
-    if (imageItems.length > 0) {
+    const fileItems = items.filter((item) => item.kind === 'file')
+
+    if (fileItems.length > 0) {
       event.preventDefault()
-      for (const item of imageItems) {
+      for (const item of fileItems) {
         const file = item.getAsFile()
         if (file) {
-          const isValidImageFile = 
-            ACCEPTED_FILE_TYPES.includes(file.type) ||
-            file.type.startsWith('image/') ||
-            file.size > 0
-          
-          if (isValidImageFile) {
-            addImageAttachment(file)
-          }
+          addFileAttachment(file)
         }
       }
     }
@@ -568,17 +901,15 @@ if (isIOS && isSecureContext && navigator.clipboard && navigator.clipboard.read)
     const files = event.dataTransfer?.files
     if (files) {
       for (const file of Array.from(files)) {
-        if (ACCEPTED_FILE_TYPES.includes(file.type)) {
-          addImageAttachment(file)
-        }
+        addFileAttachment(file)
       }
     }
   }
 
   const handleFileInputChange = (event: React.ChangeEvent<HTMLInputElement>) => {
     const file = event.currentTarget.files?.[0]
-    if (file && ACCEPTED_FILE_TYPES.includes(file.type)) {
-      addImageAttachment(file)
+    if (file) {
+      addFileAttachment(file)
     }
     event.currentTarget.value = ''
   }
@@ -671,6 +1002,7 @@ if (isIOS && isSecureContext && navigator.clipboard && navigator.clipboard.read)
       setPrompt('')
       revokeBlobUrls(imageAttachments)
       setImageAttachments([])
+      resetVoiceGestureState()
       clearSTT()
     } else if ((e.metaKey || e.ctrlKey) && e.key.toLowerCase() === 't') {
       e.preventDefault()
@@ -729,19 +1061,151 @@ if (isIOS && isSecureContext && navigator.clipboard && navigator.clipboard.read)
     }
   }
 
-  const sessionAgent = useSessionAgent(opcodeUrl, sessionID, directory)
-  const currentMode = localMode ?? sessionAgent.agent
-  const setStoredAgent = useSessionAgentStore((s) => s.setAgent)
+  const appliedSessionModelRef = useRef<string | undefined>(undefined)
 
-const { model, modelString } = useModelSelection(opcodeUrl, directory)
+  const client = useOpenCodeClient(opcodeUrl, directory)
+  const { data: providersData } = useQuery({
+    queryKey: ['opencode', 'providers', opcodeUrl, directory],
+    queryFn: () => getProviders(directory),
+    enabled: !!client,
+    staleTime: 30000,
+  })
+
+  const { model, modelString, setModel: setStoredModel, restoreSessionModel } = useModelSelection(opcodeUrl, directory)
+  const setStoreVariant = useModelStore((state) => state.setVariant)
+  const clearStoreVariant = useModelStore((state) => state.clearVariant)
+
+  const sessionModelSyncKey = sessionID ? `${directory ?? ''}:${sessionID}` : undefined
+
+  useEffect(() => {
+    if (!sessionModelSyncKey) return
+    if (!sessionAgent.model) return
+
+    const sessionSelectionKey = `${sessionModelSyncKey}|${sessionAgent.model.providerID}/${sessionAgent.model.modelID}|${sessionAgent.variant ?? ''}`
+    if (appliedSessionModelRef.current === sessionSelectionKey) return
+
+    appliedSessionModelRef.current = sessionSelectionKey
+
+    restoreSessionModel(sessionAgent.model)
+
+    if (sessionAgent.variant) {
+      setStoreVariant(sessionAgent.model, sessionAgent.variant)
+    } else {
+      clearStoreVariant(sessionAgent.model)
+    }
+  }, [clearStoreVariant, sessionAgent.model, sessionAgent.variant, sessionModelSyncKey, restoreSessionModel, setStoreVariant])
+
   const currentModel = modelString || ''
-  const displayModelName = model?.modelID || currentModel
+  const displayModelName = useMemo(() => {
+    if (!model) {
+      return currentModel
+    }
+
+    const provider = providersData?.providers.find((item) => item.id === model.providerID)
+    const modelData = provider?.models?.[model.modelID]
+
+    return modelData ? formatModelName(modelData) : model.modelID || currentModel
+  }, [currentModel, model, providersData])
   const isMobile = useMobile()
   const { setShowDialog, hasForSession: hasPermissionsForSession } = usePermissions()
   const hasPendingPermissionForSession = hasPermissionsForSession(sessionID)
   const { hasVariants, currentVariant, cycleVariant } = useVariants(opcodeUrl, directory)
-  const showStopButton = hasActiveStream
-  const hideSecondaryButtons = isMobile && hasActiveStream
+  const showStopButton = isSessionActive
+  const hideSecondaryButtons = isMobile && isSessionActive
+  const showMobileScrollButton = isMobile && showScrollButton
+  const voiceFeedbackState: VoiceStatusOverlayState | null = isTogglingRecording
+    ? 'starting'
+    : isProcessing
+      ? isVoiceAutoSendPending
+        ? 'sending'
+        : 'processing'
+      : isRecording
+        ? isVoiceSwipeArmed
+          ? 'readyToSend'
+          : 'recording'
+        : isVoiceAutoSendPending
+          ? 'sending'
+          : null
+  const showVoiceFeedback = voiceFeedbackState !== null
+  const voiceFeedbackLabel = voiceFeedbackState === 'starting'
+    ? 'Starting microphone...'
+    : voiceFeedbackState === 'sending'
+      ? 'Transcribing and sending...'
+      : voiceFeedbackState === 'processing'
+        ? 'Transcribing...'
+        : voiceFeedbackState === 'readyToSend'
+          ? 'Release to send'
+          : voiceFeedbackState === 'recording'
+            ? 'Recording... swipe up to send'
+            : null
+  const voiceButtonTitle = voiceFeedbackState === 'starting'
+    ? 'Starting microphone'
+    : voiceFeedbackState === 'sending'
+      ? 'Transcribing and sending speech'
+      : voiceFeedbackState === 'processing'
+        ? 'Transcribing speech'
+        : voiceFeedbackState === 'readyToSend'
+          ? 'Release to send'
+          : voiceFeedbackState === 'recording'
+            ? 'Tap to transcribe'
+            : 'Tap to speak'
+
+
+
+  const renderVoiceButton = (variant: VoiceButtonVariant) => {
+    const isDesktop = variant === 'desktop'
+    const isBusy = isRecording || isTogglingRecording || (isProcessing && !isRecording)
+    const spinnerClassName = `w-5 h-5 animate-spin rounded-full border-2 ${isDesktop ? 'border-muted-foreground' : 'border-white'} border-t-transparent`
+    const voiceGestureHandlers = isDesktop ? {} : {
+      onPointerDown: handleVoicePointerDown,
+      onPointerMove: handleVoicePointerMove,
+      onPointerUp: handleVoicePointerEnd,
+      onPointerCancel: (event: ReactPointerEvent<HTMLDivElement>) => handleVoicePointerEnd(event, true),
+    }
+    const buttonClassName = isDesktop
+      ? `hidden md:flex p-2 rounded-lg transition-all duration-200 active:scale-95 hover:scale-105 shadow-md border items-center justify-center touch-none select-none ${
+        isBusy
+          ? 'bg-gradient-to-br from-red-600 to-red-700 hover:from-red-500 hover:to-red-600 text-destructive-foreground border-red-500/60 animate-pulse'
+          : 'bg-muted hover:bg-muted-foreground/20 text-muted-foreground hover:text-foreground border-border'
+      }`
+      : `px-4 py-2 rounded-lg transition-all duration-150 flex items-center justify-center min-w-[52px] border touch-none select-none ${
+        isBusy
+          ? 'bg-gradient-to-t from-green-700 via-green-500 to-emerald-400 text-white border-green-300/70 shadow-lg shadow-green-500/40'
+          : 'bg-muted hover:bg-muted-foreground/20 text-muted-foreground hover:text-foreground border-border active:bg-muted-foreground/30 active:scale-95'
+      }`
+
+    const containerClassName = isDesktop ? 'relative hidden md:block' : 'relative flex w-full touch-none select-none'
+
+    return (
+      <div
+        ref={voiceButtonContainerRef}
+        className={containerClassName}
+        {...voiceGestureHandlers}
+      >
+        {!isDesktop && showVoiceFeedback && (
+          <div aria-hidden="true" className="absolute inset-x-0 bottom-full z-20 h-44 touch-none" />
+        )}
+        <VoiceStatusOverlay show={!isDesktop && showVoiceFeedback} label={voiceFeedbackLabel} state={voiceFeedbackState} />
+        <button
+          type="button"
+          onClick={handleVoiceClick}
+          disabled={isProcessing}
+          className={buttonClassName}
+          title={voiceButtonTitle}
+        >
+          {isTogglingRecording && !isRecording ? (
+            <div className={spinnerClassName} />
+          ) : isProcessing && !isRecording ? (
+            <div className={spinnerClassName} />
+          ) : isRecording ? (
+            <MicOff className="w-5 h-5" />
+          ) : (
+            <Mic className="w-5 h-5" />
+          )}
+        </button>
+      </div>
+    )
+  }
 
   
 
@@ -754,7 +1218,15 @@ const { model, modelString } = useModelSelection(opcodeUrl, directory)
   }, [prompt, onPromptChange])
 
   useEffect(() => {
+    if (isRecording) {
+      abortRecording()
+    }
+    clearSTT()
+    resetVoiceGestureState()
+    lastAddedTranscriptRef.current = ''
+    setIsTogglingRecording(false)
     setLocalMode(null)
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- Intentionally only run on sessionID change to avoid clearing transcript when recording state changes
   }, [sessionID])
 
   
@@ -762,12 +1234,11 @@ const { model, modelString } = useModelSelection(opcodeUrl, directory)
   
 
 return (
-    <div className={`relative mb-4 w-full rounded-xl border border-border bg-background p-2 opacity-95 backdrop-blur-md transition-all md:mb-1 md:p-3 ${hasPendingPermissionForSession ? 'border-warning/40 ring-1 ring-warning/20' : ''}`}>
-      {showStopButton && !(isFocused && prompt.trim().length > 0) && (
+    <div className={`relative backdrop-blur-md bg-background opacity-95 border border-border dark:border-white/30 rounded-xl p-2 md:p-3 mb-4 md:mb-1 w-full transition-all ${hasPendingPermissionForSession ? 'border-orange-500/50 ring-1 ring-orange-500/30' : ''}`}>
+      {showStopButton && (
         <button
           onClick={handleStop}
-          disabled={disabled}
-          className="fixed bottom-19 right-0 z-50 rounded-xl border border-destructive/50 bg-destructive p-3 text-destructive-foreground shadow-lg shadow-destructive/20 transition-all duration-200 active:scale-95 hover:scale-105 hover:bg-destructive/92 md:hidden"
+          className="border  fixed bottom-19 right-0 md:hidden z-50 p-3 rounded-xl transition-all duration-200 active:scale-95 hover:scale-105 bg-gradient-to-br from-red-600 to-red-700 hover:from-red-500 hover:to-red-600 text-destructive-foreground border border-red-500/60 shadow-lg shadow-red-500/30"
           title="Stop"
         >
           <SquareFill className="w-5 h-5" />
@@ -788,9 +1259,6 @@ return (
             ? "Enter bash command..."
             : "Send a message..."
         }
-        disabled={disabled}
-        onFocus={() => setIsFocused(true)}
-        onBlur={() => setIsFocused(false)}
         className={`w-full bg-muted/50 pl-2 md:pl-3 pr-3 py-2 text-[16px] text-foreground placeholder-muted-foreground focus:outline-none focus:bg-muted/70 resize-none min-h-[40px] max-h-[120px] disabled:opacity-50 disabled:cursor-not-allowed md:text-sm rounded-lg [field-sizing:content] ${
           isBashMode
             ? 'border-info/40 bg-info/6 focus:bg-info/10'
@@ -821,60 +1289,80 @@ return (
 
       <div className="flex gap-1.5 md:gap-2 items-center justify-between">
         <div className="flex gap-1.5 md:gap-2 items-center min-w-0">
-          <AgentQuickSelect
-            opcodeUrl={opcodeUrl}
-            directory={directory}
-            currentAgent={currentMode}
-            onAgentChange={handleAgentChange}
-            isBashMode={isBashMode}
-            disabled={disabled}
-          />
-          {hasActiveStream ? (
+          {showMobileScrollButton ? (
+            <>
+              <button
+                type="button"
+                onClick={onScrollToBottom}
+                className="flex items-center gap-1.5 px-3 min-h-[36px] rounded-lg text-xs font-medium border bg-zinc-950/80 hover:bg-zinc-900/90 text-blue-300 hover:text-blue-200 border-blue-400/20 shadow-md backdrop-blur-md transition-all duration-200 active:scale-95 ring-1 ring-blue-400/15"
+                title="Scroll to bottom"
+                aria-label="Scroll to bottom"
+              >
+                <ArrowDown className="w-4 h-4" />
+                <span>Latest</span>
+              </button>
+              {isSessionActive && (
+                <div className="px-2.5 py-1.5 rounded-lg text-xs font-medium text-muted-foreground max-w-[120px]">
+                  <SessionStatusIndicator sessionID={sessionID} showLabel />
+                </div>
+              )}
+            </>
+          ) : (
+            <>
+              <AgentQuickSelect
+                opcodeUrl={opcodeUrl}
+                directory={directory}
+                currentAgent={currentMode}
+                onAgentChange={handleAgentChange}
+                isBashMode={isBashMode}
+              />
+              {isSessionActive ? (
               <div className="px-2.5 py-1.5 md:px-3 md:py-2 rounded-lg text-xs md:text-sm font-medium text-muted-foreground max-w-[120px] md:max-w-[180px]">
-                <SessionStatusIndicator sessionID={sessionID} />
+                <SessionStatusIndicator sessionID={sessionID} showLabel />
               </div>
             ) : (
                !hideSecondaryButtons && (
-                 <ModelQuickSelect
-                   opcodeUrl={opcodeUrl}
-                   directory={directory}
-                   onOpenFullDialog={() => onShowModelsDialog?.()}
-                 >
-                   <button
-                     className="px-2.5 py-0.5 md:px-3 min-h-[36px] rounded-lg text-xs md:text-sm font-medium border bg-muted border-border text-muted-foreground hover:bg-muted-foreground/10 hover:border-foreground/30 transition-colors cursor-pointer max-w-[150px] md:max-w-[220px] dark:border-white/30 flex flex-col items-start justify-center"
-                   >
-                     <span className="truncate w-full text-left">{displayModelName || 'Select model'}</span>
+                  <ModelQuickSelect
+                    opcodeUrl={opcodeUrl}
+                    directory={directory}
+                  >
+<button
+                      className="px-2.5 py-0.5 md:px-3 min-h-[36px] min-w-0 rounded-lg text-xs md:text-sm font-medium border bg-muted border-border text-muted-foreground hover:bg-muted-foreground/10 hover:border-foreground/30 transition-colors cursor-pointer flex-1 md:flex-initial md:w-auto max-w-[110px] md:max-w-[220px] dark:border-white/30 flex flex-col items-start justify-center overflow-hidden"
+                    >
+                      <span className="truncate w-full text-left">{displayModelName || 'Select model'}</span>
 {hasVariants && currentVariant && (
                         <span className="w-full truncate text-center text-[10px] capitalize text-warning">{currentVariant}</span>
                        )}
                    </button>
                  </ModelQuickSelect>
                 )
-             )}
-          
+              )}
+            </>
+          )}
         </div>
 <div className="flex items-center gap-1.5 md:gap-2 flex-shrink-0">
-             <button
+            {!isMobile && (
+              <button
                 onClick={onScrollToBottom}
-               className={`rounded-lg border border-info/25 bg-muted p-2 text-muted-foreground shadow-md shadow-info/10 ring-1 ring-info/15 transition-all duration-200 hover:scale-105 hover:border-info/40 hover:bg-muted-foreground/20 hover:text-foreground hover:shadow-info/15 active:scale-95 md:p-2 ${showScrollButton ? 'visible' : 'invisible'}`}
-               title="Scroll to bottom"
+                className={`p-2 rounded-lg bg-zinc-950/80 hover:bg-zinc-900/90 text-blue-300 hover:text-blue-200 transition-all duration-200 active:scale-95 hover:scale-105 shadow-md border border-blue-400/20 backdrop-blur-md ring-1 ring-blue-400/15 ${showScrollButton ? 'visible' : 'invisible'}`}
+                title="Scroll to bottom"
               >
-               <ArrowDown className="w-5 h-5" />
-             </button>
+                <ArrowDown className="w-6 h-6" />
+              </button>
+            )}
 {showStopButton && (
-             <button
-               onClick={handleStop}
-               disabled={disabled}
-               className="hidden rounded-lg border border-destructive/50 bg-destructive p-1.5 px-5 text-destructive-foreground shadow-md shadow-destructive/20 transition-all duration-200 hover:scale-105 hover:border-destructive/70 hover:bg-destructive/92 hover:shadow-destructive/30 active:scale-95 md:block md:p-2 md:px-6"
-               title="Stop"
-             >
+            <button
+              onClick={handleStop}
+              className="hidden md:block p-1.5 px-5 md:p-2 md:px-6 rounded-lg transition-all duration-200 active:scale-95 hover:scale-105 bg-gradient-to-br from-red-600 to-red-700 hover:from-red-500 hover:to-red-600 text-destructive-foreground border border-red-500/60 hover:border-red-400 shadow-md shadow-red-500/30 hover:shadow-red-500/40 ring-1 ring-red-500/20 hover:ring-red-500/30"
+              title="Stop"
+            >
               <SquareFill className="w-4 h-4 md:w-5 md:h-5" />
             </button>
 )}
           <input
             ref={fileInputRef}
             type="file"
-            accept="*/*"
+            accept={ACCEPTED_FILE_TYPES.join(',')}
             className="hidden"
             onChange={handleFileInputChange}
           />
@@ -887,64 +1375,24 @@ return (
             <Upload className="w-5 h-5" />
           </button>
           {sttEnabled && sttSupported && (
-            <button
-              type="button"
-              onClick={handleVoiceToggle}
-              disabled={disabled || isProcessing}
-               className={`hidden md:flex p-2 rounded-lg transition-all duration-200 active:scale-95 hover:scale-105 shadow-md border items-center justify-center ${
-                 isRecording
-                  ? 'animate-pulse border-destructive/50 bg-destructive text-destructive-foreground'
-                  : 'bg-muted hover:bg-muted-foreground/20 text-muted-foreground hover:text-foreground border-border'
-               }`}
-              title={isRecording ? 'Stop recording' : 'Voice input'}
-            >
-              {isTogglingRecording && !isRecording ? (
-                <div className="w-5 h-5 animate-spin rounded-full border-2 border-muted-foreground border-t-transparent" />
-              ) : isProcessing && !isRecording ? (
-                <div className="w-5 h-5 animate-spin rounded-full border-2 border-muted-foreground border-t-transparent" />
-              ) : isRecording ? (
-                <MicOff className="w-5 h-5" />
-              ) : (
-                <Mic className="w-5 h-5" />
-              )}
-            </button>
+            renderVoiceButton('desktop')
           )}
-          {isMobile && !prompt.trim() && imageAttachments.length === 0 && sttEnabled && sttSupported && !hasPendingPermissionForSession ? (
-            <button
-              onClick={handleVoiceToggle}
-              disabled={disabled || isProcessing}
-               className={`px-4 py-2 rounded-lg transition-all duration-200 active:scale-95 flex items-center justify-center min-w-[52px] ${
-                 isRecording || isTogglingRecording || (isProcessing && !isRecording)
-                  ? 'animate-pulse border-2 border-destructive/50 bg-destructive text-destructive-foreground shadow-lg shadow-destructive/20'
-                  : 'bg-primary hover:bg-primary/90 text-primary-foreground border border-white/30'
-               }`}
-              title={isRecording ? 'Stop recording' : 'Voice input'}
-            >
-              {isTogglingRecording && !isRecording ? (
-                <div className="w-5 h-5 animate-spin rounded-full border-2 border-white border-t-transparent" />
-              ) : isProcessing && !isRecording ? (
-                <div className="w-5 h-5 animate-spin rounded-full border-2 border-white border-t-transparent" />
-              ) : isRecording ? (
-                <MicOff className="w-5 h-5" />
-              ) : (
-                <Mic className="w-5 h-5" />
-              )}
-            </button>
-          ) : (
+          {isMobile && sttEnabled && sttSupported && !hasPendingPermissionForSession && (
+            renderVoiceButton('mobile')
+          )}
             <button
               data-submit-prompt
               onClick={hasPendingPermissionForSession ? () => setShowDialog(true) : handleSubmit}
-              disabled={hasPendingPermissionForSession ? false : ((!prompt.trim() && imageAttachments.length === 0) || disabled)}
-               className={`px-4 md:px-5 py-1.5 md:py-2 rounded-lg text-sm font-medium transition-colors dark:border flex-shrink-0 min-w-[52px] ${
-                 hasPendingPermissionForSession
-                  ? 'border-warning/30 bg-warning text-warning-foreground ring-warning/20 hover:bg-warning/90'
+              disabled={hasPendingPermissionForSession ? false : ((!prompt.trim() && imageAttachments.length === 0) || (isPromptSubmitPending && !isStreamingResponse))}
+              className={`px-4 md:px-5 py-1.5 md:py-2 rounded-lg text-sm font-medium transition-colors dark:border flex-shrink-0 min-w-[52px] ${
+                hasPendingPermissionForSession
+                  ? 'bg-orange-500 hover:bg-orange-600 border-orange-400 text-primary-foreground ring-orange-500/20'
                   : 'bg-primary hover:bg-primary/90 disabled:bg-muted disabled:text-muted-foreground disabled:cursor-not-allowed text-primary-foreground border-white/30'
-               }`}
-              title={hasPendingPermissionForSession ? 'View pending permission' : (hasActiveStream ? 'Queue message' : 'Send')}
+              }`}
+              title={hasPendingPermissionForSession ? 'View pending permission' : (isStreamingResponse ? 'Queue message' : 'Send')}
             >
-              <span className="whitespace-nowrap">{hasPendingPermissionForSession ? 'View' : (hasActiveStream ? 'Queue' : 'Send')}</span>
+              <span className="whitespace-nowrap">{hasPendingPermissionForSession ? 'View' : (isStreamingResponse ? 'Queue' : 'Send')}</span>
             </button>
-          )}
         </div>
       </div>
       

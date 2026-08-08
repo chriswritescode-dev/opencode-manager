@@ -3,6 +3,8 @@ services:
     build:
       context: .
       dockerfile: Dockerfile
+      args:
+        TOOLS_CACHEBUST: ${TOOLS_CACHEBUST:-0}
     container_name: opencode-manager
     ports:
       - "5003:5003"
@@ -12,14 +14,16 @@ services:
       - "5103:5103"
     environment:
       - NODE_ENV=${NODE_ENV:-production}
+      - PUID=${PUID:-1000}
+      - PGID=${PGID:-1000}
       - HOST=0.0.0.0
       - PORT=5003
       - OPENCODE_SERVER_PORT=5551
+      - OPENCODE_HOST=127.0.0.1
       - DATABASE_PATH=/app/data/opencode.db
       - WORKSPACE_PATH=/workspace
       - PROCESS_START_WAIT_MS=2000
       - PROCESS_VERIFY_WAIT_MS=1000
-      - HEALTH_CHECK_INTERVAL_MS=5000
       - HEALTH_CHECK_TIMEOUT_MS=30000
       - MAX_FILE_SIZE_MB=50
       - MAX_UPLOAD_SIZE_MB=50
@@ -43,7 +47,7 @@ services:
       - VAPID_PRIVATE_KEY=${VAPID_PRIVATE_KEY:-}
       - VAPID_SUBJECT=${VAPID_SUBJECT:-}
     volumes:
-      - opencode-workspace:/workspace
+      - ${OCM_WORKSPACE_HOST_PATH:-opencode-workspace}:/workspace
       - opencode-data:/app/data
     restart: unless-stopped
     healthcheck:

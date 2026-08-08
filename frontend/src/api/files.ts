@@ -3,8 +3,27 @@ import { fetchWrapper, fetchWrapperBlob } from './fetchWrapper'
 import { API_BASE_URL } from '@/config'
 import type { FileInfo, ChunkedFileInfo, PatchOperation } from '@/types/files'
 
+interface FileApiUrlOptions {
+  route?: string
+  params?: Record<string, string | number | boolean | undefined>
+}
+
+export function getFileApiUrl(path: string, options: FileApiUrlOptions = {}): string {
+  const searchParams = new URLSearchParams()
+  Object.entries(options.params ?? {}).forEach(([key, value]) => {
+    if (value !== undefined) {
+      searchParams.append(key, String(value))
+    }
+  })
+
+  searchParams.set('path', path)
+  const query = searchParams.toString()
+  const routePath = options.route ? `/${options.route}` : ''
+  return `${API_BASE_URL}/api/files${routePath}${query ? `?${query}` : ''}`
+}
+
 async function fetchFile(path: string): Promise<FileInfo> {
-  return fetchWrapper(`${API_BASE_URL}/api/files/${path}`)
+  return fetchWrapper(getFileApiUrl(path))
 }
 
 export function useFile(path: string | undefined) {
@@ -16,21 +35,13 @@ export function useFile(path: string | undefined) {
 }
 
 export async function fetchFileRange(path: string, startLine: number, endLine: number): Promise<ChunkedFileInfo> {
-  return fetchWrapper(`${API_BASE_URL}/api/files/${path}`, {
+  return fetchWrapper(getFileApiUrl(path), {
     params: { startLine, endLine },
   })
 }
 
-export async function applyFilePatches(path: string, patches: PatchOperation[]): Promise<{ success: boolean; totalLines: number }> {
-  return fetchWrapper(`${API_BASE_URL}/api/files/${path}`, {
-    method: 'PATCH',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ patches }),
-  })
-}
-
 export async function getIgnoredPaths(path: string): Promise<{ ignoredPaths: string[] }> {
-  return fetchWrapper(`${API_BASE_URL}/api/files/${path}/ignored-paths`)
+  return fetchWrapper(getFileApiUrl(path, { route: 'ignored-paths' }))
 }
 
 export interface DownloadOptions {
@@ -39,11 +50,13 @@ export interface DownloadOptions {
 }
 
 export async function downloadDirectoryAsZip(path: string, options?: DownloadOptions): Promise<void> {
-  const params = new URLSearchParams()
-  if (options?.includeGit) params.append('includeGit', 'true')
-  if (options?.includePaths?.length) params.append('includePaths', options.includePaths.join(','))
-
-  const url = `${API_BASE_URL}/api/files/${path}/download-zip${params.toString() ? '?' + params.toString() : ''}`
+  const url = getFileApiUrl(path, {
+    route: 'download-zip',
+    params: {
+      includeGit: options?.includeGit || undefined,
+      includePaths: options?.includePaths?.length ? options.includePaths.join(',') : undefined,
+    },
+  })
   
   const blob = await fetchWrapperBlob(url)
   const urlObj = window.URL.createObjectURL(blob)
@@ -55,4 +68,12 @@ export async function downloadDirectoryAsZip(path: string, options?: DownloadOpt
   a.click()
   document.body.removeChild(a)
   window.URL.revokeObjectURL(urlObj)
+}
+
+export async function applyFilePatches(path: string, patches: PatchOperation[]): Promise<{ success: boolean; totalLines: number }> {
+  const url = getFileApiUrl(path)
+  return fetchWrapper(url, {
+    method: 'PATCH',
+    body: JSON.stringify({ patches }),
+  })
 }

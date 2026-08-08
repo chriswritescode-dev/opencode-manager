@@ -1,5 +1,5 @@
-import { describe, it, expect } from 'vitest'
-import { sanitizeForTTS } from './utils'
+import { describe, it, expect, afterEach } from 'vitest'
+import { getRepoDisplayName, sanitizeForTTS, randomId } from './utils'
 
 describe('sanitizeForTTS', () => {
   it('should handle headers', () => {
@@ -80,5 +80,70 @@ describe('sanitizeForTTS', () => {
 
   it('should handle HTML tags', () => {
     expect(sanitizeForTTS('Text with <tag>content</tag> here')).toBe('Text with content here')
+  })
+})
+
+describe('randomId', () => {
+  const originalRandomUUID = globalThis.crypto?.randomUUID
+
+  afterEach(() => {
+    if (globalThis.crypto) {
+      Object.defineProperty(globalThis.crypto, 'randomUUID', {
+        value: originalRandomUUID,
+        configurable: true,
+        writable: true,
+      })
+    }
+  })
+
+  it('uses crypto.randomUUID when available', () => {
+    Object.defineProperty(globalThis.crypto, 'randomUUID', {
+      value: () => '11111111-2222-4333-8444-555555555555',
+      configurable: true,
+      writable: true,
+    })
+    expect(randomId()).toBe('11111111-2222-4333-8444-555555555555')
+  })
+
+  it('falls back to a unique id when crypto.randomUUID is unavailable (non-secure context)', () => {
+    Object.defineProperty(globalThis.crypto, 'randomUUID', {
+      value: undefined,
+      configurable: true,
+      writable: true,
+    })
+    const first = randomId()
+    const second = randomId()
+    expect(first).toMatch(/^[a-z0-9]+-[a-z0-9]+$/)
+    expect(first).not.toBe(second)
+  })
+})
+
+describe('getRepoDisplayName', () => {
+  it('prefers name when present', () => {
+    expect(getRepoDisplayName({ name: 'Fork A', repoUrl: 'https://github.com/x/y.git' })).toBe('Fork A')
+  })
+
+  it('trims and ignores empty name', () => {
+    expect(getRepoDisplayName({ name: '   ', repoUrl: 'https://github.com/x/y.git' })).toBe('y')
+  })
+
+  it('falls back to repoUrl basename stripping .git', () => {
+    expect(getRepoDisplayName({ repoUrl: 'https://github.com/user/repo.git' })).toBe('repo')
+  })
+
+  it('falls back to sourcePath basename', () => {
+    expect(getRepoDisplayName({ sourcePath: '/home/user/projects/my-repo' })).toBe('my-repo')
+  })
+
+  it('falls back to the localPath basename', () => {
+    expect(getRepoDisplayName({ localPath: '/some/path' })).toBe('path')
+  })
+
+  it('falls back to Repository when all are empty', () => {
+    expect(getRepoDisplayName({})).toBe('Repository')
+  })
+
+  it('handles null values properly', () => {
+    expect(getRepoDisplayName({ repoUrl: null, localPath: null, sourcePath: null })).toBe('Repository')
   })
 })

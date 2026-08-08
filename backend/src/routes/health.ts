@@ -2,7 +2,9 @@ import { Hono } from 'hono'
 import type { Database } from 'bun:sqlite'
 import { readFile } from 'fs/promises'
 import { opencodeServerManager } from '../services/opencode-single-server'
+import type { OpenCodeSupervisor } from '../services/opencode-supervisor'
 import { compareVersions } from '../utils/version-utils'
+import { githubFetch } from '../utils/github'
 
 const GITHUB_REPO_OWNER = 'chriswritescode-dev'
 const GITHUB_REPO_NAME = 'opencode-manager'
@@ -23,14 +25,8 @@ async function fetchLatestRelease(): Promise<CachedRelease | null> {
   }
 
   try {
-    const response = await fetch(
+    const response = await githubFetch(
       `https://api.github.com/repos/${GITHUB_REPO_OWNER}/${GITHUB_REPO_NAME}/releases/latest`,
-      {
-        headers: {
-          'Accept': 'application/vnd.github+json',
-          'User-Agent': 'OpenCode-Manager'
-        }
-      }
     )
 
     if (!response.ok) {
@@ -66,17 +62,22 @@ const opencodeManagerVersionPromise = (async (): Promise<string | null> => {
   }
 })()
 
-export function createHealthRoutes(db: Database) {
+export function createHealthRoutes(db: Database, openCodeSupervisor?: OpenCodeSupervisor) {
   const app = new Hono()
 
   app.get('/', async (c) => {
     try {
       const opencodeManagerVersion = await opencodeManagerVersionPromise
       const dbCheck = db.prepare('SELECT 1').get()
+      const lifecycle = openCodeSupervisor
+        ? openCodeSupervisor.getStatus()
+        : null
       const opencodeHealthy = await opencodeServerManager.checkHealth()
-      const startupError = opencodeServerManager.getLastStartupError()
+      const startupError = lifecycle?.lastError ?? opencodeServerManager.getLastStartupError()
 
-      const status = startupError && !opencodeHealthy
+      const status = lifecycle?.state === 'recovering'
+        ? 'degraded'
+        : startupError && !opencodeHealthy
         ? 'unhealthy'
         : (dbCheck && opencodeHealthy ? 'healthy' : 'degraded')
 
@@ -90,13 +91,18 @@ export function createHealthRoutes(db: Database) {
         opencodeMinVersion: opencodeServerManager.getMinVersion(),
         opencodeVersionSupported: opencodeServerManager.isVersionSupported(),
         opencodeManagerVersion,
+        opencodeRestartPending: opencodeServerManager.isRestartPending(),
+      }
+
+      if (lifecycle) {
+        response.opencodeLifecycle = lifecycle
       }
 
       if (startupError && !opencodeHealthy) {
         response.error = startupError
       }
 
-      return c.json(response)
+      return c.json(response, status === 'unhealthy' ? 503 : 200)
     } catch (error) {
       const opencodeManagerVersion = await opencodeManagerVersionPromise
       return c.json({
@@ -110,12 +116,16 @@ export function createHealthRoutes(db: Database) {
 
   app.get('/processes', async (c) => {
     try {
+      const lifecycle = openCodeSupervisor
+        ? openCodeSupervisor.getStatus()
+        : null
       const opencodeHealthy = await opencodeServerManager.checkHealth()
-      
+       
       return c.json({
         opencode: {
           port: opencodeServerManager.getPort(),
-          healthy: opencodeHealthy
+          healthy: opencodeHealthy,
+          lifecycle,
         },
         timestamp: new Date().toISOString()
       })

@@ -15,41 +15,41 @@ export function ScheduleTabMenu({ activeTab, onTabChange, className }: ScheduleT
       <button
         type="button"
         className={cn(
-          'flex-1 flex flex-col items-center gap-0.5 pt-2.5 pb-2 pb-safe text-xs font-medium transition-colors',
+          'flex-1 flex flex-col items-center gap-1 px-2 py-2 text-xs font-medium border-b-2 transition-colors',
           activeTab === 'jobs'
-            ? 'bg-primary/10 text-primary'
-            : 'bg-transparent text-muted-foreground hover:text-foreground hover:bg-muted/50'
+            ? 'text-primary border-primary'
+            : 'text-muted-foreground border-transparent hover:text-foreground',
         )}
         onClick={() => onTabChange('jobs')}
       >
-        <CalendarClock className="h-4 w-4" />
+        <CalendarClock className="h-5 w-5" />
         <span>Jobs</span>
       </button>
       <button
         type="button"
         className={cn(
-          'flex-1 flex flex-col items-center gap-0.5 pt-2.5 pb-2 pb-safe text-xs font-medium transition-colors',
+          'flex-1 flex flex-col items-center gap-1 px-2 py-2 text-xs font-medium border-b-2 transition-colors',
           activeTab === 'detail'
-            ? 'bg-primary/10 text-primary'
-            : 'bg-transparent text-muted-foreground hover:text-foreground hover:bg-muted/50'
+            ? 'text-primary border-primary'
+            : 'text-muted-foreground border-transparent hover:text-foreground',
         )}
         onClick={() => onTabChange('detail')}
       >
-        <Info className="h-4 w-4" />
+        <Info className="h-5 w-5" />
         <span>Detail</span>
       </button>
       <button
         type="button"
         className={cn(
-          'flex-1 flex flex-col items-center gap-0.5 pt-1.5 py-2 pb-safe text-xs font-medium transition-colors',
+          'flex-1 flex flex-col items-center gap-1 px-2 py-2 text-xs font-medium border-b-2 transition-colors',
           activeTab === 'runs'
-            ? 'bg-primary/10 text-primary'
-            : 'bg-transparent text-muted-foreground hover:text-foreground hover:bg-muted/50'
+            ? 'text-primary border-primary'
+            : 'text-muted-foreground border-transparent hover:text-foreground',
         )}
         onClick={() => onTabChange('runs')}
       >
-        <History className="h-4 w-4" />
-        <span>Run History</span>
+        <History className="h-5 w-5" />
+        <span>Runs</span>
       </button>
     </div>
   )

@@ -1,4 +1,4 @@
-import { useState, useEffect } from 'react'
+import { useState, useEffect, useCallback } from 'react'
 import type { PromptTemplate, CreatePromptTemplateRequest } from '@opencode-manager/shared/types'
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from '@/components/ui/dialog'
 import { Button } from '@/components/ui/button'
@@ -8,54 +8,61 @@ import { Label } from '@/components/ui/label'
 import { Loader2 } from 'lucide-react'
 import { useCreatePromptTemplate, useUpdatePromptTemplate } from '@/hooks/usePromptTemplates'
 
+type FormData = Pick<CreatePromptTemplateRequest, 'title' | 'category' | 'cadenceHint' | 'suggestedName' | 'suggestedDescription' | 'description' | 'prompt'>
+
+const INITIAL_FORM: FormData = {
+  title: '',
+  category: '',
+  cadenceHint: '',
+  suggestedName: '',
+  suggestedDescription: '',
+  description: '',
+  prompt: '',
+}
+
 interface PromptTemplateDialogProps {
   open: boolean
   onOpenChange: (open: boolean) => void
   template?: PromptTemplate
+  initialValues?: Partial<CreatePromptTemplateRequest>
 }
 
-export function PromptTemplateDialog({ open, onOpenChange, template }: PromptTemplateDialogProps) {
-  const [title, setTitle] = useState('')
-  const [category, setCategory] = useState('')
-  const [cadenceHint, setCadenceHint] = useState('')
-  const [suggestedName, setSuggestedName] = useState('')
-  const [suggestedDescription, setSuggestedDescription] = useState('')
-  const [description, setDescription] = useState('')
-  const [prompt, setPrompt] = useState('')
+function pickFormData(template?: PromptTemplate, initialValues?: Partial<CreatePromptTemplateRequest>): FormData {
+  return {
+    title: template?.title ?? initialValues?.title ?? '',
+    category: template?.category ?? initialValues?.category ?? '',
+    cadenceHint: template?.cadenceHint ?? initialValues?.cadenceHint ?? '',
+    suggestedName: template?.suggestedName ?? initialValues?.suggestedName ?? '',
+    suggestedDescription: template?.suggestedDescription ?? initialValues?.suggestedDescription ?? '',
+    description: template?.description ?? initialValues?.description ?? '',
+    prompt: template?.prompt ?? initialValues?.prompt ?? '',
+  }
+}
+
+export function PromptTemplateDialog({ open, onOpenChange, template, initialValues }: PromptTemplateDialogProps) {
+  const [form, setForm] = useState<FormData>(INITIAL_FORM)
 
   const createMutation = useCreatePromptTemplate()
   const updateMutation = useUpdatePromptTemplate()
   const isSaving = createMutation.isPending || updateMutation.isPending
 
   useEffect(() => {
-    if (open) {
-      setTitle(template?.title ?? '')
-      setCategory(template?.category ?? '')
-      setCadenceHint(template?.cadenceHint ?? '')
-      setSuggestedName(template?.suggestedName ?? '')
-      setSuggestedDescription(template?.suggestedDescription ?? '')
-      setDescription(template?.description ?? '')
-      setPrompt(template?.prompt ?? '')
-    } else {
-      setTitle('')
-      setCategory('')
-      setCadenceHint('')
-      setSuggestedName('')
-      setSuggestedDescription('')
-      setDescription('')
-      setPrompt('')
-    }
-  }, [template, open])
+    setForm(open ? pickFormData(template, initialValues) : INITIAL_FORM)
+  }, [template, open, initialValues])
+
+  const handleChange = useCallback((field: keyof FormData) => (e: React.ChangeEvent<HTMLInputElement | HTMLTextAreaElement>) => {
+    setForm((prev) => ({ ...prev, [field]: e.target.value }))
+  }, [])
 
   const handleSubmit = () => {
     const data: CreatePromptTemplateRequest = {
-      title: title.trim(),
-      category: category.trim(),
-      cadenceHint: cadenceHint.trim(),
-      suggestedName: suggestedName.trim(),
-      suggestedDescription: suggestedDescription.trim(),
-      description: description.trim(),
-      prompt: prompt.trim(),
+      title: form.title.trim(),
+      category: form.category.trim(),
+      cadenceHint: form.cadenceHint.trim(),
+      suggestedName: form.suggestedName.trim(),
+      suggestedDescription: form.suggestedDescription.trim(),
+      description: form.description.trim(),
+      prompt: form.prompt.trim(),
     }
 
     if (template) {
@@ -65,7 +72,7 @@ export function PromptTemplateDialog({ open, onOpenChange, template }: PromptTem
     }
   }
 
-  const isValid = title.trim() && category.trim() && cadenceHint.trim() && suggestedName.trim() && prompt.trim()
+  const isValid = form.title.trim() && form.category.trim() && form.cadenceHint.trim() && form.suggestedName.trim() && form.prompt.trim()
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
@@ -77,34 +84,34 @@ export function PromptTemplateDialog({ open, onOpenChange, template }: PromptTem
           <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
             <div className="space-y-2">
               <Label htmlFor="template-title">Title</Label>
-              <Input id="template-title" value={title} onChange={(e) => setTitle(e.target.value)} placeholder="Repo Health Report" />
+              <Input id="template-title" value={form.title} onChange={handleChange('title')} placeholder="Repo Health Report" />
             </div>
             <div className="space-y-2">
               <Label htmlFor="template-category">Category</Label>
-              <Input id="template-category" value={category} onChange={(e) => setCategory(e.target.value)} placeholder="Health" />
+              <Input id="template-category" value={form.category} onChange={handleChange('category')} placeholder="Health" />
             </div>
           </div>
           <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
             <div className="space-y-2">
               <Label htmlFor="template-cadence">Cadence hint</Label>
-              <Input id="template-cadence" value={cadenceHint} onChange={(e) => setCadenceHint(e.target.value)} placeholder="Weekly" />
+              <Input id="template-cadence" value={form.cadenceHint} onChange={handleChange('cadenceHint')} placeholder="Weekly" />
             </div>
             <div className="space-y-2">
               <Label htmlFor="template-suggested-name">Suggested job name</Label>
-              <Input id="template-suggested-name" value={suggestedName} onChange={(e) => setSuggestedName(e.target.value)} placeholder="Weekly repo health report" />
+              <Input id="template-suggested-name" value={form.suggestedName} onChange={handleChange('suggestedName')} placeholder="Weekly repo health report" />
             </div>
           </div>
           <div className="space-y-2">
             <Label htmlFor="template-description">Description</Label>
-            <Input id="template-description" value={description} onChange={(e) => setDescription(e.target.value)} placeholder="Short summary shown on the template card" />
+            <Input id="template-description" value={form.description} onChange={handleChange('description')} placeholder="Short summary shown on the template card" />
           </div>
           <div className="space-y-2">
             <Label htmlFor="template-suggested-description">Suggested job description</Label>
-            <Input id="template-suggested-description" value={suggestedDescription} onChange={(e) => setSuggestedDescription(e.target.value)} placeholder="Pre-fills the schedule job description field" />
+            <Input id="template-suggested-description" value={form.suggestedDescription} onChange={handleChange('suggestedDescription')} placeholder="Pre-fills the schedule job description field" />
           </div>
           <div className="space-y-2">
             <Label htmlFor="template-prompt">Prompt</Label>
-            <Textarea id="template-prompt" value={prompt} onChange={(e) => setPrompt(e.target.value)} className="min-h-[200px]" placeholder="The full prompt sent to the agent when the schedule runs." />
+            <Textarea id="template-prompt" value={form.prompt} onChange={handleChange('prompt')} className="min-h-[200px]" placeholder="The full prompt sent to the agent when the schedule runs." />
           </div>
         </div>
         <div className="flex flex-row gap-2 pt-2 border-t border-border sm:justify-end">

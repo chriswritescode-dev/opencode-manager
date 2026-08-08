@@ -1,6 +1,7 @@
 import type { ScheduleJob, ScheduleRun } from '@opencode-manager/shared/types'
+import { Button } from '@/components/ui/button'
 import { Card, CardContent } from '@/components/ui/card'
-import { History, Loader2 } from 'lucide-react'
+import { History, Loader2, Trash2 } from 'lucide-react'
 import { RunHistoryCards, RunDetailPanel } from '@/components/schedules'
 
 interface RunHistoryTabProps {
@@ -13,6 +14,10 @@ interface RunHistoryTabProps {
   onSelectRun: (id: number) => void
   onCancelRun: () => void
   cancelRunPending: boolean
+  onClearHistory: () => void
+  clearHistoryPending: boolean
+  onDeleteRun: (runId: number) => void
+  deleteRunPending: boolean
 }
 
 export function RunHistoryTab({
@@ -25,6 +30,10 @@ export function RunHistoryTab({
   selectedRunLoading,
   onCancelRun,
   cancelRunPending,
+  onClearHistory,
+  clearHistoryPending,
+  onDeleteRun,
+  deleteRunPending,
 }: RunHistoryTabProps) {
   if (!selectedJob) {
     if (selectedRunLoading) {
@@ -49,6 +58,18 @@ export function RunHistoryTab({
 
   return (
     <div className="flex min-h-0 flex-1 flex-col overflow-hidden">
+      <div className="flex items-center justify-between gap-2 pt-2">
+        <p className="text-sm font-medium text-muted-foreground">Run history</p>
+        <Button
+          variant="outline"
+          size="sm"
+          onClick={onClearHistory}
+          disabled={clearHistoryPending || !runs?.length}
+        >
+          {clearHistoryPending ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Trash2 className="h-3.5 w-3.5" />}
+          Clear history
+        </Button>
+      </div>
       <div className="min-h-0 flex-1 overflow-hidden pt-2 xl:gap-4 xl:grid xl:grid-cols-[320px_minmax(0,1fr)] xl:grid-rows-1">
         <RunHistoryCards
           runs={runs}
@@ -56,6 +77,8 @@ export function RunHistoryTab({
           onSelectRun={onSelectRun}
           onCancelRun={onCancelRun}
           cancelRunPending={cancelRunPending}
+          onDeleteRun={onDeleteRun}
+          deleteRunPending={deleteRunPending}
         />
 
         <div className="hidden xl:flex min-h-0 flex-col overflow-hidden rounded-xl border border-border/60 bg-background/60 p-4">

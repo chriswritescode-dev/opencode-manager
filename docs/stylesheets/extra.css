@@ -132,10 +132,29 @@
 }
 
 .md-typeset img {
-  max-width: 600px;
-  max-height: 800px;
+  max-width: 100%;
   height: auto;
-  object-fit: contain;
+  border-radius: 8px;
+  box-shadow: 0 4px 6px -1px rgb(0 0 0 / 0.3);
+}
+
+.md-typeset img.phone {
+  max-width: 300px;
+}
+
+.md-typeset img.hero {
+  border-radius: 0;
+  box-shadow: none;
+}
+
+.md-typeset img.hero-desktop {
+  width: 100%;
+  max-width: 1100px;
+  max-height: none;
+}
+
+.md-typeset img.hero-mobile {
+  margin-left: 12px;
 }
 
 @keyframes progress {

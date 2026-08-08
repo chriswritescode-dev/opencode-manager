@@ -127,6 +127,9 @@ export function STTSettings() {
       } else if (sttError) {
         setTestResult('failed')
         setIsTesting(false)
+      } else {
+        setTestResult('idle')
+        setIsTesting(false)
       }
     }
   }, [isTesting, isRecording, isProcessing, transcript, sttError])

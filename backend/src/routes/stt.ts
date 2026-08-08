@@ -4,23 +4,9 @@ import { SettingsService } from '../services/settings'
 import { logger } from '../utils/logger'
 import {
   normalizeToBaseUrl,
-  ensureDiscoveryCacheDir,
-  getCachedDiscovery,
-  cacheDiscovery,
-  generateDiscoveryCacheKey,
-  fetchAvailableModels,
+  discoverModelsCached,
 } from '../utils/discovery-cache'
-
-type STTConfigExtended = {
-  enabled: boolean
-  provider: 'external' | 'builtin'
-  endpoint: string
-  apiKey: string
-  model: string
-  language: string
-  availableModels?: string[]
-  lastModelsFetch?: number
-}
+import { type STTConfig } from '@opencode-manager/shared'
 
 export function createSTTRoutes(db: Database) {
   const app = new Hono()
@@ -38,7 +24,7 @@ export function createSTTRoutes(db: Database) {
 
       const settingsService = new SettingsService(db)
       const settings = settingsService.getSettings(userId)
-      const sttConfig = settings.preferences.stt as STTConfigExtended | undefined
+      const sttConfig = settings.preferences.stt as STTConfig | undefined
 
       if (!sttConfig?.enabled) {
         return c.json({ error: 'STT is not enabled' }, 400)
@@ -146,43 +132,32 @@ export function createSTTRoutes(db: Database) {
 
       const settingsService = new SettingsService(db)
       const settings = settingsService.getSettings(userId)
-      const sttConfig = settings.preferences.stt as STTConfigExtended | undefined
+      const sttConfig = settings.preferences.stt as STTConfig | undefined
 
       if (!sttConfig?.endpoint) {
         return c.json({ error: 'STT not configured' }, 400)
       }
 
-      const cacheKey = generateDiscoveryCacheKey(sttConfig.endpoint, sttConfig.apiKey, 'models')
+      const { models, cached } = await discoverModelsCached({
+        baseUrl: sttConfig.endpoint,
+        apiKey: sttConfig.apiKey,
+        type: 'models',
+        filterPattern: /whisper|transcri/,
+        defaultModels: ['whisper-1'],
+        forceRefresh,
+      })
 
-      if (!forceRefresh) {
-        const cachedModels = await getCachedDiscovery<string[]>(cacheKey)
-        if (cachedModels) {
-          logger.info(`STT models cache hit for user ${userId}`)
-          return c.json({ models: cachedModels, cached: true })
-        }
+      if (!cached) {
+        await settingsService.updateSettings({
+          stt: {
+            ...sttConfig,
+            availableModels: models,
+            lastModelsFetch: Date.now(),
+          } as STTConfig,
+        }, userId)
       }
 
-      await ensureDiscoveryCacheDir()
-      logger.info(`Fetching STT models for user ${userId}`)
-
-      const models = await fetchAvailableModels(
-        sttConfig.endpoint,
-        sttConfig.apiKey,
-        /whisper|transcri/,
-        ['whisper-1'],
-      )
-      await cacheDiscovery(cacheKey, models)
-
-      await settingsService.updateSettings({
-        stt: {
-          ...sttConfig,
-          availableModels: models,
-          lastModelsFetch: Date.now()
-        } as STTConfigExtended
-      }, userId)
-
-      logger.info(`Fetched ${models.length} STT models`)
-      return c.json({ models, cached: false })
+      return c.json({ models, cached })
     } catch (error) {
       logger.error('Failed to fetch STT models:', error)
       return c.json({ error: 'Failed to fetch models' }, 500)
@@ -193,7 +168,7 @@ export function createSTTRoutes(db: Database) {
     const userId = c.req.query('userId') || 'default'
     const settingsService = new SettingsService(db)
     const settings = settingsService.getSettings(userId)
-    const sttConfig = settings.preferences.stt as STTConfigExtended | undefined
+    const sttConfig = settings.preferences.stt as STTConfig | undefined
 
     return c.json({
       enabled: sttConfig?.enabled || false,

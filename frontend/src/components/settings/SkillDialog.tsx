@@ -8,6 +8,7 @@ import { Input } from '@/components/ui/input'
 import { Form, FormControl, FormDescription, FormField, FormItem, FormLabel, FormMessage } from '@/components/ui/form'
 import { Textarea } from '@/components/ui/textarea'
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
+import { getRepoDisplayName } from '@/lib/utils'
 import type { SkillFileInfo, CreateSkillRequest, UpdateSkillRequest, SkillScope } from '@opencode-manager/shared'
 import type { Repo } from '@/api/types'
 import { listRepos } from '@/api/repos'
@@ -21,9 +22,6 @@ const skillFormSchema = z.object({
   description: z.string().min(1, 'Description is required').max(1024, 'Description must be 1024 characters or less'),
   body: z.string().min(1, 'Skill body is required'),
   scope: z.enum(['global', 'project']),
-  license: z.string().optional(),
-  compatibility: z.string().optional(),
-  metadata: z.record(z.string(), z.string()).optional(),
 })
 
 type SkillFormValues = z.infer<typeof skillFormSchema>
@@ -51,9 +49,6 @@ export function SkillDialog({ open, onOpenChange, onSubmit, editingSkill }: Skil
       description: skill?.description || '',
       body: skill?.body || '',
       scope: skill?.scope || 'global',
-      license: skill?.license || '',
-      compatibility: skill?.compatibility || '',
-      metadata: skill?.metadata || {},
     }
   }
 
@@ -84,9 +79,6 @@ export function SkillDialog({ open, onOpenChange, onSubmit, editingSkill }: Skil
         repoId: editingSkill.scope === 'project' ? editingSkill.repoId : undefined,
         description: values.description,
         body: values.body,
-        license: values.license || undefined,
-        compatibility: values.compatibility || undefined,
-        metadata: Object.keys(values.metadata || {}).length > 0 ? values.metadata : undefined,
       })
     } else {
       onSubmit({
@@ -95,9 +87,6 @@ export function SkillDialog({ open, onOpenChange, onSubmit, editingSkill }: Skil
         body: values.body,
         scope: values.scope,
         repoId: values.scope === 'project' ? selectedRepoId : undefined,
-        license: values.license || undefined,
-        compatibility: values.compatibility || undefined,
-        metadata: Object.keys(values.metadata || {}).length > 0 ? values.metadata : undefined,
       })
     }
     form.reset()
@@ -204,68 +193,28 @@ export function SkillDialog({ open, onOpenChange, onSubmit, editingSkill }: Skil
               />
 
               {scope === 'project' && (
-                <FormField
-                  control={form.control}
-                  name="metadata"
-                  render={() => (
-                    <FormItem>
-                      <FormLabel>Repository</FormLabel>
-                      <FormControl>
-                        <Select
-                          value={selectedRepoId?.toString()}
-                          onValueChange={(value) => setSelectedRepoId(value ? parseInt(value, 10) : undefined)}
-                        >
-                          <SelectTrigger>
-                            <SelectValue placeholder="Select repository" />
-                          </SelectTrigger>
-                          <SelectContent>
-                            {repos.map((repo) => (
-                              <SelectItem key={repo.id} value={repo.id.toString()}>
-                                {repo.localPath}
-                              </SelectItem>
-                            ))}
-                          </SelectContent>
-                        </Select>
-                      </FormControl>
-                      <FormMessage />
-                    </FormItem>
-                  )}
-                />
+                <FormItem>
+                  <FormLabel>Repository</FormLabel>
+                  <FormControl>
+                    <Select
+                      value={selectedRepoId?.toString()}
+                      onValueChange={(value) => setSelectedRepoId(value ? parseInt(value, 10) : undefined)}
+                    >
+                      <SelectTrigger>
+                        <SelectValue placeholder="Select repository" />
+                      </SelectTrigger>
+                      <SelectContent>
+                        {repos.map((repo) => (
+                          <SelectItem key={repo.id} value={repo.id.toString()}>
+                            {getRepoDisplayName(repo)}
+                          </SelectItem>
+                        ))}
+                      </SelectContent>
+                    </Select>
+                  </FormControl>
+                  <FormMessage />
+                </FormItem>
               )}
-
-              <FormField
-                control={form.control}
-                name="license"
-                render={({ field }) => (
-                  <FormItem>
-                    <FormLabel>License (Optional)</FormLabel>
-                    <FormControl>
-                      <Input
-                        {...field}
-                        placeholder="MIT"
-                      />
-                    </FormControl>
-                    <FormMessage />
-                  </FormItem>
-                )}
-              />
-
-              <FormField
-                control={form.control}
-                name="compatibility"
-                render={({ field }) => (
-                  <FormItem>
-                    <FormLabel>Compatibility (Optional)</FormLabel>
-                    <FormControl>
-                      <Input
-                        {...field}
-                        placeholder="opencode"
-                      />
-                    </FormControl>
-                    <FormMessage />
-                  </FormItem>
-                )}
-              />
             </div>
           </Form>
         </div>

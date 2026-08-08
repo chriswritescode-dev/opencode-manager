@@ -35,6 +35,8 @@ services:
     build:
       context: .
       dockerfile: Dockerfile
+      args:
+        TOOLS_CACHEBUST: ${TOOLS_CACHEBUST:-0}
     container_name: opencode-manager
     ports:
       - "5003:5003"
@@ -44,14 +46,16 @@ services:
       - "5103:5103"
     environment:
       - NODE_ENV=${NODE_ENV:-production}
+      - PUID=${PUID:-1000}
+      - PGID=${PGID:-1000}
       - HOST=0.0.0.0
       - PORT=5003
       - OPENCODE_SERVER_PORT=5551
+      - OPENCODE_HOST=127.0.0.1
       - DATABASE_PATH=/app/data/opencode.db
       - WORKSPACE_PATH=/workspace
       - PROCESS_START_WAIT_MS=2000
       - PROCESS_VERIFY_WAIT_MS=1000
-      - HEALTH_CHECK_INTERVAL_MS=5000
       - HEALTH_CHECK_TIMEOUT_MS=30000
       - MAX_FILE_SIZE_MB=50
       - MAX_UPLOAD_SIZE_MB=50
@@ -75,7 +79,7 @@ services:
       - VAPID_PRIVATE_KEY=${VAPID_PRIVATE_KEY:-}
       - VAPID_SUBJECT=${VAPID_SUBJECT:-}
     volumes:
-      - opencode-workspace:/workspace
+      - ${OCM_WORKSPACE_HOST_PATH:-opencode-workspace}:/workspace
       - opencode-data:/app/data
     restart: unless-stopped
     healthcheck:
@@ -126,7 +130,7 @@ The container entrypoint (`scripts/docker-entrypoint.sh`) automatically:
 2. **Verifies OpenCode** is installed (installed at build time, fallback install if missing)
 3. **Upgrades OpenCode** if below minimum version (1.0.137)
 4. **Validates AUTH_SECRET** is set (required for startup)
-5. **Validates memory plugin** installation
+5. **Aligns the `node` account** to `PUID`/`PGID` (default `1000`) before chowning the workspace, the `/app/data` directory, and the `node` home directory. If `PUID`/`PGID` are already used by another account in the image, startup aborts with an explicit error. Group alignment runs first, so a free `PGID` combined with an occupied `PUID` mutates `/etc/group` before the UID collision is detected and aborts startup; realign to the original ids or pick a free pair before retrying.
 
 ## Port Configuration
 
@@ -192,10 +196,54 @@ Repository storage:
 
 ```yaml
 volumes:
-  - opencode-workspace:/workspace
+  - ${OCM_WORKSPACE_HOST_PATH:-opencode-workspace}:/workspace
 ```
 
-All cloned repositories are stored here. Uses a named volume for data persistence across container recreations.
+All cloned repositories are stored here. Defaults to a named volume for data persistence across container recreations.
+
+#### Accessing Repositories From the Host
+
+To work in the cloned repositories from the host instead of through `docker exec`, bind `/workspace` to a host directory and run the container as your host user so the files stay usable from the host without root. Add to `.env`:
+
+```bash
+# Output of `id -u` and `id -g` on the host
+PUID=1000
+PGID=1000
+OCM_WORKSPACE_HOST_PATH=/absolute/path/to/opencode-workspace
+```
+
+`OCM_WORKSPACE_HOST_PATH` is consumed verbatim as the compose mount source, so an absolute or `./`-relative path becomes a bind mount while the default value (`opencode-workspace`) stays a named volume. `PUID`/`PGID` are applied before the workspace is chowned, so agent-created files are host-owned and both sides share one uid &mdash; which also avoids git's "dubious ownership" warning.
+
+To migrate an existing named volume to a bind mount without losing data, copy the volume contents into the host directory with a one-off container &mdash; this works whether `<host path>` already exists or not, and avoids depending on Docker's internal storage path (`/var/lib/docker/...` differs on Docker Desktop, rootless Docker, and custom data roots). The destination must be empty; if it is not, the recipe aborts without copying anything so existing files are never overwritten:
+
+```bash
+docker compose stop
+mkdir -p "<host path>"
+# Abort if the destination is non-empty so we never overwrite existing files.
+if [ -n "$(ls -A "<host path>")" ]; then
+  echo "destination '<host path>' is not empty; aborting migration" >&2
+  exit 1
+fi
+# `<project>` is the Compose project name, usually the directory containing docker-compose.yml.
+docker run --rm \
+  -v <project>_opencode-workspace:/from:ro \
+  -v "<host path>":/to alpine sh -c 'cp -a /from/. /to/'
+sudo chown -R "$(id -u):$(id -g)" "<host path>"
+docker compose up -d
+# After confirming /workspace contains your repositories, remove the old volume:
+docker volume rm <project>_opencode-workspace
+```
+
+The quoted `"<host path>"` keeps paths containing spaces (for example `/Users/name/My Repositories`) intact across `mkdir`, the Docker `-v` argument, and `chown`. With the empty-destination guard in place, `cp -a /from/. /to/` copies the volume's *contents* (not its `_data` directory) directly into the bind-mount root, so repositories land directly beneath the mounted `/workspace`. The named volume is left in place until you confirm the migration succeeded.
+
+!!! warning "Set PUID before switching to a bind mount"
+    A wrong `PUID` makes startup chown the whole host directory. The entrypoint prints a warning naming both uids, but it does not block the chown.
+
+!!! warning "Concurrent git access"
+    Editing a repository from the host while an agent works in the same repository or worktree can collide on `index.lock` and branch state.
+
+!!! note "/app keeps the build-time uid"
+    `/app` and its `node_modules` are chowned to uid 1000 at build time and are read-only at runtime. When `PUID` differs, the container runs the code as a different uid, but since `/app` is only read (never written) at runtime, it is left untouched and startup stays fast.
 
 ### Data
 
@@ -387,3 +435,44 @@ docker exec -it opencode-manager vi /workspace/.config/opencode/AGENTS.md
 ### Precedence
 
 Global instructions merge with repository-specific `AGENTS.md` files. Repository instructions take precedence.
+
+## Exposing the OpenCode Server (Advanced)
+
+By default, the OpenCode server binds to `127.0.0.1` inside the container and is **not reachable from outside the container**. This is the correct and safe default for nearly all users.
+
+### When to Expose Externally
+
+You only need to expose the OpenCode server on an external interface if you have a specific use case that requires other services or machines to connect directly to it.
+
+### How to Expose Safely
+
+To expose the OpenCode server on the host network:
+
+1. **Set `OPENCODE_HOST=0.0.0.0`** in your environment
+2. **Add port `5551:5551`** to the compose ports
+3. **Set `OPENCODE_SERVER_PASSWORD`** — this is **required**; the managed OpenCode server will refuse to start without it
+
+Example compose override:
+
+```yaml
+services:
+  app:
+    ports:
+      - "5551:5551"
+    environment:
+      - OPENCODE_HOST=0.0.0.0
+      - OPENCODE_SERVER_PASSWORD=${OPENCODE_SERVER_PASSWORD:?Set OPENCODE_SERVER_PASSWORD before exposing OpenCode on port 5551}
+```
+
+### Password Configuration
+
+The password can be configured in two ways:
+
+1. **Environment variable:** Set `OPENCODE_SERVER_PASSWORD` in your `.env` file or compose environment
+2. **Via UI:** Use Settings → OpenCode → Server Auth to set a password at runtime
+
+**DB-stored passwords take precedence over the environment variable.** If you set a password via the UI, it will override the env var.
+
+### Startup Guard
+
+If you set `OPENCODE_HOST=0.0.0.0` (or any non-localhost host) without configuring a password (either via env var or UI), the managed OpenCode server will refuse to start with an error message explaining how to fix it. The OpenCode Manager UI/API may remain available so you can configure a password and restart the managed server.

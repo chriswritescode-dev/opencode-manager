@@ -7,9 +7,14 @@ import {
   NotificationEventType,
   DEFAULT_NOTIFICATION_PREFERENCES,
 } from "@opencode-manager/shared/schemas";
+import {
+  getPermissionLabel,
+  getPermissionDetail,
+  getQuestionText,
+} from "@opencode-manager/shared/notifications";
 import { SettingsService } from "./settings";
 import { sseAggregator, type SSEEvent } from "./sse-aggregator";
-import { getRepoByLocalPath, getRepoBySourcePath } from "../db/queries";
+import { getRepoByLocalPath, getRepoBySourcePath, getRepoName } from "../db/queries";
 import { getReposPath } from "@opencode-manager/shared/config/env";
 import path from "path";
 
@@ -21,21 +26,28 @@ interface VapidConfig {
 
 const EVENT_CONFIG: Record<
   string,
-  { preferencesKey: keyof typeof DEFAULT_NOTIFICATION_PREFERENCES.events; title: string; bodyFn: (props: Record<string, unknown>) => string }
+  {
+    preferencesKey: keyof typeof DEFAULT_NOTIFICATION_PREFERENCES.events;
+    titleFn: (props: Record<string, unknown>) => string;
+    bodyFn: (props: Record<string, unknown>) => string;
+  }
 > = {
   [NotificationEventType.PERMISSION_ASKED]: {
     preferencesKey: "permissionAsked",
-    title: "Permission Required",
-    bodyFn: () => "OpenCode needs your approval to continue",
+    titleFn: (props) =>
+      getPermissionLabel(
+        typeof props.permission === "string" ? props.permission : ""
+      ),
+    bodyFn: (props) => getPermissionDetail(props).primary || "Approval required",
   },
   [NotificationEventType.QUESTION_ASKED]: {
     preferencesKey: "questionAsked",
-    title: "Question from Agent",
-    bodyFn: () => "The agent has a question for you",
+    titleFn: () => "Question",
+    bodyFn: (props) => getQuestionText(props) || "A question needs your answer",
   },
   [NotificationEventType.SESSION_ERROR]: {
     preferencesKey: "sessionError",
-    title: "Session Error",
+    titleFn: () => "Error",
     bodyFn: (props) => {
       const error = props.error as { message?: string } | undefined;
       return error?.message ?? "A session encountered an error";
@@ -43,10 +55,51 @@ const EVENT_CONFIG: Record<
   },
   [NotificationEventType.SESSION_IDLE]: {
     preferencesKey: "sessionIdle",
-    title: "Session Complete",
+    titleFn: () => "Session complete",
     bodyFn: () => "Your session has finished processing",
   },
 };
+
+const MAX_BODY_LENGTH = 140;
+
+export function buildEventNotificationPayload(
+  event: SSEEvent,
+  context: {
+    repoName?: string;
+    repoId?: number;
+    sessionId?: string;
+    directory?: string;
+    url: string;
+  }
+): PushNotificationPayload | null {
+  const config = EVENT_CONFIG[event.type];
+  if (!config) return null;
+
+  const action = config.titleFn(event.properties);
+  const title = context.repoName
+    ? `${context.repoName}: ${action}`
+    : action;
+
+  const rawBody = config.bodyFn(event.properties);
+  const body =
+    rawBody.length > MAX_BODY_LENGTH
+      ? `${rawBody.slice(0, MAX_BODY_LENGTH - 1)}…`
+      : rawBody;
+
+  return {
+    title,
+    body,
+    tag: `${event.type}-${context.sessionId ?? "global"}`,
+    data: {
+      eventType: event.type,
+      sessionId: context.sessionId,
+      directory: context.directory,
+      repoId: context.repoId,
+      repoName: context.repoName,
+      url: context.url,
+    },
+  };
+}
 
 export class NotificationService {
   private vapidConfig: VapidConfig | null = null;
@@ -205,6 +258,34 @@ export class NotificationService {
     if (!this.isConfigured()) return;
 
     const userIds = this.getAllUserIds();
+    if (userIds.length === 0) return;
+
+    let notificationUrl = "/";
+    let repoName = "";
+    let repoId: number | undefined;
+
+    if (_directory) {
+      const reposBasePath = getReposPath();
+      const localPath = path.relative(reposBasePath, _directory);
+      const repo = getRepoBySourcePath(this.db, path.resolve(_directory)) ?? getRepoByLocalPath(this.db, localPath);
+
+      if (repo) {
+        repoId = repo.id;
+        repoName = getRepoName(repo);
+        notificationUrl = sessionId
+          ? `/repos/${repo.id}/sessions/${sessionId}`
+          : `/repos/${repo.id}`;
+      }
+    }
+
+    const payload = buildEventNotificationPayload(event, {
+      repoName: repoName || undefined,
+      repoId,
+      sessionId,
+      directory: _directory,
+      url: notificationUrl,
+    });
+    if (!payload) return;
 
     for (const userId of userIds) {
       const settings = this.settingsService.getSettings(userId);
@@ -213,42 +294,6 @@ export class NotificationService {
 
       if (!notifPrefs.enabled) continue;
       if (!notifPrefs.events[config.preferencesKey]) continue;
-
-      let notificationUrl = "/";
-      let repoName = "";
-      let repoId: number | undefined;
-
-      if (_directory) {
-        const reposBasePath = getReposPath();
-        const localPath = path.relative(reposBasePath, _directory);
-        const repo = getRepoBySourcePath(this.db, path.resolve(_directory)) ?? getRepoByLocalPath(this.db, localPath);
-
-        if (repo) {
-          repoId = repo.id;
-          repoName = path.basename(repo.localPath);
-          if (sessionId) {
-            notificationUrl = `/repos/${repo.id}/sessions/${sessionId}`;
-          } else {
-            notificationUrl = `/repos/${repo.id}`;
-          }
-        }
-      }
-
-      const body = config.bodyFn(event.properties);
-
-      const payload: PushNotificationPayload = {
-        title: repoName ? `[${repoName.toUpperCase()}] ${config.title}` : config.title,
-        body: body,
-        tag: `${event.type}-${sessionId ?? "global"}`,
-        data: {
-          eventType: event.type,
-          sessionId,
-          directory: _directory,
-          repoId,
-          repoName,
-          url: notificationUrl,
-        },
-      };
 
       await this.sendToUser(userId, payload);
     }
@@ -263,12 +308,14 @@ export class NotificationService {
     });
   }
 
-  private async sendToUser(
+  async sendToUser(
     userId: string,
     payload: PushNotificationPayload
-  ): Promise<void> {
+  ): Promise<{ delivered: number; expired: number; failed: number; total: number }> {
     const subscriptions = this.getSubscriptions(userId);
     const expiredEndpoints: string[] = [];
+    let delivered = 0
+    let failed = 0
 
     await Promise.allSettled(
       subscriptions.map(async (sub) => {
@@ -286,6 +333,8 @@ export class NotificationService {
               "UPDATE push_subscriptions SET last_used_at = ? WHERE id = ?"
             )
             .run(Date.now(), sub.id);
+          
+          delivered++
         } catch (error) {
           const statusCode = (error as { statusCode?: number }).statusCode;
 
@@ -293,6 +342,7 @@ export class NotificationService {
             expiredEndpoints.push(sub.endpoint);
           } else {
             logger.error(`Push delivery failed for ${sub.endpoint.slice(0, 50)}:`, error);
+            failed++
           }
         }
       })
@@ -300,6 +350,13 @@ export class NotificationService {
 
     for (const endpoint of expiredEndpoints) {
       this.removeSubscription(endpoint);
+    }
+
+    return {
+      delivered,
+      expired: expiredEndpoints.length,
+      failed,
+      total: subscriptions.length,
     }
   }
 }

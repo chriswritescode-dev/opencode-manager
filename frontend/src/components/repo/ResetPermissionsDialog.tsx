@@ -1,4 +1,4 @@
-import { useMutation, useQueryClient } from "@tanstack/react-query";
+import { useMutation } from "@tanstack/react-query";
 import { resetRepoPermissions } from "@/api/repos";
 import {
   Dialog,
@@ -16,23 +16,16 @@ interface ResetPermissionsDialogProps {
   open: boolean;
   onOpenChange: (open: boolean) => void;
   repoId: number;
-  repoDirectory?: string;
 }
 
 export function ResetPermissionsDialog({
   open,
   onOpenChange,
   repoId,
-  repoDirectory,
 }: ResetPermissionsDialogProps) {
-  const queryClient = useQueryClient();
-
   const resetPermissionsMutation = useMutation({
     mutationFn: () => resetRepoPermissions(repoId),
     onSuccess: () => {
-      queryClient.invalidateQueries({
-        queryKey: ["opencode", "sessions", "http://localhost:5551", repoDirectory],
-      });
       showToast.success("Permissions reset successfully");
       onOpenChange(false);
     },

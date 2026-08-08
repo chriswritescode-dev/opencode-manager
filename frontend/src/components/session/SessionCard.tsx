@@ -1,17 +1,22 @@
 import { useRef, useEffect } from "react";
 import { Card } from "@/components/ui/card";
 import { Checkbox } from "@/components/ui/checkbox";
-import { MiniScanner } from "@/components/ui/mini-scanner";
-import { Trash2, Clock } from "lucide-react";
+import { SessionStatusIndicator } from "@/components/ui/session-status-indicator";
+import { Trash2, Clock, MoreVertical, Pin, PinOff } from "lucide-react";
 import { formatDistanceToNow } from "date-fns";
 import type { Session } from "@/api/types";
 import { useSwipe } from "@/hooks/useSwipe";
+import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger } from "@/components/ui/dropdown-menu";
+import { Button } from "@/components/ui/button";
 
 interface SessionCardProps {
   session: Session;
   isSelected: boolean;
   isActive: boolean;
   manageMode: boolean;
+  workspaceLabel?: string;
+  isPinned?: boolean;
+  onTogglePin?: () => void;
   onSelect: (sessionID: string) => void;
   onToggleSelection: (selected: boolean) => void;
   onDelete: (e: React.MouseEvent<HTMLButtonElement>) => void;
@@ -22,6 +27,9 @@ export const SessionCard = ({
   isSelected,
   isActive,
   manageMode,
+  workspaceLabel,
+  isPinned,
+  onTogglePin,
   onSelect,
   onToggleSelection,
   onDelete,
@@ -49,7 +57,8 @@ export const SessionCard = ({
         }`}
       >
         <button
-          className="flex h-full w-full items-center justify-center text-destructive-foreground hover:bg-destructive/90"
+          aria-label="Delete session"
+          className="h-full w-full flex items-center justify-center text-white hover:bg-red-700"
           onClick={handleDeleteClick}
         >
           <Trash2 className="w-5 h-5" />
@@ -70,7 +79,11 @@ export const SessionCard = ({
           } hover:shadow-lg`}
           onClick={() => {
             if (!isOpen) {
-              onSelect(session.id);
+              if (manageMode) {
+                onToggleSelection(!isSelected);
+              } else {
+                onSelect(session.id);
+              }
             }
           }}
         >
@@ -78,21 +91,22 @@ export const SessionCard = ({
             {manageMode ? (
               <div className="flex items-start gap-2 flex-1 min-w-0">
                 <div className="flex flex-col items-center gap-2 flex-shrink-0">
-                  <Checkbox
-                    checked={isSelected}
-                    onCheckedChange={(checked) => {
-                      onToggleSelection(checked === true);
-                    }}
-                    onClick={(e) => {
-                      e.stopPropagation();
-                    }}
-                    className="w-5 h-5 flex-shrink-0"
-                  />
-                  <MiniScanner sessionID={session.id} />
+                    <Checkbox
+                      checked={isSelected}
+                      onCheckedChange={(checked) => {
+                        onToggleSelection(checked === true);
+                      }}
+                      onClick={(e) => {
+                        e.stopPropagation();
+                      }}
+                      className="w-5 h-5 flex-shrink-0"
+                    />
+                    <SessionStatusIndicator sessionID={session.id} size="sm" />
                 </div>
                 <div className="flex-1 min-w-0">
                   <div className="flex items-center gap-1">
-                    <h3 className="truncate text-base font-semibold text-warning">
+                    {isPinned && <Pin className="w-3 h-3 text-orange-500 shrink-0" />}
+                    <h3 className="text-base font-semibold text-orange-600 dark:text-orange-400 truncate">
                       {session.title || "Untitled Session"}
                     </h3>
                   </div>
@@ -103,28 +117,66 @@ export const SessionCard = ({
                         addSuffix: true,
                       })}
                     </span>
+                    {workspaceLabel ? (
+                      <span className="text-purple-400 truncate max-w-[140px]">{workspaceLabel}</span>
+                    ) : null}
                   </div>
                 </div>
               </div>
             ) : (
-              <div className="flex flex-col flex-1 min-w-0">
-                <h3 className="truncate text-sm font-semibold text-warning">
-                  {session.title || "Untitled Session"}
-                </h3>
-                <div className="flex items-center gap-2 mt-0.5 text-xs text-muted-foreground">
-                  <span className="flex items-center">
-                    <Clock className="w-3 h-3 mr-1" />
-                    {formatDistanceToNow(new Date(session.time.updated), {
-                      addSuffix: true,
-                    })}
-                  </span>
-                  <MiniScanner sessionID={session.id} />
+              <>
+                <div className="flex flex-col flex-1 min-w-0">
+                  <div className="flex items-center gap-1">
+                    {isPinned && <Pin className="w-3 h-3 text-orange-500 shrink-0" />}
+                    <h3 className="text-sm font-semibold text-orange-600 dark:text-orange-400 truncate">
+                      {session.title || "Untitled Session"}
+                    </h3>
+                  </div>
+                  <div className="flex items-center gap-2 mt-0.5 text-xs text-muted-foreground">
+                    <span className="flex items-center">
+                      <Clock className="w-3 h-3 mr-1" />
+                      {formatDistanceToNow(new Date(session.time.updated), {
+                        addSuffix: true,
+                      })}
+                    </span>
+                    {workspaceLabel ? (
+                      <span className="text-purple-400 truncate max-w-[120px]">{workspaceLabel}</span>
+                    ) : null}
+                    <SessionStatusIndicator sessionID={session.id} size="sm" />
+                  </div>
                 </div>
-              </div>
+                {onTogglePin && (
+                  <DropdownMenu>
+                    <DropdownMenuTrigger asChild>
+                      <Button
+                        aria-label="Session actions"
+                        size="sm"
+                        variant="ghost"
+                        className="h-7 w-7 p-0 shrink-0"
+                        onClick={(e) => e.stopPropagation()}
+                      >
+                        <MoreVertical className="w-4 h-4" />
+                      </Button>
+                    </DropdownMenuTrigger>
+                    <DropdownMenuContent
+                      align="end"
+                      className="z-[200]"
+                      onClick={(e) => e.stopPropagation()}
+                      onPointerDown={(e) => e.stopPropagation()}
+                    >
+                      <DropdownMenuItem onClick={() => onTogglePin()}>
+                        {isPinned ? <PinOff className="w-4 h-4 mr-2" /> : <Pin className="w-4 h-4 mr-2" />}
+                        {isPinned ? "Unpin" : "Pin to top"}
+                      </DropdownMenuItem>
+                    </DropdownMenuContent>
+                  </DropdownMenu>
+                )}
+              </>
             )}
             {manageMode && (
               <button
-                className="h-6 w-6 cursor-pointer border-none bg-transparent p-0 text-foreground hover:text-destructive"
+                aria-label="Delete session"
+                className="h-6 w-6 p-0 text-foreground hover:text-red-600 dark:hover:text-red-400 bg-transparent border-none cursor-pointer"
                 onClick={(e) => {
                   e.stopPropagation();
                   onDelete(e);

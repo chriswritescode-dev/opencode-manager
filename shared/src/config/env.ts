@@ -36,11 +36,24 @@ const resolveWorkspacePath = (): string => {
   return path.resolve(DEFAULTS.WORKSPACE.BASE_PATH)
 }
 
-const workspaceBasePath = resolveWorkspacePath()
+const resolveBrowseRoot = (): string => {
+  const envPath = process.env.REPO_BROWSE_ROOT
+  if (!envPath) {
+    return ''
+  }
+  if (envPath.startsWith('~')) {
+    return path.join(os.homedir(), envPath.slice(1))
+  }
+  return path.resolve(envPath)
+}
 
 const generateDefaultSecret = (): string => {
   return randomBytes(32).toString('base64').slice(0, 32)
 }
+
+const defaultHealthWatchEnabled = getEnvString('NODE_ENV', 'development') === 'test'
+  ? false
+  : DEFAULTS.OPENCODE.HEALTH_WATCH_ENABLED
 
 export const ENV = {
   SERVER: {
@@ -53,6 +66,12 @@ export const ENV = {
   OPENCODE: {
     PORT: getEnvNumber('OPENCODE_SERVER_PORT', DEFAULTS.OPENCODE.PORT),
     HOST: getEnvString('OPENCODE_HOST', DEFAULTS.OPENCODE.HOST),
+    PUBLIC_URL: getEnvString('OPENCODE_PUBLIC_URL', ''), // Public URL for OAuth callbacks
+    HEALTH_WATCH_ENABLED: getEnvBoolean('OPENCODE_HEALTH_WATCH_ENABLED', defaultHealthWatchEnabled),
+    HEALTH_POLL_MS: getEnvNumber('OPENCODE_HEALTH_POLL_MS', DEFAULTS.OPENCODE.HEALTH_POLL_MS),
+    HEALTH_FAILURE_THRESHOLD: getEnvNumber('OPENCODE_HEALTH_FAILURE_THRESHOLD', DEFAULTS.OPENCODE.HEALTH_FAILURE_THRESHOLD),
+    SERVER_PASSWORD: getEnvString('OPENCODE_SERVER_PASSWORD', ''),
+    SERVER_USERNAME: getEnvString('OPENCODE_SERVER_USERNAME', 'opencode'),
   },
 
   DATABASE: {
@@ -60,8 +79,10 @@ export const ENV = {
   },
 
   WORKSPACE: {
-    BASE_PATH: workspaceBasePath,
+    get BASE_PATH() { return resolveWorkspacePath() },
+    get BROWSE_ROOT() { return resolveBrowseRoot() },
     REPOS_DIR: DEFAULTS.WORKSPACE.REPOS_DIR,
+    SCHEDULE_WORKTREES_DIR: DEFAULTS.WORKSPACE.SCHEDULE_WORKTREES_DIR,
     CONFIG_DIR: DEFAULTS.WORKSPACE.CONFIG_DIR,
     AUTH_FILE: DEFAULTS.WORKSPACE.AUTH_FILE,
   },
@@ -69,7 +90,6 @@ export const ENV = {
   TIMEOUTS: {
     PROCESS_START_WAIT_MS: getEnvNumber('PROCESS_START_WAIT_MS', DEFAULTS.TIMEOUTS.PROCESS_START_WAIT_MS),
     PROCESS_VERIFY_WAIT_MS: getEnvNumber('PROCESS_VERIFY_WAIT_MS', DEFAULTS.TIMEOUTS.PROCESS_VERIFY_WAIT_MS),
-    HEALTH_CHECK_INTERVAL_MS: getEnvNumber('HEALTH_CHECK_INTERVAL_MS', DEFAULTS.TIMEOUTS.HEALTH_CHECK_INTERVAL_MS),
     HEALTH_CHECK_TIMEOUT_MS: getEnvNumber('HEALTH_CHECK_TIMEOUT_MS', DEFAULTS.TIMEOUTS.HEALTH_CHECK_TIMEOUT_MS),
   },
 
@@ -110,7 +130,9 @@ export const ENV = {
 } as const
 
 export const getWorkspacePath = () => ENV.WORKSPACE.BASE_PATH
+export const getBrowseRootPath = () => ENV.WORKSPACE.BROWSE_ROOT
 export const getReposPath = () => path.join(ENV.WORKSPACE.BASE_PATH, ENV.WORKSPACE.REPOS_DIR)
+export const getScheduleWorktreesPath = () => path.join(ENV.WORKSPACE.BASE_PATH, ENV.WORKSPACE.SCHEDULE_WORKTREES_DIR)
 export const getConfigPath = () => path.join(ENV.WORKSPACE.BASE_PATH, ENV.WORKSPACE.CONFIG_DIR)
 export const getOpenCodeConfigFilePath = () => path.join(ENV.WORKSPACE.BASE_PATH, ENV.WORKSPACE.CONFIG_DIR, 'opencode.json')
 export const getAgentsMdPath = () => path.join(ENV.WORKSPACE.BASE_PATH, ENV.WORKSPACE.CONFIG_DIR, 'AGENTS.md')

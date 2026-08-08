@@ -20,7 +20,7 @@ Click **Create Account** to continue.
 
 After account creation, configure an AI provider:
 
-1. Navigate to **Settings > Provider Credentials**
+1. Navigate to **Settings > Providers**
 2. Select a provider
 3. Enter API key or connect via OAuth
 4. Save configuration

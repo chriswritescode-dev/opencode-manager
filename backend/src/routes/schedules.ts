@@ -159,6 +159,29 @@ export function createScheduleRoutes(scheduleService: ScheduleService) {
     }
   })
 
+  app.delete('/:jobId/runs', async (c) => {
+    try {
+      const repoId = parseId(c.req.param('id'), 'repo id', ScheduleServiceError)
+      const jobId = parseId(c.req.param('jobId'), 'schedule id', ScheduleServiceError)
+      const result = await scheduleService.clearRunHistory(repoId, jobId)
+      return c.json(result)
+    } catch (error) {
+      return handleServiceError(c, error, 'Failed to clear schedule run history', ScheduleServiceError)
+    }
+  })
+
+  app.delete('/:jobId/runs/:runId', async (c) => {
+    try {
+      const repoId = parseId(c.req.param('id'), 'repo id', ScheduleServiceError)
+      const jobId = parseId(c.req.param('jobId'), 'schedule id', ScheduleServiceError)
+      const runId = parseId(c.req.param('runId'), 'run id', ScheduleServiceError)
+      await scheduleService.deleteRun(repoId, jobId, runId)
+      return c.json({ success: true })
+    } catch (error) {
+      return handleServiceError(c, error, 'Failed to delete schedule run', ScheduleServiceError)
+    }
+  })
+
   return app
 }
 

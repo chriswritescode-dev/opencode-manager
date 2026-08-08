@@ -41,7 +41,6 @@ COPY --chown=node:node package.json pnpm-workspace.yaml pnpm-lock.yaml ./
 COPY --chown=node:node shared/package.json ./shared/
 COPY --chown=node:node backend/package.json ./backend/
 COPY --chown=node:node frontend/package.json ./frontend/
-COPY --chown=node:node packages/memory ./packages/memory/
 
 RUN pnpm install --frozen-lockfile
 
@@ -52,30 +51,41 @@ COPY shared ./shared
 COPY backend ./backend
 COPY frontend/src ./frontend/src
 COPY frontend/public ./frontend/public
+COPY frontend/plugins ./frontend/plugins
 COPY frontend/index.html frontend/vite.config.ts frontend/tsconfig*.json frontend/components.json frontend/eslint.config.js ./frontend/
-COPY packages/memory ./packages/memory
 
 RUN pnpm --filter frontend build
-RUN pnpm --filter @opencode-manager/memory build
 
 FROM base AS runner
 
 ARG UV_VERSION=latest
 ARG OPENCODE_VERSION=latest
+# Bump TOOLS_CACHEBUST (e.g. via --build-arg) to force a fresh uv/opencode
+# install without invalidating the rest of the build cache.
+ARG TOOLS_CACHEBUST=0
 
-RUN echo "Installing uv=${UV_VERSION} opencode=${OPENCODE_VERSION}" && \
+RUN echo "Installing uv=${UV_VERSION} opencode=${OPENCODE_VERSION} (cachebust=${TOOLS_CACHEBUST})" && \
     curl -LsSf https://astral.sh/uv/install.sh | UV_NO_MODIFY_PATH=1 sh && \
     mv /root/.local/bin/uv /usr/local/bin/uv && \
     mv /root/.local/bin/uvx /usr/local/bin/uvx && \
     chmod +x /usr/local/bin/uv /usr/local/bin/uvx && \
+    echo "Downloading opencode ${OPENCODE_VERSION}..." && \
+    OC_ARCH=$(uname -m) && \
+    if [ "$OC_ARCH" = "aarch64" ]; then OC_ARCH="arm64"; fi && \
+    if [ "$OC_ARCH" = "x86_64" ]; then OC_ARCH="x64"; fi && \
     if [ "${OPENCODE_VERSION}" = "latest" ]; then \
-        curl -fsSL https://opencode.ai/install | bash -s -- --no-modify-path; \
+        OC_DOWNLOAD_URL="https://github.com/anomalyco/opencode/releases/latest/download/opencode-linux-${OC_ARCH}.tar.gz"; \
     else \
-        curl -fsSL https://opencode.ai/install | bash -s -- --version ${OPENCODE_VERSION} --no-modify-path; \
+        OC_DOWNLOAD_URL="https://github.com/anomalyco/opencode/releases/download/v${OPENCODE_VERSION}/opencode-linux-${OC_ARCH}.tar.gz"; \
     fi && \
-    mv /root/.opencode /opt/opencode && \
-    chmod -R 755 /opt/opencode && \
-    ln -s /opt/opencode/bin/opencode /usr/local/bin/opencode
+    curl -fsSL "$OC_DOWNLOAD_URL" -o /tmp/opencode.tar.gz && \
+    tar -xzf /tmp/opencode.tar.gz -C /tmp && \
+    mkdir -p /opt/opencode/bin && \
+    mv /tmp/opencode /opt/opencode/bin/opencode && \
+    chmod 755 /opt/opencode/bin/opencode && \
+    rm -f /tmp/opencode.tar.gz && \
+    ln -s /opt/opencode/bin/opencode /usr/local/bin/opencode && \
+    echo "opencode ${OPENCODE_VERSION} installed successfully"
 
 ENV NODE_ENV=production
 ENV HOST=0.0.0.0
@@ -83,40 +93,30 @@ ENV PORT=5003
 ENV OPENCODE_SERVER_PORT=5551
 ENV DATABASE_PATH=/app/data/opencode.db
 ENV WORKSPACE_PATH=/workspace
-ENV NODE_PATH=/opt/opencode-plugins/node_modules
+ENV XDG_CACHE_HOME=/home/node/.cache
 
 COPY --from=deps --chown=node:node /app/node_modules ./node_modules
 COPY --from=builder /app/shared ./shared
 COPY --from=builder /app/backend ./backend
 COPY --from=builder /app/frontend/dist ./frontend/dist
+COPY --from=deps --chown=node:node /app/backend/node_modules ./backend/node_modules
+COPY --from=deps --chown=node:node /app/frontend/node_modules ./frontend/node_modules
 COPY package.json pnpm-workspace.yaml ./
 
 RUN mkdir -p /app/backend/node_modules/@opencode-manager && \
-    ln -s /app/shared /app/backend/node_modules/@opencode-manager/shared
+    ln -sfn /app/shared /app/backend/node_modules/@opencode-manager/shared
 
-COPY --from=builder /app/packages/memory /opt/opencode-plugins/src
-
-RUN cd /opt/opencode-plugins/src && npm install
-
-RUN mkdir -p /opt/opencode-plugins/node_modules/@opencode-manager/memory && \
-    cp -r /opt/opencode-plugins/src/dist/* /opt/opencode-plugins/node_modules/@opencode-manager/memory/ && \
-    cp /opt/opencode-plugins/src/package.json /opt/opencode-plugins/node_modules/@opencode-manager/memory/ && \
-    cp /opt/opencode-plugins/src/config.jsonc /opt/opencode-plugins/node_modules/@opencode-manager/memory/config.jsonc 2>/dev/null || true && \
-    cp -r /opt/opencode-plugins/src/node_modules/* /opt/opencode-plugins/node_modules/ 2>/dev/null || true
-
+COPY scripts/lib/container-user.sh /usr/local/lib/ocm/container-user.sh
 COPY scripts/docker-entrypoint.sh /docker-entrypoint.sh
 RUN chmod +x /docker-entrypoint.sh
 
-RUN mkdir -p /workspace /app/data && \
-    chown -R node:node /workspace /app/data
+RUN mkdir -p /workspace /app/data /home/node/.cache /home/node/.opencode && \
+    chown -R node:node /workspace /app/data /home/node
 
 EXPOSE 5003 5100 5101 5102 5103
 
 HEALTHCHECK --interval=30s --timeout=3s --start-period=40s --retries=3 \
   CMD curl -f http://localhost:5003/api/health || exit 1
 
-USER node
-
 ENTRYPOINT ["/docker-entrypoint.sh"]
 CMD ["bun", "backend/src/index.ts"]
-

@@ -6,18 +6,30 @@ import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
 import { Textarea } from '@/components/ui/textarea'
 import { Alert } from '@/components/ui/alert'
+import { Checkbox } from '@/components/ui/checkbox'
+import { MultiSelect, type MultiSelectOption } from '@/components/ui/multi-select'
 import { showToast } from '@/lib/toast'
+import { getRepoDisplayName } from '@/lib/utils'
 import type { GitCredential } from '@/api/types/settings'
+import type { Repo } from '@/api/types'
+
+export interface GitCredentialSaveOptions {
+  makeDefault: boolean
+  repoIds: number[]
+}
 
 interface GitCredentialDialogProps {
   open: boolean
   onOpenChange: (open: boolean) => void
-  onSave: (credential: GitCredential) => Promise<void>
+  onSave: (credential: GitCredential, options: GitCredentialSaveOptions) => Promise<void>
   credential?: GitCredential
+  repos: Repo[]
+  assignedRepoIds: number[]
+  isDefault: boolean
   isSaving: boolean
 }
 
-export function GitCredentialDialog({ open, onOpenChange, onSave, credential, isSaving }: GitCredentialDialogProps) {
+export function GitCredentialDialog({ open, onOpenChange, onSave, credential, repos, assignedRepoIds, isDefault, isSaving }: GitCredentialDialogProps) {
   const [formData, setFormData] = useState<GitCredential>({
     name: '',
     host: '',
@@ -31,6 +43,8 @@ export function GitCredentialDialog({ open, onOpenChange, onSave, credential, is
   const [isTesting, setIsTesting] = useState(false)
   const [showPassphraseInput, setShowPassphraseInput] = useState(false)
   const [testPassphrase, setTestPassphrase] = useState('')
+  const [makeDefault, setMakeDefault] = useState(false)
+  const [selectedRepoIds, setSelectedRepoIds] = useState<number[]>([])
 
   const maskToken = (token: string) => {
     if (!token) return ''
@@ -43,6 +57,8 @@ export function GitCredentialDialog({ open, onOpenChange, onSave, credential, is
       setTokenEdited(false)
       setShowPassphraseInput(false)
       setTestPassphrase('')
+      setMakeDefault(isDefault)
+      setSelectedRepoIds(assignedRepoIds)
       if (credential) {
         setFormData({
           ...credential,
@@ -61,7 +77,16 @@ export function GitCredentialDialog({ open, onOpenChange, onSave, credential, is
         })
       }
     }
-  }, [open, credential])
+  }, [open, credential, assignedRepoIds, isDefault])
+
+  const normalizedHost = formData.host.toLowerCase().replace(/^https?:\/\//, '').replace(/\/+$/, '')
+  const isGithubPat = formData.type === 'pat' && normalizedHost === 'github.com'
+
+  const repoOptions: MultiSelectOption[] = repos.map((repo) => ({
+    value: String(repo.id),
+    label: getRepoDisplayName(repo),
+    description: repo.repoUrl || repo.fullPath,
+  }))
 
   const handleSubmit = async (event?: React.MouseEvent) => {
     event?.preventDefault()
@@ -73,7 +98,7 @@ export function GitCredentialDialog({ open, onOpenChange, onSave, credential, is
     }
 
     if (formData.type === 'pat') {
-      if (!formData.token?.trim()) {
+      if (!formData.token?.trim() && !(credential?.token && !tokenEdited)) {
         showToast.error('Token is required for PAT type')
         return
       }
@@ -92,7 +117,10 @@ export function GitCredentialDialog({ open, onOpenChange, onSave, credential, is
       if (formData.type === 'pat' && credential?.token && !tokenEdited) {
         dataToSave.token = credential.token
       }
-      await onSave(dataToSave)
+      await onSave(dataToSave, {
+        makeDefault: isGithubPat && makeDefault,
+        repoIds: isGithubPat ? selectedRepoIds : [],
+      })
       setFormData({ name: '', host: '', type: 'pat', token: '', username: '', sshPrivateKey: '', passphrase: '' })
       onOpenChange(false)
     } catch {
@@ -177,7 +205,7 @@ export function GitCredentialDialog({ open, onOpenChange, onSave, credential, is
                   onClick={() => setFormData({
                     ...formData,
                     type: 'ssh',
-                    host: formData.type === 'ssh' ? formData.host : 'git@github.com',
+                    host: formData.type === 'ssh' ? formData.host : 'github.com',
                     token: ''
                   })}
                   disabled={isSaving}
@@ -193,7 +221,7 @@ export function GitCredentialDialog({ open, onOpenChange, onSave, credential, is
               <Label htmlFor="cred-host">Host *</Label>
               <Input
                 id="cred-host"
-                placeholder="github.com or git@github.com"
+                placeholder="github.com"
                 value={formData.host}
                 onChange={(e) => setFormData({ ...formData, host: e.target.value })}
                 disabled={isSaving}
@@ -237,6 +265,42 @@ export function GitCredentialDialog({ open, onOpenChange, onSave, credential, is
                     autoComplete="off"
                   />
                 </div>
+
+                {isGithubPat && (
+                  <div className="space-y-3 rounded-lg border border-border p-3">
+                    <div className="flex items-start gap-2">
+                      <Checkbox
+                        id="cred-default-github-token"
+                        checked={makeDefault}
+                        onCheckedChange={(checked) => setMakeDefault(checked === true)}
+                        disabled={isSaving}
+                      />
+                      <div className="space-y-1">
+                        <Label htmlFor="cred-default-github-token">Use as default GitHub token</Label>
+                        <p className="text-xs text-muted-foreground">
+                          Used for GH_TOKEN/GITHUB_TOKEN unless a repository below overrides it.
+                        </p>
+                      </div>
+                    </div>
+
+                    <div className="space-y-2">
+                      <Label>Use for specific repositories</Label>
+                      {repos.length === 0 ? (
+                        <p className="text-xs text-muted-foreground">No repositories available.</p>
+                      ) : (
+                        <MultiSelect
+                          value={selectedRepoIds.map(String)}
+                          onChange={(values) => setSelectedRepoIds(values.map(Number))}
+                          options={repoOptions}
+                          placeholder="Select repositories..."
+                          searchPlaceholder="Search repositories..."
+                          emptyMessage="No repositories found"
+                          disabled={isSaving}
+                        />
+                      )}
+                    </div>
+                  </div>
+                )}
               </>
             ) : (
               <>
@@ -336,7 +400,7 @@ export function GitCredentialDialog({ open, onOpenChange, onSave, credential, is
             type="button"
             onClick={handleSubmit}
             disabled={isSaving || !formData.name.trim() || !formData.host.trim() ||
-                     (formData.type === 'pat' && !formData.token?.trim()) ||
+                     (formData.type === 'pat' && !formData.token?.trim() && !(credential?.token && !tokenEdited)) ||
                      (formData.type === 'ssh' && !formData.sshPrivateKey?.trim())}
             className="flex-1 sm:flex-none"
           >

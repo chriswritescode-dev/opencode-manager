@@ -2,6 +2,7 @@ import { useState, useRef, useEffect } from 'react'
 import type { components } from '@/api/opencode-types'
 import { useSettings } from '@/hooks/useSettings'
 import { useUserBash } from '@/stores/userBashStore'
+import { useSessionStatusForSession } from '@/stores/sessionStatusStore'
 import { usePermissions, useQuestions } from '@/contexts/EventContext'
 import { detectFileReferences } from '@/lib/fileReferences'
 import { ExternalLink, Loader2 } from 'lucide-react'
@@ -14,6 +15,15 @@ interface ToolCallPartProps {
   part: ToolPart
   onFileClick?: (filePath: string, lineNumber?: number) => void
   onChildSessionClick?: (sessionId: string) => void
+  simpleChatMode?: boolean
+}
+
+function getTaskSessionId(part: ToolPart): string | undefined {
+  let sessionId = part.metadata?.sessionId as string | undefined
+  if (!sessionId && part.state.status !== 'pending' && 'metadata' in part.state) {
+    sessionId = part.state.metadata?.sessionId as string | undefined
+  }
+  return sessionId
 }
 
 function ClickableJson({ json, onFileClick }: { json: unknown; onFileClick?: (filePath: string) => void }) {
@@ -59,6 +69,8 @@ function ClickableJson({ json, onFileClick }: { json: unknown; onFileClick?: (fi
 export function ToolCallPart({ part, onFileClick, onChildSessionClick }: ToolCallPartProps) {
   const { preferences } = useSettings()
   const { userBashCommands } = useUserBash()
+  const taskSessionId = part.tool === 'task' ? getTaskSessionId(part) : undefined
+  const taskSessionStatus = useSessionStatusForSession(taskSessionId)
   const { getForCallID: getPermissionForCallID } = usePermissions()
   const { getForCallID: getQuestionForCallID } = useQuestions()
   const outputRef = useRef<HTMLDivElement>(null)
@@ -142,33 +154,60 @@ export function ToolCallPart({ part, onFileClick, onChildSessionClick }: ToolCal
   const previewText = getPreviewText()
   const isFileTool = ['read', 'write', 'edit'].includes(part.tool)
 
+  if (part.tool === 'task') {
+    const sessionId = taskSessionId
+    const description = previewText || 'Sub-agent task'
+    const status = part.state.status
+
+    const isPending = status === 'pending'
+    const isRunning = status === 'running' && taskSessionStatus.type !== 'idle'
+    const isCompleted = status === 'completed' || (status === 'running' && !!sessionId && taskSessionStatus.type === 'idle')
+    const isError = status === 'error'
+
+    const content = (
+      <div className="flex items-center gap-2 min-w-0">
+        {isPending && (
+          <div className="flex gap-1">
+            <span className="w-2 h-2 rounded-full bg-muted-foreground" />
+            <span className="w-2 h-2 rounded-full bg-muted-foreground" />
+            <span className="w-2 h-2 rounded-full bg-muted-foreground" />
+          </div>
+        )}
+        {isRunning && (
+          <div className="flex gap-1">
+            <span className="w-2.5 h-2.5 rounded-full bg-blue-500 animate-bounce" style={{ animationDelay: '0ms' }} />
+            <span className="w-2.5 h-2.5 rounded-full bg-blue-500 animate-bounce" style={{ animationDelay: '150ms' }} />
+            <span className="w-2.5 h-2.5 rounded-full bg-blue-500 animate-bounce" style={{ animationDelay: '300ms' }} />
+          </div>
+        )}
+        {isCompleted && <span className="text-green-600 text-sm font-medium">✓</span>}
+        {isError && <span className="text-red-600 text-sm font-medium">✗</span>}
+        <span className="font-medium text-foreground truncate">{description}</span>
+        <span className="text-[11px] font-medium text-orange-600 dark:text-orange-400 shrink-0">sub-agent</span>
+        {sessionId && <ExternalLink className="w-3 h-3 shrink-0 text-blue-600 dark:text-blue-400" />}
+      </div>
+    )
+
+    if (sessionId) {
+      return (
+        <button
+          onClick={() => onChildSessionClick?.(sessionId)}
+          className="my-1 w-full rounded-lg border border-blue-500/20 bg-blue-500/5 px-3 py-1.5 text-left text-xs text-muted-foreground hover:bg-blue-500/10 hover:border-blue-500/30 transition-all duration-200 shadow-sm shadow-blue-500/5"
+          title="View subagent session"
+        >
+          {content}
+        </button>
+      )
+    }
+
+    return (
+      <div className="my-1 rounded-lg border border-blue-500/20 bg-blue-500/5 px-3 py-1.5 text-xs text-muted-foreground shadow-sm shadow-blue-500/5">
+        {content}
+      </div>
+    )
+  }
+
   if (isTodoTool) {
-    if (part.state.status === 'pending') {
-      return (
-        <div className="my-2 text-sm text-muted-foreground flex items-center gap-2">
-          <Loader2 className="w-3 h-3 animate-spin" />
-          <span>Preparing task list...</span>
-        </div>
-      )
-    }
-
-    if (part.state.status === 'running') {
-      return (
-        <div className="my-2 text-sm text-muted-foreground flex items-center gap-2">
-          <Loader2 className="w-3 h-3 animate-spin" />
-          <span>Updating task list...</span>
-        </div>
-      )
-    }
-
-    if (part.state.status === 'completed') {
-      return (
-        <div className="my-2 text-xs text-muted-foreground">
-          Task list updated
-        </div>
-      )
-    }
-
     if (part.state.status === 'error') {
       return (
         <div className="my-2 text-sm text-destructive">
@@ -254,17 +293,14 @@ export function ToolCallPart({ part, onFileClick, onChildSessionClick }: ToolCal
         ) : null}
 
         {part.tool === 'task' && (() => {
-          let sessionId: string | undefined = part.metadata?.sessionId as string | undefined
-          if (!sessionId && part.state.status !== 'pending' && 'metadata' in part.state) {
-            sessionId = part.state.metadata?.sessionId as string | undefined
-          }
+          const sessionId = getTaskSessionId(part)
           return sessionId ? (
             <span
               onClick={(e) => {
                 e.stopPropagation()
                 onChildSessionClick?.(sessionId)
               }}
-              className="flex cursor-pointer items-center gap-1 text-xs text-info underline decoration-dotted hover:text-info"
+              className="text-blue-600 dark:text-blue-400 text-xs hover:text-blue-700 dark:hover:text-blue-300 cursor-pointer underline decoration-dotted flex items-center gap-1"
               title="View subagent session"
             >
               <ExternalLink className="w-3 h-3" />

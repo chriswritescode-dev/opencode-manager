@@ -31,6 +31,7 @@ function isKokoroStyleVoice(voice: string): boolean {
 const ttsFormSchema = z.object({
   enabled: z.boolean(),
   provider: z.enum(['external', 'builtin']),
+  autoPlay: z.boolean(),
   endpoint: z.string(),
   apiKey: z.string(),
   voice: z.string(),
@@ -175,6 +176,7 @@ export function TTSSettings() {
       reset({
         enabled: preferences.tts.enabled ?? DEFAULT_TTS_CONFIG.enabled,
         provider: preferences.tts.provider ?? DEFAULT_TTS_CONFIG.provider,
+        autoPlay: preferences.tts.autoPlay ?? DEFAULT_TTS_CONFIG.autoPlay,
         endpoint: preferences.tts.endpoint ?? DEFAULT_TTS_CONFIG.endpoint,
         apiKey: preferences.tts.apiKey ?? DEFAULT_TTS_CONFIG.apiKey,
         voice: preferences.tts.voice ?? DEFAULT_TTS_CONFIG.voice,
@@ -287,6 +289,29 @@ export function TTSSettings() {
               </FormItem>
             )}
           />
+
+          {watchEnabled && (
+            <FormField
+              control={form.control}
+              name="autoPlay"
+              render={({ field }) => (
+                <FormItem className="flex flex-row items-center justify-between rounded-lg border border-border p-4">
+                  <div className="space-y-0.5">
+                    <FormLabel className="text-base">Auto-play replies</FormLabel>
+                    <FormDescription>
+                      Automatically speak new assistant replies when they complete.
+                    </FormDescription>
+                  </div>
+                  <FormControl>
+                    <Switch
+                      checked={field.value}
+                      onCheckedChange={field.onChange}
+                    />
+                  </FormControl>
+                </FormItem>
+              )}
+            />
+          )}
 
           {watchEnabled && (
             <>

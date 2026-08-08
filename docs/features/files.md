@@ -13,6 +13,8 @@ The file browser displays your repository as an expandable tree:
 - Icons indicate file types
 - Modified files are highlighted
 
+![File Browser](../images/file-browser.png)
+
 ### Breadcrumbs
 
 Navigate quickly using the breadcrumb path at the top:

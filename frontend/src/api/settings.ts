@@ -5,15 +5,33 @@ import type {
   OpenCodeConfigResponse,
   CreateOpenCodeConfigRequest,
   UpdateOpenCodeConfigRequest,
+  OpenCodeImportStatus,
+  SyncOpenCodeImportResponse,
   SkillFileInfo,
   CreateSkillRequest,
   UpdateSkillRequest,
   SkillScope,
+  InstallSkillFromGithubRequest,
+  InstallSkillResponse,
+  OpenCodeDirectoryFileInfo,
 } from './types/settings'
 import { API_BASE_URL } from '@/config'
 import { fetchWrapper, FetchError } from './fetchWrapper'
 
 const DEFAULT_USER_ID = 'default'
+
+function appendFilesWithManifest(formData: FormData, files: File[]): void {
+  const fileManifest: Array<{ fieldName: string; relativePath: string }> = []
+
+  files.forEach((file, index) => {
+    const fieldName = `file${index}`
+    const relativePath = file.webkitRelativePath || file.name
+    fileManifest.push({ fieldName, relativePath })
+    formData.append(fieldName, file)
+  })
+
+  formData.append('fileManifest', JSON.stringify(fileManifest))
+}
 
 export const settingsApi = {
   getSettings: async (userId = DEFAULT_USER_ID): Promise<SettingsResponse> => {
@@ -114,11 +132,28 @@ export const settingsApi = {
     }
   },
 
+  discoverOpenCodeModels: async (
+    baseUrl: string,
+    apiKey?: string,
+    forceRefresh = false,
+  ): Promise<{ models: string[]; cached: boolean }> => {
+    const params: Record<string, string> = { baseUrl }
+    if (apiKey) params.apiKey = apiKey
+    if (forceRefresh) params.refresh = 'true'
+    return fetchWrapper(`${API_BASE_URL}/api/settings/opencode-discover-models`, {
+      params,
+    })
+  },
+
   restartOpenCodeServer: async (): Promise<{ success: boolean; message: string; details?: string }> => {
     return fetchWrapper(`${API_BASE_URL}/api/settings/opencode-restart`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
     })
+  },
+
+  getActiveOpenCodeSessions: async (): Promise<{ count: number; sessions: { sessionID: string; directory: string }[] }> => {
+    return fetchWrapper(`${API_BASE_URL}/api/settings/opencode-active-sessions`)
   },
 
   reloadOpenCodeConfig: async (): Promise<{ success: boolean; message: string; details?: string }> => {
@@ -142,6 +177,18 @@ export const settingsApi = {
     return fetchWrapper(`${API_BASE_URL}/api/settings/opencode-rollback`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
+    })
+  },
+
+  getOpenCodeImportStatus: async (): Promise<OpenCodeImportStatus> => {
+    return fetchWrapper(`${API_BASE_URL}/api/settings/opencode-import/status`)
+  },
+
+  syncOpenCodeImport: async (overwriteState = false): Promise<SyncOpenCodeImportResponse> => {
+    return fetchWrapper(`${API_BASE_URL}/api/settings/opencode-import`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ overwriteState }),
     })
   },
 
@@ -215,13 +262,12 @@ export const settingsApi = {
     return fetchWrapper(`${API_BASE_URL}/api/health/version`)
   },
 
-  getMemoryPluginStatus: async (): Promise<{ memoryPluginEnabled: boolean }> => {
-    return fetchWrapper(`${API_BASE_URL}/api/settings/memory-plugin-status`)
-  },
-
-  listManagedSkills: async (repoId?: number): Promise<SkillFileInfo[]> => {
-    const params = repoId ? `?repoId=${repoId}` : ''
-    return fetchWrapper(`${API_BASE_URL}/api/settings/skills${params}`)
+  listManagedSkills: async (repoId?: number, directory?: string): Promise<SkillFileInfo[]> => {
+    const searchParams = new URLSearchParams()
+    if (repoId) searchParams.set('repoId', String(repoId))
+    if (directory) searchParams.set('directory', directory)
+    const query = searchParams.toString() ? `?${searchParams.toString()}` : ''
+    return fetchWrapper(`${API_BASE_URL}/api/settings/skills${query}`)
   },
 
   getSkill: async (name: string, scope: SkillScope, repoId?: number): Promise<SkillFileInfo> => {
@@ -255,6 +301,86 @@ export const settingsApi = {
       method: 'DELETE',
     })
   },
+
+  installSkillFromGithub: async (data: InstallSkillFromGithubRequest): Promise<InstallSkillResponse> => {
+    return fetchWrapper(`${API_BASE_URL}/api/settings/skills/install`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(data),
+    })
+  },
+
+  installSkillFromUpload: async (data: {
+    files: File[]
+    scope: SkillScope
+    repoId?: number
+    overwrite?: boolean
+  }): Promise<InstallSkillResponse> => {
+    const formData = new FormData()
+    formData.append('sourceType', 'upload')
+    formData.append('scope', data.scope)
+    if (data.repoId !== undefined) formData.append('repoId', String(data.repoId))
+    if (data.overwrite !== undefined) formData.append('overwrite', String(data.overwrite))
+
+    appendFilesWithManifest(formData, data.files)
+
+    return fetchWrapper(`${API_BASE_URL}/api/settings/skills/install`, {
+      method: 'POST',
+      body: formData,
+    })
+  },
+
+  installOpenCodeDirectoryFiles: async (data: {
+    kind: 'agents' | 'commands'
+    files: File[]
+  }): Promise<{ kind: 'agents' | 'commands'; filesInstalled: string[] }> => {
+    const formData = new FormData()
+    formData.append('kind', data.kind)
+
+    appendFilesWithManifest(formData, data.files)
+
+    return fetchWrapper(`${API_BASE_URL}/api/settings/opencode-directory-files/install`, {
+      method: 'POST',
+      body: formData,
+    })
+  },
+
+  listOpenCodeDirectoryFiles: async (kind: 'agents' | 'commands'): Promise<OpenCodeDirectoryFileInfo[]> => {
+    return fetchWrapper(`${API_BASE_URL}/api/settings/opencode-directory-files`, {
+      params: { kind },
+    })
+  },
+
+  getOpenCodeDirectoryFile: async (
+    kind: 'agents' | 'commands',
+    relativePath: string,
+  ): Promise<OpenCodeDirectoryFileInfo & { content: string }> => {
+    return fetchWrapper(`${API_BASE_URL}/api/settings/opencode-directory-files/content`, {
+      params: { kind, relativePath },
+    })
+  },
+
+  updateOpenCodeDirectoryFile: async (data: {
+    kind: 'agents' | 'commands'
+    relativePath: string
+    content: string
+  }): Promise<OpenCodeDirectoryFileInfo> => {
+    return fetchWrapper(`${API_BASE_URL}/api/settings/opencode-directory-files`, {
+      method: 'PUT',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(data),
+    })
+  },
+
+  deleteOpenCodeDirectoryFile: async (
+    kind: 'agents' | 'commands',
+    relativePath: string,
+  ): Promise<{ kind: 'agents' | 'commands'; relativePath: string }> => {
+    return fetchWrapper(`${API_BASE_URL}/api/settings/opencode-directory-files`, {
+      method: 'DELETE',
+      params: { kind, relativePath },
+    })
+  },
 }
 
 export interface VersionInfo {
@@ -263,4 +389,35 @@ export interface VersionInfo {
   updateAvailable: boolean
   releaseUrl: string | null
   releaseName: string | null
+}
+
+export interface OpenCodeServerAuthStatus {
+  isSet: boolean
+  source: 'db' | 'env' | 'none'
+}
+
+export async function getOpenCodeServerAuth(): Promise<OpenCodeServerAuthStatus> {
+  return fetchWrapper(`${API_BASE_URL}/api/settings/opencode-server-auth`)
+}
+
+export async function updateOpenCodeServerAuth(password: string | null): Promise<OpenCodeServerAuthStatus> {
+  return fetchWrapper(`${API_BASE_URL}/api/settings/opencode-server-auth`, {
+    method: 'PATCH',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ password }),
+  })
+}
+
+export interface ManagerTokenResponse {
+  token: string
+}
+
+export async function getManagerToken(): Promise<ManagerTokenResponse> {
+  return fetchWrapper(`${API_BASE_URL}/api/settings/manager-token`)
+}
+
+export async function rotateManagerToken(): Promise<ManagerTokenResponse> {
+  return fetchWrapper(`${API_BASE_URL}/api/settings/manager-token/rotate`, {
+    method: 'POST',
+  })
 }

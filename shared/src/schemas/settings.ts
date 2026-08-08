@@ -10,6 +10,7 @@ export const CustomCommandSchema = z.object({
 export const TTSConfigSchema = z.object({
   enabled: z.boolean(),
   provider: z.enum(['external', 'builtin']).default('external'),
+  autoPlay: z.boolean().default(false),
   endpoint: z.string(),
   apiKey: z.string(),
   voice: z.string(),
@@ -35,6 +36,7 @@ export const STTConfigSchema = z.object({
 export type TTSConfig = {
   enabled: boolean;
   provider: 'external' | 'builtin';
+  autoPlay: boolean;
   endpoint: string;
   apiKey: string;
   voice: string;
@@ -81,6 +83,7 @@ export const DEFAULT_KEYBOARD_SHORTCUTS: Record<string, string> = {
 };
 
 export const GitCredentialSchema = z.object({
+  id: z.string().optional(),
   name: z.string(),
   host: z.string(),
   type: z.enum(['pat', 'ssh']).default('pat'),
@@ -101,6 +104,29 @@ export const GitIdentitySchema = z.object({
 
 export type GitIdentity = z.infer<typeof GitIdentitySchema>;
 
+export const ServerEnvVarSchema = z.object({
+  key: z.string().min(1),
+  value: z.string(),
+});
+
+type ServerEnvVar = z.infer<typeof ServerEnvVarSchema>
+
+export const DEFAULT_SERVER_ENV_VARS = [
+  {
+    key: 'OPENCODE_EXPERIMENTAL_WORKSPACES',
+    value: 'true',
+  },
+] as const satisfies readonly ServerEnvVar[];
+
+export const BLOCKED_SERVER_ENV_KEYS = [
+  'OPENCODE_SERVER_PASSWORD',
+  'OPENCODE_SERVER_USERNAME',
+  'OPENCODE_CONFIG',
+  'XDG_DATA_HOME',
+  'XDG_STATE_HOME',
+  'XDG_CONFIG_HOME',
+] as const;
+
 export const DEFAULT_GIT_IDENTITY: GitIdentity = {
   name: 'OpenCode Agent',
   email: '',
@@ -113,25 +139,31 @@ export const UserPreferencesSchema = z.object({
   defaultModel: z.string().optional(),
   defaultAgent: z.string().optional(),
   autoScroll: z.boolean(),
-  showReasoning: z.boolean(),
-  expandToolCalls: z.boolean(),
   expandDiffs: z.boolean(),
+  expandToolCalls: z.boolean(),
+  showReasoning: z.boolean(),
+  simpleChatMode: z.boolean(),
   leaderKey: z.string().optional(),
   directShortcuts: z.array(z.string()).optional(),
   keyboardShortcuts: z.record(z.string(), z.string()),
   customCommands: z.array(CustomCommandSchema),
   gitCredentials: z.array(GitCredentialSchema).optional(),
+  defaultGitCredentialId: z.string().optional(),
   gitIdentity: GitIdentitySchema.optional(),
   tts: TTSConfigSchema.optional(),
   stt: STTConfigSchema.optional(),
   notifications: NotificationPreferencesSchema.optional(),
   lastKnownGoodConfig: z.string().optional(),
   repoOrder: z.array(z.number()).optional(),
+  repoSortMode: z.enum(['recent', 'manual', 'name']).optional(),
+  serverEnvVars: z.array(ServerEnvVarSchema).optional(),
+  disabledDefaultServerEnvVars: z.array(z.string()).optional(),
 });
 
 export const DEFAULT_TTS_CONFIG: TTSConfig = {
   enabled: false,
   provider: 'external',
+  autoPlay: false,
   endpoint: "https://api.openai.com",
   apiKey: "",
   voice: "alloy",
@@ -159,19 +191,24 @@ export const DEFAULT_USER_PREFERENCES = {
   themePreset: "opencode",
   mode: "build" as const,
   autoScroll: true,
-  showReasoning: false,
-  expandToolCalls: false,
   expandDiffs: true,
+  expandToolCalls: false,
+  showReasoning: false,
+  simpleChatMode: false,
   leaderKey: DEFAULT_LEADER_KEY,
   directShortcuts: ['submit', 'abort'],
   keyboardShortcuts: DEFAULT_KEYBOARD_SHORTCUTS,
   customCommands: [],
   customAgents: [],
   gitCredentials: [] as GitCredential[],
+  defaultGitCredentialId: undefined as string | undefined,
   gitIdentity: DEFAULT_GIT_IDENTITY,
   tts: DEFAULT_TTS_CONFIG,
   stt: DEFAULT_STT_CONFIG,
   notifications: DEFAULT_NOTIFICATION_PREFERENCES,
+  repoSortMode: 'recent' as const,
+  serverEnvVars: [] as ServerEnvVar[],
+  disabledDefaultServerEnvVars: [] as string[],
 };
 
 export const SettingsResponseSchema = z.object({
@@ -183,12 +220,113 @@ export const UpdateSettingsRequestSchema = z.object({
   preferences: UserPreferencesSchema.partial(),
 });
 
+export const ProviderApiConfigSchema = z.object({
+  url: z.string(),
+  npm: z.string().optional(),
+});
+
+export type ProviderApiConfig = z.infer<typeof ProviderApiConfigSchema>;
+
+export const ModelCapabilitiesSchema = z.object({
+  temperature: z.boolean(),
+  reasoning: z.boolean(),
+  attachment: z.boolean(),
+  toolcall: z.boolean(),
+  input: z.object({
+    text: z.boolean(),
+    audio: z.boolean(),
+    image: z.boolean(),
+    video: z.boolean(),
+    pdf: z.boolean(),
+  }),
+  output: z.object({
+    text: z.boolean(),
+    audio: z.boolean(),
+    image: z.boolean(),
+    video: z.boolean(),
+    pdf: z.boolean(),
+  }),
+  interleaved: z.union([
+    z.boolean(),
+    z.object({
+      field: z.enum(["reasoning_content", "reasoning_details"]),
+    }),
+  ]),
+});
+
+export const ModelCostSchema = z.object({
+  input: z.number(),
+  output: z.number(),
+  cache: z.object({
+    read: z.number(),
+    write: z.number(),
+  }).optional(),
+  experimentalOver200K: z.object({
+    input: z.number(),
+    output: z.number(),
+    cache: z.object({
+      read: z.number(),
+      write: z.number(),
+    }).optional(),
+  }).optional(),
+});
+
+export const ModelLimitSchema = z.object({
+  context: z.number(),
+  input: z.number().optional(),
+  output: z.number(),
+});
+
+export const ModelConfigSchema = z.object({
+  id: z.string().optional(),
+  providerID: z.string().optional(),
+  api: ProviderApiConfigSchema.optional(),
+  name: z.string().optional(),
+  family: z.string().optional(),
+  capabilities: ModelCapabilitiesSchema.optional(),
+  cost: ModelCostSchema.optional(),
+  limit: ModelLimitSchema.optional(),
+  status: z.enum(["alpha", "beta", "deprecated", "active"]).optional(),
+  options: z.record(z.string(), z.any()).optional(),
+  headers: z.record(z.string(), z.string()).optional(),
+  release_date: z.string().optional(),
+  variants: z.record(z.string(), z.record(z.string(), z.any())).optional(),
+});
+
+export type ModelConfig = z.infer<typeof ModelConfigSchema>;
+
+export const ProviderSourceSchema = z.enum(["env", "config", "custom", "api"]);
+
+export const ProviderConfigSchema = z.object({
+  id: z.string().optional(),
+  name: z.string().optional(),
+  source: ProviderSourceSchema.optional(),
+  env: z.array(z.string()).optional().default([]),
+  key: z.string().optional(),
+  api: z.string().optional(),
+  npm: z.string().optional(),
+  whitelist: z.array(z.string()).optional(),
+  blacklist: z.array(z.string()).optional(),
+  options: z.record(z.string(), z.any()).optional(),
+  models: z.record(z.string(), ModelConfigSchema).optional(),
+});
+
+export type ProviderSource = z.infer<typeof ProviderSourceSchema>;
+export type ProviderConfig = z.infer<typeof ProviderConfigSchema>;
+
+export const OpenCodePluginOptionsSchema = z.record(z.string(), z.unknown());
+export const OpenCodePluginSpecSchema = z.union([
+  z.string(),
+  z.tuple([z.string(), OpenCodePluginOptionsSchema]),
+]);
+
 export const OpenCodeConfigSchema = z.object({
   $schema: z.string().optional(),
   theme: z.string().optional(),
   model: z.string().optional(),
   small_model: z.string().optional(),
-  provider: z.record(z.string(), z.any()).optional(),
+  default_agent: z.string().optional(),
+  provider: z.record(z.string(), ProviderConfigSchema).optional(),
   agent: z.record(z.string(), z.any()).optional(),
   command: z.record(z.string(), z.any()).optional(),
   keybinds: z.record(z.string(), z.any()).optional(),
@@ -199,7 +337,7 @@ export const OpenCodeConfigSchema = z.object({
   instructions: z.array(z.string()).optional(),
   disabled_providers: z.array(z.string()).optional(),
   share: z.enum(["manual", "auto", "disabled"]).optional(),
-  plugin: z.array(z.string()).optional(),
+  plugin: z.array(OpenCodePluginSpecSchema).optional(),
   skills: z.object({
     paths: z.array(z.string()).optional(),
     urls: z.array(z.string()).optional(),

@@ -9,6 +9,14 @@ import migration007 from './007-schedules'
 import migration008 from './008-schedule-cron-support'
 import migration009 from './009-repo-source-path'
 import migration010 from './009-prompt-templates'
+import migration011 from './011-repo-last-accessed'
+import migration012 from './012-opencode-model-state'
+import migration013 from './013-app-secrets'
+import migration014 from './014-repos-add-name'
+import migration015 from './015-schedule-worktree-isolation'
+import migration016 from './016-schedule-permission-config'
+import migration017 from './017-schedule-run-workspace-id'
+import migration018 from './018-session-pins'
 
 export const allMigrations: Migration[] = [
   migration001,
@@ -21,4 +29,12 @@ export const allMigrations: Migration[] = [
   migration008,
   migration009,
   migration010,
+  migration011,
+  migration012,
+  migration013,
+  migration014,
+  migration015,
+  migration016,
+  migration017,
+  migration018,
 ]

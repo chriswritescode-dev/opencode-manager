@@ -1,9 +1,8 @@
-import { spawn, execSync } from 'child_process'
+import { spawn, execSync, spawnSync } from 'child_process'
 import path from 'path'
 import { promises as fs } from 'fs'
 import { logger } from '../utils/logger'
-import { createGitEnv, createGitIdentityEnv, resolveGitIdentity } from '../utils/git-auth'
-import type { GitCredential } from '@opencode-manager/shared'
+import { createGitIdentityEnv, resolveGitIdentity } from '../utils/git-auth'
 import {
   buildSSHCommandWithKnownHosts,
   buildSSHCommandWithConfig,
@@ -15,20 +14,93 @@ import {
   parseSSHHost
 } from '../utils/ssh-key-manager'
 import { decryptSecret } from '../utils/crypto'
+import { BLOCKED_SERVER_ENV_KEYS, DEFAULT_SERVER_ENV_VARS } from '@opencode-manager/shared'
 import { SettingsService } from './settings'
 import { getWorkspacePath, getOpenCodeConfigFilePath, ENV } from '@opencode-manager/shared/config/env'
+import { parseJsonc } from '@opencode-manager/shared/utils'
 import type { Database } from 'bun:sqlite'
 import { compareVersions } from '../utils/version-utils'
+import { patchConfigWithRecovery } from './opencode/config-recovery'
+import type { OpenCodeClient } from './opencode/client'
+import { writeFileContent } from './file-operations'
+import { getOrCreateInternalToken } from './internal-token'
+import { installGhEnvPlugin } from './opencode-gh-env-plugin'
+import { CredentialProvider } from './credential-provider'
+import { mkdirSafe } from '../utils/fs-safe'
 
-const OPENCODE_SERVER_PORT = ENV.OPENCODE.PORT
-const OPENCODE_SERVER_HOST = ENV.OPENCODE.HOST
+
 const MIN_OPENCODE_VERSION = '1.0.137'
 const MAX_STDERR_SIZE = 10240
+const PLUGIN_INSTALL_TIMEOUT_MS = 120000
+const PROCESS_EXIT_GRACE_MS = 2000
+const PROCESS_EXIT_POLL_MS = 50
+const DEPRECATED_PLUGIN_PACKAGES = ['opencode-openai-codex-auth', 'opencode-copilot-auth']
+
+type StartupValidationIssue = {
+  path: string
+  message: string
+}
+
+type OpenCodePluginOptions = Record<string, unknown>
+type OpenCodePluginSpec = string | [string, OpenCodePluginOptions]
+
+export class ConfigReloadError extends Error {
+  validationIssues: StartupValidationIssue[]
+  removedFields: string[]
+
+  constructor(message: string, validationIssues: StartupValidationIssue[] = [], removedFields: string[] = []) {
+    super(message)
+    this.name = 'ConfigReloadError'
+    this.validationIssues = validationIssues
+    this.removedFields = removedFields
+  }
+}
+
+function parseStartupValidationIssues(stderrOutput: string): StartupValidationIssue[] {
+  const match = stderrOutput.match(/ZodError:\s*(\[[\s\S]*?\])(?:\n\s+at |$)/)
+  if (!match?.[1]) {
+    return []
+  }
+
+  try {
+    const parsed = JSON.parse(match[1]) as Array<{ path?: unknown; message?: unknown }>
+    return parsed
+      .map((issue) => ({
+        path: Array.isArray(issue.path) && issue.path.length > 0 ? issue.path.join('.') : 'root',
+        message: typeof issue.message === 'string' ? issue.message : 'Invalid value',
+      }))
+      .filter((issue) => issue.message)
+  } catch {
+    return []
+  }
+}
+
+function formatStartupError(stderrOutput: string, fallback: string): string {
+  const validationIssues = parseStartupValidationIssues(stderrOutput)
+  if (validationIssues.length === 0) {
+    return fallback
+  }
+
+  const summary = validationIssues
+    .slice(0, 8)
+    .map((issue) => `${issue.path}: ${issue.message}`)
+    .join('; ')
+
+  const remainder = validationIssues.length > 8
+    ? ` (${validationIssues.length - 8} more issue${validationIssues.length - 8 === 1 ? '' : 's'})`
+    : ''
+
+  return `OpenCode config validation failed: ${summary}${remainder}`
+}
 
 // Helper getters to ensure values are computed at runtime (not module load time)
 // This allows proper mocking in tests
 const getOpenCodeServerDirectory = () => getWorkspacePath()
 const getOpenCodeConfigPath = () => getOpenCodeConfigFilePath()
+const getOpenCodeServerPort = () => ENV.OPENCODE.PORT
+const getOpenCodeServerHost = () => ENV.OPENCODE.HOST
+const getOpenCodeServerPublicUrl = () => ENV.OPENCODE.PUBLIC_URL
+const getOpenCodeServerUsername = () => ENV.OPENCODE.SERVER_USERNAME
 
 class OpenCodeServerManager {
   private static instance: OpenCodeServerManager
@@ -38,11 +110,39 @@ class OpenCodeServerManager {
   private db: Database | null = null
   private version: string | null = null
   private lastStartupError: string | null = null
+  private restartPending: boolean = false
+  private opInProgress: boolean = false
+  private openCodeClient: OpenCodeClient | null = null
 
   private constructor() {}
 
   setDatabase(db: Database) {
     this.db = db
+  }
+
+  setOpenCodeClient(client: OpenCodeClient) {
+    this.openCodeClient = client
+  }
+
+  async rebuildClient(): Promise<void> {
+    const password = this.getResolvedPassword()
+    const { createOpenCodeClient } = await import('./opencode/client')
+    this.openCodeClient = createOpenCodeClient(password)
+  }
+
+  private getResolvedPassword(): string {
+    if (this.db) {
+      const settingsService = new SettingsService(this.db)
+      return settingsService.getOpenCodeServerPassword()
+    }
+    return ENV.OPENCODE.SERVER_PASSWORD
+  }
+
+  private requireClient(): OpenCodeClient {
+    if (!this.openCodeClient) {
+      throw new Error('OpenCodeClient not configured on OpenCodeServerManager. Call setOpenCodeClient() during startup.')
+    }
+    return this.openCodeClient
   }
 
   static getInstance(): OpenCodeServerManager {
@@ -60,22 +160,76 @@ class OpenCodeServerManager {
     OpenCodeServerManager.instance = null as unknown as OpenCodeServerManager
   }
 
-  async start(): Promise<void> {
-    if (this.isHealthy) {
-      logger.info('OpenCode server already running and healthy')
+  private acquireOp(): boolean {
+    if (this.opInProgress) {
+      return false
+    }
+
+    this.opInProgress = true
+    return true
+  }
+
+  private releaseOp(acquired: boolean): void {
+    if (acquired) {
+      this.opInProgress = false
+    }
+  }
+
+  isOperationInProgress(): boolean {
+    return this.opInProgress
+  }
+
+  async start(retryAfterPluginInstall = true, allowNested = false): Promise<void> {
+    const acquired = this.acquireOp()
+    if (!acquired && !allowNested) {
       return
     }
 
-    const isDevelopment = ENV.SERVER.NODE_ENV !== 'production'
+    try {
+      if (this.isHealthy) {
+        logger.info('OpenCode server already running and healthy')
+        return
+      }
 
-    let gitCredentials: GitCredential[] = []
+    await this.rebuildClient()
+
+    const isDevelopment = ENV.SERVER.NODE_ENV !== 'production'
+    const password = this.getResolvedPassword()
+    const openCodeServerHost = getOpenCodeServerHost()
+    const isExposed = openCodeServerHost !== '127.0.0.1' && openCodeServerHost !== 'localhost'
+    if (isExposed && !password) {
+      const msg = `OPENCODE_HOST=${openCodeServerHost} exposes the OpenCode server externally but no password is configured. Set OPENCODE_SERVER_PASSWORD env var or configure a password via Settings → OpenCode → Server Auth.`
+      this.lastStartupError = msg
+      logger.error(msg)
+      throw new Error(msg)
+    }
+
+    let credentialProvider: CredentialProvider | null = null
     let gitIdentityEnv: Record<string, string> = {}
+    let userEnvVars: Record<string, string> = {}
     if (this.db) {
       try {
+        credentialProvider = new CredentialProvider(this.db)
         const settingsService = new SettingsService(this.db)
         const settings = settingsService.getSettings('default')
-        gitCredentials = settings.preferences.gitCredentials || []
-        
+        const gitCredentials = credentialProvider.getGitCredentials()
+        const disabledDefaultEnvVars = new Set(settings.preferences.disabledDefaultServerEnvVars || [])
+        const rawEnvVars = [
+          ...DEFAULT_SERVER_ENV_VARS.filter((envVar) => !disabledDefaultEnvVars.has(envVar.key)),
+          ...(settings.preferences.serverEnvVars || []),
+        ]
+        if (rawEnvVars.length > 0) {
+          userEnvVars = Object.fromEntries(
+            rawEnvVars
+              .filter(({ key }) => {
+                const normalizedKey = key.trim()
+                return normalizedKey !== '' && !(BLOCKED_SERVER_ENV_KEYS as readonly string[]).includes(normalizedKey)
+              })
+              .map(({ key, value }) => [key.trim(), value])
+          )
+          logger.info(`Injecting ${Object.keys(userEnvVars).length} custom server env vars`)
+        }
+
         const identity = await resolveGitIdentity(settings.preferences.gitIdentity, gitCredentials)
         if (identity) {
           gitIdentityEnv = createGitIdentityEnv(identity)
@@ -86,9 +240,10 @@ class OpenCodeServerManager {
       }
     }
 
-    const existingProcesses = await this.findProcessesByPort(OPENCODE_SERVER_PORT)
+    const openCodeServerPort = getOpenCodeServerPort()
+    const existingProcesses = await this.findProcessesByPort(openCodeServerPort)
     if (existingProcesses.length > 0) {
-      logger.info(`OpenCode server already running on port ${OPENCODE_SERVER_PORT}`)
+      logger.info(`OpenCode server already running on port ${openCodeServerPort}`)
       const healthy = await this.checkHealth()
       if (healthy) {
         if (isDevelopment) {
@@ -127,12 +282,12 @@ class OpenCodeServerManager {
     logger.info(`OpenCode XDG_CONFIG_HOME: ${path.join(openCodeServerDirectory, '.config')}`)
     logger.info(`OpenCode will use ?directory= parameter for session isolation`)
 
-    const gitEnv = createGitEnv(gitCredentials)
+    const gitEnv = credentialProvider?.getGitEnv() ?? {}
     const knownHostsPath = path.join(getWorkspacePath(), 'config', 'known_hosts')
     let gitSshCommand: string
     let sshConfigPath: string | null = null
 
-    const sshCredentials = gitCredentials.filter(cred => cred.type === 'ssh' && cred.sshPrivateKeyEncrypted)
+    const sshCredentials = credentialProvider?.getSshCredentialsWithPrivateKey() ?? []
     if (sshCredentials.length > 0) {
       logger.info(`Setting up ${sshCredentials.length} SSH credential(s) for OpenCode server`)
 
@@ -175,23 +330,49 @@ class OpenCodeServerManager {
     logger.info(`OpenCode server GIT_SSH_COMMAND: ${gitSshCommand}`)
 
     await this.initializeOpencodeBinDirectory()
+    await installGhEnvPlugin(path.join(openCodeServerDirectory, '.config'))
+    const configuredPlugins = await this.getConfiguredPlugins(openCodeConfigPath)
+    await this.installConfiguredPlugins(configuredPlugins)
+    const configuredPluginCount = configuredPlugins.length
 
     let stderrOutput = ''
 
+    const cleanEnv = { ...process.env }
+    delete cleanEnv.OPENCODE_SERVER_PASSWORD
+    delete cleanEnv.OPENCODE_RUN_ID
+    delete cleanEnv.OPENCODE_PROCESS_ROLE
+    delete cleanEnv.OPENCODE_PID
+    delete cleanEnv.OPENCODE
+
     this.serverProcess = spawn(
       'opencode',
-      ['serve', '--port', OPENCODE_SERVER_PORT.toString(), '--hostname', OPENCODE_SERVER_HOST],
+      ['serve', '--port', openCodeServerPort.toString(), '--hostname', openCodeServerHost],
       {
         cwd: openCodeServerDirectory,
         detached: !isDevelopment,
         stdio: isDevelopment ? 'inherit' : ['ignore', 'pipe', 'pipe'],
         env: {
-          ...process.env,
+          ...cleanEnv,
+          ...userEnvVars,
           ...gitEnv,
           ...gitIdentityEnv,
+          ...(this.db
+            ? {
+              OCM_INTERNAL_API_URL: `http://localhost:${ENV.SERVER.PORT}/api/internal`,
+              OCM_INTERNAL_TOKEN: getOrCreateInternalToken(this.db),
+            }
+            : {}),
           GIT_SSH_COMMAND: gitSshCommand,
           XDG_DATA_HOME: path.join(openCodeServerDirectory, '.opencode/state'),
+          XDG_STATE_HOME: path.join(openCodeServerDirectory, '.opencode/state'),
           XDG_CONFIG_HOME: path.join(openCodeServerDirectory, '.config'),
+          ...(getOpenCodeServerPublicUrl() ? { OPENCODE_PUBLIC_URL: getOpenCodeServerPublicUrl() } : {}),
+          ...(password
+            ? {
+              OPENCODE_SERVER_PASSWORD: password,
+              OPENCODE_SERVER_USERNAME: getOpenCodeServerUsername(),
+            }
+            : {}),
           OPENCODE_CONFIG: openCodeConfigPath,
         }
       }
@@ -208,7 +389,8 @@ class OpenCodeServerManager {
 
     this.serverProcess.on('exit', (code, signal) => {
       if (code !== null && code !== 0) {
-        this.lastStartupError = `Server exited with code ${code}${stderrOutput ? `: ${stderrOutput.slice(-500)}` : ''}`
+        const fallback = `Server exited with code ${code}${stderrOutput ? `: ${stderrOutput.slice(-500)}` : ''}`
+        this.lastStartupError = formatStartupError(stderrOutput, fallback)
         logger.error('OpenCode server process exited:', this.lastStartupError)
       } else if (signal) {
         this.lastStartupError = `Server terminated by signal ${signal}`
@@ -220,13 +402,23 @@ class OpenCodeServerManager {
 
     logger.info(`OpenCode server started with PID ${this.serverPid}`)
 
-    const healthy = await this.waitForHealth(30000)
+    const healthTimeoutMs = configuredPluginCount > 0 ? 120000 : 30000
+    const healthy = await this.waitForHealth(healthTimeoutMs)
     if (!healthy) {
-      this.lastStartupError = `Server failed to become healthy after 30s${stderrOutput ? `. Last error: ${stderrOutput.slice(-500)}` : ''}`
+      const fallback = `Server failed to become healthy after ${Math.round(healthTimeoutMs / 1000)}s${stderrOutput ? `. Last error: ${stderrOutput.slice(-500)}` : ''}`
+      this.lastStartupError = formatStartupError(stderrOutput, fallback)
+      if (configuredPluginCount > 0 && retryAfterPluginInstall) {
+        logger.warn(`OpenCode server did not become healthy after installing ${configuredPluginCount} configured plugin(s); restarting once`)
+        await this.stop(true)
+        await new Promise(r => setTimeout(r, 1000))
+        await this.start(false, true)
+        return
+      }
       throw new Error('OpenCode server failed to become healthy')
     }
 
     this.isHealthy = true
+    this.restartPending = false
     logger.info('OpenCode server is healthy')
 
     await this.fetchVersion()
@@ -237,43 +429,57 @@ class OpenCodeServerManager {
         logger.warn('Some features like MCP management may not work correctly')
       }
     }
+    } finally {
+      this.releaseOp(acquired)
+    }
   }
 
-  async stop(): Promise<void> {
-    if (!this.serverPid) return
-
-    logger.info('Stopping OpenCode server')
-    try {
-      process.kill(this.serverPid, 'SIGTERM')
-    } catch (error) {
-      const errorCode = error && typeof error === 'object' && 'code' in error ? (error as { code: string }).code : ''
-      if (errorCode === 'ESRCH') {
-        logger.debug(`Process ${this.serverPid} already stopped`)
-      } else {
-        logger.warn(`Failed to send SIGTERM to ${this.serverPid}:`, error)
-      }
+  async stop(allowNested = false): Promise<void> {
+    const acquired = this.acquireOp()
+    if (!acquired && !allowNested) {
+      return
     }
 
-    await new Promise(r => setTimeout(r, 2000))
-
     try {
-      process.kill(this.serverPid, 'SIGKILL')
-    } catch (error) {
-      const errorCode = error && typeof error === 'object' && 'code' in error ? (error as { code: string }).code : ''
-      if (errorCode === 'ESRCH') {
-        logger.debug(`Process ${this.serverPid} already stopped`)
-      } else {
-        logger.warn(`Failed to send SIGKILL to ${this.serverPid}:`, error)
+      if (!this.serverPid) return
+
+      logger.info('Stopping OpenCode server')
+      try {
+        process.kill(this.serverPid, 'SIGTERM')
+      } catch (error) {
+        const errorCode = error && typeof error === 'object' && 'code' in error ? (error as { code: string }).code : ''
+        if (errorCode === 'ESRCH') {
+          logger.debug(`Process ${this.serverPid} already stopped`)
+        } else {
+          logger.warn(`Failed to send SIGTERM to ${this.serverPid}:`, error)
+        }
       }
-    }
 
-    this.serverPid = null
-    this.isHealthy = false
+      const exited = await this.waitForProcessExit(this.serverPid, PROCESS_EXIT_GRACE_MS)
 
-    try {
-      await cleanupPersistentSSHKeys()
-    } catch (error) {
-      logger.warn('Failed to cleanup persistent SSH keys:', error)
+      if (!exited) {
+        try {
+          process.kill(this.serverPid, 'SIGKILL')
+        } catch (error) {
+          const errorCode = error && typeof error === 'object' && 'code' in error ? (error as { code: string }).code : ''
+          if (errorCode === 'ESRCH') {
+            logger.debug(`Process ${this.serverPid} already stopped`)
+          } else {
+            logger.warn(`Failed to send SIGKILL to ${this.serverPid}:`, error)
+          }
+        }
+      }
+
+      this.serverPid = null
+      this.isHealthy = false
+
+      try {
+        await cleanupPersistentSSHKeys()
+      } catch (error) {
+        logger.warn('Failed to cleanup persistent SSH keys:', error)
+      }
+    } finally {
+      this.releaseOp(acquired)
     }
   }
 
@@ -289,7 +495,7 @@ class OpenCodeServerManager {
     const packageJsonPath = path.join(binDir, 'package.json')
 
     try {
-      await fs.mkdir(binDir, { recursive: true })
+      await mkdirSafe(binDir)
 
       const packageJsonExists = await fs.access(packageJsonPath)
         .then(() => true)
@@ -317,50 +523,173 @@ class OpenCodeServerManager {
     }
   }
 
+  private isPathPluginSpec(spec: string): boolean {
+    return spec.startsWith('file://') || spec.startsWith('.') || path.isAbsolute(spec)
+  }
+
+  private getPluginInstallSpec(spec: string): string {
+    if (spec.startsWith('@')) {
+      const slashIndex = spec.indexOf('/')
+      return slashIndex !== -1 && spec.indexOf('@', slashIndex + 1) === -1 ? `${spec}@latest` : spec
+    }
+    return spec.includes('@') ? spec : `${spec}@latest`
+  }
+
+  private getPluginPackageName(spec: string): string {
+    if (spec.startsWith('@')) {
+      const slashIndex = spec.indexOf('/')
+      if (slashIndex === -1) return spec
+      const versionIndex = spec.indexOf('@', slashIndex + 1)
+      return versionIndex === -1 ? spec : spec.slice(0, versionIndex)
+    }
+    const versionIndex = spec.indexOf('@')
+    return versionIndex === -1 ? spec : spec.slice(0, versionIndex)
+  }
+
+  private sanitizeNpmCacheSegment(spec: string): string {
+    if (process.platform !== 'win32') return spec
+    return Array.from(spec, (char) => /[<>:"|?*]/.test(char) || char.charCodeAt(0) < 32 ? '_' : char).join('')
+  }
+
+  private getPluginSpecifier(plugin: OpenCodePluginSpec): string {
+    return Array.isArray(plugin) ? plugin[0] : plugin
+  }
+
+  private isOpenCodePluginSpec(plugin: unknown): plugin is OpenCodePluginSpec {
+    if (typeof plugin === 'string') return plugin.trim().length > 0
+    if (!Array.isArray(plugin) || plugin.length !== 2 || typeof plugin[0] !== 'string' || plugin[0].trim().length === 0) return false
+    const options = plugin[1]
+    return options !== null && typeof options === 'object' && !Array.isArray(options)
+  }
+
+  private async getConfiguredPlugins(configPath: string): Promise<OpenCodePluginSpec[]> {
+    try {
+      const content = await fs.readFile(configPath, 'utf-8')
+      const config = parseJsonc(content) as { plugin?: unknown }
+      if (!Array.isArray(config.plugin)) return []
+      return config.plugin
+        .filter((plugin): plugin is OpenCodePluginSpec => this.isOpenCodePluginSpec(plugin))
+    } catch {
+      return []
+    }
+  }
+
+  private async installConfiguredPlugins(plugins: OpenCodePluginSpec[]): Promise<void> {
+    const npmPlugins = plugins
+      .map((plugin) => this.getPluginSpecifier(plugin))
+      .filter((plugin) => !this.isPathPluginSpec(plugin) && !DEPRECATED_PLUGIN_PACKAGES.some((pkg) => plugin.includes(pkg)))
+    if (npmPlugins.length === 0) return
+
+    const cacheHome = process.env.XDG_CACHE_HOME || path.join(process.env.HOME || '/home/node', '.cache')
+    logger.info(`Pre-installing ${npmPlugins.length} configured OpenCode plugin(s)`)
+
+    for (const plugin of npmPlugins) {
+      const installSpec = this.getPluginInstallSpec(plugin)
+      const packageName = this.getPluginPackageName(plugin)
+      const installDir = path.join(cacheHome, 'opencode', 'packages', this.sanitizeNpmCacheSegment(installSpec))
+      const packageJsonPath = path.join(installDir, 'node_modules', packageName, 'package.json')
+
+      try {
+        await fs.access(packageJsonPath)
+        logger.info(`OpenCode plugin already installed: ${plugin}`)
+        continue
+      } catch (error) {
+        const errorCode = error && typeof error === 'object' && 'code' in error ? (error as NodeJS.ErrnoException).code : ''
+        if (errorCode !== 'ENOENT') {
+          logger.warn(`Could not check OpenCode plugin install state for ${plugin}:`, error)
+        }
+      }
+
+      await mkdirSafe(installDir)
+      if (!await fs.access(path.join(installDir, 'package.json')).then(() => true).catch(() => false)) {
+        const init = spawnSync('bun', ['init', '-y'], { cwd: installDir, encoding: 'utf8', timeout: 30000 })
+        if (init.status !== 0) {
+          logger.warn(`Failed to initialize OpenCode plugin cache for ${plugin}: ${init.stderr || init.stdout}`)
+          continue
+        }
+      }
+
+      const result = spawnSync('bun', ['add', '--ignore-scripts', installSpec], { cwd: installDir, encoding: 'utf8', timeout: PLUGIN_INSTALL_TIMEOUT_MS })
+      if (result.status === 0) {
+        logger.info(`Installed OpenCode plugin: ${plugin}`)
+        continue
+      }
+
+      if (result.error) {
+        logger.warn(`Failed to install OpenCode plugin ${plugin}: ${result.error.message}`)
+        continue
+      }
+
+      logger.warn(`Failed to install OpenCode plugin ${plugin}: ${result.stderr || result.stdout}`)
+    }
+  }
+
   async restart(): Promise<void> {
-    logger.info('Restarting OpenCode server (full process restart)')
-    await this.stop()
-    await new Promise(r => setTimeout(r, 1000))
-    await this.start()
+    const acquired = this.acquireOp()
+    if (!acquired) {
+      return
+    }
+
+    try {
+      logger.info('Restarting OpenCode server (full process restart)')
+      await this.stop(true)
+      await this.start(false, true)
+    } finally {
+      this.releaseOp(acquired)
+    }
   }
 
   async reloadConfig(): Promise<void> {
-    logger.info('Reloading OpenCode configuration (via API)')
+    const acquired = this.acquireOp()
+    if (!acquired) {
+      return
+    }
+
     try {
-      const response = await fetch(`http://${OPENCODE_SERVER_HOST}:${OPENCODE_SERVER_PORT}/config`, {
-        method: 'GET'
-      })
+      logger.info('Reloading OpenCode configuration (via API)')
+      try {
+        const configPath = getOpenCodeConfigFilePath()
+        const fileContent = await fs.readFile(configPath, 'utf-8')
+        const fileConfig = parseJsonc(fileContent) as Record<string, unknown>
+        logger.info(`Read config from file for reload: ${configPath}`)
 
-      if (!response.ok) {
-        throw new Error(`Failed to get current config: ${response.status}`)
+        const patchResult = await patchConfigWithRecovery(this.requireClient(), fileConfig)
+        if (!patchResult.success) {
+          const errorMessage = patchResult.error || 'Failed to reload config'
+          const validationIssues = patchResult.details || []
+          const removedFields = patchResult.removedFields || []
+          if (validationIssues.length > 0) {
+            const issueSummary = validationIssues.map((d) => `${d.path}: ${d.message}`).join('; ')
+            logger.error(`Config reload validation errors: ${issueSummary}`)
+          }
+          if (removedFields.length > 0) {
+            logger.info(`Removed fields during config reload: ${removedFields.join(', ')}`)
+          }
+          throw new ConfigReloadError(errorMessage, validationIssues, removedFields)
+        }
+
+        if (patchResult.removedFields && patchResult.removedFields.length > 0 && patchResult.appliedConfig) {
+          await writeFileContent(configPath, JSON.stringify(patchResult.appliedConfig, null, 2))
+          logger.info(`Persisted cleaned config to ${configPath} after removing fields: ${patchResult.removedFields.join(', ')}`)
+        }
+
+        logger.info('OpenCode configuration reloaded successfully')
+        await new Promise(r => setTimeout(r, 500))
+        const healthy = await this.checkHealth()
+        if (!healthy) {
+          throw new Error('Server unhealthy after config reload')
+        }
+      } catch (error) {
+        logger.error('Failed to reload OpenCode config:', error)
+        throw error
       }
-
-      const currentConfig = await response.json()
-      logger.info('Triggering OpenCode config reload via PATCH')
-      const patchResponse = await fetch(`http://${OPENCODE_SERVER_HOST}:${OPENCODE_SERVER_PORT}/config`, {
-        method: 'PATCH',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(currentConfig)
-      })
-
-      if (!patchResponse.ok) {
-        throw new Error(`Failed to reload config: ${patchResponse.status}`)
-      }
-
-      logger.info('OpenCode configuration reloaded successfully')
-      await new Promise(r => setTimeout(r, 500))
-      const healthy = await this.checkHealth()
-      if (!healthy) {
-        throw new Error('Server unhealthy after config reload')
-      }
-    } catch (error) {
-      logger.error('Failed to reload OpenCode config:', error)
-      throw error
+    } finally {
+      this.releaseOp(acquired)
     }
   }
 
   getPort(): number {
-    return OPENCODE_SERVER_PORT
+    return getOpenCodeServerPort()
   }
 
   getVersion(): string | null {
@@ -384,15 +713,28 @@ class OpenCodeServerManager {
     this.lastStartupError = null
   }
 
+  isRestartPending(): boolean {
+    return this.restartPending
+  }
+
+  markRestartPending(): void {
+    this.restartPending = true
+  }
+
   async reinitializeBinDirectory(): Promise<void> {
     logger.info('Reinitializing OpenCode bin directory')
     await this.initializeOpencodeBinDirectory()
   }
 
   async checkHealth(): Promise<boolean> {
+    if (!this.openCodeClient) {
+      return false
+    }
     try {
-      const response = await fetch(`http://${OPENCODE_SERVER_HOST}:${OPENCODE_SERVER_PORT}/doc`, {
-        signal: AbortSignal.timeout(3000)
+      const response = await this.openCodeClient.forward({
+        method: 'GET',
+        path: '/global/health',
+        signal: AbortSignal.timeout(ENV.TIMEOUTS.HEALTH_CHECK_TIMEOUT_MS),
       })
       return response.ok
     } catch {
@@ -412,6 +754,22 @@ class OpenCodeServerManager {
       logger.warn('Failed to get OpenCode version:', error)
     }
     return null
+  }
+
+  private async waitForProcessExit(pid: number, timeoutMs: number): Promise<boolean> {
+    const start = Date.now()
+    while (Date.now() - start < timeoutMs) {
+      try {
+        process.kill(pid, 0)
+      } catch (error) {
+        const errorCode = error && typeof error === 'object' && 'code' in error ? (error as { code: string }).code : ''
+        if (errorCode === 'ESRCH') {
+          return true
+        }
+      }
+      await new Promise(r => setTimeout(r, PROCESS_EXIT_POLL_MS))
+    }
+    return false
   }
 
   private async waitForHealth(timeoutMs: number): Promise<boolean> {

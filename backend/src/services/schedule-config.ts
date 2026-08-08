@@ -3,6 +3,7 @@ import type {
   CreateScheduleJobRequest,
   ScheduleJob,
   ScheduleMode,
+  SchedulePermissionConfig,
   ScheduleSkillMetadata,
   UpdateScheduleJobRequest,
 } from '@opencode-manager/shared/types'
@@ -21,6 +22,8 @@ export interface ScheduleJobPersistenceInput {
   prompt: string
   model: string | null
   skillMetadata: ScheduleSkillMetadata | null | undefined
+  permissionConfig: SchedulePermissionConfig | null
+  branch: string | null
   nextRunAt: number | null
 }
 
@@ -95,6 +98,7 @@ export function buildCreateSchedulePersistenceInput(input: CreateScheduleJobRequ
     prompt: input.prompt.trim(),
     model: input.model?.trim() || null,
     skillMetadata: input.skillMetadata,
+    branch: input.branch?.trim() || null,
   }
 
   const scheduleConfig = input.scheduleMode === 'cron'
@@ -104,6 +108,7 @@ export function buildCreateSchedulePersistenceInput(input: CreateScheduleJobRequ
   return {
     ...base,
     ...scheduleConfig,
+    permissionConfig: input.permissionConfig ?? null,
     nextRunAt: base.enabled ? scheduleConfig.nextRunAt : null,
   }
 }
@@ -151,6 +156,8 @@ export function buildUpdatedSchedulePersistenceInput(
     prompt: input.prompt?.trim() || existing.prompt,
     model: input.model === undefined ? existing.model : (input.model?.trim() || null),
     skillMetadata: input.skillMetadata !== undefined ? input.skillMetadata : existing.skillMetadata,
+    permissionConfig: input.permissionConfig === undefined ? existing.permissionConfig : (input.permissionConfig ?? null),
+    branch: input.branch === undefined ? existing.branch : (input.branch?.trim() || null),
     nextRunAt,
   }
 }

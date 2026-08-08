@@ -1,17 +1,15 @@
-import { Settings, Bell, HelpCircle, MoreVertical } from "lucide-react";
+import { Settings } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { BackButton } from "@/components/ui/back-button";
 import { PageHeader } from "@/components/ui/page-header";
 import { useSettingsDialog } from "@/hooks/useSettingsDialog";
 import { useTheme } from "@/hooks/useTheme";
 import { EditSessionTitleDialog } from "@/components/session/EditSessionTitleDialog";
-import { DropdownMenu, DropdownMenuContent, DropdownMenuTrigger, DropdownMenuItem, DropdownMenuSeparator } from "@/components/ui/dropdown-menu";
 import { cn } from "@/lib/utils";
 import type { ReactNode } from "react";
 import { useState, useEffect } from "react";
 import { useMobile } from "@/hooks/useMobile";
-import { Loader2, X } from "lucide-react";
-import { usePermissions, useQuestions } from "@/contexts/EventContext";
+import { X } from "lucide-react";
 
 interface HeaderProps {
   children: ReactNode;
@@ -62,11 +60,10 @@ interface HeaderEditableTitleProps {
   value: string;
   onChange: (value: string) => void;
   subtitle?: React.ReactNode;
-  generating?: boolean;
   className?: string;
 }
 
-function HeaderEditableTitle({ value, onChange, subtitle, generating, className }: HeaderEditableTitleProps) {
+function HeaderEditableTitle({ value, onChange, subtitle, className }: HeaderEditableTitleProps) {
   const [isEditing, setIsEditing] = useState(false);
   const [editTitle, setEditTitle] = useState(value);
   const isMobile = useMobile();
@@ -143,19 +140,12 @@ function HeaderEditableTitle({ value, onChange, subtitle, generating, className 
         </form>
       ) : (
         <div className="min-w-0">
-          {generating ? (
-            <div className="flex items-center gap-2">
-              <Loader2 className="w-3 h-3 animate-spin text-muted-foreground" />
-              <span className="text-xs sm:text-base text-muted-foreground italic">Generating title...</span>
-            </div>
-          ) : (
-            <h1 
-              className="cursor-pointer truncate text-xs font-semibold text-foreground transition-opacity hover:opacity-80 sm:text-base"
-              onClick={handleTitleClick}
-            >
-              {value}
-            </h1>
-          )}
+          <h1 
+            className="text-xs sm:text-base font-semibold bg-gradient-to-r from-foreground to-muted-foreground bg-clip-text text-transparent truncate cursor-pointer hover:opacity-80 transition-opacity"
+            onClick={handleTitleClick}
+          >
+            {value}
+          </h1>
           {subtitle && (
             <p className="text-[10px] sm:text-xs text-muted-foreground truncate">
               {typeof subtitle === 'string' ? subtitle : subtitle}
@@ -233,6 +223,7 @@ function HeaderSettingsButton() {
       variant="ghost"
       size="icon"
       onClick={open}
+      aria-label="Settings"
       className="text-muted-foreground hover:text-foreground hover:bg-accent transition-all duration-200 h-8 w-8"
     >
       <Settings className="w-4 h-4" />
@@ -245,13 +236,11 @@ export const Header = Object.assign(HeaderBase, {
   Title: HeaderTitle,
   EditableTitle: HeaderEditableTitle,
   Actions: HeaderActions,
-  MobileDropdown: HeaderMobileDropdown,
   Settings: HeaderSettingsButton,
 }) as typeof HeaderBase & {
   BackButton: typeof HeaderBackButton;
   Title: typeof HeaderTitle;
   EditableTitle: typeof HeaderEditableTitle;
   Actions: typeof HeaderActions;
-  MobileDropdown: typeof HeaderMobileDropdown;
   Settings: typeof HeaderSettingsButton;
 };

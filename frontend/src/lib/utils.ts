@@ -2,8 +2,17 @@ import { clsx, type ClassValue } from "clsx"
 import { twMerge } from "tailwind-merge"
 import type { CSSProperties } from "react"
 
+export { getRepoDisplayName } from '@opencode-manager/shared/utils'
+
 export function cn(...inputs: ClassValue[]) {
   return twMerge(clsx(inputs))
+}
+
+export function randomId(): string {
+  if (typeof crypto !== 'undefined' && typeof crypto.randomUUID === 'function') {
+    return crypto.randomUUID()
+  }
+  return `${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 11)}`
 }
 
 export const GPU_ACCELERATED_STYLE: CSSProperties = {
@@ -13,20 +22,6 @@ export const GPU_ACCELERATED_STYLE: CSSProperties = {
 }
 
 export const MODAL_TRANSITION_MS = 300
-
-function getPathBaseName(filePath: string): string {
-  return filePath.split(/[\\/]/).pop() || filePath
-}
-
-export function getRepoDisplayName(repoUrl?: string | null, localPath?: string | null, sourcePath?: string | null): string {
-  if (repoUrl) {
-    return repoUrl.split("/").pop()?.replace(".git", "") || "Repository"
-  }
-  if (sourcePath) {
-    return getPathBaseName(sourcePath) || localPath || 'Repository'
-  }
-  return localPath || "Repository"
-}
 
 export function sanitizeForTTS(text: string): string {
   if (!text) return ''
@@ -39,11 +34,11 @@ export function sanitizeForTTS(text: string): string {
   // Remove inline code, keep content: `code` -> code
   sanitized = sanitized.replace(/`([^`]+)`/g, '$1')
 
+  // Remove markdown images: ![alt](url) -> alt (must run before link regex to avoid leaving stray !)
+  sanitized = sanitized.replace(/!\[([^\]]*)\]\([^)]+\)/g, '$1')
+
   // Remove markdown links, keep display text: [text](url) -> text
   sanitized = sanitized.replace(/\[([^\]]+)\]\([^)]+\)/g, '$1')
-
-  // Remove markdown images: ![alt](url) -> alt
-  sanitized = sanitized.replace(/!\[([^\]]*)\]\([^)]+\)/g, '$1')
 
   // Remove bold markers: **text** -> text or __text__ -> text
   sanitized = sanitized.replace(/\*\*([^*]+)\*\*/g, '$1')

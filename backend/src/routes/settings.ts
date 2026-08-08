@@ -1,13 +1,15 @@
-import { Hono } from 'hono'
+import { Hono, type Context } from 'hono'
 import { z } from 'zod'
 import { execSync, spawnSync } from 'child_process'
+import { randomUUID } from 'crypto'
 import { existsSync } from 'fs'
 import { resolve, dirname } from 'path'
 import type { Database } from 'bun:sqlite'
 import { SettingsService } from '../services/settings'
 import { writeFileContent, readFileContent, fileExists } from '../services/file-operations'
-import { patchOpenCodeConfig, proxyToOpenCodeWithDirectory } from '../services/proxy'
-import { getOpenCodeConfigFilePath, getAgentsMdPath, ENV } from '@opencode-manager/shared/config/env'
+import { patchConfigWithRecovery } from '../services/opencode/config-recovery'
+import type { OpenCodeClient } from '../services/opencode/client'
+import { getOpenCodeConfigFilePath, getAgentsMdPath } from '@opencode-manager/shared/config/env'
 import {
   UserPreferencesSchema,
   OpenCodeConfigSchema,
@@ -17,20 +19,46 @@ import {
   CreateSkillRequestSchema,
   UpdateSkillRequestSchema,
   SkillScopeSchema,
+  InstallSkillFromGithubRequestSchema,
+  InstallSkillUploadRequestSchema,
+  type SkillScope,
 } from '@opencode-manager/shared'
 import { logger } from '../utils/logger'
-import { opencodeServerManager } from '../services/opencode-single-server'
+import {
+  discoverModelsCached,
+} from '../utils/discovery-cache'
+import { opencodeServerManager, ConfigReloadError } from '../services/opencode-single-server'
+import { getOrCreateInternalToken, rotateInternalToken } from '../services/internal-token'
+import { sseAggregator } from '../services/sse-aggregator'
+import type { OpenCodeSupervisor } from '../services/opencode-supervisor'
+import { restartOpenCode, reloadOpenCodeConfig, getOpenCodeRestartCoordinator } from '../services/opencode-restart'
+import type { GitAuthService } from '../services/git-auth'
 import { DEFAULT_AGENTS_MD } from '../constants'
 import { validateSSHPrivateKey } from '../utils/ssh-validation'
 import { encryptSecret } from '../utils/crypto'
 import { compareVersions, isValidVersion } from '../utils/version-utils'
+import { getImportedSessionDirectories, getOpenCodeImportStatus, OpenCodeImportProtectionError, syncOpenCodeImport } from '../services/opencode-import'
+import { relinkReposFromSessionDirectories } from '../services/repo'
+import { ENV } from '@opencode-manager/shared/config/env'
 import {
   listManagedSkills,
   getSkill,
   createSkill,
   updateSkill,
   deleteSkill,
+  installSkillFromGithubTree,
+  installSkillFromUploadedFiles,
 } from '../services/skills'
+import {
+  installOpenCodeDirectoryFiles,
+  listOpenCodeDirectoryFiles,
+  getOpenCodeDirectoryFile,
+  updateOpenCodeDirectoryFile,
+  deleteOpenCodeDirectoryFile,
+} from '../services/opencode-directory-files'
+import { parseUploadManifest, readUploadedManifestFiles, UploadValidationError } from './upload-utils'
+import { getRepoById } from '../db/queries'
+import { githubFetch } from '../utils/github'
 
 function getOpenCodeInstallMethod(): string {
   const homePath = process.env.HOME || ''
@@ -51,6 +79,161 @@ function getOpenCodeInstallMethod(): string {
   }
   
   return 'curl'
+}
+
+function getOpenCodeConfigContentToWrite(
+  rawContent: string,
+  appliedConfig?: Record<string, unknown>,
+  removedFields?: string[]
+): string {
+  if (!appliedConfig || !removedFields || removedFields.length === 0) {
+    return rawContent
+  }
+
+  return JSON.stringify(appliedConfig, null, 2)
+}
+
+async function restartOpenCodeSafe(openCodeSupervisor: OpenCodeSupervisor | undefined, context: string): Promise<void> {
+  try {
+    await restartOpenCode(openCodeSupervisor)
+    logger.info(`Restarted OpenCode server after ${context}`)
+  } catch (restartError) {
+    logger.warn(`Failed to restart OpenCode server after ${context}:`, restartError)
+  }
+}
+
+async function dispatchSkillReload(
+  db: Database,
+  openCodeClient: OpenCodeClient,
+  openCodeSupervisor: OpenCodeSupervisor | undefined,
+  repoId: number,
+): Promise<void> {
+  const repo = getRepoById(db, repoId)
+  if (!repo) {
+    logger.warn(`Cannot dispatch skill reload: repo ${repoId} not found`)
+    return
+  }
+
+  await restartOpenCodeSafe(openCodeSupervisor, 'skill install')
+
+  try {
+    await openCodeClient.forward({
+      method: 'GET',
+      path: '/skill',
+      directory: repo.fullPath,
+    })
+    logger.info(`Dispatched skill reload for project ${repo.fullPath}`)
+  } catch (dispatchError) {
+    logger.warn('Failed to dispatch skill reload:', dispatchError)
+  }
+}
+
+async function reloadAfterSkillInstall(
+  db: Database,
+  openCodeClient: OpenCodeClient,
+  openCodeSupervisor: OpenCodeSupervisor | undefined,
+  scope: SkillScope,
+  repoId: number | undefined,
+): Promise<boolean> {
+  if (scope === 'project' && repoId !== undefined) {
+    await dispatchSkillReload(db, openCodeClient, openCodeSupervisor, repoId)
+    return false
+  }
+
+  opencodeServerManager.markRestartPending()
+  return true
+}
+
+const OPENCODE_DIRECTORY_UPLOAD_ERROR_STATUS: ReadonlyArray<readonly [string, 400]> = [
+  ['No markdown', 400],
+  ['Path must be relative', 400],
+  ['Path must not contain', 400],
+  ['Path must reference', 400],
+  ['escapes', 400],
+  ['Missing upload file', 400],
+  ['not a valid file', 400],
+]
+
+function matchErrorStatus<T extends number>(
+  table: ReadonlyArray<readonly [string, T]>,
+  error: Error,
+): T | null {
+  const match = table.find(([needle]) => error.message.includes(needle))
+  return match ? match[1] : null
+}
+
+function handleOpenCodeDirectoryFileError(c: Context, error: unknown, operation: string) {
+  logger.error(`Failed to ${operation} OpenCode directory file:`, error)
+
+  if (error instanceof z.ZodError) {
+    return c.json({ error: 'Invalid request', details: error.issues }, 400)
+  }
+
+  if (error instanceof Error) {
+    if ('code' in error && error.code === 'ENOENT') {
+      return c.json({ error: 'File not found' }, 404)
+    }
+
+    const status = matchErrorStatus(OPENCODE_DIRECTORY_UPLOAD_ERROR_STATUS, error)
+    if (status) {
+      return c.json({ error: error.message }, status)
+    }
+  }
+
+  return c.json({ error: `Failed to ${operation} OpenCode directory file` }, 500)
+}
+
+const SKILL_INSTALL_ERROR_STATUS: ReadonlyArray<readonly [string, 400 | 404 | 409]> = [
+  ['already exists', 409],
+  ['404', 404],
+  ['Invalid GitHub tree URL', 400],
+  ['Invalid skill name', 400],
+  ['Only one skill', 400],
+  ['Skill source must contain', 400],
+  ['Path must be relative', 400],
+  ['Path must not contain', 400],
+  ['escapes', 400],
+  ['no downloadable files', 400],
+  ['repoId is required', 400],
+  ['Missing upload file', 400],
+  ['Invalid repoId', 400],
+  ['not a valid file', 400],
+]
+
+function didConfigFieldChange(
+  previous: Record<string, unknown> | undefined,
+  next: Record<string, unknown> | undefined,
+  field: string
+): boolean {
+  return JSON.stringify(previous?.[field]) !== JSON.stringify(next?.[field])
+}
+
+function needsOpenCodeRestart(
+  previous: Record<string, unknown> | undefined,
+  next: Record<string, unknown> | undefined
+): boolean {
+  return ['agent', 'plugin', 'skills', 'provider'].some((field) => didConfigFieldChange(previous, next, field))
+}
+
+function parseOptionalRepoId(value: string | undefined): number | undefined {
+  if (value === undefined) return undefined
+  const parsed = parseInt(value, 10)
+  if (isNaN(parsed)) throw new Error('Invalid repoId')
+  return parsed
+}
+
+function parseBooleanFormValue(value: unknown): boolean | undefined {
+  if (value === true || value === 'true') return true
+  if (value === false || value === 'false') return false
+  return undefined
+}
+
+function getMarkdownUploadManifest(manifest: ReturnType<typeof parseUploadManifest>) {
+  return manifest.filter(entry => entry.relativePath.toLowerCase().endsWith('.md'))
+}
+
+function hasConfiguredPlugins(config: Record<string, unknown> | undefined): boolean {
+  return Array.isArray(config?.plugin) && config.plugin.length > 0
 }
 
 function execWithTimeout(
@@ -153,6 +336,10 @@ const TestSSHConnectionSchema = z.object({
   passphrase: z.string().optional(),
 })
 
+const SyncOpenCodeImportSchema = z.object({
+  overwriteState: z.boolean().optional(),
+})
+
 
 async function extractOpenCodeError(response: Response, defaultError: string): Promise<string> {
   const errorObj = await response.json().catch(() => null)
@@ -161,7 +348,7 @@ async function extractOpenCodeError(response: Response, defaultError: string): P
     : defaultError
 }
 
-export function createSettingsRoutes(db: Database) {
+export function createSettingsRoutes(db: Database, gitAuthService: GitAuthService, openCodeClient: OpenCodeClient, openCodeSupervisor?: OpenCodeSupervisor) {
   const app = new Hono()
   const settingsService = new SettingsService(db)
 
@@ -173,19 +360,6 @@ export function createSettingsRoutes(db: Database) {
     } catch (error) {
       logger.error('Failed to get settings:', error)
       return c.json({ error: 'Failed to get settings' }, 500)
-    }
-  })
-
-  app.get('/memory-plugin-status', async (c) => {
-    try {
-      const userId = c.req.query('userId') || 'default'
-      const configs = settingsService.getOpenCodeConfigs(userId)
-      const defaultConfig = configs.configs.find((cfg: { isDefault: boolean }) => cfg.isDefault)
-      const isEnabled = defaultConfig?.content?.plugin?.includes('@opencode-manager/memory') ?? false
-      return c.json({ memoryPluginEnabled: isEnabled })
-    } catch (error) {
-      logger.error('Failed to get memory plugin status:', error)
-      return c.json({ error: 'Failed to get memory plugin status' }, 500)
     }
   })
 
@@ -206,6 +380,7 @@ export function createSettingsRoutes(db: Database) {
 
               const result: GitCredential = {
                 ...cred,
+                id: cred.id || randomUUID(),
                 sshPrivateKeyEncrypted: encryptSecret(cred.sshPrivateKey),
                 hasPassphrase: validation.hasPassphrase,
                 passphrase: cred.passphrase ? encryptSecret(cred.passphrase) : undefined,
@@ -213,10 +388,13 @@ export function createSettingsRoutes(db: Database) {
               delete result.sshPrivateKey
               return result
             }
-            return cred
+            return { ...cred, id: cred.id || randomUUID() }
           })
         )
         validated.preferences.gitCredentials = validations
+        if (validated.preferences.defaultGitCredentialId && !validations.some((cred) => cred.id === validated.preferences.defaultGitCredentialId)) {
+          validated.preferences.defaultGitCredentialId = undefined
+        }
       }
 
       const currentSettings = settingsService.getSettings(userId)
@@ -235,7 +413,7 @@ export function createSettingsRoutes(db: Database) {
         const changeType = [credentialsChanged && 'credentials', identityChanged && 'identity'].filter(Boolean).join(' and ')
         logger.info(`Git ${changeType} changed, reloading OpenCode configuration`)
         try {
-          await opencodeServerManager.reloadConfig()
+          await reloadOpenCodeConfig(openCodeSupervisor)
           serverRestarted = true
         } catch (error) {
           logger.warn('Failed to reload OpenCode config after git settings change:', error)
@@ -284,20 +462,73 @@ export function createSettingsRoutes(db: Database) {
       const userId = c.req.query('userId') || 'default'
       const body = await c.req.json()
       const validated = CreateOpenCodeConfigSchema.parse(body)
-      
-      const config = settingsService.createOpenCodeConfig(validated, userId)
-      
-      if (config.isDefault) {
-        const configPath = getOpenCodeConfigFilePath()
-        await writeFileContent(configPath, config.rawContent)
-        logger.info(`Wrote default config to: ${configPath}`)
-        
-        const patchResult = await patchOpenCodeConfig(config.content)
-        if (!patchResult.success) {
-          return c.json({ error: 'Config saved but failed to apply', details: patchResult.error }, 500)
+
+      if (validated.isDefault) {
+        settingsService.saveLastKnownGoodConfig(userId)
+
+        const provisionalConfig = settingsService.createOpenCodeConfig(
+          { ...validated, isDefault: false },
+          userId,
+          { suppressAutoDefault: true }
+        )
+
+        if (hasConfiguredPlugins(provisionalConfig.content)) {
+          const config = settingsService.updateOpenCodeConfig(provisionalConfig.name, {
+            content: provisionalConfig.rawContent,
+            isDefault: true,
+          }, userId)
+
+          if (!config) {
+            return c.json({ error: 'Failed to finalize OpenCode config creation' }, 500)
+          }
+
+          const configPath = getOpenCodeConfigFilePath()
+          await writeFileContent(configPath, provisionalConfig.rawContent)
+          logger.info(`Wrote default config to: ${configPath}`)
+          opencodeServerManager.clearStartupError()
+          await restartOpenCode(openCodeSupervisor)
+
+          return c.json(config)
         }
+
+        const patchResult = await patchConfigWithRecovery(openCodeClient, provisionalConfig.content)
+        if (!patchResult.success) {
+          settingsService.deleteOpenCodeConfig(provisionalConfig.name, userId)
+          return c.json({ 
+            error: 'Config validation failed', 
+            details: patchResult.error,
+            validationIssues: patchResult.details,
+            removedFields: patchResult.removedFields
+          }, 400)
+        }
+
+        const contentToWrite = getOpenCodeConfigContentToWrite(
+          provisionalConfig.rawContent,
+          patchResult.appliedConfig,
+          patchResult.removedFields
+        )
+        const config = settingsService.updateOpenCodeConfig(provisionalConfig.name, {
+          content: contentToWrite,
+          isDefault: true,
+        }, userId)
+
+        if (!config) {
+          return c.json({ error: 'Failed to finalize OpenCode config creation' }, 500)
+        }
+
+        const configPath = getOpenCodeConfigFilePath()
+        await writeFileContent(configPath, contentToWrite)
+        logger.info(`Wrote default config to: ${configPath}`)
+
+        if (patchResult.removedFields && patchResult.removedFields.length > 0) {
+          logger.info(`Config applied with auto-removed fields: ${patchResult.removedFields.join(', ')}`)
+          return c.json({ ...config, removedFields: patchResult.removedFields })
+        }
+
+        return c.json(config)
       }
-      
+
+      const config = settingsService.createOpenCodeConfig(validated, userId)
       return c.json(config)
     } catch (error) {
       logger.error('Failed to create OpenCode config:', error)
@@ -319,7 +550,7 @@ export function createSettingsRoutes(db: Database) {
       const validated = UpdateOpenCodeConfigSchema.parse(body)
       
       const existingConfig = settingsService.getOpenCodeConfigByName(configName, userId)
-      const existingAgents = existingConfig?.content?.agent
+      const previousContent = existingConfig?.content
       
       const config = settingsService.updateOpenCodeConfig(configName, validated, userId)
       if (!config) {
@@ -327,24 +558,47 @@ export function createSettingsRoutes(db: Database) {
       }
       
       if (config.isDefault) {
+        const restartRequired = needsOpenCodeRestart(previousContent, config.content)
         const configPath = getOpenCodeConfigFilePath()
-        await writeFileContent(configPath, config.rawContent)
-        logger.info(`Wrote default config to: ${configPath}`)
-        
-        const newAgents = config.content?.agent
-        const agentsChanged = JSON.stringify(existingAgents) !== JSON.stringify(newAgents)
-        
-        if (agentsChanged) {
-          logger.info('Agent configuration changed, restarting OpenCode server')
-          await opencodeServerManager.restart()
+
+        if (restartRequired) {
+          await writeFileContent(configPath, config.rawContent)
+          logger.info(`Wrote default config to: ${configPath}`)
+          logger.info('OpenCode configuration change requires a server restart; deferring until requested')
+          opencodeServerManager.markRestartPending()
+          return c.json({ ...config, restartRequired: true })
         } else {
-          const patchResult = await patchOpenCodeConfig(config.content)
+          const patchResult = await patchConfigWithRecovery(openCodeClient, config.content)
           if (!patchResult.success) {
-            return c.json({ error: 'Config saved but failed to apply', details: patchResult.error }, 500)
+            return c.json({ 
+              error: 'Config saved but failed to apply', 
+              details: patchResult.error,
+              validationIssues: patchResult.details,
+              removedFields: patchResult.removedFields
+            }, 500)
+          }
+          
+          const removedFields = patchResult.removedFields ?? []
+          const contentToWrite = removedFields.length > 0
+            ? JSON.stringify(patchResult.appliedConfig ?? config.content, null, 2)
+            : config.rawContent
+
+          await writeFileContent(configPath, contentToWrite)
+          logger.info(`Wrote default config to: ${configPath}`)
+
+          if (removedFields.length > 0) {
+            logger.info(`Config applied with auto-removed fields: ${removedFields.join(', ')}`)
+            const persisted = settingsService.updateOpenCodeConfig(configName, { content: contentToWrite }, userId)
+            if (!persisted) {
+              return c.json({
+                error: 'OpenCode config was removed while applying recovered fields',
+              }, 409)
+            }
+            return c.json({ ...persisted, removedFields })
           }
         }
       }
-      
+
       return c.json(config)
     } catch (error) {
       logger.error('Failed to update OpenCode config:', error)
@@ -379,18 +633,61 @@ export function createSettingsRoutes(db: Database) {
 
       settingsService.saveLastKnownGoodConfig(userId)
 
+      const existingConfig = settingsService.getOpenCodeConfigByName(configName, userId)
+      if (!existingConfig) {
+        return c.json({ error: 'Config not found' }, 404)
+      }
+
+      if (hasConfiguredPlugins(existingConfig.content)) {
+        const config = settingsService.setDefaultOpenCodeConfig(configName, userId)
+        if (!config) {
+          return c.json({ error: 'Config not found' }, 404)
+        }
+
+        const configPath = getOpenCodeConfigFilePath()
+        await writeFileContent(configPath, existingConfig.rawContent)
+        logger.info(`Wrote default config '${configName}' to: ${configPath}`)
+        opencodeServerManager.clearStartupError()
+        await restartOpenCode(openCodeSupervisor)
+
+        return c.json(config)
+      }
+
+      const patchResult = await patchConfigWithRecovery(openCodeClient, existingConfig.content)
+      if (!patchResult.success) {
+        return c.json({ 
+          error: 'Config validation failed', 
+          details: patchResult.error,
+          validationIssues: patchResult.details,
+          removedFields: patchResult.removedFields
+        }, 400)
+      }
+
+      const contentToWrite = getOpenCodeConfigContentToWrite(
+        existingConfig.rawContent,
+        patchResult.appliedConfig,
+        patchResult.removedFields
+      )
+      const updatedConfig = settingsService.updateOpenCodeConfig(configName, {
+        content: contentToWrite,
+      }, userId)
+
+      if (!updatedConfig) {
+        return c.json({ error: 'Failed to update OpenCode config' }, 500)
+      }
+
       const config = settingsService.setDefaultOpenCodeConfig(configName, userId)
       if (!config) {
         return c.json({ error: 'Config not found' }, 404)
       }
 
       const configPath = getOpenCodeConfigFilePath()
-      await writeFileContent(configPath, config.rawContent)
+      await writeFileContent(configPath, contentToWrite)
       logger.info(`Wrote default config '${configName}' to: ${configPath}`)
 
-      const patchResult = await patchOpenCodeConfig(config.content)
-      if (!patchResult.success) {
-        return c.json({ error: 'Config saved but failed to apply', details: patchResult.error }, 500)
+      if (patchResult.removedFields && patchResult.removedFields.length > 0) {
+        logger.info(`Config applied with auto-removed fields: ${patchResult.removedFields.join(', ')}`)
+        return c.json({ ...config, removedFields: patchResult.removedFields })
       }
       
       return c.json(config)
@@ -420,8 +717,12 @@ export function createSettingsRoutes(db: Database) {
     try {
       logger.info('Manual OpenCode server restart requested')
       opencodeServerManager.clearStartupError()
-      await opencodeServerManager.restart()
-      return c.json({ success: true, message: 'OpenCode server restarted successfully' })
+      const { resumedSessionIDs } = await restartOpenCode(openCodeSupervisor)
+      return c.json({
+        success: true,
+        message: 'OpenCode server restarted successfully',
+        resumedSessions: resumedSessionIDs,
+      })
     } catch (error) {
       logger.error('Failed to restart OpenCode server:', error)
       const startupError = opencodeServerManager.getLastStartupError()
@@ -432,16 +733,99 @@ export function createSettingsRoutes(db: Database) {
     }
   })
 
+  app.get('/opencode-import/status', async (c) => {
+    try {
+      return c.json(await getOpenCodeImportStatus())
+    } catch (error) {
+      logger.error('Failed to get OpenCode import status:', error)
+      return c.json({
+        error: 'Failed to get OpenCode import status',
+        details: error instanceof Error ? error.message : 'Unknown error'
+      }, 500)
+    }
+  })
+
+  app.post('/opencode-import', async (c) => {
+    try {
+      const userId = c.req.query('userId') || 'default'
+      const rawBody = c.req.header('content-type')?.includes('application/json') ? await c.req.json() : {}
+      const body = SyncOpenCodeImportSchema.parse(rawBody)
+      const result = await syncOpenCodeImport({
+        db,
+        userId,
+        overwriteState: body.overwriteState ?? false,
+        protectExistingState: true,
+      })
+
+      if (!result.configImported && !result.stateImported) {
+        return c.json({
+          error: 'No importable OpenCode host data found',
+          ...result,
+        }, 404)
+      }
+
+      let relinkedRepos
+      if (result.stateImported) {
+        const importedSessions = await getImportedSessionDirectories(result.workspaceStatePath)
+        relinkedRepos = await relinkReposFromSessionDirectories(db, gitAuthService, importedSessions.directories)
+      } else {
+        relinkedRepos = {
+          repos: [],
+          relinkedCount: 0,
+          existingCount: 0,
+          nonRepoPathCount: 0,
+          duplicatePathCount: 0,
+          errors: [],
+        }
+      }
+
+      opencodeServerManager.clearStartupError()
+      await restartOpenCode(openCodeSupervisor)
+
+      return c.json({
+        success: true,
+        message: 'Imported existing OpenCode host data and restarted the server',
+        serverRestarted: true,
+        relinkedRepos,
+        ...result,
+      })
+    } catch (error) {
+      logger.error('Failed to import existing OpenCode host data:', error)
+      if (error instanceof z.ZodError) {
+        return c.json({ error: 'Invalid OpenCode import request', details: error.issues }, 400)
+      }
+      if (error instanceof OpenCodeImportProtectionError) {
+        return c.json({
+          error: error.message,
+          code: error.code,
+          detail: error.detail,
+        }, 409)
+      }
+      return c.json({
+        error: 'Failed to import existing OpenCode host data',
+        details: error instanceof Error ? error.message : 'Unknown error'
+      }, 500)
+    }
+  })
+
   app.post('/opencode-reload', async (c) => {
     try {
       logger.info('OpenCode configuration reload requested')
-      await fetch(`http://${ENV.OPENCODE.HOST}:${ENV.OPENCODE.PORT}/config`, {
-        method: 'GET'
-      })
-      await opencodeServerManager.reloadConfig()
+      await reloadOpenCodeConfig(openCodeSupervisor)
       return c.json({ success: true, message: 'OpenCode configuration reloaded successfully' })
     } catch (error) {
       logger.error('Failed to reload OpenCode config:', error)
+      if (error instanceof ConfigReloadError) {
+        const details = error.validationIssues.length > 0
+          ? error.validationIssues.map((issue) => `${issue.path}: ${issue.message}`).join('; ')
+          : error.message
+        return c.json({
+          error: error.message,
+          details,
+          validationIssues: error.validationIssues,
+          removedFields: error.removedFields
+        }, 500)
+      }
       return c.json({
         error: 'Failed to reload OpenCode configuration',
         details: error instanceof Error ? error.message : 'Unknown error'
@@ -470,7 +854,7 @@ export function createSettingsRoutes(db: Database) {
 
       opencodeServerManager.clearStartupError()
       try {
-        await opencodeServerManager.reloadConfig()
+        await reloadOpenCodeConfig(openCodeSupervisor)
       } catch (reloadError) {
         logger.error('Rollback config reload failed, attempting restart:', reloadError)
 
@@ -480,7 +864,7 @@ export function createSettingsRoutes(db: Database) {
           await new Promise(r => setTimeout(r, 1000))
 
           opencodeServerManager.clearStartupError()
-          await opencodeServerManager.restart()
+          await restartOpenCode(openCodeSupervisor)
 
           return c.json({
             success: true,
@@ -522,7 +906,7 @@ export function createSettingsRoutes(db: Database) {
         throw new Error('Upgrade command timed out after 90 seconds')
       }
 
-      const newVersion = opencodeServerManager.getVersion() || await opencodeServerManager.fetchVersion()
+      const newVersion = await opencodeServerManager.fetchVersion()
       logger.info(`New OpenCode version: ${newVersion}`)
 
       const upgraded = oldVersion && newVersion && compareVersions(newVersion, oldVersion) > 0
@@ -530,18 +914,12 @@ export function createSettingsRoutes(db: Database) {
       if (upgraded) {
         logger.info(`OpenCode upgraded from v${oldVersion} to v${newVersion}`)
         opencodeServerManager.clearStartupError()
-        try {
-          await opencodeServerManager.reloadConfig()
-          logger.info('OpenCode server reloaded after upgrade')
-        } catch (reloadError) {
-          logger.warn('Config reload after upgrade failed, attempting full restart:', reloadError)
-          await opencodeServerManager.restart()
-          logger.info('OpenCode server restarted after upgrade')
-        }
+        await restartOpenCode(openCodeSupervisor)
+        logger.info('OpenCode server restarted after upgrade')
 
         return c.json({
           success: true,
-          message: `OpenCode upgraded from v${oldVersion} to v${newVersion} and configuration reloaded`,
+          message: `OpenCode upgraded from v${oldVersion} to v${newVersion} and restarted`,
           oldVersion,
           newVersion,
           upgraded: true
@@ -565,7 +943,7 @@ export function createSettingsRoutes(db: Database) {
 
       opencodeServerManager.clearStartupError()
       try {
-        await opencodeServerManager.restart()
+        await restartOpenCode(openCodeSupervisor)
         logger.warn('OpenCode server restarted after upgrade failure')
         recovered = true
         recoveryMessage = 'Server recovered'
@@ -611,11 +989,8 @@ export function createSettingsRoutes(db: Database) {
     try {
       logger.info('Fetching available OpenCode versions from GitHub')
       
-      const response = await fetch('https://api.github.com/repos/sst/opencode/releases?per_page=20', {
-        headers: {
-          'Accept': 'application/vnd.github.v3+json',
-          'User-Agent': 'opencode-manager'
-        }
+      const response = await githubFetch('https://api.github.com/repos/sst/opencode/releases?per_page=20', {
+        accept: 'application/vnd.github.v3+json',
       })
       
       if (!response.ok) {
@@ -686,7 +1061,7 @@ export function createSettingsRoutes(db: Database) {
       logger.info(`New OpenCode version: ${newVersion}`)
 
       opencodeServerManager.clearStartupError()
-      await opencodeServerManager.restart()
+      await restartOpenCode(openCodeSupervisor)
       logger.info('OpenCode server restarted after version change')
 
       return c.json({
@@ -704,7 +1079,7 @@ export function createSettingsRoutes(db: Database) {
 
       opencodeServerManager.clearStartupError()
       try {
-        await opencodeServerManager.restart()
+        await restartOpenCode(openCodeSupervisor)
         logger.warn('OpenCode server restarted after install failure')
         recovered = true
         recoveryMessage = 'Server recovered'
@@ -863,7 +1238,7 @@ export function createSettingsRoutes(db: Database) {
       await writeFileContent(agentsMdPath, content)
       logger.info(`Updated AGENTS.md at: ${agentsMdPath}`)
       
-      await opencodeServerManager.restart()
+      await restartOpenCode(openCodeSupervisor)
       logger.info('Restarted OpenCode server after AGENTS.md update')
       
       return c.json({ success: true })
@@ -878,13 +1253,10 @@ export function createSettingsRoutes(db: Database) {
 
   app.get('/skills', async (c) => {
     try {
-      const repoIdParam = c.req.query('repoId')
-      const repoId = repoIdParam ? parseInt(repoIdParam, 10) : undefined
-      if (repoId !== undefined && isNaN(repoId)) {
-        return c.json({ error: 'Invalid repoId' }, 400)
-      }
+      const repoId = parseOptionalRepoId(c.req.query('repoId'))
+      const directory = c.req.query('directory')
       
-      const skills = await listManagedSkills(db, repoId)
+      const skills = await listManagedSkills(db, openCodeClient, repoId, directory)
       return c.json(skills)
     } catch (error) {
       logger.error('Failed to list skills:', error)
@@ -892,26 +1264,206 @@ export function createSettingsRoutes(db: Database) {
     }
   })
 
+  app.post('/opencode-directory-files/install', async (c) => {
+    try {
+      const contentType = c.req.header('content-type') || ''
+      if (!contentType.includes('multipart/form-data')) {
+        return c.json({ error: 'Unsupported content type. Use multipart/form-data' }, 400)
+      }
+
+      const formData = await c.req.parseBody({ all: true })
+      const kind = z.enum(['agents', 'commands']).parse(formData['kind'])
+
+      const manifest = parseUploadManifest(formData['fileManifest'])
+      const markdownManifest = getMarkdownUploadManifest(manifest)
+      if (markdownManifest.length === 0) {
+        return c.json({ error: `No markdown ${kind} files found` }, 400)
+      }
+
+      const files = await readUploadedManifestFiles(formData, markdownManifest)
+
+      const result = await installOpenCodeDirectoryFiles(kind, files)
+      opencodeServerManager.markRestartPending()
+
+      return c.json({ ...result, restartRequired: true })
+    } catch (error) {
+      logger.error('Failed to install OpenCode directory files:', error)
+
+      if (error instanceof UploadValidationError) {
+        return c.json({ error: error.message }, 400)
+      }
+
+      if (error instanceof z.ZodError) {
+        return c.json({ error: 'Invalid upload data', details: error.issues }, 400)
+      }
+
+      if (error instanceof Error) {
+        const status = matchErrorStatus(OPENCODE_DIRECTORY_UPLOAD_ERROR_STATUS, error)
+        if (status) {
+          return c.json({ error: error.message }, status)
+        }
+      }
+
+      return c.json({ error: 'Failed to install OpenCode directory files' }, 500)
+    }
+  })
+
+  app.get('/opencode-directory-files', async (c) => {
+    try {
+      const kind = z.enum(['agents', 'commands']).parse(c.req.query('kind'))
+      return c.json(await listOpenCodeDirectoryFiles(kind))
+    } catch (error) {
+      logger.error('Failed to list OpenCode directory files:', error)
+
+      if (error instanceof z.ZodError) {
+        return c.json({ error: 'Invalid file kind', details: error.issues }, 400)
+      }
+
+      return c.json({ error: 'Failed to list OpenCode directory files' }, 500)
+    }
+  })
+
+  app.get('/opencode-directory-files/content', async (c) => {
+    try {
+      const kind = z.enum(['agents', 'commands']).parse(c.req.query('kind'))
+      const relativePath = z.string().min(1).parse(c.req.query('relativePath'))
+      return c.json(await getOpenCodeDirectoryFile(kind, relativePath))
+    } catch (error) {
+      return handleOpenCodeDirectoryFileError(c, error, 'read')
+    }
+  })
+
+  app.put('/opencode-directory-files', async (c) => {
+    try {
+      const body = await c.req.json()
+      const { kind, relativePath, content } = z
+        .object({
+          kind: z.enum(['agents', 'commands']),
+          relativePath: z.string().min(1),
+          content: z.string(),
+        })
+        .parse(body)
+
+      const result = await updateOpenCodeDirectoryFile(kind, relativePath, content)
+      opencodeServerManager.markRestartPending()
+
+      return c.json({ ...result, restartRequired: true })
+    } catch (error) {
+      return handleOpenCodeDirectoryFileError(c, error, 'update')
+    }
+  })
+
+  app.delete('/opencode-directory-files', async (c) => {
+    try {
+      const kind = z.enum(['agents', 'commands']).parse(c.req.query('kind'))
+      const relativePath = z.string().min(1).parse(c.req.query('relativePath'))
+
+      await deleteOpenCodeDirectoryFile(kind, relativePath)
+      opencodeServerManager.markRestartPending()
+
+      return c.json({ kind, relativePath, restartRequired: true })
+    } catch (error) {
+      return handleOpenCodeDirectoryFileError(c, error, 'delete')
+    }
+  })
+
+  app.post('/skills/install', async (c) => {
+    try {
+      const contentType = c.req.header('content-type') || ''
+
+      if (contentType.includes('application/json')) {
+        const body = await c.req.json()
+        const validated = InstallSkillFromGithubRequestSchema.parse(body)
+
+        if (validated.scope === 'project' && validated.repoId === undefined) {
+          return c.json({ error: 'repoId is required for project scope' }, 400)
+        }
+
+        const result = await installSkillFromGithubTree(db, validated)
+
+        const restartRequired = await reloadAfterSkillInstall(db, openCodeClient, openCodeSupervisor, validated.scope, validated.repoId)
+
+        return c.json({ ...result, restartRequired })
+      }
+
+      if (contentType.includes('multipart/form-data')) {
+        const formData = await c.req.parseBody({ all: true })
+
+        const scope = formData['scope']
+        const repoIdValue = formData['repoId']
+        const overwriteValue = formData['overwrite']
+
+        const manifest = parseUploadManifest(formData['fileManifest'])
+
+        const repoId = parseOptionalRepoId(repoIdValue as string | undefined)
+        const overwrite = parseBooleanFormValue(overwriteValue)
+
+        const uploadRequest = InstallSkillUploadRequestSchema.parse({
+          sourceType: 'upload',
+          scope,
+          repoId,
+          overwrite,
+        })
+
+        if (scope === 'project' && repoId === undefined) {
+          return c.json({ error: 'repoId is required for project scope' }, 400)
+        }
+
+        if (manifest.length === 0) {
+          return c.json({ error: 'fileManifest must contain at least one entry' }, 400)
+        }
+
+        const files = await readUploadedManifestFiles(formData, manifest)
+
+        const result = await installSkillFromUploadedFiles(db, uploadRequest, files)
+
+        const restartRequired = await reloadAfterSkillInstall(db, openCodeClient, openCodeSupervisor, uploadRequest.scope, uploadRequest.repoId)
+
+        return c.json({ ...result, restartRequired })
+      }
+
+      return c.json({ error: 'Unsupported content type. Use application/json or multipart/form-data' }, 400)
+    } catch (error) {
+      logger.error('Failed to install skill:', error)
+
+      if (error instanceof UploadValidationError) {
+        return c.json({ error: error.message }, 400)
+      }
+
+      if (error instanceof z.ZodError) {
+        return c.json({ error: 'Invalid skill install data', details: error.issues }, 400)
+      }
+
+      if (error instanceof Error) {
+        const status = matchErrorStatus(SKILL_INSTALL_ERROR_STATUS, error)
+        if (status) {
+          return c.json({ error: error.message }, status)
+        }
+      }
+
+      return c.json({ error: 'Failed to install skill' }, 500)
+    }
+  })
+
   app.get('/skills/:name', async (c) => {
     try {
       const name = c.req.param('name')
       const scope = SkillScopeSchema.parse(c.req.query('scope'))
-      const repoIdParam = c.req.query('repoId')
-      const repoId = repoIdParam ? parseInt(repoIdParam, 10) : undefined
-      if (repoId !== undefined && isNaN(repoId)) {
-        return c.json({ error: 'Invalid repoId' }, 400)
-      }
+      const repoId = parseOptionalRepoId(c.req.query('repoId'))
 
       if (scope === 'project' && !repoId) {
         return c.json({ error: 'repoId is required for project scope' }, 400)
       }
 
-      const skill = await getSkill(db, name, scope, repoId)
+      const skill = await getSkill(db, openCodeClient, name, scope, repoId)
       return c.json(skill)
     } catch (error) {
       logger.error('Failed to get skill:', error)
       if (error instanceof z.ZodError) {
         return c.json({ error: 'Invalid scope parameter. Must be "global" or "project"' }, 400)
+      }
+      if (error instanceof Error && error.message.includes('Invalid repoId')) {
+        return c.json({ error: error.message }, 400)
       }
       if (error instanceof Error && error.message.includes('not found')) {
         return c.json({ error: error.message }, 404)
@@ -929,15 +1481,10 @@ export function createSettingsRoutes(db: Database) {
       const validated = CreateSkillRequestSchema.parse(body)
 
       const skill = await createSkill(db, validated)
-      
-      try {
-        await opencodeServerManager.restart()
-        logger.info('Restarted OpenCode server after skill creation')
-      } catch (restartError) {
-        logger.warn('Failed to restart OpenCode server after skill creation:', restartError)
-      }
-      
-      return c.json(skill)
+
+      opencodeServerManager.markRestartPending()
+
+      return c.json({ ...skill, restartRequired: true })
     } catch (error) {
       logger.error('Failed to create skill:', error)
       if (error instanceof z.ZodError) {
@@ -954,11 +1501,7 @@ export function createSettingsRoutes(db: Database) {
     try {
       const name = c.req.param('name')
       const scope = SkillScopeSchema.parse(c.req.query('scope'))
-      const repoIdParam = c.req.query('repoId')
-      const repoId = repoIdParam ? parseInt(repoIdParam, 10) : undefined
-      if (repoId !== undefined && isNaN(repoId)) {
-        return c.json({ error: 'Invalid repoId' }, 400)
-      }
+      const repoId = parseOptionalRepoId(c.req.query('repoId'))
       const body = await c.req.json()
       const validated = UpdateSkillRequestSchema.parse(body)
 
@@ -966,20 +1509,18 @@ export function createSettingsRoutes(db: Database) {
         return c.json({ error: 'repoId is required for project scope' }, 400)
       }
 
-      const skill = await updateSkill(db, name, scope, validated, repoId)
-      
-      try {
-        await opencodeServerManager.restart()
-        logger.info('Restarted OpenCode server after skill update')
-      } catch (restartError) {
-        logger.warn('Failed to restart OpenCode server after skill update:', restartError)
-      }
-      
-      return c.json(skill)
+      const skill = await updateSkill(db, openCodeClient, name, scope, validated, repoId)
+
+      opencodeServerManager.markRestartPending()
+
+      return c.json({ ...skill, restartRequired: true })
     } catch (error) {
       logger.error('Failed to update skill:', error)
       if (error instanceof z.ZodError) {
         return c.json({ error: 'Invalid request data', details: error.issues }, 400)
+      }
+      if (error instanceof Error && error.message.includes('Invalid repoId')) {
+        return c.json({ error: error.message }, 400)
       }
       if (error instanceof Error && error.message.includes('not found')) {
         return c.json({ error: error.message }, 404)
@@ -995,30 +1536,24 @@ export function createSettingsRoutes(db: Database) {
     try {
       const name = c.req.param('name')
       const scope = SkillScopeSchema.parse(c.req.query('scope'))
-      const repoIdParam = c.req.query('repoId')
-      const repoId = repoIdParam ? parseInt(repoIdParam, 10) : undefined
-      if (repoId !== undefined && isNaN(repoId)) {
-        return c.json({ error: 'Invalid repoId' }, 400)
-      }
+      const repoId = parseOptionalRepoId(c.req.query('repoId'))
 
       if (scope === 'project' && !repoId) {
         return c.json({ error: 'repoId is required for project scope' }, 400)
       }
 
       await deleteSkill(db, name, scope, repoId)
-      
-      try {
-        await opencodeServerManager.restart()
-        logger.info('Restarted OpenCode server after skill deletion')
-      } catch (restartError) {
-        logger.warn('Failed to restart OpenCode server after skill deletion:', restartError)
-      }
-      
-      return c.json({ success: true })
+
+      opencodeServerManager.markRestartPending()
+
+      return c.json({ success: true, restartRequired: true })
     } catch (error) {
       logger.error('Failed to delete skill:', error)
       if (error instanceof z.ZodError) {
         return c.json({ error: 'Invalid scope parameter. Must be "global" or "project"' }, 400)
+      }
+      if (error instanceof Error && error.message.includes('Invalid repoId')) {
+        return c.json({ error: error.message }, 400)
       }
       if (error instanceof Error && error.message.includes('not found')) {
         return c.json({ error: error.message }, 404)
@@ -1055,6 +1590,7 @@ export function createSettingsRoutes(db: Database) {
 
         const sshArgs = [
           '-T',
+          '-v',
           '-i', keyPath,
           '-o', 'IdentitiesOnly=yes',
           '-o', 'PasswordAuthentication=no',
@@ -1111,7 +1647,8 @@ export function createSettingsRoutes(db: Database) {
 
         const authenticated = outputStr.includes('successfully authenticated') ||
                               outputStr.includes('You\'ve successfully authenticated') ||
-                              outputStr.includes('Welcome to')
+                              outputStr.includes('Welcome to') ||
+                              outputStr.includes('Authenticated to')
 
         if (authenticated) {
           logger.info(`SSH connection test to ${host} succeeded`)
@@ -1151,11 +1688,11 @@ export function createSettingsRoutes(db: Database) {
       const body = await c.req.json()
       const { directory } = ConnectMcpDirectorySchema.parse(body)
       
-      const response = await proxyToOpenCodeWithDirectory(
-        `/mcp/${encodeURIComponent(serverName)}/connect`,
-        'POST',
-        directory
-      )
+      const response = await (openCodeClient).forward({
+        method: 'POST',
+        path: `/mcp/${encodeURIComponent(serverName)}/connect`,
+        directory,
+      })
       
       if (!response.ok) {
         const errorMsg = await extractOpenCodeError(response, 'Failed to connect MCP server')
@@ -1178,11 +1715,11 @@ export function createSettingsRoutes(db: Database) {
       const body = await c.req.json()
       const { directory } = ConnectMcpDirectorySchema.parse(body)
       
-      const response = await proxyToOpenCodeWithDirectory(
-        `/mcp/${encodeURIComponent(serverName)}/disconnect`,
-        'POST',
-        directory
-      )
+      const response = await (openCodeClient).forward({
+        method: 'POST',
+        path: `/mcp/${encodeURIComponent(serverName)}/disconnect`,
+        directory,
+      })
       
       if (!response.ok) {
         const errorMsg = await extractOpenCodeError(response, 'Failed to disconnect MCP server')
@@ -1205,11 +1742,11 @@ export function createSettingsRoutes(db: Database) {
       const body = await c.req.json()
       const { directory } = McpAuthDirectorySchema.parse(body)
       
-      const response = await proxyToOpenCodeWithDirectory(
-        `/mcp/${encodeURIComponent(serverName)}/auth/authenticate`,
-        'POST',
+      const response = await (openCodeClient).forward({
+        method: 'POST',
+        path: `/mcp/${encodeURIComponent(serverName)}/auth/authenticate`,
         directory,
-      )
+      })
       
       if (!response.ok) {
         const errorMsg = await extractOpenCodeError(response, 'Failed to authenticate MCP server')
@@ -1232,11 +1769,11 @@ export function createSettingsRoutes(db: Database) {
       const body = await c.req.json()
       const { directory } = ConnectMcpDirectorySchema.parse(body)
       
-      const response = await proxyToOpenCodeWithDirectory(
-        `/mcp/${encodeURIComponent(serverName)}/auth`,
-        'DELETE',
-        directory
-      )
+      const response = await (openCodeClient).forward({
+        method: 'DELETE',
+        path: `/mcp/${encodeURIComponent(serverName)}/auth`,
+        directory,
+      })
       
       if (!response.ok) {
         const errorMsg = await extractOpenCodeError(response, 'Failed to remove MCP auth')
@@ -1250,6 +1787,125 @@ export function createSettingsRoutes(db: Database) {
         return c.json({ error: 'Invalid request data', details: error.issues }, 400)
       }
       return c.json({ error: 'Failed to remove MCP auth' }, 500)
+    }
+  })
+
+  const OpenCodeServerAuthBodySchema = z.object({
+    password: z.union([z.string().min(8), z.null()]),
+  })
+
+  app.get('/opencode-server-auth', async (c) => {
+    try {
+      const hasStored = settingsService.hasStoredOpenCodeServerPassword()
+      const source = hasStored ? 'db' : ENV.OPENCODE.SERVER_PASSWORD ? 'env' : 'none'
+      const isSet = source !== 'none'
+      return c.json({ isSet, source })
+    } catch (error) {
+      logger.error('Failed to get OpenCode server auth status:', error)
+      return c.json({ error: 'Failed to get OpenCode server auth status' }, 500)
+    }
+  })
+
+  app.patch('/opencode-server-auth', async (c) => {
+    try {
+      const body = await c.req.json()
+      const validated = OpenCodeServerAuthBodySchema.parse(body)
+      const previousPasswordState = settingsService.getStoredOpenCodeServerPasswordState()
+
+      if (validated.password === null) {
+        settingsService.clearOpenCodeServerPassword()
+      } else if (validated.password) {
+        settingsService.setOpenCodeServerPassword(validated.password)
+      }
+
+      try {
+        await opencodeServerManager.restart()
+      } catch (restartError) {
+        try {
+          settingsService.restoreOpenCodeServerPasswordState(previousPasswordState)
+          await opencodeServerManager.restart()
+          sseAggregator.reconnect()
+        } catch (restoreError) {
+          logger.error('Failed to restore OpenCode server auth runtime after restart failure:', restoreError)
+        }
+        throw restartError
+      }
+
+      sseAggregator.reconnect()
+
+      const hasStored = settingsService.hasStoredOpenCodeServerPassword()
+      const source = hasStored ? 'db' : ENV.OPENCODE.SERVER_PASSWORD ? 'env' : 'none'
+      const isSet = source !== 'none'
+      return c.json({ isSet, source })
+    } catch (error) {
+      logger.error('Failed to update OpenCode server auth:', error)
+      if (error instanceof z.ZodError) {
+        return c.json({ error: 'Invalid request data', details: error.issues }, 400)
+      }
+      return c.json({ error: 'Failed to update OpenCode server auth' }, 500)
+    }
+  })
+
+  app.get('/manager-token', async (c) => {
+    try {
+      const token = getOrCreateInternalToken(db)
+      return c.json({ token })
+    } catch (error) {
+      logger.error('Failed to get manager token:', error)
+      return c.json({ error: 'Failed to get manager token' }, 500)
+    }
+  })
+
+  app.post('/manager-token/rotate', async (c) => {
+    try {
+      const token = rotateInternalToken(db)
+      return c.json({ token })
+    } catch (error) {
+      logger.error('Failed to rotate manager token:', error)
+      return c.json({ error: 'Failed to rotate manager token' }, 500)
+    }
+  })
+
+  app.get('/opencode-active-sessions', (c) => {
+    const sessions = getOpenCodeRestartCoordinator()?.captureResumableSessions() ?? []
+    return c.json({ count: sessions.length, sessions })
+  })
+
+  app.get('/opencode-discover-models', async (c) => {
+    try {
+      const baseUrl = c.req.query('baseUrl')
+      const apiKey = c.req.query('apiKey') || ''
+      const forceRefresh = c.req.query('refresh') === 'true'
+
+      if (!baseUrl || !baseUrl.trim()) {
+        return c.json({ error: 'baseUrl is required' }, 400)
+      }
+
+      let parsedUrl: URL
+      try {
+        parsedUrl = new URL(baseUrl.trim())
+      } catch {
+        return c.json({ error: 'Invalid baseUrl' }, 400)
+      }
+      if (parsedUrl.protocol !== 'http:' && parsedUrl.protocol !== 'https:') {
+        return c.json({ error: 'baseUrl must be an http or https URL' }, 400)
+      }
+
+      const trimmedBaseUrl = baseUrl.trim()
+
+      const { models, cached } = await discoverModelsCached({
+        baseUrl: trimmedBaseUrl,
+        apiKey,
+        type: 'opencode-models',
+        filterPattern: /.*/,
+        defaultModels: [],
+        forceRefresh,
+      })
+
+      return c.json({ models, cached })
+    } catch (error) {
+      logger.error('Failed to discover OpenCode models:', error)
+      return c.json({ error: 'Failed to discover models' }, 500)
     }
   })
 

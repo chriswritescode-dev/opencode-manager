@@ -24,9 +24,28 @@ function ensureMigrationsTable(db: Database): void {
   `)
 }
 
-function getAppliedVersions(db: Database): Set<number> {
-  const rows = db.prepare('SELECT version FROM schema_migrations ORDER BY version').all() as MigrationRecord[]
-  return new Set(rows.map(r => r.version))
+function getAppliedMigrations(db: Database): Map<number, string> {
+  const rows = db.prepare('SELECT version, name FROM schema_migrations ORDER BY version').all() as MigrationRecord[]
+  return new Map(rows.map(r => [r.version, r.name]))
+}
+
+/**
+ * Surfaces version-number collisions where a recorded migration's name differs
+ * from the code migration registered under the same version. The runner keys on
+ * version number alone, so a reused version silently skips the real migration
+ * (e.g. an ADD COLUMN), producing later runtime errors that are hard to trace.
+ * This converts that silent skip into a loud, actionable warning.
+ */
+function warnOnVersionNameMismatch(applied: Map<number, string>, migrations: Migration[]): void {
+  for (const migration of migrations) {
+    const recordedName = applied.get(migration.version)
+    if (recordedName !== undefined && recordedName !== migration.name) {
+      logger.warn(
+        `Migration version ${migration.version} is recorded as "${recordedName}" but the code defines "${migration.name}". ` +
+        `This migration was skipped; its schema changes may be missing. Verify the database schema and apply the changes manually if needed.`,
+      )
+    }
+  }
 }
 
 function markApplied(db: Database, migration: Migration): void {
@@ -34,14 +53,11 @@ function markApplied(db: Database, migration: Migration): void {
     .run(migration.version, migration.name, Date.now())
 }
 
-function markReverted(db: Database, version: number): void {
-  db.prepare('DELETE FROM schema_migrations WHERE version = ?').run(version)
-}
-
 export function migrate(db: Database, migrations: Migration[]): void {
   ensureMigrationsTable(db)
 
-  const applied = getAppliedVersions(db)
+  const applied = getAppliedMigrations(db)
+  warnOnVersionNameMismatch(applied, migrations)
   const sorted = [...migrations].sort((a, b) => a.version - b.version)
   const pending = sorted.filter(m => !applied.has(m.version))
 
@@ -70,49 +86,4 @@ export function migrate(db: Database, migrations: Migration[]): void {
   logger.info('All migrations applied successfully')
 }
 
-export function rollback(db: Database, migrations: Migration[], targetVersion?: number): void {
-  ensureMigrationsTable(db)
 
-  const applied = getAppliedVersions(db)
-  const sorted = [...migrations]
-    .filter(m => applied.has(m.version))
-    .sort((a, b) => b.version - a.version)
-
-  if (sorted.length === 0) {
-    logger.info('No migrations to rollback')
-    return
-  }
-
-  const latest = sorted[0]
-  if (!latest) {
-    logger.info('No migrations to rollback')
-    return
-  }
-  const target = targetVersion ?? latest.version - 1
-
-  const toRevert = sorted.filter(m => m.version > target)
-
-  if (toRevert.length === 0) {
-    logger.info('No migrations to rollback')
-    return
-  }
-
-  logger.info(`Rolling back ${toRevert.length} migration(s) to version ${target}`)
-
-  for (const migration of toRevert) {
-    logger.info(`Reverting migration ${migration.version}: ${migration.name}`)
-    db.run('BEGIN TRANSACTION')
-    try {
-      migration.down(db)
-      markReverted(db, migration.version)
-      db.run('COMMIT')
-      logger.info(`Migration ${migration.version} reverted successfully`)
-    } catch (error) {
-      db.run('ROLLBACK')
-      logger.error(`Rollback of migration ${migration.version} failed:`, error)
-      throw error
-    }
-  }
-
-  logger.info('Rollback completed successfully')
-}

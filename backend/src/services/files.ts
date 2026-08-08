@@ -3,6 +3,7 @@ import path from 'path'
 import { createReadStream } from 'fs'
 import { createInterface } from 'readline'
 import { logger } from '../utils/logger'
+import { mkdirSafe } from '../utils/fs-safe'
 
 import { 
   readFileContent, 
@@ -13,11 +14,12 @@ import {
   getFileStats, 
   listDirectory 
 } from './file-operations'
-import { getReposPath, FILE_LIMITS } from '@opencode-manager/shared/config/env'
+import { getReposPath, getWorkspacePath, FILE_LIMITS } from '@opencode-manager/shared/config/env'
 import { ALLOWED_MIME_TYPES, type AllowedMimeType } from '@opencode-manager/shared'
 import type { ChunkedFileInfo, PatchOperation } from '@opencode-manager/shared'
 
 const SHARED_WORKSPACE_BASE = getReposPath()
+const WORKSPACE_BASE = getWorkspacePath()
 
 interface FileInfo {
   name: string
@@ -159,7 +161,7 @@ export async function uploadFile(userPath: string, file: File, relativePath?: st
   }
   
   const parentDir = path.dirname(fullPath)
-  await fs.mkdir(parentDir, { recursive: true })
+  await mkdirSafe(parentDir)
   
   const buffer = await file.arrayBuffer()
   
@@ -177,7 +179,7 @@ export async function createFileOrFolder(userPath: string, body: { type: 'file' 
   const validatedPath = validatePath(userPath)
   
   if (body.type === 'folder') {
-  await fs.mkdir(validatedPath, { recursive: true })
+  await mkdirSafe(validatedPath)
   return {
     name: path.basename(validatedPath),
     path: userPath,
@@ -215,7 +217,7 @@ export async function renameOrMoveFile(userPath: string, body: { newPath: string
   const newValidatedPath = validatePath(body.newPath)
   
   // Create parent directory if needed
-  await fs.mkdir(path.dirname(newValidatedPath), { recursive: true })
+  await mkdirSafe(path.dirname(newValidatedPath))
   
   // Move/rename file
   await fs.rename(oldValidatedPath, newValidatedPath)
@@ -234,12 +236,12 @@ export async function renameOrMoveFile(userPath: string, body: { newPath: string
 
 function validatePath(userPath: string): string {
   const trimmed = userPath.trim()
-  const normalized = path.normalize(trimmed).replace(/^(\.\.(\/|\\|$))+/, '')
+  const normalized = path.normalize(trimmed || '.')
   const fullPath = path.join(SHARED_WORKSPACE_BASE, normalized)
   const resolved = path.resolve(fullPath)
   
-  const basePath = path.resolve(SHARED_WORKSPACE_BASE)
-  if (!resolved.startsWith(basePath)) {
+  const basePath = path.resolve(WORKSPACE_BASE)
+  if (resolved !== basePath && !resolved.startsWith(`${basePath}${path.sep}`)) {
     throw { message: 'Path traversal detected', statusCode: 403 }
   }
   

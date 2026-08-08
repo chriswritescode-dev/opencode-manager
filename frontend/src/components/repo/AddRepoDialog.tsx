@@ -1,15 +1,15 @@
-import { useState } from 'react'
-import { useMutation, useQueryClient } from '@tanstack/react-query'
-import { Badge } from '@/components/ui/badge'
-import { createRepo, discoverRepos } from '@/api/repos'
+import { useState, useRef, useCallback, useMemo } from 'react'
+import { useMutation, useQueryClient, useQuery } from '@tanstack/react-query'
+import { listRepos, createRepo, discoverRepos } from '@/api/repos'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
-import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from '@/components/ui/dialog'
-import { Drawer, DrawerContent, DrawerDescription, DrawerFooter, DrawerHeader, DrawerTitle } from '@/components/ui/drawer'
-import { useMobile } from '@/hooks/useMobile'
-import { cn } from '@/lib/utils'
-import { Loader2 } from 'lucide-react'
+import { Dialog, DialogContent, DialogHeader, DialogTitle } from '@/components/ui/dialog'
+import { Tabs, TabsList, TabsTrigger } from '@/components/ui/tabs'
+import { DirectoryPickerDialog } from './DirectoryPickerDialog'
+import { Loader2, FolderSearch } from 'lucide-react'
 import { showToast } from '@/lib/toast'
+import { invalidateRepoListCaches } from '@/lib/queryInvalidation'
+import { getRepoBaseDirectoryName, getRepoDirectoryNameError, getRepoNameFromUrl, normalizeRepoUrlForCompare, sanitizeRepoDirectoryName } from '@opencode-manager/shared/utils'
 import type { DiscoverReposResponse } from '@opencode-manager/shared/types'
 import type { Repo } from '@/api/types'
 
@@ -24,8 +24,11 @@ export function AddRepoDialog({ open, onOpenChange }: AddRepoDialogProps) {
   const [repoUrl, setRepoUrl] = useState('')
   const [localPath, setLocalPath] = useState('')
   const [folderPath, setFolderPath] = useState('')
+  const [directoryName, setDirectoryName] = useState('')
   const [branch, setBranch] = useState('')
   const [skipSSHVerification, setSkipSSHVerification] = useState(false)
+  const [pickerOpen, setPickerOpen] = useState(false)
+  const directoryTouched = useRef(false)
   const queryClient = useQueryClient()
 
   const isSSHUrl = (url: string): boolean => {
@@ -33,6 +36,29 @@ export function AddRepoDialog({ open, onOpenChange }: AddRepoDialogProps) {
   }
 
   const showSkipSSHCheckbox = repoType === 'remote' && isSSHUrl(repoUrl)
+  const showDirectoryName = repoType === 'remote'
+
+  const { data: existingRepos } = useQuery({
+    queryKey: ['repos'],
+    queryFn: listRepos,
+    staleTime: 30_000,
+  })
+
+  const directoryNameError = useMemo(() => {
+    if (!showDirectoryName || !directoryName) return null
+    return getRepoDirectoryNameError(directoryName)
+  }, [showDirectoryName, directoryName])
+
+  const directoryCollision = useMemo(() => {
+    if (!showDirectoryName || !directoryName || directoryNameError || !existingRepos) return null
+    const normalizedNewUrl = normalizeRepoUrlForCompare(repoUrl)
+    const colliding = existingRepos.find((r) => {
+      if (r.localPath !== directoryName && getRepoBaseDirectoryName(r) !== directoryName) return false
+      if (r.repoUrl && normalizeRepoUrlForCompare(r.repoUrl) === normalizedNewUrl) return false
+      return true
+    })
+    return colliding ?? null
+  }, [showDirectoryName, directoryName, directoryNameError, existingRepos, repoUrl])
 
   type AddRepoResult =
     | { mode: 'single'; repo: Repo }
@@ -41,7 +67,7 @@ export function AddRepoDialog({ open, onOpenChange }: AddRepoDialogProps) {
   const mutation = useMutation({
     mutationFn: async (): Promise<AddRepoResult> => {
       if (repoType === 'local') {
-        const repo = await createRepo(undefined, localPath, branch || undefined, undefined, false)
+        const repo = await createRepo({ localPath, branch: branch || undefined, useWorktree: false })
         return { mode: 'single', repo }
       }
 
@@ -50,18 +76,25 @@ export function AddRepoDialog({ open, onOpenChange }: AddRepoDialogProps) {
         return { mode: 'discover', ...result }
       }
 
-      const repo = await createRepo(repoUrl, undefined, branch || undefined, undefined, false, skipSSHVerification)
+      const repo = await createRepo({
+        repoUrl,
+        directoryName: directoryName || undefined,
+        branch: branch || undefined,
+        useWorktree: false,
+        skipSSHVerification,
+      })
       return { mode: 'single', repo }
     },
     onSuccess: (result) => {
-      queryClient.invalidateQueries({ queryKey: ['repos'] })
-      queryClient.invalidateQueries({ queryKey: ['reposGitStatus'] })
+      invalidateRepoListCaches(queryClient)
       setRepoUrl('')
       setLocalPath('')
       setFolderPath('')
+      setDirectoryName('')
       setBranch('')
       setRepoType('remote')
       setSkipSSHVerification(false)
+      directoryTouched.current = false
 
       if (result.mode === 'discover') {
         const summary = [
@@ -95,168 +128,176 @@ export function AddRepoDialog({ open, onOpenChange }: AddRepoDialogProps) {
     }
   }
 
-  const handleRepoUrlChange = (value: string) => {
+  const handleRepoUrlChange = useCallback((value: string) => {
     setRepoUrl(value)
     if (!isSSHUrl(value)) {
       setSkipSSHVerification(false)
     }
-  }
+    if (!directoryTouched.current) {
+      const extracted = sanitizeRepoDirectoryName(getRepoNameFromUrl(value))
+      setDirectoryName(extracted)
+    }
+  }, [])
 
-  const repoTypeOptions = [
-    {
-      id: 'remote' as const,
-      label: 'Remote Repository',
-      description: 'Clone from GitHub, GitLab, or any accessible remote.',
-    },
-    {
-      id: 'local' as const,
-      label: 'Local Repository',
-      description: 'Import a local path or initialize a fresh workspace repo.',
-    },
-    {
-      id: 'folder' as const,
-      label: 'Folder Discovery',
-      description: 'Scan a parent folder and import every nested Git repository.',
-    },
-  ]
+  const handleDirectoryNameChange = useCallback((value: string) => {
+    directoryTouched.current = true
+    setDirectoryName(value)
+  }, [])
 
-  const sourceValue = repoType === 'remote' ? repoUrl : repoType === 'local' ? localPath : folderPath
-  const sourceLabel = repoType === 'remote' ? 'Repository URL' : repoType === 'local' ? 'Local Path' : 'Folder Path'
-  const sourcePlaceholder = repoType === 'remote'
-    ? 'owner/repo or https://github.com/user/repo.git'
-    : repoType === 'local'
-      ? 'my-local-project OR /absolute/path/to/git-repo'
-      : '/absolute/path/to/projects'
-  const sourceDescription = repoType === 'remote'
-    ? 'Full URL or shorthand format for GitHub repositories.'
-    : repoType === 'local'
-      ? 'Use a new directory name or an absolute path to an existing Git repository.'
-      : 'Scans the folder for nested Git repositories and links each one in place.'
-  const branchOutcome = branch
-    ? repoType === 'remote'
-      ? `Clones directly to '${branch}'.`
-      : repoType === 'folder'
-        ? 'Folder discovery keeps each repository on its current branch.'
-        : localPath?.startsWith('/')
-        ? `Copies the repo and checks out '${branch}' (creating it if needed).`
-        : `Initializes the repository with '${branch}'.`
-    : repoType === 'remote'
-      ? 'Clones the repository to its default branch.'
-      : repoType === 'folder'
-        ? 'Finds and links each repository on its current branch.'
-        : localPath?.startsWith('/')
-          ? 'Copies the repo and keeps the current branch.'
-          : "Initializes the repository with 'main'."
-  const submitLabel = mutation.isPending
-    ? repoType === 'folder'
-      ? 'Discovering...'
-      : repoType === 'local'
-        ? 'Initializing...'
-        : 'Cloning...'
-    : repoType === 'folder'
-      ? 'Discover Repositories'
-      : 'Add Repository'
-  const isSubmitDisabled = (!repoUrl && repoType === 'remote') || (!localPath && repoType === 'local') || (!folderPath && repoType === 'folder') || mutation.isPending
-
-  const formSections = (
-    <div className="space-y-4">
-      <div className="surface-panel rounded-[1.5rem] p-4 sm:p-5">
-        <div className="flex flex-wrap items-center gap-2">
-          <p className="text-[11px] font-medium uppercase tracking-[0.22em] text-muted-foreground">Import Plan</p>
-          <Badge variant={repoType === 'remote' ? 'info' : repoType === 'folder' ? 'warning' : 'secondary'}>
-            {repoType === 'remote' ? 'Remote' : repoType === 'folder' ? 'Folder' : 'Local'}
-          </Badge>
-          {showSkipSSHCheckbox && skipSSHVerification && <Badge variant="warning">SSH verification disabled</Badge>}
-        </div>
-        <div className="mt-3 grid gap-3 sm:grid-cols-2">
-          <div>
-            <p className="text-xs font-medium uppercase tracking-[0.18em] text-muted-foreground">Source</p>
-            <p className="mt-1 text-sm text-foreground">
-              {sourceValue || (repoType === 'remote' ? 'Choose a remote repository' : repoType === 'folder' ? 'Choose a folder to scan' : 'Choose a local path')}
-            </p>
+  return (
+    <Dialog open={open} onOpenChange={onOpenChange}>
+      <DialogContent mobileFullscreen mobileSwipeToClose className="content-start gap-0 sm:max-w-[500px] sm:max-h-[80vh] sm:h-auto sm:top-[50%] sm:translate-y-[-50%] bg-card border-border">
+        <DialogHeader className="px-4 sm:px-6 pt-2 sm:pt-6 pb-2 sm:pb-3 h-fit">
+          <DialogTitle className="text-xl text-foreground">
+            Add Repository
+          </DialogTitle>
+        </DialogHeader>
+        <form onSubmit={handleSubmit} className="space-y-4 px-4 sm:px-6">
+          <div className="space-y-2">
+            <label className="text-sm text-muted-foreground">Repository Type</label>
+            <Tabs value={repoType} onValueChange={(value) => setRepoType(value as 'remote' | 'local' | 'folder')}>
+              <TabsList className="grid w-full grid-cols-3 bg-muted">
+                <TabsTrigger value="remote">Remote</TabsTrigger>
+                <TabsTrigger value="local">Local</TabsTrigger>
+                <TabsTrigger value="folder">Folder</TabsTrigger>
+              </TabsList>
+            </Tabs>
           </div>
-          <div>
-            <p className="text-xs font-medium uppercase tracking-[0.18em] text-muted-foreground">Branch</p>
-            <p className="mt-1 text-sm text-foreground">
-              {branch || (repoType === 'remote' ? 'Default branch' : repoType === 'folder' ? 'Current branch per repo' : localPath?.startsWith('/') ? 'Keep current branch' : 'main')}
-            </p>
-          </div>
-        </div>
-        <p className="mt-3 text-xs leading-5 text-muted-foreground">{branchOutcome}</p>
-      </div>
 
-      <div className="surface-panel-muted rounded-[1.5rem] p-4 sm:p-5">
-        <label className="text-sm font-medium text-foreground">Repository Type</label>
-        <div className="mt-3 grid gap-2 sm:grid-cols-2">
-          {repoTypeOptions.map((option) => {
-            const isSelected = repoType === option.id
-
-            return (
-              <button
-                key={option.id}
-                type="button"
-                onClick={() => setRepoType(option.id)}
+          {repoType === 'remote' ? (
+            <div className="space-y-2">
+              <label className="text-sm text-muted-foreground">Repository URL</label>
+              <Input
+                placeholder="owner/repo or https://github.com/user/repo.git"
+                value={repoUrl}
+                onChange={(e) => handleRepoUrlChange(e.target.value)}
                 disabled={mutation.isPending}
-                className={cn(
-                  'rounded-2xl border border-border/70 bg-background/70 p-4 text-left transition-[transform,border-color,background-color] hover:border-primary/20 hover:-translate-y-0.5 disabled:pointer-events-none disabled:opacity-50',
-                  isSelected && 'border-primary/35 bg-primary/10'
-                )}
-              >
-                <p className={cn('text-sm font-semibold', isSelected ? 'text-primary' : 'text-foreground')}>
-                  {option.label}
-                </p>
-                <p className="mt-1 text-xs leading-5 text-muted-foreground">{option.description}</p>
-              </button>
-            )
-          })}
-        </div>
-      </div>
+                className="bg-muted border-border text-foreground placeholder:text-muted-foreground min-h-[44px] text-base"
+              />
+              <p className="text-xs text-muted-foreground">
+                Full URL or shorthand format (owner/repo for GitHub)
+              </p>
+            </div>
+          ) : repoType === 'local' ? (
+            <div className="space-y-2">
+              <label className="text-sm text-muted-foreground">Local Path</label>
+              <div className="flex gap-2">
+                <Input
+                  placeholder="my-local-project OR /absolute/path/to/git-repo"
+                  value={localPath}
+                  onChange={(e) => setLocalPath(e.target.value)}
+                  disabled={mutation.isPending}
+                  className="bg-muted border-border text-foreground placeholder:text-muted-foreground min-h-[44px] text-base"
+                />
+                <Button
+                  type="button"
+                  variant="outline"
+                  onClick={() => setPickerOpen(true)}
+                  disabled={mutation.isPending}
+                  className="min-h-[44px] shrink-0 border-border bg-muted px-3 text-muted-foreground hover:bg-accent"
+                  aria-label="Browse for folder"
+                >
+                  <FolderSearch className="h-4 w-4" />
+                </Button>
+              </div>
+              <p className="text-xs text-muted-foreground">
+                Directory name for a new repo, or an absolute path to link an existing Git repo
+              </p>
+            </div>
+          ) : (
+            <div className="space-y-2">
+              <label className="text-sm text-muted-foreground">Folder Path</label>
+              <div className="flex gap-2">
+                <Input
+                  placeholder="/absolute/path/to/projects"
+                  value={folderPath}
+                  onChange={(e) => setFolderPath(e.target.value)}
+                  disabled={mutation.isPending}
+                  className="bg-muted border-border text-foreground placeholder:text-muted-foreground min-h-[44px] text-base"
+                />
+                <Button
+                  type="button"
+                  variant="outline"
+                  onClick={() => setPickerOpen(true)}
+                  disabled={mutation.isPending}
+                  className="min-h-[44px] shrink-0 border-border bg-muted px-3 text-muted-foreground hover:bg-accent"
+                  aria-label="Browse for folder"
+                >
+                  <FolderSearch className="h-4 w-4" />
+                </Button>
+              </div>
+              <p className="text-xs text-muted-foreground">
+                Scans the folder for nested Git repositories and links each one
+              </p>
+            </div>
+          )}
 
-      <div className="surface-panel-muted rounded-[1.5rem] p-4 sm:p-5">
-        <div className="space-y-4">
+          {showDirectoryName && (
+            <div className="space-y-2">
+              <label className="text-sm text-muted-foreground">Directory Name</label>
+              <Input
+                placeholder="Auto-detected from URL"
+                value={directoryName}
+                onChange={(e) => handleDirectoryNameChange(e.target.value)}
+                disabled={mutation.isPending}
+                className="bg-muted border-border text-foreground placeholder:text-muted-foreground min-h-[44px] text-base"
+              />
+              {directoryNameError ? (
+                <p className="text-xs text-amber-400">
+                  {directoryNameError}.
+                </p>
+              ) : directoryCollision ? (
+                <p className="text-xs text-amber-400">
+                  A repository named '{directoryName}' already exists.
+                  {directoryCollision.repoUrl && directoryCollision.repoUrl !== repoUrl
+                    ? ` (${directoryCollision.repoUrl})`
+                    : ''
+                  }
+                  {' '}Choose a different directory name to clone this fork.
+                </p>
+              ) : (
+                <p className="text-xs text-muted-foreground">
+                  Custom directory name for the cloned repository
+                </p>
+              )}
+            </div>
+          )}
+          
           <div className="space-y-2">
-            <label className="text-sm font-medium text-foreground">{sourceLabel}</label>
+            <label className="text-sm text-muted-foreground">Branch (optional)</label>
             <Input
-              placeholder={sourcePlaceholder}
-              value={sourceValue}
-              onChange={(e) => {
-                if (repoType === 'remote') {
-                  handleRepoUrlChange(e.target.value)
-                } else if (repoType === 'local') {
-                  setLocalPath(e.target.value)
-                } else {
-                  setFolderPath(e.target.value)
-                }
-              }}
-              disabled={mutation.isPending}
-            />
-            <p className="text-xs leading-5 text-muted-foreground">{sourceDescription}</p>
-          </div>
-          <div className="space-y-2">
-            <label className="text-sm font-medium text-foreground">Branch</label>
-            <Input
-              placeholder="Optional - uses default if empty"
+              placeholder="Uses default if empty"
               value={branch}
               onChange={(e) => setBranch(e.target.value)}
               disabled={mutation.isPending || repoType === 'folder'}
+              className="bg-muted border-border text-foreground placeholder:text-muted-foreground min-h-[44px] text-base"
             />
-            <p className="text-xs leading-5 text-muted-foreground">{branchOutcome}</p>
+            <p className="text-xs text-muted-foreground">
+              {repoType === 'folder' 
+                ? 'Links each repository on its current branch'
+                : branch 
+                  ? `Uses '${branch}' branch`
+                  : 'Uses default branch'
+              }
+            </p>
           </div>
 
           {showSkipSSHCheckbox && (
-            <label className="rounded-2xl border border-warning/20 bg-warning/10 p-4 flex items-start gap-3">
+            <div className="flex items-start space-x-3">
               <input
                 type="checkbox"
                 id="skip-ssh-verification"
                 checked={skipSSHVerification}
                 onChange={(e) => setSkipSSHVerification(e.target.checked)}
                 disabled={mutation.isPending}
-                className="mt-1 h-4 w-4 rounded border-input bg-background accent-primary focus:ring-primary"
+                className="mt-1 h-5 w-5 rounded border-border bg-muted text-primary focus:ring-primary"
               />
               <div className="flex-1">
-                <span className="cursor-pointer text-sm font-medium text-foreground">Skip SSH host key verification</span>
-                <p className="mt-1 text-xs leading-5 text-muted-foreground">
-                  Auto-accept the SSH host key for self-hosted or internal Git servers.
+                <label htmlFor="skip-ssh-verification" className="cursor-pointer text-sm text-foreground">
+                  Skip SSH host key verification
+                </label>
+                <p className="text-xs text-muted-foreground">
+                  Auto-accept the SSH host key for self-hosted or internal servers
                 </p>
               </div>
             </label>
@@ -264,52 +305,39 @@ export function AddRepoDialog({ open, onOpenChange }: AddRepoDialogProps) {
         </div>
       </div>
 
-      {mutation.isError && (
-        <p className="px-1 text-sm text-destructive">{mutation.error.message}</p>
-      )}
-    </div>
-  )
-
-  const submitButton = (
-    <Button type="submit" disabled={isSubmitDisabled} className="w-full">
-      {mutation.isPending && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}
-      {submitLabel}
-    </Button>
-  )
-
-  if (isMobile) {
-    return (
-      <Drawer open={open} onOpenChange={onOpenChange}>
-        <DrawerContent className="max-h-[94dvh]">
-          <form onSubmit={handleSubmit} className="flex min-h-0 flex-1 flex-col">
-          <DrawerHeader className="border-b border-border/60 pb-4">
-            <DrawerTitle className="heading-ink">Add Repository</DrawerTitle>
-            <DrawerDescription>Bring a remote repo into the workspace, import a local Git directory, or discover repos in a folder.</DrawerDescription>
-          </DrawerHeader>
-          <div className="scrollbar-thin flex-1 overflow-y-auto px-4 py-3 pb-safe">
-            {formSections}
-          </div>
-          <DrawerFooter className="border-t border-border/60 bg-background/90 pb-[calc(1rem+env(safe-area-inset-bottom))] supports-[backdrop-filter]:backdrop-blur-xl">
-            {submitButton}
-          </DrawerFooter>
-          </form>
-        </DrawerContent>
-      </Drawer>
-    )
-  }
-
-  return (
-    <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent className="sm:max-w-[620px]">
-        <DialogHeader>
-          <DialogTitle className="heading-ink text-xl">Add Repository</DialogTitle>
-          <DialogDescription>Bring a remote repo into the workspace, import a local Git directory, or discover repos in a folder.</DialogDescription>
-        </DialogHeader>
-        <form onSubmit={handleSubmit} className="mt-2 space-y-4">
-          {formSections}
-          {submitButton}
+          <Button 
+            type="submit" 
+            disabled={(!repoUrl && repoType === 'remote') || (!localPath && repoType === 'local') || (!folderPath && repoType === 'folder') || mutation.isPending || (showDirectoryName && (!!directoryNameError || !!directoryCollision))}
+            className="w-full min-h-[48px] bg-primary hover:bg-primary-hover text-primary-foreground text-base font-medium"
+          >
+            {mutation.isPending ? (
+              <>
+                <Loader2 className="w-4 h-4 mr-2 animate-spin" />
+                {repoType === 'local' ? 'Linking...' : repoType === 'folder' ? 'Discovering...' : 'Cloning...'}
+              </>
+            ) : (
+              repoType === 'folder' ? 'Discover Repositories' : 'Add Repository'
+            )}
+          </Button>
+          {mutation.isError && (
+            <p className="text-sm text-red-400">
+              {mutation.error.message}
+            </p>
+          )}
         </form>
       </DialogContent>
+      <DirectoryPickerDialog
+        open={pickerOpen}
+        onOpenChange={setPickerOpen}
+        title={repoType === 'folder' ? 'Select Folder to Scan' : 'Select Local Repository'}
+        onSelect={(path) => {
+          if (repoType === 'folder') {
+            setFolderPath(path)
+          } else {
+            setLocalPath(path)
+          }
+        }}
+      />
     </Dialog>
   )
 }

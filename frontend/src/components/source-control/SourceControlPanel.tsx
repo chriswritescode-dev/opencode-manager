@@ -1,6 +1,8 @@
 import { useState } from 'react'
+import { useQuery, useQueryClient } from '@tanstack/react-query'
 import { FetchError } from '@opencode-manager/shared'
 import { useGitStatus, getApiErrorMessage } from '@/api/git'
+import { getRepo } from '@/api/repos'
 
 import { useGit } from '@/hooks/useGit'
 import { ChangesTab } from './ChangesTab'
@@ -26,14 +28,14 @@ import {
 } from 'lucide-react'
 import { cn } from '@/lib/utils'
 import { useMobile } from '@/hooks/useMobile'
+import { invalidateRepoGitCaches } from '@/lib/queryInvalidation'
+import { useRefreshOnOpen } from '@/hooks/useRefreshOnOpen'
 
 interface SourceControlPanelProps {
   repoId: number
   isOpen: boolean
   onClose: () => void
   currentBranch: string
-  repoUrl?: string | null
-  isRepoWorktree?: boolean
   repoName?: string
 }
 
@@ -45,8 +47,6 @@ export function SourceControlPanel({
   isOpen,
   onClose,
   currentBranch,
-  repoUrl,
-  isRepoWorktree,
   repoName,
 }: SourceControlPanelProps) {
   const [activeTab, setActiveTab] = useState<Tab>('changes')
@@ -55,8 +55,17 @@ export function SourceControlPanel({
   const [selectedCommit, setSelectedCommit] = useState<string | undefined>()
   const [selectedCommitFile, setSelectedCommitFile] = useState<string | undefined>()
   const [gitError, setGitError] = useState<{ summary: string; detail?: string } | null>(null)
+  const queryClient = useQueryClient()
   const { data: status } = useGitStatus(repoId)
+  const { data: repo } = useQuery({
+    queryKey: ['repo', repoId],
+    queryFn: () => getRepo(repoId),
+    enabled: isOpen,
+  })
   const isMobile = useMobile()
+  const displayBranch = repo?.currentBranch || repo?.branch || currentBranch
+
+  useRefreshOnOpen(isOpen, () => { invalidateRepoGitCaches(queryClient, repoId) })
 
   const handleGitError = (error: unknown) => {
     if (error instanceof FetchError) {
@@ -104,7 +113,7 @@ export function SourceControlPanel({
         <div className="flex items-center gap-2">
           <div className="flex items-center gap-2">
             <GitBranch className="w-4 h-4 text-muted-foreground" />
-            <span className="text-sm font-medium">{currentBranch}</span>
+            <span className="text-sm font-medium">{displayBranch}</span>
           </div>
           {status && (status.ahead > 0 || status.behind > 0) && (
             <div className="flex items-center gap-1 text-xs text-muted-foreground">
@@ -221,10 +230,10 @@ export function SourceControlPanel({
             />
           )}
           {activeTab === 'commits' && currentView === 'default' && (
-            <CommitsTab repoId={repoId} onSelectCommit={handleSelectCommit} />
+            <CommitsTab repoId={repoId} branch={displayBranch} onSelectCommit={handleSelectCommit} />
           )}
           {activeTab === 'branches' && currentView === 'default' && (
-            <BranchesTab repoId={repoId} currentBranch={currentBranch} repoUrl={repoUrl} isRepoWorktree={isRepoWorktree} />
+            <BranchesTab repoId={repoId} currentBranch={displayBranch} />
           )}
 
           {currentView === 'commit-detail' && selectedCommit && (

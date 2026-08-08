@@ -1,19 +1,14 @@
 import { useState } from "react";
-import { Button } from "@/components/ui/button";
-
-import { Checkbox } from "@/components/ui/checkbox";
-import { Loader2, Trash2, Download, GitBranch, FolderOpen, AlertCircle } from "lucide-react";
 import { useNavigate } from "react-router-dom";
-import { downloadRepo } from "@/api/repos";
-import { showToast } from "@/lib/toast";
+import { Loader2, GitBranch, FolderOpen, AlertCircle } from "lucide-react";
 import { getRepoDisplayName } from "@/lib/utils";
-import type { GitStatusResponse } from "@/types/git";
-import { SourceControlPanel } from "@/components/source-control/SourceControlPanel";
-import { DownloadDialog } from "@/components/ui/download-dialog";
+import type { GitStatusResponse } from "@/types/git"
+import { RepoRowActions } from "./RepoRowActions"
 
 interface RepoCardProps {
   repo: {
     id: number;
+    name?: string | null;
     repoUrl?: string | null;
     localPath?: string;
     sourcePath?: string;
@@ -23,12 +18,18 @@ interface RepoCardProps {
     isWorktree?: boolean;
     isLocal?: boolean;
     fullPath?: string;
+    lastAccessedAt?: number;
   };
   onDelete: (id: number) => void;
   isDeleting: boolean;
   isSelected?: boolean;
   onSelect?: (id: number, selected: boolean) => void;
   gitStatus?: GitStatusResponse;
+  manageMode?: boolean;
+  isMobile?: boolean;
+  activityLabel?: string;
+  hasSelectedRepos?: boolean;
+  selectionMode?: boolean;
 }
 
 export function RepoCard({
@@ -38,12 +39,16 @@ export function RepoCard({
   isSelected = false,
   onSelect,
   gitStatus,
+  manageMode = false,
+  isMobile = false,
+  activityLabel,
+  hasSelectedRepos = false,
+  selectionMode = false,
 }: RepoCardProps) {
   const navigate = useNavigate();
-  const [showDownloadDialog, setShowDownloadDialog] = useState(false);
-  const [showSourceControl, setShowSourceControl] = useState(false);
+  const [actionsOpen, setActionsOpen] = useState(false);
 
-  const repoName = getRepoDisplayName(repo.repoUrl, repo.localPath, repo.sourcePath);
+  const repoName = getRepoDisplayName(repo);
   const branchToDisplay = gitStatus?.branch || repo.currentBranch || repo.branch;
   const isReady = repo.cloneStatus === "ready";
   const isCloning = repo.cloneStatus === "cloning";
@@ -51,26 +56,16 @@ export function RepoCard({
   const isDirty = gitStatus?.hasChanges || false;
   const ahead = gitStatus?.ahead || 0;
   const behind = gitStatus?.behind || 0;
-  const stagedCount = gitStatus?.files.filter((f) => f.staged).length || 0;
-  const unstagedCount = gitStatus?.files.filter((f) => !f.staged).length || 0;
+  const stagedCount = gitStatus?.files?.filter((f) => f.staged).length || 0;
+  const unstagedCount = gitStatus?.files?.filter((f) => !f.staged).length || 0;
 
   const handleCardClick = () => {
-    if (isReady && !showSourceControl && !showDownloadDialog) {
-      navigate(`/repos/${repo.id}`);
+    if (selectionMode && onSelect) {
+      onSelect(repo.id, !isSelected);
+      return;
     }
-  };
-
-  const handleActionClick = (e: React.MouseEvent, action: () => void) => {
-    e.stopPropagation();
-    action();
-  };
-
-  const handleDownload = async (options: { includeGit?: boolean, includePaths?: string[] }) => {
-    try {
-      await downloadRepo(repo.id, repoName, options);
-      showToast.success("Download complete");
-    } catch (error: unknown) {
-      showToast.error(error instanceof Error ? error.message : "Download failed");
+    if (isReady && !actionsOpen) {
+      navigate(`/repos/${repo.id}`);
     }
   };
 
@@ -85,30 +80,28 @@ export function RepoCard({
           : "border-border bg-card"
       }`}
     >
-      <div className="p-2">
+      <div className="p-1.5">
         <div>
-          <div className="flex items-start gap-3 mb-1">
-            {onSelect && (
-              <div
-                onClick={(e) => handleActionClick(e, () => onSelect(repo.id, !isSelected))}
-              >
-                <Checkbox
-                  checked={isSelected}
-                  onCheckedChange={(checked) => onSelect(repo.id, checked === true)}
-                  className="w-5 h-5"
-                />
-              </div>
-            )}
-
-            <div className="flex items-center gap-2">
+          <div className="flex items-start gap-2 mb-1">
+            <div className="flex items-center gap-2 min-w-0 flex-1">
               <h3 className="font-semibold text-base text-foreground truncate">
                 {repoName}
               </h3>
               {isReady && (
                 <div className={`w-2 h-2 rounded-full shrink-0 ${isDirty ? 'bg-warning' : 'bg-success'}`} />
               )}
-
             </div>
+
+            {!manageMode && !isSelected && !hasSelectedRepos && (
+              <RepoRowActions
+                repo={repo}
+                gitStatus={gitStatus}
+                onDelete={onDelete}
+                isDeleting={isDeleting}
+                isMobile={isMobile}
+                onActionsOpenChange={setActionsOpen}
+              />
+            )}
           </div>
 
           <div className="flex items-center gap-2 text-sm text-muted-foreground">
@@ -151,64 +144,14 @@ export function RepoCard({
               )}
             </div>
 
-            <div className="flex items-center gap-1 shrink-0" onClick={(e) => e.stopPropagation()}>
-              <Button
-                size="sm"
-                variant="ghost"
-                onClick={(e) => handleActionClick(e, () => setShowSourceControl(true))}
-                disabled={!isReady}
-                className="h-8 w-8 p-0"
-                title="Source Control"
-              >
-                <GitBranch className="w-4 h-4" />
-              </Button>
-
-              <Button
-                size="sm"
-                variant="ghost"
-                onClick={(e) => handleActionClick(e, () => setShowDownloadDialog(true))}
-                disabled={!isReady}
-                className="h-8 w-8 p-0"
-              >
-                <Download className="w-4 h-4" />
-              </Button>
-
-              <Button
-                size="sm"
-                variant="ghost"
-                onClick={(e) => handleActionClick(e, () => onDelete(repo.id))}
-                disabled={isDeleting}
-                className="h-8 w-8 p-0 text-destructive hover:text-destructive hover:bg-destructive/10"
-              >
-                {isDeleting ? (
-                  <Loader2 className="w-4 h-4 animate-spin" />
-                ) : (
-                  <Trash2 className="w-4 h-4" />
-                )}
-              </Button>
-            </div>
+            {activityLabel && (
+              <span className="text-xs text-muted-foreground/70 shrink-0">
+                {activityLabel}
+              </span>
+            )}
           </div>
         </div>
       </div>
-
-      <SourceControlPanel
-        repoId={repo.id}
-        isOpen={showSourceControl}
-        onClose={() => setShowSourceControl(false)}
-        currentBranch={branchToDisplay || ""}
-        repoUrl={repo.repoUrl}
-        isRepoWorktree={repo.isWorktree}
-        repoName={repoName}
-      />
-      <DownloadDialog
-        open={showDownloadDialog}
-        onOpenChange={setShowDownloadDialog}
-        onDownload={handleDownload}
-        title="Download Repository"
-        description="This will create a ZIP archive of the entire repository."
-        itemName={repoName}
-        targetPath={repo.fullPath}
-      />
     </div>
   );
 }

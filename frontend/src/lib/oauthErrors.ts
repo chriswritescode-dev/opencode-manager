@@ -1,16 +1,17 @@
-export const OAuthMethod = {
-  CODE: 0,
-} as const
+import { FetchError } from '@opencode-manager/shared'
+import { OAUTH_ERROR_CODES, type OAuthErrorCode } from '@opencode-manager/shared/schemas'
 
-export type OAuthMethodType = (typeof OAuthMethod)[keyof typeof OAuthMethod]
+const ERROR_MESSAGES: Record<OAuthErrorCode, string> = {
+  BadRequest: 'The provider rejected the request. Please try the OAuth flow again.',
+  ProviderAuthOauthMissing: 'No authorization is in progress for this provider. Please start the OAuth flow again.',
+  ProviderAuthOauthCodeMissing: 'An authorization code is required. Please paste the code from the provider.',
+  ProviderAuthOauthCallbackFailed: 'The provider rejected the authorization. It may have expired — please try again.',
+  ProviderAuthValidationFailed: 'Some authentication details were invalid. Please check them and try again.',
+  InvalidRequestError: 'The request was invalid. Please check your details and try again.',
+}
 
-const ERROR_MAPPINGS: Record<string, string> = {
-  'invalid code': 'Invalid authorization code. Please try the OAuth flow again.',
-  'expired': 'Authorization code has expired. Please try the OAuth flow again.',
-  'access denied': 'Access was denied. Please check the permissions and try again.',
-  'server error': 'Server error occurred. Please try again later.',
-  'provider not found': 'Provider is not available or does not support OAuth.',
-  'invalid method': 'Invalid authentication method selected.',
+function isOAuthErrorCode(code: string): code is OAuthErrorCode {
+  return (OAUTH_ERROR_CODES as readonly string[]).includes(code)
 }
 
 export function mapOAuthError(err: unknown, context: 'authorize' | 'callback'): string {
@@ -20,10 +21,10 @@ export function mapOAuthError(err: unknown, context: 'authorize' | 'callback'): 
 
   if (!(err instanceof Error)) return defaultMessage
 
-  for (const [key, message] of Object.entries(ERROR_MAPPINGS)) {
-    if (err.message.toLowerCase().includes(key)) {
-      return message
-    }
+  if (err instanceof FetchError && err.code && isOAuthErrorCode(err.code)) {
+    return err.detail
+      ? `${ERROR_MESSAGES[err.code]} (${err.detail})`
+      : ERROR_MESSAGES[err.code]
   }
 
   return err.message || defaultMessage

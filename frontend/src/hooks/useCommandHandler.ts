@@ -57,7 +57,7 @@ export function useCommandHandler({
           onShowModelsDialog?.()
           break
           
-        case 'themes':
+        case 'themes': {
           await client.sendCommand(sessionID, {
             command: command.name,
             arguments: args,
@@ -65,13 +65,14 @@ export function useCommandHandler({
             model: modelString || undefined
           })
           break
+        }
           
         case 'help':
           onShowHelpDialog?.()
           break
           
         case 'new':
-        case 'clear':
+        case 'clear': {
           try {
             const newSession = await createSession.mutateAsync({
               agent: undefined
@@ -91,6 +92,7 @@ export function useCommandHandler({
             showToast.error(`Failed to create new session: ${error instanceof Error ? error.message : 'Unknown error'}`)
           }
           break
+        }
           
         case 'details':
           if (onToggleDetails) {
@@ -129,7 +131,7 @@ export function useCommandHandler({
         case 'undo':
         case 'redo':
         case 'editor':
-        case 'init':
+        case 'init': {
           await client.sendCommand(sessionID, {
             command: command.name,
             arguments: args,
@@ -137,14 +139,16 @@ export function useCommandHandler({
             model: modelString || undefined
           })
           break
+        }
 
-        default:
+        default: {
           await client.sendCommand(sessionID, {
             command: command.name,
             arguments: args,
             agent: currentAgent,
             model: modelString || undefined
           })
+        }
       }
     } catch (error) {
       showToast.error(`Command failed: ${error instanceof Error ? error.message : 'Unknown error'}`)

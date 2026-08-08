@@ -1,20 +1,24 @@
 import type { Repo } from './types'
 import { FetchError, fetchWrapper, fetchWrapperVoid, fetchWrapperBlob } from './fetchWrapper'
 import { API_BASE_URL } from '@/config'
-import type { DiscoverReposResponse } from '@opencode-manager/shared/types'
+import type { DiscoverReposResponse, AssistantModeStatus, AssistantModeInitRequest } from '@opencode-manager/shared/types'
 
-export async function createRepo(
-  repoUrl?: string,
-  localPath?: string,
-  branch?: string,
-  openCodeConfigName?: string,
-  useWorktree?: boolean,
+export interface CreateRepoOptions {
+  repoUrl?: string
+  localPath?: string
+  branch?: string
+  directoryName?: string
+  openCodeConfigName?: string
+  useWorktree?: boolean
   skipSSHVerification?: boolean
-): Promise<Repo> {
+  baseBranch?: string
+}
+
+export async function createRepo(options: CreateRepoOptions = {}): Promise<Repo> {
   return fetchWrapper(`${API_BASE_URL}/api/repos`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ repoUrl, localPath, branch, openCodeConfigName, useWorktree, skipSSHVerification }),
+    body: JSON.stringify(options),
   })
 }
 
@@ -32,6 +36,48 @@ export async function discoverRepos(rootPath: string, maxDepth?: number): Promis
 
 export async function getRepo(id: number): Promise<Repo> {
   return fetchWrapper(`${API_BASE_URL}/api/repos/${id}`)
+}
+
+export type RepoSibling = Repo & {
+  currentBranch?: string
+  workspaceId?: string
+  workspaceType?: string
+  workspaceName?: string
+}
+
+export function workspaceLabel(workspace: RepoSibling): string {
+  return (
+    workspace.currentBranch ||
+    workspace.branch ||
+    workspace.workspaceName ||
+    workspace.workspaceId ||
+    'workspace'
+  )
+}
+
+export interface RepoWorkspace {
+  id: string
+  type: string
+  name?: string | null
+  branch?: string | null
+  directory?: string | null
+  projectID?: string
+}
+
+export async function getRepoSiblings(id: number): Promise<RepoSibling[]> {
+  return fetchWrapper(`${API_BASE_URL}/api/repos/${id}/siblings`)
+}
+
+export async function deleteRepoWorkspace(repoId: number, workspaceId: string): Promise<void> {
+  return fetchWrapperVoid(`${API_BASE_URL}/api/repos/${repoId}/workspaces/${workspaceId}`, {
+    method: 'DELETE',
+  })
+}
+
+export async function createRepoWorkspace(repoId: number): Promise<RepoWorkspace> {
+  return fetchWrapper(`${API_BASE_URL}/api/repos/${repoId}/workspaces`, {
+    method: 'POST',
+  })
 }
 
 export async function deleteRepo(id: number): Promise<void> {
@@ -65,6 +111,22 @@ export async function switchRepoConfig(id: number, configName: string): Promise<
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({ configName }),
+  })
+}
+
+export async function updateRepoGitCredential(id: number, credentialId?: string): Promise<Repo> {
+  return fetchWrapper(`${API_BASE_URL}/api/repos/${id}/git-credential`, {
+    method: 'PATCH',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ credentialId }),
+  })
+}
+
+export async function renameRepo(id: number, name: string | null): Promise<Repo> {
+  return fetchWrapper(`${API_BASE_URL}/api/repos/${id}`, {
+    method: 'PATCH',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ name: name ?? '' }),
   })
 }
 
@@ -155,5 +217,28 @@ export async function updateRepoOrder(order: number[]): Promise<void> {
 export async function resetRepoPermissions(id: number): Promise<void> {
   return fetchWrapperVoid(`${API_BASE_URL}/api/repos/${id}/reset-permissions`, {
     method: 'POST',
+  })
+}
+
+export async function touchRepoActivity(id: number): Promise<void> {
+  return fetchWrapperVoid(`${API_BASE_URL}/api/repos/${id}/access`, {
+    method: 'POST',
+  })
+}
+
+export async function getAssistantModeStatus(id: number): Promise<AssistantModeStatus> {
+  return fetchWrapper(`${API_BASE_URL}/api/repos/${id}/assistant-mode`, {
+    method: 'GET',
+  })
+}
+
+export async function initializeAssistantMode(
+  id: number,
+  options?: AssistantModeInitRequest
+): Promise<AssistantModeStatus> {
+  return fetchWrapper(`${API_BASE_URL}/api/repos/${id}/assistant-mode`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(options ?? {}),
   })
 }

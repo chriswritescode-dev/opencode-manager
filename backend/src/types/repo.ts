@@ -4,6 +4,7 @@ export * from '../../../shared/src/schemas/repo'
 
 export interface Repo extends BaseRepo {
   isWorktree?: boolean
+  lastAccessedAt?: number
 }
 
 interface CreateRepoInputBase {

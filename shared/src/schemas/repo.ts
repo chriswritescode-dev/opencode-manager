@@ -4,6 +4,7 @@ export const RepoStatusSchema = z.enum(['cloning', 'ready', 'error'])
 
 export const RepoSchema = z.object({
   id: z.number(),
+  name: z.string().optional(),
   repoUrl: z.string().url().optional(),
   localPath: z.string(),
   fullPath: z.string(),
@@ -13,15 +14,22 @@ export const RepoSchema = z.object({
   cloneStatus: RepoStatusSchema,
   clonedAt: z.number(),
   lastPulled: z.number().optional(),
+  lastAccessedAt: z.number().optional(),
   openCodeConfigName: z.string().optional(),
+  gitCredentialId: z.string().optional(),
   isWorktree: z.boolean().optional(),
   isLocal: z.boolean().optional(),
+})
+
+export const InternalRepoListResponseSchema = z.object({
+  repos: z.array(RepoSchema),
 })
 
 export const CreateRepoRequestSchema = z.object({
   repoUrl: z.string().url().optional(),
   localPath: z.string().optional(),
   branch: z.string().optional(),
+  directoryName: z.string().optional(),
   openCodeConfigName: z.string().optional(),
   useWorktree: z.boolean().optional(),
   skipSSHVerification: z.boolean().optional(),
@@ -38,6 +46,10 @@ export const DiscoverReposRequestSchema = z.object({
   maxDepth: z.number().int().min(0).max(8).optional(),
 })
 
+export const UpdateRepoRequestSchema = z.object({
+  name: z.string().trim().max(100).nullable(),
+})
+
 export const DiscoverReposResponseSchema = z.object({
   repos: z.array(RepoSchema),
   discoveredCount: z.number().int().nonnegative(),
@@ -48,4 +60,56 @@ export const DiscoverReposResponseSchema = z.object({
       error: z.string(),
     })
   ),
+})
+
+export const AssistantModeFileSchema = z.object({
+  path: z.string(),
+  exists: z.boolean(),
+  created: z.boolean(),
+})
+
+export const AssistantModeStatusSchema = z.object({
+  repoId: z.number(),
+  directory: z.string(),
+  relativePath: z.literal('repos/assistant'),
+  warnings: z.array(z.object({
+    code: z.string(),
+    path: z.string(),
+    message: z.string(),
+  })).optional(),
+  files: z.object({
+    agentsMd: AssistantModeFileSchema,
+    opencodeJson: AssistantModeFileSchema,
+  }),
+  internalToken: z.object({
+    path: z.string(),
+    created: z.boolean(),
+  }).optional(),
+  schedulesSkill: z.object({
+    path: z.string(),
+    created: z.boolean(),
+  }).optional(),
+  notificationsSkill: z.object({
+    path: z.string(),
+    created: z.boolean(),
+  }).optional(),
+  settingsSkill: z.object({
+    path: z.string(),
+    created: z.boolean(),
+  }).optional(),
+  repoManagementSkill: z.object({
+    path: z.string(),
+    created: z.boolean(),
+  }).optional(),
+  defaultAgent: z.object({
+    name: z.literal('assistant'),
+    path: z.string(),
+    exists: z.boolean(),
+    created: z.boolean(),
+  }).optional(),
+})
+
+export const AssistantModeInitRequestSchema = z.object({
+  overwriteAgentsMd: z.boolean().optional(),
+  overwriteOpenCodeConfig: z.boolean().optional(),
 })

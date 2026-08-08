@@ -13,9 +13,6 @@ export type SkillScope = z.infer<typeof SkillScopeSchema>
 export const SkillFrontmatterSchema = z.object({
   name: SkillNameSchema,
   description: z.string().min(1).max(1024),
-  license: z.string().optional(),
-  compatibility: z.string().optional(),
-  metadata: z.record(z.string(), z.string()).optional(),
 })
 
 export type SkillFrontmatter = z.infer<typeof SkillFrontmatterSchema>
@@ -24,9 +21,6 @@ export const CreateSkillRequestSchema = z.object({
   name: SkillNameSchema,
   description: z.string().min(1).max(1024),
   body: z.string(),
-  license: z.string().optional(),
-  compatibility: z.string().optional(),
-  metadata: z.record(z.string(), z.string()).optional(),
   scope: SkillScopeSchema,
   repoId: z.number().optional(),
 })
@@ -36,9 +30,6 @@ export type CreateSkillRequest = z.infer<typeof CreateSkillRequestSchema>
 export const UpdateSkillRequestSchema = z.object({
   description: z.string().min(1).max(1024).optional(),
   body: z.string().optional(),
-  license: z.string().nullable().optional(),
-  compatibility: z.string().nullable().optional(),
-  metadata: z.record(z.string(), z.string()).nullable().optional(),
 })
 
 export type UpdateSkillRequest = z.infer<typeof UpdateSkillRequestSchema>
@@ -47,11 +38,38 @@ export interface SkillFileInfo {
   name: string
   description: string
   body: string
-  license?: string
-  compatibility?: string
-  metadata?: Record<string, string>
   scope: SkillScope
   location: string
   repoId?: number
   repoName?: string
+}
+
+export const InstallSkillFromGithubRequestSchema = z.object({
+  sourceType: z.literal('github'),
+  url: z.string().url(),
+  scope: SkillScopeSchema,
+  repoId: z.number().optional(),
+  overwrite: z.boolean().optional(),
+})
+export type InstallSkillFromGithubRequest = z.infer<typeof InstallSkillFromGithubRequestSchema>
+
+export const InstallSkillUploadManifestEntrySchema = z.object({
+  fieldName: z.string().min(1),
+  relativePath: z.string().min(1),
+})
+export type InstallSkillUploadManifestEntry = z.infer<typeof InstallSkillUploadManifestEntrySchema>
+
+export const InstallSkillUploadRequestSchema = z.object({
+  sourceType: z.literal('upload'),
+  scope: SkillScopeSchema,
+  repoId: z.number().optional(),
+  overwrite: z.boolean().optional(),
+})
+export type InstallSkillUploadRequest = z.infer<typeof InstallSkillUploadRequestSchema>
+
+export interface InstallSkillResponse {
+  skill: SkillFileInfo
+  overwritten: boolean
+  sourceType: 'github' | 'upload'
+  filesInstalled: string[]
 }

@@ -19,6 +19,19 @@ Messages stream in real-time using Server-Sent Events (SSE):
 - No waiting for complete responses
 - Can interrupt generation if needed
 
+![Chat Conversation](../images/chat-conversation.png)
+
+## Model Selection
+
+Click the **model name** in the chat prompt area to open the quick model switcher. From there you can:
+
+- Switch to a favorite or recently used model without leaving the chat
+- Toggle favorites (star icon next to the active model)
+- Pick a model variant (highlighted in orange when available)
+- Open **All Models…** to browse the full model list
+
+Each agent retains its own model selection — switching agents restores the model last used with that agent. See [AI Configuration](ai-config.md#model-selection) for the full reference.
+
 ## Slash Commands
 
 Type `/` to see available commands:
@@ -131,6 +144,8 @@ Access your sessions from the sidebar:
 - Most recent sessions appear first
 - Click a session to resume
 
+![Session List](../images/chat-session-list.png)
+
 ### Searching Sessions
 
 Find sessions by content:
@@ -138,6 +153,16 @@ Find sessions by content:
 1. Click the search icon in the sessions panel
 2. Type your search query
 3. Results show sessions with matching content
+
+### Pinning Sessions
+
+Pin important sessions to the top of your session list:
+
+1. Open the session actions menu (three dots on the session card)
+2. Select **Pin to top**
+3. The session moves to a **Pinned** section above the **Recent** section
+
+Pinned sessions stay at the top regardless of age or activity. Unpin anytime from the same menu. See [Session Pinning](session-pins.md) for details.
 
 ### Deleting Sessions
 

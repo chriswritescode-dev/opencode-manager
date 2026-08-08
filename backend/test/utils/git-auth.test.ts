@@ -1,5 +1,5 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest'
-import { fetchGitHubUserInfo, findGitHubCredential, resolveGitIdentity, createGitIdentityEnv } from '../../src/utils/git-auth'
+import { fetchGitHubUserInfo, findGitHubCredential, findPatCredentialForHost, resolveGitIdentity, createGitIdentityEnv, getSSHCredentialsForHost, createGitEnv, createGhCliEnv, getDefaultUsername, normalizeHost } from '../../src/utils/git-auth'
 import type { GitCredential } from '@opencode-manager/shared'
 
 describe('fetchGitHubUserInfo', () => {
@@ -206,6 +206,104 @@ describe('fetchGitHubUserInfo', () => {
   })
 })
 
+describe('createGitEnv', () => {
+  it('creates URL-scoped extraheader keys that git can match against HTTPS remotes', () => {
+    const env = createGitEnv([
+      { name: 'github', host: 'github.com', type: 'pat', token: 'github-token' },
+    ])
+
+    expect(env.GIT_CONFIG_COUNT).toBe('1')
+    expect(env.GIT_CONFIG_KEY_0).toBe('http.https://github.com/.extraheader')
+    expect(env.GIT_CONFIG_VALUE_0).toBe(`AUTHORIZATION: basic ${Buffer.from('x-access-token:github-token', 'utf8').toString('base64')}`)
+  })
+
+  it('normalizes hosts with protocols, paths, and trailing slashes', () => {
+    const env = createGitEnv([
+      { name: 'github', host: 'https://github.com/', type: 'pat', token: 'github-token' },
+      { name: 'gitlab', host: 'https://gitlab.com/group/project.git', type: 'pat', token: 'gitlab-token' },
+    ])
+
+    expect(env.GIT_CONFIG_COUNT).toBe('2')
+    expect(env.GIT_CONFIG_KEY_0).toBe('http.https://github.com/.extraheader')
+    expect(env.GIT_CONFIG_KEY_1).toBe('http.https://gitlab.com/.extraheader')
+  })
+
+  it('skips credentials whose host cannot be parsed', () => {
+    const env = createGitEnv([
+      { name: 'broken', host: '   ', type: 'pat', token: 'broken-token' },
+      { name: 'github', host: 'github.com', type: 'pat', token: 'github-token' },
+    ])
+
+    expect(env.GIT_CONFIG_COUNT).toBe('1')
+    expect(env.GIT_CONFIG_KEY_0).toBe('http.https://github.com/.extraheader')
+  })
+})
+
+describe('createGhCliEnv', () => {
+  it('returns GH_TOKEN and GITHUB_TOKEN set to the token for a github PAT', () => {
+    const credentials: GitCredential[] = [
+      { name: 'github', host: 'https://github.com/', type: 'pat', token: 'gh-cli-token' },
+    ]
+
+    const env = createGhCliEnv(credentials)
+
+    expect(env).toEqual({ GH_TOKEN: 'gh-cli-token', GITHUB_TOKEN: 'gh-cli-token' })
+  })
+
+  it('returns {} when no github credential exists', () => {
+    const credentials: GitCredential[] = [
+      { name: 'gitlab', host: 'https://gitlab.com/', type: 'pat', token: 'gl-token' },
+    ]
+
+    const env = createGhCliEnv(credentials)
+
+    expect(env).toEqual({})
+  })
+
+  it('returns {} when github credential has an empty token', () => {
+    const credentials: GitCredential[] = [
+      { name: 'github', host: 'https://github.com/', type: 'pat', token: '' },
+    ]
+
+    const env = createGhCliEnv(credentials)
+
+    expect(env).toEqual({})
+  })
+
+  it('returns {} when only an ssh github credential exists', () => {
+    const credentials: GitCredential[] = [
+      { name: 'github-ssh', host: 'git@github.com', type: 'ssh', sshPrivateKey: 'key' },
+    ]
+
+    const env = createGhCliEnv(credentials)
+
+    expect(env).toEqual({})
+  })
+})
+
+describe('normalizeHost', () => {
+  it('returns a URL-form host prefix for git url matching', () => {
+    expect(normalizeHost('github.com')).toBe('https://github.com/')
+    expect(normalizeHost('https://github.com/owner/repo.git')).toBe('https://github.com/')
+  })
+
+  it('returns null when the host cannot be parsed', () => {
+    expect(normalizeHost('   ')).toBeNull()
+  })
+})
+
+describe('getDefaultUsername', () => {
+  it('uses the GitHub token username for bare and URL hosts', () => {
+    expect(getDefaultUsername('github.com')).toBe('x-access-token')
+    expect(getDefaultUsername('https://github.com/')).toBe('x-access-token')
+  })
+
+  it('falls back to oauth2 for non-github hosts', () => {
+    expect(getDefaultUsername('gitlab.com')).toBe('oauth2')
+    expect(getDefaultUsername('https://git.example.com/')).toBe('oauth2')
+  })
+})
+
 describe('findGitHubCredential', () => {
   it('should find GitHub credential in credentials array', () => {
     const credentials: GitCredential[] = [
@@ -249,6 +347,96 @@ describe('findGitHubCredential', () => {
     const result = findGitHubCredential(credentials)
 
     expect(result).toBeNull()
+  })
+
+  it('should find GitHub credential when host is stored without a protocol', () => {
+    const credentials: GitCredential[] = [
+      { name: 'github', host: 'github.com', type: 'pat', token: 'github-token' },
+    ]
+
+    expect(findGitHubCredential(credentials)).toEqual(credentials[0])
+  })
+
+  it('should ignore SSH credentials when looking up GitHub PAT', () => {
+    const credentials: GitCredential[] = [
+      { name: 'github-ssh', host: 'git@github.com', type: 'ssh', token: 'ssh-key' },
+      { name: 'github-pat', host: 'https://github.com/', type: 'pat', token: 'pat-token' },
+    ]
+
+    expect(findGitHubCredential(credentials)).toEqual(credentials[1])
+  })
+})
+
+describe('findPatCredentialForHost', () => {
+  it('matches by hostname when stored as full https URL', () => {
+    const credentials: GitCredential[] = [
+      { name: 'github', host: 'https://github.com/owner/repo.git', type: 'pat', token: 'gh-token' },
+    ]
+
+    const result = findPatCredentialForHost(credentials, 'github.com')
+
+    expect(result).toEqual({ username: 'x-access-token', password: 'gh-token' })
+  })
+
+  it('uses explicit username when provided', () => {
+    const credentials: GitCredential[] = [
+      { name: 'github', host: 'github.com', type: 'pat', token: 'gh-token', username: 'custom-user' },
+    ]
+
+    const result = findPatCredentialForHost(credentials, 'github.com')
+
+    expect(result).toEqual({ username: 'custom-user', password: 'gh-token' })
+  })
+
+  it('returns x-access-token default for github hosts', () => {
+    const credentials: GitCredential[] = [
+      { name: 'github', host: 'github.com', type: 'pat', token: 'gh-token' },
+    ]
+
+    const result = findPatCredentialForHost(credentials, 'github.com')
+
+    expect(result?.username).toBe('x-access-token')
+  })
+
+  it('returns oauth2 default for non-github hosts', () => {
+    const credentials: GitCredential[] = [
+      { name: 'gitlab', host: 'gitlab.com', type: 'pat', token: 'gl-token' },
+    ]
+
+    const result = findPatCredentialForHost(credentials, 'gitlab.com')
+
+    expect(result?.username).toBe('oauth2')
+  })
+
+  it('ignores ssh credentials', () => {
+    const credentials: GitCredential[] = [
+      { name: 'github-ssh', host: 'github.com', type: 'ssh', sshPrivateKey: 'key' },
+      { name: 'github-pat', host: 'github.com', type: 'pat', token: 'pat-token' },
+    ]
+
+    const result = findPatCredentialForHost(credentials, 'github.com')
+
+    expect(result).toEqual({ username: 'x-access-token', password: 'pat-token' })
+  })
+
+  it('returns null when no credential matches the host', () => {
+    const credentials: GitCredential[] = [
+      { name: 'gitlab', host: 'gitlab.com', type: 'pat', token: 'gl-token' },
+    ]
+
+    const result = findPatCredentialForHost(credentials, 'github.com')
+
+    expect(result).toBeNull()
+  })
+
+  it('returns empty password when matched credential has no token', () => {
+    const credentials: GitCredential[] = [
+      { name: 'github', host: 'github.com', type: 'pat' },
+    ]
+
+    const result = findPatCredentialForHost(credentials, 'github.com')
+
+    expect(result).toEqual({ username: 'x-access-token', password: '' })
   })
 })
 
@@ -437,5 +625,74 @@ describe('createGitIdentityEnv', () => {
       GIT_COMMITTER_NAME: '',
       GIT_COMMITTER_EMAIL: 'email@example.com'
     })
+  })
+})
+
+describe('getSSHCredentialsForHost', () => {
+  const makeSSHCred = (host: string, name = 'test'): GitCredential => ({
+    name,
+    host,
+    type: 'ssh',
+    sshPrivateKey: 'key',
+  })
+
+  it('matches bare hostname when credential host is bare', () => {
+    const creds = [makeSSHCred('github.com')]
+    expect(getSSHCredentialsForHost(creds, 'github.com')).toHaveLength(1)
+  })
+
+  it('matches when credential host has git@ prefix', () => {
+    const creds = [makeSSHCred('git@bitbucket.org')]
+    expect(getSSHCredentialsForHost(creds, 'bitbucket.org')).toHaveLength(1)
+  })
+
+  it('matches when credential host has git@ prefix for github', () => {
+    const creds = [makeSSHCred('git@github.com')]
+    expect(getSSHCredentialsForHost(creds, 'github.com')).toHaveLength(1)
+  })
+
+  it('does not match a different hostname', () => {
+    const creds = [makeSSHCred('git@gitlab.com')]
+    expect(getSSHCredentialsForHost(creds, 'github.com')).toHaveLength(0)
+  })
+
+  it('filters out non-ssh credentials', () => {
+    const patCred: GitCredential = { ...makeSSHCred('github.com'), type: 'pat' }
+    expect(getSSHCredentialsForHost([patCred], 'github.com')).toHaveLength(0)
+  })
+
+  it('matches with custom user@ prefix stripped', () => {
+    const creds = [makeSSHCred('deploy@example.com')]
+    expect(getSSHCredentialsForHost(creds, 'example.com')).toHaveLength(1)
+  })
+
+  it('matches ssh://git@... URL format', () => {
+    const creds = [makeSSHCred('ssh://git@github.com:22')]
+    expect(getSSHCredentialsForHost(creds, 'github.com')).toHaveLength(1)
+  })
+
+  it('matches ssh://git@... URL format with port', () => {
+    const creds = [makeSSHCred('ssh://git@github.com:22')]
+    expect(getSSHCredentialsForHost(creds, 'github.com:22')).toHaveLength(1)
+  })
+
+  it('matches https://git@... URL format', () => {
+    const creds = [makeSSHCred('https://git@github.com')]
+    expect(getSSHCredentialsForHost(creds, 'github.com')).toHaveLength(1)
+  })
+
+  it('matches git@host:port format with default port target', () => {
+    const creds = [makeSSHCred('git@github.com:22')]
+    expect(getSSHCredentialsForHost(creds, 'github.com')).toHaveLength(1)
+  })
+
+  it('matches git@host:port format with explicit port target', () => {
+    const creds = [makeSSHCred('git@github.com:22')]
+    expect(getSSHCredentialsForHost(creds, 'github.com:22')).toHaveLength(1)
+  })
+
+  it('does not match git@host:port with different port', () => {
+    const creds = [makeSSHCred('git@github.com:2222')]
+    expect(getSSHCredentialsForHost(creds, 'github.com:22')).toHaveLength(0)
   })
 })

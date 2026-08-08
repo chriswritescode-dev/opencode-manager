@@ -15,6 +15,66 @@ export const ScheduleSkillMetadataSchema = z.object({
 })
 export type ScheduleSkillMetadata = z.infer<typeof ScheduleSkillMetadataSchema>
 
+/**
+ * Bash commands whose blast radius escapes the throwaway worktree: host-level
+ * commands that damage the machine regardless of cwd, plus force-pushes that can
+ * overwrite remote branches. File-mutating commands (`rm -rf`, `git reset --hard`,
+ * etc.) are intentionally omitted — they only affect the disposable worktree, which
+ * is never auto-pushed and is the real safety boundary.
+ */
+export const DEFAULT_DESTRUCTIVE_BASH_PATTERNS = [
+  'git push --force*', 'git push -f *',
+  'sudo *', 'dd *', 'mkfs*',
+  'shutdown*', 'reboot*', 'halt*',
+  'kill -9 *', 'killall *',
+] as const
+
+export const SchedulePermissionConfigSchema = z.object({
+  allowExternalDirectory: z.boolean().default(false),
+  bashDenyPatterns: z.array(z.string().min(1).max(200)).max(200)
+    .default([...DEFAULT_DESTRUCTIVE_BASH_PATTERNS]),
+})
+export type SchedulePermissionConfig = z.infer<typeof SchedulePermissionConfigSchema>
+
+export type SchedulePermissionAction = 'allow' | 'deny' | 'ask'
+
+/**
+ * A single OpenCode session permission rule. `permission` is the tool name
+ * (e.g. `bash`, `external_directory`, or `*` for all), `pattern` is the glob
+ * matched against the tool argument, and `action` is the resulting decision.
+ */
+export interface SchedulePermissionRule {
+  permission: string
+  pattern: string
+  action: SchedulePermissionAction
+}
+
+export type SchedulePermissionRuleset = SchedulePermissionRule[]
+
+/**
+ * Builds the OpenCode session permission ruleset for an unattended scheduled run.
+ *
+ * OpenCode's `POST /session` `permission` field expects an ordered array of
+ * `{ permission, pattern, action }` rules (`PermissionV1.Ruleset`), evaluated
+ * with last-match-wins semantics (see https://opencode.ai/docs/permissions).
+ * A leading `*`/`*` allow rule sets the allow-all baseline; the trailing
+ * `external_directory` and `bash` deny rules then override it for external
+ * directory access and matching destructive command patterns.
+ */
+export function buildSchedulePermissionRuleset(
+  config: SchedulePermissionConfig | null | undefined,
+): SchedulePermissionRuleset {
+  const cfg = SchedulePermissionConfigSchema.parse(config ?? {})
+  const ruleset: SchedulePermissionRuleset = [{ permission: '*', pattern: '*', action: 'allow' }]
+  if (!cfg.allowExternalDirectory) {
+    ruleset.push({ permission: 'external_directory', pattern: '*', action: 'deny' })
+  }
+  for (const pattern of cfg.bashDenyPatterns) {
+    ruleset.push({ permission: 'bash', pattern, action: 'deny' })
+  }
+  return ruleset
+}
+
 export const ScheduleJobSchema = z.object({
   id: z.number(),
   repoId: z.number(),
@@ -29,6 +89,8 @@ export const ScheduleJobSchema = z.object({
   prompt: z.string(),
   model: z.string().nullable(),
   skillMetadata: ScheduleSkillMetadataSchema.nullable(),
+  permissionConfig: SchedulePermissionConfigSchema.nullable(),
+  branch: z.string().nullable(),
   createdAt: z.number(),
   updatedAt: z.number(),
   lastRunAt: z.number().nullable(),
@@ -50,6 +112,10 @@ export const ScheduleRunSchema = z.object({
   logText: z.string().nullable(),
   responseText: z.string().nullable(),
   errorText: z.string().nullable(),
+  runBranch: z.string().nullable(),
+  commitHash: z.string().nullable(),
+  worktreePath: z.string().nullable(),
+  workspaceId: z.string().nullable(),
 })
 export type ScheduleRun = z.infer<typeof ScheduleRunSchema>
 
@@ -61,6 +127,8 @@ const ScheduleJobBaseRequestSchema = z.object({
   prompt: z.string().min(1).max(20000),
   model: z.string().min(1).max(200).optional(),
   skillMetadata: ScheduleSkillMetadataSchema.nullable().optional(),
+  permissionConfig: SchedulePermissionConfigSchema.nullable().optional(),
+  branch: z.string().min(1).max(200).nullable().optional(),
 })
 
 export const CreateScheduleJobRequestSchema = z.discriminatedUnion('scheduleMode', [
@@ -88,6 +156,8 @@ export const UpdateScheduleJobRequestSchema = z.object({
   prompt: z.string().min(1).max(20000).optional(),
   model: z.string().min(1).max(200).nullable().optional(),
   skillMetadata: ScheduleSkillMetadataSchema.nullable().optional(),
+  permissionConfig: SchedulePermissionConfigSchema.nullable().optional(),
+  branch: z.string().min(1).max(200).nullable().optional(),
 })
 export type UpdateScheduleJobRequest = z.infer<typeof UpdateScheduleJobRequestSchema>
 

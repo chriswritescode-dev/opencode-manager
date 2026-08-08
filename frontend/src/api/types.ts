@@ -1,5 +1,6 @@
 export interface Repo {
   id: number
+  name?: string
   repoUrl?: string
   localPath: string
   fullPath: string
@@ -10,7 +11,9 @@ export interface Repo {
   cloneStatus: 'cloning' | 'ready' | 'error'
   clonedAt: number
   lastPulled?: number
+  lastAccessedAt?: number
   openCodeConfigName?: string
+  gitCredentialId?: string
   isWorktree?: boolean
   isLocal?: boolean
 }
@@ -39,6 +42,17 @@ export interface SSEMessagePartUpdatedEvent {
   type: 'message.part.updated' | 'messagev2.part.updated'
   properties: {
     part: Part
+  }
+}
+
+export interface SSEMessagePartDeltaEvent {
+  type: 'message.part.delta'
+  properties: {
+    sessionID: string
+    messageID: string
+    partID: string
+    field: string
+    delta: string
   }
 }
 
@@ -73,6 +87,14 @@ export interface SSESessionUpdatedEvent {
   }
 }
 
+export interface SSESessionCreatedEvent {
+  type: 'session.created'
+  properties: {
+    sessionID: string
+    info: Session
+  }
+}
+
 export interface SSESessionDeletedEvent {
   type: 'session.deleted'
   properties: {
@@ -98,6 +120,7 @@ export interface SSETodoUpdatedEvent {
 export interface SSEPermissionAskedEvent {
   type: 'permission.asked'
   properties: PermissionRequest
+  directory?: string
 }
 
 export interface SSEPermissionRepliedEvent {
@@ -112,6 +135,7 @@ export interface SSEPermissionRepliedEvent {
 export interface SSEQuestionAskedEvent {
   type: 'question.asked'
   properties: QuestionRequest
+  directory?: string
 }
 
 export interface SSEQuestionRepliedEvent {
@@ -161,6 +185,8 @@ export interface SSESessionStatusEvent {
     } | {
       type: 'busy'
     } | {
+      type: 'compact'
+    } | {
       type: 'retry'
       attempt: number
       message: string
@@ -186,6 +212,14 @@ export interface SSELspUpdatedEvent {
   properties: Record<string, never>
 }
 
+export interface SSEVcsBranchUpdatedEvent {
+  type: 'vcs.branch.updated'
+  directory?: string
+  properties: {
+    branch?: string
+  }
+}
+
 export interface SSESSHHostKeyRequestEvent {
   type: 'ssh.host-key-request'
   properties: SSHHostKeyRequest
@@ -193,9 +227,11 @@ export interface SSESSHHostKeyRequestEvent {
 
 export type SSEEvent =
   | SSEMessagePartUpdatedEvent
+  | SSEMessagePartDeltaEvent
   | SSEMessageUpdatedEvent
   | SSEMessageRemovedEvent
   | SSEMessagePartRemovedEvent
+  | SSESessionCreatedEvent
   | SSESessionUpdatedEvent
   | SSESessionDeletedEvent
   | SSESessionCompactedEvent
@@ -211,6 +247,7 @@ export type SSEEvent =
   | SSEInstallationUpdatedEvent
   | SSEInstallationUpdateAvailableEvent
   | SSELspUpdatedEvent
+  | SSEVcsBranchUpdatedEvent
   | SSESSHHostKeyRequestEvent
 
 export type ContentPart = 

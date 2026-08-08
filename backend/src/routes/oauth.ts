@@ -1,15 +1,66 @@
 import { Hono } from 'hono'
+import type { ContentfulStatusCode } from 'hono/utils/http-status'
+import type { OpenCodeClient } from '../services/opencode/client'
 import { z } from 'zod'
-import { proxyRequest, OPENCODE_SERVER_URL } from '../services/proxy'
 import { logger } from '../utils/logger'
 import {
   OAuthAuthorizeRequestSchema,
   OAuthAuthorizeResponseSchema,
-  OAuthCallbackRequestSchema
+  OAuthCallbackRequestSchema,
+  OpenCodeOAuthErrorSchema,
+  oauthErrorCode
 } from '../../../shared/src/schemas/auth'
-import { opencodeServerManager } from '../services/opencode-single-server'
+import type { OAuthErrorCode } from '../../../shared/src/schemas/auth'
+import { reloadOpenCodeConfig } from '../services/opencode-restart'
+import type { OpenCodeSupervisor } from '../services/opencode-supervisor'
 
-export function createOAuthRoutes() {
+type OAuthPhase = 'authorize' | 'callback'
+
+const PHASE_FALLBACK: Record<OAuthPhase, string> = {
+  authorize: 'OAuth authorization failed',
+  callback: 'OAuth callback failed',
+}
+
+interface OAuthFailure {
+  payload: { error: string; code?: OAuthErrorCode; detail?: string }
+  status: ContentfulStatusCode
+}
+
+export function buildOAuthFailure(body: string, upstreamStatus: number, phase: OAuthPhase): OAuthFailure {
+  const status: ContentfulStatusCode =
+    upstreamStatus >= 400 && upstreamStatus <= 599 ? (upstreamStatus as ContentfulStatusCode) : 502
+
+  let parsed: unknown
+  try {
+    parsed = JSON.parse(body)
+  } catch {
+    return { payload: { error: PHASE_FALLBACK[phase] }, status }
+  }
+
+  const result = OpenCodeOAuthErrorSchema.safeParse(parsed)
+  if (!result.success) {
+    return { payload: { error: PHASE_FALLBACK[phase] }, status }
+  }
+
+  const error = result.data
+  const isTagged = '_tag' in error
+  const message = isTagged ? error.message : error.data.message
+  const field = isTagged ? error.field : error.data.field
+  const detail = [message?.replace(/\s+/g, ' ').trim(), field ? `field: ${field}` : undefined]
+    .filter(Boolean)
+    .join(' — ')
+
+  return {
+    payload: {
+      error: PHASE_FALLBACK[phase],
+      code: oauthErrorCode(error),
+      ...(detail ? { detail } : {}),
+    },
+    status,
+  }
+}
+
+export function createOAuthRoutes(openCodeClient: OpenCodeClient, openCodeSupervisor?: OpenCodeSupervisor) {
   const app = new Hono()
 
   app.post('/:id/oauth/authorize', async (c) => {
@@ -18,22 +69,18 @@ export function createOAuthRoutes() {
       const body = await c.req.json()
       const validated = OAuthAuthorizeRequestSchema.parse(body)
       
-      // Proxy to OpenCode server
-      const response = await proxyRequest(
-        new Request(
-          `${OPENCODE_SERVER_URL}/provider/${providerId}/oauth/authorize`,
-          {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify(validated)
-          }
-        )
-      )
+      const response = await openCodeClient.forward({
+        method: 'POST',
+        path: `/provider/${encodeURIComponent(providerId)}/oauth/authorize`,
+        body: JSON.stringify(validated),
+        headers: { 'Content-Type': 'application/json' },
+      })
 
       if (!response.ok) {
         const error = await response.text()
         logger.error(`OAuth authorize failed for ${providerId}:`, error)
-        return c.json({ error: 'OAuth authorization failed' }, 500)
+        const failure = buildOAuthFailure(error, response.status, 'authorize')
+        return c.json(failure.payload, failure.status)
       }
 
       const data = await response.json()
@@ -55,29 +102,28 @@ export function createOAuthRoutes() {
       const body = await c.req.json()
       const validated = OAuthCallbackRequestSchema.parse(body)
       
-      // Proxy to OpenCode server
-      const response = await proxyRequest(
-        new Request(
-          `${OPENCODE_SERVER_URL}/provider/${providerId}/oauth/callback`,
-          {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify(validated)
-          }
-        )
-      )
+      const response = await openCodeClient.forward({
+        method: 'POST',
+        path: `/provider/${encodeURIComponent(providerId)}/oauth/callback`,
+        body: JSON.stringify(validated),
+        headers: { 'Content-Type': 'application/json' },
+      })
 
       if (!response.ok) {
         const error = await response.text()
         logger.error(`OAuth callback failed for ${providerId}:`, error)
-        return c.json({ error: 'OAuth callback failed' }, 500)
+        const failure = buildOAuthFailure(error, response.status, 'callback')
+        return c.json(failure.payload, failure.status)
       }
 
       const data = await response.json()
-      
-      logger.info(`OAuth callback successful for ${providerId}, reloading OpenCode configuration`)
-      await opencodeServerManager.reloadConfig()
-      
+
+      try {
+        await reloadOpenCodeConfig(openCodeSupervisor)
+      } catch (reloadError) {
+        logger.warn(`Failed to reload OpenCode config after OAuth callback for ${providerId}:`, reloadError)
+      }
+
       return c.json(data)
     } catch (error) {
       logger.error('OAuth callback error:', error)
@@ -90,13 +136,10 @@ export function createOAuthRoutes() {
 
   app.get('/auth-methods', async (c) => {
     try {
-      // Proxy to OpenCode server
-      const response = await proxyRequest(
-        new Request(`${OPENCODE_SERVER_URL}/provider/auth`, {
-          method: 'GET',
-          headers: { 'Content-Type': 'application/json' }
-        })
-      )
+      const response = await openCodeClient.forward({
+        method: 'GET',
+        path: '/provider/auth',
+      })
 
       if (!response.ok) {
         const error = await response.text()

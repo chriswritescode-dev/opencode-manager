@@ -1,4 +1,4 @@
-import { useState, useEffect, useRef, useCallback } from 'react'
+import { useState, useEffect, useRef, useCallback, forwardRef, useImperativeHandle } from 'react'
 import { FileTree } from './FileTree'
 import { FileOperations } from './FileOperations'
 import { FilePreview } from './FilePreview'
@@ -10,9 +10,24 @@ import { Dialog, DialogContent, DialogHeader, DialogTitle } from '@/components/u
 import { Progress } from '@/components/ui/progress'
 import { FolderOpen, Upload, RefreshCw, X } from 'lucide-react'
 import type { FileInfo } from '@/types/files'
-import { API_BASE_URL } from '@/config'
 import { useMobile } from '@/hooks/useMobile'
-import { useFile } from '@/api/files'
+import { getFileApiUrl, useFile } from '@/api/files'
+
+export interface FileBrowserHandle {
+  goBack: () => void
+  canGoBack: () => boolean
+  getCurrentPath: () => string
+}
+
+interface FileBrowserProps {
+  basePath?: string
+  onFileSelect?: (file: FileInfo) => void
+  embedded?: boolean
+  initialSelectedFile?: string
+  onDirectoryLoad?: (info: { workspaceRoot?: string; currentPath: string }) => void
+  onPreviewStateChange?: (isOpen: boolean) => void
+  allowNavigateAboveBase?: boolean
+}
 
 interface UploadItem {
   file: File
@@ -27,12 +42,13 @@ interface UploadProgress {
   cancelled: boolean
 }
 
-interface FileBrowserProps {
-  basePath?: string
-  onFileSelect?: (file: FileInfo) => void
-  embedded?: boolean
-  initialSelectedFile?: string
-  onDirectoryLoad?: (info: { workspaceRoot?: string; currentPath: string }) => void
+const encodeBase64 = (content: string) => {
+  const bytes = new TextEncoder().encode(content)
+  let binary = ''
+  for (let i = 0; i < bytes.length; i++) {
+    binary += String.fromCharCode(bytes[i])
+  }
+  return btoa(binary)
 }
 
 async function readFileEntry(entry: FileSystemFileEntry): Promise<File> {
@@ -115,7 +131,7 @@ function getUploadItemsFromFileList(fileList: FileList): UploadItem[] {
   return items
 }
 
-export function FileBrowser({ basePath = '', onFileSelect, embedded = false, initialSelectedFile, onDirectoryLoad }: FileBrowserProps) {
+export const FileBrowser = forwardRef<FileBrowserHandle, FileBrowserProps>(function FileBrowser({ basePath = '', onFileSelect, embedded = false, initialSelectedFile, onDirectoryLoad, onPreviewStateChange, allowNavigateAboveBase = false }, ref) {
   const [currentPath, setCurrentPath] = useState(basePath)
   const [files, setFiles] = useState<FileInfo | null>(null)
   const [selectedFile, setSelectedFile] = useState<FileInfo | null>(null)
@@ -130,16 +146,17 @@ export function FileBrowser({ basePath = '', onFileSelect, embedded = false, ini
   const uploadCancelledRef = useRef(false)
   const isMobile = useMobile()
 
-   const { data: initialFileData, error: initialFileError } = useFile(initialSelectedFile)
+  const { data: initialFileData, error: initialFileError } = useFile(initialSelectedFile)
 
 useEffect(() => {
   if (initialFileData) {
     setSelectedFile(initialFileData)
     if (isMobile) {
       setIsPreviewModalOpen(true)
+      onPreviewStateChange?.(true)
     }
   }
-}, [initialFileData, isMobile])
+}, [initialFileData, isMobile, onPreviewStateChange])
 
 useEffect(() => {
   if (initialFileError) {
@@ -152,7 +169,7 @@ useEffect(() => {
     setError(null)
     
     try {
-      const response = await fetch(`${API_BASE_URL}/api/files/${path}`)
+      const response = await fetch(getFileApiUrl(path))
       if (!response.ok) {
         throw new Error(`Failed to load files: ${response.statusText}`)
       }
@@ -168,6 +185,63 @@ useEffect(() => {
     }
   }, [onDirectoryLoad])
 
+  const normalizePath = useCallback((path: string) => {
+    const normalized = path
+      .trim()
+      .replace(/\\/g, '/')
+      .replace(/\/+/g, '/')
+      .replace(/\/+$/, '')
+
+    if (normalized === '.' || normalized === './') {
+      return ''
+    }
+
+    if (normalized.startsWith('./')) {
+      return normalized.slice(2)
+    }
+
+    return normalized
+  }, [])
+
+  const getPathParts = useCallback((path: string) => normalizePath(path).split('/').filter(Boolean), [normalizePath])
+
+  const canNavigateUp = useCallback(() => {
+    if (allowNavigateAboveBase && normalizePath(currentPath) === '') {
+      return true
+    }
+
+    if (normalizePath(currentPath) === '..') {
+      return false
+    }
+
+    const pathParts = getPathParts(currentPath)
+    if (allowNavigateAboveBase) {
+      return pathParts.length > 0
+    }
+
+    return pathParts.length > 0 && normalizePath(currentPath) !== normalizePath(basePath)
+  }, [allowNavigateAboveBase, basePath, currentPath, getPathParts, normalizePath])
+
+  const goToParentDirectory = useCallback(() => {
+    if (allowNavigateAboveBase && normalizePath(currentPath) === '') {
+      loadFiles('..')
+      return
+    }
+
+    const pathParts = getPathParts(currentPath)
+    if (pathParts.length > 0) {
+      pathParts.pop()
+      const parentPath = pathParts.join('/')
+      loadFiles(allowNavigateAboveBase ? parentPath : parentPath || basePath)
+    }
+  }, [allowNavigateAboveBase, currentPath, basePath, loadFiles, getPathParts, normalizePath])
+
+  useImperativeHandle(ref, () => ({
+    goBack: goToParentDirectory,
+    canGoBack: canNavigateUp,
+    getCurrentPath: () => currentPath,
+  }), [currentPath, goToParentDirectory, canNavigateUp])
+
   const handleFileSelect = useCallback(async (file: FileInfo) => {
     if (file.isDirectory) {
       setSelectedFile(null)
@@ -177,7 +251,7 @@ useEffect(() => {
     // Fetch the full file content when selecting a file
     setLoading(true)
     try {
-      const response = await fetch(`${API_BASE_URL}/api/files/${file.path}`)
+      const response = await fetch(getFileApiUrl(file.path))
       if (!response.ok) {
         throw new Error(`Failed to load file: ${response.statusText}`)
       }
@@ -189,6 +263,7 @@ useEffect(() => {
       // On mobile, open preview in modal
       if (isMobile) {
         setIsPreviewModalOpen(true)
+        onPreviewStateChange?.(true)
       }
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Failed to load file')
@@ -196,12 +271,13 @@ useEffect(() => {
     } finally {
       setLoading(false)
     }
-  }, [onFileSelect, isMobile])
+  }, [onFileSelect, isMobile, onPreviewStateChange])
 
   const handleCloseModal = useCallback(() => {
     setIsPreviewModalOpen(false)
     setSelectedFile(null)
-  }, [])
+    onPreviewStateChange?.(false)
+  }, [onPreviewStateChange])
 
   const handleDirectoryClick = (path: string) => {
     loadFiles(path)
@@ -217,7 +293,7 @@ useEffect(() => {
     formData.append('relativePath', item.relativePath)
     
     try {
-      const response = await fetch(`${API_BASE_URL}/api/files/${currentPath}`, {
+      const response = await fetch(getFileApiUrl(currentPath), {
         method: 'POST',
         body: formData,
       })
@@ -287,7 +363,7 @@ useEffect(() => {
 
   const handleCreateFile = useCallback(async (name: string, type: 'file' | 'folder') => {
     try {
-      const response = await fetch(`${API_BASE_URL}/api/files/${currentPath}/${name}`, {
+      const response = await fetch(getFileApiUrl([currentPath, name].filter(Boolean).join('/')), {
         method: 'PUT',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ type, content: type === 'file' ? '' : undefined }),
@@ -305,7 +381,7 @@ useEffect(() => {
 
   const handleDelete = useCallback(async (path: string) => {
     try {
-      const response = await fetch(`${API_BASE_URL}/api/files/${path}`, {
+      const response = await fetch(getFileApiUrl(path), {
         method: 'DELETE',
       })
       
@@ -322,7 +398,7 @@ useEffect(() => {
 
   const handleRename = useCallback(async (oldPath: string, newPath: string) => {
     try {
-      const response = await fetch(`${API_BASE_URL}/api/files/${oldPath}`, {
+      const response = await fetch(getFileApiUrl(oldPath), {
         method: 'PATCH',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ newPath }),
@@ -373,15 +449,27 @@ useEffect(() => {
   }, [basePath, loadFiles])
 
   useEffect(() => {
-    const handleFileSaved = (event: CustomEvent<{ path: string; content: string }>) => {
+    const handleFileSaved = (event: CustomEvent<{ path: string; content?: string }>) => {
       if (selectedFile && selectedFile.path === event.detail.path) {
+        if (event.detail.content !== undefined) {
+          const nextFile = {
+            ...selectedFile,
+            content: encodeBase64(event.detail.content),
+            size: new Blob([event.detail.content]).size,
+            lastModified: new Date(),
+          }
+          setSelectedFile(nextFile)
+          onFileSelect?.(nextFile)
+          return
+        }
+
         handleFileSelect(selectedFile)
       }
     }
 
     window.addEventListener('fileSaved', handleFileSaved as EventListener)
     return () => window.removeEventListener('fileSaved', handleFileSaved as EventListener)
-  }, [selectedFile, handleFileSelect])
+  }, [selectedFile, handleFileSelect, onFileSelect])
 
   useEffect(() => {
     if (!isPreviewModalOpen) return
@@ -396,6 +484,10 @@ useEffect(() => {
     return () => document.removeEventListener('keydown', handleEscape)
   }, [isPreviewModalOpen, handleCloseModal])
 
+  const showNavigateUp = allowNavigateAboveBase && normalizePath(currentPath) !== '..'
+    ? true
+    : canNavigateUp()
+
   const filteredFiles = files?.children?.filter(file =>
     file.name.toLowerCase().includes(searchQuery.toLowerCase())
   )
@@ -404,7 +496,7 @@ useEffect(() => {
   const canDismissDialog = isUploadComplete || uploadProgress?.cancelled
 
   const uploadDialog = (
-    <Dialog open={!!uploadProgress} onOpenChange={(open) => { if (!open && canDismissDialog) setUploadProgress(null) }}>
+    <Dialog open={!!uploadProgress} onOpenChange={(open: boolean) => { if (!open && canDismissDialog) setUploadProgress(null) }}>
       <DialogContent className="sm:max-w-md" hideCloseButton={!canDismissDialog}>
         <DialogHeader>
           <DialogTitle className="flex items-center justify-between">
@@ -525,6 +617,8 @@ useEffect(() => {
                   onRename={handleRename}
                   currentPath={currentPath}
                   basePath={basePath}
+                  onNavigateUp={goToParentDirectory}
+                  canNavigateUp={showNavigateUp}
                 />
               )}
             </div>
@@ -624,6 +718,8 @@ useEffect(() => {
                   onRename={handleRename}
                   currentPath={currentPath}
                   basePath={basePath}
+                  onNavigateUp={goToParentDirectory}
+                  canNavigateUp={showNavigateUp}
                 />
               </div>
             )}
@@ -654,4 +750,4 @@ useEffect(() => {
       {uploadDialog}
     </div>
   )
-}
+})

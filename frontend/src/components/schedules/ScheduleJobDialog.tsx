@@ -4,7 +4,7 @@ import type { CreateScheduleJobRequest, PromptTemplate, ScheduleJob } from '@ope
 import { getProvidersWithModels } from '@/api/providers'
 import { createOpenCodeClient } from '@/api/opencode'
 import { settingsApi } from '@/api/settings'
-import { listRepos } from '@/api/repos'
+import { listRepos, listBranches } from '@/api/repos'
 import type { Repo } from '@/api/types'
 import { OPENCODE_API_ENDPOINT } from '@/config'
 import { Button } from '@/components/ui/button'
@@ -18,6 +18,8 @@ import {
   type SchedulePreset,
 } from '@/components/schedules/schedule-utils'
 import { getRepoDisplayName } from '@/lib/utils'
+import { ASSISTANT_REPO_ID, ASSISTANT_REPO_NAME } from '@opencode-manager/shared/utils'
+import { DEFAULT_DESTRUCTIVE_BASH_PATTERNS } from '@opencode-manager/shared/schemas'
 import { Loader2 } from 'lucide-react'
 import { usePromptTemplates, useDeletePromptTemplate } from '@/hooks/usePromptTemplates'
 import { PromptTemplateDialog } from './PromptTemplateDialog'
@@ -26,6 +28,8 @@ import { GeneralTab } from './GeneralTab'
 import { TimingTab } from './TimingTab'
 import { PromptTab } from './PromptTab'
 import { SkillsTab } from './SkillsTab'
+
+const EMPTY_TEMPLATES: PromptTemplate[] = []
 
 type ScheduleJobDialogProps = {
   open: boolean
@@ -59,11 +63,14 @@ export function ScheduleJobDialog({ open, onOpenChange, job, isSaving, onSubmit,
   const [skillNotes, setSkillNotes] = useState('')
   const initialSkillSlugsRef = useRef<string[] | undefined>(undefined)
   const initialSkillNotesRef = useRef<string | undefined>(undefined)
+  const [branch, setBranch] = useState('')
+  const [allowExternalDirectory, setAllowExternalDirectory] = useState(false)
+  const [bashDenyPatterns, setBashDenyPatterns] = useState<string[]>([...DEFAULT_DESTRUCTIVE_BASH_PATTERNS])
   const [templateDialogOpen, setTemplateDialogOpen] = useState(false)
   const [editingTemplate, setEditingTemplate] = useState<PromptTemplate | undefined>(undefined)
   const [deletingTemplateId, setDeletingTemplateId] = useState<number | null>(null)
 
-  const { data: templates = [] } = usePromptTemplates()
+  const { data: templates = EMPTY_TEMPLATES } = usePromptTemplates()
   const deleteTemplateMutation = useDeletePromptTemplate()
 
   const { data: providerModels = [] } = useQuery({
@@ -107,16 +114,44 @@ export function ScheduleJobDialog({ open, onOpenChange, job, isSaving, onSubmit,
     staleTime: 5 * 60 * 1000,
   })
 
-  const repoOptions = useMemo<ComboboxOption[]>(() =>
-    repos
+  const effectiveRepoId = selectedRepoId ?? job?.repoId
+  const branchesEnabled = open && effectiveRepoId !== undefined && effectiveRepoId !== ASSISTANT_REPO_ID
+
+  const { data: branchData, isLoading: branchesLoading } = useQuery({
+    queryKey: ['branches', effectiveRepoId],
+    queryFn: () => listBranches(effectiveRepoId!),
+    enabled: branchesEnabled,
+    staleTime: 60 * 1000,
+  })
+
+  const branchOptions = useMemo<ComboboxOption[]>(() => {
+    const names = new Set<string>()
+    for (const gitBranch of branchData?.branches ?? []) {
+      const name = gitBranch.name.replace(/^remotes\/[^/]+\//, '')
+      if (name && name !== 'HEAD') {
+        names.add(name)
+      }
+    }
+    return Array.from(names)
+      .sort((a, b) => a.localeCompare(b))
+      .map((name) => ({ value: name, label: name }))
+  }, [branchData])
+
+  const repoOptions = useMemo<ComboboxOption[]>(() => {
+    const assistantOption: ComboboxOption = {
+      value: ASSISTANT_REPO_ID.toString(),
+      label: ASSISTANT_REPO_NAME,
+      description: 'Built-in assistant',
+    }
+    const repoEntries = repos
       .filter((repo) => repo.cloneStatus === 'ready')
       .map((repo) => ({
         value: repo.id.toString(),
-        label: getRepoDisplayName(repo.repoUrl, repo.localPath, repo.sourcePath),
+        label: getRepoDisplayName(repo),
         description: repo.localPath,
-      })),
-    [repos]
-  )
+      }))
+    return [assistantOption, ...repoEntries]
+  }, [repos])
 
   const modelOptions = useMemo<ComboboxOption[]>(() => {
     const configuredModels: ComboboxOption[] = []
@@ -179,15 +214,24 @@ export function ScheduleJobDialog({ open, onOpenChange, job, isSaving, onSubmit,
     setAgentSlug(job?.agentSlug ?? '')
     setModel(job?.model ?? '')
     setPrompt(job?.prompt ?? '')
-    const matchingTemplate = templates.find((template) => template.prompt === (job?.prompt ?? ''))
-    setSelectedPromptTemplateId(matchingTemplate ? matchingTemplate.id : null)
     const initialSkillSlugs = job?.skillMetadata?.skillSlugs ?? []
     const initialSkillNotes = job?.skillMetadata?.notes ?? ''
     setSkillSlugs(initialSkillSlugs)
     setSkillNotes(initialSkillNotes)
     initialSkillSlugsRef.current = initialSkillSlugs
     initialSkillNotesRef.current = initialSkillNotes
-  }, [job, open, templates])
+    setBranch(job?.branch ?? '')
+    setAllowExternalDirectory(job?.permissionConfig?.allowExternalDirectory ?? false)
+    setBashDenyPatterns(job?.permissionConfig?.bashDenyPatterns ?? [...DEFAULT_DESTRUCTIVE_BASH_PATTERNS])
+  }, [job, open])
+
+  useEffect(() => {
+    if (!open) {
+      return
+    }
+    const matchingTemplate = templates.find((template) => template.prompt === (job?.prompt ?? ''))
+    setSelectedPromptTemplateId(matchingTemplate ? matchingTemplate.id : null)
+  }, [templates, job, open])
 
   const applyPromptTemplate = (template: PromptTemplate) => {
     setSelectedPromptTemplateId(template.id)
@@ -218,6 +262,11 @@ export function ScheduleJobDialog({ open, onOpenChange, job, isSaving, onSubmit,
       agentSlug: agentSlug.trim() || undefined,
       model: model.trim() || undefined,
       prompt: prompt.trim(),
+      branch: branch.trim() || null,
+      permissionConfig: {
+        allowExternalDirectory,
+        bashDenyPatterns: bashDenyPatterns.map((p) => p.trim()).filter(Boolean),
+      },
       ...(shouldIncludeSkillMetadata ? {
         skillMetadata: skillSlugs.length > 0 || skillNotes.trim()
           ? {
@@ -254,9 +303,10 @@ export function ScheduleJobDialog({ open, onOpenChange, job, isSaving, onSubmit,
     <Dialog open={open} onOpenChange={onOpenChange}>
       <DialogContent
         overlayClassName="bg-black/80"
-        className="flex h-dvh max-h-dvh w-full max-w-4xl flex-col gap-0 overflow-hidden border-border bg-background p-0 shadow-lg sm:h-[min(85vh,760px)] sm:max-h-[85vh] sm:w-[calc(100vw-1rem)]"
+        mobileFullscreen
+        className="flex h-dvh max-h-dvh w-full max-w-4xl flex-col gap-0 overflow-hidden border-border bg-background p-0 shadow-lg sm:h-[min(85vh,760px)] sm:max-h-[85vh] sm:max-w-[90vw] sm:w-[calc(100vw-1rem)]"
       >
-        <DialogHeader className="shrink-0 space-y-1 px-3 sm:px-6 pt-6 pb-3 pr-14">
+        <DialogHeader className="shrink-0 space-y-1 border-b border-border px-3 sm:px-6 py-4">
           <DialogTitle>{job ? 'Edit schedule' : 'New schedule'}</DialogTitle>
           <DialogDescription className="mt-0">
             Create a reusable repo job with a visual schedule builder, manual runs, and optional advanced metadata.
@@ -286,11 +336,19 @@ export function ScheduleJobDialog({ open, onOpenChange, job, isSaving, onSubmit,
             modelOptions={modelOptions}
             enabled={enabled}
             onEnabledChange={setEnabled}
+            branch={branch}
+            onBranchChange={setBranch}
+            branchOptions={branchOptions}
+            branchesLoading={branchesEnabled && branchesLoading}
             showRepoSelector={showRepoSelector}
             isEditing={!!job}
             repoId={selectedRepoId}
             onRepoChange={onRepoChange}
             repoOptions={repoOptions}
+            allowExternalDirectory={allowExternalDirectory}
+            onAllowExternalDirectoryChange={setAllowExternalDirectory}
+            bashDenyPatterns={bashDenyPatterns}
+            onBashDenyPatternsChange={setBashDenyPatterns}
           />
 
           <TimingTab
@@ -335,7 +393,7 @@ export function ScheduleJobDialog({ open, onOpenChange, job, isSaving, onSubmit,
 
         <div className="mt-0 shrink-0 border-t border-border px-3 sm:px-6 py-4 flex flex-row gap-2 sm:justify-end">
           <Button variant="outline" onClick={() => onOpenChange(false)} disabled={isSaving} className="flex-1 sm:flex-none">Cancel</Button>
-          <Button onClick={handleSubmit} disabled={isSaving || !name.trim() || !prompt.trim() || isScheduleConfigInvalid || (!!showRepoSelector && !job && !selectedRepoId)} className="flex-1 sm:flex-none">
+          <Button onClick={handleSubmit} disabled={isSaving || !name.trim() || !prompt.trim() || isScheduleConfigInvalid || (!!showRepoSelector && !job && selectedRepoId === undefined)} className="flex-1 sm:flex-none">
             {isSaving ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : null}
             {isSaving ? 'Saving...' : job ? 'Save changes' : 'Create schedule'}
           </Button>

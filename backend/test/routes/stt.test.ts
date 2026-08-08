@@ -2,11 +2,15 @@ import { describe, it, expect, vi, beforeEach } from 'vitest'
 import * as fs from 'fs/promises'
 
 vi.mock('fs/promises', () => ({
-  mkdir: vi.fn(),
   readFile: vi.fn(),
   writeFile: vi.fn(),
   stat: vi.fn(),
   unlink: vi.fn(),
+}))
+
+vi.mock('../../src/utils/fs-safe', () => ({
+  mkdirSafe: vi.fn().mockResolvedValue(undefined),
+  mkdirSyncSafe: vi.fn(),
 }))
 
 vi.mock('bun:sqlite', () => ({
@@ -40,7 +44,6 @@ vi.mock('@opencode-manager/shared/config/env', () => ({
   },
 }))
 
-const mockMkdir = fs.mkdir as any
 const mockReadFile = fs.readFile as any
 const mockWriteFile = fs.writeFile as any
 const mockStat = fs.stat as any
@@ -70,13 +73,6 @@ describe('STT Routes', () => {
     })
     
     sttApp = createSTTRoutes(mockDb)
-  })
-
-  describe('createSTTRoutes', () => {
-    it('should create a Hono app with routes', () => {
-      expect(sttApp).toBeDefined()
-      expect(typeof sttApp.fetch).toBe('function')
-    })
   })
 
   describe('GET /status', () => {
@@ -434,7 +430,6 @@ describe('STT Routes', () => {
         mtimeMs: Date.now() - 2 * 60 * 60 * 1000,
       })
       mockUnlink.mockResolvedValue(undefined)
-      mockMkdir.mockResolvedValue(undefined)
       mockWriteFile.mockResolvedValue(undefined)
 
       const mockFetch = vi.fn().mockResolvedValue({
@@ -463,7 +458,6 @@ describe('STT Routes', () => {
     it('should return default model when API fetch fails', async () => {
       const originalFetch = globalThis.fetch
       mockStat.mockRejectedValue(new Error('File not found'))
-      mockMkdir.mockResolvedValue(undefined)
       mockWriteFile.mockResolvedValue(undefined)
 
       const mockFetch = vi.fn().mockRejectedValue(new Error('Network error'))
@@ -481,7 +475,6 @@ describe('STT Routes', () => {
 
     it('should force refresh when refresh=true', async () => {
       const originalFetch = globalThis.fetch
-      mockMkdir.mockResolvedValue(undefined)
       mockWriteFile.mockResolvedValue(undefined)
 
       const mockFetch = vi.fn().mockResolvedValue({

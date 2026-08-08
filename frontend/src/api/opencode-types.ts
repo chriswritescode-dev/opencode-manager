@@ -3379,6 +3379,24 @@ export interface components {
         ProviderAuthMethod: {
             type: "oauth" | "api";
             label: string;
+            prompts?: ({
+                type: "text";
+                key: string;
+                message: string;
+                placeholder?: string;
+            } | {
+                type: "select";
+                key: string;
+                message: string;
+                options: {
+                    label: string;
+                    value: string;
+                }[];
+                when?: {
+                    key: string;
+                    value: string;
+                };
+            })[];
         };
         ProviderAuthAuthorization: {
             url: string;
@@ -5698,6 +5716,9 @@ export interface operations {
                 "application/json": {
                     /** @description Auth method index */
                     method: number;
+                    inputs?: {
+                        [key: string]: string;
+                    };
                 };
             };
         };

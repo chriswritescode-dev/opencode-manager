@@ -3,8 +3,18 @@ import * as DialogPrimitive from "@radix-ui/react-dialog"
 import { X } from "lucide-react"
 
 import { cn } from "@/lib/utils"
+import { useSwipeBack } from '@/hooks/useMobile'
+import { useVisualViewport } from '@/hooks/useVisualViewport'
 
-const Dialog = DialogPrimitive.Root
+const DialogOpenContext = React.createContext<boolean>(true)
+
+function Dialog({ open, ...props }: React.ComponentProps<typeof DialogPrimitive.Root>) {
+  return (
+    <DialogOpenContext.Provider value={open ?? true}>
+      <DialogPrimitive.Root open={open} {...props} />
+    </DialogOpenContext.Provider>
+  )
+}
 
 const DialogTrigger = DialogPrimitive.Trigger
 
@@ -16,55 +26,103 @@ const DialogOverlay = React.forwardRef<
   React.ElementRef<typeof DialogPrimitive.Overlay>,
   React.ComponentPropsWithoutRef<typeof DialogPrimitive.Overlay>
 >(({ className, ...props }, ref) => (
-    <DialogPrimitive.Overlay
-      ref={ref}
-      data-slot="dialog-overlay"
-      className={cn(
-        "fixed inset-0 z-50 bg-black/72 backdrop-blur-[3px] data-[state=open]:animate-in data-[state=closed]:animate-out data-[state=closed]:fade-out-0 data-[state=open]:fade-in-0",
-        className
-      )}
+  <DialogPrimitive.Overlay
+    ref={ref}
+    className={cn(
+      "fixed inset-0 z-[70] bg-black/80 data-[state=open]:animate-in data-[state=closed]:animate-out data-[state=closed]:fade-out-0 data-[state=open]:fade-in-0",
+      className
+    )}
     {...props}
   />
 ))
 DialogOverlay.displayName = DialogPrimitive.Overlay.displayName
 
 interface DialogContentProps
-  extends React.ComponentPropsWithoutRef<typeof DialogPrimitive.Content> {
+  extends Omit<React.ComponentPropsWithoutRef<typeof DialogPrimitive.Content>, 'onOpenChange'> {
   hideCloseButton?: boolean
   fullscreen?: boolean
   mobileFullscreen?: boolean
+  mobileSwipeToClose?: boolean
+  keyboardAware?: boolean
+  canSwipeBack?: () => boolean
+  onSwipeBack?: () => void
+  onOpenChange?: (open: boolean) => void
   overlayClassName?: string
 }
 
 const DialogContent = React.forwardRef<
   React.ElementRef<typeof DialogPrimitive.Content>,
   DialogContentProps
->(({ className, children, hideCloseButton, fullscreen, mobileFullscreen, overlayClassName, ...props }, ref) => {
+>(({ className, children, hideCloseButton, fullscreen, mobileFullscreen, mobileSwipeToClose, keyboardAware, canSwipeBack, onSwipeBack, overlayClassName, style, ...props }, ref) => {
   const isMobileFullscreenMode = fullscreen || mobileFullscreen
-   
+  const isDialogOpen = React.useContext(DialogOpenContext)
+  const [isMobile, setIsMobile] = React.useState(() => typeof window !== 'undefined' ? window.innerWidth < 768 : false)
+  const shouldEnableMobileSwipe = mobileSwipeToClose !== false && isMobile && isDialogOpen
+  const shouldAnimateSwipe = shouldEnableMobileSwipe && isMobileFullscreenMode
+  const { keyboardHeight } = useVisualViewport({ enabled: keyboardAware === true && isDialogOpen })
+  const [swipeContainer, setSwipeContainer] = React.useState<HTMLDivElement | null>(null)
+  const closeTriggerRef = React.useRef<HTMLButtonElement>(null)
+  
+  const combinedRef = React.useCallback((node: HTMLDivElement | null) => {
+    setSwipeContainer(node)
+    if (typeof ref === 'function') {
+      ref(node)
+    } else if (ref) {
+      ref.current = node
+    }
+  }, [ref])
+  
+  React.useEffect(() => {
+    const check = () => setIsMobile(window.innerWidth < 768)
+    window.addEventListener('resize', check)
+    return () => window.removeEventListener('resize', check)
+  }, [])
+  const { bind: swipeBind, swipeStyles } = useSwipeBack(
+    () => closeTriggerRef.current?.click(),
+    { enabled: shouldEnableMobileSwipe, canBack: canSwipeBack, onBack: onSwipeBack }
+  )
+  
+  React.useEffect(() => {
+    if (shouldEnableMobileSwipe) {
+      return swipeBind(swipeContainer)
+    }
+    return undefined
+  }, [shouldEnableMobileSwipe, swipeBind, swipeContainer])
+  
+  const baseStyle = isMobileFullscreenMode
+    ? { paddingTop: 'env(safe-area-inset-top, 0px)' }
+    : undefined
+
+  const mergedStyle = {
+    ...baseStyle,
+    ...style,
+    ...(shouldAnimateSwipe ? swipeStyles : undefined),
+    ...(keyboardAware && keyboardHeight > 0 ? { paddingBottom: `${keyboardHeight}px` } : undefined),
+  }
+
   return (
     <DialogPortal>
       {!fullscreen && <DialogOverlay className={overlayClassName} />}
       <DialogPrimitive.Content
-        ref={ref}
-        data-slot="dialog-content"
+        ref={combinedRef}
         autoFocus={false}
         aria-describedby={undefined}
         className={cn(
-          "scrollbar-thin fixed z-50 grid gap-4 border-0 sm:border border-border/70 bg-popover text-popover-foreground shadow-[0_24px_90px_-36px_color-mix(in_oklab,var(--foreground)_38%,transparent)] duration-200 supports-[backdrop-filter]:bg-popover/92 supports-[backdrop-filter]:backdrop-blur-xl data-[state=open]:animate-in data-[state=closed]:animate-out data-[state=closed]:fade-out-0 data-[state=open]:fade-in-0",
+          "fixed z-[70] grid gap-4 border-0 sm:border bg-background shadow-lg duration-200 data-[state=open]:animate-in data-[state=closed]:animate-out data-[state=closed]:fade-out-0 data-[state=open]:fade-in-0",
           fullscreen
             ? "inset-0 w-full h-full max-w-none max-h-none p-0 rounded-none"
             : mobileFullscreen
-              ? "inset-0 w-full h-full max-w-none max-h-none p-0 rounded-none sm:inset-auto sm:left-[50%] sm:bottom-auto sm:w-[90%] sm:max-w-lg sm:translate-x-[-50%] sm:translate-y-0 sm:p-6 sm:rounded-xl sm:top-[8%]"
-              : "left-[50%] top-[50%] w-[90%] max-w-lg translate-x-[-50%] translate-y-[-50%] p-6 data-[state=closed]:zoom-out-95 data-[state=open]:zoom-in-95 data-[state=closed]:slide-out-to-left-1/2 data-[state=closed]:slide-out-to-top-[48%] data-[state=open]:slide-in-from-left-1/2 data-[state=open]:slide-in-from-top-[48%] sm:rounded-xl",
+              ? "inset-0 w-full h-full max-w-none max-h-none p-0 rounded-none sm:inset-auto sm:left-[50%] sm:bottom-auto sm:w-[90%] sm:max-w-lg sm:translate-x-[-50%] sm:translate-y-0 sm:rounded-lg sm:top-[8%] sm:p-6"
+              : "left-[50%] top-[50%] w-[90%] max-w-lg translate-x-[-50%] translate-y-[-50%] p-6 data-[state=closed]:zoom-out-95 data-[state=open]:zoom-in-95 data-[state=closed]:slide-out-to-left-1/2 data-[state=closed]:slide-out-to-top-[48%] data-[state=open]:slide-in-from-left-1/2 data-[state=open]:slide-in-from-top-[48%] sm:rounded-lg",
           className
         )}
-        style={isMobileFullscreenMode ? {
-          paddingTop: 'env(safe-area-inset-top, 0px)',
-        } : undefined}
+        style={Object.keys(mergedStyle).length > 0 ? mergedStyle : undefined}
         {...props}
       >
         {children}
+        {shouldEnableMobileSwipe && (
+          <DialogPrimitive.Close ref={closeTriggerRef} className="sr-only" data-swipe-close-trigger />
+        )}
         {!hideCloseButton && !fullscreen && (
           <DialogPrimitive.Close 
             className="absolute right-4 inline-flex min-h-10 min-w-10 items-center justify-center rounded-md border border-border/70 bg-background/70 text-muted-foreground opacity-90 ring-offset-background transition-[color,background-color,opacity] hover:bg-accent hover:text-foreground hover:opacity-100 focus:outline-none focus:ring-2 focus:ring-ring focus:ring-offset-2 disabled:pointer-events-none data-[state=open]:bg-accent data-[state=open]:text-foreground"

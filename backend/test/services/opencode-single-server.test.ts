@@ -1,5 +1,24 @@
 import { describe, it, expect, vi, beforeEach, afterEach, beforeAll } from 'vitest'
 
+const createOpenCodeClientMock = vi.hoisted(() => vi.fn(() => ({
+  forward: vi.fn().mockResolvedValue(new Response(null, { status: 200 })),
+  forwardRaw: vi.fn(),
+  getJson: vi.fn(),
+  postJson: vi.fn(),
+  setProviderAuth: vi.fn(),
+  deleteProviderAuth: vi.fn(),
+  startMcpAuth: vi.fn(),
+  authenticateMcp: vi.fn(),
+})))
+
+const spawnMock = vi.hoisted(() => vi.fn(() => ({
+  pid: 1234,
+  stderr: null,
+  on: vi.fn(),
+})))
+
+const spawnSyncMock = vi.hoisted(() => vi.fn())
+
 vi.mock('bun:sqlite', () => ({
   Database: vi.fn(),
 }))
@@ -15,7 +34,8 @@ vi.mock('@opencode-manager/shared/config/env', () => ({
     SERVER: { PORT: 5003, HOST: '0.0.0.0', NODE_ENV: 'test' },
     AUTH: { TRUSTED_ORIGINS: 'http://localhost:5173', SECRET: 'test-secret-for-encryption-key-32c' },
     WORKSPACE: { BASE_PATH: '/test/workspace', REPOS_DIR: 'repos', CONFIG_DIR: 'config', AUTH_FILE: 'auth.json' },
-    OPENCODE: { PORT: 5551, HOST: '127.0.0.1' },
+    OPENCODE: { PORT: 5551, HOST: '127.0.0.1', SERVER_PASSWORD: '', SERVER_USERNAME: 'opencode', PUBLIC_URL: '' },
+    TIMEOUTS: { HEALTH_CHECK_TIMEOUT_MS: 50 },
     DATABASE: { PATH: ':memory:' },
     FILE_LIMITS: {
       MAX_SIZE_BYTES: 1024 * 1024,
@@ -44,26 +64,138 @@ vi.mock('fs', () => ({
 
 vi.mock('child_process', () => ({
   execSync: vi.fn(),
+  spawn: spawnMock,
+  spawnSync: spawnSyncMock,
+}))
+
+vi.mock('../../src/services/opencode/config-recovery', () => ({
+  patchConfigWithRecovery: vi.fn(),
+}))
+
+vi.mock('../../src/services/opencode/client', () => ({
+  createOpenCodeClient: createOpenCodeClientMock,
 }))
 
 import { promises as fs } from 'fs'
-import { execSync } from 'child_process'
+import { execSync, spawnSync } from 'child_process'
+import { ConfigReloadError } from '../../src/services/opencode-single-server'
+import { encryptSecret } from '../../src/utils/crypto'
+import { ENV } from '@opencode-manager/shared/config/env'
 
 vi.mock('../../src/utils/logger', () => ({
   logger: {
     info: vi.fn(),
     error: vi.fn(),
+    warn: vi.fn(),
   },
 }))
 
 const mkdirMock = fs.mkdir as any
 const accessMock = fs.access as any
 const execSyncMock = execSync as any
+const childSpawnSyncMock = spawnSync as any
 
 // Reset singleton before any tests run to clear any polluted state from previous test files
 beforeAll(async () => {
   const { OpenCodeServerManager } = await import('../../src/services/opencode-single-server')
   OpenCodeServerManager.resetInstance()
+})
+
+describe('OpenCodeServerManager - server auth', () => {
+  let originalHost: string
+  let originalPassword: string
+
+  beforeEach(async () => {
+    vi.clearAllMocks()
+    execSyncMock.mockReset()
+    originalHost = ENV.OPENCODE.HOST
+    originalPassword = ENV.OPENCODE.SERVER_PASSWORD
+    setOpenCodeEnv({ host: '127.0.0.1', password: '' })
+    const { OpenCodeServerManager } = await import('../../src/services/opencode-single-server')
+    OpenCodeServerManager.resetInstance()
+  })
+
+  afterEach(async () => {
+    setOpenCodeEnv({ host: originalHost, password: originalPassword })
+    const { OpenCodeServerManager } = await import('../../src/services/opencode-single-server')
+    OpenCodeServerManager.resetInstance()
+    vi.clearAllMocks()
+  })
+
+  it('rebuilds the client with env password when no DB password is stored', async () => {
+    setOpenCodeEnv({ host: '127.0.0.1', password: 'envpassword123' })
+    const { opencodeServerManager } = await import('../../src/services/opencode-single-server')
+
+    await opencodeServerManager.rebuildClient()
+
+    expect(createOpenCodeClientMock).toHaveBeenCalledWith('envpassword123')
+  })
+
+  it('rebuilds the client with DB password before env password', async () => {
+    setOpenCodeEnv({ host: '127.0.0.1', password: 'envpassword123' })
+    const { opencodeServerManager } = await import('../../src/services/opencode-single-server')
+    opencodeServerManager.setDatabase(createPasswordDb('dbpassword123'))
+
+    await opencodeServerManager.rebuildClient()
+
+    expect(createOpenCodeClientMock).toHaveBeenCalledWith('dbpassword123')
+  })
+
+  it('fails startup when externally exposed without a resolved password', async () => {
+    setOpenCodeEnv({ host: '0.0.0.0', password: '' })
+    execSyncMock.mockReturnValue(Buffer.from('1234\n'))
+    const { opencodeServerManager } = await import('../../src/services/opencode-single-server')
+    opencodeServerManager.setDatabase(createPasswordDb(null))
+
+    await expect(opencodeServerManager.start()).rejects.toThrow('no password is configured')
+
+    expect(execSyncMock).not.toHaveBeenCalledWith('lsof -ti:5551')
+    expect(spawnMock).not.toHaveBeenCalled()
+    expect(opencodeServerManager.getLastStartupError()).toContain('OPENCODE_HOST=0.0.0.0')
+  })
+
+  it('starts when externally exposed with a resolved password', async () => {
+    setOpenCodeEnv({ host: '0.0.0.0', password: 'envpassword123' })
+    const { opencodeServerManager } = await import('../../src/services/opencode-single-server')
+
+    await opencodeServerManager.start()
+
+    expect(spawnMock).toHaveBeenCalledWith(
+      'opencode',
+      ['serve', '--port', '5551', '--hostname', '0.0.0.0'],
+      expect.objectContaining({
+        env: expect.objectContaining({
+          OPENCODE_SERVER_PASSWORD: 'envpassword123',
+          OPENCODE_SERVER_USERNAME: 'opencode',
+        }),
+      })
+    )
+  })
+
+  function setOpenCodeEnv(values: { host: string; password: string }) {
+    Object.defineProperty(ENV.OPENCODE, 'HOST', { value: values.host, configurable: true, writable: true })
+    Object.defineProperty(ENV.OPENCODE, 'SERVER_PASSWORD', { value: values.password, configurable: true, writable: true })
+  }
+
+  function createPasswordDb(password: string | null) {
+    const encrypted = password ? encryptSecret(password) : null
+
+    const db = {
+      prepare: vi.fn((sql: string) => ({
+        get: (key?: string) => {
+          if (key === 'opencode_server_password' && sql.includes('SELECT value FROM app_secrets') && encrypted) {
+            return { value: encrypted }
+          }
+          return undefined
+        },
+        run: vi.fn(),
+        all: vi.fn(() => []),
+      })),
+      query: vi.fn((sql: string) => db.prepare(sql)),
+    }
+
+    return db as any
+  }
 })
 
 describe('OpenCodeServerManager - reinitializeBinDirectory', () => {
@@ -208,5 +340,138 @@ describe('OpenCodeServerManager - reinitializeBinDirectory', () => {
         expect.any(Error)
       )
     })
+  })
+})
+
+describe('ConfigReloadError', () => {
+  it('should create error with validation issues and removed fields', () => {
+    const issues = [{ path: 'command.review', message: 'Invalid' }]
+    const removed = ['command.review']
+    const error = new ConfigReloadError('Test error', issues, removed)
+
+    expect(error.name).toBe('ConfigReloadError')
+    expect(error.message).toBe('Test error')
+    expect(error.validationIssues).toEqual(issues)
+    expect(error.removedFields).toEqual(removed)
+  })
+
+  it('should default to empty arrays for issues and removed fields', () => {
+    const error = new ConfigReloadError('Test error')
+
+    expect(error.validationIssues).toEqual([])
+    expect(error.removedFields).toEqual([])
+  })
+})
+
+describe('OpenCodeServerManager - reloadConfig', () => {
+  beforeEach(() => {
+    vi.clearAllMocks()
+  })
+
+  afterEach(() => {
+    vi.clearAllMocks()
+  })
+
+  it('should read config from file before patching', async () => {
+    const mockReadFile = vi.fn().mockResolvedValue(JSON.stringify({ command: { review: 'test' } }))
+    fs.readFile = mockReadFile
+
+    const { patchConfigWithRecovery } = await import('../../src/services/opencode/config-recovery')
+    const mockPatchResult = { success: true }
+    vi.mocked(patchConfigWithRecovery).mockResolvedValue(mockPatchResult as any)
+
+    const { opencodeServerManager } = await import('../../src/services/opencode-single-server')
+    const { createStubOpenCodeClient } = await import('../helpers/stub-opencode-client')
+    opencodeServerManager.setOpenCodeClient(createStubOpenCodeClient())
+
+    await opencodeServerManager.reloadConfig()
+
+    expect(mockReadFile).toHaveBeenCalledWith(
+      expect.stringContaining('.config/opencode.json'),
+      'utf-8'
+    )
+    expect(patchConfigWithRecovery).toHaveBeenCalled()
+  })
+})
+
+describe('OpenCodeServerManager - checkHealth', () => {
+  it('uses the OpenCode liveness endpoint', async () => {
+    const { opencodeServerManager } = await import('../../src/services/opencode-single-server')
+    const { createStubOpenCodeClient } = await import('../helpers/stub-opencode-client')
+    const forward = vi.fn(async () => new Response(JSON.stringify({ healthy: true }), { status: 200 }))
+    const timeout = vi.spyOn(AbortSignal, 'timeout')
+    opencodeServerManager.setOpenCodeClient(createStubOpenCodeClient({ forward }))
+
+    await opencodeServerManager.checkHealth()
+
+    expect(forward).toHaveBeenCalledWith(expect.objectContaining({
+      method: 'GET',
+      path: '/global/health',
+      signal: expect.any(AbortSignal),
+    }))
+    expect(timeout).toHaveBeenCalledWith(ENV.TIMEOUTS.HEALTH_CHECK_TIMEOUT_MS)
+  })
+
+  it('returns false when the upstream times out and aborts the upstream fetch', async () => {
+    const { opencodeServerManager } = await import('../../src/services/opencode-single-server')
+    const { createStubOpenCodeClient } = await import('../helpers/stub-opencode-client')
+
+    let capturedSignal: AbortSignal | undefined
+    let aborted = false
+    const stubClient = createStubOpenCodeClient({
+      forward: vi.fn(async (req: { signal?: AbortSignal }) => {
+        capturedSignal = req.signal
+        return await new Promise<Response>((resolve) => {
+          req.signal?.addEventListener('abort', () => {
+            aborted = true
+            resolve(new Response(JSON.stringify({ error: 'Proxy request failed' }), { status: 502 }))
+          })
+        })
+      }),
+    })
+    opencodeServerManager.setOpenCodeClient(stubClient)
+
+    const healthy = await opencodeServerManager.checkHealth()
+
+    expect(healthy).toBe(false)
+    expect(capturedSignal).toBeDefined()
+    expect(aborted).toBe(true)
+  }, 5000)
+})
+
+describe('OpenCodeServerManager - configured plugin install', () => {
+  beforeEach(async () => {
+    const { OpenCodeServerManager } = await import('../../src/services/opencode-single-server')
+    OpenCodeServerManager.resetInstance()
+    vi.clearAllMocks()
+  })
+
+  afterEach(async () => {
+    const { OpenCodeServerManager } = await import('../../src/services/opencode-single-server')
+    OpenCodeServerManager.resetInstance()
+    vi.clearAllMocks()
+  })
+
+  it('bounds first-run plugin installation with a timeout', async () => {
+    const { opencodeServerManager } = await import('../../src/services/opencode-single-server')
+    const { logger } = await import('../../src/utils/logger')
+
+    accessMock.mockImplementation((filePath: string) => {
+      const error = new Error('Not found') as NodeJS.ErrnoException
+      error.code = 'ENOENT'
+      return filePath.includes('package.json') ? Promise.reject(error) : Promise.resolve()
+    })
+    childSpawnSyncMock
+      .mockReturnValueOnce({ status: 0, stdout: '', stderr: '' })
+      .mockReturnValueOnce({ status: null, stdout: '', stderr: '', error: new Error('spawnSync bun ETIMEDOUT') })
+
+    await (opencodeServerManager as any).installConfiguredPlugins(['test-plugin'])
+
+    expect(childSpawnSyncMock).toHaveBeenCalledWith(
+      'bun',
+      ['add', '--ignore-scripts', 'test-plugin@latest'],
+      expect.objectContaining({ timeout: 120000 }),
+    )
+    expect(logger.warn).toHaveBeenCalledWith('Failed to install OpenCode plugin test-plugin: spawnSync bun ETIMEDOUT')
   })
 })

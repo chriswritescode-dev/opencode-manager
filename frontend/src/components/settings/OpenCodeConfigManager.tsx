@@ -1,12 +1,14 @@
 import { useState, useEffect, useRef } from 'react'
 import { cn } from '@/lib/utils'
-import { Loader2, Plus, Trash2, Edit, StarOff, Download, RotateCcw, FileText, ArrowUpCircle, History, ChevronDown } from 'lucide-react'
+import { Loader2, Plus, Trash2, Edit, Download, RotateCcw, FileText, ArrowUpCircle, History, ChevronDown, AlertTriangle } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
 import { Label } from '@/components/ui/label'
 import { Badge } from '@/components/ui/badge'
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
+import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from '@/components/ui/tooltip'
 import { DeleteDialog } from '@/components/ui/delete-dialog'
+import { RestartServerDialog } from './RestartServerDialog'
 import { CreateConfigDialog } from './CreateConfigDialog'
 import { OpenCodeConfigEditor } from './OpenCodeConfigEditor'
 import { CommandsEditor } from './CommandsEditor'
@@ -14,15 +16,18 @@ import { AgentsEditor } from './AgentsEditor'
 import { AgentsMdEditor } from './AgentsMdEditor'
 import { McpManager } from './McpManager'
 import { SkillsEditor } from './SkillsEditor'
+import { OpenCodeModelsEditor, type ConfigProvider } from './OpenCodeModelsEditor'
 import { VersionSelectDialog } from './VersionSelectDialog'
-import { MemoryPluginConfig } from './MemoryPluginConfig'
 import { settingsApi } from '@/api/settings'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import { useServerHealth } from '@/hooks/useServerHealth'
+import { useOpenCodeServerActions } from '@/hooks/useOpenCodeServerActions'
 import { parseJsonc, hasJsoncComments } from '@/lib/jsonc'
 import { showToast } from '@/lib/toast'
 import { invalidateConfigCaches } from '@/lib/queryInvalidation'
-import type { OpenCodeConfig } from '@/api/types/settings'
+import { getOpenCodeApiErrorMessage } from '@/lib/opencode-errors'
+import { FetchError } from '@/api/fetchWrapper'
+import type { OpenCodeConfig, OpenCodeImportStatus } from '@/api/types/settings'
 
 interface Command {
   template: string
@@ -51,7 +56,13 @@ interface Agent {
   [key: string]: unknown
 }
 
-export function OpenCodeConfigManager() {
+interface OpenCodeConfigManagerProps {
+  hideHealthStatus?: boolean
+}
+
+const EXPANDED_SECTION_CONTENT_CLASS = 'p-2 sm:p-4'
+
+export function OpenCodeConfigManager({ hideHealthStatus = false }: OpenCodeConfigManagerProps) {
   const queryClient = useQueryClient()
   const { data: health } = useServerHealth()
   const [configs, setConfigs] = useState<OpenCodeConfig[]>([])
@@ -59,23 +70,36 @@ export function OpenCodeConfigManager() {
   const [isUpdating, setIsUpdating] = useState(false)
   const [editingConfig, setEditingConfig] = useState<OpenCodeConfig | null>(null)
   const [selectedConfig, setSelectedConfig] = useState<OpenCodeConfig | null>(null)
+  const [activeConfigName, setActiveConfigName] = useState<string>('')
   const [expandedSections, setExpandedSections] = useState<Record<string, boolean>>({
     agentsMd: false,
     commands: false,
     agents: false,
     skills: false,
     mcp: false,
+    models: false,
   })
   const [isCreateDialogOpen, setIsCreateDialogOpen] = useState(false)
   const [isEditDialogOpen, setIsEditDialogOpen] = useState(false)
   const [isVersionDialogOpen, setIsVersionDialogOpen] = useState(false)
   const [deleteConfirmConfig, setDeleteConfirmConfig] = useState<OpenCodeConfig | null>(null)
+  const {
+    restartServerMutation,
+    upgradeOpenCodeMutation,
+    confirmOpen: isRestartPromptOpen,
+    setConfirmOpen: setIsRestartPromptOpen,
+    activeSessionCount,
+    requestRestart,
+    confirmRestart,
+    performUpgrade,
+  } = useOpenCodeServerActions()
   
   const agentsMdRef = useRef<HTMLButtonElement>(null)
   const commandsRef = useRef<HTMLButtonElement>(null)
   const agentsRef = useRef<HTMLButtonElement>(null)
   const skillsRef = useRef<HTMLButtonElement>(null)
   const mcpRef = useRef<HTMLButtonElement>(null)
+  const modelsRef = useRef<HTMLButtonElement>(null)
   
   const { data: managedSkills = [] } = useQuery({
     queryKey: ['managed-skills'],
@@ -83,135 +107,98 @@ export function OpenCodeConfigManager() {
     staleTime: 5 * 60 * 1000,
   })
 
+  const { data: importStatus, isLoading: isImportStatusLoading } = useQuery<OpenCodeImportStatus>({
+    queryKey: ['opencode-import-status'],
+    queryFn: () => settingsApi.getOpenCodeImportStatus(),
+    staleTime: 30 * 1000,
+  })
+
+  const { data: directoryCommands = [] } = useQuery({
+    queryKey: ['opencode-directory-files', 'commands'],
+    queryFn: () => settingsApi.listOpenCodeDirectoryFiles('commands'),
+    staleTime: 30 * 1000,
+  })
+
+  const { data: directoryAgents = [] } = useQuery({
+    queryKey: ['opencode-directory-files', 'agents'],
+    queryFn: () => settingsApi.listOpenCodeDirectoryFiles('agents'),
+    staleTime: 30 * 1000,
+  })
+
   const scrollToSection = (ref: React.RefObject<HTMLButtonElement | null>) => {
     if (ref.current) {
       ref.current.scrollIntoView({ 
         behavior: 'smooth', 
-        block: 'start',
+        block: 'nearest',
         inline: 'nearest'
       })
     }
   }
 
-  const reloadConfigMutation = useMutation({
-    mutationFn: async () => {
-      return await settingsApi.reloadOpenCodeConfig()
-    },
-    onSuccess: () => {
+  const syncOpenCodeImportMutation = useMutation({
+    mutationFn: async () => settingsApi.syncOpenCodeImport(),
+    onSuccess: async () => {
+      await fetchConfigs()
       invalidateConfigCaches(queryClient)
+      queryClient.invalidateQueries({ queryKey: ['opencode-import-status'] })
     },
   })
 
-  const restartServerMutation = useMutation({
-    mutationFn: async () => {
-      return await settingsApi.restartOpenCodeServer()
-    },
-    onSuccess: () => {
-      invalidateConfigCaches(queryClient)
-    },
-  })
+  const getApiErrorMessage = getOpenCodeApiErrorMessage
 
-  const upgradeOpenCodeMutation = useMutation({
-    mutationFn: async () => {
-      return await settingsApi.upgradeOpenCode()
-    },
-    onSuccess: (data) => {
-      if (data.upgraded && data.newVersion) {
-        queryClient.setQueryData(['health'], (old: Record<string, unknown> | undefined) => {
-          if (!old) return old
-          return { ...old, opencodeVersion: data.newVersion }
-        })
-      }
-      invalidateConfigCaches(queryClient)
-      if (data.upgraded) {
-        showToast.success(`Upgraded to v${data.newVersion} and server restarted`, { id: 'upgrade-opencode' })
-      } else {
-        showToast.success('OpenCode is already up to date', { id: 'upgrade-opencode' })
-      }
-    },
-    onError: (error) => {
-      const defaultMessage = 'Failed to upgrade OpenCode'
-      
-      if (error && typeof error === 'object' && 'response' in error) {
-        const response = (error as { response?: { data?: { recovered?: boolean; recoveryMessage?: string; newVersion?: string } } }).response
-        const data = response?.data
-        
-        if (data?.recovered && data.newVersion) {
-          queryClient.setQueryData(['health'], (old: Record<string, unknown> | undefined) => {
-            if (!old) return old
-            return { ...old, opencodeVersion: data.newVersion }
-          })
-          showToast.success(`Upgrade failed but server recovered at v${data.newVersion}`, { id: 'upgrade-opencode' })
-        } else {
-          showToast.error(data?.recoveryMessage || defaultMessage, { id: 'upgrade-opencode' })
-        }
-      } else {
-        showToast.error(defaultMessage, { id: 'upgrade-opencode' })
-      }
-      invalidateConfigCaches(queryClient)
-    },
-  })
-
-  const getApiErrorMessage = (error: unknown, fallback: string): string => {
-    if (error && typeof error === 'object' && 'response' in error) {
-      const response = (error as { response?: { data?: { details?: string; error?: string } } }).response
-      return response?.data?.details || response?.data?.error || fallback
+  const getOpenCodeImportErrorMessage = (error: unknown): string => {
+    if (error instanceof FetchError && error.code === 'OPENCODE_IMPORT_PROTECTED') {
+      return error.detail || error.message
     }
-    return fallback
+
+    return getApiErrorMessage(error, 'Failed to import existing OpenCode host data')
   }
 
-  const getRestartErrorMessage = (error: unknown): string => {
-    return getApiErrorMessage(error, 'Failed to restart OpenCode server')
-  }
-
-  const fetchConfigs = async () => {
+  const fetchConfigs = async (silent = false) => {
     try {
-      setIsLoading(true)
+      if (!silent) setIsLoading(true)
       const data = await settingsApi.getOpenCodeConfigs()
       setConfigs(data.configs)
     } catch (error) {
       console.error('Failed to fetch configs:', error)
     } finally {
-      setIsLoading(false)
+      if (!silent) setIsLoading(false)
     }
   }
 
-  const updateConfigContent = async (configName: string, newContent: Record<string, unknown>, restartServer = false) => {
+  const updateConfigContent = async (configName: string, newContent: Record<string, unknown>) => {
+    const previousConfig = configs.find(c => c.name === configName)
+    const previousContent = previousConfig?.content
+    const previousSelectedConfig = selectedConfig
+    const now = Date.now()
+
+    setConfigs(prev => prev.map(config =>
+      config.name === configName ? { ...config, content: newContent, updatedAt: now } : config
+    ))
+    if (selectedConfig && selectedConfig.name === configName) {
+      setSelectedConfig({ ...selectedConfig, content: newContent, updatedAt: now })
+    }
+
     try {
       setIsUpdating(true)
-      const previousContent = configs.find(c => c.name === configName)?.content
-
-      await settingsApi.updateOpenCodeConfig(configName, { content: newContent })
-
-      setConfigs(prev => prev.map(config =>
-        config.name === configName
-          ? { ...config, content: newContent, updatedAt: Date.now() }
-          : config
-      ))
-
-      if (selectedConfig && selectedConfig.name === configName) {
-        setSelectedConfig({ ...selectedConfig, content: newContent, updatedAt: Date.now() })
-      }
-
-      const agentsChanged = JSON.stringify(previousContent?.agent) !== JSON.stringify(newContent.agent)
-      const pluginsChanged = JSON.stringify(previousContent?.plugin) !== JSON.stringify(newContent.plugin)
-      const skillsChanged = JSON.stringify(previousContent?.skills) !== JSON.stringify(newContent.skills)
-      if (restartServer || agentsChanged || pluginsChanged || skillsChanged) {
-        showToast.loading('Reloading server...', { id: 'update-restart' })
-        try {
-          await reloadConfigMutation.mutateAsync()
-          showToast.success('Configuration updated and server reloaded', { id: 'update-restart' })
-        } catch (error) {
-          showToast.error(getRestartErrorMessage(error), { id: 'update-restart' })
-          throw error
-        }
+      const result = await settingsApi.updateOpenCodeConfig(configName, { content: newContent })
+      if (result.removedFields && result.removedFields.length > 0) {
+        showToast.info(`Configuration updated after removing invalid fields: ${result.removedFields.join(', ')}`)
+      } else if (result.restartRequired) {
+        showToast.success('Configuration saved. Restart the server to apply changes.')
       } else {
         showToast.success('Configuration updated')
-        invalidateConfigCaches(queryClient)
       }
+      invalidateConfigCaches(queryClient)
     } catch (error) {
+      setConfigs(prev => prev.map(config =>
+        config.name === configName ? { ...config, content: previousContent ?? {}, updatedAt: previousConfig?.updatedAt ?? now } : config
+      ))
+      if (previousSelectedConfig && previousSelectedConfig.name === configName) {
+        setSelectedConfig(previousSelectedConfig)
+      }
       console.error('Failed to update config:', error)
-      showToast.error(getApiErrorMessage(error, 'Failed to update config'), { id: 'update-restart' })
+      showToast.error(getApiErrorMessage(error, 'Failed to update config'))
     } finally {
       setIsUpdating(false)
     }
@@ -220,6 +207,18 @@ export function OpenCodeConfigManager() {
   useEffect(() => {
     fetchConfigs()
   }, [])
+
+  useEffect(() => {
+    if (configs.length === 0) {
+      setActiveConfigName('')
+      return
+    }
+    const stillExists = configs.some((c) => c.name === activeConfigName)
+    if (!stillExists) {
+      const fallback = configs.find((c) => c.isDefault) ?? configs[0]
+      setActiveConfigName(fallback.name)
+    }
+  }, [configs, activeConfigName])
 
   useEffect(() => {
     if (configs.length > 0 && !selectedConfig) {
@@ -240,7 +239,7 @@ export function OpenCodeConfigManager() {
         throw new Error(`Invalid fields found: ${foundForbidden.join(', ')}. These fields are managed automatically.`)
       }
 
-      await settingsApi.createOpenCodeConfig({
+      const result = await settingsApi.createOpenCodeConfig({
         name: name.trim(),
         content: rawContent,
         isDefault,
@@ -250,13 +249,10 @@ export function OpenCodeConfigManager() {
       await fetchConfigs()
 
       if (isDefault) {
-        showToast.loading('Reloading server...', { id: 'create-config' })
-        try {
-          await reloadConfigMutation.mutateAsync()
-          showToast.success('Configuration created and server reloaded', { id: 'create-config' })
-        } catch (error) {
-          showToast.error(getRestartErrorMessage(error), { id: 'create-config' })
-          throw error
+        if (result.removedFields && result.removedFields.length > 0) {
+          showToast.info(`Configuration created after removing invalid fields: ${result.removedFields.join(', ')}`, { id: 'create-config' })
+        } else {
+          showToast.success('Configuration created and applied', { id: 'create-config' })
         }
       } else {
         showToast.success('Configuration created', { id: 'create-config' })
@@ -292,13 +288,16 @@ export function OpenCodeConfigManager() {
   }
 
   const setDefaultConfig = async (config: OpenCodeConfig) => {
-    showToast.loading('Setting default config and reloading server...', { id: 'set-default' })
+    showToast.loading('Setting default config...', { id: 'set-default' })
     try {
       setIsUpdating(true)
-      await settingsApi.setDefaultOpenCodeConfig(config.name)
+      const result = await settingsApi.setDefaultOpenCodeConfig(config.name)
       await fetchConfigs()
-      await reloadConfigMutation.mutateAsync()
-      showToast.success('Default config updated and server reloaded', { id: 'set-default' })
+      if (result.removedFields && result.removedFields.length > 0) {
+        showToast.info(`Default config updated after removing invalid fields: ${result.removedFields.join(', ')}`, { id: 'set-default' })
+      } else {
+        showToast.success('Default config updated and applied', { id: 'set-default' })
+      }
     } catch (error) {
       console.error('Failed to set default config:', error)
       showToast.error(getApiErrorMessage(error, 'Failed to set default config'), { id: 'set-default' })
@@ -337,10 +336,12 @@ export function OpenCodeConfigManager() {
   }
 
   const isUnhealthy = health?.opencode !== 'healthy'
+  const canImportFromHost = Boolean(importStatus?.configSourcePath || importStatus?.stateSourcePath)
+  const activeConfig = configs.find((c) => c.name === activeConfigName) ?? null
 
   return (
-    <div className="space-y-6 overflow-y-auto">
-      {health && (
+    <div className="space-y-6 min-w-0">
+      {!hideHealthStatus && health && (
         <Card className={cn('bg-transparent border-transparent', isUnhealthy && 'border-destructive')}>
           <CardContent className="p-3">
             <div className="flex flex-col sm:flex-row sm:items-center items-center justify-center gap-3">
@@ -369,19 +370,7 @@ export function OpenCodeConfigManager() {
                 <Button
                   variant="outline"
                   size="sm"
-                  onClick={async () => {
-                    showToast.loading('Upgrading OpenCode...', { id: 'upgrade-opencode' })
-                    try {
-                      await upgradeOpenCodeMutation.mutateAsync()
-                    } catch (error) {
-                      const errorMessage = error && typeof error === 'object' && 'response' in error
-                        ? ((error as { response?: { data?: { details?: string; error?: string } } }).response?.data?.details
-                           || (error as { response?: { data?: { details?: string; error?: string } } }).response?.data?.error
-                           || 'Failed to upgrade OpenCode')
-                        : 'Failed to upgrade OpenCode'
-                      showToast.error(errorMessage, { id: 'upgrade-opencode' })
-                    }
-                  }}
+                  onClick={performUpgrade}
                   disabled={upgradeOpenCodeMutation.isPending}
                 >
                   {upgradeOpenCodeMutation.isPending ? (
@@ -394,15 +383,7 @@ export function OpenCodeConfigManager() {
                 <Button
                   variant="outline"
                   size="sm"
-                  onClick={async () => {
-                    showToast.loading('Restarting OpenCode server...', { id: 'manual-restart' })
-                    try {
-                      await restartServerMutation.mutateAsync()
-                      showToast.success('Server restarted successfully', { id: 'manual-restart' })
-                    } catch (error) {
-                      showToast.error(getRestartErrorMessage(error), { id: 'manual-restart' })
-                    }
-                  }}
+                  onClick={requestRestart}
                   disabled={restartServerMutation.isPending}
                 >
                   {restartServerMutation.isPending ? (
@@ -420,41 +401,133 @@ export function OpenCodeConfigManager() {
                   <History className="h-3 w-3 sm:h-4 sm:w-4 mr-1" />
                   <span className="text-xs sm:text-sm">Versions</span>
                 </Button>
-                <Button 
-                  size="sm"
-                  onClick={() => setIsCreateDialogOpen(true)}
-                >
-                  <Plus className="h-3 w-3 sm:h-4 sm:w-4 mr-1" />
-                  <span className="text-xs sm:text-sm">New Config</span>
-                </Button>
               </div>
             </div>
           </CardContent>
         </Card>
        )}
 
-        <MemoryPluginConfig 
-           memoryPluginEnabled={configs.find(c => c.isDefault)?.content?.plugin?.includes('@opencode-manager/memory') ?? false}
-           onToggle={async (enabled) => {
-             const defaultConfig = configs.find(c => c.isDefault)
-             if (!defaultConfig) return
-             
-             const currentPlugins = defaultConfig.content?.plugin ?? []
-             const memoryPlugin = '@opencode-manager/memory'
-             const newPlugins = enabled
-               ? currentPlugins.includes(memoryPlugin)
-                 ? currentPlugins
-                 : [...currentPlugins, memoryPlugin]
-               : currentPlugins.filter(p => p !== memoryPlugin)
-             
-             await updateConfigContent(defaultConfig.name, {
-               ...defaultConfig.content,
-               plugin: newPlugins.length > 0 ? newPlugins : undefined
-             }, true)
-             
-             queryClient.invalidateQueries({ queryKey: ['memory-plugin-status'] })
-           }}
-         />
+       {health?.opencodeRestartPending && (
+         <div className="flex flex-col gap-2 rounded-md border border-amber-500/40 bg-amber-500/10 p-3 sm:flex-row sm:items-center sm:justify-between">
+           <div className="flex items-center gap-2">
+             <AlertTriangle className="h-4 w-4 shrink-0 text-amber-500" />
+             <p className="text-sm">
+               Configuration changes are saved but require a server restart to take effect.
+             </p>
+           </div>
+           <Button
+             size="sm"
+             onClick={requestRestart}
+             disabled={restartServerMutation.isPending}
+             className="shrink-0"
+           >
+             {restartServerMutation.isPending ? (
+               <Loader2 className="h-3 w-3 mr-1 animate-spin" />
+             ) : (
+               <RotateCcw className="h-3 w-3 mr-1" />
+             )}
+             Restart Now
+           </Button>
+         </div>
+       )}
+
+       <Card>
+         <CardHeader className="pb-3">
+           <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
+              <div>
+                      <CardTitle className="text-sm sm:text-base">Existing OpenCode Host Import</CardTitle>
+                <p className="text-sm text-muted-foreground mt-1">
+                  Import your standalone OpenCode config and session state into this workspace, then restart the server so existing chats can reconnect.
+                </p>
+              </div>
+             <Button
+               variant="outline"
+               size="sm"
+               disabled={!canImportFromHost || syncOpenCodeImportMutation.isPending || isImportStatusLoading}
+                onClick={async () => {
+                  showToast.loading('Importing existing OpenCode host data...', { id: 'opencode-import' })
+                  try {
+                    const result = await syncOpenCodeImportMutation.mutateAsync()
+                    const importedParts = [result.configImported && 'config', result.stateImported && 'state']
+                      .filter(Boolean)
+                      .join(' and ')
+                    const relinkSummary = result.relinkedRepos
+                      ? ` Linked ${result.relinkedRepos.relinkedCount} repos, matched ${result.relinkedRepos.existingCount} existing repos, skipped ${result.relinkedRepos.nonRepoPathCount} non-repo paths, and ignored ${result.relinkedRepos.duplicatePathCount} duplicate session paths.`
+                      : ''
+                    showToast.success(`Imported existing OpenCode ${importedParts || 'data'} and restarted the server.${relinkSummary}`, { id: 'opencode-import' })
+                  } catch (error) {
+                    showToast.error(getOpenCodeImportErrorMessage(error), { id: 'opencode-import' })
+                  }
+                }}
+              >
+                {syncOpenCodeImportMutation.isPending ? (
+                  <Loader2 className="h-3 w-3 sm:h-4 sm:w-4 mr-1 animate-spin" />
+                ) : (
+                  <Download className="h-3 w-3 sm:h-4 sm:w-4 mr-1" />
+                )}
+                <span className="text-xs sm:text-sm">Import From Host</span>
+              </Button>
+            </div>
+          </CardHeader>
+          <CardContent className="space-y-3 text-sm">
+            <div className="grid gap-3 md:grid-cols-2">
+              <div className="rounded-lg border border-border p-3">
+                <p className="font-medium">Config Source</p>
+                <p className="mt-1 break-all text-muted-foreground">
+                  {isImportStatusLoading ? 'Checking...' : importStatus?.configSourcePath || 'No importable OpenCode config found'}
+                </p>
+              </div>
+              <div className="rounded-lg border border-border p-3">
+                <p className="font-medium">State Source</p>
+                <p className="mt-1 break-all text-muted-foreground">
+                  {isImportStatusLoading ? 'Checking...' : importStatus?.stateSourcePath || 'No importable OpenCode state found'}
+                </p>
+              </div>
+            </div>
+            <div className="rounded-lg border border-border p-3">
+              <p className="font-medium">Workspace State</p>
+              <p className="mt-1 break-all text-muted-foreground">
+                {importStatus?.workspaceStatePath || 'Unavailable'}
+              </p>
+              <p className="mt-2 text-xs text-muted-foreground">
+                {importStatus?.workspaceStateExists
+                  ? 'A workspace session database already exists. Import is blocked to protect it from being replaced by detected host state.'
+                  : 'No workspace session database exists yet. Import will seed it from the detected host state.'}
+              </p>
+            </div>
+            {syncOpenCodeImportMutation.error && (
+              <div className="rounded-lg border border-destructive/40 bg-destructive/5 p-3">
+                <p className="font-medium text-destructive">Import blocked</p>
+                <p className="mt-1 text-sm text-destructive/90">
+                  {getOpenCodeImportErrorMessage(syncOpenCodeImportMutation.error)}
+                </p>
+                <p className="mt-2 text-xs text-destructive/80">
+                  This workspace already has OpenCode session state, so host state import was stopped to prevent accidental replacement of existing chats and history. If you want to use host state instead, clear the workspace state first and then run the import again.
+                </p>
+              </div>
+            )}
+            {syncOpenCodeImportMutation.data?.relinkedRepos && (
+              <div className="rounded-lg border border-border p-3">
+                <p className="font-medium">Last Relink Result</p>
+                <p className="mt-1 text-muted-foreground">
+                  Linked {syncOpenCodeImportMutation.data.relinkedRepos.relinkedCount} repos, matched {syncOpenCodeImportMutation.data.relinkedRepos.existingCount} existing repos, skipped {syncOpenCodeImportMutation.data.relinkedRepos.nonRepoPathCount} non-repo session paths, and ignored {syncOpenCodeImportMutation.data.relinkedRepos.duplicatePathCount} duplicate session paths.
+                </p>
+                {syncOpenCodeImportMutation.data.relinkedRepos.errors.length > 0 && (
+                  <p className="mt-2 text-xs text-destructive">
+                    {syncOpenCodeImportMutation.data.relinkedRepos.errors.length} repo paths could not be linked.
+                  </p>
+                )}
+              </div>
+            )}
+            {!canImportFromHost && !isImportStatusLoading && (
+              <p className="text-xs text-muted-foreground">
+                No host OpenCode config or state was detected. For Docker installs, bind your host OpenCode config and state into the container before using this action.
+              </p>
+            )}
+          </CardContent>
+        </Card>
+
+        
         
         <CreateConfigDialog
         isOpen={isCreateDialogOpen}
@@ -475,68 +548,123 @@ export function OpenCodeConfigManager() {
           </CardContent>
         </Card>
       ) : (
-        <div className="flex flex-col gap-4 md:grid md:grid-cols-2 lg:grid-cols">
-          {configs
-            .sort((a, b) => {
-              if (a.isDefault) return -1
-              if (b.isDefault) return 1
-              return 0
-            })
-            .map((config) => (
-              <Card key={config.id} className={cn('border-transparent', config.isDefault && 'border-success/40')}>
-                <CardHeader className="pb-3">
-                  <div className="flex items-center justify-between">
-                    <div className="flex items-center gap-2 flex-wrap">
-                      <CardTitle className="text-sm sm:text-base">{config.name}</CardTitle>
+        <Card>
+          <CardHeader className="pb-3">
+            <CardTitle className="text-sm sm:text-base">OpenCode Configurations</CardTitle>
+          </CardHeader>
+          <CardContent className="space-y-3">
+            <div className="flex flex-col gap-2 sm:flex-row sm:items-center">
+              <Select
+                value={activeConfigName}
+                onValueChange={(value) => {
+                  setActiveConfigName(value)
+                }}
+              >
+                <SelectTrigger className="w-full sm:max-w-xs">
+                  <SelectValue placeholder="Select a configuration...">
+                    {activeConfig && (
+                      <>
+                        {activeConfig.name}
+                        {activeConfig.isDefault && (
+                          <span className="text-orange-500 dark:text-orange-400"> (Active)</span>
+                        )}
+                        {!activeConfig.isValid && ' (Invalid)'}
+                      </>
+                    )}
+                  </SelectValue>
+                </SelectTrigger>
+                <SelectContent>
+                  {configs.map((config) => (
+                    <SelectItem key={config.id} value={config.name}>
+                      {config.name}
                       {config.isDefault && (
-                        <Badge variant="success">
-                          Current
-                        </Badge>
+                        <span className="text-orange-500 dark:text-orange-400"> (Active)</span>
                       )}
-                    </div>
-                    <div className="flex items-center gap-2">
+                      {!config.isValid && ' (Invalid)'}
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+
+              <div className="flex items-center gap-2">
+                {activeConfig && !activeConfig.isValid && (
+                  <Badge variant="destructive">Invalid Config</Badge>
+                )}
+              </div>
+
+              <TooltipProvider delayDuration={200}>
+                <div className="flex items-center gap-1 sm:gap-1.5 sm:ml-auto">
+                  <Tooltip>
+                    <TooltipTrigger asChild>
                       <Button
                         variant="ghost"
                         size="sm"
-                        onClick={() => downloadConfig(config)}
+                        disabled={!activeConfig}
+                        onClick={() => activeConfig && downloadConfig(activeConfig)}
                       >
                         <Download className="h-4 w-4" />
                       </Button>
+                    </TooltipTrigger>
+                    <TooltipContent side="bottom">Download</TooltipContent>
+                  </Tooltip>
+                  <Tooltip>
+                    <TooltipTrigger asChild>
                       <Button
                         variant="ghost"
                         size="sm"
-                        onClick={() => startEdit(config)}
+                        disabled={!activeConfig}
+                        onClick={() => activeConfig && startEdit(activeConfig)}
                       >
                         <Edit className="h-4 w-4" />
                       </Button>
+                    </TooltipTrigger>
+                    <TooltipContent side="bottom">Edit</TooltipContent>
+                  </Tooltip>
+                  {!activeConfig?.isDefault && (
+                    <Tooltip>
+                      <TooltipTrigger asChild>
+                        <Button
+                          size="sm"
+                          variant="default"
+                          disabled={!activeConfig || isUpdating}
+                          onClick={() => activeConfig && setDefaultConfig(activeConfig)}
+                        >
+                          Apply
+                        </Button>
+                      </TooltipTrigger>
+                      <TooltipContent side="bottom">Apply as default</TooltipContent>
+                    </Tooltip>
+                  )}
+                  <Tooltip>
+                    <TooltipTrigger asChild>
                       <Button
                         variant="ghost"
                         size="sm"
-                        onClick={() => setDefaultConfig(config)}
-                        disabled={config.isDefault || isUpdating}
-                      >
-                        <StarOff className="h-4 w-4" />
-                      </Button>
-                      <Button
-                        variant="ghost"
-                        size="sm"
-                        onClick={() => setDeleteConfirmConfig(config)}
-                        className="text-destructive hover:text-destructive"
+                        disabled={!activeConfig}
+                        className="text-red-500 hover:text-red-600"
+                        onClick={() => activeConfig && setDeleteConfirmConfig(activeConfig)}
                       >
                         <Trash2 className="h-4 w-4" />
                       </Button>
-                    </div>
-                  </div>
-                </CardHeader>
-                <CardContent>
-                  <div className="text-sm text-muted-foreground break-words">
-                    <p className="truncate">Updated: {new Date(config.updatedAt).toLocaleString()}</p>
-                    <p className="truncate">Created: {new Date(config.createdAt).toLocaleString()}</p>
-                  </div>
-                </CardContent>
-              </Card>
-            ))}
-        </div>
+                    </TooltipTrigger>
+                    <TooltipContent side="bottom">Delete</TooltipContent>
+                  </Tooltip>
+                  <Button size="sm" onClick={() => setIsCreateDialogOpen(true)}>
+                    <Plus className="h-3 w-3 sm:h-4 sm:w-4 mr-1" />
+                    <span className="text-xs sm:text-sm">New Config</span>
+                  </Button>
+                </div>
+              </TooltipProvider>
+            </div>
+
+            {activeConfig && (
+              <div className="text-sm text-muted-foreground break-words">
+                <p className="truncate">Updated: {new Date(activeConfig.updatedAt).toLocaleString()}</p>
+                <p className="truncate">Created: {new Date(activeConfig.createdAt).toLocaleString()}</p>
+              </div>
+            )}
+          </CardContent>
+        </Card>
       )}
 
       {/* Edit Dialog */}
@@ -548,10 +676,10 @@ export function OpenCodeConfigManager() {
           if (!editingConfig) return
           showToast.loading('Saving configuration...', { id: 'edit-config' })
           try {
-            await settingsApi.updateOpenCodeConfig(editingConfig.name, { content: rawContent })
-            await fetchConfigs()
-            const successMsg = editingConfig.isDefault
-              ? 'Configuration saved and server reloaded'
+            const result = await settingsApi.updateOpenCodeConfig(editingConfig.name, { content: rawContent })
+            await fetchConfigs(true)
+            const successMsg = result.restartRequired
+              ? 'Configuration saved. Restart the server to apply changes.'
               : 'Configuration saved'
             showToast.success(successMsg, { id: 'edit-config' })
             invalidateConfigCaches(queryClient)
@@ -560,13 +688,12 @@ export function OpenCodeConfigManager() {
             throw error
           }
         }}
-        isUpdating={isUpdating}
       />
 
       {/* Global AGENTS.md Section */}
       <div className="mt-8 space-y-6">
         <div className="border-t border-border pt-6">
-          <div className="bg-card border border-border rounded-lg overflow-hidden min-w-0 mb-6">
+          <div className="bg-card border border-border rounded-lg overflow-clip min-w-0 mb-6">
             <button
               ref={agentsMdRef}
               className={cn("w-full px-4 py-3 flex items-center justify-between transition-colors min-w-0", expandedSections.agentsMd ? "bg-muted/40 hover:bg-muted/50" : "hover:bg-muted/50")}
@@ -600,7 +727,7 @@ export function OpenCodeConfigManager() {
             <div className="space-y-6">
               <div className='px-1'>
                 <Label className="text-sm sm:text-base font-medium">Select Configuration to Edit</Label>
-                <Select 
+                <Select
                   onValueChange={(value) => {
                     const config = configs.find(c => c.name === value)
                     setSelectedConfig(config || null)
@@ -613,16 +740,36 @@ export function OpenCodeConfigManager() {
                   <SelectContent>
                     {configs.map(config => (
                       <SelectItem key={config.id} value={config.name}>
-                        {config.name} {config.isDefault && '(Default)'}
+                        {config.name} {config.isDefault && '(Default)'} {!config.isValid && '(Invalid)'}
                       </SelectItem>
                     ))}
                   </SelectContent>
                 </Select>
               </div>
               
-              <div className="flex flex-col gap-4 pb-20 min-w-0">
+              <div className="flex flex-col gap-4 pb-4 min-w-0">
                 {selectedConfig ? (
                   <>
+                    {!selectedConfig.isValid && selectedConfig.validationIssues && selectedConfig.validationIssues.length > 0 && (
+                      <div className="rounded-lg border border-destructive/40 bg-destructive/5 p-4">
+                        <p className="font-medium text-destructive">This configuration has validation issues</p>
+                        <p className="mt-1 text-sm text-destructive/90">
+                          OpenCode may fail to start until these fields are corrected. Open the config editor to fix the file directly.
+                        </p>
+                        <ul className="mt-3 list-disc space-y-1 pl-5 text-sm text-destructive/90">
+                          {selectedConfig.validationIssues.slice(0, 8).map((issue) => (
+                            <li key={`${issue.path}-${issue.message}`}>
+                              <span className="font-mono text-xs">{issue.path}</span>: {issue.message}
+                            </li>
+                          ))}
+                        </ul>
+                        {selectedConfig.validationIssues.length > 8 && (
+                          <p className="mt-2 text-xs text-destructive/80">
+                            Showing 8 of {selectedConfig.validationIssues.length} issues. Open the config editor to review and fix the file.
+                          </p>
+                        )}
+                      </div>
+                    )}
                     <div className="bg-card border border-border rounded-lg overflow-hidden min-w-0">
                       <button
                         ref={commandsRef}
@@ -639,15 +786,16 @@ export function OpenCodeConfigManager() {
                         <div className="flex items-center gap-3 min-w-0">
                           <h4 className="text-sm font-medium truncate">Commands</h4>
                           <span className="text-xs text-muted-foreground">
-                            {Object.keys((selectedConfig.content?.command as Record<string, Command> | undefined) ?? {}).length} configured
+                            {Object.keys((selectedConfig.content?.command as Record<string, Command> | undefined) ?? {}).length + directoryCommands.length} configured
                           </span>
                         </div>
                         <ChevronDown className={`h-4 w-4 transition-transform ${expandedSections.commands ? 'rotate-90' : ''}`} />
                       </button>
                       <div className={`${expandedSections.commands ? 'block' : 'hidden'} border-t border-border`}>
-                        <div className="p-1 sm:p-4 max-h-[50vh] overflow-y-auto">
+                        <div className={EXPANDED_SECTION_CONTENT_CLASS}>
                           <CommandsEditor
                             commands={(selectedConfig.content?.command as Record<string, Command> | undefined) ?? {}}
+                            directoryCommands={directoryCommands}
                             onChange={(commands) => {
                               const updatedContent = {
                                 ...selectedConfig.content,
@@ -676,15 +824,16 @@ export function OpenCodeConfigManager() {
                         <div className="flex items-center gap-3 min-w-0">
                           <h4 className="text-sm font-medium truncate">Agents</h4>
                           <span className="text-xs text-muted-foreground">
-                            {Object.keys((selectedConfig.content?.agent as Record<string, Agent> | undefined) ?? {}).length} configured
+                            {Object.keys((selectedConfig.content?.agent as Record<string, Agent> | undefined) ?? {}).length + directoryAgents.length} configured
                           </span>
                         </div>
                         <ChevronDown className={`h-4 w-4 transition-transform ${expandedSections.agents ? 'rotate-90' : ''}`} />
                       </button>
                       <div className={`${expandedSections.agents ? 'block' : 'hidden'} border-t border-border`}>
-                        <div className="p-4 max-h-[50vh] overflow-y-auto">
+                        <div className={EXPANDED_SECTION_CONTENT_CLASS}>
                           <AgentsEditor
                             agents={(selectedConfig.content?.agent as Record<string, Agent> | undefined) ?? {}}
+                            directoryAgents={directoryAgents}
                             onChange={(agents) => {
                               const updatedContent = {
                                 ...selectedConfig.content,
@@ -712,25 +861,15 @@ export function OpenCodeConfigManager() {
                         <div className="flex items-center gap-3 min-w-0">
                           <h4 className="text-sm font-medium truncate">Skills</h4>
                           <span className="text-xs text-muted-foreground">
-                            {managedSkills.length + (selectedConfig.content?.skills?.paths?.length ?? 0) + (selectedConfig.content?.skills?.urls?.length ?? 0)} configured
+                            {managedSkills.length} configured
                           </span>
                         </div>
                         <ChevronDown className={`h-4 w-4 transition-transform ${expandedSections.skills ? 'rotate-90' : ''}`} />
                       </button>
                         <div className={`${expandedSections.skills ? 'block' : 'hidden'} border-t border-border`}>
-                          <div className="p-4 max-h-[50vh] overflow-y-auto">
+                          <div className={EXPANDED_SECTION_CONTENT_CLASS}>
                             <SkillsEditor
-                              skills={selectedConfig.content?.skills}
                               managedSkills={managedSkills}
-                              onChange={(skills) => {
-                                const paths = skills?.paths?.filter(Boolean)
-                                const urls = skills?.urls?.filter(Boolean)
-                                const updatedContent = {
-                                  ...selectedConfig.content,
-                                  skills: (paths?.length || urls?.length) ? { paths: paths?.length ? paths : undefined, urls: urls?.length ? urls : undefined } : undefined
-                                }
-                                updateConfigContent(selectedConfig.name, updatedContent)
-                              }}
                             />
                           </div>
                         </div>
@@ -758,11 +897,55 @@ export function OpenCodeConfigManager() {
                         <ChevronDown className={`h-4 w-4 transition-transform ${expandedSections.mcp ? 'rotate-90' : ''}`} />
                       </button>
                       <div className={`${expandedSections.mcp ? 'block' : 'hidden'} border-t border-border`}>
-                        <div className="p-4 max-h-[50vh] overflow-y-auto">
+                        <div className={EXPANDED_SECTION_CONTENT_CLASS}>
                           <McpManager
                             config={selectedConfig}
                             onUpdate={(content) => updateConfigContent(selectedConfig.name, content)}
                             onConfigUpdate={updateConfigContent}
+                          />
+                        </div>
+                      </div>
+                    </div>
+
+                    <div className="bg-card border border-border rounded-lg overflow-hidden min-w-0">
+                      <button
+                        ref={modelsRef}
+                        className={cn("w-full px-4 py-3 flex items-center justify-between transition-colors min-w-0", expandedSections.models ? "bg-muted/40 hover:bg-muted/50" : "hover:bg-muted/50")}
+                        onClick={() => {
+                          const isExpanding = !expandedSections.models
+                          setExpandedSections(prev => ({ ...prev, models: isExpanding }))
+                          
+                          if (isExpanding) {
+                            setTimeout(() => scrollToSection(modelsRef), 100)
+                          }
+                        }}
+                      >
+                        <div className="flex items-center gap-3 min-w-0">
+                          <h4 className="text-sm font-medium truncate">Models</h4>
+                          <span className="text-xs text-muted-foreground">
+                            {(() => {
+                              const provider = selectedConfig.content?.provider as Record<string, unknown> | undefined
+                              if (!provider) return 0
+                              return Object.values(provider).reduce<number>((acc, p) => {
+                                const models = (p as { models?: Record<string, unknown> })?.models
+                                return acc + (models ? Object.keys(models).length : 0)
+                              }, 0)
+                            })()} configured
+                          </span>
+                        </div>
+                        <ChevronDown className={`h-4 w-4 transition-transform ${expandedSections.models ? 'rotate-90' : ''}`} />
+                      </button>
+                      <div className={`${expandedSections.models ? 'block' : 'hidden'} border-t border-border`}>
+                        <div className={EXPANDED_SECTION_CONTENT_CLASS}>
+                          <OpenCodeModelsEditor
+                            providers={(selectedConfig.content?.provider as Record<string, ConfigProvider> | undefined) ?? {}}
+                            onChange={(providers) => {
+                              const updatedContent = {
+                                ...selectedConfig.content,
+                                provider: providers
+                              }
+                              updateConfigContent(selectedConfig.name, updatedContent)
+                            }}
                           />
                         </div>
                       </div>
@@ -789,6 +972,15 @@ export function OpenCodeConfigManager() {
         description="Any repositories using this configuration will continue to work but won't receive updates."
         itemName={deleteConfirmConfig?.name}
         isDeleting={isUpdating}
+      />
+
+      <RestartServerDialog
+        open={isRestartPromptOpen}
+        onOpenChange={setIsRestartPromptOpen}
+        activeSessionCount={activeSessionCount}
+        isRestarting={restartServerMutation.isPending}
+        onCancel={() => setIsRestartPromptOpen(false)}
+        onConfirm={confirmRestart}
       />
     </div>
   )

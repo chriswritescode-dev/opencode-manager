@@ -1,0 +1,241 @@
+import os from 'os'
+import path from 'path'
+import { cp, mkdtemp, readdir, rename, rm } from 'fs/promises'
+import { Database as SQLiteDatabase, type Database } from 'bun:sqlite'
+import { OpenCodeConfigSchema } from '@opencode-manager/shared/schemas'
+import { getOpenCodeConfigFilePath, getWorkspacePath } from '@opencode-manager/shared/config/env'
+import { parse as parseJsonc } from 'jsonc-parser'
+import { SettingsService } from './settings'
+import { ensureDirectoryExists, fileExists, readFileContent, writeFileContent } from './file-operations'
+
+const OPENCODE_STATE_DB_FILENAMES = new Set(['opencode.db', 'opencode.db-shm', 'opencode.db-wal'])
+
+export interface OpenCodeImportStatus {
+  configSourcePath: string | null
+  stateSourcePath: string | null
+  workspaceConfigPath: string
+  workspaceStatePath: string
+  workspaceStateExists: boolean
+}
+
+export interface SyncOpenCodeImportOptions {
+  db: Database
+  userId?: string
+  overwriteState?: boolean
+  protectExistingState?: boolean
+}
+
+export interface SyncOpenCodeImportResult extends OpenCodeImportStatus {
+  configImported: boolean
+  stateImported: boolean
+}
+
+export class OpenCodeImportProtectionError extends Error {
+  code = 'OPENCODE_IMPORT_PROTECTED'
+  detail: string
+
+  constructor(detail: string) {
+    super('OpenCode host import was blocked to protect existing workspace state')
+    this.name = 'OpenCodeImportProtectionError'
+    this.detail = detail
+  }
+}
+
+export interface ImportedSessionDirectorySummary {
+  directories: string[]
+}
+
+export function getImportPathCandidates(envKey: string, fallbackPath: string): string[] {
+  const candidates = [process.env[envKey], fallbackPath]
+    .filter((value): value is string => Boolean(value))
+    .map((value) => path.resolve(value))
+
+  return Array.from(new Set(candidates))
+}
+
+export async function getFirstExistingPath(paths: string[]): Promise<string | null> {
+  for (const candidate of paths) {
+    if (await fileExists(candidate)) {
+      return candidate
+    }
+  }
+
+  return null
+}
+
+async function getFirstExistingPathWithDatabase(paths: string[]): Promise<string | null> {
+  for (const candidate of paths) {
+    if (await fileExists(candidate) && await fileExists(path.join(candidate, 'opencode.db'))) {
+      return candidate
+    }
+  }
+
+  return null
+}
+
+function escapeSqliteValue(value: string): string {
+  return value.replace(/'/g, "''")
+}
+
+async function copyOpenCodeStateFiles(sourcePath: string, targetPath: string): Promise<void> {
+  const entries = await readdir(sourcePath, { withFileTypes: true })
+
+  for (const entry of entries) {
+    if (OPENCODE_STATE_DB_FILENAMES.has(entry.name)) {
+      continue
+    }
+
+    await cp(path.join(sourcePath, entry.name), path.join(targetPath, entry.name), {
+      recursive: true,
+      force: true,
+      errorOnExist: false,
+    })
+  }
+}
+
+function snapshotOpenCodeDatabase(sourcePath: string, targetPath: string): void {
+  const database = new SQLiteDatabase(sourcePath)
+
+  try {
+    database.exec(`VACUUM INTO '${escapeSqliteValue(targetPath)}'`)
+  } finally {
+    database.close()
+  }
+}
+
+export async function importOpenCodeStateDirectory(sourcePath: string, targetPath: string): Promise<boolean> {
+  const resolvedSourcePath = path.resolve(sourcePath)
+  const resolvedTargetPath = path.resolve(targetPath)
+  const sourceDbPath = path.join(resolvedSourcePath, 'opencode.db')
+  const targetParentPath = path.dirname(resolvedTargetPath)
+  const targetDirectoryName = path.basename(resolvedTargetPath)
+
+  if (resolvedSourcePath === resolvedTargetPath) {
+    return false
+  }
+
+  if (!await fileExists(sourceDbPath)) {
+    return false
+  }
+
+  await ensureDirectoryExists(targetParentPath)
+
+  const stagedTargetPath = await mkdtemp(path.join(targetParentPath, `${targetDirectoryName}-import-`))
+
+  try {
+    await copyOpenCodeStateFiles(resolvedSourcePath, stagedTargetPath)
+    snapshotOpenCodeDatabase(sourceDbPath, path.join(stagedTargetPath, 'opencode.db'))
+
+    await rm(resolvedTargetPath, { recursive: true, force: true })
+    await rename(stagedTargetPath, resolvedTargetPath)
+    return true
+  } catch (error) {
+    await rm(stagedTargetPath, { recursive: true, force: true })
+    throw error
+  }
+}
+
+export async function getOpenCodeImportStatus(): Promise<OpenCodeImportStatus> {
+  const workspaceConfigPath = getOpenCodeConfigFilePath()
+  const workspaceStatePath = path.join(getWorkspacePath(), '.opencode', 'state', 'opencode')
+  const workspaceStateExists = await fileExists(path.join(workspaceStatePath, 'opencode.db'))
+
+  const configSourcePath = await getFirstExistingPath(
+    getImportPathCandidates('OPENCODE_IMPORT_CONFIG_PATH', path.join(os.homedir(), '.config', 'opencode', 'opencode.json'))
+  )
+  const stateSourcePath = await getFirstExistingPathWithDatabase(
+    getImportPathCandidates('OPENCODE_IMPORT_STATE_PATH', path.join(os.homedir(), '.local', 'share', 'opencode'))
+  )
+
+  return {
+    configSourcePath,
+    stateSourcePath,
+    workspaceConfigPath,
+    workspaceStatePath,
+    workspaceStateExists,
+  }
+}
+
+async function importOpenCodeConfigFromSource(db: Database, userId: string, sourcePath: string, workspaceConfigPath: string): Promise<boolean> {
+  const rawContent = await readFileContent(sourcePath)
+  const parsed = parseJsonc(rawContent)
+  const validation = OpenCodeConfigSchema.safeParse(parsed)
+
+  if (!validation.success) {
+    throw new Error('Importable OpenCode config is invalid')
+  }
+
+  const settingsService = new SettingsService(db)
+  const existingDefault = settingsService.getOpenCodeConfigByName('default', userId)
+
+  if (existingDefault) {
+    settingsService.updateOpenCodeConfig('default', {
+      content: rawContent,
+      isDefault: true,
+    }, userId)
+  } else {
+    settingsService.createOpenCodeConfig({
+      name: 'default',
+      content: rawContent,
+      isDefault: true,
+    }, userId)
+  }
+
+  await writeFileContent(workspaceConfigPath, rawContent)
+  return true
+}
+
+export async function syncOpenCodeImport(options: SyncOpenCodeImportOptions): Promise<SyncOpenCodeImportResult> {
+  const initialStatus = await getOpenCodeImportStatus()
+  const userId = options.userId || 'default'
+  const overwriteState = options.overwriteState === true
+  let configImported = false
+  let stateImported = false
+
+  if (options.protectExistingState && initialStatus.stateSourcePath && initialStatus.workspaceStateExists && !overwriteState) {
+    throw new OpenCodeImportProtectionError(
+      `Import was blocked because workspace state already exists at ${initialStatus.workspaceStatePath}. Clear the workspace state first if you want to replace it with host state.`
+    )
+  }
+
+  if (initialStatus.configSourcePath) {
+    configImported = await importOpenCodeConfigFromSource(options.db, userId, initialStatus.configSourcePath, initialStatus.workspaceConfigPath)
+  }
+
+  if (initialStatus.stateSourcePath && (overwriteState || !initialStatus.workspaceStateExists)) {
+    stateImported = await importOpenCodeStateDirectory(initialStatus.stateSourcePath, initialStatus.workspaceStatePath)
+  }
+
+  const finalStatus = await getOpenCodeImportStatus()
+
+  return {
+    ...finalStatus,
+    configImported,
+    stateImported,
+  }
+}
+
+export async function getImportedSessionDirectories(workspaceStatePath?: string): Promise<ImportedSessionDirectorySummary> {
+  const statePath = workspaceStatePath || path.join(getWorkspacePath(), '.opencode', 'state', 'opencode')
+  const stateDbPath = path.join(statePath, 'opencode.db')
+
+  if (!await fileExists(stateDbPath)) {
+    return { directories: [] }
+  }
+
+  const database = new SQLiteDatabase(stateDbPath, { readonly: true })
+
+  try {
+    const rows = database
+      .query("SELECT DISTINCT directory FROM session WHERE directory IS NOT NULL AND TRIM(directory) != '' ORDER BY directory")
+      .all() as Array<{ directory: string }>
+
+    return {
+      directories: rows
+        .map((row) => row.directory.trim())
+        .filter(Boolean),
+    }
+  } finally {
+    database.close()
+  }
+}

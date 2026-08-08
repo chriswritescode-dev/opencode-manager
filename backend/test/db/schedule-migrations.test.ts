@@ -1,6 +1,7 @@
 import { describe, expect, it, vi } from 'vitest'
 import migration007 from '../../src/db/migrations/007-schedules'
 import migration008 from '../../src/db/migrations/008-schedule-cron-support'
+import migration015 from '../../src/db/migrations/015-schedule-worktree-isolation'
 
 describe('schedule migrations', () => {
   it('creates schedule jobs with nullable interval minutes in v7', () => {
@@ -83,5 +84,70 @@ describe('schedule migrations', () => {
     expect(db.run).toHaveBeenCalledWith(expect.stringContaining("'interval'"))
     expect(db.run).toHaveBeenCalledWith('DROP TABLE schedule_jobs')
     expect(db.run).toHaveBeenCalledWith('ALTER TABLE schedule_jobs_new RENAME TO schedule_jobs')
+  })
+})
+
+describe('migration 015 - schedule worktree isolation', () => {
+  it('adds branch column to schedule_jobs and worktree columns to schedule_runs', () => {
+    const db = {
+      prepare: vi.fn().mockImplementation((query: string) => {
+        if (query.includes('PRAGMA table_info(schedule_jobs)')) {
+          return {
+            all: vi.fn().mockReturnValue([
+              { name: 'id', notnull: 1, dflt_value: null },
+              { name: 'repo_id', notnull: 1, dflt_value: null },
+            ]),
+          }
+        }
+        if (query.includes('PRAGMA table_info(schedule_runs)')) {
+          return {
+            all: vi.fn().mockReturnValue([
+              { name: 'id', notnull: 1, dflt_value: null },
+              { name: 'job_id', notnull: 1, dflt_value: null },
+            ]),
+          }
+        }
+        return { all: vi.fn().mockReturnValue([]), get: vi.fn().mockReturnValue(undefined) }
+      }),
+      run: vi.fn(),
+    }
+
+    migration015.up(db as never)
+
+    expect(db.run).toHaveBeenCalledWith('ALTER TABLE schedule_jobs ADD COLUMN branch TEXT')
+    expect(db.run).toHaveBeenCalledWith('ALTER TABLE schedule_runs ADD COLUMN run_branch TEXT')
+    expect(db.run).toHaveBeenCalledWith('ALTER TABLE schedule_runs ADD COLUMN commit_hash TEXT')
+    expect(db.run).toHaveBeenCalledWith('ALTER TABLE schedule_runs ADD COLUMN worktree_path TEXT')
+  })
+
+  it('skips columns that already exist', () => {
+    const db = {
+      prepare: vi.fn().mockImplementation((query: string) => {
+        if (query.includes('PRAGMA table_info(schedule_jobs)')) {
+          return {
+            all: vi.fn().mockReturnValue([
+              { name: 'id', notnull: 1, dflt_value: null },
+              { name: 'branch', notnull: 0, dflt_value: null },
+            ]),
+          }
+        }
+        if (query.includes('PRAGMA table_info(schedule_runs)')) {
+          return {
+            all: vi.fn().mockReturnValue([
+              { name: 'id', notnull: 1, dflt_value: null },
+              { name: 'run_branch', notnull: 0, dflt_value: null },
+              { name: 'commit_hash', notnull: 0, dflt_value: null },
+              { name: 'worktree_path', notnull: 0, dflt_value: null },
+            ]),
+          }
+        }
+        return { all: vi.fn().mockReturnValue([]), get: vi.fn().mockReturnValue(undefined) }
+      }),
+      run: vi.fn(),
+    }
+
+    migration015.up(db as never)
+
+    expect(db.run).not.toHaveBeenCalledWith(expect.stringContaining('ALTER TABLE'))
   })
 })

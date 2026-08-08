@@ -9,31 +9,9 @@ import {
 } from '@/components/ui/dialog'
 import { Button } from '@/components/ui/button'
 import type { PermissionRequest, PermissionResponse } from '@/api/types'
-import type { components } from '@/api/opencode-types'
+import { getPermissionLabel, getPermissionDetail } from '@opencode-manager/shared/notifications'
 import { cn } from '@/lib/utils'
 import { showToast } from '@/lib/toast'
-
-type PermissionConfig = components['schemas']['PermissionConfig']
-type KnownPermissionType = keyof Exclude<PermissionConfig, string> & string
-
-const PERMISSION_LABELS: Record<KnownPermissionType, string> = {
-  read: 'Read File',
-  edit: 'Edit File',
-  glob: 'Search Files',
-  grep: 'Search Content',
-  list: 'List Directory',
-  bash: 'Run Command',
-  task: 'Run Task',
-  external_directory: 'External Access',
-  todowrite: 'Write Todo',
-  todoread: 'Read Todo',
-  question: 'Ask Question',
-  webfetch: 'Fetch URL',
-  websearch: 'Web Search',
-  codesearch: 'Code Search',
-  lsp: 'LSP Action',
-  doom_loop: 'Repeated Action',
-}
 
 interface PermissionRequestDialogProps {
   permission: PermissionRequest | null
@@ -44,76 +22,6 @@ interface PermissionRequestDialogProps {
   onRespond: (permissionID: string, sessionID: string, response: PermissionResponse) => Promise<void>
   open?: boolean
   onOpenChange?: (open: boolean) => void
-}
-
-function getPermissionTypeLabel(type: string): string {
-  if (type in PERMISSION_LABELS) {
-    return PERMISSION_LABELS[type as KnownPermissionType]
-  }
-  return type.charAt(0).toUpperCase() + type.slice(1)
-}
-
-function getPermissionDetails(permission: PermissionRequest): { primary: string; secondary?: string } {
-  const metadata = permission.metadata || {}
-  
-  switch (permission.permission) {
-    case 'bash': {
-      const command = metadata.command as string | undefined
-      if (command) {
-        return { primary: command }
-      }
-      break
-    }
-    case 'edit':
-    case 'write': {
-      const filePath = metadata.filePath as string | undefined
-      const diff = metadata.diff as string | undefined
-      if (filePath) {
-        return { 
-          primary: filePath,
-          secondary: diff ? diff.slice(0, 500) + (diff.length > 500 ? '\n...' : '') : undefined
-        }
-      }
-      break
-    }
-    case 'webfetch': {
-      const url = metadata.url as string | undefined
-      if (url) {
-        return { primary: url }
-      }
-      break
-    }
-    case 'external_directory': {
-      const command = metadata.command as string | undefined
-      const filepath = metadata.filepath as string | undefined
-      if (command) {
-        return { primary: command }
-      }
-      if (filepath) {
-        return { primary: filepath }
-      }
-      break
-    }
-    case 'doom_loop': {
-      const tool = metadata.tool as string | undefined
-      const input = metadata.input
-      if (tool) {
-        return { 
-          primary: `Tool: ${tool}`,
-          secondary: input ? JSON.stringify(input, null, 2).slice(0, 300) : undefined
-        }
-      }
-      break
-    }
-  }
-  
-  const patterns = permission.patterns || []
-  
-  if (patterns.length > 0) {
-    return { primary: patterns.join('\n') }
-  }
-  
-  return { primary: '' }
 }
 
 export function PermissionRequestDialog({
@@ -145,8 +53,8 @@ export function PermissionRequestDialog({
     }
   }
 
-  const typeLabel = getPermissionTypeLabel(permission.permission)
-  const details = getPermissionDetails(permission)
+  const typeLabel = getPermissionLabel(permission.permission)
+  const details = getPermissionDetail(permission)
   const hasMultiple = pendingCount > 1
   const displaySessionName = sessionTitle || `Session ${permission.sessionID.slice(0, 8)}...`
 

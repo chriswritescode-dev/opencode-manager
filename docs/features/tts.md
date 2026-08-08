@@ -6,6 +6,8 @@ Listen to AI responses with built-in or external TTS.
 
 OpenCode Manager supports two TTS providers:
 
+![TTS Settings](../images/tts-settings.png)
+
 1. **Built-in Browser** - Uses your browser's Web Speech API
 2. **External API** - OpenAI-compatible TTS endpoints
 
@@ -34,7 +36,7 @@ Works in modern browsers:
 
 ### Setup
 
-1. Go to **Settings > TTS**
+1. Go to **Settings > Voice**
 2. Enable **TTS**
 3. Select **Built-in Browser** provider
 4. Choose a voice from available browser voices
@@ -74,7 +76,7 @@ Connect to OpenAI-compatible TTS endpoints for higher quality voices.
 
 ### Setup
 
-1. Go to **Settings > TTS**
+1. Go to **Settings > Voice**
 2. Enable **TTS**
 3. Select **External API** provider
 4. Enter the **TTS Server URL**:

@@ -1,4 +1,4 @@
-import { parse as parseJsoncLib, type ParseError } from 'jsonc-parser'
+import { parse as parseJsoncLib, parseTree, findNodeAtLocation, type ParseError, type JSONPath } from 'jsonc-parser'
 
 export function parseJsonc<T = unknown>(content: string): T {
   const errors: ParseError[] = []
@@ -40,6 +40,26 @@ function getErrorMessageByCode(error: number): string {
     8: 'Unexpected end of input',
     9: 'Invalid comment',
   }
-  
+
   return errorMessages[error] || 'Invalid JSONC'
+}
+
+export function parseJsoncErrorLine(error: unknown): number | null {
+  if (!(error instanceof SyntaxError)) return null
+  const match = error.message.match(/at line (\d+)/)
+  return match ? Number(match[1]) : null
+}
+
+export function findJsoncLineForPath(content: string, path: JSONPath): number | null {
+  if (path.length === 0) return null
+  const root = parseTree(content, [], { allowTrailingComma: true, disallowComments: false })
+  if (!root) return null
+  const node = findNodeAtLocation(root, path)
+  if (!node) return null
+  return content.substring(0, node.offset).split('\n').length
+}
+
+export function parseJsoncPathSegments(path: string): JSONPath {
+  if (!path || path === 'root') return []
+  return path.split('.').map((segment) => (/^\d+$/.test(segment) ? Number(segment) : segment))
 }

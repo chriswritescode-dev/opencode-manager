@@ -7,6 +7,10 @@
 </p>
 
 <p align="center">
+    <a href="https://opencodemanager.app">opencodemanager.app</a>
+</p>
+
+<p align="center">
     <a href="https://github.com/chriswritescode-dev/opencode-manager/blob/main/LICENSE">
         <img src="https://img.shields.io/github/license/chriswritescode-dev/opencode-manager?label=License" alt="License" />
     </a>
@@ -22,8 +26,8 @@
 </p>
 
 <p align="center">
-  <img src="docs/images/ocmgr-demo.gif" alt="OpenCode Manager Demo" height="400" />
-  <img src="https://github.com/user-attachments/assets/c8087451-8b97-4178-952b-b8149f5c258a" alt="Git Commit Demo" height="400" />
+  <img src="docs/images/ocmgr-main.webp" alt="OpenCode Manager" width="600" style="border: none" />
+  <img src="docs/images/ocmgr-mobile.webp" alt="Mobile view" height="400" style="border: none; margin-left: 12px" />
 </p>
 
 ## Quick Start
@@ -41,27 +45,44 @@ On first launch, you'll be prompted to create an admin account. That's it!
 
 For local development setup, see the [Development Guide](https://chriswritescode-dev.github.io/opencode-manager/development/setup/).
 
-## Screenshots
-
-<table>
-<tr>
-<td align="center"><strong>Chat (Mobile)</strong><br/><img src="https://github.com/user-attachments/assets/a48cc728-e540-4247-879a-c5f36c3fd6de" alt="chat-mobile" width="200" /></td>
-<td align="center"><strong>File Browser (Mobile)</strong><br/><img src="https://github.com/user-attachments/assets/24243e5e-ab02-44ff-a719-263f61c3178b" alt="files-mobile" width="200" /></td>
-<td align="center"><strong>Inline Diff View</strong><br/><img src="https://github.com/user-attachments/assets/b94c0ca0-d960-4888-8a25-a31ed6d5068d" alt="inline-diff-view" width="300" /></td>
-</tr>
-</table>
 
 ## Features
 
-- **Git** — Multi-repo support, SSH authentication, worktrees, unified diffs with line numbers, PR creation
+- **Repositories & Git** — Multi-repo management, local discovery, SSH auth, worktrees, unified diffs, branch and commit management
+- **Chat & Sessions** — Real-time SSE streaming, slash commands, `@file` mentions, Plan/Build modes, Mermaid diagram rendering
 - **Files** — Directory browser with tree view, syntax highlighting, create/rename/delete, ZIP download
-- **Chat** — Real-time streaming (SSE), slash commands, `@file` mentions, Plan/Build modes, Mermaid diagrams
-- **Schedules** — Recurring repo jobs with reusable prompts, run history, linked sessions, and markdown-rendered output
-- **Audio** — Text-to-speech (browser + OpenAI-compatible), speech-to-text (browser + OpenAI-compatible)
-- **AI** — Model selection, provider config, OAuth for Anthropic/GitHub Copilot, custom agents with system prompts
-- **MCP** — Local and remote MCP server support with pre-built templates
-- **Memory** — Persistent project knowledge with semantic search and compaction awareness
-- **Mobile** — Responsive UI, PWA installable, iOS-optimized with proper keyboard handling and swipe navigation
+- **Assistant Mode** — Dedicated AI workspace with auto-provisioned skills for schedules, notifications, settings, and repo operations
+- **Schedules** — Recurring repo jobs with reusable prompts, run history, linked sessions, markdown-rendered output
+- **MCP Servers** — Add, configure, authenticate, and manage local or remote MCP servers with OAuth support
+- **AI Configuration** — Model/provider setup, API keys, OAuth for Anthropic and GitHub Copilot, custom agent definitions
+- **Skills** — Extend agent capabilities with shareable, scoped skill definitions
+- **Notifications** — Push notifications for session events, questions, errors, and completions
+- **Audio** — Text-to-speech and speech-to-text (browser native and OpenAI-compatible APIs)
+- **Mobile & PWA** — Responsive mobile-first UI, installable on any device, iOS-optimized
+
+## Architecture
+
+OpenCode Manager is a pnpm workspace with three TypeScript packages:
+
+- `backend/` — Bun + Hono API server with Better Auth, SQLite migrations, OpenCode process management, SSE, schedules, and push notifications.
+- `frontend/` — React + Vite SPA using React Router, TanStack Query, Radix UI/Tailwind, service worker support, and mobile-first navigation.
+- `shared/` — shared Zod schemas, config helpers, types, and utilities consumed by both backend and frontend.
+
+A MkDocs Material site (`docs/`) provides guides, feature docs, configuration, and troubleshooting.
+
+## Development
+
+This repo uses pnpm workspaces for `shared`, `backend`, and `frontend`.
+
+```bash
+pnpm install
+pnpm dev
+pnpm lint
+pnpm typecheck
+pnpm test
+```
+
+See the [Development Guide](https://chriswritescode-dev.github.io/opencode-manager/development/setup/) for local setup, scripts, database notes, and testing.
 
 ## Configuration
 
@@ -80,6 +101,12 @@ AUTH_SECURE_COOKIES=false  # Set to true when using HTTPS
 
 For OAuth, Passkeys, Push Notifications (VAPID), and advanced configuration, see the [Configuration Guide](https://chriswritescode-dev.github.io/opencode-manager/configuration/environment/).
 
+## `ocm` CLI
+
+OpenCode Manager ships an `ocm` CLI (from `ocm-cli/`) that attaches your local OpenCode TUI to a repo hosted on the Manager. It lists ready repos, attaches via the Manager's `/api/opencode-proxy` (so prompts run on the Manager's filesystem against a single shared OpenCode server), and can sync the working tree up or down with `ocm push` / `ocm pull` (fast git bundle + working-tree patch by default; pass `--full` for the legacy tarball mirror). Running `ocm` inside a local clone auto-detects the matching Manager repo by `origin` URL.
+
+See the [`ocm` CLI guide](docs/ocm-cli.md) for setup and commands.
+
 ## Documentation
 
 - [Getting Started](https://chriswritescode-dev.github.io/opencode-manager/getting-started/installation/) — Installation and first-run setup
@@ -87,6 +114,7 @@ For OAuth, Passkeys, Push Notifications (VAPID), and advanced configuration, see
 - [Configuration](https://chriswritescode-dev.github.io/opencode-manager/configuration/environment/) — Environment variables and advanced setup
 - [Troubleshooting](https://chriswritescode-dev.github.io/opencode-manager/troubleshooting/) — Common issues and solutions
 - [Development](https://chriswritescode-dev.github.io/opencode-manager/development/setup/) — Contributing and local development
+- [`ocm` CLI](docs/ocm-cli.md) — Attach local OpenCode TUI to Manager repos
 
 ## License
 

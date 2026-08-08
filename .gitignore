@@ -18,4 +18,5 @@ data/
 workspace/
 /config/
 temp/
+.forge/
 

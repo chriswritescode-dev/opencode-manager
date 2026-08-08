@@ -1,12 +1,12 @@
 import { useEffect, useMemo, useState } from 'react'
-import { useParams } from 'react-router-dom'
-import { useQuery } from '@tanstack/react-query'
+import { useLocation, useParams } from 'react-router-dom'
 import type { CreateScheduleJobRequest, ScheduleJob } from '@opencode-manager/shared/types'
-import { getRepo } from '@/api/repos'
 import {
   useCancelRepoScheduleRun,
+  useClearRepoScheduleRuns,
   useCreateRepoSchedule,
   useDeleteRepoSchedule,
+  useDeleteRepoScheduleRun,
   useRepoSchedule,
   useRepoScheduleRun,
   useRepoScheduleRuns,
@@ -14,75 +14,122 @@ import {
   useRunRepoSchedule,
   useUpdateRepoSchedule,
 } from '@/hooks/useSchedules'
+import { useRepoActivity } from '@/hooks/useRepoActivity'
+import { useScheduleTarget } from '@/hooks/useScheduleTarget'
+import { useScheduleUrlState } from '@/hooks/useScheduleUrlState'
 import { ScheduleJobDialog, JobsTab, JobDetailTab, RunHistoryTab, ScheduleTabMenu } from '@/components/schedules'
-import { toUpdateScheduleRequest, getJobStatusTone } from '@/components/schedules/schedule-utils'
+import { toUpdateScheduleRequest } from '@/components/schedules/schedule-utils'
 import { Header } from '@/components/ui/header'
 import { Button } from '@/components/ui/button'
-import { Badge } from '@/components/ui/badge'
 import { Card, CardContent } from '@/components/ui/card'
 import { DeleteDialog } from '@/components/ui/delete-dialog'
-import { getRepoDisplayName, cn } from '@/lib/utils'
+import { getReturnToPath } from '@/lib/navigation'
 import { CalendarClock, Loader2, Plus } from 'lucide-react'
 
 export function Schedules() {
   const { id } = useParams<{ id: string }>()
+  const location = useLocation()
   const repoId = id ? Number(id) : undefined
-  const [selectedJobId, setSelectedJobId] = useState<number | null>(null)
-  const [selectedRunId, setSelectedRunId] = useState<number | null>(null)
-  const [dialogOpen, setDialogOpen] = useState(false)
-  const [editingJob, setEditingJob] = useState<ScheduleJob | undefined>()
-  const [deleteJobId, setDeleteJobId] = useState<number | null>(null)
-  const [activeTab, setActiveTab] = useState<'jobs' | 'detail' | 'runs'>('jobs')
 
-  const { data: repo, isLoading: repoLoading } = useQuery({
-    queryKey: ['repo', repoId],
-    queryFn: () => getRepo(repoId!),
-    enabled: repoId !== undefined,
-  })
+  const {
+    scheduleTab,
+    setScheduleTab,
+    dialog,
+    jobId,
+    runId,
+    openNewJob,
+    openEditJob,
+    openDeleteJob,
+    closeDialog,
+    selectRun,
+    selectJobAndView,
+    selectJobAndCloseDialog,
+    replaceUrlParams,
+  } = useScheduleUrlState()
+
+  const repoScheduleTab = scheduleTab === 'prompts' ? 'jobs' : scheduleTab
+
+  const { scheduleTarget, isLoading: scheduleTargetLoading } = useScheduleTarget(repoId)
+
+  useRepoActivity(repoId ?? 0, Boolean(scheduleTarget) && scheduleTarget?.kind === 'repo')
+
   const { data: jobs, isLoading: jobsLoading } = useRepoSchedules(repoId)
-  const { data: selectedJob, isFetching: isJobFetching } = useRepoSchedule(repoId, selectedJobId)
-  const { data: runs, isLoading: runsLoading } = useRepoScheduleRuns(repoId, selectedJobId, 30)
-  const { data: selectedRunDetails, isLoading: selectedRunLoading } = useRepoScheduleRun(repoId, selectedJobId, selectedRunId)
+  const { data: selectedJob, isFetching: isJobFetching } = useRepoSchedule(repoId, jobId)
+  const { data: runs, isLoading: runsLoading } = useRepoScheduleRuns(repoId, jobId, 30)
+  const { data: selectedRunDetails, isLoading: selectedRunLoading } = useRepoScheduleRun(repoId, jobId, runId)
 
   const createMutation = useCreateRepoSchedule()
   const updateMutation = useUpdateRepoSchedule()
   const deleteMutation = useDeleteRepoSchedule()
   const runMutation = useRunRepoSchedule()
   const cancelRunMutation = useCancelRepoScheduleRun()
+  const clearRunsMutation = useClearRepoScheduleRuns()
+  const deleteRunMutation = useDeleteRepoScheduleRun()
+
+  const [clearRunsOpen, setClearRunsOpen] = useState(false)
+  const [runToDelete, setRunToDelete] = useState<number | null>(null)
+
+  const clearableRuns = useMemo(() => (runs ?? []).filter((run) => run.status !== 'running'), [runs])
+  const clearableWorktrees = useMemo(() => clearableRuns.filter((run) => run.worktreePath).length, [clearableRuns])
+  const clearableBranches = useMemo(() => clearableRuns.filter((run) => run.runBranch).length, [clearableRuns])
 
   useEffect(() => {
-    if (!jobs?.length) {
-      setSelectedJobId(null)
-      setActiveTab('jobs')
+    if (scheduleTab === 'prompts') {
+      setScheduleTab('jobs')
+    }
+  }, [scheduleTab, setScheduleTab])
+
+  const editingJob = useMemo<ScheduleJob | undefined>(
+    () => (dialog === 'edit' && jobId !== null ? jobs?.find((j) => j.id === jobId) : undefined),
+    [dialog, jobId, jobs],
+  )
+
+  useEffect(() => {
+    if (jobs === undefined) return
+
+    if (!jobs.length) {
+      if (jobId !== null || scheduleTab !== 'jobs') {
+        replaceUrlParams((p) => {
+          p.delete('jobId')
+          p.delete('scheduleTab')
+        })
+      }
       return
     }
 
-    const stillExists = selectedJobId !== null && jobs.some((job) => job.id === selectedJobId)
+    const stillExists = jobId !== null && jobs.some((job) => job.id === jobId)
     if (!stillExists) {
-      setSelectedJobId(jobs[0]?.id ?? null)
-      setActiveTab('jobs')
+      const newId = jobs[0]?.id ?? null
+      if (newId !== jobId || scheduleTab !== 'jobs') {
+        replaceUrlParams((p) => {
+          if (newId === null) p.delete('jobId')
+          else p.set('jobId', String(newId))
+          p.delete('scheduleTab')
+        })
+      }
     }
-  }, [jobs, selectedJobId])
+  }, [jobs, jobId, scheduleTab, replaceUrlParams])
 
   useEffect(() => {
-    if (!runs?.length) {
-      setSelectedRunId(null)
+    if (runs === undefined) return
+
+    if (!runs.length) {
+      if (runId !== null) selectRun(null)
       return
     }
 
-    const stillExists = selectedRunId !== null && runs.some((run) => run.id === selectedRunId)
+    const stillExists = runId !== null && runs.some((run) => run.id === runId)
     if (!stillExists) {
-      setSelectedRunId(runs[0]?.id ?? null)
+      const newRunId = runs[0]?.id ?? null
+      if (newRunId !== runId) selectRun(newRunId)
     }
-  }, [runs, selectedRunId])
+  }, [runs, runId, selectRun])
 
-
-
-  const activeRunSummary = useMemo(() => runs?.find((run) => run.id === selectedRunId) ?? null, [runs, selectedRunId])
+  const activeRunSummary = useMemo(() => runs?.find((run) => run.id === runId) ?? null, [runs, runId])
   const activeRun = selectedRunDetails ?? activeRunSummary
   const runningRun = useMemo(() => runs?.find((run) => run.status === 'running') ?? null, [runs])
 
-  if (repoLoading || jobsLoading) {
+  if (scheduleTargetLoading || jobsLoading) {
     return (
       <div className="flex items-center justify-center min-h-screen bg-background">
         <Loader2 className="w-8 h-8 animate-spin text-muted-foreground" />
@@ -90,56 +137,51 @@ export function Schedules() {
     )
   }
 
-  if (!repo || repoId === undefined) {
+  if (!scheduleTarget || repoId === undefined) {
     return (
       <div className="flex items-center justify-center min-h-screen bg-background">
-        <p className="text-muted-foreground">Repository not found</p>
+        <p className="text-muted-foreground">
+          {repoId === 0 ? 'Assistant not found' : 'Repository not found'}
+        </p>
       </div>
     )
   }
-
-  const repoName = getRepoDisplayName(repo.repoUrl, repo.localPath)
-  const enabledCount = jobs?.filter((job) => job.enabled).length ?? 0
   const hasJobs = (jobs?.length ?? 0) > 0
+  const backHref = getReturnToPath(location.search, scheduleTarget.backHref)
 
   const handleCreate = (data: CreateScheduleJobRequest) => {
     createMutation.mutate({ repoId: repoId!, data }, {
       onSuccess: (job) => {
-        setSelectedJobId(job.id)
-        setDialogOpen(false)
-        setEditingJob(undefined)
+        selectJobAndCloseDialog(job.id)
       },
     })
   }
 
   const handleUpdate = (data: CreateScheduleJobRequest) => {
-    if (!editingJob) {
+    if (dialog !== 'edit' || jobId === null) {
       return
     }
 
     updateMutation.mutate({
       repoId: repoId!,
-      jobId: editingJob.id,
+      jobId,
       data: toUpdateScheduleRequest(data),
     }, {
       onSuccess: () => {
-        setDialogOpen(false)
-        setEditingJob(undefined)
+        closeDialog()
       },
     })
   }
 
   const handleDelete = () => {
-    if (deleteJobId === null) {
+    if (dialog !== 'delete' || jobId === null) {
       return
     }
 
-    deleteMutation.mutate({ repoId: repoId!, jobId: deleteJobId }, {
+    const deletedJobId = jobId
+    deleteMutation.mutate({ repoId: repoId!, jobId: deletedJobId }, {
       onSuccess: () => {
-        if (selectedJobId === deleteJobId) {
-          setSelectedJobId(null)
-        }
-        setDeleteJobId(null)
+        closeDialog()
       },
     })
   }
@@ -163,7 +205,7 @@ export function Schedules() {
 
     runMutation.mutate({ repoId: repoId!, jobId: selectedJob.id }, {
       onSuccess: (run) => {
-        setSelectedRunId(run.id)
+        selectRun(run.id)
       },
     })
   }
@@ -179,34 +221,51 @@ export function Schedules() {
       runId: activeRun.id,
     }, {
       onSuccess: (run) => {
-        setSelectedRunId(run.id)
+        selectRun(run.id)
       },
     })
   }
 
-  const handleSelectJob = (jobId: number) => {
-    setSelectedJobId(jobId)
-    setActiveTab('detail')
+  const handleClearHistory = () => {
+    if (jobId === null) {
+      return
+    }
+
+    clearRunsMutation.mutate({ repoId: repoId!, jobId }, {
+      onSuccess: () => setClearRunsOpen(false),
+    })
+  }
+
+  const handleConfirmDeleteRun = () => {
+    if (jobId === null || runToDelete === null) {
+      return
+    }
+
+    deleteRunMutation.mutate({ repoId: repoId!, jobId, runId: runToDelete }, {
+      onSuccess: () => setRunToDelete(null),
+    })
+  }
+
+  const handleSelectJob = (id: number) => {
+    selectJobAndView(id)
   }
 
   return (
-    <div className="h-dvh max-h-dvh overflow-hidden bg-background flex flex-col">
+    <div className="h-dvh max-h-dvh overflow-hidden bg-background flex flex-col pb-[calc(env(safe-area-inset-bottom)+56px)] sm:pb-0">
       <Header>
-        <Header.BackButton to={`/repos/${repoId}`} />
+        <Header.BackButton to={backHref} />
         <div className="min-w-0 flex-1 px-3">
-          <Header.Title className="truncate">Schedules</Header.Title>
-          <p className="text-xs text-muted-foreground truncate">{repoName}</p>
+          <Header.Title className="truncate">{scheduleTarget.name}</Header.Title>
+          <p className="text-xs text-muted-foreground truncate">{scheduleTarget.subtitle}</p>
         </div>
         <div className="flex items-center gap-2">
-          <Badge variant="outline" className="h-6 rounded-full px-2 text-xs">{jobs?.length ?? 0} jobs</Badge>
-          <Badge variant="outline" className={cn('h-6 rounded-full px-2 text-xs', getJobStatusTone({ enabled: true } as ScheduleJob))}>{enabledCount} enabled</Badge>
           <Header.Actions>
-            <Button onClick={() => { setEditingJob(undefined); setDialogOpen(true) }} size="sm" className="hidden sm:flex">
+            <Button onClick={openNewJob} size="sm" className="hidden sm:flex">
               <Plus className="w-4 h-4 mr-2" />
               New Schedule
             </Button>
-            <Button onClick={() => { setEditingJob(undefined); setDialogOpen(true) }} size="sm" className="sm:hidden">
-              <Plus className="w-4 h-4" />
+            <Button onClick={openNewJob} size="sm" className="sm:hidden h-10 w-10 p-0">
+              <Plus className="w-5 h-5" />
             </Button>
           </Header.Actions>
         </div>
@@ -224,7 +283,7 @@ export function Schedules() {
                   <p className="text-xl font-semibold tracking-tight">No schedules yet</p>
                   <p className="text-sm text-muted-foreground">Create a schedule for this repo to automate recurring agent work, then inspect runs, logs, and sessions here.</p>
                 </div>
-                <Button onClick={() => { setEditingJob(undefined); setDialogOpen(true) }}>
+                <Button onClick={openNewJob}>
                   <Plus className="w-4 h-4 mr-2" />
                   Create First Schedule
                 </Button>
@@ -233,18 +292,18 @@ export function Schedules() {
           </div>
         ) : (
           <>
-            {activeTab === 'jobs' && (
+            {repoScheduleTab === 'jobs' && (
               <JobsTab
                 jobs={jobs ?? []}
-                selectedJobId={selectedJobId}
+                selectedJobId={jobId}
                 onSelectJob={handleSelectJob}
               />
             )}
-            {activeTab === 'detail' && (
+            {repoScheduleTab === 'detail' && (
               <JobDetailTab
                 selectedJob={selectedJob}
-                onEdit={(job) => { setEditingJob(job); setDialogOpen(true) }}
-                onDelete={setDeleteJobId}
+                onEdit={(job) => openEditJob(job.id)}
+                onDelete={openDeleteJob}
                 onToggleEnabled={handleToggleEnabled}
                 onRunNow={handleRunNow}
                 updatePending={updateMutation.isPending}
@@ -253,17 +312,21 @@ export function Schedules() {
                 isJobFetching={isJobFetching}
               />
             )}
-            {activeTab === 'runs' && (
+            {repoScheduleTab === 'runs' && (
               <RunHistoryTab
                 repoId={repoId}
                 selectedJob={selectedJob}
                 runs={runs}
                 runsLoading={runsLoading}
-                onSelectRun={setSelectedRunId}
+                onSelectRun={selectRun}
                 activeRun={activeRun}
                 selectedRunLoading={selectedRunLoading}
                 onCancelRun={handleCancelRun}
                 cancelRunPending={cancelRunMutation.isPending}
+                onClearHistory={() => setClearRunsOpen(true)}
+                clearHistoryPending={clearRunsMutation.isPending}
+                onDeleteRun={(id) => setRunToDelete(id)}
+                deleteRunPending={deleteRunMutation.isPending}
               />
             )}
           </>
@@ -271,30 +334,69 @@ export function Schedules() {
       </div>
 
       {hasJobs && (
-        <ScheduleTabMenu activeTab={activeTab} onTabChange={setActiveTab} />
+        <div className="sm:block hidden">
+          <ScheduleTabMenu
+            activeTab={repoScheduleTab as 'jobs' | 'detail' | 'runs'}
+            onTabChange={(tab) => setScheduleTab(tab)}
+          />
+        </div>
       )}
 
       <ScheduleJobDialog
-        open={dialogOpen}
+        open={dialog === 'new' || dialog === 'edit'}
         onOpenChange={(open) => {
-          setDialogOpen(open)
-          if (!open) {
-            setEditingJob(undefined)
-          }
+          if (!open) closeDialog()
         }}
         job={editingJob}
+        repoId={repoId}
         isSaving={createMutation.isPending || updateMutation.isPending}
-        onSubmit={editingJob ? handleUpdate : handleCreate}
+        onSubmit={dialog === 'edit' ? handleUpdate : handleCreate}
       />
 
       <DeleteDialog
-        open={deleteJobId !== null}
-        onOpenChange={(open) => !open && setDeleteJobId(null)}
+        open={dialog === 'delete'}
+        onOpenChange={(open) => !open && closeDialog()}
         onConfirm={handleDelete}
-        onCancel={() => setDeleteJobId(null)}
+        onCancel={() => closeDialog()}
         title="Delete Schedule"
         description="This removes the job definition and all recorded run history for it."
         isDeleting={deleteMutation.isPending}
+      />
+
+      <DeleteDialog
+        open={clearRunsOpen}
+        onOpenChange={(open) => !open && setClearRunsOpen(false)}
+        onConfirm={handleClearHistory}
+        onCancel={() => setClearRunsOpen(false)}
+        title="Clear run history"
+        description={
+          <>
+            <p className="mb-2">This permanently deletes all <strong>{clearableRuns.length}</strong> finished run{clearableRuns.length === 1 ? '' : 's'} for this schedule.</p>
+            {clearableBranches > 0 && (
+              <p className="mb-1">Git artifacts that will be pruned:</p>
+            )}
+            <ul className="list-disc pl-5 space-y-0.5 text-sm text-muted-foreground">
+              {clearableWorktrees > 0 && (
+                <li><strong>{clearableWorktrees}</strong> worktree{clearableWorktrees === 1 ? '' : 's'}</li>
+              )}
+              {clearableBranches > 0 && (
+                <li><strong>{clearableBranches}</strong> run branch{clearableBranches === 1 ? '' : 'es'}</li>
+              )}
+            </ul>
+            <p className="mt-2">A run in progress is kept. This cannot be undone.</p>
+          </>
+        }
+        isDeleting={clearRunsMutation.isPending}
+      />
+
+      <DeleteDialog
+        open={runToDelete !== null}
+        onOpenChange={(open) => !open && setRunToDelete(null)}
+        onConfirm={handleConfirmDeleteRun}
+        onCancel={() => setRunToDelete(null)}
+        title="Delete run"
+        description="This permanently deletes this run along with its git run branch and worktree. This cannot be undone."
+        isDeleting={deleteRunMutation.isPending}
       />
     </div>
   )

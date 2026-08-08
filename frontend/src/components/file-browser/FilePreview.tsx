@@ -2,12 +2,10 @@ import { useState, useCallback, useRef, useEffect, memo } from 'react'
 import { Button } from '@/components/ui/button'
 import { Download, X, Edit3, Save, X as XIcon, WrapText, Eye, Code } from 'lucide-react'
 import type { FileInfo } from '@/types/files'
-import { API_BASE_URL } from '@/config'
+import { getFileApiUrl } from '@/api/files'
 import { VirtualizedTextView, type VirtualizedTextViewHandle } from '@/components/ui/virtualized-text-view'
 import { MarkdownRenderer } from './MarkdownRenderer'
 
-
-const API_BASE = API_BASE_URL
 
 const VIRTUALIZATION_THRESHOLD_BYTES = 50_000
 const MARKDOWN_PREVIEW_SIZE_LIMIT = 1_000_000
@@ -34,6 +32,7 @@ export const FilePreview = memo(function FilePreview({ file, hideHeader = false,
   const [isLoadingAllContent, setIsLoadingAllContent] = useState(false)
   const [fullContentLoaded, setFullContentLoaded] = useState(false)
   const [fullContent, setFullContent] = useState<string | null>(null)
+  const [localMdContent, setLocalMdContent] = useState<string | null>(null)
   const virtualizedRef = useRef<VirtualizedTextViewHandle>(null)
   const contentRef = useRef<HTMLDivElement>(null)
   
@@ -44,6 +43,7 @@ export const FilePreview = memo(function FilePreview({ file, hideHeader = false,
     setFullContentLoaded(false)
     setMarkdownPreview(isMarkdownFile)
     setFullContent(null)
+    setLocalMdContent(null)
   }, [file.path, isMarkdownFile])
   
   useEffect(() => {
@@ -95,7 +95,7 @@ export const FilePreview = memo(function FilePreview({ file, hideHeader = false,
 
   const handleDownload = () => {
     const link = document.createElement('a')
-    link.href = `${API_BASE}/api/files/${file.path}?download=true`
+    link.href = getFileApiUrl(file.path, { params: { download: true } })
     link.download = file.name
     document.body.appendChild(link)
     link.click()
@@ -115,6 +115,22 @@ export const FilePreview = memo(function FilePreview({ file, hideHeader = false,
     }
   }
 
+  const saveFileContent = useCallback(async (content: string) => {
+    const response = await fetch(getFileApiUrl(file.path), {
+      method: 'PUT',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ type: 'file', content }),
+    })
+    
+    if (!response.ok) {
+      throw new Error(`Save failed: ${response.statusText}`)
+    }
+
+    const event = new CustomEvent('fileSaved', { detail: { path: file.path, content } })
+    window.dispatchEvent(event)
+    onFileSaved?.()
+  }, [file.path, onFileSaved])
+
   const handleEdit = () => {
     if (shouldVirtualize) {
       setViewMode('edit')
@@ -124,7 +140,8 @@ export const FilePreview = memo(function FilePreview({ file, hideHeader = false,
     }
     
     try {
-      const content = file.content ? decodeBase64(file.content) : ''
+      const textContent = file.content ? decodeBase64(file.content) : ''
+      const content = localMdContent ?? textContent
       setEditContent(content)
       setViewMode('edit')
       const event = new CustomEvent('editModeChange', { detail: { isEditing: true } })
@@ -137,22 +154,13 @@ export const FilePreview = memo(function FilePreview({ file, hideHeader = false,
   const handleSave = async () => {
     setIsSaving(true)
     try {
-      const response = await fetch(`${API_BASE}/api/files/${file.path}`, {
-        method: 'PUT',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ type: 'file', content: editContent }),
-      })
-      
-      if (!response.ok) {
-        throw new Error(`Save failed: ${response.statusText}`)
+      await saveFileContent(editContent)
+      if (isMarkdownFile) {
+        setLocalMdContent(editContent)
       }
-      
       setViewMode('preview')
       const editEvent = new CustomEvent('editModeChange', { detail: { isEditing: false } })
       window.dispatchEvent(editEvent)
-      const event = new CustomEvent('fileSaved', { detail: { path: file.path, content: editContent } })
-      window.dispatchEvent(event)
-      onFileSaved?.()
     } catch (err) {
       console.error('Failed to save file:', err)
     } finally {
@@ -181,6 +189,27 @@ export const FilePreview = memo(function FilePreview({ file, hideHeader = false,
     onFileSaved?.()
   }, [file.path, onFileSaved])
 
+  const persistMarkdownContent = useCallback(async (content: string, setContent: (content: string) => void) => {
+    setContent(content)
+    setEditContent(content)
+    setIsSaving(true)
+    try {
+      await saveFileContent(content)
+    } catch (err) {
+      console.error('Failed to save markdown checkbox change:', err)
+    } finally {
+      setIsSaving(false)
+    }
+  }, [saveFileContent])
+
+  const handleFullMarkdownContentChange = useCallback((content: string) => {
+    void persistMarkdownContent(content, setFullContent)
+  }, [persistMarkdownContent])
+
+  const handleLocalMarkdownContentChange = useCallback((content: string) => {
+    void persistMarkdownContent(content, setLocalMdContent)
+  }, [persistMarkdownContent])
+
   const isTextFile = file.mimeType?.startsWith('text/') || 
     ['application/json', 'application/xml', 'text/javascript', 'text/typescript'].includes(file.mimeType || '')
 
@@ -189,7 +218,7 @@ export const FilePreview = memo(function FilePreview({ file, hideHeader = false,
       return (
         <div className="flex justify-center p-4">
           <img 
-            src={`${API_BASE}/api/files/${file.path}?raw=true`}
+            src={getFileApiUrl(file.path, { params: { raw: true } })}
             alt={file.name}
             className="max-w-full h-auto object-contain rounded"
           />
@@ -230,7 +259,7 @@ export const FilePreview = memo(function FilePreview({ file, hideHeader = false,
                   <div className="w-6 h-6 border-2 border-muted-foreground border-t-transparent rounded-full animate-spin" />
                 </div>
               ) : fullContent ? (
-                <MarkdownRenderer content={fullContent} />
+                <MarkdownRenderer content={fullContent} onContentChange={handleFullMarkdownContentChange} />
               ) : null}
             </>
           )}
@@ -259,7 +288,8 @@ export const FilePreview = memo(function FilePreview({ file, hideHeader = false,
       
       try {
         const textContent = decodeBase64(file.content)
-        if (!textContent) {
+        const displayContent = isMarkdownFile ? localMdContent ?? textContent : textContent
+        if (!displayContent) {
           return (
             <div className="text-center text-muted-foreground py-8">
               Empty file - click Edit to add content
@@ -268,10 +298,10 @@ export const FilePreview = memo(function FilePreview({ file, hideHeader = false,
         }
         
         if (isMarkdownFile && markdownPreview) {
-          return <MarkdownRenderer content={textContent} />
+          return <MarkdownRenderer content={displayContent} onContentChange={handleLocalMarkdownContentChange} />
         }
         
-        const lines = textContent.split('\n')
+        const lines = displayContent.split('\n')
         return (
           <div className={`pb-[200px] text-sm bg-muted text-foreground rounded font-mono ${
             lineWrap ? 'overflow-x-hidden' : 'overflow-x-auto'

@@ -6,14 +6,46 @@ import { CSS } from "@dnd-kit/utilities"
 import { listRepos, deleteRepo, updateRepoOrder } from "@/api/repos"
 import { fetchReposGitStatus } from "@/api/git"
 import { DeleteDialog } from "@/components/ui/delete-dialog"
-import { ListToolbar } from "@/components/ui/list-toolbar"
 import { GitBranch, Search, GripVertical } from "lucide-react"
 import type { Repo } from "@/api/types"
 import type { GitStatusResponse } from "@/types/git"
 import { RepoCard } from "./RepoCard"
 import { RepoCardSkeleton } from "./RepoCardSkeleton"
 import { useMobile } from "@/hooks/useMobile"
-import { getRepoDisplayName } from "@/lib/utils"
+import { useSettings } from "@/hooks/useSettings"
+import {
+  buildRepoViewModels,
+  filterReposBySearch,
+  filterReposByMode,
+  sortRepos,
+  groupReposIntoSections,
+  countAttentionItems,
+  type RepoFilterMode,
+  type RepoSortMode,
+} from "./repo-list-state"
+import { RepoListControls } from "./RepoListControls"
+import { invalidateRepoListCaches } from "@/lib/queryInvalidation"
+import { ASSISTANT_REPO_ID } from "@opencode-manager/shared/utils"
+
+function formatActivityLabel(timestamp: number): string {
+  const now = Date.now()
+  const diff = now - timestamp
+  const seconds = Math.floor(diff / 1000)
+  const minutes = Math.floor(seconds / 60)
+  const hours = Math.floor(minutes / 60)
+  const days = Math.floor(hours / 24)
+
+  if (days > 0) {
+    return days === 1 ? '1d ago' : `${days}d ago`
+  }
+  if (hours > 0) {
+    return hours === 1 ? '1h ago' : `${hours}h ago`
+  }
+  if (minutes > 0) {
+    return minutes === 1 ? '1m ago' : `${minutes}m ago`
+  }
+  return 'just now'
+}
 
 interface RepoCardWrapperProps {
   repo: Repo
@@ -22,6 +54,11 @@ interface RepoCardWrapperProps {
   isSelected: boolean
   onSelect: (id: number, selected: boolean) => void
   gitStatus?: GitStatusResponse
+  manageMode: boolean
+  isMobile: boolean
+  activityLabel?: string
+  hasSelectedRepos?: boolean
+  selectionMode?: boolean
 }
 
 function SortableRepoCard({
@@ -31,7 +68,13 @@ function SortableRepoCard({
   isSelected,
   onSelect,
   gitStatus,
-}: RepoCardWrapperProps) {
+  manageMode,
+  isMobile,
+  activityLabel,
+  hasSelectedRepos,
+  selectionMode,
+  isManualSort,
+}: RepoCardWrapperProps & { isManualSort: boolean }) {
   const { attributes, listeners, setNodeRef, setActivatorNodeRef, transform, transition, isDragging } = useSortable({ id: repo.id })
 
   const style = {
@@ -43,15 +86,17 @@ function SortableRepoCard({
   return (
     <div ref={setNodeRef} style={style}>
       <div className="relative">
-        <div
-          ref={setActivatorNodeRef}
-          {...listeners}
-          {...attributes}
-          className="absolute left-0 top-1/2 -translate-y-1/2 z-10 cursor-grab active:cursor-grabbing touch-none p-1 rounded hover:bg-accent/80"
-        >
-          <GripVertical className="w-4 h-4 text-muted-foreground" />
-        </div>
-        <div className="pl-8">
+        {isManualSort && (
+          <div
+            ref={setActivatorNodeRef}
+            {...listeners}
+            {...attributes}
+            className="absolute left-0 top-1/2 -translate-y-1/2 z-10 cursor-grab active:cursor-grabbing touch-none p-1 rounded hover:bg-accent/80"
+          >
+            <GripVertical className="w-4 h-4 text-muted-foreground" />
+          </div>
+        )}
+        <div className={isManualSort ? 'pl-8' : ''}>
           <RepoCard
             repo={repo}
             onDelete={onDelete}
@@ -59,6 +104,11 @@ function SortableRepoCard({
             isSelected={isSelected}
             onSelect={onSelect}
             gitStatus={gitStatus}
+            manageMode={manageMode}
+            isMobile={isMobile}
+            activityLabel={activityLabel}
+            hasSelectedRepos={hasSelectedRepos}
+            selectionMode={selectionMode}
           />
         </div>
       </div>
@@ -73,6 +123,11 @@ function StaticRepoCard({
   isSelected,
   onSelect,
   gitStatus,
+  manageMode,
+  isMobile,
+  activityLabel,
+  hasSelectedRepos,
+  selectionMode,
 }: RepoCardWrapperProps) {
   return (
     <RepoCard
@@ -82,6 +137,11 @@ function StaticRepoCard({
       isSelected={isSelected}
       onSelect={onSelect}
       gitStatus={gitStatus}
+      manageMode={manageMode}
+      isMobile={isMobile}
+      activityLabel={activityLabel}
+      hasSelectedRepos={hasSelectedRepos}
+      selectionMode={selectionMode}
     />
   )
 }
@@ -89,13 +149,24 @@ function StaticRepoCard({
 export function RepoList() {
   const queryClient = useQueryClient()
   const isMobile = useMobile()
+  const { preferences, updateSettings } = useSettings()
   const [deleteDialogOpen, setDeleteDialogOpen] = useState(false)
   const [repoToDelete, setRepoToDelete] = useState<number | null>(null)
   const [selectedRepos, setSelectedRepos] = useState<Set<number>>(new Set())
+  const [selectionMode, setSelectionMode] = useState(false)
   const [searchQuery, setSearchQuery] = useState("")
-  const [reorderMode, setReorderMode] = useState(false)
-  
-  const isDragEnabled = !isMobile || reorderMode
+  const [filterMode, setFilterMode] = useState<RepoFilterMode>('recent')
+  const isSelectionActive = selectionMode || selectedRepos.size > 0
+
+  const sortMode = (preferences?.repoSortMode as RepoSortMode) || 'recent'
+  const repoOrder = preferences?.repoOrder
+
+  const handleSortModeChange = (newSortMode: RepoSortMode) => {
+    updateSettings({ repoSortMode: newSortMode })
+  }
+
+  const isManualSort = sortMode === 'manual'
+  const isDragEnabled = !isMobile || (isManualSort && selectedRepos.size === 0)
 
   const {
     data: repos,
@@ -105,6 +176,11 @@ export function RepoList() {
     queryKey: ["repos"],
     queryFn: listRepos,
   })
+
+  const regularRepos = useMemo(
+    () => repos?.filter((r) => r.id !== ASSISTANT_REPO_ID) ?? null,
+    [repos],
+  )
 
   const repoForDelete = useMemo(() => {
     return repoToDelete ? repos?.find(r => r.id === repoToDelete) : null
@@ -119,7 +195,7 @@ export function RepoList() {
     }
   }, [selectedRepos, repos])
 
-  const repoIds = repos?.map((repo) => repo.id) || []
+  const repoIds = regularRepos?.map((repo) => repo.id) || []
 
   const { data: gitStatuses } = useQuery({
     queryKey: ["reposGitStatus", repoIds],
@@ -129,11 +205,32 @@ export function RepoList() {
     gcTime: 60 * 60 * 1000,
   })
 
+  const viewModels = useMemo(() => {
+    if (!regularRepos) return []
+    return buildRepoViewModels(regularRepos, gitStatuses)
+  }, [regularRepos, gitStatuses])
+
+  const filteredViewModels = useMemo(() => {
+    const searched = filterReposBySearch(viewModels, searchQuery)
+    return filterReposByMode(searched, filterMode)
+  }, [viewModels, searchQuery, filterMode])
+
+  const sortedViewModels = useMemo(() => {
+    return sortRepos(filteredViewModels, sortMode, repoOrder)
+  }, [filteredViewModels, sortMode, repoOrder])
+
+  const sections = useMemo(() => {
+    return groupReposIntoSections(sortedViewModels, filterMode, sortMode)
+  }, [sortedViewModels, filterMode, sortMode])
+
+  const attentionCount = useMemo(() => {
+    return countAttentionItems(viewModels)
+  }, [viewModels])
+
   const deleteMutation = useMutation({
     mutationFn: deleteRepo,
     onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: ["repos"] })
-      queryClient.invalidateQueries({ queryKey: ["reposGitStatus"] })
+      invalidateRepoListCaches(queryClient)
       setDeleteDialogOpen(false)
       setRepoToDelete(null)
     },
@@ -144,10 +241,10 @@ export function RepoList() {
       await Promise.all(repoIds.map((id) => deleteRepo(id)))
     },
     onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: ["repos"] })
-      queryClient.invalidateQueries({ queryKey: ["reposGitStatus"] })
+      invalidateRepoListCaches(queryClient)
       setDeleteDialogOpen(false)
       setSelectedRepos(new Set())
+      setSelectionMode(false)
     },
   })
 
@@ -172,8 +269,7 @@ export function RepoList() {
       queryClient.setQueryData(["repos"], context?.previousRepos)
     },
     onSettled: () => {
-      queryClient.invalidateQueries({ queryKey: ["repos"] })
-      queryClient.invalidateQueries({ queryKey: ["reposGitStatus"] })
+      invalidateRepoListCaches(queryClient)
     },
   })
 
@@ -211,70 +307,53 @@ export function RepoList() {
 
   }
 
-  if (isLoading && !repos) {
-    return (
-      <div className="px-0 md:p-4 h-full flex flex-col">
-        <div className="px-2 md:px-0">
-          <div className="h-10 bg-muted/50 animate-pulse rounded w-full" />
-        </div>
-        <div className="mx-2 md:mx-0 flex-1 min-h-0">
-          <div className="h-full overflow-y-auto pt-4 pb-2 md:pb-0">
-            <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-2 gap-3 md:gap-4 w-full">
-              {Array.from({ length: 6 }).map((_, i) => (
-                <div key={i} className="md:pl-8">
-                  <RepoCardSkeleton />
+  const renderContent = () => {
+    switch (true) {
+      case isLoading && !repos:
+        return (
+          <div className="px-0 md:p-4 h-full flex flex-col">
+            <div className="px-2 md:px-0">
+              <div className="h-10 bg-muted/50 animate-pulse rounded w-full" />
+            </div>
+            <div className="mx-2 md:mx-0 flex-1 min-h-0">
+              <div className="h-full overflow-y-auto pt-4 pb-2 md:pb-0">
+                <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-2 gap-3 md:gap-4 w-full">
+                  {Array.from({ length: 6 }).map((_, i) => (
+                    <div key={i} className="md:pl-8">
+                      <RepoCardSkeleton />
+                    </div>
+                  ))}
                 </div>
-              ))}
+              </div>
             </div>
           </div>
-        </div>
-      </div>
-    )
-  }
+        )
 
-  if (error) {
-    return (
-      <div className="text-center p-8 text-destructive">
-        Failed to load repositories:{" "}
-        {error instanceof Error ? error.message : "Unknown error"}
-      </div>
-    )
-  }
+      case !!error:
+        return (
+          <div className="text-center p-8 text-destructive">
+            Failed to load repositories:{" "}
+            {error instanceof Error ? error.message : "Unknown error"}
+          </div>
+        )
 
-  if (!repos || repos.length === 0) {
-    return (
-      <div className="text-center p-12">
-        <GitBranch className="mx-auto mb-4 h-12 w-12 text-muted-foreground" />
-        <p className="text-muted-foreground">
-          No repositories yet. Add one to get started.
-        </p>
-      </div>
-    )
-  }
+      case !repos || repos.length === 0:
+        return (
+          <div className="text-center p-12">
+            <GitBranch className="w-12 h-12 mx-auto mb-4 text-zinc-600" />
+            <p className="text-zinc-500">
+              No repositories yet. Add one to get started.
+            </p>
+          </div>
+        )
 
-  const dedupedRepos = repos.reduce((acc, repo) => {
-    if (repo.isWorktree) {
-      acc.push(repo)
-    } else {
-      const key = repo.repoUrl || repo.sourcePath || repo.localPath
-      const existing = acc.find((r) => (r.repoUrl || r.sourcePath || r.localPath) === key && !r.isWorktree)
-
-      if (!existing) {
-        acc.push(repo)
-      }
+      default:
+        return null
     }
+  }
 
-    return acc
-  }, [] as Repo[])
-
-  const filteredRepos = dedupedRepos.filter((repo) => {
-    const repoName = getRepoDisplayName(repo.repoUrl, repo.localPath, repo.sourcePath)
-    const searchTarget = repo.repoUrl || repo.sourcePath || repo.localPath || ""
-    return (
-      repoName.toLowerCase().includes(searchQuery.toLowerCase()) ||
-      searchTarget.toLowerCase().includes(searchQuery.toLowerCase())
-    )
-  })
+  const content = renderContent()
+  if (content) return content
 
   const handleSelectRepo = (id: number, selected: boolean) => {
     const newSelected = new Set(selectedRepos)
@@ -287,108 +366,136 @@ export function RepoList() {
   }
 
   const handleSelectAll = () => {
-    const allFilteredSelected = filteredRepos.every((repo) =>
-      selectedRepos.has(repo.id),
-    )
-
-    if (allFilteredSelected) {
-      setSelectedRepos(new Set())
+    const visibleIds = sortedViewModels.map(r => r.id)
+    const allVisibleSelected = visibleIds.length > 0 && visibleIds.every(id => selectedRepos.has(id))
+    
+    if (allVisibleSelected) {
+      // Unselect only the visible repos, keep hidden ones
+      const newSelected = new Set(selectedRepos)
+      visibleIds.forEach(id => newSelected.delete(id))
+      setSelectedRepos(newSelected)
     } else {
-      const filteredIds = filteredRepos.map((repo) => repo.id)
-      setSelectedRepos(new Set([...selectedRepos, ...filteredIds]))
+      // Add all visible repos to existing selection (preserves hidden selections)
+      const newSelected = new Set(selectedRepos)
+      visibleIds.forEach(id => newSelected.add(id))
+      setSelectedRepos(newSelected)
     }
   }
 
-  const handleBatchDelete = () => {
-    if (selectedRepos.size > 0) {
-      setDeleteDialogOpen(true)
+  const handleSelectionModeChange = (enabled: boolean) => {
+    setSelectionMode(enabled)
+    if (!enabled) {
+      setSelectedRepos(new Set())
     }
-  }
-
-  const handleDeleteAll = () => {
-    if (filteredRepos.length === 0) return
-    setSelectedRepos(new Set(filteredRepos.map((r) => r.id)))
-    setDeleteDialogOpen(true)
   }
 
   return (
     <>
       <div className="px-0 md:p-4 h-full flex flex-col">
-        <div className=" px-2 md:px-0">
-          <ListToolbar
-            searchQuery={searchQuery}
-            onSearchChange={setSearchQuery}
-            selectedCount={selectedRepos.size}
-            totalCount={filteredRepos.length}
-            allSelected={
-              filteredRepos.length > 0 &&
-              filteredRepos.every((repo) => selectedRepos.has(repo.id))
-            }
-            onToggleSelectAll={handleSelectAll}
-            onDelete={handleBatchDelete}
-            onDeleteAll={handleDeleteAll}
-            reorderMode={reorderMode}
-            onToggleReorderMode={() => setReorderMode((m) => !m)}
-            showReorderToggle={isMobile}
-          />
-        </div>
+        <RepoListControls
+          searchQuery={searchQuery}
+          onSearchChange={setSearchQuery}
+          filterMode={filterMode}
+          onFilterModeChange={setFilterMode}
+          sortMode={sortMode}
+          onSortModeChange={handleSortModeChange}
+          filteredCount={sortedViewModels.length}
+          attentionCount={attentionCount}
+          selectedCount={selectedRepos.size}
+          allVisibleSelected={sortedViewModels.length > 0 && sortedViewModels.every(r => selectedRepos.has(r.id))}
+          onSelectAll={handleSelectAll}
+          onClearSelection={() => {
+            setSelectedRepos(new Set())
+            setSelectionMode(false)
+          }}
+          onDelete={() => {
+            setRepoToDelete(null)
+            setDeleteDialogOpen(true)
+          }}
+          hasLocalRepos={hasLocalRepos}
+          hasClonedRepos={hasClonedRepos}
+          selectionMode={selectionMode}
+          onSelectionModeChange={handleSelectionModeChange}
+        />
 
         <div className="mx-2 md:mx-0 flex-1 min-h-0">
           <div className="h-full overflow-y-auto pt-4 md:pb-0 [mask-image:linear-gradient(to_bottom,transparent,black_16px,black)]">
-            {filteredRepos.length === 0 ? (
-              <div className="text-center p-12">
-                <Search className="mx-auto mb-4 h-12 w-12 text-muted-foreground" />
-                <p className="text-muted-foreground">
-                  No repositories found matching "{searchQuery}"
-                </p>
-              </div>
-            ) : isDragEnabled ? (
-              <DndContext
-                sensors={sensors}
-                collisionDetection={closestCenter}
-                onDragEnd={handleDragEnd}
-              >
-                <SortableContext items={filteredRepos.map((r) => r.id)} strategy={verticalListSortingStrategy}>
-                  <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-2 gap-3 md:gap-4 w-full md:pb-0">
-                    {filteredRepos.map((repo) => (
-                      <SortableRepoCard
-                        key={repo.id}
-                        repo={repo}
-                        onDelete={(id) => {
-                          setRepoToDelete(id)
-                          setDeleteDialogOpen(true)
-                        }}
-                        isDeleting={
-                          deleteMutation.isPending && repoToDelete === repo.id
-                        }
-                        isSelected={selectedRepos.has(repo.id)}
-                        onSelect={handleSelectRepo}
-                        gitStatus={gitStatuses?.get(repo.id)}
-                      />
-                    ))}
-                  </div>
-                </SortableContext>
-              </DndContext>
-            ) : (
-              <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-2 gap-3 md:gap-4 w-full md:pb-0">
-                {filteredRepos.map((repo) => (
-                  <StaticRepoCard
-                    key={repo.id}
-                    repo={repo}
-                    onDelete={(id) => {
-                      setRepoToDelete(id)
-                      setDeleteDialogOpen(true)
-                    }}
-                    isDeleting={
-                      deleteMutation.isPending && repoToDelete === repo.id
-                    }
-                    isSelected={selectedRepos.has(repo.id)}
-                    onSelect={handleSelectRepo}
-                    gitStatus={gitStatuses?.get(repo.id)}
-                  />
-                ))}
-              </div>
-            )}
+            {(() => {
+              switch (true) {
+                case sortedViewModels.length === 0:
+                  return (
+                    <div className="text-center p-12">
+                      <Search className="w-12 h-12 mx-auto mb-4 text-zinc-600" />
+                      <p className="text-zinc-500">
+                        {sections[0]?.emptyMessage || `No repositories found${searchQuery ? ` matching "${searchQuery}"` : ''}`}
+                      </p>
+                    </div>
+                  )
+
+                case isDragEnabled:
+                  return (
+                    <DndContext
+                      sensors={sensors}
+                      collisionDetection={closestCenter}
+                      onDragEnd={handleDragEnd}
+                    >
+                      <SortableContext items={sortedViewModels.map((r) => r.id)} strategy={verticalListSortingStrategy}>
+                        <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-2 gap-3 md:gap-4 w-full md:pb-0">
+                          {sortedViewModels.map((repo) => (
+                            <SortableRepoCard
+                              key={repo.id}
+                              repo={repo}
+                              onDelete={(id) => {
+                                setRepoToDelete(id)
+                                setDeleteDialogOpen(true)
+                              }}
+                              isDeleting={
+                                deleteMutation.isPending && repoToDelete === repo.id
+                              }
+                              isSelected={selectedRepos.has(repo.id)}
+                              onSelect={handleSelectRepo}
+                              gitStatus={gitStatuses?.get(repo.id)}
+                              manageMode={isSelectionActive}
+                              isMobile={isMobile}
+                              isManualSort={isManualSort}
+                              activityLabel={formatActivityLabel(repo.activityTimestamp)}
+                              hasSelectedRepos={selectedRepos.size > 0}
+                              selectionMode={selectionMode}
+                            />
+                          ))}
+                        </div>
+                      </SortableContext>
+                    </DndContext>
+                  )
+
+                default:
+                  return (
+                    <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-2 gap-3 md:gap-4 w-full md:pb-0">
+                      {sortedViewModels.map((repo) => (
+                        <StaticRepoCard
+                          key={repo.id}
+                          repo={repo}
+                          onDelete={(id) => {
+                            setRepoToDelete(id)
+                            setDeleteDialogOpen(true)
+                          }}
+                          isDeleting={
+                            deleteMutation.isPending && repoToDelete === repo.id
+                          }
+                          isSelected={selectedRepos.has(repo.id)}
+                          onSelect={handleSelectRepo}
+                          gitStatus={gitStatuses?.get(repo.id)}
+                          manageMode={isSelectionActive}
+                          isMobile={isMobile}
+                          activityLabel={formatActivityLabel(repo.activityTimestamp)}
+                          hasSelectedRepos={selectedRepos.size > 0}
+                          selectionMode={selectionMode}
+                        />
+                      ))}
+                    </div>
+                  )
+              }
+            })()}
           </div>
         </div>
       </div>
@@ -397,16 +504,19 @@ export function RepoList() {
         open={deleteDialogOpen}
         onOpenChange={setDeleteDialogOpen}
         onConfirm={() => {
-          if (repoToDelete) {
-            deleteMutation.mutate(repoToDelete)
-          } else if (selectedRepos.size > 0) {
+          if (selectedRepos.size > 0) {
             batchDeleteMutation.mutate(Array.from(selectedRepos))
+          } else if (repoToDelete) {
+            deleteMutation.mutate(repoToDelete)
           }
         }}
         onCancel={() => {
           setDeleteDialogOpen(false)
           setRepoToDelete(null)
-          setSelectedRepos(new Set())
+          if (selectedRepos.size > 0) {
+            setSelectedRepos(new Set())
+            setSelectionMode(false)
+          }
         }}
         title={
           selectedRepos.size > 0

@@ -66,10 +66,12 @@ export function FileToolRender({ part, filediff, filePath, content, toolName, on
   const { preferences } = useSettings()
   const isReadTool = toolName === 'Read'
   const isEditTool = toolName === 'Edit'
+  const isWriteTool = toolName === 'Write'
   const hasExpandableContent = !isReadTool && (filediff || content)
   
-  const defaultExpanded = isEditTool 
-    ? (preferences?.expandDiffs ?? true) 
+  const isFileMutatingTool = isEditTool || isWriteTool
+  const defaultExpanded = isFileMutatingTool
+    ? (preferences?.expandDiffs ?? true)
     : (preferences?.expandToolCalls ?? false)
   const [expanded, setExpanded] = useState(defaultExpanded)
 

@@ -33,6 +33,7 @@ export function TTSProvider({ children }: TTSProviderProps) {
   const [error, setError] = useState<string | null>(null)
   const [currentText, setCurrentText] = useState<string | null>(null)
   const [originalText, setOriginalText] = useState<string | null>(null)
+  const [activeMessageId, setActiveMessageId] = useState<string | null>(null)
   
   const abortControllerRef = useRef<AbortController | null>(null)
   const audioRef = useRef<HTMLAudioElement | null>(null)
@@ -97,6 +98,7 @@ export function TTSProvider({ children }: TTSProviderProps) {
     setState('idle')
     setCurrentText(null)
     setOriginalText(null)
+    setActiveMessageId(null)
     setError(null)
   }, [cleanup])
 
@@ -181,6 +183,7 @@ export function TTSProvider({ children }: TTSProviderProps) {
       if (!stoppedRef.current) {
         setState('idle')
         setCurrentText(null)
+        setActiveMessageId(null)
       }
       return
     }
@@ -233,8 +236,8 @@ export function TTSProvider({ children }: TTSProviderProps) {
     }
   }, [synthesizeExternal, fetchNextChunk])
 
-  // Builtin Web Speech synthesis - takes explicit config
-  const speakBuiltinWithConfig = useCallback(async (text: string, config: TTSConfig): Promise<boolean> => {
+  // Builtin Web Speech synthesis - takes explicit config and optional messageId
+  const speakBuiltinWithConfig = useCallback(async (text: string, config: TTSConfig, messageId: string | null = null): Promise<boolean> => {
     if (!isWebSpeechSupported()) {
       setError('Web Speech API not supported in this browser')
       setState('error')
@@ -261,6 +264,11 @@ export function TTSProvider({ children }: TTSProviderProps) {
 
     setOriginalText(text)
     setCurrentText(sanitizedText)
+    if (messageId) {
+      setActiveMessageId(messageId)
+    } else {
+      setActiveMessageId(null)
+    }
     setState('loading')
 
     const synth = getSynthesizer()
@@ -274,6 +282,7 @@ export function TTSProvider({ children }: TTSProviderProps) {
       if (!stoppedRef.current) {
         setState('idle')
         setCurrentText(null)
+        setActiveMessageId(null)
       }
     })
 
@@ -303,8 +312,30 @@ export function TTSProvider({ children }: TTSProviderProps) {
     }
   }, [stop, getSynthesizer])
 
-  // Config-aware speak function - takes explicit config
-  const speakWithConfig = useCallback(async (text: string, config: TTSConfig): Promise<boolean> => {
+  // Internal helper to start external TTS playback
+  const startExternalPlayback = useCallback((sanitizedText: string, original: string, messageId: string | null): boolean => {
+    stop()
+    stoppedRef.current = false
+    setError(null)
+
+    setOriginalText(original)
+    setCurrentText(sanitizedText)
+    if (messageId) {
+      setActiveMessageId(messageId)
+    } else {
+      setActiveMessageId(null)
+    }
+
+    abortControllerRef.current = new AbortController()
+    chunksRef.current = splitIntoChunks(sanitizedText)
+    
+    playChunk(0)
+    
+    return true
+  }, [stop, playChunk])
+
+  // Config-aware speak function - takes explicit config and optional messageId
+  const speakWithConfig = useCallback(async (text: string, config: TTSConfig, messageId: string | null = null): Promise<boolean> => {
     if (!config.enabled) {
       setError('TTS is not enabled')
       setState('error')
@@ -319,7 +350,7 @@ export function TTSProvider({ children }: TTSProviderProps) {
         setState('error')
         return false
       }
-      return speakBuiltinWithConfig(text, config)
+      return speakBuiltinWithConfig(text, config, messageId)
     } else {
       if (!config.apiKey) {
         setError('API key not configured')
@@ -341,21 +372,30 @@ export function TTSProvider({ children }: TTSProviderProps) {
         return false
       }
 
-      stop()
-      stoppedRef.current = false
-      setError(null)
-
-      setOriginalText(text)
-      setCurrentText(sanitizedText)
-
-      abortControllerRef.current = new AbortController()
-      chunksRef.current = splitIntoChunks(sanitizedText)
-      
-      playChunk(0)
-      
-      return true
+      return startExternalPlayback(sanitizedText, text, messageId)
     }
-  }, [speakBuiltinWithConfig, stop, playChunk])
+  }, [speakBuiltinWithConfig, startExternalPlayback])
+
+  // Message-aware speak function - tracks active message id
+  const speakMessage = useCallback(async (messageId: string, text: string): Promise<boolean> => {
+    if (!ttsConfig) {
+      setError('TTS is not configured')
+      setState('error')
+      return false
+    }
+
+    const config: TTSConfig = {
+      enabled: ttsConfig.enabled ?? false,
+      provider: ttsConfig.provider ?? 'external',
+      endpoint: ttsConfig.endpoint ?? '',
+      apiKey: ttsConfig.apiKey ?? '',
+      voice: ttsConfig.voice ?? '',
+      model: ttsConfig.model ?? '',
+      speed: ttsConfig.speed ?? 1.0,
+    }
+
+    return speakWithConfig(text, config, messageId)
+  }, [ttsConfig, speakWithConfig])
 
   // Main speak function - uses stored preferences
   const speak = useCallback(async (text: string): Promise<boolean> => {
@@ -381,11 +421,13 @@ export function TTSProvider({ children }: TTSProviderProps) {
   const value = {
     speak,
     speakWithConfig,
+    speakMessage,
     stop,
     state,
     error,
     currentText,
     originalText,
+    activeMessageId,
     isEnabled,
     isPlaying: state === 'playing',
     isLoading: state === 'loading',

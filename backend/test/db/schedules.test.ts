@@ -20,6 +20,8 @@ function makeJobRow(overrides: Record<string, unknown> = {}) {
     prompt: 'Generate a weekly summary.',
     model: 'openai/gpt-5-mini',
     skill_metadata: JSON.stringify({ skillSlugs: ['planning'], notes: 'Optional notes' }),
+    permission_config: null,
+    branch: null,
     created_at: Date.UTC(2026, 2, 8, 12, 0, 0),
     updated_at: Date.UTC(2026, 2, 9, 12, 0, 0),
     last_run_at: Date.UTC(2026, 2, 9, 11, 0, 0),
@@ -43,6 +45,10 @@ function makeRunRow(overrides: Record<string, unknown> = {}) {
     log_text: 'Run started. Waiting for assistant response...',
     response_text: null,
     error_text: null,
+    run_branch: null,
+    commit_hash: null,
+    worktree_path: null,
+    workspace_id: null,
     ...overrides,
   }
 }
@@ -72,6 +78,19 @@ describe('schedule database queries', () => {
     })
   })
 
+  it('lists schedule job ids without loading full job rows', () => {
+    const stmt = {
+      all: vi.fn().mockReturnValue([{ id: 7 }, { id: 8 }]),
+    }
+    mockDb.prepare.mockReturnValue(stmt)
+
+    const jobIds = schedulesDb.listScheduleJobIdsByRepo(mockDb, 42)
+
+    expect(mockDb.prepare).toHaveBeenCalledWith('SELECT id FROM schedule_jobs WHERE repo_id = ? ORDER BY created_at DESC')
+    expect(stmt.all).toHaveBeenCalledWith(42)
+    expect(jobIds).toEqual([7, 8])
+  })
+
   it('creates a schedule job and reloads the inserted row', () => {
     const insertStmt = {
       run: vi.fn().mockReturnValue({ lastInsertRowid: 7 }),
@@ -94,6 +113,8 @@ describe('schedule database queries', () => {
       prompt: 'Generate a weekly summary.',
       model: 'openai/gpt-5-mini',
       skillMetadata: { skillSlugs: ['planning'], notes: 'Optional notes' },
+      permissionConfig: null,
+      branch: null,
       nextRunAt: Date.UTC(2026, 2, 9, 13, 0, 0),
     })
 
@@ -110,6 +131,8 @@ describe('schedule database queries', () => {
       'Generate a weekly summary.',
       'openai/gpt-5-mini',
       JSON.stringify({ skillSlugs: ['planning'], notes: 'Optional notes' }),
+      null,
+      null,
       expect.any(Number),
       expect.any(Number),
       null,
@@ -146,6 +169,8 @@ describe('schedule database queries', () => {
       prompt: 'Run a new summary.',
       model: null,
       skillMetadata: null,
+      permissionConfig: null,
+      branch: null,
       nextRunAt: null,
     })
 
@@ -161,6 +186,8 @@ describe('schedule database queries', () => {
       'Run a new summary.',
       null,
       null,
+      null,
+      null,
       expect.any(Number),
       null,
       42,
@@ -171,6 +198,27 @@ describe('schedule database queries', () => {
       enabled: false,
       skillMetadata: null,
     })
+  })
+
+  it('deletes schedule runs before deleting a schedule job', () => {
+    const deleteRunsStmt = {
+      run: vi.fn().mockReturnValue({ changes: 2 }),
+    }
+    const deleteJobStmt = {
+      run: vi.fn().mockReturnValue({ changes: 1 }),
+    }
+
+    mockDb.prepare
+      .mockReturnValueOnce(deleteRunsStmt)
+      .mockReturnValueOnce(deleteJobStmt)
+
+    const deleted = schedulesDb.deleteScheduleJob(mockDb, 42, 7)
+
+    expect(mockDb.prepare).toHaveBeenNthCalledWith(1, 'DELETE FROM schedule_runs WHERE repo_id = ? AND job_id = ?')
+    expect(deleteRunsStmt.run).toHaveBeenCalledWith(42, 7)
+    expect(mockDb.prepare).toHaveBeenNthCalledWith(2, 'DELETE FROM schedule_jobs WHERE repo_id = ? AND id = ?')
+    expect(deleteJobStmt.run).toHaveBeenCalledWith(42, 7)
+    expect(deleted).toBe(true)
   })
 
   it('returns null when updating metadata for a missing run', () => {
@@ -218,6 +266,53 @@ describe('schedule database queries', () => {
       5,
     )
     expect(run?.sessionTitle).toBe('Updated title')
+  })
+
+  it('returns null when updating worktree for a missing run', () => {
+    const selectStmt = {
+      get: vi.fn().mockReturnValue(undefined),
+    }
+    mockDb.prepare.mockReturnValue(selectStmt)
+
+    const run = schedulesDb.updateScheduleRunWorktree(mockDb, 42, 7, 5, {
+      worktreePath: '/worktrees/feature-branch',
+    })
+
+    expect(run).toBeNull()
+  })
+
+  it('updates worktree fields while preserving omitted ones', () => {
+    const existingRun = makeRunRow({ run_branch: 'feature-x' })
+    const existingStmt = {
+      get: vi.fn().mockReturnValue(existingRun),
+    }
+    const updateStmt = {
+      run: vi.fn(),
+    }
+    const reloadStmt = {
+      get: vi.fn().mockReturnValue(makeRunRow({ worktree_path: '/worktrees/feature-branch', run_branch: 'feature-x' })),
+    }
+
+    mockDb.prepare
+      .mockReturnValueOnce(existingStmt)
+      .mockReturnValueOnce(updateStmt)
+      .mockReturnValueOnce(reloadStmt)
+
+    const run = schedulesDb.updateScheduleRunWorktree(mockDb, 42, 7, 5, {
+      worktreePath: '/worktrees/feature-branch',
+    })
+
+    expect(updateStmt.run).toHaveBeenCalledWith(
+      '/worktrees/feature-branch',
+      'feature-x',
+      null,
+      null,
+      42,
+      7,
+      5,
+    )
+    expect(run?.worktreePath).toBe('/worktrees/feature-branch')
+    expect(run?.runBranch).toBe('feature-x')
   })
 
   it('creates and reloads a schedule run', () => {
@@ -316,7 +411,7 @@ describe('schedule database queries', () => {
 
     expect(mockDb.prepare).toHaveBeenCalledWith('SELECT * FROM schedule_jobs WHERE repo_id = ? AND id = ?')
     expect(stmt.get).toHaveBeenCalledWith(42, 7)
-    expect(job).toMatchObject({ id: 7, repoId: 42, name: 'Weekly engineering summary' })
+    expect(job).toMatchObject({ id: 7, repoId: 42, name: 'Weekly engineering summary', branch: null })
   })
 
   it('returns null when schedule job is not found', () => {
@@ -352,19 +447,6 @@ describe('schedule database queries', () => {
     const result = schedulesDb.deleteScheduleJob(mockDb, 42, 7)
 
     expect(result).toBe(false)
-  })
-
-  it('reserves the next run time for a schedule job', () => {
-    const nextRunAt = Date.now() + 3600000
-    const stmt = {
-      run: vi.fn(),
-    }
-    mockDb.prepare.mockReturnValue(stmt)
-
-    schedulesDb.reserveScheduleJobNextRun(mockDb, 42, 7, nextRunAt)
-
-    expect(mockDb.prepare).toHaveBeenCalledWith('UPDATE schedule_jobs SET next_run_at = ?, updated_at = ? WHERE repo_id = ? AND id = ?')
-    expect(stmt.run).toHaveBeenCalledWith(nextRunAt, expect.any(Number), 42, 7)
   })
 
   it('updates the run state of a schedule job', () => {
@@ -427,7 +509,7 @@ describe('schedule database queries', () => {
 
     expect(mockDb.prepare).toHaveBeenCalledWith('SELECT * FROM schedule_runs WHERE repo_id = ? AND job_id = ? AND id = ?')
     expect(stmt.get).toHaveBeenCalledWith(42, 7, 5)
-    expect(run).toMatchObject({ id: 5, jobId: 7, repoId: 42, status: 'running' })
+    expect(run).toMatchObject({ id: 5, jobId: 7, repoId: 42, status: 'running', runBranch: null, commitHash: null, worktreePath: null })
   })
 
   it('returns null when schedule run is not found', () => {
@@ -522,5 +604,54 @@ describe('schedule database queries', () => {
 
     expect(mockDb.prepare).toHaveBeenCalledWith(expect.stringContaining('NULL AS log_text'))
     expect(mockDb.prepare).toHaveBeenCalledWith(expect.stringContaining('NULL AS response_text'))
+  })
+
+  it('listScheduleRunArtifactsByJob maps run branch/worktree rows', () => {
+    const stmt = {
+      all: vi.fn().mockReturnValue([
+        { id: 3, status: 'completed', run_branch: 'schedule/7/run-3', worktree_path: null, workspace_id: null },
+        { id: 2, status: 'running', run_branch: 'schedule/7/run-2', worktree_path: '/wt/2', workspace_id: null },
+      ]),
+    }
+    mockDb.prepare.mockReturnValue(stmt)
+
+    const artifacts = schedulesDb.listScheduleRunArtifactsByJob(mockDb, 42, 7)
+
+    expect(stmt.all).toHaveBeenCalledWith(42, 7)
+    expect(artifacts).toEqual([
+      { id: 3, status: 'completed', runBranch: 'schedule/7/run-3', worktreePath: null, workspaceId: null },
+      { id: 2, status: 'running', runBranch: 'schedule/7/run-2', worktreePath: '/wt/2', workspaceId: null },
+    ])
+  })
+
+  it('deleteScheduleRunById deletes a single run row', () => {
+    const stmt = { run: vi.fn().mockReturnValue({ changes: 1 }) }
+    mockDb.prepare.mockReturnValue(stmt)
+
+    const deleted = schedulesDb.deleteScheduleRunById(mockDb, 42, 7, 5)
+
+    expect(mockDb.prepare).toHaveBeenCalledWith('DELETE FROM schedule_runs WHERE repo_id = ? AND job_id = ? AND id = ?')
+    expect(stmt.run).toHaveBeenCalledWith(42, 7, 5)
+    expect(deleted).toBe(true)
+  })
+
+  it('deleteScheduleRunsByIds deletes only the given ids', () => {
+    const stmt = { run: vi.fn().mockReturnValue({ changes: 2 }) }
+    mockDb.prepare.mockReturnValue(stmt)
+
+    const cleared = schedulesDb.deleteScheduleRunsByIds(mockDb, 42, 7, [3, 1])
+
+    expect(mockDb.prepare).toHaveBeenCalledWith('DELETE FROM schedule_runs WHERE repo_id = ? AND job_id = ? AND id IN (?, ?)')
+    expect(stmt.run).toHaveBeenCalledWith(42, 7, 3, 1)
+    expect(cleared).toBe(2)
+  })
+
+  it('deleteScheduleRunsByIds is a no-op for an empty id list', () => {
+    mockDb.prepare.mockClear()
+
+    const cleared = schedulesDb.deleteScheduleRunsByIds(mockDb, 42, 7, [])
+
+    expect(cleared).toBe(0)
+    expect(mockDb.prepare).not.toHaveBeenCalled()
   })
 })

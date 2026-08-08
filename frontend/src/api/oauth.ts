@@ -1,66 +1,38 @@
 import { API_BASE_URL } from "@/config"
-import { fetchWrapper, FetchError } from "./fetchWrapper"
+import type { components, operations } from "./opencode-types"
+import { fetchWrapper } from "./fetchWrapper"
 
-export interface OAuthAuthorizeResponse {
-  url: string
-  method: "code"
-  instructions: string
-}
+type OpenCodeAuthorizeRequest = NonNullable<operations["provider.oauth.authorize"]["requestBody"]>["content"]["application/json"]
 
-export interface OAuthCallbackRequest {
-  method: number
-  code?: string
-}
+export type OAuthAuthorizeResponse = components["schemas"]["ProviderAuthAuthorization"]
 
-export interface ProviderAuthMethod {
-  type: "oauth" | "api"
-  label: string
-}
+export type OAuthCallbackRequest = NonNullable<operations["provider.oauth.callback"]["requestBody"]>["content"]["application/json"]
+
+export type ProviderAuthMethod = components["schemas"]["ProviderAuthMethod"]
 
 export interface ProviderAuthMethods {
   [providerId: string]: ProviderAuthMethod[]
 }
 
-function handleApiError(error: unknown, context: string): never {
-  if (error instanceof FetchError) {
-    throw new Error(`${context}: ${error.message}`)
-  }
-  throw error
-}
-
 export const oauthApi = {
-  authorize: async (providerId: string, method: number): Promise<OAuthAuthorizeResponse> => {
-    try {
-      return await fetchWrapper(`${API_BASE_URL}/api/oauth/${providerId}/oauth/authorize`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ method }),
-      })
-    } catch (error) {
-      handleApiError(error, "OAuth authorization failed")
-    }
-  },
+  authorize: async (providerId: string, method: number, inputs?: OpenCodeAuthorizeRequest["inputs"]): Promise<OAuthAuthorizeResponse> =>
+    fetchWrapper(`${API_BASE_URL}/api/oauth/${providerId}/oauth/authorize`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ method, inputs }),
+    }),
 
-  callback: async (providerId: string, request: OAuthCallbackRequest): Promise<boolean> => {
-    try {
-      return await fetchWrapper(`${API_BASE_URL}/api/oauth/${providerId}/oauth/callback`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(request),
-      })
-    } catch (error) {
-      handleApiError(error, "OAuth callback failed")
-    }
-  },
+  callback: async (providerId: string, request: OAuthCallbackRequest): Promise<boolean> =>
+    fetchWrapper(`${API_BASE_URL}/api/oauth/${providerId}/oauth/callback`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(request),
+    }),
 
   getAuthMethods: async (): Promise<ProviderAuthMethods> => {
-    try {
-      const { providers, ...rest } = await fetchWrapper<{ providers?: ProviderAuthMethods } & ProviderAuthMethods>(
-        `${API_BASE_URL}/api/oauth/auth-methods`
-      )
-      return providers || rest
-    } catch (error) {
-      handleApiError(error, "Failed to get provider auth methods")
-    }
+    const { providers, ...rest } = await fetchWrapper<{ providers?: ProviderAuthMethods } & ProviderAuthMethods>(
+      `${API_BASE_URL}/api/oauth/auth-methods`
+    )
+    return providers || rest
   },
 }

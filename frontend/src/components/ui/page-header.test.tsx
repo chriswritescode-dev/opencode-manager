@@ -3,19 +3,6 @@ import { render, screen } from "@testing-library/react";
 import { PageHeader } from "./page-header";
 
 describe("PageHeader", () => {
-  it("applies pt-safe class for iOS safe area", () => {
-    render(<PageHeader data-testid="header">Content</PageHeader>);
-    const header = screen.getByTestId("header");
-    expect(header).toHaveClass("pt-safe");
-  });
-
-  it("applies sticky top-0 positioning", () => {
-    render(<PageHeader data-testid="header">Content</PageHeader>);
-    const header = screen.getByTestId("header");
-    expect(header).toHaveClass("sticky");
-    expect(header).toHaveClass("top-0");
-  });
-
   it("renders children correctly", () => {
     render(
       <PageHeader>

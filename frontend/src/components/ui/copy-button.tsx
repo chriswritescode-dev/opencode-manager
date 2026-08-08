@@ -8,6 +8,7 @@ interface CopyButtonProps {
   className?: string
   iconSize?: 'sm' | 'md'
   variant?: 'default' | 'ghost'
+  onCopy?: () => void
 }
 
 export function CopyButton({ 
@@ -15,7 +16,8 @@ export function CopyButton({
   title = 'Copy', 
   className = '', 
   iconSize = 'md',
-  variant = 'default'
+  variant = 'default',
+  onCopy
 }: CopyButtonProps) {
   const [copied, setCopied] = useState(false)
 
@@ -25,6 +27,7 @@ export function CopyButton({
       await navigator.clipboard.writeText(content)
       setCopied(true)
       setTimeout(() => setCopied(false), 2000)
+      onCopy?.()
     } catch {
       const textArea = document.createElement('textarea')
       textArea.value = content
@@ -37,6 +40,7 @@ export function CopyButton({
         if (successful) {
           setCopied(true)
           setTimeout(() => setCopied(false), 2000)
+          onCopy?.()
         }
       } finally {
         document.body.removeChild(textArea)

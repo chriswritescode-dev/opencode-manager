@@ -1,6 +1,6 @@
 import { useState, useMemo, useCallback } from 'react'
 import { Button } from '@/components/ui/button'
-import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card'
+import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '@/components/ui/card'
 import { Badge } from '@/components/ui/badge'
 import { Input } from '@/components/ui/input'
 import { DeleteDialog } from '@/components/ui/delete-dialog'
@@ -12,12 +12,14 @@ import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { OAuthAuthorizeDialog } from './OAuthAuthorizeDialog'
 import { OAuthCallbackDialog } from './OAuthCallbackDialog'
 import { ApiKeyDialog } from '@/components/model/ApiKeyDialog'
+import { invalidateProviderCaches } from '@/lib/queryInvalidation'
 
 export function ProviderSettings() {
   const [selectedProvider, setSelectedProvider] = useState<string | null>(null)
   const [oauthDialogOpen, setOauthDialogOpen] = useState(false)
   const [oauthCallbackDialogOpen, setOauthCallbackDialogOpen] = useState(false)
   const [oauthResponse, setOauthResponse] = useState<OAuthAuthorizeResponse | null>(null)
+  const [oauthMethodIndex, setOauthMethodIndex] = useState<number | null>(null)
   const [connectedExpanded, setConnectedExpanded] = useState(false)
   const [availableExpanded, setAvailableExpanded] = useState(false)
   const [availableSearch, setAvailableSearch] = useState('')
@@ -48,9 +50,7 @@ export function ProviderSettings() {
   const deleteCredentialMutation = useMutation({
     mutationFn: (providerId: string) => providerCredentialsApi.delete(providerId),
     onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: ['provider-credentials'] })
-      queryClient.invalidateQueries({ queryKey: ['providers'] })
-      queryClient.invalidateQueries({ queryKey: ['providers-with-models'] })
+      invalidateProviderCaches(queryClient)
     },
   })
 
@@ -69,21 +69,24 @@ export function ProviderSettings() {
     setDeleteTarget(null)
   }
 
-  const handleOAuthAuthorize = (response: OAuthAuthorizeResponse) => {
+  const handleOAuthAuthorize = (response: OAuthAuthorizeResponse, methodIndex: number) => {
     setOauthResponse(response)
+    setOauthMethodIndex(methodIndex)
     setOauthDialogOpen(false)
     setOauthCallbackDialogOpen(true)
   }
 
   const handleOAuthDialogClose = () => {
     setOauthDialogOpen(false)
+    setOauthMethodIndex(null)
     setSelectedProvider(null)
   }
 
   const handleOAuthSuccess = () => {
-    queryClient.invalidateQueries({ queryKey: ['provider-credentials'] })
+    invalidateProviderCaches(queryClient)
     setOauthCallbackDialogOpen(false)
     setOauthResponse(null)
+    setOauthMethodIndex(null)
     setSelectedProvider(null)
   }
 
@@ -98,8 +101,13 @@ export function ProviderSettings() {
 
   const oauthProviders = useMemo(() => {
     if (!providers || !authMethods) return []
-    return providers.filter(provider => supportsOAuth(provider.id))
-  }, [providers, authMethods, supportsOAuth])
+    const oauth = providers.filter(provider => supportsOAuth(provider.id))
+    return oauth.slice().sort((a, b) => {
+      const aConnected = hasCredentials(a.id) ? 1 : 0
+      const bConnected = hasCredentials(b.id) ? 1 : 0
+      return bConnected - aConnected
+    })
+  }, [providers, authMethods, supportsOAuth, hasCredentials])
 
   const apiKeyProviders = useMemo(() => {
     if (!providers || !authMethods) return { connected: [], available: [] }
@@ -138,9 +146,7 @@ export function ProviderSettings() {
   const handleApiKeySuccess = useCallback(() => {
     setApiKeyDialogOpen(false)
     setApiKeyProvider(null)
-    queryClient.invalidateQueries({ queryKey: ['provider-credentials'] })
-    queryClient.invalidateQueries({ queryKey: ['providers'] })
-    queryClient.invalidateQueries({ queryKey: ['providers-with-models'] })
+    invalidateProviderCaches(queryClient)
   }, [queryClient])
 
   const handleApiKeyDialogClose = useCallback((open: boolean) => {
@@ -242,17 +248,19 @@ export function ProviderSettings() {
         <OAuthAuthorizeDialog
           providerId={selectedProvider}
           providerName={selectedProviderName}
+          methods={authMethods?.[selectedProvider] || []}
           open={oauthDialogOpen}
           onOpenChange={handleOAuthDialogClose}
           onSuccess={handleOAuthAuthorize}
         />
       )}
 
-      {selectedProvider && oauthResponse && (
+      {selectedProvider && oauthResponse && oauthMethodIndex !== null && (
         <OAuthCallbackDialog
           providerId={selectedProvider}
           providerName={selectedProviderName}
           authResponse={oauthResponse}
+          methodIndex={oauthMethodIndex}
           open={oauthCallbackDialogOpen}
           onOpenChange={setOauthCallbackDialogOpen}
           onSuccess={handleOAuthSuccess}
