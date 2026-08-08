@@ -24,6 +24,11 @@ export default defineConfig(({ mode }) => {
     server: {
       host: "0.0.0.0",
       port: frontendPort,
+      allowedHosts: true,
+      hmr: {
+        // Tailscale Serve terminates TLS and proxies to this port
+        clientPort: frontendPort,
+      },
       proxy: {
         "/api": {
           target: `http://localhost:${backendPort}`,

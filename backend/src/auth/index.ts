@@ -48,7 +48,9 @@ export function createAuth(db: Database) {
       passkey({
         rpID: ENV.AUTH.PASSKEY_RP_ID,
         rpName: ENV.AUTH.PASSKEY_RP_NAME,
-        origin: ENV.AUTH.PASSKEY_ORIGIN,
+        // Omit origin so verification uses the request Origin header.
+        // That lets the same RP ID work across Tailscale ports (prod :5003, HMR :5174).
+        ...(ENV.AUTH.PASSKEY_ORIGIN ? { origin: ENV.AUTH.PASSKEY_ORIGIN } : {}),
         authenticatorSelection: {
           residentKey: 'required',
           userVerification: 'preferred',
