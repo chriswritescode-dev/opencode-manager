@@ -26,6 +26,7 @@ export default defineConfig([
       '@typescript-eslint/no-explicit-any': 'warn',
       '@typescript-eslint/no-unused-vars': 'error',
       'no-useless-escape': 'warn',
+      'no-empty': ['error', { allowEmptyCatch: true }],
     },
   },
   {

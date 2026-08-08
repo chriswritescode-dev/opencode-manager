@@ -71,6 +71,7 @@ export interface UserPreferences {
   repoSortMode?: 'recent' | 'manual' | 'name'
   serverEnvVars?: Array<{ key: string; value: string }>
   disabledDefaultServerEnvVars?: string[]
+  devServerPort?: number
 }
 
 export interface SettingsResponse {

@@ -19,6 +19,11 @@ export const DEFAULTS = {
     HEALTH_FAILURE_THRESHOLD: 2,
   },
 
+  DEV_PREVIEW: {
+    PORT: 3056,
+    PUBLIC_URL: '', // Optional: public origin for the preview iframe behind a reverse proxy (e.g., https://preview.mydomain.com)
+  },
+
   DATABASE: {
     PATH: './data/opencode.db',
   },

@@ -77,3 +77,12 @@ export async function applyFilePatches(path: string, patches: PatchOperation[]):
     body: JSON.stringify({ patches }),
   })
 }
+
+export function encodePathForRoute(path: string): string {
+  return path.split('/').map(encodeURIComponent).join('/')
+}
+
+export function getFilePreviewUrl(path: string): string {
+  const encodedPath = encodePathForRoute(path)
+  return `${API_BASE_URL}/api/files/preview/${encodedPath}`
+}

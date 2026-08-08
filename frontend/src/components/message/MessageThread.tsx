@@ -8,6 +8,7 @@ import type { Message, Part, MessageWithParts } from '@/api/types'
 import { useSessionStatusForSession } from '@/stores/sessionStatusStore'
 import { useSessionTodos } from '@/stores/sessionTodosStore'
 import { useSettings } from '@/hooks/useSettings'
+import type { OpenHtmlArtifactInput } from '@/lib/htmlArtifacts'
 import type { components } from '@/api/opencode-types'
 import type { Todo } from '@/components/message/SessionTodoDisplay'
 import type { OpenCodeError } from '@/lib/opencode-errors'
@@ -27,6 +28,7 @@ interface MessageThreadProps {
   messages?: MessageWithParts[]
   onFileClick?: (filePath: string, lineNumber?: number) => void
   onChildSessionClick?: (sessionId: string) => void
+  onHtmlArtifactOpen?: (input: OpenHtmlArtifactInput) => void
   onUndoMessage?: (restoredPrompt: string) => void
   model?: string
 }
@@ -147,6 +149,7 @@ interface MessageRowProps {
   directory?: string
   onFileClick?: (filePath: string, lineNumber?: number) => void
   onChildSessionClick?: (sessionId: string) => void
+  onHtmlArtifactOpen?: (input: OpenHtmlArtifactInput) => void
   handleStartEditUserMessage: (userMessageId: string, assistantMessageId: string) => void
   handleCancelEdit: () => void
   model?: string
@@ -168,6 +171,7 @@ const MessageRow = memo(function MessageRow({
   directory,
   onFileClick,
   onChildSessionClick,
+  onHtmlArtifactOpen,
   handleStartEditUserMessage,
   handleCancelEdit,
   model,
@@ -212,6 +216,7 @@ const MessageRow = memo(function MessageRow({
                 partIndex={partIndex}
                 onFileClick={onFileClick}
                 onChildSessionClick={onChildSessionClick}
+                onHtmlArtifactOpen={onHtmlArtifactOpen}
                 messageTextContent={messageTextContent}
               />
             </div>
@@ -308,6 +313,7 @@ const MessageRow = memo(function MessageRow({
                   partIndex={partIndex}
                   onFileClick={onFileClick}
                   onChildSessionClick={onChildSessionClick}
+                  onHtmlArtifactOpen={onHtmlArtifactOpen}
                   messageTextContent={msg.role === 'assistant' ? messageTextContent : undefined}
                 />
               </div>
@@ -329,6 +335,7 @@ export const MessageThread = memo(function MessageThread({
   messages, 
   onFileClick, 
   onChildSessionClick,
+  onHtmlArtifactOpen,
   onUndoMessage,
   model
 }: MessageThreadProps) {
@@ -442,6 +449,7 @@ export const MessageThread = memo(function MessageThread({
           directory={directory}
           onFileClick={onFileClick}
           onChildSessionClick={onChildSessionClick}
+          onHtmlArtifactOpen={onHtmlArtifactOpen}
           handleStartEditUserMessage={handleStartEditUserMessage}
           handleCancelEdit={handleCancelEdit}
           model={model}

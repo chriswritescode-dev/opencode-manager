@@ -1,5 +1,6 @@
 import React, { useState } from 'react'
 import type { components } from '@/api/opencode-types'
+import type { OpenHtmlArtifactInput } from '@/lib/htmlArtifacts'
 import { useSettings } from '@/hooks/useSettings'
 import { DiffStats } from './DiffStats'
 import { ContentDiffViewer } from './ContentDiffViewer'
@@ -60,9 +61,10 @@ interface FileToolRenderProps {
   content?: string
   toolName: string
   onFileClick?: (filePath: string, lineNumber?: number) => void
+  onHtmlArtifactOpen?: (input: OpenHtmlArtifactInput) => void
 }
 
-export function FileToolRender({ part, filediff, filePath, content, toolName, onFileClick }: FileToolRenderProps) {
+export function FileToolRender({ part, filediff, filePath, content, toolName, onFileClick, onHtmlArtifactOpen }: FileToolRenderProps) {
   const { preferences } = useSettings()
   const isReadTool = toolName === 'Read'
   const isEditTool = toolName === 'Edit'
@@ -119,21 +121,21 @@ export function FileToolRender({ part, filediff, filePath, content, toolName, on
       {expanded && hasExpandableContent && (
         <div className="bg-card p-0">
           {filediff && <ContentDiffViewer before={filediff.before} after={filediff.after} />}
-          {content && !filediff && <CodePreview fileName={filePath || ''} content={content} />}
+          {content && !filediff && <CodePreview fileName={filePath || ''} content={content} onHtmlArtifactOpen={onHtmlArtifactOpen} />}
         </div>
       )}
     </div>
   )
 }
 
-export function getToolSpecificRender(part: ToolPart, onFileClick?: (filePath: string) => void): React.ReactElement | null {
+export function getToolSpecificRender(part: ToolPart, onFileClick?: (filePath: string) => void, onHtmlArtifactOpen?: (input: OpenHtmlArtifactInput) => void): React.ReactElement | null {
   if (part.state.status !== 'completed') return null
 
   if (part.tool === 'edit') {
     const filediff = part.state.metadata?.filediff
     const filePath = part.state.input?.filePath as string | undefined
     if (filediff && isFileDiff(filediff)) {
-      return <FileToolRender part={part} filediff={filediff} filePath={filePath} toolName="Edit" onFileClick={onFileClick} />
+      return <FileToolRender part={part} filediff={filediff} filePath={filePath} toolName="Edit" onFileClick={onFileClick} onHtmlArtifactOpen={onHtmlArtifactOpen} />
     }
   }
 
@@ -141,14 +143,14 @@ export function getToolSpecificRender(part: ToolPart, onFileClick?: (filePath: s
     const filePath = part.state.input?.filePath as string | undefined
     const content = part.state.input?.content as string | undefined
     if (filePath) {
-      return <FileToolRender part={part} filePath={filePath} content={content} toolName="Write" onFileClick={onFileClick} />
+      return <FileToolRender part={part} filePath={filePath} content={content} toolName="Write" onFileClick={onFileClick} onHtmlArtifactOpen={onHtmlArtifactOpen} />
     }
   }
 
   if (part.tool === 'read') {
     const filePath = part.state.input?.filePath as string | undefined
     if (filePath) {
-      return <FileToolRender part={part} filePath={filePath} toolName="Read" onFileClick={onFileClick} />
+      return <FileToolRender part={part} filePath={filePath} toolName="Read" onFileClick={onFileClick} onHtmlArtifactOpen={onHtmlArtifactOpen} />
     }
   }
 

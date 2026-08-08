@@ -12,6 +12,9 @@ import { FolderOpen, Upload, RefreshCw, X } from 'lucide-react'
 import type { FileInfo } from '@/types/files'
 import { useMobile } from '@/hooks/useMobile'
 import { getFileApiUrl, useFile } from '@/api/files'
+import { HtmlArtifactPanel } from '@/components/html-preview/HtmlArtifactPanel'
+import type { HtmlArtifact } from '@/lib/htmlArtifacts'
+import { createHtmlArtifact, isHtmlPath } from '@/lib/htmlArtifacts'
 
 export interface FileBrowserHandle {
   goBack: () => void
@@ -50,6 +53,10 @@ const encodeBase64 = (content: string) => {
   }
   return btoa(binary)
 }
+
+const isHtmlFileInfo = (file: FileInfo): boolean => (
+  isHtmlPath(file.path) || isHtmlPath(file.name) || file.mimeType === 'text/html'
+)
 
 async function readFileEntry(entry: FileSystemFileEntry): Promise<File> {
   return new Promise((resolve, reject) => {
@@ -135,6 +142,7 @@ export const FileBrowser = forwardRef<FileBrowserHandle, FileBrowserProps>(funct
   const [currentPath, setCurrentPath] = useState(basePath)
   const [files, setFiles] = useState<FileInfo | null>(null)
   const [selectedFile, setSelectedFile] = useState<FileInfo | null>(null)
+  const [htmlArtifact, setHtmlArtifact] = useState<HtmlArtifact | null>(null)
   const [searchQuery, setSearchQuery] = useState('')
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState<string | null>(null)
@@ -146,17 +154,27 @@ export const FileBrowser = forwardRef<FileBrowserHandle, FileBrowserProps>(funct
   const uploadCancelledRef = useRef(false)
   const isMobile = useMobile()
 
+  const openMobilePreview = useCallback((file: FileInfo) => {
+    if (isHtmlFileInfo(file)) {
+      setHtmlArtifact(createHtmlArtifact({ source: 'file', path: file.path, title: file.name }))
+      setIsPreviewModalOpen(false)
+    } else {
+      setHtmlArtifact(null)
+      setIsPreviewModalOpen(true)
+    }
+    onPreviewStateChange?.(true)
+  }, [onPreviewStateChange])
+
   const { data: initialFileData, error: initialFileError } = useFile(initialSelectedFile)
 
 useEffect(() => {
   if (initialFileData) {
     setSelectedFile(initialFileData)
     if (isMobile) {
-      setIsPreviewModalOpen(true)
-      onPreviewStateChange?.(true)
+      openMobilePreview(initialFileData)
     }
   }
-}, [initialFileData, isMobile, onPreviewStateChange])
+}, [initialFileData, isMobile, openMobilePreview])
 
 useEffect(() => {
   if (initialFileError) {
@@ -262,8 +280,7 @@ useEffect(() => {
       
       // On mobile, open preview in modal
       if (isMobile) {
-        setIsPreviewModalOpen(true)
-        onPreviewStateChange?.(true)
+        openMobilePreview(fullFileData)
       }
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Failed to load file')
@@ -271,10 +288,11 @@ useEffect(() => {
     } finally {
       setLoading(false)
     }
-  }, [onFileSelect, isMobile, onPreviewStateChange])
+  }, [onFileSelect, isMobile, openMobilePreview])
 
-  const handleCloseModal = useCallback(() => {
+  const handleClosePreview = useCallback(() => {
     setIsPreviewModalOpen(false)
+    setHtmlArtifact(null)
     setSelectedFile(null)
     onPreviewStateChange?.(false)
   }, [onPreviewStateChange])
@@ -476,13 +494,13 @@ useEffect(() => {
 
     const handleEscape = (e: KeyboardEvent) => {
       if (e.key === 'Escape') {
-        handleCloseModal()
+        handleClosePreview()
       }
     }
 
     document.addEventListener('keydown', handleEscape)
     return () => document.removeEventListener('keydown', handleEscape)
-  }, [isPreviewModalOpen, handleCloseModal])
+  }, [isPreviewModalOpen, handleClosePreview])
 
   const showNavigateUp = allowNavigateAboveBase && normalizePath(currentPath) !== '..'
     ? true
@@ -553,6 +571,15 @@ useEffect(() => {
         )}
       </DialogContent>
     </Dialog>
+  )
+
+  const htmlArtifactPanel = isMobile && htmlArtifact && (
+    <HtmlArtifactPanel
+      artifact={htmlArtifact}
+      isFullscreen={true}
+      isMobile={true}
+      onClose={handleClosePreview}
+    />
   )
 
   if (embedded) {
@@ -641,10 +668,12 @@ useEffect(() => {
 {/* Mobile: File Preview Modal */}
         <MobileFilePreviewModal 
           isOpen={isMobile && isPreviewModalOpen}
-          onClose={handleCloseModal}
+          onClose={handleClosePreview}
           file={selectedFile}
           showFilePreviewHeader={true}
         />
+
+        {htmlArtifactPanel}
       </div>
     )
   }
@@ -743,9 +772,11 @@ useEffect(() => {
 {/* Mobile: File Preview Modal */}
       <MobileFilePreviewModal 
         isOpen={isMobile && isPreviewModalOpen}
-        onClose={handleCloseModal}
+        onClose={handleClosePreview}
         file={selectedFile}
       />
+
+      {htmlArtifactPanel}
       
       {uploadDialog}
     </div>
