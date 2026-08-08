@@ -82,14 +82,34 @@ export function AuthProvider({ children }: AuthProviderProps) {
     try {
       const result = await authClient.signIn.passkey()
       if (result.error) {
-        return { error: result.error.message || 'Passkey sign in failed' }
+        const msg = result.error.message || 'Passkey sign in failed'
+        if (msg === 'auth cancelled' || result.error.code === 'AUTH_CANCELLED') {
+          return {
+            error:
+              'Passkey was cancelled or blocked. Open this app via your Tailscale HTTPS URL (same hostname as production), then try again. If it still fails, sign in with email and re-add the passkey under Account.',
+          }
+        }
+        return { error: msg }
       }
       await refetch()
       const from = (location.state as { from?: string })?.from || '/'
       navigate(from, { replace: true })
       return {}
     } catch (err) {
-      return { error: err instanceof Error ? err.message : 'Passkey sign in failed' }
+      const message = err instanceof Error ? err.message : 'Passkey sign in failed'
+      if (err instanceof DOMException || (err && typeof err === 'object' && 'name' in err)) {
+        const name = err instanceof DOMException ? err.name : String((err as { name?: string }).name || '')
+        if (name === 'NotAllowedError') {
+          return { error: 'Passkey prompt was dismissed or timed out. Try again.' }
+        }
+        if (name === 'SecurityError') {
+          return {
+            error:
+              'Passkey blocked for this origin. Use the Tailscale HTTPS hostname that matches production RP ID.',
+          }
+        }
+      }
+      return { error: message }
     }
   }, [refetch, navigate, location])
 

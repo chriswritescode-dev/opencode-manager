@@ -64,6 +64,17 @@ export function Login() {
 
   const handlePasskey = async () => {
     setError(null)
+    const rpId = config.passkeyRpId
+    if (rpId && typeof window !== 'undefined' && window.location.hostname !== rpId) {
+      setError(
+        `Passkeys only work on ${rpId}. Open https://${rpId}:${window.location.port || '5174'}/login instead of ${window.location.host}.`
+      )
+      return
+    }
+    if (typeof window !== 'undefined' && window.location.protocol !== 'https:' && window.location.hostname !== 'localhost') {
+      setError('Passkeys require HTTPS. Use your Tailscale Serve URL.')
+      return
+    }
     setIsPasskeyLoading(true)
     try {
       const result = await signInWithPasskey()

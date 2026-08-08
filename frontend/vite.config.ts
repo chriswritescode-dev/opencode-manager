@@ -31,8 +31,22 @@ export default defineConfig(({ mode }) => {
       },
       proxy: {
         "/api": {
-          target: `http://localhost:${backendPort}`,
+          target: `http://127.0.0.1:${backendPort}`,
           changeOrigin: true,
+          configure: (proxy) => {
+            proxy.on("proxyReq", (proxyReq, req) => {
+              const host = req.headers.host;
+              if (host) {
+                proxyReq.setHeader("x-forwarded-host", host);
+              }
+              const proto = req.headers["x-forwarded-proto"] || "https";
+              proxyReq.setHeader("x-forwarded-proto", String(proto));
+              // Preserve browser Origin for WebAuthn expectedOrigin checks
+              if (req.headers.origin) {
+                proxyReq.setHeader("origin", String(req.headers.origin));
+              }
+            });
+          },
         },
       },
     },

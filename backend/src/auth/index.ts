@@ -76,7 +76,8 @@ export function createAuth(db: Database) {
       },
     },
     advanced: {
-      cookiePrefix: 'opencode',
+      // Isolate dev cookies from production when both share a Tailscale hostname
+      cookiePrefix: ENV.SERVER.NODE_ENV === 'development' ? 'opencode-dev' : 'opencode',
       useSecureCookies: ENV.AUTH.SECURE_COOKIES,
     },
   })
