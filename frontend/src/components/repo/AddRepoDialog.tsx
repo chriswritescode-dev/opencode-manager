@@ -9,7 +9,7 @@ import { DirectoryPickerDialog } from './DirectoryPickerDialog'
 import { Loader2, FolderSearch } from 'lucide-react'
 import { showToast } from '@/lib/toast'
 import { invalidateRepoListCaches } from '@/lib/queryInvalidation'
-import { getRepoBaseDirectoryName, getRepoDirectoryNameError, getRepoNameFromUrl, normalizeRepoUrlForCompare, sanitizeRepoDirectoryName } from '@opencode-manager/shared/utils'
+import { getRepoBaseDirectoryName, getRepoDirectoryNameError, getRepoNameFromUrl, isSSHUrl, normalizeRepoUrlForCompare, sanitizeRepoDirectoryName } from '@opencode-manager/shared/utils'
 import type { DiscoverReposResponse } from '@opencode-manager/shared/types'
 import type { Repo } from '@/api/types'
 
@@ -29,10 +29,6 @@ export function AddRepoDialog({ open, onOpenChange }: AddRepoDialogProps) {
   const [pickerOpen, setPickerOpen] = useState(false)
   const directoryTouched = useRef(false)
   const queryClient = useQueryClient()
-
-  const isSSHUrl = (url: string): boolean => {
-    return url.startsWith('git@') || url.startsWith('ssh://')
-  }
 
   const showSkipSSHCheckbox = repoType === 'remote' && isSSHUrl(repoUrl)
   const showDirectoryName = repoType === 'remote'

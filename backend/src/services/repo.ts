@@ -7,9 +7,9 @@ import type { Database } from 'bun:sqlite'
 import type { Repo, CreateRepoInput } from '../types/repo'
 import { logger } from '../utils/logger'
 import { getReposPath, getScheduleWorktreesPath } from '@opencode-manager/shared/config/env'
-import { normalizeRepoDirectoryName, sanitizeRepoDirectoryName, sanitizeBranchForDirectory, normalizeRepoUrlForCompare } from '@opencode-manager/shared/utils'
+import { normalizeRepoDirectoryName, sanitizeRepoDirectoryName, sanitizeBranchForDirectory, normalizeRepoUrlForCompare, isSSHUrl, normalizeSSHUrl } from '@opencode-manager/shared/utils'
 import type { GitAuthService } from './git-auth'
-import { isGitHubHttpsUrl, isSSHUrl, normalizeSSHUrl } from '../utils/git-auth'
+import { isGitHubHttpsUrl } from '../utils/git-auth'
 import path from 'path'
 import { parseSSHHost } from '../utils/ssh-key-manager'
 import { getErrorMessage } from '../utils/error-utils'
@@ -957,9 +957,9 @@ export async function deleteRepoFiles(database: Database, repoId: number): Promi
 }
 
 function normalizeRepoUrl(url: string, preserveSSH: boolean = false): { url: string; name: string } {
-  const sshMatch = url.match(/^git@([^:]+):(.+?)(?:\.git)?$/)
+  const sshMatch = url.match(/^([^@/:]+)@([^:]+):(.+?)(?:\.git)?$/)
   if (sshMatch) {
-    const [, host, pathPart] = sshMatch
+    const [, , host, pathPart] = sshMatch
     const path = pathPart ?? ''
     const repoName = path.split('/').pop() || `repo-${Date.now()}`
     return {
