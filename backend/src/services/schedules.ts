@@ -44,7 +44,7 @@ import { resolveOpenCodeModel } from './opencode-models'
 import type { OpenCodeClient } from './opencode/client'
 import type { ScheduleWorktreeManager } from './schedule-worktree'
 import type { Repo } from '../types/repo'
-import { sseAggregator, type SSEEvent } from './sse-aggregator'
+import { sseAggregator, type SSEEvent, type ScheduledSessionRef } from './sse-aggregator'
 import { getErrorMessage } from '../utils/error-utils'
 import { logger } from '../utils/logger'
 import { buildAssistantRepo } from './assistant-mode'
@@ -61,13 +61,6 @@ class ScheduleServiceError extends Error {
 
 interface SessionResponse {
   id: string
-}
-
-interface PromptResponse {
-  parts?: Array<{
-    type?: string
-    text?: string
-  }>
 }
 
 interface SessionMessagePart {
@@ -101,22 +94,23 @@ interface SessionStatus {
   next?: number
 }
 
-const RUN_POLL_INTERVAL_MS = 2_000
-const RUN_POLL_TIMEOUT_MS = 5 * 60_000
+const SESSION_STOPPED_ERROR = 'The session stopped without producing an assistant response. This usually means OpenCode restarted mid-run or the session was interrupted. Open the linked session to inspect any partial output and rerun if needed.'
+
+interface SessionSignal {
+  errorText: string | null
+  disposed: boolean
+}
 
 interface SessionMonitor {
-  getErrorText(): string | null
-  isIdle(): boolean
+  markSubmitted(): void
+  nextSignal(): Promise<SessionSignal>
   dispose(): void
 }
 
-function extractResponseText(response: PromptResponse): string {
-  return (response.parts ?? [])
-    .filter((part) => part.type === 'text' && typeof part.text === 'string')
-    .map((part) => part.text?.replace(/<think>[\s\S]*?<\/think>\s*/g, '').trim() ?? '')
-    .filter(Boolean)
-    .join('\n\n')
-}
+type AssistantOutcome =
+  | { kind: 'busy' }
+  | { kind: 'settled'; responseText: string | null; errorText: string | null }
+  | { kind: 'stopped'; responseText: string | null }
 
 function buildSessionTitle(job: ScheduleJob): string {
   return `Scheduled: ${job.name}`
@@ -253,18 +247,6 @@ function buildRunStartedLog(input: {
   ].join('\n')
 }
 
-function parsePromptResponse(responseText: string): PromptResponse | null {
-  if (!responseText.trim()) {
-    return null
-  }
-
-  try {
-    return JSON.parse(responseText) as PromptResponse
-  } catch {
-    return null
-  }
-}
-
 function extractAssistantMessageText(parts: SessionMessagePart[] | undefined): string {
   return (parts ?? [])
     .filter((part) => part.type === 'text' && typeof part.text === 'string')
@@ -326,8 +308,19 @@ function getSessionStatusType(event: SSEEvent): string | null {
 }
 
 function createSessionMonitor(directory: string, sessionId: string): SessionMonitor {
-  let errorText: string | null = null
-  let idle = false
+  const queued: SessionSignal[] = []
+  let waiting: ((signal: SessionSignal) => void) | null = null
+  let disposed = false
+
+  const push = (signal: SessionSignal): void => {
+    if (waiting) {
+      const resolve = waiting
+      waiting = null
+      resolve(signal)
+      return
+    }
+    queued.push(signal)
+  }
 
   const unsubscribe = sseAggregator.onEvent((eventDirectory, event) => {
     if (eventDirectory !== directory) {
@@ -339,24 +332,37 @@ function createSessionMonitor(directory: string, sessionId: string): SessionMoni
     }
 
     if (event.type === 'session.error') {
-      errorText = getSessionErrorText(event) ?? 'The session reported an unknown error.'
+      push({ errorText: getSessionErrorText(event) ?? 'The session reported an unknown error.', disposed: false })
       return
     }
 
-    if (event.type === 'session.idle') {
-      idle = true
-      return
-    }
-
-    if (event.type === 'session.status' && getSessionStatusType(event) === 'idle') {
-      idle = true
+    if (event.type === 'session.idle' || (event.type === 'session.status' && getSessionStatusType(event) === 'idle')) {
+      push({ errorText: null, disposed: false })
     }
   })
 
   return {
-    getErrorText: () => errorText,
-    isIdle: () => idle,
-    dispose: unsubscribe,
+    markSubmitted: () => {
+      queued.length = 0
+    },
+    nextSignal: () => {
+      const next = queued.shift()
+      if (next) {
+        return Promise.resolve(next)
+      }
+      if (disposed) {
+        return Promise.resolve({ errorText: null, disposed: true })
+      }
+      return new Promise<SessionSignal>((resolve) => { waiting = resolve })
+    },
+    dispose: () => {
+      if (disposed) {
+        return
+      }
+      disposed = true
+      unsubscribe()
+      push({ errorText: null, disposed: true })
+    },
   }
 }
 
@@ -375,9 +381,27 @@ export class ScheduleService {
     this.onJobChange = handler
   }
 
-  getActiveRunSessionIds(): Set<string> {
-    const runs = listRunningScheduleRuns(this.db)
-    return new Set(runs.filter(r => r.sessionId).map(r => r.sessionId!))
+  getActiveRunSessions(): ScheduledSessionRef[] {
+    const refs: ScheduledSessionRef[] = []
+
+    for (const run of listRunningScheduleRuns(this.db)) {
+      if (!run.sessionId) continue
+
+      const directory = run.worktreePath ?? this.findRepoPath(run.repoId)
+      if (!directory) continue
+
+      refs.push({ sessionID: run.sessionId, directory })
+    }
+
+    return refs
+  }
+
+  private findRepoPath(repoId: number): string | null {
+    try {
+      return this.assertRepo(repoId).fullPath
+    } catch {
+      return null
+    }
   }
 
   listAllEnabledJobs(): ScheduleJob[] {
@@ -773,7 +797,7 @@ export class ScheduleService {
     try {
       const promptResponse = await this.openCodeClient.forward({
         method: 'POST',
-        path: `/session/${input.sessionId}/message`,
+        path: `/session/${input.sessionId}/prompt_async`,
         directory: input.directory,
         body: JSON.stringify({
           parts: [{ type: 'text', text: await buildPromptWithSkills(input.job.prompt, input.job.skillMetadata, input.directory, this.openCodeClient) }],
@@ -787,40 +811,7 @@ export class ScheduleService {
         throw new ScheduleServiceError(errorText || 'Failed to run scheduled prompt', 502)
       }
 
-      const promptBody = await promptResponse.text()
-      const promptResult = parsePromptResponse(promptBody)
-
-      if (promptResult) {
-        const currentRun = getScheduleRunById(this.db, input.repoId, input.job.id, input.runId)
-        if (!currentRun || currentRun.status !== 'running') {
-          return
-        }
-
-        const finishedAt = Date.now()
-        const responseText = extractResponseText(promptResult)
-        updateScheduleRun(this.db, input.repoId, input.job.id, input.runId, {
-          status: 'completed',
-          finishedAt,
-          sessionId: input.sessionId,
-          sessionTitle: input.sessionTitle,
-          responseText,
-          logText: buildRunLog({
-            job: input.job,
-            triggerSource: input.triggerSource,
-            sessionId: input.sessionId,
-            sessionTitle: input.sessionTitle,
-            responseText,
-            finishedAt,
-          }),
-        })
-
-        updateScheduleJobRunState(this.db, input.repoId, input.job.id, {
-          lastRunAt: finishedAt,
-          nextRunAt: input.triggerSource === 'manual' ? input.job.nextRunAt : computeNextRunAtForJob(input.job, finishedAt),
-        })
-
-        return
-      }
+      input.sessionMonitor.markSubmitted()
 
       await this.monitorRunCompletion({
         sessionMonitor: input.sessionMonitor,
@@ -905,9 +896,8 @@ export class ScheduleService {
       }
 
       const repo = this.assertRepo(input.repoId)
-      const currentMessages = await this.listSessionMessages(input.directory, input.sessionId)
-      const currentAssistantState = getAssistantMessageState(currentMessages)
-      if (currentAssistantState?.completed || currentAssistantState?.errorText) {
+      const currentAssistantState = await this.readSettledAssistantState(input.directory, input.sessionId)
+      if (currentAssistantState) {
         await this.finalizeRecoveredRun(input.job, {
           id: input.runId,
           repoId: input.repoId,
@@ -923,7 +913,7 @@ export class ScheduleService {
         return
       }
 
-      const response = await this.waitForAssistantMessage(input.job, input.sessionId, input.sessionMonitor, input.directory)
+      const response = await this.waitForAssistantMessage(input.sessionId, input.sessionMonitor, input.directory)
       const currentRun = getScheduleRunById(this.db, input.repoId, input.job.id, input.runId)
       if (!currentRun || currentRun.status !== 'running') {
         return
@@ -1131,46 +1121,62 @@ export class ScheduleService {
     }
   }
 
+  /**
+   * An assistant message completing is not the end of a run: a multi-step agent
+   * settles one message per tool call. Only a session that has gone idle has
+   * finished, and only then is the final message guaranteed to carry its parts.
+   */
+  private async readAssistantOutcome(directory: string, sessionId: string): Promise<AssistantOutcome> {
+    const sessionStatus = (await this.getSessionStatuses(directory))[sessionId]
+    if (sessionStatus && sessionStatus.type !== 'idle') {
+      return { kind: 'busy' }
+    }
+
+    const assistantState = getAssistantMessageState(await this.listSessionMessages(directory, sessionId))
+    if (assistantState?.completed || assistantState?.errorText) {
+      return { kind: 'settled', responseText: assistantState.responseText, errorText: assistantState.errorText }
+    }
+
+    return { kind: 'stopped', responseText: assistantState?.responseText ?? null }
+  }
+
+  private async readSettledAssistantState(
+    directory: string,
+    sessionId: string,
+  ): Promise<{ responseText: string | null; errorText: string | null } | null> {
+    const outcome = await this.readAssistantOutcome(directory, sessionId)
+    return outcome.kind === 'settled'
+      ? { responseText: outcome.responseText, errorText: outcome.errorText }
+      : null
+  }
+
   private async waitForAssistantMessage(
-    job: ScheduleJob,
     sessionId: string,
     sessionMonitor: SessionMonitor,
     directory: string,
   ): Promise<{ responseText: string | null; errorText: string | null }> {
-    const startedAt = Date.now()
+    for (;;) {
+      const signal = await sessionMonitor.nextSignal()
 
-    while (Date.now() - startedAt < RUN_POLL_TIMEOUT_MS) {
-      const messages = await this.listSessionMessages(directory, sessionId)
-      const assistantState = getAssistantMessageState(messages)
-
-      if (assistantState && (assistantState.completed || assistantState.errorText)) {
+      if (signal.errorText || signal.disposed) {
+        const messages = await this.listSessionMessages(directory, sessionId)
         return {
-          responseText: assistantState.responseText,
-          errorText: assistantState.errorText,
+          responseText: getAssistantMessageState(messages)?.responseText ?? null,
+          errorText: signal.errorText ?? SESSION_STOPPED_ERROR,
         }
       }
 
-      const sessionErrorText = sessionMonitor.getErrorText()
-      if (sessionErrorText) {
-        return {
-          responseText: null,
-          errorText: sessionErrorText,
-        }
+      const outcome = await this.readAssistantOutcome(directory, sessionId)
+
+      if (outcome.kind === 'busy') {
+        continue
       }
 
-      if (sessionMonitor.isIdle()) {
-        return {
-          responseText: null,
-          errorText: 'The session became idle without producing an assistant response. Open the linked session to inspect any pending questions, permissions, or provider issues.',
-        }
+      if (outcome.kind === 'settled') {
+        return { responseText: outcome.responseText, errorText: outcome.errorText }
       }
 
-      await Bun.sleep(RUN_POLL_INTERVAL_MS)
-    }
-
-    return {
-      responseText: null,
-      errorText: 'Timed out waiting for the assistant response. Open the linked session to inspect any pending questions, permissions, or provider issues.',
+      return { responseText: outcome.responseText, errorText: SESSION_STOPPED_ERROR }
     }
   }
 

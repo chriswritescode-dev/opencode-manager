@@ -335,7 +335,7 @@ sseAggregator.setPasswordResolver(() => new SettingsService(db).getOpenCodeServe
 sseAggregator.start()
 
 sseAggregator.setScheduledSessionsResolver(
-  () => scheduleService.getActiveRunSessionIds(),
+  () => scheduleService.getActiveRunSessions(),
 )
 
 const openCodeRestartCoordinator = new OpenCodeRestartCoordinator(openCodeClient, sseAggregator)

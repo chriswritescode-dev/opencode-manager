@@ -99,6 +99,11 @@ function getExternalDirSwitch() {
   return screen.getAllByRole('switch')[1]
 }
 
+/** The allow-questions switch is the 3rd switch (index 2), after Enabled and external directory */
+function getAllowQuestionsSwitch() {
+  return screen.getAllByRole('switch')[2]
+}
+
 describe('ScheduleJobDialog — permission config', () => {
   beforeEach(() => {
     vi.clearAllMocks()
@@ -127,6 +132,7 @@ describe('ScheduleJobDialog — permission config', () => {
 
     const switchInput = getExternalDirSwitch()
     expect(switchInput).not.toBeChecked()
+    expect(getAllowQuestionsSwitch()).not.toBeChecked()
   })
 
   it('initializes permission config from an existing job', async () => {
@@ -138,6 +144,7 @@ describe('ScheduleJobDialog — permission config', () => {
     const job = getDefaultJob({
       permissionConfig: {
         allowExternalDirectory: true,
+        allowQuestions: true,
         bashDenyPatterns: [...customPatterns],
       },
     })
@@ -160,6 +167,7 @@ describe('ScheduleJobDialog — permission config', () => {
 
     const switchInput = getExternalDirSwitch()
     expect(switchInput).toBeChecked()
+    expect(getAllowQuestionsSwitch()).toBeChecked()
   })
 
   it('submits permissionConfig in the create payload', async () => {
@@ -198,6 +206,44 @@ describe('ScheduleJobDialog — permission config', () => {
     const payload = onSubmit.mock.calls[0][0]
     expect(payload.permissionConfig).toEqual({
       allowExternalDirectory: true,
+      allowQuestions: false,
+      bashDenyPatterns: [...DEFAULT_DESTRUCTIVE_BASH_PATTERNS],
+    })
+  })
+
+  it('submits allowQuestions true when the questions toggle is enabled', async () => {
+    const onSubmit = vi.fn()
+    const onOpenChange = vi.fn()
+    const user = userEvent.setup()
+
+    render(
+      <ScheduleJobDialog
+        open
+        onOpenChange={onOpenChange}
+        onSubmit={onSubmit}
+        isSaving={false}
+      />,
+      { wrapper: createWrapper() },
+    )
+
+    await navigateToGeneralTab(user)
+    await fillRequiredFields(user)
+
+    await navigateToGeneralTab(user)
+
+    await user.click(getAllowQuestionsSwitch())
+
+    const submitButton = screen.getByRole('button', { name: /Create schedule/i })
+    await user.click(submitButton)
+
+    await waitFor(() => {
+      expect(onSubmit).toHaveBeenCalledTimes(1)
+    })
+
+    const payload = onSubmit.mock.calls[0][0]
+    expect(payload.permissionConfig).toEqual({
+      allowExternalDirectory: false,
+      allowQuestions: true,
       bashDenyPatterns: [...DEFAULT_DESTRUCTIVE_BASH_PATTERNS],
     })
   })
@@ -239,6 +285,7 @@ describe('ScheduleJobDialog — permission config', () => {
     const payload = onSubmit.mock.calls[0][0]
     expect(payload.permissionConfig).toEqual({
       allowExternalDirectory: false,
+      allowQuestions: false,
       bashDenyPatterns: ['rm -rf *', 'sudo *'],
     })
   })
@@ -251,6 +298,7 @@ describe('ScheduleJobDialog — permission config', () => {
     const job = getDefaultJob({
       permissionConfig: {
         allowExternalDirectory: false,
+        allowQuestions: true,
         bashDenyPatterns: ['rm -rf *', 'git push --force*'],
       },
     })
@@ -288,6 +336,7 @@ describe('ScheduleJobDialog — permission config', () => {
     const payload = onSubmit.mock.calls[0][0]
     expect(payload.permissionConfig).toEqual({
       allowExternalDirectory: true,
+      allowQuestions: true,
       bashDenyPatterns: ['rm -rf *', 'git push --force*', 'sudo *'],
     })
   })

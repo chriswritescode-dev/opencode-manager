@@ -217,8 +217,12 @@ describe('ScheduleService', () => {
         return Promise.resolve(jsonResponse({ id: 'ses-run-1' }))
       }
 
-      if (path === '/session/ses-run-1/message' && method === 'POST') {
+      if (path === '/session/ses-run-1/prompt_async' && method === 'POST') {
         return Promise.resolve(textResponse(''))
+      }
+
+      if (path === '/session/status' && method === 'GET') {
+        return Promise.resolve(jsonResponse({ 'ses-run-1': { type: 'idle' } }))
       }
 
       if (path === '/session/ses-run-1/message' && method === 'GET') {
@@ -259,7 +263,7 @@ describe('ScheduleService', () => {
     )
   })
 
-  it('sends session and message JSON POSTs with Content-Type: application/json', async () => {
+  it('sends session and prompt_async JSON POSTs with Content-Type: application/json', async () => {
     const service = new ScheduleService({} as never, createOpenCodeClientStub(), mocks.stubWorktreeManager as never)
     const runWithSession: ScheduleRun = {
       ...baseRun,
@@ -273,8 +277,16 @@ describe('ScheduleService', () => {
       if (path === '/session' && method === 'POST') {
         return jsonResponse({ id: 'ses-content-type' })
       }
-      if (path === '/session/ses-content-type/message' && method === 'POST') {
-        return textResponse(JSON.stringify({ parts: [{ type: 'text', text: 'Done.' }] }))
+      if (path === '/session/ses-content-type/prompt_async' && method === 'POST') {
+        return new Response(null, { status: 204 })
+      }
+      if (path === '/session/ses-content-type/message' && method === 'GET') {
+        return jsonResponse([
+          {
+            info: { role: 'assistant', sessionID: 'ses-content-type', time: { completed: Date.now() } },
+            parts: [{ type: 'text', text: 'Done.' }],
+          },
+        ])
       }
       throw new Error(`Unexpected forward request: ${method} ${path}`)
     })
@@ -292,14 +304,14 @@ describe('ScheduleService', () => {
       expect(mocks.forward).toHaveBeenCalledWith(
         expect.objectContaining({
           method: 'POST',
-          path: '/session/ses-content-type/message',
+          path: '/session/ses-content-type/prompt_async',
           headers: expect.objectContaining({ 'Content-Type': 'application/json' }),
         }),
       )
     })
   })
 
-  it('completes a run immediately when the prompt endpoint returns JSON', async () => {
+  it('submits without holding the request open and completes from the session completion event', async () => {
     const service = new ScheduleService({} as never, createOpenCodeClientStub(), mocks.stubWorktreeManager as never)
     const runWithSession: ScheduleRun = {
       ...baseRun,
@@ -308,6 +320,7 @@ describe('ScheduleService', () => {
       logText: 'Run started. Waiting for assistant response...',
     }
 
+    let assistantCompleted = false
     mocks.updateScheduleRunMetadata.mockReturnValue(runWithSession)
     mocks.getScheduleRunById.mockReturnValue(runWithSession)
     routeForward(({ path, method }) => {
@@ -315,16 +328,44 @@ describe('ScheduleService', () => {
         return Promise.resolve(jsonResponse({ id: 'ses-run-2' }))
       }
 
-      if (path === '/session/ses-run-2/message' && method === 'POST') {
-        return Promise.resolve(textResponse(JSON.stringify({
-          parts: [{ type: 'text', text: 'Immediate status summary.' }],
-        })))
+      if (path === '/session/ses-run-2/prompt_async' && method === 'POST') {
+        return Promise.resolve(new Response(null, { status: 204 }))
+      }
+
+      if (path === '/session/status' && method === 'GET') {
+        return Promise.resolve(jsonResponse(
+          assistantCompleted ? { 'ses-run-2': { type: 'idle' } } : { 'ses-run-2': { type: 'busy' } },
+        ))
+      }
+
+      if (path === '/session/ses-run-2/message' && method === 'GET') {
+        return Promise.resolve(jsonResponse([
+          {
+            info: {
+              role: 'assistant',
+              sessionID: 'ses-run-2',
+              time: assistantCompleted ? { completed: Date.now() } : {},
+            },
+            parts: [{ type: 'text', text: 'Event driven summary.' }],
+          },
+        ]))
       }
 
       throw new Error(`Unexpected proxy request: ${method} ${path}`)
     })
 
     await service.runJob(42, 7, 'manual')
+
+    await vi.waitFor(() => {
+      expect(mocks.forward).toHaveBeenCalledWith(
+        expect.objectContaining({ method: 'GET', path: '/session/status' }),
+      )
+    })
+    expect(mocks.updateScheduleRun).not.toHaveBeenCalled()
+
+    assistantCompleted = true
+    const emit = mocks.onEvent.mock.calls[0]?.[0] as (directory: string, event: unknown) => void
+    emit(repo.fullPath, { type: 'session.idle', properties: { sessionID: 'ses-run-2' } })
 
     await vi.waitFor(() => {
       expect(mocks.updateScheduleRun).toHaveBeenCalledWith(
@@ -334,8 +375,72 @@ describe('ScheduleService', () => {
         5,
         expect.objectContaining({
           status: 'completed',
-          responseText: 'Immediate status summary.',
+          responseText: 'Event driven summary.',
         }),
+      )
+    })
+  })
+
+  it('keeps waiting when an intermediate assistant step completes while the session is still busy', async () => {
+    const service = new ScheduleService({} as never, createOpenCodeClientStub(), mocks.stubWorktreeManager as never)
+    const runWithSession: ScheduleRun = {
+      ...baseRun,
+      sessionId: 'ses-multi',
+      sessionTitle: 'Scheduled: Weekly engineering summary',
+      logText: 'Run started. Waiting for assistant response...',
+    }
+
+    let sessionIdle = false
+    mocks.updateScheduleRunMetadata.mockReturnValue(runWithSession)
+    mocks.getScheduleRunById.mockReturnValue(runWithSession)
+    routeForward(({ path, method }) => {
+      if (path === '/session' && method === 'POST') {
+        return Promise.resolve(jsonResponse({ id: 'ses-multi' }))
+      }
+
+      if (path === '/session/ses-multi/prompt_async' && method === 'POST') {
+        return Promise.resolve(new Response(null, { status: 204 }))
+      }
+
+      if (path === '/session/status' && method === 'GET') {
+        return Promise.resolve(jsonResponse({ 'ses-multi': { type: sessionIdle ? 'idle' : 'busy' } }))
+      }
+
+      if (path === '/session/ses-multi/message' && method === 'GET') {
+        return Promise.resolve(jsonResponse(sessionIdle
+          ? [
+              { info: { role: 'assistant', sessionID: 'ses-multi', time: { completed: Date.now() } }, parts: [{ type: 'tool', tool: 'bash' }] },
+              { info: { role: 'assistant', sessionID: 'ses-multi', time: { completed: Date.now() } }, parts: [{ type: 'text', text: 'Final answer.' }] },
+            ]
+          : [
+              { info: { role: 'assistant', sessionID: 'ses-multi', time: { completed: Date.now() } }, parts: [{ type: 'tool', tool: 'bash' }] },
+            ]))
+      }
+
+      throw new Error(`Unexpected proxy request: ${method} ${path}`)
+    })
+
+    await service.runJob(42, 7, 'manual')
+    const emit = mocks.onEvent.mock.calls[0]?.[0] as (directory: string, event: unknown) => void
+
+    emit(repo.fullPath, { type: 'session.idle', properties: { sessionID: 'ses-multi' } })
+    await vi.waitFor(() => {
+      expect(mocks.forward).toHaveBeenCalledWith(
+        expect.objectContaining({ method: 'GET', path: '/session/status' }),
+      )
+    })
+    expect(mocks.updateScheduleRun).not.toHaveBeenCalled()
+
+    sessionIdle = true
+    emit(repo.fullPath, { type: 'session.idle', properties: { sessionID: 'ses-multi' } })
+
+    await vi.waitFor(() => {
+      expect(mocks.updateScheduleRun).toHaveBeenCalledWith(
+        expect.anything(),
+        42,
+        7,
+        5,
+        expect.objectContaining({ status: 'completed', responseText: 'Final answer.' }),
       )
     })
   })
@@ -399,7 +504,7 @@ describe('ScheduleService', () => {
         return Promise.resolve(jsonResponse({ id: 'ses-run-6' }))
       }
 
-      if (path === '/session/ses-run-6/message' && method === 'POST') {
+      if (path === '/session/ses-run-6/prompt_async' && method === 'POST') {
         return Promise.resolve(textResponse('Provider unavailable', 500))
       }
 
@@ -654,29 +759,25 @@ describe('ScheduleService', () => {
       sessionId: 'ses-run-9',
       sessionTitle: 'Scheduled: Weekly engineering summary',
     }
-    let messageRequests = 0
+    let sessionIdle = false
 
     mocks.listRunningScheduleRuns.mockReturnValue([resumedRun])
     mocks.getScheduleRunById.mockReturnValue(resumedRun)
     routeForward(({ path, method }) => {
       if (path === '/session/ses-run-9/message' && method === 'GET') {
-        messageRequests += 1
-
-        if (messageRequests === 1) {
-          return Promise.resolve(jsonResponse([]))
-        }
-
-        return Promise.resolve(jsonResponse([
-          {
-            info: { role: 'assistant', time: { completed: Date.now() } },
-            parts: [{ type: 'text', text: 'Recovered after reconnect' }],
-          },
-        ]))
+        return Promise.resolve(jsonResponse(sessionIdle
+          ? [
+              {
+                info: { role: 'assistant', time: { completed: Date.now() } },
+                parts: [{ type: 'text', text: 'Recovered after reconnect' }],
+              },
+            ]
+          : []))
       }
 
       if (path === '/session/status' && method === 'GET') {
         return Promise.resolve(jsonResponse({
-          'ses-run-9': { type: 'busy' },
+          'ses-run-9': { type: sessionIdle ? 'idle' : 'busy' },
         }))
       }
 
@@ -684,6 +785,10 @@ describe('ScheduleService', () => {
     })
 
     await service.recoverRunningRuns()
+
+    sessionIdle = true
+    const emitResume = mocks.onEvent.mock.calls[0]?.[0] as (directory: string, event: unknown) => void
+    emitResume(repo.fullPath, { type: 'session.idle', properties: { sessionID: 'ses-run-9' } })
 
     await vi.waitFor(() => {
       expect(mocks.updateScheduleRun).toHaveBeenCalledWith(
@@ -879,7 +984,7 @@ describe('ScheduleService', () => {
         if (path === '/session' && method === 'POST') {
           return Promise.resolve(jsonResponse({ id: 'ses-skills-1' }))
         }
-        if (path === '/session/ses-skills-1/message' && method === 'POST') {
+        if (path === '/session/ses-skills-1/prompt_async' && method === 'POST') {
           capturedPromptBody = body
           return Promise.resolve(textResponse(JSON.stringify({
             parts: [{ type: 'text', text: 'Done.' }],
@@ -928,7 +1033,7 @@ describe('ScheduleService', () => {
         if (path === '/session' && method === 'POST') {
           return Promise.resolve(jsonResponse({ id: 'ses-skills-2' }))
         }
-        if (path === '/session/ses-skills-2/message' && method === 'POST') {
+        if (path === '/session/ses-skills-2/prompt_async' && method === 'POST') {
           capturedPromptBody = body
           return Promise.resolve(textResponse(JSON.stringify({
             parts: [{ type: 'text', text: 'Done.' }],
@@ -971,7 +1076,7 @@ describe('ScheduleService', () => {
         if (path === '/session' && method === 'POST') {
           return Promise.resolve(jsonResponse({ id: 'ses-skills-3' }))
         }
-        if (path === '/session/ses-skills-3/message' && method === 'POST') {
+        if (path === '/session/ses-skills-3/prompt_async' && method === 'POST') {
           capturedPromptBody = body
           return Promise.resolve(textResponse(JSON.stringify({
             parts: [{ type: 'text', text: 'Done.' }],
@@ -1015,7 +1120,7 @@ describe('ScheduleService', () => {
         if (path === '/session' && method === 'POST') {
           return Promise.resolve(jsonResponse({ id: 'ses-skills-4' }))
         }
-        if (path === '/session/ses-skills-4/message' && method === 'POST') {
+        if (path === '/session/ses-skills-4/prompt_async' && method === 'POST') {
           capturedPromptBody = body
           return Promise.resolve(textResponse(JSON.stringify({
             parts: [{ type: 'text', text: 'Done.' }],
@@ -1059,7 +1164,7 @@ describe('ScheduleService', () => {
         if (path === '/session' && method === 'POST') {
           return Promise.resolve(jsonResponse({ id: 'ses-skills-5' }))
         }
-        if (path === '/session/ses-skills-5/message' && method === 'POST') {
+        if (path === '/session/ses-skills-5/prompt_async' && method === 'POST') {
           capturedPromptBody = body
           return Promise.resolve(textResponse(JSON.stringify({
             parts: [{ type: 'text', text: 'Done.' }],
@@ -1124,7 +1229,7 @@ describe('ScheduleService worktree isolation', () => {
         expect(directory).toBe(worktreePath)
         return Promise.resolve(jsonResponse({ id: 'ses-wt-1' }))
       }
-      if (path === '/session/ses-wt-1/message' && method === 'POST') {
+      if (path === '/session/ses-wt-1/prompt_async' && method === 'POST') {
         expect(directory).toBe(worktreePath)
         return Promise.resolve(textResponse(JSON.stringify({
           parts: [{ type: 'text', text: 'Worktree run done.' }],
@@ -1163,7 +1268,7 @@ describe('ScheduleService worktree isolation', () => {
       if (path === '/session' && method === 'POST') {
         return Promise.resolve(jsonResponse({ id: 'ses-wt-1' }))
       }
-      if (path === '/session/ses-wt-1/message' && method === 'POST') {
+      if (path === '/session/ses-wt-1/prompt_async' && method === 'POST') {
         return Promise.resolve(textResponse(JSON.stringify({
           parts: [{ type: 'text', text: 'Worktree run done.' }],
         })))
@@ -1203,7 +1308,7 @@ describe('ScheduleService worktree isolation', () => {
         capturedDirectory = directory
         return Promise.resolve(jsonResponse({ id: 'ses-inline-1' }))
       }
-      if (path === '/session/ses-inline-1/message' && method === 'POST') {
+      if (path === '/session/ses-inline-1/prompt_async' && method === 'POST') {
         return Promise.resolve(textResponse(JSON.stringify({
           parts: [{ type: 'text', text: 'Inline run done.' }],
         })))

@@ -25,6 +25,11 @@ export interface PendingActionsFetcher {
   getJson<T>(path: string, opts?: { directory?: string; signal?: AbortSignal }): Promise<T>
 }
 
+export interface ScheduledSessionRef {
+  sessionID: string
+  directory: string
+}
+
 interface PendingPermission {
   id: string
   sessionID: string
@@ -58,7 +63,7 @@ class SSEAggregator {
   private started = false
   private pendingActionsFetcher: PendingActionsFetcher | null = null
   private passwordResolver: OpenCodePasswordResolver | null = null
-  private scheduledSessionsResolver: (() => Set<string>) | null = null
+  private scheduledSessionsResolver: (() => ScheduledSessionRef[]) | null = null
 
   private constructor() {}
 
@@ -70,7 +75,7 @@ class SSEAggregator {
     this.passwordResolver = resolver
   }
 
-  setScheduledSessionsResolver(resolver: () => Set<string>): void {
+  setScheduledSessionsResolver(resolver: () => ScheduledSessionRef[]): void {
     this.scheduledSessionsResolver = resolver
   }
 
@@ -210,11 +215,12 @@ class SSEAggregator {
     await Promise.allSettled(tasks)
   }
 
-  private async replaySessionStatusesForAllClients(): Promise<void> {
+  private async replaySessionStatusesForTrackedDirectories(): Promise<void> {
     const fetcher = this.pendingActionsFetcher
     if (!fetcher) return
 
-    const directories = new Set<string>()
+    const scheduledByDirectory = this.getScheduledSessionsByDirectory()
+    const directories = new Set<string>(scheduledByDirectory.keys())
     this.clients.forEach((client) => {
       client.directories.forEach(dir => directories.add(dir))
     })
@@ -222,13 +228,14 @@ class SSEAggregator {
     if (directories.size === 0) return
     logger.info(`replay: replaying session statuses for ${directories.size} directory(ies) after upstream reconnect`)
     await Promise.allSettled(Array.from(directories).map(directory =>
-      this.replaySessionStatusesForDirectory(directory, fetcher)
+      this.replaySessionStatusesForDirectory(directory, fetcher, scheduledByDirectory.get(directory))
     ))
   }
 
   private async replaySessionStatusesForDirectory(
     directory: string,
     fetcher: PendingActionsFetcher,
+    scheduledSessionIDs?: Set<string>,
   ): Promise<void> {
     let statuses: SessionStatusMap
     try {
@@ -240,7 +247,8 @@ class SSEAggregator {
 
     if (!statuses) return
 
-    const previouslyActive = new Set(this.activeSessions.get(directory) ?? [])
+    const tracked = new Set(this.activeSessions.get(directory) ?? [])
+    scheduledSessionIDs?.forEach(sessionID => tracked.add(sessionID))
     const nowActive = new Set<string>()
 
     let replayed = 0
@@ -253,7 +261,7 @@ class SSEAggregator {
     }
 
     let cleared = 0
-    for (const sessionID of previouslyActive) {
+    for (const sessionID of tracked) {
       if (nowActive.has(sessionID)) continue
       const data = JSON.stringify({ directory, payload: { type: 'session.status', properties: { sessionID, status: { type: 'idle' } } } })
       this.handleUpstreamMessage(data)
@@ -352,7 +360,7 @@ class SSEAggregator {
       this.everConnected = true
       if (wasConnectedBefore) {
         void this.replayPendingActionsForAllClients()
-        void this.replaySessionStatusesForAllClients()
+        void this.replaySessionStatusesForTrackedDirectories()
       }
     }
 
@@ -529,7 +537,24 @@ class SSEAggregator {
   }
 
   getScheduledSessionIds(): Set<string> {
-    return this.scheduledSessionsResolver?.() ?? new Set()
+    return new Set(this.getScheduledSessions().map(ref => ref.sessionID))
+  }
+
+  private getScheduledSessions(): ScheduledSessionRef[] {
+    return this.scheduledSessionsResolver?.() ?? []
+  }
+
+  private getScheduledSessionsByDirectory(): Map<string, Set<string>> {
+    const byDirectory = new Map<string, Set<string>>()
+    for (const ref of this.getScheduledSessions()) {
+      let sessions = byDirectory.get(ref.directory)
+      if (!sessions) {
+        sessions = new Set()
+        byDirectory.set(ref.directory, sessions)
+      }
+      sessions.add(ref.sessionID)
+    }
+    return byDirectory
   }
 
   getActiveDirectories(): string[] {
