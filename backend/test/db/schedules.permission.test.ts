@@ -41,6 +41,7 @@ describe('schedule permission config persistence', () => {
   it('round-trips permissionConfig when set on create', () => {
     const config = {
       allowExternalDirectory: true,
+      allowQuestions: false,
       bashDenyPatterns: ['rm -rf /'],
     }
     const created = createScheduleJob(db, 1, baseInput({ permissionConfig: config }))
@@ -68,6 +69,7 @@ describe('schedule permission config persistence', () => {
 
     const config = {
       allowExternalDirectory: false,
+      allowQuestions: true,
       bashDenyPatterns: ['sudo rm -rf *'],
     }
     const updated = updateScheduleJob(db, 1, created.id, baseInput({ permissionConfig: config }))
@@ -80,7 +82,7 @@ describe('schedule permission config persistence', () => {
   })
 
   it('clears permissionConfig when set to null on update', () => {
-    const config = { allowExternalDirectory: true, bashDenyPatterns: [] }
+    const config = { allowExternalDirectory: true, allowQuestions: false, bashDenyPatterns: [] }
     const created = createScheduleJob(db, 1, baseInput({ permissionConfig: config }))
     expect(created.permissionConfig).toEqual(config)
 
@@ -90,7 +92,7 @@ describe('schedule permission config persistence', () => {
   })
 
   it('preserves permissionConfig when updating other fields', () => {
-    const config = { allowExternalDirectory: false, bashDenyPatterns: ['rm -rf *'] }
+    const config = { allowExternalDirectory: false, allowQuestions: false, bashDenyPatterns: ['rm -rf *'] }
     const created = createScheduleJob(db, 1, baseInput({ permissionConfig: config }))
     expect(created.permissionConfig).toEqual(config)
 

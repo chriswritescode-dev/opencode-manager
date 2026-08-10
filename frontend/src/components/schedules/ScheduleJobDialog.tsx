@@ -65,6 +65,7 @@ export function ScheduleJobDialog({ open, onOpenChange, job, isSaving, onSubmit,
   const initialSkillNotesRef = useRef<string | undefined>(undefined)
   const [branch, setBranch] = useState('')
   const [allowExternalDirectory, setAllowExternalDirectory] = useState(false)
+  const [allowQuestions, setAllowQuestions] = useState(false)
   const [bashDenyPatterns, setBashDenyPatterns] = useState<string[]>([...DEFAULT_DESTRUCTIVE_BASH_PATTERNS])
   const [templateDialogOpen, setTemplateDialogOpen] = useState(false)
   const [editingTemplate, setEditingTemplate] = useState<PromptTemplate | undefined>(undefined)
@@ -222,6 +223,7 @@ export function ScheduleJobDialog({ open, onOpenChange, job, isSaving, onSubmit,
     initialSkillNotesRef.current = initialSkillNotes
     setBranch(job?.branch ?? '')
     setAllowExternalDirectory(job?.permissionConfig?.allowExternalDirectory ?? false)
+    setAllowQuestions(job?.permissionConfig?.allowQuestions ?? false)
     setBashDenyPatterns(job?.permissionConfig?.bashDenyPatterns ?? [...DEFAULT_DESTRUCTIVE_BASH_PATTERNS])
   }, [job, open])
 
@@ -265,6 +267,7 @@ export function ScheduleJobDialog({ open, onOpenChange, job, isSaving, onSubmit,
       branch: branch.trim() || null,
       permissionConfig: {
         allowExternalDirectory,
+        allowQuestions,
         bashDenyPatterns: bashDenyPatterns.map((p) => p.trim()).filter(Boolean),
       },
       ...(shouldIncludeSkillMetadata ? {
@@ -347,6 +350,8 @@ export function ScheduleJobDialog({ open, onOpenChange, job, isSaving, onSubmit,
             repoOptions={repoOptions}
             allowExternalDirectory={allowExternalDirectory}
             onAllowExternalDirectoryChange={setAllowExternalDirectory}
+            allowQuestions={allowQuestions}
+            onAllowQuestionsChange={setAllowQuestions}
             bashDenyPatterns={bashDenyPatterns}
             onBashDenyPatternsChange={setBashDenyPatterns}
           />

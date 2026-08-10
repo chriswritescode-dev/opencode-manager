@@ -30,6 +30,8 @@ type GeneralTabProps = {
   repoOptions: ComboboxOption[]
   allowExternalDirectory: boolean
   onAllowExternalDirectoryChange: (value: boolean) => void
+  allowQuestions: boolean
+  onAllowQuestionsChange: (value: boolean) => void
   bashDenyPatterns: string[]
   onBashDenyPatternsChange: (value: string[]) => void
 }
@@ -70,6 +72,8 @@ export function GeneralTab({
   repoOptions,
   allowExternalDirectory,
   onAllowExternalDirectoryChange,
+  allowQuestions,
+  onAllowQuestionsChange,
   bashDenyPatterns,
   onBashDenyPatternsChange,
 }: GeneralTabProps) {
@@ -176,6 +180,15 @@ export function GeneralTab({
                 <InfoHint text="When disabled, runs are confined to the worktree. Enable to allow the agent to read/write files elsewhere on the system." />
               </div>
               <Switch checked={allowExternalDirectory} onCheckedChange={onAllowExternalDirectoryChange} />
+            </div>
+          </div>
+          <div className="rounded-lg border border-border bg-card p-4">
+            <div className="flex items-center justify-between gap-4">
+              <div className="flex items-center gap-2">
+                <p className="text-sm font-medium">Allow questions</p>
+                <InfoHint text="Scheduled runs are unattended. When disabled, the agent's question tool is denied so a run can never stall waiting for an answer that nobody is there to give." />
+              </div>
+              <Switch checked={allowQuestions} onCheckedChange={onAllowQuestionsChange} />
             </div>
           </div>
           <div className="rounded-lg border border-border bg-card p-4">

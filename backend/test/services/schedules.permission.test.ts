@@ -210,7 +210,7 @@ describe('ScheduleService permission ruleset in session creation', () => {
       if (path === '/session' && method === 'POST') {
         return jsonResponse({ id: 'ses-perm-1' })
       }
-      if (path.match(/^\/session\/[\w-]+\/message$/) && method === 'POST') {
+      if (path.match(/^\/session\/[\w-]+\/prompt_async$/) && method === 'POST') {
         return textResponse('')
       }
       if (path.match(/^\/session\/[\w-]+\/message$/) && method === 'GET') {
@@ -235,7 +235,7 @@ describe('ScheduleService permission ruleset in session creation', () => {
   })
 
   it('sends custom permission ruleset when job has custom permissionConfig', async () => {
-    const customConfig = { allowExternalDirectory: true, bashDenyPatterns: [] }
+    const customConfig = { allowExternalDirectory: true, allowQuestions: true, bashDenyPatterns: [] }
     mocks.getScheduleJobById.mockReturnValue({ ...baseJob, permissionConfig: customConfig })
 
     const runWithSession: ScheduleRun = {
@@ -250,7 +250,7 @@ describe('ScheduleService permission ruleset in session creation', () => {
       if (path === '/session' && method === 'POST') {
         return jsonResponse({ id: 'ses-perm-2' })
       }
-      if (path.match(/^\/session\/[\w-]+\/message$/) && method === 'POST') {
+      if (path.match(/^\/session\/[\w-]+\/prompt_async$/) && method === 'POST') {
         return textResponse('')
       }
       if (path.match(/^\/session\/[\w-]+\/message$/) && method === 'GET') {
@@ -289,7 +289,7 @@ describe('ScheduleService permission ruleset in session creation', () => {
       if (path === '/session' && method === 'POST') {
         return jsonResponse({ id: 'ses-perm-3' })
       }
-      if (path.match(/^\/session\/[\w-]+\/message$/) && method === 'POST') {
+      if (path.match(/^\/session\/[\w-]+\/prompt_async$/) && method === 'POST') {
         return textResponse('')
       }
       if (path.match(/^\/session\/[\w-]+\/message$/) && method === 'GET') {

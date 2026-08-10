@@ -31,6 +31,7 @@ export const DEFAULT_DESTRUCTIVE_BASH_PATTERNS = [
 
 export const SchedulePermissionConfigSchema = z.object({
   allowExternalDirectory: z.boolean().default(false),
+  allowQuestions: z.boolean().default(false),
   bashDenyPatterns: z.array(z.string().min(1).max(200)).max(200)
     .default([...DEFAULT_DESTRUCTIVE_BASH_PATTERNS]),
 })
@@ -58,8 +59,9 @@ export type SchedulePermissionRuleset = SchedulePermissionRule[]
  * `{ permission, pattern, action }` rules (`PermissionV1.Ruleset`), evaluated
  * with last-match-wins semantics (see https://opencode.ai/docs/permissions).
  * A leading `*`/`*` allow rule sets the allow-all baseline; the trailing
- * `external_directory` and `bash` deny rules then override it for external
- * directory access and matching destructive command patterns.
+ * `external_directory`, `question` and `bash` deny rules then override it for
+ * external directory access, agent questions that would block an unattended run
+ * with nobody to answer them, and matching destructive command patterns.
  */
 export function buildSchedulePermissionRuleset(
   config: SchedulePermissionConfig | null | undefined,
@@ -68,6 +70,9 @@ export function buildSchedulePermissionRuleset(
   const ruleset: SchedulePermissionRuleset = [{ permission: '*', pattern: '*', action: 'allow' }]
   if (!cfg.allowExternalDirectory) {
     ruleset.push({ permission: 'external_directory', pattern: '*', action: 'deny' })
+  }
+  if (!cfg.allowQuestions) {
+    ruleset.push({ permission: 'question', pattern: '*', action: 'deny' })
   }
   for (const pattern of cfg.bashDenyPatterns) {
     ruleset.push({ permission: 'bash', pattern, action: 'deny' })

@@ -215,7 +215,7 @@ describe('SSEAggregator session status replay on upstream reconnect', () => {
     const clientA = createCapturingClient()
     sseAggregator.addClient('status-1', clientA.callback, clientA.writeFrame, ['/repo/a'])
 
-    await (sseAggregator as any).replaySessionStatusesForAllClients()
+    await (sseAggregator as any).replaySessionStatusesForTrackedDirectories()
     await flushReplay()
 
     const parsed = clientA.frames.map(f => JSON.parse(f.replace(/^event: message\ndata: /, '').trim()) as {
@@ -238,7 +238,7 @@ describe('SSEAggregator session status replay on upstream reconnect', () => {
 
     sseAggregator.setPendingActionsFetcher(makeFetcher({ '/repo/a': { statuses: {} } }))
 
-    await (sseAggregator as any).replaySessionStatusesForAllClients()
+    await (sseAggregator as any).replaySessionStatusesForTrackedDirectories()
     await flushReplay()
 
     const parsed = clientA.frames.map(f => JSON.parse(f.replace(/^event: message\ndata: /, '').trim()) as {
@@ -253,10 +253,67 @@ describe('SSEAggregator session status replay on upstream reconnect', () => {
     const clientA = createCapturingClient()
     sseAggregator.addClient('status-3', clientA.callback, clientA.writeFrame, ['/repo/a'])
 
-    await (sseAggregator as any).replaySessionStatusesForAllClients()
+    await (sseAggregator as any).replaySessionStatusesForTrackedDirectories()
     await flushReplay()
 
     expect(clientA.frames).toHaveLength(0)
+  })
+})
+
+describe('SSEAggregator scheduled session replay without a connected client', () => {
+  beforeEach(() => {
+    sseAggregator.shutdown()
+    sseAggregator.setPendingActionsFetcher(null)
+    sseAggregator.setScheduledSessionsResolver(() => [])
+  })
+
+  it('replays a scheduled directory that no browser client is subscribed to', async () => {
+    sseAggregator.setPendingActionsFetcher(makeFetcher({
+      '/worktrees/run-1': { statuses: { 'ses-sched': { type: 'busy' } } },
+    }))
+    sseAggregator.setScheduledSessionsResolver(() => [
+      { sessionID: 'ses-sched', directory: '/worktrees/run-1' },
+    ])
+
+    const seen: Array<{ directory: string; type: string; sessionID: string; status: string }> = []
+    sseAggregator.onEvent((directory, event) => {
+      const properties = event.properties as { sessionID?: string; status?: { type?: string } }
+      seen.push({
+        directory,
+        type: event.type,
+        sessionID: properties.sessionID ?? '',
+        status: properties.status?.type ?? '',
+      })
+    })
+
+    await (sseAggregator as any).replaySessionStatusesForTrackedDirectories()
+    await flushReplay()
+
+    expect(seen).toEqual([
+      { directory: '/worktrees/run-1', type: 'session.status', sessionID: 'ses-sched', status: 'busy' },
+    ])
+  })
+
+  it('emits idle for a scheduled session that finished while the stream was down and was never marked active', async () => {
+    sseAggregator.setPendingActionsFetcher(makeFetcher({
+      '/worktrees/run-2': { statuses: {} },
+    }))
+    sseAggregator.setScheduledSessionsResolver(() => [
+      { sessionID: 'ses-finished', directory: '/worktrees/run-2' },
+    ])
+
+    const idle: string[] = []
+    sseAggregator.onEvent((_directory, event) => {
+      const properties = event.properties as { sessionID?: string; status?: { type?: string } }
+      if (event.type === 'session.status' && properties.status?.type === 'idle') {
+        idle.push(properties.sessionID ?? '')
+      }
+    })
+
+    await (sseAggregator as any).replaySessionStatusesForTrackedDirectories()
+    await flushReplay()
+
+    expect(idle).toEqual(['ses-finished'])
   })
 })
 
