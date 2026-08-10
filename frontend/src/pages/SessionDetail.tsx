@@ -132,17 +132,35 @@ export function SessionDetail() {
 
   const opcodeUrl = OPENCODE_API_ENDPOINT;
   
-  const repoDirectory = repo?.fullPath;
   const sessionRouteSuffix = isAssistantSession ? '?assistant=1' : '';
 
-  const { isConnected, isReconnecting } = useSSE(opcodeUrl, repoDirectory, sessionId);
+  const repoDirectory = repo?.fullPath;
+  const [resolvedSessionDirectory, setResolvedSessionDirectory] = useState<{ sessionId: string; directory: string } | null>(null);
+  const sessionDirectory = (
+    resolvedSessionDirectory && resolvedSessionDirectory.sessionId === sessionId
+      ? resolvedSessionDirectory.directory
+      : undefined
+  ) ?? repoDirectory;
 
-  const { data: rawMessages, isLoading: messagesLoading } = useMessages(opcodeUrl, sessionId, repoDirectory, { fallbackPoll: !isConnected });
   const { data: session, isLoading: sessionLoading, error: sessionQueryError } = useSession(
     opcodeUrl,
     sessionId,
-    repoDirectory,
+    sessionDirectory,
   );
+
+  useEffect(() => {
+    const directory = session?.directory;
+    if (!sessionId || !directory) return;
+    setResolvedSessionDirectory((current) => (
+      current?.sessionId === sessionId && current.directory === directory
+        ? current
+        : { sessionId, directory }
+    ));
+  }, [sessionId, session?.directory]);
+
+  const { isConnected, isReconnecting } = useSSE(opcodeUrl, sessionDirectory, sessionId);
+
+  const { data: rawMessages, isLoading: messagesLoading } = useMessages(opcodeUrl, sessionId, sessionDirectory, { fallbackPoll: !isConnected });
 
   const messages = useMemo(() => {
     if (!rawMessages) return undefined
@@ -164,10 +182,10 @@ export function SessionDetail() {
     contentVersion: messagesContentVersion,
     onScrollStateChange: setShowScrollButton
   });
-  const abortSession = useAbortSession(opcodeUrl, repoDirectory, sessionId);
-  const updateSession = useUpdateSession(opcodeUrl, repoDirectory);
-  const createSession = useCreateSession(opcodeUrl, repoDirectory);
-  const { model, modelString } = useModelSelection(opcodeUrl, repoDirectory);
+  const abortSession = useAbortSession(opcodeUrl, sessionDirectory, sessionId);
+  const updateSession = useUpdateSession(opcodeUrl, sessionDirectory);
+  const createSession = useCreateSession(opcodeUrl, sessionDirectory);
+  const { model, modelString } = useModelSelection(opcodeUrl, sessionDirectory);
   const isEditingMessage = useUIState((state) => state.isEditingMessage);
   const setActivePromptFileBasePath = useUIState((state) => state.setActivePromptFileBasePath);
   const { isEnabled: ttsEnabled } = useTTS();
@@ -192,12 +210,12 @@ export function SessionDetail() {
   const workspaceBasePath = (isAssistantSession ? assistantFileBasePath : repo?.localPath) ?? repo?.localPath;
 
   useEffect(() => {
-    setActivePromptFileBasePath(repoDirectory ? workspaceBasePath ?? null : null)
+    setActivePromptFileBasePath(sessionDirectory ? workspaceBasePath ?? null : null)
 
     return () => {
       setActivePromptFileBasePath(null)
     }
-  }, [repoDirectory, setActivePromptFileBasePath, workspaceBasePath])
+  }, [sessionDirectory, setActivePromptFileBasePath, workspaceBasePath])
 
   useAutoPlayLastResponse({
     sessionId: sessionId ?? '',
@@ -224,20 +242,20 @@ export function SessionDetail() {
   }, [sessionId, minimizedQuestion])
 
   const syncPendingActionsForSession = useCallback(async () => {
-    if (!repoDirectory || !sessionId) return
+    if (!sessionDirectory || !sessionId) return
     await Promise.all([
-      syncPermissionsForSession(repoDirectory, sessionId),
-      syncQuestionsForSession(repoDirectory, sessionId),
+      syncPermissionsForSession(sessionDirectory, sessionId),
+      syncQuestionsForSession(sessionDirectory, sessionId),
     ])
-  }, [repoDirectory, sessionId, syncPermissionsForSession, syncQuestionsForSession])
+  }, [sessionDirectory, sessionId, syncPermissionsForSession, syncQuestionsForSession])
 
   useQuery({
-    queryKey: ['opencode', 'pending-actions', opcodeUrl, sessionId, repoDirectory],
+    queryKey: ['opencode', 'pending-actions', opcodeUrl, sessionId, sessionDirectory],
     queryFn: async () => {
       await syncPendingActionsForSession()
       return null
     },
-    enabled: !!repoDirectory && !!sessionId,
+    enabled: !!sessionDirectory && !!sessionId,
     refetchOnMount: 'always',
     refetchOnReconnect: true,
     refetchOnWindowFocus: true,
@@ -270,37 +288,37 @@ export function SessionDetail() {
     showToast.loading('Compacting session...', { id: `compact-${sessionId}` });
 
     try {
-      const client = createOpenCodeClient(opcodeUrl, repoDirectory);
+      const client = createOpenCodeClient(opcodeUrl, sessionDirectory);
       await client.summarizeSession(sessionId, model.providerID, model.modelID);
     } catch (error) {
       showToast.error(`Compact failed: ${error instanceof Error ? error.message : 'Unknown error'}`);
     }
-  }, [opcodeUrl, sessionId, model, repoDirectory]);
+  }, [opcodeUrl, sessionId, model, sessionDirectory]);
 
   const handleUndo = useCallback(async () => {
     if (!opcodeUrl || !sessionId) return;
     try {
-      const client = createOpenCodeClient(opcodeUrl, repoDirectory);
+      const client = createOpenCodeClient(opcodeUrl, sessionDirectory);
       await client.sendCommand(sessionId, { command: 'undo', arguments: '' });
     } catch (error) {
       showToast.error(`Undo failed: ${error instanceof Error ? error.message : 'Unknown error'}`);
     }
-  }, [opcodeUrl, sessionId, repoDirectory]);
+  }, [opcodeUrl, sessionId, sessionDirectory]);
 
   const handleRedo = useCallback(async () => {
     if (!opcodeUrl || !sessionId) return;
     try {
-      const client = createOpenCodeClient(opcodeUrl, repoDirectory);
+      const client = createOpenCodeClient(opcodeUrl, sessionDirectory);
       await client.sendCommand(sessionId, { command: 'redo', arguments: '' });
     } catch (error) {
       showToast.error(`Redo failed: ${error instanceof Error ? error.message : 'Unknown error'}`);
     }
-  }, [opcodeUrl, sessionId, repoDirectory]);
+  }, [opcodeUrl, sessionId, sessionDirectory]);
 
   const handleFork = useCallback(async () => {
     if (!opcodeUrl || !sessionId) return;
     try {
-      const client = createOpenCodeClient(opcodeUrl, repoDirectory);
+      const client = createOpenCodeClient(opcodeUrl, sessionDirectory);
       const forkedSession = await client.forkSession(sessionId);
       if (forkedSession?.id) {
         navigate(`/repos/${repoId}/sessions/${forkedSession.id}${sessionRouteSuffix}`);
@@ -309,7 +327,7 @@ export function SessionDetail() {
     } catch (error) {
       showToast.error(`Fork failed: ${error instanceof Error ? error.message : 'Unknown error'}`);
     }
-  }, [opcodeUrl, sessionId, repoDirectory, navigate, repoId, sessionRouteSuffix]);
+  }, [opcodeUrl, sessionId, sessionDirectory, navigate, repoId, sessionRouteSuffix]);
 
   const handleCloseSession = useCallback(() => {
     const tab = new URLSearchParams(location.search).get('repoTab') ?? undefined;
@@ -497,7 +515,7 @@ export function SessionDetail() {
             <ContextUsageIndicator
               opcodeUrl={opcodeUrl}
               sessionID={sessionId}
-              directory={repoDirectory}
+              directory={sessionDirectory}
               isConnected={isConnected}
               isReconnecting={isReconnecting}
             />
@@ -514,11 +532,11 @@ export function SessionDetail() {
         <div key={sessionId} ref={messageContainerRef} className="flex-1 overflow-y-auto overflow-x-hidden overscroll-contain [mask-image:linear-gradient(to_bottom,transparent,black_16px,black)]" style={{ paddingBottom: promptOverlayHeight + inputBottomOffset + PROMPT_OVERLAY_CLEARANCE_PX }}>
           {repoLoading || sessionLoading || messagesLoading ? (
             <MessageSkeleton />
-          ) : opcodeUrl && repoDirectory ? (
+          ) : opcodeUrl && sessionDirectory ? (
             <MessageThread 
               opcodeUrl={opcodeUrl} 
               sessionID={sessionId} 
-              directory={repoDirectory}
+              directory={sessionDirectory}
               messages={messages}
               onFileClick={handleFileClick}
               onChildSessionClick={handleChildSessionClick}
@@ -527,7 +545,7 @@ export function SessionDetail() {
             />
           ) : null}
         </div>
-        {opcodeUrl && repoDirectory && !isEditingMessage && (
+        {opcodeUrl && sessionDirectory && !isEditingMessage && (
           <div
             ref={promptOverlayRef}
             className="absolute left-0 right-0 flex justify-center"
@@ -582,7 +600,7 @@ export function SessionDetail() {
               <PromptInput
                 ref={promptInputRef}
                 opcodeUrl={opcodeUrl}
-                directory={repoDirectory}
+                directory={sessionDirectory}
                 sessionID={sessionId}
                 showScrollButton={showScrollButton && !hasPromptContent}
                 isSessionActive={isSessionActive}

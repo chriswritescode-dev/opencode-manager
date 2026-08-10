@@ -265,6 +265,36 @@ describe('SessionDetail assistant loading at repoId=0', () => {
     })
   })
 
+  it('subscribes and caches using the session directory when it differs from the repo path', async () => {
+    mocks.useSession.mockReturnValue({
+      data: { id: 'sess-wt-1', directory: '/abs/worktrees/job-1-run-1', title: 'Scheduled run', time: {} },
+      isLoading: false,
+    })
+
+    renderAssistantSession('sess-wt-1')
+
+    await waitFor(() => {
+      expect(mocks.useSSE.mock.calls.at(-1)?.[1]).toBe('/abs/worktrees/job-1-run-1')
+    })
+
+    expect(mocks.useMessages.mock.calls.at(-1)?.[2]).toBe('/abs/worktrees/job-1-run-1')
+  })
+
+  it('keeps using the repo path when the session lives in the repo directory', async () => {
+    mocks.useSession.mockReturnValue({
+      data: { id: 'sess-asst-1', directory: '/abs/assistant', title: 'Assistant chat', time: {} },
+      isLoading: false,
+    })
+
+    renderAssistantSession('sess-asst-1')
+
+    await waitFor(() => {
+      expect(mocks.useSSE.mock.calls.at(-1)?.[1]).toBe('/abs/assistant')
+    })
+
+    expect(mocks.useMessages.mock.calls.at(-1)?.[2]).toBe('/abs/assistant')
+  })
+
   it('shows the loading state for a non-assistant session whose repo has not loaded', async () => {
     mocks.useSession.mockReturnValue({ data: undefined, isLoading: false })
 
