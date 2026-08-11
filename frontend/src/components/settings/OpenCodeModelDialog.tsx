@@ -675,7 +675,7 @@ export function OpenCodeModelDialog({
                 <FormField control={form.control} name="contextLimit" render={({ field }) => (
                   <FormItem>
                     <FormLabel>Context Limit</FormLabel>
-                    <FormControl><Input {...field} inputMode="numeric" placeholder="e.g., 200000" /></FormControl>
+                    <FormControl><Input {...field} inputMode="numeric" placeholder="e.g., 1000000" /></FormControl>
                     <FormMessage />
                   </FormItem>
                 )} />
@@ -754,7 +754,8 @@ export function OpenCodeModelDialog({
                     <FormLabel>Variants JSON</FormLabel>
                     <FormControl>
                       <Textarea {...field} className="min-h-[120px] font-mono text-xs" placeholder={`{
-  "fast": {}
+  "adaptive": {},
+  "disabled": {}
 }`} />
                     </FormControl>
                     <FormMessage />
