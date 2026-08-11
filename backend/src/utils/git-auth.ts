@@ -24,45 +24,6 @@ function normalizeGitCredentialUrl(host: string): URL | null {
   }
 }
 
-export function isSSHUrl(url: string): boolean {
-  return url.startsWith('git@') || url.startsWith('ssh://')
-}
-
-export function normalizeSSHUrl(url: string): string {
-  if (url.startsWith('ssh://')) {
-    return url
-  }
-
-  const match = url.match(/^git@([^:]+):(\d{1,5})\/(.+)$/)
-  if (match) {
-    const [, host, port, path] = match
-    const portNum = parseInt(port!, 10)
-    if (portNum > 0 && portNum <= 65535) {
-      return `ssh://git@${host}:${port}/${path}`
-    }
-  }
-  return url
-}
-
-export function extractHostFromSSHUrl(url: string): string | null {
-  if (url.startsWith('git@')) {
-    const match = url.match(/^git@([^:]+):/)
-    const host = match?.[1]
-    return host || null
-  }
-  if (url.startsWith('ssh://')) {
-    try {
-      const parsed = new URL(url)
-      const hostname = parsed.hostname ?? ''
-      const port = parsed.port ?? ''
-      return port ? `${hostname}:${port}` : parsed.hostname || null
-    } catch {
-      return null
-    }
-  }
-  return null
-}
-
 export function normalizeHost(host: string): string | null {
   const url = normalizeGitCredentialUrl(host)
   return url ? `${url.protocol}//${url.host}/` : null

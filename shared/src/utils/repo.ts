@@ -66,12 +66,58 @@ export function getRepoBaseDirectoryName(repo: { localPath: string; branch?: str
   return repo.localPath
 }
 
+export const SCP_STYLE_URL_PATTERN = /^([^@/:]+)@([^/:]+):(.+)$/
+const SCP_STYLE_URL_WITH_PORT_PATTERN = /^([^@/:]+)@([^/:]+):(\d{1,5})\/(.+\/.+)$/
+
+export function isScpStyleUrl(url: string): boolean {
+  return SCP_STYLE_URL_PATTERN.test(url.trim())
+}
+
+export function isSSHUrl(url: string): boolean {
+  return url.trim().startsWith('ssh://') || isScpStyleUrl(url)
+}
+
+export function normalizeSSHUrl(url: string): string {
+  if (url.startsWith('ssh://')) {
+    return url
+  }
+
+  const match = url.match(SCP_STYLE_URL_WITH_PORT_PATTERN)
+  if (match) {
+    const [, user, host, port, path] = match
+    const portNumber = Number(port)
+    if (portNumber > 0 && portNumber <= 65535) {
+      return `ssh://${user}@${host}:${port}/${path}`
+    }
+  }
+
+  return url
+}
+
+export function extractHostFromSSHUrl(url: string): string | null {
+  const scpMatch = url.match(SCP_STYLE_URL_PATTERN)
+  if (scpMatch) {
+    return scpMatch[2] || null
+  }
+
+  if (url.startsWith('ssh://')) {
+    try {
+      const parsed = new URL(url)
+      return parsed.port ? `${parsed.hostname}:${parsed.port}` : parsed.hostname || null
+    } catch {
+      return null
+    }
+  }
+
+  return null
+}
+
 export function getRepoNameFromUrl(url: string): string {
   const cleaned = trimTrailingChar(url.trim().replace(/\.git$/, ''), '/')
-  const scpMatch = cleaned.match(/^git@[^:]+:(.+)$/)
+  const scpMatch = cleaned.match(SCP_STYLE_URL_PATTERN)
 
   if (scpMatch) {
-    const parts = scpMatch[1]?.split('/') ?? []
+    const parts = scpMatch[3]?.split('/') ?? []
     return parts[parts.length - 1] || ''
   }
 
@@ -97,19 +143,20 @@ export function getRepoDisplayName(repo: {
 }
 
 export function normalizeRepoUrlForCompare(url: string): string {
-  let normalized = trimTrailingChar(url.trim().replace(/\.git$/, ''), '/')
+  const normalized = trimTrailingChar(normalizeSSHUrl(url.trim()).replace(/\.git$/, ''), '/')
+  const scpMatch = normalized.match(SCP_STYLE_URL_PATTERN)
+
+  if (scpMatch) {
+    return `https://${scpMatch[2]}/${scpMatch[3]}`.toLowerCase()
+  }
+
   const shorthandMatch = normalized.match(/^([^/]+)\/([^/]+)$/)
 
-  if (shorthandMatch && !normalized.includes('://') && !normalized.startsWith('git@')) {
+  if (shorthandMatch && !normalized.includes('://')) {
     return `https://github.com/${normalized}`.toLowerCase()
   }
 
-  const scpMatch = normalized.match(/^git@([^:]+):(.+)$/)
-  if (scpMatch) {
-    return `https://${scpMatch[1]}/${scpMatch[2]}`.toLowerCase()
-  }
-
-  if (normalized.startsWith('ssh://')) {
+  if (/^(?:ssh|https?):\/\//.test(normalized)) {
     try {
       const parsed = new URL(normalized)
       const path = parsed.pathname.replace(/^\/+/, '')
@@ -118,10 +165,6 @@ export function normalizeRepoUrlForCompare(url: string): string {
     } catch {
       return normalized.toLowerCase()
     }
-  }
-
-  if (normalized.startsWith('http://')) {
-    normalized = `https://${normalized.slice(7)}`
   }
 
   return normalized.toLowerCase()
