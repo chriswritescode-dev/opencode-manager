@@ -1,4 +1,7 @@
 import { useEffect, useState } from 'react'
+
+import { DEFAULT_THEME_PRESET, getAppThemeVariables } from '@/lib/opencodeThemes'
+
 import { useSettings } from './useSettings'
 
 export function useTheme() {
@@ -7,29 +10,38 @@ export function useTheme() {
 
   useEffect(() => {
     const theme = preferences?.theme || 'dark'
+    const themePreset = preferences?.themePreset || DEFAULT_THEME_PRESET
     const root = document.documentElement
 
-    const applyTheme = (isDark: boolean) => {
+    const applyTheme = (mode: 'light' | 'dark') => {
+      const isDark = mode === 'dark'
+
       if (isDark) {
         root.classList.add('dark')
-        setCurrentTheme('dark')
       } else {
         root.classList.remove('dark')
-        setCurrentTheme('light')
       }
+
+      Object.entries(getAppThemeVariables(themePreset, mode)).forEach(([name, value]) => {
+        root.style.setProperty(name, value)
+      })
+
+      root.dataset.themePreset = themePreset
+      root.dataset.colorScheme = mode
+      setCurrentTheme(mode)
     }
 
     if (theme === 'system') {
       const mediaQuery = window.matchMedia('(prefers-color-scheme: dark)')
-      applyTheme(mediaQuery.matches)
+      applyTheme(mediaQuery.matches ? 'dark' : 'light')
 
-      const listener = (e: MediaQueryListEvent) => applyTheme(e.matches)
+      const listener = (e: MediaQueryListEvent) => applyTheme(e.matches ? 'dark' : 'light')
       mediaQuery.addEventListener('change', listener)
       return () => mediaQuery.removeEventListener('change', listener)
     } else {
-      applyTheme(theme === 'dark')
+      applyTheme(theme === 'dark' ? 'dark' : 'light')
     }
-  }, [preferences?.theme])
+  }, [preferences?.theme, preferences?.themePreset])
 
   return currentTheme
 }

@@ -26,7 +26,7 @@ export function ContextUsageIndicator({ opcodeUrl, sessionID, directory, isConne
   }
 
   if (isReconnecting) {
-    return <span className="text-xs text-yellow-700 dark:text-yellow-400 font-medium">Reconnecting...</span>
+    return <span className="text-xs font-medium text-warning">Reconnecting...</span>
   }
 
   if (!isConnected) {

@@ -89,7 +89,7 @@ export function SessionTodoDisplay({ sessionID }: SessionTodoDisplayProps) {
           </span>
           <div className="flex-1 h-1.5 bg-secondary rounded-full overflow-hidden">
             <div
-              className="h-full bg-green-500 transition-all duration-300"
+              className="h-full bg-success transition-all duration-300"
               style={{ width: `${stats.percentage}%` }}
             />
           </div>
@@ -117,7 +117,7 @@ export function SessionTodoDisplay({ sessionID }: SessionTodoDisplayProps) {
         </span>
         <div className="flex-1 h-1.5 bg-secondary rounded-full overflow-hidden">
           <div
-            className="h-full bg-green-500 transition-all duration-300"
+            className="h-full bg-success transition-all duration-300"
             style={{ width: `${stats.percentage}%` }}
           />
         </div>

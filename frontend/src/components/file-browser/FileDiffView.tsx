@@ -93,25 +93,25 @@ const statusConfig: Record<
   modified: {
     icon: FileEdit,
     color: GIT_STATUS_COLORS.modified,
-    bgColor: "bg-amber-500/10",
+    bgColor: "bg-warning/10",
     label: GIT_STATUS_LABELS.modified,
   },
   added: {
     icon: FilePlus,
     color: GIT_STATUS_COLORS.added,
-    bgColor: "bg-emerald-500/10",
+    bgColor: "bg-success/10",
     label: GIT_STATUS_LABELS.added,
   },
   deleted: {
     icon: FileX,
     color: GIT_STATUS_COLORS.deleted,
-    bgColor: "bg-rose-500/10",
+    bgColor: "bg-destructive/10",
     label: GIT_STATUS_LABELS.deleted,
   },
   renamed: {
     icon: FileText,
     color: GIT_STATUS_COLORS.renamed,
-    bgColor: "bg-blue-500/10",
+    bgColor: "bg-info/10",
     label: GIT_STATUS_LABELS.renamed,
   },
   untracked: {
@@ -123,7 +123,7 @@ const statusConfig: Record<
   copied: {
     icon: FileText,
     color: GIT_STATUS_COLORS.copied,
-    bgColor: "bg-emerald-500/10",
+    bgColor: "bg-success/10",
     label: GIT_STATUS_LABELS.copied,
   },
 };
@@ -155,16 +155,16 @@ function DiffLineComponent({
 
   const bgClass =
     line.type === "add"
-      ? "bg-emerald-500/10"
+      ? "bg-success/10"
       : line.type === "remove"
-        ? "bg-rose-500/10"
+        ? "bg-destructive/10"
         : "";
 
   const textClass =
     line.type === "add"
-      ? "text-emerald-700 dark:text-emerald-300"
+      ? "text-success"
       : line.type === "remove"
-        ? "text-rose-700 dark:text-rose-300"
+        ? "text-destructive"
         : "text-foreground";
 
   const lineNumber = line.newLineNumber ?? line.oldLineNumber;
@@ -172,14 +172,14 @@ function DiffLineComponent({
 
   return (
     <div
-      className={cn(
-        "flex font-mono text-sm border-l-2 transition-colors min-w-0",
-        bgClass,
-        line.type === "add" && "border-l-emerald-500",
-        line.type === "remove" && "border-l-rose-500",
-        line.type === "context" && "border-l-transparent",
-        isClickable && "cursor-pointer hover:bg-accent/30",
-      )}
+        className={cn(
+          "flex font-mono text-sm border-l-2 transition-colors min-w-0",
+          bgClass,
+          line.type === "add" && "border-l-success",
+          line.type === "remove" && "border-l-destructive",
+          line.type === "context" && "border-l-transparent",
+          isClickable && "cursor-pointer hover:bg-accent/30",
+        )}
       onClick={() =>
         isClickable && lineNumber !== undefined && onLineClick(lineNumber)
       }
@@ -196,10 +196,10 @@ function DiffLineComponent({
       )}
       <div className="w-6 flex-shrink-0 flex items-center justify-center bg-muted/20">
         {line.type === "add" && (
-          <Plus className="w-3 h-3 text-emerald-600 dark:text-emerald-400" />
+          <Plus className="w-3 h-3 text-success" />
         )}
         {line.type === "remove" && (
-          <Minus className="w-3 h-3 text-rose-600 dark:text-rose-400" />
+          <Minus className="w-3 h-3 text-destructive" />
         )}
       </div>
       <pre
@@ -325,8 +325,8 @@ export function FileDiffView({
           </span>
           {!diffData.isBinary && (
             <>
-              <span className="text-green-500">+{diffData.additions}</span>
-              <span className="text-red-500">-{diffData.deletions}</span>
+              <span className="text-success">+{diffData.additions}</span>
+              <span className="text-destructive">-{diffData.deletions}</span>
             </>
           )}
           {diffData.diff && (

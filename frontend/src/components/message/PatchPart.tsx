@@ -38,7 +38,7 @@ export function PatchPart({ part, onFileClick }: PatchPartProps) {
         {displayedFiles.map((file, index) => (
           <div
             key={index}
-            className="text-xs font-mono text-blue-600 dark:text-blue-400 hover:underline cursor-pointer"
+            className="cursor-pointer text-xs font-mono text-info hover:underline"
             onClick={() => onFileClick?.(file)}
           >
             {getRelativePath(file)}
