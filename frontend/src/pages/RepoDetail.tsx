@@ -217,7 +217,7 @@ export function RepoDetail() {
             onClick={() => handleCreateSession()}
             disabled={!opcodeUrl || createSessionMutation.isPending}
             size="sm"
-            className="sm:hidden h-10 w-10 p-0 bg-blue-600 hover:bg-blue-700 text-white transition-all duration-200 hover:scale-105"
+            className="sm:hidden h-10 w-10 p-0 bg-primary hover:bg-primary-hover text-primary-foreground transition-all duration-200 hover:scale-105"
           >
             <Plus className="w-5 h-5" />
           </Button>
@@ -351,7 +351,7 @@ function CreateWorkspaceDialog({ open, onOpenChange, onCreate, isCreating }: Cre
           <Button variant="outline" onClick={() => onOpenChange(false)} disabled={isCreating}>
             Cancel
           </Button>
-          <Button onClick={() => { void onCreate(); }} disabled={isCreating} className="bg-blue-600 hover:bg-blue-700 text-white">
+          <Button onClick={() => { void onCreate(); }} disabled={isCreating} className="bg-primary hover:bg-primary-hover text-primary-foreground">
             {isCreating ? (
               <>
                 <Loader2 className="h-4 w-4 mr-2 animate-spin" />
