@@ -20,6 +20,7 @@ export function createBrowserEventStreamTransport(): EventStreamTransport {
 
     async post(path: string, body: unknown): Promise<boolean> {
       const response = await fetch(path, {
+        credentials: 'include',
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(body),

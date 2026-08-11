@@ -117,6 +117,7 @@ export const FilePreview = memo(function FilePreview({ file, hideHeader = false,
 
   const saveFileContent = useCallback(async (content: string) => {
     const response = await fetch(getFileApiUrl(file.path), {
+      credentials: 'include',
       method: 'PUT',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ type: 'file', content }),
