@@ -11,7 +11,7 @@ import { Progress } from '@/components/ui/progress'
 import { FolderOpen, Upload, RefreshCw, X } from 'lucide-react'
 import type { FileInfo } from '@/types/files'
 import { useMobile } from '@/hooks/useMobile'
-import { getFileApiUrl, useFile } from '@/api/files'
+import { fetchFileInfo, uploadFileEntry, writeFileEntry, deleteFileEntry, renameFileEntry, useFile } from '@/api/files'
 
 export interface FileBrowserHandle {
   goBack: () => void
@@ -169,12 +169,7 @@ useEffect(() => {
     setError(null)
     
     try {
-      const response = await fetch(getFileApiUrl(path))
-      if (!response.ok) {
-        throw new Error(`Failed to load files: ${response.statusText}`)
-      }
-      
-      const data = await response.json()
+      const data = await fetchFileInfo(path)
       setFiles(data)
       setCurrentPath(path)
       onDirectoryLoad?.({ workspaceRoot: data.workspaceRoot, currentPath: path })
@@ -251,12 +246,7 @@ useEffect(() => {
     // Fetch the full file content when selecting a file
     setLoading(true)
     try {
-      const response = await fetch(getFileApiUrl(file.path))
-      if (!response.ok) {
-        throw new Error(`Failed to load file: ${response.statusText}`)
-      }
-      
-      const fullFileData = await response.json()
+      const fullFileData = await fetchFileInfo(file.path)
       setSelectedFile(fullFileData)
       onFileSelect?.(fullFileData)
       
@@ -293,16 +283,7 @@ useEffect(() => {
     formData.append('relativePath', item.relativePath)
     
     try {
-      const response = await fetch(getFileApiUrl(currentPath), {
-        method: 'POST',
-        body: formData,
-      })
-      
-      if (!response.ok) {
-        const errorData = await response.json().catch(() => ({}))
-        return errorData.error || `Upload failed: ${response.statusText}`
-      }
-      
+      await uploadFileEntry(currentPath, formData)
       return null
     } catch (err) {
       return err instanceof Error ? err.message : 'Upload failed'
@@ -363,16 +344,8 @@ useEffect(() => {
 
   const handleCreateFile = useCallback(async (name: string, type: 'file' | 'folder') => {
     try {
-      const response = await fetch(getFileApiUrl([currentPath, name].filter(Boolean).join('/')), {
-        method: 'PUT',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ type, content: type === 'file' ? '' : undefined }),
-      })
-      
-      if (!response.ok) {
-        throw new Error(`Create failed: ${response.statusText}`)
-      }
-      
+      await writeFileEntry([currentPath, name].filter(Boolean).join('/'), type, type === 'file' ? '' : undefined)
+
       await loadFiles(currentPath)
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Create failed')
@@ -381,14 +354,8 @@ useEffect(() => {
 
   const handleDelete = useCallback(async (path: string) => {
     try {
-      const response = await fetch(getFileApiUrl(path), {
-        method: 'DELETE',
-      })
-      
-      if (!response.ok) {
-        throw new Error(`Delete failed: ${response.statusText}`)
-      }
-      
+      await deleteFileEntry(path)
+
       await loadFiles(currentPath)
       setSelectedFile(null)
     } catch (err) {
@@ -398,16 +365,8 @@ useEffect(() => {
 
   const handleRename = useCallback(async (oldPath: string, newPath: string) => {
     try {
-      const response = await fetch(getFileApiUrl(oldPath), {
-        method: 'PATCH',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ newPath }),
-      })
-      
-      if (!response.ok) {
-        throw new Error(`Rename failed: ${response.statusText}`)
-      }
-      
+      await renameFileEntry(oldPath, newPath)
+
       await loadFiles(currentPath)
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Rename failed')

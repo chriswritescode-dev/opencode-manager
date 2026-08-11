@@ -1,6 +1,7 @@
 import { useState, useRef, useCallback, useEffect, type ReactNode } from 'react'
 import { useSettings } from '@/hooks/useSettings'
-import { API_BASE_URL } from '@/config'
+import { ttsApi } from '@/api/tts'
+import { FetchError } from '@/api/fetchWrapper'
 import { TTSContext, type TTSState, type TTSConfig } from './tts-context'
 import { sanitizeForTTS } from '@/lib/utils'
 import { getWebSpeechSynthesizer, isWebSpeechSupported } from '@/lib/webSpeechSynthesizer'
@@ -114,42 +115,34 @@ export function TTSProvider({ children }: TTSProviderProps) {
     if (stoppedRef.current) return null
 
     try {
-      const response = await fetch(`${API_BASE_URL}/api/tts/synthesize`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ text }),
-        signal,
-      })
+      const blob = await ttsApi.synthesize(text, 'default', signal)
 
       if (stoppedRef.current) return null
 
-      if (!response.ok) {
-        let errorMessage = 'TTS request failed'
-        try {
-          const errorData = await response.json()
-          errorMessage = errorData.error || errorData.details || errorMessage
-        } catch {
-          if (response.status === 401) errorMessage = 'Invalid API key'
-          else if (response.status === 429) errorMessage = 'Rate limit exceeded'
-          else if (response.status >= 500) errorMessage = 'Service unavailable'
-        }
-        throw new Error(errorMessage)
-      }
-
-      const contentType = response.headers.get('content-type')
-      if (!contentType?.includes('audio')) {
+      if (!blob.type.includes('audio')) {
         throw new Error('Invalid response from TTS service')
       }
 
-      const blob = await response.blob()
       if (blob.size === 0) {
         throw new Error('Empty audio response')
       }
 
       return blob
     } catch (err) {
-      if (err instanceof Error && err.name === 'AbortError') {
+      if (signal?.aborted) {
         return null
+      }
+      if (err instanceof FetchError) {
+        const status = err.statusCode ?? 0
+        const backendMessage = err.message
+        const isFallback = backendMessage === 'Request failed' || backendMessage === 'An error occurred' || !backendMessage
+        let errorMessage = backendMessage
+        if (isFallback) {
+          if (status === 401) errorMessage = 'Invalid API key'
+          else if (status === 429) errorMessage = 'Rate limit exceeded'
+          else if (status >= 500) errorMessage = 'Service unavailable'
+        }
+        throw new Error(errorMessage)
       }
       throw err
     }

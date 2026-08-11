@@ -157,10 +157,7 @@ export function useSTT(userId = 'default') {
         setTranscript((prev) => appendTranscriptSegment(prev, result.text))
         setInterimTranscript('')
       } catch (err) {
-        if (err instanceof Error && (
-          err.name === 'CanceledError' ||
-          (err instanceof FetchError && (err.code === 'CANCELED' || err.statusCode === 499))
-        )) {
+        if (err instanceof FetchError && (err.code === 'CANCELED' || err.statusCode === 499)) {
           return
         }
         

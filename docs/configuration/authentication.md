@@ -177,6 +177,7 @@ PASSKEY_ORIGIN=http://192.168.1.244:5003
 1. Check AUTH_SECRET is persistent across restarts
 2. Verify cookies aren't being blocked
 3. Check AUTH_SECURE_COOKIES setting
+4. If accessing from a different site (cross-site, not just cross-origin), note that CORS alone is not sufficient: the auth config in `backend/src/auth/index.ts` sets no `sameSite` override, so better-auth's `SameSite=Lax` default prevents the session cookie from being attached to cross-site requests regardless of `credentials: 'include'` on the client. The app is designed same-origin (`VITE_API_URL` defaults to `''`); cross-site access requires changing `sameSite` to `'none'` with `secure: true`, which is an open question rather than a supported configuration.
 
 ### Passkey Not Working
 

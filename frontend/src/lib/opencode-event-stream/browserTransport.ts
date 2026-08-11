@@ -1,3 +1,4 @@
+import { fetchWrapperVoid } from '@/api/fetchWrapper'
 import type { EventStreamConnection, EventStreamTransport, EventStreamTransportHandlers } from './types'
 
 export function createBrowserEventStreamTransport(): EventStreamTransport {
@@ -19,13 +20,16 @@ export function createBrowserEventStreamTransport(): EventStreamTransport {
     },
 
     async post(path: string, body: unknown): Promise<boolean> {
-      const response = await fetch(path, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(body),
-      })
-
-      return response.ok
+      try {
+        await fetchWrapperVoid(path, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify(body),
+        })
+        return true
+      } catch {
+        return false
+      }
     },
   }
 }
