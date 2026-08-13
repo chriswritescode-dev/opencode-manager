@@ -20,6 +20,8 @@ import { createScheduleRoutes } from './schedules'
 import type { GitAuthService } from '../services/git-auth'
 import { ScheduleService } from '../services/schedules'
 import { ensureAssistantMode, getAssistantModeStatus, buildAssistantRepo } from '../services/assistant-mode'
+import { opencodeServerManager } from '../services/opencode-single-server'
+import { resolveSandboxWorkDirectory } from '../services/sandbox/command'
 import path from 'path'
 
 function resolveRepo(database: Database, id: number): Repo | null {
@@ -314,7 +316,33 @@ app.get('/', async (c) => {
         return c.json({ error: body || 'Failed to create workspace' }, response.status as ContentfulStatusCode)
       }
 
-      return c.json(body ? JSON.parse(body) : { success: true })
+      let workspace: unknown
+      try {
+        workspace = body ? JSON.parse(body) : { success: true }
+      } catch {
+        return c.json({ error: 'Failed to create workspace' }, 500)
+      }
+
+      const workspaceRecord = workspace as { id?: unknown; directory?: unknown } | null
+      if (
+        workspaceRecord &&
+        typeof workspaceRecord.directory === 'string' &&
+        opencodeServerManager.isSandboxEnforced() &&
+        (await resolveSandboxWorkDirectory(workspaceRecord.directory)) === null
+      ) {
+        if (typeof workspaceRecord.id === 'string' && workspaceRecord.id.length > 0) {
+          await openCodeClient.forward({
+            method: 'DELETE',
+            path: `/experimental/workspace/${encodeURIComponent(workspaceRecord.id)}`,
+            directory: repo.fullPath,
+          }).catch(() => {})
+        }
+        return c.json({
+          error: 'OpenCode worktrees are not available while sandboxing is enabled because they are created outside the sandboxed project roots',
+        }, 400)
+      }
+
+      return c.json(workspace)
     } catch (error: unknown) {
       logger.error('Failed to create workspace:', error)
       return c.json({ error: getErrorMessage(error) }, 500)

@@ -77,18 +77,26 @@ export async function executeCommand(
       }
     })
 
-    proc.on('close', (code: number | null) => {
+    proc.on('close', (code: number | null, signal: NodeJS.Signals | null) => {
       if (isResolved) return
       
       isResolved = true
       if (timeoutId) clearTimeout(timeoutId)
-      
+
+      const terminatedBySignal = code === null && signal !== null
+      const exitCode = code === null ? 1 : code
+      const failureDetail = terminatedBySignal ? `signal ${signal}` : `code ${code}`
+
       if (options.ignoreExitCode) {
-        resolve({ exitCode: code || 0, stdout, stderr })
+        resolve({
+          exitCode,
+          stdout,
+          stderr: terminatedBySignal ? `${stderr}Command terminated by signal ${signal}` : stderr,
+        })
       } else if (code === 0) {
         resolve(stdout)
       } else {
-        const error = new Error(`Command failed with code ${code}: ${stderr || stdout}`)
+        const error = new Error(`Command failed with ${failureDetail}: ${stderr || stdout}`)
         if (!options.silent) {
           logger.error(`Command failed: ${args.join(' ')}`, error)
         }

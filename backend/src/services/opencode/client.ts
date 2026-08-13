@@ -39,8 +39,10 @@ export interface OpenCodeClient {
   authenticateMcp(serverName: string, directory?: string): Promise<Response>
 }
 
+export type OpenCodeClientHost = string | (() => string)
+
 export interface FetchOpenCodeClientConfig {
-  baseUrl: string
+  baseUrl: OpenCodeClientHost
   basicAuth: string | null
   passwordResolver?: OpenCodePasswordResolver
   fetchFn?: typeof fetch
@@ -53,6 +55,10 @@ export class FetchOpenCodeClient implements OpenCodeClient {
     return this.config.fetchFn ?? fetch
   }
 
+  private resolveBaseUrl(): string {
+    return typeof this.config.baseUrl === 'function' ? this.config.baseUrl() : this.config.baseUrl
+  }
+
   private async getBasicAuth(): Promise<string> {
     if (!this.config.passwordResolver) {
       return this.config.basicAuth ?? ''
@@ -62,7 +68,7 @@ export class FetchOpenCodeClient implements OpenCodeClient {
   }
 
   private async request(req: ForwardRequest): Promise<Response> {
-    const url = new URL(this.config.baseUrl + req.path)
+    const url = new URL(this.resolveBaseUrl() + req.path)
 
     if (req.directory) {
       url.searchParams.set('directory', req.directory)
@@ -248,9 +254,20 @@ export class FetchOpenCodeClient implements OpenCodeClient {
   }
 }
 
-export function createOpenCodeClient(passwordOverride?: string | OpenCodePasswordResolver): OpenCodeClient {
-  const host = ENV.OPENCODE.HOST === '0.0.0.0' ? '127.0.0.1' : ENV.OPENCODE.HOST
-  const baseUrl = `http://${host}:${ENV.OPENCODE.PORT}`
+function formatOpenCodeHostForUrl(host: string): string {
+  return host.includes(':') ? `[${host}]` : host
+}
+
+export function createOpenCodeClient(
+  passwordOverride?: string | OpenCodePasswordResolver,
+  host?: OpenCodeClientHost,
+): OpenCodeClient {
+  const resolveConfiguredHost = typeof host === 'function' ? host : () => (host ?? ENV.OPENCODE.HOST)
+  const baseUrl: OpenCodeClientHost = () => {
+    const configuredHost = resolveConfiguredHost()
+    const normalized = configuredHost === '0.0.0.0' ? '127.0.0.1' : configuredHost
+    return `http://${formatOpenCodeHostForUrl(normalized)}:${ENV.OPENCODE.PORT}`
+  }
   const passwordResolver = typeof passwordOverride === 'function' ? passwordOverride : undefined
   const password = typeof passwordOverride === 'string' ? passwordOverride : ENV.OPENCODE.SERVER_PASSWORD
   const basicAuth = getOpenCodeBasicAuthHeader(password)

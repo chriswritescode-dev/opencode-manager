@@ -724,3 +724,31 @@ describe('installAssistantWorkspace', () => {
     expect(result.defaultAgent?.created).toBe(false)
   })
 })
+
+describe('assistant mode directory contract', () => {
+  it('resolves the assistant directory from the shared sandbox mount owner', async () => {
+    const ws = await createTempAssistantWorkspace()
+    try {
+      const { getAssistantModePath, getAssistantOpenCodeDir } = await import('@opencode-manager/shared/config/env')
+      const { getAssistantModeDirectory } = await import('../../src/services/assistant-mode')
+      const { sandboxSecretMaskPath } = await import('../../src/services/sandbox/command')
+
+      expect(getAssistantModeDirectory()).toBe(getAssistantModePath())
+      expect(sandboxSecretMaskPath()).toBe(getAssistantOpenCodeDir())
+      expect(getAssistantOpenCodeDir()).toBe(path.join(ws.assistantDir, '.opencode'))
+    } finally {
+      await ws.cleanup()
+    }
+  })
+
+  it('keeps the internal token underneath the sandboxed assistant .opencode directory', async () => {
+    const ws = await createTempAssistantWorkspace()
+    try {
+      const { getAssistantOpenCodeDir } = await import('@opencode-manager/shared/config/env')
+      const tokenPath = path.join(ws.assistantDir, '.opencode/internal-token')
+      expect(tokenPath).toContain(getAssistantOpenCodeDir())
+    } finally {
+      await ws.cleanup()
+    }
+  })
+})

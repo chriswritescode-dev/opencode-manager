@@ -198,6 +198,7 @@ export const settingsApi = {
       tag: string
       name: string
       publishedAt: string
+      installable: boolean
     }>
     currentVersion: string | null
   }> => {

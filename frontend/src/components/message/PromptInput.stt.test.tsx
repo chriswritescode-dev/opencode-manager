@@ -29,7 +29,12 @@ const mocks = vi.hoisted(() => ({
   useSessionAgentStore: vi.fn(),
   useSendErrorStore: vi.fn(),
   useSettings: vi.fn(),
+  useServerHealth: vi.fn(),
   EventContext: vi.fn(),
+}))
+
+vi.mock('@/hooks/useServerHealth', () => ({
+  useServerHealth: mocks.useServerHealth,
 }))
 
 vi.mock('@/hooks/useSTT', () => ({
@@ -165,6 +170,14 @@ describe('PromptInput STT Gesture Tests', () => {
     mocks.sendPromptPending.mockReturnValue(false)
 
     mocks.useMobile.mockReturnValue(true)
+    mocks.useServerHealth.mockReturnValue({
+      data: { sandbox: { available: true, enforced: false } },
+      isLoading: false,
+      error: null,
+      refetch: vi.fn(),
+      restartMutation: { mutate: vi.fn(), mutateAsync: vi.fn(), isPending: false },
+      rollbackMutation: { mutate: vi.fn(), mutateAsync: vi.fn(), isPending: false },
+    } as ReturnType<typeof import('@/hooks/useServerHealth').useServerHealth>)
     mocks.useSTT.mockReturnValue({
       isRecording: false,
       isProcessing: false,

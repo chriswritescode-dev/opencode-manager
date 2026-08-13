@@ -33,6 +33,7 @@ vi.mock('../../src/services/opencode-single-server', () => ({
   opencodeServerManager: {
     clearStartupError: vi.fn(),
     restart: vi.fn().mockResolvedValue(undefined),
+    isSandboxEnforced: vi.fn(),
   },
 }))
 
@@ -53,6 +54,7 @@ const mockScheduleService = {} as ScheduleService
 describe('Repo Routes', () => {
   beforeEach(() => {
     vi.clearAllMocks()
+    vi.mocked(opencodeServerManager.isSandboxEnforced).mockReturnValue(false)
   })
 
   describe('POST /:id/access', () => {
@@ -318,6 +320,64 @@ describe('Repo Routes', () => {
         path: '/instance/dispose',
         directory: '/tmp/test-repo',
       })
+    })
+  })
+
+  describe('POST /:id/workspaces', () => {
+    const mockRepo = {
+      id: 1,
+      repoUrl: 'https://github.com/test/repo',
+      localPath: 'repos/test-repo',
+      fullPath: '/tmp/test-repo',
+      sourcePath: '/tmp/test-repo/.git',
+      branch: 'main',
+      defaultBranch: 'main',
+      cloneStatus: 'ready' as const,
+      clonedAt: Date.now(),
+    }
+
+    it('refuses and cleans up a workspace created outside the project roots while sandboxing is enforced', async () => {
+      vi.mocked(db.getRepoById).mockReturnValue(mockRepo)
+      vi.mocked(opencodeServerManager.isSandboxEnforced).mockReturnValue(true)
+
+      const forward = vi.fn(async () =>
+        new Response(
+          JSON.stringify({ id: 'wrk_outside', directory: '/workspace/.opencode/state/workspaces/wrk_outside', branch: null }),
+          { status: 200 },
+        ),
+      )
+      const app = createRepoRoutes(mockDb, mockGitAuthService, mockScheduleService, createStubOpenCodeClient({ forward }))
+      const res = await app.request('/1/workspaces', { method: 'POST' })
+
+      expect(res.status).toBe(400)
+      const body = await res.json() as { error: string }
+      expect(body.error).toContain('not available while sandboxing is enabled')
+      expect(forward).toHaveBeenCalledWith(
+        expect.objectContaining({
+          method: 'DELETE',
+          path: '/experimental/workspace/wrk_outside',
+          directory: '/tmp/test-repo',
+        }),
+      )
+    })
+
+    it('allows workspace creation when sandboxing is not enforced', async () => {
+      vi.mocked(db.getRepoById).mockReturnValue(mockRepo)
+      vi.mocked(opencodeServerManager.isSandboxEnforced).mockReturnValue(false)
+
+      const forward = vi.fn(async () =>
+        new Response(
+          JSON.stringify({ id: 'wrk_ok', directory: '/workspace/.opencode/state/workspaces/wrk_ok', branch: null }),
+          { status: 200 },
+        ),
+      )
+      const app = createRepoRoutes(mockDb, mockGitAuthService, mockScheduleService, createStubOpenCodeClient({ forward }))
+      const res = await app.request('/1/workspaces', { method: 'POST' })
+
+      expect(res.status).toBe(200)
+      const body = await res.json() as { id: string }
+      expect(body.id).toBe('wrk_ok')
+      expect(forward).not.toHaveBeenCalledWith(expect.objectContaining({ method: 'DELETE' }))
     })
   })
 })

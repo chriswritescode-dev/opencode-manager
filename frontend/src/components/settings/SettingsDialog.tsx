@@ -6,6 +6,7 @@ import { OpenCodeConfigManager } from '@/components/settings/OpenCodeConfigManag
 import { OpenCodeServerAuthSettings } from '@/components/settings/OpenCodeServerAuthSettings'
 import { ManagerTokenSettings } from '@/components/settings/ManagerTokenSettings'
 import { ServerEnvVarsSettings } from '@/components/settings/ServerEnvVarsSettings'
+import { SandboxSettings } from '@/components/settings/SandboxSettings'
 import { ServerHealthStatus } from '@/components/settings/ServerHealthStatus'
 import { ProviderSettings } from '@/components/settings/ProviderSettings'
 import { AccountSettings } from '@/components/settings/AccountSettings'
@@ -178,6 +179,7 @@ export function SettingsDialog() {
                       <ManagerTokenSettings isOpen={authSectionsOpen} onToggle={toggleAuthSections} />
                     </div>
                     <ServerEnvVarsSettings />
+                    <SandboxSettings />
                     <OpenCodeConfigManager hideHealthStatus />
                   </div>
                 </TabsContent>
@@ -249,6 +251,7 @@ export function SettingsDialog() {
                     <OpenCodeServerAuthSettings />
                     <ManagerTokenSettings />
                     <ServerEnvVarsSettings />
+                    <SandboxSettings />
                     <OpenCodeConfigManager hideHealthStatus />
                   </div>
                 )}

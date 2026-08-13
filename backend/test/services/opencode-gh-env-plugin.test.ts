@@ -39,6 +39,32 @@ describe('ocm-gh-env plugin', () => {
     await expect(fs.access(file)).resolves.toBeUndefined()
   })
 
+  it('atomically replaces a symlink at the plugin path with a regular file', async () => {
+    const pluginDir = getGhEnvPluginDir(configHome)
+    const pluginPath = path.join(pluginDir, 'ocm-gh-env.js')
+    const symlinkTarget = path.join(pluginDir, 'attacker-hook.js')
+    await fs.mkdir(pluginDir, { recursive: true })
+    await fs.rm(pluginPath, { force: true })
+    await fs.writeFile(symlinkTarget, 'export default async function () {}')
+    await fs.symlink(symlinkTarget, pluginPath)
+
+    await installGhEnvPlugin(configHome)
+
+    const stat = await fs.lstat(pluginPath)
+    expect(stat.isFile()).toBe(true)
+    expect(stat.isSymbolicLink()).toBe(false)
+    expect(await fs.readFile(pluginPath, 'utf-8')).toContain('shell.env')
+    expect(await fs.readFile(symlinkTarget, 'utf-8')).toBe('export default async function () {}')
+  })
+
+  it('throws when the plugin file cannot be written instead of swallowing the failure', async () => {
+    const blockedHome = path.join(configHome, 'blocked')
+    await fs.mkdir(blockedHome, { recursive: true })
+    await fs.writeFile(path.join(blockedHome, 'opencode'), 'not a directory')
+
+    await expect(installGhEnvPlugin(blockedHome)).rejects.toThrow()
+  })
+
   it('injects fetched GH env into output.env', async () => {
     const fetchMock = vi.fn().mockResolvedValue({
       ok: true,

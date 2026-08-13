@@ -43,6 +43,7 @@ nav:
     - Speech-to-Text: features/stt.md
     - Push Notifications: features/notifications.md
     - OpenCode Server Health: features/server-health.md
+    - Agent Sandboxing: features/sandboxing.md
     - Mobile & PWA: features/mobile.md
   - Configuration:
     - Environment Variables: configuration/environment.md

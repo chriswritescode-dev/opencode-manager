@@ -6,6 +6,7 @@ import { Button } from '@/components/ui/button'
 import { settingsApi } from '@/api/settings'
 import { showToast } from '@/lib/toast'
 import { invalidateConfigCaches, updateOpenCodeVersionCaches } from '@/lib/queryInvalidation'
+import { useServerHealth } from '@/hooks/useServerHealth'
 
 interface VersionSelectDialogProps {
   open: boolean
@@ -14,6 +15,8 @@ interface VersionSelectDialogProps {
 
 export function VersionSelectDialog({ open, onOpenChange }: VersionSelectDialogProps) {
   const queryClient = useQueryClient()
+  const { data: health } = useServerHealth()
+  const sandboxEnforced = health?.sandbox?.enforced === true
   const [selectedVersion, setSelectedVersion] = useState<string | null>(null)
 
   const { data, isLoading, error } = useQuery({
@@ -22,6 +25,9 @@ export function VersionSelectDialog({ open, onOpenChange }: VersionSelectDialogP
     enabled: open,
     staleTime: 60000,
   })
+
+  const selectedRelease = data?.versions.find((release) => release.version === selectedVersion)
+  const selectedInstallable = selectedRelease?.installable === true
 
   const installMutation = useMutation({
     mutationFn: (version: string) => settingsApi.installOpenCodeVersion(version),
@@ -95,6 +101,13 @@ export function VersionSelectDialog({ open, onOpenChange }: VersionSelectDialogP
 
         {data && (
           <>
+            {sandboxEnforced && (
+              <div className="rounded-lg border border-amber-500/40 bg-amber-500/10 p-3 text-sm text-amber-600 dark:text-amber-400 mb-3">
+                While agent sandboxing is enabled, only verified OpenCode versions can be installed. Unverified
+                versions are disabled. Disable Agent Sandboxing in Settings and restart the OpenCode server to
+                install other versions.
+              </div>
+            )}
             <div className="h-[300px] overflow-y-auto pr-2">
               <div className="space-y-2">
                 {data.versions.map((release) => {
@@ -105,13 +118,15 @@ export function VersionSelectDialog({ open, onOpenChange }: VersionSelectDialogP
                     <button
                       key={release.version}
                       onClick={() => setSelectedVersion(isCurrent ? null : release.version)}
-                      disabled={isCurrent || installMutation.isPending}
+                      disabled={isCurrent || installMutation.isPending || !release.installable}
                       className={`w-full text-left p-3 rounded-lg border transition-colors ${
                         isSelected
                           ? 'border-primary bg-primary/10'
                           : isCurrent
                             ? 'border-green-500/50 bg-green-500/10 cursor-default'
-                            : 'border-border hover:border-primary/50 hover:bg-muted/50'
+                            : !release.installable
+                              ? 'border-border opacity-50 cursor-not-allowed'
+                              : 'border-border hover:border-primary/50 hover:bg-muted/50'
                       }`}
                     >
                       <div className="flex items-center justify-between">
@@ -121,6 +136,11 @@ export function VersionSelectDialog({ open, onOpenChange }: VersionSelectDialogP
                             {isCurrent && (
                               <span className="text-xs px-1.5 py-0.5 rounded bg-green-500/20 text-green-600 dark:text-green-400">
                                 Current
+                              </span>
+                            )}
+                            {!release.installable && (
+                              <span className="text-xs px-1.5 py-0.5 rounded bg-muted text-muted-foreground">
+                                Unverified
                               </span>
                             )}
                           </div>
@@ -146,7 +166,7 @@ export function VersionSelectDialog({ open, onOpenChange }: VersionSelectDialogP
               </Button>
               <Button
                 onClick={handleInstall}
-                disabled={!selectedVersion || installMutation.isPending}
+                disabled={!selectedVersion || installMutation.isPending || !selectedInstallable}
                 className="min-w-[120px]"
               >
                 {installMutation.isPending ? (

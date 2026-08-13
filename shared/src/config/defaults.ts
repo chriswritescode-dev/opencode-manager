@@ -31,6 +31,17 @@ export const DEFAULTS = {
     AUTH_FILE: '.opencode/state/opencode/auth.json',
   },
 
+  SANDBOX: {
+    MSB_PATH: 'msb',
+    IMAGE: 'node:24',
+    MEMORY: '4G',
+    CPUS: 2,
+    EXEC_USER: 'node',
+    NET: 'public',
+    START_TIMEOUT_MS: 300000,
+    EXEC_TIMEOUT_MS: 600000,
+  },
+
   TIMEOUTS: {
     PROCESS_START_WAIT_MS: 2000,
     PROCESS_VERIFY_WAIT_MS: 1000,

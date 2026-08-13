@@ -5,6 +5,8 @@ import { opencodeServerManager } from '../services/opencode-single-server'
 import type { OpenCodeSupervisor } from '../services/opencode-supervisor'
 import { compareVersions } from '../utils/version-utils'
 import { githubFetch } from '../utils/github'
+import { logger } from '../utils/logger'
+import { SandboxRuntimeService } from '../services/sandbox/runtime'
 
 const GITHUB_REPO_OWNER = 'chriswritescode-dev'
 const GITHUB_REPO_NAME = 'opencode-manager'
@@ -92,6 +94,22 @@ export function createHealthRoutes(db: Database, openCodeSupervisor?: OpenCodeSu
         opencodeVersionSupported: opencodeServerManager.isVersionSupported(),
         opencodeManagerVersion,
         opencodeRestartPending: opencodeServerManager.isRestartPending(),
+      }
+
+      try {
+        const runtimeStatus = new SandboxRuntimeService(db).getStatus()
+        response.sandbox = {
+          ...runtimeStatus,
+          enforced: opencodeServerManager.isSandboxEnforced(),
+        }
+      } catch (error) {
+        logger.error('Failed to collect sandbox status', error)
+        response.sandbox = {
+          available: false,
+          enabled: false,
+          enforced: opencodeServerManager.isSandboxEnforced(),
+          reason: error instanceof Error ? error.message : 'sandbox status unavailable',
+        }
       }
 
       if (lifecycle) {

@@ -13,6 +13,7 @@ import { getOpenCodeConfigFilePath, getAgentsMdPath } from '@opencode-manager/sh
 import {
   UserPreferencesSchema,
   OpenCodeConfigSchema,
+  type SandboxPreferences,
 } from '../types/settings'
 import type { GitCredential } from '@opencode-manager/shared'
 import {
@@ -27,7 +28,9 @@ import { logger } from '../utils/logger'
 import {
   discoverModelsCached,
 } from '../utils/discovery-cache'
-import { opencodeServerManager, ConfigReloadError } from '../services/opencode-single-server'
+import { opencodeServerManager, ConfigReloadError, isSandboxVerifiedOpenCodeVersion, getSandboxVerifiedOpenCodeVersions } from '../services/opencode-single-server'
+import { sanitizeConfigForEnforcementResult, type EnforcementRemovedSections } from '../services/opencode/enforcement-config'
+import { isSandboxEnforcementActive } from '../services/sandbox/enforcement'
 import { getOrCreateInternalToken, rotateInternalToken } from '../services/internal-token'
 import { sseAggregator } from '../services/sse-aggregator'
 import type { OpenCodeSupervisor } from '../services/opencode-supervisor'
@@ -83,14 +86,16 @@ function getOpenCodeInstallMethod(): string {
 
 function getOpenCodeConfigContentToWrite(
   rawContent: string,
+  sourceConfig: Record<string, unknown>,
   appliedConfig?: Record<string, unknown>,
-  removedFields?: string[]
+  removedFields?: string[],
+  enforcementRemoved = false,
 ): string {
-  if (!appliedConfig || !removedFields || removedFields.length === 0) {
-    return rawContent
+  if ((removedFields && removedFields.length > 0) || enforcementRemoved) {
+    return JSON.stringify(appliedConfig ?? sourceConfig, null, 2)
   }
 
-  return JSON.stringify(appliedConfig, null, 2)
+  return rawContent
 }
 
 async function restartOpenCodeSafe(openCodeSupervisor: OpenCodeSupervisor | undefined, context: string): Promise<void> {
@@ -215,6 +220,14 @@ function needsOpenCodeRestart(
   return ['agent', 'plugin', 'skills', 'provider'].some((field) => didConfigFieldChange(previous, next, field))
 }
 
+function sandboxPreferenceChanged(
+  previous: SandboxPreferences | undefined,
+  next: SandboxPreferences | undefined,
+): boolean {
+  if (next === undefined) return false
+  return JSON.stringify(previous ?? {}) !== JSON.stringify(next)
+}
+
 function parseOptionalRepoId(value: string | undefined): number | undefined {
   if (value === undefined) return undefined
   const parsed = parseInt(value, 10)
@@ -234,6 +247,28 @@ function getMarkdownUploadManifest(manifest: ReturnType<typeof parseUploadManife
 
 function hasConfiguredPlugins(config: Record<string, unknown> | undefined): boolean {
   return Array.isArray(config?.plugin) && config.plugin.length > 0
+}
+
+type EnforcementSanitization = {
+  patchTarget: Record<string, unknown>
+  removed: EnforcementRemovedSections
+}
+
+function sanitizeConfigPatchForEnforcement(config: Record<string, unknown>): EnforcementSanitization {
+  const { sanitized, removed } = sanitizeConfigForEnforcementResult(config, opencodeServerManager.isSandboxEnforced())
+  return { patchTarget: sanitized, removed }
+}
+
+function contentForEnforcedDefaultWrite(
+  rawContent: string,
+  config: Record<string, unknown>,
+): { content: string; enforcementRemoved: boolean } {
+  const sanitization = sanitizeConfigPatchForEnforcement(config)
+  const enforcementRemoved = Object.keys(sanitization.removed).length > 0
+  if (!enforcementRemoved) {
+    return { content: rawContent, enforcementRemoved }
+  }
+  return { content: JSON.stringify(sanitization.patchTarget, null, 2), enforcementRemoved }
 }
 
 function execWithTimeout(
@@ -400,6 +435,13 @@ export function createSettingsRoutes(db: Database, gitAuthService: GitAuthServic
       const currentSettings = settingsService.getSettings(userId)
       const settings = settingsService.updateSettings(validated.preferences, userId)
 
+      const sandboxChanged = sandboxPreferenceChanged(currentSettings.preferences.sandbox, validated.preferences.sandbox)
+
+      if (sandboxChanged) {
+        logger.info('Sandbox preference changed, marking OpenCode server restart as pending')
+        opencodeServerManager.markRestartPending()
+      }
+
       let serverRestarted = false
 
       const credentialsChanged = validated.preferences.gitCredentials !== undefined &&
@@ -437,7 +479,14 @@ export function createSettingsRoutes(db: Database, gitAuthService: GitAuthServic
   app.delete('/', async (c) => {
     try {
       const userId = c.req.query('userId') || 'default'
+      const currentSettings = settingsService.getSettings(userId)
       const settings = settingsService.resetSettings(userId)
+
+      if (sandboxPreferenceChanged(currentSettings.preferences.sandbox, settings.preferences.sandbox)) {
+        logger.info('Sandbox preference changed, marking OpenCode server restart as pending')
+        opencodeServerManager.markRestartPending()
+      }
+
       return c.json(settings)
     } catch (error) {
       logger.error('Failed to reset settings:', error)
@@ -473,8 +522,9 @@ export function createSettingsRoutes(db: Database, gitAuthService: GitAuthServic
         )
 
         if (hasConfiguredPlugins(provisionalConfig.content)) {
+          const { content: contentToWrite } = contentForEnforcedDefaultWrite(provisionalConfig.rawContent, provisionalConfig.content)
           const config = settingsService.updateOpenCodeConfig(provisionalConfig.name, {
-            content: provisionalConfig.rawContent,
+            content: contentToWrite,
             isDefault: true,
           }, userId)
 
@@ -483,7 +533,7 @@ export function createSettingsRoutes(db: Database, gitAuthService: GitAuthServic
           }
 
           const configPath = getOpenCodeConfigFilePath()
-          await writeFileContent(configPath, provisionalConfig.rawContent)
+          await writeFileContent(configPath, contentToWrite)
           logger.info(`Wrote default config to: ${configPath}`)
           opencodeServerManager.clearStartupError()
           await restartOpenCode(openCodeSupervisor)
@@ -491,7 +541,8 @@ export function createSettingsRoutes(db: Database, gitAuthService: GitAuthServic
           return c.json(config)
         }
 
-        const patchResult = await patchConfigWithRecovery(openCodeClient, provisionalConfig.content)
+        const sanitization = sanitizeConfigPatchForEnforcement(provisionalConfig.content)
+        const patchResult = await patchConfigWithRecovery(openCodeClient, sanitization.patchTarget)
         if (!patchResult.success) {
           settingsService.deleteOpenCodeConfig(provisionalConfig.name, userId)
           return c.json({ 
@@ -504,8 +555,10 @@ export function createSettingsRoutes(db: Database, gitAuthService: GitAuthServic
 
         const contentToWrite = getOpenCodeConfigContentToWrite(
           provisionalConfig.rawContent,
+          sanitization.patchTarget,
           patchResult.appliedConfig,
-          patchResult.removedFields
+          patchResult.removedFields,
+          Object.keys(sanitization.removed).length > 0,
         )
         const config = settingsService.updateOpenCodeConfig(provisionalConfig.name, {
           content: contentToWrite,
@@ -552,7 +605,7 @@ export function createSettingsRoutes(db: Database, gitAuthService: GitAuthServic
       const existingConfig = settingsService.getOpenCodeConfigByName(configName, userId)
       const previousContent = existingConfig?.content
       
-      const config = settingsService.updateOpenCodeConfig(configName, validated, userId)
+      let config = settingsService.updateOpenCodeConfig(configName, validated, userId)
       if (!config) {
         return c.json({ error: 'Config not found' }, 404)
       }
@@ -562,13 +615,22 @@ export function createSettingsRoutes(db: Database, gitAuthService: GitAuthServic
         const configPath = getOpenCodeConfigFilePath()
 
         if (restartRequired) {
-          await writeFileContent(configPath, config.rawContent)
+          const { content: contentToWrite, enforcementRemoved } = contentForEnforcedDefaultWrite(config.rawContent, config.content)
+          if (enforcementRemoved) {
+            const persisted = settingsService.updateOpenCodeConfig(configName, { content: contentToWrite }, userId)
+            if (!persisted) {
+              return c.json({ error: 'Config not found' }, 404)
+            }
+            config = persisted
+          }
+          await writeFileContent(configPath, contentToWrite)
           logger.info(`Wrote default config to: ${configPath}`)
           logger.info('OpenCode configuration change requires a server restart; deferring until requested')
           opencodeServerManager.markRestartPending()
           return c.json({ ...config, restartRequired: true })
         } else {
-          const patchResult = await patchConfigWithRecovery(openCodeClient, config.content)
+          const sanitization = sanitizeConfigPatchForEnforcement(config.content)
+          const patchResult = await patchConfigWithRecovery(openCodeClient, sanitization.patchTarget)
           if (!patchResult.success) {
             return c.json({ 
               error: 'Config saved but failed to apply', 
@@ -579,9 +641,14 @@ export function createSettingsRoutes(db: Database, gitAuthService: GitAuthServic
           }
           
           const removedFields = patchResult.removedFields ?? []
-          const contentToWrite = removedFields.length > 0
-            ? JSON.stringify(patchResult.appliedConfig ?? config.content, null, 2)
-            : config.rawContent
+          const enforcementRemoved = Object.keys(sanitization.removed).length > 0
+          const contentToWrite = getOpenCodeConfigContentToWrite(
+            config.rawContent,
+            sanitization.patchTarget,
+            patchResult.appliedConfig,
+            removedFields,
+            enforcementRemoved,
+          )
 
           await writeFileContent(configPath, contentToWrite)
           logger.info(`Wrote default config to: ${configPath}`)
@@ -595,6 +662,17 @@ export function createSettingsRoutes(db: Database, gitAuthService: GitAuthServic
               }, 409)
             }
             return c.json({ ...persisted, removedFields })
+          }
+
+          if (enforcementRemoved) {
+            logger.info('Config applied with host-execution sections removed by sandbox enforcement')
+            const persisted = settingsService.updateOpenCodeConfig(configName, { content: contentToWrite }, userId)
+            if (!persisted) {
+              return c.json({
+                error: 'OpenCode config was removed while applying sandbox enforcement',
+              }, 409)
+            }
+            return c.json(persisted)
           }
         }
       }
@@ -639,13 +717,20 @@ export function createSettingsRoutes(db: Database, gitAuthService: GitAuthServic
       }
 
       if (hasConfiguredPlugins(existingConfig.content)) {
+        const { content: contentToWrite, enforcementRemoved } = contentForEnforcedDefaultWrite(existingConfig.rawContent, existingConfig.content)
+        if (enforcementRemoved) {
+          const updated = settingsService.updateOpenCodeConfig(configName, { content: contentToWrite }, userId)
+          if (!updated) {
+            return c.json({ error: 'Config not found' }, 404)
+          }
+        }
         const config = settingsService.setDefaultOpenCodeConfig(configName, userId)
         if (!config) {
           return c.json({ error: 'Config not found' }, 404)
         }
 
         const configPath = getOpenCodeConfigFilePath()
-        await writeFileContent(configPath, existingConfig.rawContent)
+        await writeFileContent(configPath, contentToWrite)
         logger.info(`Wrote default config '${configName}' to: ${configPath}`)
         opencodeServerManager.clearStartupError()
         await restartOpenCode(openCodeSupervisor)
@@ -653,7 +738,8 @@ export function createSettingsRoutes(db: Database, gitAuthService: GitAuthServic
         return c.json(config)
       }
 
-      const patchResult = await patchConfigWithRecovery(openCodeClient, existingConfig.content)
+      const sanitization = sanitizeConfigPatchForEnforcement(existingConfig.content)
+      const patchResult = await patchConfigWithRecovery(openCodeClient, sanitization.patchTarget)
       if (!patchResult.success) {
         return c.json({ 
           error: 'Config validation failed', 
@@ -665,8 +751,10 @@ export function createSettingsRoutes(db: Database, gitAuthService: GitAuthServic
 
       const contentToWrite = getOpenCodeConfigContentToWrite(
         existingConfig.rawContent,
+        sanitization.patchTarget,
         patchResult.appliedConfig,
-        patchResult.removedFields
+        patchResult.removedFields,
+        Object.keys(sanitization.removed).length > 0,
       )
       const updatedConfig = settingsService.updateOpenCodeConfig(configName, {
         content: contentToWrite,
@@ -849,7 +937,11 @@ export function createSettingsRoutes(db: Database, gitAuthService: GitAuthServic
         return c.json({ error: 'Failed to get default config after rollback' }, 500)
       }
 
-      await writeFileContent(configPath, config.rawContent)
+      const { content: contentToWrite, enforcementRemoved } = contentForEnforcedDefaultWrite(config.rawContent, config.content)
+      if (enforcementRemoved) {
+        settingsService.updateOpenCodeConfig(config.name, { content: contentToWrite }, userId)
+      }
+      await writeFileContent(configPath, contentToWrite)
       logger.info(`Rolled back to config '${rollbackConfig}'`)
 
       opencodeServerManager.clearStartupError()
@@ -896,6 +988,19 @@ export function createSettingsRoutes(db: Database, gitAuthService: GitAuthServic
     logger.info(`Current OpenCode version: ${oldVersion}`)
 
     try {
+      if (isSandboxEnforcementActive(db)) {
+        const verified = getSandboxVerifiedOpenCodeVersions()
+        logger.warn('OpenCode upgrade blocked while sandbox enforcement is active')
+        return c.json({
+          success: false,
+          error: 'OpenCode upgrade is disabled while sandbox enforcement is active',
+          details: `Sandbox enforcement only accepts verified OpenCode builds (${verified.join(', ')}). Disable Agent Sandboxing in Settings and restart the OpenCode server before upgrading.`,
+          oldVersion,
+          newVersion: oldVersion,
+          upgraded: false,
+        }, 409)
+      }
+
       const installMethod = getOpenCodeInstallMethod()
       logger.info(`Running opencode upgrade --method ${installMethod} with 90s timeout...`)
       const { output: upgradeOutput, timedOut } = execWithTimeout(`opencode upgrade --method ${installMethod} 2>&1`, 90000)
@@ -1003,15 +1108,20 @@ export function createSettingsRoutes(db: Database, gitAuthService: GitAuthServic
         published_at: string
         prerelease: boolean
       }>
-      
+
+      const enforcementActive = isSandboxEnforcementActive(db)
       const versions = releases
         .filter(r => !r.prerelease)
-        .map(r => ({
-          version: r.tag_name.replace(/^v/, ''),
-          tag: r.tag_name,
-          name: r.name,
-          publishedAt: r.published_at
-        }))
+        .map(r => {
+          const version = r.tag_name.replace(/^v/, '')
+          return {
+            version,
+            tag: r.tag_name,
+            name: r.name,
+            publishedAt: r.published_at,
+            installable: !enforcementActive || isSandboxVerifiedOpenCodeVersion(version),
+          }
+        })
       
       const currentVersion = opencodeServerManager.getVersion()
       
@@ -1039,6 +1149,18 @@ export function createSettingsRoutes(db: Database, gitAuthService: GitAuthServic
       const versionWithoutPrefix = version.replace(/^v/, '')
       if (!isValidVersion(versionWithoutPrefix)) {
         throw new Error('Invalid version format. Must be in MAJOR.MINOR.PATCH format (e.g., 1.2.27)')
+      }
+
+      if (isSandboxEnforcementActive(db) && !isSandboxVerifiedOpenCodeVersion(versionWithoutPrefix)) {
+        const verified = getSandboxVerifiedOpenCodeVersions()
+        logger.warn(`OpenCode v${versionWithoutPrefix} install blocked while sandbox enforcement is active`)
+        return c.json({
+          success: false,
+          error: `OpenCode v${versionWithoutPrefix} is not verified for sandbox enforcement`,
+          details: `Sandbox enforcement only accepts verified OpenCode builds (${verified.join(', ')}).`,
+          oldVersion,
+          newVersion: oldVersion,
+        }, 409)
       }
 
       logger.info(`Installing OpenCode version: ${version}`)
@@ -1819,11 +1941,11 @@ export function createSettingsRoutes(db: Database, gitAuthService: GitAuthServic
       }
 
       try {
-        await opencodeServerManager.restart()
+        await restartOpenCode(openCodeSupervisor)
       } catch (restartError) {
         try {
           settingsService.restoreOpenCodeServerPasswordState(previousPasswordState)
-          await opencodeServerManager.restart()
+          await restartOpenCode(openCodeSupervisor)
           sseAggregator.reconnect()
         } catch (restoreError) {
           logger.error('Failed to restore OpenCode server auth runtime after restart failure:', restoreError)
@@ -1859,6 +1981,8 @@ export function createSettingsRoutes(db: Database, gitAuthService: GitAuthServic
   app.post('/manager-token/rotate', async (c) => {
     try {
       const token = rotateInternalToken(db)
+      logger.info('Manager token rotated, marking OpenCode server restart as pending')
+      opencodeServerManager.markRestartPending()
       return c.json({ token })
     } catch (error) {
       logger.error('Failed to rotate manager token:', error)

@@ -1,4 +1,4 @@
-FROM node:24.13.0 AS base
+FROM node:24.13.0-trixie AS base
 
 RUN apt-get update && apt-get install -y \
     git \
@@ -59,7 +59,8 @@ RUN pnpm --filter frontend build
 FROM base AS runner
 
 ARG UV_VERSION=latest
-ARG OPENCODE_VERSION=latest
+ARG OPENCODE_VERSION=1.18.16
+ARG MICROSANDBOX_VERSION=0.6.8
 # Bump TOOLS_CACHEBUST (e.g. via --build-arg) to force a fresh uv/opencode
 # install without invalidating the rest of the build cache.
 ARG TOOLS_CACHEBUST=0
@@ -87,6 +88,34 @@ RUN echo "Installing uv=${UV_VERSION} opencode=${OPENCODE_VERSION} (cachebust=${
     ln -s /opt/opencode/bin/opencode /usr/local/bin/opencode && \
     echo "opencode ${OPENCODE_VERSION} installed successfully"
 
+RUN echo "Installing microsandbox=${MICROSANDBOX_VERSION} (cachebust=${TOOLS_CACHEBUST})" && \
+    MSB_ARCH=$(uname -m) && \
+    if [ "$MSB_ARCH" = "x86_64" ] || [ "$MSB_ARCH" = "amd64" ]; then MSB_TARGET="x86_64"; \
+    elif [ "$MSB_ARCH" = "aarch64" ] || [ "$MSB_ARCH" = "arm64" ]; then MSB_TARGET="aarch64"; \
+    else echo "ERROR: microsandbox does not support architecture: $MSB_ARCH" >&2; exit 1; fi && \
+    MSB_BUNDLE="microsandbox-linux-${MSB_TARGET}.tar.gz" && \
+    case "${MICROSANDBOX_VERSION}" in v*) MSB_VERSION="${MICROSANDBOX_VERSION}" ;; *) MSB_VERSION="v${MICROSANDBOX_VERSION}" ;; esac && \
+    MSB_BASE_URL="https://github.com/superradcompany/microsandbox/releases/download/${MSB_VERSION}" && \
+    curl -fsSL "${MSB_BASE_URL}/${MSB_BUNDLE}" -o "/tmp/${MSB_BUNDLE}" && \
+    curl -fsSL "${MSB_BASE_URL}/checksums.sha256" -o /tmp/checksums.sha256 && \
+    cd /tmp && \
+    grep -F "${MSB_BUNDLE}" checksums.sha256 | sha256sum -c --quiet - && \
+    mkdir -p /opt/microsandbox/bin /opt/microsandbox/lib && \
+    tar -xzf "/tmp/${MSB_BUNDLE}" -C /tmp && \
+    install -m 755 /tmp/msb /opt/microsandbox/bin/msb && \
+    ln -sf msb /opt/microsandbox/bin/microsandbox && \
+    ln -s /opt/microsandbox/bin/msb /usr/local/bin/msb && \
+    MSB_LIB=$(find /tmp -maxdepth 1 -type f -name 'libkrunfw.so.*.*.*' | head -1) && \
+    MSB_LIB_NAME=$(basename "$MSB_LIB") && \
+    MSB_LIB_ABI=${MSB_LIB_NAME#libkrunfw.so.} && \
+    MSB_LIB_ABI=${MSB_LIB_ABI%%.*} && \
+    install -m 644 "$MSB_LIB" "/opt/microsandbox/lib/${MSB_LIB_NAME}" && \
+    ln -sf "$MSB_LIB_NAME" "/opt/microsandbox/lib/libkrunfw.so.${MSB_LIB_ABI}" && \
+    ln -sf "libkrunfw.so.${MSB_LIB_ABI}" /opt/microsandbox/lib/libkrunfw.so && \
+    rm -f "/tmp/${MSB_BUNDLE}" /tmp/checksums.sha256 /tmp/msb /tmp/libkrunfw.so.* && \
+    chmod -R a+rX /opt/microsandbox && \
+    msb --version
+
 ENV NODE_ENV=production
 ENV HOST=0.0.0.0
 ENV PORT=5003
@@ -94,6 +123,9 @@ ENV OPENCODE_SERVER_PORT=5551
 ENV DATABASE_PATH=/app/data/opencode.db
 ENV WORKSPACE_PATH=/workspace
 ENV XDG_CACHE_HOME=/home/node/.cache
+ENV OPENCODE_BUNDLED_VERSION=${OPENCODE_VERSION}
+ENV MSB_PATH=/usr/local/bin/msb
+ENV MSB_LIBKRUNFW_PATH=/opt/microsandbox/lib/libkrunfw.so
 
 COPY --from=deps --chown=node:node /app/node_modules ./node_modules
 COPY --from=builder /app/shared ./shared
@@ -110,7 +142,7 @@ COPY scripts/lib/container-user.sh /usr/local/lib/ocm/container-user.sh
 COPY scripts/docker-entrypoint.sh /docker-entrypoint.sh
 RUN chmod +x /docker-entrypoint.sh
 
-RUN mkdir -p /workspace /app/data /home/node/.cache /home/node/.opencode && \
+RUN mkdir -p /workspace /app/data /home/node/.cache /home/node/.opencode /home/node/.microsandbox && \
     chown -R node:node /workspace /app/data /home/node
 
 EXPOSE 5003 5100 5101 5102 5103

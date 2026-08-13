@@ -295,6 +295,44 @@ Why the repo mount uses the host path as the container path:
 
 With a fresh Docker volume, first startup imports the host OpenCode config and state, and after you add `${OCM_REPOS_HOST_PATH}` in the Manager UI, previously existing chats appear under the discovered repositories.
 
+## Agent Sandboxing Overlay
+
+Optional KVM-backed agent sandboxing (see [Agent Sandboxing](../features/sandboxing.md)). The sandbox overlay (`docker-compose.sandbox.yml`) grants the container KVM access, passes sandbox tuning through from `.env`, and persists microsandbox state:
+
+```yaml
+services:
+  app:
+    privileged: true
+    devices:
+      - "/dev/kvm:/dev/kvm"
+    environment:
+      - SANDBOX_IMAGE=${SANDBOX_IMAGE:-node:24}
+      - SANDBOX_MEMORY=${SANDBOX_MEMORY:-4G}
+      - SANDBOX_CPUS=${SANDBOX_CPUS:-2}
+      - SANDBOX_EXEC_USER=${SANDBOX_EXEC_USER:-${PUID:-1000}}
+      - SANDBOX_NET=${SANDBOX_NET:-public}
+      - SANDBOX_START_TIMEOUT_MS=${SANDBOX_START_TIMEOUT_MS:-300000}
+      - SANDBOX_EXEC_TIMEOUT_MS=${SANDBOX_EXEC_TIMEOUT_MS:-600000}
+    volumes:
+      - microsandbox-data:/home/node/.microsandbox
+
+volumes:
+  microsandbox-data:
+    driver: local
+```
+
+Start the Manager with the overlay:
+
+```bash
+docker compose -f docker-compose.yml -f docker-compose.sandbox.yml up -d
+```
+
+The overlay requires a Linux host with `/dev/kvm`. Docker Desktop on macOS and Windows cannot provide `/dev/kvm`, so the sandbox toggle in Settings stays disabled there.
+
+`SANDBOX_EXEC_USER` defaults to the numeric `PUID` (falling back to `1000`), and the Manager runs every sandboxed command as that numeric uid (with the Manager's gid). Because the entrypoint realigns the container's `node` account to `PUID`/`PGID` and re-owns `/workspace`, a non-1000 `PUID` (for example `PUID=1001`) writes to the mounted repositories with the same identity as the workspace owner. If a configured `SANDBOX_EXEC_USER` cannot match the workspace owner, the toggle reports enforcement as unavailable instead of running broken commands.
+
+The `microsandbox-data` volume persists microsandbox's own state (downloaded images, firmware cache) across container recreations, alongside the workspace and data volumes.
+
 ## Health Checks
 
 The container includes health checks:
@@ -444,6 +482,9 @@ By default, the OpenCode server binds to `127.0.0.1` inside the container and is
 
 You only need to expose the OpenCode server on an external interface if you have a specific use case that requires other services or machines to connect directly to it.
 
+!!! warning "Sandbox enforcement is proxy-scoped"
+    Part of agent-sandboxing enforcement — the blocked session-shell/PTY/slash-command endpoints and config-mutation sanitization — is applied by the Manager's OpenCode proxy on port 5003, not by the OpenCode server itself. The `bash` tool rewrite, by contrast, runs as a plugin hook inside the OpenCode process, so it still guards direct connections to the OpenCode server. While sandboxing is enforced the Manager forces the OpenCode server to bind loopback, so external clients cannot reach the OpenCode port directly and bypass the proxy-applied endpoint blocking and config sanitization; exposing port `5551:5551` is only effective with sandboxing disabled (see [Agent Sandboxing](../features/sandboxing.md)).
+
 ### How to Expose Safely
 
 To expose the OpenCode server on the host network:
@@ -475,4 +516,4 @@ The password can be configured in two ways:
 
 ### Startup Guard
 
-If you set `OPENCODE_HOST=0.0.0.0` (or any non-localhost host) without configuring a password (either via env var or UI), the managed OpenCode server will refuse to start with an error message explaining how to fix it. The OpenCode Manager UI/API may remain available so you can configure a password and restart the managed server.
+If you set `OPENCODE_HOST=0.0.0.0` (or any non-localhost host) without configuring a password (either via env var or UI), the managed OpenCode server will refuse to start with an error message explaining how to fix it. The OpenCode Manager UI/API may remain available so you can configure a password and restart the managed server. (While agent sandboxing is enforced the server is forced onto a loopback bind regardless of `OPENCODE_HOST`, so this password guard is skipped — the server is not actually reachable externally.)

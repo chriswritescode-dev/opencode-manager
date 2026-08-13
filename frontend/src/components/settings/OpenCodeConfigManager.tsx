@@ -336,6 +336,10 @@ export function OpenCodeConfigManager({ hideHealthStatus = false }: OpenCodeConf
   }
 
   const isUnhealthy = health?.opencode !== 'healthy'
+  const sandboxEnforced = health?.sandbox?.enforced === true
+  const updateBlockedReason = sandboxEnforced
+    ? 'Updating the OpenCode version is disabled while agent sandboxing is enabled'
+    : undefined
   const canImportFromHost = Boolean(importStatus?.configSourcePath || importStatus?.stateSourcePath)
   const activeConfig = configs.find((c) => c.name === activeConfigName) ?? null
 
@@ -365,13 +369,19 @@ export function OpenCodeConfigManager({ hideHealthStatus = false }: OpenCodeConf
                     Manager v{health.opencodeManagerVersion}
                   </p>
                 )}
+                {sandboxEnforced && (
+                  <p className="text-xs text-muted-foreground">
+                    Agent sandboxing is on; Update is disabled and only verified versions can be installed.
+                  </p>
+                )}
               </div>
               <div className="flex flex-wrap gap-2 justify-center sm:justify-end">
                 <Button
                   variant="outline"
                   size="sm"
                   onClick={performUpgrade}
-                  disabled={upgradeOpenCodeMutation.isPending}
+                  disabled={upgradeOpenCodeMutation.isPending || sandboxEnforced}
+                  title={updateBlockedReason}
                 >
                   {upgradeOpenCodeMutation.isPending ? (
                     <Loader2 className="h-3 w-3 sm:h-4 sm:w-4 mr-1 animate-spin" />

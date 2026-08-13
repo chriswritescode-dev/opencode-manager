@@ -13,8 +13,8 @@ import {
   ensureDirectoryExists,
 } from './file-operations'
 import { OpenCodeConfigSchema } from '@opencode-manager/shared/schemas'
-import { ASSISTANT_REPO_ID, ASSISTANT_REPO_PATH } from '@opencode-manager/shared/utils'
-import { getReposPath, ENV } from '@opencode-manager/shared/config/env'
+import { ASSISTANT_REPO_ID, ASSISTANT_REPO_PATH, ASSISTANT_OPENCODE_DIR_NAME } from '@opencode-manager/shared/utils'
+import { getAssistantModePath, getReposPath, ENV } from '@opencode-manager/shared/config/env'
 import type { Database } from 'bun:sqlite'
 import { getOrCreateInternalToken } from './internal-token'
 import { ensureAssistantRepo } from '../db/queries'
@@ -24,7 +24,7 @@ const ASSISTANT_MODE_DIR = ASSISTANT_REPO_PATH
 const ASSISTANT_MODE_RELATIVE_PATH = 'repos/assistant'
 const ASSISTANT_AGENTS_MD_FILENAME = 'AGENTS.md'
 const ASSISTANT_OPENCODE_CONFIG_FILENAME = 'opencode.json'
-const ASSISTANT_OPENCODE_DIR = '.opencode'
+const ASSISTANT_OPENCODE_DIR = ASSISTANT_OPENCODE_DIR_NAME
 const ASSISTANT_INTERNAL_TOKEN_FILENAME = 'internal-token'
 const ASSISTANT_SKILLS_DIR = 'skills'
 const ASSISTANT_SCHEDULES_SKILL_DIR = 'schedule-management'
@@ -37,9 +37,8 @@ const ASSISTANT_DEFAULT_AGENT_NAME = 'assistant'
 const ASSISTANT_DEFAULT_AGENT_FILENAME = `${ASSISTANT_DEFAULT_AGENT_NAME}.md`
 
 export function getAssistantModeDirectory(): string {
-  const reposPath = getReposPath()
-  const assistantDir = path.join(reposPath, ASSISTANT_MODE_DIR)
-  const resolvedReposRoot = path.resolve(reposPath)
+  const assistantDir = getAssistantModePath()
+  const resolvedReposRoot = path.resolve(getReposPath())
   const resolvedAssistantDir = path.resolve(assistantDir)
 
   if (!resolvedAssistantDir.startsWith(resolvedReposRoot)) {

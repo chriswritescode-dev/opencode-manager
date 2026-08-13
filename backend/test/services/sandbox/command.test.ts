@@ -1,0 +1,616 @@
+import { describe, expect, it, vi, afterEach } from 'vitest'
+import { spawnSync } from 'child_process'
+import { mkdirSync, mkdtempSync, readFileSync, rmSync, symlinkSync, writeFileSync } from 'node:fs'
+import { tmpdir } from 'node:os'
+import path from 'node:path'
+import { ENV, getAssistantOpenCodeDir, getReposPath, getScheduleWorktreesPath } from '@opencode-manager/shared/config/env'
+import {
+  WORKSPACE_SANDBOX_NAME,
+  SANDBOX_UNAVAILABLE_PREFIX,
+  buildBlockedCommand,
+  buildCanonicalSandboxSpec,
+  buildSandboxCreateArgs,
+  buildSandboxInspectArgs,
+  buildSandboxListArgs,
+  buildSandboxRemoveArgs,
+  buildSandboxStartArgs,
+  buildSandboxStopManagedArgs,
+  buildSandboxVersionArgs,
+  quoteForShell,
+  resolveExpectedSandboxNetworkPolicy,
+  resolveSandboxExecUser,
+  resolveSandboxExecUserUid,
+  sandboxMountRoots,
+  sandboxNetworkPolicyMismatch,
+  sandboxSecretMaskPath,
+} from '../../../src/services/sandbox/command'
+
+afterEach(() => {
+  vi.restoreAllMocks()
+})
+
+describe('sandbox command builders', () => {
+  it('builds the version probe as exactly --version', () => {
+    expect(buildSandboxVersionArgs()).toEqual(['--version'])
+  })
+
+  it('builds inspect args targeting the shared workspace sandbox with JSON output', () => {
+    expect(buildSandboxInspectArgs()).toEqual(['inspect', WORKSPACE_SANDBOX_NAME, '--format', 'json'])
+  })
+
+  it('builds remove args that force-remove the shared workspace sandbox', () => {
+    expect(buildSandboxRemoveArgs()).toEqual(['rm', '--force', WORKSPACE_SANDBOX_NAME])
+  })
+
+  it('builds list args that emit machine-readable JSON for all sandboxes', () => {
+    expect(buildSandboxListArgs()).toEqual(['ls', '--format', 'json'])
+  })
+
+  it('builds start args targeting the shared workspace sandbox', () => {
+    expect(buildSandboxStartArgs()).toEqual(['start', WORKSPACE_SANDBOX_NAME])
+  })
+
+  it('builds managed-stop args that filter by the ocm.managed label', () => {
+    expect(buildSandboxStopManagedArgs()).toEqual(['stop', '--label', 'ocm.managed=true'])
+  })
+
+  it('escapes embedded single quotes so values survive a shell round-trip', () => {
+    const value = "echo 'a'b'"
+    expect(quoteForShell(value)).toBe(`'echo '\\''a'\\''b'\\'''`)
+
+    const result = spawnSync('sh', ['-c', `printf '%s' ${quoteForShell(value)}`], { encoding: 'utf8' })
+    expect(result.status).toBe(0)
+    expect(result.stdout).toBe(value)
+  })
+
+  it('builds create args with exactly two identical-path bind mounts and the detached flag', () => {
+    const args = buildSandboxCreateArgs()
+
+    expect(args[0]).toBe('run')
+    expect(args).toContain('-d')
+    expect(args).toContain('--name')
+    expect(args[args.indexOf('--name') + 1]).toBe(WORKSPACE_SANDBOX_NAME)
+    expect(args[args.indexOf('-w') + 1]).toBe(getReposPath())
+    expect(args[args.indexOf('-u') + 1]).toBe(resolveSandboxExecUser())
+
+    const labelArgs: string[] = []
+    for (let i = 0; i < args.length; i++) {
+      const value = args[i + 1]
+      if (args[i] === '--label' && value !== undefined) {
+        labelArgs.push(value)
+      }
+    }
+    expect(labelArgs).toContain('ocm.managed=true')
+    expect(labelArgs).toContain(`ocm.net=${ENV.SANDBOX.NET}`)
+
+    const mountArgs: string[] = []
+    for (let i = 0; i < args.length; i++) {
+      const value = args[i + 1]
+      if (args[i] === '--mount-dir' && value !== undefined) {
+        mountArgs.push(value)
+      }
+    }
+    expect(mountArgs).toEqual(sandboxMountRoots().map((root) => `${root}:${root}`))
+    expect(mountArgs[0]).toBe(`${getReposPath()}:${getReposPath()}`)
+    expect(mountArgs[1]).toBe(`${getScheduleWorktreesPath()}:${getScheduleWorktreesPath()}`)
+  })
+
+  it('masks the assistant .opencode directory with a tmpfs overlay', () => {
+    const args = buildSandboxCreateArgs()
+
+    expect(args[args.indexOf('--tmpfs') + 1]).toBe(getAssistantOpenCodeDir())
+    expect(sandboxSecretMaskPath()).toBe(getAssistantOpenCodeDir())
+  })
+
+  it('never mounts the SSH/config/state workspace directories', () => {
+    const joined = buildSandboxCreateArgs().join(' ')
+    const workspacePath = path.dirname(getReposPath())
+
+    expect(joined).not.toContain(`${workspacePath}/.config`)
+    expect(joined).not.toContain(`${workspacePath}/config`)
+    expect(joined).not.toContain('auth.json')
+    expect(joined).not.toContain(`${workspacePath}/.opencode`)
+    expect(joined).not.toContain('/.opencode/state')
+  })
+
+  it('derives a canonical spec from the create args matching the security configuration', () => {
+    const spec = buildCanonicalSandboxSpec()
+    const labels = spec.labels as Record<string, string>
+    const resources = spec.resources as Record<string, number>
+    const runtime = spec.runtime as Record<string, unknown>
+    const mounts = spec.mounts as Array<Record<string, unknown>>
+    const network = spec.network as Record<string, unknown>
+    const lifecycle = spec.lifecycle as Record<string, unknown>
+
+    expect(spec.name).toBe(WORKSPACE_SANDBOX_NAME)
+    const canonicalImage = spec.image as Record<string, { reference: string } | undefined>
+    expect(canonicalImage.Oci?.reference).toBe(ENV.SANDBOX.IMAGE)
+    expect(labels['ocm.managed']).toBe('true')
+    expect(labels['ocm.net']).toBe(ENV.SANDBOX.NET)
+    expect(resources.cpus).toBe(ENV.SANDBOX.CPUS)
+    expect(typeof resources.memory_mib).toBe('number')
+    expect(runtime.workdir).toBe(getReposPath())
+    expect(runtime.user).toBe(resolveSandboxExecUser())
+    expect(runtime.cmd).toEqual(['sleep', 'infinity'])
+    expect(runtime.entrypoint).toBeNull()
+    expect(spec.patches).toEqual([])
+    expect(network.enabled).toBe(true)
+    expect(network.ports).toEqual([])
+    expect(lifecycle.ephemeral).toBe(false)
+    expect(lifecycle.max_duration_secs).toBeNull()
+    expect(lifecycle.idle_timeout_secs).toBeNull()
+
+    const binds = mounts.filter((mount) => mount.type === 'Bind')
+    expect(binds).toHaveLength(2)
+    expect(binds.map((mount) => mount.host)).toEqual([getReposPath(), getScheduleWorktreesPath()])
+    for (const mount of binds) {
+      expect(mount.guest).toBe(mount.host)
+      const options = mount.options as Record<string, boolean>
+      expect(options.readonly).toBe(false)
+      expect(options.noexec).toBe(false)
+      expect(options.nosuid).toBe(false)
+      expect(options.nodev).toBe(false)
+      expect(mount.stat_virtualization).toBe('strict')
+      expect(mount.host_permissions).toBe('private')
+      expect(mount.follow_root_symlinks).toBe(false)
+      expect(mount.quota_mib).toBeNull()
+    }
+
+    const tmpfs = mounts.find((mount) => mount.type === 'Tmpfs')
+    expect(tmpfs?.guest).toBe(getAssistantOpenCodeDir())
+    expect((tmpfs as Record<string, unknown>).size_mib).toBeNull()
+  })
+
+  it('accepts real repo dirs and schedule worktrees while rejecting config, missing, and unrelated paths', async () => {
+    const tmp = mkdtempSync(path.join(tmpdir(), 'ocm-sandbox-roots-'))
+    const originalWorkspacePath = process.env.WORKSPACE_PATH
+    try {
+      const repos = path.join(tmp, 'repos')
+      const schedules = path.join(tmp, 'schedule-worktrees')
+      mkdirSync(path.join(repos, 'org', 'repo', 'subdir'), { recursive: true })
+      mkdirSync(path.join(schedules, 'job-1-run-2'), { recursive: true })
+      mkdirSync(path.join(tmp, '.config', 'opencode'), { recursive: true })
+
+      process.env.WORKSPACE_PATH = tmp
+      const { resolveSandboxWorkDirectory } = await import('../../../src/services/sandbox/command')
+
+      await expect(resolveSandboxWorkDirectory(repos)).resolves.toBe(repos)
+      await expect(resolveSandboxWorkDirectory(path.join(repos, 'org', 'repo', 'subdir'))).resolves.toBe(
+        path.join(repos, 'org', 'repo', 'subdir'),
+      )
+      await expect(resolveSandboxWorkDirectory(path.join(schedules, 'job-1-run-2'))).resolves.toBe(
+        path.join(schedules, 'job-1-run-2'),
+      )
+      await expect(resolveSandboxWorkDirectory(path.join(repos, '..', '.config', 'opencode'))).resolves.toBeNull()
+      await expect(resolveSandboxWorkDirectory(`${repos}-extra`)).resolves.toBeNull()
+      await expect(resolveSandboxWorkDirectory(path.join(repos, 'missing'))).resolves.toBeNull()
+      await expect(resolveSandboxWorkDirectory('/etc')).resolves.toBeNull()
+    } finally {
+      if (originalWorkspacePath === undefined) {
+        delete process.env.WORKSPACE_PATH
+      } else {
+        process.env.WORKSPACE_PATH = originalWorkspacePath
+      }
+      rmSync(tmp, { recursive: true, force: true })
+    }
+  })
+
+  it('returns canonical guest paths for symlinks inside the roots and null for escapes', async () => {
+    const tmp = mkdtempSync(path.join(tmpdir(), 'ocm-sandbox-escape-'))
+    const originalWorkspacePath = process.env.WORKSPACE_PATH
+    try {
+      const repos = path.join(tmp, 'repos')
+      const schedules = path.join(tmp, 'schedule-worktrees')
+      mkdirSync(path.join(tmp, 'outside'), { recursive: true })
+      mkdirSync(path.join(repos, 'repo'), { recursive: true })
+      mkdirSync(path.join(repos, 'other-repo'), { recursive: true })
+      mkdirSync(path.join(schedules, 'job-1-run-2'), { recursive: true })
+      symlinkSync(path.join(tmp, 'outside'), path.join(repos, 'repo', 'escape'))
+      symlinkSync(path.join(repos, 'other-repo'), path.join(repos, 'repo', 'inside-link'))
+      symlinkSync(path.join(schedules, 'job-1-run-2'), path.join(repos, 'repo', 'cross-root-link'))
+
+      process.env.WORKSPACE_PATH = tmp
+      const { resolveSandboxWorkDirectory } = await import('../../../src/services/sandbox/command')
+
+      await expect(resolveSandboxWorkDirectory(path.join(repos, 'repo'))).resolves.toBe(path.join(repos, 'repo'))
+      await expect(resolveSandboxWorkDirectory(path.join(repos, 'repo', 'escape'))).resolves.toBeNull()
+      await expect(resolveSandboxWorkDirectory(path.join(repos, 'repo', 'escape', 'nested'))).resolves.toBeNull()
+      await expect(resolveSandboxWorkDirectory(path.join(repos, 'repo', 'inside-link'))).resolves.toBe(
+        path.join(repos, 'other-repo'),
+      )
+      await expect(resolveSandboxWorkDirectory(path.join(repos, 'repo', 'cross-root-link'))).resolves.toBe(
+        path.join(schedules, 'job-1-run-2'),
+      )
+    } finally {
+      if (originalWorkspacePath === undefined) {
+        delete process.env.WORKSPACE_PATH
+      } else {
+        process.env.WORKSPACE_PATH = originalWorkspacePath
+      }
+      rmSync(tmp, { recursive: true, force: true })
+    }
+  })
+
+  it('targets the shared sandbox with a per-command working directory and a verbatim guest payload', async () => {
+    const fakeBin = mkdtempSync(path.join(tmpdir(), 'ocm-msb-'))
+    const msbPath = path.join(fakeBin, 'msb')
+    const captureFile = path.join(fakeBin, 'payload.txt')
+    writeFileSync(
+      msbPath,
+      [
+        '#!/bin/sh',
+        'payload=""',
+        'prev=""',
+        'for arg in "$@"; do',
+        '  if [ "$prev" = "-c" ]; then payload="$arg"; fi',
+        '  prev="$arg"',
+        'done',
+        `printf '%s' "$payload" > "${captureFile}"`,
+        'sh -c "$payload"',
+      ].join('\n'),
+      { mode: 0o755 },
+    )
+    process.env.MSB_PATH = msbPath
+    try {
+      vi.resetModules()
+      const mod = await import('../../../src/services/sandbox/command')
+      mod.overrideSandboxExecutableTrustValidator(() => true)
+      const { buildSandboxExecCommandString, resolveSandboxExecUser } = mod
+
+      const directory = path.join(getReposPath(), 'foo')
+      const command = 'echo "it\'s a test" && echo line2 | tr a-z A-Z\necho after-newline'
+      const exec = buildSandboxExecCommandString(directory, command)
+
+      expect(exec).toBe(
+        `${quoteForShell(msbPath)} exec ${WORKSPACE_SANDBOX_NAME} --no-tty -q -u ${quoteForShell(resolveSandboxExecUser())} -w ${quoteForShell(directory)} --timeout ${Math.floor(ENV.SANDBOX.EXEC_TIMEOUT_MS / 1000)}s -- sh -c ${quoteForShell(command)}`,
+      )
+
+      const result = spawnSync('sh', ['-c', exec], {
+        encoding: 'utf8',
+      })
+      expect(result.status).toBe(0)
+      expect(result.stdout).toBe("it's a test\nLINE2\nafter-newline\n")
+      expect(readFileSync(captureFile, 'utf8')).toBe(command)
+    } finally {
+      delete process.env.MSB_PATH
+      rmSync(fakeBin, { recursive: true, force: true })
+    }
+  })
+
+  it('passes MSB_PATH and the resolved exec identity to msb as single literal arguments', async () => {
+    const fakeBin = mkdtempSync(path.join(tmpdir(), 'ocm-msb-hostile-'))
+    const captureFile = path.join(fakeBin, 'argv.txt')
+    const msbPath = path.join(fakeBin, 'my msb')
+    const hostileUser = 'node; echo hacked'
+    writeFileSync(
+      msbPath,
+      [
+        '#!/bin/sh',
+        `printf '%s\\n' "$0" "$@" > "${captureFile}"`,
+        'payload=""',
+        'prev=""',
+        'for arg in "$@"; do',
+        '  if [ "$prev" = "-c" ]; then payload="$arg"; fi',
+        '  prev="$arg"',
+        'done',
+        'sh -c "$payload"',
+      ].join('\n'),
+      { mode: 0o755 },
+    )
+
+    try {
+      process.env.MSB_PATH = msbPath
+      process.env.SANDBOX_EXEC_USER = hostileUser
+      vi.resetModules()
+      const mod = await import('../../../src/services/sandbox/command')
+      mod.overrideSandboxExecutableTrustValidator(() => true)
+      const { buildSandboxExecCommandString, resolveSandboxExecUser } = mod
+
+      const directory = path.join(getReposPath(), 'foo')
+      const command = 'echo hostile-ok'
+      const exec = buildSandboxExecCommandString(directory, command)
+
+      const result = spawnSync('sh', ['-c', exec], {
+        encoding: 'utf8',
+        env: { ...process.env, PATH: `${fakeBin}:${process.env.PATH ?? ''}` },
+      })
+      expect(result.status).toBe(0)
+      expect(result.stdout).toBe('hostile-ok\n')
+
+      const resolvedUser = resolveSandboxExecUser()
+      expect(resolvedUser).toMatch(/^\d+:\d+$/)
+
+      const argv = readFileSync(captureFile, 'utf8').split('\n')
+      expect(argv[0]).toBe(msbPath)
+      expect(argv[argv.indexOf('-u') + 1]).toBe(resolvedUser)
+      expect(argv[argv.indexOf('-w') + 1]).toBe(directory)
+      expect(argv[argv.indexOf('-c') + 1]).toBe(command)
+      expect(argv.join(' ')).not.toContain(hostileUser)
+    } finally {
+      delete process.env.MSB_PATH
+      delete process.env.SANDBOX_EXEC_USER
+      rmSync(fakeBin, { recursive: true, force: true })
+    }
+  })
+
+  it('resolves the named exec user default to the manager uid:gid', () => {
+    const proc = process as unknown as { getuid: () => number; getgid: () => number }
+    vi.spyOn(proc, 'getuid').mockReturnValue(1001)
+    vi.spyOn(proc, 'getgid').mockReturnValue(1002)
+
+    expect(resolveSandboxExecUser()).toBe('1001:1002')
+    expect(resolveSandboxExecUserUid()).toBe(1001)
+  })
+
+  it('aligns a numeric exec user with the manager gid', async () => {
+    const proc = process as unknown as { getuid: () => number; getgid: () => number }
+    vi.spyOn(proc, 'getuid').mockReturnValue(1001)
+    vi.spyOn(proc, 'getgid').mockReturnValue(1002)
+    process.env.SANDBOX_EXEC_USER = '1001'
+    try {
+      vi.resetModules()
+      const { resolveSandboxExecUser } = await import('../../../src/services/sandbox/command')
+      expect(resolveSandboxExecUser()).toBe('1001:1002')
+    } finally {
+      delete process.env.SANDBOX_EXEC_USER
+    }
+  })
+
+  it('keeps an explicit uid:gid exec user verbatim', async () => {
+    process.env.SANDBOX_EXEC_USER = '1000:1000'
+    try {
+      vi.resetModules()
+      const { resolveSandboxExecUser } = await import('../../../src/services/sandbox/command')
+      expect(resolveSandboxExecUser()).toBe('1000:1000')
+    } finally {
+      delete process.env.SANDBOX_EXEC_USER
+    }
+  })
+
+  it('builds a blocked command that exits non-zero and writes the reason to stderr', () => {
+    const reason = "KVM is unavailable (it's not a hypervisor host)"
+    const command = buildBlockedCommand(reason)
+    const message = `${SANDBOX_UNAVAILABLE_PREFIX}${reason}`
+
+    expect(SANDBOX_UNAVAILABLE_PREFIX).toBe('Sandbox enforcement is on but the sandbox is unavailable: ')
+    expect(command).toBe(`printf '%s\n' ${quoteForShell(message)} >&2; exit 1`)
+
+    const result = spawnSync('sh', ['-c', command], { encoding: 'utf8' })
+    expect(result.status).toBe(1)
+    expect(result.stderr).toBe(`${message}\n`)
+    expect(result.stdout).toBe('')
+  })
+
+  it('resolves a relative MSB_PATH to one absolute executable found on PATH', async () => {
+    const fakeBin = mkdtempSync(path.join(tmpdir(), 'ocm-msb-resolve-'))
+    writeFileSync(path.join(fakeBin, 'msb'), '#!/bin/sh\nexit 0\n', { mode: 0o755 })
+    const originalPath = process.env.PATH
+    process.env.PATH = fakeBin
+    try {
+      vi.resetModules()
+      const mod = await import('../../../src/services/sandbox/command')
+      mod.overrideSandboxExecutableTrustValidator(() => true)
+      const { resolveSandboxExecutable, sandboxExecutablePath } = mod
+
+      expect(resolveSandboxExecutable()).toBe(path.join(fakeBin, 'msb'))
+      expect(sandboxExecutablePath()).toBe(path.join(fakeBin, 'msb'))
+    } finally {
+      process.env.PATH = originalPath
+      rmSync(fakeBin, { recursive: true, force: true })
+    }
+  })
+
+  it('returns null when a relative MSB_PATH has no executable candidate on PATH', async () => {
+    const originalPath = process.env.PATH
+    process.env.PATH = '/nonexistent-ocm-bin'
+    try {
+      vi.resetModules()
+      const { resolveSandboxExecutable, sandboxExecutablePath } = await import('../../../src/services/sandbox/command')
+
+      expect(resolveSandboxExecutable()).toBeNull()
+      expect(sandboxExecutablePath()).toBe(ENV.SANDBOX.MSB_PATH)
+    } finally {
+      process.env.PATH = originalPath
+    }
+  })
+
+  it('returns an absolute MSB_PATH verbatim without consulting PATH', async () => {
+    const fakeBin = mkdtempSync(path.join(tmpdir(), 'ocm-msb-abs-'))
+    const msbPath = path.join(fakeBin, 'my msb')
+    writeFileSync(msbPath, '#!/bin/sh\nexit 0\n', { mode: 0o755 })
+    process.env.MSB_PATH = msbPath
+    try {
+      vi.resetModules()
+      const mod = await import('../../../src/services/sandbox/command')
+      mod.overrideSandboxExecutableTrustValidator(() => true)
+      const { resolveSandboxExecutable, sandboxExecutablePath } = mod
+
+      expect(resolveSandboxExecutable()).toBe(msbPath)
+      expect(sandboxExecutablePath()).toBe(msbPath)
+    } finally {
+      delete process.env.MSB_PATH
+      rmSync(fakeBin, { recursive: true, force: true })
+    }
+  })
+
+  it('rejects an msb executable located inside a mounted project root', async () => {
+    const tmp = mkdtempSync(path.join(tmpdir(), 'ocm-msb-mount-'))
+    const originalWorkspacePath = process.env.WORKSPACE_PATH
+    const originalPath = process.env.PATH
+    try {
+      const repos = path.join(tmp, 'workspace', 'repos')
+      mkdirSync(path.join(repos, 'bin'), { recursive: true })
+      writeFileSync(path.join(repos, 'bin', 'msb'), '#!/bin/sh\nexit 0\n', { mode: 0o755 })
+
+      process.env.WORKSPACE_PATH = path.join(tmp, 'workspace')
+      process.env.PATH = path.join(repos, 'bin')
+      vi.resetModules()
+      const { resolveSandboxExecutable, sandboxExecutablePath } = await import('../../../src/services/sandbox/command')
+
+      expect(resolveSandboxExecutable()).toBeNull()
+      expect(sandboxExecutablePath()).toBe(ENV.SANDBOX.MSB_PATH)
+    } finally {
+      if (originalWorkspacePath === undefined) {
+        delete process.env.WORKSPACE_PATH
+      } else {
+        process.env.WORKSPACE_PATH = originalWorkspacePath
+      }
+      process.env.PATH = originalPath
+      rmSync(tmp, { recursive: true, force: true })
+    }
+  })
+
+  it('rejects an msb executable whose symlink resolves into a mounted project root', async () => {
+    const tmp = mkdtempSync(path.join(tmpdir(), 'ocm-msb-symlink-'))
+    const originalWorkspacePath = process.env.WORKSPACE_PATH
+    const originalPath = process.env.PATH
+    try {
+      const repos = path.join(tmp, 'workspace', 'repos')
+      const bin = path.join(tmp, 'bin')
+      mkdirSync(path.join(repos, 'evil'), { recursive: true })
+      mkdirSync(bin)
+      writeFileSync(path.join(repos, 'evil', 'msb'), '#!/bin/sh\nexit 0\n', { mode: 0o755 })
+      symlinkSync(path.join(repos, 'evil', 'msb'), path.join(bin, 'msb'))
+
+      process.env.WORKSPACE_PATH = path.join(tmp, 'workspace')
+      process.env.PATH = bin
+      vi.resetModules()
+      const { resolveSandboxExecutable, sandboxExecutablePath } = await import('../../../src/services/sandbox/command')
+
+      expect(resolveSandboxExecutable()).toBeNull()
+      expect(sandboxExecutablePath()).toBe(ENV.SANDBOX.MSB_PATH)
+    } finally {
+      if (originalWorkspacePath === undefined) {
+        delete process.env.WORKSPACE_PATH
+      } else {
+        process.env.WORKSPACE_PATH = originalWorkspacePath
+      }
+      process.env.PATH = originalPath
+      rmSync(tmp, { recursive: true, force: true })
+    }
+  })
+
+  it('rejects an msb executable writable by the manager user or a parent directory', async () => {
+    const fakeBin = mkdtempSync(path.join(tmpdir(), 'ocm-msb-writable-'))
+    writeFileSync(path.join(fakeBin, 'msb'), '#!/bin/sh\nexit 0\n', { mode: 0o755 })
+    const originalPath = process.env.PATH
+    process.env.PATH = fakeBin
+    try {
+      vi.resetModules()
+      const { resolveSandboxExecutable, sandboxExecutablePath } = await import('../../../src/services/sandbox/command')
+
+      expect(resolveSandboxExecutable()).toBeNull()
+      expect(sandboxExecutablePath()).toBe(ENV.SANDBOX.MSB_PATH)
+    } finally {
+      process.env.PATH = originalPath
+      rmSync(fakeBin, { recursive: true, force: true })
+    }
+  })
+})
+
+describe('sandbox network policy attestation helpers', () => {
+  const publicPolicy = {
+    default_egress: 'deny',
+    default_ingress: 'allow',
+    rules: [
+      { direction: 'egress', destination: { group: 'dns' }, protocols: [], ports: [], action: 'allow' },
+      { direction: 'egress', destination: { group: 'public' }, protocols: [], ports: [], action: 'allow' },
+    ],
+  }
+
+  it('resolves the public profile to the deny-by-default fixture policy', () => {
+    expect(resolveExpectedSandboxNetworkPolicy('public')).toEqual(publicPolicy)
+  })
+
+  it('composes comma-separated profiles with a single DNS rule in profile order', () => {
+    expect(resolveExpectedSandboxNetworkPolicy('public,private,host')).toEqual({
+      default_egress: 'deny',
+      default_ingress: 'allow',
+      rules: [
+        { direction: 'egress', destination: { group: 'dns' }, protocols: [], ports: [], action: 'allow' },
+        { direction: 'egress', destination: { group: 'public' }, protocols: [], ports: [], action: 'allow' },
+        { direction: 'egress', destination: { group: 'private' }, protocols: [], ports: [], action: 'allow' },
+        { direction: 'egress', destination: { group: 'host' }, protocols: [], ports: [], action: 'allow' },
+      ],
+    })
+  })
+
+  it('deduplicates repeated profiles', () => {
+    expect(resolveExpectedSandboxNetworkPolicy('public, public')).toEqual(publicPolicy)
+  })
+
+  it('returns null for terminal, unknown, or empty profiles', () => {
+    expect(resolveExpectedSandboxNetworkPolicy('all')).toBeNull()
+    expect(resolveExpectedSandboxNetworkPolicy('none')).toBeNull()
+    expect(resolveExpectedSandboxNetworkPolicy('public,unknown')).toBeNull()
+    expect(resolveExpectedSandboxNetworkPolicy('')).toBeNull()
+    expect(resolveExpectedSandboxNetworkPolicy('  ')).toBeNull()
+  })
+
+  it('accepts the source-faithful public policy fixture', () => {
+    expect(sandboxNetworkPolicyMismatch(publicPolicy, resolveExpectedSandboxNetworkPolicy('public')!)).toBeNull()
+  })
+
+  it('rejects a policy with an allow-all wildcard rule', () => {
+    const inspected = {
+      ...publicPolicy,
+      rules: [
+        publicPolicy.rules[0],
+        { direction: 'egress', destination: { any: true }, protocols: [], ports: [], action: 'allow' },
+      ],
+    }
+    expect(sandboxNetworkPolicyMismatch(inspected, resolveExpectedSandboxNetworkPolicy('public')!)).toContain('network policy')
+  })
+
+  it('rejects a policy whose profile rule is broadened to specific protocols and ports', () => {
+    const inspected = {
+      ...publicPolicy,
+      rules: [
+        publicPolicy.rules[0],
+        { direction: 'egress', destination: { group: 'public' }, protocols: ['tcp'], ports: [443], action: 'allow' },
+      ],
+    }
+    expect(sandboxNetworkPolicyMismatch(inspected, resolveExpectedSandboxNetworkPolicy('public')!)).toContain('network policy')
+  })
+
+  it('rejects a policy carrying stale rules from another profile', () => {
+    const inspected = {
+      ...publicPolicy,
+      rules: [
+        ...publicPolicy.rules,
+        { direction: 'egress', destination: { group: 'private' }, protocols: [], ports: [], action: 'allow' },
+      ],
+    }
+    expect(sandboxNetworkPolicyMismatch(inspected, resolveExpectedSandboxNetworkPolicy('public')!)).toContain('network policy')
+  })
+
+  it('rejects a policy missing a required rule', () => {
+    const inspected = {
+      ...publicPolicy,
+      rules: [publicPolicy.rules[0]],
+    }
+    expect(sandboxNetworkPolicyMismatch(inspected, resolveExpectedSandboxNetworkPolicy('public')!)).toContain('network policy')
+  })
+
+  it('rejects an allow egress default with an unrestricted-egress reason', () => {
+    const inspected = { default_egress: 'allow', default_ingress: 'allow', rules: [] }
+    const mismatch = sandboxNetworkPolicyMismatch(inspected, resolveExpectedSandboxNetworkPolicy('public')!)
+    expect(mismatch).toContain('unrestricted egress')
+  })
+
+  it('rejects an altered ingress default', () => {
+    const inspected = { ...publicPolicy, default_ingress: 'deny' }
+    expect(sandboxNetworkPolicyMismatch(inspected, resolveExpectedSandboxNetworkPolicy('public')!)).toContain('default_ingress')
+  })
+
+  it('rejects a missing or malformed policy', () => {
+    const expected = resolveExpectedSandboxNetworkPolicy('public')!
+    expect(sandboxNetworkPolicyMismatch(undefined, expected)).toContain('missing or malformed')
+    expect(sandboxNetworkPolicyMismatch({ default_egress: 'deny' }, expected)).toContain('missing or malformed')
+    expect(sandboxNetworkPolicyMismatch({ ...publicPolicy, rules: 'not-an-array' }, expected)).toContain('missing or malformed')
+    expect(sandboxNetworkPolicyMismatch(
+      { ...publicPolicy, rules: [{ direction: 'egress', destination: { group: 'dns' }, action: 'allow' }] },
+      expected,
+    )).toContain('network policy')
+  })
+})

@@ -3,6 +3,14 @@ import type { Database } from 'bun:sqlite'
 import { ENV } from '@opencode-manager/shared/config/env'
 import { createInternalTokenMiddleware } from '../auth/internal-token-middleware'
 import type { SettingsService } from '../services/settings'
+import { opencodeServerManager } from '../services/opencode-single-server'
+import {
+  decideSandboxMutationBody,
+  decideSandboxProxyBlock,
+  isSandboxAuthWrite,
+  isSandboxConfigMutation,
+  isSandboxMcpAdd,
+} from '../services/opencode/proxy-policy'
 
 const HOP_BY_HOP_HEADERS = new Set([
   'connection',
@@ -25,6 +33,10 @@ export function createOpenCodeProxyRoutes(db: Database, settingsService: Setting
   app.use('/*', createInternalTokenMiddleware(db))
 
   app.all('/*', async (c) => {
+    if (!opencodeServerManager.isLifecycleInitialized()) {
+      return c.json({ error: 'OpenCode lifecycle initialization is incomplete; refusing to proxy to an unmanaged server' }, 503)
+    }
+
     const connectionHeader = c.req.header('connection')?.toLowerCase() ?? ''
     const upgradeHeader = c.req.header('upgrade')?.toLowerCase() ?? ''
     if (connectionHeader.includes('upgrade') && upgradeHeader === 'websocket') {
@@ -33,6 +45,11 @@ export function createOpenCodeProxyRoutes(db: Database, settingsService: Setting
 
     const url = new URL(c.req.url)
     const pathSuffix = url.pathname.replace(/^\/api\/opencode-proxy/, '') || '/'
+    const enforced = opencodeServerManager.isSandboxEnforced()
+    const decision = decideSandboxProxyBlock(enforced, c.req.method, pathSuffix)
+    if (decision.blocked) {
+      return c.json({ error: decision.reason }, 403)
+    }
     const upstreamUrl = `http://127.0.0.1:${ENV.OPENCODE.PORT}${pathSuffix}${url.search}`
 
     const headers: Record<string, string> = {}
@@ -49,7 +66,16 @@ export function createOpenCodeProxyRoutes(db: Database, settingsService: Setting
 
     let requestBody: RequestInit['body'] = undefined
     if (c.req.method !== 'GET' && c.req.method !== 'HEAD') {
-      requestBody = c.req.raw.body
+      if (isSandboxConfigMutation(enforced, c.req.method, pathSuffix) || isSandboxMcpAdd(enforced, c.req.method, pathSuffix) || isSandboxAuthWrite(enforced, c.req.method, pathSuffix)) {
+        const rawBody = await c.req.text()
+        const bodyDecision = decideSandboxMutationBody(enforced, c.req.method, pathSuffix, rawBody)
+        if (bodyDecision.kind === 'reject') {
+          return c.json({ error: bodyDecision.reason }, 403)
+        }
+        requestBody = bodyDecision.kind === 'sanitized' ? bodyDecision.body : rawBody
+      } else {
+        requestBody = c.req.raw.body
+      }
     }
 
     try {

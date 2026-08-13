@@ -1,4 +1,4 @@
-import { describe, expect, it, vi } from 'vitest'
+import { beforeEach, describe, expect, it, vi } from 'vitest'
 import { ensureDirectoryExists, writeFileContent } from '../../src/services/file-operations'
 import { OpenCodeSupervisor } from '../../src/services/opencode-supervisor'
 
@@ -36,6 +36,8 @@ interface FakeManager {
   reloadConfig: ReturnType<typeof vi.fn>
   clearStartupError: ReturnType<typeof vi.fn>
   getLastStartupError: ReturnType<typeof vi.fn>
+  isLastStartupErrorNonRecoverable: ReturnType<typeof vi.fn>
+  setLifecycleInitialized: ReturnType<typeof vi.fn>
   getPort: ReturnType<typeof vi.fn>
   getVersion: ReturnType<typeof vi.fn>
   getMinVersion: ReturnType<typeof vi.fn>
@@ -51,6 +53,10 @@ interface FakeSettingsService {
 }
 
 describe('OpenCodeSupervisor', () => {
+  beforeEach(() => {
+    vi.clearAllMocks()
+  })
+
   const createManager = (): FakeManager => ({
     start: vi.fn().mockResolvedValue(undefined),
     stop: vi.fn().mockResolvedValue(undefined),
@@ -60,6 +66,8 @@ describe('OpenCodeSupervisor', () => {
     reloadConfig: vi.fn().mockResolvedValue(undefined),
     clearStartupError: vi.fn(),
     getLastStartupError: vi.fn(() => null),
+    isLastStartupErrorNonRecoverable: vi.fn(() => false),
+    setLifecycleInitialized: vi.fn(),
     getPort: vi.fn(() => 5551),
     getVersion: vi.fn(() => '1.0.137'),
     getMinVersion: vi.fn(() => '1.0.137'),
@@ -122,6 +130,65 @@ describe('OpenCodeSupervisor', () => {
     await supervisor.stop()
   })
 
+  it('opens the proxy lifecycle gate when the managed child is attested healthy', async () => {
+    const manager = createManager()
+    const settings = createSettings()
+    const supervisor = new OpenCodeSupervisor(manager as unknown as never, settings as unknown as never, {
+      failureThreshold: 1,
+      watchEnabled: false,
+    })
+
+    await supervisor.start()
+
+    expect(manager.setLifecycleInitialized).toHaveBeenLastCalledWith(true)
+  })
+
+  it('keeps the proxy lifecycle gate closed when startup fails non-recoverably', async () => {
+    const manager = createManager()
+    const settings = createSettings()
+    const supervisor = new OpenCodeSupervisor(manager as unknown as never, settings as unknown as never, {
+      failureThreshold: 1,
+      watchEnabled: false,
+      userId: 'default',
+    })
+
+    manager.start.mockRejectedValueOnce(new Error('OpenCode version 1.18.15 does not support sandboxed bash tool rewriting'))
+    manager.isLastStartupErrorNonRecoverable.mockReturnValue(true)
+
+    const status = await supervisor.start()
+
+    expect(status.healthy).toBe(false)
+    expect(manager.setLifecycleInitialized).toHaveBeenLastCalledWith(false)
+  })
+
+  it('closes the proxy lifecycle gate when recovery is exhausted and reopens it once health returns', async () => {
+    const manager = createManager()
+    const settings = createSettings()
+    const supervisor = new OpenCodeSupervisor(manager as unknown as never, settings as unknown as never, {
+      failureThreshold: 1,
+      watchEnabled: false,
+      userId: 'default',
+    })
+
+    manager.start.mockRejectedValueOnce(new Error('startup failed'))
+    manager.checkHealth
+      .mockResolvedValueOnce(false)
+      .mockResolvedValueOnce(false)
+      .mockResolvedValueOnce(false)
+      .mockResolvedValueOnce(false)
+      .mockResolvedValueOnce(true)
+
+    const failed = await supervisor.start()
+    expect(failed.healthy).toBe(false)
+    expect(manager.setLifecycleInitialized).toHaveBeenLastCalledWith(false)
+
+    const recovered = await supervisor.checkNow('manual')
+    expect(recovered.healthy).toBe(true)
+    expect(manager.setLifecycleInitialized).toHaveBeenLastCalledWith(true)
+
+    await supervisor.stop()
+  })
+
   it('does not recover polling failures until the threshold is reached', async () => {
     const manager = createManager()
     const settings = createSettings()
@@ -137,6 +204,35 @@ describe('OpenCodeSupervisor', () => {
     expect(status.state).toBe('unhealthy')
     expect(status.failureCount).toBe(1)
     expect(manager.restart).not.toHaveBeenCalled()
+    expect(manager.setLifecycleInitialized).toHaveBeenLastCalledWith(false)
+  })
+
+  it('closes the proxy lifecycle gate on a below-threshold health failure and reopens it once health returns', async () => {
+    const manager = createManager()
+    const settings = createSettings()
+    const supervisor = new OpenCodeSupervisor(manager as unknown as never, settings as unknown as never, {
+      failureThreshold: 2,
+      watchEnabled: false,
+    })
+
+    await supervisor.start()
+    expect(manager.setLifecycleInitialized).toHaveBeenLastCalledWith(true)
+
+    manager.checkHealth.mockResolvedValueOnce(false)
+
+    const unhealthy = await supervisor.checkNow('manual')
+
+    expect(unhealthy.state).toBe('unhealthy')
+    expect(unhealthy.failureCount).toBe(1)
+    expect(manager.setLifecycleInitialized).toHaveBeenLastCalledWith(false)
+    expect(manager.restart).not.toHaveBeenCalled()
+
+    manager.checkHealth.mockResolvedValueOnce(true)
+
+    const recovered = await supervisor.checkNow('manual')
+
+    expect(recovered.healthy).toBe(true)
+    expect(manager.setLifecycleInitialized).toHaveBeenLastCalledWith(true)
   })
 
   it('captures debug state before debug recovery', async () => {
@@ -170,5 +266,307 @@ describe('OpenCodeSupervisor', () => {
     await supervisor.checkNow('manual')
 
     expect(manager.checkHealth).not.toHaveBeenCalled()
+  })
+
+  it('does not run configuration recovery for a non-recoverable startup failure', async () => {
+    const manager = createManager()
+    const settings = createSettings()
+    const supervisor = new OpenCodeSupervisor(manager as unknown as never, settings as unknown as never, {
+      failureThreshold: 1,
+      userId: 'default',
+    })
+
+    manager.start.mockRejectedValueOnce(new Error('OpenCode version 1.18.15 does not support sandboxed bash tool rewriting'))
+    manager.isLastStartupErrorNonRecoverable.mockReturnValue(true)
+
+    const status = await supervisor.start()
+
+    expect(status.state).toBe('failed')
+    expect(status.healthy).toBe(false)
+    expect(status.lastError).toContain('does not support sandboxed bash tool rewriting')
+    expect(manager.restart).not.toHaveBeenCalled()
+    expect(settings.archiveBrokenConfig).not.toHaveBeenCalled()
+    expect(settings.restoreToLastKnownGoodConfig).not.toHaveBeenCalled()
+    expect(settings.updateOpenCodeConfig).not.toHaveBeenCalled()
+    expect(settings.createOpenCodeConfig).not.toHaveBeenCalled()
+    expect(writeFileContent).not.toHaveBeenCalled()
+
+    await supervisor.stop()
+  })
+
+  it('does not run configuration recovery when a manual restart fails non-recoverably', async () => {
+    const manager = createManager()
+    const settings = createSettings()
+    const supervisor = new OpenCodeSupervisor(manager as unknown as never, settings as unknown as never, {
+      failureThreshold: 1,
+      userId: 'default',
+    })
+
+    manager.restart.mockRejectedValueOnce(new Error('Failed to quarantine untrusted OpenCode plugins'))
+    manager.isLastStartupErrorNonRecoverable.mockReturnValue(true)
+
+    const status = await supervisor.restart('settings_restart')
+
+    expect(status.state).toBe('failed')
+    expect(settings.archiveBrokenConfig).not.toHaveBeenCalled()
+    expect(settings.restoreToLastKnownGoodConfig).not.toHaveBeenCalled()
+    expect(settings.updateOpenCodeConfig).not.toHaveBeenCalled()
+    expect(settings.createOpenCodeConfig).not.toHaveBeenCalled()
+    expect(writeFileContent).not.toHaveBeenCalled()
+
+    await supervisor.stop()
+  })
+
+  it('stops the recovery ladder when a recovery restart fails non-recoverably', async () => {
+    const manager = createManager()
+    const settings = createSettings()
+    const supervisor = new OpenCodeSupervisor(manager as unknown as never, settings as unknown as never, {
+      failureThreshold: 1,
+      userId: 'default',
+    })
+
+    manager.start.mockRejectedValueOnce(new Error('startup failed'))
+    manager.checkHealth.mockResolvedValue(false)
+    manager.restart.mockImplementation(async () => {
+      manager.isLastStartupErrorNonRecoverable.mockReturnValue(true)
+      throw new Error('Failed to install the sandbox OpenCode plugin')
+    })
+
+    const status = await supervisor.start()
+
+    expect(status.state).toBe('failed')
+    expect(status.lastError).toContain('Failed to install the sandbox OpenCode plugin')
+    expect(manager.restart).toHaveBeenCalledTimes(1)
+    expect(settings.archiveBrokenConfig).not.toHaveBeenCalled()
+    expect(settings.restoreToLastKnownGoodConfig).not.toHaveBeenCalled()
+    expect(settings.updateOpenCodeConfig).not.toHaveBeenCalled()
+    expect(settings.createOpenCodeConfig).not.toHaveBeenCalled()
+    expect(writeFileContent).not.toHaveBeenCalled()
+
+    await supervisor.stop()
+  })
+
+  it('still follows the normal recovery ladder for a recoverable startup failure', async () => {
+    const manager = createManager()
+    const settings = createSettings()
+    const supervisor = new OpenCodeSupervisor(manager as unknown as never, settings as unknown as never, {
+      failureThreshold: 1,
+      userId: 'default',
+    })
+
+    manager.start.mockRejectedValueOnce(new Error('OpenCode config validation failed: command.review: Invalid'))
+    manager.checkHealth
+      .mockResolvedValueOnce(false)
+      .mockResolvedValueOnce(false)
+      .mockResolvedValueOnce(true)
+
+    const status = await supervisor.start()
+
+    expect(status.state).toBe('healthy')
+    expect(settings.archiveBrokenConfig).toHaveBeenCalledWith('default')
+    expect(settings.restoreToLastKnownGoodConfig).toHaveBeenCalledWith('default')
+    expect(settings.updateOpenCodeConfig).toHaveBeenCalled()
+    expect(writeFileContent).toHaveBeenCalled()
+
+    await supervisor.stop()
+  })
+
+  it('executes a restart requested during an active restart after the active restart completes', async () => {
+    const manager = createManager()
+    const settings = createSettings()
+    const supervisor = new OpenCodeSupervisor(manager as unknown as never, settings as unknown as never, {
+      failureThreshold: 1,
+      watchEnabled: false,
+    })
+
+    let releaseRestart!: () => void
+    manager.restart.mockImplementationOnce(
+      () => new Promise<void>((resolve) => { releaseRestart = resolve }),
+    )
+    manager.checkHealth.mockResolvedValue(true)
+
+    const first = supervisor.restart('settings_restart')
+    await vi.waitFor(() => expect(manager.restart).toHaveBeenCalledTimes(1))
+
+    const second = supervisor.restart('manual')
+    await new Promise((resolve) => setTimeout(resolve, 20))
+    expect(manager.restart).toHaveBeenCalledTimes(1)
+
+    releaseRestart()
+
+    const [firstStatus, secondStatus] = await Promise.all([first, second])
+
+    expect(manager.restart).toHaveBeenCalledTimes(2)
+    expect(firstStatus.healthy).toBe(true)
+    expect(secondStatus.healthy).toBe(true)
+  })
+
+  it('executes a reload requested during an active reload after the active reload completes', async () => {
+    const manager = createManager()
+    const settings = createSettings()
+    const supervisor = new OpenCodeSupervisor(manager as unknown as never, settings as unknown as never, {
+      failureThreshold: 1,
+      watchEnabled: false,
+    })
+
+    let releaseReload!: () => void
+    manager.reloadConfig.mockImplementationOnce(
+      () => new Promise<void>((resolve) => { releaseReload = resolve }),
+    )
+    manager.checkHealth.mockResolvedValue(true)
+
+    const first = supervisor.reloadConfig('settings_reload')
+    await vi.waitFor(() => expect(manager.reloadConfig).toHaveBeenCalledTimes(1))
+
+    const second = supervisor.reloadConfig('manual')
+    await new Promise((resolve) => setTimeout(resolve, 20))
+    expect(manager.reloadConfig).toHaveBeenCalledTimes(1)
+
+    releaseReload()
+
+    const [firstStatus, secondStatus] = await Promise.all([first, second])
+
+    expect(manager.reloadConfig).toHaveBeenCalledTimes(2)
+    expect(firstStatus.healthy).toBe(true)
+    expect(secondStatus.healthy).toBe(true)
+  })
+
+  it('closes the proxy lifecycle gate for the whole restart transition and reopens once healthy', async () => {
+    const manager = createManager()
+    const settings = createSettings()
+    const supervisor = new OpenCodeSupervisor(manager as unknown as never, settings as unknown as never, {
+      failureThreshold: 1,
+      watchEnabled: false,
+    })
+
+    await supervisor.start()
+    expect(manager.setLifecycleInitialized).toHaveBeenLastCalledWith(true)
+
+    let releaseRestart!: () => void
+    manager.restart.mockImplementationOnce(
+      () => new Promise<void>((resolve) => { releaseRestart = resolve }),
+    )
+    manager.checkHealth.mockResolvedValue(true)
+
+    const restart = supervisor.restart('settings_restart')
+    await vi.waitFor(() => expect(manager.restart).toHaveBeenCalledTimes(1))
+    expect(manager.setLifecycleInitialized).toHaveBeenLastCalledWith(false)
+
+    releaseRestart()
+    const status = await restart
+
+    expect(status.healthy).toBe(true)
+    expect(manager.setLifecycleInitialized).toHaveBeenLastCalledWith(true)
+  })
+
+  it('closes the proxy lifecycle gate for the whole reload transition and reopens once healthy', async () => {
+    const manager = createManager()
+    const settings = createSettings()
+    const supervisor = new OpenCodeSupervisor(manager as unknown as never, settings as unknown as never, {
+      failureThreshold: 1,
+      watchEnabled: false,
+    })
+
+    await supervisor.start()
+    expect(manager.setLifecycleInitialized).toHaveBeenLastCalledWith(true)
+
+    let releaseReload!: () => void
+    manager.reloadConfig.mockImplementationOnce(
+      () => new Promise<void>((resolve) => { releaseReload = resolve }),
+    )
+    manager.checkHealth.mockResolvedValue(true)
+
+    const reload = supervisor.reloadConfig('settings_reload')
+    await vi.waitFor(() => expect(manager.reloadConfig).toHaveBeenCalledTimes(1))
+    expect(manager.setLifecycleInitialized).toHaveBeenLastCalledWith(false)
+
+    releaseReload()
+    const status = await reload
+
+    expect(status.healthy).toBe(true)
+    expect(manager.setLifecycleInitialized).toHaveBeenLastCalledWith(true)
+  })
+
+  it('closes the proxy lifecycle gate while stopping and never reopens it', async () => {
+    const manager = createManager()
+    const settings = createSettings()
+    const supervisor = new OpenCodeSupervisor(manager as unknown as never, settings as unknown as never, {
+      failureThreshold: 1,
+      watchEnabled: false,
+    })
+
+    await supervisor.start()
+    expect(manager.setLifecycleInitialized).toHaveBeenLastCalledWith(true)
+
+    let releaseStop!: () => void
+    manager.stop.mockImplementationOnce(
+      () => new Promise<void>((resolve) => { releaseStop = resolve }),
+    )
+
+    const stopPromise = supervisor.stop()
+    await vi.waitFor(() => expect(manager.stop).toHaveBeenCalledTimes(1))
+    expect(manager.setLifecycleInitialized).toHaveBeenLastCalledWith(false)
+
+    releaseStop()
+    await stopPromise
+    expect(manager.setLifecycleInitialized).toHaveBeenLastCalledWith(false)
+  })
+
+  it('closes the proxy lifecycle gate while recovering a polling failure until health returns', async () => {
+    const manager = createManager()
+    const settings = createSettings()
+    const supervisor = new OpenCodeSupervisor(manager as unknown as never, settings as unknown as never, {
+      failureThreshold: 1,
+      watchEnabled: false,
+      userId: 'default',
+    })
+
+    await supervisor.start()
+    expect(manager.setLifecycleInitialized).toHaveBeenLastCalledWith(true)
+
+    let releaseRestart!: () => void
+    manager.restart.mockImplementationOnce(
+      () => new Promise<void>((resolve) => { releaseRestart = resolve }),
+    )
+    manager.checkHealth.mockResolvedValueOnce(false)
+
+    const recovering = supervisor.checkNow('manual')
+    await vi.waitFor(() => expect(manager.restart).toHaveBeenCalledTimes(1))
+    expect(manager.setLifecycleInitialized).toHaveBeenLastCalledWith(false)
+
+    releaseRestart()
+    const status = await recovering
+
+    expect(status.healthy).toBe(true)
+    expect(manager.setLifecycleInitialized).toHaveBeenLastCalledWith(true)
+  })
+
+  it('executes a stop requested during an active restart after the restart completes', async () => {
+    const manager = createManager()
+    const settings = createSettings()
+    const supervisor = new OpenCodeSupervisor(manager as unknown as never, settings as unknown as never, {
+      failureThreshold: 1,
+      watchEnabled: false,
+    })
+
+    let releaseRestart!: () => void
+    manager.restart.mockImplementationOnce(
+      () => new Promise<void>((resolve) => { releaseRestart = resolve }),
+    )
+    manager.checkHealth.mockResolvedValue(true)
+
+    const restart = supervisor.restart('manual')
+    await vi.waitFor(() => expect(manager.restart).toHaveBeenCalledTimes(1))
+
+    const stopPromise = supervisor.stop()
+    await new Promise((resolve) => setTimeout(resolve, 20))
+    expect(manager.stop).not.toHaveBeenCalled()
+
+    releaseRestart()
+
+    await Promise.all([restart, stopPromise])
+
+    expect(manager.restart).toHaveBeenCalledTimes(1)
+    expect(manager.stop).toHaveBeenCalledTimes(1)
   })
 })
