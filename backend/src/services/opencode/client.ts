@@ -1,6 +1,7 @@
 import { logger } from '../../utils/logger'
 import { ENV } from '@opencode-manager/shared/config/env'
 import { getOpenCodeBasicAuthHeader, type OpenCodePasswordResolver } from './auth'
+import { getOpenCodeUpstreamBaseUrl } from './upstream'
 
 export interface ForwardRequest {
   method: string
@@ -35,8 +36,6 @@ export interface OpenCodeClient {
   postJson<T>(path: string, body: unknown, opts?: JsonRequestOptions): Promise<T>
   setProviderAuth(providerId: string, apiKey: string): Promise<boolean>
   deleteProviderAuth(providerId: string): Promise<boolean>
-  startMcpAuth(serverName: string, directory?: string): Promise<Response>
-  authenticateMcp(serverName: string, directory?: string): Promise<Response>
 }
 
 export type OpenCodeClientHost = string | (() => string)
@@ -234,28 +233,6 @@ export class FetchOpenCodeClient implements OpenCodeClient {
     logger.error(`Failed to delete OpenCode auth: ${response.status} ${response.statusText}`)
     return false
   }
-
-  async startMcpAuth(serverName: string, directory?: string): Promise<Response> {
-    return this.request({
-      method: 'POST',
-      path: `/mcp/${encodeURIComponent(serverName)}/auth`,
-      headers: { 'Content-Type': 'application/json' },
-      directory,
-    })
-  }
-
-  async authenticateMcp(serverName: string, directory?: string): Promise<Response> {
-    return this.request({
-      method: 'POST',
-      path: `/mcp/${encodeURIComponent(serverName)}/auth/authenticate`,
-      headers: { 'Content-Type': 'application/json' },
-      directory,
-    })
-  }
-}
-
-function formatOpenCodeHostForUrl(host: string): string {
-  return host.includes(':') ? `[${host}]` : host
 }
 
 export function createOpenCodeClient(
@@ -263,11 +240,7 @@ export function createOpenCodeClient(
   host?: OpenCodeClientHost,
 ): OpenCodeClient {
   const resolveConfiguredHost = typeof host === 'function' ? host : () => (host ?? ENV.OPENCODE.HOST)
-  const baseUrl: OpenCodeClientHost = () => {
-    const configuredHost = resolveConfiguredHost()
-    const normalized = configuredHost === '0.0.0.0' ? '127.0.0.1' : configuredHost
-    return `http://${formatOpenCodeHostForUrl(normalized)}:${ENV.OPENCODE.PORT}`
-  }
+  const baseUrl: OpenCodeClientHost = () => getOpenCodeUpstreamBaseUrl(false, resolveConfiguredHost())
   const passwordResolver = typeof passwordOverride === 'function' ? passwordOverride : undefined
   const password = typeof passwordOverride === 'string' ? passwordOverride : ENV.OPENCODE.SERVER_PASSWORD
   const basicAuth = getOpenCodeBasicAuthHeader(password)

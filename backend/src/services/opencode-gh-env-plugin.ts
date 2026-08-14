@@ -1,9 +1,5 @@
-import path from 'path'
-import { writeFileAtomic } from '../utils/fs-safe'
-
-const PLUGIN_FILENAME = 'ocm-gh-env.js'
-
-const PLUGIN_SOURCE = `const TTL_MS = 5000
+export function buildGhEnvPluginSource(): string {
+  return `const TTL_MS = 5000
 let cache = new Map()
 
 async function fetchGhEnv(cwd) {
@@ -39,11 +35,4 @@ export default async function () {
   }
 }
 `
-
-export function getGhEnvPluginDir(configHome: string): string {
-  return path.join(configHome, 'opencode', 'plugin')
-}
-
-export async function installGhEnvPlugin(configHome: string): Promise<void> {
-  await writeFileAtomic(path.join(getGhEnvPluginDir(configHome), PLUGIN_FILENAME), PLUGIN_SOURCE)
 }

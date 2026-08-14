@@ -206,6 +206,7 @@ describe('OpenCodeClient', () => {
 
     it('honours an explicit host override instead of OPENCODE_HOST', async () => {
       const originalFetch = globalThis.fetch
+      const originalHost = ENV.OPENCODE.HOST
       Object.defineProperty(ENV.OPENCODE, 'HOST', { value: '192.168.1.10', configurable: true, writable: true })
       let capturedUrl: URL | undefined
       const fetchFn = async (input: URL | Request | string) => {
@@ -220,7 +221,7 @@ describe('OpenCodeClient', () => {
 
         expect(capturedUrl?.origin).toBe('http://127.0.0.1:5551')
       } finally {
-        Object.defineProperty(ENV.OPENCODE, 'HOST', { value: '127.0.0.1', configurable: true, writable: true })
+        Object.defineProperty(ENV.OPENCODE, 'HOST', { value: originalHost, configurable: true, writable: true })
         Object.defineProperty(globalThis, 'fetch', { value: originalFetch, configurable: true, writable: true })
       }
     })
@@ -460,42 +461,6 @@ describe('OpenCodeClient', () => {
 
       const result = await client.deleteProviderAuth('test-provider')
       expect(result).toBe(false)
-    })
-  })
-
-  describe('startMcpAuth', () => {
-    it('should build path with encoded serverName and directory param', async () => {
-      const mockResponse = new Response(JSON.stringify({}), { status: 200 })
-      let capturedUrl: URL | undefined
-      const fetchFn = async (input: URL | Request | string) => {
-        capturedUrl = input instanceof URL ? input : new URL(input.toString())
-        return mockResponse
-      }
-      const client = new FetchOpenCodeClient({ baseUrl, basicAuth: '', fetchFn: fetchFn as unknown as typeof fetch })
-
-      const result = await client.startMcpAuth('foo bar', '/dir')
-
-      expect(capturedUrl?.pathname).toBe('/mcp/foo%20bar/auth')
-      expect(capturedUrl?.searchParams.get('directory')).toBe('/dir')
-      expect(result).toBeInstanceOf(Response)
-    })
-  })
-
-  describe('authenticateMcp', () => {
-    it('should build path with auth/authenticate suffix', async () => {
-      const mockResponse = new Response(JSON.stringify({}), { status: 200 })
-      let capturedUrl: URL | undefined
-      const fetchFn = async (input: URL | Request | string) => {
-        capturedUrl = input instanceof URL ? input : new URL(input.toString())
-        return mockResponse
-      }
-      const client = new FetchOpenCodeClient({ baseUrl, basicAuth: '', fetchFn: fetchFn as unknown as typeof fetch })
-
-      const result = await client.authenticateMcp('name', undefined)
-
-      expect(capturedUrl?.pathname).toBe('/mcp/name/auth/authenticate')
-      expect(capturedUrl?.searchParams.has('directory')).toBe(false)
-      expect(result).toBeInstanceOf(Response)
     })
   })
 })

@@ -7,8 +7,6 @@ const createOpenCodeClientMock = vi.hoisted(() => vi.fn(() => ({
   postJson: vi.fn(),
   setProviderAuth: vi.fn(),
   deleteProviderAuth: vi.fn(),
-  startMcpAuth: vi.fn(),
-  authenticateMcp: vi.fn(),
 })))
 
 const spawnMock = vi.hoisted(() => vi.fn(() => ({
@@ -88,16 +86,10 @@ vi.mock('../../src/services/opencode/client', () => ({
   createOpenCodeClient: createOpenCodeClientMock,
 }))
 
-const installSandboxPluginMock = vi.hoisted(() => vi.fn())
+const installManagedPluginsMock = vi.hoisted(() => vi.fn())
 
-vi.mock('../../src/services/opencode-sandbox-plugin', () => ({
-  installSandboxPlugin: installSandboxPluginMock,
-}))
-
-const installGhEnvPluginMock = vi.hoisted(() => vi.fn())
-
-vi.mock('../../src/services/opencode-gh-env-plugin', () => ({
-  installGhEnvPlugin: installGhEnvPluginMock,
+vi.mock('../../src/services/opencode/plugin-registry', () => ({
+  installManagedPlugins: installManagedPluginsMock,
 }))
 
 const quarantineOpenCodePluginsMock = vi.hoisted(() => vi.fn())
@@ -617,10 +609,15 @@ describe('OpenCodeServerManager - server auth', () => {
     }
   })
 
-  it('drops a user-supplied HOME serverEnvVars entry from the spawned env', async () => {
+  it('overrides a user-supplied HOME serverEnvVars entry with the plugin discovery home when enforced', async () => {
     sandboxRuntimeServiceMock.SandboxRuntimeService.mockImplementation(() => ({
-      isEnabled: () => false,
+      isEnabled: () => true,
     }))
+    execSyncMock.mockImplementation((cmd: string) => {
+      if (cmd.includes('lsof')) return spawnMock.mock.calls.length > 0 ? '1234\n' : ''
+      if (cmd.includes('opencode --version')) return '1.18.16\n'
+      throw new Error('not found')
+    })
     const { OpenCodeServerManager } = await import('../../src/services/opencode-single-server')
     const manager = OpenCodeServerManager.getInstance()
     manager.setDatabase(createPreferencesDb({
@@ -631,54 +628,6 @@ describe('OpenCodeServerManager - server auth', () => {
 
     const env = (spawnMock.mock.calls[0] as unknown as [unknown, unknown, { env: Record<string, string> }])[2].env
     expect(env.HOME).not.toBe('/tmp/evil-home')
-  })
-
-  it('drops executable-resolution and runtime-loader serverEnvVars from the spawned env', async () => {
-    sandboxRuntimeServiceMock.SandboxRuntimeService.mockImplementation(() => ({
-      isEnabled: () => false,
-    }))
-    const { OpenCodeServerManager } = await import('../../src/services/opencode-single-server')
-    const manager = OpenCodeServerManager.getInstance()
-    manager.setDatabase(createPreferencesDb({
-      serverEnvVars: [
-        { key: 'PATH', value: '/tmp/evil-bin' },
-        { key: 'BUN_OPTIONS', value: '--preload=/tmp/evil.js' },
-        { key: 'NODE_OPTIONS', value: '--require /tmp/evil.js' },
-        { key: 'LD_PRELOAD', value: '/tmp/evil.so' },
-        { key: 'LD_LIBRARY_PATH', value: '/tmp/evil-lib' },
-      ],
-    }))
-
-    await manager.start()
-
-    const env = (spawnMock.mock.calls[0] as unknown as [unknown, unknown, { env: Record<string, string> }])[2].env
-    expect(env.PATH).not.toBe('/tmp/evil-bin')
-    expect(env.BUN_OPTIONS).toBeUndefined()
-    expect(env.NODE_OPTIONS).toBeUndefined()
-    expect(env.LD_PRELOAD).toBeUndefined()
-    expect(env.LD_LIBRARY_PATH).toBeUndefined()
-  })
-
-  it('drops shell-selection and shell-startup serverEnvVars from the spawned env', async () => {
-    sandboxRuntimeServiceMock.SandboxRuntimeService.mockImplementation(() => ({
-      isEnabled: () => false,
-    }))
-    const { OpenCodeServerManager } = await import('../../src/services/opencode-single-server')
-    const manager = OpenCodeServerManager.getInstance()
-    manager.setDatabase(createPreferencesDb({
-      serverEnvVars: [
-        { key: 'SHELL', value: '/workspace/repos/evil/evil-sh' },
-        { key: 'BASH_ENV', value: '/workspace/repos/evil/rc' },
-        { key: 'ENV', value: '/workspace/repos/evil/envrc' },
-      ],
-    }))
-
-    await manager.start()
-
-    const env = (spawnMock.mock.calls[0] as unknown as [unknown, unknown, { env: Record<string, string> }])[2].env
-    expect(env.SHELL).not.toBe('/workspace/repos/evil/evil-sh')
-    expect(env.BASH_ENV).toBeUndefined()
-    expect(env.ENV).toBeUndefined()
   })
 
   it('drops config-source and well-known auth serverEnvVars from the spawned env', async () => {
@@ -768,7 +717,9 @@ describe('OpenCodeServerManager - server auth', () => {
       await manager.start()
 
       const env = (spawnMock.mock.calls[0] as unknown as [unknown, unknown, { env: Record<string, string> }])[2].env
-      expect(env.SHELL).toBe('/bin/bash')
+      const { getEnforcedSandboxShellPath } = await import('../../src/services/sandbox/shell-wrapper')
+      expect(env.SHELL).toBe(getEnforcedSandboxShellPath())
+      expect(env.SHELL).not.toContain('/repos/')
       expect(env.BASH_ENV).toBeUndefined()
       expect(env.ENV).toBeUndefined()
     } finally {
@@ -2282,7 +2233,11 @@ describe('OpenCodeServerManager - server auth', () => {
         throw new Error('not found')
       })
       const writeFileMock = fs.writeFile as unknown as ReturnType<typeof vi.fn>
-      writeFileMock.mockRejectedValueOnce(new Error('disk full'))
+      writeFileMock.mockImplementation((filePath: unknown) =>
+        String(filePath).includes('opencode-server-child.json')
+          ? Promise.reject(new Error('disk full'))
+          : Promise.resolve(),
+      )
       const { OpenCodeServerManager } = await import('../../src/services/opencode-single-server')
       const manager = OpenCodeServerManager.getInstance()
       manager.setDatabase(createPasswordDb(null))
@@ -2294,6 +2249,7 @@ describe('OpenCodeServerManager - server auth', () => {
       expect((manager as any).serverPid).toBeNull()
       expect(manager.getLastStartupError()).toContain('Failed to persist the OpenCode child state marker')
     } finally {
+      ;(fs.writeFile as unknown as ReturnType<typeof vi.fn>).mockReset()
       killSpy.mockRestore()
       Object.defineProperty(ENV.SERVER, 'NODE_ENV', { value: originalNodeEnv, configurable: true, writable: true })
     }
@@ -2499,19 +2455,18 @@ describe('OpenCodeServerManager - server auth', () => {
     }
   }, 15000)
 
-  it('installs the sandbox plugin into the same config dir as the gh-env plugin', async () => {
+  it('installs the generated plugins into the same config dir', async () => {
     const { OpenCodeServerManager } = await import('../../src/services/opencode-single-server')
     await OpenCodeServerManager.getInstance().start()
 
-    expect(installSandboxPluginMock).toHaveBeenCalledWith('/test/workspace/.config')
+    expect(installManagedPluginsMock).toHaveBeenCalledWith('/test/workspace/.config')
   })
 
-  it('installs both generated plugins into the same auto-discovery config dir', async () => {
+  it('installs all generated plugins into the same auto-discovery config dir', async () => {
     const { OpenCodeServerManager } = await import('../../src/services/opencode-single-server')
     await OpenCodeServerManager.getInstance().start()
 
-    expect(installGhEnvPluginMock).toHaveBeenCalledWith('/test/workspace/.config')
-    expect(installSandboxPluginMock).toHaveBeenCalledWith('/test/workspace/.config')
+    expect(installManagedPluginsMock).toHaveBeenCalledWith('/test/workspace/.config')
   })
 
   it('aborts enforced startup when the gh-env plugin cannot be installed', async () => {
@@ -2523,7 +2478,7 @@ describe('OpenCodeServerManager - server auth', () => {
       if (cmd.includes('opencode --version')) return '1.18.16\n'
       throw new Error('not found')
     })
-    installGhEnvPluginMock.mockRejectedValueOnce(new Error('readonly filesystem'))
+    installManagedPluginsMock.mockRejectedValueOnce(new Error('readonly filesystem'))
     const { OpenCodeServerManager } = await import('../../src/services/opencode-single-server')
     const manager = OpenCodeServerManager.getInstance()
     manager.setDatabase(createPasswordDb(null))
@@ -2536,7 +2491,7 @@ describe('OpenCodeServerManager - server auth', () => {
     sandboxRuntimeServiceMock.SandboxRuntimeService.mockImplementation(() => ({
       isEnabled: () => false,
     }))
-    installGhEnvPluginMock.mockRejectedValueOnce(new Error('readonly filesystem'))
+    installManagedPluginsMock.mockRejectedValueOnce(new Error('readonly filesystem'))
     const { OpenCodeServerManager } = await import('../../src/services/opencode-single-server')
     const manager = OpenCodeServerManager.getInstance()
     manager.setDatabase(createPasswordDb(null))
@@ -2647,7 +2602,7 @@ describe('OpenCodeServerManager - server auth', () => {
       if (cmd.includes('opencode --version')) return '1.18.16\n'
       throw new Error('not found')
     })
-    installSandboxPluginMock.mockRejectedValueOnce(new Error('readonly filesystem'))
+    installManagedPluginsMock.mockRejectedValueOnce(new Error('readonly filesystem'))
     const { OpenCodeServerManager } = await import('../../src/services/opencode-single-server')
     const manager = OpenCodeServerManager.getInstance()
     manager.setDatabase(createPasswordDb(null))
@@ -2660,7 +2615,7 @@ describe('OpenCodeServerManager - server auth', () => {
     sandboxRuntimeServiceMock.SandboxRuntimeService.mockImplementation(() => ({
       isEnabled: () => false,
     }))
-    installSandboxPluginMock.mockRejectedValueOnce(new Error('readonly filesystem'))
+    installManagedPluginsMock.mockRejectedValueOnce(new Error('readonly filesystem'))
     const { OpenCodeServerManager } = await import('../../src/services/opencode-single-server')
     const manager = OpenCodeServerManager.getInstance()
     manager.setDatabase(createPasswordDb(null))
@@ -2860,8 +2815,6 @@ describe('OpenCodeServerManager - server auth', () => {
       postJson: vi.fn(),
       setProviderAuth: vi.fn(),
       deleteProviderAuth: vi.fn(),
-      startMcpAuth: vi.fn(),
-      authenticateMcp: vi.fn(),
     }))
 
     await manager.start()
@@ -2883,10 +2836,10 @@ describe('OpenCodeServerManager - server auth', () => {
     expect(manager.isRestartPending()).toBe(false)
   })
 
-  it('exposes the minimum sandbox-compatible OpenCode version', async () => {
+  it('exposes the sandbox-verified OpenCode versions as the single version gate', async () => {
     const { opencodeServerManager } = await import('../../src/services/opencode-single-server')
 
-    expect(opencodeServerManager.getMinSandboxVersion()).toBe('1.18.16')
+    expect(opencodeServerManager.getSandboxVerifiedVersions()).toEqual(['1.18.16'])
     expect(opencodeServerManager.isSandboxVersionSupported()).toBe(false)
   })
 

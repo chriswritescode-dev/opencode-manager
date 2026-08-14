@@ -49,16 +49,19 @@ describe('entrypoint library wiring', () => {
     expect(warnIndex).toBeLessThan(chownIndex)
   })
 
-  it('grants node access to /dev/kvm before dropping privileges', () => {
+  it('grants node access to /dev/kvm before dropping privileges without aborting startup', () => {
     const entrypoint = read(entrypointPath)
     expect(entrypoint).toMatch(/^grant_kvm_access\(\) \{/m)
     const alignIndex = entrypoint.indexOf('if ! align_container_user node; then')
     const grantCallIndex = entrypoint.indexOf('if ! grant_kvm_access; then')
     const runuserIndex = entrypoint.indexOf('exec runuser -u node')
+    expect(alignIndex, 'entrypoint must align the container user').toBeGreaterThan(-1)
     expect(grantCallIndex, 'entrypoint must call grant_kvm_access').toBeGreaterThan(-1)
     expect(grantCallIndex).toBeGreaterThan(alignIndex)
     expect(runuserIndex).toBeGreaterThan(grantCallIndex)
-    expect(entrypoint.slice(grantCallIndex, grantCallIndex + 60)).toMatch(/exit 1/)
+    const grantBlock = entrypoint.slice(grantCallIndex, grantCallIndex + 200)
+    expect(grantBlock).toMatch(/WARNING: continuing without \/dev\/kvm access/)
+    expect(grantBlock.slice(0, grantBlock.indexOf('fi'))).not.toMatch(/exit 1/)
   })
 
   it('does not re-chown /app when ids change', () => {

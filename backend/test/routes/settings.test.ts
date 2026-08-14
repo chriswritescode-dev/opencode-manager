@@ -81,8 +81,6 @@ vi.mock('../../src/services/opencode/client', () => ({
     postJson: vi.fn(),
     setProviderAuth: vi.fn(),
     deleteProviderAuth: vi.fn(),
-    startMcpAuth: vi.fn(),
-    authenticateMcp: vi.fn(),
   }),
 }))
 

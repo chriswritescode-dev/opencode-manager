@@ -180,7 +180,7 @@ export function SettingsDialog() {
                     </div>
                     <ServerEnvVarsSettings />
                     <SandboxSettings />
-                    <OpenCodeConfigManager hideHealthStatus />
+                    <OpenCodeConfigManager />
                   </div>
                 </TabsContent>
                 <TabsContent key="providers" value="providers" className="mt-0"><ProviderSettings /></TabsContent>
@@ -252,7 +252,7 @@ export function SettingsDialog() {
                     <ManagerTokenSettings />
                     <ServerEnvVarsSettings />
                     <SandboxSettings />
-                    <OpenCodeConfigManager hideHealthStatus />
+                    <OpenCodeConfigManager />
                   </div>
                 )}
               {mobileView === 'providers' && <div key="providers"><ProviderSettings /></div>}

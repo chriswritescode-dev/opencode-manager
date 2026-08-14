@@ -6,8 +6,8 @@ import os from 'os'
 import {
   quarantineOpenCodePlugins,
   restoreQuarantinedOpenCodePlugins,
-  TRUSTED_OPENCODE_PLUGIN_FILENAMES,
 } from '../../src/services/opencode-plugin-quarantine'
+import { TRUSTED_OPENCODE_PLUGIN_FILENAMES } from '../../src/services/opencode/plugin-registry'
 
 describe('opencode plugin quarantine', () => {
   let root: string

@@ -89,8 +89,6 @@ describe('ScheduleWorktreeManager', () => {
     forwardRaw: vi.fn(),
     setProviderAuth: vi.fn(),
     deleteProviderAuth: vi.fn(),
-    startMcpAuth: vi.fn(),
-    authenticateMcp: vi.fn(),
   }
 
   beforeEach(() => {

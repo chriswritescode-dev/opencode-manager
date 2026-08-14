@@ -1,15 +1,9 @@
-import path from 'path'
-import { ENV } from '@opencode-manager/shared/config/env'
-import { SANDBOX_UNAVAILABLE_PREFIX } from './sandbox/command'
-import { writeFileAtomic } from '../utils/fs-safe'
+import { sandboxPlanTimeoutMs, SANDBOX_UNAVAILABLE_PREFIX } from './sandbox/command'
 
-const PLUGIN_FILENAME = 'ocm-sandbox.js'
+export const SANDBOX_PLAN_TIMEOUT_MS = sandboxPlanTimeoutMs()
 
-const SANDBOX_PLAN_REQUEST_MARGIN_MS = 30000
-
-export const SANDBOX_PLAN_TIMEOUT_MS = ENV.SANDBOX.START_TIMEOUT_MS + SANDBOX_PLAN_REQUEST_MARGIN_MS
-
-const PLUGIN_SOURCE = `var SANDBOX_UNAVAILABLE_PREFIX = ${JSON.stringify(SANDBOX_UNAVAILABLE_PREFIX)}
+export function buildSandboxPluginSource(): string {
+  return `var SANDBOX_UNAVAILABLE_PREFIX = ${JSON.stringify(SANDBOX_UNAVAILABLE_PREFIX)}
 var PLAN_TIMEOUT_MS = ${SANDBOX_PLAN_TIMEOUT_MS}
 
 function guardCommand(reason) {
@@ -151,11 +145,5 @@ export default async function ({ directory, worktree }) {
   }
 }
 `
-
-export function getSandboxPluginDir(configHome: string): string {
-  return path.join(configHome, 'opencode', 'plugin')
 }
 
-export async function installSandboxPlugin(configHome: string): Promise<void> {
-  await writeFileAtomic(path.join(getSandboxPluginDir(configHome), PLUGIN_FILENAME), PLUGIN_SOURCE)
-}

@@ -1,4 +1,3 @@
-import { useState } from 'react'
 import { useSettings } from '@/hooks/useSettings'
 import { useServerHealth } from '@/hooks/useServerHealth'
 import { Switch } from '@/components/ui/switch'
@@ -10,7 +9,6 @@ import { showToast } from '@/lib/toast'
 export function SandboxSettings() {
   const { preferences, updateSettingsAsync, isUpdating } = useSettings()
   const { data: health } = useServerHealth()
-  const [needsRestart, setNeedsRestart] = useState(false)
 
   const sandbox = health?.sandbox
   const isAvailable = sandbox?.available === true
@@ -19,7 +17,6 @@ export function SandboxSettings() {
   const handleToggle = async (next: boolean) => {
     try {
       await updateSettingsAsync({ sandbox: { enabled: next } })
-      setNeedsRestart(true)
       showToast.success(next ? 'Sandboxing enabled' : 'Sandboxing disabled')
     } catch {
       showToast.error('Failed to update sandbox preference')
@@ -62,7 +59,7 @@ export function SandboxSettings() {
           />
         </div>
 
-        {needsRestart && (
+        {health?.opencodeRestartPending && (
           <Alert>
             <RotateCcw className="h-4 w-4" />
             <AlertDescription>

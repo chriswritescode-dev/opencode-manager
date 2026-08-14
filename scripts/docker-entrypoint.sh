@@ -43,7 +43,11 @@ grant_kvm_access() {
 }
 
 install_opencode() {
-  local opencode_version="${OPENCODE_BUNDLED_VERSION:-1.18.16}"
+  local opencode_version="${OPENCODE_BUNDLED_VERSION:-}"
+  if [ -z "$opencode_version" ]; then
+    echo "ERROR: OPENCODE_BUNDLED_VERSION is not set; refusing to guess the pinned OpenCode build" >&2
+    return 1
+  fi
   echo "Installing OpenCode ${opencode_version}..."
   curl -fsSL "https://github.com/anomalyco/opencode/releases/download/v${opencode_version}/opencode-linux-$(uname -m | sed 's/x86_64/x64/; s/aarch64/arm64/').tar.gz" \
     -o /tmp/opencode.tar.gz
@@ -98,7 +102,7 @@ if [ "$OPENCODE_VERSION" != "unknown" ]; then
     echo "OpenCode version meets minimum requirement (>=$MIN_OPENCODE_VERSION)"
   else
     echo "OpenCode version $OPENCODE_VERSION is below minimum required version $MIN_OPENCODE_VERSION"
-    echo "Reinstalling bundled OpenCode version ${OPENCODE_BUNDLED_VERSION:-1.18.16}..."
+    echo "Reinstalling bundled OpenCode version ${OPENCODE_BUNDLED_VERSION}..."
     install_opencode
 
     OPENCODE_VERSION=$(opencode --version 2>&1 | grep -oE '[0-9]+\.[0-9]+\.[0-9]+' | head -1 || echo "unknown")
@@ -129,7 +133,7 @@ if ! align_container_user node; then
 fi
 
 if ! grant_kvm_access; then
-  exit 1
+  echo "WARNING: continuing without /dev/kvm access; agent sandboxing will report itself unavailable" >&2
 fi
 
 warn_if_workspace_owner_differs /workspace "$OCM_TARGET_UID" "$OCM_TARGET_GID"

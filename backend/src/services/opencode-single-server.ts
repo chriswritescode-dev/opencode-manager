@@ -25,11 +25,12 @@ import { patchConfigWithRecovery } from './opencode/config-recovery'
 import type { OpenCodeClient } from './opencode/client'
 import { writeFileContent } from './file-operations'
 import { getOrCreateInternalToken } from './internal-token'
-import { installGhEnvPlugin } from './opencode-gh-env-plugin'
-import { installSandboxPlugin } from './opencode-sandbox-plugin'
+import { installManagedPlugins } from './opencode/plugin-registry'
+import { getEnforcedSandboxShellPath, installSandboxShell } from './sandbox/shell-wrapper'
 import { getOpenCodePluginDiscoveryHome, quarantineOpenCodePlugins, restoreQuarantinedOpenCodePlugins } from './opencode-plugin-quarantine'
 import { sanitizeConfigForEnforcement } from './opencode/enforcement-config'
 import { resolveProcessIdentityProvider } from './opencode/process-identity'
+import { resolveEffectiveServerHost } from './opencode/upstream'
 import { SandboxRuntimeService } from './sandbox/runtime'
 import { CredentialProvider } from './credential-provider'
 import { mkdirSafe, writeFileAtomic } from '../utils/fs-safe'
@@ -38,7 +39,6 @@ export { sanitizeConfigForEnforcement }
 
 
 const MIN_OPENCODE_VERSION = '1.0.137'
-const MIN_SANDBOX_OPENCODE_VERSION = '1.18.16'
 const SANDBOX_VERIFIED_OPENCODE_VERSIONS = ['1.18.16']
 const MAX_STDERR_SIZE = 10240
 const PLUGIN_INSTALL_TIMEOUT_MS = 120000
@@ -134,25 +134,6 @@ const getOpenCodeServerPort = () => ENV.OPENCODE.PORT
 const getOpenCodeServerHost = () => ENV.OPENCODE.HOST
 const getOpenCodeServerPublicUrl = () => ENV.OPENCODE.PUBLIC_URL
 const getOpenCodeServerUsername = () => ENV.OPENCODE.SERVER_USERNAME
-
-function isLoopbackBindHost(host: string): boolean {
-  const normalized = host.trim().toLowerCase().replace(/^\[|\]$/g, '')
-  return (
-    normalized === 'localhost' ||
-    normalized === '127.0.0.1' ||
-    normalized === '::1' ||
-    normalized === '::ffff:127.0.0.1' ||
-    normalized.startsWith('127.')
-  )
-}
-
-function resolveEffectiveServerHost(enforced: boolean): string {
-  const openCodeServerHost = getOpenCodeServerHost()
-  if (enforced && !isLoopbackBindHost(openCodeServerHost)) {
-    return '127.0.0.1'
-  }
-  return openCodeServerHost
-}
 
 function resolveManagerMicrosandboxEnv(): Record<string, string> {
   const env: Record<string, string> = {
@@ -643,8 +624,8 @@ class OpenCodeServerManager {
       logger.warn('Failed to restore quarantined OpenCode plugins:', error)
     }
     try {
-      await installGhEnvPlugin(pluginConfigHome)
-      await installSandboxPlugin(pluginConfigHome)
+      await installManagedPlugins(pluginConfigHome)
+      await installSandboxShell(pluginConfigHome)
     } catch (error) {
       if (sandboxEnforced) {
         logger.error('Failed to install a generated OpenCode plugin; refusing to start an enforced server', error)
@@ -712,7 +693,7 @@ class OpenCodeServerManager {
             }
             : {}),
           OPENCODE_CONFIG: openCodeConfigPath,
-          ...(sandboxEnforced ? { SHELL: '/bin/bash' } : {}),
+          ...(sandboxEnforced ? { SHELL: getEnforcedSandboxShellPath() } : {}),
         }
       }
     )
@@ -1140,8 +1121,8 @@ class OpenCodeServerManager {
     return compareVersions(this.version, MIN_OPENCODE_VERSION) >= 0
   }
 
-  getMinSandboxVersion(): string {
-    return MIN_SANDBOX_OPENCODE_VERSION
+  getSandboxVerifiedVersions(): readonly string[] {
+    return SANDBOX_VERIFIED_OPENCODE_VERSIONS
   }
 
   isSandboxVersionSupported(): boolean {

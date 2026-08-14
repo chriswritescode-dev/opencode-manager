@@ -3,7 +3,7 @@ import { promises as fs } from 'fs'
 import path from 'path'
 import os from 'os'
 import { pathToFileURL } from 'url'
-import { installGhEnvPlugin, getGhEnvPluginDir } from '../../src/services/opencode-gh-env-plugin'
+import { installManagedPlugins, getOpenCodePluginDir } from '../../src/services/opencode/plugin-registry'
 
 type ShellEnvHook = (
   input: { cwd: string },
@@ -12,7 +12,7 @@ type ShellEnvHook = (
 type PluginFactory = () => Promise<{ 'shell.env': ShellEnvHook }>
 
 async function loadPlugin(configHome: string): Promise<PluginFactory> {
-  const file = path.join(getGhEnvPluginDir(configHome), 'ocm-gh-env.js')
+  const file = path.join(getOpenCodePluginDir(configHome), 'ocm-gh-env.js')
   const mod = await import(pathToFileURL(file).href)
   return mod.default as PluginFactory
 }
@@ -22,7 +22,7 @@ describe('ocm-gh-env plugin', () => {
 
   beforeEach(async () => {
     configHome = await fs.mkdtemp(path.join(os.tmpdir(), 'ocm-ghenv-'))
-    await installGhEnvPlugin(configHome)
+    await installManagedPlugins(configHome)
     process.env.OCM_INTERNAL_API_URL = 'http://localhost:5003/api/internal'
     process.env.OCM_INTERNAL_TOKEN = 'secret-token'
   })
@@ -35,12 +35,12 @@ describe('ocm-gh-env plugin', () => {
   })
 
   it('writes the plugin file into the auto-discovery dir', async () => {
-    const file = path.join(getGhEnvPluginDir(configHome), 'ocm-gh-env.js')
+    const file = path.join(getOpenCodePluginDir(configHome), 'ocm-gh-env.js')
     await expect(fs.access(file)).resolves.toBeUndefined()
   })
 
   it('atomically replaces a symlink at the plugin path with a regular file', async () => {
-    const pluginDir = getGhEnvPluginDir(configHome)
+    const pluginDir = getOpenCodePluginDir(configHome)
     const pluginPath = path.join(pluginDir, 'ocm-gh-env.js')
     const symlinkTarget = path.join(pluginDir, 'attacker-hook.js')
     await fs.mkdir(pluginDir, { recursive: true })
@@ -48,7 +48,7 @@ describe('ocm-gh-env plugin', () => {
     await fs.writeFile(symlinkTarget, 'export default async function () {}')
     await fs.symlink(symlinkTarget, pluginPath)
 
-    await installGhEnvPlugin(configHome)
+    await installManagedPlugins(configHome)
 
     const stat = await fs.lstat(pluginPath)
     expect(stat.isFile()).toBe(true)
@@ -62,7 +62,7 @@ describe('ocm-gh-env plugin', () => {
     await fs.mkdir(blockedHome, { recursive: true })
     await fs.writeFile(path.join(blockedHome, 'opencode'), 'not a directory')
 
-    await expect(installGhEnvPlugin(blockedHome)).rejects.toThrow()
+    await expect(installManagedPlugins(blockedHome)).rejects.toThrow()
   })
 
   it('injects fetched GH env into output.env', async () => {

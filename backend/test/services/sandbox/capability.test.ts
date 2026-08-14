@@ -65,7 +65,8 @@ describe('detectSandboxCapability', () => {
     const result = detectSandboxCapability()
 
     expect(result.available).toBe(false)
-    expect(result.reason).toBe('msb CLI not found or not executable')
+    expect(result.reason).toContain('msb CLI version probe failed')
+    expect(result.reason).toContain('msb: not found')
   })
 
   it('reports unavailable when msb --version fails to spawn', () => {
@@ -75,7 +76,8 @@ describe('detectSandboxCapability', () => {
     const result = detectSandboxCapability()
 
     expect(result.available).toBe(false)
-    expect(result.reason).toBe('msb CLI not found or not executable')
+    expect(result.reason).toContain('msb CLI version probe failed')
+    expect(result.reason).toContain('spawn ENOENT')
   })
 
   it('reports available with the trimmed msb version when both probes succeed', () => {

@@ -302,9 +302,11 @@ describe('opencode-proxy routes', () => {
     expect(res.headers.get('content-type')).toBe('text/plain')
   })
 
-  it('blocks the session shell endpoint with 403 when the OpenCode child is enforced', async () => {
+  it('forwards the session shell endpoint when the OpenCode child is enforced', async () => {
     isSandboxEnforcedMock.mockReturnValue(true)
-    const upstreamFetch = vi.fn().mockResolvedValue(new Response('should not be reached'))
+    const upstreamFetch = vi.fn().mockResolvedValue(
+      new Response('ok', { status: 200, headers: { 'content-type': 'text/plain' } })
+    )
     globalThis.fetch = upstreamFetch as unknown as typeof fetch
 
     const res = await app.request('/api/opencode-proxy/session/ses_1/shell', {
@@ -312,16 +314,15 @@ describe('opencode-proxy routes', () => {
       headers: { Authorization: 'Bearer test-internal-token' },
     })
 
-    expect(res.status).toBe(403)
-    expect(upstreamFetch).not.toHaveBeenCalled()
-    const body = await res.json() as { error: string }
-    expect(body.error).toContain('Sandbox enforcement is on')
-    expect(body.error).toContain('host process')
+    expect(res.status).toBe(200)
+    expect(upstreamFetch).toHaveBeenCalled()
   })
 
-  it('keeps host-process shell endpoints blocked when enforcement resolution failed (fail-closed manager state)', async () => {
+  it('forwards the session shell endpoint while enforcement is on', async () => {
     isSandboxEnforcedMock.mockReturnValue(true)
-    const upstreamFetch = vi.fn().mockResolvedValue(new Response('should not be reached'))
+    const upstreamFetch = vi.fn().mockResolvedValue(
+      new Response('ok', { status: 200, headers: { 'content-type': 'text/plain' } })
+    )
     globalThis.fetch = upstreamFetch as unknown as typeof fetch
 
     const res = await app.request('/api/opencode-proxy/session/ses_1/shell', {
@@ -329,18 +330,16 @@ describe('opencode-proxy routes', () => {
       headers: { Authorization: 'Bearer test-internal-token' },
     })
 
-    expect(res.status).toBe(403)
-    expect(upstreamFetch).not.toHaveBeenCalled()
-    const body = await res.json() as { error: string }
-    expect(body.error).toContain('Sandbox enforcement is on')
+    expect(res.status).toBe(200)
+    expect(upstreamFetch).toHaveBeenCalled()
   })
 
-  it('blocks percent-encoded shell spellings with 403 when the OpenCode child is enforced', async () => {
+  it('blocks percent-encoded PTY spellings with 403 when the OpenCode child is enforced', async () => {
     isSandboxEnforcedMock.mockReturnValue(true)
     const upstreamFetch = vi.fn().mockResolvedValue(new Response('should not be reached'))
     globalThis.fetch = upstreamFetch as unknown as typeof fetch
 
-    const res = await app.request('/api/opencode-proxy/session/ses_1/%73hell', {
+    const res = await app.request('/api/opencode-proxy/%70ty', {
       method: 'POST',
       headers: { Authorization: 'Bearer test-internal-token' },
     })
@@ -357,7 +356,7 @@ describe('opencode-proxy routes', () => {
     const upstreamFetch = vi.fn().mockResolvedValue(new Response('should not be reached'))
     globalThis.fetch = upstreamFetch as unknown as typeof fetch
 
-    const res = await app.request('/api/opencode-proxy/session/ses_1%2Fshell', {
+    const res = await app.request('/api/opencode-proxy/pty%2Fp1', {
       method: 'POST',
       headers: { Authorization: 'Bearer test-internal-token' },
     })
@@ -409,9 +408,11 @@ describe('opencode-proxy routes', () => {
     expect(upstreamFetch).not.toHaveBeenCalled()
   })
 
-  it('blocks custom slash command execution with 403 when the OpenCode child is enforced', async () => {
+  it('forwards custom slash command execution when the OpenCode child is enforced', async () => {
     isSandboxEnforcedMock.mockReturnValue(true)
-    const upstreamFetch = vi.fn().mockResolvedValue(new Response('should not be reached'))
+    const upstreamFetch = vi.fn().mockResolvedValue(
+      new Response('ok', { status: 200, headers: { 'content-type': 'text/plain' } })
+    )
     globalThis.fetch = upstreamFetch as unknown as typeof fetch
 
     const res = await app.request('/api/opencode-proxy/session/ses_1/command', {
@@ -419,8 +420,8 @@ describe('opencode-proxy routes', () => {
       headers: { Authorization: 'Bearer test-internal-token' },
     })
 
-    expect(res.status).toBe(403)
-    expect(upstreamFetch).not.toHaveBeenCalled()
+    expect(res.status).toBe(200)
+    expect(upstreamFetch).toHaveBeenCalled()
   })
 
   it('rejects a local MCP server add with 403 when the OpenCode child is enforced', async () => {

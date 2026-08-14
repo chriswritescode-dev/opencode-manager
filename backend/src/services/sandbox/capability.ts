@@ -48,7 +48,10 @@ export function detectSandboxCapability(): SandboxCapability {
 
   const result = spawnSync(executable, buildSandboxVersionArgs(), { encoding: 'utf8', timeout: 10000 })
   if (result.status !== 0 || result.error) {
-    const reason = 'msb CLI not found or not executable'
+    const detail = result.error
+      ? result.error.message
+      : (result.stderr ?? '').trim() || `exit code ${String(result.status)}`
+    const reason = `msb CLI version probe failed at ${executable}: ${detail}`
     cachedCapability = { available: false, reason }
     logger.info(reason)
     return cachedCapability

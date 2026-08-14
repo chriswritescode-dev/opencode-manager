@@ -13,6 +13,7 @@ vi.mock('../../src/services/opencode-single-server', () => ({
 
 import {
   restartOpenCode,
+  restartOpenCodeAfterCommit,
   setOpenCodeRestartCoordinator,
 } from '../../src/services/opencode-restart'
 import type { OpenCodeRestartCoordinator } from '../../src/services/opencode-restart-coordinator'
@@ -89,5 +90,31 @@ describe('restartOpenCode', () => {
 
     await expect(restartOpenCode()).rejects.toThrow('server failed to become healthy')
     expect(managerMock.clearStartupError).toHaveBeenCalled()
+  })
+})
+
+describe('restartOpenCodeAfterCommit', () => {
+  beforeEach(() => {
+    vi.clearAllMocks()
+    setOpenCodeRestartCoordinator(null)
+  })
+
+  afterEach(() => {
+    setOpenCodeRestartCoordinator(null)
+  })
+
+  it('reports success without a restart error when the restart completes', async () => {
+    managerMock.checkHealth.mockReturnValue(true)
+
+    await expect(restartOpenCodeAfterCommit(createSupervisor(true))).resolves.toEqual({ restartFailed: false })
+  })
+
+  it('reports the failure instead of throwing so the caller can still return the persisted entity', async () => {
+    managerMock.getLastStartupError.mockReturnValue('OpenCode health check failed')
+
+    const result = await restartOpenCodeAfterCommit(createSupervisor(false))
+
+    expect(result.restartFailed).toBe(true)
+    expect(result.restartError).toBe('OpenCode health check failed')
   })
 })

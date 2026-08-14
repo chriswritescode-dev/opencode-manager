@@ -34,7 +34,7 @@ import { isSandboxEnforcementActive } from '../services/sandbox/enforcement'
 import { getOrCreateInternalToken, rotateInternalToken } from '../services/internal-token'
 import { sseAggregator } from '../services/sse-aggregator'
 import type { OpenCodeSupervisor } from '../services/opencode-supervisor'
-import { restartOpenCode, reloadOpenCodeConfig, getOpenCodeRestartCoordinator } from '../services/opencode-restart'
+import { restartOpenCode, restartOpenCodeAfterCommit, reloadOpenCodeConfig, getOpenCodeRestartCoordinator } from '../services/opencode-restart'
 import type { GitAuthService } from '../services/git-auth'
 import { DEFAULT_AGENTS_MD } from '../constants'
 import { validateSSHPrivateKey } from '../utils/ssh-validation'
@@ -463,7 +463,7 @@ export function createSettingsRoutes(db: Database, gitAuthService: GitAuthServic
         }
       }
 
-      return c.json({ ...settings, serverRestarted, reloadError })
+      return c.json({ ...settings, serverRestarted, reloadError, ...(sandboxChanged ? { restartRequired: true } : {}) })
     } catch (error) {
       logger.error('Failed to update settings:', error)
       if (error instanceof Error && error.message.startsWith('Invalid SSH key')) {
@@ -482,12 +482,13 @@ export function createSettingsRoutes(db: Database, gitAuthService: GitAuthServic
       const currentSettings = settingsService.getSettings(userId)
       const settings = settingsService.resetSettings(userId)
 
-      if (sandboxPreferenceChanged(currentSettings.preferences.sandbox, settings.preferences.sandbox)) {
+      const sandboxChanged = sandboxPreferenceChanged(currentSettings.preferences.sandbox, settings.preferences.sandbox)
+      if (sandboxChanged) {
         logger.info('Sandbox preference changed, marking OpenCode server restart as pending')
         opencodeServerManager.markRestartPending()
       }
 
-      return c.json(settings)
+      return c.json(sandboxChanged ? { ...settings, restartRequired: true } : settings)
     } catch (error) {
       logger.error('Failed to reset settings:', error)
       return c.json({ error: 'Failed to reset settings' }, 500)
@@ -536,9 +537,9 @@ export function createSettingsRoutes(db: Database, gitAuthService: GitAuthServic
           await writeFileContent(configPath, contentToWrite)
           logger.info(`Wrote default config to: ${configPath}`)
           opencodeServerManager.clearStartupError()
-          await restartOpenCode(openCodeSupervisor)
+          const { restartFailed, restartError } = await restartOpenCodeAfterCommit(openCodeSupervisor)
 
-          return c.json(config)
+          return c.json(restartFailed ? { ...config, restartFailed, restartError } : config)
         }
 
         const sanitization = sanitizeConfigPatchForEnforcement(provisionalConfig.content)
@@ -733,9 +734,9 @@ export function createSettingsRoutes(db: Database, gitAuthService: GitAuthServic
         await writeFileContent(configPath, contentToWrite)
         logger.info(`Wrote default config '${configName}' to: ${configPath}`)
         opencodeServerManager.clearStartupError()
-        await restartOpenCode(openCodeSupervisor)
+        const { restartFailed, restartError } = await restartOpenCodeAfterCommit(openCodeSupervisor)
 
-        return c.json(config)
+        return c.json(restartFailed ? { ...config, restartFailed, restartError } : config)
       }
 
       const sanitization = sanitizeConfigPatchForEnforcement(existingConfig.content)
@@ -1983,7 +1984,7 @@ export function createSettingsRoutes(db: Database, gitAuthService: GitAuthServic
       const token = rotateInternalToken(db)
       logger.info('Manager token rotated, marking OpenCode server restart as pending')
       opencodeServerManager.markRestartPending()
-      return c.json({ token })
+      return c.json({ token, restartRequired: true })
     } catch (error) {
       logger.error('Failed to rotate manager token:', error)
       return c.json({ error: 'Failed to rotate manager token' }, 500)

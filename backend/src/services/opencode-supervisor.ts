@@ -131,7 +131,6 @@ export class OpenCodeSupervisor {
   async reloadConfig(reason: OpenCodeOperationReason): Promise<OpenCodeLifecycleStatus> {
     return this.runLifecycleOperation(async () => {
       this.setState('starting')
-      this.closeLifecycleGate()
 
       try {
         this.openCodeServerManager.clearStartupError()

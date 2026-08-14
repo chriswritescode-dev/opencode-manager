@@ -43,11 +43,22 @@ export type SandboxStatus = {
 let inFlightBoot: Promise<void> | null = null
 let lastKnownRunningAt: number | null = null
 let shutdownRequested = false
+let stopInProgress = false
+let canonicalSandboxSpecMemo: Record<string, unknown> | null = null
 
 export function resetSandboxRuntimeState(): void {
   inFlightBoot = null
   lastKnownRunningAt = null
   shutdownRequested = false
+  stopInProgress = false
+  canonicalSandboxSpecMemo = null
+}
+
+function memoizedCanonicalSandboxSpec(): Record<string, unknown> {
+  if (canonicalSandboxSpecMemo === null) {
+    canonicalSandboxSpecMemo = buildCanonicalSandboxSpec()
+  }
+  return canonicalSandboxSpecMemo
 }
 
 async function validateSandboxMountRoots(): Promise<void> {
@@ -79,13 +90,13 @@ function ensureWorkspaceSandbox(): Promise<void> {
     return inFlightBoot
   }
   inFlightBoot = (async () => {
-    await validateSandboxMountRoots()
-    if (shutdownRequested) {
+    if (shutdownRequested || stopInProgress) {
       throw new Error('sandbox shutdown is in progress; refusing to boot the workspace sandbox')
     }
     if (lastKnownRunningAt !== null && Date.now() - lastKnownRunningAt < SANDBOX_LS_CACHE_MS) {
       return
     }
+    await validateSandboxMountRoots()
     await bootWorkspaceSandbox()
   })().finally(() => {
     inFlightBoot = null
@@ -95,25 +106,34 @@ function ensureWorkspaceSandbox(): Promise<void> {
 
 async function bootWorkspaceSandbox(): Promise<void> {
   try {
-    const entry = findWorkspaceSandboxEntry(await listSandboxes())
-
-    if (!entry) {
-      await createWorkspaceSandbox()
+    const outcome = await inspectSandbox()
+    if (outcome.kind === 'failed' || (outcome.record.config === undefined && outcome.record.active_config === undefined)) {
+      await bootWorkspaceSandboxFromListing()
     } else {
-      const attestation = await attestWorkspaceSandbox(entry.running)
-      if (!attestation.trusted) {
-        logger.warn(`Recreating unverifiable sandbox ${WORKSPACE_SANDBOX_NAME}: ${attestation.reason}`)
-        await removeWorkspaceSandbox()
-        await createWorkspaceSandbox()
-      } else if (!entry.running) {
-        await startWorkspaceSandbox()
-        const runningAttestation = await attestWorkspaceSandbox(true)
-        if (!runningAttestation.trusted) {
-          logger.warn(
-            `Recreating sandbox ${WORKSPACE_SANDBOX_NAME} that failed running attestation: ${runningAttestation.reason}`,
-          )
+      const inspected = outcome.record
+      if (inspected.active_config !== undefined && inspected.active_config !== null) {
+        const attestation = await attestWorkspaceSandboxConfig(inspected.active_config)
+        if (!attestation.trusted) {
+          logger.warn(`Recreating unverifiable sandbox ${WORKSPACE_SANDBOX_NAME}: ${attestation.reason}`)
           await removeWorkspaceSandbox()
           await createWorkspaceSandbox()
+        }
+      } else {
+        const attestation = await attestWorkspaceSandboxConfig(inspected.config)
+        if (!attestation.trusted) {
+          logger.warn(`Recreating unverifiable sandbox ${WORKSPACE_SANDBOX_NAME}: ${attestation.reason}`)
+          await removeWorkspaceSandbox()
+          await createWorkspaceSandbox()
+        } else {
+          await startWorkspaceSandbox()
+          const runningAttestation = await attestWorkspaceSandbox(true)
+          if (!runningAttestation.trusted) {
+            logger.warn(
+              `Recreating sandbox ${WORKSPACE_SANDBOX_NAME} that failed running attestation: ${runningAttestation.reason}`,
+            )
+            await removeWorkspaceSandbox()
+            await createWorkspaceSandbox()
+          }
         }
       }
     }
@@ -122,6 +142,31 @@ async function bootWorkspaceSandbox(): Promise<void> {
   } catch (error) {
     lastKnownRunningAt = null
     throw error
+  }
+}
+
+async function bootWorkspaceSandboxFromListing(): Promise<void> {
+  const entry = findWorkspaceSandboxEntry(await listSandboxes())
+
+  if (!entry) {
+    await createWorkspaceSandbox()
+  } else {
+    const attestation = await attestWorkspaceSandbox(entry.running)
+    if (!attestation.trusted) {
+      logger.warn(`Recreating unverifiable sandbox ${WORKSPACE_SANDBOX_NAME}: ${attestation.reason}`)
+      await removeWorkspaceSandbox()
+      await createWorkspaceSandbox()
+    } else if (!entry.running) {
+      await startWorkspaceSandbox()
+      const runningAttestation = await attestWorkspaceSandbox(true)
+      if (!runningAttestation.trusted) {
+        logger.warn(
+          `Recreating sandbox ${WORKSPACE_SANDBOX_NAME} that failed running attestation: ${runningAttestation.reason}`,
+        )
+        await removeWorkspaceSandbox()
+        await createWorkspaceSandbox()
+      }
+    }
   }
 }
 
@@ -187,7 +232,7 @@ async function attestWorkspaceSandboxConfig(config: unknown): Promise<SandboxAtt
     return { trusted: false, reason: 'msb inspect returned an unexpected config shape' }
   }
 
-  const canonical = buildCanonicalSandboxSpec()
+  const canonical = memoizedCanonicalSandboxSpec()
 
   const labels = isRecord(spec.labels) ? spec.labels : {}
   const canonicalLabels = isRecord(canonical.labels) ? canonical.labels : {}
@@ -436,7 +481,11 @@ async function attestWorkspaceSandboxConfig(config: unknown): Promise<SandboxAtt
   return { trusted: true }
 }
 
-async function attestWorkspaceSandbox(running: boolean): Promise<SandboxAttestation> {
+type SandboxInspectOutcome =
+  | { kind: 'parsed'; record: Record<string, unknown> }
+  | { kind: 'failed'; reason: string }
+
+async function inspectSandbox(): Promise<SandboxInspectOutcome> {
   let result: string | { exitCode: number; stdout: string; stderr: string }
   try {
     result = (await executeCommand([sandboxExecutablePath(), ...buildSandboxInspectArgs()], {
@@ -445,13 +494,13 @@ async function attestWorkspaceSandbox(running: boolean): Promise<SandboxAttestat
       timeout: SANDBOX_LS_TIMEOUT_MS,
     })) as string | { exitCode: number; stdout: string; stderr: string }
   } catch (error) {
-    return { trusted: false, reason: `msb inspect failed: ${error instanceof Error ? error.message : String(error)}` }
+    return { kind: 'failed', reason: `msb inspect failed: ${error instanceof Error ? error.message : String(error)}` }
   }
   const listing = typeof result === 'string' ? { exitCode: 0, stdout: result, stderr: '' } : result
 
   if (listing.exitCode !== 0) {
     return {
-      trusted: false,
+      kind: 'failed',
       reason: `msb inspect failed with code ${listing.exitCode}: ${listing.stderr || listing.stdout}`,
     }
   }
@@ -460,18 +509,26 @@ async function attestWorkspaceSandbox(running: boolean): Promise<SandboxAttestat
   try {
     parsed = JSON.parse(listing.stdout)
   } catch {
-    return { trusted: false, reason: 'msb inspect returned malformed JSON' }
+    return { kind: 'failed', reason: 'msb inspect returned malformed JSON' }
   }
   if (!isRecord(parsed)) {
-    return { trusted: false, reason: 'msb inspect returned an unexpected JSON shape' }
+    return { kind: 'failed', reason: 'msb inspect returned an unexpected JSON shape' }
+  }
+  return { kind: 'parsed', record: parsed }
+}
+
+async function attestWorkspaceSandbox(running: boolean): Promise<SandboxAttestation> {
+  const outcome = await inspectSandbox()
+  if (outcome.kind === 'failed') {
+    return { trusted: false, reason: outcome.reason }
   }
   if (running) {
-    if (parsed.active_config === undefined || parsed.active_config === null) {
+    if (outcome.record.active_config === undefined || outcome.record.active_config === null) {
       return { trusted: false, reason: 'msb inspect returned no active configuration for the running sandbox' }
     }
-    return await attestWorkspaceSandboxConfig(parsed.active_config)
+    return await attestWorkspaceSandboxConfig(outcome.record.active_config)
   }
-  return await attestWorkspaceSandboxConfig(parsed.config)
+  return await attestWorkspaceSandboxConfig(outcome.record.config)
 }
 
 async function createWorkspaceSandbox(): Promise<void> {
@@ -604,6 +661,15 @@ export class SandboxRuntimeService {
   }
 
   private async stopManagedSandbox(): Promise<void> {
+    stopInProgress = true
+    try {
+      await this.runManagedSandboxStop()
+    } finally {
+      stopInProgress = false
+    }
+  }
+
+  private async runManagedSandboxStop(): Promise<void> {
     while (inFlightBoot) {
       try {
         await inFlightBoot

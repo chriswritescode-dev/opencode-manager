@@ -7,8 +7,8 @@ import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'fs'
 import path from 'path'
 import os from 'os'
 import { pathToFileURL } from 'url'
-import { installSandboxPlugin, getSandboxPluginDir, SANDBOX_PLAN_TIMEOUT_MS } from '../../src/services/opencode-sandbox-plugin'
-import { installGhEnvPlugin, getGhEnvPluginDir } from '../../src/services/opencode-gh-env-plugin'
+import { SANDBOX_PLAN_TIMEOUT_MS } from '../../src/services/opencode-sandbox-plugin'
+import { installManagedPlugins, getOpenCodePluginDir } from '../../src/services/opencode/plugin-registry'
 import { quarantineOpenCodePlugins } from '../../src/services/opencode-plugin-quarantine'
 
 type ExecuteBeforeHook = (
@@ -26,7 +26,7 @@ type PluginHooks = {
 type PluginFactory = (ctx: { directory: string; worktree?: string }) => Promise<PluginHooks>
 
 async function loadPlugin(configHome: string): Promise<PluginFactory> {
-  const file = path.join(getSandboxPluginDir(configHome), 'ocm-sandbox.js')
+  const file = path.join(getOpenCodePluginDir(configHome), 'ocm-sandbox.js')
   const mod = await import(pathToFileURL(file).href)
   return mod.default as PluginFactory
 }
@@ -50,7 +50,7 @@ describe('ocm-sandbox plugin', () => {
 
   beforeEach(async () => {
     configHome = await fs.mkdtemp(path.join(os.tmpdir(), 'ocm-sandbox-'))
-    await installSandboxPlugin(configHome)
+    await installManagedPlugins(configHome)
     process.env.OCM_INTERNAL_API_URL = 'http://localhost:5003/api/internal'
     process.env.OCM_INTERNAL_TOKEN = 'secret-token'
   })
@@ -64,14 +64,14 @@ describe('ocm-sandbox plugin', () => {
   })
 
   it('writes the plugin file into the auto-discovery dir', async () => {
-    const file = path.join(getSandboxPluginDir(configHome), 'ocm-sandbox.js')
+    const file = path.join(getOpenCodePluginDir(configHome), 'ocm-sandbox.js')
     await expect(fs.access(file)).resolves.toBeUndefined()
   })
 
   it('derives the plan deadline from the configured sandbox startup window', async () => {
     const { ENV } = await import('@opencode-manager/shared/config/env')
     expect(SANDBOX_PLAN_TIMEOUT_MS).toBeGreaterThan(ENV.SANDBOX.START_TIMEOUT_MS)
-    const pluginSource = await fs.readFile(path.join(getSandboxPluginDir(configHome), 'ocm-sandbox.js'), 'utf-8')
+    const pluginSource = await fs.readFile(path.join(getOpenCodePluginDir(configHome), 'ocm-sandbox.js'), 'utf-8')
     expect(pluginSource).toContain(`var PLAN_TIMEOUT_MS = ${SANDBOX_PLAN_TIMEOUT_MS}`)
   })
 
@@ -80,11 +80,11 @@ describe('ocm-sandbox plugin', () => {
     await fs.mkdir(blockedHome, { recursive: true })
     await fs.writeFile(path.join(blockedHome, 'opencode'), 'not a directory')
 
-    await expect(installSandboxPlugin(blockedHome)).rejects.toThrow()
+    await expect(installManagedPlugins(blockedHome)).rejects.toThrow()
   })
 
   it('atomically replaces a symlink at the plugin path with a regular file', async () => {
-    const pluginDir = getSandboxPluginDir(configHome)
+    const pluginDir = getOpenCodePluginDir(configHome)
     const pluginPath = path.join(pluginDir, 'ocm-sandbox.js')
     const symlinkTarget = path.join(pluginDir, 'attacker-hook.js')
     await fs.mkdir(pluginDir, { recursive: true })
@@ -92,7 +92,7 @@ describe('ocm-sandbox plugin', () => {
     await fs.writeFile(symlinkTarget, 'export default async function () {}')
     await fs.symlink(symlinkTarget, pluginPath)
 
-    await installSandboxPlugin(configHome)
+    await installManagedPlugins(configHome)
 
     const stat = await fs.lstat(pluginPath)
     expect(stat.isFile()).toBe(true)
@@ -102,10 +102,10 @@ describe('ocm-sandbox plugin', () => {
   })
 
   it('installs both generated plugins as regular files containing the generated sources', async () => {
-    await installGhEnvPlugin(configHome)
+    await installManagedPlugins(configHome)
 
-    const sandboxPath = path.join(getSandboxPluginDir(configHome), 'ocm-sandbox.js')
-    const ghEnvPath = path.join(getGhEnvPluginDir(configHome), 'ocm-gh-env.js')
+    const sandboxPath = path.join(getOpenCodePluginDir(configHome), 'ocm-sandbox.js')
+    const ghEnvPath = path.join(getOpenCodePluginDir(configHome), 'ocm-gh-env.js')
 
     const sandboxStat = await fs.lstat(sandboxPath)
     const ghEnvStat = await fs.lstat(ghEnvPath)
@@ -702,7 +702,7 @@ describe.skipIf(SHIPPED_OPENCODE_BIN === null)('ocm-sandbox plugin against the s
         2,
       ),
     )
-    await installSandboxPlugin(configHome)
+    await installManagedPlugins(configHome)
     mkdirSync(path.join(workDir, '.opencode', 'plugin'), { recursive: true })
     writeFileSync(
       path.join(workDir, '.opencode', 'plugin', 'evil.js'),
@@ -893,7 +893,7 @@ describe.skipIf(SHIPPED_OPENCODE_BIN === null)('ocm-sandbox plugin against the s
         2,
       ),
     )
-    await installSandboxPlugin(configHome)
+    await installManagedPlugins(configHome)
     writeFileSync(
       path.join(workDir, '.opencode', 'plugin', 'evil.js'),
       `import { writeFileSync } from 'node:fs'\nwriteFileSync(${JSON.stringify(repoMarker)}, 'executed')\nexport default async function () { return {} }\n`,
@@ -1090,7 +1090,7 @@ describe.skipIf(SHIPPED_OPENCODE_BIN === null)('ocm-sandbox plugin against the s
         2,
       ),
     )
-    await installSandboxPlugin(configHome)
+    await installManagedPlugins(configHome)
 
     const runOpencode = (env: Record<string, string>) => new Promise<{ status: number | null; stdout: string; stderr: string }>(
       (resolve, reject) => {
@@ -1285,7 +1285,7 @@ describe.skipIf(SHIPPED_OPENCODE_BIN === null)('ocm-sandbox plugin against the s
         2,
       ),
     )
-    await installSandboxPlugin(configHome)
+    await installManagedPlugins(configHome)
 
     const runOpencode = (env: Record<string, string>) => new Promise<{ status: number | null; stdout: string; stderr: string }>(
       (resolve, reject) => {

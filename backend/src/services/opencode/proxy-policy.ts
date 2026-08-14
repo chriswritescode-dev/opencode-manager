@@ -34,16 +34,6 @@ const BLOCKED_ENFORCED_ROUTES: ReadonlyArray<{
 }> = [
   {
     methods: ['POST'],
-    pathPattern: /^\/session\/[^/]+\/shell$/,
-    reason: 'the session shell endpoint (`!command`) runs in the OpenCode host process',
-  },
-  {
-    methods: ['POST'],
-    pathPattern: /^\/session\/[^/]+\/command$/,
-    reason: 'custom slash commands can run shell templates in the OpenCode host process',
-  },
-  {
-    methods: ['POST'],
     pathPattern: /^\/pty$/,
     reason: 'PTY creation runs commands in the OpenCode host process',
   },

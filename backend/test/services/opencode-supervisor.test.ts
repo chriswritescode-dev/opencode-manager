@@ -459,7 +459,7 @@ describe('OpenCodeSupervisor', () => {
     expect(manager.setLifecycleInitialized).toHaveBeenLastCalledWith(true)
   })
 
-  it('closes the proxy lifecycle gate for the whole reload transition and reopens once healthy', async () => {
+  it('keeps the proxy lifecycle gate open across a config reload so in-flight sessions are never interrupted', async () => {
     const manager = createManager()
     const settings = createSettings()
     const supervisor = new OpenCodeSupervisor(manager as unknown as never, settings as unknown as never, {
@@ -469,6 +469,7 @@ describe('OpenCodeSupervisor', () => {
 
     await supervisor.start()
     expect(manager.setLifecycleInitialized).toHaveBeenLastCalledWith(true)
+    manager.setLifecycleInitialized.mockClear()
 
     let releaseReload!: () => void
     manager.reloadConfig.mockImplementationOnce(
@@ -478,13 +479,13 @@ describe('OpenCodeSupervisor', () => {
 
     const reload = supervisor.reloadConfig('settings_reload')
     await vi.waitFor(() => expect(manager.reloadConfig).toHaveBeenCalledTimes(1))
-    expect(manager.setLifecycleInitialized).toHaveBeenLastCalledWith(false)
+    expect(manager.setLifecycleInitialized).not.toHaveBeenCalledWith(false)
 
     releaseReload()
     const status = await reload
 
     expect(status.healthy).toBe(true)
-    expect(manager.setLifecycleInitialized).toHaveBeenLastCalledWith(true)
+    expect(manager.setLifecycleInitialized).not.toHaveBeenCalledWith(false)
   })
 
   it('closes the proxy lifecycle gate while stopping and never reopens it', async () => {

@@ -29,9 +29,9 @@ function mockUseSettings(overrides: Partial<ReturnType<typeof useSettings>> = {}
   return { updateSettingsAsync }
 }
 
-function mockHealth(sandbox?: { available: boolean; enforced: boolean; reason?: string; msbVersion?: string }) {
+function mockHealth(sandbox?: { available: boolean; enforced: boolean; reason?: string; msbVersion?: string }, opencodeRestartPending = false) {
   vi.mocked(useServerHealth).mockReturnValue({
-    data: { sandbox },
+    data: { opencode: 'healthy', opencodeRestartPending, sandbox },
     isLoading: false,
     error: null,
     refetch: vi.fn(),
@@ -57,7 +57,7 @@ describe('SandboxSettings', () => {
   it('writes only the sandbox preference when toggled and shows the restart notice', async () => {
     const user = userEvent.setup()
     const { updateSettingsAsync } = mockUseSettings()
-    mockHealth({ available: true, enforced: false })
+    mockHealth({ available: true, enforced: false }, true)
 
     render(<SandboxSettings />)
 

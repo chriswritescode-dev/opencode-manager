@@ -7,6 +7,12 @@ export const WORKSPACE_SANDBOX_NAME = 'ocm-workspace'
 
 export const SANDBOX_UNAVAILABLE_PREFIX = 'Sandbox enforcement is on but the sandbox is unavailable: '
 
+const SANDBOX_PLAN_REQUEST_MARGIN_MS = 30000
+
+export function sandboxPlanTimeoutMs(): number {
+  return ENV.SANDBOX.START_TIMEOUT_MS + SANDBOX_PLAN_REQUEST_MARGIN_MS
+}
+
 let cachedExecutablePath: string | null | undefined
 let executableTrustValidator: ((candidate: string) => boolean) | null = null
 

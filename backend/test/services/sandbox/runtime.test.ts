@@ -7,7 +7,7 @@ import { ENV, getReposPath, getScheduleWorktreesPath } from '@opencode-manager/s
 import { migrate } from '../../../src/db/migration-runner'
 import { allMigrations } from '../../../src/db/migrations'
 import { SettingsService } from '../../../src/services/settings'
-import { buildSandboxExecCommandString, resolveSandboxExecUser, sandboxExecutablePath, WORKSPACE_SANDBOX_NAME, sandboxSecretMaskPath } from '../../../src/services/sandbox/command'
+import { buildSandboxExecCommandString, buildSandboxInspectArgs, resolveSandboxExecUser, sandboxExecutablePath, WORKSPACE_SANDBOX_NAME, sandboxSecretMaskPath } from '../../../src/services/sandbox/command'
 import { SandboxRuntimeService, resetSandboxRuntimeState, stopWorkspaceSandboxOnShutdown } from '../../../src/services/sandbox/runtime'
 import { executeCommand } from '../../../src/utils/process'
 import { detectSandboxCapability } from '../../../src/services/sandbox/capability'
@@ -220,10 +220,11 @@ describe('SandboxRuntimeService', () => {
 
     expect(plan).toEqual({ mode: 'sandbox', command: buildSandboxExecCommandString(directory, 'echo hi') })
     expect(mockExecuteCommand).toHaveBeenCalledWith(
-      [sandboxExecutablePath(), 'ls', '--format', 'json'],
+      [sandboxExecutablePath(), ...buildSandboxInspectArgs()],
       expect.objectContaining({ ignoreExitCode: true, silent: true }),
     )
-    expect(mockExecuteCommand.mock.calls.filter((call) => call[0].includes('run'))).toHaveLength(1)
+    expect(mockExecuteCommand.mock.calls.filter((call) => call[0].includes('ls'))).toHaveLength(0)
+    expect(mockExecuteCommand.mock.calls.filter((call) => call[0].includes('run'))).toHaveLength(0)
   })
 
   it('boots the microVM once for concurrent plans in different repo directories', async () => {
@@ -242,8 +243,9 @@ describe('SandboxRuntimeService', () => {
 
     expect(planA).toEqual({ mode: 'sandbox', command: buildSandboxExecCommandString(dirA, 'echo a') })
     expect(planB).toEqual({ mode: 'sandbox', command: buildSandboxExecCommandString(dirB, 'echo b') })
-    expect(mockExecuteCommand.mock.calls.filter((call) => call[0].includes('ls'))).toHaveLength(1)
-    expect(mockExecuteCommand.mock.calls.filter((call) => call[0].includes('run'))).toHaveLength(1)
+    expect(mockExecuteCommand.mock.calls.filter((call) => call[0].includes('inspect'))).toHaveLength(1)
+    expect(mockExecuteCommand.mock.calls.filter((call) => call[0].includes('ls'))).toHaveLength(0)
+    expect(mockExecuteCommand.mock.calls.filter((call) => call[0].includes('run'))).toHaveLength(0)
   })
 
   it('accepts a schedule-worktree directory', async () => {
@@ -306,14 +308,13 @@ describe('SandboxRuntimeService', () => {
       mode: 'blocked',
       reason: 'msb start failed with code 1: vm kernel failed to boot: no memory',
     })
-    expect(mockExecuteCommand.mock.calls.filter((call) => call[0].includes('ls'))).toHaveLength(2)
+    expect(mockExecuteCommand.mock.calls.filter((call) => call[0].includes('ls'))).toHaveLength(1)
     expect(mockExecuteCommand.mock.calls.filter((call) => call[0].includes('run'))).toHaveLength(0)
   })
 
   it('tolerates a non-zero start exit when the follow-up listing shows the sandbox running', async () => {
     enableEnforcement()
     mockExecuteCommand
-      .mockResolvedValueOnce({ exitCode: 0, stdout: stoppedListingOutput(), stderr: '' })
       .mockResolvedValueOnce({ exitCode: 0, stdout: trustedInspectOutput(), stderr: '' })
       .mockResolvedValueOnce({ exitCode: 1, stdout: '', stderr: 'already running' })
       .mockResolvedValueOnce({
@@ -327,7 +328,7 @@ describe('SandboxRuntimeService', () => {
     const plan = await service.planCommand(directory, 'echo hi')
 
     expect(plan).toEqual({ mode: 'sandbox', command: buildSandboxExecCommandString(directory, 'echo hi') })
-    expect(mockExecuteCommand.mock.calls.filter((call) => call[0].includes('ls'))).toHaveLength(2)
+    expect(mockExecuteCommand.mock.calls.filter((call) => call[0].includes('ls'))).toHaveLength(1)
     expect(mockExecuteCommand.mock.calls.filter((call) => call[0].includes('start'))).toHaveLength(1)
     expect(mockExecuteCommand.mock.calls.filter((call) => call[0].includes('run'))).toHaveLength(0)
   })
@@ -377,10 +378,8 @@ describe('SandboxRuntimeService', () => {
   it('blocks a signal-terminated start and never caches the sandbox as running without proof', async () => {
     enableEnforcement()
     mockExecuteCommand
-      .mockResolvedValueOnce({ exitCode: 0, stdout: stoppedListingOutput(), stderr: '' })
       .mockResolvedValueOnce({ exitCode: 0, stdout: trustedInspectOutput(), stderr: '' })
       .mockResolvedValueOnce({ exitCode: 1, stdout: '', stderr: 'Command terminated by signal SIGKILL' })
-      .mockResolvedValueOnce({ exitCode: 0, stdout: stoppedListingOutput(), stderr: '' })
       .mockResolvedValueOnce({ exitCode: 0, stdout: stoppedListingOutput(), stderr: '' })
       .mockResolvedValueOnce({ exitCode: 0, stdout: trustedInspectOutput(), stderr: '' })
       .mockResolvedValueOnce({ exitCode: 1, stdout: '', stderr: 'Command terminated by signal SIGKILL' })
@@ -393,7 +392,7 @@ describe('SandboxRuntimeService', () => {
       reason: 'msb start failed with code 1: Command terminated by signal SIGKILL',
     })
     expect(mockExecuteCommand.mock.calls.filter((call) => call[0].includes('start'))).toHaveLength(1)
-    expect(mockExecuteCommand.mock.calls.filter((call) => call[0].includes('ls'))).toHaveLength(2)
+    expect(mockExecuteCommand.mock.calls.filter((call) => call[0].includes('ls'))).toHaveLength(1)
     expect(mockExecuteCommand.mock.calls.filter((call) => call[0].includes('run'))).toHaveLength(0)
 
     const retried = await service.planCommand(repoADir, 'echo hi')
@@ -403,7 +402,7 @@ describe('SandboxRuntimeService', () => {
       reason: 'msb start failed with code 1: Command terminated by signal SIGKILL',
     })
     expect(mockExecuteCommand.mock.calls.filter((call) => call[0].includes('start'))).toHaveLength(2)
-    expect(mockExecuteCommand.mock.calls.filter((call) => call[0].includes('ls'))).toHaveLength(4)
+    expect(mockExecuteCommand.mock.calls.filter((call) => call[0].includes('ls'))).toHaveLength(2)
   })
 
   it('removes and recreates a same-name sandbox that is not labelled as managed', async () => {
@@ -812,7 +811,7 @@ describe('SandboxRuntimeService', () => {
     expect(plan).toEqual({ mode: 'sandbox', command: buildSandboxExecCommandString(repoADir, 'echo hi') })
     expect(mockExecuteCommand.mock.calls.filter((call) => call[0].includes('rm'))).toHaveLength(1)
     expect(mockExecuteCommand.mock.calls.filter((call) => call[0].includes('run'))).toHaveLength(1)
-    expect(mockExecuteCommand.mock.calls.filter((call) => call[0].includes('start'))).toHaveLength(0)
+    expect(mockExecuteCommand.mock.calls.filter((call) => call[0].includes('start'))).toHaveLength(1)
     expect(logger.warn).toHaveBeenCalledWith(expect.stringContaining('no active configuration'))
   })
 
@@ -1414,7 +1413,7 @@ describe('SandboxRuntimeService', () => {
       const second = await service.planCommand(repoBDir, 'echo b')
       expect(second).toEqual({ mode: 'sandbox', command: buildSandboxExecCommandString(repoBDir, 'echo b') })
 
-      expect(mockExecuteCommand.mock.calls.filter((call) => call[0].includes('ls'))).toHaveLength(2)
+      expect(mockExecuteCommand.mock.calls.filter((call) => call[0].includes('ls'))).toHaveLength(0)
       expect(mockExecuteCommand.mock.calls.filter((call) => call[0].includes('inspect'))).toHaveLength(2)
       expect(mockExecuteCommand.mock.calls.filter((call) => call[0].includes('rm'))).toHaveLength(0)
       expect(mockExecuteCommand.mock.calls.filter((call) => call[0].includes('run'))).toHaveLength(0)
@@ -1729,7 +1728,7 @@ describe('SandboxRuntimeService', () => {
         }
       }
       if (args.includes('inspect')) {
-        return runningInspectOutput(realInspectConfig({ env: [{ key: 'PATH', value: '/evil' }] }))
+        return { exitCode: 0, stdout: runningInspectOutput(realInspectConfig({ env: [{ key: 'PATH', value: '/evil' }] })), stderr: '' }
       }
       return { exitCode: 0, stdout: '', stderr: '' }
     })
@@ -1848,8 +1847,9 @@ describe('SandboxRuntimeService', () => {
       const plan = await service.planCommand(lateDir, 'echo b')
 
       expect(plan).toEqual({ mode: 'sandbox', command: buildSandboxExecCommandString(lateDir, 'echo b') })
-      expect(mockExecuteCommand.mock.calls.filter((call) => call[0].includes('ls'))).toHaveLength(1)
-      expect(mockExecuteCommand.mock.calls.filter((call) => call[0].includes('run'))).toHaveLength(1)
+      expect(mockExecuteCommand.mock.calls.filter((call) => call[0].includes('inspect'))).toHaveLength(1)
+      expect(mockExecuteCommand.mock.calls.filter((call) => call[0].includes('ls'))).toHaveLength(0)
+      expect(mockExecuteCommand.mock.calls.filter((call) => call[0].includes('run'))).toHaveLength(0)
     } finally {
       rmSync(lateDir, { recursive: true, force: true })
     }
@@ -1885,7 +1885,7 @@ describe('SandboxRuntimeService', () => {
     const second = await service.planCommand(repoADir, 'echo b')
 
     expect(second).toEqual({ mode: 'blocked', reason: '/dev/kvm is not available or not writable' })
-    expect(mockExecuteCommand.mock.calls.filter((call) => call[0].includes('run'))).toHaveLength(1)
+    expect(mockExecuteCommand.mock.calls.filter((call) => call[0].includes('run'))).toHaveLength(0)
   })
 
   it('stops the managed sandbox using the label filter', async () => {
@@ -1913,35 +1913,34 @@ describe('SandboxRuntimeService', () => {
 
   it('serializes shutdown with an in-flight boot and stops only after the boot completes', async () => {
     enableEnforcement()
-    let releaseLs: () => void = () => {}
-    const lsGate = new Promise<void>((resolve) => {
-      releaseLs = resolve
+    let releaseInspect: () => void = () => {}
+    const inspectGate = new Promise<void>((resolve) => {
+      releaseInspect = resolve
     })
     mockExecuteCommand.mockImplementation(async (args: string[]) => {
-      if (args.includes('ls')) {
-        await lsGate
-        return { exitCode: 0, stdout: '[]', stderr: '' }
+      if (args.includes('inspect')) {
+        await inspectGate
+        return inspectedRunningSandbox()
       }
-      if (args.includes('inspect')) return inspectedRunningSandbox()
       return { exitCode: 0, stdout: '', stderr: '' }
     })
 
     const planning = service.planCommand(repoADir, 'echo a')
     await vi.waitFor(() => {
-      expect(mockExecuteCommand.mock.calls.some((call) => call[0].includes('ls'))).toBe(true)
+      expect(mockExecuteCommand.mock.calls.some((call) => call[0].includes('inspect'))).toBe(true)
     })
 
     const stopping = service.stopWorkspaceSandbox()
-    releaseLs()
+    releaseInspect()
     const plan = await planning
     await stopping
 
     expect(plan).toEqual({ mode: 'sandbox', command: buildSandboxExecCommandString(repoADir, 'echo a') })
     const calls = mockExecuteCommand.mock.calls
-    const runIndex = calls.findIndex((call) => call[0].includes('run'))
+    const inspectIndex = calls.findIndex((call) => call[0].includes('inspect'))
     const stopIndex = calls.findIndex((call) => call[0].includes('stop'))
-    expect(runIndex).toBeGreaterThanOrEqual(0)
-    expect(stopIndex).toBeGreaterThan(runIndex)
+    expect(inspectIndex).toBeGreaterThanOrEqual(0)
+    expect(stopIndex).toBeGreaterThan(inspectIndex)
   })
 
   it('refuses to boot the workspace sandbox once shutdown is in progress', async () => {
@@ -2036,7 +2035,8 @@ describe('SandboxRuntimeService', () => {
     const plan = await service.planCommand(repoADir, 'echo hi')
 
     expect(plan).toEqual({ mode: 'sandbox', command: buildSandboxExecCommandString(repoADir, 'echo hi') })
-    expect(mockExecuteCommand.mock.calls.filter((call) => call[0].includes('run'))).toHaveLength(1)
+    expect(mockExecuteCommand.mock.calls.filter((call) => call[0].includes('run'))).toHaveLength(0)
+    expect(mockExecuteCommand.mock.calls.filter((call) => call[0].includes('inspect'))).toHaveLength(1)
   })
 
   it('attempts the toggle stop even when sandbox capability is unavailable', async () => {
@@ -2132,7 +2132,9 @@ describe('SandboxRuntimeService', () => {
     enableEnforcement()
     mockExecuteCommand
       .mockResolvedValueOnce({ exitCode: 0, stdout: '[]', stderr: '' })
+      .mockResolvedValueOnce({ exitCode: 0, stdout: '[]', stderr: '' })
       .mockRejectedValueOnce(new Error('Command failed with code 1: no KVM acceleration available'))
+      .mockResolvedValueOnce({ exitCode: 0, stdout: '[]', stderr: '' })
       .mockResolvedValueOnce({ exitCode: 0, stdout: '[]', stderr: '' })
       .mockResolvedValueOnce({ exitCode: 0, stdout: '', stderr: '' })
       .mockResolvedValueOnce(inspectedRunningSandbox())
@@ -2242,7 +2244,7 @@ describe('SandboxRuntimeService', () => {
 
     expect(plan).toEqual({ mode: 'blocked', reason: expect.stringContaining('failed attestation') })
     expect(mockExecuteCommand.mock.calls.filter((call) => call[0].includes('run'))).toHaveLength(1)
-    expect(mockExecuteCommand.mock.calls.filter((call) => call[0].includes('inspect'))).toHaveLength(1)
+    expect(mockExecuteCommand.mock.calls.filter((call) => call[0].includes('inspect'))).toHaveLength(2)
 
     const retried = await service.planCommand(repoADir, 'echo again')
     expect(retried).toEqual({ mode: 'blocked', reason: expect.stringContaining('failed attestation') })

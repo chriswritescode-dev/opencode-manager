@@ -177,6 +177,7 @@ const runOpenCodeSection = (snippet: string, env: Record<string, string> = {}) =
       PATH: `${stubDir}:${homeDir}/.opencode/bin:/usr/bin:/bin`,
       OCM_STUB_LOG: logPath,
       HOME: homeDir,
+      OPENCODE_BUNDLED_VERSION: '1.18.16',
       ...env,
     },
   })
@@ -202,6 +203,16 @@ describe('install_opencode', () => {
     const urls = curlLog().join(' ')
     expect(urls).toMatch(/\/releases\/download\/v1\.18\.16\//)
     expect(urls).not.toContain('/releases/latest/download/')
+  })
+
+  it('refuses to guess the pinned build when OPENCODE_BUNDLED_VERSION is unset', () => {
+    stubInstallTools()
+    const res = runOpenCodeSection(`${extractInstallOpencode()}\ninstall_opencode`, {
+      OPENCODE_BUNDLED_VERSION: '',
+    })
+    expect(res.status).not.toBe(0)
+    expect(res.stderr).toContain('OPENCODE_BUNDLED_VERSION is not set')
+    expect(curlLog()).toHaveLength(0)
   })
 
   it('honors an OPENCODE_BUNDLED_VERSION override for the download URL', () => {

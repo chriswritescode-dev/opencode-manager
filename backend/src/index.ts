@@ -51,6 +51,7 @@ import { CredentialProvider } from './services/credential-provider'
 import { ScheduleWorktreeManager } from './services/schedule-worktree'
 import { migrateGlobalSkills } from './services/skills'
 import { installAssistantWorkspace } from './services/assistant-mode'
+import { detectSandboxCapability } from './services/sandbox/capability'
 import { stopWorkspaceSandboxOnShutdown } from './services/sandbox/runtime'
 import { getOpenCodeImportStatus, syncOpenCodeImport } from './services/opencode-import'
 import { OpenCodeSupervisor } from './services/opencode-supervisor'
@@ -297,8 +298,8 @@ try {
   await syncAdminFromEnv(auth, db)
 
   opencodeServerManager.setDatabase(db)
+  detectSandboxCapability()
   const openCodeStatus = await openCodeSupervisor.start()
-  opencodeServerManager.setLifecycleInitialized(openCodeStatus.healthy)
   if (openCodeStatus.healthy) {
     logger.info(`OpenCode server running on port ${openCodeStatus.port}`)
   } else {
@@ -338,6 +339,7 @@ if (ENV.VAPID.PUBLIC_KEY && ENV.VAPID.PRIVATE_KEY) {
 
 sseAggregator.setPendingActionsFetcher(openCodeClient)
 sseAggregator.setPasswordResolver(() => new SettingsService(db).getOpenCodeServerPassword())
+sseAggregator.setEnforcementResolver(() => opencodeServerManager.isSandboxEnforced())
 sseAggregator.start()
 
 sseAggregator.setScheduledSessionsResolver(

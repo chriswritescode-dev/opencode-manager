@@ -4,6 +4,7 @@ import path from 'path'
 import { parseJsonc } from '@opencode-manager/shared/utils'
 import { logger } from '../utils/logger'
 import { mkdirSafe, writeFileAtomic } from '../utils/fs-safe'
+import { getOpenCodePluginDir, TRUSTED_OPENCODE_PLUGIN_FILENAMES } from './opencode/plugin-registry'
 import {
   isRecord,
   restoreEnforcementSections,
@@ -11,7 +12,6 @@ import {
   type EnforcementRemovedSections,
 } from './opencode/enforcement-config'
 
-export const TRUSTED_OPENCODE_PLUGIN_FILENAMES = ['ocm-sandbox.js', 'ocm-gh-env.js'] as const
 const TRUSTED_TOOL_FILENAMES: readonly string[] = []
 const PLUGIN_CONFIG_BACKUP_SUFFIX = '.ocm-sandbox-backup'
 const QUARANTINE_CONFLICT_SUFFIX = '.ocm-conflict'
@@ -58,7 +58,7 @@ function deepEqual(left: unknown, right: unknown): boolean {
 function getPluginDirs(configHome: string): string[] {
   const home = getOpenCodePluginDiscoveryHome()
   return [
-    path.join(configHome, 'opencode', 'plugin'),
+    getOpenCodePluginDir(configHome),
     path.join(configHome, 'opencode', 'plugins'),
     path.join(home, '.opencode', 'plugin'),
     path.join(home, '.opencode', 'plugins'),
@@ -571,7 +571,7 @@ async function restoreEnforcementConfigSections(configPath: string): Promise<voi
 
 export async function quarantineOpenCodePlugins(configHome: string, configPath: string): Promise<void> {
   await assertNoWellKnownAuthEntries(configHome)
-  const managerPluginDir = path.join(configHome, 'opencode', 'plugin')
+  const managerPluginDir = getOpenCodePluginDir(configHome)
   for (const dir of getPluginDirs(configHome)) {
     await moveUntrustedPluginEntries(dir, dir === managerPluginDir ? TRUSTED_OPENCODE_PLUGIN_FILENAMES : [])
   }

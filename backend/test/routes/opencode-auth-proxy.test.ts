@@ -144,20 +144,20 @@ describe('authenticated opencode proxy routes', () => {
     expect(forwarded.url).toContain('/api/opencode/mcp/evil-server/auth/authenticate')
   })
 
-  it('blocks the session shell endpoint with 403 when enforced', async () => {
+  it('forwards the session shell endpoint when enforced', async () => {
     isSandboxEnforcedMock.mockReturnValue(true)
     const app = buildApp()
     const res = await app.request('/api/opencode/session/ses_1/shell', { method: 'POST' })
-    expect(res.status).toBe(403)
-    expect(forwardRawMock).not.toHaveBeenCalled()
+    expect(res.status).toBe(200)
+    expect(forwardRawMock).toHaveBeenCalled()
   })
 
-  it('keeps host-process shell endpoints blocked when enforcement resolution failed (fail-closed manager state)', async () => {
+  it('forwards the session shell endpoint while enforcement is on', async () => {
     isSandboxEnforcedMock.mockReturnValue(true)
     const app = buildApp()
     const res = await app.request('/api/opencode/session/ses_1/shell', { method: 'POST' })
-    expect(res.status).toBe(403)
-    expect(forwardRawMock).not.toHaveBeenCalled()
+    expect(res.status).toBe(200)
+    expect(forwardRawMock).toHaveBeenCalled()
   })
 
   it('blocks /api-prefixed PTY creation with 403 when enforced', async () => {
@@ -168,10 +168,10 @@ describe('authenticated opencode proxy routes', () => {
     expect(forwardRawMock).not.toHaveBeenCalled()
   })
 
-  it('blocks percent-encoded shell spellings with 403 when enforced', async () => {
+  it('blocks percent-encoded PTY spellings with 403 when enforced', async () => {
     isSandboxEnforcedMock.mockReturnValue(true)
     const app = buildApp()
-    const res = await app.request('/api/opencode/session/ses_1/%73hell', { method: 'POST' })
+    const res = await app.request('/api/opencode/%70ty', { method: 'POST' })
     expect(res.status).toBe(403)
     expect(forwardRawMock).not.toHaveBeenCalled()
     const body = await res.json() as { error: string }
@@ -181,7 +181,7 @@ describe('authenticated opencode proxy routes', () => {
   it('fails closed on encoded separators in proxied paths when enforced', async () => {
     isSandboxEnforcedMock.mockReturnValue(true)
     const app = buildApp()
-    const res = await app.request('/api/opencode/session/ses_1%2Fshell', { method: 'POST' })
+    const res = await app.request('/api/opencode/pty%2Fp1', { method: 'POST' })
     expect(res.status).toBe(403)
     expect(forwardRawMock).not.toHaveBeenCalled()
   })

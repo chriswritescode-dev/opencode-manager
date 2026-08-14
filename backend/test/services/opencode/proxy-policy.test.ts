@@ -8,7 +8,6 @@ import {
   isSandboxConfigMutation,
   isSandboxMcpAdd,
   isSandboxAuthWrite,
-  SANDBOX_BLOCKED_REASON_PREFIX,
   SANDBOX_CONFIG_MUTATION_REASON_PREFIX,
 } from '../../../src/services/opencode/proxy-policy'
 
@@ -19,17 +18,12 @@ describe('sandbox proxy policy', () => {
     expect(decideSandboxProxyBlock(false, 'POST', '/session/s1/command')).toEqual({ blocked: false })
   })
 
-  it('blocks the session shell endpoint when enforced', () => {
-    const decision = decideSandboxProxyBlock(true, 'POST', '/session/ses_1/shell')
-    expect(decision.blocked).toBe(true)
-    if (decision.blocked) {
-      expect(decision.reason).toContain(SANDBOX_BLOCKED_REASON_PREFIX)
-      expect(decision.reason).toContain('host process')
-    }
+  it('forwards the session shell endpoint when enforced', () => {
+    expect(decideSandboxProxyBlock(true, 'POST', '/session/ses_1/shell')).toEqual({ blocked: false })
   })
 
-  it('blocks custom slash command execution when enforced', () => {
-    expect(decideSandboxProxyBlock(true, 'POST', '/session/ses_1/command').blocked).toBe(true)
+  it('forwards custom slash command execution when enforced', () => {
+    expect(decideSandboxProxyBlock(true, 'POST', '/session/ses_1/command')).toEqual({ blocked: false })
   })
 
   it('blocks PTY creation and connection when enforced', () => {
@@ -41,8 +35,8 @@ describe('sandbox proxy policy', () => {
   it('treats /api-prefixed execution routes identically to unprefixed routes when enforced', () => {
     expect(decideSandboxProxyBlock(true, 'POST', '/api/pty').blocked).toBe(true)
     expect(decideSandboxProxyBlock(true, 'GET', '/api/pty/p1/connect').blocked).toBe(true)
-    expect(decideSandboxProxyBlock(true, 'POST', '/api/session/ses_1/shell').blocked).toBe(true)
-    expect(decideSandboxProxyBlock(true, 'POST', '/api/session/ses_1/command').blocked).toBe(true)
+    expect(decideSandboxProxyBlock(true, 'POST', '/api/session/ses_1/shell')).toEqual({ blocked: false })
+    expect(decideSandboxProxyBlock(true, 'POST', '/api/session/ses_1/command')).toEqual({ blocked: false })
     expect(decideSandboxProxyBlock(true, 'POST', '/api/p%74y').blocked).toBe(true)
     expect(decideSandboxProxyBlock(true, 'GET', '/api/session')).toEqual({ blocked: false })
     expect(decideSandboxProxyBlock(true, 'GET', '/api/pty/p1')).toEqual({ blocked: false })
@@ -51,7 +45,7 @@ describe('sandbox proxy policy', () => {
 
   it('fails closed on encoded separators inside the /api prefix when enforced', () => {
     expect(decideSandboxProxyBlock(true, 'POST', '/api%2Fpty').blocked).toBe(true)
-    expect(decideSandboxProxyBlock(true, 'POST', '/api%2Fsession/ses_1/shell').blocked).toBe(true)
+    expect(decideSandboxProxyBlock(true, 'POST', '/api%2Fpty/p1/connect').blocked).toBe(true)
   })
 
   it('classifies /api-prefixed config, mcp, and auth writes identically when enforced', () => {
@@ -80,21 +74,21 @@ describe('sandbox proxy policy', () => {
   })
 
   it('blocks percent-encoded spellings of blocked routes when enforced', () => {
-    expect(decideSandboxProxyBlock(true, 'POST', '/session/ses_1/%73hell').blocked).toBe(true)
-    expect(decideSandboxProxyBlock(true, 'POST', '/session/ses_1/%73%68%65%6c%6c').blocked).toBe(true)
-    expect(decideSandboxProxyBlock(true, 'POST', '/session/ses_1/%63ommand').blocked).toBe(true)
+    expect(decideSandboxProxyBlock(true, 'POST', '/%70ty').blocked).toBe(true)
+    expect(decideSandboxProxyBlock(true, 'POST', '/pty/%70%31/connect').blocked).toBe(true)
+    expect(decideSandboxProxyBlock(true, 'POST', '/p%74y/p1/connect').blocked).toBe(true)
     expect(decideSandboxProxyBlock(true, 'POST', '/p%74y').blocked).toBe(true)
     expect(decideSandboxProxyBlock(true, 'GET', '/p%74y/ses_1/connect').blocked).toBe(true)
   })
 
   it('fails closed on encoded separators, double-encoded, control, and malformed paths when enforced', () => {
-    expect(decideSandboxProxyBlock(true, 'POST', '/session/ses_1/shell%2F..').blocked).toBe(true)
-    expect(decideSandboxProxyBlock(true, 'POST', '/session/ses_1%2Fshell').blocked).toBe(true)
-    expect(decideSandboxProxyBlock(true, 'POST', '/session/ses_1/shell%5Cx').blocked).toBe(true)
-    expect(decideSandboxProxyBlock(true, 'POST', '/session/ses_1/%2573hell').blocked).toBe(true)
-    expect(decideSandboxProxyBlock(true, 'POST', '/session/ses_1/shell%00').blocked).toBe(true)
-    expect(decideSandboxProxyBlock(true, 'POST', '/session/ses_1/shell%zz').blocked).toBe(true)
-    expect(decideSandboxProxyBlock(true, 'POST', '/session/ses_1/%c0%ae').blocked).toBe(true)
+    expect(decideSandboxProxyBlock(true, 'POST', '/pty%2F..').blocked).toBe(true)
+    expect(decideSandboxProxyBlock(true, 'POST', '/pty%2Fp1').blocked).toBe(true)
+    expect(decideSandboxProxyBlock(true, 'POST', '/pty%5Cx').blocked).toBe(true)
+    expect(decideSandboxProxyBlock(true, 'POST', '/%2570ty').blocked).toBe(true)
+    expect(decideSandboxProxyBlock(true, 'POST', '/pty%00').blocked).toBe(true)
+    expect(decideSandboxProxyBlock(true, 'POST', '/pty%zz').blocked).toBe(true)
+    expect(decideSandboxProxyBlock(true, 'POST', '/p%c0%ae').blocked).toBe(true)
   })
 
   it('passes safely encoded non-execution paths through when enforced', () => {

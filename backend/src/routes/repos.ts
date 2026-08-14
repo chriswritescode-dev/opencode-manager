@@ -8,7 +8,7 @@ import * as repoService from '../services/repo'
 import * as archiveService from '../services/archive'
 import { SettingsService } from '../services/settings'
 import { writeFileContent } from '../services/file-operations'
-import { restartOpenCode } from '../services/opencode-restart'
+import { restartOpenCodeAfterCommit } from '../services/opencode-restart'
 import type { OpenCodeSupervisor } from '../services/opencode-supervisor'
 import type { OpenCodeClient } from '../services/opencode/client'
 import { logger } from '../utils/logger'
@@ -420,10 +420,10 @@ app.get('/', async (c) => {
       logger.info(`Updated OpenCode config: ${openCodeConfigPath}`)
       
       logger.info('Restarting OpenCode server due to workspace config change')
-      await restartOpenCode(openCodeSupervisor)
+      const { restartFailed, restartError } = await restartOpenCodeAfterCommit(openCodeSupervisor)
       
       const updatedRepo = getRepoById(database, id)
-      return c.json(updatedRepo)
+      return c.json(restartFailed ? { ...updatedRepo, restartFailed, restartError } : updatedRepo)
     } catch (error: unknown) {
       logger.error('Failed to switch repo config:', error)
       return c.json({ error: getErrorMessage(error) }, 500)

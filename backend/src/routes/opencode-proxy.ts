@@ -4,6 +4,7 @@ import { ENV } from '@opencode-manager/shared/config/env'
 import { createInternalTokenMiddleware } from '../auth/internal-token-middleware'
 import type { SettingsService } from '../services/settings'
 import { opencodeServerManager } from '../services/opencode-single-server'
+import { getOpenCodeUpstreamBaseUrl } from '../services/opencode/upstream'
 import {
   decideSandboxMutationBody,
   decideSandboxProxyBlock,
@@ -50,7 +51,7 @@ export function createOpenCodeProxyRoutes(db: Database, settingsService: Setting
     if (decision.blocked) {
       return c.json({ error: decision.reason }, 403)
     }
-    const upstreamUrl = `http://127.0.0.1:${ENV.OPENCODE.PORT}${pathSuffix}${url.search}`
+    const upstreamUrl = `${getOpenCodeUpstreamBaseUrl(enforced)}${pathSuffix}${url.search}`
 
     const headers: Record<string, string> = {}
     c.req.raw.headers.forEach((value, key) => {

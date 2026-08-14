@@ -1,6 +1,5 @@
 import { useState, useRef, useEffect, useMemo, useImperativeHandle, forwardRef, memo, useCallback, type KeyboardEvent, type PointerEvent as ReactPointerEvent } from 'react'
 import { useSendPrompt, useAbortSession, useSendShell, useAgents } from '@/hooks/useOpenCode'
-import { useServerHealth } from '@/hooks/useServerHealth'
 import { useCommands } from '@/hooks/useCommands'
 import { useCommandHandler } from '@/hooks/useCommandHandler'
 import { useFileSearch } from '@/hooks/useFileSearch'
@@ -219,8 +218,6 @@ export const PromptInput = memo(forwardRef<PromptInputHandle, PromptInputProps>(
   const sendPrompt = useSendPrompt(opcodeUrl, directory)
   const sendShell = useSendShell(opcodeUrl, directory)
   const isPromptSubmitPending = sendPrompt.isPending || sendShell.isPending
-  const sandboxEnforced = useServerHealth().data?.sandbox?.enforced === true
-  const sandboxShellModeDisabledMessage = 'Sandbox enforcement is on: `!command` shell mode is disabled because it runs in the OpenCode host process. Agent shell commands run inside the microsandbox — send a normal message instead.'
   const abortSession = useAbortSession(opcodeUrl, directory, sessionID)
   const { filterCommands } = useCommands(opcodeUrl)
   const { executeCommand } = useCommandHandler({
@@ -325,12 +322,6 @@ export const PromptInput = memo(forwardRef<PromptInputHandle, PromptInputProps>(
     if (isPromptSubmitPending) return
 
     if (isBashMode) {
-      if (sandboxEnforced) {
-        showToast.error(sandboxShellModeDisabledMessage, { id: 'sandbox-bash-mode-disabled' })
-        setIsBashMode(false)
-        setPrompt('')
-        return
-      }
       const command = prompt.startsWith('!') ? prompt.slice(1) : prompt
       addUserBashCommand(command)
       const submittedPrompt = prompt
@@ -1025,11 +1016,6 @@ if (isIOS && isSecureContext && navigator.clipboard && navigator.clipboard.read)
     const value = e.target.value
     
     if (value === '!' && prompt === '') {
-      if (sandboxEnforced) {
-        showToast.error(sandboxShellModeDisabledMessage, { id: 'sandbox-bash-mode-disabled' })
-        setPrompt(value)
-        return
-      }
       setIsBashMode(true)
       setPrompt(value)
       return

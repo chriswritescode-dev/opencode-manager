@@ -1,9 +1,9 @@
 import { EventSource } from 'eventsource'
 import { logger } from '../utils/logger'
-import { ENV } from '@opencode-manager/shared/config/env'
 import { DEFAULTS } from '@opencode-manager/shared/config'
 import type { SSEEventEnvelope, SSEEventPayload } from '@opencode-manager/shared'
 import { getOpenCodeBasicAuthHeader, type OpenCodePasswordResolver } from './opencode/auth'
+import { getOpenCodeUpstreamBaseUrl } from './opencode/upstream'
 import { encodeSSEFrame } from '../utils/sse-frame'
 
 type SSEClientCallback = (event: string, data: string) => void
@@ -45,7 +45,6 @@ interface PendingQuestion {
 type SessionStatusValue = { type: string } & Record<string, unknown>
 type SessionStatusMap = Record<string, SessionStatusValue>
 
-const OPENCODE_PORT = ENV.OPENCODE.PORT
 const { RECONNECT_DELAY_MS, MAX_RECONNECT_DELAY_MS } = DEFAULTS.SSE
 
 class SSEAggregator {
@@ -64,8 +63,13 @@ class SSEAggregator {
   private pendingActionsFetcher: PendingActionsFetcher | null = null
   private passwordResolver: OpenCodePasswordResolver | null = null
   private scheduledSessionsResolver: (() => ScheduledSessionRef[]) | null = null
+  private enforcementResolver: (() => boolean) | null = null
 
   private constructor() {}
+
+  setEnforcementResolver(resolver: (() => boolean) | null): void {
+    this.enforcementResolver = resolver
+  }
 
   setPendingActionsFetcher(fetcher: PendingActionsFetcher | null): void {
     this.pendingActionsFetcher = fetcher
@@ -327,7 +331,7 @@ class SSEAggregator {
       this.upstream = null
     }
 
-    const url = `http://127.0.0.1:${OPENCODE_PORT}/global/event`
+    const url = `${getOpenCodeUpstreamBaseUrl(this.enforcementResolver?.() ?? false)}/global/event`
     const wasConnectedBefore = this.everConnected
     logger.info(`SSE connecting to OpenCode global stream: ${url}`)
 
