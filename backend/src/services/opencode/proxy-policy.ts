@@ -1,4 +1,4 @@
-import { isRecord, sanitizeConfigForEnforcement } from './enforcement-config'
+import { isProvablyRemoteMcpEntry, isRecord, sanitizeConfigForEnforcement } from './enforcement-config'
 
 export type SandboxProxyDecision = { blocked: true; reason: string } | { blocked: false }
 
@@ -158,14 +158,7 @@ export function decideSandboxMcpAddBody(
       reason: `${SANDBOX_CONFIG_MUTATION_REASON_PREFIX}the MCP server body must be a JSON object`,
     }
   }
-  const config = parsed.config
-  if (
-    !isRecord(config) ||
-    config.type !== 'remote' ||
-    typeof config.url !== 'string' ||
-    config.command !== undefined ||
-    config.environment !== undefined
-  ) {
+  if (!isProvablyRemoteMcpEntry(parsed.config)) {
     return {
       kind: 'reject',
       reason: `${SANDBOX_CONFIG_MUTATION_REASON_PREFIX}only remote MCP servers can be added while enforcement is active`,

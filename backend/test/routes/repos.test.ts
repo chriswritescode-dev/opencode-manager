@@ -361,6 +361,20 @@ describe('Repo Routes', () => {
       )
     })
 
+    it('refuses a workspace whose directory cannot be validated while sandboxing is enforced', async () => {
+      vi.mocked(db.getRepoById).mockReturnValue(mockRepo)
+      vi.mocked(opencodeServerManager.isSandboxEnforced).mockReturnValue(true)
+
+      const forward = vi.fn(async () => new Response('', { status: 200 }))
+      const app = createRepoRoutes(mockDb, mockGitAuthService, mockScheduleService, createStubOpenCodeClient({ forward }))
+      const res = await app.request('/1/workspaces', { method: 'POST' })
+
+      expect(res.status).toBe(400)
+      const body = await res.json() as { error: string }
+      expect(body.error).toContain('not available while sandboxing is enabled')
+      expect(forward).not.toHaveBeenCalledWith(expect.objectContaining({ method: 'DELETE' }))
+    })
+
     it('allows workspace creation when sandboxing is not enforced', async () => {
       vi.mocked(db.getRepoById).mockReturnValue(mockRepo)
       vi.mocked(opencodeServerManager.isSandboxEnforced).mockReturnValue(false)

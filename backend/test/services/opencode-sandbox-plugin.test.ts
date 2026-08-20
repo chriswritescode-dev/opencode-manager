@@ -527,6 +527,31 @@ describe('ocm-sandbox plugin', () => {
     expect(output.args.command).toBe('echo hi')
   })
 
+  it('rejects an enforced bash call when the command property is non-configurable but writable', async () => {
+    process.env.OCM_SANDBOX_ENFORCED = 'true'
+    const fetchMock = vi.fn().mockResolvedValue({
+      ok: true,
+      json: async () => ({ mode: 'sandbox', command: "msb exec 'echo hi'" }),
+    })
+    vi.stubGlobal('fetch', fetchMock)
+
+    const factory = await loadPlugin(configHome)
+    const hooks = await factory({ directory: '/repo' })
+    const args = {} as { command?: string }
+    Object.defineProperty(args, 'command', {
+      value: 'echo hi',
+      writable: true,
+      configurable: false,
+      enumerable: true,
+    })
+    const output = { args }
+
+    await expect(
+      hooks['tool.execute.before']?.({ tool: 'bash', sessionID: 's', callID: 'c' }, output),
+    ).rejects.toThrow(/could not replace the bash command/)
+    expect(output.args.command).toBe('echo hi')
+  })
+
   it('leaves the args reference replaceable when enforcement is off', async () => {
     const fetchMock = vi.fn()
     vi.stubGlobal('fetch', fetchMock)

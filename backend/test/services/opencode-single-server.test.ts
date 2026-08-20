@@ -138,6 +138,17 @@ const execSyncMock = execSync as any
 const childSpawnSyncMock = spawnSync as any
 const readdirSyncMock = readdirSync as any
 
+const routeVersionProbeThroughExecSyncStub = () => {
+  childSpawnSyncMock.mockImplementation((file: string, args?: readonly string[]) => {
+    if (Array.isArray(args) && args[0] === '--version') {
+      return { status: 0, stdout: String(execSyncMock(`${file} --version`) ?? ''), stderr: '' }
+    }
+    return { status: 0, stdout: '', stderr: '' }
+  })
+}
+
+beforeEach(routeVersionProbeThroughExecSyncStub)
+
 // Reset singleton before any tests run to clear any polluted state from previous test files
 beforeAll(async () => {
   const { OpenCodeServerManager } = await import('../../src/services/opencode-single-server')

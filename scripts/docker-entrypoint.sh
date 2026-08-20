@@ -42,10 +42,24 @@ grant_kvm_access() {
   echo "Granted node access to $dev (group '$group_name', gid $dev_gid)"
 }
 
+MIN_OPENCODE_VERSION="1.0.137"
+
+version_gte() {
+  printf '%s\n%s\n' "$2" "$1" | sort -V -C
+}
+
 install_opencode() {
   local opencode_version="${OPENCODE_BUNDLED_VERSION:-}"
   if [ -z "$opencode_version" ]; then
     echo "ERROR: OPENCODE_BUNDLED_VERSION is not set; refusing to guess the pinned OpenCode build" >&2
+    return 1
+  fi
+  if [[ ! "$opencode_version" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
+    echo "ERROR: OPENCODE_BUNDLED_VERSION='$opencode_version' is not an X.Y.Z version; refusing to download it" >&2
+    return 1
+  fi
+  if ! version_gte "$opencode_version" "$MIN_OPENCODE_VERSION"; then
+    echo "ERROR: OPENCODE_BUNDLED_VERSION=$opencode_version is below the minimum supported $MIN_OPENCODE_VERSION; refusing to download it" >&2
     return 1
   fi
   echo "Installing OpenCode ${opencode_version}..."
@@ -76,12 +90,6 @@ else
 fi
 
 echo "Checking OpenCode installation..."
-
-MIN_OPENCODE_VERSION="1.0.137"
-
-version_gte() {
-  printf '%s\n%s\n' "$2" "$1" | sort -V -C
-}
 
 if ! command -v opencode >/dev/null 2>&1; then
   echo "OpenCode not found. Installing..."

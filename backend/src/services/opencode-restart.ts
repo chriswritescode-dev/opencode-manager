@@ -68,13 +68,6 @@ export async function restartOpenCode(supervisor?: OpenCodeSupervisor): Promise<
   return { resumedSessionIDs: [] }
 }
 
-/**
- * Restarts OpenCode for callers that have already persisted their change. A
- * failed restart must not be reported as a failed write, so the failure is
- * logged and returned as a flag instead of thrown; the caller returns the
- * persisted entity so the client can distinguish "saved but needs a restart"
- * from "nothing was saved".
- */
 export async function restartOpenCodeAfterCommit(
   supervisor?: OpenCodeSupervisor,
 ): Promise<{ restartFailed: boolean; restartError?: string }> {

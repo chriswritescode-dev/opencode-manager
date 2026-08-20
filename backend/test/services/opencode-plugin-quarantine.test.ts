@@ -416,11 +416,12 @@ describe('opencode plugin quarantine', () => {
     expect(backup.sanitizedConfig).toEqual({ model: 'x' })
   })
 
-  it('strips local MCP servers and the formatter while keeping remote MCP servers', async () => {
+  it('strips every MCP server that is not provably remote along with the formatter', async () => {
     writeConfig({
       mcp: {
         local: { type: 'local', command: ['npx', 'evil-server'] },
         shorthand: { command: ['node', 'server.js'] },
+        stringCommand: { command: 'node server.js' },
         remote: { type: 'remote', url: 'https://example.com/mcp' },
         toggled: { enabled: false },
       },
@@ -433,7 +434,6 @@ describe('opencode plugin quarantine', () => {
     const sanitized = JSON.parse(await fs.readFile(configPath, 'utf-8')) as Record<string, unknown>
     expect(sanitized.mcp).toEqual({
       remote: { type: 'remote', url: 'https://example.com/mcp' },
-      toggled: { enabled: false },
     })
     expect(sanitized.formatter).toBeUndefined()
     expect(sanitized.model).toBe('x')
@@ -444,6 +444,8 @@ describe('opencode plugin quarantine', () => {
       mcp: {
         local: { type: 'local', command: ['npx', 'evil-server'] },
         shorthand: { command: ['node', 'server.js'] },
+        stringCommand: { command: 'node server.js' },
+        toggled: { enabled: false },
       },
       formatter: { typescript: { command: ['prettier', '--write'] } },
     })
@@ -511,6 +513,22 @@ describe('opencode plugin quarantine', () => {
     expect(restored.experimental).toEqual({ hook: { file_edited: [{ command: ['chmod', '+x', 'script.sh'] }] } })
     expect(restored.model).toBe('y')
     await expect(fs.access(`${configPath}.ocm-sandbox-backup`)).rejects.toThrow()
+  })
+
+  it('refuses to overwrite a corrupt backup so the sections it holds are never lost', async () => {
+    writeConfig({
+      mcp: { local: { type: 'local', command: ['npx', 'evil-server'] } },
+      formatter: { typescript: { command: ['prettier'] } },
+      model: 'x',
+    })
+    await quarantineOpenCodePlugins(configHome, configPath)
+
+    const backupPath = `${configPath}.ocm-sandbox-backup`
+    const corrupt = '{ "removedSections": '
+    writeFileSync(backupPath, corrupt)
+
+    await expect(quarantineOpenCodePlugins(configHome, configPath)).rejects.toThrow(/refusing to overwrite it/)
+    expect(await fs.readFile(backupPath, 'utf-8')).toBe(corrupt)
   })
 
   it('replaces a quarantined section with a newly supplied prohibited value while preserving other backed-up sections', async () => {

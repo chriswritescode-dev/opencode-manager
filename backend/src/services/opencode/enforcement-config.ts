@@ -48,9 +48,16 @@ export function sanitizeConfigForEnforcementResult(
   return { sanitized, removed }
 }
 
+export function isProvablyRemoteMcpEntry(entry: unknown): boolean {
+  return isRecord(entry)
+    && entry.type === 'remote'
+    && typeof entry.url === 'string'
+    && entry.command === undefined
+    && entry.environment === undefined
+}
+
 export function isLocalMcpServerEntry(entry: unknown): boolean {
-  if (!isRecord(entry)) return false
-  return entry.type === 'local' || Array.isArray(entry.command)
+  return !isProvablyRemoteMcpEntry(entry)
 }
 
 export function isCustomProviderEntry(entry: unknown): boolean {

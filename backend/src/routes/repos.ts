@@ -323,23 +323,27 @@ app.get('/', async (c) => {
         return c.json({ error: 'Failed to create workspace' }, 500)
       }
 
-      const workspaceRecord = workspace as { id?: unknown; directory?: unknown } | null
-      if (
-        workspaceRecord &&
-        typeof workspaceRecord.directory === 'string' &&
-        opencodeServerManager.isSandboxEnforced() &&
-        (await resolveSandboxWorkDirectory(workspaceRecord.directory)) === null
-      ) {
-        if (typeof workspaceRecord.id === 'string' && workspaceRecord.id.length > 0) {
-          await openCodeClient.forward({
-            method: 'DELETE',
-            path: `/experimental/workspace/${encodeURIComponent(workspaceRecord.id)}`,
-            directory: repo.fullPath,
-          }).catch(() => {})
+      const workspaceRecord = workspace && typeof workspace === 'object'
+        ? workspace as { id?: unknown; directory?: unknown }
+        : null
+      if (opencodeServerManager.isSandboxEnforced()) {
+        const directoryAllowed =
+          typeof workspaceRecord?.directory === 'string' &&
+          (await resolveSandboxWorkDirectory(workspaceRecord.directory)) !== null
+        if (!directoryAllowed) {
+          if (typeof workspaceRecord?.id === 'string' && workspaceRecord.id.length > 0) {
+            await openCodeClient.forward({
+              method: 'DELETE',
+              path: `/experimental/workspace/${encodeURIComponent(workspaceRecord.id)}`,
+              directory: repo.fullPath,
+            }).catch(() => {})
+          } else {
+            logger.warn(`Rejected an OpenCode workspace for repo ${id} that could not be validated against the sandbox roots; it reported no usable id, so it may need manual cleanup`)
+          }
+          return c.json({
+            error: 'OpenCode worktrees are not available while sandboxing is enabled because they are created outside the sandboxed project roots',
+          }, 400)
         }
-        return c.json({
-          error: 'OpenCode worktrees are not available while sandboxing is enabled because they are created outside the sandboxed project roots',
-        }, 400)
       }
 
       return c.json(workspace)

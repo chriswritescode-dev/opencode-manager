@@ -14,10 +14,10 @@ function guardCommand(reason) {
   return "printf '%s\\\\n' '" + safe + "' >&2; exit 1"
 }
 
-function lockArgsReference(output, args) {
+function lockAccessor(target, key, value) {
   try {
-    Object.defineProperty(output, 'args', {
-      get: function () { return args },
+    Object.defineProperty(target, key, {
+      get: function () { return value },
       set: function () {},
       configurable: false,
       enumerable: true,
@@ -25,29 +25,11 @@ function lockArgsReference(output, args) {
   } catch (error) {
     return false
   }
-  var descriptor = Object.getOwnPropertyDescriptor(output, 'args')
-  return !!descriptor && descriptor.configurable === false && typeof descriptor.get === 'function'
-}
-
-function lockCommand(args, command) {
-  var current = null
-  try {
-    Object.defineProperty(args, 'command', {
-      get: function () { return command },
-      set: function () {},
-      configurable: false,
-      enumerable: true,
-    })
-    current = args.command
-  } catch (error) {
-    try {
-      args.command = command
-      current = args.command
-    } catch (ignored) {
-      current = null
-    }
-  }
-  return current === command
+  var descriptor = Object.getOwnPropertyDescriptor(target, key)
+  return !!descriptor
+    && descriptor.configurable === false
+    && typeof descriptor.get === 'function'
+    && target[key] === value
 }
 
 var wrappedCommands = new Map()
@@ -64,10 +46,10 @@ function rememberWrapped(callID, command) {
 }
 
 function replaceCommand(output, command, callID) {
-  if (!lockArgsReference(output, output.args)) {
+  if (!lockAccessor(output, 'args', output.args)) {
     throw new Error('sandbox enforcement could not lock the bash arguments; aborting tool execution before it runs on the host')
   }
-  if (!lockCommand(output.args, command)) {
+  if (!lockAccessor(output.args, 'command', command)) {
     throw new Error('sandbox enforcement could not replace the bash command; aborting tool execution before it runs on the host')
   }
   rememberWrapped(callID, command)
@@ -79,7 +61,7 @@ export default async function ({ directory, worktree }) {
       if (input.tool !== 'bash') return
       if (process.env.OCM_SANDBOX_ENFORCED !== 'true') return
       if (typeof output.args?.command !== 'string') {
-        if (!lockArgsReference(output, output.args)) {
+        if (!lockAccessor(output, 'args', output.args)) {
           throw new Error('sandbox enforcement could not lock the bash arguments; aborting tool execution before it runs on the host')
         }
         return

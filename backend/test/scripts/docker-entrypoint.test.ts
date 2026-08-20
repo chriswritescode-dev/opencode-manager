@@ -16,12 +16,24 @@ const writeStub = (name: string, body: string) => {
   chmodSync(file, 0o755)
 }
 
-const extractGrantKvmAccess = () => {
+const extractShellFunction = (name: string) => {
   const entrypoint = readFileSync(entrypointPath, 'utf-8')
-  const match = entrypoint.match(/^grant_kvm_access\(\) \{\n[\s\S]*?\n\}/m)
-  if (!match) throw new Error('grant_kvm_access() not found in docker-entrypoint.sh')
+  const match = entrypoint.match(new RegExp(`^${name}\\(\\) \\{\\n[\\s\\S]*?\\n\\}`, 'm'))
+  if (!match) throw new Error(`${name}() not found in docker-entrypoint.sh`)
   return match[0]
 }
+
+const extractMinOpenCodeVersion = () => {
+  const match = readFileSync(entrypointPath, 'utf-8').match(/^MIN_OPENCODE_VERSION="[^"]+"$/m)
+  if (!match) throw new Error('MIN_OPENCODE_VERSION not found in docker-entrypoint.sh')
+  return match[0]
+}
+
+const installPrelude = () => [
+  extractMinOpenCodeVersion(),
+  extractShellFunction('version_gte'),
+  extractShellFunction('install_opencode'),
+].join('\n')
 
 beforeEach(() => {
   stubDir = join(tmpdir(), `ocm-entrypoint-${Date.now()}-${Math.random().toString(36).slice(2)}`)
@@ -47,7 +59,7 @@ afterEach(() => {
 
 const runScript = (snippet: string, env: Record<string, string> = {}) => {
   const scriptPath = join(stubDir, 'test.sh')
-  writeFileSync(scriptPath, `set -e\n${extractGrantKvmAccess()}\n${snippet}\n`)
+  writeFileSync(scriptPath, `set -e\n${extractShellFunction('grant_kvm_access')}\n${snippet}\n`)
   return spawnSync('bash', [scriptPath], {
     encoding: 'utf-8',
     env: {
@@ -147,13 +159,6 @@ describe('grant_kvm_access', () => {
   })
 })
 
-const extractInstallOpencode = () => {
-  const entrypoint = readFileSync(entrypointPath, 'utf-8')
-  const match = entrypoint.match(/^install_opencode\(\) \{\n[\s\S]*?\n\}/m)
-  if (!match) throw new Error('install_opencode() not found in docker-entrypoint.sh')
-  return match[0]
-}
-
 const extractOpenCodeInstallSection = () => {
   const entrypoint = readFileSync(entrypointPath, 'utf-8')
   const startMarker = 'echo "Checking OpenCode installation..."'
@@ -198,7 +203,7 @@ const curlLog = () => stubCalls().filter((c) => c.startsWith('curl '))
 describe('install_opencode', () => {
   it('installs the bundled verified version, never latest', () => {
     stubInstallTools()
-    const res = runOpenCodeSection(`${extractInstallOpencode()}\ninstall_opencode`)
+    const res = runOpenCodeSection(`${installPrelude()}\ninstall_opencode`)
     expect(res.status).toBe(0)
     const urls = curlLog().join(' ')
     expect(urls).toMatch(/\/releases\/download\/v1\.18\.16\//)
@@ -207,7 +212,7 @@ describe('install_opencode', () => {
 
   it('refuses to guess the pinned build when OPENCODE_BUNDLED_VERSION is unset', () => {
     stubInstallTools()
-    const res = runOpenCodeSection(`${extractInstallOpencode()}\ninstall_opencode`, {
+    const res = runOpenCodeSection(`${installPrelude()}\ninstall_opencode`, {
       OPENCODE_BUNDLED_VERSION: '',
     })
     expect(res.status).not.toBe(0)
@@ -215,9 +220,29 @@ describe('install_opencode', () => {
     expect(curlLog()).toHaveLength(0)
   })
 
+  it('refuses to download an OPENCODE_BUNDLED_VERSION below the supported minimum', () => {
+    stubInstallTools()
+    const res = runOpenCodeSection(`${installPrelude()}\ninstall_opencode`, {
+      OPENCODE_BUNDLED_VERSION: '1.0.136',
+    })
+    expect(res.status).not.toBe(0)
+    expect(res.stderr).toContain('below the minimum supported')
+    expect(curlLog()).toHaveLength(0)
+  })
+
+  it('refuses to download a malformed OPENCODE_BUNDLED_VERSION', () => {
+    stubInstallTools()
+    const res = runOpenCodeSection(`${installPrelude()}\ninstall_opencode`, {
+      OPENCODE_BUNDLED_VERSION: '1.18',
+    })
+    expect(res.status).not.toBe(0)
+    expect(res.stderr).toContain('is not an X.Y.Z version')
+    expect(curlLog()).toHaveLength(0)
+  })
+
   it('honors an OPENCODE_BUNDLED_VERSION override for the download URL', () => {
     stubInstallTools()
-    const res = runOpenCodeSection(`${extractInstallOpencode()}\ninstall_opencode`, {
+    const res = runOpenCodeSection(`${installPrelude()}\ninstall_opencode`, {
       OPENCODE_BUNDLED_VERSION: '1.22.0',
     })
     expect(res.status).toBe(0)
@@ -228,7 +253,7 @@ describe('install_opencode', () => {
 
   it('reinstalls the bundled verified version when opencode is missing', () => {
     stubInstallTools()
-    const res = runOpenCodeSection(`${extractInstallOpencode()}\n${extractOpenCodeInstallSection()}`)
+    const res = runOpenCodeSection(`${installPrelude()}\n${extractOpenCodeInstallSection()}`)
     expect(res.status).toBe(0)
     expect(res.stdout).toContain('OpenCode not found. Installing...')
     const urls = curlLog().join(' ')
@@ -239,7 +264,7 @@ describe('install_opencode', () => {
   it('repairs a below-minimum opencode with the bundled verified version, not latest', () => {
     stubInstallTools()
     writeStub('opencode', `echo "opencode version 1.0.0"`)
-    const res = runOpenCodeSection(`${extractInstallOpencode()}\n${extractOpenCodeInstallSection()}`)
+    const res = runOpenCodeSection(`${installPrelude()}\n${extractOpenCodeInstallSection()}`)
     expect(res.status).toBe(0)
     expect(res.stdout).toContain('below minimum required version')
     const urls = curlLog().join(' ')

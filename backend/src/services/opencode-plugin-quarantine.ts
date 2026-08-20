@@ -376,13 +376,11 @@ async function readPluginConfigBackup(backupPath: string): Promise<PluginConfigB
   return null
 }
 
-function backupRemovedSections(backup: PluginConfigBackup | null): EnforcementRemovedSections {
-  if (backup !== null && backup.removedSections !== undefined && isRecord(backup.removedSections)) {
+function backupRemovedSections(backup: PluginConfigBackup): EnforcementRemovedSections {
+  if (isRecord(backup.removedSections)) {
     return backup.removedSections as EnforcementRemovedSections
   }
-  const legacyPlugins = backup !== null && Array.isArray(backup.originalPlugins)
-    ? backup.originalPlugins
-    : backup?.plugin
+  const legacyPlugins = Array.isArray(backup.originalPlugins) ? backup.originalPlugins : backup.plugin
   return Array.isArray(legacyPlugins) ? { plugin: legacyPlugins } : {}
 }
 
@@ -509,13 +507,14 @@ async function sanitizeEnforcementConfigSections(configPath: string): Promise<vo
   let effectiveRemoved = removed
   if (hasBackup) {
     const backup = await readPluginConfigBackup(backupPath)
-    if (backup !== null) {
-      const priorRemoved = backupRemovedSections(backup)
-      if (backup.sanitizedConfig !== undefined && deepEqual(backup.sanitizedConfig, config)) {
-        effectiveRemoved = priorRemoved
-      } else {
-        effectiveRemoved = reconcileRemovedSections(priorRemoved, removed)
-      }
+    if (backup === null) {
+      throw new Error(`cannot read OpenCode enforcement backup ${backupPath}; refusing to overwrite it because the config sections it holds would be lost`)
+    }
+    const priorRemoved = backupRemovedSections(backup)
+    if (backup.sanitizedConfig !== undefined && deepEqual(backup.sanitizedConfig, config)) {
+      effectiveRemoved = priorRemoved
+    } else {
+      effectiveRemoved = reconcileRemovedSections(priorRemoved, removed)
     }
   }
 

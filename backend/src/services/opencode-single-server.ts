@@ -1195,8 +1195,8 @@ class OpenCodeServerManager {
   async fetchVersion(): Promise<string | null> {
     try {
       const executable = resolveOpenCodeExecutable() ?? 'opencode'
-      const result = execSync(`${executable} --version 2>&1`, { encoding: 'utf8' })
-      const match = result.match(/(\d+\.\d+\.\d+)/)
+      const result = spawnSync(executable, ['--version'], { encoding: 'utf8' })
+      const match = `${result.stdout ?? ''}${result.stderr ?? ''}`.match(/(\d+\.\d+\.\d+)/)
       if (match && match[1]) {
         this.version = match[1]
         return this.version
