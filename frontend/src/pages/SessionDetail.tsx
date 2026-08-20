@@ -206,8 +206,7 @@ export function SessionDetail() {
   }, [lastAssistantMessage, session?.time?.compacting, sessionStatus.type])
   const hasIncompleteMessages = lastAssistantMessage ? !('completed' in lastAssistantMessage.info.time && lastAssistantMessage.info.time.completed) : false;
   const isStreamingResponse = hasIncompleteMessages && isSessionActive;
-  const assistantFileBasePath = repo?.fullPath.split('/').filter(Boolean).at(-1);
-  const workspaceBasePath = (isAssistantSession ? assistantFileBasePath : repo?.localPath) ?? repo?.localPath;
+  const workspaceBasePath = repo?.localPath;
 
   useEffect(() => {
     setActivePromptFileBasePath(sessionDirectory ? workspaceBasePath ?? null : null)

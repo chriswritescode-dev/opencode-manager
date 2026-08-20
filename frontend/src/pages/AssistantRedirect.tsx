@@ -37,7 +37,6 @@ export function AssistantRedirect() {
   })
 
   const assistantDirectory = repo?.fullPath
-  const assistantFileBasePath = assistantDirectory?.split('/').filter(Boolean).at(-1)
 
   useSSE(opcodeUrl, assistantDirectory)
 
@@ -82,7 +81,7 @@ export function AssistantRedirect() {
       </div>
       {assistantDirectory && (
         <>
-          <FileBrowserSheet isOpen={fileBrowserOpen} onClose={() => setFileBrowserOpen(false)} basePath={assistantFileBasePath} repoName="Assistant" repoId={repoId} />
+          <FileBrowserSheet isOpen={fileBrowserOpen} onClose={() => setFileBrowserOpen(false)} basePath={repo?.localPath} repoName="Assistant" repoId={repoId} />
           <RepoMcpDialog open={mcpDialogOpen} onOpenChange={setMcpDialogOpen} directory={assistantDirectory} />
           {assistantDirectory && opcodeUrl ? (
             <RepoSkillsDialog

@@ -1,5 +1,6 @@
 import { useEffect, useState, memo, useCallback, useRef } from 'react'
 import { FileBrowser, type FileBrowserHandle } from './FileBrowser'
+import { getRepoRelativeDisplayPath } from './display-path'
 import { Button } from '@/components/ui/button'
 import { PathDisplay } from '@/components/ui/path-display'
 import { FullscreenSheet, FullscreenSheetHeader, FullscreenSheetContent } from '@/components/ui/fullscreen-sheet'
@@ -71,28 +72,9 @@ export const FileBrowserSheet = memo(function FileBrowserSheet({ isOpen, onClose
       return
     }
 
-    if (!info.currentPath || info.currentPath === '.' || info.currentPath === '') {
-      setDisplayPath('/')
-      setCurrentPath(info.currentPath || '.')
-      return
-    }
-
-    setCurrentPath(info.currentPath)
-
-    const pathParts = info.currentPath.split('/').filter(Boolean)
-
-    if (repoName) {
-      const repoIndex = pathParts.findIndex(p => p === repoName || p.startsWith(repoName + '-'))
-      if (repoIndex >= 0) {
-        const subPath = pathParts.slice(repoIndex + 1)
-        setDisplayPath(subPath.length > 0 ? '/' + subPath.join('/') : '/')
-      } else {
-        setDisplayPath('/' + pathParts.join('/'))
-      }
-    } else {
-      setDisplayPath('/' + pathParts.join('/'))
-    }
-  }, [allowNavigateAboveBase, repoName])
+    setCurrentPath(info.currentPath || '.')
+    setDisplayPath(getRepoRelativeDisplayPath(info.currentPath || '.', normalizedBasePath))
+  }, [allowNavigateAboveBase, normalizedBasePath])
 
   const handleDownloadDirectory = useCallback(async (options: { includeGit?: boolean, includePaths?: string[] }) => {
     if (!currentPath) return
