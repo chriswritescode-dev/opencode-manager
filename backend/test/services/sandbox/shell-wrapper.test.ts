@@ -2,6 +2,7 @@ import { describe, it, expect, beforeEach, afterEach } from 'vitest'
 import { promises as fs } from 'fs'
 import path from 'path'
 import os from 'os'
+import { spawnSync } from 'child_process'
 import { getWorkspacePath } from '@opencode-manager/shared/config/env'
 import {
   SANDBOX_SHELL_FILENAME,
@@ -61,5 +62,16 @@ describe('sandbox shell wrapper', () => {
     expect(source).toContain('/sandbox/command')
     expect(source).toContain('OCM_INTERNAL_TOKEN')
     expect(source).toContain(SANDBOX_UNAVAILABLE_PREFIX)
+  })
+
+  it('fail-closes to stderr with exit 1 when the sandbox is unavailable', async () => {
+    await installSandboxShell(configHome)
+
+    const result = spawnSync(getSandboxShellPath(configHome), [], { encoding: 'utf8' })
+
+    expect(result.status).toBe(1)
+    expect(result.stdout).toBe('')
+    expect(result.stderr).toContain(SANDBOX_UNAVAILABLE_PREFIX)
+    expect(result.stderr).toContain('interactive shell sessions are not available while sandbox enforcement is on')
   })
 })

@@ -11,7 +11,7 @@ var SANDBOX_UNAVAILABLE_PREFIX = ${JSON.stringify(SANDBOX_UNAVAILABLE_PREFIX)}
 var PLAN_TIMEOUT_MS = ${sandboxPlanTimeoutMs()}
 
 function failClosed(reason) {
-  process.stdout.write(SANDBOX_UNAVAILABLE_PREFIX + reason + '\\n')
+  process.stderr.write(SANDBOX_UNAVAILABLE_PREFIX + reason + '\\n')
   process.exit(1)
 }
 

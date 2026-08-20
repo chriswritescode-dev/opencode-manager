@@ -798,6 +798,32 @@ describe('opencode plugin quarantine', () => {
     ).toBe('v1')
   })
 
+  it('quarantines and restores through a legitimate symlinked ancestor directory', async () => {
+    const realBase = path.join(root, 'real-base')
+    mkdirSync(path.join(realBase, '.config', 'opencode', 'plugin'), { recursive: true })
+    writeFileSync(path.join(realBase, '.config', 'opencode', 'plugin', 'user-plugin.js'), 'user code')
+    await fs.symlink(realBase, path.join(root, 'linked-base'))
+    const linkedConfigHome = path.join(root, 'linked-base', '.config')
+    const linkedConfigPath = path.join(linkedConfigHome, 'opencode', 'opencode.json')
+
+    await quarantineOpenCodePlugins(linkedConfigHome, linkedConfigPath)
+
+    expect(await fs.readdir(path.join(realBase, '.config', 'opencode', 'plugin'))).toEqual([])
+    expect(
+      await fs.readdir(path.join(realBase, '.config', 'opencode', 'plugin.ocm-quarantine')),
+    ).toContain('user-plugin.js')
+
+    await restoreQuarantinedOpenCodePlugins(linkedConfigHome, linkedConfigPath)
+
+    expect(await fs.readdir(path.join(realBase, '.config', 'opencode', 'plugin'))).toContain('user-plugin.js')
+    expect(
+      await fs.readFile(path.join(realBase, '.config', 'opencode', 'plugin', 'user-plugin.js'), 'utf-8'),
+    ).toBe('user code')
+    expect(
+      await fs.readdir(path.join(realBase, '.config', 'opencode', 'plugin.ocm-quarantine')),
+    ).toEqual([])
+  })
+
   it('round-trips a legitimate plugin file whose name ends in .ocm-conflict<digits>', async () => {
     writeFileSync(path.join(configHome, 'opencode', 'plugin', 'audit.ocm-conflict1'), 'legit plugin')
     writeConfig({})

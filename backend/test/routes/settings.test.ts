@@ -108,7 +108,7 @@ vi.mock('../../src/services/opencode-single-server', async (importOriginal) => {
       restart: vi.fn(),
       clearStartupError: vi.fn(),
       getLastStartupError: vi.fn(),
-      checkHealth: vi.fn(() => true),
+      checkHealth: vi.fn().mockResolvedValue(true),
       markRestartPending: vi.fn(),
       isRestartPending: vi.fn(),
       isSandboxEnforced: vi.fn(),

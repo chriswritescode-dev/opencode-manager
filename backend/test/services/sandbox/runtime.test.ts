@@ -1,6 +1,6 @@
-import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
+import { afterAll, afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { Database } from 'bun:sqlite'
-import { mkdirSync, mkdtempSync, rmSync, symlinkSync } from 'node:fs'
+import { mkdirSync, mkdtempSync, realpathSync, rmSync, symlinkSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import path from 'node:path'
 import { ENV, getReposPath, getScheduleWorktreesPath } from '@opencode-manager/shared/config/env'
@@ -33,6 +33,10 @@ vi.mock('../../../src/utils/logger', () => ({
 const mockExecuteCommand = executeCommand as ReturnType<typeof vi.fn>
 const mockDetectSandboxCapability = detectSandboxCapability as ReturnType<typeof vi.fn>
 
+const originalWorkspacePath = process.env.WORKSPACE_PATH
+const suiteWorkspaceParent = mkdtempSync(path.join(realpathSync(tmpdir()), 'ocm-runtime-test-'))
+process.env.WORKSPACE_PATH = suiteWorkspaceParent
+
 const reposRoot = getReposPath()
 const worktreesRoot = getScheduleWorktreesPath()
 const repoADir = path.join(reposRoot, 'repo-a')
@@ -61,6 +65,15 @@ describe('SandboxRuntimeService', () => {
     rmSync(repoADir, { recursive: true, force: true })
     rmSync(repoBDir, { recursive: true, force: true })
     rmSync(worktreeDir, { recursive: true, force: true })
+  })
+
+  afterAll(() => {
+    if (originalWorkspacePath === undefined) {
+      delete process.env.WORKSPACE_PATH
+    } else {
+      process.env.WORKSPACE_PATH = originalWorkspacePath
+    }
+    rmSync(suiteWorkspaceParent, { recursive: true, force: true })
   })
 
   function enableEnforcement(): void {

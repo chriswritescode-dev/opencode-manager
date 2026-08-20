@@ -17,7 +17,12 @@ function stripSandboxProxyApiPrefix(pathname: string): string {
   return pathname
 }
 
+function isAmbiguousSandboxProxyPath(pathname: string): boolean {
+  return pathname !== '/' && (pathname.includes('//') || pathname.endsWith('/'))
+}
+
 function canonicalizeSandboxProxyPath(pathname: string): string | null {
+  if (isAmbiguousSandboxProxyPath(pathname)) return null
   if (!pathname.includes('%')) return stripSandboxProxyApiPrefix(pathname)
   if (ENCODED_PATH_HAZARD.test(pathname)) return null
   try {

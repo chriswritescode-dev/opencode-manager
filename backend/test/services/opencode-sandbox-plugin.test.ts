@@ -7,7 +7,7 @@ import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'fs'
 import path from 'path'
 import os from 'os'
 import { pathToFileURL } from 'url'
-import { SANDBOX_PLAN_TIMEOUT_MS } from '../../src/services/opencode-sandbox-plugin'
+import { SANDBOX_PLAN_TIMEOUT_MS, WRAPPED_COMMANDS_CAP } from '../../src/services/opencode-sandbox-plugin'
 import { installManagedPlugins, getOpenCodePluginDir } from '../../src/services/opencode/plugin-registry'
 import { quarantineOpenCodePlugins } from '../../src/services/opencode-plugin-quarantine'
 
@@ -567,6 +567,74 @@ describe('ocm-sandbox plugin', () => {
     expect(next.args.command).toBe(
       guardFor('sandbox enforcement was bypassed by another plugin; all sandboxed commands are now blocked'),
     )
+  })
+
+  it('evicts the oldest tracked call once the wrapped command map exceeds its cap', async () => {
+    process.env.OCM_SANDBOX_ENFORCED = 'true'
+    const fetchMock = vi.fn().mockResolvedValue({
+      ok: true,
+      json: async () => ({ mode: 'sandbox', command: "msb exec 'echo wrapped'" }),
+    })
+    vi.stubGlobal('fetch', fetchMock)
+
+    const factory = await loadPlugin(configHome)
+    const hooks = await factory({ directory: '/repo' })
+
+    const callIDs = Array.from({ length: WRAPPED_COMMANDS_CAP + 1 }, (_, index) => `call-${index}`)
+    for (const callID of callIDs) {
+      await hooks['tool.execute.before']?.({ tool: 'bash', sessionID: 's', callID }, { args: { command: 'echo hi' } })
+    }
+
+    await hooks['tool.execute.after']?.(
+      { tool: 'bash', sessionID: 's', callID: callIDs[0]!, args: { command: 'echo evil' } },
+      { title: '', output: '', metadata: {} },
+    )
+
+    const afterEvicted = { args: { command: 'echo next' } }
+    await hooks['tool.execute.before']?.({ tool: 'bash', sessionID: 's', callID: 'after-evicted' }, afterEvicted)
+    expect(afterEvicted.args.command).toBe("msb exec 'echo wrapped'")
+
+    await hooks['tool.execute.after']?.(
+      { tool: 'bash', sessionID: 's', callID: callIDs[callIDs.length - 1]!, args: { command: 'echo evil' } },
+      { title: '', output: '', metadata: {} },
+    )
+
+    const afterBypass = { args: { command: 'echo blocked' } }
+    await hooks['tool.execute.before']?.({ tool: 'bash', sessionID: 's', callID: 'after-bypass' }, afterBypass)
+    expect(afterBypass.args.command).toBe(
+      guardFor('sandbox enforcement was bypassed by another plugin; all sandboxed commands are now blocked'),
+    )
+  })
+
+  it('removes the tracked call entry before returning on an enforcement-state change', async () => {
+    process.env.OCM_SANDBOX_ENFORCED = 'true'
+    const fetchMock = vi.fn().mockResolvedValue({
+      ok: true,
+      json: async () => ({ mode: 'sandbox', command: "msb exec 'echo hi'" }),
+    })
+    vi.stubGlobal('fetch', fetchMock)
+
+    const factory = await loadPlugin(configHome)
+    const hooks = await factory({ directory: '/repo' })
+    const output = { args: { command: 'echo hi' } }
+    await hooks['tool.execute.before']?.({ tool: 'bash', sessionID: 's', callID: 'c' }, output)
+    expect(output.args.command).toBe("msb exec 'echo hi'")
+
+    delete process.env.OCM_SANDBOX_ENFORCED
+    await hooks['tool.execute.after']?.(
+      { tool: 'bash', sessionID: 's', callID: 'c', args: { command: 'echo evil-unwrapped' } },
+      { title: '', output: '', metadata: {} },
+    )
+
+    process.env.OCM_SANDBOX_ENFORCED = 'true'
+    await hooks['tool.execute.after']?.(
+      { tool: 'bash', sessionID: 's', callID: 'c', args: { command: 'echo evil-unwrapped' } },
+      { title: '', output: '', metadata: {} },
+    )
+
+    const next = { args: { command: 'echo should-still-be-planned' } }
+    await hooks['tool.execute.before']?.({ tool: 'bash', sessionID: 's', callID: 'd' }, next)
+    expect(next.args.command).toBe("msb exec 'echo hi'")
   })
 })
 

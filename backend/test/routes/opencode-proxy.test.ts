@@ -408,6 +408,52 @@ describe('opencode-proxy routes', () => {
     expect(upstreamFetch).not.toHaveBeenCalled()
   })
 
+  it('blocks duplicate-separator PTY creation with 403 when the OpenCode child is enforced', async () => {
+    isSandboxEnforcedMock.mockReturnValue(true)
+    const upstreamFetch = vi.fn().mockResolvedValue(new Response('should not be reached'))
+    globalThis.fetch = upstreamFetch as unknown as typeof fetch
+
+    const res = await app.request('/api/opencode-proxy//pty', {
+      method: 'POST',
+      headers: { Authorization: 'Bearer test-internal-token' },
+    })
+
+    expect(res.status).toBe(403)
+    expect(upstreamFetch).not.toHaveBeenCalled()
+  })
+
+  it('blocks trailing-separator PTY creation with 403 when the OpenCode child is enforced', async () => {
+    isSandboxEnforcedMock.mockReturnValue(true)
+    const upstreamFetch = vi.fn().mockResolvedValue(new Response('should not be reached'))
+    globalThis.fetch = upstreamFetch as unknown as typeof fetch
+
+    const res = await app.request('/api/opencode-proxy/pty/', {
+      method: 'POST',
+      headers: { Authorization: 'Bearer test-internal-token' },
+    })
+
+    expect(res.status).toBe(403)
+    expect(upstreamFetch).not.toHaveBeenCalled()
+  })
+
+  it('blocks duplicate-separator config mutation with 403 when the OpenCode child is enforced', async () => {
+    isSandboxEnforcedMock.mockReturnValue(true)
+    const upstreamFetch = vi.fn().mockResolvedValue(new Response('should not be reached'))
+    globalThis.fetch = upstreamFetch as unknown as typeof fetch
+
+    const res = await app.request('/api/opencode-proxy//config', {
+      method: 'PATCH',
+      headers: {
+        Authorization: 'Bearer test-internal-token',
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify({ theme: 'dark' }),
+    })
+
+    expect(res.status).toBe(403)
+    expect(upstreamFetch).not.toHaveBeenCalled()
+  })
+
   it('forwards custom slash command execution when the OpenCode child is enforced', async () => {
     isSandboxEnforcedMock.mockReturnValue(true)
     const upstreamFetch = vi.fn().mockResolvedValue(

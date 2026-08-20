@@ -2,9 +2,12 @@ import { sandboxPlanTimeoutMs, SANDBOX_UNAVAILABLE_PREFIX } from './sandbox/comm
 
 export const SANDBOX_PLAN_TIMEOUT_MS = sandboxPlanTimeoutMs()
 
+export const WRAPPED_COMMANDS_CAP = 256
+
 export function buildSandboxPluginSource(): string {
   return `var SANDBOX_UNAVAILABLE_PREFIX = ${JSON.stringify(SANDBOX_UNAVAILABLE_PREFIX)}
 var PLAN_TIMEOUT_MS = ${SANDBOX_PLAN_TIMEOUT_MS}
+var WRAPPED_COMMANDS_CAP = ${WRAPPED_COMMANDS_CAP}
 
 function guardCommand(reason) {
   var safe = String(SANDBOX_UNAVAILABLE_PREFIX + reason).replace(/'/g, "'\\\\''")
@@ -50,6 +53,16 @@ function lockCommand(args, command) {
 var wrappedCommands = new Map()
 var bypassed = false
 
+function rememberWrapped(callID, command) {
+  if (wrappedCommands.has(callID)) {
+    wrappedCommands.delete(callID)
+  }
+  wrappedCommands.set(callID, command)
+  while (wrappedCommands.size > WRAPPED_COMMANDS_CAP) {
+    wrappedCommands.delete(wrappedCommands.keys().next().value)
+  }
+}
+
 function replaceCommand(output, command, callID) {
   if (!lockArgsReference(output, output.args)) {
     throw new Error('sandbox enforcement could not lock the bash arguments; aborting tool execution before it runs on the host')
@@ -57,7 +70,7 @@ function replaceCommand(output, command, callID) {
   if (!lockCommand(output.args, command)) {
     throw new Error('sandbox enforcement could not replace the bash command; aborting tool execution before it runs on the host')
   }
-  wrappedCommands.set(callID, command)
+  rememberWrapped(callID, command)
 }
 
 export default async function ({ directory, worktree }) {
@@ -133,10 +146,10 @@ export default async function ({ directory, worktree }) {
     },
     'tool.execute.after': async (input, output) => {
       if (input.tool !== 'bash') return
-      if (process.env.OCM_SANDBOX_ENFORCED !== 'true') return
       var wrapped = wrappedCommands.get(input.callID)
-      if (wrapped === undefined) return
       wrappedCommands.delete(input.callID)
+      if (process.env.OCM_SANDBOX_ENFORCED !== 'true') return
+      if (wrapped === undefined) return
       if (!bypassed && input.args && input.args.command !== wrapped) {
         bypassed = true
         console.error('OpenCode Manager: sandbox enforcement bypass detected for bash call ' + input.callID + '; blocking all further sandboxed commands')
@@ -146,4 +159,3 @@ export default async function ({ directory, worktree }) {
 }
 `
 }
-

@@ -180,8 +180,9 @@ async function requireRealDirectory(dir: string, purpose: string): Promise<boole
     throw new Error(`${purpose} ${dir} is not a directory; refusing to quarantine or restore through it`)
   }
   const resolved = path.resolve(dir)
-  const canonical = await realpath(dir)
-  if (canonical !== resolved) {
+  const canonicalParent = await realpath(path.dirname(resolved))
+  const canonical = await realpath(resolved)
+  if (canonical !== path.join(canonicalParent, path.basename(resolved))) {
     throw new Error(`${purpose} ${dir} resolves to ${canonical} instead of ${resolved}; refusing to quarantine or restore through a redirected directory`)
   }
   return true

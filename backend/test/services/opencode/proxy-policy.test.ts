@@ -48,6 +48,56 @@ describe('sandbox proxy policy', () => {
     expect(decideSandboxProxyBlock(true, 'POST', '/api%2Fpty/p1/connect').blocked).toBe(true)
   })
 
+  it('fails closed on duplicate and trailing separators when enforced', () => {
+    expect(decideSandboxProxyBlock(true, 'POST', '/pty/').blocked).toBe(true)
+    expect(decideSandboxProxyBlock(true, 'POST', '//pty').blocked).toBe(true)
+    expect(decideSandboxProxyBlock(true, 'POST', '/api//pty').blocked).toBe(true)
+    expect(decideSandboxProxyBlock(true, 'POST', '/api/pty/').blocked).toBe(true)
+    expect(decideSandboxProxyBlock(true, 'GET', '/pty/p1/connect/').blocked).toBe(true)
+    expect(decideSandboxProxyBlock(true, 'POST', '/pty//p1/connect').blocked).toBe(true)
+    expect(decideSandboxProxyBlock(true, 'POST', '//pty/p1/connect').blocked).toBe(true)
+    expect(decideSandboxProxyBlock(true, 'POST', '/%70ty/').blocked).toBe(true)
+    expect(decideSandboxProxyBlock(true, 'POST', '/p%74y/').blocked).toBe(true)
+    expect(decideSandboxProxyBlock(true, 'GET', '/session//ses_1/message').blocked).toBe(true)
+    expect(decideSandboxProxyBlock(true, 'GET', '/session/ses_1/message/').blocked).toBe(true)
+  })
+
+  it('does not flag the bare root path as ambiguous when enforced', () => {
+    expect(decideSandboxProxyBlock(true, 'GET', '/')).toEqual({ blocked: false })
+    expect(decideSandboxProxyBlock(true, 'POST', '/api')).toEqual({ blocked: false })
+  })
+
+  it('fails closed on duplicate and trailing separators for config, mcp, and auth mutations when enforced', () => {
+    expect(decideSandboxProxyBlock(true, 'PATCH', '/config/').blocked).toBe(true)
+    expect(decideSandboxProxyBlock(true, 'PATCH', '//config').blocked).toBe(true)
+    expect(decideSandboxProxyBlock(true, 'PATCH', '/api//config').blocked).toBe(true)
+    expect(decideSandboxProxyBlock(true, 'POST', '/mcp/').blocked).toBe(true)
+    expect(decideSandboxProxyBlock(true, 'POST', '//mcp').blocked).toBe(true)
+    expect(decideSandboxProxyBlock(true, 'POST', '/api//mcp').blocked).toBe(true)
+    expect(decideSandboxProxyBlock(true, 'PUT', '/auth/openai/').blocked).toBe(true)
+    expect(decideSandboxProxyBlock(true, 'PUT', '//auth/openai').blocked).toBe(true)
+    expect(decideSandboxProxyBlock(true, 'PUT', '/api//auth/openai').blocked).toBe(true)
+  })
+
+  it('never classifies ambiguous config, mcp, or auth mutation paths when enforced', () => {
+    expect(isSandboxConfigMutation(true, 'PATCH', '//config')).toBe(false)
+    expect(isSandboxConfigMutation(true, 'PATCH', '/api//config')).toBe(false)
+    expect(isSandboxMcpAdd(true, 'POST', '//mcp')).toBe(false)
+    expect(isSandboxMcpAdd(true, 'POST', '/api//mcp')).toBe(false)
+    expect(isSandboxAuthWrite(true, 'PUT', '//auth/openai')).toBe(false)
+    expect(isSandboxAuthWrite(true, 'PUT', '/auth/openai/')).toBe(false)
+    expect(isSandboxAuthWrite(true, 'PUT', '/api//auth/openai')).toBe(false)
+  })
+
+  it('passes mutation bodies through untouched on ambiguous paths since the block decision gates them when enforced', () => {
+    expect(decideSandboxMutationBody(true, 'PATCH', '//config', JSON.stringify({ theme: 'dark' }))).toEqual({ kind: 'passthrough' })
+    expect(decideSandboxMutationBody(true, 'POST', '/api//mcp', JSON.stringify({
+      name: 'remote-server',
+      config: { type: 'remote', url: 'https://example.com/mcp' },
+    }))).toEqual({ kind: 'passthrough' })
+    expect(decideSandboxMutationBody(true, 'PUT', '/auth/openai/', JSON.stringify({ type: 'api', key: 'k' }))).toEqual({ kind: 'passthrough' })
+  })
+
   it('classifies /api-prefixed config, mcp, and auth writes identically when enforced', () => {
     expect(isSandboxConfigMutation(true, 'PATCH', '/api/config')).toBe(true)
     expect(isSandboxConfigMutation(true, 'PATCH', '/api/%63onfig')).toBe(true)
