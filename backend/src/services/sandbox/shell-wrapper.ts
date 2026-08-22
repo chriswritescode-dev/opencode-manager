@@ -1,4 +1,4 @@
-import path from 'path'
+import { join } from 'path'
 import { getWorkspacePath } from '@opencode-manager/shared/config/env'
 import { sandboxPlanTimeoutMs, SANDBOX_UNAVAILABLE_PREFIX } from './command'
 import { writeFileAtomic } from '../../utils/fs-safe'
@@ -85,15 +85,15 @@ main()
 `
 
 export function getSandboxShellDir(configHome: string): string {
-  return path.join(configHome, 'ocm')
+  return join(configHome, 'ocm')
 }
 
 export function getSandboxShellPath(configHome: string): string {
-  return path.join(getSandboxShellDir(configHome), SANDBOX_SHELL_FILENAME)
+  return join(getSandboxShellDir(configHome), SANDBOX_SHELL_FILENAME)
 }
 
 export function getEnforcedSandboxShellPath(): string {
-  return getSandboxShellPath(path.join(getWorkspacePath(), '.config'))
+  return getSandboxShellPath(join(getWorkspacePath(), '.config'))
 }
 
 export async function installSandboxShell(configHome: string): Promise<void> {

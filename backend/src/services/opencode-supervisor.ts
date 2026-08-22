@@ -27,6 +27,8 @@ export const OPENCODE_RECOVERY_ACTIONS = [
 
 export type OpenCodeRecoveryAction = (typeof OPENCODE_RECOVERY_ACTIONS)[number]
 
+const MAX_QUEUED_LIFECYCLE_OPERATIONS = 2
+
 export type OpenCodeOperationReason =
   | 'backend_startup'
   | 'health_poll'
@@ -66,6 +68,7 @@ export class OpenCodeSupervisor {
   private consecutiveFailures = 0
   private operationInProgress = false
   private operationTail: Promise<void> = Promise.resolve()
+  private queuedOperations = 0
   private updatedAt = new Date().toISOString()
 
   constructor(
@@ -167,7 +170,7 @@ export class OpenCodeSupervisor {
       await this.openCodeServerManager.stop()
       this.setState('stopped')
       return this.getStatus()
-    })
+    }, { droppable: false })
 
     logger.info('Stopped OpenCode supervisor')
   }
@@ -194,20 +197,33 @@ export class OpenCodeSupervisor {
     }
   }
 
-  private async runLifecycleOperation(operation: () => Promise<OpenCodeLifecycleStatus>): Promise<OpenCodeLifecycleStatus> {
+  private async runLifecycleOperation(
+    operation: () => Promise<OpenCodeLifecycleStatus>,
+    options: { droppable?: boolean } = {},
+  ): Promise<OpenCodeLifecycleStatus> {
+    if ((options.droppable ?? true) && this.queuedOperations >= MAX_QUEUED_LIFECYCLE_OPERATIONS) {
+      logger.warn('Dropped an OpenCode lifecycle request: one operation is running and another is already queued')
+      return this.getStatus()
+    }
+
+    this.queuedOperations += 1
     const previousTail = this.operationTail
     let releaseTail!: () => void
     this.operationTail = new Promise<void>((resolve) => {
       releaseTail = resolve
     })
 
-    await previousTail
-    this.operationInProgress = true
     try {
-      return await operation()
+      await previousTail
+      this.operationInProgress = true
+      try {
+        return await operation()
+      } finally {
+        this.operationInProgress = false
+        this.touch()
+      }
     } finally {
-      this.operationInProgress = false
-      this.touch()
+      this.queuedOperations -= 1
       releaseTail()
     }
   }

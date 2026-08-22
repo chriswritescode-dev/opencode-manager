@@ -531,6 +531,31 @@ describe('opencode plugin quarantine', () => {
     expect(await fs.readFile(backupPath, 'utf-8')).toBe(corrupt)
   })
 
+  it('refuses to overwrite a backup that holds no recoverable removed sections', async () => {
+    writeConfig({
+      mcp: { local: { type: 'local', command: ['npx', 'evil-server'] } },
+      formatter: { typescript: { command: ['prettier'] } },
+      model: 'x',
+    })
+    await quarantineOpenCodePlugins(configHome, configPath)
+
+    const backupPath = `${configPath}.ocm-sandbox-backup`
+    writeFileSync(backupPath, '{}')
+
+    await expect(quarantineOpenCodePlugins(configHome, configPath)).rejects.toThrow(/refusing to overwrite it/)
+    expect(await fs.readFile(backupPath, 'utf-8')).toBe('{}')
+  })
+
+  it('accepts a legacy backup that recorded an empty plugin list', async () => {
+    writeConfig({ plugin: ['my-plugin'], model: 'x' })
+    await quarantineOpenCodePlugins(configHome, configPath)
+
+    const backupPath = `${configPath}.ocm-sandbox-backup`
+    writeFileSync(backupPath, JSON.stringify({ originalPlugins: [] }))
+
+    await expect(quarantineOpenCodePlugins(configHome, configPath)).resolves.toBeUndefined()
+  })
+
   it('replaces a quarantined section with a newly supplied prohibited value while preserving other backed-up sections', async () => {
     writeConfig({
       mcp: { local: { type: 'local', command: ['npx', 'old-server'] } },

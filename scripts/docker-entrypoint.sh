@@ -63,13 +63,15 @@ install_opencode() {
     return 1
   fi
   echo "Installing OpenCode ${opencode_version}..."
+  local staging
+  staging="$(mktemp -d)"
   curl -fsSL "https://github.com/anomalyco/opencode/releases/download/v${opencode_version}/opencode-linux-$(uname -m | sed 's/x86_64/x64/; s/aarch64/arm64/').tar.gz" \
-    -o /tmp/opencode.tar.gz
-  tar -xzf /tmp/opencode.tar.gz -C /tmp
+    -o "$staging/opencode.tar.gz"
+  tar -xzf "$staging/opencode.tar.gz" -C "$staging"
   mkdir -p "$HOME/.opencode/bin"
-  mv /tmp/opencode "$HOME/.opencode/bin/opencode"
+  mv "$staging/opencode" "$HOME/.opencode/bin/opencode"
   chmod 755 "$HOME/.opencode/bin/opencode"
-  rm -f /tmp/opencode.tar.gz
+  rm -rf "$staging"
 }
 
 echo "Checking Bun installation..."

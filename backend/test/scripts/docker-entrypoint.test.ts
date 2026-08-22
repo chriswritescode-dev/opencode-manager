@@ -190,11 +190,15 @@ const runOpenCodeSection = (snippet: string, env: Record<string, string> = {}) =
 
 const stubInstallTools = () => {
   writeStub('curl', `echo "curl $*" >> "$OCM_STUB_LOG"
-rm -rf /tmp/opencode /tmp/opencode.tar.gz
+out=""
+while [ "$#" -gt 0 ]; do
+  if [ "$1" = "-o" ]; then out="$2"; fi
+  shift
+done
 mkdir -p "$HOME/.opencode/bin"
 printf '#!/bin/bash\\necho 1.18.16\\n' > "$HOME/.opencode/bin/opencode"
 chmod +x "$HOME/.opencode/bin/opencode"
-printf 'fake binary\\n' > /tmp/opencode`)
+printf 'fake binary\\n' > "$(dirname "$out")/opencode"`)
   writeStub('tar', `echo "tar $*" >> "$OCM_STUB_LOG"`)
 }
 
@@ -208,6 +212,7 @@ describe('install_opencode', () => {
     const urls = curlLog().join(' ')
     expect(urls).toMatch(/\/releases\/download\/v1\.18\.16\//)
     expect(urls).not.toContain('/releases/latest/download/')
+    expect(urls).not.toContain('/tmp/opencode.tar.gz')
   })
 
   it('refuses to guess the pinned build when OPENCODE_BUNDLED_VERSION is unset', () => {

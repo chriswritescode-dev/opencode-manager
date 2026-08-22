@@ -570,4 +570,34 @@ describe('OpenCodeSupervisor', () => {
     expect(manager.restart).toHaveBeenCalledTimes(1)
     expect(manager.stop).toHaveBeenCalledTimes(1)
   })
+
+  it('drops a restart stacked behind an already queued restart but never drops a stop', async () => {
+    const manager = createManager()
+    const settings = createSettings()
+    const supervisor = new OpenCodeSupervisor(manager as unknown as never, settings as unknown as never, {
+      failureThreshold: 1,
+      watchEnabled: false,
+    })
+
+    let releaseRestart!: () => void
+    manager.restart.mockImplementationOnce(
+      () => new Promise<void>((resolve) => { releaseRestart = resolve }),
+    )
+    manager.checkHealth.mockResolvedValue(true)
+
+    const running = supervisor.restart('manual')
+    await vi.waitFor(() => expect(manager.restart).toHaveBeenCalledTimes(1))
+
+    const queued = supervisor.restart('manual')
+    const dropped = supervisor.restart('manual')
+    const stopPromise = supervisor.stop()
+
+    await expect(dropped).resolves.toMatchObject({ state: 'starting' })
+
+    releaseRestart()
+    await Promise.all([running, queued, stopPromise])
+
+    expect(manager.restart).toHaveBeenCalledTimes(2)
+    expect(manager.stop).toHaveBeenCalledTimes(1)
+  })
 })

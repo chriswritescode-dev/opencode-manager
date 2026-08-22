@@ -1,7 +1,7 @@
 import { describe, it, expect, beforeEach, afterEach } from 'vitest'
 import { promises as fs } from 'fs'
-import path from 'path'
-import os from 'os'
+import { join } from 'path'
+import { tmpdir } from 'os'
 import { spawnSync } from 'child_process'
 import { getWorkspacePath } from '@opencode-manager/shared/config/env'
 import {
@@ -19,7 +19,7 @@ describe('sandbox shell wrapper', () => {
   let configHome: string
 
   beforeEach(async () => {
-    configHome = await fs.mkdtemp(path.join(os.tmpdir(), 'ocm-shell-wrapper-'))
+    configHome = await fs.mkdtemp(join(tmpdir(), 'ocm-shell-wrapper-'))
   })
 
   afterEach(async () => {
@@ -27,15 +27,15 @@ describe('sandbox shell wrapper', () => {
   })
 
   it('derives the sandbox shell directory from the config home', () => {
-    expect(getSandboxShellDir(configHome)).toBe(path.join(configHome, 'ocm'))
+    expect(getSandboxShellDir(configHome)).toBe(join(configHome, 'ocm'))
   })
 
   it('derives the sandbox shell path from the config home', () => {
-    expect(getSandboxShellPath(configHome)).toBe(path.join(configHome, 'ocm', SANDBOX_SHELL_FILENAME))
+    expect(getSandboxShellPath(configHome)).toBe(join(configHome, 'ocm', SANDBOX_SHELL_FILENAME))
   })
 
   it('derives the enforced sandbox shell path from the workspace config home', () => {
-    expect(getEnforcedSandboxShellPath()).toBe(path.join(getWorkspacePath(), '.config', 'ocm', SANDBOX_SHELL_FILENAME))
+    expect(getEnforcedSandboxShellPath()).toBe(join(getWorkspacePath(), '.config', 'ocm', SANDBOX_SHELL_FILENAME))
   })
 
   it('uses a sandbox shell basename outside the rc-file sourcing basenames so OpenCode never injects shell config', () => {

@@ -367,8 +367,10 @@ async function restorePluginEntries(dir: string): Promise<void> {
 async function readPluginConfigBackup(backupPath: string): Promise<PluginConfigBackup | null> {
   try {
     const parsed = parseJsonc(await fs.readFile(backupPath, 'utf-8')) as unknown
-    if (parsed && typeof parsed === 'object' && !Array.isArray(parsed)) {
-      return parsed as PluginConfigBackup
+    if (!isRecord(parsed)) return null
+    const backup = parsed as PluginConfigBackup
+    if (isRecord(backup.removedSections) || Array.isArray(backup.originalPlugins) || Array.isArray(backup.plugin)) {
+      return backup
     }
   } catch {
     return null

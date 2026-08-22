@@ -1,4 +1,4 @@
-import path from 'path'
+import { join } from 'path'
 import { writeFileAtomic } from '../../utils/fs-safe'
 import { buildGhEnvPluginSource } from '../opencode-gh-env-plugin'
 import { buildSandboxPluginSource } from '../opencode-sandbox-plugin'
@@ -16,12 +16,12 @@ export const MANAGED_OPENCODE_PLUGINS: readonly ManagedOpenCodePlugin[] = [
 export const TRUSTED_OPENCODE_PLUGIN_FILENAMES: readonly string[] = MANAGED_OPENCODE_PLUGINS.map((plugin) => plugin.filename)
 
 export function getOpenCodePluginDir(configHome: string): string {
-  return path.join(configHome, 'opencode', 'plugin')
+  return join(configHome, 'opencode', 'plugin')
 }
 
 export async function installManagedPlugins(configHome: string): Promise<void> {
   const dir = getOpenCodePluginDir(configHome)
   for (const plugin of MANAGED_OPENCODE_PLUGINS) {
-    await writeFileAtomic(path.join(dir, plugin.filename), plugin.buildSource())
+    await writeFileAtomic(join(dir, plugin.filename), plugin.buildSource())
   }
 }
