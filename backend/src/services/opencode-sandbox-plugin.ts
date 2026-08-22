@@ -55,7 +55,7 @@ function replaceCommand(output, command, callID) {
   rememberWrapped(callID, command)
 }
 
-export default async function ({ directory, worktree }) {
+export default async function ({ directory }) {
   return {
     'tool.execute.before': async (input, output) => {
       if (input.tool !== 'bash') return
@@ -75,14 +75,13 @@ export default async function ({ directory, worktree }) {
         return
       }
       var replacement = null
-      var sessionDir = worktree || directory
-      var effectiveDirectory = sessionDir
+      var effectiveDirectory = directory
       var requestedWorkdir = output.args.workdir
       if (typeof requestedWorkdir === 'string' && requestedWorkdir.length > 0) {
         if (requestedWorkdir.charAt(0) === '/') {
           effectiveDirectory = requestedWorkdir
         } else {
-          effectiveDirectory = sessionDir.replace(/\\/+$/, '') + '/' + requestedWorkdir
+          effectiveDirectory = directory.replace(/\\/+$/, '') + '/' + requestedWorkdir
         }
       }
       var controller = new AbortController()

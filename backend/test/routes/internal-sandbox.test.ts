@@ -11,7 +11,7 @@ import { createOpenCodeClient } from '../../src/services/opencode/client'
 import { allMigrations } from '../../src/db/migrations'
 import { getOrCreateInternalToken } from '../../src/services/internal-token'
 import { migrate } from '../../src/db/migration-runner'
-import { buildSandboxExecCommandString, resolveSandboxExecUser, WORKSPACE_SANDBOX_NAME, sandboxSecretMaskPath } from '../../src/services/sandbox/command'
+import { buildSandboxExecCommandString, resolveSandboxExecUser, resolveSandboxRuntimeTmpfsSizeMib, WORKSPACE_SANDBOX_NAME, sandboxSecretMaskPath } from '../../src/services/sandbox/command'
 import { executeCommand } from '../../src/utils/process'
 import { detectSandboxCapability } from '../../src/services/sandbox/capability'
 import { getReposPath, getScheduleWorktreesPath, ENV } from '@opencode-manager/shared/config/env'
@@ -56,6 +56,7 @@ function trustedRunningInspect(): { exitCode: number; stdout: string; stderr: st
     mounts: [
       bindMount(getReposPath()),
       bindMount(getScheduleWorktreesPath()),
+      { type: 'Tmpfs', guest: '/tmp', size_mib: resolveSandboxRuntimeTmpfsSizeMib(memoryMib), options: { readonly: false, noexec: false, nosuid: false, nodev: false } },
       { type: 'Tmpfs', guest: sandboxSecretMaskPath(), size_mib: null, options: { readonly: false, noexec: false, nosuid: false, nodev: false } },
     ],
     patches: [],

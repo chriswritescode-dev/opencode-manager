@@ -60,7 +60,7 @@ All projects share one microVM named `ocm-workspace`:
 - Repositories and worktrees created after boot are visible immediately because their parent roots are mounted.
 - Each command supplies its own working directory through `msb exec -w`.
 - A session outside the mounted roots is refused rather than executed on the host.
-- The Manager verifies the microVM image, resources, user, network policy, mounts, labels, and secret mask before reuse.
+- The Manager verifies the microVM image, resources, user, network policy, mounts (including the `/tmp` tmpfs size and mount options), labels, and secret mask before reuse.
 - A stale or unverifiable microVM is removed and recreated.
 - Manager shutdown and an enforced-to-disabled restart stop the managed microVM.
 
@@ -78,6 +78,8 @@ The microVM receives writable bind mounts for:
 - `/workspace/schedule-worktrees`
 
 The assistant workspace's `repos/assistant/.opencode` directory falls beneath the repository mount but is hidden in the guest behind a `tmpfs` mask so its internal API token cannot be read by agent commands.
+
+The microVM also mounts a runtime-owned tmpfs at `/tmp`. It is sized to one quarter of the microVM memory, clamped to 1-512 MiB, so agent commands get writable scratch space that is not backed by a host filesystem.
 
 The following remain outside the microVM:
 

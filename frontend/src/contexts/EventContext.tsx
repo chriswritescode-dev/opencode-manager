@@ -361,7 +361,7 @@ export function EventProvider({ children }: { children: React.ReactNode }) {
       }
     }
 
-    await client.respondToPermission(sessionID, permissionID, response)
+    await client.respondToPermission(permissionID, response)
     removePermission(permissionID, sessionID)
   }, [getClient, permissionsBySession, queryClient, removePermission])
 

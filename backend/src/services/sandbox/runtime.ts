@@ -18,6 +18,7 @@ import {
   buildSandboxStartArgs,
   buildSandboxStopManagedArgs,
   resolveExpectedSandboxNetworkPolicy,
+  resolveSandboxRuntimeTmpfsSizeMib,
   resolveSandboxWorkDirectory,
   sandboxExecutablePath,
   sandboxMountRoots,
@@ -27,6 +28,7 @@ import {
 const SANDBOX_LS_CACHE_MS = 5000
 const SANDBOX_LS_TIMEOUT_MS = 15000
 const SANDBOX_STOP_TIMEOUT_MS = 30000
+const SANDBOX_RUNTIME_TMPFS_GUEST = path.resolve('/tmp')
 
 export type SandboxPlan =
   | { mode: 'host' }
@@ -280,9 +282,16 @@ async function attestWorkspaceSandboxConfig(config: unknown): Promise<SandboxAtt
     }
   }
 
+  const canonicalResources = isRecord(canonical.resources) ? canonical.resources : {}
+  const expectedTmpfsSizeMib = resolveSandboxRuntimeTmpfsSizeMib(canonicalResources.memory_mib)
+  if (expectedTmpfsSizeMib === null) {
+    return { trusted: false, reason: 'sandbox memory is not a positive finite number; cannot derive the runtime tmpfs size' }
+  }
+
   const mounts = Array.isArray(spec.mounts) ? spec.mounts : []
   const bindRoots = new Set<string>()
   let maskSeen = false
+  let runtimeTmpfsSeen = false
   for (let mountIndex = 0; mountIndex < mounts.length; mountIndex++) {
     const rawMount = mounts[mountIndex]
     const mount = parseInspectMount(rawMount)
@@ -341,23 +350,33 @@ async function attestWorkspaceSandboxConfig(config: unknown): Promise<SandboxAtt
       }
       bindRoots.add(hostPath)
     } else if (mount.kind === 'tmpfs') {
-      if (maskGuest === null || path.resolve(mount.guest) !== maskGuest) {
+      const guestPath = path.resolve(mount.guest)
+      const tmpfsMountOptions = isRecord(rawMount) && isRecord(rawMount.options) ? rawMount.options : {}
+      let expectedSizeMib: number | null
+      if (maskGuest !== null && guestPath === maskGuest) {
+        if (maskSeen) {
+          return { trusted: false, reason: 'sandbox has a duplicate assistant mask mount' }
+        }
+        maskSeen = true
+        expectedSizeMib = null
+      } else if (guestPath === SANDBOX_RUNTIME_TMPFS_GUEST) {
+        if (runtimeTmpfsSeen) {
+          return { trusted: false, reason: `sandbox has a duplicate runtime tmpfs mount at ${SANDBOX_RUNTIME_TMPFS_GUEST}` }
+        }
+        runtimeTmpfsSeen = true
+        expectedSizeMib = expectedTmpfsSizeMib
+      } else {
         return { trusted: false, reason: `sandbox has an unexpected tmpfs mount at ${mount.guest}` }
       }
-      if (maskSeen) {
-        return { trusted: false, reason: 'sandbox has a duplicate assistant mask mount' }
-      }
-      maskSeen = true
-      const tmpfsMountOptions = isRecord(rawMount) && isRecord(rawMount.options) ? rawMount.options : {}
       for (const flag of ['readonly', 'noexec', 'nosuid', 'nodev'] as const) {
-        if (tmpfsMountOptions[flag] === true) {
+        if (tmpfsMountOptions[flag] !== false) {
           return {
             trusted: false,
             reason: `sandbox configuration mounts[${mountIndex}].options.${flag} does not match the canonical specification`,
           }
         }
       }
-      if (rawMount.size_mib !== null) {
+      if (rawMount.size_mib !== expectedSizeMib) {
         return {
           trusted: false,
           reason: `sandbox configuration mounts[${mountIndex}].size_mib does not match the canonical specification`,
@@ -373,9 +392,11 @@ async function attestWorkspaceSandboxConfig(config: unknown): Promise<SandboxAtt
   if (!maskSeen) {
     return { trusted: false, reason: `sandbox is missing the assistant .opencode mask at ${maskGuest}` }
   }
+  if (!runtimeTmpfsSeen) {
+    return { trusted: false, reason: `sandbox is missing the runtime tmpfs mount at ${SANDBOX_RUNTIME_TMPFS_GUEST}` }
+  }
 
   const resources = isRecord(spec.resources) ? spec.resources : {}
-  const canonicalResources = isRecord(canonical.resources) ? canonical.resources : {}
   if (resources.cpus !== canonicalResources.cpus) {
     return { trusted: false, reason: `sandbox cpus ${String(resources.cpus)} does not match ${String(canonicalResources.cpus)}` }
   }

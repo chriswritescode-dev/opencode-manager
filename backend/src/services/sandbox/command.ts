@@ -298,6 +298,11 @@ function parseMemoryMib(value: string): number | null {
   return Math.floor(number * 1024)
 }
 
+export function resolveSandboxRuntimeTmpfsSizeMib(memoryMib: unknown): number | null {
+  if (typeof memoryMib !== 'number' || !Number.isFinite(memoryMib) || memoryMib <= 0) return null
+  return Math.min(512, Math.max(1, Math.floor(memoryMib / 4)))
+}
+
 function parseSandboxCreateArgs(args: string[]): {
   name: string
   labels: Record<string, string>

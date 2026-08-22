@@ -20,6 +20,7 @@ import {
   resolveExpectedSandboxNetworkPolicy,
   resolveSandboxExecUser,
   resolveSandboxExecUserUid,
+  resolveSandboxRuntimeTmpfsSizeMib,
   sandboxMountRoots,
   sandboxNetworkPolicyMismatch,
   sandboxSecretMaskPath,
@@ -505,6 +506,35 @@ describe('sandbox command builders', () => {
       process.env.PATH = originalPath
       rmSync(fakeBin, { recursive: true, force: true })
     }
+  })
+})
+
+describe('resolveSandboxRuntimeTmpfsSizeMib', () => {
+  it('clamps the quarter-memory floor to the 1-512 MiB range', () => {
+    expect(resolveSandboxRuntimeTmpfsSizeMib(1)).toBe(1)
+    expect(resolveSandboxRuntimeTmpfsSizeMib(3)).toBe(1)
+    expect(resolveSandboxRuntimeTmpfsSizeMib(4)).toBe(1)
+    expect(resolveSandboxRuntimeTmpfsSizeMib(2047)).toBe(511)
+    expect(resolveSandboxRuntimeTmpfsSizeMib(2048)).toBe(512)
+    expect(resolveSandboxRuntimeTmpfsSizeMib(2049)).toBe(512)
+    expect(resolveSandboxRuntimeTmpfsSizeMib(4096)).toBe(512)
+  })
+
+  it('floors fractional positive memory to whole MiB', () => {
+    expect(resolveSandboxRuntimeTmpfsSizeMib(5.5)).toBe(1)
+    expect(resolveSandboxRuntimeTmpfsSizeMib(10.5)).toBe(2)
+    expect(resolveSandboxRuntimeTmpfsSizeMib(0.5)).toBe(1)
+  })
+
+  it('rejects zero, negative, non-finite, and non-number memory values', () => {
+    expect(resolveSandboxRuntimeTmpfsSizeMib(0)).toBeNull()
+    expect(resolveSandboxRuntimeTmpfsSizeMib(-1)).toBeNull()
+    expect(resolveSandboxRuntimeTmpfsSizeMib(Number.NaN)).toBeNull()
+    expect(resolveSandboxRuntimeTmpfsSizeMib(Number.POSITIVE_INFINITY)).toBeNull()
+    expect(resolveSandboxRuntimeTmpfsSizeMib(Number.NEGATIVE_INFINITY)).toBeNull()
+    expect(resolveSandboxRuntimeTmpfsSizeMib('512')).toBeNull()
+    expect(resolveSandboxRuntimeTmpfsSizeMib(null)).toBeNull()
+    expect(resolveSandboxRuntimeTmpfsSizeMib(undefined)).toBeNull()
   })
 })
 

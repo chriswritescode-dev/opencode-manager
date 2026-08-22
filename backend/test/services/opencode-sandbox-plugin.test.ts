@@ -3,7 +3,7 @@ import { promises as fs } from 'fs'
 import { spawn, spawnSync } from 'child_process'
 import http from 'http'
 import type { AddressInfo } from 'net'
-import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'fs'
+import { mkdirSync, mkdtempSync, realpathSync, rmSync, writeFileSync } from 'fs'
 import path from 'path'
 import os from 'os'
 import { pathToFileURL } from 'url'
@@ -138,7 +138,7 @@ describe('ocm-sandbox plugin', () => {
     expect(fetchMock).not.toHaveBeenCalled()
   })
 
-  it('replaces the command with the sandbox plan when enforced', async () => {
+  it('plans the default bash cwd against the factory directory when a different worktree is present', async () => {
     process.env.OCM_SANDBOX_ENFORCED = 'true'
     const fetchMock = vi.fn().mockResolvedValue({
       ok: true,
@@ -160,12 +160,12 @@ describe('ocm-sandbox plugin', () => {
         'content-type': 'application/json',
         Authorization: 'Bearer secret-token',
       },
-      body: JSON.stringify({ directory: '/wt/repo', command: 'echo hi', enforced: true }),
+      body: JSON.stringify({ directory: '/repo', command: 'echo hi', enforced: true }),
       signal: expect.any(AbortSignal),
     })
   })
 
-  it('uses the session directory when no worktree is provided', async () => {
+  it('uses the factory directory when no worktree is provided', async () => {
     process.env.OCM_SANDBOX_ENFORCED = 'true'
     const fetchMock = vi.fn().mockResolvedValue({
       ok: true,
@@ -181,7 +181,47 @@ describe('ocm-sandbox plugin', () => {
     expect(JSON.parse(options.body)).toEqual({ directory: '/repo', command: 'echo hi', enforced: true })
   })
 
-  it('resolves a relative bash workdir against the session directory when planning', async () => {
+  it('plans the default bash cwd against the factory directory even when the worktree is the filesystem root', async () => {
+    process.env.OCM_SANDBOX_ENFORCED = 'true'
+    const fetchMock = vi.fn().mockResolvedValue({
+      ok: true,
+      json: async () => ({ mode: 'sandbox', command: "msb exec 'pwd'" }),
+    })
+    vi.stubGlobal('fetch', fetchMock)
+
+    const factory = await loadPlugin(configHome)
+    const hooks = await factory({ directory: '/workspace/repos/assistant', worktree: '/' })
+    const output = { args: { command: 'pwd' } }
+    await hooks['tool.execute.before']({ tool: 'bash', sessionID: 's', callID: 'c' }, output)
+
+    expect(output.args.command).toBe("msb exec 'pwd'")
+    const [, options] = fetchMock.mock.calls[0]!
+    expect(JSON.parse(options.body)).toEqual({ directory: '/workspace/repos/assistant', command: 'pwd', enforced: true })
+  })
+
+  it('resolves a relative bash workdir against the factory directory even when the worktree is broader', async () => {
+    process.env.OCM_SANDBOX_ENFORCED = 'true'
+    const fetchMock = vi.fn().mockResolvedValue({
+      ok: true,
+      json: async () => ({ mode: 'sandbox', command: "msb exec 'ls'" }),
+    })
+    vi.stubGlobal('fetch', fetchMock)
+
+    const factory = await loadPlugin(configHome)
+    const hooks = await factory({ directory: '/workspace/repos/assistant', worktree: '/' })
+    const output = { args: { command: 'ls', workdir: 'backend/src' } }
+    await hooks['tool.execute.before']({ tool: 'bash', sessionID: 's', callID: 'c' }, output)
+
+    expect(output.args.command).toBe("msb exec 'ls'")
+    const [, options] = fetchMock.mock.calls[0]!
+    expect(JSON.parse(options.body)).toEqual({
+      directory: '/workspace/repos/assistant/backend/src',
+      command: 'ls',
+      enforced: true,
+    })
+  })
+
+  it('resolves a relative bash workdir against the factory directory when planning', async () => {
     process.env.OCM_SANDBOX_ENFORCED = 'true'
     const fetchMock = vi.fn().mockResolvedValue({
       ok: true,
@@ -196,7 +236,7 @@ describe('ocm-sandbox plugin', () => {
 
     expect(output.args.command).toBe("msb exec 'echo hi'")
     const [, options] = fetchMock.mock.calls[0]!
-    expect(JSON.parse(options.body)).toEqual({ directory: '/wt/repo/backend/src', command: 'echo hi', enforced: true })
+    expect(JSON.parse(options.body)).toEqual({ directory: '/repo/backend/src', command: 'echo hi', enforced: true })
   })
 
   it('plans an absolute bash workdir verbatim and rejects outside-root workdirs via the planner', async () => {
@@ -773,6 +813,7 @@ describe.skipIf(SHIPPED_OPENCODE_BIN === null)('ocm-sandbox plugin against the s
     const workDir = path.join(root, 'work')
     mkdirSync(path.join(configHome, 'opencode', 'plugin'), { recursive: true })
     mkdirSync(workDir, { recursive: true })
+    mkdirSync(path.join(workDir, 'subdir'), { recursive: true })
 
     const planRequests: string[] = []
     const toolResults: string[] = []
@@ -783,7 +824,9 @@ describe.skipIf(SHIPPED_OPENCODE_BIN === null)('ocm-sandbox plugin against the s
         body += chunk.toString()
       })
       req.on('end', () => {
-        planRequests.push(body)
+        if (req.method === 'POST' && req.url?.endsWith('/sandbox/command')) {
+          planRequests.push(body)
+        }
         res.writeHead(200, { 'content-type': 'application/json' })
         res.end(JSON.stringify({ mode: 'sandbox', command: `echo ${REWRITTEN_SENTINEL}` }))
       })
@@ -819,8 +862,7 @@ describe.skipIf(SHIPPED_OPENCODE_BIN === null)('ocm-sandbox plugin against the s
         const base = { id: 'chatcmpl-e2e', object: 'chat.completion.chunk', created: 1, model: 'mock-model' }
         const hasTools = Array.isArray(parsed.tools) && parsed.tools.length > 0
 
-        if (hasTools && toolMessages.length === 0) {
-          const args = JSON.stringify({ command: `echo ${ORIGINAL_SENTINEL}` })
+        const emitToolCall = (callId: string, args: string) => {
           writeChunk({
             ...base,
             choices: [
@@ -830,7 +872,7 @@ describe.skipIf(SHIPPED_OPENCODE_BIN === null)('ocm-sandbox plugin against the s
                   role: 'assistant',
                   content: null,
                   tool_calls: [
-                    { index: 0, id: 'call_1', type: 'function', function: { name: 'bash', arguments: '' } },
+                    { index: 0, id: callId, type: 'function', function: { name: 'bash', arguments: '' } },
                   ],
                 },
                 finish_reason: null,
@@ -842,6 +884,12 @@ describe.skipIf(SHIPPED_OPENCODE_BIN === null)('ocm-sandbox plugin against the s
             choices: [{ index: 0, delta: { tool_calls: [{ index: 0, function: { arguments: args } }] }, finish_reason: null }],
           })
           writeChunk({ ...base, choices: [{ index: 0, delta: {}, finish_reason: 'tool_calls' }] })
+        }
+
+        if (hasTools && toolMessages.length === 0) {
+          emitToolCall('call_1', JSON.stringify({ command: `echo ${ORIGINAL_SENTINEL}` }))
+        } else if (hasTools && toolMessages.length === 1) {
+          emitToolCall('call_2', JSON.stringify({ command: `echo ${ORIGINAL_SENTINEL}`, workdir: 'subdir' }))
         } else {
           writeChunk({ ...base, choices: [{ index: 0, delta: { role: 'assistant', content: '' }, finish_reason: null }] })
           writeChunk({ ...base, choices: [{ index: 0, delta: { content: 'FINAL' }, finish_reason: null }] })
@@ -900,14 +948,15 @@ export default async function () {
             {
               cwd: workDir,
               stdio: ['ignore', 'pipe', 'pipe'],
-            env: {
-              ...process.env,
-              HOME: root,
-              XDG_CONFIG_HOME: configHome,
-              OCM_SANDBOX_ENFORCED: 'true',
-              OCM_INTERNAL_API_URL: `http://127.0.0.1:${planPort}/api/internal`,
-              OCM_INTERNAL_TOKEN: 'test-token',
-            },
+              env: {
+                ...process.env,
+                HOME: root,
+                XDG_CONFIG_HOME: configHome,
+                PWD: workDir,
+                OCM_SANDBOX_ENFORCED: 'true',
+                OCM_INTERNAL_API_URL: `http://127.0.0.1:${planPort}/api/internal`,
+                OCM_INTERNAL_TOKEN: 'test-token',
+              },
             },
           )
           let stdout = ''
@@ -934,10 +983,15 @@ export default async function () {
       )
 
       expect(result.status).toBe(0)
-      expect(planRequests.length).toBeGreaterThan(0)
-      const planBody = JSON.parse(planRequests[0] as string) as { command?: string; enforced?: boolean }
-      expect(planBody.enforced).toBe(true)
-      expect(planBody.command).toContain(ORIGINAL_SENTINEL)
+      expect(planRequests.length).toBeGreaterThanOrEqual(2)
+      const firstPlan = JSON.parse(planRequests[0] as string) as { command?: string; directory?: string; enforced?: boolean }
+      expect(firstPlan.enforced).toBe(true)
+      expect(firstPlan.command).toContain(ORIGINAL_SENTINEL)
+      expect(firstPlan.directory).toBe(realpathSync(workDir))
+      const subdirPlan = JSON.parse(planRequests[1] as string) as { command?: string; directory?: string; enforced?: boolean }
+      expect(subdirPlan.enforced).toBe(true)
+      expect(subdirPlan.command).toContain(ORIGINAL_SENTINEL)
+      expect(subdirPlan.directory).toBe(realpathSync(path.join(workDir, 'subdir')))
 
       expect(toolResults.length).toBeGreaterThan(0)
       expect(toolResults.some((output) => output.includes(REWRITTEN_SENTINEL))).toBe(true)
@@ -982,7 +1036,9 @@ export default async function () {
         body += chunk.toString()
       })
       req.on('end', () => {
-        planRequests.push(body)
+        if (req.method === 'POST' && req.url?.endsWith('/sandbox/command')) {
+          planRequests.push(body)
+        }
         res.writeHead(200, { 'content-type': 'application/json' })
         res.end(JSON.stringify({ mode: 'sandbox', command: `echo ${REWRITTEN_SENTINEL}` }))
       })
@@ -1113,6 +1169,7 @@ export default async function () {
         ...process.env,
         HOME: root,
         XDG_CONFIG_HOME: configHome,
+        PWD: workDir,
         OCM_SANDBOX_ENFORCED: 'true',
         OCM_INTERNAL_API_URL: `http://127.0.0.1:${planPort}/api/internal`,
         OCM_INTERNAL_TOKEN: 'test-token',
@@ -1122,9 +1179,10 @@ export default async function () {
 
       expect(result.status).toBe(0)
       expect(planRequests.length).toBeGreaterThan(0)
-      const planBody = JSON.parse(planRequests[0] as string) as { command?: string; enforced?: boolean }
+      const planBody = JSON.parse(planRequests[0] as string) as { command?: string; directory?: string; enforced?: boolean }
       expect(planBody.enforced).toBe(true)
       expect(planBody.command).toContain(ORIGINAL_SENTINEL)
+      expect(planBody.directory).toBe(realpathSync(workDir))
 
       expect(toolResults.some((output) => output.includes(REWRITTEN_SENTINEL))).toBe(true)
       expect(toolResults.every((output) => !output.includes(ORIGINAL_SENTINEL))).toBe(true)

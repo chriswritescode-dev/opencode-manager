@@ -43,6 +43,21 @@ describe('OpenCodeClient', () => {
     )
   })
 
+  it('responds to permission requests via the request-scoped reply endpoint', async () => {
+    fetchMock.mockResolvedValue(new Response(JSON.stringify({}), { status: 200 }))
+
+    await new OpenCodeClient('/api/opencode', '/repo').respondToPermission('per_1', 'reject')
+
+    expect(fetchMock).toHaveBeenCalledWith(
+      'http://localhost/api/opencode/permission/per_1/reply?directory=%2Frepo',
+      expect.objectContaining({
+        method: 'POST',
+        headers: expect.objectContaining({ 'Content-Type': 'application/json' }),
+        body: JSON.stringify({ reply: 'reject' }),
+      }),
+    )
+  })
+
   describe('listSessionsPage', () => {
     it('handles v1.16.0+ API response format with data envelope and nested location', async () => {
       fetchMock.mockResolvedValue(

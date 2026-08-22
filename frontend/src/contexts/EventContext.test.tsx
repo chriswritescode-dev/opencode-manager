@@ -13,6 +13,7 @@ const mocks = vi.hoisted(() => ({
   listPendingQuestions: vi.fn(),
   replyToQuestion: vi.fn(),
   rejectQuestion: vi.fn(),
+  respondToPermission: vi.fn(),
   subscribeGlobalMonitor: vi.fn(),
   getHealth: vi.fn(),
 }))
@@ -27,6 +28,7 @@ vi.mock('@/api/opencode', () => ({
     listPendingQuestions: mocks.listPendingQuestions,
     replyToQuestion: mocks.replyToQuestion,
     rejectQuestion: mocks.rejectQuestion,
+    respondToPermission: mocks.respondToPermission,
   })),
 }))
 
@@ -93,6 +95,19 @@ const pendingPermission: PermissionRequest = {
   },
 }
 
+const secondPendingPermission: PermissionRequest = {
+  id: 'permission-2',
+  sessionID: 'session-1',
+  permission: 'write',
+  patterns: ['/tmp/test.txt'],
+  metadata: {},
+  always: [],
+  tool: {
+    messageID: 'message-2',
+    callID: 'call-2',
+  },
+}
+
 function Harness() {
   const { current, pendingCount, syncForSession, navigateToCurrent, reject, reply, getForSession } = useQuestions()
   const permissions = usePermissions()
@@ -115,6 +130,7 @@ function Harness() {
       <button onClick={navigateToCurrent}>Navigate</button>
       <button onClick={() => current && reject(current.id)}>Dismiss</button>
       <button onClick={() => current && reply(current.id, [['Yes']])}>Reply</button>
+      <button onClick={() => permissions.current && permissions.respond(permissions.current.id, permissions.current.sessionID, 'reject')}>Reject Permission</button>
     </div>
   )
 }
@@ -197,6 +213,28 @@ describe('EventProvider questions', () => {
     await waitFor(() => {
       expect(screen.getByTestId('permission-count')).toHaveTextContent('0')
       expect(screen.getByTestId('permission-current')).toHaveTextContent('none')
+    })
+  })
+
+  it('advances to the remaining permission after rejecting the current one of two in the same session', async () => {
+    mocks.listPendingPermissions.mockResolvedValue([pendingPermission, secondPendingPermission])
+
+    render(<Harness />, { wrapper: createWrapper() })
+
+    await userEvent.click(screen.getByRole('button', { name: 'Sync Permissions' }))
+
+    await waitFor(() => {
+      expect(screen.getByTestId('permission-count')).toHaveTextContent('2')
+      expect(screen.getByTestId('permission-current')).toHaveTextContent('permission-1')
+    })
+
+    await userEvent.click(screen.getByRole('button', { name: 'Reject Permission' }))
+
+    await waitFor(() => {
+      expect(mocks.respondToPermission).toHaveBeenCalledTimes(1)
+      expect(mocks.respondToPermission).toHaveBeenCalledWith('permission-1', 'reject')
+      expect(screen.getByTestId('permission-count')).toHaveTextContent('1')
+      expect(screen.getByTestId('permission-current')).toHaveTextContent('permission-2')
     })
   })
 
