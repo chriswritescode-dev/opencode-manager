@@ -16,19 +16,16 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v4
 
-      - name: Resolve tool versions (opencode and microsandbox are intentionally pinned)
+      - name: Resolve tool versions (bundled OpenCode and microsandbox for reproducibility)
         id: versions
         run: |
-          # OPENCODE_VERSION is pinned, not detected: sandbox enforcement depends on the
-          # bash-tool hook contract, which is verified per build. It must stay in sync with
-          # SANDBOX_VERIFIED_OPENCODE_VERSIONS in backend/src/services/opencode-single-server.ts.
           UV_VERSION=$(git ls-remote --tags --sort=-v:refname https://github.com/astral-sh/uv.git 'refs/tags/[0-9]*' | head -1 | sed 's/.*refs\/tags\///')
           OPENCODE_VERSION=1.18.16
           MICROSANDBOX_VERSION=0.6.8
           echo "uv=${UV_VERSION}" >> $GITHUB_OUTPUT
           echo "opencode=${OPENCODE_VERSION}" >> $GITHUB_OUTPUT
           echo "microsandbox=${MICROSANDBOX_VERSION}" >> $GITHUB_OUTPUT
-          echo "Versions: uv=${UV_VERSION} (latest), opencode=${OPENCODE_VERSION} (pinned), microsandbox=${MICROSANDBOX_VERSION} (pinned)"
+          echo "Versions: uv=${UV_VERSION} (latest), opencode=${OPENCODE_VERSION} (bundled default), microsandbox=${MICROSANDBOX_VERSION} (pinned)"
 
       - name: Docker meta
         id: meta
@@ -69,5 +66,4 @@ jobs:
           cache-from: type=gha
           cache-to: type=gha,mode=max
           target: runner
-
 

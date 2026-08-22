@@ -39,21 +39,12 @@ export { sanitizeConfigForEnforcement }
 
 
 const MIN_OPENCODE_VERSION = '1.0.137'
-const SANDBOX_VERIFIED_OPENCODE_VERSIONS = ['1.18.16']
 const MAX_STDERR_SIZE = 10240
 const PLUGIN_INSTALL_TIMEOUT_MS = 120000
 const PROCESS_EXIT_GRACE_MS = 2000
 const PROCESS_EXIT_POLL_MS = 50
 const CHILD_STATE_MARKER_REFRESH_MS = 60000
 const DEPRECATED_PLUGIN_PACKAGES = ['opencode-openai-codex-auth', 'opencode-copilot-auth']
-
-export function getSandboxVerifiedOpenCodeVersions(): readonly string[] {
-  return SANDBOX_VERIFIED_OPENCODE_VERSIONS
-}
-
-export function isSandboxVerifiedOpenCodeVersion(version: string): boolean {
-  return (SANDBOX_VERIFIED_OPENCODE_VERSIONS as readonly string[]).includes(version)
-}
 
 type StartupValidationIssue = {
   path: string
@@ -513,14 +504,6 @@ class OpenCodeServerManager {
         await this.terminatePortOwners(existingProcesses, PROCESS_EXIT_GRACE_MS)
         replacingExistingServer = true
       }
-      const enforcedVersion = await this.fetchVersion()
-      if (enforcedVersion === null || !this.isSandboxVersionSupported()) {
-        const message =
-          enforcedVersion === null
-            ? `OpenCode version could not be determined; refusing to run an enforced server (verified builds: ${SANDBOX_VERIFIED_OPENCODE_VERSIONS.join(', ')})`
-            : `OpenCode version ${enforcedVersion} does not support sandboxed bash tool rewriting; refusing to run an enforced server (verified builds: ${SANDBOX_VERIFIED_OPENCODE_VERSIONS.join(', ')})`
-        this.failNonRecoverable(message)
-      }
     } else if (existingProcesses.length > 0) {
       logger.info(`OpenCode server already running on port ${openCodeServerPort}`)
       const healthy = await this.checkHealth()
@@ -814,14 +797,6 @@ class OpenCodeServerManager {
         logger.warn(`OpenCode version ${this.version} is below minimum required version ${MIN_OPENCODE_VERSION}`)
         logger.warn('Some features like MCP management may not work correctly')
       }
-    }
-    if (sandboxEnforced && (this.version === null || !this.isSandboxVersionSupported())) {
-      const message =
-        this.version === null
-          ? `OpenCode version could not be determined; refusing to run an enforced server (verified builds: ${SANDBOX_VERIFIED_OPENCODE_VERSIONS.join(', ')})`
-          : `OpenCode version ${this.version} does not support sandboxed bash tool rewriting; refusing to run an enforced server (verified builds: ${SANDBOX_VERIFIED_OPENCODE_VERSIONS.join(', ')})`
-      await this.stop(true)
-      this.failNonRecoverable(message)
     }
     } finally {
       this.releaseOp(acquired)
@@ -1119,14 +1094,6 @@ class OpenCodeServerManager {
   isVersionSupported(): boolean {
     if (!this.version) return false
     return compareVersions(this.version, MIN_OPENCODE_VERSION) >= 0
-  }
-
-  getSandboxVerifiedVersions(): readonly string[] {
-    return SANDBOX_VERIFIED_OPENCODE_VERSIONS
-  }
-
-  isSandboxVersionSupported(): boolean {
-    return this.version !== null && isSandboxVerifiedOpenCodeVersion(this.version)
   }
 
   getLastStartupError(): string | null {

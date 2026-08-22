@@ -28,9 +28,8 @@ import { logger } from '../utils/logger'
 import {
   discoverModelsCached,
 } from '../utils/discovery-cache'
-import { opencodeServerManager, ConfigReloadError, isSandboxVerifiedOpenCodeVersion, getSandboxVerifiedOpenCodeVersions } from '../services/opencode-single-server'
+import { opencodeServerManager, ConfigReloadError } from '../services/opencode-single-server'
 import { sanitizeConfigForEnforcementResult, type EnforcementRemovedSections } from '../services/opencode/enforcement-config'
-import { isSandboxEnforcementActive } from '../services/sandbox/enforcement'
 import { getOrCreateInternalToken, rotateInternalToken } from '../services/internal-token'
 import { sseAggregator } from '../services/sse-aggregator'
 import type { OpenCodeSupervisor } from '../services/opencode-supervisor'
@@ -989,19 +988,6 @@ export function createSettingsRoutes(db: Database, gitAuthService: GitAuthServic
     logger.info(`Current OpenCode version: ${oldVersion}`)
 
     try {
-      if (isSandboxEnforcementActive(db)) {
-        const verified = getSandboxVerifiedOpenCodeVersions()
-        logger.warn('OpenCode upgrade blocked while sandbox enforcement is active')
-        return c.json({
-          success: false,
-          error: 'OpenCode upgrade is disabled while sandbox enforcement is active',
-          details: `Sandbox enforcement only accepts verified OpenCode builds (${verified.join(', ')}). Disable Agent Sandboxing in Settings and restart the OpenCode server before upgrading.`,
-          oldVersion,
-          newVersion: oldVersion,
-          upgraded: false,
-        }, 409)
-      }
-
       const installMethod = getOpenCodeInstallMethod()
       logger.info(`Running opencode upgrade --method ${installMethod} with 90s timeout...`)
       const { output: upgradeOutput, timedOut } = execWithTimeout(`opencode upgrade --method ${installMethod} 2>&1`, 90000)
@@ -1110,7 +1096,6 @@ export function createSettingsRoutes(db: Database, gitAuthService: GitAuthServic
         prerelease: boolean
       }>
 
-      const enforcementActive = isSandboxEnforcementActive(db)
       const versions = releases
         .filter(r => !r.prerelease)
         .map(r => {
@@ -1120,7 +1105,6 @@ export function createSettingsRoutes(db: Database, gitAuthService: GitAuthServic
             tag: r.tag_name,
             name: r.name,
             publishedAt: r.published_at,
-            installable: !enforcementActive || isSandboxVerifiedOpenCodeVersion(version),
           }
         })
       
@@ -1150,18 +1134,6 @@ export function createSettingsRoutes(db: Database, gitAuthService: GitAuthServic
       const versionWithoutPrefix = version.replace(/^v/, '')
       if (!isValidVersion(versionWithoutPrefix)) {
         throw new Error('Invalid version format. Must be in MAJOR.MINOR.PATCH format (e.g., 1.2.27)')
-      }
-
-      if (isSandboxEnforcementActive(db) && !isSandboxVerifiedOpenCodeVersion(versionWithoutPrefix)) {
-        const verified = getSandboxVerifiedOpenCodeVersions()
-        logger.warn(`OpenCode v${versionWithoutPrefix} install blocked while sandbox enforcement is active`)
-        return c.json({
-          success: false,
-          error: `OpenCode v${versionWithoutPrefix} is not verified for sandbox enforcement`,
-          details: `Sandbox enforcement only accepts verified OpenCode builds (${verified.join(', ')}).`,
-          oldVersion,
-          newVersion: oldVersion,
-        }, 409)
       }
 
       logger.info(`Installing OpenCode version: ${version}`)

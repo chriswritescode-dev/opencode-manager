@@ -11,11 +11,9 @@ vi.mock('@/components/settings/RestartServerDialog', () => ({
   RestartServerDialog: () => null,
 }))
 
-const BLOCKED_REASON = 'Updating the OpenCode version is disabled while agent sandboxing is enabled'
-
-function mockHealth(sandbox?: { available: boolean; enforced: boolean; reason?: string; msbVersion?: string }) {
+function mockHealth() {
   vi.mocked(useServerHealth).mockReturnValue({
-    data: { opencode: 'healthy', opencodeVersion: '1.18.16', sandbox },
+    data: { opencode: 'healthy', opencodeVersion: '1.18.16' },
     isLoading: false,
     error: null,
     refetch: vi.fn(),
@@ -41,57 +39,32 @@ function mockActions(overrides: Partial<ReturnType<typeof useOpenCodeServerActio
 describe('ServerHealthStatus', () => {
   beforeEach(() => {
     vi.clearAllMocks()
+    mockHealth()
     mockActions()
   })
 
-  it('keeps Update and Versions enabled when sandboxing is off', () => {
-    mockHealth({ available: true, enforced: false })
-
+  it('keeps Update and Versions enabled', () => {
     render(<ServerHealthStatus />)
 
     expect(screen.getByRole('button', { name: /Update/i })).toBeEnabled()
     expect(screen.getByRole('button', { name: /Versions/i })).toBeEnabled()
   })
 
-  it('disables Update but keeps Versions accessible when sandbox enforcement is on', () => {
-    mockHealth({ available: true, enforced: true })
-
-    render(<ServerHealthStatus />)
-
-    const update = screen.getByRole('button', { name: /Update/i })
-    const versions = screen.getByRole('button', { name: /Versions/i })
-    expect(update).toBeDisabled()
-    expect(update).toHaveAttribute('title', BLOCKED_REASON)
-    expect(versions).toBeEnabled()
-    expect(screen.getByText(/Agent sandboxing is on; Update is disabled and only verified versions can be installed\./)).toBeInTheDocument()
-  })
-
-  it('keeps Update and Versions enabled while enforcement is pending but not active', () => {
-    mockHealth({ available: false, enforced: false, reason: 'KVM unavailable' })
-
-    render(<ServerHealthStatus />)
-
-    expect(screen.getByRole('button', { name: /Update/i })).toBeEnabled()
-    expect(screen.getByRole('button', { name: /Versions/i })).toBeEnabled()
-  })
-
-  it('does not invoke an upgrade while the Update button is disabled', async () => {
+  it('invokes an upgrade when Update is clicked', async () => {
     const user = userEvent.setup()
     const performUpgrade = vi.fn()
     mockActions({ performUpgrade })
-    mockHealth({ available: true, enforced: true })
 
     render(<ServerHealthStatus />)
 
     await user.click(screen.getByRole('button', { name: /Update/i }))
 
-    expect(performUpgrade).not.toHaveBeenCalled()
+    expect(performUpgrade).toHaveBeenCalled()
   })
 
-  it('opens the version dialog when Versions is clicked under enforcement', async () => {
+  it('opens the version dialog when Versions is clicked', async () => {
     const user = userEvent.setup()
     const onOpenVersionDialog = vi.fn()
-    mockHealth({ available: true, enforced: true })
 
     render(<ServerHealthStatus onOpenVersionDialog={onOpenVersionDialog} />)
 

@@ -12,8 +12,6 @@ const isLifecycleInitializedMock = vi.hoisted(() => vi.fn().mockReturnValue(true
 vi.mock('../../src/services/opencode-single-server', () => ({
   opencodeServerManager: { isSandboxEnforced: isSandboxEnforcedMock, isLifecycleInitialized: isLifecycleInitializedMock },
   OpenCodeServerManager: class {},
-  getSandboxVerifiedOpenCodeVersions: () => [],
-  isSandboxVerifiedOpenCodeVersion: () => false,
   sanitizeConfigForEnforcement: (config: Record<string, unknown>) => config,
   ConfigReloadError: class extends Error {},
   NonRecoverableStartupError: class extends Error {},

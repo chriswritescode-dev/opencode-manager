@@ -1256,6 +1256,19 @@ describe('Settings Routes - OpenCode Upgrade', () => {
         expect(mockRestart).toHaveBeenCalledTimes(1)
         expect(mockReloadConfig).not.toHaveBeenCalled()
       })
+
+      it('allows upgrading while sandbox enforcement is active', async () => {
+        mockIsSandboxEnforced.mockReturnValue(true)
+        mockGetVersion.mockReturnValueOnce('1.18.16')
+        mockFetchVersion.mockResolvedValueOnce('1.19.0')
+        mockExecSync.mockReturnValueOnce('Upgrade successful\n')
+
+        const res = await settingsApp.fetch(new Request('http://localhost/opencode-upgrade', { method: 'POST' }))
+
+        expect(res.status).toBe(200)
+        expect(mockExecSync).toHaveBeenCalled()
+        expect(mockRestart).toHaveBeenCalled()
+      })
     })
 
     describe('timeout and recovery scenarios', () => {
@@ -1363,44 +1376,6 @@ describe('Settings Routes - OpenCode Upgrade', () => {
         expect(json.upgraded).toBe(false)
       })
     })
-
-    describe('sandbox enforcement gating', () => {
-      it('blocks the upgrade while the persisted sandbox preference is enabled', async () => {
-        sandboxRuntimeServiceMock.SandboxRuntimeService.mockImplementation(() => ({
-          isEnabled: () => true,
-        }))
-        mockGetVersion.mockReturnValue('1.18.16')
-
-        const req = new Request('http://localhost/opencode-upgrade', {
-          method: 'POST'
-        })
-        const res = await settingsApp.fetch(req)
-        const json = await res.json() as Record<string, unknown>
-
-        expect(res.status).toBe(409)
-        expect(json.error).toContain('sandbox enforcement')
-        expect(json.details).toContain('1.18.16')
-        expect(mockExecSync).not.toHaveBeenCalled()
-        expect(mockRestart).not.toHaveBeenCalled()
-        expect(mockClearStartupError).not.toHaveBeenCalled()
-      })
-
-      it('blocks the upgrade while the running OpenCode child is enforced', async () => {
-        mockIsSandboxEnforced.mockReturnValue(true)
-        mockGetVersion.mockReturnValue('1.18.16')
-
-        const req = new Request('http://localhost/opencode-upgrade', {
-          method: 'POST'
-        })
-        const res = await settingsApp.fetch(req)
-        const json = await res.json() as Record<string, unknown>
-
-        expect(res.status).toBe(409)
-        expect(json.error).toContain('sandbox enforcement')
-        expect(mockExecSync).not.toHaveBeenCalled()
-        expect(mockRestart).not.toHaveBeenCalled()
-      })
-    })
   })
 
   describe('POST /opencode-install-version', () => {
@@ -1421,6 +1396,26 @@ describe('Settings Routes - OpenCode Upgrade', () => {
         expect(res.status).toBe(200)
         expect(json.success).toBe(true)
         expect(json.newVersion).toBe('1.0.5')
+      })
+
+      it('allows installing any version while sandbox enforcement is active', async () => {
+        mockIsSandboxEnforced.mockReturnValue(true)
+        mockGetVersion.mockReturnValueOnce('1.18.16')
+        mockFetchVersion.mockResolvedValueOnce('1.20.0')
+        mockSpawnSync.mockReturnValueOnce({ stdout: 'Installed v1.20.0\n', stderr: '', signal: null, error: undefined })
+
+        const res = await settingsApp.fetch(new Request('http://localhost/opencode-install-version', {
+          method: 'POST',
+          body: JSON.stringify({ version: '1.20.0' }),
+          headers: { 'Content-Type': 'application/json' }
+        }))
+
+        expect(res.status).toBe(200)
+        expect(mockSpawnSync).toHaveBeenCalledWith(
+          'opencode',
+          ['upgrade', 'v1.20.0', '--method', 'curl'],
+          expect.any(Object)
+        )
       })
 
       it('should prepend v to version if missing', async () => {
@@ -1532,120 +1527,6 @@ describe('Settings Routes - OpenCode Upgrade', () => {
 
         expect(res.status).toBe(400)
       })
-    })
-
-    describe('sandbox enforcement gating', () => {
-      it('allows installing a verified version while the sandbox preference is enabled', async () => {
-        sandboxRuntimeServiceMock.SandboxRuntimeService.mockImplementation(() => ({
-          isEnabled: () => true,
-        }))
-        mockGetVersion.mockReturnValueOnce('1.18.16')
-        mockFetchVersion.mockResolvedValueOnce('1.18.16')
-        mockSpawnSync.mockReturnValueOnce({ stdout: 'Installed v1.18.16\n', stderr: '', signal: null, error: undefined })
-
-        const req = new Request('http://localhost/opencode-install-version', {
-          method: 'POST',
-          body: JSON.stringify({ version: '1.18.16' }),
-          headers: { 'Content-Type': 'application/json' }
-        })
-        const res = await settingsApp.fetch(req)
-        const json = await res.json() as Record<string, unknown>
-
-        expect(res.status).toBe(200)
-        expect(json.success).toBe(true)
-        expect(mockSpawnSync).toHaveBeenCalledWith(
-          'opencode',
-          ['upgrade', 'v1.18.16', '--method', 'curl'],
-          expect.any(Object)
-        )
-      })
-
-      it('rejects an unverified version install while the sandbox preference is enabled', async () => {
-        sandboxRuntimeServiceMock.SandboxRuntimeService.mockImplementation(() => ({
-          isEnabled: () => true,
-        }))
-        mockGetVersion.mockReturnValue('1.18.16')
-
-        const req = new Request('http://localhost/opencode-install-version', {
-          method: 'POST',
-          body: JSON.stringify({ version: '1.19.0' }),
-          headers: { 'Content-Type': 'application/json' }
-        })
-        const res = await settingsApp.fetch(req)
-        const json = await res.json() as Record<string, unknown>
-
-        expect(res.status).toBe(409)
-        expect(json.error).toContain('not verified')
-        expect(json.details).toContain('1.18.16')
-        expect(mockSpawnSync).not.toHaveBeenCalled()
-        expect(mockRestart).not.toHaveBeenCalled()
-      })
-
-      it('rejects an unverified version install while the running child is enforced', async () => {
-        mockIsSandboxEnforced.mockReturnValue(true)
-        mockGetVersion.mockReturnValue('1.18.16')
-
-        const req = new Request('http://localhost/opencode-install-version', {
-          method: 'POST',
-          body: JSON.stringify({ version: '1.20.0' }),
-          headers: { 'Content-Type': 'application/json' }
-        })
-        const res = await settingsApp.fetch(req)
-        const json = await res.json() as Record<string, unknown>
-
-        expect(res.status).toBe(409)
-        expect(json.error).toContain('not verified')
-        expect(mockSpawnSync).not.toHaveBeenCalled()
-      })
-    })
-  })
-
-  describe('GET /opencode-versions - installable flags', () => {
-    let originalFetch: typeof globalThis.fetch
-
-    function mockReleasesResponse() {
-      const releases = [
-        { tag_name: 'v1.20.0', name: '', published_at: '2026-02-01T00:00:00Z', prerelease: false },
-        { tag_name: 'v1.19.0', name: '', published_at: '2026-01-01T00:00:00Z', prerelease: false },
-        { tag_name: 'v1.18.16', name: '', published_at: '2025-12-01T00:00:00Z', prerelease: false },
-      ]
-      globalThis.fetch = vi.fn().mockResolvedValue(
-        new Response(JSON.stringify(releases), { status: 200, headers: { 'content-type': 'application/json' } }),
-      ) as unknown as typeof fetch
-    }
-
-    beforeEach(() => {
-      originalFetch = globalThis.fetch
-    })
-
-    afterEach(() => {
-      globalThis.fetch = originalFetch
-    })
-
-    it('marks every release installable when enforcement is inactive', async () => {
-      mockReleasesResponse()
-
-      const res = await settingsApp.fetch(new Request('http://localhost/opencode-versions'))
-      const json = await res.json() as { versions: Array<{ version: string; installable: boolean }> }
-
-      expect(res.status).toBe(200)
-      expect(json.versions.every((release) => release.installable === true)).toBe(true)
-    })
-
-    it('marks only verified releases installable while sandbox enforcement is active', async () => {
-      sandboxRuntimeServiceMock.SandboxRuntimeService.mockImplementation(() => ({
-        isEnabled: () => true,
-      }))
-      mockReleasesResponse()
-
-      const res = await settingsApp.fetch(new Request('http://localhost/opencode-versions'))
-      const json = await res.json() as { versions: Array<{ version: string; installable: boolean }> }
-
-      expect(res.status).toBe(200)
-      const byVersion = new Map(json.versions.map((release) => [release.version, release.installable]))
-      expect(byVersion.get('1.18.16')).toBe(true)
-      expect(byVersion.get('1.19.0')).toBe(false)
-      expect(byVersion.get('1.20.0')).toBe(false)
     })
   })
 

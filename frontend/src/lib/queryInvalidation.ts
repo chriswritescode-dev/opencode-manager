@@ -31,14 +31,16 @@ export function invalidateConfigCaches(queryClient: QueryClient) {
   invalidateProviderCaches(queryClient)
 }
 
-export function updateOpenCodeVersionCaches(queryClient: QueryClient, version: string) {
-  queryClient.setQueryData<Record<string, unknown>>(['health'], (oldData) => (
-    oldData ? { ...oldData, opencodeVersion: version } : oldData
-  ))
-  queryClient.setQueryData<Record<string, unknown>>(['opencode-versions'], (oldData) => (
-    oldData ? { ...oldData, currentVersion: version } : oldData
-  ))
-  queryClient.invalidateQueries({ queryKey: ['health'] })
+export function refreshOpenCodeServerCaches(queryClient: QueryClient, version?: string) {
+  if (version) {
+    queryClient.setQueryData<Record<string, unknown>>(['health'], (oldData) => (
+      oldData ? { ...oldData, opencodeVersion: version } : oldData
+    ))
+    queryClient.setQueryData<Record<string, unknown>>(['opencode-versions'], (oldData) => (
+      oldData ? { ...oldData, currentVersion: version } : oldData
+    ))
+  }
+  invalidateConfigCaches(queryClient)
   queryClient.invalidateQueries({ queryKey: ['opencode-versions'] })
 }
 
