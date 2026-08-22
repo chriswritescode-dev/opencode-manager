@@ -302,7 +302,7 @@ describe('OpenCodeSupervisor', () => {
       userId: 'default',
     })
 
-    manager.restart.mockRejectedValueOnce(new Error('Failed to quarantine untrusted OpenCode plugins'))
+    manager.restart.mockRejectedValueOnce(new Error('Failed to install a generated OpenCode plugin; refusing to start an enforced server'))
     manager.isLastStartupErrorNonRecoverable.mockReturnValue(true)
 
     const status = await supervisor.restart('settings_restart')
@@ -329,13 +329,13 @@ describe('OpenCodeSupervisor', () => {
     manager.checkHealth.mockResolvedValue(false)
     manager.restart.mockImplementation(async () => {
       manager.isLastStartupErrorNonRecoverable.mockReturnValue(true)
-      throw new Error('Failed to install the sandbox OpenCode plugin')
+      throw new Error('Failed to install a generated OpenCode plugin; refusing to start an enforced server')
     })
 
     const status = await supervisor.start()
 
     expect(status.state).toBe('failed')
-    expect(status.lastError).toContain('Failed to install the sandbox OpenCode plugin')
+    expect(status.lastError).toContain('Failed to install a generated OpenCode plugin')
     expect(manager.restart).toHaveBeenCalledTimes(1)
     expect(settings.archiveBrokenConfig).not.toHaveBeenCalled()
     expect(settings.restoreToLastKnownGoodConfig).not.toHaveBeenCalled()

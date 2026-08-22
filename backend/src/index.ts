@@ -339,7 +339,6 @@ if (ENV.VAPID.PUBLIC_KEY && ENV.VAPID.PRIVATE_KEY) {
 
 sseAggregator.setPendingActionsFetcher(openCodeClient)
 sseAggregator.setPasswordResolver(() => new SettingsService(db).getOpenCodeServerPassword())
-sseAggregator.setEnforcementResolver(() => opencodeServerManager.isSandboxEnforced())
 sseAggregator.start()
 
 sseAggregator.setScheduledSessionsResolver(

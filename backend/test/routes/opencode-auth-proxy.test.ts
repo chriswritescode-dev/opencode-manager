@@ -6,15 +6,10 @@ import type { OpenCodeClient } from '../../src/services/opencode/client'
 import { OpenCodeSupervisor } from '../../src/services/opencode-supervisor'
 import type { SettingsService } from '../../src/services/settings'
 
-const isSandboxEnforcedMock = vi.hoisted(() => vi.fn().mockReturnValue(false))
 const isLifecycleInitializedMock = vi.hoisted(() => vi.fn().mockReturnValue(true))
 
 vi.mock('../../src/services/opencode-single-server', () => ({
-  opencodeServerManager: { isSandboxEnforced: isSandboxEnforcedMock, isLifecycleInitialized: isLifecycleInitializedMock },
-  OpenCodeServerManager: class {},
-  sanitizeConfigForEnforcement: (config: Record<string, unknown>) => config,
-  ConfigReloadError: class extends Error {},
-  NonRecoverableStartupError: class extends Error {},
+  opencodeServerManager: { isLifecycleInitialized: isLifecycleInitializedMock },
 }))
 
 const forwardRawMock = vi.hoisted(() => vi.fn<OpenCodeClient['forwardRaw']>(async () => new Response('ok', { status: 200 })))
@@ -39,7 +34,6 @@ function buildApp() {
 describe('authenticated opencode proxy routes', () => {
   beforeEach(() => {
     vi.clearAllMocks()
-    isSandboxEnforcedMock.mockReturnValue(false)
     isLifecycleInitializedMock.mockReturnValue(true)
     forwardRawMock.mockResolvedValue(new Response('ok', { status: 200 }))
   })
@@ -142,58 +136,21 @@ describe('authenticated opencode proxy routes', () => {
     expect(forwarded.url).toContain('/api/opencode/mcp/evil-server/auth/authenticate')
   })
 
-  it('forwards the session shell endpoint when enforced', async () => {
-    isSandboxEnforcedMock.mockReturnValue(true)
+  it('forwards the session shell endpoint', async () => {
     const app = buildApp()
     const res = await app.request('/api/opencode/session/ses_1/shell', { method: 'POST' })
     expect(res.status).toBe(200)
     expect(forwardRawMock).toHaveBeenCalled()
   })
 
-  it('forwards the session shell endpoint while enforcement is on', async () => {
-    isSandboxEnforcedMock.mockReturnValue(true)
-    const app = buildApp()
-    const res = await app.request('/api/opencode/session/ses_1/shell', { method: 'POST' })
-    expect(res.status).toBe(200)
-    expect(forwardRawMock).toHaveBeenCalled()
-  })
-
-  it('blocks /api-prefixed PTY creation with 403 when enforced', async () => {
-    isSandboxEnforcedMock.mockReturnValue(true)
-    const app = buildApp()
-    const res = await app.request('/api/opencode/api/pty', { method: 'POST' })
-    expect(res.status).toBe(403)
-    expect(forwardRawMock).not.toHaveBeenCalled()
-  })
-
-  it('blocks percent-encoded PTY spellings with 403 when enforced', async () => {
-    isSandboxEnforcedMock.mockReturnValue(true)
+  it('forwards percent-encoded PTY paths when enforced', async () => {
     const app = buildApp()
     const res = await app.request('/api/opencode/%70ty', { method: 'POST' })
-    expect(res.status).toBe(403)
-    expect(forwardRawMock).not.toHaveBeenCalled()
-    const body = await res.json() as { error: string }
-    expect(body.error).toContain('Sandbox enforcement is on')
-  })
-
-  it('fails closed on encoded separators in proxied paths when enforced', async () => {
-    isSandboxEnforcedMock.mockReturnValue(true)
-    const app = buildApp()
-    const res = await app.request('/api/opencode/pty%2Fp1', { method: 'POST' })
-    expect(res.status).toBe(403)
-    expect(forwardRawMock).not.toHaveBeenCalled()
-  })
-
-  it('forwards safely encoded non-execution paths when enforced', async () => {
-    isSandboxEnforcedMock.mockReturnValue(true)
-    const app = buildApp()
-    const res = await app.request('/api/opencode/session/ses_1/%6dessage')
     expect(res.status).toBe(200)
     expect(forwardRawMock).toHaveBeenCalled()
   })
 
-  it('sanitizes plugins from a PATCH /config mutation when enforced', async () => {
-    isSandboxEnforcedMock.mockReturnValue(true)
+  it('forwards a PATCH /config mutation with plugins exactly when enforced', async () => {
     const app = buildApp()
     const res = await app.request('/api/opencode/config', {
       method: 'PATCH',
@@ -203,43 +160,38 @@ describe('authenticated opencode proxy routes', () => {
     expect(res.status).toBe(200)
     expect(forwardRawMock).toHaveBeenCalledTimes(1)
     const forwarded = JSON.parse(await (forwardRawMock.mock.calls[0]![0] as Request).text()) as Record<string, unknown>
-    expect(forwarded.theme).toBe('dark')
-    expect(forwarded.plugin).toBeUndefined()
+    expect(forwarded).toEqual({ theme: 'dark', plugin: ['opencode-plugin-npm'] })
   })
 
-  it('sanitizes local MCP servers and formatter config from a PATCH /config mutation when enforced', async () => {
-    isSandboxEnforcedMock.mockReturnValue(true)
+  it('forwards a PATCH /config mutation with local MCP servers and formatter config exactly when enforced', async () => {
     const app = buildApp()
+    const body = JSON.stringify({
+      formatter: { command: 'prettier' },
+      mcp: { local: { type: 'local', command: ['node', 'server.js'] } },
+    })
     const res = await app.request('/api/opencode/config', {
       method: 'PATCH',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({
-        formatter: { command: 'prettier' },
-        mcp: { local: { type: 'local', command: ['node', 'server.js'] } },
-      }),
+      body,
     })
     expect(res.status).toBe(200)
     const forwarded = JSON.parse(await (forwardRawMock.mock.calls[0]![0] as Request).text()) as Record<string, unknown>
-    expect(forwarded.formatter).toBeUndefined()
-    expect(forwarded.mcp).toBeUndefined()
+    expect(forwarded).toEqual(JSON.parse(body))
   })
 
-  it('rejects a malformed PATCH /config body with 403 when enforced', async () => {
-    isSandboxEnforcedMock.mockReturnValue(true)
+  it('forwards a malformed PATCH /config body exactly when enforced', async () => {
     const app = buildApp()
     const res = await app.request('/api/opencode/config', {
       method: 'PATCH',
       headers: { 'Content-Type': 'application/json' },
       body: '{not json',
     })
-    expect(res.status).toBe(403)
-    expect(forwardRawMock).not.toHaveBeenCalled()
-    const body = await res.json() as { error: string }
-    expect(body.error).toContain('Sandbox enforcement is on')
+    expect(res.status).toBe(200)
+    expect(forwardRawMock).toHaveBeenCalledTimes(1)
+    expect(await (forwardRawMock.mock.calls[0]![0] as Request).text()).toBe('{not json')
   })
 
   it('forwards PATCH /config mutations raw when enforcement is off', async () => {
-    isSandboxEnforcedMock.mockReturnValue(false)
     const app = buildApp()
     const res = await app.request('/api/opencode/config', {
       method: 'PATCH',
@@ -251,8 +203,7 @@ describe('authenticated opencode proxy routes', () => {
     expect(forwarded.plugin).toEqual(['opencode-plugin-npm'])
   })
 
-  it('rejects a local MCP server add with 403 when enforced', async () => {
-    isSandboxEnforcedMock.mockReturnValue(true)
+  it('forwards a local MCP server add when enforced', async () => {
     const app = buildApp()
     const res = await app.request('/api/opencode/mcp', {
       method: 'POST',
@@ -262,15 +213,16 @@ describe('authenticated opencode proxy routes', () => {
         config: { type: 'local', command: ['node', 'server.js'] },
       }),
     })
-    expect(res.status).toBe(403)
-    expect(forwardRawMock).not.toHaveBeenCalled()
-    const body = await res.json() as { error: string }
-    expect(body.error).toContain('Sandbox enforcement is on')
-    expect(body.error).toContain('only remote MCP servers')
+    expect(res.status).toBe(200)
+    expect(forwardRawMock).toHaveBeenCalledTimes(1)
+    const forwarded = JSON.parse(await (forwardRawMock.mock.calls[0]![0] as Request).text()) as Record<string, unknown>
+    expect(forwarded).toEqual({
+      name: 'evil',
+      config: { type: 'local', command: ['node', 'server.js'] },
+    })
   })
 
   it('forwards a remote MCP server add when enforced', async () => {
-    isSandboxEnforcedMock.mockReturnValue(true)
     const app = buildApp()
     const res = await app.request('/api/opencode/mcp', {
       method: 'POST',
@@ -290,7 +242,6 @@ describe('authenticated opencode proxy routes', () => {
   })
 
   it('forwards MCP server adds raw when enforcement is off', async () => {
-    isSandboxEnforcedMock.mockReturnValue(false)
     const app = buildApp()
     const res = await app.request('/api/opencode/mcp', {
       method: 'POST',
@@ -305,28 +256,26 @@ describe('authenticated opencode proxy routes', () => {
     expect(forwarded.config.type).toBe('local')
   })
 
-  it('sanitizes LSP servers and experimental hooks from a PATCH /config mutation when enforced', async () => {
-    isSandboxEnforcedMock.mockReturnValue(true)
+  it('forwards a PATCH /config mutation with LSP servers and experimental hooks exactly when enforced', async () => {
     const app = buildApp()
+    const body = JSON.stringify({
+      lsp: { typescript: { command: ['typescript-language-server'] } },
+      experimental: {
+        hook: { file_edited: [{ command: ['chmod', '+x', 'x'] }] },
+        chatMaxRetries: 4,
+      },
+    })
     const res = await app.request('/api/opencode/config', {
       method: 'PATCH',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({
-        lsp: { typescript: { command: ['typescript-language-server'] } },
-        experimental: {
-          hook: { file_edited: [{ command: ['chmod', '+x', 'x'] }] },
-          chatMaxRetries: 4,
-        },
-      }),
+      body,
     })
     expect(res.status).toBe(200)
     const forwarded = JSON.parse(await (forwardRawMock.mock.calls[0]![0] as Request).text()) as Record<string, unknown>
-    expect(forwarded.lsp).toBeUndefined()
-    expect(forwarded.experimental).toEqual({ chatMaxRetries: 4 })
+    expect(forwarded).toEqual(JSON.parse(body))
   })
 
   it('forwards a PATCH /config mutation without host-execution sections unchanged when enforced', async () => {
-    isSandboxEnforcedMock.mockReturnValue(true)
     const app = buildApp()
     const res = await app.request('/api/opencode/config', {
       method: 'PATCH',
@@ -338,23 +287,20 @@ describe('authenticated opencode proxy routes', () => {
     expect(forwarded).toEqual({ theme: 'dark' })
   })
 
-  it('rejects a well-known auth write with 403 when enforced', async () => {
-    isSandboxEnforcedMock.mockReturnValue(true)
+  it('forwards a well-known auth write when enforced', async () => {
     const app = buildApp()
     const res = await app.request('/api/opencode/auth/sso.example.com', {
       method: 'PUT',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ type: 'wellknown', key: 'SSO_TOKEN', token: 't' }),
     })
-    expect(res.status).toBe(403)
-    expect(forwardRawMock).not.toHaveBeenCalled()
-    const body = await res.json() as { error: string }
-    expect(body.error).toContain('Sandbox enforcement is on')
-    expect(body.error).toContain('well-known')
+    expect(res.status).toBe(200)
+    expect(forwardRawMock).toHaveBeenCalledTimes(1)
+    const forwarded = JSON.parse(await (forwardRawMock.mock.calls[0]![0] as Request).text()) as Record<string, unknown>
+    expect(forwarded).toEqual({ type: 'wellknown', key: 'SSO_TOKEN', token: 't' })
   })
 
   it('forwards api and oauth auth writes when enforced', async () => {
-    isSandboxEnforcedMock.mockReturnValue(true)
     const app = buildApp()
     const res = await app.request('/api/opencode/auth/anthropic', {
       method: 'PUT',
@@ -368,7 +314,6 @@ describe('authenticated opencode proxy routes', () => {
   })
 
   it('forwards auth writes raw when enforcement is off', async () => {
-    isSandboxEnforcedMock.mockReturnValue(false)
     const app = buildApp()
     const res = await app.request('/api/opencode/auth/sso.example.com', {
       method: 'PUT',
@@ -380,24 +325,23 @@ describe('authenticated opencode proxy routes', () => {
     expect(forwarded.type).toBe('wellknown')
   })
 
-  it('strips custom provider npm selectors from a PATCH /config mutation when enforced', async () => {
-    isSandboxEnforcedMock.mockReturnValue(true)
+  it('forwards a PATCH /config mutation with custom provider npm selectors exactly when enforced', async () => {
     const app = buildApp()
+    const body = JSON.stringify({
+      model: 'x',
+      provider: {
+        evil: { npm: 'file:///repo/evil-provider.js' },
+        builtin: { options: { apiKey: 'k' } },
+      },
+    })
     const res = await app.request('/api/opencode/config', {
       method: 'PATCH',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({
-        model: 'x',
-        provider: {
-          evil: { npm: 'file:///repo/evil-provider.js' },
-          builtin: { options: { apiKey: 'k' } },
-        },
-      }),
+      body,
     })
     expect(res.status).toBe(200)
     expect(forwardRawMock).toHaveBeenCalledTimes(1)
     const forwarded = JSON.parse(await (forwardRawMock.mock.calls[0]![0] as Request).text()) as Record<string, unknown>
-    expect(forwarded.model).toBe('x')
-    expect(forwarded.provider).toEqual({ builtin: { options: { apiKey: 'k' } } })
+    expect(forwarded).toEqual(JSON.parse(body))
   })
 })

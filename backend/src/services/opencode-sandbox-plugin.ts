@@ -61,9 +61,7 @@ export default async function ({ directory, worktree }) {
       if (input.tool !== 'bash') return
       if (process.env.OCM_SANDBOX_ENFORCED !== 'true') return
       if (typeof output.args?.command !== 'string') {
-        if (!lockAccessor(output, 'args', output.args)) {
-          throw new Error('sandbox enforcement could not lock the bash arguments; aborting tool execution before it runs on the host')
-        }
+        replaceCommand(output, guardCommand('sandbox enforcement blocked a malformed bash invocation: command is missing or not a string'), input.callID)
         return
       }
       if (bypassed) {

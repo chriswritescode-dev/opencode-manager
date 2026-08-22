@@ -63,13 +63,8 @@ class SSEAggregator {
   private pendingActionsFetcher: PendingActionsFetcher | null = null
   private passwordResolver: OpenCodePasswordResolver | null = null
   private scheduledSessionsResolver: (() => ScheduledSessionRef[]) | null = null
-  private enforcementResolver: (() => boolean) | null = null
 
   private constructor() {}
-
-  setEnforcementResolver(resolver: (() => boolean) | null): void {
-    this.enforcementResolver = resolver
-  }
 
   setPendingActionsFetcher(fetcher: PendingActionsFetcher | null): void {
     this.pendingActionsFetcher = fetcher
@@ -331,7 +326,7 @@ class SSEAggregator {
       this.upstream = null
     }
 
-    const url = `${getOpenCodeUpstreamBaseUrl(this.enforcementResolver?.() ?? false)}/global/event`
+    const url = `${getOpenCodeUpstreamBaseUrl()}/global/event`
     const wasConnectedBefore = this.everConnected
     logger.info(`SSE connecting to OpenCode global stream: ${url}`)
 

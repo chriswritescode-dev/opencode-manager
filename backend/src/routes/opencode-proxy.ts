@@ -5,13 +5,6 @@ import { createInternalTokenMiddleware } from '../auth/internal-token-middleware
 import type { SettingsService } from '../services/settings'
 import { opencodeServerManager } from '../services/opencode-single-server'
 import { getOpenCodeUpstreamBaseUrl } from '../services/opencode/upstream'
-import {
-  decideSandboxMutationBody,
-  decideSandboxProxyBlock,
-  isSandboxAuthWrite,
-  isSandboxConfigMutation,
-  isSandboxMcpAdd,
-} from '../services/opencode/proxy-policy'
 
 const HOP_BY_HOP_HEADERS = new Set([
   'connection',
@@ -46,12 +39,7 @@ export function createOpenCodeProxyRoutes(db: Database, settingsService: Setting
 
     const url = new URL(c.req.url)
     const pathSuffix = url.pathname.replace(/^\/api\/opencode-proxy/, '') || '/'
-    const enforced = opencodeServerManager.isSandboxEnforced()
-    const decision = decideSandboxProxyBlock(enforced, c.req.method, pathSuffix)
-    if (decision.blocked) {
-      return c.json({ error: decision.reason }, 403)
-    }
-    const upstreamUrl = `${getOpenCodeUpstreamBaseUrl(enforced)}${pathSuffix}${url.search}`
+    const upstreamUrl = `${getOpenCodeUpstreamBaseUrl()}${pathSuffix}${url.search}`
 
     const headers: Record<string, string> = {}
     c.req.raw.headers.forEach((value, key) => {
@@ -67,16 +55,7 @@ export function createOpenCodeProxyRoutes(db: Database, settingsService: Setting
 
     let requestBody: RequestInit['body'] = undefined
     if (c.req.method !== 'GET' && c.req.method !== 'HEAD') {
-      if (isSandboxConfigMutation(enforced, c.req.method, pathSuffix) || isSandboxMcpAdd(enforced, c.req.method, pathSuffix) || isSandboxAuthWrite(enforced, c.req.method, pathSuffix)) {
-        const rawBody = await c.req.text()
-        const bodyDecision = decideSandboxMutationBody(enforced, c.req.method, pathSuffix, rawBody)
-        if (bodyDecision.kind === 'reject') {
-          return c.json({ error: bodyDecision.reason }, 403)
-        }
-        requestBody = bodyDecision.kind === 'sanitized' ? bodyDecision.body : rawBody
-      } else {
-        requestBody = c.req.raw.body
-      }
+      requestBody = c.req.raw.body
     }
 
     try {

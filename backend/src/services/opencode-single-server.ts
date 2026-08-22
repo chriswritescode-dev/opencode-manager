@@ -26,16 +26,11 @@ import type { OpenCodeClient } from './opencode/client'
 import { writeFileContent } from './file-operations'
 import { getOrCreateInternalToken } from './internal-token'
 import { installManagedPlugins } from './opencode/plugin-registry'
-import { getEnforcedSandboxShellPath, installSandboxShell } from './sandbox/shell-wrapper'
-import { getOpenCodePluginDiscoveryHome, quarantineOpenCodePlugins, restoreQuarantinedOpenCodePlugins } from './opencode-plugin-quarantine'
-import { sanitizeConfigForEnforcement } from './opencode/enforcement-config'
+import { getOpenCodePluginDiscoveryHome, restoreQuarantinedOpenCodePlugins } from './opencode-plugin-quarantine'
 import { resolveProcessIdentityProvider } from './opencode/process-identity'
-import { resolveEffectiveServerHost } from './opencode/upstream'
 import { SandboxRuntimeService } from './sandbox/runtime'
 import { CredentialProvider } from './credential-provider'
 import { mkdirSafe, writeFileAtomic } from '../utils/fs-safe'
-
-export { sanitizeConfigForEnforcement }
 
 
 const MIN_OPENCODE_VERSION = '1.0.137'
@@ -309,11 +304,11 @@ class OpenCodeServerManager {
   async rebuildClient(): Promise<void> {
     const password = this.getResolvedPassword()
     const { createOpenCodeClient } = await import('./opencode/client')
-    this.openCodeClient = createOpenCodeClient(password, resolveEffectiveServerHost(this.sandboxEnforced))
+    this.openCodeClient = createOpenCodeClient(password, getOpenCodeServerHost())
   }
 
   getEffectiveServerHost(): string {
-    return resolveEffectiveServerHost(this.sandboxEnforced)
+    return getOpenCodeServerHost()
   }
 
   private getResolvedPassword(): string {
@@ -424,12 +419,8 @@ class OpenCodeServerManager {
 
     const password = this.getResolvedPassword()
     const openCodeServerHost = getOpenCodeServerHost()
-    const effectiveServerHost = resolveEffectiveServerHost(sandboxEnforced)
-    if (effectiveServerHost !== openCodeServerHost) {
-      logger.warn(`Sandbox enforcement requires the OpenCode server to bind loopback only; overriding OPENCODE_HOST=${openCodeServerHost} with 127.0.0.1 so external clients cannot bypass the Manager proxy policy`)
-    }
     const isExposed = openCodeServerHost !== '127.0.0.1' && openCodeServerHost !== 'localhost'
-    if (isExposed && !password && !sandboxEnforced) {
+    if (isExposed && !password) {
       const msg = `OPENCODE_HOST=${openCodeServerHost} exposes the OpenCode server externally but no password is configured. Set OPENCODE_SERVER_PASSWORD env var or configure a password via Settings → OpenCode → Server Auth.`
       this.lastStartupError = msg
       logger.error(msg)
@@ -594,21 +585,14 @@ class OpenCodeServerManager {
     await this.initializeOpencodeBinDirectory()
     const pluginConfigHome = path.join(openCodeServerDirectory, '.config')
     try {
-      if (sandboxEnforced) {
-        await quarantineOpenCodePlugins(pluginConfigHome, openCodeConfigPath)
-      } else {
-        await restoreQuarantinedOpenCodePlugins(pluginConfigHome, openCodeConfigPath)
-      }
+      await restoreQuarantinedOpenCodePlugins(pluginConfigHome, openCodeConfigPath)
     } catch (error) {
-      if (sandboxEnforced) {
-        logger.error('Failed to quarantine untrusted OpenCode plugins; refusing to start an enforced server', error)
-        this.failNonRecoverable(error instanceof Error ? error.message : String(error))
-      }
-      logger.warn('Failed to restore quarantined OpenCode plugins:', error)
+      this.failNonRecoverable(
+        `Failed to restore legacy quarantined OpenCode plugins before startup: ${error instanceof Error ? error.message : String(error)}`,
+      )
     }
     try {
       await installManagedPlugins(pluginConfigHome)
-      await installSandboxShell(pluginConfigHome)
     } catch (error) {
       if (sandboxEnforced) {
         logger.error('Failed to install a generated OpenCode plugin; refusing to start an enforced server', error)
@@ -616,7 +600,7 @@ class OpenCodeServerManager {
       }
       logger.warn('Failed to install a generated OpenCode plugin (sandboxing is disabled):', error)
     }
-    const configuredPlugins = sandboxEnforced ? [] : await this.getConfiguredPlugins(openCodeConfigPath)
+    const configuredPlugins = await this.getConfiguredPlugins(openCodeConfigPath)
     await this.installConfiguredPlugins(configuredPlugins)
     const configuredPluginCount = configuredPlugins.length
     const openCodeExecutable = resolveOpenCodeExecutable() ?? 'opencode'
@@ -631,19 +615,11 @@ class OpenCodeServerManager {
     delete cleanEnv.OPENCODE_PROCESS_ROLE
     delete cleanEnv.OPENCODE_PID
     delete cleanEnv.OPENCODE
-    delete cleanEnv.OPENCODE_CONFIG_CONTENT
-    delete cleanEnv.OPENCODE_CONFIG_DIR
     delete cleanEnv.OPENCODE_PURE
-    delete cleanEnv.OPENCODE_AUTH_CONTENT
-    delete cleanEnv.OPENCODE_TEST_HOME
-    delete cleanEnv.OPENCODE_TEST_MANAGED_CONFIG_DIR
-    delete cleanEnv.SHELL
-    delete cleanEnv.BASH_ENV
-    delete cleanEnv.ENV
 
     this.serverProcess = spawn(
       openCodeExecutable,
-      ['serve', '--port', openCodeServerPort.toString(), '--hostname', effectiveServerHost],
+      ['serve', '--port', openCodeServerPort.toString(), '--hostname', openCodeServerHost],
       {
         cwd: openCodeServerDirectory,
         detached: !isDevelopment,
@@ -662,8 +638,6 @@ class OpenCodeServerManager {
             : {}),
           OCM_SANDBOX_ENFORCED: sandboxEnforced ? 'true' : 'false',
           OPENCODE_PURE: 'false',
-          ...(sandboxEnforced ? { OPENCODE_DISABLE_PROJECT_CONFIG: '1' } : {}),
-          ...(sandboxEnforced ? { HOME: getOpenCodePluginDiscoveryHome() } : {}),
           GIT_SSH_COMMAND: gitSshCommand,
           XDG_DATA_HOME: path.join(openCodeServerDirectory, '.opencode/state'),
           XDG_STATE_HOME: path.join(openCodeServerDirectory, '.opencode/state'),
@@ -676,7 +650,6 @@ class OpenCodeServerManager {
             }
             : {}),
           OPENCODE_CONFIG: openCodeConfigPath,
-          ...(sandboxEnforced ? { SHELL: getEnforcedSandboxShellPath() } : {}),
         }
       }
     )
@@ -1043,7 +1016,7 @@ class OpenCodeServerManager {
         const fileConfig = parseJsonc(fileContent) as Record<string, unknown>
         logger.info(`Read config from file for reload: ${configPath}`)
 
-        const patchTarget = sanitizeConfigForEnforcement(fileConfig, this.sandboxEnforced)
+        const patchTarget = fileConfig
         const patchResult = await patchConfigWithRecovery(this.requireClient(), patchTarget)
         if (!patchResult.success) {
           const errorMessage = patchResult.error || 'Failed to reload config'

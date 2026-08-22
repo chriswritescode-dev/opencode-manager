@@ -299,7 +299,7 @@ describe('Settings Routes - OpenCode Upgrade', () => {
       expect(mockWriteFileContent).not.toHaveBeenCalled()
     })
 
-    it('should persist sanitized content before marking a new config as default', async () => {
+    it('should persist recovery-cleaned content before marking a new config as default', async () => {
       mockCreateOpenCodeConfig.mockReturnValue({
         id: 1,
         name: 'cleaned',
@@ -384,7 +384,7 @@ describe('Settings Routes - OpenCode Upgrade', () => {
       expect(mockWriteFileContent).not.toHaveBeenCalled()
     })
 
-    it('should sanitize existing config content before switching the default flag', async () => {
+    it('should persist recovery-cleaned content before switching the default flag', async () => {
       mockGetOpenCodeConfigByName.mockReturnValue({
         id: 2,
         name: 'cleaned',
@@ -562,116 +562,7 @@ describe('Settings Routes - OpenCode Upgrade', () => {
       )
     })
 
-    it('strips configured plugins from a live default-config patch while sandbox enforcement is active', async () => {
-      mockGetOpenCodeConfigByName.mockReturnValue({
-        id: 2,
-        name: 'enforced',
-        content: { plugin: ['evil-plugin'], theme: 'dark' },
-        rawContent: '{"plugin":["evil-plugin"],"theme":"dark"}',
-        isValid: true,
-        isDefault: true,
-        createdAt: 1,
-        updatedAt: 1,
-      })
-      mockUpdateOpenCodeConfig.mockReturnValue({
-        id: 2,
-        name: 'enforced',
-        content: { plugin: ['evil-plugin'], theme: 'light' },
-        rawContent: '{"plugin":["evil-plugin"],"theme":"light"}',
-        isValid: true,
-        isDefault: true,
-        createdAt: 1,
-        updatedAt: 2,
-      })
-      mockPatchConfigWithRecovery.mockResolvedValue({
-        success: true,
-        appliedConfig: { theme: 'light' },
-      })
-      mockIsSandboxEnforced.mockReturnValue(true)
-
-      const req = new Request('http://localhost/opencode-configs/enforced', {
-        method: 'PUT',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          content: '{"plugin":["evil-plugin"],"theme":"light"}',
-          isDefault: true,
-        }),
-      })
-      const res = await settingsApp.fetch(req)
-      const json = await res.json() as Record<string, unknown>
-
-      expect(res.status).toBe(200)
-      expect(mockPatchConfigWithRecovery).toHaveBeenCalledWith(expect.anything(), { theme: 'light' })
-      expect((json.content as Record<string, unknown>).theme).toBe('light')
-    })
-
-    it('strips local MCP servers and the formatter from a live default-config patch while sandbox enforcement is active', async () => {
-      mockGetOpenCodeConfigByName.mockReturnValue({
-        id: 2,
-        name: 'enforced',
-        content: {
-          mcp: { local: { type: 'local', command: ['npx', 'evil-server'] }, remote: { type: 'remote', url: 'https://example.com/mcp' } },
-          formatter: { typescript: { command: ['prettier'] } },
-          theme: 'dark',
-        },
-        rawContent: JSON.stringify({
-          mcp: { local: { type: 'local', command: ['npx', 'evil-server'] }, remote: { type: 'remote', url: 'https://example.com/mcp' } },
-          formatter: { typescript: { command: ['prettier'] } },
-          theme: 'dark',
-        }),
-        isValid: true,
-        isDefault: true,
-        createdAt: 1,
-        updatedAt: 1,
-      })
-      mockUpdateOpenCodeConfig.mockReturnValue({
-        id: 2,
-        name: 'enforced',
-        content: {
-          mcp: { local: { type: 'local', command: ['npx', 'evil-server'] }, remote: { type: 'remote', url: 'https://example.com/mcp' } },
-          formatter: { typescript: { command: ['prettier'] } },
-          theme: 'light',
-        },
-        rawContent: JSON.stringify({
-          mcp: { local: { type: 'local', command: ['npx', 'evil-server'] }, remote: { type: 'remote', url: 'https://example.com/mcp' } },
-          formatter: { typescript: { command: ['prettier'] } },
-          theme: 'light',
-        }),
-        isValid: true,
-        isDefault: true,
-        createdAt: 1,
-        updatedAt: 2,
-      })
-      mockPatchConfigWithRecovery.mockResolvedValue({
-        success: true,
-        appliedConfig: { mcp: { remote: { type: 'remote', url: 'https://example.com/mcp' } }, theme: 'light' },
-      })
-      mockIsSandboxEnforced.mockReturnValue(true)
-
-      const req = new Request('http://localhost/opencode-configs/enforced', {
-        method: 'PUT',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          content: JSON.stringify({
-            mcp: { local: { type: 'local', command: ['npx', 'evil-server'] }, remote: { type: 'remote', url: 'https://example.com/mcp' } },
-            formatter: { typescript: { command: ['prettier'] } },
-            theme: 'light',
-          }),
-          isDefault: true,
-        }),
-      })
-      const res = await settingsApp.fetch(req)
-      const json = await res.json() as Record<string, unknown>
-
-      expect(res.status).toBe(200)
-      expect(mockPatchConfigWithRecovery).toHaveBeenCalledWith(expect.anything(), {
-        mcp: { remote: { type: 'remote', url: 'https://example.com/mcp' } },
-        theme: 'light',
-      })
-      expect((json.content as Record<string, unknown>).theme).toBe('light')
-    })
-
-    it('keeps configured plugins in a live default-config patch when sandbox enforcement is off', async () => {
+    it('keeps configured plugins in a live default-config patch while sandbox enforcement is active', async () => {
       mockGetOpenCodeConfigByName.mockReturnValue({
         id: 2,
         name: 'enforced',
@@ -696,7 +587,7 @@ describe('Settings Routes - OpenCode Upgrade', () => {
         success: true,
         appliedConfig: { plugin: ['evil-plugin'], theme: 'light' },
       })
-      mockIsSandboxEnforced.mockReturnValue(false)
+      mockIsSandboxEnforced.mockReturnValue(true)
 
       const req = new Request('http://localhost/opencode-configs/enforced', {
         method: 'PUT',
@@ -710,15 +601,16 @@ describe('Settings Routes - OpenCode Upgrade', () => {
       const json = await res.json() as Record<string, unknown>
 
       expect(res.status).toBe(200)
-      expect(mockPatchConfigWithRecovery).toHaveBeenCalledWith(
-        expect.anything(),
-        { plugin: ['evil-plugin'], theme: 'light' },
+      expect(mockPatchConfigWithRecovery).toHaveBeenCalledWith(expect.anything(), { plugin: ['evil-plugin'], theme: 'light' })
+      expect(mockWriteFileContent).toHaveBeenCalledWith(
+        '/tmp/test-workspace/.config/opencode.json',
+        '{"plugin":["evil-plugin"],"theme":"light"}',
       )
       expect((json.content as Record<string, unknown>).theme).toBe('light')
     })
 
-    it('writes and persists sanitized content when enforcement strips local MCP and formatter without OpenCode-reported removed fields', async () => {
-      const prohibitedContent = {
+    it('keeps local MCP servers and the formatter in a live default-config patch while sandbox enforcement is active', async () => {
+      const submittedContent = {
         mcp: { local: { type: 'local', command: ['npx', 'evil-server'] }, remote: { type: 'remote', url: 'https://example.com/mcp' } },
         formatter: { typescript: { command: ['prettier'] } },
         theme: 'light',
@@ -726,72 +618,100 @@ describe('Settings Routes - OpenCode Upgrade', () => {
       mockGetOpenCodeConfigByName.mockReturnValue({
         id: 2,
         name: 'enforced',
-        content: { ...prohibitedContent, theme: 'dark' },
-        rawContent: JSON.stringify({ ...prohibitedContent, theme: 'dark' }),
+        content: { ...submittedContent, theme: 'dark' },
+        rawContent: JSON.stringify({ ...submittedContent, theme: 'dark' }),
         isValid: true,
         isDefault: true,
         createdAt: 1,
         updatedAt: 1,
       })
-      mockUpdateOpenCodeConfig
-        .mockReturnValueOnce({
-          id: 2,
-          name: 'enforced',
-          content: prohibitedContent,
-          rawContent: JSON.stringify(prohibitedContent),
-          isValid: true,
-          isDefault: true,
-          createdAt: 1,
-          updatedAt: 2,
-        })
-        .mockReturnValueOnce({
-          id: 2,
-          name: 'enforced',
-          content: { mcp: { remote: { type: 'remote', url: 'https://example.com/mcp' } }, theme: 'light' },
-          rawContent: JSON.stringify(
-            { mcp: { remote: { type: 'remote', url: 'https://example.com/mcp' } }, theme: 'light' },
-            null,
-            2,
-          ),
-          isValid: true,
-          isDefault: true,
-          createdAt: 1,
-          updatedAt: 3,
-        })
+      mockUpdateOpenCodeConfig.mockReturnValue({
+        id: 2,
+        name: 'enforced',
+        content: submittedContent,
+        rawContent: JSON.stringify(submittedContent),
+        isValid: true,
+        isDefault: true,
+        createdAt: 1,
+        updatedAt: 2,
+      })
       mockPatchConfigWithRecovery.mockResolvedValue({
         success: true,
-        appliedConfig: { mcp: { remote: { type: 'remote', url: 'https://example.com/mcp' } }, theme: 'light' },
+        appliedConfig: submittedContent,
       })
       mockIsSandboxEnforced.mockReturnValue(true)
 
       const req = new Request('http://localhost/opencode-configs/enforced', {
         method: 'PUT',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ content: JSON.stringify(prohibitedContent), isDefault: true }),
+        body: JSON.stringify({
+          content: JSON.stringify(submittedContent),
+          isDefault: true,
+        }),
       })
       const res = await settingsApp.fetch(req)
       const json = await res.json() as Record<string, unknown>
 
-      const expectedWritten = JSON.stringify(
-        { mcp: { remote: { type: 'remote', url: 'https://example.com/mcp' } }, theme: 'light' },
-        null,
-        2,
-      )
       expect(res.status).toBe(200)
-      expect(mockWriteFileContent).toHaveBeenCalledWith('/tmp/test-workspace/.config/opencode.json', expectedWritten)
-      expect(mockUpdateOpenCodeConfig).toHaveBeenCalledTimes(2)
-      expect(mockUpdateOpenCodeConfig).toHaveBeenNthCalledWith(
-        2,
-        'enforced',
-        { content: expectedWritten },
-        'default',
+      expect(mockPatchConfigWithRecovery).toHaveBeenCalledWith(expect.anything(), submittedContent)
+      expect(mockWriteFileContent).toHaveBeenCalledWith(
+        '/tmp/test-workspace/.config/opencode.json',
+        JSON.stringify(submittedContent),
       )
-      expect(JSON.stringify(json.content)).not.toContain('evil-server')
-      expect(JSON.stringify(json.content)).not.toContain('prettier')
+      expect(JSON.stringify(json.content)).toContain('evil-server')
+      expect(JSON.stringify(json.content)).toContain('prettier')
     })
 
-    it('writes and persists sanitized content when enforcement strips shell, LSP, hooks, and custom providers', async () => {
-      const prohibitedContent = {
+    it('writes and persists the exact submitted config with local MCP and formatter when recovery removes no fields', async () => {
+      const submittedContent = {
+        mcp: { local: { type: 'local', command: ['npx', 'evil-server'] }, remote: { type: 'remote', url: 'https://example.com/mcp' } },
+        formatter: { typescript: { command: ['prettier'] } },
+        theme: 'light',
+      }
+      mockGetOpenCodeConfigByName.mockReturnValue({
+        id: 2,
+        name: 'enforced',
+        content: { ...submittedContent, theme: 'dark' },
+        rawContent: JSON.stringify({ ...submittedContent, theme: 'dark' }),
+        isValid: true,
+        isDefault: true,
+        createdAt: 1,
+        updatedAt: 1,
+      })
+      mockUpdateOpenCodeConfig.mockReturnValue({
+        id: 2,
+        name: 'enforced',
+        content: submittedContent,
+        rawContent: JSON.stringify(submittedContent),
+        isValid: true,
+        isDefault: true,
+        createdAt: 1,
+        updatedAt: 2,
+      })
+      mockPatchConfigWithRecovery.mockResolvedValue({
+        success: true,
+        appliedConfig: submittedContent,
+      })
+      mockIsSandboxEnforced.mockReturnValue(true)
+
+      const req = new Request('http://localhost/opencode-configs/enforced', {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ content: JSON.stringify(submittedContent), isDefault: true }),
+      })
+      const res = await settingsApp.fetch(req)
+      const json = await res.json() as Record<string, unknown>
+
+      expect(res.status).toBe(200)
+      expect(mockPatchConfigWithRecovery).toHaveBeenCalledWith(expect.anything(), submittedContent)
+      expect(mockWriteFileContent).toHaveBeenCalledWith('/tmp/test-workspace/.config/opencode.json', JSON.stringify(submittedContent))
+      expect(mockUpdateOpenCodeConfig).toHaveBeenCalledTimes(1)
+      expect(JSON.stringify(json.content)).toContain('evil-server')
+      expect(JSON.stringify(json.content)).toContain('prettier')
+    })
+
+    it('writes and persists the exact submitted config with shell, LSP, hooks, and custom providers when recovery removes no fields', async () => {
+      const submittedContent = {
         shell: { command: '/repo/.bin/evil-shell', args: [] },
         lsp: true,
         experimental: { hook: { file_edited: [{ command: ['chmod', '+x', 'script.sh'] }] }, chatMaxRetries: 4 },
@@ -801,66 +721,47 @@ describe('Settings Routes - OpenCode Upgrade', () => {
       mockGetOpenCodeConfigByName.mockReturnValue({
         id: 2,
         name: 'enforced',
-        content: { ...prohibitedContent, theme: 'dark' },
-        rawContent: JSON.stringify({ ...prohibitedContent, theme: 'dark' }),
+        content: { ...submittedContent, theme: 'dark' },
+        rawContent: JSON.stringify({ ...submittedContent, theme: 'dark' }),
         isValid: true,
         isDefault: true,
         createdAt: 1,
         updatedAt: 1,
       })
-      mockUpdateOpenCodeConfig
-        .mockReturnValueOnce({
-          id: 2,
-          name: 'enforced',
-          content: prohibitedContent,
-          rawContent: JSON.stringify(prohibitedContent),
-          isValid: true,
-          isDefault: true,
-          createdAt: 1,
-          updatedAt: 2,
-        })
-        .mockReturnValueOnce({
-          id: 2,
-          name: 'enforced',
-          content: { experimental: { chatMaxRetries: 4 }, provider: { builtin: { options: { apiKey: 'k' } } }, theme: 'light' },
-          rawContent: JSON.stringify(
-            { experimental: { chatMaxRetries: 4 }, provider: { builtin: { options: { apiKey: 'k' } } }, theme: 'light' },
-            null,
-            2,
-          ),
-          isValid: true,
-          isDefault: true,
-          createdAt: 1,
-          updatedAt: 3,
-        })
+      mockUpdateOpenCodeConfig.mockReturnValue({
+        id: 2,
+        name: 'enforced',
+        content: submittedContent,
+        rawContent: JSON.stringify(submittedContent),
+        isValid: true,
+        isDefault: true,
+        createdAt: 1,
+        updatedAt: 2,
+      })
       mockPatchConfigWithRecovery.mockResolvedValue({
         success: true,
-        appliedConfig: { experimental: { chatMaxRetries: 4 }, provider: { builtin: { options: { apiKey: 'k' } } }, theme: 'light' },
+        appliedConfig: submittedContent,
       })
       mockIsSandboxEnforced.mockReturnValue(true)
 
       const req = new Request('http://localhost/opencode-configs/enforced', {
         method: 'PUT',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ content: JSON.stringify(prohibitedContent), isDefault: true }),
+        body: JSON.stringify({ content: JSON.stringify(submittedContent), isDefault: true }),
       })
       const res = await settingsApp.fetch(req)
       const json = await res.json() as Record<string, unknown>
 
-      const expectedWritten = JSON.stringify(
-        { experimental: { chatMaxRetries: 4 }, provider: { builtin: { options: { apiKey: 'k' } } }, theme: 'light' },
-        null,
-        2,
-      )
       expect(res.status).toBe(200)
-      expect(mockWriteFileContent).toHaveBeenCalledWith('/tmp/test-workspace/.config/opencode.json', expectedWritten)
-      expect(mockUpdateOpenCodeConfig).toHaveBeenCalledTimes(2)
-      expect(JSON.stringify(json.content)).not.toContain('evil-shell')
-      expect(JSON.stringify(json.content)).not.toContain('chmod')
-      expect(JSON.stringify(json.content)).not.toContain('evil-provider')
+      expect(mockPatchConfigWithRecovery).toHaveBeenCalledWith(expect.anything(), submittedContent)
+      expect(mockWriteFileContent).toHaveBeenCalledWith('/tmp/test-workspace/.config/opencode.json', JSON.stringify(submittedContent))
+      expect(mockUpdateOpenCodeConfig).toHaveBeenCalledTimes(1)
+      expect(JSON.stringify(json.content)).toContain('evil-shell')
+      expect(JSON.stringify(json.content)).toContain('chmod')
+      expect(JSON.stringify(json.content)).toContain('evil-provider')
     })
 
-    it('keeps the original raw content when enforcement strips nothing', async () => {
+    it('keeps the original raw content when recovery removes nothing', async () => {
       mockGetOpenCodeConfigByName.mockReturnValue({
         id: 2,
         name: 'enforced',
@@ -905,7 +806,7 @@ describe('Settings Routes - OpenCode Upgrade', () => {
       expect(mockUpdateOpenCodeConfig).toHaveBeenCalledTimes(1)
     })
 
-    it('writes and persists sanitized content on a restart-required PUT while enforcement is active', async () => {
+    it('writes the exact submitted config on a restart-required PUT regardless of sandbox state', async () => {
       mockGetOpenCodeConfigByName.mockReturnValue({
         id: 2,
         name: 'enforced',
@@ -940,19 +841,13 @@ describe('Settings Routes - OpenCode Upgrade', () => {
       expect(json.restartRequired).toBe(true)
       expect(mockWriteFileContent).toHaveBeenCalledWith(
         '/tmp/test-workspace/.config/opencode.json',
-        JSON.stringify({ theme: 'light' }, null, 2),
+        '{"plugin":["evil-plugin"],"theme":"light"}',
       )
-      expect(mockUpdateOpenCodeConfig).toHaveBeenCalledTimes(2)
-      expect(mockUpdateOpenCodeConfig).toHaveBeenNthCalledWith(
-        2,
-        'enforced',
-        { content: JSON.stringify({ theme: 'light' }, null, 2) },
-        'default',
-      )
+      expect(mockUpdateOpenCodeConfig).toHaveBeenCalledTimes(1)
       expect(opencodeServerManager.markRestartPending).toHaveBeenCalled()
     })
 
-    it('writes sanitized content when creating a plugin-bearing default config while enforcement is active', async () => {
+    it('writes the exact submitted config when creating a plugin-bearing default config regardless of sandbox state', async () => {
       mockCreateOpenCodeConfig.mockReturnValue({
         id: 1,
         name: 'enforced',
@@ -966,8 +861,8 @@ describe('Settings Routes - OpenCode Upgrade', () => {
       mockUpdateOpenCodeConfig.mockReturnValue({
         id: 1,
         name: 'enforced',
-        content: { theme: 'dark' },
-        rawContent: JSON.stringify({ theme: 'dark' }, null, 2),
+        content: { plugin: ['evil-plugin'], theme: 'dark' },
+        rawContent: '{"plugin":["evil-plugin"],"theme":"dark"}',
         isValid: true,
         isDefault: true,
         createdAt: 1,
@@ -985,16 +880,16 @@ describe('Settings Routes - OpenCode Upgrade', () => {
       expect(res.status).toBe(200)
       expect(mockUpdateOpenCodeConfig).toHaveBeenCalledWith(
         'enforced',
-        { content: JSON.stringify({ theme: 'dark' }, null, 2), isDefault: true },
+        { content: '{"plugin":["evil-plugin"],"theme":"dark"}', isDefault: true },
         'default',
       )
       expect(mockWriteFileContent).toHaveBeenCalledWith(
         '/tmp/test-workspace/.config/opencode.json',
-        JSON.stringify({ theme: 'dark' }, null, 2),
+        '{"plugin":["evil-plugin"],"theme":"dark"}',
       )
     })
 
-    it('writes sanitized content when setting a plugin-bearing config as default while enforcement is active', async () => {
+    it('writes the exact submitted config when setting a plugin-bearing config as default regardless of sandbox state', async () => {
       mockGetOpenCodeConfigByName.mockReturnValue({
         id: 2,
         name: 'enforced',
@@ -1005,25 +900,15 @@ describe('Settings Routes - OpenCode Upgrade', () => {
         createdAt: 1,
         updatedAt: 1,
       })
-      mockUpdateOpenCodeConfig.mockReturnValue({
-        id: 2,
-        name: 'enforced',
-        content: { theme: 'dark' },
-        rawContent: JSON.stringify({ theme: 'dark' }, null, 2),
-        isValid: true,
-        isDefault: false,
-        createdAt: 1,
-        updatedAt: 2,
-      })
       mockSetDefaultOpenCodeConfig.mockReturnValue({
         id: 2,
         name: 'enforced',
-        content: { theme: 'dark' },
-        rawContent: JSON.stringify({ theme: 'dark' }, null, 2),
+        content: { plugin: ['evil-plugin'], theme: 'dark' },
+        rawContent: '{"plugin":["evil-plugin"],"theme":"dark"}',
         isValid: true,
         isDefault: true,
         createdAt: 1,
-        updatedAt: 3,
+        updatedAt: 2,
       })
       mockIsSandboxEnforced.mockReturnValue(true)
 
@@ -1033,14 +918,10 @@ describe('Settings Routes - OpenCode Upgrade', () => {
       const res = await settingsApp.fetch(req)
 
       expect(res.status).toBe(200)
-      expect(mockUpdateOpenCodeConfig).toHaveBeenCalledWith(
-        'enforced',
-        { content: JSON.stringify({ theme: 'dark' }, null, 2) },
-        'default',
-      )
+      expect(mockSetDefaultOpenCodeConfig).toHaveBeenCalledWith('enforced', 'default')
       expect(mockWriteFileContent).toHaveBeenCalledWith(
         '/tmp/test-workspace/.config/opencode.json',
-        JSON.stringify({ theme: 'dark' }, null, 2),
+        '{"plugin":["evil-plugin"],"theme":"dark"}',
       )
     })
   })

@@ -1,150 +1,122 @@
 # Agent Sandboxing
 
-Run agent shell commands inside an isolated microVM instead of directly in the Manager container. Sandboxing is a hardening option for untrusted agent code, not a per-project permission boundary.
+Run OpenCode agent `bash` tool commands inside an isolated microVM instead of directly in the Manager container. Sandboxing does not restrict trusted OpenCode configuration or extensions and is not a per-project permission boundary.
 
 ## Overview
 
-When sandboxing is enabled, every shell command an OpenCode **agent** runs through the `bash` tool is executed inside a microVM managed by [`msb`](https://github.com/superradcompany/microsandbox) instead of in the container that hosts the Manager and the OpenCode server. The agent still works with the same files in the same layout — the microVM sees the repositories through bind mounts — but the process runs under a different kernel and cannot read Manager or provider secrets from the host filesystem. OpenCode also exposes shell surfaces that bypass the `bash` tool hook; those are routed into the same microVM through a Manager-owned shell wrapper (see [Host-Shell Surfaces Under Enforcement](#host-shell-surfaces-under-enforcement)).
+When sandboxing is enabled, every command an OpenCode agent runs through the `bash` tool is executed inside a microVM managed by [`msb`](https://github.com/superradcompany/microsandbox). OpenCode itself continues to run in the Manager container and loads the same global and project configuration, providers, models, plugins, tools, MCP servers, formatters, LSP servers, hooks, and shell settings as it does with sandboxing disabled.
+
+The microVM sees repositories through bind mounts at the same paths used by the Manager. Agent commands therefore operate on the same files while running under a separate kernel without access to Manager configuration, provider credentials, or SSH keys.
 
 ## What Gets Sandboxed
 
-Sandboxing covers both the OpenCode `bash` tool and every other path through which OpenCode's host process can start a shell. As a result:
-
-| Execution path | Sandboxed |
-|----------------|-----------|
+| Execution path | Through the microVM |
+|----------------|---------------------|
 | Chat session `bash` tool calls | Yes |
-| Scheduled run commands | Yes |
+| Scheduled run `bash` tool calls | Yes |
 | Subagent `bash` tool calls | Yes |
-| WebUI `!command` shell mode (`POST /session/:id/shell`) | Yes |
-| Slash-command shell templates (`` !`cmd` ``, `POST /session/:id/command`) | Yes |
-| Skills and prompt-only slash commands | Yes (no shell to sandbox) |
-| PTY terminals (`POST /pty`, `/pty/:id/connect`) | Blocked while enforced |
-| Local MCP server processes (`mcp` config with `type: "local"` / `command`) | Disabled while enforced |
-| Dynamically added local MCP servers (`POST /mcp`) | Blocked while enforced |
-| Formatter commands (`formatter` config) | Disabled while enforced |
-| LSP server processes (`lsp` config, any enabling form) | Disabled while enforced |
-| Experimental hook commands (`experimental.hook` config) | Disabled while enforced |
-| Global custom tools (`<config>/opencode/tool(s)/`, `$HOME/.opencode/tool(s)/`) | Quarantined while enforced |
-| Manager-side git operations (`backend/src/services/repo.ts`) | No |
-| OpenCode `read` / `write` / `edit` file tools | No |
+| WebUI `!command` shell mode (`POST /session/:id/shell`) | No; normal OpenCode behavior |
+| Slash-command shell templates (`` !`cmd` ``, `POST /session/:id/command`) | No; normal OpenCode behavior |
+| PTY terminals (`POST /pty`, `/pty/:id/connect`) | No; normal OpenCode behavior |
+| OpenCode file tools | No |
+| Manager-side git operations | No |
+| Plugins and custom tools | No; normal OpenCode behavior |
+| Local MCP servers | No; normal OpenCode behavior |
+| Formatters, LSP servers, and hooks | No; normal OpenCode behavior |
+| Custom provider modules | No; normal OpenCode behavior |
+| Explicit OpenCode `shell` configuration | No; normal OpenCode behavior |
 
-Manager-side git operations (clone, fetch, worktree creation, credential setup) run directly in the container so the Manager can manage repositories regardless of the sandbox setting. OpenCode's file tools keep operating on the host filesystem — the same files the microVM sees through its bind mounts — so editing a file and running a command against it behave exactly as they do without sandboxing.
+The Manager-owned `ocm-sandbox.js` plugin intercepts the OpenCode `bash` tool before execution, asks the Manager for a sandbox execution plan, and replaces the command with `msb exec`. The replacement is locked and verified so a later plugin cannot silently restore the original host command. If the sandbox cannot be prepared, the tool call fails instead of running on the host.
 
-## Host-Shell Surfaces Under Enforcement
+## OpenCode Configuration
 
-The `bash` tool hook is not the only way OpenCode's host process can spawn a shell. The session-shell endpoint that powers the WebUI `!command` mode, slash-command shell templates (`` !`cmd` `` sequences expanded before the prompt is sent), and PTY sessions all resolve a shell through OpenCode's `shell` configuration rather than through `tool.execute.before`.
+Sandbox enforcement does not sanitize, rewrite, filter, or replace OpenCode configuration. Global and project configuration loads normally, configured plugins are installed normally, and config, MCP, and authentication API requests are forwarded unchanged.
 
-Rather than blocking those endpoints, the Manager redirects them into the same microVM. Enforcement already strips the `shell` key from every configuration source OpenCode reads, so OpenCode falls back to the `SHELL` environment variable of its own process — and the Manager stamps `SHELL` to a generated wrapper (`<workspace>/.config/ocm/ocm-sandbox-shell`, installed at every enforced start). The wrapper receives the command as `-c <command>`, asks the Manager's internal `POST /api/internal/sandbox/command` endpoint for a plan — the identical endpoint the `bash` tool hook uses — and executes the returned `msb exec` command. If the sandbox is unavailable for any reason it prints the reason and exits non-zero, so the surface fails closed instead of silently running on the host.
+Existing `.ocm-sandbox-backup` and `.ocm-quarantine` artifacts created by older releases are restored during startup and are no longer created.
 
-The wrapper's filename is deliberately not a recognized shell name, so OpenCode passes the command through verbatim instead of sourcing host startup files. It is installed outside every sandbox bind mount, so code running inside the microVM cannot modify it. A failure to install it aborts an enforced start.
+Configured extensions execute with OpenCode's normal host-process privileges. This includes plugins, custom tools, local MCP servers, formatters, LSP servers, hooks, custom provider modules, and explicit shell configuration. These are trusted configuration outside the agent `bash` isolation boundary.
 
-PTY sessions remain blocked with `403`: they require an interactive TTY that `msb exec --no-tty` cannot provide. The Manager's OpenCode proxy — both the authenticated `/api/opencode/*` surface and the internal-token `/api/opencode-proxy` surface — rejects PTY creation and connection with an actionable reason. The shared policy strictly canonicalizes request paths before matching: percent-encoded spellings of a blocked route (for example `/%70ty`) are blocked, and any path containing malformed, double-encoded, control-character, or encoded-separator sequences is refused as unsafe rather than forwarded. The same proxy surfaces refuse to dynamically add a local MCP server to the running process: `POST /mcp` is only forwarded while enforcement is on when the body is a provably remote server (`type: "remote"` with a URL) — a local (`type: "local"`) or otherwise command-bearing config is rejected with `403`, so neither surface can start an MCP process in the OpenCode host process. This boundary is enforced by the shared proxy policy in `backend/src/services/opencode/proxy-policy.ts`, which is covered by route tests that pin the blocked surface list.
+## Other Shell Surfaces
 
-!!! note "Slash-command shell templates run without a project working directory"
-    OpenCode expands `` !`cmd` `` sequences without setting a working directory, so the wrapper sees the OpenCode server's own directory rather than the session's project. That path is outside the sandbox mount roots, so such expansions fail closed with an explanatory message instead of running on the host. Skills and prompt-only slash commands contain no shell sequences and are unaffected.
+WebUI `!command` shell mode, slash-command shell templates, and PTY terminals follow OpenCode's normal host-process behavior during enforcement. Only the OpenCode `bash` tool is routed into the microVM; these surfaces are not sandboxed.
 
-!!! warning "Direct OpenCode port exposure bypasses the proxy boundary"
-    Enforcement is applied in two different places. The `bash` tool rewrite runs as a plugin hook (`ocm-sandbox.js`) inside the OpenCode process itself, and the shell wrapper is selected by the child process's own environment, so both still apply even when clients connect directly to the OpenCode server's own port. The blocked PTY surfaces and the config-mutation sanitization, by contrast, are applied by the Manager's OpenCode proxy. To keep the proxy authoritative, an enforced OpenCode server is always spawned with a loopback bind: when `OPENCODE_HOST` is not a loopback address, the Manager overrides it with `127.0.0.1` for the child (and logs the override), so callers cannot reach the PTY or unsanitized configuration endpoints on the OpenCode port directly — the only external path is the Manager proxy, which applies the enforcement policy. The Manager's own OpenCode client follows the same effective host (loopback while enforced, `OPENCODE_HOST` otherwise), so health checks and every proxied request keep targeting the address the child actually binds, including IPv6 loopback hosts. The override is active only while enforcement is on; with the toggle off, `OPENCODE_HOST` is honored as configured.
+The OpenCode server binds to the configured `OPENCODE_HOST` regardless of enforcement, so the password guard for non-loopback hosts applies in both modes.
 
 ## Host Requirements
 
-Sandboxing requires KVM, which means a Linux host:
+Sandboxing requires KVM on a Linux host. Start the Manager with the sandbox overlay:
 
-- The host must expose `/dev/kvm` to the container. Start the Manager with the sandbox overlay:
-  ```bash
-  docker compose -f docker-compose.yml -f docker-compose.sandbox.yml up -d
-  ```
-- Docker Desktop on macOS and Windows cannot provide `/dev/kvm`. On those platforms the sandbox toggle stays disabled and the Settings UI shows the reason.
+```bash
+docker compose -f docker-compose.yml -f docker-compose.sandbox.yml up -d
+```
 
-Because enforcement requires KVM, it is inherently limited to Linux. On non-Linux hosts the enforced code path fails closed, and unenforced production operation tracks the OpenCode server as a direct child instead of relying on `/proc` process identity attestation, so starting the Manager in production mode on macOS keeps working with the sandbox toggle off.
-
-If the host meets the requirements, the Settings UI displays the detected `msb` version; otherwise it shows why sandboxing is unavailable.
+The overlay exposes `/dev/kvm`, `/dev/net/tun`, and `NET_ADMIN` without enabling full container privilege. Docker Desktop on macOS and Windows cannot provide `/dev/kvm`, so the sandbox toggle remains unavailable there.
 
 ## Scope and Lifecycle
 
-All projects share **one** microVM:
+All projects share one microVM named `ocm-workspace`:
 
-- The microVM is named `ocm-workspace` and is created detached (`msb run -d`), booted on the first sandboxed command, and reused for every subsequent command.
-- It mounts `/workspace/repos` and `/workspace/schedule-worktrees` at identical guest paths. This covers every repository, every repository worktree, the assistant-mode project (`repos/assistant`), and every schedule worktree.
-- The assistant-mode `.opencode` directory (`repos/assistant/.opencode`, which holds the internal API token plus the managed assistant skills and agents) is masked inside the microVM with a guest-memory `tmpfs` overlay. Guest shell processes see an empty directory there and cannot read the token, while OpenCode's host-side config and skill loading keeps operating on the real directory.
-- Because the mount roots are the two parent directories, repositories cloned and schedule worktrees created after the microVM booted are visible inside it immediately — there is nothing to remount.
-- Each command supplies its own working directory via `msb exec -w`, so `cd`-ing between projects behaves exactly as it does without sandboxing.
-- To tear the microVM down, remove it by label:
-  ```bash
-  msb rm --force --label ocm.managed=true
-  ```
-  The next sandboxed command recreates it.
-- A graceful Manager shutdown always attempts to stop any `ocm.managed=true` microVM (`msb stop --label ocm.managed=true`, with `ignoreExitCode` and a finite timeout), independent of the current toggle state, so a VM is never left detached after a restart, a toggle change with a pending restart, or an earlier shutdown step failing.
-- Disabling sandboxing does not stop the microVM at toggle time: the stop runs when the OpenCode server restarts into the disabled state, so a background guest process cannot outlive an enforced-to-disabled restart. That stop is confirmed — it only completes once the managed microVM is listed as stopped or absent, and the restart fails closed if the VM cannot be confirmed stopped — and it is reversible: re-enabling sandboxing and restarting boots the microVM again.
-- Before reusing an existing `ocm-workspace` microVM, the Manager verifies it was created by the Manager: it must carry the `ocm.managed=true` label, boot from the configured `SANDBOX_IMAGE`, run with the configured CPUs/memory/workdir, keep networking enabled, mount exactly `/workspace/repos` and `/workspace/schedule-worktrees` as writable identical-path bind mounts, and carry exactly one tmpfs: the assistant `.opencode` mask. The effective network policy is also attested against the resolved policy of the configured `SANDBOX_NET` profile (`public`, `private`, `host`, or a comma-separated composition): the inspected `default_egress`/`default_ingress` and every rule must match the profile's canonical policy exactly, so a sandbox labelled with the configured profile that actually carries an allow-all rule, a rule broadened to specific protocols or ports, stale rules from another profile, or altered defaults is recreated rather than reused. Any named volume, disk image, extra tmpfs (including one masking a project root), extra bind mount (for example one exposing `/workspace/config`), or missing mask fails the check. An instance that fails any of these checks is force-removed and recreated from the centralized create arguments, so an unmanaged or stale instance is never started or used. The attestation parses the real `msb inspect --format json` contract of the pinned `msb` CLI (`MICROSANDBOX_VERSION`), which is tested against fixtures copied from that contract.
+- It mounts `/workspace/repos` and `/workspace/schedule-worktrees` at identical guest paths.
+- Repositories and worktrees created after boot are visible immediately because their parent roots are mounted.
+- Each command supplies its own working directory through `msb exec -w`.
+- A session outside the mounted roots is refused rather than executed on the host.
+- The Manager verifies the microVM image, resources, user, network policy, mounts, labels, and secret mask before reuse.
+- A stale or unverifiable microVM is removed and recreated.
+- Manager shutdown and an enforced-to-disabled restart stop the managed microVM.
 
-A session rooted outside the two mounted roots (for example `/workspace` itself) is refused with a clear error rather than silently escaping the sandbox.
+To remove it manually:
 
-## What Is Not Mounted
+```bash
+msb rm --force --label ocm.managed=true
+```
 
-These host paths stay outside the microVM:
+## Mounts and Secrets
+
+The microVM receives writable bind mounts for:
+
+- `/workspace/repos`
+- `/workspace/schedule-worktrees`
+
+The assistant workspace's `repos/assistant/.opencode` directory falls beneath the repository mount but is hidden in the guest behind a `tmpfs` mask so its internal API token cannot be read by agent commands.
+
+The following remain outside the microVM:
 
 | Host path | Contents |
 |-----------|----------|
-| `/workspace/config` | SSH `known_hosts`, `ssh_config` |
-| `/workspace/.ssh-keys` | SSH private keys for repository access |
+| `/workspace/config` | SSH configuration and known hosts |
+| `/workspace/.ssh-keys` | Repository SSH private keys |
 | `/workspace/.config` | OpenCode configuration and generated plugins |
-| `/workspace/.opencode/state` | Provider credentials (`auth.json`) |
-| `repos/assistant/.opencode` (masked) | Assistant internal API token — hidden inside the microVM behind a `tmpfs` overlay |
+| `/workspace/.opencode/state` | Provider credentials |
 
-The consequence: sandboxed commands cannot read Manager or provider secrets, and they cannot modify the OpenCode configuration or the installed plugins. The assistant-mode `.opencode` directory is bind-visible on the host for OpenCode's own config and skill loading, but inside the microVM it is replaced by an empty in-memory filesystem, so the internal API bearer token it contains is unreadable by guest shell code.
+OpenCode's host process still reads these paths normally. They are omitted only from the agent command environment.
 
-## Blast Radius
+## Enabling and Enforcement
 
-The microVM shares one kernel and one filesystem namespace across all projects. This boundary protects the Manager container and its secrets from agent code; it does **not** isolate one repository from another. Repositories remain mutually accessible inside the sandbox, exactly as they are on the host.
+1. Enable **Sandbox** in Settings.
+2. Restart the OpenCode server when prompted.
+3. The Manager starts the new child with `OCM_SANDBOX_ENFORCED=true`.
+4. The sandbox plugin rewrites each `bash` tool command through the internal planner.
+5. If capability detection, planning, boot, attestation, or command replacement fails, the command exits non-zero instead of running on the host.
 
-## Enabling and Enforcement Model
+A directory outside the mounted roots fails with:
 
-Enforcement follows this chain:
+```text
+Sandbox enforcement is on but the sandbox is unavailable: working directory is outside the sandboxed project roots (/workspace/repos, /workspace/schedule-worktrees)
+```
 
-1. **Toggle** — Enable **Sandbox** in Settings. If `/dev/kvm` is unavailable the toggle cannot be turned on and the capability reason is shown; if the runtime later becomes unavailable while the preference stays enabled, the toggle remains turned on and every sandboxed command fails closed with the reason instead of running on the host.
-2. **Restart** — Changing the preference marks the OpenCode server restart as pending. The new enforcement value is only applied to newly spawned OpenCode processes, so a restart is required. When an enforced server starts, the Manager terminates the previous server's process group — the detached OpenCode child plus every host-process descendant it spawned, including a shell command or MCP process started while enforcement was off — waits for all members to exit, escalates to `SIGKILL` on the group if needed, and refuses to start the enforced server if any member survives, so no unenforced host-executed process can outlive the transition. Non-detached development children are terminated by PID only, preserving the existing hot-reload behavior.
-3. **Stamp** — On startup the Manager resolves the preference (not the runtime probe) and stamps every spawned OpenCode child environment with `OCM_SANDBOX_ENFORCED=true` whenever the preference is enabled. A missing or broken sandbox runtime therefore keeps enforcement active and blocks commands with the capability reason rather than silently running them on the host. If the preference itself cannot be read, the Manager fails closed the same way: it treats enforcement as active, terminates any attested predecessor and port-owning server so no unenforced child stays reachable, and aborts startup as non-recoverable with the settings error. User-defined environment variables cannot override this value.
-4. **OpenCode build** — Sandbox enforcement rewrites `bash` tool arguments through the plugin `tool.execute.before` hook, a behavior that depends on the OpenCode build. The container image bundles a fixed OpenCode build (`1.18.16`) as the reproducible default and fallback, but that build is not an allowlist: users may install, upgrade, or roll back OpenCode versions while sandbox enforcement is active, and the Settings Update action, the Versions dialog, `POST /opencode-upgrade`, and `POST /opencode-install-version` all keep working under enforcement. The container entrypoint also repairs a missing or below-minimum `opencode` by reinstalling the bundled build as the fallback.
-5. **Fail closed** — The installed OpenCode plugin rewrites every `bash` tool command through the internal sandbox planning endpoint. If the sandbox cannot be prepared, the command is replaced with an error and exits non-zero instead of running on the host. A session outside the project roots fails with:
-   ```text
-   Sandbox enforcement is on but the sandbox is unavailable: working directory is outside the sandboxed project roots (/workspace/repos, /workspace/schedule-worktrees)
-   ```
-   Every other fail-closed reason uses the same `Sandbox enforcement is on but the sandbox is unavailable:` prefix followed by its reason — for example, a sandbox that fails to boot reports the underlying `msb` error after the prefix.
-
-The enforcement value is stamped into the OpenCode child process at startup and is authoritative for its lifetime. The plugin reports that stamp to the planning endpoint, so an enforced child can never fall back to host execution — even if the toggle is turned off before the required restart, the running OpenCode server keeps executing sandboxed until it is restarted.
-
-## Plugin Policy Under Enforcement
-
-Plugins run as ordinary JavaScript inside the OpenCode process and can touch the host filesystem and process APIs without going through the `bash` tool, so sandbox enforcement must make sure that **only Manager-owned plugin code** is evaluated in the host process:
-
-- The Manager installs exactly two plugins into the auto-discovery directory (`<workspace>/.config/opencode/plugin`): `ocm-sandbox.js` (the enforcement hook) and `ocm-gh-env.js` (host credential injection for the `shell.env` hook). Both are generated by the Manager and are the only trusted plugin files.
-- **Repository plugins are never evaluated.** Enforced OpenCode children are started with `OPENCODE_DISABLE_PROJECT_CONFIG=1`, so OpenCode does not read project `opencode.json` files or scan `.opencode/plugin` / `.opencode/plugins` directories — including plugins planted in a repository by an agent using the host-side `write` tool or by a cloned repository itself.
-- **Configured package plugins are disabled.** On an enforced start the Manager removes the `plugin` array from the global OpenCode config file (`<workspace>/.config/opencode/opencode.json`) and writes a backup of the removed sections next to it; the backup is refreshed with the latest configured array whenever the file sanitizer sees new plugins during enforcement, and the entries are merged back when enforcement is turned off and the server restarts. `installConfiguredPlugins` is skipped while enforcement is on. The running process is additionally guarded by stateless enforcement sanitization: config reloads, settings-driven config saves, and mutating `PATCH /config` requests proxied through either Manager OpenCode proxy surface (`/api/opencode/*` or `/api/opencode-proxy/*`) have the `plugin` array stripped from the patch before it reaches the OpenCode server — a body that is not valid JSON or not a JSON object is refused with `403` rather than forwarded — so a persisted config that still contains a plugin array can never re-activate plugins in the running process. Proxied patches are rewritten for that request only: their removed values are discarded rather than backed up, and the proxy never writes to the config file.
-- **Config-source environment variables are blocked.** OpenCode reads additional config and plugin sources from `OPENCODE_CONFIG`, `OPENCODE_CONFIG_CONTENT`, `OPENCODE_CONFIG_DIR`, `OPENCODE_AUTH_CONTENT`, `OPENCODE_TEST_HOME`, and `OPENCODE_TEST_MANAGED_CONFIG_DIR`. `OPENCODE_AUTH_CONTENT` replaces the whole auth file and can inject a well-known auth entry that triggers the `.well-known/opencode` remote-config fetch; `OPENCODE_TEST_HOME` redirects the home-based `.opencode` plugin and agent discovery directories; `OPENCODE_TEST_MANAGED_CONFIG_DIR` redirects the system managed-config directory. The Manager blocks all six in user-defined `serverEnvVars`, removes the five overridable ones from the child environment entirely, and stamps `OPENCODE_CONFIG` to the Manager's own global config path, so neither a configured environment variable nor a leaked Manager process environment can introduce a third-party config, plugin, or auth source into a child process. OpenCode also skips external plugin discovery and installation when `OPENCODE_PURE` is truthy, which would silently disable the Manager-owned `ocm-sandbox.js` and `ocm-gh-env.js` hooks; the Manager removes any inherited value from the child environment and stamps `OPENCODE_PURE=false` after the user environment spreads in both modes, so neither a configured entry nor an inherited value can switch pure mode on. Shell selection is protected by stamping rather than by blocking: the Manager spawns the verified `opencode` executable by its absolute path, removes any inherited `SHELL`, `BASH_ENV`, and `ENV` from the child environment in both modes, and stamps `SHELL` to the Manager-generated sandbox shell wrapper after the user environment spreads when enforcement is on — so a configured or inherited value cannot select a repository-controlled shell binary or source repository-controlled startup files (`.bashrc`/`$ENV`/`$BASH_ENV`), and every host-shell surface that resolves a shell is routed into the microVM instead. Variables that only affect the child's own process (`PATH`, `HOME`, `NODE_OPTIONS`, `BUN_OPTIONS`, `LD_PRELOAD`, `LD_LIBRARY_PATH`) are not blocked in `serverEnvVars`, because the values the enforcement boundary depends on are stamped after the user environment and therefore always win.
-- **User-dropped global plugins are quarantined.** Any file other than the two Manager-owned plugins found in the global plugin directories (`<workspace>/.config/opencode/plugin`, `<workspace>/.config/opencode/plugins`, `$HOME/.opencode/plugin`, `$HOME/.opencode/plugins`) is moved to a sibling `.ocm-quarantine` directory at an enforced start and restored when enforcement is turned off.
-- **Fail closed.** If the plugin directory cannot be quarantined or the config cannot be sanitized, the Manager refuses to start an enforced server.
-- **Defense in depth.** In addition, the sandbox plugin locks the rewritten `bash` command argument after planning and verifies the replacement by reading it back; if neither the planned command nor a blocking guard can be installed — for example another plugin froze the argument object — the hook aborts the tool call instead of letting the original command run on the host, and any detected bypass blocks every subsequent sandboxed command.
-- **Host-execution config sections are disabled.** OpenCode can spawn host processes outside the `bash` hook from configuration sources, and enforcement disables all of them: local MCP servers (a `mcp` entry with `type: "local"` or a `command`), the whole `formatter` configuration, the `shell` configuration (removing it is what makes OpenCode fall back to the Manager-stamped sandbox shell wrapper), LSP servers (every enabling `lsp` form, whether a non-empty section or `lsp: true`; only an explicit `lsp: false` survives, since it disables built-in LSP processes), experimental hook commands (`experimental.hook`), and custom provider modules (any `provider` entry carrying an `npm` selector, including a `file://` module, which OpenCode would dynamically import in its host process); remote MCP servers and provider entries without an `npm` selector survive. On an enforced start the Manager removes these sections from the global config file and from every native global config file OpenCode loads (`opencode.json`, `opencode.jsonc`, `config.json` under `<workspace>/.config/opencode`, plus `opencode.json` and `opencode.jsonc` under `$HOME/.opencode`), backs up the removed sections next to each file, and merges them back when enforcement is turned off. The same sections are stripped, without any backup, from every live config reload, every settings-driven config save, and every mutating `/config` request proxied through either Manager OpenCode proxy surface. A proxied `POST /mcp` that would add a local or command-bearing MCP server to the running process is refused with `403`, so only provably remote servers can be added while enforcement is active. Global custom tools — TypeScript/JavaScript modules under `<config>/opencode/tool(s)/` and `$HOME/.opencode/tool(s)/` that run in the OpenCode host process — are quarantined to a sibling `.ocm-quarantine` directory at an enforced start and restored when enforcement is off. Project-level `.opencode/tool(s)/` custom tools are covered by `OPENCODE_DISABLE_PROJECT_CONFIG=1`. The consequence: a configured local MCP server, formatter command, shell, LSP server, hook command, or custom provider module cannot read Manager or provider credentials from the host process during enforcement.
-- **System managed configuration is sanitized.** OpenCode reads the platform managed-config directory — `/etc/opencode` on Linux, `/Library/Application Support/opencode` on macOS, `%ProgramData%\opencode` on Windows — with the highest file-based priority. On an enforced start the Manager sanitizes `opencode.json` and `opencode.jsonc` from that directory with the same backup-and-restore contract as the native global files, so an org-managed config cannot supply a plugin, local MCP server, formatter, shell, LSP server, or hook to the host process. A managed config that contains a host-execution section and cannot be rewritten (for example a read-only bind mount) aborts the enforced start instead of running with unsanitized managed configuration.
-- **Well-known remote configuration fails closed.** OpenCode fetches organizational default configuration from `${provider}/.well-known/opencode` whenever an authenticated provider entry is a well-known auth entry, and merges the response — including `plugin`, local MCP, formatter, `shell`, LSP, and hook sections — into the running process. That content is fetched by the OpenCode process at startup, so the Manager cannot sanitize it. On an enforced start the Manager inspects the auth file it owns (`<workspace>/.opencode/state/opencode/auth.json`) and refuses to launch whenever it contains a well-known provider entry, with an error naming the provider and the remediation (remove the provider authentication or disable sandboxing). The `OPENCODE_AUTH_CONTENT` environment variable that could inject such an entry is blocked and stripped from the child environment, and both Manager OpenCode proxy surfaces additionally refuse a `PUT /auth/{provider}` write whose body is a well-known auth entry with `403` while enforcement is active — so a well-known entry cannot be added to the running process after the startup check, which would fetch remote host-executed configuration on a later enforced start. Ordinary `api` and `oauth` auth writes continue to pass through.
-
-One documented consequence: because project config files are disabled while enforcement is on, the assistant-mode workspace's project-level `opencode.json`, agents, and skills (under `repos/assistant/.opencode`) are not loaded for assistant sessions during enforcement. The assistant workspace directory and its `AGENTS.md` guidance still load, but its default agent and managed skills are unavailable until sandboxing is disabled and the server restarts.
+The enforcement stamp remains authoritative for the lifetime of the OpenCode child, even if the setting changes before the required restart.
 
 ## Worktree Placement
 
-The Manager only creates agent worktrees under the two mounted roots, so every supported project plans in sandbox mode while the secret-bearing `.opencode/state` directory stays unmounted:
-
-- **Scheduled runs** — OpenCode's experimental workspace API would place run worktrees beneath `.opencode/state`. The schedule runner detects that location, deletes the API workspace, and falls back to a raw git worktree under `/workspace/schedule-worktrees` (`job-<id>-run-<runId>`), which is mounted. A worktree returned by the API that already lives under a mounted root is used as-is.
-- **User-created OpenCode worktrees** — the same API creates these outside the mounted roots, so while sandboxing is enforced the Manager refuses the creation with a clear error instead of handing the session a directory that cannot be sandboxed. Disable sandboxing (and restart) to use them.
-- **Local repositories outside `/workspace/repos`** — external repositories are symlinked into `repos/`; the link target is not mounted, so an agent session in one of them is refused with the "outside the sandboxed project roots" error. Move the repository under `/workspace/repos` or disable sandboxing.
+- Scheduled runs use worktrees under `/workspace/schedule-worktrees` when OpenCode's workspace API returns a path beneath unmounted state storage.
+- User-created OpenCode worktrees outside the mounted roots are created normally; only a later agent `bash` call whose working directory is outside the mounts is refused by the planner.
+- External repositories symlinked into `/workspace/repos` remain outside the microVM because the link target is not mounted.
 
 ## Caveats
 
-- **First-command latency** — The first sandboxed command after a container start pays the image pull and microVM boot cost once for all projects. This is bounded by `SANDBOX_START_TIMEOUT_MS` (default 5 minutes).
-- **Image contents** — `SANDBOX_IMAGE` is the OCI image the microVM boots from. It must contain the toolchain the agent expects, including `git` if the agent runs git commands.
-- **Workspace identity** — Sandboxed commands run as the Manager's effective uid (and gid), which the entrypoint aligns to `PUID`/`PGID`. The overlay defaults `SANDBOX_EXEC_USER` to `PUID`, so a non-1000 `PUID` (for example `1001`) still writes to the mounted repositories as the workspace owner. If a configured numeric `SANDBOX_EXEC_USER` cannot match the workspace owner, the toggle reports enforcement as unavailable with the reason instead of enabling a broken sandbox.
-- **Permission patterns** — OpenCode `permission` rules are matched against the rewritten command (`msb exec ...`), not the agent's original text. Command-pattern permission rules must be reviewed when enforcement is on.
-- **Plugin lockdown** — While enforcement is on, only the Manager-owned plugins load (see [Plugin Policy Under Enforcement](#plugin-policy-under-enforcement)); repository, project, and user-configured plugins are not evaluated in the host process. As defense in depth, the sandbox plugin also locks the `command` argument after rewriting, so any plugin that did manage to load cannot unwrap a sandboxed `bash` command, and a detected bypass blocks every subsequent sandboxed command.
-- **Host credentials** — Credentials injected by the `shell.env` hook (`ocm-gh-env.js`) are not forwarded into the microVM, so agent-run `git push` / `gh` calls that depend on those injected credentials fail inside the sandbox by design. Credentials that are themselves visible inside the microVM remain usable — a token or credential helper stored in a mounted repository, an authenticated remote URL, or a credential supplied directly to the command — because the microVM's networking is enabled.
-- **Assistant internal API** — The assistant-mode `.opencode` directory is masked in the microVM, so the internal API token it holds is not readable there. Assistant sessions can still manage repos, schedules, notifications, and settings through the Manager's host-side integrations; agent-run `curl` against the internal API using the masked token fails inside a sandbox by design.
+- The first command pays image pull and microVM boot latency, bounded by `SANDBOX_START_TIMEOUT_MS`.
+- `SANDBOX_IMAGE` must contain every tool the agent expects to run.
+- `SANDBOX_EXEC_USER` must match the workspace owner so commands can write mounted files.
+- OpenCode permission rules see the rewritten `msb exec` command rather than the original command.
+- Credentials injected into OpenCode's host shell environment are not forwarded into the microVM.
+- Plugins and other configured host-process extensions are trusted and are not isolated by agent `bash` sandboxing.

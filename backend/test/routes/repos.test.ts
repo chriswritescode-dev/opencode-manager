@@ -336,7 +336,7 @@ describe('Repo Routes', () => {
       clonedAt: Date.now(),
     }
 
-    it('refuses and cleans up a workspace created outside the project roots while sandboxing is enforced', async () => {
+    it('returns the workspace created outside the project roots even while sandboxing is enforced', async () => {
       vi.mocked(db.getRepoById).mockReturnValue(mockRepo)
       vi.mocked(opencodeServerManager.isSandboxEnforced).mockReturnValue(true)
 
@@ -349,19 +349,13 @@ describe('Repo Routes', () => {
       const app = createRepoRoutes(mockDb, mockGitAuthService, mockScheduleService, createStubOpenCodeClient({ forward }))
       const res = await app.request('/1/workspaces', { method: 'POST' })
 
-      expect(res.status).toBe(400)
-      const body = await res.json() as { error: string }
-      expect(body.error).toContain('not available while sandboxing is enabled')
-      expect(forward).toHaveBeenCalledWith(
-        expect.objectContaining({
-          method: 'DELETE',
-          path: '/experimental/workspace/wrk_outside',
-          directory: '/tmp/test-repo',
-        }),
-      )
+      expect(res.status).toBe(200)
+      const body = await res.json() as { id: string }
+      expect(body.id).toBe('wrk_outside')
+      expect(forward).not.toHaveBeenCalledWith(expect.objectContaining({ method: 'DELETE' }))
     })
 
-    it('refuses a workspace whose directory cannot be validated while sandboxing is enforced', async () => {
+    it('returns a workspace with an empty response body when sandboxing is enforced', async () => {
       vi.mocked(db.getRepoById).mockReturnValue(mockRepo)
       vi.mocked(opencodeServerManager.isSandboxEnforced).mockReturnValue(true)
 
@@ -369,9 +363,9 @@ describe('Repo Routes', () => {
       const app = createRepoRoutes(mockDb, mockGitAuthService, mockScheduleService, createStubOpenCodeClient({ forward }))
       const res = await app.request('/1/workspaces', { method: 'POST' })
 
-      expect(res.status).toBe(400)
-      const body = await res.json() as { error: string }
-      expect(body.error).toContain('not available while sandboxing is enabled')
+      expect(res.status).toBe(200)
+      const body = await res.json() as { success: boolean }
+      expect(body.success).toBe(true)
       expect(forward).not.toHaveBeenCalledWith(expect.objectContaining({ method: 'DELETE' }))
     })
 

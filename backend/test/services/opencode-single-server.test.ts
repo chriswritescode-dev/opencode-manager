@@ -92,12 +92,10 @@ vi.mock('../../src/services/opencode/plugin-registry', () => ({
   installManagedPlugins: installManagedPluginsMock,
 }))
 
-const quarantineOpenCodePluginsMock = vi.hoisted(() => vi.fn())
 const restoreQuarantinedOpenCodePluginsMock = vi.hoisted(() => vi.fn())
 const getOpenCodePluginDiscoveryHomeMock = vi.hoisted(() => vi.fn(() => '/test/home'))
 
 vi.mock('../../src/services/opencode-plugin-quarantine', () => ({
-  quarantineOpenCodePlugins: quarantineOpenCodePluginsMock,
   restoreQuarantinedOpenCodePlugins: restoreQuarantinedOpenCodePluginsMock,
   getOpenCodePluginDiscoveryHome: getOpenCodePluginDiscoveryHomeMock,
 }))
@@ -227,7 +225,7 @@ describe('OpenCodeServerManager - server auth', () => {
     expect(createOpenCodeClientMock).toHaveBeenCalledWith('dbpassword123', '127.0.0.1')
   })
 
-  it('rebuilds the client against the loopback address when enforcement is on and OPENCODE_HOST is non-loopback', async () => {
+  it('rebuilds the client against the configured host regardless of enforcement', async () => {
     setOpenCodeEnv({ host: '192.168.1.10', password: 'envpassword123' })
     const { OpenCodeServerManager } = await import('../../src/services/opencode-single-server')
     const manager = OpenCodeServerManager.getInstance()
@@ -235,10 +233,10 @@ describe('OpenCodeServerManager - server auth', () => {
 
     await manager.rebuildClient()
 
-    expect(createOpenCodeClientMock).toHaveBeenCalledWith('envpassword123', '127.0.0.1')
+    expect(createOpenCodeClientMock).toHaveBeenCalledWith('envpassword123', '192.168.1.10')
   })
 
-  it('rebuilds the client against the IPv6 loopback address when enforcement is on and OPENCODE_HOST is ::1', async () => {
+  it('rebuilds the client against the configured IPv6 host regardless of enforcement', async () => {
     setOpenCodeEnv({ host: '::1', password: 'envpassword123' })
     const { OpenCodeServerManager } = await import('../../src/services/opencode-single-server')
     const manager = OpenCodeServerManager.getInstance()
@@ -280,7 +278,7 @@ describe('OpenCodeServerManager - server auth', () => {
     )
   })
 
-  it('forces a loopback bind for an enforced server even when OPENCODE_HOST is externally bound', async () => {
+  it('binds an enforced server to the configured host even when OPENCODE_HOST is externally bound', async () => {
     sandboxRuntimeServiceMock.SandboxRuntimeService.mockImplementation(() => ({
       isEnabled: () => true,
     }))
@@ -298,7 +296,7 @@ describe('OpenCodeServerManager - server auth', () => {
 
     expect(spawnMock).toHaveBeenCalledWith(
       'opencode',
-      ['serve', '--port', '5551', '--hostname', '127.0.0.1'],
+      ['serve', '--port', '5551', '--hostname', '0.0.0.0'],
       expect.objectContaining({
         env: expect.objectContaining({
           OCM_SANDBOX_ENFORCED: 'true',
@@ -308,7 +306,7 @@ describe('OpenCodeServerManager - server auth', () => {
     )
   })
 
-  it('does not require an OpenCode password when enforcement forces the loopback bind', async () => {
+  it('requires an OpenCode password for an enforced server bound to an external host', async () => {
     sandboxRuntimeServiceMock.SandboxRuntimeService.mockImplementation(() => ({
       isEnabled: () => true,
     }))
@@ -322,15 +320,10 @@ describe('OpenCodeServerManager - server auth', () => {
     const manager = OpenCodeServerManager.getInstance()
     manager.setDatabase(createPasswordDb(null))
 
-    await manager.start()
+    await expect(manager.start()).rejects.toThrow('no password is configured')
 
-    expect(spawnMock).toHaveBeenCalledWith(
-      'opencode',
-      ['serve', '--port', '5551', '--hostname', '127.0.0.1'],
-      expect.objectContaining({
-        env: expect.objectContaining({ OCM_SANDBOX_ENFORCED: 'true' }),
-      })
-    )
+    expect(spawnMock).not.toHaveBeenCalled()
+    expect(manager.getLastStartupError()).toContain('OPENCODE_HOST=0.0.0.0')
   })
 
   it('stamps OCM_SANDBOX_ENFORCED=false into the spawned env by default', async () => {
@@ -585,7 +578,7 @@ describe('OpenCodeServerManager - server auth', () => {
     expect(env.OCM_INTERNAL_TOKEN).toBe(storedInternalToken)
   })
 
-  it('drops user-supplied OPENCODE_CONFIG_CONTENT and OPENCODE_CONFIG_DIR serverEnvVars from the spawned env', async () => {
+  it('passes through user-supplied OPENCODE_CONFIG_CONTENT and OPENCODE_CONFIG_DIR serverEnvVars', async () => {
     const { OpenCodeServerManager } = await import('../../src/services/opencode-single-server')
     const manager = OpenCodeServerManager.getInstance()
     manager.setDatabase(createPreferencesDb({
@@ -598,11 +591,11 @@ describe('OpenCodeServerManager - server auth', () => {
     await manager.start()
 
     const env = (spawnMock.mock.calls[0] as unknown as [unknown, unknown, { env: Record<string, string> }])[2].env
-    expect(env.OPENCODE_CONFIG_CONTENT).toBeUndefined()
-    expect(env.OPENCODE_CONFIG_DIR).toBeUndefined()
+    expect(env.OPENCODE_CONFIG_CONTENT).toBe('{"plugin":["file:///evil.js"]}')
+    expect(env.OPENCODE_CONFIG_DIR).toBe('/tmp/evil-config')
   })
 
-  it('strips OPENCODE_CONFIG_CONTENT and OPENCODE_CONFIG_DIR from the manager process env before spawning', async () => {
+  it('passes inherited OPENCODE_CONFIG_CONTENT and OPENCODE_CONFIG_DIR through to the spawned env', async () => {
     const { OpenCodeServerManager } = await import('../../src/services/opencode-single-server')
     const manager = OpenCodeServerManager.getInstance()
     manager.setDatabase(createPasswordDb(null))
@@ -612,15 +605,15 @@ describe('OpenCodeServerManager - server auth', () => {
       await manager.start()
 
       const env = (spawnMock.mock.calls[0] as unknown as [unknown, unknown, { env: Record<string, string> }])[2].env
-      expect(env.OPENCODE_CONFIG_CONTENT).toBeUndefined()
-      expect(env.OPENCODE_CONFIG_DIR).toBeUndefined()
+      expect(env.OPENCODE_CONFIG_CONTENT).toBe('{"plugin":["file:///evil.js"]}')
+      expect(env.OPENCODE_CONFIG_DIR).toBe('/tmp/evil-config')
     } finally {
       delete process.env.OPENCODE_CONFIG_CONTENT
       delete process.env.OPENCODE_CONFIG_DIR
     }
   })
 
-  it('overrides a user-supplied HOME serverEnvVars entry with the plugin discovery home when enforced', async () => {
+  it('honors a user-supplied HOME serverEnvVars entry while enforced', async () => {
     sandboxRuntimeServiceMock.SandboxRuntimeService.mockImplementation(() => ({
       isEnabled: () => true,
     }))
@@ -638,10 +631,10 @@ describe('OpenCodeServerManager - server auth', () => {
     await manager.start()
 
     const env = (spawnMock.mock.calls[0] as unknown as [unknown, unknown, { env: Record<string, string> }])[2].env
-    expect(env.HOME).not.toBe('/tmp/evil-home')
+    expect(env.HOME).toBe('/tmp/evil-home')
   })
 
-  it('drops config-source and well-known auth serverEnvVars from the spawned env', async () => {
+  it('passes through user-supplied config-source and well-known auth serverEnvVars', async () => {
     sandboxRuntimeServiceMock.SandboxRuntimeService.mockImplementation(() => ({
       isEnabled: () => false,
     }))
@@ -658,12 +651,12 @@ describe('OpenCodeServerManager - server auth', () => {
     await manager.start()
 
     const env = (spawnMock.mock.calls[0] as unknown as [unknown, unknown, { env: Record<string, string> }])[2].env
-    expect(env.OPENCODE_AUTH_CONTENT).toBeUndefined()
-    expect(env.OPENCODE_TEST_HOME).toBeUndefined()
-    expect(env.OPENCODE_TEST_MANAGED_CONFIG_DIR).toBeUndefined()
+    expect(env.OPENCODE_AUTH_CONTENT).toBe('{"https://evil.example.com":{"type":"wellknown","key":"K","token":"t"}}')
+    expect(env.OPENCODE_TEST_HOME).toBe('/tmp/evil-home')
+    expect(env.OPENCODE_TEST_MANAGED_CONFIG_DIR).toBe('/tmp/evil-managed')
   })
 
-  it('removes inherited shell startup variables from the spawned env in both modes', async () => {
+  it('passes inherited shell startup variables through to the spawned env', async () => {
     sandboxRuntimeServiceMock.SandboxRuntimeService.mockImplementation(() => ({
       isEnabled: () => false,
     }))
@@ -677,9 +670,9 @@ describe('OpenCodeServerManager - server auth', () => {
       await manager.start()
 
       const env = (spawnMock.mock.calls[0] as unknown as [unknown, unknown, { env: Record<string, string> }])[2].env
-      expect(env.SHELL).toBeUndefined()
-      expect(env.BASH_ENV).toBeUndefined()
-      expect(env.ENV).toBeUndefined()
+      expect(env.SHELL).toBe('/workspace/repos/evil/evil-sh')
+      expect(env.BASH_ENV).toBe('/workspace/repos/evil/rc')
+      expect(env.ENV).toBe('/workspace/repos/evil/envrc')
     } finally {
       delete process.env.SHELL
       delete process.env.BASH_ENV
@@ -687,7 +680,7 @@ describe('OpenCodeServerManager - server auth', () => {
     }
   })
 
-  it('removes inherited config-source env vars from the spawned env', async () => {
+  it('passes inherited config-source env vars through to the spawned env', async () => {
     const { OpenCodeServerManager } = await import('../../src/services/opencode-single-server')
     const manager = OpenCodeServerManager.getInstance()
     manager.setDatabase(createPasswordDb(null))
@@ -698,9 +691,9 @@ describe('OpenCodeServerManager - server auth', () => {
       await manager.start()
 
       const env = (spawnMock.mock.calls[0] as unknown as [unknown, unknown, { env: Record<string, string> }])[2].env
-      expect(env.OPENCODE_AUTH_CONTENT).toBeUndefined()
-      expect(env.OPENCODE_TEST_HOME).toBeUndefined()
-      expect(env.OPENCODE_TEST_MANAGED_CONFIG_DIR).toBeUndefined()
+      expect(env.OPENCODE_AUTH_CONTENT).toBe('{"https://evil.example.com":{"type":"wellknown","key":"K","token":"t"}}')
+      expect(env.OPENCODE_TEST_HOME).toBe('/tmp/evil-home')
+      expect(env.OPENCODE_TEST_MANAGED_CONFIG_DIR).toBe('/tmp/evil-managed')
     } finally {
       delete process.env.OPENCODE_AUTH_CONTENT
       delete process.env.OPENCODE_TEST_HOME
@@ -708,7 +701,7 @@ describe('OpenCodeServerManager - server auth', () => {
     }
   })
 
-  it('stamps a trusted absolute shell into the spawned env when enforced', async () => {
+  it('honors a user-supplied SHELL serverEnvVars entry and passes inherited shell vars through while enforced', async () => {
     sandboxRuntimeServiceMock.SandboxRuntimeService.mockImplementation(() => ({
       isEnabled: () => true,
     }))
@@ -724,18 +717,18 @@ describe('OpenCodeServerManager - server auth', () => {
     }))
     process.env.SHELL = '/workspace/repos/evil/evil-sh'
     process.env.BASH_ENV = '/workspace/repos/evil/rc'
+    process.env.ENV = '/workspace/repos/evil/envrc'
     try {
       await manager.start()
 
       const env = (spawnMock.mock.calls[0] as unknown as [unknown, unknown, { env: Record<string, string> }])[2].env
-      const { getEnforcedSandboxShellPath } = await import('../../src/services/sandbox/shell-wrapper')
-      expect(env.SHELL).toBe(getEnforcedSandboxShellPath())
-      expect(env.SHELL).not.toContain('/repos/')
-      expect(env.BASH_ENV).toBeUndefined()
-      expect(env.ENV).toBeUndefined()
+      expect(env.SHELL).toBe('/workspace/repos/evil/evil-sh')
+      expect(env.BASH_ENV).toBe('/workspace/repos/evil/rc')
+      expect(env.ENV).toBe('/workspace/repos/evil/envrc')
     } finally {
       delete process.env.SHELL
       delete process.env.BASH_ENV
+      delete process.env.ENV
     }
   })
 
@@ -787,28 +780,6 @@ describe('OpenCodeServerManager - server auth', () => {
         throw error
       })
     }
-  })
-
-  it('stamps the quarantined plugin discovery home into the spawned env when enforced', async () => {
-    sandboxRuntimeServiceMock.SandboxRuntimeService.mockImplementation(() => ({
-      isEnabled: () => true,
-    }))
-    execSyncMock.mockImplementation((cmd: string) => {
-      if (cmd.includes('lsof')) return spawnMock.mock.calls.length > 0 ? '1234\n' : ''
-      if (cmd.includes('opencode --version')) return '1.18.16\n'
-      throw new Error('not found')
-    })
-    getOpenCodePluginDiscoveryHomeMock.mockReturnValue('/test/home')
-    const { OpenCodeServerManager } = await import('../../src/services/opencode-single-server')
-    const manager = OpenCodeServerManager.getInstance()
-    manager.setDatabase(createPreferencesDb({
-      serverEnvVars: [{ key: 'HOME', value: '/tmp/evil-home' }],
-    }))
-
-    await manager.start()
-
-    const env = (spawnMock.mock.calls[0] as unknown as [unknown, unknown, { env: Record<string, string> }])[2].env
-    expect(env.HOME).toBe('/test/home')
   })
 
   it('exposes the running child sandbox enforcement state for worktree placement', async () => {
@@ -2530,7 +2501,7 @@ describe('OpenCodeServerManager - server auth', () => {
     expect(spawnMock).toHaveBeenCalled()
   })
 
-  it('quarantines untrusted plugins before an enforced start', async () => {
+  it('restores legacy quarantined plugins before an enforced start', async () => {
     sandboxRuntimeServiceMock.SandboxRuntimeService.mockImplementation(() => ({
       isEnabled: () => true,
     }))
@@ -2545,14 +2516,13 @@ describe('OpenCodeServerManager - server auth', () => {
 
     await manager.start()
 
-    expect(quarantineOpenCodePluginsMock).toHaveBeenCalledWith(
+    expect(restoreQuarantinedOpenCodePluginsMock).toHaveBeenCalledWith(
       '/test/workspace/.config',
       '/test/workspace/.config/opencode.json',
     )
-    expect(restoreQuarantinedOpenCodePluginsMock).not.toHaveBeenCalled()
   })
 
-  it('restores quarantined plugins when enforcement is off', async () => {
+  it('restores legacy quarantined plugins before a non-enforced start', async () => {
     const { OpenCodeServerManager } = await import('../../src/services/opencode-single-server')
     await OpenCodeServerManager.getInstance().start()
 
@@ -2560,10 +2530,9 @@ describe('OpenCodeServerManager - server auth', () => {
       '/test/workspace/.config',
       '/test/workspace/.config/opencode.json',
     )
-    expect(quarantineOpenCodePluginsMock).not.toHaveBeenCalled()
   })
 
-  it('stamps OPENCODE_DISABLE_PROJECT_CONFIG=1 into an enforced spawn and skips configured plugin installs', async () => {
+  it('spawns an enforced server without disabling project config', async () => {
     sandboxRuntimeServiceMock.SandboxRuntimeService.mockImplementation(() => ({
       isEnabled: () => true,
     }))
@@ -2584,22 +2553,23 @@ describe('OpenCodeServerManager - server auth', () => {
       expect.objectContaining({
         env: expect.objectContaining({
           OCM_SANDBOX_ENFORCED: 'true',
-          OPENCODE_DISABLE_PROJECT_CONFIG: '1',
         }),
       })
     )
+    const env = (spawnMock.mock.calls[0] as unknown as [unknown, unknown, { env: Record<string, string> }])[2].env
+    expect(env.OPENCODE_DISABLE_PROJECT_CONFIG).toBeUndefined()
   })
 
-  it('aborts an enforced start when untrusted plugins cannot be quarantined', async () => {
+  it('aborts an enforced start when legacy quarantined plugins cannot be restored', async () => {
     sandboxRuntimeServiceMock.SandboxRuntimeService.mockImplementation(() => ({
       isEnabled: () => true,
     }))
     execSyncMock.mockImplementation((cmd: string) => {
-      if (cmd.includes('lsof')) return ''
+      if (cmd.includes('lsof')) return spawnMock.mock.calls.length > 0 ? '1234\n' : ''
       if (cmd.includes('opencode --version')) return '1.18.16\n'
       throw new Error('not found')
     })
-    quarantineOpenCodePluginsMock.mockRejectedValueOnce(new Error('readonly filesystem'))
+    restoreQuarantinedOpenCodePluginsMock.mockRejectedValueOnce(new Error('readonly filesystem'))
     const { OpenCodeServerManager } = await import('../../src/services/opencode-single-server')
     const manager = OpenCodeServerManager.getInstance()
     manager.setDatabase(createPasswordDb(null))
@@ -2608,7 +2578,7 @@ describe('OpenCodeServerManager - server auth', () => {
     expect(spawnMock).not.toHaveBeenCalled()
   })
 
-  it('continues a non-enforced start when quarantined plugins cannot be restored', async () => {
+  it('aborts a non-enforced start when quarantined plugins cannot be restored', async () => {
     sandboxRuntimeServiceMock.SandboxRuntimeService.mockImplementation(() => ({
       isEnabled: () => false,
     }))
@@ -2617,9 +2587,8 @@ describe('OpenCodeServerManager - server auth', () => {
     const manager = OpenCodeServerManager.getInstance()
     manager.setDatabase(createPasswordDb(null))
 
-    await manager.start()
-
-    expect(spawnMock).toHaveBeenCalled()
+    await expect(manager.start()).rejects.toThrow('readonly filesystem')
+    expect(spawnMock).not.toHaveBeenCalled()
   })
 
   it('aborts enforced startup when the sandbox plugin cannot be installed', async () => {
@@ -2992,95 +2961,9 @@ describe('ConfigReloadError', () => {
   })
 })
 
-describe('sanitizeConfigForEnforcement', () => {
-  it('strips plugins, local MCP servers, and the formatter while keeping remote MCP servers', async () => {
-    const { sanitizeConfigForEnforcement } = await import('../../src/services/opencode-single-server')
-    const sanitized = sanitizeConfigForEnforcement(
-      {
-        plugin: ['evil-plugin'],
-        mcp: {
-          local: { type: 'local', command: ['npx', 'evil-server'] },
-          remote: { type: 'remote', url: 'https://example.com/mcp' },
-        },
-        formatter: { typescript: { command: ['prettier'] } },
-        model: 'x',
-      },
-      true,
-    )
-    expect(sanitized).toEqual({
-      mcp: { remote: { type: 'remote', url: 'https://example.com/mcp' } },
-      model: 'x',
-    })
-  })
-
-  it('strips an mcp entry carrying a command without an explicit local type', async () => {
-    const { sanitizeConfigForEnforcement } = await import('../../src/services/opencode-single-server')
-    const sanitized = sanitizeConfigForEnforcement(
-      { mcp: { runner: { command: ['node', 'server.js'], enabled: true } }, model: 'x' },
-      true,
-    )
-    expect(sanitized).toEqual({ model: 'x' })
-  })
-
-  it('strips the shell configuration while enforced', async () => {
-    const { sanitizeConfigForEnforcement } = await import('../../src/services/opencode-single-server')
-    const sanitized = sanitizeConfigForEnforcement(
-      { shell: { command: '/repo/bin/evil-shell', args: [] }, model: 'x' },
-      true,
-    )
-    expect(sanitized).toEqual({ model: 'x' })
-  })
-
-  it('strips an enabling lsp boolean while enforced and keeps an explicit disabled flag', async () => {
-    const { sanitizeConfigForEnforcement } = await import('../../src/services/opencode-single-server')
-    expect(sanitizeConfigForEnforcement({ lsp: true, model: 'x' }, true)).toEqual({ model: 'x' })
-    const kept = sanitizeConfigForEnforcement({ lsp: false, model: 'x' }, true)
-    expect(kept).toEqual({ lsp: false, model: 'x' })
-  })
-
-  it('strips custom provider npm selectors while keeping built-in providers', async () => {
-    const { sanitizeConfigForEnforcement } = await import('../../src/services/opencode-single-server')
-    const sanitized = sanitizeConfigForEnforcement(
-      {
-        model: 'x',
-        provider: {
-          builtin: { options: { apiKey: 'k' } },
-          evil: { npm: 'file:///repo/evil-provider.js' },
-          remote: { npm: '@scope/remote-provider', models: { 'm-1': { name: 'M1' } } },
-        },
-      },
-      true,
-    )
-    expect(sanitized).toEqual({ model: 'x', provider: { builtin: { options: { apiKey: 'k' } } } })
-  })
-
-  it('passes the config through unchanged when enforcement is off', async () => {
-    const { sanitizeConfigForEnforcement } = await import('../../src/services/opencode-single-server')
-    const config = {
-      plugin: ['evil-plugin'],
-      mcp: { local: { type: 'local', command: ['npx', 'evil-server'] } },
-      formatter: { typescript: { command: ['prettier'] } },
-      model: 'x',
-    }
-    expect(sanitizeConfigForEnforcement(config, false)).toBe(config)
-  })
-
-  it('passes a config without host-execution sections through unchanged when enforced', async () => {
-    const { sanitizeConfigForEnforcement } = await import('../../src/services/opencode-single-server')
-    const config = { model: 'x', mcp: { remote: { type: 'remote', url: 'https://example.com/mcp' } } }
-    expect(sanitizeConfigForEnforcement(config, true)).toBe(config)
-  })
-})
-
 describe('OpenCodeServerManager - reloadConfig', () => {
   beforeEach(() => {
     vi.clearAllMocks()
-  })
-
-  afterEach(async () => {
-    vi.clearAllMocks()
-    const { opencodeServerManager } = await import('../../src/services/opencode-single-server')
-    ;(opencodeServerManager as any).sandboxEnforced = false
   })
 
   it('should read config from file before patching', async () => {
@@ -3104,50 +2987,32 @@ describe('OpenCodeServerManager - reloadConfig', () => {
     expect(patchConfigWithRecovery).toHaveBeenCalled()
   })
 
-  it('strips configured plugins from the live reload patch while enforcement is active', async () => {
+  it('passes a config with plugins through to the live reload patch unchanged', async () => {
     const { opencodeServerManager } = await import('../../src/services/opencode-single-server')
     const { patchConfigWithRecovery } = await import('../../src/services/opencode/config-recovery')
     vi.mocked(patchConfigWithRecovery).mockResolvedValue({ success: true } as any)
     const { createStubOpenCodeClient } = await import('../helpers/stub-opencode-client')
     opencodeServerManager.setOpenCodeClient(createStubOpenCodeClient())
     fs.readFile = vi.fn().mockResolvedValue(JSON.stringify({ plugin: ['evil-plugin'], model: 'x' }))
-    ;(opencodeServerManager as any).sandboxEnforced = true
 
     await opencodeServerManager.reloadConfig()
 
     const patchTarget = vi.mocked(patchConfigWithRecovery).mock.calls[0]![1]
-    expect(patchTarget).toEqual({ model: 'x' })
-    expect(patchTarget).not.toHaveProperty('plugin')
+    expect(patchTarget).toEqual({ plugin: ['evil-plugin'], model: 'x' })
   })
 
-  it('passes a plugin-free file through unchanged while enforcement is active', async () => {
+  it('passes a plugin-free config through to the live reload patch unchanged', async () => {
     const { opencodeServerManager } = await import('../../src/services/opencode-single-server')
     const { patchConfigWithRecovery } = await import('../../src/services/opencode/config-recovery')
     vi.mocked(patchConfigWithRecovery).mockResolvedValue({ success: true } as any)
     const { createStubOpenCodeClient } = await import('../helpers/stub-opencode-client')
     opencodeServerManager.setOpenCodeClient(createStubOpenCodeClient())
     fs.readFile = vi.fn().mockResolvedValue(JSON.stringify({ model: 'x' }))
-    ;(opencodeServerManager as any).sandboxEnforced = true
 
     await opencodeServerManager.reloadConfig()
 
     const patchTarget = vi.mocked(patchConfigWithRecovery).mock.calls[0]![1]
     expect(patchTarget).toEqual({ model: 'x' })
-  })
-
-  it('retains configured plugins in the live reload patch when enforcement is off', async () => {
-    const { opencodeServerManager } = await import('../../src/services/opencode-single-server')
-    const { patchConfigWithRecovery } = await import('../../src/services/opencode/config-recovery')
-    vi.mocked(patchConfigWithRecovery).mockResolvedValue({ success: true } as any)
-    const { createStubOpenCodeClient } = await import('../helpers/stub-opencode-client')
-    opencodeServerManager.setOpenCodeClient(createStubOpenCodeClient())
-    fs.readFile = vi.fn().mockResolvedValue(JSON.stringify({ plugin: ['my-plugin'], model: 'x' }))
-    ;(opencodeServerManager as any).sandboxEnforced = false
-
-    await opencodeServerManager.reloadConfig()
-
-    const patchTarget = vi.mocked(patchConfigWithRecovery).mock.calls[0]![1]
-    expect(patchTarget).toEqual({ plugin: ['my-plugin'], model: 'x' })
   })
 })
 

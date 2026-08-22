@@ -482,8 +482,8 @@ By default, the OpenCode server binds to `127.0.0.1` inside the container and is
 
 You only need to expose the OpenCode server on an external interface if you have a specific use case that requires other services or machines to connect directly to it.
 
-!!! warning "Sandbox enforcement is proxy-scoped"
-    Part of agent-sandboxing enforcement — the blocked session-shell/PTY/slash-command endpoints and config-mutation sanitization — is applied by the Manager's OpenCode proxy on port 5003, not by the OpenCode server itself. The `bash` tool rewrite, by contrast, runs as a plugin hook inside the OpenCode process, so it still guards direct connections to the OpenCode server. While sandboxing is enforced the Manager forces the OpenCode server to bind loopback, so external clients cannot reach the OpenCode port directly and bypass the proxy-applied endpoint blocking and config sanitization; exposing port `5551:5551` is only effective with sandboxing disabled (see [Agent Sandboxing](../features/sandboxing.md)).
+!!! warning "Sandbox enforcement is agent-tool-scoped"
+    Sandbox enforcement applies only to the OpenCode agent `bash` tool. The rewrite runs as a plugin hook inside the OpenCode process, so it guards both proxied and direct connections to the OpenCode server. WebUI shell, slash shell, PTY, and server binding follow normal OpenCode behavior while sandboxing is enabled (see [Agent Sandboxing](../features/sandboxing.md)).
 
 ### How to Expose Safely
 
@@ -516,4 +516,4 @@ The password can be configured in two ways:
 
 ### Startup Guard
 
-If you set `OPENCODE_HOST=0.0.0.0` (or any non-localhost host) without configuring a password (either via env var or UI), the managed OpenCode server will refuse to start with an error message explaining how to fix it. The OpenCode Manager UI/API may remain available so you can configure a password and restart the managed server. (While agent sandboxing is enforced the server is forced onto a loopback bind regardless of `OPENCODE_HOST`, so this password guard is skipped — the server is not actually reachable externally.)
+If you set `OPENCODE_HOST=0.0.0.0` (or any non-localhost host) without configuring a password (either via env var or UI), the managed OpenCode server will refuse to start with an error message explaining how to fix it. The OpenCode Manager UI/API may remain available so you can configure a password and restart the managed server. The password guard applies in both sandboxing modes — an enforced server binds the configured `OPENCODE_HOST` like any other server.

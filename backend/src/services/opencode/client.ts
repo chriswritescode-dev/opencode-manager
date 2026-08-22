@@ -240,7 +240,7 @@ export function createOpenCodeClient(
   host?: OpenCodeClientHost,
 ): OpenCodeClient {
   const resolveConfiguredHost = typeof host === 'function' ? host : () => (host ?? ENV.OPENCODE.HOST)
-  const baseUrl: OpenCodeClientHost = () => getOpenCodeUpstreamBaseUrl(false, resolveConfiguredHost())
+  const baseUrl: OpenCodeClientHost = () => getOpenCodeUpstreamBaseUrl(resolveConfiguredHost())
   const passwordResolver = typeof passwordOverride === 'function' ? passwordOverride : undefined
   const password = typeof passwordOverride === 'string' ? passwordOverride : ENV.OPENCODE.SERVER_PASSWORD
   const basicAuth = getOpenCodeBasicAuthHeader(password)

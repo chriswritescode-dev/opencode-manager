@@ -13,15 +13,10 @@ vi.mock('../../src/services/internal-token', () => ({
   getOrCreateInternalToken: vi.fn().mockReturnValue('test-internal-token'),
 }))
 
-const isSandboxEnforcedMock = vi.hoisted(() => vi.fn().mockReturnValue(false))
 const isLifecycleInitializedMock = vi.hoisted(() => vi.fn().mockReturnValue(true))
 
 vi.mock('../../src/services/opencode-single-server', () => ({
-  opencodeServerManager: { isSandboxEnforced: isSandboxEnforcedMock, isLifecycleInitialized: isLifecycleInitializedMock },
-  OpenCodeServerManager: class {},
-  sanitizeConfigForEnforcement: (config: Record<string, unknown>) => config,
-  ConfigReloadError: class extends Error {},
-  NonRecoverableStartupError: class extends Error {},
+  opencodeServerManager: { isLifecycleInitialized: isLifecycleInitializedMock },
 }))
 
 const mockSettingsService = {
@@ -36,7 +31,6 @@ describe('opencode-proxy routes', () => {
 
   beforeEach(() => {
     vi.clearAllMocks()
-    isSandboxEnforcedMock.mockReturnValue(false)
     isLifecycleInitializedMock.mockReturnValue(true)
     originalFetch = globalThis.fetch
     app = new Hono()
@@ -300,8 +294,7 @@ describe('opencode-proxy routes', () => {
     expect(res.headers.get('content-type')).toBe('text/plain')
   })
 
-  it('forwards the session shell endpoint when the OpenCode child is enforced', async () => {
-    isSandboxEnforcedMock.mockReturnValue(true)
+  it('forwards the session shell endpoint', async () => {
     const upstreamFetch = vi.fn().mockResolvedValue(
       new Response('ok', { status: 200, headers: { 'content-type': 'text/plain' } })
     )
@@ -316,25 +309,10 @@ describe('opencode-proxy routes', () => {
     expect(upstreamFetch).toHaveBeenCalled()
   })
 
-  it('forwards the session shell endpoint while enforcement is on', async () => {
-    isSandboxEnforcedMock.mockReturnValue(true)
+  it('forwards percent-encoded PTY paths when the OpenCode child is enforced', async () => {
     const upstreamFetch = vi.fn().mockResolvedValue(
       new Response('ok', { status: 200, headers: { 'content-type': 'text/plain' } })
     )
-    globalThis.fetch = upstreamFetch as unknown as typeof fetch
-
-    const res = await app.request('/api/opencode-proxy/session/ses_1/shell', {
-      method: 'POST',
-      headers: { Authorization: 'Bearer test-internal-token' },
-    })
-
-    expect(res.status).toBe(200)
-    expect(upstreamFetch).toHaveBeenCalled()
-  })
-
-  it('blocks percent-encoded PTY spellings with 403 when the OpenCode child is enforced', async () => {
-    isSandboxEnforcedMock.mockReturnValue(true)
-    const upstreamFetch = vi.fn().mockResolvedValue(new Response('should not be reached'))
     globalThis.fetch = upstreamFetch as unknown as typeof fetch
 
     const res = await app.request('/api/opencode-proxy/%70ty', {
@@ -342,118 +320,11 @@ describe('opencode-proxy routes', () => {
       headers: { Authorization: 'Bearer test-internal-token' },
     })
 
-    expect(res.status).toBe(403)
-    expect(upstreamFetch).not.toHaveBeenCalled()
-    const body = await res.json() as { error: string }
-    expect(body.error).toContain('Sandbox enforcement is on')
-    expect(body.error).toContain('host process')
-  })
-
-  it('fails closed on encoded separators in proxied paths when the OpenCode child is enforced', async () => {
-    isSandboxEnforcedMock.mockReturnValue(true)
-    const upstreamFetch = vi.fn().mockResolvedValue(new Response('should not be reached'))
-    globalThis.fetch = upstreamFetch as unknown as typeof fetch
-
-    const res = await app.request('/api/opencode-proxy/pty%2Fp1', {
-      method: 'POST',
-      headers: { Authorization: 'Bearer test-internal-token' },
-    })
-
-    expect(res.status).toBe(403)
-    expect(upstreamFetch).not.toHaveBeenCalled()
-  })
-
-  it('forwards safely encoded non-execution paths when the OpenCode child is enforced', async () => {
-    isSandboxEnforcedMock.mockReturnValue(true)
-    const upstreamFetch = vi.fn().mockResolvedValue(
-      new Response('ok', { status: 200, headers: { 'content-type': 'text/plain' } })
-    )
-    globalThis.fetch = upstreamFetch as unknown as typeof fetch
-
-    const res = await app.request('/api/opencode-proxy/session/ses_1/%6dessage', {
-      headers: { Authorization: 'Bearer test-internal-token' },
-    })
-
     expect(res.status).toBe(200)
     expect(upstreamFetch).toHaveBeenCalled()
   })
 
-  it('blocks PTY creation with 403 when the OpenCode child is enforced', async () => {
-    isSandboxEnforcedMock.mockReturnValue(true)
-    const upstreamFetch = vi.fn().mockResolvedValue(new Response('should not be reached'))
-    globalThis.fetch = upstreamFetch as unknown as typeof fetch
-
-    const res = await app.request('/api/opencode-proxy/pty', {
-      method: 'POST',
-      headers: { Authorization: 'Bearer test-internal-token' },
-    })
-
-    expect(res.status).toBe(403)
-    expect(upstreamFetch).not.toHaveBeenCalled()
-  })
-
-  it('blocks /api-prefixed PTY creation with 403 when the OpenCode child is enforced', async () => {
-    isSandboxEnforcedMock.mockReturnValue(true)
-    const upstreamFetch = vi.fn().mockResolvedValue(new Response('should not be reached'))
-    globalThis.fetch = upstreamFetch as unknown as typeof fetch
-
-    const res = await app.request('/api/opencode-proxy/api/pty', {
-      method: 'POST',
-      headers: { Authorization: 'Bearer test-internal-token' },
-    })
-
-    expect(res.status).toBe(403)
-    expect(upstreamFetch).not.toHaveBeenCalled()
-  })
-
-  it('blocks duplicate-separator PTY creation with 403 when the OpenCode child is enforced', async () => {
-    isSandboxEnforcedMock.mockReturnValue(true)
-    const upstreamFetch = vi.fn().mockResolvedValue(new Response('should not be reached'))
-    globalThis.fetch = upstreamFetch as unknown as typeof fetch
-
-    const res = await app.request('/api/opencode-proxy//pty', {
-      method: 'POST',
-      headers: { Authorization: 'Bearer test-internal-token' },
-    })
-
-    expect(res.status).toBe(403)
-    expect(upstreamFetch).not.toHaveBeenCalled()
-  })
-
-  it('blocks trailing-separator PTY creation with 403 when the OpenCode child is enforced', async () => {
-    isSandboxEnforcedMock.mockReturnValue(true)
-    const upstreamFetch = vi.fn().mockResolvedValue(new Response('should not be reached'))
-    globalThis.fetch = upstreamFetch as unknown as typeof fetch
-
-    const res = await app.request('/api/opencode-proxy/pty/', {
-      method: 'POST',
-      headers: { Authorization: 'Bearer test-internal-token' },
-    })
-
-    expect(res.status).toBe(403)
-    expect(upstreamFetch).not.toHaveBeenCalled()
-  })
-
-  it('blocks duplicate-separator config mutation with 403 when the OpenCode child is enforced', async () => {
-    isSandboxEnforcedMock.mockReturnValue(true)
-    const upstreamFetch = vi.fn().mockResolvedValue(new Response('should not be reached'))
-    globalThis.fetch = upstreamFetch as unknown as typeof fetch
-
-    const res = await app.request('/api/opencode-proxy//config', {
-      method: 'PATCH',
-      headers: {
-        Authorization: 'Bearer test-internal-token',
-        'Content-Type': 'application/json',
-      },
-      body: JSON.stringify({ theme: 'dark' }),
-    })
-
-    expect(res.status).toBe(403)
-    expect(upstreamFetch).not.toHaveBeenCalled()
-  })
-
   it('forwards custom slash command execution when the OpenCode child is enforced', async () => {
-    isSandboxEnforcedMock.mockReturnValue(true)
     const upstreamFetch = vi.fn().mockResolvedValue(
       new Response('ok', { status: 200, headers: { 'content-type': 'text/plain' } })
     )
@@ -468,9 +339,10 @@ describe('opencode-proxy routes', () => {
     expect(upstreamFetch).toHaveBeenCalled()
   })
 
-  it('rejects a local MCP server add with 403 when the OpenCode child is enforced', async () => {
-    isSandboxEnforcedMock.mockReturnValue(true)
-    const upstreamFetch = vi.fn().mockResolvedValue(new Response('should not be reached'))
+  it('forwards a local MCP server add when the OpenCode child is enforced', async () => {
+    const upstreamFetch = vi.fn().mockResolvedValue(
+      new Response('ok', { status: 200, headers: { 'content-type': 'application/json' } })
+    )
     globalThis.fetch = upstreamFetch as unknown as typeof fetch
 
     const res = await app.request('/api/opencode-proxy/mcp', {
@@ -485,16 +357,19 @@ describe('opencode-proxy routes', () => {
       }),
     })
 
-    expect(res.status).toBe(403)
-    expect(upstreamFetch).not.toHaveBeenCalled()
-    const body = await res.json() as { error: string }
-    expect(body.error).toContain('Sandbox enforcement is on')
-    expect(body.error).toContain('only remote MCP servers')
+    expect(res.status).toBe(200)
+    const fetchCall = upstreamFetch.mock.calls[0] as [string, RequestInit]
+    const forwarded = JSON.parse(await new Response(fetchCall[1].body as ReadableStream).text()) as Record<string, unknown>
+    expect(forwarded).toEqual({
+      name: 'evil',
+      config: { type: 'local', command: ['node', 'server.js'] },
+    })
   })
 
-  it('rejects a command-bearing MCP add without an explicit local type with 403 when enforced', async () => {
-    isSandboxEnforcedMock.mockReturnValue(true)
-    const upstreamFetch = vi.fn().mockResolvedValue(new Response('should not be reached'))
+  it('forwards a command-bearing MCP add without an explicit local type when the OpenCode child is enforced', async () => {
+    const upstreamFetch = vi.fn().mockResolvedValue(
+      new Response('ok', { status: 200, headers: { 'content-type': 'application/json' } })
+    )
     globalThis.fetch = upstreamFetch as unknown as typeof fetch
 
     const res = await app.request('/api/opencode-proxy/mcp', {
@@ -509,12 +384,16 @@ describe('opencode-proxy routes', () => {
       }),
     })
 
-    expect(res.status).toBe(403)
-    expect(upstreamFetch).not.toHaveBeenCalled()
+    expect(res.status).toBe(200)
+    const fetchCall = upstreamFetch.mock.calls[0] as [string, RequestInit]
+    const forwarded = JSON.parse(await new Response(fetchCall[1].body as ReadableStream).text()) as Record<string, unknown>
+    expect(forwarded).toEqual({
+      name: 'evil',
+      config: { command: ['npx', 'evil-server'] },
+    })
   })
 
   it('forwards a remote MCP server add when the OpenCode child is enforced', async () => {
-    isSandboxEnforcedMock.mockReturnValue(true)
     const upstreamFetch = vi.fn().mockResolvedValue(
       new Response('ok', { status: 200, headers: { 'content-type': 'application/json' } })
     )
@@ -534,7 +413,7 @@ describe('opencode-proxy routes', () => {
 
     expect(res.status).toBe(200)
     const fetchCall = upstreamFetch.mock.calls[0] as [string, RequestInit]
-    const forwarded = JSON.parse(fetchCall[1].body as string) as Record<string, unknown>
+    const forwarded = JSON.parse(await new Response(fetchCall[1].body as ReadableStream).text()) as Record<string, unknown>
     expect(forwarded).toEqual({
       name: 'remote-server',
       config: { type: 'remote', url: 'https://example.com/mcp' },
@@ -542,7 +421,6 @@ describe('opencode-proxy routes', () => {
   })
 
   it('forwards MCP server adds raw when enforcement is off', async () => {
-    isSandboxEnforcedMock.mockReturnValue(false)
     const upstreamFetch = vi.fn().mockResolvedValue(
       new Response('ok', { status: 200, headers: { 'content-type': 'application/json' } })
     )
@@ -566,37 +444,35 @@ describe('opencode-proxy routes', () => {
     expect(forwarded.config.type).toBe('local')
   })
 
-  it('sanitizes LSP servers and experimental hooks from a PATCH /config mutation when enforced', async () => {
-    isSandboxEnforcedMock.mockReturnValue(true)
+  it('forwards a PATCH /config mutation with LSP servers and experimental hooks exactly when enforced', async () => {
     const upstreamFetch = vi.fn().mockResolvedValue(
       new Response('ok', { status: 200, headers: { 'content-type': 'application/json' } })
     )
     globalThis.fetch = upstreamFetch as unknown as typeof fetch
 
+    const body = JSON.stringify({
+      lsp: { typescript: { command: ['typescript-language-server'] } },
+      experimental: {
+        hook: { file_edited: [{ command: ['chmod', '+x', 'x'] }] },
+        chatMaxRetries: 4,
+      },
+    })
     const res = await app.request('/api/opencode-proxy/config', {
       method: 'PATCH',
       headers: {
         Authorization: 'Bearer test-internal-token',
         'Content-Type': 'application/json',
       },
-      body: JSON.stringify({
-        lsp: { typescript: { command: ['typescript-language-server'] } },
-        experimental: {
-          hook: { file_edited: [{ command: ['chmod', '+x', 'x'] }] },
-          chatMaxRetries: 4,
-        },
-      }),
+      body,
     })
 
     expect(res.status).toBe(200)
     const fetchCall = upstreamFetch.mock.calls[0] as [string, RequestInit]
-    const forwarded = JSON.parse(fetchCall[1].body as string) as Record<string, unknown>
-    expect(forwarded.lsp).toBeUndefined()
-    expect(forwarded.experimental).toEqual({ chatMaxRetries: 4 })
+    const forwarded = JSON.parse(await new Response(fetchCall[1].body as ReadableStream).text()) as Record<string, unknown>
+    expect(forwarded).toEqual(JSON.parse(body))
   })
 
   it('forwards ordinary agent endpoints when the OpenCode child is enforced', async () => {
-    isSandboxEnforcedMock.mockReturnValue(true)
     const upstreamFetch = vi.fn().mockResolvedValue(
       new Response('ok', { status: 200, headers: { 'content-type': 'text/plain' } })
     )
@@ -611,58 +487,57 @@ describe('opencode-proxy routes', () => {
     expect(upstreamFetch).toHaveBeenCalled()
   })
 
-  it('sanitizes plugins from a PATCH /config mutation when the OpenCode child is enforced', async () => {
-    isSandboxEnforcedMock.mockReturnValue(true)
+  it('forwards a PATCH /config mutation with plugins exactly when the OpenCode child is enforced', async () => {
     const upstreamFetch = vi.fn().mockResolvedValue(
       new Response('ok', { status: 200, headers: { 'content-type': 'application/json' } })
     )
     globalThis.fetch = upstreamFetch as unknown as typeof fetch
 
+    const body = JSON.stringify({ theme: 'dark', plugin: ['opencode-plugin-npm'] })
     const res = await app.request('/api/opencode-proxy/config', {
       method: 'PATCH',
       headers: {
         Authorization: 'Bearer test-internal-token',
         'Content-Type': 'application/json',
       },
-      body: JSON.stringify({ theme: 'dark', plugin: ['opencode-plugin-npm'] }),
+      body,
     })
 
     expect(res.status).toBe(200)
     const fetchCall = upstreamFetch.mock.calls[0] as [string, RequestInit]
-    const forwarded = JSON.parse(fetchCall[1].body as string) as Record<string, unknown>
-    expect(forwarded.theme).toBe('dark')
-    expect(forwarded.plugin).toBeUndefined()
+    const forwarded = JSON.parse(await new Response(fetchCall[1].body as ReadableStream).text()) as Record<string, unknown>
+    expect(forwarded).toEqual(JSON.parse(body))
   })
 
-  it('sanitizes local MCP servers and formatter config from a PATCH /config mutation when enforced', async () => {
-    isSandboxEnforcedMock.mockReturnValue(true)
+  it('forwards a PATCH /config mutation with local MCP servers and formatter config exactly when enforced', async () => {
     const upstreamFetch = vi.fn().mockResolvedValue(
       new Response('ok', { status: 200, headers: { 'content-type': 'application/json' } })
     )
     globalThis.fetch = upstreamFetch as unknown as typeof fetch
 
+    const body = JSON.stringify({
+      formatter: { command: 'prettier' },
+      mcp: { local: { type: 'local', command: ['node', 'server.js'] } },
+    })
     const res = await app.request('/api/opencode-proxy/config', {
       method: 'PATCH',
       headers: {
         Authorization: 'Bearer test-internal-token',
         'Content-Type': 'application/json',
       },
-      body: JSON.stringify({
-        formatter: { command: 'prettier' },
-        mcp: { local: { type: 'local', command: ['node', 'server.js'] } },
-      }),
+      body,
     })
 
     expect(res.status).toBe(200)
     const fetchCall = upstreamFetch.mock.calls[0] as [string, RequestInit]
-    const forwarded = JSON.parse(fetchCall[1].body as string) as Record<string, unknown>
-    expect(forwarded.formatter).toBeUndefined()
-    expect(forwarded.mcp).toBeUndefined()
+    const forwarded = JSON.parse(await new Response(fetchCall[1].body as ReadableStream).text()) as Record<string, unknown>
+    expect(forwarded).toEqual(JSON.parse(body))
   })
 
-  it('rejects a malformed PATCH /config body with 403 when enforced', async () => {
-    isSandboxEnforcedMock.mockReturnValue(true)
-    const upstreamFetch = vi.fn().mockResolvedValue(new Response('should not be reached'))
+  it('forwards a malformed PATCH /config body exactly when enforced', async () => {
+    const upstreamFetch = vi.fn().mockResolvedValue(
+      new Response('ok', { status: 200, headers: { 'content-type': 'application/json' } })
+    )
     globalThis.fetch = upstreamFetch as unknown as typeof fetch
 
     const res = await app.request('/api/opencode-proxy/config', {
@@ -674,14 +549,12 @@ describe('opencode-proxy routes', () => {
       body: '{not json',
     })
 
-    expect(res.status).toBe(403)
-    expect(upstreamFetch).not.toHaveBeenCalled()
-    const body = await res.json() as { error: string }
-    expect(body.error).toContain('Sandbox enforcement is on')
+    expect(res.status).toBe(200)
+    const fetchCall = upstreamFetch.mock.calls[0] as [string, RequestInit]
+    expect(await new Response(fetchCall[1].body as ReadableStream).text()).toBe('{not json')
   })
 
   it('forwards PATCH /config mutations raw when enforcement is off', async () => {
-    isSandboxEnforcedMock.mockReturnValue(false)
     const upstreamFetch = vi.fn().mockResolvedValue(
       new Response('ok', { status: 200, headers: { 'content-type': 'application/json' } })
     )
@@ -703,7 +576,6 @@ describe('opencode-proxy routes', () => {
   })
 
   it('forwards non-config mutations raw when enforced', async () => {
-    isSandboxEnforcedMock.mockReturnValue(true)
     const upstreamFetch = vi.fn().mockResolvedValue(
       new Response('ok', { status: 200, headers: { 'content-type': 'application/json' } })
     )
@@ -724,9 +596,10 @@ describe('opencode-proxy routes', () => {
     expect(forwarded.content).toBe('hello')
   })
 
-  it('rejects a well-known auth write with 403 when enforced', async () => {
-    isSandboxEnforcedMock.mockReturnValue(true)
-    const upstreamFetch = vi.fn().mockResolvedValue(new Response('should not be reached'))
+  it('forwards a well-known auth write when enforced', async () => {
+    const upstreamFetch = vi.fn().mockResolvedValue(
+      new Response('ok', { status: 200, headers: { 'content-type': 'application/json' } })
+    )
     globalThis.fetch = upstreamFetch as unknown as typeof fetch
 
     const res = await app.request('/api/opencode-proxy/auth/sso.example.com', {
@@ -738,15 +611,13 @@ describe('opencode-proxy routes', () => {
       body: JSON.stringify({ type: 'wellknown', key: 'SSO_TOKEN', token: 't' }),
     })
 
-    expect(res.status).toBe(403)
-    expect(upstreamFetch).not.toHaveBeenCalled()
-    const body = await res.json() as { error: string }
-    expect(body.error).toContain('Sandbox enforcement is on')
-    expect(body.error).toContain('well-known')
+    expect(res.status).toBe(200)
+    const fetchCall = upstreamFetch.mock.calls[0] as [string, RequestInit]
+    const forwarded = JSON.parse(await new Response(fetchCall[1].body as ReadableStream).text()) as Record<string, unknown>
+    expect(forwarded).toEqual({ type: 'wellknown', key: 'SSO_TOKEN', token: 't' })
   })
 
   it('forwards api and oauth auth writes when enforced', async () => {
-    isSandboxEnforcedMock.mockReturnValue(true)
     const upstreamFetch = vi.fn().mockResolvedValue(
       new Response('ok', { status: 200, headers: { 'content-type': 'application/json' } })
     )
@@ -768,7 +639,6 @@ describe('opencode-proxy routes', () => {
   })
 
   it('forwards auth writes raw when enforcement is off', async () => {
-    isSandboxEnforcedMock.mockReturnValue(false)
     const upstreamFetch = vi.fn().mockResolvedValue(
       new Response('ok', { status: 200, headers: { 'content-type': 'application/json' } })
     )

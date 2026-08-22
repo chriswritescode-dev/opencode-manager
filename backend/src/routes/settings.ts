@@ -29,7 +29,6 @@ import {
   discoverModelsCached,
 } from '../utils/discovery-cache'
 import { opencodeServerManager, ConfigReloadError, resolveOpenCodeExecutable } from '../services/opencode-single-server'
-import { sanitizeConfigForEnforcementResult, type EnforcementRemovedSections } from '../services/opencode/enforcement-config'
 import { getOrCreateInternalToken, rotateInternalToken } from '../services/internal-token'
 import { sseAggregator } from '../services/sse-aggregator'
 import type { OpenCodeSupervisor } from '../services/opencode-supervisor'
@@ -88,9 +87,8 @@ function getOpenCodeConfigContentToWrite(
   sourceConfig: Record<string, unknown>,
   appliedConfig?: Record<string, unknown>,
   removedFields?: string[],
-  enforcementRemoved = false,
 ): string {
-  if ((removedFields && removedFields.length > 0) || enforcementRemoved) {
+  if (removedFields && removedFields.length > 0) {
     return JSON.stringify(appliedConfig ?? sourceConfig, null, 2)
   }
 
@@ -246,28 +244,6 @@ function getMarkdownUploadManifest(manifest: ReturnType<typeof parseUploadManife
 
 function hasConfiguredPlugins(config: Record<string, unknown> | undefined): boolean {
   return Array.isArray(config?.plugin) && config.plugin.length > 0
-}
-
-type EnforcementSanitization = {
-  patchTarget: Record<string, unknown>
-  removed: EnforcementRemovedSections
-}
-
-function sanitizeConfigPatchForEnforcement(config: Record<string, unknown>): EnforcementSanitization {
-  const { sanitized, removed } = sanitizeConfigForEnforcementResult(config, opencodeServerManager.isSandboxEnforced())
-  return { patchTarget: sanitized, removed }
-}
-
-function contentForEnforcedDefaultWrite(
-  rawContent: string,
-  config: Record<string, unknown>,
-): { content: string; enforcementRemoved: boolean } {
-  const sanitization = sanitizeConfigPatchForEnforcement(config)
-  const enforcementRemoved = Object.keys(sanitization.removed).length > 0
-  if (!enforcementRemoved) {
-    return { content: rawContent, enforcementRemoved }
-  }
-  return { content: JSON.stringify(sanitization.patchTarget, null, 2), enforcementRemoved }
 }
 
 function execWithTimeout(
@@ -508,7 +484,7 @@ export function createSettingsRoutes(db: Database, gitAuthService: GitAuthServic
         )
 
         if (hasConfiguredPlugins(provisionalConfig.content)) {
-          const { content: contentToWrite } = contentForEnforcedDefaultWrite(provisionalConfig.rawContent, provisionalConfig.content)
+          const contentToWrite = provisionalConfig.rawContent
           const config = settingsService.updateOpenCodeConfig(provisionalConfig.name, {
             content: contentToWrite,
             isDefault: true,
@@ -527,8 +503,7 @@ export function createSettingsRoutes(db: Database, gitAuthService: GitAuthServic
           return c.json(restartFailed ? { ...config, restartFailed, restartError } : config)
         }
 
-        const sanitization = sanitizeConfigPatchForEnforcement(provisionalConfig.content)
-        const patchResult = await patchConfigWithRecovery(openCodeClient, sanitization.patchTarget)
+        const patchResult = await patchConfigWithRecovery(openCodeClient, provisionalConfig.content)
         if (!patchResult.success) {
           settingsService.deleteOpenCodeConfig(provisionalConfig.name, userId)
           return c.json({ 
@@ -541,10 +516,9 @@ export function createSettingsRoutes(db: Database, gitAuthService: GitAuthServic
 
         const contentToWrite = getOpenCodeConfigContentToWrite(
           provisionalConfig.rawContent,
-          sanitization.patchTarget,
+          provisionalConfig.content,
           patchResult.appliedConfig,
           patchResult.removedFields,
-          Object.keys(sanitization.removed).length > 0,
         )
         const config = settingsService.updateOpenCodeConfig(provisionalConfig.name, {
           content: contentToWrite,
@@ -591,7 +565,7 @@ export function createSettingsRoutes(db: Database, gitAuthService: GitAuthServic
       const existingConfig = settingsService.getOpenCodeConfigByName(configName, userId)
       const previousContent = existingConfig?.content
       
-      let config = settingsService.updateOpenCodeConfig(configName, validated, userId)
+      const config = settingsService.updateOpenCodeConfig(configName, validated, userId)
       if (!config) {
         return c.json({ error: 'Config not found' }, 404)
       }
@@ -601,22 +575,14 @@ export function createSettingsRoutes(db: Database, gitAuthService: GitAuthServic
         const configPath = getOpenCodeConfigFilePath()
 
         if (restartRequired) {
-          const { content: contentToWrite, enforcementRemoved } = contentForEnforcedDefaultWrite(config.rawContent, config.content)
-          if (enforcementRemoved) {
-            const persisted = settingsService.updateOpenCodeConfig(configName, { content: contentToWrite }, userId)
-            if (!persisted) {
-              return c.json({ error: 'Config not found' }, 404)
-            }
-            config = persisted
-          }
+          const contentToWrite = config.rawContent
           await writeFileContent(configPath, contentToWrite)
           logger.info(`Wrote default config to: ${configPath}`)
           logger.info('OpenCode configuration change requires a server restart; deferring until requested')
           opencodeServerManager.markRestartPending()
           return c.json({ ...config, restartRequired: true })
         } else {
-          const sanitization = sanitizeConfigPatchForEnforcement(config.content)
-          const patchResult = await patchConfigWithRecovery(openCodeClient, sanitization.patchTarget)
+          const patchResult = await patchConfigWithRecovery(openCodeClient, config.content)
           if (!patchResult.success) {
             return c.json({ 
               error: 'Config saved but failed to apply', 
@@ -627,13 +593,11 @@ export function createSettingsRoutes(db: Database, gitAuthService: GitAuthServic
           }
           
           const removedFields = patchResult.removedFields ?? []
-          const enforcementRemoved = Object.keys(sanitization.removed).length > 0
           const contentToWrite = getOpenCodeConfigContentToWrite(
             config.rawContent,
-            sanitization.patchTarget,
+            config.content,
             patchResult.appliedConfig,
             removedFields,
-            enforcementRemoved,
           )
 
           await writeFileContent(configPath, contentToWrite)
@@ -648,17 +612,6 @@ export function createSettingsRoutes(db: Database, gitAuthService: GitAuthServic
               }, 409)
             }
             return c.json({ ...persisted, removedFields })
-          }
-
-          if (enforcementRemoved) {
-            logger.info('Config applied with host-execution sections removed by sandbox enforcement')
-            const persisted = settingsService.updateOpenCodeConfig(configName, { content: contentToWrite }, userId)
-            if (!persisted) {
-              return c.json({
-                error: 'OpenCode config was removed while applying sandbox enforcement',
-              }, 409)
-            }
-            return c.json(persisted)
           }
         }
       }
@@ -703,13 +656,7 @@ export function createSettingsRoutes(db: Database, gitAuthService: GitAuthServic
       }
 
       if (hasConfiguredPlugins(existingConfig.content)) {
-        const { content: contentToWrite, enforcementRemoved } = contentForEnforcedDefaultWrite(existingConfig.rawContent, existingConfig.content)
-        if (enforcementRemoved) {
-          const updated = settingsService.updateOpenCodeConfig(configName, { content: contentToWrite }, userId)
-          if (!updated) {
-            return c.json({ error: 'Config not found' }, 404)
-          }
-        }
+        const contentToWrite = existingConfig.rawContent
         const config = settingsService.setDefaultOpenCodeConfig(configName, userId)
         if (!config) {
           return c.json({ error: 'Config not found' }, 404)
@@ -724,8 +671,7 @@ export function createSettingsRoutes(db: Database, gitAuthService: GitAuthServic
         return c.json(restartFailed ? { ...config, restartFailed, restartError } : config)
       }
 
-      const sanitization = sanitizeConfigPatchForEnforcement(existingConfig.content)
-      const patchResult = await patchConfigWithRecovery(openCodeClient, sanitization.patchTarget)
+      const patchResult = await patchConfigWithRecovery(openCodeClient, existingConfig.content)
       if (!patchResult.success) {
         return c.json({ 
           error: 'Config validation failed', 
@@ -737,10 +683,9 @@ export function createSettingsRoutes(db: Database, gitAuthService: GitAuthServic
 
       const contentToWrite = getOpenCodeConfigContentToWrite(
         existingConfig.rawContent,
-        sanitization.patchTarget,
+        existingConfig.content,
         patchResult.appliedConfig,
         patchResult.removedFields,
-        Object.keys(sanitization.removed).length > 0,
       )
       const updatedConfig = settingsService.updateOpenCodeConfig(configName, {
         content: contentToWrite,
@@ -923,10 +868,7 @@ export function createSettingsRoutes(db: Database, gitAuthService: GitAuthServic
         return c.json({ error: 'Failed to get default config after rollback' }, 500)
       }
 
-      const { content: contentToWrite, enforcementRemoved } = contentForEnforcedDefaultWrite(config.rawContent, config.content)
-      if (enforcementRemoved) {
-        settingsService.updateOpenCodeConfig(config.name, { content: contentToWrite }, userId)
-      }
+      const contentToWrite = config.rawContent
       await writeFileContent(configPath, contentToWrite)
       logger.info(`Rolled back to config '${rollbackConfig}'`)
 
