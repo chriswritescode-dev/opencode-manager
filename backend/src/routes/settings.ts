@@ -1,6 +1,6 @@
 import { Hono, type Context } from 'hono'
 import { z } from 'zod'
-import { execSync, spawnSync } from 'child_process'
+import { spawnSync } from 'child_process'
 import { randomUUID } from 'crypto'
 import { existsSync } from 'fs'
 import { resolve, dirname } from 'path'
@@ -28,7 +28,7 @@ import { logger } from '../utils/logger'
 import {
   discoverModelsCached,
 } from '../utils/discovery-cache'
-import { opencodeServerManager, ConfigReloadError } from '../services/opencode-single-server'
+import { opencodeServerManager, ConfigReloadError, resolveOpenCodeExecutable } from '../services/opencode-single-server'
 import { sanitizeConfigForEnforcementResult, type EnforcementRemovedSections } from '../services/opencode/enforcement-config'
 import { getOrCreateInternalToken, rotateInternalToken } from '../services/internal-token'
 import { sseAggregator } from '../services/sse-aggregator'
@@ -271,45 +271,31 @@ function contentForEnforcedDefaultWrite(
 }
 
 function execWithTimeout(
-  command: string | [executable: string, ...args: string[]],
+  args: [executable: string, ...commandArgs: string[]],
   timeoutMs: number,
   env?: Record<string, string>
 ): { output: string; timedOut: boolean } {
-  if (Array.isArray(command)) {
-    const result = spawnSync(command[0], command.slice(1), {
-      encoding: 'utf8',
-      timeout: timeoutMs,
-      killSignal: 'SIGKILL',
-      env: env ? { ...process.env, ...env } : undefined
-    })
+  const result = spawnSync(args[0], args.slice(1), {
+    encoding: 'utf8',
+    timeout: timeoutMs,
+    killSignal: 'SIGKILL',
+    env: env ? { ...process.env, ...env } : undefined
+  })
 
-    if (result.signal === 'SIGKILL' || result.error?.message?.includes('TIMEOUT')) {
-      return { output: '', timedOut: true }
-    }
-
-    const output = (result.stdout || '') + (result.stderr || '')
-    return { output, timedOut: false }
+  if (result.signal === 'SIGKILL' || result.error?.message?.includes('TIMEOUT')) {
+    return { output: '', timedOut: true }
   }
 
-  try {
-    const output = execSync(command, {
-      encoding: 'utf8',
-      timeout: timeoutMs,
-      killSignal: 'SIGKILL',
-      env: env ? { ...process.env, ...env } : undefined
-    })
-    return { output, timedOut: false }
-  } catch (error) {
-    if (error && typeof error === 'object' && 'status' in error && (error as { status: number }).status === null) {
-      return { output: '', timedOut: true }
-    }
-    if (error && typeof error === 'object' && ('stdout' in error || 'stderr' in error)) {
-      const stdout = (error as { stdout?: string }).stdout || ''
-      const stderr = (error as { stderr?: string }).stderr || ''
-      return { output: stdout + stderr, timedOut: false }
-    }
-    throw error
+  if (result.error) {
+    throw result.error
   }
+
+  const output = (result.stdout || '') + (result.stderr || '')
+  if (result.status !== 0) {
+    throw new Error(output || `Command exited with status ${result.status}`)
+  }
+
+  return { output, timedOut: false }
 }
 
 function spawnWithTimeout(args: string[], timeoutMs: number, env?: Record<string, string>): { output: string; timedOut: boolean } {
@@ -989,8 +975,9 @@ export function createSettingsRoutes(db: Database, gitAuthService: GitAuthServic
 
     try {
       const installMethod = getOpenCodeInstallMethod()
+      const openCodeExecutable = resolveOpenCodeExecutable() ?? 'opencode'
       logger.info(`Running opencode upgrade --method ${installMethod} with 90s timeout...`)
-      const { output: upgradeOutput, timedOut } = execWithTimeout(`opencode upgrade --method ${installMethod} 2>&1`, 90000)
+      const { output: upgradeOutput, timedOut } = execWithTimeout([openCodeExecutable, 'upgrade', '--method', installMethod], 90000)
       logger.info(`Upgrade output: ${upgradeOutput}`)
 
       if (timedOut) {
@@ -1139,10 +1126,11 @@ export function createSettingsRoutes(db: Database, gitAuthService: GitAuthServic
       logger.info(`Installing OpenCode version: ${version}`)
       const versionArg = version.startsWith('v') ? version : `v${version}`
       const installMethod = getOpenCodeInstallMethod()
+      const openCodeExecutable = resolveOpenCodeExecutable() ?? 'opencode'
       logger.info(`Running opencode upgrade ${versionArg} --method ${installMethod} with 90s timeout...`)
 
       const { output: upgradeOutput, timedOut } = execWithTimeout(
-        ['opencode', 'upgrade', versionArg, '--method', installMethod],
+        [openCodeExecutable, 'upgrade', versionArg, '--method', installMethod],
         90000
       )
       logger.info(`Upgrade output: ${upgradeOutput}`)
@@ -1154,6 +1142,10 @@ export function createSettingsRoutes(db: Database, gitAuthService: GitAuthServic
 
       const newVersion = await opencodeServerManager.fetchVersion()
       logger.info(`New OpenCode version: ${newVersion}`)
+
+      if (newVersion !== versionWithoutPrefix) {
+        throw new Error(`OpenCode version install did not result in the requested version ${versionWithoutPrefix}; detected ${newVersion ?? 'unknown'}`)
+      }
 
       opencodeServerManager.clearStartupError()
       await restartOpenCode(openCodeSupervisor)

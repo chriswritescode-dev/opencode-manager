@@ -264,9 +264,9 @@ async function removeChildStateMarker(): Promise<void> {
 export function resolveOpenCodeExecutable(): string | null {
   const candidates = [
     process.env.OPENCODE_BIN,
+    path.join(getOpenCodePluginDiscoveryHome(), '.opencode', 'bin', 'opencode'),
     '/usr/local/bin/opencode',
     '/opt/opencode/bin/opencode',
-    path.join(getOpenCodePluginDiscoveryHome(), '.opencode', 'bin', 'opencode'),
   ].filter((candidate): candidate is string => typeof candidate === 'string' && candidate.length > 0)
   for (const candidate of candidates) {
     try {

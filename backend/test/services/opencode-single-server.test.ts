@@ -117,7 +117,7 @@ import { promises as fs, accessSync, readdirSync } from 'fs'
 import { execSync, spawnSync } from 'child_process'
 import path from 'path'
 import os from 'os'
-import { ConfigReloadError } from '../../src/services/opencode-single-server'
+import { ConfigReloadError, resolveOpenCodeExecutable } from '../../src/services/opencode-single-server'
 import { forceProcessAttestation, resetProcessIdentityProvider } from '../../src/services/opencode/process-identity'
 import { encryptSecret } from '../../src/utils/crypto'
 import { ENV } from '@opencode-manager/shared/config/env'
@@ -768,6 +768,24 @@ describe('OpenCodeServerManager - server auth', () => {
       } else {
         process.env.OPENCODE_BIN = previousBin
       }
+    }
+  })
+
+  it('prefers the user-installed OpenCode executable over the bundled executable', () => {
+    const accessSyncMock = accessSync as ReturnType<typeof vi.fn>
+    try {
+      accessSyncMock.mockImplementation((candidate) => {
+        if (candidate === '/test/home/.opencode/bin/opencode' || candidate === '/usr/local/bin/opencode') return
+        throw new Error('ENOENT')
+      })
+
+      expect(resolveOpenCodeExecutable()).toBe('/test/home/.opencode/bin/opencode')
+    } finally {
+      accessSyncMock.mockImplementation(() => {
+        const error = new Error('ENOENT: no such file or directory') as NodeJS.ErrnoException
+        error.code = 'ENOENT'
+        throw error
+      })
     }
   })
 
