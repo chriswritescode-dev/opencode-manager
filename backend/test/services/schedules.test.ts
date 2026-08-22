@@ -124,8 +124,6 @@ function createOpenCodeClientStub(): OpenCodeClient {
     postJson: vi.fn(async () => ({}) as unknown),
     setProviderAuth: vi.fn(async () => true),
     deleteProviderAuth: vi.fn(async () => true),
-    startMcpAuth: vi.fn(async () => new Response('', { status: 200 })),
-    authenticateMcp: vi.fn(async () => new Response('', { status: 200 })),
   } as OpenCodeClient
 }
 

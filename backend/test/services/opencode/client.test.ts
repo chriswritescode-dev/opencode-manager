@@ -203,6 +203,69 @@ describe('OpenCodeClient', () => {
         Object.defineProperty(globalThis, 'fetch', { value: originalFetch, configurable: true, writable: true })
       }
     })
+
+    it('honours an explicit host override instead of OPENCODE_HOST', async () => {
+      const originalFetch = globalThis.fetch
+      const originalHost = ENV.OPENCODE.HOST
+      Object.defineProperty(ENV.OPENCODE, 'HOST', { value: '192.168.1.10', configurable: true, writable: true })
+      let capturedUrl: URL | undefined
+      const fetchFn = async (input: URL | Request | string) => {
+        capturedUrl = input instanceof URL ? input : new URL(input.toString())
+        return new Response(JSON.stringify({}), { status: 200 })
+      }
+      Object.defineProperty(globalThis, 'fetch', { value: fetchFn, configurable: true, writable: true })
+
+      try {
+        const client = createOpenCodeClient('testpassword', '127.0.0.1')
+        await client.forward({ method: 'GET', path: '/doc' })
+
+        expect(capturedUrl?.origin).toBe('http://127.0.0.1:5551')
+      } finally {
+        Object.defineProperty(ENV.OPENCODE, 'HOST', { value: originalHost, configurable: true, writable: true })
+        Object.defineProperty(globalThis, 'fetch', { value: originalFetch, configurable: true, writable: true })
+      }
+    })
+
+    it('brackets an IPv6 loopback host in the request URL', async () => {
+      const originalFetch = globalThis.fetch
+      let capturedUrl: URL | undefined
+      const fetchFn = async (input: URL | Request | string) => {
+        capturedUrl = input instanceof URL ? input : new URL(input.toString())
+        return new Response(JSON.stringify({}), { status: 200 })
+      }
+      Object.defineProperty(globalThis, 'fetch', { value: fetchFn, configurable: true, writable: true })
+
+      try {
+        const client = createOpenCodeClient('testpassword', '::1')
+        await client.forward({ method: 'GET', path: '/doc' })
+
+        expect(capturedUrl?.origin).toBe('http://[::1]:5551')
+      } finally {
+        Object.defineProperty(globalThis, 'fetch', { value: originalFetch, configurable: true, writable: true })
+      }
+    })
+
+    it('resolves a lazy host override on every request', async () => {
+      const originalFetch = globalThis.fetch
+      const hosts: string[] = []
+      let currentHost = '192.168.1.10'
+      const fetchFn = async (input: URL | Request | string) => {
+        hosts.push(input instanceof URL ? input.hostname : new URL(input.toString()).hostname)
+        return new Response(JSON.stringify({}), { status: 200 })
+      }
+      Object.defineProperty(globalThis, 'fetch', { value: fetchFn, configurable: true, writable: true })
+
+      try {
+        const client = createOpenCodeClient('testpassword', () => currentHost)
+        await client.forward({ method: 'GET', path: '/doc' })
+        currentHost = '127.0.0.1'
+        await client.forward({ method: 'GET', path: '/doc' })
+
+        expect(hosts).toEqual(['192.168.1.10', '127.0.0.1'])
+      } finally {
+        Object.defineProperty(globalThis, 'fetch', { value: originalFetch, configurable: true, writable: true })
+      }
+    })
   })
 
   describe('forwardRaw', () => {
@@ -398,42 +461,6 @@ describe('OpenCodeClient', () => {
 
       const result = await client.deleteProviderAuth('test-provider')
       expect(result).toBe(false)
-    })
-  })
-
-  describe('startMcpAuth', () => {
-    it('should build path with encoded serverName and directory param', async () => {
-      const mockResponse = new Response(JSON.stringify({}), { status: 200 })
-      let capturedUrl: URL | undefined
-      const fetchFn = async (input: URL | Request | string) => {
-        capturedUrl = input instanceof URL ? input : new URL(input.toString())
-        return mockResponse
-      }
-      const client = new FetchOpenCodeClient({ baseUrl, basicAuth: '', fetchFn: fetchFn as unknown as typeof fetch })
-
-      const result = await client.startMcpAuth('foo bar', '/dir')
-
-      expect(capturedUrl?.pathname).toBe('/mcp/foo%20bar/auth')
-      expect(capturedUrl?.searchParams.get('directory')).toBe('/dir')
-      expect(result).toBeInstanceOf(Response)
-    })
-  })
-
-  describe('authenticateMcp', () => {
-    it('should build path with auth/authenticate suffix', async () => {
-      const mockResponse = new Response(JSON.stringify({}), { status: 200 })
-      let capturedUrl: URL | undefined
-      const fetchFn = async (input: URL | Request | string) => {
-        capturedUrl = input instanceof URL ? input : new URL(input.toString())
-        return mockResponse
-      }
-      const client = new FetchOpenCodeClient({ baseUrl, basicAuth: '', fetchFn: fetchFn as unknown as typeof fetch })
-
-      const result = await client.authenticateMcp('name', undefined)
-
-      expect(capturedUrl?.pathname).toBe('/mcp/name/auth/authenticate')
-      expect(capturedUrl?.searchParams.has('directory')).toBe(false)
-      expect(result).toBeInstanceOf(Response)
     })
   })
 })

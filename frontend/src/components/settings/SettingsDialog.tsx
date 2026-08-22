@@ -6,6 +6,7 @@ import { OpenCodeConfigManager } from '@/components/settings/OpenCodeConfigManag
 import { OpenCodeServerAuthSettings } from '@/components/settings/OpenCodeServerAuthSettings'
 import { ManagerTokenSettings } from '@/components/settings/ManagerTokenSettings'
 import { ServerEnvVarsSettings } from '@/components/settings/ServerEnvVarsSettings'
+import { SandboxSettings } from '@/components/settings/SandboxSettings'
 import { ServerHealthStatus } from '@/components/settings/ServerHealthStatus'
 import { ProviderSettings } from '@/components/settings/ProviderSettings'
 import { AccountSettings } from '@/components/settings/AccountSettings'
@@ -178,7 +179,8 @@ export function SettingsDialog() {
                       <ManagerTokenSettings isOpen={authSectionsOpen} onToggle={toggleAuthSections} />
                     </div>
                     <ServerEnvVarsSettings />
-                    <OpenCodeConfigManager hideHealthStatus />
+                    <SandboxSettings />
+                    <OpenCodeConfigManager />
                   </div>
                 </TabsContent>
                 <TabsContent key="providers" value="providers" className="mt-0"><ProviderSettings /></TabsContent>
@@ -249,7 +251,8 @@ export function SettingsDialog() {
                     <OpenCodeServerAuthSettings />
                     <ManagerTokenSettings />
                     <ServerEnvVarsSettings />
-                    <OpenCodeConfigManager hideHealthStatus />
+                    <SandboxSettings />
+                    <OpenCodeConfigManager />
                   </div>
                 )}
               {mobileView === 'providers' && <div key="providers"><ProviderSettings /></div>}

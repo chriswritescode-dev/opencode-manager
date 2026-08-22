@@ -1,6 +1,6 @@
-import { describe, it, expect, beforeAll, afterAll, vi } from 'vitest'
+import { describe, it, expect, beforeAll, afterAll, beforeEach, vi } from 'vitest'
 import { execSync } from 'child_process'
-import { mkdtempSync, existsSync, mkdirSync, writeFileSync } from 'fs'
+import { mkdtempSync, existsSync, mkdirSync, writeFileSync, symlinkSync, unlinkSync, rmSync } from 'fs'
 import { tmpdir } from 'os'
 import path from 'path'
 import { rm } from 'fs/promises'
@@ -19,6 +19,14 @@ vi.mock('@opencode-manager/shared/config/env', async (importOriginal) => {
     getWorkspacePath: vi.fn(() => '/tmp/fake-workspace'),
   }
 })
+
+const opencodeServerManagerMock = vi.hoisted(() => ({
+  isSandboxEnforced: vi.fn(),
+}))
+
+vi.mock('../../src/services/opencode-single-server', () => ({
+  opencodeServerManager: opencodeServerManagerMock,
+}))
 
 describe('buildRepoEnvForRepo', () => {
   it('includes OCM_GIT_REPO_ID and OCM_GIT_REPO_CWD when id is provided', async () => {
@@ -81,9 +89,11 @@ describe('ScheduleWorktreeManager', () => {
     forwardRaw: vi.fn(),
     setProviderAuth: vi.fn(),
     deleteProviderAuth: vi.fn(),
-    startMcpAuth: vi.fn(),
-    authenticateMcp: vi.fn(),
   }
+
+  beforeEach(() => {
+    opencodeServerManagerMock.isSandboxEnforced.mockReturnValue(false)
+  })
 
   beforeAll(() => {
     tmpDir = mkdtempSync(path.join(tmpdir(), 'schedule-worktree-test-'))
@@ -335,6 +345,7 @@ describe('ScheduleWorktreeManager', () => {
       branch: null,
     })
     mockOpenCodeClient.postJson = mockPost
+    opencodeServerManagerMock.isSandboxEnforced.mockReturnValue(true)
 
     const manager = await createManager()
     const repo = testRepo()
@@ -364,6 +375,116 @@ describe('ScheduleWorktreeManager', () => {
 
     // Cleanup
     await cleanup()
+  })
+
+  it('prepare falls back to raw git when the workspace directory is outside the sandboxed project roots', async () => {
+    const workspaceId = 'ws-outside-456'
+    const outsideDirectory = path.join(path.dirname(tmpDir), 'ocm-outside-workspace')
+    mockOpenCodeClient.postJson = vi.fn().mockResolvedValue({
+      id: workspaceId,
+      directory: outsideDirectory,
+      branch: null,
+    })
+    opencodeServerManagerMock.isSandboxEnforced.mockReturnValue(true)
+    const deleteMock = vi.fn().mockResolvedValue(new Response(null, { status: 200 }))
+    mockOpenCodeClient.forward = deleteMock
+
+    const manager = await createManager()
+    const repo = testRepo()
+    const job = { id: 31, branch: null }
+    const runId = 6
+
+    const ctx = await manager.prepare(repo, job, runId)
+
+    expect(ctx).not.toBeNull()
+    expect(ctx!.workspaceId).toBeNull()
+    expect(ctx!.worktreePath).toBe(path.join(scheduleWorktreesRoot, 'job-31-run-6'))
+    expect(existsSync(ctx!.worktreePath)).toBe(true)
+
+    expect(deleteMock).toHaveBeenCalledWith(
+      expect.objectContaining({
+        method: 'DELETE',
+        path: `/experimental/workspace/${workspaceId}`,
+      }),
+    )
+
+    const { removeWorktree } = await import('../../src/services/repo')
+    await removeWorktree(baseRepoPath, ctx!.worktreePath)
+  })
+
+  it('uses an OpenCode workspace outside the mount roots as-is when sandboxing is not enforced', async () => {
+    const outsideDirectory = path.join(path.dirname(tmpDir), 'ocm-off-workspace')
+    const workspaceId = 'ws-off-123'
+    execSync(`git -C "${baseRepoPath}" worktree add --detach "${outsideDirectory}" origin/main`, { env })
+    mockOpenCodeClient.postJson = vi.fn().mockResolvedValue({
+      id: workspaceId,
+      directory: outsideDirectory,
+      branch: null,
+    })
+
+    const manager = await createManager()
+    const repo = testRepo()
+    const job = { id: 32, branch: null }
+    const runId = 1
+
+    try {
+      const ctx = await manager.prepare(repo, job, runId)
+
+      expect(ctx).not.toBeNull()
+      expect(ctx!.workspaceId).toBe(workspaceId)
+      expect(ctx!.directory).toBe(outsideDirectory)
+
+      const branch = execSync(`git -C "${outsideDirectory}" rev-parse --abbrev-ref HEAD`, {
+        encoding: 'utf-8',
+      }).trim()
+      expect(branch).toBe('schedule/32/run-1')
+    } finally {
+      const { removeWorktree } = await import('../../src/services/repo')
+      await removeWorktree(baseRepoPath, outsideDirectory).catch(() => {})
+    }
+  })
+
+  it('falls back to raw git when an enforced workspace directory is a symlink escaping the project roots', async () => {
+    const escapeTarget = path.join(path.dirname(tmpDir), 'ocm-escape-target')
+    const escapeLink = path.join(tmpDir, 'ocm-escape-link')
+    mkdirSync(escapeTarget, { recursive: true })
+    symlinkSync(escapeTarget, escapeLink)
+
+    const workspaceId = 'ws-escape-999'
+    mockOpenCodeClient.postJson = vi.fn().mockResolvedValue({
+      id: workspaceId,
+      directory: escapeLink,
+      branch: null,
+    })
+    opencodeServerManagerMock.isSandboxEnforced.mockReturnValue(true)
+    const deleteMock = vi.fn().mockResolvedValue(new Response(null, { status: 200 }))
+    mockOpenCodeClient.forward = deleteMock
+
+    const manager = await createManager()
+    const repo = testRepo()
+    const job = { id: 33, branch: null }
+    const runId = 1
+
+    try {
+      const ctx = await manager.prepare(repo, job, runId)
+
+      expect(ctx).not.toBeNull()
+      expect(ctx!.workspaceId).toBeNull()
+      expect(ctx!.worktreePath).toBe(path.join(scheduleWorktreesRoot, 'job-33-run-1'))
+      expect(existsSync(ctx!.worktreePath)).toBe(true)
+
+      expect(deleteMock).toHaveBeenCalledWith(
+        expect.objectContaining({
+          method: 'DELETE',
+          path: `/experimental/workspace/${workspaceId}`,
+        }),
+      )
+    } finally {
+      unlinkSync(escapeLink)
+      rmSync(escapeTarget, { recursive: true, force: true })
+      const { removeWorktree } = await import('../../src/services/repo')
+      await removeWorktree(baseRepoPath, path.join(scheduleWorktreesRoot, 'job-33-run-1')).catch(() => {})
+    }
   })
 
   it('prepare falls back to raw git when postJson rejects', async () => {

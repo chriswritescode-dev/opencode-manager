@@ -14,6 +14,8 @@ import { executeCommand } from '../utils/process'
 import { resolveDefaultBranch, createWorktreeSafely, removeWorktree } from './repo'
 import { logger } from '../utils/logger'
 import { mkdirSyncSafe } from '../utils/fs-safe'
+import { resolveSandboxWorkDirectory } from './sandbox/command'
+import { opencodeServerManager } from './opencode-single-server'
 
 export interface ScheduleWorktreeContext {
   directory: string
@@ -89,16 +91,18 @@ export class ScheduleWorktreeManager {
           { directory: repo.fullPath },
         )
 
-        // Re-point the workspace to our run branch and base
-        await executeCommand(['git', '-C', createdWorkspace.directory, 'checkout', '-B', runBranch, baseRef], { env })
+        const workspaceDirectory = await this.resolveWorkspaceDirectory(createdWorkspace.directory)
 
-        if (!existsSync(createdWorkspace.directory)) {
-          throw new Error(`OpenCode workspace directory was not created at: ${createdWorkspace.directory}`)
+        // Re-point the workspace to our run branch and base
+        await executeCommand(['git', '-C', workspaceDirectory, 'checkout', '-B', runBranch, baseRef], { env })
+
+        if (!existsSync(workspaceDirectory)) {
+          throw new Error(`OpenCode workspace directory was not created at: ${workspaceDirectory}`)
         }
 
         return {
-          directory: createdWorkspace.directory,
-          worktreePath: createdWorkspace.directory,
+          directory: workspaceDirectory,
+          worktreePath: workspaceDirectory,
           runBranch,
           workspaceId: createdWorkspace.id,
         }
@@ -287,6 +291,17 @@ export class ScheduleWorktreeManager {
       }
     }
     return null
+  }
+
+  private async resolveWorkspaceDirectory(directory: string): Promise<string> {
+    if (!opencodeServerManager.isSandboxEnforced()) {
+      return directory
+    }
+    const workDirectory = await resolveSandboxWorkDirectory(directory)
+    if (workDirectory === null) {
+      throw new Error(`OpenCode workspace directory is outside the sandboxed project roots: ${directory}`)
+    }
+    return workDirectory
   }
 
   private async buildGitEnv(repo: Repo, sshSetup: boolean, silent: boolean): Promise<Record<string, string>> {

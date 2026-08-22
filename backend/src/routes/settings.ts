@@ -1,6 +1,6 @@
 import { Hono, type Context } from 'hono'
 import { z } from 'zod'
-import { execSync, spawnSync } from 'child_process'
+import { spawnSync } from 'child_process'
 import { randomUUID } from 'crypto'
 import { existsSync } from 'fs'
 import { resolve, dirname } from 'path'
@@ -13,6 +13,7 @@ import { getOpenCodeConfigFilePath, getAgentsMdPath } from '@opencode-manager/sh
 import {
   UserPreferencesSchema,
   OpenCodeConfigSchema,
+  type SandboxPreferences,
 } from '../types/settings'
 import type { GitCredential } from '@opencode-manager/shared'
 import {
@@ -27,11 +28,11 @@ import { logger } from '../utils/logger'
 import {
   discoverModelsCached,
 } from '../utils/discovery-cache'
-import { opencodeServerManager, ConfigReloadError } from '../services/opencode-single-server'
+import { opencodeServerManager, ConfigReloadError, resolveOpenCodeExecutable } from '../services/opencode-single-server'
 import { getOrCreateInternalToken, rotateInternalToken } from '../services/internal-token'
 import { sseAggregator } from '../services/sse-aggregator'
 import type { OpenCodeSupervisor } from '../services/opencode-supervisor'
-import { restartOpenCode, reloadOpenCodeConfig, getOpenCodeRestartCoordinator } from '../services/opencode-restart'
+import { restartOpenCode, restartOpenCodeAfterCommit, reloadOpenCodeConfig, getOpenCodeRestartCoordinator } from '../services/opencode-restart'
 import type { GitAuthService } from '../services/git-auth'
 import { DEFAULT_AGENTS_MD } from '../constants'
 import { validateSSHPrivateKey } from '../utils/ssh-validation'
@@ -83,14 +84,15 @@ function getOpenCodeInstallMethod(): string {
 
 function getOpenCodeConfigContentToWrite(
   rawContent: string,
+  sourceConfig: Record<string, unknown>,
   appliedConfig?: Record<string, unknown>,
-  removedFields?: string[]
+  removedFields?: string[],
 ): string {
-  if (!appliedConfig || !removedFields || removedFields.length === 0) {
-    return rawContent
+  if (removedFields && removedFields.length > 0) {
+    return JSON.stringify(appliedConfig ?? sourceConfig, null, 2)
   }
 
-  return JSON.stringify(appliedConfig, null, 2)
+  return rawContent
 }
 
 async function restartOpenCodeSafe(openCodeSupervisor: OpenCodeSupervisor | undefined, context: string): Promise<void> {
@@ -215,6 +217,14 @@ function needsOpenCodeRestart(
   return ['agent', 'plugin', 'skills', 'provider'].some((field) => didConfigFieldChange(previous, next, field))
 }
 
+function sandboxPreferenceChanged(
+  previous: SandboxPreferences | undefined,
+  next: SandboxPreferences | undefined,
+): boolean {
+  if (next === undefined) return false
+  return JSON.stringify(previous ?? {}) !== JSON.stringify(next)
+}
+
 function parseOptionalRepoId(value: string | undefined): number | undefined {
   if (value === undefined) return undefined
   const parsed = parseInt(value, 10)
@@ -237,45 +247,31 @@ function hasConfiguredPlugins(config: Record<string, unknown> | undefined): bool
 }
 
 function execWithTimeout(
-  command: string | [executable: string, ...args: string[]],
+  args: [executable: string, ...commandArgs: string[]],
   timeoutMs: number,
   env?: Record<string, string>
 ): { output: string; timedOut: boolean } {
-  if (Array.isArray(command)) {
-    const result = spawnSync(command[0], command.slice(1), {
-      encoding: 'utf8',
-      timeout: timeoutMs,
-      killSignal: 'SIGKILL',
-      env: env ? { ...process.env, ...env } : undefined
-    })
+  const result = spawnSync(args[0], args.slice(1), {
+    encoding: 'utf8',
+    timeout: timeoutMs,
+    killSignal: 'SIGKILL',
+    env: env ? { ...process.env, ...env } : undefined
+  })
 
-    if (result.signal === 'SIGKILL' || result.error?.message?.includes('TIMEOUT')) {
-      return { output: '', timedOut: true }
-    }
-
-    const output = (result.stdout || '') + (result.stderr || '')
-    return { output, timedOut: false }
+  if (result.signal === 'SIGKILL' || result.error?.message?.includes('TIMEOUT')) {
+    return { output: '', timedOut: true }
   }
 
-  try {
-    const output = execSync(command, {
-      encoding: 'utf8',
-      timeout: timeoutMs,
-      killSignal: 'SIGKILL',
-      env: env ? { ...process.env, ...env } : undefined
-    })
-    return { output, timedOut: false }
-  } catch (error) {
-    if (error && typeof error === 'object' && 'status' in error && (error as { status: number }).status === null) {
-      return { output: '', timedOut: true }
-    }
-    if (error && typeof error === 'object' && ('stdout' in error || 'stderr' in error)) {
-      const stdout = (error as { stdout?: string }).stdout || ''
-      const stderr = (error as { stderr?: string }).stderr || ''
-      return { output: stdout + stderr, timedOut: false }
-    }
-    throw error
+  if (result.error) {
+    throw result.error
   }
+
+  const output = (result.stdout || '') + (result.stderr || '')
+  if (result.status !== 0) {
+    throw new Error(output || `Command exited with status ${result.status}`)
+  }
+
+  return { output, timedOut: false }
 }
 
 function spawnWithTimeout(args: string[], timeoutMs: number, env?: Record<string, string>): { output: string; timedOut: boolean } {
@@ -400,6 +396,13 @@ export function createSettingsRoutes(db: Database, gitAuthService: GitAuthServic
       const currentSettings = settingsService.getSettings(userId)
       const settings = settingsService.updateSettings(validated.preferences, userId)
 
+      const sandboxChanged = sandboxPreferenceChanged(currentSettings.preferences.sandbox, validated.preferences.sandbox)
+
+      if (sandboxChanged) {
+        logger.info('Sandbox preference changed, marking OpenCode server restart as pending')
+        opencodeServerManager.markRestartPending()
+      }
+
       let serverRestarted = false
 
       const credentialsChanged = validated.preferences.gitCredentials !== undefined &&
@@ -421,7 +424,7 @@ export function createSettingsRoutes(db: Database, gitAuthService: GitAuthServic
         }
       }
 
-      return c.json({ ...settings, serverRestarted, reloadError })
+      return c.json({ ...settings, serverRestarted, reloadError, ...(sandboxChanged ? { restartRequired: true } : {}) })
     } catch (error) {
       logger.error('Failed to update settings:', error)
       if (error instanceof Error && error.message.startsWith('Invalid SSH key')) {
@@ -437,8 +440,16 @@ export function createSettingsRoutes(db: Database, gitAuthService: GitAuthServic
   app.delete('/', async (c) => {
     try {
       const userId = c.req.query('userId') || 'default'
+      const currentSettings = settingsService.getSettings(userId)
       const settings = settingsService.resetSettings(userId)
-      return c.json(settings)
+
+      const sandboxChanged = sandboxPreferenceChanged(currentSettings.preferences.sandbox, settings.preferences.sandbox)
+      if (sandboxChanged) {
+        logger.info('Sandbox preference changed, marking OpenCode server restart as pending')
+        opencodeServerManager.markRestartPending()
+      }
+
+      return c.json(sandboxChanged ? { ...settings, restartRequired: true } : settings)
     } catch (error) {
       logger.error('Failed to reset settings:', error)
       return c.json({ error: 'Failed to reset settings' }, 500)
@@ -473,8 +484,9 @@ export function createSettingsRoutes(db: Database, gitAuthService: GitAuthServic
         )
 
         if (hasConfiguredPlugins(provisionalConfig.content)) {
+          const contentToWrite = provisionalConfig.rawContent
           const config = settingsService.updateOpenCodeConfig(provisionalConfig.name, {
-            content: provisionalConfig.rawContent,
+            content: contentToWrite,
             isDefault: true,
           }, userId)
 
@@ -483,12 +495,12 @@ export function createSettingsRoutes(db: Database, gitAuthService: GitAuthServic
           }
 
           const configPath = getOpenCodeConfigFilePath()
-          await writeFileContent(configPath, provisionalConfig.rawContent)
+          await writeFileContent(configPath, contentToWrite)
           logger.info(`Wrote default config to: ${configPath}`)
           opencodeServerManager.clearStartupError()
-          await restartOpenCode(openCodeSupervisor)
+          const { restartFailed, restartError } = await restartOpenCodeAfterCommit(openCodeSupervisor)
 
-          return c.json(config)
+          return c.json(restartFailed ? { ...config, restartFailed, restartError } : config)
         }
 
         const patchResult = await patchConfigWithRecovery(openCodeClient, provisionalConfig.content)
@@ -504,8 +516,9 @@ export function createSettingsRoutes(db: Database, gitAuthService: GitAuthServic
 
         const contentToWrite = getOpenCodeConfigContentToWrite(
           provisionalConfig.rawContent,
+          provisionalConfig.content,
           patchResult.appliedConfig,
-          patchResult.removedFields
+          patchResult.removedFields,
         )
         const config = settingsService.updateOpenCodeConfig(provisionalConfig.name, {
           content: contentToWrite,
@@ -562,7 +575,8 @@ export function createSettingsRoutes(db: Database, gitAuthService: GitAuthServic
         const configPath = getOpenCodeConfigFilePath()
 
         if (restartRequired) {
-          await writeFileContent(configPath, config.rawContent)
+          const contentToWrite = config.rawContent
+          await writeFileContent(configPath, contentToWrite)
           logger.info(`Wrote default config to: ${configPath}`)
           logger.info('OpenCode configuration change requires a server restart; deferring until requested')
           opencodeServerManager.markRestartPending()
@@ -579,9 +593,12 @@ export function createSettingsRoutes(db: Database, gitAuthService: GitAuthServic
           }
           
           const removedFields = patchResult.removedFields ?? []
-          const contentToWrite = removedFields.length > 0
-            ? JSON.stringify(patchResult.appliedConfig ?? config.content, null, 2)
-            : config.rawContent
+          const contentToWrite = getOpenCodeConfigContentToWrite(
+            config.rawContent,
+            config.content,
+            patchResult.appliedConfig,
+            removedFields,
+          )
 
           await writeFileContent(configPath, contentToWrite)
           logger.info(`Wrote default config to: ${configPath}`)
@@ -639,18 +656,19 @@ export function createSettingsRoutes(db: Database, gitAuthService: GitAuthServic
       }
 
       if (hasConfiguredPlugins(existingConfig.content)) {
+        const contentToWrite = existingConfig.rawContent
         const config = settingsService.setDefaultOpenCodeConfig(configName, userId)
         if (!config) {
           return c.json({ error: 'Config not found' }, 404)
         }
 
         const configPath = getOpenCodeConfigFilePath()
-        await writeFileContent(configPath, existingConfig.rawContent)
+        await writeFileContent(configPath, contentToWrite)
         logger.info(`Wrote default config '${configName}' to: ${configPath}`)
         opencodeServerManager.clearStartupError()
-        await restartOpenCode(openCodeSupervisor)
+        const { restartFailed, restartError } = await restartOpenCodeAfterCommit(openCodeSupervisor)
 
-        return c.json(config)
+        return c.json(restartFailed ? { ...config, restartFailed, restartError } : config)
       }
 
       const patchResult = await patchConfigWithRecovery(openCodeClient, existingConfig.content)
@@ -665,8 +683,9 @@ export function createSettingsRoutes(db: Database, gitAuthService: GitAuthServic
 
       const contentToWrite = getOpenCodeConfigContentToWrite(
         existingConfig.rawContent,
+        existingConfig.content,
         patchResult.appliedConfig,
-        patchResult.removedFields
+        patchResult.removedFields,
       )
       const updatedConfig = settingsService.updateOpenCodeConfig(configName, {
         content: contentToWrite,
@@ -849,7 +868,8 @@ export function createSettingsRoutes(db: Database, gitAuthService: GitAuthServic
         return c.json({ error: 'Failed to get default config after rollback' }, 500)
       }
 
-      await writeFileContent(configPath, config.rawContent)
+      const contentToWrite = config.rawContent
+      await writeFileContent(configPath, contentToWrite)
       logger.info(`Rolled back to config '${rollbackConfig}'`)
 
       opencodeServerManager.clearStartupError()
@@ -897,8 +917,9 @@ export function createSettingsRoutes(db: Database, gitAuthService: GitAuthServic
 
     try {
       const installMethod = getOpenCodeInstallMethod()
+      const openCodeExecutable = resolveOpenCodeExecutable() ?? 'opencode'
       logger.info(`Running opencode upgrade --method ${installMethod} with 90s timeout...`)
-      const { output: upgradeOutput, timedOut } = execWithTimeout(`opencode upgrade --method ${installMethod} 2>&1`, 90000)
+      const { output: upgradeOutput, timedOut } = execWithTimeout([openCodeExecutable, 'upgrade', '--method', installMethod], 90000)
       logger.info(`Upgrade output: ${upgradeOutput}`)
 
       if (timedOut) {
@@ -1003,15 +1024,18 @@ export function createSettingsRoutes(db: Database, gitAuthService: GitAuthServic
         published_at: string
         prerelease: boolean
       }>
-      
+
       const versions = releases
         .filter(r => !r.prerelease)
-        .map(r => ({
-          version: r.tag_name.replace(/^v/, ''),
-          tag: r.tag_name,
-          name: r.name,
-          publishedAt: r.published_at
-        }))
+        .map(r => {
+          const version = r.tag_name.replace(/^v/, '')
+          return {
+            version,
+            tag: r.tag_name,
+            name: r.name,
+            publishedAt: r.published_at,
+          }
+        })
       
       const currentVersion = opencodeServerManager.getVersion()
       
@@ -1044,10 +1068,11 @@ export function createSettingsRoutes(db: Database, gitAuthService: GitAuthServic
       logger.info(`Installing OpenCode version: ${version}`)
       const versionArg = version.startsWith('v') ? version : `v${version}`
       const installMethod = getOpenCodeInstallMethod()
+      const openCodeExecutable = resolveOpenCodeExecutable() ?? 'opencode'
       logger.info(`Running opencode upgrade ${versionArg} --method ${installMethod} with 90s timeout...`)
 
       const { output: upgradeOutput, timedOut } = execWithTimeout(
-        ['opencode', 'upgrade', versionArg, '--method', installMethod],
+        [openCodeExecutable, 'upgrade', versionArg, '--method', installMethod],
         90000
       )
       logger.info(`Upgrade output: ${upgradeOutput}`)
@@ -1059,6 +1084,10 @@ export function createSettingsRoutes(db: Database, gitAuthService: GitAuthServic
 
       const newVersion = await opencodeServerManager.fetchVersion()
       logger.info(`New OpenCode version: ${newVersion}`)
+
+      if (newVersion !== versionWithoutPrefix) {
+        throw new Error(`OpenCode version install did not result in the requested version ${versionWithoutPrefix}; detected ${newVersion ?? 'unknown'}`)
+      }
 
       opencodeServerManager.clearStartupError()
       await restartOpenCode(openCodeSupervisor)
@@ -1819,11 +1848,11 @@ export function createSettingsRoutes(db: Database, gitAuthService: GitAuthServic
       }
 
       try {
-        await opencodeServerManager.restart()
+        await restartOpenCode(openCodeSupervisor)
       } catch (restartError) {
         try {
           settingsService.restoreOpenCodeServerPasswordState(previousPasswordState)
-          await opencodeServerManager.restart()
+          await restartOpenCode(openCodeSupervisor)
           sseAggregator.reconnect()
         } catch (restoreError) {
           logger.error('Failed to restore OpenCode server auth runtime after restart failure:', restoreError)
@@ -1859,7 +1888,9 @@ export function createSettingsRoutes(db: Database, gitAuthService: GitAuthServic
   app.post('/manager-token/rotate', async (c) => {
     try {
       const token = rotateInternalToken(db)
-      return c.json({ token })
+      logger.info('Manager token rotated, marking OpenCode server restart as pending')
+      opencodeServerManager.markRestartPending()
+      return c.json({ token, restartRequired: true })
     } catch (error) {
       logger.error('Failed to rotate manager token:', error)
       return c.json({ error: 'Failed to rotate manager token' }, 500)

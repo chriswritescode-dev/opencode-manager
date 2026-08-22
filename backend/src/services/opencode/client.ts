@@ -1,6 +1,7 @@
 import { logger } from '../../utils/logger'
 import { ENV } from '@opencode-manager/shared/config/env'
 import { getOpenCodeBasicAuthHeader, type OpenCodePasswordResolver } from './auth'
+import { getOpenCodeUpstreamBaseUrl } from './upstream'
 
 export interface ForwardRequest {
   method: string
@@ -35,12 +36,12 @@ export interface OpenCodeClient {
   postJson<T>(path: string, body: unknown, opts?: JsonRequestOptions): Promise<T>
   setProviderAuth(providerId: string, apiKey: string): Promise<boolean>
   deleteProviderAuth(providerId: string): Promise<boolean>
-  startMcpAuth(serverName: string, directory?: string): Promise<Response>
-  authenticateMcp(serverName: string, directory?: string): Promise<Response>
 }
 
+export type OpenCodeClientHost = string | (() => string)
+
 export interface FetchOpenCodeClientConfig {
-  baseUrl: string
+  baseUrl: OpenCodeClientHost
   basicAuth: string | null
   passwordResolver?: OpenCodePasswordResolver
   fetchFn?: typeof fetch
@@ -53,6 +54,10 @@ export class FetchOpenCodeClient implements OpenCodeClient {
     return this.config.fetchFn ?? fetch
   }
 
+  private resolveBaseUrl(): string {
+    return typeof this.config.baseUrl === 'function' ? this.config.baseUrl() : this.config.baseUrl
+  }
+
   private async getBasicAuth(): Promise<string> {
     if (!this.config.passwordResolver) {
       return this.config.basicAuth ?? ''
@@ -62,7 +67,7 @@ export class FetchOpenCodeClient implements OpenCodeClient {
   }
 
   private async request(req: ForwardRequest): Promise<Response> {
-    const url = new URL(this.config.baseUrl + req.path)
+    const url = new URL(this.resolveBaseUrl() + req.path)
 
     if (req.directory) {
       url.searchParams.set('directory', req.directory)
@@ -228,29 +233,14 @@ export class FetchOpenCodeClient implements OpenCodeClient {
     logger.error(`Failed to delete OpenCode auth: ${response.status} ${response.statusText}`)
     return false
   }
-
-  async startMcpAuth(serverName: string, directory?: string): Promise<Response> {
-    return this.request({
-      method: 'POST',
-      path: `/mcp/${encodeURIComponent(serverName)}/auth`,
-      headers: { 'Content-Type': 'application/json' },
-      directory,
-    })
-  }
-
-  async authenticateMcp(serverName: string, directory?: string): Promise<Response> {
-    return this.request({
-      method: 'POST',
-      path: `/mcp/${encodeURIComponent(serverName)}/auth/authenticate`,
-      headers: { 'Content-Type': 'application/json' },
-      directory,
-    })
-  }
 }
 
-export function createOpenCodeClient(passwordOverride?: string | OpenCodePasswordResolver): OpenCodeClient {
-  const host = ENV.OPENCODE.HOST === '0.0.0.0' ? '127.0.0.1' : ENV.OPENCODE.HOST
-  const baseUrl = `http://${host}:${ENV.OPENCODE.PORT}`
+export function createOpenCodeClient(
+  passwordOverride?: string | OpenCodePasswordResolver,
+  host?: OpenCodeClientHost,
+): OpenCodeClient {
+  const resolveConfiguredHost = typeof host === 'function' ? host : () => (host ?? ENV.OPENCODE.HOST)
+  const baseUrl: OpenCodeClientHost = () => getOpenCodeUpstreamBaseUrl(resolveConfiguredHost())
   const passwordResolver = typeof passwordOverride === 'function' ? passwordOverride : undefined
   const password = typeof passwordOverride === 'string' ? passwordOverride : ENV.OPENCODE.SERVER_PASSWORD
   const basicAuth = getOpenCodeBasicAuthHeader(password)

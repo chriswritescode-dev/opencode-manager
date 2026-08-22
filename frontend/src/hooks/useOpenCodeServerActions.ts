@@ -2,7 +2,7 @@ import { useState } from 'react'
 import { useMutation, useQueryClient } from '@tanstack/react-query'
 import { settingsApi } from '@/api/settings'
 import { showToast } from '@/lib/toast'
-import { invalidateConfigCaches, updateOpenCodeVersionCaches } from '@/lib/queryInvalidation'
+import { refreshOpenCodeServerCaches } from '@/lib/queryInvalidation'
 import { getOpenCodeApiErrorMessage } from '@/lib/opencode-errors'
 
 const RESTART_TOAST_ID = 'opencode-restart'
@@ -22,17 +22,14 @@ export function useOpenCodeServerActions() {
   const restartServerMutation = useMutation({
     mutationFn: async () => settingsApi.restartOpenCodeServer(),
     onSuccess: () => {
-      invalidateConfigCaches(queryClient)
+      refreshOpenCodeServerCaches(queryClient)
     },
   })
 
   const upgradeOpenCodeMutation = useMutation({
     mutationFn: async () => settingsApi.upgradeOpenCode(),
     onSuccess: (data) => {
-      if (data.upgraded && data.newVersion) {
-        updateOpenCodeVersionCaches(queryClient, data.newVersion)
-      }
-      invalidateConfigCaches(queryClient)
+      refreshOpenCodeServerCaches(queryClient, data.upgraded ? data.newVersion ?? undefined : undefined)
       if (data.upgraded) {
         showToast.success(`Upgraded to v${data.newVersion} and server restarted`, { id: UPGRADE_TOAST_ID })
       } else {
@@ -47,15 +44,16 @@ export function useOpenCodeServerActions() {
         const data = response?.data
 
         if (data?.recovered && data.newVersion) {
-          updateOpenCodeVersionCaches(queryClient, data.newVersion)
+          refreshOpenCodeServerCaches(queryClient, data.newVersion)
           showToast.success(`Upgrade failed but server recovered at v${data.newVersion}`, { id: UPGRADE_TOAST_ID })
         } else {
+          refreshOpenCodeServerCaches(queryClient)
           showToast.error(data?.recoveryMessage || defaultMessage, { id: UPGRADE_TOAST_ID })
         }
       } else {
+        refreshOpenCodeServerCaches(queryClient)
         showToast.error(defaultMessage, { id: UPGRADE_TOAST_ID })
       }
-      invalidateConfigCaches(queryClient)
     },
   })
 

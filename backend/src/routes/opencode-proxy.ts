@@ -3,6 +3,8 @@ import type { Database } from 'bun:sqlite'
 import { ENV } from '@opencode-manager/shared/config/env'
 import { createInternalTokenMiddleware } from '../auth/internal-token-middleware'
 import type { SettingsService } from '../services/settings'
+import { opencodeServerManager } from '../services/opencode-single-server'
+import { getOpenCodeUpstreamBaseUrl } from '../services/opencode/upstream'
 
 const HOP_BY_HOP_HEADERS = new Set([
   'connection',
@@ -25,6 +27,10 @@ export function createOpenCodeProxyRoutes(db: Database, settingsService: Setting
   app.use('/*', createInternalTokenMiddleware(db))
 
   app.all('/*', async (c) => {
+    if (!opencodeServerManager.isLifecycleInitialized()) {
+      return c.json({ error: 'OpenCode lifecycle initialization is incomplete; refusing to proxy to an unmanaged server' }, 503)
+    }
+
     const connectionHeader = c.req.header('connection')?.toLowerCase() ?? ''
     const upgradeHeader = c.req.header('upgrade')?.toLowerCase() ?? ''
     if (connectionHeader.includes('upgrade') && upgradeHeader === 'websocket') {
@@ -33,7 +39,7 @@ export function createOpenCodeProxyRoutes(db: Database, settingsService: Setting
 
     const url = new URL(c.req.url)
     const pathSuffix = url.pathname.replace(/^\/api\/opencode-proxy/, '') || '/'
-    const upstreamUrl = `http://127.0.0.1:${ENV.OPENCODE.PORT}${pathSuffix}${url.search}`
+    const upstreamUrl = `${getOpenCodeUpstreamBaseUrl()}${pathSuffix}${url.search}`
 
     const headers: Record<string, string> = {}
     c.req.raw.headers.forEach((value, key) => {
