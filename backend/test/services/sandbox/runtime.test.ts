@@ -130,7 +130,7 @@ describe('SandboxRuntimeService', () => {
         hostname: null,
         user: resolveSandboxExecUser(),
         log_level: 'info',
-        metrics_sample_interval_ms: null,
+        metrics_sample_interval_ms: 1000,
         disable_metrics_sample: false,
       },
       env: [
@@ -153,7 +153,7 @@ describe('SandboxRuntimeService', () => {
           default_egress: 'deny',
           default_ingress: 'allow',
           rules: [
-            { direction: 'egress', destination: { group: 'dns' }, protocols: [], ports: [], action: 'allow' },
+            { direction: 'egress', destination: { group: 'host' }, protocols: ['udp', 'tcp'], ports: [{ start: 53, end: 53 }], action: 'allow' },
             { direction: 'egress', destination: { group: 'public' }, protocols: [], ports: [], action: 'allow' },
           ],
         },
@@ -1142,7 +1142,7 @@ describe('SandboxRuntimeService', () => {
                 default_egress: 'deny',
                 default_ingress: 'allow',
                 rules: [
-                  { direction: 'egress', destination: { group: 'dns' }, protocols: [], ports: [], action: 'allow' },
+                  { direction: 'egress', destination: { group: 'host' }, protocols: ['udp', 'tcp'], ports: [{ start: 53, end: 53 }], action: 'allow' },
                   { direction: 'egress', destination: { any: true }, protocols: [], ports: [], action: 'allow' },
                 ],
               },
@@ -1185,7 +1185,7 @@ describe('SandboxRuntimeService', () => {
                 default_egress: 'deny',
                 default_ingress: 'allow',
                 rules: [
-                  { direction: 'egress', destination: { group: 'dns' }, protocols: [], ports: [], action: 'allow' },
+                  { direction: 'egress', destination: { group: 'host' }, protocols: ['udp', 'tcp'], ports: [{ start: 53, end: 53 }], action: 'allow' },
                   { direction: 'egress', destination: { group: 'public' }, protocols: [], ports: [], action: 'allow' },
                   { direction: 'egress', destination: { group: 'private' }, protocols: [], ports: [], action: 'allow' },
                 ],
@@ -1229,7 +1229,7 @@ describe('SandboxRuntimeService', () => {
                 default_egress: 'deny',
                 default_ingress: 'allow',
                 rules: [
-                  { direction: 'egress', destination: { group: 'dns' }, protocols: [], ports: [], action: 'allow' },
+                  { direction: 'egress', destination: { group: 'host' }, protocols: ['udp', 'tcp'], ports: [{ start: 53, end: 53 }], action: 'allow' },
                 ],
               },
               max_connections: null,
@@ -1271,7 +1271,7 @@ describe('SandboxRuntimeService', () => {
                 default_egress: 'deny',
                 default_ingress: 'deny',
                 rules: [
-                  { direction: 'egress', destination: { group: 'dns' }, protocols: [], ports: [], action: 'allow' },
+                  { direction: 'egress', destination: { group: 'host' }, protocols: ['udp', 'tcp'], ports: [{ start: 53, end: 53 }], action: 'allow' },
                   { direction: 'egress', destination: { group: 'public' }, protocols: [], ports: [], action: 'allow' },
                 ],
               },

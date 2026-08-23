@@ -9,6 +9,8 @@ export const SANDBOX_UNAVAILABLE_PREFIX = 'Sandbox enforcement is on but the san
 
 const SANDBOX_PLAN_REQUEST_MARGIN_MS = 30000
 
+const MSB_METRICS_SAMPLE_INTERVAL_MS = 1000
+
 export function sandboxPlanTimeoutMs(): number {
   return ENV.SANDBOX.START_TIMEOUT_MS + SANDBOX_PLAN_REQUEST_MARGIN_MS
 }
@@ -237,7 +239,7 @@ export function resolveExpectedSandboxNetworkPolicy(netProfile: string): Sandbox
     default_egress: 'deny',
     default_ingress: 'allow',
     rules: [
-      { direction: 'egress', destination: { group: 'dns' }, protocols: [], ports: [], action: 'allow' },
+      { direction: 'egress', destination: { group: 'host' }, protocols: ['udp', 'tcp'], ports: [{ start: 53, end: 53 }], action: 'allow' },
       ...groups.map((group) => ({ direction: 'egress', destination: { group }, protocols: [], ports: [], action: 'allow' })),
     ],
   }
@@ -402,7 +404,7 @@ export function buildCanonicalSandboxSpec(): Record<string, unknown> {
       hostname: null,
       user: args.user,
       log_level: null,
-      metrics_sample_interval_ms: null,
+      metrics_sample_interval_ms: MSB_METRICS_SAMPLE_INTERVAL_MS,
       disable_metrics_sample: false,
     },
     env: [],

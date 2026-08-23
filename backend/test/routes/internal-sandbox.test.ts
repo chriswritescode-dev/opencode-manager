@@ -47,7 +47,7 @@ function trustedRunningInspect(): { exitCode: number; stdout: string; stderr: st
       hostname: null,
       user: resolveSandboxExecUser(),
       log_level: null,
-      metrics_sample_interval_ms: null,
+      metrics_sample_interval_ms: 1000,
       disable_metrics_sample: false,
     },
     env: [],
@@ -67,7 +67,7 @@ function trustedRunningInspect(): { exitCode: number; stdout: string; stderr: st
         default_egress: 'deny',
         default_ingress: 'allow',
         rules: [
-          { direction: 'egress', destination: { group: 'dns' }, protocols: [], ports: [], action: 'allow' },
+          { direction: 'egress', destination: { group: 'host' }, protocols: ['udp', 'tcp'], ports: [{ start: 53, end: 53 }], action: 'allow' },
           { direction: 'egress', destination: { group: 'public' }, protocols: [], ports: [], action: 'allow' },
         ],
       },

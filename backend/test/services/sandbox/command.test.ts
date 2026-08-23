@@ -552,7 +552,7 @@ describe('sandbox network policy attestation helpers', () => {
     default_egress: 'deny',
     default_ingress: 'allow',
     rules: [
-      { direction: 'egress', destination: { group: 'dns' }, protocols: [], ports: [], action: 'allow' },
+      { direction: 'egress', destination: { group: 'host' }, protocols: ['udp', 'tcp'], ports: [{ start: 53, end: 53 }], action: 'allow' },
       { direction: 'egress', destination: { group: 'public' }, protocols: [], ports: [], action: 'allow' },
     ],
   }
@@ -566,7 +566,7 @@ describe('sandbox network policy attestation helpers', () => {
       default_egress: 'deny',
       default_ingress: 'allow',
       rules: [
-        { direction: 'egress', destination: { group: 'dns' }, protocols: [], ports: [], action: 'allow' },
+        { direction: 'egress', destination: { group: 'host' }, protocols: ['udp', 'tcp'], ports: [{ start: 53, end: 53 }], action: 'allow' },
         { direction: 'egress', destination: { group: 'public' }, protocols: [], ports: [], action: 'allow' },
         { direction: 'egress', destination: { group: 'private' }, protocols: [], ports: [], action: 'allow' },
         { direction: 'egress', destination: { group: 'host' }, protocols: [], ports: [], action: 'allow' },
@@ -648,7 +648,7 @@ describe('sandbox network policy attestation helpers', () => {
     expect(sandboxNetworkPolicyMismatch({ default_egress: 'deny' }, expected)).toContain('missing or malformed')
     expect(sandboxNetworkPolicyMismatch({ ...publicPolicy, rules: 'not-an-array' }, expected)).toContain('missing or malformed')
     expect(sandboxNetworkPolicyMismatch(
-      { ...publicPolicy, rules: [{ direction: 'egress', destination: { group: 'dns' }, action: 'allow' }] },
+      { ...publicPolicy, rules: [{ direction: 'egress', destination: { group: 'host' }, action: 'allow' }] },
       expected,
     )).toContain('network policy')
   })
