@@ -1,11 +1,13 @@
 import { useState, useRef, useEffect } from 'react'
+import { unwrapSandboxExecCommand } from '@opencode-manager/shared/utils'
 import type { components } from '@/api/opencode-types'
 import { useSettings } from '@/hooks/useSettings'
 import { useUserBash } from '@/stores/userBashStore'
 import { useSessionStatusForSession } from '@/stores/sessionStatusStore'
 import { usePermissions, useQuestions } from '@/contexts/EventContext'
 import { detectFileReferences } from '@/lib/fileReferences'
-import { ExternalLink, Loader2 } from 'lucide-react'
+import { ExternalLink, Loader2, Shield } from 'lucide-react'
+import { Badge } from '@/components/ui/badge'
 import { CopyButton } from '@/components/ui/copy-button'
 import { getToolSpecificRender } from './FileToolRender'
 
@@ -74,10 +76,14 @@ export function ToolCallPart({ part, onFileClick, onChildSessionClick }: ToolCal
   const { getForCallID: getPermissionForCallID } = usePermissions()
   const { getForCallID: getQuestionForCallID } = useQuestions()
   const outputRef = useRef<HTMLDivElement>(null)
-  const isUserBashCommand = part.tool === 'bash' &&
-    part.state.status === 'completed' &&
-    typeof part.state.input?.command === 'string' &&
-    userBashCommands.has(part.state.input.command)
+  const rawCommand = part.tool === 'bash' && typeof part.state.input?.command === 'string'
+    ? part.state.input.command
+    : undefined
+  const displayCommand = rawCommand === undefined ? undefined : unwrapSandboxExecCommand(rawCommand)
+  const isSandboxedCommand = rawCommand !== undefined && displayCommand !== rawCommand
+  const isUserBashCommand = part.state.status === 'completed' &&
+    typeof displayCommand === 'string' &&
+    userBashCommands.has(displayCommand)
   const isTodoTool = part.tool === 'todowrite' || part.tool === 'todoread'
   const [expanded, setExpanded] = useState(isUserBashCommand || isTodoTool || (preferences?.expandToolCalls ?? false))
 
@@ -134,7 +140,7 @@ export function ToolCallPart({ part, onFileClick, onChildSessionClick }: ToolCal
       case 'edit':
         return (input.filePath as string) || null
       case 'bash':
-        return (input.command as string) || null
+        return displayCommand || null
       case 'glob':
         return (input.pattern as string) || null
       case 'grep':
@@ -153,6 +159,12 @@ export function ToolCallPart({ part, onFileClick, onChildSessionClick }: ToolCal
 
   const previewText = getPreviewText()
   const isFileTool = ['read', 'write', 'edit'].includes(part.tool)
+  const sandboxIndicator = isSandboxedCommand ? (
+    <Badge variant="secondary" className="shrink-0 gap-1" title="Executed inside the sandbox microVM">
+      <Shield className="w-3 h-3" />
+      sandbox
+    </Badge>
+  ) : null
 
   if (part.tool === 'task') {
     const sessionId = taskSessionId
@@ -225,7 +237,7 @@ export function ToolCallPart({ part, onFileClick, onChildSessionClick }: ToolCal
   }
 
   if (isUserBashCommand) {
-    const command = part.state.input.command as string
+    const command = displayCommand ?? ''
     const output = part.state.status === 'completed' ? part.state.output : ''
     return (
       <div className="my-2">
@@ -233,6 +245,7 @@ export function ToolCallPart({ part, onFileClick, onChildSessionClick }: ToolCal
           <span className="text-green-600 dark:text-green-400">✓</span>
           <span className="font-medium">$</span>
           <span className="text-foreground">{command}</span>
+          {sandboxIndicator}
           {part.state.status === 'completed' && part.state.time && (
             <span className="text-muted-foreground text-xs ml-auto">
               {((part.state.time.end - part.state.time.start) / 1000).toFixed(2)}s
@@ -274,6 +287,7 @@ export function ToolCallPart({ part, onFileClick, onChildSessionClick }: ToolCal
       >
         <span className={getStatusColor()}>{getStatusIcon()}</span>
         <span className="font-medium">{part.tool}</span>
+        {sandboxIndicator}
 
         {previewText && isFileTool ? (
           <span
@@ -331,12 +345,12 @@ export function ToolCallPart({ part, onFileClick, onChildSessionClick }: ToolCal
                   <div className="flex items-center gap-2 mb-1">
                     <div className="text-muted-foreground">Command:</div>
                     <CopyButton
-                      content={typeof part.state.input?.command === 'string' ? part.state.input.command : ''}
+                      content={displayCommand ?? ''}
                       title="Copy command"
                     />
                   </div>
                   <div className="bg-accent p-2 rounded text-xs overflow-x-auto whitespace-pre-wrap break-words">
-                    <span className="text-green-600 dark:text-green-400">$</span> {typeof part.state.input?.command === 'string' ? part.state.input.command : ''}
+                    <span className="text-green-600 dark:text-green-400">$</span> {displayCommand ?? ''}
                   </div>
                   <div className={`flex items-center gap-2 mt-2 text-xs ${isWaitingPermission ? 'text-orange-600 dark:text-orange-400' : 'text-yellow-600 dark:text-yellow-400'}`}>
                     <Loader2 className="w-3 h-3 animate-spin" />
@@ -363,12 +377,12 @@ export function ToolCallPart({ part, onFileClick, onChildSessionClick }: ToolCal
                   <div className="flex items-center gap-2 mb-1">
                     <div className="text-muted-foreground">Command:</div>
                     <CopyButton
-                      content={typeof part.state.input?.command === 'string' ? part.state.input.command : ''}
+                      content={displayCommand ?? ''}
                       title="Copy command"
                     />
                   </div>
                   <div className="bg-accent p-2 rounded text-xs overflow-x-auto whitespace-pre-wrap break-words">
-                    <span className="text-green-600 dark:text-green-400">$</span> {typeof part.state.input?.command === 'string' ? part.state.input.command : ''}
+                    <span className="text-green-600 dark:text-green-400">$</span> {displayCommand ?? ''}
                   </div>
                 </div>
               ) : (

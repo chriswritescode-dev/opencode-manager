@@ -4,12 +4,14 @@ import { mkdirSync, mkdtempSync, readFileSync, rmSync, symlinkSync, writeFileSyn
 import { tmpdir } from 'node:os'
 import path from 'node:path'
 import { ENV, getAssistantOpenCodeDir, getReposPath, getScheduleWorktreesPath } from '@opencode-manager/shared/config/env'
+import { unwrapSandboxExecCommand } from '@opencode-manager/shared/utils'
 import {
   WORKSPACE_SANDBOX_NAME,
   SANDBOX_UNAVAILABLE_PREFIX,
   buildBlockedCommand,
   buildCanonicalSandboxSpec,
   buildSandboxCreateArgs,
+  buildSandboxExecCommandString,
   buildSandboxInspectArgs,
   buildSandboxListArgs,
   buildSandboxRemoveArgs,
@@ -515,6 +517,30 @@ describe('sandbox command builders', () => {
       process.env.PATH = originalPath
       rmSync(fakeBin, { recursive: true, force: true })
     }
+  })
+})
+
+describe('unwrapSandboxExecCommand round-trips against the real builder', () => {
+  it('recovers the original command from a real sandbox exec wrapper', () => {
+    const directory = '/workspace/repos/ai-test'
+    for (const command of [
+      'git status',
+      "echo 'hi there'",
+      "echo 'x' -- sh -c 'y'",
+      'git status\ngit diff\necho done',
+    ]) {
+      expect(unwrapSandboxExecCommand(buildSandboxExecCommandString(directory, command))).toBe(command)
+    }
+  })
+
+  it('passes through plain, blocked, empty, and near-miss commands unchanged', () => {
+    const blocked = buildBlockedCommand('KVM is unavailable')
+    const nearMiss = buildSandboxExecCommandString('/workspace/repos/ai-test', 'git status').replace(' --no-tty -q ', ' --no-tty ')
+
+    expect(unwrapSandboxExecCommand('git status')).toBe('git status')
+    expect(unwrapSandboxExecCommand(blocked)).toBe(blocked)
+    expect(unwrapSandboxExecCommand('')).toBe('')
+    expect(unwrapSandboxExecCommand(nearMiss)).toBe(nearMiss)
   })
 })
 
