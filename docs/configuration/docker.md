@@ -81,6 +81,7 @@ services:
     volumes:
       - ${OCM_WORKSPACE_HOST_PATH:-opencode-workspace}:/workspace
       - opencode-data:/app/data
+      - opencode-bin:/home/node/.opencode/bin
     restart: unless-stopped
     healthcheck:
       test: ["CMD", "curl", "-f", "http://localhost:5003/api/health"]
@@ -93,6 +94,8 @@ volumes:
   opencode-workspace:
     driver: local
   opencode-data:
+    driver: local
+  opencode-bin:
     driver: local
 ```
 
@@ -127,8 +130,10 @@ VAPID_SUBJECT=mailto:you@example.com
 The container entrypoint (`scripts/docker-entrypoint.sh`) automatically:
 
 1. **Verifies Bun** is installed (installed at build time, fallback install if missing)
-2. **Verifies OpenCode** is installed (installed at build time, fallback install if missing)
-3. **Upgrades OpenCode** if below minimum version (1.0.137)
+2. **Reconciles the persisted OpenCode home binary** (`/home/node/.opencode/bin/opencode`):
+   - any valid persisted binary is retained, including a user-selected version older than the image-bundled `OPENCODE_BUNDLED_VERSION`;
+   - a persisted binary that is malformed or unversioned is removed (only that binary), so `PATH` falls back to the image-bundled `/usr/local/bin/opencode` without a download
+3. **Installs OpenCode** only when no usable binary is present: if opencode is missing entirely, or if the surviving binary is still below the minimum version (1.0.137), the pinned bundled version is downloaded into the persisted `bin` volume
 4. **Validates AUTH_SECRET** is set (required for startup)
 5. **Aligns the `node` account** to `PUID`/`PGID` (default `1000`) before chowning the workspace, the `/app/data` directory, and the `node` home directory. If `PUID`/`PGID` are already used by another account in the image, startup aborts with an explicit error. Group alignment runs first, so a free `PGID` combined with an occupied `PUID` mutates `/etc/group` before the UID collision is detected and aborts startup; realign to the original ids or pick a free pair before retrying.
 
@@ -260,6 +265,23 @@ Contains:
 - Session data
 
 Uses a named volume for data persistence.
+
+### OpenCode Binary
+
+```yaml
+volumes:
+  - opencode-bin:/home/node/.opencode/bin
+```
+
+Persists the OpenCode binary that OpenCode's own `upgrade --method curl` command (run from the UI's OpenCode settings) installs into `~/.opencode/bin`, so an upgrade survives container recreations. The volume is limited to the binary and leaves existing workspace and XDG persistence behavior for config, auth, and chat state unchanged.
+
+On startup the entrypoint reconciles the persisted binary:
+
+- any valid persisted binary is retained, including a user-selected version older than the image-bundled `OPENCODE_BUNDLED_VERSION`;
+- a malformed or unversioned persisted binary is removed so `PATH` falls back to the image-bundled `/usr/local/bin/opencode`, avoiding a download;
+- a persisted binary still below the minimum version (1.0.137) is replaced by the pinned bundled version, which is downloaded into this volume.
+
+A fresh volume starts empty and the image-bundled binary is used until an upgrade installs into the volume.
 
 ### Import Existing OpenCode Chats From Your Host
 
@@ -405,8 +427,11 @@ services:
 # Start
 docker-compose up -d
 
-# Stop
+# Stop (containers removed; named volumes are preserved)
 docker-compose down
+
+# Stop and remove containers and all named volumes (workspace, database, OpenCode binary)
+docker-compose down -v
 
 # Restart
 docker-compose restart
@@ -417,6 +442,8 @@ docker-compose logs -f
 # View logs (last 100 lines)
 docker-compose logs --tail 100
 ```
+
+The package scripts mirror these: `pnpm docker:down` stops and removes containers while preserving all named volumes, and `pnpm docker:reset` is the destructive variant that also deletes the workspace, database, and OpenCode binary volumes.
 
 ### Maintenance
 

@@ -61,6 +61,8 @@ All projects share one microVM named `ocm-workspace`:
 - Each command supplies its own working directory through `msb exec -w`.
 - A session outside the mounted roots is refused rather than executed on the host.
 - The Manager verifies the microVM image, resources, user, network policy, mounts (including the `/tmp` tmpfs size and mount options), labels, and secret mask before reuse.
+- MSB pulls the configured `SANDBOX_IMAGE` (default `node:24`) automatically; no custom image build is needed.
+- The Manager pins a neutral `/usr/bin/env` entrypoint, so the image's own OCI entrypoint is never inherited.
 - A stale or unverifiable microVM is removed and recreated.
 - Manager shutdown and an enforced-to-disabled restart stop the managed microVM.
 

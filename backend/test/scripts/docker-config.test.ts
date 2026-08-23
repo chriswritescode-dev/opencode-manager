@@ -152,6 +152,22 @@ describe('workspace ownership configuration', () => {
     expect(compose).toMatch(/^volumes:\n(?:.*\n)*?\s+opencode-workspace:/m)
   })
 
+  it('mounts a dedicated named volume at /home/node/.opencode/bin with a top-level declaration', () => {
+    const compose = read(composePath)
+    expect(compose).toContain('opencode-bin:/home/node/.opencode/bin')
+    expect(compose).toMatch(/^volumes:\n(?:.*\n)*?\s+opencode-bin:/m)
+  })
+
+  it('persists only the opencode bin directory, not the whole ~/.opencode home', () => {
+    const compose = read(composePath)
+    expect(compose).not.toMatch(/:\/home\/node\/\.opencode(?:\s|$)/)
+  })
+
+  it('lists the opencode-bin volume in the installation docs table', () => {
+    const docs = read(join(repoRoot, 'docs/getting-started/installation.md'))
+    expect(docs).toContain('| `opencode-bin` | `/home/node/.opencode/bin` |')
+  })
+
   it('keeps the docker docs compose snippet in sync with docker-compose.yml', () => {
     const compose = read(composePath)
     const docs = read(dockerDocsPath)
@@ -185,6 +201,26 @@ describe('workspace ownership configuration', () => {
     expect(docs).toContain('mkdir -p "<host path>"')
     expect(docs).toContain('-v "<host path>":/to')
     expect(docs).toContain('chown -R "$(id -u):$(id -g)" "<host path>"')
+  })
+})
+
+describe('docker lifecycle scripts', () => {
+  it('keeps docker:down non-destructive and docker:reset destructive', () => {
+    const pkg = read(join(repoRoot, 'package.json'))
+    expect(pkg).toContain('"docker:down": "docker-compose down"')
+    expect(pkg).toContain('"docker:reset": "docker-compose down -v"')
+  })
+
+  it('documents the preserved-volume shutdown and the destructive reset', () => {
+    const docs = read(dockerDocsPath)
+    expect(docs).toContain('named volumes are preserved')
+    expect(docs).toContain('docker-compose down -v')
+  })
+
+  it('documents a targeted opencode-bin volume reset that preserves the other volumes', () => {
+    const docs = read(join(repoRoot, 'docs/troubleshooting.md'))
+    expect(docs).toContain('docker volume rm <project>_opencode-bin')
+    expect(docs).toContain('without touching the workspace or database volumes')
   })
 })
 

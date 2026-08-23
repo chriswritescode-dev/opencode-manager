@@ -48,6 +48,15 @@ version_gte() {
   printf '%s\n%s\n' "$2" "$1" | sort -V -C
 }
 
+read_opencode_version() {
+  local binary
+  binary="$(command -v "${1:-opencode}" 2>/dev/null || true)"
+  if [ -z "$binary" ] || [ ! -x "$binary" ]; then
+    return 0
+  fi
+  runuser -u node -- "$binary" --version 2>&1 | grep -oE '[0-9]+\.[0-9]+\.[0-9]+' | head -1 || true
+}
+
 install_opencode() {
   local opencode_version="${OPENCODE_BUNDLED_VERSION:-}"
   if [ -z "$opencode_version" ]; then
@@ -74,6 +83,19 @@ install_opencode() {
   rm -rf "$staging"
 }
 
+reconcile_persisted_opencode() {
+  local persisted_path="$HOME/.opencode/bin/opencode"
+  [ -e "$persisted_path" ] || return 0
+  local persisted_version
+  persisted_version="$(read_opencode_version "$persisted_path")"
+  if [ -z "$persisted_version" ]; then
+    echo "Persisted OpenCode at $persisted_path is malformed or unversioned; removing it to fall back to the bundled binary"
+    rm -f "$persisted_path"
+    return 0
+  fi
+  echo "Persisted OpenCode $persisted_version is usable; retaining it"
+}
+
 echo "Checking Bun installation..."
 
 if ! command -v bun >/dev/null 2>&1; then
@@ -93,6 +115,8 @@ fi
 
 echo "Checking OpenCode installation..."
 
+reconcile_persisted_opencode
+
 if ! command -v opencode >/dev/null 2>&1; then
   echo "OpenCode not found. Installing..."
   install_opencode
@@ -104,7 +128,8 @@ if ! command -v opencode >/dev/null 2>&1; then
   echo "OpenCode installed successfully"
 fi
 
-OPENCODE_VERSION=$(opencode --version 2>&1 | grep -oE '[0-9]+\.[0-9]+\.[0-9]+' | head -1 || echo "unknown")
+OPENCODE_VERSION="$(read_opencode_version)"
+[ -n "$OPENCODE_VERSION" ] || OPENCODE_VERSION="unknown"
 echo "OpenCode is installed (version: $OPENCODE_VERSION)"
 
 if [ "$OPENCODE_VERSION" != "unknown" ]; then
@@ -115,7 +140,8 @@ if [ "$OPENCODE_VERSION" != "unknown" ]; then
     echo "Reinstalling bundled OpenCode version ${OPENCODE_BUNDLED_VERSION}..."
     install_opencode
 
-    OPENCODE_VERSION=$(opencode --version 2>&1 | grep -oE '[0-9]+\.[0-9]+\.[0-9]+' | head -1 || echo "unknown")
+    OPENCODE_VERSION="$(read_opencode_version)"
+    [ -n "$OPENCODE_VERSION" ] || OPENCODE_VERSION="unknown"
     echo "OpenCode reinstalled as version: $OPENCODE_VERSION"
   fi
 fi

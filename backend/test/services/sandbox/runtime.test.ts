@@ -125,7 +125,7 @@ describe('SandboxRuntimeService', () => {
         workdir: reposRoot,
         shell: null,
         scripts: {},
-        entrypoint: null,
+        entrypoint: ['/usr/bin/env'],
         cmd: ['sleep', 'infinity'],
         hostname: null,
         user: resolveSandboxExecUser(),
@@ -934,6 +934,35 @@ describe('SandboxRuntimeService', () => {
     expect(mockExecuteCommand.mock.calls.filter((call) => call[0].includes('inspect'))).toHaveLength(1)
   })
 
+  it('reuses a running sandbox carrying the explicit /usr/bin/env runtime entrypoint', async () => {
+    enableEnforcement()
+    const runtime = realInspectConfig().runtime as Record<string, unknown>
+    mockExecuteCommand.mockImplementation(async (args: string[]) => {
+      if (args.includes('ls')) {
+        return {
+          exitCode: 0,
+          stdout: JSON.stringify([{ name: WORKSPACE_SANDBOX_NAME, status: 'running' }]),
+          stderr: '',
+        }
+      }
+      if (args.includes('inspect')) {
+        return {
+          exitCode: 0,
+          stdout: runningInspectOutput(realInspectConfig({ runtime: { ...runtime, entrypoint: ['/usr/bin/env'] } })),
+          stderr: '',
+        }
+      }
+      return { exitCode: 0, stdout: '', stderr: '' }
+    })
+
+    const plan = await service.planCommand(repoADir, 'echo hi')
+
+    expect(plan).toEqual({ mode: 'sandbox', command: buildSandboxExecCommandString(repoADir, 'echo hi') })
+    expect(mockExecuteCommand.mock.calls.filter((call) => call[0].includes('rm'))).toHaveLength(0)
+    expect(mockExecuteCommand.mock.calls.filter((call) => call[0].includes('run'))).toHaveLength(0)
+    expect(mockExecuteCommand.mock.calls.filter((call) => call[0].includes('inspect'))).toHaveLength(1)
+  })
+
   it('reuses a running sandbox carrying the microsandbox runtime tmpfs at /tmp sized from the canonical memory', async () => {
     enableEnforcement()
     mockExecuteCommand.mockImplementation(async (args: string[]) => {
@@ -1686,6 +1715,35 @@ describe('SandboxRuntimeService', () => {
     expect(logger.warn).toHaveBeenCalledWith(expect.stringContaining('runtime.cmd'))
   })
 
+  it('removes and recreates a running sandbox inheriting the image OCI entrypoint instead of /usr/bin/env', async () => {
+    enableEnforcement()
+    const runtime = realInspectConfig().runtime as Record<string, unknown>
+    mockExecuteCommand.mockImplementation(async (args: string[]) => {
+      if (args.includes('ls')) {
+        return {
+          exitCode: 0,
+          stdout: JSON.stringify([{ name: WORKSPACE_SANDBOX_NAME, status: 'running' }]),
+          stderr: '',
+        }
+      }
+      if (args.includes('inspect')) {
+        return attestedAfterRecreate({
+          exitCode: 0,
+          stdout: runningInspectOutput(realInspectConfig({ runtime: { ...runtime, entrypoint: ['docker-entrypoint.sh'] } })),
+          stderr: '',
+        })
+      }
+      return { exitCode: 0, stdout: '', stderr: '' }
+    })
+
+    const plan = await service.planCommand(repoADir, 'echo hi')
+
+    expect(plan).toEqual({ mode: 'sandbox', command: buildSandboxExecCommandString(repoADir, 'echo hi') })
+    expect(mockExecuteCommand.mock.calls.filter((call) => call[0].includes('rm'))).toHaveLength(1)
+    expect(mockExecuteCommand.mock.calls.filter((call) => call[0].includes('run'))).toHaveLength(1)
+    expect(logger.warn).toHaveBeenCalledWith(expect.stringContaining('runtime.entrypoint'))
+  })
+
   it('removes and recreates a running sandbox carrying image patches', async () => {
     enableEnforcement()
     mockExecuteCommand.mockImplementation(async (args: string[]) => {
@@ -2304,6 +2362,35 @@ describe('SandboxRuntimeService', () => {
     const retried = await service.planCommand(repoADir, 'echo again')
     expect(retried).toEqual({ mode: 'blocked', reason: expect.stringContaining('failed attestation') })
     expect(mockExecuteCommand.mock.calls.filter((call) => call[0].includes('run'))).toHaveLength(2)
+  })
+
+  it('trusts a freshly created sandbox whose runtime entrypoint is the explicit /usr/bin/env value', async () => {
+    enableEnforcement()
+    const runtime = realInspectConfig().runtime as Record<string, unknown>
+    let inspectCalls = 0
+    mockExecuteCommand.mockImplementation(async (args: string[]) => {
+      if (args.includes('ls')) {
+        return { exitCode: 0, stdout: '[]', stderr: '' }
+      }
+      if (args.includes('inspect')) {
+        inspectCalls += 1
+        if (inspectCalls === 1) {
+          return { exitCode: 1, stdout: '', stderr: 'sandbox not found' }
+        }
+        return {
+          exitCode: 0,
+          stdout: runningInspectOutput(realInspectConfig({ runtime: { ...runtime, entrypoint: ['/usr/bin/env'] } })),
+          stderr: '',
+        }
+      }
+      return { exitCode: 0, stdout: '', stderr: '' }
+    })
+
+    const plan = await service.planCommand(repoADir, 'echo hi')
+
+    expect(plan).toEqual({ mode: 'sandbox', command: buildSandboxExecCommandString(repoADir, 'echo hi') })
+    expect(mockExecuteCommand.mock.calls.filter((call) => call[0].includes('run'))).toHaveLength(1)
+    expect(mockExecuteCommand.mock.calls.filter((call) => call[0].includes('inspect'))).toHaveLength(2)
   })
 
   function assertRecreateForInspectMutation(

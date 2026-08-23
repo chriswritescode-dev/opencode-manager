@@ -42,7 +42,7 @@ function trustedRunningInspect(): { exitCode: number; stdout: string; stderr: st
       workdir: getReposPath(),
       shell: null,
       scripts: {},
-      entrypoint: null,
+      entrypoint: ['/usr/bin/env'],
       cmd: ['sleep', 'infinity'],
       hostname: null,
       user: resolveSandboxExecUser(),

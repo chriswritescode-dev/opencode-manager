@@ -103,6 +103,15 @@ describe('sandbox command builders', () => {
     expect(sandboxSecretMaskPath()).toBe(getAssistantOpenCodeDir())
   })
 
+  it('pins --entrypoint to /usr/bin/env before the image so msb never inherits the OCI entrypoint', () => {
+    const args = buildSandboxCreateArgs()
+
+    const entrypointIndex = args.indexOf('--entrypoint')
+    expect(entrypointIndex).toBeGreaterThan(-1)
+    expect(args[entrypointIndex + 1]).toBe('/usr/bin/env')
+    expect(args.indexOf(ENV.SANDBOX.IMAGE)).toBeGreaterThan(entrypointIndex + 1)
+  })
+
   it('never mounts the SSH/config/state workspace directories', () => {
     const joined = buildSandboxCreateArgs().join(' ')
     const workspacePath = path.dirname(getReposPath())
@@ -133,7 +142,7 @@ describe('sandbox command builders', () => {
     expect(runtime.workdir).toBe(getReposPath())
     expect(runtime.user).toBe(resolveSandboxExecUser())
     expect(runtime.cmd).toEqual(['sleep', 'infinity'])
-    expect(runtime.entrypoint).toBeNull()
+    expect(runtime.entrypoint).toEqual(['/usr/bin/env'])
     expect(spec.patches).toEqual([])
     expect(network.enabled).toBe(true)
     expect(network.ports).toEqual([])

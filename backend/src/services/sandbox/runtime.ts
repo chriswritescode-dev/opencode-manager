@@ -421,8 +421,8 @@ async function attestWorkspaceSandboxConfig(config: unknown): Promise<SandboxAtt
   if (!sameStringArray(runtime.cmd, canonicalRuntime.cmd)) {
     return { trusted: false, reason: 'sandbox configuration runtime.cmd does not match the canonical specification' }
   }
-  if (runtime.entrypoint !== null) {
-    return { trusted: false, reason: 'sandbox configuration runtime.entrypoint must be empty' }
+  if (!sameStringArray(runtime.entrypoint, canonicalRuntime.entrypoint)) {
+    return { trusted: false, reason: 'sandbox configuration runtime.entrypoint does not match the canonical specification' }
   }
   if (runtime.shell !== canonicalRuntime.shell) {
     return { trusted: false, reason: 'sandbox configuration runtime.shell does not match the canonical specification' }

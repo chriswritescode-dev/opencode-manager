@@ -153,6 +153,8 @@ export function buildSandboxCreateArgs(): string[] {
     sandboxSecretMaskPath(),
     '-w',
     getReposPath(),
+    '--entrypoint',
+    '/usr/bin/env',
     ENV.SANDBOX.IMAGE,
     '--',
     'sleep',
@@ -312,6 +314,7 @@ function parseSandboxCreateArgs(args: string[]): {
   mountDirs: string[]
   tmpfs: string | null
   workdir: string
+  entrypoint: string[]
   image: string
   cmd: string[]
 } {
@@ -323,6 +326,7 @@ function parseSandboxCreateArgs(args: string[]): {
   let user = ''
   let tmpfs: string | null = null
   let workdir = ''
+  let entrypoint: string[] = []
   let image = ''
   let cmd: string[] = []
   for (let i = 1; i < args.length; i++) {
@@ -349,12 +353,13 @@ function parseSandboxCreateArgs(args: string[]): {
       case '--mount-dir': if (value !== undefined) mountDirs.push(value); i += 1; break
       case '--tmpfs': tmpfs = value ?? null; i += 1; break
       case '-w': workdir = value ?? ''; i += 1; break
+      case '--entrypoint': if (value !== undefined) entrypoint = [value]; i += 1; break
       case '-d': break
       default:
         if (image === '' && !token.startsWith('-')) image = token
     }
   }
-  return { name, labels, memory, cpus, user, mountDirs, tmpfs, workdir, image, cmd }
+  return { name, labels, memory, cpus, user, mountDirs, tmpfs, workdir, entrypoint, image, cmd }
 }
 
 export function buildCanonicalSandboxSpec(): Record<string, unknown> {
@@ -392,7 +397,7 @@ export function buildCanonicalSandboxSpec(): Record<string, unknown> {
       workdir: args.workdir,
       shell: null,
       scripts: {},
-      entrypoint: null,
+      entrypoint: args.entrypoint,
       cmd: args.cmd,
       hostname: null,
       user: args.user,
