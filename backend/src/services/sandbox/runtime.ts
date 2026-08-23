@@ -11,7 +11,6 @@ import {
   WORKSPACE_SANDBOX_NAME,
   buildCanonicalSandboxSpec,
   buildSandboxCreateArgs,
-  buildSandboxExecCommandString,
   buildSandboxInspectArgs,
   buildSandboxListArgs,
   buildSandboxRemoveArgs,
@@ -30,9 +29,9 @@ const SANDBOX_LS_TIMEOUT_MS = 15000
 const SANDBOX_STOP_TIMEOUT_MS = 30000
 const SANDBOX_RUNTIME_TMPFS_GUEST = path.resolve('/tmp')
 
-export type SandboxPlan =
+export type SandboxShellPlan =
   | { mode: 'host' }
-  | { mode: 'sandbox'; command: string }
+  | { mode: 'sandbox'; workdir: string }
   | { mode: 'blocked'; reason: string }
 
 export type SandboxStatus = {
@@ -648,7 +647,7 @@ export class SandboxRuntimeService {
     }
   }
 
-  async planCommand(directory: string, command: string, enforced = false): Promise<SandboxPlan> {
+  async planShell(directory: string, enforced = false): Promise<SandboxShellPlan> {
     if (!enforced && !this.isEnabled()) {
       return { mode: 'host' }
     }
@@ -665,7 +664,7 @@ export class SandboxRuntimeService {
     }
     try {
       await ensureWorkspaceSandbox()
-      return { mode: 'sandbox', command: buildSandboxExecCommandString(workDirectory, command) }
+      return { mode: 'sandbox', workdir: workDirectory }
     } catch (error) {
       logger.error('Failed to prepare the workspace sandbox', error)
       return { mode: 'blocked', reason: error instanceof Error ? error.message : String(error) }

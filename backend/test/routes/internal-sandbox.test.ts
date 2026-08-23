@@ -11,7 +11,7 @@ import { createOpenCodeClient } from '../../src/services/opencode/client'
 import { allMigrations } from '../../src/db/migrations'
 import { getOrCreateInternalToken } from '../../src/services/internal-token'
 import { migrate } from '../../src/db/migration-runner'
-import { buildSandboxExecCommandString, resolveSandboxExecUser, resolveSandboxRuntimeTmpfsSizeMib, WORKSPACE_SANDBOX_NAME, sandboxSecretMaskPath } from '../../src/services/sandbox/command'
+import { resolveSandboxExecUser, resolveSandboxRuntimeTmpfsSizeMib, WORKSPACE_SANDBOX_NAME, sandboxSecretMaskPath } from '../../src/services/sandbox/command'
 import { executeCommand } from '../../src/utils/process'
 import { detectSandboxCapability } from '../../src/services/sandbox/capability'
 import { getReposPath, getScheduleWorktreesPath, ENV } from '@opencode-manager/shared/config/env'
@@ -140,8 +140,8 @@ describe('internal sandbox routes', () => {
     rmSync(repoDir, { recursive: true, force: true })
   })
 
-  function postCommand(body: unknown, auth = true) {
-    return app.request('/api/internal/sandbox/command', {
+  function postShell(body: unknown, auth = true) {
+    return app.request('/api/internal/sandbox/shell', {
       method: 'POST',
       body: JSON.stringify(body),
       headers: {
@@ -151,62 +151,62 @@ describe('internal sandbox routes', () => {
     })
   }
 
-  it('POST /command returns 401 without bearer token', async () => {
-    const res = await postCommand({ directory: repoDir, command: 'echo hi' }, false)
+  it('POST /shell returns 401 without bearer token', async () => {
+    const res = await postShell({ directory: repoDir }, false)
 
     expect(res.status).toBe(401)
   })
 
-  it('POST /command returns host mode when the sandbox preference is off', async () => {
-    const res = await postCommand({ directory: repoDir, command: 'echo hi' })
+  it('POST /shell returns host mode when the sandbox preference is off', async () => {
+    const res = await postShell({ directory: repoDir })
 
     expect(res.status).toBe(200)
     expect(await res.json()).toEqual({ mode: 'host' })
     expect(mockExecuteCommand).not.toHaveBeenCalled()
   })
 
-  it('POST /command returns a wrapped sandbox command when enforcement is on', async () => {
+  it('POST /shell returns the mapped sandbox working directory when enforcement is on', async () => {
     settingsService.updateSettings({ sandbox: { enabled: true } })
 
-    const res = await postCommand({ directory: repoDir, command: 'echo hi' })
+    const res = await postShell({ directory: repoDir })
 
     expect(res.status).toBe(200)
     expect(await res.json()).toEqual({
       mode: 'sandbox',
-      command: buildSandboxExecCommandString(repoDir, 'echo hi'),
+      workdir: repoDir,
     })
   })
 
-  it('POST /command returns 400 for a malformed body', async () => {
-    const res = await postCommand({ directory: '', command: 'echo hi' })
+  it('POST /shell returns 400 for a malformed body', async () => {
+    const res = await postShell({ directory: '' })
 
     expect(res.status).toBe(400)
     expect(await res.json()).toEqual({ error: 'Invalid request' })
   })
 
-  it('POST /command blocks an enabled request when the capability is unavailable instead of running on the host', async () => {
+  it('POST /shell blocks an enabled request when the capability is unavailable instead of running on the host', async () => {
     settingsService.updateSettings({ sandbox: { enabled: true } })
     mockDetectSandboxCapability.mockReturnValue({ available: false, reason: '/dev/kvm is not available' })
 
-    const res = await postCommand({ directory: repoDir, command: 'echo hi' })
+    const res = await postShell({ directory: repoDir })
 
     expect(res.status).toBe(200)
     expect(await res.json()).toEqual({ mode: 'blocked', reason: '/dev/kvm is not available' })
     expect(mockExecuteCommand).not.toHaveBeenCalled()
   })
 
-  it('POST /command never returns host mode for an enforced request even when the preference is off', async () => {
-    const res = await postCommand({ directory: repoDir, command: 'echo hi', enforced: true })
+  it('POST /shell never returns host mode for an enforced request even when the preference is off', async () => {
+    const res = await postShell({ directory: repoDir, enforced: true })
 
     expect(res.status).toBe(200)
     expect(await res.json()).toEqual({
       mode: 'sandbox',
-      command: buildSandboxExecCommandString(repoDir, 'echo hi'),
+      workdir: repoDir,
     })
   })
 
-  it('POST /command blocks an enforced request for a directory outside the project roots', async () => {
-    const res = await postCommand({ directory: '/etc', command: 'echo hi', enforced: true })
+  it('POST /shell blocks an enforced request for a directory outside the project roots', async () => {
+    const res = await postShell({ directory: '/etc', enforced: true })
 
     expect(res.status).toBe(200)
     const body = (await res.json()) as { mode: string; reason?: string }

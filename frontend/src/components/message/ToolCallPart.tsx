@@ -80,7 +80,10 @@ export function ToolCallPart({ part, onFileClick, onChildSessionClick }: ToolCal
     ? part.state.input.command
     : undefined
   const displayCommand = rawCommand === undefined ? undefined : unwrapSandboxExecCommand(rawCommand)
-  const isSandboxedCommand = rawCommand !== undefined && displayCommand !== rawCommand
+  const isSandboxedCommand = rawCommand !== undefined && (
+    displayCommand !== rawCommand ||
+    (part.state.status === 'completed' && (part.state.metadata as Record<string, unknown> | undefined)?.sandbox === true)
+  )
   const isUserBashCommand = part.state.status === 'completed' &&
     typeof displayCommand === 'string' &&
     userBashCommands.has(displayCommand)
@@ -160,7 +163,11 @@ export function ToolCallPart({ part, onFileClick, onChildSessionClick }: ToolCal
   const previewText = getPreviewText()
   const isFileTool = ['read', 'write', 'edit'].includes(part.tool)
   const sandboxIndicator = isSandboxedCommand ? (
-    <Badge variant="secondary" className="shrink-0 gap-1" title="Executed inside the sandbox microVM">
+    <Badge
+      variant="outline"
+      className="shrink-0 gap-1 border-green-600/40 bg-green-500/15 text-green-700 dark:text-green-400"
+      title="Executed inside the sandbox microVM"
+    >
       <Shield className="w-3 h-3" />
       sandbox
     </Badge>

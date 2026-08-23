@@ -23,7 +23,7 @@ export function overrideSandboxExecutableTrustValidator(validator: ((candidate: 
   resetSandboxExecutableCache()
 }
 
-function isPathWithinRoot(root: string, target: string): boolean {
+export function isPathWithinRoot(root: string, target: string): boolean {
   const relative = path.relative(path.resolve(root), path.resolve(target))
   return relative === '' || (!relative.startsWith('..') && !path.isAbsolute(relative))
 }
@@ -469,12 +469,3 @@ export function resolveSandboxExecUserUid(): number | null {
   return Number(uid)
 }
 
-export function buildSandboxExecCommandString(directory: string, command: string): string {
-  const timeoutSeconds = Math.floor(ENV.SANDBOX.EXEC_TIMEOUT_MS / 1000)
-  return `${quoteForShell(sandboxExecutablePath())} exec ${WORKSPACE_SANDBOX_NAME} --no-tty -q -u ${quoteForShell(resolveSandboxExecUser())} -w ${quoteForShell(directory)} --timeout ${timeoutSeconds}s -- sh -c ${quoteForShell(command)}`
-}
-
-export function buildBlockedCommand(reason: string): string {
-  const message = `${SANDBOX_UNAVAILABLE_PREFIX}${reason}`
-  return `printf '%s\n' ${quoteForShell(message)} >&2; exit 1`
-}

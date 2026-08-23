@@ -1,6 +1,6 @@
 import { describe, expect, it, vi, afterEach } from 'vitest'
 import { spawnSync } from 'child_process'
-import { mkdirSync, mkdtempSync, readFileSync, rmSync, symlinkSync, writeFileSync } from 'node:fs'
+import { mkdirSync, mkdtempSync, rmSync, symlinkSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import path from 'node:path'
 import { ENV, getAssistantOpenCodeDir, getReposPath, getScheduleWorktreesPath } from '@opencode-manager/shared/config/env'
@@ -8,10 +8,8 @@ import { unwrapSandboxExecCommand } from '@opencode-manager/shared/utils'
 import {
   WORKSPACE_SANDBOX_NAME,
   SANDBOX_UNAVAILABLE_PREFIX,
-  buildBlockedCommand,
   buildCanonicalSandboxSpec,
   buildSandboxCreateArgs,
-  buildSandboxExecCommandString,
   buildSandboxInspectArgs,
   buildSandboxListArgs,
   buildSandboxRemoveArgs,
@@ -243,108 +241,6 @@ describe('sandbox command builders', () => {
     }
   })
 
-  it('targets the shared sandbox with a per-command working directory and a verbatim guest payload', async () => {
-    const fakeBin = mkdtempSync(path.join(tmpdir(), 'ocm-msb-'))
-    const msbPath = path.join(fakeBin, 'msb')
-    const captureFile = path.join(fakeBin, 'payload.txt')
-    writeFileSync(
-      msbPath,
-      [
-        '#!/bin/sh',
-        'payload=""',
-        'prev=""',
-        'for arg in "$@"; do',
-        '  if [ "$prev" = "-c" ]; then payload="$arg"; fi',
-        '  prev="$arg"',
-        'done',
-        `printf '%s' "$payload" > "${captureFile}"`,
-        'sh -c "$payload"',
-      ].join('\n'),
-      { mode: 0o755 },
-    )
-    process.env.MSB_PATH = msbPath
-    try {
-      vi.resetModules()
-      const mod = await import('../../../src/services/sandbox/command')
-      mod.overrideSandboxExecutableTrustValidator(() => true)
-      const { buildSandboxExecCommandString, resolveSandboxExecUser } = mod
-
-      const directory = path.join(getReposPath(), 'foo')
-      const command = 'echo "it\'s a test" && echo line2 | tr a-z A-Z\necho after-newline'
-      const exec = buildSandboxExecCommandString(directory, command)
-
-      expect(exec).toBe(
-        `${quoteForShell(msbPath)} exec ${WORKSPACE_SANDBOX_NAME} --no-tty -q -u ${quoteForShell(resolveSandboxExecUser())} -w ${quoteForShell(directory)} --timeout ${Math.floor(ENV.SANDBOX.EXEC_TIMEOUT_MS / 1000)}s -- sh -c ${quoteForShell(command)}`,
-      )
-
-      const result = spawnSync('sh', ['-c', exec], {
-        encoding: 'utf8',
-      })
-      expect(result.status).toBe(0)
-      expect(result.stdout).toBe("it's a test\nLINE2\nafter-newline\n")
-      expect(readFileSync(captureFile, 'utf8')).toBe(command)
-    } finally {
-      delete process.env.MSB_PATH
-      rmSync(fakeBin, { recursive: true, force: true })
-    }
-  })
-
-  it('passes MSB_PATH and the resolved exec identity to msb as single literal arguments', async () => {
-    const fakeBin = mkdtempSync(path.join(tmpdir(), 'ocm-msb-hostile-'))
-    const captureFile = path.join(fakeBin, 'argv.txt')
-    const msbPath = path.join(fakeBin, 'my msb')
-    const hostileUser = 'node; echo hacked'
-    writeFileSync(
-      msbPath,
-      [
-        '#!/bin/sh',
-        `printf '%s\\n' "$0" "$@" > "${captureFile}"`,
-        'payload=""',
-        'prev=""',
-        'for arg in "$@"; do',
-        '  if [ "$prev" = "-c" ]; then payload="$arg"; fi',
-        '  prev="$arg"',
-        'done',
-        'sh -c "$payload"',
-      ].join('\n'),
-      { mode: 0o755 },
-    )
-
-    try {
-      process.env.MSB_PATH = msbPath
-      process.env.SANDBOX_EXEC_USER = hostileUser
-      vi.resetModules()
-      const mod = await import('../../../src/services/sandbox/command')
-      mod.overrideSandboxExecutableTrustValidator(() => true)
-      const { buildSandboxExecCommandString, resolveSandboxExecUser } = mod
-
-      const directory = path.join(getReposPath(), 'foo')
-      const command = 'echo hostile-ok'
-      const exec = buildSandboxExecCommandString(directory, command)
-
-      const result = spawnSync('sh', ['-c', exec], {
-        encoding: 'utf8',
-        env: { ...process.env, PATH: `${fakeBin}:${process.env.PATH ?? ''}` },
-      })
-      expect(result.status).toBe(0)
-      expect(result.stdout).toBe('hostile-ok\n')
-
-      const resolvedUser = resolveSandboxExecUser()
-      expect(resolvedUser).toMatch(/^\d+:\d+$/)
-
-      const argv = readFileSync(captureFile, 'utf8').split('\n')
-      expect(argv[0]).toBe(msbPath)
-      expect(argv[argv.indexOf('-u') + 1]).toBe(resolvedUser)
-      expect(argv[argv.indexOf('-w') + 1]).toBe(directory)
-      expect(argv[argv.indexOf('-c') + 1]).toBe(command)
-      expect(argv.join(' ')).not.toContain(hostileUser)
-    } finally {
-      delete process.env.MSB_PATH
-      delete process.env.SANDBOX_EXEC_USER
-      rmSync(fakeBin, { recursive: true, force: true })
-    }
-  })
-
   it('resolves the named exec user default to the manager uid:gid', () => {
     const proc = process as unknown as { getuid: () => number; getgid: () => number }
     vi.spyOn(proc, 'getuid').mockReturnValue(1001)
@@ -379,18 +275,8 @@ describe('sandbox command builders', () => {
     }
   })
 
-  it('builds a blocked command that exits non-zero and writes the reason to stderr', () => {
-    const reason = "KVM is unavailable (it's not a hypervisor host)"
-    const command = buildBlockedCommand(reason)
-    const message = `${SANDBOX_UNAVAILABLE_PREFIX}${reason}`
-
+  it('exposes the sandbox-unavailable message prefix', () => {
     expect(SANDBOX_UNAVAILABLE_PREFIX).toBe('Sandbox enforcement is on but the sandbox is unavailable: ')
-    expect(command).toBe(`printf '%s\n' ${quoteForShell(message)} >&2; exit 1`)
-
-    const result = spawnSync('sh', ['-c', command], { encoding: 'utf8' })
-    expect(result.status).toBe(1)
-    expect(result.stderr).toBe(`${message}\n`)
-    expect(result.stdout).toBe('')
   })
 
   it('resolves a relative MSB_PATH to one absolute executable found on PATH', async () => {
@@ -520,8 +406,11 @@ describe('sandbox command builders', () => {
   })
 })
 
-describe('unwrapSandboxExecCommand round-trips against the real builder', () => {
-  it('recovers the original command from a real sandbox exec wrapper', () => {
+describe('unwrapSandboxExecCommand recovers commands from the legacy recorded wrapper format', () => {
+  const legacyWrapped = (directory: string, command: string) =>
+    `${quoteForShell('/usr/local/bin/msb')} exec ocm-workspace --no-tty -q -u '1001:1001' -w ${quoteForShell(directory)} --timeout 600s -- sh -c ${quoteForShell(command)}`
+
+  it('recovers the original command from a legacy sandbox exec wrapper', () => {
     const directory = '/workspace/repos/ai-test'
     for (const command of [
       'git status',
@@ -529,13 +418,13 @@ describe('unwrapSandboxExecCommand round-trips against the real builder', () => 
       "echo 'x' -- sh -c 'y'",
       'git status\ngit diff\necho done',
     ]) {
-      expect(unwrapSandboxExecCommand(buildSandboxExecCommandString(directory, command))).toBe(command)
+      expect(unwrapSandboxExecCommand(legacyWrapped(directory, command))).toBe(command)
     }
   })
 
   it('passes through plain, blocked, empty, and near-miss commands unchanged', () => {
-    const blocked = buildBlockedCommand('KVM is unavailable')
-    const nearMiss = buildSandboxExecCommandString('/workspace/repos/ai-test', 'git status').replace(' --no-tty -q ', ' --no-tty ')
+    const blocked = "printf '%s\n' 'Sandbox enforcement is on but the sandbox is unavailable: KVM is unavailable' >&2; exit 1"
+    const nearMiss = legacyWrapped('/workspace/repos/ai-test', 'git status').replace(' --no-tty -q ', ' --no-tty ')
 
     expect(unwrapSandboxExecCommand('git status')).toBe('git status')
     expect(unwrapSandboxExecCommand(blocked)).toBe(blocked)

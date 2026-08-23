@@ -7,7 +7,7 @@ import { ENV, getReposPath, getScheduleWorktreesPath } from '@opencode-manager/s
 import { migrate } from '../../../src/db/migration-runner'
 import { allMigrations } from '../../../src/db/migrations'
 import { SettingsService } from '../../../src/services/settings'
-import { buildSandboxExecCommandString, buildSandboxInspectArgs, resolveSandboxExecUser, resolveSandboxRuntimeTmpfsSizeMib, sandboxExecutablePath, WORKSPACE_SANDBOX_NAME, sandboxSecretMaskPath } from '../../../src/services/sandbox/command'
+import { buildSandboxInspectArgs, resolveSandboxExecUser, resolveSandboxRuntimeTmpfsSizeMib, sandboxExecutablePath, WORKSPACE_SANDBOX_NAME, sandboxSecretMaskPath } from '../../../src/services/sandbox/command'
 import { SandboxRuntimeService, resetSandboxRuntimeState, stopWorkspaceSandboxOnShutdown } from '../../../src/services/sandbox/runtime'
 import { executeCommand } from '../../../src/utils/process'
 import { detectSandboxCapability } from '../../../src/services/sandbox/capability'
@@ -212,7 +212,7 @@ describe('SandboxRuntimeService', () => {
   it('returns host mode when the preference is off', async () => {
     mockDetectSandboxCapability.mockReturnValue({ available: true, msbVersion: 'msb 0.3.1' })
 
-    const plan = await service.planCommand(repoADir, 'echo hi')
+    const plan = await service.planShell(repoADir)
 
     expect(plan).toEqual({ mode: 'host' })
     expect(mockExecuteCommand).not.toHaveBeenCalled()
@@ -222,7 +222,7 @@ describe('SandboxRuntimeService', () => {
     settingsService.updateSettings({ sandbox: { enabled: true } })
     mockDetectSandboxCapability.mockReturnValue({ available: false, reason: '/dev/kvm is not available' })
 
-    const plan = await service.planCommand(repoADir, 'echo hi')
+    const plan = await service.planShell(repoADir)
 
     expect(plan).toEqual({ mode: 'blocked', reason: '/dev/kvm is not available' })
     expect(mockExecuteCommand).not.toHaveBeenCalled()
@@ -236,9 +236,9 @@ describe('SandboxRuntimeService', () => {
     })
 
     const directory = repoADir
-    const plan = await service.planCommand(directory, 'echo hi')
+    const plan = await service.planShell(directory)
 
-    expect(plan).toEqual({ mode: 'sandbox', command: buildSandboxExecCommandString(directory, 'echo hi') })
+    expect(plan).toEqual({ mode: 'sandbox', workdir: directory })
     expect(mockExecuteCommand).toHaveBeenCalledWith(
       [sandboxExecutablePath(), ...buildSandboxInspectArgs()],
       expect.objectContaining({ ignoreExitCode: true, silent: true }),
@@ -257,12 +257,12 @@ describe('SandboxRuntimeService', () => {
     const dirA = repoADir
     const dirB = repoBDir
     const [planA, planB] = await Promise.all([
-      service.planCommand(dirA, 'echo a'),
-      service.planCommand(dirB, 'echo b'),
+      service.planShell(dirA),
+      service.planShell(dirB),
     ])
 
-    expect(planA).toEqual({ mode: 'sandbox', command: buildSandboxExecCommandString(dirA, 'echo a') })
-    expect(planB).toEqual({ mode: 'sandbox', command: buildSandboxExecCommandString(dirB, 'echo b') })
+    expect(planA).toEqual({ mode: 'sandbox', workdir: dirA })
+    expect(planB).toEqual({ mode: 'sandbox', workdir: dirB })
     expect(mockExecuteCommand.mock.calls.filter((call) => call[0].includes('inspect'))).toHaveLength(1)
     expect(mockExecuteCommand.mock.calls.filter((call) => call[0].includes('ls'))).toHaveLength(0)
     expect(mockExecuteCommand.mock.calls.filter((call) => call[0].includes('run'))).toHaveLength(0)
@@ -276,9 +276,9 @@ describe('SandboxRuntimeService', () => {
     })
 
     const directory = worktreeDir
-    const plan = await service.planCommand(directory, 'echo hi')
+    const plan = await service.planShell(directory)
 
-    expect(plan).toEqual({ mode: 'sandbox', command: buildSandboxExecCommandString(directory, 'echo hi') })
+    expect(plan).toEqual({ mode: 'sandbox', workdir: directory })
   })
 
   it('starts an existing stopped sandbox instead of recreating it', async () => {
@@ -298,9 +298,9 @@ describe('SandboxRuntimeService', () => {
       return { exitCode: 0, stdout: '', stderr: '' }
     })
 
-    const plan = await service.planCommand(repoADir, 'echo hi')
+    const plan = await service.planShell(repoADir)
 
-    expect(plan).toEqual({ mode: 'sandbox', command: buildSandboxExecCommandString(repoADir, 'echo hi') })
+    expect(plan).toEqual({ mode: 'sandbox', workdir: repoADir })
     expect(mockExecuteCommand).toHaveBeenCalledWith(
       [sandboxExecutablePath(), 'start', WORKSPACE_SANDBOX_NAME],
       expect.objectContaining({ ignoreExitCode: true }),
@@ -322,7 +322,7 @@ describe('SandboxRuntimeService', () => {
       return { exitCode: 1, stdout: '', stderr: 'vm kernel failed to boot: no memory' }
     })
 
-    const plan = await service.planCommand(repoADir, 'echo hi')
+    const plan = await service.planShell(repoADir)
 
     expect(plan).toEqual({
       mode: 'blocked',
@@ -345,9 +345,9 @@ describe('SandboxRuntimeService', () => {
       .mockResolvedValueOnce(inspectedRunningSandbox())
 
     const directory = repoADir
-    const plan = await service.planCommand(directory, 'echo hi')
+    const plan = await service.planShell(directory)
 
-    expect(plan).toEqual({ mode: 'sandbox', command: buildSandboxExecCommandString(directory, 'echo hi') })
+    expect(plan).toEqual({ mode: 'sandbox', workdir: directory })
     expect(mockExecuteCommand.mock.calls.filter((call) => call[0].includes('ls'))).toHaveLength(1)
     expect(mockExecuteCommand.mock.calls.filter((call) => call[0].includes('start'))).toHaveLength(1)
     expect(mockExecuteCommand.mock.calls.filter((call) => call[0].includes('run'))).toHaveLength(0)
@@ -386,9 +386,9 @@ describe('SandboxRuntimeService', () => {
       return { exitCode: 0, stdout: '', stderr: '' }
     })
 
-    const plan = await service.planCommand(repoADir, 'echo hi')
+    const plan = await service.planShell(repoADir)
 
-    expect(plan).toEqual({ mode: 'sandbox', command: buildSandboxExecCommandString(repoADir, 'echo hi') })
+    expect(plan).toEqual({ mode: 'sandbox', workdir: repoADir })
     expect(mockExecuteCommand.mock.calls.filter((call) => call[0].includes('start'))).toHaveLength(1)
     expect(mockExecuteCommand.mock.calls.filter((call) => call[0].includes('rm'))).toHaveLength(1)
     expect(mockExecuteCommand.mock.calls.filter((call) => call[0].includes('run'))).toHaveLength(1)
@@ -405,7 +405,7 @@ describe('SandboxRuntimeService', () => {
       .mockResolvedValueOnce({ exitCode: 1, stdout: '', stderr: 'Command terminated by signal SIGKILL' })
       .mockResolvedValueOnce({ exitCode: 0, stdout: stoppedListingOutput(), stderr: '' })
 
-    const first = await service.planCommand(repoADir, 'echo hi')
+    const first = await service.planShell(repoADir)
 
     expect(first).toEqual({
       mode: 'blocked',
@@ -415,7 +415,7 @@ describe('SandboxRuntimeService', () => {
     expect(mockExecuteCommand.mock.calls.filter((call) => call[0].includes('ls'))).toHaveLength(1)
     expect(mockExecuteCommand.mock.calls.filter((call) => call[0].includes('run'))).toHaveLength(0)
 
-    const retried = await service.planCommand(repoADir, 'echo hi')
+    const retried = await service.planShell(repoADir)
 
     expect(retried).toEqual({
       mode: 'blocked',
@@ -445,9 +445,9 @@ describe('SandboxRuntimeService', () => {
       return { exitCode: 0, stdout: '', stderr: '' }
     })
 
-    const plan = await service.planCommand(repoADir, 'echo hi')
+    const plan = await service.planShell(repoADir)
 
-    expect(plan).toEqual({ mode: 'sandbox', command: buildSandboxExecCommandString(repoADir, 'echo hi') })
+    expect(plan).toEqual({ mode: 'sandbox', workdir: repoADir })
     expect(mockExecuteCommand).toHaveBeenCalledWith(
       [sandboxExecutablePath(), 'rm', '--force', WORKSPACE_SANDBOX_NAME],
       expect.objectContaining({ ignoreExitCode: true }),
@@ -490,9 +490,9 @@ describe('SandboxRuntimeService', () => {
       return { exitCode: 0, stdout: '', stderr: '' }
     })
 
-    const plan = await service.planCommand(repoADir, 'echo hi')
+    const plan = await service.planShell(repoADir)
 
-    expect(plan).toEqual({ mode: 'sandbox', command: buildSandboxExecCommandString(repoADir, 'echo hi') })
+    expect(plan).toEqual({ mode: 'sandbox', workdir: repoADir })
     expect(mockExecuteCommand.mock.calls.filter((call) => call[0].includes('rm'))).toHaveLength(1)
     expect(mockExecuteCommand.mock.calls.filter((call) => call[0].includes('run'))).toHaveLength(1)
     expect(mockExecuteCommand.mock.calls.filter((call) => call[0].includes('start'))).toHaveLength(0)
@@ -526,9 +526,9 @@ describe('SandboxRuntimeService', () => {
       return { exitCode: 0, stdout: '', stderr: '' }
     })
 
-    const plan = await service.planCommand(repoADir, 'echo hi')
+    const plan = await service.planShell(repoADir)
 
-    expect(plan).toEqual({ mode: 'sandbox', command: buildSandboxExecCommandString(repoADir, 'echo hi') })
+    expect(plan).toEqual({ mode: 'sandbox', workdir: repoADir })
     expect(mockExecuteCommand.mock.calls.filter((call) => call[0].includes('rm'))).toHaveLength(1)
     expect(mockExecuteCommand.mock.calls.filter((call) => call[0].includes('run'))).toHaveLength(1)
     expect(mockExecuteCommand.mock.calls.filter((call) => call[0].includes('start'))).toHaveLength(0)
@@ -570,9 +570,9 @@ describe('SandboxRuntimeService', () => {
       return { exitCode: 0, stdout: '', stderr: '' }
     })
 
-    const plan = await service.planCommand(repoADir, 'echo hi')
+    const plan = await service.planShell(repoADir)
 
-    expect(plan).toEqual({ mode: 'sandbox', command: buildSandboxExecCommandString(repoADir, 'echo hi') })
+    expect(plan).toEqual({ mode: 'sandbox', workdir: repoADir })
     expect(mockExecuteCommand.mock.calls.filter((call) => call[0].includes('rm'))).toHaveLength(1)
     expect(mockExecuteCommand.mock.calls.filter((call) => call[0].includes('run'))).toHaveLength(1)
     expect(mockExecuteCommand.mock.calls.filter((call) => call[0].includes('start'))).toHaveLength(0)
@@ -613,9 +613,9 @@ describe('SandboxRuntimeService', () => {
       return { exitCode: 0, stdout: '', stderr: '' }
     })
 
-    const plan = await service.planCommand(repoADir, 'echo hi')
+    const plan = await service.planShell(repoADir)
 
-    expect(plan).toEqual({ mode: 'sandbox', command: buildSandboxExecCommandString(repoADir, 'echo hi') })
+    expect(plan).toEqual({ mode: 'sandbox', workdir: repoADir })
     expect(mockExecuteCommand.mock.calls.filter((call) => call[0].includes('rm'))).toHaveLength(1)
     expect(mockExecuteCommand.mock.calls.filter((call) => call[0].includes('run'))).toHaveLength(1)
     expect(mockExecuteCommand.mock.calls.filter((call) => call[0].includes('start'))).toHaveLength(0)
@@ -651,9 +651,9 @@ describe('SandboxRuntimeService', () => {
       return { exitCode: 0, stdout: '', stderr: '' }
     })
 
-    const plan = await service.planCommand(repoADir, 'echo hi')
+    const plan = await service.planShell(repoADir)
 
-    expect(plan).toEqual({ mode: 'sandbox', command: buildSandboxExecCommandString(repoADir, 'echo hi') })
+    expect(plan).toEqual({ mode: 'sandbox', workdir: repoADir })
     expect(mockExecuteCommand.mock.calls.filter((call) => call[0].includes('rm'))).toHaveLength(1)
     expect(mockExecuteCommand.mock.calls.filter((call) => call[0].includes('run'))).toHaveLength(1)
     expect(logger.warn).toHaveBeenCalledWith(expect.stringContaining('network.secrets is malformed'))
@@ -683,9 +683,9 @@ describe('SandboxRuntimeService', () => {
       return { exitCode: 0, stdout: '', stderr: '' }
     })
 
-    const plan = await service.planCommand(repoADir, 'echo hi')
+    const plan = await service.planShell(repoADir)
 
-    expect(plan).toEqual({ mode: 'sandbox', command: buildSandboxExecCommandString(repoADir, 'echo hi') })
+    expect(plan).toEqual({ mode: 'sandbox', workdir: repoADir })
     expect(mockExecuteCommand.mock.calls.filter((call) => call[0].includes('rm'))).toHaveLength(0)
     expect(mockExecuteCommand.mock.calls.filter((call) => call[0].includes('run'))).toHaveLength(0)
     expect(mockExecuteCommand.mock.calls.filter((call) => call[0].includes('start'))).toHaveLength(0)
@@ -719,9 +719,9 @@ describe('SandboxRuntimeService', () => {
       return { exitCode: 0, stdout: '', stderr: '' }
     })
 
-    const plan = await service.planCommand(repoADir, 'echo hi')
+    const plan = await service.planShell(repoADir)
 
-    expect(plan).toEqual({ mode: 'sandbox', command: buildSandboxExecCommandString(repoADir, 'echo hi') })
+    expect(plan).toEqual({ mode: 'sandbox', workdir: repoADir })
     expect(mockExecuteCommand.mock.calls.filter((call) => call[0].includes('rm'))).toHaveLength(1)
     expect(mockExecuteCommand.mock.calls.filter((call) => call[0].includes('run'))).toHaveLength(1)
     expect(logger.warn).toHaveBeenCalledWith(expect.stringContaining('unexpected tmpfs mount'))
@@ -752,9 +752,9 @@ describe('SandboxRuntimeService', () => {
       return { exitCode: 0, stdout: '', stderr: '' }
     })
 
-    const plan = await service.planCommand(repoADir, 'echo hi')
+    const plan = await service.planShell(repoADir)
 
-    expect(plan).toEqual({ mode: 'sandbox', command: buildSandboxExecCommandString(repoADir, 'echo hi') })
+    expect(plan).toEqual({ mode: 'sandbox', workdir: repoADir })
     expect(mockExecuteCommand.mock.calls.filter((call) => call[0].includes('rm'))).toHaveLength(1)
     expect(mockExecuteCommand.mock.calls.filter((call) => call[0].includes('run'))).toHaveLength(1)
     expect(logger.warn).toHaveBeenCalledWith(expect.stringContaining('assistant .opencode mask'))
@@ -792,9 +792,9 @@ describe('SandboxRuntimeService', () => {
       return { exitCode: 0, stdout: '', stderr: '' }
     })
 
-    const plan = await service.planCommand(repoADir, 'echo hi')
+    const plan = await service.planShell(repoADir)
 
-    expect(plan).toEqual({ mode: 'sandbox', command: buildSandboxExecCommandString(repoADir, 'echo hi') })
+    expect(plan).toEqual({ mode: 'sandbox', workdir: repoADir })
     expect(mockExecuteCommand.mock.calls.filter((call) => call[0].includes('rm'))).toHaveLength(1)
     expect(mockExecuteCommand.mock.calls.filter((call) => call[0].includes('run'))).toHaveLength(1)
     expect(mockExecuteCommand.mock.calls.filter((call) => call[0].includes('start'))).toHaveLength(0)
@@ -826,9 +826,9 @@ describe('SandboxRuntimeService', () => {
       return { exitCode: 0, stdout: '', stderr: '' }
     })
 
-    const plan = await service.planCommand(repoADir, 'echo hi')
+    const plan = await service.planShell(repoADir)
 
-    expect(plan).toEqual({ mode: 'sandbox', command: buildSandboxExecCommandString(repoADir, 'echo hi') })
+    expect(plan).toEqual({ mode: 'sandbox', workdir: repoADir })
     expect(mockExecuteCommand.mock.calls.filter((call) => call[0].includes('rm'))).toHaveLength(1)
     expect(mockExecuteCommand.mock.calls.filter((call) => call[0].includes('run'))).toHaveLength(1)
     expect(mockExecuteCommand.mock.calls.filter((call) => call[0].includes('start'))).toHaveLength(1)
@@ -860,9 +860,9 @@ describe('SandboxRuntimeService', () => {
       return { exitCode: 0, stdout: '', stderr: '' }
     })
 
-    const plan = await service.planCommand(repoADir, 'echo hi')
+    const plan = await service.planShell(repoADir)
 
-    expect(plan).toEqual({ mode: 'sandbox', command: buildSandboxExecCommandString(repoADir, 'echo hi') })
+    expect(plan).toEqual({ mode: 'sandbox', workdir: repoADir })
     expect(mockExecuteCommand.mock.calls.filter((call) => call[0].includes('rm'))).toHaveLength(1)
     expect(mockExecuteCommand.mock.calls.filter((call) => call[0].includes('run'))).toHaveLength(1)
     expect(logger.warn).toHaveBeenCalledWith(expect.stringContaining('unexpected config shape'))
@@ -900,9 +900,9 @@ describe('SandboxRuntimeService', () => {
       return { exitCode: 0, stdout: '', stderr: '' }
     })
 
-    const plan = await service.planCommand(repoADir, 'echo hi')
+    const plan = await service.planShell(repoADir)
 
-    expect(plan).toEqual({ mode: 'sandbox', command: buildSandboxExecCommandString(repoADir, 'echo hi') })
+    expect(plan).toEqual({ mode: 'sandbox', workdir: repoADir })
     expect(mockExecuteCommand.mock.calls.filter((call) => call[0].includes('rm'))).toHaveLength(0)
     expect(mockExecuteCommand.mock.calls.filter((call) => call[0].includes('run'))).toHaveLength(0)
     expect(mockExecuteCommand.mock.calls.filter((call) => call[0].includes('start'))).toHaveLength(0)
@@ -925,9 +925,9 @@ describe('SandboxRuntimeService', () => {
       return { exitCode: 0, stdout: '', stderr: '' }
     })
 
-    const plan = await service.planCommand(repoADir, 'echo hi')
+    const plan = await service.planShell(repoADir)
 
-    expect(plan).toEqual({ mode: 'sandbox', command: buildSandboxExecCommandString(repoADir, 'echo hi') })
+    expect(plan).toEqual({ mode: 'sandbox', workdir: repoADir })
     expect(mockExecuteCommand.mock.calls.filter((call) => call[0].includes('rm'))).toHaveLength(0)
     expect(mockExecuteCommand.mock.calls.filter((call) => call[0].includes('run'))).toHaveLength(0)
     expect(mockExecuteCommand.mock.calls.filter((call) => call[0].includes('start'))).toHaveLength(0)
@@ -955,9 +955,9 @@ describe('SandboxRuntimeService', () => {
       return { exitCode: 0, stdout: '', stderr: '' }
     })
 
-    const plan = await service.planCommand(repoADir, 'echo hi')
+    const plan = await service.planShell(repoADir)
 
-    expect(plan).toEqual({ mode: 'sandbox', command: buildSandboxExecCommandString(repoADir, 'echo hi') })
+    expect(plan).toEqual({ mode: 'sandbox', workdir: repoADir })
     expect(mockExecuteCommand.mock.calls.filter((call) => call[0].includes('rm'))).toHaveLength(0)
     expect(mockExecuteCommand.mock.calls.filter((call) => call[0].includes('run'))).toHaveLength(0)
     expect(mockExecuteCommand.mock.calls.filter((call) => call[0].includes('inspect'))).toHaveLength(1)
@@ -990,9 +990,9 @@ describe('SandboxRuntimeService', () => {
       return { exitCode: 0, stdout: '', stderr: '' }
     })
 
-    const plan = await service.planCommand(repoADir, 'echo hi')
+    const plan = await service.planShell(repoADir)
 
-    expect(plan).toEqual({ mode: 'sandbox', command: buildSandboxExecCommandString(repoADir, 'echo hi') })
+    expect(plan).toEqual({ mode: 'sandbox', workdir: repoADir })
     expect(mockExecuteCommand.mock.calls.filter((call) => call[0].includes('rm'))).toHaveLength(0)
     expect(mockExecuteCommand.mock.calls.filter((call) => call[0].includes('run'))).toHaveLength(0)
     expect(mockExecuteCommand.mock.calls.filter((call) => call[0].includes('start'))).toHaveLength(0)
@@ -1014,9 +1014,9 @@ describe('SandboxRuntimeService', () => {
       return { exitCode: 0, stdout: '', stderr: '' }
     })
 
-    const plan = await service.planCommand(repoADir, 'echo hi')
+    const plan = await service.planShell(repoADir)
 
-    expect(plan).toEqual({ mode: 'sandbox', command: buildSandboxExecCommandString(repoADir, 'echo hi') })
+    expect(plan).toEqual({ mode: 'sandbox', workdir: repoADir })
     expect(mockExecuteCommand.mock.calls.filter((call) => call[0].includes('rm'))).toHaveLength(0)
     expect(mockExecuteCommand.mock.calls.filter((call) => call[0].includes('run'))).toHaveLength(0)
   })
@@ -1047,9 +1047,9 @@ describe('SandboxRuntimeService', () => {
       return { exitCode: 0, stdout: '', stderr: '' }
     })
 
-    const plan = await service.planCommand(repoADir, 'echo hi')
+    const plan = await service.planShell(repoADir)
 
-    expect(plan).toEqual({ mode: 'sandbox', command: buildSandboxExecCommandString(repoADir, 'echo hi') })
+    expect(plan).toEqual({ mode: 'sandbox', workdir: repoADir })
     expect(mockExecuteCommand.mock.calls.filter((call) => call[0].includes('rm'))).toHaveLength(0)
     expect(mockExecuteCommand.mock.calls.filter((call) => call[0].includes('run'))).toHaveLength(0)
     expect(mockExecuteCommand.mock.calls.filter((call) => call[0].includes('inspect'))).toHaveLength(1)
@@ -1077,9 +1077,9 @@ describe('SandboxRuntimeService', () => {
       return { exitCode: 0, stdout: '', stderr: '' }
     })
 
-    const plan = await service.planCommand(repoADir, 'echo hi')
+    const plan = await service.planShell(repoADir)
 
-    expect(plan).toEqual({ mode: 'sandbox', command: buildSandboxExecCommandString(repoADir, 'echo hi') })
+    expect(plan).toEqual({ mode: 'sandbox', workdir: repoADir })
     expect(mockExecuteCommand.mock.calls.filter((call) => call[0].includes('rm'))).toHaveLength(1)
     expect(mockExecuteCommand.mock.calls.filter((call) => call[0].includes('run'))).toHaveLength(1)
     expect(logger.warn).toHaveBeenCalledWith(expect.stringContaining('host disk image'))
@@ -1113,9 +1113,9 @@ describe('SandboxRuntimeService', () => {
       return { exitCode: 0, stdout: '', stderr: '' }
     })
 
-    const plan = await service.planCommand(repoADir, 'echo hi')
+    const plan = await service.planShell(repoADir)
 
-    expect(plan).toEqual({ mode: 'sandbox', command: buildSandboxExecCommandString(repoADir, 'echo hi') })
+    expect(plan).toEqual({ mode: 'sandbox', workdir: repoADir })
     expect(mockExecuteCommand.mock.calls.filter((call) => call[0].includes('rm'))).toHaveLength(1)
     expect(mockExecuteCommand.mock.calls.filter((call) => call[0].includes('run'))).toHaveLength(1)
     expect(logger.warn).toHaveBeenCalledWith(expect.stringContaining('unrestricted egress'))
@@ -1156,9 +1156,9 @@ describe('SandboxRuntimeService', () => {
       return { exitCode: 0, stdout: '', stderr: '' }
     })
 
-    const plan = await service.planCommand(repoADir, 'echo hi')
+    const plan = await service.planShell(repoADir)
 
-    expect(plan).toEqual({ mode: 'sandbox', command: buildSandboxExecCommandString(repoADir, 'echo hi') })
+    expect(plan).toEqual({ mode: 'sandbox', workdir: repoADir })
     expect(mockExecuteCommand.mock.calls.filter((call) => call[0].includes('rm'))).toHaveLength(1)
     expect(mockExecuteCommand.mock.calls.filter((call) => call[0].includes('run'))).toHaveLength(1)
     expect(logger.warn).toHaveBeenCalledWith(expect.stringContaining('network policy'))
@@ -1200,9 +1200,9 @@ describe('SandboxRuntimeService', () => {
       return { exitCode: 0, stdout: '', stderr: '' }
     })
 
-    const plan = await service.planCommand(repoADir, 'echo hi')
+    const plan = await service.planShell(repoADir)
 
-    expect(plan).toEqual({ mode: 'sandbox', command: buildSandboxExecCommandString(repoADir, 'echo hi') })
+    expect(plan).toEqual({ mode: 'sandbox', workdir: repoADir })
     expect(mockExecuteCommand.mock.calls.filter((call) => call[0].includes('rm'))).toHaveLength(1)
     expect(mockExecuteCommand.mock.calls.filter((call) => call[0].includes('run'))).toHaveLength(1)
     expect(logger.warn).toHaveBeenCalledWith(expect.stringContaining('network policy'))
@@ -1242,9 +1242,9 @@ describe('SandboxRuntimeService', () => {
       return { exitCode: 0, stdout: '', stderr: '' }
     })
 
-    const plan = await service.planCommand(repoADir, 'echo hi')
+    const plan = await service.planShell(repoADir)
 
-    expect(plan).toEqual({ mode: 'sandbox', command: buildSandboxExecCommandString(repoADir, 'echo hi') })
+    expect(plan).toEqual({ mode: 'sandbox', workdir: repoADir })
     expect(mockExecuteCommand.mock.calls.filter((call) => call[0].includes('rm'))).toHaveLength(1)
     expect(mockExecuteCommand.mock.calls.filter((call) => call[0].includes('run'))).toHaveLength(1)
     expect(logger.warn).toHaveBeenCalledWith(expect.stringContaining('network policy'))
@@ -1285,9 +1285,9 @@ describe('SandboxRuntimeService', () => {
       return { exitCode: 0, stdout: '', stderr: '' }
     })
 
-    const plan = await service.planCommand(repoADir, 'echo hi')
+    const plan = await service.planShell(repoADir)
 
-    expect(plan).toEqual({ mode: 'sandbox', command: buildSandboxExecCommandString(repoADir, 'echo hi') })
+    expect(plan).toEqual({ mode: 'sandbox', workdir: repoADir })
     expect(mockExecuteCommand.mock.calls.filter((call) => call[0].includes('rm'))).toHaveLength(1)
     expect(mockExecuteCommand.mock.calls.filter((call) => call[0].includes('run'))).toHaveLength(1)
     expect(logger.warn).toHaveBeenCalledWith(expect.stringContaining('default_ingress'))
@@ -1315,9 +1315,9 @@ describe('SandboxRuntimeService', () => {
       return { exitCode: 0, stdout: '', stderr: '' }
     })
 
-    const plan = await service.planCommand(repoADir, 'echo hi')
+    const plan = await service.planShell(repoADir)
 
-    expect(plan).toEqual({ mode: 'sandbox', command: buildSandboxExecCommandString(repoADir, 'echo hi') })
+    expect(plan).toEqual({ mode: 'sandbox', workdir: repoADir })
     expect(mockExecuteCommand.mock.calls.filter((call) => call[0].includes('rm'))).toHaveLength(1)
     expect(mockExecuteCommand.mock.calls.filter((call) => call[0].includes('run'))).toHaveLength(1)
     expect(logger.warn).toHaveBeenCalledWith(expect.stringContaining('network policy'))
@@ -1346,7 +1346,7 @@ describe('SandboxRuntimeService', () => {
         return { exitCode: 0, stdout: '', stderr: '' }
       })
 
-      const plan = await service.planCommand(repoADir, 'echo hi')
+      const plan = await service.planShell(repoADir)
 
       expect(plan).toEqual({
         mode: 'blocked',
@@ -1379,9 +1379,9 @@ describe('SandboxRuntimeService', () => {
       return { exitCode: 0, stdout: '', stderr: '' }
     })
 
-    const plan = await service.planCommand(repoADir, 'echo hi')
+    const plan = await service.planShell(repoADir)
 
-    expect(plan).toEqual({ mode: 'sandbox', command: buildSandboxExecCommandString(repoADir, 'echo hi') })
+    expect(plan).toEqual({ mode: 'sandbox', workdir: repoADir })
     expect(mockExecuteCommand.mock.calls.filter((call) => call[0].includes('rm'))).toHaveLength(1)
     expect(mockExecuteCommand.mock.calls.filter((call) => call[0].includes('run'))).toHaveLength(1)
     expect(logger.warn).toHaveBeenCalledWith(expect.stringContaining('does not match'))
@@ -1407,9 +1407,9 @@ describe('SandboxRuntimeService', () => {
       return { exitCode: 0, stdout: '', stderr: '' }
     })
 
-    const plan = await service.planCommand(repoADir, 'echo hi')
+    const plan = await service.planShell(repoADir)
 
-    expect(plan).toEqual({ mode: 'sandbox', command: buildSandboxExecCommandString(repoADir, 'echo hi') })
+    expect(plan).toEqual({ mode: 'sandbox', workdir: repoADir })
     expect(mockExecuteCommand.mock.calls.filter((call) => call[0].includes('rm'))).toHaveLength(1)
     expect(mockExecuteCommand.mock.calls.filter((call) => call[0].includes('run'))).toHaveLength(1)
     expect(logger.warn).toHaveBeenCalledWith(expect.stringContaining('networking is disabled'))
@@ -1435,9 +1435,9 @@ describe('SandboxRuntimeService', () => {
       return { exitCode: 0, stdout: '', stderr: '' }
     })
 
-    const plan = await service.planCommand(repoADir, 'echo hi')
+    const plan = await service.planShell(repoADir)
 
-    expect(plan).toEqual({ mode: 'sandbox', command: buildSandboxExecCommandString(repoADir, 'echo hi') })
+    expect(plan).toEqual({ mode: 'sandbox', workdir: repoADir })
     expect(mockExecuteCommand.mock.calls.filter((call) => call[0].includes('rm'))).toHaveLength(1)
     expect(mockExecuteCommand.mock.calls.filter((call) => call[0].includes('run'))).toHaveLength(1)
     expect(logger.warn).toHaveBeenCalledWith(expect.stringContaining('network profile'))
@@ -1463,9 +1463,9 @@ describe('SandboxRuntimeService', () => {
       return { exitCode: 0, stdout: '', stderr: '' }
     })
 
-    const plan = await service.planCommand(repoADir, 'echo hi')
+    const plan = await service.planShell(repoADir)
 
-    expect(plan).toEqual({ mode: 'sandbox', command: buildSandboxExecCommandString(repoADir, 'echo hi') })
+    expect(plan).toEqual({ mode: 'sandbox', workdir: repoADir })
     expect(mockExecuteCommand.mock.calls.filter((call) => call[0].includes('rm'))).toHaveLength(1)
     expect(mockExecuteCommand.mock.calls.filter((call) => call[0].includes('run'))).toHaveLength(1)
     expect(logger.warn).toHaveBeenCalledWith(expect.stringContaining('network profile'))
@@ -1489,13 +1489,13 @@ describe('SandboxRuntimeService', () => {
         return { exitCode: 0, stdout: '', stderr: '' }
       })
 
-      const first = await service.planCommand(repoADir, 'echo a')
-      expect(first).toEqual({ mode: 'sandbox', command: buildSandboxExecCommandString(repoADir, 'echo a') })
+      const first = await service.planShell(repoADir)
+      expect(first).toEqual({ mode: 'sandbox', workdir: repoADir })
 
       vi.advanceTimersByTime(6000)
 
-      const second = await service.planCommand(repoBDir, 'echo b')
-      expect(second).toEqual({ mode: 'sandbox', command: buildSandboxExecCommandString(repoBDir, 'echo b') })
+      const second = await service.planShell(repoBDir)
+      expect(second).toEqual({ mode: 'sandbox', workdir: repoBDir })
 
       expect(mockExecuteCommand.mock.calls.filter((call) => call[0].includes('ls'))).toHaveLength(0)
       expect(mockExecuteCommand.mock.calls.filter((call) => call[0].includes('inspect'))).toHaveLength(2)
@@ -1523,9 +1523,9 @@ describe('SandboxRuntimeService', () => {
       return { exitCode: 0, stdout: '', stderr: '' }
     })
 
-    const plan = await service.planCommand(repoADir, 'echo hi')
+    const plan = await service.planShell(repoADir)
 
-    expect(plan).toEqual({ mode: 'sandbox', command: buildSandboxExecCommandString(repoADir, 'echo hi') })
+    expect(plan).toEqual({ mode: 'sandbox', workdir: repoADir })
     expect(mockExecuteCommand.mock.calls.filter((call) => call[0].includes('rm'))).toHaveLength(1)
     expect(mockExecuteCommand.mock.calls.filter((call) => call[0].includes('run'))).toHaveLength(1)
     expect(logger.warn).toHaveBeenCalledWith(expect.stringContaining('malformed JSON'))
@@ -1547,9 +1547,9 @@ describe('SandboxRuntimeService', () => {
       return { exitCode: 0, stdout: '', stderr: '' }
     })
 
-    const plan = await service.planCommand(repoADir, 'echo hi')
+    const plan = await service.planShell(repoADir)
 
-    expect(plan).toEqual({ mode: 'sandbox', command: buildSandboxExecCommandString(repoADir, 'echo hi') })
+    expect(plan).toEqual({ mode: 'sandbox', workdir: repoADir })
     expect(mockExecuteCommand.mock.calls.filter((call) => call[0].includes('rm'))).toHaveLength(1)
     expect(mockExecuteCommand.mock.calls.filter((call) => call[0].includes('run'))).toHaveLength(1)
     expect(logger.warn).toHaveBeenCalledWith(expect.stringContaining('msb inspect failed with code 1'))
@@ -1559,7 +1559,7 @@ describe('SandboxRuntimeService', () => {
     enableEnforcement()
     mockExecuteCommand.mockResolvedValue({ exitCode: 1, stdout: '', stderr: 'failed to connect to supervisor' })
 
-    const plan = await service.planCommand(repoADir, 'echo hi')
+    const plan = await service.planShell(repoADir)
 
     expect(plan).toEqual({
       mode: 'blocked',
@@ -1572,7 +1572,7 @@ describe('SandboxRuntimeService', () => {
     enableEnforcement()
     mockExecuteCommand.mockResolvedValue({ exitCode: 0, stdout: '{"error":"truncated', stderr: '' })
 
-    const plan = await service.planCommand(repoADir, 'echo hi')
+    const plan = await service.planShell(repoADir)
 
     expect(plan).toEqual({
       mode: 'blocked',
@@ -1585,7 +1585,7 @@ describe('SandboxRuntimeService', () => {
     enableEnforcement()
     mockExecuteCommand.mockResolvedValue({ exitCode: 0, stdout: '{"name":"ocm-workspace"}', stderr: '' })
 
-    const plan = await service.planCommand(repoADir, 'echo hi')
+    const plan = await service.planShell(repoADir)
 
     expect(plan).toEqual({
       mode: 'blocked',
@@ -1603,7 +1603,7 @@ describe('SandboxRuntimeService', () => {
       throw new Error('Command failed with code 1: no KVM acceleration available')
     })
 
-    const plan = await service.planCommand(repoADir, 'echo hi')
+    const plan = await service.planShell(repoADir)
 
     expect(plan).toEqual({ mode: 'blocked', reason: 'Command failed with code 1: no KVM acceleration available' })
     expect(logger.error).toHaveBeenCalled()
@@ -1612,7 +1612,7 @@ describe('SandboxRuntimeService', () => {
   it('returns blocked for a directory outside the mounted project roots', async () => {
     enableEnforcement()
 
-    const plan = await service.planCommand('/etc', 'echo hi')
+    const plan = await service.planShell('/etc')
 
     expect(plan).toEqual({
       mode: 'blocked',
@@ -1642,9 +1642,9 @@ describe('SandboxRuntimeService', () => {
       return { exitCode: 0, stdout: '', stderr: '' }
     })
 
-    const plan = await service.planCommand(repoADir, 'echo hi')
+    const plan = await service.planShell(repoADir)
 
-    expect(plan).toEqual({ mode: 'sandbox', command: buildSandboxExecCommandString(repoADir, 'echo hi') })
+    expect(plan).toEqual({ mode: 'sandbox', workdir: repoADir })
     expect(mockExecuteCommand.mock.calls.filter((call) => call[0].includes('rm'))).toHaveLength(1)
     expect(mockExecuteCommand.mock.calls.filter((call) => call[0].includes('run'))).toHaveLength(1)
     expect(logger.warn).toHaveBeenCalledWith(expect.stringContaining('sandbox user null does not match'))
@@ -1678,9 +1678,9 @@ describe('SandboxRuntimeService', () => {
       return { exitCode: 0, stdout: '', stderr: '' }
     })
 
-    const plan = await service.planCommand(repoADir, 'echo hi')
+    const plan = await service.planShell(repoADir)
 
-    expect(plan).toEqual({ mode: 'sandbox', command: buildSandboxExecCommandString(repoADir, 'echo hi') })
+    expect(plan).toEqual({ mode: 'sandbox', workdir: repoADir })
     expect(mockExecuteCommand.mock.calls.filter((call) => call[0].includes('rm'))).toHaveLength(1)
     expect(mockExecuteCommand.mock.calls.filter((call) => call[0].includes('run'))).toHaveLength(1)
     expect(logger.warn).toHaveBeenCalledWith(expect.stringContaining('does not match the canonical specification'))
@@ -1707,9 +1707,9 @@ describe('SandboxRuntimeService', () => {
       return { exitCode: 0, stdout: '', stderr: '' }
     })
 
-    const plan = await service.planCommand(repoADir, 'echo hi')
+    const plan = await service.planShell(repoADir)
 
-    expect(plan).toEqual({ mode: 'sandbox', command: buildSandboxExecCommandString(repoADir, 'echo hi') })
+    expect(plan).toEqual({ mode: 'sandbox', workdir: repoADir })
     expect(mockExecuteCommand.mock.calls.filter((call) => call[0].includes('rm'))).toHaveLength(1)
     expect(mockExecuteCommand.mock.calls.filter((call) => call[0].includes('run'))).toHaveLength(1)
     expect(logger.warn).toHaveBeenCalledWith(expect.stringContaining('runtime.cmd'))
@@ -1736,9 +1736,9 @@ describe('SandboxRuntimeService', () => {
       return { exitCode: 0, stdout: '', stderr: '' }
     })
 
-    const plan = await service.planCommand(repoADir, 'echo hi')
+    const plan = await service.planShell(repoADir)
 
-    expect(plan).toEqual({ mode: 'sandbox', command: buildSandboxExecCommandString(repoADir, 'echo hi') })
+    expect(plan).toEqual({ mode: 'sandbox', workdir: repoADir })
     expect(mockExecuteCommand.mock.calls.filter((call) => call[0].includes('rm'))).toHaveLength(1)
     expect(mockExecuteCommand.mock.calls.filter((call) => call[0].includes('run'))).toHaveLength(1)
     expect(logger.warn).toHaveBeenCalledWith(expect.stringContaining('runtime.entrypoint'))
@@ -1764,9 +1764,9 @@ describe('SandboxRuntimeService', () => {
       return { exitCode: 0, stdout: '', stderr: '' }
     })
 
-    const plan = await service.planCommand(repoADir, 'echo hi')
+    const plan = await service.planShell(repoADir)
 
-    expect(plan).toEqual({ mode: 'sandbox', command: buildSandboxExecCommandString(repoADir, 'echo hi') })
+    expect(plan).toEqual({ mode: 'sandbox', workdir: repoADir })
     expect(mockExecuteCommand.mock.calls.filter((call) => call[0].includes('rm'))).toHaveLength(1)
     expect(mockExecuteCommand.mock.calls.filter((call) => call[0].includes('run'))).toHaveLength(1)
     expect(logger.warn).toHaveBeenCalledWith(expect.stringContaining('patches'))
@@ -1792,9 +1792,9 @@ describe('SandboxRuntimeService', () => {
       return { exitCode: 0, stdout: '', stderr: '' }
     })
 
-    const plan = await service.planCommand(repoADir, 'echo hi')
+    const plan = await service.planShell(repoADir)
 
-    expect(plan).toEqual({ mode: 'sandbox', command: buildSandboxExecCommandString(repoADir, 'echo hi') })
+    expect(plan).toEqual({ mode: 'sandbox', workdir: repoADir })
     expect(mockExecuteCommand.mock.calls.filter((call) => call[0].includes('rm'))).toHaveLength(1)
     expect(mockExecuteCommand.mock.calls.filter((call) => call[0].includes('run'))).toHaveLength(1)
     expect(logger.warn).toHaveBeenCalledWith(expect.stringContaining('network.ports'))
@@ -1822,9 +1822,9 @@ describe('SandboxRuntimeService', () => {
       return { exitCode: 0, stdout: '', stderr: '' }
     })
 
-    const plan = await service.planCommand(repoADir, 'echo hi')
+    const plan = await service.planShell(repoADir)
 
-    expect(plan).toEqual({ mode: 'sandbox', command: buildSandboxExecCommandString(repoADir, 'echo hi') })
+    expect(plan).toEqual({ mode: 'sandbox', workdir: repoADir })
     expect(mockExecuteCommand.mock.calls.filter((call) => call[0].includes('rm'))).toHaveLength(1)
     expect(mockExecuteCommand.mock.calls.filter((call) => call[0].includes('run'))).toHaveLength(1)
     expect(logger.warn).toHaveBeenCalledWith(expect.stringContaining('lifecycle.ephemeral'))
@@ -1846,9 +1846,9 @@ describe('SandboxRuntimeService', () => {
       return { exitCode: 0, stdout: '', stderr: '' }
     })
 
-    const plan = await service.planCommand(repoADir, 'echo hi')
+    const plan = await service.planShell(repoADir)
 
-    expect(plan).toEqual({ mode: 'sandbox', command: buildSandboxExecCommandString(repoADir, 'echo hi') })
+    expect(plan).toEqual({ mode: 'sandbox', workdir: repoADir })
     expect(mockExecuteCommand.mock.calls.filter((call) => call[0].includes('rm'))).toHaveLength(0)
     expect(mockExecuteCommand.mock.calls.filter((call) => call[0].includes('run'))).toHaveLength(0)
     expect(mockExecuteCommand.mock.calls.filter((call) => call[0].includes('start'))).toHaveLength(0)
@@ -1875,9 +1875,9 @@ describe('SandboxRuntimeService', () => {
       return { exitCode: 0, stdout: '', stderr: '' }
     })
 
-    const plan = await service.planCommand(repoADir, 'echo hi')
+    const plan = await service.planShell(repoADir)
 
-    expect(plan).toEqual({ mode: 'sandbox', command: buildSandboxExecCommandString(repoADir, 'echo hi') })
+    expect(plan).toEqual({ mode: 'sandbox', workdir: repoADir })
     expect(mockExecuteCommand.mock.calls.filter((call) => call[0].includes('rm'))).toHaveLength(1)
     expect(mockExecuteCommand.mock.calls.filter((call) => call[0].includes('run'))).toHaveLength(1)
     expect(logger.warn).toHaveBeenCalledWith(expect.stringContaining('security_profile'))
@@ -1903,9 +1903,9 @@ describe('SandboxRuntimeService', () => {
       return { exitCode: 0, stdout: '', stderr: '' }
     })
 
-    const plan = await service.planCommand(repoADir, 'echo hi')
+    const plan = await service.planShell(repoADir)
 
-    expect(plan).toEqual({ mode: 'sandbox', command: buildSandboxExecCommandString(repoADir, 'echo hi') })
+    expect(plan).toEqual({ mode: 'sandbox', workdir: repoADir })
     expect(mockExecuteCommand.mock.calls.filter((call) => call[0].includes('rm'))).toHaveLength(1)
     expect(mockExecuteCommand.mock.calls.filter((call) => call[0].includes('run'))).toHaveLength(1)
     expect(logger.warn).toHaveBeenCalledWith(expect.stringContaining('manifest digest'))
@@ -1931,15 +1931,15 @@ describe('SandboxRuntimeService', () => {
       return { exitCode: 0, stdout: '[]', stderr: '' }
     })
 
-    const plan = await service.planCommand(repoADir, 'echo hi', true)
+    const plan = await service.planShell(repoADir, true)
 
-    expect(plan).toEqual({ mode: 'sandbox', command: buildSandboxExecCommandString(repoADir, 'echo hi') })
+    expect(plan).toEqual({ mode: 'sandbox', workdir: repoADir })
   })
 
   it('blocks an enforced request when the capability is unavailable instead of falling back to host', async () => {
     mockDetectSandboxCapability.mockReturnValue({ available: false, reason: '/dev/kvm is not available' })
 
-    const plan = await service.planCommand(repoADir, 'echo hi', true)
+    const plan = await service.planShell(repoADir, true)
 
     expect(plan).toEqual({ mode: 'blocked', reason: '/dev/kvm is not available' })
     expect(mockExecuteCommand).not.toHaveBeenCalled()
@@ -1952,14 +1952,14 @@ describe('SandboxRuntimeService', () => {
       return { exitCode: 0, stdout: '[]', stderr: '' }
     })
 
-    await service.planCommand(repoADir, 'echo a')
+    await service.planShell(repoADir)
 
     const lateDir = path.join(getScheduleWorktreesPath(), 'job-9-run-9')
     mkdirSync(lateDir, { recursive: true })
     try {
-      const plan = await service.planCommand(lateDir, 'echo b')
+      const plan = await service.planShell(lateDir)
 
-      expect(plan).toEqual({ mode: 'sandbox', command: buildSandboxExecCommandString(lateDir, 'echo b') })
+      expect(plan).toEqual({ mode: 'sandbox', workdir: lateDir })
       expect(mockExecuteCommand.mock.calls.filter((call) => call[0].includes('inspect'))).toHaveLength(1)
       expect(mockExecuteCommand.mock.calls.filter((call) => call[0].includes('ls'))).toHaveLength(0)
       expect(mockExecuteCommand.mock.calls.filter((call) => call[0].includes('run'))).toHaveLength(0)
@@ -1990,12 +1990,12 @@ describe('SandboxRuntimeService', () => {
       return { exitCode: 0, stdout: '[]', stderr: '' }
     })
 
-    const first = await service.planCommand(repoADir, 'echo a')
-    expect(first).toEqual({ mode: 'sandbox', command: buildSandboxExecCommandString(repoADir, 'echo a') })
+    const first = await service.planShell(repoADir)
+    expect(first).toEqual({ mode: 'sandbox', workdir: repoADir })
 
     mockDetectSandboxCapability.mockReturnValue({ available: false, reason: '/dev/kvm is not available or not writable' })
 
-    const second = await service.planCommand(repoADir, 'echo b')
+    const second = await service.planShell(repoADir)
 
     expect(second).toEqual({ mode: 'blocked', reason: '/dev/kvm is not available or not writable' })
     expect(mockExecuteCommand.mock.calls.filter((call) => call[0].includes('run'))).toHaveLength(0)
@@ -2038,7 +2038,7 @@ describe('SandboxRuntimeService', () => {
       return { exitCode: 0, stdout: '', stderr: '' }
     })
 
-    const planning = service.planCommand(repoADir, 'echo a')
+    const planning = service.planShell(repoADir)
     await vi.waitFor(() => {
       expect(mockExecuteCommand.mock.calls.some((call) => call[0].includes('inspect'))).toBe(true)
     })
@@ -2048,7 +2048,7 @@ describe('SandboxRuntimeService', () => {
     const plan = await planning
     await stopping
 
-    expect(plan).toEqual({ mode: 'sandbox', command: buildSandboxExecCommandString(repoADir, 'echo a') })
+    expect(plan).toEqual({ mode: 'sandbox', workdir: repoADir })
     const calls = mockExecuteCommand.mock.calls
     const inspectIndex = calls.findIndex((call) => call[0].includes('inspect'))
     const stopIndex = calls.findIndex((call) => call[0].includes('stop'))
@@ -2075,7 +2075,7 @@ describe('SandboxRuntimeService', () => {
       expect(mockExecuteCommand.mock.calls.some((call) => call[0].includes('stop'))).toBe(true)
     })
 
-    const plan = await service.planCommand(repoADir, 'echo hi')
+    const plan = await service.planShell(repoADir)
 
     expect(plan).toEqual({ mode: 'blocked', reason: expect.stringContaining('shutdown is in progress') })
     expect(mockExecuteCommand.mock.calls.filter((call) => call[0].includes('run'))).toHaveLength(0)
@@ -2090,7 +2090,7 @@ describe('SandboxRuntimeService', () => {
       return { exitCode: 0, stdout: '', stderr: '' }
     })
 
-    const planning = service.planCommand(repoADir, 'echo a')
+    const planning = service.planShell(repoADir)
     const stopping = service.stopWorkspaceSandbox()
 
     const plan = await planning
@@ -2145,9 +2145,9 @@ describe('SandboxRuntimeService', () => {
     expect(mockExecuteCommand.mock.calls.filter((call) => call[0].includes('stop'))).toHaveLength(1)
     expect(mockExecuteCommand.mock.calls.filter((call) => call[0].includes('run'))).toHaveLength(0)
 
-    const plan = await service.planCommand(repoADir, 'echo hi')
+    const plan = await service.planShell(repoADir)
 
-    expect(plan).toEqual({ mode: 'sandbox', command: buildSandboxExecCommandString(repoADir, 'echo hi') })
+    expect(plan).toEqual({ mode: 'sandbox', workdir: repoADir })
     expect(mockExecuteCommand.mock.calls.filter((call) => call[0].includes('run'))).toHaveLength(0)
     expect(mockExecuteCommand.mock.calls.filter((call) => call[0].includes('inspect'))).toHaveLength(1)
   })
@@ -2193,7 +2193,7 @@ describe('SandboxRuntimeService', () => {
     try {
       symlinkSync(target, reposRoot)
 
-      const plan = await service.planCommand(repoADir, 'echo hi')
+      const plan = await service.planShell(repoADir)
 
       expect(plan).toEqual({
         mode: 'blocked',
@@ -2233,9 +2233,9 @@ describe('SandboxRuntimeService', () => {
       return { exitCode: 0, stdout: '', stderr: '' }
     })
 
-    const plan = await service.planCommand(repoADir, 'echo hi')
+    const plan = await service.planShell(repoADir)
 
-    expect(plan).toEqual({ mode: 'sandbox', command: buildSandboxExecCommandString(repoADir, 'echo hi') })
+    expect(plan).toEqual({ mode: 'sandbox', workdir: repoADir })
     expect(mockExecuteCommand.mock.calls.filter((call) => call[0].includes('rm'))).toHaveLength(1)
     expect(mockExecuteCommand.mock.calls.filter((call) => call[0].includes('run'))).toHaveLength(1)
     expect(logger.warn).toHaveBeenCalledWith(expect.stringContaining('missing one of the project bind mounts'))
@@ -2252,11 +2252,11 @@ describe('SandboxRuntimeService', () => {
       .mockResolvedValueOnce({ exitCode: 0, stdout: '', stderr: '' })
       .mockResolvedValueOnce(inspectedRunningSandbox())
 
-    const failed = await service.planCommand(repoADir, 'echo a')
+    const failed = await service.planShell(repoADir)
     expect(failed).toEqual({ mode: 'blocked', reason: 'Command failed with code 1: no KVM acceleration available' })
 
-    const retried = await service.planCommand(repoADir, 'echo b')
-    expect(retried).toEqual({ mode: 'sandbox', command: buildSandboxExecCommandString(repoADir, 'echo b') })
+    const retried = await service.planShell(repoADir)
+    expect(retried).toEqual({ mode: 'sandbox', workdir: repoADir })
     expect(mockExecuteCommand.mock.calls.filter((call) => call[0].includes('ls'))).toHaveLength(2)
     expect(mockExecuteCommand.mock.calls.filter((call) => call[0].includes('run'))).toHaveLength(2)
   })
@@ -2284,7 +2284,7 @@ describe('SandboxRuntimeService', () => {
       return { exitCode: 0, stdout: '', stderr: '' }
     })
 
-    const plan = await service.planCommand(repoADir, 'echo hi')
+    const plan = await service.planShell(repoADir)
 
     expect(plan).toEqual({
       mode: 'blocked',
@@ -2295,7 +2295,7 @@ describe('SandboxRuntimeService', () => {
     expect(mockExecuteCommand.mock.calls.filter((call) => call[0].includes('inspect'))).toHaveLength(1)
     expect(logger.warn).toHaveBeenCalledWith(expect.stringContaining('Recreating unverifiable sandbox'))
 
-    const retried = await service.planCommand(repoADir, 'echo again')
+    const retried = await service.planShell(repoADir)
     expect(retried).toEqual({
       mode: 'blocked',
       reason: 'msb rm failed with code 1: failed to kill vm: operation not permitted',
@@ -2329,9 +2329,9 @@ describe('SandboxRuntimeService', () => {
       return { exitCode: 0, stdout: '', stderr: '' }
     })
 
-    const plan = await service.planCommand(repoADir, 'echo hi')
+    const plan = await service.planShell(repoADir)
 
-    expect(plan).toEqual({ mode: 'sandbox', command: buildSandboxExecCommandString(repoADir, 'echo hi') })
+    expect(plan).toEqual({ mode: 'sandbox', workdir: repoADir })
     expect(mockExecuteCommand.mock.calls.filter((call) => call[0].includes('rm'))).toHaveLength(1)
     expect(mockExecuteCommand.mock.calls.filter((call) => call[0].includes('run'))).toHaveLength(1)
     expect(mockExecuteCommand.mock.calls.filter((call) => call[0].includes('inspect'))).toHaveLength(2)
@@ -2353,13 +2353,13 @@ describe('SandboxRuntimeService', () => {
       return { exitCode: 0, stdout: '', stderr: '' }
     })
 
-    const plan = await service.planCommand(repoADir, 'echo hi')
+    const plan = await service.planShell(repoADir)
 
     expect(plan).toEqual({ mode: 'blocked', reason: expect.stringContaining('failed attestation') })
     expect(mockExecuteCommand.mock.calls.filter((call) => call[0].includes('run'))).toHaveLength(1)
     expect(mockExecuteCommand.mock.calls.filter((call) => call[0].includes('inspect'))).toHaveLength(2)
 
-    const retried = await service.planCommand(repoADir, 'echo again')
+    const retried = await service.planShell(repoADir)
     expect(retried).toEqual({ mode: 'blocked', reason: expect.stringContaining('failed attestation') })
     expect(mockExecuteCommand.mock.calls.filter((call) => call[0].includes('run'))).toHaveLength(2)
   })
@@ -2386,9 +2386,9 @@ describe('SandboxRuntimeService', () => {
       return { exitCode: 0, stdout: '', stderr: '' }
     })
 
-    const plan = await service.planCommand(repoADir, 'echo hi')
+    const plan = await service.planShell(repoADir)
 
-    expect(plan).toEqual({ mode: 'sandbox', command: buildSandboxExecCommandString(repoADir, 'echo hi') })
+    expect(plan).toEqual({ mode: 'sandbox', workdir: repoADir })
     expect(mockExecuteCommand.mock.calls.filter((call) => call[0].includes('run'))).toHaveLength(1)
     expect(mockExecuteCommand.mock.calls.filter((call) => call[0].includes('inspect'))).toHaveLength(2)
   })
@@ -2417,9 +2417,9 @@ describe('SandboxRuntimeService', () => {
         return { exitCode: 0, stdout: '', stderr: '' }
       })
 
-      const plan = await service.planCommand(repoADir, 'echo hi')
+      const plan = await service.planShell(repoADir)
 
-      expect(plan).toEqual({ mode: 'sandbox', command: buildSandboxExecCommandString(repoADir, 'echo hi') })
+      expect(plan).toEqual({ mode: 'sandbox', workdir: repoADir })
       expect(mockExecuteCommand.mock.calls.filter((call) => call[0].includes('rm'))).toHaveLength(1)
       expect(mockExecuteCommand.mock.calls.filter((call) => call[0].includes('run'))).toHaveLength(1)
       expect(logger.warn).toHaveBeenCalledWith(expect.stringContaining(expectedReasonPart))

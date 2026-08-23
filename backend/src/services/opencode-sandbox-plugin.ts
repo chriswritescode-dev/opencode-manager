@@ -1,17 +1,23 @@
 import { sandboxPlanTimeoutMs, SANDBOX_UNAVAILABLE_PREFIX } from './sandbox/command'
+import { SANDBOX_SHELL_ENV_HOST_SHELL, SANDBOX_SHELL_ENV_WORKDIR } from './sandbox/shell-shim'
 
 export const SANDBOX_PLAN_TIMEOUT_MS = sandboxPlanTimeoutMs()
 
-export const WRAPPED_COMMANDS_CAP = 256
+export function buildSandboxPluginSource(shellShimPath: string): string {
+  return `import { existsSync } from 'fs'
 
-export function buildSandboxPluginSource(): string {
-  return `var SANDBOX_UNAVAILABLE_PREFIX = ${JSON.stringify(SANDBOX_UNAVAILABLE_PREFIX)}
+var SANDBOX_UNAVAILABLE_PREFIX = ${JSON.stringify(SANDBOX_UNAVAILABLE_PREFIX)}
 var PLAN_TIMEOUT_MS = ${SANDBOX_PLAN_TIMEOUT_MS}
-var WRAPPED_COMMANDS_CAP = ${WRAPPED_COMMANDS_CAP}
+var SHELL_SHIM_PATH = ${JSON.stringify(shellShimPath)}
+var ENV_WORKDIR = ${JSON.stringify(SANDBOX_SHELL_ENV_WORKDIR)}
+var ENV_HOST_SHELL = ${JSON.stringify(SANDBOX_SHELL_ENV_HOST_SHELL)}
 
-function guardCommand(reason) {
-  var safe = String(SANDBOX_UNAVAILABLE_PREFIX + reason).replace(/'/g, "'\\\\''")
-  return "printf '%s\\\\n' '" + safe + "' >&2; exit 1"
+function isEnforced() {
+  return process.env.OCM_SANDBOX_ENFORCED === 'true'
+}
+
+function unavailable(reason) {
+  return new Error(SANDBOX_UNAVAILABLE_PREFIX + reason)
 }
 
 function lockAccessor(target, key, value) {
@@ -32,107 +38,80 @@ function lockAccessor(target, key, value) {
     && target[key] === value
 }
 
-var wrappedCommands = new Map()
-var bypassed = false
-
-function rememberWrapped(callID, command) {
-  if (wrappedCommands.has(callID)) {
-    wrappedCommands.delete(callID)
+async function planSandboxShell(cwd) {
+  var baseUrl = process.env.OCM_INTERNAL_API_URL
+  var token = process.env.OCM_INTERNAL_TOKEN
+  if (!baseUrl || !token) {
+    throw unavailable('sandbox plan lookup unavailable: internal API is not configured')
   }
-  wrappedCommands.set(callID, command)
-  while (wrappedCommands.size > WRAPPED_COMMANDS_CAP) {
-    wrappedCommands.delete(wrappedCommands.keys().next().value)
+  var controller = new AbortController()
+  var planTimedOut = false
+  var planTimer = setTimeout(function () {
+    planTimedOut = true
+    controller.abort()
+  }, PLAN_TIMEOUT_MS)
+  var plan = null
+  var failure = null
+  try {
+    var res = await fetch(baseUrl + '/sandbox/shell', {
+      method: 'POST',
+      headers: {
+        'content-type': 'application/json',
+        Authorization: 'Bearer ' + token,
+      },
+      body: JSON.stringify({ directory: cwd, enforced: true }),
+      signal: controller.signal,
+    })
+    if (!res.ok) {
+      failure = 'sandbox plan request failed with status ' + res.status
+    } else {
+      plan = await res.json()
+    }
+  } catch (error) {
+    failure = planTimedOut ? 'sandbox plan lookup timed out' : (error instanceof Error ? error.message : String(error))
+  } finally {
+    clearTimeout(planTimer)
   }
+  if (failure !== null) {
+    throw unavailable(failure)
+  }
+  if (plan === null || typeof plan !== 'object' || plan.mode !== 'sandbox' || typeof plan.workdir !== 'string' || plan.workdir.length === 0) {
+    throw unavailable(plan !== null && typeof plan === 'object' && typeof plan.reason === 'string' ? plan.reason : 'sandbox plan request returned an invalid response')
+  }
+  return plan.workdir
 }
 
-function replaceCommand(output, command, callID) {
-  if (!lockAccessor(output, 'args', output.args)) {
-    throw new Error('sandbox enforcement could not lock the bash arguments; aborting tool execution before it runs on the host')
-  }
-  if (!lockAccessor(output.args, 'command', command)) {
-    throw new Error('sandbox enforcement could not replace the bash command; aborting tool execution before it runs on the host')
-  }
-  rememberWrapped(callID, command)
-}
+export default async function () {
+  var hostShell
 
-export default async function ({ directory }) {
   return {
-    'tool.execute.before': async (input, output) => {
-      if (input.tool !== 'bash') return
-      if (process.env.OCM_SANDBOX_ENFORCED !== 'true') return
-      if (typeof output.args?.command !== 'string') {
-        replaceCommand(output, guardCommand('sandbox enforcement blocked a malformed bash invocation: command is missing or not a string'), input.callID)
-        return
+    config: async (cfg) => {
+      if (!isEnforced()) return
+      var configured = cfg.shell
+      if (typeof configured === 'string' && configured.length > 0 && configured !== SHELL_SHIM_PATH) {
+        hostShell = configured
       }
-      if (bypassed) {
-        replaceCommand(output, guardCommand('sandbox enforcement was bypassed by another plugin; all sandboxed commands are now blocked'), input.callID)
-        return
-      }
-      var baseUrl = process.env.OCM_INTERNAL_API_URL
-      var token = process.env.OCM_INTERNAL_TOKEN
-      if (!baseUrl || !token) {
-        replaceCommand(output, guardCommand('sandbox plan lookup unavailable: internal API is not configured'), input.callID)
-        return
-      }
-      var replacement = null
-      var effectiveDirectory = directory
-      var requestedWorkdir = output.args.workdir
-      if (typeof requestedWorkdir === 'string' && requestedWorkdir.length > 0) {
-        if (requestedWorkdir.charAt(0) === '/') {
-          effectiveDirectory = requestedWorkdir
-        } else {
-          effectiveDirectory = directory.replace(/\\/+$/, '') + '/' + requestedWorkdir
+      lockAccessor(cfg, 'shell', SHELL_SHIM_PATH)
+    },
+    'shell.env': async (input, output) => {
+      if (!isEnforced() || typeof input.callID !== 'string' || input.callID.length === 0) {
+        if (hostShell !== undefined) {
+          output.env[ENV_HOST_SHELL] = hostShell
         }
+        return
       }
-      var controller = new AbortController()
-      var planTimedOut = false
-      var planTimer = setTimeout(function () {
-        planTimedOut = true
-        controller.abort()
-      }, PLAN_TIMEOUT_MS)
-      try {
-        var res = await fetch(baseUrl + '/sandbox/command', {
-          method: 'POST',
-          headers: {
-            'content-type': 'application/json',
-            Authorization: 'Bearer ' + token,
-          },
-          body: JSON.stringify({
-            directory: effectiveDirectory,
-            command: output.args.command,
-            enforced: true,
-          }),
-          signal: controller.signal,
-        })
-        if (!res.ok) {
-          replacement = guardCommand('sandbox plan request failed with status ' + res.status)
-        } else {
-          var plan = await res.json()
-          if (plan && typeof plan === 'object' && plan.mode === 'sandbox' && typeof plan.command === 'string' && plan.command.length > 0) {
-            replacement = plan.command
-          } else {
-            replacement = guardCommand(plan && typeof plan === 'object' && typeof plan.reason === 'string' ? plan.reason : 'sandbox plan request returned an invalid response')
-          }
-        }
-      } catch (error) {
-        replacement = guardCommand(planTimedOut ? 'sandbox plan lookup timed out' : (error instanceof Error ? error.message : String(error)))
-      } finally {
-        clearTimeout(planTimer)
+      if (!existsSync(SHELL_SHIM_PATH)) {
+        throw unavailable('the sandbox shell shim is missing at ' + SHELL_SHIM_PATH)
       }
-      if (replacement !== null) {
-        replaceCommand(output, replacement, input.callID)
+      var workdir = await planSandboxShell(input.cwd)
+      if (!lockAccessor(output.env, ENV_WORKDIR, workdir)) {
+        throw unavailable('sandbox enforcement could not pin the sandbox working directory; aborting before the command runs on the host')
       }
     },
     'tool.execute.after': async (input, output) => {
-      if (input.tool !== 'bash') return
-      var wrapped = wrappedCommands.get(input.callID)
-      wrappedCommands.delete(input.callID)
-      if (process.env.OCM_SANDBOX_ENFORCED !== 'true') return
-      if (wrapped === undefined) return
-      if (!bypassed && input.args && input.args.command !== wrapped) {
-        bypassed = true
-        console.error('OpenCode Manager: sandbox enforcement bypass detected for bash call ' + input.callID + '; blocking all further sandboxed commands')
-      }
+      if (!isEnforced() || input.tool !== 'bash') return
+      if (output.metadata === null || typeof output.metadata !== 'object') return
+      output.metadata.sandbox = true
     },
   }
 }

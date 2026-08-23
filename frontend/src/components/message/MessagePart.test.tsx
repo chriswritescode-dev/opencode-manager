@@ -283,7 +283,7 @@ describe('MessagePart', () => {
   })
 
   describe('sandbox indicator', () => {
-    const createBashPart = (command: string): MessagePartType => ({
+    const createBashPart = (command: string, metadata?: Record<string, unknown>): MessagePartType => ({
       type: 'tool',
       tool: 'bash',
       sessionID: 'test-session',
@@ -291,13 +291,21 @@ describe('MessagePart', () => {
         status: 'completed',
         input: { command },
         output: 'ok',
+        ...(metadata === undefined ? {} : { metadata }),
         time: { start: Date.now(), end: Date.now() + 100 },
       },
     })
 
     const wrapped = "'/usr/local/bin/msb' exec ocm-workspace --no-tty -q -u '1001:1001' -w '/workspace/repos/ai-test' --timeout 600s -- sh -c 'git status'"
 
-    it('shows the sandbox badge and the unwrapped command for a sandboxed bash call', () => {
+    it('shows the sandbox badge for a bash call the sandbox plugin marked', () => {
+      render(<MessagePart part={createBashPart('git status', { sandbox: true })} />)
+
+      expect(screen.getByText('sandbox')).toBeInTheDocument()
+      expect(screen.getByText('git status')).toBeInTheDocument()
+    })
+
+    it('shows the sandbox badge and the unwrapped command for a legacy recorded sandbox call', () => {
       render(<MessagePart part={createBashPart(wrapped)} />)
 
       expect(screen.getByText('sandbox')).toBeInTheDocument()

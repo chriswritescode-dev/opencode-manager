@@ -24,13 +24,19 @@ The microVM sees repositories through bind mounts at the same paths used by the 
 | Local MCP servers | No; normal OpenCode behavior |
 | Formatters, LSP servers, and hooks | No; normal OpenCode behavior |
 | Custom provider modules | No; normal OpenCode behavior |
-| Explicit OpenCode `shell` configuration | No; normal OpenCode behavior |
+| Explicit OpenCode `shell` configuration | Overridden while enforcement is on |
 
-The Manager-owned `ocm-sandbox.js` plugin intercepts the OpenCode `bash` tool before execution, asks the Manager for a sandbox execution plan, and replaces the command with `msb exec`. The replacement is locked and verified so a later plugin cannot silently restore the original host command. If the sandbox cannot be prepared, the tool call fails instead of running on the host.
+The Manager generates a POSIX shell shim and points OpenCode's `shell` setting at it, so the agent `bash` tool spawns the shim instead of a host shell. The Manager-owned `ocm-sandbox.js` plugin pins that setting and, before each `bash` spawn, asks the Manager for the sandbox working directory and injects it as `OCM_SANDBOX_WORKDIR`. The shim routes the command into the microVM through `msb exec` whenever that variable is set. Both the pinned setting and the injected directory are locked and verified so a later plugin cannot silently restore host execution. If the sandbox cannot be prepared, the tool call fails instead of running on the host.
+
+The command the agent wrote is never rewritten. It reaches `msb exec` as a single argument, so the recorded tool call, the permission rules, and the model's own context all keep the original command.
+
+Each sandboxed `bash` call is marked `sandbox` in its tool metadata, which the WebUI shows as a green badge on the tool call. Metadata is not sent to the model.
 
 ## OpenCode Configuration
 
-Sandbox enforcement does not sanitize, rewrite, filter, or replace OpenCode configuration. Global and project configuration loads normally, configured plugins are installed normally, and config, MCP, and authentication API requests are forwarded unchanged.
+Sandbox enforcement does not sanitize, rewrite, filter, or replace OpenCode configuration files. Global and project configuration loads normally, configured plugins are installed normally, and config, MCP, and authentication API requests are forwarded unchanged.
+
+The single exception is the in-memory `shell` setting: while enforcement is on, the sandbox plugin pins it to the generated shim. No configuration file is modified. A shell the user configured is remembered and handed back to the shim for the surfaces that are not the agent `bash` tool.
 
 Existing `.ocm-sandbox-backup` and `.ocm-quarantine` artifacts created by older releases are restored during startup and are no longer created.
 
@@ -39,6 +45,8 @@ Configured extensions execute with OpenCode's normal host-process privileges. Th
 ## Other Shell Surfaces
 
 WebUI `!command` shell mode, slash-command shell templates, and PTY terminals follow OpenCode's normal host-process behavior during enforcement. Only the OpenCode `bash` tool is routed into the microVM; these surfaces are not sandboxed.
+
+They also spawn the shim, because it is the configured shell, but no working directory is injected for them, so the shim passes the command straight through to the host shell. PTY terminals receive the user's configured shell; `!command` shell mode and slash-command shell templates fall back to the shell the Manager resolved at startup rather than a login shell.
 
 The OpenCode server binds to the configured `OPENCODE_HOST` regardless of enforcement, so the password guard for non-loopback hosts applies in both modes.
 
@@ -99,8 +107,9 @@ OpenCode's host process still reads these paths normally. They are omitted only 
 1. Enable **Sandbox** in Settings.
 2. Restart the OpenCode server when prompted.
 3. The Manager starts the new child with `OCM_SANDBOX_ENFORCED=true`.
-4. The sandbox plugin rewrites each `bash` tool command through the internal planner.
-5. If capability detection, planning, boot, attestation, or command replacement fails, the command exits non-zero instead of running on the host.
+4. The Manager writes the shell shim next to the generated plugins and refuses to start an enforced server if it cannot.
+5. The sandbox plugin resolves each `bash` tool working directory through the internal planner and pins it for the shim.
+6. If capability detection, planning, boot, attestation, or working-directory pinning fails, the tool call fails instead of running on the host.
 
 A directory outside the mounted roots fails with:
 
@@ -121,6 +130,7 @@ The enforcement stamp remains authoritative for the lifetime of the OpenCode chi
 - The first command pays image pull and microVM boot latency, bounded by `SANDBOX_START_TIMEOUT_MS`.
 - `SANDBOX_IMAGE` must contain every tool the agent expects to run.
 - `SANDBOX_EXEC_USER` must match the workspace owner so commands can write mounted files.
-- OpenCode permission rules see the rewritten `msb exec` command rather than the original command.
+- A `shell` the user configured does not apply to `!command` shell mode or slash-command shell templates while enforcement is on.
 - Credentials injected into OpenCode's host shell environment are not forwarded into the microVM.
+- Message parts recorded by older releases still hold the old `msb exec` wrapper; the WebUI unwraps them for display and still badges them.
 - Plugins and other configured host-process extensions are trusted and are not isolated by agent `bash` sandboxing.

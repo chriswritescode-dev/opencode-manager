@@ -4,16 +4,15 @@ import type { Database } from 'bun:sqlite'
 import { SandboxRuntimeService } from '../../services/sandbox/runtime'
 import { logger } from '../../utils/logger'
 
-const SandboxCommandRequestSchema = z.object({
+const SandboxShellRequestSchema = z.object({
   directory: z.string().min(1),
-  command: z.string().min(1),
   enforced: z.boolean().optional(),
 })
 
 export function createInternalSandboxRoutes(db: Database) {
   const app = new Hono()
 
-  app.post('/command', async (c) => {
+  app.post('/shell', async (c) => {
     let body: unknown
     try {
       body = await c.req.json()
@@ -21,17 +20,17 @@ export function createInternalSandboxRoutes(db: Database) {
       return c.json({ error: 'Invalid request' }, 400)
     }
 
-    const parsed = SandboxCommandRequestSchema.safeParse(body)
+    const parsed = SandboxShellRequestSchema.safeParse(body)
     if (!parsed.success) {
       return c.json({ error: 'Invalid request' }, 400)
     }
 
     try {
       return c.json(
-        await new SandboxRuntimeService(db).planCommand(parsed.data.directory, parsed.data.command, parsed.data.enforced === true),
+        await new SandboxRuntimeService(db).planShell(parsed.data.directory, parsed.data.enforced === true),
       )
     } catch (error) {
-      logger.error('Failed to plan sandbox command', error)
+      logger.error('Failed to plan the sandbox shell', error)
       return c.json({ mode: 'blocked', reason: error instanceof Error ? error.message : String(error) }, 500)
     }
   })
