@@ -8,25 +8,15 @@ import type { OpenCodeConfig } from '@/api/types/settings'
 const {
   mockGetOpenCodeConfigs,
   mockUpdateOpenCodeConfig,
-  mockRestartOpenCodeServer,
-  mockGetActiveOpenCodeSessions,
   mockGetOpenCodeImportStatus,
   mockListManagedSkills,
   mockListOpenCodeDirectoryFiles,
-  healthState,
 } = vi.hoisted(() => ({
   mockGetOpenCodeConfigs: vi.fn(),
   mockUpdateOpenCodeConfig: vi.fn(),
-  mockRestartOpenCodeServer: vi.fn(),
-  mockGetActiveOpenCodeSessions: vi.fn(),
   mockGetOpenCodeImportStatus: vi.fn(),
   mockListManagedSkills: vi.fn(),
   mockListOpenCodeDirectoryFiles: vi.fn(),
-  healthState: { data: { opencode: 'healthy', opencodeRestartPending: false } as Record<string, unknown> },
-}))
-
-vi.mock('@/hooks/useServerHealth', () => ({
-  useServerHealth: () => healthState,
 }))
 
 vi.mock('@/lib/toast', () => ({
@@ -37,13 +27,10 @@ vi.mock('@/api/settings', () => ({
   settingsApi: {
     getOpenCodeConfigs: mockGetOpenCodeConfigs,
     updateOpenCodeConfig: mockUpdateOpenCodeConfig,
-    restartOpenCodeServer: mockRestartOpenCodeServer,
-    getActiveOpenCodeSessions: mockGetActiveOpenCodeSessions,
     getOpenCodeImportStatus: mockGetOpenCodeImportStatus,
     listManagedSkills: mockListManagedSkills,
     listOpenCodeDirectoryFiles: mockListOpenCodeDirectoryFiles,
     syncOpenCodeImport: vi.fn(),
-    upgradeOpenCode: vi.fn(),
   },
 }))
 
@@ -78,7 +65,6 @@ describe('OpenCodeConfigManager', () => {
 
   beforeEach(() => {
     vi.clearAllMocks()
-    healthState.data = { opencode: 'healthy', opencodeRestartPending: false }
     mockGetOpenCodeConfigs.mockResolvedValue({ configs: [defaultConfig] })
     mockGetOpenCodeImportStatus.mockResolvedValue({})
     mockListManagedSkills.mockResolvedValue([])
@@ -87,8 +73,6 @@ describe('OpenCodeConfigManager', () => {
       return Promise.resolve([])
     })
     mockUpdateOpenCodeConfig.mockResolvedValue(defaultConfig)
-    mockRestartOpenCodeServer.mockResolvedValue({ success: true, message: 'ok' })
-    mockGetActiveOpenCodeSessions.mockResolvedValue({ count: 2, sessions: [] })
   })
 
   it('shows uploaded command and agent directory files in settings', async () => {
@@ -98,7 +82,7 @@ describe('OpenCodeConfigManager', () => {
     })
 
     const user = userEvent.setup()
-    renderWithQuery(<OpenCodeConfigManager hideHealthStatus />)
+    renderWithQuery(<OpenCodeConfigManager />)
 
     await screen.findByText('Commands')
     await vi.waitFor(() => {
@@ -120,7 +104,7 @@ describe('OpenCodeConfigManager', () => {
     mockUpdateOpenCodeConfig.mockResolvedValueOnce({ ...defaultConfig, restartRequired: true })
 
     const user = userEvent.setup()
-    renderWithQuery(<OpenCodeConfigManager hideHealthStatus />)
+    renderWithQuery(<OpenCodeConfigManager />)
 
     await screen.findByText('GPT-4o')
 
@@ -133,30 +117,13 @@ describe('OpenCodeConfigManager', () => {
     const [configName, payload] = mockUpdateOpenCodeConfig.mock.calls[0]
     expect(configName).toBe('default')
     expect(payload.content.provider.openai.models).not.toHaveProperty('gpt-4o')
-
-    expect(screen.queryByText('Restart OpenCode Server?')).not.toBeInTheDocument()
-  })
-
-  it('deferred restart banner triggers server restart', async () => {
-    healthState.data = { opencode: 'healthy', opencodeRestartPending: true }
-
-    const user = userEvent.setup()
-    renderWithQuery(<OpenCodeConfigManager hideHealthStatus />)
-
-    const restartNowButton = await screen.findByRole('button', { name: /restart now/i })
-    await user.click(restartNowButton)
-
-    await screen.findByText('Restart OpenCode Server?')
-    await user.click(screen.getByRole('button', { name: /restart now/i }))
-
-    expect(mockRestartOpenCodeServer).toHaveBeenCalledTimes(1)
   })
 
   it('rollback on failure', async () => {
     mockUpdateOpenCodeConfig.mockRejectedValueOnce(new Error('boom'))
 
     const user = userEvent.setup()
-    renderWithQuery(<OpenCodeConfigManager hideHealthStatus />)
+    renderWithQuery(<OpenCodeConfigManager />)
 
     await screen.findByText('GPT-4o')
 
@@ -173,12 +140,10 @@ describe('OpenCodeConfigManager', () => {
     })
 
     expect(screen.getByText('GPT-4o')).toBeInTheDocument()
-
-    expect(screen.queryByText('Restart OpenCode Server?')).not.toBeInTheDocument()
   })
 
   it('anchors the AGENTS.md card to the settings dialog scrollport', async () => {
-    renderWithQuery(<OpenCodeConfigManager hideHealthStatus />)
+    renderWithQuery(<OpenCodeConfigManager />)
     const header = await screen.findByRole('button', { name: /Global Agent Instructions/i })
     const card = header.parentElement
     expect(card?.className).toContain('overflow-clip')
@@ -200,7 +165,7 @@ describe('OpenCodeConfigManager', () => {
     mockUpdateOpenCodeConfig.mockResolvedValue(configWithRaw)
 
     const user = userEvent.setup()
-    const { container } = renderWithQuery(<OpenCodeConfigManager hideHealthStatus />)
+    const { container } = renderWithQuery(<OpenCodeConfigManager />)
 
     await screen.findByText('GPT-4o')
     const editIcon = container.querySelector('.lucide-square-pen') as SVGElement

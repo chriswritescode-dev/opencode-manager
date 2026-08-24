@@ -3,6 +3,7 @@ import { GeneralSettings } from '@/components/settings/GeneralSettings'
 import { GitSettings } from '@/components/settings/GitSettings'
 import { KeyboardShortcuts } from '@/components/settings/KeyboardShortcuts'
 import { OpenCodeConfigManager } from '@/components/settings/OpenCodeConfigManager'
+import { OpenCodeRestartPendingNotice } from '@/components/settings/OpenCodeRestartPendingNotice'
 import { OpenCodeServerAuthSettings } from '@/components/settings/OpenCodeServerAuthSettings'
 import { ManagerTokenSettings } from '@/components/settings/ManagerTokenSettings'
 import { ServerEnvVarsSettings } from '@/components/settings/ServerEnvVarsSettings'
@@ -118,6 +119,7 @@ export function SettingsDialog() {
           data-settings-dialog
         >
          <DialogTitle className="sr-only">Settings</DialogTitle>
+         {activeTab === 'opencode' && <OpenCodeRestartPendingNotice />}
          <div className="hidden sm:flex sm:flex-col sm:h-full sm:min-h-0">
            <div className="sticky top-0 z-10 bg-gradient-to-b from-background via-background to-transparent border-b border-border backdrop-blur-sm px-6 py-4 flex-shrink-0 flex items-center justify-between">
              <h2 className="text-2xl font-semibold bg-gradient-to-r from-foreground to-muted-foreground bg-clip-text text-transparent">
@@ -178,7 +180,7 @@ export function SettingsDialog() {
                       <ManagerTokenSettings isOpen={authSectionsOpen} onToggle={toggleAuthSections} />
                     </div>
                     <ServerEnvVarsSettings />
-                    <OpenCodeConfigManager hideHealthStatus />
+                    <OpenCodeConfigManager />
                   </div>
                 </TabsContent>
                 <TabsContent key="providers" value="providers" className="mt-0"><ProviderSettings /></TabsContent>
@@ -249,7 +251,7 @@ export function SettingsDialog() {
                     <OpenCodeServerAuthSettings />
                     <ManagerTokenSettings />
                     <ServerEnvVarsSettings />
-                    <OpenCodeConfigManager hideHealthStatus />
+                    <OpenCodeConfigManager />
                   </div>
                 )}
               {mobileView === 'providers' && <div key="providers"><ProviderSettings /></div>}

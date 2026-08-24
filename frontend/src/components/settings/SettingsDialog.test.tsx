@@ -1,8 +1,33 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest'
-import { render, screen, fireEvent } from '@testing-library/react'
+import { render, screen, fireEvent, waitFor } from '@testing-library/react'
+import userEvent from '@testing-library/user-event'
 import { MemoryRouter, useLocation, useNavigate } from 'react-router-dom'
+import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
 import { SettingsDialog } from './SettingsDialog'
 import { Dialog, DialogContent, DialogTitle } from '@/components/ui/dialog'
+
+const {
+  mockRestartOpenCodeServer,
+  mockGetActiveOpenCodeSessions,
+} = vi.hoisted(() => ({
+  mockRestartOpenCodeServer: vi.fn(),
+  mockGetActiveOpenCodeSessions: vi.fn(),
+}))
+
+vi.mock('@/hooks/useServerHealth', () => ({
+  useServerHealth: () => ({ data: { opencode: 'healthy', opencodeRestartPending: true } }),
+}))
+
+vi.mock('@/api/settings', () => ({
+  settingsApi: {
+    restartOpenCodeServer: mockRestartOpenCodeServer,
+    getActiveOpenCodeSessions: mockGetActiveOpenCodeSessions,
+  },
+}))
+
+vi.mock('@/lib/toast', () => ({
+  showToast: { success: vi.fn(), error: vi.fn(), info: vi.fn(), loading: vi.fn(), warning: vi.fn(), dismiss: vi.fn() },
+}))
 
 vi.mock('@/components/settings/GeneralSettings', () => ({
   GeneralSettings: () => <div data-testid="general-settings">General Settings Content</div>,
@@ -18,6 +43,22 @@ vi.mock('@/components/settings/KeyboardShortcuts', () => ({
 
 vi.mock('@/components/settings/OpenCodeConfigManager', () => ({
   OpenCodeConfigManager: () => <div data-testid="opencode-settings">OpenCode Config Content</div>,
+}))
+
+vi.mock('@/components/settings/ServerHealthStatus', () => ({
+  ServerHealthStatus: () => <div data-testid="server-health-status">Server Health Status</div>,
+}))
+
+vi.mock('@/components/settings/OpenCodeServerAuthSettings', () => ({
+  OpenCodeServerAuthSettings: () => <div data-testid="opencode-auth-settings">OpenCode Auth Settings</div>,
+}))
+
+vi.mock('@/components/settings/ManagerTokenSettings', () => ({
+  ManagerTokenSettings: () => <div data-testid="manager-token-settings">Manager Token Settings</div>,
+}))
+
+vi.mock('@/components/settings/ServerEnvVarsSettings', () => ({
+  ServerEnvVarsSettings: () => <div data-testid="server-env-vars-settings">Server Env Vars Settings</div>,
 }))
 
 vi.mock('@/components/settings/ProviderSettings', () => ({
@@ -51,6 +92,8 @@ vi.mock('@/hooks/useMobile', () => ({
 describe('SettingsDialog', () => {
   beforeEach(() => {
     vi.clearAllMocks()
+    mockRestartOpenCodeServer.mockResolvedValue({ success: true, message: 'ok' })
+    mockGetActiveOpenCodeSessions.mockResolvedValue({ count: 2, sessions: [] })
   })
 
   it('resets to menu state when dialog closes and reopens', () => {
@@ -152,5 +195,46 @@ describe('SettingsDialog', () => {
     fireEvent.keyDown(nestedInput, { key: 'Escape' })
 
     expect(screen.getByTestId('settings-open')).toBeInTheDocument()
+  })
+
+  it('mounts a single restart-pending notice and dialog on the OpenCode tab', async () => {
+    function TestWrapper() {
+      const location = useLocation()
+      const navigate = useNavigate()
+
+      const isOpen = new URLSearchParams(location.search).get('settings') === 'open'
+
+      return (
+        <>
+          <button onClick={() => navigate('?settings=open')}>Open Settings</button>
+          {isOpen && <span data-testid="dialog-open">Dialog Open</span>}
+          <SettingsDialog />
+        </>
+      )
+    }
+
+    const queryClient = new QueryClient({ defaultOptions: { queries: { retry: false } } })
+    render(
+      <QueryClientProvider client={queryClient}>
+        <MemoryRouter initialEntries={['/']}>
+          <TestWrapper />
+        </MemoryRouter>
+      </QueryClientProvider>
+    )
+
+    const user = userEvent.setup()
+    await user.click(screen.getByText('Open Settings'))
+    await user.click(screen.getByRole('tab', { name: 'OpenCode' }))
+
+    await screen.findByText('Restart OpenCode Server?')
+    expect(screen.getAllByText('Restart OpenCode Server?')).toHaveLength(1)
+    expect(screen.getAllByText('Configuration changes are saved but require a server restart to take effect.')).toHaveLength(1)
+
+    await user.click(screen.getByRole('button', { name: /later/i }))
+    await waitFor(() => {
+      expect(screen.queryAllByText('Restart OpenCode Server?')).toHaveLength(0)
+    })
+    expect(screen.getByText('Configuration changes are saved but require a server restart to take effect.')).toBeInTheDocument()
+    expect(mockRestartOpenCodeServer).not.toHaveBeenCalled()
   })
 })

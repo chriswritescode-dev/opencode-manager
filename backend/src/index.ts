@@ -54,8 +54,6 @@ import { getOpenCodeImportStatus, syncOpenCodeImport } from './services/opencode
 import { OpenCodeSupervisor } from './services/opencode-supervisor'
 import { OpenCodeRestartCoordinator } from './services/opencode-restart-coordinator'
 import { setOpenCodeRestartCoordinator } from './services/opencode-restart'
-import { OpenCodeConfigSchema } from '@opencode-manager/shared/schemas'
-import { parse as parseJsonc } from 'jsonc-parser'
 import { getModelStatePath, ModelStateSchema } from './routes/providers'
 import { readJsonSafe } from './utils/atomic-json'
 import {
@@ -119,29 +117,8 @@ async function ensureDefaultConfigExists(): Promise<void> {
     logger.info(`Found workspace config at ${workspaceConfigPath}, syncing to database...`)
     try {
       const rawContent = await readFileContent(workspaceConfigPath)
-      const parsed = parseJsonc(rawContent)
-      const validation = OpenCodeConfigSchema.safeParse(parsed)
-      
-      if (!validation.success) {
-        logger.warn('Workspace config has invalid structure', validation.error)
-      } else {
-        const existingDefault = settingsService.getOpenCodeConfigByName('default')
-        if (existingDefault) {
-          settingsService.updateOpenCodeConfig('default', {
-            content: rawContent,
-            isDefault: true,
-          })
-          logger.info('Updated database config from workspace file')
-        } else {
-          settingsService.createOpenCodeConfig({
-            name: 'default',
-            content: rawContent,
-            isDefault: true,
-          })
-          logger.info('Created database config from workspace file')
-        }
-        return
-      }
+      settingsService.upsertDefaultOpenCodeConfig(rawContent)
+      return
     } catch (error) {
       logger.warn('Failed to read workspace config', error)
     }

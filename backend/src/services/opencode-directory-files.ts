@@ -1,6 +1,6 @@
 import path from 'path'
 import { promises as fs } from 'fs'
-import { getWorkspacePath } from '@opencode-manager/shared/config/env'
+import { getConfigPath } from '@opencode-manager/shared/config/env'
 import { normalizeUploadRelativePath, resolveWithinDirectory } from './file-operations'
 import { mkdirSafe } from '../utils/fs-safe'
 
@@ -23,7 +23,7 @@ export interface OpenCodeDirectoryFileInfo {
 }
 
 function getOpenCodeDirectoryRoot(kind: OpenCodeDirectoryFileKind): string {
-  return path.join(getWorkspacePath(), '.config', 'opencode', kind)
+  return path.join(getConfigPath(), kind)
 }
 
 function getNameFromRelativePath(relativePath: string): string {

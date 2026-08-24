@@ -69,9 +69,12 @@ describe('settingsApi', () => {
       )
 
       const file = new File(['# Teach Skill'], 'SKILL.md', { type: 'text/markdown' })
-      Object.defineProperty(file, 'webkitRelativePath', { value: 'teach/SKILL.md' })
+      Object.defineProperty(file, 'webkitRelativePath', { value: 'decoy/fallback.md' })
 
-      const result = await settingsApi.installSkillFromUpload({ files: [file], scope: 'global' })
+      const result = await settingsApi.installSkillFromUpload({
+        items: [{ file, relativePath: 'teach/SKILL.md' }],
+        scope: 'global',
+      })
 
       expect(result.sourceType).toBe('upload')
 

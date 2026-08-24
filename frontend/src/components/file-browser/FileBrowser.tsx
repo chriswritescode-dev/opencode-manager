@@ -12,6 +12,7 @@ import { FolderOpen, Upload, RefreshCw, X } from 'lucide-react'
 import type { FileInfo } from '@/types/files'
 import { useMobile } from '@/hooks/useMobile'
 import { getFileApiUrl, useFile } from '@/api/files'
+import { getUploadItemsFromDataTransfer, getUploadItemsFromFileList, type DirectoryUploadItem } from '@/lib/directoryUpload'
 
 export interface FileBrowserHandle {
   goBack: () => void
@@ -29,11 +30,6 @@ interface FileBrowserProps {
   allowNavigateAboveBase?: boolean
 }
 
-interface UploadItem {
-  file: File
-  relativePath: string
-}
-
 interface UploadProgress {
   current: number
   total: number
@@ -49,86 +45,6 @@ const encodeBase64 = (content: string) => {
     binary += String.fromCharCode(bytes[i])
   }
   return btoa(binary)
-}
-
-async function readFileEntry(entry: FileSystemFileEntry): Promise<File> {
-  return new Promise((resolve, reject) => {
-    entry.file(resolve, reject)
-  })
-}
-
-async function readDirectoryEntries(dirReader: FileSystemDirectoryReader): Promise<FileSystemEntry[]> {
-  return new Promise((resolve, reject) => {
-    dirReader.readEntries(resolve, reject)
-  })
-}
-
-async function traverseFileSystemEntry(
-  entry: FileSystemEntry,
-  basePath: string = ''
-): Promise<UploadItem[]> {
-  const items: UploadItem[] = []
-  const relativePath = basePath ? `${basePath}/${entry.name}` : entry.name
-
-  if (entry.isFile) {
-    const fileEntry = entry as FileSystemFileEntry
-    const file = await readFileEntry(fileEntry)
-    items.push({ file, relativePath })
-  } else if (entry.isDirectory) {
-    const dirEntry = entry as FileSystemDirectoryEntry
-    const dirReader = dirEntry.createReader()
-    let entries: FileSystemEntry[] = []
-    let batch: FileSystemEntry[]
-    
-    do {
-      batch = await readDirectoryEntries(dirReader)
-      entries = entries.concat(batch)
-    } while (batch.length > 0)
-
-    for (const childEntry of entries) {
-      const childItems = await traverseFileSystemEntry(childEntry, relativePath)
-      items.push(...childItems)
-    }
-  }
-
-  return items
-}
-
-async function getUploadItemsFromDataTransfer(dataTransfer: DataTransfer): Promise<UploadItem[]> {
-  const items: UploadItem[] = []
-  const entries: FileSystemEntry[] = []
-
-  for (let i = 0; i < dataTransfer.items.length; i++) {
-    const item = dataTransfer.items[i]
-    const entry = item.webkitGetAsEntry?.()
-    if (entry) {
-      entries.push(entry)
-    }
-  }
-
-  if (entries.length > 0) {
-    for (const entry of entries) {
-      const entryItems = await traverseFileSystemEntry(entry)
-      items.push(...entryItems)
-    }
-  } else {
-    for (let i = 0; i < dataTransfer.files.length; i++) {
-      const file = dataTransfer.files[i]
-      items.push({ file, relativePath: file.name })
-    }
-  }
-
-  return items
-}
-
-function getUploadItemsFromFileList(fileList: FileList): UploadItem[] {
-  const items: UploadItem[] = []
-  for (let i = 0; i < fileList.length; i++) {
-    const file = fileList[i]
-    const relativePath = (file as File & { webkitRelativePath?: string }).webkitRelativePath || file.name
-    items.push({ file, relativePath })
-  }
-  return items
 }
 
 export const FileBrowser = forwardRef<FileBrowserHandle, FileBrowserProps>(function FileBrowser({ basePath = '', onFileSelect, embedded = false, initialSelectedFile, onDirectoryLoad, onPreviewStateChange, allowNavigateAboveBase = false }, ref) {
@@ -287,7 +203,7 @@ useEffect(() => {
     loadFiles(currentPath)
   }
 
-  const uploadSingleFile = useCallback(async (item: UploadItem): Promise<string | null> => {
+  const uploadSingleFile = useCallback(async (item: DirectoryUploadItem): Promise<string | null> => {
     const formData = new FormData()
     formData.append('file', item.file)
     formData.append('relativePath', item.relativePath)
@@ -309,7 +225,7 @@ useEffect(() => {
     }
   }, [currentPath])
 
-  const handleUploadItems = useCallback(async (items: UploadItem[]) => {
+  const handleUploadItems = useCallback(async (items: DirectoryUploadItem[]) => {
     if (items.length === 0) return
 
     uploadCancelledRef.current = false

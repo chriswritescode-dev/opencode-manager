@@ -353,6 +353,16 @@ export class SettingsService {
     return config
   }
 
+  upsertDefaultOpenCodeConfig(rawContent: string, userId: string = 'default'): OpenCodeConfigWithRaw {
+    const existing = this.getOpenCodeConfigByName('default', userId)
+
+    if (existing) {
+      return this.updateOpenCodeConfig('default', { content: rawContent, isDefault: true }, userId)!
+    }
+
+    return this.createOpenCodeConfig({ name: 'default', content: rawContent, isDefault: true }, userId)
+  }
+
   deleteOpenCodeConfig(configName: string, userId: string = 'default'): boolean {
     const result = this.db
       .query('DELETE FROM opencode_configs WHERE user_id = ? AND config_name = ?')

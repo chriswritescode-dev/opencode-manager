@@ -49,6 +49,7 @@ import {
   installSkillFromGithubTree,
   installSkillFromUploadedFiles,
 } from '../services/skills'
+import { replaceOpenCodeConfigDirectory } from '../services/opencode-config-directory'
 import {
   installOpenCodeDirectoryFiles,
   listOpenCodeDirectoryFiles,
@@ -149,6 +150,19 @@ const OPENCODE_DIRECTORY_UPLOAD_ERROR_STATUS: ReadonlyArray<readonly [string, 40
   ['Path must be relative', 400],
   ['Path must not contain', 400],
   ['Path must reference', 400],
+  ['escapes', 400],
+  ['Missing upload file', 400],
+  ['not a valid file', 400],
+]
+
+const OPENCODE_CONFIG_DIRECTORY_REPLACE_ERROR_STATUS: ReadonlyArray<readonly [string, 400 | 413]> = [
+  ['No files were provided', 400],
+  ['must contain opencode.json', 400],
+  ['too many files', 400],
+  ['contains too many files', 400],
+  ['exceed maximum upload size', 413],
+  ['Path must be relative', 400],
+  ['Path must not contain', 400],
   ['escapes', 400],
   ['Missing upload file', 400],
   ['not a valid file', 400],
@@ -1305,6 +1319,62 @@ export function createSettingsRoutes(db: Database, gitAuthService: GitAuthServic
       }
 
       return c.json({ error: 'Failed to install OpenCode directory files' }, 500)
+    }
+  })
+
+  app.post('/opencode-config-directory/replace', async (c) => {
+    try {
+      const contentType = c.req.header('content-type') || ''
+      if (!contentType.includes('multipart/form-data')) {
+        return c.json({ error: 'Unsupported content type. Use multipart/form-data' }, 400)
+      }
+
+      const formData = await c.req.parseBody({ all: true })
+      const userId = c.req.query('userId') || 'default'
+
+      let manifest: ReturnType<typeof parseUploadManifest>
+      try {
+        manifest = parseUploadManifest(formData['fileManifest'])
+      } catch (error) {
+        if (error instanceof z.ZodError) {
+          return c.json({ error: 'Invalid upload manifest', details: error.issues }, 400)
+        }
+        throw error
+      }
+      if (manifest.length === 0) {
+        return c.json({ error: 'fileManifest must contain at least one entry' }, 400)
+      }
+
+      const files = await readUploadedManifestFiles(formData, manifest)
+
+      settingsService.saveLastKnownGoodConfig(userId)
+
+      const result = await replaceOpenCodeConfigDirectory(db, files, userId)
+
+      opencodeServerManager.markRestartPending()
+      opencodeServerManager.clearStartupError()
+      await restartOpenCodeSafe(openCodeSupervisor, 'OpenCode config directory replace')
+
+      return c.json({ ...result, restartRequired: true })
+    } catch (error) {
+      logger.error('Failed to replace OpenCode config directory:', error)
+
+      if (error instanceof UploadValidationError) {
+        return c.json({ error: error.message }, 400)
+      }
+
+      if (error instanceof z.ZodError) {
+        return c.json({ error: 'Uploaded OpenCode config is invalid', details: error.issues }, 400)
+      }
+
+      if (error instanceof Error) {
+        const status = matchErrorStatus(OPENCODE_CONFIG_DIRECTORY_REPLACE_ERROR_STATUS, error)
+        if (status) {
+          return c.json({ error: error.message }, status)
+        }
+      }
+
+      return c.json({ error: 'Failed to replace OpenCode config directory' }, 500)
     }
   })
 

@@ -2,9 +2,7 @@ import os from 'os'
 import path from 'path'
 import { cp, mkdtemp, readdir, rename, rm } from 'fs/promises'
 import { Database as SQLiteDatabase, type Database } from 'bun:sqlite'
-import { OpenCodeConfigSchema } from '@opencode-manager/shared/schemas'
-import { getOpenCodeConfigFilePath, getWorkspacePath } from '@opencode-manager/shared/config/env'
-import { parse as parseJsonc } from 'jsonc-parser'
+import { getConfigPath, getOpenCodeConfigFilePath, getWorkspacePath } from '@opencode-manager/shared/config/env'
 import { SettingsService } from './settings'
 import { ensureDirectoryExists, fileExists, readFileContent, writeFileContent } from './file-operations'
 
@@ -14,6 +12,7 @@ export interface OpenCodeImportStatus {
   configSourcePath: string | null
   stateSourcePath: string | null
   workspaceConfigPath: string
+  workspaceConfigDirectory: string
   workspaceStatePath: string
   workspaceStateExists: boolean
 }
@@ -137,6 +136,7 @@ export async function importOpenCodeStateDirectory(sourcePath: string, targetPat
 
 export async function getOpenCodeImportStatus(): Promise<OpenCodeImportStatus> {
   const workspaceConfigPath = getOpenCodeConfigFilePath()
+  const workspaceConfigDirectory = getConfigPath()
   const workspaceStatePath = path.join(getWorkspacePath(), '.opencode', 'state', 'opencode')
   const workspaceStateExists = await fileExists(path.join(workspaceStatePath, 'opencode.db'))
 
@@ -151,6 +151,7 @@ export async function getOpenCodeImportStatus(): Promise<OpenCodeImportStatus> {
     configSourcePath,
     stateSourcePath,
     workspaceConfigPath,
+    workspaceConfigDirectory,
     workspaceStatePath,
     workspaceStateExists,
   }
@@ -158,28 +159,7 @@ export async function getOpenCodeImportStatus(): Promise<OpenCodeImportStatus> {
 
 async function importOpenCodeConfigFromSource(db: Database, userId: string, sourcePath: string, workspaceConfigPath: string): Promise<boolean> {
   const rawContent = await readFileContent(sourcePath)
-  const parsed = parseJsonc(rawContent)
-  const validation = OpenCodeConfigSchema.safeParse(parsed)
-
-  if (!validation.success) {
-    throw new Error('Importable OpenCode config is invalid')
-  }
-
-  const settingsService = new SettingsService(db)
-  const existingDefault = settingsService.getOpenCodeConfigByName('default', userId)
-
-  if (existingDefault) {
-    settingsService.updateOpenCodeConfig('default', {
-      content: rawContent,
-      isDefault: true,
-    }, userId)
-  } else {
-    settingsService.createOpenCodeConfig({
-      name: 'default',
-      content: rawContent,
-      isDefault: true,
-    }, userId)
-  }
+  new SettingsService(db).upsertDefaultOpenCodeConfig(rawContent, userId)
 
   await writeFileContent(workspaceConfigPath, rawContent)
   return true

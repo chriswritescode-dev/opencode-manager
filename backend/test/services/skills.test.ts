@@ -53,6 +53,7 @@ describe('SkillService', () => {
   beforeEach(async () => {
     tempDir = await mkdtemp(join(tmpdir(), 'skills-test-'))
     vi.spyOn(await import('@opencode-manager/shared/config/env'), 'getWorkspacePath').mockReturnValue(tempDir)
+    vi.spyOn(await import('@opencode-manager/shared/config/env'), 'getConfigPath').mockReturnValue(join(tempDir, '.config', 'opencode'))
   })
 
   afterEach(async () => {

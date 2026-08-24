@@ -121,6 +121,7 @@ export interface OpenCodeImportStatus {
   configSourcePath: string | null
   stateSourcePath: string | null
   workspaceConfigPath: string
+  workspaceConfigDirectory: string
   workspaceStatePath: string
   workspaceStateExists: boolean
 }
@@ -145,4 +146,14 @@ export interface OpenCodeDirectoryFileInfo {
   kind: 'agents' | 'commands'
   name: string
   relativePath: string
+}
+
+export interface ReplaceOpenCodeConfigDirectoryResponse {
+  configDirectory: string
+  configSourceFilename: string
+  filesInstalled: string[]
+  skippedPaths: string[]
+  preservedEntries: string[]
+  executablesRestored: string[]
+  restartRequired: boolean
 }

@@ -120,7 +120,7 @@ describe('SkillsEditor', () => {
 
     await waitFor(() => {
       expect(mocks.installSkillFromUpload).toHaveBeenCalledWith({
-        files: expect.arrayContaining([expect.any(File)]),
+        items: expect.arrayContaining([expect.objectContaining({ file: expect.any(File), relativePath: 'SKILL.md' })]),
         scope: 'global',
       })
     })

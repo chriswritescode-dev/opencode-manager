@@ -11,20 +11,11 @@ import {
 } from '@/components/ui/dropdown-menu'
 import { settingsApi } from '@/api/settings'
 import { invalidateConfigCaches } from '@/lib/queryInvalidation'
+import { DIRECTORY_INPUT_PROPS, getUploadItemsFromFileList } from '@/lib/directoryUpload'
 
 const KIND_NOUN: Record<'agents' | 'commands', string> = {
   agents: 'agent',
   commands: 'command',
-}
-
-const DIRECTORY_INPUT_PROPS = {
-  webkitdirectory: '',
-  directory: '',
-  mozdirectory: '',
-} as React.InputHTMLAttributes<HTMLInputElement>
-
-function isMarkdownFile(file: File): boolean {
-  return (file.webkitRelativePath || file.name).toLowerCase().endsWith('.md')
 }
 
 interface UploadFolderButtonProps {
@@ -43,21 +34,22 @@ export function UploadFolderButton({ kind }: UploadFolderButtonProps) {
   }
 
   const handleChange = async (event: React.ChangeEvent<HTMLInputElement>) => {
-    const selectedFiles = Array.from(event.target.files ?? [])
+    const fileList = event.target.files
+    const items = fileList ? getUploadItemsFromFileList(fileList) : []
     event.target.value = ''
-    if (selectedFiles.length === 0) {
+    if (items.length === 0) {
       return
     }
 
-    const files = selectedFiles.filter(isMarkdownFile)
-    if (files.length === 0) {
+    const markdownItems = items.filter((item) => item.relativePath.toLowerCase().endsWith('.md'))
+    if (markdownItems.length === 0) {
       toast.error(`No markdown ${kind} files found`)
       return
     }
 
     try {
       setIsUploading(true)
-      const result = await settingsApi.installOpenCodeDirectoryFiles({ kind, files })
+      const result = await settingsApi.installOpenCodeDirectoryFiles({ kind, items: markdownItems })
       invalidateConfigCaches(queryClient)
       toast.success(`Uploaded ${result.filesInstalled.length} ${noun} file${result.filesInstalled.length === 1 ? '' : 's'}`)
     } catch (error) {

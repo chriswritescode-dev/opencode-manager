@@ -14,6 +14,7 @@ import { FetchError } from '@/api/fetchWrapper'
 import { toast } from 'sonner'
 import type { SkillScope } from '@opencode-manager/shared'
 import type { Repo } from '@/api/types'
+import { DIRECTORY_INPUT_PROPS, getUploadItemsFromFileList, type DirectoryUploadItem } from '@/lib/directoryUpload'
 
 interface SkillInstallDialogProps {
   open: boolean
@@ -26,18 +27,18 @@ export function SkillInstallDialog({ open, onOpenChange, onInstalled }: SkillIns
   const [url, setUrl] = useState('')
   const [scope, setScope] = useState<SkillScope>('global')
   const [selectedRepoId, setSelectedRepoId] = useState<number | undefined>(undefined)
-  const [files, setFiles] = useState<File[]>([])
+  const [items, setItems] = useState<DirectoryUploadItem[]>([])
   const [overwrite, setOverwrite] = useState(false)
 
   useEffect(() => {
     setOverwrite(false)
-  }, [url, files, sourceType, scope, selectedRepoId])
+  }, [url, items, sourceType, scope, selectedRepoId])
 
   const resetForm = () => {
     setUrl('')
     setScope('global')
     setSelectedRepoId(undefined)
-    setFiles([])
+    setItems([])
     setOverwrite(false)
   }
 
@@ -60,7 +61,7 @@ export function SkillInstallDialog({ open, onOpenChange, onInstalled }: SkillIns
         })
       }
       return settingsApi.installSkillFromUpload({
-        files,
+        items,
         scope,
         repoId: scope === 'project' ? selectedRepoId : undefined,
         overwrite: overwrite || undefined,
@@ -86,7 +87,7 @@ export function SkillInstallDialog({ open, onOpenChange, onInstalled }: SkillIns
       toast.error('Please enter a GitHub URL')
       return
     }
-    if (sourceType === 'upload' && files.length === 0) {
+    if (sourceType === 'upload' && items.length === 0) {
       toast.error('Please select at least one file')
       return
     }
@@ -105,18 +106,17 @@ export function SkillInstallDialog({ open, onOpenChange, onInstalled }: SkillIns
   }
 
   const handleFileChange = (e: React.ChangeEvent<HTMLInputElement>) => {
-    const selectedFiles = e.target.files
-    if (selectedFiles) {
-      setFiles(Array.from(selectedFiles))
+    if (e.target.files) {
+      setItems(getUploadItemsFromFileList(e.target.files))
     }
   }
 
   const selectedFileSummary = () => {
-    if (files.length === 0) return null
-    const relPath = files[0].webkitRelativePath || files[0].name
+    if (items.length === 0) return null
+    const relPath = items[0].relativePath
     return (
       <p className="text-sm text-muted-foreground">
-        {files.length} file{files.length > 1 ? 's' : ''} selected (first: {relPath})
+        {items.length} file{items.length > 1 ? 's' : ''} selected (first: {relPath})
       </p>
     )
   }
@@ -161,7 +161,7 @@ export function SkillInstallDialog({ open, onOpenChange, onInstalled }: SkillIns
                   <Input
                     type="file"
                     accept=".md,text/markdown"
-                    {...{ webkitdirectory: '', directory: '' } as React.InputHTMLAttributes<HTMLInputElement>}
+                    {...DIRECTORY_INPUT_PROPS}
                     onChange={handleFileChange}
                   />
                 </div>

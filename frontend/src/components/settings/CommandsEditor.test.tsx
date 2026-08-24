@@ -151,7 +151,10 @@ describe('CommandsEditor', () => {
     fireEvent.change(input, { target: { files: [markdownFile, systemFile] } })
 
     await waitFor(() => {
-      expect(mocks.installOpenCodeDirectoryFiles).toHaveBeenCalledWith({ kind: 'commands', files: [markdownFile] })
+      expect(mocks.installOpenCodeDirectoryFiles).toHaveBeenCalledWith({
+        kind: 'commands',
+        items: [{ file: markdownFile, relativePath: 'commands/git/commit.md' }],
+      })
     })
     expect(mocks.toastSuccess).toHaveBeenCalledWith('Uploaded 1 command file')
   })
@@ -168,5 +171,36 @@ describe('CommandsEditor', () => {
 
     expect(mocks.installOpenCodeDirectoryFiles).not.toHaveBeenCalled()
     expect(mocks.toastError).toHaveBeenCalledWith('No markdown commands files found')
+  })
+
+  it('materializes the FileList before the input reset, matching Blink/WebKit in-place clearing', async () => {
+    const onChange = vi.fn()
+    const markdownFile = new File(['commit body'], 'commit.md', { type: 'text/markdown' })
+    Object.defineProperty(markdownFile, 'webkitRelativePath', { value: 'commands/git/commit.md' })
+
+    const { container } = render(<CommandsEditor commands={{}} onChange={onChange} />, { wrapper: createWrapper() })
+    const input = container.querySelector('input[type="file"]') as HTMLInputElement
+
+    const liveFiles: File[] = [markdownFile]
+    Object.defineProperty(input, 'files', {
+      configurable: true,
+      get: () => liveFiles,
+    })
+    Object.defineProperty(input, 'value', {
+      configurable: true,
+      get: () => (liveFiles.length > 0 ? 'C:\\fakepath\\commit.md' : ''),
+      set: () => {
+        liveFiles.length = 0
+      },
+    })
+
+    fireEvent.change(input)
+
+    await waitFor(() => {
+      expect(mocks.installOpenCodeDirectoryFiles).toHaveBeenCalledWith({
+        kind: 'commands',
+        items: [{ file: markdownFile, relativePath: 'commands/git/commit.md' }],
+      })
+    })
   })
 })
