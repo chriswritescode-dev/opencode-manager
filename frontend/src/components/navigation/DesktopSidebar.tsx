@@ -71,14 +71,19 @@ export function DesktopSidebar() {
     }
   }
 
+  const [homeItem, ...routeItems] = items
   const navItems: MoreDrawerItem[] = [
+    homeItem,
     { key: 'repos', label: 'Repos', icon: FolderGit2 },
-    ...items,
+    ...routeItems,
   ]
 
   return (
     <>
       <Sidebar collapsed={collapsed} onToggle={toggle} className='mt-2'>
+        <div className="flex justify-end px-2 py-1.5">
+          <SidebarCollapseToggle collapsed={collapsed} onToggle={toggle} />
+        </div>
 
         {primary.length > 0 && (
           <SidebarSection collapsed={collapsed}>
@@ -95,15 +100,6 @@ export function DesktopSidebar() {
             ))}
           </SidebarSection>
         )}
-
-        <div className="flex items-center justify-between px-2 py-1.5">
-          {!collapsed && (
-            <div className="text-xs font-medium text-muted-foreground uppercase tracking-wider">
-              Navigation
-            </div>
-          )}
-          <SidebarCollapseToggle collapsed={collapsed} onToggle={toggle} />
-        </div>
 
         <div className="flex flex-col gap-1 p-2 pt-0">
           {navItems.map((item: MoreDrawerItem) => (

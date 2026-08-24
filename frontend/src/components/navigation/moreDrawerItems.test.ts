@@ -2,84 +2,111 @@ import { describe, it, expect } from 'vitest'
 import { buildMoreItems, buildNavModel } from './moreDrawerItems'
 
 describe('buildMoreItems', () => {
-  it('returns Settings + Logout + All Schedules + Files for root path', () => {
+  it('returns Home + All Schedules + Files + Settings + Logout for root path', () => {
     const items = buildMoreItems('/')
-    expect(items).toHaveLength(4)
-    expect(items[0].key).toBe('all-schedules')
-    expect(items[1].key).toBe('files')
-    expect(items[2].key).toBe('settings')
-    expect(items[3].key).toBe('logout')
+    expect(items).toHaveLength(5)
+    expect(items[0].key).toBe('home')
+    expect(items[1].key).toBe('all-schedules')
+    expect(items[2].key).toBe('files')
+    expect(items[3].key).toBe('settings')
+    expect(items[4].key).toBe('logout')
   })
 
   it('returns repo-specific items for /repos/:id', () => {
     const items = buildMoreItems('/repos/42')
-    expect(items).toHaveLength(8)
-    expect(items[0].key).toBe('files')
-    expect(items[0].dialog).toBe('files')
-    expect(items[1].key).toBe('mcp')
-    expect(items[1].dialog).toBe('mcp')
-    expect(items[2].key).toBe('skills')
-    expect(items[2].dialog).toBe('skills')
-    expect(items[3].key).toBe('reset-permissions')
-    expect(items[3].dialog).toBe('resetPermissions')
-    expect(items[3].danger).toBe(true)
-    expect(items[4].key).toBe('schedules')
-    expect(items[4].to).toBe('/repos/42/schedules')
-    expect(items[5].key).toBe('source-control')
-    expect(items[5].dialog).toBe('sourceControl')
-    expect(items[6].key).toBe('settings')
-    expect(items[7].key).toBe('logout')
+    expect(items).toHaveLength(9)
+    expect(items[0].key).toBe('home')
+    expect(items[1].key).toBe('files')
+    expect(items[1].dialog).toBe('files')
+    expect(items[2].key).toBe('mcp')
+    expect(items[2].dialog).toBe('mcp')
+    expect(items[3].key).toBe('skills')
+    expect(items[3].dialog).toBe('skills')
+    expect(items[4].key).toBe('reset-permissions')
+    expect(items[4].dialog).toBe('resetPermissions')
+    expect(items[4].danger).toBe(true)
+    expect(items[5].key).toBe('schedules')
+    expect(items[5].to).toBe('/repos/42/schedules')
+    expect(items[6].key).toBe('source-control')
+    expect(items[6].dialog).toBe('sourceControl')
+    expect(items[7].key).toBe('settings')
+    expect(items[8].key).toBe('logout')
   })
 
   it('returns session-specific items for /repos/:id/sessions/:sid', () => {
     const items = buildMoreItems('/repos/42/sessions/abc')
+    expect(items).toHaveLength(10)
+    expect(items[0].key).toBe('home')
+    expect(items[1].key).toBe('files')
+    expect(items[2].key).toBe('mcp')
+    expect(items[3].key).toBe('skills')
+    expect(items[4].key).toBe('lsp')
+    expect(items[4].dialog).toBe('lsp')
+    expect(items[5].key).toBe('reset-permissions')
+    expect(items[6].key).toBe('schedules')
+    expect(items[6].to).toBe('/repos/42/schedules')
+    expect(items[7].key).toBe('source-control')
+    expect(items[8].key).toBe('settings')
+    expect(items[9].key).toBe('logout')
+  })
+
+  it('returns assistant workspace items for /repos/:id/assistant', () => {
+    const items = buildMoreItems('/repos/42/assistant')
     expect(items).toHaveLength(9)
-    expect(items[0].key).toBe('files')
-    expect(items[1].key).toBe('mcp')
-    expect(items[2].key).toBe('skills')
-    expect(items[3].key).toBe('lsp')
-    expect(items[3].dialog).toBe('lsp')
+    expect(items[0].key).toBe('home')
+    expect(items[1].key).toBe('files')
+    expect(items[1].dialog).toBe('files')
+    expect(items[2].key).toBe('mcp')
+    expect(items[3].key).toBe('skills')
     expect(items[4].key).toBe('reset-permissions')
     expect(items[5].key).toBe('schedules')
-    expect(items[5].to).toBe('/repos/42/schedules')
     expect(items[6].key).toBe('source-control')
     expect(items[7].key).toBe('settings')
     expect(items[8].key).toBe('logout')
   })
 
-  it('returns assistant workspace items for /repos/:id/assistant', () => {
-    const items = buildMoreItems('/repos/42/assistant')
-    expect(items).toHaveLength(8)
-    expect(items[0].key).toBe('files')
-    expect(items[0].dialog).toBe('files')
-    expect(items[1].key).toBe('mcp')
-    expect(items[2].key).toBe('skills')
-    expect(items[3].key).toBe('reset-permissions')
-    expect(items[4].key).toBe('schedules')
-    expect(items[5].key).toBe('source-control')
-    expect(items[6].key).toBe('settings')
-    expect(items[7].key).toBe('logout')
-  })
-
-  it('returns only Settings + Logout for /schedules', () => {
+  it('returns only Home + Settings + Logout for /schedules', () => {
     const items = buildMoreItems('/schedules')
-    expect(items).toHaveLength(2)
-    expect(items[0].key).toBe('settings')
-    expect(items[1].key).toBe('logout')
+    expect(items).toHaveLength(3)
+    expect(items[0].key).toBe('home')
+    expect(items[1].key).toBe('settings')
+    expect(items[2].key).toBe('logout')
   })
 
-  it('returns only Settings + Logout for /repos/:id/schedules', () => {
+  it('returns only Home + Settings + Logout for /repos/:id/schedules', () => {
     const items = buildMoreItems('/repos/42/schedules')
-    expect(items).toHaveLength(2)
-    expect(items[0].key).toBe('settings')
-    expect(items[1].key).toBe('logout')
+    expect(items).toHaveLength(3)
+    expect(items[0].key).toBe('home')
+    expect(items[1].key).toBe('settings')
+    expect(items[2].key).toBe('logout')
   })
 
-  it('returns only Settings + Logout for unknown paths', () => {
+  it('returns only Home + Settings + Logout for unknown paths', () => {
     const items = buildMoreItems('/unknown/path')
-    expect(items).toHaveLength(2)
-    expect(items[0].key).toBe('settings')
-    expect(items[1].key).toBe('logout')
+    expect(items).toHaveLength(3)
+    expect(items[0].key).toBe('home')
+    expect(items[1].key).toBe('settings')
+    expect(items[2].key).toBe('logout')
+  })
+
+  it('leads every route with a Home item routed to /', () => {
+    const paths = [
+      '/',
+      '/repos/42',
+      '/repos/42/sessions/abc',
+      '/repos/42/assistant',
+      '/assistant',
+      '/schedules',
+      '/repos/42/schedules',
+      '/unknown/path',
+    ]
+
+    for (const path of paths) {
+      const [first] = buildMoreItems(path)
+      expect(first.key).toBe('home')
+      expect(first.label).toBe('Home')
+      expect(first.to).toBe('/')
+    }
   })
 })
 

@@ -1,5 +1,5 @@
 import type { LucideIcon } from 'lucide-react'
-import { Plug, Sparkles, ShieldOff, CalendarClock, GitCommitHorizontal, Code2, Settings, LogOut, Plus, Bot, Folder, Clock, SquarePlus } from 'lucide-react'
+import { Plug, Sparkles, ShieldOff, CalendarClock, GitCommitHorizontal, Code2, Settings, LogOut, Plus, Bot, Folder, Clock, SquarePlus, Home } from 'lucide-react'
 import { getAssistantPath, isAssistantPath } from '@/lib/navigation'
 
 export interface MoreDrawerItem {
@@ -35,6 +35,10 @@ function getAssistantNavItem(_pathname: string, variant: NavPrimaryCta['variant'
   }
 }
 
+function getHomeItem(): MoreDrawerItem {
+  return { key: 'home', label: 'Home', icon: Home, to: '/' }
+}
+
 function getBaseItems(): MoreDrawerItem[] {
   return [
     { key: 'settings', label: 'Settings', icon: Settings },
@@ -42,7 +46,7 @@ function getBaseItems(): MoreDrawerItem[] {
   ]
 }
 
-export function buildNavModel(pathname: string): NavModel {
+function buildRouteNavModel(pathname: string): NavModel {
   const baseItems = getBaseItems()
 
   const repoDetailMatch = /^\/repos\/(\d+)$/.exec(pathname)
@@ -139,6 +143,11 @@ export function buildNavModel(pathname: string): NavModel {
     ],
     items: baseItems,
   }
+}
+
+export function buildNavModel(pathname: string): NavModel {
+  const { primary, items } = buildRouteNavModel(pathname)
+  return { primary, items: [getHomeItem(), ...items] }
 }
 
 export function buildMoreItems(pathname: string): MoreDrawerItem[] {

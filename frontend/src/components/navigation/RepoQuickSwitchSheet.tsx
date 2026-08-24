@@ -8,7 +8,7 @@ import { Button } from '@/components/ui/button'
 import { cn, getRepoDisplayName } from '@/lib/utils'
 import { listRepos } from '@/api/repos'
 import { AddRepoDialog } from '@/components/repo/AddRepoDialog'
-import { FolderGit2, Check, Plus, House } from 'lucide-react'
+import { FolderGit2, Check, Plus } from 'lucide-react'
 import { useUrlParams } from '@/hooks/useUrlParams'
 import { ASSISTANT_REPO_ID } from '@opencode-manager/shared/utils'
 import { getAssistantPath, isAssistantPath } from '@/lib/navigation'
@@ -77,25 +77,11 @@ export function RepoQuickSwitchSheet({ isOpen, onClose }: RepoQuickSwitchSheetPr
     navigateAndClose(`/repos/${id}`, { replace: true })
   }
 
-  const handleHomeClick = () => {
-    navigateAndClose('/')
-  }
-
   return (
     <>
       <BottomSheet isOpen={isOpen} onClose={onClose} heightClass="h-[70dvh]" ariaLabel="Switch repo">
         <BottomSheetHeader>
           <div className="flex items-center gap-2">
-            <Button
-              type="button"
-              size="sm"
-              onClick={handleHomeClick}
-              className="flex-shrink-0"
-            >
-              <House className="h-4 w-4" />
-              <span className="hidden sm:inline">Home</span>
-              <span className="sr-only">Home</span>
-            </Button>
             <Input
               type="text"
               placeholder="Search projects..."
@@ -108,7 +94,7 @@ export function RepoQuickSwitchSheet({ isOpen, onClose }: RepoQuickSwitchSheetPr
             />
             <Button
               type="button"
-              size="sm"
+              size="lg"
               onClick={() => {
                 onClose()
                 setAddRepoOpen(true)
