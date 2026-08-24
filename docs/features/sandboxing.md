@@ -21,6 +21,7 @@ The microVM sees repositories through bind mounts at the same paths used by the 
 | OpenCode file tools | No |
 | Manager-side git operations | No |
 | Plugins and custom tools | No; normal OpenCode behavior |
+| The `ocm` tool (`ocm-manager.js`) | No; runs in the Manager's OpenCode process |
 | Local MCP servers | No; normal OpenCode behavior |
 | Formatters, LSP servers, and hooks | No; normal OpenCode behavior |
 | Custom provider modules | No; normal OpenCode behavior |
@@ -88,6 +89,8 @@ The microVM receives writable bind mounts for:
 - `/workspace/schedule-worktrees`
 
 The assistant workspace's `repos/assistant/.opencode` directory falls beneath the repository mount but is hidden in the guest behind a `tmpfs` mask so its internal API token cannot be read by agent commands.
+
+Because of that mask, and because `localhost` inside the microVM is the guest rather than the Manager, an agent command cannot call the internal API with `curl`. Agents reach the Manager through the `ocm` tool instead, which executes in the Manager's own OpenCode process and never exposes the token to the guest.
 
 The microVM also mounts a runtime-owned tmpfs at `/tmp`. It is sized to one quarter of the microVM memory, clamped to 1-512 MiB, so agent commands get writable scratch space that is not backed by a host filesystem.
 

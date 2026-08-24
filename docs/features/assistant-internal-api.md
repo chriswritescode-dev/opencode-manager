@@ -14,13 +14,28 @@ Include the token in requests:
 Authorization: Bearer <token>
 ```
 
+## The `ocm` Tool
+
+The Manager installs a generated plugin (`ocm-manager.js`) that gives every agent an `ocm` tool. The tool calls this API from inside the Manager's own OpenCode process, so it needs no token, no base URL, and no network access from the agent shell.
+
+That makes it the only path that works everywhere: a scheduled run executes in a throwaway worktree with no `.opencode/internal-token`, and a sandboxed `bash` call runs in a microVM where `localhost` is the guest, not the Manager.
+
+```ts
+{
+  action: 'send_notification',
+  params: { title: string, body: string, url?: string, tag?: string, priority?: 'normal' | 'high' }
+}
+```
+
+The bearer-token endpoints below remain available for agents running in the assistant workspace without sandboxing.
+
 ## Endpoints
 
 ### Notifications
 
 **POST `/api/internal/notifications/send`**
 
-Send push notifications to the user's registered devices.
+Send push notifications to the user's registered devices. Prefer the `ocm` tool with the `send_notification` action.
 
 **Request Body:**
 ```ts

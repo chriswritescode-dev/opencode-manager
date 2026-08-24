@@ -1,6 +1,7 @@
 import { join } from 'path'
 import { writeFileAtomic } from '../../utils/fs-safe'
 import { buildGhEnvPluginSource } from '../opencode-gh-env-plugin'
+import { buildManagerToolPluginSource } from '../opencode-manager-tool-plugin'
 import { buildSandboxPluginSource } from '../opencode-sandbox-plugin'
 import { ensureSandboxShellShim } from '../sandbox/shell-shim'
 
@@ -11,6 +12,7 @@ type ManagedOpenCodePlugin = {
 
 const MANAGED_OPENCODE_PLUGINS: readonly ManagedOpenCodePlugin[] = [
   { filename: 'ocm-gh-env.js', buildSource: () => buildGhEnvPluginSource() },
+  { filename: 'ocm-manager.js', buildSource: () => buildManagerToolPluginSource() },
   { filename: 'ocm-sandbox.js', buildSource: ({ shellShimPath }) => buildSandboxPluginSource(shellShimPath) },
 ]
 

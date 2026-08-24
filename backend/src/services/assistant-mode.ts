@@ -12,11 +12,12 @@ import {
   fileExists,
   ensureDirectoryExists,
 } from './file-operations'
-import { OpenCodeConfigSchema } from '@opencode-manager/shared/schemas'
+import { ASSISTANT_NOTIFICATION_LIMITS, OpenCodeConfigSchema } from '@opencode-manager/shared/schemas'
 import { ASSISTANT_REPO_ID, ASSISTANT_REPO_PATH, ASSISTANT_OPENCODE_DIR_NAME } from '@opencode-manager/shared/utils'
 import { getAssistantModePath, getReposPath, ENV } from '@opencode-manager/shared/config/env'
 import type { Database } from 'bun:sqlite'
 import { getOrCreateInternalToken } from './internal-token'
+import { MANAGER_TOOL_NAME } from './opencode-manager-tool-plugin'
 import { ensureAssistantRepo } from '../db/queries'
 
 
@@ -438,77 +439,61 @@ Always confirm destructive operations (\`DELETE\` jobs, \`cancel\` runs) with th
 `
 }
 
-export function buildNotificationsSkill(baseUrl: string): string {
-  const internalBaseUrl = toLocalhostInternalBaseUrl(baseUrl)
-
+export function buildNotificationsSkill(): string {
   return `---
 name: notifications
-description: Send push notifications to the user's registered devices via the internal HTTP API
+description: Send push notifications to the user's registered devices with the ${MANAGER_TOOL_NAME} tool
 ---
 
 ## When to Load
 
 Load this skill when you need to notify the user about important events, completed tasks, or questions that require their attention.
 
-## Authentication
+## Tool
 
-All API calls require a bearer token. Read the token from \`.opencode/internal-token\` (relative to the assistant workspace cwd) and pass it as:
+Use the \`${MANAGER_TOOL_NAME}\` tool with the \`send_notification\` action. The tool runs inside OpenCode Manager, so it needs no token, no base URL, and no network access from the shell. It works the same in a normal session, a sandboxed session, and a scheduled run.
 
-\`\`\`
-Authorization: Bearer <token>
-\`\`\`
+The tool declares its arguments as a typed schema, so the editor and the model both see the exact shape and the tool call is rejected before it runs if it does not match.
 
-## Base URL
-
-\`${internalBaseUrl}\`
-
-## Endpoint
-
-### POST /notifications/send
-
-Send a push notification to all of the user's registered devices.
-
-**Query Parameters:**
-- \`userId\` (optional): User ID. Defaults to \`"default"\`.
-
-**Request Body:**
+**Arguments:**
 \`\`\`ts
 {
-  title: string       // 1-120 characters
-  body: string        // 1-500 characters
-  url?: string        // Optional: deep link to navigate to (1-500 chars)
-  tag?: string        // Optional: notification tag for deduplication (max 80 chars)
-  priority?: 'normal' | 'high'  // Defaults to 'normal'
+  action: 'send_notification',
+  params: {
+    title: string       // 1-${ASSISTANT_NOTIFICATION_LIMITS.TITLE_MAX} characters
+    body: string        // 1-${ASSISTANT_NOTIFICATION_LIMITS.BODY_MAX} characters
+    url?: string        // Optional: deep link to navigate to (1-${ASSISTANT_NOTIFICATION_LIMITS.URL_MAX} chars)
+    tag?: string        // Optional: notification tag for deduplication (max ${ASSISTANT_NOTIFICATION_LIMITS.TAG_MAX} chars)
+    priority?: 'normal' | 'high'  // Defaults to 'normal'
+  }
 }
 \`\`\`
 
 **Example:**
-\`\`\`bash
-curl -X POST -H "Authorization: Bearer <token>" \\
-  -H "Content-Type: application/json" \\
-  -d '{"title":"Task Complete","body":"The build has finished successfully","url":"/repos/my-repo","priority":"high"}' \\
-  "${internalBaseUrl}/notifications/send?userId=default"
-\`\`\`
-
-**Response:**
-\`\`\`ts
+\`\`\`json
 {
-  delivered: number       // Number of successfully delivered notifications
-  expired: number         // Number of expired subscriptions removed
-  failed: number          // Number of failed deliveries
-  noSubscriptions: boolean // True if user has no registered devices
+  "action": "send_notification",
+  "params": {
+    "title": "Task Complete",
+    "body": "The build has finished successfully",
+    "url": "/repos/my-repo",
+    "priority": "high"
+  }
 }
 \`\`\`
 
+The tool reports how many devices the notification was delivered to, and says so explicitly when the user has no registered devices.
+
 ## Rate Limiting
 
-The endpoint enforces a rate limit of **10 requests per minute per token**. If exceeded, you'll receive a \`429 Too Many Requests\` response with a \`Retry-After\` header.
+Sending is rate limited to **10 notifications per minute**. Beyond that the tool fails with a \`429\` status; wait before retrying.
 
 ## Notes
 
 - Notifications are only sent if the user has registered devices (browser push subscriptions)
-- If VAPID is not configured on the server, the endpoint returns \`503 Service Unavailable\`
+- If VAPID is not configured on the server, the tool fails with a \`503\` status
 - Use \`priority: 'high'\` for urgent notifications that should interrupt the user
+- Do not call the internal HTTP API with \`curl\` for notifications; the tool is the supported path
 `
 }
 
@@ -834,7 +819,7 @@ export async function ensureAssistantMode(
   }
 
   const notificationsSkillPath = getNotificationsSkillPath(assistantDir)
-  const notificationsSkillContent = buildNotificationsSkill(deps.apiBaseUrl)
+  const notificationsSkillContent = buildNotificationsSkill()
   const existingNotificationsSkillContent = await fileExists(notificationsSkillPath) ? await readFileContent(notificationsSkillPath) : undefined
   const notificationsSkillCreated = !hasSameContentHash(existingNotificationsSkillContent, notificationsSkillContent)
   if (notificationsSkillCreated) {

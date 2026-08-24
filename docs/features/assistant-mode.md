@@ -21,7 +21,7 @@ Four skills are provisioned automatically when assistant mode is initialized:
 | Skill | What it teaches |
 |-------|----------------|
 | `schedule-management` | Create, list, update, delete, and run scheduled jobs |
-| `notifications` | Send push notifications to registered user devices |
+| `notifications` | Send push notifications to registered user devices with the `ocm` tool |
 | `manager-settings` | Read and patch user preferences, and reload the assistant workspace |
 | `repo-management` | List all managed repositories |
 
