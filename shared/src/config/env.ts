@@ -5,7 +5,9 @@ import { DEFAULTS } from './defaults'
 
 try {
   const { config } = await import('dotenv')
-  config({ path: path.resolve(process.cwd(), '.env') })
+  const cwd = process.cwd()
+  config({ path: path.resolve(cwd, '.env') })
+  config({ path: path.resolve(cwd, '.env.local'), override: true })
 } catch {
   // dotenv not available (e.g., in production Docker), env vars already set
 }
@@ -124,7 +126,8 @@ export const ENV = {
     DISCORD_CLIENT_SECRET: process.env.DISCORD_CLIENT_SECRET,
     PASSKEY_RP_ID: getEnvString('PASSKEY_RP_ID', 'localhost'),
     PASSKEY_RP_NAME: getEnvString('PASSKEY_RP_NAME', 'OpenCode Manager'),
-    PASSKEY_ORIGIN: getEnvString('PASSKEY_ORIGIN', 'http://localhost:5003'),
+    // Empty/unset => passkey plugin uses the request Origin (multi-port Tailscale OK)
+    PASSKEY_ORIGIN: process.env.PASSKEY_ORIGIN?.trim() || undefined,
   },
 
 } as const

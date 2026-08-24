@@ -11,4 +11,45 @@ describe("PageHeader", () => {
     );
     expect(screen.getByText("Test Child")).toBeInTheDocument();
   });
+
+  it("merges custom className", () => {
+    render(
+      <PageHeader data-testid="header" className="custom-class">
+        Content
+      </PageHeader>
+    );
+    const header = screen.getByTestId("header");
+    expect(header).toHaveClass("custom-class");
+    expect(header).toHaveClass("pt-safe");
+  });
+
+  it("forwards additional props", () => {
+    render(
+      <PageHeader data-testid="header" aria-label="Page header">
+        Content
+      </PageHeader>
+    );
+    const header = screen.getByTestId("header");
+    expect(header).toHaveAttribute("aria-label", "Page header");
+  });
+
+  it("applies z-10 for proper stacking", () => {
+    render(<PageHeader data-testid="header">Content</PageHeader>);
+    const header = screen.getByTestId("header");
+    expect(header).toHaveClass("z-10");
+  });
+
+  it("applies background and border styling", () => {
+    render(<PageHeader data-testid="header">Content</PageHeader>);
+    const header = screen.getByTestId("header");
+    expect(header).toHaveClass("border-b");
+    expect(header).toHaveClass("border-border/60");
+    expect(header).toHaveClass("bg-background/90");
+  });
+
+  it("applies backdrop-blur-xl for frosted glass effect", () => {
+    render(<PageHeader data-testid="header">Content</PageHeader>);
+    const header = screen.getByTestId("header");
+    expect(header).toHaveClass("backdrop-blur-xl");
+  });
 });

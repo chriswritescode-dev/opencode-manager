@@ -345,7 +345,7 @@ void scheduleRunnerInstance.start()
 
 const settingsService = new SettingsService(db)
 
-app.route('/api/auth', createAuthRoutes(auth))
+app.route('/api/auth', createAuthRoutes(auth, db))
 app.route('/api/auth-info', createAuthInfoRoutes(auth, db))
 app.route('/api/health', createHealthRoutes(db, openCodeSupervisor))
 

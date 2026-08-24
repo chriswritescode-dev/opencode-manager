@@ -11,7 +11,7 @@ export function PendingActionsGroup() {
       <PendingActionBadge
         count={permissionCount}
         icon={Bell}
-        color="orange"
+        color="warning"
         onClick={() => {
           navigateToPermission()
           setShowDialog(true)
@@ -21,7 +21,7 @@ export function PendingActionsGroup() {
       <PendingActionBadge
         count={questionCount}
         icon={HelpCircle}
-        color="blue"
+        color="info"
         onClick={navigateToCurrent}
         label="question"
       />

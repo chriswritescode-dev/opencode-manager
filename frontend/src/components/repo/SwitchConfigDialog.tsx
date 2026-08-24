@@ -91,7 +91,7 @@ export function SwitchConfigDialog({
 
           {loading ? (
             <div className="flex items-center justify-center py-6">
-              <Loader2 className="w-4 h-4 animate-spin text-blue-600 dark:text-blue-400" />
+              <Loader2 className="w-4 h-4 animate-spin text-info" />
               <span className="ml-2 text-sm text-muted-foreground">Loading configs...</span>
             </div>
           ) : configs.length === 0 ? (
@@ -107,7 +107,7 @@ export function SwitchConfigDialog({
                     <div className="flex items-center gap-2">
                       {config.name}
                       {config.isDefault && (
-                        <span className="text-xs text-blue-600 dark:text-blue-400 ml-2">(default)</span>
+                        <span className="ml-2 text-xs text-info">(default)</span>
                       )}
                     </div>
                   </SelectItem>
@@ -117,9 +117,9 @@ export function SwitchConfigDialog({
           )}
 
           {error && (
-            <div className="flex items-start gap-2 bg-red-500/10 dark:bg-red-900/20 border border-red-500/30 dark:border-red-800/50 rounded p-3">
-              <AlertCircle className="w-4 h-4 text-red-600 dark:text-red-400 mt-0.5 flex-shrink-0" />
-              <p className="text-sm text-red-600 dark:text-red-400">{error}</p>
+            <div className="flex items-start gap-2 rounded p-3 border border-destructive/30 bg-destructive/10">
+              <AlertCircle className="mt-0.5 h-4 w-4 flex-shrink-0 text-destructive" />
+              <p className="text-sm text-destructive">{error}</p>
             </div>
           )}
 
@@ -134,7 +134,6 @@ export function SwitchConfigDialog({
             <Button
               onClick={handleSwitch}
               disabled={!selectedConfig || switching || selectedConfig === currentConfigName}
-              className="bg-blue-600 hover:bg-blue-700 disabled:opacity-50"
             >
               {switching ? (
                 <>
