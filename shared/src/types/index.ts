@@ -104,6 +104,7 @@ export type AssistantSettingsPatch = z.infer<typeof AssistantSettingsPatchSchema
 export { FetchError } from './errors'
 export type { ApiErrorResponse, ApiErrorCode, GitErrorCode } from './errors'
 export { BLOCKED_SERVER_ENV_KEYS, DEFAULT_SERVER_ENV_VARS } from '../schemas/settings'
+export type { ReplaceOpenCodeConfigDirectoryResult } from './settings'
 
 export interface SuccessResponse {
   success: boolean

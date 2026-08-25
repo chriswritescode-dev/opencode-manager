@@ -12,7 +12,7 @@ import { FolderOpen, Upload, RefreshCw, X } from 'lucide-react'
 import type { FileInfo } from '@/types/files'
 import { useMobile } from '@/hooks/useMobile'
 import { getFileApiUrl, useFile } from '@/api/files'
-import { getUploadItemsFromDataTransfer, getUploadItemsFromFileList, type DirectoryUploadItem } from '@/lib/directoryUpload'
+import { useDirectoryDropZone, getUploadItemsFromFileList, type DirectoryUploadItem } from '@/lib/directoryUpload'
 
 export interface FileBrowserHandle {
   goBack: () => void
@@ -54,11 +54,9 @@ export const FileBrowser = forwardRef<FileBrowserHandle, FileBrowserProps>(funct
   const [searchQuery, setSearchQuery] = useState('')
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState<string | null>(null)
-  const [isDragging, setIsDragging] = useState(false)
   const [isPreviewModalOpen, setIsPreviewModalOpen] = useState(false)
   const [uploadProgress, setUploadProgress] = useState<UploadProgress | null>(null)
   
-  const dropZoneRef = useRef<HTMLDivElement>(null)
   const uploadCancelledRef = useRef(false)
   const isMobile = useMobile()
 
@@ -273,6 +271,10 @@ useEffect(() => {
     await handleUploadItems(items)
   }, [handleUploadItems])
 
+  const { dropZoneRef, isDragging, dropHandlers } = useDirectoryDropZone({
+    onItems: handleUploadItems,
+  })
+
   const cancelUpload = useCallback(() => {
     uploadCancelledRef.current = true
   }, [])
@@ -329,36 +331,6 @@ useEffect(() => {
       setError(err instanceof Error ? err.message : 'Rename failed')
     }
   }, [currentPath, loadFiles])
-
-  const handleDragEnter = (e: React.DragEvent) => {
-    e.preventDefault()
-    e.stopPropagation()
-    setIsDragging(true)
-  }
-
-  const handleDragLeave = (e: React.DragEvent) => {
-    e.preventDefault()
-    e.stopPropagation()
-    if (e.currentTarget === dropZoneRef.current) {
-      setIsDragging(false)
-    }
-  }
-
-  const handleDragOver = (e: React.DragEvent) => {
-    e.preventDefault()
-    e.stopPropagation()
-  }
-
-  const handleDrop = async (e: React.DragEvent) => {
-    e.preventDefault()
-    e.stopPropagation()
-    setIsDragging(false)
-
-    const items = await getUploadItemsFromDataTransfer(e.dataTransfer)
-    if (items.length > 0) {
-      await handleUploadItems(items)
-    }
-  }
 
   useEffect(() => {
     loadFiles(basePath)
@@ -476,10 +448,7 @@ useEffect(() => {
       <div 
         className="h-full flex flex-col bg-background"
         ref={dropZoneRef}
-        onDragEnter={handleDragEnter}
-        onDragLeave={handleDragLeave}
-        onDragOver={handleDragOver}
-        onDrop={handleDrop}
+        {...dropHandlers}
       >
         {isDragging && (
           <div className="absolute inset-0 z-50 bg-primary/10 border-2 border-dashed border-primary rounded-lg flex items-center justify-center">
@@ -569,10 +538,7 @@ useEffect(() => {
     <div 
       className="h-full flex flex-col"
       ref={dropZoneRef}
-      onDragEnter={handleDragEnter}
-      onDragLeave={handleDragLeave}
-      onDragOver={handleDragOver}
-      onDrop={handleDrop}
+      {...dropHandlers}
     >
       <Card className="flex-1 relative">
         {isDragging && (

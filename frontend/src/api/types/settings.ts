@@ -18,9 +18,9 @@ import {
   type InstallSkillFromGithubRequest,
   type InstallSkillResponse,
 } from '@opencode-manager/shared'
-import type { NotificationPreferences } from '@opencode-manager/shared/types'
+import type { NotificationPreferences, ReplaceOpenCodeConfigDirectoryResult } from '@opencode-manager/shared/types'
 
-export type { TTSConfig, STTConfig, OpenCodeConfigContent, ModelConfig, ProviderConfig, NotificationPreferences, SkillFileInfo, CreateSkillRequest, UpdateSkillRequest, SkillScope, InstallSkillFromGithubRequest, InstallSkillResponse }
+export type { TTSConfig, STTConfig, OpenCodeConfigContent, ModelConfig, ProviderConfig, NotificationPreferences, SkillFileInfo, CreateSkillRequest, UpdateSkillRequest, SkillScope, InstallSkillFromGithubRequest, InstallSkillResponse, ReplaceOpenCodeConfigDirectoryResult }
 export { DEFAULT_TTS_CONFIG, DEFAULT_STT_CONFIG, DEFAULT_KEYBOARD_SHORTCUTS, DEFAULT_USER_PREFERENCES, DEFAULT_LEADER_KEY, BLOCKED_SERVER_ENV_KEYS, DEFAULT_SERVER_ENV_VARS }
 
 export interface CustomCommand {
@@ -146,14 +146,4 @@ export interface OpenCodeDirectoryFileInfo {
   kind: 'agents' | 'commands'
   name: string
   relativePath: string
-}
-
-export interface ReplaceOpenCodeConfigDirectoryResponse {
-  configDirectory: string
-  configSourceFilename: string
-  filesInstalled: string[]
-  skippedPaths: string[]
-  preservedEntries: string[]
-  executablesRestored: string[]
-  restartRequired: boolean
 }

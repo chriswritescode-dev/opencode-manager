@@ -131,14 +131,16 @@ import { SettingsService } from '../../src/services/settings'
 import { opencodeServerManager } from '../../src/services/opencode-single-server'
 import { restartOpenCode } from '../../src/services/opencode-restart'
 import { replaceOpenCodeConfigDirectory } from '../../src/services/opencode-config-directory'
+import { writeFileContent, fileExists } from '../../src/services/file-operations'
 
 const mockReplace = replaceOpenCodeConfigDirectory as ReturnType<typeof vi.fn>
 const mockRestartOpenCode = restartOpenCode as ReturnType<typeof vi.fn>
 const mockMarkRestartPending = opencodeServerManager.markRestartPending as ReturnType<typeof vi.fn>
 const mockClearStartupError = opencodeServerManager.clearStartupError as ReturnType<typeof vi.fn>
+const mockWriteFileContent = writeFileContent as ReturnType<typeof vi.fn>
+const mockFileExists = fileExists as ReturnType<typeof vi.fn>
 
 const mockReplaceResult = {
-  configDirectory: '/tmp/test-workspace/config',
   configSourceFilename: 'opencode.json',
   filesInstalled: ['opencode.json', 'agents/team/lead.md'],
   skippedPaths: ['node_modules/package/dist/index.js'],
@@ -164,6 +166,7 @@ describe('Settings Routes - OpenCode Config Directory Replace', () => {
     vi.clearAllMocks()
     mockReplace.mockResolvedValue(mockReplaceResult)
     mockRestartOpenCode.mockResolvedValue({ resumedSessionIDs: [] })
+    mockFileExists.mockResolvedValue(false)
 
     testDb = {} as any
     settingsApp = createSettingsRoutes(testDb, { getGitEnvironment: vi.fn().mockReturnValue({}) } as any, createStubOpenCodeClient())
@@ -183,7 +186,7 @@ describe('Settings Routes - OpenCode Config Directory Replace', () => {
   }
 
   describe('POST /opencode-config-directory/replace', () => {
-    it('replaces the config directory and marks a restart required', async () => {
+    it('replaces the config directory, re-ensures AGENTS.md, and restarts the server', async () => {
       const res = await settingsApp.request('/opencode-config-directory/replace?userId=custom', {
         method: 'POST',
         body: buildFormData(),
@@ -191,18 +194,21 @@ describe('Settings Routes - OpenCode Config Directory Replace', () => {
 
       expect(res.status).toBe(200)
       const body = await res.json() as Record<string, unknown>
-      expect(body).toEqual({ ...mockReplaceResult, restartRequired: true })
+      expect(body).toEqual(mockReplaceResult)
+      expect('restartRequired' in body).toBe(false)
+      expect('configDirectory' in body).toBe(false)
 
       expect(mockReplace).toHaveBeenCalledTimes(1)
       expect(mockReplace).toHaveBeenCalledWith(
         testDb,
         [
-          expect.objectContaining({ relativePath: 'opencode.json', content: expect.any(Buffer) }),
-          expect.objectContaining({ relativePath: 'agents/team/lead.md', content: expect.any(Buffer) }),
+          expect.objectContaining({ relativePath: 'opencode.json', file: expect.any(File) }),
+          expect.objectContaining({ relativePath: 'agents/team/lead.md', file: expect.any(File) }),
         ],
         'custom',
       )
       expect(mockSaveLastKnownGoodConfig).toHaveBeenCalledWith('custom')
+      expect(mockWriteFileContent).toHaveBeenCalledWith('/tmp/test-workspace/AGENTS.md', '# Test Agents MD')
       expect(mockMarkRestartPending).toHaveBeenCalledTimes(1)
       expect(mockClearStartupError).toHaveBeenCalledTimes(1)
       expect(mockRestartOpenCode).toHaveBeenCalledTimes(1)
@@ -261,6 +267,25 @@ describe('Settings Routes - OpenCode Config Directory Replace', () => {
       expect(res.status).toBe(400)
       const body = await res.json() as { error: string }
       expect(body.error).toBe('Uploaded config directory contains too many files (max 5000)')
+    })
+
+    it('rejects an over-count manifest with 400 before reading any file content', async () => {
+      const manifest = Array.from({ length: 5001 }, (_, index) => ({
+        fieldName: `file${index}`,
+        relativePath: `dir/file${index}.md`,
+      }))
+      const formData = new FormData()
+      formData.append('fileManifest', JSON.stringify(manifest))
+
+      const res = await settingsApp.request('/opencode-config-directory/replace', {
+        method: 'POST',
+        body: formData,
+      })
+
+      expect(res.status).toBe(400)
+      const body = await res.json() as { error: string }
+      expect(body.error).toBe('Uploaded config directory contains too many files (max 5000)')
+      expect(mockReplace).not.toHaveBeenCalled()
     })
 
     it('reports invalid config content as a ZodError 400 with issue details', async () => {
@@ -325,7 +350,20 @@ describe('Settings Routes - OpenCode Config Directory Replace', () => {
       expect(mockReplace).not.toHaveBeenCalled()
     })
 
-    it('leaves restartRequired false when the replace itself fails', async () => {
+    it('maps a "." manifest relative path to 400 instead of 500', async () => {
+      mockReplace.mockRejectedValue(new Error('Path must not be empty'))
+
+      const res = await settingsApp.request('/opencode-config-directory/replace', {
+        method: 'POST',
+        body: buildFormData(),
+      })
+
+      expect(res.status).toBe(400)
+      const body = await res.json() as { error: string }
+      expect(body.error).toBe('Path must not be empty')
+    })
+
+    it('returns 500 when the replace itself fails without restarting', async () => {
       mockReplace.mockRejectedValue(new Error('unexpected failure'))
 
       const res = await settingsApp.request('/opencode-config-directory/replace', {

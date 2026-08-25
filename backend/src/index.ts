@@ -41,7 +41,9 @@ import { sweepStaleUploadSessions } from './routes/internal/repo-mirror-helpers'
 import { createOpenCodeProxyRoutes } from './routes/opencode-proxy'
 import { sseAggregator } from './services/sse-aggregator'
 import { ensureDirectoryExists, writeFileContent, fileExists, readFileContent } from './services/file-operations'
-import { SettingsService } from './services/settings'
+import { SettingsService, DEFAULT_SEED_OPENCODE_CONFIG } from './services/settings'
+import { sweepStaleOpenCodeConfigDirectoryDirs } from './services/opencode-config-directory'
+import { ensureDefaultAgentsMdExists } from './services/agents-md'
 import { opencodeServerManager } from './services/opencode-single-server'
 import { createOpenCodeClient } from './services/opencode/client'
 import { NotificationService } from './services/notification'
@@ -66,7 +68,6 @@ import {
   getReposPath, 
   getConfigPath,
   getOpenCodeConfigFilePath,
-  getAgentsMdPath,
   getDatabasePath,
   ENV
 } from '@opencode-manager/shared/config/env'
@@ -103,8 +104,6 @@ const db = initializeDatabase(DB_PATH)
 const auth = createAuth(db)
 const requireAuth = createAuthMiddleware(auth)
 const openCodeClient = createOpenCodeClient(() => new SettingsService(db).getOpenCodeServerPassword())
-
-import { DEFAULT_AGENTS_MD } from './constants'
 
 let ipcServer: IPCServer | undefined
 const gitAuthService = new GitAuthService()
@@ -150,13 +149,8 @@ async function ensureDefaultConfigExists(): Promise<void> {
   }
   
   logger.info('No existing config found, creating minimal seed config')
-  const seedConfig = JSON.stringify({ $schema: 'https://opencode.ai/config.json' }, null, 2)
-  settingsService.createOpenCodeConfig({
-    name: 'default',
-    content: seedConfig,
-    isDefault: true,
-  })
-  await writeFileContent(workspaceConfigPath, seedConfig)
+  settingsService.upsertDefaultOpenCodeConfig(DEFAULT_SEED_OPENCODE_CONFIG)
+  await writeFileContent(workspaceConfigPath, DEFAULT_SEED_OPENCODE_CONFIG)
   logger.info('Created minimal seed config')
 }
 
@@ -216,16 +210,6 @@ async function ensureHomeStateImported(): Promise<void> {
   }
 }
 
-async function ensureDefaultAgentsMdExists(): Promise<void> {
-  const agentsMdPath = getAgentsMdPath()
-  const exists = await fileExists(agentsMdPath)
-  
-  if (!exists) {
-    await writeFileContent(agentsMdPath, DEFAULT_AGENTS_MD)
-    logger.info(`Created default AGENTS.md at: ${agentsMdPath}`)
-  }
-}
-
 try {
   if (ENV.SERVER.NODE_ENV === 'production' && !ENV.AUTH.SECRET) {
     logger.error('AUTH_SECRET is required in production mode')
@@ -241,6 +225,7 @@ try {
 
   await cleanupExpiredCache()
   await sweepStaleUploadSessions()
+  await sweepStaleOpenCodeConfigDirectoryDirs()
 
   await ensureDefaultConfigExists()
   await backfillOpenCodeModelStateFromFile()

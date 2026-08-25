@@ -14,7 +14,7 @@ import type {
   InstallSkillFromGithubRequest,
   InstallSkillResponse,
   OpenCodeDirectoryFileInfo,
-  ReplaceOpenCodeConfigDirectoryResponse,
+  ReplaceOpenCodeConfigDirectoryResult,
 } from './types/settings'
 import { API_BASE_URL } from '@/config'
 import { fetchWrapper, FetchError } from './fetchWrapper'
@@ -385,7 +385,7 @@ export const settingsApi = {
 
   replaceOpenCodeConfigDirectory: async (
     items: DirectoryUploadItem[],
-  ): Promise<ReplaceOpenCodeConfigDirectoryResponse> => {
+  ): Promise<ReplaceOpenCodeConfigDirectoryResult> => {
     const formData = new FormData()
     appendUploadItemsWithManifest(formData, items)
     return fetchWrapper(`${API_BASE_URL}/api/settings/opencode-config-directory/replace`, {

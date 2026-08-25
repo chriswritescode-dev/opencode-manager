@@ -5,7 +5,7 @@ import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
 import { FILE_LIMITS } from '@/config'
 import { OpenCodeConfigDirectoryUpload } from './OpenCodeConfigDirectoryUpload'
 import type { DirectoryUploadItem } from '@/lib/directoryUpload'
-import type { ReplaceOpenCodeConfigDirectoryResponse } from '@/api/types/settings'
+import type { ReplaceOpenCodeConfigDirectoryResult } from '@opencode-manager/shared/types'
 
 const {
   mockReplaceOpenCodeConfigDirectory,
@@ -43,18 +43,34 @@ vi.mock('@/lib/directoryUpload', () => ({
   DIRECTORY_INPUT_PROPS: { webkitdirectory: '', directory: '' },
   getUploadItemsFromDataTransfer: mockGetUploadItemsFromDataTransfer,
   getUploadItemsFromFileList: mockGetUploadItemsFromFileList,
+  openPicker: vi.fn(),
+  readUploadItemsFromInput: () => mockGetUploadItemsFromFileList(),
+  useDirectoryDropZone: (options: {
+    shouldSkip?: (relativePath: string, isDirectory: boolean) => boolean
+    onItems: (items: DirectoryUploadItem[]) => void | Promise<void>
+  }) => ({
+    dropZoneRef: { current: null },
+    isDragging: false,
+    dropHandlers: {
+      onDragEnter: vi.fn(),
+      onDragOver: vi.fn(),
+      onDragLeave: vi.fn(),
+      onDrop: async (e: React.DragEvent) => {
+        const items = await mockGetUploadItemsFromDataTransfer(e.dataTransfer)
+        await options.onItems(items)
+      },
+    },
+  }),
 }))
 
 const IMPORT_STATUS = { workspaceConfigDirectory: '/workspace/.config/opencode' }
 
-const RESULT: ReplaceOpenCodeConfigDirectoryResponse = {
-  configDirectory: '/workspace/.config/opencode',
+const RESULT: ReplaceOpenCodeConfigDirectoryResult = {
   configSourceFilename: 'opencode.jsonc',
   filesInstalled: ['opencode.json', 'skills/x/SKILL.md', 'plugin/p.js'],
   skippedPaths: ['node_modules/pkg/index.js'],
   preservedEntries: ['node_modules'],
   executablesRestored: ['scripts/run.sh'],
-  restartRequired: true,
 }
 
 function makeItem(relativePath: string, size = 10): DirectoryUploadItem {
@@ -62,11 +78,11 @@ function makeItem(relativePath: string, size = 10): DirectoryUploadItem {
   return { file: new File([new Uint8Array(size)], name), relativePath }
 }
 
-function renderComponent() {
+function renderComponent(props?: { onReplaced?: () => void }) {
   const queryClient = new QueryClient({ defaultOptions: { queries: { retry: false } } })
   return render(
     <QueryClientProvider client={queryClient}>
-      <OpenCodeConfigDirectoryUpload />
+      <OpenCodeConfigDirectoryUpload {...props} />
     </QueryClientProvider>,
   )
 }
@@ -96,7 +112,7 @@ describe('OpenCodeConfigDirectoryUpload', () => {
     await dropItems(items)
 
     expect(screen.getByText('/workspace/.config/opencode')).toBeInTheDocument()
-    expect(screen.getByText('3 files (30 B)')).toBeInTheDocument()
+    expect(screen.getByText('3 files (30 Bytes)')).toBeInTheDocument()
     expect(screen.getByText('opencode.jsonc')).toBeInTheDocument()
     expect(screen.getByText('plugin')).toBeInTheDocument()
     expect(screen.getByText('skills')).toBeInTheDocument()
@@ -204,7 +220,7 @@ describe('OpenCodeConfigDirectoryUpload', () => {
     fireEvent.change(input, { target: { files: [] } })
 
     await screen.findByText('Replace OpenCode Config Directory?')
-    expect(screen.getByText('2 files (20 B)')).toBeInTheDocument()
+    expect(screen.getByText('2 files (20 Bytes)')).toBeInTheDocument()
     expect(screen.getByText('opencode.jsonc')).toBeInTheDocument()
     expect(screen.getByText('skills')).toBeInTheDocument()
     expect(screen.queryByText('node_modules')).not.toBeInTheDocument()
@@ -229,6 +245,18 @@ describe('OpenCodeConfigDirectoryUpload', () => {
     ).toBeInTheDocument()
     await waitFor(() => expect(mockShowToast.success).toHaveBeenCalled())
     expect(screen.queryByText('Replace OpenCode Config Directory?')).not.toBeInTheDocument()
+  })
+
+  it('invokes onReplaced after a successful replace so the parent refetches configs', async () => {
+    const user = userEvent.setup()
+    const onReplaced = vi.fn()
+    renderComponent({ onReplaced })
+
+    await dropItems([makeItem('opencode/opencode.jsonc')])
+
+    await user.click(screen.getByRole('button', { name: 'Replace and Restart' }))
+
+    await waitFor(() => expect(onReplaced).toHaveBeenCalledTimes(1))
   })
 
   it('surfaces a failed replace through an error toast', async () => {

@@ -159,14 +159,15 @@ OpenCode's configuration lives in a directory — `workspace/.config/opencode` �
 - The whole `workspace/.config/opencode` tree is replaced — the config file, `AGENTS.md`, `agents/`, `commands/`, `skills/`, `plugin/` and any other files the directory holds. The exact destination path is shown in the confirmation dialog before you confirm.
 - The folder must contain `opencode.json` or `opencode.jsonc` at its root. An uploaded `.jsonc` file is installed as `opencode.json` with its comments preserved; when both are uploaded, the `.jsonc` is skipped.
 - The uploaded config becomes the **default** config shown in the config manager.
-- `node_modules`, `.git` and `.DS_Store` entries are skipped. An existing `node_modules` directory at the root of the config directory is carried over unchanged across the replace, so plugin dependencies do not have to be re-uploaded; OpenCode installs the plugins declared in the config's `plugin` array on start.
+- `node_modules`, `.git` and `.DS_Store` entries are skipped. An existing `node_modules` directory at the root of the config directory is carried over unchanged across the replace, so dependencies of plugins kept inside the directory do not have to be re-uploaded. Plugins declared as packages in the config's `plugin` array are installed separately by OpenCode on start and do not depend on it.
 - Files whose contents start with a `#!` shebang are restored as executable.
-- At most 5000 files can be uploaded, with a combined upload size limited by `MAX_UPLOAD_SIZE_MB` (50 MB by default).
+- At most 5000 files can be uploaded, with a combined upload size limited by `MAX_UPLOAD_SIZE_MB` (50 MB by default). An upload beyond either limit is rejected before its contents are read.
+- If the uploaded folder contains no `AGENTS.md`, the default one is recreated, so the global instructions file is never left missing.
 - The OpenCode server restarts afterwards.
 
 ### Restart Required
 
-Changes that need a restart surface as an amber notice pinned at the top of the **OpenCode** tab in Settings while a restart is pending. The notice appears when a change has been saved but not yet applied to the running server — a directory replace restarts the server for you, so it only shows up after one if that restart never came up healthy. The first time a pending restart is seen, a confirmation dialog opens automatically; you can dismiss it with **Later**. The **Restart Now** button restarts the server immediately when no sessions are working, and asks for confirmation first when sessions are working, reporting how many would be interrupted.
+Changes that need a restart surface as an amber notice pinned at the top of the **OpenCode** tab in Settings while a restart is pending. The notice appears when a change has been saved but not yet applied to the running server — a directory replace restarts the server for you, so it only shows up after one if that restart never came up healthy. A confirmation dialog opens automatically once per pending restart; dismissing it with **Later** keeps it closed, including across settings tab changes, until a new restart becomes pending. The **Restart Now** button restarts the server immediately when no sessions are working, and asks for confirmation first when sessions are working, reporting how many would be interrupted.
 
 ### If the Replacement Breaks Startup
 

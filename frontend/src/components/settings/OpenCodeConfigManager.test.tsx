@@ -4,6 +4,7 @@ import userEvent from '@testing-library/user-event'
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
 import { OpenCodeConfigManager } from './OpenCodeConfigManager'
 import type { OpenCodeConfig } from '@/api/types/settings'
+import type { DirectoryUploadItem } from '@/lib/directoryUpload'
 
 const {
   mockGetOpenCodeConfigs,
@@ -11,12 +12,16 @@ const {
   mockGetOpenCodeImportStatus,
   mockListManagedSkills,
   mockListOpenCodeDirectoryFiles,
+  mockReplaceOpenCodeConfigDirectory,
+  mockGetUploadItemsFromDataTransfer,
 } = vi.hoisted(() => ({
   mockGetOpenCodeConfigs: vi.fn(),
   mockUpdateOpenCodeConfig: vi.fn(),
   mockGetOpenCodeImportStatus: vi.fn(),
   mockListManagedSkills: vi.fn(),
   mockListOpenCodeDirectoryFiles: vi.fn(),
+  mockReplaceOpenCodeConfigDirectory: vi.fn(),
+  mockGetUploadItemsFromDataTransfer: vi.fn(),
 }))
 
 vi.mock('@/lib/toast', () => ({
@@ -31,7 +36,32 @@ vi.mock('@/api/settings', () => ({
     listManagedSkills: mockListManagedSkills,
     listOpenCodeDirectoryFiles: mockListOpenCodeDirectoryFiles,
     syncOpenCodeImport: vi.fn(),
+    replaceOpenCodeConfigDirectory: mockReplaceOpenCodeConfigDirectory,
   },
+}))
+
+vi.mock('@/lib/directoryUpload', () => ({
+  DIRECTORY_INPUT_PROPS: { webkitdirectory: '', directory: '' },
+  getUploadItemsFromDataTransfer: mockGetUploadItemsFromDataTransfer,
+  getUploadItemsFromFileList: vi.fn(),
+  openPicker: vi.fn(),
+  readUploadItemsFromInput: vi.fn(),
+  useDirectoryDropZone: (options: {
+    shouldSkip?: (relativePath: string, isDirectory: boolean) => boolean
+    onItems: (items: DirectoryUploadItem[]) => void | Promise<void>
+  }) => ({
+    dropZoneRef: { current: null },
+    isDragging: false,
+    dropHandlers: {
+      onDragEnter: vi.fn(),
+      onDragOver: vi.fn(),
+      onDragLeave: vi.fn(),
+      onDrop: async (e: React.DragEvent) => {
+        const items = await mockGetUploadItemsFromDataTransfer(e.dataTransfer)
+        await options.onItems(items)
+      },
+    },
+  }),
 }))
 
 const defaultConfig: OpenCodeConfig = {
@@ -182,5 +212,31 @@ describe('OpenCodeConfigManager', () => {
 
     resolveRefresh()
     await waitFor(() => expect(screen.queryByText('Edit Config: default')).not.toBeInTheDocument())
+  })
+
+  it('refetches the imperative config list after a config-directory replace', async () => {
+    const user = userEvent.setup()
+    mockReplaceOpenCodeConfigDirectory.mockResolvedValue({
+      configSourceFilename: 'opencode.json',
+      filesInstalled: ['opencode.json'],
+      skippedPaths: [],
+      preservedEntries: [],
+      executablesRestored: [],
+    })
+    mockGetUploadItemsFromDataTransfer.mockResolvedValue([
+      { file: new File(['{}'], 'opencode.json'), relativePath: 'opencode/opencode.json' },
+    ])
+
+    renderWithQuery(<OpenCodeConfigManager />)
+
+    await screen.findByText('GPT-4o')
+    expect(mockGetOpenCodeConfigs).toHaveBeenCalledTimes(1)
+
+    fireEvent.drop(screen.getByTestId('config-directory-drop-zone'), { dataTransfer: { items: [] } })
+    await screen.findByText('Replace OpenCode Config Directory?')
+    await user.click(screen.getByRole('button', { name: 'Replace and Restart' }))
+
+    await waitFor(() => expect(mockReplaceOpenCodeConfigDirectory).toHaveBeenCalledTimes(1))
+    await waitFor(() => expect(mockGetOpenCodeConfigs).toHaveBeenCalledTimes(2))
   })
 })

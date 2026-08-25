@@ -47,9 +47,6 @@ importers:
       hono:
         specifier: ^4.11.7
         version: 4.11.7
-      jsonc-parser:
-        specifier: ^3.3.1
-        version: 3.3.1
       typescript:
         specifier: ^5
         version: 5.9.3

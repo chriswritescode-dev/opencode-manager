@@ -1,13 +1,19 @@
-import { useRef, useState } from 'react'
+import { useEffect, useMemo, useRef, useState } from 'react'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { FolderUp, UploadCloud, Loader2 } from 'lucide-react'
 import {
+  EXCLUDED_OPENCODE_CONFIG_UPLOAD_FILENAMES,
+  EXCLUDED_OPENCODE_CONFIG_UPLOAD_SEGMENTS,
+  MAX_OPENCODE_CONFIG_DIRECTORY_FILES,
+  OPENCODE_CONFIG_UPLOAD_ERRORS,
+  PRESERVED_OPENCODE_CONFIG_ENTRIES,
   getCommonUploadRootDirectory,
   isExcludedOpenCodeConfigUploadPath,
   isOpenCodeConfigUploadPath,
+  stripUploadRootDirectory,
 } from '@opencode-manager/shared/utils'
 import { FILE_LIMITS } from '@/config'
-import { cn } from '@/lib/utils'
+import { cn, formatBytes } from '@/lib/utils'
 import { Button } from '@/components/ui/button'
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
 import { ConfirmDestructiveDialog } from '@/components/ui/confirm-destructive-dialog'
@@ -17,33 +23,31 @@ import { invalidateConfigCaches } from '@/lib/queryInvalidation'
 import { getOpenCodeApiErrorMessage } from '@/lib/opencode-errors'
 import {
   DIRECTORY_INPUT_PROPS,
-  getUploadItemsFromDataTransfer,
-  getUploadItemsFromFileList,
+  openPicker,
+  readUploadItemsFromInput,
+  useDirectoryDropZone,
   type DirectoryUploadItem,
 } from '@/lib/directoryUpload'
-import type { OpenCodeImportStatus, ReplaceOpenCodeConfigDirectoryResponse } from '@/api/types/settings'
+import type { OpenCodeImportStatus } from '@/api/types/settings'
+import type { ReplaceOpenCodeConfigDirectoryResult } from '@opencode-manager/shared/types'
 
-const MAX_CONFIG_DIRECTORY_FILES = 5000
 const MAX_CONFIG_UPLOAD_BYTES = FILE_LIMITS.MAX_UPLOAD_SIZE_BYTES
+const EXCLUDED_ENTRIES_DISPLAY = [
+  ...EXCLUDED_OPENCODE_CONFIG_UPLOAD_SEGMENTS,
+  ...EXCLUDED_OPENCODE_CONFIG_UPLOAD_FILENAMES,
+].join(', ')
 
-function formatBytes(bytes: number): string {
-  if (bytes < 1024) return `${bytes} B`
-  if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(1)} KB`
-  return `${(bytes / (1024 * 1024)).toFixed(1)} MB`
+interface OpenCodeConfigDirectoryUploadProps {
+  onReplaced?: () => void
 }
 
-function stripCommonRoot(relativePath: string, commonRoot: string | null): string {
-  return commonRoot ? relativePath.slice(commonRoot.length + 1) : relativePath
-}
-
-export function OpenCodeConfigDirectoryUpload() {
+export function OpenCodeConfigDirectoryUpload({ onReplaced }: OpenCodeConfigDirectoryUploadProps) {
   const queryClient = useQueryClient()
   const folderInputRef = useRef<HTMLInputElement>(null)
-  const dropZoneRef = useRef<HTMLDivElement>(null)
-  const [isDragging, setIsDragging] = useState(false)
   const [stagedItems, setStagedItems] = useState<DirectoryUploadItem[] | null>(null)
   const [isConfirmOpen, setIsConfirmOpen] = useState(false)
-  const [lastResult, setLastResult] = useState<ReplaceOpenCodeConfigDirectoryResponse | null>(null)
+  const [lastResult, setLastResult] = useState<ReplaceOpenCodeConfigDirectoryResult | null>(null)
+  const deferredConfigInvalidationRef = useRef(false)
 
   const { data: importStatus } = useQuery<OpenCodeImportStatus>({
     queryKey: ['opencode-import-status'],
@@ -54,8 +58,10 @@ export function OpenCodeConfigDirectoryUpload() {
   const replaceMutation = useMutation({
     mutationFn: (items: DirectoryUploadItem[]) => settingsApi.replaceOpenCodeConfigDirectory(items),
     onSuccess: (result) => {
-      invalidateConfigCaches(queryClient)
+      onReplaced?.()
+      deferredConfigInvalidationRef.current = true
       queryClient.invalidateQueries({ queryKey: ['opencode-import-status'] })
+      queryClient.invalidateQueries({ queryKey: ['health'] })
       setLastResult(result)
       setStagedItems(null)
       setIsConfirmOpen(false)
@@ -68,6 +74,18 @@ export function OpenCodeConfigDirectoryUpload() {
     },
   })
 
+  useEffect(() => {
+    const unsubscribe = queryClient.getQueryCache().subscribe((event) => {
+      if (event.type !== 'updated') return
+      if (event.query.queryKey[0] !== 'health') return
+      const health = queryClient.getQueryData<{ opencode?: 'healthy' | 'unhealthy' }>(['health'])
+      if (!deferredConfigInvalidationRef.current || health?.opencode !== 'healthy') return
+      deferredConfigInvalidationRef.current = false
+      invalidateConfigCaches(queryClient)
+    })
+    return unsubscribe
+  }, [queryClient])
+
   const stageItems = (items: DirectoryUploadItem[]) => {
     if (items.length === 0) {
       showToast.error('No files were provided. Drop a folder containing opencode.json or opencode.jsonc at its root.')
@@ -76,21 +94,21 @@ export function OpenCodeConfigDirectoryUpload() {
 
     const commonRoot = getCommonUploadRootDirectory(items.map((item) => item.relativePath))
     const hasRootConfig = items.some((item) =>
-      isOpenCodeConfigUploadPath(stripCommonRoot(item.relativePath, commonRoot)),
+      isOpenCodeConfigUploadPath(stripUploadRootDirectory(item.relativePath, commonRoot)),
     )
     if (!hasRootConfig) {
-      showToast.error('Uploaded directory must contain opencode.json or opencode.jsonc at its root')
+      showToast.error(OPENCODE_CONFIG_UPLOAD_ERRORS.MISSING_ROOT_CONFIG)
       return
     }
 
-    if (items.length > MAX_CONFIG_DIRECTORY_FILES) {
-      showToast.error(`Uploaded config directory contains too many files (max ${MAX_CONFIG_DIRECTORY_FILES})`)
+    if (items.length > MAX_OPENCODE_CONFIG_DIRECTORY_FILES) {
+      showToast.error(OPENCODE_CONFIG_UPLOAD_ERRORS.TOO_MANY_FILES)
       return
     }
 
     const totalBytes = items.reduce((sum, item) => sum + item.file.size, 0)
     if (totalBytes > MAX_CONFIG_UPLOAD_BYTES) {
-      showToast.error('Uploaded config directory files exceed maximum upload size')
+      showToast.error(OPENCODE_CONFIG_UPLOAD_ERRORS.EXCEEDS_MAX_UPLOAD_SIZE)
       return
     }
 
@@ -99,56 +117,35 @@ export function OpenCodeConfigDirectoryUpload() {
     setIsConfirmOpen(true)
   }
 
-  const handleDragEnter = (e: React.DragEvent) => {
-    e.preventDefault()
-    e.stopPropagation()
-    setIsDragging(true)
-  }
-
-  const handleDragLeave = (e: React.DragEvent) => {
-    e.preventDefault()
-    e.stopPropagation()
-    if (e.currentTarget === dropZoneRef.current) {
-      setIsDragging(false)
-    }
-  }
-
-  const handleDragOver = (e: React.DragEvent) => {
-    e.preventDefault()
-    e.stopPropagation()
-  }
-
-  const handleDrop = async (e: React.DragEvent) => {
-    e.preventDefault()
-    e.stopPropagation()
-    setIsDragging(false)
-
-    const items = await getUploadItemsFromDataTransfer(e.dataTransfer, {
-      shouldSkip: (relativePath) => isExcludedOpenCodeConfigUploadPath(relativePath),
-    })
-    stageItems(items)
-  }
-
-  const openFolderPicker = () => {
-    requestAnimationFrame(() => folderInputRef.current?.click())
-  }
+  const { dropZoneRef, isDragging, dropHandlers } = useDirectoryDropZone({
+    shouldSkip: (relativePath) => isExcludedOpenCodeConfigUploadPath(relativePath),
+    onItems: stageItems,
+  })
 
   const handleFolderChange = (event: React.ChangeEvent<HTMLInputElement>) => {
-    const fileList = event.target.files
-    const items = fileList
-      ? getUploadItemsFromFileList(fileList).filter((item) => !isExcludedOpenCodeConfigUploadPath(item.relativePath))
-      : []
-    event.target.value = ''
+    const items = readUploadItemsFromInput(event).filter((item) =>
+      !isExcludedOpenCodeConfigUploadPath(item.relativePath),
+    )
     stageItems(items)
   }
 
-  const stagedRoot = stagedItems ? getCommonUploadRootDirectory(stagedItems.map((item) => item.relativePath)) : null
-  const topLevelEntries = stagedItems
-    ? Array.from(new Set(
-        stagedItems.map((item) => stripCommonRoot(item.relativePath, stagedRoot).split('/')[0]),
-      )).sort()
-    : []
-  const stagedTotalBytes = stagedItems?.reduce((sum, item) => sum + item.file.size, 0) ?? 0
+  const stagedRoot = useMemo(
+    () => (stagedItems ? getCommonUploadRootDirectory(stagedItems.map((item) => item.relativePath)) : null),
+    [stagedItems],
+  )
+  const topLevelEntries = useMemo(
+    () =>
+      stagedItems
+        ? Array.from(new Set(
+            stagedItems.map((item) => stripUploadRootDirectory(item.relativePath, stagedRoot).split('/')[0]),
+          )).sort()
+        : [],
+    [stagedItems, stagedRoot],
+  )
+  const stagedTotalBytes = useMemo(
+    () => stagedItems?.reduce((sum, item) => sum + item.file.size, 0) ?? 0,
+    [stagedItems],
+  )
 
   return (
     <Card>
@@ -164,10 +161,7 @@ export function OpenCodeConfigDirectoryUpload() {
         <div
           ref={dropZoneRef}
           data-testid="config-directory-drop-zone"
-          onDragEnter={handleDragEnter}
-          onDragOver={handleDragOver}
-          onDragLeave={handleDragLeave}
-          onDrop={handleDrop}
+          {...dropHandlers}
           className={cn(
             'flex flex-col items-center justify-center gap-2 rounded-lg border-2 border-dashed p-6 text-center',
             isDragging ? 'border-primary bg-primary/5' : 'border-border',
@@ -176,14 +170,14 @@ export function OpenCodeConfigDirectoryUpload() {
           <UploadCloud className="h-8 w-8 text-muted-foreground" />
           <p className="text-sm font-medium">Drag and drop your OpenCode config folder here</p>
           <p className="text-xs text-muted-foreground">
-            The folder must contain opencode.json or opencode.jsonc at its root. node_modules, .git and .DS_Store
-            entries are excluded automatically.
+            The folder must contain opencode.json or opencode.jsonc at its root. {EXCLUDED_ENTRIES_DISPLAY} entries are
+            excluded automatically.
           </p>
           <Button
             type="button"
             variant="outline"
             size="sm"
-            onClick={openFolderPicker}
+            onClick={() => openPicker(folderInputRef)}
             disabled={replaceMutation.isPending}
           >
             {replaceMutation.isPending ? (
@@ -264,7 +258,7 @@ export function OpenCodeConfigDirectoryUpload() {
               </div>
             </div>
           }
-          warning="Every file currently in the destination directory except node_modules will be deleted."
+          warning={`Every file currently in the destination directory except ${PRESERVED_OPENCODE_CONFIG_ENTRIES.join(', ')} will be deleted.`}
           confirmLabel="Replace and Restart"
           pendingLabel="Replacing..."
           isPending={replaceMutation.isPending}

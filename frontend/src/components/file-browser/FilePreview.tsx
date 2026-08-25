@@ -5,6 +5,7 @@ import type { FileInfo } from '@/types/files'
 import { getFileApiUrl } from '@/api/files'
 import { VirtualizedTextView, type VirtualizedTextViewHandle } from '@/components/ui/virtualized-text-view'
 import { MarkdownRenderer } from './MarkdownRenderer'
+import { formatBytes } from '@/lib/utils'
 
 
 const VIRTUALIZATION_THRESHOLD_BYTES = 50_000
@@ -81,14 +82,6 @@ export const FilePreview = memo(function FilePreview({ file, hideHeader = false,
     }
   }, [initialLineNumber, shouldVirtualize, file.content])
   
-  const formatFileSize = (bytes: number) => {
-    if (bytes === 0) return '0 Bytes'
-    const k = 1024
-    const sizes = ['Bytes', 'KB', 'MB', 'GB']
-    const i = Math.floor(Math.log(bytes) / Math.log(k))
-    return parseFloat((bytes / Math.pow(k, i)).toFixed(2)) + ' ' + sizes[i]
-  }
-
   const formatDate = (date: Date) => {
     return new Date(date).toLocaleString()
   }
@@ -369,7 +362,7 @@ export const FilePreview = memo(function FilePreview({ file, hideHeader = false,
               </h3>
               <div className="flex items-center gap-2 text-xs text-muted-foreground mt-1 flex-wrap">
                 <span className="bg-muted px-1.5 py-0.5 rounded text-xs truncate max-w-[80px] flex-shrink-0">{file.mimeType || 'Unknown'}</span>
-                <span className="truncate flex-shrink-0">{formatFileSize(file.size)}</span>
+                <span className="truncate flex-shrink-0">{formatBytes(file.size)}</span>
                 <span className="hidden sm:inline truncate flex-shrink-0">{formatDate(file.lastModified)}</span>
                 {shouldVirtualize && (
                   <span className="text-xs text-blue-500 flex-shrink-0">Virtualized</span>

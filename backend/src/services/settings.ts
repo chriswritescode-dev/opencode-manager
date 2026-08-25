@@ -10,7 +10,8 @@ import type {
   UserPreferences, 
   SettingsResponse, 
   CreateOpenCodeConfigRequest,
-  UpdateOpenCodeConfigRequest
+  UpdateOpenCodeConfigRequest,
+  OpenCodeConfigContent,
 } from '../types/settings'
 import {
   UserPreferencesSchema,
@@ -50,6 +51,7 @@ interface OpenCodeServerPasswordState {
   updatedAt: number
 }
 
+export const DEFAULT_SEED_OPENCODE_CONFIG = JSON.stringify({ $schema: 'https://opencode.ai/config.json' }, null, 2)
 
 export class SettingsService {
   private static lastKnownGoodConfigContent: string | null = null
@@ -226,6 +228,11 @@ export class SettingsService {
     }
   }
 
+  validateOpenCodeConfigContent(rawContent: string): OpenCodeConfigContent {
+    const parsedContent = parseJsonc(rawContent)
+    return OpenCodeConfigSchema.parse(parsedContent)
+  }
+
   createOpenCodeConfig(
     request: CreateOpenCodeConfigRequest,
     userId: string = 'default',
@@ -240,12 +247,8 @@ export class SettingsService {
     const rawContent = typeof request.content === 'string' 
       ? request.content 
       : JSON.stringify(request.content, null, 2)
-    
-    const parsedContent = typeof request.content === 'string'
-      ? parseJsonc(request.content)
-      : request.content
-    
-    const contentValidated = OpenCodeConfigSchema.parse(parsedContent)
+
+    const contentValidated = this.validateOpenCodeConfigContent(rawContent)
     const now = Date.now()
 
     const existingCount = this.db
@@ -310,12 +313,8 @@ export class SettingsService {
     const rawContent = typeof request.content === 'string' 
       ? request.content 
       : JSON.stringify(request.content, null, 2)
-    
-    const parsedContent = typeof request.content === 'string'
-      ? parseJsonc(request.content)
-      : request.content
 
-    const contentValidated = OpenCodeConfigSchema.parse(parsedContent)
+    const contentValidated = this.validateOpenCodeConfigContent(rawContent)
     const now = Date.now()
 
     if (request.isDefault) {

@@ -11,7 +11,7 @@ import {
 } from '@/components/ui/dropdown-menu'
 import { settingsApi } from '@/api/settings'
 import { invalidateConfigCaches } from '@/lib/queryInvalidation'
-import { DIRECTORY_INPUT_PROPS, getUploadItemsFromFileList } from '@/lib/directoryUpload'
+import { DIRECTORY_INPUT_PROPS, openPicker, readUploadItemsFromInput } from '@/lib/directoryUpload'
 
 const KIND_NOUN: Record<'agents' | 'commands', string> = {
   agents: 'agent',
@@ -29,14 +29,8 @@ export function UploadFolderButton({ kind }: UploadFolderButtonProps) {
   const folderInputRef = useRef<HTMLInputElement>(null)
   const noun = KIND_NOUN[kind]
 
-  const openPicker = (inputRef: React.RefObject<HTMLInputElement | null>) => {
-    requestAnimationFrame(() => inputRef.current?.click())
-  }
-
   const handleChange = async (event: React.ChangeEvent<HTMLInputElement>) => {
-    const fileList = event.target.files
-    const items = fileList ? getUploadItemsFromFileList(fileList) : []
-    event.target.value = ''
+    const items = readUploadItemsFromInput(event)
     if (items.length === 0) {
       return
     }

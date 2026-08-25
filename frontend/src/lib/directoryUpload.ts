@@ -1,4 +1,5 @@
-import type { InputHTMLAttributes } from 'react'
+import { useRef, useState } from 'react'
+import type { ChangeEvent, DragEvent, InputHTMLAttributes, RefObject } from 'react'
 
 export interface DirectoryUploadItem {
   file: File
@@ -10,6 +11,8 @@ export const DIRECTORY_INPUT_PROPS = {
   directory: '',
   mozdirectory: '',
 } as InputHTMLAttributes<HTMLInputElement>
+
+const DIRECTORY_TRAVERSAL_CONCURRENCY = 25
 
 async function readFileEntry(entry: FileSystemFileEntry): Promise<File> {
   return new Promise((resolve, reject) => {
@@ -23,7 +26,7 @@ async function readDirectoryEntries(dirReader: FileSystemDirectoryReader): Promi
   })
 }
 
-export async function traverseFileSystemEntry(
+async function traverseFileSystemEntry(
   entry: FileSystemEntry,
   basePath: string = '',
   shouldSkip?: (relativePath: string, isDirectory: boolean) => boolean,
@@ -48,9 +51,14 @@ export async function traverseFileSystemEntry(
       entries = entries.concat(batch)
     } while (batch.length > 0)
 
-    for (const childEntry of entries) {
-      const childItems = await traverseFileSystemEntry(childEntry, relativePath, shouldSkip)
-      items.push(...childItems)
+    for (let i = 0; i < entries.length; i += DIRECTORY_TRAVERSAL_CONCURRENCY) {
+      const childBatch = entries.slice(i, i + DIRECTORY_TRAVERSAL_CONCURRENCY)
+      const childBatchItems = await Promise.all(
+        childBatch.map((childEntry) => traverseFileSystemEntry(childEntry, relativePath, shouldSkip)),
+      )
+      for (const childItems of childBatchItems) {
+        items.push(...childItems)
+      }
     }
   }
 
@@ -96,4 +104,64 @@ export function getUploadItemsFromFileList(fileList: FileList): DirectoryUploadI
     items.push({ file, relativePath })
   }
   return items
+}
+
+export function openPicker(inputRef: RefObject<HTMLInputElement | null>): void {
+  requestAnimationFrame(() => inputRef.current?.click())
+}
+
+export function readUploadItemsFromInput(event: ChangeEvent<HTMLInputElement>): DirectoryUploadItem[] {
+  const fileList = event.target.files
+  const items = fileList ? getUploadItemsFromFileList(fileList) : []
+  event.target.value = ''
+  return items
+}
+
+interface DirectoryDropZoneOptions {
+  shouldSkip?: (relativePath: string, isDirectory: boolean) => boolean
+  onItems: (items: DirectoryUploadItem[]) => void | Promise<void>
+}
+
+export function useDirectoryDropZone(options: DirectoryDropZoneOptions) {
+  const dropZoneRef = useRef<HTMLDivElement>(null)
+  const [isDragging, setIsDragging] = useState(false)
+  const { shouldSkip, onItems } = options
+
+  const handleDragEnter = (e: DragEvent) => {
+    e.preventDefault()
+    e.stopPropagation()
+    setIsDragging(true)
+  }
+
+  const handleDragLeave = (e: DragEvent) => {
+    e.preventDefault()
+    e.stopPropagation()
+    if (e.currentTarget === dropZoneRef.current) {
+      setIsDragging(false)
+    }
+  }
+
+  const handleDragOver = (e: DragEvent) => {
+    e.preventDefault()
+    e.stopPropagation()
+  }
+
+  const handleDrop = async (e: DragEvent) => {
+    e.preventDefault()
+    e.stopPropagation()
+    setIsDragging(false)
+    const items = await getUploadItemsFromDataTransfer(e.dataTransfer, shouldSkip ? { shouldSkip } : undefined)
+    await onItems(items)
+  }
+
+  return {
+    dropZoneRef,
+    isDragging,
+    dropHandlers: {
+      onDragEnter: handleDragEnter,
+      onDragOver: handleDragOver,
+      onDragLeave: handleDragLeave,
+      onDrop: handleDrop,
+    },
+  }
 }

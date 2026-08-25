@@ -7,7 +7,7 @@ vi.mock('bun:sqlite', () => ({
   })),
 }))
 
-import { SettingsService } from '../../src/services/settings'
+import { SettingsService, DEFAULT_SEED_OPENCODE_CONFIG } from '../../src/services/settings'
 
 describe('SettingsService - upsertDefaultOpenCodeConfig', () => {
   let settingsService: SettingsService
@@ -52,6 +52,23 @@ describe('SettingsService - upsertDefaultOpenCodeConfig', () => {
       isDefault: true,
     }, 'default')
     expect(mockUpdateOpenCodeConfig).not.toHaveBeenCalled()
+    expect(result.isDefault).toBe(true)
+  })
+
+  it('seeds a default config row marked isDefault when no config exists (index seed path)', () => {
+    expect(JSON.parse(DEFAULT_SEED_OPENCODE_CONFIG)).toEqual({ $schema: 'https://opencode.ai/config.json' })
+
+    mockGetOpenCodeConfigByName.mockReturnValue(null)
+    mockCreateOpenCodeConfig.mockReturnValue({ name: 'default', isDefault: true })
+
+    const result = settingsService.upsertDefaultOpenCodeConfig(DEFAULT_SEED_OPENCODE_CONFIG)
+
+    expect(mockCreateOpenCodeConfig).toHaveBeenCalledWith({
+      name: 'default',
+      content: DEFAULT_SEED_OPENCODE_CONFIG,
+      isDefault: true,
+    }, 'default')
+    expect(result.name).toBe('default')
     expect(result.isDefault).toBe(true)
   })
 })

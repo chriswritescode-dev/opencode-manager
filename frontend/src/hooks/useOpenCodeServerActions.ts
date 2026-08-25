@@ -78,17 +78,20 @@ export function useOpenCodeServerActions() {
     }
   }, [])
 
-  const openRestartPrompt = useCallback(async () => {
-    const count = await probeActiveSessionCount()
+  const showRestartConfirmation = useCallback((count: number) => {
     setActiveSessionCount(count)
     setConfirmOpen(true)
-  }, [probeActiveSessionCount, setActiveSessionCount, setConfirmOpen])
+  }, [setActiveSessionCount, setConfirmOpen])
+
+  const openRestartPrompt = useCallback(async () => {
+    const count = await probeActiveSessionCount()
+    showRestartConfirmation(count)
+  }, [probeActiveSessionCount, showRestartConfirmation])
 
   const requestRestart = async () => {
     const count = await probeActiveSessionCount()
     if (count > 0) {
-      setActiveSessionCount(count)
-      setConfirmOpen(true)
+      showRestartConfirmation(count)
       return
     }
     await performRestart()

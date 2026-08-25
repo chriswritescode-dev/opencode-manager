@@ -418,7 +418,7 @@ export function OpenCodeConfigManager() {
           </CardContent>
         </Card>
 
-        <OpenCodeConfigDirectoryUpload />
+        <OpenCodeConfigDirectoryUpload onReplaced={() => void fetchConfigs(true)} />
 
         
         <CreateConfigDialog

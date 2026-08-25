@@ -1,4 +1,4 @@
-import { useState, useEffect, useCallback } from 'react'
+import { useState, useEffect, useCallback, useRef } from 'react'
 import { GeneralSettings } from '@/components/settings/GeneralSettings'
 import { GitSettings } from '@/components/settings/GitSettings'
 import { KeyboardShortcuts } from '@/components/settings/KeyboardShortcuts'
@@ -6,6 +6,7 @@ import { OpenCodeConfigManager } from '@/components/settings/OpenCodeConfigManag
 import { OpenCodeRestartPendingNotice } from '@/components/settings/OpenCodeRestartPendingNotice'
 import { OpenCodeServerAuthSettings } from '@/components/settings/OpenCodeServerAuthSettings'
 import { ManagerTokenSettings } from '@/components/settings/ManagerTokenSettings'
+import { RestartServerDialog } from '@/components/settings/RestartServerDialog'
 import { ServerEnvVarsSettings } from '@/components/settings/ServerEnvVarsSettings'
 import { ServerHealthStatus } from '@/components/settings/ServerHealthStatus'
 import { ProviderSettings } from '@/components/settings/ProviderSettings'
@@ -18,16 +19,37 @@ import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs'
 import { Settings2, Keyboard, Code, ChevronLeft, Key, GitBranch, User, Volume2, Bell, X } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import { useSettingsDialog } from '@/hooks/useSettingsDialog'
+import { useServerHealth } from '@/hooks/useServerHealth'
+import { useOpenCodeServerActions } from '@/hooks/useOpenCodeServerActions'
 
 type SettingsView = 'menu' | 'general' | 'git' | 'shortcuts' | 'opencode' | 'providers' | 'account' | 'voice' | 'notifications'
 
 export function SettingsDialog() {
   const { isOpen, close, activeTab, setActiveTab } = useSettingsDialog()
+  const { data: health } = useServerHealth()
+  const {
+    restartServerMutation,
+    upgradeOpenCodeMutation,
+    confirmOpen,
+    setConfirmOpen,
+    activeSessionCount,
+    requestRestart,
+    confirmRestart,
+    openRestartPrompt,
+    performUpgrade,
+  } = useOpenCodeServerActions()
+  const hasAutoPromptedRef = useRef(false)
   const [mobileView, setMobileView] = useState<SettingsView>('menu')
   const [isVersionDialogOpen, setIsVersionDialogOpen] = useState(false)
   const [sectionHistory, setSectionHistory] = useState<SettingsView[]>([])
   const [authSectionsOpen, setAuthSectionsOpen] = useState(true)
   const toggleAuthSections = useCallback(() => setAuthSectionsOpen((open) => !open), [])
+
+  useEffect(() => {
+    if (!health?.opencodeRestartPending) {
+      hasAutoPromptedRef.current = false
+    }
+  }, [health?.opencodeRestartPending])
 
   const pushSectionHistory = useCallback((view: SettingsView) => {
     if (view === 'menu') return
@@ -119,7 +141,6 @@ export function SettingsDialog() {
           data-settings-dialog
         >
          <DialogTitle className="sr-only">Settings</DialogTitle>
-         {activeTab === 'opencode' && <OpenCodeRestartPendingNotice />}
          <div className="hidden sm:flex sm:flex-col sm:h-full sm:min-h-0">
            <div className="sticky top-0 z-10 bg-gradient-to-b from-background via-background to-transparent border-b border-border backdrop-blur-sm px-6 py-4 flex-shrink-0 flex items-center justify-between">
              <h2 className="text-2xl font-semibold bg-gradient-to-r from-foreground to-muted-foreground bg-clip-text text-transparent">
@@ -133,7 +154,15 @@ export function SettingsDialog() {
              >
                <X className="w-5 h-5" />
              </Button>
-           </div>
+            </div>
+           {activeTab === 'opencode' && (
+             <OpenCodeRestartPendingNotice
+               hasAutoPromptedRef={hasAutoPromptedRef}
+               openRestartPrompt={openRestartPrompt}
+               requestRestart={requestRestart}
+               restartIsPending={restartServerMutation.isPending}
+             />
+           )}
           <Tabs defaultValue="account" value={activeTab} onValueChange={handleTabChange} className="w-full flex flex-col flex-1 min-h-0">
             <div className="px-6 pt-6 pb-4 flex-shrink-0">
               <TabsList className="grid w-full grid-cols-8 bg-card p-1">
@@ -174,7 +203,13 @@ export function SettingsDialog() {
                 <TabsContent key="shortcuts" value="shortcuts" className="mt-0"><KeyboardShortcuts /></TabsContent>
                 <TabsContent key="opencode" value="opencode" className="mt-0">
                   <div className="space-y-6">
-                    <ServerHealthStatus onOpenVersionDialog={() => setIsVersionDialogOpen(true)} />
+                    <ServerHealthStatus
+                      onOpenVersionDialog={() => setIsVersionDialogOpen(true)}
+                      requestRestart={requestRestart}
+                      restartIsPending={restartServerMutation.isPending}
+                      performUpgrade={performUpgrade}
+                      upgradeIsPending={upgradeOpenCodeMutation.isPending}
+                    />
                     <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
                       <OpenCodeServerAuthSettings isOpen={authSectionsOpen} onToggle={toggleAuthSections} />
                       <ManagerTokenSettings isOpen={authSectionsOpen} onToggle={toggleAuthSections} />
@@ -216,6 +251,15 @@ export function SettingsDialog() {
              </Button>
            </div>
 
+           {mobileView === 'opencode' && (
+             <OpenCodeRestartPendingNotice
+               hasAutoPromptedRef={hasAutoPromptedRef}
+               openRestartPrompt={openRestartPrompt}
+               requestRestart={requestRestart}
+               restartIsPending={restartServerMutation.isPending}
+             />
+           )}
+
              <div className="flex-1 min-h-0 overflow-y-auto p-3 pb-[calc(env(safe-area-inset-bottom)+1rem)]">
              {mobileView === 'menu' && (
                <div className="space-y-3">
@@ -247,7 +291,13 @@ export function SettingsDialog() {
               {mobileView === 'shortcuts' && <div key="shortcuts"><KeyboardShortcuts /></div>}
                 {mobileView === 'opencode' && (
                    <div key="opencode" className="space-y-4">
-                    <ServerHealthStatus onOpenVersionDialog={() => setIsVersionDialogOpen(true)} />
+                    <ServerHealthStatus
+                      onOpenVersionDialog={() => setIsVersionDialogOpen(true)}
+                      requestRestart={requestRestart}
+                      restartIsPending={restartServerMutation.isPending}
+                      performUpgrade={performUpgrade}
+                      upgradeIsPending={upgradeOpenCodeMutation.isPending}
+                    />
                     <OpenCodeServerAuthSettings />
                     <ManagerTokenSettings />
                     <ServerEnvVarsSettings />
@@ -262,6 +312,14 @@ export function SettingsDialog() {
       <VersionSelectDialog
         open={isVersionDialogOpen}
         onOpenChange={setIsVersionDialogOpen}
+      />
+      <RestartServerDialog
+        open={confirmOpen}
+        onOpenChange={setConfirmOpen}
+        activeSessionCount={activeSessionCount}
+        isRestarting={restartServerMutation.isPending}
+        onCancel={() => setConfirmOpen(false)}
+        onConfirm={confirmRestart}
       />
     </Dialog>
   )

@@ -1,16 +1,11 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest'
 import { render, screen, waitFor } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
-import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
 import { OpenCodeRestartPendingNotice } from './OpenCodeRestartPendingNotice'
 
 const {
-  mockRestartOpenCodeServer,
-  mockGetActiveOpenCodeSessions,
   healthState,
 } = vi.hoisted(() => ({
-  mockRestartOpenCodeServer: vi.fn(),
-  mockGetActiveOpenCodeSessions: vi.fn(),
   healthState: { data: { opencode: 'healthy', opencodeRestartPending: false } as Record<string, unknown> },
 }))
 
@@ -18,107 +13,84 @@ vi.mock('@/hooks/useServerHealth', () => ({
   useServerHealth: () => healthState,
 }))
 
-vi.mock('@/lib/toast', () => ({
-  showToast: { success: vi.fn(), error: vi.fn(), info: vi.fn(), loading: vi.fn(), warning: vi.fn(), dismiss: vi.fn() },
-}))
-
-vi.mock('@/api/settings', () => ({
-  settingsApi: {
-    restartOpenCodeServer: mockRestartOpenCodeServer,
-    getActiveOpenCodeSessions: mockGetActiveOpenCodeSessions,
-  },
-}))
-
 const NOTICE_TEXT = 'Configuration changes are saved but require a server restart to take effect.'
 
-function renderWithQuery(ui: React.ReactElement) {
-  const queryClient = new QueryClient({ defaultOptions: { queries: { retry: false } } })
-  return render(ui, {
-    wrapper: ({ children }) => <QueryClientProvider client={queryClient}>{children}</QueryClientProvider>,
-  })
+interface NoticeProps {
+  hasAutoPromptedRef: { current: boolean }
+  openRestartPrompt: () => Promise<void>
+  requestRestart: () => Promise<void>
+  restartIsPending: boolean
+}
+
+function renderNotice(overrides: Partial<NoticeProps> = {}) {
+  const props: NoticeProps = {
+    hasAutoPromptedRef: { current: false },
+    openRestartPrompt: vi.fn().mockResolvedValue(undefined),
+    requestRestart: vi.fn().mockResolvedValue(undefined),
+    restartIsPending: false,
+    ...overrides,
+  }
+  const result = render(<OpenCodeRestartPendingNotice {...props} />)
+  return { ...result, props }
 }
 
 describe('OpenCodeRestartPendingNotice', () => {
   beforeEach(() => {
     vi.clearAllMocks()
     healthState.data = { opencode: 'healthy', opencodeRestartPending: false }
-    mockRestartOpenCodeServer.mockResolvedValue({ success: true, message: 'ok' })
-    mockGetActiveOpenCodeSessions.mockResolvedValue({ count: 2, sessions: [] })
   })
 
   it('renders nothing when no restart is pending', () => {
-    renderWithQuery(<OpenCodeRestartPendingNotice />)
+    const { props } = renderNotice()
 
     expect(screen.queryByText(NOTICE_TEXT)).not.toBeInTheDocument()
     expect(screen.queryByRole('button', { name: /restart now/i })).not.toBeInTheDocument()
-    expect(screen.queryByText('Restart OpenCode Server?')).not.toBeInTheDocument()
+    expect(props.openRestartPrompt).not.toHaveBeenCalled()
   })
 
-  it('auto-opens the restart dialog when the pending flag flips to true', async () => {
-    const { rerender } = renderWithQuery(<OpenCodeRestartPendingNotice />)
-    expect(screen.queryByText('Restart OpenCode Server?')).not.toBeInTheDocument()
+  it('auto-opens the restart prompt when the pending flag flips to true', async () => {
+    const { props, rerender } = renderNotice()
+    expect(props.openRestartPrompt).not.toHaveBeenCalled()
 
     healthState.data = { opencode: 'healthy', opencodeRestartPending: true }
-    rerender(<OpenCodeRestartPendingNotice />)
-
-    expect(await screen.findByText('Restart OpenCode Server?')).toBeInTheDocument()
-    expect(screen.getByText(/2 sessions are currently working/i)).toBeInTheDocument()
-    expect(screen.getByText(NOTICE_TEXT)).toBeInTheDocument()
-    expect(mockGetActiveOpenCodeSessions).toHaveBeenCalledTimes(1)
-  })
-
-  it('closes the dialog with "Later" without issuing a restart', async () => {
-    healthState.data = { opencode: 'healthy', opencodeRestartPending: true }
-    const user = userEvent.setup()
-    renderWithQuery(<OpenCodeRestartPendingNotice />)
-
-    await screen.findByText('Restart OpenCode Server?')
-    await user.click(screen.getByRole('button', { name: /later/i }))
+    rerender(<OpenCodeRestartPendingNotice {...props} />)
 
     await waitFor(() => {
-      expect(screen.queryByText('Restart OpenCode Server?')).not.toBeInTheDocument()
+      expect(props.openRestartPrompt).toHaveBeenCalledTimes(1)
     })
     expect(screen.getByText(NOTICE_TEXT)).toBeInTheDocument()
-    expect(mockRestartOpenCodeServer).not.toHaveBeenCalled()
   })
 
-  it('restarts exactly once via the notice button plus dialog confirmation', async () => {
+  it('does not re-prompt on re-render while the shared flag stays set', async () => {
+    const { props, rerender } = renderNotice()
+
     healthState.data = { opencode: 'healthy', opencodeRestartPending: true }
-    const user = userEvent.setup()
-    renderWithQuery(<OpenCodeRestartPendingNotice />)
+    rerender(<OpenCodeRestartPendingNotice {...props} />)
 
-    await screen.findByText('Restart OpenCode Server?')
-    await user.click(screen.getByRole('button', { name: /later/i }))
     await waitFor(() => {
-      expect(screen.queryByText('Restart OpenCode Server?')).not.toBeInTheDocument()
+      expect(props.openRestartPrompt).toHaveBeenCalledTimes(1)
     })
 
-    await user.click(screen.getByRole('button', { name: /restart now/i }))
-    expect(await screen.findByText('Restart OpenCode Server?')).toBeInTheDocument()
-    expect(mockGetActiveOpenCodeSessions).toHaveBeenCalledTimes(2)
+    rerender(<OpenCodeRestartPendingNotice {...props} />)
 
-    await user.click(screen.getByRole('button', { name: /restart now/i }))
-    await waitFor(() => {
-      expect(mockRestartOpenCodeServer).toHaveBeenCalledTimes(1)
-    })
-  })
-
-  it('does not re-open a dismissed dialog on re-render while the flag stays true', async () => {
-    healthState.data = { opencode: 'healthy', opencodeRestartPending: true }
-    const user = userEvent.setup()
-    const { rerender } = renderWithQuery(<OpenCodeRestartPendingNotice />)
-
-    await screen.findByText('Restart OpenCode Server?')
-    await user.click(screen.getByRole('button', { name: /later/i }))
-    await waitFor(() => {
-      expect(screen.queryByText('Restart OpenCode Server?')).not.toBeInTheDocument()
-    })
-
-    rerender(<OpenCodeRestartPendingNotice />)
-
-    expect(screen.queryByText('Restart OpenCode Server?')).not.toBeInTheDocument()
+    expect(props.openRestartPrompt).toHaveBeenCalledTimes(1)
     expect(screen.getByText(NOTICE_TEXT)).toBeInTheDocument()
-    expect(mockGetActiveOpenCodeSessions).toHaveBeenCalledTimes(1)
-    expect(mockRestartOpenCodeServer).not.toHaveBeenCalled()
+  })
+
+  it('requests a restart via the notice button', async () => {
+    healthState.data = { opencode: 'healthy', opencodeRestartPending: true }
+    const { props } = renderNotice()
+
+    expect(screen.getByText(NOTICE_TEXT)).toBeInTheDocument()
+    await userEvent.setup().click(screen.getByRole('button', { name: /restart now/i }))
+
+    expect(props.requestRestart).toHaveBeenCalledTimes(1)
+  })
+
+  it('disables the restart button while a restart is in flight', () => {
+    healthState.data = { opencode: 'healthy', opencodeRestartPending: true }
+    renderNotice({ restartIsPending: true })
+
+    expect(screen.getByRole('button', { name: /restart now/i })).toBeDisabled()
   })
 })

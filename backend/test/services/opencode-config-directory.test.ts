@@ -1,6 +1,7 @@
 import { beforeEach, afterEach, describe, expect, it, vi } from 'vitest'
 import { join } from 'path'
 import { tmpdir } from 'os'
+import { promises as fs } from 'fs'
 import { mkdir, mkdtemp, readdir, readFile, rm, stat, writeFile } from 'fs/promises'
 import type { Database } from 'bun:sqlite'
 import { z } from 'zod'
@@ -16,10 +17,13 @@ vi.mock('@opencode-manager/shared/config/env', async (importOriginal) => {
   }
 })
 
+const mockValidateOpenCodeConfigContent = vi.fn()
 const mockUpsertDefaultOpenCodeConfig = vi.fn()
+const mockBunWrite = vi.fn()
 
 vi.mock('../../src/services/settings', () => ({
   SettingsService: vi.fn(() => ({
+    validateOpenCodeConfigContent: mockValidateOpenCodeConfigContent,
     upsertDefaultOpenCodeConfig: mockUpsertDefaultOpenCodeConfig,
   })),
 }))
@@ -28,13 +32,13 @@ import { SettingsService } from '../../src/services/settings'
 
 interface TestUploadFile {
   relativePath: string
-  content: Buffer
+  file: File
 }
 
 function payload(files: Array<[string, string]>): TestUploadFile[] {
   return files.map(([relativePath, content]) => ({
     relativePath,
-    content: Buffer.from(content),
+    file: new File([content], relativePath.split('/').pop() ?? relativePath),
   }))
 }
 
@@ -66,12 +70,18 @@ describe('replaceOpenCodeConfigDirectory', () => {
     configDir = join(tempDir, '.config', 'opencode')
     vi.spyOn(await import('@opencode-manager/shared/config/env'), 'getConfigPath').mockReturnValue(configDir)
     mockDb = { query: vi.fn() } as unknown as Database
+    mockValidateOpenCodeConfigContent.mockReturnValue({})
     mockUpsertDefaultOpenCodeConfig.mockReturnValue({ name: 'default', isDefault: true })
+    mockBunWrite.mockImplementation(async (targetPath: string, file: File) => {
+      await writeFile(targetPath, Buffer.from(await file.arrayBuffer()))
+    })
+    vi.stubGlobal('Bun', { write: mockBunWrite })
   })
 
   afterEach(async () => {
     await rm(tempDir, { recursive: true, force: true })
     vi.restoreAllMocks()
+    vi.unstubAllGlobals()
   })
 
   it('replaces the directory with the uploaded tree, normalizing the config and restoring executables', async () => {
@@ -97,8 +107,8 @@ describe('replaceOpenCodeConfigDirectory', () => {
     ]))
 
     expect(SettingsService).toHaveBeenCalledWith(mockDb)
+    expect(mockValidateOpenCodeConfigContent).toHaveBeenCalledWith(jsonc)
     expect(mockUpsertDefaultOpenCodeConfig).toHaveBeenCalledWith(jsonc, 'default')
-    expect(result.configDirectory).toBe(configDir)
     expect(result.configSourceFilename).toBe('opencode.jsonc')
     expect(result.filesInstalled).toEqual([
       'opencode.json',
@@ -111,7 +121,7 @@ describe('replaceOpenCodeConfigDirectory', () => {
       'vendor/x.js',
       'postgres-mcp-manager.sh',
     ])
-    expect(result.executablesRestored).toEqual(['skills/quo-api/scripts/quo-spec.sh', 'postgres-mcp-manager.sh'])
+    expect(result.executablesRestored).toEqual(['postgres-mcp-manager.sh', 'skills/quo-api/scripts/quo-spec.sh'])
     expect(result.skippedPaths).toEqual([])
     expect(result.preservedEntries).toEqual([])
 
@@ -172,6 +182,21 @@ describe('replaceOpenCodeConfigDirectory', () => {
     await expect(readFile(join(configDir, '.DS_Store'), 'utf8')).rejects.toThrow()
   })
 
+  it('computes the common upload root from kept paths, ignoring excluded siblings', async () => {
+    const { replaceOpenCodeConfigDirectory } = await import('../../src/services/opencode-config-directory')
+    const result = await replaceOpenCodeConfigDirectory(mockDb, payload([
+      ['my-config/opencode.json', '{"theme":"dark"}'],
+      ['my-config/AGENTS.md', '# Project'],
+      ['other/node_modules/installed.js', 'x'],
+    ]))
+
+    expect(result.filesInstalled).toEqual(['opencode.json', 'AGENTS.md'])
+    expect(result.skippedPaths).toEqual(['other/node_modules/installed.js'])
+    expect(await readFile(join(configDir, 'opencode.json'), 'utf8')).toBe('{"theme":"dark"}')
+    expect(await readFile(join(configDir, 'AGENTS.md'), 'utf8')).toBe('# Project')
+    await expect(readFile(join(configDir, 'other', 'node_modules', 'installed.js'), 'utf8')).rejects.toThrow()
+  })
+
   it('rejects a payload with no root config file, leaving the old directory untouched', async () => {
     const { replaceOpenCodeConfigDirectory } = await import('../../src/services/opencode-config-directory')
     await mkdir(join(configDir, 'agents'), { recursive: true })
@@ -192,7 +217,7 @@ describe('replaceOpenCodeConfigDirectory', () => {
 
   it('rejects when the config fails validation before touching disk', async () => {
     const { replaceOpenCodeConfigDirectory } = await import('../../src/services/opencode-config-directory')
-    mockUpsertDefaultOpenCodeConfig.mockImplementationOnce(() => {
+    mockValidateOpenCodeConfigContent.mockImplementationOnce(() => {
       throw createConfigZodError()
     })
     await mkdir(join(configDir, 'agents'), { recursive: true })
@@ -205,9 +230,60 @@ describe('replaceOpenCodeConfigDirectory', () => {
     ])).catch((caught) => caught)
 
     expect(error).toBeInstanceOf(z.ZodError)
-    expect(mockUpsertDefaultOpenCodeConfig).toHaveBeenCalledWith('{"theme": 42}', 'default')
+    expect(mockValidateOpenCodeConfigContent).toHaveBeenCalledWith('{"theme": 42}')
+    expect(mockUpsertDefaultOpenCodeConfig).not.toHaveBeenCalled()
     expect(await readFile(join(configDir, 'opencode.json'), 'utf8')).toBe('{"theme":"old"}')
     expect(await readFile(join(configDir, 'agents', 'existing.md'), 'utf8')).toBe('keep me')
+    const parentEntries = await listParentEntries(join(tempDir, '.config'))
+    expect(parentEntries.filter((name) => name.startsWith('.opencode-config-staging-') || name.startsWith('.opencode-config-backup-'))).toEqual([])
+  })
+
+  it('does not persist to the database when the filesystem phase fails', async () => {
+    const { replaceOpenCodeConfigDirectory } = await import('../../src/services/opencode-config-directory')
+    await mkdir(join(configDir, 'agents'), { recursive: true })
+    await writeFile(join(configDir, 'agents', 'existing.md'), 'keep me')
+    await writeFile(join(configDir, 'opencode.json'), '{"theme":"old"}')
+    mockBunWrite.mockImplementationOnce(() => {
+      throw new Error('ENOSPC: no space left on device')
+    })
+
+    const error = await replaceOpenCodeConfigDirectory(mockDb, payload([
+      ['opencode.json', '{"theme":"new"}'],
+      ['agents/planner.md', '# Planner'],
+    ])).catch((caught) => caught)
+
+    expect(error).toBeInstanceOf(Error)
+    expect((error as Error).message).toContain('ENOSPC')
+    expect(mockValidateOpenCodeConfigContent).toHaveBeenCalledWith('{"theme":"new"}')
+    expect(mockUpsertDefaultOpenCodeConfig).not.toHaveBeenCalled()
+    expect(await readFile(join(configDir, 'opencode.json'), 'utf8')).toBe('{"theme":"old"}')
+    expect(await readFile(join(configDir, 'agents', 'existing.md'), 'utf8')).toBe('keep me')
+    const parentEntries = await listParentEntries(join(tempDir, '.config'))
+    expect(parentEntries.filter((name) => name.startsWith('.opencode-config-staging-') || name.startsWith('.opencode-config-backup-'))).toEqual([])
+  })
+
+  it('reports success when a post-swap node_modules preservation step fails', async () => {
+    const { replaceOpenCodeConfigDirectory } = await import('../../src/services/opencode-config-directory')
+    await mkdir(join(configDir, 'node_modules', 'dep'), { recursive: true })
+    await writeFile(join(configDir, 'node_modules', 'dep', 'index.js'), 'module.exports = 1')
+
+    const realRename = fs.rename.bind(fs)
+    vi.spyOn(fs, 'rename').mockImplementation(async (oldPath, newPath) => {
+      if (String(newPath).includes('node_modules')) {
+        throw new Error('EACCES: permission denied')
+      }
+      return realRename(oldPath, newPath)
+    })
+
+    const result = await replaceOpenCodeConfigDirectory(mockDb, payload([
+      ['opencode.json', '{"theme":"dark"}'],
+    ]))
+
+    expect(result.filesInstalled).toEqual(['opencode.json'])
+    expect(result.preservedEntries).toEqual([])
+    expect(mockUpsertDefaultOpenCodeConfig).toHaveBeenCalledWith('{"theme":"dark"}', 'default')
+    expect(await readFile(join(configDir, 'opencode.json'), 'utf8')).toBe('{"theme":"dark"}')
+    await expect(readFile(join(configDir, 'node_modules', 'dep', 'index.js'), 'utf8')).rejects.toThrow()
     const parentEntries = await listParentEntries(join(tempDir, '.config'))
     expect(parentEntries.filter((name) => name.startsWith('.opencode-config-staging-') || name.startsWith('.opencode-config-backup-'))).toEqual([])
   })
@@ -221,6 +297,20 @@ describe('replaceOpenCodeConfigDirectory', () => {
       ['opencode.json', '{"theme":"new"}'],
       ['../escape.md', 'x'],
     ]))).rejects.toThrow('Path must not contain ".."')
+
+    expect(await readFile(join(configDir, 'opencode.json'), 'utf8')).toBe('{"theme":"old"}')
+    expect(mockUpsertDefaultOpenCodeConfig).not.toHaveBeenCalled()
+  })
+
+  it('rejects a "." manifest relative path before any disk mutation', async () => {
+    const { replaceOpenCodeConfigDirectory } = await import('../../src/services/opencode-config-directory')
+    await mkdir(configDir, { recursive: true })
+    await writeFile(join(configDir, 'opencode.json'), '{"theme":"old"}')
+
+    await expect(replaceOpenCodeConfigDirectory(mockDb, payload([
+      ['opencode.json', '{"theme":"new"}'],
+      ['.', 'x'],
+    ]))).rejects.toThrow('Path must not be empty')
 
     expect(await readFile(join(configDir, 'opencode.json'), 'utf8')).toBe('{"theme":"old"}')
     expect(mockUpsertDefaultOpenCodeConfig).not.toHaveBeenCalled()

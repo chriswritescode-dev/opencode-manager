@@ -1,33 +1,29 @@
-import { useEffect, useRef } from 'react'
+import { useEffect, type RefObject } from 'react'
 import { AlertTriangle, Loader2, RotateCcw } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import { useServerHealth } from '@/hooks/useServerHealth'
-import { useOpenCodeServerActions } from '@/hooks/useOpenCodeServerActions'
-import { RestartServerDialog } from './RestartServerDialog'
 
-export function OpenCodeRestartPendingNotice() {
+interface OpenCodeRestartPendingNoticeProps {
+  hasAutoPromptedRef: RefObject<boolean>
+  openRestartPrompt: () => void
+  requestRestart: () => void
+  restartIsPending: boolean
+}
+
+export function OpenCodeRestartPendingNotice({
+  hasAutoPromptedRef,
+  openRestartPrompt,
+  requestRestart,
+  restartIsPending,
+}: OpenCodeRestartPendingNoticeProps) {
   const { data: health } = useServerHealth()
-  const {
-    restartServerMutation,
-    confirmOpen,
-    setConfirmOpen,
-    activeSessionCount,
-    requestRestart,
-    confirmRestart,
-    openRestartPrompt,
-  } = useOpenCodeServerActions()
-  const hasPromptedRef = useRef(false)
 
   useEffect(() => {
-    if (health?.opencodeRestartPending) {
-      if (!hasPromptedRef.current) {
-        hasPromptedRef.current = true
-        void openRestartPrompt()
-      }
-    } else {
-      hasPromptedRef.current = false
+    if (health?.opencodeRestartPending && !hasAutoPromptedRef.current) {
+      hasAutoPromptedRef.current = true
+      void openRestartPrompt()
     }
-  }, [health?.opencodeRestartPending, openRestartPrompt])
+  }, [health?.opencodeRestartPending, hasAutoPromptedRef, openRestartPrompt])
 
   if (!health?.opencodeRestartPending) {
     return null
@@ -45,10 +41,10 @@ export function OpenCodeRestartPendingNotice() {
         <Button
           size="sm"
           onClick={requestRestart}
-          disabled={restartServerMutation.isPending}
+          disabled={restartIsPending}
           className="shrink-0"
         >
-          {restartServerMutation.isPending ? (
+          {restartIsPending ? (
             <Loader2 className="h-3 w-3 mr-1 animate-spin" />
           ) : (
             <RotateCcw className="h-3 w-3 mr-1" />
@@ -56,14 +52,6 @@ export function OpenCodeRestartPendingNotice() {
           Restart Now
         </Button>
       </div>
-      <RestartServerDialog
-        open={confirmOpen}
-        onOpenChange={setConfirmOpen}
-        activeSessionCount={activeSessionCount}
-        isRestarting={restartServerMutation.isPending}
-        onCancel={() => setConfirmOpen(false)}
-        onConfirm={confirmRestart}
-      />
     </div>
   )
 }
