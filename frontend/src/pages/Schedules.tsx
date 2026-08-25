@@ -17,6 +17,7 @@ import {
 import { useRepoActivity } from '@/hooks/useRepoActivity'
 import { useScheduleTarget } from '@/hooks/useScheduleTarget'
 import { useScheduleUrlState } from '@/hooks/useScheduleUrlState'
+import { useSidebarAction } from '@/hooks/useSidebarAction'
 import { ScheduleJobDialog, JobsTab, JobDetailTab, RunHistoryTab, ScheduleTabMenu } from '@/components/schedules'
 import { toUpdateScheduleRequest } from '@/components/schedules/schedule-utils'
 import { Header } from '@/components/ui/header'
@@ -68,6 +69,10 @@ export function Schedules() {
 
   const [clearRunsOpen, setClearRunsOpen] = useState(false)
   const [runToDelete, setRunToDelete] = useState<number | null>(null)
+
+  useSidebarAction('new-schedule', () => {
+    openNewJob()
+  })
 
   const clearableRuns = useMemo(() => (runs ?? []).filter((run) => run.status !== 'running'), [runs])
   const clearableWorktrees = useMemo(() => clearableRuns.filter((run) => run.worktreePath).length, [clearableRuns])

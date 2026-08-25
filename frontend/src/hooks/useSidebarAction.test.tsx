@@ -1,6 +1,6 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest'
 import { renderHook } from '@testing-library/react'
-import { useSidebarAction } from './useSidebarAction'
+import { useSidebarAction, emitSidebarAction, SIDEBAR_ACTIONS } from './useSidebarAction'
 
 describe('useSidebarAction', () => {
   beforeEach(() => {
@@ -52,5 +52,47 @@ describe('useSidebarAction', () => {
     )
 
     expect(handler).not.toHaveBeenCalled()
+  })
+})
+
+describe('emitSidebarAction', () => {
+  afterEach(() => {
+    vi.restoreAllMocks()
+  })
+
+  it('reaches a registered handler without warning', () => {
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => {})
+    const handler = vi.fn()
+
+    renderHook(() => useSidebarAction('new-schedule', handler))
+    emitSidebarAction('new-schedule')
+
+    expect(handler).toHaveBeenCalledTimes(1)
+    expect(warn).not.toHaveBeenCalled()
+  })
+
+  it('warns when an action is dispatched with no mounted handler', () => {
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => {})
+
+    emitSidebarAction('new-schedule')
+
+    expect(warn).toHaveBeenCalledWith(expect.stringContaining('new-schedule'))
+  })
+
+  it('warns again once the last handler unmounts', () => {
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => {})
+    const { unmount } = renderHook(() => useSidebarAction('new-repo', vi.fn()))
+
+    emitSidebarAction('new-repo')
+    expect(warn).not.toHaveBeenCalled()
+
+    unmount()
+    emitSidebarAction('new-repo')
+
+    expect(warn).toHaveBeenCalledWith(expect.stringContaining('new-repo'))
+  })
+
+  it('exposes every action the nav model can emit', () => {
+    expect([...SIDEBAR_ACTIONS]).toEqual(['new-session', 'new-repo', 'new-schedule'])
   })
 })

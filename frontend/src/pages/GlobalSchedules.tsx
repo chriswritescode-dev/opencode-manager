@@ -16,6 +16,7 @@ import { CalendarClock, Loader2, Plus, ArrowLeft, Play, Pencil, Trash2, Pause, P
 
 import { useScheduleUrlState } from '@/hooks/useScheduleUrlState'
 import type { ScheduleTab } from '@/hooks/useScheduleUrlState'
+import { useSidebarAction } from '@/hooks/useSidebarAction'
 
 import type { ScheduleJobWithRepo, ScheduleRunWithContext } from '@/api/schedules'
 import { Combobox } from '@/components/ui/combobox'
@@ -45,6 +46,11 @@ export function GlobalSchedules() {
 
   const cancelRunMutation = useCancelRepoScheduleRun()
   const cancelRunPending = cancelRunMutation.isPending
+
+  useSidebarAction('new-schedule', () => {
+    openNewJob()
+    setSelectedRepoId(undefined)
+  })
 
   useEffect(() => {
     runOffsetRef.current = runOffset
