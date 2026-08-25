@@ -28,6 +28,7 @@ vi.mock('../../src/services/settings', () => ({
 }))
 
 vi.mock('@opencode-manager/shared/config/env', () => ({
+  getConfigPath: vi.fn(() => '/tmp/workspace/.config/opencode'),
   getOpenCodeConfigFilePath: vi.fn(() => '/tmp/workspace/.config/opencode/opencode.json'),
   getWorkspacePath: vi.fn(() => '/tmp/workspace'),
 }))
@@ -52,9 +53,7 @@ const mockRename = rename as unknown as ReturnType<typeof vi.fn>
 describe('opencode-import service', () => {
   const mockDb = {} as unknown as Database
   const settingsService = {
-    getOpenCodeConfigByName: vi.fn(),
-    updateOpenCodeConfig: vi.fn(),
-    createOpenCodeConfig: vi.fn(),
+    upsertDefaultOpenCodeConfig: vi.fn(),
   }
 
   beforeEach(() => {
@@ -92,6 +91,7 @@ describe('opencode-import service', () => {
       configSourcePath: '/import/opencode-config/opencode.json',
       stateSourcePath: '/import/opencode-state',
       workspaceConfigPath: '/tmp/workspace/.config/opencode/opencode.json',
+      workspaceConfigDirectory: '/tmp/workspace/.config/opencode',
       workspaceStatePath: '/tmp/workspace/.opencode/state/opencode',
       workspaceStateExists: true,
     })
@@ -108,8 +108,6 @@ describe('opencode-import service', () => {
         || candidate === '/tmp/workspace/.opencode/state/opencode/opencode.db'
     })
 
-    settingsService.getOpenCodeConfigByName.mockReturnValue({ name: 'default' })
-
     const result = await syncOpenCodeImport({
       db: mockDb,
       userId: 'default',
@@ -119,10 +117,7 @@ describe('opencode-import service', () => {
     expect(result.configImported).toBe(true)
     expect(result.stateImported).toBe(true)
     expect(result.workspaceStateExists).toBe(true)
-    expect(settingsService.updateOpenCodeConfig).toHaveBeenCalledWith('default', {
-      content: '{"$schema":"https://opencode.ai/config.json"}',
-      isDefault: true,
-    }, 'default')
+    expect(settingsService.upsertDefaultOpenCodeConfig).toHaveBeenCalledWith('{"$schema":"https://opencode.ai/config.json"}', 'default')
     expect(mockWriteFileContent).toHaveBeenCalledWith(
       '/tmp/workspace/.config/opencode/opencode.json',
       '{"$schema":"https://opencode.ai/config.json"}'
@@ -243,7 +238,7 @@ describe('opencode-import service', () => {
       protectExistingState: true,
     })).rejects.toThrow('OpenCode host import was blocked to protect existing workspace state')
 
-    expect(settingsService.updateOpenCodeConfig).not.toHaveBeenCalled()
+    expect(settingsService.upsertDefaultOpenCodeConfig).not.toHaveBeenCalled()
     expect(mockEnsureDirectoryExists).not.toHaveBeenCalled()
   })
 

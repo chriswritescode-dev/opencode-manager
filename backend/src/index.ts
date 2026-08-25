@@ -41,7 +41,9 @@ import { sweepStaleUploadSessions } from './routes/internal/repo-mirror-helpers'
 import { createOpenCodeProxyRoutes } from './routes/opencode-proxy'
 import { sseAggregator } from './services/sse-aggregator'
 import { ensureDirectoryExists, writeFileContent, fileExists, readFileContent } from './services/file-operations'
-import { SettingsService } from './services/settings'
+import { SettingsService, DEFAULT_SEED_OPENCODE_CONFIG } from './services/settings'
+import { sweepStaleOpenCodeConfigDirectoryDirs } from './services/opencode-config-directory'
+import { ensureDefaultAgentsMdExists } from './services/agents-md'
 import { opencodeServerManager } from './services/opencode-single-server'
 import { createOpenCodeClient } from './services/opencode/client'
 import { NotificationService } from './services/notification'
@@ -54,8 +56,6 @@ import { getOpenCodeImportStatus, syncOpenCodeImport } from './services/opencode
 import { OpenCodeSupervisor } from './services/opencode-supervisor'
 import { OpenCodeRestartCoordinator } from './services/opencode-restart-coordinator'
 import { setOpenCodeRestartCoordinator } from './services/opencode-restart'
-import { OpenCodeConfigSchema } from '@opencode-manager/shared/schemas'
-import { parse as parseJsonc } from 'jsonc-parser'
 import { getModelStatePath, ModelStateSchema } from './routes/providers'
 import { readJsonSafe } from './utils/atomic-json'
 import {
@@ -68,7 +68,6 @@ import {
   getReposPath, 
   getConfigPath,
   getOpenCodeConfigFilePath,
-  getAgentsMdPath,
   getDatabasePath,
   ENV
 } from '@opencode-manager/shared/config/env'
@@ -106,8 +105,6 @@ const auth = createAuth(db)
 const requireAuth = createAuthMiddleware(auth)
 const openCodeClient = createOpenCodeClient(() => new SettingsService(db).getOpenCodeServerPassword())
 
-import { DEFAULT_AGENTS_MD } from './constants'
-
 let ipcServer: IPCServer | undefined
 const gitAuthService = new GitAuthService()
 let openCodeSupervisor: OpenCodeSupervisor | undefined
@@ -119,29 +116,8 @@ async function ensureDefaultConfigExists(): Promise<void> {
     logger.info(`Found workspace config at ${workspaceConfigPath}, syncing to database...`)
     try {
       const rawContent = await readFileContent(workspaceConfigPath)
-      const parsed = parseJsonc(rawContent)
-      const validation = OpenCodeConfigSchema.safeParse(parsed)
-      
-      if (!validation.success) {
-        logger.warn('Workspace config has invalid structure', validation.error)
-      } else {
-        const existingDefault = settingsService.getOpenCodeConfigByName('default')
-        if (existingDefault) {
-          settingsService.updateOpenCodeConfig('default', {
-            content: rawContent,
-            isDefault: true,
-          })
-          logger.info('Updated database config from workspace file')
-        } else {
-          settingsService.createOpenCodeConfig({
-            name: 'default',
-            content: rawContent,
-            isDefault: true,
-          })
-          logger.info('Created database config from workspace file')
-        }
-        return
-      }
+      settingsService.upsertDefaultOpenCodeConfig(rawContent)
+      return
     } catch (error) {
       logger.warn('Failed to read workspace config', error)
     }
@@ -173,13 +149,8 @@ async function ensureDefaultConfigExists(): Promise<void> {
   }
   
   logger.info('No existing config found, creating minimal seed config')
-  const seedConfig = JSON.stringify({ $schema: 'https://opencode.ai/config.json' }, null, 2)
-  settingsService.createOpenCodeConfig({
-    name: 'default',
-    content: seedConfig,
-    isDefault: true,
-  })
-  await writeFileContent(workspaceConfigPath, seedConfig)
+  settingsService.upsertDefaultOpenCodeConfig(DEFAULT_SEED_OPENCODE_CONFIG)
+  await writeFileContent(workspaceConfigPath, DEFAULT_SEED_OPENCODE_CONFIG)
   logger.info('Created minimal seed config')
 }
 
@@ -239,16 +210,6 @@ async function ensureHomeStateImported(): Promise<void> {
   }
 }
 
-async function ensureDefaultAgentsMdExists(): Promise<void> {
-  const agentsMdPath = getAgentsMdPath()
-  const exists = await fileExists(agentsMdPath)
-  
-  if (!exists) {
-    await writeFileContent(agentsMdPath, DEFAULT_AGENTS_MD)
-    logger.info(`Created default AGENTS.md at: ${agentsMdPath}`)
-  }
-}
-
 try {
   if (ENV.SERVER.NODE_ENV === 'production' && !ENV.AUTH.SECRET) {
     logger.error('AUTH_SECRET is required in production mode')
@@ -264,6 +225,7 @@ try {
 
   await cleanupExpiredCache()
   await sweepStaleUploadSessions()
+  await sweepStaleOpenCodeConfigDirectoryDirs()
 
   await ensureDefaultConfigExists()
   await backfillOpenCodeModelStateFromFile()

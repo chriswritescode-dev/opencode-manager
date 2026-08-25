@@ -1,8 +1,35 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest'
-import { render, screen, fireEvent } from '@testing-library/react'
+import { render, screen, fireEvent, waitFor } from '@testing-library/react'
+import userEvent from '@testing-library/user-event'
 import { MemoryRouter, useLocation, useNavigate } from 'react-router-dom'
+import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
 import { SettingsDialog } from './SettingsDialog'
 import { Dialog, DialogContent, DialogTitle } from '@/components/ui/dialog'
+
+const {
+  mockRestartOpenCodeServer,
+  mockGetActiveOpenCodeSessions,
+  healthState,
+} = vi.hoisted(() => ({
+  mockRestartOpenCodeServer: vi.fn(),
+  mockGetActiveOpenCodeSessions: vi.fn(),
+  healthState: { data: { opencode: 'healthy', opencodeRestartPending: true } as Record<string, unknown> },
+}))
+
+vi.mock('@/hooks/useServerHealth', () => ({
+  useServerHealth: () => healthState,
+}))
+
+vi.mock('@/api/settings', () => ({
+  settingsApi: {
+    restartOpenCodeServer: mockRestartOpenCodeServer,
+    getActiveOpenCodeSessions: mockGetActiveOpenCodeSessions,
+  },
+}))
+
+vi.mock('@/lib/toast', () => ({
+  showToast: { success: vi.fn(), error: vi.fn(), info: vi.fn(), loading: vi.fn(), warning: vi.fn(), dismiss: vi.fn() },
+}))
 
 vi.mock('@/components/settings/GeneralSettings', () => ({
   GeneralSettings: () => <div data-testid="general-settings">General Settings Content</div>,
@@ -18,6 +45,22 @@ vi.mock('@/components/settings/KeyboardShortcuts', () => ({
 
 vi.mock('@/components/settings/OpenCodeConfigManager', () => ({
   OpenCodeConfigManager: () => <div data-testid="opencode-settings">OpenCode Config Content</div>,
+}))
+
+vi.mock('@/components/settings/ServerHealthStatus', () => ({
+  ServerHealthStatus: () => <div data-testid="server-health-status">Server Health Status</div>,
+}))
+
+vi.mock('@/components/settings/OpenCodeServerAuthSettings', () => ({
+  OpenCodeServerAuthSettings: () => <div data-testid="opencode-auth-settings">OpenCode Auth Settings</div>,
+}))
+
+vi.mock('@/components/settings/ManagerTokenSettings', () => ({
+  ManagerTokenSettings: () => <div data-testid="manager-token-settings">Manager Token Settings</div>,
+}))
+
+vi.mock('@/components/settings/ServerEnvVarsSettings', () => ({
+  ServerEnvVarsSettings: () => <div data-testid="server-env-vars-settings">Server Env Vars Settings</div>,
 }))
 
 vi.mock('@/components/settings/ProviderSettings', () => ({
@@ -51,7 +94,17 @@ vi.mock('@/hooks/useMobile', () => ({
 describe('SettingsDialog', () => {
   beforeEach(() => {
     vi.clearAllMocks()
+    healthState.data = { opencode: 'healthy', opencodeRestartPending: true }
+    mockRestartOpenCodeServer.mockResolvedValue({ success: true, message: 'ok' })
+    mockGetActiveOpenCodeSessions.mockResolvedValue({ count: 2, sessions: [] })
   })
+
+  function renderWithSettingsContext(ui: React.ReactElement) {
+    const queryClient = new QueryClient({ defaultOptions: { queries: { retry: false } } })
+    return render(ui, {
+      wrapper: ({ children }) => <QueryClientProvider client={queryClient}>{children}</QueryClientProvider>,
+    })
+  }
 
   it('resets to menu state when dialog closes and reopens', () => {
     function TestWrapper() {
@@ -71,7 +124,7 @@ describe('SettingsDialog', () => {
       )
     }
 
-    render(
+    renderWithSettingsContext(
       <MemoryRouter initialEntries={['/']}>
         <TestWrapper />
       </MemoryRouter>
@@ -104,7 +157,7 @@ describe('SettingsDialog', () => {
       )
     }
 
-    render(
+    renderWithSettingsContext(
       <MemoryRouter initialEntries={['/']}>
         <TestWrapper />
       </MemoryRouter>
@@ -139,10 +192,10 @@ describe('SettingsDialog', () => {
       )
     }
 
-    render(
+    renderWithSettingsContext(
       <MemoryRouter initialEntries={['/?settings=open']}>
         <TestWrapper />
-      </MemoryRouter>,
+      </MemoryRouter>
     )
 
     expect(screen.getByTestId('settings-open')).toBeInTheDocument()
@@ -152,5 +205,144 @@ describe('SettingsDialog', () => {
     fireEvent.keyDown(nestedInput, { key: 'Escape' })
 
     expect(screen.getByTestId('settings-open')).toBeInTheDocument()
+  })
+
+  it('mounts a single restart-pending dialog on the OpenCode tab', async () => {
+    function TestWrapper() {
+      const location = useLocation()
+      const navigate = useNavigate()
+
+      const isOpen = new URLSearchParams(location.search).get('settings') === 'open'
+
+      return (
+        <>
+          <button onClick={() => navigate('?settings=open')}>Open Settings</button>
+          {isOpen && <span data-testid="dialog-open">Dialog Open</span>}
+          <SettingsDialog />
+        </>
+      )
+    }
+
+    renderWithSettingsContext(
+      <MemoryRouter initialEntries={['/']}>
+        <TestWrapper />
+      </MemoryRouter>
+    )
+
+    const user = userEvent.setup()
+    await user.click(screen.getByText('Open Settings'))
+    await user.click(screen.getByRole('tab', { name: 'OpenCode' }))
+
+    await screen.findByText('Restart OpenCode Server?')
+    expect(screen.getAllByText('Restart OpenCode Server?')).toHaveLength(1)
+    expect(screen.getAllByText('Configuration changes are saved but require a server restart to take effect.')).toHaveLength(2)
+    expect(mockGetActiveOpenCodeSessions).toHaveBeenCalledTimes(1)
+
+    await user.click(screen.getByRole('button', { name: /later/i }))
+    await waitFor(() => {
+      expect(screen.queryAllByText('Restart OpenCode Server?')).toHaveLength(0)
+    })
+    expect(screen.getAllByText('Configuration changes are saved but require a server restart to take effect.')).toHaveLength(2)
+    expect(mockRestartOpenCodeServer).not.toHaveBeenCalled()
+  })
+
+  it('does not re-open the auto-prompted dialog after Later when switching tabs away and back', async () => {
+    function TestWrapper() {
+      const location = useLocation()
+      const navigate = useNavigate()
+
+      const isOpen = new URLSearchParams(location.search).get('settings') === 'open'
+
+      return (
+        <>
+          <button onClick={() => navigate('?settings=open')}>Open Settings</button>
+          {isOpen && <span data-testid="dialog-open">Dialog Open</span>}
+          <SettingsDialog />
+        </>
+      )
+    }
+
+    renderWithSettingsContext(
+      <MemoryRouter initialEntries={['/']}>
+        <TestWrapper />
+      </MemoryRouter>
+    )
+
+    const user = userEvent.setup()
+    await user.click(screen.getByText('Open Settings'))
+    await user.click(screen.getByRole('tab', { name: 'OpenCode' }))
+
+    await screen.findByText('Restart OpenCode Server?')
+    await user.click(screen.getByRole('button', { name: /later/i }))
+    await waitFor(() => {
+      expect(screen.queryAllByText('Restart OpenCode Server?')).toHaveLength(0)
+    })
+
+    await user.click(screen.getByRole('tab', { name: 'Git' }))
+    expect(screen.queryByText('Restart OpenCode Server?')).not.toBeInTheDocument()
+
+    await user.click(screen.getByRole('tab', { name: 'OpenCode' }))
+
+    expect(screen.queryByText('Restart OpenCode Server?')).not.toBeInTheDocument()
+    expect(screen.getAllByText('Configuration changes are saved but require a server restart to take effect.')).toHaveLength(2)
+    expect(mockGetActiveOpenCodeSessions).toHaveBeenCalledTimes(1)
+    expect(mockRestartOpenCodeServer).not.toHaveBeenCalled()
+  })
+
+  it('re-prompts when a new pending restart arrives after the previous one cleared', async () => {
+    function TestWrapper() {
+      const location = useLocation()
+      const navigate = useNavigate()
+
+      const isOpen = new URLSearchParams(location.search).get('settings') === 'open'
+
+      return (
+        <>
+          <button onClick={() => navigate('?settings=open')}>Open Settings</button>
+          {isOpen && <span data-testid="dialog-open">Dialog Open</span>}
+          <SettingsDialog />
+        </>
+      )
+    }
+
+    const queryClient = new QueryClient({ defaultOptions: { queries: { retry: false } } })
+    const { rerender } = render(
+      <QueryClientProvider client={queryClient}>
+        <MemoryRouter initialEntries={['/']}>
+          <TestWrapper />
+        </MemoryRouter>
+      </QueryClientProvider>
+    )
+
+    const user = userEvent.setup()
+    await user.click(screen.getByText('Open Settings'))
+    await user.click(screen.getByRole('tab', { name: 'OpenCode' }))
+
+    await screen.findByText('Restart OpenCode Server?')
+    await user.click(screen.getByRole('button', { name: /later/i }))
+    await waitFor(() => {
+      expect(screen.queryAllByText('Restart OpenCode Server?')).toHaveLength(0)
+    })
+
+    healthState.data = { opencode: 'healthy', opencodeRestartPending: false }
+    rerender(
+      <QueryClientProvider client={queryClient}>
+        <MemoryRouter initialEntries={['/']}>
+          <TestWrapper />
+        </MemoryRouter>
+      </QueryClientProvider>
+    )
+
+    healthState.data = { opencode: 'healthy', opencodeRestartPending: true }
+    rerender(
+      <QueryClientProvider client={queryClient}>
+        <MemoryRouter initialEntries={['/']}>
+          <TestWrapper />
+        </MemoryRouter>
+      </QueryClientProvider>
+    )
+
+    expect(await screen.findByText('Restart OpenCode Server?')).toBeInTheDocument()
+    expect(mockGetActiveOpenCodeSessions).toHaveBeenCalledTimes(2)
   })
 })

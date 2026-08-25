@@ -1,5 +1,5 @@
 import path from 'path'
-import type { SettingsService } from './settings'
+import { DEFAULT_SEED_OPENCODE_CONFIG, type SettingsService } from './settings'
 import { logger } from '../utils/logger'
 import { ensureDirectoryExists, writeFileContent } from './file-operations'
 import { getOpenCodeConfigFilePath, getWorkspacePath, ENV } from '@opencode-manager/shared/config/env'
@@ -304,23 +304,9 @@ export class OpenCodeSupervisor {
   }
 
   private async seedDefaultConfig(): Promise<void> {
-    const seedConfig = JSON.stringify({ $schema: 'https://opencode.ai/config.json' }, null, 2)
-    const defaultConfig = this.settingsService.getDefaultOpenCodeConfig(this.userId)
+    this.settingsService.upsertDefaultOpenCodeConfig(DEFAULT_SEED_OPENCODE_CONFIG, this.userId)
 
-    if (defaultConfig) {
-      this.settingsService.updateOpenCodeConfig(defaultConfig.name, { content: seedConfig }, this.userId)
-    } else {
-      this.settingsService.createOpenCodeConfig(
-        {
-          name: 'default',
-          content: seedConfig,
-          isDefault: true,
-        },
-        this.userId,
-      )
-    }
-
-    await this.writeConfig(seedConfig)
+    await this.writeConfig(DEFAULT_SEED_OPENCODE_CONFIG)
     this.openCodeServerManager.clearStartupError()
     await this.openCodeServerManager.restart()
   }

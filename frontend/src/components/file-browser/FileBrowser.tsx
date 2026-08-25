@@ -12,6 +12,7 @@ import { FolderOpen, Upload, RefreshCw, X } from 'lucide-react'
 import type { FileInfo } from '@/types/files'
 import { useMobile } from '@/hooks/useMobile'
 import { getFileApiUrl, useFile } from '@/api/files'
+import { useDirectoryDropZone, getUploadItemsFromFileList, type DirectoryUploadItem } from '@/lib/directoryUpload'
 
 export interface FileBrowserHandle {
   goBack: () => void
@@ -27,11 +28,6 @@ interface FileBrowserProps {
   onDirectoryLoad?: (info: { workspaceRoot?: string; currentPath: string }) => void
   onPreviewStateChange?: (isOpen: boolean) => void
   allowNavigateAboveBase?: boolean
-}
-
-interface UploadItem {
-  file: File
-  relativePath: string
 }
 
 interface UploadProgress {
@@ -51,86 +47,6 @@ const encodeBase64 = (content: string) => {
   return btoa(binary)
 }
 
-async function readFileEntry(entry: FileSystemFileEntry): Promise<File> {
-  return new Promise((resolve, reject) => {
-    entry.file(resolve, reject)
-  })
-}
-
-async function readDirectoryEntries(dirReader: FileSystemDirectoryReader): Promise<FileSystemEntry[]> {
-  return new Promise((resolve, reject) => {
-    dirReader.readEntries(resolve, reject)
-  })
-}
-
-async function traverseFileSystemEntry(
-  entry: FileSystemEntry,
-  basePath: string = ''
-): Promise<UploadItem[]> {
-  const items: UploadItem[] = []
-  const relativePath = basePath ? `${basePath}/${entry.name}` : entry.name
-
-  if (entry.isFile) {
-    const fileEntry = entry as FileSystemFileEntry
-    const file = await readFileEntry(fileEntry)
-    items.push({ file, relativePath })
-  } else if (entry.isDirectory) {
-    const dirEntry = entry as FileSystemDirectoryEntry
-    const dirReader = dirEntry.createReader()
-    let entries: FileSystemEntry[] = []
-    let batch: FileSystemEntry[]
-    
-    do {
-      batch = await readDirectoryEntries(dirReader)
-      entries = entries.concat(batch)
-    } while (batch.length > 0)
-
-    for (const childEntry of entries) {
-      const childItems = await traverseFileSystemEntry(childEntry, relativePath)
-      items.push(...childItems)
-    }
-  }
-
-  return items
-}
-
-async function getUploadItemsFromDataTransfer(dataTransfer: DataTransfer): Promise<UploadItem[]> {
-  const items: UploadItem[] = []
-  const entries: FileSystemEntry[] = []
-
-  for (let i = 0; i < dataTransfer.items.length; i++) {
-    const item = dataTransfer.items[i]
-    const entry = item.webkitGetAsEntry?.()
-    if (entry) {
-      entries.push(entry)
-    }
-  }
-
-  if (entries.length > 0) {
-    for (const entry of entries) {
-      const entryItems = await traverseFileSystemEntry(entry)
-      items.push(...entryItems)
-    }
-  } else {
-    for (let i = 0; i < dataTransfer.files.length; i++) {
-      const file = dataTransfer.files[i]
-      items.push({ file, relativePath: file.name })
-    }
-  }
-
-  return items
-}
-
-function getUploadItemsFromFileList(fileList: FileList): UploadItem[] {
-  const items: UploadItem[] = []
-  for (let i = 0; i < fileList.length; i++) {
-    const file = fileList[i]
-    const relativePath = (file as File & { webkitRelativePath?: string }).webkitRelativePath || file.name
-    items.push({ file, relativePath })
-  }
-  return items
-}
-
 export const FileBrowser = forwardRef<FileBrowserHandle, FileBrowserProps>(function FileBrowser({ basePath = '', onFileSelect, embedded = false, initialSelectedFile, onDirectoryLoad, onPreviewStateChange, allowNavigateAboveBase = false }, ref) {
   const [currentPath, setCurrentPath] = useState(basePath)
   const [files, setFiles] = useState<FileInfo | null>(null)
@@ -138,11 +54,9 @@ export const FileBrowser = forwardRef<FileBrowserHandle, FileBrowserProps>(funct
   const [searchQuery, setSearchQuery] = useState('')
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState<string | null>(null)
-  const [isDragging, setIsDragging] = useState(false)
   const [isPreviewModalOpen, setIsPreviewModalOpen] = useState(false)
   const [uploadProgress, setUploadProgress] = useState<UploadProgress | null>(null)
   
-  const dropZoneRef = useRef<HTMLDivElement>(null)
   const uploadCancelledRef = useRef(false)
   const isMobile = useMobile()
 
@@ -287,7 +201,7 @@ useEffect(() => {
     loadFiles(currentPath)
   }
 
-  const uploadSingleFile = useCallback(async (item: UploadItem): Promise<string | null> => {
+  const uploadSingleFile = useCallback(async (item: DirectoryUploadItem): Promise<string | null> => {
     const formData = new FormData()
     formData.append('file', item.file)
     formData.append('relativePath', item.relativePath)
@@ -309,7 +223,7 @@ useEffect(() => {
     }
   }, [currentPath])
 
-  const handleUploadItems = useCallback(async (items: UploadItem[]) => {
+  const handleUploadItems = useCallback(async (items: DirectoryUploadItem[]) => {
     if (items.length === 0) return
 
     uploadCancelledRef.current = false
@@ -356,6 +270,10 @@ useEffect(() => {
     const items = getUploadItemsFromFileList(fileList)
     await handleUploadItems(items)
   }, [handleUploadItems])
+
+  const { dropZoneRef, isDragging, dropHandlers } = useDirectoryDropZone({
+    onItems: handleUploadItems,
+  })
 
   const cancelUpload = useCallback(() => {
     uploadCancelledRef.current = true
@@ -413,36 +331,6 @@ useEffect(() => {
       setError(err instanceof Error ? err.message : 'Rename failed')
     }
   }, [currentPath, loadFiles])
-
-  const handleDragEnter = (e: React.DragEvent) => {
-    e.preventDefault()
-    e.stopPropagation()
-    setIsDragging(true)
-  }
-
-  const handleDragLeave = (e: React.DragEvent) => {
-    e.preventDefault()
-    e.stopPropagation()
-    if (e.currentTarget === dropZoneRef.current) {
-      setIsDragging(false)
-    }
-  }
-
-  const handleDragOver = (e: React.DragEvent) => {
-    e.preventDefault()
-    e.stopPropagation()
-  }
-
-  const handleDrop = async (e: React.DragEvent) => {
-    e.preventDefault()
-    e.stopPropagation()
-    setIsDragging(false)
-
-    const items = await getUploadItemsFromDataTransfer(e.dataTransfer)
-    if (items.length > 0) {
-      await handleUploadItems(items)
-    }
-  }
 
   useEffect(() => {
     loadFiles(basePath)
@@ -560,10 +448,7 @@ useEffect(() => {
       <div 
         className="h-full flex flex-col bg-background"
         ref={dropZoneRef}
-        onDragEnter={handleDragEnter}
-        onDragLeave={handleDragLeave}
-        onDragOver={handleDragOver}
-        onDrop={handleDrop}
+        {...dropHandlers}
       >
         {isDragging && (
           <div className="absolute inset-0 z-50 bg-primary/10 border-2 border-dashed border-primary rounded-lg flex items-center justify-center">
@@ -653,10 +538,7 @@ useEffect(() => {
     <div 
       className="h-full flex flex-col"
       ref={dropZoneRef}
-      onDragEnter={handleDragEnter}
-      onDragLeave={handleDragLeave}
-      onDragOver={handleDragOver}
-      onDrop={handleDrop}
+      {...dropHandlers}
     >
       <Card className="flex-1 relative">
         {isDragging && (

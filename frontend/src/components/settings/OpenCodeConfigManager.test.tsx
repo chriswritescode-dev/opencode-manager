@@ -4,29 +4,24 @@ import userEvent from '@testing-library/user-event'
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
 import { OpenCodeConfigManager } from './OpenCodeConfigManager'
 import type { OpenCodeConfig } from '@/api/types/settings'
+import type { DirectoryUploadItem } from '@/lib/directoryUpload'
 
 const {
   mockGetOpenCodeConfigs,
   mockUpdateOpenCodeConfig,
-  mockRestartOpenCodeServer,
-  mockGetActiveOpenCodeSessions,
   mockGetOpenCodeImportStatus,
   mockListManagedSkills,
   mockListOpenCodeDirectoryFiles,
-  healthState,
+  mockReplaceOpenCodeConfigDirectory,
+  mockGetUploadItemsFromDataTransfer,
 } = vi.hoisted(() => ({
   mockGetOpenCodeConfigs: vi.fn(),
   mockUpdateOpenCodeConfig: vi.fn(),
-  mockRestartOpenCodeServer: vi.fn(),
-  mockGetActiveOpenCodeSessions: vi.fn(),
   mockGetOpenCodeImportStatus: vi.fn(),
   mockListManagedSkills: vi.fn(),
   mockListOpenCodeDirectoryFiles: vi.fn(),
-  healthState: { data: { opencode: 'healthy', opencodeRestartPending: false } as Record<string, unknown> },
-}))
-
-vi.mock('@/hooks/useServerHealth', () => ({
-  useServerHealth: () => healthState,
+  mockReplaceOpenCodeConfigDirectory: vi.fn(),
+  mockGetUploadItemsFromDataTransfer: vi.fn(),
 }))
 
 vi.mock('@/lib/toast', () => ({
@@ -37,14 +32,36 @@ vi.mock('@/api/settings', () => ({
   settingsApi: {
     getOpenCodeConfigs: mockGetOpenCodeConfigs,
     updateOpenCodeConfig: mockUpdateOpenCodeConfig,
-    restartOpenCodeServer: mockRestartOpenCodeServer,
-    getActiveOpenCodeSessions: mockGetActiveOpenCodeSessions,
     getOpenCodeImportStatus: mockGetOpenCodeImportStatus,
     listManagedSkills: mockListManagedSkills,
     listOpenCodeDirectoryFiles: mockListOpenCodeDirectoryFiles,
     syncOpenCodeImport: vi.fn(),
-    upgradeOpenCode: vi.fn(),
+    replaceOpenCodeConfigDirectory: mockReplaceOpenCodeConfigDirectory,
   },
+}))
+
+vi.mock('@/lib/directoryUpload', () => ({
+  DIRECTORY_INPUT_PROPS: { webkitdirectory: '', directory: '' },
+  getUploadItemsFromDataTransfer: mockGetUploadItemsFromDataTransfer,
+  getUploadItemsFromFileList: vi.fn(),
+  openPicker: vi.fn(),
+  readUploadItemsFromInput: vi.fn(),
+  useDirectoryDropZone: (options: {
+    shouldSkip?: (relativePath: string, isDirectory: boolean) => boolean
+    onItems: (items: DirectoryUploadItem[]) => void | Promise<void>
+  }) => ({
+    dropZoneRef: { current: null },
+    isDragging: false,
+    dropHandlers: {
+      onDragEnter: vi.fn(),
+      onDragOver: vi.fn(),
+      onDragLeave: vi.fn(),
+      onDrop: async (e: React.DragEvent) => {
+        const items = await mockGetUploadItemsFromDataTransfer(e.dataTransfer)
+        await options.onItems(items)
+      },
+    },
+  }),
 }))
 
 const defaultConfig: OpenCodeConfig = {
@@ -78,7 +95,6 @@ describe('OpenCodeConfigManager', () => {
 
   beforeEach(() => {
     vi.clearAllMocks()
-    healthState.data = { opencode: 'healthy', opencodeRestartPending: false }
     mockGetOpenCodeConfigs.mockResolvedValue({ configs: [defaultConfig] })
     mockGetOpenCodeImportStatus.mockResolvedValue({})
     mockListManagedSkills.mockResolvedValue([])
@@ -87,8 +103,6 @@ describe('OpenCodeConfigManager', () => {
       return Promise.resolve([])
     })
     mockUpdateOpenCodeConfig.mockResolvedValue(defaultConfig)
-    mockRestartOpenCodeServer.mockResolvedValue({ success: true, message: 'ok' })
-    mockGetActiveOpenCodeSessions.mockResolvedValue({ count: 2, sessions: [] })
   })
 
   it('shows uploaded command and agent directory files in settings', async () => {
@@ -98,7 +112,7 @@ describe('OpenCodeConfigManager', () => {
     })
 
     const user = userEvent.setup()
-    renderWithQuery(<OpenCodeConfigManager hideHealthStatus />)
+    renderWithQuery(<OpenCodeConfigManager />)
 
     await screen.findByText('Commands')
     await vi.waitFor(() => {
@@ -120,7 +134,7 @@ describe('OpenCodeConfigManager', () => {
     mockUpdateOpenCodeConfig.mockResolvedValueOnce({ ...defaultConfig, restartRequired: true })
 
     const user = userEvent.setup()
-    renderWithQuery(<OpenCodeConfigManager hideHealthStatus />)
+    renderWithQuery(<OpenCodeConfigManager />)
 
     await screen.findByText('GPT-4o')
 
@@ -133,30 +147,13 @@ describe('OpenCodeConfigManager', () => {
     const [configName, payload] = mockUpdateOpenCodeConfig.mock.calls[0]
     expect(configName).toBe('default')
     expect(payload.content.provider.openai.models).not.toHaveProperty('gpt-4o')
-
-    expect(screen.queryByText('Restart OpenCode Server?')).not.toBeInTheDocument()
-  })
-
-  it('deferred restart banner triggers server restart', async () => {
-    healthState.data = { opencode: 'healthy', opencodeRestartPending: true }
-
-    const user = userEvent.setup()
-    renderWithQuery(<OpenCodeConfigManager hideHealthStatus />)
-
-    const restartNowButton = await screen.findByRole('button', { name: /restart now/i })
-    await user.click(restartNowButton)
-
-    await screen.findByText('Restart OpenCode Server?')
-    await user.click(screen.getByRole('button', { name: /restart now/i }))
-
-    expect(mockRestartOpenCodeServer).toHaveBeenCalledTimes(1)
   })
 
   it('rollback on failure', async () => {
     mockUpdateOpenCodeConfig.mockRejectedValueOnce(new Error('boom'))
 
     const user = userEvent.setup()
-    renderWithQuery(<OpenCodeConfigManager hideHealthStatus />)
+    renderWithQuery(<OpenCodeConfigManager />)
 
     await screen.findByText('GPT-4o')
 
@@ -173,12 +170,10 @@ describe('OpenCodeConfigManager', () => {
     })
 
     expect(screen.getByText('GPT-4o')).toBeInTheDocument()
-
-    expect(screen.queryByText('Restart OpenCode Server?')).not.toBeInTheDocument()
   })
 
   it('anchors the AGENTS.md card to the settings dialog scrollport', async () => {
-    renderWithQuery(<OpenCodeConfigManager hideHealthStatus />)
+    renderWithQuery(<OpenCodeConfigManager />)
     const header = await screen.findByRole('button', { name: /Global Agent Instructions/i })
     const card = header.parentElement
     expect(card?.className).toContain('overflow-clip')
@@ -200,7 +195,7 @@ describe('OpenCodeConfigManager', () => {
     mockUpdateOpenCodeConfig.mockResolvedValue(configWithRaw)
 
     const user = userEvent.setup()
-    const { container } = renderWithQuery(<OpenCodeConfigManager hideHealthStatus />)
+    const { container } = renderWithQuery(<OpenCodeConfigManager />)
 
     await screen.findByText('GPT-4o')
     const editIcon = container.querySelector('.lucide-square-pen') as SVGElement
@@ -217,5 +212,31 @@ describe('OpenCodeConfigManager', () => {
 
     resolveRefresh()
     await waitFor(() => expect(screen.queryByText('Edit Config: default')).not.toBeInTheDocument())
+  })
+
+  it('refetches the imperative config list after a config-directory replace', async () => {
+    const user = userEvent.setup()
+    mockReplaceOpenCodeConfigDirectory.mockResolvedValue({
+      configSourceFilename: 'opencode.json',
+      filesInstalled: ['opencode.json'],
+      skippedPaths: [],
+      preservedEntries: [],
+      executablesRestored: [],
+    })
+    mockGetUploadItemsFromDataTransfer.mockResolvedValue([
+      { file: new File(['{}'], 'opencode.json'), relativePath: 'opencode/opencode.json' },
+    ])
+
+    renderWithQuery(<OpenCodeConfigManager />)
+
+    await screen.findByText('GPT-4o')
+    expect(mockGetOpenCodeConfigs).toHaveBeenCalledTimes(1)
+
+    fireEvent.drop(screen.getByTestId('config-directory-drop-zone'), { dataTransfer: { items: [] } })
+    await screen.findByText('Replace OpenCode Config Directory?')
+    await user.click(screen.getByRole('button', { name: 'Replace and Restart' }))
+
+    await waitFor(() => expect(mockReplaceOpenCodeConfigDirectory).toHaveBeenCalledTimes(1))
+    await waitFor(() => expect(mockGetOpenCodeConfigs).toHaveBeenCalledTimes(2))
   })
 })

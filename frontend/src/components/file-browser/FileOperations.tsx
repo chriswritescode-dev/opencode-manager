@@ -6,6 +6,7 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@
 import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger } from '@/components/ui/dropdown-menu'
 import { Upload, Plus, FolderPlus, FilePlus, File, Folder } from 'lucide-react'
 import { useMobile } from '@/hooks/useMobile'
+import { DIRECTORY_INPUT_PROPS } from '@/lib/directoryUpload'
 
 interface FileOperationsProps {
   onUpload: (files: FileList) => void
@@ -51,7 +52,7 @@ export const FileOperations = memo(function FileOperations({ onUpload, onCreate 
         type="file"
         className="hidden"
         onChange={handleFileSelect}
-        {...{ webkitdirectory: '', directory: '' } as React.InputHTMLAttributes<HTMLInputElement>}
+        {...DIRECTORY_INPUT_PROPS}
       />
       
       {isMobile ? (

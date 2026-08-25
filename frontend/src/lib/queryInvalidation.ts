@@ -28,6 +28,7 @@ export function invalidateConfigCaches(queryClient: QueryClient) {
   queryClient.invalidateQueries({ queryKey: ['opencode-skills'] })
   queryClient.invalidateQueries({ queryKey: ['managed-skills'] })
   queryClient.invalidateQueries({ queryKey: ['opencode-directory-files'] })
+  queryClient.invalidateQueries({ queryKey: ['agents-md'] })
   invalidateProviderCaches(queryClient)
 }
 

@@ -4,7 +4,7 @@ import { promises as fs } from 'fs'
 import type { Database } from 'bun:sqlite'
 import type { SkillFileInfo, SkillScope, CreateSkillRequest, UpdateSkillRequest, InstallSkillUploadRequest, InstallSkillFromGithubRequest, InstallSkillResponse } from '@opencode-manager/shared'
 import { SKILL_NAME_REGEX, SkillFrontmatterSchema } from '@opencode-manager/shared'
-import { getWorkspacePath, FILE_LIMITS } from '@opencode-manager/shared/config/env'
+import { getWorkspacePath, getConfigPath, FILE_LIMITS } from '@opencode-manager/shared/config/env'
 import { getRepoById, getRepoName, listRepos } from '../db/queries'
 import type { Repo } from '@opencode-manager/shared/types'
 import { ensureDirectoryExists, fileExists, readFileContent, writeFileContent, deletePath, listDirectory, normalizeUploadRelativePath, resolveWithinDirectory } from './file-operations'
@@ -303,7 +303,7 @@ export async function installSkillFromGithubTree(
 }
 
 function getGlobalSkillsPath(): string {
-  return path.join(getWorkspacePath(), '.config', 'opencode', 'skills')
+  return path.join(getConfigPath(), 'skills')
 }
 
 function getOldGlobalSkillsPath(): string {

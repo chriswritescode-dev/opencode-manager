@@ -36,7 +36,9 @@ export function ConfirmDestructiveDialog({
       <DialogContent className="max-w-[90%] sm:max-w-sm">
         <DialogHeader>
           <DialogTitle>{title}</DialogTitle>
-          <DialogDescription>{description}</DialogDescription>
+          <DialogDescription asChild>
+            <div className="text-sm text-muted-foreground">{description}</div>
+          </DialogDescription>
         </DialogHeader>
 
         {warning && (

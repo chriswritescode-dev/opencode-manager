@@ -14,20 +14,21 @@ import type {
   InstallSkillFromGithubRequest,
   InstallSkillResponse,
   OpenCodeDirectoryFileInfo,
+  ReplaceOpenCodeConfigDirectoryResult,
 } from './types/settings'
 import { API_BASE_URL } from '@/config'
 import { fetchWrapper, FetchError } from './fetchWrapper'
+import type { DirectoryUploadItem } from '@/lib/directoryUpload'
 
 const DEFAULT_USER_ID = 'default'
 
-function appendFilesWithManifest(formData: FormData, files: File[]): void {
+function appendUploadItemsWithManifest(formData: FormData, items: DirectoryUploadItem[]): void {
   const fileManifest: Array<{ fieldName: string; relativePath: string }> = []
 
-  files.forEach((file, index) => {
+  items.forEach((item, index) => {
     const fieldName = `file${index}`
-    const relativePath = file.webkitRelativePath || file.name
-    fileManifest.push({ fieldName, relativePath })
-    formData.append(fieldName, file)
+    fileManifest.push({ fieldName, relativePath: item.relativePath })
+    formData.append(fieldName, item.file)
   })
 
   formData.append('fileManifest', JSON.stringify(fileManifest))
@@ -311,7 +312,7 @@ export const settingsApi = {
   },
 
   installSkillFromUpload: async (data: {
-    files: File[]
+    items: DirectoryUploadItem[]
     scope: SkillScope
     repoId?: number
     overwrite?: boolean
@@ -322,7 +323,7 @@ export const settingsApi = {
     if (data.repoId !== undefined) formData.append('repoId', String(data.repoId))
     if (data.overwrite !== undefined) formData.append('overwrite', String(data.overwrite))
 
-    appendFilesWithManifest(formData, data.files)
+    appendUploadItemsWithManifest(formData, data.items)
 
     return fetchWrapper(`${API_BASE_URL}/api/settings/skills/install`, {
       method: 'POST',
@@ -332,12 +333,12 @@ export const settingsApi = {
 
   installOpenCodeDirectoryFiles: async (data: {
     kind: 'agents' | 'commands'
-    files: File[]
+    items: DirectoryUploadItem[]
   }): Promise<{ kind: 'agents' | 'commands'; filesInstalled: string[] }> => {
     const formData = new FormData()
     formData.append('kind', data.kind)
 
-    appendFilesWithManifest(formData, data.files)
+    appendUploadItemsWithManifest(formData, data.items)
 
     return fetchWrapper(`${API_BASE_URL}/api/settings/opencode-directory-files/install`, {
       method: 'POST',
@@ -379,6 +380,18 @@ export const settingsApi = {
     return fetchWrapper(`${API_BASE_URL}/api/settings/opencode-directory-files`, {
       method: 'DELETE',
       params: { kind, relativePath },
+    })
+  },
+
+  replaceOpenCodeConfigDirectory: async (
+    items: DirectoryUploadItem[],
+  ): Promise<ReplaceOpenCodeConfigDirectoryResult> => {
+    const formData = new FormData()
+    appendUploadItemsWithManifest(formData, items)
+    return fetchWrapper(`${API_BASE_URL}/api/settings/opencode-config-directory/replace`, {
+      method: 'POST',
+      body: formData,
+      timeout: 300000,
     })
   },
 }

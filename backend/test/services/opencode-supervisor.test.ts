@@ -1,6 +1,7 @@
 import { describe, expect, it, vi } from 'vitest'
 import { ensureDirectoryExists, writeFileContent } from '../../src/services/file-operations'
 import { OpenCodeSupervisor } from '../../src/services/opencode-supervisor'
+import { DEFAULT_SEED_OPENCODE_CONFIG } from '../../src/services/settings'
 
 vi.mock('../../src/utils/logger', () => ({
   logger: {
@@ -18,6 +19,7 @@ vi.mock('../../src/services/file-operations', () => ({
 vi.mock('@opencode-manager/shared/config/env', () => ({
   getWorkspacePath: vi.fn(() => '/tmp/opencode-workspace'),
   getOpenCodeConfigFilePath: vi.fn(() => '/tmp/opencode-workspace/.config/opencode.json'),
+  getConfigPath: vi.fn(() => '/tmp/opencode-workspace/.config/opencode'),
   ENV: {
     OPENCODE: {
       HEALTH_POLL_MS: 200,
@@ -48,6 +50,7 @@ interface FakeSettingsService {
   getDefaultOpenCodeConfig: ReturnType<typeof vi.fn>
   updateOpenCodeConfig: ReturnType<typeof vi.fn>
   createOpenCodeConfig: ReturnType<typeof vi.fn>
+  upsertDefaultOpenCodeConfig: ReturnType<typeof vi.fn>
 }
 
 describe('OpenCodeSupervisor', () => {
@@ -85,6 +88,12 @@ describe('OpenCodeSupervisor', () => {
       isDefault: true,
     })),
     createOpenCodeConfig: vi.fn(),
+    upsertDefaultOpenCodeConfig: vi.fn(() => ({
+      name: 'default',
+      content: { $schema: 'https://opencode.ai/config.json' },
+      rawContent: DEFAULT_SEED_OPENCODE_CONFIG,
+      isDefault: true,
+    })),
   })
 
   it('recovers a startup failure through rollback and keeps watching', async () => {
@@ -170,5 +179,33 @@ describe('OpenCodeSupervisor', () => {
     await supervisor.checkNow('manual')
 
     expect(manager.checkHealth).not.toHaveBeenCalled()
+  })
+
+  it('seeds the default config via upsert when recovery reaches seed_default_config', async () => {
+    const manager = createManager()
+    const settings = createSettings()
+    const supervisor = new OpenCodeSupervisor(manager as unknown as never, settings as unknown as never, {
+      failureThreshold: 1,
+      userId: 'default',
+    })
+
+    manager.start.mockRejectedValueOnce(new Error('startup failed'))
+    manager.checkHealth
+      .mockResolvedValueOnce(false)
+      .mockResolvedValueOnce(false)
+      .mockResolvedValueOnce(false)
+      .mockResolvedValueOnce(true)
+
+    const status = await supervisor.start()
+
+    expect(status.healthy).toBe(true)
+    expect(settings.upsertDefaultOpenCodeConfig).toHaveBeenCalledWith(DEFAULT_SEED_OPENCODE_CONFIG, 'default')
+    expect(writeFileContent).toHaveBeenCalledWith(
+      '/tmp/opencode-workspace/.config/opencode.json',
+      DEFAULT_SEED_OPENCODE_CONFIG,
+    )
+    expect(manager.restart).toHaveBeenCalledTimes(4)
+
+    await supervisor.stop()
   })
 })

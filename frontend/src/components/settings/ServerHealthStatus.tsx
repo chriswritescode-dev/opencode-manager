@@ -3,25 +3,23 @@ import { Button } from '@/components/ui/button'
 import { Card, CardContent } from '@/components/ui/card'
 import { Loader2, ArrowUpCircle, RotateCcw, History } from 'lucide-react'
 import { useServerHealth } from '@/hooks/useServerHealth'
-import { useOpenCodeServerActions } from '@/hooks/useOpenCodeServerActions'
-import { RestartServerDialog } from './RestartServerDialog'
 
 interface ServerHealthStatusProps {
   onOpenVersionDialog?: () => void
+  requestRestart: () => void
+  restartIsPending: boolean
+  performUpgrade: () => void
+  upgradeIsPending: boolean
 }
 
-export function ServerHealthStatus({ onOpenVersionDialog }: ServerHealthStatusProps) {
+export function ServerHealthStatus({
+  onOpenVersionDialog,
+  requestRestart,
+  restartIsPending,
+  performUpgrade,
+  upgradeIsPending,
+}: ServerHealthStatusProps) {
   const { data: health } = useServerHealth()
-  const {
-    restartServerMutation,
-    upgradeOpenCodeMutation,
-    confirmOpen,
-    setConfirmOpen,
-    activeSessionCount,
-    requestRestart,
-    confirmRestart,
-    performUpgrade,
-  } = useOpenCodeServerActions()
 
   if (!health) {
     return (
@@ -68,9 +66,9 @@ export function ServerHealthStatus({ onOpenVersionDialog }: ServerHealthStatusPr
               variant="outline"
               size="sm"
               onClick={performUpgrade}
-              disabled={upgradeOpenCodeMutation.isPending}
+              disabled={upgradeIsPending}
             >
-              {upgradeOpenCodeMutation.isPending ? (
+              {upgradeIsPending ? (
                 <Loader2 className="h-3 w-3 sm:h-4 sm:w-4 mr-1 animate-spin" />
               ) : (
                 <ArrowUpCircle className="h-3 w-3 sm:h-4 sm:w-4 mr-1" />
@@ -81,9 +79,9 @@ export function ServerHealthStatus({ onOpenVersionDialog }: ServerHealthStatusPr
               variant="outline"
               size="sm"
               onClick={requestRestart}
-              disabled={restartServerMutation.isPending}
+              disabled={restartIsPending}
             >
-              {restartServerMutation.isPending ? (
+              {restartIsPending ? (
                 <Loader2 className="h-3 w-3 sm:h-4 sm:w-4 mr-1 animate-spin" />
               ) : (
                 <RotateCcw className="h-3 w-3 sm:h-4 sm:w-4 mr-1" />
@@ -101,14 +99,6 @@ export function ServerHealthStatus({ onOpenVersionDialog }: ServerHealthStatusPr
           </div>
         </div>
       </CardContent>
-      <RestartServerDialog
-        open={confirmOpen}
-        onOpenChange={setConfirmOpen}
-        activeSessionCount={activeSessionCount}
-        isRestarting={restartServerMutation.isPending}
-        onCancel={() => setConfirmOpen(false)}
-        onConfirm={confirmRestart}
-      />
     </Card>
   )
 }

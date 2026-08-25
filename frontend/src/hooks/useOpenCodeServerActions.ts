@@ -1,4 +1,4 @@
-import { useState } from 'react'
+import { useCallback, useState } from 'react'
 import { useMutation, useQueryClient } from '@tanstack/react-query'
 import { settingsApi } from '@/api/settings'
 import { showToast } from '@/lib/toast'
@@ -69,16 +69,30 @@ export function useOpenCodeServerActions() {
     }
   }
 
-  const requestRestart = async () => {
+  const probeActiveSessionCount = useCallback(async (): Promise<number> => {
     try {
       const { count } = await settingsApi.getActiveOpenCodeSessions()
-      if (count > 0) {
-        setActiveSessionCount(count)
-        setConfirmOpen(true)
-        return
-      }
+      return count
     } catch {
-      // Fall through to an immediate restart when the active-session probe fails.
+      return 0
+    }
+  }, [])
+
+  const showRestartConfirmation = useCallback((count: number) => {
+    setActiveSessionCount(count)
+    setConfirmOpen(true)
+  }, [setActiveSessionCount, setConfirmOpen])
+
+  const openRestartPrompt = useCallback(async () => {
+    const count = await probeActiveSessionCount()
+    showRestartConfirmation(count)
+  }, [probeActiveSessionCount, showRestartConfirmation])
+
+  const requestRestart = async () => {
+    const count = await probeActiveSessionCount()
+    if (count > 0) {
+      showRestartConfirmation(count)
+      return
     }
     await performRestart()
   }
@@ -104,6 +118,7 @@ export function useOpenCodeServerActions() {
     setConfirmOpen,
     activeSessionCount,
     requestRestart,
+    openRestartPrompt,
     confirmRestart,
     performUpgrade,
   }

@@ -1,4 +1,5 @@
 import { Hono, type Context } from 'hono'
+import { bodyLimit } from 'hono/body-limit'
 import { z } from 'zod'
 import { execSync, spawnSync } from 'child_process'
 import { randomUUID } from 'crypto'
@@ -39,7 +40,8 @@ import { encryptSecret } from '../utils/crypto'
 import { compareVersions, isValidVersion } from '../utils/version-utils'
 import { getImportedSessionDirectories, getOpenCodeImportStatus, OpenCodeImportProtectionError, syncOpenCodeImport } from '../services/opencode-import'
 import { relinkReposFromSessionDirectories } from '../services/repo'
-import { ENV } from '@opencode-manager/shared/config/env'
+import { ENV, FILE_LIMITS } from '@opencode-manager/shared/config/env'
+import { MAX_OPENCODE_CONFIG_DIRECTORY_FILES, OPENCODE_CONFIG_UPLOAD_ERRORS } from '@opencode-manager/shared/utils'
 import {
   listManagedSkills,
   getSkill,
@@ -49,6 +51,8 @@ import {
   installSkillFromGithubTree,
   installSkillFromUploadedFiles,
 } from '../services/skills'
+import { replaceOpenCodeConfigDirectory } from '../services/opencode-config-directory'
+import { ensureDefaultAgentsMdExists } from '../services/agents-md'
 import {
   installOpenCodeDirectoryFiles,
   listOpenCodeDirectoryFiles,
@@ -56,7 +60,7 @@ import {
   updateOpenCodeDirectoryFile,
   deleteOpenCodeDirectoryFile,
 } from '../services/opencode-directory-files'
-import { parseUploadManifest, readUploadedManifestFiles, UploadValidationError } from './upload-utils'
+import { parseUploadManifest, parseUploadPreamble, readUploadedManifestFiles, resolveUploadedManifestFiles, UploadValidationError, UPLOAD_PATH_ERROR_STATUS } from './upload-utils'
 import { getRepoById } from '../db/queries'
 import { githubFetch } from '../utils/github'
 
@@ -146,12 +150,16 @@ async function reloadAfterSkillInstall(
 
 const OPENCODE_DIRECTORY_UPLOAD_ERROR_STATUS: ReadonlyArray<readonly [string, 400]> = [
   ['No markdown', 400],
-  ['Path must be relative', 400],
-  ['Path must not contain', 400],
   ['Path must reference', 400],
-  ['escapes', 400],
-  ['Missing upload file', 400],
-  ['not a valid file', 400],
+  ...UPLOAD_PATH_ERROR_STATUS,
+]
+
+const OPENCODE_CONFIG_DIRECTORY_REPLACE_ERROR_STATUS: ReadonlyArray<readonly [string, 400 | 413]> = [
+  ['No files were provided', 400],
+  ['must contain opencode.json', 400],
+  ['too many files', 400],
+  ['exceed maximum upload size', 413],
+  ...UPLOAD_PATH_ERROR_STATUS,
 ]
 
 function matchErrorStatus<T extends number>(
@@ -190,14 +198,10 @@ const SKILL_INSTALL_ERROR_STATUS: ReadonlyArray<readonly [string, 400 | 404 | 40
   ['Invalid skill name', 400],
   ['Only one skill', 400],
   ['Skill source must contain', 400],
-  ['Path must be relative', 400],
-  ['Path must not contain', 400],
-  ['escapes', 400],
   ['no downloadable files', 400],
   ['repoId is required', 400],
-  ['Missing upload file', 400],
   ['Invalid repoId', 400],
-  ['not a valid file', 400],
+  ...UPLOAD_PATH_ERROR_STATUS,
 ]
 
 function didConfigFieldChange(
@@ -1266,15 +1270,9 @@ export function createSettingsRoutes(db: Database, gitAuthService: GitAuthServic
 
   app.post('/opencode-directory-files/install', async (c) => {
     try {
-      const contentType = c.req.header('content-type') || ''
-      if (!contentType.includes('multipart/form-data')) {
-        return c.json({ error: 'Unsupported content type. Use multipart/form-data' }, 400)
-      }
-
-      const formData = await c.req.parseBody({ all: true })
+      const { formData, manifest } = await parseUploadPreamble(c)
       const kind = z.enum(['agents', 'commands']).parse(formData['kind'])
 
-      const manifest = parseUploadManifest(formData['fileManifest'])
       const markdownManifest = getMarkdownUploadManifest(manifest)
       if (markdownManifest.length === 0) {
         return c.json({ error: `No markdown ${kind} files found` }, 400)
@@ -1305,6 +1303,72 @@ export function createSettingsRoutes(db: Database, gitAuthService: GitAuthServic
       }
 
       return c.json({ error: 'Failed to install OpenCode directory files' }, 500)
+    }
+  })
+
+  app.use('/opencode-config-directory/replace', bodyLimit({
+    maxSize: FILE_LIMITS.MAX_UPLOAD_SIZE_BYTES,
+    onError: (c) => c.json({ error: OPENCODE_CONFIG_UPLOAD_ERRORS.EXCEEDS_MAX_UPLOAD_SIZE }, 413),
+  }))
+
+  app.post('/opencode-config-directory/replace', async (c) => {
+    try {
+      const userId = c.req.query('userId') || 'default'
+
+      let preamble: Awaited<ReturnType<typeof parseUploadPreamble>>
+      try {
+        preamble = await parseUploadPreamble(c)
+      } catch (error) {
+        if (error instanceof z.ZodError) {
+          return c.json({ error: 'Invalid upload manifest', details: error.issues }, 400)
+        }
+        throw error
+      }
+      const { formData, manifest } = preamble
+
+      if (manifest.length === 0) {
+        return c.json({ error: 'fileManifest must contain at least one entry' }, 400)
+      }
+      if (manifest.length > MAX_OPENCODE_CONFIG_DIRECTORY_FILES) {
+        return c.json({ error: OPENCODE_CONFIG_UPLOAD_ERRORS.TOO_MANY_FILES }, 400)
+      }
+
+      const files = resolveUploadedManifestFiles(formData, manifest)
+
+      settingsService.saveLastKnownGoodConfig(userId)
+
+      const result = await replaceOpenCodeConfigDirectory(db, files, userId)
+
+      try {
+        await ensureDefaultAgentsMdExists()
+      } catch (error) {
+        logger.warn('Failed to ensure AGENTS.md after OpenCode config directory replace', error)
+      }
+
+      opencodeServerManager.markRestartPending()
+      opencodeServerManager.clearStartupError()
+      await restartOpenCodeSafe(openCodeSupervisor, 'OpenCode config directory replace')
+
+      return c.json(result)
+    } catch (error) {
+      logger.error('Failed to replace OpenCode config directory:', error)
+
+      if (error instanceof UploadValidationError) {
+        return c.json({ error: error.message }, 400)
+      }
+
+      if (error instanceof z.ZodError) {
+        return c.json({ error: 'Uploaded OpenCode config is invalid', details: error.issues }, 400)
+      }
+
+      if (error instanceof Error) {
+        const status = matchErrorStatus(OPENCODE_CONFIG_DIRECTORY_REPLACE_ERROR_STATUS, error)
+        if (status) {
+          return c.json({ error: error.message }, status)
+        }
+      }
+
+      return c.json({ error: 'Failed to replace OpenCode config directory' }, 500)
     }
   })
 
@@ -1387,13 +1451,11 @@ export function createSettingsRoutes(db: Database, gitAuthService: GitAuthServic
       }
 
       if (contentType.includes('multipart/form-data')) {
-        const formData = await c.req.parseBody({ all: true })
+        const { formData, manifest } = await parseUploadPreamble(c)
 
         const scope = formData['scope']
         const repoIdValue = formData['repoId']
         const overwriteValue = formData['overwrite']
-
-        const manifest = parseUploadManifest(formData['fileManifest'])
 
         const repoId = parseOptionalRepoId(repoIdValue as string | undefined)
         const overwrite = parseBooleanFormValue(overwriteValue)
