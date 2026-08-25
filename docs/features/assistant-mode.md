@@ -1,6 +1,6 @@
 # Assistant Mode
 
-Assistant Mode gives OpenCode Manager a dedicated AI workspace — an isolated directory (`repos/assistant/`) where a built-in assistant agent can manage scheduled jobs, send push notifications, and read or update settings via a secure internal API.
+Assistant Mode gives OpenCode Manager a dedicated AI workspace — an isolated directory (`repos/assistant/`) where a built-in assistant agent can manage scheduled jobs, send push notifications, and read or update settings through the `ocm` tool.
 
 ## What Is Assistant Mode?
 
@@ -10,9 +10,8 @@ The assistant workspace is a special repository-like directory managed and maint
 |------|---------|
 | `AGENTS.md` | Workspace description the agent reads on every session start |
 | `opencode.json` | OpenCode configuration scoped to the assistant agent |
-| `.opencode/internal-token` | Bearer token used to authenticate against the internal API |
 | `.opencode/agents/assistant.md` | Agent definition with system prompt and permissions |
-| `.opencode/skills/` | Auto-generated skills teaching the agent to use the internal API |
+| `.opencode/skills/` | Auto-generated skills teaching the agent to use the `ocm` tool |
 
 ## Skills Provided
 
@@ -20,10 +19,10 @@ Four skills are provisioned automatically when assistant mode is initialized:
 
 | Skill | What it teaches |
 |-------|----------------|
-| `schedule-management` | Create, list, update, delete, and run scheduled jobs |
-| `notifications` | Send push notifications to registered user devices with the `ocm` tool |
-| `manager-settings` | Read and patch user preferences, and reload the assistant workspace |
-| `repo-management` | List all managed repositories |
+| `schedule-management` | Create, list, update, delete, and run scheduled jobs through the `ocm` `request` action |
+| `notifications` | Send push notifications to registered user devices with the `ocm` `send_notification` action |
+| `manager-settings` | Read and patch user preferences, and reload the assistant workspace, through the `ocm` `request` action |
+| `repo-management` | List all managed repositories through the `ocm` `request` action |
 
 See [Assistant Internal API](assistant-internal-api.md) for the full API reference these skills expose.
 
@@ -31,7 +30,7 @@ See [Assistant Internal API](assistant-internal-api.md) for the full API referen
 
 The assistant's system prompt, behavior, and durable preferences live solely in `.opencode/agents/assistant.md`. This file is the single source of truth for the assistant agent's personality and self-editing rules. The `opencode.json` configuration no longer duplicates the agent persona — it only stores agent mode and workspace-level settings.
 
-When the assistant self-edits its agent definition (e.g., to refine behavior or add durable preferences), it uses the `manager-settings` skill to call the `POST /assistant/reload` endpoint. This disposes the current OpenCode workspace instance so the changes take effect on the next message. The reload endpoint is rate-limited to 5 requests per minute; the assistant always asks the user before reloading.
+When the assistant self-edits its agent definition (e.g., to refine behavior or add durable preferences), it uses the `manager-settings` skill to call the `POST /assistant/reload` endpoint through the `ocm` `request` action. This disposes the current OpenCode workspace instance so the changes take effect on the next message. The reload endpoint is rate-limited to 5 requests per minute; the assistant always asks the user before reloading.
 
 ## Getting Started
 

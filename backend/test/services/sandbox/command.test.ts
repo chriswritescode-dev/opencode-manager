@@ -23,7 +23,6 @@ import {
   resolveSandboxRuntimeTmpfsSizeMib,
   sandboxMountRoots,
   sandboxNetworkPolicyMismatch,
-  sandboxSecretMaskPath,
 } from '../../../src/services/sandbox/command'
 
 afterEach(() => {
@@ -96,11 +95,11 @@ describe('sandbox command builders', () => {
     expect(mountArgs[1]).toBe(`${getScheduleWorktreesPath()}:${getScheduleWorktreesPath()}`)
   })
 
-  it('masks the assistant .opencode directory with a tmpfs overlay', () => {
+  it('never masks the assistant .opencode directory with a tmpfs overlay', () => {
     const args = buildSandboxCreateArgs()
 
-    expect(args[args.indexOf('--tmpfs') + 1]).toBe(getAssistantOpenCodeDir())
-    expect(sandboxSecretMaskPath()).toBe(getAssistantOpenCodeDir())
+    expect(args).not.toContain('--tmpfs')
+    expect(args).not.toContain(getAssistantOpenCodeDir())
   })
 
   it('pins --entrypoint to /usr/bin/env before the image so msb never inherits the OCI entrypoint', () => {
@@ -166,9 +165,7 @@ describe('sandbox command builders', () => {
       expect(mount.quota_mib).toBeNull()
     }
 
-    const tmpfs = mounts.find((mount) => mount.type === 'Tmpfs')
-    expect(tmpfs?.guest).toBe(getAssistantOpenCodeDir())
-    expect((tmpfs as Record<string, unknown>).size_mib).toBeNull()
+    expect(mounts.find((mount) => mount.type === 'Tmpfs')).toBeUndefined()
   })
 
   it('accepts real repo dirs and schedule worktrees while rejecting config, missing, and unrelated paths', async () => {

@@ -69,7 +69,7 @@ All projects share one microVM named `ocm-workspace`:
 - Repositories and worktrees created after boot are visible immediately because their parent roots are mounted.
 - Each command supplies its own working directory through `msb exec -w`.
 - A session outside the mounted roots is refused rather than executed on the host.
-- The Manager verifies the microVM image, resources, user, network policy, mounts (including the `/tmp` tmpfs size and mount options), labels, and secret mask before reuse.
+- The Manager verifies the microVM image, resources, user, network policy, mounts (including the `/tmp` tmpfs size and mount options), and labels before reuse. `/tmp` is the only tmpfs the microVM may carry; any other tmpfs fails attestation.
 - MSB pulls the configured `SANDBOX_IMAGE` (default `node:24`) automatically; no custom image build is needed.
 - The Manager pins a neutral `/usr/bin/env` entrypoint, so the image's own OCI entrypoint is never inherited.
 - A stale or unverifiable microVM is removed and recreated.
@@ -88,9 +88,9 @@ The microVM receives writable bind mounts for:
 - `/workspace/repos`
 - `/workspace/schedule-worktrees`
 
-The assistant workspace's `repos/assistant/.opencode` directory falls beneath the repository mount but is hidden in the guest behind a `tmpfs` mask so its internal API token cannot be read by agent commands.
+No internal API token exists anywhere under the mounted roots. The token lives in the Manager's database and reaches the generated plugins only through the `OCM_INTERNAL_TOKEN` environment variable of the Manager's own OpenCode process, which is never part of the guest environment.
 
-Because of that mask, and because `localhost` inside the microVM is the guest rather than the Manager, an agent command cannot call the internal API with `curl`. Agents reach the Manager through the `ocm` tool instead, which executes in the Manager's own OpenCode process and never exposes the token to the guest.
+Because `localhost` inside the microVM is the guest rather than the Manager, and because the guest has no token to present, an agent command cannot call the internal API with `curl`. Agents reach the Manager through the `ocm` tool instead, which executes in the Manager's own OpenCode process. The tool's `request` action covers settings, repos, OpenCode workspaces, and schedules through an allow-list of internal API routes, while `send_notification` covers push notifications.
 
 The microVM also mounts a runtime-owned tmpfs at `/tmp`. It is sized to one quarter of the microVM memory, clamped to 1-512 MiB, so agent commands get writable scratch space that is not backed by a host filesystem.
 

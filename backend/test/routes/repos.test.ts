@@ -228,7 +228,6 @@ describe('Repo Routes', () => {
       expect(ensureAssistantMode).toHaveBeenCalledTimes(1)
       expect(ensureAssistantMode).toHaveBeenCalledWith(
         expect.objectContaining({ id: 1, localPath: 'repos/test-repo' }),
-        expect.objectContaining({ db: mockDb, apiBaseUrl: 'http://localhost:5003/api/internal' }),
         expect.objectContaining({ overwriteAgentsMd: true }),
       )
 

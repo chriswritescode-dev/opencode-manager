@@ -1,6 +1,6 @@
 import { describe, expect, it, beforeEach, afterEach } from 'bun:test'
 import path from 'path'
-import { readFile, stat, writeFile } from 'fs/promises'
+import { access, readFile, writeFile } from 'fs/promises'
 import { Hono } from 'hono'
 import { ensureAssistantMode, getAssistantModeStatus, buildSchedulesSkill, buildReposSkill, buildSettingsSkill, buildAssistantDefaultAgentMd, buildAssistantOpenCodeConfig, buildAssistantRepo, installAssistantWorkspace } from '../../src/services/assistant-mode'
 import { createTempAssistantWorkspace, createTestDb, mockRepo } from '../helpers/assistant-workspace'
@@ -8,59 +8,63 @@ import { createInternalRoutes } from '../../src/routes/internal'
 import { ScheduleService } from '../../src/services/schedules'
 import { NotificationService } from '../../src/services/notification'
 import { SettingsService } from '../../src/services/settings'
+import { getOrCreateInternalToken } from '../../src/services/internal-token'
 import { createOpenCodeClient } from '../../src/services/opencode/client'
 import { getRepoById } from '../../src/db/queries'
-import { ENV } from '@opencode-manager/shared/config/env'
 import type { ScheduleWorktreeManager } from '../../src/services/schedule-worktree'
 
 describe('buildSchedulesSkill', () => {
-  it('uses ENV.SERVER.PORT in the internal base URL', () => {
-    const skill = buildSchedulesSkill('https://example.com:443/api/internal')
-    expect(skill).toContain(`http://localhost:${ENV.SERVER.PORT}/api/internal`)
-    expect(skill).not.toContain(':443')
+  it('instructs the agent to use the ocm tool request action', () => {
+    const skill = buildSchedulesSkill()
+    expect(skill).toContain('"action": "request"')
+    expect(skill).toContain('"method": "GET"')
+    expect(skill).toContain('"path": "/schedules/all"')
+    expect(skill).not.toContain('curl')
   })
 
   it('documents repoId 0 for Assistant schedules', () => {
-    const skill = buildSchedulesSkill('http://localhost:5003/api/internal')
+    const skill = buildSchedulesSkill()
     expect(skill).toContain('Use repo ID `0` for the built-in Assistant')
     expect(skill).toContain('/repos/0/schedules')
   })
 })
 
 describe('buildReposSkill', () => {
-  it('uses ENV.SERVER.PORT in the internal base URL', () => {
-    const skill = buildReposSkill('https://example.com:443/api/internal')
-    expect(skill).toContain(`http://localhost:${ENV.SERVER.PORT}/api/internal`)
-    expect(skill).not.toContain(':443')
+  it('instructs the agent to use the ocm tool request action', () => {
+    const skill = buildReposSkill()
+    expect(skill).toContain('"action": "request"')
+    expect(skill).toContain('"method": "GET"')
+    expect(skill).toContain('"path": "/repos"')
   })
 
   it('contains GET /repos endpoint documentation', () => {
-    const skill = buildReposSkill('http://localhost:5003/api/internal')
+    const skill = buildReposSkill()
     expect(skill).toContain('GET /repos')
   })
 
-  it('contains Authorization Bearer header documentation', () => {
-    const skill = buildReposSkill('http://localhost:5003/api/internal')
-    expect(skill).toContain('Authorization: Bearer')
-    expect(skill).toContain('.opencode/internal-token')
+  it('does not instruct reading the internal token or sending a bearer header', () => {
+    const skill = buildReposSkill()
+    expect(skill).not.toContain('Authorization: Bearer')
+    expect(skill).not.toContain('.opencode/internal-token')
+    expect(skill).not.toContain('curl')
   })
 
-  it('contains internal localhost URL', () => {
-    const localApiBaseUrl = 'http://localhost:5003/api/internal'
-    const skill = buildReposSkill('http://localhost:5003/api/internal')
-    expect(skill).toContain(localApiBaseUrl)
+  it('does not contain a localhost base URL', () => {
+    const skill = buildReposSkill()
+    expect(skill).not.toContain('localhost')
   })
 })
 
 describe('buildSettingsSkill', () => {
-  it('uses ENV.SERVER.PORT in the internal base URL', () => {
-    const skill = buildSettingsSkill('https://example.com:443/api/internal')
-    expect(skill).toContain(`http://localhost:${ENV.SERVER.PORT}/api/internal`)
-    expect(skill).not.toContain(':443')
+  it('instructs the agent to use the ocm tool request action', () => {
+    const skill = buildSettingsSkill()
+    expect(skill).toContain('"action": "request"')
+    expect(skill).toContain('"path": "/settings?userId=default"')
+    expect(skill).not.toContain('curl')
   })
 
   it('includes tts and stt in allowed non-secret preferences', () => {
-    const skill = buildSettingsSkill('http://localhost:5003/api/internal')
+    const skill = buildSettingsSkill()
     expect(skill).toContain('tts')
     expect(skill).toContain('stt')
     expect(skill).toContain('enabled')
@@ -73,14 +77,14 @@ describe('buildSettingsSkill', () => {
   })
 
   it('documents the POST /assistant/reload endpoint', () => {
-    const skill = buildSettingsSkill('http://localhost:5003/api/internal')
+    const skill = buildSettingsSkill()
     expect(skill).toContain('/assistant/reload')
     expect(skill).toContain('Always confirm with the user before reloading')
     expect(skill).toContain('5 requests per minute')
   })
 
   it('still lists apiKey and endpoint as forbidden', () => {
-    const skill = buildSettingsSkill('http://localhost:5003/api/internal')
+    const skill = buildSettingsSkill()
     expect(skill).toContain('tts.apiKey')
     expect(skill).toContain('tts.endpoint')
     expect(skill).toContain('stt.apiKey')
@@ -129,21 +133,16 @@ describe('buildAssistantOpenCodeConfig', () => {
 
 describe('ensureAssistantMode', () => {
   let ws: Awaited<ReturnType<typeof createTempAssistantWorkspace>>
-  let db: ReturnType<typeof createTestDb>
-  const apiBaseUrl = 'http://example.test:5003/api/internal'
-  const localApiBaseUrl = 'http://localhost:5003/api/internal'
 
   beforeEach(async () => {
     ws = await createTempAssistantWorkspace()
-    db = createTestDb()
   })
   afterEach(async () => { await ws.cleanup() })
 
-  it('creates AGENTS.md, opencode.json, internal-token, and SKILL.md on first run', async () => {
-    await ensureAssistantMode(mockRepo, { db, apiBaseUrl })
+  it('creates AGENTS.md, opencode.json, and SKILL.md on first run', async () => {
+    await ensureAssistantMode(mockRepo)
     const agentsMd = await readFile(path.join(ws.assistantDir, 'AGENTS.md'), 'utf8')
     const opencodeJson = await readFile(path.join(ws.assistantDir, 'opencode.json'), 'utf8')
-    const token = await readFile(path.join(ws.assistantDir, '.opencode/internal-token'), 'utf8')
     const skill = await readFile(path.join(ws.assistantDir, '.opencode/skills/schedule-management/SKILL.md'), 'utf8')
     const repoSkill = await readFile(path.join(ws.assistantDir, '.opencode/skills/repo-management/SKILL.md'), 'utf8')
     const assistantAgent = await readFile(path.join(ws.assistantDir, '.opencode/agents/assistant.md'), 'utf8')
@@ -157,40 +156,25 @@ describe('ensureAssistantMode', () => {
     expect(parsedConfig.agent?.assistant?.prompt).toBeUndefined()
     expect(parsedConfig.agent?.assistant?.description).toBeUndefined()
     expect(parsedConfig.agent?.assistant?.permission).toBeUndefined()
-    expect(token).toMatch(/^[0-9a-f]{64}$/)
-    expect(skill).toContain('Authorization: Bearer')
-    expect(skill).toContain(localApiBaseUrl)
-    expect(skill).not.toContain(apiBaseUrl)
+    expect(skill).toContain('"action": "request"')
+    expect(skill).not.toContain('curl')
+    expect(skill).not.toContain('Authorization: Bearer')
     expect(repoSkill).toContain('GET /repos')
-    expect(repoSkill).toContain('Authorization: Bearer')
-    expect(repoSkill).toContain('.opencode/internal-token')
-    expect(repoSkill).toContain(localApiBaseUrl)
+    expect(repoSkill).not.toContain('Authorization: Bearer')
+    expect(repoSkill).not.toContain('.opencode/internal-token')
     expect(assistantAgent).toContain('mode: primary')
     expect(assistantAgent).toContain('Default OpenCode Manager assistant workspace agent')
     expect(assistantAgent).not.toContain('v file')
+    await expect(access(path.join(ws.assistantDir, '.opencode/internal-token'))).rejects.toThrow()
   })
 
-  it('does not rewrite the token file on a second run with the same db', async () => {
-    await ensureAssistantMode(mockRepo, { db, apiBaseUrl })
-    const tokenPath = path.join(ws.assistantDir, '.opencode/internal-token')
-    const firstToken = await readFile(tokenPath, 'utf8')
-    const firstStat = await stat(tokenPath)
-
-    await new Promise(r => setTimeout(r, 10))
-
-    const result = await ensureAssistantMode(mockRepo, { db, apiBaseUrl })
-    const secondToken = await readFile(tokenPath, 'utf8')
-    const secondStat = await stat(tokenPath)
-
-    expect(secondToken).toBe(firstToken)
-    expect(secondStat.mtimeMs).toBe(firstStat.mtimeMs)
-    expect(result.internalToken?.created).toBe(false)
-    expect(result.schedulesSkill?.created).toBe(false)
-    expect(result.repoManagementSkill?.created).toBe(false)
+  it('does not create a .opencode/internal-token file', async () => {
+    await ensureAssistantMode(mockRepo)
+    await expect(access(path.join(ws.assistantDir, '.opencode/internal-token'))).rejects.toThrow()
   })
 
   it('writes all files needed before OpenCode assistant session launch', async () => {
-    const result = await ensureAssistantMode(mockRepo, { db, apiBaseUrl })
+    const result = await ensureAssistantMode(mockRepo)
 
     const opencodeJsonPath = path.join(ws.assistantDir, 'opencode.json')
     const agentsMdPath = path.join(ws.assistantDir, 'AGENTS.md')
@@ -265,7 +249,7 @@ describe('ensureAssistantMode', () => {
   })
 
   it('reports repo management skill status from getAssistantModeStatus', async () => {
-    await ensureAssistantMode(mockRepo, { db, apiBaseUrl })
+    await ensureAssistantMode(mockRepo)
 
     const status = await getAssistantModeStatus(mockRepo)
 
@@ -274,13 +258,13 @@ describe('ensureAssistantMode', () => {
   })
 
   it('preserves custom assistant agent content on subsequent ensureAssistantMode calls', async () => {
-    await ensureAssistantMode(mockRepo, { db, apiBaseUrl })
+    await ensureAssistantMode(mockRepo)
     const assistantAgentPath = path.join(ws.assistantDir, '.opencode/agents/assistant.md')
 
     const customContent = '---\ndescription: Custom assistant\nmode: primary\n---\n\nCustom assistant instructions.'
     await writeFile(assistantAgentPath, customContent)
 
-    const result2 = await ensureAssistantMode(mockRepo, { db, apiBaseUrl })
+    const result2 = await ensureAssistantMode(mockRepo)
 
     const preservedContent = await readFile(assistantAgentPath, 'utf8')
     expect(preservedContent).toBe(customContent)
@@ -288,7 +272,7 @@ describe('ensureAssistantMode', () => {
   })
 
   it('repairs existing assistant opencode config missing configured assistant agent', async () => {
-    await ensureAssistantMode(mockRepo, { db, apiBaseUrl })
+    await ensureAssistantMode(mockRepo)
     const opencodeJsonPath = path.join(ws.assistantDir, 'opencode.json')
     await writeFile(opencodeJsonPath, JSON.stringify({
       model: 'provider/model',
@@ -300,7 +284,7 @@ describe('ensureAssistantMode', () => {
       skills: { paths: ['.opencode/skills'] },
     }, null, 2))
 
-    const result = await ensureAssistantMode(mockRepo, { db, apiBaseUrl })
+    const result = await ensureAssistantMode(mockRepo)
     const repaired = JSON.parse(await readFile(opencodeJsonPath, 'utf8'))
 
     expect(repaired.default_agent).toBe('assistant')
@@ -313,7 +297,7 @@ describe('ensureAssistantMode', () => {
   })
 
   it('preserves custom assistant config while making it selectable', async () => {
-    await ensureAssistantMode(mockRepo, { db, apiBaseUrl })
+    await ensureAssistantMode(mockRepo)
     const opencodeJsonPath = path.join(ws.assistantDir, 'opencode.json')
     await writeFile(opencodeJsonPath, JSON.stringify({
       default_agent: 'assistant',
@@ -327,7 +311,7 @@ describe('ensureAssistantMode', () => {
       },
     }, null, 2))
 
-    const result = await ensureAssistantMode(mockRepo, { db, apiBaseUrl })
+    const result = await ensureAssistantMode(mockRepo)
     const repaired = JSON.parse(await readFile(opencodeJsonPath, 'utf8'))
 
     expect(repaired.agent.assistant.prompt).toBe('Custom assistant prompt')
@@ -339,7 +323,7 @@ describe('ensureAssistantMode', () => {
   })
 
   it('migrates generated legacy AGENTS.md and assistant.md to the new split', async () => {
-    await ensureAssistantMode(mockRepo, { db, apiBaseUrl })
+    await ensureAssistantMode(mockRepo)
 
     const legacyAgentsMd = `# Assistant Mode Instructions
 
@@ -455,7 +439,7 @@ Ask before destructive operations or changes outside this assistant workspace.
       },
     }, null, 2))
 
-    const result = await ensureAssistantMode(mockRepo, { db, apiBaseUrl })
+    const result = await ensureAssistantMode(mockRepo)
 
     const updatedAgentsMd = await readFile(agentsMdPath, 'utf8')
     const updatedAssistantAgent = await readFile(assistantAgentPath, 'utf8')
@@ -483,14 +467,42 @@ Ask before destructive operations or changes outside this assistant workspace.
     expect(result.defaultAgent?.created).toBe(true)
   })
 
+  it('migrates previous-generation generated AGENTS.md that still mentions the internal token', async () => {
+    await ensureAssistantMode(mockRepo)
+    const agentsMdPath = path.join(ws.assistantDir, 'AGENTS.md')
+
+    const previousAgentsMd = `# Assistant Mode Workspace
+
+This directory is the shared Assistant Mode workspace for OpenCode Manager.
+
+## Directory Contents
+
+- \`opencode.json\` configures this workspace and selects the default assistant agent.
+- \`.opencode/agents/assistant.md\` contains the default assistant agent instructions, behavior, durable preferences, and self-editing rules.
+- \`.opencode/skills/\` contains managed workspace skills for repos, schedules, notifications, and settings.
+- \`.opencode/internal-token\` is managed by OpenCode Manager for internal API authentication.
+
+Assistant-specific instructions belong in \`.opencode/agents/assistant.md\`.
+`
+    await writeFile(agentsMdPath, previousAgentsMd)
+
+    const result = await ensureAssistantMode(mockRepo)
+
+    const updatedAgentsMd = await readFile(agentsMdPath, 'utf8')
+    expect(updatedAgentsMd).toContain('Assistant Mode Workspace')
+    expect(updatedAgentsMd).toContain('.opencode/agents/assistant.md')
+    expect(updatedAgentsMd).not.toContain('.opencode/internal-token')
+    expect(result.files.agentsMd?.created).toBe(true)
+  })
+
   it('preserves custom AGENTS.md content on subsequent ensureAssistantMode calls', async () => {
-    await ensureAssistantMode(mockRepo, { db, apiBaseUrl })
+    await ensureAssistantMode(mockRepo)
     const agentsMdPath = path.join(ws.assistantDir, 'AGENTS.md')
 
     const customContent = '# Custom Assistant Workspace\n\nThis is my custom AGENTS.md content.'
     await writeFile(agentsMdPath, customContent)
 
-    const result = await ensureAssistantMode(mockRepo, { db, apiBaseUrl })
+    const result = await ensureAssistantMode(mockRepo)
 
     const preservedContent = await readFile(agentsMdPath, 'utf8')
     expect(preservedContent).toBe(customContent)
@@ -498,7 +510,7 @@ Ask before destructive operations or changes outside this assistant workspace.
   })
 
   it('warns when managed updates apply but customized legacy AGENTS.md is preserved', async () => {
-    await ensureAssistantMode(mockRepo, { db, apiBaseUrl })
+    await ensureAssistantMode(mockRepo)
     const agentsMdPath = path.join(ws.assistantDir, 'AGENTS.md')
     const assistantAgentPath = path.join(ws.assistantDir, '.opencode/agents/assistant.md')
 
@@ -538,7 +550,7 @@ Preserve user-customized workspace files unless the user explicitly asks you to 
 Ask before destructive operations or changes outside this assistant workspace.
 `)
 
-    const result = await ensureAssistantMode(mockRepo, { db, apiBaseUrl })
+    const result = await ensureAssistantMode(mockRepo)
 
     const preservedAgentsMd = await readFile(agentsMdPath, 'utf8')
     expect(preservedAgentsMd).toContain('Self-Editing Rules')
@@ -549,13 +561,13 @@ Ask before destructive operations or changes outside this assistant workspace.
   })
 
   it('overwrites custom AGENTS.md when overwriteAgentsMd is true', async () => {
-    await ensureAssistantMode(mockRepo, { db, apiBaseUrl })
+    await ensureAssistantMode(mockRepo)
     const agentsMdPath = path.join(ws.assistantDir, 'AGENTS.md')
 
     const customContent = '# Custom Assistant Workspace\n\nThis is my custom AGENTS.md content.'
     await writeFile(agentsMdPath, customContent)
 
-    const result = await ensureAssistantMode(mockRepo, { db, apiBaseUrl }, { overwriteAgentsMd: true })
+    const result = await ensureAssistantMode(mockRepo, { overwriteAgentsMd: true })
 
     const updatedContent = await readFile(agentsMdPath, 'utf8')
     expect(updatedContent).toContain('Assistant Mode Workspace')
@@ -575,11 +587,10 @@ describe('assistant-mode end-to-end', () => {
   })
   afterEach(async () => { await ws.cleanup() })
 
-  it('token written by ensureAssistantMode authenticates a request to /api/internal/schedules/all', async () => {
-    const apiBaseUrl = 'http://127.0.0.1:5003/api/internal'
-    await ensureAssistantMode(mockRepo, { db, apiBaseUrl })
+  it('the database internal token authenticates a request to /api/internal/schedules/all', async () => {
+    await ensureAssistantMode(mockRepo)
 
-    const token = (await readFile(path.join(ws.assistantDir, '.opencode/internal-token'), 'utf8')).trim()
+    const token = getOrCreateInternalToken(db)
 
     const stubWorktreeManager = { prepare: () => Promise.resolve(null), finalize: () => Promise.resolve({ commitHash: null }) } as unknown as ScheduleWorktreeManager
     const scheduleService = new ScheduleService(db, createOpenCodeClient(), stubWorktreeManager)
@@ -614,7 +625,6 @@ describe('buildAssistantRepo', () => {
 describe('installAssistantWorkspace', () => {
   let ws: Awaited<ReturnType<typeof createTempAssistantWorkspace>>
   let db: ReturnType<typeof createTestDb>
-  const apiBaseUrl = 'http://localhost:5003/api/internal'
 
   beforeEach(async () => {
     ws = await createTempAssistantWorkspace()
@@ -623,7 +633,7 @@ describe('installAssistantWorkspace', () => {
   afterEach(async () => { await ws.cleanup() })
 
   it('provisions the assistant workspace files without contacting OpenCode', async () => {
-    const result = await installAssistantWorkspace({ db, apiBaseUrl })
+    const result = await installAssistantWorkspace({ db })
 
     const opencodeJson = await readFile(path.join(ws.assistantDir, 'opencode.json'), 'utf8')
     expect(JSON.parse(opencodeJson).default_agent).toBe('assistant')
@@ -684,7 +694,7 @@ describe('installAssistantWorkspace', () => {
       ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
     `).run(99, 'Assistant job', null, 1, 60, 'interval', null, null, null, 'hello', null, null, Date.now(), Date.now(), null, null)
 
-    await installAssistantWorkspace({ db, apiBaseUrl })
+    await installAssistantWorkspace({ db })
 
     expect(getRepoById(db, 99)).toBeNull()
     const assistantRepo = getRepoById(db, 0)
@@ -695,7 +705,7 @@ describe('installAssistantWorkspace', () => {
   })
 
   it('is idempotent — second call does not recreate files and content is unchanged', async () => {
-    await installAssistantWorkspace({ db, apiBaseUrl })
+    await installAssistantWorkspace({ db })
 
     const opencodeJsonPath = path.join(ws.assistantDir, 'opencode.json')
     const agentsMdPath = path.join(ws.assistantDir, 'AGENTS.md')
@@ -707,7 +717,7 @@ describe('installAssistantWorkspace', () => {
       assistantAgent: await readFile(assistantAgentPath, 'utf8'),
     }
 
-    const result = await installAssistantWorkspace({ db, apiBaseUrl })
+    const result = await installAssistantWorkspace({ db })
 
     const secondContent = {
       opencodeJson: await readFile(opencodeJsonPath, 'utf8'),
@@ -726,27 +736,14 @@ describe('installAssistantWorkspace', () => {
 })
 
 describe('assistant mode directory contract', () => {
-  it('resolves the assistant directory from the shared sandbox mount owner', async () => {
+  it('resolves the assistant directory and .opencode directory under the workspace', async () => {
     const ws = await createTempAssistantWorkspace()
     try {
       const { getAssistantModePath, getAssistantOpenCodeDir } = await import('@opencode-manager/shared/config/env')
       const { getAssistantModeDirectory } = await import('../../src/services/assistant-mode')
-      const { sandboxSecretMaskPath } = await import('../../src/services/sandbox/command')
 
       expect(getAssistantModeDirectory()).toBe(getAssistantModePath())
-      expect(sandboxSecretMaskPath()).toBe(getAssistantOpenCodeDir())
       expect(getAssistantOpenCodeDir()).toBe(path.join(ws.assistantDir, '.opencode'))
-    } finally {
-      await ws.cleanup()
-    }
-  })
-
-  it('keeps the internal token underneath the sandboxed assistant .opencode directory', async () => {
-    const ws = await createTempAssistantWorkspace()
-    try {
-      const { getAssistantOpenCodeDir } = await import('@opencode-manager/shared/config/env')
-      const tokenPath = path.join(ws.assistantDir, '.opencode/internal-token')
-      expect(tokenPath).toContain(getAssistantOpenCodeDir())
     } finally {
       await ws.cleanup()
     }

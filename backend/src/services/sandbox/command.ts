@@ -1,7 +1,7 @@
 import path from 'path'
 import { accessSync, constants, realpathSync, statSync } from 'fs'
 import { realpath } from 'fs/promises'
-import { ENV, getAssistantOpenCodeDir, getReposPath, getScheduleWorktreesPath } from '@opencode-manager/shared/config/env'
+import { ENV, getReposPath, getScheduleWorktreesPath } from '@opencode-manager/shared/config/env'
 
 export const WORKSPACE_SANDBOX_NAME = 'ocm-workspace'
 
@@ -124,10 +124,6 @@ export function sandboxMountRoots(): string[] {
   return [getReposPath(), getScheduleWorktreesPath()]
 }
 
-export function sandboxSecretMaskPath(): string {
-  return getAssistantOpenCodeDir()
-}
-
 export function quoteForShell(value: string): string {
   return `'${value.replace(/'/g, `'\\''`)}'`
 }
@@ -151,8 +147,6 @@ export function buildSandboxCreateArgs(): string[] {
     '-u',
     resolveSandboxExecUser(),
     ...sandboxMountRoots().flatMap((root) => ['--mount-dir', `${root}:${root}`]),
-    '--tmpfs',
-    sandboxSecretMaskPath(),
     '-w',
     getReposPath(),
     '--entrypoint',
@@ -314,7 +308,6 @@ function parseSandboxCreateArgs(args: string[]): {
   cpus: number
   user: string
   mountDirs: string[]
-  tmpfs: string | null
   workdir: string
   entrypoint: string[]
   image: string
@@ -326,7 +319,6 @@ function parseSandboxCreateArgs(args: string[]): {
   let memory = ''
   let cpus = 0
   let user = ''
-  let tmpfs: string | null = null
   let workdir = ''
   let entrypoint: string[] = []
   let image = ''
@@ -353,7 +345,6 @@ function parseSandboxCreateArgs(args: string[]): {
       case '--net': i += 1; break
       case '-u': user = value ?? ''; i += 1; break
       case '--mount-dir': if (value !== undefined) mountDirs.push(value); i += 1; break
-      case '--tmpfs': tmpfs = value ?? null; i += 1; break
       case '-w': workdir = value ?? ''; i += 1; break
       case '--entrypoint': if (value !== undefined) entrypoint = [value]; i += 1; break
       case '-d': break
@@ -361,7 +352,7 @@ function parseSandboxCreateArgs(args: string[]): {
         if (image === '' && !token.startsWith('-')) image = token
     }
   }
-  return { name, labels, memory, cpus, user, mountDirs, tmpfs, workdir, entrypoint, image, cmd }
+  return { name, labels, memory, cpus, user, mountDirs, workdir, entrypoint, image, cmd }
 }
 
 export function buildCanonicalSandboxSpec(): Record<string, unknown> {
@@ -410,12 +401,7 @@ export function buildCanonicalSandboxSpec(): Record<string, unknown> {
     env: [],
     labels: args.labels,
     rlimits: [],
-    mounts: [
-      ...bindMounts,
-      ...(args.tmpfs !== null
-        ? [{ type: 'Tmpfs', guest: args.tmpfs, size_mib: null, options: { readonly: false, noexec: false, nosuid: false, nodev: false } }]
-        : []),
-    ],
+    mounts: bindMounts,
     patches: [],
     network: { enabled: true, ports: [] },
     init: null,

@@ -3,11 +3,11 @@ import { Database } from 'bun:sqlite'
 import { mkdirSync, mkdtempSync, realpathSync, rmSync, symlinkSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import path from 'node:path'
-import { ENV, getReposPath, getScheduleWorktreesPath } from '@opencode-manager/shared/config/env'
+import { ENV, getAssistantOpenCodeDir, getReposPath, getScheduleWorktreesPath } from '@opencode-manager/shared/config/env'
 import { migrate } from '../../../src/db/migration-runner'
 import { allMigrations } from '../../../src/db/migrations'
 import { SettingsService } from '../../../src/services/settings'
-import { buildSandboxInspectArgs, resolveSandboxExecUser, resolveSandboxRuntimeTmpfsSizeMib, sandboxExecutablePath, WORKSPACE_SANDBOX_NAME, sandboxSecretMaskPath } from '../../../src/services/sandbox/command'
+import { buildSandboxInspectArgs, resolveSandboxExecUser, resolveSandboxRuntimeTmpfsSizeMib, sandboxExecutablePath, WORKSPACE_SANDBOX_NAME } from '../../../src/services/sandbox/command'
 import { SandboxRuntimeService, resetSandboxRuntimeState, stopWorkspaceSandboxOnShutdown } from '../../../src/services/sandbox/runtime'
 import { executeCommand } from '../../../src/utils/process'
 import { detectSandboxCapability } from '../../../src/services/sandbox/capability'
@@ -143,7 +143,6 @@ describe('SandboxRuntimeService', () => {
         bindMount(reposRoot),
         bindMount(worktreesRoot),
         tmpfsMount('/tmp', runtimeTmpfsSizeMib()),
-        tmpfsMount(sandboxSecretMaskPath(), null),
       ],
       patches: [],
       network: {
@@ -374,7 +373,6 @@ describe('SandboxRuntimeService', () => {
                   bindMount(reposRoot),
                   bindMount(worktreesRoot),
                   bindMount('/workspace/config'),
-                  tmpfsMount(sandboxSecretMaskPath(), null),
                 ],
               }),
             ),
@@ -480,7 +478,6 @@ describe('SandboxRuntimeService', () => {
                 bindMount(reposRoot),
                 bindMount(worktreesRoot),
                 bindMount('/workspace/config'),
-                tmpfsMount(sandboxSecretMaskPath(), null),
               ],
             }),
           }),
@@ -517,7 +514,6 @@ describe('SandboxRuntimeService', () => {
               bindMount(reposRoot),
               bindMount(worktreesRoot),
               tmpfsMount(reposRoot, 512),
-              tmpfsMount(sandboxSecretMaskPath(), null),
             ],
           })),
           stderr: '',
@@ -710,7 +706,6 @@ describe('SandboxRuntimeService', () => {
               bindMount(reposRoot),
               bindMount(worktreesRoot),
               tmpfsMount(path.join(reposRoot, 'repo-a', 'src'), 512),
-              tmpfsMount(sandboxSecretMaskPath(), null),
             ],
           })),
           stderr: '',
@@ -725,39 +720,6 @@ describe('SandboxRuntimeService', () => {
     expect(mockExecuteCommand.mock.calls.filter((call) => call[0].includes('rm'))).toHaveLength(1)
     expect(mockExecuteCommand.mock.calls.filter((call) => call[0].includes('run'))).toHaveLength(1)
     expect(logger.warn).toHaveBeenCalledWith(expect.stringContaining('unexpected tmpfs mount'))
-  })
-
-  it('removes and recreates a same-name sandbox that lacks the assistant .opencode mask', async () => {
-    enableEnforcement()
-    mockExecuteCommand.mockImplementation(async (args: string[]) => {
-      if (args.includes('ls')) {
-        return {
-          exitCode: 0,
-          stdout: JSON.stringify([{ name: WORKSPACE_SANDBOX_NAME, status: 'running' }]),
-          stderr: '',
-        }
-      }
-      if (args.includes('inspect')) {
-        return attestedAfterRecreate({
-          exitCode: 0,
-          stdout: runningInspectOutput(realInspectConfig({
-            mounts: [
-              bindMount(reposRoot),
-              bindMount(worktreesRoot),
-            ],
-          })),
-          stderr: '',
-        })
-      }
-      return { exitCode: 0, stdout: '', stderr: '' }
-    })
-
-    const plan = await service.planShell(repoADir)
-
-    expect(plan).toEqual({ mode: 'sandbox', workdir: repoADir })
-    expect(mockExecuteCommand.mock.calls.filter((call) => call[0].includes('rm'))).toHaveLength(1)
-    expect(mockExecuteCommand.mock.calls.filter((call) => call[0].includes('run'))).toHaveLength(1)
-    expect(logger.warn).toHaveBeenCalledWith(expect.stringContaining('assistant .opencode mask'))
   })
 
   it('removes and recreates a running sandbox whose active config carries a secret-bearing mount even when the stored config is safe', async () => {
@@ -782,7 +744,6 @@ describe('SandboxRuntimeService', () => {
                 bindMount(reposRoot),
                 bindMount(worktreesRoot),
                 bindMount('/workspace/config'),
-                tmpfsMount(sandboxSecretMaskPath(), null),
               ],
             }),
           }),
@@ -889,7 +850,6 @@ describe('SandboxRuntimeService', () => {
                 bindMount(reposRoot),
                 bindMount(worktreesRoot),
                 bindMount('/workspace/config'),
-                tmpfsMount(sandboxSecretMaskPath(), null),
               ],
             }),
             active_config: realInspectConfig(),
@@ -981,7 +941,6 @@ describe('SandboxRuntimeService', () => {
               bindMount(reposRoot),
               bindMount(worktreesRoot),
               tmpfsMount('/tmp', runtimeTmpfsSizeMib()),
-              tmpfsMount(sandboxSecretMaskPath(), null),
             ],
           })),
           stderr: '',
@@ -1668,7 +1627,6 @@ describe('SandboxRuntimeService', () => {
               mounts: [
                 { ...bindMount(reposRoot), options: { readonly: false, noexec: true, nosuid: false, nodev: false } },
                 bindMount(worktreesRoot),
-                tmpfsMount(sandboxSecretMaskPath(), null),
               ],
             }),
           ),
@@ -2224,7 +2182,6 @@ describe('SandboxRuntimeService', () => {
             mounts: [
               bindMount(reposRoot),
               bindMount(reposRoot),
-              tmpfsMount(sandboxSecretMaskPath(), null),
             ],
           })),
           stderr: '',
@@ -2427,20 +2384,15 @@ describe('SandboxRuntimeService', () => {
   }
 
   function assertRecreateForTmpfsOption(
-    guest: string,
-    sizeMib: number | null,
     mountOverrides: Record<string, unknown>,
     expectedReasonPart: string,
   ): Promise<void> {
-    const otherGuest = guest === '/tmp' ? sandboxSecretMaskPath() : '/tmp'
-    const otherSizeMib = guest === '/tmp' ? null : runtimeTmpfsSizeMib()
     return assertRecreateForInspectMutation(
       realInspectConfig({
         mounts: [
           bindMount(reposRoot),
           bindMount(worktreesRoot),
-          { type: 'Tmpfs', guest, size_mib: sizeMib, ...mountOverrides },
-          tmpfsMount(otherGuest, otherSizeMib),
+          { type: 'Tmpfs', guest: '/tmp', size_mib: runtimeTmpfsSizeMib(), ...mountOverrides },
         ],
       }),
       expectedReasonPart,
@@ -2453,7 +2405,6 @@ describe('SandboxRuntimeService', () => {
         mounts: [
           { ...bindMount(reposRoot), follow_root_symlinks: true },
           bindMount(worktreesRoot),
-          tmpfsMount(sandboxSecretMaskPath(), null),
         ],
       }),
       'follow_root_symlinks',
@@ -2466,7 +2417,6 @@ describe('SandboxRuntimeService', () => {
         mounts: [
           { ...bindMount(reposRoot), host_permissions: 'public' },
           bindMount(worktreesRoot),
-          tmpfsMount(sandboxSecretMaskPath(), null),
         ],
       }),
       'host_permissions',
@@ -2479,7 +2429,6 @@ describe('SandboxRuntimeService', () => {
         mounts: [
           { ...bindMount(reposRoot), stat_virtualization: 'none' },
           bindMount(worktreesRoot),
-          tmpfsMount(sandboxSecretMaskPath(), null),
         ],
       }),
       'stat_virtualization',
@@ -2492,7 +2441,6 @@ describe('SandboxRuntimeService', () => {
         mounts: [
           { ...bindMount(reposRoot), quota_mib: 512 },
           bindMount(worktreesRoot),
-          tmpfsMount(sandboxSecretMaskPath(), null),
         ],
       }),
       'quota_mib',
@@ -2569,39 +2517,12 @@ describe('SandboxRuntimeService', () => {
     )
   })
 
-  it('removes and recreates a sandbox whose assistant mask tmpfs has a size', async () => {
-    await assertRecreateForInspectMutation(
-      realInspectConfig({
-        mounts: [
-          bindMount(reposRoot),
-          bindMount(worktreesRoot),
-          tmpfsMount(sandboxSecretMaskPath(), 256),
-        ],
-      }),
-      'size_mib',
-    )
-  })
-
-  it('removes and recreates a sandbox whose assistant mask tmpfs is read-only', async () => {
-    await assertRecreateForInspectMutation(
-      realInspectConfig({
-        mounts: [
-          bindMount(reposRoot),
-          bindMount(worktreesRoot),
-          { type: 'Tmpfs', guest: sandboxSecretMaskPath(), size_mib: null, options: { readonly: true, noexec: false, nosuid: false, nodev: false } },
-        ],
-      }),
-      'options.readonly',
-    )
-  })
-
   it('removes and recreates a sandbox missing the runtime tmpfs at /tmp', async () => {
     await assertRecreateForInspectMutation(
       realInspectConfig({
         mounts: [
           bindMount(reposRoot),
           bindMount(worktreesRoot),
-          tmpfsMount(sandboxSecretMaskPath(), null),
         ],
       }),
       'missing the runtime tmpfs mount at /tmp',
@@ -2616,7 +2537,6 @@ describe('SandboxRuntimeService', () => {
           bindMount(worktreesRoot),
           tmpfsMount('/tmp', runtimeTmpfsSizeMib()),
           tmpfsMount('/tmp', runtimeTmpfsSizeMib()),
-          tmpfsMount(sandboxSecretMaskPath(), null),
         ],
       }),
       'duplicate runtime tmpfs',
@@ -2630,7 +2550,6 @@ describe('SandboxRuntimeService', () => {
           bindMount(reposRoot),
           bindMount(worktreesRoot),
           tmpfsMount('/tmp', runtimeTmpfsSizeMib() + 1),
-          tmpfsMount(sandboxSecretMaskPath(), null),
         ],
       }),
       'size_mib',
@@ -2644,78 +2563,22 @@ describe('SandboxRuntimeService', () => {
           bindMount(reposRoot),
           bindMount(worktreesRoot),
           { type: 'Tmpfs', guest: '/tmp', size_mib: runtimeTmpfsSizeMib(), options: { readonly: true, noexec: false, nosuid: false, nodev: false } },
-          tmpfsMount(sandboxSecretMaskPath(), null),
         ],
       }),
       'options.readonly',
     )
   })
 
-  it('removes and recreates a sandbox whose assistant mask tmpfs omits the options field', async () => {
-    await assertRecreateForTmpfsOption(sandboxSecretMaskPath(), null, {}, 'options.')
-  })
-
-  it('removes and recreates a sandbox whose assistant mask tmpfs options are not an object', async () => {
-    await assertRecreateForTmpfsOption(sandboxSecretMaskPath(), null, { options: 'malformed' }, 'options.')
-  })
-
-  it('removes and recreates a sandbox whose assistant mask tmpfs has a string option flag', async () => {
-    await assertRecreateForTmpfsOption(
-      sandboxSecretMaskPath(),
-      null,
-      { options: { readonly: 'false', noexec: false, nosuid: false, nodev: false } },
-      'options.',
-    )
-  })
-
-  it('removes and recreates a sandbox whose assistant mask tmpfs has a null option flag', async () => {
-    await assertRecreateForTmpfsOption(
-      sandboxSecretMaskPath(),
-      null,
-      { options: { readonly: null, noexec: false, nosuid: false, nodev: false } },
-      'options.',
-    )
-  })
-
-  it('removes and recreates a sandbox whose assistant mask tmpfs is noexec', async () => {
-    await assertRecreateForTmpfsOption(
-      sandboxSecretMaskPath(),
-      null,
-      { options: { readonly: false, noexec: true, nosuid: false, nodev: false } },
-      'options.noexec',
-    )
-  })
-
-  it('removes and recreates a sandbox whose assistant mask tmpfs is nosuid', async () => {
-    await assertRecreateForTmpfsOption(
-      sandboxSecretMaskPath(),
-      null,
-      { options: { readonly: false, noexec: false, nosuid: true, nodev: false } },
-      'options.nosuid',
-    )
-  })
-
-  it('removes and recreates a sandbox whose assistant mask tmpfs is nodev', async () => {
-    await assertRecreateForTmpfsOption(
-      sandboxSecretMaskPath(),
-      null,
-      { options: { readonly: false, noexec: false, nosuid: false, nodev: true } },
-      'options.nodev',
-    )
-  })
-
   it('removes and recreates a sandbox whose runtime tmpfs at /tmp omits the options field', async () => {
-    await assertRecreateForTmpfsOption('/tmp', runtimeTmpfsSizeMib(), {}, 'options.')
+    await assertRecreateForTmpfsOption({}, 'options.')
   })
 
   it('removes and recreates a sandbox whose runtime tmpfs at /tmp options are not an object', async () => {
-    await assertRecreateForTmpfsOption('/tmp', runtimeTmpfsSizeMib(), { options: 'malformed' }, 'options.')
+    await assertRecreateForTmpfsOption({ options: 'malformed' }, 'options.')
   })
 
   it('removes and recreates a sandbox whose runtime tmpfs at /tmp has a string option flag', async () => {
     await assertRecreateForTmpfsOption(
-      '/tmp',
-      runtimeTmpfsSizeMib(),
       { options: { readonly: 'false', noexec: false, nosuid: false, nodev: false } },
       'options.',
     )
@@ -2723,8 +2586,6 @@ describe('SandboxRuntimeService', () => {
 
   it('removes and recreates a sandbox whose runtime tmpfs at /tmp has a null option flag', async () => {
     await assertRecreateForTmpfsOption(
-      '/tmp',
-      runtimeTmpfsSizeMib(),
       { options: { readonly: null, noexec: false, nosuid: false, nodev: false } },
       'options.',
     )
@@ -2732,8 +2593,6 @@ describe('SandboxRuntimeService', () => {
 
   it('removes and recreates a sandbox whose runtime tmpfs at /tmp is noexec', async () => {
     await assertRecreateForTmpfsOption(
-      '/tmp',
-      runtimeTmpfsSizeMib(),
       { options: { readonly: false, noexec: true, nosuid: false, nodev: false } },
       'options.noexec',
     )
@@ -2741,8 +2600,6 @@ describe('SandboxRuntimeService', () => {
 
   it('removes and recreates a sandbox whose runtime tmpfs at /tmp is nosuid', async () => {
     await assertRecreateForTmpfsOption(
-      '/tmp',
-      runtimeTmpfsSizeMib(),
       { options: { readonly: false, noexec: false, nosuid: true, nodev: false } },
       'options.nosuid',
     )
@@ -2750,8 +2607,6 @@ describe('SandboxRuntimeService', () => {
 
   it('removes and recreates a sandbox whose runtime tmpfs at /tmp is nodev', async () => {
     await assertRecreateForTmpfsOption(
-      '/tmp',
-      runtimeTmpfsSizeMib(),
       { options: { readonly: false, noexec: false, nosuid: false, nodev: true } },
       'options.nodev',
     )
@@ -2765,7 +2620,20 @@ describe('SandboxRuntimeService', () => {
           bindMount(worktreesRoot),
           tmpfsMount('/dev/shm', 64),
           tmpfsMount('/tmp', runtimeTmpfsSizeMib()),
-          tmpfsMount(sandboxSecretMaskPath(), null),
+        ],
+      }),
+      'unexpected tmpfs mount',
+    )
+  })
+
+  it('removes and recreates a sandbox carrying a tmpfs over the assistant .opencode directory', async () => {
+    await assertRecreateForInspectMutation(
+      realInspectConfig({
+        mounts: [
+          bindMount(reposRoot),
+          bindMount(worktreesRoot),
+          tmpfsMount(getAssistantOpenCodeDir(), null),
+          tmpfsMount('/tmp', runtimeTmpfsSizeMib()),
         ],
       }),
       'unexpected tmpfs mount',

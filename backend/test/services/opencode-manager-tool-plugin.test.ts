@@ -8,7 +8,7 @@ import path from 'path'
 import os from 'os'
 import { pathToFileURL } from 'url'
 import { ASSISTANT_NOTIFICATION_LIMITS, AssistantNotificationRequestSchema } from '@opencode-manager/shared/schemas'
-import { MANAGER_TOOL_NAME } from '../../src/services/opencode-manager-tool-plugin'
+import { MANAGER_TOOL_NAME, MANAGER_TOOL_ALLOWED_ROUTES, parseAllowedRoute } from '../../src/services/opencode-manager-tool-plugin'
 import { installManagedPlugins, getOpenCodePluginDir } from '../../src/services/opencode/plugin-registry'
 
 type ZodLike = { safeParse: (value: unknown) => { success: boolean } }
@@ -130,6 +130,118 @@ describe('ocm-manager plugin', () => {
     await expect(tool.execute({ action: 'constructor', params: {} })).rejects.toThrow(/Unknown OpenCode Manager action/)
     await expect(tool.execute({ action: 'send_notification', params: { title: 't' } })).rejects.toThrow()
     expect(fetchMock).not.toHaveBeenCalled()
+  })
+
+  it('sends an allow-listed GET request with a query string and no body', async () => {
+    const fetchMock = jsonResponse({ userId: 'default', theme: 'dark' })
+    vi.stubGlobal('fetch', fetchMock)
+    const tool = await loadTool(configHome)
+
+    const result = await tool.execute({
+      action: 'request',
+      params: { method: 'GET', path: '/settings?userId=default' },
+    })
+
+    expect(fetchMock).toHaveBeenCalledTimes(1)
+    const [url, init] = fetchMock.mock.calls[0] ?? []
+    expect(url).toBe('http://localhost:5003/api/internal/settings?userId=default')
+    expect(init.method).toBe('GET')
+    expect(init.headers.Authorization).toBe('Bearer secret-token')
+    expect(init.headers['content-type']).toBeUndefined()
+    expect(init.body).toBeUndefined()
+    expect(result).toBe('{"userId":"default","theme":"dark"}')
+  })
+
+  it('sends a PATCH request with a JSON body', async () => {
+    const fetchMock = jsonResponse({})
+    vi.stubGlobal('fetch', fetchMock)
+    const tool = await loadTool(configHome)
+
+    await tool.execute({
+      action: 'request',
+      params: { method: 'PATCH', path: '/settings', body: { theme: 'dark' } },
+    })
+
+    expect(fetchMock).toHaveBeenCalledTimes(1)
+    const [url, init] = fetchMock.mock.calls[0] ?? []
+    expect(url).toBe('http://localhost:5003/api/internal/settings')
+    expect(init.method).toBe('PATCH')
+    expect(init.headers.Authorization).toBe('Bearer secret-token')
+    expect(init.headers['content-type']).toBe('application/json')
+    expect(JSON.parse(init.body)).toEqual({ theme: 'dark' })
+  })
+
+  it('allows every route in the exported allow list', async () => {
+    const tool = await loadTool(configHome)
+
+    for (const route of MANAGER_TOOL_ALLOWED_ROUTES) {
+      const { method, path: pattern } = parseAllowedRoute(route)
+      const path = pattern.split('/').map((segment) => (segment === '*' ? 'x' : segment)).join('/')
+      const fetchMock = jsonResponse({})
+      vi.stubGlobal('fetch', fetchMock)
+
+      await tool.execute({ action: 'request', params: { method, path } })
+
+      expect(fetchMock).toHaveBeenCalledTimes(1)
+    }
+  })
+
+  it('rejects non-allow-listed routes without calling the API', async () => {
+    const tool = await loadTool(configHome)
+    const deniedRoutes = [
+      ['GET', '/git-credentials/gh-env'],
+      ['POST', '/sandbox/shell'],
+      ['GET', '/repos/0/mirror/head'],
+      ['POST', '/notifications/send'],
+      ['DELETE', '/settings'],
+    ] as const
+
+    for (const [method, path] of deniedRoutes) {
+      const fetchMock = jsonResponse({})
+      vi.stubGlobal('fetch', fetchMock)
+
+      await expect(tool.execute({ action: 'request', params: { method, path } }))
+        .rejects.toThrow(/is not an allowed OpenCode Manager route/)
+      expect(fetchMock).not.toHaveBeenCalled()
+    }
+  })
+
+  it('normalizes path traversal and rejects the resolved route without calling the API', async () => {
+    const fetchMock = jsonResponse({})
+    vi.stubGlobal('fetch', fetchMock)
+    const tool = await loadTool(configHome)
+
+    await expect(
+      tool.execute({ action: 'request', params: { method: 'GET', path: '/repos/x/../../git-credentials/gh-env' } }),
+    ).rejects.toThrow(/is not an allowed OpenCode Manager route/)
+    expect(fetchMock).not.toHaveBeenCalled()
+  })
+
+  it('rejects an absolute URL that resolves outside the internal API', async () => {
+    const fetchMock = jsonResponse({})
+    vi.stubGlobal('fetch', fetchMock)
+    const tool = await loadTool(configHome)
+
+    await expect(tool.execute({ action: 'request', params: { method: 'GET', path: 'http://evil.com/steal' } }))
+      .rejects.toThrow(/resolves outside/)
+    expect(fetchMock).not.toHaveBeenCalled()
+  })
+
+  it('returns the empty-body message when the response body is empty', async () => {
+    const fetchMock = vi.fn().mockResolvedValue({ ok: true, status: 200, text: async () => '' })
+    vi.stubGlobal('fetch', fetchMock)
+    const tool = await loadTool(configHome)
+
+    await expect(tool.execute({ action: 'request', params: { method: 'GET', path: '/settings' } }))
+      .resolves.toBe('The request succeeded with an empty response body.')
+  })
+
+  it('surfaces the API status and body when the request action is rejected', async () => {
+    vi.stubGlobal('fetch', jsonResponse({ error: 'Rate limit exceeded' }, { ok: false, status: 429 }))
+    const tool = await loadTool(configHome)
+
+    await expect(tool.execute({ action: 'request', params: { method: 'GET', path: '/settings' } }))
+      .rejects.toThrow(/429.*Rate limit exceeded/)
   })
 })
 
@@ -334,7 +446,7 @@ describe.skipIf(SHIPPED_OPENCODE_BIN === null)('ocm-manager plugin against the s
       expect(managerTool?.function?.parameters).toMatchObject({
         type: 'object',
         properties: {
-          action: { type: 'string', enum: ['send_notification'] },
+          action: { type: 'string', enum: ['send_notification', 'request'] },
           params: {
             anyOf: [
               {
@@ -346,6 +458,15 @@ describe.skipIf(SHIPPED_OPENCODE_BIN === null)('ocm-manager plugin against the s
                   url: { type: 'string', maxLength: ASSISTANT_NOTIFICATION_LIMITS.URL_MAX },
                   tag: { type: 'string', maxLength: ASSISTANT_NOTIFICATION_LIMITS.TAG_MAX },
                   priority: { type: 'string', enum: ['normal', 'high'] },
+                },
+              },
+              {
+                type: 'object',
+                required: ['method', 'path'],
+                properties: {
+                  method: { type: 'string', enum: ['GET', 'POST', 'PATCH', 'DELETE'] },
+                  path: { type: 'string', minLength: 1, maxLength: 500 },
+                  body: { type: 'object' },
                 },
               },
             ],

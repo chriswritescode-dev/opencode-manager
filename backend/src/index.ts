@@ -285,10 +285,7 @@ try {
 
   await migrateGlobalSkills()
 
-  await installAssistantWorkspace({
-    db,
-    apiBaseUrl: `http://localhost:${PORT}/api/internal`,
-  })
+  await installAssistantWorkspace({ db })
   logger.info('Assistant workspace installed')
 
   ipcServer = await createIPCServer(process.env.STORAGE_PATH || undefined)
