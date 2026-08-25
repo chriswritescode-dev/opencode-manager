@@ -29,32 +29,49 @@ export function normalizeHost(host: string): string | null {
   return url ? `${url.protocol}//${url.host}/` : null
 }
 
-export function createGitEnv(credentials: GitCredential[]): Record<string, string> {
+export function createExtraHeaderEnv(
+  configIndex: number,
+  normalizedHost: string,
+  username: string,
+  token: string
+): Record<string, string> {
+  const basicAuth = Buffer.from(`${username}:${token}`, 'utf8').toString('base64')
+  return {
+    [`GIT_CONFIG_KEY_${configIndex}`]: `http.${normalizedHost}.extraheader`,
+    [`GIT_CONFIG_VALUE_${configIndex}`]: `AUTHORIZATION: basic ${basicAuth}`,
+  }
+}
+
+export function createGitEnv(
+  credentials: GitCredential[],
+  preferred?: GitCredential | null
+): Record<string, string> {
   const env: Record<string, string> = {
     GIT_TERMINAL_PROMPT: '0',
     GIT_CONFIG_COUNT: '0'
   }
 
-  if (!credentials || credentials.length === 0) {
-    return env
-  }
+  const credentialByHost = new Map<string, GitCredential>()
 
-  let configIndex = 0
-
-  for (const cred of credentials) {
+  for (const cred of [...(preferred ? [preferred] : []), ...(credentials ?? [])]) {
     if (!cred.host || !cred.token) {
       continue
     }
 
     const host = normalizeHost(cred.host)
-    if (!host) {
+    if (!host || credentialByHost.has(host)) {
       continue
     }
-    const username = cred.username || getDefaultUsername(host)
-    const basicAuth = Buffer.from(`${username}:${cred.token}`, 'utf8').toString('base64')
+    credentialByHost.set(host, cred)
+  }
 
-    env[`GIT_CONFIG_KEY_${configIndex}`] = `http.${host}.extraheader`
-    env[`GIT_CONFIG_VALUE_${configIndex}`] = `AUTHORIZATION: basic ${basicAuth}`
+  let configIndex = 0
+
+  for (const [host, cred] of credentialByHost) {
+    Object.assign(
+      env,
+      createExtraHeaderEnv(configIndex, host, cred.username || getDefaultUsername(host), cred.token as string)
+    )
     configIndex++
   }
 

@@ -4,7 +4,8 @@ import { migrate } from '../../src/db/migration-runner'
 import { allMigrations } from '../../src/db/migrations'
 import { SettingsService } from '../../src/services/settings'
 import { CredentialProvider } from '../../src/services/credential-provider'
-import { createRepo, setRepoGitCredentialId } from '../../src/db/queries'
+import { createRepo, setRepoGitCredentialId, setRepoSandboxGitCredentials } from '../../src/db/queries'
+import { SANDBOX_MAX_FORWARDED_GIT_CONFIGS } from '../../src/services/sandbox/shell-shim'
 import type { GitCredential } from '@opencode-manager/shared'
 
 function createPatCredential(name: string, host: string, token: string, username?: string, id?: string): GitCredential {
@@ -176,6 +177,124 @@ describe('CredentialProvider', () => {
       const creds = [createPatCredential('test', 'example.com', 'tok'), createSshCredential('ssh-test', 'example.com')]
       settingsService.updateSettings({ gitCredentials: creds })
       expect(provider.getGitCredentials()).toHaveLength(2)
+    })
+  })
+
+  describe('sandbox git credentials', () => {
+    function createGithubRepo() {
+      return createRepo(db, {
+        repoUrl: 'https://github.com/acme/repo.git',
+        localPath: 'repo',
+        defaultBranch: 'main',
+        cloneStatus: 'ready',
+        clonedAt: Date.now(),
+      })
+    }
+
+    beforeEach(() => {
+      settingsService.updateSettings({
+        gitCredentials: [
+          createPatCredential('first', 'github.com', 'first-token', undefined, 'first-id'),
+          createPatCredential('second', 'github.com', 'second-token', undefined, 'second-id'),
+        ],
+        defaultGitCredentialId: 'first-id',
+      })
+    })
+
+    it('withholds credentials from the sandbox by default', () => {
+      const repo = createGithubRepo()
+      expect(provider.isSandboxGitCredentialsAllowed({ cwd: repo.fullPath })).toBe(false)
+      expect(provider.getSandboxGitEnv({ cwd: repo.fullPath })).toEqual({})
+    })
+
+    it('emits one extraheader per configured host when the global toggle is on', () => {
+      settingsService.updateSettings({
+        gitCredentials: [
+          createPatCredential('first', 'github.com', 'first-token', undefined, 'first-id'),
+          createPatCredential('second', 'github.com', 'second-token', undefined, 'second-id'),
+          createPatCredential('lab', 'gitlab.com', 'lab-token', undefined, 'lab-id'),
+        ],
+        defaultGitCredentialId: 'first-id',
+        sandbox: { enabled: true, gitCredentials: true },
+      })
+      const repo = createGithubRepo()
+
+      const env = provider.getSandboxGitEnv({ cwd: repo.fullPath })
+
+      expect(env.GIT_CONFIG_COUNT).toBe('2')
+      expect(env.GIT_CONFIG_KEY_0).toBe('http.https://github.com/.extraheader')
+      expect(env.GIT_CONFIG_VALUE_0).toBe(
+        `AUTHORIZATION: basic ${Buffer.from('x-access-token:first-token', 'utf8').toString('base64')}`
+      )
+      expect(env.GIT_CONFIG_KEY_1).toBe('http.https://gitlab.com/.extraheader')
+      expect(env.GH_TOKEN).toBe('first-token')
+    })
+
+    it('caps forwarded hosts so GIT_CONFIG_COUNT never overstates the pairs present', () => {
+      const overLimit = SANDBOX_MAX_FORWARDED_GIT_CONFIGS + 3
+      settingsService.updateSettings({
+        gitCredentials: Array.from({ length: overLimit }, (_, index) =>
+          createPatCredential(`host-${index}`, `host${index}.example.com`, `token-${index}`, undefined, `id-${index}`)
+        ),
+        sandbox: { enabled: true, gitCredentials: true },
+      })
+      const repo = createGithubRepo()
+
+      const env = provider.getSandboxGitEnv({ cwd: repo.fullPath })
+
+      expect(env.GIT_CONFIG_COUNT).toBe(String(SANDBOX_MAX_FORWARDED_GIT_CONFIGS))
+      expect(env[`GIT_CONFIG_KEY_${SANDBOX_MAX_FORWARDED_GIT_CONFIGS - 1}`]).toBeDefined()
+      expect(env[`GIT_CONFIG_KEY_${SANDBOX_MAX_FORWARDED_GIT_CONFIGS}`]).toBeUndefined()
+      expect(env[`GIT_CONFIG_VALUE_${SANDBOX_MAX_FORWARDED_GIT_CONFIGS}`]).toBeUndefined()
+    })
+
+    it('withholds credentials when none of the configured credentials carry a token', () => {
+      settingsService.updateSettings({
+        gitCredentials: [createSshCredential('ssh-only', 'github.com', 'encrypted')],
+        sandbox: { enabled: true, gitCredentials: true },
+      })
+      const repo = createGithubRepo()
+
+      expect(provider.getSandboxGitEnv({ cwd: repo.fullPath })).toEqual({})
+    })
+
+    it('honors the repo-bound credential over the global default', () => {
+      settingsService.updateSettings({ sandbox: { enabled: true, gitCredentials: true } })
+      const repo = createGithubRepo()
+      setRepoGitCredentialId(db, repo.id, 'second-id')
+
+      const env = provider.getSandboxGitEnv({ cwd: repo.fullPath })
+
+      expect(env.GIT_CONFIG_VALUE_0).toBe(
+        `AUTHORIZATION: basic ${Buffer.from('x-access-token:second-token', 'utf8').toString('base64')}`
+      )
+    })
+
+    it('lets a per-repo override withhold credentials while the global toggle is on', () => {
+      settingsService.updateSettings({ sandbox: { enabled: true, gitCredentials: true } })
+      const repo = createGithubRepo()
+      setRepoSandboxGitCredentials(db, repo.id, false)
+
+      expect(provider.isSandboxGitCredentialsAllowed({ cwd: repo.fullPath })).toBe(false)
+      expect(provider.getSandboxGitEnv({ cwd: repo.fullPath })).toEqual({})
+    })
+
+    it('lets a per-repo override grant credentials while the global toggle is off', () => {
+      const repo = createGithubRepo()
+      setRepoSandboxGitCredentials(db, repo.id, true)
+
+      expect(provider.isSandboxGitCredentialsAllowed({ cwd: repo.fullPath })).toBe(true)
+      expect(provider.getSandboxGitEnv({ cwd: repo.fullPath }).GIT_CONFIG_COUNT).toBe('1')
+    })
+
+    it('falls back to the global toggle for a directory that belongs to no known repo', () => {
+      settingsService.updateSettings({ sandbox: { enabled: true, gitCredentials: true } })
+      createGithubRepo()
+
+      const env = provider.getSandboxGitEnv({ cwd: '/somewhere/unmanaged' })
+
+      expect(env.GIT_CONFIG_COUNT).toBe('1')
+      expect(env.GIT_CONFIG_KEY_0).toBe('http.https://github.com/.extraheader')
     })
   })
 })

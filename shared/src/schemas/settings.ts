@@ -134,12 +134,14 @@ export const DEFAULT_GIT_IDENTITY: GitIdentity = {
 
 export const SandboxPreferencesSchema = z.object({
   enabled: z.boolean(),
+  gitCredentials: z.boolean().optional(),
 });
 
 export type SandboxPreferences = z.infer<typeof SandboxPreferencesSchema>;
 
 export const DEFAULT_SANDBOX_PREFERENCES: SandboxPreferences = {
   enabled: false,
+  gitCredentials: false,
 };
 
 export const UserPreferencesSchema = z.object({

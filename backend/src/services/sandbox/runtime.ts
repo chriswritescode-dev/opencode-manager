@@ -6,6 +6,7 @@ import { executeCommand } from '../../utils/process'
 import { mkdirSafe } from '../../utils/fs-safe'
 import { logger } from '../../utils/logger'
 import { SettingsService } from '../settings'
+import { CredentialProvider } from '../credential-provider'
 import { detectSandboxCapability } from './capability'
 import {
   WORKSPACE_SANDBOX_NAME,
@@ -31,7 +32,7 @@ const SANDBOX_RUNTIME_TMPFS_GUEST = path.resolve('/tmp')
 
 export type SandboxShellPlan =
   | { mode: 'host' }
-  | { mode: 'sandbox'; workdir: string }
+  | { mode: 'sandbox'; workdir: string; env?: Record<string, string> }
   | { mode: 'blocked'; reason: string }
 
 export type SandboxStatus = {
@@ -648,7 +649,10 @@ export class SandboxRuntimeService {
     }
     try {
       await ensureWorkspaceSandbox()
-      return { mode: 'sandbox', workdir: workDirectory }
+      const env = new CredentialProvider(this.db).getSandboxGitEnv({ cwd: directory })
+      return Object.keys(env).length > 0
+        ? { mode: 'sandbox', workdir: workDirectory, env }
+        : { mode: 'sandbox', workdir: workDirectory }
     } catch (error) {
       logger.error('Failed to prepare the workspace sandbox', error)
       return { mode: 'blocked', reason: error instanceof Error ? error.message : String(error) }

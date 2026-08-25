@@ -398,33 +398,25 @@ export function createSettingsRoutes(db: Database, gitAuthService: GitAuthServic
 
       const sandboxChanged = sandboxPreferenceChanged(currentSettings.preferences.sandbox, validated.preferences.sandbox)
 
-      if (sandboxChanged) {
-        logger.info('Sandbox preference changed, marking OpenCode server restart as pending')
-        opencodeServerManager.markRestartPending()
-      }
-
-      let serverRestarted = false
-
       const credentialsChanged = validated.preferences.gitCredentials !== undefined &&
         JSON.stringify(currentSettings.preferences.gitCredentials || []) !== JSON.stringify(validated.preferences.gitCredentials)
 
       const identityChanged = validated.preferences.gitIdentity !== undefined &&
         JSON.stringify(currentSettings.preferences.gitIdentity || {}) !== JSON.stringify(validated.preferences.gitIdentity)
 
-      let reloadError: string | undefined
-      if (credentialsChanged || identityChanged) {
-        const changeType = [credentialsChanged && 'credentials', identityChanged && 'identity'].filter(Boolean).join(' and ')
-        logger.info(`Git ${changeType} changed, reloading OpenCode configuration`)
-        try {
-          await reloadOpenCodeConfig(openCodeSupervisor)
-          serverRestarted = true
-        } catch (error) {
-          logger.warn('Failed to reload OpenCode config after git settings change:', error)
-          reloadError = error instanceof Error ? error.message : 'Unknown error'
-        }
+      const restartReasons = [
+        sandboxChanged && 'sandbox',
+        credentialsChanged && 'git credentials',
+        identityChanged && 'git identity',
+      ].filter((reason): reason is string => typeof reason === 'string')
+
+      const restartRequired = restartReasons.length > 0
+      if (restartRequired) {
+        logger.info(`${restartReasons.join(', ')} changed, marking OpenCode server restart as pending`)
+        opencodeServerManager.markRestartPending()
       }
 
-      return c.json({ ...settings, serverRestarted, reloadError, ...(sandboxChanged ? { restartRequired: true } : {}) })
+      return c.json(restartRequired ? { ...settings, restartRequired: true } : settings)
     } catch (error) {
       logger.error('Failed to update settings:', error)
       if (error instanceof Error && error.message.startsWith('Invalid SSH key')) {

@@ -1,5 +1,9 @@
 import { sandboxPlanTimeoutMs, SANDBOX_UNAVAILABLE_PREFIX } from './sandbox/command'
-import { SANDBOX_SHELL_ENV_HOST_SHELL, SANDBOX_SHELL_ENV_WORKDIR } from './sandbox/shell-shim'
+import {
+  SANDBOX_FORWARDED_ENV_NAMES,
+  SANDBOX_SHELL_ENV_HOST_SHELL,
+  SANDBOX_SHELL_ENV_WORKDIR,
+} from './sandbox/shell-shim'
 
 export const SANDBOX_PLAN_TIMEOUT_MS = sandboxPlanTimeoutMs()
 
@@ -11,6 +15,7 @@ var PLAN_TIMEOUT_MS = ${SANDBOX_PLAN_TIMEOUT_MS}
 var SHELL_SHIM_PATH = ${JSON.stringify(shellShimPath)}
 var ENV_WORKDIR = ${JSON.stringify(SANDBOX_SHELL_ENV_WORKDIR)}
 var ENV_HOST_SHELL = ${JSON.stringify(SANDBOX_SHELL_ENV_HOST_SHELL)}
+var FORWARDED_ENV_NAMES = ${JSON.stringify(SANDBOX_FORWARDED_ENV_NAMES)}
 
 function isEnforced() {
   return process.env.OCM_SANDBOX_ENFORCED === 'true'
@@ -78,7 +83,7 @@ async function planSandboxShell(cwd) {
   if (plan === null || typeof plan !== 'object' || plan.mode !== 'sandbox' || typeof plan.workdir !== 'string' || plan.workdir.length === 0) {
     throw unavailable(plan !== null && typeof plan === 'object' && typeof plan.reason === 'string' ? plan.reason : 'sandbox plan request returned an invalid response')
   }
-  return plan.workdir
+  return plan
 }
 
 export default async function () {
@@ -103,8 +108,15 @@ export default async function () {
       if (!existsSync(SHELL_SHIM_PATH)) {
         throw unavailable('the sandbox shell shim is missing at ' + SHELL_SHIM_PATH)
       }
-      var workdir = await planSandboxShell(input.cwd)
-      if (!lockAccessor(output.env, ENV_WORKDIR, workdir)) {
+      var plan = await planSandboxShell(input.cwd)
+      if (plan.env !== null && typeof plan.env === 'object') {
+        for (var name of FORWARDED_ENV_NAMES) {
+          if (typeof plan.env[name] === 'string') {
+            output.env[name] = plan.env[name]
+          }
+        }
+      }
+      if (!lockAccessor(output.env, ENV_WORKDIR, plan.workdir)) {
         throw unavailable('sandbox enforcement could not pin the sandbox working directory; aborting before the command runs on the host')
       }
     },

@@ -6,6 +6,7 @@ import path from 'node:path'
 import { getReposPath } from '@opencode-manager/shared/config/env'
 import { WORKSPACE_SANDBOX_NAME } from '../../../src/services/sandbox/command'
 import {
+  SANDBOX_FORWARDED_ENV_NAMES,
   SANDBOX_SHELL_ENV_HOST_SHELL,
   SANDBOX_SHELL_ENV_WORKDIR,
 } from '../../../src/services/sandbox/shell-shim'
@@ -76,6 +77,64 @@ describe('sandbox shell shim', () => {
         '-c',
         command,
       ])
+    } finally {
+      if (originalMsbPath === undefined) {
+        delete process.env.MSB_PATH
+      } else {
+        process.env.MSB_PATH = originalMsbPath
+      }
+      rmSync(fakeBin, { recursive: true, force: true })
+      rmSync(configHome, { recursive: true, force: true })
+    }
+  })
+
+  it('forwards only the allow-listed credential env into the guest as -e pairs, ahead of the command', async () => {
+    const fakeBin = mkdtempSync(path.join(tmpdir(), 'ocm-shim-msb-'))
+    const configHome = mkdtempSync(path.join(tmpdir(), 'ocm-shim-config-'))
+    const msbPath = path.join(fakeBin, 'msb')
+    const captureFile = path.join(fakeBin, 'argv.txt')
+    writeArgvCapturingFakeMsb(msbPath, captureFile)
+    const originalMsbPath = process.env.MSB_PATH
+    process.env.MSB_PATH = msbPath
+    try {
+      vi.resetModules()
+      const shimMod = await import('../../../src/services/sandbox/shell-shim')
+      const commandMod = await import('../../../src/services/sandbox/command')
+      commandMod.overrideSandboxExecutableTrustValidator(() => true)
+      const shimPath = await shimMod.ensureSandboxShellShim(configHome)
+
+      const directory = path.join(getReposPath(), 'foo')
+      const extraheaderValue = 'AUTHORIZATION: basic eDphYmMgZGVm'
+      const result = spawnSync(shimPath, ['-c', 'echo -e sentinel'], {
+        encoding: 'utf8',
+        env: {
+          ...process.env,
+          [SANDBOX_SHELL_ENV_WORKDIR]: directory,
+          GIT_CONFIG_COUNT: '1',
+          GIT_CONFIG_KEY_0: 'http.https://github.com/.extraheader',
+          GIT_CONFIG_VALUE_0: extraheaderValue,
+          OCM_INTERNAL_TOKEN: 'must-not-be-forwarded',
+        },
+      })
+      expect(result.status).toBe(0)
+
+      const argv = readFileSync(captureFile, 'utf8').split('\0').filter((element) => element !== '')
+
+      expect(argv).toContain('-e')
+      expect(argv).toContain('GIT_CONFIG_COUNT=1')
+      expect(argv).toContain(`GIT_CONFIG_VALUE_0=${extraheaderValue}`)
+
+      const separatorIndex = argv.indexOf('--')
+      expect(argv.slice(separatorIndex)).toEqual(['--', 'sh', '-c', 'echo -e sentinel'])
+      expect(argv.slice(0, separatorIndex).filter((element) => element === '-e')).toHaveLength(3)
+
+      expect(argv.some((element) => element.startsWith('OCM_INTERNAL_TOKEN='))).toBe(false)
+      for (const element of argv) {
+        if (!element.includes('=') || element === '--') continue
+        const name = element.slice(0, element.indexOf('='))
+        if (!SANDBOX_FORWARDED_ENV_NAMES.includes(name as never)) continue
+        expect(SANDBOX_FORWARDED_ENV_NAMES).toContain(name)
+      }
     } finally {
       if (originalMsbPath === undefined) {
         delete process.env.MSB_PATH

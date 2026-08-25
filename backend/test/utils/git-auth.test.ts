@@ -237,6 +237,37 @@ describe('createGitEnv', () => {
     expect(env.GIT_CONFIG_COUNT).toBe('1')
     expect(env.GIT_CONFIG_KEY_0).toBe('http.https://github.com/.extraheader')
   })
+
+  it('emits a single extraheader per host so git cannot send competing Authorization headers', () => {
+    const env = createGitEnv([
+      { name: 'first', host: 'github.com', type: 'pat', token: 'first-token' },
+      { name: 'second', host: 'https://github.com/', type: 'pat', token: 'second-token' },
+    ])
+
+    expect(env.GIT_CONFIG_COUNT).toBe('1')
+    expect(env.GIT_CONFIG_KEY_0).toBe('http.https://github.com/.extraheader')
+    expect(env.GIT_CONFIG_VALUE_0).toBe(
+      `AUTHORIZATION: basic ${Buffer.from('x-access-token:first-token', 'utf8').toString('base64')}`
+    )
+    expect(env.GIT_CONFIG_KEY_1).toBeUndefined()
+  })
+
+  it('lets the preferred credential win its host over other credentials for that host', () => {
+    const env = createGitEnv(
+      [
+        { name: 'first', host: 'github.com', type: 'pat', token: 'first-token' },
+        { name: 'gitlab', host: 'gitlab.com', type: 'pat', token: 'gitlab-token' },
+      ],
+      { name: 'repo-bound', host: 'github.com', type: 'pat', token: 'repo-bound-token' }
+    )
+
+    expect(env.GIT_CONFIG_COUNT).toBe('2')
+    expect(env.GIT_CONFIG_KEY_0).toBe('http.https://github.com/.extraheader')
+    expect(env.GIT_CONFIG_VALUE_0).toBe(
+      `AUTHORIZATION: basic ${Buffer.from('x-access-token:repo-bound-token', 'utf8').toString('base64')}`
+    )
+    expect(env.GIT_CONFIG_KEY_1).toBe('http.https://gitlab.com/.extraheader')
+  })
 })
 
 describe('createGhCliEnv', () => {

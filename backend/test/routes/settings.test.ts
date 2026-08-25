@@ -1690,7 +1690,7 @@ describe('Settings Routes - OpenCode Upgrade', () => {
     })
   })
 
-  describe('PATCH / - sandbox preference restart pending', () => {
+  describe('PATCH / - restart pending', () => {
     it('marks the OpenCode server restart pending when sandbox.enabled changes', async () => {
       mockGetSettings.mockReturnValue({
         preferences: { sandbox: { enabled: false } },
@@ -1751,6 +1751,78 @@ describe('Settings Routes - OpenCode Upgrade', () => {
       const res = await settingsApp.fetch(req)
 
       expect(res.status).toBe(200)
+      expect(opencodeServerManager.markRestartPending).not.toHaveBeenCalled()
+    })
+
+    it('requires a restart when git credentials change instead of reloading config', async () => {
+      const credential = { id: 'cred-1', name: 'gh', host: 'github.com', type: 'pat', token: 'new-token' }
+      mockGetSettings.mockReturnValue({
+        preferences: { gitCredentials: [{ ...credential, token: 'old-token' }] },
+        updatedAt: 1,
+      })
+      mockUpdateSettings.mockReturnValue({
+        preferences: { gitCredentials: [credential] },
+        updatedAt: 2,
+      })
+
+      const req = new Request('http://localhost/', {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ preferences: { gitCredentials: [credential] } }),
+      })
+      const res = await settingsApp.fetch(req)
+      const json = await res.json() as Record<string, unknown>
+
+      expect(res.status).toBe(200)
+      expect(json.restartRequired).toBe(true)
+      expect(opencodeServerManager.markRestartPending).toHaveBeenCalledTimes(1)
+      expect(mockReloadConfig).not.toHaveBeenCalled()
+    })
+
+    it('requires a restart when the git identity changes', async () => {
+      mockGetSettings.mockReturnValue({
+        preferences: { gitIdentity: { name: 'Old', email: 'old@example.com' } },
+        updatedAt: 1,
+      })
+      mockUpdateSettings.mockReturnValue({
+        preferences: { gitIdentity: { name: 'New', email: 'new@example.com' } },
+        updatedAt: 2,
+      })
+
+      const req = new Request('http://localhost/', {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ preferences: { gitIdentity: { name: 'New', email: 'new@example.com' } } }),
+      })
+      const res = await settingsApp.fetch(req)
+      const json = await res.json() as Record<string, unknown>
+
+      expect(res.status).toBe(200)
+      expect(json.restartRequired).toBe(true)
+      expect(opencodeServerManager.markRestartPending).toHaveBeenCalledTimes(1)
+    })
+
+    it('does not require a restart when git credentials are resubmitted unchanged', async () => {
+      const credential = { id: 'cred-1', name: 'gh', host: 'github.com', type: 'pat', token: 'same-token' }
+      mockGetSettings.mockReturnValue({
+        preferences: { gitCredentials: [credential] },
+        updatedAt: 1,
+      })
+      mockUpdateSettings.mockReturnValue({
+        preferences: { gitCredentials: [credential] },
+        updatedAt: 1,
+      })
+
+      const req = new Request('http://localhost/', {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ preferences: { gitCredentials: [credential] } }),
+      })
+      const res = await settingsApp.fetch(req)
+      const json = await res.json() as Record<string, unknown>
+
+      expect(res.status).toBe(200)
+      expect(json.restartRequired).toBeUndefined()
       expect(opencodeServerManager.markRestartPending).not.toHaveBeenCalled()
     })
   })

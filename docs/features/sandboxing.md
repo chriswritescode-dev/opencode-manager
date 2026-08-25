@@ -15,7 +15,7 @@ The microVM sees repositories through bind mounts at the same paths used by the 
 | Chat session `bash` tool calls | Yes |
 | Scheduled run `bash` tool calls | Yes |
 | Subagent `bash` tool calls | Yes |
-| WebUI `!command` shell mode (`POST /session/:id/shell`) | No; normal OpenCode behavior |
+| WebUI `!command` shell mode (`POST /session/:id/shell`) | Yes; it carries a tool call id like the `bash` tool, so it is planned and routed into the microVM. It is not badged in the UI because the surface fires no `tool.execute.after` hook |
 | Slash-command shell templates (`` !`cmd` ``, `POST /session/:id/command`) | No; normal OpenCode behavior |
 | PTY terminals (`POST /pty`, `/pty/:id/connect`) | No; normal OpenCode behavior |
 | OpenCode file tools | No |
@@ -45,9 +45,11 @@ Configured extensions execute with OpenCode's normal host-process privileges. Th
 
 ## Other Shell Surfaces
 
-WebUI `!command` shell mode, slash-command shell templates, and PTY terminals follow OpenCode's normal host-process behavior during enforcement. Only the OpenCode `bash` tool is routed into the microVM; these surfaces are not sandboxed.
+Slash-command shell templates and PTY terminals follow OpenCode's normal host-process behavior during enforcement. WebUI `!command` shell mode **is** sandboxed: OpenCode builds a synthetic tool part for it and passes that part's call id to `shell.env`, so it is planned and routed into the microVM exactly like an agent `bash` call.
 
-They also spawn the shim, because it is the configured shell, but no working directory is injected for them, so the shim passes the command straight through to the host shell. PTY terminals receive the user's configured shell; `!command` shell mode and slash-command shell templates fall back to the shell the Manager resolved at startup rather than a login shell.
+The unsandboxed surfaces also spawn the shim, because it is the configured shell, but no working directory is injected for them, so the shim passes the command straight through to the host shell. PTY terminals receive the user's configured shell; slash-command shell templates fire no `shell.env` hook at all and fall back to the shell the Manager resolved at startup rather than a login shell.
+
+The `shell.env` hook input carries only `{ cwd, sessionID?, callID? }`, so the presence of a call id is the only available discriminator. It separates session-attached shells (the `bash` tool and `!command` mode) from PTY creation, which has no session context. It cannot distinguish the `bash` tool from `!command` mode.
 
 The OpenCode server binds to the configured `OPENCODE_HOST` regardless of enforcement, so the password guard for non-loopback hosts applies in both modes.
 
@@ -70,7 +72,7 @@ All projects share one microVM named `ocm-workspace`:
 - Each command supplies its own working directory through `msb exec -w`.
 - A session outside the mounted roots is refused rather than executed on the host.
 - The Manager verifies the microVM image, resources, user, network policy, mounts (including the `/tmp` tmpfs size and mount options), and labels before reuse. `/tmp` is the only tmpfs the microVM may carry; any other tmpfs fails attestation.
-- MSB pulls the configured `SANDBOX_IMAGE` (default `node:24`) automatically; no custom image build is needed.
+- MSB pulls the configured `SANDBOX_IMAGE` (default `docker.io/cstechdev/ocm-sandbox:latest`) automatically; see [Sandbox Guest Image](#sandbox-guest-image) to build your own.
 - The Manager pins a neutral `/usr/bin/env` entrypoint, so the image's own OCI entrypoint is never inherited.
 - A stale or unverifiable microVM is removed and recreated.
 - Manager shutdown and an enforced-to-disabled restart stop the managed microVM.
@@ -128,12 +130,69 @@ The enforcement stamp remains authoritative for the lifetime of the OpenCode chi
 - User-created OpenCode worktrees outside the mounted roots are created normally; only a later agent `bash` call whose working directory is outside the mounts is refused by the planner.
 - External repositories symlinked into `/workspace/repos` remain outside the microVM because the link target is not mounted.
 
+## Git Credentials in the Sandbox
+
+The guest environment is empty by default, so a sandboxed `git push`, `git pull`, or `gh` call has no credentials and fails to authenticate. This applies to agent `bash` calls and to WebUI `!command` shell mode alike, since both are routed into the microVM.
+
+Forwarding is opt-in, off by default:
+
+| Scope | Where | Effect |
+| --- | --- | --- |
+| Global | Settings → Sandbox → *Git credentials in sandbox* (`preferences.sandbox.gitCredentials`) | Default for every repo |
+| Per repo | `repo_settings.sandboxGitCredentials` | Overrides the global default in either direction |
+
+When enabled, the planner resolves credentials on the host and the shim forwards them into the microVM with `msb exec -e`:
+
+- One `http.<host>.extraheader` pair per configured host, so a command can authenticate against every host you have a credential for, not just the repo's own remote.
+- Where several credentials share a host, the repo-bound credential wins, then `defaultGitCredentialId`. Exactly one credential is ever sent per host — git treats `http.<url>.extraheader` as multi-valued and would otherwise send competing `Authorization` headers.
+- `GIT_AUTHOR_*` / `GIT_COMMITTER_*` so `git commit` has an identity, and `GH_TOKEN` / `GITHUB_TOKEN` for `gh`.
+- At most 16 hosts. Beyond that the Manager logs a warning and forwards the first 16 rather than emitting a `GIT_CONFIG_COUNT` that git would reject.
+
+Credentials are resolved per command, so changing a credential takes effect on the next sandboxed command without restarting the OpenCode server.
+
+Understand the trade-off before enabling it. `msb exec -e` is the only injection mechanism microsandbox offers, so the token is visible in the `msb` process arguments on the host and in the guest environment for that command's lifetime. A prompt-injected agent inside the microVM can read and exfiltrate any credential you forward. Leave it off for repos where the agent handles untrusted input, and prefer per-repo opt-in over the global switch.
+
+## Sandbox Guest Image
+
+`SANDBOX_IMAGE` defaults to `docker.io/cstechdev/ocm-sandbox:latest`, built from `Dockerfile.sandbox` in this repository and published for `linux/amd64` and `linux/arm64` by the `Sandbox Image` workflow.
+
+It is `node:24` (Debian 12, `buildpack-deps` based), so the compile toolchain is already present, plus two additions:
+
+| Tool | Source | Notes |
+| --- | --- | --- |
+| `gcc` / `g++` / `make` / `ld` / `pkg-config` | `node:24` | GCC 12.2, GNU Make 4.3 |
+| `glib-2.0` | `node:24` | 2.74.6, with `pkg-config` metadata |
+| `git`, `ssh`, `python3`, `curl`, `unzip` | `node:24` | git 2.39.5 |
+| `gh` | official `cli.github.com` apt repo | Current release. Debian's own package is several years stale |
+| Chromium | Playwright (`PLAYWRIGHT_VERSION`, default `1.56.0`) | Installed to `PLAYWRIGHT_BROWSERS_PATH=/ms-playwright`, world-readable so `SANDBOX_EXEC_USER` can launch it |
+
+`NODE_PATH=/usr/local/lib/node_modules` is set so agent code can `require("playwright")` from any working directory. It is only a resolution fallback; a project-local `node_modules` still wins.
+
+Chromium launches headless as the non-root exec user without extra flags. If your host kernel restricts user namespaces so Chromium's own sandbox fails, pass `--no-sandbox` — the microVM is already the isolation boundary.
+
+The image is roughly 3.3 GB against a 1.6 GB `node:24` baseline, almost entirely Chromium and its dependencies. The first pull is bounded by `SANDBOX_START_TIMEOUT_MS`; raise it on slow links.
+
+### Using your own image
+
+Point `SANDBOX_IMAGE` at any OCI reference the host can pull. It must contain every tool the agent expects to run, and a shell at `/bin/sh`. Changing the value is safe at runtime: the running microVM fails image attestation and is recreated automatically.
+
+To build it on the server instead of pulling:
+
+```bash
+docker build -f Dockerfile.sandbox -t my-sandbox:local .
+# then set SANDBOX_IMAGE=my-sandbox:local
+```
+
+Pin a concrete tag or digest rather than a floating one. Attestation compares the image *reference string*, so a mutable tag keeps passing attestation while the underlying image drifts.
+
+Override the Playwright version at build time with `--build-arg PLAYWRIGHT_VERSION=1.57.0`. If your project drives Playwright itself, match this version to the one in your `package.json`; a mismatched browser revision makes Playwright refuse to launch.
+
 ## Caveats
 
 - The first command pays image pull and microVM boot latency, bounded by `SANDBOX_START_TIMEOUT_MS`.
 - `SANDBOX_IMAGE` must contain every tool the agent expects to run.
 - `SANDBOX_EXEC_USER` must match the workspace owner so commands can write mounted files.
-- A `shell` the user configured does not apply to `!command` shell mode or slash-command shell templates while enforcement is on.
-- Credentials injected into OpenCode's host shell environment are not forwarded into the microVM.
+- A `shell` the user configured does not apply to slash-command shell templates while enforcement is on, and is bypassed for `!command` shell mode because that surface is routed into the microVM.
+- Credentials injected into OpenCode's host shell environment are not forwarded into the microVM unless git credential forwarding is enabled; see [Git Credentials in the Sandbox](#git-credentials-in-the-sandbox).
 - Message parts recorded by older releases still hold the old `msb exec` wrapper; the WebUI unwraps them for display and still badges them.
 - Plugins and other configured host-process extensions are trusted and are not isolated by agent `bash` sandboxing.
