@@ -227,6 +227,9 @@ describe('docker lifecycle scripts', () => {
 describe('sandbox compose overlay', () => {
   const overlayPath = join(repoRoot, 'docker-compose.sandbox.yml')
   const overlay = read(overlayPath)
+  const overlayDirectives = overlay
+    .split('\n')
+    .filter((line) => line.trim() !== '' && !line.trimStart().startsWith('#'))
 
   it('defaults SANDBOX_EXEC_USER from PUID so the guest identity tracks the workspace owner', () => {
     expect(overlay).toContain('- SANDBOX_EXEC_USER=${SANDBOX_EXEC_USER:-${PUID:-1000}}')
@@ -239,10 +242,29 @@ describe('sandbox compose overlay', () => {
   })
 
   it('grants KVM and persists microsandbox state only in the overlay', () => {
-    expect(overlay).toContain('privileged: true')
     expect(overlay).toContain('"/dev/kvm:/dev/kvm"')
+    expect(overlay).toContain('"/dev/net/tun:/dev/net/tun"')
+    expect(overlay).toContain('- NET_ADMIN')
     expect(overlay).toContain('microsandbox-data:/home/node/.microsandbox')
     expect(overlay).toMatch(/^volumes:\n(?:.*\n)*?\s+microsandbox-data:/m)
+  })
+
+  it('grants only the devices and capability msb needs, never full container privilege', () => {
+    expect(overlayDirectives.join('\n')).not.toContain('privileged')
+  })
+
+  it('keeps the sandbox overlay docs snippet in sync with docker-compose.sandbox.yml', () => {
+    const docs = read(dockerDocsPath)
+    const docsOverlay = [...docs.matchAll(/```yaml\n([\s\S]*?)\n```/g)]
+      .map((match) => match[1]!)
+      .find((block) => block.includes('microsandbox-data'))
+
+    expect(docsOverlay, 'docs must contain the sandbox overlay yaml block').toBeDefined()
+
+    const significantLines = (source: string[]) =>
+      source.filter((line) => line.trim() !== '').map((line) => line.replace(/\s+$/, '')).join('\n')
+
+    expect(significantLines(docsOverlay!.split('\n'))).toBe(significantLines(overlayDirectives))
   })
 })
 

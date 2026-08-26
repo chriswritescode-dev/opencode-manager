@@ -319,14 +319,16 @@ With a fresh Docker volume, first startup imports the host OpenCode config and s
 
 ## Agent Sandboxing Overlay
 
-Optional KVM-backed agent sandboxing (see [Agent Sandboxing](../features/sandboxing.md)). The sandbox overlay (`docker-compose.sandbox.yml`) grants the container KVM access, passes sandbox tuning through from `.env`, and persists microsandbox state:
+Optional KVM-backed agent sandboxing (see [Agent Sandboxing](../features/sandboxing.md)). The sandbox overlay (`docker-compose.sandbox.yml`) grants the container KVM and guest-networking access, passes sandbox tuning through from `.env`, and persists microsandbox state. It deliberately avoids `privileged: true`, granting only the specific devices and capability `msb` needs:
 
 ```yaml
 services:
   app:
-    privileged: true
     devices:
       - "/dev/kvm:/dev/kvm"
+      - "/dev/net/tun:/dev/net/tun"
+    cap_add:
+      - NET_ADMIN
     environment:
       - SANDBOX_IMAGE=${SANDBOX_IMAGE:-docker.io/cstechdev/ocm-sandbox:latest}
       - SANDBOX_MEMORY=${SANDBOX_MEMORY:-4G}
@@ -349,7 +351,7 @@ Start the Manager with the overlay:
 docker compose -f docker-compose.yml -f docker-compose.sandbox.yml up -d
 ```
 
-The overlay requires a Linux host with `/dev/kvm`. Docker Desktop on macOS and Windows cannot provide `/dev/kvm`, so the sandbox toggle in Settings stays disabled there.
+The overlay requires a Linux host with `/dev/kvm`. Docker Desktop on macOS and Windows cannot provide `/dev/kvm`, so the sandbox toggle in Settings stays disabled there. `/dev/net/tun` and `NET_ADMIN` provide guest networking for `SANDBOX_NET=public`; if `msb` reports a missing device or capability on a particular host, add that specific entry rather than enabling full privilege.
 
 `SANDBOX_EXEC_USER` defaults to the numeric `PUID` (falling back to `1000`), and the Manager runs every sandboxed command as that numeric uid (with the Manager's gid). Because the entrypoint realigns the container's `node` account to `PUID`/`PGID` and re-owns `/workspace`, a non-1000 `PUID` (for example `PUID=1001`) writes to the mounted repositories with the same identity as the workspace owner. If a configured `SANDBOX_EXEC_USER` cannot match the workspace owner, the toggle reports enforcement as unavailable instead of running broken commands.
 

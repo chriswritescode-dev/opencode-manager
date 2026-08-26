@@ -217,12 +217,12 @@ function needsOpenCodeRestart(
   return ['agent', 'plugin', 'skills', 'provider'].some((field) => didConfigFieldChange(previous, next, field))
 }
 
-function sandboxPreferenceChanged(
+function sandboxEnforcementChanged(
   previous: SandboxPreferences | undefined,
   next: SandboxPreferences | undefined,
 ): boolean {
   if (next === undefined) return false
-  return JSON.stringify(previous ?? {}) !== JSON.stringify(next)
+  return (previous?.enabled ?? false) !== next.enabled
 }
 
 function parseOptionalRepoId(value: string | undefined): number | undefined {
@@ -396,7 +396,7 @@ export function createSettingsRoutes(db: Database, gitAuthService: GitAuthServic
       const currentSettings = settingsService.getSettings(userId)
       const settings = settingsService.updateSettings(validated.preferences, userId)
 
-      const sandboxChanged = sandboxPreferenceChanged(currentSettings.preferences.sandbox, validated.preferences.sandbox)
+      const sandboxChanged = sandboxEnforcementChanged(currentSettings.preferences.sandbox, validated.preferences.sandbox)
 
       const credentialsChanged = validated.preferences.gitCredentials !== undefined &&
         JSON.stringify(currentSettings.preferences.gitCredentials || []) !== JSON.stringify(validated.preferences.gitCredentials)
@@ -435,9 +435,9 @@ export function createSettingsRoutes(db: Database, gitAuthService: GitAuthServic
       const currentSettings = settingsService.getSettings(userId)
       const settings = settingsService.resetSettings(userId)
 
-      const sandboxChanged = sandboxPreferenceChanged(currentSettings.preferences.sandbox, settings.preferences.sandbox)
+      const sandboxChanged = sandboxEnforcementChanged(currentSettings.preferences.sandbox, settings.preferences.sandbox)
       if (sandboxChanged) {
-        logger.info('Sandbox preference changed, marking OpenCode server restart as pending')
+        logger.info('Sandbox enforcement changed, marking OpenCode server restart as pending')
         opencodeServerManager.markRestartPending()
       }
 

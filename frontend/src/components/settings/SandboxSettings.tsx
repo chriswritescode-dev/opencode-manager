@@ -13,15 +13,25 @@ export function SandboxSettings() {
   const sandbox = health?.sandbox
   const isAvailable = sandbox?.available === true
   const enabled = preferences?.sandbox?.enabled ?? false
+  const gitCredentials = preferences?.sandbox?.gitCredentials ?? false
 
-  const handleToggle = async (next: boolean) => {
+  const saveSandbox = async (next: { enabled: boolean; gitCredentials: boolean }, message: string) => {
     try {
-      await updateSettingsAsync({ sandbox: { enabled: next } })
-      showToast.success(next ? 'Sandboxing enabled' : 'Sandboxing disabled')
+      await updateSettingsAsync({ sandbox: next })
+      showToast.success(message)
     } catch {
       showToast.error('Failed to update sandbox preference')
     }
   }
+
+  const handleToggle = (next: boolean) =>
+    saveSandbox({ enabled: next, gitCredentials }, next ? 'Sandboxing enabled' : 'Sandboxing disabled')
+
+  const handleGitCredentialsToggle = (next: boolean) =>
+    saveSandbox(
+      { enabled, gitCredentials: next },
+      next ? 'Git credentials will be forwarded into the sandbox' : 'Git credential forwarding disabled',
+    )
 
   return (
     <div className="rounded-lg border bg-card overflow-hidden">
@@ -56,6 +66,22 @@ export function SandboxSettings() {
             disabled={isUpdating || (!isAvailable && !enabled)}
             onCheckedChange={handleToggle}
             aria-label="Toggle sandbox"
+          />
+        </div>
+
+        <div className="flex items-center justify-between gap-3 border-t pt-3">
+          <div className="min-w-0 space-y-0.5">
+            <p className="text-sm">Git credentials in sandbox</p>
+            <p className="text-xs text-muted-foreground">
+              Forward git credentials into the microVM so sandboxed git and gh commands can authenticate. A
+              prompt-injected agent can exfiltrate any credential you forward.
+            </p>
+          </div>
+          <Switch
+            checked={gitCredentials}
+            disabled={isUpdating || !enabled}
+            onCheckedChange={handleGitCredentialsToggle}
+            aria-label="Toggle git credentials in sandbox"
           />
         </div>
 

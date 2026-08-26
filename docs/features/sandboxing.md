@@ -139,7 +139,7 @@ Forwarding is opt-in, off by default:
 | Scope | Where | Effect |
 | --- | --- | --- |
 | Global | Settings → Sandbox → *Git credentials in sandbox* (`preferences.sandbox.gitCredentials`) | Default for every repo |
-| Per repo | `repo_settings.sandboxGitCredentials` | Overrides the global default in either direction |
+| Per repo | `repo_settings.sandboxGitCredentials` | Overrides the global default in either direction. The planner honours it when resolving credentials, but nothing writes it yet — there is no UI or API for the per-repo override |
 
 When enabled, the planner resolves credentials on the host and the shim forwards them into the microVM with `msb exec -e`:
 
@@ -148,9 +148,9 @@ When enabled, the planner resolves credentials on the host and the shim forwards
 - `GIT_AUTHOR_*` / `GIT_COMMITTER_*` so `git commit` has an identity, and `GH_TOKEN` / `GITHUB_TOKEN` for `gh`.
 - At most 16 hosts. Beyond that the Manager logs a warning and forwards the first 16 rather than emitting a `GIT_CONFIG_COUNT` that git would reject.
 
-Credentials are resolved per command, so changing a credential takes effect on the next sandboxed command without restarting the OpenCode server.
+Both the switch and the credentials themselves are resolved per command, so turning forwarding on or off, or changing a credential, takes effect on the next sandboxed command without restarting the OpenCode server. Only the sandbox enable toggle requires a restart.
 
-Understand the trade-off before enabling it. `msb exec -e` is the only injection mechanism microsandbox offers, so the token is visible in the `msb` process arguments on the host and in the guest environment for that command's lifetime. A prompt-injected agent inside the microVM can read and exfiltrate any credential you forward. Leave it off for repos where the agent handles untrusted input, and prefer per-repo opt-in over the global switch.
+Understand the trade-off before enabling it. `msb exec -e` is the only injection mechanism microsandbox offers, so the token is visible in the `msb` process arguments on the host and in the guest environment for that command's lifetime. A prompt-injected agent inside the microVM can read and exfiltrate any credential you forward. The global switch is the only exposed control today, so enabling it applies to every repo; leave it off while any agent handles untrusted input.
 
 ## Sandbox Guest Image
 

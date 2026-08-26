@@ -1733,6 +1733,27 @@ describe('Settings Routes - OpenCode Upgrade', () => {
       expect(opencodeServerManager.markRestartPending).not.toHaveBeenCalled()
     })
 
+    it('does not mark the OpenCode server restart pending when only sandbox.gitCredentials changes', async () => {
+      mockGetSettings.mockReturnValue({
+        preferences: { sandbox: { enabled: true, gitCredentials: false } },
+        updatedAt: 1,
+      })
+      mockUpdateSettings.mockReturnValue({
+        preferences: { sandbox: { enabled: true, gitCredentials: true } },
+        updatedAt: 2,
+      })
+
+      const req = new Request('http://localhost/', {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ preferences: { sandbox: { enabled: true, gitCredentials: true } } }),
+      })
+      const res = await settingsApp.fetch(req)
+
+      expect(res.status).toBe(200)
+      expect(opencodeServerManager.markRestartPending).not.toHaveBeenCalled()
+    })
+
     it('does not mark the OpenCode server restart pending when sandbox is absent from the patch', async () => {
       mockGetSettings.mockReturnValue({
         preferences: { sandbox: { enabled: true } },

@@ -51,7 +51,7 @@ describe('SandboxSettings', () => {
 
     render(<SandboxSettings />)
 
-    expect(screen.getByRole('switch')).toBeChecked()
+    expect(screen.getByRole('switch', { name: 'Toggle sandbox' })).toBeChecked()
   })
 
   it('writes only the sandbox preference when toggled and shows the restart notice', async () => {
@@ -61,9 +61,9 @@ describe('SandboxSettings', () => {
 
     render(<SandboxSettings />)
 
-    await user.click(screen.getByRole('switch'))
+    await user.click(screen.getByRole('switch', { name: 'Toggle sandbox' }))
 
-    expect(updateSettingsAsync).toHaveBeenCalledWith({ sandbox: { enabled: true } })
+    expect(updateSettingsAsync).toHaveBeenCalledWith({ sandbox: { enabled: true, gitCredentials: false } })
     expect(screen.getByText('Restart the OpenCode server to apply sandbox changes.')).toBeInTheDocument()
   })
 
@@ -73,7 +73,7 @@ describe('SandboxSettings', () => {
 
     render(<SandboxSettings />)
 
-    expect(screen.getByRole('switch')).toBeDisabled()
+    expect(screen.getByRole('switch', { name: 'Toggle sandbox' })).toBeDisabled()
     expect(screen.getByText('KVM is not available on this host')).toBeInTheDocument()
   })
 
@@ -84,14 +84,14 @@ describe('SandboxSettings', () => {
 
     render(<SandboxSettings />)
 
-    const toggle = screen.getByRole('switch')
+    const toggle = screen.getByRole('switch', { name: 'Toggle sandbox' })
     expect(toggle).toBeChecked()
     expect(toggle).not.toBeDisabled()
     expect(screen.getByText('KVM is not available on this host')).toBeInTheDocument()
 
     await user.click(toggle)
 
-    expect(updateSettingsAsync).toHaveBeenCalledWith({ sandbox: { enabled: false } })
+    expect(updateSettingsAsync).toHaveBeenCalledWith({ sandbox: { enabled: false, gitCredentials: false } })
   })
 
   it('disables the switch while sandbox availability has not been reported', () => {
@@ -107,7 +107,7 @@ describe('SandboxSettings', () => {
 
     render(<SandboxSettings />)
 
-    expect(screen.getByRole('switch')).toBeDisabled()
+    expect(screen.getByRole('switch', { name: 'Toggle sandbox' })).toBeDisabled()
     expect(screen.getByText('Checking sandbox availability...')).toBeInTheDocument()
   })
 
@@ -127,8 +127,43 @@ describe('SandboxSettings', () => {
 
     render(<SandboxSettings />)
 
-    await user.click(screen.getByRole('switch'))
+    await user.click(screen.getByRole('switch', { name: 'Toggle sandbox' }))
 
     expect(vi.mocked(showToast.error)).toHaveBeenCalledWith('Failed to update sandbox preference')
+  })
+
+  it('preserves the git credential preference when the sandbox toggle changes', async () => {
+    const user = userEvent.setup()
+    const { updateSettingsAsync } = mockUseSettings({
+      preferences: { sandbox: { enabled: false, gitCredentials: true } },
+    })
+    mockHealth({ available: true, enforced: false })
+
+    render(<SandboxSettings />)
+
+    await user.click(screen.getByRole('switch', { name: 'Toggle sandbox' }))
+
+    expect(updateSettingsAsync).toHaveBeenCalledWith({ sandbox: { enabled: true, gitCredentials: true } })
+  })
+
+  it('enables git credential forwarding without changing the sandbox preference', async () => {
+    const user = userEvent.setup()
+    const { updateSettingsAsync } = mockUseSettings({ preferences: { sandbox: { enabled: true } } })
+    mockHealth({ available: true, enforced: false })
+
+    render(<SandboxSettings />)
+
+    await user.click(screen.getByRole('switch', { name: 'Toggle git credentials in sandbox' }))
+
+    expect(updateSettingsAsync).toHaveBeenCalledWith({ sandbox: { enabled: true, gitCredentials: true } })
+  })
+
+  it('disables the git credential switch while sandboxing is off', () => {
+    mockUseSettings()
+    mockHealth({ available: true, enforced: false })
+
+    render(<SandboxSettings />)
+
+    expect(screen.getByRole('switch', { name: 'Toggle git credentials in sandbox' })).toBeDisabled()
   })
 })
