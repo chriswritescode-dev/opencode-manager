@@ -42,8 +42,6 @@ function createMockClient(skills: Array<{ name: string; description: string; loc
     postJson: vi.fn(),
     setProviderAuth: vi.fn(),
     deleteProviderAuth: vi.fn(),
-    startMcpAuth: vi.fn(),
-    authenticateMcp: vi.fn(),
   } as unknown as OpenCodeClient
 }
 

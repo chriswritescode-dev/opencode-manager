@@ -8,7 +8,7 @@ import * as repoService from '../services/repo'
 import * as archiveService from '../services/archive'
 import { SettingsService } from '../services/settings'
 import { writeFileContent } from '../services/file-operations'
-import { restartOpenCode } from '../services/opencode-restart'
+import { restartOpenCodeAfterCommit } from '../services/opencode-restart'
 import type { OpenCodeSupervisor } from '../services/opencode-supervisor'
 import type { OpenCodeClient } from '../services/opencode/client'
 import { logger } from '../utils/logger'
@@ -314,7 +314,14 @@ app.get('/', async (c) => {
         return c.json({ error: body || 'Failed to create workspace' }, response.status as ContentfulStatusCode)
       }
 
-      return c.json(body ? JSON.parse(body) : { success: true })
+      let workspace: unknown
+      try {
+        workspace = body ? JSON.parse(body) : { success: true }
+      } catch {
+        return c.json({ error: 'Failed to create workspace' }, 500)
+      }
+
+      return c.json(workspace)
     } catch (error: unknown) {
       logger.error('Failed to create workspace:', error)
       return c.json({ error: getErrorMessage(error) }, 500)
@@ -392,10 +399,10 @@ app.get('/', async (c) => {
       logger.info(`Updated OpenCode config: ${openCodeConfigPath}`)
       
       logger.info('Restarting OpenCode server due to workspace config change')
-      await restartOpenCode(openCodeSupervisor)
+      const { restartFailed, restartError } = await restartOpenCodeAfterCommit(openCodeSupervisor)
       
       const updatedRepo = getRepoById(database, id)
-      return c.json(updatedRepo)
+      return c.json(restartFailed ? { ...updatedRepo, restartFailed, restartError } : updatedRepo)
     } catch (error: unknown) {
       logger.error('Failed to switch repo config:', error)
       return c.json({ error: getErrorMessage(error) }, 500)
@@ -568,11 +575,8 @@ app.get('/', async (c) => {
 
       const body = await c.req.json().catch(() => ({}))
       const options = AssistantModeInitRequestSchema.parse(body)
-      const protocol = c.req.header('x-forwarded-proto') || 'http'
-      const host = c.req.header('host') || 'localhost:5003'
-      const apiBaseUrl = `${protocol}://${host}/api/internal`
 
-      const status = await ensureAssistantMode(repo, { db: database, apiBaseUrl }, options)
+      const status = await ensureAssistantMode(repo, options)
       return c.json(status)
     } catch (error: unknown) {
       logger.error('Failed to initialize assistant mode:', error)

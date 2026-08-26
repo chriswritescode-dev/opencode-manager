@@ -108,6 +108,22 @@ When configured, users can enable push notifications in Settings → Notificatio
 | `OPENCODE_IMPORT_CONFIG_PATH` | Existing standalone OpenCode `opencode.json` to import on first startup | - |
 | `OPENCODE_IMPORT_STATE_PATH` | Existing standalone OpenCode state directory to import on first startup | - |
 
+## Agent Sandboxing
+
+Sandboxed agent commands run inside a microVM managed by `msb` (see [Agent Sandboxing](../features/sandboxing.md)). Requires a Linux host with `/dev/kvm` and the sandbox compose overlay.
+
+| Variable | Description | Default |
+|----------|-------------|---------|
+| `MSB_PATH` | Path to the `msb` executable | `msb` |
+| `MSB_LIBKRUNFW_PATH` | Path to the `libkrunfw` firmware library used by `msb` (set in the container image) | `/opt/microsandbox/lib/libkrunfw.so` |
+| `SANDBOX_IMAGE` | OCI image the microVM boots from. See [Sandbox Guest Image](../features/sandboxing.md#sandbox-guest-image) for what the default ships and how to build your own | `docker.io/cstechdev/ocm-sandbox:latest` |
+| `SANDBOX_MEMORY` | MicroVM memory (e.g. `4G`) | `4G` |
+| `SANDBOX_CPUS` | MicroVM CPU count | `2` |
+| `SANDBOX_EXEC_USER` | Guest identity sandboxed commands run as: a numeric `uid`, a numeric `uid:gid`, or a guest username. A numeric uid must match the Manager's effective uid (`PUID`); the compose overlay defaults it to `${PUID:-1000}`. A guest username is resolved to the Manager's effective `uid:gid` so writes to the mounted project roots always succeed. When a configured numeric identity cannot write the workspace, enforcement is reported unavailable | `${PUID:-1000}` via the overlay, otherwise `node` |
+| `SANDBOX_NET` | Network mode for the microVM: `public`, `private`, or `host`, or a comma-separated composition (for example `public,host`). Passed to `msb run --net` and attested against the profile's canonical network policy | `public` |
+| `SANDBOX_START_TIMEOUT_MS` | Timeout for microVM startup, in milliseconds | `300000` |
+| `SANDBOX_EXEC_TIMEOUT_MS` | Timeout for a single sandboxed command, in milliseconds | `600000` |
+
 ## Timeouts
 
 | Variable | Description | Default |

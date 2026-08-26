@@ -1,6 +1,7 @@
 import type { LucideIcon } from 'lucide-react'
 import { Plug, Sparkles, ShieldOff, CalendarClock, GitCommitHorizontal, Code2, Settings, LogOut, Plus, Bot, Folder, Clock, SquarePlus, Home } from 'lucide-react'
 import { getAssistantPath, isAssistantPath } from '@/lib/navigation'
+import type { SidebarActionKey } from '@/hooks/useSidebarAction'
 
 export interface MoreDrawerItem {
   key: string
@@ -16,7 +17,7 @@ export interface NavPrimaryCta {
   label: string
   icon: LucideIcon
   to?: string
-  onSelect?: 'new-session' | 'new-repo' | 'new-schedule'
+  onSelect?: SidebarActionKey
   variant?: 'primary' | 'secondary'
 }
 

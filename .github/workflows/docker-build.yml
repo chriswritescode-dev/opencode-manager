@@ -16,14 +16,16 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v4
 
-      - name: Get latest tool versions
+      - name: Resolve tool versions (bundled OpenCode and microsandbox for reproducibility)
         id: versions
         run: |
           UV_VERSION=$(git ls-remote --tags --sort=-v:refname https://github.com/astral-sh/uv.git 'refs/tags/[0-9]*' | head -1 | sed 's/.*refs\/tags\///')
-          OPENCODE_VERSION=$(git ls-remote --tags --sort=-v:refname https://github.com/anomalyco/opencode.git 'refs/tags/v[0-9]*' | head -1 | sed 's/.*refs\/tags\/v//')
+          OPENCODE_VERSION=1.18.16
+          MICROSANDBOX_VERSION=0.6.8
           echo "uv=${UV_VERSION}" >> $GITHUB_OUTPUT
           echo "opencode=${OPENCODE_VERSION}" >> $GITHUB_OUTPUT
-          echo "Detected versions: uv=${UV_VERSION}, opencode=${OPENCODE_VERSION}"
+          echo "microsandbox=${MICROSANDBOX_VERSION}" >> $GITHUB_OUTPUT
+          echo "Versions: uv=${UV_VERSION} (latest), opencode=${OPENCODE_VERSION} (bundled default), microsandbox=${MICROSANDBOX_VERSION} (pinned)"
 
       - name: Docker meta
         id: meta
@@ -60,8 +62,8 @@ jobs:
           build-args: |
             UV_VERSION=${{ steps.versions.outputs.uv }}
             OPENCODE_VERSION=${{ steps.versions.outputs.opencode }}
+            MICROSANDBOX_VERSION=${{ steps.versions.outputs.microsandbox }}
           cache-from: type=gha
           cache-to: type=gha,mode=max
           target: runner
-
 

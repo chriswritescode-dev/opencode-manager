@@ -274,12 +274,12 @@ export class OpenCodeClient {
     })
   }
 
-  async respondToPermission(sessionID: string, permissionID: string, response: 'once' | 'always' | 'reject') {
-    return fetchWrapper(`${this.baseURL}/session/${sessionID}/permissions/${permissionID}`, {
+  async respondToPermission(permissionID: string, response: 'once' | 'always' | 'reject') {
+    return fetchWrapper(`${this.baseURL}/permission/${permissionID}/reply`, {
       method: 'POST',
       params: this.getParams(),
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ response }),
+      body: JSON.stringify({ reply: response }),
     })
   }
 

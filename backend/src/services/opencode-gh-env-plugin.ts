@@ -1,11 +1,5 @@
-import { promises as fs } from 'fs'
-import path from 'path'
-import { logger } from '../utils/logger'
-import { mkdirSafe } from '../utils/fs-safe'
-
-const PLUGIN_FILENAME = 'ocm-gh-env.js'
-
-const PLUGIN_SOURCE = `const TTL_MS = 5000
+export function buildGhEnvPluginSource(): string {
+  return `const TTL_MS = 5000
 let cache = new Map()
 
 async function fetchGhEnv(cwd) {
@@ -41,17 +35,4 @@ export default async function () {
   }
 }
 `
-
-export function getGhEnvPluginDir(configHome: string): string {
-  return path.join(configHome, 'opencode', 'plugin')
-}
-
-export async function installGhEnvPlugin(configHome: string): Promise<void> {
-  try {
-    const dir = getGhEnvPluginDir(configHome)
-    await mkdirSafe(dir)
-    await fs.writeFile(path.join(dir, PLUGIN_FILENAME), PLUGIN_SOURCE, 'utf-8')
-  } catch (error) {
-    logger.warn('Failed to install gh-env OpenCode plugin:', error)
-  }
 }

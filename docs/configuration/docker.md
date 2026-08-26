@@ -81,6 +81,7 @@ services:
     volumes:
       - ${OCM_WORKSPACE_HOST_PATH:-opencode-workspace}:/workspace
       - opencode-data:/app/data
+      - opencode-bin:/home/node/.opencode/bin
     restart: unless-stopped
     healthcheck:
       test: ["CMD", "curl", "-f", "http://localhost:5003/api/health"]
@@ -93,6 +94,8 @@ volumes:
   opencode-workspace:
     driver: local
   opencode-data:
+    driver: local
+  opencode-bin:
     driver: local
 ```
 
@@ -127,8 +130,10 @@ VAPID_SUBJECT=mailto:you@example.com
 The container entrypoint (`scripts/docker-entrypoint.sh`) automatically:
 
 1. **Verifies Bun** is installed (installed at build time, fallback install if missing)
-2. **Verifies OpenCode** is installed (installed at build time, fallback install if missing)
-3. **Upgrades OpenCode** if below minimum version (1.0.137)
+2. **Reconciles the persisted OpenCode home binary** (`/home/node/.opencode/bin/opencode`):
+   - any valid persisted binary is retained, including a user-selected version older than the image-bundled `OPENCODE_BUNDLED_VERSION`;
+   - a persisted binary that is malformed or unversioned is removed (only that binary), so `PATH` falls back to the image-bundled `/usr/local/bin/opencode` without a download
+3. **Installs OpenCode** only when no usable binary is present: if opencode is missing entirely, or if the surviving binary is still below the minimum version (1.0.137), the pinned bundled version is downloaded into the persisted `bin` volume
 4. **Validates AUTH_SECRET** is set (required for startup)
 5. **Aligns the `node` account** to `PUID`/`PGID` (default `1000`) before chowning the workspace, the `/app/data` directory, and the `node` home directory. If `PUID`/`PGID` are already used by another account in the image, startup aborts with an explicit error. Group alignment runs first, so a free `PGID` combined with an occupied `PUID` mutates `/etc/group` before the UID collision is detected and aborts startup; realign to the original ids or pick a free pair before retrying.
 
@@ -261,6 +266,23 @@ Contains:
 
 Uses a named volume for data persistence.
 
+### OpenCode Binary
+
+```yaml
+volumes:
+  - opencode-bin:/home/node/.opencode/bin
+```
+
+Persists the OpenCode binary that OpenCode's own `upgrade --method curl` command (run from the UI's OpenCode settings) installs into `~/.opencode/bin`, so an upgrade survives container recreations. The volume is limited to the binary and leaves existing workspace and XDG persistence behavior for config, auth, and chat state unchanged.
+
+On startup the entrypoint reconciles the persisted binary:
+
+- any valid persisted binary is retained, including a user-selected version older than the image-bundled `OPENCODE_BUNDLED_VERSION`;
+- a malformed or unversioned persisted binary is removed so `PATH` falls back to the image-bundled `/usr/local/bin/opencode`, avoiding a download;
+- a persisted binary still below the minimum version (1.0.137) is replaced by the pinned bundled version, which is downloaded into this volume.
+
+A fresh volume starts empty and the image-bundled binary is used until an upgrade installs into the volume.
+
 ### Import Existing OpenCode Chats From Your Host
 
 If you already use standalone OpenCode on your machine and want Dockerized OpenCode Manager to show those chats on first setup, bind your host OpenCode config/state into the container and bind your repo root to the same absolute path that standalone OpenCode used.
@@ -294,6 +316,46 @@ Why the repo mount uses the host path as the container path:
 - OpenCode Manager can then discover that folder and create its normal workspace links under `/workspace/repos`
 
 With a fresh Docker volume, first startup imports the host OpenCode config and state, and after you add `${OCM_REPOS_HOST_PATH}` in the Manager UI, previously existing chats appear under the discovered repositories.
+
+## Agent Sandboxing Overlay
+
+Optional KVM-backed agent sandboxing (see [Agent Sandboxing](../features/sandboxing.md)). The sandbox overlay (`docker-compose.sandbox.yml`) grants the container KVM and guest-networking access, passes sandbox tuning through from `.env`, and persists microsandbox state. It deliberately avoids `privileged: true`, granting only the specific devices and capability `msb` needs:
+
+```yaml
+services:
+  app:
+    devices:
+      - "/dev/kvm:/dev/kvm"
+      - "/dev/net/tun:/dev/net/tun"
+    cap_add:
+      - NET_ADMIN
+    environment:
+      - SANDBOX_IMAGE=${SANDBOX_IMAGE:-docker.io/cstechdev/ocm-sandbox:latest}
+      - SANDBOX_MEMORY=${SANDBOX_MEMORY:-4G}
+      - SANDBOX_CPUS=${SANDBOX_CPUS:-2}
+      - SANDBOX_EXEC_USER=${SANDBOX_EXEC_USER:-${PUID:-1000}}
+      - SANDBOX_NET=${SANDBOX_NET:-public}
+      - SANDBOX_START_TIMEOUT_MS=${SANDBOX_START_TIMEOUT_MS:-300000}
+      - SANDBOX_EXEC_TIMEOUT_MS=${SANDBOX_EXEC_TIMEOUT_MS:-600000}
+    volumes:
+      - microsandbox-data:/home/node/.microsandbox
+
+volumes:
+  microsandbox-data:
+    driver: local
+```
+
+Start the Manager with the overlay:
+
+```bash
+docker compose -f docker-compose.yml -f docker-compose.sandbox.yml up -d
+```
+
+The overlay requires a Linux host with `/dev/kvm`. Docker Desktop on macOS and Windows cannot provide `/dev/kvm`, so the sandbox toggle in Settings stays disabled there. `/dev/net/tun` and `NET_ADMIN` provide guest networking for `SANDBOX_NET=public`; if `msb` reports a missing device or capability on a particular host, add that specific entry rather than enabling full privilege.
+
+`SANDBOX_EXEC_USER` defaults to the numeric `PUID` (falling back to `1000`), and the Manager runs every sandboxed command as that numeric uid (with the Manager's gid). Because the entrypoint realigns the container's `node` account to `PUID`/`PGID` and re-owns `/workspace`, a non-1000 `PUID` (for example `PUID=1001`) writes to the mounted repositories with the same identity as the workspace owner. If a configured `SANDBOX_EXEC_USER` cannot match the workspace owner, the toggle reports enforcement as unavailable instead of running broken commands.
+
+The `microsandbox-data` volume persists microsandbox's own state (downloaded images, firmware cache) across container recreations, alongside the workspace and data volumes.
 
 ## Health Checks
 
@@ -367,8 +429,11 @@ services:
 # Start
 docker-compose up -d
 
-# Stop
+# Stop (containers removed; named volumes are preserved)
 docker-compose down
+
+# Stop and remove containers and all named volumes (workspace, database, OpenCode binary)
+docker-compose down -v
 
 # Restart
 docker-compose restart
@@ -379,6 +444,8 @@ docker-compose logs -f
 # View logs (last 100 lines)
 docker-compose logs --tail 100
 ```
+
+The package scripts mirror these: `pnpm docker:down` stops and removes containers while preserving all named volumes, and `pnpm docker:reset` is the destructive variant that also deletes the workspace, database, and OpenCode binary volumes.
 
 ### Maintenance
 
@@ -444,6 +511,9 @@ By default, the OpenCode server binds to `127.0.0.1` inside the container and is
 
 You only need to expose the OpenCode server on an external interface if you have a specific use case that requires other services or machines to connect directly to it.
 
+!!! warning "Sandbox enforcement is agent-tool-scoped"
+    Sandbox enforcement applies only to the OpenCode agent `bash` tool. The rewrite runs as a plugin hook inside the OpenCode process, so it guards both proxied and direct connections to the OpenCode server. WebUI shell, slash shell, PTY, and server binding follow normal OpenCode behavior while sandboxing is enabled (see [Agent Sandboxing](../features/sandboxing.md)).
+
 ### How to Expose Safely
 
 To expose the OpenCode server on the host network:
@@ -475,4 +545,4 @@ The password can be configured in two ways:
 
 ### Startup Guard
 
-If you set `OPENCODE_HOST=0.0.0.0` (or any non-localhost host) without configuring a password (either via env var or UI), the managed OpenCode server will refuse to start with an error message explaining how to fix it. The OpenCode Manager UI/API may remain available so you can configure a password and restart the managed server.
+If you set `OPENCODE_HOST=0.0.0.0` (or any non-localhost host) without configuring a password (either via env var or UI), the managed OpenCode server will refuse to start with an error message explaining how to fix it. The OpenCode Manager UI/API may remain available so you can configure a password and restart the managed server. The password guard applies in both sandboxing modes — an enforced server binds the configured `OPENCODE_HOST` like any other server.

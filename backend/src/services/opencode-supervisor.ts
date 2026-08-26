@@ -27,6 +27,8 @@ export const OPENCODE_RECOVERY_ACTIONS = [
 
 export type OpenCodeRecoveryAction = (typeof OPENCODE_RECOVERY_ACTIONS)[number]
 
+const MAX_QUEUED_LIFECYCLE_OPERATIONS = 2
+
 export type OpenCodeOperationReason =
   | 'backend_startup'
   | 'health_poll'
@@ -65,6 +67,8 @@ export class OpenCodeSupervisor {
   private attemptedRecoveryActions: OpenCodeRecoveryAction[] = []
   private consecutiveFailures = 0
   private operationInProgress = false
+  private operationTail: Promise<void> = Promise.resolve()
+  private queuedOperations = 0
   private updatedAt = new Date().toISOString()
 
   constructor(
@@ -89,6 +93,7 @@ export class OpenCodeSupervisor {
   async start(): Promise<OpenCodeLifecycleStatus> {
     await this.runLifecycleOperation(async () => {
       this.setState('starting')
+      this.closeLifecycleGate()
 
       try {
         await this.openCodeServerManager.start()
@@ -113,6 +118,7 @@ export class OpenCodeSupervisor {
   async restart(reason: OpenCodeOperationReason): Promise<OpenCodeLifecycleStatus> {
     return this.runLifecycleOperation(async () => {
       this.setState('starting')
+      this.closeLifecycleGate()
 
       try {
         this.openCodeServerManager.clearStartupError()
@@ -160,10 +166,11 @@ export class OpenCodeSupervisor {
 
     await this.runLifecycleOperation(async () => {
       this.setState('stopping')
+      this.closeLifecycleGate()
       await this.openCodeServerManager.stop()
       this.setState('stopped')
       return this.getStatus()
-    })
+    }, { droppable: false })
 
     logger.info('Stopped OpenCode supervisor')
   }
@@ -190,17 +197,34 @@ export class OpenCodeSupervisor {
     }
   }
 
-  private async runLifecycleOperation(operation: () => Promise<OpenCodeLifecycleStatus>): Promise<OpenCodeLifecycleStatus> {
-    if (this.operationInProgress) {
+  private async runLifecycleOperation(
+    operation: () => Promise<OpenCodeLifecycleStatus>,
+    options: { droppable?: boolean } = {},
+  ): Promise<OpenCodeLifecycleStatus> {
+    if ((options.droppable ?? true) && this.queuedOperations >= MAX_QUEUED_LIFECYCLE_OPERATIONS) {
+      logger.warn('Dropped an OpenCode lifecycle request: one operation is running and another is already queued')
       return this.getStatus()
     }
 
-    this.operationInProgress = true
+    this.queuedOperations += 1
+    const previousTail = this.operationTail
+    let releaseTail!: () => void
+    this.operationTail = new Promise<void>((resolve) => {
+      releaseTail = resolve
+    })
+
     try {
-      return await operation()
+      await previousTail
+      this.operationInProgress = true
+      try {
+        return await operation()
+      } finally {
+        this.operationInProgress = false
+        this.touch()
+      }
     } finally {
-      this.operationInProgress = false
-      this.touch()
+      this.queuedOperations -= 1
+      releaseTail()
     }
   }
 
@@ -213,6 +237,7 @@ export class OpenCodeSupervisor {
 
     this.consecutiveFailures += 1
     this.setState('unhealthy')
+    this.closeLifecycleGate()
     this.lastError = this.openCodeServerManager.getLastStartupError() ?? 'OpenCode health check failed'
 
     if (respectThreshold && this.consecutiveFailures < this.failureThreshold) {
@@ -223,10 +248,20 @@ export class OpenCodeSupervisor {
   }
 
   private async recover(reason: OpenCodeOperationReason): Promise<OpenCodeLifecycleStatus> {
+    this.closeLifecycleGate()
+
+    if (this.openCodeServerManager.isLastStartupErrorNonRecoverable()) {
+      return this.failWithoutRecovery()
+    }
+
     this.setState('recovering')
     logger.warn(`OpenCode unhealthy during ${reason}, entering recovery`)
 
     for (const action of OPENCODE_RECOVERY_ACTIONS) {
+      if (this.openCodeServerManager.isLastStartupErrorNonRecoverable()) {
+        return this.failWithoutRecovery()
+      }
+
       this.activeRecoveryAction = action
       this.attemptedRecoveryActions.push(action)
       this.touch()
@@ -249,6 +284,17 @@ export class OpenCodeSupervisor {
 
     this.activeRecoveryAction = null
     this.setState('failed')
+    this.openCodeServerManager.setLifecycleInitialized(false)
+    return this.getStatus()
+  }
+
+  private failWithoutRecovery(): OpenCodeLifecycleStatus {
+    const message = this.lastError ?? this.openCodeServerManager.getLastStartupError() ?? 'OpenCode failed with a non-recoverable startup error'
+    logger.error(`OpenCode failed with a non-recoverable startup error; skipping configuration recovery: ${message}`)
+    this.activeRecoveryAction = null
+    this.attemptedRecoveryActions = []
+    this.setState('failed')
+    this.openCodeServerManager.setLifecycleInitialized(false)
     return this.getStatus()
   }
 
@@ -349,12 +395,17 @@ export class OpenCodeSupervisor {
     logger.info(`Started OpenCode supervisor health polling (${this.pollIntervalMs}ms)`)
   }
 
+  private closeLifecycleGate(): void {
+    this.openCodeServerManager.setLifecycleInitialized(false)
+  }
+
   private markHealthy(): void {
     this.state = 'healthy'
     this.lastError = null
     this.activeRecoveryAction = null
     this.attemptedRecoveryActions = []
     this.consecutiveFailures = 0
+    this.openCodeServerManager.setLifecycleInitialized(true)
     this.touch()
   }
 

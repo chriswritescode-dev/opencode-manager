@@ -23,6 +23,7 @@ interface HealthResponse {
   opencodeVersionSupported: boolean
   opencodeManagerVersion: string | null
   opencodeRestartPending?: boolean
+  sandbox?: { available: boolean; enabled: boolean; enforced: boolean; reason?: string; msbVersion?: string }
   error?: string
 }
 

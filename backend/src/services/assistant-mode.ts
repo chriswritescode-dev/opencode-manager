@@ -12,11 +12,11 @@ import {
   fileExists,
   ensureDirectoryExists,
 } from './file-operations'
-import { OpenCodeConfigSchema } from '@opencode-manager/shared/schemas'
-import { ASSISTANT_REPO_ID, ASSISTANT_REPO_PATH } from '@opencode-manager/shared/utils'
-import { getReposPath, ENV } from '@opencode-manager/shared/config/env'
+import { ASSISTANT_NOTIFICATION_LIMITS, OpenCodeConfigSchema } from '@opencode-manager/shared/schemas'
+import { ASSISTANT_REPO_ID, ASSISTANT_REPO_PATH, ASSISTANT_OPENCODE_DIR_NAME } from '@opencode-manager/shared/utils'
+import { getAssistantModePath, getReposPath } from '@opencode-manager/shared/config/env'
 import type { Database } from 'bun:sqlite'
-import { getOrCreateInternalToken } from './internal-token'
+import { MANAGER_TOOL_NAME } from './opencode-manager-tool-plugin'
 import { ensureAssistantRepo } from '../db/queries'
 
 
@@ -24,8 +24,7 @@ const ASSISTANT_MODE_DIR = ASSISTANT_REPO_PATH
 const ASSISTANT_MODE_RELATIVE_PATH = 'repos/assistant'
 const ASSISTANT_AGENTS_MD_FILENAME = 'AGENTS.md'
 const ASSISTANT_OPENCODE_CONFIG_FILENAME = 'opencode.json'
-const ASSISTANT_OPENCODE_DIR = '.opencode'
-const ASSISTANT_INTERNAL_TOKEN_FILENAME = 'internal-token'
+const ASSISTANT_OPENCODE_DIR = ASSISTANT_OPENCODE_DIR_NAME
 const ASSISTANT_SKILLS_DIR = 'skills'
 const ASSISTANT_SCHEDULES_SKILL_DIR = 'schedule-management'
 const ASSISTANT_NOTIFICATIONS_SKILL_DIR = 'notifications'
@@ -37,9 +36,8 @@ const ASSISTANT_DEFAULT_AGENT_NAME = 'assistant'
 const ASSISTANT_DEFAULT_AGENT_FILENAME = `${ASSISTANT_DEFAULT_AGENT_NAME}.md`
 
 export function getAssistantModeDirectory(): string {
-  const reposPath = getReposPath()
-  const assistantDir = path.join(reposPath, ASSISTANT_MODE_DIR)
-  const resolvedReposRoot = path.resolve(reposPath)
+  const assistantDir = getAssistantModePath()
+  const resolvedReposRoot = path.resolve(getReposPath())
   const resolvedAssistantDir = path.resolve(assistantDir)
 
   if (!resolvedAssistantDir.startsWith(resolvedReposRoot)) {
@@ -60,10 +58,6 @@ export function buildAssistantRepo(): Repo {
     isWorktree: false,
     isLocal: false,
   }
-}
-
-function getInternalTokenPath(assistantDir: string): string {
-  return path.join(assistantDir, ASSISTANT_OPENCODE_DIR, ASSISTANT_INTERNAL_TOKEN_FILENAME)
 }
 
 function getSchedulesSkillPath(assistantDir: string): string {
@@ -190,11 +184,28 @@ function buildLegacyAssistantDefaultAgentMd(): string {
   return buildAssistantDefaultAgentMdFromPrompt(buildLegacyAssistantAgentPrompt())
 }
 
+function buildPreviousAssistantAgentsMd(): string {
+  return `# Assistant Mode Workspace
+
+This directory is the shared Assistant Mode workspace for OpenCode Manager.
+
+## Directory Contents
+
+- \`opencode.json\` configures this workspace and selects the default assistant agent.
+- \`.opencode/agents/assistant.md\` contains the default assistant agent instructions, behavior, durable preferences, and self-editing rules.
+- \`.opencode/skills/\` contains managed workspace skills for repos, schedules, notifications, and settings.
+- \`.opencode/internal-token\` is managed by OpenCode Manager for internal API authentication.
+
+Assistant-specific instructions belong in \`.opencode/agents/assistant.md\`.
+`
+}
+
 function matchesGeneratedAssistantAgentsMd(content: string): boolean {
   const currentHash = hashContent(buildAssistantAgentsMd())
+  const previousHash = hashContent(buildPreviousAssistantAgentsMd())
   const legacyHash = hashContent(buildLegacyAssistantAgentsMd())
   const contentHash = hashContent(content)
-  return contentHash === currentHash || contentHash === legacyHash
+  return contentHash === currentHash || contentHash === previousHash || contentHash === legacyHash
 }
 
 function matchesGeneratedAssistantDefaultAgentMd(content: string): boolean {
@@ -230,7 +241,6 @@ This directory is the shared Assistant Mode workspace for OpenCode Manager.
 - \`opencode.json\` configures this workspace and selects the default assistant agent.
 - \`.opencode/agents/assistant.md\` contains the default assistant agent instructions, behavior, durable preferences, and self-editing rules.
 - \`.opencode/skills/\` contains managed workspace skills for repos, schedules, notifications, and settings.
-- \`.opencode/internal-token\` is managed by OpenCode Manager for internal API authentication.
 
 Assistant-specific instructions belong in \`.opencode/agents/assistant.md\`.
 `
@@ -306,37 +316,31 @@ export function buildAssistantDefaultAgentMd(): string {
   return buildAssistantDefaultAgentMdFromPrompt(buildAssistantAgentPrompt())
 }
 
-function toLocalhostInternalBaseUrl(baseUrl: string): string {
-  const url = new URL(baseUrl)
-  url.protocol = 'http'
-  url.hostname = 'localhost'
-  url.port = String(ENV.SERVER.PORT)
-  return url.toString().replace(/\/$/, '')
-}
-
-export function buildSchedulesSkill(baseUrl: string): string {
-  const internalBaseUrl = toLocalhostInternalBaseUrl(baseUrl)
-
+export function buildSchedulesSkill(): string {
   return `---
 name: schedule-management
-description: Manage schedule jobs and runs across any repo via the internal HTTP API
+description: Manage schedule jobs and runs across any repo with the ${MANAGER_TOOL_NAME} tool
 ---
 
 ## When to Load
 
 Load this skill when the user asks about managing schedules, schedule jobs, schedule runs, or anything related to automated task execution across repos.
 
-## Authentication
+## Tool
 
-All API calls require a bearer token. Read the token from \`.opencode/internal-token\` (relative to the assistant workspace cwd) and pass it as:
+Use the \`${MANAGER_TOOL_NAME}\` tool with the \`request\` action. The tool runs inside OpenCode Manager, so it needs no token, no base URL, and no network access from the shell. It works the same in a normal session, a sandboxed session, and a scheduled run. Paths are relative to the internal API (for example \`/schedules/all\` or \`/repos/0/schedules\`) and query strings are allowed.
 
+**Arguments:**
+\`\`\`ts
+{
+  action: 'request',
+  params: {
+    method: 'GET' | 'POST' | 'PATCH' | 'DELETE',
+    path: string   // relative internal API path; query strings allowed
+    body?: object  // JSON body for POST and PATCH routes
+  }
+}
 \`\`\`
-Authorization: Bearer <token>
-\`\`\`
-
-## Base URL
-
-\`${internalBaseUrl}\`
 
 ## Assistant Schedules
 
@@ -347,8 +351,14 @@ Use repo ID \`0\` for the built-in Assistant. For example, use \`/repos/0/schedu
 ### GET /schedules/all
 List all schedule jobs across all repos.
 
-\`\`\`bash
-curl -H "Authorization: Bearer <token>" ${internalBaseUrl}/schedules/all
+\`\`\`json
+{
+  "action": "request",
+  "params": {
+    "method": "GET",
+    "path": "/schedules/all"
+  }
+}
 \`\`\`
 
 ### GET /schedules/all/runs
@@ -356,15 +366,27 @@ List all schedule runs across all repos with optional filtering.
 
 Query params: \`limit\`, \`offset\`, \`status\`, \`repoId\`, \`jobId\`, \`triggerSource\`
 
-\`\`\`bash
-curl -H "Authorization: Bearer <token>" "${internalBaseUrl}/schedules/all/runs?limit=20"
+\`\`\`json
+{
+  "action": "request",
+  "params": {
+    "method": "GET",
+    "path": "/schedules/all/runs?limit=20"
+  }
+}
 \`\`\`
 
 ### GET /repos/:repoId/schedules
 List all schedule jobs for a specific repo.
 
-\`\`\`bash
-curl -H "Authorization: Bearer <token>" ${internalBaseUrl}/repos/:repoId/schedules
+\`\`\`json
+{
+  "action": "request",
+  "params": {
+    "method": "GET",
+    "path": "/repos/:repoId/schedules"
+  }
+}
 \`\`\`
 
 ### POST /repos/:repoId/schedules
@@ -372,17 +394,33 @@ Create a new schedule job.
 
 Body matches \`CreateScheduleJobRequest\` schema (discriminated union with \`scheduleMode: 'interval' | 'cron'\`).
 
-\`\`\`bash
-curl -X POST -H "Authorization: Bearer <token>" -H "Content-Type: application/json" \\
-  -d '{"name":"my-job","prompt":"do something","scheduleMode":"interval","intervalMinutes":60}' \\
-  ${internalBaseUrl}/repos/:repoId/schedules
+\`\`\`json
+{
+  "action": "request",
+  "params": {
+    "method": "POST",
+    "path": "/repos/:repoId/schedules",
+    "body": {
+      "name": "my-job",
+      "prompt": "do something",
+      "scheduleMode": "interval",
+      "intervalMinutes": 60
+    }
+  }
+}
 \`\`\`
 
 ### GET /repos/:repoId/schedules/:jobId
 Get a specific schedule job.
 
-\`\`\`bash
-curl -H "Authorization: Bearer <token>" ${internalBaseUrl}/repos/:repoId/schedules/:jobId
+\`\`\`json
+{
+  "action": "request",
+  "params": {
+    "method": "GET",
+    "path": "/repos/:repoId/schedules/:jobId"
+  }
+}
 \`\`\`
 
 ### PATCH /repos/:repoId/schedules/:jobId
@@ -390,24 +428,43 @@ Update an existing schedule job.
 
 Body matches \`UpdateScheduleJobRequest\` schema.
 
-\`\`\`bash
-curl -X PATCH -H "Authorization: Bearer <token>" -H "Content-Type: application/json" \\
-  -d '{"enabled":false}' \\
-  ${internalBaseUrl}/repos/:repoId/schedules/:jobId
+\`\`\`json
+{
+  "action": "request",
+  "params": {
+    "method": "PATCH",
+    "path": "/repos/:repoId/schedules/:jobId",
+    "body": {
+      "enabled": false
+    }
+  }
+}
 \`\`\`
 
 ### DELETE /repos/:repoId/schedules/:jobId
 Delete a schedule job.
 
-\`\`\`bash
-curl -X DELETE -H "Authorization: Bearer <token>" ${internalBaseUrl}/repos/:repoId/schedules/:jobId
+\`\`\`json
+{
+  "action": "request",
+  "params": {
+    "method": "DELETE",
+    "path": "/repos/:repoId/schedules/:jobId"
+  }
+}
 \`\`\`
 
 ### POST /repos/:repoId/schedules/:jobId/run
 Manually trigger a schedule job.
 
-\`\`\`bash
-curl -X POST -H "Authorization: Bearer <token>" ${internalBaseUrl}/repos/:repoId/schedules/:jobId/run
+\`\`\`json
+{
+  "action": "request",
+  "params": {
+    "method": "POST",
+    "path": "/repos/:repoId/schedules/:jobId/run"
+  }
+}
 \`\`\`
 
 ### GET /repos/:repoId/schedules/:jobId/runs
@@ -415,22 +472,40 @@ List runs for a specific job.
 
 Query params: \`limit\`
 
-\`\`\`bash
-curl -H "Authorization: Bearer <token>" ${internalBaseUrl}/repos/:repoId/schedules/:jobId/runs?limit=20
+\`\`\`json
+{
+  "action": "request",
+  "params": {
+    "method": "GET",
+    "path": "/repos/:repoId/schedules/:jobId/runs?limit=20"
+  }
+}
 \`\`\`
 
 ### GET /repos/:repoId/schedules/:jobId/runs/:runId
 Get a specific schedule run.
 
-\`\`\`bash
-curl -H "Authorization: Bearer <token>" ${internalBaseUrl}/repos/:repoId/schedules/:jobId/runs/:runId
+\`\`\`json
+{
+  "action": "request",
+  "params": {
+    "method": "GET",
+    "path": "/repos/:repoId/schedules/:jobId/runs/:runId"
+  }
+}
 \`\`\`
 
 ### POST /repos/:repoId/schedules/:jobId/runs/:runId/cancel
 Cancel a running schedule run.
 
-\`\`\`bash
-curl -X POST -H "Authorization: Bearer <token>" ${internalBaseUrl}/repos/:repoId/schedules/:jobId/runs/:runId/cancel
+\`\`\`json
+{
+  "action": "request",
+  "params": {
+    "method": "POST",
+    "path": "/repos/:repoId/schedules/:jobId/runs/:runId/cancel"
+  }
+}
 \`\`\`
 
 ## Safety
@@ -439,103 +514,89 @@ Always confirm destructive operations (\`DELETE\` jobs, \`cancel\` runs) with th
 `
 }
 
-export function buildNotificationsSkill(baseUrl: string): string {
-  const internalBaseUrl = toLocalhostInternalBaseUrl(baseUrl)
-
+export function buildNotificationsSkill(): string {
   return `---
 name: notifications
-description: Send push notifications to the user's registered devices via the internal HTTP API
+description: Send push notifications to the user's registered devices with the ${MANAGER_TOOL_NAME} tool
 ---
 
 ## When to Load
 
 Load this skill when you need to notify the user about important events, completed tasks, or questions that require their attention.
 
-## Authentication
+## Tool
 
-All API calls require a bearer token. Read the token from \`.opencode/internal-token\` (relative to the assistant workspace cwd) and pass it as:
+Use the \`${MANAGER_TOOL_NAME}\` tool with the \`send_notification\` action. The tool runs inside OpenCode Manager, so it needs no token, no base URL, and no network access from the shell. It works the same in a normal session, a sandboxed session, and a scheduled run.
 
-\`\`\`
-Authorization: Bearer <token>
-\`\`\`
+The tool declares its arguments as a typed schema, so the editor and the model both see the exact shape and the tool call is rejected before it runs if it does not match.
 
-## Base URL
-
-\`${internalBaseUrl}\`
-
-## Endpoint
-
-### POST /notifications/send
-
-Send a push notification to all of the user's registered devices.
-
-**Query Parameters:**
-- \`userId\` (optional): User ID. Defaults to \`"default"\`.
-
-**Request Body:**
+**Arguments:**
 \`\`\`ts
 {
-  title: string       // 1-120 characters
-  body: string        // 1-500 characters
-  url?: string        // Optional: deep link to navigate to (1-500 chars)
-  tag?: string        // Optional: notification tag for deduplication (max 80 chars)
-  priority?: 'normal' | 'high'  // Defaults to 'normal'
+  action: 'send_notification',
+  params: {
+    title: string       // 1-${ASSISTANT_NOTIFICATION_LIMITS.TITLE_MAX} characters
+    body: string        // 1-${ASSISTANT_NOTIFICATION_LIMITS.BODY_MAX} characters
+    url?: string        // Optional: deep link to navigate to (1-${ASSISTANT_NOTIFICATION_LIMITS.URL_MAX} chars)
+    tag?: string        // Optional: notification tag for deduplication (max ${ASSISTANT_NOTIFICATION_LIMITS.TAG_MAX} chars)
+    priority?: 'normal' | 'high'  // Defaults to 'normal'
+  }
 }
 \`\`\`
 
 **Example:**
-\`\`\`bash
-curl -X POST -H "Authorization: Bearer <token>" \\
-  -H "Content-Type: application/json" \\
-  -d '{"title":"Task Complete","body":"The build has finished successfully","url":"/repos/my-repo","priority":"high"}' \\
-  "${internalBaseUrl}/notifications/send?userId=default"
-\`\`\`
-
-**Response:**
-\`\`\`ts
+\`\`\`json
 {
-  delivered: number       // Number of successfully delivered notifications
-  expired: number         // Number of expired subscriptions removed
-  failed: number          // Number of failed deliveries
-  noSubscriptions: boolean // True if user has no registered devices
+  "action": "send_notification",
+  "params": {
+    "title": "Task Complete",
+    "body": "The build has finished successfully",
+    "url": "/repos/my-repo",
+    "priority": "high"
+  }
 }
 \`\`\`
 
+The tool reports how many devices the notification was delivered to, and says so explicitly when the user has no registered devices.
+
 ## Rate Limiting
 
-The endpoint enforces a rate limit of **10 requests per minute per token**. If exceeded, you'll receive a \`429 Too Many Requests\` response with a \`Retry-After\` header.
+Sending is rate limited to **10 notifications per minute**. Beyond that the tool fails with a \`429\` status; wait before retrying.
 
 ## Notes
 
 - Notifications are only sent if the user has registered devices (browser push subscriptions)
-- If VAPID is not configured on the server, the endpoint returns \`503 Service Unavailable\`
+- If VAPID is not configured on the server, the tool fails with a \`503\` status
 - Use \`priority: 'high'\` for urgent notifications that should interrupt the user
+- Do not call the internal HTTP API with \`curl\` for notifications; the tool is the supported path
 `
 }
 
-export function buildSettingsSkill(baseUrl: string): string {
-  const internalBaseUrl = toLocalhostInternalBaseUrl(baseUrl)
-
+export function buildSettingsSkill(): string {
   return `---
 name: manager-settings
-description: Read and modify safe user preferences via the internal HTTP API
+description: Read and modify safe user preferences with the ${MANAGER_TOOL_NAME} tool
 ---
 
 ## When to Load
 
 Load this skill when you need to inspect or update the user's UI preferences, theme, mode, or other non-sensitive settings.
 
-## Authentication
+## Tool
 
-All API calls require a bearer token. Read the token from \`.opencode/internal-token\` (relative to the assistant workspace cwd) and pass it as:
+Use the \`${MANAGER_TOOL_NAME}\` tool with the \`request\` action. The tool runs inside OpenCode Manager, so it needs no token, no base URL, and no network access from the shell. It works the same in a normal session, a sandboxed session, and a scheduled run. Paths are relative to the internal API (for example \`/settings\` or \`/assistant/reload\`) and query strings are allowed.
 
+**Arguments:**
+\`\`\`ts
+{
+  action: 'request',
+  params: {
+    method: 'GET' | 'POST' | 'PATCH' | 'DELETE',
+    path: string   // relative internal API path; query strings allowed
+    body?: object  // JSON body for POST and PATCH routes
+  }
+}
 \`\`\`
-Authorization: Bearer <token>
-\`\`\`
-
-## Base URL
-
-\`${internalBaseUrl}\`
 
 ## Endpoints
 
@@ -547,8 +608,14 @@ Retrieve the user's full settings, including all preferences.
 - \`userId\` (optional): User ID. Defaults to \`"default"\`.
 
 **Example:**
-\`\`\`bash
-curl -H "Authorization: Bearer <token>" "${internalBaseUrl}/settings?userId=default"
+\`\`\`json
+{
+  "action": "request",
+  "params": {
+    "method": "GET",
+    "path": "/settings?userId=default"
+  }
+}
 \`\`\`
 
 **Response:**
@@ -605,11 +672,18 @@ The following preference keys can be modified:
 Partial object with any of the allowed keys.
 
 **Example:**
-\`\`\`bash
-curl -X PATCH -H "Authorization: Bearer <token>" \\
-  -H "Content-Type: application/json" \\
-  -d '{"theme":"dark","mode":"build"}' \\
-  "${internalBaseUrl}/settings?userId=default"
+\`\`\`json
+{
+  "action": "request",
+  "params": {
+    "method": "PATCH",
+    "path": "/settings?userId=default",
+    "body": {
+      "theme": "dark",
+      "mode": "build"
+    }
+  }
+}
 \`\`\`
 
 **Response:**
@@ -624,9 +698,14 @@ Reload the assistant workspace by disposing the current OpenCode instance. Use t
 **Rate Limiting:** 5 requests per minute per token. Returns \`429 Too Many Requests\` with \`Retry-After\` header when exceeded.
 
 **Example:**
-\`\`\`bash
-curl -X POST -H "Authorization: Bearer <token>" \\
-  "${internalBaseUrl}/assistant/reload"
+\`\`\`json
+{
+  "action": "request",
+  "params": {
+    "method": "POST",
+    "path": "/assistant/reload"
+  }
+}
 \`\`\`
 
 **Response:**
@@ -642,29 +721,31 @@ curl -X POST -H "Authorization: Bearer <token>" \\
 `
 }
 
-export function buildReposSkill(baseUrl: string): string {
-  const internalBaseUrl = toLocalhostInternalBaseUrl(baseUrl)
-
+export function buildReposSkill(): string {
   return `---
 name: repo-management
-description: List repos available to OpenCode Manager via the internal HTTP API
+description: List repos available to OpenCode Manager with the ${MANAGER_TOOL_NAME} tool
 ---
 
 ## When to Load
 
 Load this skill when you need to discover repos, look up repo IDs, or need to reference repo information before managing schedules. Load it before the schedule-management skill if you don't know the repo ID.
 
-## Authentication
+## Tool
 
-All API calls require a bearer token. Read the token from \`.opencode/internal-token\` (relative to the assistant workspace cwd) and pass it as:
+Use the \`${MANAGER_TOOL_NAME}\` tool with the \`request\` action. The tool runs inside OpenCode Manager, so it needs no token, no base URL, and no network access from the shell. It works the same in a normal session, a sandboxed session, and a scheduled run. Paths are relative to the internal API (for example \`/repos\` or \`/repos/0/schedules\`) and query strings are allowed.
 
+**Arguments:**
+\`\`\`ts
+{
+  action: 'request',
+  params: {
+    method: 'GET' | 'POST' | 'PATCH' | 'DELETE',
+    path: string   // relative internal API path; query strings allowed
+    body?: object  // JSON body for POST and PATCH routes
+  }
+}
 \`\`\`
-Authorization: Bearer <token>
-\`\`\`
-
-## Base URL
-
-\`${internalBaseUrl}\`
 
 ## Endpoints
 
@@ -673,8 +754,14 @@ Authorization: Bearer <token>
 List all repos available to OpenCode Manager. The repos are returned in the order configured by the user (respecting \`repoOrder\` preference).
 
 **Example:**
-\`\`\`bash
-curl -H "Authorization: Bearer <token>" "${internalBaseUrl}/repos"
+\`\`\`json
+{
+  "action": "request",
+  "params": {
+    "method": "GET",
+    "path": "/repos"
+  }
+}
 \`\`\`
 
 **Response:**
@@ -729,7 +816,6 @@ export function buildAssistantOpenCodeConfig(): OpenCodeConfigInput {
 
 export async function ensureAssistantMode(
   repo: Repo,
-  deps: { db: Database; apiBaseUrl: string },
   options?: AssistantModeInitRequest,
 ): Promise<AssistantModeStatus> {
   const assistantDir = getAssistantModeDirectory()
@@ -738,7 +824,6 @@ export async function ensureAssistantMode(
 
   const agentsMdPath = path.join(assistantDir, ASSISTANT_AGENTS_MD_FILENAME)
   const opencodeJsonPath = path.join(assistantDir, ASSISTANT_OPENCODE_CONFIG_FILENAME)
-  const tokenPath = getInternalTokenPath(assistantDir)
   const skillPath = getSchedulesSkillPath(assistantDir)
   const assistantAgentPath = getAssistantDefaultAgentPath(assistantDir)
 
@@ -820,14 +905,7 @@ export async function ensureAssistantMode(
   await ensureDirectoryExists(path.join(assistantDir, ASSISTANT_OPENCODE_DIR, ASSISTANT_SKILLS_DIR, ASSISTANT_SETTINGS_SKILL_DIR))
   await ensureDirectoryExists(path.join(assistantDir, ASSISTANT_OPENCODE_DIR, ASSISTANT_SKILLS_DIR, ASSISTANT_REPOS_SKILL_DIR))
 
-  const token = getOrCreateInternalToken(deps.db)
-  const existingTokenContent = await fileExists(tokenPath) ? await readFileContent(tokenPath) : undefined
-  const tokenCreated = !existingTokenContent || existingTokenContent.trim() !== token
-  if (tokenCreated) {
-    await writeFileContent(tokenPath, token)
-  }
-
-  const schedulesSkillContent = buildSchedulesSkill(deps.apiBaseUrl)
+  const schedulesSkillContent = buildSchedulesSkill()
   const existingSchedulesSkillContent = await fileExists(skillPath) ? await readFileContent(skillPath) : undefined
   const schedulesSkillCreated = !hasSameContentHash(existingSchedulesSkillContent, schedulesSkillContent)
   if (schedulesSkillCreated) {
@@ -835,7 +913,7 @@ export async function ensureAssistantMode(
   }
 
   const notificationsSkillPath = getNotificationsSkillPath(assistantDir)
-  const notificationsSkillContent = buildNotificationsSkill(deps.apiBaseUrl)
+  const notificationsSkillContent = buildNotificationsSkill()
   const existingNotificationsSkillContent = await fileExists(notificationsSkillPath) ? await readFileContent(notificationsSkillPath) : undefined
   const notificationsSkillCreated = !hasSameContentHash(existingNotificationsSkillContent, notificationsSkillContent)
   if (notificationsSkillCreated) {
@@ -843,7 +921,7 @@ export async function ensureAssistantMode(
   }
 
   const settingsSkillPath = getSettingsSkillPath(assistantDir)
-  const settingsSkillContent = buildSettingsSkill(deps.apiBaseUrl)
+  const settingsSkillContent = buildSettingsSkill()
   const existingSettingsSkillContent = await fileExists(settingsSkillPath) ? await readFileContent(settingsSkillPath) : undefined
   const settingsSkillCreated = !hasSameContentHash(existingSettingsSkillContent, settingsSkillContent)
   if (settingsSkillCreated) {
@@ -851,7 +929,7 @@ export async function ensureAssistantMode(
   }
 
   const reposSkillPath = getReposSkillPath(assistantDir)
-  const reposSkillContent = buildReposSkill(deps.apiBaseUrl)
+  const reposSkillContent = buildReposSkill()
   const existingReposSkillContent = await fileExists(reposSkillPath) ? await readFileContent(reposSkillPath) : undefined
   const reposSkillCreated = !hasSameContentHash(existingReposSkillContent, reposSkillContent)
   if (reposSkillCreated) {
@@ -903,10 +981,7 @@ export async function ensureAssistantMode(
         created: opencodeJsonUpdated,
       },
     },
-    internalToken: {
-      path: tokenPath,
-      created: tokenCreated,
-    },
+
     schedulesSkill: {
       path: skillPath,
       created: schedulesSkillCreated,
@@ -1022,7 +1097,6 @@ export async function getAssistantModeStatus(repo: Repo): Promise<AssistantModeS
 
   const agentsMdPath = path.join(assistantDir, ASSISTANT_AGENTS_MD_FILENAME)
   const opencodeJsonPath = path.join(assistantDir, ASSISTANT_OPENCODE_CONFIG_FILENAME)
-  const tokenPath = getInternalTokenPath(assistantDir)
   const skillPath = getSchedulesSkillPath(assistantDir)
   const notificationsSkillPath = getNotificationsSkillPath(assistantDir)
   const settingsSkillPath = getSettingsSkillPath(assistantDir)
@@ -1048,10 +1122,6 @@ export async function getAssistantModeStatus(repo: Repo): Promise<AssistantModeS
         exists: opencodeJsonExists,
         created: false,
       },
-    },
-    internalToken: {
-      path: tokenPath,
-      created: false,
     },
     schedulesSkill: {
       path: skillPath,
@@ -1080,12 +1150,8 @@ export async function getAssistantModeStatus(repo: Repo): Promise<AssistantModeS
 
 export async function installAssistantWorkspace(deps: {
   db: Database
-  apiBaseUrl: string
 }): Promise<AssistantModeStatus> {
   const assistantRepo = ensureAssistantRepo(deps.db)
 
-  return ensureAssistantMode(assistantRepo, {
-    db: deps.db,
-    apiBaseUrl: deps.apiBaseUrl,
-  })
+  return ensureAssistantMode(assistantRepo)
 }

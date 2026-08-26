@@ -32,7 +32,8 @@
     "generate:openapi": "bun scripts/generate-openapi.ts",
     "docker:build": "docker-compose build",
     "docker:up": "docker-compose up -d",
-    "docker:down": "docker-compose down -v",
+    "docker:down": "docker-compose down",
+    "docker:reset": "docker-compose down -v",
     "docker:logs": "docker-compose logs -f",
     "docker:restart": "docker-compose restart"
   },

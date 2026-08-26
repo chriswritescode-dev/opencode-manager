@@ -1,6 +1,6 @@
 import { useState, useEffect, useRef } from 'react'
 import { cn } from '@/lib/utils'
-import { Loader2, Plus, Trash2, Edit, Download, RotateCcw, FileText, ArrowUpCircle, History, ChevronDown, AlertTriangle } from 'lucide-react'
+import { Loader2, Plus, Trash2, Edit, Download, RotateCcw, FileText, ChevronDown, AlertTriangle } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
 import { Label } from '@/components/ui/label'
@@ -56,13 +56,9 @@ interface Agent {
   [key: string]: unknown
 }
 
-interface OpenCodeConfigManagerProps {
-  hideHealthStatus?: boolean
-}
-
 const EXPANDED_SECTION_CONTENT_CLASS = 'p-2 sm:p-4'
 
-export function OpenCodeConfigManager({ hideHealthStatus = false }: OpenCodeConfigManagerProps) {
+export function OpenCodeConfigManager() {
   const queryClient = useQueryClient()
   const { data: health } = useServerHealth()
   const [configs, setConfigs] = useState<OpenCodeConfig[]>([])
@@ -85,13 +81,11 @@ export function OpenCodeConfigManager({ hideHealthStatus = false }: OpenCodeConf
   const [deleteConfirmConfig, setDeleteConfirmConfig] = useState<OpenCodeConfig | null>(null)
   const {
     restartServerMutation,
-    upgradeOpenCodeMutation,
     confirmOpen: isRestartPromptOpen,
     setConfirmOpen: setIsRestartPromptOpen,
     activeSessionCount,
     requestRestart,
     confirmRestart,
-    performUpgrade,
   } = useOpenCodeServerActions()
   
   const agentsMdRef = useRef<HTMLButtonElement>(null)
@@ -335,78 +329,11 @@ export function OpenCodeConfigManager({ hideHealthStatus = false }: OpenCodeConf
     )
   }
 
-  const isUnhealthy = health?.opencode !== 'healthy'
   const canImportFromHost = Boolean(importStatus?.configSourcePath || importStatus?.stateSourcePath)
   const activeConfig = configs.find((c) => c.name === activeConfigName) ?? null
 
   return (
     <div className="space-y-6 min-w-0">
-      {!hideHealthStatus && health && (
-        <Card className={cn('bg-transparent border-transparent', isUnhealthy && 'border-destructive')}>
-          <CardContent className="p-3">
-            <div className="flex flex-col sm:flex-row sm:items-center items-center justify-center gap-3">
-              <div className="flex items-center gap-2 flex-wrap justify-center ">
-                <div className={`h-3 w-3 rounded-full ${isUnhealthy ? 'bg-destructive animate-pulse' : 'bg-green-500'}`} />
-                <p className="font-medium text-sm sm:text-base">
-                  Server Status: {isUnhealthy ? 'Unhealthy' : 'Healthy'}
-                </p>
-                {health.error && (
-                  <p className="text-xs text-destructive">
-                    {health.error}
-                  </p>
-                )}
-                {health.opencodeVersion && (
-                  <p className="text-xs text-muted-foreground">
-                    OpenCode v{health.opencodeVersion}
-                  </p>
-                )}
-                {health.opencodeManagerVersion && (
-                  <p className="text-xs text-muted-foreground">
-                    Manager v{health.opencodeManagerVersion}
-                  </p>
-                )}
-              </div>
-              <div className="flex flex-wrap gap-2 justify-center sm:justify-end">
-                <Button
-                  variant="outline"
-                  size="sm"
-                  onClick={performUpgrade}
-                  disabled={upgradeOpenCodeMutation.isPending}
-                >
-                  {upgradeOpenCodeMutation.isPending ? (
-                    <Loader2 className="h-3 w-3 sm:h-4 sm:w-4 mr-1 animate-spin" />
-                  ) : (
-                    <ArrowUpCircle className="h-3 w-3 sm:h-4 sm:w-4 mr-1" />
-                  )}
-                  <span className="text-xs sm:text-sm">Update</span>
-                </Button>
-                <Button
-                  variant="outline"
-                  size="sm"
-                  onClick={requestRestart}
-                  disabled={restartServerMutation.isPending}
-                >
-                  {restartServerMutation.isPending ? (
-                    <Loader2 className="h-3 w-3 sm:h-4 sm:w-4 mr-1 animate-spin" />
-                  ) : (
-                    <RotateCcw className="h-3 w-3 sm:h-4 sm:w-4 mr-1" />
-                  )}
-                  <span className="text-xs sm:text-sm">Restart</span>
-                </Button>
-                <Button
-                  variant="outline"
-                  size="sm"
-                  onClick={() => setIsVersionDialogOpen(true)}
-                >
-                  <History className="h-3 w-3 sm:h-4 sm:w-4 mr-1" />
-                  <span className="text-xs sm:text-sm">Versions</span>
-                </Button>
-              </div>
-            </div>
-          </CardContent>
-        </Card>
-       )}
-
        {health?.opencodeRestartPending && (
          <div className="flex flex-col gap-2 rounded-md border border-amber-500/40 bg-amber-500/10 p-3 sm:flex-row sm:items-center sm:justify-between">
            <div className="flex items-center gap-2">

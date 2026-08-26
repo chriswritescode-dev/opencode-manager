@@ -3,6 +3,7 @@ import { existsSync, mkdtempSync, readdirSync, statSync } from 'fs'
 import * as fsp from 'fs/promises'
 import { createReadStream } from 'fs'
 import { dirname, join } from 'path'
+import { Readable } from 'stream'
 import { pipeline } from 'stream/promises'
 import { randomUUID } from 'crypto'
 import { getReposPath } from '@opencode-manager/shared/config/env'
@@ -94,9 +95,21 @@ export interface ExtractResult {
   staging: string
 }
 
+function isStdinClosedError(error: unknown): boolean {
+  if (typeof error !== 'object' || error === null) return false
+  const code = (error as { code?: unknown }).code
+  return code === 'ERR_STREAM_PREMATURE_CLOSE' || code === 'EPIPE'
+}
+
 export async function extractPartsToStaging(uploadId: string, totalParts: number, gzip: boolean): Promise<ExtractResult> {
   if (!isValidTotalParts(totalParts)) {
     throw new Error(TOTAL_PARTS_INVALID_MESSAGE)
+  }
+
+  for (let i = 0; i < totalParts; i++) {
+    if (!existsSync(getPartPath(uploadId, i))) {
+      throw new Error(`missing part ${i} for upload ${uploadId}`)
+    }
   }
 
   const stagingParent = getStagingRoot()
@@ -110,30 +123,40 @@ export async function extractPartsToStaging(uploadId: string, totalParts: number
   const stderrChunks: Buffer[] = []
   child.stderr.on('data', (chunk: Buffer) => stderrChunks.push(chunk))
 
-  const tarDone = new Promise<void>((resolve, reject) => {
-    child.on('close', (code) => {
-      if (code === 0) resolve()
-      else {
-        const stderr = Buffer.concat(stderrChunks).toString('utf-8').trim()
-        reject(new Error(`tar exited with code ${code}${stderr ? `: ${stderr}` : ''}`))
-      }
-    })
+  const tarDone = new Promise<number | null>((resolve, reject) => {
+    child.on('close', (code) => resolve(code))
     child.on('error', reject)
   })
+  tarDone.catch(() => {})
 
-  try {
-    for (let i = 0; i < totalParts; i++) {
-      const partPath = getPartPath(uploadId, i)
-      if (!existsSync(partPath)) {
-        throw new Error(`missing part ${i} for upload ${uploadId}`)
+  let writeError: unknown = null
+  const partStreams = Readable.from(
+    (async function* () {
+      for (let i = 0; i < totalParts; i++) {
+        for await (const chunk of createReadStream(getPartPath(uploadId, i))) {
+          yield chunk
+        }
       }
-      await pipeline(createReadStream(partPath), child.stdin, { end: i === totalParts - 1 })
-    }
-    await tarDone
+    })(),
+  )
+  try {
+    await pipeline(partStreams, child.stdin, { end: true })
   } catch (err) {
+    writeError = err
+  }
+
+  if (writeError && !isStdinClosedError(writeError)) {
     if (!child.killed) child.kill('SIGKILL')
     await fsp.rm(staging, { recursive: true, force: true }).catch(() => {})
-    throw err
+    throw writeError
+  }
+
+  const exitCode = await tarDone
+
+  if (exitCode !== 0) {
+    const stderr = Buffer.concat(stderrChunks).toString('utf-8').trim()
+    await fsp.rm(staging, { recursive: true, force: true }).catch(() => {})
+    throw new Error(`tar exited with code ${exitCode}${stderr ? `: ${stderr}` : ''}`)
   }
 
   let extractedRoot = staging

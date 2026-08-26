@@ -98,7 +98,7 @@ describe('OpenCodeConfigManager', () => {
     })
 
     const user = userEvent.setup()
-    renderWithQuery(<OpenCodeConfigManager hideHealthStatus />)
+    renderWithQuery(<OpenCodeConfigManager />)
 
     await screen.findByText('Commands')
     await vi.waitFor(() => {
@@ -120,7 +120,7 @@ describe('OpenCodeConfigManager', () => {
     mockUpdateOpenCodeConfig.mockResolvedValueOnce({ ...defaultConfig, restartRequired: true })
 
     const user = userEvent.setup()
-    renderWithQuery(<OpenCodeConfigManager hideHealthStatus />)
+    renderWithQuery(<OpenCodeConfigManager />)
 
     await screen.findByText('GPT-4o')
 
@@ -141,7 +141,7 @@ describe('OpenCodeConfigManager', () => {
     healthState.data = { opencode: 'healthy', opencodeRestartPending: true }
 
     const user = userEvent.setup()
-    renderWithQuery(<OpenCodeConfigManager hideHealthStatus />)
+    renderWithQuery(<OpenCodeConfigManager />)
 
     const restartNowButton = await screen.findByRole('button', { name: /restart now/i })
     await user.click(restartNowButton)
@@ -156,7 +156,7 @@ describe('OpenCodeConfigManager', () => {
     mockUpdateOpenCodeConfig.mockRejectedValueOnce(new Error('boom'))
 
     const user = userEvent.setup()
-    renderWithQuery(<OpenCodeConfigManager hideHealthStatus />)
+    renderWithQuery(<OpenCodeConfigManager />)
 
     await screen.findByText('GPT-4o')
 
@@ -178,7 +178,7 @@ describe('OpenCodeConfigManager', () => {
   })
 
   it('anchors the AGENTS.md card to the settings dialog scrollport', async () => {
-    renderWithQuery(<OpenCodeConfigManager hideHealthStatus />)
+    renderWithQuery(<OpenCodeConfigManager />)
     const header = await screen.findByRole('button', { name: /Global Agent Instructions/i })
     const card = header.parentElement
     expect(card?.className).toContain('overflow-clip')
@@ -200,7 +200,7 @@ describe('OpenCodeConfigManager', () => {
     mockUpdateOpenCodeConfig.mockResolvedValue(configWithRaw)
 
     const user = userEvent.setup()
-    const { container } = renderWithQuery(<OpenCodeConfigManager hideHealthStatus />)
+    const { container } = renderWithQuery(<OpenCodeConfigManager />)
 
     await screen.findByText('GPT-4o')
     const editIcon = container.querySelector('.lucide-square-pen') as SVGElement

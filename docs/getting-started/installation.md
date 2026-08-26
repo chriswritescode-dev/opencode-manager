@@ -23,7 +23,7 @@ The container automatically:
 
 - Installs OpenCode if not present
 - Builds and serves the frontend
-- Creates persistent volumes for workspace and database
+- Creates persistent volumes for the workspace, database, and OpenCode binary
 - Configures health checks and auto-restart
 
 ### Docker Commands
@@ -32,8 +32,11 @@ The container automatically:
 # Start the container
 docker-compose up -d
 
-# Stop and remove container
+# Stop and remove containers (named volumes are preserved)
 docker-compose down
+
+# Stop and remove containers and all named volumes (workspace, database, OpenCode binary)
+docker-compose down -v
 
 # Rebuild the image
 docker-compose build
@@ -54,6 +57,7 @@ docker exec -it opencode-manager sh
 |--------|---------------|---------|
 | `opencode-workspace` | `/workspace` | Repository storage |
 | `opencode-data` | `/app/data` | Database and config |
+| `opencode-bin` | `/home/node/.opencode/bin` | OpenCode binary, persisted across container recreations |
 
 ## Local Development
 

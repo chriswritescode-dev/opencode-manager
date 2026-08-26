@@ -24,6 +24,8 @@ interface RepoRow {
 
 const REPO_GIT_CREDENTIAL_SETTING_KEY = 'gitCredentialId'
 
+const REPO_SANDBOX_GIT_CREDENTIALS_SETTING_KEY = 'sandboxGitCredentials'
+
 function rowToRepo(row: RepoRow): Repo {
   const fullPath = row.source_path || path.join(getReposPath(), row.local_path)
 
@@ -80,6 +82,16 @@ export function getRepoGitCredentialId(db: Database, repoId: number): string | n
 
 export function setRepoGitCredentialId(db: Database, repoId: number, credentialId: string | null): void {
   setRepoSetting(db, repoId, REPO_GIT_CREDENTIAL_SETTING_KEY, credentialId)
+}
+
+export function getRepoSandboxGitCredentials(db: Database, repoId: number): boolean | null {
+  const value = getRepoSetting(db, repoId, REPO_SANDBOX_GIT_CREDENTIALS_SETTING_KEY)
+  if (value === null) return null
+  return value === 'true'
+}
+
+export function setRepoSandboxGitCredentials(db: Database, repoId: number, allowed: boolean | null): void {
+  setRepoSetting(db, repoId, REPO_SANDBOX_GIT_CREDENTIALS_SETTING_KEY, allowed === null ? null : String(allowed))
 }
 
 export function getRepoByDirectory(db: Database, directory: string): Repo | null {

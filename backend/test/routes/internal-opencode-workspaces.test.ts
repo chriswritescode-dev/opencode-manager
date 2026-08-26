@@ -85,8 +85,6 @@ describe('internal-opencode-workspaces routes', () => {
       postJson: vi.fn(),
       setProviderAuth: vi.fn(),
       deleteProviderAuth: vi.fn(),
-      startMcpAuth: vi.fn(),
-      authenticateMcp: vi.fn(),
     } as unknown as OpenCodeClient
     app = new Hono()
     app.route('/api/internal', createInternalRoutes(mockDb, scheduleService, notificationService, settingsService, openCodeClient))

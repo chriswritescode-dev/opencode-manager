@@ -3,11 +3,18 @@ import { UserPreferencesSchema } from './settings'
 
 export const AssistantNotificationPrioritySchema = z.enum(['normal', 'high'])
 
+export const ASSISTANT_NOTIFICATION_LIMITS = {
+  TITLE_MAX: 120,
+  BODY_MAX: 500,
+  URL_MAX: 500,
+  TAG_MAX: 80,
+} as const
+
 export const AssistantNotificationRequestSchema = z.object({
-  title: z.string().min(1).max(120),
-  body: z.string().min(1).max(500),
-  url: z.string().min(1).max(500).optional(),
-  tag: z.string().max(80).optional(),
+  title: z.string().min(1).max(ASSISTANT_NOTIFICATION_LIMITS.TITLE_MAX),
+  body: z.string().min(1).max(ASSISTANT_NOTIFICATION_LIMITS.BODY_MAX),
+  url: z.string().min(1).max(ASSISTANT_NOTIFICATION_LIMITS.URL_MAX).optional(),
+  tag: z.string().max(ASSISTANT_NOTIFICATION_LIMITS.TAG_MAX).optional(),
   priority: AssistantNotificationPrioritySchema.default('normal'),
 })
 

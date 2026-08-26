@@ -71,14 +71,6 @@ function createStubClient(
     async deleteProviderAuth(_providerId: string) {
       throw new Error('not used')
     },
-     
-    async startMcpAuth(_serverName: string, _directory?: string) {
-      throw new Error('not used')
-    },
-     
-    async authenticateMcp(_serverName: string, _directory?: string) {
-      throw new Error('not used')
-    },
   }
 }
 
@@ -252,12 +244,6 @@ describe('patchConfigWithRecovery', () => {
         throw new Error('not used')
       },
       async deleteProviderAuth(providerId: string) {
-        throw new Error('not used')
-      },
-      async startMcpAuth(serverName: string, directory?: string) {
-        throw new Error('not used')
-      },
-      async authenticateMcp(serverName: string, directory?: string) {
         throw new Error('not used')
       },
     }

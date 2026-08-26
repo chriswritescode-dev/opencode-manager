@@ -27,6 +27,29 @@ lsof -i :5003
 docker-compose build --no-cache
 ```
 
+### Reset a Broken OpenCode Binary
+
+**Symptoms:** Container won't start after an OpenCode upgrade, or the OpenCode settings show a malformed binary
+
+The OpenCode binary lives in its own named volume (`opencode-bin`). To remove only that volume and let the entrypoint reinstall the pinned bundled version on next start, without touching the workspace or database volumes:
+
+```bash
+docker-compose down
+# <project> is the Compose project name, usually the directory containing docker-compose.yml
+docker volume rm <project>_opencode-bin
+docker-compose up -d
+```
+
+Or via the package scripts:
+
+```bash
+pnpm docker:down
+docker volume rm <project>_opencode-bin
+pnpm docker:up
+```
+
+Do not use `docker-compose down -v` (or `pnpm docker:reset`) here: that also deletes the workspace and database volumes.
+
 ### Port Already in Use
 
 **Symptoms:** Error about port 5003 being in use

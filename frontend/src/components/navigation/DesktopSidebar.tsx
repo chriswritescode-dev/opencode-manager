@@ -2,6 +2,7 @@ import { useState } from 'react'
 import { useLocation, useNavigate } from 'react-router-dom'
 import { useDesktop } from '@/hooks/useDesktop'
 import { useSidebarCollapsed } from '@/hooks/useSidebarCollapsed'
+import { emitSidebarAction } from '@/hooks/useSidebarAction'
 import { useAuth } from '@/hooks/useAuth'
 import { useUrlParams } from '@/hooks/useUrlParams'
 import { buildNavModel, type MoreDrawerItem, type NavPrimaryCta } from '@/components/navigation/moreDrawerItems'
@@ -39,11 +40,7 @@ export function DesktopSidebar() {
     if (item.to) {
       navigate(item.to)
     } else if (item.onSelect) {
-      window.dispatchEvent(
-        new CustomEvent('oc:sidebar:action', {
-          detail: { action: item.onSelect },
-        })
-      )
+      emitSidebarAction(item.onSelect)
     }
   }
 

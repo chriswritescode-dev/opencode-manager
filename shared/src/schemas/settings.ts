@@ -132,6 +132,18 @@ export const DEFAULT_GIT_IDENTITY: GitIdentity = {
   email: '',
 };
 
+export const SandboxPreferencesSchema = z.object({
+  enabled: z.boolean(),
+  gitCredentials: z.boolean().optional(),
+});
+
+export type SandboxPreferences = z.infer<typeof SandboxPreferencesSchema>;
+
+export const DEFAULT_SANDBOX_PREFERENCES: SandboxPreferences = {
+  enabled: false,
+  gitCredentials: false,
+};
+
 export const UserPreferencesSchema = z.object({
   theme: z.enum(["dark", "light", "system"]),
   mode: z.enum(["plan", "build"]),
@@ -156,6 +168,7 @@ export const UserPreferencesSchema = z.object({
   repoOrder: z.array(z.number()).optional(),
   repoSortMode: z.enum(['recent', 'manual', 'name']).optional(),
   serverEnvVars: z.array(ServerEnvVarSchema).optional(),
+  sandbox: SandboxPreferencesSchema.optional(),
   disabledDefaultServerEnvVars: z.array(z.string()).optional(),
 });
 
@@ -206,6 +219,7 @@ export const DEFAULT_USER_PREFERENCES = {
   notifications: DEFAULT_NOTIFICATION_PREFERENCES,
   repoSortMode: 'recent' as const,
   serverEnvVars: [] as ServerEnvVar[],
+  sandbox: DEFAULT_SANDBOX_PREFERENCES,
   disabledDefaultServerEnvVars: [] as string[],
 };
 

@@ -33,8 +33,6 @@ describe('internal/assistant routes', () => {
       postJson: vi.fn(),
       setProviderAuth: vi.fn(),
       deleteProviderAuth: vi.fn(),
-      startMcpAuth: vi.fn(),
-      authenticateMcp: vi.fn(),
     } as unknown as OpenCodeClient
 
     const stubWorktreeManager = { prepare: () => Promise.resolve(null), finalize: () => Promise.resolve({ commitHash: null }) } as unknown as ScheduleWorktreeManager

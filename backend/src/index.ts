@@ -39,6 +39,7 @@ import { createSessionPinRoutes } from './routes/session-pins'
 import { createInternalRoutes } from './routes/internal'
 import { sweepStaleUploadSessions } from './routes/internal/repo-mirror-helpers'
 import { createOpenCodeProxyRoutes } from './routes/opencode-proxy'
+import { createAuthenticatedOpenCodeProxyRoutes } from './routes/opencode-auth-proxy'
 import { sseAggregator } from './services/sse-aggregator'
 import { ensureDirectoryExists, writeFileContent, fileExists, readFileContent } from './services/file-operations'
 import { SettingsService } from './services/settings'
@@ -50,6 +51,8 @@ import { CredentialProvider } from './services/credential-provider'
 import { ScheduleWorktreeManager } from './services/schedule-worktree'
 import { migrateGlobalSkills } from './services/skills'
 import { installAssistantWorkspace } from './services/assistant-mode'
+import { detectSandboxCapability } from './services/sandbox/capability'
+import { stopWorkspaceSandboxOnShutdown } from './services/sandbox/runtime'
 import { getOpenCodeImportStatus, syncOpenCodeImport } from './services/opencode-import'
 import { OpenCodeSupervisor } from './services/opencode-supervisor'
 import { OpenCodeRestartCoordinator } from './services/opencode-restart-coordinator'
@@ -104,7 +107,10 @@ app.use('/*', cors({
 const db = initializeDatabase(DB_PATH)
 const auth = createAuth(db)
 const requireAuth = createAuthMiddleware(auth)
-const openCodeClient = createOpenCodeClient(() => new SettingsService(db).getOpenCodeServerPassword())
+const openCodeClient = createOpenCodeClient(
+  () => new SettingsService(db).getOpenCodeServerPassword(),
+  () => opencodeServerManager.getEffectiveServerHost(),
+)
 
 import { DEFAULT_AGENTS_MD } from './constants'
 
@@ -279,10 +285,7 @@ try {
 
   await migrateGlobalSkills()
 
-  await installAssistantWorkspace({
-    db,
-    apiBaseUrl: `http://localhost:${PORT}/api/internal`,
-  })
+  await installAssistantWorkspace({ db })
   logger.info('Assistant workspace installed')
 
   ipcServer = await createIPCServer(process.env.STORAGE_PATH || undefined)
@@ -292,6 +295,7 @@ try {
   await syncAdminFromEnv(auth, db)
 
   opencodeServerManager.setDatabase(db)
+  detectSandboxCapability()
   const openCodeStatus = await openCodeSupervisor.start()
   if (openCodeStatus.healthy) {
     logger.info(`OpenCode server running on port ${openCodeStatus.port}`)
@@ -373,21 +377,7 @@ protectedApi.route('/schedules', createScheduleRoutes(scheduleService))
 
 app.route('/api', protectedApi)
 
-app.post('/api/opencode/mcp/:name/auth', requireAuth, async (c) => {
-  const serverName = c.req.param('name')
-  const directory = c.req.query('directory')
-  return openCodeClient.startMcpAuth(serverName, directory)
-})
-
-app.post('/api/opencode/mcp/:name/auth/authenticate', requireAuth, async (c) => {
-  const serverName = c.req.param('name')
-  const directory = c.req.query('directory')
-  return openCodeClient.authenticateMcp(serverName, directory)
-})
-
-app.all('/api/opencode/*', requireAuth, async (c) => {
-  return openCodeClient.forwardRaw(c.req.raw)
-})
+app.route('/api/opencode', createAuthenticatedOpenCodeProxyRoutes(openCodeClient, requireAuth))
 
 const isProduction = ENV.SERVER.NODE_ENV === 'production'
 
@@ -482,6 +472,12 @@ const shutdown = async (signal: string) => {
     logger.info('OpenCode server stopped')
   } catch (error) {
     logger.error('Error during shutdown:', error)
+  }
+  try {
+    await stopWorkspaceSandboxOnShutdown(db)
+    logger.info('Workspace sandbox stopped')
+  } catch (error) {
+    logger.error('Error stopping workspace sandbox:', error)
   }
   process.exit(0)
 }

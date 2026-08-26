@@ -49,6 +49,7 @@ services:
     volumes:
       - ${OCM_WORKSPACE_HOST_PATH:-opencode-workspace}:/workspace
       - opencode-data:/app/data
+      - opencode-bin:/home/node/.opencode/bin
     restart: unless-stopped
     healthcheck:
       test: ["CMD", "curl", "-f", "http://localhost:5003/api/health"]
@@ -61,4 +62,6 @@ volumes:
   opencode-workspace:
     driver: local
   opencode-data:
+    driver: local
+  opencode-bin:
     driver: local

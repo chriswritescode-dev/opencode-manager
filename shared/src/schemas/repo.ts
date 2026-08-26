@@ -81,10 +81,7 @@ export const AssistantModeStatusSchema = z.object({
     agentsMd: AssistantModeFileSchema,
     opencodeJson: AssistantModeFileSchema,
   }),
-  internalToken: z.object({
-    path: z.string(),
-    created: z.boolean(),
-  }).optional(),
+
   schedulesSkill: z.object({
     path: z.string(),
     created: z.boolean(),

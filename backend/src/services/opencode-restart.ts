@@ -1,6 +1,7 @@
 import { opencodeServerManager } from './opencode-single-server'
 import type { OpenCodeSupervisor } from './opencode-supervisor'
 import type { OpenCodeRestartCoordinator } from './opencode-restart-coordinator'
+import { logger } from '../utils/logger'
 
 let restartCoordinator: OpenCodeRestartCoordinator | null = null
 
@@ -17,13 +18,22 @@ export function getOpenCodeRestartCoordinator(): OpenCodeRestartCoordinator | nu
   return restartCoordinator
 }
 
+function restartFailureError(): Error {
+  const startupError = opencodeServerManager.getLastStartupError()
+  return new Error(startupError ?? 'OpenCode server restart did not complete successfully')
+}
+
 async function performRestart(supervisor?: OpenCodeSupervisor): Promise<boolean> {
   if (supervisor) {
     return (await supervisor.restart('settings_restart')).healthy
   }
   opencodeServerManager.clearStartupError()
   await opencodeServerManager.restart()
-  return opencodeServerManager.checkHealth()
+  const healthy = await opencodeServerManager.checkHealth()
+  if (!healthy) {
+    throw restartFailureError()
+  }
+  return healthy
 }
 
 /**
@@ -37,15 +47,38 @@ async function performRestart(supervisor?: OpenCodeSupervisor): Promise<boolean>
 export async function restartOpenCode(supervisor?: OpenCodeSupervisor): Promise<{ resumedSessionIDs: string[] }> {
   if (restartCoordinator) {
     const result = await restartCoordinator.runWithResume(() => performRestart(supervisor))
+    if (!result.healthy) {
+      throw restartFailureError()
+    }
     return { resumedSessionIDs: result.resumedSessionIDs }
   }
   if (supervisor) {
-    await supervisor.restart('settings_restart')
+    const status = await supervisor.restart('settings_restart')
+    if (!status.healthy) {
+      throw restartFailureError()
+    }
   } else {
     opencodeServerManager.clearStartupError()
     await opencodeServerManager.restart()
+    const healthy = await opencodeServerManager.checkHealth()
+    if (!healthy) {
+      throw restartFailureError()
+    }
   }
   return { resumedSessionIDs: [] }
+}
+
+export async function restartOpenCodeAfterCommit(
+  supervisor?: OpenCodeSupervisor,
+): Promise<{ restartFailed: boolean; restartError?: string }> {
+  try {
+    await restartOpenCode(supervisor)
+    return { restartFailed: false }
+  } catch (error) {
+    const restartError = error instanceof Error ? error.message : String(error)
+    logger.error('OpenCode restart failed after the change was persisted', error)
+    return { restartFailed: true, restartError }
+  }
 }
 
 /**
@@ -55,7 +88,11 @@ export async function restartOpenCode(supervisor?: OpenCodeSupervisor): Promise<
  */
 export async function reloadOpenCodeConfig(supervisor?: OpenCodeSupervisor): Promise<void> {
   if (supervisor) {
-    await supervisor.reloadConfig('settings_reload')
+    const status = await supervisor.reloadConfig('settings_reload')
+    if (!status.healthy) {
+      const startupError = opencodeServerManager.getLastStartupError()
+      throw new Error(startupError ?? 'OpenCode server reload did not complete successfully')
+    }
     return
   }
   await opencodeServerManager.reloadConfig()

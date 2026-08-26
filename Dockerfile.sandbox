@@ -1,0 +1,38 @@
+# Guest image for the agent sandbox microVM (SANDBOX_IMAGE).
+#
+# node:24 is buildpack-deps based, so gcc/g++/make/ld/pkg-config, glib-2.0,
+# git, ssh, python3 and curl are already present. This image only adds the
+# GitHub CLI and a Playwright-managed Chromium.
+FROM node:24
+
+ARG PLAYWRIGHT_VERSION=1.56.0
+# Bump TOOLS_CACHEBUST (e.g. via --build-arg) to force a fresh gh/Playwright
+# install without invalidating the rest of the build cache.
+ARG TOOLS_CACHEBUST=0
+
+# Shared browser location so the sandbox exec user (SANDBOX_EXEC_USER, default
+# "node") can read browsers installed at build time by root.
+ENV PLAYWRIGHT_BROWSERS_PATH=/ms-playwright
+# Lets agent code `require("playwright")` from any working directory without a
+# project-local install. Only a resolution fallback; local node_modules wins.
+ENV NODE_PATH=/usr/local/lib/node_modules
+
+RUN echo "Installing gh (cachebust=${TOOLS_CACHEBUST})" && \
+    apt-get update && \
+    apt-get install -y --no-install-recommends ca-certificates curl && \
+    curl -fsSL https://cli.github.com/packages/githubcli-archive-keyring.gpg \
+        -o /usr/share/keyrings/githubcli-archive-keyring.gpg && \
+    chmod go+r /usr/share/keyrings/githubcli-archive-keyring.gpg && \
+    echo "deb [arch=$(dpkg --print-architecture) signed-by=/usr/share/keyrings/githubcli-archive-keyring.gpg] https://cli.github.com/packages stable main" \
+        > /etc/apt/sources.list.d/github-cli.list && \
+    apt-get update && \
+    apt-get install -y --no-install-recommends gh && \
+    rm -rf /var/lib/apt/lists/* && \
+    gh --version
+
+RUN echo "Installing playwright=${PLAYWRIGHT_VERSION} chromium (cachebust=${TOOLS_CACHEBUST})" && \
+    npm install -g "playwright@${PLAYWRIGHT_VERSION}" && \
+    npx --yes "playwright@${PLAYWRIGHT_VERSION}" install --with-deps chromium && \
+    chmod -R a+rX "${PLAYWRIGHT_BROWSERS_PATH}" && \
+    rm -rf /var/lib/apt/lists/* /root/.npm && \
+    npx --yes "playwright@${PLAYWRIGHT_VERSION}" --version

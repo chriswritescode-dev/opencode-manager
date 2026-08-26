@@ -49,6 +49,21 @@ describe('entrypoint library wiring', () => {
     expect(warnIndex).toBeLessThan(chownIndex)
   })
 
+  it('grants node access to /dev/kvm before dropping privileges without aborting startup', () => {
+    const entrypoint = read(entrypointPath)
+    expect(entrypoint).toMatch(/^grant_kvm_access\(\) \{/m)
+    const alignIndex = entrypoint.indexOf('if ! align_container_user node; then')
+    const grantCallIndex = entrypoint.indexOf('if ! grant_kvm_access; then')
+    const runuserIndex = entrypoint.indexOf('exec runuser -u node')
+    expect(alignIndex, 'entrypoint must align the container user').toBeGreaterThan(-1)
+    expect(grantCallIndex, 'entrypoint must call grant_kvm_access').toBeGreaterThan(-1)
+    expect(grantCallIndex).toBeGreaterThan(alignIndex)
+    expect(runuserIndex).toBeGreaterThan(grantCallIndex)
+    const grantBlock = entrypoint.slice(grantCallIndex, grantCallIndex + 200)
+    expect(grantBlock).toMatch(/WARNING: continuing without \/dev\/kvm access/)
+    expect(grantBlock.slice(0, grantBlock.indexOf('fi'))).not.toMatch(/exit 1/)
+  })
+
   it('does not re-chown /app when ids change', () => {
     const entrypoint = read(entrypointPath)
 
@@ -63,6 +78,55 @@ describe('entrypoint library wiring', () => {
   it('does not mark the library executable in the image', () => {
     const dockerfile = read(dockerfilePath)
     expect(dockerfile).not.toMatch(/chmod \+x \/usr\/local\/lib\/ocm\/container-user\.sh/)
+  })
+})
+
+describe('microsandbox runtime install', () => {
+  const dockerfile = read(dockerfilePath)
+
+  it('declares MICROSANDBOX_VERSION next to the other tool args', () => {
+    expect(dockerfile).toMatch(/ARG MICROSANDBOX_VERSION=0\.6\.8/)
+  })
+
+  it('resolves the release URL from MICROSANDBOX_VERSION, not only the log message', () => {
+    const microsandboxRun = dockerfile.slice(dockerfile.indexOf('Installing microsandbox='), dockerfile.indexOf('msb --version'))
+    expect(microsandboxRun).toMatch(/releases\/download\/\$\{MSB_VERSION\}/)
+    expect(microsandboxRun).toMatch(/MSB_VERSION="v\$\{MICROSANDBOX_VERSION\}"/)
+  })
+
+  it('pins a tested version and avoids unauthenticated GitHub API lookups', () => {
+    const microsandboxRun = dockerfile.slice(dockerfile.indexOf('Installing microsandbox='), dockerfile.indexOf('msb --version'))
+    expect(microsandboxRun).not.toMatch(/releases\/latest\/download/)
+    expect(microsandboxRun).not.toContain('install.microsandbox.dev')
+    expect(microsandboxRun).not.toMatch(/api\.github\.com/)
+  })
+
+  it('passes the same MICROSANDBOX_VERSION from the docker-build workflow', () => {
+    const workflow = read(join(repoRoot, '.github/workflows/docker-build.yml'))
+    expect(workflow).toContain('MICROSANDBOX_VERSION=0.6.8')
+    expect(workflow).toContain('MICROSANDBOX_VERSION=${{ steps.versions.outputs.microsandbox }}')
+  })
+
+  it('downloads the arch-specific bundle and verifies its checksum', () => {
+    const microsandboxRun = dockerfile.slice(dockerfile.indexOf('Installing microsandbox='), dockerfile.indexOf('msb --version'))
+    expect(microsandboxRun).toMatch(/MSB_BUNDLE="microsandbox-linux-\$\{MSB_TARGET\}\.tar\.gz"/)
+    expect(microsandboxRun).toMatch(/MSB_TARGET="x86_64"/)
+    expect(microsandboxRun).toMatch(/MSB_TARGET="aarch64"/)
+    expect(microsandboxRun).toMatch(/checksums\.sha256/)
+    expect(microsandboxRun).toMatch(/sha256sum -c --quiet/)
+  })
+
+  it('installs msb and libkrunfw under /opt/microsandbox with the runtime symlinks', () => {
+    expect(dockerfile).toContain('/opt/microsandbox/bin/msb')
+    expect(dockerfile).toContain('/usr/local/bin/msb')
+    expect(dockerfile).toContain('/opt/microsandbox/lib/libkrunfw.so')
+    expect(dockerfile).toMatch(/chmod -R a\+rX \/opt\/microsandbox/)
+    expect(dockerfile).toMatch(/msb --version/)
+  })
+
+  it('keeps the state directory writable by the node user', () => {
+    expect(dockerfile).toMatch(/mkdir -p \/workspace \/app\/data \/home\/node\/\.cache \/home\/node\/\.opencode \/home\/node\/\.microsandbox/)
+    expect(dockerfile).toMatch(/chown -R node:node \/workspace \/app\/data \/home\/node/)
   })
 })
 
@@ -86,6 +150,22 @@ describe('workspace ownership configuration', () => {
   it('keeps the opencode-workspace named volume declared at top level', () => {
     const compose = read(composePath)
     expect(compose).toMatch(/^volumes:\n(?:.*\n)*?\s+opencode-workspace:/m)
+  })
+
+  it('mounts a dedicated named volume at /home/node/.opencode/bin with a top-level declaration', () => {
+    const compose = read(composePath)
+    expect(compose).toContain('opencode-bin:/home/node/.opencode/bin')
+    expect(compose).toMatch(/^volumes:\n(?:.*\n)*?\s+opencode-bin:/m)
+  })
+
+  it('persists only the opencode bin directory, not the whole ~/.opencode home', () => {
+    const compose = read(composePath)
+    expect(compose).not.toMatch(/:\/home\/node\/\.opencode(?:\s|$)/)
+  })
+
+  it('lists the opencode-bin volume in the installation docs table', () => {
+    const docs = read(join(repoRoot, 'docs/getting-started/installation.md'))
+    expect(docs).toContain('| `opencode-bin` | `/home/node/.opencode/bin` |')
   })
 
   it('keeps the docker docs compose snippet in sync with docker-compose.yml', () => {
@@ -121,6 +201,70 @@ describe('workspace ownership configuration', () => {
     expect(docs).toContain('mkdir -p "<host path>"')
     expect(docs).toContain('-v "<host path>":/to')
     expect(docs).toContain('chown -R "$(id -u):$(id -g)" "<host path>"')
+  })
+})
+
+describe('docker lifecycle scripts', () => {
+  it('keeps docker:down non-destructive and docker:reset destructive', () => {
+    const pkg = read(join(repoRoot, 'package.json'))
+    expect(pkg).toContain('"docker:down": "docker-compose down"')
+    expect(pkg).toContain('"docker:reset": "docker-compose down -v"')
+  })
+
+  it('documents the preserved-volume shutdown and the destructive reset', () => {
+    const docs = read(dockerDocsPath)
+    expect(docs).toContain('named volumes are preserved')
+    expect(docs).toContain('docker-compose down -v')
+  })
+
+  it('documents a targeted opencode-bin volume reset that preserves the other volumes', () => {
+    const docs = read(join(repoRoot, 'docs/troubleshooting.md'))
+    expect(docs).toContain('docker volume rm <project>_opencode-bin')
+    expect(docs).toContain('without touching the workspace or database volumes')
+  })
+})
+
+describe('sandbox compose overlay', () => {
+  const overlayPath = join(repoRoot, 'docker-compose.sandbox.yml')
+  const overlay = read(overlayPath)
+  const overlayDirectives = overlay
+    .split('\n')
+    .filter((line) => line.trim() !== '' && !line.trimStart().startsWith('#'))
+
+  it('defaults SANDBOX_EXEC_USER from PUID so the guest identity tracks the workspace owner', () => {
+    expect(overlay).toContain('- SANDBOX_EXEC_USER=${SANDBOX_EXEC_USER:-${PUID:-1000}}')
+  })
+
+  it('keeps the base compose free of KVM and privileged flags', () => {
+    const compose = read(composePath)
+    expect(compose).not.toContain('privileged')
+    expect(compose).not.toContain('/dev/kvm')
+  })
+
+  it('grants KVM and persists microsandbox state only in the overlay', () => {
+    expect(overlay).toContain('"/dev/kvm:/dev/kvm"')
+    expect(overlay).toContain('"/dev/net/tun:/dev/net/tun"')
+    expect(overlay).toContain('- NET_ADMIN')
+    expect(overlay).toContain('microsandbox-data:/home/node/.microsandbox')
+    expect(overlay).toMatch(/^volumes:\n(?:.*\n)*?\s+microsandbox-data:/m)
+  })
+
+  it('grants only the devices and capability msb needs, never full container privilege', () => {
+    expect(overlayDirectives.join('\n')).not.toContain('privileged')
+  })
+
+  it('keeps the sandbox overlay docs snippet in sync with docker-compose.sandbox.yml', () => {
+    const docs = read(dockerDocsPath)
+    const docsOverlay = [...docs.matchAll(/```yaml\n([\s\S]*?)\n```/g)]
+      .map((match) => match[1]!)
+      .find((block) => block.includes('microsandbox-data'))
+
+    expect(docsOverlay, 'docs must contain the sandbox overlay yaml block').toBeDefined()
+
+    const significantLines = (source: string[]) =>
+      source.filter((line) => line.trim() !== '').map((line) => line.replace(/\s+$/, '')).join('\n')
+
+    expect(significantLines(docsOverlay!.split('\n'))).toBe(significantLines(overlayDirectives))
   })
 })
 

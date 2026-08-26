@@ -1,18 +1,90 @@
 # Assistant Internal API
 
-The Assistant Internal API provides capabilities for OpenCode agents to interact with the manager backend via a secure bearer-token API.
+The Assistant Internal API provides capabilities for OpenCode agents to interact with the manager backend. Agents reach it through the `ocm` tool, which authenticates on their behalf; the HTTP surface itself is a secure bearer-token API.
 
 > For a user-facing overview of how to use and set up assistant mode, see [Assistant Mode](assistant-mode.md).
 
 ## Authentication
 
-All endpoints require a bearer token. The token can be found at:
-- `.opencode/internal-token` (relative to the assistant workspace cwd)
+The raw HTTP endpoints require a bearer token:
 
-Include the token in requests:
 ```
 Authorization: Bearer <token>
 ```
+
+The token has two in-product consumers, neither of which is an agent:
+
+| Consumer | How it obtains the token |
+|----------|--------------------------|
+| Generated plugins (`ocm-manager.js`, `ocm-sandbox.js`, `ocm-gh-env.js`) | The `OCM_INTERNAL_TOKEN` environment variable, injected into the OpenCode child process |
+| External clients such as the `ocm` CLI | Settings -> Manager Token, served by `GET /api/settings/manager-token` |
+
+Agents never authenticate against this API themselves. They call the `ocm` tool, which holds the token inside the Manager process.
+
+## The `ocm` Tool
+
+The Manager installs a generated plugin (`ocm-manager.js`) that gives every agent an `ocm` tool. The tool calls this API from inside the Manager's own OpenCode process, so it needs no token, no base URL, and no network access from the agent shell.
+
+That makes it the only path that works everywhere: a scheduled run executes in a throwaway worktree with no token of its own, and a sandboxed `bash` call runs in a microVM where `localhost` is the guest, not the Manager.
+
+The tool has two actions.
+
+### `send_notification`
+
+Send a push notification to every device the user has registered.
+
+```ts
+{
+  action: 'send_notification',
+  params: { title: string, body: string, url?: string, tag?: string, priority?: 'normal' | 'high' }
+}
+```
+
+### `request`
+
+Call an allow-listed internal API route and return the raw response body text.
+
+```ts
+{
+  action: 'request',
+  params: { method: 'GET' | 'POST' | 'PATCH' | 'DELETE', path: string, body?: object }
+}
+```
+
+The `path` is relative to the internal API base (for example `/settings` or `/repos/0/schedules`) and query strings are allowed. The action resolves the path against the internal API base and rejects anything that resolves outside it (absolute URLs and `..` traversal), then rejects any method plus path that is not in the allow-list.
+
+**Allow-listed routes:**
+
+```
+GET /settings
+PATCH /settings
+POST /assistant/reload
+GET /repos
+GET /repos/*/git-info
+GET /opencode-workspaces
+GET /schedules/all
+GET /schedules/all/runs
+GET /repos/*/schedules
+POST /repos/*/schedules
+GET /repos/*/schedules/*
+PATCH /repos/*/schedules/*
+DELETE /repos/*/schedules/*
+POST /repos/*/schedules/*/run
+GET /repos/*/schedules/*/runs
+DELETE /repos/*/schedules/*/runs
+GET /repos/*/schedules/*/runs/*
+DELETE /repos/*/schedules/*/runs/*
+POST /repos/*/schedules/*/runs/*/cancel
+```
+
+**Deliberately not allow-listed:**
+
+- `POST /notifications/send` — use the `send_notification` action instead.
+- `GET /git-credentials/gh-env` — returns the GitHub CLI environment (`GH_TOKEN`, `GITHUB_TOKEN`) for the OpenCode host process; it must not be readable by the agent.
+- `POST /sandbox/shell` — the sandbox planner's internal route that resolves and pins the shell for a `bash` call; exposing it would let the agent drive shell planning directly.
+- `/repos/*/mirror/*` — the repo mirror protocol that the `ocm` CLI uses to sync entire repositories; it can create, replace, patch, or delete whole repos, so it stays reserved for the CLI.
+
+Agents should use the `ocm` tool rather than the raw bearer-token endpoints below. Those endpoints remain available to the frontend, generated plugins, and other Manager-internal clients.
 
 ## Endpoints
 
@@ -20,7 +92,7 @@ Authorization: Bearer <token>
 
 **POST `/api/internal/notifications/send`**
 
-Send push notifications to the user's registered devices.
+Send push notifications to the user's registered devices. Prefer the `ocm` tool with the `send_notification` action.
 
 **Request Body:**
 ```ts
@@ -137,9 +209,14 @@ Reload the assistant workspace by disposing the current OpenCode instance. Use t
 **Rate Limiting:** 5 requests per minute per token. Returns `429 Too Many Requests` with `Retry-After` header when exceeded.
 
 **Example:**
-```bash
-curl -X POST -H "Authorization: Bearer <token>" \
-  "http://localhost:5003/api/internal/assistant/reload"
+```json
+{
+  "action": "request",
+  "params": {
+    "method": "POST",
+    "path": "/assistant/reload"
+  }
+}
 ```
 
 **Response:**
@@ -190,9 +267,9 @@ Retrieve a list of all managed repositories, ordered by the user's repo preferen
 
 The assistant workspace includes four skills that document these capabilities:
 
-1. **Schedule Management** (`.opencode/skills/schedule-management/SKILL.md`)
-2. **Notifications** (`.opencode/skills/notifications/SKILL.md`)
-3. **Manager Settings** (`.opencode/skills/manager-settings/SKILL.md`)
-4. **Repo Management** (`.opencode/skills/repo-management/SKILL.md`)
+1. **Schedule Management** (`.opencode/skills/schedule-management/SKILL.md`) — manage schedule jobs and runs through the `ocm` `request` action.
+2. **Notifications** (`.opencode/skills/notifications/SKILL.md`) — send push notifications through the `ocm` `send_notification` action.
+3. **Manager Settings** (`.opencode/skills/manager-settings/SKILL.md`) — read and patch user preferences and reload the assistant workspace through the `ocm` `request` action.
+4. **Repo Management** (`.opencode/skills/repo-management/SKILL.md`) — list managed repositories through the `ocm` `request` action.
 
 These skills are automatically provisioned when assistant mode is initialized and contain detailed examples and usage patterns.

@@ -1,0 +1,31 @@
+# Agent Sandboxing overlay (microsandbox / msb)
+# Grants the container KVM access and persists microsandbox state so OpenCode
+# agent commands can run inside a microVM. Linux host with /dev/kvm required.
+# Use with: docker compose -f docker-compose.yml -f docker-compose.sandbox.yml up -d
+#
+# This overlay deliberately does NOT use `privileged: true`. It grants only
+# /dev/kvm (microVM execution), /dev/net/tun and NET_ADMIN (guest networking
+# for SANDBOX_NET=public). If msb reports a missing device or capability on a
+# particular host, add that specific entry rather than enabling full privilege.
+
+services:
+  app:
+    devices:
+      - "/dev/kvm:/dev/kvm"
+      - "/dev/net/tun:/dev/net/tun"
+    cap_add:
+      - NET_ADMIN
+    environment:
+      - SANDBOX_IMAGE=${SANDBOX_IMAGE:-docker.io/cstechdev/ocm-sandbox:latest}
+      - SANDBOX_MEMORY=${SANDBOX_MEMORY:-4G}
+      - SANDBOX_CPUS=${SANDBOX_CPUS:-2}
+      - SANDBOX_EXEC_USER=${SANDBOX_EXEC_USER:-${PUID:-1000}}
+      - SANDBOX_NET=${SANDBOX_NET:-public}
+      - SANDBOX_START_TIMEOUT_MS=${SANDBOX_START_TIMEOUT_MS:-300000}
+      - SANDBOX_EXEC_TIMEOUT_MS=${SANDBOX_EXEC_TIMEOUT_MS:-600000}
+    volumes:
+      - microsandbox-data:/home/node/.microsandbox
+
+volumes:
+  microsandbox-data:
+    driver: local

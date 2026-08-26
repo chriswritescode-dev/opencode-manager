@@ -2,6 +2,7 @@ import path from 'path'
 import os from 'os'
 import { randomBytes } from 'crypto'
 import { DEFAULTS } from './defaults'
+import { ASSISTANT_REPO_PATH, ASSISTANT_OPENCODE_DIR_NAME } from '../utils/repo'
 
 try {
   const { config } = await import('dotenv')
@@ -87,6 +88,17 @@ export const ENV = {
     AUTH_FILE: DEFAULTS.WORKSPACE.AUTH_FILE,
   },
 
+  SANDBOX: {
+    MSB_PATH: getEnvString('MSB_PATH', DEFAULTS.SANDBOX.MSB_PATH),
+    IMAGE: getEnvString('SANDBOX_IMAGE', DEFAULTS.SANDBOX.IMAGE),
+    MEMORY: getEnvString('SANDBOX_MEMORY', DEFAULTS.SANDBOX.MEMORY),
+    CPUS: getEnvNumber('SANDBOX_CPUS', DEFAULTS.SANDBOX.CPUS),
+    EXEC_USER: getEnvString('SANDBOX_EXEC_USER', DEFAULTS.SANDBOX.EXEC_USER),
+    NET: getEnvString('SANDBOX_NET', DEFAULTS.SANDBOX.NET),
+    START_TIMEOUT_MS: getEnvNumber('SANDBOX_START_TIMEOUT_MS', DEFAULTS.SANDBOX.START_TIMEOUT_MS),
+    EXEC_TIMEOUT_MS: getEnvNumber('SANDBOX_EXEC_TIMEOUT_MS', DEFAULTS.SANDBOX.EXEC_TIMEOUT_MS),
+  },
+
   TIMEOUTS: {
     PROCESS_START_WAIT_MS: getEnvNumber('PROCESS_START_WAIT_MS', DEFAULTS.TIMEOUTS.PROCESS_START_WAIT_MS),
     PROCESS_VERIFY_WAIT_MS: getEnvNumber('PROCESS_VERIFY_WAIT_MS', DEFAULTS.TIMEOUTS.PROCESS_VERIFY_WAIT_MS),
@@ -133,6 +145,8 @@ export const getWorkspacePath = () => ENV.WORKSPACE.BASE_PATH
 export const getBrowseRootPath = () => ENV.WORKSPACE.BROWSE_ROOT
 export const getReposPath = () => path.join(ENV.WORKSPACE.BASE_PATH, ENV.WORKSPACE.REPOS_DIR)
 export const getScheduleWorktreesPath = () => path.join(ENV.WORKSPACE.BASE_PATH, ENV.WORKSPACE.SCHEDULE_WORKTREES_DIR)
+export const getAssistantModePath = () => path.join(getReposPath(), ASSISTANT_REPO_PATH)
+export const getAssistantOpenCodeDir = () => path.join(getAssistantModePath(), ASSISTANT_OPENCODE_DIR_NAME)
 export const getConfigPath = () => path.join(ENV.WORKSPACE.BASE_PATH, ENV.WORKSPACE.CONFIG_DIR)
 export const getOpenCodeConfigFilePath = () => path.join(ENV.WORKSPACE.BASE_PATH, ENV.WORKSPACE.CONFIG_DIR, 'opencode.json')
 export const getAgentsMdPath = () => path.join(ENV.WORKSPACE.BASE_PATH, ENV.WORKSPACE.CONFIG_DIR, 'AGENTS.md')

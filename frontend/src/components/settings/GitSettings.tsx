@@ -4,12 +4,14 @@ import { useSettings } from '@/hooks/useSettings'
 import { Loader2, Plus, Trash2, Save, User, Key, Pencil } from 'lucide-react'
 import { showToast } from '@/lib/toast'
 import { GitCredentialDialog, type GitCredentialSaveOptions } from './GitCredentialDialog'
+import { RestartServerDialog } from './RestartServerDialog'
 import { Label } from '@/components/ui/label'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { randomId } from '@/lib/utils'
-import type { GitCredential, GitIdentity } from '@/api/types/settings'
+import type { GitCredential, GitIdentity, UserPreferences } from '@/api/types/settings'
 import { listRepos, updateRepoGitCredential } from '@/api/repos'
+import { useOpenCodeServerActions } from '@/hooks/useOpenCodeServerActions'
 
 function ensureCredentialId(credential: GitCredential): GitCredential {
   return credential.id ? credential : { ...credential, id: randomId() }
@@ -30,6 +32,27 @@ export function GitSettings() {
     queryKey: ['repos'],
     queryFn: listRepos,
   })
+
+  const {
+    restartServerMutation,
+    confirmOpen,
+    setConfirmOpen,
+    activeSessionCount,
+    requestRestart,
+    confirmRestart,
+  } = useOpenCodeServerActions()
+
+  const saveGitSettings = async (
+    updates: Partial<UserPreferences>,
+    options: { successMessage: string; toastId?: string; afterSave?: () => Promise<void> }
+  ) => {
+    const result = await updateSettingsAsync(updates)
+    await options.afterSave?.()
+    showToast.success(options.successMessage, options.toastId ? { id: options.toastId } : undefined)
+    if (result.restartRequired) {
+      await requestRestart()
+    }
+  }
 
 
   useEffect(() => {
@@ -98,9 +121,13 @@ export function GitSettings() {
     setDefaultGitCredentialId(nextDefaultGitCredentialId)
     
     try {
-      await updateSettingsAsync({ gitCredentials: newCredentials, defaultGitCredentialId: nextDefaultGitCredentialId, gitIdentity })
-      await syncRepoAssignments(nextCredential.id!, options.repoIds)
-      showToast.success('Credential saved')
+      await saveGitSettings(
+        { gitCredentials: newCredentials, defaultGitCredentialId: nextDefaultGitCredentialId, gitIdentity },
+        {
+          successMessage: 'Credential saved',
+          afterSave: () => syncRepoAssignments(nextCredential.id!, options.repoIds),
+        }
+      )
     } catch {
       showToast.error('Failed to save credential')
     }
@@ -116,11 +143,13 @@ export function GitSettings() {
     setDefaultGitCredentialId(nextDefaultGitCredentialId)
 
     try {
-      await updateSettingsAsync({ gitCredentials: newCredentials, defaultGitCredentialId: nextDefaultGitCredentialId, gitIdentity })
-      if (removedCredentialId) {
-        await syncRepoAssignments(removedCredentialId, [])
-      }
-      showToast.success('Credential deleted')
+      await saveGitSettings(
+        { gitCredentials: newCredentials, defaultGitCredentialId: nextDefaultGitCredentialId, gitIdentity },
+        {
+          successMessage: 'Credential deleted',
+          afterSave: removedCredentialId ? () => syncRepoAssignments(removedCredentialId, []) : undefined,
+        }
+      )
     } catch {
       showToast.error('Failed to delete credential')
     }
@@ -136,13 +165,11 @@ export function GitSettings() {
     setIsSaving(true)
     try {
       showToast.loading('Saving git configuration...', { id: 'git-config' })
-      const result = await updateSettingsAsync({ gitCredentials, defaultGitCredentialId, gitIdentity })
+      await saveGitSettings(
+        { gitCredentials, defaultGitCredentialId, gitIdentity },
+        { successMessage: 'Git configuration saved', toastId: 'git-config' }
+      )
       setHasChanges(false)
-      if (result.reloadError) {
-        showToast.success('Git configuration saved (server reload pending)', { id: 'git-config' })
-      } else {
-        showToast.success('Git configuration saved', { id: 'git-config' })
-      }
     } catch {
       showToast.error('Failed to save git configuration', { id: 'git-config' })
     } finally {
@@ -330,6 +357,15 @@ export function GitSettings() {
             : []}
           isDefault={editingCredentialIndex !== null && !!gitCredentials[editingCredentialIndex]?.id && defaultGitCredentialId === gitCredentials[editingCredentialIndex]?.id}
           isSaving={isSaving || isUpdating}
+        />
+
+        <RestartServerDialog
+          open={confirmOpen}
+          onOpenChange={setConfirmOpen}
+          activeSessionCount={activeSessionCount}
+          isRestarting={restartServerMutation.isPending}
+          onCancel={() => setConfirmOpen(false)}
+          onConfirm={confirmRestart}
         />
     </div>
   )

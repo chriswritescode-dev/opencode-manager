@@ -1,5 +1,5 @@
 import type { Database } from 'bun:sqlite'
-import type { GitCredential } from '@opencode-manager/shared'
+import type { GitCredential, Repo } from '@opencode-manager/shared'
 import { SettingsService } from './settings'
 import {
   findPatCredentialForHost,
@@ -8,7 +8,14 @@ import {
   findGitHubCredential,
   type ResolvedGitCredential,
 } from '../utils/git-auth'
-import { getRepoByDirectory, getRepoGitCredentialId } from '../db/queries'
+import { limitForwardedGitConfigs, SANDBOX_MAX_FORWARDED_GIT_CONFIGS } from './sandbox/shell-shim'
+import { logger } from '../utils/logger'
+import {
+  getRepoByDirectory,
+  getRepoGitCredentialId,
+  getRepoSandboxGitCredentials,
+  listRepos,
+} from '../db/queries'
 
 interface CredentialResolutionOptions {
   cwd?: string
@@ -49,8 +56,42 @@ export class CredentialProvider {
     return this.getGitCredentials().filter((cred) => cred.type === 'ssh' && cred.sshPrivateKeyEncrypted)
   }
 
-  getGitEnv(): Record<string, string> {
-    return createGitEnv(this.getGitCredentials())
+  getGitEnv(options: CredentialResolutionOptions = {}): Record<string, string> {
+    const credentials = this.getGitCredentials()
+    return createGitEnv(credentials, this.getSelectedCredential(options, credentials))
+  }
+
+  isSandboxGitCredentialsAllowed(options: CredentialResolutionOptions = {}): boolean {
+    const repo = this.resolveRepo(options)
+    if (repo) {
+      const repoOverride = getRepoSandboxGitCredentials(this.database, repo.id)
+      if (repoOverride !== null) return repoOverride
+    }
+
+    return this.settingsService.getSettings('default').preferences.sandbox?.gitCredentials === true
+  }
+
+  getSandboxGitEnv(options: CredentialResolutionOptions = {}): Record<string, string> {
+    if (!this.isSandboxGitCredentialsAllowed(options)) return {}
+
+    const gitEnv = this.getGitEnv(options)
+    if (gitEnv.GIT_CONFIG_COUNT === '0') return {}
+
+    const { env, dropped } = limitForwardedGitConfigs(gitEnv)
+    if (dropped > 0) {
+      logger.warn(
+        `Sandbox git credentials exceed the forwarding limit of ${SANDBOX_MAX_FORWARDED_GIT_CONFIGS} hosts; ${dropped} host(s) will not authenticate inside the microVM`,
+      )
+    }
+
+    return { ...env, ...this.getGhCliEnv(options) }
+  }
+
+  private resolveRepo(options: CredentialResolutionOptions): Repo | null {
+    if (options.repoId !== undefined) {
+      return listRepos(this.database).find((repo) => repo.id === options.repoId) ?? null
+    }
+    return options.cwd ? getRepoByDirectory(this.database, options.cwd) : null
   }
 
   getGhCliEnv(options: CredentialResolutionOptions = {}): Record<string, string> {
@@ -76,10 +117,10 @@ export class CredentialProvider {
   }
 
   private getRepoCredential(options: CredentialResolutionOptions, credentials: GitCredential[]): GitCredential | null {
-    const repoId = options.repoId ?? (options.cwd ? getRepoByDirectory(this.database, options.cwd)?.id : undefined)
-    if (!repoId) return null
+    const repo = this.resolveRepo(options)
+    if (!repo) return null
 
-    const credentialId = getRepoGitCredentialId(this.database, repoId)
+    const credentialId = getRepoGitCredentialId(this.database, repo.id)
     return credentials.find((credential) => credential.id === credentialId) ?? null
   }
 

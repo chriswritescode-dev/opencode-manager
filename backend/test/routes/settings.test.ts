@@ -1,9 +1,14 @@
-import { describe, it, expect, vi, beforeEach } from 'vitest'
-import { execSync, spawnSync } from 'child_process'
+import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest'
+import { spawnSync } from 'child_process'
+import { Database } from 'bun:sqlite'
 import { createStubOpenCodeClient } from '../helpers/stub-opencode-client'
+import { migrate } from '../../src/db/migration-runner'
+import { allMigrations } from '../../src/db/migrations'
+import { getOrCreateInternalToken } from '../../src/services/internal-token'
 
 const mockGetSettings = vi.fn()
 const mockUpdateSettings = vi.fn()
+const mockResetSettings = vi.fn()
 const mockSaveLastKnownGoodConfig = vi.fn()
 const mockCreateOpenCodeConfig = vi.fn()
 const mockUpdateOpenCodeConfig = vi.fn()
@@ -27,7 +32,6 @@ vi.mock('fs', () => ({
 }))
 
 vi.mock('child_process', () => ({
-  execSync: vi.fn(),
   spawnSync: vi.fn(),
   spawn: vi.fn(),
 }))
@@ -48,6 +52,7 @@ vi.mock('../../src/services/settings', () => ({
   SettingsService: vi.fn().mockImplementation(() => ({
     getSettings: mockGetSettings,
     updateSettings: mockUpdateSettings,
+    resetSettings: mockResetSettings,
     saveLastKnownGoodConfig: mockSaveLastKnownGoodConfig,
     createOpenCodeConfig: mockCreateOpenCodeConfig,
     updateOpenCodeConfig: mockUpdateOpenCodeConfig,
@@ -75,8 +80,6 @@ vi.mock('../../src/services/opencode/client', () => ({
     postJson: vi.fn(),
     setProviderAuth: vi.fn(),
     deleteProviderAuth: vi.fn(),
-    startMcpAuth: vi.fn(),
-    authenticateMcp: vi.fn(),
   }),
 }))
 
@@ -104,8 +107,10 @@ vi.mock('../../src/services/opencode-single-server', async (importOriginal) => {
       restart: vi.fn(),
       clearStartupError: vi.fn(),
       getLastStartupError: vi.fn(),
+      checkHealth: vi.fn().mockResolvedValue(true),
       markRestartPending: vi.fn(),
       isRestartPending: vi.fn(),
+      isSandboxEnforced: vi.fn(),
       setDatabase: vi.fn(),
       reinitializeBinDirectory: vi.fn(),
     },
@@ -132,6 +137,14 @@ vi.mock('../../src/services/repo', () => ({
   relinkReposFromSessionDirectories: vi.fn(),
 }))
 
+const sandboxRuntimeServiceMock = vi.hoisted(() => ({
+  SandboxRuntimeService: vi.fn(),
+}))
+
+vi.mock('../../src/services/sandbox/runtime', () => ({
+  SandboxRuntimeService: sandboxRuntimeServiceMock.SandboxRuntimeService,
+}))
+
 vi.mock('@opencode-manager/shared/config/env', () => ({
   getWorkspacePath: vi.fn(() => '/tmp/test-workspace'),
   getReposPath: vi.fn(() => '/tmp/test-repos'),
@@ -144,6 +157,7 @@ vi.mock('@opencode-manager/shared/config/env', () => ({
     AUTH: { TRUSTED_ORIGINS: 'http://localhost:5173', SECRET: 'test-secret-for-encryption-key-32c' },
     WORKSPACE: { BASE_PATH: '/tmp/test-workspace', REPOS_DIR: 'repos', CONFIG_DIR: 'config', AUTH_FILE: 'auth.json' },
     OPENCODE: { PORT: 5551, HOST: '127.0.0.1' },
+    SANDBOX: { START_TIMEOUT_MS: 300000, EXEC_TIMEOUT_MS: 600000 },
     DATABASE: { PATH: ':memory:' },
     FILE_LIMITS: {
       MAX_SIZE_BYTES: 1024 * 1024,
@@ -163,13 +177,14 @@ import { relinkReposFromSessionDirectories } from '../../src/services/repo'
 import { opencodeServerManager, ConfigReloadError } from '../../src/services/opencode-single-server'
 import { patchConfigWithRecovery } from '../../src/services/opencode/config-recovery'
 
-const mockExecSync = execSync as ReturnType<typeof vi.fn>
 const mockSpawnSync = spawnSync as ReturnType<typeof vi.fn>
 const mockGetVersion = opencodeServerManager.getVersion as ReturnType<typeof vi.fn>
 const mockFetchVersion = opencodeServerManager.fetchVersion as ReturnType<typeof vi.fn>
 const mockReloadConfig = opencodeServerManager.reloadConfig as ReturnType<typeof vi.fn>
 const mockRestart = opencodeServerManager.restart as ReturnType<typeof vi.fn>
 const mockClearStartupError = opencodeServerManager.clearStartupError as ReturnType<typeof vi.fn>
+const mockGetLastStartupError = opencodeServerManager.getLastStartupError as ReturnType<typeof vi.fn>
+const mockIsSandboxEnforced = opencodeServerManager.isSandboxEnforced as ReturnType<typeof vi.fn>
 const mockGetOpenCodeImportStatus = getOpenCodeImportStatus as ReturnType<typeof vi.fn>
 const mockSyncOpenCodeImport = syncOpenCodeImport as ReturnType<typeof vi.fn>
 const mockGetImportedSessionDirectories = getImportedSessionDirectories as ReturnType<typeof vi.fn>
@@ -183,14 +198,15 @@ describe('Settings Routes - OpenCode Upgrade', () => {
 
   beforeEach(() => {
     vi.clearAllMocks()
-    mockExecSync.mockReset()
     mockGetVersion.mockReset()
     mockFetchVersion.mockReset()
     mockReloadConfig.mockReset()
     mockRestart.mockReset()
     mockClearStartupError.mockReset()
+    mockIsSandboxEnforced.mockReset()
     mockGetSettings.mockReset()
     mockUpdateSettings.mockReset()
+    mockResetSettings.mockReset()
     mockSaveLastKnownGoodConfig.mockReset()
     mockCreateOpenCodeConfig.mockReset()
     mockUpdateOpenCodeConfig.mockReset()
@@ -203,6 +219,10 @@ describe('Settings Routes - OpenCode Upgrade', () => {
     mockRelinkReposFromSessionDirectories.mockReset()
     mockWriteFileContent.mockReset()
     mockPatchConfigWithRecovery.mockReset()
+    sandboxRuntimeServiceMock.SandboxRuntimeService.mockReset()
+    sandboxRuntimeServiceMock.SandboxRuntimeService.mockImplementation(() => ({
+      isEnabled: () => false,
+    }))
     
     testDb = {} as any
     settingsApp = createSettingsRoutes(testDb, { getGitEnvironment: vi.fn().mockReturnValue({}) } as any, createStubOpenCodeClient())
@@ -279,7 +299,7 @@ describe('Settings Routes - OpenCode Upgrade', () => {
       expect(mockWriteFileContent).not.toHaveBeenCalled()
     })
 
-    it('should persist sanitized content before marking a new config as default', async () => {
+    it('should persist recovery-cleaned content before marking a new config as default', async () => {
       mockCreateOpenCodeConfig.mockReturnValue({
         id: 1,
         name: 'cleaned',
@@ -364,7 +384,7 @@ describe('Settings Routes - OpenCode Upgrade', () => {
       expect(mockWriteFileContent).not.toHaveBeenCalled()
     })
 
-    it('should sanitize existing config content before switching the default flag', async () => {
+    it('should persist recovery-cleaned content before switching the default flag', async () => {
       mockGetOpenCodeConfigByName.mockReturnValue({
         id: 2,
         name: 'cleaned',
@@ -541,6 +561,369 @@ describe('Settings Routes - OpenCode Upgrade', () => {
         'default',
       )
     })
+
+    it('keeps configured plugins in a live default-config patch while sandbox enforcement is active', async () => {
+      mockGetOpenCodeConfigByName.mockReturnValue({
+        id: 2,
+        name: 'enforced',
+        content: { plugin: ['evil-plugin'], theme: 'dark' },
+        rawContent: '{"plugin":["evil-plugin"],"theme":"dark"}',
+        isValid: true,
+        isDefault: true,
+        createdAt: 1,
+        updatedAt: 1,
+      })
+      mockUpdateOpenCodeConfig.mockReturnValue({
+        id: 2,
+        name: 'enforced',
+        content: { plugin: ['evil-plugin'], theme: 'light' },
+        rawContent: '{"plugin":["evil-plugin"],"theme":"light"}',
+        isValid: true,
+        isDefault: true,
+        createdAt: 1,
+        updatedAt: 2,
+      })
+      mockPatchConfigWithRecovery.mockResolvedValue({
+        success: true,
+        appliedConfig: { plugin: ['evil-plugin'], theme: 'light' },
+      })
+      mockIsSandboxEnforced.mockReturnValue(true)
+
+      const req = new Request('http://localhost/opencode-configs/enforced', {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          content: '{"plugin":["evil-plugin"],"theme":"light"}',
+          isDefault: true,
+        }),
+      })
+      const res = await settingsApp.fetch(req)
+      const json = await res.json() as Record<string, unknown>
+
+      expect(res.status).toBe(200)
+      expect(mockPatchConfigWithRecovery).toHaveBeenCalledWith(expect.anything(), { plugin: ['evil-plugin'], theme: 'light' })
+      expect(mockWriteFileContent).toHaveBeenCalledWith(
+        '/tmp/test-workspace/.config/opencode.json',
+        '{"plugin":["evil-plugin"],"theme":"light"}',
+      )
+      expect((json.content as Record<string, unknown>).theme).toBe('light')
+    })
+
+    it('keeps local MCP servers and the formatter in a live default-config patch while sandbox enforcement is active', async () => {
+      const submittedContent = {
+        mcp: { local: { type: 'local', command: ['npx', 'evil-server'] }, remote: { type: 'remote', url: 'https://example.com/mcp' } },
+        formatter: { typescript: { command: ['prettier'] } },
+        theme: 'light',
+      }
+      mockGetOpenCodeConfigByName.mockReturnValue({
+        id: 2,
+        name: 'enforced',
+        content: { ...submittedContent, theme: 'dark' },
+        rawContent: JSON.stringify({ ...submittedContent, theme: 'dark' }),
+        isValid: true,
+        isDefault: true,
+        createdAt: 1,
+        updatedAt: 1,
+      })
+      mockUpdateOpenCodeConfig.mockReturnValue({
+        id: 2,
+        name: 'enforced',
+        content: submittedContent,
+        rawContent: JSON.stringify(submittedContent),
+        isValid: true,
+        isDefault: true,
+        createdAt: 1,
+        updatedAt: 2,
+      })
+      mockPatchConfigWithRecovery.mockResolvedValue({
+        success: true,
+        appliedConfig: submittedContent,
+      })
+      mockIsSandboxEnforced.mockReturnValue(true)
+
+      const req = new Request('http://localhost/opencode-configs/enforced', {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          content: JSON.stringify(submittedContent),
+          isDefault: true,
+        }),
+      })
+      const res = await settingsApp.fetch(req)
+      const json = await res.json() as Record<string, unknown>
+
+      expect(res.status).toBe(200)
+      expect(mockPatchConfigWithRecovery).toHaveBeenCalledWith(expect.anything(), submittedContent)
+      expect(mockWriteFileContent).toHaveBeenCalledWith(
+        '/tmp/test-workspace/.config/opencode.json',
+        JSON.stringify(submittedContent),
+      )
+      expect(JSON.stringify(json.content)).toContain('evil-server')
+      expect(JSON.stringify(json.content)).toContain('prettier')
+    })
+
+    it('writes and persists the exact submitted config with local MCP and formatter when recovery removes no fields', async () => {
+      const submittedContent = {
+        mcp: { local: { type: 'local', command: ['npx', 'evil-server'] }, remote: { type: 'remote', url: 'https://example.com/mcp' } },
+        formatter: { typescript: { command: ['prettier'] } },
+        theme: 'light',
+      }
+      mockGetOpenCodeConfigByName.mockReturnValue({
+        id: 2,
+        name: 'enforced',
+        content: { ...submittedContent, theme: 'dark' },
+        rawContent: JSON.stringify({ ...submittedContent, theme: 'dark' }),
+        isValid: true,
+        isDefault: true,
+        createdAt: 1,
+        updatedAt: 1,
+      })
+      mockUpdateOpenCodeConfig.mockReturnValue({
+        id: 2,
+        name: 'enforced',
+        content: submittedContent,
+        rawContent: JSON.stringify(submittedContent),
+        isValid: true,
+        isDefault: true,
+        createdAt: 1,
+        updatedAt: 2,
+      })
+      mockPatchConfigWithRecovery.mockResolvedValue({
+        success: true,
+        appliedConfig: submittedContent,
+      })
+      mockIsSandboxEnforced.mockReturnValue(true)
+
+      const req = new Request('http://localhost/opencode-configs/enforced', {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ content: JSON.stringify(submittedContent), isDefault: true }),
+      })
+      const res = await settingsApp.fetch(req)
+      const json = await res.json() as Record<string, unknown>
+
+      expect(res.status).toBe(200)
+      expect(mockPatchConfigWithRecovery).toHaveBeenCalledWith(expect.anything(), submittedContent)
+      expect(mockWriteFileContent).toHaveBeenCalledWith('/tmp/test-workspace/.config/opencode.json', JSON.stringify(submittedContent))
+      expect(mockUpdateOpenCodeConfig).toHaveBeenCalledTimes(1)
+      expect(JSON.stringify(json.content)).toContain('evil-server')
+      expect(JSON.stringify(json.content)).toContain('prettier')
+    })
+
+    it('writes and persists the exact submitted config with shell, LSP, hooks, and custom providers when recovery removes no fields', async () => {
+      const submittedContent = {
+        shell: { command: '/repo/.bin/evil-shell', args: [] },
+        lsp: true,
+        experimental: { hook: { file_edited: [{ command: ['chmod', '+x', 'script.sh'] }] }, chatMaxRetries: 4 },
+        provider: { builtin: { options: { apiKey: 'k' } }, evil: { npm: 'file:///repo/evil-provider.js' } },
+        theme: 'light',
+      }
+      mockGetOpenCodeConfigByName.mockReturnValue({
+        id: 2,
+        name: 'enforced',
+        content: { ...submittedContent, theme: 'dark' },
+        rawContent: JSON.stringify({ ...submittedContent, theme: 'dark' }),
+        isValid: true,
+        isDefault: true,
+        createdAt: 1,
+        updatedAt: 1,
+      })
+      mockUpdateOpenCodeConfig.mockReturnValue({
+        id: 2,
+        name: 'enforced',
+        content: submittedContent,
+        rawContent: JSON.stringify(submittedContent),
+        isValid: true,
+        isDefault: true,
+        createdAt: 1,
+        updatedAt: 2,
+      })
+      mockPatchConfigWithRecovery.mockResolvedValue({
+        success: true,
+        appliedConfig: submittedContent,
+      })
+      mockIsSandboxEnforced.mockReturnValue(true)
+
+      const req = new Request('http://localhost/opencode-configs/enforced', {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ content: JSON.stringify(submittedContent), isDefault: true }),
+      })
+      const res = await settingsApp.fetch(req)
+      const json = await res.json() as Record<string, unknown>
+
+      expect(res.status).toBe(200)
+      expect(mockPatchConfigWithRecovery).toHaveBeenCalledWith(expect.anything(), submittedContent)
+      expect(mockWriteFileContent).toHaveBeenCalledWith('/tmp/test-workspace/.config/opencode.json', JSON.stringify(submittedContent))
+      expect(mockUpdateOpenCodeConfig).toHaveBeenCalledTimes(1)
+      expect(JSON.stringify(json.content)).toContain('evil-shell')
+      expect(JSON.stringify(json.content)).toContain('chmod')
+      expect(JSON.stringify(json.content)).toContain('evil-provider')
+    })
+
+    it('keeps the original raw content when recovery removes nothing', async () => {
+      mockGetOpenCodeConfigByName.mockReturnValue({
+        id: 2,
+        name: 'enforced',
+        content: { mcp: { local: { type: 'local', command: ['npx', 'evil-server'] } }, theme: 'dark' },
+        rawContent: '{"mcp":{"local":{"type":"local","command":["npx","evil-server"]}},"theme":"dark"}',
+        isValid: true,
+        isDefault: true,
+        createdAt: 1,
+        updatedAt: 1,
+      })
+      mockUpdateOpenCodeConfig.mockReturnValue({
+        id: 2,
+        name: 'enforced',
+        content: { mcp: { local: { type: 'local', command: ['npx', 'evil-server'] } }, theme: 'light' },
+        rawContent: '{"mcp":{"local":{"type":"local","command":["npx","evil-server"]}},"theme":"light"}',
+        isValid: true,
+        isDefault: true,
+        createdAt: 1,
+        updatedAt: 2,
+      })
+      mockPatchConfigWithRecovery.mockResolvedValue({
+        success: true,
+        appliedConfig: { mcp: { local: { type: 'local', command: ['npx', 'evil-server'] } }, theme: 'light' },
+      })
+      mockIsSandboxEnforced.mockReturnValue(false)
+
+      const req = new Request('http://localhost/opencode-configs/enforced', {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          content: '{"mcp":{"local":{"type":"local","command":["npx","evil-server"]}},"theme":"light"}',
+          isDefault: true,
+        }),
+      })
+      const res = await settingsApp.fetch(req)
+
+      expect(res.status).toBe(200)
+      expect(mockWriteFileContent).toHaveBeenCalledWith(
+        '/tmp/test-workspace/.config/opencode.json',
+        '{"mcp":{"local":{"type":"local","command":["npx","evil-server"]}},"theme":"light"}',
+      )
+      expect(mockUpdateOpenCodeConfig).toHaveBeenCalledTimes(1)
+    })
+
+    it('writes the exact submitted config on a restart-required PUT regardless of sandbox state', async () => {
+      mockGetOpenCodeConfigByName.mockReturnValue({
+        id: 2,
+        name: 'enforced',
+        content: { theme: 'dark' },
+        rawContent: '{"theme":"dark"}',
+        isValid: true,
+        isDefault: true,
+        createdAt: 1,
+        updatedAt: 1,
+      })
+      mockUpdateOpenCodeConfig.mockReturnValue({
+        id: 2,
+        name: 'enforced',
+        content: { plugin: ['evil-plugin'], theme: 'light' },
+        rawContent: '{"plugin":["evil-plugin"],"theme":"light"}',
+        isValid: true,
+        isDefault: true,
+        createdAt: 1,
+        updatedAt: 2,
+      })
+      mockIsSandboxEnforced.mockReturnValue(true)
+
+      const req = new Request('http://localhost/opencode-configs/enforced', {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ content: '{"plugin":["evil-plugin"],"theme":"light"}', isDefault: true }),
+      })
+      const res = await settingsApp.fetch(req)
+      const json = await res.json() as Record<string, unknown>
+
+      expect(res.status).toBe(200)
+      expect(json.restartRequired).toBe(true)
+      expect(mockWriteFileContent).toHaveBeenCalledWith(
+        '/tmp/test-workspace/.config/opencode.json',
+        '{"plugin":["evil-plugin"],"theme":"light"}',
+      )
+      expect(mockUpdateOpenCodeConfig).toHaveBeenCalledTimes(1)
+      expect(opencodeServerManager.markRestartPending).toHaveBeenCalled()
+    })
+
+    it('writes the exact submitted config when creating a plugin-bearing default config regardless of sandbox state', async () => {
+      mockCreateOpenCodeConfig.mockReturnValue({
+        id: 1,
+        name: 'enforced',
+        content: { plugin: ['evil-plugin'], theme: 'dark' },
+        rawContent: '{"plugin":["evil-plugin"],"theme":"dark"}',
+        isValid: true,
+        isDefault: false,
+        createdAt: 1,
+        updatedAt: 1,
+      })
+      mockUpdateOpenCodeConfig.mockReturnValue({
+        id: 1,
+        name: 'enforced',
+        content: { plugin: ['evil-plugin'], theme: 'dark' },
+        rawContent: '{"plugin":["evil-plugin"],"theme":"dark"}',
+        isValid: true,
+        isDefault: true,
+        createdAt: 1,
+        updatedAt: 2,
+      })
+      mockIsSandboxEnforced.mockReturnValue(true)
+
+      const req = new Request('http://localhost/opencode-configs', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ name: 'enforced', content: '{"plugin":["evil-plugin"],"theme":"dark"}', isDefault: true }),
+      })
+      const res = await settingsApp.fetch(req)
+
+      expect(res.status).toBe(200)
+      expect(mockUpdateOpenCodeConfig).toHaveBeenCalledWith(
+        'enforced',
+        { content: '{"plugin":["evil-plugin"],"theme":"dark"}', isDefault: true },
+        'default',
+      )
+      expect(mockWriteFileContent).toHaveBeenCalledWith(
+        '/tmp/test-workspace/.config/opencode.json',
+        '{"plugin":["evil-plugin"],"theme":"dark"}',
+      )
+    })
+
+    it('writes the exact submitted config when setting a plugin-bearing config as default regardless of sandbox state', async () => {
+      mockGetOpenCodeConfigByName.mockReturnValue({
+        id: 2,
+        name: 'enforced',
+        content: { plugin: ['evil-plugin'], theme: 'dark' },
+        rawContent: '{"plugin":["evil-plugin"],"theme":"dark"}',
+        isValid: true,
+        isDefault: false,
+        createdAt: 1,
+        updatedAt: 1,
+      })
+      mockSetDefaultOpenCodeConfig.mockReturnValue({
+        id: 2,
+        name: 'enforced',
+        content: { plugin: ['evil-plugin'], theme: 'dark' },
+        rawContent: '{"plugin":["evil-plugin"],"theme":"dark"}',
+        isValid: true,
+        isDefault: true,
+        createdAt: 1,
+        updatedAt: 2,
+      })
+      mockIsSandboxEnforced.mockReturnValue(true)
+
+      const req = new Request('http://localhost/opencode-configs/enforced/set-default', {
+        method: 'POST',
+      })
+      const res = await settingsApp.fetch(req)
+
+      expect(res.status).toBe(200)
+      expect(mockSetDefaultOpenCodeConfig).toHaveBeenCalledWith('enforced', 'default')
+      expect(mockWriteFileContent).toHaveBeenCalledWith(
+        '/tmp/test-workspace/.config/opencode.json',
+        '{"plugin":["evil-plugin"],"theme":"dark"}',
+      )
+    })
   })
 
   describe('OpenCode import routes', () => {
@@ -685,7 +1068,7 @@ describe('Settings Routes - OpenCode Upgrade', () => {
       it('should upgrade OpenCode successfully and respond with success', async () => {
         mockGetVersion.mockReturnValueOnce('1.0.0')
         mockFetchVersion.mockResolvedValueOnce('1.0.1')
-        mockExecSync.mockReturnValueOnce('Upgrade successful\n')
+        mockSpawnSync.mockReturnValueOnce({ stdout: 'Upgrade successful\n', stderr: '', signal: null, status: 0, error: undefined })
 
         const req = new Request('http://localhost/opencode-upgrade', {
           method: 'POST'
@@ -704,7 +1087,7 @@ describe('Settings Routes - OpenCode Upgrade', () => {
       it('should use a freshly fetched version and restart when the cached version is stale after upgrade', async () => {
         mockGetVersion.mockReturnValue('1.0.0')
         mockFetchVersion.mockResolvedValueOnce('1.0.1')
-        mockExecSync.mockReturnValueOnce('Upgrade successful\n')
+        mockSpawnSync.mockReturnValueOnce({ stdout: 'Upgrade successful\n', stderr: '', signal: null, status: 0, error: undefined })
 
         const req = new Request('http://localhost/opencode-upgrade', {
           method: 'POST'
@@ -723,7 +1106,7 @@ describe('Settings Routes - OpenCode Upgrade', () => {
       it('should return already up to date when version unchanged', async () => {
         mockGetVersion.mockReturnValueOnce('1.0.0')
         mockFetchVersion.mockResolvedValueOnce('1.0.0')
-        mockExecSync.mockReturnValueOnce('Already up to date\n')
+        mockSpawnSync.mockReturnValueOnce({ stdout: 'Already up to date\n', stderr: '', signal: null, status: 0, error: undefined })
 
         const req = new Request('http://localhost/opencode-upgrade', {
           method: 'POST'
@@ -741,7 +1124,7 @@ describe('Settings Routes - OpenCode Upgrade', () => {
       it('should restart directly after a successful upgrade', async () => {
         mockGetVersion.mockReturnValueOnce('1.0.0')
         mockFetchVersion.mockResolvedValueOnce('1.0.1')
-        mockExecSync.mockReturnValueOnce('Upgrade successful\n')
+        mockSpawnSync.mockReturnValueOnce({ stdout: 'Upgrade successful\n', stderr: '', signal: null, status: 0, error: undefined })
 
         const req = new Request('http://localhost/opencode-upgrade', {
           method: 'POST'
@@ -751,6 +1134,19 @@ describe('Settings Routes - OpenCode Upgrade', () => {
         expect(mockRestart).toHaveBeenCalledTimes(1)
         expect(mockReloadConfig).not.toHaveBeenCalled()
       })
+
+      it('allows upgrading while sandbox enforcement is active', async () => {
+        mockIsSandboxEnforced.mockReturnValue(true)
+        mockGetVersion.mockReturnValueOnce('1.18.16')
+        mockFetchVersion.mockResolvedValueOnce('1.19.0')
+        mockSpawnSync.mockReturnValueOnce({ stdout: 'Upgrade successful\n', stderr: '', signal: null, status: 0, error: undefined })
+
+        const res = await settingsApp.fetch(new Request('http://localhost/opencode-upgrade', { method: 'POST' }))
+
+        expect(res.status).toBe(200)
+        expect(mockSpawnSync).toHaveBeenCalled()
+        expect(mockRestart).toHaveBeenCalled()
+      })
     })
 
     describe('timeout and recovery scenarios', () => {
@@ -758,12 +1154,7 @@ describe('Settings Routes - OpenCode Upgrade', () => {
         mockGetVersion.mockReturnValueOnce('1.0.0')
           .mockReturnValueOnce('1.0.0')
         mockFetchVersion.mockResolvedValueOnce('1.0.0')
-        
-        const timeoutError = new Error('Command timeout')
-        ;(timeoutError as any).status = null
-        mockExecSync.mockImplementationOnce(() => {
-          throw timeoutError
-        })
+        mockSpawnSync.mockReturnValueOnce({ stdout: '', stderr: '', signal: 'SIGKILL', status: null, error: undefined })
 
         const req = new Request('http://localhost/opencode-upgrade', {
           method: 'POST'
@@ -771,10 +1162,14 @@ describe('Settings Routes - OpenCode Upgrade', () => {
         const res = await settingsApp.fetch(req)
         const json = await res.json() as Record<string, unknown>
 
-        expect(mockExecSync).toHaveBeenCalledWith('opencode upgrade --method curl 2>&1', expect.objectContaining({
-          timeout: 90000,
-          killSignal: 'SIGKILL'
-        }))
+        expect(mockSpawnSync).toHaveBeenCalledWith(
+          'opencode',
+          ['upgrade', '--method', 'curl'],
+          expect.objectContaining({
+            timeout: 90000,
+            killSignal: 'SIGKILL'
+          })
+        )
         expect(mockClearStartupError).toHaveBeenCalled()
         expect(mockRestart).toHaveBeenCalled()
         expect(res.status).toBe(400)
@@ -791,9 +1186,7 @@ describe('Settings Routes - OpenCode Upgrade', () => {
         mockGetVersion.mockReturnValueOnce('1.0.0')
           .mockReturnValueOnce('1.0.0')
         mockFetchVersion.mockResolvedValueOnce('1.0.0')
-        mockExecSync.mockImplementationOnce(() => {
-          throw new Error('Network error')
-        })
+        mockSpawnSync.mockReturnValueOnce({ stdout: '', stderr: 'Network error', signal: null, status: 1, error: undefined })
 
         const req = new Request('http://localhost/opencode-upgrade', {
           method: 'POST'
@@ -811,9 +1204,7 @@ describe('Settings Routes - OpenCode Upgrade', () => {
         mockGetVersion.mockReturnValueOnce('1.0.0')
           .mockReturnValueOnce('1.0.0')
         mockFetchVersion.mockResolvedValueOnce('1.0.0')
-        mockExecSync.mockImplementationOnce(() => {
-          throw new Error('Upgrade failed')
-        })
+        mockSpawnSync.mockReturnValueOnce({ stdout: '', stderr: 'Upgrade failed', signal: null, status: 1, error: undefined })
         mockRestart.mockRejectedValueOnce(new Error('Restart failed'))
 
         const req = new Request('http://localhost/opencode-upgrade', {
@@ -831,7 +1222,7 @@ describe('Settings Routes - OpenCode Upgrade', () => {
       it('should use fetched version when getVersion returns null', async () => {
         mockGetVersion.mockReturnValueOnce(null)
         mockFetchVersion.mockResolvedValueOnce('1.0.1')
-        mockExecSync.mockReturnValueOnce('Upgrade successful\n')
+        mockSpawnSync.mockReturnValueOnce({ stdout: 'Upgrade successful\n', stderr: '', signal: null, status: 0, error: undefined })
 
         const req = new Request('http://localhost/opencode-upgrade', {
           method: 'POST'
@@ -847,7 +1238,7 @@ describe('Settings Routes - OpenCode Upgrade', () => {
       it('should handle both getVersion and fetchVersion returning null', async () => {
         mockGetVersion.mockReturnValueOnce(null)
         mockFetchVersion.mockResolvedValueOnce(null)
-        mockExecSync.mockReturnValueOnce('Upgrade successful\n')
+        mockSpawnSync.mockReturnValueOnce({ stdout: 'Upgrade successful\n', stderr: '', signal: null, status: 0, error: undefined })
 
         const req = new Request('http://localhost/opencode-upgrade', {
           method: 'POST'
@@ -865,7 +1256,7 @@ describe('Settings Routes - OpenCode Upgrade', () => {
       it('should install specific version successfully', async () => {
         mockGetVersion.mockReturnValueOnce('1.0.0')
         mockFetchVersion.mockResolvedValueOnce('1.0.5')
-        mockSpawnSync.mockReturnValueOnce({ stdout: 'Installed v1.0.5\n', stderr: '', signal: null, error: undefined })
+        mockSpawnSync.mockReturnValueOnce({ stdout: 'Installed v1.0.5\n', stderr: '', signal: null, status: 0, error: undefined })
 
         const req = new Request('http://localhost/opencode-install-version', {
           method: 'POST',
@@ -880,10 +1271,48 @@ describe('Settings Routes - OpenCode Upgrade', () => {
         expect(json.newVersion).toBe('1.0.5')
       })
 
+      it('does not report success when the requested version was not installed', async () => {
+        mockGetVersion.mockReturnValue('1.0.0')
+        mockFetchVersion.mockResolvedValueOnce('1.0.0')
+        mockSpawnSync.mockReturnValueOnce({ stdout: 'Installed v1.0.5\n', stderr: '', signal: null, status: 0, error: undefined })
+
+        const res = await settingsApp.fetch(new Request('http://localhost/opencode-install-version', {
+          method: 'POST',
+          body: JSON.stringify({ version: '1.0.5' }),
+          headers: { 'Content-Type': 'application/json' }
+        }))
+        const json = await res.json() as Record<string, unknown>
+
+        expect(res.status).toBe(400)
+        expect(json.success).toBe(false)
+        expect(json.details).toContain('did not result in the requested version 1.0.5')
+        expect(json.newVersion).toBe('1.0.0')
+      })
+
+      it('allows installing any version while sandbox enforcement is active', async () => {
+        mockIsSandboxEnforced.mockReturnValue(true)
+        mockGetVersion.mockReturnValueOnce('1.18.16')
+        mockFetchVersion.mockResolvedValueOnce('1.20.0')
+        mockSpawnSync.mockReturnValueOnce({ stdout: 'Installed v1.20.0\n', stderr: '', signal: null, status: 0, error: undefined })
+
+        const res = await settingsApp.fetch(new Request('http://localhost/opencode-install-version', {
+          method: 'POST',
+          body: JSON.stringify({ version: '1.20.0' }),
+          headers: { 'Content-Type': 'application/json' }
+        }))
+
+        expect(res.status).toBe(200)
+        expect(mockSpawnSync).toHaveBeenCalledWith(
+          'opencode',
+          ['upgrade', 'v1.20.0', '--method', 'curl'],
+          expect.any(Object)
+        )
+      })
+
       it('should prepend v to version if missing', async () => {
         mockGetVersion.mockReturnValueOnce('1.0.0')
         mockFetchVersion.mockResolvedValueOnce('1.0.5')
-        mockSpawnSync.mockReturnValueOnce({ stdout: 'Installed v1.0.5\n', stderr: '', signal: null, error: undefined })
+        mockSpawnSync.mockReturnValueOnce({ stdout: 'Installed v1.0.5\n', stderr: '', signal: null, status: 0, error: undefined })
 
         const req = new Request('http://localhost/opencode-install-version', {
           method: 'POST',
@@ -902,7 +1331,7 @@ describe('Settings Routes - OpenCode Upgrade', () => {
       it('should not double prepend v to version', async () => {
         mockGetVersion.mockReturnValueOnce('1.0.0')
         mockFetchVersion.mockResolvedValueOnce('1.0.5')
-        mockSpawnSync.mockReturnValueOnce({ stdout: 'Installed v1.0.5\n', stderr: '', signal: null, error: undefined })
+        mockSpawnSync.mockReturnValueOnce({ stdout: 'Installed v1.0.5\n', stderr: '', signal: null, status: 0, error: undefined })
 
         const req = new Request('http://localhost/opencode-install-version', {
           method: 'POST',
@@ -997,9 +1426,7 @@ describe('Settings Routes - OpenCode Upgrade', () => {
       mockGetVersion.mockReturnValueOnce('1.0.0')
           .mockReturnValue('1.0.0')
       mockFetchVersion.mockResolvedValueOnce('1.0.0')
-      mockExecSync.mockImplementationOnce(() => {
-        throw new Error('Unexpected error')
-      })
+      mockSpawnSync.mockReturnValueOnce({ stdout: '', stderr: 'Unexpected error', signal: null, status: 1, error: undefined })
       mockRestart.mockResolvedValue(undefined)
 
       const req = new Request('http://localhost/opencode-upgrade', {
@@ -1017,9 +1444,7 @@ describe('Settings Routes - OpenCode Upgrade', () => {
             throw new Error('GetVersion failed')
           })
       mockFetchVersion.mockResolvedValueOnce('1.0.0')
-      mockExecSync.mockImplementationOnce(() => {
-        throw new Error('Upgrade failed')
-      })
+      mockSpawnSync.mockReturnValueOnce({ stdout: '', stderr: 'Upgrade failed', signal: null, status: 1, error: undefined })
       mockRestart.mockResolvedValue(undefined)
 
       const req = new Request('http://localhost/opencode-upgrade', {
@@ -1035,7 +1460,7 @@ describe('Settings Routes - OpenCode Upgrade', () => {
       mockGetVersion.mockReturnValueOnce('1.0.0')
         .mockReturnValueOnce('1.0.0')
       mockFetchVersion.mockRejectedValueOnce(new Error('Fetch version failed'))
-      mockExecSync.mockReturnValueOnce('Upgrade successful\n')
+      mockSpawnSync.mockReturnValueOnce({ stdout: 'Upgrade successful\n', stderr: '', signal: null, status: 0, error: undefined })
 
       const req = new Request('http://localhost/opencode-upgrade', {
         method: 'POST'
@@ -1053,11 +1478,7 @@ describe('Settings Routes - OpenCode Upgrade', () => {
           .mockReturnValueOnce('1.0.0')
       mockFetchVersion.mockResolvedValueOnce('1.0.0')
       
-      const timeoutError = new Error('timeout')
-      ;(timeoutError as any).status = null
-      mockExecSync.mockImplementationOnce(() => {
-        throw timeoutError
-      })
+      mockSpawnSync.mockReturnValueOnce({ stdout: '', stderr: '', signal: 'SIGKILL', status: null, error: undefined })
       mockRestart.mockResolvedValue(undefined)
 
       const req = new Request('http://localhost/opencode-upgrade', {
@@ -1151,6 +1572,367 @@ describe('Settings Routes - OpenCode Upgrade', () => {
       expect(json.details).toBe('Reload failed')
       expect(json.validationIssues).toEqual([])
       expect(json.removedFields).toEqual([])
+    })
+
+    it('returns 500 with the startup failure reason when a supervisor reload is unhealthy', async () => {
+      mockGetLastStartupError.mockReturnValue('OpenCode config reload failed after recovery')
+      const unhealthySupervisor = {
+        restart: vi.fn(),
+        reloadConfig: vi.fn().mockResolvedValue({ healthy: false }),
+      }
+      const app = createSettingsRoutes(
+        testDb,
+        { getGitEnvironment: vi.fn().mockReturnValue({}) } as any,
+        createStubOpenCodeClient(),
+        unhealthySupervisor as any,
+      )
+
+      const req = new Request('http://localhost/opencode-reload', { method: 'POST' })
+      const res = await app.fetch(req)
+      const json = await res.json() as Record<string, unknown>
+
+      expect(res.status).toBe(500)
+      expect(json.success).toBeUndefined()
+      expect(json.error).toBe('Failed to reload OpenCode configuration')
+      expect(json.details).toBe('OpenCode config reload failed after recovery')
+      expect(unhealthySupervisor.reloadConfig).toHaveBeenCalledWith('settings_reload')
+    })
+
+    it('returns success when a supervisor reload is healthy', async () => {
+      const healthySupervisor = {
+        restart: vi.fn(),
+        reloadConfig: vi.fn().mockResolvedValue({ healthy: true }),
+      }
+      const app = createSettingsRoutes(
+        testDb,
+        { getGitEnvironment: vi.fn().mockReturnValue({}) } as any,
+        createStubOpenCodeClient(),
+        healthySupervisor as any,
+      )
+
+      const req = new Request('http://localhost/opencode-reload', { method: 'POST' })
+      const res = await app.fetch(req)
+      const json = await res.json() as Record<string, unknown>
+
+      expect(res.status).toBe(200)
+      expect(json.success).toBe(true)
+      expect(healthySupervisor.reloadConfig).toHaveBeenCalledWith('settings_reload')
+    })
+  })
+
+  describe('POST /opencode-restart', () => {
+    beforeEach(() => {
+      vi.clearAllMocks()
+      mockRestart.mockReset()
+      mockClearStartupError.mockReset()
+      mockGetLastStartupError.mockReset()
+      mockRestart.mockResolvedValue(undefined)
+      mockClearStartupError.mockReturnValue(undefined)
+    })
+
+    it('returns 500 with the startup failure reason when a supervisor restart is unhealthy', async () => {
+      mockGetLastStartupError.mockReturnValue('OpenCode version 1.18.15 does not support sandboxed bash tool rewriting')
+      const unhealthySupervisor = {
+        restart: vi.fn().mockResolvedValue({ healthy: false }),
+        reloadConfig: vi.fn(),
+      }
+      const app = createSettingsRoutes(
+        testDb,
+        { getGitEnvironment: vi.fn().mockReturnValue({}) } as any,
+        createStubOpenCodeClient(),
+        unhealthySupervisor as any,
+      )
+
+      const req = new Request('http://localhost/opencode-restart', { method: 'POST' })
+      const res = await app.fetch(req)
+      const json = await res.json() as Record<string, unknown>
+
+      expect(res.status).toBe(500)
+      expect(json.success).toBeUndefined()
+      expect(json.error).toBe('Failed to restart OpenCode server')
+      expect(json.details).toContain('does not support sandboxed bash tool rewriting')
+      expect(unhealthySupervisor.restart).toHaveBeenCalledWith('settings_restart')
+    })
+
+    it('returns success when a supervisor restart is healthy', async () => {
+      const healthySupervisor = {
+        restart: vi.fn().mockResolvedValue({ healthy: true }),
+        reloadConfig: vi.fn(),
+      }
+      const app = createSettingsRoutes(
+        testDb,
+        { getGitEnvironment: vi.fn().mockReturnValue({}) } as any,
+        createStubOpenCodeClient(),
+        healthySupervisor as any,
+      )
+
+      const req = new Request('http://localhost/opencode-restart', { method: 'POST' })
+      const res = await app.fetch(req)
+      const json = await res.json() as Record<string, unknown>
+
+      expect(res.status).toBe(200)
+      expect(json.success).toBe(true)
+      expect(json.message).toBe('OpenCode server restarted successfully')
+      expect(json.resumedSessions).toEqual([])
+    })
+
+    it('returns 500 when a manager restart fails without a supervisor', async () => {
+      mockRestart.mockRejectedValue(new Error('server failed to become healthy'))
+      mockGetLastStartupError.mockReturnValue('server failed to become healthy')
+
+      const req = new Request('http://localhost/opencode-restart', { method: 'POST' })
+      const res = await settingsApp.fetch(req)
+      const json = await res.json() as Record<string, unknown>
+
+      expect(res.status).toBe(500)
+      expect(json.error).toBe('Failed to restart OpenCode server')
+      expect(json.details).toBe('server failed to become healthy')
+    })
+  })
+
+  describe('PATCH / - restart pending', () => {
+    it('marks the OpenCode server restart pending when sandbox.enabled changes', async () => {
+      mockGetSettings.mockReturnValue({
+        preferences: { sandbox: { enabled: false } },
+        updatedAt: 1,
+      })
+      mockUpdateSettings.mockReturnValue({
+        preferences: { sandbox: { enabled: true } },
+        updatedAt: 2,
+      })
+
+      const req = new Request('http://localhost/', {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ preferences: { sandbox: { enabled: true } } }),
+      })
+      const res = await settingsApp.fetch(req)
+
+      expect(res.status).toBe(200)
+      expect(opencodeServerManager.markRestartPending).toHaveBeenCalledTimes(1)
+    })
+
+    it('does not mark the OpenCode server restart pending when sandbox is unchanged', async () => {
+      mockGetSettings.mockReturnValue({
+        preferences: { sandbox: { enabled: true } },
+        updatedAt: 1,
+      })
+      mockUpdateSettings.mockReturnValue({
+        preferences: { sandbox: { enabled: true } },
+        updatedAt: 1,
+      })
+
+      const req = new Request('http://localhost/', {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ preferences: { sandbox: { enabled: true } } }),
+      })
+      const res = await settingsApp.fetch(req)
+
+      expect(res.status).toBe(200)
+      expect(opencodeServerManager.markRestartPending).not.toHaveBeenCalled()
+    })
+
+    it('does not mark the OpenCode server restart pending when only sandbox.gitCredentials changes', async () => {
+      mockGetSettings.mockReturnValue({
+        preferences: { sandbox: { enabled: true, gitCredentials: false } },
+        updatedAt: 1,
+      })
+      mockUpdateSettings.mockReturnValue({
+        preferences: { sandbox: { enabled: true, gitCredentials: true } },
+        updatedAt: 2,
+      })
+
+      const req = new Request('http://localhost/', {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ preferences: { sandbox: { enabled: true, gitCredentials: true } } }),
+      })
+      const res = await settingsApp.fetch(req)
+
+      expect(res.status).toBe(200)
+      expect(opencodeServerManager.markRestartPending).not.toHaveBeenCalled()
+    })
+
+    it('does not mark the OpenCode server restart pending when sandbox is absent from the patch', async () => {
+      mockGetSettings.mockReturnValue({
+        preferences: { sandbox: { enabled: true } },
+        updatedAt: 1,
+      })
+      mockUpdateSettings.mockReturnValue({
+        preferences: { sandbox: { enabled: true } },
+        updatedAt: 1,
+      })
+
+      const req = new Request('http://localhost/', {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ preferences: { theme: 'dark' } }),
+      })
+      const res = await settingsApp.fetch(req)
+
+      expect(res.status).toBe(200)
+      expect(opencodeServerManager.markRestartPending).not.toHaveBeenCalled()
+    })
+
+    it('requires a restart when git credentials change instead of reloading config', async () => {
+      const credential = { id: 'cred-1', name: 'gh', host: 'github.com', type: 'pat', token: 'new-token' }
+      mockGetSettings.mockReturnValue({
+        preferences: { gitCredentials: [{ ...credential, token: 'old-token' }] },
+        updatedAt: 1,
+      })
+      mockUpdateSettings.mockReturnValue({
+        preferences: { gitCredentials: [credential] },
+        updatedAt: 2,
+      })
+
+      const req = new Request('http://localhost/', {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ preferences: { gitCredentials: [credential] } }),
+      })
+      const res = await settingsApp.fetch(req)
+      const json = await res.json() as Record<string, unknown>
+
+      expect(res.status).toBe(200)
+      expect(json.restartRequired).toBe(true)
+      expect(opencodeServerManager.markRestartPending).toHaveBeenCalledTimes(1)
+      expect(mockReloadConfig).not.toHaveBeenCalled()
+    })
+
+    it('requires a restart when the git identity changes', async () => {
+      mockGetSettings.mockReturnValue({
+        preferences: { gitIdentity: { name: 'Old', email: 'old@example.com' } },
+        updatedAt: 1,
+      })
+      mockUpdateSettings.mockReturnValue({
+        preferences: { gitIdentity: { name: 'New', email: 'new@example.com' } },
+        updatedAt: 2,
+      })
+
+      const req = new Request('http://localhost/', {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ preferences: { gitIdentity: { name: 'New', email: 'new@example.com' } } }),
+      })
+      const res = await settingsApp.fetch(req)
+      const json = await res.json() as Record<string, unknown>
+
+      expect(res.status).toBe(200)
+      expect(json.restartRequired).toBe(true)
+      expect(opencodeServerManager.markRestartPending).toHaveBeenCalledTimes(1)
+    })
+
+    it('does not require a restart when git credentials are resubmitted unchanged', async () => {
+      const credential = { id: 'cred-1', name: 'gh', host: 'github.com', type: 'pat', token: 'same-token' }
+      mockGetSettings.mockReturnValue({
+        preferences: { gitCredentials: [credential] },
+        updatedAt: 1,
+      })
+      mockUpdateSettings.mockReturnValue({
+        preferences: { gitCredentials: [credential] },
+        updatedAt: 1,
+      })
+
+      const req = new Request('http://localhost/', {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ preferences: { gitCredentials: [credential] } }),
+      })
+      const res = await settingsApp.fetch(req)
+      const json = await res.json() as Record<string, unknown>
+
+      expect(res.status).toBe(200)
+      expect(json.restartRequired).toBeUndefined()
+      expect(opencodeServerManager.markRestartPending).not.toHaveBeenCalled()
+    })
+  })
+
+  describe('DELETE / - sandbox preference restart pending', () => {
+    it('marks the OpenCode server restart pending when resetting disables sandboxing', async () => {
+      mockGetSettings.mockReturnValue({
+        preferences: { sandbox: { enabled: true } },
+        updatedAt: 1,
+      })
+      mockResetSettings.mockReturnValue({
+        preferences: { sandbox: { enabled: false } },
+        updatedAt: 2,
+      })
+
+      const req = new Request('http://localhost/', { method: 'DELETE' })
+      const res = await settingsApp.fetch(req)
+
+      expect(res.status).toBe(200)
+      expect(opencodeServerManager.markRestartPending).toHaveBeenCalledTimes(1)
+    })
+
+    it('does not mark the OpenCode server restart pending when resetting an already-default sandbox preference', async () => {
+      mockGetSettings.mockReturnValue({
+        preferences: { sandbox: { enabled: false } },
+        updatedAt: 1,
+      })
+      mockResetSettings.mockReturnValue({
+        preferences: { sandbox: { enabled: false } },
+        updatedAt: 2,
+      })
+
+      const req = new Request('http://localhost/', { method: 'DELETE' })
+      const res = await settingsApp.fetch(req)
+
+      expect(res.status).toBe(200)
+      expect(opencodeServerManager.markRestartPending).not.toHaveBeenCalled()
+    })
+  })
+
+  describe('Settings Routes - manager token rotation', () => {
+    let settingsApp: ReturnType<typeof createSettingsRoutes>
+    let tokenDb: Database
+
+    beforeEach(() => {
+      vi.clearAllMocks()
+      tokenDb = new Database(':memory:')
+      migrate(tokenDb, allMigrations)
+      settingsApp = createSettingsRoutes(
+        tokenDb,
+        { getGitEnvironment: vi.fn().mockReturnValue({}) } as any,
+        createStubOpenCodeClient(),
+      )
+      mockRestart.mockResolvedValue(undefined)
+      mockClearStartupError.mockReturnValue(undefined)
+    })
+
+    afterEach(() => {
+      tokenDb.close()
+    })
+
+    it('rotates the manager token and marks the OpenCode server restart as pending', async () => {
+      const previous = getOrCreateInternalToken(tokenDb)
+
+      const res = await settingsApp.fetch(new Request('http://localhost/manager-token/rotate', { method: 'POST' }))
+      const json = await res.json() as { token: string }
+
+      expect(res.status).toBe(200)
+      expect(json.token).toBeDefined()
+      expect(json.token).not.toBe(previous)
+      expect(opencodeServerManager.markRestartPending).toHaveBeenCalledTimes(1)
+    })
+
+    it('does not mark the OpenCode server restart as pending when rotation fails', async () => {
+      const brokenDb = {
+        prepare: vi.fn(() => {
+          throw new Error('database is unavailable')
+        }),
+      } as any
+      settingsApp = createSettingsRoutes(
+        brokenDb,
+        { getGitEnvironment: vi.fn().mockReturnValue({}) } as any,
+        createStubOpenCodeClient(),
+      )
+
+      const res = await settingsApp.fetch(new Request('http://localhost/manager-token/rotate', { method: 'POST' }))
+
+      expect(res.status).toBe(500)
+      expect(opencodeServerManager.markRestartPending).not.toHaveBeenCalled()
     })
   })
 })
