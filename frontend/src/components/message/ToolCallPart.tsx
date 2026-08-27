@@ -1,4 +1,4 @@
-import { useState, useRef, useEffect } from 'react'
+import { useState, useRef, useEffect, useMemo, memo } from 'react'
 import { unwrapSandboxExecCommand } from '@opencode-manager/shared/utils'
 import type { components } from '@/api/opencode-types'
 import { useSettings } from '@/hooks/useSettings'
@@ -12,6 +12,33 @@ import { CopyButton } from '@/components/ui/copy-button'
 import { getToolSpecificRender } from './FileToolRender'
 
 type ToolPart = components['schemas']['ToolPart']
+
+const DISPLAY_LIMIT = 30_000
+const DISPLAY_HEAD_LENGTH = 20_000
+const DISPLAY_TAIL_LENGTH = 10_000
+
+function formatOmittedSize(size: number): string {
+  return size < 1024 * 1024
+    ? `${(size / 1024).toFixed(1)} KB`
+    : `${(size / (1024 * 1024)).toFixed(1)} MB`
+}
+
+function clampDisplayText(text: string): string {
+  if (text.length <= DISPLAY_LIMIT) return text
+  const headCut = text.lastIndexOf('\n', DISPLAY_HEAD_LENGTH)
+  const head = headCut === -1 ? text.slice(0, DISPLAY_HEAD_LENGTH) : text.slice(0, headCut)
+  const tailFrom = text.length - DISPLAY_TAIL_LENGTH
+  const tailCut = text.indexOf('\n', tailFrom)
+  const tail = tailCut === -1 ? text.slice(tailFrom) : text.slice(tailCut + 1)
+  const omitted = formatOmittedSize(text.length - head.length - tail.length)
+  const marker = `\n[… ${omitted} omitted — use the copy button for the full output …]\n`
+  return head + marker + tail
+}
+
+function BoundedPre({ content, className }: { content: string; className: string }) {
+  const clamped = useMemo(() => clampDisplayText(content), [content])
+  return <pre className={className}>{clamped}</pre>
+}
 
 interface ToolCallPartProps {
   part: ToolPart
@@ -29,8 +56,8 @@ function getTaskSessionId(part: ToolPart): string | undefined {
 }
 
 function ClickableJson({ json, onFileClick }: { json: unknown; onFileClick?: (filePath: string) => void }) {
-  const jsonString = JSON.stringify(json, null, 2)
-  const references = detectFileReferences(jsonString)
+  const jsonString = useMemo(() => JSON.stringify(json, null, 2), [json])
+  const references = useMemo(() => detectFileReferences(jsonString), [jsonString])
 
   if (references.length === 0) {
     return <pre className="bg-accent p-2 rounded text-xs overflow-x-auto whitespace-pre-wrap break-words">{jsonString}</pre>
@@ -68,7 +95,7 @@ function ClickableJson({ json, onFileClick }: { json: unknown; onFileClick?: (fi
   return <pre className="bg-accent p-2 rounded text-xs overflow-x-auto whitespace-pre-wrap break-words">{parts}</pre>
 }
 
-export function ToolCallPart({ part, onFileClick, onChildSessionClick }: ToolCallPartProps) {
+export const ToolCallPart = memo(function ToolCallPart({ part, onFileClick, onChildSessionClick }: ToolCallPartProps) {
   const { preferences } = useSettings()
   const { userBashCommands } = useUserBash()
   const taskSessionId = part.tool === 'task' ? getTaskSessionId(part) : undefined
@@ -79,7 +106,10 @@ export function ToolCallPart({ part, onFileClick, onChildSessionClick }: ToolCal
   const rawCommand = part.tool === 'bash' && typeof part.state.input?.command === 'string'
     ? part.state.input.command
     : undefined
-  const displayCommand = rawCommand === undefined ? undefined : unwrapSandboxExecCommand(rawCommand)
+  const displayCommand = useMemo(
+    () => (rawCommand === undefined ? undefined : unwrapSandboxExecCommand(rawCommand)),
+    [rawCommand]
+  )
   const isSandboxedCommand = rawCommand !== undefined && (
     displayCommand !== rawCommand ||
     (part.state.status === 'completed' && (part.state.metadata as Record<string, unknown> | undefined)?.sandbox === true)
@@ -260,10 +290,8 @@ export function ToolCallPart({ part, onFileClick, onChildSessionClick }: ToolCal
           )}
         </div>
         <div className="relative">
-          <pre className="bg-accent p-3 rounded text-xs overflow-x-auto whitespace-pre-wrap">
-            {output}
-          </pre>
-          <CopyButton content={output} title="Copy output" className="absolute top-2 right-2" />
+          <BoundedPre content={output ?? ''} className="bg-accent p-3 rounded text-xs overflow-x-auto whitespace-pre-wrap" />
+          <CopyButton content={output ?? ''} title="Copy output" className="absolute top-2 right-2" />
         </div>
       </div>
     )
@@ -401,9 +429,10 @@ export function ToolCallPart({ part, onFileClick, onChildSessionClick }: ToolCal
               <div className="text-sm">
                 <div className="text-muted-foreground mb-1">Output:</div>
                 <div className="relative">
-                  <pre className="bg-accent p-2 rounded text-xs overflow-x-auto whitespace-pre-wrap break-all">
-                    {part.state.status === 'completed' ? part.state.output : ''}
-                  </pre>
+                  <BoundedPre
+                    content={part.state.status === 'completed' ? part.state.output ?? '' : ''}
+                    className="bg-accent p-2 rounded text-xs overflow-x-auto whitespace-pre-wrap break-all"
+                  />
                   {part.state.status === 'completed' && part.state.output && (
                     <CopyButton content={part.state.output} title="Copy output" className="absolute top-1 right-1" iconSize="sm" />
                   )}
@@ -420,13 +449,14 @@ export function ToolCallPart({ part, onFileClick, onChildSessionClick }: ToolCal
           {part.state.status === 'error' && (
             <div className="text-sm">
               <div className="text-red-600 dark:text-red-400 mb-1">Error:</div>
-              <pre className="bg-accent p-2 rounded text-xs overflow-x-auto whitespace-pre-wrap break-words text-red-600 dark:text-red-300">
-                {part.state.error}
-              </pre>
+              <BoundedPre
+                content={part.state.error ?? ''}
+                className="bg-accent p-2 rounded text-xs overflow-x-auto whitespace-pre-wrap break-words text-red-600 dark:text-red-300"
+              />
             </div>
           )}
         </div>
       )}
     </div>
   )
-}
+})

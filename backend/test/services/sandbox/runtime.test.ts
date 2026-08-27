@@ -12,6 +12,7 @@ import { SandboxRuntimeService, resetSandboxRuntimeState, stopWorkspaceSandboxOn
 import { executeCommand } from '../../../src/utils/process'
 import { detectSandboxCapability } from '../../../src/services/sandbox/capability'
 import { logger } from '../../../src/utils/logger'
+import { forceProcessAttestation } from '../../../src/services/opencode/process-identity'
 
 vi.mock('../../../src/utils/process', () => ({
   executeCommand: vi.fn(),
@@ -78,7 +79,7 @@ describe('SandboxRuntimeService', () => {
 
   function enableEnforcement(): void {
     settingsService.updateSettings({ sandbox: { enabled: true } })
-    mockDetectSandboxCapability.mockReturnValue({ available: true, msbVersion: 'msb 0.6.8' })
+    mockDetectSandboxCapability.mockReturnValue({ available: true, msbVersion: 'msb 0.6.15' })
   }
 
   function memoryMib(): number {
@@ -980,7 +981,7 @@ describe('SandboxRuntimeService', () => {
     expect(mockExecuteCommand.mock.calls.filter((call) => call[0].includes('run'))).toHaveLength(0)
   })
 
-  it('accepts the full image-resolved v0.6.8 config shape without recreating the sandbox', async () => {
+  it('accepts the full image-resolved v0.6.15 config shape without recreating the sandbox', async () => {
     enableEnforcement()
     const resolvedConfig = realInspectConfig({
       image: {
@@ -1903,6 +1904,23 @@ describe('SandboxRuntimeService', () => {
     expect(mockExecuteCommand).not.toHaveBeenCalled()
   })
 
+  it('blocks an enforced request when process identity cannot be attested', async () => {
+    mockDetectSandboxCapability.mockReturnValue({ available: true, msbVersion: 'msb 0.6.15' })
+    forceProcessAttestation(false)
+
+    try {
+      const plan = await service.planShell(repoADir, true)
+
+      expect(plan).toEqual({
+        mode: 'blocked',
+        reason: 'process identity attestation is unavailable on this platform (Linux /proc is required)',
+      })
+      expect(mockExecuteCommand).not.toHaveBeenCalled()
+    } finally {
+      forceProcessAttestation(null)
+    }
+  })
+
   it('uses a directory created after boot without recreating the sandbox', async () => {
     enableEnforcement()
     mockExecuteCommand.mockImplementation(async (args: string[]) => {
@@ -1940,9 +1958,25 @@ describe('SandboxRuntimeService', () => {
     expect(service.getStatus()).toEqual({ available: false, enabled: true, reason: '/dev/kvm is not available' })
   })
 
+  it('reports sandboxing unavailable when process identity cannot be attested', () => {
+    mockDetectSandboxCapability.mockReturnValue({ available: true, msbVersion: 'msb 0.6.15' })
+    forceProcessAttestation(false)
+
+    try {
+      expect(service.getStatus()).toEqual({
+        available: false,
+        enabled: false,
+        reason: 'process identity attestation is unavailable on this platform (Linux /proc is required)',
+        msbVersion: 'msb 0.6.15',
+      })
+    } finally {
+      forceProcessAttestation(null)
+    }
+  })
+
   it('fails closed when the capability becomes unavailable after the toggle was enabled', async () => {
     settingsService.updateSettings({ sandbox: { enabled: true } })
-    mockDetectSandboxCapability.mockReturnValue({ available: true, msbVersion: 'msb 0.6.8' })
+    mockDetectSandboxCapability.mockReturnValue({ available: true, msbVersion: 'msb 0.6.15' })
     mockExecuteCommand.mockImplementation(async (args: string[]) => {
       if (args.includes('inspect')) return { exitCode: 0, stdout: runningInspectOutput(realInspectConfig()), stderr: '' }
       return { exitCode: 0, stdout: '[]', stderr: '' }

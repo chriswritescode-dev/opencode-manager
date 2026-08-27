@@ -32,6 +32,8 @@ import { opencodeServerManager, ConfigReloadError, resolveOpenCodeExecutable } f
 import { getOrCreateInternalToken, rotateInternalToken } from '../services/internal-token'
 import { sseAggregator } from '../services/sse-aggregator'
 import type { OpenCodeSupervisor } from '../services/opencode-supervisor'
+import { detectSandboxCapability } from '../services/sandbox/capability'
+import { getProcessIdentityAttestationError } from '../services/opencode/process-identity'
 import { restartOpenCode, restartOpenCodeAfterCommit, reloadOpenCodeConfig, getOpenCodeRestartCoordinator } from '../services/opencode-restart'
 import type { GitAuthService } from '../services/git-auth'
 import { DEFAULT_AGENTS_MD } from '../constants'
@@ -394,6 +396,18 @@ export function createSettingsRoutes(db: Database, gitAuthService: GitAuthServic
       }
 
       const currentSettings = settingsService.getSettings(userId)
+
+      if (currentSettings.preferences.sandbox?.enabled !== true && validated.preferences.sandbox?.enabled === true) {
+        const capability = detectSandboxCapability()
+        if (capability.available === false) {
+          return c.json({ error: `Cannot enable sandboxing: ${capability.reason}` }, 400)
+        }
+        const attestationError = getProcessIdentityAttestationError()
+        if (attestationError !== null) {
+          return c.json({ error: `Cannot enable sandboxing: ${attestationError}` }, 400)
+        }
+      }
+
       const settings = settingsService.updateSettings(validated.preferences, userId)
 
       const sandboxChanged = sandboxEnforcementChanged(currentSettings.preferences.sandbox, validated.preferences.sandbox)

@@ -33,6 +33,12 @@ function writeArgvCapturingFakeMsb(msbPath: string, captureFile: string): void {
   )
 }
 
+function sandboxShellEnv(overrides: NodeJS.ProcessEnv): NodeJS.ProcessEnv {
+  const env = { ...process.env }
+  for (const name of SANDBOX_FORWARDED_ENV_NAMES) delete env[name]
+  return { ...env, ...overrides }
+}
+
 describe('sandbox shell shim', () => {
   it('execs msb through the shim with the working directory and a byte-for-byte guest payload', async () => {
     const fakeBin = mkdtempSync(path.join(tmpdir(), 'ocm-shim-msb-'))
@@ -54,7 +60,7 @@ describe('sandbox shell shim', () => {
       const command = 'echo "it\'s a test" && echo line2 | tr a-z A-Z\necho after-newline'
       const result = spawnSync(shimPath, ['-c', command], {
         encoding: 'utf8',
-        env: { ...process.env, [SANDBOX_SHELL_ENV_WORKDIR]: directory },
+        env: sandboxShellEnv({ [SANDBOX_SHELL_ENV_WORKDIR]: directory }),
       })
       expect(result.status).toBe(0)
       expect(result.stdout).toBe("it's a test\nLINE2\nafter-newline\n")
@@ -107,14 +113,13 @@ describe('sandbox shell shim', () => {
       const extraheaderValue = 'AUTHORIZATION: basic eDphYmMgZGVm'
       const result = spawnSync(shimPath, ['-c', 'echo -e sentinel'], {
         encoding: 'utf8',
-        env: {
-          ...process.env,
+        env: sandboxShellEnv({
           [SANDBOX_SHELL_ENV_WORKDIR]: directory,
           GIT_CONFIG_COUNT: '1',
           GIT_CONFIG_KEY_0: 'http.https://github.com/.extraheader',
           GIT_CONFIG_VALUE_0: extraheaderValue,
           OCM_INTERNAL_TOKEN: 'must-not-be-forwarded',
-        },
+        }),
       })
       expect(result.status).toBe(0)
 
@@ -168,7 +173,7 @@ describe('sandbox shell shim', () => {
       const command = 'echo hostile-ok'
       const result = spawnSync(shimPath, ['-c', command], {
         encoding: 'utf8',
-        env: { ...process.env, [SANDBOX_SHELL_ENV_WORKDIR]: directory },
+        env: sandboxShellEnv({ [SANDBOX_SHELL_ENV_WORKDIR]: directory }),
       })
       expect(result.status).toBe(0)
       expect(result.stdout).toBe('hostile-ok\n')

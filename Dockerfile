@@ -60,7 +60,7 @@ FROM base AS runner
 
 ARG UV_VERSION=latest
 ARG OPENCODE_VERSION=1.18.16
-ARG MICROSANDBOX_VERSION=0.6.8
+ARG MICROSANDBOX_VERSION=0.6.15
 # Bump TOOLS_CACHEBUST (e.g. via --build-arg) to force a fresh uv/opencode
 # install without invalidating the rest of the build cache.
 ARG TOOLS_CACHEBUST=0

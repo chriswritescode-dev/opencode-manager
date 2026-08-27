@@ -5,6 +5,7 @@ import { SandboxSettings } from './SandboxSettings'
 import { useSettings } from '@/hooks/useSettings'
 import { useServerHealth } from '@/hooks/useServerHealth'
 import { showToast } from '@/lib/toast'
+import { FetchError } from '@/api/fetchWrapper'
 
 vi.mock('@/hooks/useSettings')
 vi.mock('@/hooks/useServerHealth')
@@ -130,6 +131,24 @@ describe('SandboxSettings', () => {
     await user.click(screen.getByRole('switch', { name: 'Toggle sandbox' }))
 
     expect(vi.mocked(showToast.error)).toHaveBeenCalledWith('Failed to update sandbox preference')
+  })
+
+  it('shows the backend error when enabling sandboxing is rejected', async () => {
+    const user = userEvent.setup()
+    mockUseSettings({
+      updateSettingsAsync: vi.fn().mockRejectedValue(
+        new FetchError('Cannot enable sandboxing: process identity attestation is unavailable', 400),
+      ),
+    })
+    mockHealth({ available: true, enforced: false })
+
+    render(<SandboxSettings />)
+
+    await user.click(screen.getByRole('switch', { name: 'Toggle sandbox' }))
+
+    expect(vi.mocked(showToast.error)).toHaveBeenCalledWith(
+      'Cannot enable sandboxing: process identity attestation is unavailable',
+    )
   })
 
   it('preserves the git credential preference when the sandbox toggle changes', async () => {

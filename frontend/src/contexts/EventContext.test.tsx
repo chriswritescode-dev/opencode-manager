@@ -528,4 +528,49 @@ describe('EventProvider questions', () => {
       expect(screen.getByTestId('healthy')).toHaveTextContent('false')
     })
   })
+
+  it('does not re-render consumers for health notifications that only change lastEventAt', async () => {
+    let onHealthChange: (state: { isConnected: boolean; isHealthy: boolean; lastEventAt: number | null; isStalled: boolean }) => void = () => {}
+    mocks.subscribeGlobalMonitor.mockImplementation(({ onHealthChange: handler }) => {
+      onHealthChange = handler
+      return {
+        dispose: vi.fn(),
+        updateDirectories: vi.fn(),
+        reconnect: vi.fn(),
+        reportVisibility: vi.fn(),
+      }
+    })
+
+    let renderCount = 0
+
+    const Probe = () => {
+      renderCount += 1
+      const { isConnected } = useSSEHealth()
+      return <div data-testid="probe-connected">{String(isConnected)}</div>
+    }
+
+    render(<Probe />, { wrapper: createWrapper() })
+
+    await waitFor(() => {
+      expect(screen.getByTestId('probe-connected')).toHaveTextContent('false')
+    })
+    const initialRenderCount = renderCount
+
+    act(() => {
+      onHealthChange({ isConnected: true, isHealthy: true, lastEventAt: 1, isStalled: false })
+    })
+
+    await waitFor(() => {
+      expect(screen.getByTestId('probe-connected')).toHaveTextContent('true')
+    })
+    const afterBooleanChange = renderCount
+
+    act(() => {
+      onHealthChange({ isConnected: true, isHealthy: true, lastEventAt: 2, isStalled: false })
+      onHealthChange({ isConnected: true, isHealthy: true, lastEventAt: 3, isStalled: false })
+    })
+
+    expect(afterBooleanChange).toBe(initialRenderCount + 1)
+    expect(renderCount).toBe(afterBooleanChange)
+  })
 })

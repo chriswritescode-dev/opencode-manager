@@ -7,6 +7,7 @@ import { mkdirSafe } from '../../utils/fs-safe'
 import { logger } from '../../utils/logger'
 import { SettingsService } from '../settings'
 import { CredentialProvider } from '../credential-provider'
+import { getProcessIdentityAttestationError } from '../opencode/process-identity'
 import { detectSandboxCapability } from './capability'
 import {
   WORKSPACE_SANDBOX_NAME,
@@ -624,10 +625,12 @@ export class SandboxRuntimeService {
 
   getStatus(): SandboxStatus {
     const capability = detectSandboxCapability()
+    const attestationError = capability.available ? getProcessIdentityAttestationError() : null
+    const reason = capability.reason ?? attestationError
     return {
-      available: capability.available,
+      available: capability.available && attestationError === null,
       enabled: this.isEnabled(),
-      ...(capability.reason !== undefined ? { reason: capability.reason } : {}),
+      ...(reason !== null && reason !== undefined ? { reason } : {}),
       ...(capability.msbVersion !== undefined ? { msbVersion: capability.msbVersion } : {}),
     }
   }
@@ -639,6 +642,10 @@ export class SandboxRuntimeService {
     const capability = detectSandboxCapability()
     if (!capability.available) {
       return { mode: 'blocked', reason: capability.reason ?? 'Sandbox capability is unavailable' }
+    }
+    const attestationError = getProcessIdentityAttestationError()
+    if (attestationError !== null) {
+      return { mode: 'blocked', reason: attestationError }
     }
     const workDirectory = await resolveSandboxWorkDirectory(directory)
     if (workDirectory === null) {
