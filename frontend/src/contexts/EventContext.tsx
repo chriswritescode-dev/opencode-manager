@@ -187,6 +187,15 @@ export function EventProvider({ children }: { children: React.ReactNode }) {
     }
   }, [])
 
+  const handleHealthChange = useCallback((next: EventStreamHealthState) => {
+    setSseHealth((prev) => {
+      if (prev.isConnected === next.isConnected && prev.isHealthy === next.isHealthy && prev.isStalled === next.isStalled) {
+        return prev
+      }
+      return next
+    })
+  }, [])
+
   const [permissionsBySession, setPermissionsBySession] = useState<PermissionsBySession>({})
   const [questionsBySession, setQuestionsBySession] = useState<QuestionsBySession>({})
   const [showPermissionDialog, setShowPermissionDialog] = useState(true)
@@ -552,7 +561,7 @@ export function EventProvider({ children }: { children: React.ReactNode }) {
       directories: initialDirectories,
       onEvent: handleSSEMessage,
       onStatusChange: handleStatusChange,
-      onHealthChange: setSseHealth,
+      onHealthChange: handleHealthChange,
     })
     subscriptionRef.current = subscription
     
@@ -560,7 +569,7 @@ export function EventProvider({ children }: { children: React.ReactNode }) {
       subscription.dispose()
       subscriptionRef.current = null
     }
-  }, [addPermission, removePermission, addQuestion, removeQuestion, rememberSessionDirectory, fetchInitialPendingData, queryClient, setSseHealth])
+  }, [addPermission, removePermission, addQuestion, removeQuestion, rememberSessionDirectory, fetchInitialPendingData, queryClient, handleHealthChange])
 
   useEffect(() => {
     reposRef.current = repos

@@ -1,4 +1,4 @@
-import { describe, it, expect, beforeEach } from 'vitest'
+import { describe, it, expect, beforeEach, vi } from 'vitest'
 import { Database } from 'bun:sqlite'
 import { migrate } from '../../src/db/migration-runner'
 import { allMigrations } from '../../src/db/migrations'
@@ -295,6 +295,19 @@ describe('CredentialProvider', () => {
 
       expect(env.GIT_CONFIG_COUNT).toBe('1')
       expect(env.GIT_CONFIG_KEY_0).toBe('http.https://github.com/.extraheader')
+    })
+
+    it('resolves settings once per getSandboxGitEnv invocation', () => {
+      settingsService.updateSettings({ sandbox: { enabled: true, gitCredentials: true } })
+      const repo = createGithubRepo()
+
+      const getSettingsSpy = vi.spyOn(SettingsService.prototype, 'getSettings')
+      try {
+        provider.getSandboxGitEnv({ cwd: repo.fullPath })
+        expect(getSettingsSpy).toHaveBeenCalledTimes(1)
+      } finally {
+        getSettingsSpy.mockRestore()
+      }
     })
   })
 })

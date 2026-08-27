@@ -21,7 +21,7 @@ jobs:
         run: |
           UV_VERSION=$(git ls-remote --tags --sort=-v:refname https://github.com/astral-sh/uv.git 'refs/tags/[0-9]*' | head -1 | sed 's/.*refs\/tags\///')
           OPENCODE_VERSION=1.18.16
-          MICROSANDBOX_VERSION=0.6.8
+          MICROSANDBOX_VERSION=0.6.15
           echo "uv=${UV_VERSION}" >> $GITHUB_OUTPUT
           echo "opencode=${OPENCODE_VERSION}" >> $GITHUB_OUTPUT
           echo "microsandbox=${MICROSANDBOX_VERSION}" >> $GITHUB_OUTPUT

@@ -321,6 +321,82 @@ describe('MessagePart', () => {
     })
   })
 
+  describe('tool output clamping', () => {
+    const createBashPartWithOutput = (output: string): MessagePartType => ({
+      type: 'tool',
+      tool: 'bash',
+      sessionID: 'test-session',
+      state: {
+        status: 'completed',
+        input: { command: 'echo big' },
+        output,
+        time: { start: Date.now(), end: Date.now() + 100 },
+      },
+    })
+
+    const expandTool = () => {
+      fireEvent.click(screen.getByRole('button'))
+    }
+
+    it('renders small output in full without omission marker', () => {
+      setup()
+      const output = Array.from({ length: 200 }, (_, i) => `line ${i}`).join('\n')
+      render(<MessagePart part={createBashPartWithOutput(output)} />)
+
+      expandTool()
+
+      expect(output).not.toContain('omitted')
+      const pre = document.querySelector('pre')!
+      expect(pre.textContent).toBe(output)
+      expect(screen.queryByText(/omitted/)).toBeNull()
+    })
+
+    it('clamps very large output with a marker and keeps head and tail', () => {
+      setup()
+      const lines: string[] = []
+      for (let i = 0; lines.join('\n').length < 200_000; i++) {
+        lines.push(`line-${i} ${'x'.repeat(80)} marker-start-${i === 0 ? 'FIRST' : ''}${i === 0 ? 'FIRST-marker-end' : ''}`)
+      }
+      const output = lines.join('\n')
+      const startMarker = 'marker-start-FIRST'
+      const endContent = `line-${lines.length - 1}`
+
+      render(<MessagePart part={createBashPartWithOutput(output)} />)
+
+      expandTool()
+
+      expect(screen.queryByText(/omitted/)).not.toBeNull()
+      const pre = document.querySelector('pre')!
+      const rendered = pre.textContent ?? ''
+      expect(rendered).toContain('omitted — use the copy button for the full output')
+      expect(rendered.length).toBeLessThan(35_000)
+      expect(output.startsWith(rendered.split('\n')[0])).toBe(true)
+      expect(rendered).toContain(endContent)
+      expect(rendered).toContain(startMarker)
+    })
+
+    it('copies the full unclamped output via the copy button', async () => {
+      setup()
+      const writeText = vi.fn().mockResolvedValue(undefined)
+      Object.assign(navigator, { clipboard: { writeText } })
+
+      const lines: string[] = []
+      for (let i = 0; lines.join('\n').length < 200_000; i++) {
+        lines.push(`line-${i} ${'y'.repeat(80)}`)
+      }
+      const output = lines.join('\n')
+
+      render(<MessagePart part={createBashPartWithOutput(output)} />)
+
+      expandTool()
+
+      const copyButton = screen.getByTitle('Copy output')
+      fireEvent.click(copyButton)
+
+      await expect(vi.waitFor(() => writeText.mock.calls[0]?.[0])).resolves.toBe(output)
+    })
+  })
+
   describe('simpleChatMode', () => {
     const createToolPart = (): MessagePartType => ({
       type: 'tool',

@@ -85,7 +85,7 @@ describe('microsandbox runtime install', () => {
   const dockerfile = read(dockerfilePath)
 
   it('declares MICROSANDBOX_VERSION next to the other tool args', () => {
-    expect(dockerfile).toMatch(/ARG MICROSANDBOX_VERSION=0\.6\.8/)
+    expect(dockerfile).toMatch(/ARG MICROSANDBOX_VERSION=0\.6\.15/)
   })
 
   it('resolves the release URL from MICROSANDBOX_VERSION, not only the log message', () => {
@@ -103,7 +103,7 @@ describe('microsandbox runtime install', () => {
 
   it('passes the same MICROSANDBOX_VERSION from the docker-build workflow', () => {
     const workflow = read(join(repoRoot, '.github/workflows/docker-build.yml'))
-    expect(workflow).toContain('MICROSANDBOX_VERSION=0.6.8')
+    expect(workflow).toContain('MICROSANDBOX_VERSION=0.6.15')
     expect(workflow).toContain('MICROSANDBOX_VERSION=${{ steps.versions.outputs.microsandbox }}')
   })
 

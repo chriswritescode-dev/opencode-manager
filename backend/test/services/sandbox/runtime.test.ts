@@ -78,7 +78,7 @@ describe('SandboxRuntimeService', () => {
 
   function enableEnforcement(): void {
     settingsService.updateSettings({ sandbox: { enabled: true } })
-    mockDetectSandboxCapability.mockReturnValue({ available: true, msbVersion: 'msb 0.6.8' })
+    mockDetectSandboxCapability.mockReturnValue({ available: true, msbVersion: 'msb 0.6.15' })
   }
 
   function memoryMib(): number {
@@ -980,7 +980,7 @@ describe('SandboxRuntimeService', () => {
     expect(mockExecuteCommand.mock.calls.filter((call) => call[0].includes('run'))).toHaveLength(0)
   })
 
-  it('accepts the full image-resolved v0.6.8 config shape without recreating the sandbox', async () => {
+  it('accepts the full image-resolved v0.6.15 config shape without recreating the sandbox', async () => {
     enableEnforcement()
     const resolvedConfig = realInspectConfig({
       image: {
@@ -1942,7 +1942,7 @@ describe('SandboxRuntimeService', () => {
 
   it('fails closed when the capability becomes unavailable after the toggle was enabled', async () => {
     settingsService.updateSettings({ sandbox: { enabled: true } })
-    mockDetectSandboxCapability.mockReturnValue({ available: true, msbVersion: 'msb 0.6.8' })
+    mockDetectSandboxCapability.mockReturnValue({ available: true, msbVersion: 'msb 0.6.15' })
     mockExecuteCommand.mockImplementation(async (args: string[]) => {
       if (args.includes('inspect')) return { exitCode: 0, stdout: runningInspectOutput(realInspectConfig()), stderr: '' }
       return { exitCode: 0, stdout: '[]', stderr: '' }
