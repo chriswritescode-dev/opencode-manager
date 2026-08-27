@@ -1904,6 +1904,23 @@ describe('SandboxRuntimeService', () => {
     expect(mockExecuteCommand).not.toHaveBeenCalled()
   })
 
+  it('blocks an enforced request when process identity cannot be attested', async () => {
+    mockDetectSandboxCapability.mockReturnValue({ available: true, msbVersion: 'msb 0.6.15' })
+    forceProcessAttestation(false)
+
+    try {
+      const plan = await service.planShell(repoADir, true)
+
+      expect(plan).toEqual({
+        mode: 'blocked',
+        reason: 'process identity attestation is unavailable on this platform (Linux /proc is required)',
+      })
+      expect(mockExecuteCommand).not.toHaveBeenCalled()
+    } finally {
+      forceProcessAttestation(null)
+    }
+  })
+
   it('uses a directory created after boot without recreating the sandbox', async () => {
     enableEnforcement()
     mockExecuteCommand.mockImplementation(async (args: string[]) => {

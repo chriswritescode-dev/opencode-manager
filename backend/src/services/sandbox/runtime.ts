@@ -643,6 +643,10 @@ export class SandboxRuntimeService {
     if (!capability.available) {
       return { mode: 'blocked', reason: capability.reason ?? 'Sandbox capability is unavailable' }
     }
+    const attestationError = getProcessIdentityAttestationError()
+    if (attestationError !== null) {
+      return { mode: 'blocked', reason: attestationError }
+    }
     const workDirectory = await resolveSandboxWorkDirectory(directory)
     if (workDirectory === null) {
       return {
