@@ -5,6 +5,7 @@ import { Alert, AlertDescription } from '@/components/ui/alert'
 import { Badge } from '@/components/ui/badge'
 import { Box, RotateCcw } from 'lucide-react'
 import { showToast } from '@/lib/toast'
+import { FetchError } from '@/api/fetchWrapper'
 
 export function SandboxSettings() {
   const { preferences, updateSettingsAsync, isUpdating } = useSettings()
@@ -19,8 +20,8 @@ export function SandboxSettings() {
     try {
       await updateSettingsAsync({ sandbox: next })
       showToast.success(message)
-    } catch {
-      showToast.error('Failed to update sandbox preference')
+    } catch (error) {
+      showToast.error(error instanceof FetchError ? error.message : 'Failed to update sandbox preference')
     }
   }
 

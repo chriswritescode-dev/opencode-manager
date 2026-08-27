@@ -12,6 +12,7 @@ import { SandboxRuntimeService, resetSandboxRuntimeState, stopWorkspaceSandboxOn
 import { executeCommand } from '../../../src/utils/process'
 import { detectSandboxCapability } from '../../../src/services/sandbox/capability'
 import { logger } from '../../../src/utils/logger'
+import { forceProcessAttestation } from '../../../src/services/opencode/process-identity'
 
 vi.mock('../../../src/utils/process', () => ({
   executeCommand: vi.fn(),
@@ -1938,6 +1939,22 @@ describe('SandboxRuntimeService', () => {
     mockDetectSandboxCapability.mockReturnValue({ available: false, reason: '/dev/kvm is not available' })
 
     expect(service.getStatus()).toEqual({ available: false, enabled: true, reason: '/dev/kvm is not available' })
+  })
+
+  it('reports sandboxing unavailable when process identity cannot be attested', () => {
+    mockDetectSandboxCapability.mockReturnValue({ available: true, msbVersion: 'msb 0.6.15' })
+    forceProcessAttestation(false)
+
+    try {
+      expect(service.getStatus()).toEqual({
+        available: false,
+        enabled: false,
+        reason: 'process identity attestation is unavailable on this platform (Linux /proc is required)',
+        msbVersion: 'msb 0.6.15',
+      })
+    } finally {
+      forceProcessAttestation(null)
+    }
   })
 
   it('fails closed when the capability becomes unavailable after the toggle was enabled', async () => {

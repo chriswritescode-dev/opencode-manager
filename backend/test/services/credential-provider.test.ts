@@ -275,8 +275,14 @@ describe('CredentialProvider', () => {
       const repo = createGithubRepo()
       setRepoSandboxGitCredentials(db, repo.id, false)
 
-      expect(provider.isSandboxGitCredentialsAllowed({ cwd: repo.fullPath })).toBe(false)
-      expect(provider.getSandboxGitEnv({ cwd: repo.fullPath })).toEqual({})
+      const getSettingsSpy = vi.spyOn(SettingsService.prototype, 'getSettings')
+      try {
+        expect(provider.isSandboxGitCredentialsAllowed({ cwd: repo.fullPath })).toBe(false)
+        expect(provider.getSandboxGitEnv({ cwd: repo.fullPath })).toEqual({})
+        expect(getSettingsSpy).not.toHaveBeenCalled()
+      } finally {
+        getSettingsSpy.mockRestore()
+      }
     })
 
     it('lets a per-repo override grant credentials while the global toggle is off', () => {

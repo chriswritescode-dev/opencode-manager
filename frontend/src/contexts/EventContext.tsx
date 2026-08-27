@@ -13,6 +13,7 @@ import { invalidateRepoGitCachesDebounced } from '@/lib/queryInvalidation'
 
 type PermissionsBySession = Record<string, PermissionRequest[]>
 type QuestionsBySession = Record<string, QuestionRequest[]>
+type SSEHealthState = Pick<EventStreamHealthState, 'isConnected' | 'isHealthy' | 'isStalled'>
 
 type SessionScopedItem = { id: string; sessionID: string }
 
@@ -163,7 +164,7 @@ interface EventContextValue {
     navigateToCurrent: () => void
     syncForSession: (directory: string, sessionID: string) => Promise<void>
   }
-  sseHealth: EventStreamHealthState
+  sseHealth: SSEHealthState
   getRepoIdForSession: (sessionID: string) => number | null
   getClient: (sessionID: string) => OpenCodeClient | null
 }
@@ -175,7 +176,10 @@ export function EventProvider({ children }: { children: React.ReactNode }) {
   const navigate = useNavigate()
 
   const [sshHostKeyRequest, setSSHHostKeyRequest] = useState<SSHHostKeyRequest | null>(null)
-  const [sseHealth, setSseHealth] = useState<EventStreamHealthState>(() => openCodeEventStream.getHealth())
+  const [sseHealth, setSseHealth] = useState<SSEHealthState>(() => {
+    const { isConnected, isHealthy, isStalled } = openCodeEventStream.getHealth()
+    return { isConnected, isHealthy, isStalled }
+  })
 
   const respondToSSHHostKey = useCallback(async (requestId: string, approved: boolean) => {
     try {
@@ -192,7 +196,7 @@ export function EventProvider({ children }: { children: React.ReactNode }) {
       if (prev.isConnected === next.isConnected && prev.isHealthy === next.isHealthy && prev.isStalled === next.isStalled) {
         return prev
       }
-      return next
+      return { isConnected: next.isConnected, isHealthy: next.isHealthy, isStalled: next.isStalled }
     })
   }, [])
 
@@ -667,6 +671,6 @@ export function useQuestions() {
   return questions
 }
 
-export function useSSEHealth(): EventStreamHealthState {
+export function useSSEHealth(): SSEHealthState {
   return useEventContext().sseHealth
 }

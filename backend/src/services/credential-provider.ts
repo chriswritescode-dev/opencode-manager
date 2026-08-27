@@ -1,11 +1,11 @@
 import type { Database } from 'bun:sqlite'
-import type { GitCredential, Repo } from '@opencode-manager/shared'
-import type { UserPreferences } from '../types/settings'
+import type { GitCredential, Repo, UserPreferences } from '@opencode-manager/shared'
 import { SettingsService } from './settings'
 import {
   findPatCredentialForHost,
   getSSHCredentialsForHost,
   createGitEnv,
+  createGhCliEnv,
   findGitHubCredential,
   type ResolvedGitCredential,
 } from '../utils/git-auth'
@@ -67,12 +67,16 @@ export class CredentialProvider {
   }
 
   isSandboxGitCredentialsAllowed(options: CredentialResolutionOptions = {}): boolean {
-    return this.getSandboxGitCredentialsAllowed(this.resolveContext(options))
+    return this.getSandboxGitCredentialsAllowed(options)
   }
 
   getSandboxGitEnv(options: CredentialResolutionOptions = {}): Record<string, string> {
-    const context = this.resolveContext(options)
-    if (!this.getSandboxGitCredentialsAllowed(context)) return {}
+    const repo = this.resolveRepo(options)
+    const repoOverride = repo ? getRepoSandboxGitCredentials(this.database, repo.id) : null
+    if (repoOverride === false) return {}
+
+    const context = this.resolveContext(options, repo)
+    if (repoOverride !== true && context.preferences.sandbox?.gitCredentials !== true) return {}
 
     const gitEnv = this.getGitEnvForContext(context)
     if (gitEnv.GIT_CONFIG_COUNT === '0') return {}
@@ -91,12 +95,12 @@ export class CredentialProvider {
     return this.getGhCliEnvForContext(this.resolveContext(options))
   }
 
-  private resolveContext(options: CredentialResolutionOptions): CredentialResolutionContext {
+  private resolveContext(options: CredentialResolutionOptions, repo = this.resolveRepo(options)): CredentialResolutionContext {
     const preferences = this.getPreferences()
     return {
       preferences,
       credentials: this.getCredentials(preferences),
-      repo: this.resolveRepo(options),
+      repo,
     }
   }
 
@@ -114,17 +118,13 @@ export class CredentialProvider {
 
   private getGhCliEnvForContext(context: CredentialResolutionContext): Record<string, string> {
     const credential = this.getGhCliCredential(context)
-    if (!credential?.token) return {}
-    return { GH_TOKEN: credential.token, GITHUB_TOKEN: credential.token }
+    return createGhCliEnv(credential ? [credential] : [])
   }
 
-  private getSandboxGitCredentialsAllowed(context: CredentialResolutionContext): boolean {
-    if (context.repo) {
-      const repoOverride = getRepoSandboxGitCredentials(this.database, context.repo.id)
-      if (repoOverride !== null) return repoOverride
-    }
-
-    return context.preferences.sandbox?.gitCredentials === true
+  private getSandboxGitCredentialsAllowed(options: CredentialResolutionOptions): boolean {
+    const repo = this.resolveRepo(options)
+    const repoOverride = repo ? getRepoSandboxGitCredentials(this.database, repo.id) : null
+    return repoOverride ?? (this.getPreferences().sandbox?.gitCredentials === true)
   }
 
   private resolveRepo(options: CredentialResolutionOptions): Repo | null {

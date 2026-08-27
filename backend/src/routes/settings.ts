@@ -33,7 +33,7 @@ import { getOrCreateInternalToken, rotateInternalToken } from '../services/inter
 import { sseAggregator } from '../services/sse-aggregator'
 import type { OpenCodeSupervisor } from '../services/opencode-supervisor'
 import { detectSandboxCapability } from '../services/sandbox/capability'
-import { resolveProcessIdentityProvider } from '../services/opencode/process-identity'
+import { getProcessIdentityAttestationError } from '../services/opencode/process-identity'
 import { restartOpenCode, restartOpenCodeAfterCommit, reloadOpenCodeConfig, getOpenCodeRestartCoordinator } from '../services/opencode-restart'
 import type { GitAuthService } from '../services/git-auth'
 import { DEFAULT_AGENTS_MD } from '../constants'
@@ -402,8 +402,9 @@ export function createSettingsRoutes(db: Database, gitAuthService: GitAuthServic
         if (capability.available === false) {
           return c.json({ error: `Cannot enable sandboxing: ${capability.reason}` }, 400)
         }
-        if (resolveProcessIdentityProvider().attested === false) {
-          return c.json({ error: 'Cannot enable sandboxing: process identity attestation is unavailable on this platform (Linux /proc is required)' }, 400)
+        const attestationError = getProcessIdentityAttestationError()
+        if (attestationError !== null) {
+          return c.json({ error: `Cannot enable sandboxing: ${attestationError}` }, 400)
         }
       }
 

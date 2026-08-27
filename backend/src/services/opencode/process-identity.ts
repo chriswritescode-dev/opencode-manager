@@ -77,6 +77,12 @@ export function resolveProcessIdentityProvider(): ProcessIdentityProvider {
   return cachedProvider
 }
 
+export function getProcessIdentityAttestationError(): string | null {
+  return resolveProcessIdentityProvider().attested
+    ? null
+    : 'process identity attestation is unavailable on this platform (Linux /proc is required)'
+}
+
 export function resetProcessIdentityProvider(): void {
   cachedProvider = null
 }

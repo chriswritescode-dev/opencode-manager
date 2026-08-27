@@ -55,7 +55,7 @@ The OpenCode server binds to the configured `OPENCODE_HOST` regardless of enforc
 
 ## Host Requirements
 
-Sandboxing requires KVM on a Linux host. Start the Manager with the sandbox overlay:
+Sandboxing requires KVM on a Linux host and access to Linux `/proc` for process identity attestation. Start the Manager with the sandbox overlay:
 
 ```bash
 docker compose -f docker-compose.yml -f docker-compose.sandbox.yml up -d
