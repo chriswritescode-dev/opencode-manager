@@ -125,7 +125,7 @@ describe('SandboxRuntimeService', () => {
       resources: { cpus: ENV.SANDBOX.CPUS, memory_mib: memoryMib(), max_cpus: ENV.SANDBOX.CPUS, max_memory_mib: memoryMib() },
       runtime: {
         workdir: reposRoot,
-        shell: null,
+        shell: '/bin/sh',
         scripts: {},
         entrypoint: ['/usr/bin/env'],
         cmd: ['sleep', 'infinity'],
@@ -2737,7 +2737,7 @@ describe('SandboxRuntimeService', () => {
   it('removes and recreates a sandbox whose runtime shell differs from the canonical spec', async () => {
     const runtime = realInspectConfig().runtime as Record<string, unknown>
     await assertRecreateForInspectMutation(
-      realInspectConfig({ runtime: { ...runtime, shell: '/bin/sh' } }),
+      realInspectConfig({ runtime: { ...runtime, shell: '/bin/bash' } }),
       'runtime.shell',
     )
   })

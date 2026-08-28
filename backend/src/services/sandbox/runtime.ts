@@ -34,7 +34,6 @@ const SANDBOX_LS_TIMEOUT_MS = 15000
 const SANDBOX_STOP_TIMEOUT_MS = 30000
 const SANDBOX_PROVISION_ATTEMPTS = 3
 const SANDBOX_PROVISION_RETRY_DELAY_MS = 2000
-const SANDBOX_PROVISION_TIMEOUT_MS = 30000
 const SANDBOX_AGENT_PING_TIMEOUT_MS = 10000
 const SANDBOX_AGENT_POLL_DELAY_MS = 1000
 const SANDBOX_RUNTIME_TMPFS_GUEST = path.resolve('/tmp')
@@ -596,17 +595,20 @@ async function provisionSandboxExecUserPasswd(): Promise<void> {
     throw new Error('the sandbox agent did not become reachable before the exec user could be provisioned')
   }
   let lastError: unknown = null
+  const deadline = Date.now() + ENV.SANDBOX.START_TIMEOUT_MS
   for (let attempt = 0; attempt < SANDBOX_PROVISION_ATTEMPTS; attempt++) {
     if (attempt > 0) {
+      if (Date.now() >= deadline) break
       await new Promise((resolve) => setTimeout(resolve, SANDBOX_PROVISION_RETRY_DELAY_MS))
     }
     try {
       await executeCommand([sandboxExecutablePath(), ...provisionArgs], {
-        timeout: SANDBOX_PROVISION_TIMEOUT_MS,
+        timeout: ENV.SANDBOX.START_TIMEOUT_MS,
       })
       return
     } catch (error) {
       lastError = error
+      if (Date.now() >= deadline) break
     }
   }
   throw new Error(

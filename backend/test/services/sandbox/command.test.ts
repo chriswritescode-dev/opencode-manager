@@ -149,6 +149,7 @@ describe('sandbox command builders', () => {
     expect(runtime.user).toBe(resolveSandboxExecUser())
     expect(runtime.cmd).toEqual(['sleep', 'infinity'])
     expect(runtime.entrypoint).toEqual(['/usr/bin/env'])
+    expect(runtime.shell).toBe('/bin/sh')
     expect(spec.patches).toEqual([])
     expect(network.enabled).toBe(true)
     expect(network.ports).toEqual([])
@@ -271,6 +272,7 @@ describe('sandbox command builders', () => {
       "getent passwd 1001 >/dev/null 2>&1 || echo 'ocm-exec:x:1001:1002:Manager sandbox exec user:/home/ocm-agent:/bin/sh' >> /etc/passwd",
     )
     expect(script).toContain("grep -q '^ocm-exec:' /etc/shadow || echo 'ocm-exec:*:19000:0:99999:7:::' >> /etc/shadow")
+    expect(script).toContain('getent passwd 1001 >/dev/null || exit 1')
   })
 
   it('returns no provisioning args when the exec user does not resolve to numeric uid and gid', () => {
