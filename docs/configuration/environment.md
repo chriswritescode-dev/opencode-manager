@@ -116,7 +116,7 @@ Sandboxed agent commands run inside a microVM managed by `msb` (see [Agent Sandb
 |----------|-------------|---------|
 | `MSB_PATH` | Path to the `msb` executable | `msb` |
 | `MSB_LIBKRUNFW_PATH` | Path to the `libkrunfw` firmware library used by `msb` (set in the container image) | `/opt/microsandbox/lib/libkrunfw.so` |
-| `SANDBOX_IMAGE` | OCI image the microVM boots from. Digest-pinned by default so a rebuilt guest image is actually adopted; see [Sandbox Guest Image](../features/sandboxing.md#sandbox-guest-image) for what the default ships and how to build your own | `docker.io/cstechdev/ocm-sandbox@sha256:74a9f12e…` |
+| `SANDBOX_IMAGE` | OCI image the microVM boots from. Digest-pinned by default so a rebuilt guest image is actually adopted; see [Sandbox Guest Image](../features/sandboxing.md#sandbox-guest-image) for what the default ships and how to build your own | `docker.io/cstechdev/ocm-sandbox@sha256:c3e75c42…` |
 | `SANDBOX_MEMORY` | MicroVM memory (e.g. `4G`) | `4G` |
 | `SANDBOX_CPUS` | MicroVM CPU count | `2` |
 | `SANDBOX_EXEC_USER` | Guest identity sandboxed commands run as: a numeric `uid`, a numeric `uid:gid`, or a guest username. A numeric uid must match the Manager's effective uid (`PUID`); the compose overlay defaults it to `${PUID:-1000}`. A guest username is resolved to the Manager's effective `uid:gid` so writes to the mounted project roots always succeed. When a configured numeric identity cannot write the workspace, enforcement is reported unavailable | `${PUID:-1000}` via the overlay, otherwise `node` |
