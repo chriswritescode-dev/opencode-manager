@@ -1,4 +1,4 @@
-import { useState } from 'react'
+import { useMemo, useState } from 'react'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import { listBranches, switchBranch, GitAuthError, getRepo } from '@/api/repos'
 import { fetchGitStatus, useGitStatus } from '@/api/git'
@@ -20,6 +20,7 @@ interface BranchesTabProps {
 export function BranchesTab({ repoId, currentBranch }: BranchesTabProps) {
   const queryClient = useQueryClient()
   const [newBranchName, setNewBranchName] = useState('')
+  const [searchQuery, setSearchQuery] = useState('')
   const [isCreating, setIsCreating] = useState(false)
   const [worktreeDialogOpen, setWorktreeDialogOpen] = useState(false)
   const git = useGit(repoId)
@@ -40,6 +41,13 @@ export function BranchesTab({ repoId, currentBranch }: BranchesTabProps) {
 
   const repoUrl = repo?.repoUrl ?? null
   const isRepoWorktree = repo?.isWorktree ?? false
+
+  const filteredBranches = useMemo(() => {
+    const allBranches = branches?.branches ?? []
+    if (!searchQuery.trim()) return allBranches
+    const query = searchQuery.toLowerCase()
+    return allBranches.filter((branch) => branch.name.toLowerCase().includes(query))
+  }, [branches, searchQuery])
 
   const switchBranchMutation = useMutation({
     mutationFn: async (branch: string) => {
@@ -183,6 +191,16 @@ export function BranchesTab({ repoId, currentBranch }: BranchesTabProps) {
             )}
           </div>
         )}
+        {branches?.branches && branches.branches.length > 0 && (
+          <div className="px-3 pb-1">
+            <Input
+              placeholder="Search branches..."
+              value={searchQuery}
+              onChange={(e) => setSearchQuery(e.target.value)}
+              className="h-8 md:text-sm"
+            />
+          </div>
+        )}
       </div>
 
       <div className="flex-1 overflow-y-auto relative">
@@ -191,9 +209,9 @@ export function BranchesTab({ repoId, currentBranch }: BranchesTabProps) {
             <Loader2 className="w-5 h-5 animate-spin text-muted-foreground" />
           </div>
         )}
-        {branches?.branches && branches.branches.length > 0 ? (
+        {filteredBranches.length > 0 ? (
           <div className="py-1">
-            {branches.branches.map((branch) => {
+            {filteredBranches.map((branch) => {
               const isCurrent = branch.name === activeBranch || branch.name === `remotes/${activeBranch}`
               const isRemote = branch.type === 'remote'
               const checkoutName = isRemote ? branch.name.replace(/^remotes\/[^/]+\//, '') : branch.name
@@ -237,7 +255,11 @@ export function BranchesTab({ repoId, currentBranch }: BranchesTabProps) {
         ) : (
           <div className="text-center py-12 text-muted-foreground">
             <GitBranch className="w-8 h-8 mx-auto mb-2 opacity-50" />
-            <p className="text-sm">No branches found</p>
+            {searchQuery.trim() ? (
+              <p className="text-sm">No branches match "{searchQuery.trim()}"</p>
+            ) : (
+              <p className="text-sm">No branches found</p>
+            )}
           </div>
         )}
       </div>
