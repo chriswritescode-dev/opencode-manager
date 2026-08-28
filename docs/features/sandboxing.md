@@ -154,7 +154,17 @@ Understand the trade-off before enabling it. `msb exec -e` is the only injection
 
 ## Sandbox Guest Image
 
-`SANDBOX_IMAGE` defaults to `docker.io/cstechdev/ocm-sandbox:latest`, built from `Dockerfile.sandbox` in this repository and published for `linux/amd64` and `linux/arm64` by the `Sandbox Image` workflow.
+`SANDBOX_IMAGE` defaults to `docker.io/cstechdev/ocm-sandbox:latest`, built from `Dockerfile.sandbox` in this repository and published for `linux/amd64` and `linux/arm64` from a build host with `docker buildx`:
+
+```bash
+docker buildx build --platform linux/amd64,linux/arm64 \
+  -t docker.io/cstechdev/ocm-sandbox:latest \
+  --build-arg PLAYWRIGHT_VERSION=1.56.0 \
+  -f Dockerfile.sandbox --load .
+docker tag docker.io/cstechdev/ocm-sandbox:latest docker.io/cstechdev/ocm-sandbox:0.17.1
+docker push docker.io/cstechdev/ocm-sandbox:latest
+docker push docker.io/cstechdev/ocm-sandbox:0.17.1
+```
 
 It is `node:24` (Debian 12, `buildpack-deps` based), so the compile toolchain is already present, plus the package managers and CLI tooling from the Manager image:
 
