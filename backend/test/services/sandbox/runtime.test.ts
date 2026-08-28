@@ -409,6 +409,66 @@ describe('SandboxRuntimeService', () => {
     expect(mockExecuteCommand.mock.calls.find((call) => call[0].includes('exec'))).toBeDefined()
   })
 
+  it('waits for the guest agent before provisioning the exec user', async () => {
+    enableEnforcement()
+    let pingCalls = 0
+    let inspectCalls = 0
+    mockExecuteCommand.mockImplementation(async (args: string[]) => {
+      if (args.includes('ping')) {
+        pingCalls += 1
+        if (pingCalls === 1) {
+          return { exitCode: 1, stdout: '', stderr: 'agent unreachable' }
+        }
+        return { exitCode: 0, stdout: '', stderr: '' }
+      }
+      if (args.includes('inspect')) {
+        inspectCalls += 1
+        if (inspectCalls === 1) {
+          return { exitCode: 1, stdout: '', stderr: 'no such sandbox' }
+        }
+        return inspectedRunningSandbox()
+      }
+      if (args.includes('ls')) {
+        return { exitCode: 0, stdout: '[]', stderr: '' }
+      }
+      return { exitCode: 0, stdout: '', stderr: '' }
+    })
+
+    const plan = await service.planShell(repoADir)
+
+    expect(plan).toEqual({ mode: 'sandbox', workdir: repoADir })
+    expect(pingCalls).toBeGreaterThanOrEqual(2)
+    const pingIndex = mockExecuteCommand.mock.calls.findIndex((call) => call[0].includes('ping'))
+    const provisionIndex = mockExecuteCommand.mock.calls.findIndex((call) => call[0].includes('exec'))
+    expect(pingIndex).toBeLessThan(provisionIndex)
+  })
+
+  it('keeps the sandbox usable when exec user provisioning fails', async () => {
+    enableEnforcement()
+    let inspectCalls = 0
+    mockExecuteCommand.mockImplementation(async (args: string[]) => {
+      if (args.includes('exec')) {
+        throw new Error('Command timed out after 30000ms')
+      }
+      if (args.includes('inspect')) {
+        inspectCalls += 1
+        if (inspectCalls === 1) {
+          return { exitCode: 1, stdout: '', stderr: 'no such sandbox' }
+        }
+        return inspectedRunningSandbox()
+      }
+      if (args.includes('ls')) {
+        return { exitCode: 0, stdout: '[]', stderr: '' }
+      }
+      return { exitCode: 0, stdout: '', stderr: '' }
+    })
+
+    const plan = await service.planShell(repoADir)
+
+    expect(plan).toEqual({ mode: 'sandbox', workdir: repoADir })
+    expect(logger.warn).toHaveBeenCalledWith(expect.stringContaining('sudo will not work inside the guest'))
+  })
+
   it('never touches msb at boot when the sandbox preference is off', async () => {
     mockExecuteCommand.mockImplementation(async () => {
       throw new Error('msb must not be invoked when sandboxing is disabled')
@@ -487,6 +547,7 @@ describe('SandboxRuntimeService', () => {
         stdout: JSON.stringify([{ name: WORKSPACE_SANDBOX_NAME, status: 'running' }]),
         stderr: '',
       })
+      .mockResolvedValueOnce({ exitCode: 0, stdout: '', stderr: '' })
       .mockResolvedValueOnce({ exitCode: 0, stdout: '', stderr: '' })
       .mockResolvedValueOnce(inspectedRunningSandbox())
 
@@ -2414,6 +2475,7 @@ describe('SandboxRuntimeService', () => {
       .mockRejectedValueOnce(new Error('Command failed with code 1: no KVM acceleration available'))
       .mockResolvedValueOnce({ exitCode: 0, stdout: '[]', stderr: '' })
       .mockResolvedValueOnce({ exitCode: 0, stdout: '[]', stderr: '' })
+      .mockResolvedValueOnce({ exitCode: 0, stdout: '', stderr: '' })
       .mockResolvedValueOnce({ exitCode: 0, stdout: '', stderr: '' })
       .mockResolvedValueOnce({ exitCode: 0, stdout: '', stderr: '' })
       .mockResolvedValueOnce(inspectedRunningSandbox())

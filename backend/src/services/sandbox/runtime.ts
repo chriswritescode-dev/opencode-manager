@@ -15,6 +15,7 @@ import {
   buildSandboxCreateArgs,
   buildSandboxInspectArgs,
   buildSandboxListArgs,
+  buildSandboxPingArgs,
   buildSandboxProvisionArgs,
   buildSandboxPullArgs,
   buildSandboxRemoveArgs,
@@ -33,6 +34,9 @@ const SANDBOX_LS_TIMEOUT_MS = 15000
 const SANDBOX_STOP_TIMEOUT_MS = 30000
 const SANDBOX_PROVISION_ATTEMPTS = 3
 const SANDBOX_PROVISION_RETRY_DELAY_MS = 2000
+const SANDBOX_PROVISION_TIMEOUT_MS = 30000
+const SANDBOX_AGENT_PING_TIMEOUT_MS = 10000
+const SANDBOX_AGENT_POLL_DELAY_MS = 1000
 const SANDBOX_RUNTIME_TMPFS_GUEST = path.resolve('/tmp')
 
 export type SandboxShellPlan =
@@ -133,7 +137,7 @@ async function bootWorkspaceSandbox(): Promise<void> {
           await createWorkspaceSandbox()
         } else {
           await startWorkspaceSandbox()
-          await provisionSandboxExecUserPasswd()
+          await provisionSandboxExecUser()
           const runningAttestation = await attestWorkspaceSandbox(true)
           if (!runningAttestation.trusted) {
             logger.warn(
@@ -166,7 +170,7 @@ async function bootWorkspaceSandboxFromListing(): Promise<void> {
       await createWorkspaceSandbox()
     } else if (!entry.running) {
       await startWorkspaceSandbox()
-      await provisionSandboxExecUserPasswd()
+      await provisionSandboxExecUser()
       const runningAttestation = await attestWorkspaceSandbox(true)
       if (!runningAttestation.trusted) {
         logger.warn(
@@ -551,10 +555,45 @@ async function cacheSandboxImage(): Promise<void> {
   logger.info(`Sandbox guest image ${ENV.SANDBOX.IMAGE} is cached`)
 }
 
+async function pingSandboxAgent(): Promise<boolean> {
+  try {
+    const result = (await executeCommand([sandboxExecutablePath(), ...buildSandboxPingArgs()], {
+      ignoreExitCode: true,
+      silent: true,
+      timeout: SANDBOX_AGENT_PING_TIMEOUT_MS,
+    })) as string | { exitCode: number; stdout: string; stderr: string }
+    return typeof result === 'string' || result.exitCode === 0
+  } catch {
+    return false
+  }
+}
+
+async function waitForSandboxAgent(): Promise<boolean> {
+  const deadline = Date.now() + ENV.SANDBOX.START_TIMEOUT_MS
+  for (;;) {
+    if (await pingSandboxAgent()) return true
+    if (Date.now() >= deadline) return false
+    await new Promise((resolve) => setTimeout(resolve, SANDBOX_AGENT_POLL_DELAY_MS))
+  }
+}
+
+async function provisionSandboxExecUser(): Promise<void> {
+  try {
+    await provisionSandboxExecUserPasswd()
+  } catch (error) {
+    logger.warn(
+      `Sandbox exec user provisioning failed, so sudo will not work inside the guest: ${error instanceof Error ? error.message : String(error)}`,
+    )
+  }
+}
+
 async function provisionSandboxExecUserPasswd(): Promise<void> {
   const provisionArgs = buildSandboxProvisionArgs()
   if (provisionArgs.length === 0) {
     return
+  }
+  if (!(await waitForSandboxAgent())) {
+    throw new Error('the sandbox agent did not become reachable before the exec user could be provisioned')
   }
   let lastError: unknown = null
   for (let attempt = 0; attempt < SANDBOX_PROVISION_ATTEMPTS; attempt++) {
@@ -563,7 +602,7 @@ async function provisionSandboxExecUserPasswd(): Promise<void> {
     }
     try {
       await executeCommand([sandboxExecutablePath(), ...provisionArgs], {
-        timeout: SANDBOX_LS_TIMEOUT_MS,
+        timeout: SANDBOX_PROVISION_TIMEOUT_MS,
       })
       return
     } catch (error) {
@@ -579,7 +618,7 @@ async function createWorkspaceSandbox(): Promise<void> {
   await executeCommand([sandboxExecutablePath(), ...buildSandboxCreateArgs()], {
     timeout: ENV.SANDBOX.START_TIMEOUT_MS,
   })
-  await provisionSandboxExecUserPasswd()
+  await provisionSandboxExecUser()
   const attestation = await attestWorkspaceSandbox(true)
   if (!attestation.trusted) {
     throw new Error(`newly created sandbox ${WORKSPACE_SANDBOX_NAME} failed attestation: ${attestation.reason}`)
@@ -665,7 +704,7 @@ export class SandboxRuntimeService {
     if (getProcessIdentityAttestationError() !== null) return
     await cacheSandboxImage()
     await ensureWorkspaceSandbox()
-    await provisionSandboxExecUserPasswd()
+    await provisionSandboxExecUser()
     logger.info('Workspace sandbox is running and its exec user is provisioned')
   }
 

@@ -124,6 +124,10 @@ export function buildSandboxPullArgs(): string[] {
   return ['pull', ENV.SANDBOX.IMAGE]
 }
 
+export function buildSandboxPingArgs(): string[] {
+  return ['ping', WORKSPACE_SANDBOX_NAME, '-q']
+}
+
 export function sandboxMountRoots(): string[] {
   return [getReposPath(), getScheduleWorktreesPath()]
 }
