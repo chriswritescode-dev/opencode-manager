@@ -72,7 +72,7 @@ All projects share one microVM named `ocm-workspace`:
 - Each command supplies its own working directory through `msb exec -w`.
 - A session outside the mounted roots is refused rather than executed on the host.
 - The Manager verifies the microVM image, resources, user, network policy, mounts (including the `/tmp` tmpfs size and mount options), and labels before reuse. `/tmp` is the only tmpfs the microVM may carry; any other tmpfs fails attestation.
-- MSB pulls the configured `SANDBOX_IMAGE` (default `docker.io/cstechdev/ocm-sandbox:latest`) automatically; see [Sandbox Guest Image](#sandbox-guest-image) to build your own.
+- MSB pulls the configured `SANDBOX_IMAGE` (a digest-pinned `docker.io/cstechdev/ocm-sandbox` by default) automatically; see [Sandbox Guest Image](#sandbox-guest-image) to build your own.
 - The Manager pins a neutral `/usr/bin/env` entrypoint, so the image's own OCI entrypoint is never inherited.
 - A stale or unverifiable microVM is removed and recreated.
 - Manager shutdown and an enforced-to-disabled restart stop the managed microVM.
@@ -154,17 +154,23 @@ Understand the trade-off before enabling it. `msb exec -e` is the only injection
 
 ## Sandbox Guest Image
 
-`SANDBOX_IMAGE` defaults to `docker.io/cstechdev/ocm-sandbox:latest`, built from `Dockerfile.sandbox` in this repository and published for `linux/amd64` and `linux/arm64` from a build host with `docker buildx`:
+`SANDBOX_IMAGE` defaults to a digest-pinned reference of `docker.io/cstechdev/ocm-sandbox`, built from `Dockerfile.sandbox` in this repository and published for `linux/amd64` and `linux/arm64` from a build host with `docker buildx`:
 
 ```bash
 docker buildx build --platform linux/amd64,linux/arm64 \
   -t docker.io/cstechdev/ocm-sandbox:latest \
   --build-arg PLAYWRIGHT_VERSION=1.56.0 \
   -f Dockerfile.sandbox --load .
-docker tag docker.io/cstechdev/ocm-sandbox:latest docker.io/cstechdev/ocm-sandbox:0.17.1
 docker push docker.io/cstechdev/ocm-sandbox:latest
-docker push docker.io/cstechdev/ocm-sandbox:0.17.1
+docker buildx imagetools inspect docker.io/cstechdev/ocm-sandbox:latest   # copy the index digest
 ```
+
+Then update the pin in `shared/src/config/defaults.ts` (`SANDBOX.IMAGE`) and in the `docker-compose.sandbox.yml` default to the new `@sha256:` digest. That bump is what makes deployments adopt a rebuilt guest image, and it is deliberate rather than convenient:
+
+- msb caches images by reference. `msb pull docker.io/cstechdev/ocm-sandbox:latest` reports "already cached" without contacting the registry, and `pull_policy: IfMissing` never re-pulls, so a host that pulled a mutable tag once keeps that content forever.
+- Sandbox attestation compares the image *reference string*. A floating tag therefore keeps passing attestation while its content drifts, so the running microVM is never recreated either.
+
+A digest reference sidesteps both: it is a cache key no host has seen before, so `IfMissing` pulls it, and it fails the reference comparison against a microVM created from the old reference, so the Manager removes and recreates that microVM on its own. No manual cleanup is required on deploy; to reclaim the superseded image afterwards, run `msb image prune` or `msb image rm <old reference>`.
 
 It is `node:24` (Debian 12, `buildpack-deps` based), so the compile toolchain is already present, plus the package managers and CLI tooling from the Manager image:
 
@@ -187,7 +193,7 @@ It is `node:24` (Debian 12, `buildpack-deps` based), so the compile toolchain is
 
 The guest runs every command as a numeric host uid that has no `/etc/passwd` entry in the image, so the uncorrected default `HOME` is `/` and anything that writes per-user state — the pnpm store, uv and pip caches, `git config`, `gh` config — dies with `EACCES` on the first run. The image therefore sets `HOME=/home/ocm-agent` (mode 1777), prewarms corepack into a world-readable `COREPACK_HOME`, and puts a world-writable `/opt/agent-tools/bin` on `PATH` for `uv tool` and global package-manager installs. Image `ENV` reaches `msb exec` commands verbatim, including for unknown uids. The image build verifies the whole toolchain as an unprivileged uid so a root-only regression fails the build instead of the agent.
 
-`sudo` also needs the exec user to exist in the guest, which the image cannot know at build time. The Manager provisions the `/etc/passwd`, `/etc/group`, and `/etc/shadow` entries for the exec uid through an idempotent root exec (verified by `getent`, so repeats are no-ops) at three points: when the workspace sandbox is created, when a stopped sandbox is started, and once at Manager startup for a sandbox that is already running. Without the entries, `sudo` refuses with "you do not exist in the passwd database" or a PAM "account validation failure". Only a sandbox created before this mechanism existed and never started again slips through; remove it once with `msb rm -f ocm-workspace` to pick up sudo and the fixed toolchain.
+`sudo` also needs the exec user to exist in the guest, which the image cannot know at build time. The Manager provisions the `/etc/passwd`, `/etc/group`, and `/etc/shadow` entries for the exec uid through an idempotent root exec (verified by `getent`, so repeats are no-ops) at three points: when the workspace sandbox is created, when a stopped sandbox is started, and at Manager startup. Without the entries, `sudo` refuses with "you do not exist in the passwd database" or a PAM "account validation failure". A microVM created from an older image reference is replaced automatically when the digest pin changes, so it picks up both sudo and the fixed toolchain without manual cleanup.
 
 Chromium launches headless as the non-root exec user without extra flags. If your host kernel restricts user namespaces so Chromium's own sandbox fails, pass `--no-sandbox` — the microVM is already the isolation boundary.
 
