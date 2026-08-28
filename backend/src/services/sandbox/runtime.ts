@@ -15,11 +15,13 @@ import {
   buildSandboxCreateArgs,
   buildSandboxInspectArgs,
   buildSandboxListArgs,
+  buildSandboxPingArgs,
   buildSandboxProvisionArgs,
   buildSandboxPullArgs,
   buildSandboxRemoveArgs,
   buildSandboxStartArgs,
   buildSandboxStopManagedArgs,
+  buildSandboxVerifyProvisionArgs,
   resolveExpectedSandboxNetworkPolicy,
   resolveSandboxRuntimeTmpfsSizeMib,
   resolveSandboxWorkDirectory,
@@ -33,6 +35,9 @@ const SANDBOX_LS_TIMEOUT_MS = 15000
 const SANDBOX_STOP_TIMEOUT_MS = 30000
 const SANDBOX_PROVISION_ATTEMPTS = 3
 const SANDBOX_PROVISION_RETRY_DELAY_MS = 2000
+const SANDBOX_PROVISION_RETRY_ATTEMPTS = 5
+const SANDBOX_AGENT_PING_TIMEOUT_MS = 10000
+const SANDBOX_AGENT_POLL_DELAY_MS = 1000
 const SANDBOX_RUNTIME_TMPFS_GUEST = path.resolve('/tmp')
 
 export type SandboxShellPlan =
@@ -59,6 +64,9 @@ export function resetSandboxRuntimeState(): void {
   shutdownRequested = false
   stopInProgress = false
   canonicalSandboxSpecMemo = null
+  provisionRetryGeneration += 1
+  backgroundProvisionRetry = null
+  inFlightProvision = null
 }
 
 function memoizedCanonicalSandboxSpec(): Record<string, unknown> {
@@ -133,7 +141,7 @@ async function bootWorkspaceSandbox(): Promise<void> {
           await createWorkspaceSandbox()
         } else {
           await startWorkspaceSandbox()
-          await provisionSandboxExecUserPasswd()
+          await provisionSandboxExecUser()
           const runningAttestation = await attestWorkspaceSandbox(true)
           if (!runningAttestation.trusted) {
             logger.warn(
@@ -166,7 +174,7 @@ async function bootWorkspaceSandboxFromListing(): Promise<void> {
       await createWorkspaceSandbox()
     } else if (!entry.running) {
       await startWorkspaceSandbox()
-      await provisionSandboxExecUserPasswd()
+      await provisionSandboxExecUser()
       const runningAttestation = await attestWorkspaceSandbox(true)
       if (!runningAttestation.trusted) {
         logger.warn(
@@ -551,23 +559,69 @@ async function cacheSandboxImage(): Promise<void> {
   logger.info(`Sandbox guest image ${ENV.SANDBOX.IMAGE} is cached`)
 }
 
+async function pingSandboxAgent(): Promise<boolean> {
+  try {
+    const result = (await executeCommand([sandboxExecutablePath(), ...buildSandboxPingArgs()], {
+      ignoreExitCode: true,
+      silent: true,
+      timeout: SANDBOX_AGENT_PING_TIMEOUT_MS,
+    })) as string | { exitCode: number; stdout: string; stderr: string }
+    return typeof result === 'string' || result.exitCode === 0
+  } catch {
+    return false
+  }
+}
+
+async function waitForSandboxAgent(): Promise<boolean> {
+  const deadline = Date.now() + ENV.SANDBOX.START_TIMEOUT_MS
+  for (;;) {
+    if (await pingSandboxAgent()) return true
+    if (Date.now() >= deadline) return false
+    await new Promise((resolve) => setTimeout(resolve, SANDBOX_AGENT_POLL_DELAY_MS))
+  }
+}
+
+async function provisionSandboxExecUser(): Promise<void> {
+  try {
+    await ensureSandboxExecUserProvisioned()
+    return
+  } catch (error) {
+    logger.warn(
+      `Sandbox exec user provisioning failed, so sudo will not work inside the guest yet; retrying in the background: ${error instanceof Error ? error.message : String(error)}`,
+    )
+  }
+  scheduleBackgroundProvisionRetry()
+}
+
 async function provisionSandboxExecUserPasswd(): Promise<void> {
   const provisionArgs = buildSandboxProvisionArgs()
   if (provisionArgs.length === 0) {
     return
   }
+  if (!(await waitForSandboxAgent())) {
+    throw new Error('the sandbox agent did not become reachable before the exec user could be provisioned')
+  }
   let lastError: unknown = null
+  const deadline = Date.now() + ENV.SANDBOX.START_TIMEOUT_MS
   for (let attempt = 0; attempt < SANDBOX_PROVISION_ATTEMPTS; attempt++) {
     if (attempt > 0) {
+      if (Date.now() >= deadline) break
       await new Promise((resolve) => setTimeout(resolve, SANDBOX_PROVISION_RETRY_DELAY_MS))
     }
     try {
       await executeCommand([sandboxExecutablePath(), ...provisionArgs], {
-        timeout: SANDBOX_LS_TIMEOUT_MS,
+        timeout: ENV.SANDBOX.START_TIMEOUT_MS,
       })
+      const verifyArgs = buildSandboxVerifyProvisionArgs()
+      if (verifyArgs.length > 0) {
+        await executeCommand([sandboxExecutablePath(), ...verifyArgs], {
+          timeout: SANDBOX_LS_TIMEOUT_MS,
+        })
+      }
       return
     } catch (error) {
       lastError = error
+      if (Date.now() >= deadline) break
     }
   }
   throw new Error(
@@ -575,11 +629,69 @@ async function provisionSandboxExecUserPasswd(): Promise<void> {
   )
 }
 
+let backgroundProvisionRetry: Promise<void> | null = null
+let provisionRetryGeneration = 0
+let inFlightProvision: Promise<void> | null = null
+
+function ensureSandboxExecUserProvisioned(): Promise<void> {
+  if (inFlightProvision) {
+    return inFlightProvision
+  }
+  inFlightProvision = provisionSandboxExecUserPasswd().finally(() => {
+    inFlightProvision = null
+  })
+  return inFlightProvision
+}
+
+export function backgroundProvisionRetryForTests(): Promise<void> | null {
+  return backgroundProvisionRetry
+}
+
+export function provisionSandboxExecUserForTests(): Promise<void> {
+  return ensureSandboxExecUserProvisioned()
+}
+
+function scheduleBackgroundProvisionRetry(): void {
+  const generation = provisionRetryGeneration
+  if (backgroundProvisionRetry !== null) return
+  logger.info('Sandbox exec user provisioning background retry scheduled')
+  backgroundProvisionRetry = (async () => {
+    for (let attempt = 1; attempt <= SANDBOX_PROVISION_RETRY_ATTEMPTS; attempt++) {
+      await new Promise((resolve) => setTimeout(resolve, SANDBOX_PROVISION_RETRY_DELAY_MS))
+      if (generation !== provisionRetryGeneration) {
+        logger.info('Sandbox exec user provisioning background retry cancelled by a runtime state reset')
+        return
+      }
+      if (shutdownRequested) {
+        logger.info('Sandbox exec user provisioning background retry cancelled by shutdown')
+        return
+      }
+      try {
+        await ensureSandboxExecUserProvisioned()
+        logger.info(`Sandbox exec user provisioned by the background retry (attempt ${attempt})`)
+        return
+      } catch (error) {
+        logger.warn(
+          `Sandbox exec user provisioning background retry attempt ${attempt} failed: ${error instanceof Error ? error.message : String(error)}`,
+        )
+        if (generation !== provisionRetryGeneration || shutdownRequested) return
+      }
+    }
+    logger.warn(
+      'Sandbox exec user provisioning retries were exhausted; sudo will not work inside the guest until the next boot cycle',
+    )
+  })().finally(() => {
+    if (generation === provisionRetryGeneration) {
+      backgroundProvisionRetry = null
+    }
+  })
+}
+
 async function createWorkspaceSandbox(): Promise<void> {
   await executeCommand([sandboxExecutablePath(), ...buildSandboxCreateArgs()], {
     timeout: ENV.SANDBOX.START_TIMEOUT_MS,
   })
-  await provisionSandboxExecUserPasswd()
+  await provisionSandboxExecUser()
   const attestation = await attestWorkspaceSandbox(true)
   if (!attestation.trusted) {
     throw new Error(`newly created sandbox ${WORKSPACE_SANDBOX_NAME} failed attestation: ${attestation.reason}`)
@@ -665,8 +777,15 @@ export class SandboxRuntimeService {
     if (getProcessIdentityAttestationError() !== null) return
     await cacheSandboxImage()
     await ensureWorkspaceSandbox()
-    await provisionSandboxExecUserPasswd()
-    logger.info('Workspace sandbox is running and its exec user is provisioned')
+    try {
+      await ensureSandboxExecUserProvisioned()
+      logger.info('Workspace sandbox is running and its exec user is provisioned')
+    } catch (error) {
+      logger.warn(
+        `Workspace sandbox is running but its exec user is not provisioned yet; retrying in the background: ${error instanceof Error ? error.message : String(error)}`,
+      )
+      scheduleBackgroundProvisionRetry()
+    }
   }
 
   isEnabled(): boolean {
@@ -727,6 +846,8 @@ export class SandboxRuntimeService {
 
   private async stopManagedSandbox(): Promise<void> {
     stopInProgress = true
+    provisionRetryGeneration += 1
+    backgroundProvisionRetry = null
     try {
       await this.runManagedSandboxStop()
     } finally {

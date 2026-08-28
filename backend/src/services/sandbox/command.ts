@@ -124,6 +124,27 @@ export function buildSandboxPullArgs(): string[] {
   return ['pull', ENV.SANDBOX.IMAGE]
 }
 
+export function buildSandboxPingArgs(): string[] {
+  return ['ping', WORKSPACE_SANDBOX_NAME, '-q']
+}
+
+export function buildSandboxVerifyProvisionArgs(): string[] {
+  const uid = resolveSandboxExecUserUid()
+  if (uid === null) return []
+  return [
+    'exec',
+    WORKSPACE_SANDBOX_NAME,
+    '--no-tty',
+    '-q',
+    '-u',
+    '0:0',
+    '--',
+    '/bin/sh',
+    '-c',
+    `getent passwd ${uid} >/dev/null`,
+  ]
+}
+
 export function sandboxMountRoots(): string[] {
   return [getReposPath(), getScheduleWorktreesPath()]
 }
@@ -155,6 +176,8 @@ export function buildSandboxCreateArgs(): string[] {
     getReposPath(),
     '--entrypoint',
     '/usr/bin/env',
+    '--shell',
+    '/bin/sh',
     ENV.SANDBOX.IMAGE,
     '--',
     'sleep',
@@ -314,6 +337,7 @@ function parseSandboxCreateArgs(args: string[]): {
   mountDirs: string[]
   workdir: string
   entrypoint: string[]
+  shell: string
   image: string
   cmd: string[]
 } {
@@ -325,6 +349,7 @@ function parseSandboxCreateArgs(args: string[]): {
   let user = ''
   let workdir = ''
   let entrypoint: string[] = []
+  let shell = ''
   let image = ''
   let cmd: string[] = []
   for (let i = 1; i < args.length; i++) {
@@ -351,12 +376,13 @@ function parseSandboxCreateArgs(args: string[]): {
       case '--mount-dir': if (value !== undefined) mountDirs.push(value); i += 1; break
       case '-w': workdir = value ?? ''; i += 1; break
       case '--entrypoint': if (value !== undefined) entrypoint = [value]; i += 1; break
+      case '--shell': if (value !== undefined) shell = value; i += 1; break
       case '-d': break
       default:
         if (image === '' && !token.startsWith('-')) image = token
     }
   }
-  return { name, labels, memory, cpus, user, mountDirs, workdir, entrypoint, image, cmd }
+  return { name, labels, memory, cpus, user, mountDirs, workdir, entrypoint, shell, image, cmd }
 }
 
 export function buildCanonicalSandboxSpec(): Record<string, unknown> {
@@ -392,7 +418,7 @@ export function buildCanonicalSandboxSpec(): Record<string, unknown> {
     },
     runtime: {
       workdir: args.workdir,
-      shell: null,
+      shell: args.shell,
       scripts: {},
       entrypoint: args.entrypoint,
       cmd: args.cmd,
@@ -480,8 +506,11 @@ export function buildSandboxProvisionArgs(): string[] {
     '/bin/sh',
     '-c',
     `getent group ${gid} >/dev/null 2>&1 || echo 'ocm-exec:x:${gid}:' >> /etc/group; ` +
-      `getent passwd ${uid} >/dev/null 2>&1 || echo 'ocm-exec:x:${uid}:${gid}:Manager sandbox exec user:/home/ocm-agent:/bin/sh' >> /etc/passwd; ` +
-      `grep -q '^ocm-exec:' /etc/shadow || echo 'ocm-exec:*:19000:0:99999:7:::' >> /etc/shadow`,
+      `getent passwd ${uid} >/dev/null 2>&1 || { ` +
+      `echo 'ocm-exec:x:${uid}:${gid}:Manager sandbox exec user:/home/ocm-agent:/bin/sh' >> /etc/passwd; ` +
+      `grep -q '^ocm-exec:' /etc/shadow || echo 'ocm-exec:*:19000:0:99999:7:::' >> /etc/shadow; ` +
+      `}; ` +
+      `getent passwd ${uid} >/dev/null || exit 1`,
   ]
 }
 

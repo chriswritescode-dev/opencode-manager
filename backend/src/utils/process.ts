@@ -43,7 +43,8 @@ export async function executeCommand(
     const proc: ChildProcess = spawn(command || '', cmdArgs, {
       cwd: options.cwd,
       shell: false,
-      env: effectiveEnv
+      env: effectiveEnv,
+      stdio: ['ignore', 'pipe', 'pipe'],
     })
 
     let stdout = ''

@@ -11,73 +11,37 @@ import { createOpenCodeClient } from '../../src/services/opencode/client'
 import { allMigrations } from '../../src/db/migrations'
 import { getOrCreateInternalToken } from '../../src/services/internal-token'
 import { migrate } from '../../src/db/migration-runner'
-import { resolveSandboxExecUser, resolveSandboxRuntimeTmpfsSizeMib, WORKSPACE_SANDBOX_NAME } from '../../src/services/sandbox/command'
+import {
+  buildCanonicalSandboxSpec,
+  resolveExpectedSandboxNetworkPolicy,
+  resolveSandboxRuntimeTmpfsSizeMib,
+  WORKSPACE_SANDBOX_NAME,
+} from '../../src/services/sandbox/command'
 import { executeCommand } from '../../src/utils/process'
 import { detectSandboxCapability } from '../../src/services/sandbox/capability'
-import { getReposPath, getScheduleWorktreesPath, ENV } from '@opencode-manager/shared/config/env'
+import { forceProcessAttestation } from '../../src/services/opencode/process-identity'
+import { getReposPath, ENV } from '@opencode-manager/shared/config/env'
 import type { ScheduleWorktreeManager } from '../../src/services/schedule-worktree'
 
 function trustedRunningInspect(): { exitCode: number; stdout: string; stderr: string } {
-  const memoryMatch = /^(\d+(?:\.\d+)?)([gGmM])?$/.exec(ENV.SANDBOX.MEMORY)
-  const memoryMib = memoryMatch
-    ? memoryMatch[2] === undefined || memoryMatch[2] === 'M' || memoryMatch[2] === 'm'
-      ? Math.floor(Number(memoryMatch[1]))
-      : Math.floor(Number(memoryMatch[1]) * 1024)
-    : 0
-  const bindMount = (host: string) => ({
-    type: 'Bind',
-    host,
-    guest: host,
-    options: { readonly: false, noexec: false, nosuid: false, nodev: false },
-    stat_virtualization: 'strict',
-    host_permissions: 'private',
-    follow_root_symlinks: false,
-    quota_mib: null,
-  })
+  const canonical = buildCanonicalSandboxSpec()
+  const { memory_mib: memoryMib } = canonical.resources as { memory_mib: number }
   const config = {
-    name: WORKSPACE_SANDBOX_NAME,
-    image: { Oci: { reference: ENV.SANDBOX.IMAGE, root_disk: { kind: 'managed', size_mib: 4096 } } },
-    resources: { cpus: ENV.SANDBOX.CPUS, memory_mib: memoryMib, max_cpus: ENV.SANDBOX.CPUS, max_memory_mib: memoryMib },
-    runtime: {
-      workdir: getReposPath(),
-      shell: null,
-      scripts: {},
-      entrypoint: ['/usr/bin/env'],
-      cmd: ['sleep', 'infinity'],
-      hostname: null,
-      user: resolveSandboxExecUser(),
-      log_level: null,
-      metrics_sample_interval_ms: 1000,
-      disable_metrics_sample: false,
-    },
-    env: [],
-    labels: { 'ocm.managed': 'true', 'ocm.net': ENV.SANDBOX.NET },
-    rlimits: [],
+    ...canonical,
     mounts: [
-      bindMount(getReposPath()),
-      bindMount(getScheduleWorktreesPath()),
-      { type: 'Tmpfs', guest: '/tmp', size_mib: resolveSandboxRuntimeTmpfsSizeMib(memoryMib), options: { readonly: false, noexec: false, nosuid: false, nodev: false } },
+      ...(canonical.mounts as unknown[]),
+      {
+        type: 'Tmpfs',
+        guest: '/tmp',
+        size_mib: resolveSandboxRuntimeTmpfsSizeMib(memoryMib),
+        options: { readonly: false, noexec: false, nosuid: false, nodev: false },
+      },
     ],
-    patches: [],
     network: {
       enabled: true,
       ports: [],
-      policy: {
-        default_egress: 'deny',
-        default_ingress: 'allow',
-        rules: [
-          { direction: 'egress', destination: { group: 'host' }, protocols: ['udp', 'tcp'], ports: [{ start: 53, end: 53 }], action: 'allow' },
-          { direction: 'egress', destination: { group: 'public' }, protocols: [], ports: [], action: 'allow' },
-        ],
-      },
-      max_connections: null,
-      trust_host_cas: false,
+      policy: resolveExpectedSandboxNetworkPolicy(ENV.SANDBOX.NET),
     },
-    init: null,
-    pull_policy: 'IfMissing',
-    security_profile: 'default',
-    lifecycle: { ephemeral: false, max_duration_secs: null, idle_timeout_secs: null },
-    manifest_digest: 'sha256:0000000000000000000000000000000000000000000000000000000000000000',
   }
   return {
     exitCode: 0,
@@ -120,6 +84,7 @@ describe('internal sandbox routes', () => {
     mockExecuteCommand.mockClear()
     mockDetectSandboxCapability.mockReset()
     mockDetectSandboxCapability.mockReturnValue({ available: true, msbVersion: 'msb 0.3.1' })
+    forceProcessAttestation(true)
     db = new Database(':memory:')
     migrate(db, allMigrations)
     const openCodeClient = createOpenCodeClient()
@@ -135,6 +100,7 @@ describe('internal sandbox routes', () => {
   })
 
   afterEach(() => {
+    forceProcessAttestation(null)
     db.close()
     rmSync(repoDir, { recursive: true, force: true })
   })
