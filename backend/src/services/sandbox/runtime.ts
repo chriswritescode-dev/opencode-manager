@@ -16,6 +16,7 @@ import {
   buildSandboxInspectArgs,
   buildSandboxListArgs,
   buildSandboxProvisionArgs,
+  buildSandboxPullArgs,
   buildSandboxRemoveArgs,
   buildSandboxStartArgs,
   buildSandboxStopManagedArgs,
@@ -542,6 +543,14 @@ async function attestWorkspaceSandbox(running: boolean): Promise<SandboxAttestat
   return await attestWorkspaceSandboxConfig(outcome.record.config)
 }
 
+async function cacheSandboxImage(): Promise<void> {
+  logger.info(`Caching the sandbox guest image ${ENV.SANDBOX.IMAGE}`)
+  await executeCommand([sandboxExecutablePath(), ...buildSandboxPullArgs()], {
+    timeout: ENV.SANDBOX.START_TIMEOUT_MS,
+  })
+  logger.info(`Sandbox guest image ${ENV.SANDBOX.IMAGE} is cached`)
+}
+
 async function provisionSandboxExecUserPasswd(): Promise<void> {
   const provisionArgs = buildSandboxProvisionArgs()
   if (provisionArgs.length === 0) {
@@ -649,11 +658,12 @@ async function startWorkspaceSandbox(): Promise<void> {
 export class SandboxRuntimeService {
   constructor(private readonly db: Database) {}
 
-  async provisionWorkspaceSandboxOnBoot(): Promise<void> {
+  async prepareWorkspaceSandboxOnBoot(): Promise<void> {
     if (!this.isSandboxEnabled()) return
     const capability = detectSandboxCapability()
     if (!capability.available) return
     if (getProcessIdentityAttestationError() !== null) return
+    await cacheSandboxImage()
     if (buildSandboxProvisionArgs().length === 0) return
     const entry = findWorkspaceSandboxEntry(await listSandboxes())
     if (entry === null || !entry.running) return

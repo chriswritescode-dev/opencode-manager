@@ -414,6 +414,11 @@ class OpenCodeServerManager {
           this.failNonRecoverable(`Failed to stop the workspace sandbox while disabling enforcement: ${error instanceof Error ? error.message : String(error)}`)
         }
       }
+      if (sandboxEnforced && !this.sandboxEnforced) {
+        void new SandboxRuntimeService(this.db).prepareWorkspaceSandboxOnBoot().catch((error) => {
+          logger.warn('Sandbox enforcement enabled but preparing the guest image failed:', error)
+        })
+      }
       logger.info(`OpenCode sandbox enforcement: ${sandboxEnforced ? 'enabled' : 'disabled'}`)
     }
 

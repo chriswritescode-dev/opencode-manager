@@ -13,6 +13,7 @@ import {
   buildSandboxInspectArgs,
   buildSandboxListArgs,
   buildSandboxProvisionArgs,
+  buildSandboxPullArgs,
   buildSandboxRemoveArgs,
   buildSandboxStartArgs,
   buildSandboxStopManagedArgs,
@@ -34,6 +35,10 @@ afterEach(() => {
 describe('sandbox command builders', () => {
   it('builds the version probe as exactly --version', () => {
     expect(buildSandboxVersionArgs()).toEqual(['--version'])
+  })
+
+  it('builds pull args for the configured guest image', () => {
+    expect(buildSandboxPullArgs()).toEqual(['pull', ENV.SANDBOX.IMAGE])
   })
 
   it('builds inspect args targeting the shared workspace sandbox with JSON output', () => {

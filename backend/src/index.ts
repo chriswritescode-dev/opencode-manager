@@ -296,11 +296,9 @@ try {
 
   opencodeServerManager.setDatabase(db)
   detectSandboxCapability()
-  try {
-    await new SandboxRuntimeService(db).provisionWorkspaceSandboxOnBoot()
-  } catch (error) {
-    logger.warn('Workspace sandbox provisioning skipped:', error)
-  }
+  void new SandboxRuntimeService(db).prepareWorkspaceSandboxOnBoot().catch((error) => {
+    logger.warn('Workspace sandbox preparation failed:', error)
+  })
   const openCodeStatus = await openCodeSupervisor.start()
   if (openCodeStatus.healthy) {
     logger.info(`OpenCode server running on port ${openCodeStatus.port}`)

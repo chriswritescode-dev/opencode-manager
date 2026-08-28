@@ -351,7 +351,7 @@ describe('SandboxRuntimeService', () => {
       return { exitCode: 0, stdout: '', stderr: '' }
     })
 
-    await service.provisionWorkspaceSandboxOnBoot()
+    await service.prepareWorkspaceSandboxOnBoot()
 
     const provisionCall = mockExecuteCommand.mock.calls.find((call) => call[0].includes('exec'))
     expect(provisionCall).toBeDefined()
@@ -364,7 +364,7 @@ describe('SandboxRuntimeService', () => {
       throw new Error('msb must not be invoked when sandboxing is disabled')
     })
 
-    await service.provisionWorkspaceSandboxOnBoot()
+    await service.prepareWorkspaceSandboxOnBoot()
 
     expect(mockExecuteCommand).not.toHaveBeenCalled()
   })
@@ -378,9 +378,51 @@ describe('SandboxRuntimeService', () => {
       return { exitCode: 0, stdout: '', stderr: '' }
     })
 
-    await service.provisionWorkspaceSandboxOnBoot()
+    await service.prepareWorkspaceSandboxOnBoot()
 
     expect(mockExecuteCommand.mock.calls.filter((call) => call[0].includes('exec'))).toHaveLength(0)
+  })
+
+  it('caches the guest image at boot before touching the microVM', async () => {
+    enableEnforcement()
+    mockExecuteCommand.mockImplementation(async (args: string[]) => {
+      if (args.includes('ls')) {
+        return { exitCode: 0, stdout: stoppedListingOutput(), stderr: '' }
+      }
+      return { exitCode: 0, stdout: '', stderr: '' }
+    })
+
+    await service.prepareWorkspaceSandboxOnBoot()
+
+    expect(mockExecuteCommand).toHaveBeenCalledWith(
+      [sandboxExecutablePath(), 'pull', ENV.SANDBOX.IMAGE],
+      expect.objectContaining({ timeout: ENV.SANDBOX.START_TIMEOUT_MS }),
+    )
+    const pullIndex = mockExecuteCommand.mock.calls.findIndex((call) => call[0].includes('pull'))
+    const listIndex = mockExecuteCommand.mock.calls.findIndex((call) => call[0].includes('ls'))
+    expect(pullIndex).toBeGreaterThanOrEqual(0)
+    expect(pullIndex).toBeLessThan(listIndex)
+  })
+
+  it('never pulls the guest image at boot when the sandbox preference is off', async () => {
+    mockExecuteCommand.mockImplementation(async () => ({ exitCode: 0, stdout: '', stderr: '' }))
+
+    await service.prepareWorkspaceSandboxOnBoot()
+
+    expect(mockExecuteCommand.mock.calls.filter((call) => call[0].includes('pull'))).toHaveLength(0)
+  })
+
+  it('surfaces a failed boot image pull to the caller', async () => {
+    enableEnforcement()
+    mockExecuteCommand.mockImplementation(async (args: string[]) => {
+      if (args.includes('pull')) {
+        throw new Error('msb pull failed: registry unreachable')
+      }
+      return { exitCode: 0, stdout: '', stderr: '' }
+    })
+
+    await expect(service.prepareWorkspaceSandboxOnBoot()).rejects.toThrow('registry unreachable')
+    expect(mockExecuteCommand.mock.calls.filter((call) => call[0].includes('ls'))).toHaveLength(0)
   })
 
   it('returns blocked with the start stderr when a stopped sandbox fails to start', async () => {

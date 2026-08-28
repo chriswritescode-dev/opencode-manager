@@ -120,6 +120,10 @@ export function buildSandboxVersionArgs(): string[] {
   return ['--version']
 }
 
+export function buildSandboxPullArgs(): string[] {
+  return ['pull', ENV.SANDBOX.IMAGE]
+}
+
 export function sandboxMountRoots(): string[] {
   return [getReposPath(), getScheduleWorktreesPath()]
 }

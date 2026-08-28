@@ -104,11 +104,17 @@ const sandboxRuntimeServiceMock = vi.hoisted(() => ({
   SandboxRuntimeService: vi.fn<() => {
     isEnabled: () => boolean
     stopWorkspaceSandboxForToggle?: () => Promise<void>
+    prepareWorkspaceSandboxOnBoot?: () => Promise<void>
   }>(() => ({ isEnabled: () => false })),
 }))
 
 vi.mock('../../src/services/sandbox/runtime', () => ({
-  SandboxRuntimeService: sandboxRuntimeServiceMock.SandboxRuntimeService,
+  SandboxRuntimeService: function SandboxRuntimeServiceStub() {
+    return {
+      prepareWorkspaceSandboxOnBoot: async () => undefined,
+      ...sandboxRuntimeServiceMock.SandboxRuntimeService(),
+    }
+  },
 }))
 
 import { promises as fs, accessSync, readdirSync } from 'fs'
