@@ -73,15 +73,18 @@ RUN echo "Installing playwright=${PLAYWRIGHT_VERSION} chromium (cachebust=${TOOL
 # /usr/local/lib/node_modules for the NODE_PATH fallback above to work.
 ENV npm_config_prefix=/opt/agent-tools
 
-# The exec user is an unknown numeric uid, so verify as uid 1000 (also absent
-# from /etc/passwd) instead of root. A root-only check would not catch the
-# EACCES failures this image exists to prevent.
-RUN echo "Verifying guest toolchain as an unprivileged uid (cachebust=${TOOLS_CACHEBUST})" && \
+# The runtime exec user is a numeric host uid with no /etc/passwd entry, so the
+# toolchain is verified as uid 4242, which is absent from this image's passwd
+# database. uid 1000 would not do: it is the base image's `node` user, so it
+# would exercise the known-user path and pass even if the real one were broken.
+# sudo is checked separately as that known user, because sudo refuses unknown
+# uids by design and the Manager provisions their passwd entry at runtime.
+RUN echo "Verifying guest toolchain as an unknown uid (cachebust=${TOOLS_CACHEBUST})" && \
     rm -rf /home/ocm-agent && \
     mkdir -p /home/ocm-agent && \
     chmod 1777 /home/ocm-agent && \
-    setpriv --reuid=1000 --regid=1000 --clear-groups sh -c "set -e; pnpm --version; bun --version; bunx --version; uv --version; uvx --version; playwright --version; gh --version; jq --version; rg --version; npm install -g --silent cowsay && cowsay -t verify-ok | head -1; sudo -n apt-get update -qq && sudo -n apt-get install -y -qq --no-install-recommends bc && bc --version | head -1; uv venv /tmp/uv-check >/dev/null; uv pip install --python /tmp/uv-check/bin/python idna >/dev/null; pip3 install --user --force-reinstall --no-deps --quiet idna; rm -rf /tmp/uv-check" && \
-    npm uninstall -g --silent cowsay && \
+    setpriv --reuid=4242 --regid=4242 --clear-groups sh -c "set -e; pnpm --version; bun --version; bunx --version; uv --version; uvx --version; playwright --version; gh --version; jq --version; rg --version; npm install -g --silent cowsay && cowsay -t verify-ok | head -1; git config --global user.email verify@ocm.local; uv venv /tmp/uv-check >/dev/null; uv pip install --python /tmp/uv-check/bin/python idna >/dev/null; pip3 install --user --force-reinstall --no-deps --quiet idna; rm -rf /tmp/uv-check" && \
+    setpriv --reuid=1000 --regid=1000 --clear-groups sh -c "set -e; sudo -n apt-get update -qq; sudo -n apt-get install -y -qq --no-install-recommends bc; bc --version | head -1" && \
     rm -rf /home/ocm-agent /opt/agent-tools /var/lib/apt/lists/* && \
     mkdir -p /home/ocm-agent /opt/agent-tools/bin && \
     chmod 1777 /home/ocm-agent /opt/agent-tools /opt/agent-tools/bin

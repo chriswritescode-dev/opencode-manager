@@ -489,8 +489,10 @@ export function buildSandboxProvisionArgs(): string[] {
     '/bin/sh',
     '-c',
     `getent group ${gid} >/dev/null 2>&1 || echo 'ocm-exec:x:${gid}:' >> /etc/group; ` +
-      `getent passwd ${uid} >/dev/null 2>&1 || echo 'ocm-exec:x:${uid}:${gid}:Manager sandbox exec user:/home/ocm-agent:/bin/sh' >> /etc/passwd; ` +
+      `getent passwd ${uid} >/dev/null 2>&1 || { ` +
+      `echo 'ocm-exec:x:${uid}:${gid}:Manager sandbox exec user:/home/ocm-agent:/bin/sh' >> /etc/passwd; ` +
       `grep -q '^ocm-exec:' /etc/shadow || echo 'ocm-exec:*:19000:0:99999:7:::' >> /etc/shadow; ` +
+      `}; ` +
       `getent passwd ${uid} >/dev/null || exit 1`,
   ]
 }

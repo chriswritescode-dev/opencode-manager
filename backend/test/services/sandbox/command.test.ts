@@ -269,9 +269,9 @@ describe('sandbox command builders', () => {
     const script = args[args.indexOf('-c') + 1]
     expect(script).toContain("getent group 1002 >/dev/null 2>&1 || echo 'ocm-exec:x:1002:' >> /etc/group")
     expect(script).toContain(
-      "getent passwd 1001 >/dev/null 2>&1 || echo 'ocm-exec:x:1001:1002:Manager sandbox exec user:/home/ocm-agent:/bin/sh' >> /etc/passwd",
+      "getent passwd 1001 >/dev/null 2>&1 || { echo 'ocm-exec:x:1001:1002:Manager sandbox exec user:/home/ocm-agent:/bin/sh' >> /etc/passwd; grep -q '^ocm-exec:' /etc/shadow || echo 'ocm-exec:*:19000:0:99999:7:::' >> /etc/shadow; }",
     )
-    expect(script).toContain("grep -q '^ocm-exec:' /etc/shadow || echo 'ocm-exec:*:19000:0:99999:7:::' >> /etc/shadow")
+    expect(script).toContain('getent passwd 1001 >/dev/null || exit 1')
     expect(script).toContain('getent passwd 1001 >/dev/null || exit 1')
   })
 
