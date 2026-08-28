@@ -52,7 +52,7 @@ import { ScheduleWorktreeManager } from './services/schedule-worktree'
 import { migrateGlobalSkills } from './services/skills'
 import { installAssistantWorkspace } from './services/assistant-mode'
 import { detectSandboxCapability } from './services/sandbox/capability'
-import { stopWorkspaceSandboxOnShutdown } from './services/sandbox/runtime'
+import { SandboxRuntimeService, stopWorkspaceSandboxOnShutdown } from './services/sandbox/runtime'
 import { getOpenCodeImportStatus, syncOpenCodeImport } from './services/opencode-import'
 import { OpenCodeSupervisor } from './services/opencode-supervisor'
 import { OpenCodeRestartCoordinator } from './services/opencode-restart-coordinator'
@@ -296,6 +296,11 @@ try {
 
   opencodeServerManager.setDatabase(db)
   detectSandboxCapability()
+  try {
+    await new SandboxRuntimeService(db).provisionWorkspaceSandboxOnBoot()
+  } catch (error) {
+    logger.warn('Workspace sandbox provisioning skipped:', error)
+  }
   const openCodeStatus = await openCodeSupervisor.start()
   if (openCodeStatus.healthy) {
     logger.info(`OpenCode server running on port ${openCodeStatus.port}`)

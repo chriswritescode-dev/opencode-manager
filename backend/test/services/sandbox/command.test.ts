@@ -12,6 +12,7 @@ import {
   buildSandboxCreateArgs,
   buildSandboxInspectArgs,
   buildSandboxListArgs,
+  buildSandboxProvisionArgs,
   buildSandboxRemoveArgs,
   buildSandboxStartArgs,
   buildSandboxStopManagedArgs,
@@ -19,6 +20,7 @@ import {
   quoteForShell,
   resolveExpectedSandboxNetworkPolicy,
   resolveSandboxExecUser,
+  resolveSandboxExecUserGid,
   resolveSandboxExecUserUid,
   resolveSandboxRuntimeTmpfsSizeMib,
   sandboxMountRoots,
@@ -245,6 +247,33 @@ describe('sandbox command builders', () => {
 
     expect(resolveSandboxExecUser()).toBe('1001:1002')
     expect(resolveSandboxExecUserUid()).toBe(1001)
+    expect(resolveSandboxExecUserGid()).toBe(1002)
+  })
+
+  it('builds provisioning args that add the exec user passwd entry as root', () => {
+    const proc = process as unknown as { getuid: () => number; getgid: () => number }
+    vi.spyOn(proc, 'getuid').mockReturnValue(1001)
+    vi.spyOn(proc, 'getgid').mockReturnValue(1002)
+
+    const args = buildSandboxProvisionArgs()
+
+    expect(args[0]).toBe('exec')
+    expect(args).toContain(WORKSPACE_SANDBOX_NAME)
+    expect(args[args.indexOf('-u') + 1]).toBe('0:0')
+    const script = args[args.indexOf('-c') + 1]
+    expect(script).toContain("getent group 1002 >/dev/null 2>&1 || echo 'ocm-exec:x:1002:' >> /etc/group")
+    expect(script).toContain(
+      "getent passwd 1001 >/dev/null 2>&1 || echo 'ocm-exec:x:1001:1002:Manager sandbox exec user:/home/ocm-agent:/bin/sh' >> /etc/passwd",
+    )
+    expect(script).toContain("grep -q '^ocm-exec:' /etc/shadow || echo 'ocm-exec:*:19000:0:99999:7:::' >> /etc/shadow")
+  })
+
+  it('returns no provisioning args when the exec user does not resolve to numeric uid and gid', () => {
+    const proc = process as unknown as { getuid: () => number | undefined; getgid: () => number | undefined }
+    vi.spyOn(proc, 'getuid').mockReturnValue(undefined)
+    vi.spyOn(proc, 'getgid').mockReturnValue(undefined)
+
+    expect(buildSandboxProvisionArgs()).toEqual([])
   })
 
   it('aligns a numeric exec user with the manager gid', async () => {

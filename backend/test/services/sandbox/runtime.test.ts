@@ -52,6 +52,7 @@ describe('SandboxRuntimeService', () => {
   beforeEach(() => {
     vi.resetAllMocks()
     resetSandboxRuntimeState()
+    forceProcessAttestation(true)
     db = new Database(':memory:')
     migrate(db, allMigrations)
     settingsService = new SettingsService(db)
@@ -310,6 +311,78 @@ describe('SandboxRuntimeService', () => {
     expect(mockExecuteCommand.mock.calls.filter((call) => call[0].includes('inspect'))).toHaveLength(2)
   })
 
+  it('provisions the exec user passwd entry after starting a stopped sandbox', async () => {
+    enableEnforcement()
+    let inspectCalls = 0
+    mockExecuteCommand.mockImplementation(async (args: string[]) => {
+      if (args.includes('ls')) {
+        return { exitCode: 0, stdout: stoppedListingOutput(), stderr: '' }
+      }
+      if (args.includes('inspect')) {
+        inspectCalls += 1
+        if (inspectCalls === 1) {
+          return { exitCode: 0, stdout: trustedInspectOutput(), stderr: '' }
+        }
+        return inspectedRunningSandbox()
+      }
+      return { exitCode: 0, stdout: '', stderr: '' }
+    })
+
+    const plan = await service.planShell(repoADir)
+
+    expect(plan).toEqual({ mode: 'sandbox', workdir: repoADir })
+    const provisionCall = mockExecuteCommand.mock.calls.find((call) => call[0].includes('exec'))
+    expect(provisionCall).toBeDefined()
+    const provisionArgs = provisionCall![0]
+    expect(provisionArgs[provisionArgs.indexOf('-u') + 1]).toBe('0:0')
+    expect(provisionArgs.join(' ')).toContain('getent passwd')
+  })
+
+  it('provisions a running workspace sandbox once at boot when enforcement is on', async () => {
+    enableEnforcement()
+    mockExecuteCommand.mockImplementation(async (args: string[]) => {
+      if (args.includes('ls')) {
+        return {
+          exitCode: 0,
+          stdout: JSON.stringify([{ name: WORKSPACE_SANDBOX_NAME, status: 'running' }]),
+          stderr: '',
+        }
+      }
+      return { exitCode: 0, stdout: '', stderr: '' }
+    })
+
+    await service.provisionWorkspaceSandboxOnBoot()
+
+    const provisionCall = mockExecuteCommand.mock.calls.find((call) => call[0].includes('exec'))
+    expect(provisionCall).toBeDefined()
+    const provisionArgs = provisionCall![0]
+    expect(provisionArgs[provisionArgs.indexOf('-u') + 1]).toBe('0:0')
+  })
+
+  it('skips boot provisioning when the sandbox preference is off', async () => {
+    mockExecuteCommand.mockImplementation(async () => {
+      throw new Error('msb must not be invoked when sandboxing is disabled')
+    })
+
+    await service.provisionWorkspaceSandboxOnBoot()
+
+    expect(mockExecuteCommand).not.toHaveBeenCalled()
+  })
+
+  it('skips boot provisioning when the workspace sandbox is not running', async () => {
+    enableEnforcement()
+    mockExecuteCommand.mockImplementation(async (args: string[]) => {
+      if (args.includes('ls')) {
+        return { exitCode: 0, stdout: stoppedListingOutput(), stderr: '' }
+      }
+      return { exitCode: 0, stdout: '', stderr: '' }
+    })
+
+    await service.provisionWorkspaceSandboxOnBoot()
+
+    expect(mockExecuteCommand.mock.calls.filter((call) => call[0].includes('exec'))).toHaveLength(0)
+  })
+
   it('returns blocked with the start stderr when a stopped sandbox fails to start', async () => {
     enableEnforcement()
     mockExecuteCommand.mockImplementation(async (args: string[]) => {
@@ -342,6 +415,7 @@ describe('SandboxRuntimeService', () => {
         stdout: JSON.stringify([{ name: WORKSPACE_SANDBOX_NAME, status: 'running' }]),
         stderr: '',
       })
+      .mockResolvedValueOnce({ exitCode: 0, stdout: '', stderr: '' })
       .mockResolvedValueOnce(inspectedRunningSandbox())
 
     const directory = repoADir
@@ -392,6 +466,34 @@ describe('SandboxRuntimeService', () => {
     expect(mockExecuteCommand.mock.calls.filter((call) => call[0].includes('rm'))).toHaveLength(1)
     expect(mockExecuteCommand.mock.calls.filter((call) => call[0].includes('run'))).toHaveLength(1)
     expect(logger.warn).toHaveBeenCalledWith(expect.stringContaining('failed running attestation'))
+  })
+
+  it('provisions the exec user passwd entry over a root exec after creating the sandbox', async () => {
+    enableEnforcement()
+    let inspectCalls = 0
+    mockExecuteCommand.mockImplementation(async (args: string[]) => {
+      if (args.includes('inspect')) {
+        inspectCalls += 1
+        if (inspectCalls === 1) {
+          return { exitCode: 1, stdout: '', stderr: 'no such sandbox' }
+        }
+        return { exitCode: 0, stdout: runningInspectOutput(realInspectConfig()), stderr: '' }
+      }
+      return { exitCode: 0, stdout: '[]', stderr: '' }
+    })
+
+    const plan = await service.planShell(repoADir)
+
+    expect(plan).toEqual({ mode: 'sandbox', workdir: repoADir })
+    expect(mockExecuteCommand.mock.calls.filter((call) => call[0].includes('run'))).toHaveLength(1)
+    const provisionCall = mockExecuteCommand.mock.calls.find((call) => call[0].includes('exec'))
+    expect(provisionCall).toBeDefined()
+    const provisionArgs = provisionCall![0]
+    expect(provisionArgs[provisionArgs.indexOf('-u') + 1]).toBe('0:0')
+    const provisionScript = provisionArgs.join(' ')
+    expect(provisionScript).toContain('getent group')
+    expect(provisionScript).toContain('getent passwd')
+    expect(provisionScript).toContain('/home/ocm-agent')
   })
 
   it('blocks a signal-terminated start and never caches the sandbox as running without proof', async () => {
@@ -2240,6 +2342,7 @@ describe('SandboxRuntimeService', () => {
       .mockRejectedValueOnce(new Error('Command failed with code 1: no KVM acceleration available'))
       .mockResolvedValueOnce({ exitCode: 0, stdout: '[]', stderr: '' })
       .mockResolvedValueOnce({ exitCode: 0, stdout: '[]', stderr: '' })
+      .mockResolvedValueOnce({ exitCode: 0, stdout: '', stderr: '' })
       .mockResolvedValueOnce({ exitCode: 0, stdout: '', stderr: '' })
       .mockResolvedValueOnce(inspectedRunningSandbox())
 

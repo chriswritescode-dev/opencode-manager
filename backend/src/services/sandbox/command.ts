@@ -455,3 +455,29 @@ export function resolveSandboxExecUserUid(): number | null {
   return Number(uid)
 }
 
+export function resolveSandboxExecUserGid(): number | null {
+  const gid = resolveSandboxExecUser().split(':')[1]
+  if (gid === undefined || !/^\d+$/.test(gid)) return null
+  return Number(gid)
+}
+
+export function buildSandboxProvisionArgs(): string[] {
+  const uid = resolveSandboxExecUserUid()
+  const gid = resolveSandboxExecUserGid()
+  if (uid === null || gid === null) return []
+  return [
+    'exec',
+    WORKSPACE_SANDBOX_NAME,
+    '--no-tty',
+    '-q',
+    '-u',
+    '0:0',
+    '--',
+    '/bin/sh',
+    '-c',
+    `getent group ${gid} >/dev/null 2>&1 || echo 'ocm-exec:x:${gid}:' >> /etc/group; ` +
+      `getent passwd ${uid} >/dev/null 2>&1 || echo 'ocm-exec:x:${uid}:${gid}:Manager sandbox exec user:/home/ocm-agent:/bin/sh' >> /etc/passwd; ` +
+      `grep -q '^ocm-exec:' /etc/shadow || echo 'ocm-exec:*:19000:0:99999:7:::' >> /etc/shadow`,
+  ]
+}
+

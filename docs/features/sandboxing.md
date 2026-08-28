@@ -163,15 +163,21 @@ It is `node:24` (Debian 12, `buildpack-deps` based), so the compile toolchain is
 | `gcc` / `g++` / `make` / `ld` / `pkg-config` | `node:24` | GCC 12.2, GNU Make 4.3 |
 | `glib-2.0` | `node:24` | 2.74.6, with `pkg-config` metadata |
 | `git`, `ssh`, `python3`, `curl`, `unzip` | `node:24` | git 2.39.5 |
-| `pnpm` | corepack | Activated at build time; a project `packageManager` pin still wins |
-| `bun` | official installer | Installed to `/opt/bun`, world-readable, symlinked onto `PATH` |
-| `uv`, `uvx` | Astral installer | Standalone binaries on `PATH` |
-| `pip`, `venv` | apt | `python3-pip` and `python3-venv` on top of the base `python3` |
+| `pnpm` | corepack | Prewarmed into a shared, writable `COREPACK_HOME` (`/usr/local/share/corepack`), so the exec user runs the build-time version offline. A project `packageManager` pin of a different version downloads on first use |
+| `bun`, `bunx` | official installer | Installed to `/opt/bun`, world-readable, both symlinked onto `PATH` |
+| `uv`, `uvx` | Astral installer | Standalone binaries on `PATH`; `uv tool` shims land in `/opt/agent-tools/bin`, which is on `PATH` |
+| `npm -g`, `pnpm -g` | npm / corepack | Global installs redirect to `/opt/agent-tools` (`npm_config_prefix`, `PNPM_HOME`), so they are writable for the exec user and their binaries are on `PATH` |
+| `sudo` | apt | Passwordless for every guest user via `/etc/sudoers.d/ocm-guest`; system-wide `apt-get install` works from the exec user |
+| `pip`, `venv` | apt | `python3-pip` and `python3-venv` on top of the base `python3`. Debian's externally-managed marker is removed, so `pip` and `uv pip --system` are not refused; system-wide writes still need `sudo`, so use `--user` or a venv |
 | `jq`, `ripgrep`, `less`, `tree`, `file`, `procps` | apt | Common CLI tools agent workflows expect |
 | `gh` | official `cli.github.com` apt repo | Current release. Debian's own package is several years stale |
 | Chromium | Playwright (`PLAYWRIGHT_VERSION`, default `1.56.0`) | Installed to `PLAYWRIGHT_BROWSERS_PATH=/ms-playwright`, world-readable so `SANDBOX_EXEC_USER` can launch it |
 
 `NODE_PATH=/usr/local/lib/node_modules` is set so agent code can `require("playwright")` from any working directory. It is only a resolution fallback; a project-local `node_modules` still wins.
+
+The guest runs every command as a numeric host uid that has no `/etc/passwd` entry in the image, so the uncorrected default `HOME` is `/` and anything that writes per-user state — the pnpm store, uv and pip caches, `git config`, `gh` config — dies with `EACCES` on the first run. The image therefore sets `HOME=/home/ocm-agent` (mode 1777), prewarms corepack into a world-readable `COREPACK_HOME`, and puts a world-writable `/opt/agent-tools/bin` on `PATH` for `uv tool` and global package-manager installs. Image `ENV` reaches `msb exec` commands verbatim, including for unknown uids. The image build verifies the whole toolchain as an unprivileged uid so a root-only regression fails the build instead of the agent.
+
+`sudo` also needs the exec user to exist in the guest, which the image cannot know at build time. The Manager provisions the `/etc/passwd`, `/etc/group`, and `/etc/shadow` entries for the exec uid through an idempotent root exec (verified by `getent`, so repeats are no-ops) at three points: when the workspace sandbox is created, when a stopped sandbox is started, and once at Manager startup for a sandbox that is already running. Without the entries, `sudo` refuses with "you do not exist in the passwd database" or a PAM "account validation failure". Only a sandbox created before this mechanism existed and never started again slips through; remove it once with `msb rm -f ocm-workspace` to pick up sudo and the fixed toolchain.
 
 Chromium launches headless as the non-root exec user without extra flags. If your host kernel restricts user namespaces so Chromium's own sandbox fails, pass `--no-sandbox` — the microVM is already the isolation boundary.
 

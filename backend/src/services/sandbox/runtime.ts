@@ -15,6 +15,7 @@ import {
   buildSandboxCreateArgs,
   buildSandboxInspectArgs,
   buildSandboxListArgs,
+  buildSandboxProvisionArgs,
   buildSandboxRemoveArgs,
   buildSandboxStartArgs,
   buildSandboxStopManagedArgs,
@@ -29,6 +30,8 @@ import {
 const SANDBOX_LS_CACHE_MS = 5000
 const SANDBOX_LS_TIMEOUT_MS = 15000
 const SANDBOX_STOP_TIMEOUT_MS = 30000
+const SANDBOX_PROVISION_ATTEMPTS = 3
+const SANDBOX_PROVISION_RETRY_DELAY_MS = 2000
 const SANDBOX_RUNTIME_TMPFS_GUEST = path.resolve('/tmp')
 
 export type SandboxShellPlan =
@@ -129,6 +132,7 @@ async function bootWorkspaceSandbox(): Promise<void> {
           await createWorkspaceSandbox()
         } else {
           await startWorkspaceSandbox()
+          await provisionSandboxExecUserPasswd()
           const runningAttestation = await attestWorkspaceSandbox(true)
           if (!runningAttestation.trusted) {
             logger.warn(
@@ -161,6 +165,7 @@ async function bootWorkspaceSandboxFromListing(): Promise<void> {
       await createWorkspaceSandbox()
     } else if (!entry.running) {
       await startWorkspaceSandbox()
+      await provisionSandboxExecUserPasswd()
       const runningAttestation = await attestWorkspaceSandbox(true)
       if (!runningAttestation.trusted) {
         logger.warn(
@@ -537,10 +542,35 @@ async function attestWorkspaceSandbox(running: boolean): Promise<SandboxAttestat
   return await attestWorkspaceSandboxConfig(outcome.record.config)
 }
 
+async function provisionSandboxExecUserPasswd(): Promise<void> {
+  const provisionArgs = buildSandboxProvisionArgs()
+  if (provisionArgs.length === 0) {
+    return
+  }
+  let lastError: unknown = null
+  for (let attempt = 0; attempt < SANDBOX_PROVISION_ATTEMPTS; attempt++) {
+    if (attempt > 0) {
+      await new Promise((resolve) => setTimeout(resolve, SANDBOX_PROVISION_RETRY_DELAY_MS))
+    }
+    try {
+      await executeCommand([sandboxExecutablePath(), ...provisionArgs], {
+        timeout: SANDBOX_LS_TIMEOUT_MS,
+      })
+      return
+    } catch (error) {
+      lastError = error
+    }
+  }
+  throw new Error(
+    `provisioning the sandbox exec user passwd entry failed: ${lastError instanceof Error ? lastError.message : String(lastError)}`,
+  )
+}
+
 async function createWorkspaceSandbox(): Promise<void> {
   await executeCommand([sandboxExecutablePath(), ...buildSandboxCreateArgs()], {
     timeout: ENV.SANDBOX.START_TIMEOUT_MS,
   })
+  await provisionSandboxExecUserPasswd()
   const attestation = await attestWorkspaceSandbox(true)
   if (!attestation.trusted) {
     throw new Error(`newly created sandbox ${WORKSPACE_SANDBOX_NAME} failed attestation: ${attestation.reason}`)
@@ -618,6 +648,18 @@ async function startWorkspaceSandbox(): Promise<void> {
 
 export class SandboxRuntimeService {
   constructor(private readonly db: Database) {}
+
+  async provisionWorkspaceSandboxOnBoot(): Promise<void> {
+    if (!this.isSandboxEnabled()) return
+    const capability = detectSandboxCapability()
+    if (!capability.available) return
+    if (getProcessIdentityAttestationError() !== null) return
+    if (buildSandboxProvisionArgs().length === 0) return
+    const entry = findWorkspaceSandboxEntry(await listSandboxes())
+    if (entry === null || !entry.running) return
+    await provisionSandboxExecUserPasswd()
+    logger.info('Provisioned the workspace sandbox exec user passwd entry')
+  }
 
   isEnabled(): boolean {
     return this.isSandboxEnabled()

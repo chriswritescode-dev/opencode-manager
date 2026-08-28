@@ -7,8 +7,8 @@
 FROM node:24
 
 ARG PLAYWRIGHT_VERSION=1.56.0
-# Bump TOOLS_CACHEBUST (e.g. via --build-arg) to force a fresh gh/Playwright
-# install without invalidating the rest of the build cache.
+# Bump TOOLS_CACHEBUST (e.g. via --build-arg) to force a fresh tool install
+# without invalidating the rest of the build cache.
 ARG TOOLS_CACHEBUST=0
 
 # Shared browser location so the sandbox exec user (SANDBOX_EXEC_USER, default
@@ -17,11 +17,21 @@ ENV PLAYWRIGHT_BROWSERS_PATH=/ms-playwright
 # Lets agent code `require("playwright")` from any working directory without a
 # project-local install. Only a resolution fallback; local node_modules wins.
 ENV NODE_PATH=/usr/local/lib/node_modules
+# msb exec runs commands as a numeric host uid with no /etc/passwd entry, so
+# the guest defaults to HOME=/ and every tool that writes per-user state (uv
+# and pip caches, git config, gh config, the pnpm store) fails with EACCES.
+# Point HOME at a sticky world-writable directory and give corepack a shared
+# prewarmed cache so the preinstalled pnpm resolves without network or root.
+ENV HOME=/home/ocm-agent
+ENV COREPACK_HOME=/usr/local/share/corepack
+ENV UV_TOOL_BIN_DIR=/opt/agent-tools/bin
+ENV PNPM_HOME=/opt/agent-tools
+ENV PATH=/opt/agent-tools/bin:$PATH
 
 RUN echo "Installing gh and CLI tooling (cachebust=${TOOLS_CACHEBUST})" && \
     apt-get update && \
     apt-get install -y --no-install-recommends \
-        ca-certificates curl gh jq less ripgrep tree file procps \
+        ca-certificates curl gh jq less ripgrep sudo tree file procps \
         python3-pip python3-venv && \
     curl -fsSL https://cli.github.com/packages/githubcli-archive-keyring.gpg \
         -o /usr/share/keyrings/githubcli-archive-keyring.gpg && \
@@ -31,19 +41,24 @@ RUN echo "Installing gh and CLI tooling (cachebust=${TOOLS_CACHEBUST})" && \
     apt-get update && \
     apt-get install -y --no-install-recommends gh && \
     rm -rf /var/lib/apt/lists/* && \
+    rm -f /usr/lib/python3*/EXTERNALLY-MANAGED && \
+    printf 'Defaults env_keep += "npm_config_prefix"\nALL ALL=(ALL:ALL) NOPASSWD:ALL\n' \
+        > /etc/sudoers.d/ocm-guest && \
+    chmod 440 /etc/sudoers.d/ocm-guest && \
+    visudo -c && \
     gh --version
 
 RUN echo "Installing pnpm, bun and uv (cachebust=${TOOLS_CACHEBUST})" && \
+    mkdir -p /home/ocm-agent /opt/agent-tools/bin /usr/local/share/corepack && \
+    chmod 1777 /home/ocm-agent /opt/agent-tools /opt/agent-tools/bin /usr/local/share/corepack && \
     corepack enable && corepack prepare pnpm@latest --activate && \
-    curl -fsSL https://bun.sh/install | bash && \
-    mv /root/.bun /opt/bun && \
+    curl -fsSL https://bun.sh/install | BUN_INSTALL=/opt/bun bash && \
     chmod -R a+rX /opt/bun && \
+    ln -sf /opt/bun/bin/bun /opt/bun/bin/bunx && \
     ln -s /opt/bun/bin/bun /usr/local/bin/bun && \
-    curl -LsSf https://astral.sh/uv/install.sh | UV_NO_MODIFY_PATH=1 sh && \
-    mv /root/.local/bin/uv /usr/local/bin/uv && \
-    mv /root/.local/bin/uvx /usr/local/bin/uvx && \
-    chmod +x /usr/local/bin/uv /usr/local/bin/uvx && \
-    rm -rf /root/.npm /root/.cache/uv && \
+    ln -s /opt/bun/bin/bun /usr/local/bin/bunx && \
+    curl -LsSf https://astral.sh/uv/install.sh | UV_INSTALL_DIR=/usr/local/bin UV_NO_MODIFY_PATH=1 sh && \
+    rm -rf /root/.npm /root/.cache/uv /home/ocm-agent/.cache && \
     pnpm --version && bun --version && uv --version
 
 RUN echo "Installing playwright=${PLAYWRIGHT_VERSION} chromium (cachebust=${TOOLS_CACHEBUST})" && \
@@ -52,3 +67,21 @@ RUN echo "Installing playwright=${PLAYWRIGHT_VERSION} chromium (cachebust=${TOOL
     chmod -R a+rX "${PLAYWRIGHT_BROWSERS_PATH}" && \
     rm -rf /var/lib/apt/lists/* /root/.npm && \
     npx --yes "playwright@${PLAYWRIGHT_VERSION}" --version
+
+# Declared after the Playwright layer on purpose: npm_config_prefix must not
+# affect the root-run `npm install -g playwright`, which has to land in
+# /usr/local/lib/node_modules for the NODE_PATH fallback above to work.
+ENV npm_config_prefix=/opt/agent-tools
+
+# The exec user is an unknown numeric uid, so verify as uid 1000 (also absent
+# from /etc/passwd) instead of root. A root-only check would not catch the
+# EACCES failures this image exists to prevent.
+RUN echo "Verifying guest toolchain as an unprivileged uid (cachebust=${TOOLS_CACHEBUST})" && \
+    rm -rf /home/ocm-agent && \
+    mkdir -p /home/ocm-agent && \
+    chmod 1777 /home/ocm-agent && \
+    setpriv --reuid=1000 --regid=1000 --clear-groups sh -c "set -e; pnpm --version; bun --version; bunx --version; uv --version; uvx --version; playwright --version; gh --version; jq --version; rg --version; npm install -g --silent cowsay && cowsay -t verify-ok | head -1; sudo -n apt-get update -qq && sudo -n apt-get install -y -qq --no-install-recommends bc && bc --version | head -1; uv venv /tmp/uv-check >/dev/null; uv pip install --python /tmp/uv-check/bin/python idna >/dev/null; pip3 install --user --force-reinstall --no-deps --quiet idna; rm -rf /tmp/uv-check" && \
+    npm uninstall -g --silent cowsay && \
+    rm -rf /home/ocm-agent /opt/agent-tools /var/lib/apt/lists/* && \
+    mkdir -p /home/ocm-agent /opt/agent-tools/bin && \
+    chmod 1777 /home/ocm-agent /opt/agent-tools /opt/agent-tools/bin

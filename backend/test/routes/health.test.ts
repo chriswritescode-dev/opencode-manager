@@ -30,6 +30,7 @@ vi.mock('../../src/services/sandbox/capability', () => ({
 import { opencodeServerManager } from '../../src/services/opencode-single-server'
 import { createHealthRoutes } from '../../src/routes/health'
 import { detectSandboxCapability } from '../../src/services/sandbox/capability'
+import { forceProcessAttestation } from '../../src/services/opencode/process-identity'
 import type { OpenCodeSupervisor } from '../../src/services/opencode-supervisor'
 
 const mockDetectSandboxCapability = detectSandboxCapability as ReturnType<typeof vi.fn>
@@ -126,14 +127,18 @@ describe('Health Routes', () => {
         preferences: JSON.stringify({ sandbox: { enabled: true } }),
         updated_at: Date.now(),
       })
+      forceProcessAttestation(true)
+      try {
+        const req = new Request('http://localhost/')
+        const res = await healthApp.fetch(req)
+        const json = await res.json() as Record<string, unknown>
 
-      const req = new Request('http://localhost/')
-      const res = await healthApp.fetch(req)
-      const json = await res.json() as Record<string, unknown>
-
-      expect(res.status).toBe(200)
-      expect(json.status).toBe('healthy')
-      expect(json.sandbox).toEqual({ available: true, enabled: true, enforced: true, msbVersion: 'msb 0.3.1' })
+        expect(res.status).toBe(200)
+        expect(json.status).toBe('healthy')
+        expect(json.sandbox).toEqual({ available: true, enabled: true, enforced: true, msbVersion: 'msb 0.3.1' })
+      } finally {
+        forceProcessAttestation(null)
+      }
     })
 
     it('should keep the overall status unchanged when the sandbox runtime is unavailable', async () => {
