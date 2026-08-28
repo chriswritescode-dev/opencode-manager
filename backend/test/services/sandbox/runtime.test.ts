@@ -8,7 +8,7 @@ import { migrate } from '../../../src/db/migration-runner'
 import { allMigrations } from '../../../src/db/migrations'
 import { SettingsService } from '../../../src/services/settings'
 import { buildSandboxInspectArgs, resolveSandboxExecUser, resolveSandboxRuntimeTmpfsSizeMib, sandboxExecutablePath, WORKSPACE_SANDBOX_NAME } from '../../../src/services/sandbox/command'
-import { SandboxRuntimeService, backgroundProvisionRetryForTests, resetSandboxRuntimeState, stopWorkspaceSandboxOnShutdown } from '../../../src/services/sandbox/runtime'
+import { SandboxRuntimeService, backgroundProvisionRetryForTests, provisionSandboxExecUserForTests, resetSandboxRuntimeState, stopWorkspaceSandboxOnShutdown } from '../../../src/services/sandbox/runtime'
 import { executeCommand } from '../../../src/utils/process'
 import { detectSandboxCapability } from '../../../src/services/sandbox/capability'
 import { logger } from '../../../src/utils/logger'
@@ -2415,6 +2415,51 @@ describe('SandboxRuntimeService', () => {
     expect(mockExecuteCommand.mock.calls.filter((call) => call[0].includes('run'))).toHaveLength(0)
     expect(mockExecuteCommand.mock.calls.filter((call) => call[0].includes('inspect'))).toHaveLength(1)
   })
+
+  it('shares one in-flight attempt when exec user provisioning is requested concurrently', async () => {
+    enableEnforcement()
+    mockExecuteCommand.mockImplementation(async (args: string[]) => {
+      if (args.includes('inspect')) return inspectedRunningSandbox()
+      if (args.includes('ls')) return { exitCode: 0, stdout: '[]', stderr: '' }
+      return { exitCode: 0, stdout: '', stderr: '' }
+    })
+
+    const first = provisionSandboxExecUserForTests()
+    const second = provisionSandboxExecUserForTests()
+
+    expect(second).toBe(first)
+    await Promise.all([first, second])
+
+    const provisionCalls = mockExecuteCommand.mock.calls.filter(
+      (call) => call[0].includes('exec') && call[0].some((arg: string) => arg.includes('/etc/passwd')),
+    )
+    expect(provisionCalls).toHaveLength(1)
+  })
+
+  it('cancels a scheduled provisioning retry when the sandbox is stopped by a toggle', async () => {
+    enableEnforcement()
+    let inspectCalls = 0
+    mockExecuteCommand.mockImplementation(async (args: string[]) => {
+      if (args.includes('exec')) throw new Error('Command timed out after 30000ms')
+      if (args.includes('inspect')) {
+        inspectCalls += 1
+        if (inspectCalls === 1) return { exitCode: 1, stdout: '', stderr: 'no such sandbox' }
+        return inspectedRunningSandbox()
+      }
+      if (args.includes('ls')) return { exitCode: 0, stdout: '[]', stderr: '' }
+      return { exitCode: 0, stdout: '', stderr: '' }
+    })
+
+    await service.planShell(repoADir)
+    const retry = backgroundProvisionRetryForTests()
+    expect(retry).not.toBeNull()
+
+    await service.stopWorkspaceSandboxForToggle()
+    expect(backgroundProvisionRetryForTests()).toBeNull()
+
+    await retry
+    expect(logger.info).toHaveBeenCalledWith(expect.stringContaining('background retry cancelled'))
+  }, 30000)
 
   it('attempts the toggle stop even when sandbox capability is unavailable', async () => {
     mockDetectSandboxCapability.mockReturnValue({ available: false, reason: '/dev/kvm is not available' })

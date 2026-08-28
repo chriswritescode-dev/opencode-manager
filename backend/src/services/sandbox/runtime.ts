@@ -66,6 +66,7 @@ export function resetSandboxRuntimeState(): void {
   canonicalSandboxSpecMemo = null
   provisionRetryGeneration += 1
   backgroundProvisionRetry = null
+  inFlightProvision = null
 }
 
 function memoizedCanonicalSandboxSpec(): Record<string, unknown> {
@@ -582,7 +583,7 @@ async function waitForSandboxAgent(): Promise<boolean> {
 
 async function provisionSandboxExecUser(): Promise<void> {
   try {
-    await provisionSandboxExecUserPasswd()
+    await ensureSandboxExecUserProvisioned()
     return
   } catch (error) {
     logger.warn(
@@ -630,9 +631,24 @@ async function provisionSandboxExecUserPasswd(): Promise<void> {
 
 let backgroundProvisionRetry: Promise<void> | null = null
 let provisionRetryGeneration = 0
+let inFlightProvision: Promise<void> | null = null
+
+function ensureSandboxExecUserProvisioned(): Promise<void> {
+  if (inFlightProvision) {
+    return inFlightProvision
+  }
+  inFlightProvision = provisionSandboxExecUserPasswd().finally(() => {
+    inFlightProvision = null
+  })
+  return inFlightProvision
+}
 
 export function backgroundProvisionRetryForTests(): Promise<void> | null {
   return backgroundProvisionRetry
+}
+
+export function provisionSandboxExecUserForTests(): Promise<void> {
+  return ensureSandboxExecUserProvisioned()
 }
 
 function scheduleBackgroundProvisionRetry(): void {
@@ -651,7 +667,7 @@ function scheduleBackgroundProvisionRetry(): void {
         return
       }
       try {
-        await provisionSandboxExecUserPasswd()
+        await ensureSandboxExecUserProvisioned()
         logger.info(`Sandbox exec user provisioned by the background retry (attempt ${attempt})`)
         return
       } catch (error) {
@@ -762,7 +778,7 @@ export class SandboxRuntimeService {
     await cacheSandboxImage()
     await ensureWorkspaceSandbox()
     try {
-      await provisionSandboxExecUserPasswd()
+      await ensureSandboxExecUserProvisioned()
       logger.info('Workspace sandbox is running and its exec user is provisioned')
     } catch (error) {
       logger.warn(
@@ -830,6 +846,8 @@ export class SandboxRuntimeService {
 
   private async stopManagedSandbox(): Promise<void> {
     stopInProgress = true
+    provisionRetryGeneration += 1
+    backgroundProvisionRetry = null
     try {
       await this.runManagedSandboxStop()
     } finally {
