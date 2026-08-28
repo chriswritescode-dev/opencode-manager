@@ -1,8 +1,9 @@
 # Guest image for the agent sandbox microVM (SANDBOX_IMAGE).
 #
 # node:24 is buildpack-deps based, so gcc/g++/make/ld/pkg-config, glib-2.0,
-# git, ssh, python3 and curl are already present. This image only adds the
-# GitHub CLI and a Playwright-managed Chromium.
+# git, ssh, python3 and curl are already present. This image adds the rest of
+# the Manager image toolchain (pnpm, bun, uv, jq) and the GitHub CLI and a
+# Playwright-managed Chromium.
 FROM node:24
 
 ARG PLAYWRIGHT_VERSION=1.56.0
@@ -17,9 +18,11 @@ ENV PLAYWRIGHT_BROWSERS_PATH=/ms-playwright
 # project-local install. Only a resolution fallback; local node_modules wins.
 ENV NODE_PATH=/usr/local/lib/node_modules
 
-RUN echo "Installing gh (cachebust=${TOOLS_CACHEBUST})" && \
+RUN echo "Installing gh and CLI tooling (cachebust=${TOOLS_CACHEBUST})" && \
     apt-get update && \
-    apt-get install -y --no-install-recommends ca-certificates curl && \
+    apt-get install -y --no-install-recommends \
+        ca-certificates curl gh jq less ripgrep tree file procps \
+        python3-pip python3-venv && \
     curl -fsSL https://cli.github.com/packages/githubcli-archive-keyring.gpg \
         -o /usr/share/keyrings/githubcli-archive-keyring.gpg && \
     chmod go+r /usr/share/keyrings/githubcli-archive-keyring.gpg && \
@@ -29,6 +32,19 @@ RUN echo "Installing gh (cachebust=${TOOLS_CACHEBUST})" && \
     apt-get install -y --no-install-recommends gh && \
     rm -rf /var/lib/apt/lists/* && \
     gh --version
+
+RUN echo "Installing pnpm, bun and uv (cachebust=${TOOLS_CACHEBUST})" && \
+    corepack enable && corepack prepare pnpm@latest --activate && \
+    curl -fsSL https://bun.sh/install | bash && \
+    mv /root/.bun /opt/bun && \
+    chmod -R a+rX /opt/bun && \
+    ln -s /opt/bun/bin/bun /usr/local/bin/bun && \
+    curl -LsSf https://astral.sh/uv/install.sh | UV_NO_MODIFY_PATH=1 sh && \
+    mv /root/.local/bin/uv /usr/local/bin/uv && \
+    mv /root/.local/bin/uvx /usr/local/bin/uvx && \
+    chmod +x /usr/local/bin/uv /usr/local/bin/uvx && \
+    rm -rf /root/.npm /root/.cache/uv && \
+    pnpm --version && bun --version && uv --version
 
 RUN echo "Installing playwright=${PLAYWRIGHT_VERSION} chromium (cachebust=${TOOLS_CACHEBUST})" && \
     npm install -g "playwright@${PLAYWRIGHT_VERSION}" && \

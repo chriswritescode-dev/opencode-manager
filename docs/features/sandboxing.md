@@ -156,13 +156,18 @@ Understand the trade-off before enabling it. `msb exec -e` is the only injection
 
 `SANDBOX_IMAGE` defaults to `docker.io/cstechdev/ocm-sandbox:latest`, built from `Dockerfile.sandbox` in this repository and published for `linux/amd64` and `linux/arm64` by the `Sandbox Image` workflow.
 
-It is `node:24` (Debian 12, `buildpack-deps` based), so the compile toolchain is already present, plus two additions:
+It is `node:24` (Debian 12, `buildpack-deps` based), so the compile toolchain is already present, plus the package managers and CLI tooling from the Manager image:
 
 | Tool | Source | Notes |
 | --- | --- | --- |
 | `gcc` / `g++` / `make` / `ld` / `pkg-config` | `node:24` | GCC 12.2, GNU Make 4.3 |
 | `glib-2.0` | `node:24` | 2.74.6, with `pkg-config` metadata |
 | `git`, `ssh`, `python3`, `curl`, `unzip` | `node:24` | git 2.39.5 |
+| `pnpm` | corepack | Activated at build time; a project `packageManager` pin still wins |
+| `bun` | official installer | Installed to `/opt/bun`, world-readable, symlinked onto `PATH` |
+| `uv`, `uvx` | Astral installer | Standalone binaries on `PATH` |
+| `pip`, `venv` | apt | `python3-pip` and `python3-venv` on top of the base `python3` |
+| `jq`, `ripgrep`, `less`, `tree`, `file`, `procps` | apt | Common CLI tools agent workflows expect |
 | `gh` | official `cli.github.com` apt repo | Current release. Debian's own package is several years stale |
 | Chromium | Playwright (`PLAYWRIGHT_VERSION`, default `1.56.0`) | Installed to `PLAYWRIGHT_BROWSERS_PATH=/ms-playwright`, world-readable so `SANDBOX_EXEC_USER` can launch it |
 
@@ -170,7 +175,7 @@ It is `node:24` (Debian 12, `buildpack-deps` based), so the compile toolchain is
 
 Chromium launches headless as the non-root exec user without extra flags. If your host kernel restricts user namespaces so Chromium's own sandbox fails, pass `--no-sandbox` — the microVM is already the isolation boundary.
 
-The image is roughly 3.3 GB against a 1.6 GB `node:24` baseline, almost entirely Chromium and its dependencies. The first pull is bounded by `SANDBOX_START_TIMEOUT_MS`; raise it on slow links.
+The image is over 3 GB against a 1.6 GB `node:24` baseline, almost entirely Chromium and its dependencies. The first pull is bounded by `SANDBOX_START_TIMEOUT_MS`; raise it on slow links.
 
 ### Using your own image
 
