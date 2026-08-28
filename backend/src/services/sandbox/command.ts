@@ -128,6 +128,23 @@ export function buildSandboxPingArgs(): string[] {
   return ['ping', WORKSPACE_SANDBOX_NAME, '-q']
 }
 
+export function buildSandboxVerifyProvisionArgs(): string[] {
+  const uid = resolveSandboxExecUserUid()
+  if (uid === null) return []
+  return [
+    'exec',
+    WORKSPACE_SANDBOX_NAME,
+    '--no-tty',
+    '-q',
+    '-u',
+    '0:0',
+    '--',
+    '/bin/sh',
+    '-c',
+    `getent passwd ${uid} >/dev/null`,
+  ]
+}
+
 export function sandboxMountRoots(): string[] {
   return [getReposPath(), getScheduleWorktreesPath()]
 }

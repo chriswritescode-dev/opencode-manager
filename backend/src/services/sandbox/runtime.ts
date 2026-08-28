@@ -21,6 +21,7 @@ import {
   buildSandboxRemoveArgs,
   buildSandboxStartArgs,
   buildSandboxStopManagedArgs,
+  buildSandboxVerifyProvisionArgs,
   resolveExpectedSandboxNetworkPolicy,
   resolveSandboxRuntimeTmpfsSizeMib,
   resolveSandboxWorkDirectory,
@@ -34,6 +35,7 @@ const SANDBOX_LS_TIMEOUT_MS = 15000
 const SANDBOX_STOP_TIMEOUT_MS = 30000
 const SANDBOX_PROVISION_ATTEMPTS = 3
 const SANDBOX_PROVISION_RETRY_DELAY_MS = 2000
+const SANDBOX_PROVISION_RETRY_ATTEMPTS = 5
 const SANDBOX_AGENT_PING_TIMEOUT_MS = 10000
 const SANDBOX_AGENT_POLL_DELAY_MS = 1000
 const SANDBOX_RUNTIME_TMPFS_GUEST = path.resolve('/tmp')
@@ -62,6 +64,8 @@ export function resetSandboxRuntimeState(): void {
   shutdownRequested = false
   stopInProgress = false
   canonicalSandboxSpecMemo = null
+  provisionRetryGeneration += 1
+  backgroundProvisionRetry = null
 }
 
 function memoizedCanonicalSandboxSpec(): Record<string, unknown> {
@@ -579,11 +583,13 @@ async function waitForSandboxAgent(): Promise<boolean> {
 async function provisionSandboxExecUser(): Promise<void> {
   try {
     await provisionSandboxExecUserPasswd()
+    return
   } catch (error) {
     logger.warn(
-      `Sandbox exec user provisioning failed, so sudo will not work inside the guest: ${error instanceof Error ? error.message : String(error)}`,
+      `Sandbox exec user provisioning failed, so sudo will not work inside the guest yet; retrying in the background: ${error instanceof Error ? error.message : String(error)}`,
     )
   }
+  scheduleBackgroundProvisionRetry()
 }
 
 async function provisionSandboxExecUserPasswd(): Promise<void> {
@@ -605,6 +611,12 @@ async function provisionSandboxExecUserPasswd(): Promise<void> {
       await executeCommand([sandboxExecutablePath(), ...provisionArgs], {
         timeout: ENV.SANDBOX.START_TIMEOUT_MS,
       })
+      const verifyArgs = buildSandboxVerifyProvisionArgs()
+      if (verifyArgs.length > 0) {
+        await executeCommand([sandboxExecutablePath(), ...verifyArgs], {
+          timeout: SANDBOX_LS_TIMEOUT_MS,
+        })
+      }
       return
     } catch (error) {
       lastError = error
@@ -614,6 +626,49 @@ async function provisionSandboxExecUserPasswd(): Promise<void> {
   throw new Error(
     `provisioning the sandbox exec user passwd entry failed: ${lastError instanceof Error ? lastError.message : String(lastError)}`,
   )
+}
+
+let backgroundProvisionRetry: Promise<void> | null = null
+let provisionRetryGeneration = 0
+
+export function backgroundProvisionRetryForTests(): Promise<void> | null {
+  return backgroundProvisionRetry
+}
+
+function scheduleBackgroundProvisionRetry(): void {
+  const generation = provisionRetryGeneration
+  if (backgroundProvisionRetry !== null) return
+  logger.info('Sandbox exec user provisioning background retry scheduled')
+  backgroundProvisionRetry = (async () => {
+    for (let attempt = 1; attempt <= SANDBOX_PROVISION_RETRY_ATTEMPTS; attempt++) {
+      await new Promise((resolve) => setTimeout(resolve, SANDBOX_PROVISION_RETRY_DELAY_MS))
+      if (generation !== provisionRetryGeneration) {
+        logger.info('Sandbox exec user provisioning background retry cancelled by a runtime state reset')
+        return
+      }
+      if (shutdownRequested) {
+        logger.info('Sandbox exec user provisioning background retry cancelled by shutdown')
+        return
+      }
+      try {
+        await provisionSandboxExecUserPasswd()
+        logger.info(`Sandbox exec user provisioned by the background retry (attempt ${attempt})`)
+        return
+      } catch (error) {
+        logger.warn(
+          `Sandbox exec user provisioning background retry attempt ${attempt} failed: ${error instanceof Error ? error.message : String(error)}`,
+        )
+        if (generation !== provisionRetryGeneration || shutdownRequested) return
+      }
+    }
+    logger.warn(
+      'Sandbox exec user provisioning retries were exhausted; sudo will not work inside the guest until the next boot cycle',
+    )
+  })().finally(() => {
+    if (generation === provisionRetryGeneration) {
+      backgroundProvisionRetry = null
+    }
+  })
 }
 
 async function createWorkspaceSandbox(): Promise<void> {
@@ -706,8 +761,15 @@ export class SandboxRuntimeService {
     if (getProcessIdentityAttestationError() !== null) return
     await cacheSandboxImage()
     await ensureWorkspaceSandbox()
-    await provisionSandboxExecUser()
-    logger.info('Workspace sandbox is running and its exec user is provisioned')
+    try {
+      await provisionSandboxExecUserPasswd()
+      logger.info('Workspace sandbox is running and its exec user is provisioned')
+    } catch (error) {
+      logger.warn(
+        `Workspace sandbox is running but its exec user is not provisioned yet; retrying in the background: ${error instanceof Error ? error.message : String(error)}`,
+      )
+      scheduleBackgroundProvisionRetry()
+    }
   }
 
   isEnabled(): boolean {
