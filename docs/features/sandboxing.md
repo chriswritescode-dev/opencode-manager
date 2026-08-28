@@ -191,7 +191,7 @@ The guest runs every command as a numeric host uid that has no `/etc/passwd` ent
 
 Chromium launches headless as the non-root exec user without extra flags. If your host kernel restricts user namespaces so Chromium's own sandbox fails, pass `--no-sandbox` — the microVM is already the isolation boundary.
 
-The image is over 3 GB against a 1.6 GB `node:24` baseline, almost entirely Chromium and its dependencies. The Manager caches it ahead of first use: at startup, and whenever sandbox enforcement is switched on, it runs `msb pull` in the background (bounded by `SANDBOX_START_TIMEOUT_MS`; raise it on slow links). The pull is a no-op once the image is cached, and `docker-compose.sandbox.yml` persists the microsandbox store in the `microsandbox-data` volume so the download survives container replacement. Because it runs in the background, server startup is never blocked by it, and a sandboxed command issued while the pull is still running joins the same in-flight boot instead of starting a second download.
+The image is over 3 GB against a 1.6 GB `node:24` baseline, almost entirely Chromium and its dependencies. When sandboxing is enabled, the Manager gets everything ready before the first command instead of on it: at startup, and whenever enforcement is switched on, it pulls the image and then boots the shared microVM in the background (`msb pull`, then the same create/start/attest/provision path a command would trigger, bounded by `SANDBOX_START_TIMEOUT_MS`; raise it on slow links). One microVM serves every repo and schedule worktree, so a single warm-up covers the whole workspace. The pull is a no-op once cached, `docker-compose.sandbox.yml` persists the microsandbox store in the `microsandbox-data` volume so the download survives container replacement, and the shutdown handler stops the microVM again. Because the warm-up runs in the background, server startup never waits for it, and a command issued while it is still running joins the same in-flight boot rather than starting a second one.
 
 ### Using your own image
 
@@ -210,7 +210,7 @@ Override the Playwright version at build time with `--build-arg PLAYWRIGHT_VERSI
 
 ## Caveats
 
-- The first command pays microVM boot latency, bounded by `SANDBOX_START_TIMEOUT_MS`. The guest image itself is pulled in the background at startup, so it only pays a download too if it runs before that pull finishes.
+- With sandboxing enabled the image pull and microVM boot happen at Manager startup, so commands normally pay neither. A command that runs before the warm-up finishes waits on that same boot, bounded by `SANDBOX_START_TIMEOUT_MS`.
 - `SANDBOX_IMAGE` must contain every tool the agent expects to run.
 - `SANDBOX_EXEC_USER` must match the workspace owner so commands can write mounted files.
 - A `shell` the user configured does not apply to slash-command shell templates while enforcement is on, and is bypassed for `!command` shell mode because that surface is routed into the microVM.

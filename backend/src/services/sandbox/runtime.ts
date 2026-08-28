@@ -664,11 +664,9 @@ export class SandboxRuntimeService {
     if (!capability.available) return
     if (getProcessIdentityAttestationError() !== null) return
     await cacheSandboxImage()
-    if (buildSandboxProvisionArgs().length === 0) return
-    const entry = findWorkspaceSandboxEntry(await listSandboxes())
-    if (entry === null || !entry.running) return
+    await ensureWorkspaceSandbox()
     await provisionSandboxExecUserPasswd()
-    logger.info('Provisioned the workspace sandbox exec user passwd entry')
+    logger.info('Workspace sandbox is running and its exec user is provisioned')
   }
 
   isEnabled(): boolean {

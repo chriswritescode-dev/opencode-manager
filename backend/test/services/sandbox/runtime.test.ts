@@ -338,9 +338,10 @@ describe('SandboxRuntimeService', () => {
     expect(provisionArgs.join(' ')).toContain('getent passwd')
   })
 
-  it('provisions a running workspace sandbox once at boot when enforcement is on', async () => {
+  it('leaves an already running workspace sandbox in place at boot and provisions its exec user', async () => {
     enableEnforcement()
     mockExecuteCommand.mockImplementation(async (args: string[]) => {
+      if (args.includes('inspect')) return inspectedRunningSandbox()
       if (args.includes('ls')) {
         return {
           exitCode: 0,
@@ -353,13 +354,62 @@ describe('SandboxRuntimeService', () => {
 
     await service.prepareWorkspaceSandboxOnBoot()
 
+    expect(mockExecuteCommand.mock.calls.filter((call) => call[0].includes('run'))).toHaveLength(0)
+    expect(mockExecuteCommand.mock.calls.filter((call) => call[0].includes('start'))).toHaveLength(0)
     const provisionCall = mockExecuteCommand.mock.calls.find((call) => call[0].includes('exec'))
     expect(provisionCall).toBeDefined()
     const provisionArgs = provisionCall![0]
     expect(provisionArgs[provisionArgs.indexOf('-u') + 1]).toBe('0:0')
   })
 
-  it('skips boot provisioning when the sandbox preference is off', async () => {
+  it('creates the shared microVM at boot when none exists yet', async () => {
+    enableEnforcement()
+    let inspectCalls = 0
+    mockExecuteCommand.mockImplementation(async (args: string[]) => {
+      if (args.includes('inspect')) {
+        inspectCalls += 1
+        if (inspectCalls === 1) {
+          return { exitCode: 1, stdout: '', stderr: 'no such sandbox' }
+        }
+        return inspectedRunningSandbox()
+      }
+      if (args.includes('ls')) {
+        return { exitCode: 0, stdout: '[]', stderr: '' }
+      }
+      return { exitCode: 0, stdout: '', stderr: '' }
+    })
+
+    await service.prepareWorkspaceSandboxOnBoot()
+
+    expect(mockExecuteCommand.mock.calls.filter((call) => call[0].includes('run'))).toHaveLength(1)
+    expect(mockExecuteCommand.mock.calls.find((call) => call[0].includes('exec'))).toBeDefined()
+  })
+
+  it('starts a stopped microVM at boot instead of waiting for the first command', async () => {
+    enableEnforcement()
+    let inspectCalls = 0
+    mockExecuteCommand.mockImplementation(async (args: string[]) => {
+      if (args.includes('ls')) {
+        return { exitCode: 0, stdout: stoppedListingOutput(), stderr: '' }
+      }
+      if (args.includes('inspect')) {
+        inspectCalls += 1
+        if (inspectCalls === 1) {
+          return { exitCode: 0, stdout: trustedInspectOutput(), stderr: '' }
+        }
+        return inspectedRunningSandbox()
+      }
+      return { exitCode: 0, stdout: '', stderr: '' }
+    })
+
+    await service.prepareWorkspaceSandboxOnBoot()
+
+    expect(mockExecuteCommand.mock.calls.filter((call) => call[0].includes('start'))).toHaveLength(1)
+    expect(mockExecuteCommand.mock.calls.filter((call) => call[0].includes('run'))).toHaveLength(0)
+    expect(mockExecuteCommand.mock.calls.find((call) => call[0].includes('exec'))).toBeDefined()
+  })
+
+  it('never touches msb at boot when the sandbox preference is off', async () => {
     mockExecuteCommand.mockImplementation(async () => {
       throw new Error('msb must not be invoked when sandboxing is disabled')
     })
@@ -369,23 +419,10 @@ describe('SandboxRuntimeService', () => {
     expect(mockExecuteCommand).not.toHaveBeenCalled()
   })
 
-  it('skips boot provisioning when the workspace sandbox is not running', async () => {
-    enableEnforcement()
-    mockExecuteCommand.mockImplementation(async (args: string[]) => {
-      if (args.includes('ls')) {
-        return { exitCode: 0, stdout: stoppedListingOutput(), stderr: '' }
-      }
-      return { exitCode: 0, stdout: '', stderr: '' }
-    })
-
-    await service.prepareWorkspaceSandboxOnBoot()
-
-    expect(mockExecuteCommand.mock.calls.filter((call) => call[0].includes('exec'))).toHaveLength(0)
-  })
-
   it('caches the guest image at boot before touching the microVM', async () => {
     enableEnforcement()
     mockExecuteCommand.mockImplementation(async (args: string[]) => {
+      if (args.includes('inspect')) return inspectedRunningSandbox()
       if (args.includes('ls')) {
         return { exitCode: 0, stdout: stoppedListingOutput(), stderr: '' }
       }
@@ -399,20 +436,12 @@ describe('SandboxRuntimeService', () => {
       expect.objectContaining({ timeout: ENV.SANDBOX.START_TIMEOUT_MS }),
     )
     const pullIndex = mockExecuteCommand.mock.calls.findIndex((call) => call[0].includes('pull'))
-    const listIndex = mockExecuteCommand.mock.calls.findIndex((call) => call[0].includes('ls'))
-    expect(pullIndex).toBeGreaterThanOrEqual(0)
-    expect(pullIndex).toBeLessThan(listIndex)
+    const inspectIndex = mockExecuteCommand.mock.calls.findIndex((call) => call[0].includes('inspect'))
+    expect(pullIndex).toBe(0)
+    expect(pullIndex).toBeLessThan(inspectIndex)
   })
 
-  it('never pulls the guest image at boot when the sandbox preference is off', async () => {
-    mockExecuteCommand.mockImplementation(async () => ({ exitCode: 0, stdout: '', stderr: '' }))
-
-    await service.prepareWorkspaceSandboxOnBoot()
-
-    expect(mockExecuteCommand.mock.calls.filter((call) => call[0].includes('pull'))).toHaveLength(0)
-  })
-
-  it('surfaces a failed boot image pull to the caller', async () => {
+  it('surfaces a failed boot image pull to the caller and never boots the microVM', async () => {
     enableEnforcement()
     mockExecuteCommand.mockImplementation(async (args: string[]) => {
       if (args.includes('pull')) {
@@ -422,7 +451,8 @@ describe('SandboxRuntimeService', () => {
     })
 
     await expect(service.prepareWorkspaceSandboxOnBoot()).rejects.toThrow('registry unreachable')
-    expect(mockExecuteCommand.mock.calls.filter((call) => call[0].includes('ls'))).toHaveLength(0)
+    expect(mockExecuteCommand.mock.calls.filter((call) => call[0].includes('inspect'))).toHaveLength(0)
+    expect(mockExecuteCommand.mock.calls.filter((call) => call[0].includes('run'))).toHaveLength(0)
   })
 
   it('returns blocked with the start stderr when a stopped sandbox fails to start', async () => {
