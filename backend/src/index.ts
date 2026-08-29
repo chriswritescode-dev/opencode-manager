@@ -36,6 +36,7 @@ import { createAuth } from './auth'
 import { createAuthMiddleware } from './auth/middleware'
 import { createPromptTemplateRoutes } from './routes/prompt-templates'
 import { createSessionPinRoutes } from './routes/session-pins'
+import { createLogRoutes } from './routes/logs'
 import { createInternalRoutes } from './routes/internal'
 import { sweepStaleUploadSessions } from './routes/internal/repo-mirror-helpers'
 import { createOpenCodeProxyRoutes } from './routes/opencode-proxy'
@@ -377,6 +378,7 @@ protectedApi.route('/notifications', createNotificationRoutes(notificationServic
 protectedApi.route('/prompt-templates', createPromptTemplateRoutes(db))
 protectedApi.route('/session-pins', createSessionPinRoutes(db))
 protectedApi.route('/schedules', createScheduleRoutes(scheduleService))
+protectedApi.route('/logs', createLogRoutes())
 
 app.route('/api', protectedApi)
 

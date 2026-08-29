@@ -31,6 +31,7 @@ import { resolveProcessIdentityProvider } from './opencode/process-identity'
 import { SandboxRuntimeService } from './sandbox/runtime'
 import { CredentialProvider } from './credential-provider'
 import { mkdirSafe, writeFileAtomic } from '../utils/fs-safe'
+import { createProcessLogForwarder } from '../utils/log-buffer'
 
 
 const MIN_OPENCODE_VERSION = '1.0.137'
@@ -659,13 +660,24 @@ class OpenCodeServerManager {
       }
     )
 
+    const openCodeStdoutLog = createProcessLogForwarder({ source: 'opencode', defaultLevel: 'info' })
+    const openCodeStderrLog = createProcessLogForwarder({ source: 'opencode', defaultLevel: 'error' })
+
     if (!isDevelopment && this.serverProcess.stderr) {
       this.serverProcess.stderr.on('data', (data) => {
-        stderrOutput += data.toString()
+        const text = data.toString()
+        stderrOutput += text
         if (stderrOutput.length > MAX_STDERR_SIZE) {
           stderrOutput = stderrOutput.slice(-MAX_STDERR_SIZE)
         }
+        openCodeStderrLog.write(data)
       })
+      this.serverProcess.stderr.on('end', () => openCodeStderrLog.flush())
+    }
+
+    if (!isDevelopment && this.serverProcess.stdout) {
+      this.serverProcess.stdout.on('data', (data) => openCodeStdoutLog.write(data))
+      this.serverProcess.stdout.on('end', () => openCodeStdoutLog.flush())
     }
 
     const spawnedServerPid = this.serverProcess.pid

@@ -55,6 +55,7 @@ OpenCode Manager runs as a pnpm workspace:
 - **Assistant Mode** — Dedicated AI workspace with auto-provisioned skills for schedule management, notifications, settings, and repo listing — [Learn more](features/assistant-mode.md)
 - **AI Configuration** — Model/provider setup, OAuth for Anthropic/GitHub Copilot, custom agents — [Learn more](features/ai-config.md)
 - **Server Health & Restart** — Monitor server status, graceful restarts with session resume, auto-recovery — [Learn more](features/server-health.md)
+- **Manager Logs** — Manager log lines plus captured OpenCode server stdout/stderr in Settings, with level/source filters, search, and pause/copy controls — [Learn more](features/logs.md)
 - **MCP Servers** — Add local or remote MCP servers with OAuth support — [Learn more](features/mcp.md)
 - **Skills** — Skill support for extended agent capabilities — [Learn more](features/skills.md)
 - **Mobile & PWA** — Responsive UI, installable on any device, iOS-optimized — [Learn more](features/mobile.md)

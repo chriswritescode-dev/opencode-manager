@@ -1,22 +1,31 @@
 import { useCallback, useRef } from 'react'
 import { useUrlParams } from './useUrlParams'
 
-type Tab = 'account' | 'general' | 'notifications' | 'voice' | 'git' | 'shortcuts' | 'opencode' | 'providers' | 'menu'
+const SETTINGS_CONTENT_TABS = ['account', 'general', 'notifications', 'voice', 'git', 'shortcuts', 'opencode', 'providers', 'logs'] as const
+
+export type SettingsContentTab = (typeof SETTINGS_CONTENT_TABS)[number]
+
+export function isSettingsContentTab(value: string | null): value is SettingsContentTab {
+  return value !== null && (SETTINGS_CONTENT_TABS as readonly string[]).includes(value)
+}
 
 interface UseSettingsDialogReturn {
   isOpen: boolean
   open: () => void
   close: () => void
   toggle: () => void
-  activeTab: Tab
-  setActiveTab: (tab: Tab) => void
+  activeTab: SettingsContentTab
+  selectedTab: SettingsContentTab | null
+  setActiveTab: (tab: SettingsContentTab) => void
 }
 
 export function useSettingsDialog(): UseSettingsDialogReturn {
   const { searchParams, updateParams } = useUrlParams()
 
   const isOpen = searchParams.get('settings') === 'open'
-  const activeTab = (searchParams.get('settingsTab') as Tab) || 'account'
+  const rawTab = searchParams.get('settingsTab')
+  const selectedTab = isSettingsContentTab(rawTab) ? rawTab : null
+  const activeTab = selectedTab || 'account'
 
   const activeTabRef = useRef(activeTab)
   activeTabRef.current = activeTab
@@ -45,7 +54,7 @@ export function useSettingsDialog(): UseSettingsDialogReturn {
     }
   }, [searchParams, open, close])
 
-  const setActiveTab = useCallback((tab: Tab) => {
+  const setActiveTab = useCallback((tab: SettingsContentTab) => {
     updateParams((p) => {
       p.set('settings', 'open')
       p.set('settingsTab', tab)
@@ -58,6 +67,7 @@ export function useSettingsDialog(): UseSettingsDialogReturn {
     close,
     toggle,
     activeTab,
+    selectedTab,
     setActiveTab,
   }
 }

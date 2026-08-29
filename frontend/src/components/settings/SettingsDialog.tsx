@@ -3,6 +3,7 @@ import { GeneralSettings } from '@/components/settings/GeneralSettings'
 import { GitSettings } from '@/components/settings/GitSettings'
 import { KeyboardShortcuts } from '@/components/settings/KeyboardShortcuts'
 import { OpenCodeConfigManager } from '@/components/settings/OpenCodeConfigManager'
+import { LogsViewer } from '@/components/settings/LogsViewer'
 import { OpenCodeServerAuthSettings } from '@/components/settings/OpenCodeServerAuthSettings'
 import { ManagerTokenSettings } from '@/components/settings/ManagerTokenSettings'
 import { ServerEnvVarsSettings } from '@/components/settings/ServerEnvVarsSettings'
@@ -15,14 +16,18 @@ import { NotificationSettings } from '@/components/settings/NotificationSettings
 import { VersionSelectDialog } from '@/components/settings/VersionSelectDialog'
 import { Dialog, DialogContent, DialogTitle } from '@/components/ui/dialog'
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs'
-import { Settings2, Keyboard, Code, ChevronLeft, Key, GitBranch, User, Volume2, Bell, X } from 'lucide-react'
+import { Settings2, Keyboard, Code, ChevronLeft, Key, GitBranch, User, Volume2, Bell, X, ScrollText, type LucideIcon } from 'lucide-react'
 import { Button } from '@/components/ui/button'
-import { useSettingsDialog } from '@/hooks/useSettingsDialog'
+import { useSettingsDialog, isSettingsContentTab, type SettingsContentTab } from '@/hooks/useSettingsDialog'
+import { DESKTOP_MEDIA_QUERY, useMediaQuery } from '@/hooks/useMediaQuery'
 
-type SettingsView = 'menu' | 'general' | 'git' | 'shortcuts' | 'opencode' | 'providers' | 'account' | 'voice' | 'notifications'
+type SettingsView = 'menu' | SettingsContentTab
+
+const TAB_TRIGGER_CLASS = 'data-[state=active]:bg-blue-600 data-[state=active]:text-white text-muted-foreground transition-all duration-200 sm:px-2 sm:text-xs md:px-3 md:text-sm'
 
 export function SettingsDialog() {
-  const { isOpen, close, activeTab, setActiveTab } = useSettingsDialog()
+  const { isOpen, close, activeTab, selectedTab, setActiveTab } = useSettingsDialog()
+  const isDesktop = useMediaQuery(DESKTOP_MEDIA_QUERY)
   const [mobileView, setMobileView] = useState<SettingsView>('menu')
   const [isVersionDialogOpen, setIsVersionDialogOpen] = useState(false)
   const [sectionHistory, setSectionHistory] = useState<SettingsView[]>([])
@@ -49,7 +54,7 @@ export function SettingsDialog() {
       : sectionHistory
     const previousView = previousHistory.at(-1)
 
-    if (previousView) {
+    if (previousView && previousView !== 'menu') {
       setSectionHistory(previousHistory)
       setMobileView(previousView)
       setActiveTab(previousView)
@@ -82,7 +87,13 @@ export function SettingsDialog() {
     return () => document.removeEventListener('keydown', handleKeyDown, { capture: true })
   }, [isOpen, close, isVersionDialogOpen])
 
-  const menuItems = [
+  useEffect(() => {
+    if (!isOpen || !selectedTab) return
+    setMobileView(selectedTab)
+    pushSectionHistory(selectedTab)
+  }, [isOpen, selectedTab, pushSectionHistory])
+
+  const menuItems: Array<{ id: SettingsContentTab; icon: LucideIcon; label: string; description: string }> = [
     { id: 'account', icon: User, label: 'Account', description: 'Profile, passkeys, and sign out' },
     { id: 'general', icon: Settings2, label: 'General Settings', description: 'App preferences and behavior' },
     { id: 'notifications', icon: Bell, label: 'Notifications', description: 'Push notification preferences' },
@@ -90,20 +101,21 @@ export function SettingsDialog() {
     { id: 'git', icon: GitBranch, label: 'Git', description: 'Git identity and credentials for repositories' },
     { id: 'shortcuts', icon: Keyboard, label: 'Keyboard Shortcuts', description: 'Customize keyboard shortcuts' },
     { id: 'opencode', icon: Code, label: 'OpenCode Config', description: 'Manage OpenCode configurations, commands, and agents' },
+    { id: 'logs', icon: ScrollText, label: 'Logs', description: 'Live manager and OpenCode server logs' },
     { id: 'providers', icon: Key, label: 'Providers', description: 'Manage AI provider API keys' },
   ]
 
-  const handleOpenMobileView = useCallback((view: SettingsView) => {
+  const handleOpenMobileView = useCallback((view: SettingsContentTab) => {
     setMobileView(view)
     setActiveTab(view)
     pushSectionHistory(view)
   }, [setActiveTab, pushSectionHistory])
 
   const handleTabChange = (tab: string) => {
-    const nextView = tab as SettingsView
-    setActiveTab(nextView)
-    setMobileView(nextView)
-    pushSectionHistory(nextView)
+    if (!isSettingsContentTab(tab)) return
+    setActiveTab(tab)
+    setMobileView(tab)
+    pushSectionHistory(tab)
   }
 
    return (
@@ -135,29 +147,32 @@ export function SettingsDialog() {
            </div>
           <Tabs defaultValue="account" value={activeTab} onValueChange={handleTabChange} className="w-full flex flex-col flex-1 min-h-0">
             <div className="px-6 pt-6 pb-4 flex-shrink-0">
-              <TabsList className="grid w-full grid-cols-8 bg-card p-1">
-                <TabsTrigger value="account" className="data-[state=active]:bg-blue-600 data-[state=active]:text-white text-muted-foreground transition-all duration-200">
+              <TabsList className="grid w-full grid-cols-9 bg-card p-1">
+                <TabsTrigger value="account" className={TAB_TRIGGER_CLASS}>
                   Account
                 </TabsTrigger>
-                <TabsTrigger value="general" className="data-[state=active]:bg-blue-600 data-[state=active]:text-white text-muted-foreground transition-all duration-200">
+                <TabsTrigger value="general" className={TAB_TRIGGER_CLASS}>
                   General
                 </TabsTrigger>
-                <TabsTrigger value="notifications" className="data-[state=active]:bg-blue-600 data-[state=active]:text-white text-muted-foreground transition-all duration-200">
+                <TabsTrigger value="notifications" className={TAB_TRIGGER_CLASS}>
                   Notify
                 </TabsTrigger>
-                <TabsTrigger value="voice" className="data-[state=active]:bg-blue-600 data-[state=active]:text-white text-muted-foreground transition-all duration-200">
+                <TabsTrigger value="voice" className={TAB_TRIGGER_CLASS}>
                   Voice
                 </TabsTrigger>
-                <TabsTrigger value="git" className="data-[state=active]:bg-blue-600 data-[state=active]:text-white text-muted-foreground transition-all duration-200">
+                <TabsTrigger value="git" className={TAB_TRIGGER_CLASS}>
                   Git
                 </TabsTrigger>
-                <TabsTrigger value="shortcuts" className="data-[state=active]:bg-blue-600 data-[state=active]:text-white text-muted-foreground transition-all duration-200">
+                <TabsTrigger value="shortcuts" className={TAB_TRIGGER_CLASS}>
                   Shortcuts
                 </TabsTrigger>
-                <TabsTrigger value="opencode" className="data-[state=active]:bg-blue-600 data-[state=active]:text-white text-muted-foreground transition-all duration-200">
+                <TabsTrigger value="opencode" className={TAB_TRIGGER_CLASS}>
                   OpenCode
                 </TabsTrigger>
-                <TabsTrigger value="providers" className="data-[state=active]:bg-blue-600 data-[state=active]:text-white text-muted-foreground transition-all duration-200">
+                <TabsTrigger value="logs" className={TAB_TRIGGER_CLASS}>
+                  Logs
+                </TabsTrigger>
+                <TabsTrigger value="providers" className={TAB_TRIGGER_CLASS}>
                   Providers
                 </TabsTrigger>
               </TabsList>
@@ -183,6 +198,7 @@ export function SettingsDialog() {
                     <OpenCodeConfigManager />
                   </div>
                 </TabsContent>
+                <TabsContent key="logs" value="logs" className="mt-0">{isDesktop && <LogsViewer />}</TabsContent>
                 <TabsContent key="providers" value="providers" className="mt-0"><ProviderSettings /></TabsContent>
               </div>
             </div>
@@ -222,7 +238,7 @@ export function SettingsDialog() {
                  {menuItems.map((item) => (
                     <button
                       key={item.id}
-                      onClick={() => handleOpenMobileView(item.id as SettingsView)}
+                      onClick={() => handleOpenMobileView(item.id)}
                       className="w-full bg-gradient-to-br from-card to-card-hover border border-border rounded-xl p-4 hover:border-border transition-all duration-200 text-left"
                     >
                      <div className="flex items-center gap-4">
@@ -256,6 +272,7 @@ export function SettingsDialog() {
                   </div>
                 )}
               {mobileView === 'providers' && <div key="providers"><ProviderSettings /></div>}
+              {mobileView === 'logs' && !isDesktop && <div key="logs"><LogsViewer /></div>}
            </div>
         </div>
 

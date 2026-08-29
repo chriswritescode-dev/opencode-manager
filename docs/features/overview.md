@@ -113,3 +113,12 @@ OpenCode Manager provides a comprehensive web interface for managing OpenCode AI
 - **Version Management** — View current versions and trigger OpenCode upgrades from the UI
 
 [Learn more →](server-health.md)
+
+### Manager Logs
+
+- **In-App Log Viewer** — Manager and OpenCode server output in the Settings Logs tab, no shell access needed
+- **Filtering** — Minimum severity, source, and case-insensitive text search
+- **Live Controls** — Pause/resume, clear, copy, and automatic follow scrolling
+- **Bounded Memory** — In-memory ring buffer with explicit dropped-entry notice
+
+[Learn more →](logs.md)

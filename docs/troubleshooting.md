@@ -15,6 +15,8 @@ Common issues and their solutions.
 docker-compose logs -f
 ```
 
+Once the Manager is running, **Settings → Logs** shows the Manager's own log lines in-app, plus the OpenCode server's stdout/stderr, which the Manager captures in memory and does **not** forward to the container console — so those OpenCode-server lines are visible in-app only. If the container or the Manager itself fails before the Manager's HTTP server is up, use `docker-compose logs`; the in-app viewer has nothing to show at that point.
+
 2. Verify Docker resources (2GB RAM minimum)
 
  3. Check ports aren't in use:
@@ -275,6 +277,6 @@ If your issue isn't covered:
 3. Open a new issue with:
    - Steps to reproduce
    - Expected vs actual behavior
-   - Container logs: `docker-compose logs`
+   - Container logs: `docker-compose logs` — required when the Manager fails to start; **Settings → Logs** in-app covers the same Manager lines plus captured OpenCode server output once the Manager is up
    - Browser console errors
    - Environment info (OS, browser, Docker version)

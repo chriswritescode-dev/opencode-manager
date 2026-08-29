@@ -11,7 +11,7 @@ const createOpenCodeClientMock = vi.hoisted(() => vi.fn(() => ({
 
 const spawnMock = vi.hoisted(() => vi.fn(() => ({
   pid: 1234,
-  stderr: null,
+  stderr: null as unknown,
   on: vi.fn(),
 })))
 
@@ -1361,6 +1361,65 @@ describe('OpenCodeServerManager - server auth', () => {
     } finally {
       killSpy.mockRestore()
       readFileMock.mockReset()
+      readFileSyncMock.mockReset()
+      readdirSyncMock.mockReset()
+      Object.defineProperty(ENV.SERVER, 'NODE_ENV', { value: originalNodeEnv, configurable: true, writable: true })
+    }
+  }, 15000)
+
+  it('records child output that arrives after the exit event but before the stdio streams end', async () => {
+    const originalNodeEnv = ENV.SERVER.NODE_ENV
+    Object.defineProperty(ENV.SERVER, 'NODE_ENV', { value: 'production', configurable: true, writable: true })
+    try {
+      sandboxRuntimeServiceMock.SandboxRuntimeService.mockImplementation(() => ({
+        isEnabled: () => false,
+      }))
+      execSyncMock.mockImplementation(() => {
+        throw new Error('not found')
+      })
+      readdirSyncMock.mockReturnValue([])
+      readFileSyncMock.mockImplementation((filePath: string) => {
+        if (String(filePath).includes('/proc/1234/stat')) return procStatStringWithGroup(1234, '42')
+        const error = new Error('No such process') as NodeJS.ErrnoException
+        error.code = 'ENOENT'
+        throw error
+      })
+
+      const { EventEmitter } = await import('events')
+      const stdout = new EventEmitter()
+      const stderr = new EventEmitter()
+      spawnMock.mockImplementationOnce(() => ({ pid: 1234, stdout, stderr, on: vi.fn() }))
+
+      const { OpenCodeServerManager } = await import('../../src/services/opencode-single-server')
+      const { readManagerLogEntries, resetManagerLogBuffer } = await import('../../src/utils/log-buffer')
+      resetManagerLogBuffer()
+      const manager = OpenCodeServerManager.getInstance()
+      manager.setDatabase(createPasswordDb(null))
+
+      await manager.start()
+
+      const spawnedChild = spawnMock.mock.results[0]!.value as { pid: number; on: ReturnType<typeof vi.fn> }
+      const exitCall = spawnedChild.on.mock.calls.find((call: unknown[]) => call[0] === 'exit')
+      expect(exitCall).toBeDefined()
+
+      stderr.emit('data', Buffer.from('ERROR boom\npartial tail'))
+      ;(exitCall![1] as (code: number | null, signal: NodeJS.Signals | null) => void)(1, null)
+
+      expect(readManagerLogEntries({ source: 'opencode' }).entries.map((entry) => entry.message)).toEqual([
+        'ERROR boom',
+      ])
+
+      stderr.emit('data', Buffer.from(' FINAL'))
+      stderr.emit('end')
+      stdout.emit('data', Buffer.from('INFO started\n'))
+      stdout.emit('end')
+
+      const messages = readManagerLogEntries({ source: 'opencode' }).entries.map((entry) => entry.message)
+      expect(messages).toEqual(['ERROR boom', 'partial tail FINAL', 'INFO started'])
+      expect(messages.filter((message) => message === 'partial tail FINAL')).toHaveLength(1)
+      expect((manager as any).serverPid).toBeNull()
+      expect(manager.getLastStartupError()).toContain('exited with code 1')
+    } finally {
       readFileSyncMock.mockReset()
       readdirSyncMock.mockReset()
       Object.defineProperty(ENV.SERVER, 'NODE_ENV', { value: originalNodeEnv, configurable: true, writable: true })

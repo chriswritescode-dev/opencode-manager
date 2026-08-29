@@ -16,12 +16,27 @@ describe('useSettingsDialog', () => {
     const { result } = renderHookWithRouter(() => useSettingsDialog(), ['/?settings=open&settingsTab=git'])
     expect(result.current.isOpen).toBe(true)
     expect(result.current.activeTab).toBe('git')
+    expect(result.current.selectedTab).toBe('git')
+  })
+
+  it('falls back to account and null selectedTab for an unknown settingsTab value', () => {
+    const { result } = renderHookWithRouter(() => useSettingsDialog(), ['/?settings=open&settingsTab=log'])
+    expect(result.current.isOpen).toBe(true)
+    expect(result.current.selectedTab).toBeNull()
+    expect(result.current.activeTab).toBe('account')
+  })
+
+  it('does not treat menu as a selectable content tab', () => {
+    const { result } = renderHookWithRouter(() => useSettingsDialog(), ['/?settings=open&settingsTab=menu'])
+    expect(result.current.selectedTab).toBeNull()
+    expect(result.current.activeTab).toBe('account')
   })
 
   it('defaults activeTab to account when settingsTab is missing', () => {
     const { result } = renderHookWithRouter(() => useSettingsDialog(), ['/?settings=open'])
     expect(result.current.isOpen).toBe(true)
     expect(result.current.activeTab).toBe('account')
+    expect(result.current.selectedTab).toBeNull()
   })
 
   it('open sets settings=open and settingsTab, clears mobileTab', () => {
