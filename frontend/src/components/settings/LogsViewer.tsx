@@ -76,11 +76,11 @@ export function LogsViewer() {
     .join('\n')
 
   return (
-    <Card>
-      <CardContent className="space-y-3">
+    <Card className="border-0 bg-transparent shadow-none">
+      <CardContent className="space-y-3 p-0">
         <div className="flex flex-wrap items-center gap-2">
           <Select value={level} onValueChange={(value) => setLevel(value as LevelFilter)}>
-            <SelectTrigger className="w-44" aria-label="Log level filter">
+            <SelectTrigger className="min-w-0 flex-1 sm:w-44 sm:flex-none" aria-label="Log level filter">
               <SelectValue />
             </SelectTrigger>
             <SelectContent>
@@ -92,7 +92,7 @@ export function LogsViewer() {
             </SelectContent>
           </Select>
           <Select value={source} onValueChange={(value) => setSource(value as SourceFilter)}>
-            <SelectTrigger className="w-44" aria-label="Log source filter">
+            <SelectTrigger className="min-w-0 flex-1 sm:w-44 sm:flex-none" aria-label="Log source filter">
               <SelectValue />
             </SelectTrigger>
             <SelectContent>
@@ -107,17 +107,17 @@ export function LogsViewer() {
             value={search}
             onChange={(event) => setSearch(event.target.value)}
             placeholder="Search messages"
-            className="w-56"
+            className="order-last w-full sm:order-none sm:w-56"
             aria-label="Search log messages"
           />
           <div className="ml-auto flex items-center gap-2">
-            <Button variant="outline" size="sm" onClick={() => setPaused((value) => !value)}>
+            <Button variant="outline" size="sm" className="px-2 sm:px-3" onClick={() => setPaused((value) => !value)}>
               {paused ? <Play /> : <Pause />}
-              {paused ? 'Resume' : 'Pause'}
+              <span className="hidden sm:inline">{paused ? 'Resume' : 'Pause'}</span>
             </Button>
-            <Button variant="outline" size="sm" onClick={clear}>
+            <Button variant="outline" size="sm" className="px-2 sm:px-3" onClick={clear}>
               <Trash2 />
-              Clear
+              <span className="hidden sm:inline">Clear</span>
             </Button>
             <CopyButton content={copyContent} title="Copy log entries" variant="ghost" />
           </div>
@@ -125,26 +125,28 @@ export function LogsViewer() {
         <div
           ref={scrollRef}
           onScroll={handleScroll}
-          className="max-h-80 space-y-1 overflow-y-auto rounded-md border border-border bg-background p-2 font-mono text-xs"
+          className="h-[calc(100dvh-15rem)] min-h-80 space-y-1 overflow-y-auto rounded-md border border-border bg-background p-2 font-mono text-xs"
         >
           {entries.length === 0 ? (
             <p className="p-4 text-center font-sans text-muted-foreground">No log entries captured yet.</p>
           ) : (
             displayedEntries.map((entry) => (
               <div key={entry.seq} className="flex min-w-0 gap-2">
-                <span className="shrink-0 text-muted-foreground">
-                  {new Date(entry.timestamp).toLocaleTimeString()}
-                </span>
-                <span
-                  className={cn(
-                    'shrink-0 rounded px-1.5 py-0.5 uppercase',
-                    LEVEL_CHIP_CLASSES[entry.level]
-                  )}
-                >
-                  {entry.level}
-                </span>
-                <span className="shrink-0 text-muted-foreground">{SOURCE_LABELS[entry.source]}</span>
-                <span className="whitespace-pre-wrap break-words">{entry.message}</span>
+                <div className="flex w-20 shrink-0 flex-col items-start gap-1 border-r border-border pr-2 text-xs sm:w-auto sm:flex-row sm:items-center sm:gap-2 sm:border-r-0 sm:pr-0">
+                  <span className="whitespace-nowrap text-muted-foreground">
+                    {new Date(entry.timestamp).toLocaleTimeString()}
+                  </span>
+                  <span
+                    className={cn(
+                      'shrink-0 rounded px-1.5 py-0.5 uppercase',
+                      LEVEL_CHIP_CLASSES[entry.level]
+                    )}
+                  >
+                    {entry.level}
+                  </span>
+                  <span className="max-w-full truncate text-muted-foreground">{SOURCE_LABELS[entry.source]}</span>
+                </div>
+                <span className="min-w-0 flex-1 whitespace-pre-wrap break-words">{entry.message}</span>
               </div>
             ))
           )}
