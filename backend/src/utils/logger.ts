@@ -1,4 +1,5 @@
 import { ENV } from '@opencode-manager/shared/config/env'
+import { appendManagerLogEntry, composeLogMessage } from './log-buffer'
 
 type LogLevel = 'info' | 'warn' | 'error' | 'debug'
 
@@ -9,27 +10,36 @@ class Logger {
     this.prefix = prefix
   }
 
-  private format(level: LogLevel, message: string): string {
-    const timestamp = new Date().toISOString()
-    const prefixStr = this.prefix ? `[${this.prefix}] ` : ''
-    return `[${timestamp}] [${level.toUpperCase()}] ${prefixStr}${message}`
+  private format(level: LogLevel, composed: string): string {
+    return `[${new Date().toISOString()}] [${level.toUpperCase()}] ${composed}`
+  }
+
+  private emit(
+    level: LogLevel,
+    write: (line: string) => void,
+    message: string,
+    args: unknown[],
+  ): void {
+    const composed = composeLogMessage(this.prefix, message, args)
+    write(this.format(level, composed))
+    appendManagerLogEntry({ level, source: 'manager', message: composed })
   }
 
   info(message: string, ...args: unknown[]): void {
-    console.log(this.format('info', message), ...args)
+    this.emit('info', (line) => console.log(line), message, args)
   }
 
   warn(message: string, ...args: unknown[]): void {
-    console.warn(this.format('warn', message), ...args)
+    this.emit('warn', (line) => console.warn(line), message, args)
   }
 
   error(message: string, ...args: unknown[]): void {
-    console.error(this.format('error', message), ...args)
+    this.emit('error', (line) => console.error(line), message, args)
   }
 
   debug(message: string, ...args: unknown[]): void {
     if (ENV.LOGGING.DEBUG) {
-      console.debug(this.format('debug', message), ...args)
+      this.emit('debug', (line) => console.debug(line), message, args)
     }
   }
 }
