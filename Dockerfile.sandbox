@@ -22,10 +22,15 @@ ENV NODE_PATH=/usr/local/lib/node_modules
 # and pip caches, git config, gh config, the pnpm store) fails with EACCES.
 # Point HOME at a sticky world-writable directory and give corepack a shared
 # prewarmed cache so the preinstalled pnpm resolves without network or root.
+# PNPM_CONFIG_STORE_DIR pins the pnpm store to a container-internal path:
+# pnpm 11 no longer reads npm_config_* env vars, and an unpinned store falls
+# back into the bind-mounted project directory, where it floods the host file
+# watcher and gets committed.
 ENV HOME=/home/ocm-agent
 ENV COREPACK_HOME=/usr/local/share/corepack
 ENV UV_TOOL_BIN_DIR=/opt/agent-tools/bin
 ENV PNPM_HOME=/opt/agent-tools
+ENV PNPM_CONFIG_STORE_DIR=/home/ocm-agent/.local/share/pnpm/store
 ENV PATH=/opt/agent-tools/bin:$PATH
 
 RUN echo "Installing gh and CLI tooling (cachebust=${TOOLS_CACHEBUST})" && \

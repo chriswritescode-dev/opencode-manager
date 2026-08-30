@@ -224,6 +224,16 @@ describe('docker lifecycle scripts', () => {
   })
 })
 
+describe('sandbox guest image', () => {
+  const sandboxDockerfilePath = join(repoRoot, 'Dockerfile.sandbox')
+  const sandboxDockerfile = read(sandboxDockerfilePath)
+
+  it('pins the pnpm store to a container-internal path via PNPM_CONFIG_STORE_DIR', () => {
+    expect(sandboxDockerfile).toContain('PNPM_CONFIG_STORE_DIR=/home/ocm-agent/.local/share/pnpm/store')
+    expect(sandboxDockerfile, 'pnpm 11 ignores npm_config_* env vars').not.toContain('npm_config_store_dir=')
+  })
+})
+
 describe('sandbox compose overlay', () => {
   const overlayPath = join(repoRoot, 'docker-compose.sandbox.yml')
   const overlay = read(overlayPath)
