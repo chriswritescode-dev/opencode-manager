@@ -3,7 +3,7 @@ import { spawnSync } from 'child_process'
 import { mkdirSync, mkdtempSync, rmSync, symlinkSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import path from 'node:path'
-import { ENV, getAssistantOpenCodeDir, getReposPath, getScheduleWorktreesPath } from '@opencode-manager/shared/config/env'
+import { ENV, getAssistantOpenCodeDir, getOpenCodeAgentTmpPath, getOpenCodeGlobalSkillsPath, getOpenCodeToolOutputPath, getReposPath, getScheduleWorktreesPath } from '@opencode-manager/shared/config/env'
 import { unwrapSandboxExecCommand } from '@opencode-manager/shared/utils'
 import {
   WORKSPACE_SANDBOX_NAME,
@@ -18,6 +18,7 @@ import {
   buildSandboxStartArgs,
   buildSandboxStopManagedArgs,
   buildSandboxVersionArgs,
+  isPathWithinRoot,
   quoteForShell,
   resolveExpectedSandboxNetworkPolicy,
   resolveSandboxExecUser,
@@ -70,7 +71,7 @@ describe('sandbox command builders', () => {
     expect(result.stdout).toBe(value)
   })
 
-  it('builds create args with exactly two identical-path bind mounts and the detached flag', () => {
+  it('builds create args with exactly five identical-path bind mounts and the detached flag', () => {
     const args = buildSandboxCreateArgs()
 
     expect(args[0]).toBe('run')
@@ -100,6 +101,9 @@ describe('sandbox command builders', () => {
     expect(mountArgs).toEqual(sandboxMountRoots().map((root) => `${root}:${root}`))
     expect(mountArgs[0]).toBe(`${getReposPath()}:${getReposPath()}`)
     expect(mountArgs[1]).toBe(`${getScheduleWorktreesPath()}:${getScheduleWorktreesPath()}`)
+    expect(mountArgs[2]).toBe(`${getOpenCodeToolOutputPath()}:${getOpenCodeToolOutputPath()}`)
+    expect(mountArgs[3]).toBe(`${getOpenCodeGlobalSkillsPath()}:${getOpenCodeGlobalSkillsPath()}`)
+    expect(mountArgs[4]).toBe(`${getOpenCodeAgentTmpPath()}:${getOpenCodeAgentTmpPath()}`)
   })
 
   it('never masks the assistant .opencode directory with a tmpfs overlay', () => {
@@ -118,15 +122,28 @@ describe('sandbox command builders', () => {
     expect(args.indexOf(ENV.SANDBOX.IMAGE)).toBeGreaterThan(entrypointIndex + 1)
   })
 
-  it('never mounts the SSH/config/state workspace directories', () => {
-    const joined = buildSandboxCreateArgs().join(' ')
+  it('mounts only the skills, tool-output, and agent tmp directories from outside the project roots', () => {
     const workspacePath = path.dirname(getReposPath())
+    const roots = sandboxMountRoots()
 
-    expect(joined).not.toContain(`${workspacePath}/.config`)
-    expect(joined).not.toContain(`${workspacePath}/config`)
-    expect(joined).not.toContain('auth.json')
-    expect(joined).not.toContain(`${workspacePath}/.opencode`)
-    expect(joined).not.toContain('/.opencode/state')
+    expect(roots.filter((root) => isPathWithinRoot(path.join(workspacePath, '.config'), root))).toEqual([
+      getOpenCodeGlobalSkillsPath(),
+    ])
+    expect(roots.filter((root) => isPathWithinRoot(path.join(workspacePath, '.opencode'), root))).toEqual([
+      getOpenCodeToolOutputPath(),
+      getOpenCodeAgentTmpPath(),
+    ])
+
+    for (const sensitive of [
+      path.join(workspacePath, 'config'),
+      path.join(workspacePath, '.ssh-keys'),
+      path.join(workspacePath, '.config', 'ocm'),
+      path.join(workspacePath, '.config', 'opencode', 'plugin'),
+      path.join(workspacePath, '.opencode', 'state', 'opencode', 'auth.json'),
+      path.join(workspacePath, '.opencode', 'state', 'opencode', 'mcp-auth.json'),
+    ]) {
+      expect(roots.some((root) => isPathWithinRoot(root, sensitive))).toBe(false)
+    }
   })
 
   it('derives a canonical spec from the create args matching the security configuration', () => {
@@ -158,8 +175,14 @@ describe('sandbox command builders', () => {
     expect(lifecycle.idle_timeout_secs).toBeNull()
 
     const binds = mounts.filter((mount) => mount.type === 'Bind')
-    expect(binds).toHaveLength(2)
-    expect(binds.map((mount) => mount.host)).toEqual([getReposPath(), getScheduleWorktreesPath()])
+    expect(binds).toHaveLength(5)
+    expect(binds.map((mount) => mount.host)).toEqual([
+      getReposPath(),
+      getScheduleWorktreesPath(),
+      getOpenCodeToolOutputPath(),
+      getOpenCodeGlobalSkillsPath(),
+      getOpenCodeAgentTmpPath(),
+    ])
     for (const mount of binds) {
       expect(mount.guest).toBe(mount.host)
       const options = mount.options as Record<string, boolean>
@@ -185,6 +208,9 @@ describe('sandbox command builders', () => {
       mkdirSync(path.join(repos, 'org', 'repo', 'subdir'), { recursive: true })
       mkdirSync(path.join(schedules, 'job-1-run-2'), { recursive: true })
       mkdirSync(path.join(tmp, '.config', 'opencode'), { recursive: true })
+      mkdirSync(path.join(tmp, '.opencode', 'state', 'opencode', 'tool-output'), { recursive: true })
+      mkdirSync(path.join(tmp, '.opencode', 'tmp', 'opencode'), { recursive: true })
+      mkdirSync(path.join(tmp, '.config', 'opencode', 'skills'), { recursive: true })
 
       process.env.WORKSPACE_PATH = tmp
       const { resolveSandboxWorkDirectory } = await import('../../../src/services/sandbox/command')
@@ -197,6 +223,9 @@ describe('sandbox command builders', () => {
         path.join(schedules, 'job-1-run-2'),
       )
       await expect(resolveSandboxWorkDirectory(path.join(repos, '..', '.config', 'opencode'))).resolves.toBeNull()
+      await expect(resolveSandboxWorkDirectory(getOpenCodeToolOutputPath())).resolves.toBeNull()
+      await expect(resolveSandboxWorkDirectory(getOpenCodeGlobalSkillsPath())).resolves.toBeNull()
+      await expect(resolveSandboxWorkDirectory(getOpenCodeAgentTmpPath())).resolves.toBeNull()
       await expect(resolveSandboxWorkDirectory(`${repos}-extra`)).resolves.toBeNull()
       await expect(resolveSandboxWorkDirectory(path.join(repos, 'missing'))).resolves.toBeNull()
       await expect(resolveSandboxWorkDirectory('/etc')).resolves.toBeNull()

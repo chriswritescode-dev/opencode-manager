@@ -125,6 +125,7 @@ export const BLOCKED_SERVER_ENV_KEYS = [
   'XDG_DATA_HOME',
   'XDG_STATE_HOME',
   'XDG_CONFIG_HOME',
+  'TMPDIR',
 ] as const;
 
 export const DEFAULT_GIT_IDENTITY: GitIdentity = {

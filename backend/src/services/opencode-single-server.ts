@@ -17,7 +17,15 @@ import {
 import { decryptSecret } from '../utils/crypto'
 import { BLOCKED_SERVER_ENV_KEYS, DEFAULT_SERVER_ENV_VARS } from '@opencode-manager/shared'
 import { SettingsService } from './settings'
-import { getWorkspacePath, getOpenCodeConfigFilePath, ENV } from '@opencode-manager/shared/config/env'
+import {
+  getWorkspacePath,
+  getOpenCodeAgentTmpPath,
+  getOpenCodeConfigFilePath,
+  getOpenCodeConfigHome,
+  getOpenCodeStateHome,
+  getOpenCodeTmpHome,
+  ENV,
+} from '@opencode-manager/shared/config/env'
 import { parseJsonc } from '@opencode-manager/shared/utils'
 import type { Database } from 'bun:sqlite'
 import { compareVersions } from '../utils/version-utils'
@@ -538,7 +546,7 @@ class OpenCodeServerManager {
     const openCodeServerDirectory = getOpenCodeServerDirectory()
     const openCodeConfigPath = getOpenCodeConfigPath()
     logger.info(`OpenCode server working directory: ${openCodeServerDirectory}`)
-    logger.info(`OpenCode XDG_CONFIG_HOME: ${path.join(openCodeServerDirectory, '.config')}`)
+    logger.info(`OpenCode XDG_CONFIG_HOME: ${getOpenCodeConfigHome()}`)
     logger.info(`OpenCode will use ?directory= parameter for session isolation`)
 
     const gitEnv = credentialProvider?.getGitEnv() ?? {}
@@ -589,7 +597,8 @@ class OpenCodeServerManager {
     logger.info(`OpenCode server GIT_SSH_COMMAND: ${gitSshCommand}`)
 
     await this.initializeOpencodeBinDirectory()
-    const pluginConfigHome = path.join(openCodeServerDirectory, '.config')
+    await this.resetAgentTmpDirectory()
+    const pluginConfigHome = getOpenCodeConfigHome()
     try {
       await restoreQuarantinedOpenCodePlugins(pluginConfigHome, openCodeConfigPath)
     } catch (error) {
@@ -645,9 +654,10 @@ class OpenCodeServerManager {
           OCM_SANDBOX_ENFORCED: sandboxEnforced ? 'true' : 'false',
           OPENCODE_PURE: 'false',
           GIT_SSH_COMMAND: gitSshCommand,
-          XDG_DATA_HOME: path.join(openCodeServerDirectory, '.opencode/state'),
-          XDG_STATE_HOME: path.join(openCodeServerDirectory, '.opencode/state'),
-          XDG_CONFIG_HOME: path.join(openCodeServerDirectory, '.config'),
+          XDG_DATA_HOME: getOpenCodeStateHome(),
+          XDG_STATE_HOME: getOpenCodeStateHome(),
+          XDG_CONFIG_HOME: getOpenCodeConfigHome(),
+          TMPDIR: getOpenCodeTmpHome(),
           ...(getOpenCodeServerPublicUrl() ? { OPENCODE_PUBLIC_URL: getOpenCodeServerPublicUrl() } : {}),
           ...(password
             ? {
@@ -863,14 +873,19 @@ class OpenCodeServerManager {
     }
   }
 
+  private async resetAgentTmpDirectory(): Promise<void> {
+    const tmpDir = getOpenCodeAgentTmpPath()
+    try {
+      await mkdirSafe(tmpDir)
+      const entries = await fs.readdir(tmpDir)
+      await Promise.all(entries.map((entry) => fs.rm(path.join(tmpDir, entry), { recursive: true, force: true })))
+    } catch (error) {
+      logger.warn(`Failed to reset the agent temporary directory ${tmpDir}:`, error)
+    }
+  }
+
   private async initializeOpencodeBinDirectory(): Promise<void> {
-    const binDir = path.join(
-      getOpenCodeServerDirectory(),
-      '.opencode',
-      'state',
-      'opencode',
-      'bin'
-    )
+    const binDir = path.join(getOpenCodeStateHome(), 'opencode', 'bin')
 
     const packageJsonPath = path.join(binDir, 'package.json')
 

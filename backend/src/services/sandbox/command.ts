@@ -1,7 +1,14 @@
 import path from 'path'
 import { accessSync, constants, realpathSync, statSync } from 'fs'
 import { realpath } from 'fs/promises'
-import { ENV, getReposPath, getScheduleWorktreesPath } from '@opencode-manager/shared/config/env'
+import {
+  ENV,
+  getOpenCodeAgentTmpPath,
+  getOpenCodeGlobalSkillsPath,
+  getOpenCodeToolOutputPath,
+  getReposPath,
+  getScheduleWorktreesPath,
+} from '@opencode-manager/shared/config/env'
 
 export const WORKSPACE_SANDBOX_NAME = 'ocm-workspace'
 
@@ -145,8 +152,17 @@ export function buildSandboxVerifyProvisionArgs(): string[] {
   ]
 }
 
-export function sandboxMountRoots(): string[] {
+export function sandboxProjectRoots(): string[] {
   return [getReposPath(), getScheduleWorktreesPath()]
+}
+
+export function sandboxMountRoots(): string[] {
+  return [
+    ...sandboxProjectRoots(),
+    getOpenCodeToolOutputPath(),
+    getOpenCodeGlobalSkillsPath(),
+    getOpenCodeAgentTmpPath(),
+  ]
 }
 
 export function quoteForShell(value: string): string {
@@ -449,7 +465,7 @@ export async function resolveSandboxWorkDirectory(directory: string): Promise<st
     return null
   }
 
-  for (const root of sandboxMountRoots()) {
+  for (const root of sandboxProjectRoots()) {
     let resolvedRoot: string
     try {
       resolvedRoot = await realpath(root)

@@ -131,7 +131,7 @@ export async function ensureSandboxShellShim(configHome: string): Promise<string
   const mountRoot = sandboxMountRoots().find((root) => isPathWithinRoot(root, shimPath))
   if (mountRoot !== undefined) {
     throw new Error(
-      `refusing to install the sandbox shell shim at ${shimPath}: the path is inside the sandboxed project root ${mountRoot} and would be writable by agent commands`,
+      `refusing to install the sandbox shell shim at ${shimPath}: the path is inside the sandbox mount root ${mountRoot} and would be writable by agent commands`,
     )
   }
   await writeFileAtomic(shimPath, buildSandboxShellShimScript(), { mode: 0o700 })

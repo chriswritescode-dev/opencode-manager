@@ -22,6 +22,7 @@ describe('settings schema - BLOCKED_SERVER_ENV_KEYS', () => {
     expect(blocked.has('XDG_DATA_HOME')).toBe(true)
     expect(blocked.has('XDG_STATE_HOME')).toBe(true)
     expect(blocked.has('XDG_CONFIG_HOME')).toBe(true)
+    expect(blocked.has('TMPDIR')).toBe(true)
   })
 })
 

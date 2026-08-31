@@ -3,7 +3,7 @@ import { Database } from 'bun:sqlite'
 import { mkdirSync, mkdtempSync, realpathSync, rmSync, symlinkSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import path from 'node:path'
-import { ENV, getAssistantOpenCodeDir, getReposPath, getScheduleWorktreesPath } from '@opencode-manager/shared/config/env'
+import { ENV, getAssistantOpenCodeDir, getOpenCodeAgentTmpPath, getOpenCodeGlobalSkillsPath, getOpenCodeToolOutputPath, getReposPath, getScheduleWorktreesPath } from '@opencode-manager/shared/config/env'
 import { migrate } from '../../../src/db/migration-runner'
 import { allMigrations } from '../../../src/db/migrations'
 import { SettingsService } from '../../../src/services/settings'
@@ -40,6 +40,9 @@ process.env.WORKSPACE_PATH = suiteWorkspaceParent
 
 const reposRoot = getReposPath()
 const worktreesRoot = getScheduleWorktreesPath()
+const toolOutputRoot = getOpenCodeToolOutputPath()
+const skillsRoot = getOpenCodeGlobalSkillsPath()
+const agentTmpRoot = getOpenCodeAgentTmpPath()
 const repoADir = path.join(reposRoot, 'repo-a')
 const repoBDir = path.join(reposRoot, 'repo-b')
 const worktreeDir = path.join(worktreesRoot, 'job-1-run-2')
@@ -60,6 +63,9 @@ describe('SandboxRuntimeService', () => {
     mkdirSync(repoADir, { recursive: true })
     mkdirSync(repoBDir, { recursive: true })
     mkdirSync(worktreeDir, { recursive: true })
+    mkdirSync(toolOutputRoot, { recursive: true })
+    mkdirSync(skillsRoot, { recursive: true })
+    mkdirSync(agentTmpRoot, { recursive: true })
   })
 
   afterEach(() => {
@@ -144,6 +150,9 @@ describe('SandboxRuntimeService', () => {
       mounts: [
         bindMount(reposRoot),
         bindMount(worktreesRoot),
+        bindMount(toolOutputRoot),
+        bindMount(skillsRoot),
+        bindMount(agentTmpRoot),
         tmpfsMount('/tmp', runtimeTmpfsSizeMib()),
       ],
       patches: [],
@@ -617,6 +626,9 @@ describe('SandboxRuntimeService', () => {
                 mounts: [
                   bindMount(reposRoot),
                   bindMount(worktreesRoot),
+                  bindMount(toolOutputRoot),
+                  bindMount(skillsRoot),
+                  bindMount(agentTmpRoot),
                   bindMount('/workspace/config'),
                 ],
               }),
@@ -750,6 +762,9 @@ describe('SandboxRuntimeService', () => {
               mounts: [
                 bindMount(reposRoot),
                 bindMount(worktreesRoot),
+                bindMount(toolOutputRoot),
+                bindMount(skillsRoot),
+                bindMount(agentTmpRoot),
                 bindMount('/workspace/config'),
               ],
             }),
@@ -786,6 +801,9 @@ describe('SandboxRuntimeService', () => {
             mounts: [
               bindMount(reposRoot),
               bindMount(worktreesRoot),
+              bindMount(toolOutputRoot),
+              bindMount(skillsRoot),
+              bindMount(agentTmpRoot),
               tmpfsMount(reposRoot, 512),
             ],
           })),
@@ -978,6 +996,9 @@ describe('SandboxRuntimeService', () => {
             mounts: [
               bindMount(reposRoot),
               bindMount(worktreesRoot),
+              bindMount(toolOutputRoot),
+              bindMount(skillsRoot),
+              bindMount(agentTmpRoot),
               tmpfsMount(path.join(reposRoot, 'repo-a', 'src'), 512),
             ],
           })),
@@ -1016,6 +1037,9 @@ describe('SandboxRuntimeService', () => {
               mounts: [
                 bindMount(reposRoot),
                 bindMount(worktreesRoot),
+                bindMount(toolOutputRoot),
+                bindMount(skillsRoot),
+                bindMount(agentTmpRoot),
                 bindMount('/workspace/config'),
               ],
             }),
@@ -1122,6 +1146,9 @@ describe('SandboxRuntimeService', () => {
               mounts: [
                 bindMount(reposRoot),
                 bindMount(worktreesRoot),
+                bindMount(toolOutputRoot),
+                bindMount(skillsRoot),
+                bindMount(agentTmpRoot),
                 bindMount('/workspace/config'),
               ],
             }),
@@ -1213,6 +1240,9 @@ describe('SandboxRuntimeService', () => {
             mounts: [
               bindMount(reposRoot),
               bindMount(worktreesRoot),
+              bindMount(toolOutputRoot),
+              bindMount(skillsRoot),
+              bindMount(agentTmpRoot),
               tmpfsMount('/tmp', runtimeTmpfsSizeMib()),
             ],
           })),
@@ -1900,6 +1930,9 @@ describe('SandboxRuntimeService', () => {
               mounts: [
                 { ...bindMount(reposRoot), options: { readonly: false, noexec: true, nosuid: false, nodev: false } },
                 bindMount(worktreesRoot),
+                bindMount(toolOutputRoot),
+                bindMount(skillsRoot),
+                bindMount(agentTmpRoot),
               ],
             }),
           ),
@@ -2746,6 +2779,9 @@ describe('SandboxRuntimeService', () => {
         mounts: [
           bindMount(reposRoot),
           bindMount(worktreesRoot),
+          bindMount(toolOutputRoot),
+          bindMount(skillsRoot),
+          bindMount(agentTmpRoot),
           { type: 'Tmpfs', guest: '/tmp', size_mib: runtimeTmpfsSizeMib(), ...mountOverrides },
         ],
       }),
@@ -2759,6 +2795,9 @@ describe('SandboxRuntimeService', () => {
         mounts: [
           { ...bindMount(reposRoot), follow_root_symlinks: true },
           bindMount(worktreesRoot),
+          bindMount(toolOutputRoot),
+          bindMount(skillsRoot),
+          bindMount(agentTmpRoot),
         ],
       }),
       'follow_root_symlinks',
@@ -2771,6 +2810,9 @@ describe('SandboxRuntimeService', () => {
         mounts: [
           { ...bindMount(reposRoot), host_permissions: 'public' },
           bindMount(worktreesRoot),
+          bindMount(toolOutputRoot),
+          bindMount(skillsRoot),
+          bindMount(agentTmpRoot),
         ],
       }),
       'host_permissions',
@@ -2783,6 +2825,9 @@ describe('SandboxRuntimeService', () => {
         mounts: [
           { ...bindMount(reposRoot), stat_virtualization: 'none' },
           bindMount(worktreesRoot),
+          bindMount(toolOutputRoot),
+          bindMount(skillsRoot),
+          bindMount(agentTmpRoot),
         ],
       }),
       'stat_virtualization',
@@ -2795,6 +2840,9 @@ describe('SandboxRuntimeService', () => {
         mounts: [
           { ...bindMount(reposRoot), quota_mib: 512 },
           bindMount(worktreesRoot),
+          bindMount(toolOutputRoot),
+          bindMount(skillsRoot),
+          bindMount(agentTmpRoot),
         ],
       }),
       'quota_mib',
@@ -2877,6 +2925,9 @@ describe('SandboxRuntimeService', () => {
         mounts: [
           bindMount(reposRoot),
           bindMount(worktreesRoot),
+          bindMount(toolOutputRoot),
+          bindMount(skillsRoot),
+          bindMount(agentTmpRoot),
         ],
       }),
       'missing the runtime tmpfs mount at /tmp',
@@ -2889,6 +2940,9 @@ describe('SandboxRuntimeService', () => {
         mounts: [
           bindMount(reposRoot),
           bindMount(worktreesRoot),
+          bindMount(toolOutputRoot),
+          bindMount(skillsRoot),
+          bindMount(agentTmpRoot),
           tmpfsMount('/tmp', runtimeTmpfsSizeMib()),
           tmpfsMount('/tmp', runtimeTmpfsSizeMib()),
         ],
@@ -2903,6 +2957,9 @@ describe('SandboxRuntimeService', () => {
         mounts: [
           bindMount(reposRoot),
           bindMount(worktreesRoot),
+          bindMount(toolOutputRoot),
+          bindMount(skillsRoot),
+          bindMount(agentTmpRoot),
           tmpfsMount('/tmp', runtimeTmpfsSizeMib() + 1),
         ],
       }),
@@ -2916,6 +2973,9 @@ describe('SandboxRuntimeService', () => {
         mounts: [
           bindMount(reposRoot),
           bindMount(worktreesRoot),
+          bindMount(toolOutputRoot),
+          bindMount(skillsRoot),
+          bindMount(agentTmpRoot),
           { type: 'Tmpfs', guest: '/tmp', size_mib: runtimeTmpfsSizeMib(), options: { readonly: true, noexec: false, nosuid: false, nodev: false } },
         ],
       }),
@@ -2972,6 +3032,9 @@ describe('SandboxRuntimeService', () => {
         mounts: [
           bindMount(reposRoot),
           bindMount(worktreesRoot),
+          bindMount(toolOutputRoot),
+          bindMount(skillsRoot),
+          bindMount(agentTmpRoot),
           tmpfsMount('/dev/shm', 64),
           tmpfsMount('/tmp', runtimeTmpfsSizeMib()),
         ],
@@ -2986,6 +3049,9 @@ describe('SandboxRuntimeService', () => {
         mounts: [
           bindMount(reposRoot),
           bindMount(worktreesRoot),
+          bindMount(toolOutputRoot),
+          bindMount(skillsRoot),
+          bindMount(agentTmpRoot),
           tmpfsMount(getAssistantOpenCodeDir(), null),
           tmpfsMount('/tmp', runtimeTmpfsSizeMib()),
         ],

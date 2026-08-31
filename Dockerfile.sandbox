@@ -1,9 +1,10 @@
 # Guest image for the agent sandbox microVM (SANDBOX_IMAGE).
 #
 # node:24 is buildpack-deps based, so gcc/g++/make/ld/pkg-config, glib-2.0,
-# git, ssh, python3 and curl are already present. This image adds the rest of
-# the Manager image toolchain (pnpm, bun, uv, jq) and the GitHub CLI and a
-# Playwright-managed Chromium.
+# git, ssh, python3, curl and wget are already present, but it ships no network
+# diagnostics at all. This image adds the rest of the Manager image toolchain
+# (pnpm, bun, uv, jq), the GitHub CLI, a Playwright-managed Chromium, the
+# `python` alias, and the network tooling agents reach for.
 FROM node:24
 
 ARG PLAYWRIGHT_VERSION=1.56.0
@@ -37,7 +38,9 @@ RUN echo "Installing gh and CLI tooling (cachebust=${TOOLS_CACHEBUST})" && \
     apt-get update && \
     apt-get install -y --no-install-recommends \
         ca-certificates curl gh jq less ripgrep sudo tree file procps \
-        python3-pip python3-venv && \
+        python3-pip python3-venv python-is-python3 \
+        iproute2 iputils-ping bind9-dnsutils bind9-host net-tools \
+        netcat-openbsd traceroute lsof rsync && \
     curl -fsSL https://cli.github.com/packages/githubcli-archive-keyring.gpg \
         -o /usr/share/keyrings/githubcli-archive-keyring.gpg && \
     chmod go+r /usr/share/keyrings/githubcli-archive-keyring.gpg && \
@@ -88,7 +91,7 @@ RUN echo "Verifying guest toolchain as an unknown uid (cachebust=${TOOLS_CACHEBU
     rm -rf /home/ocm-agent && \
     mkdir -p /home/ocm-agent && \
     chmod 1777 /home/ocm-agent && \
-    setpriv --reuid=4242 --regid=4242 --clear-groups sh -c "set -e; pnpm --version; bun --version; bunx --version; uv --version; uvx --version; playwright --version; gh --version; jq --version; rg --version; npm install -g --silent cowsay && cowsay -t verify-ok | head -1; git config --global user.email verify@ocm.local; uv venv /tmp/uv-check >/dev/null; uv pip install --python /tmp/uv-check/bin/python idna >/dev/null; pip3 install --user --force-reinstall --no-deps --quiet idna; rm -rf /tmp/uv-check" && \
+    setpriv --reuid=4242 --regid=4242 --clear-groups sh -c "set -e; pnpm --version; bun --version; bunx --version; uv --version; uvx --version; playwright --version; gh --version; jq --version; rg --version; npm install -g --silent cowsay && cowsay -t verify-ok | head -1; git config --global user.email verify@ocm.local; uv venv /tmp/uv-check >/dev/null; uv pip install --python /tmp/uv-check/bin/python idna >/dev/null; pip3 install --user --force-reinstall --no-deps --quiet idna; rm -rf /tmp/uv-check; for tool in python python3 git curl wget ssh rsync lsof ip ss netstat ping dig host nslookup nc traceroute; do command -v \"\$tool\" >/dev/null || { echo \"missing guest tool: \$tool\"; exit 1; }; done; python --version" && \
     setpriv --reuid=1000 --regid=1000 --clear-groups sh -c "set -e; sudo -n apt-get update -qq; sudo -n apt-get install -y -qq --no-install-recommends bc; bc --version | head -1" && \
     rm -rf /home/ocm-agent /opt/agent-tools /var/lib/apt/lists/* && \
     mkdir -p /home/ocm-agent /opt/agent-tools/bin && \

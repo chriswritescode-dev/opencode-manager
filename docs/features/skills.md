@@ -9,6 +9,8 @@ Skills are reusable instruction sets that provide domain-specific workflows and 
 | **Global** | `$WORKSPACE_PATH/.config/opencode/skills/<name>/SKILL.md` (defaults to `./workspace/.config/opencode/skills/`) | Available across all repositories |
 | **Project** | `<repo>/.opencode/skills/<name>/SKILL.md` | Scoped to a specific repository |
 
+Both scopes are mounted into the microVM when [sandboxing](./sandboxing.md) is enforced, so a skill that bundles scripts or reference files can run them from a sandboxed `bash` call. Because the mount is writable, an agent command can also modify a global skill, which affects every later session in every repository.
+
 ## Skill File Format
 
 Each skill is a `SKILL.md` file with YAML frontmatter and a markdown body:

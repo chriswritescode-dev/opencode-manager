@@ -26,6 +26,10 @@ vi.mock('bun:sqlite', () => ({
 vi.mock('@opencode-manager/shared/config/env', () => ({
   getWorkspacePath: vi.fn(() => '/test/workspace'),
   getOpenCodeConfigFilePath: vi.fn(() => '/test/workspace/.config/opencode.json'),
+  getOpenCodeStateHome: vi.fn(() => '/test/workspace/.opencode/state'),
+  getOpenCodeConfigHome: vi.fn(() => '/test/workspace/.config'),
+  getOpenCodeTmpHome: vi.fn(() => '/test/workspace/.opencode/tmp'),
+  getOpenCodeAgentTmpPath: vi.fn(() => '/test/workspace/.opencode/tmp/opencode'),
   getReposPath: vi.fn(() => '/test/workspace/repos'),
   getAgentsMdPath: vi.fn(() => '/test/workspace/AGENTS.md'),
   getDatabasePath: vi.fn(() => ':memory:'),
@@ -138,6 +142,8 @@ vi.mock('../../src/utils/logger', () => ({
 const mkdirMock = fs.mkdir as any
 const accessMock = fs.access as any
 const readFileMock = fs.readFile as any
+const readdirMock = fs.readdir as any
+const rmMock = fs.rm as any
 const execSyncMock = execSync as any
 const childSpawnSyncMock = spawnSync as any
 const readdirSyncMock = readdirSync as any
@@ -508,6 +514,21 @@ describe('OpenCodeServerManager - server auth', () => {
 
     const env = (spawnMock.mock.calls[0] as unknown as [unknown, unknown, { env: Record<string, string> }])[2].env
     expect(env.OPENCODE_PURE).toBe('false')
+  })
+
+  it('points TMPDIR at the workspace temp home and clears the mounted agent temp directory before spawning', async () => {
+    const { OpenCodeServerManager } = await import('../../src/services/opencode-single-server')
+    const manager = OpenCodeServerManager.getInstance()
+    manager.setDatabase(createPasswordDb(null))
+    readdirMock.mockResolvedValue(['stale-run', 'leftover.txt'])
+
+    await manager.start()
+
+    const env = (spawnMock.mock.calls[0] as unknown as [unknown, unknown, { env: Record<string, string> }])[2].env
+    expect(env.TMPDIR).toBe('/test/workspace/.opencode/tmp')
+    expect(mkdirMock).toHaveBeenCalledWith('/test/workspace/.opencode/tmp/opencode', expect.objectContaining({ recursive: true }))
+    expect(rmMock).toHaveBeenCalledWith('/test/workspace/.opencode/tmp/opencode/stale-run', { recursive: true, force: true })
+    expect(rmMock).toHaveBeenCalledWith('/test/workspace/.opencode/tmp/opencode/leftover.txt', { recursive: true, force: true })
   })
 
   it('strips an inherited OPENCODE_PURE from the manager process env before spawning', async () => {

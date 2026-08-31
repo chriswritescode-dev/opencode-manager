@@ -67,7 +67,7 @@ The overlay exposes `/dev/kvm`, `/dev/net/tun`, and `NET_ADMIN` without enabling
 
 All projects share one microVM named `ocm-workspace`:
 
-- It mounts `/workspace/repos` and `/workspace/schedule-worktrees` at identical guest paths.
+- It mounts the two project roots plus the OpenCode directories agents are handed absolute paths to, at identical guest paths. See [Mounts and Secrets](#mounts-and-secrets).
 - Repositories and worktrees created after boot are visible immediately because their parent roots are mounted.
 - Each command supplies its own working directory through `msb exec -w`.
 - A session outside the mounted roots is refused rather than executed on the host.
@@ -87,14 +87,25 @@ msb rm --force --label ocm.managed=true
 
 The microVM receives writable bind mounts for:
 
-- `/workspace/repos`
-- `/workspace/schedule-worktrees`
+| Host path | Why it is mounted |
+|-----------|-------------------|
+| `/workspace/repos` | Project root |
+| `/workspace/schedule-worktrees` | Project root |
+| `/workspace/.opencode/state/opencode/tool-output` | Where OpenCode saves the full content of a truncated tool result before handing the agent that absolute path |
+| `/workspace/.config/opencode/skills` | Global skills, including the scripts and reference files a skill bundles and refers to by absolute path |
+| `/workspace/.opencode/tmp/opencode` | The temporary directory the `bash` tool description tells agents to use for work outside the workspace |
+
+Each is mounted at the identical guest path. That is the point: OpenCode hands the model absolute host paths, and the host-side `read`, `write`, and `glob` tools resolve them against the container. A path that is not mounted resolves for those tools but not for a sandboxed `bash` call, which is how an agent ends up searching for a file it was just told the exact location of.
+
+Only the two project roots are accepted as working directories. The other three mounts are readable and writable but are never a valid working directory, so `bash` calls still have to run inside a repository or a schedule worktree.
 
 No internal API token exists anywhere under the mounted roots. The token lives in the Manager's database and reaches the generated plugins only through the `OCM_INTERNAL_TOKEN` environment variable of the Manager's own OpenCode process, which is never part of the guest environment.
 
 Because `localhost` inside the microVM is the guest rather than the Manager, and because the guest has no token to present, an agent command cannot call the internal API with `curl`. Agents reach the Manager through the `ocm` tool instead, which executes in the Manager's own OpenCode process. The tool's `request` action covers settings, repos, OpenCode workspaces, and schedules through an allow-list of internal API routes, while `send_notification` covers push notifications.
 
-The microVM also mounts a runtime-owned tmpfs at `/tmp`. It is sized to one quarter of the microVM memory, clamped to 1-512 MiB, so agent commands get writable scratch space that is not backed by a host filesystem.
+The microVM also mounts a runtime-owned tmpfs at `/tmp`. It is sized to one quarter of the microVM memory, clamped to 1-512 MiB, so agent commands get guest-only scratch space that is not backed by a host filesystem.
+
+The agent temporary directory is separate from that tmpfs. The Manager sets `TMPDIR=/workspace/.opencode/tmp` on the OpenCode child, which puts OpenCode's own temporary directory at `/workspace/.opencode/tmp/opencode` — the path its `bash` tool description advertises — so the same files are visible to sandboxed commands and to the host-side file tools. Everything else under `TMPDIR` (temporary files from host-side `git`, `gh`, and MCP servers) stays out of the guest. The Manager empties the mounted directory each time it starts the OpenCode child, matching the lifetime it had in the container's `/tmp`; it clears the contents rather than the directory itself, because replacing the directory would detach a running microVM's bind mount.
 
 The following remain outside the microVM:
 
@@ -102,8 +113,9 @@ The following remain outside the microVM:
 |-----------|----------|
 | `/workspace/config` | SSH configuration and known hosts |
 | `/workspace/.ssh-keys` | Repository SSH private keys |
-| `/workspace/.config` | OpenCode configuration and generated plugins |
-| `/workspace/.opencode/state` | Provider credentials |
+| `/workspace/.config/opencode/plugin`, `/workspace/.config/ocm` | Generated plugins and the shell shim — the enforcement mechanism itself |
+| `/workspace/.config/opencode` (except `skills`) | OpenCode configuration |
+| `/workspace/.opencode/state` (except `opencode/tool-output`) | Provider and MCP credentials |
 
 OpenCode's host process still reads these paths normally. They are omitted only from the agent command environment.
 
@@ -157,13 +169,15 @@ Understand the trade-off before enabling it. `msb exec -e` is the only injection
 `SANDBOX_IMAGE` defaults to a digest-pinned reference of `docker.io/cstechdev/ocm-sandbox`, built from `Dockerfile.sandbox` in this repository and published for `linux/amd64` and `linux/arm64` from a build host with `docker buildx`:
 
 ```bash
-docker buildx build --platform linux/amd64,linux/arm64 \
+docker buildx build --builder <docker-container-builder> \
+  --platform linux/amd64,linux/arm64 \
   -t docker.io/cstechdev/ocm-sandbox:latest \
   --build-arg PLAYWRIGHT_VERSION=1.56.0 \
-  -f Dockerfile.sandbox --load .
-docker push docker.io/cstechdev/ocm-sandbox:latest
+  -f Dockerfile.sandbox --push .
 docker buildx imagetools inspect docker.io/cstechdev/ocm-sandbox:latest   # copy the index digest
 ```
+
+A multi-platform build needs the `docker-container` driver and pushes the manifest list directly; `--load` cannot hold two platforms, and the default `docker` driver cannot build them.
 
 Then update the pin in `shared/src/config/defaults.ts` (`SANDBOX.IMAGE`) and in the `docker-compose.sandbox.yml` default to the new `@sha256:` digest. That bump is what makes deployments adopt a rebuilt guest image, and it is deliberate rather than convenient:
 
@@ -178,7 +192,9 @@ It is `node:24` (Debian 12, `buildpack-deps` based), so the compile toolchain is
 | --- | --- | --- |
 | `gcc` / `g++` / `make` / `ld` / `pkg-config` | `node:24` | GCC 12.2, GNU Make 4.3 |
 | `glib-2.0` | `node:24` | 2.74.6, with `pkg-config` metadata |
-| `git`, `ssh`, `python3`, `curl`, `unzip` | `node:24` | git 2.39.5 |
+| `git`, `ssh`, `python3`, `curl`, `wget`, `unzip` | `node:24` | git 2.39.5 |
+| `python` | apt (`python-is-python3`) | The base image ships only `python3`; a skill or script invoking `python` would otherwise fail |
+| `ping`, `ip`, `ss`, `netstat`, `dig`, `host`, `nslookup`, `nc`, `traceroute`, `lsof`, `rsync` | apt | `node:24` ships no network diagnostics at all. The image build fails if any of these is missing |
 | `pnpm` | corepack | Prewarmed into a shared, writable `COREPACK_HOME` (`/usr/local/share/corepack`), so the exec user runs the build-time version offline. A project `packageManager` pin of a different version downloads on first use |
 | `bun`, `bunx` | official installer | Installed to `/opt/bun`, world-readable, both symlinked onto `PATH` |
 | `uv`, `uvx` | Astral installer | Standalone binaries on `PATH`; `uv tool` shims land in `/opt/agent-tools/bin`, which is on `PATH` |

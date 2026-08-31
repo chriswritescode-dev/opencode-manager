@@ -28,6 +28,7 @@ import {
   sandboxExecutablePath,
   sandboxMountRoots,
   sandboxNetworkPolicyMismatch,
+  sandboxProjectRoots,
 } from './command'
 
 const SANDBOX_LS_CACHE_MS = 5000
@@ -91,11 +92,11 @@ async function validateSandboxMountRoots(): Promise<void> {
       stat = await lstat(root)
     }
     if (stat.isSymbolicLink()) {
-      throw new Error(`sandbox mount root ${root} is a symbolic link; refusing to mount a redirected project root`)
+      throw new Error(`sandbox mount root ${root} is a symbolic link; refusing to mount a redirected root`)
     }
     const canonical = await realpath(root)
     if (canonical !== resolvedRoot) {
-      throw new Error(`sandbox mount root ${root} resolves to ${canonical} instead of ${resolvedRoot}; refusing to mount a redirected project root`)
+      throw new Error(`sandbox mount root ${root} resolves to ${canonical} instead of ${resolvedRoot}; refusing to mount a redirected root`)
     }
   }
 }
@@ -820,7 +821,7 @@ export class SandboxRuntimeService {
     if (workDirectory === null) {
       return {
         mode: 'blocked',
-        reason: `working directory is outside the sandboxed project roots (${sandboxMountRoots().join(', ')})`,
+        reason: `working directory is outside the sandboxed project roots (${sandboxProjectRoots().join(', ')})`,
       }
     }
     try {
