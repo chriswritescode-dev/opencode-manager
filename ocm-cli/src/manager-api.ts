@@ -52,6 +52,25 @@ export interface MirrorBundleResult {
   created: false
 }
 
+export type MirrorTargetKind = 'in-place' | 'existing' | 'new'
+
+export interface MirrorTargetPlan {
+  kind: MirrorTargetKind
+  repoId: number | null
+  fullPath: string
+  localPath: string
+  branch: string
+  currentBranch: string | null
+}
+
+export interface MirrorTarget {
+  repoId: number
+  fullPath: string
+  localPath: string
+  branch: string
+  created: boolean
+}
+
 function createByteCounter(onProgress: (bytesSent: number) => void): TransformStream<Uint8Array, Uint8Array> {
   let bytesSent = 0
   return new TransformStream<Uint8Array, Uint8Array>({
@@ -200,6 +219,26 @@ export class ManagerApi {
 
     if (!res.ok) throw await formatErrorResponse(res, 'mirror head')
     return (await res.json()) as MirrorHead
+  }
+
+  async mirrorTargetPlan(repoId: number, branch: string): Promise<MirrorTargetPlan> {
+    const res = await fetch(`${this.baseUrl}/api/internal/repos/${repoId}/mirror/target?branch=${encodeURIComponent(branch)}`, {
+      headers: this.headers(),
+    })
+
+    if (!res.ok) throw await formatErrorResponse(res, 'mirror target plan')
+    return (await res.json()) as MirrorTargetPlan
+  }
+
+  async mirrorEnsureTarget(repoId: number, branch: string): Promise<MirrorTarget> {
+    const res = await fetch(`${this.baseUrl}/api/internal/repos/${repoId}/mirror/target`, {
+      method: 'POST',
+      headers: { ...this.headers(), 'Content-Type': 'application/json' },
+      body: JSON.stringify({ branch }),
+    })
+
+    if (!res.ok) throw await formatErrorResponse(res, 'mirror target')
+    return (await res.json()) as MirrorTarget
   }
 
   async mirrorContains(repoId: number, sha: string): Promise<{ contained: boolean }> {

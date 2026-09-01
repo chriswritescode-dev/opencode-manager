@@ -3,7 +3,7 @@ import { basename } from 'path'
 import { readState, writeState, clearState, getStatePath, type OcmState } from '../src/state.js'
 import { getToken, setToken, deleteToken, hasStoredToken, describeTokenStore, describeTokenWriteTarget, envToken, TOKEN_ENV, TokenStoreError } from '../src/internal-token-store.js'
 import { ManagerApi, ManagerApiError } from '../src/manager-api.js'
-import { mirrorUp, mirrorDown, mirrorUpFast, mirrorDownFast, prepareMirror, MirrorAbort, checkPushDivergence, checkPullDivergence } from '../src/mirror.js'
+import { mirrorUp, mirrorDown, mirrorUpFast, mirrorDownFast, prepareMirror, MirrorAbort, checkPushDivergence, checkPullDivergence, describePushDivergence } from '../src/mirror.js'
 import type { RemoteRepoSummary, MirrorProgress, PushDivergence, PullDivergence } from '../src/mirror.js'
 import { createProgressReporter } from '../src/progress.js'
 import { getBranchName, getOriginUrl } from '../src/local-repo.js'
@@ -72,17 +72,9 @@ function confirmOverwrite(headline: string, reasons: string[], question: string,
 }
 
 function guardDivergentPush(repoName: string, div: PushDivergence): boolean {
-  const reasons: string[] = []
-  if (div.diverged) {
-    reasons.push(div.lostCommits >= 0
-      ? `the server is ${div.lostCommits} commit(s) ahead of your local branch`
-      : 'the server has commit(s) not present in your local branch')
-  }
-  if (div.serverDirty) reasons.push('the server has uncommitted changes')
-
   return confirmOverwrite(
     `pushing to ${repoName} will discard server-side work:`,
-    reasons,
+    describePushDivergence(div),
     'Overwrite server-side work and push anyway?',
     'This work is likely from OpenCode agent sessions on the manager.',
   )

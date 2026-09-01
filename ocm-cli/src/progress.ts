@@ -1,4 +1,4 @@
-const FRAMES = ['⠋', '⠙', '⠹', '⠸', '⠼', '⠴', '⠦', '⠧', '⠇', '⠏']
+export const SPINNER_FRAMES = ['⠋', '⠙', '⠹', '⠸', '⠼', '⠴', '⠦', '⠧', '⠇', '⠏']
 
 export function formatBytes(bytes: number): string {
   if (bytes < 1024) {
@@ -42,8 +42,8 @@ export function createProgressReporter(
       if (isTTY) {
         if (t - lastRenderAt < 80) return
         lastRenderAt = t
-        out.write(`\r\x1b[K${label}: ${FRAMES[frameIndex]} ${formatBytes(bytes)}`)
-        frameIndex = (frameIndex + 1) % FRAMES.length
+        out.write(`\r\x1b[K${label}: ${SPINNER_FRAMES[frameIndex]} ${formatBytes(bytes)}`)
+        frameIndex = (frameIndex + 1) % SPINNER_FRAMES.length
       } else {
         if (t - lastNonTtyTickAt < 1000) return
         lastNonTtyTickAt = t

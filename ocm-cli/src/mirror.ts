@@ -69,6 +69,12 @@ export async function prepareMirror(cwd: string, remotes: RemoteRepoSummary[]): 
   return { repoRoot, localProjectId, matched }
 }
 
+export function pickMatchedRepo(matched: RemoteRepoSummary[], localBranch: string | null): RemoteRepoSummary | null {
+  const onBranch = matched.filter((r) => localBranch !== null && r.branch === localBranch)
+  if (onBranch.length === 1) return onBranch[0]!
+  return matched.length === 1 ? matched[0]! : null
+}
+
 export interface PushDivergence {
   serverHead: string | null
   serverBranch: string | null
@@ -93,6 +99,17 @@ export async function checkPushDivergence(repoRoot: string, api: ManagerApi, rep
   }
   const lostCommits = localHead ? countCommitsAhead(repoRoot, localHead, serverHead) : -1
   return { serverHead, serverBranch, serverDirty, diverged: true, lostCommits }
+}
+
+export function describePushDivergence(div: PushDivergence): string[] {
+  const reasons: string[] = []
+  if (div.diverged) {
+    reasons.push(div.lostCommits >= 0
+      ? `the server is ${div.lostCommits} commit(s) ahead of your local branch`
+      : 'the server has commit(s) not present in your local branch')
+  }
+  if (div.serverDirty) reasons.push('the server has uncommitted changes')
+  return reasons
 }
 
 export interface PullDivergence {
@@ -412,6 +429,8 @@ function importLocalBundle(repoRoot: string, bundlePath: string, branch: string 
   }
 
   if (branch) {
+    runGit(repoRoot, ['reset', '--hard'])
+    runGit(repoRoot, ['clean', '-fd'])
     runGit(repoRoot, ['checkout', branch])
     const head = runGit(repoRoot, ['rev-parse', `refs/remotes/ocm-sync/${branch}`]).trim()
     if (head) runGit(repoRoot, ['reset', '--hard', head])
@@ -447,7 +466,7 @@ export type MirrorUpFastPhase =
 export async function mirrorUpFast(
   plan: MirrorPlan,
   opts: Pick<MirrorUpOpts, 'api' | 'force'> & { onPhase?: (phase: MirrorUpFastPhase) => void },
-): Promise<{ repoId: number; branch: string | null; head: string | null; created: false }> {
+): Promise<{ repoId: number; fullPath: string; branch: string | null; head: string | null; created: false }> {
   const repoId = plan.matched[0]!.repoId
   const onPhase = opts.onPhase
   onPhase?.({ kind: 'bundling' })
@@ -467,7 +486,7 @@ export async function mirrorUpFast(
     })
     onPhase?.({ kind: 'patching' })
     const patchResult = await mirrorUpPatch(plan, opts)
-    return { repoId: patchResult.repoId, branch: patchResult.branch, head: patchResult.head, created: false }
+    return { repoId: patchResult.repoId, fullPath: patchResult.fullPath, branch: patchResult.branch, head: patchResult.head, created: false }
   } finally {
     await fsp.rm(bundlePath, { force: true }).catch(() => {})
   }

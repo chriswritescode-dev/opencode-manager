@@ -4,7 +4,7 @@ import { join } from 'path'
 import { tmpdir } from 'os'
 import { randomBytes } from 'crypto'
 import { spawnSync, execSync } from 'child_process'
-import { prepareMirror, MirrorAbort, mirrorDown, mirrorUp, mirrorUpPatch, mirrorUpFast, checkPushDivergence, checkPullDivergence, type MirrorUpFastPhase } from '../src/mirror'
+import { prepareMirror, MirrorAbort, mirrorDown, mirrorUp, mirrorUpPatch, mirrorUpFast, checkPushDivergence, checkPullDivergence, describePushDivergence, pickMatchedRepo, type MirrorUpFastPhase } from '../src/mirror'
 import { getBranchName } from '../src/local-repo'
 import { gitRemoteProjectId } from '@opencode-manager/shared/project-id'
 import { mockStateModule, mockTokenStoreModule } from './helpers/token-store-mocks.js'
@@ -641,6 +641,46 @@ describe('checkPushDivergence', () => {
     const result = await checkPushDivergence(repoRoot, apiWith(head, true), 1)
     expect(result.diverged).toBe(false)
     expect(result.serverDirty).toBe(true)
+  })
+})
+
+describe('pickMatchedRepo', () => {
+  const main = { repoId: 1, name: 'app', projectId: 'p', branch: 'main' }
+  const feature = { repoId: 2, name: 'app-feature', projectId: 'p', branch: 'feature' }
+
+  it('returns the single match regardless of branch', () => {
+    expect(pickMatchedRepo([main], 'feature')).toBe(main)
+    expect(pickMatchedRepo([main], null)).toBe(main)
+  })
+
+  it('prefers the repo already on the local branch when several match', () => {
+    expect(pickMatchedRepo([main, feature], 'feature')).toBe(feature)
+  })
+
+  it('returns null when several match and none is on the local branch', () => {
+    expect(pickMatchedRepo([main, feature], 'other')).toBeNull()
+    expect(pickMatchedRepo([main, feature], null)).toBeNull()
+  })
+})
+
+describe('describePushDivergence', () => {
+  const base = { serverHead: 'abc', serverBranch: 'main', lostCommits: 0 }
+
+  it('returns no reasons when the push is a clean fast-forward', () => {
+    expect(describePushDivergence({ ...base, serverDirty: false, diverged: false })).toEqual([])
+  })
+
+  it('describes a counted divergence and dirty server together', () => {
+    expect(describePushDivergence({ ...base, serverDirty: true, diverged: true, lostCommits: 2 })).toEqual([
+      'the server is 2 commit(s) ahead of your local branch',
+      'the server has uncommitted changes',
+    ])
+  })
+
+  it('describes divergence with an unknown commit count', () => {
+    expect(describePushDivergence({ ...base, serverDirty: false, diverged: true, lostCommits: -1 })).toEqual([
+      'the server has commit(s) not present in your local branch',
+    ])
   })
 })
 

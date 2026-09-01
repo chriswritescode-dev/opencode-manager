@@ -118,6 +118,44 @@ describe('rewriteEventsForRemote', () => {
     expect(result[0]!.data.location).toEqual({ directory: '/workspace/repos/repo/src' })
   })
 
+  it('rewrites assistant message path cwd and root', () => {
+    const events: ReplayEvent[] = [
+      {
+        id: 'e1', aggregateID: 'ses_a', seq: 3,
+        type: 'message.updated.1',
+        data: { info: { id: 'msg_1', role: 'assistant', path: { cwd: '/Users/x/repo/src', root: '/Users/x/repo' } } },
+      },
+    ]
+
+    const result = rewriteEventsForRemote(events, ctx)
+
+    expect(result[0]!.data.info).toEqual({
+      id: 'msg_1',
+      role: 'assistant',
+      path: { cwd: '/workspace/repos/repo/src', root: '/workspace/repos/repo' },
+    })
+  })
+
+  it('leaves message paths outside the local root untouched', () => {
+    const events: ReplayEvent[] = [
+      {
+        id: 'e1', aggregateID: 'ses_a', seq: 3,
+        type: 'message.updated.1',
+        data: { info: { id: 'msg_1', role: 'assistant', path: { cwd: '/Users/x/repo-other', root: '/Users/x/repo-other' } } },
+      },
+      {
+        id: 'e2', aggregateID: 'ses_a', seq: 4,
+        type: 'message.updated.1',
+        data: { info: { id: 'msg_2', role: 'user' } },
+      },
+    ]
+
+    const result = rewriteEventsForRemote(events, ctx)
+
+    expect(result[0]!.data.info).toEqual({ id: 'msg_1', role: 'assistant', path: { cwd: '/Users/x/repo-other', root: '/Users/x/repo-other' } })
+    expect(result[1]!.data.info).toEqual({ id: 'msg_2', role: 'user' })
+  })
+
   it('strips workspaceID from info', () => {
     const events: ReplayEvent[] = [
       {

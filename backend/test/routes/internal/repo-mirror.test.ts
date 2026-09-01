@@ -348,6 +348,101 @@ describe('internal-repo-mirror routes', () => {
       expect(featureRef.status).toBe(0)
     })
 
+    it('replaces a dirty manager working tree when importing a bundle', async () => {
+      const sourceDir = join(getTmpRoot(), 'bundle-source-dirty')
+      mkdirSync(sourceDir, { recursive: true })
+      spawnSync('git', ['init', '-b', 'main'], { cwd: sourceDir, stdio: 'ignore' })
+      spawnSync('git', ['config', 'user.email', 'test@test.com'], { cwd: sourceDir, stdio: 'ignore' })
+      spawnSync('git', ['config', 'user.name', 'Test'], { cwd: sourceDir, stdio: 'ignore' })
+      writeFileSync(join(sourceDir, '.gitignore'), 'ignored.txt\n')
+      writeFileSync(join(sourceDir, 'tracked.txt'), 'from bundle\n')
+      spawnSync('git', ['add', '.gitignore', 'tracked.txt'], { cwd: sourceDir, stdio: 'ignore' })
+      spawnSync('git', ['commit', '-m', 'source'], { cwd: sourceDir, stdio: 'ignore' })
+      const bundlePath = join(getTmpRoot(), 'source-dirty.bundle')
+      spawnSync('git', ['bundle', 'create', bundlePath, '--all'], { cwd: sourceDir, stdio: 'ignore' })
+
+      const targetDir = join(getTmpRoot(), 'bundle-target-dirty')
+      mkdirSync(targetDir, { recursive: true })
+      spawnSync('git', ['init', '-b', 'main'], { cwd: targetDir, stdio: 'ignore' })
+      spawnSync('git', ['config', 'user.email', 'test@test.com'], { cwd: targetDir, stdio: 'ignore' })
+      spawnSync('git', ['config', 'user.name', 'Test'], { cwd: targetDir, stdio: 'ignore' })
+      writeFileSync(join(targetDir, '.gitignore'), 'ignored.txt\n')
+      writeFileSync(join(targetDir, 'tracked.txt'), 'old\n')
+      spawnSync('git', ['add', '.gitignore', 'tracked.txt'], { cwd: targetDir, stdio: 'ignore' })
+      spawnSync('git', ['commit', '-m', 'target'], { cwd: targetDir, stdio: 'ignore' })
+      writeFileSync(join(targetDir, 'tracked.txt'), 'server-side edit\n')
+      writeFileSync(join(targetDir, 'stale-untracked.txt'), 'stale\n')
+      writeFileSync(join(targetDir, 'ignored.txt'), 'keep me\n')
+
+      mockGetRepoById.mockReturnValue({ id: 1, fullPath: targetDir })
+      mockSafeGitOut.mockImplementation(async (_repoPath: string, args: string[]) => {
+        if (args[0] === 'rev-parse' && args[1] === '--abbrev-ref') return 'main'
+        if (args[0] === 'rev-parse' && args[1] === 'HEAD') return 'abc'
+        return null
+      })
+
+      const res = await app.request('/api/internal/repos/1/mirror/bundle?force=1', {
+        method: 'POST',
+        body: readFileSync(bundlePath),
+        headers: { 'content-type': 'application/octet-stream', 'x-ocm-branch': 'main' },
+      })
+
+      expect(res.status).toBe(200)
+      expect(readFileSync(join(targetDir, 'tracked.txt'), 'utf-8')).toBe('from bundle\n')
+      expect(existsSync(join(targetDir, 'stale-untracked.txt'))).toBe(false)
+      expect(existsSync(join(targetDir, 'ignored.txt'))).toBe(true)
+      const status = spawnSync('git', ['status', '--porcelain'], { cwd: targetDir, encoding: 'utf-8' }).stdout
+      expect(status.trim()).toBe('')
+    })
+
+    it('does not move branches checked out in other worktrees when importing into a worktree', async () => {
+      const sourceDir = join(getTmpRoot(), 'bundle-source-wt')
+      mkdirSync(sourceDir, { recursive: true })
+      spawnSync('git', ['init', '-b', 'main'], { cwd: sourceDir, stdio: 'ignore' })
+      spawnSync('git', ['config', 'user.email', 'test@test.com'], { cwd: sourceDir, stdio: 'ignore' })
+      spawnSync('git', ['config', 'user.name', 'Test'], { cwd: sourceDir, stdio: 'ignore' })
+      writeFileSync(join(sourceDir, 'tracked.txt'), 'main from laptop\n')
+      spawnSync('git', ['add', 'tracked.txt'], { cwd: sourceDir, stdio: 'ignore' })
+      spawnSync('git', ['commit', '-m', 'laptop main'], { cwd: sourceDir, stdio: 'ignore' })
+      spawnSync('git', ['checkout', '-b', 'feature'], { cwd: sourceDir, stdio: 'ignore' })
+      writeFileSync(join(sourceDir, 'feature.txt'), 'feature\n')
+      spawnSync('git', ['add', 'feature.txt'], { cwd: sourceDir, stdio: 'ignore' })
+      spawnSync('git', ['commit', '-m', 'feature'], { cwd: sourceDir, stdio: 'ignore' })
+      const bundlePath = join(getTmpRoot(), 'source-wt.bundle')
+      spawnSync('git', ['bundle', 'create', bundlePath, '--all'], { cwd: sourceDir, stdio: 'ignore' })
+
+      const baseDir = join(getTmpRoot(), 'wt-base')
+      mkdirSync(baseDir, { recursive: true })
+      spawnSync('git', ['init', '-b', 'main'], { cwd: baseDir, stdio: 'ignore' })
+      spawnSync('git', ['config', 'user.email', 'test@test.com'], { cwd: baseDir, stdio: 'ignore' })
+      spawnSync('git', ['config', 'user.name', 'Test'], { cwd: baseDir, stdio: 'ignore' })
+      writeFileSync(join(baseDir, 'tracked.txt'), 'server main\n')
+      spawnSync('git', ['add', 'tracked.txt'], { cwd: baseDir, stdio: 'ignore' })
+      spawnSync('git', ['commit', '-m', 'server main'], { cwd: baseDir, stdio: 'ignore' })
+      const serverMainHead = spawnSync('git', ['rev-parse', 'HEAD'], { cwd: baseDir, encoding: 'utf-8' }).stdout.trim()
+      const worktreeDir = join(getTmpRoot(), 'wt-base-feature')
+      spawnSync('git', ['worktree', 'add', '-b', 'feature', worktreeDir], { cwd: baseDir, stdio: 'ignore' })
+
+      mockGetRepoById.mockReturnValue({ id: 2, fullPath: worktreeDir })
+      mockSafeGitOut.mockImplementation(async (_repoPath: string, args: string[]) => {
+        if (args[0] === 'rev-parse' && args[1] === '--abbrev-ref') return 'feature'
+        if (args[0] === 'rev-parse' && args[1] === 'HEAD') return 'abc'
+        return null
+      })
+
+      const res = await app.request('/api/internal/repos/2/mirror/bundle?force=1', {
+        method: 'POST',
+        body: readFileSync(bundlePath),
+        headers: { 'content-type': 'application/octet-stream', 'x-ocm-branch': 'feature' },
+      })
+
+      expect(res.status).toBe(200)
+      expect(readFileSync(join(worktreeDir, 'feature.txt'), 'utf-8')).toBe('feature\n')
+      expect(readFileSync(join(baseDir, 'tracked.txt'), 'utf-8')).toBe('server main\n')
+      expect(spawnSync('git', ['rev-parse', 'refs/heads/main'], { cwd: baseDir, encoding: 'utf-8' }).stdout.trim()).toBe(serverMainHead)
+      expect(spawnSync('git', ['status', '--porcelain'], { cwd: baseDir, encoding: 'utf-8' }).stdout.trim()).toBe('')
+    })
+
     it('imports a bundle whose ocm-sync refs include a symbolic HEAD without failing', async () => {
       const sourceDir = join(getTmpRoot(), 'bundle-source-head')
       mkdirSync(sourceDir, { recursive: true })

@@ -4,16 +4,21 @@ import { getToken } from './internal-token-store.js'
 import { TokenStoreError } from './token-store.js'
 import { fetchRepos, toRemoteRepoSummaries } from './manager-repos.js'
 import { ManagerApi, ManagerApiError } from './manager-api.js'
-import { prepareMirror, checkPushDivergence, mirrorUpFast } from './mirror.js'
-import type { MirrorPlan, MirrorUpFastPhase } from './mirror.js'
-import { formatBytes } from './progress.js'
+import type { MirrorTargetPlan } from './manager-api.js'
+import { prepareMirror, checkPushDivergence, describePushDivergence, mirrorUpFast, pickMatchedRepo } from './mirror.js'
+import type { MirrorPlan, RemoteRepoSummary } from './mirror.js'
+import { getBranchName } from './local-repo.js'
 import { transferSession, moveReminderText } from './session-move.js'
 import { createManagerReplay, createManagerPromptAsync } from './remote-replay.js'
 import { readSessionEvents } from './local-history.js'
 import { confirmDialog, selectDialog } from './tui-dialogs.js'
 import { setPendingWarp, runPendingWarp } from './warp.js'
+import { pushPhaseProgress, replayProgress } from './move-progress.js'
+import type { MoveProgress } from './move-progress.js'
 
-export async function setupOcm(api: TuiPluginApi): Promise<void> {
+export type MoveProgressSetter = (progress: MoveProgress | null) => void
+
+export async function setupOcm(api: TuiPluginApi, setMoveProgress: MoveProgressSetter): Promise<void> {
   showInstallNotice(api)
   api.keymap.registerLayer({
     commands: [
@@ -24,7 +29,7 @@ export async function setupOcm(api: TuiPluginApi): Promise<void> {
         category: 'OpenCode Manager',
         namespace: 'palette',
         slashName: 'ocm-move',
-        run: () => runSessionMove(api),
+        run: () => runSessionMove(api, setMoveProgress),
       },
     ],
   })
@@ -45,32 +50,40 @@ function showInstallNotice(api: TuiPluginApi): void {
   })
 }
 
-function pushPhaseMessage(phase: MirrorUpFastPhase): string {
-  switch (phase.kind) {
-    case 'bundling':
-      return 'Pushing repo state: creating git bundle…'
-    case 'uploading':
-      return `Pushing repo state: uploading ${formatBytes(phase.bytesSent)} / ${formatBytes(phase.totalBytes)}…`
-    case 'processing':
-      return 'Pushing repo state: waiting for server to import bundle…'
-    case 'patching':
-      return 'Pushing repo state: applying local changes…'
+async function describeRemoteDiscard(repoRoot: string, managerApi: ManagerApi, repoId: number): Promise<string[]> {
+  try {
+    return describePushDivergence(await checkPushDivergence(repoRoot, managerApi, repoId))
+  } catch (error) {
+    if (error instanceof ManagerApiError && error.status === 404) return []
+    throw error
   }
 }
 
-function createPushPhaseToaster(api: TuiPluginApi): (phase: MirrorUpFastPhase) => void {
-  let lastUploadToastAt = 0
-  return (phase) => {
-    if (phase.kind === 'uploading') {
-      const now = Date.now()
-      if (now - lastUploadToastAt < 1000) return
-      lastUploadToastAt = now
-    }
-    api.ui.toast({ message: pushPhaseMessage(phase) })
+function describeMoveTarget(repoName: string, target: MirrorTargetPlan): string {
+  switch (target.kind) {
+    case 'in-place':
+      return `Replace the repo state of ${repoName} (${target.fullPath}) with your local working tree and move this session there?`
+    case 'existing':
+      return `${repoName} is checked out on ${target.currentBranch ?? 'another branch'}; branch ${target.branch} lives in worktree ${target.localPath} (${target.fullPath}).\n\nReplace that worktree with your local working tree and move this session there?`
+    case 'new':
+      return `${repoName} is checked out on ${target.currentBranch ?? 'another branch'}; it will not be touched.\n\nCreate worktree ${target.localPath} (${target.fullPath}) for branch ${target.branch}, push your local working tree there, and move this session?`
   }
 }
 
-async function runSessionMove(api: TuiPluginApi): Promise<void> {
+function moveConfirmMessage(repoName: string, target: MirrorTargetPlan, discardReasons: string[]): string {
+  const base = describeMoveTarget(repoName, target)
+  if (discardReasons.length === 0) return base
+  return `${base}\n\nThis discards server-side work:\n${discardReasons.map((r) => `  - ${r}`).join('\n')}`
+}
+
+async function resolveMoveTarget(managerApi: ManagerApi, matched: RemoteRepoSummary, remoteDirectory: string, localBranch: string | null): Promise<MirrorTargetPlan> {
+  if (!localBranch) {
+    return { kind: 'in-place', repoId: matched.repoId, fullPath: remoteDirectory, localPath: remoteDirectory, branch: '', currentBranch: null }
+  }
+  return managerApi.mirrorTargetPlan(matched.repoId, localBranch)
+}
+
+async function runSessionMove(api: TuiPluginApi, setMoveProgress: MoveProgressSetter): Promise<void> {
   try {
     const current = api.route.current
     if (current.name !== 'session' || !current.params) {
@@ -112,50 +125,50 @@ async function runSessionMove(api: TuiPluginApi): Promise<void> {
       return
     }
 
-    let matched = plan.matched[0]!
-    if (plan.matched.length > 1) {
-      const chosen = await selectDialog(api, 'Move session to Manager repo', plan.matched.map((r) => ({ title: r.name, description: `id=${r.repoId}`, value: r })))
-      if (!chosen) return
-      matched = chosen
-    }
-    const repoId = matched.repoId
-    const remoteRepo = repos.find((r) => r.repoId === repoId)
-    const remoteDirectory = remoteRepo!.directory
-
-    const proceed = await confirmDialog(api, { title: 'Move session to Manager', message: `Push repo state and move this session to ${matched.name} (${remoteDirectory})?` })
-    if (!proceed) return
+    const localBranch = getBranchName(plan.repoRoot)
+    const matched = pickMatchedRepo(plan.matched, localBranch)
+      ?? await selectDialog(api, 'Move session to Manager repo', plan.matched.map((r) => ({ title: r.name, description: `id=${r.repoId} branch=${r.branch ?? '-'}`, value: r })))
+    if (!matched) return
+    const matchedRepoId = matched.repoId
+    const remoteRepo = repos.find((r) => r.repoId === matchedRepoId)!
 
     const managerApi = new ManagerApi(state.managerUrl, token)
+    const target = await resolveMoveTarget(managerApi, matched, remoteRepo.directory, localBranch)
+    const discardReasons = target.repoId === null ? [] : await describeRemoteDiscard(plan.repoRoot, managerApi, target.repoId)
 
-    try {
-      const divergence = await checkPushDivergence(plan.repoRoot, managerApi, repoId)
-      if (divergence.diverged || divergence.serverDirty) {
-        api.ui.toast({ variant: 'error', title: 'Remote has diverged', message: 'Remote has diverged; resolve with `ocm push --force` first' })
-        return
-      }
-    } catch (error) {
-      if (!(error instanceof ManagerApiError && error.status === 404)) throw error
-    }
-
-    const selectedPlan: MirrorPlan = { ...plan, matched: [matched] }
-    await mirrorUpFast(selectedPlan, {
-      api: managerApi,
-      force: false,
-      onPhase: createPushPhaseToaster(api),
+    const proceed = await confirmDialog(api, {
+      title: 'Move session to Manager',
+      message: moveConfirmMessage(matched.name, target, discardReasons),
     })
+    if (!proceed) return
+
+    let targetRepoId = target.repoId
+    if (targetRepoId === null) {
+      setMoveProgress({ label: `creating worktree ${target.localPath}`, fraction: null })
+      targetRepoId = (await managerApi.mirrorEnsureTarget(matched.repoId, target.branch)).repoId
+    }
+    const selectedPlan: MirrorPlan = { ...plan, matched: [{ ...matched, repoId: targetRepoId }] }
+    const pushed = await mirrorUpFast(selectedPlan, {
+      api: managerApi,
+      force: true,
+      onPhase: (phase) => setMoveProgress(pushPhaseProgress(phase)),
+    })
+    const remoteDirectory = pushed.fullPath
 
     const result = await transferSession(
       { sessionID, localRoot: plan.repoRoot, remoteDirectory },
       {
         fetchLocalHistory: () => readSessionEvents(sessionID),
         replayEvents: createManagerReplay(state.managerUrl, token),
-        onProgress: (replayed, total) => api.ui.toast({ message: `Moving session… ${replayed}/${total} events`, duration: 2000 }),
+        onProgress: (replayed, total) => setMoveProgress(replayProgress(replayed, total)),
       },
     )
 
     switch (result.kind) {
       case 'moved': {
+        setMoveProgress({ label: 'notifying moved session', fraction: null })
         await createManagerPromptAsync(state.managerUrl, token)(remoteDirectory, result.sessionID, moveReminderText(remoteDirectory)).catch(() => undefined)
+        setMoveProgress(null)
         const warp = await confirmDialog(api, { title: 'Attach to moved session?', message: 'Exit this TUI and attach to the moved session on the Manager now?' })
         if (warp) {
           await fetch(`${state.managerUrl}/api/opencode-proxy/session?directory=${encodeURIComponent(remoteDirectory)}`, { headers: { authorization: `Bearer ${token}` } }).catch(() => undefined)
@@ -178,6 +191,8 @@ async function runSessionMove(api: TuiPluginApi): Promise<void> {
     }
   } catch (err) {
     api.ui.toast({ variant: 'error', message: err instanceof Error ? err.message : String(err) })
+  } finally {
+    setMoveProgress(null)
   }
 }
 
