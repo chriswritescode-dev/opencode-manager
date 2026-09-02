@@ -110,6 +110,53 @@ describe('RepoQuickSwitchSheet', () => {
     })
   })
 
+  it('distinguishes worktrees of the same repo by branch', async () => {
+    vi.mocked(listRepos).mockResolvedValue([
+      {
+        id: 1,
+        repoUrl: 'https://github.com/test/repo1.git',
+        localPath: '/path/to/repo1',
+        sourcePath: null,
+        currentBranch: 'main',
+        isLocal: false,
+        createdAt: new Date().toISOString(),
+        updatedAt: new Date().toISOString(),
+      },
+      {
+        id: 2,
+        repoUrl: 'https://github.com/test/repo1.git',
+        localPath: '/path/to/repo1/.worktrees/feature-a',
+        sourcePath: null,
+        currentBranch: 'feature-a',
+        isWorktree: true,
+        isLocal: false,
+        createdAt: new Date().toISOString(),
+        updatedAt: new Date().toISOString(),
+      },
+      {
+        id: 3,
+        repoUrl: 'https://github.com/test/repo1.git',
+        localPath: '/path/to/repo1/.worktrees/feature-b',
+        sourcePath: null,
+        currentBranch: 'feature-b',
+        isWorktree: true,
+        isLocal: false,
+        createdAt: new Date().toISOString(),
+        updatedAt: new Date().toISOString(),
+      },
+    ])
+    const handleClose = vi.fn()
+    render(
+      <RepoQuickSwitchSheet isOpen onClose={handleClose} />,
+      { wrapper: createWrapper() },
+    )
+    await waitFor(() => {
+      expect(screen.getAllByText('repo1')).toHaveLength(3)
+      expect(screen.getByText('feature-a')).toBeInTheDocument()
+      expect(screen.getByText('feature-b')).toBeInTheDocument()
+    })
+  })
+
   it('does not show assistant as a repo option', async () => {
     vi.mocked(listRepos).mockResolvedValue([
       {
