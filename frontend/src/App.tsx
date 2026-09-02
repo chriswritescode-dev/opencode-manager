@@ -30,6 +30,7 @@ import { PermissionRequestDialog } from './components/session/PermissionRequestD
 import { SSHHostKeyDialog } from './components/ssh/SSHHostKeyDialog'
 import { loginLoader, setupLoader, registerLoader, protectedLoader } from './lib/auth-loaders'
 import { getSwipeBackTarget } from '@/lib/navigation'
+import { onNotificationClick } from '@/lib/serviceWorker'
 import { useAuth } from '@/hooks/useAuth'
 import { useServerHealth } from '@/hooks/useServerHealth'
 
@@ -143,16 +144,13 @@ function AppShell() {
     }
   }, [bindMoreSwipe])
 
-  useEffect(() => {
-    const channel = new BroadcastChannel('notification-click')
-    channel.onmessage = (event: MessageEvent) => {
-      const data = event.data as { url?: string } | null | undefined
-      if (typeof data?.url === 'string') {
-        navigate(data.url)
-      }
-    }
-    return () => channel.close()
-  }, [navigate])
+  useEffect(
+    () =>
+      onNotificationClick((url) => {
+        if (window.location.pathname + window.location.search !== url) navigate(url)
+      }),
+    [navigate]
+  )
 
   return (
     <AuthProvider>

@@ -1,5 +1,7 @@
 /// <reference lib="webworker" />
 
+import type { PushNotificationPayload } from "@opencode-manager/shared/types";
+
 const worker = self as unknown as ServiceWorkerGlobalScope & typeof globalThis;
 
 interface SwBuildGlobals {
@@ -87,29 +89,17 @@ worker.addEventListener("fetch", (event) => {
   event.respondWith(cacheFirstAsset(request));
 });
 
-interface PushNotificationData {
-  title: string;
-  body: string;
-  icon?: string;
-  badge?: string;
-  tag?: string;
-  data?: {
-    url?: string;
-    eventType?: string;
-    sessionId?: string;
-    directory?: string;
-    repoId?: number;
-    repoName?: string;
-    priority?: 'normal' | 'high';
-  };
-}
+type ShowNotificationOptions = NotificationOptions & {
+  renotify?: boolean;
+  timestamp?: number;
+};
 
 worker.addEventListener("push", (event) => {
   if (!event.data) return;
 
-  let payload: PushNotificationData;
+  let payload: PushNotificationPayload;
   try {
-    payload = event.data.json() as PushNotificationData;
+    payload = event.data.json() as PushNotificationPayload;
   } catch {
     payload = {
       title: "OpenCode Manager",
@@ -118,11 +108,13 @@ worker.addEventListener("push", (event) => {
     };
   }
 
-  const options: NotificationOptions = {
+  const options: ShowNotificationOptions = {
     body: payload.body,
-    icon: payload.icon ?? "/icons/icon-192x192.png",
-    badge: payload.badge ?? "/icons/icon-192x192.png",
+    icon: payload.icon ?? "/icons/icon-512x512.png",
+    badge: payload.badge ?? "/icons/badge-96x96.png",
     tag: payload.tag,
+    renotify: Boolean(payload.tag && payload.renotify),
+    ...(payload.timestamp !== undefined ? { timestamp: payload.timestamp } : {}),
     data: payload.data,
     requireInteraction: isHighPriority(payload.data?.eventType, payload.data?.priority),
   };
@@ -133,24 +125,31 @@ worker.addEventListener("push", (event) => {
 worker.addEventListener("notificationclick", (event) => {
   event.notification.close();
 
-  const url = (event.notification.data?.url as string) ?? "/";
+  const url = typeof event.notification.data?.url === "string" ? event.notification.data.url : "/";
 
-  event.waitUntil(
-    worker.clients
-      .matchAll({ type: "window", includeUncontrolled: true })
-      .then((clientList) => {
-        for (const client of clientList) {
-          if (new URL(client.url).origin === worker.location.origin) {
-            const channel = new BroadcastChannel("notification-click");
-            channel.postMessage({ url });
-            channel.close();
-            return (client as WindowClient).focus();
-          }
-        }
-        return worker.clients.openWindow(url);
-      })
-  );
+  event.waitUntil(openOrFocusClient(url));
 });
+
+async function openOrFocusClient(url: string): Promise<void> {
+  const clientList = await worker.clients.matchAll({ type: "window", includeUncontrolled: true });
+  const clients = clientList.filter(
+    (client) => new URL(client.url).origin === worker.location.origin
+  ) as WindowClient[];
+  const targetPathname = new URL(url, worker.location.origin).pathname;
+  const target =
+    clients.find((client) => new URL(client.url).pathname === targetPathname) ??
+    clients.find((client) => client.focused) ??
+    clients.find((client) => client.visibilityState === "visible") ??
+    clients[0];
+
+  if (!target) {
+    await worker.clients.openWindow(url);
+    return;
+  }
+
+  target.postMessage({ type: "NOTIFICATION_CLICK", url });
+  await target.focus();
+}
 
 function isHighPriority(eventType?: string, priority?: 'normal' | 'high'): boolean {
   return eventType === "permission.asked" || eventType === "question.asked" || priority === 'high';

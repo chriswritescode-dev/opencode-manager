@@ -97,6 +97,19 @@ export function registerServiceWorker(): void {
     .catch(() => {});
 }
 
+export function onNotificationClick(handler: (url: string) => void): () => void {
+  if (!("serviceWorker" in navigator)) return () => {};
+
+  const listener = (event: MessageEvent) => {
+    const data = event.data as { type?: string; url?: string } | null;
+    if (data?.type === "NOTIFICATION_CLICK" && typeof data.url === "string") {
+      handler(data.url);
+    }
+  };
+  navigator.serviceWorker.addEventListener("message", listener);
+  return () => navigator.serviceWorker.removeEventListener("message", listener);
+}
+
 export async function getServiceWorkerRegistration(): Promise<ServiceWorkerRegistration | null> {
   if (!("serviceWorker" in navigator)) return null;
   return (await navigator.serviceWorker.getRegistration("/")) ?? null;

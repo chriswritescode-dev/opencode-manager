@@ -14,8 +14,16 @@ import {
 } from "@opencode-manager/shared/notifications";
 import { SettingsService } from "./settings";
 import { sseAggregator, type SSEEvent } from "./sse-aggregator";
-import { getRepoByLocalPath, getRepoBySourcePath, getRepoName } from "../db/queries";
+import {
+  getRepoByLocalPath,
+  getRepoBySourcePath,
+  getRepoName,
+  listRepos,
+} from "../db/queries";
+import type { Repo } from "../types/repo";
 import { getReposPath } from "@opencode-manager/shared/config/env";
+import { ASSISTANT_REPO_ID } from "@opencode-manager/shared/utils";
+import { resolveProjectId } from "./project-id-resolver";
 import path from "path";
 
 interface VapidConfig {
@@ -62,6 +70,16 @@ const EVENT_CONFIG: Record<
 
 const MAX_BODY_LENGTH = 140;
 
+export function buildNotificationUrl(
+  repo: Pick<Repo, "id"> | null,
+  sessionId: string | undefined
+): string {
+  if (!repo) return "/";
+  if (!sessionId) return `/repos/${repo.id}`;
+  const suffix = repo.id === ASSISTANT_REPO_ID ? "?assistant=1" : "";
+  return `/repos/${repo.id}/sessions/${sessionId}${suffix}`;
+}
+
 export function buildEventNotificationPayload(
   event: SSEEvent,
   context: {
@@ -75,12 +93,12 @@ export function buildEventNotificationPayload(
   const config = EVENT_CONFIG[event.type];
   if (!config) return null;
 
-  const action = config.titleFn(event.properties);
-  const title = context.repoName
-    ? `${context.repoName}: ${action}`
-    : action;
+  const title = config.titleFn(event.properties);
 
-  const rawBody = config.bodyFn(event.properties);
+  const detail = config.bodyFn(event.properties);
+  const rawBody = context.repoName
+    ? `${context.repoName} · ${detail}`
+    : detail;
   const body =
     rawBody.length > MAX_BODY_LENGTH
       ? `${rawBody.slice(0, MAX_BODY_LENGTH - 1)}…`
@@ -90,6 +108,8 @@ export function buildEventNotificationPayload(
     title,
     body,
     tag: `${event.type}-${context.sessionId ?? "global"}`,
+    timestamp: Date.now(),
+    renotify: true,
     data: {
       eventType: event.type,
       sessionId: context.sessionId,
@@ -244,8 +264,29 @@ export class NotificationService {
     return rows.map((r) => r.user_id);
   }
 
+  private async resolveRepoForDirectory(directory: string): Promise<Repo | null> {
+    const repo =
+      getRepoBySourcePath(this.db, path.resolve(directory)) ??
+      getRepoByLocalPath(this.db, path.relative(getReposPath(), directory));
+    if (repo) return repo;
+
+    const projectId = await resolveProjectId(directory);
+    if (!projectId) return null;
+
+    const readyRepos = listRepos(this.db).filter(
+      (candidate) => candidate.cloneStatus === "ready"
+    );
+    for (const candidate of readyRepos) {
+      const candidateProjectId = await resolveProjectId(candidate.fullPath).catch(
+        () => null
+      );
+      if (candidateProjectId === projectId) return candidate;
+    }
+    return null;
+  }
+
   async handleSSEEvent(
-    _directory: string,
+    directory: string,
     event: SSEEvent
   ): Promise<void> {
     const config = EVENT_CONFIG[event.type];
@@ -260,30 +301,17 @@ export class NotificationService {
     const userIds = this.getAllUserIds();
     if (userIds.length === 0) return;
 
-    let notificationUrl = "/";
-    let repoName = "";
-    let repoId: number | undefined;
-
-    if (_directory) {
-      const reposBasePath = getReposPath();
-      const localPath = path.relative(reposBasePath, _directory);
-      const repo = getRepoBySourcePath(this.db, path.resolve(_directory)) ?? getRepoByLocalPath(this.db, localPath);
-
-      if (repo) {
-        repoId = repo.id;
-        repoName = getRepoName(repo);
-        notificationUrl = sessionId
-          ? `/repos/${repo.id}/sessions/${sessionId}`
-          : `/repos/${repo.id}`;
-      }
-    }
+    const repo = directory ? await this.resolveRepoForDirectory(directory) : null;
+    const repoId = repo?.id;
+    const repoName = repo ? getRepoName(repo) : undefined;
+    const url = buildNotificationUrl(repo, sessionId);
 
     const payload = buildEventNotificationPayload(event, {
-      repoName: repoName || undefined,
+      repoName,
       repoId,
       sessionId,
-      directory: _directory,
-      url: notificationUrl,
+      directory,
+      url,
     });
     if (!payload) return;
 

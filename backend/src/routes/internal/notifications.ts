@@ -37,6 +37,7 @@ export function createInternalNotificationRoutes(notificationService: Notificati
       title: parsed.data.title,
       body: parsed.data.body,
       tag: parsed.data.tag ?? `assistant-${Date.now()}`,
+      timestamp: Date.now(),
       data: {
         eventType: 'assistant.message',
         url: parsed.data.url ?? '/',

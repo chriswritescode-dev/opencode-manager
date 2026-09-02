@@ -58,6 +58,8 @@ export const PushNotificationPayloadSchema = z.object({
   icon: z.string().optional(),
   badge: z.string().optional(),
   tag: z.string().optional(),
+  timestamp: z.number().optional(),
+  renotify: z.boolean().optional(),
   data: z
     .object({
       url: z.string().optional(),
@@ -66,6 +68,7 @@ export const PushNotificationPayloadSchema = z.object({
       directory: z.string().optional(),
       repoId: z.number().optional(),
       repoName: z.string().optional(),
+      priority: z.enum(["normal", "high"]).optional(),
     })
     .optional(),
 });
