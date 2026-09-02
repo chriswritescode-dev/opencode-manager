@@ -4,7 +4,7 @@ import { getToken } from './internal-token-store.js'
 import { TokenStoreError } from './token-store.js'
 import { fetchRepos, toRemoteRepoSummaries } from './manager-repos.js'
 import { ManagerApi, ManagerApiError } from './manager-api.js'
-import type { MirrorTargetPlan } from './manager-api.js'
+import type { MirrorTargetPlanResponse } from '@opencode-manager/shared/schemas'
 import { prepareMirror, checkPushDivergence, describePushDivergence, mirrorUpFast, pickMatchedRepo } from './mirror.js'
 import type { MirrorPlan, RemoteRepoSummary } from './mirror.js'
 import { getBranchName } from './local-repo.js'
@@ -59,7 +59,7 @@ async function describeRemoteDiscard(repoRoot: string, managerApi: ManagerApi, r
   }
 }
 
-function describeMoveTarget(repoName: string, target: MirrorTargetPlan): string {
+function describeMoveTarget(repoName: string, target: MirrorTargetPlanResponse): string {
   switch (target.kind) {
     case 'in-place':
       return `Replace the repo state of ${repoName} (${target.fullPath}) with your local working tree and move this session there?`
@@ -70,13 +70,13 @@ function describeMoveTarget(repoName: string, target: MirrorTargetPlan): string 
   }
 }
 
-function moveConfirmMessage(repoName: string, target: MirrorTargetPlan, discardReasons: string[]): string {
+function moveConfirmMessage(repoName: string, target: MirrorTargetPlanResponse, discardReasons: string[]): string {
   const base = describeMoveTarget(repoName, target)
   if (discardReasons.length === 0) return base
   return `${base}\n\nThis discards server-side work:\n${discardReasons.map((r) => `  - ${r}`).join('\n')}`
 }
 
-async function resolveMoveTarget(managerApi: ManagerApi, matched: RemoteRepoSummary, remoteDirectory: string, localBranch: string | null): Promise<MirrorTargetPlan> {
+async function resolveMoveTarget(managerApi: ManagerApi, matched: RemoteRepoSummary, remoteDirectory: string, localBranch: string | null): Promise<MirrorTargetPlanResponse> {
   if (!localBranch) {
     return { kind: 'in-place', repoId: matched.repoId, fullPath: remoteDirectory, localPath: remoteDirectory, branch: '', currentBranch: null }
   }
@@ -151,6 +151,7 @@ async function runSessionMove(api: TuiPluginApi, setMoveProgress: MoveProgressSe
     const pushed = await mirrorUpFast(selectedPlan, {
       api: managerApi,
       force: true,
+      requireCurrentBranch: true,
       onPhase: (phase) => setMoveProgress(pushPhaseProgress(phase)),
     })
     const remoteDirectory = pushed.fullPath

@@ -55,11 +55,15 @@ vi.mock('../../../src/db/queries', () => ({
 const mockEnsureMirrorTargetPath = vi.fn()
 const mockCreateRepoRow = vi.fn()
 const mockIsRepoInUse = vi.fn()
+const mockPlanMirrorTarget = vi.fn()
+const mockEnsureMirrorTarget = vi.fn()
 
 vi.mock('../../../src/services/repo', () => ({
   ensureMirrorTargetPath: (...args: unknown[]) => mockEnsureMirrorTargetPath(...args),
   createRepoRow: (...args: unknown[]) => mockCreateRepoRow(...args),
   isRepoInUse: (...args: unknown[]) => mockIsRepoInUse(...args),
+  planMirrorTarget: (...args: unknown[]) => mockPlanMirrorTarget(...args),
+  ensureMirrorTarget: (...args: unknown[]) => mockEnsureMirrorTarget(...args),
 }))
 
 import { createInternalRepoMirrorRoutes } from '../../../src/routes/internal/repo-mirror'
@@ -441,6 +445,284 @@ describe('internal-repo-mirror routes', () => {
       expect(readFileSync(join(baseDir, 'tracked.txt'), 'utf-8')).toBe('server main\n')
       expect(spawnSync('git', ['rev-parse', 'refs/heads/main'], { cwd: baseDir, encoding: 'utf-8' }).stdout.trim()).toBe(serverMainHead)
       expect(spawnSync('git', ['status', '--porcelain'], { cwd: baseDir, encoding: 'utf-8' }).stdout.trim()).toBe('')
+    })
+
+    function gitCmd(cwd: string, args: string[], input?: string) {
+      return spawnSync('git', args, { cwd, encoding: 'utf-8', input })
+    }
+
+    function initGitRepo(name: string): string {
+      const dir = join(getTmpRoot(), name)
+      mkdirSync(dir, { recursive: true })
+      gitCmd(dir, ['init', '-b', 'main'], '')
+      gitCmd(dir, ['config', 'user.email', 'test@test.com'])
+      gitCmd(dir, ['config', 'user.name', 'Test'])
+      return dir
+    }
+
+    function gitCommitFile(dir: string, file: string, content: string): string {
+      writeFileSync(join(dir, file), content)
+      gitCmd(dir, ['add', file])
+      gitCmd(dir, ['commit', '-m', `add ${file}`])
+      return gitCmd(dir, ['rev-parse', 'HEAD']).stdout.trim()
+    }
+
+    function makeBundle(dir: string, name: string): Buffer {
+      const bundlePath = join(getTmpRoot(), `${name}.bundle`)
+      gitCmd(dir, ['bundle', 'create', bundlePath, '--all'])
+      return readFileSync(bundlePath)
+    }
+
+    async function postBundle(app: Hono, urlRepoId: number, bundle: Buffer, headers: Record<string, string>): Promise<Response> {
+      return app.request(`/api/internal/repos/${urlRepoId}/mirror/bundle`, {
+        method: 'POST',
+        body: bundle,
+        headers: { 'content-type': 'application/octet-stream', ...headers },
+      })
+    }
+
+    const currentBranchOf = (dir: string): string => gitCmd(dir, ['rev-parse', '--abbrev-ref', 'HEAD']).stdout.trim()
+    const revRef = (dir: string, ref: string): string => gitCmd(dir, ['rev-parse', '--verify', ref], '').stdout.trim()
+    const refExists = (dir: string, ref: string): boolean => gitCmd(dir, ['rev-parse', '--verify', '--quiet', ref], '').status === 0
+    const syncRefCount = (dir: string): number =>
+      gitCmd(dir, ['for-each-ref', '--format=%(refname)', 'refs/remotes/ocm-sync']).stdout.trim().split('\n').filter(Boolean).length
+
+    it('rejects a strict bundle upload when the repo branch differs and preserves all local state', async () => {
+      const sourceDir = initGitRepo('strict-mismatch-source')
+      gitCommitFile(sourceDir, 'main.txt', 'source main\n')
+      gitCmd(sourceDir, ['checkout', '-b', 'feature'])
+      const incomingFeatureSha = gitCommitFile(sourceDir, 'feature.txt', 'source feature\n')
+      gitCmd(sourceDir, ['checkout', 'main'])
+      const incomingMainSha = gitCmd(sourceDir, ['rev-parse', 'HEAD']).stdout.trim()
+      const bundle = makeBundle(sourceDir, 'strict-mismatch')
+
+      const targetDir = initGitRepo('strict-mismatch-target')
+      const targetMainSha = gitCommitFile(targetDir, 'main.txt', 'target main\n')
+      writeFileSync(join(targetDir, 'untracked.txt'), 'keep me\n')
+      mockGetRepoById.mockReturnValue({ id: 1, fullPath: targetDir })
+
+      const res = await postBundle(app, 1, bundle, {
+        'x-ocm-branch': 'feature',
+        'x-ocm-require-current-branch': '1',
+      })
+
+      expect(res.status).toBe(409)
+      const json = (await res.json()) as { error: string }
+      expect(json.error).toContain('targets')
+      expect(gitCmd(targetDir, ['symbolic-ref', '--quiet', '--short', 'HEAD']).stdout.trim()).toBe('main')
+      expect(revRef(targetDir, 'refs/heads/main')).toBe(targetMainSha)
+      expect(refExists(targetDir, 'refs/heads/feature')).toBe(false)
+      expect(readFileSync(join(targetDir, 'main.txt'), 'utf-8')).toBe('target main\n')
+      expect(readFileSync(join(targetDir, 'untracked.txt'), 'utf-8')).toBe('keep me\n')
+      expect(syncRefCount(targetDir)).toBe(0)
+      expect(incomingFeatureSha).not.toBe(targetMainSha)
+      expect(incomingMainSha).not.toBe(targetMainSha)
+      expect(mockUpdateLastPulled).not.toHaveBeenCalled()
+    })
+
+    it('rejects a bundle upload when the requested branch is missing and preserves all local state', async () => {
+      const sourceDir = initGitRepo('missing-branch-source')
+      gitCommitFile(sourceDir, 'main.txt', 'source main\n')
+      const bundle = makeBundle(sourceDir, 'missing-branch')
+
+      const targetDir = initGitRepo('missing-branch-target')
+      const targetMainSha = gitCommitFile(targetDir, 'main.txt', 'target main\n')
+      writeFileSync(join(targetDir, 'untracked.txt'), 'keep me\n')
+      writeFileSync(join(targetDir, 'tracked-local.txt'), 'modified\n')
+      gitCmd(targetDir, ['add', 'tracked-local.txt'])
+      mockGetRepoById.mockReturnValue({ id: 1, fullPath: targetDir })
+
+      const res = await postBundle(app, 1, bundle, { 'x-ocm-branch': 'ghost' })
+
+      expect(res.status).toBe(409)
+      const json = (await res.json()) as { error: string }
+      expect(json.error).toContain("no branch 'ghost'")
+      expect(gitCmd(targetDir, ['symbolic-ref', '--quiet', '--short', 'HEAD']).stdout.trim()).toBe('main')
+      expect(revRef(targetDir, 'refs/heads/main')).toBe(targetMainSha)
+      expect(readFileSync(join(targetDir, 'untracked.txt'), 'utf-8')).toBe('keep me\n')
+      expect(gitCmd(targetDir, ['status', '--porcelain']).stdout).toContain('A  tracked-local.txt')
+      expect(syncRefCount(targetDir)).toBe(0)
+      expect(mockUpdateLastPulled).not.toHaveBeenCalled()
+    })
+
+    it('rejects a bundle upload targeting a branch locked by another worktree and preserves all local state', async () => {
+      const sourceDir = initGitRepo('locked-target-source')
+      gitCommitFile(sourceDir, 'main.txt', 'source main\n')
+      gitCmd(sourceDir, ['checkout', '-b', 'shared'])
+      const sourceSharedSha = gitCommitFile(sourceDir, 'shared.txt', 'source shared\n')
+      gitCmd(sourceDir, ['checkout', 'main'])
+      const bundle = makeBundle(sourceDir, 'locked-target')
+
+      const baseDir = initGitRepo('locked-target-base')
+      const baseMainSha = gitCommitFile(baseDir, 'main.txt', 'base main\n')
+      const wt1Dir = join(getTmpRoot(), 'locked-target-wt1')
+      gitCmd(baseDir, ['worktree', 'add', '-b', 'other', wt1Dir])
+      const wt2Dir = join(getTmpRoot(), 'locked-target-wt2')
+      gitCmd(baseDir, ['worktree', 'add', '-b', 'shared', wt2Dir])
+      const wt2SharedSha = revRef(wt2Dir, 'refs/heads/shared')
+      writeFileSync(join(wt1Dir, 'untracked.txt'), 'keep me\n')
+      mockGetRepoById.mockReturnValue({ id: 2, fullPath: wt1Dir })
+
+      const res = await postBundle(app, 2, bundle, { 'x-ocm-branch': 'shared' })
+
+      expect(res.status).toBe(409)
+      const json = (await res.json()) as { error: string }
+      expect(json.error).toContain('checked out in another worktree')
+      expect(currentBranchOf(wt1Dir)).toBe('other')
+      expect(readFileSync(join(wt1Dir, 'untracked.txt'), 'utf-8')).toBe('keep me\n')
+      expect(revRef(baseDir, 'refs/heads/main')).toBe(baseMainSha)
+      expect(revRef(baseDir, 'refs/heads/shared')).toBe(wt2SharedSha)
+      expect(gitCmd(wt2Dir, ['status', '--porcelain']).stdout.trim()).toBe('')
+      expect(syncRefCount(wt1Dir)).toBe(0)
+      expect(sourceSharedSha).not.toBe(wt2SharedSha)
+      expect(mockUpdateLastPulled).not.toHaveBeenCalled()
+    })
+
+    it('switches to a new target branch from the incoming bundle on a normal non-strict push', async () => {
+      const sourceDir = initGitRepo('cross-branch-source')
+      gitCommitFile(sourceDir, 'main.txt', 'source main\n')
+      gitCmd(sourceDir, ['checkout', '-b', 'topic'])
+      const incomingTopicSha = gitCommitFile(sourceDir, 'topic.txt', 'source topic\n')
+      gitCmd(sourceDir, ['checkout', 'main'])
+      const incomingMainSha = gitCmd(sourceDir, ['rev-parse', 'HEAD']).stdout.trim()
+      const bundle = makeBundle(sourceDir, 'cross-branch')
+
+      const targetDir = initGitRepo('cross-branch-target')
+      gitCommitFile(targetDir, 'main.txt', 'target main\n')
+      writeFileSync(join(targetDir, 'stale-untracked.txt'), 'stale\n')
+      mockGetRepoById.mockReturnValue({ id: 1, fullPath: targetDir })
+      mockSafeGitOut.mockImplementation(async (_repoPath: string, args: string[]) => {
+        if (args[0] === 'rev-parse' && args[1] === '--abbrev-ref') return 'topic'
+        if (args[0] === 'rev-parse' && args[1] === 'HEAD') return incomingTopicSha
+        return null
+      })
+
+      const res = await postBundle(app, 1, bundle, { 'x-ocm-branch': 'topic' })
+
+      expect(res.status).toBe(200)
+      expect(currentBranchOf(targetDir)).toBe('topic')
+      expect(revRef(targetDir, 'HEAD')).toBe(incomingTopicSha)
+      expect(revRef(targetDir, 'refs/heads/topic')).toBe(incomingTopicSha)
+      expect(revRef(targetDir, 'refs/heads/main')).toBe(incomingMainSha)
+      expect(readFileSync(join(targetDir, 'topic.txt'), 'utf-8')).toBe('source topic\n')
+      expect(existsSync(join(targetDir, 'stale-untracked.txt'))).toBe(false)
+      expect(syncRefCount(targetDir)).toBe(0)
+      expect(mockUpdateRepoBranch).toHaveBeenCalledWith({}, 1, 'topic')
+    })
+
+    it('moves an existing local target branch to the incoming sha and resets it on a normal non-strict push', async () => {
+      const sourceDir = initGitRepo('cross-branch-existing-source')
+      gitCommitFile(sourceDir, 'main.txt', 'source main\n')
+      gitCmd(sourceDir, ['checkout', '-b', 'topic'])
+      const incomingTopicSha = gitCommitFile(sourceDir, 'topic.txt', 'source topic\n')
+      gitCmd(sourceDir, ['checkout', 'main'])
+      const incomingMainSha = gitCmd(sourceDir, ['rev-parse', 'HEAD']).stdout.trim()
+      const bundle = makeBundle(sourceDir, 'cross-branch-existing')
+
+      const targetDir = initGitRepo('cross-branch-existing-target')
+      gitCommitFile(targetDir, 'main.txt', 'target main\n')
+      gitCmd(targetDir, ['branch', 'topic'], '')
+      const localTopicSha = revRef(targetDir, 'refs/heads/topic')
+      mockGetRepoById.mockReturnValue({ id: 1, fullPath: targetDir })
+      mockSafeGitOut.mockResolvedValue(null)
+
+      const res = await postBundle(app, 1, bundle, { 'x-ocm-branch': 'topic' })
+
+      expect(res.status).toBe(200)
+      expect(currentBranchOf(targetDir)).toBe('topic')
+      expect(revRef(targetDir, 'HEAD')).toBe(incomingTopicSha)
+      expect(revRef(targetDir, 'refs/heads/topic')).toBe(incomingTopicSha)
+      expect(localTopicSha).not.toBe(incomingTopicSha)
+      expect(revRef(targetDir, 'refs/heads/main')).toBe(incomingMainSha)
+      expect(readFileSync(join(targetDir, 'topic.txt'), 'utf-8')).toBe('source topic\n')
+      expect(existsSync(join(targetDir, 'main.txt'))).toBe(true)
+      expect(syncRefCount(targetDir)).toBe(0)
+    })
+
+    it('replaces dirty tracked and untracked state when switching branches on a forced normal push', async () => {
+      const sourceDir = initGitRepo('forced-cross-source')
+      gitCommitFile(sourceDir, 'main.txt', 'source main\n')
+      gitCmd(sourceDir, ['checkout', '-b', 'topic'])
+      const incomingTopicSha = gitCommitFile(sourceDir, 'topic.txt', 'source topic\n')
+      gitCmd(sourceDir, ['checkout', 'main'])
+      const incomingMainSha = gitCmd(sourceDir, ['rev-parse', 'HEAD']).stdout.trim()
+      const bundle = makeBundle(sourceDir, 'forced-cross')
+
+      const targetDir = initGitRepo('forced-cross-target')
+      gitCommitFile(targetDir, 'main.txt', 'target main\n')
+      writeFileSync(join(targetDir, 'main.txt'), 'dirty edit\n')
+      writeFileSync(join(targetDir, 'stale-untracked.txt'), 'stale\n')
+      mockGetRepoById.mockReturnValue({ id: 1, fullPath: targetDir })
+      mockSafeGitOut.mockResolvedValue(null)
+
+      const forcedRes = await app.request('/api/internal/repos/1/mirror/bundle?force=1', {
+        method: 'POST',
+        body: bundle,
+        headers: { 'content-type': 'application/octet-stream', 'x-ocm-branch': 'topic' },
+      })
+
+      expect(forcedRes.status).toBe(200)
+      expect(currentBranchOf(targetDir)).toBe('topic')
+      expect(revRef(targetDir, 'HEAD')).toBe(incomingTopicSha)
+      expect(revRef(targetDir, 'refs/heads/main')).toBe(incomingMainSha)
+      expect(readFileSync(join(targetDir, 'topic.txt'), 'utf-8')).toBe('source topic\n')
+      expect(readFileSync(join(targetDir, 'main.txt'), 'utf-8')).toBe('source main\n')
+      expect(gitCmd(targetDir, ['status', '--porcelain']).stdout.trim()).toBe('')
+      expect(existsSync(join(targetDir, 'stale-untracked.txt'))).toBe(false)
+      expect(syncRefCount(targetDir)).toBe(0)
+      expect(incomingTopicSha).not.toBe(incomingMainSha)
+    })
+
+    it('preserves dirty state and refs when a non-forced cross-branch import fails checkout', async () => {
+      const sourceDir = initGitRepo('nonforce-cross-source')
+      gitCommitFile(sourceDir, 'main.txt', 'source main\n')
+      gitCmd(sourceDir, ['checkout', '-b', 'topic'])
+      gitCommitFile(sourceDir, 'topic.txt', 'source topic\n')
+      gitCmd(sourceDir, ['checkout', 'main'])
+      const bundle = makeBundle(sourceDir, 'nonforce-cross')
+
+      const targetDir = initGitRepo('nonforce-cross-target')
+      const targetMainSha = gitCommitFile(targetDir, 'main.txt', 'target main\n')
+      writeFileSync(join(targetDir, 'main.txt'), 'dirty edit\n')
+      writeFileSync(join(targetDir, 'untracked.txt'), 'keep me\n')
+      mockGetRepoById.mockReturnValue({ id: 1, fullPath: targetDir })
+      mockSafeGitOut.mockResolvedValue(null)
+
+      const res = await postBundle(app, 1, bundle, { 'x-ocm-branch': 'topic' })
+
+      expect(res.status).toBe(409)
+      expect(currentBranchOf(targetDir)).toBe('main')
+      expect(readFileSync(join(targetDir, 'main.txt'), 'utf-8')).toBe('dirty edit\n')
+      expect(readFileSync(join(targetDir, 'untracked.txt'), 'utf-8')).toBe('keep me\n')
+      expect(revRef(targetDir, 'refs/heads/main')).toBe(targetMainSha)
+      expect(refExists(targetDir, 'refs/heads/topic')).toBe(false)
+      expect(syncRefCount(targetDir)).toBe(0)
+      expect(mockUpdateLastPulled).not.toHaveBeenCalled()
+    })
+
+    it('accepts a strict bundle upload when the repo already sits on the requested branch', async () => {
+      const sourceDir = initGitRepo('strict-same-source')
+      gitCommitFile(sourceDir, 'main.txt', 'source main\n')
+      const incomingMainSha = gitCmd(sourceDir, ['rev-parse', 'HEAD']).stdout.trim()
+      const bundle = makeBundle(sourceDir, 'strict-same')
+
+      const targetDir = initGitRepo('strict-same-target')
+      gitCommitFile(targetDir, 'main.txt', 'target main\n')
+      writeFileSync(join(targetDir, 'stale-untracked.txt'), 'stale\n')
+      mockGetRepoById.mockReturnValue({ id: 1, fullPath: targetDir })
+      mockSafeGitOut.mockResolvedValue(null)
+
+      const res = await postBundle(app, 1, bundle, {
+        'x-ocm-branch': 'main',
+        'x-ocm-require-current-branch': '1',
+      })
+
+      expect(res.status).toBe(200)
+      expect(currentBranchOf(targetDir)).toBe('main')
+      expect(revRef(targetDir, 'HEAD')).toBe(incomingMainSha)
+      expect(readFileSync(join(targetDir, 'main.txt'), 'utf-8')).toBe('source main\n')
+      expect(existsSync(join(targetDir, 'stale-untracked.txt'))).toBe(false)
+      expect(syncRefCount(targetDir)).toBe(0)
     })
 
     it('imports a bundle whose ocm-sync refs include a symbolic HEAD without failing', async () => {
@@ -852,6 +1134,249 @@ describe('internal-repo-mirror routes', () => {
 
       const commitRes = await commit(app, beginJson.repoId, beginJson.uploadId, 1)
       expect(commitRes.status).toBe(404)
+    })
+  })
+
+  describe('GET /:repoId/mirror/target', () => {
+    let repo: { id: number; fullPath: string; localPath: string }
+
+    beforeEach(() => {
+      repo = { id: 1, fullPath: join(getTmpRoot(), 'test-repo'), localPath: 'test-repo' }
+    })
+
+    it('returns a new-worktree plan with repoId null when no worktree exists', async () => {
+      mockGetRepoById.mockReturnValue(repo)
+      mockPlanMirrorTarget.mockResolvedValue({ kind: 'new', localPath: 'test-repo-feature', fullPath: join(getTmpRoot(), 'test-repo-feature'), currentBranch: 'main' })
+
+      const res = await app.request('/api/internal/repos/1/mirror/target?branch=feature')
+
+      expect(res.status).toBe(200)
+      expect(await res.json()).toEqual({
+        kind: 'new',
+        repoId: null,
+        fullPath: join(getTmpRoot(), 'test-repo-feature'),
+        localPath: 'test-repo-feature',
+        branch: 'feature',
+        currentBranch: 'main',
+      })
+      expect(mockPlanMirrorTarget).toHaveBeenCalledWith({}, repo, 'feature')
+    })
+
+    it('returns an in-place plan with the repo id', async () => {
+      mockGetRepoById.mockReturnValue(repo)
+      mockPlanMirrorTarget.mockResolvedValue({ kind: 'in-place', repo, currentBranch: 'feature' })
+
+      const res = await app.request('/api/internal/repos/1/mirror/target?branch=feature')
+
+      expect(res.status).toBe(200)
+      expect(await res.json()).toEqual({
+        kind: 'in-place',
+        repoId: 1,
+        fullPath: repo.fullPath,
+        localPath: 'test-repo',
+        branch: 'feature',
+        currentBranch: 'feature',
+      })
+    })
+
+    it('returns an existing-worktree plan with the worktree repo id', async () => {
+      mockGetRepoById.mockReturnValue(repo)
+      const worktreeRepo = { id: 5, fullPath: join(getTmpRoot(), 'test-repo-wt'), localPath: 'test-repo-wt' }
+      mockPlanMirrorTarget.mockResolvedValue({ kind: 'existing', repo: worktreeRepo, currentBranch: 'main' })
+
+      const res = await app.request('/api/internal/repos/1/mirror/target?branch=feature')
+
+      expect(res.status).toBe(200)
+      expect(await res.json()).toEqual({
+        kind: 'existing',
+        repoId: 5,
+        fullPath: worktreeRepo.fullPath,
+        localPath: 'test-repo-wt',
+        branch: 'feature',
+        currentBranch: 'main',
+      })
+    })
+
+    it('returns 400 for a missing branch without calling the plan service', async () => {
+      const res = await app.request('/api/internal/repos/1/mirror/target')
+
+      expect(res.status).toBe(400)
+      const json = (await res.json()) as { error: string }
+      expect(json.error).toBe('branch required')
+      expect(mockPlanMirrorTarget).not.toHaveBeenCalled()
+      expect(mockGetRepoById).not.toHaveBeenCalled()
+    })
+
+    it('returns 400 for a whitespace-only branch without calling the plan service', async () => {
+      const res = await app.request('/api/internal/repos/1/mirror/target?branch=%20%20%20')
+
+      expect(res.status).toBe(400)
+      const json = (await res.json()) as { error: string }
+      expect(json.error).toBe('branch required')
+      expect(mockPlanMirrorTarget).not.toHaveBeenCalled()
+    })
+
+    it('trims the branch before calling the plan service', async () => {
+      mockGetRepoById.mockReturnValue(repo)
+      mockPlanMirrorTarget.mockResolvedValue({ kind: 'in-place', repo, currentBranch: 'feature' })
+
+      await app.request('/api/internal/repos/1/mirror/target?branch=%20feature%20')
+
+      expect(mockPlanMirrorTarget).toHaveBeenCalledWith({}, repo, 'feature')
+    })
+
+    it('returns 400 for an invalid repoId', async () => {
+      const res = await app.request('/api/internal/repos/abc/mirror/target?branch=feature')
+
+      expect(res.status).toBe(400)
+      expect(mockPlanMirrorTarget).not.toHaveBeenCalled()
+    })
+
+    it('returns 404 for a non-existent repo', async () => {
+      mockGetRepoById.mockReturnValue(null)
+
+      const res = await app.request('/api/internal/repos/99999/mirror/target?branch=feature')
+
+      expect(res.status).toBe(404)
+      expect(mockPlanMirrorTarget).not.toHaveBeenCalled()
+    })
+
+    it('returns 500 when planning fails', async () => {
+      mockGetRepoById.mockReturnValue(repo)
+      mockPlanMirrorTarget.mockRejectedValue(new Error('worktree occupied'))
+
+      const res = await app.request('/api/internal/repos/1/mirror/target?branch=feature')
+
+      expect(res.status).toBe(500)
+      const json = (await res.json()) as { error: string }
+      expect(json.error).toContain('worktree occupied')
+    })
+  })
+
+  describe('POST /:repoId/mirror/target', () => {
+    let repo: { id: number; fullPath: string; localPath: string }
+
+    beforeEach(() => {
+      repo = { id: 1, fullPath: join(getTmpRoot(), 'test-repo'), localPath: 'test-repo' }
+    })
+
+    async function request(branchBody: unknown): Promise<Response> {
+      const res = await app.request('/api/internal/repos/1/mirror/target', {
+        method: 'POST',
+        body: JSON.stringify(branchBody),
+        headers: { 'content-type': 'application/json' },
+      })
+      return res
+    }
+
+    it('ensures the target and returns the target repo contract', async () => {
+      mockGetRepoById.mockReturnValue(repo)
+      const targetRepo = { id: 5, fullPath: join(getTmpRoot(), 'test-repo-wt'), localPath: 'test-repo-wt' }
+      mockEnsureMirrorTarget.mockResolvedValue({ repo: targetRepo, created: true })
+
+      const res = await request({ branch: 'feature' })
+
+      expect(res.status).toBe(200)
+      expect(await res.json()).toEqual({
+        repoId: 5,
+        fullPath: targetRepo.fullPath,
+        localPath: 'test-repo-wt',
+        branch: 'feature',
+        created: true,
+      })
+      expect(mockEnsureMirrorTarget).toHaveBeenCalledWith({}, repo, 'feature')
+    })
+
+    it('reports created=false when the target already exists', async () => {
+      mockGetRepoById.mockReturnValue(repo)
+      mockEnsureMirrorTarget.mockResolvedValue({ repo, created: false })
+
+      const res = await request({ branch: 'feature' })
+
+      expect(res.status).toBe(200)
+      const json = (await res.json()) as { created: boolean; repoId: number }
+      expect(json.created).toBe(false)
+      expect(json.repoId).toBe(1)
+    })
+
+    it('returns 400 for malformed JSON body without calling services', async () => {
+      const res = await app.request('/api/internal/repos/1/mirror/target', {
+        method: 'POST',
+        body: 'not json{',
+        headers: { 'content-type': 'application/json' },
+      })
+
+      expect(res.status).toBe(400)
+      expect(mockEnsureMirrorTarget).not.toHaveBeenCalled()
+      expect(mockGetRepoById).not.toHaveBeenCalled()
+    })
+
+    it('returns 400 for a missing branch without calling services', async () => {
+      const res = await request({})
+
+      expect(res.status).toBe(400)
+      const json = (await res.json()) as { error: string }
+      expect(json.error).toBe('branch required')
+      expect(mockEnsureMirrorTarget).not.toHaveBeenCalled()
+      expect(mockGetRepoById).not.toHaveBeenCalled()
+    })
+
+    it.each([
+      ['null branch', null],
+      ['numeric branch', 123],
+      ['object branch', { branch: 'feature' }],
+    ])('returns 400 for %s without calling services', async (_label, branchValue) => {
+      const res = await request({ branch: branchValue })
+
+      expect(res.status).toBe(400)
+      expect(mockEnsureMirrorTarget).not.toHaveBeenCalled()
+    })
+
+    it('returns 400 for a whitespace-only branch without calling services', async () => {
+      const res = await request({ branch: '   ' })
+
+      expect(res.status).toBe(400)
+      expect(mockEnsureMirrorTarget).not.toHaveBeenCalled()
+    })
+
+    it('trims the branch before calling the ensure service', async () => {
+      mockGetRepoById.mockReturnValue(repo)
+      mockEnsureMirrorTarget.mockResolvedValue({ repo, created: false })
+
+      await request({ branch: '  feature  ' })
+
+      expect(mockEnsureMirrorTarget).toHaveBeenCalledWith({}, repo, 'feature')
+    })
+
+    it('returns 400 for an invalid repoId', async () => {
+      const res = await app.request('/api/internal/repos/abc/mirror/target', {
+        method: 'POST',
+        body: JSON.stringify({ branch: 'feature' }),
+        headers: { 'content-type': 'application/json' },
+      })
+
+      expect(res.status).toBe(400)
+      expect(mockEnsureMirrorTarget).not.toHaveBeenCalled()
+    })
+
+    it('returns 404 for a non-existent repo', async () => {
+      mockGetRepoById.mockReturnValue(null)
+
+      const res = await request({ branch: 'feature' })
+
+      expect(res.status).toBe(404)
+      expect(mockEnsureMirrorTarget).not.toHaveBeenCalled()
+    })
+
+    it('returns 409 when ensure fails', async () => {
+      mockGetRepoById.mockReturnValue(repo)
+      mockEnsureMirrorTarget.mockRejectedValue(new Error('git worktree add failed'))
+
+      const res = await request({ branch: 'feature' })
+
+      expect(res.status).toBe(409)
+      const json = (await res.json()) as { error: string }
+      expect(json.error).toContain('git worktree add failed')
     })
   })
 })

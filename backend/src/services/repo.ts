@@ -1066,10 +1066,27 @@ export async function planMirrorTarget(database: Database, repo: Repo, branch: s
   if (currentBranch === branch) return { kind: 'in-place', repo, currentBranch }
 
   const localPath = `${getRepoBaseDirectoryName(repo)}-${sanitizeBranchForDirectory(branch)}`
+  const fullPath = path.join(getReposPath(), localPath)
   const existing = getRepoByLocalPath(database, localPath)
-  if (existing && existsSync(existing.fullPath)) return { kind: 'existing', repo: existing, currentBranch }
 
-  return { kind: 'new', localPath, fullPath: path.join(getReposPath(), localPath), currentBranch }
+  if (existing) {
+    if (existing.branch !== branch) {
+      throw new Error(`Mirror target '${localPath}' is occupied by repo ${existing.id} registered for branch '${existing.branch ?? 'none'}' instead of '${branch}'`)
+    }
+
+    if (!existsSync(existing.fullPath)) {
+      throw new Error(`Repo ${existing.id} for branch '${branch}' is missing its worktree directory at '${existing.fullPath}'`)
+    }
+
+    const checkedOutBranch = await safeGetCurrentBranch(existing.fullPath, {})
+    if (checkedOutBranch !== branch) {
+      throw new Error(`Repo ${existing.id} for branch '${branch}' has branch '${checkedOutBranch ?? 'none'}' checked out at '${existing.fullPath}'`)
+    }
+
+    return { kind: 'existing', repo: existing, currentBranch }
+  }
+
+  return { kind: 'new', localPath, fullPath, currentBranch }
 }
 
 export async function ensureMirrorTarget(database: Database, repo: Repo, branch: string): Promise<{ repo: Repo; created: boolean }> {
@@ -1077,15 +1094,21 @@ export async function ensureMirrorTarget(database: Database, repo: Repo, branch:
   if (plan.kind !== 'new') return { repo: plan.repo, created: false }
 
   await createWorktreeSafely(repo.fullPath, plan.fullPath, branch, {})
-  const worktreeRepo = createRepo(database, repo.repoUrl
-    ? { repoUrl: repo.repoUrl, localPath: plan.localPath, branch, defaultBranch: branch, cloneStatus: 'ready', clonedAt: Date.now(), isWorktree: true }
-    : { isLocal: true, localPath: plan.localPath, branch, defaultBranch: branch, cloneStatus: 'ready', clonedAt: Date.now(), isWorktree: true })
 
-  if (worktreeRepo.localPath !== plan.localPath) {
+  try {
+    const worktreeRepo = createRepo(database, repo.repoUrl
+      ? { repoUrl: repo.repoUrl, localPath: plan.localPath, branch, defaultBranch: branch, cloneStatus: 'ready', clonedAt: Date.now(), isWorktree: true }
+      : { isLocal: true, localPath: plan.localPath, branch, defaultBranch: branch, cloneStatus: 'ready', clonedAt: Date.now(), isWorktree: true })
+
+    if (worktreeRepo.localPath !== plan.localPath) {
+      throw new Error(`branch ${branch} is already registered as repo ${worktreeRepo.id} at ${worktreeRepo.fullPath}`)
+    }
+
+    return { repo: worktreeRepo, created: true }
+  } catch (error: unknown) {
     await removeWorktree(repo.fullPath, plan.fullPath)
-    throw new Error(`branch ${branch} is already registered as repo ${worktreeRepo.id} at ${worktreeRepo.fullPath}`)
+    throw error
   }
-  return { repo: worktreeRepo, created: true }
 }
 
 export function ensureMirrorTargetPath(name: string): { fullPath: string; localPath: string } {

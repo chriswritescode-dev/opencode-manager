@@ -126,15 +126,16 @@ describe('internal-opencode-workspaces routes', () => {
   it('GET /api/internal/opencode-workspaces returns workspace structure', async () => {
     mockListRepos.mockReturnValue([
       makeRepo({ id: 1, localPath: 'test-repo', cloneStatus: 'ready' }),
+      makeRepo({ id: 2, localPath: 'worktree-repo', cloneStatus: 'ready', isWorktree: true }),
     ])
 
     const res = await app.request('/api/internal/opencode-workspaces', {
       headers: { authorization: `Bearer ${token}` },
     })
     expect(res.status).toBe(200)
-    const body = await res.json() as { workspaces: Array<{ repoId: number; name: string; branch: string | null; cloneStatus: string; directory: string; extra: { repoId: number; localPath: string; fullPath: string } }> }
-    expect(body.workspaces.length).toBe(1)
-    const workspace = body.workspaces[0]!
+    const body = await res.json() as { workspaces: Array<{ repoId: number; name: string; branch: string | null; cloneStatus: string; directory: string; isWorktree: boolean; extra: { repoId: number; localPath: string; fullPath: string } }> }
+    expect(body.workspaces.length).toBe(2)
+    const workspace = body.workspaces.find((w) => w.repoId === 1)!
     expect(workspace).toHaveProperty('repoId')
     expect(workspace).toHaveProperty('name')
     expect(workspace).toHaveProperty('branch')
@@ -145,5 +146,8 @@ describe('internal-opencode-workspaces routes', () => {
     expect(workspace.extra).toHaveProperty('repoId')
     expect(workspace.extra).toHaveProperty('localPath')
     expect(workspace.extra).toHaveProperty('fullPath')
+    const worktreeWorkspace = body.workspaces.find((w) => w.repoId === 2)!
+    expect(workspace.isWorktree).toBe(false)
+    expect(worktreeWorkspace.isWorktree).toBe(true)
   })
 })

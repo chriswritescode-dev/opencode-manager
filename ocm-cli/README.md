@@ -48,8 +48,8 @@ ocm
 ocm status
 ocm list
 ocm use <repoId|name>
-ocm push [--force] [--create] [--yes] [--full]
-ocm pull [--force] [--full]
+ocm push [repoId] [--force] [--create] [--yes] [--full]
+ocm pull [repoId] [--force] [--full]
 ocm logout
 ```
 
@@ -76,6 +76,14 @@ fast git bundle + working-tree patch by default. Pass `--full` to use the legacy
 tarball mirror. If the fast path fails, `ocm` prompts before reverting to the
 tarball mirror (and proceeds automatically when there is no TTY to prompt). It
 refuses to overwrite uncommitted local changes unless `--force` is passed.
+
+A base repo and one of its worktrees can both be registered as ready Manager
+repos sharing the same OpenCode project id. When that happens, `ocm push` and
+`ocm pull` accept an optional positional repo id to pick the target:
+`ocm push [repoId]` / `ocm pull [repoId]`. The id must belong to one of the
+repos matching the current project (the command fails clearly otherwise), and
+any ambiguity message lists each match with its id, kind (repo or worktree),
+branch, and path. The default attach reports the same details.
 
 ## OpenCode TUI plugin
 

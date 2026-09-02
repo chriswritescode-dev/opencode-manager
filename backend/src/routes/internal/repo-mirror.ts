@@ -8,6 +8,11 @@ import { pipeline } from 'stream/promises'
 import { join } from 'path'
 import * as fsp from 'fs/promises'
 import { getReposPath } from '@opencode-manager/shared/config/env'
+import {
+  MirrorTargetBranchRequestSchema,
+  type MirrorTargetEnsureResponse,
+  type MirrorTargetPlanResponse,
+} from '@opencode-manager/shared/schemas'
 import { getRepoById, updateLastPulled, updateRepoBranch, deleteRepo } from '../../db/queries'
 import { ensureMirrorTargetPath, createRepoRow, isRepoInUse, planMirrorTarget, ensureMirrorTarget } from '../../services/repo'
 import { logger } from '../../utils/logger'
@@ -50,10 +55,6 @@ interface PatchBody {
   baseHead?: string | null
   patch?: string
   force?: boolean
-}
-
-interface TargetBody {
-  branch?: string
 }
 
 const LEGACY_UPGRADE_MESSAGE = 'this ocm CLI is too old for this server; upgrade to ocm-cli >= 0.1.2 (the mirror upload protocol changed to chunked uploads)'
@@ -115,37 +116,76 @@ async function branchesCheckedOutElsewhere(fullPath: string): Promise<Set<string
   return locked
 }
 
-async function importBundle(fullPath: string, bundlePath: string, branch: string | null): Promise<void> {
+async function currentBranchName(fullPath: string): Promise<string | null> {
+  const out = await gitRaw(fullPath, ['symbolic-ref', '--quiet', '--short', 'HEAD']).catch(() => '')
+  const trimmed = out.trim()
+  return trimmed.length > 0 ? trimmed : null
+}
+
+async function listLocalBranchNames(fullPath: string): Promise<Set<string>> {
+  const out = await gitRaw(fullPath, ['for-each-ref', '--format=%(refname:strip=2)', 'refs/heads'])
+  return new Set(out.split('\n').map((l) => l.trim()).filter(Boolean))
+}
+
+async function importBundle(fullPath: string, bundlePath: string, branch: string | null, requireCurrentBranch: boolean, force: boolean): Promise<void> {
   await gitRaw(fullPath, ['fetch', bundlePath, '+refs/heads/*:refs/remotes/ocm-sync/*', '+refs/tags/*:refs/tags/*'])
-  const refs = await gitRaw(fullPath, ['for-each-ref', '--format=%(refname:strip=3) %(objectname)', 'refs/remotes/ocm-sync'])
-  const locked = await branchesCheckedOutElsewhere(fullPath)
-  const updates: string[] = []
-  for (const line of refs.split('\n')) {
-    const trimmed = line.trim()
-    if (!trimmed) continue
-    const firstSpace = trimmed.indexOf(' ')
-    if (firstSpace === -1) continue
-    const name = trimmed.slice(0, firstSpace)
-    if (name === 'HEAD' || locked.has(name)) continue
-    const sha = trimmed.slice(firstSpace + 1)
-    updates.push(`update refs/heads/${name} ${sha}\n`)
-  }
-  if (updates.length > 0) {
-    await gitRaw(fullPath, ['update-ref', '--stdin'], process.env, updates.join(''))
-  }
+  try {
+    const refs = await gitRaw(fullPath, ['for-each-ref', '--format=%(refname:strip=3) %(objectname)', 'refs/remotes/ocm-sync'])
+    const incoming = new Map<string, string>()
+    for (const line of refs.split('\n')) {
+      const trimmed = line.trim()
+      if (!trimmed) continue
+      const firstSpace = trimmed.indexOf(' ')
+      if (firstSpace === -1) continue
+      const name = trimmed.slice(0, firstSpace)
+      if (name === 'HEAD') continue
+      incoming.set(name, trimmed.slice(firstSpace + 1))
+    }
 
-  if (branch) {
-    await gitRaw(fullPath, ['reset', '--hard'])
-    await gitRaw(fullPath, ['clean', '-fd'])
-    await gitRaw(fullPath, ['checkout', branch])
-    const head = (await gitRaw(fullPath, ['rev-parse', `refs/remotes/ocm-sync/${branch}`])).trim()
-    if (head) await gitRaw(fullPath, ['reset', '--hard', head])
-  }
+    const locked = await branchesCheckedOutElsewhere(fullPath)
+    const actualBranch = await currentBranchName(fullPath)
 
-  const syncRefsOut = await gitRaw(fullPath, ['for-each-ref', '--format=%(refname)', 'refs/remotes/ocm-sync']).catch(() => '')
-  const deletes = syncRefsOut.split('\n').map((l) => l.trim()).filter(Boolean).map((ref) => `delete ${ref}\n`)
-  if (deletes.length > 0) {
-    await gitRaw(fullPath, ['update-ref', '--stdin'], process.env, deletes.join('')).catch(() => {})
+    let targetSha: string | undefined
+    if (branch) {
+      const incomingSha = incoming.get(branch)
+      if (!incomingSha) throw new Error(`incoming bundle has no branch '${branch}'`)
+      if (locked.has(branch)) {
+        throw new Error(`branch '${branch}' is checked out in another worktree; release it there before pushing`)
+      }
+      if (requireCurrentBranch && actualBranch !== branch) {
+        throw new Error(`repo is on branch '${actualBranch ?? 'detached HEAD'}' but the bundle targets '${branch}'`)
+      }
+      targetSha = incomingSha
+      if (actualBranch !== branch) {
+        const checkoutArgs = force ? ['-f'] : []
+        if ((await listLocalBranchNames(fullPath)).has(branch)) {
+          await gitRaw(fullPath, ['checkout', ...checkoutArgs, branch])
+        } else {
+          await gitRaw(fullPath, ['checkout', ...checkoutArgs, '-b', branch, incomingSha])
+        }
+      }
+    }
+
+    const updates: string[] = []
+    for (const [name, sha] of incoming) {
+      if (targetSha !== undefined && name === branch) continue
+      if (locked.has(name)) continue
+      updates.push(`update refs/heads/${name} ${sha}\n`)
+    }
+    if (updates.length > 0) {
+      await gitRaw(fullPath, ['update-ref', '--stdin'], process.env, updates.join(''))
+    }
+
+    if (branch && targetSha !== undefined) {
+      await gitRaw(fullPath, ['reset', '--hard', targetSha])
+      await gitRaw(fullPath, ['clean', '-fd'])
+    }
+  } finally {
+    const syncRefsOut = await gitRaw(fullPath, ['for-each-ref', '--format=%(refname)', 'refs/remotes/ocm-sync']).catch(() => '')
+    const deletes = syncRefsOut.split('\n').map((l) => l.trim()).filter(Boolean).map((ref) => `delete ${ref}\n`)
+    if (deletes.length > 0) {
+      await gitRaw(fullPath, ['update-ref', '--stdin'], process.env, deletes.join('')).catch(() => {})
+    }
   }
 }
 
@@ -358,7 +398,8 @@ export function createInternalRepoMirrorRoutes(db: Database) {
     if (!Number.isFinite(repoId)) return c.json({ error: 'invalid repoId' }, 400)
     const repo = getRepoById(db, repoId)
     if (!repo) return c.json({ error: 'repo not found' }, 404)
-    if (isRepoInUse(db, repoId) && c.req.query('force') !== '1') {
+    const force = c.req.query('force') === '1'
+    if (isRepoInUse(db, repoId) && !force) {
       return c.json({ error: 'repo_in_use', message: 'open OpenCode sessions are using this repo; rerun with force=1' }, 409)
     }
 
@@ -370,11 +411,12 @@ export function createInternalRepoMirrorRoutes(db: Database) {
     const bundleDir = mkdtempSync(join(stagingRoot, 'bundle-upload-'))
     const bundlePath = join(bundleDir, 'repo.bundle')
     const branch = c.req.header('x-ocm-branch')?.trim() || null
+    const requireCurrentBranch = c.req.header('x-ocm-require-current-branch')?.trim() === '1'
 
     try {
       const body = Readable.fromWeb(rawBody as unknown as Parameters<typeof Readable.fromWeb>[0])
       await pipeline(body, createWriteStream(bundlePath))
-      await importBundle(repo.fullPath, bundlePath, branch)
+      await importBundle(repo.fullPath, bundlePath, branch, requireCurrentBranch, force)
 
       const branchName = await safeGitOut(repo.fullPath, ['rev-parse', '--abbrev-ref', 'HEAD'])
       const head = await safeGitOut(repo.fullPath, ['rev-parse', 'HEAD'])
@@ -399,16 +441,18 @@ export function createInternalRepoMirrorRoutes(db: Database) {
   app.get('/:repoId/mirror/target', async (c) => {
     const repoId = Number(c.req.param('repoId'))
     if (!Number.isFinite(repoId)) return c.json({ error: 'invalid repoId' }, 400)
-    const branch = c.req.query('branch')?.trim()
-    if (!branch) return c.json({ error: 'branch required' }, 400)
+    const branchParsed = MirrorTargetBranchRequestSchema.safeParse({ branch: c.req.query('branch') })
+    if (!branchParsed.success) return c.json({ error: 'branch required' }, 400)
+    const { branch } = branchParsed.data
     const repo = getRepoById(db, repoId)
     if (!repo) return c.json({ error: 'repo not found' }, 404)
 
     try {
       const plan = await planMirrorTarget(db, repo, branch)
-      return c.json(plan.kind === 'new'
+      const response: MirrorTargetPlanResponse = plan.kind === 'new'
         ? { kind: plan.kind, repoId: null, fullPath: plan.fullPath, localPath: plan.localPath, branch, currentBranch: plan.currentBranch }
-        : { kind: plan.kind, repoId: plan.repo.id, fullPath: plan.repo.fullPath, localPath: plan.repo.localPath, branch, currentBranch: plan.currentBranch })
+        : { kind: plan.kind, repoId: plan.repo.id, fullPath: plan.repo.fullPath, localPath: plan.repo.localPath, branch, currentBranch: plan.currentBranch }
+      return c.json(response)
     } catch (error) {
       logger.error('mirror target plan failed:', error)
       return c.json({ error: getErrorMessage(error) }, 500)
@@ -418,20 +462,28 @@ export function createInternalRepoMirrorRoutes(db: Database) {
   app.post('/:repoId/mirror/target', async (c) => {
     const repoId = Number(c.req.param('repoId'))
     if (!Number.isFinite(repoId)) return c.json({ error: 'invalid repoId' }, 400)
-    let body: TargetBody
+    let json: unknown
     try {
-      body = (await c.req.json()) as TargetBody
+      json = await c.req.json()
     } catch {
       return c.json({ error: 'invalid json body' }, 400)
     }
-    const branch = body.branch?.trim()
-    if (!branch) return c.json({ error: 'branch required' }, 400)
+    const branchParsed = MirrorTargetBranchRequestSchema.safeParse(json)
+    if (!branchParsed.success) return c.json({ error: 'branch required' }, 400)
+    const { branch } = branchParsed.data
     const repo = getRepoById(db, repoId)
     if (!repo) return c.json({ error: 'repo not found' }, 404)
 
     try {
       const { repo: target, created } = await ensureMirrorTarget(db, repo, branch)
-      return c.json({ repoId: target.id, fullPath: target.fullPath, localPath: target.localPath, branch, created })
+      const response: MirrorTargetEnsureResponse = {
+        repoId: target.id,
+        fullPath: target.fullPath,
+        localPath: target.localPath,
+        branch,
+        created,
+      }
+      return c.json(response)
     } catch (error) {
       logger.error('mirror target ensure failed:', error)
       return c.json({ error: getErrorMessage(error) }, 409)

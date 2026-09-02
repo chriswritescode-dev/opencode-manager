@@ -410,32 +410,38 @@ async function createLocalBundle(repoRoot: string): Promise<string> {
   return bundlePath
 }
 
-function importLocalBundle(repoRoot: string, bundlePath: string, branch: string | null): void {
-  runGit(repoRoot, ['fetch', bundlePath, '+refs/heads/*:refs/remotes/ocm-sync/*', '+refs/tags/*:refs/tags/*'])
-  const refs = runGit(repoRoot, ['for-each-ref', '--format=%(refname:strip=3) %(objectname)', 'refs/remotes/ocm-sync'])
-  const updates: string[] = []
-  for (const line of refs.split('\n')) {
-    const trimmed = line.trim()
-    if (!trimmed) continue
-    const firstSpace = trimmed.indexOf(' ')
-    if (firstSpace === -1) continue
-    const name = trimmed.slice(0, firstSpace)
-    if (name === 'HEAD') continue
-    const sha = trimmed.slice(firstSpace + 1)
-    updates.push(`update refs/heads/${name} ${sha}\n`)
+function listWorktreeBranches(repoRoot: string): Map<string, string[]> {
+  const out = runGit(repoRoot, ['worktree', 'list', '--porcelain'])
+  const ownership = new Map<string, string[]>()
+  let currentPath: string | null = null
+  for (const line of out.split('\n')) {
+    if (line.startsWith('worktree ')) {
+      currentPath = line.slice('worktree '.length).trim()
+    } else if (line.startsWith('branch ')) {
+      if (!currentPath) continue
+      const branch = line.slice('branch '.length).trim().replace(/^refs\/heads\//, '')
+      const paths = ownership.get(branch) ?? []
+      paths.push(currentPath)
+      ownership.set(branch, paths)
+    }
   }
-  if (updates.length > 0) {
-    runGit(repoRoot, ['update-ref', '--stdin'], updates.join(''))
-  }
+  return ownership
+}
 
-  if (branch) {
-    runGit(repoRoot, ['reset', '--hard'])
-    runGit(repoRoot, ['clean', '-fd'])
-    runGit(repoRoot, ['checkout', branch])
-    const head = runGit(repoRoot, ['rev-parse', `refs/remotes/ocm-sync/${branch}`]).trim()
-    if (head) runGit(repoRoot, ['reset', '--hard', head])
-  }
+function listLocalBranches(repoRoot: string): Set<string> {
+  const out = runGit(repoRoot, ['for-each-ref', '--format=%(refname:short)', 'refs/heads'])
+  return new Set(out.split('\n').map((l) => l.trim()).filter(Boolean))
+}
 
+function branchOwnedElsewhere(ownership: Map<string, string[]>, repoRoot: string): Set<string> {
+  const locked = new Set<string>()
+  for (const [branch, paths] of ownership) {
+    if (paths.some((path) => path !== repoRoot)) locked.add(branch)
+  }
+  return locked
+}
+
+function deleteSyncRefs(repoRoot: string): void {
   try {
     const syncRefsOut = runGit(repoRoot, ['for-each-ref', '--format=%(refname)', 'refs/remotes/ocm-sync'])
     const deletes = syncRefsOut.split('\n').map((l) => l.trim()).filter(Boolean).map((ref) => `delete ${ref}\n`)
@@ -443,7 +449,61 @@ function importLocalBundle(repoRoot: string, bundlePath: string, branch: string 
       runGit(repoRoot, ['update-ref', '--stdin'], deletes.join(''))
     }
   } catch {
-    // cleanup of ocm-sync refs is best-effort
+    return
+  }
+}
+
+function importLocalBundle(repoRoot: string, bundlePath: string, branch: string | null, force: boolean): void {
+  runGit(repoRoot, ['fetch', bundlePath, '+refs/heads/*:refs/remotes/ocm-sync/*', '+refs/tags/*:refs/tags/*'])
+  try {
+    const refs = runGit(repoRoot, ['for-each-ref', '--format=%(refname:strip=3) %(objectname)', 'refs/remotes/ocm-sync'])
+    const incoming = new Map<string, string>()
+    for (const line of refs.split('\n')) {
+      const trimmed = line.trim()
+      if (!trimmed) continue
+      const firstSpace = trimmed.indexOf(' ')
+      if (firstSpace === -1) continue
+      const name = trimmed.slice(0, firstSpace)
+      if (name === 'HEAD') continue
+      incoming.set(name, trimmed.slice(firstSpace + 1))
+    }
+
+    const lockedElsewhere = branchOwnedElsewhere(listWorktreeBranches(repoRoot), repoRoot)
+
+    if (branch) {
+      const incomingSha = incoming.get(branch)
+      if (!incomingSha) throw new MirrorAbort(`no incoming branch '${branch}' in the server bundle`)
+      if (lockedElsewhere.has(branch)) {
+        throw new MirrorAbort(`branch '${branch}' is checked out in another worktree; release it there before pulling`)
+      }
+      const currentBranch = getBranchName(repoRoot)
+      if (currentBranch !== branch) {
+        const checkoutArgs = force ? ['-f'] : []
+        if (listLocalBranches(repoRoot).has(branch)) {
+          runGit(repoRoot, ['checkout', ...checkoutArgs, branch])
+        } else {
+          runGit(repoRoot, ['checkout', ...checkoutArgs, '-b', branch, incomingSha])
+        }
+      }
+    }
+
+    const updates: string[] = []
+    for (const [name, sha] of incoming) {
+      if (branch === name) continue
+      if (lockedElsewhere.has(name)) continue
+      updates.push(`update refs/heads/${name} ${sha}\n`)
+    }
+    if (updates.length > 0) {
+      runGit(repoRoot, ['update-ref', '--stdin'], updates.join(''))
+    }
+
+    if (branch) {
+      const targetSha = incoming.get(branch)!
+      runGit(repoRoot, ['reset', '--hard', targetSha])
+      runGit(repoRoot, ['clean', '-fd'])
+    }
+  } finally {
+    deleteSyncRefs(repoRoot)
   }
 }
 
@@ -463,9 +523,14 @@ export type MirrorUpFastPhase =
   | { kind: 'processing' }
   | { kind: 'patching' }
 
+type MirrorUpFastOpts = Pick<MirrorUpOpts, 'api' | 'force'> & {
+  requireCurrentBranch?: boolean
+  onPhase?: (phase: MirrorUpFastPhase) => void
+}
+
 export async function mirrorUpFast(
   plan: MirrorPlan,
-  opts: Pick<MirrorUpOpts, 'api' | 'force'> & { onPhase?: (phase: MirrorUpFastPhase) => void },
+  opts: MirrorUpFastOpts,
 ): Promise<{ repoId: number; fullPath: string; branch: string | null; head: string | null; created: false }> {
   const repoId = plan.matched[0]!.repoId
   const onPhase = opts.onPhase
@@ -477,6 +542,7 @@ export async function mirrorUpFast(
     await opts.api.mirrorUploadBundle(repoId, bundlePath, {
       branch: getBranchName(plan.repoRoot),
       force: opts.force,
+      requireCurrentBranch: opts.requireCurrentBranch,
       onProgress: onPhase
         ? (bytesSent) => {
             onPhase({ kind: 'uploading', bytesSent, totalBytes: size })
@@ -505,11 +571,10 @@ export async function mirrorDownFast(
   const snapshot = await api.mirrorPatchSnapshot(repoId)
   const bundlePath = await writeBundleStream(repoId, api)
   try {
-    importLocalBundle(repoRoot, bundlePath, snapshot.branch)
+    importLocalBundle(repoRoot, bundlePath, snapshot.branch, opts.force)
     applyPatch(repoRoot, snapshot.patch)
   } finally {
     await fsp.rm(bundlePath, { force: true }).catch(() => {})
   }
 }
-
 

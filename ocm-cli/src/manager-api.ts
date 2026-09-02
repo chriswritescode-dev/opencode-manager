@@ -1,5 +1,11 @@
 import { createReadStream } from 'fs'
 import { Readable } from 'stream'
+import {
+  MirrorTargetEnsureResponseSchema,
+  MirrorTargetPlanResponseSchema,
+  type MirrorTargetEnsureResponse,
+  type MirrorTargetPlanResponse,
+} from '@opencode-manager/shared/schemas'
 
 export interface MirrorBeginOpts {
   force?: boolean
@@ -50,25 +56,6 @@ export interface MirrorBundleResult {
   branch: string | null
   head: string | null
   created: false
-}
-
-export type MirrorTargetKind = 'in-place' | 'existing' | 'new'
-
-export interface MirrorTargetPlan {
-  kind: MirrorTargetKind
-  repoId: number | null
-  fullPath: string
-  localPath: string
-  branch: string
-  currentBranch: string | null
-}
-
-export interface MirrorTarget {
-  repoId: number
-  fullPath: string
-  localPath: string
-  branch: string
-  created: boolean
 }
 
 function createByteCounter(onProgress: (bytesSent: number) => void): TransformStream<Uint8Array, Uint8Array> {
@@ -194,11 +181,12 @@ export class ManagerApi {
   async mirrorUploadBundle(
     repoId: number,
     bundlePath: string,
-    opts: { branch: string | null; force?: boolean; onProgress?: (bytesSent: number) => void },
+    opts: { branch: string | null; force?: boolean; requireCurrentBranch?: boolean; onProgress?: (bytesSent: number) => void },
   ): Promise<MirrorBundleResult> {
     const query = opts.force === true ? '?force=1' : ''
     const headers: Record<string, string> = { ...this.headers(), 'Content-Type': 'application/octet-stream' }
     if (opts.branch) headers['X-OCM-Branch'] = opts.branch
+    if (opts.requireCurrentBranch === true) headers['X-OCM-Require-Current-Branch'] = '1'
     const fileStream = Readable.toWeb(createReadStream(bundlePath)) as unknown as ReadableStream<Uint8Array>
     const body = opts.onProgress ? fileStream.pipeThrough(createByteCounter(opts.onProgress)) : fileStream
     const res = await fetch(`${this.baseUrl}/api/internal/repos/${repoId}/mirror/bundle${query}`, {
@@ -221,16 +209,16 @@ export class ManagerApi {
     return (await res.json()) as MirrorHead
   }
 
-  async mirrorTargetPlan(repoId: number, branch: string): Promise<MirrorTargetPlan> {
+  async mirrorTargetPlan(repoId: number, branch: string): Promise<MirrorTargetPlanResponse> {
     const res = await fetch(`${this.baseUrl}/api/internal/repos/${repoId}/mirror/target?branch=${encodeURIComponent(branch)}`, {
       headers: this.headers(),
     })
 
     if (!res.ok) throw await formatErrorResponse(res, 'mirror target plan')
-    return (await res.json()) as MirrorTargetPlan
+    return MirrorTargetPlanResponseSchema.parse(await res.json())
   }
 
-  async mirrorEnsureTarget(repoId: number, branch: string): Promise<MirrorTarget> {
+  async mirrorEnsureTarget(repoId: number, branch: string): Promise<MirrorTargetEnsureResponse> {
     const res = await fetch(`${this.baseUrl}/api/internal/repos/${repoId}/mirror/target`, {
       method: 'POST',
       headers: { ...this.headers(), 'Content-Type': 'application/json' },
@@ -238,7 +226,7 @@ export class ManagerApi {
     })
 
     if (!res.ok) throw await formatErrorResponse(res, 'mirror target')
-    return (await res.json()) as MirrorTarget
+    return MirrorTargetEnsureResponseSchema.parse(await res.json())
   }
 
   async mirrorContains(repoId: number, sha: string): Promise<{ contained: boolean }> {
