@@ -8,7 +8,7 @@ import { Button } from '@/components/ui/button'
 import { cn, getRepoDisplayName } from '@/lib/utils'
 import { listRepos } from '@/api/repos'
 import { AddRepoDialog } from '@/components/repo/AddRepoDialog'
-import { FolderGit2, Check, Plus } from 'lucide-react'
+import { FolderGit2, Check, Plus, GitBranch } from 'lucide-react'
 import { useUrlParams } from '@/hooks/useUrlParams'
 import { ASSISTANT_REPO_ID } from '@opencode-manager/shared/utils'
 import { getAssistantPath, isAssistantPath } from '@/lib/navigation'
@@ -123,6 +123,7 @@ export function RepoQuickSwitchSheet({ isOpen, onClose }: RepoQuickSwitchSheetPr
           <div className="flex flex-col gap-2">
             {filteredRepos.map((repo) => {
               const isActive = repo.id === activeRepoId
+              const branchToDisplay = repo.currentBranch || repo.branch
               return (
                 <button
                   key={repo.id}
@@ -146,8 +147,21 @@ export function RepoQuickSwitchSheet({ isOpen, onClose }: RepoQuickSwitchSheetPr
                       <FolderGit2 className="h-4 w-4" />
                     </div>
                   </div>
-                  <div className="flex-1 min-w-0 font-medium text-sm text-foreground truncate">
-                    {getRepoDisplayName(repo)}
+                  <div className="flex-1 min-w-0">
+                    <div className="font-medium text-sm text-foreground truncate">
+                      {getRepoDisplayName(repo)}
+                    </div>
+                    {branchToDisplay && (
+                      <div
+                        className={cn(
+                          'flex items-center gap-1 text-xs',
+                          repo.isWorktree ? 'text-purple-400' : 'text-muted-foreground',
+                        )}
+                      >
+                        <GitBranch className="h-3 w-3 shrink-0" />
+                        <span className="truncate">{branchToDisplay}</span>
+                      </div>
+                    )}
                   </div>
                   {isActive && <Check className="h-4 w-4 text-primary flex-shrink-0" />}
                 </button>
