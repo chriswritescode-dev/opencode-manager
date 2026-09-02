@@ -469,6 +469,7 @@ function importLocalBundle(repoRoot: string, bundlePath: string, branch: string 
     }
 
     const lockedElsewhere = branchOwnedElsewhere(listWorktreeBranches(repoRoot), repoRoot)
+    const currentBranch = getBranchName(repoRoot)
 
     if (branch) {
       const incomingSha = incoming.get(branch)
@@ -476,7 +477,6 @@ function importLocalBundle(repoRoot: string, bundlePath: string, branch: string 
       if (lockedElsewhere.has(branch)) {
         throw new MirrorAbort(`branch '${branch}' is checked out in another worktree; release it there before pulling`)
       }
-      const currentBranch = getBranchName(repoRoot)
       if (currentBranch !== branch) {
         const checkoutArgs = force ? ['-f'] : []
         if (listLocalBranches(repoRoot).has(branch)) {
@@ -491,6 +491,7 @@ function importLocalBundle(repoRoot: string, bundlePath: string, branch: string 
     for (const [name, sha] of incoming) {
       if (branch === name) continue
       if (lockedElsewhere.has(name)) continue
+      if (branch === null && name === currentBranch) continue
       updates.push(`update refs/heads/${name} ${sha}\n`)
     }
     if (updates.length > 0) {

@@ -1108,6 +1108,32 @@ describe('mirrorDownFast preflight', () => {
     expect(syncRefCount(local)).toBe(0)
   })
 
+  it('keeps the active branch untouched when the snapshot has no target branch', async () => {
+    const server = initRepo('server-null-target')
+    commitFile(server, 'a.txt', 'server-a\n')
+    execSync('git checkout -b feature', { cwd: server, stdio: 'ignore' })
+    const serverFeatureSha = commitFile(server, 'feature.txt', 'feature\n')
+    execSync('git checkout main', { cwd: server, stdio: 'ignore' })
+    commitFile(server, 'b.txt', 'server-b\n')
+    const bundle = createBundle(server, 'server-null-target')
+
+    const local = initRepo('local-null-target')
+    const localMainSha = commitFile(local, 'a.txt', 'local-a\n')
+    execSync('git checkout -b feature', { cwd: local, stdio: 'ignore' })
+    commitFile(local, 'local-feature.txt', 'local-feature\n')
+    execSync('git checkout main', { cwd: local, stdio: 'ignore' })
+
+    await mirrorDownFast(1, local, fastApi(null, bundle) as any, { force: false })
+
+    expect(getBranchName(local)).toBe('main')
+    expect(revRef(local, 'main')).toBe(localMainSha)
+    expect(revRef(local, 'HEAD')).toBe(localMainSha)
+    expect(readFileSync(join(local, 'a.txt'), 'utf-8')).toBe('local-a\n')
+    expect(execSync('git status --porcelain', { cwd: local, encoding: 'utf-8' })).toBe('')
+    expect(revRef(local, 'feature')).toBe(serverFeatureSha)
+    expect(syncRefCount(local)).toBe(0)
+  })
+
   it('rejects a target checked out in another worktree and preserves the current worktree state', async () => {
     const server = initRepo('server-wt')
     commitFile(server, 'main.txt', 'server-main\n')
