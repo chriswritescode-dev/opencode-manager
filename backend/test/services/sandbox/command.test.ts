@@ -3,7 +3,7 @@ import { spawnSync } from 'child_process'
 import { mkdirSync, mkdtempSync, rmSync, symlinkSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import path from 'node:path'
-import { ENV, getAssistantOpenCodeDir, getOpenCodeAgentTmpPath, getOpenCodeGlobalSkillsPath, getOpenCodeToolOutputPath, getReposPath, getScheduleWorktreesPath } from '@opencode-manager/shared/config/env'
+import { ENV, getAssistantOpenCodeDir, getForgeWorktreesPath, getOpenCodeAgentTmpPath, getOpenCodeGlobalSkillsPath, getOpenCodeToolOutputPath, getOpenCodeWorktreesPath, getReposPath, getScheduleWorktreesPath } from '@opencode-manager/shared/config/env'
 import { unwrapSandboxExecCommand } from '@opencode-manager/shared/utils'
 import {
   WORKSPACE_SANDBOX_NAME,
@@ -101,9 +101,11 @@ describe('sandbox command builders', () => {
     expect(mountArgs).toEqual(sandboxMountRoots().map((root) => `${root}:${root}`))
     expect(mountArgs[0]).toBe(`${getReposPath()}:${getReposPath()}`)
     expect(mountArgs[1]).toBe(`${getScheduleWorktreesPath()}:${getScheduleWorktreesPath()}`)
-    expect(mountArgs[2]).toBe(`${getOpenCodeToolOutputPath()}:${getOpenCodeToolOutputPath()}`)
-    expect(mountArgs[3]).toBe(`${getOpenCodeGlobalSkillsPath()}:${getOpenCodeGlobalSkillsPath()}`)
-    expect(mountArgs[4]).toBe(`${getOpenCodeAgentTmpPath()}:${getOpenCodeAgentTmpPath()}`)
+    expect(mountArgs[2]).toBe(`${getOpenCodeWorktreesPath()}:${getOpenCodeWorktreesPath()}`)
+    expect(mountArgs[3]).toBe(`${getForgeWorktreesPath()}:${getForgeWorktreesPath()}`)
+    expect(mountArgs[4]).toBe(`${getOpenCodeToolOutputPath()}:${getOpenCodeToolOutputPath()}`)
+    expect(mountArgs[5]).toBe(`${getOpenCodeGlobalSkillsPath()}:${getOpenCodeGlobalSkillsPath()}`)
+    expect(mountArgs[6]).toBe(`${getOpenCodeAgentTmpPath()}:${getOpenCodeAgentTmpPath()}`)
   })
 
   it('never masks the assistant .opencode directory with a tmpfs overlay', () => {
@@ -122,7 +124,7 @@ describe('sandbox command builders', () => {
     expect(args.indexOf(ENV.SANDBOX.IMAGE)).toBeGreaterThan(entrypointIndex + 1)
   })
 
-  it('mounts only the skills, tool-output, and agent tmp directories from outside the project roots', () => {
+  it('mounts only the worktree, skills, tool-output, and agent tmp directories from outside the repo roots', () => {
     const workspacePath = path.dirname(getReposPath())
     const roots = sandboxMountRoots()
 
@@ -130,6 +132,8 @@ describe('sandbox command builders', () => {
       getOpenCodeGlobalSkillsPath(),
     ])
     expect(roots.filter((root) => isPathWithinRoot(path.join(workspacePath, '.opencode'), root))).toEqual([
+      getOpenCodeWorktreesPath(),
+      getForgeWorktreesPath(),
       getOpenCodeToolOutputPath(),
       getOpenCodeAgentTmpPath(),
     ])
@@ -175,10 +179,12 @@ describe('sandbox command builders', () => {
     expect(lifecycle.idle_timeout_secs).toBeNull()
 
     const binds = mounts.filter((mount) => mount.type === 'Bind')
-    expect(binds).toHaveLength(5)
+    expect(binds).toHaveLength(7)
     expect(binds.map((mount) => mount.host)).toEqual([
       getReposPath(),
       getScheduleWorktreesPath(),
+      getOpenCodeWorktreesPath(),
+      getForgeWorktreesPath(),
       getOpenCodeToolOutputPath(),
       getOpenCodeGlobalSkillsPath(),
       getOpenCodeAgentTmpPath(),
@@ -199,14 +205,18 @@ describe('sandbox command builders', () => {
     expect(mounts.find((mount) => mount.type === 'Tmpfs')).toBeUndefined()
   })
 
-  it('accepts real repo dirs and schedule worktrees while rejecting config, missing, and unrelated paths', async () => {
+  it('accepts real repo dirs, schedule, OpenCode, and forge worktrees while rejecting config, missing, and unrelated paths', async () => {
     const tmp = mkdtempSync(path.join(tmpdir(), 'ocm-sandbox-roots-'))
     const originalWorkspacePath = process.env.WORKSPACE_PATH
     try {
       const repos = path.join(tmp, 'repos')
       const schedules = path.join(tmp, 'schedule-worktrees')
+      const openCodeWorktrees = path.join(tmp, '.opencode', 'state', 'opencode', 'worktree')
+      const forgeWorktrees = path.join(tmp, '.opencode', 'state', 'opencode', 'forge', 'worktrees')
       mkdirSync(path.join(repos, 'org', 'repo', 'subdir'), { recursive: true })
       mkdirSync(path.join(schedules, 'job-1-run-2'), { recursive: true })
+      mkdirSync(path.join(openCodeWorktrees, 'project-id', 'feature'), { recursive: true })
+      mkdirSync(path.join(forgeWorktrees, 'loop-slug'), { recursive: true })
       mkdirSync(path.join(tmp, '.config', 'opencode'), { recursive: true })
       mkdirSync(path.join(tmp, '.opencode', 'state', 'opencode', 'tool-output'), { recursive: true })
       mkdirSync(path.join(tmp, '.opencode', 'tmp', 'opencode'), { recursive: true })
@@ -222,6 +232,14 @@ describe('sandbox command builders', () => {
       await expect(resolveSandboxWorkDirectory(path.join(schedules, 'job-1-run-2'))).resolves.toBe(
         path.join(schedules, 'job-1-run-2'),
       )
+      await expect(resolveSandboxWorkDirectory(path.join(openCodeWorktrees, 'project-id', 'feature'))).resolves.toBe(
+        path.join(openCodeWorktrees, 'project-id', 'feature'),
+      )
+      await expect(resolveSandboxWorkDirectory(path.join(forgeWorktrees, 'loop-slug'))).resolves.toBe(
+        path.join(forgeWorktrees, 'loop-slug'),
+      )
+      await expect(resolveSandboxWorkDirectory(path.join(tmp, '.opencode', 'state', 'opencode'))).resolves.toBeNull()
+      await expect(resolveSandboxWorkDirectory(path.join(tmp, '.opencode', 'state', 'opencode', 'forge'))).resolves.toBeNull()
       await expect(resolveSandboxWorkDirectory(path.join(repos, '..', '.config', 'opencode'))).resolves.toBeNull()
       await expect(resolveSandboxWorkDirectory(getOpenCodeToolOutputPath())).resolves.toBeNull()
       await expect(resolveSandboxWorkDirectory(getOpenCodeGlobalSkillsPath())).resolves.toBeNull()

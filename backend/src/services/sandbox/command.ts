@@ -3,9 +3,11 @@ import { accessSync, constants, realpathSync, statSync } from 'fs'
 import { realpath } from 'fs/promises'
 import {
   ENV,
+  getForgeWorktreesPath,
   getOpenCodeAgentTmpPath,
   getOpenCodeGlobalSkillsPath,
   getOpenCodeToolOutputPath,
+  getOpenCodeWorktreesPath,
   getReposPath,
   getScheduleWorktreesPath,
 } from '@opencode-manager/shared/config/env'
@@ -153,7 +155,7 @@ export function buildSandboxVerifyProvisionArgs(): string[] {
 }
 
 export function sandboxProjectRoots(): string[] {
-  return [getReposPath(), getScheduleWorktreesPath()]
+  return [getReposPath(), getScheduleWorktreesPath(), getOpenCodeWorktreesPath(), getForgeWorktreesPath()]
 }
 
 export function sandboxMountRoots(): string[] {

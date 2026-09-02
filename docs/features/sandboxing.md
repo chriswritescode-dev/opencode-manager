@@ -67,7 +67,7 @@ The overlay exposes `/dev/kvm`, `/dev/net/tun`, and `NET_ADMIN` without enabling
 
 All projects share one microVM named `ocm-workspace`:
 
-- It mounts the two project roots plus the OpenCode directories agents are handed absolute paths to, at identical guest paths. See [Mounts and Secrets](#mounts-and-secrets).
+- It mounts the four project roots plus the OpenCode directories agents are handed absolute paths to, at identical guest paths. See [Mounts and Secrets](#mounts-and-secrets).
 - Repositories and worktrees created after boot are visible immediately because their parent roots are mounted.
 - Each command supplies its own working directory through `msb exec -w`.
 - A session outside the mounted roots is refused rather than executed on the host.
@@ -91,13 +91,15 @@ The microVM receives writable bind mounts for:
 |-----------|-------------------|
 | `/workspace/repos` | Project root |
 | `/workspace/schedule-worktrees` | Project root |
+| `/workspace/.opencode/state/opencode/worktree` | Project root: worktrees created through OpenCode's workspace API |
+| `/workspace/.opencode/state/opencode/forge/worktrees` | Project root: worktrees created by the opencode-forge plugin for its loops |
 | `/workspace/.opencode/state/opencode/tool-output` | Where OpenCode saves the full content of a truncated tool result before handing the agent that absolute path |
 | `/workspace/.config/opencode/skills` | Global skills, including the scripts and reference files a skill bundles and refers to by absolute path |
 | `/workspace/.opencode/tmp/opencode` | The temporary directory the `bash` tool description tells agents to use for work outside the workspace |
 
 Each is mounted at the identical guest path. That is the point: OpenCode hands the model absolute host paths, and the host-side `read`, `write`, and `glob` tools resolve them against the container. A path that is not mounted resolves for those tools but not for a sandboxed `bash` call, which is how an agent ends up searching for a file it was just told the exact location of.
 
-Only the two project roots are accepted as working directories. The other three mounts are readable and writable but are never a valid working directory, so `bash` calls still have to run inside a repository or a schedule worktree.
+Only the four project roots are accepted as working directories. The other three mounts are readable and writable but are never a valid working directory, so `bash` calls still have to run inside a repository or a worktree.
 
 No internal API token exists anywhere under the mounted roots. The token lives in the Manager's database and reaches the generated plugins only through the `OCM_INTERNAL_TOKEN` environment variable of the Manager's own OpenCode process, which is never part of the guest environment.
 
@@ -115,7 +117,7 @@ The following remain outside the microVM:
 | `/workspace/.ssh-keys` | Repository SSH private keys |
 | `/workspace/.config/opencode/plugin`, `/workspace/.config/ocm` | Generated plugins and the shell shim — the enforcement mechanism itself |
 | `/workspace/.config/opencode` (except `skills`) | OpenCode configuration |
-| `/workspace/.opencode/state` (except `opencode/tool-output`) | Provider and MCP credentials |
+| `/workspace/.opencode/state` (except `opencode/tool-output`, `opencode/worktree`, and `opencode/forge/worktrees`) | Provider and MCP credentials, the forge database |
 
 OpenCode's host process still reads these paths normally. They are omitted only from the agent command environment.
 
@@ -131,7 +133,7 @@ OpenCode's host process still reads these paths normally. They are omitted only 
 A directory outside the mounted roots fails with:
 
 ```text
-Sandbox enforcement is on but the sandbox is unavailable: working directory is outside the sandboxed project roots (/workspace/repos, /workspace/schedule-worktrees)
+Sandbox enforcement is on but the sandbox is unavailable: working directory is outside the sandboxed project roots (/workspace/repos, /workspace/schedule-worktrees, /workspace/.opencode/state/opencode/worktree, /workspace/.opencode/state/opencode/forge/worktrees)
 ```
 
 The enforcement stamp remains authoritative for the lifetime of the OpenCode child, even if the setting changes before the required restart.
@@ -139,7 +141,8 @@ The enforcement stamp remains authoritative for the lifetime of the OpenCode chi
 ## Worktree Placement
 
 - Scheduled runs use worktrees under `/workspace/schedule-worktrees` when OpenCode's workspace API returns a path beneath unmounted state storage.
-- User-created OpenCode worktrees outside the mounted roots are created normally; only a later agent `bash` call whose working directory is outside the mounts is refused by the planner.
+- OpenCode's own workspace worktrees (`/workspace/.opencode/state/opencode/worktree`) and opencode-forge loop worktrees (`/workspace/.opencode/state/opencode/forge/worktrees`) are project roots, so agent `bash` calls run inside them without further configuration. Both live under OpenCode's data directory because the Manager sets `XDG_DATA_HOME=/workspace/.opencode/state`.
+- Any other worktree location outside the mounted roots is created normally; only a later agent `bash` call whose working directory is outside the mounts is refused by the planner.
 - External repositories symlinked into `/workspace/repos` remain outside the microVM because the link target is not mounted.
 
 ## Git Credentials in the Sandbox
