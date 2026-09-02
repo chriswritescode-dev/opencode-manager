@@ -20,6 +20,7 @@ export function createInternalOpenCodeWorkspacesRoutes(db: Database) {
           directory: repo.fullPath,
           originUrl: repo.repoUrl ?? null,
           projectId: await resolveProjectId(repo.fullPath).catch(() => null),
+          isWorktree: repo.isWorktree === true,
           extra: {
             repoId: repo.id,
             localPath: repo.localPath,

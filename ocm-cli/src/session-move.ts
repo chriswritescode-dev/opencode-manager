@@ -53,6 +53,10 @@ export function rewriteEventsForRemote(events: ReplayEvent[], ctx: RewriteContex
       stripWorkspaceID(data, 'location')
     }
 
+    if (isMessageUpdated(event.type)) {
+      rewriteMessagePath(data, ctx)
+    }
+
     coerceTimestamp(data)
 
     return { ...event, data }
@@ -67,28 +71,44 @@ function isMovedEvent(type: string): boolean {
   return type.startsWith('session.next.moved')
 }
 
+function isMessageUpdated(type: string): boolean {
+  return type.startsWith('message.updated')
+}
+
+function asRecord(value: unknown): Record<string, unknown> | null {
+  return value && typeof value === 'object' ? (value as Record<string, unknown>) : null
+}
+
+function relocatePath(path: string, ctx: RewriteContext): string {
+  if (path === ctx.localRoot) return ctx.remoteRoot
+  if (path.startsWith(ctx.localRoot + '/')) return ctx.remoteRoot + path.slice(ctx.localRoot.length)
+  return path
+}
+
+function relocateField(obj: Record<string, unknown>, key: string, ctx: RewriteContext): void {
+  const value = obj[key]
+  if (typeof value === 'string') obj[key] = relocatePath(value, ctx)
+}
+
 function rewriteDirectory(
   data: Record<string, unknown>,
   key: 'info' | 'location',
   ctx: RewriteContext,
 ): void {
-  const container = data[key]
-  if (!container || typeof container !== 'object') return
-  const obj = container as Record<string, unknown>
-  const dir = obj.directory
-  if (typeof dir !== 'string') return
-  if (dir === ctx.localRoot) {
-    obj.directory = ctx.remoteRoot
-  } else if (dir.startsWith(ctx.localRoot + '/')) {
-    obj.directory = ctx.remoteRoot + dir.slice(ctx.localRoot.length)
-  }
+  const container = asRecord(data[key])
+  if (container) relocateField(container, 'directory', ctx)
+}
+
+function rewriteMessagePath(data: Record<string, unknown>, ctx: RewriteContext): void {
+  const path = asRecord(asRecord(data.info)?.path)
+  if (!path) return
+  relocateField(path, 'cwd', ctx)
+  relocateField(path, 'root', ctx)
 }
 
 function stripWorkspaceID(data: Record<string, unknown>, key: 'info' | 'location'): void {
-  const container = data[key]
-  if (!container || typeof container !== 'object') return
-  const obj = container as Record<string, unknown>
-  delete obj.workspaceID
+  const container = asRecord(data[key])
+  if (container) delete container.workspaceID
 }
 
 /** Per commit 686c820d: coerce `data.timestamp` from ISO string to epoch ms. */

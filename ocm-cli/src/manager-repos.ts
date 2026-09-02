@@ -7,6 +7,7 @@ export interface ManagerRepo {
   cloneStatus: string
   directory: string
   projectId?: string | null
+  isWorktree?: boolean
   extra: { repoId: number; localPath: string; fullPath: string }
 }
 

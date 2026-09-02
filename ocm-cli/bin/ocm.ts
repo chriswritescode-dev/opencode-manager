@@ -3,12 +3,12 @@ import { basename } from 'path'
 import { readState, writeState, clearState, getStatePath, type OcmState } from '../src/state.js'
 import { getToken, setToken, deleteToken, hasStoredToken, describeTokenStore, describeTokenWriteTarget, envToken, TOKEN_ENV, TokenStoreError } from '../src/internal-token-store.js'
 import { ManagerApi, ManagerApiError } from '../src/manager-api.js'
-import { mirrorUp, mirrorDown, mirrorUpFast, mirrorDownFast, prepareMirror, MirrorAbort, checkPushDivergence, checkPullDivergence } from '../src/mirror.js'
+import { mirrorUp, mirrorDown, mirrorUpFast, mirrorDownFast, prepareMirror, MirrorAbort, checkPushDivergence, checkPullDivergence, describePushDivergence } from '../src/mirror.js'
 import type { RemoteRepoSummary, MirrorProgress, PushDivergence, PullDivergence } from '../src/mirror.js'
 import { createProgressReporter } from '../src/progress.js'
 import { getBranchName, getOriginUrl } from '../src/local-repo.js'
 import { resolveOpenCodeProjectId } from '@opencode-manager/shared/project-id'
-import { resolveTarget } from '../src/resolve-target.js'
+import { resolveTarget, formatRepoIdentities, parseRepoIdPositional, restrictMatchesToRequestedRepo } from '../src/resolve-target.js'
 import { buildRemoteAttachEnv } from '../src/remote-context.js'
 import { type ManagerRepo, fetchRepos, toRemoteRepoSummaries } from '../src/manager-repos.js'
 import packageJson from '../package.json' with { type: 'json' }
@@ -26,8 +26,10 @@ Usage:
   ocm status                Show current manager URL, repo, and whether token is set
   ocm list                  List ready repos from the manager
   ocm use <repoId|name>     Attach to a specific repo and remember it as last
-  ocm push [--force] [--create] [--yes] [--full]   Mirror $PWD to the matching Manager repo (fast patch sync by default)
-  ocm pull [--force] [--full]                      Mirror the matching Manager repo over $PWD (fast patch sync by default)
+  ocm push [repoId] [--force] [--create] [--yes] [--full]
+                                                  Mirror $PWD to the matching Manager repo (fast patch sync by default)
+  ocm pull [repoId] [--force] [--full]
+                                                  Mirror the matching Manager repo over $PWD (fast patch sync by default)
   ocm --version             Show the installed ocm version
   ocm --help                Show this help
 `
@@ -72,17 +74,9 @@ function confirmOverwrite(headline: string, reasons: string[], question: string,
 }
 
 function guardDivergentPush(repoName: string, div: PushDivergence): boolean {
-  const reasons: string[] = []
-  if (div.diverged) {
-    reasons.push(div.lostCommits >= 0
-      ? `the server is ${div.lostCommits} commit(s) ahead of your local branch`
-      : 'the server has commit(s) not present in your local branch')
-  }
-  if (div.serverDirty) reasons.push('the server has uncommitted changes')
-
   return confirmOverwrite(
     `pushing to ${repoName} will discard server-side work:`,
-    reasons,
+    describePushDivergence(div),
     'Overwrite server-side work and push anyway?',
     'This work is likely from OpenCode agent sessions on the manager.',
   )
@@ -355,8 +349,7 @@ async function cmdDefault(): Promise<void> {
       return
     }
     case 'cwd-ambiguous': {
-      const names = result.matches.map((r) => `${r.name} (id=${r.repoId})`).join(', ')
-      die(`multiple Manager repos match project ${result.localProjectId}: ${names}; disambiguate with \`ocm use <repoId>\``)
+      die(`multiple Manager repos match project ${result.localProjectId}: ${formatRepoIdentities(result.matches)}; disambiguate with \`ocm use <repoId>\``)
       break
     }
     case 'local':
@@ -387,7 +380,17 @@ function toManagerRepo(repo: { repoId: number; name: string; branch: string | nu
   }
 }
 
+const PUSH_FLAGS = ['--force', '--create', '--yes', '--full'] as const
+const PULL_FLAGS = ['--force', '--full'] as const
+
+function dieAmbiguousProjectMatch(command: 'push' | 'pull', localProjectId: string, repos: readonly ManagerRepo[], matches: readonly RemoteRepoSummary[]): never {
+  const matchedIds = new Set(matches.map((m) => m.repoId))
+  die(`multiple Manager repos match project ${localProjectId}: ${formatRepoIdentities(repos.filter((r) => matchedIds.has(r.repoId)))}; disambiguate with \`ocm ${command} <repoId>\``)
+}
+
 export async function cmdPush(args: string[]): Promise<void> {
+  const parsed = parseRepoIdPositional(args, PUSH_FLAGS)
+  if (parsed.error) die(parsed.error)
   let force = false
   let create = false
   let yes = false
@@ -408,6 +411,9 @@ export async function cmdPush(args: string[]): Promise<void> {
   const remotes: RemoteRepoSummary[] = toRemoteRepoSummaries(repos)
 
   const plan = await prepareMirror(process.cwd(), remotes)
+  const restriction = restrictMatchesToRequestedRepo(plan.matched, parsed.repoId, plan.localProjectId)
+  if (restriction.error) die(restriction.error)
+  plan.matched = restriction.matches
 
   if (plan.matched.length === 0) {
     if (!create) {
@@ -464,12 +470,13 @@ export async function cmdPush(args: string[]): Promise<void> {
     progress.done()
     info(`pushed ${plan.repoRoot} -> ${plan.matched[0]!.name} (repoId=${result.repoId}, branch=${result.branch})`)
   } else {
-    const names = plan.matched.map((r) => `${r.name} (id=${r.repoId})`).join(', ')
-    die(`multiple Manager repos match project ${plan.localProjectId}: ${names}; disambiguate with \`ocm push <repoId>\``)
+    dieAmbiguousProjectMatch('push', plan.localProjectId, repos, plan.matched)
   }
 }
 
 async function cmdPull(args: string[]): Promise<void> {
+  const parsed = parseRepoIdPositional(args, PULL_FLAGS)
+  if (parsed.error) die(parsed.error)
   let force = false
   let full = false
 
@@ -486,14 +493,16 @@ async function cmdPull(args: string[]): Promise<void> {
   const remotes: RemoteRepoSummary[] = toRemoteRepoSummaries(repos)
 
   const plan = await prepareMirror(process.cwd(), remotes)
+  const restriction = restrictMatchesToRequestedRepo(plan.matched, parsed.repoId, plan.localProjectId)
+  if (restriction.error) die(restriction.error)
+  plan.matched = restriction.matches
 
   if (plan.matched.length === 0) {
     die(`no matching Manager repo for project ${plan.localProjectId}.`)
   }
 
   if (plan.matched.length > 1) {
-    const names = plan.matched.map((r) => `${r.name} (id=${r.repoId})`).join(', ')
-    die(`multiple Manager repos match project ${plan.localProjectId}: ${names}; disambiguate with \`ocm pull <repoId>\``)
+    dieAmbiguousProjectMatch('pull', plan.localProjectId, repos, plan.matched)
   }
 
   if (!force) {

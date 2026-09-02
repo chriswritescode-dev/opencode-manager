@@ -48,8 +48,8 @@ ocm
 ocm status
 ocm list
 ocm use <repoId|name>
-ocm push [--force] [--create] [--yes] [--full]
-ocm pull [--force] [--full]
+ocm push [repoId] [--force] [--create] [--yes] [--full]
+ocm pull [repoId] [--force] [--full]
 ocm logout
 ```
 
@@ -77,6 +77,14 @@ tarball mirror. If the fast path fails, `ocm` prompts before reverting to the
 tarball mirror (and proceeds automatically when there is no TTY to prompt). It
 refuses to overwrite uncommitted local changes unless `--force` is passed.
 
+A base repo and one of its worktrees can both be registered as ready Manager
+repos sharing the same OpenCode project id. When that happens, `ocm push` and
+`ocm pull` accept an optional positional repo id to pick the target:
+`ocm push [repoId]` / `ocm pull [repoId]`. The id must belong to one of the
+repos matching the current project (the command fails clearly otherwise), and
+any ambiguity message lists each match with its id, kind (repo or worktree),
+branch, and path. The default attach reports the same details.
+
 ## OpenCode TUI plugin
 
 The package exposes an OpenCode TUI plugin through its `./tui` package export.
@@ -84,9 +92,18 @@ Configure the package name and OpenCode resolves that TUI entrypoint
 automatically. When attached to a Manager via `ocm`, the plugin shows a
 `REMOTE <host> · <repo>` indicator at the bottom of the TUI; local launches
 show nothing. It registers `/ocm-move`, which keeps the local session and
-copies the active session to the Manager after pushing the current repo state.
-When multiple Manager repos match, a picker dialog lets you choose the
-destination. A confirmation dialog gates the move before any push. On success
+copies the active session to the Manager after replacing the Manager repo's
+working tree with your local one (commits, staged, unstaged, and untracked
+files; gitignored files on the Manager are preserved). The Manager's current
+checkout is never switched: if it is on your branch the repo is replaced in
+place; otherwise your branch goes into a sibling worktree (`<repo>-<branch>`,
+registered as its own Manager repo), created on demand if it does not exist
+yet. When multiple Manager repos match, the one already on your branch is
+chosen; otherwise a picker dialog lets you choose. A confirmation dialog gates
+the move before any push, states where the state will land, and lists any
+server-side work (uncommitted changes or commits not present locally) that will
+be discarded there. While the move runs, a spinner with the current phase and a
+progress bar is shown next to the prompt. On success
 you can optionally warp — exit the local TUI and attach to the moved session
 on the Manager immediately. Use it from inside an OpenCode session after
 `ocm login` and after the repo already exists on the Manager

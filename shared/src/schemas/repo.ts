@@ -110,3 +110,34 @@ export const AssistantModeInitRequestSchema = z.object({
   overwriteAgentsMd: z.boolean().optional(),
   overwriteOpenCodeConfig: z.boolean().optional(),
 })
+
+export const MirrorTargetBranchRequestSchema = z.object({
+  branch: z.string().trim().min(1),
+})
+
+export type MirrorTargetBranchRequest = z.infer<typeof MirrorTargetBranchRequestSchema>
+
+const MirrorTargetPlanBaseSchema = z.object({
+  fullPath: z.string().min(1),
+  localPath: z.string().min(1),
+  branch: z.string().min(1),
+  currentBranch: z.string().min(1).nullable(),
+})
+
+export const MirrorTargetPlanResponseSchema = z.discriminatedUnion('kind', [
+  MirrorTargetPlanBaseSchema.extend({ kind: z.literal('new'), repoId: z.literal(null) }),
+  MirrorTargetPlanBaseSchema.extend({ kind: z.literal('in-place'), repoId: z.number().int().positive() }),
+  MirrorTargetPlanBaseSchema.extend({ kind: z.literal('existing'), repoId: z.number().int().positive() }),
+])
+
+export type MirrorTargetPlanResponse = z.infer<typeof MirrorTargetPlanResponseSchema>
+
+export const MirrorTargetEnsureResponseSchema = z.object({
+  repoId: z.number().int().positive(),
+  fullPath: z.string().min(1),
+  localPath: z.string().min(1),
+  branch: z.string().min(1),
+  created: z.boolean(),
+})
+
+export type MirrorTargetEnsureResponse = z.infer<typeof MirrorTargetEnsureResponseSchema>

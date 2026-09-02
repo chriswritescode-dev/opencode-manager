@@ -4,8 +4,9 @@ import { join } from 'path'
 import { tmpdir } from 'os'
 import { randomBytes } from 'crypto'
 import { spawnSync, execSync } from 'child_process'
-import { prepareMirror, MirrorAbort, mirrorDown, mirrorUp, mirrorUpPatch, mirrorUpFast, checkPushDivergence, checkPullDivergence, type MirrorUpFastPhase } from '../src/mirror'
+import { prepareMirror, MirrorAbort, mirrorDown, mirrorDownFast, mirrorUp, mirrorUpPatch, mirrorUpFast, checkPushDivergence, checkPullDivergence, describePushDivergence, pickMatchedRepo, type MirrorUpFastPhase } from '../src/mirror'
 import { getBranchName } from '../src/local-repo'
+import { ManagerApi } from '../src/manager-api'
 import { gitRemoteProjectId } from '@opencode-manager/shared/project-id'
 import { mockStateModule, mockTokenStoreModule } from './helpers/token-store-mocks.js'
 
@@ -644,6 +645,46 @@ describe('checkPushDivergence', () => {
   })
 })
 
+describe('pickMatchedRepo', () => {
+  const main = { repoId: 1, name: 'app', projectId: 'p', branch: 'main' }
+  const feature = { repoId: 2, name: 'app-feature', projectId: 'p', branch: 'feature' }
+
+  it('returns the single match regardless of branch', () => {
+    expect(pickMatchedRepo([main], 'feature')).toBe(main)
+    expect(pickMatchedRepo([main], null)).toBe(main)
+  })
+
+  it('prefers the repo already on the local branch when several match', () => {
+    expect(pickMatchedRepo([main, feature], 'feature')).toBe(feature)
+  })
+
+  it('returns null when several match and none is on the local branch', () => {
+    expect(pickMatchedRepo([main, feature], 'other')).toBeNull()
+    expect(pickMatchedRepo([main, feature], null)).toBeNull()
+  })
+})
+
+describe('describePushDivergence', () => {
+  const base = { serverHead: 'abc', serverBranch: 'main', lostCommits: 0 }
+
+  it('returns no reasons when the push is a clean fast-forward', () => {
+    expect(describePushDivergence({ ...base, serverDirty: false, diverged: false })).toEqual([])
+  })
+
+  it('describes a counted divergence and dirty server together', () => {
+    expect(describePushDivergence({ ...base, serverDirty: true, diverged: true, lostCommits: 2 })).toEqual([
+      'the server is 2 commit(s) ahead of your local branch',
+      'the server has uncommitted changes',
+    ])
+  })
+
+  it('describes divergence with an unknown commit count', () => {
+    expect(describePushDivergence({ ...base, serverDirty: false, diverged: true, lostCommits: -1 })).toEqual([
+      'the server has commit(s) not present in your local branch',
+    ])
+  })
+})
+
 describe('checkPullDivergence', () => {
   let tmpDir: string
 
@@ -808,6 +849,58 @@ describe('mirrorUpFast targets the selected repo', () => {
     expect(result.repoId).toBe(99)
   })
 
+  it('forwards the strict current-branch option to the bundle upload', async () => {
+    const repoRoot = join(tmpDir, 'repo-strict-forward')
+    mkdirSync(repoRoot)
+    spawnSync('git', ['init'], { cwd: repoRoot, stdio: 'ignore' })
+    spawnSync('git', ['config', 'user.email', 'test@test.com'], { cwd: repoRoot, stdio: 'ignore' })
+    spawnSync('git', ['config', 'user.name', 'Test'], { cwd: repoRoot, stdio: 'ignore' })
+    writeFileSync(join(repoRoot, 'tracked.txt'), 'content\n')
+    spawnSync('git', ['add', 'tracked.txt'], { cwd: repoRoot, stdio: 'ignore' })
+    spawnSync('git', ['commit', '-m', 'initial'], { cwd: repoRoot, stdio: 'ignore' })
+
+    const api = {
+      mirrorUploadBundle: vi.fn().mockResolvedValue(undefined),
+      mirrorPatch: vi.fn().mockResolvedValue({ repoId: 1, fullPath: '/tmp/x', branch: 'main', head: 'abc', created: false, applied: true }),
+    }
+
+    const plan = {
+      repoRoot,
+      localProjectId: 'proj',
+      matched: [{ repoId: 1, name: 'repo-A', projectId: 'proj', branch: 'main' }],
+    }
+
+    await mirrorUpFast(plan, { api: api as any, force: false, requireCurrentBranch: true })
+
+    expect(api.mirrorUploadBundle.mock.calls[0]![2].requireCurrentBranch).toBe(true)
+  })
+
+  it('omits the strict current-branch option by default', async () => {
+    const repoRoot = join(tmpDir, 'repo-strict-default')
+    mkdirSync(repoRoot)
+    spawnSync('git', ['init'], { cwd: repoRoot, stdio: 'ignore' })
+    spawnSync('git', ['config', 'user.email', 'test@test.com'], { cwd: repoRoot, stdio: 'ignore' })
+    spawnSync('git', ['config', 'user.name', 'Test'], { cwd: repoRoot, stdio: 'ignore' })
+    writeFileSync(join(repoRoot, 'tracked.txt'), 'content\n')
+    spawnSync('git', ['add', 'tracked.txt'], { cwd: repoRoot, stdio: 'ignore' })
+    spawnSync('git', ['commit', '-m', 'initial'], { cwd: repoRoot, stdio: 'ignore' })
+
+    const api = {
+      mirrorUploadBundle: vi.fn().mockResolvedValue(undefined),
+      mirrorPatch: vi.fn().mockResolvedValue({ repoId: 1, fullPath: '/tmp/x', branch: 'main', head: 'abc', created: false, applied: true }),
+    }
+
+    const plan = {
+      repoRoot,
+      localProjectId: 'proj',
+      matched: [{ repoId: 1, name: 'repo-A', projectId: 'proj', branch: 'main' }],
+    }
+
+    await mirrorUpFast(plan, { api: api as any, force: false })
+
+    expect(api.mirrorUploadBundle.mock.calls[0]![2].requireCurrentBranch).toBeUndefined()
+  })
+
   it('reports bundling, uploading, and patching phases in order', async () => {
     const repoRoot = join(tmpDir, 'repo-phases')
     mkdirSync(repoRoot)
@@ -915,3 +1008,302 @@ describe('mirrorUpFast targets the selected repo', () => {
   })
 })
 
+describe('mirrorDownFast preflight', () => {
+  let tmpDir: string
+
+  beforeEach(() => {
+    tmpDir = mkdtempSync(join(tmpdir(), 'mirror-downfast-test-'))
+  })
+
+  afterEach(() => {
+    rmSync(tmpDir, { recursive: true, force: true })
+  })
+
+  function initRepo(name: string): string {
+    const repoRoot = join(tmpDir, name)
+    mkdirSync(repoRoot)
+    spawnSync('git', ['init', '-b', 'main'], { cwd: repoRoot, stdio: 'ignore' })
+    spawnSync('git', ['config', 'user.email', 'test@test.com'], { cwd: repoRoot, stdio: 'ignore' })
+    spawnSync('git', ['config', 'user.name', 'Test'], { cwd: repoRoot, stdio: 'ignore' })
+    return repoRoot
+  }
+
+  function commitFile(repoRoot: string, file: string, content: string): string {
+    writeFileSync(join(repoRoot, file), content)
+    spawnSync('git', ['add', '.'], { cwd: repoRoot, stdio: 'ignore' })
+    spawnSync('git', ['commit', '-m', `update ${file}`], { cwd: repoRoot, stdio: 'ignore' })
+    return execSync('git rev-parse HEAD', { cwd: repoRoot, encoding: 'utf-8' }).trim()
+  }
+
+  function revRef(repoRoot: string, ref: string): string {
+    return execSync(`git rev-parse ${ref}`, { cwd: repoRoot, encoding: 'utf-8' }).trim()
+  }
+
+  function createBundle(repoRoot: string, name: string): Buffer {
+    const bundleFile = join(tmpDir, `${name}.bundle`)
+    execSync(`git bundle create "${bundleFile}" --all`, { cwd: repoRoot })
+    return readFileSync(bundleFile)
+  }
+
+  const streamOf = (buf: Buffer): ReadableStream<Uint8Array> =>
+    new ReadableStream({
+      start(controller) {
+        controller.enqueue(new Uint8Array(buf))
+        controller.close()
+      },
+    })
+
+  const fastApi = (branch: string | null, bundle: Buffer) => ({
+    mirrorPatchSnapshot: vi.fn().mockResolvedValue({ branch, patch: '' }),
+    mirrorDownloadBundle: vi.fn().mockResolvedValue(streamOf(bundle)),
+  })
+
+  const syncRefCount = (repoRoot: string): number =>
+    execSync('git for-each-ref refs/remotes/ocm-sync', { cwd: repoRoot, encoding: 'utf-8' }).trim().split('\n').filter(Boolean).length
+
+  it('updates the same branch target and leaves no ocm-sync refs behind', async () => {
+    const server = initRepo('server-same')
+    commitFile(server, 'tracked.txt', 'server-base\n')
+    execSync('git checkout -b feature', { cwd: server, stdio: 'ignore' })
+    commitFile(server, 'feature.txt', 'feature\n')
+    execSync('git checkout main', { cwd: server, stdio: 'ignore' })
+    commitFile(server, 'tracked.txt', 'server-head\n')
+    const serverMainSha = revRef(server, 'main')
+    const serverFeatureSha = revRef(server, 'feature')
+    const bundle = createBundle(server, 'server-same')
+
+    const local = initRepo('local-same')
+    commitFile(local, 'tracked.txt', 'local-head\n')
+
+    await mirrorDownFast(1, local, fastApi('main', bundle) as any, { force: false })
+
+    expect(getBranchName(local)).toBe('main')
+    expect(revRef(local, 'HEAD')).toBe(serverMainSha)
+    expect(readFileSync(join(local, 'tracked.txt'), 'utf-8')).toBe('server-head\n')
+    expect(revRef(local, 'feature')).toBe(serverFeatureSha)
+    expect(syncRefCount(local)).toBe(0)
+  })
+
+  it('switches branches when clean and selects the incoming target before resetting', async () => {
+    const server = initRepo('server-cross')
+    commitFile(server, 'main.txt', 'server-main\n')
+    execSync('git checkout -b topic', { cwd: server, stdio: 'ignore' })
+    const topicSha = commitFile(server, 'topic.txt', 'server-topic\n')
+    execSync('git checkout main', { cwd: server, stdio: 'ignore' })
+    commitFile(server, 'main.txt', 'server-main-2\n')
+    const serverMainSha = revRef(server, 'main')
+    const bundle = createBundle(server, 'server-cross')
+
+    const local = initRepo('local-cross')
+    commitFile(local, 'main.txt', 'local-main\n')
+    execSync('git branch topic', { cwd: local, stdio: 'ignore' })
+
+    await mirrorDownFast(1, local, fastApi('topic', bundle) as any, { force: false })
+
+    expect(getBranchName(local)).toBe('topic')
+    expect(revRef(local, 'HEAD')).toBe(topicSha)
+    expect(revRef(local, 'topic')).toBe(topicSha)
+    expect(revRef(local, 'main')).toBe(serverMainSha)
+    expect(readFileSync(join(local, 'topic.txt'), 'utf-8')).toBe('server-topic\n')
+    expect(syncRefCount(local)).toBe(0)
+  })
+
+  it('keeps the active branch untouched when the snapshot has no target branch', async () => {
+    const server = initRepo('server-null-target')
+    commitFile(server, 'a.txt', 'server-a\n')
+    execSync('git checkout -b feature', { cwd: server, stdio: 'ignore' })
+    const serverFeatureSha = commitFile(server, 'feature.txt', 'feature\n')
+    execSync('git checkout main', { cwd: server, stdio: 'ignore' })
+    commitFile(server, 'b.txt', 'server-b\n')
+    const bundle = createBundle(server, 'server-null-target')
+
+    const local = initRepo('local-null-target')
+    const localMainSha = commitFile(local, 'a.txt', 'local-a\n')
+    execSync('git checkout -b feature', { cwd: local, stdio: 'ignore' })
+    commitFile(local, 'local-feature.txt', 'local-feature\n')
+    execSync('git checkout main', { cwd: local, stdio: 'ignore' })
+
+    await mirrorDownFast(1, local, fastApi(null, bundle) as any, { force: false })
+
+    expect(getBranchName(local)).toBe('main')
+    expect(revRef(local, 'main')).toBe(localMainSha)
+    expect(revRef(local, 'HEAD')).toBe(localMainSha)
+    expect(readFileSync(join(local, 'a.txt'), 'utf-8')).toBe('local-a\n')
+    expect(execSync('git status --porcelain', { cwd: local, encoding: 'utf-8' })).toBe('')
+    expect(revRef(local, 'feature')).toBe(serverFeatureSha)
+    expect(syncRefCount(local)).toBe(0)
+  })
+
+  it('rejects a target checked out in another worktree and preserves the current worktree state', async () => {
+    const server = initRepo('server-wt')
+    commitFile(server, 'main.txt', 'server-main\n')
+    execSync('git checkout -b checked', { cwd: server, stdio: 'ignore' })
+    commitFile(server, 'checked.txt', 'server-checked\n')
+    execSync('git checkout main', { cwd: server, stdio: 'ignore' })
+    const bundle = createBundle(server, 'server-wt')
+
+    const local = initRepo('local-wt')
+    commitFile(local, 'main.txt', 'local-base\n')
+    execSync(`git worktree add "${join(tmpDir, 'checked-wt')}" -b checked`, { cwd: local, stdio: 'ignore' })
+    const localMainSha = revRef(local, 'main')
+    const localCheckedSha = revRef(local, 'checked')
+    writeFileSync(join(local, 'untracked.txt'), 'keep-me\n')
+
+    const thrown = await mirrorDownFast(1, local, fastApi('checked', bundle) as any, { force: true }).then(
+      () => null,
+      (err: unknown) => err,
+    )
+    expect(thrown).toBeInstanceOf(MirrorAbort)
+    expect((thrown as MirrorAbort).message).toContain('checked out in another worktree')
+
+    expect(getBranchName(local)).toBe('main')
+    expect(existsSync(join(local, 'untracked.txt'))).toBe(true)
+    expect(revRef(local, 'main')).toBe(localMainSha)
+    expect(revRef(local, 'checked')).toBe(localCheckedSha)
+    expect(existsSync(join(tmpDir, 'checked-wt', 'checked.txt'))).toBe(false)
+    expect(syncRefCount(local)).toBe(0)
+  })
+
+  it('rejects a missing target ref and preserves local refs and worktree state', async () => {
+    const server = initRepo('server-missing')
+    commitFile(server, 'main.txt', 'server-main\n')
+    const bundle = createBundle(server, 'server-missing')
+
+    const local = initRepo('local-missing')
+    const localMainSha = commitFile(local, 'main.txt', 'local-main\n')
+    writeFileSync(join(local, 'untracked.txt'), 'keep-me\n')
+
+    const thrown = await mirrorDownFast(1, local, fastApi('ghost', bundle) as any, { force: true }).then(
+      () => null,
+      (err: unknown) => err,
+    )
+    expect(thrown).toBeInstanceOf(MirrorAbort)
+    expect((thrown as MirrorAbort).message).toContain("no incoming branch 'ghost'")
+
+    expect(getBranchName(local)).toBe('main')
+    expect(revRef(local, 'main')).toBe(localMainSha)
+    expect(existsSync(join(local, 'untracked.txt'))).toBe(true)
+    expect(syncRefCount(local)).toBe(0)
+  })
+})
+
+describe('ManagerApi target response validation', () => {
+  afterEach(() => {
+    vi.unstubAllGlobals()
+  })
+
+  const api = new ManagerApi('http://localhost:5003', 'test-token')
+
+  it('parses a valid new-worktree target plan response', async () => {
+    vi.stubGlobal('fetch', vi.fn().mockResolvedValue({
+      ok: true,
+      json: () => Promise.resolve({ kind: 'new', repoId: null, fullPath: '/repos/repo-feature', localPath: 'repo-feature', branch: 'feature', currentBranch: 'main' }),
+    }))
+
+    const plan = await api.mirrorTargetPlan(1, 'feature')
+
+    expect(plan.kind).toBe('new')
+    expect(plan.repoId).toBeNull()
+    expect(plan.branch).toBe('feature')
+  })
+
+  it('parses a valid existing-worktree target plan response', async () => {
+    vi.stubGlobal('fetch', vi.fn().mockResolvedValue({
+      ok: true,
+      json: () => Promise.resolve({ kind: 'existing', repoId: 5, fullPath: '/repos/repo-feature', localPath: 'repo-feature', branch: 'feature', currentBranch: null }),
+    }))
+
+    const plan = await api.mirrorTargetPlan(1, 'feature')
+
+    expect(plan.kind).toBe('existing')
+    expect(plan.repoId).toBe(5)
+  })
+
+  it('rejects a target plan response whose repoId contradicts its kind', async () => {
+    vi.stubGlobal('fetch', vi.fn().mockResolvedValue({
+      ok: true,
+      json: () => Promise.resolve({ kind: 'new', repoId: 7, fullPath: '/repos/repo-feature', localPath: 'repo-feature', branch: 'feature', currentBranch: 'main' }),
+    }))
+
+    await expect(api.mirrorTargetPlan(1, 'feature')).rejects.toThrow()
+  })
+
+  it('rejects a target plan response with an unknown kind', async () => {
+    vi.stubGlobal('fetch', vi.fn().mockResolvedValue({
+      ok: true,
+      json: () => Promise.resolve({ kind: 'bogus', repoId: 1, fullPath: '/x', localPath: 'x', branch: 'main', currentBranch: null }),
+    }))
+
+    await expect(api.mirrorTargetPlan(1, 'main')).rejects.toThrow()
+  })
+
+  it('parses a valid ensure target response', async () => {
+    vi.stubGlobal('fetch', vi.fn().mockResolvedValue({
+      ok: true,
+      json: () => Promise.resolve({ repoId: 9, fullPath: '/repos/repo-feature', localPath: 'repo-feature', branch: 'feature', created: true }),
+    }))
+
+    const target = await api.mirrorEnsureTarget(1, 'feature')
+
+    expect(target.repoId).toBe(9)
+    expect(target.created).toBe(true)
+  })
+
+  it('rejects an ensure target response missing fields', async () => {
+    vi.stubGlobal('fetch', vi.fn().mockResolvedValue({
+      ok: true,
+      json: () => Promise.resolve({ repoId: 9, fullPath: '/repos/repo-feature' }),
+    }))
+
+    await expect(api.mirrorEnsureTarget(1, 'feature')).rejects.toThrow()
+  })
+
+  it('rejects an ensure target response with a non-positive repoId', async () => {
+    vi.stubGlobal('fetch', vi.fn().mockResolvedValue({
+      ok: true,
+      json: () => Promise.resolve({ repoId: 0, fullPath: '/x', localPath: 'x', branch: 'main', created: false }),
+    }))
+
+    await expect(api.mirrorEnsureTarget(1, 'main')).rejects.toThrow()
+  })
+})
+
+describe('ManagerApi mirrorUploadBundle strict branch header', () => {
+  let tmpDir: string
+
+  beforeEach(() => {
+    tmpDir = mkdtempSync(join(tmpdir(), 'bundle-header-test-'))
+  })
+
+  afterEach(() => {
+    vi.unstubAllGlobals()
+    rmSync(tmpDir, { recursive: true, force: true })
+  })
+
+  const api = new ManagerApi('http://localhost:5003', 'test-token')
+
+  async function captureUpload(opts: { branch: string | null; requireCurrentBranch?: boolean }): Promise<Record<string, string>> {
+    const bundlePath = join(tmpDir, 'repo.bundle')
+    writeFileSync(bundlePath, 'bundle bytes')
+    let capturedHeaders: Record<string, string> | undefined
+    vi.stubGlobal('fetch', vi.fn().mockImplementation(async (_url: unknown, init?: RequestInit) => {
+      capturedHeaders = init!.headers as Record<string, string>
+      return { ok: true, json: () => Promise.resolve({ repoId: 1, fullPath: '/repos/x', branch: 'main', head: 'abc', created: false }) }
+    }))
+    await api.mirrorUploadBundle(1, bundlePath, opts)
+    expect(capturedHeaders).toBeDefined()
+    return capturedHeaders!
+  }
+
+  it('sends the require-current-branch header when requested', async () => {
+    const headers = await captureUpload({ branch: 'main', requireCurrentBranch: true })
+    expect(headers['X-OCM-Require-Current-Branch']).toBe('1')
+    expect(headers['X-OCM-Branch']).toBe('main')
+  })
+
+  it('omits the require-current-branch header for normal push', async () => {
+    const headers = await captureUpload({ branch: 'main' })
+    expect(headers['X-OCM-Require-Current-Branch']).toBeUndefined()
+    expect(headers['X-OCM-Branch']).toBe('main')
+  })
+})
