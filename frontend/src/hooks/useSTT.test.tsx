@@ -1,5 +1,6 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest'
 import { renderHook, act, waitFor } from '@testing-library/react'
+import { FetchError } from '../api/fetchWrapper'
 import { useSTT } from './useSTT'
 
 type MockRecorder = {
@@ -253,8 +254,7 @@ describe('useSTT external provider lifecycle', () => {
 
     expect(signalArg.aborted).toBe(true)
 
-    const cancelError = new Error('canceled')
-    cancelError.name = 'CanceledError'
+    const cancelError = new FetchError('Request canceled', 499, 'CANCELED')
     rejectTranscribe(cancelError)
 
     await waitFor(() => {
