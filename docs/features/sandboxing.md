@@ -198,7 +198,7 @@ It is `node:24` (Debian 12, `buildpack-deps` based), so the compile toolchain is
 | `git`, `ssh`, `python3`, `curl`, `wget`, `unzip` | `node:24` | git 2.39.5 |
 | `python` | apt (`python-is-python3`) | The base image ships only `python3`; a skill or script invoking `python` would otherwise fail |
 | `ping`, `ip`, `ss`, `netstat`, `dig`, `host`, `nslookup`, `nc`, `traceroute`, `lsof`, `rsync` | apt | `node:24` ships no network diagnostics at all. The image build fails if any of these is missing |
-| `pnpm` | corepack | Prewarmed into a shared, writable `COREPACK_HOME` (`/usr/local/share/corepack`), so the exec user runs the build-time version offline. A project `packageManager` pin of a different version downloads on first use |
+| `pnpm` | corepack | Prewarmed into a shared `COREPACK_HOME` (`/usr/local/share/corepack`) whose whole tree — including the `v1/` cache and `lastKnownGood.json` that `corepack prepare` creates as root — is opened up after prewarming, so the exec user runs the build-time version offline and a project `packageManager` pin of a different version downloads on first use. The build verifies that pinned download as an unknown uid |
 | `bun`, `bunx` | official installer | Installed to `/opt/bun`, world-readable, both symlinked onto `PATH` |
 | `uv`, `uvx` | Astral installer | Standalone binaries on `PATH`; `uv tool` shims land in `/opt/agent-tools/bin`, which is on `PATH` |
 | `npm -g`, `pnpm -g` | npm / corepack | Global installs redirect to `/opt/agent-tools` (`npm_config_prefix`, `PNPM_HOME`), so they are writable for the exec user and their binaries are on `PATH` |

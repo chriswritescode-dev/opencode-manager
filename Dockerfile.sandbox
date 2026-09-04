@@ -8,6 +8,9 @@
 FROM node:24
 
 ARG PLAYWRIGHT_VERSION=1.56.0
+# uv@latest (0.12.9) segfaults under qemu-user amd64 emulation, which is how
+# cross-arch builds execute it; pin a known-good release and verify a bump.
+ARG UV_VERSION=0.12.7
 # Bump TOOLS_CACHEBUST (e.g. via --build-arg) to force a fresh tool install
 # without invalidating the rest of the build cache.
 ARG TOOLS_CACHEBUST=0
@@ -56,16 +59,22 @@ RUN echo "Installing gh and CLI tooling (cachebust=${TOOLS_CACHEBUST})" && \
     visudo -c && \
     gh --version
 
+# corepack prepare runs as root and creates COREPACK_HOME/v1 and
+# lastKnownGood.json beneath the sticky top-level directory, so those must be
+# opened up afterwards or a project pinning any other packageManager version
+# fails with "Failed to create cache directory" for the exec user.
 RUN echo "Installing pnpm, bun and uv (cachebust=${TOOLS_CACHEBUST})" && \
     mkdir -p /home/ocm-agent /opt/agent-tools/bin /usr/local/share/corepack && \
     chmod 1777 /home/ocm-agent /opt/agent-tools /opt/agent-tools/bin /usr/local/share/corepack && \
     corepack enable && corepack prepare pnpm@latest --activate && \
+    find /usr/local/share/corepack -type d -exec chmod 1777 {} + && \
+    chmod a+rw /usr/local/share/corepack/lastKnownGood.json && \
     curl -fsSL https://bun.sh/install | BUN_INSTALL=/opt/bun bash && \
     chmod -R a+rX /opt/bun && \
     ln -sf /opt/bun/bin/bun /opt/bun/bin/bunx && \
     ln -s /opt/bun/bin/bun /usr/local/bin/bun && \
     ln -s /opt/bun/bin/bun /usr/local/bin/bunx && \
-    curl -LsSf https://astral.sh/uv/install.sh | UV_INSTALL_DIR=/usr/local/bin UV_NO_MODIFY_PATH=1 sh && \
+    curl -LsSf https://astral.sh/uv/${UV_VERSION}/install.sh | UV_INSTALL_DIR=/usr/local/bin UV_NO_MODIFY_PATH=1 sh && \
     rm -rf /root/.npm /root/.cache/uv /home/ocm-agent/.cache && \
     pnpm --version && bun --version && uv --version
 
@@ -91,8 +100,8 @@ RUN echo "Verifying guest toolchain as an unknown uid (cachebust=${TOOLS_CACHEBU
     rm -rf /home/ocm-agent && \
     mkdir -p /home/ocm-agent && \
     chmod 1777 /home/ocm-agent && \
-    setpriv --reuid=4242 --regid=4242 --clear-groups sh -c "set -e; pnpm --version; bun --version; bunx --version; uv --version; uvx --version; playwright --version; gh --version; jq --version; rg --version; npm install -g --silent cowsay && cowsay -t verify-ok | head -1; git config --global user.email verify@ocm.local; uv venv /tmp/uv-check >/dev/null; uv pip install --python /tmp/uv-check/bin/python idna >/dev/null; pip3 install --user --force-reinstall --no-deps --quiet idna; rm -rf /tmp/uv-check; for tool in python python3 git curl wget ssh rsync lsof ip ss netstat ping dig host nslookup nc traceroute; do command -v \"\$tool\" >/dev/null || { echo \"missing guest tool: \$tool\"; exit 1; }; done; python --version" && \
+    setpriv --reuid=4242 --regid=4242 --clear-groups sh -c "set -e; pnpm --version; mkdir /tmp/pm-pin-check && cd /tmp/pm-pin-check && printf '{\"name\":\"pm-pin-check\",\"packageManager\":\"pnpm@10.12.1\"}' > package.json && pnpm --version | grep -qx 10.12.1 && cd / && rm -rf /tmp/pm-pin-check; bun --version; bunx --version; uv --version; uvx --version; playwright --version; gh --version; jq --version; rg --version; npm install -g --silent cowsay && cowsay -t verify-ok | head -1; git config --global user.email verify@ocm.local; uv venv /tmp/uv-check >/dev/null; uv pip install --python /tmp/uv-check/bin/python idna >/dev/null; pip3 install --user --force-reinstall --no-deps --quiet idna; rm -rf /tmp/uv-check; for tool in python python3 git curl wget ssh rsync lsof ip ss netstat ping dig host nslookup nc traceroute; do command -v \"\$tool\" >/dev/null || { echo \"missing guest tool: \$tool\"; exit 1; }; done; python --version" && \
     setpriv --reuid=1000 --regid=1000 --clear-groups sh -c "set -e; sudo -n apt-get update -qq; sudo -n apt-get install -y -qq --no-install-recommends bc; bc --version | head -1" && \
-    rm -rf /home/ocm-agent /opt/agent-tools /var/lib/apt/lists/* && \
+    rm -rf /home/ocm-agent /opt/agent-tools /var/lib/apt/lists/* /usr/local/share/corepack/v1/pnpm/10.12.1 && \
     mkdir -p /home/ocm-agent /opt/agent-tools/bin && \
     chmod 1777 /home/ocm-agent /opt/agent-tools /opt/agent-tools/bin
