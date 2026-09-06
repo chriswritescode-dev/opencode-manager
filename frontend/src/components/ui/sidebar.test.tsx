@@ -114,4 +114,31 @@ describe('SidebarCollapseToggle', () => {
     fireEvent.click(screen.getByRole('button'))
     expect(handleToggle).toHaveBeenCalledTimes(1)
   })
+
+  it('calls onToggle when clicked while collapsed', () => {
+    const handleToggle = vi.fn()
+
+    render(
+      <SidebarCollapseToggle collapsed={true} onToggle={handleToggle} />
+    )
+
+    fireEvent.click(screen.getByRole('button', { name: 'Expand sidebar' }))
+    expect(handleToggle).toHaveBeenCalledTimes(1)
+  })
+
+  it('exposes expanded state via accessible name and aria-expanded', () => {
+    const { rerender } = render(
+      <SidebarCollapseToggle collapsed={false} onToggle={vi.fn()} />
+    )
+
+    expect(
+      screen.getByRole('button', { name: 'Collapse sidebar' })
+    ).toHaveAttribute('aria-expanded', 'true')
+
+    rerender(<SidebarCollapseToggle collapsed={true} onToggle={vi.fn()} />)
+
+    expect(
+      screen.getByRole('button', { name: 'Expand sidebar' })
+    ).toHaveAttribute('aria-expanded', 'false')
+  })
 })

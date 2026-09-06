@@ -12,7 +12,6 @@ import {
   Sidebar,
   SidebarSection,
   SidebarItem,
-  SidebarCollapseToggle,
 } from '@/components/ui/sidebar'
 import { FolderGit2 } from 'lucide-react'
 
@@ -78,10 +77,6 @@ export function DesktopSidebar() {
   return (
     <>
       <Sidebar collapsed={collapsed} onToggle={toggle} className='mt-2'>
-        <div className="flex justify-end px-2 py-1.5">
-          <SidebarCollapseToggle collapsed={collapsed} onToggle={toggle} />
-        </div>
-
         {primary.length > 0 && (
           <SidebarSection collapsed={collapsed}>
             {primary.map((item: NavPrimaryCta) => (

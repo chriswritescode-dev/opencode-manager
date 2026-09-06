@@ -112,8 +112,8 @@ export function SourceControlPanel({
       <div className="flex items-center justify-between px-3 py-2 border-b border-border flex-shrink-0">
         <div className="flex items-center gap-2">
           <div className="flex items-center gap-2">
-            <GitBranch className="w-4 h-4 text-muted-foreground" />
-            <span className="text-sm font-medium">{displayBranch}</span>
+            <GitBranch className={cn('w-4 h-4', GIT_UI_COLORS.current)} />
+            <span className={cn('text-sm font-medium', GIT_UI_COLORS.current)}>{displayBranch}</span>
           </div>
           {status && (status.ahead > 0 || status.behind > 0) && (
             <div className="flex items-center gap-1 text-xs text-muted-foreground">

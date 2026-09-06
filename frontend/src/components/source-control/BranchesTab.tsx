@@ -1,10 +1,10 @@
 import { useMemo, useState } from 'react'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import { listBranches, switchBranch, GitAuthError, getRepo } from '@/api/repos'
-import { fetchGitStatus, useGitStatus } from '@/api/git'
+import { fetchGitStatus } from '@/api/git'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
-import { Loader2, GitBranch, GitBranchPlus, Check, Plus, AlertCircle, ArrowUp, ArrowDown, Globe } from 'lucide-react'
+import { Loader2, GitBranch, GitBranchPlus, Check, Plus, AlertCircle, Globe } from 'lucide-react'
 import { cn } from '@/lib/utils'
 import { showToast } from '@/lib/toast'
 import { useGit } from '@/hooks/useGit'
@@ -24,8 +24,6 @@ export function BranchesTab({ repoId, currentBranch }: BranchesTabProps) {
   const [isCreating, setIsCreating] = useState(false)
   const [worktreeDialogOpen, setWorktreeDialogOpen] = useState(false)
   const git = useGit(repoId)
-
-  const { data: status } = useGitStatus(repoId)
 
   const { data: branches, isLoading, error, refetch } = useQuery({
     queryKey: ['branches', repoId],
@@ -103,36 +101,18 @@ export function BranchesTab({ repoId, currentBranch }: BranchesTabProps) {
   }
 
   const activeBranch = branches?.branches?.find(b => b.current)?.name || currentBranch
+  const hasBranches = (branches?.branches?.length ?? 0) > 0
 
   return (
     <div className="flex flex-col h-full">
-      <div className="p-3 border-b border-border space-y-3 flex-shrink-0">
-        <div className="flex items-center gap-2">
-          <GitBranch className="w-4 h-4 text-muted-foreground" />
-          <span className="text-sm font-medium">Current: {activeBranch}</span>
-          {status && (status.ahead > 0 || status.behind > 0) && (
-            <div className="flex items-center gap-1 text-xs text-muted-foreground">
-              {status.ahead > 0 && (
-                <span className="flex items-center gap-0.5">
-                  <ArrowUp className="w-3 h-3" />{status.ahead}
-                </span>
-              )}
-              {status.behind > 0 && (
-                <span className="flex items-center gap-0.5">
-                  <ArrowDown className="w-3 h-3" />{status.behind}
-                </span>
-              )}
-            </div>
-          )}
-        </div>
-
+      <div className="p-3 border-b border-border flex-shrink-0">
         {isCreating ? (
           <div className="flex items-center gap-2">
             <Input
               placeholder="New branch name..."
               value={newBranchName}
               onChange={(e) => setNewBranchName(e.target.value)}
-              className="h-8 md:text-sm"
+              className="h-10 md:h-8 md:text-sm"
               autoFocus
               onKeyDown={(e) => {
                 if (e.key === 'Enter') handleCreateBranch()
@@ -144,7 +124,7 @@ export function BranchesTab({ repoId, currentBranch }: BranchesTabProps) {
             />
             <Button
               size="sm"
-              className="h-8"
+              className="h-10 md:h-8"
               onClick={handleCreateBranch}
               disabled={!newBranchName.trim() || git.createBranch.isPending}
             >
@@ -157,7 +137,7 @@ export function BranchesTab({ repoId, currentBranch }: BranchesTabProps) {
             <Button
               size="sm"
               variant="ghost"
-              className="h-8"
+              className="h-10 md:h-8"
               onClick={() => {
                 setIsCreating(false)
                 setNewBranchName('')
@@ -168,37 +148,36 @@ export function BranchesTab({ repoId, currentBranch }: BranchesTabProps) {
           </div>
         ) : (
           <div className="flex items-center gap-2">
+            {hasBranches && (
+              <Input
+                placeholder="Search branches..."
+                value={searchQuery}
+                onChange={(e) => setSearchQuery(e.target.value)}
+                className="h-10 md:h-8 md:text-sm flex-1 min-w-0"
+              />
+            )}
             <Button
               size="sm"
               variant="outline"
-              className="flex-1 h-8"
+              className="h-10 md:h-8 flex-shrink-0"
               onClick={() => setIsCreating(true)}
+              title="Create branch"
             >
-              <Plus className="w-4 h-4 mr-2" />
-              Create Branch
+              <Plus className="w-4 h-4" />
+              <span className="hidden sm:inline ml-1">Branch</span>
             </Button>
             {repoUrl && (
               <Button
                 size="sm"
                 variant="outline"
-                className="flex-1 h-8"
+                className="h-10 md:h-8 flex-shrink-0"
                 onClick={() => setWorktreeDialogOpen(true)}
                 title="Create as a separate worktree workspace"
               >
-                <GitBranchPlus className="w-4 h-4 mr-2" />
-                Create Worktree
+                <GitBranchPlus className="w-4 h-4" />
+                <span className="hidden sm:inline ml-1">Worktree</span>
               </Button>
             )}
-          </div>
-        )}
-        {branches?.branches && branches.branches.length > 0 && (
-          <div className="px-3 pb-1">
-            <Input
-              placeholder="Search branches..."
-              value={searchQuery}
-              onChange={(e) => setSearchQuery(e.target.value)}
-              className="h-8 md:text-sm"
-            />
           </div>
         )}
       </div>
@@ -228,7 +207,7 @@ export function BranchesTab({ repoId, currentBranch }: BranchesTabProps) {
                   key={branch.name}
                   className={cn(
                     'flex items-center gap-2 px-3 py-2 w-full text-left transition-colors',
-                    isCurrent && 'bg-accent',
+                    isCurrent && 'bg-orange-500/10',
                     isCheckedOutElsewhere ? 'opacity-60 cursor-not-allowed' : 'hover:bg-accent/50'
                   )}
                   onClick={handleClick}

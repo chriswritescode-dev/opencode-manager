@@ -10,7 +10,7 @@ export const GIT_STATUS_COLORS = {
 export const GIT_UI_COLORS = {
   ahead: 'text-emerald-600 dark:text-emerald-400',
   behind: 'text-amber-600 dark:text-amber-400',
-  current: 'text-emerald-600 dark:text-emerald-400',
+  current: 'text-orange-600 dark:text-orange-400',
   remote: 'text-blue-600 dark:text-blue-400',
   stage: 'text-emerald-600 dark:text-emerald-400',
   unstage: 'text-rose-600 dark:text-rose-400',

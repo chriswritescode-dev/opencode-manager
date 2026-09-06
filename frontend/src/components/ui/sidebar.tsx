@@ -1,11 +1,11 @@
 import type { LucideIcon } from 'lucide-react'
-import { PanelLeft, PanelLeftClose } from 'lucide-react'
+import { ChevronLeft, ChevronRight } from 'lucide-react'
 import { cn } from '@/lib/utils'
 import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip'
 
 export interface SidebarProps {
   collapsed: boolean
-  onToggle: () => void
+  onToggle?: () => void
   widthClass?: string
   collapsedWidthClass?: string
   className?: string
@@ -15,6 +15,7 @@ export interface SidebarProps {
 
 export function Sidebar({
   collapsed,
+  onToggle,
   widthClass = 'w-60',
   collapsedWidthClass = 'w-14',
   className,
@@ -24,12 +25,13 @@ export function Sidebar({
   return (
     <aside
       className={cn(
-        'flex-shrink-0 border-r border-border bg-card/50 backdrop-blur-sm h-dvh flex flex-col pt-safe pb-safe transition-[width] duration-200',
+        'relative z-20 flex-shrink-0 border-r border-border bg-card/50 backdrop-blur-sm h-dvh flex flex-col pt-safe pb-safe transition-[width] duration-200',
         collapsed ? collapsedWidthClass : widthClass,
         className
       )}
       aria-label={ariaLabel}
     >
+      {onToggle && <SidebarCollapseToggle collapsed={collapsed} onToggle={onToggle} />}
       {children}
     </aside>
   )
@@ -125,14 +127,36 @@ export function SidebarCollapseToggle({ collapsed, onToggle }: SidebarCollapseTo
       type="button"
       onClick={onToggle}
       className={cn(
-        'rounded-md p-2.5',
-        'hover:bg-accent hover:text-accent-foreground',
-        'transition-colors duration-150'
+        'group absolute -right-3 top-1/2 z-20 h-16 w-6 -translate-y-1/2',
+        'flex items-center justify-center bg-transparent',
+        'focus:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 focus-visible:ring-offset-background'
       )}
       title={collapsed ? 'Expand sidebar' : 'Collapse sidebar'}
       aria-label={collapsed ? 'Expand sidebar' : 'Collapse sidebar'}
+      aria-expanded={!collapsed}
     >
-      {collapsed ? <PanelLeft className="h-5 w-5" /> : <PanelLeftClose className="h-5 w-5" />}
+      <span aria-hidden="true" className="relative flex items-center justify-center">
+        <span
+          className={cn(
+            'h-8 w-1 rounded-full bg-orange-500/60 transition-colors duration-150',
+            'group-hover:bg-orange-500 group-focus-visible:bg-orange-500'
+          )}
+        />
+        <ChevronLeft
+          className={cn(
+            'absolute left-full ml-0.5 h-3.5 w-3.5 text-muted-foreground opacity-0 transition-opacity duration-150',
+            'group-hover:opacity-100 group-focus-visible:opacity-100',
+            collapsed && 'hidden'
+          )}
+        />
+        <ChevronRight
+          className={cn(
+            'absolute left-full ml-0.5 h-3.5 w-3.5 text-muted-foreground opacity-0 transition-opacity duration-150',
+            'group-hover:opacity-100 group-focus-visible:opacity-100',
+            !collapsed && 'hidden'
+          )}
+        />
+      </span>
     </button>
   )
 }
