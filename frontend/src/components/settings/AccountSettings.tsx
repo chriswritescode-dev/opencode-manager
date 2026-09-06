@@ -10,14 +10,7 @@ import { DeleteDialog } from '@/components/ui/delete-dialog'
 import { Loader2, User, KeyRound, LogOut, Plus, Trash2, AlertCircle, CheckCircle, Lock } from 'lucide-react'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import { passkey, changePassword } from '@/lib/auth-client'
-
-interface Passkey {
-  id: string
-  name?: string
-  credentialID: string
-  createdAt: string
-  deviceType: string
-}
+import { listUserPasskeys } from '@/api/authInfo'
 
 export function AccountSettings() {
   const { user, addPasskey, logout } = useAuth()
@@ -33,13 +26,7 @@ export function AccountSettings() {
 
   const { data: passkeys, isLoading: passkeysLoading } = useQuery({
     queryKey: ['passkeys'],
-    queryFn: async () => {
-      const response = await fetch('/api/auth/passkey/list-user-passkeys', {
-        credentials: 'include',
-      })
-      if (!response.ok) return []
-      return response.json() as Promise<Passkey[]>
-    },
+    queryFn: () => listUserPasskeys(),
     enabled: !!user,
   })
 

@@ -72,11 +72,18 @@ async function fetchWithTimeout(
   url: string,
   options: FetchWrapperOptions = {}
 ): Promise<Response> {
-  const { timeout = 30000, params, ...fetchOptions } = options
+  const { timeout = 30000, params, signal: callerSignal, ...fetchOptions } = options
   const urlObj = buildUrl(url, params)
 
   const controller = new AbortController()
   const timeoutId = timeout > 0 ? setTimeout(() => controller.abort(), timeout) : null
+
+  const abortFromCaller = () => controller.abort()
+  if (callerSignal?.aborted) {
+    controller.abort()
+  } else {
+    callerSignal?.addEventListener('abort', abortFromCaller, { once: true })
+  }
 
   try {
     const response = await fetch(urlObj.toString(), {
@@ -86,6 +93,7 @@ async function fetchWithTimeout(
     })
 
     if (timeoutId) clearTimeout(timeoutId)
+    if (callerSignal) callerSignal.removeEventListener('abort', abortFromCaller)
 
     if (!response.ok) {
       await handleResponse(response)
@@ -94,7 +102,11 @@ async function fetchWithTimeout(
     return response
   } catch (error) {
     if (timeoutId) clearTimeout(timeoutId)
+    if (callerSignal) callerSignal.removeEventListener('abort', abortFromCaller)
     if (error instanceof Error && error.name === 'AbortError') {
+      if (callerSignal?.aborted) {
+        throw new FetchError('Request canceled', 499, 'CANCELED')
+      }
       throw new FetchError('Request timeout', 408, 'TIMEOUT')
     }
     throw error

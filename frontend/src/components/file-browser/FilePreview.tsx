@@ -2,7 +2,7 @@ import { useState, useCallback, useRef, useEffect, memo } from 'react'
 import { Button } from '@/components/ui/button'
 import { Download, X, Edit3, Save, X as XIcon, WrapText, Eye, Code } from 'lucide-react'
 import type { FileInfo } from '@/types/files'
-import { getFileApiUrl } from '@/api/files'
+import { getFileApiUrl, writeFileEntry } from '@/api/files'
 import { VirtualizedTextView, type VirtualizedTextViewHandle } from '@/components/ui/virtualized-text-view'
 import { MarkdownRenderer } from './MarkdownRenderer'
 
@@ -116,15 +116,7 @@ export const FilePreview = memo(function FilePreview({ file, hideHeader = false,
   }
 
   const saveFileContent = useCallback(async (content: string) => {
-    const response = await fetch(getFileApiUrl(file.path), {
-      method: 'PUT',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ type: 'file', content }),
-    })
-    
-    if (!response.ok) {
-      throw new Error(`Save failed: ${response.statusText}`)
-    }
+    await writeFileEntry(file.path, 'file', content)
 
     const event = new CustomEvent('fileSaved', { detail: { path: file.path, content } })
     window.dispatchEvent(event)

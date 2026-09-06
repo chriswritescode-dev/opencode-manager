@@ -48,6 +48,7 @@ export const ttsApi = {
       params: { userId },
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ text }),
+      timeout: 60000,
       signal,
     })
   },
