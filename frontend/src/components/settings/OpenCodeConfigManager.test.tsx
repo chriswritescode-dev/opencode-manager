@@ -218,4 +218,22 @@ describe('OpenCodeConfigManager', () => {
     resolveRefresh()
     await waitFor(() => expect(screen.queryByText('Edit Config: default')).not.toBeInTheDocument())
   })
+
+  it('renders host import collapsed after configurations until expanded', async () => {
+    const user = userEvent.setup()
+    renderWithQuery(<OpenCodeConfigManager />)
+
+    const importToggle = await screen.findByRole('button', { name: /Existing OpenCode Host Import/i })
+    expect(importToggle).toHaveAttribute('aria-expanded', 'false')
+    const importContent = document.getElementById(importToggle.getAttribute('aria-controls') ?? '')
+    expect(importContent).toHaveClass('hidden')
+
+    const configsTitle = screen.getByText('OpenCode Configurations')
+    expect(configsTitle.compareDocumentPosition(importToggle) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy()
+
+    await user.click(importToggle)
+    expect(importToggle).toHaveAttribute('aria-expanded', 'true')
+    expect(importContent).toHaveClass('block')
+    expect(await screen.findByRole('button', { name: /Import From Host/i })).toBeInTheDocument()
+  })
 })

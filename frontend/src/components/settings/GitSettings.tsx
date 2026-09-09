@@ -208,58 +208,58 @@ export function GitSettings() {
         )}
       </div>
 
-       <div className="divide-y divide-border space-y-4 pb-4">
-         <div>
-            <div className="flex items-center gap-3 px-6 py-3">
-              <User className="w-4 h-4 text-muted-foreground" />
+        <div className="grid grid-cols-1 gap-4 p-4 sm:gap-6 sm:p-6 @min-[1000px]:grid-cols-3 @min-[1000px]:items-start">
+          <div className="min-w-0 space-y-4">
+            <div className="flex items-center gap-3">
+              <User className="w-4 h-4 shrink-0 text-muted-foreground" />
               <span className="font-medium">Identity</span>
-              <span className="text-xs text-muted-foreground ml-auto">
+              <span className="ml-auto min-w-0 truncate text-xs text-muted-foreground">
                 {gitIdentity.name || gitIdentity.email ? `${gitIdentity.name || 'No name'} <${gitIdentity.email || 'No email'}>` : 'Not configured'}
               </span>
             </div>
 
-            <div className="px-6 space-y-4 sm:ml-7">
+            <div className="space-y-4 sm:ml-7">
               <p className="text-sm text-muted-foreground">
                 Author identity used for git commits. Leave empty to use system defaults.
               </p>
-             <div className="grid pb-4 grid-cols-1 sm:grid-cols-2 gap-4">
-               <div className="space-y-2">
-                 <Label htmlFor="git-name">Name</Label>
-                 <Input
-                   id="git-name"
-                   placeholder="Your Name"
-                   value={gitIdentity.name}
-                   onChange={(e) => updateIdentity('name', e.target.value)}
-                   disabled={isSaving}
-                   className="bg-background border-border text-foreground placeholder:text-muted-foreground"
-                 />
-               </div>
-               <div className="space-y-2">
-                 <Label htmlFor="git-email">Email</Label>
-                 <Input
-                   id="git-email"
-                   type="email"
-                   placeholder="you@example.com"
-                   value={gitIdentity.email}
-                   onChange={(e) => updateIdentity('email', e.target.value)}
-                   disabled={isSaving}
-                   className="bg-background border-border text-foreground placeholder:text-muted-foreground"
-                 />
-               </div>
-             </div>
-           </div>
-         </div>
+              <div className="space-y-4">
+                <div className="space-y-2">
+                  <Label htmlFor="git-name">Name</Label>
+                  <Input
+                    id="git-name"
+                    placeholder="Your Name"
+                    value={gitIdentity.name}
+                    onChange={(e) => updateIdentity('name', e.target.value)}
+                    disabled={isSaving}
+                    className="bg-background border-border text-foreground placeholder:text-muted-foreground"
+                  />
+                </div>
+                <div className="space-y-2">
+                  <Label htmlFor="git-email">Email</Label>
+                  <Input
+                    id="git-email"
+                    type="email"
+                    placeholder="you@example.com"
+                    value={gitIdentity.email}
+                    onChange={(e) => updateIdentity('email', e.target.value)}
+                    disabled={isSaving}
+                    className="bg-background border-border text-foreground placeholder:text-muted-foreground"
+                  />
+                </div>
+              </div>
+            </div>
+          </div>
 
-         <div>
-            <div className="flex items-center gap-3 px-6 py-3">
-              <Key className="w-4 h-4 text-muted-foreground" />
+          <div className="min-w-0 space-y-4 @min-[1000px]:col-span-2">
+            <div className="flex items-center gap-3">
+              <Key className="w-4 h-4 shrink-0 text-muted-foreground" />
               <span className="font-medium">Credentials</span>
-              <span className="text-xs text-muted-foreground ml-auto">
+              <span className="ml-auto text-xs text-muted-foreground">
                 {gitCredentials.length} configured
               </span>
             </div>
 
-            <div className="px-6 space-y-4 sm:ml-7">
+            <div className="space-y-4 sm:ml-7">
               <div className="flex items-center justify-between">
                 <p className="text-sm text-muted-foreground">
                   Credentials for cloning private repositories
@@ -283,7 +283,7 @@ export function GitSettings() {
                  </p>
                </div>
              ) : (
-               <div className="border border-border rounded-lg overflow-hidden">
+                <div className="min-w-0 overflow-x-auto rounded-lg border border-border">
                  <table className="w-full text-sm">
                     <thead className="bg-muted/50">
                      <tr>

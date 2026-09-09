@@ -154,206 +154,208 @@ export function AccountSettings() {
         </Alert>
       )}
 
-      <div className="grid grid-cols-1 lg:grid-cols-2 gap-4 sm:gap-6">
-        <Card className="border-0 shadow-none">
-          <CardHeader className="pb-3 sm:pb-4">
-            <div className="flex items-center justify-between">
-              <div className="flex items-center gap-2">
-                <User className="h-4 w-4 sm:h-5 sm:w-5" />
-                <CardTitle className="text-base sm:text-lg">Profile</CardTitle>
+      <div className="grid grid-cols-1 gap-4 sm:gap-6 @min-[1000px]:grid-cols-3 @min-[1000px]:items-start">
+        <div className="min-w-0 space-y-4 sm:space-y-6">
+          <Card className="border-0 shadow-none">
+            <CardHeader className="pb-3 sm:pb-4">
+              <div className="flex items-center justify-between">
+                <div className="flex items-center gap-2">
+                  <User className="h-4 w-4 sm:h-5 sm:w-5" />
+                  <CardTitle className="text-base sm:text-lg">Profile</CardTitle>
+                </div>
+                {!editingProfile && (
+                  <Button variant="ghost" size="sm" onClick={() => setEditingProfile(true)} className="h-8">
+                    <Edit2 className="h-3.5 w-3.5" />
+                  </Button>
+                )}
               </div>
-              {!editingProfile && (
-                <Button variant="ghost" size="sm" onClick={() => setEditingProfile(true)} className="h-8">
-                  <Edit2 className="h-3.5 w-3.5" />
-                </Button>
+            </CardHeader>
+            <CardContent>
+              {editingProfile ? (
+                <div className="space-y-3 sm:space-y-4">
+                  <div className="space-y-1.5">
+                    <Label className="text-xs sm:text-sm">Name</Label>
+                    <Input value={user.name} disabled className="h-9 sm:h-10 md:text-sm" />
+                  </div>
+                  <div className="space-y-1.5">
+                    <Label className="text-xs sm:text-sm">Email</Label>
+                    <Input value={user.email} disabled className="h-9 sm:h-10 md:text-sm" />
+                  </div>
+                  <Button variant="outline" onClick={() => setEditingProfile(false)} className="h-9 sm:h-10">
+                    Done
+                  </Button>
+                </div>
+              ) : (
+                <div className="space-y-2 sm:space-y-3">
+                  <div className="flex flex-col sm:flex-row sm:items-center gap-1.5 sm:gap-4">
+                    <span className="text-xs sm:text-sm text-muted-foreground sm:w-20">Name</span>
+                    <span className="text-sm font-medium truncate">{user.name}</span>
+                  </div>
+                  <div className="flex flex-col sm:flex-row sm:items-center gap-1.5 sm:gap-4">
+                    <span className="text-xs sm:text-sm text-muted-foreground sm:w-20">Email</span>
+                    <span className="text-sm truncate">{user.email}</span>
+                  </div>
+                </div>
               )}
-            </div>
-          </CardHeader>
-          <CardContent>
-            {editingProfile ? (
-              <div className="space-y-3 sm:space-y-4">
-                <div className="space-y-1.5">
-                  <Label className="text-xs sm:text-sm">Name</Label>
-                  <Input value={user.name} disabled className="h-9 sm:h-10 md:text-sm" />
+            </CardContent>
+          </Card>
+
+          <Card className="border-0 shadow-none">
+            <CardHeader className="pb-2 sm:pb-4">
+              <CardTitle className="flex items-center gap-2 text-base sm:text-lg">
+                <Lock className="h-4 w-4 sm:h-5 sm:w-5" />
+                Change Password
+              </CardTitle>
+              <CardDescription className="text-xs sm:text-sm">Update your account password</CardDescription>
+            </CardHeader>
+            <CardContent>
+              {!showChangePassword ? (
+                <Button
+                  variant="outline"
+                  onClick={() => setShowChangePassword(true)}
+                  className="h-9 sm:h-10"
+                >
+                  <Lock className="mr-2 h-4 w-4" />
+                  Change Password
+                </Button>
+              ) : (
+                <div className="space-y-3 sm:space-y-4">
+                  <div className="space-y-1.5">
+                    <Label htmlFor="current-password" className="text-xs sm:text-sm">Current Password</Label>
+                    <Input
+                      id="current-password"
+                      type="password"
+                      value={currentPassword}
+                      onChange={(e) => setCurrentPassword(e.target.value)}
+                      placeholder="Enter current password"
+                      className="h-9 sm:h-10 md:text-sm"
+                    />
+                  </div>
+                  <div className="space-y-1.5">
+                    <Label htmlFor="new-password" className="text-xs sm:text-sm">New Password</Label>
+                    <Input
+                      id="new-password"
+                      type="password"
+                      value={newPassword}
+                      onChange={(e) => setNewPassword(e.target.value)}
+                      placeholder="At least 8 characters"
+                      className="h-9 sm:h-10 md:text-sm"
+                    />
+                  </div>
+                  <div className="flex flex-wrap gap-2">
+                    <Button
+                      onClick={handleChangePassword}
+                      disabled={changePasswordMutation.isPending || !currentPassword || !newPassword}
+                      className="h-9 sm:h-10"
+                    >
+                      {changePasswordMutation.isPending ? (
+                        <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                      ) : (
+                        <Lock className="mr-2 h-4 w-4" />
+                      )}
+                      Change Password
+                    </Button>
+                    <Button
+                      variant="ghost"
+                      onClick={() => setShowChangePassword(false)}
+                      className="h-9 sm:h-10"
+                    >
+                      Cancel
+                    </Button>
+                  </div>
                 </div>
-                <div className="space-y-1.5">
-                  <Label className="text-xs sm:text-sm">Email</Label>
-                  <Input value={user.email} disabled className="h-9 sm:h-10 md:text-sm" />
-                </div>
-                <Button variant="outline" onClick={() => setEditingProfile(false)} className="h-9 sm:h-10">
-                  Done
+              )}
+            </CardContent>
+          </Card>
+        </div>
+
+        <div className="min-w-0 @min-[1000px]:col-span-2">
+          <Card className="border-0 shadow-none">
+            <CardHeader className="pb-2 sm:pb-4">
+              <CardTitle className="flex items-center gap-2 text-base sm:text-lg">
+                <KeyRound className="h-4 w-4 sm:h-5 sm:w-5" />
+                Passkeys
+              </CardTitle>
+              <CardDescription className="text-xs sm:text-sm">Manage passkeys for passwordless sign-in</CardDescription>
+            </CardHeader>
+            <CardContent className="space-y-3 sm:space-y-4">
+              <div className="flex flex-col sm:flex-row gap-2">
+                <Input
+                  placeholder="Passkey name (optional)"
+                  value={passkeyName}
+                  onChange={(e) => setPasskeyName(e.target.value)}
+                  className="h-9 sm:h-10 md:text-sm"
+                />
+                <Button
+                  onClick={handleAddPasskey}
+                  disabled={addPasskeyMutation.isPending}
+                  className="h-9 sm:h-10 whitespace-nowrap"
+                >
+                  {addPasskeyMutation.isPending ? (
+                    <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                  ) : (
+                    <Plus className="mr-2 h-4 w-4" />
+                  )}
+                  Add Passkey
                 </Button>
               </div>
-            ) : (
-              <div className="space-y-2 sm:space-y-3">
-                <div className="flex flex-col sm:flex-row sm:items-center gap-1.5 sm:gap-4">
-                  <span className="text-xs sm:text-sm text-muted-foreground sm:w-20">Name</span>
-                  <span className="text-sm font-medium truncate">{user.name}</span>
-                </div>
-                <div className="flex flex-col sm:flex-row sm:items-center gap-1.5 sm:gap-4">
-                  <span className="text-xs sm:text-sm text-muted-foreground sm:w-20">Email</span>
-                  <span className="text-sm truncate">{user.email}</span>
-                </div>
-              </div>
-            )}
-          </CardContent>
-        </Card>
 
-        <Card className="border-0 shadow-none">
-          <CardHeader className="pb-2 sm:pb-4">
-            <CardTitle className="flex items-center gap-2 text-base sm:text-lg">
-              <Lock className="h-4 w-4 sm:h-5 sm:w-5" />
-              Change Password
-            </CardTitle>
-            <CardDescription className="text-xs sm:text-sm">Update your account password</CardDescription>
-          </CardHeader>
-          <CardContent>
-            {!showChangePassword ? (
-              <Button
-                variant="outline"
-                onClick={() => setShowChangePassword(true)}
-                className="h-9 sm:h-10"
-              >
-                <Lock className="mr-2 h-4 w-4" />
-                Change Password
-              </Button>
-            ) : (
-              <div className="space-y-3 sm:space-y-4">
-                <div className="space-y-1.5">
-                  <Label htmlFor="current-password" className="text-xs sm:text-sm">Current Password</Label>
-                  <Input
-                    id="current-password"
-                    type="password"
-                    value={currentPassword}
-                    onChange={(e) => setCurrentPassword(e.target.value)}
-                    placeholder="Enter current password"
-                    className="h-9 sm:h-10 md:text-sm"
-                  />
+              {passkeysLoading ? (
+                <div className="flex items-center justify-center py-4">
+                  <Loader2 className="h-5 w-5 animate-spin text-muted-foreground" />
                 </div>
-                <div className="space-y-1.5">
-                  <Label htmlFor="new-password" className="text-xs sm:text-sm">New Password</Label>
-                  <Input
-                    id="new-password"
-                    type="password"
-                    value={newPassword}
-                    onChange={(e) => setNewPassword(e.target.value)}
-                    placeholder="At least 8 characters"
-                    className="h-9 sm:h-10 md:text-sm"
-                  />
+              ) : passkeys && passkeys.length > 0 ? (
+                <div className="space-y-2">
+                  {passkeys.map((pk) => (
+                    <div
+                      key={pk.id}
+                      className="flex items-center justify-between p-2.5 sm:p-3 bg-muted rounded-lg"
+                    >
+                      <div className="min-w-0 flex-1">
+                        <p className="font-medium text-sm truncate">{pk.name || 'Unnamed Passkey'}</p>
+                        <p className="text-xs text-muted-foreground truncate">
+                          {pk.deviceType} - {new Date(pk.createdAt).toLocaleDateString()}
+                        </p>
+                      </div>
+                      <Button
+                        variant="ghost"
+                        size="icon"
+                        className="h-8 w-8 ml-2 flex-shrink-0"
+                        onClick={() => handleDeletePasskey(pk.id)}
+                        disabled={deletePasskeyMutation.isPending}
+                      >
+                        {deletePasskeyMutation.isPending ? (
+                          <Loader2 className="h-4 w-4 animate-spin" />
+                        ) : (
+                          <Trash2 className="h-4 w-4 text-destructive" />
+                        )}
+                      </Button>
+                    </div>
+                  ))}
                 </div>
-                <div className="flex gap-2">
-                  <Button
-                    onClick={handleChangePassword}
-                    disabled={changePasswordMutation.isPending || !currentPassword || !newPassword}
-                    className="h-9 sm:h-10"
-                  >
-                    {changePasswordMutation.isPending ? (
-                      <Loader2 className="mr-2 h-4 w-4 animate-spin" />
-                    ) : (
-                      <Lock className="mr-2 h-4 w-4" />
-                    )}
-                    Change Password
-                  </Button>
-                  <Button
-                    variant="ghost"
-                    onClick={() => setShowChangePassword(false)}
-                    className="h-9 sm:h-10"
-                  >
-                    Cancel
-                  </Button>
-                </div>
-              </div>
-            )}
-          </CardContent>
-        </Card>
+              ) : (
+                <p className="text-xs sm:text-sm text-muted-foreground text-center py-3">
+                  No passkeys registered. Add one for passwordless sign-in.
+                </p>
+              )}
+            </CardContent>
+          </Card>
+        </div>
       </div>
 
-      <Card className="border-0 shadow-none">
-        <CardHeader className="pb-2 sm:pb-4">
-          <CardTitle className="flex items-center gap-2 text-base sm:text-lg">
-            <KeyRound className="h-4 w-4 sm:h-5 sm:w-5" />
-            Passkeys
-          </CardTitle>
-          <CardDescription className="text-xs sm:text-sm">Manage passkeys for passwordless sign-in</CardDescription>
-        </CardHeader>
-        <CardContent className="space-y-3 sm:space-y-4">
-          <div className="flex flex-col sm:flex-row gap-2">
-            <Input
-              placeholder="Passkey name (optional)"
-              value={passkeyName}
-              onChange={(e) => setPasskeyName(e.target.value)}
-              className="h-9 sm:h-10 md:text-sm"
-            />
-            <Button 
-              onClick={handleAddPasskey} 
-              disabled={addPasskeyMutation.isPending}
-              className="h-9 sm:h-10 whitespace-nowrap"
-            >
-              {addPasskeyMutation.isPending ? (
-                <Loader2 className="mr-2 h-4 w-4 animate-spin" />
-              ) : (
-                <Plus className="mr-2 h-4 w-4" />
-              )}
-              Add Passkey
-            </Button>
+      <div className="flex flex-col gap-3 rounded-lg border border-border bg-card px-4 py-3 sm:flex-row sm:items-center sm:justify-between">
+        <div className="flex items-center gap-2">
+          <LogOut className="h-4 w-4 shrink-0 text-destructive" />
+          <div className="min-w-0">
+            <p className="text-sm font-medium text-destructive">Sign Out</p>
+            <p className="text-xs text-muted-foreground">Sign out of your account</p>
           </div>
-
-          {passkeysLoading ? (
-            <div className="flex items-center justify-center py-4">
-              <Loader2 className="h-5 w-5 animate-spin text-muted-foreground" />
-            </div>
-          ) : passkeys && passkeys.length > 0 ? (
-            <div className="space-y-2">
-              {passkeys.map((pk) => (
-                <div
-                  key={pk.id}
-                  className="flex items-center justify-between p-2.5 sm:p-3 bg-muted rounded-lg"
-                >
-                  <div className="min-w-0 flex-1">
-                    <p className="font-medium text-sm truncate">{pk.name || 'Unnamed Passkey'}</p>
-                    <p className="text-xs text-muted-foreground truncate">
-                      {pk.deviceType} - {new Date(pk.createdAt).toLocaleDateString()}
-                    </p>
-                  </div>
-                  <Button
-                    variant="ghost"
-                    size="icon"
-                    className="h-8 w-8 ml-2 flex-shrink-0"
-                    onClick={() => handleDeletePasskey(pk.id)}
-                    disabled={deletePasskeyMutation.isPending}
-                  >
-                    {deletePasskeyMutation.isPending ? (
-                      <Loader2 className="h-4 w-4 animate-spin" />
-                    ) : (
-                      <Trash2 className="h-4 w-4 text-destructive" />
-                    )}
-                  </Button>
-                </div>
-              ))}
-            </div>
-          ) : (
-            <p className="text-xs sm:text-sm text-muted-foreground text-center py-3">
-              No passkeys registered. Add one for passwordless sign-in.
-            </p>
-          )}
-        </CardContent>
-      </Card>
-
-      <Card className="border-0 shadow-none">
-        <CardHeader className="pb-2 sm:pb-4">
-          <CardTitle className="flex items-center gap-2 text-base sm:text-lg text-destructive">
-            <LogOut className="h-4 w-4 sm:h-5 sm:w-5" />
-            Sign Out
-          </CardTitle>
-          <CardDescription className="text-xs sm:text-sm">Sign out of your account</CardDescription>
-        </CardHeader>
-        <CardContent>
-          <Button variant="destructive" onClick={logout} className="h-9 sm:h-10">
-            <LogOut className="mr-2 h-4 w-4" />
-            Sign Out
-          </Button>
-        </CardContent>
-      </Card>
+        </div>
+        <Button variant="destructive" onClick={logout} className="h-9 shrink-0 sm:h-10">
+          <LogOut className="mr-2 h-4 w-4" />
+          Sign Out
+        </Button>
+      </div>
 
       <DeleteDialog
         open={deletePasskeyId !== null}

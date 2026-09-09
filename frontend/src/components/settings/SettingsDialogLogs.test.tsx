@@ -1,5 +1,5 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest'
-import { render, screen, fireEvent, act } from '@testing-library/react'
+import { render, screen, fireEvent, within, act } from '@testing-library/react'
 import { MemoryRouter } from 'react-router-dom'
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
 import type { ManagerLogEntry } from '@opencode-manager/shared/schemas'
@@ -90,6 +90,12 @@ async function settleTime(ms: number): Promise<void> {
   })
 }
 
+function openLogsFromMenu(): void {
+  const mobileContainer = document.querySelector('.sm\\:hidden') as HTMLElement
+  const logsMenuButton = within(mobileContainer).getByText('Live manager and OpenCode server logs').closest('button')
+  fireEvent.click(logsMenuButton!)
+}
+
 describe('SettingsDialog live Logs view integration', () => {
   beforeEach(() => {
     vi.clearAllMocks()
@@ -118,6 +124,7 @@ describe('SettingsDialog live Logs view integration', () => {
     stubMatchMedia(false)
     render(<SettingsDialog />, { wrapper: createWrapper() })
 
+    openLogsFromMenu()
     await settleTime(0)
 
     expect(getManagerLogs).toHaveBeenCalledTimes(1)
@@ -129,6 +136,7 @@ describe('SettingsDialog live Logs view integration', () => {
     getManagerLogs.mockImplementation(async () => makeResponse([]))
     render(<SettingsDialog />, { wrapper: createWrapper() })
 
+    openLogsFromMenu()
     await settleTime(0)
     expect(getManagerLogs).toHaveBeenCalledTimes(1)
 

@@ -23,16 +23,33 @@ import { DESKTOP_MEDIA_QUERY, useMediaQuery } from '@/hooks/useMediaQuery'
 
 type SettingsView = 'menu' | SettingsContentTab
 
-const TAB_TRIGGER_CLASS = 'data-[state=active]:bg-blue-600 data-[state=active]:text-white text-muted-foreground transition-all duration-200 sm:px-2 sm:text-xs md:px-3 md:text-sm'
+function OpenCodeSettings({ onOpenVersionDialog }: { onOpenVersionDialog: () => void }) {
+  const [authSectionsOpen, setAuthSectionsOpen] = useState(true)
+  const toggleAuthSections = useCallback(() => setAuthSectionsOpen((open) => !open), [])
+
+  return (
+    <div className="space-y-6">
+      <ServerHealthStatus onOpenVersionDialog={onOpenVersionDialog} />
+      <OpenCodeConfigManager />
+      <section className="space-y-4 border-t border-border pt-6" aria-label="Server maintenance">
+        <h2 className="text-lg font-semibold">Server maintenance</h2>
+        <div className="grid grid-cols-1 items-start gap-4 @min-[1000px]:grid-cols-2">
+          <OpenCodeServerAuthSettings isOpen={authSectionsOpen} onToggle={toggleAuthSections} />
+          <ManagerTokenSettings isOpen={authSectionsOpen} onToggle={toggleAuthSections} />
+        </div>
+        <ServerEnvVarsSettings />
+        <SandboxSettings />
+      </section>
+    </div>
+  )
+}
 
 export function SettingsDialog() {
-  const { isOpen, close, activeTab, selectedTab, setActiveTab } = useSettingsDialog()
+  const { isOpen, close, activeTab, setActiveTab } = useSettingsDialog()
   const isDesktop = useMediaQuery(DESKTOP_MEDIA_QUERY)
   const [mobileView, setMobileView] = useState<SettingsView>('menu')
   const [isVersionDialogOpen, setIsVersionDialogOpen] = useState(false)
   const [sectionHistory, setSectionHistory] = useState<SettingsView[]>([])
-  const [authSectionsOpen, setAuthSectionsOpen] = useState(true)
-  const toggleAuthSections = useCallback(() => setAuthSectionsOpen((open) => !open), [])
 
   const pushSectionHistory = useCallback((view: SettingsView) => {
     if (view === 'menu') return
@@ -87,12 +104,6 @@ export function SettingsDialog() {
     return () => document.removeEventListener('keydown', handleKeyDown, { capture: true })
   }, [isOpen, close, isVersionDialogOpen])
 
-  useEffect(() => {
-    if (!isOpen || !selectedTab) return
-    setMobileView(selectedTab)
-    pushSectionHistory(selectedTab)
-  }, [isOpen, selectedTab, pushSectionHistory])
-
   const menuItems: Array<{ id: SettingsContentTab; icon: LucideIcon; label: string; description: string }> = [
     { id: 'account', icon: User, label: 'Account', description: 'Profile, passkeys, and sign out' },
     { id: 'general', icon: Settings2, label: 'General Settings', description: 'App preferences and behavior' },
@@ -131,76 +142,51 @@ export function SettingsDialog() {
           data-settings-dialog
         >
          <DialogTitle className="sr-only">Settings</DialogTitle>
-         <div className="hidden sm:flex sm:flex-col sm:h-full sm:min-h-0">
-           <div className="sticky top-0 z-10 bg-gradient-to-b from-background via-background to-transparent border-b border-border backdrop-blur-sm px-6 py-4 flex-shrink-0 flex items-center justify-between">
-             <h2 className="text-2xl font-semibold bg-gradient-to-r from-foreground to-muted-foreground bg-clip-text text-transparent">
-               Settings
-             </h2>
+         <div className="hidden sm:flex sm:h-full sm:min-h-0 sm:flex-col">
+           <div className="flex h-12 shrink-0 items-center justify-between border-b border-border bg-background px-4">
+             <h2 className="text-lg font-semibold text-foreground">Settings</h2>
              <Button
                variant="ghost"
                size="icon"
                onClick={close}
-               className="text-muted-foreground hover:text-foreground min-w-[44px] min-h-[44px]"
+               aria-label="Close"
+               className="text-muted-foreground hover:text-foreground"
              >
-               <X className="w-5 h-5" />
+               <X className="w-4 h-4" />
              </Button>
            </div>
-          <Tabs defaultValue="account" value={activeTab} onValueChange={handleTabChange} className="w-full flex flex-col flex-1 min-h-0">
-            <div className="px-6 pt-6 pb-4 flex-shrink-0">
-              <TabsList className="grid w-full grid-cols-9 bg-card p-1">
-                <TabsTrigger value="account" className={TAB_TRIGGER_CLASS}>
-                  Account
+          <Tabs
+            defaultValue="account"
+            value={activeTab}
+            onValueChange={handleTabChange}
+            orientation="vertical"
+            className="flex min-h-0 w-full flex-1"
+          >
+            <TabsList className="flex h-full min-h-0 w-56 shrink-0 flex-col items-stretch justify-start overflow-y-auto rounded-none border-r border-border bg-card p-1">
+              {menuItems.map((item) => (
+                <TabsTrigger
+                  key={item.id}
+                  value={item.id}
+                  className="shrink-0 justify-start gap-2 rounded-md px-3 py-2 text-sm text-muted-foreground transition-colors data-[state=active]:bg-accent data-[state=active]:text-foreground data-[state=active]:shadow-none"
+                >
+                  <item.icon className="h-4 w-4 shrink-0" />
+                  {item.label}
                 </TabsTrigger>
-                <TabsTrigger value="general" className={TAB_TRIGGER_CLASS}>
-                  General
-                </TabsTrigger>
-                <TabsTrigger value="notifications" className={TAB_TRIGGER_CLASS}>
-                  Notify
-                </TabsTrigger>
-                <TabsTrigger value="voice" className={TAB_TRIGGER_CLASS}>
-                  Voice
-                </TabsTrigger>
-                <TabsTrigger value="git" className={TAB_TRIGGER_CLASS}>
-                  Git
-                </TabsTrigger>
-                <TabsTrigger value="shortcuts" className={TAB_TRIGGER_CLASS}>
-                  Shortcuts
-                </TabsTrigger>
-                <TabsTrigger value="opencode" className={TAB_TRIGGER_CLASS}>
-                  OpenCode
-                </TabsTrigger>
-                <TabsTrigger value="logs" className={TAB_TRIGGER_CLASS}>
-                  Logs
-                </TabsTrigger>
-                <TabsTrigger value="providers" className={TAB_TRIGGER_CLASS}>
-                  Providers
-                </TabsTrigger>
-              </TabsList>
-            </div>
+              ))}
+            </TabsList>
 
-            <div className="flex-1 min-h-0 overflow-y-auto">
-              <div className="px-6 pb-6">
-                <TabsContent key="account" value="account" className="mt-0"><AccountSettings /></TabsContent>
-                <TabsContent key="general" value="general" className="mt-0"><GeneralSettings /></TabsContent>
-                <TabsContent key="notifications" value="notifications" className="mt-0"><NotificationSettings /></TabsContent>
-                <TabsContent key="voice" value="voice" className="mt-0"><VoiceSettings /></TabsContent>
-                <TabsContent key="git" value="git" className="mt-0"><GitSettings /></TabsContent>
-                <TabsContent key="shortcuts" value="shortcuts" className="mt-0"><KeyboardShortcuts /></TabsContent>
-                <TabsContent key="opencode" value="opencode" className="mt-0">
-                  <div className="space-y-6">
-                    <ServerHealthStatus onOpenVersionDialog={() => setIsVersionDialogOpen(true)} />
-                    <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                      <OpenCodeServerAuthSettings isOpen={authSectionsOpen} onToggle={toggleAuthSections} />
-                      <ManagerTokenSettings isOpen={authSectionsOpen} onToggle={toggleAuthSections} />
-                    </div>
-                    <ServerEnvVarsSettings />
-                    <SandboxSettings />
-                    <OpenCodeConfigManager />
-                  </div>
-                </TabsContent>
-                <TabsContent key="logs" value="logs" className="mt-0">{isDesktop && <LogsViewer />}</TabsContent>
-                <TabsContent key="providers" value="providers" className="mt-0"><ProviderSettings /></TabsContent>
-              </div>
+            <div className={`@container min-h-0 min-w-0 flex-1 p-6 ${activeTab === 'logs' ? 'overflow-hidden' : 'overflow-y-auto'}`}>
+              <TabsContent key="account" value="account" className="mt-0 px-0 max-w-7xl"><AccountSettings /></TabsContent>
+              <TabsContent key="general" value="general" className="mt-0 px-0 max-w-4xl"><GeneralSettings /></TabsContent>
+              <TabsContent key="notifications" value="notifications" className="mt-0 px-0 max-w-7xl"><NotificationSettings /></TabsContent>
+              <TabsContent key="voice" value="voice" className="mt-0 px-0 max-w-7xl"><VoiceSettings /></TabsContent>
+              <TabsContent key="git" value="git" className="mt-0 px-0 max-w-7xl"><GitSettings /></TabsContent>
+              <TabsContent key="shortcuts" value="shortcuts" className="mt-0 px-0 max-w-7xl"><KeyboardShortcuts /></TabsContent>
+              <TabsContent key="opencode" value="opencode" className="mt-0 px-0">
+                <OpenCodeSettings onOpenVersionDialog={() => setIsVersionDialogOpen(true)} />
+              </TabsContent>
+              <TabsContent key="logs" value="logs" className="mt-0 h-full min-h-0 px-0">{isDesktop && <LogsViewer />}</TabsContent>
+              <TabsContent key="providers" value="providers" className="mt-0 px-0 max-w-7xl"><ProviderSettings /></TabsContent>
             </div>
           </Tabs>
         </div>
@@ -222,17 +208,18 @@ export function SettingsDialog() {
                  {mobileView === 'menu' ? 'Settings' : menuItems.find(item => item.id === mobileView)?.label}
                </h2>
              </div>
-             <Button
-               variant="ghost"
-               size="icon"
-               onClick={close}
-               className="text-muted-foreground hover:text-foreground min-w-[44px] min-h-[44px] flex-shrink-0"
-             >
+              <Button
+                variant="ghost"
+                size="icon"
+                onClick={close}
+                aria-label="Close"
+                className="text-muted-foreground hover:text-foreground min-w-[44px] min-h-[44px] flex-shrink-0"
+              >
                <X className="w-6 h-6" />
              </Button>
            </div>
 
-             <div className="flex-1 min-h-0 overflow-y-auto p-3 pb-[calc(env(safe-area-inset-bottom)+1rem)]">
+             <div className={`@container flex-1 min-h-0 p-3 pb-[calc(env(safe-area-inset-bottom)+1rem)] ${mobileView === 'logs' ? 'overflow-hidden' : 'overflow-y-auto'}`}>
              {mobileView === 'menu' && (
                <div className="space-y-3">
                  {menuItems.map((item) => (
@@ -262,17 +249,10 @@ export function SettingsDialog() {
              {mobileView === 'git' && <div key="git"><GitSettings /></div>}
               {mobileView === 'shortcuts' && <div key="shortcuts"><KeyboardShortcuts /></div>}
                 {mobileView === 'opencode' && (
-                   <div key="opencode" className="space-y-4">
-                    <ServerHealthStatus onOpenVersionDialog={() => setIsVersionDialogOpen(true)} />
-                    <OpenCodeServerAuthSettings />
-                    <ManagerTokenSettings />
-                    <ServerEnvVarsSettings />
-                    <SandboxSettings />
-                    <OpenCodeConfigManager />
-                  </div>
+                   <OpenCodeSettings key="opencode" onOpenVersionDialog={() => setIsVersionDialogOpen(true)} />
                 )}
               {mobileView === 'providers' && <div key="providers"><ProviderSettings /></div>}
-              {mobileView === 'logs' && !isDesktop && <div key="logs"><LogsViewer /></div>}
+              {mobileView === 'logs' && !isDesktop && <div key="logs" className="h-full min-h-0"><LogsViewer /></div>}
            </div>
         </div>
 

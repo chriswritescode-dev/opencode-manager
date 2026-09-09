@@ -27,7 +27,7 @@ export function ServerHealthStatus({ onOpenVersionDialog }: ServerHealthStatusPr
     return (
       <Card className="bg-transparent border-transparent">
         <CardContent className="p-3">
-          <div className="flex items-center justify-center gap-2">
+          <div className="flex items-center gap-2">
             <Loader2 className="h-4 w-4 animate-spin text-muted-foreground" />
             <span className="text-sm text-muted-foreground">Loading server status...</span>
           </div>
@@ -41,10 +41,10 @@ export function ServerHealthStatus({ onOpenVersionDialog }: ServerHealthStatusPr
   return (
     <Card className={cn('bg-transparent border-transparent', isUnhealthy && 'border-destructive')}>
       <CardContent className="p-3">
-        <div className="flex flex-col sm:flex-row sm:items-center items-center justify-center gap-3">
-          <div className="flex items-center gap-2 flex-wrap justify-center ">
+        <div className="flex flex-wrap items-center justify-between gap-3">
+          <div className="flex min-w-0 flex-wrap items-center gap-2">
             <div className={`h-3 w-3 rounded-full ${isUnhealthy ? 'bg-destructive animate-pulse' : 'bg-green-500'}`} />
-            <p className="font-medium text-sm sm:text-base">
+            <p className="font-medium text-sm">
               Server Status: {isUnhealthy ? 'Unhealthy' : 'Healthy'}
             </p>
             {health.error && (
@@ -63,7 +63,7 @@ export function ServerHealthStatus({ onOpenVersionDialog }: ServerHealthStatusPr
               </p>
             )}
           </div>
-          <div className="flex flex-wrap gap-2 justify-center sm:justify-end">
+          <div className="flex flex-wrap gap-2">
             <Button
               variant="outline"
               size="sm"

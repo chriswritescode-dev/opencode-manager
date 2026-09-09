@@ -1,5 +1,5 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest'
-import { render, screen, fireEvent, within } from '@testing-library/react'
+import { render, screen, fireEvent, within, act } from '@testing-library/react'
 import { MemoryRouter, useLocation, useNavigate } from 'react-router-dom'
 import { SettingsDialog } from './SettingsDialog'
 import { Dialog, DialogContent, DialogTitle } from '@/components/ui/dialog'
@@ -144,10 +144,10 @@ describe('SettingsDialog', () => {
     expect(screen.getByTestId('dialog-open')).toBeInTheDocument()
 
     expect(screen.getAllByText('Account').length).toBeGreaterThanOrEqual(1)
-    expect(screen.getAllByText('General').length).toBeGreaterThanOrEqual(1)
+    expect(screen.getAllByText('General Settings').length).toBeGreaterThanOrEqual(1)
     expect(screen.getAllByText('Git').length).toBeGreaterThanOrEqual(1)
-    expect(screen.getAllByText('Shortcuts').length).toBeGreaterThanOrEqual(1)
-    expect(screen.getAllByText('OpenCode').length).toBeGreaterThanOrEqual(1)
+    expect(screen.getAllByText('Keyboard Shortcuts').length).toBeGreaterThanOrEqual(1)
+    expect(screen.getAllByText('OpenCode Config').length).toBeGreaterThanOrEqual(1)
     expect(screen.getAllByText('Providers').length).toBeGreaterThanOrEqual(1)
 
     const mobileContainer = document.querySelector('.sm\\:hidden') as HTMLElement
@@ -192,7 +192,7 @@ describe('SettingsDialog', () => {
     expect(screen.getByTestId('location-search')).toHaveTextContent('settingsTab=logs')
   })
 
-  it('opens directly on the Logs mobile view from ?settings=open&settingsTab=logs and returns to the menu on back', () => {
+  it('starts at the menu on mobile even with a deep-linked settingsTab and navigates from there', () => {
     stubMatchMedia(false)
     function TestWrapper() {
       const location = useLocation()
@@ -205,6 +205,7 @@ describe('SettingsDialog', () => {
         <>
           <button onClick={() => navigate('/')}>Close Settings</button>
           {isOpen && <span data-testid="dialog-open">Dialog Open</span>}
+          {isOpen && <span data-testid="location-search">{location.search}</span>}
           <SettingsDialog />
         </>
       )
@@ -221,9 +222,20 @@ describe('SettingsDialog', () => {
     const mobileContainer = document.querySelector('.sm\\:hidden') as HTMLElement
     const mobile = within(mobileContainer)
 
+    expect(mobile.getByRole('heading', { name: 'Settings' })).toBeInTheDocument()
+    expect(mobile.getByText('Live manager and OpenCode server logs')).toBeInTheDocument()
+    expect(mobile.queryByTestId('logs-settings')).not.toBeInTheDocument()
+    expect(mobileContainer.querySelector('svg.lucide-chevron-left')).toBeNull()
+    expect(screen.queryByTestId('logs-settings')).not.toBeInTheDocument()
+
+    const logsMenuButton = mobile.getByText('Live manager and OpenCode server logs').closest('button')
+    expect(logsMenuButton).not.toBeNull()
+    fireEvent.click(logsMenuButton!)
+
     expect(mobile.getByTestId('logs-settings')).toBeInTheDocument()
     expect(mobile.getByRole('heading', { name: 'Logs' })).toBeInTheDocument()
     expect(screen.getAllByTestId('logs-settings')).toHaveLength(1)
+    expect(screen.getByTestId('location-search')).toHaveTextContent('settingsTab=logs')
 
     const backButton = mobileContainer.querySelector('svg.lucide-chevron-left')?.closest('button')
     expect(backButton).not.toBeNull()
@@ -231,9 +243,7 @@ describe('SettingsDialog', () => {
 
     expect(mobile.queryByTestId('logs-settings')).not.toBeInTheDocument()
     expect(mobile.getByRole('heading', { name: 'Settings' })).toBeInTheDocument()
-    expect(mobile.getByText('Live manager and OpenCode server logs')).toBeInTheDocument()
     expect(mobileContainer.querySelector('svg.lucide-chevron-left')).toBeNull()
-    expect(screen.queryByTestId('logs-settings')).not.toBeInTheDocument()
   })
 
   it('mounts exactly one LogsViewer on desktop when the Logs tab is selected', () => {
@@ -299,9 +309,16 @@ describe('SettingsDialog', () => {
     expect(desktopTrigger).toHaveAttribute('data-state', 'active')
   })
 
-  it('applies compact responsive sizing to all nine desktop tab triggers', () => {
+  it('renders a vertical desktop sidebar driven by menu items with URL and keyboard navigation', async () => {
+    stubMatchMedia(true)
     function TestWrapper() {
-      return <SettingsDialog />
+      const location = useLocation()
+      return (
+        <>
+          <span data-testid="location-search">{location.search}</span>
+          <SettingsDialog />
+        </>
+      )
     }
 
     render(
@@ -310,16 +327,27 @@ describe('SettingsDialog', () => {
       </MemoryRouter>
     )
 
+    const tablist = screen.getByRole('tablist')
+    expect(tablist).toHaveAttribute('aria-orientation', 'vertical')
+
     const triggers = screen.getAllByRole('tab')
     expect(triggers).toHaveLength(9)
-    const expected = ['Account', 'General', 'Notify', 'Voice', 'Git', 'Shortcuts', 'OpenCode', 'Logs', 'Providers']
+    const expected = ['Account', 'General Settings', 'Notifications', 'Voice', 'Git', 'Keyboard Shortcuts', 'OpenCode Config', 'Logs', 'Providers']
     expect(triggers.map((trigger) => trigger.textContent)).toEqual(expected)
-    for (const trigger of triggers) {
-      expect(trigger.className).toContain('sm:px-2')
-      expect(trigger.className).toContain('sm:text-xs')
-      expect(trigger.className).toContain('md:px-3')
-      expect(trigger.className).toContain('md:text-sm')
-    }
+
+    const logsTrigger = screen.getByRole('tab', { name: 'Logs' })
+    fireEvent.mouseDown(logsTrigger)
+    expect(screen.getByTestId('location-search')).toHaveTextContent('settingsTab=logs')
+
+    const gitTrigger = screen.getByRole('tab', { name: 'Git' })
+    act(() => {
+      gitTrigger.focus()
+    })
+    fireEvent.keyDown(gitTrigger, { key: 'ArrowDown' })
+    await act(async () => {
+      await new Promise((resolve) => setTimeout(resolve, 0))
+    })
+    expect(screen.getByRole('tab', { name: 'Keyboard Shortcuts' })).toHaveFocus()
   })
 
   it('keeps Settings open when Escape fires inside a nested dialog', () => {

@@ -1,4 +1,4 @@
-import { useState, useEffect, useRef } from 'react'
+import { useState, useEffect, useRef, useId } from 'react'
 import { cn } from '@/lib/utils'
 import { Loader2, Plus, Trash2, Edit, Download, RotateCcw, FileText, ChevronDown, AlertTriangle } from 'lucide-react'
 import { Button } from '@/components/ui/button'
@@ -59,6 +59,7 @@ interface Agent {
 const EXPANDED_SECTION_CONTENT_CLASS = 'p-2 sm:p-4'
 
 export function OpenCodeConfigManager() {
+  const hostImportContentId = useId()
   const queryClient = useQueryClient()
   const { data: health } = useServerHealth()
   const [configs, setConfigs] = useState<OpenCodeConfig[]>([])
@@ -74,6 +75,7 @@ export function OpenCodeConfigManager() {
     skills: false,
     mcp: false,
     models: false,
+    hostImport: false,
   })
   const [isCreateDialogOpen, setIsCreateDialogOpen] = useState(false)
   const [isEditDialogOpen, setIsEditDialogOpen] = useState(false)
@@ -358,104 +360,6 @@ export function OpenCodeConfigManager() {
          </div>
        )}
 
-       <Card>
-         <CardHeader className="pb-3">
-           <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
-              <div>
-                      <CardTitle className="text-sm sm:text-base">Existing OpenCode Host Import</CardTitle>
-                <p className="text-sm text-muted-foreground mt-1">
-                  Import your standalone OpenCode config and session state into this workspace, then restart the server so existing chats can reconnect.
-                </p>
-              </div>
-             <Button
-               variant="outline"
-               size="sm"
-               disabled={!canImportFromHost || syncOpenCodeImportMutation.isPending || isImportStatusLoading}
-                onClick={async () => {
-                  showToast.loading('Importing existing OpenCode host data...', { id: 'opencode-import' })
-                  try {
-                    const result = await syncOpenCodeImportMutation.mutateAsync()
-                    const importedParts = [result.configImported && 'config', result.stateImported && 'state']
-                      .filter(Boolean)
-                      .join(' and ')
-                    const relinkSummary = result.relinkedRepos
-                      ? ` Linked ${result.relinkedRepos.relinkedCount} repos, matched ${result.relinkedRepos.existingCount} existing repos, skipped ${result.relinkedRepos.nonRepoPathCount} non-repo paths, and ignored ${result.relinkedRepos.duplicatePathCount} duplicate session paths.`
-                      : ''
-                    showToast.success(`Imported existing OpenCode ${importedParts || 'data'} and restarted the server.${relinkSummary}`, { id: 'opencode-import' })
-                  } catch (error) {
-                    showToast.error(getOpenCodeImportErrorMessage(error), { id: 'opencode-import' })
-                  }
-                }}
-              >
-                {syncOpenCodeImportMutation.isPending ? (
-                  <Loader2 className="h-3 w-3 sm:h-4 sm:w-4 mr-1 animate-spin" />
-                ) : (
-                  <Download className="h-3 w-3 sm:h-4 sm:w-4 mr-1" />
-                )}
-                <span className="text-xs sm:text-sm">Import From Host</span>
-              </Button>
-            </div>
-          </CardHeader>
-          <CardContent className="space-y-3 text-sm">
-            <div className="grid gap-3 md:grid-cols-2">
-              <div className="rounded-lg border border-border p-3">
-                <p className="font-medium">Config Source</p>
-                <p className="mt-1 break-all text-muted-foreground">
-                  {isImportStatusLoading ? 'Checking...' : importStatus?.configSourcePath || 'No importable OpenCode config found'}
-                </p>
-              </div>
-              <div className="rounded-lg border border-border p-3">
-                <p className="font-medium">State Source</p>
-                <p className="mt-1 break-all text-muted-foreground">
-                  {isImportStatusLoading ? 'Checking...' : importStatus?.stateSourcePath || 'No importable OpenCode state found'}
-                </p>
-              </div>
-            </div>
-            <div className="rounded-lg border border-border p-3">
-              <p className="font-medium">Workspace State</p>
-              <p className="mt-1 break-all text-muted-foreground">
-                {importStatus?.workspaceStatePath || 'Unavailable'}
-              </p>
-              <p className="mt-2 text-xs text-muted-foreground">
-                {importStatus?.workspaceStateExists
-                  ? 'A workspace session database already exists. Import is blocked to protect it from being replaced by detected host state.'
-                  : 'No workspace session database exists yet. Import will seed it from the detected host state.'}
-              </p>
-            </div>
-            {syncOpenCodeImportMutation.error && (
-              <div className="rounded-lg border border-destructive/40 bg-destructive/5 p-3">
-                <p className="font-medium text-destructive">Import blocked</p>
-                <p className="mt-1 text-sm text-destructive/90">
-                  {getOpenCodeImportErrorMessage(syncOpenCodeImportMutation.error)}
-                </p>
-                <p className="mt-2 text-xs text-destructive/80">
-                  This workspace already has OpenCode session state, so host state import was stopped to prevent accidental replacement of existing chats and history. If you want to use host state instead, clear the workspace state first and then run the import again.
-                </p>
-              </div>
-            )}
-            {syncOpenCodeImportMutation.data?.relinkedRepos && (
-              <div className="rounded-lg border border-border p-3">
-                <p className="font-medium">Last Relink Result</p>
-                <p className="mt-1 text-muted-foreground">
-                  Linked {syncOpenCodeImportMutation.data.relinkedRepos.relinkedCount} repos, matched {syncOpenCodeImportMutation.data.relinkedRepos.existingCount} existing repos, skipped {syncOpenCodeImportMutation.data.relinkedRepos.nonRepoPathCount} non-repo session paths, and ignored {syncOpenCodeImportMutation.data.relinkedRepos.duplicatePathCount} duplicate session paths.
-                </p>
-                {syncOpenCodeImportMutation.data.relinkedRepos.errors.length > 0 && (
-                  <p className="mt-2 text-xs text-destructive">
-                    {syncOpenCodeImportMutation.data.relinkedRepos.errors.length} repo paths could not be linked.
-                  </p>
-                )}
-              </div>
-            )}
-            {!canImportFromHost && !isImportStatusLoading && (
-              <p className="text-xs text-muted-foreground">
-                No host OpenCode config or state was detected. For Docker installs, bind your host OpenCode config and state into the container before using this action.
-              </p>
-            )}
-          </CardContent>
-        </Card>
-
-        
-        
         <CreateConfigDialog
         isOpen={isCreateDialogOpen}
         onOpenChange={setIsCreateDialogOpen}
@@ -886,6 +790,109 @@ export function OpenCodeConfigManager() {
               </div>
             </div>
           )}
+        </div>
+      </div>
+
+      <div className="bg-card border border-border rounded-lg overflow-hidden min-w-0">
+        <button
+          className={cn("w-full px-4 py-3 flex items-center justify-between transition-colors min-w-0", expandedSections.hostImport ? "bg-muted/40 hover:bg-muted/50" : "hover:bg-muted/50")}
+          aria-expanded={expandedSections.hostImport}
+          aria-controls={hostImportContentId}
+          onClick={() => setExpandedSections(prev => ({ ...prev, hostImport: !prev.hostImport }))}
+        >
+          <div className="flex items-center gap-3 min-w-0">
+            <Download className="h-4 w-4 text-blue-500" />
+            <h4 className="text-sm font-medium truncate">Existing OpenCode Host Import</h4>
+          </div>
+          <ChevronDown className={`h-4 w-4 transition-transform ${expandedSections.hostImport ? 'rotate-90' : ''}`} />
+        </button>
+        <div id={hostImportContentId} className={`${expandedSections.hostImport ? 'block' : 'hidden'} border-t border-border`}>
+          <div className={cn(EXPANDED_SECTION_CONTENT_CLASS, 'space-y-3 text-sm')}>
+            <p className="text-muted-foreground">
+              Import your standalone OpenCode config and session state into this workspace, then restart the server so existing chats can reconnect.
+            </p>
+            <Button
+              variant="outline"
+              size="sm"
+              disabled={!canImportFromHost || syncOpenCodeImportMutation.isPending || isImportStatusLoading}
+              onClick={async () => {
+                showToast.loading('Importing existing OpenCode host data...', { id: 'opencode-import' })
+                try {
+                  const result = await syncOpenCodeImportMutation.mutateAsync()
+                  const importedParts = [result.configImported && 'config', result.stateImported && 'state']
+                    .filter(Boolean)
+                    .join(' and ')
+                  const relinkSummary = result.relinkedRepos
+                    ? ` Linked ${result.relinkedRepos.relinkedCount} repos, matched ${result.relinkedRepos.existingCount} existing repos, skipped ${result.relinkedRepos.nonRepoPathCount} non-repo paths, and ignored ${result.relinkedRepos.duplicatePathCount} duplicate session paths.`
+                    : ''
+                  showToast.success(`Imported existing OpenCode ${importedParts || 'data'} and restarted the server.${relinkSummary}`, { id: 'opencode-import' })
+                } catch (error) {
+                  showToast.error(getOpenCodeImportErrorMessage(error), { id: 'opencode-import' })
+                }
+              }}
+            >
+              {syncOpenCodeImportMutation.isPending ? (
+                <Loader2 className="h-3 w-3 sm:h-4 sm:w-4 mr-1 animate-spin" />
+              ) : (
+                <Download className="h-3 w-3 sm:h-4 sm:w-4 mr-1" />
+              )}
+              <span className="text-xs sm:text-sm">Import From Host</span>
+            </Button>
+            <div className="grid gap-3 md:grid-cols-2">
+              <div className="rounded-lg border border-border p-3">
+                <p className="font-medium">Config Source</p>
+                <p className="mt-1 break-all text-muted-foreground">
+                  {isImportStatusLoading ? 'Checking...' : importStatus?.configSourcePath || 'No importable OpenCode config found'}
+                </p>
+              </div>
+              <div className="rounded-lg border border-border p-3">
+                <p className="font-medium">State Source</p>
+                <p className="mt-1 break-all text-muted-foreground">
+                  {isImportStatusLoading ? 'Checking...' : importStatus?.stateSourcePath || 'No importable OpenCode state found'}
+                </p>
+              </div>
+            </div>
+            <div className="rounded-lg border border-border p-3">
+              <p className="font-medium">Workspace State</p>
+              <p className="mt-1 break-all text-muted-foreground">
+                {importStatus?.workspaceStatePath || 'Unavailable'}
+              </p>
+              <p className="mt-2 text-xs text-muted-foreground">
+                {importStatus?.workspaceStateExists
+                  ? 'A workspace session database already exists. Import is blocked to protect it from being replaced by detected host state.'
+                  : 'No workspace session database exists yet. Import will seed it from the detected host state.'}
+              </p>
+            </div>
+            {syncOpenCodeImportMutation.error && (
+              <div className="rounded-lg border border-destructive/40 bg-destructive/5 p-3">
+                <p className="font-medium text-destructive">Import blocked</p>
+                <p className="mt-1 text-sm text-destructive/90">
+                  {getOpenCodeImportErrorMessage(syncOpenCodeImportMutation.error)}
+                </p>
+                <p className="mt-2 text-xs text-destructive/80">
+                  This workspace already has OpenCode session state, so host state import was stopped to prevent accidental replacement of existing chats and history. If you want to use host state instead, clear the workspace state first and then run the import again.
+                </p>
+              </div>
+            )}
+            {syncOpenCodeImportMutation.data?.relinkedRepos && (
+              <div className="rounded-lg border border-border p-3">
+                <p className="font-medium">Last Relink Result</p>
+                <p className="mt-1 text-muted-foreground">
+                  Linked {syncOpenCodeImportMutation.data.relinkedRepos.relinkedCount} repos, matched {syncOpenCodeImportMutation.data.relinkedRepos.existingCount} existing repos, skipped {syncOpenCodeImportMutation.data.relinkedRepos.nonRepoPathCount} non-repo session paths, and ignored {syncOpenCodeImportMutation.data.relinkedRepos.duplicatePathCount} duplicate session paths.
+                </p>
+                {syncOpenCodeImportMutation.data.relinkedRepos.errors.length > 0 && (
+                  <p className="mt-2 text-xs text-destructive">
+                    {syncOpenCodeImportMutation.data.relinkedRepos.errors.length} repo paths could not be linked.
+                  </p>
+                )}
+              </div>
+            )}
+            {!canImportFromHost && !isImportStatusLoading && (
+              <p className="text-xs text-muted-foreground">
+                No host OpenCode config or state was detected. For Docker installs, bind your host OpenCode config and state into the container before using this action.
+              </p>
+            )}
+          </div>
         </div>
       </div>
 

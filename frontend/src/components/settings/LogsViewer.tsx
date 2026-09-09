@@ -76,9 +76,9 @@ export function LogsViewer() {
     .join('\n')
 
   return (
-    <Card className="border-0 bg-transparent shadow-none">
-      <CardContent className="space-y-3 p-0">
-        <div className="flex flex-wrap items-center gap-2">
+    <Card className="flex h-full min-h-0 flex-col border-0 bg-transparent shadow-none">
+      <CardContent className="flex min-h-0 flex-1 flex-col gap-3 p-0">
+        <div className="flex shrink-0 flex-wrap items-center gap-2">
           <Select value={level} onValueChange={(value) => setLevel(value as LevelFilter)}>
             <SelectTrigger className="min-w-0 flex-1 sm:w-44 sm:flex-none" aria-label="Log level filter">
               <SelectValue />
@@ -111,11 +111,11 @@ export function LogsViewer() {
             aria-label="Search log messages"
           />
           <div className="ml-auto flex items-center gap-2">
-            <Button variant="outline" size="sm" className="px-2 sm:px-3" onClick={() => setPaused((value) => !value)}>
+            <Button variant="outline" size="sm" className="px-2 sm:px-3" aria-label={paused ? 'Resume' : 'Pause'} onClick={() => setPaused((value) => !value)}>
               {paused ? <Play /> : <Pause />}
               <span className="hidden sm:inline">{paused ? 'Resume' : 'Pause'}</span>
             </Button>
-            <Button variant="outline" size="sm" className="px-2 sm:px-3" onClick={clear}>
+            <Button variant="outline" size="sm" className="px-2 sm:px-3" aria-label="Clear" onClick={clear}>
               <Trash2 />
               <span className="hidden sm:inline">Clear</span>
             </Button>
@@ -125,7 +125,7 @@ export function LogsViewer() {
         <div
           ref={scrollRef}
           onScroll={handleScroll}
-          className="h-[calc(100dvh-15rem)] min-h-80 space-y-1 overflow-y-auto rounded-md border border-border bg-background p-2 font-mono text-xs"
+          className="min-h-0 flex-1 space-y-1 overflow-y-auto rounded-md border border-border bg-background p-2 font-mono text-xs"
         >
           {entries.length === 0 ? (
             <p className="p-4 text-center font-sans text-muted-foreground">No log entries captured yet.</p>
@@ -152,7 +152,7 @@ export function LogsViewer() {
           )}
         </div>
         {dropped > 0 && (
-          <p className="text-xs text-muted-foreground">
+          <p className="shrink-0 text-xs text-muted-foreground">
             {dropped} earlier entries dropped (buffer holds {DEFAULTS.LOGS.BUFFER_CAPACITY})
           </p>
         )}
