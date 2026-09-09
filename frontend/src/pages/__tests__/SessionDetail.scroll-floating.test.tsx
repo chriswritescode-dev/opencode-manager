@@ -1,5 +1,5 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest'
-import { render, screen, fireEvent, waitFor } from '@testing-library/react'
+import { render, screen, fireEvent, waitFor, act } from '@testing-library/react'
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
 import { MemoryRouter, Route, Routes } from 'react-router-dom'
 import { useEffect } from 'react'
@@ -25,6 +25,7 @@ const mocks = vi.hoisted(() => ({
   useSidebarAction: vi.fn(),
   useSessionStatusForSession: vi.fn(),
   PromptInput: vi.fn(),
+  uiState: { isEditingMessage: false },
 }))
 
 vi.mock('@/config', () => ({
@@ -104,7 +105,7 @@ vi.mock('@/hooks/useAutoPlayLastResponse', () => ({
 vi.mock('@/stores/uiStateStore', () => ({
   useUIState: vi.fn((selector?: (state: Record<string, unknown>) => unknown) =>
     typeof selector === 'function'
-      ? selector({ isEditingMessage: false, setActivePromptFileBasePath: vi.fn() })
+      ? selector({ isEditingMessage: mocks.uiState.isEditingMessage, setActivePromptFileBasePath: vi.fn() })
       : false
   ),
 }))
@@ -195,11 +196,53 @@ vi.mock('@/components/message/PromptInput', () => ({
   PromptInput: mocks.PromptInput,
 }))
 
+interface ObservedElement {
+  element: Element
+  callback: ResizeObserverCallback
+  observer: ResizeObserver
+}
+
+const observedElements: ObservedElement[] = []
+
+class TestResizeObserver {
+  constructor(private readonly callback: ResizeObserverCallback) {}
+
+  observe(element: Element) {
+    observedElements.push({ element, callback: this.callback, observer: this as unknown as ResizeObserver })
+  }
+
+  unobserve(element: Element) {
+    const index = observedElements.findIndex((entry) => entry.observer === (this as unknown) && entry.element === element)
+    if (index !== -1) observedElements.splice(index, 1)
+  }
+
+  disconnect() {
+    for (let index = observedElements.length - 1; index >= 0; index -= 1) {
+      if (observedElements[index].observer === (this as unknown)) observedElements.splice(index, 1)
+    }
+  }
+}
+
+const reportObservedHeight = (height: number) => {
+  act(() => {
+    for (const entry of [...observedElements]) {
+      if (!entry.element.isConnected) continue
+      entry.callback(
+        [{ target: entry.element, contentRect: { height } } as unknown as ResizeObserverEntry],
+        entry.observer
+      )
+    }
+  })
+}
+
 describe('SessionDetail scroll floating button', () => {
   let mockScrollToBottom: ReturnType<typeof vi.fn>
 
   beforeEach(() => {
     vi.clearAllMocks()
+    observedElements.length = 0
+    mocks.uiState.isEditingMessage = false
+    vi.stubGlobal('ResizeObserver', TestResizeObserver)
 
     mockScrollToBottom = vi.fn()
 
@@ -270,15 +313,18 @@ describe('SessionDetail scroll floating button', () => {
       )
     })
 
-    return render(
+    const queryClient = createQueryClient()
+    const buildTree = () => (
       <MemoryRouter initialEntries={['/repos/1/sessions/test-session']}>
-        <QueryClientProvider client={createQueryClient()}>
+        <QueryClientProvider client={queryClient}>
           <Routes>
             <Route path="/repos/:id/sessions/:sessionId" element={<SessionDetail />} />
           </Routes>
         </QueryClientProvider>
       </MemoryRouter>
     )
+
+    return Object.assign(render(buildTree()), { buildTree })
   }
 
   it('passes scroll button state to PromptInput when showScrollButton is true', async () => {
@@ -354,5 +400,27 @@ describe('SessionDetail scroll floating button', () => {
 
     const props = mocks.PromptInput.mock.calls.at(-1)?.[0] as { disabled?: boolean }
     expect(props.disabled).not.toBe(true)
+  })
+
+  it('restores message list clearance after the prompt overlay remounts following a message edit', async () => {
+    const { buildTree, rerender } = renderWith({ mobile: true, showScrollButton: false })
+    await waitFor(() => expect(screen.getByText('MockedPromptInput')).toBeInTheDocument())
+
+    const paddingBottom = () => screen.getByTestId('session-message-scroll').style.paddingBottom
+
+    reportObservedHeight(140)
+    expect(paddingBottom()).toBe('156px')
+
+    mocks.uiState.isEditingMessage = true
+    rerender(buildTree())
+    await waitFor(() => expect(screen.queryByText('MockedPromptInput')).not.toBeInTheDocument())
+    expect(paddingBottom()).toBe('16px')
+
+    mocks.uiState.isEditingMessage = false
+    rerender(buildTree())
+    await waitFor(() => expect(screen.getByText('MockedPromptInput')).toBeInTheDocument())
+
+    reportObservedHeight(140)
+    expect(paddingBottom()).toBe('156px')
   })
 })

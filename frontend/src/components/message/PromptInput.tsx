@@ -1238,7 +1238,7 @@ return (
       {showStopButton && (
         <button
           onClick={handleStop}
-          className="border  fixed bottom-19 right-0 md:hidden z-50 p-3 rounded-xl transition-all duration-200 active:scale-95 hover:scale-105 bg-gradient-to-br from-red-600 to-red-700 hover:from-red-500 hover:to-red-600 text-destructive-foreground border border-red-500/60 shadow-lg shadow-red-500/30"
+          className="absolute bottom-full right-0 mb-2 md:hidden z-50 p-3 rounded-xl transition-all duration-200 active:scale-95 hover:scale-105 bg-gradient-to-br from-red-600 to-red-700 hover:from-red-500 hover:to-red-600 text-destructive-foreground border border-red-500/60 shadow-lg shadow-red-500/30"
           title="Stop"
         >
           <SquareFill className="w-5 h-5" />

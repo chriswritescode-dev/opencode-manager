@@ -101,24 +101,24 @@ export function SessionDetail() {
   const isMobile = useMobile();
   const { keyboardHeight } = useVisualViewport();
   const inputBottomOffset = isMobile ? keyboardHeight : 0;
-  const promptOverlayRef = useRef<HTMLDivElement>(null);
+  const promptOverlayObserverRef = useRef<ResizeObserver | null>(null);
   const [promptOverlayHeight, setPromptOverlayHeight] = useState(112);
 
-  useEffect(() => {
-    const el = promptOverlayRef.current;
-    if (!el) return;
-    let mounted = true;
+  const promptOverlayRef = useCallback((el: HTMLDivElement | null) => {
+    promptOverlayObserverRef.current?.disconnect();
+    promptOverlayObserverRef.current = null;
+    if (!el) {
+      setPromptOverlayHeight(0);
+      return;
+    }
     const observer = new ResizeObserver((entries) => {
       const entry = entries[0];
-      if (entry && mounted) {
+      if (entry) {
         setPromptOverlayHeight(entry.contentRect.height);
       }
     });
     observer.observe(el);
-    return () => {
-      mounted = false;
-      observer.disconnect();
-    };
+    promptOverlayObserverRef.current = observer;
   }, []);
 
   const { data: repo, isLoading: repoLoading } = useQuery({
@@ -528,7 +528,7 @@ export function SessionDetail() {
       </div>
 
       <div className="relative flex-1 overflow-hidden flex flex-col">
-        <div key={sessionId} ref={messageContainerRef} className="flex-1 overflow-y-auto overflow-x-hidden overscroll-contain [mask-image:linear-gradient(to_bottom,transparent,black_16px,black)]" style={{ paddingBottom: promptOverlayHeight + inputBottomOffset + PROMPT_OVERLAY_CLEARANCE_PX }}>
+        <div key={sessionId} data-testid="session-message-scroll" ref={messageContainerRef} className="flex-1 overflow-y-auto overflow-x-hidden overscroll-contain [mask-image:linear-gradient(to_bottom,transparent,black_16px,black)]" style={{ paddingBottom: promptOverlayHeight + inputBottomOffset + PROMPT_OVERLAY_CLEARANCE_PX }}>
           {repoLoading || sessionLoading || messagesLoading ? (
             <MessageSkeleton />
           ) : opcodeUrl && sessionDirectory ? (
