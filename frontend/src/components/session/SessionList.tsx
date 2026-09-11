@@ -1,4 +1,4 @@
-import { useCallback, useState, useMemo, useEffect } from "react";
+import { useCallback, useState, useMemo, useEffect, useRef } from "react";
 import { useSessionsAcrossDirectories, useDeleteSession, useCreateSession } from "@/hooks/useOpenCode";
 import type { DeleteSessionTarget } from "@/hooks/useOpenCode";
 import { useSessionPins, useToggleSessionPin } from '@/hooks/useSessionPins';
@@ -56,6 +56,7 @@ export const SessionList = ({
   const [sessionToDelete, setSessionToDelete] = useState<DeleteSessionTarget | DeleteSessionTarget[] | null>(null);
   const [selectedSessions, setSelectedSessions] = useState<Set<string>>(new Set());
   const [manageMode, setManageMode] = useState(false);
+  const sessionListRef = useRef<HTMLDivElement>(null);
 
   const filteredSessions = useMemo(() => {
     if (!sessions) return [];
@@ -96,10 +97,19 @@ export const SessionList = ({
   }, [hasNextPage, isFetchingNextPage, fetchNextPage]);
 
   useEffect(() => {
-    if (!isLoading && filteredSessions.length === 0 && hasNextPage && !isFetchingNextPage) {
+    const sessionList = sessionListRef.current;
+    const isNearBottom = sessionList
+      ? sessionList.scrollHeight - sessionList.scrollTop - sessionList.clientHeight <= 240
+      : filteredSessions.length === 0;
+    if (
+      !isLoading
+      && isNearBottom
+      && hasNextPage
+      && !isFetchingNextPage
+    ) {
       void fetchNextPage();
     }
-  }, [isLoading, filteredSessions.length, hasNextPage, isFetchingNextPage, fetchNextPage]);
+  }, [isLoading, filteredSessions, hasNextPage, isFetchingNextPage, fetchNextPage]);
 
   if (isLoading) {
     return <div className="p-4 text-sm text-muted-foreground">Loading sessions...</div>;
@@ -275,6 +285,7 @@ export const SessionList = ({
       </div>
 
       <div
+        ref={sessionListRef}
         className="flex-1 overflow-y-auto overflow-x-hidden px-4 pt-4 pb-4 min-h-0 [mask-image:linear-gradient(to_bottom,transparent,black_16px,black)]"
         role="region"
         aria-label="Sessions"

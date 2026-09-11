@@ -277,6 +277,52 @@ describe('SessionList', () => {
     })
   })
 
+  it('auto-fetches next page when filtered sessions underfill the scroll viewport', async () => {
+    sessionsData.splice(0, sessionsData.length,
+      { id: 'root1', title: 'root session 1', directory: '/w/a', time: { updated: 4 } },
+      { id: 'root2', title: 'root session 2', directory: '/w/a', time: { updated: 3 } },
+      { id: 'root3', title: 'root session 3', directory: '/w/a', time: { updated: 2 } },
+      { id: 'root4', title: 'root session 4', directory: '/w/a', time: { updated: 1 } },
+      ...Array.from({ length: 21 }, (_, index) => ({
+        id: `child${index}`,
+        title: `child session ${index}`,
+        directory: '/w/a',
+        parentID: `root${index}`,
+        time: { updated: index },
+      })),
+    )
+    hasNextPageRef.current = true
+    const scrollHeightDescriptor = Object.getOwnPropertyDescriptor(HTMLElement.prototype, 'scrollHeight')
+    const clientHeightDescriptor = Object.getOwnPropertyDescriptor(HTMLElement.prototype, 'clientHeight')
+    Object.defineProperty(HTMLElement.prototype, 'scrollHeight', { configurable: true, value: 300 })
+    Object.defineProperty(HTMLElement.prototype, 'clientHeight', { configurable: true, value: 500 })
+
+    try {
+      render(
+        <SessionList
+          opcodeUrl="/api/opencode"
+          directories={['/w/a']}
+          onSelectSession={vi.fn()}
+        />,
+      )
+
+      await waitFor(() => {
+        expect(fetchNextPageMock).toHaveBeenCalled()
+      })
+    } finally {
+      if (scrollHeightDescriptor) {
+        Object.defineProperty(HTMLElement.prototype, 'scrollHeight', scrollHeightDescriptor)
+      } else {
+        Reflect.deleteProperty(HTMLElement.prototype, 'scrollHeight')
+      }
+      if (clientHeightDescriptor) {
+        Object.defineProperty(HTMLElement.prototype, 'clientHeight', clientHeightDescriptor)
+      } else {
+        Reflect.deleteProperty(HTMLElement.prototype, 'clientHeight')
+      }
+    }
+  })
+
   it('renders pinned session under a Pinned heading and excludes it from Today', () => {
     const pinnedTime = Date.now()
     sessionPinsData.push({ sessionId: 'ses_a', directory: '/w/a', pinnedAt: pinnedTime })
