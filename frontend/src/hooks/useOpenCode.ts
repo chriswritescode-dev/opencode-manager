@@ -124,6 +124,7 @@ export const useSessionsAcrossDirectories = (
     fetchNextPage: query.fetchNextPage,
     hasNextPage: query.hasNextPage,
     isFetchingNextPage: query.isFetchingNextPage,
+    isFetchNextPageError: query.isFetchNextPageError,
     error: query.error,
   };
 };
