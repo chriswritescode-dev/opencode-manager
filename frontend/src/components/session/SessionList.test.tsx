@@ -1,9 +1,11 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 import { render, screen, waitFor, within, fireEvent } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
+import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
+import type { ReactNode } from 'react'
 import { SessionList } from './SessionList'
 
-const { createSessionMock, deleteSessionMock, sessionsData, createSessionState, fetchNextPageMock, hasNextPageRef, isFetchingNextPageRef, lastSessionsHookArgs, sessionPinsData, togglePinMock } = vi.hoisted(() => ({
+const { createSessionMock, deleteSessionMock, sessionsData, createSessionState, fetchNextPageMock, hasNextPageRef, isFetchingNextPageRef, isFetchNextPageErrorRef, useRealSessionsHookRef, lastSessionsHookArgs, sessionPinsData, togglePinMock } = vi.hoisted(() => ({
   createSessionMock: vi.fn(),
   deleteSessionMock: vi.fn(),
   sessionsData: [] as Array<{ id: string; title: string; directory: string; workspaceID?: string; parentID?: string; time: { updated: number } }>,
@@ -11,30 +13,39 @@ const { createSessionMock, deleteSessionMock, sessionsData, createSessionState, 
   fetchNextPageMock: vi.fn(),
   hasNextPageRef: { current: false },
   isFetchingNextPageRef: { current: false },
+  isFetchNextPageErrorRef: { current: false },
+  useRealSessionsHookRef: { current: false },
   lastSessionsHookArgs: { current: undefined as { opcodeUrl: string; directories: string[]; options?: { search?: string; limit?: number } } | undefined },
   sessionPinsData: [] as Array<{ sessionId: string; directory: string; pinnedAt: number }>,
   togglePinMock: vi.fn(),
 }))
 
-vi.mock('@/hooks/useOpenCode', () => ({
-  useSessionsAcrossDirectories: (opcodeUrl: string, directories: string[], options?: { search?: string; limit?: number }) => {
-    lastSessionsHookArgs.current = { opcodeUrl, directories, options }
-    // Simulate server-side search: return empty data when a search query is active
-    const data = options?.search ? [] : sessionsData
-    return {
-      data,
-      isLoading: false,
-      fetchNextPage: fetchNextPageMock,
-      hasNextPage: hasNextPageRef.current,
-      isFetchingNextPage: isFetchingNextPageRef.current,
-    }
-  },
-  useCreateSession: (_opcodeUrl: string, directory?: string) => {
-    createSessionState.directory = directory
-    return { mutate: createSessionMock }
-  },
-  useDeleteSession: () => ({ mutateAsync: deleteSessionMock, isPending: false }),
-}))
+vi.mock('@/hooks/useOpenCode', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('@/hooks/useOpenCode')>()
+  return {
+    ...actual,
+    useSessionsAcrossDirectories: (opcodeUrl: string, directories: string[], options?: { search?: string; limit?: number }) => {
+      if (useRealSessionsHookRef.current) {
+        return actual.useSessionsAcrossDirectories(opcodeUrl, directories, options)
+      }
+      lastSessionsHookArgs.current = { opcodeUrl, directories, options }
+      const data = options?.search ? [] : sessionsData
+      return {
+        data,
+        isLoading: false,
+        fetchNextPage: fetchNextPageMock,
+        hasNextPage: hasNextPageRef.current,
+        isFetchingNextPage: isFetchingNextPageRef.current,
+        isFetchNextPageError: isFetchNextPageErrorRef.current,
+      }
+    },
+    useCreateSession: (_opcodeUrl: string, directory?: string) => {
+      createSessionState.directory = directory
+      return { mutate: createSessionMock }
+    },
+    useDeleteSession: () => ({ mutateAsync: deleteSessionMock, isPending: false }),
+  }
+})
 
 vi.mock('@/hooks/useSessionPins', () => ({
   useSessionPins: () => ({ data: sessionPinsData }),
@@ -55,6 +66,8 @@ describe('SessionList', () => {
     fetchNextPageMock.mockReset()
     hasNextPageRef.current = false
     isFetchingNextPageRef.current = false
+    isFetchNextPageErrorRef.current = false
+    useRealSessionsHookRef.current = false
     lastSessionsHookArgs.current = undefined
     sessionPinsData.splice(0, sessionPinsData.length)
     togglePinMock.mockReset()
@@ -277,6 +290,52 @@ describe('SessionList', () => {
     })
   })
 
+  it('auto-fetches next page when filtered sessions underfill the scroll viewport', async () => {
+    sessionsData.splice(0, sessionsData.length,
+      { id: 'root1', title: 'root session 1', directory: '/w/a', time: { updated: 4 } },
+      { id: 'root2', title: 'root session 2', directory: '/w/a', time: { updated: 3 } },
+      { id: 'root3', title: 'root session 3', directory: '/w/a', time: { updated: 2 } },
+      { id: 'root4', title: 'root session 4', directory: '/w/a', time: { updated: 1 } },
+      ...Array.from({ length: 21 }, (_, index) => ({
+        id: `child${index}`,
+        title: `child session ${index}`,
+        directory: '/w/a',
+        parentID: `root${index}`,
+        time: { updated: index },
+      })),
+    )
+    hasNextPageRef.current = true
+    const scrollHeightDescriptor = Object.getOwnPropertyDescriptor(HTMLElement.prototype, 'scrollHeight')
+    const clientHeightDescriptor = Object.getOwnPropertyDescriptor(HTMLElement.prototype, 'clientHeight')
+    Object.defineProperty(HTMLElement.prototype, 'scrollHeight', { configurable: true, value: 300 })
+    Object.defineProperty(HTMLElement.prototype, 'clientHeight', { configurable: true, value: 500 })
+
+    try {
+      render(
+        <SessionList
+          opcodeUrl="/api/opencode"
+          directories={['/w/a']}
+          onSelectSession={vi.fn()}
+        />,
+      )
+
+      await waitFor(() => {
+        expect(fetchNextPageMock).toHaveBeenCalled()
+      })
+    } finally {
+      if (scrollHeightDescriptor) {
+        Object.defineProperty(HTMLElement.prototype, 'scrollHeight', scrollHeightDescriptor)
+      } else {
+        Reflect.deleteProperty(HTMLElement.prototype, 'scrollHeight')
+      }
+      if (clientHeightDescriptor) {
+        Object.defineProperty(HTMLElement.prototype, 'clientHeight', clientHeightDescriptor)
+      } else {
+        Reflect.deleteProperty(HTMLElement.prototype, 'clientHeight')
+      }
+    }
+  })
+
   it('renders pinned session under a Pinned heading and excludes it from Today', () => {
     const pinnedTime = Date.now()
     sessionPinsData.push({ sessionId: 'ses_a', directory: '/w/a', pinnedAt: pinnedTime })
@@ -319,5 +378,174 @@ describe('SessionList', () => {
     await user.click(pinItem)
 
     expect(togglePinMock).toHaveBeenCalledWith({ sessionId: 'ses_x', directory: '/w/a', pinned: true })
+  })
+
+  it('shows a retry action and stops automatic pagination while a next-page error is active', async () => {
+    hasNextPageRef.current = true
+    isFetchNextPageErrorRef.current = true
+
+    render(
+      <SessionList
+        opcodeUrl="/api/opencode"
+        directories={['/w/a']}
+        onSelectSession={vi.fn()}
+      />,
+    )
+
+    expect(screen.getByText('Failed to load more sessions.')).toBeTruthy()
+    expect(screen.getByRole('button', { name: 'Retry' })).toBeTruthy()
+
+    const scrollContainer = screen.getByRole('region', { name: 'Sessions' })
+    Object.defineProperty(scrollContainer, 'scrollHeight', { value: 1000, configurable: true })
+    Object.defineProperty(scrollContainer, 'clientHeight', { value: 500, configurable: true })
+    Object.defineProperty(scrollContainer, 'scrollTop', { value: 300, configurable: true })
+    fireEvent.scroll(scrollContainer)
+
+    await waitFor(() => {
+      expect(fetchNextPageMock).not.toHaveBeenCalled()
+    })
+  })
+
+  it('retries the next page when the retry action is clicked after an error', async () => {
+    hasNextPageRef.current = true
+    isFetchNextPageErrorRef.current = true
+    const user = userEvent.setup()
+
+    render(
+      <SessionList
+        opcodeUrl="/api/opencode"
+        directories={['/w/a']}
+        onSelectSession={vi.fn()}
+      />,
+    )
+
+    await user.click(screen.getByRole('button', { name: 'Retry' }))
+
+    expect(fetchNextPageMock).toHaveBeenCalledTimes(1)
+  })
+
+  it('shows the retry action instead of the loading state when the first page is empty and the next page failed', () => {
+    sessionsData.splice(0, sessionsData.length)
+    hasNextPageRef.current = true
+    isFetchNextPageErrorRef.current = true
+
+    render(
+      <SessionList
+        opcodeUrl="/api/opencode"
+        directories={['/w/a']}
+        onSelectSession={vi.fn()}
+      />,
+    )
+
+    expect(screen.getByRole('button', { name: 'Retry' })).toBeTruthy()
+    expect(screen.queryByText('Loading sessions...')).toBeNull()
+  })
+
+  it('stops automatic pagination after a persistent next-page error and appends older roots on explicit retry with real React Query', async () => {
+    const fetchMock = vi.fn()
+    vi.stubGlobal('fetch', fetchMock)
+
+    const pageOneItems = [
+      ...Array.from({ length: 4 }, (_, index) => ({
+        id: `root${index}`,
+        projectID: 'proj_1',
+        title: `root session ${index}`,
+        time: { created: 100 + index, updated: 100 + index },
+      })),
+      ...Array.from({ length: 21 }, (_, index) => ({
+        id: `child${index}`,
+        projectID: 'proj_1',
+        parentID: `root${index}`,
+        title: `child session ${index}`,
+        time: { created: index, updated: index },
+      })),
+    ]
+
+    let cursorAttempts = 0
+    let recovered = false
+    let resolveRecovery: ((response: Response) => void) | undefined
+    fetchMock.mockImplementation((input: RequestInfo | URL) => {
+      const url = String(input)
+      if (url.includes('cursor=cursor_next')) {
+        cursorAttempts += 1
+        if (!recovered) {
+          return Promise.resolve(new Response(JSON.stringify({ error: 'persistent failure' }), {
+            status: 500,
+            headers: { 'Content-Type': 'application/json' },
+          }))
+        }
+        return new Promise<Response>((resolve) => {
+          resolveRecovery = resolve
+        })
+      }
+      return Promise.resolve(new Response(JSON.stringify({
+        items: pageOneItems,
+        cursor: { next: 'cursor_next' },
+      }), { status: 200, headers: { 'Content-Type': 'application/json' } }))
+    })
+
+    useRealSessionsHookRef.current = true
+    const queryClient = new QueryClient({
+      defaultOptions: { queries: { retry: 1, retryDelay: 0 }, mutations: { retry: false } },
+    })
+    const wrapper = ({ children }: { children: ReactNode }) => (
+      <QueryClientProvider client={queryClient}>{children}</QueryClientProvider>
+    )
+
+    let unmount: (() => void) | undefined
+    try {
+      const rendered = render(
+        <SessionList
+          opcodeUrl="/api/opencode"
+          directories={['/w/a']}
+          onSelectSession={vi.fn()}
+        />,
+        { wrapper },
+      )
+      unmount = rendered.unmount
+
+      await waitFor(() => {
+        expect(screen.getByText('root session 0')).toBeTruthy()
+      })
+
+      await waitFor(() => {
+        expect(screen.getByText('Failed to load more sessions.')).toBeTruthy()
+      })
+      expect(cursorAttempts).toBe(2)
+
+      const scrollContainer = screen.getByRole('region', { name: 'Sessions' })
+      fireEvent.scroll(scrollContainer)
+      fireEvent.scroll(scrollContainer)
+
+      await new Promise((resolve) => setTimeout(resolve, 20))
+      expect(cursorAttempts).toBe(2)
+
+      recovered = true
+      fireEvent.click(screen.getByRole('button', { name: 'Retry' }))
+
+      await waitFor(() => {
+        expect(resolveRecovery).toBeDefined()
+      })
+      expect(screen.getByRole('button', { name: 'Retry' })).toBeDisabled()
+      expect(screen.getByText('Loading more sessions...')).toBeTruthy()
+      expect(screen.getByText('root session 0')).toBeTruthy()
+      expect(screen.queryByText('child session 0')).toBeNull()
+
+      resolveRecovery?.(new Response(JSON.stringify({
+        items: [{ id: 'older_root', projectID: 'proj_1', title: 'older root session', time: { created: 1, updated: 1 } }],
+      }), { status: 200, headers: { 'Content-Type': 'application/json' } }))
+
+      await waitFor(() => {
+        expect(screen.getByText('older root session')).toBeTruthy()
+      })
+      expect(cursorAttempts).toBe(3)
+      expect(screen.getByText('root session 0')).toBeTruthy()
+      expect(screen.queryByText('child session 0')).toBeNull()
+      expect(screen.queryByText('Failed to load more sessions.')).toBeNull()
+    } finally {
+      unmount?.()
+      queryClient.clear()
+      vi.unstubAllGlobals()
+    }
   })
 })

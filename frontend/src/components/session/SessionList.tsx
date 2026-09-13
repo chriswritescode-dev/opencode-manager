@@ -1,4 +1,4 @@
-import { useCallback, useState, useMemo, useEffect } from "react";
+import { useCallback, useState, useMemo, useEffect, useRef } from "react";
 import { useSessionsAcrossDirectories, useDeleteSession, useCreateSession } from "@/hooks/useOpenCode";
 import type { DeleteSessionTarget } from "@/hooks/useOpenCode";
 import { useSessionPins, useToggleSessionPin } from '@/hooks/useSessionPins';
@@ -41,7 +41,7 @@ export const SessionList = ({
     buildSessionKey(session.directory ?? primaryDirectory, session.id),
   [primaryDirectory]);
   const [searchQuery, setSearchQuery] = useState("");
-  const { data: sessions, isLoading, fetchNextPage, hasNextPage, isFetchingNextPage } = useSessionsAcrossDirectories(opcodeUrl, directoriesList, { search: searchQuery, limit: 25 });
+  const { data: sessions, isLoading, fetchNextPage, hasNextPage, isFetchingNextPage, isFetchNextPageError } = useSessionsAcrossDirectories(opcodeUrl, directoriesList, { search: searchQuery, limit: 25 });
   const deleteSession = useDeleteSession(opcodeUrl, directoriesList);
   const createSession = useCreateSession(opcodeUrl, sessionCreateDirectory, (newSession) => {
     onSelectSession(newSession.id);
@@ -56,6 +56,7 @@ export const SessionList = ({
   const [sessionToDelete, setSessionToDelete] = useState<DeleteSessionTarget | DeleteSessionTarget[] | null>(null);
   const [selectedSessions, setSelectedSessions] = useState<Set<string>>(new Set());
   const [manageMode, setManageMode] = useState(false);
+  const sessionListRef = useRef<HTMLDivElement>(null);
 
   const filteredSessions = useMemo(() => {
     if (!sessions) return [];
@@ -88,24 +89,48 @@ export const SessionList = ({
     togglePin.mutate({ sessionId: session.id, directory, pinned: !pinnedKeys.has(key) });
   };
 
+  const handleRetryNextPage = useCallback(() => {
+    void fetchNextPage();
+  }, [fetchNextPage]);
+
   const handleSessionsScroll = useCallback((event: React.UIEvent<HTMLDivElement>) => {
     const { scrollTop, scrollHeight, clientHeight } = event.currentTarget;
-    if (scrollHeight - scrollTop - clientHeight <= 240 && hasNextPage && !isFetchingNextPage) {
+    if (scrollHeight - scrollTop - clientHeight <= 240 && hasNextPage && !isFetchingNextPage && !isFetchNextPageError) {
       void fetchNextPage();
     }
-  }, [hasNextPage, isFetchingNextPage, fetchNextPage]);
+  }, [hasNextPage, isFetchingNextPage, isFetchNextPageError, fetchNextPage]);
 
   useEffect(() => {
-    if (!isLoading && filteredSessions.length === 0 && hasNextPage && !isFetchingNextPage) {
+    const sessionList = sessionListRef.current;
+    const isNearBottom = sessionList
+      ? sessionList.scrollHeight - sessionList.scrollTop - sessionList.clientHeight <= 240
+      : filteredSessions.length === 0;
+    if (
+      !isLoading
+      && isNearBottom
+      && hasNextPage
+      && !isFetchingNextPage
+      && !isFetchNextPageError
+    ) {
       void fetchNextPage();
     }
-  }, [isLoading, filteredSessions.length, hasNextPage, isFetchingNextPage, fetchNextPage]);
+  }, [isLoading, filteredSessions, hasNextPage, isFetchingNextPage, isFetchNextPageError, fetchNextPage]);
 
   if (isLoading) {
     return <div className="p-4 text-sm text-muted-foreground">Loading sessions...</div>;
   }
 
   if (!sessions || sessions.length === 0) {
+    if (isFetchNextPageError) {
+      return (
+        <div className="flex flex-col items-center justify-center gap-2 p-4 text-sm text-muted-foreground">
+          <p>Failed to load sessions.</p>
+          <Button variant="outline" size="sm" onClick={handleRetryNextPage} disabled={isFetchingNextPage}>
+            Retry
+          </Button>
+        </div>
+      );
+    }
     if (hasNextPage || isFetchingNextPage) {
       return <div className="p-4 text-sm text-muted-foreground">Loading sessions...</div>;
     }
@@ -275,6 +300,7 @@ export const SessionList = ({
       </div>
 
       <div
+        ref={sessionListRef}
         className="flex-1 overflow-y-auto overflow-x-hidden px-4 pt-4 pb-4 min-h-0 [mask-image:linear-gradient(to_bottom,transparent,black_16px,black)]"
         role="region"
         aria-label="Sessions"
@@ -311,6 +337,14 @@ export const SessionList = ({
               )}
               {olderSessions.map((session) => renderSessionCard(session, false))}
             </>
+          )}
+          {isFetchNextPageError && (
+            <div className="flex flex-col items-center gap-2 py-4">
+              <p className="text-sm text-muted-foreground">Failed to load more sessions.</p>
+              <Button variant="outline" size="sm" onClick={handleRetryNextPage} disabled={isFetchingNextPage}>
+                Retry
+              </Button>
+            </div>
           )}
           {isFetchingNextPage && (
             <div className="text-sm text-muted-foreground text-center py-4">
