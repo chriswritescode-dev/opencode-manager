@@ -116,6 +116,16 @@ RUN echo "Installing microsandbox=${MICROSANDBOX_VERSION} (cachebust=${TOOLS_CAC
     chmod -R a+rX /opt/microsandbox && \
     msb --version
 
+# Playwright chromium runtime system libraries (Debian trixie) — e2e ready out
+# of the box in every deployment.
+RUN apt-get update \
+    && apt-get install -y --no-install-recommends \
+        libasound2t64 libatk-bridge2.0-0t64 libatk1.0-0t64 libatspi2.0-0t64 \
+        libcups2t64 libdbus-1-3 libdrm2 libgbm1 libnspr4 libnss3 \
+        libxcomposite1 libxdamage1 libxfixes3 libxi6 libxkbcommon0 libxrandr2 \
+        libavahi-client3 libavahi-common3 \
+    && rm -rf /var/lib/apt/lists/*
+
 ENV NODE_ENV=production
 ENV HOST=0.0.0.0
 ENV PORT=5003
