@@ -68,6 +68,7 @@ export const sttApi = {
 
     try {
       const response = await fetch(urlObj.toString(), {
+        credentials: 'include',
         method: 'POST',
         body: formData,
         signal: controller.signal,
