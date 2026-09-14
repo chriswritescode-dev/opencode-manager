@@ -116,6 +116,10 @@ See the [`ocm` CLI guide](docs/ocm-cli.md) for setup and commands.
 - [Development](https://chriswritescode-dev.github.io/opencode-manager/development/setup/) — Contributing and local development
 - [`ocm` CLI](docs/ocm-cli.md) — Attach local OpenCode TUI to Manager repos
 
+## ☁️ One-Click Deploy
+
+[![Deploy on RepoCloud](https://d16t0pc4846x52.cloudfront.net/deploylobe.svg)](https://repocloud.io/details/opencode-manager/)
+
 ## License
 
 MIT
