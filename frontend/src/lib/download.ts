@@ -22,45 +22,52 @@ function saveViaAnchor(href: string, filename: string): void {
   document.body.removeChild(link)
 }
 
-async function saveViaShareSheet(blob: Blob, filename: string): Promise<void> {
+async function saveViaShareSheet(blob: Blob, filename: string): Promise<boolean> {
   const file = new File([blob], filename, { type: blob.type || 'application/octet-stream' })
 
   if (!navigator.canShare?.({ files: [file] })) {
     showToast.error(`${filename} cannot be saved from this device`)
-    return
+    return false
   }
 
   try {
     await navigator.share({ files: [file] })
+    return true
   } catch (error) {
     const name = error instanceof DOMException ? error.name : ''
-    if (name === 'AbortError') return
+    if (name === 'AbortError') return false
     if (name === 'NotAllowedError') {
       showToast.info(`Tap Save to finish saving ${filename}`, {
         action: { label: 'Save', onClick: () => void saveViaShareSheet(blob, filename) },
       })
-      return
+      return false
     }
     showToast.error(`Failed to save ${filename}`)
+    return false
   }
 }
 
-export async function saveFile(blob: Blob, filename: string): Promise<void> {
+export async function saveFile(blob: Blob, filename: string): Promise<boolean> {
   if (isIosHomeScreenApp()) {
-    await saveViaShareSheet(blob, filename)
-    return
+    return saveViaShareSheet(blob, filename)
   }
 
   const url = URL.createObjectURL(blob)
   saveViaAnchor(url, filename)
   setTimeout(() => URL.revokeObjectURL(url), 0)
+  return true
 }
 
-export async function saveFileFromUrl(url: string, filename: string): Promise<void> {
+export async function saveFileFromUrl(url: string, filename: string): Promise<boolean> {
   if (isIosHomeScreenApp()) {
-    await saveFile(await fetchWrapperBlob(url), filename)
-    return
+    try {
+      return await saveFile(await fetchWrapperBlob(url), filename)
+    } catch {
+      showToast.error(`Failed to save ${filename}`)
+      return false
+    }
   }
 
   saveViaAnchor(url, filename)
+  return true
 }

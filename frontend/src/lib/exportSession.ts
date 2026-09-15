@@ -116,8 +116,8 @@ function generateSessionMarkdown(
   return lines.join('\n')
 }
 
-export async function downloadMarkdown(content: string, filename: string): Promise<void> {
-  await saveFile(new Blob([content], { type: 'text/markdown' }), filename)
+export async function downloadMarkdown(content: string, filename: string): Promise<boolean> {
+  return saveFile(new Blob([content], { type: 'text/markdown' }), filename)
 }
 
 export function exportSession(
