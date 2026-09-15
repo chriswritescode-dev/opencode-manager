@@ -412,7 +412,7 @@ export function SessionDetail() {
     return newValue
   }, [preferences?.expandToolCalls, updateSettings]);
 
-  const handleExportSession = useCallback(() => {
+  const handleExportSession = useCallback(async () => {
     const data = getMessagesWithParts()
     if (!data || !session) {
       showToast.error('No session data to export')
@@ -420,8 +420,9 @@ export function SessionDetail() {
     }
     
     const { filename, content } = exportSession(data, session)
-    downloadMarkdown(content, filename)
-    showToast.success(`Exported to ${filename}`)
+    if (await downloadMarkdown(content, filename)) {
+      showToast.success(`Exported to ${filename}`)
+    }
   }, [getMessagesWithParts, session]);
 
   const handleUndoMessage = useCallback((restoredPrompt: string) => {
