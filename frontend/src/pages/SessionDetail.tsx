@@ -420,7 +420,7 @@ export function SessionDetail() {
     }
     
     const { filename, content } = exportSession(data, session)
-    downloadMarkdown(content, filename)
+    void downloadMarkdown(content, filename)
     showToast.success(`Exported to ${filename}`)
   }, [getMessagesWithParts, session]);
 
