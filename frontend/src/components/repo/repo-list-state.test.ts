@@ -25,7 +25,6 @@ const createMockRepo = (overrides: Partial<Repo> = {}): Repo => ({
   clonedAt: Date.now() - 100000,
   lastPulled: undefined,
   lastAccessedAt: undefined,
-  openCodeConfigName: undefined,
   isWorktree: false,
   isLocal: false,
   ...overrides,

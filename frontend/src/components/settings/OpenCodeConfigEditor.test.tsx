@@ -2,7 +2,7 @@ import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest'
 import { render, screen, waitFor, fireEvent } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { OpenCodeConfigEditor } from './OpenCodeConfigEditor'
-import type { OpenCodeConfig } from '@/api/types/settings'
+import type { OpenCodeConfigFile } from '@/api/types/settings'
 
 const RAW = `{
   "$schema": "https://opencode.ai/config.json",
@@ -10,14 +10,11 @@ const RAW = `{
   "model": "anthropic/claude-sonnet-4"
 }`
 
-const config: OpenCodeConfig = {
-  id: 1,
-  name: 'default',
+const config: OpenCodeConfigFile = {
+  path: '/workspace/.opencode/opencode.json',
   content: {},
   rawContent: RAW,
   isValid: true,
-  isDefault: true,
-  createdAt: 0,
   updatedAt: 0,
 }
 

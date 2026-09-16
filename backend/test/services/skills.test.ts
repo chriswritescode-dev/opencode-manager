@@ -26,7 +26,6 @@ vi.mock('../../src/db/queries', async () => {
     getRepoBySourcePath: vi.fn(),
     createRepo: vi.fn(),
     updateRepoStatus: vi.fn(),
-    updateRepoConfigName: vi.fn(),
     updateLastPulled: vi.fn(),
     updateRepoBranch: vi.fn(),
     deleteRepo: vi.fn(),

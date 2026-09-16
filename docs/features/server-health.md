@@ -40,6 +40,19 @@ Health monitoring is configured through environment variables:
 | `OPENCODE_HEALTH_POLL_MS` | `30000` | Poll interval in milliseconds |
 | `OPENCODE_HEALTH_FAILURE_THRESHOLD` | `2` | Failed checks before recovery starts |
 
+## Configuration Recovery
+
+The on-disk `opencode.json` is the source of truth. When the file exists at boot but fails validation, the Manager logs a warning and starts with the file unchanged — an invalid config file is never automatically replaced or rolled back during boot.
+
+The health-watch ladder is the only automatic repair path. When the supervised OpenCode server fails repeated health checks, recovery runs these actions in order until the server is healthy:
+
+1. **Restart** — restart the server process
+2. **Debug capture** — capture a diagnostic snapshot, then restart
+3. **Rollback to last known good** — archive the broken config and restore the last known good config
+4. **Seed default config** — write the minimal seed config and restart
+
+Because the ladder only runs after repeated failed health checks, a config file that fails validation but does not make the server unhealthy is left in place. Setting `OPENCODE_HEALTH_WATCH_ENABLED=false` disables the ladder entirely, leaving no automatic repair path.
+
 ## Restart with Session Resume
 
 When you restart the OpenCode server (manually or through an upgrade), active sessions are handled gracefully:

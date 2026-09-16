@@ -1,4 +1,4 @@
-import { useState, useEffect, useCallback } from 'react'
+import { useState, useEffect, useCallback, useRef } from 'react'
 import { Button } from '@/components/ui/button'
 import { Loader2 } from 'lucide-react'
 import { Dialog, DialogContent, DialogHeader, DialogFooter, DialogTitle } from '@/components/ui/dialog'
@@ -10,7 +10,7 @@ import { useFindInText } from '@/lib/useFindInText'
 import { parseJsonc, parseJsoncErrorLine, resolveJsoncIssueLine } from '@/lib/jsonc'
 import { FetchError } from '@/api/fetchWrapper'
 import { OpenCodeConfigSchema } from '@opencode-manager/shared'
-import type { OpenCodeConfig } from '@/api/types/settings'
+import type { OpenCodeConfigFile } from '@/api/types/settings'
 
 type ValidationIssue = {
   path: string
@@ -19,7 +19,7 @@ type ValidationIssue = {
 }
 
 interface OpenCodeConfigEditorProps {
-  config: OpenCodeConfig | null
+  config: OpenCodeConfigFile | null
   isOpen: boolean
   onClose: () => void
   onUpdate: (content: string) => Promise<void>
@@ -41,6 +41,7 @@ export function OpenCodeConfigEditor({
   const [removedFields, setRemovedFields] = useState<string[]>([])
   const [activeLine, setActiveLine] = useState<number | null>(null)
   const [revealNonce, setRevealNonce] = useState(0)
+  const hasInitializedSessionRef = useRef(false)
   const isMobile = useMobile()
   const isDirty = editConfigContent !== initialContent
   const { query, setQuery, matches, currentMatchIndex, hasMatches, next, prev } = useFindInText(editConfigContent)
@@ -59,14 +60,18 @@ export function OpenCodeConfigEditor({
   }
 
   useEffect(() => {
-    if (config && isOpen) {
-      const next = config.rawContent || JSON.stringify(config.content, null, 2)
-      setEditConfigContent(next)
-      setInitialContent(next)
-      resetErrors()
-      setIsSaving(false)
-      setIsDiscardPromptOpen(false)
+    if (!isOpen) {
+      hasInitializedSessionRef.current = false
+      return
     }
+    if (hasInitializedSessionRef.current || !config) return
+    hasInitializedSessionRef.current = true
+    const next = config.rawContent || JSON.stringify(config.content, null, 2)
+    setEditConfigContent(next)
+    setInitialContent(next)
+    resetErrors()
+    setIsSaving(false)
+    setIsDiscardPromptOpen(false)
   }, [config, isOpen])
 
   const requestClose = () => {
@@ -155,7 +160,7 @@ export function OpenCodeConfigEditor({
         >
           <DialogHeader className="flex shrink-0 flex-row items-center justify-between space-y-0 border-b p-4 sm:p-6">
             <DialogTitle className="text-lg font-semibold sm:text-xl">
-              {`Edit Config: ${config.name}`}
+              Edit opencode.json
             </DialogTitle>
           </DialogHeader>
 
@@ -257,7 +262,7 @@ export function OpenCodeConfigEditor({
         onOpenChange={(open) => !open && setIsDiscardPromptOpen(false)}
         onDiscard={discardAndClose}
         onKeepEditing={() => setIsDiscardPromptOpen(false)}
-        itemName={config.name}
+        itemName="opencode.json"
       />
     </>
   )

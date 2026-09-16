@@ -2,7 +2,8 @@ import path from 'path'
 import type { SettingsService } from './settings'
 import { logger } from '../utils/logger'
 import { ensureDirectoryExists, writeFileContent } from './file-operations'
-import { getOpenCodeConfigFilePath, getWorkspacePath, ENV } from '@opencode-manager/shared/config/env'
+import { getOpenCodeHealthWatchPath, ENV } from '@opencode-manager/shared/config/env'
+import { archiveBrokenOpenCodeConfigFile, pruneHealthWatchDirectory, writeOpenCodeConfigFile, OPENCODE_CONFIG_SEED } from './opencode-config-file'
 import type { OpenCodeServerManager } from './opencode-single-server'
 
 export const OPENCODE_LIFECYCLE_STATES = [
@@ -55,7 +56,6 @@ export interface OpenCodeLifecycleStatus {
 interface OpenCodeSupervisorOptions {
   pollIntervalMs?: number
   failureThreshold?: number
-  userId?: string
   watchEnabled?: boolean
 }
 
@@ -320,7 +320,7 @@ export class OpenCodeSupervisor {
 
   private async captureDebugSnapshot(): Promise<void> {
     const timestamp = new Date().toISOString().replace(/[:.]/g, '-')
-    const debugPath = path.join(getWorkspacePath(), '.opencode', 'state', 'health-watch', `opencode-health-${timestamp}.json`)
+    const debugPath = path.join(getOpenCodeHealthWatchPath(), `opencode-health-${timestamp}.json`)
     const payload = JSON.stringify({
       capturedAt: timestamp,
       startupError: this.openCodeServerManager.getLastStartupError(),
@@ -330,50 +330,25 @@ export class OpenCodeSupervisor {
 
     await ensureDirectoryExists(path.dirname(debugPath))
     await writeFileContent(debugPath, payload)
+    await pruneHealthWatchDirectory(getOpenCodeHealthWatchPath())
   }
 
   private async rollbackToLastKnownGood(): Promise<void> {
-    this.settingsService.archiveBrokenConfig(this.userId)
-    const lastGood = this.settingsService.restoreToLastKnownGoodConfig(this.userId)
+    await archiveBrokenOpenCodeConfigFile()
+    const lastGood = this.settingsService.getLastKnownGoodConfig()
     if (!lastGood) {
       throw new Error('No last known good config available')
     }
 
-    const config = this.settingsService.updateOpenCodeConfig(lastGood.configName, { content: lastGood.content }, this.userId)
-    if (!config) {
-      throw new Error(`Failed to restore OpenCode config '${lastGood.configName}'`)
-    }
-
-    await this.writeConfig(lastGood.content)
+    await writeOpenCodeConfigFile(lastGood)
     this.openCodeServerManager.clearStartupError()
     await this.openCodeServerManager.restart()
   }
 
   private async seedDefaultConfig(): Promise<void> {
-    const seedConfig = JSON.stringify({ $schema: 'https://opencode.ai/config.json' }, null, 2)
-    const defaultConfig = this.settingsService.getDefaultOpenCodeConfig(this.userId)
-
-    if (defaultConfig) {
-      this.settingsService.updateOpenCodeConfig(defaultConfig.name, { content: seedConfig }, this.userId)
-    } else {
-      this.settingsService.createOpenCodeConfig(
-        {
-          name: 'default',
-          content: seedConfig,
-          isDefault: true,
-        },
-        this.userId,
-      )
-    }
-
-    await this.writeConfig(seedConfig)
+    await writeOpenCodeConfigFile(OPENCODE_CONFIG_SEED)
     this.openCodeServerManager.clearStartupError()
     await this.openCodeServerManager.restart()
-  }
-
-  private async writeConfig(content: string): Promise<void> {
-    const configPath = getOpenCodeConfigFilePath()
-    await writeFileContent(configPath, content)
   }
 
   private startWatching(): void {
@@ -428,9 +403,5 @@ export class OpenCodeSupervisor {
 
   private getNextRecoveryAction(): OpenCodeRecoveryAction | null {
     return OPENCODE_RECOVERY_ACTIONS.find((action) => !this.attemptedRecoveryActions.includes(action)) ?? null
-  }
-
-  private get userId(): string {
-    return this.options.userId ?? 'default'
   }
 }

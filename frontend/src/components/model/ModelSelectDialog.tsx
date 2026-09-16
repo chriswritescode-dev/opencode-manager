@@ -15,6 +15,7 @@ import {
   formatModelName,
   formatProviderName,
 } from "@/api/providers";
+import { useOpenCodeConfigFile } from "@/hooks/useOpenCodeConfigFile";
 import { useModelSelection } from "@/hooks/useModelSelection";
 import { keepPreviousData, useQuery } from "@tanstack/react-query";
 import type { Model, ProviderWithModels } from "@/api/providers";
@@ -349,10 +350,11 @@ export function ModelSelectDialog({
   const { modelString, setModel, toggleFavorite, recentModels, favoriteModels } = useModelSelection(opcodeUrl, directory);
   const currentModel = modelString || "";
 
+  const { data: config, isLoading: isConfigLoading } = useOpenCodeConfigFile(open);
   const { data: allProviders = [], isLoading: loading } = useQuery({
     queryKey: ["providers-with-models", opcodeUrl, directory],
-    queryFn: () => getProvidersWithModels(directory),
-    enabled: open,
+    queryFn: () => getProvidersWithModels(directory, config),
+    enabled: open && !isConfigLoading,
     staleTime: 5 * 60 * 1000,
     gcTime: 10 * 60 * 1000,
     placeholderData: keepPreviousData,

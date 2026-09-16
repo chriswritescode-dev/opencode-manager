@@ -357,29 +357,20 @@ export const OpenCodeConfigSchema = z.object({
   }).optional(),
 }).strip();
 
-export type OpenCodeConfigContent = z.infer<typeof OpenCodeConfigSchema>;
-
-export const OpenCodeConfigMetadataSchema = z.object({
-  id: z.number(),
-  name: z.string().min(1).max(255),
-  content: OpenCodeConfigSchema,
-  isDefault: z.boolean(),
-  createdAt: z.number(),
-  updatedAt: z.number(),
+export const OpenCodeConfigValidationIssueSchema = z.object({
+  path: z.string(),
+  message: z.string(),
 });
 
-export const CreateOpenCodeConfigRequestSchema = z.object({
-  name: z.string().min(1).max(255),
-  content: z.union([OpenCodeConfigSchema, z.string()]),
-  isDefault: z.boolean().optional(),
+export const OpenCodeConfigFileSchema = z.object({
+  path: z.string(),
+  content: z.record(z.string(), z.unknown()),
+  rawContent: z.string(),
+  isValid: z.boolean(),
+  validationIssues: z.array(OpenCodeConfigValidationIssueSchema).optional(),
+  updatedAt: z.number(),
 });
 
 export const UpdateOpenCodeConfigRequestSchema = z.object({
   content: z.union([OpenCodeConfigSchema, z.string()]),
-  isDefault: z.boolean().optional(),
-});
-
-export const OpenCodeConfigResponseSchema = z.object({
-  configs: z.array(OpenCodeConfigMetadataSchema),
-  defaultConfig: OpenCodeConfigMetadataSchema.nullable(),
 });

@@ -27,11 +27,12 @@ import {
   ENV,
 } from '@opencode-manager/shared/config/env'
 import { parseJsonc } from '@opencode-manager/shared/utils'
+import { ZodError } from 'zod'
 import type { Database } from 'bun:sqlite'
 import { compareVersions } from '../utils/version-utils'
 import { patchConfigWithRecovery } from './opencode/config-recovery'
 import type { OpenCodeClient } from './opencode/client'
-import { writeFileContent } from './file-operations'
+import { withOpenCodeConfigLock, writeOpenCodeConfigFile } from './opencode-config-file'
 import { getOrCreateInternalToken } from './internal-token'
 import { installManagedPlugins } from './opencode/plugin-registry'
 import { getOpenCodePluginDiscoveryHome, restoreQuarantinedOpenCodePlugins } from './opencode-plugin-quarantine'
@@ -1065,7 +1066,21 @@ class OpenCodeServerManager {
         }
 
         if (patchResult.removedFields && patchResult.removedFields.length > 0 && patchResult.appliedConfig) {
-          await writeFileContent(configPath, JSON.stringify(patchResult.appliedConfig, null, 2))
+          const cleanedConfigContent = JSON.stringify(patchResult.appliedConfig, null, 2)
+          try {
+            await withOpenCodeConfigLock(() => writeOpenCodeConfigFile(cleanedConfigContent))
+          } catch (error) {
+            if (error instanceof ZodError) {
+              const validationIssues = error.issues.map((issue) => ({
+                path: issue.path.length > 0 ? issue.path.join('.') : 'root',
+                message: issue.message,
+              }))
+              const issueSummary = validationIssues.map((d) => `${d.path}: ${d.message}`).join('; ')
+              logger.error(`Config reload validation errors: ${issueSummary}`)
+              throw new ConfigReloadError('Cleaned config failed validation', validationIssues, patchResult.removedFields)
+            }
+            throw error
+          }
           logger.info(`Persisted cleaned config to ${configPath} after removing fields: ${patchResult.removedFields.join(', ')}`)
         }
 

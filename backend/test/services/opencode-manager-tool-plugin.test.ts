@@ -171,6 +171,25 @@ describe('ocm-manager plugin', () => {
     expect(JSON.parse(init.body)).toEqual({ theme: 'dark' })
   })
 
+  it('sends a PUT request with a JSON body', async () => {
+    const fetchMock = jsonResponse({})
+    vi.stubGlobal('fetch', fetchMock)
+    const tool = await loadTool(configHome)
+
+    await tool.execute({
+      action: 'request',
+      params: { method: 'PUT', path: '/opencode-config', body: { content: { theme: 'dark' } } },
+    })
+
+    expect(fetchMock).toHaveBeenCalledTimes(1)
+    const [url, init] = fetchMock.mock.calls[0] ?? []
+    expect(url).toBe('http://localhost:5003/api/internal/opencode-config')
+    expect(init.method).toBe('PUT')
+    expect(init.headers.Authorization).toBe('Bearer secret-token')
+    expect(init.headers['content-type']).toBe('application/json')
+    expect(JSON.parse(init.body)).toEqual({ content: { theme: 'dark' } })
+  })
+
   it('allows every route in the exported allow list', async () => {
     const tool = await loadTool(configHome)
 
@@ -464,7 +483,7 @@ describe.skipIf(SHIPPED_OPENCODE_BIN === null)('ocm-manager plugin against the s
                 type: 'object',
                 required: ['method', 'path'],
                 properties: {
-                  method: { type: 'string', enum: ['GET', 'POST', 'PATCH', 'DELETE'] },
+                  method: { type: 'string', enum: ['GET', 'POST', 'PUT', 'PATCH', 'DELETE'] },
                   path: { type: 'string', minLength: 1, maxLength: 500 },
                   body: { type: 'object' },
                 },

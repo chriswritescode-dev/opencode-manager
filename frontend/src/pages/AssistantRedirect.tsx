@@ -1,6 +1,5 @@
-import { useState } from "react"
 import { useNavigate } from "react-router-dom"
-import { useQuery, useQueryClient } from "@tanstack/react-query"
+import { useQuery } from "@tanstack/react-query"
 import { getRepo } from "@/api/repos"
 import { useCreateSession } from "@/hooks/useOpenCode"
 import { useDialogParam } from "@/hooks/useDialogParam"
@@ -16,20 +15,16 @@ import { RepoSkillsDialog } from "@/components/repo/RepoSkillsDialog"
 import { SourceControlPanel } from "@/components/source-control"
 import { ResetPermissionsDialog } from "@/components/repo/ResetPermissionsDialog"
 import { PendingActionsGroup } from "@/components/notifications/PendingActionsGroup"
-import { invalidateConfigCaches } from "@/lib/queryInvalidation"
-import { SwitchConfigDialog } from "@/components/repo/SwitchConfigDialog"
 import { Plus } from "lucide-react"
 
 export function AssistantRedirect() {
   const navigate = useNavigate()
-  const queryClient = useQueryClient()
   const repoId = 0
   const [fileBrowserOpen, setFileBrowserOpen] = useDialogParam('files')
   const [mcpDialogOpen, setMcpDialogOpen] = useDialogParam('mcp')
   const [skillsDialogOpen, setSkillsDialogOpen] = useDialogParam('skills')
   const [sourceControlOpen, setSourceControlOpen] = useDialogParam('sourceControl')
   const [resetPermissionsOpen, setResetPermissionsOpen] = useDialogParam('resetPermissions')
-  const [switchConfigOpen, setSwitchConfigOpen] = useState(false)
 
   const opcodeUrl = OPENCODE_API_ENDPOINT
   const { data: repo, isLoading: repoLoading, error: repoError } = useQuery({
@@ -107,18 +102,6 @@ export function AssistantRedirect() {
           <SourceControlPanel repoId={repoId} isOpen={sourceControlOpen} onClose={() => setSourceControlOpen(false)} currentBranch={repo?.currentBranch || repo?.branch || "main"} repoName="Assistant" />
           <ResetPermissionsDialog open={resetPermissionsOpen} onOpenChange={setResetPermissionsOpen} repoId={repoId} />
         </>
-      )}
-      {repo && (
-        <SwitchConfigDialog
-          open={switchConfigOpen}
-          onOpenChange={setSwitchConfigOpen}
-          repoId={repoId}
-          currentConfigName={repo.openCodeConfigName}
-          onConfigSwitched={(configName) => {
-            queryClient.setQueryData(["repo", repoId], { ...repo, openCodeConfigName: configName })
-            invalidateConfigCaches(queryClient)
-          }}
-        />
       )}
     </div>
   )

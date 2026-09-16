@@ -39,11 +39,6 @@ vi.mock('../../src/services/settings', () => ({
     getSettings: vi.fn(),
     updateSettings: vi.fn(),
     saveLastKnownGoodConfig: vi.fn(),
-    createOpenCodeConfig: vi.fn(),
-    updateOpenCodeConfig: vi.fn(),
-    deleteOpenCodeConfig: vi.fn(),
-    getOpenCodeConfigByName: vi.fn(),
-    setDefaultOpenCodeConfig: vi.fn(),
   })),
 }))
 

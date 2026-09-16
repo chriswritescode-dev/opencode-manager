@@ -149,6 +149,7 @@ export const getAssistantModePath = () => path.join(getReposPath(), ASSISTANT_RE
 export const getAssistantOpenCodeDir = () => path.join(getAssistantModePath(), ASSISTANT_OPENCODE_DIR_NAME)
 export const getOpenCodeConfigHome = () => path.join(ENV.WORKSPACE.BASE_PATH, '.config')
 export const getOpenCodeStateHome = () => path.join(ENV.WORKSPACE.BASE_PATH, '.opencode', 'state')
+export const getOpenCodeHealthWatchPath = () => path.join(getOpenCodeStateHome(), 'health-watch')
 export const getOpenCodeGlobalSkillsPath = () => path.join(getOpenCodeConfigHome(), 'opencode', 'skills')
 export const getOpenCodeDataPath = () => path.join(getOpenCodeStateHome(), 'opencode')
 export const getOpenCodeToolOutputPath = () => path.join(getOpenCodeDataPath(), 'tool-output')

@@ -6,6 +6,7 @@ export class Database {
 
   constructor(path: string) {
     this.db = new DatabaseSync(path)
+    this.db.exec('PRAGMA foreign_keys = OFF')
   }
 
   prepare(sql: string) {

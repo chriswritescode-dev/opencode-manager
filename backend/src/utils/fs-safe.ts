@@ -23,6 +23,14 @@ export async function writeFileAtomic(filePath: string, content: string, options
   }
 }
 
+export async function existingFileMode(filePath: string): Promise<number | undefined> {
+  try {
+    return (await fs.stat(filePath)).mode & 0o777
+  } catch {
+    return undefined
+  }
+}
+
 export async function mkdirSafe(dirPath: string, options: MkdirSafeOptions = {}): Promise<void> {
   try {
     await fs.mkdir(dirPath, { ...options, recursive: true })

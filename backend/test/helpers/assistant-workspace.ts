@@ -8,6 +8,7 @@ import type { Repo } from '@opencode-manager/shared/types'
 
 export async function createTempAssistantWorkspace() {
   const workspacePath = await mkdtemp(path.join(tmpdir(), 'oc-assistant-'))
+  const previousWorkspacePath = process.env.WORKSPACE_PATH
   process.env.WORKSPACE_PATH = workspacePath
   const reposPath = path.join(workspacePath, 'repos')
   const assistantDir = path.join(reposPath, 'assistant')
@@ -15,7 +16,17 @@ export async function createTempAssistantWorkspace() {
     workspacePath,
     reposPath,
     assistantDir,
-    cleanup: () => rm(workspacePath, { recursive: true, force: true }),
+    cleanup: async () => {
+      try {
+        await rm(workspacePath, { recursive: true, force: true })
+      } finally {
+        if (previousWorkspacePath === undefined) {
+          delete process.env.WORKSPACE_PATH
+        } else {
+          process.env.WORKSPACE_PATH = previousWorkspacePath
+        }
+      }
+    },
   }
 }
 
@@ -37,7 +48,6 @@ export const mockRepo: Repo = {
   clonedAt: Date.now(),
   lastPulled: Date.now(),
   lastAccessedAt: Date.now(),
-  openCodeConfigName: 'default',
   isWorktree: false,
   isLocal: false,
 }

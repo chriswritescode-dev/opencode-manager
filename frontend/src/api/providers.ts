@@ -1,6 +1,7 @@
 import { API_BASE_URL } from "@/config";
 import { settingsApi } from "./settings";
 import { fetchWrapper } from "./fetchWrapper";
+import type { OpenCodeConfigFile } from "./types/settings";
 
 export type ProviderSource = "configured" | "local" | "builtin";
 
@@ -265,12 +266,12 @@ export async function toggleOpenCodeFavoriteModel(model: ModelSelection): Promis
   });
 }
 
-async function getConfiguredProviders(connectedIds: Set<string>): Promise<ProviderWithModels[]> {
+async function getConfiguredProviders(connectedIds: Set<string>, config?: OpenCodeConfigFile): Promise<ProviderWithModels[]> {
   try {
-    const config = await settingsApi.getDefaultOpenCodeConfig();
-    if (!config?.content?.provider) return [];
+    const resolvedConfig = config ?? await settingsApi.getOpenCodeConfig();
+    if (!resolvedConfig.content.provider) return [];
 
-    const configProviders = config.content.provider as Record<string, ConfigProvider>;
+    const configProviders = resolvedConfig.content.provider as Record<string, ConfigProvider>;
     const result: ProviderWithModels[] = [];
 
     for (const [providerId, providerConfig] of Object.entries(configProviders)) {
@@ -314,11 +315,11 @@ async function getConfiguredProviders(connectedIds: Set<string>): Promise<Provid
   }
 }
 
-export async function getProvidersWithModels(directory?: string): Promise<ProviderWithModels[]> {
+export async function getProvidersWithModels(directory?: string, config?: OpenCodeConfigFile): Promise<ProviderWithModels[]> {
   const { providers: builtinProviders, connected } = await getProviders(directory);
   const connectedIds = new Set(connected);
 
-  const configuredProviders = await getConfiguredProviders(connectedIds);
+  const configuredProviders = await getConfiguredProviders(connectedIds, config);
   const configuredIds = new Set(configuredProviders.map((p) => p.id));
 
   const builtinResult: ProviderWithModels[] = builtinProviders

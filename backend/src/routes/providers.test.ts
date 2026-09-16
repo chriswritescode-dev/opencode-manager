@@ -5,7 +5,7 @@ import { migrate } from '../db/migration-runner'
 import { allMigrations } from '../db/migrations'
 import { createProvidersRoutes } from './providers'
 import { join, dirname } from 'node:path'
-import { mkdtemp, rm, writeFile, mkdir } from 'node:fs/promises'
+import { mkdtemp, rm, writeFile, mkdir, readFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { createStubOpenCodeClient } from '../../test/helpers/stub-opencode-client'
 
@@ -119,7 +119,7 @@ describe('providers routes', () => {
       const data = (await res.json()) as { recent: Array<{ providerID: string; modelID: string }> }
       expect(data.recent).toHaveLength(1)
 
-      const fileContent = await Bun.file(modelStatePath).text()
+      const fileContent = await readFile(modelStatePath, 'utf8')
       const parsed = JSON.parse(fileContent) as { recent: unknown[] }
       expect(parsed.recent).toHaveLength(1)
     })

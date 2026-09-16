@@ -1,13 +1,18 @@
 import archiver from 'archiver'
 import { createWriteStream, createReadStream } from 'fs'
-import { readdir, stat, unlink } from 'fs/promises'
+import { readdir, stat, unlink, realpath } from 'fs/promises'
 import path from 'path'
 import os from 'os'
 import { logger } from '../utils/logger'
 import { getReposPath } from '@opencode-manager/shared/config/env'
 
-function resolvePath(userPath: string): string {
-  return path.isAbsolute(userPath) ? userPath : path.join(getReposPath(), userPath)
+async function resolvePath(userPath: string): Promise<string> {
+  const absolutePath = path.isAbsolute(userPath) ? userPath : path.join(getReposPath(), userPath)
+  try {
+    return await realpath(absolutePath)
+  } catch {
+    return absolutePath
+  }
 }
 
 export interface ArchiveOptions {
@@ -205,7 +210,7 @@ async function filterIgnoredPaths(targetPath: string, allPaths: string[], option
 }
 
 export async function createRepoArchive(repoPath: string, options?: ArchiveOptions): Promise<string> {
-  repoPath = resolvePath(repoPath)
+  repoPath = await resolvePath(repoPath)
   const repoName = path.basename(repoPath)
   const tempFile = path.join(os.tmpdir(), `${repoName}-${Date.now()}.zip`)
 
@@ -243,7 +248,7 @@ export async function createRepoArchive(repoPath: string, options?: ArchiveOptio
 }
 
 export async function createDirectoryArchive(directoryPath: string, archiveName?: string, options?: ArchiveOptions): Promise<string> {
-  directoryPath = resolvePath(directoryPath)
+  directoryPath = await resolvePath(directoryPath)
   const dirName = archiveName || path.basename(directoryPath)
   const tempFile = path.join(os.tmpdir(), `${dirName}-${Date.now()}.zip`)
 
@@ -300,7 +305,7 @@ export async function getArchiveSize(filePath: string): Promise<number> {
 }
 
 export async function getIgnoredPathsList(directoryPath: string): Promise<string[]> {
-  directoryPath = resolvePath(directoryPath)
+  directoryPath = await resolvePath(directoryPath)
   logger.debug('[getIgnoredPathsList] Starting for:', directoryPath)
   const gitRoot = await findGitRoot(directoryPath)
   logger.debug('[getIgnoredPathsList] Git root:', gitRoot)

@@ -1,12 +1,11 @@
 import os from 'os'
 import path from 'path'
+import { existsSync } from 'node:fs'
 import { cp, mkdtemp, readdir, rename, rm } from 'fs/promises'
-import { Database as SQLiteDatabase, type Database } from 'bun:sqlite'
-import { OpenCodeConfigSchema } from '@opencode-manager/shared/schemas'
+import { Database as SQLiteDatabase } from 'bun:sqlite'
 import { getOpenCodeConfigFilePath, getWorkspacePath } from '@opencode-manager/shared/config/env'
-import { parse as parseJsonc } from 'jsonc-parser'
-import { SettingsService } from './settings'
-import { ensureDirectoryExists, fileExists, readFileContent, writeFileContent } from './file-operations'
+import { parseOpenCodeConfigContent, writeOpenCodeConfigFile } from './opencode-config-file'
+import { ensureDirectoryExists, fileExists, readFileContent } from './file-operations'
 
 const OPENCODE_STATE_DB_FILENAMES = new Set(['opencode.db', 'opencode.db-shm', 'opencode.db-wal'])
 
@@ -19,10 +18,10 @@ export interface OpenCodeImportStatus {
 }
 
 export interface SyncOpenCodeImportOptions {
-  db: Database
-  userId?: string
   overwriteState?: boolean
   protectExistingState?: boolean
+  importConfig?: boolean
+  status?: OpenCodeImportStatus
 }
 
 export interface SyncOpenCodeImportResult extends OpenCodeImportStatus {
@@ -53,14 +52,11 @@ export function getImportPathCandidates(envKey: string, fallbackPath: string): s
   return Array.from(new Set(candidates))
 }
 
-export async function getFirstExistingPath(paths: string[]): Promise<string | null> {
-  for (const candidate of paths) {
-    if (await fileExists(candidate)) {
-      return candidate
-    }
-  }
-
-  return null
+export function getFirstExistingConfigSourcePath(): string | null {
+  return getImportPathCandidates(
+    'OPENCODE_IMPORT_CONFIG_PATH',
+    path.join(os.homedir(), '.config', 'opencode', 'opencode.json')
+  ).find(candidate => existsSync(candidate)) ?? null
 }
 
 async function getFirstExistingPathWithDatabase(paths: string[]): Promise<string | null> {
@@ -140,9 +136,7 @@ export async function getOpenCodeImportStatus(): Promise<OpenCodeImportStatus> {
   const workspaceStatePath = path.join(getWorkspacePath(), '.opencode', 'state', 'opencode')
   const workspaceStateExists = await fileExists(path.join(workspaceStatePath, 'opencode.db'))
 
-  const configSourcePath = await getFirstExistingPath(
-    getImportPathCandidates('OPENCODE_IMPORT_CONFIG_PATH', path.join(os.homedir(), '.config', 'opencode', 'opencode.json'))
-  )
+  const configSourcePath = getFirstExistingConfigSourcePath()
   const stateSourcePath = await getFirstExistingPathWithDatabase(
     getImportPathCandidates('OPENCODE_IMPORT_STATE_PATH', path.join(os.homedir(), '.local', 'share', 'opencode'))
   )
@@ -156,38 +150,20 @@ export async function getOpenCodeImportStatus(): Promise<OpenCodeImportStatus> {
   }
 }
 
-async function importOpenCodeConfigFromSource(db: Database, userId: string, sourcePath: string, workspaceConfigPath: string): Promise<boolean> {
+async function importOpenCodeConfigFromSource(sourcePath: string): Promise<boolean> {
   const rawContent = await readFileContent(sourcePath)
-  const parsed = parseJsonc(rawContent)
-  const validation = OpenCodeConfigSchema.safeParse(parsed)
+  const { isValid } = parseOpenCodeConfigContent(rawContent)
 
-  if (!validation.success) {
+  if (!isValid) {
     throw new Error('Importable OpenCode config is invalid')
   }
 
-  const settingsService = new SettingsService(db)
-  const existingDefault = settingsService.getOpenCodeConfigByName('default', userId)
-
-  if (existingDefault) {
-    settingsService.updateOpenCodeConfig('default', {
-      content: rawContent,
-      isDefault: true,
-    }, userId)
-  } else {
-    settingsService.createOpenCodeConfig({
-      name: 'default',
-      content: rawContent,
-      isDefault: true,
-    }, userId)
-  }
-
-  await writeFileContent(workspaceConfigPath, rawContent)
+  await writeOpenCodeConfigFile(rawContent)
   return true
 }
 
 export async function syncOpenCodeImport(options: SyncOpenCodeImportOptions): Promise<SyncOpenCodeImportResult> {
-  const initialStatus = await getOpenCodeImportStatus()
-  const userId = options.userId || 'default'
+  const initialStatus = options.status ?? await getOpenCodeImportStatus()
   const overwriteState = options.overwriteState === true
   let configImported = false
   let stateImported = false
@@ -198,8 +174,8 @@ export async function syncOpenCodeImport(options: SyncOpenCodeImportOptions): Pr
     )
   }
 
-  if (initialStatus.configSourcePath) {
-    configImported = await importOpenCodeConfigFromSource(options.db, userId, initialStatus.configSourcePath, initialStatus.workspaceConfigPath)
+  if (options.importConfig !== false && initialStatus.configSourcePath) {
+    configImported = await importOpenCodeConfigFromSource(initialStatus.configSourcePath)
   }
 
   if (initialStatus.stateSourcePath && (overwriteState || !initialStatus.workspaceStateExists)) {

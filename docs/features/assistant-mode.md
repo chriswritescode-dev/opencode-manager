@@ -21,8 +21,10 @@ Four skills are provisioned automatically when assistant mode is initialized:
 |-------|----------------|
 | `schedule-management` | Create, list, update, delete, and run scheduled jobs through the `ocm` `request` action |
 | `notifications` | Send push notifications to registered user devices with the `ocm` `send_notification` action |
-| `manager-settings` | Read and patch user preferences, and reload the assistant workspace, through the `ocm` `request` action |
+| `manager-settings` | Read and patch user preferences, read and update the OpenCode configuration file, and reload the assistant workspace, through the `ocm` `request` action |
 | `repo-management` | List all managed repositories through the `ocm` `request` action |
+
+The assistant manages the Manager's global OpenCode configuration file through the `ocm` tool (`/opencode-config`), and the file on disk is the source of truth.
 
 See [Assistant Internal API](assistant-internal-api.md) for the full API reference these skills expose.
 

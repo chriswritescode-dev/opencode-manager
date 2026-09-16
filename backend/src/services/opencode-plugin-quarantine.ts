@@ -3,7 +3,7 @@ import { lstat, realpath } from 'fs/promises'
 import path from 'path'
 import { parseJsonc } from '@opencode-manager/shared/utils'
 import { logger } from '../utils/logger'
-import { mkdirSafe, writeFileAtomic } from '../utils/fs-safe'
+import { existingFileMode, mkdirSafe, writeFileAtomic } from '../utils/fs-safe'
 import { getOpenCodePluginDir } from './opencode/plugin-registry'
 import {
   isRecord,
@@ -239,14 +239,6 @@ async function restorePluginEntries(dir: string): Promise<void> {
     logger.warn(
       `Left ${remaining.length} conflicted quarantined OpenCode plugin copy/copies recoverable in ${quarantineDir}: ${remaining.join(', ')}`,
     )
-  }
-}
-
-async function existingFileMode(filePath: string): Promise<number | undefined> {
-  try {
-    return (await fs.stat(filePath)).mode & 0o777
-  } catch {
-    return undefined
   }
 }
 

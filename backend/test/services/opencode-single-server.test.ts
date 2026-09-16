@@ -26,6 +26,7 @@ vi.mock('bun:sqlite', () => ({
 vi.mock('@opencode-manager/shared/config/env', () => ({
   getWorkspacePath: vi.fn(() => '/test/workspace'),
   getOpenCodeConfigFilePath: vi.fn(() => '/test/workspace/.config/opencode.json'),
+  getOpenCodeHealthWatchPath: vi.fn(() => '/test/workspace/health-watch'),
   getOpenCodeStateHome: vi.fn(() => '/test/workspace/.opencode/state'),
   getOpenCodeConfigHome: vi.fn(() => '/test/workspace/.config'),
   getOpenCodeTmpHome: vi.fn(() => '/test/workspace/.opencode/tmp'),
@@ -86,6 +87,16 @@ vi.mock('../../src/services/opencode/config-recovery', () => ({
   patchConfigWithRecovery: vi.fn(),
 }))
 
+const writeOpenCodeConfigFileMock = vi.hoisted(() => vi.fn())
+
+vi.mock('../../src/services/opencode-config-file', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('../../src/services/opencode-config-file')>()
+  return {
+    ...actual,
+    writeOpenCodeConfigFile: writeOpenCodeConfigFileMock,
+  }
+})
+
 vi.mock('../../src/services/opencode/client', () => ({
   createOpenCodeClient: createOpenCodeClientMock,
 }))
@@ -125,6 +136,7 @@ import { promises as fs, accessSync, readdirSync } from 'fs'
 import { execSync, spawnSync } from 'child_process'
 import path from 'path'
 import os from 'os'
+import { ZodError } from 'zod'
 import { ConfigReloadError, resolveOpenCodeExecutable } from '../../src/services/opencode-single-server'
 import { forceProcessAttestation, resetProcessIdentityProvider } from '../../src/services/opencode/process-identity'
 import { encryptSecret } from '../../src/utils/crypto'
@@ -3050,6 +3062,7 @@ describe('ConfigReloadError', () => {
 describe('OpenCodeServerManager - reloadConfig', () => {
   beforeEach(() => {
     vi.clearAllMocks()
+    writeOpenCodeConfigFileMock.mockReset()
   })
 
   it('should read config from file before patching', async () => {
@@ -3100,6 +3113,119 @@ describe('OpenCodeServerManager - reloadConfig', () => {
     const patchTarget = vi.mocked(patchConfigWithRecovery).mock.calls[0]![1]
     expect(patchTarget).toEqual({ model: 'x' })
   })
+
+  it('persists the cleaned config through the config-file owner when fields are removed', async () => {
+    const { opencodeServerManager } = await import('../../src/services/opencode-single-server')
+    const { patchConfigWithRecovery } = await import('../../src/services/opencode/config-recovery')
+    const cleanedConfig = { model: 'x' }
+    vi.mocked(patchConfigWithRecovery).mockResolvedValue({
+      success: true,
+      removedFields: ['mcp.bad'],
+      appliedConfig: cleanedConfig,
+    } as any)
+    const { createStubOpenCodeClient } = await import('../helpers/stub-opencode-client')
+    opencodeServerManager.setOpenCodeClient(createStubOpenCodeClient())
+    fs.readFile = vi.fn().mockResolvedValue(JSON.stringify({ model: 'x', mcp: { bad: true } }))
+
+    await opencodeServerManager.reloadConfig()
+
+    expect(writeOpenCodeConfigFileMock).toHaveBeenCalledWith(JSON.stringify(cleanedConfig, null, 2))
+  })
+
+  it('does not write the config file when the live patch removes nothing', async () => {
+    const { opencodeServerManager } = await import('../../src/services/opencode-single-server')
+    const { patchConfigWithRecovery } = await import('../../src/services/opencode/config-recovery')
+    vi.mocked(patchConfigWithRecovery).mockResolvedValue({ success: true } as any)
+    const { createStubOpenCodeClient } = await import('../helpers/stub-opencode-client')
+    opencodeServerManager.setOpenCodeClient(createStubOpenCodeClient())
+    fs.readFile = vi.fn().mockResolvedValue(JSON.stringify({ model: 'x' }))
+
+    await opencodeServerManager.reloadConfig()
+
+    expect(writeOpenCodeConfigFileMock).not.toHaveBeenCalled()
+  })
+
+  it('reports a cleaned config validation failure as a ConfigReloadError with the removed fields', async () => {
+    const { opencodeServerManager } = await import('../../src/services/opencode-single-server')
+    const { patchConfigWithRecovery } = await import('../../src/services/opencode/config-recovery')
+    vi.mocked(patchConfigWithRecovery).mockResolvedValue({
+      success: true,
+      removedFields: ['mcp.bad'],
+      appliedConfig: { model: 'x' },
+    } as any)
+    writeOpenCodeConfigFileMock.mockRejectedValue(new ZodError([
+      { code: 'custom', path: ['model'], message: 'Invalid model' },
+    ]))
+    const { createStubOpenCodeClient } = await import('../helpers/stub-opencode-client')
+    opencodeServerManager.setOpenCodeClient(createStubOpenCodeClient())
+    fs.readFile = vi.fn().mockResolvedValue(JSON.stringify({ model: 'x', mcp: { bad: true } }))
+
+    const error = await opencodeServerManager.reloadConfig().then(
+      () => null,
+      (caught: unknown) => caught,
+    )
+
+    expect(error).toBeInstanceOf(ConfigReloadError)
+    const reloadError = error as ConfigReloadError
+    expect(reloadError.validationIssues).toEqual([{ path: 'model', message: 'Invalid model' }])
+    expect(reloadError.removedFields).toEqual(['mcp.bad'])
+  })
+
+  it('serializes the cleaned-config write against a concurrent apply so neither write interleaves', async () => {
+    const { opencodeServerManager } = await import('../../src/services/opencode-single-server')
+    const { patchConfigWithRecovery } = await import('../../src/services/opencode/config-recovery')
+    const { applyOpenCodeConfigUpdate } = await import('../../src/services/opencode-config-apply')
+    const { createStubOpenCodeClient } = await import('../helpers/stub-opencode-client')
+
+    const openCodeClient = createStubOpenCodeClient()
+    opencodeServerManager.setOpenCodeClient(openCodeClient)
+    fs.readFile = vi.fn().mockResolvedValue(JSON.stringify({ model: 'x', mcp: { bad: true } }))
+
+    const events: string[] = []
+    let releaseReloadWrite!: () => void
+    const writtenConfig = {
+      path: '/test/workspace/.config/opencode.json',
+      rawContent: '{}',
+      content: {},
+      isValid: true,
+      updatedAt: 0,
+    }
+
+    vi.mocked(patchConfigWithRecovery)
+      .mockResolvedValueOnce({ success: true, removedFields: ['mcp.bad'], appliedConfig: { model: 'x' } } as any)
+      .mockResolvedValueOnce({ success: true } as any)
+
+    writeOpenCodeConfigFileMock
+      .mockImplementationOnce(() => {
+        events.push('reload:write:start')
+        return new Promise((resolve) => {
+          releaseReloadWrite = () => {
+            events.push('reload:write:end')
+            resolve(writtenConfig)
+          }
+        })
+      })
+      .mockImplementationOnce(() => {
+        events.push('apply:write:start')
+        return Promise.resolve(writtenConfig)
+      })
+
+    const reload = opencodeServerManager.reloadConfig()
+    await vi.waitFor(() => expect(events).toContain('reload:write:start'))
+
+    const apply = applyOpenCodeConfigUpdate({
+      content: { theme: 'light' },
+      openCodeClient,
+      settingsService: {} as unknown as Parameters<typeof applyOpenCodeConfigUpdate>[0]['settingsService'],
+    })
+    await new Promise((resolve) => setTimeout(resolve, 20))
+    expect(events).toEqual(['reload:write:start'])
+
+    releaseReloadWrite()
+    await Promise.all([reload, apply])
+
+    expect(events).toEqual(['reload:write:start', 'reload:write:end', 'apply:write:start'])
+  }, 5000)
 })
 
 describe('OpenCodeServerManager - checkHealth', () => {

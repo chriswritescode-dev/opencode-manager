@@ -8,7 +8,6 @@ export interface CreateRepoOptions {
   localPath?: string
   branch?: string
   directoryName?: string
-  openCodeConfigName?: string
   useWorktree?: boolean
   skipSSHVerification?: boolean
   baseBranch?: string
@@ -86,11 +85,9 @@ export async function deleteRepo(id: number): Promise<void> {
   })
 }
 
-export async function startServer(id: number, openCodeConfigName?: string): Promise<Repo> {
+export async function startServer(id: number): Promise<Repo> {
   return fetchWrapper(`${API_BASE_URL}/api/repos/${id}/server/start`, {
     method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ openCodeConfigName }),
   })
 }
 
@@ -103,14 +100,6 @@ export async function stopServer(id: number): Promise<Repo> {
 export async function pullRepo(id: number): Promise<Repo> {
   return fetchWrapper(`${API_BASE_URL}/api/repos/${id}/pull`, {
     method: 'POST',
-  })
-}
-
-export async function switchRepoConfig(id: number, configName: string): Promise<Repo> {
-  return fetchWrapper(`${API_BASE_URL}/api/repos/${id}/config/switch`, {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ configName }),
   })
 }
 

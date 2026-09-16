@@ -12,6 +12,7 @@ import { Switch } from '@/components/ui/switch'
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
 import { Combobox, type ComboboxOption } from '@/components/ui/combobox'
 import { getProvidersWithModels } from '@/api/providers'
+import { useOpenCodeConfigFile } from '@/hooks/useOpenCodeConfigFile'
 
 const agentFormSchema = z.object({
   name: z.string().min(1, 'Agent name is required').regex(/^[a-z0-9-]+$/, 'Must be lowercase letters, numbers, and hyphens only'),
@@ -66,10 +67,11 @@ interface AgentDialogProps {
 }
 
 export function AgentDialog({ open, onOpenChange, onSubmit, editingAgent }: AgentDialogProps) {
+  const { data: config, isLoading: isConfigLoading } = useOpenCodeConfigFile(open)
   const { data: providers = [] } = useQuery({
     queryKey: ['providers-with-models'],
-    queryFn: () => getProvidersWithModels(),
-    enabled: open,
+    queryFn: () => getProvidersWithModels(undefined, config),
+    enabled: open && !isConfigLoading,
     staleTime: 5 * 60 * 1000,
   })
 

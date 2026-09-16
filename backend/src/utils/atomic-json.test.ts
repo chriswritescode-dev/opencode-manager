@@ -98,6 +98,63 @@ describe('atomic-json', () => {
       expect(executionOrder).toEqual([1, 2, 3, 4])
     })
 
+    it('runs the next queued call when the previous call rejects', async () => {
+      const filePath = join(tmpDir, 'reject-next.json')
+      const firstError = new Error('first fails')
+      let secondRan = false
+
+      const first = withFileLock(filePath, async () => {
+        throw firstError
+      })
+
+      const second = withFileLock(filePath, async () => {
+        secondRan = true
+        return 'second'
+      })
+
+      await expect(first).rejects.toThrow('first fails')
+      await expect(second).resolves.toBe('second')
+      expect(secondRan).toBe(true)
+    })
+
+    it('does not poison the lock for later calls after a rejection settles', async () => {
+      const filePath = join(tmpDir, 'reject-recovery.json')
+      const firstError = new Error('first fails')
+
+      await expect(
+        withFileLock(filePath, async () => {
+          throw firstError
+        }),
+      ).rejects.toThrow('first fails')
+
+      await expect(withFileLock(filePath, async () => 'recovered')).resolves.toBe('recovered')
+    })
+
+    it('serializes calls when an operation rejects', async () => {
+      const filePath = join(tmpDir, 'reject-order.json')
+      const executionOrder: number[] = []
+
+      const first = withFileLock(filePath, async () => {
+        executionOrder.push(1)
+        await new Promise((resolve) => setTimeout(resolve, 50))
+        executionOrder.push(2)
+        throw new Error('first fails')
+      })
+
+      const second = withFileLock(filePath, async () => {
+        executionOrder.push(3)
+        await new Promise((resolve) => setTimeout(resolve, 50))
+        executionOrder.push(4)
+        return 'second'
+      })
+
+      const [firstResult, secondResult] = await Promise.allSettled([first, second])
+
+      expect(firstResult.status).toBe('rejected')
+      expect(secondResult).toEqual({ status: 'fulfilled', value: 'second' })
+      expect(executionOrder).toEqual([1, 2, 3, 4])
+    })
+
     it('concurrent stress test: 50 writes then reads', async () => {
       const filePath = join(tmpDir, 'stress.json')
       const numOps = 50

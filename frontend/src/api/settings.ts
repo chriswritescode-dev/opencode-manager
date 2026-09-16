@@ -1,9 +1,8 @@
 import type { 
   SettingsResponse, 
   UpdateSettingsRequest, 
-  OpenCodeConfig,
-  OpenCodeConfigResponse,
-  CreateOpenCodeConfigRequest,
+  OpenCodeConfigFile,
+  OpenCodeConfigSaveResponse,
   UpdateOpenCodeConfigRequest,
   OpenCodeImportStatus,
   SyncOpenCodeImportResponse,
@@ -59,77 +58,18 @@ export const settingsApi = {
     })
   },
 
-  getOpenCodeConfigs: async (userId = DEFAULT_USER_ID): Promise<OpenCodeConfigResponse> => {
-    return fetchWrapper(`${API_BASE_URL}/api/settings/opencode-configs`, {
-      params: { userId },
-    })
-  },
-
-  createOpenCodeConfig: async (
-    request: CreateOpenCodeConfigRequest,
-    userId = DEFAULT_USER_ID
-  ): Promise<OpenCodeConfig> => {
-    return fetchWrapper(`${API_BASE_URL}/api/settings/opencode-configs`, {
-      method: 'POST',
-      params: { userId },
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify(request),
-    })
+  getOpenCodeConfig: async (): Promise<OpenCodeConfigFile> => {
+    return fetchWrapper(`${API_BASE_URL}/api/settings/opencode-config`)
   },
 
   updateOpenCodeConfig: async (
-    configName: string,
-    request: UpdateOpenCodeConfigRequest,
-    userId = DEFAULT_USER_ID
-  ): Promise<OpenCodeConfig> => {
-    return fetchWrapper(
-      `${API_BASE_URL}/api/settings/opencode-configs/${encodeURIComponent(configName)}`,
-      {
-        method: 'PUT',
-        params: { userId },
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(request),
-      }
-    )
-  },
-
-  deleteOpenCodeConfig: async (
-    configName: string,
-    userId = DEFAULT_USER_ID
-  ): Promise<boolean> => {
-    await fetchWrapper(
-      `${API_BASE_URL}/api/settings/opencode-configs/${encodeURIComponent(configName)}`,
-      {
-        method: 'DELETE',
-        params: { userId },
-      }
-    )
-    return true
-  },
-
-  setDefaultOpenCodeConfig: async (
-    configName: string,
-    userId = DEFAULT_USER_ID
-  ): Promise<OpenCodeConfig> => {
-    return fetchWrapper(
-      `${API_BASE_URL}/api/settings/opencode-configs/${encodeURIComponent(configName)}/set-default`,
-      {
-        method: 'POST',
-        params: { userId },
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({}),
-      }
-    )
-  },
-
-  getDefaultOpenCodeConfig: async (userId = DEFAULT_USER_ID): Promise<OpenCodeConfig | null> => {
-    try {
-      return fetchWrapper(`${API_BASE_URL}/api/settings/opencode-configs/default`, {
-        params: { userId },
-      })
-    } catch {
-      return null
-    }
+    request: UpdateOpenCodeConfigRequest
+  ): Promise<OpenCodeConfigSaveResponse> => {
+    return fetchWrapper(`${API_BASE_URL}/api/settings/opencode-config`, {
+      method: 'PUT',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(request),
+    })
   },
 
   discoverOpenCodeModels: async (
@@ -173,7 +113,7 @@ export const settingsApi = {
     }
   },
 
-  rollbackOpenCodeConfig: async (): Promise<{ success: boolean; message: string; configName?: string }> => {
+  rollbackOpenCodeConfig: async (): Promise<{ success: boolean; message: string; fallback?: boolean }> => {
     return fetchWrapper(`${API_BASE_URL}/api/settings/opencode-rollback`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },

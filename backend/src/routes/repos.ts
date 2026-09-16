@@ -3,17 +3,13 @@ import type { ContentfulStatusCode } from 'hono/utils/http-status'
 import type { Database } from 'bun:sqlite'
 import type { Repo } from '@opencode-manager/shared/types'
 import { DiscoverReposRequestSchema, AssistantModeInitRequestSchema, UpdateRepoRequestSchema } from '@opencode-manager/shared/schemas'
-import { listRepos, getRepoById, updateLastAccessed, updateRepoConfigName, getRepoGitCredentialId, setRepoGitCredentialId, updateRepoName } from '../db/queries'
+import { listRepos, getRepoById, updateLastAccessed, getRepoGitCredentialId, setRepoGitCredentialId, updateRepoName } from '../db/queries'
 import * as repoService from '../services/repo'
 import * as archiveService from '../services/archive'
 import { SettingsService } from '../services/settings'
-import { writeFileContent } from '../services/file-operations'
-import { restartOpenCodeAfterCommit } from '../services/opencode-restart'
-import type { OpenCodeSupervisor } from '../services/opencode-supervisor'
 import type { OpenCodeClient } from '../services/opencode/client'
 import { logger } from '../utils/logger'
 import { getErrorMessage, getStatusCode } from '../utils/error-utils'
-import { getOpenCodeConfigFilePath } from '@opencode-manager/shared/config/env'
 import { ASSISTANT_REPO_ID } from '@opencode-manager/shared/utils'
 import { createRepoGitRoutes } from './repo-git'
 import { createScheduleRoutes } from './schedules'
@@ -38,7 +34,6 @@ export function createRepoRoutes(
   gitAuthService: GitAuthService,
   scheduleService: ScheduleService,
   openCodeClient: OpenCodeClient,
-  openCodeSupervisor?: OpenCodeSupervisor,
 ) {
   const app = new Hono()
 
@@ -48,7 +43,7 @@ export function createRepoRoutes(
   app.post('/', async (c) => {
     try {
       const body = await c.req.json()
-      const { repoUrl, localPath, branch, directoryName, openCodeConfigName, useWorktree, skipSSHVerification, provider, baseBranch } = body
+      const { repoUrl, localPath, branch, directoryName, useWorktree, skipSSHVerification, provider, baseBranch } = body
 
       if (!repoUrl && !localPath) {
         return c.json({ error: 'Either repoUrl or localPath is required' }, 400)
@@ -71,18 +66,6 @@ export function createRepoRoutes(
           repoUrl!,
           { branch, directoryName, useWorktree, skipSSHVerification, baseBranch }
         )
-      }
-      
-      if (openCodeConfigName) {
-        const settingsService = new SettingsService(database)
-        const configContent = settingsService.getOpenCodeConfigContent(openCodeConfigName)
-        
-        if (configContent) {
-          const openCodeConfigPath = getOpenCodeConfigFilePath()
-          await writeFileContent(openCodeConfigPath, configContent)
-          updateRepoConfigName(database, repo.id, openCodeConfigName)
-          logger.info(`Applied config '${openCodeConfigName}' to: ${openCodeConfigPath}`)
-        }
       }
       
       return c.json(repo)
@@ -362,49 +345,6 @@ app.get('/', async (c) => {
       return c.json(repo)
     } catch (error: unknown) {
       logger.error('Failed to pull repo:', error)
-      return c.json({ error: getErrorMessage(error) }, 500)
-    }
-  })
-
-  app.post('/:id/config/switch', async (c) => {
-    try {
-      const id = parseInt(c.req.param('id'))
-      const repo = getRepoById(database, id)
-      
-      if (!repo) {
-        return c.json({ error: 'Repo not found' }, 404)
-      }
-      
-      const body = await c.req.json()
-      const { configName } = body
-      
-      if (!configName) {
-        return c.json({ error: 'configName is required' }, 400)
-      }
-      
-      const settingsService = new SettingsService(database)
-      const configContent = settingsService.getOpenCodeConfigContent(configName)
-      
-      if (!configContent) {
-        return c.json({ error: `Config '${configName}' not found` }, 404)
-      }
-      
-      const openCodeConfigPath = getOpenCodeConfigFilePath()
-      
-      await writeFileContent(openCodeConfigPath, configContent)
-      
-      updateRepoConfigName(database, id, configName)
-      
-      logger.info(`Switched config for repo ${id} to '${configName}'`)
-      logger.info(`Updated OpenCode config: ${openCodeConfigPath}`)
-      
-      logger.info('Restarting OpenCode server due to workspace config change')
-      const { restartFailed, restartError } = await restartOpenCodeAfterCommit(openCodeSupervisor)
-      
-      const updatedRepo = getRepoById(database, id)
-      return c.json(restartFailed ? { ...updatedRepo, restartFailed, restartError } : updatedRepo)
-    } catch (error: unknown) {
-      logger.error('Failed to switch repo config:', error)
       return c.json({ error: getErrorMessage(error) }, 500)
     }
   })
