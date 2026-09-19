@@ -227,7 +227,7 @@ export function Combobox({
           {Object.entries(groupedOptions).map(([group, groupOptions]) => (
             <div key={group || 'default'}>
               {group && (
-                <div className="px-3 py-1.5 text-xs font-semibold text-muted-foreground bg-muted/50 sticky top-0">
+                <div className="z-10 px-3 py-1.5 text-xs font-semibold text-muted-foreground bg-muted sticky top-0">
                   {group}
                 </div>
               )}
@@ -243,7 +243,7 @@ export function Combobox({
                     type="button"
                     onClick={() => handleSelect(option.value)}
                     className={cn(
-                      'w-full px-3 py-2 text-left text-sm transition-colors',
+                      'w-full scroll-mt-7 px-3 py-2 text-left text-sm transition-colors',
                       isSelected ? 'bg-accent text-accent-foreground' : 'hover:bg-muted'
                     )}
                   >

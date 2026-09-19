@@ -1,7 +1,8 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
 import { useQuery } from '@tanstack/react-query'
 import type { CreateScheduleJobRequest, PromptTemplate, ScheduleJob } from '@opencode-manager/shared/types'
-import { useProvidersWithModels } from '@/hooks/useProvidersWithModels'
+import { useScheduleModels } from '@/hooks/useScheduleModels'
+import { resolveScheduleModel } from '@/lib/schedules/schedule-model'
 import { createOpenCodeClient } from '@/api/opencode'
 import { settingsApi } from '@/api/settings'
 import { listRepos, listBranches } from '@/api/repos'
@@ -57,6 +58,7 @@ export function ScheduleJobDialog({ open, onOpenChange, job, isSaving, onSubmit,
   const [timezone, setTimezone] = useState(getLocalTimeZone())
   const [agentSlug, setAgentSlug] = useState('')
   const [model, setModel] = useState('')
+  const [modelDirty, setModelDirty] = useState(false)
   const [prompt, setPrompt] = useState('')
   const [selectedPromptTemplateId, setSelectedPromptTemplateId] = useState<number | null>(null)
   const [skillSlugs, setSkillSlugs] = useState<string[]>([])
@@ -74,10 +76,12 @@ export function ScheduleJobDialog({ open, onOpenChange, job, isSaving, onSubmit,
   const { data: templates = EMPTY_TEMPLATES } = usePromptTemplates()
   const deleteTemplateMutation = useDeletePromptTemplate()
 
-  const { data: providerModels } = useProvidersWithModels({
-    enabled: open,
-    keyParts: ['schedule-dialog'],
-  })
+  const { providerModels, availableModelKeys, configDefaultModel } = useScheduleModels(open)
+
+  const resolvedModel = useMemo(
+    () => (modelDirty ? (model.trim() || null) : resolveScheduleModel(model, availableModelKeys, configDefaultModel)),
+    [model, modelDirty, availableModelKeys, configDefaultModel],
+  )
 
   const { data: agents = [] } = useQuery({
     queryKey: ['opencode-agents', 'schedule-dialog'],
@@ -92,16 +96,6 @@ export function ScheduleJobDialog({ open, onOpenChange, job, isSaving, onSubmit,
   const { data: skills = [], isLoading: skillsLoading } = useQuery({
     queryKey: ['managed-skills'],
     queryFn: () => settingsApi.listManagedSkills(),
-    enabled: open,
-    staleTime: 5 * 60 * 1000,
-  })
-
-  const { data: openCodeConfig } = useQuery({
-    queryKey: ['opencode-config', 'schedule-dialog'],
-    queryFn: async () => {
-      const client = createOpenCodeClient(OPENCODE_API_ENDPOINT)
-      return await client.getConfig()
-    },
     enabled: open,
     staleTime: 5 * 60 * 1000,
   })
@@ -156,34 +150,37 @@ export function ScheduleJobDialog({ open, onOpenChange, job, isSaving, onSubmit,
     const configuredModels: ComboboxOption[] = []
     const configuredValues = new Set<string>()
 
-    for (const configModel of [openCodeConfig?.model, openCodeConfig?.small_model]) {
-      if (!configModel || configuredValues.has(configModel)) continue
-      configuredValues.add(configModel)
-      const [providerId, ...modelParts] = configModel.split('/')
+    if (configDefaultModel) {
+      const [providerId, ...modelParts] = configDefaultModel.split('/')
       const modelId = modelParts.join('/')
       const provider = providerModels.find((p) => p.id === providerId)
-      const providerModel = provider?.models.find((m) => m.id === modelId)
+      const providerModel = provider?.models.find((m) => m.key === modelId || m.id === modelId)
+      configuredValues.add(configDefaultModel)
+      if (providerModel) {
+        configuredValues.add(`${providerId}/${providerModel.key ?? providerModel.id}`)
+        configuredValues.add(`${providerId}/${providerModel.id}`)
+      }
       configuredModels.push({
-        value: configModel,
+        value: configDefaultModel,
         label: providerModel?.name || modelId,
-        description: configModel,
+        description: configDefaultModel,
         group: 'Configured',
       })
     }
 
     const allModels = providerModels.flatMap((provider) =>
       provider.models
-        .filter((providerModel) => !configuredValues.has(`${provider.id}/${providerModel.id}`))
+        .filter((providerModel) => !configuredValues.has(`${provider.id}/${providerModel.key ?? providerModel.id}`))
         .map((providerModel) => ({
-          value: `${provider.id}/${providerModel.id}`,
-          label: providerModel.name || providerModel.id,
-          description: `${provider.id}/${providerModel.id}`,
+          value: `${provider.id}/${providerModel.key ?? providerModel.id}`,
+          label: providerModel.name || providerModel.key || providerModel.id,
+          description: `${provider.id}/${providerModel.key ?? providerModel.id}`,
           group: provider.name,
         })),
     )
 
     return [...configuredModels, ...allModels]
-  }, [providerModels, openCodeConfig])
+  }, [providerModels, configDefaultModel])
 
   const agentOptions = useMemo<ComboboxOption[]>(() => {
     return agents.map((agent) => ({
@@ -212,6 +209,7 @@ export function ScheduleJobDialog({ open, onOpenChange, job, isSaving, onSubmit,
     setTimezone(scheduleDefaults.timezone)
     setAgentSlug(job?.agentSlug ?? '')
     setModel(job?.model ?? '')
+    setModelDirty(false)
     setPrompt(job?.prompt ?? '')
     const initialSkillSlugs = job?.skillMetadata?.skillSlugs ?? []
     const initialSkillNotes = job?.skillMetadata?.notes ?? ''
@@ -240,6 +238,11 @@ export function ScheduleJobDialog({ open, onOpenChange, job, isSaving, onSubmit,
     setPrompt(template.prompt)
   }
 
+  const handleModelChange = (value: string) => {
+    setModel(value)
+    setModelDirty(true)
+  }
+
   const handleSubmit = () => {
     const parsedInterval = Number.parseInt(intervalMinutes, 10)
     const resolvedCronExpression = buildCronExpressionFromPreset({
@@ -260,7 +263,7 @@ export function ScheduleJobDialog({ open, onOpenChange, job, isSaving, onSubmit,
       description: description.trim() || undefined,
       enabled,
       agentSlug: agentSlug.trim() || undefined,
-      model: model.trim() || undefined,
+      model: resolvedModel ?? undefined,
       prompt: prompt.trim(),
       branch: branch.trim() || null,
       permissionConfig: {
@@ -332,8 +335,8 @@ export function ScheduleJobDialog({ open, onOpenChange, job, isSaving, onSubmit,
             agentSlug={agentSlug}
             onAgentSlugChange={setAgentSlug}
             agentOptions={agentOptions}
-            model={model}
-            onModelChange={setModel}
+            model={resolvedModel ?? ''}
+            onModelChange={handleModelChange}
             modelOptions={modelOptions}
             enabled={enabled}
             onEnabledChange={setEnabled}

@@ -2,7 +2,6 @@ import type { OpenCodeClient } from './opencode/client'
 
 interface OpenCodeConfigResponse {
   model?: string
-  small_model?: string
 }
 
 interface OpenCodeProviderResponse {
@@ -76,7 +75,6 @@ export async function resolveOpenCodeModel(
   directory: string | undefined,
   options?: {
     preferredModel?: string | null
-    preferSmallModel?: boolean
   },
 ): Promise<ResolvedOpenCodeModel> {
   const [config, providersResponse] = await Promise.all([
@@ -86,10 +84,7 @@ export async function resolveOpenCodeModel(
 
   const availableModels = buildAvailableModels(providersResponse)
   const defaultModels = providersResponse.default ?? {}
-  const configCandidates = options?.preferSmallModel
-    ? [config.small_model, config.model]
-    : [config.model, config.small_model]
-  const candidates = uniqueCandidates([options?.preferredModel, ...configCandidates])
+  const candidates = uniqueCandidates([options?.preferredModel, config.model])
 
   for (const candidate of candidates) {
     if (availableModels.has(candidate)) {
