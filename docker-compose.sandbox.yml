@@ -16,7 +16,7 @@ services:
     cap_add:
       - NET_ADMIN
     environment:
-      - SANDBOX_IMAGE=${SANDBOX_IMAGE:-docker.io/cstechdev/ocm-sandbox@sha256:7435dce147503b846bcd89ad5e9f7192f37b332c8e49087a7e619034352c47f4}
+      - SANDBOX_IMAGE=${SANDBOX_IMAGE:-docker.io/cstechdev/ocm-sandbox@sha256:ac2e20e19442ff894cfbe6f976029b180ea155b59159e1d5065dbcf74cc2a95a}
       - SANDBOX_MEMORY=${SANDBOX_MEMORY:-4G}
       - SANDBOX_CPUS=${SANDBOX_CPUS:-2}
       - SANDBOX_EXEC_USER=${SANDBOX_EXEC_USER:-${PUID:-1000}}
