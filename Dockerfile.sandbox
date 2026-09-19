@@ -7,9 +7,10 @@
 # `python` alias, and the network tooling agents reach for.
 FROM node:24
 
-ARG PLAYWRIGHT_VERSION=1.56.0
-# uv@latest (0.12.9) segfaults under qemu-user amd64 emulation, which is how
-# cross-arch builds execute it; pin a known-good release and verify a bump.
+ARG PLAYWRIGHT_VERSION=1.63.0
+# uv 0.12.8 and later segfault under qemu-user x86_64 emulation, which is how
+# an arm64 host builds the amd64 platform; 0.12.7 is the newest verified-good
+# release, so re-verify a bump there before moving it.
 ARG UV_VERSION=0.12.7
 # Bump TOOLS_CACHEBUST (e.g. via --build-arg) to force a fresh tool install
 # without invalidating the rest of the build cache.
@@ -66,7 +67,7 @@ RUN echo "Installing gh and CLI tooling (cachebust=${TOOLS_CACHEBUST})" && \
 RUN echo "Installing pnpm, bun and uv (cachebust=${TOOLS_CACHEBUST})" && \
     mkdir -p /home/ocm-agent /opt/agent-tools/bin /usr/local/share/corepack && \
     chmod 1777 /home/ocm-agent /opt/agent-tools /opt/agent-tools/bin /usr/local/share/corepack && \
-    corepack enable && corepack prepare pnpm@latest --activate && \
+    corepack enable && corepack prepare pnpm@10.28.1 --activate && \
     find /usr/local/share/corepack -type d -exec chmod 1777 {} + && \
     chmod a+rw /usr/local/share/corepack/lastKnownGood.json && \
     curl -fsSL https://bun.sh/install | BUN_INSTALL=/opt/bun bash && \
@@ -75,6 +76,7 @@ RUN echo "Installing pnpm, bun and uv (cachebust=${TOOLS_CACHEBUST})" && \
     ln -s /opt/bun/bin/bun /usr/local/bin/bun && \
     ln -s /opt/bun/bin/bun /usr/local/bin/bunx && \
     curl -LsSf https://astral.sh/uv/${UV_VERSION}/install.sh | UV_INSTALL_DIR=/usr/local/bin UV_NO_MODIFY_PATH=1 sh && \
+    test "$(uv --version | cut -d' ' -f2)" = "${UV_VERSION}" && \
     rm -rf /root/.npm /root/.cache/uv /home/ocm-agent/.cache && \
     pnpm --version && bun --version && uv --version
 

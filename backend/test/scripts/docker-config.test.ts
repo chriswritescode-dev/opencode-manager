@@ -85,7 +85,7 @@ describe('microsandbox runtime install', () => {
   const dockerfile = read(dockerfilePath)
 
   it('declares MICROSANDBOX_VERSION next to the other tool args', () => {
-    expect(dockerfile).toMatch(/ARG MICROSANDBOX_VERSION=0\.6\.15/)
+    expect(dockerfile).toMatch(/ARG MICROSANDBOX_VERSION=0\.7\.2/)
   })
 
   it('resolves the release URL from MICROSANDBOX_VERSION, not only the log message', () => {
@@ -103,7 +103,7 @@ describe('microsandbox runtime install', () => {
 
   it('passes the same MICROSANDBOX_VERSION from the docker-build workflow', () => {
     const workflow = read(join(repoRoot, '.github/workflows/docker-build.yml'))
-    expect(workflow).toContain('MICROSANDBOX_VERSION=0.6.15')
+    expect(workflow).toContain('MICROSANDBOX_VERSION=0.7.2')
     expect(workflow).toContain('MICROSANDBOX_VERSION=${{ steps.versions.outputs.microsandbox }}')
   })
 
@@ -127,6 +127,68 @@ describe('microsandbox runtime install', () => {
   it('keeps the state directory writable by the node user', () => {
     expect(dockerfile).toMatch(/mkdir -p \/workspace \/app\/data \/home\/node\/\.cache \/home\/node\/\.opencode \/home\/node\/\.microsandbox/)
     expect(dockerfile).toMatch(/chown -R node:node \/workspace \/app\/data \/home\/node/)
+  })
+})
+
+describe('uv install pin', () => {
+  const dockerfile = read(dockerfilePath)
+  const sandboxDockerfile = read(join(repoRoot, 'Dockerfile.sandbox'))
+  const workflow = read(join(repoRoot, '.github/workflows/docker-build.yml'))
+  const uvRun = dockerfile.slice(dockerfile.indexOf('Installing uv='), dockerfile.indexOf('Downloading opencode'))
+
+  it('installs uv from the versioned installer URL', () => {
+    expect(uvRun).toMatch(/https:\/\/astral\.sh\/uv\/\$\{UV_VERSION\}\/install\.sh/)
+    expect(uvRun).not.toMatch(/https:\/\/astral\.sh\/uv\/install\.sh/)
+  })
+
+  it('verifies the installed uv version matches the build argument', () => {
+    expect(uvRun).toContain('test "$(uv --version | cut -d\' \' -f2)" = "${UV_VERSION}"')
+  })
+
+  it('pins the workflow to the verified-good release instead of resolving the latest tag', () => {
+    expect(workflow).toContain('UV_VERSION=0.12.7')
+    expect(workflow).not.toContain('astral-sh/uv.git')
+  })
+
+  it('pins the same UV_VERSION in the sandbox guest image', () => {
+    expect(sandboxDockerfile).toMatch(/ARG UV_VERSION=0\.12\.7/)
+    expect(sandboxDockerfile).toContain('test "$(uv --version | cut -d\' \' -f2)" = "${UV_VERSION}"')
+  })
+})
+
+describe('chromium runtime libraries for playwright', () => {
+  const dockerfile = read(dockerfilePath)
+  const sandboxDockerfile = read(join(repoRoot, 'Dockerfile.sandbox'))
+  const workflow = read(join(repoRoot, '.github/workflows/docker-build.yml'))
+  const installRun = dockerfile.slice(
+    dockerfile.indexOf('Installing Chromium runtime libraries'),
+    dockerfile.indexOf('ENV NODE_ENV=production'),
+  )
+
+  it('declares PLAYWRIGHT_VERSION next to the other tool args', () => {
+    expect(dockerfile).toMatch(/ARG PLAYWRIGHT_VERSION=1\.63\.0/)
+  })
+
+  it('resolves the system dependency list from the pinned playwright version', () => {
+    expect(installRun).toMatch(/npx --yes "playwright@\$\{PLAYWRIGHT_VERSION\}" install-deps chromium/)
+  })
+
+  it('does not hand-maintain a package list', () => {
+    expect(installRun).not.toMatch(/libasound2t64|libnss3|libgbm1/)
+    expect(installRun).not.toContain('apt-get install')
+  })
+
+  it('cleans the apt lists and npm cache in the same layer', () => {
+    expect(installRun).toContain('rm -rf /var/lib/apt/lists/* /root/.npm')
+  })
+
+  it('pins the same PLAYWRIGHT_VERSION in the sandbox guest image', () => {
+    expect(sandboxDockerfile).toMatch(/ARG PLAYWRIGHT_VERSION=1\.63\.0/)
+  })
+
+  it('passes the same PLAYWRIGHT_VERSION from the docker-build workflow', () => {
+    expect(workflow).toContain('PLAYWRIGHT_VERSION=1.63.0')
+    expect(workflow).toContain('PLAYWRIGHT_VERSION=${{ steps.versions.outputs.playwright }}')
   })
 })
 

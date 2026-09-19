@@ -1,4 +1,4 @@
-FROM node:24.13.0-trixie AS base
+FROM node:24.21.0-trixie AS base
 
 RUN apt-get update && apt-get install -y \
     git \
@@ -26,7 +26,7 @@ RUN curl -fsSL https://cli.github.com/packages/githubcli-archive-keyring.gpg | d
   && apt-get update && apt-get install -y gh \
   && rm -rf /var/lib/apt/lists/*
 
-RUN corepack enable && corepack prepare pnpm@latest --activate
+RUN corepack enable && corepack prepare pnpm@10.28.1 --activate
 
 RUN curl -fsSL https://bun.sh/install | bash && \
     mv /root/.bun /opt/bun && \
@@ -58,18 +58,23 @@ RUN pnpm --filter frontend build
 
 FROM base AS runner
 
-ARG UV_VERSION=latest
-ARG OPENCODE_VERSION=1.18.16
-ARG MICROSANDBOX_VERSION=0.6.15
+# uv 0.12.8 and later segfault under qemu-user x86_64 emulation, which is how
+# an arm64 host builds the amd64 platform; 0.12.7 is the newest verified-good
+# release, so re-verify a bump there before moving it.
+ARG UV_VERSION=0.12.7
+ARG OPENCODE_VERSION=1.18.31
+ARG MICROSANDBOX_VERSION=0.7.2
+ARG PLAYWRIGHT_VERSION=1.63.0
 # Bump TOOLS_CACHEBUST (e.g. via --build-arg) to force a fresh uv/opencode
 # install without invalidating the rest of the build cache.
 ARG TOOLS_CACHEBUST=0
 
 RUN echo "Installing uv=${UV_VERSION} opencode=${OPENCODE_VERSION} (cachebust=${TOOLS_CACHEBUST})" && \
-    curl -LsSf https://astral.sh/uv/install.sh | UV_NO_MODIFY_PATH=1 sh && \
+    curl -LsSf https://astral.sh/uv/${UV_VERSION}/install.sh | UV_NO_MODIFY_PATH=1 sh && \
     mv /root/.local/bin/uv /usr/local/bin/uv && \
     mv /root/.local/bin/uvx /usr/local/bin/uvx && \
     chmod +x /usr/local/bin/uv /usr/local/bin/uvx && \
+    test "$(uv --version | cut -d' ' -f2)" = "${UV_VERSION}" && \
     echo "Downloading opencode ${OPENCODE_VERSION}..." && \
     OC_ARCH=$(uname -m) && \
     if [ "$OC_ARCH" = "aarch64" ]; then OC_ARCH="arm64"; fi && \
@@ -115,6 +120,10 @@ RUN echo "Installing microsandbox=${MICROSANDBOX_VERSION} (cachebust=${TOOLS_CAC
     rm -f "/tmp/${MSB_BUNDLE}" /tmp/checksums.sha256 /tmp/msb /tmp/libkrunfw.so.* && \
     chmod -R a+rX /opt/microsandbox && \
     msb --version
+
+RUN echo "Installing Chromium runtime libraries for playwright=${PLAYWRIGHT_VERSION} (cachebust=${TOOLS_CACHEBUST})" && \
+    npx --yes "playwright@${PLAYWRIGHT_VERSION}" install-deps chromium && \
+    rm -rf /var/lib/apt/lists/* /root/.npm
 
 ENV NODE_ENV=production
 ENV HOST=0.0.0.0

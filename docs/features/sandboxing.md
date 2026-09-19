@@ -175,7 +175,7 @@ Understand the trade-off before enabling it. `msb exec -e` is the only injection
 docker buildx build --builder <docker-container-builder> \
   --platform linux/amd64,linux/arm64 \
   -t docker.io/cstechdev/ocm-sandbox:latest \
-  --build-arg PLAYWRIGHT_VERSION=1.56.0 \
+  --build-arg PLAYWRIGHT_VERSION=1.63.0 \
   -f Dockerfile.sandbox --push .
 docker buildx imagetools inspect docker.io/cstechdev/ocm-sandbox:latest   # copy the index digest
 ```
@@ -206,7 +206,7 @@ It is `node:24` (Debian 12, `buildpack-deps` based), so the compile toolchain is
 | `pip`, `venv` | apt | `python3-pip` and `python3-venv` on top of the base `python3`. Debian's externally-managed marker is removed, so `pip` and `uv pip --system` are not refused; system-wide writes still need `sudo`, so use `--user` or a venv |
 | `jq`, `ripgrep`, `less`, `tree`, `file`, `procps` | apt | Common CLI tools agent workflows expect |
 | `gh` | official `cli.github.com` apt repo | Current release. Debian's own package is several years stale |
-| Chromium | Playwright (`PLAYWRIGHT_VERSION`, default `1.56.0`) | Installed to `PLAYWRIGHT_BROWSERS_PATH=/ms-playwright`, world-readable so `SANDBOX_EXEC_USER` can launch it |
+| Chromium | Playwright (`PLAYWRIGHT_VERSION`, default `1.63.0`) | Installed to `PLAYWRIGHT_BROWSERS_PATH=/ms-playwright`, world-readable so `SANDBOX_EXEC_USER` can launch it |
 
 `NODE_PATH=/usr/local/lib/node_modules` is set so agent code can `require("playwright")` from any working directory. It is only a resolution fallback; a project-local `node_modules` still wins.
 
@@ -233,7 +233,9 @@ docker build -f Dockerfile.sandbox -t my-sandbox:local .
 
 Pin a concrete tag or digest rather than a floating one. Attestation compares the image *reference string*, so a mutable tag keeps passing attestation while the underlying image drifts.
 
-Override the Playwright version at build time with `--build-arg PLAYWRIGHT_VERSION=1.57.0`. If your project drives Playwright itself, match this version to the one in your `package.json`; a mismatched browser revision makes Playwright refuse to launch.
+Override the Playwright version at build time with `--build-arg PLAYWRIGHT_VERSION=1.62.0`. If your project drives Playwright itself, match this version to the one in your `package.json`; a mismatched browser revision makes Playwright refuse to launch. Rebuild and republish the guest image, then update the `SANDBOX.IMAGE` digest, whenever you change this pin.
+
+The Manager image itself carries the same Chromium runtime libraries, resolved by `playwright install-deps chromium` for the same `PLAYWRIGHT_VERSION` at build time. That is what makes a Playwright e2e suite run in a container with sandboxing off, where the agent has no root or sudo to install them at runtime. Both images track one pin, so bumping `PLAYWRIGHT_VERSION` refreshes the sandbox browser and the Manager's system libraries together.
 
 ## Caveats
 
