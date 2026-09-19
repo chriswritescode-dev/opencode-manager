@@ -61,12 +61,13 @@ describe('CommandsEditor', () => {
     expect(screen.getByText('Add your first command to get started.')).toBeInTheDocument()
   })
 
-  it('renders command names with leading slash', () => {
+  it('renders command names without a leading slash', () => {
     const onChange = vi.fn()
     render(<CommandsEditor commands={mockCommands} onChange={onChange} />, { wrapper: createWrapper() })
 
-    expect(screen.getByText('/review')).toBeInTheDocument()
-    expect(screen.getByText('/build')).toBeInTheDocument()
+    expect(screen.getByText('review')).toBeInTheDocument()
+    expect(screen.getByText('build')).toBeInTheDocument()
+    expect(screen.queryByText('/review')).not.toBeInTheDocument()
   })
 
   it('renders uploaded directory command files', () => {
@@ -80,7 +81,7 @@ describe('CommandsEditor', () => {
       { wrapper: createWrapper() },
     )
 
-    expect(screen.getByText('/deploy')).toBeInTheDocument()
+    expect(screen.getByText('deploy')).toBeInTheDocument()
     expect(screen.getByText('Uploaded file: project/deploy.md')).toBeInTheDocument()
     expect(screen.getByText('File')).toBeInTheDocument()
     expect(screen.queryByText('No commands configured')).not.toBeInTheDocument()
@@ -103,7 +104,7 @@ describe('CommandsEditor', () => {
     const onChange = vi.fn()
     render(<CommandsEditor commands={mockCommands} onChange={onChange} />, { wrapper: createWrapper() })
 
-    await user.click(screen.getByText('/review'))
+    await user.click(screen.getByText('review'))
 
     expect(screen.getByTestId('command-dialog')).toBeInTheDocument()
   })
@@ -124,7 +125,7 @@ describe('CommandsEditor', () => {
     const onChange = vi.fn()
     render(<CommandsEditor commands={mockCommands} onChange={onChange} />, { wrapper: createWrapper() })
 
-    await user.click(screen.getByLabelText('Actions for /review'))
+    await user.click(screen.getByLabelText('Actions for review'))
     await user.click(screen.getByText('Delete'))
 
     expect(onChange).toHaveBeenCalledTimes(1)

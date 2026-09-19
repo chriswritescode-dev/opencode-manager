@@ -84,7 +84,7 @@ export function CommandsEditor({ commands, directoryCommands = [], onChange }: C
         {Object.entries(commands).map(([name, command]) => (
           <SettingsListRow
             key={name}
-            title={`/${name}`}
+            title={name}
             description={command.description}
             badges={
               command.agent && <Badge variant="outline" className="shrink-0">{command.agent}</Badge>
@@ -92,10 +92,10 @@ export function CommandsEditor({ commands, directoryCommands = [], onChange }: C
             onClick={() => startEdit(name, command)}
             primaryAction={{ label: 'Edit', onClick: () => startEdit(name, command) }}
             actions={[{ label: 'Delete', destructive: true, onClick: () => deleteCommand(name) }]}
-            actionsLabel={`Actions for /${name}`}
+            actionsLabel={`Actions for ${name}`}
           />
         ))}
-        <DirectoryFilesList kind="commands" files={directoryCommands} titlePrefix="/" />
+        <DirectoryFilesList kind="commands" files={directoryCommands} />
       </SettingsList>
 
       <CommandDialog

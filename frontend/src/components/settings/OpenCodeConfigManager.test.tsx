@@ -110,7 +110,7 @@ describe('OpenCodeConfigManager', () => {
     })
 
     await user.click(screen.getByRole('button', { name: /Commands/i }))
-    expect(await screen.findByText('/deploy')).toBeInTheDocument()
+    expect(await screen.findByText('deploy')).toBeInTheDocument()
     expect(screen.getByText('Uploaded file: project/deploy.md')).toBeInTheDocument()
 
     const agentsButton = screen.getAllByRole('button', { name: /Agents/i }).find(button => button.textContent?.startsWith('Agents'))

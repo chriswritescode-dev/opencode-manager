@@ -1,6 +1,7 @@
-import { Fragment, type ReactNode } from 'react'
+import { createContext, Fragment, useContext, type ReactNode } from 'react'
 import { MoreHorizontal, Loader2, AlertCircle } from 'lucide-react'
 import { Button } from '@/components/ui/button'
+import { DESKTOP_MEDIA_QUERY, useMediaQuery } from '@/hooks/useMediaQuery'
 import {
   DropdownMenu,
   DropdownMenuContent,
@@ -9,6 +10,8 @@ import {
   DropdownMenuTrigger,
 } from '@/components/ui/dropdown-menu'
 import { cn } from '@/lib/utils'
+
+export const RowActionsMenuContext = createContext(false)
 
 export interface SettingsListRowAction {
   label: string
@@ -104,18 +107,28 @@ export function SettingsListRow({
   onClick,
   className,
 }: SettingsListRowProps) {
+  const inSettingsScope = useContext(RowActionsMenuContext)
+  const isDesktop = useMediaQuery(DESKTOP_MEDIA_QUERY)
+  const actionsInMenu = inSettingsScope && !isDesktop
+  const overflowActions = primaryAction && actionsInMenu
+    ? [
+        { label: primaryAction.label, onClick: primaryAction.onClick },
+        ...(actions ?? []).map((action, index) => (index === 0 ? { ...action, separatorBefore: true } : action)),
+      ]
+    : actions
+
   return (
     <div
       onClick={onClick}
       className={cn(
         'group flex flex-col gap-2 bg-card px-3 py-3 hover:bg-accent/50 sm:flex-row sm:items-center sm:gap-3',
-        '[[data-opencode-settings]_&]:flex-row [[data-opencode-settings]_&]:items-center [[data-opencode-settings]_&]:gap-2 [[data-opencode-settings]_&]:bg-transparent [[data-opencode-settings]_&]:px-2 [[data-opencode-settings]_&]:py-2',
+        '[[data-opencode-settings]_&]:flex-row [[data-opencode-settings]_&]:items-start [[data-opencode-settings]_&]:gap-2 [[data-opencode-settings]_&]:bg-transparent [[data-opencode-settings]_&]:px-2 [[data-opencode-settings]_&]:py-2',
         onClick && 'cursor-pointer',
         className,
       )}
     >
-      <div className="min-w-0 flex-1 self-stretch sm:self-auto">
-        <div className="flex min-w-0 items-start gap-2">
+      <div className="min-w-0 flex-1 self-stretch sm:self-auto [[data-opencode-settings]_&]:self-auto">
+        <div className="flex min-w-0 items-start gap-2 [[data-opencode-settings]_&]:items-center [[data-opencode-settings]_&]:max-sm:min-h-11 [[data-opencode-settings]_&]:sm:min-h-8">
           <p className={cn('min-w-0 flex-1 truncate text-sm font-medium [[data-opencode-settings]_&]:whitespace-normal [[data-opencode-settings]_&]:break-words', titleClassName)}>{title}</p>
           {badges}
         </div>
@@ -127,17 +140,17 @@ export function SettingsListRow({
         onClick={(e) => e.stopPropagation()}
       >
         {trailing}
-        {primaryAction && (
+        {primaryAction && !actionsInMenu && (
           <Button
             type="button"
             size="sm"
             onClick={primaryAction.onClick}
-            className="flex-1 sm:flex-none [[data-opencode-settings]_&]:max-sm:h-11 [[data-opencode-settings]_&]:flex-none [[data-opencode-settings]_&]:bg-transparent [[data-opencode-settings]_&]:text-foreground [[data-opencode-settings]_&]:hover:bg-accent [[data-opencode-settings]_&]:hover:text-accent-foreground"
+            className="flex-1 sm:flex-none [[data-opencode-settings]_&]:flex-none [[data-opencode-settings]_&]:bg-transparent [[data-opencode-settings]_&]:text-foreground [[data-opencode-settings]_&]:hover:bg-accent [[data-opencode-settings]_&]:hover:text-accent-foreground"
           >
             {primaryAction.label}
           </Button>
         )}
-        {actions && actions.length > 0 && (
+        {overflowActions && overflowActions.length > 0 && (
           <DropdownMenu>
             <DropdownMenuTrigger asChild>
               <Button type="button" variant="ghost" size="icon" className="h-8 w-8 [[data-opencode-settings]_&]:max-sm:h-11 [[data-opencode-settings]_&]:max-sm:w-11" aria-label={actionsLabel}>
@@ -145,7 +158,7 @@ export function SettingsListRow({
               </Button>
             </DropdownMenuTrigger>
             <DropdownMenuContent align="end">
-              {actions.map((action, i) => (
+              {overflowActions.map((action, i) => (
                 <Fragment key={action.label}>
                   {action.separatorBefore && i > 0 && <DropdownMenuSeparator />}
                   <DropdownMenuItem

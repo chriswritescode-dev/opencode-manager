@@ -1,8 +1,8 @@
 import { render, screen } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
-import { describe, it, expect, vi } from 'vitest'
-import { SettingsList, SettingsListRow } from './settings-list'
+import { afterEach, describe, it, expect, vi } from 'vitest'
+import { RowActionsMenuContext, SettingsList, SettingsListRow } from './settings-list'
 import { DirectoryFilesList } from '@/components/settings/DirectoryFilesList'
 
 vi.mock('@/api/settings', () => ({
@@ -114,22 +114,72 @@ describe('SettingsListRow', () => {
     expect(actionClick).toHaveBeenCalledTimes(1)
   })
 
-  it('keeps primary and overflow actions reachable inside the compact settings scope', async () => {
+  afterEach(() => {
+    vi.unstubAllGlobals()
+  })
+
+  const mockViewport = (isDesktop: boolean) => {
+    vi.stubGlobal('matchMedia', (query: string) => ({
+      matches: query === '(min-width: 640px)' ? isDesktop : false,
+      media: query,
+      addEventListener: vi.fn(),
+      removeEventListener: vi.fn(),
+      addListener: vi.fn(),
+      removeListener: vi.fn(),
+      onchange: null,
+      dispatchEvent: vi.fn(),
+    }))
+  }
+
+  it('keeps primary and overflow actions reachable inside the compact settings scope on desktop', async () => {
     const user = userEvent.setup()
     const primaryClick = vi.fn()
     const deleteClick = vi.fn()
+    mockViewport(true)
 
     render(
-      <div data-opencode-settings>
-        <SettingsListRow
-          title="Row"
-          primaryAction={{ label: 'Edit', onClick: primaryClick }}
-          actionsLabel="More options"
-          actions={[{ label: 'Delete', onClick: deleteClick, destructive: true }]}
-        />
-      </div>,
+      <RowActionsMenuContext.Provider value={true}>
+        <div data-opencode-settings>
+          <SettingsListRow
+            title="Row"
+            primaryAction={{ label: 'Edit', onClick: primaryClick }}
+            actionsLabel="More options"
+            actions={[{ label: 'Delete', onClick: deleteClick, destructive: true }]}
+          />
+        </div>
+      </RowActionsMenuContext.Provider>,
     )
 
+    await user.click(screen.getByText('Edit'))
+    expect(primaryClick).toHaveBeenCalledTimes(1)
+
+    await user.click(screen.getByLabelText('More options'))
+    await user.click(screen.getByText('Delete'))
+    expect(deleteClick).toHaveBeenCalledTimes(1)
+  })
+
+  it('collapses the primary action into the overflow menu on mobile settings rows', async () => {
+    const user = userEvent.setup()
+    const primaryClick = vi.fn()
+    const deleteClick = vi.fn()
+    mockViewport(false)
+
+    render(
+      <RowActionsMenuContext.Provider value={true}>
+        <div data-opencode-settings>
+          <SettingsListRow
+            title="Row"
+            primaryAction={{ label: 'Edit', onClick: primaryClick }}
+            actionsLabel="More options"
+            actions={[{ label: 'Delete', onClick: deleteClick, destructive: true }]}
+          />
+        </div>
+      </RowActionsMenuContext.Provider>,
+    )
+
+    expect(screen.queryByText('Edit')).not.toBeInTheDocument()
+
+    await user.click(screen.getByLabelText('More options'))
     await user.click(screen.getByText('Edit'))
     expect(primaryClick).toHaveBeenCalledTimes(1)
 

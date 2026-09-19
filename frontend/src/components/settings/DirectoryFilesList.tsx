@@ -14,10 +14,9 @@ import type { OpenCodeDirectoryFileInfo } from '@/api/types/settings'
 interface DirectoryFilesListProps {
   kind: 'agents' | 'commands'
   files: OpenCodeDirectoryFileInfo[]
-  titlePrefix?: string
 }
 
-export function DirectoryFilesList({ kind, files, titlePrefix = '' }: DirectoryFilesListProps) {
+export function DirectoryFilesList({ kind, files }: DirectoryFilesListProps) {
   const queryClient = useQueryClient()
   const [editingFile, setEditingFile] = useState<OpenCodeDirectoryFileInfo | null>(null)
   const [deletingFile, setDeletingFile] = useState<OpenCodeDirectoryFileInfo | null>(null)
@@ -71,7 +70,7 @@ export function DirectoryFilesList({ kind, files, titlePrefix = '' }: DirectoryF
         return (
           <SettingsListRow
             key={`file:${file.relativePath}`}
-            title={<span title={file.relativePath}>{`${titlePrefix}${file.name}`}</span>}
+            title={<span title={file.relativePath}>{file.name}</span>}
             description={isNested ? `Uploaded file: ${file.relativePath}` : undefined}
             badges={<Badge variant="secondary" className="shrink-0">File</Badge>}
             onClick={() => setEditingFile(file)}

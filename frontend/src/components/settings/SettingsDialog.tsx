@@ -15,6 +15,7 @@ import { VoiceSettings } from '@/components/settings/VoiceSettings'
 import { NotificationSettings } from '@/components/settings/NotificationSettings'
 import { VersionSelectDialog } from '@/components/settings/VersionSelectDialog'
 import { Dialog, DialogContent, DialogTitle } from '@/components/ui/dialog'
+import { RowActionsMenuContext } from '@/components/ui/settings-list'
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs'
 import { Settings2, Keyboard, Code, ChevronLeft, Key, GitBranch, User, Volume2, Bell, X, ScrollText, type LucideIcon } from 'lucide-react'
 import { Button } from '@/components/ui/button'
@@ -28,19 +29,21 @@ function OpenCodeSettings({ onOpenVersionDialog }: { onOpenVersionDialog: () => 
   const toggleAuthSections = useCallback(() => setAuthSectionsOpen((open) => !open), [])
 
   return (
-    <div className="group/opencode-settings space-y-4" data-opencode-settings>
-      <ServerHealthStatus onOpenVersionDialog={onOpenVersionDialog} />
-      <OpenCodeConfigManager />
-      <section className="space-y-4 border-t border-border pt-4" aria-label="Server maintenance">
-        <h2 className="text-lg font-semibold">Server maintenance</h2>
-        <div className="grid grid-cols-1 items-start gap-x-6 gap-y-4 @min-[1000px]:grid-cols-2">
-          <OpenCodeServerAuthSettings isOpen={authSectionsOpen} onToggle={toggleAuthSections} />
-          <ManagerTokenSettings isOpen={authSectionsOpen} onToggle={toggleAuthSections} />
-        </div>
-        <ServerEnvVarsSettings />
-        <SandboxSettings />
-      </section>
-    </div>
+    <RowActionsMenuContext.Provider value={true}>
+      <div className="group/opencode-settings space-y-4" data-opencode-settings>
+        <ServerHealthStatus onOpenVersionDialog={onOpenVersionDialog} />
+        <OpenCodeConfigManager />
+        <section className="space-y-4 border-t border-border pt-4" aria-label="Server maintenance">
+          <h2 className="text-lg font-semibold">Server maintenance</h2>
+          <div className="grid grid-cols-1 items-start gap-x-6 gap-y-4 @min-[1000px]:grid-cols-2">
+            <OpenCodeServerAuthSettings isOpen={authSectionsOpen} onToggle={toggleAuthSections} />
+            <ManagerTokenSettings isOpen={authSectionsOpen} onToggle={toggleAuthSections} />
+          </div>
+          <ServerEnvVarsSettings />
+          <SandboxSettings />
+        </section>
+      </div>
+    </RowActionsMenuContext.Provider>
   )
 }
 
