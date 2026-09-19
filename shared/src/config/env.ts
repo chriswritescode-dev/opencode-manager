@@ -153,6 +153,7 @@ export const getOpenCodeStateHome = () => path.join(ENV.WORKSPACE.BASE_PATH, '.o
 export const getOpenCodeHealthWatchPath = () => path.join(getOpenCodeStateHome(), 'health-watch')
 export const getOpenCodeGlobalSkillsPath = () => path.join(getOpenCodeConfigHome(), 'opencode', 'skills')
 export const getOpenCodeDataPath = () => path.join(getOpenCodeStateHome(), 'opencode')
+export const getOpenCodeModelStatePath = () => path.join(getOpenCodeDataPath(), 'model.json')
 export const getOpenCodeToolOutputPath = () => path.join(getOpenCodeDataPath(), 'tool-output')
 export const getOpenCodeWorktreesPath = () => path.join(getOpenCodeDataPath(), 'worktree')
 export const getForgeWorktreesPath = () => path.join(getOpenCodeDataPath(), 'forge', 'worktrees')

@@ -30,9 +30,6 @@ describe('initializeDatabase', () => {
 
     expect(getRepoById(db, 0)?.localPath).toBe('assistant')
 
-    const modelStateTable = db.prepare("SELECT name FROM sqlite_master WHERE type = 'table' AND name = 'opencode_model_state'").get()
-    expect(modelStateTable).toBeDefined()
-
     db.close()
 
     const fileContents = await readFile(dbPath, 'utf-8')

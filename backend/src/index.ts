@@ -59,12 +59,6 @@ import { readOpenCodeConfigFile, writeOpenCodeConfigFile, OPENCODE_CONFIG_SEED }
 import { OpenCodeSupervisor } from './services/opencode-supervisor'
 import { OpenCodeRestartCoordinator } from './services/opencode-restart-coordinator'
 import { setOpenCodeRestartCoordinator } from './services/opencode-restart'
-import { getModelStatePath, ModelStateSchema } from './routes/providers'
-import { readJsonSafe } from './utils/atomic-json'
-import {
-  type OpenCodeModelStateRecord,
-} from './db/model-state'
-
 import { logger } from './utils/logger'
 import { 
   getWorkspacePath, 
@@ -143,42 +137,6 @@ async function ensureOpenCodeConfigFileExists(): Promise<void> {
   logger.info('Created minimal seed config')
 }
 
-async function backfillOpenCodeModelStateFromFile(): Promise<void> {
-  try {
-    const modelStatePath = getModelStatePath()
-    const fileState = await readJsonSafe<OpenCodeModelStateRecord | null>(modelStatePath, null)
-
-    if (!fileState) {
-      return
-    }
-
-    const existingRow = db.prepare('SELECT 1 FROM opencode_model_state WHERE user_id = ?').get('default')
-    if (existingRow) {
-      return
-    }
-
-    const validated = ModelStateSchema.safeParse(fileState)
-    if (!validated.success) {
-      logger.warn('Model state file has invalid structure, skipping backfill', validated.error)
-      return
-    }
-
-    db.prepare(
-      'INSERT INTO opencode_model_state(user_id, recent, favorite, variant, updated_at) VALUES(?,?,?,?,?)'
-    ).run(
-      'default',
-      JSON.stringify(validated.data.recent),
-      JSON.stringify(validated.data.favorite),
-      JSON.stringify(validated.data.variant),
-      Date.now()
-    )
-
-    logger.info('Backfilled OpenCode model state from model.json to database')
-  } catch (error) {
-    logger.warn('Failed to backfill OpenCode model state from file:', error)
-  }
-}
-
 async function ensureHomeStateImported(): Promise<void> {
   try {
     const status = await getOpenCodeImportStatus()
@@ -226,7 +184,6 @@ try {
   await sweepStaleUploadSessions()
 
   await ensureOpenCodeConfigFileExists()
-  await backfillOpenCodeModelStateFromFile()
   await ensureHomeStateImported()
   await ensureDefaultAgentsMdExists()
 
@@ -319,7 +276,7 @@ protectedApi.route('/repos', createRepoRoutes(db, gitAuthService, scheduleServic
 protectedApi.route('/settings', createSettingsRoutes(db, gitAuthService, openCodeClient, openCodeSupervisor))
   protectedApi.route('/files', createFileRoutes())
   protectedApi.route('/filesystem', createFilesystemRoutes())
-protectedApi.route('/providers', createProvidersRoutes(db, openCodeClient, openCodeSupervisor))
+protectedApi.route('/providers', createProvidersRoutes(openCodeClient, openCodeSupervisor))
 protectedApi.route('/oauth', createOAuthRoutes(openCodeClient, openCodeSupervisor))
 protectedApi.route('/tts', createTTSRoutes(db))
 protectedApi.route('/stt', createSTTRoutes(db))

@@ -35,14 +35,6 @@ vi.mock('@/api/providers', async () => {
   }
 })
 
-vi.mock('zustand/middleware', async () => {
-  const actual = await vi.importActual('zustand/middleware')
-  return {
-    ...actual,
-    persist: (config: any) => config,
-  }
-})
-
 const mockUseConfig = vi.mocked(useOpenCodeExports.useConfig)
 const mockUseOpenCodeClient = vi.mocked(useOpenCodeExports.useOpenCodeClient)
 const mockGetProviders = vi.mocked(providersApi.getProviders)
@@ -270,6 +262,77 @@ describe('useModelSelection', () => {
       })
 
       expect(result.current.favoriteModels).toEqual([{ providerID: 'VLLM', modelID: 'bar' }])
+    })
+  })
+
+  describe('startup model resolution', () => {
+    const providersData = {
+      providers: [
+        {
+          id: 'anthropic',
+          name: 'Anthropic',
+          models: {
+            'claude-sonnet-4': { id: 'claude-sonnet-4', name: 'Claude Sonnet 4' },
+            'claude-opus-4': { id: 'claude-opus-4', name: 'Claude Opus 4' },
+          },
+          isConnected: true,
+          env: [],
+          options: {},
+        },
+        {
+          id: 'openai',
+          name: 'OpenAI',
+          models: {
+            'gpt-4o': { id: 'gpt-4o', name: 'GPT-4o' },
+          },
+          isConnected: true,
+          env: [],
+          options: {},
+        },
+      ],
+      connected: ['anthropic', 'openai'],
+      default: { anthropic: 'claude-opus-4' },
+    }
+
+    it('prefers config model over recent and provider default', async () => {
+      mockUseConfig.mockReturnValue({ data: { model: 'anthropic/claude-sonnet-4' }, isLoading: false } as any)
+      mockGetProviders.mockResolvedValue(providersData as any)
+      mockGetOpenCodeModelState.mockResolvedValue({
+        recent: [{ providerID: 'openai', modelID: 'gpt-4o' }],
+        favorite: [],
+        variant: {},
+      })
+
+      const { result } = renderHookWithProviders()
+
+      await waitFor(() => {
+        expect(result.current.model).toEqual({ providerID: 'anthropic', modelID: 'claude-sonnet-4' })
+      })
+    })
+
+    it('prefers recent model over provider default when config is missing', async () => {
+      mockGetProviders.mockResolvedValue(providersData as any)
+      mockGetOpenCodeModelState.mockResolvedValue({
+        recent: [{ providerID: 'anthropic', modelID: 'claude-sonnet-4' }],
+        favorite: [],
+        variant: {},
+      })
+
+      const { result } = renderHookWithProviders()
+
+      await waitFor(() => {
+        expect(result.current.model).toEqual({ providerID: 'anthropic', modelID: 'claude-sonnet-4' })
+      })
+    })
+
+    it('falls back to provider default when config and recent are unavailable', async () => {
+      mockGetProviders.mockResolvedValue(providersData as any)
+
+      const { result } = renderHookWithProviders()
+
+      await waitFor(() => {
+        expect(result.current.model).toEqual({ providerID: 'anthropic', modelID: 'claude-opus-4' })
+      })
     })
   })
 
