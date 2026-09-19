@@ -76,7 +76,7 @@ export function ScheduleJobDialog({ open, onOpenChange, job, isSaving, onSubmit,
   const { data: templates = EMPTY_TEMPLATES } = usePromptTemplates()
   const deleteTemplateMutation = useDeletePromptTemplate()
 
-  const { providerModels, availableModelKeys, configModelCandidates, configDefaultModel } = useScheduleModels(open)
+  const { providerModels, availableModelKeys, configDefaultModel } = useScheduleModels(open)
 
   const resolvedModel = useMemo(
     () => (modelDirty ? (model.trim() || null) : resolveScheduleModel(model, availableModelKeys, configDefaultModel)),
@@ -150,17 +150,16 @@ export function ScheduleJobDialog({ open, onOpenChange, job, isSaving, onSubmit,
     const configuredModels: ComboboxOption[] = []
     const configuredValues = new Set<string>()
 
-    for (const configModel of configModelCandidates) {
-      if (configuredValues.has(configModel)) continue
-      configuredValues.add(configModel)
-      const [providerId, ...modelParts] = configModel.split('/')
+    if (configDefaultModel) {
+      configuredValues.add(configDefaultModel)
+      const [providerId, ...modelParts] = configDefaultModel.split('/')
       const modelId = modelParts.join('/')
       const provider = providerModels.find((p) => p.id === providerId)
       const providerModel = provider?.models.find((m) => (m.key ?? m.id) === modelId)
       configuredModels.push({
-        value: configModel,
+        value: configDefaultModel,
         label: providerModel?.name || modelId,
-        description: configModel,
+        description: configDefaultModel,
         group: 'Configured',
       })
     }
@@ -177,7 +176,7 @@ export function ScheduleJobDialog({ open, onOpenChange, job, isSaving, onSubmit,
     )
 
     return [...configuredModels, ...allModels]
-  }, [providerModels, configModelCandidates])
+  }, [providerModels, configDefaultModel])
 
   const agentOptions = useMemo<ComboboxOption[]>(() => {
     return agents.map((agent) => ({

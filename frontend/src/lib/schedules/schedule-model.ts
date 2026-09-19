@@ -18,10 +18,8 @@ export function buildAvailableModelKeys(providers: ProviderWithModels[]): Set<st
   return keys
 }
 
-export function getConfigModelCandidates(configFile: OpenCodeConfigFile | undefined): string[] {
-  const content = configFile?.content
-  const candidates = [normalizeModel(content?.model), normalizeModel(content?.small_model)]
-  return [...new Set(candidates.filter((candidate): candidate is string => candidate !== null))]
+export function getConfigDefaultModel(configFile: OpenCodeConfigFile | undefined): string | null {
+  return normalizeModel(configFile?.content?.model)
 }
 
 export function resolveScheduleModel(

@@ -1,7 +1,7 @@
 import { describe, it, expect } from 'vitest'
 import {
   buildAvailableModelKeys,
-  getConfigModelCandidates,
+  getConfigDefaultModel,
   resolveScheduleModel,
 } from './schedule-model'
 import type { ProviderWithModels } from '@/api/providers'
@@ -43,18 +43,18 @@ describe('buildAvailableModelKeys', () => {
   })
 })
 
-describe('getConfigModelCandidates', () => {
-  it('returns model then small_model, deduped and trimmed', () => {
-    expect(getConfigModelCandidates(makeConfigFile({
+describe('getConfigDefaultModel', () => {
+  it('returns the configured model, trimmed, and ignores small_model', () => {
+    expect(getConfigDefaultModel(makeConfigFile({
       model: ' openai/gpt-5 ',
       small_model: 'openai/gpt-5-mini',
-    }))).toEqual(['openai/gpt-5', 'openai/gpt-5-mini'])
+    }))).toBe('openai/gpt-5')
   })
 
-  it('returns an empty list when config is missing or unset', () => {
-    expect(getConfigModelCandidates(undefined)).toEqual([])
-    expect(getConfigModelCandidates(makeConfigFile({}))).toEqual([])
-    expect(getConfigModelCandidates(makeConfigFile({ model: 42 }))).toEqual([])
+  it('returns null when the model is missing or unset', () => {
+    expect(getConfigDefaultModel(undefined)).toBeNull()
+    expect(getConfigDefaultModel(makeConfigFile({}))).toBeNull()
+    expect(getConfigDefaultModel(makeConfigFile({ model: 42 }))).toBeNull()
   })
 })
 

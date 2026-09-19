@@ -1,7 +1,7 @@
 import { useMemo } from 'react'
 import { useProvidersWithModels } from '@/hooks/useProvidersWithModels'
 import { useOpenCodeConfigFile } from '@/hooks/useOpenCodeConfigFile'
-import { buildAvailableModelKeys, getConfigModelCandidates } from '@/lib/schedules/schedule-model'
+import { buildAvailableModelKeys, getConfigDefaultModel } from '@/lib/schedules/schedule-model'
 
 export function useScheduleModels(enabled: boolean) {
   const { data: providerModels, isLoading: providersLoading } = useProvidersWithModels({
@@ -10,13 +10,12 @@ export function useScheduleModels(enabled: boolean) {
   })
   const { data: configFile, isLoading: configLoading } = useOpenCodeConfigFile(enabled)
   const availableModelKeys = useMemo(() => buildAvailableModelKeys(providerModels), [providerModels])
-  const configModelCandidates = useMemo(() => getConfigModelCandidates(configFile), [configFile])
+  const configDefaultModel = useMemo(() => getConfigDefaultModel(configFile), [configFile])
 
   return {
     providerModels,
     availableModelKeys,
-    configModelCandidates,
-    configDefaultModel: configModelCandidates[0] ?? null,
+    configDefaultModel,
     isLoading: providersLoading || configLoading,
   }
 }

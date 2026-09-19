@@ -36,75 +36,11 @@ describe('resolveOpenCodeModel', () => {
     })
   })
 
-  it('falls back to the provider default when the preferred model is unavailable', async () => {
+  it('falls back to the configured model when the preferred model is unavailable', async () => {
     const mockClient = {
       getJson: vi.fn().mockImplementation((path: string) => {
         if (path === '/config') {
-          return Promise.resolve({ model: 'openai/gpt-5.4' })
-        }
-        if (path === '/config/providers') {
-          return Promise.resolve({
-            providers: [
-              { id: 'openai', models: { 'gpt-5.3-codex-spark': {}, 'gpt-5-mini': {} } },
-            ],
-            default: { openai: 'gpt-5.3-codex-spark' },
-          })
-        }
-        throw new Error(`Unexpected path: ${path}`)
-      }),
-    } as unknown as OpenCodeClient
-
-    const result = await resolveOpenCodeModel(mockClient, '/workspace/repos/sample-project', {
-      preferredModel: 'openai/gpt-5.4',
-    })
-
-    expect(result).toEqual({
-      providerID: 'openai',
-      modelID: 'gpt-5.3-codex-spark',
-      model: 'openai/gpt-5.3-codex-spark',
-    })
-  })
-
-  it('prefers the configured small model when requested', async () => {
-    const mockClient = {
-      getJson: vi.fn().mockImplementation((path: string) => {
-        if (path === '/config') {
-          return Promise.resolve({
-            model: 'openai/gpt-5',
-            small_model: 'openai/gpt-5-mini',
-          })
-        }
-        if (path === '/config/providers') {
-          return Promise.resolve({
-            providers: [
-              { id: 'openai', models: { 'gpt-5': {}, 'gpt-5-mini': {} } },
-            ],
-            default: { openai: 'gpt-5' },
-          })
-        }
-        throw new Error(`Unexpected path: ${path}`)
-      }),
-    } as unknown as OpenCodeClient
-
-    const result = await resolveOpenCodeModel(mockClient, '/workspace/repos/sample-project', {
-      preferSmallModel: true,
-    })
-
-    expect(result).toEqual({
-      providerID: 'openai',
-      modelID: 'gpt-5-mini',
-      model: 'openai/gpt-5-mini',
-    })
-  })
-
-  it('falls back to config.model when small_model is unavailable', async () => {
-    const mockClient = {
-      getJson: vi.fn().mockImplementation((path: string) => {
-        if (path === '/config') {
-          return Promise.resolve({
-            model: 'openai/gpt-5',
-            small_model: 'openai/gpt-5-unavailable',
-          })
+          return Promise.resolve({ model: 'openai/gpt-5' })
         }
         if (path === '/config/providers') {
           return Promise.resolve({
@@ -119,7 +55,7 @@ describe('resolveOpenCodeModel', () => {
     } as unknown as OpenCodeClient
 
     const result = await resolveOpenCodeModel(mockClient, '/workspace/repos/sample-project', {
-      preferSmallModel: true,
+      preferredModel: 'openai/retired',
     })
 
     expect(result).toEqual({
@@ -129,46 +65,11 @@ describe('resolveOpenCodeModel', () => {
     })
   })
 
-  it('falls back to provider default only after all configured candidates fail', async () => {
+  it('falls back to the provider default when the configured model is unavailable', async () => {
     const mockClient = {
       getJson: vi.fn().mockImplementation((path: string) => {
         if (path === '/config') {
-          return Promise.resolve({
-            model: 'openai/gpt-5-configured',
-            small_model: 'openai/gpt-5-small-unavailable',
-          })
-        }
-        if (path === '/config/providers') {
-          return Promise.resolve({
-            providers: [
-              { id: 'openai', models: { 'gpt-5-mini': {}, 'gpt-5-turbo': {}, 'gpt-5-configured': {} } },
-            ],
-            default: { openai: 'gpt-5-mini' },
-          })
-        }
-        throw new Error(`Unexpected path: ${path}`)
-      }),
-    } as unknown as OpenCodeClient
-
-    const result = await resolveOpenCodeModel(mockClient, '/workspace/repos/sample-project', {
-      preferSmallModel: true,
-    })
-
-    expect(result).toEqual({
-      providerID: 'openai',
-      modelID: 'gpt-5-configured',
-      model: 'openai/gpt-5-configured',
-    })
-  })
-
-  it('falls back to provider default when both small_model and model are unavailable', async () => {
-    const mockClient = {
-      getJson: vi.fn().mockImplementation((path: string) => {
-        if (path === '/config') {
-          return Promise.resolve({
-            model: 'openai/gpt-5-unavailable',
-            small_model: 'openai/gpt-5-also-unavailable',
-          })
+          return Promise.resolve({ model: 'openai/gpt-5-unavailable' })
         }
         if (path === '/config/providers') {
           return Promise.resolve({
@@ -183,13 +84,45 @@ describe('resolveOpenCodeModel', () => {
     } as unknown as OpenCodeClient
 
     const result = await resolveOpenCodeModel(mockClient, '/workspace/repos/sample-project', {
-      preferSmallModel: true,
+      preferredModel: 'openai/retired',
     })
 
     expect(result).toEqual({
       providerID: 'openai',
       modelID: 'gpt-5-mini',
       model: 'openai/gpt-5-mini',
+    })
+  })
+
+  it('never selects the configured small_model', async () => {
+    const mockClient = {
+      getJson: vi.fn().mockImplementation((path: string) => {
+        if (path === '/config') {
+          return Promise.resolve({
+            model: 'openai/gpt-5-unavailable',
+            small_model: 'openai/gpt-5-mini',
+          })
+        }
+        if (path === '/config/providers') {
+          return Promise.resolve({
+            providers: [
+              { id: 'openai', models: { 'gpt-5-mini': {}, 'gpt-5-turbo': {} } },
+            ],
+            default: { openai: 'gpt-5-turbo' },
+          })
+        }
+        throw new Error(`Unexpected path: ${path}`)
+      }),
+    } as unknown as OpenCodeClient
+
+    const result = await resolveOpenCodeModel(mockClient, '/workspace/repos/sample-project', {
+      preferredModel: 'openai/retired',
+    })
+
+    expect(result).toEqual({
+      providerID: 'openai',
+      modelID: 'gpt-5-turbo',
+      model: 'openai/gpt-5-turbo',
     })
   })
 
