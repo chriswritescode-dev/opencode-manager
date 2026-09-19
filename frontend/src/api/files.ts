@@ -1,6 +1,7 @@
 import { useQuery } from '@tanstack/react-query'
 import { fetchWrapper, fetchWrapperBlob } from './fetchWrapper'
 import { API_BASE_URL } from '@/config'
+import { saveFile } from '@/lib/download'
 import type { FileInfo, ChunkedFileInfo, PatchOperation } from '@/types/files'
 
 interface FileApiUrlOptions {
@@ -59,15 +60,8 @@ export async function downloadDirectoryAsZip(path: string, options?: DownloadOpt
   })
   
   const blob = await fetchWrapperBlob(url)
-  const urlObj = window.URL.createObjectURL(blob)
-  const a = document.createElement('a')
-  a.href = urlObj
   const dirName = path.split('/').pop() || 'download'
-  a.download = `${dirName}.zip`
-  document.body.appendChild(a)
-  a.click()
-  document.body.removeChild(a)
-  window.URL.revokeObjectURL(urlObj)
+  await saveFile(blob, `${dirName}.zip`)
 }
 
 export async function applyFilePatches(path: string, patches: PatchOperation[]): Promise<{ success: boolean; totalLines: number }> {
