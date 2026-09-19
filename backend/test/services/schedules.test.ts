@@ -261,6 +261,58 @@ describe('ScheduleService', () => {
     )
   })
 
+  it('submits the resolved fallback model when the stored job model is gone', async () => {
+    const service = new ScheduleService({} as never, createOpenCodeClientStub(), mocks.stubWorktreeManager as never)
+    const runWithSession: ScheduleRun = {
+      ...baseRun,
+      sessionId: 'ses-fallback-model',
+      sessionTitle: 'Scheduled: Weekly engineering summary',
+      logText: 'Run started. Waiting for assistant response...',
+    }
+    mocks.updateScheduleRunMetadata.mockReturnValue(runWithSession)
+    mocks.getScheduleRunById.mockReturnValue(runWithSession)
+    mocks.getScheduleJobById.mockReturnValue({ ...job, model: 'openai/retired' })
+    mocks.resolveOpenCodeModel.mockResolvedValue({ providerID: 'openai', modelID: 'gpt-5' })
+
+    let capturedPromptBody: string | undefined
+    routeForward(({ path, method, body }) => {
+      if (path === '/session' && method === 'POST') {
+        return Promise.resolve(jsonResponse({ id: 'ses-fallback-model' }))
+      }
+
+      if (path === '/session/ses-fallback-model/prompt_async' && method === 'POST') {
+        capturedPromptBody = body
+        return Promise.resolve(new Response(null, { status: 204 }))
+      }
+
+      if (path === '/session/ses-fallback-model/message' && method === 'GET') {
+        return Promise.resolve(jsonResponse([
+          {
+            info: { role: 'assistant', sessionID: 'ses-fallback-model', time: { completed: Date.now() } },
+            parts: [{ type: 'text', text: 'Done.' }],
+          },
+        ]))
+      }
+
+      throw new Error(`Unexpected proxy request: ${method} ${path}`)
+    })
+
+    await service.runJob(42, 7, 'manual')
+
+    await vi.waitFor(() => {
+      expect(capturedPromptBody).toBeDefined()
+    })
+
+    expect(mocks.resolveOpenCodeModel).toHaveBeenCalledWith(
+      expect.anything(),
+      repo.fullPath,
+      { preferredModel: 'openai/retired' },
+    )
+    expect(JSON.parse(capturedPromptBody!)).toMatchObject({
+      model: { providerID: 'openai', modelID: 'gpt-5' },
+    })
+  })
+
   it('sends session and prompt_async JSON POSTs with Content-Type: application/json', async () => {
     const service = new ScheduleService({} as never, createOpenCodeClientStub(), mocks.stubWorktreeManager as never)
     const runWithSession: ScheduleRun = {

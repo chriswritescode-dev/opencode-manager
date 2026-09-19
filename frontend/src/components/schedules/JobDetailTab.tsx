@@ -9,6 +9,8 @@ import {
   hasSkillMetadata,
 } from '@/components/schedules/schedule-utils'
 import { Bot, CalendarClock, Clock3, History, Loader2, Pencil, Play, Sparkles, Trash2 } from 'lucide-react'
+import { useScheduleModels } from '@/hooks/useScheduleModels'
+import { resolveScheduleModel } from '@/lib/schedules/schedule-model'
 
 interface JobDetailTabProps {
   selectedJob: ScheduleJob | undefined
@@ -33,6 +35,9 @@ export function JobDetailTab({
   runningRun,
   isJobFetching,
 }: JobDetailTabProps) {
+  const { availableModelKeys, configDefaultModel } = useScheduleModels(Boolean(selectedJob))
+  const resolvedModel = resolveScheduleModel(selectedJob?.model, availableModelKeys, configDefaultModel)
+
   if (!selectedJob) {
     return (
       <div className="flex h-full items-center justify-center">
@@ -124,7 +129,7 @@ export function JobDetailTab({
                 </div>
                 <div>
                   <p className="text-muted-foreground">Model</p>
-                  <p className="font-medium break-all">{selectedJob.model ?? 'Workspace default'}</p>
+                  <p className="font-medium break-all">{resolvedModel ?? 'Workspace default'}</p>
                 </div>
                 <div>
                   <p className="text-muted-foreground">Created</p>
