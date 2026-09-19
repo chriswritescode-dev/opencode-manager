@@ -4,6 +4,7 @@ import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { DeleteDialog } from '@/components/ui/delete-dialog'
 import { getFileApiUrl } from '@/api/files'
+import { saveFileFromUrl } from '@/lib/download'
 import { 
   File, 
   Folder, 
@@ -95,13 +96,7 @@ function TreeNode({ file, level, onFileSelect, onDirectoryClick, selectedFile, o
   const handleDownload = () => {
     if (file.isDirectory) return
 
-    const downloadUrl = getFileApiUrl(file.path, { params: { download: true } })
-    const link = document.createElement('a')
-    link.href = downloadUrl
-    link.download = file.name
-    document.body.appendChild(link)
-    link.click()
-    document.body.removeChild(link)
+    void saveFileFromUrl(getFileApiUrl(file.path, { params: { download: true } }), file.name)
   }
 
   const getFileIcon = () => {

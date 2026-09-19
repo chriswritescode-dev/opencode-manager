@@ -1,6 +1,7 @@
 import type { Repo } from './types'
 import { FetchError, fetchWrapper, fetchWrapperVoid, fetchWrapperBlob } from './fetchWrapper'
 import { API_BASE_URL } from '@/config'
+import { saveFile } from '@/lib/download'
 import type { DiscoverReposResponse, AssistantModeStatus, AssistantModeInitRequest } from '@opencode-manager/shared/types'
 
 export interface CreateRepoOptions {
@@ -185,14 +186,7 @@ export async function downloadRepo(id: number, repoName: string, options?: Downl
   const url = `${API_BASE_URL}/api/repos/${id}/download${params.toString() ? '?' + params.toString() : ''}`
   
   const blob = await fetchWrapperBlob(url)
-  const urlObj = window.URL.createObjectURL(blob)
-  const a = document.createElement('a')
-  a.href = urlObj
-  a.download = `${repoName}.zip`
-  document.body.appendChild(a)
-  a.click()
-  document.body.removeChild(a)
-  window.URL.revokeObjectURL(urlObj)
+  await saveFile(blob, `${repoName}.zip`)
 }
 
 export async function updateRepoOrder(order: number[]): Promise<void> {

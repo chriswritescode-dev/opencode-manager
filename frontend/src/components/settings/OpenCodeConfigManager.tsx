@@ -20,6 +20,7 @@ import { useServerHealth } from '@/hooks/useServerHealth'
 import { useOpenCodeServerActions } from '@/hooks/useOpenCodeServerActions'
 import { hasJsoncComments } from '@/lib/jsonc'
 import { showToast } from '@/lib/toast'
+import { saveFile } from '@/lib/download'
 import { invalidateConfigCaches } from '@/lib/queryInvalidation'
 import { getOpenCodeApiErrorMessage } from '@/lib/opencode-errors'
 import { FetchError } from '@/api/fetchWrapper'
@@ -173,12 +174,7 @@ export function OpenCodeConfigManager() {
     const content = config.rawContent || JSON.stringify(config.content, null, 2)
     const extension = config.rawContent && hasJsoncComments(config.rawContent) ? 'jsonc' : 'json'
     const blob = new Blob([content], { type: 'application/json' })
-    const url = URL.createObjectURL(blob)
-    const a = document.createElement('a')
-    a.href = url
-    a.download = `opencode.${extension}`
-    a.click()
-    URL.revokeObjectURL(url)
+    void saveFile(blob, `opencode.${extension}`)
   }
 
   if (isLoading) {
