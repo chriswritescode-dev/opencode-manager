@@ -1,5 +1,5 @@
 import { spawnSync, spawn } from 'child_process'
-import { createWriteStream, existsSync } from 'fs'
+import { createWriteStream, existsSync, realpathSync } from 'fs'
 import * as fsp from 'fs/promises'
 import { Readable } from 'stream'
 import { pipeline } from 'stream/promises'
@@ -433,10 +433,19 @@ function listLocalBranches(repoRoot: string): Set<string> {
   return new Set(out.split('\n').map((l) => l.trim()).filter(Boolean))
 }
 
+function canonicalPath(path: string): string {
+  try {
+    return realpathSync(path)
+  } catch {
+    return path
+  }
+}
+
 function branchOwnedElsewhere(ownership: Map<string, string[]>, repoRoot: string): Set<string> {
+  const canonicalRoot = canonicalPath(repoRoot)
   const locked = new Set<string>()
   for (const [branch, paths] of ownership) {
-    if (paths.some((path) => path !== repoRoot)) locked.add(branch)
+    if (paths.some((path) => canonicalPath(path) !== canonicalRoot)) locked.add(branch)
   }
   return locked
 }
