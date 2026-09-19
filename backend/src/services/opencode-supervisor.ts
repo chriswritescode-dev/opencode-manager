@@ -1,9 +1,8 @@
-import path from 'path'
 import type { SettingsService } from './settings'
 import { logger } from '../utils/logger'
-import { ensureDirectoryExists, writeFileContent } from './file-operations'
-import { getOpenCodeHealthWatchPath, ENV } from '@opencode-manager/shared/config/env'
-import { archiveBrokenOpenCodeConfigFile, pruneHealthWatchDirectory, writeOpenCodeConfigFile, OPENCODE_CONFIG_SEED } from './opencode-config-file'
+import { ENV } from '@opencode-manager/shared/config/env'
+import { archiveBrokenOpenCodeConfigFile, writeHealthWatchArtifact } from './opencode-config-file'
+import { restoreLastKnownGoodOpenCodeConfig, seedOpenCodeConfigFile } from './opencode-config-apply'
 import type { OpenCodeServerManager } from './opencode-single-server'
 
 export const OPENCODE_LIFECYCLE_STATES = [
@@ -319,34 +318,26 @@ export class OpenCodeSupervisor {
   }
 
   private async captureDebugSnapshot(): Promise<void> {
-    const timestamp = new Date().toISOString().replace(/[:.]/g, '-')
-    const debugPath = path.join(getOpenCodeHealthWatchPath(), `opencode-health-${timestamp}.json`)
-    const payload = JSON.stringify({
+    await writeHealthWatchArtifact('opencode-health', (timestamp) => JSON.stringify({
       capturedAt: timestamp,
       startupError: this.openCodeServerManager.getLastStartupError(),
       lifecycleState: this.state,
       attemptedRecoveryActions: this.attemptedRecoveryActions,
-    }, null, 2)
-
-    await ensureDirectoryExists(path.dirname(debugPath))
-    await writeFileContent(debugPath, payload)
-    await pruneHealthWatchDirectory(getOpenCodeHealthWatchPath())
+    }, null, 2))
   }
 
   private async rollbackToLastKnownGood(): Promise<void> {
     await archiveBrokenOpenCodeConfigFile()
-    const lastGood = this.settingsService.getLastKnownGoodConfig()
-    if (!lastGood) {
+    const restored = await restoreLastKnownGoodOpenCodeConfig(this.settingsService)
+    if (!restored) {
       throw new Error('No last known good config available')
     }
 
-    await writeOpenCodeConfigFile(lastGood)
-    this.openCodeServerManager.clearStartupError()
     await this.openCodeServerManager.restart()
   }
 
   private async seedDefaultConfig(): Promise<void> {
-    await writeOpenCodeConfigFile(OPENCODE_CONFIG_SEED)
+    await seedOpenCodeConfigFile()
     this.openCodeServerManager.clearStartupError()
     await this.openCodeServerManager.restart()
   }

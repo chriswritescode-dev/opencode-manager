@@ -1,5 +1,5 @@
 import path from 'path'
-import { promises as fs, mkdirSync, accessSync, constants } from 'node:fs'
+import { promises as fs, mkdirSync, accessSync, constants, realpathSync } from 'node:fs'
 
 interface MkdirSafeOptions {
   mode?: number
@@ -8,6 +8,22 @@ interface MkdirSafeOptions {
 function isPermissionError(error: unknown): boolean {
   const code = (error as NodeJS.ErrnoException).code
   return code === 'EACCES' || code === 'EPERM'
+}
+
+export async function canonicalPath(target: string): Promise<string> {
+  try {
+    return await fs.realpath(target)
+  } catch {
+    return target
+  }
+}
+
+export function canonicalPathSync(target: string): string {
+  try {
+    return realpathSync(target)
+  } catch {
+    return target
+  }
 }
 
 export async function writeFileAtomic(filePath: string, content: string, options: { mode?: number } = {}): Promise<void> {

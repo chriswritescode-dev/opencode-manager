@@ -162,6 +162,7 @@ vi.mock('../../src/services/opencode-config-file', () => ({
   readOpenCodeConfigFile: mockReadOpenCodeConfigFile,
   writeOpenCodeConfigFile: mockWriteOpenCodeConfigFile,
   deleteOpenCodeConfigFile: mockDeleteOpenCodeConfigFile,
+  withOpenCodeConfigLock: (fn: () => Promise<unknown>) => fn(),
 }))
 
 vi.mock('../../src/services/opencode-config-apply', async (importOriginal) => {
@@ -412,7 +413,6 @@ describe('Settings Routes - OpenCode Upgrade', () => {
         content: '{"plugin":["evil-plugin"]}',
         openCodeClient: expect.anything(),
         settingsService: expect.anything(),
-        userId: 'default',
       })
     })
 
@@ -440,7 +440,6 @@ describe('Settings Routes - OpenCode Upgrade', () => {
         content: { theme: 'light' },
         openCodeClient: expect.anything(),
         settingsService: expect.anything(),
-        userId: 'default',
       })
     })
 
@@ -516,7 +515,7 @@ describe('Settings Routes - OpenCode Upgrade', () => {
       const json = await res.json() as Record<string, unknown>
 
       expect(res.status).toBe(400)
-      expect(json.error).toBe('Invalid config data')
+      expect(json.error).toBe('Invalid JSON')
       expect(mockApplyOpenCodeConfigUpdate).not.toHaveBeenCalled()
     })
 
@@ -528,7 +527,7 @@ describe('Settings Routes - OpenCode Upgrade', () => {
       const json = await res.json() as Record<string, unknown>
 
       expect(res.status).toBe(400)
-      expect(json.error).toBe('Invalid config data')
+      expect(json.error).toBe('Invalid JSON')
       expect(mockApplyOpenCodeConfigUpdate).not.toHaveBeenCalled()
     })
 
@@ -548,6 +547,13 @@ describe('Settings Routes - OpenCode Upgrade', () => {
 
     it('writes the last known good config and reloads on rollback', async () => {
       mockGetLastKnownGoodConfig.mockReturnValueOnce('{"theme":"dark"}')
+      mockWriteOpenCodeConfigFile.mockResolvedValueOnce({
+        path: '/tmp/test-workspace/.config/opencode.json',
+        rawContent: '{"theme":"dark"}',
+        content: { theme: 'dark' },
+        isValid: true,
+        updatedAt: 1,
+      })
 
       const res = await settingsApp.fetch(new Request('http://localhost/opencode-rollback', { method: 'POST' }))
       const json = await res.json() as Record<string, unknown>
@@ -572,6 +578,13 @@ describe('Settings Routes - OpenCode Upgrade', () => {
 
     it('deletes the config file and restarts when the rollback reload fails', async () => {
       mockGetLastKnownGoodConfig.mockReturnValueOnce('{"theme":"dark"}')
+      mockWriteOpenCodeConfigFile.mockResolvedValueOnce({
+        path: '/tmp/test-workspace/.config/opencode.json',
+        rawContent: '{"theme":"dark"}',
+        content: { theme: 'dark' },
+        isValid: true,
+        updatedAt: 1,
+      })
       mockReloadConfig.mockRejectedValueOnce(new Error('reload failed'))
       mockDeleteOpenCodeConfigFile.mockResolvedValueOnce(true)
 
@@ -635,6 +648,7 @@ describe('Settings Routes - OpenCode Upgrade', () => {
       expect(mockSyncOpenCodeImport).toHaveBeenCalledWith({
         overwriteState: true,
         protectExistingState: true,
+        settingsService: expect.anything(),
       })
       expect(mockGetImportedSessionDirectories).toHaveBeenCalledWith('/tmp/test-workspace/.opencode/state/opencode')
       expect(mockRelinkReposFromSessionDirectories).toHaveBeenCalled()

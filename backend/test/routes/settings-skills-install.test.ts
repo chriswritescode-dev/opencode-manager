@@ -107,6 +107,7 @@ vi.mock('@opencode-manager/shared/config/env', () => ({
     MAX_SIZE_BYTES: 1024 * 1024,
     MAX_UPLOAD_SIZE_BYTES: 10 * 1024 * 1024,
   },
+  TIMEOUTS: { CONFIG_PATCH_TIMEOUT_MS: 15000 },
 }))
 
 import { createSettingsRoutes } from '../../src/routes/settings'

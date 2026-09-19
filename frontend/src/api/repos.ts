@@ -86,24 +86,6 @@ export async function deleteRepo(id: number): Promise<void> {
   })
 }
 
-export async function startServer(id: number): Promise<Repo> {
-  return fetchWrapper(`${API_BASE_URL}/api/repos/${id}/server/start`, {
-    method: 'POST',
-  })
-}
-
-export async function stopServer(id: number): Promise<Repo> {
-  return fetchWrapper(`${API_BASE_URL}/api/repos/${id}/server/stop`, {
-    method: 'POST',
-  })
-}
-
-export async function pullRepo(id: number): Promise<Repo> {
-  return fetchWrapper(`${API_BASE_URL}/api/repos/${id}/pull`, {
-    method: 'POST',
-  })
-}
-
 export async function updateRepoGitCredential(id: number, credentialId?: string): Promise<Repo> {
   return fetchWrapper(`${API_BASE_URL}/api/repos/${id}/git-credential`, {
     method: 'PATCH',

@@ -3,7 +3,7 @@ import { render, screen, waitFor } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
 import { AddMcpServerDialog } from './AddMcpServerDialog'
-import type { OpenCodeConfigFile } from '@/api/types/settings'
+import { makeOpenCodeConfigFile } from '@/test/fixtures/opencode-config'
 
 const {
   mockGetOpenCodeConfig,
@@ -30,13 +30,7 @@ vi.mock('@/lib/toast', () => ({
   showToast: { success: vi.fn(), error: vi.fn(), info: vi.fn(), loading: vi.fn(), warning: vi.fn(), dismiss: vi.fn() },
 }))
 
-const config: OpenCodeConfigFile = {
-  path: '/workspace/.opencode/opencode.json',
-  isValid: true,
-  updatedAt: 1,
-  rawContent: '{}',
-  content: {},
-}
+const config = makeOpenCodeConfigFile()
 
 function renderDialog(onUpdate: (content: Record<string, unknown>) => Promise<void>) {
   const queryClient = new QueryClient({ defaultOptions: { queries: { retry: false } } })

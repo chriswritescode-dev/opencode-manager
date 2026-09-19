@@ -1,7 +1,7 @@
 import { OpenCodeConfigSchema } from '@opencode-manager/shared/schemas'
 import { parseJsonc } from '@opencode-manager/shared/utils'
 import type { OpenCodeConfigFile, OpenCodeConfigInput } from '../types/settings'
-import { normalizeOpenCodeConfigContent, readOpenCodeConfigFile, withOpenCodeConfigLock, writeOpenCodeConfigFile } from './opencode-config-file'
+import { OPENCODE_CONFIG_SEED, normalizeOpenCodeConfigContent, readOpenCodeConfigFile, withOpenCodeConfigLock, writeOpenCodeConfigFile } from './opencode-config-file'
 import { patchConfigWithRecovery, type PatchConfigValidationIssue } from './opencode/config-recovery'
 import type { OpenCodeClient } from './opencode/client'
 import { opencodeServerManager } from './opencode-single-server'
@@ -16,7 +16,29 @@ export interface ApplyOpenCodeConfigInput {
   content: OpenCodeConfigInput | string
   openCodeClient: OpenCodeClient
   settingsService: SettingsService
-  userId?: string
+}
+
+export async function captureLastKnownGoodOpenCodeConfig(settingsService: SettingsService): Promise<OpenCodeConfigFile | null> {
+  const previous = await readOpenCodeConfigFile()
+  if (previous?.isValid) {
+    settingsService.saveLastKnownGoodConfig(previous.rawContent)
+  }
+  return previous
+}
+
+export async function restoreLastKnownGoodOpenCodeConfig(settingsService: SettingsService): Promise<OpenCodeConfigFile | null> {
+  const lastGood = settingsService.getLastKnownGoodConfig()
+  if (!lastGood) {
+    return null
+  }
+
+  const config = await withOpenCodeConfigLock(() => writeOpenCodeConfigFile(lastGood))
+  opencodeServerManager.clearStartupError()
+  return config
+}
+
+export async function seedOpenCodeConfigFile(): Promise<OpenCodeConfigFile> {
+  return withOpenCodeConfigLock(() => writeOpenCodeConfigFile(OPENCODE_CONFIG_SEED))
 }
 
 function didConfigFieldChange(
@@ -27,7 +49,7 @@ function didConfigFieldChange(
   return JSON.stringify(previous?.[field]) !== JSON.stringify(next?.[field])
 }
 
-export function needsOpenCodeRestart(
+function needsOpenCodeRestart(
   previous: Record<string, unknown> | undefined,
   next: Record<string, unknown> | undefined,
 ): boolean {
@@ -65,15 +87,12 @@ export async function applyOpenCodeConfigUpdate(
   input: ApplyOpenCodeConfigInput,
 ): Promise<ApplyOpenCodeConfigResult> {
   return withOpenCodeConfigLock(async () => {
-    const { content, openCodeClient, settingsService, userId } = input
+    const { content, openCodeClient, settingsService } = input
 
     const rawContent = normalizeOpenCodeConfigContent(content)
     const nextContent = OpenCodeConfigSchema.parse(parseJsonc(rawContent))
 
-    const previous = await readOpenCodeConfigFile()
-    if (previous?.isValid) {
-      settingsService.saveLastKnownGoodConfig(previous.rawContent, userId)
-    }
+    const previous = await captureLastKnownGoodOpenCodeConfig(settingsService)
 
     if (needsOpenCodeRestart(previous?.content, nextContent)) {
       const config = await writeOpenCodeConfigFile(rawContent)

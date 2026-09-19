@@ -1,6 +1,5 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest'
-import { ensureDirectoryExists, writeFileContent } from '../../src/services/file-operations'
-import { archiveBrokenOpenCodeConfigFile, pruneHealthWatchDirectory, writeOpenCodeConfigFile, OPENCODE_CONFIG_SEED } from '../../src/services/opencode-config-file'
+import { archiveBrokenOpenCodeConfigFile, writeHealthWatchArtifact, writeOpenCodeConfigFile, OPENCODE_CONFIG_SEED } from '../../src/services/opencode-config-file'
 import { OpenCodeSupervisor } from '../../src/services/opencode-supervisor'
 
 vi.mock('../../src/utils/logger', () => ({
@@ -11,20 +10,24 @@ vi.mock('../../src/utils/logger', () => ({
   },
 }))
 
-vi.mock('../../src/services/file-operations', () => ({
-  writeFileContent: vi.fn(),
-  ensureDirectoryExists: vi.fn(),
-}))
-
 vi.mock('../../src/services/opencode-config-file', () => ({
   archiveBrokenOpenCodeConfigFile: vi.fn(),
-  pruneHealthWatchDirectory: vi.fn(),
-  writeOpenCodeConfigFile: vi.fn(),
+  writeHealthWatchArtifact: vi.fn(),
+  writeOpenCodeConfigFile: vi.fn(async (rawContent: string) => ({ rawContent, isValid: true })),
+  withOpenCodeConfigLock: (fn: () => Promise<unknown>) => fn(),
   OPENCODE_CONFIG_SEED: '{"$schema":"https://opencode.ai/config.json"}',
 }))
 
+vi.mock('../../src/services/opencode-single-server', () => ({
+  opencodeServerManager: {
+    clearStartupError: vi.fn(),
+  },
+}))
+
 vi.mock('@opencode-manager/shared/config/env', () => ({
-  getOpenCodeHealthWatchPath: vi.fn(() => '/tmp/opencode-workspace/.opencode/state/health-watch'),
+  TIMEOUTS: {
+    CONFIG_PATCH_TIMEOUT_MS: 30000,
+  },
   ENV: {
     OPENCODE: {
       HEALTH_POLL_MS: 200,
@@ -246,9 +249,7 @@ describe('OpenCodeSupervisor', () => {
     const status = await supervisor.checkNow('manual')
 
     expect(status.healthy).toBe(true)
-    expect(ensureDirectoryExists).toHaveBeenCalled()
-    expect(writeFileContent).toHaveBeenCalled()
-    expect(pruneHealthWatchDirectory).toHaveBeenCalledWith('/tmp/opencode-workspace/.opencode/state/health-watch')
+    expect(writeHealthWatchArtifact).toHaveBeenCalled()
     expect(manager.restart).toHaveBeenCalledTimes(2)
   })
 
@@ -283,7 +284,7 @@ describe('OpenCodeSupervisor', () => {
     expect(archiveBrokenOpenCodeConfigFile).not.toHaveBeenCalled()
     expect(settings.getLastKnownGoodConfig).not.toHaveBeenCalled()
     expect(writeOpenCodeConfigFile).not.toHaveBeenCalled()
-    expect(writeFileContent).not.toHaveBeenCalled()
+    expect(writeHealthWatchArtifact).not.toHaveBeenCalled()
 
     await supervisor.stop()
   })
@@ -304,7 +305,7 @@ describe('OpenCodeSupervisor', () => {
     expect(archiveBrokenOpenCodeConfigFile).not.toHaveBeenCalled()
     expect(settings.getLastKnownGoodConfig).not.toHaveBeenCalled()
     expect(writeOpenCodeConfigFile).not.toHaveBeenCalled()
-    expect(writeFileContent).not.toHaveBeenCalled()
+    expect(writeHealthWatchArtifact).not.toHaveBeenCalled()
 
     await supervisor.stop()
   })
@@ -331,7 +332,7 @@ describe('OpenCodeSupervisor', () => {
     expect(archiveBrokenOpenCodeConfigFile).not.toHaveBeenCalled()
     expect(settings.getLastKnownGoodConfig).not.toHaveBeenCalled()
     expect(writeOpenCodeConfigFile).not.toHaveBeenCalled()
-    expect(writeFileContent).not.toHaveBeenCalled()
+    expect(writeHealthWatchArtifact).not.toHaveBeenCalled()
 
     await supervisor.stop()
   })

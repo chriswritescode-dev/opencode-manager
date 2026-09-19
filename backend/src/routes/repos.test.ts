@@ -50,6 +50,17 @@ function createTestDb(): Database {
   return db
 }
 
+function createThrowingDb(): Database {
+  return {
+    prepare: () => {
+      throw new Error('repo failed')
+    },
+    query: () => {
+      throw new Error('repo failed')
+    },
+  } as unknown as Database
+}
+
 describe('GET /api/repos/:id/siblings', () => {
   let db: Database
   let app: Hono
@@ -268,6 +279,11 @@ describe('GET /api/repos/:id/siblings', () => {
     const data = await res.json() as { error: string }
     expect(data.error).toBe('Invalid repo id')
   })
+
+  it('returns 500 when listing siblings throws', async () => {
+    const res = await createTestApp(createThrowingDb()).request('/repos/1/siblings')
+    expect(res.status).toBe(500)
+  })
 })
 
 describe('DELETE /api/repos/:id/workspaces/:workspaceId', () => {
@@ -298,6 +314,50 @@ describe('DELETE /api/repos/:id/workspaces/:workspaceId', () => {
     expect(res.status).toBe(200)
     expect(captured?.path).toBe('/experimental/workspace/wrk_test')
     expect(captured?.directory?.endsWith('/repos/repo-a')).toBe(true)
+  })
+
+  it('returns 400 for a non-numeric repo id', async () => {
+    const app = createTestApp(db)
+    const res = await app.request('/repos/abc/workspaces/wrk_test', { method: 'DELETE' })
+
+    expect(res.status).toBe(400)
+  })
+
+  it('returns 404 when the repo is missing or not ready', async () => {
+    const app = createTestApp(db)
+
+    const missing = await app.request('/repos/1/workspaces/wrk_test', { method: 'DELETE' })
+    expect(missing.status).toBe(404)
+
+    createRepo(db, { localPath: 'repo-a', defaultBranch: 'main', cloneStatus: 'cloning', clonedAt: Date.now(), isLocal: true })
+    const notReady = await app.request('/repos/1/workspaces/wrk_test', { method: 'DELETE' })
+    expect(notReady.status).toBe(404)
+  })
+
+  it('returns 400 for an invalid workspace id', async () => {
+    createRepo(db, { localPath: 'repo-a', defaultBranch: 'main', cloneStatus: 'ready', clonedAt: Date.now(), isLocal: true })
+    const app = createTestApp(db)
+    const res = await app.request('/repos/1/workspaces/bad-id', { method: 'DELETE' })
+
+    expect(res.status).toBe(400)
+  })
+
+  it('forwards an upstream error status', async () => {
+    createRepo(db, { localPath: 'repo-a', defaultBranch: 'main', cloneStatus: 'ready', clonedAt: Date.now(), isLocal: true })
+    const app = createTestApp(db, createStubOpenCodeClient({
+      forward: mock(async () => new Response('bad request', { status: 400 })) as any,
+    }))
+    const res = await app.request('/repos/1/workspaces/wrk_test', { method: 'DELETE' })
+
+    expect(res.status).toBe(400)
+    const data = await res.json() as { error: string }
+    expect(data.error).toBe('bad request')
+  })
+
+  it('returns 500 when reading the repo throws', async () => {
+    const res = await createTestApp(createThrowingDb()).request('/repos/1/workspaces/wrk_test', { method: 'DELETE' })
+
+    expect(res.status).toBe(500)
   })
 })
 
@@ -331,6 +391,59 @@ describe('POST /api/repos/:id/workspaces', () => {
     expect(captured?.directory?.endsWith('/repos/repo-a')).toBe(true)
     expect(JSON.parse(captured?.body ?? '{}')).toEqual({ type: 'worktree', branch: null })
     expect(await res.json()).toMatchObject({ id: 'wrk_test', type: 'worktree' })
+  })
+
+  it('returns 400 for a non-numeric repo id', async () => {
+    const app = createTestApp(db)
+    const res = await app.request('/repos/abc/workspaces', { method: 'POST' })
+
+    expect(res.status).toBe(400)
+  })
+
+  it('returns 404 when the repo is missing or not ready', async () => {
+    const app = createTestApp(db)
+
+    const missing = await app.request('/repos/1/workspaces', { method: 'POST' })
+    expect(missing.status).toBe(404)
+
+    createRepo(db, { localPath: 'repo-a', defaultBranch: 'main', cloneStatus: 'cloning', clonedAt: Date.now(), isLocal: true })
+    const notReady = await app.request('/repos/1/workspaces', { method: 'POST' })
+    expect(notReady.status).toBe(404)
+  })
+
+  it('forwards an upstream error status', async () => {
+    createRepo(db, { localPath: 'repo-a', defaultBranch: 'main', cloneStatus: 'ready', clonedAt: Date.now(), isLocal: true })
+    const app = createTestApp(db, createStubOpenCodeClient({
+      forward: mock(async () => new Response('boom', { status: 502 })) as any,
+    }))
+    const res = await app.request('/repos/1/workspaces', { method: 'POST' })
+
+    expect(res.status).toBe(502)
+    const data = await res.json() as { error: string }
+    expect(data.error).toBe('boom')
+  })
+
+  it('returns 500 when the upstream body is not JSON', async () => {
+    createRepo(db, { localPath: 'repo-a', defaultBranch: 'main', cloneStatus: 'ready', clonedAt: Date.now(), isLocal: true })
+    const app = createTestApp(db, createStubOpenCodeClient({
+      forward: mock(async () => new Response('not-json', { status: 200 })) as any,
+    }))
+    const res = await app.request('/repos/1/workspaces', { method: 'POST' })
+
+    expect(res.status).toBe(500)
+    const data = await res.json() as { error: string }
+    expect(data.error).toBe('Failed to create workspace')
+  })
+
+  it('returns success for an empty upstream response body', async () => {
+    createRepo(db, { localPath: 'repo-a', defaultBranch: 'main', cloneStatus: 'ready', clonedAt: Date.now(), isLocal: true })
+    const app = createTestApp(db, createStubOpenCodeClient({
+      forward: mock(async () => new Response('', { status: 200 })) as any,
+    }))
+    const res = await app.request('/repos/1/workspaces', { method: 'POST' })
+
+    expect(res.status).toBe(200)
+    expect(await res.json()).toEqual({ success: true })
   })
 })
 
@@ -401,5 +514,22 @@ describe('PATCH /api/repos/:id', () => {
     const longName = 'a'.repeat(101)
     const res = await app.request('/repos/1', { method: 'PATCH', body: JSON.stringify({ name: longName }), headers: { 'Content-Type': 'application/json' } })
     expect(res.status).toBe(400)
+  })
+
+  it('returns 400 for a non-numeric repo id', async () => {
+    const res = await app.request('/repos/abc', { method: 'PATCH', body: JSON.stringify({ name: 'new-name' }), headers: { 'Content-Type': 'application/json' } })
+    expect(res.status).toBe(400)
+  })
+
+  it('returns 400 for an invalid body', async () => {
+    createRepo(db, { localPath: 'repo-a', defaultBranch: 'main', cloneStatus: 'ready', clonedAt: Date.now(), isLocal: true })
+
+    const res = await app.request('/repos/1', { method: 'PATCH', body: JSON.stringify({}), headers: { 'Content-Type': 'application/json' } })
+    expect(res.status).toBe(400)
+  })
+
+  it('returns 500 when reading the repo throws', async () => {
+    const res = await createTestApp(createThrowingDb()).request('/repos/1', { method: 'PATCH', body: JSON.stringify({ name: 'new-name' }), headers: { 'Content-Type': 'application/json' } })
+    expect(res.status).toBe(500)
   })
 })

@@ -26,6 +26,8 @@ import {
   deleteOpenCodeConfigFile,
   pruneHealthWatchDirectory,
   readOpenCodeConfigFile,
+  toOpenCodeConfigValidationIssues,
+  writeHealthWatchArtifact,
   writeOpenCodeConfigFile,
 } from '../../src/services/opencode-config-file'
 
@@ -106,6 +108,27 @@ describe('opencode-config-file', () => {
 
     expect(file?.isValid).toBe(false)
     expect(file?.validationIssues?.[0]?.path).toBe('root')
+  })
+
+  it('maps Zod issues to config validation issues with a root fallback', () => {
+    const issues = new ZodError([
+      { code: 'custom', path: ['model'], message: 'Invalid model' },
+      { code: 'custom', path: [], message: 'Invalid root' },
+    ]).issues
+
+    expect(toOpenCodeConfigValidationIssues(issues)).toEqual([
+      { path: 'model', message: 'Invalid model' },
+      { path: 'root', message: 'Invalid root' },
+    ])
+  })
+
+  it('writes a health-watch artifact with a shared timestamp and returns its path', async () => {
+    const artifactPath = await writeHealthWatchArtifact('opencode-health', (timestamp) => JSON.stringify({ capturedAt: timestamp }))
+
+    expect(path.dirname(artifactPath)).toBe(paths.healthWatch)
+    expect(path.basename(artifactPath)).toMatch(/^opencode-health-.+\.json$/)
+    const content = JSON.parse(await readFile(artifactPath, 'utf8')) as { capturedAt: string }
+    expect(content.capturedAt).toBe(path.basename(artifactPath).replace(/^opencode-health-/, '').replace(/\.json$/, ''))
   })
 
   it('archives the config file under the health-watch directory', async () => {

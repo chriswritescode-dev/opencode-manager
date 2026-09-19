@@ -4,6 +4,7 @@ import userEvent from '@testing-library/user-event'
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
 import { OpenCodeConfigManager } from './OpenCodeConfigManager'
 import type { OpenCodeConfigFile } from '@/api/types/settings'
+import { makeOpenCodeConfigFile } from '@/test/fixtures/opencode-config'
 
 const {
   mockGetOpenCodeConfig,
@@ -58,13 +59,11 @@ const defaultContent = {
   },
 }
 
-const defaultConfig: OpenCodeConfigFile = {
+const defaultConfig = makeOpenCodeConfigFile({
   path: '/workspace/.opencode/opencode.json',
-  isValid: true,
-  updatedAt: 1,
   rawContent: JSON.stringify(defaultContent, null, 2),
   content: defaultContent,
-}
+})
 
 function renderWithQuery(ui: React.ReactElement) {
   const queryClient = new QueryClient({ defaultOptions: { queries: { retry: false } } })

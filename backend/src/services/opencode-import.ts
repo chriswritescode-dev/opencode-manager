@@ -4,8 +4,10 @@ import { existsSync } from 'node:fs'
 import { cp, mkdtemp, readdir, rename, rm } from 'fs/promises'
 import { Database as SQLiteDatabase } from 'bun:sqlite'
 import { getOpenCodeConfigFilePath, getWorkspacePath } from '@opencode-manager/shared/config/env'
-import { parseOpenCodeConfigContent, writeOpenCodeConfigFile } from './opencode-config-file'
+import { parseOpenCodeConfigContent, withOpenCodeConfigLock, writeOpenCodeConfigFile } from './opencode-config-file'
+import { captureLastKnownGoodOpenCodeConfig } from './opencode-config-apply'
 import { ensureDirectoryExists, fileExists, readFileContent } from './file-operations'
+import type { SettingsService } from './settings'
 
 const OPENCODE_STATE_DB_FILENAMES = new Set(['opencode.db', 'opencode.db-shm', 'opencode.db-wal'])
 
@@ -22,6 +24,7 @@ export interface SyncOpenCodeImportOptions {
   protectExistingState?: boolean
   importConfig?: boolean
   status?: OpenCodeImportStatus
+  settingsService?: SettingsService
 }
 
 export interface SyncOpenCodeImportResult extends OpenCodeImportStatus {
@@ -150,7 +153,7 @@ export async function getOpenCodeImportStatus(): Promise<OpenCodeImportStatus> {
   }
 }
 
-async function importOpenCodeConfigFromSource(sourcePath: string): Promise<boolean> {
+async function importOpenCodeConfigFromSource(sourcePath: string, settingsService?: SettingsService): Promise<boolean> {
   const rawContent = await readFileContent(sourcePath)
   const { isValid } = parseOpenCodeConfigContent(rawContent)
 
@@ -158,7 +161,12 @@ async function importOpenCodeConfigFromSource(sourcePath: string): Promise<boole
     throw new Error('Importable OpenCode config is invalid')
   }
 
-  await writeOpenCodeConfigFile(rawContent)
+  await withOpenCodeConfigLock(async () => {
+    if (settingsService) {
+      await captureLastKnownGoodOpenCodeConfig(settingsService)
+    }
+    await writeOpenCodeConfigFile(rawContent)
+  })
   return true
 }
 
@@ -175,7 +183,7 @@ export async function syncOpenCodeImport(options: SyncOpenCodeImportOptions): Pr
   }
 
   if (options.importConfig !== false && initialStatus.configSourcePath) {
-    configImported = await importOpenCodeConfigFromSource(initialStatus.configSourcePath)
+    configImported = await importOpenCodeConfigFromSource(initialStatus.configSourcePath, options.settingsService)
   }
 
   if (initialStatus.stateSourcePath && (overwriteState || !initialStatus.workspaceStateExists)) {

@@ -18,6 +18,7 @@ import { settingsApi } from '@/api/settings'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import { useServerHealth } from '@/hooks/useServerHealth'
 import { useOpenCodeServerActions } from '@/hooks/useOpenCodeServerActions'
+import { useOpenCodeConfigFile, OPEN_CODE_CONFIG_QUERY_KEY } from '@/hooks/useOpenCodeConfigFile'
 import { hasJsoncComments } from '@/lib/jsonc'
 import { showToast } from '@/lib/toast'
 import { saveFile } from '@/lib/download'
@@ -54,7 +55,6 @@ interface Agent {
 }
 
 const EXPANDED_SECTION_CONTENT_CLASS = 'p-2 sm:p-4'
-const CONFIG_QUERY_KEY = ['opencode-config', 'file']
 
 export function OpenCodeConfigManager() {
   const hostImportContentId = useId()
@@ -87,10 +87,7 @@ export function OpenCodeConfigManager() {
   const mcpRef = useRef<HTMLButtonElement>(null)
   const modelsRef = useRef<HTMLButtonElement>(null)
   
-  const { data: config, isLoading } = useQuery({
-    queryKey: CONFIG_QUERY_KEY,
-    queryFn: () => settingsApi.getOpenCodeConfig(),
-  })
+  const { data: config, isLoading } = useOpenCodeConfigFile()
 
   const { data: managedSkills = [] } = useQuery({
     queryKey: ['managed-skills'],
@@ -145,10 +142,10 @@ export function OpenCodeConfigManager() {
   }
 
   const updateConfigContent = async (newContent: Record<string, unknown>) => {
-    const previousConfig = queryClient.getQueryData<OpenCodeConfigFile>(CONFIG_QUERY_KEY)
+    const previousConfig = queryClient.getQueryData<OpenCodeConfigFile>(OPEN_CODE_CONFIG_QUERY_KEY)
     const now = Date.now()
 
-    queryClient.setQueryData<OpenCodeConfigFile>(CONFIG_QUERY_KEY, (prev) =>
+    queryClient.setQueryData<OpenCodeConfigFile>(OPEN_CODE_CONFIG_QUERY_KEY, (prev) =>
       prev ? { ...prev, content: newContent, updatedAt: now } : prev
     )
 
@@ -164,7 +161,7 @@ export function OpenCodeConfigManager() {
       invalidateConfigCaches(queryClient)
     } catch (error) {
       if (previousConfig) {
-        queryClient.setQueryData(CONFIG_QUERY_KEY, previousConfig)
+        queryClient.setQueryData(OPEN_CODE_CONFIG_QUERY_KEY, previousConfig)
       }
       showToast.error(getApiErrorMessage(error, 'Failed to update config'))
     }
@@ -300,7 +297,7 @@ export function OpenCodeConfigManager() {
             onClose={() => setIsEditDialogOpen(false)}
             onUpdate={async (rawContent) => {
               await settingsApi.updateOpenCodeConfig({ content: rawContent })
-              await queryClient.invalidateQueries({ queryKey: CONFIG_QUERY_KEY })
+              await queryClient.invalidateQueries({ queryKey: OPEN_CODE_CONFIG_QUERY_KEY })
             }}
           />
         </>

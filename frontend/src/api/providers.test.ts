@@ -1,6 +1,6 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest'
 import { getProvidersWithModels } from './providers'
-import type { OpenCodeConfigFile } from './types/settings'
+import { makeOpenCodeConfigFile } from '@/test/fixtures/opencode-config'
 
 const { mockGetOpenCodeConfig, mockFetchWrapper } = vi.hoisted(() => ({
   mockGetOpenCodeConfig: vi.fn(),
@@ -17,11 +17,7 @@ vi.mock('./fetchWrapper', () => ({
   fetchWrapper: mockFetchWrapper,
 }))
 
-const config: OpenCodeConfigFile = {
-  path: '/workspace/.opencode/opencode.json',
-  isValid: true,
-  updatedAt: 1,
-  rawContent: '{}',
+const config = makeOpenCodeConfigFile({
   content: {
     provider: {
       openai: {
@@ -32,7 +28,7 @@ const config: OpenCodeConfigFile = {
       },
     },
   },
-}
+})
 
 describe('getProvidersWithModels', () => {
   beforeEach(() => {

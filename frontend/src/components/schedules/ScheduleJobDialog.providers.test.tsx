@@ -3,7 +3,7 @@ import { render, waitFor } from '@testing-library/react'
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
 import { ScheduleJobDialog } from './ScheduleJobDialog'
 import { OPEN_CODE_CONFIG_QUERY_KEY } from '@/hooks/useOpenCodeConfigFile'
-import type { OpenCodeConfigFile } from '@/api/types/settings'
+import { makeOpenCodeConfigFile } from '@/test/fixtures/opencode-config'
 
 Element.prototype.scrollIntoView = vi.fn()
 
@@ -42,13 +42,7 @@ vi.mock('@/api/repos', () => ({
   listBranches: () => Promise.resolve({ branches: [], status: { ahead: 0, behind: 0 } }),
 }))
 
-const config: OpenCodeConfigFile = {
-  path: '/workspace/.opencode/opencode.json',
-  isValid: true,
-  updatedAt: 1,
-  rawContent: '{}',
-  content: {},
-}
+const config = makeOpenCodeConfigFile()
 
 describe('ScheduleJobDialog — shared config query', () => {
   beforeEach(() => {

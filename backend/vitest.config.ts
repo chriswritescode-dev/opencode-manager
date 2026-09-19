@@ -15,7 +15,7 @@ export default defineConfig({
     ],
     coverage: {
       provider: 'v8',
-      reporter: ['text', 'html'],
+      reporter: ['text-summary', 'html'],
       thresholds: {
         statements: 80,
         branches: 80,

@@ -118,9 +118,9 @@ export class SettingsService {
     }
   }
 
-  saveLastKnownGoodConfig(rawContent: string, userId: string = 'default'): void {
+  saveLastKnownGoodConfig(rawContent: string): void {
     SettingsService.lastKnownGoodConfigContent = rawContent
-    this.persistLastKnownGoodConfig(userId)
+    this.persistLastKnownGoodConfig()
     logger.info('Saved last known good config')
   }
 

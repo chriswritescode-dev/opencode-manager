@@ -23,6 +23,9 @@ vi.mock('@opencode-manager/shared/config/env', () => ({
     MAX_SIZE_BYTES: 1024 * 1024,
     MAX_UPLOAD_SIZE_BYTES: 10 * 1024 * 1024,
   },
+  TIMEOUTS: {
+    CONFIG_PATCH_TIMEOUT_MS: 15000,
+  },
 }))
 
 vi.mock('../../../src/utils/logger', () => ({
@@ -270,6 +273,42 @@ describe('patchConfigWithRecovery', () => {
     expect(result.success).toBe(false)
     expect(result.error).toContain('Parse error')
     expect(captured).toHaveLength(1)
+  })
+
+  it('should pass an AbortSignal to every forward call', async () => {
+    const errorResponse = {
+      success: false,
+      data: {},
+      errors: [
+        { path: ['command', 'review'], message: 'Invalid command review field' },
+      ],
+    }
+
+    const captured: ForwardRequest[] = []
+    const client = createStubClient([
+      { status: 400, text: JSON.stringify(errorResponse) },
+      { status: 200, text: '{}' },
+    ], captured)
+
+    const result = await patchConfigWithRecovery(client, { command: { review: 'test' } })
+
+    expect(result.success).toBe(true)
+    expect(captured).toHaveLength(2)
+    expect(captured[0]!.signal).toBeInstanceOf(AbortSignal)
+    expect(captured[1]!.signal).toBeInstanceOf(AbortSignal)
+    expect(captured[0]!.signal).not.toBe(captured[1]!.signal)
+  })
+
+  it('should map a TimeoutError rejection to a readable timeout error result', async () => {
+    const client = createStubClient([])
+    client.forward = vi.fn(async () => {
+      throw new DOMException('The operation was aborted due to timeout', 'TimeoutError')
+    })
+
+    const result = await patchConfigWithRecovery(client, {})
+
+    expect(result.success).toBe(false)
+    expect(result.error).toMatch(/timed out/i)
   })
 
   it('should return error on 502 from client.forward', async () => {

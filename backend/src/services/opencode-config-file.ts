@@ -1,5 +1,6 @@
-import { copyFile, readdir, rm, stat } from 'fs/promises'
+import { readdir, rm, stat } from 'fs/promises'
 import path from 'path'
+import type { ZodIssue } from 'zod'
 import { getOpenCodeConfigFilePath, getOpenCodeHealthWatchPath } from '@opencode-manager/shared/config/env'
 import { OpenCodeConfigSchema } from '@opencode-manager/shared/schemas'
 import { parseJsonc } from '@opencode-manager/shared/utils'
@@ -7,7 +8,7 @@ import type { OpenCodeConfigFile, OpenCodeConfigInput, OpenCodeConfigValidationI
 import { logger } from '../utils/logger'
 import { withFileLock } from '../utils/atomic-json'
 import { existingFileMode, writeFileAtomic } from '../utils/fs-safe'
-import { ensureDirectoryExists, fileExists, readFileContent } from './file-operations'
+import { ensureDirectoryExists, fileExists, readFileContent, writeFileContent } from './file-operations'
 
 export const OPENCODE_CONFIG_SEED = JSON.stringify({ $schema: 'https://opencode.ai/config.json' }, null, 2)
 
@@ -25,6 +26,13 @@ interface OpenCodeConfigParseResult {
 
 export function normalizeOpenCodeConfigContent(content: OpenCodeConfigInput | string): string {
   return typeof content === 'string' ? content : JSON.stringify(content, null, 2)
+}
+
+export function toOpenCodeConfigValidationIssues(issues: ZodIssue[]): OpenCodeConfigValidationIssue[] {
+  return issues.map((issue) => ({
+    path: issue.path.length > 0 ? issue.path.join('.') : 'root',
+    message: issue.message,
+  }))
 }
 
 export function parseOpenCodeConfigContent(rawContent: string): OpenCodeConfigParseResult {
@@ -53,10 +61,7 @@ export function parseOpenCodeConfigContent(rawContent: string): OpenCodeConfigPa
     }
   }
 
-  const validationIssues = validated.error.issues.map((issue) => ({
-    path: issue.path.length > 0 ? issue.path.join('.') : 'root',
-    message: issue.message,
-  }))
+  const validationIssues = toOpenCodeConfigValidationIssues(validated.error.issues)
   logger.error(`Failed to validate OpenCode config: ${validationIssues.map((issue) => `${issue.path}: ${issue.message}`).join('; ')}`)
 
   return {
@@ -131,19 +136,27 @@ export async function pruneHealthWatchDirectory(dirPath: string): Promise<void> 
   }
 }
 
+export async function writeHealthWatchArtifact(
+  prefix: string,
+  buildContent: (timestamp: string) => string,
+): Promise<string> {
+  const timestamp = new Date().toISOString().replace(/[:.]/g, '-')
+  const artifactPath = path.join(getOpenCodeHealthWatchPath(), `${prefix}-${timestamp}.json`)
+  await ensureDirectoryExists(getOpenCodeHealthWatchPath())
+  await writeFileContent(artifactPath, buildContent(timestamp))
+  await pruneHealthWatchDirectory(getOpenCodeHealthWatchPath())
+  return artifactPath
+}
+
 export async function archiveBrokenOpenCodeConfigFile(): Promise<string | null> {
   const configPath = getOpenCodeConfigFilePath()
   if (!(await fileExists(configPath))) {
     return null
   }
 
-  const timestamp = new Date().toISOString().replace(/[:.]/g, '-')
-  const archivePath = path.join(getOpenCodeHealthWatchPath(), `opencode-config-broken-${timestamp}.json`)
-
   try {
-    await ensureDirectoryExists(getOpenCodeHealthWatchPath())
-    await copyFile(configPath, archivePath)
-    await pruneHealthWatchDirectory(getOpenCodeHealthWatchPath())
+    const content = await readFileContent(configPath)
+    const archivePath = await writeHealthWatchArtifact('opencode-config-broken', () => content)
     logger.warn(`Archived broken OpenCode config to ${archivePath}`)
     return archivePath
   } catch (error) {

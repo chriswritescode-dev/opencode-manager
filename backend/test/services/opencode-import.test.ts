@@ -28,7 +28,18 @@ vi.mock('../../src/services/file-operations', () => ({
 
 vi.mock('../../src/services/opencode-config-file', async (importOriginal) => ({
   ...(await importOriginal<typeof import('../../src/services/opencode-config-file')>()),
+  readOpenCodeConfigFile: vi.fn(),
   writeOpenCodeConfigFile: vi.fn(),
+}))
+
+vi.mock('../../src/services/opencode-single-server', () => ({
+  opencodeServerManager: {
+    clearStartupError: vi.fn(),
+  },
+}))
+
+vi.mock('../../src/services/opencode/config-recovery', () => ({
+  patchConfigWithRecovery: vi.fn(),
 }))
 
 vi.mock('@opencode-manager/shared/config/env', () => ({
@@ -41,7 +52,8 @@ import { existsSync } from 'node:fs'
 import { readdir, rm, cp, mkdtemp, rename } from 'fs/promises'
 import { Database as SQLiteDatabase } from 'bun:sqlite'
 import { ensureDirectoryExists, fileExists, readFileContent } from '../../src/services/file-operations'
-import { writeOpenCodeConfigFile } from '../../src/services/opencode-config-file'
+import { readOpenCodeConfigFile, writeOpenCodeConfigFile } from '../../src/services/opencode-config-file'
+import type { SettingsService } from '../../src/services/settings'
 import { getFirstExistingConfigSourcePath, getOpenCodeImportStatus, syncOpenCodeImport } from '../../src/services/opencode-import'
 
 const mockReaddir = readdir as unknown as ReturnType<typeof vi.fn>
@@ -49,6 +61,7 @@ const mockExistsSync = existsSync as ReturnType<typeof vi.fn>
 const mockFileExists = fileExists as ReturnType<typeof vi.fn>
 const mockReadFileContent = readFileContent as ReturnType<typeof vi.fn>
 const mockEnsureDirectoryExists = ensureDirectoryExists as ReturnType<typeof vi.fn>
+const mockReadOpenCodeConfigFile = readOpenCodeConfigFile as ReturnType<typeof vi.fn>
 const mockWriteOpenCodeConfigFile = writeOpenCodeConfigFile as ReturnType<typeof vi.fn>
 const MockSQLiteDatabase = SQLiteDatabase as unknown as ReturnType<typeof vi.fn>
 const mockMkdtemp = mkdtemp as unknown as ReturnType<typeof vi.fn>
@@ -122,6 +135,35 @@ describe('opencode-import service', () => {
       '/tmp/workspace/.opencode/state/opencode-import-123',
       '/tmp/workspace/.opencode/state/opencode'
     )
+  })
+
+  it('captures the previous on-disk config as last known good before importing over it', async () => {
+    process.env.OPENCODE_IMPORT_CONFIG_PATH = '/import/opencode-config/opencode.json'
+
+    mockFileExists.mockImplementation(async (candidate: string) => candidate === '/import/opencode-config/opencode.json')
+    mockReadOpenCodeConfigFile.mockResolvedValue({
+      isValid: true,
+      rawContent: '{"theme":"previous"}',
+    })
+    const settingsService = { saveLastKnownGoodConfig: vi.fn() } as unknown as SettingsService
+
+    await syncOpenCodeImport({ overwriteState: true, settingsService })
+
+    expect(settingsService.saveLastKnownGoodConfig).toHaveBeenCalledWith('{"theme":"previous"}')
+    expect(mockWriteOpenCodeConfigFile).toHaveBeenCalledWith('{"$schema":"https://opencode.ai/config.json"}')
+  })
+
+  it('does not capture last known good when no previous config file exists', async () => {
+    process.env.OPENCODE_IMPORT_CONFIG_PATH = '/import/opencode-config/opencode.json'
+
+    mockFileExists.mockImplementation(async (candidate: string) => candidate === '/import/opencode-config/opencode.json')
+    mockReadOpenCodeConfigFile.mockResolvedValue(null)
+    const settingsService = { saveLastKnownGoodConfig: vi.fn() } as unknown as SettingsService
+
+    await syncOpenCodeImport({ overwriteState: true, settingsService })
+
+    expect(settingsService.saveLastKnownGoodConfig).not.toHaveBeenCalled()
+    expect(mockWriteOpenCodeConfigFile).toHaveBeenCalled()
   })
 
   it('does not report state imported when source db is missing', async () => {

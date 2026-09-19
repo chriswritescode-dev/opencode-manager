@@ -29,16 +29,18 @@ vi.mock('../../src/services/opencode/config-recovery', () => ({
 }))
 
 const markRestartPendingMock = vi.hoisted(() => vi.fn())
+const clearStartupErrorMock = vi.hoisted(() => vi.fn())
 vi.mock('../../src/services/opencode-single-server', () => ({
   opencodeServerManager: {
     markRestartPending: markRestartPendingMock,
+    clearStartupError: clearStartupErrorMock,
   },
 }))
 
 import { migrate } from '../../src/db/migration-runner'
 import { allMigrations } from '../../src/db/migrations'
 import { SettingsService } from '../../src/services/settings'
-import { applyOpenCodeConfigUpdate, type ApplyOpenCodeConfigResult } from '../../src/services/opencode-config-apply'
+import { applyOpenCodeConfigUpdate, captureLastKnownGoodOpenCodeConfig, restoreLastKnownGoodOpenCodeConfig, type ApplyOpenCodeConfigResult } from '../../src/services/opencode-config-apply'
 import type { OpenCodeClient } from '../../src/services/opencode/client'
 
 function expectStatus<T extends ApplyOpenCodeConfigResult['status']>(
@@ -174,6 +176,44 @@ describe('opencode-config-apply', () => {
 
     expect(result.config.rawContent).toBe('{\n  "theme": "light"\n}')
     expect(settingsService.getLastKnownGoodConfig()).toBe('sentinel')
+  })
+
+  it('captures the on-disk config as last known good when it is valid', async () => {
+    const previous = '{"theme":"dark"}'
+    await writeFile(paths.config, previous, 'utf8')
+    settingsService.saveLastKnownGoodConfig('sentinel')
+
+    const captured = await captureLastKnownGoodOpenCodeConfig(settingsService)
+
+    expect(captured?.rawContent).toBe(previous)
+    expect(settingsService.getLastKnownGoodConfig()).toBe(previous)
+  })
+
+  it('does not overwrite last known good when the on-disk config is invalid', async () => {
+    await writeFile(paths.config, '{"model": 5}', 'utf8')
+    settingsService.saveLastKnownGoodConfig('sentinel')
+
+    const captured = await captureLastKnownGoodOpenCodeConfig(settingsService)
+
+    expect(captured?.isValid).toBe(false)
+    expect(settingsService.getLastKnownGoodConfig()).toBe('sentinel')
+  })
+
+  it('returns null from restore when no last known good config exists', async () => {
+    const service = { getLastKnownGoodConfig: () => null } as unknown as SettingsService
+
+    expect(await restoreLastKnownGoodOpenCodeConfig(service)).toBeNull()
+    expect(clearStartupErrorMock).not.toHaveBeenCalled()
+  })
+
+  it('writes the last known good config and clears the startup error on restore', async () => {
+    const service = { getLastKnownGoodConfig: () => '{"theme":"dark"}' } as unknown as SettingsService
+
+    const restored = await restoreLastKnownGoodOpenCodeConfig(service)
+
+    expect(restored?.rawContent).toBe('{"theme":"dark"}')
+    await expect(readFile(paths.config, 'utf8')).resolves.toBe('{"theme":"dark"}')
+    expect(clearStartupErrorMock).toHaveBeenCalledTimes(1)
   })
 
   it('throws ZodError and writes nothing when the submitted content is invalid', async () => {

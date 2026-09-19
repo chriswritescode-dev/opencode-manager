@@ -88,11 +88,13 @@ vi.mock('../../src/services/opencode/config-recovery', () => ({
 }))
 
 const writeOpenCodeConfigFileMock = vi.hoisted(() => vi.fn())
+const readOpenCodeConfigFileMock = vi.hoisted(() => vi.fn())
 
 vi.mock('../../src/services/opencode-config-file', async (importOriginal) => {
   const actual = await importOriginal<typeof import('../../src/services/opencode-config-file')>()
   return {
     ...actual,
+    readOpenCodeConfigFile: readOpenCodeConfigFileMock,
     writeOpenCodeConfigFile: writeOpenCodeConfigFileMock,
   }
 })
@@ -3060,14 +3062,22 @@ describe('ConfigReloadError', () => {
 })
 
 describe('OpenCodeServerManager - reloadConfig', () => {
+  const configFile = (content: Record<string, unknown>) => ({
+    path: '/test/workspace/.config/opencode.json',
+    rawContent: JSON.stringify(content),
+    content,
+    isValid: true,
+    updatedAt: 0,
+  })
+
   beforeEach(() => {
     vi.clearAllMocks()
     writeOpenCodeConfigFileMock.mockReset()
+    readOpenCodeConfigFileMock.mockReset()
   })
 
   it('should read config from file before patching', async () => {
-    const mockReadFile = vi.fn().mockResolvedValue(JSON.stringify({ command: { review: 'test' } }))
-    fs.readFile = mockReadFile
+    readOpenCodeConfigFileMock.mockResolvedValue(configFile({ command: { review: 'test' } }))
 
     const { patchConfigWithRecovery } = await import('../../src/services/opencode/config-recovery')
     const mockPatchResult = { success: true }
@@ -3079,10 +3089,7 @@ describe('OpenCodeServerManager - reloadConfig', () => {
 
     await opencodeServerManager.reloadConfig()
 
-    expect(mockReadFile).toHaveBeenCalledWith(
-      expect.stringContaining('.config/opencode.json'),
-      'utf-8'
-    )
+    expect(readOpenCodeConfigFileMock).toHaveBeenCalled()
     expect(patchConfigWithRecovery).toHaveBeenCalled()
   })
 
@@ -3092,7 +3099,7 @@ describe('OpenCodeServerManager - reloadConfig', () => {
     vi.mocked(patchConfigWithRecovery).mockResolvedValue({ success: true } as any)
     const { createStubOpenCodeClient } = await import('../helpers/stub-opencode-client')
     opencodeServerManager.setOpenCodeClient(createStubOpenCodeClient())
-    fs.readFile = vi.fn().mockResolvedValue(JSON.stringify({ plugin: ['evil-plugin'], model: 'x' }))
+    readOpenCodeConfigFileMock.mockResolvedValue(configFile({ plugin: ['evil-plugin'], model: 'x' }))
 
     await opencodeServerManager.reloadConfig()
 
@@ -3106,7 +3113,7 @@ describe('OpenCodeServerManager - reloadConfig', () => {
     vi.mocked(patchConfigWithRecovery).mockResolvedValue({ success: true } as any)
     const { createStubOpenCodeClient } = await import('../helpers/stub-opencode-client')
     opencodeServerManager.setOpenCodeClient(createStubOpenCodeClient())
-    fs.readFile = vi.fn().mockResolvedValue(JSON.stringify({ model: 'x' }))
+    readOpenCodeConfigFileMock.mockResolvedValue(configFile({ model: 'x' }))
 
     await opencodeServerManager.reloadConfig()
 
@@ -3125,7 +3132,7 @@ describe('OpenCodeServerManager - reloadConfig', () => {
     } as any)
     const { createStubOpenCodeClient } = await import('../helpers/stub-opencode-client')
     opencodeServerManager.setOpenCodeClient(createStubOpenCodeClient())
-    fs.readFile = vi.fn().mockResolvedValue(JSON.stringify({ model: 'x', mcp: { bad: true } }))
+    readOpenCodeConfigFileMock.mockResolvedValue(configFile({ model: 'x', mcp: { bad: true } }))
 
     await opencodeServerManager.reloadConfig()
 
@@ -3138,7 +3145,7 @@ describe('OpenCodeServerManager - reloadConfig', () => {
     vi.mocked(patchConfigWithRecovery).mockResolvedValue({ success: true } as any)
     const { createStubOpenCodeClient } = await import('../helpers/stub-opencode-client')
     opencodeServerManager.setOpenCodeClient(createStubOpenCodeClient())
-    fs.readFile = vi.fn().mockResolvedValue(JSON.stringify({ model: 'x' }))
+    readOpenCodeConfigFileMock.mockResolvedValue(configFile({ model: 'x' }))
 
     await opencodeServerManager.reloadConfig()
 
@@ -3158,7 +3165,7 @@ describe('OpenCodeServerManager - reloadConfig', () => {
     ]))
     const { createStubOpenCodeClient } = await import('../helpers/stub-opencode-client')
     opencodeServerManager.setOpenCodeClient(createStubOpenCodeClient())
-    fs.readFile = vi.fn().mockResolvedValue(JSON.stringify({ model: 'x', mcp: { bad: true } }))
+    readOpenCodeConfigFileMock.mockResolvedValue(configFile({ model: 'x', mcp: { bad: true } }))
 
     const error = await opencodeServerManager.reloadConfig().then(
       () => null,
@@ -3179,7 +3186,7 @@ describe('OpenCodeServerManager - reloadConfig', () => {
 
     const openCodeClient = createStubOpenCodeClient()
     opencodeServerManager.setOpenCodeClient(openCodeClient)
-    fs.readFile = vi.fn().mockResolvedValue(JSON.stringify({ model: 'x', mcp: { bad: true } }))
+    readOpenCodeConfigFileMock.mockResolvedValue(configFile({ model: 'x', mcp: { bad: true } }))
 
     const events: string[] = []
     let releaseReloadWrite!: () => void
@@ -3216,7 +3223,7 @@ describe('OpenCodeServerManager - reloadConfig', () => {
     const apply = applyOpenCodeConfigUpdate({
       content: { theme: 'light' },
       openCodeClient,
-      settingsService: {} as unknown as Parameters<typeof applyOpenCodeConfigUpdate>[0]['settingsService'],
+      settingsService: { saveLastKnownGoodConfig: vi.fn() } as unknown as Parameters<typeof applyOpenCodeConfigUpdate>[0]['settingsService'],
     })
     await new Promise((resolve) => setTimeout(resolve, 20))
     expect(events).toEqual(['reload:write:start'])

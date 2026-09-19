@@ -18,13 +18,8 @@ vi.mock('@opencode-manager/shared/config/env', async (importOriginal) => ({
   getOpenCodeConfigFilePath: () => paths.configFile,
 }))
 
-vi.mock('../../src/services/opencode-import', () => ({
-  getFirstExistingConfigSourcePath: vi.fn(),
-}))
-
-import { getFirstExistingConfigSourcePath } from '../../src/services/opencode-import'
-
-const mockGetFirstExistingConfigSourcePath = getFirstExistingConfigSourcePath as ReturnType<typeof vi.fn>
+const originalHome = process.env.HOME
+const originalImportConfigPath = process.env.OPENCODE_IMPORT_CONFIG_PATH
 
 function migrateToV18(db: Database): void {
   migrate(db, allMigrations.filter(migration => migration.version < 19))
@@ -40,11 +35,22 @@ describe('019-drop-opencode-configs', () => {
     paths.workDir = await mkdtemp(path.join(tmpdir(), 'opencode-config-migration-'))
     paths.configHome = path.join(paths.workDir, '.config')
     paths.configFile = path.join(paths.configHome, 'opencode', 'opencode.json')
-    mockGetFirstExistingConfigSourcePath.mockReturnValue(null)
+    process.env.HOME = paths.workDir
+    delete process.env.OPENCODE_IMPORT_CONFIG_PATH
   })
 
   afterEach(async () => {
     await rm(paths.workDir, { recursive: true, force: true })
+    if (originalHome === undefined) {
+      delete process.env.HOME
+    } else {
+      process.env.HOME = originalHome
+    }
+    if (originalImportConfigPath === undefined) {
+      delete process.env.OPENCODE_IMPORT_CONFIG_PATH
+    } else {
+      process.env.OPENCODE_IMPORT_CONFIG_PATH = originalImportConfigPath
+    }
   })
 
   it('archives rows, restores the default file, and drops the table and column', async () => {
@@ -89,7 +95,9 @@ describe('019-drop-opencode-configs', () => {
     const defaultContent = JSON.stringify({ model: 'default' })
     insertConfig(db, 'default', defaultContent, true)
 
-    mockGetFirstExistingConfigSourcePath.mockReturnValue('/import/opencode.json')
+    const importSource = path.join(paths.workDir, 'import-source.json')
+    await writeFile(importSource, '{}')
+    process.env.OPENCODE_IMPORT_CONFIG_PATH = importSource
 
     migrate(db, allMigrations)
 

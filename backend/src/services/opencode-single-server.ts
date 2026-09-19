@@ -26,13 +26,17 @@ import {
   getOpenCodeTmpHome,
   ENV,
 } from '@opencode-manager/shared/config/env'
-import { parseJsonc } from '@opencode-manager/shared/utils'
 import { ZodError } from 'zod'
 import type { Database } from 'bun:sqlite'
 import { compareVersions } from '../utils/version-utils'
 import { patchConfigWithRecovery } from './opencode/config-recovery'
 import type { OpenCodeClient } from './opencode/client'
-import { withOpenCodeConfigLock, writeOpenCodeConfigFile } from './opencode-config-file'
+import {
+  readOpenCodeConfigFile,
+  toOpenCodeConfigValidationIssues,
+  withOpenCodeConfigLock,
+  writeOpenCodeConfigFile,
+} from './opencode-config-file'
 import { getOrCreateInternalToken } from './internal-token'
 import { installManagedPlugins } from './opencode/plugin-registry'
 import { getOpenCodePluginDiscoveryHome, restoreQuarantinedOpenCodePlugins } from './opencode-plugin-quarantine'
@@ -616,7 +620,7 @@ class OpenCodeServerManager {
       }
       logger.warn('Failed to install a generated OpenCode plugin (sandboxing is disabled):', error)
     }
-    const configuredPlugins = await this.getConfiguredPlugins(openCodeConfigPath)
+    const configuredPlugins = await this.getConfiguredPlugins()
     await this.installConfiguredPlugins(configuredPlugins)
     const configuredPluginCount = configuredPlugins.length
     const openCodeExecutable = resolveOpenCodeExecutable() ?? 'opencode'
@@ -958,13 +962,13 @@ class OpenCodeServerManager {
     return options !== null && typeof options === 'object' && !Array.isArray(options)
   }
 
-  private async getConfiguredPlugins(configPath: string): Promise<OpenCodePluginSpec[]> {
+  private async getConfiguredPlugins(): Promise<OpenCodePluginSpec[]> {
     try {
-      const content = await fs.readFile(configPath, 'utf-8')
-      const config = parseJsonc(content) as { plugin?: unknown }
-      if (!Array.isArray(config.plugin)) return []
-      return config.plugin
-        .filter((plugin): plugin is OpenCodePluginSpec => this.isOpenCodePluginSpec(plugin))
+      const file = await readOpenCodeConfigFile()
+      const plugin = file?.content.plugin
+      if (!Array.isArray(plugin)) return []
+      return plugin
+        .filter((entry): entry is OpenCodePluginSpec => this.isOpenCodePluginSpec(entry))
     } catch {
       return []
     }
@@ -1044,45 +1048,44 @@ class OpenCodeServerManager {
     try {
       logger.info('Reloading OpenCode configuration (via API)')
       try {
-        const configPath = getOpenCodeConfigFilePath()
-        const fileContent = await fs.readFile(configPath, 'utf-8')
-        const fileConfig = parseJsonc(fileContent) as Record<string, unknown>
-        logger.info(`Read config from file for reload: ${configPath}`)
-
-        const patchTarget = fileConfig
-        const patchResult = await patchConfigWithRecovery(this.requireClient(), patchTarget)
-        if (!patchResult.success) {
-          const errorMessage = patchResult.error || 'Failed to reload config'
-          const validationIssues = patchResult.details || []
-          const removedFields = patchResult.removedFields || []
-          if (validationIssues.length > 0) {
-            const issueSummary = validationIssues.map((d) => `${d.path}: ${d.message}`).join('; ')
-            logger.error(`Config reload validation errors: ${issueSummary}`)
+        await withOpenCodeConfigLock(async () => {
+          const file = await readOpenCodeConfigFile()
+          if (file === null) {
+            throw new Error(`OpenCode config file not found: ${getOpenCodeConfigFilePath()}`)
           }
-          if (removedFields.length > 0) {
-            logger.info(`Removed fields during config reload: ${removedFields.join(', ')}`)
-          }
-          throw new ConfigReloadError(errorMessage, validationIssues, removedFields)
-        }
+          logger.info(`Read config from file for reload: ${file.path}`)
 
-        if (patchResult.removedFields && patchResult.removedFields.length > 0 && patchResult.appliedConfig) {
-          const cleanedConfigContent = JSON.stringify(patchResult.appliedConfig, null, 2)
-          try {
-            await withOpenCodeConfigLock(() => writeOpenCodeConfigFile(cleanedConfigContent))
-          } catch (error) {
-            if (error instanceof ZodError) {
-              const validationIssues = error.issues.map((issue) => ({
-                path: issue.path.length > 0 ? issue.path.join('.') : 'root',
-                message: issue.message,
-              }))
+          const patchResult = await patchConfigWithRecovery(this.requireClient(), file.content)
+          if (!patchResult.success) {
+            const errorMessage = patchResult.error || 'Failed to reload config'
+            const validationIssues = patchResult.details || []
+            const removedFields = patchResult.removedFields || []
+            if (validationIssues.length > 0) {
               const issueSummary = validationIssues.map((d) => `${d.path}: ${d.message}`).join('; ')
               logger.error(`Config reload validation errors: ${issueSummary}`)
-              throw new ConfigReloadError('Cleaned config failed validation', validationIssues, patchResult.removedFields)
             }
-            throw error
+            if (removedFields.length > 0) {
+              logger.info(`Removed fields during config reload: ${removedFields.join(', ')}`)
+            }
+            throw new ConfigReloadError(errorMessage, validationIssues, removedFields)
           }
-          logger.info(`Persisted cleaned config to ${configPath} after removing fields: ${patchResult.removedFields.join(', ')}`)
-        }
+
+          if (patchResult.removedFields && patchResult.removedFields.length > 0 && patchResult.appliedConfig) {
+            const cleanedConfigContent = JSON.stringify(patchResult.appliedConfig, null, 2)
+            try {
+              await writeOpenCodeConfigFile(cleanedConfigContent)
+            } catch (error) {
+              if (error instanceof ZodError) {
+                const validationIssues = toOpenCodeConfigValidationIssues(error.issues)
+                const issueSummary = validationIssues.map((d) => `${d.path}: ${d.message}`).join('; ')
+                logger.error(`Config reload validation errors: ${issueSummary}`)
+                throw new ConfigReloadError('Cleaned config failed validation', validationIssues, patchResult.removedFields)
+              }
+              throw error
+            }
+            logger.info(`Persisted cleaned config to ${file.path} after removing fields: ${patchResult.removedFields.join(', ')}`)
+          }
+        })
 
         logger.info('OpenCode configuration reloaded successfully')
         await new Promise(r => setTimeout(r, 500))

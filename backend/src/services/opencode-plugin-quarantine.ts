@@ -4,6 +4,7 @@ import path from 'path'
 import { parseJsonc } from '@opencode-manager/shared/utils'
 import { logger } from '../utils/logger'
 import { existingFileMode, mkdirSafe, writeFileAtomic } from '../utils/fs-safe'
+import { withFileLock } from '../utils/atomic-json'
 import { getOpenCodePluginDir } from './opencode/plugin-registry'
 import {
   isRecord,
@@ -285,7 +286,8 @@ async function restoreEnforcementConfigSections(configPath: string): Promise<voi
   const restored = restoreEnforcementSections(currentConfig, removed)
   const restoredContent = JSON.stringify(restored, null, 2)
   if (restoredContent !== currentContent) {
-    await writeFileAtomic(configPath, restoredContent, { mode: await existingFileMode(configPath) })
+    const mode = await existingFileMode(configPath)
+    await withFileLock(configPath, () => writeFileAtomic(configPath, restoredContent, { mode }))
   }
   await fs.rm(backupPath, { force: true })
 }

@@ -778,8 +778,8 @@ When the response contains \`restartRequired: true\`, tell the user to restart t
 
 ## Safety
 
-- This API intentionally rejects any attempt to modify credentials, API keys, or other sensitive settings
-- If you need to change credentials (Git, TTS, STT, etc.), guide the user to use the full UI
+- The settings PATCH endpoint rejects any attempt to modify credentials, API keys, or other sensitive settings; guide the user to the full UI for Git, TTS, and STT credentials
+- PUT /opencode-config writes the complete OpenCode configuration, including \`plugin\`, \`mcp\`, and \`provider\` entries; change only the keys the user explicitly asked for and never add plugins, MCP servers, or provider credentials the user did not request
 - The settings PATCH endpoint does NOT trigger OpenCode reload or restart
 `
 }

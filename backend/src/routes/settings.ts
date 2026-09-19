@@ -7,11 +7,11 @@ import { resolve, dirname } from 'path'
 import type { Database } from 'bun:sqlite'
 import { SettingsService } from '../services/settings'
 import { writeFileContent, readFileContent, fileExists } from '../services/file-operations'
-import { readOpenCodeConfigFile, writeOpenCodeConfigFile, deleteOpenCodeConfigFile } from '../services/opencode-config-file'
-import { applyOpenCodeConfigUpdate, toOpenCodeConfigApplyResponse } from '../services/opencode-config-apply'
+import { deleteOpenCodeConfigFile } from '../services/opencode-config-file'
+import { restoreLastKnownGoodOpenCodeConfig } from '../services/opencode-config-apply'
+import { createOpenCodeConfigRoutes } from './opencode-config'
 import type { OpenCodeClient } from '../services/opencode/client'
 import { getAgentsMdPath } from '@opencode-manager/shared/config/env'
-import { UpdateOpenCodeConfigRequestSchema } from '@opencode-manager/shared/schemas'
 import {
   UserPreferencesSchema,
   type SandboxPreferences,
@@ -419,42 +419,7 @@ export function createSettingsRoutes(db: Database, gitAuthService: GitAuthServic
   })
 
   // OpenCode Config routes
-  app.get('/opencode-config', async (c) => {
-    try {
-      const config = await readOpenCodeConfigFile()
-      if (!config) {
-        return c.json({ error: 'No OpenCode config file found' }, 404)
-      }
-      return c.json(config)
-    } catch (error) {
-      logger.error('Failed to get OpenCode config:', error)
-      return c.json({ error: 'Failed to get OpenCode config' }, 500)
-    }
-  })
-
-  app.put('/opencode-config', async (c) => {
-    const userId = c.req.query('userId') || 'default'
-
-    let body: unknown
-    try {
-      body = await c.req.json()
-    } catch {
-      return c.json({ error: 'Invalid config data' }, 400)
-    }
-
-    try {
-      const { content } = UpdateOpenCodeConfigRequestSchema.parse(body)
-      const result = await applyOpenCodeConfigUpdate({ content, openCodeClient, settingsService, userId })
-      const { status, body: responseBody } = toOpenCodeConfigApplyResponse(result)
-      return c.json(responseBody, status)
-    } catch (error) {
-      logger.error('Failed to update OpenCode config:', error)
-      if (error instanceof z.ZodError) {
-        return c.json({ error: 'Invalid config data', details: error.issues }, 400)
-      }
-      return c.json({ error: 'Failed to update OpenCode config' }, 500)
-    }
-  })
+  app.route('/opencode-config', createOpenCodeConfigRoutes(settingsService, openCodeClient))
 
   app.post('/opencode-restart', async (c) => {
     try {
@@ -495,6 +460,7 @@ export function createSettingsRoutes(db: Database, gitAuthService: GitAuthServic
       const result = await syncOpenCodeImport({
         overwriteState: body.overwriteState ?? false,
         protectExistingState: true,
+        settingsService,
       })
 
       if (!result.configImported && !result.stateImported) {
@@ -577,15 +543,13 @@ export function createSettingsRoutes(db: Database, gitAuthService: GitAuthServic
     try {
       logger.info('OpenCode config rollback requested')
 
-      const lastGood = settingsService.getLastKnownGoodConfig()
-      if (!lastGood) {
+      const restored = await restoreLastKnownGoodOpenCodeConfig(settingsService)
+      if (!restored) {
         return c.json({ error: 'No previous working config available for rollback' }, 404)
       }
 
-      await writeOpenCodeConfigFile(lastGood)
       logger.info('Rolled back to the previous working config')
 
-      opencodeServerManager.clearStartupError()
       try {
         await reloadOpenCodeConfig(openCodeSupervisor)
       } catch (reloadError) {

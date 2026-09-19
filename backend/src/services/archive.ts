@@ -1,18 +1,15 @@
 import archiver from 'archiver'
 import { createWriteStream, createReadStream } from 'fs'
-import { readdir, stat, unlink, realpath } from 'fs/promises'
+import { readdir, stat, unlink } from 'fs/promises'
 import path from 'path'
 import os from 'os'
 import { logger } from '../utils/logger'
+import { canonicalPath } from '../utils/fs-safe'
 import { getReposPath } from '@opencode-manager/shared/config/env'
 
 async function resolvePath(userPath: string): Promise<string> {
   const absolutePath = path.isAbsolute(userPath) ? userPath : path.join(getReposPath(), userPath)
-  try {
-    return await realpath(absolutePath)
-  } catch {
-    return absolutePath
-  }
+  return canonicalPath(absolutePath)
 }
 
 export interface ArchiveOptions {

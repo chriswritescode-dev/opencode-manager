@@ -1,13 +1,13 @@
 import { Hono } from 'hono'
 import { z } from 'zod'
 import { UpdateOpenCodeConfigRequestSchema } from '@opencode-manager/shared/schemas'
-import type { SettingsService } from '../../services/settings'
-import type { OpenCodeClient } from '../../services/opencode/client'
-import { readOpenCodeConfigFile } from '../../services/opencode-config-file'
-import { applyOpenCodeConfigUpdate, toOpenCodeConfigApplyResponse } from '../../services/opencode-config-apply'
-import { logger } from '../../utils/logger'
+import type { SettingsService } from '../services/settings'
+import type { OpenCodeClient } from '../services/opencode/client'
+import { readOpenCodeConfigFile } from '../services/opencode-config-file'
+import { applyOpenCodeConfigUpdate, toOpenCodeConfigApplyResponse } from '../services/opencode-config-apply'
+import { logger } from '../utils/logger'
 
-export function createInternalOpenCodeConfigRoutes(settingsService: SettingsService, openCodeClient: OpenCodeClient) {
+export function createOpenCodeConfigRoutes(settingsService: SettingsService, openCodeClient: OpenCodeClient) {
   const app = new Hono()
 
   app.get('/', async (c) => {
@@ -24,8 +24,6 @@ export function createInternalOpenCodeConfigRoutes(settingsService: SettingsServ
   })
 
   app.put('/', async (c) => {
-    const userId = c.req.query('userId') ?? 'default'
-
     let body: unknown
     try {
       body = await c.req.json()
@@ -43,7 +41,6 @@ export function createInternalOpenCodeConfigRoutes(settingsService: SettingsServ
         content: parsed.data.content,
         openCodeClient,
         settingsService,
-        userId,
       })
       const { status, body: responseBody } = toOpenCodeConfigApplyResponse(result)
       return c.json(responseBody, status)
