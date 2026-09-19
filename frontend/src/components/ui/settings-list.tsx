@@ -77,7 +77,7 @@ export function SettingsList({
 
   if (isEmpty) {
     return (
-      <div className="h-auto max-h-40 min-h-24 rounded-lg border border-dashed border-border bg-card/50 p-6 text-center text-muted-foreground">
+      <div className="h-auto max-h-40 min-h-24 rounded-lg border border-dashed border-border bg-card/50 p-6 text-center text-muted-foreground [[data-opencode-settings]_&]:rounded-none [[data-opencode-settings]_&]:border-0 [[data-opencode-settings]_&]:bg-transparent">
         <p className="text-sm font-medium text-foreground">{emptyTitle}</p>
         <p className="text-xs mt-1">{emptyHint}</p>
       </div>
@@ -85,8 +85,8 @@ export function SettingsList({
   }
 
   return (
-    <div className={cn(maxHeightClassName ?? 'max-h-[420px]', 'overflow-y-auto rounded-lg border border-border')}>
-      <div className="divide-y divide-border">{children}</div>
+    <div className={cn(maxHeightClassName ?? 'max-h-[420px]', 'overflow-y-auto rounded-lg border border-border [[data-opencode-settings]_&]:rounded-none [[data-opencode-settings]_&]:border-0')}>
+      <div className="divide-y divide-border [[data-opencode-settings]_&]:divide-y-0">{children}</div>
     </div>
   )
 }
@@ -109,32 +109,38 @@ export function SettingsListRow({
       onClick={onClick}
       className={cn(
         'group flex flex-col gap-2 bg-card px-3 py-3 hover:bg-accent/50 sm:flex-row sm:items-center sm:gap-3',
+        '[[data-opencode-settings]_&]:flex-row [[data-opencode-settings]_&]:items-center [[data-opencode-settings]_&]:gap-2 [[data-opencode-settings]_&]:bg-transparent [[data-opencode-settings]_&]:px-2 [[data-opencode-settings]_&]:py-2',
         onClick && 'cursor-pointer',
         className,
       )}
     >
       <div className="min-w-0 flex-1 self-stretch sm:self-auto">
         <div className="flex min-w-0 items-start gap-2">
-          <p className={cn('min-w-0 flex-1 truncate text-sm font-medium', titleClassName)}>{title}</p>
+          <p className={cn('min-w-0 flex-1 truncate text-sm font-medium [[data-opencode-settings]_&]:whitespace-normal [[data-opencode-settings]_&]:break-words', titleClassName)}>{title}</p>
           {badges}
         </div>
-        {description && <div className="mt-1 truncate text-xs text-muted-foreground">{description}</div>}
+        {description && <div className="mt-1 truncate text-xs text-muted-foreground [[data-opencode-settings]_&]:mt-0.5">{description}</div>}
         {belowDescription}
       </div>
       <div
-        className="flex w-full shrink-0 items-center justify-end gap-1 sm:w-auto sm:justify-start"
+        className="flex w-full shrink-0 items-center justify-end gap-1 sm:w-auto sm:justify-start [[data-opencode-settings]_&]:w-auto"
         onClick={(e) => e.stopPropagation()}
       >
         {trailing}
         {primaryAction && (
-          <Button type="button" size="sm" onClick={primaryAction.onClick} className="flex-1 sm:flex-none">
+          <Button
+            type="button"
+            size="sm"
+            onClick={primaryAction.onClick}
+            className="flex-1 sm:flex-none [[data-opencode-settings]_&]:max-sm:h-11 [[data-opencode-settings]_&]:flex-none [[data-opencode-settings]_&]:bg-transparent [[data-opencode-settings]_&]:text-foreground [[data-opencode-settings]_&]:hover:bg-accent [[data-opencode-settings]_&]:hover:text-accent-foreground"
+          >
             {primaryAction.label}
           </Button>
         )}
         {actions && actions.length > 0 && (
           <DropdownMenu>
             <DropdownMenuTrigger asChild>
-              <Button type="button" variant="ghost" size="icon" className="h-8 w-8" aria-label={actionsLabel}>
+              <Button type="button" variant="ghost" size="icon" className="h-8 w-8 [[data-opencode-settings]_&]:max-sm:h-11 [[data-opencode-settings]_&]:max-sm:w-11" aria-label={actionsLabel}>
                 <MoreHorizontal className="h-4 w-4" />
               </Button>
             </DropdownMenuTrigger>

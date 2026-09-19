@@ -41,26 +41,51 @@ function mockHealth(sandbox?: { available: boolean; enforced: boolean; reason?: 
   } as ReturnType<typeof useServerHealth>)
 }
 
+async function renderSandbox() {
+  const user = userEvent.setup()
+  render(<SandboxSettings />)
+  await user.click(screen.getByRole('button', { name: /^Sandbox/ }))
+  return user
+}
+
 describe('SandboxSettings', () => {
   beforeEach(() => {
     vi.clearAllMocks()
   })
 
-  it('reflects the persisted sandbox preference', () => {
+  it('keeps the controls collapsed until the disclosure is expanded', async () => {
+    mockUseSettings()
+    mockHealth({ available: true, enforced: false })
+
+    const user = userEvent.setup()
+    render(<SandboxSettings />)
+
+    const header = screen.getByRole('button', { name: /^Sandbox/ })
+    expect(header).toHaveAttribute('aria-expanded', 'false')
+    const content = document.getElementById(header.getAttribute('aria-controls') ?? '')
+    expect(content).toHaveClass('hidden')
+
+    await user.click(header)
+
+    expect(header).toHaveAttribute('aria-expanded', 'true')
+    expect(content).toHaveClass('block')
+    expect(screen.getByRole('switch', { name: 'Toggle sandbox' })).toBeInTheDocument()
+  })
+
+  it('reflects the persisted sandbox preference', async () => {
     mockUseSettings({ preferences: { sandbox: { enabled: true } } })
     mockHealth({ available: true, enforced: false })
 
-    render(<SandboxSettings />)
+    await renderSandbox()
 
     expect(screen.getByRole('switch', { name: 'Toggle sandbox' })).toBeChecked()
   })
 
   it('writes only the sandbox preference when toggled and shows the restart notice', async () => {
-    const user = userEvent.setup()
     const { updateSettingsAsync } = mockUseSettings()
     mockHealth({ available: true, enforced: false }, true)
 
-    render(<SandboxSettings />)
+    const user = await renderSandbox()
 
     await user.click(screen.getByRole('switch', { name: 'Toggle sandbox' }))
 
@@ -68,22 +93,21 @@ describe('SandboxSettings', () => {
     expect(screen.getByText('Restart the OpenCode server to apply sandbox changes.')).toBeInTheDocument()
   })
 
-  it('disables the switch with a visible reason when microVMs are unavailable', () => {
+  it('disables the switch with a visible reason when microVMs are unavailable', async () => {
     mockUseSettings()
     mockHealth({ available: false, enforced: false, reason: 'KVM is not available on this host' })
 
-    render(<SandboxSettings />)
+    await renderSandbox()
 
     expect(screen.getByRole('switch', { name: 'Toggle sandbox' })).toBeDisabled()
     expect(screen.getByText('KVM is not available on this host')).toBeInTheDocument()
   })
 
   it('still allows disabling an already-enabled preference when microVMs become unavailable', async () => {
-    const user = userEvent.setup()
     const { updateSettingsAsync } = mockUseSettings({ preferences: { sandbox: { enabled: true } } })
     mockHealth({ available: false, enforced: false, reason: 'KVM is not available on this host' })
 
-    render(<SandboxSettings />)
+    const user = await renderSandbox()
 
     const toggle = screen.getByRole('switch', { name: 'Toggle sandbox' })
     expect(toggle).toBeChecked()
@@ -95,7 +119,7 @@ describe('SandboxSettings', () => {
     expect(updateSettingsAsync).toHaveBeenCalledWith({ sandbox: { enabled: false, gitCredentials: false } })
   })
 
-  it('disables the switch while sandbox availability has not been reported', () => {
+  it('disables the switch while sandbox availability has not been reported', async () => {
     mockUseSettings()
     vi.mocked(useServerHealth).mockReturnValue({
       data: undefined,
@@ -106,7 +130,7 @@ describe('SandboxSettings', () => {
       rollbackMutation: { mutate: vi.fn(), mutateAsync: vi.fn(), isPending: false },
     } as ReturnType<typeof useServerHealth>)
 
-    render(<SandboxSettings />)
+    await renderSandbox()
 
     expect(screen.getByRole('switch', { name: 'Toggle sandbox' })).toBeDisabled()
     expect(screen.getByText('Checking sandbox availability...')).toBeInTheDocument()
@@ -122,11 +146,10 @@ describe('SandboxSettings', () => {
   })
 
   it('shows an error toast when saving the preference fails', async () => {
-    const user = userEvent.setup()
     mockUseSettings({ updateSettingsAsync: vi.fn().mockRejectedValue(new Error('failed')) })
     mockHealth({ available: true, enforced: false })
 
-    render(<SandboxSettings />)
+    const user = await renderSandbox()
 
     await user.click(screen.getByRole('switch', { name: 'Toggle sandbox' }))
 
@@ -134,7 +157,6 @@ describe('SandboxSettings', () => {
   })
 
   it('shows the backend error when enabling sandboxing is rejected', async () => {
-    const user = userEvent.setup()
     mockUseSettings({
       updateSettingsAsync: vi.fn().mockRejectedValue(
         new FetchError('Cannot enable sandboxing: process identity attestation is unavailable', 400),
@@ -142,7 +164,7 @@ describe('SandboxSettings', () => {
     })
     mockHealth({ available: true, enforced: false })
 
-    render(<SandboxSettings />)
+    const user = await renderSandbox()
 
     await user.click(screen.getByRole('switch', { name: 'Toggle sandbox' }))
 
@@ -152,13 +174,12 @@ describe('SandboxSettings', () => {
   })
 
   it('preserves the git credential preference when the sandbox toggle changes', async () => {
-    const user = userEvent.setup()
     const { updateSettingsAsync } = mockUseSettings({
       preferences: { sandbox: { enabled: false, gitCredentials: true } },
     })
     mockHealth({ available: true, enforced: false })
 
-    render(<SandboxSettings />)
+    const user = await renderSandbox()
 
     await user.click(screen.getByRole('switch', { name: 'Toggle sandbox' }))
 
@@ -166,22 +187,21 @@ describe('SandboxSettings', () => {
   })
 
   it('enables git credential forwarding without changing the sandbox preference', async () => {
-    const user = userEvent.setup()
     const { updateSettingsAsync } = mockUseSettings({ preferences: { sandbox: { enabled: true } } })
     mockHealth({ available: true, enforced: false })
 
-    render(<SandboxSettings />)
+    const user = await renderSandbox()
 
     await user.click(screen.getByRole('switch', { name: 'Toggle git credentials in sandbox' }))
 
     expect(updateSettingsAsync).toHaveBeenCalledWith({ sandbox: { enabled: true, gitCredentials: true } })
   })
 
-  it('disables the git credential switch while sandboxing is off', () => {
+  it('disables the git credential switch while sandboxing is off', async () => {
     mockUseSettings()
     mockHealth({ available: true, enforced: false })
 
-    render(<SandboxSettings />)
+    await renderSandbox()
 
     expect(screen.getByRole('switch', { name: 'Toggle git credentials in sandbox' })).toBeDisabled()
   })

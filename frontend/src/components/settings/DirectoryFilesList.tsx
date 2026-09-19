@@ -66,43 +66,46 @@ export function DirectoryFilesList({ kind, files, titlePrefix = '' }: DirectoryF
 
   return (
     <>
-      {files.map((file) => (
-        <SettingsListRow
-          key={`file:${file.relativePath}`}
-          title={`${titlePrefix}${file.name}`}
-          description={`Uploaded file: ${file.relativePath}`}
-          badges={<Badge variant="secondary" className="shrink-0">File</Badge>}
-          onClick={() => setEditingFile(file)}
-          primaryAction={{ label: 'Edit', onClick: () => setEditingFile(file) }}
-          actions={[{ label: 'Delete', destructive: true, onClick: () => setDeletingFile(file) }]}
-          actionsLabel={`Actions for ${file.name}`}
-        />
-      ))}
+      {files.map((file) => {
+        const isNested = file.relativePath.includes('/')
+        return (
+          <SettingsListRow
+            key={`file:${file.relativePath}`}
+            title={<span title={file.relativePath}>{`${titlePrefix}${file.name}`}</span>}
+            description={isNested ? `Uploaded file: ${file.relativePath}` : undefined}
+            badges={<Badge variant="secondary" className="shrink-0">File</Badge>}
+            onClick={() => setEditingFile(file)}
+            primaryAction={{ label: 'Edit', onClick: () => setEditingFile(file) }}
+            actions={[{ label: 'Delete', destructive: true, onClick: () => setDeletingFile(file) }]}
+            actionsLabel={`Actions for ${file.name}`}
+          />
+        )
+      })}
 
       <Dialog open={!!editingFile} onOpenChange={(open) => !open && setEditingFile(null)}>
-        <DialogContent mobileFullscreen className="sm:max-w-2xl sm:max-h-[85vh] gap-0 flex flex-col p-0 md:p-6 pb-safe">
+        <DialogContent mobileFullscreen keyboardAware className="sm:max-w-2xl sm:max-h-[85vh] gap-0 flex flex-col p-0 md:p-6 pb-safe">
           <DialogHeader className="p-4 sm:p-6 border-b">
-            <DialogTitle className="truncate">{editingFile?.relativePath}</DialogTitle>
+            <DialogTitle className="break-all pr-8">{editingFile?.relativePath}</DialogTitle>
           </DialogHeader>
 
-          <div className="flex-1 overflow-y-auto p-2 sm:p-4">
+          <div className="flex min-h-0 flex-1 flex-col p-2 sm:p-4">
             <Textarea
               value={content}
               onChange={(e) => setContent(e.target.value)}
               disabled={isLoadingContent}
-              rows={18}
-              className="font-mono md:text-sm"
+              aria-label={editingFile?.relativePath ?? 'File content'}
+              className="h-full min-h-0 flex-1 field-sizing-fixed resize-none font-mono md:text-sm"
             />
           </div>
 
           <DialogFooter className="flex flex-row gap-2 pt-2 border-t border-border sm:justify-end pb-4 p-3">
-            <Button variant="outline" onClick={() => setEditingFile(null)} className="flex-1 sm:flex-none">
+            <Button variant="outline" onClick={() => setEditingFile(null)} className="h-11 flex-1 sm:h-9 sm:flex-none">
               Cancel
             </Button>
             <Button
               onClick={() => updateMutation.mutate()}
               disabled={isLoadingContent || updateMutation.isPending}
-              className="flex-1 sm:flex-none"
+              className="h-11 flex-1 sm:h-9 sm:flex-none"
             >
               {updateMutation.isPending ? 'Saving...' : 'Save'}
             </Button>

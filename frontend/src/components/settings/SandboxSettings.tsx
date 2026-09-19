@@ -6,6 +6,7 @@ import { Badge } from '@/components/ui/badge'
 import { Box, RotateCcw } from 'lucide-react'
 import { showToast } from '@/lib/toast'
 import { FetchError } from '@/api/fetchWrapper'
+import { SettingsDisclosure } from './SettingsDisclosure'
 
 export function SandboxSettings() {
   const { preferences, updateSettingsAsync, isUpdating } = useSettings()
@@ -35,21 +36,20 @@ export function SandboxSettings() {
     )
 
   return (
-    <div className="rounded-lg border bg-card overflow-hidden">
-      <div className="p-4 space-y-3">
-        <div className="flex items-center justify-between gap-3">
-          <div className="flex items-center gap-2 min-w-0">
-            <Box className="h-4 w-4 shrink-0 text-muted-foreground" />
-            <h3 className="text-sm font-semibold truncate">Sandbox</h3>
-          </div>
-          {sandbox?.msbVersion && (
-            <Badge variant="outline" className="text-xs shrink-0">
-              msb {sandbox.msbVersion}
-            </Badge>
-          )}
-        </div>
-
-        <div className="flex items-center justify-between gap-3">
+    <SettingsDisclosure
+      title="Sandbox"
+      icon={<Box className="h-4 w-4 shrink-0 text-muted-foreground" />}
+      meta={
+        sandbox?.msbVersion ? (
+          <Badge variant="outline" className="text-xs shrink-0">
+            msb {sandbox.msbVersion}
+          </Badge>
+        ) : undefined
+      }
+      contentClassName="space-y-3"
+    >
+      <div className="grid gap-x-6 gap-y-3 @min-[1000px]:grid-cols-2">
+        <div className="flex items-start justify-between gap-3">
           <div className="min-w-0 space-y-0.5">
             <p className="text-sm text-muted-foreground">
               Run OpenCode agent commands inside microVMs for isolation.
@@ -70,9 +70,9 @@ export function SandboxSettings() {
           />
         </div>
 
-        <div className="flex items-center justify-between gap-3 border-t pt-3">
+        <div className="flex items-start justify-between gap-3 border-t pt-3 @min-[1000px]:border-t-0 @min-[1000px]:pt-0">
           <div className="min-w-0 space-y-0.5">
-            <p className="text-sm">Git credentials in sandbox</p>
+            <p className="text-sm font-semibold">Git credentials in sandbox</p>
             <p className="text-xs text-muted-foreground">
               Forward git credentials into the microVM so sandboxed git and gh commands can authenticate. A
               prompt-injected agent can exfiltrate any credential you forward.
@@ -85,16 +85,16 @@ export function SandboxSettings() {
             aria-label="Toggle git credentials in sandbox"
           />
         </div>
-
-        {health?.opencodeRestartPending && (
-          <Alert>
-            <RotateCcw className="h-4 w-4" />
-            <AlertDescription>
-              Restart the OpenCode server to apply sandbox changes.
-            </AlertDescription>
-          </Alert>
-        )}
       </div>
-    </div>
+
+      {health?.opencodeRestartPending && (
+        <Alert>
+          <RotateCcw className="h-4 w-4" />
+          <AlertDescription>
+            Restart the OpenCode server to apply sandbox changes.
+          </AlertDescription>
+        </Alert>
+      )}
+    </SettingsDisclosure>
   )
 }

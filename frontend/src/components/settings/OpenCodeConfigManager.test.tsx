@@ -14,6 +14,7 @@ const {
   mockGetOpenCodeImportStatus,
   mockListManagedSkills,
   mockListOpenCodeDirectoryFiles,
+  mockGetAgentsMd,
   healthState,
 } = vi.hoisted(() => ({
   mockGetOpenCodeConfig: vi.fn(),
@@ -23,6 +24,7 @@ const {
   mockGetOpenCodeImportStatus: vi.fn(),
   mockListManagedSkills: vi.fn(),
   mockListOpenCodeDirectoryFiles: vi.fn(),
+  mockGetAgentsMd: vi.fn(),
   healthState: { data: { opencode: 'healthy', opencodeRestartPending: false } as Record<string, unknown> },
 }))
 
@@ -43,6 +45,7 @@ vi.mock('@/api/settings', () => ({
     getOpenCodeImportStatus: mockGetOpenCodeImportStatus,
     listManagedSkills: mockListManagedSkills,
     listOpenCodeDirectoryFiles: mockListOpenCodeDirectoryFiles,
+    getAgentsMd: mockGetAgentsMd,
     syncOpenCodeImport: vi.fn(),
     upgradeOpenCode: vi.fn(),
   },
@@ -81,6 +84,7 @@ describe('OpenCodeConfigManager', () => {
     healthState.data = { opencode: 'healthy', opencodeRestartPending: false }
     mockGetOpenCodeConfig.mockResolvedValue(defaultConfig)
     mockGetOpenCodeImportStatus.mockResolvedValue({})
+    mockGetAgentsMd.mockResolvedValue({ content: '# Agent Instructions' })
     mockListManagedSkills.mockResolvedValue([])
     mockListOpenCodeDirectoryFiles.mockImplementation((kind: 'agents' | 'commands') => {
       if (kind === 'commands') return Promise.resolve([])
@@ -176,12 +180,58 @@ describe('OpenCodeConfigManager', () => {
     expect(screen.queryByText('Restart OpenCode Server?')).not.toBeInTheDocument()
   })
 
-  it('anchors the AGENTS.md card to the settings dialog scrollport', async () => {
+  it('keeps the AGENTS.md editor mounted while its disclosure toggles', async () => {
+    const user = userEvent.setup()
     renderWithQuery(<OpenCodeConfigManager />)
+
     const header = await screen.findByRole('button', { name: /Global Agent Instructions/i })
-    const card = header.parentElement
-    expect(card?.className).toContain('overflow-clip')
-    expect(card?.className).not.toContain('overflow-hidden')
+    expect(header).toHaveAttribute('aria-expanded', 'false')
+    const content = document.getElementById(header.getAttribute('aria-controls') ?? '')
+    expect(content).toHaveClass('hidden')
+    expect(await screen.findByLabelText('AGENTS.md content')).toBeInTheDocument()
+
+    const chevron = header.querySelector('.lucide-chevron-down')
+    expect(chevron).not.toHaveClass('rotate-180')
+
+    await user.click(header)
+
+    expect(header).toHaveAttribute('aria-expanded', 'true')
+    expect(content).toHaveClass('block')
+    expect(chevron).toHaveClass('rotate-180')
+    expect(chevron).not.toHaveClass('rotate-90')
+    expect(screen.getByLabelText('AGENTS.md content')).toBeInTheDocument()
+
+    await user.click(header)
+    expect(header).toHaveAttribute('aria-expanded', 'false')
+    expect(content).toHaveClass('hidden')
+    expect(screen.getByLabelText('AGENTS.md content')).toBeInTheDocument()
+  })
+
+  it('wires every disclosure header to a unique content id', async () => {
+    renderWithQuery(<OpenCodeConfigManager />)
+
+    await screen.findByText('opencode.json')
+    const headers = screen.getAllByRole('button').filter(
+      (button) => button.hasAttribute('aria-controls') && !button.hasAttribute('aria-haspopup'),
+    )
+    expect(headers).toHaveLength(7)
+    headers.forEach((header) => expect(header).toHaveAttribute('aria-expanded'))
+
+    const contentIds = headers.map((header) => header.getAttribute('aria-controls') ?? '')
+    expect(new Set(contentIds).size).toBe(7)
+    contentIds.forEach((id) => expect(document.getElementById(id)).toBeInTheDocument())
+  })
+
+  it('labels the config file actions and exposes its metadata', async () => {
+    renderWithQuery(<OpenCodeConfigManager />)
+
+    expect(await screen.findByText('opencode.json')).toBeInTheDocument()
+    const editButton = screen.getAllByRole('button', { name: 'Edit' }).find((button) => button.querySelector('.lucide-square-pen'))
+    expect(editButton).toBeDefined()
+    expect(screen.getByRole('button', { name: 'Download' })).toBeInTheDocument()
+    expect(screen.getByText('File location and updated time')).toBeInTheDocument()
+    expect(screen.getByText('/workspace/.opencode/opencode.json')).toBeInTheDocument()
+    expect(screen.getByText(`Updated: ${new Date(defaultConfig.updatedAt).toLocaleString()}`)).toBeInTheDocument()
   })
 
   it('keeps the editor mounted while the post-save config refresh is in flight', async () => {
@@ -316,7 +366,7 @@ describe('OpenCodeConfigManager', () => {
     await waitFor(() => expect(screen.queryByText('Edit opencode.json')).not.toBeInTheDocument())
   })
 
-  it('renders host import collapsed after the configuration card until expanded', async () => {
+  it('renders host import collapsed after the configuration file until expanded', async () => {
     const user = userEvent.setup()
     renderWithQuery(<OpenCodeConfigManager />)
 
@@ -325,8 +375,8 @@ describe('OpenCodeConfigManager', () => {
     const importContent = document.getElementById(importToggle.getAttribute('aria-controls') ?? '')
     expect(importContent).toHaveClass('hidden')
 
-    const configTitle = screen.getByText('OpenCode Configuration')
-    expect(configTitle.compareDocumentPosition(importToggle) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy()
+    const configFileName = await screen.findByText('opencode.json')
+    expect(configFileName.compareDocumentPosition(importToggle) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy()
 
     await user.click(importToggle)
     expect(importToggle).toHaveAttribute('aria-expanded', 'true')
@@ -334,7 +384,7 @@ describe('OpenCodeConfigManager', () => {
     expect(await screen.findByRole('button', { name: /Import From Host/i })).toBeInTheDocument()
   })
 
-  it('shows the config file path and an invalid badge when the file is invalid', async () => {
+  it('shows the config file name and an invalid badge when the file is invalid', async () => {
     mockGetOpenCodeConfig.mockResolvedValue({
       ...defaultConfig,
       isValid: false,
@@ -343,7 +393,8 @@ describe('OpenCodeConfigManager', () => {
 
     renderWithQuery(<OpenCodeConfigManager />)
 
-    expect(await screen.findByText('/workspace/.opencode/opencode.json')).toBeInTheDocument()
+    expect(await screen.findByText('opencode.json')).toBeInTheDocument()
+    expect(screen.getByText('/workspace/.opencode/opencode.json')).toBeInTheDocument()
     expect(screen.getByText('Invalid Config')).toBeInTheDocument()
     expect(screen.getByText('model')).toBeInTheDocument()
   })

@@ -43,10 +43,11 @@ describe('ServerHealthStatus', () => {
     mockActions()
   })
 
-  it('keeps Update and Versions enabled', () => {
+  it('keeps Update, Restart, and Versions enabled', () => {
     render(<ServerHealthStatus />)
 
     expect(screen.getByRole('button', { name: /Update/i })).toBeEnabled()
+    expect(screen.getByRole('button', { name: /Restart/i })).toBeEnabled()
     expect(screen.getByRole('button', { name: /Versions/i })).toBeEnabled()
   })
 
@@ -60,6 +61,18 @@ describe('ServerHealthStatus', () => {
     await user.click(screen.getByRole('button', { name: /Update/i }))
 
     expect(performUpgrade).toHaveBeenCalled()
+  })
+
+  it('invokes a restart when Restart is clicked', async () => {
+    const user = userEvent.setup()
+    const requestRestart = vi.fn()
+    mockActions({ requestRestart })
+
+    render(<ServerHealthStatus />)
+
+    await user.click(screen.getByRole('button', { name: /Restart/i }))
+
+    expect(requestRestart).toHaveBeenCalled()
   })
 
   it('opens the version dialog when Versions is clicked', async () => {

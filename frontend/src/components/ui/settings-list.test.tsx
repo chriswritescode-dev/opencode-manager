@@ -1,7 +1,17 @@
 import { render, screen } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
+import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
 import { describe, it, expect, vi } from 'vitest'
 import { SettingsList, SettingsListRow } from './settings-list'
+import { DirectoryFilesList } from '@/components/settings/DirectoryFilesList'
+
+vi.mock('@/api/settings', () => ({
+  settingsApi: {
+    getOpenCodeDirectoryFile: vi.fn().mockResolvedValue({ content: '# file' }),
+    updateOpenCodeDirectoryFile: vi.fn().mockResolvedValue(undefined),
+    deleteOpenCodeDirectoryFile: vi.fn().mockResolvedValue(undefined),
+  },
+}))
 
 describe('SettingsList', () => {
   it('renders emptyTitle and emptyHint when isEmpty and no children visible', () => {
@@ -102,5 +112,48 @@ describe('SettingsListRow', () => {
 
     await user.click(deleteItem)
     expect(actionClick).toHaveBeenCalledTimes(1)
+  })
+
+  it('keeps primary and overflow actions reachable inside the compact settings scope', async () => {
+    const user = userEvent.setup()
+    const primaryClick = vi.fn()
+    const deleteClick = vi.fn()
+
+    render(
+      <div data-opencode-settings>
+        <SettingsListRow
+          title="Row"
+          primaryAction={{ label: 'Edit', onClick: primaryClick }}
+          actionsLabel="More options"
+          actions={[{ label: 'Delete', onClick: deleteClick, destructive: true }]}
+        />
+      </div>,
+    )
+
+    await user.click(screen.getByText('Edit'))
+    expect(primaryClick).toHaveBeenCalledTimes(1)
+
+    await user.click(screen.getByLabelText('More options'))
+    await user.click(screen.getByText('Delete'))
+    expect(deleteClick).toHaveBeenCalledTimes(1)
+  })
+})
+
+describe('DirectoryFilesList', () => {
+  it('labels the raw file editor with the full file path', async () => {
+    const user = userEvent.setup()
+    const queryClient = new QueryClient({ defaultOptions: { queries: { retry: false } } })
+
+    render(
+      <QueryClientProvider client={queryClient}>
+        <DirectoryFilesList
+          kind="agents"
+          files={[{ kind: 'agents', name: 'planner', relativePath: 'team/planner.md' }]}
+        />
+      </QueryClientProvider>,
+    )
+
+    await user.click(screen.getByText('planner'))
+    expect(await screen.findByRole('textbox', { name: 'team/planner.md' })).toBeInTheDocument()
   })
 })

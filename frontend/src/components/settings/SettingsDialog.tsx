@@ -28,12 +28,12 @@ function OpenCodeSettings({ onOpenVersionDialog }: { onOpenVersionDialog: () => 
   const toggleAuthSections = useCallback(() => setAuthSectionsOpen((open) => !open), [])
 
   return (
-    <div className="space-y-6">
+    <div className="group/opencode-settings space-y-4" data-opencode-settings>
       <ServerHealthStatus onOpenVersionDialog={onOpenVersionDialog} />
       <OpenCodeConfigManager />
-      <section className="space-y-4 border-t border-border pt-6" aria-label="Server maintenance">
+      <section className="space-y-4 border-t border-border pt-4" aria-label="Server maintenance">
         <h2 className="text-lg font-semibold">Server maintenance</h2>
-        <div className="grid grid-cols-1 items-start gap-4 @min-[1000px]:grid-cols-2">
+        <div className="grid grid-cols-1 items-start gap-x-6 gap-y-4 @min-[1000px]:grid-cols-2">
           <OpenCodeServerAuthSettings isOpen={authSectionsOpen} onToggle={toggleAuthSections} />
           <ManagerTokenSettings isOpen={authSectionsOpen} onToggle={toggleAuthSections} />
         </div>
@@ -132,7 +132,7 @@ export function SettingsDialog() {
    return (
       <Dialog open={isOpen} modal={false} onOpenChange={(open) => !open && close()}>
          <DialogContent
-          className="inset-0 w-full h-full max-w-none max-h-none p-0 rounded-none bg-gradient-to-br from-background via-background to-background border-border overflow-hidden !flex !flex-col !gap-0"
+          className="inset-0 w-full h-full max-w-none max-h-none p-0 rounded-none bg-background border-border overflow-hidden !flex !flex-col !gap-0"
           fullscreen
           canSwipeBack={() => mobileView !== 'menu'}
           onSwipeBack={handleSettingsBack}

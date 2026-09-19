@@ -128,28 +128,29 @@ export function AgentsMdEditor() {
         </div>
       </div>
 
-      <EditorFindBar
-        query={query}
-        onQueryChange={setQuery}
-        matchCount={matches.length}
-        currentMatch={hasMatches ? currentMatchIndex + 1 : 0}
-        onPrev={prev}
-        onNext={next}
-        inputName="agents-md-find"
-        placeholder="Find in AGENTS.md..."
-        className="rounded-t-md border-x border-t"
-      />
-
-      <div className="h-[55vh] min-h-[300px] overflow-hidden rounded-b-md border border-input">
-        <CodeEditor
-          ariaLabel="AGENTS.md content"
-          value={content}
-            onChange={setContent}
-          highlights={matches}
-          activeHighlightIndex={currentMatchIndex}
-          disabled={isSaving}
-          placeholder="# Agent Instructions&#10;&#10;Add global instructions for AI agents here..."
+      <div className="overflow-hidden rounded-md border border-input">
+        <EditorFindBar
+          query={query}
+          onQueryChange={setQuery}
+          matchCount={matches.length}
+          currentMatch={hasMatches ? currentMatchIndex + 1 : 0}
+          onPrev={prev}
+          onNext={next}
+          inputName="agents-md-find"
+          placeholder="Find in AGENTS.md..."
         />
+
+        <div className="h-[60dvh] min-h-[320px] sm:h-[55vh]">
+          <CodeEditor
+            ariaLabel="AGENTS.md content"
+            value={content}
+            onChange={setContent}
+            highlights={matches}
+            activeHighlightIndex={currentMatchIndex}
+            disabled={isSaving}
+            placeholder="# Agent Instructions&#10;&#10;Add global instructions for AI agents here..."
+          />
+        </div>
       </div>
 
       {hasChanges && (

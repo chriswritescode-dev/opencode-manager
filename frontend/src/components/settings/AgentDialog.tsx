@@ -170,7 +170,7 @@ export function AgentDialog({ open, onOpenChange, onSubmit, editingAgent }: Agen
 
   return (
     <Dialog open={open} onOpenChange={handleOpenChange}>
-      <DialogContent mobileFullscreen className="sm:max-w-2xl sm:max-h-[85vh] gap-0 flex flex-col p-0 md:p-6">
+      <DialogContent mobileFullscreen keyboardAware className="sm:max-w-2xl sm:max-h-[85vh] gap-0 flex flex-col p-0 md:p-6 pb-safe">
         <DialogHeader className="p-4 sm:p-6 border-b flex flex-row items-center justify-between space-y-0">
           <DialogTitle>{editingAgent ? 'Edit Agent' : 'Create Agent'}</DialogTitle>
         </DialogHeader>
@@ -516,13 +516,13 @@ export function AgentDialog({ open, onOpenChange, onSubmit, editingAgent }: Agen
         </div>
 
         <DialogFooter className="p-3 sm:p-4 border-t gap-2 pb-4">
-          <Button variant="outline" onClick={() => handleOpenChange(false)} className="flex-1 sm:flex-none">
+          <Button variant="outline" onClick={() => handleOpenChange(false)} className="h-11 flex-1 sm:h-9 sm:flex-none">
             Cancel
           </Button>
           <Button
             onClick={() => form.handleSubmit(handleSubmit)()}
             disabled={!form.formState.isValid}
-            className="flex-1 sm:flex-none"
+            className="h-11 flex-1 sm:h-9 sm:flex-none"
           >
             {editingAgent ? 'Update' : 'Create'}
           </Button>
