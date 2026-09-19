@@ -16,17 +16,11 @@ A compact model switcher is embedded directly in the chat interface. Click the *
 | **Variants** | Some models offer tier options (e.g., fast or pro). Variant items are highlighted and show a checkmark on the active selection. |
 | **All Models…** | Opens the full model browser when you need a model not in recents or favorites. |
 
-Model selections persist across page reloads.
+Favorites, recents, and variant choices are stored in OpenCode's own state file (`.opencode/state/opencode/model.json` in the workspace), so they are shared with the OpenCode TUI and survive Manager restarts. The active model itself is not persisted: on page load it resolves the same way the OpenCode TUI does — the `model` set in `opencode.json`, otherwise your most recent valid model, otherwise the provider default. A model you pick during a session stays active until the page is reloaded.
 
-### Per-Agent Model Selection
+### Per-Agent and Per-Session Models
 
-Each agent can use a different model independently:
-
-1. Select an agent in the chat session header
-2. Open the quick model switcher
-3. Choose a model — it is now stored for that agent
-
-When you switch agents, the model you last used with that agent is restored automatically. Your global model selection is unaffected.
+Each agent can declare its own `model` in `opencode.json`, which becomes that agent's default. When you open an existing session, the model, agent, and variant used by its last message are restored from the session itself, so switching between sessions keeps each one's selection.
 
 ### Full Model Browser
 

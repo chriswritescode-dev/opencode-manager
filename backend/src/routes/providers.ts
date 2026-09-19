@@ -1,33 +1,19 @@
 import { Hono } from 'hono'
 import { z } from 'zod'
-import path from 'path'
 import { AuthService } from '../services/auth'
 import { SetCredentialRequestSchema } from '../../../shared/src/schemas/auth'
 import { logger } from '../utils/logger'
 import type { OpenCodeClient } from '../services/opencode/client'
 import { reloadOpenCodeConfig } from '../services/opencode-restart'
 import type { OpenCodeSupervisor } from '../services/opencode-supervisor'
-import type { Database } from 'bun:sqlite'
-import { getWorkspacePath } from '@opencode-manager/shared/config/env'
 import {
-  addRecentOpenCodeModel,
-  getOpenCodeModelState as readModelStateFromDb,
-  removeRecentOpenCodeModel,
-  toggleFavoriteOpenCodeModel,
-  type OpenCodeModelStateRecord,
-} from '../db/model-state'
-import { writeJsonAtomic, withFileLock } from '../utils/atomic-json'
-
-export const ModelSelectionSchema = z.object({
-  providerID: z.string().min(1),
-  modelID: z.string().min(1),
-})
-
-export const ModelStateSchema = z.object({
-  recent: z.array(ModelSelectionSchema).default([]),
-  favorite: z.array(ModelSelectionSchema).default([]),
-  variant: z.record(z.string(), z.string().optional()).default({}),
-})
+  addRecentModel,
+  ModelSelectionSchema,
+  readOpenCodeModelState,
+  removeRecentModel,
+  toggleFavoriteModel,
+  updateOpenCodeModelState,
+} from '../services/opencode-model-state'
 
 const UpdateModelStateSchema = z.object({
   recent: ModelSelectionSchema.optional(),
@@ -35,35 +21,16 @@ const UpdateModelStateSchema = z.object({
   removeRecent: ModelSelectionSchema.optional(),
 }).strict()
 
-export function getModelStatePath(): string {
-  return path.join(getWorkspacePath(), '.opencode', 'state', 'opencode', 'model.json')
-}
-
-async function mirrorModelStateToFile(state: OpenCodeModelStateRecord): Promise<void> {
-  const modelStatePath = getModelStatePath()
-  try {
-    await withFileLock(modelStatePath, async () => {
-      await writeJsonAtomic(modelStatePath, {
-        recent: state.recent,
-        favorite: state.favorite,
-        variant: state.variant,
-      })
-    })
-  } catch (error) {
-    logger.warn(`Failed to mirror model state to file ${modelStatePath}:`, error)
-  }
-}
-
-export function createProvidersRoutes(db: Database, openCodeClient: OpenCodeClient, openCodeSupervisor?: OpenCodeSupervisor) {
+export function createProvidersRoutes(openCodeClient: OpenCodeClient, openCodeSupervisor?: OpenCodeSupervisor) {
   const app = new Hono()
   const authService = new AuthService()
 
   app.get('/model-state', async (c) => {
     try {
-      const state = readModelStateFromDb(db)
+      const state = await readOpenCodeModelState()
       return c.json(state)
     } catch (error) {
-      logger.error('Failed to read OpenCode model state from DB:', error)
+      logger.error('Failed to read OpenCode model state:', error)
       return c.json({ recent: [], favorite: [], variant: {} })
     }
   })
@@ -72,21 +39,20 @@ export function createProvidersRoutes(db: Database, openCodeClient: OpenCodeClie
     try {
       const body = await c.req.json()
       const validated = UpdateModelStateSchema.parse(body)
-      
-      let nextState: OpenCodeModelStateRecord
-      
-      if (validated.favorite) {
-        nextState = toggleFavoriteOpenCodeModel(db, validated.favorite)
-      } else if (validated.recent) {
-        nextState = addRecentOpenCodeModel(db, validated.recent)
-      } else if (validated.removeRecent) {
-        nextState = removeRecentOpenCodeModel(db, validated.removeRecent)
-      } else {
-        nextState = readModelStateFromDb(db)
-      }
-      
-      await mirrorModelStateToFile(nextState)
-      
+
+      const nextState = await updateOpenCodeModelState((state) => {
+        if (validated.favorite) {
+          return toggleFavoriteModel(state, validated.favorite)
+        }
+        if (validated.recent) {
+          return addRecentModel(state, validated.recent)
+        }
+        if (validated.removeRecent) {
+          return removeRecentModel(state, validated.removeRecent)
+        }
+        return state
+      })
+
       return c.json(nextState)
     } catch (error) {
       logger.error('Failed to update OpenCode model state:', error)

@@ -8,6 +8,7 @@ import { createScheduleRoutes } from '../schedules'
 import { createInternalTokenMiddleware } from '../../auth/internal-token-middleware'
 import { createInternalNotificationRoutes } from './notifications'
 import { createInternalSettingsRoutes } from './settings'
+import { createOpenCodeConfigRoutes } from '../opencode-config'
 import { createInternalRepoRoutes } from './repos'
 import { createInternalRepoSyncRoutes } from './repo-sync'
 import { createInternalRepoMirrorRoutes as mirrorRoutes } from './repo-mirror'
@@ -28,6 +29,7 @@ export function createInternalRoutes(
   app.route('/schedules', createScheduleRoutes(scheduleService))
   app.route('/notifications', createInternalNotificationRoutes(notificationService))
   app.route('/settings', createInternalSettingsRoutes(settingsService))
+  app.route('/opencode-config', createOpenCodeConfigRoutes(settingsService, openCodeClient))
   const repos = new Hono()
   repos.route('/', createInternalRepoRoutes(db, settingsService))
   repos.route('/:id/schedules', createScheduleRoutes(scheduleService))

@@ -17,16 +17,14 @@ import { showToast } from '@/lib/toast'
 
 interface McpManagerProps {
   config: {
-    name: string
     content: Record<string, unknown>
   } | null
   onUpdate: (content: Record<string, unknown>) => Promise<void>
-  onConfigUpdate?: (configName: string, content: Record<string, unknown>) => Promise<void>
 }
 
 
 
-export function McpManager({ config, onUpdate, onConfigUpdate }: McpManagerProps) {
+export function McpManager({ config, onUpdate }: McpManagerProps) {
   const [isAddDialogOpen, setIsAddDialogOpen] = useState(false)
   const [deleteConfirmServer, setDeleteConfirmServer] = useState<{ id: string; name: string } | null>(null)
   const [togglingServerId, setTogglingServerId] = useState<string | null>(null)
@@ -179,7 +177,7 @@ export function McpManager({ config, onUpdate, onConfigUpdate }: McpManagerProps
   if (!config) {
     return (
       <div className="text-center py-8">
-        <p className="text-muted-foreground">Select a configuration to manage MCP servers.</p>
+        <p className="text-muted-foreground">No OpenCode configuration file found.</p>
       </div>
     )
   }
@@ -219,7 +217,7 @@ export function McpManager({ config, onUpdate, onConfigUpdate }: McpManagerProps
           <AddMcpServerDialog 
             open={isAddDialogOpen} 
             onOpenChange={setIsAddDialogOpen}
-            onUpdate={onConfigUpdate}
+            onUpdate={onUpdate}
           />
         </Dialog>
       </div>

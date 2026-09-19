@@ -103,6 +103,7 @@ export const ENV = {
     PROCESS_START_WAIT_MS: getEnvNumber('PROCESS_START_WAIT_MS', DEFAULTS.TIMEOUTS.PROCESS_START_WAIT_MS),
     PROCESS_VERIFY_WAIT_MS: getEnvNumber('PROCESS_VERIFY_WAIT_MS', DEFAULTS.TIMEOUTS.PROCESS_VERIFY_WAIT_MS),
     HEALTH_CHECK_TIMEOUT_MS: getEnvNumber('HEALTH_CHECK_TIMEOUT_MS', DEFAULTS.TIMEOUTS.HEALTH_CHECK_TIMEOUT_MS),
+    CONFIG_PATCH_TIMEOUT_MS: getEnvNumber('CONFIG_PATCH_TIMEOUT_MS', DEFAULTS.TIMEOUTS.CONFIG_PATCH_TIMEOUT_MS),
   },
 
   FILE_LIMITS: {
@@ -149,8 +150,10 @@ export const getAssistantModePath = () => path.join(getReposPath(), ASSISTANT_RE
 export const getAssistantOpenCodeDir = () => path.join(getAssistantModePath(), ASSISTANT_OPENCODE_DIR_NAME)
 export const getOpenCodeConfigHome = () => path.join(ENV.WORKSPACE.BASE_PATH, '.config')
 export const getOpenCodeStateHome = () => path.join(ENV.WORKSPACE.BASE_PATH, '.opencode', 'state')
+export const getOpenCodeHealthWatchPath = () => path.join(getOpenCodeStateHome(), 'health-watch')
 export const getOpenCodeGlobalSkillsPath = () => path.join(getOpenCodeConfigHome(), 'opencode', 'skills')
 export const getOpenCodeDataPath = () => path.join(getOpenCodeStateHome(), 'opencode')
+export const getOpenCodeModelStatePath = () => path.join(getOpenCodeDataPath(), 'model.json')
 export const getOpenCodeToolOutputPath = () => path.join(getOpenCodeDataPath(), 'tool-output')
 export const getOpenCodeWorktreesPath = () => path.join(getOpenCodeDataPath(), 'worktree')
 export const getForgeWorktreesPath = () => path.join(getOpenCodeDataPath(), 'forge', 'worktrees')

@@ -100,7 +100,6 @@ describe('Database Queries', () => {
         cloned_at: clonedAt,
         last_pulled: null,
         last_accessed_at: lastAccessedAt,
-        opencode_config_name: null,
         is_worktree: 0,
         is_local: 0
       }
@@ -124,7 +123,6 @@ describe('Database Queries', () => {
         clonedAt: clonedAt,
         lastPulled: null,
         lastAccessedAt: lastAccessedAt,
-        openCodeConfigName: null,
         isWorktree: undefined,
         isLocal: undefined
       })
@@ -196,22 +194,6 @@ describe('Database Queries', () => {
         'UPDATE repos SET clone_status = ? WHERE id = ?'
       )
       expect(stmt.run).toHaveBeenCalledWith('ready', 1)
-    })
-  })
-
-  describe('updateRepoConfigName', () => {
-    it('should update repo OpenCode config name', () => {
-      const stmt = {
-        run: vi.fn().mockReturnValue({ changes: 1 })
-      }
-      mockDb.prepare.mockReturnValue(stmt)
-
-      db.updateRepoConfigName(mockDb, 1, 'my-config')
-
-      expect(mockDb.prepare).toHaveBeenCalledWith(
-        'UPDATE repos SET opencode_config_name = ? WHERE id = ?'
-      )
-      expect(stmt.run).toHaveBeenCalledWith('my-config', 1)
     })
   })
 

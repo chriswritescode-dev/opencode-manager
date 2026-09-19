@@ -7,6 +7,8 @@ export const MANAGER_TOOL_REQUEST_TIMEOUT_MS = 15000
 export const MANAGER_TOOL_ALLOWED_ROUTES = [
   'GET /settings',
   'PATCH /settings',
+  'GET /opencode-config',
+  'PUT /opencode-config',
   'POST /assistant/reload',
   'GET /repos',
   'GET /repos/*/git-info',
@@ -26,7 +28,7 @@ export const MANAGER_TOOL_ALLOWED_ROUTES = [
   'POST /repos/*/schedules/*/runs/*/cancel',
 ] as const
 
-export const MANAGER_TOOL_ALLOWED_METHODS = ['GET', 'POST', 'PATCH', 'DELETE'] as const
+export const MANAGER_TOOL_ALLOWED_METHODS = ['GET', 'POST', 'PUT', 'PATCH', 'DELETE'] as const
 
 export function parseAllowedRoute(route: string): { method: string; path: string } {
   const separator = route.indexOf(' ')
@@ -159,7 +161,7 @@ export default async function () {
           'The action runs inside OpenCode Manager itself, so it needs no token and no network access from the agent shell, and it works in sandboxed sessions and scheduled runs.',
           'Actions:',
           '- send_notification: send a push notification to every device the user has registered.',
-          '- request: call an allow-listed internal API route to read and manage settings, repos, OpenCode workspaces, and schedules.',
+          '- request: call an allow-listed internal API route to read and manage settings, the OpenCode configuration file, repos, OpenCode workspaces, and schedules.',
           'Allowed request routes:',
         ].concat(ALLOWED_ROUTES.map(function (route) { return '- ' + route })).join('\\n'),
         args: {

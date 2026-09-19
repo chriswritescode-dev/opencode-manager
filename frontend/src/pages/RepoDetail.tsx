@@ -1,11 +1,10 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { useParams, useNavigate } from "react-router-dom";
-import { useQuery, useQueryClient } from "@tanstack/react-query";
+import { useQuery } from "@tanstack/react-query";
 import { getRepo, workspaceLabel } from "@/api/repos";
 import { SessionList } from "@/components/session/SessionList";
 import { FileBrowserSheet } from "@/components/file-browser/FileBrowserSheet";
 import { Header } from "@/components/ui/header";
-import { SwitchConfigDialog } from "@/components/repo/SwitchConfigDialog";
 import { RepoMcpDialog } from "@/components/repo/RepoMcpDialog";
 import { RepoSkillsDialog } from "@/components/repo/RepoSkillsDialog";
 import { SourceControlPanel } from "@/components/source-control";
@@ -24,17 +23,14 @@ import { GitBranch, Plus, Loader2, Layers } from "lucide-react";
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { ResetPermissionsDialog } from "@/components/repo/ResetPermissionsDialog";
 import { PendingActionsGroup } from "@/components/notifications/PendingActionsGroup";
-import { invalidateConfigCaches } from "@/lib/queryInvalidation";
 import { getRepoDisplayName } from "@/lib/utils";
 import { useSidebarAction } from "@/hooks/useSidebarAction";
 
 export function RepoDetail() {
   const { id } = useParams<{ id: string }>();
   const navigate = useNavigate();
-  const queryClient = useQueryClient();
   const repoId = Number(id) || 0;
   const [fileBrowserOpen, setFileBrowserOpen] = useDialogParam('files');
-  const [switchConfigOpen, setSwitchConfigOpen] = useState(false);
   const [mcpDialogOpen, setMcpDialogOpen] = useDialogParam('mcp');
   const [skillsDialogOpen, setSkillsDialogOpen] = useDialogParam('skills');
   const [sourceControlOpen, setSourceControlOpen] = useDialogParam('sourceControl');
@@ -292,22 +288,6 @@ export function RepoDetail() {
         currentBranch={currentBranch}
         repoName={repoName}
       />
-
-{repo && (
-          <SwitchConfigDialog
-            open={switchConfigOpen}
-            onOpenChange={setSwitchConfigOpen}
-            repoId={repoId}
-            currentConfigName={repo.openCodeConfigName}
-            onConfigSwitched={(configName) => {
-              queryClient.setQueryData(["repo", repoId], {
-                ...repo,
-                openCodeConfigName: configName,
-              });
-              invalidateConfigCaches(queryClient);
-            }}
-          />
-        )}
 
       <ResetPermissionsDialog
         open={resetPermissionsOpen}

@@ -335,7 +335,7 @@ Use the \`${MANAGER_TOOL_NAME}\` tool with the \`request\` action. The tool runs
 {
   action: 'request',
   params: {
-    method: 'GET' | 'POST' | 'PATCH' | 'DELETE',
+    method: 'GET' | 'POST' | 'PUT' | 'PATCH' | 'DELETE',
     path: string   // relative internal API path; query strings allowed
     body?: object  // JSON body for POST and PATCH routes
   }
@@ -575,7 +575,7 @@ Sending is rate limited to **10 notifications per minute**. Beyond that the tool
 export function buildSettingsSkill(): string {
   return `---
 name: manager-settings
-description: Read and modify safe user preferences with the ${MANAGER_TOOL_NAME} tool
+description: Read and modify safe user preferences and the OpenCode configuration file with the ${MANAGER_TOOL_NAME} tool
 ---
 
 ## When to Load
@@ -591,7 +591,7 @@ Use the \`${MANAGER_TOOL_NAME}\` tool with the \`request\` action. The tool runs
 {
   action: 'request',
   params: {
-    method: 'GET' | 'POST' | 'PATCH' | 'DELETE',
+    method: 'GET' | 'POST' | 'PUT' | 'PATCH' | 'DELETE',
     path: string   // relative internal API path; query strings allowed
     body?: object  // JSON body for POST and PATCH routes
   }
@@ -713,10 +713,73 @@ Reload the assistant workspace by disposing the current OpenCode instance. Use t
 { "success": true }
 \`\`\`
 
+## OpenCode Configuration
+
+The OpenCode configuration file on disk is the source of truth, and this endpoint is the only supported way to change it. Never edit \`opencode.json\` directly.
+
+### GET /opencode-config
+
+Read the current configuration file. Returns \`404\` when no config file exists yet.
+
+**Response (\`OpenCodeConfigFile\`):**
+\`\`\`ts
+{
+  path: string               // Absolute path of the configuration file
+  content: object            // Parsed configuration
+  rawContent: string         // Raw file content, including comments
+  isValid: boolean           // Whether the file passes schema validation
+  validationIssues?: Array<{ path: string, message: string }>
+  updatedAt: number          // Unix timestamp of the last write
+}
+\`\`\`
+
+**Example:**
+\`\`\`json
+{
+  "action": "request",
+  "params": {
+    "method": "GET",
+    "path": "/opencode-config"
+  }
+}
+\`\`\`
+
+### PUT /opencode-config
+
+Persist a complete configuration. Read the file first, change only the keys the user asked for, and send the complete object back.
+
+**Request Body:**
+\`\`\`ts
+{ content: object }  // The complete configuration to persist
+\`\`\`
+
+**Example:**
+\`\`\`json
+{
+  "action": "request",
+  "params": {
+    "method": "PUT",
+    "path": "/opencode-config",
+    "body": {
+      "content": {
+        "theme": "dark"
+      }
+    }
+  }
+}
+\`\`\`
+
+**Response:**
+Returns the written \`OpenCodeConfigFile\`. Adds \`restartRequired: true\` when the change needs an OpenCode server restart, and \`removedFields\` when OpenCode dropped fields it does not accept.
+
+Returns \`400\` with \`validationIssues\` when OpenCode rejects the configuration.
+
+When the response contains \`restartRequired: true\`, tell the user to restart the OpenCode server from Settings. Never attempt the restart yourself: it would terminate your own session.
+
 ## Safety
 
-- This API intentionally rejects any attempt to modify credentials, API keys, or other sensitive settings
-- If you need to change credentials (Git, TTS, STT, etc.), guide the user to use the full UI
+- The settings PATCH endpoint rejects any attempt to modify credentials, API keys, or other sensitive settings; guide the user to the full UI for Git, TTS, and STT credentials
+- PUT /opencode-config writes the complete OpenCode configuration, including \`plugin\`, \`mcp\`, and \`provider\` entries; change only the keys the user explicitly asked for and never add plugins, MCP servers, or provider credentials the user did not request
 - The settings PATCH endpoint does NOT trigger OpenCode reload or restart
 `
 }
@@ -740,7 +803,7 @@ Use the \`${MANAGER_TOOL_NAME}\` tool with the \`request\` action. The tool runs
 {
   action: 'request',
   params: {
-    method: 'GET' | 'POST' | 'PATCH' | 'DELETE',
+    method: 'GET' | 'POST' | 'PUT' | 'PATCH' | 'DELETE',
     path: string   // relative internal API path; query strings allowed
     body?: object  // JSON body for POST and PATCH routes
   }
@@ -779,7 +842,6 @@ List all repos available to OpenCode Manager. The repos are returned in the orde
     clonedAt: number   // Unix timestamp
     lastPulled?: number
     lastAccessedAt?: number
-    openCodeConfigName?: string
     isWorktree?: boolean
     isLocal?: boolean
   }>

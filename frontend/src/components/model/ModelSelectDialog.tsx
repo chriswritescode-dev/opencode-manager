@@ -11,12 +11,11 @@ import { Badge } from "@/components/ui/badge";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Clock, Loader2, Search, Check, Star } from "lucide-react";
 import {
-  getProvidersWithModels,
   formatModelName,
   formatProviderName,
 } from "@/api/providers";
+import { useProvidersWithModels } from "@/hooks/useProvidersWithModels";
 import { useModelSelection } from "@/hooks/useModelSelection";
-import { keepPreviousData, useQuery } from "@tanstack/react-query";
 import type { Model, ProviderWithModels } from "@/api/providers";
 
 interface ModelSelectDialogProps {
@@ -349,13 +348,10 @@ export function ModelSelectDialog({
   const { modelString, setModel, toggleFavorite, recentModels, favoriteModels } = useModelSelection(opcodeUrl, directory);
   const currentModel = modelString || "";
 
-  const { data: allProviders = [], isLoading: loading } = useQuery({
-    queryKey: ["providers-with-models", opcodeUrl, directory],
-    queryFn: () => getProvidersWithModels(directory),
+  const { data: allProviders, isLoading: loading } = useProvidersWithModels({
     enabled: open,
-    staleTime: 5 * 60 * 1000,
-    gcTime: 10 * 60 * 1000,
-    placeholderData: keepPreviousData,
+    directory,
+    keyParts: [opcodeUrl, directory],
   });
 
   const connectedProviders = useMemo(() => {

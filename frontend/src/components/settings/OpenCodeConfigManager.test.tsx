@@ -1,12 +1,13 @@
 import { describe, it, expect, vi, beforeEach, beforeAll } from 'vitest'
-import { render, screen, waitFor, fireEvent } from '@testing-library/react'
+import { render, screen, waitFor, fireEvent, act } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
 import { OpenCodeConfigManager } from './OpenCodeConfigManager'
-import type { OpenCodeConfig } from '@/api/types/settings'
+import type { OpenCodeConfigFile } from '@/api/types/settings'
+import { makeOpenCodeConfigFile } from '@/test/fixtures/opencode-config'
 
 const {
-  mockGetOpenCodeConfigs,
+  mockGetOpenCodeConfig,
   mockUpdateOpenCodeConfig,
   mockRestartOpenCodeServer,
   mockGetActiveOpenCodeSessions,
@@ -15,7 +16,7 @@ const {
   mockListOpenCodeDirectoryFiles,
   healthState,
 } = vi.hoisted(() => ({
-  mockGetOpenCodeConfigs: vi.fn(),
+  mockGetOpenCodeConfig: vi.fn(),
   mockUpdateOpenCodeConfig: vi.fn(),
   mockRestartOpenCodeServer: vi.fn(),
   mockGetActiveOpenCodeSessions: vi.fn(),
@@ -35,7 +36,7 @@ vi.mock('@/lib/toast', () => ({
 
 vi.mock('@/api/settings', () => ({
   settingsApi: {
-    getOpenCodeConfigs: mockGetOpenCodeConfigs,
+    getOpenCodeConfig: mockGetOpenCodeConfig,
     updateOpenCodeConfig: mockUpdateOpenCodeConfig,
     restartOpenCodeServer: mockRestartOpenCodeServer,
     getActiveOpenCodeSessions: mockGetActiveOpenCodeSessions,
@@ -47,28 +48,27 @@ vi.mock('@/api/settings', () => ({
   },
 }))
 
-const defaultConfig: OpenCodeConfig = {
-  id: 1,
-  name: 'default',
-  isDefault: true,
-  isValid: true,
-  createdAt: 1,
-  updatedAt: 1,
-  content: {
-    provider: {
-      openai: {
-        name: 'OpenAI',
-        models: {
-          'gpt-4o': { name: 'GPT-4o' },
-        },
+const defaultContent = {
+  provider: {
+    openai: {
+      name: 'OpenAI',
+      models: {
+        'gpt-4o': { name: 'GPT-4o' },
       },
     },
   },
 }
 
+const defaultConfig = makeOpenCodeConfigFile({
+  path: '/workspace/.opencode/opencode.json',
+  rawContent: JSON.stringify(defaultContent, null, 2),
+  content: defaultContent,
+})
+
 function renderWithQuery(ui: React.ReactElement) {
   const queryClient = new QueryClient({ defaultOptions: { queries: { retry: false } } })
-  return render(<QueryClientProvider client={queryClient}>{ui}</QueryClientProvider>)
+  const result = render(<QueryClientProvider client={queryClient}>{ui}</QueryClientProvider>)
+  return { ...result, queryClient }
 }
 
 describe('OpenCodeConfigManager', () => {
@@ -79,7 +79,7 @@ describe('OpenCodeConfigManager', () => {
   beforeEach(() => {
     vi.clearAllMocks()
     healthState.data = { opencode: 'healthy', opencodeRestartPending: false }
-    mockGetOpenCodeConfigs.mockResolvedValue({ configs: [defaultConfig] })
+    mockGetOpenCodeConfig.mockResolvedValue(defaultConfig)
     mockGetOpenCodeImportStatus.mockResolvedValue({})
     mockListManagedSkills.mockResolvedValue([])
     mockListOpenCodeDirectoryFiles.mockImplementation((kind: 'agents' | 'commands') => {
@@ -130,8 +130,7 @@ describe('OpenCodeConfigManager', () => {
     await user.click(screen.getByText('Delete'))
 
     expect(mockUpdateOpenCodeConfig).toHaveBeenCalledTimes(1)
-    const [configName, payload] = mockUpdateOpenCodeConfig.mock.calls[0]
-    expect(configName).toBe('default')
+    const [payload] = mockUpdateOpenCodeConfig.mock.calls[0]
     expect(payload.content.provider.openai.models).not.toHaveProperty('gpt-4o')
 
     expect(screen.queryByText('Restart OpenCode Server?')).not.toBeInTheDocument()
@@ -186,15 +185,15 @@ describe('OpenCodeConfigManager', () => {
   })
 
   it('keeps the editor mounted while the post-save config refresh is in flight', async () => {
-    const configWithRaw: OpenCodeConfig = {
+    const configWithRaw: OpenCodeConfigFile = {
       ...defaultConfig,
       rawContent: '{\n  "theme": "system"\n}',
     }
-    mockGetOpenCodeConfigs.mockResolvedValueOnce({ configs: [configWithRaw] })
+    mockGetOpenCodeConfig.mockResolvedValueOnce(configWithRaw)
     let resolveRefresh!: () => void
-    mockGetOpenCodeConfigs.mockReturnValueOnce(
-      new Promise<{ configs: OpenCodeConfig[] }>((resolve) => {
-        resolveRefresh = () => resolve({ configs: [configWithRaw] })
+    mockGetOpenCodeConfig.mockReturnValueOnce(
+      new Promise<OpenCodeConfigFile>((resolve) => {
+        resolveRefresh = () => resolve(configWithRaw)
       }),
     )
     mockUpdateOpenCodeConfig.mockResolvedValue(configWithRaw)
@@ -208,18 +207,116 @@ describe('OpenCodeConfigManager', () => {
     await user.click(editButton)
 
     const textarea = await screen.findByLabelText('Config content') as HTMLTextAreaElement
-    fireEvent.change(textarea, { target: { value: configWithRaw.rawContent! + ' ' } })
+    fireEvent.change(textarea, { target: { value: configWithRaw.rawContent + ' ' } })
     await user.click(screen.getByRole('button', { name: 'Update' }))
 
     await waitFor(() => expect(mockUpdateOpenCodeConfig).toHaveBeenCalledTimes(1))
-    expect(screen.getByText('Edit Config: default')).toBeInTheDocument()
+    expect(screen.getByText('Edit opencode.json')).toBeInTheDocument()
     expect(screen.getByRole('button', { name: 'Update' })).toBeDisabled()
 
     resolveRefresh()
-    await waitFor(() => expect(screen.queryByText('Edit Config: default')).not.toBeInTheDocument())
+    await waitFor(() => expect(screen.queryByText('Edit opencode.json')).not.toBeInTheDocument())
   })
 
-  it('renders host import collapsed after configurations until expanded', async () => {
+  it('preserves an open draft when the config query refreshes in the background', async () => {
+    const user = userEvent.setup()
+    const { container, queryClient } = renderWithQuery(<OpenCodeConfigManager />)
+
+    await screen.findByText('GPT-4o')
+
+    const editIcon = container.querySelector('.lucide-square-pen') as SVGElement
+    const editButton = editIcon.closest('button') as HTMLButtonElement
+    await user.click(editButton)
+
+    const textarea = await screen.findByLabelText('Config content') as HTMLTextAreaElement
+    const draft = `${defaultConfig.rawContent}\n// draft\n`
+    fireEvent.change(textarea, { target: { value: draft } })
+
+    const refreshedContent = { theme: 'dark' }
+    const refreshedConfig: OpenCodeConfigFile = {
+      ...defaultConfig,
+      content: refreshedContent,
+      rawContent: JSON.stringify(refreshedContent, null, 2),
+      updatedAt: 2,
+    }
+    mockGetOpenCodeConfig.mockResolvedValue(refreshedConfig)
+
+    await act(async () => {
+      await queryClient.invalidateQueries({ queryKey: ['opencode-config', 'file'] })
+    })
+
+    await waitFor(() => {
+      expect(screen.getByText(`Updated: ${new Date(2).toLocaleString()}`)).toBeInTheDocument()
+    })
+    expect(mockGetOpenCodeConfig).toHaveBeenCalledTimes(2)
+    expect(textarea).toHaveValue(draft)
+
+    await user.click(screen.getByRole('button', { name: 'Cancel' }))
+    expect(screen.getByText('Unsaved Changes')).toBeInTheDocument()
+    await user.click(screen.getByRole('button', { name: 'Keep Editing' }))
+    expect(textarea).toHaveValue(draft)
+
+    await user.click(screen.getByRole('button', { name: 'Cancel' }))
+    await user.click(screen.getByRole('button', { name: 'Discard' }))
+    await waitFor(() => expect(screen.queryByText('Edit opencode.json')).not.toBeInTheDocument())
+
+    const reopenIcon = container.querySelector('.lucide-square-pen') as SVGElement
+    const reopenButton = reopenIcon.closest('button') as HTMLButtonElement
+    await user.click(reopenButton)
+
+    const reopenedTextarea = await screen.findByLabelText('Config content') as HTMLTextAreaElement
+    expect(reopenedTextarea).toHaveValue(JSON.stringify(refreshedContent, null, 2))
+  })
+
+  it('does not reset an in-flight save when the config query refreshes in the background', async () => {
+    const user = userEvent.setup()
+    const { container, queryClient } = renderWithQuery(<OpenCodeConfigManager />)
+
+    await screen.findByText('GPT-4o')
+
+    const editIcon = container.querySelector('.lucide-square-pen') as SVGElement
+    await user.click(editIcon.closest('button') as HTMLButtonElement)
+
+    const textarea = await screen.findByLabelText('Config content') as HTMLTextAreaElement
+    const draft = `${defaultConfig.rawContent}\n// draft\n`
+    fireEvent.change(textarea, { target: { value: draft } })
+
+    let resolveSave!: (value: OpenCodeConfigFile) => void
+    mockUpdateOpenCodeConfig.mockReturnValueOnce(
+      new Promise<OpenCodeConfigFile>((resolve) => {
+        resolveSave = resolve
+      }),
+    )
+
+    const updateButton = screen.getByRole('button', { name: 'Update' })
+    await user.click(updateButton)
+    await waitFor(() => expect(updateButton).toBeDisabled())
+
+    const refreshedContent = { theme: 'dark' }
+    const refreshedConfig: OpenCodeConfigFile = {
+      ...defaultConfig,
+      content: refreshedContent,
+      rawContent: JSON.stringify(refreshedContent, null, 2),
+      updatedAt: 2,
+    }
+    mockGetOpenCodeConfig.mockResolvedValue(refreshedConfig)
+
+    await act(async () => {
+      await queryClient.invalidateQueries({ queryKey: ['opencode-config', 'file'] })
+    })
+
+    await waitFor(() => {
+      expect(screen.getByText(`Updated: ${new Date(2).toLocaleString()}`)).toBeInTheDocument()
+    })
+    expect(updateButton).toBeDisabled()
+    expect(textarea).toBeDisabled()
+    expect(textarea).toHaveValue(draft)
+
+    resolveSave(refreshedConfig)
+    await waitFor(() => expect(screen.queryByText('Edit opencode.json')).not.toBeInTheDocument())
+  })
+
+  it('renders host import collapsed after the configuration card until expanded', async () => {
     const user = userEvent.setup()
     renderWithQuery(<OpenCodeConfigManager />)
 
@@ -228,12 +325,26 @@ describe('OpenCodeConfigManager', () => {
     const importContent = document.getElementById(importToggle.getAttribute('aria-controls') ?? '')
     expect(importContent).toHaveClass('hidden')
 
-    const configsTitle = screen.getByText('OpenCode Configurations')
-    expect(configsTitle.compareDocumentPosition(importToggle) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy()
+    const configTitle = screen.getByText('OpenCode Configuration')
+    expect(configTitle.compareDocumentPosition(importToggle) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy()
 
     await user.click(importToggle)
     expect(importToggle).toHaveAttribute('aria-expanded', 'true')
     expect(importContent).toHaveClass('block')
     expect(await screen.findByRole('button', { name: /Import From Host/i })).toBeInTheDocument()
+  })
+
+  it('shows the config file path and an invalid badge when the file is invalid', async () => {
+    mockGetOpenCodeConfig.mockResolvedValue({
+      ...defaultConfig,
+      isValid: false,
+      validationIssues: [{ path: 'model', message: 'Expected string' }],
+    })
+
+    renderWithQuery(<OpenCodeConfigManager />)
+
+    expect(await screen.findByText('/workspace/.opencode/opencode.json')).toBeInTheDocument()
+    expect(screen.getByText('Invalid Config')).toBeInTheDocument()
+    expect(screen.getByText('model')).toBeInTheDocument()
   })
 })

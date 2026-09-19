@@ -1,7 +1,6 @@
 import { opencodeServerManager } from './opencode-single-server'
 import type { OpenCodeSupervisor } from './opencode-supervisor'
 import type { OpenCodeRestartCoordinator } from './opencode-restart-coordinator'
-import { logger } from '../utils/logger'
 
 let restartCoordinator: OpenCodeRestartCoordinator | null = null
 
@@ -66,19 +65,6 @@ export async function restartOpenCode(supervisor?: OpenCodeSupervisor): Promise<
     }
   }
   return { resumedSessionIDs: [] }
-}
-
-export async function restartOpenCodeAfterCommit(
-  supervisor?: OpenCodeSupervisor,
-): Promise<{ restartFailed: boolean; restartError?: string }> {
-  try {
-    await restartOpenCode(supervisor)
-    return { restartFailed: false }
-  } catch (error) {
-    const restartError = error instanceof Error ? error.message : String(error)
-    logger.error('OpenCode restart failed after the change was persisted', error)
-    return { restartFailed: true, restartError }
-  }
 }
 
 /**

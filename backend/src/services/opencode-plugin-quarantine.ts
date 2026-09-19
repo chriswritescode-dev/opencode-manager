@@ -3,7 +3,8 @@ import { lstat, realpath } from 'fs/promises'
 import path from 'path'
 import { parseJsonc } from '@opencode-manager/shared/utils'
 import { logger } from '../utils/logger'
-import { mkdirSafe, writeFileAtomic } from '../utils/fs-safe'
+import { existingFileMode, mkdirSafe, writeFileAtomic } from '../utils/fs-safe'
+import { withFileLock } from '../utils/atomic-json'
 import { getOpenCodePluginDir } from './opencode/plugin-registry'
 import {
   isRecord,
@@ -242,14 +243,6 @@ async function restorePluginEntries(dir: string): Promise<void> {
   }
 }
 
-async function existingFileMode(filePath: string): Promise<number | undefined> {
-  try {
-    return (await fs.stat(filePath)).mode & 0o777
-  } catch {
-    return undefined
-  }
-}
-
 async function restoreEnforcementConfigSections(configPath: string): Promise<void> {
   const backupPath = `${configPath}${PLUGIN_CONFIG_BACKUP_SUFFIX}`
   if (!(await pathExists(backupPath))) return
@@ -293,7 +286,8 @@ async function restoreEnforcementConfigSections(configPath: string): Promise<voi
   const restored = restoreEnforcementSections(currentConfig, removed)
   const restoredContent = JSON.stringify(restored, null, 2)
   if (restoredContent !== currentContent) {
-    await writeFileAtomic(configPath, restoredContent, { mode: await existingFileMode(configPath) })
+    const mode = await existingFileMode(configPath)
+    await withFileLock(configPath, () => writeFileAtomic(configPath, restoredContent, { mode }))
   }
   await fs.rm(backupPath, { force: true })
 }

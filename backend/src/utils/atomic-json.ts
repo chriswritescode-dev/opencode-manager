@@ -44,7 +44,7 @@ export async function withFileLock<T>(filePath: string, fn: () => Promise<T>): P
     }
   }
 
-  const newLock = previousLock ? previousLock.then(executeWithLock) : executeWithLock()
+  const newLock = previousLock ? previousLock.then(executeWithLock, executeWithLock) : executeWithLock()
   fileLockPromises.set(absolutePath, newLock)
 
   return newLock as Promise<T>

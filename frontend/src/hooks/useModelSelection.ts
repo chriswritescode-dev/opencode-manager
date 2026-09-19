@@ -134,8 +134,9 @@ export function useModelSelection(
     .find((value): value is string => Boolean(value))
 
   useEffect(() => {
-    validateAndSyncModel(config?.model || defaultModelString, providersData?.providers)
-  }, [config?.model, defaultModelString, providersData, validateAndSyncModel])
+    if (isModelStateLoading) return
+    validateAndSyncModel(config?.model, providersData?.providers, modelState?.recent ?? [], defaultModelString)
+  }, [config?.model, isModelStateLoading, modelState?.recent, defaultModelString, providersData, validateAndSyncModel])
 
   useEffect(() => {
     if (modelState) {

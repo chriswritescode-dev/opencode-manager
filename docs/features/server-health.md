@@ -40,6 +40,23 @@ Health monitoring is configured through environment variables:
 | `OPENCODE_HEALTH_POLL_MS` | `30000` | Poll interval in milliseconds |
 | `OPENCODE_HEALTH_FAILURE_THRESHOLD` | `2` | Failed checks before recovery starts |
 
+## Configuration Recovery
+
+The on-disk `opencode.json` is the source of truth. When the file exists at boot but fails validation, the Manager logs a warning and starts with the file unchanged — an invalid config file is never automatically replaced or rolled back during boot.
+
+The health-watch ladder is the only automatic repair path. When the supervised OpenCode server fails repeated health checks, recovery runs these actions in order until the server is healthy:
+
+1. **Restart** — restart the server process
+2. **Debug capture** — capture a diagnostic snapshot, then restart
+3. **Rollback to last known good** — archive the broken config and restore the last known good config
+4. **Seed default config** — write the minimal seed config and restart
+
+Because the ladder only runs after repeated failed health checks, a config file that fails validation but does not make the server unhealthy is left in place. Setting `OPENCODE_HEALTH_WATCH_ENABLED=false` disables the ladder entirely, leaving no automatic repair path.
+
+The last known good config is captured from the current on-disk file before every write made through the Settings UI, the internal API, or a host config import, so any of those can be undone with `POST /api/settings/opencode-rollback` or by the ladder. Archived broken configs and debug snapshots are kept under `.opencode/state/health-watch/` in the workspace, pruned to the newest 20 files.
+
+Earlier releases stored named configuration profiles in the Manager database. On first start after upgrading, each profile is archived to `.config/opencode-configs-archive/<name>.json` in the workspace, the default profile is restored to `opencode.json` if that file does not exist yet, and the database table is dropped.
+
 ## Restart with Session Resume
 
 When you restart the OpenCode server (manually or through an upgrade), active sessions are handled gracefully:
@@ -68,9 +85,8 @@ If the upgrade fails but the server recovers to a usable state, a recovery notic
 
 Besides the explicit **Restart** button, the server is automatically restarted when:
 
-- **OpenCode configuration is saved** — Changes to models, agents, commands, or MCP servers that require a server restart
 - **Assistant workspace is reloaded** — Via the `POST /assistant/reload` internal API endpoint
 - **Config import completes** — Importing a standalone OpenCode config into the workspace
 - **Version upgrade** — After installing a new OpenCode version
 
-Configuration changes that only affect non-process settings (e.g., environment variable passthrough, AGENTS.md) use a non-disruptive config reload instead, which does not interrupt active sessions.
+Saving the OpenCode configuration never restarts the server on its own. Changes to `agent`, `plugin`, `skills`, or `provider` are written to disk and flagged as **restart required**; the server keeps running on the previous configuration until you restart it. Every other change is live-patched into the running server without interrupting active sessions, and is only written to disk once the server has accepted it.

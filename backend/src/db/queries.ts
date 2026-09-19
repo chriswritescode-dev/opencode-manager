@@ -17,7 +17,6 @@ interface RepoRow {
   cloned_at: number
   last_pulled?: number
   last_accessed_at?: number
-  opencode_config_name?: string
   is_worktree?: number
   is_local?: number
 }
@@ -42,7 +41,6 @@ function rowToRepo(row: RepoRow): Repo {
     clonedAt: row.cloned_at,
     lastPulled: row.last_pulled,
     lastAccessedAt: row.last_accessed_at,
-    openCodeConfigName: row.opencode_config_name,
     isWorktree: row.is_worktree ? Boolean(row.is_worktree) : undefined,
     isLocal: row.is_local ? Boolean(row.is_local) : undefined,
   }
@@ -306,14 +304,6 @@ export function getRepoName(repo: Repo): string {
 export function updateRepoStatus(db: Database, id: number, cloneStatus: Repo['cloneStatus']): void {
   const stmt = db.prepare('UPDATE repos SET clone_status = ? WHERE id = ?')
   const result = stmt.run(cloneStatus, id)
-  if (result.changes === 0) {
-    throw new Error(`Repository with id ${id} not found`)
-  }
-}
-
-export function updateRepoConfigName(db: Database, id: number, configName: string): void {
-  const stmt = db.prepare('UPDATE repos SET opencode_config_name = ? WHERE id = ?')
-  const result = stmt.run(configName, id)
   if (result.changes === 0) {
     throw new Error(`Repository with id ${id} not found`)
   }

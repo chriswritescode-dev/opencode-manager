@@ -53,6 +53,11 @@ describe('buildReposSkill', () => {
     const skill = buildReposSkill()
     expect(skill).not.toContain('localhost')
   })
+
+  it('does not document the removed openCodeConfigName field', () => {
+    const skill = buildReposSkill()
+    expect(skill).not.toContain('openCodeConfigName')
+  })
 })
 
 describe('buildSettingsSkill', () => {
@@ -81,6 +86,15 @@ describe('buildSettingsSkill', () => {
     expect(skill).toContain('/assistant/reload')
     expect(skill).toContain('Always confirm with the user before reloading')
     expect(skill).toContain('5 requests per minute')
+  })
+
+  it('documents the OpenCode configuration endpoints', () => {
+    const skill = buildSettingsSkill()
+    expect(skill).toContain('## OpenCode Configuration')
+    expect(skill).toContain('GET /opencode-config')
+    expect(skill).toContain('PUT /opencode-config')
+    expect(skill).toContain('restartRequired')
+    expect(skill).toContain('Never attempt the restart yourself')
   })
 
   it('still lists apiKey and endpoint as forbidden', () => {
@@ -225,6 +239,8 @@ describe('ensureAssistantMode', () => {
     const settingsSkillContent = await readFile(settingsSkillPath, 'utf8')
     expect(settingsSkillContent).toContain('name: manager-settings')
     expect(settingsSkillContent).toContain('Read and modify')
+    expect(settingsSkillContent).toContain('/opencode-config')
+    expect(settingsSkillContent).toContain('restartRequired')
 
     const reposSkillContent = await readFile(reposSkillPath, 'utf8')
     expect(reposSkillContent).toContain('name: repo-management')

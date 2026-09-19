@@ -42,7 +42,7 @@ import { sweepStaleUploadSessions } from './routes/internal/repo-mirror-helpers'
 import { createOpenCodeProxyRoutes } from './routes/opencode-proxy'
 import { createAuthenticatedOpenCodeProxyRoutes } from './routes/opencode-auth-proxy'
 import { sseAggregator } from './services/sse-aggregator'
-import { ensureDirectoryExists, writeFileContent, fileExists, readFileContent } from './services/file-operations'
+import { ensureDirectoryExists, writeFileContent, fileExists } from './services/file-operations'
 import { SettingsService } from './services/settings'
 import { opencodeServerManager } from './services/opencode-single-server'
 import { createOpenCodeClient } from './services/opencode/client'
@@ -55,23 +55,15 @@ import { installAssistantWorkspace } from './services/assistant-mode'
 import { detectSandboxCapability } from './services/sandbox/capability'
 import { SandboxRuntimeService, stopWorkspaceSandboxOnShutdown } from './services/sandbox/runtime'
 import { getOpenCodeImportStatus, syncOpenCodeImport } from './services/opencode-import'
+import { readOpenCodeConfigFile, writeOpenCodeConfigFile, OPENCODE_CONFIG_SEED } from './services/opencode-config-file'
 import { OpenCodeSupervisor } from './services/opencode-supervisor'
 import { OpenCodeRestartCoordinator } from './services/opencode-restart-coordinator'
 import { setOpenCodeRestartCoordinator } from './services/opencode-restart'
-import { OpenCodeConfigSchema } from '@opencode-manager/shared/schemas'
-import { parse as parseJsonc } from 'jsonc-parser'
-import { getModelStatePath, ModelStateSchema } from './routes/providers'
-import { readJsonSafe } from './utils/atomic-json'
-import {
-  type OpenCodeModelStateRecord,
-} from './db/model-state'
-
 import { logger } from './utils/logger'
 import { 
   getWorkspacePath, 
   getReposPath, 
   getConfigPath,
-  getOpenCodeConfigFilePath,
   getAgentsMdPath,
   getDatabasePath,
   ENV
@@ -118,112 +110,31 @@ import { DEFAULT_AGENTS_MD } from './constants'
 let ipcServer: IPCServer | undefined
 const gitAuthService = new GitAuthService()
 let openCodeSupervisor: OpenCodeSupervisor | undefined
-async function ensureDefaultConfigExists(): Promise<void> {
-  const settingsService = new SettingsService(db)
-  const workspaceConfigPath = getOpenCodeConfigFilePath()
-  
-  if (await fileExists(workspaceConfigPath)) {
-    logger.info(`Found workspace config at ${workspaceConfigPath}, syncing to database...`)
-    try {
-      const rawContent = await readFileContent(workspaceConfigPath)
-      const parsed = parseJsonc(rawContent)
-      const validation = OpenCodeConfigSchema.safeParse(parsed)
-      
-      if (!validation.success) {
-        logger.warn('Workspace config has invalid structure', validation.error)
-      } else {
-        const existingDefault = settingsService.getOpenCodeConfigByName('default')
-        if (existingDefault) {
-          settingsService.updateOpenCodeConfig('default', {
-            content: rawContent,
-            isDefault: true,
-          })
-          logger.info('Updated database config from workspace file')
-        } else {
-          settingsService.createOpenCodeConfig({
-            name: 'default',
-            content: rawContent,
-            isDefault: true,
-          })
-          logger.info('Created database config from workspace file')
-        }
-        return
-      }
-    } catch (error) {
-      logger.warn('Failed to read workspace config', error)
-    }
-  }
-  
-  const { configSourcePath: importConfigPath } = await getOpenCodeImportStatus()
-
-  if (importConfigPath) {
-    logger.info(`Found importable OpenCode config at ${importConfigPath}, importing...`)
-    try {
-      const result = await syncOpenCodeImport({ db, overwriteState: false })
-      if (result.configImported) {
-        logger.info(`Imported OpenCode config from ${importConfigPath} to workspace`)
-        return
-      }
-    } catch (error) {
-      logger.warn(`Failed to import OpenCode config from ${importConfigPath}`, error)
-    }
-  }
-  
-  const existingDbConfigs = settingsService.getOpenCodeConfigs()
-  if (existingDbConfigs.configs.length > 0) {
-    const defaultConfig = settingsService.getDefaultOpenCodeConfig()
-    if (defaultConfig) {
-      await writeFileContent(workspaceConfigPath, defaultConfig.rawContent)
-      logger.info('Wrote existing database config to workspace file')
+async function ensureOpenCodeConfigFileExists(): Promise<void> {
+  const existing = await readOpenCodeConfigFile()
+  if (existing) {
+    if (!existing.isValid) {
+      logger.warn('OpenCode config file has validation issues', existing.validationIssues)
     }
     return
   }
-  
-  logger.info('No existing config found, creating minimal seed config')
-  const seedConfig = JSON.stringify({ $schema: 'https://opencode.ai/config.json' }, null, 2)
-  settingsService.createOpenCodeConfig({
-    name: 'default',
-    content: seedConfig,
-    isDefault: true,
-  })
-  await writeFileContent(workspaceConfigPath, seedConfig)
-  logger.info('Created minimal seed config')
-}
 
-async function backfillOpenCodeModelStateFromFile(): Promise<void> {
-  try {
-    const modelStatePath = getModelStatePath()
-    const fileState = await readJsonSafe<OpenCodeModelStateRecord | null>(modelStatePath, null)
-
-    if (!fileState) {
-      return
+  const status = await getOpenCodeImportStatus()
+  if (status.configSourcePath) {
+    logger.info(`Found importable OpenCode config at ${status.configSourcePath}, importing...`)
+    try {
+      const result = await syncOpenCodeImport({ overwriteState: false, status })
+      if (result.configImported) {
+        logger.info(`Imported OpenCode config from ${status.configSourcePath} to workspace`)
+        return
+      }
+    } catch (error) {
+      logger.warn(`Failed to import OpenCode config from ${status.configSourcePath}`, error)
     }
-
-    const existingRow = db.prepare('SELECT 1 FROM opencode_model_state WHERE user_id = ?').get('default')
-    if (existingRow) {
-      return
-    }
-
-    const validated = ModelStateSchema.safeParse(fileState)
-    if (!validated.success) {
-      logger.warn('Model state file has invalid structure, skipping backfill', validated.error)
-      return
-    }
-
-    db.prepare(
-      'INSERT INTO opencode_model_state(user_id, recent, favorite, variant, updated_at) VALUES(?,?,?,?,?)'
-    ).run(
-      'default',
-      JSON.stringify(validated.data.recent),
-      JSON.stringify(validated.data.favorite),
-      JSON.stringify(validated.data.variant),
-      Date.now()
-    )
-
-    logger.info('Backfilled OpenCode model state from model.json to database')
-  } catch (error) {
-    logger.warn('Failed to backfill OpenCode model state from file:', error)
   }
+
+  await writeOpenCodeConfigFile(OPENCODE_CONFIG_SEED)
+  logger.info('Created minimal seed config')
 }
 
 async function ensureHomeStateImported(): Promise<void> {
@@ -237,7 +148,7 @@ async function ensureHomeStateImported(): Promise<void> {
       return
     }
 
-    const result = await syncOpenCodeImport({ db, overwriteState: false })
+    const result = await syncOpenCodeImport({ overwriteState: false, importConfig: false, status })
     if (result.stateImported) {
       logger.info(`Imported OpenCode state from ${status.stateSourcePath}`)
     }
@@ -272,17 +183,14 @@ try {
   await cleanupExpiredCache()
   await sweepStaleUploadSessions()
 
-  await ensureDefaultConfigExists()
-  await backfillOpenCodeModelStateFromFile()
+  await ensureOpenCodeConfigFileExists()
   await ensureHomeStateImported()
   await ensureDefaultAgentsMdExists()
 
   const settingsService = new SettingsService(db)
   settingsService.initializeLastKnownGoodConfig()
 
-  openCodeSupervisor = new OpenCodeSupervisor(opencodeServerManager, settingsService, {
-    userId: 'default'
-  })
+  openCodeSupervisor = new OpenCodeSupervisor(opencodeServerManager, settingsService)
 
   await migrateGlobalSkills()
 
@@ -364,11 +272,11 @@ app.route('/api/opencode-proxy', createOpenCodeProxyRoutes(db, settingsService))
 const protectedApi = new Hono()
 protectedApi.use('/*', requireAuth)
 
-protectedApi.route('/repos', createRepoRoutes(db, gitAuthService, scheduleService, openCodeClient, openCodeSupervisor))
+protectedApi.route('/repos', createRepoRoutes(db, gitAuthService, scheduleService, openCodeClient))
 protectedApi.route('/settings', createSettingsRoutes(db, gitAuthService, openCodeClient, openCodeSupervisor))
   protectedApi.route('/files', createFileRoutes())
   protectedApi.route('/filesystem', createFilesystemRoutes())
-protectedApi.route('/providers', createProvidersRoutes(db, openCodeClient, openCodeSupervisor))
+protectedApi.route('/providers', createProvidersRoutes(openCodeClient, openCodeSupervisor))
 protectedApi.route('/oauth', createOAuthRoutes(openCodeClient, openCodeSupervisor))
 protectedApi.route('/tts', createTTSRoutes(db))
 protectedApi.route('/stt', createSTTRoutes(db))

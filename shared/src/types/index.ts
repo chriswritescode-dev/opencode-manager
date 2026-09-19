@@ -5,10 +5,9 @@ import {
   UpdateSettingsRequestSchema,
   CustomCommandSchema,
   OpenCodeConfigSchema,
-  OpenCodeConfigMetadataSchema,
-  CreateOpenCodeConfigRequestSchema,
+  OpenCodeConfigFileSchema,
+  OpenCodeConfigValidationIssueSchema,
   UpdateOpenCodeConfigRequestSchema,
-  OpenCodeConfigResponseSchema,
   ServerEnvVarSchema,
 } from '../schemas/settings'
 import {
@@ -59,11 +58,10 @@ export type SettingsResponse = z.infer<typeof SettingsResponseSchema>
 export type UpdateSettingsRequest = z.infer<typeof UpdateSettingsRequestSchema>
 export type CustomCommand = z.infer<typeof CustomCommandSchema>
 export type ServerEnvVar = z.infer<typeof ServerEnvVarSchema>
-export type OpenCodeConfig = z.infer<typeof OpenCodeConfigMetadataSchema>
+export type OpenCodeConfigFile = z.infer<typeof OpenCodeConfigFileSchema>
+export type OpenCodeConfigValidationIssue = z.infer<typeof OpenCodeConfigValidationIssueSchema>
 export type OpenCodeConfigInput = z.infer<typeof OpenCodeConfigSchema>
-export type CreateOpenCodeConfigRequest = z.infer<typeof CreateOpenCodeConfigRequestSchema>
 export type UpdateOpenCodeConfigRequest = z.infer<typeof UpdateOpenCodeConfigRequestSchema>
-export type OpenCodeConfigResponse = z.infer<typeof OpenCodeConfigResponseSchema>
 
 export type Repo = z.infer<typeof RepoSchema>
 export type InternalRepoListResponse = z.infer<typeof InternalRepoListResponseSchema>

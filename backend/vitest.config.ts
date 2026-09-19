@@ -10,22 +10,18 @@ export default defineConfig({
     exclude: [
       '**/node_modules/**',
       '**/dist/**',
-      'test/services/assistant-mode.test.ts',
-      'test/services/internal-token.test.ts',
-      'test/auth/internal-token-middleware.test.ts',
-      'test/routes/internal-schedules.test.ts',
-      'test/routes/internal-notifications.test.ts',
-      'test/routes/internal-settings.test.ts',
-      'test/routes/internal-repos.test.ts',
       'test/routes/internal-sandbox.test.ts',
-      'src/db/model-state.test.ts',
-      'src/routes/providers.test.ts',
       'src/routes/repos.test.ts',
-      'src/routes/session-pins.test.ts',
     ],
     coverage: {
       provider: 'v8',
-      reporter: ['text', 'html'],
+      reporter: ['text-summary', 'html'],
+      thresholds: {
+        statements: 80,
+        branches: 80,
+        functions: 80,
+        lines: 80,
+      },
     },
     env: {
       NODE_ENV: 'test',
@@ -38,6 +34,7 @@ export default defineConfig({
   resolve: {
     alias: {
       'bun:sqlite': path.resolve(__dirname, './test/mocks/bun-sqlite.ts'),
+      'bun:test': path.resolve(__dirname, './test/mocks/bun-test.ts'),
     },
   },
 })

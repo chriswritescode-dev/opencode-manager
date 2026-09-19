@@ -8,7 +8,8 @@ import {
   DEFAULT_SERVER_ENV_VARS,
   type TTSConfig,
   type STTConfig,
-  type OpenCodeConfigContent,
+  type OpenCodeConfigFile,
+  type UpdateOpenCodeConfigRequest,
   type ModelConfig,
   type ProviderConfig,
   type SandboxPreferences,
@@ -21,7 +22,7 @@ import {
 } from '@opencode-manager/shared'
 import type { NotificationPreferences } from '@opencode-manager/shared/types'
 
-export type { TTSConfig, STTConfig, OpenCodeConfigContent, ModelConfig, ProviderConfig, SandboxPreferences, NotificationPreferences, SkillFileInfo, CreateSkillRequest, UpdateSkillRequest, SkillScope, InstallSkillFromGithubRequest, InstallSkillResponse }
+export type { TTSConfig, STTConfig, OpenCodeConfigFile, UpdateOpenCodeConfigRequest, ModelConfig, ProviderConfig, SandboxPreferences, NotificationPreferences, SkillFileInfo, CreateSkillRequest, UpdateSkillRequest, SkillScope, InstallSkillFromGithubRequest, InstallSkillResponse }
 export { DEFAULT_TTS_CONFIG, DEFAULT_STT_CONFIG, DEFAULT_KEYBOARD_SHORTCUTS, DEFAULT_USER_PREFERENCES, DEFAULT_LEADER_KEY, BLOCKED_SERVER_ENV_KEYS, DEFAULT_SERVER_ENV_VARS }
 
 export interface CustomCommand {
@@ -85,37 +86,9 @@ export interface UpdateSettingsRequest {
   preferences: Partial<UserPreferences>
 }
 
-export interface OpenCodeConfig {
-  id: number
-  name: string
-  content: Record<string, unknown>
-  rawContent?: string
-  validationIssues?: Array<{
-    path: string
-    message: string
-  }>
-  removedFields?: string[]
+export interface OpenCodeConfigSaveResponse extends OpenCodeConfigFile {
   restartRequired?: boolean
-  isValid: boolean
-  isDefault: boolean
-  createdAt: number
-  updatedAt: number
-}
-
-export interface CreateOpenCodeConfigRequest {
-  name: string
-  content: OpenCodeConfigContent | string
-  isDefault?: boolean
-}
-
-export interface UpdateOpenCodeConfigRequest {
-  content: OpenCodeConfigContent | string
-  isDefault?: boolean
-}
-
-export interface OpenCodeConfigResponse {
-  configs: OpenCodeConfig[]
-  defaultConfig: OpenCodeConfig | null
+  removedFields?: string[]
 }
 
 export interface OpenCodeImportStatus {

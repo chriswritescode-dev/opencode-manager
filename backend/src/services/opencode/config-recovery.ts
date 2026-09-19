@@ -1,5 +1,6 @@
 import type { OpenCodeClient } from './client'
 import { logger } from '../../utils/logger'
+import { TIMEOUTS } from '@opencode-manager/shared/config/env'
 import { parseJsonc } from '@opencode-manager/shared/utils'
 
 export type PatchConfigValidationIssue = {
@@ -150,17 +151,41 @@ function parseErrorResponse(responseText: string): { details: PatchConfigValidat
   return { details, errorMessage }
 }
 
+const CONFIG_PATCH_TIMEOUT_ERROR = `Timed out waiting for OpenCode config patch after ${TIMEOUTS.CONFIG_PATCH_TIMEOUT_MS}ms`
+
+function isTimeoutError(error: unknown): boolean {
+  return typeof error === 'object'
+    && error !== null
+    && 'name' in error
+    && (error as { name?: unknown }).name === 'TimeoutError'
+}
+
+async function forwardConfigPatch(
+  client: OpenCodeClient,
+  config: Record<string, unknown>,
+): Promise<Response> {
+  const signal = AbortSignal.timeout(TIMEOUTS.CONFIG_PATCH_TIMEOUT_MS)
+  const response = await client.forward({
+    method: 'PATCH',
+    path: '/config',
+    body: JSON.stringify(config),
+    headers: { 'Content-Type': 'application/json' },
+    signal,
+  })
+
+  if (!response.ok && signal.aborted) {
+    throw new DOMException(CONFIG_PATCH_TIMEOUT_ERROR, 'TimeoutError')
+  }
+
+  return response
+}
+
 export async function patchConfigWithRecovery(
   client: OpenCodeClient,
   config: Record<string, unknown>,
 ): Promise<PatchConfigResult> {
   try {
-    const response = await client.forward({
-      method: 'PATCH',
-      path: '/config',
-      body: JSON.stringify(config),
-      headers: { 'Content-Type': 'application/json' },
-    })
+    const response = await forwardConfigPatch(client, config)
 
     if (response.ok) {
       logger.info('Patched OpenCode config via API')
@@ -202,12 +227,7 @@ export async function patchConfigWithRecovery(
     }
 
     logger.info(`Retrying config patch after removing ${removedFields.length} problematic field(s): ${removedFields.join(', ')}`)
-    const retryResponse = await client.forward({
-      method: 'PATCH',
-      path: '/config',
-      body: JSON.stringify(cleanedConfig),
-      headers: { 'Content-Type': 'application/json' },
-    })
+    const retryResponse = await forwardConfigPatch(client, cleanedConfig)
 
     if (retryResponse.ok) {
       logger.info('Patched OpenCode config via API after removing invalid fields')
@@ -230,6 +250,11 @@ export async function patchConfigWithRecovery(
       removedFields
     }
   } catch (error) {
+    if (isTimeoutError(error)) {
+      logger.error(`Failed to patch OpenCode config: ${CONFIG_PATCH_TIMEOUT_ERROR}`)
+      return { success: false, error: CONFIG_PATCH_TIMEOUT_ERROR }
+    }
+
     const errorMessage = error instanceof Error ? error.message : 'Unknown error'
     logger.error('Failed to patch OpenCode config:', error)
     return { success: false, error: errorMessage }

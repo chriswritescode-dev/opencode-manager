@@ -1,5 +1,5 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest'
-import { ensureDirectoryExists, writeFileContent } from '../../src/services/file-operations'
+import { archiveBrokenOpenCodeConfigFile, writeHealthWatchArtifact, writeOpenCodeConfigFile, OPENCODE_CONFIG_SEED } from '../../src/services/opencode-config-file'
 import { OpenCodeSupervisor } from '../../src/services/opencode-supervisor'
 
 vi.mock('../../src/utils/logger', () => ({
@@ -10,14 +10,24 @@ vi.mock('../../src/utils/logger', () => ({
   },
 }))
 
-vi.mock('../../src/services/file-operations', () => ({
-  writeFileContent: vi.fn(),
-  ensureDirectoryExists: vi.fn(),
+vi.mock('../../src/services/opencode-config-file', () => ({
+  archiveBrokenOpenCodeConfigFile: vi.fn(),
+  writeHealthWatchArtifact: vi.fn(),
+  writeOpenCodeConfigFile: vi.fn(async (rawContent: string) => ({ rawContent, isValid: true })),
+  withOpenCodeConfigLock: (fn: () => Promise<unknown>) => fn(),
+  OPENCODE_CONFIG_SEED: '{"$schema":"https://opencode.ai/config.json"}',
+}))
+
+vi.mock('../../src/services/opencode-single-server', () => ({
+  opencodeServerManager: {
+    clearStartupError: vi.fn(),
+  },
 }))
 
 vi.mock('@opencode-manager/shared/config/env', () => ({
-  getWorkspacePath: vi.fn(() => '/tmp/opencode-workspace'),
-  getOpenCodeConfigFilePath: vi.fn(() => '/tmp/opencode-workspace/.config/opencode.json'),
+  TIMEOUTS: {
+    CONFIG_PATCH_TIMEOUT_MS: 30000,
+  },
   ENV: {
     OPENCODE: {
       HEALTH_POLL_MS: 200,
@@ -45,11 +55,7 @@ interface FakeManager {
 }
 
 interface FakeSettingsService {
-  archiveBrokenConfig: ReturnType<typeof vi.fn>
-  restoreToLastKnownGoodConfig: ReturnType<typeof vi.fn>
-  getDefaultOpenCodeConfig: ReturnType<typeof vi.fn>
-  updateOpenCodeConfig: ReturnType<typeof vi.fn>
-  createOpenCodeConfig: ReturnType<typeof vi.fn>
+  getLastKnownGoodConfig: ReturnType<typeof vi.fn>
 }
 
 describe('OpenCodeSupervisor', () => {
@@ -75,24 +81,7 @@ describe('OpenCodeSupervisor', () => {
   })
 
   const createSettings = (): FakeSettingsService => ({
-    archiveBrokenConfig: vi.fn(() => 'default-broken-2026-01-01'),
-    restoreToLastKnownGoodConfig: vi.fn(() => ({
-      configName: 'default',
-      content: '{"$schema":"https://opencode.ai/config.json"}',
-    })),
-    getDefaultOpenCodeConfig: vi.fn(() => ({
-      name: 'default',
-      content: { $schema: 'https://opencode.ai/config.json' },
-      rawContent: '{"$schema":"https://opencode.ai/config.json"}',
-      isDefault: true,
-    })),
-    updateOpenCodeConfig: vi.fn(() => ({
-      name: 'default',
-      content: { $schema: 'https://opencode.ai/config.json' },
-      rawContent: '{"$schema":"https://opencode.ai/config.json"}',
-      isDefault: true,
-    })),
-    createOpenCodeConfig: vi.fn(),
+    getLastKnownGoodConfig: vi.fn(() => '{"$schema":"https://opencode.ai/config.json"}'),
   })
 
   it('recovers a startup failure through rollback and keeps watching', async () => {
@@ -100,7 +89,6 @@ describe('OpenCodeSupervisor', () => {
     const settings = createSettings()
     const supervisor = new OpenCodeSupervisor(manager as unknown as never, settings as unknown as never, {
       failureThreshold: 1,
-      userId: 'default',
     })
 
     manager.start.mockRejectedValueOnce(new Error('startup failed'))
@@ -114,18 +102,30 @@ describe('OpenCodeSupervisor', () => {
     expect(status.healthy).toBe(true)
     expect(status.state).toBe('healthy')
     expect(manager.restart).toHaveBeenCalledTimes(3)
-    expect(settings.archiveBrokenConfig).toHaveBeenCalledWith('default')
-    expect(settings.restoreToLastKnownGoodConfig).toHaveBeenCalledWith('default')
-    expect(settings.updateOpenCodeConfig).toHaveBeenCalledWith(
-      'default',
-      { content: '{"$schema":"https://opencode.ai/config.json"}' },
-      'default',
-    )
-    expect(writeFileContent).toHaveBeenCalledWith(
-      '/tmp/opencode-workspace/.config/opencode.json',
-      '{"$schema":"https://opencode.ai/config.json"}',
-    )
+    expect(settings.getLastKnownGoodConfig).toHaveBeenCalled()
+    expect(archiveBrokenOpenCodeConfigFile).toHaveBeenCalled()
+    expect(writeOpenCodeConfigFile).toHaveBeenCalledWith('{"$schema":"https://opencode.ai/config.json"}')
     expect(status.watching).toBe(true)
+
+    await supervisor.stop()
+  })
+
+  it('seeds the default config when the recovery ladder reaches the seed action', async () => {
+    const manager = createManager()
+    const settings = createSettings()
+    const supervisor = new OpenCodeSupervisor(manager as unknown as never, settings as unknown as never, {
+      failureThreshold: 1,
+      watchEnabled: false,
+    })
+
+    manager.start.mockRejectedValueOnce(new Error('startup failed'))
+    manager.checkHealth.mockResolvedValue(false)
+
+    const status = await supervisor.start()
+
+    expect(status.state).toBe('failed')
+    expect(archiveBrokenOpenCodeConfigFile).toHaveBeenCalled()
+    expect(writeOpenCodeConfigFile).toHaveBeenCalledWith(OPENCODE_CONFIG_SEED)
 
     await supervisor.stop()
   })
@@ -149,7 +149,6 @@ describe('OpenCodeSupervisor', () => {
     const supervisor = new OpenCodeSupervisor(manager as unknown as never, settings as unknown as never, {
       failureThreshold: 1,
       watchEnabled: false,
-      userId: 'default',
     })
 
     manager.start.mockRejectedValueOnce(new Error('OpenCode version 1.18.15 does not support sandboxed bash tool rewriting'))
@@ -167,7 +166,6 @@ describe('OpenCodeSupervisor', () => {
     const supervisor = new OpenCodeSupervisor(manager as unknown as never, settings as unknown as never, {
       failureThreshold: 1,
       watchEnabled: false,
-      userId: 'default',
     })
 
     manager.start.mockRejectedValueOnce(new Error('startup failed'))
@@ -251,8 +249,7 @@ describe('OpenCodeSupervisor', () => {
     const status = await supervisor.checkNow('manual')
 
     expect(status.healthy).toBe(true)
-    expect(ensureDirectoryExists).toHaveBeenCalled()
-    expect(writeFileContent).toHaveBeenCalled()
+    expect(writeHealthWatchArtifact).toHaveBeenCalled()
     expect(manager.restart).toHaveBeenCalledTimes(2)
   })
 
@@ -273,7 +270,6 @@ describe('OpenCodeSupervisor', () => {
     const settings = createSettings()
     const supervisor = new OpenCodeSupervisor(manager as unknown as never, settings as unknown as never, {
       failureThreshold: 1,
-      userId: 'default',
     })
 
     manager.start.mockRejectedValueOnce(new Error('OpenCode version 1.18.15 does not support sandboxed bash tool rewriting'))
@@ -285,11 +281,10 @@ describe('OpenCodeSupervisor', () => {
     expect(status.healthy).toBe(false)
     expect(status.lastError).toContain('does not support sandboxed bash tool rewriting')
     expect(manager.restart).not.toHaveBeenCalled()
-    expect(settings.archiveBrokenConfig).not.toHaveBeenCalled()
-    expect(settings.restoreToLastKnownGoodConfig).not.toHaveBeenCalled()
-    expect(settings.updateOpenCodeConfig).not.toHaveBeenCalled()
-    expect(settings.createOpenCodeConfig).not.toHaveBeenCalled()
-    expect(writeFileContent).not.toHaveBeenCalled()
+    expect(archiveBrokenOpenCodeConfigFile).not.toHaveBeenCalled()
+    expect(settings.getLastKnownGoodConfig).not.toHaveBeenCalled()
+    expect(writeOpenCodeConfigFile).not.toHaveBeenCalled()
+    expect(writeHealthWatchArtifact).not.toHaveBeenCalled()
 
     await supervisor.stop()
   })
@@ -299,7 +294,6 @@ describe('OpenCodeSupervisor', () => {
     const settings = createSettings()
     const supervisor = new OpenCodeSupervisor(manager as unknown as never, settings as unknown as never, {
       failureThreshold: 1,
-      userId: 'default',
     })
 
     manager.restart.mockRejectedValueOnce(new Error('Failed to install a generated OpenCode plugin; refusing to start an enforced server'))
@@ -308,11 +302,10 @@ describe('OpenCodeSupervisor', () => {
     const status = await supervisor.restart('settings_restart')
 
     expect(status.state).toBe('failed')
-    expect(settings.archiveBrokenConfig).not.toHaveBeenCalled()
-    expect(settings.restoreToLastKnownGoodConfig).not.toHaveBeenCalled()
-    expect(settings.updateOpenCodeConfig).not.toHaveBeenCalled()
-    expect(settings.createOpenCodeConfig).not.toHaveBeenCalled()
-    expect(writeFileContent).not.toHaveBeenCalled()
+    expect(archiveBrokenOpenCodeConfigFile).not.toHaveBeenCalled()
+    expect(settings.getLastKnownGoodConfig).not.toHaveBeenCalled()
+    expect(writeOpenCodeConfigFile).not.toHaveBeenCalled()
+    expect(writeHealthWatchArtifact).not.toHaveBeenCalled()
 
     await supervisor.stop()
   })
@@ -322,7 +315,6 @@ describe('OpenCodeSupervisor', () => {
     const settings = createSettings()
     const supervisor = new OpenCodeSupervisor(manager as unknown as never, settings as unknown as never, {
       failureThreshold: 1,
-      userId: 'default',
     })
 
     manager.start.mockRejectedValueOnce(new Error('startup failed'))
@@ -337,11 +329,10 @@ describe('OpenCodeSupervisor', () => {
     expect(status.state).toBe('failed')
     expect(status.lastError).toContain('Failed to install a generated OpenCode plugin')
     expect(manager.restart).toHaveBeenCalledTimes(1)
-    expect(settings.archiveBrokenConfig).not.toHaveBeenCalled()
-    expect(settings.restoreToLastKnownGoodConfig).not.toHaveBeenCalled()
-    expect(settings.updateOpenCodeConfig).not.toHaveBeenCalled()
-    expect(settings.createOpenCodeConfig).not.toHaveBeenCalled()
-    expect(writeFileContent).not.toHaveBeenCalled()
+    expect(archiveBrokenOpenCodeConfigFile).not.toHaveBeenCalled()
+    expect(settings.getLastKnownGoodConfig).not.toHaveBeenCalled()
+    expect(writeOpenCodeConfigFile).not.toHaveBeenCalled()
+    expect(writeHealthWatchArtifact).not.toHaveBeenCalled()
 
     await supervisor.stop()
   })
@@ -351,7 +342,6 @@ describe('OpenCodeSupervisor', () => {
     const settings = createSettings()
     const supervisor = new OpenCodeSupervisor(manager as unknown as never, settings as unknown as never, {
       failureThreshold: 1,
-      userId: 'default',
     })
 
     manager.start.mockRejectedValueOnce(new Error('OpenCode config validation failed: command.review: Invalid'))
@@ -363,10 +353,9 @@ describe('OpenCodeSupervisor', () => {
     const status = await supervisor.start()
 
     expect(status.state).toBe('healthy')
-    expect(settings.archiveBrokenConfig).toHaveBeenCalledWith('default')
-    expect(settings.restoreToLastKnownGoodConfig).toHaveBeenCalledWith('default')
-    expect(settings.updateOpenCodeConfig).toHaveBeenCalled()
-    expect(writeFileContent).toHaveBeenCalled()
+    expect(archiveBrokenOpenCodeConfigFile).toHaveBeenCalled()
+    expect(settings.getLastKnownGoodConfig).toHaveBeenCalled()
+    expect(writeOpenCodeConfigFile).toHaveBeenCalledWith('{"$schema":"https://opencode.ai/config.json"}')
 
     await supervisor.stop()
   })
@@ -519,7 +508,6 @@ describe('OpenCodeSupervisor', () => {
     const supervisor = new OpenCodeSupervisor(manager as unknown as never, settings as unknown as never, {
       failureThreshold: 1,
       watchEnabled: false,
-      userId: 'default',
     })
 
     await supervisor.start()

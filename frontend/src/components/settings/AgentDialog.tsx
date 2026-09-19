@@ -2,7 +2,6 @@ import { useForm } from 'react-hook-form'
 import { zodResolver } from '@hookform/resolvers/zod'
 import { z } from 'zod'
 import { useMemo, useEffect } from 'react'
-import { useQuery } from '@tanstack/react-query'
 import { Button } from '@/components/ui/button'
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from '@/components/ui/dialog'
 import { Input } from '@/components/ui/input'
@@ -11,7 +10,7 @@ import { Textarea } from '@/components/ui/textarea'
 import { Switch } from '@/components/ui/switch'
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
 import { Combobox, type ComboboxOption } from '@/components/ui/combobox'
-import { getProvidersWithModels } from '@/api/providers'
+import { useProvidersWithModels } from '@/hooks/useProvidersWithModels'
 
 const agentFormSchema = z.object({
   name: z.string().min(1, 'Agent name is required').regex(/^[a-z0-9-]+$/, 'Must be lowercase letters, numbers, and hyphens only'),
@@ -66,12 +65,7 @@ interface AgentDialogProps {
 }
 
 export function AgentDialog({ open, onOpenChange, onSubmit, editingAgent }: AgentDialogProps) {
-  const { data: providers = [] } = useQuery({
-    queryKey: ['providers-with-models'],
-    queryFn: () => getProvidersWithModels(),
-    enabled: open,
-    staleTime: 5 * 60 * 1000,
-  })
+  const { data: providers } = useProvidersWithModels({ enabled: open })
 
   const providerOptions: ComboboxOption[] = useMemo(() => {
     const sourceLabels: Record<string, string> = {

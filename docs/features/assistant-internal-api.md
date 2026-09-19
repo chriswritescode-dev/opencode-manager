@@ -58,6 +58,8 @@ The `path` is relative to the internal API base (for example `/settings` or `/re
 ```
 GET /settings
 PATCH /settings
+GET /opencode-config
+PUT /opencode-config
 POST /assistant/reload
 GET /repos
 GET /repos/*/git-info
@@ -200,6 +202,50 @@ Returns the updated settings object.
 - `400`: Invalid request body or disallowed key
 - `401`: Missing or invalid bearer token
 
+### OpenCode Configuration
+
+The OpenCode configuration file at `getOpenCodeConfigFilePath()` is the source of truth, and this endpoint is the only supported way to change it. The endpoint applies the same restart and live-patch rules as the Settings UI: changes to `agent`, `plugin`, `skills`, or `provider` mark an OpenCode server restart as required, and any other change is live-patched into the running OpenCode server.
+
+**GET `/api/internal/opencode-config`**
+
+Read the current configuration file state.
+
+**Response (`OpenCodeConfigFile`):**
+```ts
+{
+  path: string              // Absolute path of the configuration file
+  content: object           // Parsed configuration
+  rawContent: string        // Raw file content, including comments
+  isValid: boolean          // Whether the file passes schema validation
+  validationIssues?: Array<{ path: string, message: string }>
+  updatedAt: number         // Unix timestamp of the last write
+}
+```
+
+**Status Codes:**
+- `200`: Configuration file state returned
+- `401`: Missing or invalid bearer token
+- `404`: No config file found
+- `500`: Server error
+
+**PUT `/api/internal/opencode-config`**
+
+Persist a complete configuration. Read the file first, change only the keys the user asked for, and send the complete object back.
+
+**Request Body:**
+```ts
+{ content: object }  // The complete configuration to persist
+```
+
+**Response:**
+Returns the written `OpenCodeConfigFile`. Adds `restartRequired: true` when the change needs an OpenCode server restart, and `removedFields` when OpenCode dropped fields it does not accept.
+
+**Status Codes:**
+- `200`: Configuration written (live-patched or restart pending)
+- `400`: Invalid request body, or configuration rejected with `validationIssues`
+- `401`: Missing or invalid bearer token
+- `500`: Server error
+
 ### Assistant
 
 **POST `/api/internal/assistant/reload`**
@@ -251,7 +297,6 @@ Retrieve a list of all managed repositories, ordered by the user's repo preferen
     clonedAt: number              // Timestamp when repo was cloned
     lastPulled?: number           // Timestamp of last pull
     lastAccessedAt?: number       // Timestamp of last access
-    openCodeConfigName?: string   // Associated OpenCode config name
     isWorktree?: boolean          // Whether repo is a worktree
     isLocal?: boolean             // Whether repo is local-only
   }>
@@ -269,7 +314,7 @@ The assistant workspace includes four skills that document these capabilities:
 
 1. **Schedule Management** (`.opencode/skills/schedule-management/SKILL.md`) — manage schedule jobs and runs through the `ocm` `request` action.
 2. **Notifications** (`.opencode/skills/notifications/SKILL.md`) — send push notifications through the `ocm` `send_notification` action.
-3. **Manager Settings** (`.opencode/skills/manager-settings/SKILL.md`) — read and patch user preferences and reload the assistant workspace through the `ocm` `request` action.
+3. **Manager Settings** (`.opencode/skills/manager-settings/SKILL.md`) — read and patch user preferences, read and update the OpenCode configuration file, and reload the assistant workspace through the `ocm` `request` action.
 4. **Repo Management** (`.opencode/skills/repo-management/SKILL.md`) — list managed repositories through the `ocm` `request` action.
 
 These skills are automatically provisioned when assistant mode is initialized and contain detailed examples and usage patterns.

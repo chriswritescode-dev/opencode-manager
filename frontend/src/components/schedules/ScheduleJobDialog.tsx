@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
 import { useQuery } from '@tanstack/react-query'
 import type { CreateScheduleJobRequest, PromptTemplate, ScheduleJob } from '@opencode-manager/shared/types'
-import { getProvidersWithModels } from '@/api/providers'
+import { useProvidersWithModels } from '@/hooks/useProvidersWithModels'
 import { createOpenCodeClient } from '@/api/opencode'
 import { settingsApi } from '@/api/settings'
 import { listRepos, listBranches } from '@/api/repos'
@@ -74,11 +74,9 @@ export function ScheduleJobDialog({ open, onOpenChange, job, isSaving, onSubmit,
   const { data: templates = EMPTY_TEMPLATES } = usePromptTemplates()
   const deleteTemplateMutation = useDeletePromptTemplate()
 
-  const { data: providerModels = [] } = useQuery({
-    queryKey: ['providers-with-models', 'schedule-dialog'],
-    queryFn: () => getProvidersWithModels(),
+  const { data: providerModels } = useProvidersWithModels({
     enabled: open,
-    staleTime: 5 * 60 * 1000,
+    keyParts: ['schedule-dialog'],
   })
 
   const { data: agents = [] } = useQuery({

@@ -1,12 +1,10 @@
 import { describe, it, expect, beforeEach, vi } from 'vitest'
-import { useModelStore, modelExists, modelStorePartialize, modelStoreMigrate } from '@/stores/modelStore'
+import { useModelStore, modelExists } from '@/stores/modelStore'
 import type { Provider } from '@/api/providers'
 
 beforeEach(() => {
-  useModelStore.persist.clearStorage()
   useModelStore.setState({
     model: null,
-    agentModels: {},
     variants: {},
     lastConfigModel: undefined,
   })
@@ -24,11 +22,17 @@ function makeProvider(overrides: Partial<Provider>): Provider {
   }
 }
 
+const openaiProviders = [
+  makeProvider({
+    id: 'openai',
+    models: { 'gpt-4o': { id: 'gpt-4o', name: 'GPT-4o' } },
+  }),
+]
+
 describe('validateAndSyncModel', () => {
   beforeEach(() => {
     useModelStore.setState({
       model: null,
-      agentModels: {},
       variants: {},
       lastConfigModel: undefined,
     })
@@ -40,41 +44,75 @@ describe('validateAndSyncModel', () => {
     expect(useModelStore.getState().model).toEqual({ providerID: 'anthropic', modelID: 'claude-sonnet-4' })
   })
 
-  it('sets active model from configModel when current model not in providers but configModel parses to valid model', () => {
-    const providers = [
-      makeProvider({
-        id: 'openai',
-        models: { 'gpt-4o': { id: 'gpt-4o', name: 'GPT-4o' } },
-      }),
-    ]
-
+  it('uses config model when current model is missing and config is valid', () => {
     useModelStore.setState({
       model: { providerID: 'anthropic', modelID: 'claude-sonnet-4' },
     })
 
-    useModelStore.getState().validateAndSyncModel('openai/gpt-4o', providers)
+    useModelStore.getState().validateAndSyncModel('openai/gpt-4o', openaiProviders)
 
     expect(useModelStore.getState().model).toEqual({ providerID: 'openai', modelID: 'gpt-4o' })
   })
 
-  it('clears active model when invalid and no config fallback', () => {
-    const providers = [
-      makeProvider({
-        id: 'openai',
-        models: { 'gpt-4o': { id: 'gpt-4o', name: 'GPT-4o' } },
-      }),
-    ]
-
+  it('uses first valid recent model when config is invalid', () => {
     useModelStore.setState({
       model: { providerID: 'anthropic', modelID: 'claude-sonnet-4' },
     })
 
-    useModelStore.getState().validateAndSyncModel(undefined, providers)
+    useModelStore.getState().validateAndSyncModel('nonexistent/model', openaiProviders, [
+      { providerID: 'nonexistent', modelID: 'model' },
+      { providerID: 'openai', modelID: 'gpt-4o' },
+    ])
+
+    expect(useModelStore.getState().model).toEqual({ providerID: 'openai', modelID: 'gpt-4o' })
+  })
+
+  it('uses fallback model when config and recent are invalid', () => {
+    useModelStore.setState({
+      model: { providerID: 'anthropic', modelID: 'claude-sonnet-4' },
+    })
+
+    useModelStore.getState().validateAndSyncModel(
+      'nonexistent/model',
+      openaiProviders,
+      [{ providerID: 'nonexistent', modelID: 'model' }],
+      'openai/gpt-4o'
+    )
+
+    expect(useModelStore.getState().model).toEqual({ providerID: 'openai', modelID: 'gpt-4o' })
+  })
+
+  it('leaves model null when config, recent, and fallback are all invalid', () => {
+    useModelStore.setState({
+      model: { providerID: 'anthropic', modelID: 'claude-sonnet-4' },
+    })
+
+    useModelStore.getState().validateAndSyncModel(
+      'nonexistent/model',
+      openaiProviders,
+      [{ providerID: 'nonexistent', modelID: 'model' }],
+      'nonexistent/fallback'
+    )
 
     expect(useModelStore.getState().model).toBeNull()
   })
 
-  it('invalidates stale hydrated model when current model not in providers and no config fallback', () => {
+  it('does not override a current model that exists in providers', () => {
+    useModelStore.setState({
+      model: { providerID: 'openai', modelID: 'gpt-4o' },
+    })
+
+    useModelStore.getState().validateAndSyncModel(
+      'nonexistent/model',
+      openaiProviders,
+      [{ providerID: 'nonexistent', modelID: 'model' }],
+      'nonexistent/fallback'
+    )
+
+    expect(useModelStore.getState().model).toEqual({ providerID: 'openai', modelID: 'gpt-4o' })
+  })
+
+  it('clears stale hydrated model when nothing resolves', () => {
     const providers = [
       makeProvider({
         id: 'openrouter',
@@ -126,7 +164,6 @@ describe('setModel', () => {
   beforeEach(() => {
     useModelStore.setState({
       model: null,
-      agentModels: {},
       variants: {},
       lastConfigModel: undefined,
     })
@@ -149,7 +186,6 @@ describe('setActiveModel', () => {
   beforeEach(() => {
     useModelStore.setState({
       model: null,
-      agentModels: {},
       variants: {},
       lastConfigModel: undefined,
     })
@@ -162,44 +198,10 @@ describe('setActiveModel', () => {
   })
 })
 
-describe('agentModels', () => {
-  beforeEach(() => {
-    useModelStore.setState({
-      model: null,
-      agentModels: {},
-      variants: {},
-      lastConfigModel: undefined,
-    })
-  })
-
-  it('setAgentModel stores model for agent', () => {
-    const model = { providerID: 'openai', modelID: 'gpt-4o' }
-    useModelStore.getState().setAgentModel('agent-1', model)
-    expect(useModelStore.getState().agentModels['agent-1']).toEqual(model)
-  })
-
-  it('getAgentModel returns model for agent', () => {
-    const model = { providerID: 'openai', modelID: 'gpt-4o' }
-    useModelStore.getState().setAgentModel('agent-1', model)
-    expect(useModelStore.getState().getAgentModel('agent-1')).toEqual(model)
-  })
-
-  it('getAgentModel returns null for unknown agent', () => {
-    expect(useModelStore.getState().getAgentModel('unknown')).toBeNull()
-  })
-
-  it('setAgentModel replaces existing model for same agent', () => {
-    useModelStore.getState().setAgentModel('agent-1', { providerID: 'openai', modelID: 'gpt-4o' })
-    useModelStore.getState().setAgentModel('agent-1', { providerID: 'anthropic', modelID: 'claude-sonnet-4' })
-    expect(useModelStore.getState().agentModels['agent-1']).toEqual({ providerID: 'anthropic', modelID: 'claude-sonnet-4' })
-  })
-})
-
 describe('syncFromConfig', () => {
   beforeEach(() => {
     useModelStore.setState({
       model: null,
-      agentModels: {},
       variants: {},
       lastConfigModel: undefined,
     })
@@ -241,7 +243,6 @@ describe('getModelString', () => {
   beforeEach(() => {
     useModelStore.setState({
       model: null,
-      agentModels: {},
       variants: {},
       lastConfigModel: undefined,
     })
@@ -261,7 +262,6 @@ describe('variants', () => {
   beforeEach(() => {
     useModelStore.setState({
       model: null,
-      agentModels: {},
       variants: {},
       lastConfigModel: undefined,
     })
@@ -323,7 +323,6 @@ describe('syncModelState', () => {
   beforeEach(() => {
     useModelStore.setState({
       model: null,
-      agentModels: {},
       variants: {},
       lastConfigModel: undefined,
     })
@@ -394,121 +393,5 @@ describe('modelExists', () => {
 
   it('returns false when providers list is empty', () => {
     expect(modelExists({ providerID: 'openai', modelID: 'gpt-4o' }, [])).toBe(false)
-  })
-})
-
-describe('modelStorePartialize', () => {
-  it('returns only model and agentModels', () => {
-    const result = modelStorePartialize({
-      model: { providerID: 'anthropic', modelID: 'claude-sonnet-4' },
-      agentModels: { 'agent-1': { providerID: 'openai', modelID: 'gpt-4o' } },
-      variants: { 'anthropic/claude-sonnet-4': 'some-variant' },
-      lastConfigModel: 'anthropic/claude-sonnet-4',
-    } as Parameters<typeof modelStorePartialize>[0])
-
-    expect(result).toEqual({
-      model: { providerID: 'anthropic', modelID: 'claude-sonnet-4' },
-      agentModels: { 'agent-1': { providerID: 'openai', modelID: 'gpt-4o' } },
-    })
-    expect(result).not.toHaveProperty('variants')
-    expect(result).not.toHaveProperty('lastConfigModel')
-  })
-})
-
-describe('modelStoreMigrate', () => {
-  it('strips legacy recentModels, favoriteModels, and variants keys from flat state (Zustand v5 call shape)', () => {
-    const legacy = {
-      model: { providerID: 'p', modelID: 'm' },
-      agentModels: {},
-      recentModels: [{ providerID: 'old', modelID: 'old' }],
-      favoriteModels: [{ providerID: 'old', modelID: 'old' }],
-      variants: { 'old/old': 'v1' },
-    }
-
-    const migrated = modelStoreMigrate(legacy)
-
-    expect(migrated).toEqual({
-      model: { providerID: 'p', modelID: 'm' },
-      agentModels: {},
-    })
-  })
-
-  it('preserves model and agentModels during migration of flat state', () => {
-    const legacy = {
-      model: { providerID: 'anthropic', modelID: 'claude-sonnet-4' },
-      agentModels: { 'agent-1': { providerID: 'openai', modelID: 'gpt-4o' } },
-      recentModels: [{ providerID: 'openai', modelID: 'gpt-4o' }],
-      favoriteModels: [],
-      variants: {},
-    }
-
-    const migrated = modelStoreMigrate(legacy)
-
-    expect(migrated).toEqual({
-      model: { providerID: 'anthropic', modelID: 'claude-sonnet-4' },
-      agentModels: { 'agent-1': { providerID: 'openai', modelID: 'gpt-4o' } },
-    })
-  })
-
-  it('handles null/undefined input gracefully', () => {
-    expect(modelStoreMigrate(null)).toBeNull()
-    expect(modelStoreMigrate(undefined)).toBeUndefined()
-  })
-
-  it('also strips legacy keys from nested Zustand state envelope', () => {
-    const legacy = {
-      state: {
-        model: { providerID: 'p', modelID: 'm' },
-        agentModels: {},
-        recentModels: [{ providerID: 'old', modelID: 'old' }],
-        favoriteModels: [{ providerID: 'old', modelID: 'old' }],
-        variants: { 'old/old': 'v1' },
-      },
-      version: 0,
-    }
-
-    const migrated = modelStoreMigrate(legacy)
-
-    expect(migrated).toEqual({
-      state: {
-        model: { providerID: 'p', modelID: 'm' },
-        agentModels: {},
-      },
-      version: 0,
-    })
-  })
-
-  it('returns non-object input unchanged', () => {
-    expect(modelStoreMigrate('string')).toBe('string')
-    expect(modelStoreMigrate(42)).toBe(42)
-  })
-
-  it('handles state without legacy keys (new users)', () => {
-    const clean = {
-      model: { providerID: 'p', modelID: 'm' },
-      agentModels: {},
-    }
-
-    const migrated = modelStoreMigrate(clean)
-
-    expect(migrated).toEqual(clean)
-  })
-
-  it('migrate function is wired through persist.getOptions()', () => {
-    const legacy = {
-      model: { providerID: 'p', modelID: 'm' },
-      agentModels: {},
-      recentModels: [{ providerID: 'old', modelID: 'old' }],
-      favoriteModels: [{ providerID: 'old', modelID: 'old' }],
-      variants: { 'old/old': 'v1' },
-    }
-
-    const options = useModelStore.persist.getOptions()
-    const migrated = options.migrate?.(legacy, 0)
-
-    expect(migrated).toEqual({
-      model: { providerID: 'p', modelID: 'm' },
-      agentModels: {},
-    })
   })
 })

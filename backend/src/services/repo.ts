@@ -1,5 +1,5 @@
 import fs from 'fs/promises'
-import { existsSync, rmSync, realpathSync } from 'node:fs'
+import { existsSync, rmSync } from 'node:fs'
 import { executeCommand } from '../utils/process'
 import { ensureDirectoryExists } from './file-operations'
 import { createRepo, getRepoByLocalPath, getRepoBySourcePath, getRepoById, updateRepoStatus, updateRepoBranch, updateLastPulled, deleteRepo, getRepoByUrlAndBranch } from '../db/queries'
@@ -19,19 +19,11 @@ import { listRepos } from '../db/queries'
 import { listActiveScheduleRunWorkspaces } from '../db/schedules'
 import { SettingsService } from './settings'
 import type { OpenCodeClient } from './opencode/client'
-import { mkdirSafe } from '../utils/fs-safe'
+import { canonicalPathSync, mkdirSafe } from '../utils/fs-safe'
 
 const GIT_CLONE_TIMEOUT = 300000
 const DEFAULT_DISCOVERY_MAX_DEPTH = 4
 const DISCOVERY_SKIP_DIRECTORIES = new Set(['.git', 'node_modules'])
-
-function canonical(dir: string): string {
-  try {
-    return realpathSync(path.resolve(dir))
-  } catch {
-    return path.resolve(dir)
-  }
-}
 
 function enhanceCloneError(error: unknown, repoUrl: string, originalMessage: string): Error {
   const message = originalMessage.toLowerCase()
@@ -1224,10 +1216,10 @@ export async function getSiblingRepos(
     // Workspaces that are git main checkouts (not linked worktrees) are also
     // excluded so the project's origin/main repository can never be surfaced
     // as deletable.
-    const knownDirectories = new Set(repoSiblings.map((repo) => canonical(repo.fullPath)))
-    const targetDirectory = canonical(target.fullPath)
-    const reposRoot = canonical(getReposPath())
-    const scheduleWorktreeRoot = canonical(getScheduleWorktreesPath())
+    const knownDirectories = new Set(repoSiblings.map((repo) => canonicalPathSync(path.resolve(repo.fullPath))))
+    const targetDirectory = canonicalPathSync(path.resolve(target.fullPath))
+    const reposRoot = canonicalPathSync(path.resolve(getReposPath()))
+    const scheduleWorktreeRoot = canonicalPathSync(path.resolve(getScheduleWorktreesPath()))
 
     // Schedule runs may create their isolated worktree via the OpenCode workspace
     // API, which places it outside getScheduleWorktreesPath(). Exclude any live
@@ -1236,14 +1228,14 @@ export async function getSiblingRepos(
     const activeRuns = listActiveScheduleRunWorkspaces(database)
     const activeRunWorkspaceIds = new Set(activeRuns.map((run) => run.workspaceId).filter((id): id is string => id !== null))
     const activeRunDirectories = new Set(
-      activeRuns.map((run) => run.worktreePath).filter((p): p is string => p !== null).map((p) => canonical(p)),
+      activeRuns.map((run) => run.worktreePath).filter((p): p is string => p !== null).map((p) => canonicalPathSync(path.resolve(p))),
     )
 
     const candidates = workspaces.filter((workspace) => {
       if (workspace.projectID !== targetProjectId) return false
       if (!workspace.directory) return false
 
-      const workspaceDirectory = canonical(workspace.directory)
+      const workspaceDirectory = canonicalPathSync(path.resolve(workspace.directory))
       if (workspaceDirectory === targetDirectory) return false
       if (workspaceDirectory === reposRoot) return false
       if (workspaceDirectory.startsWith(`${scheduleWorktreeRoot}${path.sep}`)) return false
@@ -1262,7 +1254,7 @@ export async function getSiblingRepos(
     candidates
       .filter((_, index) => !mainChecks[index])
       .forEach((workspace) => {
-        const directory = canonical(workspace.directory!)
+        const directory = canonicalPathSync(path.resolve(workspace.directory!))
         if (!uniqueWorkspaces.has(directory)) {
           uniqueWorkspaces.set(directory, workspace)
         }

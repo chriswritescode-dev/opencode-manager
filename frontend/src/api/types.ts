@@ -12,7 +12,6 @@ export interface Repo {
   clonedAt: number
   lastPulled?: number
   lastAccessedAt?: number
-  openCodeConfigName?: string
   gitCredentialId?: string
   isWorktree?: boolean
   isLocal?: boolean

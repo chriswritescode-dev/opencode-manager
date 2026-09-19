@@ -13,8 +13,7 @@ import { useMutation, useQueryClient } from '@tanstack/react-query'
 interface AddMcpServerDialogProps {
   open: boolean
   onOpenChange: (open: boolean) => void
-  configName?: string
-  onUpdate?: (configName: string, content: Record<string, unknown>) => Promise<void>
+  onUpdate: (content: Record<string, unknown>) => Promise<void>
 }
 
 interface EnvironmentVariable {
@@ -40,10 +39,8 @@ export function AddMcpServerDialog({ open, onOpenChange, onUpdate }: AddMcpServe
 
   const addMcpServerMutation = useMutation({
     mutationFn: async () => {
-      const config = await settingsApi.getDefaultOpenCodeConfig()
-      if (!config) throw new Error('No default config found')
-      
-      const currentMcp = (config.content?.mcp as Record<string, unknown>) || {}
+      const config = await settingsApi.getOpenCodeConfig()
+      const currentMcp = (config.content.mcp as Record<string, unknown>) || {}
       
       const mcpConfig: Record<string, unknown> = {
         type: serverType,
@@ -93,7 +90,7 @@ export function AddMcpServerDialog({ open, onOpenChange, onUpdate }: AddMcpServe
         },
       }
 
-      await settingsApi.updateOpenCodeConfig(config.name, { content: updatedConfig })
+      await onUpdate(updatedConfig)
       
       if (enabled) {
         const buildOauthField = () => {
@@ -126,15 +123,7 @@ export function AddMcpServerDialog({ open, onOpenChange, onUpdate }: AddMcpServe
         })
       }
     },
-    onSuccess: async () => {
-      if (onUpdate) {
-        const config = await settingsApi.getDefaultOpenCodeConfig()
-        if (config) {
-          await onUpdate(config.name, config.content)
-        }
-      } else {
-        queryClient.invalidateQueries({ queryKey: ['opencode-config'] })
-      }
+    onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['mcp-status'] })
       handleClose()
     },
