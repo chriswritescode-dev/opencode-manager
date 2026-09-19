@@ -79,6 +79,10 @@ describe('resolveScheduleModel', () => {
   })
 
   it('keeps the stored model while availability is unknown', () => {
-    expect(resolveScheduleModel('openai/retired', new Set(), 'openai/gpt-5')).toBe('openai/retired')
+    expect(resolveScheduleModel('openai/retired', null, 'openai/gpt-5')).toBe('openai/retired')
+  })
+
+  it('drops the stored model when availability is confirmed empty', () => {
+    expect(resolveScheduleModel('openai/retired', new Set(), 'openai/gpt-5')).toBeNull()
   })
 })

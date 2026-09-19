@@ -24,12 +24,12 @@ export function getConfigDefaultModel(configFile: OpenCodeConfigFile | undefined
 
 export function resolveScheduleModel(
   storedModel: string | null | undefined,
-  availableModelKeys: ReadonlySet<string>,
+  availableModelKeys: ReadonlySet<string> | null,
   configDefaultModel: string | null | undefined,
 ): string | null {
   const stored = normalizeModel(storedModel)
   if (!stored) return null
-  if (availableModelKeys.size === 0) return stored
+  if (availableModelKeys === null) return stored
   if (availableModelKeys.has(stored)) return stored
   const configDefault = normalizeModel(configDefaultModel)
   if (configDefault && availableModelKeys.has(configDefault)) return configDefault

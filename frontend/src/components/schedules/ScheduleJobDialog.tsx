@@ -151,11 +151,15 @@ export function ScheduleJobDialog({ open, onOpenChange, job, isSaving, onSubmit,
     const configuredValues = new Set<string>()
 
     if (configDefaultModel) {
-      configuredValues.add(configDefaultModel)
       const [providerId, ...modelParts] = configDefaultModel.split('/')
       const modelId = modelParts.join('/')
       const provider = providerModels.find((p) => p.id === providerId)
-      const providerModel = provider?.models.find((m) => (m.key ?? m.id) === modelId)
+      const providerModel = provider?.models.find((m) => m.key === modelId || m.id === modelId)
+      configuredValues.add(configDefaultModel)
+      if (providerModel) {
+        configuredValues.add(`${providerId}/${providerModel.key ?? providerModel.id}`)
+        configuredValues.add(`${providerId}/${providerModel.id}`)
+      }
       configuredModels.push({
         value: configDefaultModel,
         label: providerModel?.name || modelId,

@@ -154,4 +154,57 @@ describe('ScheduleJobDialog — model fallback', () => {
 
     await waitFor(() => expect(screen.getByDisplayValue('GPT-5')).toBeInTheDocument())
   })
+
+  it('does not duplicate a configured model referenced by its backing id', async () => {
+    const user = userEvent.setup()
+    mockGetProvidersWithModels.mockResolvedValue([
+      {
+        id: 'openai',
+        name: 'OpenAI',
+        env: [],
+        models: [{ id: 'gpt-5-2025-08-07', key: 'gpt-5', name: 'GPT-5' }],
+        source: 'configured',
+        isConnected: true,
+      },
+    ])
+    mockGetOpenCodeConfig.mockResolvedValue(makeOpenCodeConfigFile({
+      content: { model: 'openai/gpt-5-2025-08-07' },
+    }))
+
+    render(
+      <ScheduleJobDialog
+        open
+        onOpenChange={vi.fn()}
+        job={getJob({ model: 'openai/gpt-5-2025-08-07' })}
+        isSaving={false}
+        onSubmit={vi.fn()}
+        repoId={1}
+      />,
+      { wrapper: createWrapper() },
+    )
+
+    const modelInput = await screen.findByDisplayValue('GPT-5')
+    await user.click(modelInput)
+
+    await waitFor(() => expect(screen.getAllByText('GPT-5')).toHaveLength(1))
+  })
+
+  it('clears a stale model when availability is confirmed empty', async () => {
+    mockGetProvidersWithModels.mockResolvedValue([])
+
+    render(
+      <ScheduleJobDialog
+        open
+        onOpenChange={vi.fn()}
+        job={getJob({ model: 'openai/retired' })}
+        isSaving={false}
+        onSubmit={vi.fn()}
+        repoId={1}
+      />,
+      { wrapper: createWrapper() },
+    )
+
+    await waitFor(() => expect(screen.queryByDisplayValue('openai/retired')).not.toBeInTheDocument())
+    expect(screen.getByPlaceholderText('Workspace default')).toBeInTheDocument()
+  })
 })
