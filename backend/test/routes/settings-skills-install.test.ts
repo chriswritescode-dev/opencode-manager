@@ -85,7 +85,8 @@ vi.mock('../../src/services/skills', () => ({
   installSkillFromUploadedFiles: vi.fn(),
 }))
 
-vi.mock('@opencode-manager/shared/config/env', () => ({
+vi.mock('@opencode-manager/shared/config/env', async (importOriginal) => ({
+  ...(await importOriginal<typeof import('@opencode-manager/shared/config/env')>()),
   getWorkspacePath: vi.fn(() => '/tmp/test-workspace'),
   getReposPath: vi.fn(() => '/tmp/test-repos'),
   getOpenCodeConfigFilePath: vi.fn(() => '/tmp/test-workspace/.config/opencode.json'),

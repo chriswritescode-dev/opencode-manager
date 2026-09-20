@@ -1,27 +1,53 @@
-import { OpenCodeConfigSchema } from '@opencode-manager/shared/schemas'
-import { parseJsonc } from '@opencode-manager/shared/utils'
-import type { OpenCodeConfigFile, OpenCodeConfigInput } from '../types/settings'
-import { OPENCODE_CONFIG_SEED, normalizeOpenCodeConfigContent, readOpenCodeConfigFile, withOpenCodeConfigLock, writeOpenCodeConfigFile } from './opencode-config-file'
-import { patchConfigWithRecovery, type PatchConfigValidationIssue } from './opencode/config-recovery'
-import type { OpenCodeClient } from './opencode/client'
+import path from 'path'
+import { isDeepStrictEqual } from 'node:util'
+import type {
+  OpenCodeConfigFile,
+  OpenCodeConfigSourceFile,
+  OpenCodeConfigSourceName,
+} from '../types/settings'
+import {
+  OPENCODE_CONFIG_SEED,
+  getOpenCodeConfigDirectory,
+  parseOpenCodeConfigContent,
+  readOpenCodeConfigFile,
+  restoreOpenCodeConfigSnapshot,
+  serializeOpenCodeConfigSnapshot,
+  updateOpenCodeConfigFile,
+  withOpenCodeConfigLock,
+} from './opencode-config-file'
 import { opencodeServerManager } from './opencode-single-server'
 import type { SettingsService } from './settings'
 
 export type ApplyOpenCodeConfigResult =
   | { status: 'restart_pending'; config: OpenCodeConfigFile }
-  | { status: 'applied'; config: OpenCodeConfigFile; removedFields: string[] }
-  | { status: 'rejected'; error: string; validationIssues: PatchConfigValidationIssue[]; removedFields: string[] }
+  | { status: 'applied'; config: OpenCodeConfigFile }
 
 export interface ApplyOpenCodeConfigInput {
-  content: OpenCodeConfigInput | string
-  openCodeClient: OpenCodeClient
+  content: Record<string, unknown> | string
+  source?: OpenCodeConfigSourceName
+  expectedRevision?: string
   settingsService: SettingsService
+}
+
+function buildOpenCodeConfigSeedSnapshot(): string {
+  const sourcePath = path.join(getOpenCodeConfigDirectory(), 'opencode.jsonc')
+  const content = parseOpenCodeConfigContent(OPENCODE_CONFIG_SEED).content
+  const updatedAt = Date.now()
+  const source: OpenCodeConfigSourceFile = {
+    name: 'opencode.jsonc',
+    path: sourcePath,
+    rawContent: OPENCODE_CONFIG_SEED,
+    content,
+    isValid: true,
+    updatedAt,
+  }
+  return serializeOpenCodeConfigSnapshot({ ...source, sources: [source] })
 }
 
 export async function captureLastKnownGoodOpenCodeConfig(settingsService: SettingsService): Promise<OpenCodeConfigFile | null> {
   const previous = await readOpenCodeConfigFile()
   if (previous?.isValid) {
-    settingsService.saveLastKnownGoodConfig(previous.rawContent)
+    settingsService.saveLastKnownGoodConfig(serializeOpenCodeConfigSnapshot(previous))
   }
   return previous
 }
@@ -32,54 +58,29 @@ export async function restoreLastKnownGoodOpenCodeConfig(settingsService: Settin
     return null
   }
 
-  const config = await withOpenCodeConfigLock(() => writeOpenCodeConfigFile(lastGood))
+  const config = await withOpenCodeConfigLock(() => restoreOpenCodeConfigSnapshot(lastGood))
   opencodeServerManager.clearStartupError()
   return config
 }
 
 export async function seedOpenCodeConfigFile(): Promise<OpenCodeConfigFile> {
-  return withOpenCodeConfigLock(() => writeOpenCodeConfigFile(OPENCODE_CONFIG_SEED))
-}
-
-function didConfigFieldChange(
-  previous: Record<string, unknown> | undefined,
-  next: Record<string, unknown> | undefined,
-  field: string,
-): boolean {
-  return JSON.stringify(previous?.[field]) !== JSON.stringify(next?.[field])
-}
-
-function needsOpenCodeRestart(
-  previous: Record<string, unknown> | undefined,
-  next: Record<string, unknown> | undefined,
-): boolean {
-  return ['agent', 'plugin', 'skills', 'provider'].some((field) => didConfigFieldChange(previous, next, field))
+  return withOpenCodeConfigLock(async () => {
+    const config = await restoreOpenCodeConfigSnapshot(buildOpenCodeConfigSeedSnapshot())
+    if (!config) {
+      throw new Error('Failed to seed OpenCode config')
+    }
+    return config
+  })
 }
 
 export function toOpenCodeConfigApplyResponse(
   result: ApplyOpenCodeConfigResult,
-): { status: 200 | 400; body: Record<string, unknown> } {
-  if (result.status === 'restart_pending') {
-    return { status: 200, body: { ...result.config, restartRequired: true } }
-  }
-
-  if (result.status === 'applied') {
-    return {
-      status: 200,
-      body: result.removedFields.length > 0
-        ? { ...result.config, removedFields: result.removedFields }
-        : { ...result.config },
-    }
-  }
-
+): { status: 200; body: Record<string, unknown> } {
   return {
-    status: 400,
-    body: {
-      error: 'Config validation failed',
-      details: result.error,
-      validationIssues: result.validationIssues,
-      removedFields: result.removedFields,
-    },
+    status: 200,
+    body: result.status === 'restart_pending'
+      ? { ...result.config, restartRequired: true }
+      : { ...result.config },
   }
 }
 
@@ -87,35 +88,27 @@ export async function applyOpenCodeConfigUpdate(
   input: ApplyOpenCodeConfigInput,
 ): Promise<ApplyOpenCodeConfigResult> {
   return withOpenCodeConfigLock(async () => {
-    const { content, openCodeClient, settingsService } = input
+    const { content, source, expectedRevision, settingsService } = input
 
-    const rawContent = normalizeOpenCodeConfigContent(content)
-    const nextContent = OpenCodeConfigSchema.parse(parseJsonc(rawContent))
+    const previous = await readOpenCodeConfigFile()
 
-    const previous = await captureLastKnownGoodOpenCodeConfig(settingsService)
+    const next = await updateOpenCodeConfigFile(content, { source, expectedRevision })
 
-    if (needsOpenCodeRestart(previous?.content, nextContent)) {
-      const config = await writeOpenCodeConfigFile(rawContent)
-      opencodeServerManager.markRestartPending()
-      return { status: 'restart_pending', config }
-    }
-
-    const patchResult = await patchConfigWithRecovery(openCodeClient, nextContent)
-    if (!patchResult.success) {
-      return {
-        status: 'rejected',
-        error: patchResult.error ?? 'Config validation failed',
-        validationIssues: patchResult.details ?? [],
-        removedFields: patchResult.removedFields ?? [],
+    if (previous?.isValid) {
+      const snapshot = serializeOpenCodeConfigSnapshot(previous)
+      try {
+        settingsService.saveLastKnownGoodConfig(snapshot)
+      } catch (error) {
+        await restoreOpenCodeConfigSnapshot(snapshot)
+        throw error
       }
     }
 
-    const removedFields = patchResult.removedFields ?? []
-    const contentToWrite = removedFields.length > 0
-      ? JSON.stringify(patchResult.appliedConfig ?? nextContent, null, 2)
-      : rawContent
-    const config = await writeOpenCodeConfigFile(contentToWrite)
+    if (!isDeepStrictEqual(previous?.content ?? {}, next.content) || previous?.isValid !== next.isValid) {
+      opencodeServerManager.markRestartPending()
+      return { status: 'restart_pending', config: next }
+    }
 
-    return { status: 'applied', config, removedFields }
+    return { status: 'applied', config: next }
   })
 }

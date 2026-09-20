@@ -160,6 +160,7 @@ export const getForgeWorktreesPath = () => path.join(getOpenCodeDataPath(), 'for
 export const getOpenCodeTmpHome = () => path.join(ENV.WORKSPACE.BASE_PATH, '.opencode', 'tmp')
 export const getOpenCodeAgentTmpPath = () => path.join(getOpenCodeTmpHome(), 'opencode')
 export const getConfigPath = () => path.join(ENV.WORKSPACE.BASE_PATH, ENV.WORKSPACE.CONFIG_DIR)
+export { OPENCODE_CONFIG_SOURCE_NAMES as OPENCODE_CONFIG_FILENAMES } from '../schemas/settings'
 export const getOpenCodeConfigFilePath = () => path.join(ENV.WORKSPACE.BASE_PATH, ENV.WORKSPACE.CONFIG_DIR, 'opencode.json')
 export const getAgentsMdPath = () => path.join(ENV.WORKSPACE.BASE_PATH, ENV.WORKSPACE.CONFIG_DIR, 'AGENTS.md')
 export const getAuthPath = () => path.join(ENV.WORKSPACE.BASE_PATH, ENV.WORKSPACE.AUTH_FILE)

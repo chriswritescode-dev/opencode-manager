@@ -1,5 +1,5 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest'
-import { archiveBrokenOpenCodeConfigFile, writeHealthWatchArtifact, writeOpenCodeConfigFile, OPENCODE_CONFIG_SEED } from '../../src/services/opencode-config-file'
+import { archiveBrokenOpenCodeConfigFile, writeHealthWatchArtifact, restoreOpenCodeConfigSnapshot, OPENCODE_CONFIG_SEED } from '../../src/services/opencode-config-file'
 import { OpenCodeSupervisor } from '../../src/services/opencode-supervisor'
 
 vi.mock('../../src/utils/logger', () => ({
@@ -10,13 +10,19 @@ vi.mock('../../src/utils/logger', () => ({
   },
 }))
 
-vi.mock('../../src/services/opencode-config-file', () => ({
-  archiveBrokenOpenCodeConfigFile: vi.fn(),
-  writeHealthWatchArtifact: vi.fn(),
-  writeOpenCodeConfigFile: vi.fn(async (rawContent: string) => ({ rawContent, isValid: true })),
-  withOpenCodeConfigLock: (fn: () => Promise<unknown>) => fn(),
-  OPENCODE_CONFIG_SEED: '{"$schema":"https://opencode.ai/config.json"}',
-}))
+vi.mock('../../src/services/opencode-config-file', () => {
+  const seed = '{"$schema":"https://opencode.ai/config.json"}'
+  return {
+    archiveBrokenOpenCodeConfigFile: vi.fn(),
+    writeHealthWatchArtifact: vi.fn(),
+    restoreOpenCodeConfigSnapshot: vi.fn(async () => ({ isValid: true })),
+    serializeOpenCodeConfigSnapshot: vi.fn(() => seed),
+    getOpenCodeConfigDirectory: vi.fn(() => '/test/workspace/.config/opencode'),
+    parseOpenCodeConfigContent: vi.fn(() => ({ content: {}, isValid: true })),
+    withOpenCodeConfigLock: (fn: () => Promise<unknown>) => fn(),
+    OPENCODE_CONFIG_SEED: seed,
+  }
+})
 
 vi.mock('../../src/services/opencode-single-server', () => ({
   opencodeServerManager: {
@@ -104,7 +110,7 @@ describe('OpenCodeSupervisor', () => {
     expect(manager.restart).toHaveBeenCalledTimes(3)
     expect(settings.getLastKnownGoodConfig).toHaveBeenCalled()
     expect(archiveBrokenOpenCodeConfigFile).toHaveBeenCalled()
-    expect(writeOpenCodeConfigFile).toHaveBeenCalledWith('{"$schema":"https://opencode.ai/config.json"}')
+    expect(restoreOpenCodeConfigSnapshot).toHaveBeenCalledWith('{"$schema":"https://opencode.ai/config.json"}')
     expect(status.watching).toBe(true)
 
     await supervisor.stop()
@@ -125,7 +131,7 @@ describe('OpenCodeSupervisor', () => {
 
     expect(status.state).toBe('failed')
     expect(archiveBrokenOpenCodeConfigFile).toHaveBeenCalled()
-    expect(writeOpenCodeConfigFile).toHaveBeenCalledWith(OPENCODE_CONFIG_SEED)
+    expect(restoreOpenCodeConfigSnapshot).toHaveBeenCalledWith(OPENCODE_CONFIG_SEED)
 
     await supervisor.stop()
   })
@@ -283,7 +289,7 @@ describe('OpenCodeSupervisor', () => {
     expect(manager.restart).not.toHaveBeenCalled()
     expect(archiveBrokenOpenCodeConfigFile).not.toHaveBeenCalled()
     expect(settings.getLastKnownGoodConfig).not.toHaveBeenCalled()
-    expect(writeOpenCodeConfigFile).not.toHaveBeenCalled()
+    expect(restoreOpenCodeConfigSnapshot).not.toHaveBeenCalled()
     expect(writeHealthWatchArtifact).not.toHaveBeenCalled()
 
     await supervisor.stop()
@@ -304,7 +310,7 @@ describe('OpenCodeSupervisor', () => {
     expect(status.state).toBe('failed')
     expect(archiveBrokenOpenCodeConfigFile).not.toHaveBeenCalled()
     expect(settings.getLastKnownGoodConfig).not.toHaveBeenCalled()
-    expect(writeOpenCodeConfigFile).not.toHaveBeenCalled()
+    expect(restoreOpenCodeConfigSnapshot).not.toHaveBeenCalled()
     expect(writeHealthWatchArtifact).not.toHaveBeenCalled()
 
     await supervisor.stop()
@@ -331,7 +337,7 @@ describe('OpenCodeSupervisor', () => {
     expect(manager.restart).toHaveBeenCalledTimes(1)
     expect(archiveBrokenOpenCodeConfigFile).not.toHaveBeenCalled()
     expect(settings.getLastKnownGoodConfig).not.toHaveBeenCalled()
-    expect(writeOpenCodeConfigFile).not.toHaveBeenCalled()
+    expect(restoreOpenCodeConfigSnapshot).not.toHaveBeenCalled()
     expect(writeHealthWatchArtifact).not.toHaveBeenCalled()
 
     await supervisor.stop()
@@ -355,7 +361,7 @@ describe('OpenCodeSupervisor', () => {
     expect(status.state).toBe('healthy')
     expect(archiveBrokenOpenCodeConfigFile).toHaveBeenCalled()
     expect(settings.getLastKnownGoodConfig).toHaveBeenCalled()
-    expect(writeOpenCodeConfigFile).toHaveBeenCalledWith('{"$schema":"https://opencode.ai/config.json"}')
+    expect(restoreOpenCodeConfigSnapshot).toHaveBeenCalledWith('{"$schema":"https://opencode.ai/config.json"}')
 
     await supervisor.stop()
   })
@@ -448,7 +454,7 @@ describe('OpenCodeSupervisor', () => {
     expect(manager.setLifecycleInitialized).toHaveBeenLastCalledWith(true)
   })
 
-  it('keeps the proxy lifecycle gate open across a config reload so in-flight sessions are never interrupted', async () => {
+  it('closes the proxy lifecycle gate for the whole config reload transition and reopens once healthy', async () => {
     const manager = createManager()
     const settings = createSettings()
     const supervisor = new OpenCodeSupervisor(manager as unknown as never, settings as unknown as never, {
@@ -468,13 +474,13 @@ describe('OpenCodeSupervisor', () => {
 
     const reload = supervisor.reloadConfig('settings_reload')
     await vi.waitFor(() => expect(manager.reloadConfig).toHaveBeenCalledTimes(1))
-    expect(manager.setLifecycleInitialized).not.toHaveBeenCalledWith(false)
+    expect(manager.setLifecycleInitialized).toHaveBeenLastCalledWith(false)
 
     releaseReload()
     const status = await reload
 
     expect(status.healthy).toBe(true)
-    expect(manager.setLifecycleInitialized).not.toHaveBeenCalledWith(false)
+    expect(manager.setLifecycleInitialized).toHaveBeenLastCalledWith(true)
   })
 
   it('closes the proxy lifecycle gate while stopping and never reopens it', async () => {

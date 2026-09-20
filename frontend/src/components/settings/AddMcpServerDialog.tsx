@@ -13,7 +13,7 @@ import { useMutation, useQueryClient } from '@tanstack/react-query'
 interface AddMcpServerDialogProps {
   open: boolean
   onOpenChange: (open: boolean) => void
-  onUpdate: (content: Record<string, unknown>) => Promise<void>
+  onUpdate: (content: Record<string, unknown>, expectedRevision?: string) => Promise<void>
 }
 
 interface EnvironmentVariable {
@@ -90,7 +90,7 @@ export function AddMcpServerDialog({ open, onOpenChange, onUpdate }: AddMcpServe
         },
       }
 
-      await onUpdate(updatedConfig)
+      await onUpdate(updatedConfig, config.revision)
       
       if (enabled) {
         const buildOauthField = () => {

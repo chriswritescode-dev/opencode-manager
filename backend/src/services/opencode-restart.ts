@@ -67,19 +67,35 @@ export async function restartOpenCode(supervisor?: OpenCodeSupervisor): Promise<
   return { resumedSessionIDs: [] }
 }
 
-/**
- * Reloads OpenCode configuration via the non-disruptive API patch. This does
- * NOT drop the server process, so active sessions keep running and there is
- * nothing to resume.
- */
-export async function reloadOpenCodeConfig(supervisor?: OpenCodeSupervisor): Promise<void> {
+function reloadFailureError(): Error {
+  const startupError = opencodeServerManager.getLastStartupError()
+  return new Error(startupError ?? 'OpenCode server reload did not complete successfully')
+}
+
+async function performReload(supervisor?: OpenCodeSupervisor): Promise<boolean> {
   if (supervisor) {
     const status = await supervisor.reloadConfig('settings_reload')
     if (!status.healthy) {
-      const startupError = opencodeServerManager.getLastStartupError()
-      throw new Error(startupError ?? 'OpenCode server reload did not complete successfully')
+      throw reloadFailureError()
+    }
+    return status.healthy
+  }
+  opencodeServerManager.clearStartupError()
+  await opencodeServerManager.reloadConfig()
+  const healthy = await opencodeServerManager.checkHealth()
+  if (!healthy) {
+    throw reloadFailureError()
+  }
+  return healthy
+}
+
+export async function reloadOpenCodeConfig(supervisor?: OpenCodeSupervisor): Promise<void> {
+  if (restartCoordinator) {
+    const result = await restartCoordinator.runWithResume(() => performReload(supervisor))
+    if (!result.healthy) {
+      throw reloadFailureError()
     }
     return
   }
-  await opencodeServerManager.reloadConfig()
+  await performReload(supervisor)
 }

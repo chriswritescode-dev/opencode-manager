@@ -7,7 +7,7 @@ import { resolve, dirname } from 'path'
 import type { Database } from 'bun:sqlite'
 import { SettingsService } from '../services/settings'
 import { writeFileContent, readFileContent, fileExists } from '../services/file-operations'
-import { deleteOpenCodeConfigFile } from '../services/opencode-config-file'
+import { archiveBrokenOpenCodeConfigFile, deleteOpenCodeConfigFile } from '../services/opencode-config-file'
 import { restoreLastKnownGoodOpenCodeConfig } from '../services/opencode-config-apply'
 import { createOpenCodeConfigRoutes } from './opencode-config'
 import type { OpenCodeClient } from '../services/opencode/client'
@@ -555,6 +555,7 @@ export function createSettingsRoutes(db: Database, gitAuthService: GitAuthServic
       } catch (reloadError) {
         logger.error('Rollback config reload failed, attempting restart:', reloadError)
 
+        await archiveBrokenOpenCodeConfigFile()
         const deleted = await deleteOpenCodeConfigFile()
         if (deleted) {
           logger.info('Deleted filesystem config, attempting restart with fallback')

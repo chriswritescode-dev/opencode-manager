@@ -362,6 +362,20 @@ export const OpenCodeConfigValidationIssueSchema = z.object({
   message: z.string(),
 });
 
+export const OPENCODE_CONFIG_SOURCE_NAMES = ['config.json', 'opencode.json', 'opencode.jsonc'] as const;
+
+export const OpenCodeConfigSourceNameSchema = z.enum(OPENCODE_CONFIG_SOURCE_NAMES);
+
+export const OpenCodeConfigSourceFileSchema = z.object({
+  name: OpenCodeConfigSourceNameSchema,
+  path: z.string(),
+  rawContent: z.string(),
+  content: z.record(z.string(), z.unknown()),
+  isValid: z.boolean(),
+  validationIssues: z.array(OpenCodeConfigValidationIssueSchema).optional(),
+  updatedAt: z.number(),
+});
+
 export const OpenCodeConfigFileSchema = z.object({
   path: z.string(),
   content: z.record(z.string(), z.unknown()),
@@ -369,8 +383,12 @@ export const OpenCodeConfigFileSchema = z.object({
   isValid: z.boolean(),
   validationIssues: z.array(OpenCodeConfigValidationIssueSchema).optional(),
   updatedAt: z.number(),
+  sources: z.array(OpenCodeConfigSourceFileSchema).optional(),
+  revision: z.string().optional(),
 });
 
 export const UpdateOpenCodeConfigRequestSchema = z.object({
-  content: z.union([OpenCodeConfigSchema, z.string()]),
+  content: z.union([z.record(z.string(), z.unknown()), z.string()]),
+  source: OpenCodeConfigSourceNameSchema.optional(),
+  expectedRevision: z.string().optional(),
 });

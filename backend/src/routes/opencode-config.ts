@@ -2,8 +2,13 @@ import { Hono } from 'hono'
 import { z } from 'zod'
 import { UpdateOpenCodeConfigRequestSchema } from '@opencode-manager/shared/schemas'
 import type { SettingsService } from '../services/settings'
-import type { OpenCodeClient } from '../services/opencode/client'
-import { readOpenCodeConfigFile } from '../services/opencode-config-file'
+import { UpstreamError, type OpenCodeClient } from '../services/opencode/client'
+import {
+  OpenCodeConfigConflictError,
+  OpenCodeConfigSourceInvalidError,
+  readOpenCodeConfigFile,
+  withOpenCodeConfigLock,
+} from '../services/opencode-config-file'
 import { applyOpenCodeConfigUpdate, toOpenCodeConfigApplyResponse } from '../services/opencode-config-apply'
 import { logger } from '../utils/logger'
 
@@ -12,7 +17,7 @@ export function createOpenCodeConfigRoutes(settingsService: SettingsService, ope
 
   app.get('/', async (c) => {
     try {
-      const config = await readOpenCodeConfigFile()
+      const config = await withOpenCodeConfigLock(readOpenCodeConfigFile)
       if (!config) {
         return c.json({ error: 'No OpenCode config file found' }, 404)
       }
@@ -20,6 +25,22 @@ export function createOpenCodeConfigRoutes(settingsService: SettingsService, ope
     } catch (error) {
       logger.error('Failed to get OpenCode config:', error)
       return c.json({ error: 'Failed to get OpenCode config' }, 500)
+    }
+  })
+
+  app.get('/effective', async (c) => {
+    try {
+      const config = await openCodeClient.getJson<Record<string, unknown>>('/global/config')
+      return c.json(config)
+    } catch (error) {
+      logger.error('Failed to get effective OpenCode config:', error)
+      if (error instanceof UpstreamError) {
+        if (error.status === 502) {
+          return c.json({ error: 'OpenCode server unavailable' }, 503)
+        }
+        return c.json({ error: 'Failed to get effective OpenCode config' }, 502)
+      }
+      return c.json({ error: 'Failed to get effective OpenCode config' }, 500)
     }
   })
 
@@ -39,15 +60,29 @@ export function createOpenCodeConfigRoutes(settingsService: SettingsService, ope
     try {
       const result = await applyOpenCodeConfigUpdate({
         content: parsed.data.content,
-        openCodeClient,
+        source: parsed.data.source,
+        expectedRevision: parsed.data.expectedRevision,
         settingsService,
       })
       const { status, body: responseBody } = toOpenCodeConfigApplyResponse(result)
       return c.json(responseBody, status)
     } catch (error) {
       logger.error('Failed to update OpenCode config:', error)
+      if (error instanceof OpenCodeConfigConflictError) {
+        return c.json({
+          error: error.message,
+          expectedRevision: error.expectedRevision,
+          actualRevision: error.actualRevision,
+        }, 409)
+      }
+      if (error instanceof OpenCodeConfigSourceInvalidError) {
+        return c.json({ error: error.message, sources: error.sources }, 400)
+      }
       if (error instanceof z.ZodError) {
         return c.json({ error: 'Invalid config data', details: error.issues }, 400)
+      }
+      if (error instanceof SyntaxError) {
+        return c.json({ error: 'Invalid config data', details: error.message }, 400)
       }
       return c.json({ error: 'Failed to update OpenCode config' }, 500)
     }

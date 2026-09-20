@@ -6,9 +6,12 @@ import {
   DEFAULT_LEADER_KEY,
   BLOCKED_SERVER_ENV_KEYS,
   DEFAULT_SERVER_ENV_VARS,
+  OPENCODE_CONFIG_SOURCE_NAMES,
   type TTSConfig,
   type STTConfig,
   type OpenCodeConfigFile,
+  type OpenCodeConfigSourceFile,
+  type OpenCodeConfigSourceName,
   type UpdateOpenCodeConfigRequest,
   type ModelConfig,
   type ProviderConfig,
@@ -21,9 +24,48 @@ import {
   type InstallSkillResponse,
 } from '@opencode-manager/shared'
 import type { NotificationPreferences } from '@opencode-manager/shared/types'
+import { saveFile } from '@/lib/download'
 
-export type { TTSConfig, STTConfig, OpenCodeConfigFile, UpdateOpenCodeConfigRequest, ModelConfig, ProviderConfig, SandboxPreferences, NotificationPreferences, SkillFileInfo, CreateSkillRequest, UpdateSkillRequest, SkillScope, InstallSkillFromGithubRequest, InstallSkillResponse }
+export type { TTSConfig, STTConfig, OpenCodeConfigFile, OpenCodeConfigSourceFile, OpenCodeConfigSourceName, UpdateOpenCodeConfigRequest, ModelConfig, ProviderConfig, SandboxPreferences, NotificationPreferences, SkillFileInfo, CreateSkillRequest, UpdateSkillRequest, SkillScope, InstallSkillFromGithubRequest, InstallSkillResponse }
 export { DEFAULT_TTS_CONFIG, DEFAULT_STT_CONFIG, DEFAULT_KEYBOARD_SHORTCUTS, DEFAULT_USER_PREFERENCES, DEFAULT_LEADER_KEY, BLOCKED_SERVER_ENV_KEYS, DEFAULT_SERVER_ENV_VARS }
+
+export type OpenCodeConfigSource = OpenCodeConfigSourceFile
+
+export function isOpenCodeConfigSourceName(value: string): value is OpenCodeConfigSourceName {
+  return (OPENCODE_CONFIG_SOURCE_NAMES as readonly string[]).includes(value)
+}
+
+function sourceNameFromPath(path: string): OpenCodeConfigSourceName {
+  const fileName = path.split(/[\\/]/).filter(Boolean).pop() ?? ''
+  return isOpenCodeConfigSourceName(fileName) ? fileName : 'opencode.jsonc'
+}
+
+export function getOpenCodeConfigSources(config: OpenCodeConfigFile): OpenCodeConfigSource[] {
+  if (config.sources && config.sources.length > 0) return config.sources
+  return [{
+    name: sourceNameFromPath(config.path),
+    path: config.path,
+    rawContent: config.rawContent,
+    content: config.content,
+    isValid: config.isValid,
+    validationIssues: config.validationIssues,
+    updatedAt: config.updatedAt,
+  }]
+}
+
+export function getPreferredOpenCodeConfigSource(config: OpenCodeConfigFile): OpenCodeConfigSource | null {
+  const sources = getOpenCodeConfigSources(config)
+  return sources.find((source) => source.name === 'opencode.jsonc')
+    ?? sources.find((source) => source.name === 'opencode.json')
+    ?? sources.find((source) => source.name === 'config.json')
+    ?? sources[0]
+    ?? null
+}
+
+export function downloadOpenCodeConfigSource(source: OpenCodeConfigSource): void {
+  const blob = new Blob([source.rawContent], { type: 'application/json' })
+  void saveFile(blob, source.name)
+}
 
 export interface CustomCommand {
   name: string
@@ -88,7 +130,6 @@ export interface UpdateSettingsRequest {
 
 export interface OpenCodeConfigSaveResponse extends OpenCodeConfigFile {
   restartRequired?: boolean
-  removedFields?: string[]
 }
 
 export interface OpenCodeImportStatus {

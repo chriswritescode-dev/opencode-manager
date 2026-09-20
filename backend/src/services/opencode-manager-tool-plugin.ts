@@ -8,6 +8,7 @@ export const MANAGER_TOOL_ALLOWED_ROUTES = [
   'GET /settings',
   'PATCH /settings',
   'GET /opencode-config',
+  'GET /opencode-config/effective',
   'PUT /opencode-config',
   'POST /assistant/reload',
   'GET /repos',

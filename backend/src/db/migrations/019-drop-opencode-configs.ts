@@ -2,14 +2,14 @@ import { existsSync, mkdirSync, writeFileSync } from 'node:fs'
 import { randomBytes } from 'node:crypto'
 import os from 'node:os'
 import path from 'node:path'
-import { getOpenCodeConfigFilePath, getOpenCodeConfigHome } from '@opencode-manager/shared/config/env'
+import { getOpenCodeConfigFilePath, getOpenCodeConfigHome, OPENCODE_CONFIG_FILENAMES } from '@opencode-manager/shared/config/env'
 import type { Migration } from '../migration-runner'
 import { logger } from '../../utils/logger'
 
 function firstExistingConfigSourcePath(): string | null {
   const candidates = [
     process.env.OPENCODE_IMPORT_CONFIG_PATH,
-    path.join(os.homedir(), '.config', 'opencode', 'opencode.json'),
+    ...OPENCODE_CONFIG_FILENAMES.map(name => path.join(os.homedir(), '.config', 'opencode', name)),
   ]
     .filter((value): value is string => Boolean(value))
     .map((value) => path.resolve(value))
@@ -61,7 +61,8 @@ const migration: Migration = {
     if (defaultRow) {
       try {
         const configFilePath = getOpenCodeConfigFilePath()
-        if (!existsSync(configFilePath) && !firstExistingConfigSourcePath()) {
+        const hasWorkspaceConfig = OPENCODE_CONFIG_FILENAMES.some(name => existsSync(path.join(path.dirname(configFilePath), name)))
+        if (!hasWorkspaceConfig && !firstExistingConfigSourcePath()) {
           mkdirSync(path.dirname(configFilePath), { recursive: true })
           writeFileSync(configFilePath, defaultRow.config_content)
         }

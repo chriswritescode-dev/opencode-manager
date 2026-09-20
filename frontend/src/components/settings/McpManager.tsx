@@ -19,7 +19,7 @@ interface McpManagerProps {
   config: {
     content: Record<string, unknown>
   } | null
-  onUpdate: (content: Record<string, unknown>) => Promise<void>
+  onUpdate: (content: Record<string, unknown>, expectedRevision?: string) => Promise<void>
 }
 
 

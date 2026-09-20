@@ -104,6 +104,22 @@ describe('019-drop-opencode-configs', () => {
     await expect(readFile(paths.configFile, 'utf8')).rejects.toMatchObject({ code: 'ENOENT' })
   })
 
+  it.each(['opencode.jsonc', 'config.json'])('does not restore a duplicate JSON config when %s exists', async (name) => {
+    const db = new Database(':memory:')
+    migrateToV18(db)
+    insertConfig(db, 'default', '{"model":"old-default"}', true)
+    const sourcePath = path.join(path.dirname(paths.configFile), name)
+    const rawContent = '{\n  // original\n  "model": "existing"\n}\n'
+    await mkdir(path.dirname(sourcePath), { recursive: true })
+    await writeFile(sourcePath, rawContent)
+
+    migrate(db, allMigrations)
+
+    expect(await readFile(sourcePath, 'utf8')).toBe(rawContent)
+    await expect(readFile(paths.configFile, 'utf8')).rejects.toMatchObject({ code: 'ENOENT' })
+    db.close()
+  })
+
   it('keeps every profile when sanitized names collide or the archive destination already exists', async () => {
     const db = new Database(':memory:')
     migrateToV18(db)

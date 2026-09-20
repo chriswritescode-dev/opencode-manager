@@ -133,6 +133,7 @@ export class OpenCodeSupervisor {
   async reloadConfig(reason: OpenCodeOperationReason): Promise<OpenCodeLifecycleStatus> {
     return this.runLifecycleOperation(async () => {
       this.setState('starting')
+      this.closeLifecycleGate()
 
       try {
         this.openCodeServerManager.clearStartupError()
@@ -337,6 +338,7 @@ export class OpenCodeSupervisor {
   }
 
   private async seedDefaultConfig(): Promise<void> {
+    await archiveBrokenOpenCodeConfigFile()
     await seedOpenCodeConfigFile()
     this.openCodeServerManager.clearStartupError()
     await this.openCodeServerManager.restart()

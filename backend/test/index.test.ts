@@ -1,5 +1,5 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest'
-import { mkdir, mkdtemp, rm, writeFile } from 'node:fs/promises'
+import { mkdir, mkdtemp, readFile, rm, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 
@@ -212,6 +212,18 @@ describe('backend entrypoint', () => {
     expect(body.name).toBe('OpenCode WebUI')
     expect(body.status).toBe('running')
     expect(body.endpoints.repos).toBe('/api/repos')
+  })
+
+  it.each(['opencode.jsonc', 'config.json'])('does not seed opencode.json when %s already exists', async (name) => {
+    const configDir = join(tempWorkspace, '.config', 'opencode')
+    const rawContent = '{\n  // preserve this source\n  "model": "test/model"\n}\n'
+    await mkdir(configDir, { recursive: true })
+    await writeFile(join(configDir, name), rawContent)
+
+    await import('../src/index')
+
+    expect(await readFile(join(configDir, name), 'utf8')).toBe(rawContent)
+    await expect(readFile(join(configDir, 'opencode.json'), 'utf8')).rejects.toMatchObject({ code: 'ENOENT' })
   })
 
   it('ignores unknown API routes through the not-found handler', async () => {
