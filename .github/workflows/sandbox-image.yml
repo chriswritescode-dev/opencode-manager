@@ -10,6 +10,7 @@ on:
   pull_request:
     paths:
       - Dockerfile.sandbox
+      - scripts/sandbox-dockerd-start.sh
       - .github/workflows/sandbox-image.yml
 
 env:

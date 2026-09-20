@@ -228,6 +228,7 @@ function emptyArrayMismatch(value: unknown, path: string): string | null {
 type ParsedSandboxMount =
   | { kind: 'bind'; host: string; guest: string; readonly: boolean }
   | { kind: 'tmpfs'; guest: string; readonly: boolean }
+  | { kind: 'named'; name: string; guest: string; readonly: boolean }
   | { kind: 'other' }
 
 function parseInspectMount(mount: unknown): ParsedSandboxMount | null {
@@ -240,6 +241,10 @@ function parseInspectMount(mount: unknown): ParsedSandboxMount | null {
   if (mount.type === 'Tmpfs') {
     if (typeof mount.guest !== 'string') return null
     return { kind: 'tmpfs', guest: mount.guest, readonly }
+  }
+  if (mount.type === 'Named') {
+    if (typeof mount.name !== 'string' || typeof mount.guest !== 'string') return null
+    return { kind: 'named', name: mount.name, guest: mount.guest, readonly }
   }
   return { kind: 'other' }
 }
@@ -282,6 +287,7 @@ async function attestWorkspaceSandboxConfig(config: unknown): Promise<SandboxAtt
   const canonicalMounts = Array.isArray(canonical.mounts) ? canonical.mounts : []
   const expectedRoots = new Set<string>()
   const expectedRealRoots = new Set<string>()
+  const expectedNamedMounts: Array<{ name: string; guest: string }> = []
   for (const rawMount of canonicalMounts) {
     const mount = parseInspectMount(rawMount)
     if (mount?.kind === 'bind') {
@@ -292,6 +298,8 @@ async function attestWorkspaceSandboxConfig(config: unknown): Promise<SandboxAtt
       } catch {
         return { trusted: false, reason: `cannot resolve the canonical bind mount root ${resolvedRoot}` }
       }
+    } else if (mount?.kind === 'named') {
+      expectedNamedMounts.push({ name: mount.name, guest: mount.guest })
     }
   }
 
@@ -304,6 +312,7 @@ async function attestWorkspaceSandboxConfig(config: unknown): Promise<SandboxAtt
   const mounts = Array.isArray(spec.mounts) ? spec.mounts : []
   const bindRoots = new Set<string>()
   let runtimeTmpfsSeen = false
+  let dockerDataVolumeSeen = false
   for (let mountIndex = 0; mountIndex < mounts.length; mountIndex++) {
     const rawMount = mounts[mountIndex]
     const mount = parseInspectMount(rawMount)
@@ -385,6 +394,47 @@ async function attestWorkspaceSandboxConfig(config: unknown): Promise<SandboxAtt
           reason: `sandbox configuration mounts[${mountIndex}].size_mib does not match the canonical specification`,
         }
       }
+    } else if (mount.kind === 'named') {
+      if (dockerDataVolumeSeen) {
+        return { trusted: false, reason: `sandbox has a duplicate Docker data volume mount at ${mount.guest}` }
+      }
+      dockerDataVolumeSeen = true
+      const expectedNamedMount = expectedNamedMounts[0]
+      if (
+        mount.readonly ||
+        expectedNamedMount === undefined ||
+        expectedNamedMount.name !== mount.name ||
+        expectedNamedMount.guest !== mount.guest
+      ) {
+        return { trusted: false, reason: 'sandbox has an unexpected named volume mount' }
+      }
+      const namedMountOptions = isRecord(rawMount) && isRecord(rawMount.options) ? rawMount.options : {}
+      for (const flag of ['readonly', 'noexec', 'nosuid', 'nodev'] as const) {
+        if (namedMountOptions[flag] !== false) {
+          return {
+            trusted: false,
+            reason: `sandbox configuration mounts[${mountIndex}].options.${flag} does not match the canonical specification`,
+          }
+        }
+      }
+      if (rawMount.stat_virtualization !== 'strict') {
+        return {
+          trusted: false,
+          reason: `sandbox configuration mounts[${mountIndex}].stat_virtualization does not match the canonical specification`,
+        }
+      }
+      if (rawMount.host_permissions !== 'private') {
+        return {
+          trusted: false,
+          reason: `sandbox configuration mounts[${mountIndex}].host_permissions does not match the canonical specification`,
+        }
+      }
+      if (rawMount.follow_root_symlinks !== false) {
+        return {
+          trusted: false,
+          reason: `sandbox configuration mounts[${mountIndex}].follow_root_symlinks does not match the canonical specification`,
+        }
+      }
     } else {
       return { trusted: false, reason: 'sandbox has an unexpected mount type' }
     }
@@ -394,6 +444,9 @@ async function attestWorkspaceSandboxConfig(config: unknown): Promise<SandboxAtt
   }
   if (!runtimeTmpfsSeen) {
     return { trusted: false, reason: `sandbox is missing the runtime tmpfs mount at ${SANDBOX_RUNTIME_TMPFS_GUEST}` }
+  }
+  if (!dockerDataVolumeSeen) {
+    return { trusted: false, reason: 'sandbox is missing the Docker data volume mount' }
   }
 
   const resources = isRecord(spec.resources) ? spec.resources : {}

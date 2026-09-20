@@ -1,6 +1,6 @@
 import { describe, it, expect } from 'vitest'
 import { readFileSync, mkdtempSync, mkdirSync, writeFileSync, rmSync, readdirSync, statSync, existsSync, chmodSync } from 'fs'
-import { execFileSync, execSync } from 'child_process'
+import { execFileSync, execSync, spawnSync } from 'child_process'
 import { join } from 'path'
 import { tmpdir } from 'os'
 import { repoRoot } from '../helpers/repo-root'
@@ -544,5 +544,99 @@ chown -R "$(id -u):$(id -g)" "$dst"
     expect(readdirSync(dst)).toEqual(['repo'])
     rmSync(root, { recursive: true, force: true })
     rmSync(src, { recursive: true, force: true })
+  })
+})
+
+describe('sandbox dockerd startup helper', () => {
+  const sandboxDockerfilePath = join(repoRoot, 'Dockerfile.sandbox')
+  const sandboxDockerdPath = join(repoRoot, 'scripts/sandbox-dockerd-start.sh')
+  const sandboxWorkflowPath = join(repoRoot, '.github/workflows/sandbox-image.yml')
+
+  const runSandboxDockerd = (options: { dockerExit?: number; env?: Record<string, string> } = {}) => {
+    const stubDir = mkdtempSync(join(tmpdir(), 'ocm-dockerd-'))
+    const logPath = join(stubDir, 'calls.log')
+    try {
+      const writeStub = (name: string, body: string) => {
+        const file = join(stubDir, name)
+        writeFileSync(file, `#!/bin/bash\n${body}\n`)
+        chmodSync(file, 0o755)
+      }
+
+      writeStub('timeout', 'shift\nexec "$@"')
+      writeStub(
+        'docker',
+        [
+          'echo "docker $*" >> "$OCM_STUB_LOG"',
+          'echo "DOCKER_HOST=${DOCKER_HOST:-<unset>}" >> "$OCM_STUB_LOG"',
+          'echo "DOCKER_CONTEXT=${DOCKER_CONTEXT:-<unset>}" >> "$OCM_STUB_LOG"',
+          'exit "${OCM_STUB_DOCKER_EXIT:-0}"',
+        ].join('\n'),
+      )
+      writeStub('id', 'case "$1" in\n  -u) echo "${OCM_STUB_CALLER_UID:-1000}" ;;\n  *) echo 0 ;;\nesac')
+      writeStub('sudo', 'echo "sudo $*" >> "$OCM_STUB_LOG"\nexit 0')
+      writeStub('setsid', 'echo "setsid $*" >> "$OCM_STUB_LOG"\nexit 0')
+
+      const result = spawnSync('sh', [sandboxDockerdPath], {
+        encoding: 'utf-8',
+        env: {
+          ...process.env,
+          PATH: `${stubDir}:${process.env.PATH ?? ''}`,
+          OCM_STUB_LOG: logPath,
+          OCM_STUB_DOCKER_EXIT: String(options.dockerExit ?? 0),
+          ...options.env,
+        },
+      })
+
+      const calls = existsSync(logPath) ? readFileSync(logPath, 'utf-8').split('\n').filter(Boolean) : []
+      return { result, calls }
+    } finally {
+      rmSync(stubDir, { recursive: true, force: true })
+    }
+  }
+
+  it('exits successfully against a ready guest daemon without sudo or setsid', () => {
+    const { result, calls } = runSandboxDockerd()
+
+    expect(result.status).toBe(0)
+    expect(calls.some((call) => call.startsWith('sudo '))).toBe(false)
+    expect(calls.some((call) => call.startsWith('setsid '))).toBe(false)
+  })
+
+  it('probes with the explicit socket after stripping ambient DOCKER_HOST and DOCKER_CONTEXT', () => {
+    const { result, calls } = runSandboxDockerd({
+      env: { DOCKER_HOST: 'tcp://ambient:2375', DOCKER_CONTEXT: 'ambient-context' },
+    })
+
+    expect(result.status).toBe(0)
+    expect(calls).toContain('docker -H unix:///var/run/docker.sock info')
+    expect(calls).toContain('DOCKER_HOST=<unset>')
+    expect(calls).toContain('DOCKER_CONTEXT=<unset>')
+  })
+
+  it('reexecutes itself through sudo -n when a non-root caller cannot reach the daemon', () => {
+    const { result, calls } = runSandboxDockerd({
+      dockerExit: 1,
+      env: { OCM_STUB_CALLER_UID: '1000' },
+    })
+
+    expect(result.status).toBe(0)
+    expect(calls).toContain(`sudo -n ${sandboxDockerdPath}`)
+    expect(calls.some((call) => call.startsWith('setsid '))).toBe(false)
+  })
+
+  it('installs Docker from the official Debian repository', () => {
+    const sandboxDockerfile = read(sandboxDockerfilePath)
+    expect(sandboxDockerfile).toContain('https://download.docker.com/linux/debian')
+    expect(sandboxDockerfile).toContain('docker-ce docker-ce-cli containerd.io docker-buildx-plugin docker-compose-plugin')
+  })
+
+  it('copies the startup helper into the guest image', () => {
+    const sandboxDockerfile = read(sandboxDockerfilePath)
+    expect(sandboxDockerfile).toMatch(/^COPY --chmod=0755 scripts\/sandbox-dockerd-start\.sh \/usr\/local\/bin\/ocm-dockerd-start$/m)
+  })
+
+  it('runs the sandbox image workflow when the helper changes', () => {
+    const workflow = read(sandboxWorkflowPath)
+    expect(workflow).toMatch(/pull_request:\n\s+paths:\n(?:\s+-\s+\S+\n)*\s+-\s+scripts\/sandbox-dockerd-start\.sh/)
   })
 })

@@ -14,6 +14,10 @@ import {
 
 export const WORKSPACE_SANDBOX_NAME = 'ocm-workspace'
 
+export const SANDBOX_DOCKER_DATA_VOLUME_NAME = 'ocm-workspace-docker-data'
+export const SANDBOX_DOCKER_DATA_GUEST_PATH = '/var/lib/docker'
+export const SANDBOX_DOCKER_DATA_SIZE = '20G'
+
 export const SANDBOX_UNAVAILABLE_PREFIX = 'Sandbox enforcement is on but the sandbox is unavailable: '
 
 const SANDBOX_PLAN_REQUEST_MARGIN_MS = 30000
@@ -171,7 +175,18 @@ export function quoteForShell(value: string): string {
   return `'${value.replace(/'/g, `'\\''`)}'`
 }
 
+function buildSandboxDockerDataMountArg(): string {
+  return `${SANDBOX_DOCKER_DATA_VOLUME_NAME}:${SANDBOX_DOCKER_DATA_GUEST_PATH}:kind=disk,size=${SANDBOX_DOCKER_DATA_SIZE}`
+}
+
+function parseSandboxNamedMountSpec(spec: string): { name: string; guest: string } {
+  const [name = '', guest = ''] = spec.split(':')
+  return { name, guest }
+}
+
 export function buildSandboxCreateArgs(): string[] {
+  const tmpfsSizeMib = resolveSandboxRuntimeTmpfsSizeMib(parseMemoryMib(ENV.SANDBOX.MEMORY))
+  if (tmpfsSizeMib === null) throw new Error('sandbox memory must be positive to size the runtime tmpfs')
   return [
     'run',
     '-d',
@@ -190,6 +205,10 @@ export function buildSandboxCreateArgs(): string[] {
     '-u',
     resolveSandboxExecUser(),
     ...sandboxMountRoots().flatMap((root) => ['--mount-dir', `${root}:${root}`]),
+    '--mount-named',
+    buildSandboxDockerDataMountArg(),
+    '--tmpfs',
+    `/tmp:${tmpfsSizeMib}M`,
     '-w',
     getReposPath(),
     '--entrypoint',
@@ -353,6 +372,7 @@ function parseSandboxCreateArgs(args: string[]): {
   cpus: number
   user: string
   mountDirs: string[]
+  namedMounts: Array<{ name: string; guest: string }>
   workdir: string
   entrypoint: string[]
   shell: string
@@ -361,6 +381,7 @@ function parseSandboxCreateArgs(args: string[]): {
 } {
   const labels: Record<string, string> = {}
   const mountDirs: string[] = []
+  const namedMounts: Array<{ name: string; guest: string }> = []
   let name = ''
   let memory = ''
   let cpus = 0
@@ -390,8 +411,10 @@ function parseSandboxCreateArgs(args: string[]): {
       case '-m': memory = value ?? ''; i += 1; break
       case '-c': cpus = Number(value); i += 1; break
       case '--net': i += 1; break
+      case '--tmpfs': i += 1; break
       case '-u': user = value ?? ''; i += 1; break
       case '--mount-dir': if (value !== undefined) mountDirs.push(value); i += 1; break
+      case '--mount-named': if (value !== undefined) namedMounts.push(parseSandboxNamedMountSpec(value)); i += 1; break
       case '-w': workdir = value ?? ''; i += 1; break
       case '--entrypoint': if (value !== undefined) entrypoint = [value]; i += 1; break
       case '--shell': if (value !== undefined) shell = value; i += 1; break
@@ -400,7 +423,7 @@ function parseSandboxCreateArgs(args: string[]): {
         if (image === '' && !token.startsWith('-')) image = token
     }
   }
-  return { name, labels, memory, cpus, user, mountDirs, workdir, entrypoint, shell, image, cmd }
+  return { name, labels, memory, cpus, user, mountDirs, namedMounts, workdir, entrypoint, shell, image, cmd }
 }
 
 export function buildCanonicalSandboxSpec(): Record<string, unknown> {
@@ -421,6 +444,15 @@ export function buildCanonicalSandboxSpec(): Record<string, unknown> {
       quota_mib: null,
     }
   })
+  const namedMounts = args.namedMounts.map((mount) => ({
+    type: 'Named',
+    name: mount.name,
+    guest: mount.guest,
+    options: { readonly: false, noexec: false, nosuid: false, nodev: false },
+    stat_virtualization: 'strict',
+    host_permissions: 'private',
+    follow_root_symlinks: false,
+  }))
   return {
     name: args.name,
     image: {
@@ -449,7 +481,7 @@ export function buildCanonicalSandboxSpec(): Record<string, unknown> {
     env: [],
     labels: args.labels,
     rlimits: [],
-    mounts: bindMounts,
+    mounts: [...bindMounts, ...namedMounts],
     patches: [],
     network: { enabled: true, ports: [] },
     init: null,
@@ -528,7 +560,9 @@ export function buildSandboxProvisionArgs(): string[] {
       `echo 'ocm-exec:x:${uid}:${gid}:Manager sandbox exec user:/home/ocm-agent:/bin/sh' >> /etc/passwd; ` +
       `grep -q '^ocm-exec:' /etc/shadow || echo 'ocm-exec:*:19000:0:99999:7:::' >> /etc/shadow; ` +
       `}; ` +
-      `getent passwd ${uid} >/dev/null || exit 1`,
+      `getent passwd ${uid} >/dev/null || exit 1; ` +
+      `if getent group docker >/dev/null 2>&1; then ` +
+      `usermod -aG docker "$(getent passwd ${uid} | cut -d: -f1)" || exit 1; ` +
+      `fi`,
   ]
 }
-
