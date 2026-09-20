@@ -1,10 +1,11 @@
-node_modules
+**/node_modules
+.pnpm-store
 *.log
-.env
-.env.local
-dist
+**/.env
+**/.env.local
+**/dist
 build
-coverage
+**/coverage
 .DS_Store
 *.db
 *.db-shm
@@ -13,7 +14,7 @@ coverage
 .idea
 
 data
-workspace
+**/workspace
 config
 
 opencode-src
@@ -27,8 +28,6 @@ temp
 !README.md
 
 backend/data
-frontend/dist
-backend/dist
 
 .cache
 .turbo
