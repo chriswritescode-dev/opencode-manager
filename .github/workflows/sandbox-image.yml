@@ -1,0 +1,158 @@
+name: Sandbox Image
+
+on:
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: Extra tag to publish alongside the package version and commit sha
+        default: latest
+        required: false
+  pull_request:
+    paths:
+      - Dockerfile.sandbox
+      - scripts/sandbox-dockerd-start.sh
+      - .github/workflows/sandbox-image.yml
+
+env:
+  IMAGE: docker.io/cstechdev/ocm-sandbox
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    if: github.event_name == 'workflow_dispatch' || github.event.pull_request.head.repo.full_name == github.repository
+    strategy:
+      fail-fast: true
+      matrix:
+        include:
+          - platform: linux/amd64
+            runner: ubuntu-latest
+          - platform: linux/arm64
+            runner: ubuntu-24.04-arm
+    runs-on: ${{ matrix.runner }}
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Platform slug
+        id: platform
+        run: echo "slug=${PLATFORM//\//-}" >> "$GITHUB_OUTPUT"
+        env:
+          PLATFORM: ${{ matrix.platform }}
+
+      - name: Login to Docker Hub
+        if: github.event_name == 'workflow_dispatch'
+        uses: docker/login-action@v3
+        with:
+          username: ${{ secrets.DOCKERHUB_USERNAME }}
+          password: ${{ secrets.DOCKERHUB_TOKEN }}
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Build and verify native image
+        id: build
+        uses: docker/build-push-action@v5
+        with:
+          context: .
+          file: Dockerfile.sandbox
+          platforms: ${{ matrix.platform }}
+          outputs: ${{ github.event_name == 'workflow_dispatch' && format('type=image,name={0},push-by-digest=true,name-canonical=true,push=true', env.IMAGE) || 'type=cacheonly' }}
+          cache-from: type=gha,scope=sandbox-${{ steps.platform.outputs.slug }}
+          cache-to: type=gha,scope=sandbox-${{ steps.platform.outputs.slug }},mode=max
+
+      - name: Export digest
+        if: github.event_name == 'workflow_dispatch'
+        run: |
+          mkdir -p /tmp/digests
+          touch "/tmp/digests/${DIGEST#sha256:}"
+        env:
+          DIGEST: ${{ steps.build.outputs.digest }}
+
+      - name: Upload digest
+        if: github.event_name == 'workflow_dispatch'
+        uses: actions/upload-artifact@v4
+        with:
+          name: digests-${{ steps.platform.outputs.slug }}
+          path: /tmp/digests/*
+          if-no-files-found: error
+          retention-days: 1
+
+  merge:
+    if: github.event_name == 'workflow_dispatch'
+    needs: build
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Download digests
+        uses: actions/download-artifact@v4
+        with:
+          path: /tmp/digests
+          pattern: digests-*
+          merge-multiple: true
+
+      - name: Login to Docker Hub
+        uses: docker/login-action@v3
+        with:
+          username: ${{ secrets.DOCKERHUB_USERNAME }}
+          password: ${{ secrets.DOCKERHUB_TOKEN }}
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Resolve tags
+        id: tags
+        run: |
+          version="$(jq -er .version package.json)"
+          tags="sha-${GITHUB_SHA::12} $version"
+          for tag in "$version" "$EXTRA_TAG"; do
+            if [ -n "$tag" ] && [[ ! "$tag" =~ ^[a-zA-Z0-9_][a-zA-Z0-9_.-]{0,127}$ ]]; then
+              printf 'Invalid image tag: %s\n' "$tag" >&2
+              exit 1
+            fi
+          done
+          if [ -n "$EXTRA_TAG" ]; then
+            tags="$tags $EXTRA_TAG"
+          fi
+          echo "tags=$tags" >> "$GITHUB_OUTPUT"
+        env:
+          EXTRA_TAG: ${{ inputs.tag }}
+
+      - name: Create manifest list and push
+        working-directory: /tmp/digests
+        run: |
+          read -ra tags <<< "$TAGS"
+          args=()
+          for tag in "${tags[@]}"; do
+            args+=(-t "$IMAGE:$tag")
+          done
+          digests=(*)
+          test "${#digests[@]}" -eq 2
+          for digest in "${digests[@]}"; do
+            [[ "$digest" =~ ^[a-f0-9]{64}$ ]]
+            args+=("$IMAGE@sha256:$digest")
+          done
+          docker buildx imagetools create "${args[@]}"
+        env:
+          TAGS: ${{ steps.tags.outputs.tags }}
+
+      - name: Report index digest
+        run: |
+          digest="$(docker buildx imagetools inspect "$IMAGE:sha-${GITHUB_SHA::12}" --format '{{json .Manifest.Digest}}' | tr -d '"')"
+          {
+            echo "## Sandbox image"
+            echo
+            echo "Tags: $TAGS"
+            echo
+            echo "Pin \`SANDBOX_IMAGE\` to:"
+            echo
+            echo '```'
+            echo "$IMAGE@$digest"
+            echo '```'
+          } >> "$GITHUB_STEP_SUMMARY"
+          echo "$IMAGE@$digest"
+        env:
+          TAGS: ${{ steps.tags.outputs.tags }}

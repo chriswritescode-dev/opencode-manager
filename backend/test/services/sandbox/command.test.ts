@@ -8,6 +8,9 @@ import { unwrapSandboxExecCommand } from '@opencode-manager/shared/utils'
 import {
   WORKSPACE_SANDBOX_NAME,
   SANDBOX_UNAVAILABLE_PREFIX,
+  SANDBOX_DOCKER_DATA_VOLUME_NAME,
+  SANDBOX_DOCKER_DATA_GUEST_PATH,
+  SANDBOX_DOCKER_DATA_SIZE,
   buildCanonicalSandboxSpec,
   buildSandboxCreateArgs,
   buildSandboxInspectArgs,
@@ -108,10 +111,29 @@ describe('sandbox command builders', () => {
     expect(mountArgs[6]).toBe(`${getOpenCodeAgentTmpPath()}:${getOpenCodeAgentTmpPath()}`)
   })
 
+  it('explicitly creates the runtime tmpfs required by attestation', () => {
+    const args = buildSandboxCreateArgs()
+    const spec = buildCanonicalSandboxSpec()
+    const resources = spec.resources as { memory_mib: number }
+    expect(args[args.indexOf('--tmpfs') + 1]).toBe(`/tmp:${resolveSandboxRuntimeTmpfsSizeMib(resources.memory_mib)}M`)
+  })
+
+  it('attaches the persistent Docker data disk with the tested mount-named specification', () => {
+    const args = buildSandboxCreateArgs()
+
+    const mountNamedIndex = args.indexOf('--mount-named')
+    expect(mountNamedIndex).toBeGreaterThan(-1)
+    expect(args[mountNamedIndex + 1]).toBe(
+      `${SANDBOX_DOCKER_DATA_VOLUME_NAME}:${SANDBOX_DOCKER_DATA_GUEST_PATH}:kind=disk,size=${SANDBOX_DOCKER_DATA_SIZE}`,
+    )
+  })
+
   it('never masks the assistant .opencode directory with a tmpfs overlay', () => {
     const args = buildSandboxCreateArgs()
 
-    expect(args).not.toContain('--tmpfs')
+    const tmpfsMounts = args.flatMap((arg, index) => arg === '--tmpfs' ? [args[index + 1]] : [])
+    expect(tmpfsMounts).toHaveLength(1)
+    expect(tmpfsMounts[0]).toMatch(/^\/tmp:\d+M$/)
     expect(args).not.toContain(getAssistantOpenCodeDir())
   })
 
@@ -201,6 +223,18 @@ describe('sandbox command builders', () => {
       expect(mount.follow_root_symlinks).toBe(false)
       expect(mount.quota_mib).toBeNull()
     }
+
+    const named = mounts.filter((mount) => mount.type === 'Named')
+    expect(named).toHaveLength(1)
+    expect(named[0]).toEqual({
+      type: 'Named',
+      name: SANDBOX_DOCKER_DATA_VOLUME_NAME,
+      guest: SANDBOX_DOCKER_DATA_GUEST_PATH,
+      options: { readonly: false, noexec: false, nosuid: false, nodev: false },
+      stat_virtualization: 'strict',
+      host_permissions: 'private',
+      follow_root_symlinks: false,
+    })
 
     expect(mounts.find((mount) => mount.type === 'Tmpfs')).toBeUndefined()
   })
@@ -319,7 +353,8 @@ describe('sandbox command builders', () => {
       "getent passwd 1001 >/dev/null 2>&1 || { echo 'ocm-exec:x:1001:1002:Manager sandbox exec user:/home/ocm-agent:/bin/sh' >> /etc/passwd; grep -q '^ocm-exec:' /etc/shadow || echo 'ocm-exec:*:19000:0:99999:7:::' >> /etc/shadow; }",
     )
     expect(script).toContain('getent passwd 1001 >/dev/null || exit 1')
-    expect(script).toContain('getent passwd 1001 >/dev/null || exit 1')
+    expect(script).toContain('if getent group docker >/dev/null 2>&1; then')
+    expect(script).toContain('usermod -aG docker "$(getent passwd 1001 | cut -d: -f1)" || exit 1')
   })
 
   it('returns no provisioning args when the exec user does not resolve to numeric uid and gid', () => {

@@ -169,48 +169,49 @@ Understand the trade-off before enabling it. `msb exec -e` is the only injection
 
 ## Sandbox Guest Image
 
-`SANDBOX_IMAGE` defaults to a digest-pinned reference of `docker.io/cstechdev/ocm-sandbox`, built from `Dockerfile.sandbox` in this repository and published for `linux/amd64` and `linux/arm64` from a build host with `docker buildx`:
+`SANDBOX_IMAGE` defaults to a digest-pinned reference of `docker.io/cstechdev/ocm-sandbox`. The `Sandbox Image` workflow (`.github/workflows/sandbox-image.yml`) builds `Dockerfile.sandbox` natively: `linux/amd64` on `ubuntu-latest` and `linux/arm64` on `ubuntu-24.04-arm`. Pull requests from this repository that touch the Dockerfile or workflow run build-time verification without publishing or requiring registry credentials. A manual `workflow_dispatch` publishes both platforms by digest and merges them into one manifest list, tagged with the commit SHA, package version, and optional `tag` input (default `latest`). Publishing requires `DOCKERHUB_USERNAME` and `DOCKERHUB_TOKEN` repository secrets. The job summary prints the index digest to pin.
+
+Native runners avoid the x86_64 `rustc` segmentation fault observed under qemu-user on the arm64 build host. Later uv releases also failed in that environment. Neither platform skips toolchain execution to work around emulation failures. A single-platform local build on an arm64 host is:
 
 ```bash
-docker buildx build --builder <docker-container-builder> \
-  --platform linux/amd64,linux/arm64 \
-  -t docker.io/cstechdev/ocm-sandbox:latest \
-  --build-arg PLAYWRIGHT_VERSION=1.56.0 \
-  -f Dockerfile.sandbox --push .
-docker buildx imagetools inspect docker.io/cstechdev/ocm-sandbox:latest   # copy the index digest
+docker buildx build --platform linux/arm64 -t ocm-sandbox:local -f Dockerfile.sandbox --load .
 ```
 
-A multi-platform build needs the `docker-container` driver and pushes the manifest list directly; `--load` cannot hold two platforms, and the default `docker` driver cannot build them.
-
-Then update the pin in `shared/src/config/defaults.ts` (`SANDBOX.IMAGE`) and in the `docker-compose.sandbox.yml` default to the new `@sha256:` digest. That bump is what makes deployments adopt a rebuilt guest image, and it is deliberate rather than convenient:
+After a publish, update the pin in `shared/src/config/defaults.ts` (`SANDBOX.IMAGE`) and in the `docker-compose.sandbox.yml` default to the new `@sha256:` digest. That bump is what makes deployments adopt a rebuilt guest image, and it is deliberate rather than convenient:
 
 - msb caches images by reference. `msb pull docker.io/cstechdev/ocm-sandbox:latest` reports "already cached" without contacting the registry, and `pull_policy: IfMissing` never re-pulls, so a host that pulled a mutable tag once keeps that content forever.
 - Sandbox attestation compares the image *reference string*. A floating tag therefore keeps passing attestation while its content drifts, so the running microVM is never recreated either.
 
 A digest reference sidesteps both: it is a cache key no host has seen before, so `IfMissing` pulls it, and it fails the reference comparison against a microVM created from the old reference, so the Manager removes and recreates that microVM on its own. No manual cleanup is required on deploy; to reclaim the superseded image afterwards, run `msb image prune` or `msb image rm <old reference>`.
 
-It is `node:24` (Debian 12, `buildpack-deps` based), so the compile toolchain is already present, plus the package managers and CLI tooling from the Manager image:
+It is built from the same `node:24.21.0-trixie` tag as the Manager image (Debian 13, `buildpack-deps` based), so both track one Node and one Debian release and the compile toolchain is already present. pnpm, Bun, uv, fallow, Rust, Go, and Playwright have build-argument version pins; base-image and apt tools follow their package sources:
 
 | Tool | Source | Notes |
 | --- | --- | --- |
-| `gcc` / `g++` / `make` / `ld` / `pkg-config` | `node:24` | GCC 12.2, GNU Make 4.3 |
-| `glib-2.0` | `node:24` | 2.74.6, with `pkg-config` metadata |
-| `git`, `ssh`, `python3`, `curl`, `wget`, `unzip` | `node:24` | git 2.39.5 |
+| `gcc` / `g++` / `make` / `ld` / `pkg-config` | base image | GCC 14, GNU Make 4.4 |
+| `glib-2.0` | base image | With `pkg-config` metadata |
+| `git`, `ssh`, `python3`, `curl`, `wget`, `unzip` | base image | |
 | `python` | apt (`python-is-python3`) | The base image ships only `python3`; a skill or script invoking `python` would otherwise fail |
-| `ping`, `ip`, `ss`, `netstat`, `dig`, `host`, `nslookup`, `nc`, `traceroute`, `lsof`, `rsync` | apt | `node:24` ships no network diagnostics at all. The image build fails if any of these is missing |
-| `pnpm` | corepack | Prewarmed into a shared `COREPACK_HOME` (`/usr/local/share/corepack`) whose whole tree — including the `v1/` cache and `lastKnownGood.json` that `corepack prepare` creates as root — is opened up after prewarming, so the exec user runs the build-time version offline and a project `packageManager` pin of a different version downloads on first use. The build verifies that pinned download as an unknown uid |
-| `bun`, `bunx` | official installer | Installed to `/opt/bun`, world-readable, both symlinked onto `PATH` |
-| `uv`, `uvx` | Astral installer | Standalone binaries on `PATH`; `uv tool` shims land in `/opt/agent-tools/bin`, which is on `PATH` |
-| `npm -g`, `pnpm -g` | npm / corepack | Global installs redirect to `/opt/agent-tools` (`npm_config_prefix`, `PNPM_HOME`), so they are writable for the exec user and their binaries are on `PATH` |
+| `ping`, `ip`, `ss`, `netstat`, `dig`, `host`, `nslookup`, `nc`, `traceroute`, `lsof`, `rsync` | apt | The base image ships no network diagnostics at all. The image build fails if any of these is missing |
+| `pnpm` | `npm install -g` (`PNPM_VERSION`) | Installed into `/usr/local` as root. A project `packageManager` pin of a different version is honoured by pnpm itself, which downloads it into the pnpm store on first use; the build verifies that as an unknown uid |
+| `bun`, `bunx` | official installer (`BUN_VERSION`) | Installed to `/opt/bun`, world-readable, both symlinked onto `PATH` |
+| `uv`, `uvx` | Astral installer (`UV_VERSION`) | Standalone binaries on `PATH`; `uv tool` shims land in `/opt/agent-tools/bin`, which is on `PATH`. Held at 0.12.7: later releases segfault under qemu-user x86_64 emulation, which is how the amd64 platform is built from an arm64 host |
+| `fallow` | `npm install -g` (`FALLOW_VERSION`) | Dead-code and unused-export analysis CLI |
+| `rustc`, `cargo`, `rustup` | rustup (`RUST_VERSION`, minimal profile) | `RUSTUP_HOME=/usr/local/rustup` and `CARGO_HOME=/usr/local/cargo` follow the official rust image layout and are opened to every uid afterwards, so the exec user can `cargo install` and add toolchains; `/usr/local/cargo/bin` is on `PATH` |
+| `go` | official tarball (`GO_VERSION`) | Unpacked to `/usr/local/go`, on `PATH`. `GOBIN=/opt/agent-tools/bin` puts `go install` binaries next to the other agent tools; `GOPATH` and the module cache default under the writable `HOME` |
+| `npm -g`, `pnpm -g` | npm / pnpm | Global installs redirect to `/opt/agent-tools` (`npm_config_prefix`, `PNPM_HOME`), so they are writable for the exec user and their binaries are on `PATH` |
 | `sudo` | apt | Passwordless for every guest user via `/etc/sudoers.d/ocm-guest`; system-wide `apt-get install` works from the exec user |
 | `pip`, `venv` | apt | `python3-pip` and `python3-venv` on top of the base `python3`. Debian's externally-managed marker is removed, so `pip` and `uv pip --system` are not refused; system-wide writes still need `sudo`, so use `--user` or a venv |
-| `jq`, `ripgrep`, `less`, `tree`, `file`, `procps` | apt | Common CLI tools agent workflows expect |
+| `jq`, `ripgrep`, `less`, `tree`, `file`, `procps` | apt | Common CLI tools agent workflows expect; Debian 13 carries jq 1.7 and ripgrep 14 |
 | `gh` | official `cli.github.com` apt repo | Current release. Debian's own package is several years stale |
-| Chromium | Playwright (`PLAYWRIGHT_VERSION`, default `1.56.0`) | Installed to `PLAYWRIGHT_BROWSERS_PATH=/ms-playwright`, world-readable so `SANDBOX_EXEC_USER` can launch it |
+| Docker Engine, CLI, Buildx, Compose | official Docker Debian apt repo | `ocm-dockerd-start` starts the guest daemon on demand and waits for readiness. The Manager adds the provisioned exec user to the guest's Docker group. No host Docker socket is mounted |
+| Chromium | Playwright (`PLAYWRIGHT_VERSION`, default `1.63.0`) | Installed to `PLAYWRIGHT_BROWSERS_PATH=/ms-playwright`, world-readable so `SANDBOX_EXEC_USER` can launch it |
 
 `NODE_PATH=/usr/local/lib/node_modules` is set so agent code can `require("playwright")` from any working directory. It is only a resolution fallback; a project-local `node_modules` still wins.
 
-The guest runs every command as a numeric host uid that has no `/etc/passwd` entry in the image, so the uncorrected default `HOME` is `/` and anything that writes per-user state — the pnpm store, uv and pip caches, `git config`, `gh` config — dies with `EACCES` on the first run. The image therefore sets `HOME=/home/ocm-agent` (mode 1777), prewarms corepack into a world-readable `COREPACK_HOME`, and puts a world-writable `/opt/agent-tools/bin` on `PATH` for `uv tool` and global package-manager installs. Image `ENV` reaches `msb exec` commands verbatim, including for unknown uids. The image build verifies the whole toolchain as an unprivileged uid so a root-only regression fails the build instead of the agent.
+Before using Docker inside the guest, run `ocm-dockerd-start`. The helper is safe to call repeatedly, serializes concurrent starts, and probes only the guest's Unix socket regardless of `DOCKER_HOST` or `DOCKER_CONTEXT`. Daemon startup logs are in `/var/log/dockerd.log`. Docker data lives on the 20 GiB sparse ext4 named volume `ocm-workspace-docker-data`, mounted at `/var/lib/docker`; Docker's overlay storage cannot use the sandbox's overlay root filesystem. The named volume survives sandbox restarts and recreation, remains private to the guest, and is not shared with the host Docker daemon. Removing that named volume deletes its Docker images, containers, and volumes. Sandbox attestation requires exactly this named mount in addition to the existing project mounts.
+
+The guest runs every command as a numeric host uid that has no `/etc/passwd` entry in the image, so the uncorrected default `HOME` is `/` and anything that writes per-user state — the pnpm store, uv and pip caches, `git config`, `gh` config, the cargo registry, the Go module cache — dies with `EACCES` on the first run. The image therefore sets `HOME=/home/ocm-agent` (mode 1777), opens the rust homes to every uid, and puts a world-writable `/opt/agent-tools/bin` on `PATH` for `uv tool`, `go install` and global package-manager installs. Image `ENV` reaches `msb exec` commands verbatim, including for unknown uids. The image build verifies the whole toolchain as an unprivileged uid — including a `cargo build` and a `go run` — so a root-only regression fails the build instead of the agent.
 
 The pnpm store itself is pinned to a container-internal path with `PNPM_CONFIG_STORE_DIR=/home/ocm-agent/.local/share/pnpm/store`. The pin goes through pnpm's own config env var because pnpm 11 no longer reads `npm_config_*` variables; with the store unpinned, pnpm places it on the mounted project filesystem, which pollutes the repository, slows installs over the host bind mount, and can end up committed.
 
@@ -218,7 +219,7 @@ The pnpm store itself is pinned to a container-internal path with `PNPM_CONFIG_S
 
 Chromium launches headless as the non-root exec user without extra flags. If your host kernel restricts user namespaces so Chromium's own sandbox fails, pass `--no-sandbox` — the microVM is already the isolation boundary.
 
-The image is over 3 GB against a 1.6 GB `node:24` baseline, almost entirely Chromium and its dependencies. When sandboxing is enabled, the Manager gets everything ready before the first command instead of on it: at startup, and whenever enforcement is switched on, it pulls the image and then boots the shared microVM in the background (`msb pull`, then the same create/start/attest/provision path a command would trigger, bounded by `SANDBOX_START_TIMEOUT_MS`; raise it on slow links). One microVM serves every repo and schedule worktree, so a single warm-up covers the whole workspace. The pull is a no-op once cached, `docker-compose.sandbox.yml` persists the microsandbox store in the `microsandbox-data` volume so the download survives container replacement, and the shutdown handler stops the microVM again. Because the warm-up runs in the background, server startup never waits for it, and a command issued while it is still running joins the same in-flight boot rather than starting a second one.
+The image is around 5 GB unpacked against a 1.6 GB base; Chromium with its dependencies (about 1.1 GB) and the Rust and Go toolchains (about 0.8 GB) account for most of the rest. When sandboxing is enabled, the Manager gets everything ready before the first command instead of on it: at startup, and whenever enforcement is switched on, it pulls the image and then boots the shared microVM in the background (`msb pull`, then the same create/start/attest/provision path a command would trigger, bounded by `SANDBOX_START_TIMEOUT_MS`; raise it on slow links). One microVM serves every repo and schedule worktree, so a single warm-up covers the whole workspace. The pull is a no-op once cached, `docker-compose.sandbox.yml` persists the microsandbox store in the `microsandbox-data` volume so the download survives container replacement, and the shutdown handler stops the microVM again. Because the warm-up runs in the background, server startup never waits for it, and a command issued while it is still running joins the same in-flight boot rather than starting a second one.
 
 ### Using your own image
 
@@ -233,7 +234,9 @@ docker build -f Dockerfile.sandbox -t my-sandbox:local .
 
 Pin a concrete tag or digest rather than a floating one. Attestation compares the image *reference string*, so a mutable tag keeps passing attestation while the underlying image drifts.
 
-Override the Playwright version at build time with `--build-arg PLAYWRIGHT_VERSION=1.57.0`. If your project drives Playwright itself, match this version to the one in your `package.json`; a mismatched browser revision makes Playwright refuse to launch.
+Override any tool pin at build time with its `ARG`, for example `--build-arg PLAYWRIGHT_VERSION=1.62.0` or `--build-arg RUST_VERSION=1.97.0`; the build asserts the installed version, so a typo fails early instead of shipping a stale tool. If your project drives Playwright itself, match this version to the one in your `package.json`; a mismatched browser revision makes Playwright refuse to launch. Rebuild and republish the guest image, then update the `SANDBOX.IMAGE` digest, whenever you change a pin.
+
+The Manager image itself carries the same Chromium runtime libraries, resolved by `playwright install-deps chromium` for the same `PLAYWRIGHT_VERSION` at build time. That is what makes a Playwright e2e suite run in a container with sandboxing off, where the agent has no root or sudo to install them at runtime. Both images track one pin, so bumping `PLAYWRIGHT_VERSION` refreshes the sandbox browser and the Manager's system libraries together.
 
 ## Caveats
 

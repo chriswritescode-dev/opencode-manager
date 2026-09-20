@@ -33,7 +33,7 @@ export const DEFAULTS = {
 
   SANDBOX: {
     MSB_PATH: 'msb',
-    IMAGE: 'docker.io/cstechdev/ocm-sandbox@sha256:7435dce147503b846bcd89ad5e9f7192f37b332c8e49087a7e619034352c47f4',
+    IMAGE: 'docker.io/cstechdev/ocm-sandbox@sha256:9df035cfb1a7c367bac6edbfd660d084b08e02faa051a93e0a6e381272b85342',
     MEMORY: '4G',
     CPUS: 2,
     EXEC_USER: 'node',

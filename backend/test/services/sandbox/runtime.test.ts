@@ -7,7 +7,7 @@ import { ENV, getAssistantOpenCodeDir, getForgeWorktreesPath, getOpenCodeAgentTm
 import { migrate } from '../../../src/db/migration-runner'
 import { allMigrations } from '../../../src/db/migrations'
 import { SettingsService } from '../../../src/services/settings'
-import { buildSandboxInspectArgs, resolveSandboxExecUser, resolveSandboxRuntimeTmpfsSizeMib, sandboxExecutablePath, WORKSPACE_SANDBOX_NAME } from '../../../src/services/sandbox/command'
+import { buildSandboxInspectArgs, resolveSandboxExecUser, resolveSandboxRuntimeTmpfsSizeMib, sandboxExecutablePath, SANDBOX_DOCKER_DATA_GUEST_PATH, SANDBOX_DOCKER_DATA_VOLUME_NAME, WORKSPACE_SANDBOX_NAME } from '../../../src/services/sandbox/command'
 import { SandboxRuntimeService, backgroundProvisionRetryForTests, provisionSandboxExecUserForTests, resetSandboxRuntimeState, stopWorkspaceSandboxOnShutdown } from '../../../src/services/sandbox/runtime'
 import { executeCommand } from '../../../src/utils/process'
 import { detectSandboxCapability } from '../../../src/services/sandbox/capability'
@@ -126,6 +126,38 @@ describe('SandboxRuntimeService', () => {
     }
   }
 
+  function namedMount(name: string, guest: string): Record<string, unknown> {
+    return {
+      type: 'Named',
+      name,
+      guest,
+      options: { readonly: false, noexec: false, nosuid: false, nodev: false },
+      stat_virtualization: 'strict',
+      host_permissions: 'private',
+      follow_root_symlinks: false,
+    }
+  }
+
+  function sandboxMounts(overrides: { named?: Record<string, unknown> | null; extra?: Array<Record<string, unknown>> } = {}): Array<Record<string, unknown>> {
+    const mounts: Array<Record<string, unknown>> = [
+      bindMount(reposRoot),
+      bindMount(worktreesRoot),
+      bindMount(openCodeWorktreesRoot),
+      bindMount(forgeWorktreesRoot),
+      bindMount(toolOutputRoot),
+      bindMount(skillsRoot),
+      bindMount(agentTmpRoot),
+    ]
+    if (overrides.named !== null) {
+      mounts.push(overrides.named ?? namedMount(SANDBOX_DOCKER_DATA_VOLUME_NAME, SANDBOX_DOCKER_DATA_GUEST_PATH))
+    }
+    mounts.push(tmpfsMount('/tmp', runtimeTmpfsSizeMib()))
+    if (overrides.extra !== undefined) {
+      mounts.push(...overrides.extra)
+    }
+    return mounts
+  }
+
   function realInspectConfig(overrides: Record<string, unknown> = {}): Record<string, unknown> {
     return {
       name: WORKSPACE_SANDBOX_NAME,
@@ -149,16 +181,7 @@ describe('SandboxRuntimeService', () => {
       ],
       labels: { 'ocm.managed': 'true', 'ocm.net': ENV.SANDBOX.NET },
       rlimits: [],
-      mounts: [
-        bindMount(reposRoot),
-        bindMount(worktreesRoot),
-        bindMount(openCodeWorktreesRoot),
-        bindMount(forgeWorktreesRoot),
-        bindMount(toolOutputRoot),
-        bindMount(skillsRoot),
-        bindMount(agentTmpRoot),
-        tmpfsMount('/tmp', runtimeTmpfsSizeMib()),
-      ],
+      mounts: sandboxMounts(),
       patches: [],
       network: {
         enabled: true,
@@ -1253,16 +1276,7 @@ describe('SandboxRuntimeService', () => {
         return {
           exitCode: 0,
           stdout: runningInspectOutput(realInspectConfig({
-            mounts: [
-              bindMount(reposRoot),
-              bindMount(worktreesRoot),
-              bindMount(openCodeWorktreesRoot),
-              bindMount(forgeWorktreesRoot),
-              bindMount(toolOutputRoot),
-              bindMount(skillsRoot),
-              bindMount(agentTmpRoot),
-              tmpfsMount('/tmp', runtimeTmpfsSizeMib()),
-            ],
+            mounts: sandboxMounts(),
           })),
           stderr: '',
         }
@@ -3099,6 +3113,89 @@ describe('SandboxRuntimeService', () => {
         ],
       }),
       'unexpected tmpfs mount',
+    )
+  })
+
+  it('reuses a running sandbox carrying the exact Docker data volume at /var/lib/docker', async () => {
+    enableEnforcement()
+    mockExecuteCommand.mockImplementation(async (args: string[]) => {
+      if (args.includes('ls')) {
+        return {
+          exitCode: 0,
+          stdout: JSON.stringify([{ name: WORKSPACE_SANDBOX_NAME, status: 'running' }]),
+          stderr: '',
+        }
+      }
+      if (args.includes('inspect')) {
+        return {
+          exitCode: 0,
+          stdout: runningInspectOutput(realInspectConfig({
+            mounts: sandboxMounts({
+              named: namedMount(SANDBOX_DOCKER_DATA_VOLUME_NAME, SANDBOX_DOCKER_DATA_GUEST_PATH),
+            }),
+          })),
+          stderr: '',
+        }
+      }
+      return { exitCode: 0, stdout: '', stderr: '' }
+    })
+
+    const plan = await service.planShell(repoADir)
+
+    expect(plan).toEqual({ mode: 'sandbox', workdir: repoADir })
+    expect(mockExecuteCommand.mock.calls.filter((call) => call[0].includes('rm'))).toHaveLength(0)
+    expect(mockExecuteCommand.mock.calls.filter((call) => call[0].includes('run'))).toHaveLength(0)
+    expect(mockExecuteCommand.mock.calls.filter((call) => call[0].includes('start'))).toHaveLength(0)
+    expect(mockExecuteCommand.mock.calls.filter((call) => call[0].includes('inspect'))).toHaveLength(1)
+  })
+
+  it('removes and recreates a sandbox missing the Docker data volume mount', async () => {
+    await assertRecreateForInspectMutation(
+      realInspectConfig({ mounts: sandboxMounts({ named: null }) }),
+      'missing the Docker data volume mount',
+    )
+  })
+
+  it('removes and recreates a sandbox duplicating the Docker data volume mount', async () => {
+    await assertRecreateForInspectMutation(
+      realInspectConfig({
+        mounts: sandboxMounts({
+          extra: [namedMount(SANDBOX_DOCKER_DATA_VOLUME_NAME, SANDBOX_DOCKER_DATA_GUEST_PATH)],
+        }),
+      }),
+      'duplicate Docker data volume mount',
+    )
+  })
+
+  it('removes and recreates a sandbox whose Docker data volume has an unexpected name', async () => {
+    await assertRecreateForInspectMutation(
+      realInspectConfig({
+        mounts: sandboxMounts({ named: namedMount('ocm-other-docker-data', SANDBOX_DOCKER_DATA_GUEST_PATH) }),
+      }),
+      'unexpected named volume mount',
+    )
+  })
+
+  it('removes and recreates a sandbox whose Docker data volume is mounted at an unexpected destination', async () => {
+    await assertRecreateForInspectMutation(
+      realInspectConfig({
+        mounts: sandboxMounts({ named: namedMount(SANDBOX_DOCKER_DATA_VOLUME_NAME, '/var/lib/docker-other') }),
+      }),
+      'unexpected named volume mount',
+    )
+  })
+
+  it('removes and recreates a sandbox whose Docker data volume has relaxed options', async () => {
+    await assertRecreateForInspectMutation(
+      realInspectConfig({
+        mounts: sandboxMounts({
+          named: {
+            ...namedMount(SANDBOX_DOCKER_DATA_VOLUME_NAME, SANDBOX_DOCKER_DATA_GUEST_PATH),
+            options: { readonly: false, noexec: true, nosuid: false, nodev: false },
+          },
+        }),
+      }),
+      'options.noexec',
     )
   })
 })

@@ -321,8 +321,8 @@ importers:
         version: 4.3.2
     devDependencies:
       '@opencode-ai/sdk':
-        specifier: 1.18.8
-        version: 1.18.8
+        specifier: 1.18.31
+        version: 1.18.31
       typescript:
         specifier: ^5
         version: 5.9.3
@@ -1084,8 +1084,8 @@ packages:
     resolution: {integrity: sha512-XlOlEbQcE9fmuXxrVTXCTlG2nlRXa9Rj3rr5Ue/+tX+nmkgbX720YHh0VR3hBF9xDvwnb8D2shVGOwNx+ulArw==}
     engines: {node: '>= 20.19.0'}
 
-  '@opencode-ai/sdk@1.18.8':
-    resolution: {integrity: sha512-8vi5UBKFFgc+fnyKhZhGUxiIWMtUuN00VAInnK9JO6g6EC8WvWefP+ccTBQD023zod69JaEoAzGgO8hdxXHUaw==}
+  '@opencode-ai/sdk@1.18.31':
+    resolution: {integrity: sha512-Raouthf8Lhe9edjvYeeSK7SgvdoU6bBjH9qV3f70dHoa6h+z0X2TMz/e22/wKp/StlFUZ4kIRpYYxFnY8/k01w==}
 
   '@opentui/core-darwin-arm64@0.1.107':
     resolution: {integrity: sha512-Yqt2/9Ntw0IdtPA/qmHvXCE16y4Jq5/btCmuzN9/opzqZ5rYGYYVtiBii3LezGcTZYuJQZthjvh8MLPXXwA2EQ==}
@@ -5627,7 +5627,7 @@ snapshots:
 
   '@noble/hashes@2.0.1': {}
 
-  '@opencode-ai/sdk@1.18.8':
+  '@opencode-ai/sdk@1.18.31':
     dependencies:
       cross-spawn: 7.0.6
 
