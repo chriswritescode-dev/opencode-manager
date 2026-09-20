@@ -130,21 +130,6 @@ export class OpenCodeSupervisor {
     })
   }
 
-  async reloadConfig(reason: OpenCodeOperationReason): Promise<OpenCodeLifecycleStatus> {
-    return this.runLifecycleOperation(async () => {
-      this.setState('starting')
-
-      try {
-        this.openCodeServerManager.clearStartupError()
-        await this.openCodeServerManager.reloadConfig()
-        return this.refreshHealthOrRecover(reason)
-      } catch (error) {
-        this.recordFailure(error)
-        return this.recover(reason)
-      }
-    })
-  }
-
   async checkNow(reason: OpenCodeOperationReason): Promise<OpenCodeLifecycleStatus> {
     if (reason === 'health_poll' && !this.isWatchEnabled()) {
       return this.getStatus()
@@ -337,6 +322,7 @@ export class OpenCodeSupervisor {
   }
 
   private async seedDefaultConfig(): Promise<void> {
+    await archiveBrokenOpenCodeConfigFile()
     await seedOpenCodeConfigFile()
     this.openCodeServerManager.clearStartupError()
     await this.openCodeServerManager.restart()

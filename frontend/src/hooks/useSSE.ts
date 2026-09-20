@@ -21,14 +21,14 @@ const getEventDirectory = (event: SSEEvent): string | undefined => {
 }
 
 const handleRestartServer = async () => {
-  showToast.loading('Reloading OpenCode configuration...', {
+  showToast.loading('Restarting OpenCode server...', {
     id: 'restart-server',
   })
 
   try {
     const result = await settingsApi.reloadOpenCodeConfig()
     if (result.success) {
-      showToast.success(result.message || 'OpenCode configuration reloaded successfully', {
+      showToast.success(result.message || 'OpenCode server restarted', {
         id: 'restart-server',
         duration: 3000,
       })
@@ -36,13 +36,13 @@ const handleRestartServer = async () => {
         window.location.reload()
       }, 2000)
     } else {
-      showToast.error(result.message || 'Failed to reload OpenCode configuration', {
+      showToast.error(result.message || 'Failed to restart OpenCode server', {
         id: 'restart-server',
         duration: 5000,
       })
     }
   } catch (error) {
-    showToast.error(error instanceof Error ? error.message : 'Failed to reload OpenCode configuration', {
+    showToast.error(error instanceof Error ? error.message : 'Failed to restart OpenCode server', {
       id: 'restart-server',
       duration: 5000,
     })

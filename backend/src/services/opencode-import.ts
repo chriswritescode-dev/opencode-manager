@@ -3,8 +3,14 @@ import path from 'path'
 import { existsSync } from 'node:fs'
 import { cp, mkdtemp, readdir, rename, rm } from 'fs/promises'
 import { Database as SQLiteDatabase } from 'bun:sqlite'
-import { getOpenCodeConfigFilePath, getWorkspacePath } from '@opencode-manager/shared/config/env'
-import { parseOpenCodeConfigContent, withOpenCodeConfigLock, writeOpenCodeConfigFile } from './opencode-config-file'
+import { getConfigPath, getWorkspacePath } from '@opencode-manager/shared/config/env'
+import {
+  DEFAULT_OPENCODE_CONFIG_SOURCE_NAME,
+  OPENCODE_CONFIG_SOURCE_NAMES,
+  isOpenCodeConfigSourceName,
+  selectPreferredOpenCodeConfigSourceName,
+} from '@opencode-manager/shared'
+import { parseOpenCodeConfigContent, restoreOpenCodeConfigSnapshot, serializeOpenCodeConfigSourceSnapshot, withOpenCodeConfigLock } from './opencode-config-file'
 import { captureLastKnownGoodOpenCodeConfig } from './opencode-config-apply'
 import { ensureDirectoryExists, fileExists, readFileContent } from './file-operations'
 import type { SettingsService } from './settings'
@@ -13,8 +19,10 @@ const OPENCODE_STATE_DB_FILENAMES = new Set(['opencode.db', 'opencode.db-shm', '
 
 export interface OpenCodeImportStatus {
   configSourcePath: string | null
+  configSourcePaths: string[]
   stateSourcePath: string | null
   workspaceConfigPath: string
+  workspaceConfigPathsToRemove: string[]
   workspaceStatePath: string
   workspaceStateExists: boolean
 }
@@ -55,11 +63,14 @@ export function getImportPathCandidates(envKey: string, fallbackPath: string): s
   return Array.from(new Set(candidates))
 }
 
-export function getFirstExistingConfigSourcePath(): string | null {
-  return getImportPathCandidates(
-    'OPENCODE_IMPORT_CONFIG_PATH',
-    path.join(os.homedir(), '.config', 'opencode', 'opencode.json')
-  ).find(candidate => existsSync(candidate)) ?? null
+function getExistingConfigSourcePaths(): string[] {
+  const explicitPath = process.env.OPENCODE_IMPORT_CONFIG_PATH
+  if (explicitPath && existsSync(path.resolve(explicitPath))) {
+    return [path.resolve(explicitPath)]
+  }
+  return OPENCODE_CONFIG_SOURCE_NAMES
+    .map(name => path.join(os.homedir(), '.config', 'opencode', name))
+    .filter(candidate => existsSync(candidate))
 }
 
 async function getFirstExistingPathWithDatabase(paths: string[]): Promise<string | null> {
@@ -135,37 +146,60 @@ export async function importOpenCodeStateDirectory(sourcePath: string, targetPat
 }
 
 export async function getOpenCodeImportStatus(): Promise<OpenCodeImportStatus> {
-  const workspaceConfigPath = getOpenCodeConfigFilePath()
+  const configDir = getConfigPath()
+  const workspaceConfigNames = OPENCODE_CONFIG_SOURCE_NAMES.filter(name => existsSync(path.join(configDir, name)))
+  const workspaceConfigPaths = workspaceConfigNames.map(name => path.join(configDir, name))
+  const workspaceConfigPath = path.join(
+    configDir,
+    selectPreferredOpenCodeConfigSourceName(workspaceConfigNames) ?? DEFAULT_OPENCODE_CONFIG_SOURCE_NAME,
+  )
   const workspaceStatePath = path.join(getWorkspacePath(), '.opencode', 'state', 'opencode')
   const workspaceStateExists = await fileExists(path.join(workspaceStatePath, 'opencode.db'))
 
-  const configSourcePath = getFirstExistingConfigSourcePath()
+  const configSourcePaths = getExistingConfigSourcePaths()
+  const configSourcePath = configSourcePaths.at(-1) ?? null
+  const hostSourceNames = new Set(configSourcePaths.map(sourcePath => path.basename(sourcePath)))
+  const workspaceConfigPathsToRemove = configSourcePaths.length === 0
+    ? []
+    : workspaceConfigPaths.filter(workspaceSourcePath => !hostSourceNames.has(path.basename(workspaceSourcePath)))
   const stateSourcePath = await getFirstExistingPathWithDatabase(
     getImportPathCandidates('OPENCODE_IMPORT_STATE_PATH', path.join(os.homedir(), '.local', 'share', 'opencode'))
   )
 
   return {
     configSourcePath,
+    configSourcePaths,
     stateSourcePath,
     workspaceConfigPath,
+    workspaceConfigPathsToRemove,
     workspaceStatePath,
     workspaceStateExists,
   }
 }
 
-async function importOpenCodeConfigFromSource(sourcePath: string, settingsService?: SettingsService): Promise<boolean> {
-  const rawContent = await readFileContent(sourcePath)
-  const { isValid } = parseOpenCodeConfigContent(rawContent)
-
-  if (!isValid) {
-    throw new Error('Importable OpenCode config is invalid')
-  }
+async function importOpenCodeConfigFromSources(sourcePaths: string[], settingsService?: SettingsService): Promise<boolean> {
+  const configDir = getConfigPath()
+  const sources = await Promise.all(sourcePaths.map(async sourcePath => {
+    const basename = path.basename(sourcePath)
+    const name = isOpenCodeConfigSourceName(basename) ? basename : DEFAULT_OPENCODE_CONFIG_SOURCE_NAME
+    const rawContent = await readFileContent(sourcePath)
+    if (!parseOpenCodeConfigContent(rawContent).isValid) {
+      throw new Error('Importable OpenCode config is invalid')
+    }
+    return { name, path: path.join(configDir, name), rawContent }
+  }))
+  const selected = sources.at(-1)
+  if (!selected) return false
+  if (sources.every((source, index) => path.resolve(sourcePaths[index]!) === path.resolve(source.path))) return false
+  const snapshot = serializeOpenCodeConfigSourceSnapshot(
+    sources.map(source => ({ name: source.name, rawContent: source.rawContent })),
+  )
 
   await withOpenCodeConfigLock(async () => {
     if (settingsService) {
       await captureLastKnownGoodOpenCodeConfig(settingsService)
     }
-    await writeOpenCodeConfigFile(rawContent)
+    await restoreOpenCodeConfigSnapshot(snapshot)
   })
   return true
 }
@@ -183,7 +217,7 @@ export async function syncOpenCodeImport(options: SyncOpenCodeImportOptions): Pr
   }
 
   if (options.importConfig !== false && initialStatus.configSourcePath) {
-    configImported = await importOpenCodeConfigFromSource(initialStatus.configSourcePath, options.settingsService)
+    configImported = await importOpenCodeConfigFromSources(initialStatus.configSourcePaths, options.settingsService)
   }
 
   if (initialStatus.stateSourcePath && (overwriteState || !initialStatus.workspaceStateExists)) {

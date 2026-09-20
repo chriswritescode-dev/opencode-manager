@@ -46,7 +46,6 @@ export const DEFAULTS = {
     PROCESS_START_WAIT_MS: 2000,
     PROCESS_VERIFY_WAIT_MS: 1000,
     HEALTH_CHECK_TIMEOUT_MS: 30000,
-    CONFIG_PATCH_TIMEOUT_MS: 15000,
   },
 
   FILE_LIMITS: {
@@ -100,6 +99,9 @@ export const GIT_PROVIDERS = {
   GITLAB: 'gitlab.com',
   BITBUCKET: 'bitbucket.org',
 } as const
+
+export const OPENCODE_CONFIG_SOURCE_NAMES = ['config.json', 'opencode.json', 'opencode.jsonc'] as const
+export type OpenCodeConfigSourceName = (typeof OPENCODE_CONFIG_SOURCE_NAMES)[number]
 
 export type Config = typeof DEFAULTS
 export type AllowedMimeType = (typeof ALLOWED_MIME_TYPES)[number]

@@ -7,10 +7,3 @@ export function resolveJsoncIssueLine(content: string, path: PropertyKey[] | str
     : parseJsoncPathSegments(path)
   return findJsoncLineForPath(content, segments)
 }
-
-export function hasJsoncComments(content: string): boolean {
-  return content.split('\n').some(line => {
-    const trimmed = line.trim()
-    return trimmed.startsWith('//') || trimmed.startsWith('/*')
-  })
-}

@@ -204,46 +204,71 @@ Returns the updated settings object.
 
 ### OpenCode Configuration
 
-The OpenCode configuration file at `getOpenCodeConfigFilePath()` is the source of truth, and this endpoint is the only supported way to change it. The endpoint applies the same restart and live-patch rules as the Settings UI: changes to `agent`, `plugin`, `skills`, or `provider` mark an OpenCode server restart as required, and any other change is live-patched into the running OpenCode server.
+The global OpenCode configuration files in the workspace `.config/opencode/` directory are the source of truth, and these endpoints are the only supported way to change them. Up to three sources are recognized and merged in OpenCode order — `config.json`, `opencode.json`, `opencode.jsonc` — with later files overriding earlier ones. The endpoint applies the same rules as the Settings UI: any semantic change is written to disk and marks an OpenCode server restart as required; comment-only edits and changes limited to `mcp` do not.
 
 **GET `/api/internal/opencode-config`**
 
-Read the current configuration file state.
+Read the merged persisted configuration and its source files. This is not the running instance configuration: project overrides and expanded environment values are not included.
 
 **Response (`OpenCodeConfigFile`):**
 ```ts
 {
-  path: string              // Absolute path of the configuration file
-  content: object           // Parsed configuration
-  rawContent: string        // Raw file content, including comments
-  isValid: boolean          // Whether the file passes schema validation
+  path: string              // Absolute path of the preferred write target
+  content: object           // Merged configuration across all sources
+  rawContent: string        // Raw content of the preferred write target
+  sources: Array<{          // Recognized source files, in merge order
+    name: 'config.json' | 'opencode.json' | 'opencode.jsonc'
+    path: string
+    rawContent: string
+    content: object
+    isValid: boolean
+    validationIssues?: Array<{ path: string, message: string }>
+    updatedAt: number
+  }>
+  revision: string          // Hash of the source set; send back as expectedRevision
+  isValid: boolean          // Whether every source passes schema validation
   validationIssues?: Array<{ path: string, message: string }>
-  updatedAt: number         // Unix timestamp of the last write
+  updatedAt: number         // Newest source mtime
 }
 ```
 
 **Status Codes:**
-- `200`: Configuration file state returned
+- `200`: Configuration state returned
 - `401`: Missing or invalid bearer token
-- `404`: No config file found
+- `404`: No config source found
 - `500`: Server error
+
+**GET `/api/internal/opencode-config/effective`**
+
+Read the running server's effective global configuration (OpenCode `GET /global/config`). Never copy this response into a save.
+
+**Status Codes:**
+- `200`: Effective configuration returned
+- `401`: Missing or invalid bearer token
+- `502`: OpenCode returned an error
+- `503`: OpenCode server unavailable
 
 **PUT `/api/internal/opencode-config`**
 
-Persist a complete configuration. Read the file first, change only the keys the user asked for, and send the complete object back.
+Read the merged configuration first, change only the keys the user asked for, and send the complete object back with its `revision`. Only changed paths are patched into the preferred existing source (`opencode.jsonc` > `opencode.json` > `config.json`; a new installation gets `opencode.jsonc`); comments, unknown keys, and untouched inherited values are preserved. For a raw edit, send a string as `content` together with the exact `source` name.
 
 **Request Body:**
 ```ts
-{ content: object }  // The complete configuration to persist
+{
+  content: object | string    // Complete merged object, or raw text for one source
+  expectedRevision?: string   // From GET; a stale value is rejected with 409
+  source?: 'config.json' | 'opencode.json' | 'opencode.jsonc'  // Required for raw string edits
+}
 ```
 
 **Response:**
-Returns the written `OpenCodeConfigFile`. Adds `restartRequired: true` when the change needs an OpenCode server restart, and `removedFields` when OpenCode dropped fields it does not accept.
+Returns the refreshed `OpenCodeConfigFile`. Adds `restartRequired: true` when the change needs an OpenCode server restart.
 
 **Status Codes:**
-- `200`: Configuration written (live-patched or restart pending)
-- `400`: Invalid request body, or configuration rejected with `validationIssues`
+- `200`: Configuration written
+- `400`: Invalid request body, invalid configuration, or a source file that is not valid JSON/JSONC (`sources` lists them)
 - `401`: Missing or invalid bearer token
+- `409`: Stale `expectedRevision` (`expectedRevision`/`actualRevision` in the body), or the save would remove a value defined only in a lower-priority source (`paths`/`sources` in the body)
 - `500`: Server error
 
 ### Assistant

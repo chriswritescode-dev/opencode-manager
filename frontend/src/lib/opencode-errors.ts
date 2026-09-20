@@ -141,7 +141,7 @@ export function getErrorMessage(error: OpenCodeError | undefined | null): string
 /**
  * Extracts a human-readable message from a Manager REST API error, handling
  * both {@link FetchError} and axios-style `{ response: { data } }` shapes,
- * including OpenCode config validation issues and removed fields.
+ * including OpenCode config validation issues.
  */
 export function getOpenCodeApiErrorMessage(error: unknown, fallback: string): string {
   if (error instanceof FetchError) {
@@ -154,15 +154,11 @@ export function getOpenCodeApiErrorMessage(error: unknown, fallback: string): st
       message = `Validation failed: ${issues}`
     }
 
-    if (error.removedFields && error.removedFields.length > 0) {
-      message += ` (removed invalid fields: ${error.removedFields.join(', ')})`
-    }
-
     return message
   }
 
   if (error && typeof error === 'object' && 'response' in error) {
-    const response = (error as { response?: { data?: { details?: string; error?: string; validationIssues?: Array<{ path: string; message: string }>; removedFields?: string[] } } }).response
+    const response = (error as { response?: { data?: { details?: string; error?: string; validationIssues?: Array<{ path: string; message: string }> } } }).response
     const data = response?.data
 
     let message = data?.details || data?.error || fallback
@@ -172,10 +168,6 @@ export function getOpenCodeApiErrorMessage(error: unknown, fallback: string): st
         .map((issue) => `${issue.path}: ${issue.message}`)
         .join('; ')
       message = `Validation failed: ${issues}`
-    }
-
-    if (data?.removedFields && data.removedFields.length > 0) {
-      message += ` (removed invalid fields: ${data.removedFields.join(', ')})`
     }
 
     return message

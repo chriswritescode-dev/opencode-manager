@@ -17,7 +17,6 @@ vi.mock('bun:sqlite', () => ({
 vi.mock('../../src/services/opencode-single-server', () => ({
   opencodeServerManager: {
     restart: vi.fn(),
-    reloadConfig: vi.fn(),
     getVersion: vi.fn(),
     fetchVersion: vi.fn(),
     clearStartupError: vi.fn(),
@@ -27,7 +26,6 @@ vi.mock('../../src/services/opencode-single-server', () => ({
   },
   ConfigReloadError: class ConfigReloadError extends Error {
     validationIssues = []
-    removedFields = []
   },
 }))
 
@@ -242,7 +240,6 @@ describe('OpenCode Server Auth Routes', () => {
       isOperationInProgress: vi.fn(() => false),
       checkHealth: vi.fn().mockResolvedValue(true),
       restart: vi.fn().mockResolvedValue(undefined),
-      reloadConfig: vi.fn().mockResolvedValue(undefined),
       clearStartupError: vi.fn(),
       getLastStartupError: vi.fn(() => null),
       isLastStartupErrorNonRecoverable: vi.fn(() => false),

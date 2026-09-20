@@ -715,21 +715,23 @@ Reload the assistant workspace by disposing the current OpenCode instance. Use t
 
 ## OpenCode Configuration
 
-The OpenCode configuration file on disk is the source of truth, and this endpoint is the only supported way to change it. Never edit \`opencode.json\` directly.
+The global configuration files on disk are the source of truth. Use the \`ocm\` tool's \`request\` action with the endpoints below to read or change them; never edit the files directly. Global sources merge in order: \`config.json\`, \`opencode.json\`, then \`opencode.jsonc\`.
 
 ### GET /opencode-config
 
-Read the current configuration file. Returns \`404\` when no config file exists yet.
+Read the merged persisted global configuration and its source files. Returns \`404\` when no source exists. This is not the running instance configuration: project overrides and expanded environment values are not included. \`GET /opencode-config/effective\` reads the running server's effective global configuration separately; never copy that response into a save.
 
 **Response (\`OpenCodeConfigFile\`):**
 \`\`\`ts
 {
-  path: string               // Absolute path of the configuration file
-  content: object            // Parsed configuration
-  rawContent: string         // Raw file content, including comments
-  isValid: boolean           // Whether the file passes schema validation
+  path: string
+  content: object
+  rawContent: string
+  sources: Array<{ name: string, path: string, rawContent: string, content: object, isValid: boolean }>
+  revision: string
+  isValid: boolean
   validationIssues?: Array<{ path: string, message: string }>
-  updatedAt: number          // Unix timestamp of the last write
+  updatedAt: number
 }
 \`\`\`
 
@@ -746,11 +748,13 @@ Read the current configuration file. Returns \`404\` when no config file exists 
 
 ### PUT /opencode-config
 
-Persist a complete configuration. Read the file first, change only the keys the user asked for, and send the complete object back.
+Read the merged persisted configuration first, change only the keys the user asked for, and send the complete object back with its revision. Only changed fields are patched into the preferred existing source: JSONC, JSON, then legacy config.json. New installations use opencode.jsonc. Unchanged inherited values and comments are preserved. Removing a field removes only its override in the write target; a lower-priority value can reappear.
+
+For a raw edit, send a string with the exact source name from \`sources\`. Never send merged JSON as raw source text. A \`409\` means the source files changed: read again and reconcile rather than retrying stale content.
 
 **Request Body:**
 \`\`\`ts
-{ content: object }  // The complete configuration to persist
+{ content: object | string, expectedRevision: string, source?: "config.json" | "opencode.json" | "opencode.jsonc" }
 \`\`\`
 
 **Example:**
@@ -761,6 +765,7 @@ Persist a complete configuration. Read the file first, change only the keys the 
     "method": "PUT",
     "path": "/opencode-config",
     "body": {
+      "expectedRevision": "revision-from-get",
       "content": {
         "theme": "dark"
       }
@@ -770,16 +775,16 @@ Persist a complete configuration. Read the file first, change only the keys the 
 \`\`\`
 
 **Response:**
-Returns the written \`OpenCodeConfigFile\`. Adds \`restartRequired: true\` when the change needs an OpenCode server restart, and \`removedFields\` when OpenCode dropped fields it does not accept.
+Returns the refreshed merged configuration and source files. Adds \`restartRequired: true\` for semantic configuration changes, except changes limited to \`mcp\`, which are saved without it; to make an MCP change take effect immediately, tell the user to reconnect or reload the server from Settings → MCP. Comment-only changes do not require a restart. Saving never silently drops unsupported fields.
 
-Returns \`400\` with \`validationIssues\` when OpenCode rejects the configuration.
+Returns \`400\` for invalid configuration and \`409\` for a stale revision.
 
 When the response contains \`restartRequired: true\`, tell the user to restart the OpenCode server from Settings. Never attempt the restart yourself: it would terminate your own session.
 
 ## Safety
 
 - The settings PATCH endpoint rejects any attempt to modify credentials, API keys, or other sensitive settings; guide the user to the full UI for Git, TTS, and STT credentials
-- PUT /opencode-config writes the complete OpenCode configuration, including \`plugin\`, \`mcp\`, and \`provider\` entries; change only the keys the user explicitly asked for and never add plugins, MCP servers, or provider credentials the user did not request
+- PUT /opencode-config patches changed global settings, including \`plugin\`, \`mcp\`, and \`provider\` entries; change only the keys the user explicitly asked for and never add plugins, MCP servers, or provider credentials the user did not request
 - The settings PATCH endpoint does NOT trigger OpenCode reload or restart
 `
 }

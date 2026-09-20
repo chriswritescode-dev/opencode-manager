@@ -12,13 +12,15 @@ const mockResetSettings = vi.fn()
 const mockGetLastKnownGoodConfig = vi.fn()
 const {
   mockReadOpenCodeConfigFile,
-  mockWriteOpenCodeConfigFile,
   mockDeleteOpenCodeConfigFile,
+  mockArchiveBrokenOpenCodeConfigFile,
+  mockRestoreOpenCodeConfigSnapshot,
   mockApplyOpenCodeConfigUpdate,
 } = vi.hoisted(() => ({
   mockReadOpenCodeConfigFile: vi.fn(),
-  mockWriteOpenCodeConfigFile: vi.fn(),
   mockDeleteOpenCodeConfigFile: vi.fn(),
+  mockArchiveBrokenOpenCodeConfigFile: vi.fn(),
+  mockRestoreOpenCodeConfigSnapshot: vi.fn(),
   mockApplyOpenCodeConfigUpdate: vi.fn(),
 }))
 
@@ -154,16 +156,17 @@ vi.mock('../../src/services/file-operations', () => ({
   fileExists: vi.fn(),
 }))
 
-vi.mock('../../src/services/opencode/config-recovery', () => ({
-  patchConfigWithRecovery: vi.fn(),
-}))
-
-vi.mock('../../src/services/opencode-config-file', () => ({
-  readOpenCodeConfigFile: mockReadOpenCodeConfigFile,
-  writeOpenCodeConfigFile: mockWriteOpenCodeConfigFile,
-  deleteOpenCodeConfigFile: mockDeleteOpenCodeConfigFile,
-  withOpenCodeConfigLock: (fn: () => Promise<unknown>) => fn(),
-}))
+vi.mock('../../src/services/opencode-config-file', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('../../src/services/opencode-config-file')>()
+  return {
+    ...actual,
+    readOpenCodeConfigFile: mockReadOpenCodeConfigFile,
+    deleteOpenCodeConfigFile: mockDeleteOpenCodeConfigFile,
+    archiveBrokenOpenCodeConfigFile: mockArchiveBrokenOpenCodeConfigFile,
+    restoreOpenCodeConfigSnapshot: mockRestoreOpenCodeConfigSnapshot,
+    withOpenCodeConfigLock: (fn: () => Promise<unknown>) => fn(),
+  }
+})
 
 vi.mock('../../src/services/opencode-config-apply', async (importOriginal) => {
   const actual = await importOriginal<typeof import('../../src/services/opencode-config-apply')>()
@@ -189,13 +192,11 @@ vi.mock('../../src/services/opencode-single-server', async (importOriginal) => {
   
   class MockConfigReloadError extends Error {
     validationIssues: Array<{ path: string; message: string }>
-    removedFields: string[]
 
-    constructor(message: string, validationIssues: Array<{ path: string; message: string }> = [], removedFields: string[] = []) {
+    constructor(message: string, validationIssues: Array<{ path: string; message: string }> = []) {
       super(message)
       this.name = 'ConfigReloadError'
       this.validationIssues = validationIssues
-      this.removedFields = removedFields
     }
   }
 
@@ -204,7 +205,6 @@ vi.mock('../../src/services/opencode-single-server', async (importOriginal) => {
     opencodeServerManager: {
       getVersion: vi.fn(),
       fetchVersion: vi.fn(),
-      reloadConfig: vi.fn(),
       restart: vi.fn(),
       clearStartupError: vi.fn(),
       getLastStartupError: vi.fn(),
@@ -232,7 +232,6 @@ vi.mock('../../src/services/opencode-import', () => ({
   getOpenCodeImportStatus: vi.fn(),
   syncOpenCodeImport: vi.fn(),
   getImportedSessionDirectories: vi.fn(),
-  getFirstExistingConfigSourcePath: vi.fn().mockReturnValue(null),
 }))
 
 vi.mock('../../src/services/repo', () => ({
@@ -260,9 +259,11 @@ vi.mock('@opencode-manager/shared/config/env', () => ({
   getWorkspacePath: vi.fn(() => '/tmp/test-workspace'),
   getReposPath: vi.fn(() => '/tmp/test-repos'),
   getOpenCodeConfigFilePath: vi.fn(() => '/tmp/test-workspace/.config/opencode.json'),
+  getOpenCodeHealthWatchPath: vi.fn(() => '/tmp/test-workspace/health-watch'),
   getAgentsMdPath: vi.fn(() => '/tmp/test-workspace/AGENTS.md'),
   getDatabasePath: vi.fn(() => ':memory:'),
   getConfigPath: vi.fn(() => '/tmp/test-workspace/config'),
+  OPENCODE_CONFIG_SOURCE_NAMES: ['config.json', 'opencode.json', 'opencode.jsonc'],
   ENV: {
     SERVER: { PORT: 5003, HOST: '0.0.0.0', NODE_ENV: 'test' },
     AUTH: { TRUSTED_ORIGINS: 'http://localhost:5173', SECRET: 'test-secret-for-encryption-key-32c' },
@@ -284,7 +285,7 @@ vi.mock('@opencode-manager/shared/config/env', () => ({
 import { createSettingsRoutes } from '../../src/routes/settings'
 import { getImportedSessionDirectories, getOpenCodeImportStatus, OpenCodeImportProtectionError, syncOpenCodeImport } from '../../src/services/opencode-import'
 import { relinkReposFromSessionDirectories } from '../../src/services/repo'
-import { opencodeServerManager, ConfigReloadError } from '../../src/services/opencode-single-server'
+import { opencodeServerManager } from '../../src/services/opencode-single-server'
 import { detectSandboxCapability } from '../../src/services/sandbox/capability'
 import { forceProcessAttestation } from '../../src/services/opencode/process-identity'
 import { setOpenCodeRestartCoordinator } from '../../src/services/opencode-restart'
@@ -293,7 +294,6 @@ import { createRepo } from '../../src/db/queries'
 const mockSpawnSync = spawnSync as ReturnType<typeof vi.fn>
 const mockGetVersion = opencodeServerManager.getVersion as ReturnType<typeof vi.fn>
 const mockFetchVersion = opencodeServerManager.fetchVersion as ReturnType<typeof vi.fn>
-const mockReloadConfig = opencodeServerManager.reloadConfig as ReturnType<typeof vi.fn>
 const mockRestart = opencodeServerManager.restart as ReturnType<typeof vi.fn>
 const mockClearStartupError = opencodeServerManager.clearStartupError as ReturnType<typeof vi.fn>
 const mockGetLastStartupError = opencodeServerManager.getLastStartupError as ReturnType<typeof vi.fn>
@@ -312,7 +312,6 @@ describe('Settings Routes - OpenCode Upgrade', () => {
     vi.clearAllMocks()
     mockGetVersion.mockReset()
     mockFetchVersion.mockReset()
-    mockReloadConfig.mockReset()
     mockRestart.mockReset()
     mockClearStartupError.mockReset()
     mockIsSandboxEnforced.mockReset()
@@ -325,8 +324,9 @@ describe('Settings Routes - OpenCode Upgrade', () => {
     mockGetImportedSessionDirectories.mockReset()
     mockRelinkReposFromSessionDirectories.mockReset()
     mockReadOpenCodeConfigFile.mockReset()
-    mockWriteOpenCodeConfigFile.mockReset()
     mockDeleteOpenCodeConfigFile.mockReset()
+    mockArchiveBrokenOpenCodeConfigFile.mockReset()
+    mockRestoreOpenCodeConfigSnapshot.mockReset()
     mockApplyOpenCodeConfigUpdate.mockReset()
     mockDetectSandboxCapability.mockReset()
     mockDetectSandboxCapability.mockReturnValue({ available: true, msbVersion: 'msb 1.0.0' })
@@ -339,7 +339,6 @@ describe('Settings Routes - OpenCode Upgrade', () => {
     testDb = {} as any
     settingsApp = createSettingsRoutes(testDb, { getGitEnvironment: vi.fn().mockReturnValue({}) } as any, createStubOpenCodeClient())
 
-    mockReloadConfig.mockResolvedValue(undefined)
     mockRestart.mockResolvedValue(undefined)
     mockClearStartupError.mockReturnValue(undefined)
     mockGetOpenCodeImportStatus.mockResolvedValue({
@@ -411,12 +410,13 @@ describe('Settings Routes - OpenCode Upgrade', () => {
       expect(json).toEqual({ ...config, restartRequired: true })
       expect(mockApplyOpenCodeConfigUpdate).toHaveBeenCalledWith({
         content: '{"plugin":["evil-plugin"]}',
-        openCodeClient: expect.anything(),
+        source: undefined,
+        expectedRevision: undefined,
         settingsService: expect.anything(),
       })
     })
 
-    it('maps an applied result to 200 without removedFields when none were removed', async () => {
+    it('maps an unchanged applied result to 200 without requesting a restart', async () => {
       const config = {
         path: '/tmp/test-workspace/.config/opencode.json',
         content: { theme: 'light' },
@@ -424,7 +424,7 @@ describe('Settings Routes - OpenCode Upgrade', () => {
         isValid: true,
         updatedAt: 3,
       }
-      mockApplyOpenCodeConfigUpdate.mockResolvedValueOnce({ status: 'applied', config, removedFields: [] })
+      mockApplyOpenCodeConfigUpdate.mockResolvedValueOnce({ status: 'applied', config })
 
       const res = await settingsApp.fetch(new Request('http://localhost/opencode-config', {
         method: 'PUT',
@@ -435,61 +435,11 @@ describe('Settings Routes - OpenCode Upgrade', () => {
 
       expect(res.status).toBe(200)
       expect(json).toEqual(config)
-      expect(json.removedFields).toBeUndefined()
       expect(mockApplyOpenCodeConfigUpdate).toHaveBeenCalledWith({
         content: { theme: 'light' },
-        openCodeClient: expect.anything(),
+        source: undefined,
+        expectedRevision: undefined,
         settingsService: expect.anything(),
-      })
-    })
-
-    it('maps an applied result with removedFields to 200', async () => {
-      const config = {
-        path: '/tmp/test-workspace/.config/opencode.json',
-        content: { theme: 'light' },
-        rawContent: '{"theme":"light"}',
-        isValid: true,
-        updatedAt: 3,
-      }
-      mockApplyOpenCodeConfigUpdate.mockResolvedValueOnce({
-        status: 'applied',
-        config,
-        removedFields: ['command.review'],
-      })
-
-      const res = await settingsApp.fetch(new Request('http://localhost/opencode-config', {
-        method: 'PUT',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ content: '{"command":{"review":true},"theme":"light"}' }),
-      }))
-      const json = await res.json() as Record<string, unknown>
-
-      expect(res.status).toBe(200)
-      expect(json).toEqual({ ...config, removedFields: ['command.review'] })
-    })
-
-    it('maps a rejected apply result to 400 with validation issues', async () => {
-      const validationIssues = [{ path: 'command.review', message: 'Invalid field' }]
-      mockApplyOpenCodeConfigUpdate.mockResolvedValueOnce({
-        status: 'rejected',
-        error: 'command.review: Invalid field',
-        validationIssues,
-        removedFields: ['command.review'],
-      })
-
-      const res = await settingsApp.fetch(new Request('http://localhost/opencode-config', {
-        method: 'PUT',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ content: '{"command":{"review":true}}' }),
-      }))
-      const json = await res.json() as Record<string, unknown>
-
-      expect(res.status).toBe(400)
-      expect(json).toEqual({
-        error: 'Config validation failed',
-        details: 'command.review: Invalid field',
-        validationIssues,
-        removedFields: ['command.review'],
       })
     })
 
@@ -545,9 +495,16 @@ describe('Settings Routes - OpenCode Upgrade', () => {
       expect(json.error).toBe('Failed to update OpenCode config')
     })
 
-    it('writes the last known good config and reloads on rollback', async () => {
+    it('writes the last known good config and restarts on rollback', async () => {
       mockGetLastKnownGoodConfig.mockReturnValueOnce('{"theme":"dark"}')
-      mockWriteOpenCodeConfigFile.mockResolvedValueOnce({
+      mockRestoreOpenCodeConfigSnapshot.mockResolvedValueOnce({
+        path: '/tmp/test-workspace/.config/opencode.json',
+        rawContent: '{"theme":"dark"}',
+        content: { theme: 'dark' },
+        isValid: true,
+        updatedAt: 1,
+      })
+      mockReadOpenCodeConfigFile.mockResolvedValueOnce({
         path: '/tmp/test-workspace/.config/opencode.json',
         rawContent: '{"theme":"dark"}',
         content: { theme: 'dark' },
@@ -560,9 +517,9 @@ describe('Settings Routes - OpenCode Upgrade', () => {
 
       expect(res.status).toBe(200)
       expect(json).toEqual({ success: true, message: 'Server reloaded with the previous working config' })
-      expect(mockWriteOpenCodeConfigFile).toHaveBeenCalledWith('{"theme":"dark"}')
+      expect(mockRestoreOpenCodeConfigSnapshot).toHaveBeenCalledWith('{"theme":"dark"}')
       expect(mockClearStartupError).toHaveBeenCalled()
-      expect(mockReloadConfig).toHaveBeenCalled()
+      expect(mockRestart).toHaveBeenCalled()
     })
 
     it('returns 404 from rollback when no last known good config exists', async () => {
@@ -573,19 +530,19 @@ describe('Settings Routes - OpenCode Upgrade', () => {
 
       expect(res.status).toBe(404)
       expect(json.error).toBe('No previous working config available for rollback')
-      expect(mockWriteOpenCodeConfigFile).not.toHaveBeenCalled()
+      expect(mockRestoreOpenCodeConfigSnapshot).not.toHaveBeenCalled()
     })
 
     it('deletes the config file and restarts when the rollback reload fails', async () => {
       mockGetLastKnownGoodConfig.mockReturnValueOnce('{"theme":"dark"}')
-      mockWriteOpenCodeConfigFile.mockResolvedValueOnce({
+      mockRestoreOpenCodeConfigSnapshot.mockResolvedValueOnce({
         path: '/tmp/test-workspace/.config/opencode.json',
         rawContent: '{"theme":"dark"}',
         content: { theme: 'dark' },
         isValid: true,
         updatedAt: 1,
       })
-      mockReloadConfig.mockRejectedValueOnce(new Error('reload failed'))
+      mockReadOpenCodeConfigFile.mockResolvedValueOnce(null)
       mockDeleteOpenCodeConfigFile.mockResolvedValueOnce(true)
 
       const res = await settingsApp.fetch(new Request('http://localhost/opencode-rollback', { method: 'POST' }))
@@ -597,7 +554,8 @@ describe('Settings Routes - OpenCode Upgrade', () => {
         message: 'Server restarted after deleting the broken config file. The previous working config remains available for rollback.',
         fallback: true,
       })
-      expect(mockWriteOpenCodeConfigFile).toHaveBeenCalledWith('{"theme":"dark"}')
+      expect(mockRestoreOpenCodeConfigSnapshot).toHaveBeenCalledWith('{"theme":"dark"}')
+      expect(mockArchiveBrokenOpenCodeConfigFile).toHaveBeenCalled()
       expect(mockDeleteOpenCodeConfigFile).toHaveBeenCalled()
       expect(mockRestart).toHaveBeenCalled()
     })
@@ -776,7 +734,6 @@ describe('Settings Routes - OpenCode Upgrade', () => {
         expect(json.newVersion).toBe('1.0.1')
         expect(mockFetchVersion).toHaveBeenCalledTimes(1)
         expect(mockRestart).toHaveBeenCalledTimes(1)
-        expect(mockReloadConfig).not.toHaveBeenCalled()
       })
 
       it('should return already up to date when version unchanged', async () => {
@@ -808,7 +765,6 @@ describe('Settings Routes - OpenCode Upgrade', () => {
         await settingsApp.fetch(req)
 
         expect(mockRestart).toHaveBeenCalledTimes(1)
-        expect(mockReloadConfig).not.toHaveBeenCalled()
       })
 
       it('allows upgrading while sandbox enforcement is active', async () => {
@@ -1170,18 +1126,26 @@ describe('Settings Routes - OpenCode Upgrade', () => {
   })
 
   describe('POST /opencode-reload', () => {
+    const validConfigFile = {
+      path: '/tmp/test-workspace/.config/opencode.json',
+      content: {},
+      rawContent: '{}',
+      isValid: true,
+      updatedAt: 1,
+    }
+
     beforeEach(() => {
       vi.clearAllMocks()
-      mockReloadConfig.mockReset()
+      setOpenCodeRestartCoordinator(null)
+      mockReadOpenCodeConfigFile.mockReset()
       mockRestart.mockReset()
       mockClearStartupError.mockReset()
-      mockReloadConfig.mockResolvedValue(undefined)
       mockRestart.mockResolvedValue(undefined)
       mockClearStartupError.mockReturnValue(undefined)
     })
 
-    it('should return success when reload succeeds', async () => {
-      mockReloadConfig.mockResolvedValueOnce(undefined)
+    it('should return success and restart the server when the config is valid', async () => {
+      mockReadOpenCodeConfigFile.mockResolvedValueOnce(validConfigFile)
 
       const req = new Request('http://localhost/opencode-reload', {
         method: 'POST'
@@ -1191,19 +1155,19 @@ describe('Settings Routes - OpenCode Upgrade', () => {
 
       expect(res.status).toBe(200)
       expect(json.success).toBe(true)
-      expect(json.message).toBe('OpenCode configuration reloaded successfully')
+      expect(json.message).toBe('OpenCode server restarted with the current configuration')
+      expect(json.resumedSessions).toEqual([])
+      expect(mockRestart).toHaveBeenCalledTimes(1)
+      expect(mockClearStartupError).toHaveBeenCalled()
     })
 
-    it('should propagate validationIssues and removedFields when ConfigReloadError is thrown', async () => {
+    it('should propagate validationIssues and not restart when the config is invalid', async () => {
       const validationIssues = [
         { path: 'command.review', message: 'Invalid field' },
         { path: 'agent.temperature', message: 'Temperature out of range' }
       ]
-      const removedFields = ['command.review']
 
-      mockReloadConfig.mockRejectedValueOnce(
-        new ConfigReloadError('Config validation failed', validationIssues, removedFields)
-      )
+      mockReadOpenCodeConfigFile.mockResolvedValueOnce({ ...validConfigFile, isValid: false, validationIssues })
 
       const req = new Request('http://localhost/opencode-reload', {
         method: 'POST'
@@ -1212,14 +1176,30 @@ describe('Settings Routes - OpenCode Upgrade', () => {
       const json = await res.json() as Record<string, unknown>
 
       expect(res.status).toBe(500)
-      expect(json.error).toBe('Config validation failed')
+      expect(json.error).toBe('OpenCode global configuration is invalid')
       expect(json.details).toBe('command.review: Invalid field; agent.temperature: Temperature out of range')
       expect(json.validationIssues).toEqual(validationIssues)
-      expect(json.removedFields).toEqual(removedFields)
+      expect(mockRestart).not.toHaveBeenCalled()
     })
 
-    it('should return generic error when non-ConfigReloadError is thrown', async () => {
-      mockReloadConfig.mockRejectedValueOnce(new Error('Some other error'))
+    it('should return 500 and not restart when every global config source is absent', async () => {
+      mockReadOpenCodeConfigFile.mockResolvedValueOnce(null)
+
+      const req = new Request('http://localhost/opencode-reload', {
+        method: 'POST'
+      })
+      const res = await settingsApp.fetch(req)
+      const json = await res.json() as Record<string, unknown>
+
+      expect(res.status).toBe(500)
+      expect(json.error).toBe('No OpenCode global configuration files found')
+      expect(json.details).toBe('No OpenCode global configuration files found')
+      expect(mockRestart).not.toHaveBeenCalled()
+    })
+
+    it('should return generic error when the restart fails', async () => {
+      mockReadOpenCodeConfigFile.mockResolvedValueOnce(validConfigFile)
+      mockRestart.mockRejectedValueOnce(new Error('Some other error'))
 
       const req = new Request('http://localhost/opencode-reload', {
         method: 'POST'
@@ -1232,29 +1212,11 @@ describe('Settings Routes - OpenCode Upgrade', () => {
       expect(json.details).toBe('Some other error')
     })
 
-    it('should propagate empty arrays when ConfigReloadError has no issues', async () => {
-      mockReloadConfig.mockRejectedValueOnce(
-        new ConfigReloadError('Reload failed', [], [])
-      )
-
-      const req = new Request('http://localhost/opencode-reload', {
-        method: 'POST'
-      })
-      const res = await settingsApp.fetch(req)
-      const json = await res.json() as Record<string, unknown>
-
-      expect(res.status).toBe(500)
-      expect(json.error).toBe('Reload failed')
-      expect(json.details).toBe('Reload failed')
-      expect(json.validationIssues).toEqual([])
-      expect(json.removedFields).toEqual([])
-    })
-
-    it('returns 500 with the startup failure reason when a supervisor reload is unhealthy', async () => {
-      mockGetLastStartupError.mockReturnValue('OpenCode config reload failed after recovery')
+    it('returns 500 with the startup failure reason when a supervisor restart is unhealthy', async () => {
+      mockReadOpenCodeConfigFile.mockResolvedValueOnce(validConfigFile)
+      mockGetLastStartupError.mockReturnValue('OpenCode restart failed after recovery')
       const unhealthySupervisor = {
-        restart: vi.fn(),
-        reloadConfig: vi.fn().mockResolvedValue({ healthy: false }),
+        restart: vi.fn().mockResolvedValue({ healthy: false }),
       }
       const app = createSettingsRoutes(
         testDb,
@@ -1270,14 +1232,14 @@ describe('Settings Routes - OpenCode Upgrade', () => {
       expect(res.status).toBe(500)
       expect(json.success).toBeUndefined()
       expect(json.error).toBe('Failed to reload OpenCode configuration')
-      expect(json.details).toBe('OpenCode config reload failed after recovery')
-      expect(unhealthySupervisor.reloadConfig).toHaveBeenCalledWith('settings_reload')
+      expect(json.details).toBe('OpenCode restart failed after recovery')
+      expect(unhealthySupervisor.restart).toHaveBeenCalledWith('settings_reload')
     })
 
-    it('returns success when a supervisor reload is healthy', async () => {
+    it('returns success when a supervisor restart is healthy', async () => {
+      mockReadOpenCodeConfigFile.mockResolvedValueOnce(validConfigFile)
       const healthySupervisor = {
-        restart: vi.fn(),
-        reloadConfig: vi.fn().mockResolvedValue({ healthy: true }),
+        restart: vi.fn().mockResolvedValue({ healthy: true }),
       }
       const app = createSettingsRoutes(
         testDb,
@@ -1292,7 +1254,7 @@ describe('Settings Routes - OpenCode Upgrade', () => {
 
       expect(res.status).toBe(200)
       expect(json.success).toBe(true)
-      expect(healthySupervisor.reloadConfig).toHaveBeenCalledWith('settings_reload')
+      expect(healthySupervisor.restart).toHaveBeenCalledWith('settings_reload')
     })
   })
 
@@ -1310,7 +1272,6 @@ describe('Settings Routes - OpenCode Upgrade', () => {
       mockGetLastStartupError.mockReturnValue('OpenCode version 1.18.15 does not support sandboxed bash tool rewriting')
       const unhealthySupervisor = {
         restart: vi.fn().mockResolvedValue({ healthy: false }),
-        reloadConfig: vi.fn(),
       }
       const app = createSettingsRoutes(
         testDb,
@@ -1333,7 +1294,6 @@ describe('Settings Routes - OpenCode Upgrade', () => {
     it('returns success when a supervisor restart is healthy', async () => {
       const healthySupervisor = {
         restart: vi.fn().mockResolvedValue({ healthy: true }),
-        reloadConfig: vi.fn(),
       }
       const app = createSettingsRoutes(
         testDb,
@@ -1473,7 +1433,6 @@ describe('Settings Routes - OpenCode Upgrade', () => {
       expect(res.status).toBe(200)
       expect(json.restartRequired).toBe(true)
       expect(opencodeServerManager.markRestartPending).toHaveBeenCalledTimes(1)
-      expect(mockReloadConfig).not.toHaveBeenCalled()
     })
 
     it('requires a restart when the git identity changes', async () => {
@@ -1716,7 +1675,7 @@ describe('Settings Routes - OpenCode Upgrade', () => {
 describe('Settings Routes - versions, directory files, skills, MCP and maintenance', () => {
   let app: ReturnType<typeof createSettingsRoutes>
   let db: Database
-  let supervisor: { restart: ReturnType<typeof vi.fn>; reloadConfig: ReturnType<typeof vi.fn> }
+  let supervisor: { restart: ReturnType<typeof vi.fn> }
   let fetchMock: ReturnType<typeof vi.fn>
 
   beforeEach(() => {
@@ -1750,7 +1709,6 @@ describe('Settings Routes - versions, directory files, skills, MCP and maintenan
     migrate(db, allMigrations)
     supervisor = {
       restart: vi.fn().mockResolvedValue({ healthy: true, resumedSessionIDs: [] }),
-      reloadConfig: vi.fn().mockResolvedValue({ healthy: true }),
     }
     app = createSettingsRoutes(
       db,

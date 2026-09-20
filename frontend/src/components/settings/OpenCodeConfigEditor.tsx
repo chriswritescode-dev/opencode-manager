@@ -1,16 +1,25 @@
-import { useState, useEffect, useCallback, useRef } from 'react'
+import { useState, useEffect, useCallback, useId, useMemo, useRef } from 'react'
 import { Button } from '@/components/ui/button'
-import { Loader2 } from 'lucide-react'
+import { Label } from '@/components/ui/label'
+import { Loader2, Download, ChevronDown } from 'lucide-react'
 import { Dialog, DialogContent, DialogHeader, DialogFooter, DialogTitle } from '@/components/ui/dialog'
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
 import { CodeEditor } from '@/components/ui/code-editor'
 import { EditorFindBar } from '@/components/ui/editor-find-bar'
 import { UnsavedChangesDialog } from '@/components/ui/unsaved-changes-dialog'
+import { OpenCodeConfigSourcesNotice } from './OpenCodeConfigSourcesNotice'
 import { useMobile } from '@/hooks/useMobile'
 import { useFindInText } from '@/lib/useFindInText'
 import { parseJsonc, parseJsoncErrorLine, resolveJsoncIssueLine } from '@/lib/jsonc'
 import { FetchError } from '@/api/fetchWrapper'
 import { OpenCodeConfigSchema } from '@opencode-manager/shared'
-import type { OpenCodeConfigFile } from '@/api/types/settings'
+import {
+  downloadOpenCodeConfigSource,
+  getOpenCodeConfigSources,
+  getPreferredOpenCodeConfigSource,
+  isOpenCodeConfigSourceName,
+} from '@/api/types/settings'
+import type { OpenCodeConfigFile, OpenCodeConfigSourceFile, OpenCodeConfigSourceName } from '@/api/types/settings'
 
 type ValidationIssue = {
   path: string
@@ -22,7 +31,7 @@ interface OpenCodeConfigEditorProps {
   config: OpenCodeConfigFile | null
   isOpen: boolean
   onClose: () => void
-  onUpdate: (content: string) => Promise<void>
+  onUpdate: (request: { content: string; source: OpenCodeConfigSourceName; expectedRevision?: string }) => Promise<void>
 }
 
 export function OpenCodeConfigEditor({
@@ -31,6 +40,8 @@ export function OpenCodeConfigEditor({
   onClose,
   onUpdate,
 }: OpenCodeConfigEditorProps) {
+  const [draftSource, setDraftSource] = useState<OpenCodeConfigSourceFile | null>(null)
+  const [draftRevision, setDraftRevision] = useState<string>('')
   const [editConfigContent, setEditConfigContent] = useState('')
   const [initialContent, setInitialContent] = useState('')
   const [isSaving, setIsSaving] = useState(false)
@@ -38,11 +49,12 @@ export function OpenCodeConfigEditor({
   const [editError, setEditError] = useState('')
   const [editErrorLine, setEditErrorLine] = useState<number | null>(null)
   const [validationIssues, setValidationIssues] = useState<ValidationIssue[]>([])
-  const [removedFields, setRemovedFields] = useState<string[]>([])
   const [activeLine, setActiveLine] = useState<number | null>(null)
   const [revealNonce, setRevealNonce] = useState(0)
   const hasInitializedSessionRef = useRef(false)
   const isMobile = useMobile()
+  const sourceSelectId = useId()
+  const sources = useMemo(() => (config ? getOpenCodeConfigSources(config) : []), [config])
   const isDirty = editConfigContent !== initialContent
   const { query, setQuery, matches, currentMatchIndex, hasMatches, next, prev } = useFindInText(editConfigContent)
 
@@ -51,13 +63,23 @@ export function OpenCodeConfigEditor({
     setRevealNonce((n) => n + 1)
   }, [])
 
-  const resetErrors = () => {
+  const resetErrors = useCallback(() => {
     setEditError('')
     setEditErrorLine(null)
     setValidationIssues([])
-    setRemovedFields([])
     setActiveLine(null)
-  }
+  }, [])
+
+  const selectSource = useCallback((name: OpenCodeConfigSourceName) => {
+    if (!config) return
+    const next = sources.find((source) => source.name === name)
+    if (!next) return
+    setDraftSource(next)
+    setDraftRevision(config.revision)
+    setEditConfigContent(next.rawContent)
+    setInitialContent(next.rawContent)
+    resetErrors()
+  }, [sources, config, resetErrors])
 
   useEffect(() => {
     if (!isOpen) {
@@ -66,13 +88,22 @@ export function OpenCodeConfigEditor({
     }
     if (hasInitializedSessionRef.current || !config) return
     hasInitializedSessionRef.current = true
-    const next = config.rawContent || JSON.stringify(config.content, null, 2)
-    setEditConfigContent(next)
-    setInitialContent(next)
+    const initialSource = getPreferredOpenCodeConfigSource(config)
+    const nextContent = initialSource?.rawContent ?? ''
+    setDraftSource(initialSource)
+    setDraftRevision(config.revision)
+    setEditConfigContent(nextContent)
+    setInitialContent(nextContent)
     resetErrors()
     setIsSaving(false)
     setIsDiscardPromptOpen(false)
-  }, [config, isOpen])
+  }, [config, isOpen, resetErrors])
+
+  const handleSourceChange = (name: string) => {
+    if (isDirty || isSaving) return
+    if (!isOpenCodeConfigSourceName(name)) return
+    selectSource(name)
+  }
 
   const requestClose = () => {
     if (isSaving) return
@@ -108,7 +139,7 @@ export function OpenCodeConfigEditor({
     })
 
   const updateConfig = async () => {
-    if (!config) return
+    if (!config || !draftSource) return
 
     try {
       resetErrors()
@@ -122,7 +153,7 @@ export function OpenCodeConfigEditor({
       }
 
       setIsSaving(true)
-      await onUpdate(editConfigContent)
+      await onUpdate({ content: editConfigContent, source: draftSource.name, expectedRevision: draftRevision })
       onClose()
     } catch (error) {
       if (error instanceof SyntaxError) {
@@ -133,8 +164,11 @@ export function OpenCodeConfigEditor({
       } else if (error instanceof FetchError) {
         const issues = resolveIssues(error.validationIssues ?? [])
         setValidationIssues(issues)
-        setRemovedFields(error.removedFields ?? [])
-        setEditError(error.detail || error.message)
+        if (error.statusCode === 409) {
+          setEditError(error.detail || 'This configuration changed since you opened it. Reload the file, then reapply your edits.')
+        } else {
+          setEditError(error.detail || error.message)
+        }
       } else if (error instanceof Error) {
         setEditError(error.message)
       } else {
@@ -145,7 +179,7 @@ export function OpenCodeConfigEditor({
     }
   }
 
-  if (!config) return null
+  if (!config || !draftSource) return null
 
   return (
     <>
@@ -160,9 +194,59 @@ export function OpenCodeConfigEditor({
         >
           <DialogHeader className="flex shrink-0 flex-row items-center justify-between space-y-0 border-b p-4 sm:p-6">
             <DialogTitle className="text-lg font-semibold sm:text-xl">
-              Edit opencode.json
+              Edit {draftSource.name}
             </DialogTitle>
           </DialogHeader>
+
+          <details
+            open
+            className="group/file-details max-h-[45dvh] shrink-0 overflow-y-auto border-b"
+          >
+            <summary className="flex cursor-pointer list-none items-center justify-between gap-2 px-4 py-3 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 sm:px-6 [&::-webkit-details-marker]:hidden">
+              <span className="text-sm font-medium">File details</span>
+              <ChevronDown className="h-4 w-4 shrink-0 text-muted-foreground transition-transform group-open/file-details:rotate-180" />
+            </summary>
+            <div className="space-y-2 px-4 pb-3 sm:px-6">
+              <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
+                {sources.length > 1 ? (
+                  <div className="flex items-center gap-2">
+                    <Label htmlFor={sourceSelectId} className="shrink-0">Source file</Label>
+                    <Select
+                      value={draftSource.name}
+                      onValueChange={handleSourceChange}
+                      disabled={isDirty || isSaving}
+                    >
+                      <SelectTrigger id={sourceSelectId} className="w-full sm:w-56">
+                        <SelectValue />
+                      </SelectTrigger>
+                      <SelectContent>
+                        {sources.map((source) => (
+                          <SelectItem key={source.name} value={source.name}>{source.name}</SelectItem>
+                        ))}
+                      </SelectContent>
+                    </Select>
+                  </div>
+                ) : (
+                  <p className="text-sm font-medium">{draftSource.name}</p>
+                )}
+                <Button
+                  variant="outline"
+                  size="sm"
+                  onClick={() => downloadOpenCodeConfigSource(draftSource)}
+                  disabled={isSaving}
+                  className="shrink-0"
+                >
+                  <Download className="h-3.5 w-3.5 mr-1" />
+                  Download
+                </Button>
+              </div>
+              <p className="break-all text-xs text-muted-foreground">{draftSource.path}</p>
+              <p className="text-xs text-muted-foreground">
+                Editing this file directly. Other source files and inherited values stay as they are; removing a value deletes its override so an inherited value can reappear.
+              </p>
+              <OpenCodeConfigSourcesNotice config={config} targetName={draftSource.name} />
+            </div>
+          </details>
 
           <EditorFindBar
             query={query}
@@ -228,11 +312,6 @@ export function OpenCodeConfigEditor({
                   ))}
                 </ul>
               )}
-              {removedFields.length > 0 && (
-                <p className="break-words text-xs text-amber-600 sm:text-sm">
-                  Removed invalid fields: {removedFields.join(', ')}
-                </p>
-              )}
             </div>
           )}
 
@@ -262,7 +341,7 @@ export function OpenCodeConfigEditor({
         onOpenChange={(open) => !open && setIsDiscardPromptOpen(false)}
         onDiscard={discardAndClose}
         onKeepEditing={() => setIsDiscardPromptOpen(false)}
-        itemName="opencode.json"
+        itemName={draftSource.name}
       />
     </>
   )

@@ -6,9 +6,12 @@ import {
   DEFAULT_LEADER_KEY,
   BLOCKED_SERVER_ENV_KEYS,
   DEFAULT_SERVER_ENV_VARS,
+  selectPreferredOpenCodeConfigSourceName,
   type TTSConfig,
   type STTConfig,
   type OpenCodeConfigFile,
+  type OpenCodeConfigSourceFile,
+  type OpenCodeConfigSourceName,
   type UpdateOpenCodeConfigRequest,
   type ModelConfig,
   type ProviderConfig,
@@ -21,9 +24,25 @@ import {
   type InstallSkillResponse,
 } from '@opencode-manager/shared'
 import type { NotificationPreferences } from '@opencode-manager/shared/types'
+import { saveFile } from '@/lib/download'
 
-export type { TTSConfig, STTConfig, OpenCodeConfigFile, UpdateOpenCodeConfigRequest, ModelConfig, ProviderConfig, SandboxPreferences, NotificationPreferences, SkillFileInfo, CreateSkillRequest, UpdateSkillRequest, SkillScope, InstallSkillFromGithubRequest, InstallSkillResponse }
+export type { TTSConfig, STTConfig, OpenCodeConfigFile, OpenCodeConfigSourceFile, OpenCodeConfigSourceName, UpdateOpenCodeConfigRequest, ModelConfig, ProviderConfig, SandboxPreferences, NotificationPreferences, SkillFileInfo, CreateSkillRequest, UpdateSkillRequest, SkillScope, InstallSkillFromGithubRequest, InstallSkillResponse }
 export { DEFAULT_TTS_CONFIG, DEFAULT_STT_CONFIG, DEFAULT_KEYBOARD_SHORTCUTS, DEFAULT_USER_PREFERENCES, DEFAULT_LEADER_KEY, BLOCKED_SERVER_ENV_KEYS, DEFAULT_SERVER_ENV_VARS }
+export { isOpenCodeConfigSourceName } from '@opencode-manager/shared'
+
+export function getOpenCodeConfigSources(config: OpenCodeConfigFile): OpenCodeConfigSourceFile[] {
+  return config.sources
+}
+
+export function getPreferredOpenCodeConfigSource(config: OpenCodeConfigFile): OpenCodeConfigSourceFile | null {
+  const name = selectPreferredOpenCodeConfigSourceName(config.sources.map((source) => source.name))
+  return name ? config.sources.find((source) => source.name === name) ?? null : null
+}
+
+export function downloadOpenCodeConfigSource(source: OpenCodeConfigSourceFile): void {
+  const blob = new Blob([source.rawContent], { type: 'application/json' })
+  void saveFile(blob, source.name)
+}
 
 export interface CustomCommand {
   name: string
@@ -88,13 +107,14 @@ export interface UpdateSettingsRequest {
 
 export interface OpenCodeConfigSaveResponse extends OpenCodeConfigFile {
   restartRequired?: boolean
-  removedFields?: string[]
 }
 
 export interface OpenCodeImportStatus {
   configSourcePath: string | null
+  configSourcePaths: string[]
   stateSourcePath: string | null
   workspaceConfigPath: string
+  workspaceConfigPathsToRemove: string[]
   workspaceStatePath: string
   workspaceStateExists: boolean
 }

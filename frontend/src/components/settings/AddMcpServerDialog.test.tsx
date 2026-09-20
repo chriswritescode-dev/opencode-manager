@@ -71,4 +71,22 @@ describe('AddMcpServerDialog', () => {
     })
     expect(mockAddServerAsync).toHaveBeenCalledTimes(1)
   })
+
+  it('passes only the merged content to onUpdate', async () => {
+    const fetched = makeOpenCodeConfigFile({ revision: 'rev-B' })
+    mockGetOpenCodeConfig.mockResolvedValue(fetched)
+    const onUpdate = vi.fn<(content: Record<string, unknown>) => Promise<void>>().mockResolvedValue(undefined)
+    const user = userEvent.setup()
+    renderDialog(onUpdate)
+
+    await user.type(screen.getByLabelText('Server ID'), 'filesystem')
+    await user.type(screen.getByLabelText('Command'), 'npx server-filesystem /tmp')
+    await user.click(screen.getByRole('button', { name: 'Add MCP Server' }))
+
+    await waitFor(() => expect(onUpdate).toHaveBeenCalledTimes(1))
+    const [content] = onUpdate.mock.calls[0]
+    expect(onUpdate.mock.calls[0]).toHaveLength(1)
+    expect((content.mcp as Record<string, unknown>).filesystem).toBeDefined()
+    expect(mockUpdateOpenCodeConfig).not.toHaveBeenCalled()
+  })
 })

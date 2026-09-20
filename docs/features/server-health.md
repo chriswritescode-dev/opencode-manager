@@ -42,7 +42,7 @@ Health monitoring is configured through environment variables:
 
 ## Configuration Recovery
 
-The on-disk `opencode.json` is the source of truth. When the file exists at boot but fails validation, the Manager logs a warning and starts with the file unchanged — an invalid config file is never automatically replaced or rolled back during boot.
+The on-disk global configuration files in `.config/opencode/` are the source of truth. OpenCode merges up to three recognized sources in order — `config.json`, `opencode.json`, then `opencode.jsonc` — with later files overriding matching keys from earlier ones. The Manager reads and edits the same set: saves patch only the changed paths into the preferred existing source (`opencode.jsonc` > `opencode.json` > `config.json`), preserving comments and untouched keys, and a fresh installation is seeded with `opencode.jsonc`. When a source exists at boot but fails validation, the Manager logs a warning and starts with the files unchanged — an invalid config is never automatically replaced or rolled back during boot.
 
 The health-watch ladder is the only automatic repair path. When the supervised OpenCode server fails repeated health checks, recovery runs these actions in order until the server is healthy:
 
@@ -53,7 +53,7 @@ The health-watch ladder is the only automatic repair path. When the supervised O
 
 Because the ladder only runs after repeated failed health checks, a config file that fails validation but does not make the server unhealthy is left in place. Setting `OPENCODE_HEALTH_WATCH_ENABLED=false` disables the ladder entirely, leaving no automatic repair path.
 
-The last known good config is captured from the current on-disk file before every write made through the Settings UI, the internal API, or a host config import, so any of those can be undone with `POST /api/settings/opencode-rollback` or by the ladder. Archived broken configs and debug snapshots are kept under `.opencode/state/health-watch/` in the workspace, pruned to the newest 20 files.
+The last known good config is a snapshot of every recognized source file (including which ones exist), captured before every write made through the Settings UI, the internal API, or a host config import, so any of those can be undone with `POST /api/settings/opencode-rollback` or by the ladder. Restoring a snapshot rewrites the sources it contains and removes recognized sources it does not. Archived broken configs and debug snapshots are kept under `.opencode/state/health-watch/` in the workspace, pruned to the newest 20 files.
 
 Earlier releases stored named configuration profiles in the Manager database. On first start after upgrading, each profile is archived to `.config/opencode-configs-archive/<name>.json` in the workspace, the default profile is restored to `opencode.json` if that file does not exist yet, and the database table is dropped.
 
@@ -89,4 +89,6 @@ Besides the explicit **Restart** button, the server is automatically restarted w
 - **Config import completes** — Importing a standalone OpenCode config into the workspace
 - **Version upgrade** — After installing a new OpenCode version
 
-Saving the OpenCode configuration never restarts the server on its own. Changes to `agent`, `plugin`, `skills`, or `provider` are written to disk and flagged as **restart required**; the server keeps running on the previous configuration until you restart it. Every other change is live-patched into the running server without interrupting active sessions, and is only written to disk once the server has accepted it.
+Saving the OpenCode configuration never restarts the server on its own. Any change to the merged configuration is written to disk and flagged as **restart required**; the server keeps running on the previous configuration until you restart it. Two exceptions do not set the flag: comment-only edits, and changes limited to the `mcp` section, which the Settings UI applies to the running server directly. Saving a provider credential, or completing a provider OAuth flow, restarts the server through the same session-resume flow so newly configured providers are discovered.
+
+A save is rejected with `409` when the files changed since you loaded them (stale revision), or when it would remove a value that is defined only in a lower-priority source file — removing it from the preferred file would leave the inherited value in effect.

@@ -103,7 +103,6 @@ export const ENV = {
     PROCESS_START_WAIT_MS: getEnvNumber('PROCESS_START_WAIT_MS', DEFAULTS.TIMEOUTS.PROCESS_START_WAIT_MS),
     PROCESS_VERIFY_WAIT_MS: getEnvNumber('PROCESS_VERIFY_WAIT_MS', DEFAULTS.TIMEOUTS.PROCESS_VERIFY_WAIT_MS),
     HEALTH_CHECK_TIMEOUT_MS: getEnvNumber('HEALTH_CHECK_TIMEOUT_MS', DEFAULTS.TIMEOUTS.HEALTH_CHECK_TIMEOUT_MS),
-    CONFIG_PATCH_TIMEOUT_MS: getEnvNumber('CONFIG_PATCH_TIMEOUT_MS', DEFAULTS.TIMEOUTS.CONFIG_PATCH_TIMEOUT_MS),
   },
 
   FILE_LIMITS: {
@@ -160,6 +159,7 @@ export const getForgeWorktreesPath = () => path.join(getOpenCodeDataPath(), 'for
 export const getOpenCodeTmpHome = () => path.join(ENV.WORKSPACE.BASE_PATH, '.opencode', 'tmp')
 export const getOpenCodeAgentTmpPath = () => path.join(getOpenCodeTmpHome(), 'opencode')
 export const getConfigPath = () => path.join(ENV.WORKSPACE.BASE_PATH, ENV.WORKSPACE.CONFIG_DIR)
+export { OPENCODE_CONFIG_SOURCE_NAMES } from './defaults'
 export const getOpenCodeConfigFilePath = () => path.join(ENV.WORKSPACE.BASE_PATH, ENV.WORKSPACE.CONFIG_DIR, 'opencode.json')
 export const getAgentsMdPath = () => path.join(ENV.WORKSPACE.BASE_PATH, ENV.WORKSPACE.CONFIG_DIR, 'AGENTS.md')
 export const getAuthPath = () => path.join(ENV.WORKSPACE.BASE_PATH, ENV.WORKSPACE.AUTH_FILE)

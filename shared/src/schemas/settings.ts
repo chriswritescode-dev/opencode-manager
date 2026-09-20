@@ -1,5 +1,6 @@
 import { z } from "zod";
 import { NotificationPreferencesSchema, DEFAULT_NOTIFICATION_PREFERENCES } from "./notifications";
+import { OPENCODE_CONFIG_SOURCE_NAMES } from "../config/defaults";
 
 export const CustomCommandSchema = z.object({
   name: z.string(),
@@ -362,6 +363,18 @@ export const OpenCodeConfigValidationIssueSchema = z.object({
   message: z.string(),
 });
 
+export const OpenCodeConfigSourceNameSchema = z.enum(OPENCODE_CONFIG_SOURCE_NAMES);
+
+export const OpenCodeConfigSourceFileSchema = z.object({
+  name: OpenCodeConfigSourceNameSchema,
+  path: z.string(),
+  rawContent: z.string(),
+  content: z.record(z.string(), z.unknown()),
+  isValid: z.boolean(),
+  validationIssues: z.array(OpenCodeConfigValidationIssueSchema).optional(),
+  updatedAt: z.number(),
+});
+
 export const OpenCodeConfigFileSchema = z.object({
   path: z.string(),
   content: z.record(z.string(), z.unknown()),
@@ -369,8 +382,12 @@ export const OpenCodeConfigFileSchema = z.object({
   isValid: z.boolean(),
   validationIssues: z.array(OpenCodeConfigValidationIssueSchema).optional(),
   updatedAt: z.number(),
+  sources: z.array(OpenCodeConfigSourceFileSchema),
+  revision: z.string(),
 });
 
 export const UpdateOpenCodeConfigRequestSchema = z.object({
-  content: z.union([OpenCodeConfigSchema, z.string()]),
+  content: z.union([z.record(z.string(), z.unknown()), z.string()]),
+  source: OpenCodeConfigSourceNameSchema.optional(),
+  expectedRevision: z.string().optional(),
 });

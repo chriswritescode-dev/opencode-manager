@@ -5,6 +5,7 @@ import { Button } from '@/components/ui/button'
 import { Badge } from '@/components/ui/badge'
 import { RestartServerDialog } from './RestartServerDialog'
 import { OpenCodeConfigEditor } from './OpenCodeConfigEditor'
+import { OpenCodeConfigSourcesNotice } from './OpenCodeConfigSourcesNotice'
 import { CommandsEditor } from './CommandsEditor'
 import { AgentsEditor } from './AgentsEditor'
 import { AgentsMdEditor } from './AgentsMdEditor'
@@ -18,13 +19,12 @@ import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import { useServerHealth } from '@/hooks/useServerHealth'
 import { useOpenCodeServerActions } from '@/hooks/useOpenCodeServerActions'
 import { useOpenCodeConfigFile, OPEN_CODE_CONFIG_QUERY_KEY } from '@/hooks/useOpenCodeConfigFile'
-import { hasJsoncComments } from '@/lib/jsonc'
 import { showToast } from '@/lib/toast'
-import { saveFile } from '@/lib/download'
 import { invalidateConfigCaches } from '@/lib/queryInvalidation'
 import { getOpenCodeApiErrorMessage } from '@/lib/opencode-errors'
 import { FetchError } from '@/api/fetchWrapper'
-import type { OpenCodeConfigFile, OpenCodeImportStatus } from '@/api/types/settings'
+import { getPreferredOpenCodeConfigSource, downloadOpenCodeConfigSource } from '@/api/types/settings'
+import type { OpenCodeConfigFile, OpenCodeConfigSaveResponse, OpenCodeImportStatus } from '@/api/types/settings'
 
 interface Command {
   template: string
@@ -156,37 +156,38 @@ export function OpenCodeConfigManager() {
     return getApiErrorMessage(error, 'Failed to import existing OpenCode host data')
   }
 
-  const updateConfigContent = async (newContent: Record<string, unknown>) => {
-    const previousConfig = queryClient.getQueryData<OpenCodeConfigFile>(OPEN_CODE_CONFIG_QUERY_KEY)
-    const now = Date.now()
-
-    queryClient.setQueryData<OpenCodeConfigFile>(OPEN_CODE_CONFIG_QUERY_KEY, (prev) =>
-      prev ? { ...prev, content: newContent, updatedAt: now } : prev
-    )
-
-    try {
-      const result = await settingsApi.updateOpenCodeConfig({ content: newContent })
-      if (result.removedFields && result.removedFields.length > 0) {
-        showToast.info(`Configuration updated after removing invalid fields: ${result.removedFields.join(', ')}`)
-      } else if (result.restartRequired) {
-        showToast.success('Configuration saved. Restart the server to apply changes.')
-      } else {
-        showToast.success('Configuration updated')
-      }
-      invalidateConfigCaches(queryClient)
-    } catch (error) {
-      if (previousConfig) {
-        queryClient.setQueryData(OPEN_CODE_CONFIG_QUERY_KEY, previousConfig)
-      }
-      showToast.error(getApiErrorMessage(error, 'Failed to update config'))
+  const applyOpenCodeConfigSave = (result: OpenCodeConfigSaveResponse) => {
+    queryClient.setQueryData<OpenCodeConfigFile>(OPEN_CODE_CONFIG_QUERY_KEY, result)
+    if (result.restartRequired) {
+      showToast.success('Configuration saved. Restart the server to apply changes.')
+    } else {
+      showToast.success('Configuration updated')
     }
+    invalidateConfigCaches(queryClient, { skipOpenCodeConfig: true })
+  }
+
+  const updateConfigContent = async (newContent: Record<string, unknown>) => {
+    const expectedRevision = queryClient.getQueryData<OpenCodeConfigFile>(
+      OPEN_CODE_CONFIG_QUERY_KEY,
+    )?.revision
+    const result = await settingsApi.updateOpenCodeConfig({
+      content: newContent,
+      expectedRevision,
+    })
+    applyOpenCodeConfigSave(result)
+  }
+
+  const updateConfigContentSafely = (newContent: Record<string, unknown>) => {
+    void updateConfigContent(newContent).catch((error) => {
+      showToast.error(getApiErrorMessage(error, 'Failed to update config'))
+    })
   }
 
   const downloadConfig = (config: OpenCodeConfigFile) => {
-    const content = config.rawContent || JSON.stringify(config.content, null, 2)
-    const extension = config.rawContent && hasJsoncComments(config.rawContent) ? 'jsonc' : 'json'
-    const blob = new Blob([content], { type: 'application/json' })
-    void saveFile(blob, `opencode.${extension}`)
+    const preferredSource = getPreferredOpenCodeConfigSource(config)
+    if (preferredSource) {
+      downloadOpenCodeConfigSource(preferredSource)
+    }
   }
 
   if (isLoading) {
@@ -198,6 +199,8 @@ export function OpenCodeConfigManager() {
   }
 
   const canImportFromHost = Boolean(importStatus?.configSourcePath || importStatus?.stateSourcePath)
+  const workspaceConfigPathsToRemove = importStatus?.workspaceConfigPathsToRemove ?? []
+  const hostConfigSourcePaths = importStatus?.configSourcePaths ?? []
 
   return (
     <div className="min-w-0 space-y-4">
@@ -274,6 +277,12 @@ export function OpenCodeConfigManager() {
             </div>
           </div>
 
+          <p className="text-xs text-muted-foreground">
+            Merged persisted settings. Saves write to the preferred config file; removing a value deletes its override so an inherited value can reappear. Restart the server to apply changes.
+          </p>
+
+          <OpenCodeConfigSourcesNotice config={config} />
+
           {!config.isValid && config.validationIssues && config.validationIssues.length > 0 && (
             <div className="rounded-lg border border-destructive/40 bg-destructive/5 p-4">
               <p className="font-medium text-destructive">This configuration has validation issues</p>
@@ -299,9 +308,13 @@ export function OpenCodeConfigManager() {
             config={config}
             isOpen={isEditDialogOpen}
             onClose={() => setIsEditDialogOpen(false)}
-            onUpdate={async (rawContent) => {
-              await settingsApi.updateOpenCodeConfig({ content: rawContent })
-              await queryClient.invalidateQueries({ queryKey: OPEN_CODE_CONFIG_QUERY_KEY })
+            onUpdate={async ({ content, source, expectedRevision }) => {
+              const result = await settingsApi.updateOpenCodeConfig({
+                content,
+                source,
+                expectedRevision,
+              })
+              applyOpenCodeConfigSave(result)
             }}
           />
         </>
@@ -364,7 +377,7 @@ export function OpenCodeConfigManager() {
                   commands={(config.content.command as Record<string, Command> | undefined) ?? {}}
                   directoryCommands={directoryCommands}
                   onChange={(commands) => {
-                    updateConfigContent({
+                    updateConfigContentSafely({
                       ...config.content,
                       command: commands
                     })
@@ -398,7 +411,7 @@ export function OpenCodeConfigManager() {
                   agents={(config.content.agent as Record<string, Agent> | undefined) ?? {}}
                   directoryAgents={directoryAgents}
                   onChange={(agents) => {
-                    updateConfigContent({
+                    updateConfigContentSafely({
                       ...config.content,
                       agent: agents
                     })
@@ -493,7 +506,7 @@ export function OpenCodeConfigManager() {
                 <OpenCodeModelsEditor
                   providers={(config.content.provider as Record<string, ConfigProvider> | undefined) ?? {}}
                   onChange={(providers) => {
-                    updateConfigContent({
+                    updateConfigContentSafely({
                       ...config.content,
                       provider: providers
                     })
@@ -567,6 +580,18 @@ export function OpenCodeConfigManager() {
                 </p>
               </div>
             </div>
+            {!isImportStatusLoading && workspaceConfigPathsToRemove.length > 0 && (
+              <p className="flex items-start gap-2 text-xs text-amber-600 dark:text-amber-500">
+                <AlertTriangle className="mt-0.5 h-3.5 w-3.5 shrink-0" />
+                <span>
+                  Importing replaces the workspace configuration files. These files will be removed:{' '}
+                  {workspaceConfigPathsToRemove.map(getConfigFileName).join(', ')}.
+                  {hostConfigSourcePaths.length > 1 && (
+                    <> Host files imported: {hostConfigSourcePaths.map(getConfigFileName).join(', ')}.</>
+                  )}
+                </span>
+              </p>
+            )}
             <div className="rounded-lg border border-border p-3">
               <p className="font-medium">Workspace State</p>
               <p className="mt-1 break-all text-muted-foreground">

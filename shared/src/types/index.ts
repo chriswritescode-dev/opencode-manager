@@ -6,6 +6,7 @@ import {
   CustomCommandSchema,
   OpenCodeConfigSchema,
   OpenCodeConfigFileSchema,
+  OpenCodeConfigSourceFileSchema,
   OpenCodeConfigValidationIssueSchema,
   UpdateOpenCodeConfigRequestSchema,
   ServerEnvVarSchema,
@@ -59,6 +60,8 @@ export type UpdateSettingsRequest = z.infer<typeof UpdateSettingsRequestSchema>
 export type CustomCommand = z.infer<typeof CustomCommandSchema>
 export type ServerEnvVar = z.infer<typeof ServerEnvVarSchema>
 export type OpenCodeConfigFile = z.infer<typeof OpenCodeConfigFileSchema>
+export type { OpenCodeConfigSourceName } from '../config/defaults'
+export type OpenCodeConfigSourceFile = z.infer<typeof OpenCodeConfigSourceFileSchema>
 export type OpenCodeConfigValidationIssue = z.infer<typeof OpenCodeConfigValidationIssueSchema>
 export type OpenCodeConfigInput = z.infer<typeof OpenCodeConfigSchema>
 export type UpdateOpenCodeConfigRequest = z.infer<typeof UpdateOpenCodeConfigRequestSchema>

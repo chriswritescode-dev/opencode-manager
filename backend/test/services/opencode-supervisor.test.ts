@@ -1,5 +1,5 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest'
-import { archiveBrokenOpenCodeConfigFile, writeHealthWatchArtifact, writeOpenCodeConfigFile, OPENCODE_CONFIG_SEED } from '../../src/services/opencode-config-file'
+import { archiveBrokenOpenCodeConfigFile, writeHealthWatchArtifact, restoreOpenCodeConfigSnapshot, OPENCODE_CONFIG_SEED } from '../../src/services/opencode-config-file'
 import { OpenCodeSupervisor } from '../../src/services/opencode-supervisor'
 
 vi.mock('../../src/utils/logger', () => ({
@@ -10,13 +10,18 @@ vi.mock('../../src/utils/logger', () => ({
   },
 }))
 
-vi.mock('../../src/services/opencode-config-file', () => ({
-  archiveBrokenOpenCodeConfigFile: vi.fn(),
-  writeHealthWatchArtifact: vi.fn(),
-  writeOpenCodeConfigFile: vi.fn(async (rawContent: string) => ({ rawContent, isValid: true })),
-  withOpenCodeConfigLock: (fn: () => Promise<unknown>) => fn(),
-  OPENCODE_CONFIG_SEED: '{"$schema":"https://opencode.ai/config.json"}',
-}))
+vi.mock('../../src/services/opencode-config-file', () => {
+  const seed = '{"$schema":"https://opencode.ai/config.json"}'
+  return {
+    archiveBrokenOpenCodeConfigFile: vi.fn(),
+    writeHealthWatchArtifact: vi.fn(),
+    restoreOpenCodeConfigSnapshot: vi.fn(async () => ({ isValid: true })),
+    serializeOpenCodeConfigSnapshot: vi.fn(() => seed),
+    buildOpenCodeConfigSeedSnapshot: vi.fn(() => seed),
+    withOpenCodeConfigLock: (fn: () => Promise<unknown>) => fn(),
+    OPENCODE_CONFIG_SEED: seed,
+  }
+})
 
 vi.mock('../../src/services/opencode-single-server', () => ({
   opencodeServerManager: {
@@ -25,9 +30,7 @@ vi.mock('../../src/services/opencode-single-server', () => ({
 }))
 
 vi.mock('@opencode-manager/shared/config/env', () => ({
-  TIMEOUTS: {
-    CONFIG_PATCH_TIMEOUT_MS: 30000,
-  },
+  TIMEOUTS: {},
   ENV: {
     OPENCODE: {
       HEALTH_POLL_MS: 200,
@@ -43,7 +46,6 @@ interface FakeManager {
   isOperationInProgress: ReturnType<typeof vi.fn>
   checkHealth: ReturnType<typeof vi.fn>
   restart: ReturnType<typeof vi.fn>
-  reloadConfig: ReturnType<typeof vi.fn>
   clearStartupError: ReturnType<typeof vi.fn>
   getLastStartupError: ReturnType<typeof vi.fn>
   isLastStartupErrorNonRecoverable: ReturnType<typeof vi.fn>
@@ -69,7 +71,6 @@ describe('OpenCodeSupervisor', () => {
     isOperationInProgress: vi.fn(() => false),
     checkHealth: vi.fn().mockResolvedValue(true),
     restart: vi.fn().mockResolvedValue(undefined),
-    reloadConfig: vi.fn().mockResolvedValue(undefined),
     clearStartupError: vi.fn(),
     getLastStartupError: vi.fn(() => null),
     isLastStartupErrorNonRecoverable: vi.fn(() => false),
@@ -104,7 +105,7 @@ describe('OpenCodeSupervisor', () => {
     expect(manager.restart).toHaveBeenCalledTimes(3)
     expect(settings.getLastKnownGoodConfig).toHaveBeenCalled()
     expect(archiveBrokenOpenCodeConfigFile).toHaveBeenCalled()
-    expect(writeOpenCodeConfigFile).toHaveBeenCalledWith('{"$schema":"https://opencode.ai/config.json"}')
+    expect(restoreOpenCodeConfigSnapshot).toHaveBeenCalledWith('{"$schema":"https://opencode.ai/config.json"}')
     expect(status.watching).toBe(true)
 
     await supervisor.stop()
@@ -125,7 +126,7 @@ describe('OpenCodeSupervisor', () => {
 
     expect(status.state).toBe('failed')
     expect(archiveBrokenOpenCodeConfigFile).toHaveBeenCalled()
-    expect(writeOpenCodeConfigFile).toHaveBeenCalledWith(OPENCODE_CONFIG_SEED)
+    expect(restoreOpenCodeConfigSnapshot).toHaveBeenCalledWith(OPENCODE_CONFIG_SEED)
 
     await supervisor.stop()
   })
@@ -283,7 +284,7 @@ describe('OpenCodeSupervisor', () => {
     expect(manager.restart).not.toHaveBeenCalled()
     expect(archiveBrokenOpenCodeConfigFile).not.toHaveBeenCalled()
     expect(settings.getLastKnownGoodConfig).not.toHaveBeenCalled()
-    expect(writeOpenCodeConfigFile).not.toHaveBeenCalled()
+    expect(restoreOpenCodeConfigSnapshot).not.toHaveBeenCalled()
     expect(writeHealthWatchArtifact).not.toHaveBeenCalled()
 
     await supervisor.stop()
@@ -304,7 +305,7 @@ describe('OpenCodeSupervisor', () => {
     expect(status.state).toBe('failed')
     expect(archiveBrokenOpenCodeConfigFile).not.toHaveBeenCalled()
     expect(settings.getLastKnownGoodConfig).not.toHaveBeenCalled()
-    expect(writeOpenCodeConfigFile).not.toHaveBeenCalled()
+    expect(restoreOpenCodeConfigSnapshot).not.toHaveBeenCalled()
     expect(writeHealthWatchArtifact).not.toHaveBeenCalled()
 
     await supervisor.stop()
@@ -331,7 +332,7 @@ describe('OpenCodeSupervisor', () => {
     expect(manager.restart).toHaveBeenCalledTimes(1)
     expect(archiveBrokenOpenCodeConfigFile).not.toHaveBeenCalled()
     expect(settings.getLastKnownGoodConfig).not.toHaveBeenCalled()
-    expect(writeOpenCodeConfigFile).not.toHaveBeenCalled()
+    expect(restoreOpenCodeConfigSnapshot).not.toHaveBeenCalled()
     expect(writeHealthWatchArtifact).not.toHaveBeenCalled()
 
     await supervisor.stop()
@@ -355,7 +356,7 @@ describe('OpenCodeSupervisor', () => {
     expect(status.state).toBe('healthy')
     expect(archiveBrokenOpenCodeConfigFile).toHaveBeenCalled()
     expect(settings.getLastKnownGoodConfig).toHaveBeenCalled()
-    expect(writeOpenCodeConfigFile).toHaveBeenCalledWith('{"$schema":"https://opencode.ai/config.json"}')
+    expect(restoreOpenCodeConfigSnapshot).toHaveBeenCalledWith('{"$schema":"https://opencode.ai/config.json"}')
 
     await supervisor.stop()
   })
@@ -390,36 +391,6 @@ describe('OpenCodeSupervisor', () => {
     expect(secondStatus.healthy).toBe(true)
   })
 
-  it('executes a reload requested during an active reload after the active reload completes', async () => {
-    const manager = createManager()
-    const settings = createSettings()
-    const supervisor = new OpenCodeSupervisor(manager as unknown as never, settings as unknown as never, {
-      failureThreshold: 1,
-      watchEnabled: false,
-    })
-
-    let releaseReload!: () => void
-    manager.reloadConfig.mockImplementationOnce(
-      () => new Promise<void>((resolve) => { releaseReload = resolve }),
-    )
-    manager.checkHealth.mockResolvedValue(true)
-
-    const first = supervisor.reloadConfig('settings_reload')
-    await vi.waitFor(() => expect(manager.reloadConfig).toHaveBeenCalledTimes(1))
-
-    const second = supervisor.reloadConfig('manual')
-    await new Promise((resolve) => setTimeout(resolve, 20))
-    expect(manager.reloadConfig).toHaveBeenCalledTimes(1)
-
-    releaseReload()
-
-    const [firstStatus, secondStatus] = await Promise.all([first, second])
-
-    expect(manager.reloadConfig).toHaveBeenCalledTimes(2)
-    expect(firstStatus.healthy).toBe(true)
-    expect(secondStatus.healthy).toBe(true)
-  })
-
   it('closes the proxy lifecycle gate for the whole restart transition and reopens once healthy', async () => {
     const manager = createManager()
     const settings = createSettings()
@@ -446,35 +417,6 @@ describe('OpenCodeSupervisor', () => {
 
     expect(status.healthy).toBe(true)
     expect(manager.setLifecycleInitialized).toHaveBeenLastCalledWith(true)
-  })
-
-  it('keeps the proxy lifecycle gate open across a config reload so in-flight sessions are never interrupted', async () => {
-    const manager = createManager()
-    const settings = createSettings()
-    const supervisor = new OpenCodeSupervisor(manager as unknown as never, settings as unknown as never, {
-      failureThreshold: 1,
-      watchEnabled: false,
-    })
-
-    await supervisor.start()
-    expect(manager.setLifecycleInitialized).toHaveBeenLastCalledWith(true)
-    manager.setLifecycleInitialized.mockClear()
-
-    let releaseReload!: () => void
-    manager.reloadConfig.mockImplementationOnce(
-      () => new Promise<void>((resolve) => { releaseReload = resolve }),
-    )
-    manager.checkHealth.mockResolvedValue(true)
-
-    const reload = supervisor.reloadConfig('settings_reload')
-    await vi.waitFor(() => expect(manager.reloadConfig).toHaveBeenCalledTimes(1))
-    expect(manager.setLifecycleInitialized).not.toHaveBeenCalledWith(false)
-
-    releaseReload()
-    const status = await reload
-
-    expect(status.healthy).toBe(true)
-    expect(manager.setLifecycleInitialized).not.toHaveBeenCalledWith(false)
   })
 
   it('closes the proxy lifecycle gate while stopping and never reopens it', async () => {

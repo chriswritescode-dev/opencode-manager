@@ -18,11 +18,20 @@ export function invalidateProviderCaches(queryClient: QueryClient) {
   queryClient.invalidateQueries({ queryKey: ['providers-for-execution-model'] })
 }
 
-export function invalidateConfigCaches(queryClient: QueryClient) {
+interface ConfigInvalidationOptions {
+  skipOpenCodeConfig?: boolean
+}
+
+export function invalidateConfigCaches(
+  queryClient: QueryClient,
+  options: ConfigInvalidationOptions = {},
+) {
   queryClient.invalidateQueries({ queryKey: ['opencode', 'config'] })
   queryClient.invalidateQueries({ queryKey: ['opencode', 'agents'] })
   queryClient.invalidateQueries({ queryKey: ['opencode', 'commands'] })
-  queryClient.invalidateQueries({ queryKey: ['opencode-config'] })
+  if (!options.skipOpenCodeConfig) {
+    queryClient.invalidateQueries({ queryKey: ['opencode-config'] })
+  }
   queryClient.invalidateQueries({ queryKey: ['health'] })
   queryClient.invalidateQueries({ queryKey: ['mcp-status'] })
   queryClient.invalidateQueries({ queryKey: ['opencode-skills'] })

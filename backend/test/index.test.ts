@@ -1,5 +1,5 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest'
-import { mkdir, mkdtemp, rm, writeFile } from 'node:fs/promises'
+import { mkdir, mkdtemp, readFile, rm, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 
@@ -13,7 +13,6 @@ const supervisorMock = vi.hoisted(() => ({
   start: vi.fn().mockResolvedValue({ healthy: true, port: 5551, state: 'running', resumedSessionIDs: [] }),
   stop: vi.fn().mockResolvedValue(undefined),
   restart: vi.fn().mockResolvedValue({ healthy: true, resumedSessionIDs: [] }),
-  reloadConfig: vi.fn().mockResolvedValue({ healthy: true }),
   getLastStartupError: vi.fn().mockReturnValue(null),
 }))
 
@@ -50,11 +49,12 @@ vi.mock('../src/ipc/ipcServer', () => ({
 }))
 
 vi.mock('../src/services/opencode-import', () => ({
-  getFirstExistingConfigSourcePath: vi.fn().mockReturnValue(null),
   getOpenCodeImportStatus: vi.fn().mockResolvedValue({
     configSourcePath: null,
+    configSourcePaths: [],
     stateSourcePath: null,
     workspaceConfigPath: '/tmp/test-workspace/.config/opencode/opencode.json',
+    workspaceConfigPathsToRemove: [],
     workspaceStatePath: '/tmp/test-workspace/.opencode/state/opencode',
     workspaceStateExists: true,
   }),
@@ -63,6 +63,21 @@ vi.mock('../src/services/opencode-import', () => ({
 
 vi.mock('../src/services/assistant-mode', () => ({
   installAssistantWorkspace: vi.fn().mockResolvedValue(undefined),
+}))
+
+const seedOpenCodeConfigFileMock = vi.hoisted(() => vi.fn().mockResolvedValue({
+  path: '',
+  rawContent: '',
+  content: {},
+  isValid: true,
+  updatedAt: 0,
+  sources: [],
+  revision: '',
+}))
+
+vi.mock('../src/services/opencode-config-apply', async (importOriginal) => ({
+  ...(await importOriginal<typeof import('../src/services/opencode-config-apply')>()),
+  seedOpenCodeConfigFile: seedOpenCodeConfigFileMock,
 }))
 
 vi.mock('../src/services/skills', () => ({
@@ -94,7 +109,6 @@ const serverManagerMock = vi.hoisted(() => ({
   clearStartupError: vi.fn(),
   markRestartPending: vi.fn(),
   isRestartPending: vi.fn().mockReturnValue(false),
-  reloadConfig: vi.fn().mockResolvedValue(undefined),
   restart: vi.fn().mockResolvedValue(undefined),
   checkHealth: vi.fn().mockResolvedValue(true),
 }))
@@ -178,15 +192,19 @@ describe('backend entrypoint', () => {
     const { getOpenCodeImportStatus, syncOpenCodeImport } = await import('../src/services/opencode-import')
     vi.mocked(getOpenCodeImportStatus).mockResolvedValueOnce({
       configSourcePath: '/import/opencode.json',
+      configSourcePaths: ['/import/opencode.json'],
       stateSourcePath: '/import/state',
       workspaceConfigPath: join(configDir, 'opencode.json'),
+      workspaceConfigPathsToRemove: [],
       workspaceStatePath: join(tempWorkspace, '.opencode', 'state', 'opencode'),
       workspaceStateExists: false,
     })
     vi.mocked(syncOpenCodeImport).mockResolvedValueOnce({
       configSourcePath: '/import/opencode.json',
+      configSourcePaths: ['/import/opencode.json'],
       stateSourcePath: '/import/state',
       workspaceConfigPath: join(configDir, 'opencode.json'),
+      workspaceConfigPathsToRemove: [],
       workspaceStatePath: join(tempWorkspace, '.opencode', 'state', 'opencode'),
       workspaceStateExists: false,
       configImported: false,
@@ -201,6 +219,12 @@ describe('backend entrypoint', () => {
     }))
   })
 
+  it('seeds the default config when no workspace or importable host config exists', async () => {
+    await import('../src/index')
+
+    expect(seedOpenCodeConfigFileMock).toHaveBeenCalledTimes(1)
+  })
+
   it('answers the root route with service metadata outside production', async () => {
     await import('../src/index')
 
@@ -212,6 +236,18 @@ describe('backend entrypoint', () => {
     expect(body.name).toBe('OpenCode WebUI')
     expect(body.status).toBe('running')
     expect(body.endpoints.repos).toBe('/api/repos')
+  })
+
+  it.each(['opencode.jsonc', 'config.json'])('does not seed opencode.json when %s already exists', async (name) => {
+    const configDir = join(tempWorkspace, '.config', 'opencode')
+    const rawContent = '{\n  // preserve this source\n  "model": "test/model"\n}\n'
+    await mkdir(configDir, { recursive: true })
+    await writeFile(join(configDir, name), rawContent)
+
+    await import('../src/index')
+
+    expect(await readFile(join(configDir, name), 'utf8')).toBe(rawContent)
+    await expect(readFile(join(configDir, 'opencode.json'), 'utf8')).rejects.toMatchObject({ code: 'ENOENT' })
   })
 
   it('ignores unknown API routes through the not-found handler', async () => {

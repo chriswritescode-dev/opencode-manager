@@ -4,13 +4,30 @@ const managerMock = vi.hoisted(() => ({
   getLastStartupError: vi.fn<() => string | null>(() => null),
   clearStartupError: vi.fn<() => void>(),
   restart: vi.fn<() => Promise<void>>(),
+  checkHealth: vi.fn<() => Promise<boolean>>(),
+}))
+
+const configFileMock = vi.hoisted(() => ({
+  readOpenCodeConfigFile: vi.fn(),
 }))
 
 vi.mock('../../src/services/opencode-single-server', () => ({
   opencodeServerManager: managerMock,
+  ConfigReloadError: class ConfigReloadError extends Error {
+    validationIssues: Array<{ path: string; message: string }>
+
+    constructor(message: string, validationIssues: Array<{ path: string; message: string }> = []) {
+      super(message)
+      this.name = 'ConfigReloadError'
+      this.validationIssues = validationIssues
+    }
+  },
 }))
 
+vi.mock('../../src/services/opencode-config-file', () => configFileMock)
+
 import {
+  reloadOpenCodeConfig,
   restartOpenCode,
   setOpenCodeRestartCoordinator,
 } from '../../src/services/opencode-restart'
@@ -20,7 +37,6 @@ import type { OpenCodeSupervisor } from '../../src/services/opencode-supervisor'
 function createSupervisor(healthy: boolean): OpenCodeSupervisor {
   return {
     restart: vi.fn().mockResolvedValue({ healthy }),
-    reloadConfig: vi.fn(),
   } as unknown as OpenCodeSupervisor
 }
 
@@ -28,6 +44,15 @@ function createCoordinator(healthy: boolean, resumedSessionIDs: string[] = []): 
   return {
     runWithResume: vi.fn(async (restart: () => Promise<boolean>) => ({
       healthy: healthy ?? (await restart()),
+      resumedSessionIDs,
+    })),
+  } as unknown as OpenCodeRestartCoordinator
+}
+
+function createInvokingCoordinator(resumedSessionIDs: string[] = []): OpenCodeRestartCoordinator {
+  return {
+    runWithResume: vi.fn(async (restart: () => Promise<boolean>) => ({
+      healthy: await restart(),
       resumedSessionIDs,
     })),
   } as unknown as OpenCodeRestartCoordinator
@@ -88,5 +113,87 @@ describe('restartOpenCode', () => {
 
     await expect(restartOpenCode()).rejects.toThrow('server failed to become healthy')
     expect(managerMock.clearStartupError).toHaveBeenCalled()
+  })
+})
+
+describe('reloadOpenCodeConfig', () => {
+  beforeEach(() => {
+    vi.clearAllMocks()
+    managerMock.getLastStartupError.mockReset().mockReturnValue(null)
+    managerMock.clearStartupError.mockReset()
+    managerMock.restart.mockReset()
+    managerMock.checkHealth.mockReset()
+    configFileMock.readOpenCodeConfigFile.mockReset()
+    setOpenCodeRestartCoordinator(null)
+  })
+
+  afterEach(() => {
+    setOpenCodeRestartCoordinator(null)
+  })
+
+  it('throws a ConfigReloadError without restarting when every global source is absent', async () => {
+    configFileMock.readOpenCodeConfigFile.mockResolvedValue(null)
+    const supervisor = createSupervisor(true)
+
+    await expect(reloadOpenCodeConfig(supervisor)).rejects.toMatchObject({
+      name: 'ConfigReloadError',
+      message: 'No OpenCode global configuration files found',
+    })
+    expect(supervisor.restart).not.toHaveBeenCalled()
+    expect(managerMock.restart).not.toHaveBeenCalled()
+  })
+
+  it('throws a ConfigReloadError with validation issues without restarting when the config is invalid', async () => {
+    const validationIssues = [{ path: 'model', message: 'Invalid model' }]
+    configFileMock.readOpenCodeConfigFile.mockResolvedValue({ isValid: false, validationIssues })
+    const supervisor = createSupervisor(true)
+
+    await expect(reloadOpenCodeConfig(supervisor)).rejects.toMatchObject({
+      name: 'ConfigReloadError',
+      message: 'OpenCode global configuration is invalid',
+      validationIssues,
+    })
+    expect(supervisor.restart).not.toHaveBeenCalled()
+    expect(managerMock.restart).not.toHaveBeenCalled()
+  })
+
+  it('delegates a valid config to the supervisor restart path with the settings_reload reason', async () => {
+    configFileMock.readOpenCodeConfigFile.mockResolvedValue({ isValid: true })
+    const supervisor = createSupervisor(true)
+
+    const result = await reloadOpenCodeConfig(supervisor)
+
+    expect(supervisor.restart).toHaveBeenCalledWith('settings_reload')
+    expect(result).toEqual({ resumedSessionIDs: [] })
+  })
+
+  it('returns the resumed session IDs produced by the coordinator on a valid reload', async () => {
+    configFileMock.readOpenCodeConfigFile.mockResolvedValue({ isValid: true })
+    const supervisor = createSupervisor(true)
+    setOpenCodeRestartCoordinator(createInvokingCoordinator(['session-1', 'session-2']))
+
+    const result = await reloadOpenCodeConfig(supervisor)
+
+    expect(supervisor.restart).toHaveBeenCalledWith('settings_reload')
+    expect(result).toEqual({ resumedSessionIDs: ['session-1', 'session-2'] })
+  })
+
+  it('restarts the manager directly without a coordinator', async () => {
+    configFileMock.readOpenCodeConfigFile.mockResolvedValue({ isValid: true })
+    managerMock.checkHealth.mockResolvedValue(true)
+
+    await reloadOpenCodeConfig()
+
+    expect(managerMock.clearStartupError).toHaveBeenCalled()
+    expect(managerMock.restart).toHaveBeenCalledTimes(1)
+    expect(managerMock.checkHealth).toHaveBeenCalled()
+  })
+
+  it('throws when the manager restart leaves the server unhealthy without a coordinator', async () => {
+    configFileMock.readOpenCodeConfigFile.mockResolvedValue({ isValid: true })
+    managerMock.checkHealth.mockResolvedValue(false)
+    managerMock.getLastStartupError.mockReturnValue('reload did not restore health')
+
+    await expect(reloadOpenCodeConfig()).rejects.toThrow('reload did not restore health')
   })
 })

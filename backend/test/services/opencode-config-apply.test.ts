@@ -1,19 +1,18 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
-import { mkdtemp, readFile, rm, writeFile } from 'fs/promises'
+import { mkdtemp, readFile, readdir, rm, writeFile } from 'fs/promises'
 import { tmpdir } from 'os'
 import path from 'path'
 import { Database } from 'bun:sqlite'
 import { ZodError } from 'zod'
 
-const paths = vi.hoisted(() => ({ config: '' }))
+const paths = vi.hoisted(() => ({ config: '', configDir: '', healthWatch: '' }))
 
-vi.mock('@opencode-manager/shared/config/env', async (importOriginal) => {
-  const actual = await importOriginal<typeof import('@opencode-manager/shared/config/env')>()
-  return {
-    ...actual,
-    getOpenCodeConfigFilePath: () => paths.config,
-  }
-})
+vi.mock('@opencode-manager/shared/config/env', () => ({
+  getConfigPath: () => paths.configDir,
+  getOpenCodeConfigFilePath: () => paths.config,
+  getOpenCodeHealthWatchPath: () => paths.healthWatch,
+  OPENCODE_CONFIG_SOURCE_NAMES: ['config.json', 'opencode.json', 'opencode.jsonc'],
+}))
 
 vi.mock('../../src/utils/logger', () => ({
   logger: {
@@ -21,11 +20,6 @@ vi.mock('../../src/utils/logger', () => ({
     warn: vi.fn(),
     error: vi.fn(),
   },
-}))
-
-const patchConfigWithRecoveryMock = vi.hoisted(() => vi.fn())
-vi.mock('../../src/services/opencode/config-recovery', () => ({
-  patchConfigWithRecovery: patchConfigWithRecoveryMock,
 }))
 
 const markRestartPendingMock = vi.hoisted(() => vi.fn())
@@ -40,8 +34,20 @@ vi.mock('../../src/services/opencode-single-server', () => ({
 import { migrate } from '../../src/db/migration-runner'
 import { allMigrations } from '../../src/db/migrations'
 import { SettingsService } from '../../src/services/settings'
-import { applyOpenCodeConfigUpdate, captureLastKnownGoodOpenCodeConfig, restoreLastKnownGoodOpenCodeConfig, type ApplyOpenCodeConfigResult } from '../../src/services/opencode-config-apply'
-import type { OpenCodeClient } from '../../src/services/opencode/client'
+import {
+  applyOpenCodeConfigUpdate,
+  captureLastKnownGoodOpenCodeConfig,
+  restoreLastKnownGoodOpenCodeConfig,
+  seedOpenCodeConfigFile,
+  type ApplyOpenCodeConfigResult,
+} from '../../src/services/opencode-config-apply'
+import {
+  OPENCODE_CONFIG_SEED,
+  OpenCodeConfigConflictError,
+  OpenCodeConfigSourceInvalidError,
+  readOpenCodeConfigFile,
+  writeOpenCodeConfigFile,
+} from '../../src/services/opencode-config-file'
 
 function expectStatus<T extends ApplyOpenCodeConfigResult['status']>(
   result: ApplyOpenCodeConfigResult,
@@ -51,20 +57,28 @@ function expectStatus<T extends ApplyOpenCodeConfigResult['status']>(
   return result as Extract<ApplyOpenCodeConfigResult, { status: T }>
 }
 
+function parseSnapshot(snapshot: string): { version: number; sources: Array<{ name: string; rawContent: string }> } {
+  return JSON.parse(snapshot) as { version: number; sources: Array<{ name: string; rawContent: string }> }
+}
+
 describe('opencode-config-apply', () => {
   let workDir: string
   let db: Database
   let settingsService: SettingsService
-  let openCodeClient: OpenCodeClient
+
+  function sourcePath(name: string): string {
+    return path.join(workDir, name)
+  }
 
   beforeEach(async () => {
     vi.clearAllMocks()
     workDir = await mkdtemp(path.join(tmpdir(), 'opencode-config-apply-'))
     paths.config = path.join(workDir, 'opencode.json')
+    paths.configDir = workDir
+    paths.healthWatch = path.join(workDir, 'health-watch')
     db = new Database(':memory:')
     migrate(db, allMigrations)
     settingsService = new SettingsService(db)
-    openCodeClient = { forward: vi.fn() } as unknown as OpenCodeClient
   })
 
   afterEach(async () => {
@@ -72,131 +86,197 @@ describe('opencode-config-apply', () => {
     await rm(workDir, { recursive: true, force: true })
   })
 
-  it('writes the file and marks a restart pending for a plugin change without patching the live server', async () => {
-    await writeFile(paths.config, '{"theme":"dark"}', 'utf8')
+  it.each([
+    ['theme', { theme: 'light' }],
+    ['model', { model: 'a/b' }],
+    ['mcp', { mcp: { local: { type: 'local' } } }],
+    ['agent', { agent: { build: { model: 'a/b' } } }],
+    ['plugin', { plugin: ['x'] }],
+    ['provider', { provider: { example: { npm: 'y' } } }],
+  ])('marks a restart pending for a semantic %s change without patching the live server', async (_field, change) => {
+    await writeFile(sourcePath('opencode.json'), '{"theme":"dark"}', 'utf8')
 
     const result = expectStatus(await applyOpenCodeConfigUpdate({
-      content: '{"theme":"dark","plugin":["x"]}',
-      openCodeClient,
+      content: change,
       settingsService,
     }), 'restart_pending')
 
-    expect(result.config.rawContent).toBe('{"theme":"dark","plugin":["x"]}')
-    await expect(readFile(paths.config, 'utf8')).resolves.toBe('{"theme":"dark","plugin":["x"]}')
     expect(markRestartPendingMock).toHaveBeenCalledTimes(1)
-    expect(patchConfigWithRecoveryMock).not.toHaveBeenCalled()
+    expect(result.config.content).toEqual(change)
   })
 
-  it('patches a live-applied change and writes the submitted raw text verbatim', async () => {
-    await writeFile(paths.config, '{"theme":"dark"}', 'utf8')
-    patchConfigWithRecoveryMock.mockResolvedValue({
-      success: true,
-      appliedConfig: { theme: 'dark', mcp: { local: { type: 'local' } } },
-    })
+  it('applies a comment-only edit without marking a restart pending', async () => {
+    await writeFile(sourcePath('opencode.json'), '{"theme":"dark"}', 'utf8')
+    const commented = '{\n  // keep this comment\n  "theme": "dark"\n}\n'
 
-    const submitted = '{\n  // keep this comment\n  "theme": "dark",\n  "mcp": { "local": { "type": "local" } }\n}\n'
+    const result = expectStatus(await applyOpenCodeConfigUpdate({
+      content: commented,
+      source: 'opencode.json',
+      settingsService,
+    }), 'applied')
+
+    expect(result.config.rawContent).toBe(commented)
+    await expect(readFile(sourcePath('opencode.json'), 'utf8')).resolves.toBe(commented)
+    expect(markRestartPendingMock).not.toHaveBeenCalled()
+  })
+
+  it('writes a raw string to the explicitly requested source verbatim', async () => {
+    await writeFile(sourcePath('opencode.json'), '{"model":"a/b"}', 'utf8')
+    const submitted = '{\n  // config source\n  "theme": "light"\n}\n'
+
     const result = expectStatus(await applyOpenCodeConfigUpdate({
       content: submitted,
-      openCodeClient,
+      source: 'config.json',
       settingsService,
-    }), 'applied')
+    }), 'restart_pending')
 
-    expect(result.removedFields).toEqual([])
-    await expect(readFile(paths.config, 'utf8')).resolves.toBe(submitted)
+    await expect(readFile(sourcePath('config.json'), 'utf8')).resolves.toBe(submitted)
+    await expect(readFile(sourcePath('opencode.json'), 'utf8')).resolves.toBe('{"model":"a/b"}')
+    expect(result.config.content).toEqual({ model: 'a/b', theme: 'light' })
+  })
+
+  it('throws a conflict and preserves last known good when the expected revision is stale', async () => {
+    const initial = await writeOpenCodeConfigFile('{"theme":"dark"}', 'opencode.jsonc')
+    settingsService.saveLastKnownGoodConfig('sentinel')
+    await writeFile(sourcePath('opencode.json'), '{"theme":"light"}', 'utf8')
+
+    await expect(applyOpenCodeConfigUpdate({
+      content: { theme: 'system' },
+      expectedRevision: initial.revision,
+      settingsService,
+    })).rejects.toBeInstanceOf(OpenCodeConfigConflictError)
+
+    expect(settingsService.getLastKnownGoodConfig()).toBe('sentinel')
+    await expect(readFile(sourcePath('opencode.json'), 'utf8')).resolves.toBe('{"theme":"light"}')
     expect(markRestartPendingMock).not.toHaveBeenCalled()
   })
 
-  it('writes the cleaned applied config and reports removed fields when recovery drops them', async () => {
-    await writeFile(paths.config, '{"theme":"dark"}', 'utf8')
-    const appliedConfig = { mcp: { local: { type: 'local' } } }
-    patchConfigWithRecoveryMock.mockResolvedValue({
-      success: true,
-      appliedConfig,
-      removedFields: ['theme'],
-    })
-
-    const result = expectStatus(await applyOpenCodeConfigUpdate({
-      content: '{"theme":"dark","mcp":{"local":{"type":"local"}}}',
-      openCodeClient,
-      settingsService,
-    }), 'applied')
-
-    expect(result.removedFields).toEqual(['theme'])
-    await expect(readFile(paths.config, 'utf8')).resolves.toBe(JSON.stringify(appliedConfig, null, 2))
-  })
-
-  it('leaves the previous file byte-identical and returns rejected when the live patch fails', async () => {
-    const previous = '{\n  // previous\n  "theme": "dark"\n}\n'
-    await writeFile(paths.config, previous, 'utf8')
-    patchConfigWithRecoveryMock.mockResolvedValue({
-      success: false,
-      error: 'model: must be string',
-      details: [{ path: 'model', message: 'must be string' }],
-      removedFields: ['model'],
-    })
-
-    const result = expectStatus(await applyOpenCodeConfigUpdate({
-      content: { model: 'x' },
-      openCodeClient,
-      settingsService,
-    }), 'rejected')
-
-    expect(result.error).toBe('model: must be string')
-    expect(result.validationIssues).toEqual([{ path: 'model', message: 'must be string' }])
-    expect(result.removedFields).toEqual(['model'])
-    await expect(readFile(paths.config, 'utf8')).resolves.toBe(previous)
-    expect(markRestartPendingMock).not.toHaveBeenCalled()
-  })
-
-  it('saves a valid previous file as last known good before writing', async () => {
+  it('saves the valid prior full snapshot as last known good after a successful write', async () => {
     const previous = '{"theme":"dark"}'
-    await writeFile(paths.config, previous, 'utf8')
-    patchConfigWithRecoveryMock.mockResolvedValue({ success: true })
+    await writeFile(sourcePath('opencode.json'), previous, 'utf8')
 
     await applyOpenCodeConfigUpdate({
-      content: { mcp: {} },
-      openCodeClient,
+      content: { theme: 'light' },
       settingsService,
     })
 
-    expect(settingsService.getLastKnownGoodConfig()).toBe(previous)
-    expect(settingsService.getSettings().preferences.lastKnownGoodConfig).toBe(previous)
+    const lastGood = settingsService.getLastKnownGoodConfig()
+    expect(lastGood).not.toBeNull()
+    const parsed = parseSnapshot(lastGood as string)
+    expect(parsed.version).toBe(1)
+    expect(parsed.sources).toEqual([{ name: 'opencode.json', rawContent: previous }])
   })
 
-  it('does not capture an invalid previous file as last known good', async () => {
-    await writeFile(paths.config, '{"model": 5}', 'utf8')
+  it('rejects an object update when a source is invalid and keeps last known good', async () => {
+    await writeFile(sourcePath('opencode.json'), '{"model": 5}', 'utf8')
     settingsService.saveLastKnownGoodConfig('sentinel')
-    patchConfigWithRecoveryMock.mockResolvedValue({ success: true })
+
+    await expect(applyOpenCodeConfigUpdate({
+      content: { theme: 'light' },
+      settingsService,
+    })).rejects.toBeInstanceOf(OpenCodeConfigSourceInvalidError)
+
+    expect(settingsService.getLastKnownGoodConfig()).toBe('sentinel')
+    await expect(readFile(sourcePath('opencode.json'), 'utf8')).resolves.toBe('{"model": 5}')
+    expect(markRestartPendingMock).not.toHaveBeenCalled()
+  })
+
+  it('rejects invalid raw content and writes nothing', async () => {
+    const previous = '{"theme":"dark"}'
+    await writeFile(sourcePath('opencode.json'), previous, 'utf8')
+
+    await expect(applyOpenCodeConfigUpdate({
+      content: '{"model": 5}',
+      source: 'opencode.json',
+      settingsService,
+    })).rejects.toBeInstanceOf(ZodError)
+
+    await expect(readFile(sourcePath('opencode.json'), 'utf8')).resolves.toBe(previous)
+    expect(markRestartPendingMock).not.toHaveBeenCalled()
+  })
+
+  it('restores the prior sources if persisting last known good fails', async () => {
+    const lower = '{"model":"a/b"}'
+    const higher = '{\n // keep\n "theme":"dark"\n}'
+    await writeFile(sourcePath('config.json'), lower)
+    await writeFile(sourcePath('opencode.jsonc'), higher)
+    vi.spyOn(settingsService, 'saveLastKnownGoodConfig').mockImplementation(() => {
+      throw new Error('database write failed')
+    })
+
+    await expect(applyOpenCodeConfigUpdate({
+      content: { model: 'a/b', theme: 'light' },
+      settingsService,
+    })).rejects.toThrow('database write failed')
+
+    expect(await readFile(sourcePath('config.json'), 'utf8')).toBe(lower)
+    expect(await readFile(sourcePath('opencode.jsonc'), 'utf8')).toBe(higher)
+    expect(markRestartPendingMock).not.toHaveBeenCalled()
+  })
+
+  it('requires a restart after repairing an invalid source even when merged values are unchanged', async () => {
+    await writeFile(sourcePath('config.json'), '{"model":123}')
+    await writeFile(sourcePath('opencode.jsonc'), '{"model":"a/b"}')
+
+    const result = await applyOpenCodeConfigUpdate({
+      content: '{}',
+      source: 'config.json',
+      settingsService,
+    })
+
+    expect(result.status).toBe('restart_pending')
+    expect(markRestartPendingMock).toHaveBeenCalledOnce()
+  })
+
+  it('preserves unknown fields sent back with the merged content', async () => {
+    const raw = JSON.stringify({ theme: 'dark', customTool: { enabled: true } })
+    await writeFile(sourcePath('opencode.json'), raw, 'utf8')
+    const current = await readOpenCodeConfigFile()
 
     const result = expectStatus(await applyOpenCodeConfigUpdate({
-      content: { theme: 'light' },
-      openCodeClient,
+      content: { ...current!.content, theme: 'light' },
       settingsService,
-    }), 'applied')
+    }), 'restart_pending')
 
-    expect(result.config.rawContent).toBe('{\n  "theme": "light"\n}')
-    expect(settingsService.getLastKnownGoodConfig()).toBe('sentinel')
+    expect(result.config.content).toEqual({ theme: 'light', customTool: { enabled: true } })
+    const onDisk = JSON.parse(await readFile(sourcePath('opencode.json'), 'utf8')) as Record<string, unknown>
+    expect(onDisk).toEqual({ theme: 'light', customTool: { enabled: true } })
   })
 
-  it('captures the on-disk config as last known good when it is valid', async () => {
-    const previous = '{"theme":"dark"}'
-    await writeFile(paths.config, previous, 'utf8')
-    settingsService.saveLastKnownGoodConfig('sentinel')
+  it('captures every source as last known good and restores them together', async () => {
+    await writeFile(sourcePath('config.json'), '{"model":"a/b"}', 'utf8')
+    await writeFile(sourcePath('opencode.jsonc'), '{"theme":"dark"}', 'utf8')
 
-    const captured = await captureLastKnownGoodOpenCodeConfig(settingsService)
+    await captureLastKnownGoodOpenCodeConfig(settingsService)
+    await rm(sourcePath('config.json'))
+    await rm(sourcePath('opencode.jsonc'))
 
-    expect(captured?.rawContent).toBe(previous)
-    expect(settingsService.getLastKnownGoodConfig()).toBe(previous)
+    const restored = await restoreLastKnownGoodOpenCodeConfig(settingsService)
+
+    expect(restored?.content).toEqual({ model: 'a/b', theme: 'dark' })
+    await expect(readFile(sourcePath('config.json'), 'utf8')).resolves.toBe('{"model":"a/b"}')
+    await expect(readFile(sourcePath('opencode.jsonc'), 'utf8')).resolves.toBe('{"theme":"dark"}')
+    expect(clearStartupErrorMock).toHaveBeenCalledTimes(1)
   })
 
-  it('does not overwrite last known good when the on-disk config is invalid', async () => {
-    await writeFile(paths.config, '{"model": 5}', 'utf8')
+  it('does not capture an invalid prior snapshot as last known good', async () => {
+    await writeFile(sourcePath('opencode.json'), '{"model": 5}', 'utf8')
     settingsService.saveLastKnownGoodConfig('sentinel')
 
     const captured = await captureLastKnownGoodOpenCodeConfig(settingsService)
 
     expect(captured?.isValid).toBe(false)
     expect(settingsService.getLastKnownGoodConfig()).toBe('sentinel')
+  })
+
+  it('restores a legacy raw last known good snapshot as an opencode.json source', async () => {
+    const service = { getLastKnownGoodConfig: () => '{"theme":"dark"}' } as unknown as SettingsService
+
+    const restored = await restoreLastKnownGoodOpenCodeConfig(service)
+
+    expect(restored?.content).toEqual({ theme: 'dark' })
+    await expect(readFile(sourcePath('opencode.json'), 'utf8')).resolves.toBe('{"theme":"dark"}')
+    expect(clearStartupErrorMock).toHaveBeenCalledTimes(1)
   })
 
   it('returns null from restore when no last known good config exists', async () => {
@@ -206,69 +286,62 @@ describe('opencode-config-apply', () => {
     expect(clearStartupErrorMock).not.toHaveBeenCalled()
   })
 
-  it('writes the last known good config and clears the startup error on restore', async () => {
-    const service = { getLastKnownGoodConfig: () => '{"theme":"dark"}' } as unknown as SettingsService
+  it('applies an mcp-only change without marking a restart pending', async () => {
+    await writeFile(sourcePath('opencode.json'), '{"theme":"dark"}', 'utf8')
 
-    const restored = await restoreLastKnownGoodOpenCodeConfig(service)
-
-    expect(restored?.rawContent).toBe('{"theme":"dark"}')
-    await expect(readFile(paths.config, 'utf8')).resolves.toBe('{"theme":"dark"}')
-    expect(clearStartupErrorMock).toHaveBeenCalledTimes(1)
-  })
-
-  it('throws ZodError and writes nothing when the submitted content is invalid', async () => {
-    const previous = '{"theme":"dark"}'
-    await writeFile(paths.config, previous, 'utf8')
-
-    await expect(applyOpenCodeConfigUpdate({
-      content: '{"model": 5}',
-      openCodeClient,
+    const result = expectStatus(await applyOpenCodeConfigUpdate({
+      content: { theme: 'dark', mcp: { local: { type: 'local' } } },
       settingsService,
-    })).rejects.toBeInstanceOf(ZodError)
+    }), 'applied')
 
-    await expect(readFile(paths.config, 'utf8')).resolves.toBe(previous)
-    expect(patchConfigWithRecoveryMock).not.toHaveBeenCalled()
+    expect(result.config.content).toEqual({ theme: 'dark', mcp: { local: { type: 'local' } } })
     expect(markRestartPendingMock).not.toHaveBeenCalled()
   })
 
-  it('serializes concurrent applies so their live patches do not interleave', async () => {
-    await writeFile(paths.config, '{"theme":"dark"}', 'utf8')
+  it('requires a restart when mcp changes alongside another key', async () => {
+    await writeFile(sourcePath('opencode.json'), '{"theme":"dark"}', 'utf8')
 
-    const events: string[] = []
-    let releaseFirstPatch!: () => void
-    patchConfigWithRecoveryMock
-      .mockImplementationOnce(() => {
-        events.push('first:start')
-        return new Promise((resolve) => {
-          releaseFirstPatch = () => {
-            events.push('first:end')
-            resolve({ success: true })
-          }
-        })
-      })
-      .mockImplementationOnce(() => {
-        events.push('second:start')
-        return Promise.resolve({ success: true })
-      })
-
-    const first = applyOpenCodeConfigUpdate({
-      content: { mcp: { first: { type: 'local' } } },
-      openCodeClient,
+    const result = expectStatus(await applyOpenCodeConfigUpdate({
+      content: { theme: 'light', mcp: { local: { type: 'local' } } },
       settingsService,
-    })
-    await vi.waitFor(() => expect(events).toContain('first:start'))
+    }), 'restart_pending')
 
-    const second = applyOpenCodeConfigUpdate({
-      content: { mcp: { second: { type: 'local' } } },
-      openCodeClient,
+    expect(result.config.content).toEqual({ theme: 'light', mcp: { local: { type: 'local' } } })
+    expect(markRestartPendingMock).toHaveBeenCalledTimes(1)
+  })
+
+  it('requires a restart for a theme-only change', async () => {
+    await writeFile(sourcePath('opencode.json'), '{"theme":"dark"}', 'utf8')
+
+    expectStatus(await applyOpenCodeConfigUpdate({
+      content: { theme: 'light' },
       settingsService,
-    })
-    await new Promise((resolve) => setTimeout(resolve, 20))
-    expect(events).toEqual(['first:start'])
+    }), 'restart_pending')
 
-    releaseFirstPatch()
-    await Promise.all([first, second])
+    expect(markRestartPendingMock).toHaveBeenCalledTimes(1)
+  })
 
-    expect(events).toEqual(['first:start', 'first:end', 'second:start'])
+  it('applies an unchanged content edit without marking a restart pending', async () => {
+    await writeFile(sourcePath('opencode.json'), '{"theme":"dark"}', 'utf8')
+
+    expectStatus(await applyOpenCodeConfigUpdate({
+      content: { theme: 'dark' },
+      settingsService,
+    }), 'applied')
+
+    expect(markRestartPendingMock).not.toHaveBeenCalled()
+  })
+
+  it('seeds a minimal opencode.jsonc snapshot and removes every other source', async () => {
+    await writeFile(sourcePath('config.json'), '{"model":"a/b"}', 'utf8')
+    await writeFile(sourcePath('opencode.json'), '{"theme":"dark"}', 'utf8')
+
+    const seeded = await seedOpenCodeConfigFile()
+
+    expect(seeded.path).toBe(sourcePath('opencode.jsonc'))
+    expect(seeded.rawContent).toBe(OPENCODE_CONFIG_SEED)
+    expect(seeded.content).toEqual({ $schema: 'https://opencode.ai/config.json' })
+    expect(seeded.isValid).toBe(true)
+    await expect(readdir(workDir)).resolves.toEqual(['opencode.jsonc'])
   })
 })

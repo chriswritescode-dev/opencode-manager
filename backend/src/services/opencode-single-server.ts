@@ -26,16 +26,11 @@ import {
   getOpenCodeTmpHome,
   ENV,
 } from '@opencode-manager/shared/config/env'
-import { ZodError } from 'zod'
 import type { Database } from 'bun:sqlite'
 import { compareVersions } from '../utils/version-utils'
-import { patchConfigWithRecovery } from './opencode/config-recovery'
 import type { OpenCodeClient } from './opencode/client'
 import {
   readOpenCodeConfigFile,
-  toOpenCodeConfigValidationIssues,
-  withOpenCodeConfigLock,
-  writeOpenCodeConfigFile,
 } from './opencode-config-file'
 import { getOrCreateInternalToken } from './internal-token'
 import { installManagedPlugins } from './opencode/plugin-registry'
@@ -65,13 +60,11 @@ type OpenCodePluginSpec = string | [string, OpenCodePluginOptions]
 
 export class ConfigReloadError extends Error {
   validationIssues: StartupValidationIssue[]
-  removedFields: string[]
 
-  constructor(message: string, validationIssues: StartupValidationIssue[] = [], removedFields: string[] = []) {
+  constructor(message: string, validationIssues: StartupValidationIssue[] = []) {
     super(message)
     this.name = 'ConfigReloadError'
     this.validationIssues = validationIssues
-    this.removedFields = removedFields
   }
 }
 
@@ -331,13 +324,6 @@ class OpenCodeServerManager {
       return settingsService.getOpenCodeServerPassword()
     }
     return ENV.OPENCODE.SERVER_PASSWORD
-  }
-
-  private requireClient(): OpenCodeClient {
-    if (!this.openCodeClient) {
-      throw new Error('OpenCodeClient not configured on OpenCodeServerManager. Call setOpenCodeClient() during startup.')
-    }
-    return this.openCodeClient
   }
 
   static getInstance(): OpenCodeServerManager {
@@ -636,6 +622,8 @@ class OpenCodeServerManager {
     delete cleanEnv.OPENCODE_PID
     delete cleanEnv.OPENCODE
     delete cleanEnv.OPENCODE_PURE
+    delete cleanEnv.OPENCODE_CONFIG
+    delete userEnvVars.OPENCODE_CONFIG
 
     this.serverProcess = spawn(
       openCodeExecutable,
@@ -670,7 +658,6 @@ class OpenCodeServerManager {
               OPENCODE_SERVER_USERNAME: getOpenCodeServerUsername(),
             }
             : {}),
-          OPENCODE_CONFIG: openCodeConfigPath,
         }
       }
     )
@@ -1034,69 +1021,6 @@ class OpenCodeServerManager {
       logger.info('Restarting OpenCode server (full process restart)')
       await this.stop(true)
       await this.start(false, true)
-    } finally {
-      this.releaseOp(acquired)
-    }
-  }
-
-  async reloadConfig(): Promise<void> {
-    const acquired = this.acquireOp()
-    if (!acquired) {
-      throw new OpenCodeOperationBusyError()
-    }
-
-    try {
-      logger.info('Reloading OpenCode configuration (via API)')
-      try {
-        await withOpenCodeConfigLock(async () => {
-          const file = await readOpenCodeConfigFile()
-          if (file === null) {
-            throw new Error(`OpenCode config file not found: ${getOpenCodeConfigFilePath()}`)
-          }
-          logger.info(`Read config from file for reload: ${file.path}`)
-
-          const patchResult = await patchConfigWithRecovery(this.requireClient(), file.content)
-          if (!patchResult.success) {
-            const errorMessage = patchResult.error || 'Failed to reload config'
-            const validationIssues = patchResult.details || []
-            const removedFields = patchResult.removedFields || []
-            if (validationIssues.length > 0) {
-              const issueSummary = validationIssues.map((d) => `${d.path}: ${d.message}`).join('; ')
-              logger.error(`Config reload validation errors: ${issueSummary}`)
-            }
-            if (removedFields.length > 0) {
-              logger.info(`Removed fields during config reload: ${removedFields.join(', ')}`)
-            }
-            throw new ConfigReloadError(errorMessage, validationIssues, removedFields)
-          }
-
-          if (patchResult.removedFields && patchResult.removedFields.length > 0 && patchResult.appliedConfig) {
-            const cleanedConfigContent = JSON.stringify(patchResult.appliedConfig, null, 2)
-            try {
-              await writeOpenCodeConfigFile(cleanedConfigContent)
-            } catch (error) {
-              if (error instanceof ZodError) {
-                const validationIssues = toOpenCodeConfigValidationIssues(error.issues)
-                const issueSummary = validationIssues.map((d) => `${d.path}: ${d.message}`).join('; ')
-                logger.error(`Config reload validation errors: ${issueSummary}`)
-                throw new ConfigReloadError('Cleaned config failed validation', validationIssues, patchResult.removedFields)
-              }
-              throw error
-            }
-            logger.info(`Persisted cleaned config to ${file.path} after removing fields: ${patchResult.removedFields.join(', ')}`)
-          }
-        })
-
-        logger.info('OpenCode configuration reloaded successfully')
-        await new Promise(r => setTimeout(r, 500))
-        const healthy = await this.checkHealth()
-        if (!healthy) {
-          throw new Error('Server unhealthy after config reload')
-        }
-      } catch (error) {
-        logger.error('Failed to reload OpenCode config:', error)
-        throw error
-      }
     } finally {
       this.releaseOp(acquired)
     }
