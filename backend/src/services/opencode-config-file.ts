@@ -642,15 +642,20 @@ export async function writeHealthWatchArtifact(
 }
 
 export async function archiveBrokenOpenCodeConfigFile(): Promise<string | null> {
-  const snapshot = await readOpenCodeConfigSnapshot()
-  if (snapshot.sources.length === 0) {
+  try {
+    const snapshot = await readOpenCodeConfigSnapshot()
+    if (snapshot.sources.length === 0) {
+      return null
+    }
+
+    const payload = serializeOpenCodeConfigSnapshot(toOpenCodeConfigFile(snapshot))
+    const archivePath = await writeHealthWatchArtifact(OPENCODE_CONFIG_SNAPSHOT_ARTIFACT_PREFIX, () => payload)
+    logger.warn(`Archived broken OpenCode config to ${archivePath}`)
+    return archivePath
+  } catch (error) {
+    logger.warn('Failed to archive broken OpenCode config:', error)
     return null
   }
-
-  const payload = serializeOpenCodeConfigSnapshot(toOpenCodeConfigFile(snapshot))
-  const archivePath = await writeHealthWatchArtifact(OPENCODE_CONFIG_SNAPSHOT_ARTIFACT_PREFIX, () => payload)
-  logger.warn(`Archived broken OpenCode config to ${archivePath}`)
-  return archivePath
 }
 
 export async function deleteOpenCodeConfigFile(): Promise<boolean> {
