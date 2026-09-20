@@ -1,17 +1,17 @@
 # Guest image for the agent sandbox microVM (SANDBOX_IMAGE).
 #
-# node:24 is buildpack-deps based, so gcc/g++/make/ld/pkg-config, glib-2.0,
-# git, ssh, python3, curl and wget are already present, but it ships no network
-# diagnostics at all. This image adds the rest of the Manager image toolchain
-# (pnpm, bun, uv, jq), the GitHub CLI, a Playwright-managed Chromium, the
-# `python` alias, and the network tooling agents reach for.
-FROM node:24
+FROM node:24.21.0-trixie
 
 ARG PLAYWRIGHT_VERSION=1.63.0
 # uv 0.12.8 and later segfault under qemu-user x86_64 emulation, which is how
 # an arm64 host builds the amd64 platform; 0.12.7 is the newest verified-good
 # release, so re-verify a bump there before moving it.
 ARG UV_VERSION=0.12.7
+ARG PNPM_VERSION=11.24.0
+ARG BUN_VERSION=1.4.2
+ARG FALLOW_VERSION=3.27.0
+ARG RUST_VERSION=1.98.1
+ARG GO_VERSION=1.27.1
 # Bump TOOLS_CACHEBUST (e.g. via --build-arg) to force a fresh tool install
 # without invalidating the rest of the build cache.
 ARG TOOLS_CACHEBUST=0
@@ -25,23 +25,23 @@ ENV NODE_PATH=/usr/local/lib/node_modules
 # msb exec runs commands as a numeric host uid with no /etc/passwd entry, so
 # the guest defaults to HOME=/ and every tool that writes per-user state (uv
 # and pip caches, git config, gh config, the pnpm store) fails with EACCES.
-# Point HOME at a sticky world-writable directory and give corepack a shared
-# prewarmed cache so the preinstalled pnpm resolves without network or root.
 # PNPM_CONFIG_STORE_DIR pins the pnpm store to a container-internal path:
 # pnpm 11 no longer reads npm_config_* env vars, and an unpinned store falls
 # back into the bind-mounted project directory, where it floods the host file
 # watcher and gets committed.
 ENV HOME=/home/ocm-agent
-ENV COREPACK_HOME=/usr/local/share/corepack
 ENV UV_TOOL_BIN_DIR=/opt/agent-tools/bin
 ENV PNPM_HOME=/opt/agent-tools
 ENV PNPM_CONFIG_STORE_DIR=/home/ocm-agent/.local/share/pnpm/store
-ENV PATH=/opt/agent-tools/bin:$PATH
+ENV RUSTUP_HOME=/usr/local/rustup
+ENV CARGO_HOME=/usr/local/cargo
+ENV GOBIN=/opt/agent-tools/bin
+ENV PATH=/opt/agent-tools:/opt/agent-tools/bin:/usr/local/cargo/bin:/usr/local/go/bin:$PATH
 
 RUN echo "Installing gh and CLI tooling (cachebust=${TOOLS_CACHEBUST})" && \
     apt-get update && \
     apt-get install -y --no-install-recommends \
-        ca-certificates curl gh jq less ripgrep sudo tree file procps \
+        ca-certificates curl jq less ripgrep sudo tree file procps \
         python3-pip python3-venv python-is-python3 \
         iproute2 iputils-ping bind9-dnsutils bind9-host net-tools \
         netcat-openbsd traceroute lsof rsync && \
@@ -60,25 +60,30 @@ RUN echo "Installing gh and CLI tooling (cachebust=${TOOLS_CACHEBUST})" && \
     visudo -c && \
     gh --version
 
-# corepack prepare runs as root and creates COREPACK_HOME/v1 and
-# lastKnownGood.json beneath the sticky top-level directory, so those must be
-# opened up afterwards or a project pinning any other packageManager version
-# fails with "Failed to create cache directory" for the exec user.
-RUN echo "Installing pnpm, bun and uv (cachebust=${TOOLS_CACHEBUST})" && \
-    mkdir -p /home/ocm-agent /opt/agent-tools/bin /usr/local/share/corepack && \
-    chmod 1777 /home/ocm-agent /opt/agent-tools /opt/agent-tools/bin /usr/local/share/corepack && \
-    corepack enable && corepack prepare pnpm@10.28.1 --activate && \
-    find /usr/local/share/corepack -type d -exec chmod 1777 {} + && \
-    chmod a+rw /usr/local/share/corepack/lastKnownGood.json && \
-    curl -fsSL https://bun.sh/install | BUN_INSTALL=/opt/bun bash && \
+RUN echo "Installing pnpm=${PNPM_VERSION}, bun=${BUN_VERSION}, uv=${UV_VERSION}, fallow=${FALLOW_VERSION} (cachebust=${TOOLS_CACHEBUST})" && \
+    mkdir -p /home/ocm-agent /opt/agent-tools/bin && \
+    chmod 1777 /home/ocm-agent /opt/agent-tools /opt/agent-tools/bin && \
+    npm install -g "pnpm@${PNPM_VERSION}" "fallow@${FALLOW_VERSION}" && \
+    test "$(pnpm --version)" = "${PNPM_VERSION}" && \
+    curl -fsSL https://bun.sh/install | BUN_INSTALL=/opt/bun bash -s "bun-v${BUN_VERSION}" && \
     chmod -R a+rX /opt/bun && \
     ln -sf /opt/bun/bin/bun /opt/bun/bin/bunx && \
     ln -s /opt/bun/bin/bun /usr/local/bin/bun && \
     ln -s /opt/bun/bin/bun /usr/local/bin/bunx && \
+    test "$(bun --version)" = "${BUN_VERSION}" && \
     curl -LsSf https://astral.sh/uv/${UV_VERSION}/install.sh | UV_INSTALL_DIR=/usr/local/bin UV_NO_MODIFY_PATH=1 sh && \
     test "$(uv --version | cut -d' ' -f2)" = "${UV_VERSION}" && \
     rm -rf /root/.npm /root/.cache/uv /home/ocm-agent/.cache && \
-    pnpm --version && bun --version && uv --version
+    pnpm --version && bun --version && uv --version && fallow --version | grep -x "fallow ${FALLOW_VERSION}" >/dev/null
+
+RUN echo "Installing rust=${RUST_VERSION} and go=${GO_VERSION} (cachebust=${TOOLS_CACHEBUST})" && \
+    curl --proto '=https' --tlsv1.2 -fsSL https://sh.rustup.rs | \
+        HOME=/root sh -s -- -y --no-modify-path --profile minimal --default-toolchain "${RUST_VERSION}" && \
+    test "$(rustc --version | cut -d' ' -f2)" = "${RUST_VERSION}" && \
+    chmod -R a+w "${RUSTUP_HOME}" "${CARGO_HOME}" && \
+    curl -fsSL "https://go.dev/dl/go${GO_VERSION}.linux-$(dpkg --print-architecture).tar.gz" | tar -xzC /usr/local && \
+    test "$(go version | cut -d' ' -f3)" = "go${GO_VERSION}" && \
+    cargo --version && go version
 
 RUN echo "Installing playwright=${PLAYWRIGHT_VERSION} chromium (cachebust=${TOOLS_CACHEBUST})" && \
     npm install -g "playwright@${PLAYWRIGHT_VERSION}" && \
@@ -87,9 +92,6 @@ RUN echo "Installing playwright=${PLAYWRIGHT_VERSION} chromium (cachebust=${TOOL
     rm -rf /var/lib/apt/lists/* /root/.npm && \
     npx --yes "playwright@${PLAYWRIGHT_VERSION}" --version
 
-# Declared after the Playwright layer on purpose: npm_config_prefix must not
-# affect the root-run `npm install -g playwright`, which has to land in
-# /usr/local/lib/node_modules for the NODE_PATH fallback above to work.
 ENV npm_config_prefix=/opt/agent-tools
 
 # The runtime exec user is a numeric host uid with no /etc/passwd entry, so the
@@ -102,8 +104,9 @@ RUN echo "Verifying guest toolchain as an unknown uid (cachebust=${TOOLS_CACHEBU
     rm -rf /home/ocm-agent && \
     mkdir -p /home/ocm-agent && \
     chmod 1777 /home/ocm-agent && \
-    setpriv --reuid=4242 --regid=4242 --clear-groups sh -c "set -e; pnpm --version; mkdir /tmp/pm-pin-check && cd /tmp/pm-pin-check && printf '{\"name\":\"pm-pin-check\",\"packageManager\":\"pnpm@10.12.1\"}' > package.json && pnpm --version | grep -qx 10.12.1 && cd / && rm -rf /tmp/pm-pin-check; bun --version; bunx --version; uv --version; uvx --version; playwright --version; gh --version; jq --version; rg --version; npm install -g --silent cowsay && cowsay -t verify-ok | head -1; git config --global user.email verify@ocm.local; uv venv /tmp/uv-check >/dev/null; uv pip install --python /tmp/uv-check/bin/python idna >/dev/null; pip3 install --user --force-reinstall --no-deps --quiet idna; rm -rf /tmp/uv-check; for tool in python python3 git curl wget ssh rsync lsof ip ss netstat ping dig host nslookup nc traceroute; do command -v \"\$tool\" >/dev/null || { echo \"missing guest tool: \$tool\"; exit 1; }; done; python --version" && \
-    setpriv --reuid=1000 --regid=1000 --clear-groups sh -c "set -e; sudo -n apt-get update -qq; sudo -n apt-get install -y -qq --no-install-recommends bc; bc --version | head -1" && \
-    rm -rf /home/ocm-agent /opt/agent-tools /var/lib/apt/lists/* /usr/local/share/corepack/v1/pnpm/10.12.1 && \
+    setpriv --reuid=4242 --regid=4242 --clear-groups bash -euo pipefail -c 'pnpm --version; pm_dir=$(mktemp -d); cd "$pm_dir"; printf "%s" "{\"name\":\"pm-pin-check\",\"packageManager\":\"pnpm@10.12.1\"}" > package.json; pnpm --version | grep -x 10.12.1 >/dev/null; cd /; rm -rf "$pm_dir"; bun --version; bunx --version; uv --version; uvx --version; fallow --version | grep -x "fallow ${FALLOW_VERSION}" >/dev/null; playwright --version; gh --version; jq --version; rg --version; npm install -g --silent cowsay; cowsay -t verify-ok | grep verify-ok >/dev/null; git config --global user.email verify@ocm.local; uv venv /tmp/uv-check >/dev/null; uv pip install --python /tmp/uv-check/bin/python idna >/dev/null; pip3 install --user --force-reinstall --no-deps --quiet idna; rm -rf /tmp/uv-check; for tool in python python3 git curl wget ssh rsync lsof ip ss netstat ping dig host nslookup nc traceroute; do if ! command -v "$tool" >/dev/null; then echo "missing guest tool: $tool"; exit 1; fi; done; python --version' && \
+    setpriv --reuid=4242 --regid=4242 --clear-groups bash -euo pipefail -c 'rs_dir=$(mktemp -d); cargo new --quiet --vcs none "$rs_dir/rs-check"; cargo build --quiet --manifest-path "$rs_dir/rs-check/Cargo.toml"; "$rs_dir/rs-check/target/debug/rs-check" | grep -x "Hello, world!" >/dev/null; rm -rf "$rs_dir"; go_dir=$(mktemp -d); cd "$go_dir"; go mod init go-check >/dev/null 2>&1; printf "package main\nimport \"fmt\"\nfunc main() { fmt.Println(\"go-ok\") }\n" > main.go; go run . | grep -x go-ok >/dev/null; cd /; rm -rf "$go_dir"' && \
+    setpriv --reuid=1000 --regid=1000 --clear-groups bash -euo pipefail -c 'sudo -n apt-get update -qq; sudo -n apt-get install -y -qq --no-install-recommends bc; bc --version' && \
+    rm -rf /home/ocm-agent /opt/agent-tools /var/lib/apt/lists/* "${CARGO_HOME}/registry" && \
     mkdir -p /home/ocm-agent /opt/agent-tools/bin && \
     chmod 1777 /home/ocm-agent /opt/agent-tools /opt/agent-tools/bin

@@ -1,6 +1,6 @@
 import { describe, it, expect } from 'vitest'
-import { readFileSync, mkdtempSync, mkdirSync, writeFileSync, rmSync, readdirSync, statSync, existsSync } from 'fs'
-import { execSync } from 'child_process'
+import { readFileSync, mkdtempSync, mkdirSync, writeFileSync, rmSync, readdirSync, statSync, existsSync, chmodSync } from 'fs'
+import { execFileSync, execSync } from 'child_process'
 import { join } from 'path'
 import { tmpdir } from 'os'
 import { repoRoot } from '../helpers/repo-root'
@@ -293,6 +293,151 @@ describe('sandbox guest image', () => {
   it('pins the pnpm store to a container-internal path via PNPM_CONFIG_STORE_DIR', () => {
     expect(sandboxDockerfile).toContain('PNPM_CONFIG_STORE_DIR=/home/ocm-agent/.local/share/pnpm/store')
     expect(sandboxDockerfile, 'pnpm 11 ignores npm_config_* env vars').not.toContain('npm_config_store_dir=')
+  })
+
+  it('builds from the same pinned base tag as the Manager image', () => {
+    const managerBase = read(dockerfilePath).match(/^FROM (node:\S+) AS base$/m)?.[1]
+    expect(managerBase).toMatch(/^node:\d+\.\d+\.\d+-trixie$/)
+    expect(sandboxDockerfile).toMatch(new RegExp(`^FROM ${managerBase!.replace(/\./g, '\\.')}$`, 'm'))
+  })
+
+  it('installs pnpm through npm at a pinned version and asserts it, without corepack', () => {
+    expect(sandboxDockerfile).toMatch(/ARG PNPM_VERSION=11\.24\.0/)
+    expect(sandboxDockerfile).toContain('npm install -g "pnpm@${PNPM_VERSION}"')
+    expect(sandboxDockerfile).toContain('test "$(pnpm --version)" = "${PNPM_VERSION}"')
+    expect(sandboxDockerfile).not.toContain('corepack')
+  })
+
+  it('pins bun through the installer tag and asserts the installed version', () => {
+    expect(sandboxDockerfile).toMatch(/ARG BUN_VERSION=1\.4\.2/)
+    expect(sandboxDockerfile).toContain('bash -s "bun-v${BUN_VERSION}"')
+    expect(sandboxDockerfile).toContain('test "$(bun --version)" = "${BUN_VERSION}"')
+  })
+
+  it('pins fallow, rust and go and asserts each installed version', () => {
+    expect(sandboxDockerfile).toMatch(/ARG FALLOW_VERSION=3\.27\.0/)
+    expect(sandboxDockerfile).toContain('"fallow@${FALLOW_VERSION}"')
+    expect(sandboxDockerfile).toContain('fallow --version | grep -x "fallow ${FALLOW_VERSION}" >/dev/null')
+    expect(sandboxDockerfile).toMatch(/ARG RUST_VERSION=1\.98\.1/)
+    expect(sandboxDockerfile).toContain('--profile minimal --default-toolchain "${RUST_VERSION}"')
+    expect(sandboxDockerfile).toContain('test "$(rustc --version | cut -d\' \' -f2)" = "${RUST_VERSION}"')
+    expect(sandboxDockerfile).toMatch(/ARG GO_VERSION=1\.27\.1/)
+    expect(sandboxDockerfile).toContain('test "$(go version | cut -d\' \' -f3)" = "go${GO_VERSION}"')
+  })
+
+  it('opens the rust homes to every uid and routes go installs onto the agent tools PATH', () => {
+    expect(sandboxDockerfile).toContain('ENV RUSTUP_HOME=/usr/local/rustup')
+    expect(sandboxDockerfile).toContain('ENV CARGO_HOME=/usr/local/cargo')
+    expect(sandboxDockerfile).toContain('chmod -R a+w "${RUSTUP_HOME}" "${CARGO_HOME}"')
+    expect(sandboxDockerfile).toContain('ENV GOBIN=/opt/agent-tools/bin')
+    expect(sandboxDockerfile).toContain('ENV PNPM_HOME=/opt/agent-tools')
+    expect(sandboxDockerfile).toMatch(/ENV PATH=\/opt\/agent-tools:\/opt\/agent-tools\/bin:\/usr\/local\/cargo\/bin:\/usr\/local\/go\/bin:\$PATH/)
+  })
+
+  it('declares npm_config_prefix only after every root-run npm install -g', () => {
+    const prefixIndex = sandboxDockerfile.indexOf('ENV npm_config_prefix=')
+    expect(prefixIndex).toBeGreaterThan(-1)
+    expect(sandboxDockerfile.lastIndexOf('npm install -g "')).toBeLessThan(prefixIndex)
+  })
+
+  it('verifies the rust and go toolchains as the unknown uid', () => {
+    const verifyRun = sandboxDockerfile.slice(sandboxDockerfile.indexOf('Verifying guest toolchain'))
+    expect(verifyRun).toMatch(/setpriv --reuid=4242 [^\n]*fallow --version/)
+    expect(verifyRun).toMatch(/setpriv --reuid=4242 [^\n]*cargo build/)
+    expect(verifyRun).toMatch(/setpriv --reuid=4242 [^\n]*go run \./)
+  })
+
+  it('runs each verification step under bash errexit and pipefail without head pipelines', () => {
+    const verifyRun = sandboxDockerfile.slice(sandboxDockerfile.indexOf('Verifying guest toolchain'))
+    expect(verifyRun).not.toContain('sh -c "set -e;')
+    expect(verifyRun).not.toContain('| head')
+    const scripts = [...verifyRun.matchAll(/bash -euo pipefail -c '([^']*)'/g)].map((match) => match[1]!)
+    expect(scripts).toHaveLength(3)
+  })
+
+  it('aborts the verification script when an injected cargo build fails', () => {
+    const verifyRun = sandboxDockerfile.slice(sandboxDockerfile.indexOf('Verifying guest toolchain'))
+    const rustGoScript = [...verifyRun.matchAll(/bash -euo pipefail -c '([^']*)'/g)]
+      .map((match) => match[1]!)
+      .find((script) => script.includes('cargo build'))
+    expect(rustGoScript, 'rust/go verification script must be extractable').toBeDefined()
+
+    const workDir = mkdtempSync(join(tmpdir(), 'sandbox-verify-'))
+    const binDir = join(workDir, 'bin')
+    mkdirSync(binDir)
+
+    const writeStub = (name: string, lines: string[]) => {
+      const stubPath = join(binDir, name)
+      writeFileSync(stubPath, ['#!/usr/bin/env bash', 'set -euo pipefail', ...lines, ''].join('\n'))
+      chmodSync(stubPath, 0o755)
+    }
+
+    writeStub('cargo', [
+      'crate_dir=""',
+      'for arg in "$@"; do crate_dir="$arg"; done',
+      'case "$1" in',
+      '  new) mkdir -p "$crate_dir/target/debug"; printf "%s\\n" "$crate_dir" > "$STUB_STATE/crate-dir" ;;',
+      '  build)',
+      '    dir="$(cat "$STUB_STATE/crate-dir")"',
+      '    printf "#!/usr/bin/env bash\\necho \\"Hello, world!\\"\\n" > "$dir/target/debug/rs-check"',
+      '    chmod +x "$dir/target/debug/rs-check"',
+      '    exit 1 ;;',
+      'esac',
+    ])
+
+    writeStub('go', [
+      'case "$1" in',
+      '  mod) exit 0 ;;',
+      '  run) echo go-ok ;;',
+      'esac',
+    ])
+
+    let status = 0
+    try {
+      execFileSync('bash', ['-e', '-u', '-o', 'pipefail', '-c', rustGoScript!], {
+        cwd: workDir,
+        env: { ...process.env, PATH: `${binDir}:${process.env.PATH ?? ''}`, TMPDIR: workDir, HOME: workDir, STUB_STATE: binDir },
+        stdio: 'pipe',
+      })
+    } catch (error) {
+      status = (error as { status?: number }).status ?? 1
+    }
+
+    expect(status, 'a failed cargo build must abort the verification script').not.toBe(0)
+    expect(existsSync(join(binDir, 'crate-dir'))).toBe(true)
+    rmSync(workDir, { recursive: true, force: true })
+  })
+})
+
+describe('sandbox image workflow', () => {
+  const workflow = read(join(repoRoot, '.github/workflows/sandbox-image.yml'))
+
+  it('builds each platform on a native runner instead of under qemu', () => {
+    expect(workflow).toMatch(/platform: linux\/amd64\n\s+runner: ubuntu-latest/)
+    expect(workflow).toMatch(/platform: linux\/arm64\n\s+runner: ubuntu-24\.04-arm/)
+    expect(workflow).not.toContain('setup-qemu-action')
+  })
+
+  it('pushes per-platform digests and merges them into one manifest list', () => {
+    expect(workflow).toContain('push-by-digest=true,name-canonical=true,push=true')
+    expect(workflow).toContain('docker buildx imagetools create')
+    expect(workflow).toContain('file: Dockerfile.sandbox')
+  })
+
+  it('publishes the digest-pinned default image repository', () => {
+    expect(workflow).toContain('IMAGE: docker.io/cstechdev/ocm-sandbox')
+  })
+
+  it('only pushes from this repository, never from fork pull requests', () => {
+    expect(workflow).toContain("github.event.pull_request.head.repo.full_name == github.repository")
+  })
+
+  it('validates pull requests without registry credentials or publishing', () => {
+    expect(workflow).toMatch(/- name: Login to Docker Hub\n\s+if: github.event_name == 'workflow_dispatch'/)
+    expect(workflow).toContain("|| 'type=cacheonly'")
+    expect(workflow).toMatch(/- name: Export digest\n\s+if: github.event_name == 'workflow_dispatch'/)
+    expect(workflow).toMatch(/- name: Upload digest\n\s+if: github.event_name == 'workflow_dispatch'/)
+    expect(workflow).toMatch(/merge:\n\s+if: github.event_name == 'workflow_dispatch'/)
   })
 })
 
