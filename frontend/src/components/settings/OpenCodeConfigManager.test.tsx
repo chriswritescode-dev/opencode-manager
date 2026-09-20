@@ -271,7 +271,6 @@ describe('OpenCodeConfigManager', () => {
       rawContent: '{\n  "theme": "system"\n}',
     }
     mockGetOpenCodeConfig.mockResolvedValueOnce(configWithRaw)
-    mockGetOpenCodeConfig.mockReturnValueOnce(new Promise<OpenCodeConfigFile>(() => {}))
     const savedConfig: OpenCodeConfigFile = {
       ...configWithRaw,
       rawContent: '{\n  "theme": "dark"\n}',
@@ -386,15 +385,15 @@ describe('OpenCodeConfigManager', () => {
     expect(payload.content.provider.openai.models).not.toHaveProperty('gpt-4o')
   })
 
-  it('sends the revision fetched by the add dialog, not the stale cached one', async () => {
-    const staleConfig = { ...defaultConfig, revision: 'rev-A' }
-    const freshConfig = { ...defaultConfig, revision: 'rev-B' }
+  it('resolves the add-server expected revision from the query cache', async () => {
+    const cachedConfig = { ...defaultConfig, revision: 'rev-A' }
+    const dialogFetchedConfig = { ...defaultConfig, revision: 'rev-B' }
     let configRequests = 0
     mockGetOpenCodeConfig.mockImplementation(() => {
       configRequests += 1
-      return Promise.resolve(configRequests === 1 ? staleConfig : freshConfig)
+      return Promise.resolve(configRequests === 1 ? cachedConfig : dialogFetchedConfig)
     })
-    mockUpdateOpenCodeConfig.mockResolvedValue({ ...freshConfig, restartRequired: true })
+    mockUpdateOpenCodeConfig.mockResolvedValue({ ...cachedConfig, restartRequired: true })
 
     const user = userEvent.setup()
     renderWithQuery(<OpenCodeConfigManager />)
@@ -408,8 +407,63 @@ describe('OpenCodeConfigManager', () => {
 
     await waitFor(() => expect(mockUpdateOpenCodeConfig).toHaveBeenCalledTimes(1))
     const [payload] = mockUpdateOpenCodeConfig.mock.calls[0]
-    expect(payload.expectedRevision).toBe('rev-B')
+    expect(payload.expectedRevision).toBe('rev-A')
     expect(mockAddServerAsync).toHaveBeenCalledTimes(1)
+  })
+
+  it('sends the revision from the previous save on the next structured save', async () => {
+    const twoModelsContent = {
+      provider: {
+        openai: {
+          name: 'OpenAI',
+          models: {
+            'gpt-4o': { name: 'GPT-4o' },
+            'gpt-3.5': { name: 'GPT-3.5' },
+          },
+        },
+      },
+    }
+    const twoModelsConfig = makeOpenCodeConfigFile({
+      path: '/workspace/.opencode/opencode.json',
+      rawContent: JSON.stringify(twoModelsContent, null, 2),
+      content: twoModelsContent,
+    })
+    mockGetOpenCodeConfig.mockResolvedValue(twoModelsConfig)
+
+    const afterFirstDelete = {
+      ...twoModelsConfig,
+      content: {
+        provider: {
+          openai: {
+            name: 'OpenAI',
+            models: {
+              'gpt-3.5': { name: 'GPT-3.5' },
+            },
+          },
+        },
+      },
+      revision: 'rev-2',
+    }
+    const afterSecondDelete = { ...afterFirstDelete, revision: 'rev-3' }
+    mockUpdateOpenCodeConfig
+      .mockResolvedValueOnce(afterFirstDelete)
+      .mockResolvedValueOnce(afterSecondDelete)
+
+    const user = userEvent.setup()
+    renderWithQuery(<OpenCodeConfigManager />)
+
+    await screen.findByText('GPT-4o')
+    await user.click(screen.getByRole('button', { name: /Models/i }))
+
+    await user.click(screen.getByLabelText('Actions for GPT-4o'))
+    await user.click(screen.getByText('Delete'))
+    await waitFor(() => expect(mockUpdateOpenCodeConfig).toHaveBeenCalledTimes(1))
+    expect(mockUpdateOpenCodeConfig.mock.calls[0][0].expectedRevision).toBe('rev-1')
+
+    await user.click(screen.getByLabelText('Actions for GPT-3.5'))
+    await user.click(screen.getByText('Delete'))
+    await waitFor(() => expect(mockUpdateOpenCodeConfig).toHaveBeenCalledTimes(2))
+    expect(mockUpdateOpenCodeConfig.mock.calls[1][0].expectedRevision).toBe('rev-2')
   })
 
   it('reports a comment-only raw save as applied without a restart', async () => {
@@ -519,6 +573,40 @@ describe('OpenCodeConfigManager', () => {
     expect(importToggle).toHaveAttribute('aria-expanded', 'true')
     expect(importContent).toHaveClass('block')
     expect(await screen.findByRole('button', { name: /Import From Host/i })).toBeInTheDocument()
+  })
+
+  it('warns that importing removes workspace config files absent on the host', async () => {
+    mockGetOpenCodeImportStatus.mockResolvedValue({
+      configSourcePath: '/import/opencode-config/opencode.jsonc',
+      configSourcePaths: ['/import/opencode-config/opencode.json', '/import/opencode-config/opencode.jsonc'],
+      stateSourcePath: null,
+      workspaceConfigPath: '/workspace/.config/opencode/opencode.json',
+      workspaceConfigPathsToRemove: ['/workspace/.config/opencode/opencode.jsonc'],
+      workspaceStatePath: '/workspace/.opencode/state/opencode',
+      workspaceStateExists: false,
+    })
+
+    renderWithQuery(<OpenCodeConfigManager />)
+
+    expect(await screen.findByText(/These files will be removed: opencode.jsonc\./)).toBeInTheDocument()
+    expect(screen.getByText(/Host files imported: opencode.json, opencode.jsonc\./)).toBeInTheDocument()
+  })
+
+  it('does not warn about removals when the host has every workspace config file', async () => {
+    mockGetOpenCodeImportStatus.mockResolvedValue({
+      configSourcePath: '/import/opencode-config/opencode.json',
+      configSourcePaths: ['/import/opencode-config/opencode.json'],
+      stateSourcePath: null,
+      workspaceConfigPath: '/workspace/.config/opencode/opencode.json',
+      workspaceConfigPathsToRemove: [],
+      workspaceStatePath: '/workspace/.opencode/state/opencode',
+      workspaceStateExists: false,
+    })
+
+    renderWithQuery(<OpenCodeConfigManager />)
+
+    await screen.findByText('opencode.json')
+    expect(screen.queryByText(/These files will be removed/)).not.toBeInTheDocument()
   })
 
   it('shows the config file name and an invalid badge when the file is invalid', async () => {

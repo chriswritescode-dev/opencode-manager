@@ -309,6 +309,8 @@ services:
       - ${OCM_OPENCODE_STATE_HOST_PATH}:/import/opencode-state:ro
 ```
 
+`OPENCODE_IMPORT_CONFIG_PATH` imports a single file. For a host with multiple recognized config files (`config.json`, `opencode.json`, `opencode.jsonc`), omit it and mount `${OCM_OPENCODE_CONFIG_HOST_PATH}` writable at the container's OpenCode config directory (`/home/node/.config/opencode`) instead. Import mirrors the host's recognized files into the workspace and removes workspace copies absent on the host.
+
 Why the repo mount uses the host path as the container path:
 
 - standalone OpenCode stores chats against absolute directory paths

@@ -1,5 +1,6 @@
-import { opencodeServerManager } from './opencode-single-server'
-import type { OpenCodeSupervisor } from './opencode-supervisor'
+import { opencodeServerManager, ConfigReloadError } from './opencode-single-server'
+import { readOpenCodeConfigFile } from './opencode-config-file'
+import type { OpenCodeOperationReason, OpenCodeSupervisor } from './opencode-supervisor'
 import type { OpenCodeRestartCoordinator } from './opencode-restart-coordinator'
 
 let restartCoordinator: OpenCodeRestartCoordinator | null = null
@@ -22,9 +23,9 @@ function restartFailureError(): Error {
   return new Error(startupError ?? 'OpenCode server restart did not complete successfully')
 }
 
-async function performRestart(supervisor?: OpenCodeSupervisor): Promise<boolean> {
+async function performRestart(supervisor: OpenCodeSupervisor | undefined, reason: OpenCodeOperationReason): Promise<boolean> {
   if (supervisor) {
-    return (await supervisor.restart('settings_restart')).healthy
+    return (await supervisor.restart(reason)).healthy
   }
   opencodeServerManager.clearStartupError()
   await opencodeServerManager.restart()
@@ -43,16 +44,19 @@ async function performRestart(supervisor?: OpenCodeSupervisor): Promise<boolean>
  * A full process restart drops in-flight sessions; resuming re-issues a
  * "continue" prompt once the server is healthy again.
  */
-export async function restartOpenCode(supervisor?: OpenCodeSupervisor): Promise<{ resumedSessionIDs: string[] }> {
+export async function restartOpenCode(
+  supervisor?: OpenCodeSupervisor,
+  reason: OpenCodeOperationReason = 'settings_restart',
+): Promise<{ resumedSessionIDs: string[] }> {
   if (restartCoordinator) {
-    const result = await restartCoordinator.runWithResume(() => performRestart(supervisor))
+    const result = await restartCoordinator.runWithResume(() => performRestart(supervisor, reason))
     if (!result.healthy) {
       throw restartFailureError()
     }
     return { resumedSessionIDs: result.resumedSessionIDs }
   }
   if (supervisor) {
-    const status = await supervisor.restart('settings_restart')
+    const status = await supervisor.restart(reason)
     if (!status.healthy) {
       throw restartFailureError()
     }
@@ -67,35 +71,13 @@ export async function restartOpenCode(supervisor?: OpenCodeSupervisor): Promise<
   return { resumedSessionIDs: [] }
 }
 
-function reloadFailureError(): Error {
-  const startupError = opencodeServerManager.getLastStartupError()
-  return new Error(startupError ?? 'OpenCode server reload did not complete successfully')
-}
-
-async function performReload(supervisor?: OpenCodeSupervisor): Promise<boolean> {
-  if (supervisor) {
-    const status = await supervisor.reloadConfig('settings_reload')
-    if (!status.healthy) {
-      throw reloadFailureError()
-    }
-    return status.healthy
+export async function reloadOpenCodeConfig(supervisor?: OpenCodeSupervisor): Promise<{ resumedSessionIDs: string[] }> {
+  const config = await readOpenCodeConfigFile()
+  if (!config) {
+    throw new ConfigReloadError('No OpenCode global configuration files found')
   }
-  opencodeServerManager.clearStartupError()
-  await opencodeServerManager.reloadConfig()
-  const healthy = await opencodeServerManager.checkHealth()
-  if (!healthy) {
-    throw reloadFailureError()
+  if (!config.isValid) {
+    throw new ConfigReloadError('OpenCode global configuration is invalid', config.validationIssues)
   }
-  return healthy
-}
-
-export async function reloadOpenCodeConfig(supervisor?: OpenCodeSupervisor): Promise<void> {
-  if (restartCoordinator) {
-    const result = await restartCoordinator.runWithResume(() => performReload(supervisor))
-    if (!result.healthy) {
-      throw reloadFailureError()
-    }
-    return
-  }
-  await performReload(supervisor)
+  return restartOpenCode(supervisor, 'settings_reload')
 }

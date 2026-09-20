@@ -55,7 +55,8 @@ import { installAssistantWorkspace } from './services/assistant-mode'
 import { detectSandboxCapability } from './services/sandbox/capability'
 import { SandboxRuntimeService, stopWorkspaceSandboxOnShutdown } from './services/sandbox/runtime'
 import { getOpenCodeImportStatus, syncOpenCodeImport } from './services/opencode-import'
-import { readOpenCodeConfigFile, writeOpenCodeConfigFile, OPENCODE_CONFIG_SEED } from './services/opencode-config-file'
+import { readOpenCodeConfigFile } from './services/opencode-config-file'
+import { seedOpenCodeConfigFile } from './services/opencode-config-apply'
 import { OpenCodeSupervisor } from './services/opencode-supervisor'
 import { OpenCodeRestartCoordinator } from './services/opencode-restart-coordinator'
 import { setOpenCodeRestartCoordinator } from './services/opencode-restart'
@@ -133,7 +134,7 @@ async function ensureOpenCodeConfigFileExists(): Promise<void> {
     }
   }
 
-  await writeOpenCodeConfigFile(OPENCODE_CONFIG_SEED)
+  await seedOpenCodeConfigFile()
   logger.info('Created minimal seed config')
 }
 

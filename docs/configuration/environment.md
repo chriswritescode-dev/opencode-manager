@@ -105,7 +105,7 @@ When configured, users can enable push notifications in Settings → Notificatio
 
 | Variable | Description | Default |
 |----------|-------------|---------|
-| `OPENCODE_IMPORT_CONFIG_PATH` | Existing standalone OpenCode `opencode.json` to import on first startup | - |
+| `OPENCODE_IMPORT_CONFIG_PATH` | Existing standalone OpenCode config file to import on first startup. When set to a single file, only that file is imported. When unset, the host's recognized config files (`config.json`, `opencode.json`, `opencode.jsonc`) are mirrored into the workspace and workspace copies absent on the host are removed | - |
 | `OPENCODE_IMPORT_STATE_PATH` | Existing standalone OpenCode state directory to import on first startup | - |
 
 ## Agent Sandboxing
@@ -131,7 +131,6 @@ Sandboxed agent commands run inside a microVM managed by `msb` (see [Agent Sandb
 | `PROCESS_START_WAIT_MS` | Wait time for OpenCode process to start | `2000` |
 | `PROCESS_VERIFY_WAIT_MS` | Wait time for process health verification | `1000` |
 | `HEALTH_CHECK_TIMEOUT_MS` | OpenCode liveness probe timeout | `30000` |
-| `CONFIG_PATCH_TIMEOUT_MS` | Timeout for an OpenCode config patch request | `15000` |
 
 ## File Limits
 

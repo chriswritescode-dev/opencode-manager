@@ -1,6 +1,6 @@
 import { QueryClient } from '@tanstack/react-query'
 import { describe, expect, it, vi } from 'vitest'
-import { refreshOpenCodeServerCaches } from './queryInvalidation'
+import { invalidateConfigCaches, refreshOpenCodeServerCaches } from './queryInvalidation'
 
 describe('refreshOpenCodeServerCaches', () => {
   it('invalidates every cache that displays the installed OpenCode version', () => {
@@ -25,5 +25,27 @@ describe('refreshOpenCodeServerCaches', () => {
     expect(queryClient.getQueryData(['opencode-versions'])).toEqual({ currentVersion: '1.0.1', versions: [] })
     expect(invalidateQueries).toHaveBeenCalledWith({ queryKey: ['health'] })
     expect(invalidateQueries).toHaveBeenCalledWith({ queryKey: ['opencode-versions'] })
+  })
+})
+
+describe('invalidateConfigCaches', () => {
+  it('invalidates the OpenCode config file cache by default', () => {
+    const queryClient = new QueryClient()
+    const invalidateQueries = vi.spyOn(queryClient, 'invalidateQueries')
+
+    invalidateConfigCaches(queryClient)
+
+    expect(invalidateQueries).toHaveBeenCalledWith({ queryKey: ['opencode-config'] })
+  })
+
+  it('skips the OpenCode config file cache while still invalidating dependents', () => {
+    const queryClient = new QueryClient()
+    const invalidateQueries = vi.spyOn(queryClient, 'invalidateQueries')
+
+    invalidateConfigCaches(queryClient, { skipOpenCodeConfig: true })
+
+    expect(invalidateQueries).not.toHaveBeenCalledWith({ queryKey: ['opencode-config'] })
+    expect(invalidateQueries).toHaveBeenCalledWith({ queryKey: ['opencode', 'config'] })
+    expect(invalidateQueries).toHaveBeenCalledWith({ queryKey: ['health'] })
   })
 })

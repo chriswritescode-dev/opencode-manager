@@ -32,7 +32,7 @@ vi.mock('@/lib/toast', () => ({
 
 const config = makeOpenCodeConfigFile()
 
-function renderDialog(onUpdate: (content: Record<string, unknown>, expectedRevision?: string) => Promise<void>) {
+function renderDialog(onUpdate: (content: Record<string, unknown>) => Promise<void>) {
   const queryClient = new QueryClient({ defaultOptions: { queries: { retry: false } } })
   return render(
     <QueryClientProvider client={queryClient}>
@@ -68,14 +68,14 @@ describe('AddMcpServerDialog', () => {
           command: ['npx', 'server-filesystem', '/tmp'],
         },
       },
-    }, 'rev-1')
+    })
     expect(mockAddServerAsync).toHaveBeenCalledTimes(1)
   })
 
-  it('passes the revision from the freshly fetched config to onUpdate', async () => {
+  it('passes only the merged content to onUpdate', async () => {
     const fetched = makeOpenCodeConfigFile({ revision: 'rev-B' })
     mockGetOpenCodeConfig.mockResolvedValue(fetched)
-    const onUpdate = vi.fn<(content: Record<string, unknown>, expectedRevision?: string) => Promise<void>>().mockResolvedValue(undefined)
+    const onUpdate = vi.fn<(content: Record<string, unknown>) => Promise<void>>().mockResolvedValue(undefined)
     const user = userEvent.setup()
     renderDialog(onUpdate)
 
@@ -84,8 +84,8 @@ describe('AddMcpServerDialog', () => {
     await user.click(screen.getByRole('button', { name: 'Add MCP Server' }))
 
     await waitFor(() => expect(onUpdate).toHaveBeenCalledTimes(1))
-    const [content, expectedRevision] = onUpdate.mock.calls[0]
-    expect(expectedRevision).toBe('rev-B')
+    const [content] = onUpdate.mock.calls[0]
+    expect(onUpdate.mock.calls[0]).toHaveLength(1)
     expect((content.mcp as Record<string, unknown>).filesystem).toBeDefined()
     expect(mockUpdateOpenCodeConfig).not.toHaveBeenCalled()
   })

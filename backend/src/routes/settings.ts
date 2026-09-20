@@ -517,8 +517,12 @@ export function createSettingsRoutes(db: Database, gitAuthService: GitAuthServic
   app.post('/opencode-reload', async (c) => {
     try {
       logger.info('OpenCode configuration reload requested')
-      await reloadOpenCodeConfig(openCodeSupervisor)
-      return c.json({ success: true, message: 'OpenCode configuration reloaded successfully' })
+      const { resumedSessionIDs } = await reloadOpenCodeConfig(openCodeSupervisor)
+      return c.json({
+        success: true,
+        message: 'OpenCode server restarted with the current configuration',
+        resumedSessions: resumedSessionIDs,
+      })
     } catch (error) {
       logger.error('Failed to reload OpenCode config:', error)
       if (error instanceof ConfigReloadError) {
@@ -529,7 +533,6 @@ export function createSettingsRoutes(db: Database, gitAuthService: GitAuthServic
           error: error.message,
           details,
           validationIssues: error.validationIssues,
-          removedFields: error.removedFields
         }, 500)
       }
       return c.json({

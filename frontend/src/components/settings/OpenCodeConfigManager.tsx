@@ -163,25 +163,22 @@ export function OpenCodeConfigManager() {
     } else {
       showToast.success('Configuration updated')
     }
-    invalidateConfigCaches(queryClient)
+    invalidateConfigCaches(queryClient, { skipOpenCodeConfig: true })
   }
 
-  const updateConfigContent = async (
-    newContent: Record<string, unknown>,
-    expectedRevision?: string,
-  ) => {
+  const updateConfigContent = async (newContent: Record<string, unknown>) => {
+    const expectedRevision = queryClient.getQueryData<OpenCodeConfigFile>(
+      OPEN_CODE_CONFIG_QUERY_KEY,
+    )?.revision
     const result = await settingsApi.updateOpenCodeConfig({
       content: newContent,
-      expectedRevision: expectedRevision ?? config?.revision,
+      expectedRevision,
     })
     applyOpenCodeConfigSave(result)
   }
 
-  const updateConfigContentSafely = (
-    newContent: Record<string, unknown>,
-    expectedRevision?: string,
-  ) => {
-    void updateConfigContent(newContent, expectedRevision).catch((error) => {
+  const updateConfigContentSafely = (newContent: Record<string, unknown>) => {
+    void updateConfigContent(newContent).catch((error) => {
       showToast.error(getApiErrorMessage(error, 'Failed to update config'))
     })
   }
@@ -202,6 +199,8 @@ export function OpenCodeConfigManager() {
   }
 
   const canImportFromHost = Boolean(importStatus?.configSourcePath || importStatus?.stateSourcePath)
+  const workspaceConfigPathsToRemove = importStatus?.workspaceConfigPathsToRemove ?? []
+  const hostConfigSourcePaths = importStatus?.configSourcePaths ?? []
 
   return (
     <div className="min-w-0 space-y-4">
@@ -581,6 +580,18 @@ export function OpenCodeConfigManager() {
                 </p>
               </div>
             </div>
+            {!isImportStatusLoading && workspaceConfigPathsToRemove.length > 0 && (
+              <p className="flex items-start gap-2 text-xs text-amber-600 dark:text-amber-500">
+                <AlertTriangle className="mt-0.5 h-3.5 w-3.5 shrink-0" />
+                <span>
+                  Importing replaces the workspace configuration files. These files will be removed:{' '}
+                  {workspaceConfigPathsToRemove.map(getConfigFileName).join(', ')}.
+                  {hostConfigSourcePaths.length > 1 && (
+                    <> Host files imported: {hostConfigSourcePaths.map(getConfigFileName).join(', ')}.</>
+                  )}
+                </span>
+              </p>
+            )}
             <div className="rounded-lg border border-border p-3">
               <p className="font-medium">Workspace State</p>
               <p className="mt-1 break-all text-muted-foreground">

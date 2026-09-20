@@ -60,13 +60,11 @@ type OpenCodePluginSpec = string | [string, OpenCodePluginOptions]
 
 export class ConfigReloadError extends Error {
   validationIssues: StartupValidationIssue[]
-  removedFields: string[]
 
-  constructor(message: string, validationIssues: StartupValidationIssue[] = [], removedFields: string[] = []) {
+  constructor(message: string, validationIssues: StartupValidationIssue[] = []) {
     super(message)
     this.name = 'ConfigReloadError'
     this.validationIssues = validationIssues
-    this.removedFields = removedFields
   }
 }
 
@@ -1026,17 +1024,6 @@ class OpenCodeServerManager {
     } finally {
       this.releaseOp(acquired)
     }
-  }
-
-  async reloadConfig(): Promise<void> {
-    const config = await readOpenCodeConfigFile()
-    if (!config) {
-      throw new ConfigReloadError('No OpenCode global configuration files found')
-    }
-    if (!config.isValid) {
-      throw new ConfigReloadError('OpenCode global configuration is invalid', config.validationIssues)
-    }
-    await this.restart()
   }
 
   getPort(): number {

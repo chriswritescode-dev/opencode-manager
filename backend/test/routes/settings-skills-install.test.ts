@@ -51,7 +51,6 @@ vi.mock('../../src/services/file-operations', () => ({
 vi.mock('../../src/services/opencode-single-server', () => {
   class MockConfigReloadError extends Error {
     validationIssues: Array<{ path: string; message: string }> = []
-    removedFields: string[] = []
     constructor(message: string) {
       super(message)
       this.name = 'ConfigReloadError'
@@ -62,7 +61,6 @@ vi.mock('../../src/services/opencode-single-server', () => {
     opencodeServerManager: {
       getVersion: vi.fn(),
       fetchVersion: vi.fn(),
-      reloadConfig: vi.fn(),
       restart: vi.fn(),
       clearStartupError: vi.fn(),
       getLastStartupError: vi.fn(),
@@ -108,7 +106,7 @@ vi.mock('@opencode-manager/shared/config/env', async (importOriginal) => ({
     MAX_SIZE_BYTES: 1024 * 1024,
     MAX_UPLOAD_SIZE_BYTES: 10 * 1024 * 1024,
   },
-  TIMEOUTS: { CONFIG_PATCH_TIMEOUT_MS: 15000 },
+  TIMEOUTS: {},
 }))
 
 import { createSettingsRoutes } from '../../src/routes/settings'

@@ -1,15 +1,12 @@
-import path from 'path'
 import { isDeepStrictEqual } from 'node:util'
 import type {
   OpenCodeConfigFile,
-  OpenCodeConfigSourceFile,
   OpenCodeConfigSourceName,
 } from '../types/settings'
 import {
-  OPENCODE_CONFIG_SEED,
-  getOpenCodeConfigDirectory,
-  parseOpenCodeConfigContent,
+  buildOpenCodeConfigSeedSnapshot,
   readOpenCodeConfigFile,
+  readOpenCodeConfigSnapshot,
   restoreOpenCodeConfigSnapshot,
   serializeOpenCodeConfigSnapshot,
   updateOpenCodeConfigFile,
@@ -27,21 +24,6 @@ export interface ApplyOpenCodeConfigInput {
   source?: OpenCodeConfigSourceName
   expectedRevision?: string
   settingsService: SettingsService
-}
-
-function buildOpenCodeConfigSeedSnapshot(): string {
-  const sourcePath = path.join(getOpenCodeConfigDirectory(), 'opencode.jsonc')
-  const content = parseOpenCodeConfigContent(OPENCODE_CONFIG_SEED).content
-  const updatedAt = Date.now()
-  const source: OpenCodeConfigSourceFile = {
-    name: 'opencode.jsonc',
-    path: sourcePath,
-    rawContent: OPENCODE_CONFIG_SEED,
-    content,
-    isValid: true,
-    updatedAt,
-  }
-  return serializeOpenCodeConfigSnapshot({ ...source, sources: [source] })
 }
 
 export async function captureLastKnownGoodOpenCodeConfig(settingsService: SettingsService): Promise<OpenCodeConfigFile | null> {
@@ -84,15 +66,32 @@ export function toOpenCodeConfigApplyResponse(
   }
 }
 
+function requiresOpenCodeRestart(previous: OpenCodeConfigFile | null, next: OpenCodeConfigFile): boolean {
+  if (previous?.isValid !== next.isValid) {
+    return true
+  }
+
+  const previousContent = previous?.content ?? {}
+  const keys = new Set([...Object.keys(previousContent), ...Object.keys(next.content)])
+  for (const key of keys) {
+    if (!isDeepStrictEqual(previousContent[key], next.content[key]) && key !== 'mcp') {
+      return true
+    }
+  }
+
+  return false
+}
+
 export async function applyOpenCodeConfigUpdate(
   input: ApplyOpenCodeConfigInput,
 ): Promise<ApplyOpenCodeConfigResult> {
   return withOpenCodeConfigLock(async () => {
     const { content, source, expectedRevision, settingsService } = input
 
-    const previous = await readOpenCodeConfigFile()
+    const snapshot = await readOpenCodeConfigSnapshot()
+    const previous = await readOpenCodeConfigFile(snapshot)
 
-    const next = await updateOpenCodeConfigFile(content, { source, expectedRevision })
+    const next = await updateOpenCodeConfigFile(content, { source, expectedRevision, snapshot })
 
     if (previous?.isValid) {
       const snapshot = serializeOpenCodeConfigSnapshot(previous)
@@ -104,7 +103,7 @@ export async function applyOpenCodeConfigUpdate(
       }
     }
 
-    if (!isDeepStrictEqual(previous?.content ?? {}, next.content) || previous?.isValid !== next.isValid) {
+    if (requiresOpenCodeRestart(previous, next)) {
       opencodeServerManager.markRestartPending()
       return { status: 'restart_pending', config: next }
     }

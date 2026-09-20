@@ -4,7 +4,13 @@ import path from 'path'
 import { isDeepStrictEqual } from 'node:util'
 import { applyEdits, modify, type JSONPath } from 'jsonc-parser'
 import type { ZodIssue } from 'zod'
-import { getOpenCodeConfigFilePath, getOpenCodeHealthWatchPath, OPENCODE_CONFIG_FILENAMES } from '@opencode-manager/shared/config/env'
+import { getConfigPath, getOpenCodeHealthWatchPath } from '@opencode-manager/shared/config/env'
+import {
+  DEFAULT_OPENCODE_CONFIG_SOURCE_NAME,
+  OPENCODE_CONFIG_SOURCE_NAMES,
+  isOpenCodeConfigSourceName,
+  selectPreferredOpenCodeConfigSourceName,
+} from '@opencode-manager/shared'
 import { OpenCodeConfigSchema } from '@opencode-manager/shared/schemas'
 import { parseJsonc } from '@opencode-manager/shared/utils'
 import type {
@@ -22,11 +28,7 @@ export const OPENCODE_CONFIG_SEED = JSON.stringify({ $schema: 'https://opencode.
 
 export const HEALTH_WATCH_MAX_ENTRIES = 20
 
-const OPENCODE_CONFIG_SOURCE_ORDER: readonly OpenCodeConfigSourceName[] = OPENCODE_CONFIG_FILENAMES
-
-const OPENCODE_CONFIG_WRITABLE_PREFERENCE: readonly OpenCodeConfigSourceName[] = [...OPENCODE_CONFIG_FILENAMES].reverse()
-
-const OPENCODE_CONFIG_DEFAULT_SOURCE: OpenCodeConfigSourceName = 'opencode.jsonc'
+const OPENCODE_CONFIG_SOURCE_ORDER: readonly OpenCodeConfigSourceName[] = OPENCODE_CONFIG_SOURCE_NAMES
 
 const OPENCODE_CONFIG_SNAPSHOT_VERSION = 1
 
@@ -37,6 +39,7 @@ const OPENCODE_CONFIG_SNAPSHOT_ARTIFACT_PREFIX = 'opencode-config-broken'
 export interface UpdateOpenCodeConfigOptions {
   source?: OpenCodeConfigSourceName
   expectedRevision?: string
+  snapshot?: OpenCodeConfigSnapshot
 }
 
 export class OpenCodeConfigConflictError extends Error {
@@ -68,13 +71,25 @@ export class OpenCodeConfigSnapshotError extends Error {
   }
 }
 
+export class OpenCodeConfigShadowedRemovalError extends Error {
+  readonly paths: string[]
+  readonly sources: OpenCodeConfigSourceName[]
+
+  constructor(paths: string[], sources: OpenCodeConfigSourceName[], targetName: OpenCodeConfigSourceName) {
+    super(`Cannot remove ${paths.join(', ')}: defined in ${sources.join(', ')}, not in ${targetName}`)
+    this.name = 'OpenCodeConfigShadowedRemovalError'
+    this.paths = paths
+    this.sources = sources
+  }
+}
+
 interface OpenCodeConfigParseResult {
   content: Record<string, unknown>
   isValid: boolean
   validationIssues?: OpenCodeConfigValidationIssue[]
 }
 
-interface OpenCodeConfigSnapshot {
+export interface OpenCodeConfigSnapshot {
   sources: OpenCodeConfigSourceFile[]
   content: Record<string, unknown>
   revision: string
@@ -116,16 +131,12 @@ interface OpenCodeConfigSnapshotEnvelope {
   sources: OpenCodeConfigSnapshotEnvelopeSource[]
 }
 
-export function getOpenCodeConfigDirectory(): string {
-  return path.dirname(getOpenCodeConfigFilePath())
+function getOpenCodeConfigDirectory(): string {
+  return getConfigPath()
 }
 
 function getOpenCodeConfigSourcePath(name: OpenCodeConfigSourceName): string {
   return path.join(getOpenCodeConfigDirectory(), name)
-}
-
-function isOpenCodeConfigSourceName(value: string): value is OpenCodeConfigSourceName {
-  return (OPENCODE_CONFIG_SOURCE_ORDER as readonly string[]).includes(value)
 }
 
 function assertOpenCodeConfigSourceName(value: string): OpenCodeConfigSourceName {
@@ -141,6 +152,20 @@ function isPlainObject(value: unknown): value is Record<string, unknown> {
 
 function hasOwn(object: Record<string, unknown>, key: string): boolean {
   return Object.prototype.hasOwnProperty.call(object, key)
+}
+
+function hasOpenCodeConfigPath(content: Record<string, unknown>, jsonPath: JSONPath): boolean {
+  let current: unknown = content
+  for (const segment of jsonPath) {
+    if (typeof segment === 'number') {
+      if (!Array.isArray(current) || segment < 0 || segment >= current.length) return false
+      current = current[segment]
+      continue
+    }
+    if (!isPlainObject(current) || !hasOwn(current, segment)) return false
+    current = current[segment]
+  }
+  return true
 }
 
 function defineOwnConfigValue(target: Record<string, unknown>, key: string, value: unknown): void {
@@ -239,11 +264,8 @@ async function readOpenCodeConfigSourceFile(name: OpenCodeConfigSourceName): Pro
 }
 
 function selectWritableSource(sources: OpenCodeConfigSourceFile[]): OpenCodeConfigSourceFile | null {
-  for (const name of OPENCODE_CONFIG_WRITABLE_PREFERENCE) {
-    const source = sources.find((candidate) => candidate.name === name)
-    if (source) return source
-  }
-  return null
+  const name = selectPreferredOpenCodeConfigSourceName(sources.map((source) => source.name))
+  return name ? sources.find((source) => source.name === name) ?? null : null
 }
 
 function computeOpenCodeConfigRevision(sources: OpenCodeConfigSourceFile[]): string {
@@ -261,7 +283,7 @@ function computeOpenCodeConfigRevision(sources: OpenCodeConfigSourceFile[]): str
   return hash.digest('hex')
 }
 
-async function readOpenCodeConfigSnapshot(): Promise<OpenCodeConfigSnapshot> {
+export async function readOpenCodeConfigSnapshot(): Promise<OpenCodeConfigSnapshot> {
   const discovered = await Promise.all(OPENCODE_CONFIG_SOURCE_ORDER.map(readOpenCodeConfigSourceFile))
   const sources = discovered.filter((source): source is OpenCodeConfigSourceFile => source !== null)
   const content = sources.reduce<Record<string, unknown>>(
@@ -275,7 +297,7 @@ async function readOpenCodeConfigSnapshot(): Promise<OpenCodeConfigSnapshot> {
     content,
     revision: computeOpenCodeConfigRevision(sources),
     updatedAt: sources.reduce((latest, source) => Math.max(latest, source.updatedAt), 0),
-    path: selected ? selected.path : getOpenCodeConfigSourcePath(OPENCODE_CONFIG_DEFAULT_SOURCE),
+    path: selected ? selected.path : getOpenCodeConfigSourcePath(DEFAULT_OPENCODE_CONFIG_SOURCE_NAME),
     rawContent: selected ? selected.rawContent : '',
   }
 }
@@ -294,22 +316,25 @@ function toOpenCodeConfigFile(snapshot: OpenCodeConfigSnapshot): OpenCodeConfigF
   }
 }
 
-export async function readOpenCodeConfigFile(): Promise<OpenCodeConfigFile | null> {
-  const snapshot = await readOpenCodeConfigSnapshot()
-  if (snapshot.sources.length === 0) return null
-  return toOpenCodeConfigFile(snapshot)
+export async function readOpenCodeConfigFile(
+  snapshot?: OpenCodeConfigSnapshot,
+): Promise<OpenCodeConfigFile | null> {
+  const resolved = snapshot ?? await readOpenCodeConfigSnapshot()
+  if (resolved.sources.length === 0) return null
+  return toOpenCodeConfigFile(resolved)
 }
 
 export async function writeOpenCodeConfigFile(
   rawContent: string,
   source?: OpenCodeConfigSourceName,
+  snapshot?: OpenCodeConfigSnapshot,
 ): Promise<OpenCodeConfigFile> {
   OpenCodeConfigSchema.parse(parseJsonc(rawContent))
 
-  const snapshot = await readOpenCodeConfigSnapshot()
+  const resolved = snapshot ?? await readOpenCodeConfigSnapshot()
   const targetName = source !== undefined
     ? assertOpenCodeConfigSourceName(source)
-    : selectWritableSource(snapshot.sources)?.name ?? OPENCODE_CONFIG_DEFAULT_SOURCE
+    : selectWritableSource(resolved.sources)?.name ?? DEFAULT_OPENCODE_CONFIG_SOURCE_NAME
   const targetPath = getOpenCodeConfigSourcePath(targetName)
 
   await writeFileAtomic(targetPath, rawContent, { mode: await existingFileMode(targetPath) })
@@ -358,11 +383,37 @@ function applyOpenCodeConfigPathOperations(
   return text
 }
 
+function assertNoShadowedOpenCodeConfigRemovals(
+  operations: OpenCodeConfigPathOperation[],
+  targetSource: OpenCodeConfigSourceFile | undefined,
+  sources: OpenCodeConfigSourceFile[],
+  targetName: OpenCodeConfigSourceName,
+): void {
+  const targetContent = targetSource?.content ?? {}
+  const shadowedPaths: string[] = []
+  const shadowedSources = new Set<OpenCodeConfigSourceName>()
+
+  for (const operation of operations) {
+    if (operation.value !== undefined) continue
+    if (hasOpenCodeConfigPath(targetContent, operation.path)) continue
+    const definingSources = sources.filter(
+      (source) => source.name !== targetName && hasOpenCodeConfigPath(source.content, operation.path),
+    )
+    if (definingSources.length === 0) continue
+    shadowedPaths.push(operation.path.join('.'))
+    for (const source of definingSources) shadowedSources.add(source.name)
+  }
+
+  if (shadowedPaths.length > 0) {
+    throw new OpenCodeConfigShadowedRemovalError(shadowedPaths, [...shadowedSources], targetName)
+  }
+}
+
 export async function updateOpenCodeConfigFile(
   content: Record<string, unknown> | string,
   options: UpdateOpenCodeConfigOptions = {},
 ): Promise<OpenCodeConfigFile> {
-  const snapshot = await readOpenCodeConfigSnapshot()
+  const snapshot = options.snapshot ?? await readOpenCodeConfigSnapshot()
 
   if (options.expectedRevision !== undefined && options.expectedRevision !== snapshot.revision) {
     throw new OpenCodeConfigConflictError(options.expectedRevision, snapshot.revision)
@@ -370,7 +421,7 @@ export async function updateOpenCodeConfigFile(
 
   const targetName = options.source !== undefined
     ? assertOpenCodeConfigSourceName(options.source)
-    : selectWritableSource(snapshot.sources)?.name ?? OPENCODE_CONFIG_DEFAULT_SOURCE
+    : selectWritableSource(snapshot.sources)?.name ?? DEFAULT_OPENCODE_CONFIG_SOURCE_NAME
   const targetSource = snapshot.sources.find((source) => source.name === targetName)
   const targetPath = getOpenCodeConfigSourcePath(targetName)
 
@@ -378,7 +429,7 @@ export async function updateOpenCodeConfigFile(
     if (targetSource?.rawContent === content) {
       return toOpenCodeConfigFile(snapshot)
     }
-    return writeOpenCodeConfigFile(content, targetName)
+    return writeOpenCodeConfigFile(content, targetName, snapshot)
   }
 
   const invalidSources = snapshot.sources.filter((source) => !source.isValid).map((source) => source.name)
@@ -390,6 +441,7 @@ export async function updateOpenCodeConfigFile(
 
   const originalText = targetSource?.rawContent ?? '{}\n'
   const operations = collectOpenCodeConfigPathOperations(content, snapshot.content)
+  assertNoShadowedOpenCodeConfigRemovals(operations, targetSource, snapshot.sources, targetName)
   const updatedText = applyOpenCodeConfigPathOperations(originalText, operations)
 
   if (updatedText !== originalText) {
@@ -400,22 +452,27 @@ export async function updateOpenCodeConfigFile(
   return toOpenCodeConfigFile(await readOpenCodeConfigSnapshot())
 }
 
-function resolveSnapshotSources(config: OpenCodeConfigFile): OpenCodeConfigSnapshotEnvelopeSource[] {
-  if (config.sources && config.sources.length > 0) {
-    return config.sources.map((source) => ({ name: source.name, rawContent: source.rawContent }))
-  }
-  const fileName = path.basename(config.path)
-  const name = isOpenCodeConfigSourceName(fileName) ? fileName : 'opencode.json'
-  return [{ name, rawContent: config.rawContent }]
-}
-
-export function serializeOpenCodeConfigSnapshot(config: OpenCodeConfigFile): string {
+export function serializeOpenCodeConfigSourceSnapshot(
+  entries: ReadonlyArray<{ name: OpenCodeConfigSourceName; rawContent: string }>,
+): string {
   const envelope: OpenCodeConfigSnapshotEnvelope = {
     marker: OPENCODE_CONFIG_SNAPSHOT_MARKER,
     version: OPENCODE_CONFIG_SNAPSHOT_VERSION,
-    sources: resolveSnapshotSources(config),
+    sources: entries.map((entry) => ({ name: entry.name, rawContent: entry.rawContent })),
   }
   return JSON.stringify(envelope, null, 2)
+}
+
+export function serializeOpenCodeConfigSnapshot(
+  config: Pick<OpenCodeConfigFile, 'sources'>,
+): string {
+  return serializeOpenCodeConfigSourceSnapshot(config.sources)
+}
+
+export function buildOpenCodeConfigSeedSnapshot(): string {
+  return serializeOpenCodeConfigSourceSnapshot([
+    { name: DEFAULT_OPENCODE_CONFIG_SOURCE_NAME, rawContent: OPENCODE_CONFIG_SEED },
+  ])
 }
 
 function isSnapshotEnvelopeCandidate(parsed: Record<string, unknown>): boolean {
@@ -470,15 +527,6 @@ function parseOpenCodeConfigSnapshot(snapshot: string): Map<OpenCodeConfigSource
   return new Map([['opencode.json', snapshot]])
 }
 
-async function readRawContentOrNull(sourcePath: string): Promise<string | null> {
-  try {
-    return await readFile(sourcePath, 'utf8')
-  } catch (error) {
-    if ((error as NodeJS.ErrnoException).code === 'ENOENT') return null
-    throw error
-  }
-}
-
 async function rollbackOpenCodeConfigSourceFileStates(
   applied: AppliedOpenCodeConfigSourceFileState[],
 ): Promise<Error[]> {
@@ -500,12 +548,16 @@ async function rollbackOpenCodeConfigSourceFileStates(
 
 async function applyOpenCodeConfigSourceFileStates(
   states: OpenCodeConfigSourceFileState[],
+  current: OpenCodeConfigSnapshot,
 ): Promise<void> {
+  const previousByName = new Map<OpenCodeConfigSourceName, string | null>(
+    current.sources.map((source) => [source.name, source.rawContent]),
+  )
   const prepared: PreparedOpenCodeConfigSourceFileState[] = []
   for (const state of states) {
     const sourcePath = getOpenCodeConfigSourcePath(state.name)
     const previousMode = await existingFileMode(sourcePath)
-    const previousRawContent = await readRawContentOrNull(sourcePath)
+    const previousRawContent = previousByName.get(state.name) ?? null
     prepared.push({ ...state, path: sourcePath, previousMode, previousRawContent })
   }
 
@@ -549,7 +601,7 @@ export async function restoreOpenCodeConfigSnapshot(snapshot: string): Promise<O
     }
   }
 
-  await applyOpenCodeConfigSourceFileStates(states)
+  await applyOpenCodeConfigSourceFileStates(states, current)
   return readOpenCodeConfigFile()
 }
 
@@ -607,6 +659,7 @@ export async function deleteOpenCodeConfigFile(): Promise<boolean> {
     if (snapshot.sources.length === 0) return false
     await applyOpenCodeConfigSourceFileStates(
       snapshot.sources.map((source) => ({ name: source.name, rawContent: null })),
+      snapshot,
     )
     logger.info('Deleted filesystem config to allow server startup:', snapshot.sources.map((source) => source.path).join(', '))
     return true

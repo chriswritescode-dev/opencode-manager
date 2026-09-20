@@ -4,12 +4,13 @@ import { tmpdir } from 'os'
 import path from 'path'
 import { ZodError } from 'zod'
 
-const paths = vi.hoisted(() => ({ config: '', healthWatch: '' }))
+const paths = vi.hoisted(() => ({ config: '', configDir: '', healthWatch: '' }))
 
 vi.mock('@opencode-manager/shared/config/env', () => ({
+  getConfigPath: () => paths.configDir,
   getOpenCodeConfigFilePath: () => paths.config,
   getOpenCodeHealthWatchPath: () => paths.healthWatch,
-  OPENCODE_CONFIG_FILENAMES: ['config.json', 'opencode.json', 'opencode.jsonc'],
+  OPENCODE_CONFIG_SOURCE_NAMES: ['config.json', 'opencode.json', 'opencode.jsonc'],
 }))
 
 vi.mock('../../src/utils/logger', () => ({
@@ -20,7 +21,28 @@ vi.mock('../../src/utils/logger', () => ({
   },
 }))
 
-const writeFailures = vi.hoisted(() => ({ paths: [] as string[], calls: [] as string[] }))
+const writeFailures = vi.hoisted(() => ({
+  paths: [] as string[],
+  calls: [] as string[],
+  readsAtWrite: [] as Array<{ stat: number; readFile: number }>,
+}))
+
+const fsCalls = vi.hoisted(() => ({ stat: 0, readFile: 0 }))
+
+vi.mock('fs/promises', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('fs/promises')>()
+  return {
+    ...actual,
+    stat: vi.fn((...args: Parameters<typeof actual.stat>) => {
+      fsCalls.stat += 1
+      return actual.stat(...args)
+    }),
+    readFile: vi.fn((...args: Parameters<typeof actual.readFile>) => {
+      fsCalls.readFile += 1
+      return actual.readFile(...args)
+    }),
+  }
+})
 
 vi.mock('../../src/utils/fs-safe', async (importOriginal) => {
   const actual = await importOriginal<typeof import('../../src/utils/fs-safe')>()
@@ -28,6 +50,7 @@ vi.mock('../../src/utils/fs-safe', async (importOriginal) => {
     ...actual,
     writeFileAtomic: vi.fn(async (filePath: string, content: string, options?: { mode?: number }) => {
       writeFailures.calls.push(filePath)
+      writeFailures.readsAtWrite.push({ stat: fsCalls.stat, readFile: fsCalls.readFile })
       if (writeFailures.paths.includes(filePath)) {
         throw new Error(`simulated write failure for ${filePath}`)
       }
@@ -40,11 +63,13 @@ import {
   HEALTH_WATCH_MAX_ENTRIES,
   OPENCODE_CONFIG_SEED,
   OpenCodeConfigConflictError,
+  OpenCodeConfigShadowedRemovalError,
   OpenCodeConfigSnapshotError,
   archiveBrokenOpenCodeConfigFile,
   deleteOpenCodeConfigFile,
   pruneHealthWatchDirectory,
   readOpenCodeConfigFile,
+  readOpenCodeConfigSnapshot,
   restoreOpenCodeConfigSnapshot,
   serializeOpenCodeConfigSnapshot,
   toOpenCodeConfigValidationIssues,
@@ -64,8 +89,12 @@ describe('opencode-config-file', () => {
     vi.clearAllMocks()
     writeFailures.paths = []
     writeFailures.calls = []
+    writeFailures.readsAtWrite = []
+    fsCalls.stat = 0
+    fsCalls.readFile = 0
     workDir = await mkdtemp(path.join(tmpdir(), 'opencode-config-file-'))
     paths.config = path.join(workDir, 'opencode.json')
+    paths.configDir = workDir
     paths.healthWatch = path.join(workDir, 'health-watch')
   })
 
@@ -216,6 +245,38 @@ describe('opencode-config-file', () => {
     expect(revealed?.content).toEqual({ theme: 'light', model: 'a' })
   })
 
+  it('rejects a removal of a value that only a lower-priority source defines and writes nothing', async () => {
+    const lower = '{\n  "theme": "light",\n  "model": "a"\n}\n'
+    const target = '{\n  "model": "b"\n}\n'
+    await writeFile(sourcePath('config.json'), lower, 'utf8')
+    await writeFile(sourcePath('opencode.jsonc'), target, 'utf8')
+    const targetStats = await stat(sourcePath('opencode.jsonc'))
+
+    const error = await updateOpenCodeConfigFile({ model: 'b' }).catch((caught: unknown) => caught)
+
+    expect(error).toBeInstanceOf(OpenCodeConfigShadowedRemovalError)
+    expect((error as OpenCodeConfigShadowedRemovalError).paths).toEqual(['theme'])
+    expect((error as OpenCodeConfigShadowedRemovalError).sources).toEqual(['config.json'])
+    await expect(readFile(sourcePath('opencode.jsonc'), 'utf8')).resolves.toBe(target)
+    await expect(readFile(sourcePath('config.json'), 'utf8')).resolves.toBe(lower)
+    expect((await stat(sourcePath('opencode.jsonc'))).mtimeMs).toBe(targetStats.mtimeMs)
+  })
+
+  it('rejects a mixed shadowed removal and legitimate change without writing anything', async () => {
+    const lower = '{\n  "theme": "light",\n  "model": "a"\n}\n'
+    const target = '{\n  "model": "b"\n}\n'
+    await writeFile(sourcePath('config.json'), lower, 'utf8')
+    await writeFile(sourcePath('opencode.jsonc'), target, 'utf8')
+
+    const error = await updateOpenCodeConfigFile({ model: 'b', plugin: ['x'] }).catch((caught: unknown) => caught)
+
+    expect(error).toBeInstanceOf(OpenCodeConfigShadowedRemovalError)
+    expect((error as OpenCodeConfigShadowedRemovalError).paths).toEqual(['theme'])
+    expect((error as OpenCodeConfigShadowedRemovalError).sources).toEqual(['config.json'])
+    await expect(readFile(sourcePath('opencode.jsonc'), 'utf8')).resolves.toBe(target)
+    await expect(readFile(sourcePath('config.json'), 'utf8')).resolves.toBe(lower)
+  })
+
   it('writes raw content to an explicitly requested allowlisted source and rejects unknown sources', async () => {
     const written = await writeOpenCodeConfigFile('{"theme":"dark"}', 'config.json')
 
@@ -272,11 +333,6 @@ describe('opencode-config-file', () => {
   it('rolls back already applied sources when restoring a snapshot fails', async () => {
     await writeFile(sourcePath('opencode.json'), '{"theme":"original"}', 'utf8')
     const snapshot = serializeOpenCodeConfigSnapshot({
-      path: sourcePath('opencode.jsonc'),
-      rawContent: '{"theme":"restored"}',
-      content: { theme: 'restored' },
-      isValid: true,
-      updatedAt: 0,
       sources: [{
         name: 'opencode.jsonc',
         path: sourcePath('opencode.jsonc'),
@@ -298,11 +354,6 @@ describe('opencode-config-file', () => {
   it('surfaces an AggregateError when rollback also fails', async () => {
     await writeFile(sourcePath('opencode.json'), '{"theme":"original"}', 'utf8')
     const snapshot = serializeOpenCodeConfigSnapshot({
-      path: sourcePath('opencode.jsonc'),
-      rawContent: '{"theme":"restored"}',
-      content: { theme: 'restored' },
-      isValid: true,
-      updatedAt: 0,
       sources: [{
         name: 'opencode.jsonc',
         path: sourcePath('opencode.jsonc'),
@@ -419,6 +470,19 @@ describe('opencode-config-file', () => {
 
     expect(writeFailures.calls).toEqual([])
     await expect(readFile(sourcePath('opencode.jsonc'), 'utf8')).resolves.toBe(raw)
+  })
+
+  it('uses a provided snapshot without re-reading sources before the write', async () => {
+    await writeFile(sourcePath('opencode.jsonc'), '{"theme":"dark"}', 'utf8')
+    const snapshot = await readOpenCodeConfigSnapshot()
+
+    fsCalls.stat = 0
+    fsCalls.readFile = 0
+    await updateOpenCodeConfigFile({ theme: 'light' }, { snapshot })
+
+    expect(writeFailures.readsAtWrite).toEqual([{ stat: 0, readFile: 0 }])
+    expect(fsCalls.stat).toBe(3)
+    expect(fsCalls.readFile).toBe(1)
   })
 
   it('replaces arrays atomically and merges nested objects in structured updates', async () => {

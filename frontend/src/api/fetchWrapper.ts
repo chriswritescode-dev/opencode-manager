@@ -51,7 +51,6 @@ async function handleResponse(response: Response): Promise<never> {
     {
       details: data.details,
       validationIssues: data.validationIssues,
-      removedFields: data.removedFields,
     }
   )
 }

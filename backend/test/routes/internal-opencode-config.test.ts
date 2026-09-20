@@ -156,6 +156,27 @@ describe('internal/opencode-config routes', () => {
     expect(body.actualRevision).not.toBe(initial.revision!)
   })
 
+  it('PUT /api/internal/opencode-config returns 409 for a shadowed removal', async () => {
+    const lower = '{"theme":"light","model":"a"}'
+    const target = '{"model":"b"}'
+    await writeOpenCodeConfigFile(target, 'opencode.jsonc')
+    await writeFile(configPath('config.json'), lower, 'utf8')
+
+    const res = await app.request('/api/internal/opencode-config', {
+      method: 'PUT',
+      headers: { 'content-type': 'application/json', ...authHeaders() },
+      body: JSON.stringify({ content: { model: 'b' } }),
+    })
+
+    expect(res.status).toBe(409)
+    const body = await res.json() as { error: string; paths: string[]; sources: string[] }
+    expect(body.paths).toEqual(['theme'])
+    expect(body.sources).toEqual(['config.json'])
+    expect(body.error).toContain('Cannot remove theme')
+    await expect(readFile(configPath('config.json'), 'utf8')).resolves.toBe(lower)
+    await expect(readFile(configPath('opencode.jsonc'), 'utf8')).resolves.toBe(target)
+  })
+
   it('PUT /api/internal/opencode-config returns 400 for schema-invalid content', async () => {
     await writeOpenCodeConfigFile(OPENCODE_CONFIG_SEED, 'opencode.jsonc')
 

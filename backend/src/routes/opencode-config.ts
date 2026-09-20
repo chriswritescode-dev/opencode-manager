@@ -5,6 +5,7 @@ import type { SettingsService } from '../services/settings'
 import { UpstreamError, type OpenCodeClient } from '../services/opencode/client'
 import {
   OpenCodeConfigConflictError,
+  OpenCodeConfigShadowedRemovalError,
   OpenCodeConfigSourceInvalidError,
   readOpenCodeConfigFile,
   withOpenCodeConfigLock,
@@ -77,6 +78,9 @@ export function createOpenCodeConfigRoutes(settingsService: SettingsService, ope
       }
       if (error instanceof OpenCodeConfigSourceInvalidError) {
         return c.json({ error: error.message, sources: error.sources }, 400)
+      }
+      if (error instanceof OpenCodeConfigShadowedRemovalError) {
+        return c.json({ error: error.message, paths: error.paths, sources: error.sources }, 409)
       }
       if (error instanceof z.ZodError) {
         return c.json({ error: 'Invalid config data', details: error.issues }, 400)

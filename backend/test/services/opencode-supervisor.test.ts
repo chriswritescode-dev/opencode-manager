@@ -17,8 +17,7 @@ vi.mock('../../src/services/opencode-config-file', () => {
     writeHealthWatchArtifact: vi.fn(),
     restoreOpenCodeConfigSnapshot: vi.fn(async () => ({ isValid: true })),
     serializeOpenCodeConfigSnapshot: vi.fn(() => seed),
-    getOpenCodeConfigDirectory: vi.fn(() => '/test/workspace/.config/opencode'),
-    parseOpenCodeConfigContent: vi.fn(() => ({ content: {}, isValid: true })),
+    buildOpenCodeConfigSeedSnapshot: vi.fn(() => seed),
     withOpenCodeConfigLock: (fn: () => Promise<unknown>) => fn(),
     OPENCODE_CONFIG_SEED: seed,
   }
@@ -31,9 +30,7 @@ vi.mock('../../src/services/opencode-single-server', () => ({
 }))
 
 vi.mock('@opencode-manager/shared/config/env', () => ({
-  TIMEOUTS: {
-    CONFIG_PATCH_TIMEOUT_MS: 30000,
-  },
+  TIMEOUTS: {},
   ENV: {
     OPENCODE: {
       HEALTH_POLL_MS: 200,
@@ -49,7 +46,6 @@ interface FakeManager {
   isOperationInProgress: ReturnType<typeof vi.fn>
   checkHealth: ReturnType<typeof vi.fn>
   restart: ReturnType<typeof vi.fn>
-  reloadConfig: ReturnType<typeof vi.fn>
   clearStartupError: ReturnType<typeof vi.fn>
   getLastStartupError: ReturnType<typeof vi.fn>
   isLastStartupErrorNonRecoverable: ReturnType<typeof vi.fn>
@@ -75,7 +71,6 @@ describe('OpenCodeSupervisor', () => {
     isOperationInProgress: vi.fn(() => false),
     checkHealth: vi.fn().mockResolvedValue(true),
     restart: vi.fn().mockResolvedValue(undefined),
-    reloadConfig: vi.fn().mockResolvedValue(undefined),
     clearStartupError: vi.fn(),
     getLastStartupError: vi.fn(() => null),
     isLastStartupErrorNonRecoverable: vi.fn(() => false),
@@ -396,36 +391,6 @@ describe('OpenCodeSupervisor', () => {
     expect(secondStatus.healthy).toBe(true)
   })
 
-  it('executes a reload requested during an active reload after the active reload completes', async () => {
-    const manager = createManager()
-    const settings = createSettings()
-    const supervisor = new OpenCodeSupervisor(manager as unknown as never, settings as unknown as never, {
-      failureThreshold: 1,
-      watchEnabled: false,
-    })
-
-    let releaseReload!: () => void
-    manager.reloadConfig.mockImplementationOnce(
-      () => new Promise<void>((resolve) => { releaseReload = resolve }),
-    )
-    manager.checkHealth.mockResolvedValue(true)
-
-    const first = supervisor.reloadConfig('settings_reload')
-    await vi.waitFor(() => expect(manager.reloadConfig).toHaveBeenCalledTimes(1))
-
-    const second = supervisor.reloadConfig('manual')
-    await new Promise((resolve) => setTimeout(resolve, 20))
-    expect(manager.reloadConfig).toHaveBeenCalledTimes(1)
-
-    releaseReload()
-
-    const [firstStatus, secondStatus] = await Promise.all([first, second])
-
-    expect(manager.reloadConfig).toHaveBeenCalledTimes(2)
-    expect(firstStatus.healthy).toBe(true)
-    expect(secondStatus.healthy).toBe(true)
-  })
-
   it('closes the proxy lifecycle gate for the whole restart transition and reopens once healthy', async () => {
     const manager = createManager()
     const settings = createSettings()
@@ -449,35 +414,6 @@ describe('OpenCodeSupervisor', () => {
 
     releaseRestart()
     const status = await restart
-
-    expect(status.healthy).toBe(true)
-    expect(manager.setLifecycleInitialized).toHaveBeenLastCalledWith(true)
-  })
-
-  it('closes the proxy lifecycle gate for the whole config reload transition and reopens once healthy', async () => {
-    const manager = createManager()
-    const settings = createSettings()
-    const supervisor = new OpenCodeSupervisor(manager as unknown as never, settings as unknown as never, {
-      failureThreshold: 1,
-      watchEnabled: false,
-    })
-
-    await supervisor.start()
-    expect(manager.setLifecycleInitialized).toHaveBeenLastCalledWith(true)
-    manager.setLifecycleInitialized.mockClear()
-
-    let releaseReload!: () => void
-    manager.reloadConfig.mockImplementationOnce(
-      () => new Promise<void>((resolve) => { releaseReload = resolve }),
-    )
-    manager.checkHealth.mockResolvedValue(true)
-
-    const reload = supervisor.reloadConfig('settings_reload')
-    await vi.waitFor(() => expect(manager.reloadConfig).toHaveBeenCalledTimes(1))
-    expect(manager.setLifecycleInitialized).toHaveBeenLastCalledWith(false)
-
-    releaseReload()
-    const status = await reload
 
     expect(status.healthy).toBe(true)
     expect(manager.setLifecycleInitialized).toHaveBeenLastCalledWith(true)

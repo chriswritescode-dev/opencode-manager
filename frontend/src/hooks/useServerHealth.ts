@@ -44,14 +44,14 @@ export function useServerHealth(enabled = true) {
     },
     onSuccess: () => {
       invalidateConfigCaches(queryClient)
-      toast.success('Server configuration reloaded successfully', { id: 'reload-config' })
+      toast.success('OpenCode server restarted', { id: 'reload-config' })
     },
     onError: (error: unknown) => {
       const errorMessage = error && typeof error === 'object' && 'response' in error
         ? ((error as { response?: { data?: { details?: string; error?: string } } }).response?.data?.details
            || (error as { response?: { data?: { details?: string; error?: string } } }).response?.data?.error
-           || 'Failed to reload configuration')
-        : 'Failed to reload configuration'
+           || 'Failed to restart OpenCode server')
+        : 'Failed to restart OpenCode server'
       toast.error(errorMessage, { id: 'reload-config' })
     },
   })
@@ -103,7 +103,7 @@ export function useServerHealth(enabled = true) {
           id: 'server-health-unhealthy',
           duration: Infinity,
           action: {
-            label: 'Reload',
+            label: 'Restart',
             onClick: () => restartMutation.mutate(),
           },
         })

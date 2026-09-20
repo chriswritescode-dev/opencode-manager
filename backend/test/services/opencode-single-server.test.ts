@@ -1328,16 +1328,8 @@ describe('OpenCodeServerManager - server auth', () => {
     const manager = OpenCodeServerManager.getInstance()
     manager.setDatabase(createPasswordDb(null))
     ;(manager as unknown as { opInProgress: boolean }).opInProgress = true
-    readOpenCodeConfigFileMock.mockResolvedValueOnce({
-      path: '/test/workspace/.config/opencode.json',
-      rawContent: '{}',
-      content: {},
-      isValid: true,
-      updatedAt: 0,
-    })
 
     await expect(manager.restart()).rejects.toThrow('Another OpenCode server operation is already in progress')
-    await expect(manager.reloadConfig()).rejects.toThrow('Another OpenCode server operation is already in progress')
     await expect(manager.start()).rejects.toThrow('Another OpenCode server operation is already in progress')
   })
 
@@ -3065,75 +3057,19 @@ describe('OpenCodeServerManager - reinitializeBinDirectory', () => {
 })
 
 describe('ConfigReloadError', () => {
-  it('should create error with validation issues and removed fields', () => {
+  it('should create error with validation issues', () => {
     const issues = [{ path: 'command.review', message: 'Invalid' }]
-    const removed = ['command.review']
-    const error = new ConfigReloadError('Test error', issues, removed)
+    const error = new ConfigReloadError('Test error', issues)
 
     expect(error.name).toBe('ConfigReloadError')
     expect(error.message).toBe('Test error')
     expect(error.validationIssues).toEqual(issues)
-    expect(error.removedFields).toEqual(removed)
   })
 
-  it('should default to empty arrays for issues and removed fields', () => {
+  it('should default to an empty array for validation issues', () => {
     const error = new ConfigReloadError('Test error')
 
     expect(error.validationIssues).toEqual([])
-    expect(error.removedFields).toEqual([])
-  })
-})
-
-describe('OpenCodeServerManager - reloadConfig', () => {
-  const configFile = (content: Record<string, unknown>) => ({
-    path: '/test/workspace/.config/opencode.json',
-    rawContent: JSON.stringify(content),
-    content,
-    isValid: true,
-    updatedAt: 0,
-  })
-
-  beforeEach(() => {
-    vi.clearAllMocks()
-    writeOpenCodeConfigFileMock.mockReset()
-    readOpenCodeConfigFileMock.mockReset()
-  })
-
-  it('restarts to reload merged global sources without patching an instance file', async () => {
-    const { opencodeServerManager } = await import('../../src/services/opencode-single-server')
-    const { createStubOpenCodeClient } = await import('../helpers/stub-opencode-client')
-    const forward = vi.fn()
-    opencodeServerManager.setOpenCodeClient(createStubOpenCodeClient({ forward }))
-    readOpenCodeConfigFileMock.mockResolvedValue(configFile({ plugin: ['test-plugin'], model: 'x' }))
-    const restart = vi.spyOn(opencodeServerManager, 'restart').mockResolvedValue(undefined)
-    try {
-      await opencodeServerManager.reloadConfig()
-      expect(restart).toHaveBeenCalledOnce()
-      expect(forward).not.toHaveBeenCalled()
-      expect(writeOpenCodeConfigFileMock).not.toHaveBeenCalled()
-    } finally {
-      restart.mockRestore()
-    }
-  })
-
-  it('rejects an invalid source without restarting or rewriting it', async () => {
-    const { opencodeServerManager } = await import('../../src/services/opencode-single-server')
-    const validationIssues = [{ path: 'model', message: 'Invalid model' }]
-    readOpenCodeConfigFileMock.mockResolvedValue({ ...configFile({ model: 123 }), isValid: false, validationIssues })
-    const restart = vi.spyOn(opencodeServerManager, 'restart').mockResolvedValue(undefined)
-    try {
-      await expect(opencodeServerManager.reloadConfig()).rejects.toMatchObject({ name: 'ConfigReloadError', validationIssues })
-      expect(restart).not.toHaveBeenCalled()
-      expect(writeOpenCodeConfigFileMock).not.toHaveBeenCalled()
-    } finally {
-      restart.mockRestore()
-    }
-  })
-
-  it('rejects a reload when every global source is absent', async () => {
-    const { opencodeServerManager } = await import('../../src/services/opencode-single-server')
-    readOpenCodeConfigFileMock.mockResolvedValue(null)
-    await expect(opencodeServerManager.reloadConfig()).rejects.toThrow('No OpenCode global configuration files found')
   })
 })
 

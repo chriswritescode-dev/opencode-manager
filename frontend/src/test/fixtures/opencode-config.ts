@@ -1,14 +1,14 @@
-import type { OpenCodeConfigFile, OpenCodeConfigSource, OpenCodeConfigSourceName } from '@/api/types/settings'
+import { DEFAULT_OPENCODE_CONFIG_SOURCE_NAME, isOpenCodeConfigSourceName } from '@opencode-manager/shared'
+import type { OpenCodeConfigFile, OpenCodeConfigSourceFile, OpenCodeConfigSourceName } from '@/api/types/settings'
 
 function sourceNameFromPath(path: string): OpenCodeConfigSourceName {
   const fileName = path.split(/[\\/]/).filter(Boolean).pop() ?? ''
-  if (fileName === 'config.json' || fileName === 'opencode.json' || fileName === 'opencode.jsonc') return fileName
-  return 'opencode.json'
+  return isOpenCodeConfigSourceName(fileName) ? fileName : DEFAULT_OPENCODE_CONFIG_SOURCE_NAME
 }
 
 export function makeOpenCodeConfigSource(
-  overrides: Partial<OpenCodeConfigSource> = {},
-): OpenCodeConfigSource {
+  overrides: Partial<OpenCodeConfigSourceFile> = {},
+): OpenCodeConfigSourceFile {
   return {
     name: 'opencode.json',
     path: '/workspace/.config/opencode/opencode.json',
@@ -28,6 +28,7 @@ export function makeOpenCodeConfigFile(overrides: Partial<OpenCodeConfigFile> = 
     isValid: true,
     updatedAt: 1,
     revision: 'rev-1',
+    sources: [],
   }
   const merged = { ...base, ...overrides }
   return {

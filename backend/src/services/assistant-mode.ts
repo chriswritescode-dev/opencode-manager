@@ -775,7 +775,7 @@ For a raw edit, send a string with the exact source name from \`sources\`. Never
 \`\`\`
 
 **Response:**
-Returns the refreshed merged configuration and source files. Adds \`restartRequired: true\` for semantic configuration changes. Comment-only changes do not require a restart. Saving never silently drops unsupported fields.
+Returns the refreshed merged configuration and source files. Adds \`restartRequired: true\` for semantic configuration changes, except changes limited to \`mcp\`, which are saved without it; to make an MCP change take effect immediately, tell the user to reconnect or reload the server from Settings → MCP. Comment-only changes do not require a restart. Saving never silently drops unsupported fields.
 
 Returns \`400\` for invalid configuration and \`409\` for a stale revision.
 

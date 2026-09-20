@@ -5,12 +5,13 @@ import path from 'path'
 import { Database } from 'bun:sqlite'
 import { ZodError } from 'zod'
 
-const paths = vi.hoisted(() => ({ config: '', healthWatch: '' }))
+const paths = vi.hoisted(() => ({ config: '', configDir: '', healthWatch: '' }))
 
 vi.mock('@opencode-manager/shared/config/env', () => ({
+  getConfigPath: () => paths.configDir,
   getOpenCodeConfigFilePath: () => paths.config,
   getOpenCodeHealthWatchPath: () => paths.healthWatch,
-  OPENCODE_CONFIG_FILENAMES: ['config.json', 'opencode.json', 'opencode.jsonc'],
+  OPENCODE_CONFIG_SOURCE_NAMES: ['config.json', 'opencode.json', 'opencode.jsonc'],
 }))
 
 vi.mock('../../src/utils/logger', () => ({
@@ -73,6 +74,7 @@ describe('opencode-config-apply', () => {
     vi.clearAllMocks()
     workDir = await mkdtemp(path.join(tmpdir(), 'opencode-config-apply-'))
     paths.config = path.join(workDir, 'opencode.json')
+    paths.configDir = workDir
     paths.healthWatch = path.join(workDir, 'health-watch')
     db = new Database(':memory:')
     migrate(db, allMigrations)
@@ -282,6 +284,52 @@ describe('opencode-config-apply', () => {
 
     expect(await restoreLastKnownGoodOpenCodeConfig(service)).toBeNull()
     expect(clearStartupErrorMock).not.toHaveBeenCalled()
+  })
+
+  it('applies an mcp-only change without marking a restart pending', async () => {
+    await writeFile(sourcePath('opencode.json'), '{"theme":"dark"}', 'utf8')
+
+    const result = expectStatus(await applyOpenCodeConfigUpdate({
+      content: { theme: 'dark', mcp: { local: { type: 'local' } } },
+      settingsService,
+    }), 'applied')
+
+    expect(result.config.content).toEqual({ theme: 'dark', mcp: { local: { type: 'local' } } })
+    expect(markRestartPendingMock).not.toHaveBeenCalled()
+  })
+
+  it('requires a restart when mcp changes alongside another key', async () => {
+    await writeFile(sourcePath('opencode.json'), '{"theme":"dark"}', 'utf8')
+
+    const result = expectStatus(await applyOpenCodeConfigUpdate({
+      content: { theme: 'light', mcp: { local: { type: 'local' } } },
+      settingsService,
+    }), 'restart_pending')
+
+    expect(result.config.content).toEqual({ theme: 'light', mcp: { local: { type: 'local' } } })
+    expect(markRestartPendingMock).toHaveBeenCalledTimes(1)
+  })
+
+  it('requires a restart for a theme-only change', async () => {
+    await writeFile(sourcePath('opencode.json'), '{"theme":"dark"}', 'utf8')
+
+    expectStatus(await applyOpenCodeConfigUpdate({
+      content: { theme: 'light' },
+      settingsService,
+    }), 'restart_pending')
+
+    expect(markRestartPendingMock).toHaveBeenCalledTimes(1)
+  })
+
+  it('applies an unchanged content edit without marking a restart pending', async () => {
+    await writeFile(sourcePath('opencode.json'), '{"theme":"dark"}', 'utf8')
+
+    expectStatus(await applyOpenCodeConfigUpdate({
+      content: { theme: 'dark' },
+      settingsService,
+    }), 'applied')
+
+    expect(markRestartPendingMock).not.toHaveBeenCalled()
   })
 
   it('seeds a minimal opencode.jsonc snapshot and removes every other source', async () => {

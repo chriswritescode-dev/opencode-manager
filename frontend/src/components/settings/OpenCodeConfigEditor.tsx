@@ -19,7 +19,7 @@ import {
   getPreferredOpenCodeConfigSource,
   isOpenCodeConfigSourceName,
 } from '@/api/types/settings'
-import type { OpenCodeConfigFile, OpenCodeConfigSource, OpenCodeConfigSourceName } from '@/api/types/settings'
+import type { OpenCodeConfigFile, OpenCodeConfigSourceFile, OpenCodeConfigSourceName } from '@/api/types/settings'
 
 type ValidationIssue = {
   path: string
@@ -40,8 +40,8 @@ export function OpenCodeConfigEditor({
   onClose,
   onUpdate,
 }: OpenCodeConfigEditorProps) {
-  const [draftSource, setDraftSource] = useState<OpenCodeConfigSource | null>(null)
-  const [draftRevision, setDraftRevision] = useState<string | undefined>(undefined)
+  const [draftSource, setDraftSource] = useState<OpenCodeConfigSourceFile | null>(null)
+  const [draftRevision, setDraftRevision] = useState<string>('')
   const [editConfigContent, setEditConfigContent] = useState('')
   const [initialContent, setInitialContent] = useState('')
   const [isSaving, setIsSaving] = useState(false)
@@ -71,14 +71,15 @@ export function OpenCodeConfigEditor({
   }, [])
 
   const selectSource = useCallback((name: OpenCodeConfigSourceName) => {
+    if (!config) return
     const next = sources.find((source) => source.name === name)
     if (!next) return
     setDraftSource(next)
-    setDraftRevision(config?.revision)
+    setDraftRevision(config.revision)
     setEditConfigContent(next.rawContent)
     setInitialContent(next.rawContent)
     resetErrors()
-  }, [sources, config?.revision, resetErrors])
+  }, [sources, config, resetErrors])
 
   useEffect(() => {
     if (!isOpen) {

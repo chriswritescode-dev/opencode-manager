@@ -22,7 +22,6 @@ export interface ApiErrorResponse {
   detail?: string
   details?: unknown
   validationIssues?: Array<{ path: string; message: string }>
-  removedFields?: string[]
 }
 
 export class FetchError extends Error {
@@ -31,7 +30,6 @@ export class FetchError extends Error {
   detail?: string
   details?: unknown
   validationIssues?: Array<{ path: string; message: string }>
-  removedFields?: string[]
 
   constructor(
     message: string,
@@ -41,7 +39,6 @@ export class FetchError extends Error {
     options?: {
       details?: unknown
       validationIssues?: Array<{ path: string; message: string }>
-      removedFields?: string[]
     }
   ) {
     super(message)
@@ -51,6 +48,5 @@ export class FetchError extends Error {
     this.detail = detail
     this.details = options?.details
     this.validationIssues = options?.validationIssues
-    this.removedFields = options?.removedFields
   }
 }
