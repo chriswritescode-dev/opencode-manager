@@ -14,10 +14,9 @@ describe('settings schema - BLOCKED_SERVER_ENV_KEYS', () => {
     expect(blocked.has('ENV')).toBe(false)
   })
 
-  it('still blocks manager-owned password, username, config, and XDG keys', () => {
+  it('still blocks manager-owned password, config, and XDG keys', () => {
     const blocked = new Set<string>(BLOCKED_SERVER_ENV_KEYS)
     expect(blocked.has('OPENCODE_SERVER_PASSWORD')).toBe(true)
-    expect(blocked.has('OPENCODE_SERVER_USERNAME')).toBe(true)
     expect(blocked.has('OPENCODE_CONFIG')).toBe(true)
     expect(blocked.has('XDG_DATA_HOME')).toBe(true)
     expect(blocked.has('XDG_STATE_HOME')).toBe(true)

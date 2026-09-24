@@ -33,14 +33,13 @@ vi.mock('../../src/db/queries', async () => {
   }
 })
 
-function createMockClient(skills: Array<{ name: string; description: string; location: string; content: string }>): OpenCodeClient {
+function createMockClient(skills: Array<{ name: string; description: string; path: string; content: string }>): OpenCodeClient {
   return {
-    forward: vi.fn(async () => new Response(JSON.stringify(skills), { status: 200 })),
-    forwardRaw: vi.fn(),
-    getJson: vi.fn(),
-    postJson: vi.fn(),
-    setProviderAuth: vi.fn(),
-    deleteProviderAuth: vi.fn(),
+    api: {
+      skill: {
+        list: vi.fn(async () => ({ location: { directory: '/tmp/skills-test' }, data: skills })),
+      },
+    },
   } as unknown as OpenCodeClient
 }
 
@@ -95,7 +94,7 @@ describe('SkillService', () => {
       const client = createMockClient([{
         name,
         description: 'Test description',
-        location: created.location,
+        path: created.location,
         content: '## Body\n\nSome content',
       }])
 
@@ -104,6 +103,7 @@ describe('SkillService', () => {
       expect(skill.name).toBe(name)
       expect(skill.description).toBe('Test description')
       expect(skill.body).toBe('## Body\n\nSome content')
+      expect(client.api.skill.list).toHaveBeenCalledWith({ location: { directory: tempDir } })
     } finally {
       await deleteSkill(mockDb, name, 'global').catch(() => {})
     }
@@ -211,7 +211,7 @@ describe('SkillService', () => {
       const client = createMockClient([{
         name,
         description: 'Original description',
-        location: created.location,
+        path: created.location,
         content: 'Original body',
       }])
 
@@ -285,8 +285,8 @@ describe('SkillService', () => {
       })
 
       const client = createMockClient([
-        { name: name1, description: 'Test 1', location: created1.location, content: 'Body' },
-        { name: name2, description: 'Test 2', location: created2.location, content: 'Body' },
+        { name: name1, description: 'Test 1', path: created1.location, content: 'Body' },
+        { name: name2, description: 'Test 2', path: created2.location, content: 'Body' },
       ])
 
       const skills = await listManagedSkills(mockDb, client)
@@ -324,8 +324,11 @@ describe('SkillService', () => {
       '---\nname: project-helper\ndescription: Helps project work\n---\nUse repo context.',
     )
 
-    const repoSkills = await listManagedSkills(mockDb, createMockClient([]), repo.id)
+    const client = createMockClient([])
+    const repoSkills = await listManagedSkills(mockDb, client, repo.id)
     const directorySkills = await listManagedSkills(mockDb, createMockClient([]), undefined, projectPath)
+
+    expect(client.api.skill.list).toHaveBeenCalledWith({ location: { directory: projectPath } })
 
     for (const skills of [repoSkills, directorySkills]) {
       expect(skills).toContainEqual(expect.objectContaining({
@@ -363,7 +366,7 @@ Another section.`
       const client = createMockClient([{
         name,
         description: 'Test horizontal rules in body',
-        location: created.location,
+        path: created.location,
         content: bodyWithHR,
       }])
 
@@ -391,7 +394,7 @@ Another section.`
       {
         name: 'external-skill',
         description: 'From .claude',
-        location: '/some/other/path/.claude/skills/external/SKILL.md',
+        path: '/some/other/path/.claude/skills/external/SKILL.md',
         content: 'body',
       },
     ])

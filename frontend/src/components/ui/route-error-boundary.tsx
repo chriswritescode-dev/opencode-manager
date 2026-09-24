@@ -5,7 +5,7 @@ import { parseNetworkError, parseOpenCodeError } from '@/lib/opencode-errors'
 import type { OpenCodeError } from '@/lib/opencode-errors'
 
 function isOpenCodeError(error: unknown): error is OpenCodeError {
-  return typeof error === 'object' && error !== null && 'name' in error && 'data' in error
+  return typeof error === 'object' && error !== null && ('data' in error || 'reason' in error)
 }
 
 function getErrorDetails(error: unknown) {

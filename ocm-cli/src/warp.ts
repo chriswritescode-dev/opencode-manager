@@ -4,7 +4,7 @@ import { buildRemoteAttachEnv } from './remote-context.js'
 export type WarpTarget = {
   managerUrl: string
   token: string
-  directory: string
+  repoId: number
   sessionID: string
   repoName: string
 }
@@ -29,12 +29,10 @@ export function takePendingWarp(): WarpTarget | undefined {
 
 export function buildAttachArgs(target: WarpTarget): string[] {
   return [
-    'attach',
-    `${target.managerUrl}/api/opencode-proxy`,
-    '--dir', target.directory,
-    '--session', target.sessionID,
-    '--password', target.token,
-    '--username', 'opencode',
+    '--server',
+    `${target.managerUrl}/api/opencode-proxy/repos/${target.repoId}`,
+    '--session',
+    target.sessionID,
   ]
 }
 
@@ -44,7 +42,7 @@ export function runPendingWarp(spawn: WarpSpawn = spawnSync): void {
   try {
     spawn('opencode', buildAttachArgs(target), {
       stdio: 'inherit',
-      env: { ...process.env, ...buildRemoteAttachEnv(target.managerUrl, target.repoName) },
+      env: { ...process.env, OPENCODE_PASSWORD: target.token, ...buildRemoteAttachEnv(target.managerUrl, target.repoName) },
     })
   } catch {
     void 0

@@ -5,6 +5,7 @@ import type { Database } from 'bun:sqlite'
 import type { SkillFileInfo, SkillScope, CreateSkillRequest, UpdateSkillRequest, InstallSkillUploadRequest, InstallSkillFromGithubRequest, InstallSkillResponse } from '@opencode-manager/shared'
 import { SKILL_NAME_REGEX, SkillFrontmatterSchema } from '@opencode-manager/shared'
 import { getOpenCodeGlobalSkillsPath, getWorkspacePath, FILE_LIMITS } from '@opencode-manager/shared/config/env'
+import { openCodeLocation } from '@opencode-manager/shared/opencode'
 import { getRepoById, getRepoName, listRepos } from '../db/queries'
 import type { Repo } from '@opencode-manager/shared/types'
 import { ensureDirectoryExists, fileExists, readFileContent, writeFileContent, deletePath, listDirectory, normalizeUploadRelativePath, resolveWithinDirectory } from './file-operations'
@@ -16,7 +17,7 @@ import { mkdirSafe } from '../utils/fs-safe'
 interface OpenCodeSkillInfo {
   name: string
   description: string
-  location: string
+  path: string
   content: string
 }
 
@@ -384,16 +385,13 @@ function buildSkillFileContent(name: string, description: string, body: string):
 
 async function fetchOpenCodeSkills(openCodeClient: OpenCodeClient, directory: string): Promise<OpenCodeSkillInfo[]> {
   try {
-    const response = await openCodeClient.forward({
-      method: 'GET',
-      path: '/skill',
-      directory,
-    })
-    if (!response.ok) {
-      logger.warn(`Failed to fetch skills from OpenCode (${response.status})`)
-      return []
-    }
-    return await response.json() as OpenCodeSkillInfo[]
+    const response = await openCodeClient.api.skill.list(openCodeLocation(directory))
+    return response.data.map((skill) => ({
+      name: skill.name,
+      description: skill.description ?? '',
+      path: skill.path,
+      content: skill.content,
+    }))
   } catch (error) {
     logger.warn('Error fetching skills from OpenCode:', error)
     return []
@@ -433,7 +431,7 @@ function toSkillFileInfo(
     description: skill.description,
     body: skill.content,
     scope: classification.scope,
-    location: skill.location,
+    location: skill.path,
     repoId: classification.repo?.id,
     repoName: classification.repo ? getRepoName(classification.repo) : undefined,
   }
@@ -502,8 +500,8 @@ export async function listManagedSkills(
   if (directory) {
     const skills = await fetchOpenCodeSkills(openCodeClient, directory)
     for (const skill of skills) {
-      if (seenLocations.has(skill.location)) continue
-      const classification = classifySkillLocation(skill.location, globalPrefix, allRepos, directory)
+      if (seenLocations.has(skill.path)) continue
+      const classification = classifySkillLocation(skill.path, globalPrefix, allRepos, directory)
       if (!classification) continue
       addSkill(result, seenLocations, toSkillFileInfo(skill, classification))
     }
@@ -532,8 +530,8 @@ export async function listManagedSkills(
     for (const dir of directories) {
       const skills = await fetchOpenCodeSkills(openCodeClient, dir)
       for (const skill of skills) {
-        if (seenLocations.has(skill.location)) continue
-        const classification = classifySkillLocation(skill.location, globalPrefix, allRepos)
+        if (seenLocations.has(skill.path)) continue
+        const classification = classifySkillLocation(skill.path, globalPrefix, allRepos)
         if (!classification) continue
         addSkill(result, seenLocations, toSkillFileInfo(skill, classification))
       }

@@ -3,11 +3,10 @@ import { useQuery } from '@tanstack/react-query'
 import type { CreateScheduleJobRequest, PromptTemplate, ScheduleJob } from '@opencode-manager/shared/types'
 import { useScheduleModels } from '@/hooks/useScheduleModels'
 import { resolveScheduleModel } from '@/lib/schedules/schedule-model'
-import { createOpenCodeClient } from '@/api/opencode'
+import { useAgents } from '@/hooks/useOpenCode'
 import { settingsApi } from '@/api/settings'
 import { listRepos, listBranches } from '@/api/repos'
 import type { Repo } from '@/api/types'
-import { OPENCODE_API_ENDPOINT } from '@/config'
 import { Button } from '@/components/ui/button'
 import type { ComboboxOption } from '@/components/ui/combobox'
 import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from '@/components/ui/dialog'
@@ -83,15 +82,7 @@ export function ScheduleJobDialog({ open, onOpenChange, job, isSaving, onSubmit,
     [model, modelDirty, availableModelKeys, configDefaultModel],
   )
 
-  const { data: agents = [] } = useQuery({
-    queryKey: ['opencode-agents', 'schedule-dialog'],
-    queryFn: async () => {
-      const client = createOpenCodeClient(OPENCODE_API_ENDPOINT)
-      return await client.listAgents()
-    },
-    enabled: open,
-    staleTime: 5 * 60 * 1000,
-  })
+  const { data: agents = [] } = useAgents()
 
   const { data: skills = [], isLoading: skillsLoading } = useQuery({
     queryKey: ['managed-skills'],
@@ -183,11 +174,13 @@ export function ScheduleJobDialog({ open, onOpenChange, job, isSaving, onSubmit,
   }, [providerModels, configDefaultModel])
 
   const agentOptions = useMemo<ComboboxOption[]>(() => {
-    return agents.map((agent) => ({
-      value: agent.name,
-      label: agent.name,
-      description: agent.description,
-    }))
+    return agents
+      .filter((agent) => agent.mode !== 'subagent' && !agent.hidden)
+      .map((agent) => ({
+        value: agent.id,
+        label: agent.name,
+        description: agent.description,
+      }))
   }, [agents])
 
   useEffect(() => {

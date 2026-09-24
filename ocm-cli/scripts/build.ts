@@ -14,7 +14,6 @@ async function bundleEntry(label: string, entrypoint: string, outputName: string
     outdir: dist,
     target: 'node',
     format: 'esm',
-    external: ['bun:sqlite'],
     naming: { entry: outputName },
   })
 
@@ -35,7 +34,7 @@ const tuiResult = await Bun.build({
   target: 'node',
   format: 'esm',
   plugins: [solidPlugin],
-  external: ['@opentui/solid', '@opentui/core', 'solid-js'],
+  external: ['@opencode/plugin/tui', '@opentui/solid', '@opentui/core', 'solid-js'],
   naming: { entry: 'tui.js' },
 })
 

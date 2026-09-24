@@ -1,4 +1,6 @@
-import type { MessageWithParts } from "@/api/types";
+import type { SessionMessageAssistant, SessionMessageInfo } from "@opencode-manager/shared/opencode";
+
+type SessionMessageAssistantContent = SessionMessageAssistant["content"][number];
 
 /**
  * Cheap bounded hash for a string value.
@@ -25,23 +27,44 @@ function hashString(s: string): number {
  * expensive operations like JSON.stringify so it can be called on every
  * render without impacting performance.
  */
-export function getMessagesContentVersion(messages?: MessageWithParts[]): number {
+function getContentPartVersion(part: SessionMessageAssistantContent): number {
+  if (part.type === "text" || part.type === "reasoning") {
+    return hashString(part.text);
+  }
+  if (part.type === "tool") {
+    const state = part.state;
+    let version = hashString(state.status);
+    if (state.status === "streaming") {
+      version += hashString(state.input);
+    } else {
+      if (state.status === "error") {
+        version += hashString(state.error.message);
+      }
+      if (state.status === "completed") {
+        version += state.content.reduce(
+          (sum, entry) => sum + (entry.type === "text" ? hashString(entry.text) : 0),
+          0,
+        );
+      }
+      version += hashString(JSON.stringify(state.metadata ?? {}));
+    }
+    return version;
+  }
+  return 1;
+}
+
+export function getMessagesContentVersion(messages?: SessionMessageInfo[]): number {
   if (!messages) return 0;
   return messages.reduce((sum, message) => {
-    return sum + message.parts.reduce((partSum, part) => {
-      if ("text" in part && typeof part.text === "string") {
-        return partSum + hashString(part.text);
-      }
-      if (part.type === "tool") {
-        const state = part.state as Record<string, unknown>;
-        let v = 0;
-        if (typeof state.status === "string") v += hashString(state.status);
-        if (typeof state.output === "string") v += hashString(state.output);
-        if (typeof state.error === "string") v += hashString(state.error);
-        if (typeof state.raw === "string") v += hashString(state.raw);
-        return partSum + v;
-      }
-      return partSum + 1;
-    }, 0);
+    if (message.type === "assistant") {
+      return sum + message.content.reduce(
+        (partSum, part) => partSum + getContentPartVersion(part),
+        0,
+      );
+    }
+    if (message.type === "user") {
+      return sum + hashString(message.text);
+    }
+    return sum + 1;
   }, messages.length);
 }

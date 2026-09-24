@@ -8,6 +8,7 @@ import { Loader2 } from 'lucide-react'
 import { Switch } from '@/components/ui/switch'
 import { useMcpServers } from '@/hooks/useMcpServers'
 import { settingsApi } from '@/api/settings'
+import { toV2McpServerConfig, type McpServerConfig, type V2McpServerConfig } from '@opencode-manager/shared/opencode'
 import { useMutation, useQueryClient } from '@tanstack/react-query'
 
 interface AddMcpServerDialogProps {
@@ -37,90 +38,75 @@ export function AddMcpServerDialog({ open, onOpenChange, onUpdate }: AddMcpServe
   const queryClient = useQueryClient()
   const { addServerAsync, isAddingServer } = useMcpServers()
 
+  const parseTimeout = (): number | undefined => {
+    const parsed = parseInt(timeout)
+    return Number.isFinite(parsed) ? parsed : undefined
+  }
+
+  const buildMcpServerConfig = (): McpServerConfig => {
+    const parsedTimeout = parseTimeout()
+
+    if (serverType === 'local') {
+      const commandArray = command.split(' ').filter((arg) => arg.trim())
+      if (commandArray.length === 0) {
+        throw new Error('Command is required for local MCP servers')
+      }
+
+      const environmentVariables = Object.fromEntries(
+        environment
+          .filter((env) => env.key.trim() && env.value.trim())
+          .map((env) => [env.key.trim(), env.value.trim()]),
+      )
+
+      return {
+        type: 'local',
+        enabled,
+        command: commandArray,
+        ...(Object.keys(environmentVariables).length > 0 ? { environment: environmentVariables } : {}),
+        ...(parsedTimeout === undefined ? {} : { timeout: parsedTimeout }),
+      }
+    }
+
+    if (!url.trim()) {
+      throw new Error('URL is required for remote MCP servers')
+    }
+
+    return {
+      type: 'remote',
+      enabled,
+      url: url.trim(),
+      ...(oauthEnabled
+        ? {
+            oauth: {
+              ...(oauthClientId.trim() ? { clientId: oauthClientId.trim() } : {}),
+              ...(oauthClientSecret.trim() ? { clientSecret: oauthClientSecret.trim() } : {}),
+              ...(oauthScope.trim() ? { scope: oauthScope.trim() } : {}),
+            },
+          }
+        : {}),
+      ...(parsedTimeout === undefined ? {} : { timeout: parsedTimeout }),
+    }
+  }
+
   const addMcpServerMutation = useMutation({
     mutationFn: async () => {
       const config = await settingsApi.getOpenCodeConfig()
-      const currentMcp = (config.content.mcp as Record<string, unknown>) || {}
-      
-      const mcpConfig: Record<string, unknown> = {
-        type: serverType,
-        enabled,
-      }
+      const mcpServerConfig = buildMcpServerConfig()
+      const mcp = (config.content.mcp as Record<string, unknown> | undefined) ?? {}
+      const servers = { ...(mcp.servers as Record<string, V2McpServerConfig> | undefined) }
 
-      if (serverType === 'local') {
-        const commandArray = command.split(' ').filter(arg => arg.trim())
-        if (commandArray.length === 0) {
-          throw new Error('Command is required for local MCP servers')
-        }
-        mcpConfig.command = commandArray
-        
-        const envVars: Record<string, string> = {}
-        environment.forEach(env => {
-          if (env.key.trim() && env.value.trim()) {
-            envVars[env.key.trim()] = env.value.trim()
-          }
-        })
-        if (Object.keys(envVars).length > 0) {
-          mcpConfig.environment = envVars
-        }
-      } else {
-        if (!url.trim()) {
-          throw new Error('URL is required for remote MCP servers')
-        }
-        mcpConfig.url = url.trim()
-        
-        if (oauthEnabled) {
-          const oauthConfig: Record<string, string> = {}
-          if (oauthClientId.trim()) oauthConfig.clientId = oauthClientId.trim()
-          if (oauthClientSecret.trim()) oauthConfig.clientSecret = oauthClientSecret.trim()
-          if (oauthScope.trim()) oauthConfig.scope = oauthScope.trim()
-          mcpConfig.oauth = Object.keys(oauthConfig).length > 0 ? oauthConfig : true
-        }
-      }
+      servers[serverId] = toV2McpServerConfig(mcpServerConfig, window.location.origin)
 
-      if (timeout && parseInt(timeout)) {
-        mcpConfig.timeout = parseInt(timeout)
-      }
-
-      const updatedConfig = {
+      await onUpdate({
         ...config.content,
         mcp: {
-          ...currentMcp,
-          [serverId]: mcpConfig,
+          ...mcp,
+          servers,
         },
-      }
+      })
 
-      await onUpdate(updatedConfig)
-      
       if (enabled) {
-        const buildOauthField = () => {
-          if (serverType !== 'remote' || !oauthEnabled) return undefined
-          const cfg: Record<string, string> = {}
-          if (oauthClientId.trim()) cfg.clientId = oauthClientId.trim()
-          if (oauthClientSecret.trim()) cfg.clientSecret = oauthClientSecret.trim()
-          if (oauthScope.trim()) cfg.scope = oauthScope.trim()
-          return Object.keys(cfg).length > 0 ? cfg : true
-        }
-
-        await addServerAsync({ 
-          name: serverId, 
-          config: {
-            type: serverType,
-            enabled,
-            command: serverType === 'local' ? command.split(' ').filter(arg => arg.trim()) : undefined,
-            url: serverType === 'remote' ? url.trim() : undefined,
-            environment: serverType === 'local' && Object.keys(environment).length > 0 
-              ? environment.reduce((acc, env) => {
-                  if (env.key.trim() && env.value.trim()) {
-                    acc[env.key.trim()] = env.value.trim()
-                  }
-                  return acc
-                }, {} as Record<string, string>)
-              : undefined,
-            timeout: timeout && parseInt(timeout) ? parseInt(timeout) : undefined,
-            oauth: buildOauthField(),
-          }
-        })
+        await addServerAsync({ name: serverId, config: mcpServerConfig })
       }
     },
     onSuccess: () => {

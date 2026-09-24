@@ -1,5 +1,5 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest'
-import { mkdir, mkdtemp, readFile, rm, writeFile } from 'node:fs/promises'
+import { mkdir, mkdtemp, readFile, readdir, rm, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 
@@ -238,7 +238,7 @@ describe('backend entrypoint', () => {
     expect(body.endpoints.repos).toBe('/api/repos')
   })
 
-  it.each(['opencode.jsonc', 'config.json'])('does not seed opencode.json when %s already exists', async (name) => {
+  it.each(['opencode.jsonc', 'opencode.json'])('preserves an existing %s without seeding', async (name) => {
     const configDir = join(tempWorkspace, '.config', 'opencode')
     const rawContent = '{\n  // preserve this source\n  "model": "test/model"\n}\n'
     await mkdir(configDir, { recursive: true })
@@ -247,7 +247,39 @@ describe('backend entrypoint', () => {
     await import('../src/index')
 
     expect(await readFile(join(configDir, name), 'utf8')).toBe(rawContent)
-    await expect(readFile(join(configDir, 'opencode.json'), 'utf8')).rejects.toMatchObject({ code: 'ENOENT' })
+    expect(seedOpenCodeConfigFileMock).not.toHaveBeenCalled()
+  })
+
+  it('promotes a legacy config.json to opencode.json on startup without seeding', async () => {
+    const configDir = join(tempWorkspace, '.config', 'opencode')
+    const rawContent = '{\n  // legacy source\n  "model": "test/model"\n}\n'
+    await mkdir(configDir, { recursive: true })
+    await writeFile(join(configDir, 'config.json'), rawContent)
+
+    await import('../src/index')
+
+    expect(seedOpenCodeConfigFileMock).not.toHaveBeenCalled()
+    expect(await readFile(join(configDir, 'opencode.json'), 'utf8')).toBe(rawContent)
+    await expect(readFile(join(configDir, 'config.json'), 'utf8')).rejects.toMatchObject({ code: 'ENOENT' })
+    const archived = await readdir(join(tempWorkspace, '.config', 'opencode-configs-archive'))
+    expect(archived).toHaveLength(1)
+    expect(await readFile(join(tempWorkspace, '.config', 'opencode-configs-archive', archived[0]!), 'utf8')).toBe(rawContent)
+  })
+
+  it('folds legacy config.json keys into an existing opencode.json on startup', async () => {
+    const configDir = join(tempWorkspace, '.config', 'opencode')
+    await mkdir(configDir, { recursive: true })
+    await writeFile(join(configDir, 'opencode.json'), '{\n  // target source\n  "theme": "dark"\n}\n')
+    await writeFile(join(configDir, 'config.json'), '{"model":"test/model"}')
+
+    await import('../src/index')
+
+    expect(seedOpenCodeConfigFileMock).not.toHaveBeenCalled()
+    const merged = await readFile(join(configDir, 'opencode.json'), 'utf8')
+    expect(merged).toContain('// target source')
+    expect(merged).toContain('"theme": "dark"')
+    expect(merged).toContain('"model": "test/model"')
+    await expect(readFile(join(configDir, 'config.json'), 'utf8')).rejects.toMatchObject({ code: 'ENOENT' })
   })
 
   it('ignores unknown API routes through the not-found handler', async () => {

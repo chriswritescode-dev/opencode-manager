@@ -121,6 +121,24 @@ describe('service worker notifications', () => {
         expect.objectContaining({ requireInteraction: false, renotify: false })
       )
     })
+
+    it('requires interaction for form requests', async () => {
+      const payload = {
+        title: 'Question',
+        body: 'A session needs your answer',
+        tag: 'repo-1-session-1',
+        data: { eventType: 'form.created', url: '/repos/1/sessions/s' },
+      }
+
+      await dispatchAndWait('push', {
+        data: { json: () => payload, text: () => '' },
+      })
+
+      expect(scope.registration.showNotification).toHaveBeenCalledWith(
+        'Question',
+        expect.objectContaining({ requireInteraction: true })
+      )
+    })
   })
 
   describe('notificationclick', () => {

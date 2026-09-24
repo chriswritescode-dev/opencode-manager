@@ -56,6 +56,10 @@ export function sanitizeBranchForDirectory(branch: string): string {
   return branch.replace(/[\\/]/g, '-')
 }
 
+export function isWorktreeSibling(sibling: { worktreeStrategy?: string }): boolean {
+  return sibling.worktreeStrategy !== undefined
+}
+
 export function getRepoBaseDirectoryName(repo: { localPath: string; branch?: string; isWorktree?: boolean }): string {
   if (repo.isWorktree && repo.branch) {
     const suffix = `-${sanitizeBranchForDirectory(repo.branch)}`

@@ -8,7 +8,6 @@ import { SettingsService } from '../../src/services/settings'
 import { allMigrations } from '../../src/db/migrations'
 import { getOrCreateInternalToken } from '../../src/services/internal-token'
 import { migrate } from '../../src/db/migration-runner'
-import { getAssistantModeDirectory } from '../../src/services/assistant-mode'
 import type { OpenCodeClient } from '../../src/services/opencode/client'
 import type { ScheduleWorktreeManager } from '../../src/services/schedule-worktree'
 
@@ -19,20 +18,16 @@ describe('internal/assistant routes', () => {
   let settingsService: SettingsService
   let app: Hono
   let token: string
-  let forwardMock: ReturnType<typeof vi.fn>
+  let reloadMock: ReturnType<typeof vi.fn>
 
   beforeEach(() => {
     db = new Database(':memory:')
     migrate(db, allMigrations)
 
-    forwardMock = vi.fn().mockResolvedValue(new Response(JSON.stringify({}), { status: 200 }))
+    reloadMock = vi.fn().mockResolvedValue(undefined)
     const openCodeClient = {
-      forward: forwardMock,
+      api: { location: { reload: reloadMock } },
       forwardRaw: vi.fn(),
-      getJson: vi.fn(),
-      postJson: vi.fn(),
-      setProviderAuth: vi.fn(),
-      deleteProviderAuth: vi.fn(),
     } as unknown as OpenCodeClient
 
     const stubWorktreeManager = { prepare: () => Promise.resolve(null), finalize: () => Promise.resolve({ commitHash: null }) } as unknown as ScheduleWorktreeManager
@@ -59,17 +54,13 @@ describe('internal/assistant routes', () => {
     expect(body.success).toBe(true)
   })
 
-  it('forwards POST /instance/dispose with correct directory', async () => {
+  it('reloads every loaded location without a directory argument', async () => {
     await app.request('/api/internal/assistant/reload', {
       method: 'POST',
       headers: { authorization: `Bearer ${token}` },
     })
-    expect(forwardMock).toHaveBeenCalledTimes(1)
-    expect(forwardMock).toHaveBeenCalledWith({
-      method: 'POST',
-      path: '/instance/dispose',
-      directory: getAssistantModeDirectory(),
-    })
+    expect(reloadMock).toHaveBeenCalledTimes(1)
+    expect(reloadMock).toHaveBeenCalledWith()
   })
 
   it('returns 429 after exceeding rate limit (5 calls/min)', async () => {
@@ -105,10 +96,8 @@ describe('internal/assistant routes', () => {
     expect(res.headers.get('Retry-After')).toBeTruthy()
   })
 
-  it('returns 502 when OpenCode responds non-2xx', async () => {
-    forwardMock.mockResolvedValue(
-      new Response(JSON.stringify({ error: 'Internal error' }), { status: 500 }),
-    )
+  it('returns 502 when the location reload fails', async () => {
+    reloadMock.mockRejectedValue(new Error('reload failed'))
     const res = await app.request('/api/internal/assistant/reload', {
       method: 'POST',
       headers: { authorization: `Bearer ${token}` },

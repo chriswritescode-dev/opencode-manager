@@ -472,8 +472,6 @@ describe('settings routes — restart coordinator wiring', () => {
         sessionID: 's1',
         directory: '/a',
       } satisfies ResumableSession]),
-      abortSessions: vi.fn(),
-      resumeSessions: vi.fn(),
       runWithResume: vi.fn(),
     } as unknown as OpenCodeRestartCoordinator
     setOpenCodeRestartCoordinator(fakeCoordinator)
@@ -501,8 +499,6 @@ describe('settings routes — restart coordinator wiring', () => {
     const runWithResume = vi.fn().mockResolvedValue({ healthy: true, resumedSessionIDs: ['s1'] })
     const fakeCoordinator = {
       captureResumableSessions: vi.fn(() => []),
-      abortSessions: vi.fn(),
-      resumeSessions: vi.fn(),
       runWithResume,
     } as unknown as OpenCodeRestartCoordinator
     setOpenCodeRestartCoordinator(fakeCoordinator)

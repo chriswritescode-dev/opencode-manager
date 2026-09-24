@@ -4,16 +4,16 @@ import userEvent from '@testing-library/user-event'
 import type { ReactNode } from 'react'
 import { MemoryRouter, useLocation } from 'react-router-dom'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
-import type { PermissionRequest, QuestionRequest } from '@/api/types'
-import { EventProvider, useEventContext, usePermissions, useQuestions, useSSEHealth } from './EventContext'
+import type { FormInfo, PermissionRequest } from '@opencode-manager/shared/opencode'
+import { EventProvider, useEventContext, useForms, usePermissions, useSSEHealth } from './EventContext'
 
 const mocks = vi.hoisted(() => ({
   listRepos: vi.fn(),
   listPendingPermissions: vi.fn(),
-  listPendingQuestions: vi.fn(),
-  replyToQuestion: vi.fn(),
-  rejectQuestion: vi.fn(),
-  respondToPermission: vi.fn(),
+  listPendingForms: vi.fn(),
+  replyPermission: vi.fn(),
+  replyForm: vi.fn(),
+  cancelForm: vi.fn(),
   subscribeGlobalMonitor: vi.fn(),
   getHealth: vi.fn(),
 }))
@@ -23,13 +23,11 @@ vi.mock('@/api/repos', () => ({
 }))
 
 vi.mock('@/api/opencode', () => ({
-  OpenCodeClient: vi.fn(() => ({
-    listPendingPermissions: mocks.listPendingPermissions,
-    listPendingQuestions: mocks.listPendingQuestions,
-    replyToQuestion: mocks.replyToQuestion,
-    rejectQuestion: mocks.rejectQuestion,
-    respondToPermission: mocks.respondToPermission,
-  })),
+  listPendingPermissions: mocks.listPendingPermissions,
+  listPendingForms: mocks.listPendingForms,
+  replyPermission: mocks.replyPermission,
+  replyForm: mocks.replyForm,
+  cancelForm: mocks.cancelForm,
 }))
 
 vi.mock('@/lib/opencode-event-stream', () => ({
@@ -46,72 +44,43 @@ vi.mock('@/lib/toast', () => ({
   },
 }))
 
-const pendingQuestion: QuestionRequest = {
-  id: 'question-1',
+const pendingForm: FormInfo = {
+  id: 'form-1',
   sessionID: 'session-1',
-  questions: [
-    {
-      question: 'Continue?',
-      header: 'Confirm',
-      options: [
-        {
-          label: 'Yes',
-          description: 'Continue',
-        },
-      ],
-      multiple: false,
-    },
+  title: 'Continue?',
+  fields: [
+    { key: 'q0', title: 'Confirm', type: 'string', options: [{ value: 'Yes', label: 'Yes' }] },
   ],
 }
 
-const secondPendingQuestion: QuestionRequest = {
-  id: 'question-2',
+const secondPendingForm: FormInfo = {
+  id: 'form-2',
   sessionID: 'session-2',
-  questions: [
-    {
-      question: 'Deploy?',
-      header: 'Deploy',
-      options: [
-        {
-          label: 'Yes',
-          description: 'Deploy changes',
-        },
-      ],
-      multiple: false,
-    },
+  title: 'Deploy?',
+  fields: [
+    { key: 'q0', title: 'Deploy', type: 'string', options: [{ value: 'Yes', label: 'Yes' }] },
   ],
 }
 
 const pendingPermission: PermissionRequest = {
   id: 'permission-1',
   sessionID: 'session-1',
-  permission: 'bash',
-  patterns: ['echo hello'],
+  action: 'shell',
+  resources: ['echo hello'],
   metadata: {},
-  always: [],
-  tool: {
-    messageID: 'message-1',
-    callID: 'call-1',
-  },
 }
 
 const secondPendingPermission: PermissionRequest = {
   id: 'permission-2',
   sessionID: 'session-1',
-  permission: 'write',
-  patterns: ['/tmp/test.txt'],
+  action: 'edit',
+  resources: ['/tmp/test.txt'],
   metadata: {},
-  always: [],
-  tool: {
-    messageID: 'message-2',
-    callID: 'call-2',
-  },
 }
 
 function Harness() {
-  const { current, pendingCount, syncForSession, navigateToCurrent, reject, reply, getForSession } = useQuestions()
+  const { current, pendingCount, syncForSession, navigateToCurrent, cancel, reply, getForSession } = useForms()
   const permissions = usePermissions()
-  const permissionForCall = permissions.getForCallID('call-1', 'session-1')
   const location = useLocation()
 
   return (
@@ -123,25 +92,25 @@ function Harness() {
       <div data-testid="for-session-unknown">{getForSession('session-unknown')?.id ?? 'none'}</div>
       <div data-testid="permission-count">{permissions.pendingCount}</div>
       <div data-testid="permission-current">{permissions.current?.id ?? 'none'}</div>
-      <div data-testid="permission-call">{permissionForCall?.id ?? 'none'}</div>
       <div data-testid="path">{location.pathname}</div>
       <button onClick={() => syncForSession('/repo', 'session-1')}>Sync</button>
       <button onClick={() => permissions.syncForSession('/repo', 'session-1')}>Sync Permissions</button>
       <button onClick={navigateToCurrent}>Navigate</button>
-      <button onClick={() => current && reject(current.id)}>Dismiss</button>
-      <button onClick={() => current && reply(current.id, [['Yes']])}>Reply</button>
+      <button onClick={() => current && cancel(current.id)}>Dismiss</button>
+      <button onClick={() => current && reply(current.id, { q0: 'Yes' })}>Reply</button>
       <button onClick={() => permissions.current && permissions.respond(permissions.current.id, permissions.current.sessionID, 'reject')}>Reject Permission</button>
+      <button onClick={() => permissions.current && permissions.respond(permissions.current.id, permissions.current.sessionID, 'reject', 'not allowed')}>Reject Permission With Reason</button>
     </div>
   )
 }
 
-function createWrapper() {
-  const queryClient = new QueryClient({
-    defaultOptions: {
-      queries: { retry: false },
-    },
+function createTestQueryClient() {
+  return new QueryClient({
+    defaultOptions: { queries: { retry: false } },
   })
+}
 
+function createWrapper(queryClient = createTestQueryClient()) {
   return ({ children }: { children: ReactNode }) => (
     <MemoryRouter>
       <QueryClientProvider client={queryClient}>
@@ -151,14 +120,26 @@ function createWrapper() {
   )
 }
 
-describe('EventProvider questions', () => {
+function CacheResolutionHarness({ sessionID }: { sessionID: string }) {
+  const { getRepoIdForSession } = useEventContext()
+  const repoId = getRepoIdForSession(sessionID)
+
+  return (
+    <div>
+      <div data-testid="repo-id">{repoId ?? 'none'}</div>
+    </div>
+  )
+}
+
+describe('EventProvider permissions and forms', () => {
   beforeEach(() => {
     vi.clearAllMocks()
     mocks.listRepos.mockResolvedValue([])
     mocks.listPendingPermissions.mockResolvedValue([])
-    mocks.listPendingQuestions.mockResolvedValue([])
-    mocks.replyToQuestion.mockResolvedValue(undefined)
-    mocks.rejectQuestion.mockResolvedValue(undefined)
+    mocks.listPendingForms.mockResolvedValue([])
+    mocks.replyPermission.mockResolvedValue(undefined)
+    mocks.replyForm.mockResolvedValue(undefined)
+    mocks.cancelForm.mockResolvedValue(undefined)
     mocks.getHealth.mockReturnValue({ isConnected: false, isHealthy: false, lastEventAt: null, isStalled: false })
     mocks.subscribeGlobalMonitor.mockReturnValue({
       dispose: vi.fn(),
@@ -168,8 +149,8 @@ describe('EventProvider questions', () => {
     })
   })
 
-  it('syncs missed pending questions for a session', async () => {
-    mocks.listPendingQuestions.mockResolvedValue([pendingQuestion])
+  it('syncs missed pending forms for a session', async () => {
+    mocks.listPendingForms.mockResolvedValue([pendingForm])
 
     render(<Harness />, { wrapper: createWrapper() })
 
@@ -177,7 +158,7 @@ describe('EventProvider questions', () => {
 
     await waitFor(() => {
       expect(screen.getByTestId('count')).toHaveTextContent('1')
-      expect(screen.getByTestId('current')).toHaveTextContent('question-1')
+      expect(screen.getByTestId('current')).toHaveTextContent('form-1')
     })
   })
 
@@ -191,7 +172,6 @@ describe('EventProvider questions', () => {
     await waitFor(() => {
       expect(screen.getByTestId('permission-count')).toHaveTextContent('1')
       expect(screen.getByTestId('permission-current')).toHaveTextContent('permission-1')
-      expect(screen.getByTestId('permission-call')).toHaveTextContent('permission-1')
     })
   })
 
@@ -231,16 +211,32 @@ describe('EventProvider questions', () => {
     await userEvent.click(screen.getByRole('button', { name: 'Reject Permission' }))
 
     await waitFor(() => {
-      expect(mocks.respondToPermission).toHaveBeenCalledTimes(1)
-      expect(mocks.respondToPermission).toHaveBeenCalledWith('permission-1', 'reject')
+      expect(mocks.replyPermission).toHaveBeenCalledTimes(1)
+      expect(mocks.replyPermission).toHaveBeenCalledWith('session-1', 'permission-1', 'reject', undefined)
       expect(screen.getByTestId('permission-count')).toHaveTextContent('1')
       expect(screen.getByTestId('permission-current')).toHaveTextContent('permission-2')
     })
   })
 
-  it('clears stale pending questions for a session', async () => {
-    mocks.listPendingQuestions
-      .mockResolvedValueOnce([pendingQuestion])
+  it('forwards an optional rejection message to the facade', async () => {
+    mocks.listPendingPermissions.mockResolvedValue([pendingPermission])
+
+    render(<Harness />, { wrapper: createWrapper() })
+
+    await userEvent.click(screen.getByRole('button', { name: 'Sync Permissions' }))
+
+    await waitFor(() => expect(screen.getByTestId('permission-count')).toHaveTextContent('1'))
+
+    await userEvent.click(screen.getByRole('button', { name: 'Reject Permission With Reason' }))
+
+    await waitFor(() =>
+      expect(mocks.replyPermission).toHaveBeenCalledWith('session-1', 'permission-1', 'reject', 'not allowed'),
+    )
+  })
+
+  it('clears stale pending forms for a session', async () => {
+    mocks.listPendingForms
+      .mockResolvedValueOnce([pendingForm])
       .mockResolvedValueOnce([])
 
     render(<Harness />, { wrapper: createWrapper() })
@@ -259,10 +255,10 @@ describe('EventProvider questions', () => {
     })
   })
 
-  it('reconciles pending questions for the whole directory', async () => {
-    mocks.listPendingQuestions
-      .mockResolvedValueOnce([pendingQuestion, secondPendingQuestion])
-      .mockResolvedValueOnce([pendingQuestion])
+  it('reconciles pending forms for the whole directory', async () => {
+    mocks.listPendingForms
+      .mockResolvedValueOnce([pendingForm, secondPendingForm])
+      .mockResolvedValueOnce([pendingForm])
 
     render(<Harness />, { wrapper: createWrapper() })
 
@@ -276,12 +272,12 @@ describe('EventProvider questions', () => {
 
     await waitFor(() => {
       expect(screen.getByTestId('count')).toHaveTextContent('1')
-      expect(screen.getByTestId('current')).toHaveTextContent('question-1')
+      expect(screen.getByTestId('current')).toHaveTextContent('form-1')
     })
   })
 
-  it('resolves pending questions per session independently of the global current', async () => {
-    mocks.listPendingQuestions.mockResolvedValue([pendingQuestion, secondPendingQuestion])
+  it('resolves pending forms per session independently of the global current', async () => {
+    mocks.listPendingForms.mockResolvedValue([pendingForm, secondPendingForm])
 
     render(<Harness />, { wrapper: createWrapper() })
 
@@ -291,16 +287,16 @@ describe('EventProvider questions', () => {
       expect(screen.getByTestId('count')).toHaveTextContent('2')
     })
 
-    expect(screen.getByTestId('current')).toHaveTextContent('question-1')
-    expect(screen.getByTestId('for-session-1')).toHaveTextContent('question-1')
-    expect(screen.getByTestId('for-session-2')).toHaveTextContent('question-2')
+    expect(screen.getByTestId('current')).toHaveTextContent('form-1')
+    expect(screen.getByTestId('for-session-1')).toHaveTextContent('form-1')
+    expect(screen.getByTestId('for-session-2')).toHaveTextContent('form-2')
     expect(screen.getByTestId('for-session-unknown')).toHaveTextContent('none')
   })
 
-  it('reconciles stale pending questions after reconnect', async () => {
+  it('reconciles stale pending forms after reconnect', async () => {
     mocks.listRepos.mockResolvedValue([{ id: 123, fullPath: '/repo' }])
-    mocks.listPendingQuestions
-      .mockResolvedValueOnce([pendingQuestion])
+    mocks.listPendingForms
+      .mockResolvedValueOnce([pendingForm])
       .mockResolvedValueOnce([])
 
     render(<Harness />, { wrapper: createWrapper() })
@@ -319,16 +315,127 @@ describe('EventProvider questions', () => {
     })
   })
 
-  it('navigates to a synced pending question without session query cache', async () => {
+  it('clears settled pending actions on an upstream resync while the browser stream stays connected', async () => {
     mocks.listRepos.mockResolvedValue([{ id: 123, fullPath: '/repo' }])
-    mocks.listPendingQuestions.mockResolvedValue([pendingQuestion])
+    mocks.listPendingPermissions.mockResolvedValue([])
+    mocks.listPendingForms.mockResolvedValue([])
+
+    render(<Harness />, { wrapper: createWrapper() })
+
+    await waitFor(() => {
+      expect(mocks.listPendingPermissions).toHaveBeenCalledWith('/repo')
+      expect(mocks.listPendingForms).toHaveBeenCalledWith('/repo')
+    })
+    await act(async () => {
+      await Promise.resolve()
+    })
+
+    const lastSubscribeCall = mocks.subscribeGlobalMonitor.mock.calls[mocks.subscribeGlobalMonitor.mock.calls.length - 1]
+    const onEvent = lastSubscribeCall[0].onEvent as (data: unknown) => void
+    const onResync = lastSubscribeCall[0].onResync as (() => void) | undefined
+
+    act(() => {
+      onEvent({ type: 'permission.asked', data: pendingPermission, directory: '/repo' })
+      onEvent({ type: 'form.created', data: { form: pendingForm }, directory: '/repo' })
+    })
+
+    await waitFor(() => {
+      expect(screen.getByTestId('permission-count')).toHaveTextContent('1')
+      expect(screen.getByTestId('count')).toHaveTextContent('1')
+    })
+
+    act(() => {
+      onResync?.()
+    })
+
+    await waitFor(() => {
+      expect(screen.getByTestId('permission-count')).toHaveTextContent('0')
+      expect(screen.getByTestId('count')).toHaveTextContent('0')
+    })
+  })
+
+  it('retains genuinely pending actions on an upstream resync', async () => {
+    mocks.listRepos.mockResolvedValue([{ id: 123, fullPath: '/repo' }])
+    mocks.listPendingPermissions.mockResolvedValue([pendingPermission])
+    mocks.listPendingForms.mockResolvedValue([pendingForm])
+
+    render(<Harness />, { wrapper: createWrapper() })
+
+    await waitFor(() => {
+      expect(mocks.subscribeGlobalMonitor).toHaveBeenCalled()
+    })
+
+    const lastSubscribeCall = mocks.subscribeGlobalMonitor.mock.calls[mocks.subscribeGlobalMonitor.mock.calls.length - 1]
+    const onEvent = lastSubscribeCall[0].onEvent as (data: unknown) => void
+    const onResync = lastSubscribeCall[0].onResync as (() => void) | undefined
+
+    act(() => {
+      onEvent({ type: 'permission.asked', data: pendingPermission, directory: '/repo' })
+      onEvent({ type: 'form.created', data: { form: pendingForm }, directory: '/repo' })
+    })
+
+    await waitFor(() => {
+      expect(screen.getByTestId('permission-count')).toHaveTextContent('1')
+      expect(screen.getByTestId('count')).toHaveTextContent('1')
+    })
+
+    act(() => {
+      onResync?.()
+    })
+
+    await waitFor(() => {
+      expect(screen.getByTestId('permission-count')).toHaveTextContent('1')
+      expect(screen.getByTestId('count')).toHaveTextContent('1')
+    })
+  })
+
+  it('reconciles tracked worktree session directories on an upstream resync', async () => {
+    mocks.listRepos.mockResolvedValue([{ id: 123, fullPath: '/repo' }])
+    mocks.listPendingPermissions.mockResolvedValue([])
+    mocks.listPendingForms.mockResolvedValue([])
+
+    render(<Harness />, { wrapper: createWrapper() })
+
+    await waitFor(() => {
+      expect(mocks.listPendingPermissions).toHaveBeenCalledWith('/repo')
+      expect(mocks.listPendingForms).toHaveBeenCalledWith('/repo')
+    })
+    await act(async () => {
+      await Promise.resolve()
+    })
+
+    const lastSubscribeCall = mocks.subscribeGlobalMonitor.mock.calls[mocks.subscribeGlobalMonitor.mock.calls.length - 1]
+    const onEvent = lastSubscribeCall[0].onEvent as (data: unknown) => void
+    const onResync = lastSubscribeCall[0].onResync as (() => void) | undefined
+
+    act(() => {
+      onEvent({ type: 'permission.asked', data: pendingPermission, directory: '/worktrees/wt-1' })
+    })
+
+    await waitFor(() => {
+      expect(screen.getByTestId('permission-count')).toHaveTextContent('1')
+    })
+
+    act(() => {
+      onResync?.()
+    })
+
+    await waitFor(() => {
+      expect(mocks.listPendingPermissions).toHaveBeenCalledWith('/worktrees/wt-1')
+      expect(screen.getByTestId('permission-count')).toHaveTextContent('0')
+    })
+  })
+
+  it('navigates to a synced pending form without session query cache', async () => {
+    mocks.listRepos.mockResolvedValue([{ id: 123, fullPath: '/repo' }])
+    mocks.listPendingForms.mockResolvedValue([pendingForm])
 
     render(<Harness />, { wrapper: createWrapper() })
 
     await userEvent.click(screen.getByRole('button', { name: 'Sync' }))
 
     await waitFor(() => {
-      expect(screen.getByTestId('current')).toHaveTextContent('question-1')
+      expect(screen.getByTestId('current')).toHaveTextContent('form-1')
     })
 
     await userEvent.click(screen.getByRole('button', { name: 'Navigate' }))
@@ -338,8 +445,8 @@ describe('EventProvider questions', () => {
     })
   })
 
-  it('clears a pending question after dismiss succeeds', async () => {
-    mocks.listPendingQuestions.mockResolvedValue([pendingQuestion])
+  it('clears a pending form after dismiss succeeds', async () => {
+    mocks.listPendingForms.mockResolvedValue([pendingForm])
 
     render(<Harness />, { wrapper: createWrapper() })
 
@@ -352,13 +459,14 @@ describe('EventProvider questions', () => {
     await userEvent.click(screen.getByRole('button', { name: 'Dismiss' }))
 
     await waitFor(() => {
+      expect(mocks.cancelForm).toHaveBeenCalledWith('session-1', 'form-1')
       expect(screen.getByTestId('count')).toHaveTextContent('0')
       expect(screen.getByTestId('current')).toHaveTextContent('none')
     })
   })
 
-  it('clears a pending question after reply succeeds', async () => {
-    mocks.listPendingQuestions.mockResolvedValue([pendingQuestion])
+  it('clears a pending form after reply succeeds', async () => {
+    mocks.listPendingForms.mockResolvedValue([pendingForm])
 
     render(<Harness />, { wrapper: createWrapper() })
 
@@ -371,12 +479,13 @@ describe('EventProvider questions', () => {
     await userEvent.click(screen.getByRole('button', { name: 'Reply' }))
 
     await waitFor(() => {
+      expect(mocks.replyForm).toHaveBeenCalledWith('session-1', 'form-1', { q0: 'Yes' })
       expect(screen.getByTestId('count')).toHaveTextContent('0')
       expect(screen.getByTestId('current')).toHaveTextContent('none')
     })
   })
 
-  it('adds a pending question received via the global monitor onEvent', async () => {
+  it('adds a pending form received via the global monitor onEvent', async () => {
     mocks.listRepos.mockResolvedValue([{ id: 123, fullPath: '/repo' }])
 
     render(<Harness />, { wrapper: createWrapper() })
@@ -390,85 +499,94 @@ describe('EventProvider questions', () => {
 
     act(() => {
       onEvent({
-        type: 'question.asked',
-        properties: pendingQuestion,
+        type: 'form.created',
+        data: { form: pendingForm },
         directory: '/repo',
       })
     })
 
     await waitFor(() => {
       expect(screen.getByTestId('count')).toHaveTextContent('1')
-      expect(screen.getByTestId('current')).toHaveTextContent('question-1')
+      expect(screen.getByTestId('current')).toHaveTextContent('form-1')
     })
   })
 
-
-
-  it('handles session.updated event without throwing when cache has infinite-query data', async () => {
+  it('adds a pending permission received via the global monitor onEvent', async () => {
     mocks.listRepos.mockResolvedValue([{ id: 123, fullPath: '/repo' }])
 
-    const queryClient = new QueryClient({
-      defaultOptions: { queries: { retry: false } },
-    })
-
-    // Seed infinite-query shaped data into session-list cache
-    queryClient.setQueryData(
-      ['opencode', 'sessions', 'http://localhost:5551', '/repo', { search: undefined, limit: 25 }],
-      {
-        pages: [{
-          items: [
-            { id: 'existing-session', projectID: 'proj-1', title: 'Existing', directory: '/repo', time: { created: 1000, updated: 1000 } },
-          ],
-          cursors: {},
-        }],
-        pageParams: [undefined],
-      },
-    )
-
-    const wrapper = ({ children }: { children: ReactNode }) => (
-      <MemoryRouter>
-        <QueryClientProvider client={queryClient}>
-          <EventProvider>{children}</EventProvider>
-        </QueryClientProvider>
-      </MemoryRouter>
-    )
-
-    render(<Harness />, { wrapper })
+    render(<Harness />, { wrapper: createWrapper() })
 
     await waitFor(() => {
       expect(mocks.subscribeGlobalMonitor).toHaveBeenCalled()
     })
 
-    // Trigger session.updated event - should not throw with infinite-query cache data
     const lastSubscribeCall = mocks.subscribeGlobalMonitor.mock.calls[mocks.subscribeGlobalMonitor.mock.calls.length - 1]
     const onEvent = lastSubscribeCall[0].onEvent as (data: unknown) => void
 
-    expect(() => {
-      act(() => {
-        onEvent({
-          type: 'session.updated',
-          properties: {
-            info: { id: 'new-session', projectID: 'proj-1', title: 'New', directory: '/repo', time: { created: 2000, updated: 2000 } },
-          },
-        })
+    act(() => {
+      onEvent({
+        type: 'permission.asked',
+        data: pendingPermission,
+        directory: '/repo',
       })
-    }).not.toThrow()
-  })
-
-  it('getClient resolves directory from infinite-query session list cache', async () => {
-    mocks.listRepos.mockResolvedValue([{ id: 123, fullPath: '/repo' }])
-
-    const queryClient = new QueryClient({
-      defaultOptions: { queries: { retry: false } },
     })
 
-    // Seed infinite-query data with a session that has directory field
+    await waitFor(() => {
+      expect(screen.getByTestId('permission-count')).toHaveTextContent('1')
+      expect(screen.getByTestId('permission-current')).toHaveTextContent('permission-1')
+    })
+
+    act(() => {
+      onEvent({
+        type: 'permission.replied',
+        data: { sessionID: 'session-1', requestID: 'permission-1', reply: 'reject' },
+        directory: '/repo',
+      })
+    })
+
+    await waitFor(() => {
+      expect(screen.getByTestId('permission-count')).toHaveTextContent('0')
+    })
+  })
+
+  it('removes a pending form on a form.cancelled event', async () => {
+    mocks.listRepos.mockResolvedValue([{ id: 123, fullPath: '/repo' }])
+    mocks.listPendingForms.mockResolvedValue([pendingForm])
+
+    render(<Harness />, { wrapper: createWrapper() })
+
+    await waitFor(() => {
+      expect(screen.getByTestId('count')).toHaveTextContent('1')
+    })
+
+    const lastSubscribeCall = mocks.subscribeGlobalMonitor.mock.calls[mocks.subscribeGlobalMonitor.mock.calls.length - 1]
+    const onEvent = lastSubscribeCall[0].onEvent as (data: unknown) => void
+
+    act(() => {
+      onEvent({
+        type: 'form.cancelled',
+        data: { id: 'form-1', sessionID: 'session-1' },
+        directory: '/repo',
+      })
+    })
+
+    await waitFor(() => {
+      expect(screen.getByTestId('count')).toHaveTextContent('0')
+      expect(screen.getByTestId('current')).toHaveTextContent('none')
+    })
+  })
+
+  it('resolves a session directory from the infinite-query session list cache', async () => {
+    mocks.listRepos.mockResolvedValue([{ id: 123, fullPath: '/repo' }])
+
+    const queryClient = createTestQueryClient()
+
     queryClient.setQueryData(
-      ['opencode', 'sessions', 'http://localhost:5551', '/repo', { search: undefined, limit: 25 }],
+      ['opencode', 'sessions', '/repo', { search: undefined, limit: 25 }],
       {
         pages: [{
           items: [
-            { id: 'ses-infinite', projectID: 'proj-1', title: 'From Infinite Query', directory: '/repo', time: { created: 1000, updated: 1000 } },
+            { id: 'ses-infinite', projectID: 'proj-1', title: 'From Infinite Query', location: { directory: '/repo' }, time: { created: 1000, updated: 1000 } },
           ],
           cursors: {},
         }],
@@ -476,25 +594,69 @@ describe('EventProvider questions', () => {
       },
     )
 
-    // Ensure no single-session cache exists for this session (forces fallback to session-list lookup)
-    const wrapper = ({ children }: { children: ReactNode }) => (
-      <MemoryRouter>
-        <QueryClientProvider client={queryClient}>
-          <EventProvider>{children}</EventProvider>
-        </QueryClientProvider>
-      </MemoryRouter>
-    )
-
-    function ClientHarness() {
-      const { getClient } = useEventContext()
-      const client = getClient('ses-infinite')
-      return <div data-testid="client-result">{client ? 'found' : 'not-found'}</div>
-    }
-
-    render(<ClientHarness />, { wrapper })
+    render(<CacheResolutionHarness sessionID="ses-infinite" />, { wrapper: createWrapper(queryClient) })
 
     await waitFor(() => {
-      expect(screen.getByTestId('client-result')).toHaveTextContent('found')
+      expect(screen.getByTestId('repo-id')).toHaveTextContent('123')
+    })
+  })
+
+  it('resolves a session directory from the single-session cache without a remembered event directory', async () => {
+    mocks.listRepos.mockResolvedValue([{ id: 123, fullPath: '/repo' }])
+
+    const queryClient = createTestQueryClient()
+
+    queryClient.setQueryData(
+      ['opencode', 'session', 'ses-detail', '/repo'],
+      {
+        id: 'ses-detail',
+        projectID: 'proj-1',
+        title: 'Session Detail',
+        location: { directory: '/repo' },
+        time: { created: 1000, updated: 1000 },
+      },
+    )
+
+    render(<CacheResolutionHarness sessionID="ses-detail" />, { wrapper: createWrapper(queryClient) })
+
+    await waitFor(() => {
+      expect(screen.getByTestId('repo-id')).toHaveTextContent('123')
+    })
+  })
+
+  it('resolves a session in the second directory page of the session list cache', async () => {
+    mocks.listRepos.mockResolvedValue([
+      { id: 123, fullPath: '/repo-a' },
+      { id: 456, fullPath: '/repo-b' },
+    ])
+
+    const queryClient = createTestQueryClient()
+
+    queryClient.setQueryData(
+      ['opencode', 'sessions', '/repo-a|/repo-b', { search: undefined, limit: 25 }],
+      {
+        pages: [
+          {
+            items: [
+              { id: 'ses-first', projectID: 'proj-1', title: 'First', location: { directory: '/repo-a' }, time: { created: 1000, updated: 1000 } },
+            ],
+            cursors: { '/repo-a': 'cursor-a' },
+          },
+          {
+            items: [
+              { id: 'ses-second', projectID: 'proj-1', title: 'Second', location: { directory: '/repo-b' }, time: { created: 2000, updated: 2000 } },
+            ],
+            cursors: {},
+          },
+        ],
+        pageParams: [undefined, { '/repo-a': 'cursor-a' }],
+      },
+    )
+
+    render(<CacheResolutionHarness sessionID="ses-second" />, { wrapper: createWrapper(queryClient) })
+
+    await waitFor(() => {
+      expect(screen.getByTestId('repo-id')).toHaveTextContent('456')
     })
   })
 

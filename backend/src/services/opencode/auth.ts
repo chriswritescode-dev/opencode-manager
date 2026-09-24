@@ -1,18 +1,13 @@
-import { ENV } from '@opencode-manager/shared/config/env'
+import { buildOpenCodeBasicAuth } from '@opencode-manager/shared/opencode'
 
 export type OpenCodePasswordResolver = () => string | Promise<string>
 
-export function getOpenCodeBasicAuthHeader(): string | null
-export function getOpenCodeBasicAuthHeader(password: string): string | null
-export function getOpenCodeBasicAuthHeader(passwordResolver: OpenCodePasswordResolver): Promise<string | null>
-export function getOpenCodeBasicAuthHeader(source?: string | OpenCodePasswordResolver): string | null | Promise<string | null> {
+export function getOpenCodeBasicAuthHeader(password: string): string
+export function getOpenCodeBasicAuthHeader(passwordResolver: OpenCodePasswordResolver): Promise<string>
+export function getOpenCodeBasicAuthHeader(source: string | OpenCodePasswordResolver): string | Promise<string> {
   if (typeof source === 'function') {
-    return Promise.resolve(source()).then((password) => getOpenCodeBasicAuthHeader(password))
+    return Promise.resolve(source()).then((password) => buildOpenCodeBasicAuth(password))
   }
 
-  const password = source ?? ENV.OPENCODE.SERVER_PASSWORD
-  const username = ENV.OPENCODE.SERVER_USERNAME
-  if (!password) return null
-  const token = Buffer.from(`${username}:${password}`).toString('base64')
-  return `Basic ${token}`
+  return buildOpenCodeBasicAuth(source)
 }

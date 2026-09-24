@@ -42,7 +42,7 @@ grant_kvm_access() {
   echo "Granted node access to $dev (group '$group_name', gid $dev_gid)"
 }
 
-MIN_OPENCODE_VERSION="1.0.137"
+MIN_OPENCODE_VERSION="2.0.0"
 
 version_gte() {
   printf '%s\n%s\n' "$2" "$1" | sort -V -C
@@ -55,6 +55,15 @@ read_opencode_version() {
     return 0
   fi
   runuser -u node -- "$binary" --version 2>&1 | grep -oE '[0-9]+\.[0-9]+\.[0-9]+' | head -1 || true
+}
+
+opencode_arch_suffix() {
+  local arch
+  arch="$(uname -m | sed 's/x86_64/x64/; s/aarch64/arm64/')"
+  if ls /lib/ld-musl-* >/dev/null 2>&1; then
+    arch="${arch}-musl"
+  fi
+  printf '%s\n' "$arch"
 }
 
 install_opencode() {
@@ -74,7 +83,7 @@ install_opencode() {
   echo "Installing OpenCode ${opencode_version}..."
   local staging
   staging="$(mktemp -d)"
-  curl -fsSL "https://github.com/anomalyco/opencode/releases/download/v${opencode_version}/opencode-linux-$(uname -m | sed 's/x86_64/x64/; s/aarch64/arm64/').tar.gz" \
+  curl -fsSL "https://opencode.ai/files/bin/${opencode_version}/opencode-linux-$(opencode_arch_suffix).tar.gz" \
     -o "$staging/opencode.tar.gz"
   tar -xzf "$staging/opencode.tar.gz" -C "$staging"
   mkdir -p "$HOME/.opencode/bin"
@@ -90,6 +99,11 @@ reconcile_persisted_opencode() {
   persisted_version="$(read_opencode_version "$persisted_path")"
   if [ -z "$persisted_version" ]; then
     echo "Persisted OpenCode at $persisted_path is malformed or unversioned; removing it to fall back to the bundled binary"
+    rm -f "$persisted_path"
+    return 0
+  fi
+  if ! version_gte "$persisted_version" "$MIN_OPENCODE_VERSION"; then
+    echo "Persisted OpenCode $persisted_version is below the minimum supported $MIN_OPENCODE_VERSION; removing it so the bundled OpenCode 2 binary is used"
     rm -f "$persisted_path"
     return 0
   fi

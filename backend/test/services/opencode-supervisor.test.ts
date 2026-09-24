@@ -76,8 +76,8 @@ describe('OpenCodeSupervisor', () => {
     isLastStartupErrorNonRecoverable: vi.fn(() => false),
     setLifecycleInitialized: vi.fn(),
     getPort: vi.fn(() => 5551),
-    getVersion: vi.fn(() => '1.0.137'),
-    getMinVersion: vi.fn(() => '1.0.137'),
+    getVersion: vi.fn(() => '2.0.15'),
+    getMinVersion: vi.fn(() => '2.0.15'),
     isVersionSupported: vi.fn(() => true),
   })
 

@@ -1,4 +1,4 @@
-import { useState } from 'react'
+import { useMemo, useState } from 'react'
 import { Button } from '@/components/ui/button'
 import { Dialog, DialogTrigger } from '@/components/ui/dialog'
 import { SettingsList } from '@/components/ui/settings-list'
@@ -10,9 +10,9 @@ import { McpOAuthDialog } from './McpOAuthDialog'
 import { useMcpServers } from '@/hooks/useMcpServers'
 import { useMutation, useQueryClient } from '@tanstack/react-query'
 import { invalidateConfigCaches } from '@/lib/queryInvalidation'
-import type { McpServerConfig } from '@/api/mcp'
-import { mcpApi } from '@/api/mcp'
 import type { McpAuthStartResponse } from '@/api/mcp'
+import { mcpApi } from '@/api/mcp'
+import { mcpServersFromConfig } from '@opencode-manager/shared/opencode'
 import { showToast } from '@/lib/toast'
 
 interface McpManagerProps {
@@ -22,7 +22,19 @@ interface McpManagerProps {
   onUpdate: (content: Record<string, unknown>) => Promise<void>
 }
 
+function withoutMcpServer(mcp: unknown, serverId: string): Record<string, unknown> {
+  const current = (mcp && typeof mcp === 'object' ? mcp : {}) as Record<string, unknown>
+  const next: Record<string, unknown> = { ...current }
+  delete next[serverId]
 
+  if (current.servers && typeof current.servers === 'object') {
+    const servers = { ...(current.servers as Record<string, unknown>) }
+    delete servers[serverId]
+    next.servers = servers
+  }
+
+  return next
+}
 
 export function McpManager({ config, onUpdate }: McpManagerProps) {
   const [isAddDialogOpen, setIsAddDialogOpen] = useState(false)
@@ -30,10 +42,10 @@ export function McpManager({ config, onUpdate }: McpManagerProps) {
   const [togglingServerId, setTogglingServerId] = useState<string | null>(null)
   const [authDialogServerId, setAuthDialogServerId] = useState<string | null>(null)
   const [removeAuthConfirmServer, setRemoveAuthConfirmServer] = useState<string | null>(null)
-  
+
   const queryClient = useQueryClient()
-  const { 
-    status: mcpStatus, 
+  const {
+    status: mcpStatus,
     isLoading: isLoadingStatus,
     refetch: refetchStatus,
     connect,
@@ -42,25 +54,18 @@ export function McpManager({ config, onUpdate }: McpManagerProps) {
     isRemovingAuth
   } = useMcpServers()
 
+  const mcpServers = useMemo(() => mcpServersFromConfig(config?.content?.mcp), [config])
+
   const deleteServerMutation = useMutation({
     mutationFn: async (serverId: string) => {
-      if (!config) return
-      
-      const currentStatus = mcpStatus?.[serverId]
-      if (currentStatus?.status === 'connected') {
-        await disconnect(serverId)
+      if (config) {
+        await onUpdate({
+          ...config.content,
+          mcp: withoutMcpServer(config.content.mcp, serverId),
+        })
       }
-      
-      const currentMcp = (config.content?.mcp as Record<string, McpServerConfig>) || {}
-      const { [serverId]: _, ...rest } = currentMcp
-      void _
-      
-      const updatedConfig = {
-        ...config.content,
-        mcp: rest,
-      }
-      
-      await onUpdate(updatedConfig)
+
+      await mcpApi.removeServer(serverId)
     },
     onSuccess: async () => {
       invalidateConfigCaches(queryClient)
@@ -72,21 +77,13 @@ export function McpManager({ config, onUpdate }: McpManagerProps) {
     },
   })
 
-  const mcpServers = config?.content?.mcp as Record<string, McpServerConfig> || {}
-  
   const isAnyOperationPending = deleteServerMutation.isPending || togglingServerId !== null
 
   const handleToggleServer = async (serverId: string) => {
     const currentStatus = mcpStatus?.[serverId]
     if (!currentStatus) return
 
-    const serverConfig = mcpServers[serverId]
-    const isRemote = serverConfig?.type === 'remote'
-    const hasOAuthConfig = isRemote && !!serverConfig?.oauth
-    const hasOAuthError = currentStatus.status === 'failed' && isRemote && /oauth|auth.*state/i.test(currentStatus.error)
-    const isOAuthServer = hasOAuthConfig || hasOAuthError || (currentStatus.status === 'needs_auth' && isRemote)
-    
-    if (currentStatus.status === 'needs_auth' || (currentStatus.status === 'failed' && isOAuthServer)) {
+    if (currentStatus.status === 'needs_auth') {
       setAuthDialogServerId(serverId)
       return
     }
@@ -95,9 +92,7 @@ export function McpManager({ config, onUpdate }: McpManagerProps) {
     try {
       if (currentStatus.status === 'connected') {
         await disconnect(serverId)
-      } else if (currentStatus.status === 'disabled') {
-        await connect(serverId)
-      } else if (currentStatus.status === 'failed') {
+      } else {
         await connect(serverId)
       }
     } finally {
@@ -112,30 +107,13 @@ export function McpManager({ config, onUpdate }: McpManagerProps) {
 
   const handleOAuthStartAuth = async (): Promise<McpAuthStartResponse> => {
     if (!authDialogServerId) throw new Error('No server ID')
-    const serverConfig = mcpServers[authDialogServerId]
-    if (!serverConfig?.url) throw new Error('Server URL not found')
-    const oauthConfig = typeof serverConfig.oauth === 'object' ? serverConfig.oauth : undefined
-    return await mcpApi.startAuth(
-      authDialogServerId,
-      serverConfig.url,
-      oauthConfig?.scope,
-      oauthConfig?.clientId,
-      oauthConfig?.clientSecret,
-    )
-  }
-
-  const handleOAuthCompleteAuth = async (code: string) => {
-    if (!authDialogServerId) return
-    await mcpApi.completeAuth(authDialogServerId, code)
-    refetchStatus()
-    setAuthDialogServerId(null)
+    return await mcpApi.startAuth(authDialogServerId)
   }
 
   const handleOAuthCheckStatus = async (): Promise<boolean> => {
     if (!authDialogServerId) return false
     const status = await mcpApi.getStatus()
-    const serverStatus = status[authDialogServerId]
-    if (serverStatus?.status === 'connected') {
+    if (status[authDialogServerId]?.status === 'connected') {
       refetchStatus()
       return true
     }
@@ -164,13 +142,9 @@ export function McpManager({ config, onUpdate }: McpManagerProps) {
     }
   }
 
-  
-
   const getErrorMessage = (serverId: string): string | null => {
     const status = mcpStatus?.[serverId]
-    if (!status) return null
-    if (status.status === 'failed') return status.error
-    if (status.status === 'needs_client_registration') return status.error
+    if (status?.status === 'failed') return status.error ?? null
     return null
   }
 
@@ -270,7 +244,6 @@ export function McpManager({ config, onUpdate }: McpManagerProps) {
         onOpenChange={(open) => !open && setAuthDialogServerId(null)}
         serverName={authDialogServerId || ''}
         onStartAuth={handleOAuthStartAuth}
-        onCompleteAuth={handleOAuthCompleteAuth}
         onCheckStatus={handleOAuthCheckStatus}
         onSuccess={handleOAuthSuccess}
       />

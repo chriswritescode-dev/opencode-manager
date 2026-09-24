@@ -47,7 +47,7 @@ interface ShortcutActions {
   closeSession?: () => void
   toggleSidebar?: () => void
   submitPrompt?: () => void
-  abortSession?: () => void
+  interruptSession?: () => void
   toggleMode?: () => void
   undo?: () => void
   redo?: () => void
@@ -97,7 +97,7 @@ export function useKeyboardShortcuts(actions: ShortcutActions = {}) {
         currentActions.submitPrompt?.()
         break
       case 'abort':
-        currentActions.abortSession?.()
+        currentActions.interruptSession?.()
         break
       case 'toggleMode':
         currentActions.toggleMode?.()

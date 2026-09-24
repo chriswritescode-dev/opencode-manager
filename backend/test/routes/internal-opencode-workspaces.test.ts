@@ -79,12 +79,7 @@ describe('internal-opencode-workspaces routes', () => {
     const notificationService = {} as NotificationService
     const settingsService = {} as SettingsService
     const openCodeClient = {
-      forward: vi.fn(),
       forwardRaw: vi.fn(),
-      getJson: vi.fn(),
-      postJson: vi.fn(),
-      setProviderAuth: vi.fn(),
-      deleteProviderAuth: vi.fn(),
     } as unknown as OpenCodeClient
     app = new Hono()
     app.route('/api/internal', createInternalRoutes(mockDb, scheduleService, notificationService, settingsService, openCodeClient))

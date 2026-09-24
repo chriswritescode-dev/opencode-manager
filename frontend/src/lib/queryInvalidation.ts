@@ -1,12 +1,8 @@
 import type { QueryClient } from '@tanstack/react-query'
 import type { GitStatusResponse } from '@/types/git'
 
-export function messagesQueryKey(
-  opcodeUrl: string | null | undefined,
-  sessionID: string | null | undefined,
-  directory: string | null | undefined,
-) {
-  return ['opencode', 'messages', opcodeUrl, sessionID, directory]
+export function sessionTranscriptQueryKey(sessionID: string | null | undefined) {
+  return ['opencode', 'transcript', sessionID]
 }
 
 export function invalidateProviderCaches(queryClient: QueryClient) {
@@ -148,18 +144,14 @@ export function invalidateSessionCaches(queryClient: QueryClient) {
       query.queryKey[0] === 'opencode' &&
       (query.queryKey[1] === 'sessions' ||
         query.queryKey[1] === 'session' ||
-        query.queryKey[1] === 'messages'),
+        query.queryKey[1] === 'transcript'),
   })
 }
 
-export function invalidateSessionListCaches(queryClient: QueryClient, opcodeUrl?: string | null) {
+export function invalidateSessionListCaches(queryClient: QueryClient) {
   queryClient.invalidateQueries({
-    predicate: (query) => {
-      if (query.queryKey[0] !== 'opencode') return false
-      if (query.queryKey[1] !== 'sessions') return false
-      if (opcodeUrl && query.queryKey[2] !== opcodeUrl) return false
-      return true
-    },
+    predicate: (query) =>
+      query.queryKey[0] === 'opencode' && query.queryKey[1] === 'sessions',
   })
 }
 

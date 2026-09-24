@@ -1,7 +1,8 @@
 import { useMemo } from 'react'
-import { useMessages } from './useOpenCode'
-import { useQuery } from '@tanstack/react-query'
-import { fetchWrapper } from '@/api/fetchWrapper'
+import { skipToken, useQuery } from '@tanstack/react-query'
+import { openCodeApi } from '@/api/opencodeApi'
+import { sessionTranscriptQueryKey } from '@/lib/queryInvalidation'
+import type { SessionTranscript } from '@/lib/session-projection'
 
 interface ContextUsage {
   totalTokens: number
@@ -11,82 +12,55 @@ interface ContextUsage {
   isLoading: boolean
 }
 
-interface ModelLimit {
-  context: number
-  output: number
+interface TranscriptCache {
+  transcript: SessionTranscript
 }
 
-interface ProviderModel {
-  id: string
-  name: string
-  limit: ModelLimit
-}
+export const useContextUsage = (sessionID: string | undefined, directory?: string): ContextUsage => {
+  const transcriptQuery = useQuery<TranscriptCache>({
+    queryKey: sessionTranscriptQueryKey(sessionID ?? ''),
+    queryFn: skipToken,
+  })
+  const transcriptData = transcriptQuery.data
+  const messagesLoading = transcriptQuery.isPending
 
-interface Provider {
-  id: string
-  name: string
-  models: Record<string, ProviderModel>
-}
-
-interface ProvidersResponse {
-  providers: Provider[]
-}
-
-async function fetchProviders(opcodeUrl: string): Promise<ProvidersResponse> {
-  return fetchWrapper<ProvidersResponse>(`${opcodeUrl}/config/providers`)
-}
-
-export const useContextUsage = (opcodeUrl: string | null | undefined, sessionID: string | undefined, directory?: string): ContextUsage => {
-  const { data: messages, isLoading: messagesLoading } = useMessages(opcodeUrl, sessionID, directory)
-
-  const { data: providersData } = useQuery({
-    queryKey: ['providers', opcodeUrl],
-    queryFn: () => {
-      if (!opcodeUrl) throw new Error('opcodeUrl is required')
-      return fetchProviders(opcodeUrl)
-    },
-    enabled: !!opcodeUrl,
+  const { data: models } = useQuery({
+    queryKey: ['opencode', 'models', directory],
+    queryFn: async () => (await openCodeApi.model.list(
+      directory ? { location: { directory } } : undefined,
+    )).data,
     staleTime: 5 * 60 * 1000,
   })
 
   return useMemo(() => {
-    const assistantMessages = messages?.filter(msg => msg.info.role === 'assistant') || []
+    const messages = transcriptData?.transcript.messages ?? []
+    const assistantMessages = messages.filter(msg => msg.type === 'assistant') || []
     let latestAssistantMessage = assistantMessages[assistantMessages.length - 1]
 
     const sumTokens = (msg: typeof latestAssistantMessage) => {
-      if (msg?.info.role !== 'assistant') return 0
-      const msgInfo = msg.info as { tokens?: { input: number; output: number; reasoning: number; cache?: { read: number } } }
-      return (msgInfo.tokens?.input ?? 0) + (msgInfo.tokens?.output ?? 0) + (msgInfo.tokens?.reasoning ?? 0) + (msgInfo.tokens?.cache?.read ?? 0)
+      if (msg?.type !== 'assistant' || !msg.tokens) return 0
+      return msg.tokens.input + msg.tokens.output + msg.tokens.reasoning + msg.tokens.cache.read
     }
 
     if (sumTokens(latestAssistantMessage) === 0 && assistantMessages.length > 1) {
       latestAssistantMessage = assistantMessages[assistantMessages.length - 2]
     }
 
-    const currentModel = (() => {
-      if (!latestAssistantMessage || latestAssistantMessage.info.role !== 'assistant') {
-        return null
-      }
-      const msg = latestAssistantMessage.info as { providerID?: string; modelID?: string }
-      if (msg.providerID && msg.modelID) {
-        return `${msg.providerID}/${msg.modelID}`
-      }
-      return null
-    })()
+    const activeModel = latestAssistantMessage?.type === 'assistant' ? latestAssistantMessage.model : undefined
+
+    const currentModel = activeModel
+      ? `${activeModel.providerID}/${activeModel.id}`
+      : null
 
     let contextLimit: number | null = null
-    if (currentModel && providersData) {
-      const [providerId, modelId] = currentModel.split('/')
-      const provider = providersData.providers.find(p => p.id === providerId)
-      if (provider?.models) {
-        const model = provider.models[modelId]
-        if (model?.limit) {
-          contextLimit = model.limit.context
-        }
+    if (activeModel && models) {
+      const model = models.find(item => item.providerID === activeModel.providerID && item.id === activeModel.id)
+      if (model?.limit) {
+        contextLimit = model.limit.context
       }
     }
 
-    if (!messages || messages.length === 0) {
+    if (messages.length === 0) {
       return {
         totalTokens: 0,
         contextLimit,
@@ -95,7 +69,7 @@ export const useContextUsage = (opcodeUrl: string | null | undefined, sessionID:
         isLoading: messagesLoading
       }
     }
-    
+
     const totalTokens = sumTokens(latestAssistantMessage)
 
     const usagePercentage = contextLimit ? (totalTokens / contextLimit) * 100 : null
@@ -107,5 +81,5 @@ export const useContextUsage = (opcodeUrl: string | null | undefined, sessionID:
       currentModel,
       isLoading: false
     }
-  }, [messages, messagesLoading, providersData])
+  }, [transcriptData, messagesLoading, models])
 }

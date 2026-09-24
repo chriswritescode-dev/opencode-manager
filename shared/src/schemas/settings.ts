@@ -121,7 +121,6 @@ export const DEFAULT_SERVER_ENV_VARS = [
 
 export const BLOCKED_SERVER_ENV_KEYS = [
   'OPENCODE_SERVER_PASSWORD',
-  'OPENCODE_SERVER_USERNAME',
   'OPENCODE_CONFIG',
   'XDG_DATA_HOME',
   'XDG_STATE_HOME',
@@ -334,6 +333,20 @@ export const OpenCodePluginSpecSchema = z.union([
   z.tuple([z.string(), OpenCodePluginOptionsSchema]),
 ]);
 
+export const OpenCodeNativePluginSchema = z.union([
+  z.string(),
+  z.object({
+    package: z.string(),
+    options: OpenCodePluginOptionsSchema.optional(),
+  }),
+]);
+
+export const OpenCodePermissionRuleSchema = z.object({
+  action: z.string(),
+  resource: z.string(),
+  effect: z.enum(["allow", "deny", "ask"]),
+});
+
 export const OpenCodeConfigSchema = z.object({
   $schema: z.string().optional(),
   theme: z.string().optional(),
@@ -341,21 +354,41 @@ export const OpenCodeConfigSchema = z.object({
   small_model: z.string().optional(),
   default_agent: z.string().optional(),
   provider: z.record(z.string(), ProviderConfigSchema).optional(),
+  providers: z.record(z.string(), z.record(z.string(), z.any())).optional(),
   agent: z.record(z.string(), z.any()).optional(),
+  agents: z.record(z.string(), z.record(z.string(), z.any())).optional(),
   command: z.record(z.string(), z.any()).optional(),
+  commands: z.record(z.string(), z.record(z.string(), z.any())).optional(),
   keybinds: z.record(z.string(), z.any()).optional(),
   autoupdate: z.union([z.boolean(), z.literal("notify")]).optional(),
+  update: z.enum(["disable", "notify", "auto"]).optional(),
   formatter: z.record(z.string(), z.any()).optional(),
   permission: z.record(z.string(), z.any()).optional(),
+  permissions: z.array(OpenCodePermissionRuleSchema).optional(),
   mcp: z.record(z.string(), z.any()).optional(),
   instructions: z.array(z.string()).optional(),
   disabled_providers: z.array(z.string()).optional(),
   share: z.enum(["manual", "auto", "disabled"]).optional(),
   plugin: z.array(OpenCodePluginSpecSchema).optional(),
-  skills: z.object({
-    paths: z.array(z.string()).optional(),
-    urls: z.array(z.string()).optional(),
-  }).optional(),
+  plugins: z.array(OpenCodeNativePluginSchema).optional(),
+  skills: z.union([
+    z.array(z.string()),
+    z.object({
+      paths: z.array(z.string()).optional(),
+      urls: z.array(z.string()).optional(),
+    }),
+  ]).optional(),
+  snapshots: z.boolean().optional(),
+  username: z.string().optional(),
+  media: z.record(z.string(), z.any()).optional(),
+  references: z.record(z.string(), z.any()).optional(),
+  worktree: z.record(z.string(), z.any()).optional(),
+  websearch: z.union([z.literal(false), z.record(z.string(), z.any())]).optional(),
+  warming: z.union([z.boolean(), z.record(z.string(), z.any())]).optional(),
+  compaction: z.record(z.string(), z.any()).optional(),
+  experimental: z.record(z.string(), z.any()).optional(),
+  tool_output: z.record(z.string(), z.any()).optional(),
+  watcher: z.record(z.string(), z.any()).optional(),
 }).strip();
 
 export const OpenCodeConfigValidationIssueSchema = z.object({

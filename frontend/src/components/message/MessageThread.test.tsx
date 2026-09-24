@@ -2,32 +2,30 @@ import { describe, it, expect, vi, beforeEach } from 'vitest'
 import { render, screen, fireEvent } from '@testing-library/react'
 import { MessageThread } from './MessageThread'
 import { useUIState } from '@/stores/uiStateStore'
+import { applySessionEvent, emptySessionTranscript } from '@/lib/session-projection'
+import {
+  SESSION_ID,
+  compactionSequence,
+  promptSequence,
+  shellSequence,
+} from '@/lib/session-projection/fixtures'
+import type {
+  SessionInboxUser,
+  SessionMessageAssistant,
+  SessionMessageAssistantTool,
+  SessionMessageInfo,
+  SessionMessageUser,
+  V2Event,
+} from '@opencode-manager/shared/opencode'
 
 const mocks = vi.hoisted(() => ({
-  useSessionStatus: vi.fn(),
-  useSessionTodos: vi.fn(),
   useSettings: vi.fn(),
-  usePermissions: vi.fn(),
-  useQuestions: vi.fn(),
   useRefreshMessage: vi.fn(),
   useSessionAgent: vi.fn(),
 }))
 
-vi.mock('@/stores/sessionStatusStore', () => ({
-  useSessionStatusForSession: () => mocks.useSessionStatus(),
-}))
-
-vi.mock('@/stores/sessionTodosStore', () => ({
-  useSessionTodos: mocks.useSessionTodos,
-}))
-
 vi.mock('@/hooks/useSettings', () => ({
   useSettings: mocks.useSettings,
-}))
-
-vi.mock('@/contexts/EventContext', () => ({
-  usePermissions: () => mocks.usePermissions(),
-  useQuestions: () => mocks.useQuestions(),
 }))
 
 vi.mock('@/hooks/useRemoveMessage', () => ({
@@ -36,6 +34,17 @@ vi.mock('@/hooks/useRemoveMessage', () => ({
 
 vi.mock('@/hooks/useSessionAgent', () => ({
   useSessionAgent: () => mocks.useSessionAgent(),
+}))
+
+vi.mock('@/hooks/useTTS', () => ({
+  useTTS: () => ({
+    speakMessage: vi.fn(),
+    stop: vi.fn(),
+    isEnabled: false,
+    isPlaying: false,
+    isLoading: false,
+    activeMessageId: null,
+  }),
 }))
 
 interface MockSettingsReturn {
@@ -54,110 +63,63 @@ const setupSettings = (preferences: MockSettingsReturn['preferences']) => {
   })
 }
 
-const createTextPart = (text: string, messageId: string) => ({
-  type: 'text' as const,
-  text,
-  sessionID: 'test-session',
-  messageID: messageId,
-  id: 'part-1',
-})
+const project = (events: V2Event[]): SessionMessageInfo[] =>
+  events.reduce(applySessionEvent, emptySessionTranscript).messages
 
-const createTaskToolPart = (description: string, sessionId: string | undefined, messageId: string) => ({
-  type: 'tool' as const,
-  tool: 'task',
-  sessionID: 'test-session',
-  messageID: messageId,
-  id: 'part-2',
-  callID: 'call-1',
-  metadata: sessionId ? { sessionId } : undefined,
-  state: {
-    status: 'completed' as const,
-    input: { description },
-    output: 'done',
-    title: 'Task',
-    metadata: {},
-    time: { start: Date.now(), end: Date.now() + 100 },
-  },
-})
-
-const createSubtaskPart = (description: string, messageId: string) => ({
-  type: 'subtask' as const,
-  prompt: 'Please review this',
-  description,
-  agent: 'reviewer',
-  sessionID: 'test-session',
-  messageID: messageId,
-  id: 'part-3',
-})
-
-const createStepFinishPart = (messageId: string) => ({
-  type: 'step-finish' as const,
-  sessionID: 'test-session',
-  messageID: messageId,
-  id: 'part-4',
-  reason: 'stop',
-  cost: 0,
-  tokens: {
-    input: 0,
-    output: 0,
-    reasoning: 0,
-    cache: { read: 0, write: 0 },
-  },
-})
-
-const createReasoningPart = (text: string, messageId: string) => ({
-  type: 'reasoning' as const,
-  text,
-  sessionID: 'test-session',
-  messageID: messageId,
-  id: 'part-5',
-})
-
-const createAssistantMessage = (
+const assistantMessage = (
   id: string,
-  parts: unknown[],
-  modelID?: string
-) => ({
-  info: {
-    id,
-    role: 'assistant' as const,
-    sessionID: 'test-session',
-    parentID: 'parent-1',
-    providerID: 'test-provider',
-    mode: 'build',
-    time: {
-      created: Date.now(),
-      completed: Date.now() + 100,
-    },
-    modelID: modelID || 'test-model',
-  },
-  parts,
+  content: SessionMessageAssistant['content'],
+  extra: Partial<SessionMessageAssistant> = {},
+): SessionMessageAssistant => ({
+  id,
+  type: 'assistant',
+  agent: 'test-agent',
+  model: { providerID: 'test-provider', id: 'test-model' },
+  content,
+  time: { created: Date.now(), completed: Date.now() + 100 },
+  ...extra,
 })
 
-const createUserMessage = (id: string, text: string) => ({
-  info: {
-    id,
-    role: 'user' as const,
-    sessionID: 'test-session',
-    agent: 'test-agent',
-    model: 'test-model',
-    time: {
-      created: Date.now(),
-    },
+const userMessage = (id: string, text: string): SessionMessageUser => ({
+  id,
+  type: 'user',
+  text,
+  time: { created: Date.now() },
+})
+
+const subagentTool = (description: string, sessionID?: string): SessionMessageAssistantTool => ({
+  type: 'tool',
+  id: 'tool_subagent',
+  name: 'subagent',
+  state: {
+    status: 'completed',
+    input: { description },
+    content: [{ type: 'text', text: 'done' }],
+    metadata: sessionID ? { sessionID } : {},
   },
-  parts: [createTextPart(text, id)],
+  time: { created: Date.now(), completed: Date.now() + 100 },
+})
+
+const textPart = (text: string): SessionMessageAssistant['content'][number] => ({ type: 'text', text })
+
+const reasoningPart = (text: string): SessionMessageAssistant['content'][number] => ({ type: 'reasoning', text })
+
+const shellTool = (command: string): SessionMessageAssistantTool => ({
+  type: 'tool',
+  id: 'tool_shell',
+  name: 'shell',
+  state: {
+    status: 'completed',
+    input: { command },
+    content: [{ type: 'text', text: 'ok' }],
+    metadata: {},
+  },
+  time: { created: Date.now(), completed: Date.now() + 100 },
 })
 
 describe('MessageThread', () => {
   beforeEach(() => {
-    mocks.useSessionStatus.mockReturnValue({ type: 'idle' })
-    mocks.useSessionTodos.mockReturnValue({ setTodos: vi.fn() })
-    mocks.usePermissions.mockReturnValue({
-      getForCallID: vi.fn(() => null),
-    })
-    mocks.useQuestions.mockReturnValue({
-      getForCallID: vi.fn(() => null),
-    })
+    vi.clearAllMocks()
     mocks.useRefreshMessage.mockReturnValue({
       isPending: false,
       mutate: vi.fn(),
@@ -166,26 +128,20 @@ describe('MessageThread', () => {
     useUIState.getState().setIsEditingMessage(false)
   })
 
-  it('renders assistant message with only subtask part as standalone row without header', () => {
-    setupSettings({
-      simpleChatMode: false,
-      showReasoning: false,
-    })
+  it('renders assistant message with only a subagent part as standalone row without header', () => {
+    setupSettings({ simpleChatMode: false, showReasoning: false })
 
     const messages = [
-      createUserMessage('1', 'Hello'),
-      createAssistantMessage('2', [createSubtaskPart('Review changes', '2')]),
+      userMessage('1', 'Hello'),
+      assistantMessage('2', [subagentTool('Review changes', 'child-session')]),
     ]
-
-    const onChildSessionClick = vi.fn()
 
     render(
       <MessageThread
-        opcodeUrl="http://localhost:5551"
         sessionID="test-session"
-        messages={messages as any}
-        onChildSessionClick={onChildSessionClick}
-      />
+        messages={messages}
+        pending={[]}
+      />,
     )
 
     expect(screen.getByText('Review changes')).toBeInTheDocument()
@@ -193,199 +149,69 @@ describe('MessageThread', () => {
     expect(screen.queryByText('test-model')).not.toBeInTheDocument()
   })
 
-  it('renders assistant message with only task tool part as standalone row without header', () => {
-    setupSettings({
-      simpleChatMode: false,
-      showReasoning: false,
-    })
-
-    const messages = [
-      createUserMessage('1', 'Hello'),
-      createAssistantMessage('2', [createTaskToolPart('Do something', 'child-session', '2')]),
-    ]
+  it('renders a subagent row that links to the child session', () => {
+    setupSettings({ simpleChatMode: false, showReasoning: false })
 
     const onChildSessionClick = vi.fn()
+    const messages = [
+      userMessage('1', 'Hello'),
+      assistantMessage('2', [subagentTool('Explore codebase structure', 'child-session')]),
+    ]
 
     const { container } = render(
       <MessageThread
-        opcodeUrl="http://localhost:5551"
         sessionID="test-session"
-        messages={messages as any}
+        messages={messages}
+        pending={[]}
         onChildSessionClick={onChildSessionClick}
-      />
+      />,
     )
 
-    expect(screen.getByText('Do something')).toBeInTheDocument()
+    expect(screen.getByText('Explore codebase structure')).toBeInTheDocument()
     expect(screen.getByText('sub-agent')).toBeInTheDocument()
-    expect(screen.queryByText('test-model')).not.toBeInTheDocument()
-    
+
     const buttons = container.querySelectorAll('button')
-    expect(buttons.length).toBeGreaterThan(0)
     fireEvent.click(buttons[buttons.length - 1])
     expect(onChildSessionClick).toHaveBeenCalledWith('child-session')
   })
 
-  it('renders assistant task message with empty text and step finish as standalone row', () => {
-    setupSettings({
-      simpleChatMode: false,
-      showReasoning: false,
-    })
-
-    const messages = [
-      createUserMessage('1', 'Hello'),
-      createAssistantMessage('2', [
-        createTextPart('   ', '2'),
-        createTaskToolPart('Explore codebase structure', 'child-session', '2'),
-        createStepFinishPart('2'),
-      ]),
-    ]
-
-    render(
-      <MessageThread
-        opcodeUrl="http://localhost:5551"
-        sessionID="test-session"
-        messages={messages as any}
-      />
-    )
-
-    expect(screen.getByText('Explore codebase structure')).toBeInTheDocument()
-    expect(screen.getByText('sub-agent')).toBeInTheDocument()
-    expect(screen.queryByText('test-model')).not.toBeInTheDocument()
-  })
-
-  it('renders assistant task message with hidden reasoning as standalone row', () => {
-    setupSettings({
-      simpleChatMode: false,
-      showReasoning: false,
-    })
-
-    const messages = [
-      createUserMessage('1', 'Hello'),
-      createAssistantMessage('2', [
-        createReasoningPart('I should use the explore agent', '2'),
-        createTextPart('\n\n', '2'),
-        createTaskToolPart('Explore codebase structure', 'child-session', '2'),
-        createStepFinishPart('2'),
-      ]),
-    ]
-
-    render(
-      <MessageThread
-        opcodeUrl="http://localhost:5551"
-        sessionID="test-session"
-        messages={messages as any}
-      />
-    )
-
-    expect(screen.getByText('Explore codebase structure')).toBeInTheDocument()
-    expect(screen.getByText('sub-agent')).toBeInTheDocument()
-    expect(screen.queryByText('test-model')).not.toBeInTheDocument()
-    expect(screen.queryByText('I should use the explore agent')).not.toBeInTheDocument()
-  })
-
-  it('renders assistant task message with simple-chat reasoning setting as standalone row', () => {
-    setupSettings({
-      simpleChatMode: true,
-      showReasoning: true,
-    })
-
-    const messages = [
-      createUserMessage('1', 'Hello'),
-      createAssistantMessage('2', [
-        createReasoningPart('I should use the explore agent', '2'),
-        createTextPart('\n\n', '2'),
-        createTaskToolPart('Explore codebase structure', 'child-session', '2'),
-        createStepFinishPart('2'),
-      ]),
-    ]
-
-    render(
-      <MessageThread
-        opcodeUrl="http://localhost:5551"
-        sessionID="test-session"
-        messages={messages as any}
-      />
-    )
-
-    expect(screen.getByText('Explore codebase structure')).toBeInTheDocument()
-    expect(screen.getByText('sub-agent')).toBeInTheDocument()
-    expect(screen.queryByText('test-model')).not.toBeInTheDocument()
-    expect(screen.queryByText('I should use the explore agent')).not.toBeInTheDocument()
-  })
-
-  it('renders assistant task message with visible reasoning as standalone row when no text exists', () => {
-    setupSettings({
-      simpleChatMode: false,
-      showReasoning: true,
-    })
-
-    const messages = [
-      createUserMessage('1', 'Hello'),
-      createAssistantMessage('2', [
-        createReasoningPart('I should use the explore agent', '2'),
-        createTextPart('\n\n', '2'),
-        createTaskToolPart('Explore codebase structure', 'child-session', '2'),
-        createStepFinishPart('2'),
-      ]),
-    ]
-
-    render(
-      <MessageThread
-        opcodeUrl="http://localhost:5551"
-        sessionID="test-session"
-        messages={messages as any}
-      />
-    )
-
-    expect(screen.getByText('Explore codebase structure')).toBeInTheDocument()
-    expect(screen.getByText('sub-agent')).toBeInTheDocument()
-    expect(screen.queryByText('I should use the explore agent')).not.toBeInTheDocument()
-    expect(screen.queryByText('test-model')).not.toBeInTheDocument()
-  })
-
   it('renders assistant message with text normally with header', () => {
-    setupSettings({
-      simpleChatMode: false,
-      showReasoning: false,
-    })
+    setupSettings({ simpleChatMode: false, showReasoning: false })
 
     const messages = [
-      createUserMessage('1', 'Hello'),
-      createAssistantMessage('2', [createTextPart('This is a response', '2')]),
+      userMessage('1', 'Hello'),
+      assistantMessage('2', [textPart('This is a response')]),
     ]
 
     render(
       <MessageThread
-        opcodeUrl="http://localhost:5551"
         sessionID="test-session"
-        messages={messages as any}
-      />
+        messages={messages}
+        pending={[]}
+      />,
     )
 
     expect(screen.getByText('This is a response')).toBeInTheDocument()
     expect(screen.getByText('test-model')).toBeInTheDocument()
   })
 
-  it('renders assistant message with text and subtask normally with header', () => {
-    setupSettings({
-      simpleChatMode: false,
-      showReasoning: false,
-    })
+  it('renders assistant message with text and subagent normally with header', () => {
+    setupSettings({ simpleChatMode: false, showReasoning: false })
 
     const messages = [
-      createUserMessage('1', 'Hello'),
-      createAssistantMessage('2', [
-        createTextPart('Here is the analysis', '2'),
-        createSubtaskPart('Review changes', '2'),
+      userMessage('1', 'Hello'),
+      assistantMessage('2', [
+        textPart('Here is the analysis'),
+        subagentTool('Review changes', 'child-session'),
       ]),
     ]
 
     render(
       <MessageThread
-        opcodeUrl="http://localhost:5551"
         sessionID="test-session"
-        messages={messages as any}
-      />
+        messages={messages}
+        pending={[]}
+      />,
     )
 
     expect(screen.getByText('Here is the analysis')).toBeInTheDocument()
@@ -393,45 +219,200 @@ describe('MessageThread', () => {
     expect(screen.getByText('test-model')).toBeInTheDocument()
   })
 
-  it('renders user messages normally', () => {
-    setupSettings({
-      simpleChatMode: false,
-      showReasoning: false,
-    })
+  it('renders reasoning, shell, and subagent entries in order for a textless assistant', () => {
+    setupSettings({ simpleChatMode: false, showReasoning: true })
 
     const messages = [
-      createUserMessage('1', 'Hello'),
+      userMessage('1', 'Hello'),
+      assistantMessage('2', [
+        reasoningPart('Thinking it over'),
+        shellTool('bun test'),
+        subagentTool('Review changes', 'child-session'),
+      ]),
+    ]
+
+    const { container } = render(
+      <MessageThread
+        sessionID="test-session"
+        messages={messages}
+        pending={[]}
+      />,
+    )
+
+    expect(screen.getByText('Thinking it over')).toBeInTheDocument()
+    expect(screen.getByText('bun test')).toBeInTheDocument()
+    expect(screen.getByText('Review changes')).toBeInTheDocument()
+    expect(screen.getByText('sub-agent')).toBeInTheDocument()
+
+    const text = container.textContent ?? ''
+    expect(text.indexOf('Thinking it over')).toBeLessThan(text.indexOf('bun test'))
+    expect(text.indexOf('bun test')).toBeLessThan(text.indexOf('Review changes'))
+  })
+
+  it('keeps an assistant error visible after a subagent call', () => {
+    setupSettings({ simpleChatMode: false, showReasoning: false })
+
+    const messages = [
+      userMessage('1', 'Hello'),
+      assistantMessage('2', [subagentTool('Review changes', 'child-session')], {
+        error: { type: 'provider.auth', message: 'invalid key' },
+      }),
     ]
 
     render(
       <MessageThread
-        opcodeUrl="http://localhost:5551"
         sessionID="test-session"
-        messages={messages as any}
-      />
+        messages={messages}
+        pending={[]}
+      />,
+    )
+
+    expect(screen.getByText('Review changes')).toBeInTheDocument()
+    expect(screen.getByText('Provider authentication failed')).toBeInTheDocument()
+    expect(screen.getByText('invalid key')).toBeInTheDocument()
+  })
+
+  it('keeps an assistant retry visible after a subagent call', () => {
+    setupSettings({ simpleChatMode: false, showReasoning: false })
+
+    const messages = [
+      userMessage('1', 'Hello'),
+      assistantMessage('2', [subagentTool('Review changes', 'child-session')], {
+        retry: {
+          attempt: 2,
+          at: Date.now() + 60000,
+          error: { type: 'provider.rate-limit', message: 'slow down' },
+        },
+      }),
+    ]
+
+    render(
+      <MessageThread
+        sessionID="test-session"
+        messages={messages}
+        pending={[]}
+      />,
+    )
+
+    expect(screen.getByText('Review changes')).toBeInTheDocument()
+    expect(screen.getByText('Retry attempt 2')).toBeInTheDocument()
+    expect(screen.getByText('slow down')).toBeInTheDocument()
+  })
+
+  it('renders user messages normally', () => {
+    setupSettings({ simpleChatMode: false, showReasoning: false })
+
+    render(
+      <MessageThread
+        sessionID="test-session"
+        messages={[userMessage('1', 'Hello')]}
+        pending={[]}
+      />,
     )
 
     expect(screen.getByText('Hello')).toBeInTheDocument()
     expect(screen.getByText('You')).toBeInTheDocument()
   })
 
+  it('renders a projected shell message from the fixtures', () => {
+    setupSettings({ simpleChatMode: false, showReasoning: false })
+
+    render(
+      <MessageThread
+        sessionID={SESSION_ID}
+        messages={project(shellSequence)}
+        pending={[]}
+      />,
+    )
+
+    expect(screen.getByText('bun test')).toBeInTheDocument()
+    expect(screen.getByText('12 tests passed')).toBeInTheDocument()
+  })
+
+  it('renders a projected compaction banner from the fixtures', () => {
+    setupSettings({ simpleChatMode: false, showReasoning: false })
+
+    render(
+      <MessageThread
+        sessionID={SESSION_ID}
+        messages={project(compactionSequence)}
+        pending={[]}
+      />,
+    )
+
+    expect(screen.getByText('Session compacted')).toBeInTheDocument()
+    expect(screen.getByText('Summarizing the previous turn.')).toBeInTheDocument()
+  })
+
+  it('renders a projected assistant transcript from the fixtures', () => {
+    setupSettings({ simpleChatMode: false, showReasoning: false })
+
+    render(
+      <MessageThread
+        sessionID={SESSION_ID}
+        messages={project(promptSequence)}
+        pending={[]}
+      />,
+    )
+
+    expect(screen.getByText('Run the tests')).toBeInTheDocument()
+    expect(screen.getByText('Running the tests now.')).toBeInTheDocument()
+  })
+
+  it('renders queued prompts before delivery', () => {
+    setupSettings({ simpleChatMode: false, showReasoning: false })
+
+    const pending: SessionInboxUser[] = [
+      {
+        id: 'inbox_1',
+        sessionID: 'test-session',
+        type: 'user',
+        payload: { text: 'Wait for me' },
+        delivery: 'queue',
+        time: { created: Date.now() },
+      },
+    ]
+
+    render(
+      <MessageThread
+        sessionID="test-session"
+        messages={[userMessage('1', 'Hello')]}
+        pending={pending}
+      />,
+    )
+
+    expect(screen.getByText('Wait for me')).toBeInTheDocument()
+    expect(screen.getByText('QUEUED')).toBeInTheDocument()
+  })
+
+  it('shows the empty state when there are no messages or pending prompts', () => {
+    setupSettings({ simpleChatMode: false, showReasoning: false })
+
+    render(
+      <MessageThread
+        sessionID="test-session"
+        messages={[]}
+        pending={[]}
+      />,
+    )
+
+    expect(screen.getByText('No messages yet. Start a conversation below.')).toBeInTheDocument()
+  })
+
   it('keeps global editing state active when edit textarea blurs', () => {
-    setupSettings({
-      simpleChatMode: false,
-      showReasoning: false,
-    })
+    setupSettings({ simpleChatMode: false, showReasoning: false })
 
     const messages = [
-      createUserMessage('1', 'Hello'),
-      createAssistantMessage('2', [createTextPart('This is a response', '2')]),
+      userMessage('1', 'Hello'),
+      assistantMessage('2', [textPart('This is a response')]),
     ]
 
     const { unmount } = render(
       <MessageThread
-        opcodeUrl="http://localhost:5551"
         sessionID="test-session"
-        messages={messages as any}
-      />
+        messages={messages}
+        pending={[]}
+      />,
     )
 
     fireEvent.click(screen.getByTitle('Edit message'))
@@ -447,10 +428,7 @@ describe('MessageThread', () => {
   })
 
   it('resends an edited prompt after the edit textarea blurs', () => {
-    setupSettings({
-      simpleChatMode: false,
-      showReasoning: false,
-    })
+    setupSettings({ simpleChatMode: false, showReasoning: false })
     const mutate = vi.fn()
     mocks.useRefreshMessage.mockReturnValue({
       isPending: false,
@@ -458,16 +436,16 @@ describe('MessageThread', () => {
     })
 
     const messages = [
-      createUserMessage('1', 'Hello'),
-      createAssistantMessage('2', [createTextPart('This is a response', '2')]),
+      userMessage('1', 'Hello'),
+      assistantMessage('2', [textPart('This is a response')]),
     ]
 
     render(
       <MessageThread
-        opcodeUrl="http://localhost:5551"
         sessionID="test-session"
-        messages={messages as any}
-      />
+        messages={messages}
+        pending={[]}
+      />,
     )
 
     fireEvent.click(screen.getByTitle('Edit message'))

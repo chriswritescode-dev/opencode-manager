@@ -20,7 +20,7 @@ jobs:
         id: versions
         run: |
           UV_VERSION=0.12.7
-          OPENCODE_VERSION=1.18.31
+          OPENCODE_VERSION=2.0.15
           MICROSANDBOX_VERSION=0.7.2
           PLAYWRIGHT_VERSION=1.63.0
           echo "uv=${UV_VERSION}" >> $GITHUB_OUTPUT

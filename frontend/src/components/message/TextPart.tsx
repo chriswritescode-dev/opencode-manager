@@ -6,14 +6,11 @@ import rehypeRaw from 'rehype-raw'
 import mermaid from 'mermaid'
 import { Maximize2, X, AlertCircle } from 'lucide-react'
 import { CopyButton } from '@/components/ui/copy-button'
-import type { components } from '@/api/opencode-types'
 import { useTheme } from '@/hooks/useTheme'
 import 'highlight.js/styles/github-dark.css'
 
-type TextPart = components['schemas']['TextPart']
-
 interface TextPartProps {
-  part: TextPart
+  text: string
 }
 
 interface MermaidBlockProps {
@@ -184,12 +181,12 @@ function isMermaidBlockComplete(text: string): boolean {
   return false
 }
 
-export function TextPart({ part }: TextPartProps) {
+export function TextPart({ text }: TextPartProps) {
   const mermaidComplete = React.useMemo(() => {
-    return part.text ? isMermaidBlockComplete(part.text) : false
-  }, [part.text])
+    return text ? isMermaidBlockComplete(text) : false
+  }, [text])
 
-  if (!part.text || part.text.trim() === '') {
+  if (!text || text.trim() === '') {
     return null  
   }
 
@@ -263,7 +260,7 @@ export function TextPart({ part }: TextPartProps) {
           }
         }}
       >
-        {part.text}
+        {text}
       </ReactMarkdown>
     </div>
   )

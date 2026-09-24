@@ -78,7 +78,7 @@ The **Skills** tab in the schedule dialog lets you:
 - Select one or more **skill slugs** from a multi-select input
 - Add free-form **notes** (max 2000 characters) that the agent receives as additional context
 
-Skill metadata is passed to the OpenCode workspace config when the run starts, making the selected skills available to the agent for that run only.
+When the run starts, the Manager resolves the selected skill slugs against the skills available in the run's location and attaches the matching skills directly to the submitted prompt, making them available to the agent for that run only. Skill slugs that are not available in the location are omitted, and if the available skills cannot be listed the run continues without any skill attachments.
 
 ## Worktree Isolation
 

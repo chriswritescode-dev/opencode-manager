@@ -42,7 +42,7 @@ vi.mock('@/hooks/useMobile', () => ({
 
 vi.mock('@/hooks/useOpenCode', () => ({
   useSendPrompt: () => ({ mutate: mocks.useSendPromptMutate, isPending: mocks.sendPromptPending() }),
-  useAbortSession: () => ({ mutate: vi.fn() }),
+  useInterruptSession: () => ({ mutate: vi.fn() }),
   useSendShell: () => ({ mutate: vi.fn(), isPending: false }),
   useOpenCodeClient: () => ({}),
   useAgents: () => ({ data: [] }),
@@ -135,7 +135,6 @@ describe('PromptInput STT Gesture Tests', () => {
   const mockSetAgent = vi.fn()
 
   const defaultProps = {
-    opcodeUrl: 'http://localhost:5551',
     directory: '/test',
     sessionID: 'test-session',
     repoId: 1,
@@ -317,9 +316,8 @@ describe('PromptInput STT Gesture Tests', () => {
 
       fireEvent.click(queueButton)
 
-      const [callArgs] = mocks.useSendPromptMutate.mock.calls[0] as [{ prompt: string }, unknown]
-      expect(callArgs.prompt).toBe('follow-up')
-      expect('queued' in callArgs).toBe(false)
+      const [callArgs] = mocks.useSendPromptMutate.mock.calls[0] as [{ text: string }, unknown]
+      expect(callArgs.text).toBe('follow-up')
     })
 
     it('restores a failed queued prompt when the input is empty', async () => {
@@ -334,9 +332,8 @@ describe('PromptInput STT Gesture Tests', () => {
       fireEvent.change(input, { target: { value: 'queued message' } })
       fireEvent.click(screen.getByTitle('Queue message'))
 
-      const [callArgs] = mocks.useSendPromptMutate.mock.calls[0] as [{ prompt: string }, unknown]
-      expect(callArgs.prompt).toBe('queued message')
-      expect('queued' in callArgs).toBe(false)
+      const [callArgs] = mocks.useSendPromptMutate.mock.calls[0] as [{ text: string }, unknown]
+      expect(callArgs.text).toBe('queued message')
 
       await waitFor(() => {
         expect(input).toHaveValue('')
@@ -421,10 +418,6 @@ describe('PromptInput STT Gesture Tests', () => {
         useUIState.getState().selectPromptCommand({
           name: 'help',
           description: 'Show help',
-          template: '',
-          agent: '',
-          model: '',
-          hints: [],
         })
       })
 

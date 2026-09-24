@@ -1,11 +1,10 @@
 import { Hono } from 'hono'
 import { z } from 'zod'
-import { AuthService } from '../services/auth'
 import { SetCredentialRequestSchema } from '../../../shared/src/schemas/auth'
 import { logger } from '../utils/logger'
+import { handleOpenCodeError } from '../utils/route-helpers'
+import type { IntegrationInfo } from '@opencode-manager/shared/opencode'
 import type { OpenCodeClient } from '../services/opencode/client'
-import { reloadOpenCodeConfig } from '../services/opencode-restart'
-import type { OpenCodeSupervisor } from '../services/opencode-supervisor'
 import {
   addRecentModel,
   ModelSelectionSchema,
@@ -21,9 +20,12 @@ const UpdateModelStateSchema = z.object({
   removeRecent: ModelSelectionSchema.optional(),
 }).strict()
 
-export function createProvidersRoutes(openCodeClient: OpenCodeClient, openCodeSupervisor?: OpenCodeSupervisor) {
+function credentialConnections(integration: IntegrationInfo) {
+  return integration.connections.filter((connection) => connection.type === 'credential')
+}
+
+export function createProvidersRoutes(openCodeClient: OpenCodeClient) {
   const app = new Hono()
-  const authService = new AuthService()
 
   app.get('/model-state', async (c) => {
     try {
@@ -65,75 +67,56 @@ export function createProvidersRoutes(openCodeClient: OpenCodeClient, openCodeSu
 
   app.get('/credentials', async (c) => {
     try {
-      const providers = await authService.list()
+      const integrations = await openCodeClient.api.integration.list()
+      const providers = integrations.data
+        .filter((integration) => credentialConnections(integration).length > 0)
+        .map((integration) => integration.id)
       return c.json({ providers })
     } catch (error) {
-      logger.error('Failed to list provider credentials:', error)
-      return c.json({ error: 'Failed to list provider credentials' }, 500)
+      return handleOpenCodeError(c, error, 'Failed to list provider credentials')
     }
   })
 
   app.get('/:id/credentials/status', async (c) => {
     try {
-      const providerId = c.req.param('id')
-      const hasCredentials = await authService.has(providerId)
-      return c.json({ hasCredentials })
+      const integration = await openCodeClient.api.integration.get({ integrationID: c.req.param('id') })
+      return c.json({ hasCredentials: credentialConnections(integration.data).length > 0 })
     } catch (error) {
-      logger.error('Failed to check credential status:', error)
-      return c.json({ error: 'Failed to check credential status' }, 500)
+      return handleOpenCodeError(c, error, 'Failed to check credential status')
     }
   })
 
   app.post('/:id/credentials', async (c) => {
     try {
-      const providerId = c.req.param('id')
       const body = await c.req.json()
       const validated = SetCredentialRequestSchema.parse(body)
-      
-      const openCodeSuccess = await openCodeClient.setProviderAuth(providerId, validated.apiKey)
-      if (!openCodeSuccess) {
-        logger.warn(`Failed to set OpenCode auth for ${providerId}, saving locally only`)
-      }
-      
-      await authService.set(providerId, validated.apiKey)
-      
-      try {
-        await reloadOpenCodeConfig(openCodeSupervisor)
-      } catch (reloadError) {
-        logger.warn(`Failed to reload OpenCode config after saving credentials for ${providerId}:`, reloadError)
-      }
-      
+
+      await openCodeClient.api.integration.connect.key({
+        integrationID: c.req.param('id'),
+        key: validated.apiKey,
+        ...(validated.answer ? { answer: validated.answer } : {}),
+      })
+
       return c.json({ success: true })
     } catch (error) {
-      logger.error('Failed to set provider credentials:', error)
       if (error instanceof z.ZodError) {
         return c.json({ error: 'Invalid request data', details: error.issues }, 400)
       }
-      return c.json({ error: 'Failed to set provider credentials' }, 500)
+      return handleOpenCodeError(c, error, 'Failed to set provider credentials')
     }
   })
 
   app.delete('/:id/credentials', async (c) => {
     try {
-      const providerId = c.req.param('id')
-      
-      const openCodeSuccess = await openCodeClient.deleteProviderAuth(providerId)
-      if (!openCodeSuccess) {
-        logger.warn(`Failed to delete OpenCode auth for ${providerId}, removing locally only`)
+      const integration = await openCodeClient.api.integration.get({ integrationID: c.req.param('id') })
+
+      for (const connection of credentialConnections(integration.data)) {
+        await openCodeClient.api.credential.remove({ credentialID: connection.id })
       }
-      
-      await authService.delete(providerId)
-      
-      try {
-        await reloadOpenCodeConfig(openCodeSupervisor)
-      } catch (reloadError) {
-        logger.warn(`Failed to reload OpenCode config after deleting credentials for ${providerId}:`, reloadError)
-      }
-      
+
       return c.json({ success: true })
     } catch (error) {
-      logger.error('Failed to delete provider credentials:', error)
-      return c.json({ error: 'Failed to delete provider credentials' }, 500)
+      return handleOpenCodeError(c, error, 'Failed to delete provider credentials')
     }
   })
 

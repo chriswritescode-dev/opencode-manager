@@ -143,6 +143,19 @@ describe('OpenCodeEventStream', () => {
     expect(healthyState?.isHealthy).toBe(true)
   })
 
+  it('notifies the global monitor when the upstream stream resynchronizes', () => {
+    const transport = new TestEventStreamTransport()
+    const stream = new OpenCodeEventStream({ transport })
+    const onResync = vi.fn()
+
+    stream.subscribeGlobalMonitor({ directories: ['/repo'], onEvent: vi.fn(), onResync })
+    transport.openConnection()
+    transport.connected()
+    transport.resync()
+
+    expect(onResync).toHaveBeenCalledTimes(1)
+  })
+
   it('reports visibility through the transport adapter', async () => {
     const transport = new TestEventStreamTransport()
     const stream = new OpenCodeEventStream({ transport })

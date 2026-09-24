@@ -4,7 +4,7 @@ import userEvent from '@testing-library/user-event'
 import { WorktreeTabs } from './WorktreeTabs'
 import type { RepoSibling } from '@/api/repos'
 
-const makeWorkspaceSibling = (workspaceId: string, branch: string): RepoSibling => ({
+const makeWorkspaceSibling = (branch: string): RepoSibling => ({
   id: -1,
   localPath: branch,
   fullPath: `/w/${branch}`,
@@ -14,8 +14,7 @@ const makeWorkspaceSibling = (workspaceId: string, branch: string): RepoSibling 
   isWorktree: true,
   currentBranch: branch,
   branch,
-  workspaceId,
-  workspaceName: branch,
+  worktreeStrategy: 'git',
 })
 
 const onValueChange = vi.fn()
@@ -35,7 +34,7 @@ describe('WorktreeTabs', () => {
   })
 
   it('renders Repo and Workspaces tabs when at least one workspace exists', () => {
-    const workspaces = [makeWorkspaceSibling('wrk_a', 'feature-a')]
+    const workspaces = [makeWorkspaceSibling('feature-a')]
     render(<WorktreeTabs workspaces={workspaces} value="repo" onValueChange={onValueChange} baseLabel="main" />)
 
     const tabs = screen.getAllByRole('tab')
@@ -46,7 +45,7 @@ describe('WorktreeTabs', () => {
   })
 
   it('marks the active tab', () => {
-    const workspaces = [makeWorkspaceSibling('wrk_a', 'feature-a')]
+    const workspaces = [makeWorkspaceSibling('feature-a')]
     render(<WorktreeTabs workspaces={workspaces} value="workspaces" onValueChange={onValueChange} baseLabel="main" />)
 
     const tabs = screen.getAllByRole('tab')
@@ -55,7 +54,7 @@ describe('WorktreeTabs', () => {
   })
 
   it('calls onValueChange when a different tab is clicked', async () => {
-    const workspaces = [makeWorkspaceSibling('wrk_a', 'feature-a')]
+    const workspaces = [makeWorkspaceSibling('feature-a')]
     render(<WorktreeTabs workspaces={workspaces} value="repo" onValueChange={onValueChange} baseLabel="main" />)
 
     await userEvent.click(screen.getAllByRole('tab')[1])
@@ -64,9 +63,9 @@ describe('WorktreeTabs', () => {
 
   it('shows the workspace count in the workspaces tab', () => {
     const workspaces = [
-      makeWorkspaceSibling('wrk_a', 'feature-a'),
-      makeWorkspaceSibling('wrk_b', 'feature-b'),
-      makeWorkspaceSibling('wrk_c', 'feature-c'),
+      makeWorkspaceSibling('feature-a'),
+      makeWorkspaceSibling('feature-b'),
+      makeWorkspaceSibling('feature-c'),
     ]
     render(<WorktreeTabs workspaces={workspaces} value="repo" onValueChange={onValueChange} baseLabel="main" />)
 

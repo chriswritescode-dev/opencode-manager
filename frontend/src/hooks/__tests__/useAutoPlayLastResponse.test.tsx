@@ -1,6 +1,6 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest'
 import { renderHook } from '@testing-library/react'
-import type { MessageWithParts } from '../../api/types'
+import type { SessionMessageAssistant } from '@opencode-manager/shared/opencode'
 import type { TTSConfig } from '@opencode-manager/shared'
 
 const mocks = vi.hoisted(() => ({
@@ -29,66 +29,39 @@ interface MockTTSReturn {
 
 import { getLatestPlayableAssistantMessage, useAutoPlayLastResponse } from '../useAutoPlayLastResponse'
 
-const createMessage = (id: string, completed?: number): MessageWithParts => ({
-  info: {
-    id,
-    sessionID: 'test-session',
-    role: 'assistant',
-    time: {
-      created: Date.now(),
-      ...(completed ? { completed } : {}),
-    },
-    parentID: 'parent-1',
-    modelID: 'gpt-4',
-    providerID: 'openai',
-    mode: 'build',
-    agent: 'default',
-    path: {
-      cwd: '/test',
-      root: '/test',
-    },
-    cost: 0.01,
-    tokens: {
-      input: 100,
-      output: 50,
-      reasoning: 0,
-      cache: { read: 0, write: 0 },
-    },
+const createMessage = (
+  id: string,
+  completed?: number,
+  text = 'Test message text',
+): SessionMessageAssistant => ({
+  id,
+  type: 'assistant',
+  agent: 'default',
+  model: { providerID: 'openai', id: 'gpt-4' },
+  time: {
+    created: Date.now(),
+    ...(completed ? { completed } : {}),
   },
-  parts: [
-    {
-      id: 'part-1',
-      sessionID: 'test-session',
-      messageID: id,
-      type: 'text',
-      text: 'Test message text',
-      time: {
-        start: Date.now(),
-        end: Date.now() + 100,
-      },
-    },
-  ],
+  content: [{ type: 'text', text }],
 })
 
-const createAssistantMessageWithoutText = (id: string): MessageWithParts => ({
-  ...createMessage(id, Date.now()),
-  parts: [
+const createAssistantMessageWithoutText = (id: string): SessionMessageAssistant => ({
+  id,
+  type: 'assistant',
+  agent: 'default',
+  model: { providerID: 'openai', id: 'gpt-4' },
+  time: { created: Date.now(), completed: Date.now() },
+  content: [
     {
-      id: 'part-1',
-      sessionID: 'test-session',
-      messageID: id,
       type: 'tool',
-      callID: 'call-1',
-      tool: 'question',
+      id: 'tool_1',
+      name: 'question',
       state: {
         status: 'error',
         input: {},
-        error: 'Question rejected',
-        time: {
-          start: Date.now(),
-          end: Date.now() + 100,
-        },
+        error: { type: 'tool.failed', message: 'Question rejected' },
       },
+      time: { created: Date.now() },
     },
   ],
 })
@@ -367,7 +340,7 @@ describe('getLatestPlayableAssistantMessage', () => {
       erroredMessage,
     ])
 
-    expect(result?.message.info.id).toBe('1')
+    expect(result?.messageId).toBe('1')
     expect(result?.text).toBe('Test message text')
   })
 

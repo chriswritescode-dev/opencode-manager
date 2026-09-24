@@ -1,4 +1,4 @@
-import { useState } from 'react'
+import { useEffect, useId, useState } from 'react'
 import {
   Dialog,
   DialogContent,
@@ -8,7 +8,9 @@ import {
   DialogTitle,
 } from '@/components/ui/dialog'
 import { Button } from '@/components/ui/button'
-import type { PermissionRequest, PermissionResponse } from '@/api/types'
+import { Textarea } from '@/components/ui/textarea'
+import type { PermissionResponse } from '@/api/types'
+import type { PermissionRequest } from '@opencode-manager/shared/opencode'
 import { getPermissionLabel, getPermissionDetail } from '@opencode-manager/shared/notifications'
 import { cn } from '@/lib/utils'
 import { showToast } from '@/lib/toast'
@@ -19,7 +21,12 @@ interface PermissionRequestDialogProps {
   isFromDifferentSession?: boolean
   sessionTitle?: string
   repoDirectory?: string | null
-  onRespond: (permissionID: string, sessionID: string, response: PermissionResponse) => Promise<void>
+  onRespond: (
+    permissionID: string,
+    sessionID: string,
+    response: PermissionResponse,
+    message?: string,
+  ) => Promise<void>
   open?: boolean
   onOpenChange?: (open: boolean) => void
 }
@@ -36,6 +43,12 @@ export function PermissionRequestDialog({
 }: PermissionRequestDialogProps) {
   const [isLoading, setIsLoading] = useState(false)
   const [loadingAction, setLoadingAction] = useState<PermissionResponse | null>(null)
+  const [rejectReason, setRejectReason] = useState('')
+  const reasonInputId = useId()
+
+  useEffect(() => {
+    setRejectReason('')
+  }, [permission?.id])
 
   if (!permission) return null
   if (parentOpen === false) return null
@@ -43,8 +56,9 @@ export function PermissionRequestDialog({
   const handleResponse = async (response: PermissionResponse) => {
     setIsLoading(true)
     setLoadingAction(response)
+    const message = response === 'reject' ? rejectReason.trim() : ''
     try {
-      await onRespond(permission.id, permission.sessionID, response)
+      await onRespond(permission.id, permission.sessionID, response, message === '' ? undefined : message)
     } catch {
       showToast.error('Failed to respond to permission. Please try again.')
     } finally {
@@ -53,7 +67,7 @@ export function PermissionRequestDialog({
     }
   }
 
-  const typeLabel = getPermissionLabel(permission.permission)
+  const typeLabel = getPermissionLabel(permission.action)
   const details = getPermissionDetail(permission)
   const hasMultiple = pendingCount > 1
   const displaySessionName = sessionTitle || `Session ${permission.sessionID.slice(0, 8)}...`
@@ -114,6 +128,20 @@ export function PermissionRequestDialog({
               </div>
             )}
           </div>
+        </div>
+
+        <div className="space-y-1.5">
+          <label htmlFor={reasonInputId} className="text-xs font-medium text-muted-foreground">
+            Reason (optional)
+          </label>
+          <Textarea
+            id={reasonInputId}
+            value={rejectReason}
+            onChange={(e) => setRejectReason(e.target.value)}
+            placeholder="Explain why this request is denied..."
+            disabled={isLoading}
+            className="min-h-[60px] text-[16px] sm:text-xs md:text-sm resize-none"
+          />
         </div>
 
         <DialogFooter className="flex-col-reverse gap-2 sm:flex-row sm:gap-2 mt-2">

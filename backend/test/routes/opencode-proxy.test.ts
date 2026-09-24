@@ -1,9 +1,18 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest'
+import { spawn } from 'child_process'
+import { createServer } from 'http'
+import type { AddressInfo } from 'net'
+import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'fs'
+import { tmpdir } from 'os'
+import { join } from 'path'
 import { Hono } from 'hono'
+import { serve } from '@hono/node-server'
 import type { Database } from 'bun:sqlite'
+import { buildOpenCodeBasicAuth } from '@opencode-manager/shared/opencode'
 import { createOpenCodeProxyRoutes } from '../../src/routes/opencode-proxy'
 import type { SettingsService } from '../../src/services/settings'
 import { OpenCodeSupervisor } from '../../src/services/opencode-supervisor'
+import { resolveOpenCode2Binary, startOpenCodeServe } from '../helpers/opencode-binary'
 
 vi.mock('bun:sqlite', () => ({
   Database: vi.fn(),
@@ -19,11 +28,35 @@ vi.mock('../../src/services/opencode-single-server', () => ({
   opencodeServerManager: { isLifecycleInitialized: isLifecycleInitializedMock },
 }))
 
+const getRepoByIdMock = vi.hoisted(() => vi.fn())
+
+vi.mock('../../src/db/queries', () => ({
+  getRepoById: getRepoByIdMock,
+}))
+
+const upstreamBaseUrl = vi.hoisted(() => ({ value: 'http://127.0.0.1:5551' }))
+
+vi.mock('../../src/services/opencode/upstream', () => ({
+  getOpenCodeUpstreamBaseUrl: () => upstreamBaseUrl.value,
+}))
+
+const getOpenCodeServerPasswordMock = vi.hoisted(() => vi.fn().mockReturnValue('test-password'))
+
+const readyRepo = { id: 7, fullPath: '/srv/repos/my-repo', cloneStatus: 'ready' }
+
 const mockSettingsService = {
-  getOpenCodeServerPassword: vi.fn().mockReturnValue('test-password'),
+  getOpenCodeServerPassword: getOpenCodeServerPasswordMock,
 } as unknown as SettingsService
 
 const mockDb = {} as Database
+
+function upstreamOk() {
+  const upstreamFetch = vi.fn().mockResolvedValue(
+    new Response('ok', { status: 200, headers: { 'content-type': 'text/plain' } })
+  )
+  globalThis.fetch = upstreamFetch as unknown as typeof fetch
+  return upstreamFetch
+}
 
 describe('opencode-proxy routes', () => {
   let app: Hono
@@ -673,8 +706,8 @@ describe('opencode-proxy routes', () => {
       isLastStartupErrorNonRecoverable: vi.fn(() => false),
       setLifecycleInitialized: vi.fn((value: boolean) => { lifecycle.initialized = value }),
       getPort: vi.fn(() => 5551),
-      getVersion: vi.fn(() => '1.0.137'),
-      getMinVersion: vi.fn(() => '1.0.137'),
+      getVersion: vi.fn(() => '2.0.15'),
+      getMinVersion: vi.fn(() => '2.0.15'),
       isVersionSupported: vi.fn(() => true),
     }
     const supervisor = new OpenCodeSupervisor(manager as unknown as never, {} as SettingsService, {
@@ -714,4 +747,272 @@ describe('opencode-proxy routes', () => {
     expect(reopenedRes.status).toBe(200)
     expect(upstreamFetch).toHaveBeenCalledTimes(2)
   })
+})
+
+describe('opencode-proxy repo-scoped mount', () => {
+  let app: Hono
+  let originalFetch: typeof globalThis.fetch
+
+  beforeEach(() => {
+    vi.clearAllMocks()
+    isLifecycleInitializedMock.mockReturnValue(true)
+    originalFetch = globalThis.fetch
+    app = new Hono()
+    app.route('/api/opencode-proxy', createOpenCodeProxyRoutes(mockDb, mockSettingsService))
+  })
+
+  afterEach(() => {
+    globalThis.fetch = originalFetch
+  })
+
+  it('returns 404 for an unknown repo', async () => {
+    getRepoByIdMock.mockReturnValue(null)
+    const upstreamFetch = upstreamOk()
+
+    const res = await app.request('/api/opencode-proxy/repos/999/api/session', {
+      headers: { Authorization: 'Bearer test-internal-token' },
+    })
+
+    expect(res.status).toBe(404)
+    expect(upstreamFetch).not.toHaveBeenCalled()
+  })
+
+  it('returns 404 for a non-ready repo', async () => {
+    getRepoByIdMock.mockReturnValue({ ...readyRepo, cloneStatus: 'cloning' })
+    const upstreamFetch = upstreamOk()
+
+    const res = await app.request('/api/opencode-proxy/repos/7/api/session', {
+      headers: { Authorization: 'Bearer test-internal-token' },
+    })
+
+    expect(res.status).toBe(404)
+    expect(upstreamFetch).not.toHaveBeenCalled()
+  })
+
+  it('pins x-opencode-directory to the repo path', async () => {
+    getRepoByIdMock.mockReturnValue(readyRepo)
+    const upstreamFetch = upstreamOk()
+
+    const res = await app.request('/api/opencode-proxy/repos/7/api/session?limit=1', {
+      headers: {
+        Authorization: 'Bearer test-internal-token',
+        'x-opencode-directory': encodeURIComponent('/some/other/dir'),
+      },
+    })
+
+    expect(res.status).toBe(200)
+    const fetchCall = upstreamFetch.mock.calls[0] as [string, RequestInit]
+    const fetchHeaders = fetchCall[1].headers as Record<string, string>
+    expect(fetchHeaders['x-opencode-directory']).toBe(encodeURIComponent('/srv/repos/my-repo'))
+    expect(fetchCall[0]).toBe('http://127.0.0.1:5551/api/session?limit=1&directory=%2Fsrv%2Frepos%2Fmy-repo')
+  })
+
+  it('rewrites the location[directory] query value', async () => {
+    getRepoByIdMock.mockReturnValue(readyRepo)
+    const upstreamFetch = upstreamOk()
+
+    const res = await app.request(
+      `/api/opencode-proxy/repos/7/api/agent?location%5Bdirectory%5D=${encodeURIComponent('/local/dir')}`,
+      { headers: { Authorization: 'Bearer test-internal-token' } }
+    )
+
+    expect(res.status).toBe(200)
+    const fetchCall = upstreamFetch.mock.calls[0] as [string, RequestInit]
+    const fetchUrl = new URL(fetchCall[0])
+    expect(fetchUrl.searchParams.get('location[directory]')).toBe('/srv/repos/my-repo')
+  })
+
+  it('rewrites the directory query on GET /api/session', async () => {
+    getRepoByIdMock.mockReturnValue(readyRepo)
+    const upstreamFetch = upstreamOk()
+
+    const res = await app.request('/api/opencode-proxy/repos/7/api/session?directory=/local/dir&limit=5', {
+      headers: { Authorization: 'Bearer test-internal-token' },
+    })
+
+    expect(res.status).toBe(200)
+    const fetchCall = upstreamFetch.mock.calls[0] as [string, RequestInit]
+    const fetchUrl = new URL(fetchCall[0])
+    expect(fetchUrl.searchParams.get('directory')).toBe('/srv/repos/my-repo')
+    expect(fetchUrl.searchParams.get('limit')).toBe('5')
+  })
+
+  it('rewrites a JSON body top-level location.directory', async () => {
+    getRepoByIdMock.mockReturnValue(readyRepo)
+    const upstreamFetch = upstreamOk()
+
+    const res = await app.request('/api/opencode-proxy/repos/7/api/session', {
+      method: 'POST',
+      headers: {
+        Authorization: 'Bearer test-internal-token',
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify({ title: 'x', location: { directory: '/local/dir' } }),
+    })
+
+    expect(res.status).toBe(200)
+    const fetchCall = upstreamFetch.mock.calls[0] as [string, RequestInit]
+    const forwarded = JSON.parse(fetchCall[1].body as string) as Record<string, unknown>
+    expect(forwarded).toEqual({ title: 'x', location: { directory: '/srv/repos/my-repo' } })
+  })
+
+  it('leaves a non-JSON body untouched', async () => {
+    getRepoByIdMock.mockReturnValue(readyRepo)
+    const upstreamFetch = upstreamOk()
+
+    const res = await app.request('/api/opencode-proxy/repos/7/api/session', {
+      method: 'POST',
+      headers: {
+        Authorization: 'Bearer test-internal-token',
+        'Content-Type': 'text/plain',
+      },
+      body: 'location=/local/dir',
+    })
+
+    expect(res.status).toBe(200)
+    const fetchCall = upstreamFetch.mock.calls[0] as [string, RequestInit]
+    const forwarded = new TextDecoder().decode(fetchCall[1].body as ArrayBuffer)
+    expect(forwarded).toBe('location=/local/dir')
+  })
+})
+
+const SHIPPED_OPENCODE_BIN = resolveOpenCode2Binary()
+
+function startMockLlm(): Promise<{ port: number; close: () => void }> {
+  const server = createServer((req, res) => {
+    if (req.method === 'GET' && req.url?.endsWith('/models')) {
+      res.writeHead(200, { 'content-type': 'application/json' })
+      res.end(JSON.stringify({ object: 'list', data: [{ id: 'mock-model', object: 'model' }] }))
+      return
+    }
+    if (req.method !== 'POST' || !req.url?.endsWith('/chat/completions')) {
+      res.writeHead(404)
+      res.end()
+      return
+    }
+    req.on('data', () => undefined)
+    req.on('end', () => {
+      res.writeHead(200, { 'content-type': 'text/event-stream', 'cache-control': 'no-cache' })
+      const base = { id: 'chatcmpl-e2e', object: 'chat.completion.chunk', created: 1, model: 'mock-model' }
+      res.write(`data: ${JSON.stringify({ ...base, choices: [{ index: 0, delta: { role: 'assistant', content: '' }, finish_reason: null }] })}\n\n`)
+      res.write(`data: ${JSON.stringify({ ...base, choices: [{ index: 0, delta: { content: 'hi' }, finish_reason: null }] })}\n\n`)
+      res.write(`data: ${JSON.stringify({ ...base, choices: [{ index: 0, delta: {}, finish_reason: 'stop' }] })}\n\n`)
+      res.write('data: [DONE]\n\n')
+      res.end()
+    })
+  })
+  return new Promise((resolve) => {
+    server.listen(0, '127.0.0.1', () => resolve({ port: (server.address() as AddressInfo).port, close: () => server.close() }))
+  })
+}
+
+function runOpenCodeAgainstProxy(
+  serverUrl: string,
+  cwd: string,
+  homeDirectory: string,
+  configHome: string,
+): Promise<{ status: number | null; stdout: string; stderr: string }> {
+  const binary = resolveOpenCode2Binary()
+  if (!binary) throw new Error('no OpenCode 2 binary is available for the binary-backed test')
+  return new Promise((resolve, reject) => {
+    const child = spawn(binary, ['run', '--server', serverUrl, '--format', 'json', 'hi'], {
+      cwd,
+      stdio: ['ignore', 'pipe', 'pipe'],
+      env: {
+        ...process.env,
+        HOME: homeDirectory,
+        XDG_CONFIG_HOME: configHome,
+        XDG_DATA_HOME: join(configHome, '..', 'data'),
+        XDG_STATE_HOME: join(configHome, '..', 'state'),
+        XDG_CACHE_HOME: join(configHome, '..', 'cache'),
+        OPENCODE_DISABLE_MODELS_FETCH: '1',
+        OPENCODE_PASSWORD: 'test-internal-token',
+      },
+    })
+    let stdout = ''
+    let stderr = ''
+    child.stdout?.on('data', (chunk: Buffer) => {
+      stdout += chunk.toString()
+    })
+    child.stderr?.on('data', (chunk: Buffer) => {
+      stderr += chunk.toString()
+    })
+    const timer = setTimeout(() => {
+      child.kill('SIGKILL')
+      resolve({ status: null, stdout, stderr })
+    }, 90000)
+    child.on('close', (code) => {
+      clearTimeout(timer)
+      resolve({ status: code, stdout, stderr })
+    })
+    child.on('error', (error) => {
+      clearTimeout(timer)
+      reject(error)
+    })
+  })
+}
+
+describe.skipIf(SHIPPED_OPENCODE_BIN === null)('opencode-proxy repo-scoped mount against the shipped OpenCode 2 binary', () => {
+  it('pins the repo directory for a client started from an unrelated cwd', async () => {
+    const root = mkdtempSync(join(tmpdir(), 'ocm-proxy-e2e-'))
+    const configHome = join(root, 'config')
+    const homeDirectory = join(root, 'home')
+    const clientCwd = join(root, 'client-cwd')
+    const repoPath = join(root, 'repo')
+    for (const directory of [join(configHome, 'opencode'), homeDirectory, clientCwd, repoPath, join(root, 'data'), join(root, 'state'), join(root, 'cache')]) {
+      mkdirSync(directory, { recursive: true })
+    }
+
+    const llm = await startMockLlm()
+    writeFileSync(
+      join(configHome, 'opencode', 'opencode.json'),
+      JSON.stringify({
+        providers: {
+          mock: {
+            package: '@opencode/ai/providers/openai-compatible',
+            name: 'Mock',
+            settings: { baseURL: `http://127.0.0.1:${llm.port}/v1`, apiKey: 'mock-key' },
+            models: { 'mock-model': { name: 'Mock Model' } },
+          },
+        },
+        model: 'mock/mock-model',
+        permissions: [{ action: '*', resource: '*', effect: 'allow' }],
+      }),
+    )
+
+    const instance = await startOpenCodeServe({ env: { HOME: homeDirectory, XDG_CONFIG_HOME: configHome } })
+    upstreamBaseUrl.value = instance.baseUrl
+    getOpenCodeServerPasswordMock.mockReturnValue(instance.password)
+    getRepoByIdMock.mockReturnValue({ id: 1, fullPath: repoPath, cloneStatus: 'ready' })
+
+    const proxyApp = new Hono()
+    proxyApp.route('/api/opencode-proxy', createOpenCodeProxyRoutes(mockDb, mockSettingsService))
+    const proxyServer = await new Promise<ReturnType<typeof serve>>((resolve) => {
+      const server = serve({ fetch: proxyApp.fetch, port: 0, hostname: '127.0.0.1' }, () => resolve(server))
+    })
+    const proxyPort = (proxyServer.address() as AddressInfo).port
+
+    try {
+      const result = await runOpenCodeAgainstProxy(
+        `http://127.0.0.1:${proxyPort}/api/opencode-proxy/repos/1`,
+        clientCwd,
+        homeDirectory,
+        configHome,
+      )
+      expect(result.status, result.stderr || result.stdout).toBe(0)
+
+      const response = await fetch(`${instance.baseUrl}/api/session?directory=${encodeURIComponent(repoPath)}`, {
+        headers: { Authorization: buildOpenCodeBasicAuth(instance.password) },
+      })
+      const body = (await response.json()) as { data: { location: { directory: string } }[] }
+      expect(body.data.some((session) => session.location.directory === repoPath)).toBe(true)
+    } finally {
+      await new Promise<void>((resolve) => proxyServer.close(() => resolve()))
+      await instance.stop()
+      llm.close()
+      getOpenCodeServerPasswordMock.mockReturnValue('test-password')
+      upstreamBaseUrl.value = 'http://127.0.0.1:5551'
+      rmSync(root, { recursive: true, force: true })
+    }
+  }, 120000)
 })

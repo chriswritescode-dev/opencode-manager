@@ -5,7 +5,6 @@ import { useCreateSession } from "@/hooks/useOpenCode"
 import { useDialogParam } from "@/hooks/useDialogParam"
 import { useSidebarAction } from "@/hooks/useSidebarAction"
 import { useSSE } from "@/hooks/useSSE"
-import { OPENCODE_API_ENDPOINT } from "@/config"
 import { Button } from "@/components/ui/button"
 import { Header } from "@/components/ui/header"
 import { SessionList } from "@/components/session/SessionList"
@@ -26,7 +25,6 @@ export function AssistantRedirect() {
   const [sourceControlOpen, setSourceControlOpen] = useDialogParam('sourceControl')
   const [resetPermissionsOpen, setResetPermissionsOpen] = useDialogParam('resetPermissions')
 
-  const opcodeUrl = OPENCODE_API_ENDPOINT
   const { data: repo, isLoading: repoLoading, error: repoError } = useQuery({
     queryKey: ["repo", repoId],
     queryFn: () => getRepo(repoId),
@@ -34,9 +32,9 @@ export function AssistantRedirect() {
 
   const assistantDirectory = repo?.fullPath
 
-  useSSE(opcodeUrl, assistantDirectory)
+  useSSE(assistantDirectory)
 
-  const createSessionMutation = useCreateSession(opcodeUrl, assistantDirectory, (session) => {
+  const createSessionMutation = useCreateSession(assistantDirectory, (session) => {
     navigate(`/repos/${repoId}/sessions/${session.id}?assistant=1`)
   })
 
@@ -57,11 +55,11 @@ export function AssistantRedirect() {
           <div className="flex items-center gap-1">
             <PendingActionsGroup />
           </div>
-          <Button onClick={() => handleCreateSession()} disabled={!opcodeUrl || !assistantDirectory || createSessionMutation.isPending} size="sm" className="hidden sm:inline-flex bg-blue-600 hover:bg-blue-700 text-white transition-all duration-200 hover:scale-105">
+          <Button onClick={() => handleCreateSession()} disabled={!assistantDirectory || createSessionMutation.isPending} size="sm" className="hidden sm:inline-flex bg-blue-600 hover:bg-blue-700 text-white transition-all duration-200 hover:scale-105">
             <Plus className="w-4 h-4 mr-2" />
             <span>New Session</span>
           </Button>
-          <Button onClick={() => handleCreateSession()} disabled={!opcodeUrl || !assistantDirectory || createSessionMutation.isPending} aria-label="New Session" size="sm" className="sm:hidden h-10 w-10 p-0 bg-blue-600 hover:bg-blue-700 text-white transition-all duration-200 hover:scale-105">
+          <Button onClick={() => handleCreateSession()} disabled={!assistantDirectory || createSessionMutation.isPending} aria-label="New Session" size="sm" className="sm:hidden h-10 w-10 p-0 bg-blue-600 hover:bg-blue-700 text-white transition-all duration-200 hover:scale-105">
             <Plus className="w-5 h-5" />
           </Button>
         </Header.Actions>
@@ -73,7 +71,6 @@ export function AssistantRedirect() {
           <div className="p-4 text-sm text-muted-foreground">Loading Assistant sessions...</div>
         ) : (
           <SessionList
-            opcodeUrl={opcodeUrl}
             directory={assistantDirectory}
             onSelectSession={(sessionId) => navigate(`/repos/${repoId}/sessions/${sessionId}?assistant=1`)}
           />
@@ -83,13 +80,12 @@ export function AssistantRedirect() {
         <>
           <FileBrowserSheet isOpen={fileBrowserOpen} onClose={() => setFileBrowserOpen(false)} basePath={repo?.localPath} repoName="Assistant" repoId={repoId} />
           <RepoMcpDialog open={mcpDialogOpen} onOpenChange={setMcpDialogOpen} directory={assistantDirectory} />
-          {assistantDirectory && opcodeUrl ? (
+          {assistantDirectory ? (
             <RepoSkillsDialog
               open={skillsDialogOpen}
               onOpenChange={setSkillsDialogOpen}
               repoId={repoId}
               sessionId="assistant-session"
-              opcodeUrl={opcodeUrl}
               directory={assistantDirectory}
             />
           ) : (

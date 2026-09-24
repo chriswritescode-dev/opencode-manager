@@ -6,7 +6,7 @@ import { REMOTE_MANAGER_URL_ENV, REMOTE_REPO_NAME_ENV } from '../src/remote-cont
 const sampleTarget: WarpTarget = {
   managerUrl: 'https://manager.example.com',
   token: 'tok_abc123',
-  directory: '/workspace/my-repo',
+  repoId: 42,
   sessionID: 'sess_42',
   repoName: 'my-repo',
 }
@@ -16,12 +16,10 @@ describe('buildAttachArgs', () => {
     const args = buildAttachArgs(sampleTarget)
 
     expect(args).toEqual([
-      'attach',
-      'https://manager.example.com/api/opencode-proxy',
-      '--dir', '/workspace/my-repo',
-      '--session', 'sess_42',
-      '--password', 'tok_abc123',
-      '--username', 'opencode',
+      '--server',
+      'https://manager.example.com/api/opencode-proxy/repos/42',
+      '--session',
+      'sess_42',
     ])
   })
 })
@@ -68,6 +66,7 @@ describe('runPendingWarp', () => {
         stdio: 'inherit',
         env: {
           ...process.env,
+          OPENCODE_PASSWORD: sampleTarget.token,
           [REMOTE_MANAGER_URL_ENV]: sampleTarget.managerUrl,
           [REMOTE_REPO_NAME_ENV]: sampleTarget.repoName,
         },

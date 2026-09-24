@@ -1,17 +1,18 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
-import { mkdtemp, readFile, readdir, rm, writeFile } from 'fs/promises'
+import { mkdir, mkdtemp, readFile, readdir, rm, writeFile } from 'fs/promises'
 import { tmpdir } from 'os'
 import path from 'path'
 import { Database } from 'bun:sqlite'
 import { ZodError } from 'zod'
 
-const paths = vi.hoisted(() => ({ config: '', configDir: '', healthWatch: '' }))
+const paths = vi.hoisted(() => ({ config: '', configDir: '', configHome: '', healthWatch: '' }))
 
 vi.mock('@opencode-manager/shared/config/env', () => ({
   getConfigPath: () => paths.configDir,
   getOpenCodeConfigFilePath: () => paths.config,
+  getOpenCodeConfigHome: () => paths.configHome,
   getOpenCodeHealthWatchPath: () => paths.healthWatch,
-  OPENCODE_CONFIG_SOURCE_NAMES: ['config.json', 'opencode.json', 'opencode.jsonc'],
+  OPENCODE_CONFIG_SOURCE_NAMES: ['opencode.json', 'opencode.jsonc'],
 }))
 
 vi.mock('../../src/utils/logger', () => ({
@@ -75,7 +76,9 @@ describe('opencode-config-apply', () => {
     workDir = await mkdtemp(path.join(tmpdir(), 'opencode-config-apply-'))
     paths.config = path.join(workDir, 'opencode.json')
     paths.configDir = workDir
+    paths.configHome = path.join(workDir, '..', `${path.basename(workDir)}-home`)
     paths.healthWatch = path.join(workDir, 'health-watch')
+    await mkdir(paths.configHome, { recursive: true })
     db = new Database(':memory:')
     migrate(db, allMigrations)
     settingsService = new SettingsService(db)
@@ -84,6 +87,7 @@ describe('opencode-config-apply', () => {
   afterEach(async () => {
     db.close()
     await rm(workDir, { recursive: true, force: true })
+    await rm(paths.configHome, { recursive: true, force: true })
   })
 
   it.each([
@@ -126,11 +130,11 @@ describe('opencode-config-apply', () => {
 
     const result = expectStatus(await applyOpenCodeConfigUpdate({
       content: submitted,
-      source: 'config.json',
+      source: 'opencode.jsonc',
       settingsService,
     }), 'restart_pending')
 
-    await expect(readFile(sourcePath('config.json'), 'utf8')).resolves.toBe(submitted)
+    await expect(readFile(sourcePath('opencode.jsonc'), 'utf8')).resolves.toBe(submitted)
     await expect(readFile(sourcePath('opencode.json'), 'utf8')).resolves.toBe('{"model":"a/b"}')
     expect(result.config.content).toEqual({ model: 'a/b', theme: 'light' })
   })
@@ -198,7 +202,7 @@ describe('opencode-config-apply', () => {
   it('restores the prior sources if persisting last known good fails', async () => {
     const lower = '{"model":"a/b"}'
     const higher = '{\n // keep\n "theme":"dark"\n}'
-    await writeFile(sourcePath('config.json'), lower)
+    await writeFile(sourcePath('opencode.json'), lower)
     await writeFile(sourcePath('opencode.jsonc'), higher)
     vi.spyOn(settingsService, 'saveLastKnownGoodConfig').mockImplementation(() => {
       throw new Error('database write failed')
@@ -209,18 +213,18 @@ describe('opencode-config-apply', () => {
       settingsService,
     })).rejects.toThrow('database write failed')
 
-    expect(await readFile(sourcePath('config.json'), 'utf8')).toBe(lower)
+    expect(await readFile(sourcePath('opencode.json'), 'utf8')).toBe(lower)
     expect(await readFile(sourcePath('opencode.jsonc'), 'utf8')).toBe(higher)
     expect(markRestartPendingMock).not.toHaveBeenCalled()
   })
 
   it('requires a restart after repairing an invalid source even when merged values are unchanged', async () => {
-    await writeFile(sourcePath('config.json'), '{"model":123}')
+    await writeFile(sourcePath('opencode.json'), '{"model":123}')
     await writeFile(sourcePath('opencode.jsonc'), '{"model":"a/b"}')
 
     const result = await applyOpenCodeConfigUpdate({
       content: '{}',
-      source: 'config.json',
+      source: 'opencode.json',
       settingsService,
     })
 
@@ -244,17 +248,17 @@ describe('opencode-config-apply', () => {
   })
 
   it('captures every source as last known good and restores them together', async () => {
-    await writeFile(sourcePath('config.json'), '{"model":"a/b"}', 'utf8')
+    await writeFile(sourcePath('opencode.json'), '{"model":"a/b"}', 'utf8')
     await writeFile(sourcePath('opencode.jsonc'), '{"theme":"dark"}', 'utf8')
 
     await captureLastKnownGoodOpenCodeConfig(settingsService)
-    await rm(sourcePath('config.json'))
+    await rm(sourcePath('opencode.json'))
     await rm(sourcePath('opencode.jsonc'))
 
     const restored = await restoreLastKnownGoodOpenCodeConfig(settingsService)
 
     expect(restored?.content).toEqual({ model: 'a/b', theme: 'dark' })
-    await expect(readFile(sourcePath('config.json'), 'utf8')).resolves.toBe('{"model":"a/b"}')
+    await expect(readFile(sourcePath('opencode.json'), 'utf8')).resolves.toBe('{"model":"a/b"}')
     await expect(readFile(sourcePath('opencode.jsonc'), 'utf8')).resolves.toBe('{"theme":"dark"}')
     expect(clearStartupErrorMock).toHaveBeenCalledTimes(1)
   })
@@ -333,7 +337,6 @@ describe('opencode-config-apply', () => {
   })
 
   it('seeds a minimal opencode.jsonc snapshot and removes every other source', async () => {
-    await writeFile(sourcePath('config.json'), '{"model":"a/b"}', 'utf8')
     await writeFile(sourcePath('opencode.json'), '{"theme":"dark"}', 'utf8')
 
     const seeded = await seedOpenCodeConfigFile()

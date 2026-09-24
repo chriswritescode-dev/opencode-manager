@@ -1,6 +1,6 @@
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import { mcpApi } from '@/api/mcp'
-import type { McpStatusMap, McpServerConfig } from '@/api/mcp'
+import type { McpServerConfig } from '@/api/mcp'
 import { showToast as toast } from '@/lib/toast'
 
 const SESSION_QUERY_PREDICATE = (query: { queryKey: readonly unknown[] }) =>
@@ -55,22 +55,10 @@ export function useMcpServers() {
   })
 
   const startAuthMutation = useMutation({
-    mutationFn: ({ name, serverUrl, scope, clientId, clientSecret, directory }: { name: string; serverUrl: string; scope?: string; clientId?: string; clientSecret?: string; directory?: string }) =>
-      mcpApi.startAuth(name, serverUrl, scope, clientId, clientSecret, directory),
+    mutationFn: ({ name, directory }: { name: string; directory?: string }) =>
+      mcpApi.startAuth(name, directory),
     onError: (error: Error) => {
       toast.error(`Failed to start authentication: ${error.message}`)
-    },
-  })
-
-  const completeAuthMutation = useMutation({
-    mutationFn: ({ name, code }: { name: string; code: string }) =>
-      mcpApi.completeAuth(name, code),
-    onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: ['mcp-status'] })
-      toast.success('Authentication completed')
-    },
-    onError: (error: Error) => {
-      toast.error(`Failed to complete authentication: ${error.message}`)
     },
   })
 
@@ -87,7 +75,7 @@ export function useMcpServers() {
   })
 
   return {
-    status: statusQuery.data as McpStatusMap | undefined,
+    status: statusQuery.data,
     isLoading: statusQuery.isLoading,
     isError: statusQuery.isError,
     error: statusQuery.error,
@@ -108,10 +96,6 @@ export function useMcpServers() {
     startAuth: startAuthMutation.mutate,
     startAuthAsync: startAuthMutation.mutateAsync,
     isStartingAuth: startAuthMutation.isPending,
-
-    completeAuth: completeAuthMutation.mutate,
-    completeAuthAsync: completeAuthMutation.mutateAsync,
-    isCompletingAuth: completeAuthMutation.isPending,
 
     removeAuth: removeAuthMutation.mutate,
     removeAuthAsync: removeAuthMutation.mutateAsync,

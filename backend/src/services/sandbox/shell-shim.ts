@@ -1,5 +1,4 @@
 import path from 'path'
-import { existsSync } from 'fs'
 import { ENV } from '@opencode-manager/shared/config/env'
 import { writeFileAtomic } from '../../utils/fs-safe'
 import {
@@ -14,8 +13,6 @@ import {
 export const SANDBOX_SHELL_FILENAME = 'ocm-sandbox-shell'
 
 export const SANDBOX_SHELL_ENV_WORKDIR = 'OCM_SANDBOX_WORKDIR'
-
-export const SANDBOX_SHELL_ENV_HOST_SHELL = 'OCM_SANDBOX_HOST_SHELL'
 
 /**
  * Upper bound on `http.<host>.extraheader` pairs forwarded into the microVM.
@@ -73,21 +70,6 @@ export function sandboxShellShimPath(configHome: string): string {
   return path.join(configHome, 'ocm', SANDBOX_SHELL_FILENAME)
 }
 
-export function resolveShimHostShell(): string {
-  const configured = process.env.SHELL?.trim()
-  if (
-    configured !== undefined &&
-    configured !== '' &&
-    path.isAbsolute(configured) &&
-    path.basename(configured) !== SANDBOX_SHELL_FILENAME &&
-    existsSync(configured)
-  ) {
-    return configured
-  }
-  if (existsSync('/bin/bash')) return '/bin/bash'
-  return '/bin/sh'
-}
-
 export function buildSandboxShellShimScript(): string {
   const timeoutSeconds = Math.floor(ENV.SANDBOX.EXEC_TIMEOUT_MS / 1000)
   const execArgs = [
@@ -107,22 +89,22 @@ export function buildSandboxShellShimScript(): string {
     (name) => `  if [ -n "\${${name}+x}" ]; then set -- "$@" -e "${name}=$${name}"; fi`,
   ).join('\n')
   return `#!/bin/sh
-if [ -n "\${${SANDBOX_SHELL_ENV_WORKDIR}:-}" ]; then
-  ocm_argc=$#
-  set -- "$@" ${execArgs}
-${forwardEnv}
-  set -- "$@" -- sh
-  ocm_i=0
-  while [ "$ocm_i" -lt "$ocm_argc" ]; do
-    ocm_arg=$1
-    shift
-    set -- "$@" "$ocm_arg"
-    ocm_i=$((ocm_i + 1))
-  done
-  exec "$@"
+if [ -z "\${${SANDBOX_SHELL_ENV_WORKDIR}:-}" ]; then
+  echo 'ocm-sandbox-shell: sandbox working directory missing; refusing to run on the host' >&2
+  exit 126
 fi
-OCM_SANDBOX_DEFAULT_SHELL=${quoteForShell(resolveShimHostShell())}
-exec "\${${SANDBOX_SHELL_ENV_HOST_SHELL}:-$OCM_SANDBOX_DEFAULT_SHELL}" "$@"
+ocm_argc=$#
+set -- "$@" ${execArgs}
+${forwardEnv}
+set -- "$@" -- sh
+ocm_i=0
+while [ "$ocm_i" -lt "$ocm_argc" ]; do
+  ocm_arg=$1
+  shift
+  set -- "$@" "$ocm_arg"
+  ocm_i=$((ocm_i + 1))
+done
+exec "$@"
 `
 }
 

@@ -7,10 +7,16 @@ import { getConfigPath, getWorkspacePath } from '@opencode-manager/shared/config
 import {
   DEFAULT_OPENCODE_CONFIG_SOURCE_NAME,
   OPENCODE_CONFIG_SOURCE_NAMES,
-  isOpenCodeConfigSourceName,
   selectPreferredOpenCodeConfigSourceName,
 } from '@opencode-manager/shared'
-import { parseOpenCodeConfigContent, restoreOpenCodeConfigSnapshot, serializeOpenCodeConfigSourceSnapshot, withOpenCodeConfigLock } from './opencode-config-file'
+import {
+  LEGACY_OPENCODE_CONFIG_SOURCE_NAME,
+  parseOpenCodeConfigContent,
+  restoreOpenCodeConfigSnapshot,
+  serializeOpenCodeConfigSourceSnapshot,
+  toOpenCodeConfigRestorableSourceName,
+  withOpenCodeConfigLock,
+} from './opencode-config-file'
 import { captureLastKnownGoodOpenCodeConfig } from './opencode-config-apply'
 import { ensureDirectoryExists, fileExists, readFileContent } from './file-operations'
 import type { SettingsService } from './settings'
@@ -68,7 +74,7 @@ function getExistingConfigSourcePaths(): string[] {
   if (explicitPath && existsSync(path.resolve(explicitPath))) {
     return [path.resolve(explicitPath)]
   }
-  return OPENCODE_CONFIG_SOURCE_NAMES
+  return [...OPENCODE_CONFIG_SOURCE_NAMES, LEGACY_OPENCODE_CONFIG_SOURCE_NAME]
     .map(name => path.join(os.homedir(), '.config', 'opencode', name))
     .filter(candidate => existsSync(candidate))
 }
@@ -181,7 +187,7 @@ async function importOpenCodeConfigFromSources(sourcePaths: string[], settingsSe
   const configDir = getConfigPath()
   const sources = await Promise.all(sourcePaths.map(async sourcePath => {
     const basename = path.basename(sourcePath)
-    const name = isOpenCodeConfigSourceName(basename) ? basename : DEFAULT_OPENCODE_CONFIG_SOURCE_NAME
+    const name = toOpenCodeConfigRestorableSourceName(basename) ?? DEFAULT_OPENCODE_CONFIG_SOURCE_NAME
     const rawContent = await readFileContent(sourcePath)
     if (!parseOpenCodeConfigContent(rawContent).isValid) {
       throw new Error('Importable OpenCode config is invalid')

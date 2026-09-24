@@ -1,35 +1,22 @@
 import React, { useState } from 'react'
-import type { components } from '@/api/opencode-types'
+import type { FileDiffInfo, SessionMessageAssistantTool } from '@opencode-manager/shared/opencode'
 import { useSettings } from '@/hooks/useSettings'
 import { DiffStats } from './DiffStats'
-import { ContentDiffViewer } from './ContentDiffViewer'
 import { CodePreview } from './CodePreview'
 import { ChevronDown, ChevronUp } from 'lucide-react'
 
-type ToolPart = components['schemas']['ToolPart']
-
-export interface FileDiffData {
-  file: string
-  before: string
-  after: string
-  additions: number
-  deletions: number
-}
-
-function isFileDiff(data: unknown): data is FileDiffData {
+function isFileDiff(data: unknown): data is FileDiffInfo {
   return (
     typeof data === 'object' &&
     data !== null &&
     'file' in data &&
-    'before' in data &&
-    'after' in data &&
+    'patch' in data &&
     'additions' in data &&
     'deletions' in data &&
-    typeof (data as FileDiffData).file === 'string' &&
-    typeof (data as FileDiffData).before === 'string' &&
-    typeof (data as FileDiffData).after === 'string' &&
-    typeof (data as FileDiffData).additions === 'number' &&
-    typeof (data as FileDiffData).deletions === 'number'
+    typeof (data as FileDiffInfo).file === 'string' &&
+    typeof (data as FileDiffInfo).patch === 'string' &&
+    typeof (data as FileDiffInfo).additions === 'number' &&
+    typeof (data as FileDiffInfo).deletions === 'number'
   )
 }
 
@@ -53,9 +40,30 @@ export function getRelativePath(filePath: string): string {
   return filePath
 }
 
+function PatchViewer({ patch }: { patch: string }) {
+  const lines = patch.split('\n')
+
+  return (
+    <pre className="bg-accent p-2 text-xs overflow-x-auto">
+      {lines.map((line, index) => {
+        const tone = line.startsWith('@@')
+          ? 'text-blue-600 dark:text-blue-400'
+          : line.startsWith('+++') || line.startsWith('---')
+            ? 'text-muted-foreground'
+            : line.startsWith('+')
+              ? 'text-green-600 dark:text-green-400'
+              : line.startsWith('-')
+                ? 'text-red-600 dark:text-red-400'
+                : 'text-muted-foreground'
+        return <div key={index} className={tone}>{line || ' '}</div>
+      })}
+    </pre>
+  )
+}
+
 interface FileToolRenderProps {
-  part: ToolPart
-  filediff?: FileDiffData
+  part: SessionMessageAssistantTool
+  filediff?: FileDiffInfo
   filePath?: string
   content?: string
   toolName: string
@@ -76,10 +84,8 @@ export function FileToolRender({ part, filediff, filePath, content, toolName, on
   const [expanded, setExpanded] = useState(defaultExpanded)
 
   const getDuration = () => {
-    if (part.state.status === 'completed' && part.state.time) {
-      return ((part.state.time.end - part.state.time.start) / 1000).toFixed(2) + 's'
-    }
-    return ''
+    if (part.time.ran === undefined || part.time.completed === undefined) return ''
+    return ((part.time.completed - part.time.ran) / 1000).toFixed(2) + 's'
   }
 
   const handleFileClick = (e: React.MouseEvent) => {
@@ -118,7 +124,7 @@ export function FileToolRender({ part, filediff, filePath, content, toolName, on
 
       {expanded && hasExpandableContent && (
         <div className="bg-card p-0">
-          {filediff && <ContentDiffViewer before={filediff.before} after={filediff.after} />}
+          {filediff && <PatchViewer patch={filediff.patch} />}
           {content && !filediff && <CodePreview fileName={filePath || ''} content={content} />}
         </div>
       )}
@@ -126,30 +132,46 @@ export function FileToolRender({ part, filediff, filePath, content, toolName, on
   )
 }
 
-export function getToolSpecificRender(part: ToolPart, onFileClick?: (filePath: string) => void): React.ReactElement | null {
+function fileDiffs(part: SessionMessageAssistantTool): FileDiffInfo[] {
+  if (part.state.status !== 'completed') return []
+  const files = part.state.metadata?.files
+  if (!Array.isArray(files)) return []
+  return files.filter(isFileDiff)
+}
+
+export function getToolSpecificRender(part: SessionMessageAssistantTool, onFileClick?: (filePath: string) => void): React.ReactElement | null {
   if (part.state.status !== 'completed') return null
 
-  if (part.tool === 'edit') {
-    const filediff = part.state.metadata?.filediff
-    const filePath = part.state.input?.filePath as string | undefined
-    if (filediff && isFileDiff(filediff)) {
-      return <FileToolRender part={part} filediff={filediff} filePath={filePath} toolName="Edit" onFileClick={onFileClick} />
-    }
+  const input = part.state.input
+  const inputPath = typeof input.path === 'string' ? input.path : undefined
+
+  if (part.name === 'edit' || part.name === 'patch') {
+    const diffs = fileDiffs(part)
+    if (diffs.length === 0) return null
+    const toolName = part.name === 'edit' ? 'Edit' : 'Patch'
+    return (
+      <>
+        {diffs.map((filediff, index) => (
+          <FileToolRender
+            key={`${filediff.file}-${index}`}
+            part={part}
+            filediff={filediff}
+            filePath={filediff.file}
+            toolName={toolName}
+            onFileClick={onFileClick}
+          />
+        ))}
+      </>
+    )
   }
 
-  if (part.tool === 'write') {
-    const filePath = part.state.input?.filePath as string | undefined
-    const content = part.state.input?.content as string | undefined
-    if (filePath) {
-      return <FileToolRender part={part} filePath={filePath} content={content} toolName="Write" onFileClick={onFileClick} />
-    }
+  if (part.name === 'write' && inputPath) {
+    const content = input.content as string | undefined
+    return <FileToolRender part={part} filePath={inputPath} content={content} toolName="Write" onFileClick={onFileClick} />
   }
 
-  if (part.tool === 'read') {
-    const filePath = part.state.input?.filePath as string | undefined
-    if (filePath) {
-      return <FileToolRender part={part} filePath={filePath} toolName="Read" onFileClick={onFileClick} />
-    }
+  if (part.name === 'read' && inputPath) {
+    return <FileToolRender part={part} filePath={inputPath} toolName="Read" onFileClick={onFileClick} />
   }
 
   return null

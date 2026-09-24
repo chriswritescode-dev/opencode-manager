@@ -28,7 +28,6 @@ const mocks = vi.hoisted(() => ({
   computeNextRunAtForJob: vi.fn(),
 
   resolveOpenCodeModel: vi.fn(),
-  forward: vi.fn(),
   onEvent: vi.fn(),
   loggerError: vi.fn(),
   updateScheduleRunWorktree: vi.fn(),
@@ -97,33 +96,8 @@ vi.mock('croner', () => ({
 }))
 
 import { ScheduleService } from '../../src/services/schedules'
-import type { ForwardRequest, OpenCodeClient } from '../../src/services/opencode/client'
-
-function jsonResponse(body: unknown, status: number = 200): Response {
-  return new Response(JSON.stringify(body), {
-    status,
-    headers: { 'content-type': 'application/json' },
-  })
-}
-
-function textResponse(body: string, status: number = 200): Response {
-  return new Response(body, { status })
-}
-
-function createOpenCodeClientStub(): OpenCodeClient {
-  return {
-    forward: mocks.forward,
-    forwardRaw: vi.fn(async () => new Response('', { status: 200 })),
-    getJson: vi.fn(async () => ({}) as unknown),
-    postJson: vi.fn(async () => ({}) as unknown),
-    setProviderAuth: vi.fn(async () => true),
-    deleteProviderAuth: vi.fn(async () => true),
-  } as OpenCodeClient
-}
-
-function routeForward(handler: (req: ForwardRequest) => Promise<Response> | Response) {
-  mocks.forward.mockImplementation((req: ForwardRequest) => Promise.resolve(handler(req)))
-}
+import { createStubOpenCodeClient } from '../helpers/stub-opencode-client'
+import { assistantMessage, createStubScheduleApi } from '../helpers/stub-schedule-api'
 
 const repo = {
   id: 42,
@@ -171,7 +145,6 @@ const baseRun: ScheduleRun = {
   runBranch: null,
   commitHash: null,
   worktreePath: null,
-  workspaceId: null,
 }
 
 describe('ScheduleService permission ruleset in session creation', () => {
@@ -183,130 +156,89 @@ describe('ScheduleService permission ruleset in session creation', () => {
     mocks.getRepoById.mockReturnValue(repo)
     mocks.getRunningScheduleRunByJob.mockReturnValue(null)
     mocks.createScheduleRun.mockReturnValue(baseRun)
-    mocks.resolveOpenCodeModel.mockResolvedValue({ providerID: 'openai', modelID: 'gpt-5-mini' })
+    mocks.resolveOpenCodeModel.mockResolvedValue({ providerID: 'openai', id: 'gpt-5-mini', model: 'openai/gpt-5-mini' })
     mocks.onEvent.mockReturnValue(vi.fn())
-    mocks.getScheduleRunById.mockReturnValue({
-      ...baseRun,
-      sessionId: 'ses-perm-test',
-      sessionTitle: 'Scheduled: Weekly engineering summary',
-      logText: 'Run started.',
-    })
   })
 
-  it('sends default permission ruleset when job.permissionConfig is null', async () => {
+  it('sends the default permission ruleset when job.permissionConfig is null', async () => {
     mocks.getScheduleJobById.mockReturnValue(baseJob)
+    mocks.updateScheduleRunMetadata.mockReturnValue({ ...baseRun, sessionId: 'ses-perm-1' })
 
-    const runWithSession: ScheduleRun = {
-      ...baseRun,
-      sessionId: 'ses-perm-1',
-      sessionTitle: 'Scheduled: Weekly engineering summary',
-      logText: 'Run started.',
-    }
-    mocks.updateScheduleRunMetadata.mockReturnValue(runWithSession)
-
-    routeForward(({ path, method }) => {
-      if (path === '/session' && method === 'POST') {
-        return jsonResponse({ id: 'ses-perm-1' })
-      }
-      if (path.match(/^\/session\/[\w-]+\/prompt_async$/) && method === 'POST') {
-        return textResponse('')
-      }
-      if (path.match(/^\/session\/[\w-]+\/message$/) && method === 'GET') {
-        return jsonResponse([{ info: { role: 'assistant', time: { completed: Date.now() } }, parts: [] }])
-      }
-      throw new Error(`Unexpected forward request: ${method} ${path}`)
+    const stub = createStubScheduleApi({
+      sessionID: 'ses-perm-1',
+      messages: [assistantMessage('', { completed: true })],
     })
+    const service = new ScheduleService(
+      {} as never,
+      createStubOpenCodeClient({ api: stub.api }),
+      mocks.stubWorktreeManager as never,
+    )
 
-    const service = new ScheduleService({} as never, createOpenCodeClientStub(), mocks.stubWorktreeManager as never)
     await service.runJob(42, 7, 'manual')
 
-    const sessionCall = mocks.forward.mock.calls.find(
-      ([req]) => (req as ForwardRequest).path === '/session' && (req as ForwardRequest).method === 'POST',
-    )
-    expect(sessionCall).toBeDefined()
-    const body = JSON.parse((sessionCall![0] as ForwardRequest).body!)
-    expect(body.title).toBe('Scheduled: Weekly engineering summary')
-    expect(body.agent).toBeUndefined()
-
-    const expectedRules = buildSchedulePermissionRuleset(null)
-    expect(body.permission).toEqual(expectedRules)
+    await vi.waitFor(() => {
+      expect(stub.api.session.create).toHaveBeenCalledWith({
+        title: 'Scheduled: Weekly engineering summary',
+        agent: undefined,
+        model: { providerID: 'openai', id: 'gpt-5-mini', variant: undefined },
+        location: { directory: repo.fullPath },
+        permissions: buildSchedulePermissionRuleset(null),
+      })
+    })
   })
 
-  it('sends custom permission ruleset when job has custom permissionConfig', async () => {
+  it('sends the custom permission ruleset when job.permissionConfig is set', async () => {
     const customConfig = { allowExternalDirectory: true, allowQuestions: true, bashDenyPatterns: [] }
     mocks.getScheduleJobById.mockReturnValue({ ...baseJob, permissionConfig: customConfig })
+    mocks.updateScheduleRunMetadata.mockReturnValue({ ...baseRun, sessionId: 'ses-perm-2' })
 
-    const runWithSession: ScheduleRun = {
-      ...baseRun,
-      sessionId: 'ses-perm-2',
-      sessionTitle: 'Scheduled: Weekly engineering summary',
-      logText: 'Run started.',
-    }
-    mocks.updateScheduleRunMetadata.mockReturnValue(runWithSession)
-
-    routeForward(({ path, method }) => {
-      if (path === '/session' && method === 'POST') {
-        return jsonResponse({ id: 'ses-perm-2' })
-      }
-      if (path.match(/^\/session\/[\w-]+\/prompt_async$/) && method === 'POST') {
-        return textResponse('')
-      }
-      if (path.match(/^\/session\/[\w-]+\/message$/) && method === 'GET') {
-        return jsonResponse([{ info: { role: 'assistant', time: { completed: Date.now() } }, parts: [] }])
-      }
-      throw new Error(`Unexpected forward request: ${method} ${path}`)
+    const stub = createStubScheduleApi({
+      sessionID: 'ses-perm-2',
+      messages: [assistantMessage('', { completed: true })],
     })
+    const service = new ScheduleService(
+      {} as never,
+      createStubOpenCodeClient({ api: stub.api }),
+      mocks.stubWorktreeManager as never,
+    )
 
-    const service = new ScheduleService({} as never, createOpenCodeClientStub(), mocks.stubWorktreeManager as never)
     await service.runJob(42, 7, 'manual')
 
-    const sessionCall = mocks.forward.mock.calls.find(
-      ([req]) => (req as ForwardRequest).path === '/session' && (req as ForwardRequest).method === 'POST',
-    )
-    expect(sessionCall).toBeDefined()
-    const body = JSON.parse((sessionCall![0] as ForwardRequest).body!)
-    expect(body.title).toBe('Scheduled: Weekly engineering summary')
-    expect(body.agent).toBeUndefined()
-
-    const expectedRules = buildSchedulePermissionRuleset(customConfig)
-    expect(body.permission).toEqual(expectedRules)
+    await vi.waitFor(() => {
+      expect(stub.api.session.create).toHaveBeenCalledWith({
+        title: 'Scheduled: Weekly engineering summary',
+        agent: undefined,
+        model: { providerID: 'openai', id: 'gpt-5-mini', variant: undefined },
+        location: { directory: repo.fullPath },
+        permissions: buildSchedulePermissionRuleset(customConfig),
+      })
+    })
   })
 
-  it('preserves existing fields (title, agent) when permission is added', async () => {
+  it('preserves the title and agent alongside the permission ruleset', async () => {
     mocks.getScheduleJobById.mockReturnValue({ ...baseJob, agentSlug: 'my-agent' })
+    mocks.updateScheduleRunMetadata.mockReturnValue({ ...baseRun, sessionId: 'ses-perm-3' })
 
-    const runWithSession: ScheduleRun = {
-      ...baseRun,
-      sessionId: 'ses-perm-3',
-      sessionTitle: 'Scheduled: Weekly engineering summary',
-      logText: 'Run started.',
-    }
-    mocks.updateScheduleRunMetadata.mockReturnValue(runWithSession)
-
-    routeForward(({ path, method }) => {
-      if (path === '/session' && method === 'POST') {
-        return jsonResponse({ id: 'ses-perm-3' })
-      }
-      if (path.match(/^\/session\/[\w-]+\/prompt_async$/) && method === 'POST') {
-        return textResponse('')
-      }
-      if (path.match(/^\/session\/[\w-]+\/message$/) && method === 'GET') {
-        return jsonResponse([{ info: { role: 'assistant', time: { completed: Date.now() } }, parts: [] }])
-      }
-      throw new Error(`Unexpected forward request: ${method} ${path}`)
+    const stub = createStubScheduleApi({
+      sessionID: 'ses-perm-3',
+      messages: [assistantMessage('', { completed: true })],
     })
+    const service = new ScheduleService(
+      {} as never,
+      createStubOpenCodeClient({ api: stub.api }),
+      mocks.stubWorktreeManager as never,
+    )
 
-    const service = new ScheduleService({} as never, createOpenCodeClientStub(), mocks.stubWorktreeManager as never)
     await service.runJob(42, 7, 'manual')
 
-    const sessionCall = mocks.forward.mock.calls.find(
-      ([req]) => (req as ForwardRequest).path === '/session' && (req as ForwardRequest).method === 'POST',
-    )
-    expect(sessionCall).toBeDefined()
-    const body = JSON.parse((sessionCall![0] as ForwardRequest).body!)
-    expect(body.title).toBe('Scheduled: Weekly engineering summary')
-    expect(body.agent).toBe('my-agent')
-    expect(body.permission).toBeDefined()
-    expect(body.permission[0]).toEqual({ permission: '*', pattern: '*', action: 'allow' })
+    await vi.waitFor(() => {
+      expect(stub.api.session.create).toHaveBeenCalledWith({
+        title: 'Scheduled: Weekly engineering summary',
+        agent: 'my-agent',
+        model: { providerID: 'openai', id: 'gpt-5-mini', variant: undefined },
+        location: { directory: repo.fullPath },
+        permissions: buildSchedulePermissionRuleset(null),
+      })
+    })
   })
 })

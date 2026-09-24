@@ -1,69 +1,46 @@
-export interface McpOAuthFlowState {
+export interface McpOAuthFlow {
+  state: string
   serverName: string
-  serverUrl: string
-  codeVerifier: string
-  clientId: string
-  clientSecret?: string
-  callbackUrl: string
-  tokenEndpoint: string
-  timestamp: number
+  integrationID: string
+  attemptID: string
+  callbackPort: number
   directory?: string
+  timestamp: number
 }
 
-export type McpOAuthFlowResult = 
-  | { status: 'pending' }
-  | { status: 'completed'; serverName: string }
-  | { status: 'failed'; error: string }
-
-const flowStore = new Map<string, McpOAuthFlowState>()
-const resultStore = new Map<string, McpOAuthFlowResult & { timestamp: number }>()
-const STATE_TTL_MS = 10 * 60 * 1000
-const RESULT_TTL_MS = 5 * 60 * 1000
+const flowStore = new Map<string, McpOAuthFlow>()
+const attemptStore = new Map<string, McpOAuthFlow>()
+const FLOW_TTL_MS = 10 * 60 * 1000
 const CLEANUP_INTERVAL_MS = 60 * 1000
 
 setInterval(() => {
   const now = Date.now()
-  for (const [key, value] of flowStore) {
-    if (now - value.timestamp > STATE_TTL_MS) {
+  for (const [key, flow] of flowStore) {
+    if (now - flow.timestamp > FLOW_TTL_MS) {
       flowStore.delete(key)
     }
   }
-  for (const [key, value] of resultStore) {
-    if (now - value.timestamp > RESULT_TTL_MS) {
-      resultStore.delete(key)
+  for (const [key, flow] of attemptStore) {
+    if (now - flow.timestamp > FLOW_TTL_MS) {
+      attemptStore.delete(key)
     }
   }
 }, CLEANUP_INTERVAL_MS)
 
-export function storeMcpOAuthFlow(state: string, data: Omit<McpOAuthFlowState, 'timestamp'>): void {
-  flowStore.set(state, { ...data, timestamp: Date.now() })
-  resultStore.set(state, { status: 'pending', timestamp: Date.now() })
+export function storeMcpOAuthFlow(flow: Omit<McpOAuthFlow, 'timestamp'>): void {
+  const entry = { ...flow, timestamp: Date.now() }
+  flowStore.set(flow.state, entry)
+  attemptStore.set(flow.attemptID, entry)
 }
 
-export function consumeMcpOAuthFlow(state: string): McpOAuthFlowState | undefined {
-  const data = flowStore.get(state)
-  if (data) {
+export function consumeMcpOAuthFlow(state: string): McpOAuthFlow | undefined {
+  const flow = flowStore.get(state)
+  if (flow) {
     flowStore.delete(state)
   }
-  return data
+  return flow
 }
 
-export function deleteMcpOAuthFlow(state: string): void {
-  flowStore.delete(state)
-}
-
-export function markMcpOAuthFlowCompleted(state: string, serverName: string): void {
-  resultStore.set(state, { status: 'completed', serverName, timestamp: Date.now() })
-}
-
-export function markMcpOAuthFlowFailed(state: string, error: string): void {
-  resultStore.set(state, { status: 'failed', error, timestamp: Date.now() })
-}
-
-export function getMcpOAuthFlowResult(state: string): McpOAuthFlowResult | undefined {
-  const entry = resultStore.get(state)
-  if (!entry) return undefined
-  if (entry.status === 'completed') return { status: entry.status, serverName: entry.serverName }
-  if (entry.status === 'failed') return { status: entry.status, error: entry.error }
-  return { status: entry.status }
+export function getMcpOAuthFlowByAttempt(attemptID: string): McpOAuthFlow | undefined {
+  return attemptStore.get(attemptID)
 }

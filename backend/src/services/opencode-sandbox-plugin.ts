@@ -1,7 +1,6 @@
 import { sandboxPlanTimeoutMs, SANDBOX_UNAVAILABLE_PREFIX } from './sandbox/command'
 import {
   SANDBOX_FORWARDED_ENV_NAMES,
-  SANDBOX_SHELL_ENV_HOST_SHELL,
   SANDBOX_SHELL_ENV_WORKDIR,
 } from './sandbox/shell-shim'
 
@@ -14,7 +13,6 @@ var SANDBOX_UNAVAILABLE_PREFIX = ${JSON.stringify(SANDBOX_UNAVAILABLE_PREFIX)}
 var PLAN_TIMEOUT_MS = ${SANDBOX_PLAN_TIMEOUT_MS}
 var SHELL_SHIM_PATH = ${JSON.stringify(shellShimPath)}
 var ENV_WORKDIR = ${JSON.stringify(SANDBOX_SHELL_ENV_WORKDIR)}
-var ENV_HOST_SHELL = ${JSON.stringify(SANDBOX_SHELL_ENV_HOST_SHELL)}
 var FORWARDED_ENV_NAMES = ${JSON.stringify(SANDBOX_FORWARDED_ENV_NAMES)}
 
 function isEnforced() {
@@ -86,46 +84,39 @@ async function planSandboxShell(cwd) {
   return plan
 }
 
-export default async function () {
-  var hostShell
-
-  return {
-    config: async (cfg) => {
-      if (!isEnforced()) return
-      var configured = cfg.shell
-      if (typeof configured === 'string' && configured.length > 0 && configured !== SHELL_SHIM_PATH) {
-        hostShell = configured
-      }
-      lockAccessor(cfg, 'shell', SHELL_SHIM_PATH)
-    },
-    'shell.env': async (input, output) => {
-      if (!isEnforced() || typeof input.callID !== 'string' || input.callID.length === 0) {
-        if (hostShell !== undefined) {
-          output.env[ENV_HOST_SHELL] = hostShell
-        }
-        return
-      }
-      if (!existsSync(SHELL_SHIM_PATH)) {
-        throw unavailable('the sandbox shell shim is missing at ' + SHELL_SHIM_PATH)
-      }
-      var plan = await planSandboxShell(input.cwd)
-      if (plan.env !== null && typeof plan.env === 'object') {
-        for (var name of FORWARDED_ENV_NAMES) {
-          if (typeof plan.env[name] === 'string') {
-            output.env[name] = plan.env[name]
-          }
-        }
-      }
-      if (!lockAccessor(output.env, ENV_WORKDIR, plan.workdir)) {
-        throw unavailable('sandbox enforcement could not pin the sandbox working directory; aborting before the command runs on the host')
-      }
-    },
-    'tool.execute.after': async (input, output) => {
-      if (!isEnforced() || input.tool !== 'bash') return
-      if (output.metadata === null || typeof output.metadata !== 'object') return
-      output.metadata.sandbox = true
-    },
+async function pinSandboxShell(event) {
+  if (!existsSync(SHELL_SHIM_PATH)) {
+    throw unavailable('the sandbox shell shim is missing at ' + SHELL_SHIM_PATH)
   }
+  var plan = await planSandboxShell(event.cwd)
+  if (plan.env !== null && typeof plan.env === 'object') {
+    for (var name of FORWARDED_ENV_NAMES) {
+      if (typeof plan.env[name] === 'string') {
+        event.env[name] = plan.env[name]
+      }
+    }
+  }
+  if (!lockAccessor(event, 'shell', SHELL_SHIM_PATH)) {
+    throw unavailable('sandbox enforcement could not pin the sandbox shell; aborting before the command runs on the host')
+  }
+  if (!lockAccessor(event.env, ENV_WORKDIR, plan.workdir)) {
+    throw unavailable('sandbox enforcement could not pin the sandbox working directory; aborting before the command runs on the host')
+  }
+}
+
+export default {
+  id: 'ocm.sandbox',
+  async setup(ctx) {
+    await ctx.shell.hook('create.before', async (event) => {
+      if (!isEnforced()) return
+      await pinSandboxShell(event)
+    })
+    await ctx.tool.hook('execute.after', (event) => {
+      if (!isEnforced() || event.tool !== 'shell' || event.status !== 'completed') return
+      if (event.result === null || typeof event.result !== 'object') return
+      event.result = { ...event.result, metadata: { ...(event.result.metadata ?? {}), sandbox: true } }
+    })
+  },
 }
 `
 }

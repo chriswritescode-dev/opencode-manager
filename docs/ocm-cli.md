@@ -19,7 +19,7 @@
 | **Manager backend** | Manager server | Exposes repo metadata + token-protected OpenCode proxy + tarball mirror endpoints |
 | **Manager web UI** | Manager server | Reads from the shared OpenCode server; sessions created via `ocm` appear normally |
 
-There is no per-repo OpenCode process. All sessions share one OpenCode server on the Manager, with file-level isolation via `--dir`.
+There is no per-repo OpenCode process. All sessions share one OpenCode server on the Manager, with file-level isolation via the location directory (`x-opencode-directory` / `location[directory]`).
 
 ---
 
@@ -29,13 +29,13 @@ The CLI is published as `@opencode-manager/ocm-cli`. There are two install paths
 
 ### Option A — install via OpenCode's plugin loader (recommended)
 
-Add the package to your OpenCode TUI config and OpenCode will fetch it on next start. The package exposes a `./tui` entrypoint, and OpenCode resolves that entrypoint automatically from the package name. The package `postinstall` script self-installs a `~/.local/bin/ocm` symlink for local plugin installs, so the `ocm` binary becomes available on your PATH automatically.
+Add the package to your OpenCode 2 CLI config and OpenCode will fetch it on next start. The package exposes a `./tui` entrypoint, and OpenCode resolves that entrypoint automatically from the package name. The package `postinstall` script self-installs a `~/.local/bin/ocm` symlink for local plugin installs, so the `ocm` binary becomes available on your PATH automatically.
 
 ```jsonc
-// ~/.config/opencode/tui.json
+// ~/.config/opencode/cli.json
 {
-  "$schema": "https://opencode.ai/tui.json",
-  "plugin": ["@opencode-manager/ocm-cli"]
+  "$schema": "https://opencode.ai/v2/cli.json",
+  "plugins": ["@opencode-manager/ocm-cli"]
 }
 ```
 
@@ -110,18 +110,19 @@ ocm --help                Show this help
 
 ### Attach command equivalent
 
-Under the hood, `ocm` execs:
+Under the hood, `ocm` execs (OpenCode 2 connects with `--server` and reads the password from `OPENCODE_PASSWORD`):
 
 ```bash
 OCM_REMOTE_MANAGER_URL=https://manager.example.com \
 OCM_REMOTE_REPO_NAME=my-repo \
-  opencode attach https://manager.example.com/api/opencode-proxy \
-  --dir /path/to/repo/on/manager \
-  --password <manager-token> \
-  --username opencode
+OPENCODE_PASSWORD=<manager-token> \
+  opencode --server https://manager.example.com/api/opencode-proxy/repos/42
 ```
 
-The child takes over the terminal (`stdio: inherit`); closing the TUI exits `ocm` but leaves the Manager-side session intact.
+The repo-scoped proxy mount pins the request location to the repo directory, so the
+child TUI can run from any local working directory. The child takes over the terminal
+(`stdio: inherit`); closing the TUI exits `ocm` but leaves the Manager-side session
+intact.
 
 When the TUI plugin is installed, these internal child-process variables add a `REMOTE <host> · <repo>` indicator to the bottom of Manager-attached TUI windows. Local launches show no indicator.
 
@@ -133,7 +134,7 @@ When the TUI plugin is installed, these internal child-process variables add a `
 
 ### TUI `/ocm-move`
 
-When the TUI plugin entry is installed, `/ocm-move` is available in local OpenCode sessions. It checks that the matching Manager repo has not diverged, pushes the local git state with the fast bundle + working-tree patch path, reads the active session history from the local OpenCode SQLite event database, rewrites local repo directories to the Manager repo directory, and replays the session through `/api/opencode-proxy/sync/replay`. The local session is retained. When multiple Manager repos match, a select dialog lets you pick the destination. A confirmation dialog gates the move before any push. On success, a synthetic `noReply` reminder prompt is sent to the remote session (best-effort, never fails the move). You can then choose to warp — exit the local TUI and attach to the moved session on the Manager immediately — or keep the local copy with the previous toast behavior.
+When the TUI plugin entry is installed, `/ocm-move` is available in local OpenCode sessions. It checks that the matching Manager repo has not diverged, pushes the local git state with the fast bundle + working-tree patch path, exports the active session through the local OpenCode 2 server (`session.export`), rewrites local repo directories and file attachment URIs to the Manager repo directory, imports the session through the Manager proxy (`session.import`), and sends a synthetic reminder (`session.synthetic`) to the remote session (best-effort, never fails the move). The local session is retained. When multiple Manager repos match, a select dialog lets you pick the destination. A confirmation dialog gates the move before any push. On success you can choose to warp — exit the local TUI and attach to the moved session on the Manager immediately — or keep the local copy with the previous toast behavior.
 
 - `--force` skips the dirty-working-tree check on `pull` and the safety bail on `push`.
 - `--create` (on `push`) creates a new Manager repo when no `origin` match is found.
@@ -163,3 +164,4 @@ The CLI's environment and token inputs:
 | `/api/internal/repo-mirror/:repoId/up` | POST | Receive tarball, write to repo dir |
 | `/api/internal/repo-mirror/:repoId/down` | GET | Stream tarball of repo dir |
 | `/api/opencode-proxy/*` | ALL | Token-protected proxy from Manager to single OpenCode server |
+| `/api/opencode-proxy/repos/:repoId/*` | ALL | Repo-scoped proxy that pins the request location to the repo directory |

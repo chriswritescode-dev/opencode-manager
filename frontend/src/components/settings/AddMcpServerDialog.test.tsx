@@ -62,10 +62,12 @@ describe('AddMcpServerDialog', () => {
     expect(mockUpdateOpenCodeConfig).not.toHaveBeenCalled()
     expect(onUpdate).toHaveBeenCalledWith({
       mcp: {
-        filesystem: {
-          type: 'local',
-          enabled: true,
-          command: ['npx', 'server-filesystem', '/tmp'],
+        servers: {
+          filesystem: {
+            type: 'local',
+            command: ['npx', 'server-filesystem', '/tmp'],
+            disabled: false,
+          },
         },
       },
     })
@@ -86,7 +88,8 @@ describe('AddMcpServerDialog', () => {
     await waitFor(() => expect(onUpdate).toHaveBeenCalledTimes(1))
     const [content] = onUpdate.mock.calls[0]
     expect(onUpdate.mock.calls[0]).toHaveLength(1)
-    expect((content.mcp as Record<string, unknown>).filesystem).toBeDefined()
+    const mcp = content.mcp as Record<string, unknown>
+    expect(mcp.servers).toBeDefined()
     expect(mockUpdateOpenCodeConfig).not.toHaveBeenCalled()
   })
 })

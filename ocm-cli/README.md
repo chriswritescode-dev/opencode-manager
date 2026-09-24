@@ -87,9 +87,9 @@ branch, and path. The default attach reports the same details.
 
 ## OpenCode TUI plugin
 
-The package exposes an OpenCode TUI plugin through its `./tui` package export.
-Configure the package name and OpenCode resolves that TUI entrypoint
-automatically. When attached to a Manager via `ocm`, the plugin shows a
+The package exposes an OpenCode 2 TUI plugin (`{ id, setup }`) through its `./tui`
+package export. Configure the package name and OpenCode resolves that TUI
+entrypoint automatically. When attached to a Manager via `ocm`, the plugin shows a
 `REMOTE <host> · <repo>` indicator at the bottom of the TUI; local launches
 show nothing. It registers `/ocm-move`, which keeps the local session and
 copies the active session to the Manager after replacing the Manager repo's
@@ -102,7 +102,9 @@ yet. When multiple Manager repos match, the one already on your branch is
 chosen; otherwise a picker dialog lets you choose. A confirmation dialog gates
 the move before any push, states where the state will land, and lists any
 server-side work (uncommitted changes or commits not present locally) that will
-be discarded there. While the move runs, a spinner with the current phase and a
+be discarded there. The session moves by exporting it from the local OpenCode 2
+server and importing it through the Manager proxy, followed by a synthetic
+reminder. While the move runs, a spinner with the current phase and a
 progress bar is shown next to the prompt. On success
 you can optionally warp — exit the local TUI and attach to the moved session
 on the Manager immediately. Use it from inside an OpenCode session after
@@ -124,7 +126,7 @@ global installs); the plugin surface is TUI-only.
 ## Requirements
 
 - macOS or Linux (Windows is unsupported)
-- `opencode` available on `PATH`
+- OpenCode 2.x available on `PATH`
 - `git` and `tar` (with gzip support, i.e. the `-z` flag) available on `PATH`
 - `bash`, used for hidden token entry and interactive confirmations
 - macOS only: `/usr/bin/security`, used for Keychain-backed token storage (Linux uses a mode-`0600` file under the user config dir `~/.config/opencode-manager`)

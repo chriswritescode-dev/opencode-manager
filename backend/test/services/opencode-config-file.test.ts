@@ -4,13 +4,14 @@ import { tmpdir } from 'os'
 import path from 'path'
 import { ZodError } from 'zod'
 
-const paths = vi.hoisted(() => ({ config: '', configDir: '', healthWatch: '' }))
+const paths = vi.hoisted(() => ({ config: '', configDir: '', configHome: '', healthWatch: '' }))
 
 vi.mock('@opencode-manager/shared/config/env', () => ({
   getConfigPath: () => paths.configDir,
   getOpenCodeConfigFilePath: () => paths.config,
+  getOpenCodeConfigHome: () => paths.configHome,
   getOpenCodeHealthWatchPath: () => paths.healthWatch,
-  OPENCODE_CONFIG_SOURCE_NAMES: ['config.json', 'opencode.json', 'opencode.jsonc'],
+  OPENCODE_CONFIG_SOURCE_NAMES: ['opencode.json', 'opencode.jsonc'],
 }))
 
 vi.mock('../../src/utils/logger', () => ({
@@ -61,12 +62,14 @@ vi.mock('../../src/utils/fs-safe', async (importOriginal) => {
 
 import {
   HEALTH_WATCH_MAX_ENTRIES,
+  LEGACY_OPENCODE_CONFIG_SOURCE_NAME,
   OPENCODE_CONFIG_SEED,
   OpenCodeConfigConflictError,
   OpenCodeConfigShadowedRemovalError,
   OpenCodeConfigSnapshotError,
   archiveBrokenOpenCodeConfigFile,
   deleteOpenCodeConfigFile,
+  foldLegacyConfigJsonSource,
   pruneHealthWatchDirectory,
   readOpenCodeConfigFile,
   readOpenCodeConfigSnapshot,
@@ -85,6 +88,17 @@ describe('opencode-config-file', () => {
     return path.join(workDir, name)
   }
 
+  function archiveDirectory(): string {
+    return path.join(paths.configHome, 'opencode-configs-archive')
+  }
+
+  async function readArchivedLegacyContents(): Promise<string[]> {
+    const entries = await readdir(archiveDirectory())
+    return Promise.all(
+      entries.map((entry) => readFile(path.join(archiveDirectory(), entry), 'utf8')),
+    )
+  }
+
   beforeEach(async () => {
     vi.clearAllMocks()
     writeFailures.paths = []
@@ -95,11 +109,14 @@ describe('opencode-config-file', () => {
     workDir = await mkdtemp(path.join(tmpdir(), 'opencode-config-file-'))
     paths.config = path.join(workDir, 'opencode.json')
     paths.configDir = workDir
+    paths.configHome = path.join(workDir, '..', `${path.basename(workDir)}-home`)
     paths.healthWatch = path.join(workDir, 'health-watch')
+    await mkdir(paths.configHome, { recursive: true })
   })
 
   afterEach(async () => {
     await rm(workDir, { recursive: true, force: true })
+    await rm(paths.configHome, { recursive: true, force: true })
   })
 
   it('returns null when no config source exists', async () => {
@@ -152,16 +169,15 @@ describe('opencode-config-file', () => {
     expect(file?.isValid).toBe(true)
   })
 
-  it('merges sources in config.json, opencode.json, opencode.jsonc precedence with recursive objects and replacing arrays', async () => {
-    await writeFile(sourcePath('config.json'), JSON.stringify({ provider: { a: { x: 1 } }, list: [1, 2] }), 'utf8')
-    await writeFile(sourcePath('opencode.json'), JSON.stringify({ provider: { a: { y: 2 } }, list: [3] }), 'utf8')
-    await writeFile(sourcePath('opencode.jsonc'), JSON.stringify({ provider: { a: { z: 3 } } }), 'utf8')
+  it('merges sources in opencode.json, opencode.jsonc precedence with recursive objects and replacing arrays', async () => {
+    await writeFile(sourcePath('opencode.json'), JSON.stringify({ provider: { a: { x: 1 } }, list: [1, 2] }), 'utf8')
+    await writeFile(sourcePath('opencode.jsonc'), JSON.stringify({ provider: { a: { y: 2 } }, list: [3] }), 'utf8')
 
     const file = await readOpenCodeConfigFile()
 
-    expect(file?.content).toEqual({ provider: { a: { x: 1, y: 2, z: 3 } }, list: [3] })
+    expect(file?.content).toEqual({ provider: { a: { x: 1, y: 2 } }, list: [3] })
     expect(file?.path).toBe(sourcePath('opencode.jsonc'))
-    expect(file?.sources?.map((source) => source.name)).toEqual(['config.json', 'opencode.json', 'opencode.jsonc'])
+    expect(file?.sources?.map((source) => source.name)).toEqual(['opencode.json', 'opencode.jsonc'])
   })
 
   it('reads and writes an existing jsonc source without creating a duplicate', async () => {
@@ -219,7 +235,7 @@ describe('opencode-config-file', () => {
   it('modifies only changed paths in the preferred source and preserves comments and untouched fields', async () => {
     const lower = '{\n  // lower config\n  "model": "lower/model",\n  "theme": "light"\n}\n'
     const target = '{\n  // target config\n  "theme": "dark",\n  "small_model": "small"\n}\n'
-    await writeFile(sourcePath('config.json'), lower, 'utf8')
+    await writeFile(sourcePath('opencode.json'), lower, 'utf8')
     await writeFile(sourcePath('opencode.jsonc'), target, 'utf8')
 
     const merged = (await readOpenCodeConfigFile())?.content ?? {}
@@ -230,17 +246,17 @@ describe('opencode-config-file', () => {
     expect(targetContent).toContain('// target config')
     expect(targetContent).toContain('"theme": "light"')
     expect(targetContent).toContain('"small_model": "small"')
-    await expect(readFile(sourcePath('config.json'), 'utf8')).resolves.toBe(lower)
+    await expect(readFile(sourcePath('opencode.json'), 'utf8')).resolves.toBe(lower)
   })
 
   it('removes an override from the target source only and reveals inherited values', async () => {
     const lower = JSON.stringify({ theme: 'light', model: 'a' })
-    await writeFile(sourcePath('config.json'), lower, 'utf8')
+    await writeFile(sourcePath('opencode.json'), lower, 'utf8')
     await writeFile(sourcePath('opencode.jsonc'), '{\n  "theme": "dark"\n}\n', 'utf8')
 
     await updateOpenCodeConfigFile({ model: 'a' })
 
-    await expect(readFile(sourcePath('config.json'), 'utf8')).resolves.toBe(lower)
+    await expect(readFile(sourcePath('opencode.json'), 'utf8')).resolves.toBe(lower)
     const revealed = await readOpenCodeConfigFile()
     expect(revealed?.content).toEqual({ theme: 'light', model: 'a' })
   })
@@ -248,7 +264,7 @@ describe('opencode-config-file', () => {
   it('rejects a removal of a value that only a lower-priority source defines and writes nothing', async () => {
     const lower = '{\n  "theme": "light",\n  "model": "a"\n}\n'
     const target = '{\n  "model": "b"\n}\n'
-    await writeFile(sourcePath('config.json'), lower, 'utf8')
+    await writeFile(sourcePath('opencode.json'), lower, 'utf8')
     await writeFile(sourcePath('opencode.jsonc'), target, 'utf8')
     const targetStats = await stat(sourcePath('opencode.jsonc'))
 
@@ -256,34 +272,34 @@ describe('opencode-config-file', () => {
 
     expect(error).toBeInstanceOf(OpenCodeConfigShadowedRemovalError)
     expect((error as OpenCodeConfigShadowedRemovalError).paths).toEqual(['theme'])
-    expect((error as OpenCodeConfigShadowedRemovalError).sources).toEqual(['config.json'])
+    expect((error as OpenCodeConfigShadowedRemovalError).sources).toEqual(['opencode.json'])
     await expect(readFile(sourcePath('opencode.jsonc'), 'utf8')).resolves.toBe(target)
-    await expect(readFile(sourcePath('config.json'), 'utf8')).resolves.toBe(lower)
+    await expect(readFile(sourcePath('opencode.json'), 'utf8')).resolves.toBe(lower)
     expect((await stat(sourcePath('opencode.jsonc'))).mtimeMs).toBe(targetStats.mtimeMs)
   })
 
   it('rejects a mixed shadowed removal and legitimate change without writing anything', async () => {
     const lower = '{\n  "theme": "light",\n  "model": "a"\n}\n'
     const target = '{\n  "model": "b"\n}\n'
-    await writeFile(sourcePath('config.json'), lower, 'utf8')
+    await writeFile(sourcePath('opencode.json'), lower, 'utf8')
     await writeFile(sourcePath('opencode.jsonc'), target, 'utf8')
 
     const error = await updateOpenCodeConfigFile({ model: 'b', plugin: ['x'] }).catch((caught: unknown) => caught)
 
     expect(error).toBeInstanceOf(OpenCodeConfigShadowedRemovalError)
     expect((error as OpenCodeConfigShadowedRemovalError).paths).toEqual(['theme'])
-    expect((error as OpenCodeConfigShadowedRemovalError).sources).toEqual(['config.json'])
+    expect((error as OpenCodeConfigShadowedRemovalError).sources).toEqual(['opencode.json'])
     await expect(readFile(sourcePath('opencode.jsonc'), 'utf8')).resolves.toBe(target)
-    await expect(readFile(sourcePath('config.json'), 'utf8')).resolves.toBe(lower)
+    await expect(readFile(sourcePath('opencode.json'), 'utf8')).resolves.toBe(lower)
   })
 
   it('writes raw content to an explicitly requested allowlisted source and rejects unknown sources', async () => {
-    const written = await writeOpenCodeConfigFile('{"theme":"dark"}', 'config.json')
+    const written = await writeOpenCodeConfigFile('{"theme":"dark"}', 'opencode.json')
 
-    expect(written.path).toBe(sourcePath('config.json'))
-    await expect(readFile(sourcePath('config.json'), 'utf8')).resolves.toBe('{"theme":"dark"}')
+    expect(written.path).toBe(sourcePath('opencode.json'))
+    await expect(readFile(sourcePath('opencode.json'), 'utf8')).resolves.toBe('{"theme":"dark"}')
     await expect(
-      writeOpenCodeConfigFile('{"theme":"dark"}', 'nope.json' as 'config.json'),
+      writeOpenCodeConfigFile('{"theme":"dark"}', 'nope.json' as 'opencode.json'),
     ).rejects.toThrow(/Unsupported OpenCode config source/)
   })
 
@@ -301,10 +317,8 @@ describe('opencode-config-file', () => {
   })
 
   it('round-trips every present and absent source state through a snapshot', async () => {
-    const config = '{\n  // config source\n  "theme": "light"\n}\n'
     const json = '{"model":"a/b"}'
     const jsonc = '{\n  // jsonc source\n  "small_model": "s"\n}\n'
-    await writeFile(sourcePath('config.json'), config, 'utf8')
     await writeFile(sourcePath('opencode.json'), json, 'utf8')
     await writeFile(sourcePath('opencode.jsonc'), jsonc, 'utf8')
 
@@ -315,7 +329,6 @@ describe('opencode-config-file', () => {
 
     await restoreOpenCodeConfigSnapshot(snapshot)
 
-    await expect(readFile(sourcePath('config.json'), 'utf8')).resolves.toBe(config)
     await expect(readFile(sourcePath('opencode.json'), 'utf8')).resolves.toBe(json)
     await expect(readFile(sourcePath('opencode.jsonc'), 'utf8')).resolves.toBe(jsonc)
   })
@@ -386,12 +399,12 @@ describe('opencode-config-file', () => {
     await writeFile(sourcePath('opencode.json'), '{"model":"a/b"}', 'utf8')
     const snapshot = JSON.stringify({
       version: 2,
-      sources: [{ name: 'config.json', rawContent: '{"theme":"dark"}' }],
+      sources: [{ name: 'opencode.jsonc', rawContent: '{"theme":"dark"}' }],
     })
 
     await expect(restoreOpenCodeConfigSnapshot(snapshot)).rejects.toBeInstanceOf(OpenCodeConfigSnapshotError)
     await expect(readFile(sourcePath('opencode.json'), 'utf8')).resolves.toBe('{"model":"a/b"}')
-    await expect(readFile(sourcePath('config.json'), 'utf8')).rejects.toMatchObject({ code: 'ENOENT' })
+    await expect(readFile(sourcePath('opencode.jsonc'), 'utf8')).rejects.toMatchObject({ code: 'ENOENT' })
   })
 
   it('rejects a snapshot with a malformed sources shape without changing sources', async () => {
@@ -407,7 +420,7 @@ describe('opencode-config-file', () => {
     const snapshot = JSON.stringify({
       marker: 'something-else',
       version: 1,
-      sources: [{ name: 'config.json', rawContent: '{"theme":"dark"}' }],
+      sources: [{ name: 'opencode.jsonc', rawContent: '{"theme":"dark"}' }],
     })
 
     await expect(restoreOpenCodeConfigSnapshot(snapshot)).rejects.toBeInstanceOf(OpenCodeConfigSnapshotError)
@@ -425,13 +438,13 @@ describe('opencode-config-file', () => {
     const rawContent = '{"model":"existing"}'
     await writeFile(sourcePath('opencode.json'), rawContent)
     const snapshot = JSON.stringify({ version: 1, sources: [
-      { name: 'config.json', rawContent: '{"theme":"dark"}' },
+      { name: 'opencode.json', rawContent: '{"theme":"dark"}' },
       { name: 'opencode.jsonc', rawContent: '{"model":123}' },
     ] })
 
     await expect(restoreOpenCodeConfigSnapshot(snapshot)).rejects.toBeInstanceOf(OpenCodeConfigSnapshotError)
     expect(await readFile(sourcePath('opencode.json'), 'utf8')).toBe(rawContent)
-    await expect(readFile(sourcePath('config.json'), 'utf8')).rejects.toMatchObject({ code: 'ENOENT' })
+    await expect(readFile(sourcePath('opencode.jsonc'), 'utf8')).rejects.toMatchObject({ code: 'ENOENT' })
   })
 
   it('rejects a schema-invalid legacy raw snapshot without changing sources', async () => {
@@ -446,7 +459,7 @@ describe('opencode-config-file', () => {
     await chmod(sourcePath('opencode.json'), 0o000)
     const snapshot = JSON.stringify({
       version: 1,
-      sources: [{ name: 'config.json', rawContent: '{"theme":"dark"}' }],
+      sources: [{ name: 'opencode.jsonc', rawContent: '{"theme":"dark"}' }],
     })
 
     try {
@@ -456,7 +469,7 @@ describe('opencode-config-file', () => {
     }
 
     await expect(readFile(sourcePath('opencode.json'), 'utf8')).resolves.toBe('{"model":"a/b"}')
-    await expect(readFile(sourcePath('config.json'), 'utf8')).rejects.toMatchObject({ code: 'ENOENT' })
+    await expect(readFile(sourcePath('opencode.jsonc'), 'utf8')).rejects.toMatchObject({ code: 'ENOENT' })
   })
 
   it('skips byte-identical structured and raw writes and preserves comments', async () => {
@@ -481,7 +494,7 @@ describe('opencode-config-file', () => {
     await updateOpenCodeConfigFile({ theme: 'light' }, { snapshot })
 
     expect(writeFailures.readsAtWrite).toEqual([{ stat: 0, readFile: 0 }])
-    expect(fsCalls.stat).toBe(3)
+    expect(fsCalls.stat).toBe(2)
     expect(fsCalls.readFile).toBe(1)
   })
 
@@ -504,8 +517,8 @@ describe('opencode-config-file', () => {
   })
 
   it('treats prototype-named config keys as plain data without polluting prototypes', async () => {
-    await writeFile(sourcePath('config.json'), '{"constructor":{"a":1}}', 'utf8')
-    await writeFile(sourcePath('opencode.json'), '{"constructor":{"b":2}}', 'utf8')
+    await writeFile(sourcePath('opencode.json'), '{"constructor":{"a":1}}', 'utf8')
+    await writeFile(sourcePath('opencode.jsonc'), '{"constructor":{"b":2}}', 'utf8')
 
     const file = await readOpenCodeConfigFile()
     expect(file?.content).toEqual({ constructor: { a: 1, b: 2 } })
@@ -588,10 +601,138 @@ describe('opencode-config-file', () => {
 
   it('deletes the entire source set and reports whether any source existed', async () => {
     await writeOpenCodeConfigFile(OPENCODE_CONFIG_SEED)
-    await writeFile(sourcePath('config.json'), '{"model":"a/b"}', 'utf8')
+    await writeFile(sourcePath('opencode.json'), '{"model":"a/b"}', 'utf8')
 
     await expect(deleteOpenCodeConfigFile()).resolves.toBe(true)
     await expect(readdir(workDir)).resolves.toEqual([])
     await expect(deleteOpenCodeConfigFile()).resolves.toBe(false)
+  })
+
+  describe('foldLegacyConfigJsonSource', () => {
+    const legacyPath = () => sourcePath(LEGACY_OPENCODE_CONFIG_SOURCE_NAME)
+
+    it('promotes a lone legacy config.json to opencode.json and archives the original', async () => {
+      const legacy = '{\n  // legacy config\n  "model": "a/b"\n}\n'
+      await writeFile(legacyPath(), legacy, 'utf8')
+
+      await expect(foldLegacyConfigJsonSource()).resolves.toBe(true)
+
+      await expect(readFile(sourcePath('opencode.json'), 'utf8')).resolves.toBe(legacy)
+      await expect(readFile(legacyPath(), 'utf8')).rejects.toMatchObject({ code: 'ENOENT' })
+      await expect(readArchivedLegacyContents()).resolves.toEqual([legacy])
+    })
+
+    it('merges legacy keys under opencode.json without overriding existing keys or comments', async () => {
+      const legacy = '{\n  // legacy config\n  "model": "a/b",\n  "theme": "light"\n}\n'
+      const target = '{\n  // target config\n  "theme": "dark"\n}\n'
+      await writeFile(legacyPath(), legacy, 'utf8')
+      await writeFile(sourcePath('opencode.json'), target, 'utf8')
+
+      await expect(foldLegacyConfigJsonSource()).resolves.toBe(true)
+
+      const merged = await readFile(sourcePath('opencode.json'), 'utf8')
+      expect(merged).toContain('// target config')
+      expect(merged).toContain('"theme": "dark"')
+      expect(merged).toContain('"model": "a/b"')
+      expect(merged).not.toContain('// legacy config')
+      await expect(readFile(legacyPath(), 'utf8')).rejects.toMatchObject({ code: 'ENOENT' })
+      await expect(readArchivedLegacyContents()).resolves.toEqual([legacy])
+    })
+
+    it('merges legacy keys under opencode.jsonc when opencode.json is absent', async () => {
+      const legacy = '{"model":"a/b","theme":"light"}'
+      const target = '{\n  // target config\n  "theme": "dark"\n}\n'
+      await writeFile(legacyPath(), legacy, 'utf8')
+      await writeFile(sourcePath('opencode.jsonc'), target, 'utf8')
+
+      await expect(foldLegacyConfigJsonSource()).resolves.toBe(true)
+
+      const merged = await readFile(sourcePath('opencode.jsonc'), 'utf8')
+      expect(merged).toContain('// target config')
+      expect(merged).toContain('"theme": "dark"')
+      expect(merged).toContain('"model": "a/b"')
+      await expect(readFile(legacyPath(), 'utf8')).rejects.toMatchObject({ code: 'ENOENT' })
+      await expect(readFile(sourcePath('opencode.json'), 'utf8')).rejects.toMatchObject({ code: 'ENOENT' })
+      await expect(readArchivedLegacyContents()).resolves.toEqual([legacy])
+    })
+
+    it('leaves a nested legacy key that the merge target already defines', async () => {
+      const legacy = '{"provider":{"a":{"x":1,"y":2}}}'
+      const target = '{"provider":{"a":{"x":9}}}'
+      await writeFile(legacyPath(), legacy, 'utf8')
+      await writeFile(sourcePath('opencode.json'), target, 'utf8')
+
+      await expect(foldLegacyConfigJsonSource()).resolves.toBe(true)
+
+      const merged = await readOpenCodeConfigFile()
+      expect(merged?.content).toEqual({ provider: { a: { x: 9, y: 2 } } })
+    })
+
+    it('is idempotent once the legacy source is folded', async () => {
+      const legacy = '{"model":"a/b"}'
+      await writeFile(legacyPath(), legacy, 'utf8')
+      await writeFile(sourcePath('opencode.json'), '{"theme":"dark"}', 'utf8')
+
+      await expect(foldLegacyConfigJsonSource()).resolves.toBe(true)
+      const merged = await readFile(sourcePath('opencode.json'), 'utf8')
+
+      await expect(foldLegacyConfigJsonSource()).resolves.toBe(false)
+      await expect(readFile(sourcePath('opencode.json'), 'utf8')).resolves.toBe(merged)
+      await expect(readArchivedLegacyContents()).resolves.toEqual([legacy])
+    })
+
+    it('leaves an unparseable legacy config.json in place', async () => {
+      await writeFile(legacyPath(), '{ not jsonc', 'utf8')
+
+      await expect(foldLegacyConfigJsonSource()).resolves.toBe(false)
+
+      await expect(readFile(legacyPath(), 'utf8')).resolves.toBe('{ not jsonc')
+      await expect(readdir(archiveDirectory())).rejects.toMatchObject({ code: 'ENOENT' })
+    })
+
+    it('leaves the legacy source in place when the merge target is invalid', async () => {
+      const legacy = '{"model":"a/b"}'
+      await writeFile(legacyPath(), legacy, 'utf8')
+      await writeFile(sourcePath('opencode.json'), '{"model":123}', 'utf8')
+
+      await expect(foldLegacyConfigJsonSource()).resolves.toBe(false)
+
+      await expect(readFile(legacyPath(), 'utf8')).resolves.toBe(legacy)
+      await expect(readFile(sourcePath('opencode.json'), 'utf8')).resolves.toBe('{"model":123}')
+      await expect(readdir(archiveDirectory())).rejects.toMatchObject({ code: 'ENOENT' })
+    })
+
+    it('folds a restored legacy snapshot envelope containing config.json', async () => {
+      const snapshot = JSON.stringify({
+        version: 1,
+        sources: [
+          { name: 'opencode.json', rawContent: '{"theme":"dark"}' },
+          { name: LEGACY_OPENCODE_CONFIG_SOURCE_NAME, rawContent: '{"model":"a/b"}' },
+        ],
+      })
+
+      await restoreOpenCodeConfigSnapshot(snapshot)
+
+      const restored = await readOpenCodeConfigFile()
+      expect(restored?.content).toEqual({ theme: 'dark', model: 'a/b' })
+      expect(restored?.sources.map((source) => source.name)).toEqual(['opencode.json'])
+      await expect(readFile(legacyPath(), 'utf8')).rejects.toMatchObject({ code: 'ENOENT' })
+      await expect(readArchivedLegacyContents()).resolves.toEqual(['{"model":"a/b"}'])
+    })
+
+    it('promotes a legacy snapshot that only contains config.json', async () => {
+      const snapshot = JSON.stringify({
+        version: 1,
+        sources: [{ name: LEGACY_OPENCODE_CONFIG_SOURCE_NAME, rawContent: '{"model":"a/b"}' }],
+      })
+
+      await restoreOpenCodeConfigSnapshot(snapshot)
+
+      const restored = await readOpenCodeConfigFile()
+      expect(restored?.path).toBe(sourcePath('opencode.json'))
+      expect(restored?.content).toEqual({ model: 'a/b' })
+      await expect(readFile(legacyPath(), 'utf8')).rejects.toMatchObject({ code: 'ENOENT' })
+      await expect(readArchivedLegacyContents()).resolves.toEqual(['{"model":"a/b"}'])
+    })
   })
 })

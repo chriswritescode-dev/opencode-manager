@@ -1,144 +1,57 @@
 import { describe, it, expect, vi } from 'vitest'
-import type { TuiPluginApi, TuiDialogConfirmProps, TuiDialogSelectProps } from '../src/tui-types.js'
+import type { Context } from '@opencode/plugin/tui/context'
 import { confirmDialog, selectDialog } from '../src/tui-dialogs.js'
 
-function createFakeApi() {
-  let capturedRender: (() => unknown) | undefined
-  let capturedOnClose: (() => void) | undefined
-  let clearCount = 0
-
-  const api = {
-    route: { current: { name: 'session' as const, params: { sessionID: 's1' } } },
-    state: { session: { get: () => undefined } },
-    ui: {
-      toast: vi.fn(),
-      DialogConfirm: (props: TuiDialogConfirmProps) => props,
-      DialogSelect: <Value,>(props: TuiDialogSelectProps<Value>) => props,
-      dialog: {
-        replace: vi.fn((render: () => unknown, onClose?: () => void) => {
-          capturedRender = render
-          capturedOnClose = onClose
-        }),
-        clear: vi.fn(() => { clearCount++ }),
-      },
-    },
-    keymap: { registerLayer: vi.fn(), dispatchCommand: vi.fn() },
-    slots: { register: vi.fn() },
-    lifecycle: { signal: new AbortController().signal, onDispose: vi.fn() },
-  } satisfies TuiPluginApi
-
-  const getCaptured = () => {
-    const render = capturedRender!
-    const onClose = capturedOnClose
-    return { render, onClose }
-  }
-
-  return { api, getCaptured, getClearCount: () => clearCount }
+function createFakeContext() {
+  const confirm = vi.fn()
+  const select = vi.fn()
+  const context = {
+    ui: { dialog: { confirm, select } },
+  } as unknown as Context
+  return { context, confirm, select }
 }
 
 describe('confirmDialog', () => {
-  it('resolves true when onConfirm fires', async () => {
-    const { api, getCaptured } = createFakeApi()
-    const p = confirmDialog(api, { title: 'Confirm', message: 'Continue?' })
+  it('resolves true when the dialog confirms', async () => {
+    const { context, confirm } = createFakeContext()
+    confirm.mockResolvedValue(true)
 
-    const { render } = getCaptured()
-    const props = render() as TuiDialogConfirmProps
-    props.onConfirm!()
-
-    expect(await p).toBe(true)
-    expect(api.ui.dialog.clear).toHaveBeenCalledOnce()
+    expect(await confirmDialog(context, { title: 'Confirm', message: 'Continue?' })).toBe(true)
+    expect(confirm).toHaveBeenCalledWith({ title: 'Confirm', message: 'Continue?' })
   })
 
-  it('resolves false when onCancel fires', async () => {
-    const { api, getCaptured } = createFakeApi()
-    const p = confirmDialog(api, { title: 'Confirm', message: 'Continue?' })
+  it('resolves false when the dialog is dismissed', async () => {
+    const { context, confirm } = createFakeContext()
+    confirm.mockResolvedValue(undefined)
 
-    const { render } = getCaptured()
-    const props = render() as TuiDialogConfirmProps
-    props.onCancel!()
-
-    expect(await p).toBe(false)
-    expect(api.ui.dialog.clear).toHaveBeenCalledOnce()
+    expect(await confirmDialog(context, { title: 'Confirm', message: 'Continue?' })).toBe(false)
   })
 
-  it('resolves false when onClose fires without calling clear', async () => {
-    const { api, getCaptured } = createFakeApi()
-    const p = confirmDialog(api, { title: 'Confirm', message: 'Continue?' })
+  it('resolves false when the dialog explicitly cancels', async () => {
+    const { context, confirm } = createFakeContext()
+    confirm.mockResolvedValue(false)
 
-    const { onClose } = getCaptured()
-    onClose!()
-
-    expect(await p).toBe(false)
-    expect(api.ui.dialog.clear).not.toHaveBeenCalled()
-  })
-
-  it('resolves only once when onConfirm then onClose both fire', async () => {
-    const { api, getCaptured } = createFakeApi()
-    const p = confirmDialog(api, { title: 'Confirm', message: 'Continue?' })
-
-    const { render, onClose } = getCaptured()
-    const props = render() as TuiDialogConfirmProps
-    props.onConfirm!()
-    onClose!()
-
-    expect(await p).toBe(true)
-    expect(api.ui.dialog.clear).toHaveBeenCalledOnce()
-  })
-
-  it('resolves only once when onClose then onConfirm both fire', async () => {
-    const { api, getCaptured } = createFakeApi()
-    const p = confirmDialog(api, { title: 'Confirm', message: 'Continue?' })
-
-    const { render, onClose } = getCaptured()
-    onClose!()
-    const props = render() as TuiDialogConfirmProps
-    props.onConfirm!()
-
-    expect(await p).toBe(false)
-    expect(api.ui.dialog.clear).not.toHaveBeenCalled()
+    expect(await confirmDialog(context, { title: 'Confirm', message: 'Continue?' })).toBe(false)
   })
 })
 
 describe('selectDialog', () => {
-  it('resolves the chosen option value via onSelect', async () => {
-    const { api, getCaptured } = createFakeApi()
+  it('resolves the chosen option value', async () => {
+    const { context, select } = createFakeContext()
     const options = [
       { title: 'A', value: 'a' },
       { title: 'B', value: 'b' },
     ]
-    const p = selectDialog(api, 'Pick one', options)
+    select.mockResolvedValue('b')
 
-    const { render } = getCaptured()
-    const props = render() as TuiDialogSelectProps<string>
-    props.onSelect!(props.options[1]!)
-
-    expect(await p).toBe('b')
-    expect(api.ui.dialog.clear).toHaveBeenCalledOnce()
+    expect(await selectDialog(context, 'Pick one', options)).toBe('b')
+    expect(select).toHaveBeenCalledWith({ title: 'Pick one', options })
   })
 
-  it('resolves undefined when onClose fires without calling clear', async () => {
-    const { api, getCaptured } = createFakeApi()
-    const options = [{ title: 'X', value: 42 }]
-    const p = selectDialog(api, 'Pick', options)
+  it('resolves undefined when the dialog is dismissed', async () => {
+    const { context, select } = createFakeContext()
+    select.mockResolvedValue(undefined)
 
-    const { onClose } = getCaptured()
-    onClose!()
-
-    expect(await p).toBeUndefined()
-    expect(api.ui.dialog.clear).not.toHaveBeenCalled()
-  })
-
-  it('resolves only once when onSelect then onClose both fire', async () => {
-    const { api, getCaptured } = createFakeApi()
-    const options = [{ title: 'A', value: 'a' }]
-    const p = selectDialog(api, 'Pick', options)
-
-    const { render, onClose } = getCaptured()
-    const props = render() as TuiDialogSelectProps<string>
-    props.onSelect!(props.options[0]!)
-    onClose!()
-
-    expect(await p).toBe('a')
-    expect(api.ui.dialog.clear).toHaveBeenCalledOnce()
+    expect(await selectDialog(context, 'Pick', [{ title: 'X', value: 42 }])).toBeUndefined()
   })
 })

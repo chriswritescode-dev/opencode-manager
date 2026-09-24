@@ -7,7 +7,8 @@ import { createInternalRoutes } from '../../src/routes/internal'
 import { ScheduleService } from '../../src/services/schedules'
 import { NotificationService } from '../../src/services/notification'
 import { SettingsService } from '../../src/services/settings'
-import { UpstreamError, type OpenCodeClient } from '../../src/services/opencode/client'
+import { ClientError } from '@opencode-manager/shared/opencode'
+import type { OpenCodeClient } from '../../src/services/opencode/client'
 import { allMigrations } from '../../src/db/migrations'
 import { getOrCreateInternalToken } from '../../src/services/internal-token'
 import { migrate } from '../../src/db/migration-runner'
@@ -20,8 +21,8 @@ describe('internal/opencode-config routes', () => {
   let app: Hono
   let token: string
   let ws: Awaited<ReturnType<typeof createTempAssistantWorkspace>>
-  let getJsonMock: ReturnType<typeof vi.fn>
-  let forwardMock: ReturnType<typeof vi.fn>
+  let configGetMock: ReturnType<typeof vi.fn>
+  let forwardRawMock: ReturnType<typeof vi.fn>
 
   function configPath(name: string): string {
     return path.join(ws.workspacePath, '.config/opencode', name)
@@ -35,11 +36,11 @@ describe('internal/opencode-config routes', () => {
     ws = await createTempAssistantWorkspace()
     db = new Database(':memory:')
     migrate(db, allMigrations)
-    getJsonMock = vi.fn(() => Promise.resolve({}))
-    forwardMock = vi.fn(() => Promise.resolve(new Response('{}')))
+    configGetMock = vi.fn(() => Promise.resolve([]))
+    forwardRawMock = vi.fn(() => Promise.resolve(new Response('{}')))
     const openCodeClient = {
-      getJson: getJsonMock,
-      forward: forwardMock,
+      api: { config: { get: configGetMock } },
+      forwardRaw: forwardRawMock,
     } as unknown as OpenCodeClient
     const stubWorktreeManager = { prepare: () => Promise.resolve(null), finalize: () => Promise.resolve({ commitHash: null }) } as unknown as ScheduleWorktreeManager
     const scheduleService = new ScheduleService(db, openCodeClient, stubWorktreeManager)
@@ -90,7 +91,7 @@ describe('internal/opencode-config routes', () => {
     expect(body.revision).toMatch(/^[a-f0-9]{64}$/)
   })
 
-  it('PUT /api/internal/opencode-config writes the file, reports restartRequired, and never forwards a PATCH', async () => {
+  it('PUT /api/internal/opencode-config writes the file, reports restartRequired, and never calls the OpenCode API', async () => {
     await writeOpenCodeConfigFile(OPENCODE_CONFIG_SEED, 'opencode.jsonc')
 
     const res = await app.request('/api/internal/opencode-config', {
@@ -103,7 +104,8 @@ describe('internal/opencode-config routes', () => {
     const body = await res.json() as { restartRequired?: boolean; content: Record<string, unknown> }
     expect(body.restartRequired).toBe(true)
     expect(body.content).toEqual({ $schema: 'https://opencode.ai/config.json', plugin: ['x'] })
-    expect(forwardMock).not.toHaveBeenCalled()
+    expect(configGetMock).not.toHaveBeenCalled()
+    expect(forwardRawMock).not.toHaveBeenCalled()
 
     const onDisk = JSON.parse(await readFile(configPath('opencode.jsonc'), 'utf8')) as Record<string, unknown>
     expect(onDisk.plugin).toEqual(['x'])
@@ -132,17 +134,17 @@ describe('internal/opencode-config routes', () => {
     const res = await app.request('/api/internal/opencode-config', {
       method: 'PUT',
       headers: { 'content-type': 'application/json', ...authHeaders() },
-      body: JSON.stringify({ content: submitted, source: 'config.json' }),
+      body: JSON.stringify({ content: submitted, source: 'opencode.json' }),
     })
 
     expect(res.status).toBe(200)
-    await expect(readFile(configPath('config.json'), 'utf8')).resolves.toBe(submitted)
+    await expect(readFile(configPath('opencode.json'), 'utf8')).resolves.toBe(submitted)
     await expect(readFile(configPath('opencode.jsonc'), 'utf8')).resolves.toBe(OPENCODE_CONFIG_SEED)
   })
 
   it('PUT /api/internal/opencode-config returns 409 for a stale expectedRevision', async () => {
     const initial = await writeOpenCodeConfigFile(OPENCODE_CONFIG_SEED, 'opencode.jsonc')
-    await writeFile(configPath('config.json'), '{"model":"a/b"}', 'utf8')
+    await writeFile(configPath('opencode.json'), '{"model":"a/b"}', 'utf8')
 
     const res = await app.request('/api/internal/opencode-config', {
       method: 'PUT',
@@ -160,7 +162,7 @@ describe('internal/opencode-config routes', () => {
     const lower = '{"theme":"light","model":"a"}'
     const target = '{"model":"b"}'
     await writeOpenCodeConfigFile(target, 'opencode.jsonc')
-    await writeFile(configPath('config.json'), lower, 'utf8')
+    await writeFile(configPath('opencode.json'), lower, 'utf8')
 
     const res = await app.request('/api/internal/opencode-config', {
       method: 'PUT',
@@ -171,9 +173,9 @@ describe('internal/opencode-config routes', () => {
     expect(res.status).toBe(409)
     const body = await res.json() as { error: string; paths: string[]; sources: string[] }
     expect(body.paths).toEqual(['theme'])
-    expect(body.sources).toEqual(['config.json'])
+    expect(body.sources).toEqual(['opencode.json'])
     expect(body.error).toContain('Cannot remove theme')
-    await expect(readFile(configPath('config.json'), 'utf8')).resolves.toBe(lower)
+    await expect(readFile(configPath('opencode.json'), 'utf8')).resolves.toBe(lower)
     await expect(readFile(configPath('opencode.jsonc'), 'utf8')).resolves.toBe(target)
   })
 
@@ -201,25 +203,40 @@ describe('internal/opencode-config routes', () => {
     expect(body.error).toBe('Invalid JSON')
   })
 
-  it('GET /api/internal/opencode-config/effective proxies the running global config without writing it back', async () => {
+  it('GET /api/internal/opencode-config/effective returns the running config entries without writing them back', async () => {
     await writeOpenCodeConfigFile(OPENCODE_CONFIG_SEED, 'opencode.jsonc')
-    const effective = { theme: 'dark', model: 'effective/model' }
-    getJsonMock.mockImplementation(() => Promise.resolve(effective))
+    const entries = [
+      { type: 'document', path: configPath('opencode.jsonc'), info: { theme: 'dark' } },
+      { type: 'directory', path: path.join(ws.workspacePath, '.config', 'opencode') },
+    ]
+    configGetMock.mockImplementation(() => Promise.resolve(entries))
 
     const res = await app.request('/api/internal/opencode-config/effective', { headers: authHeaders() })
 
     expect(res.status).toBe(200)
-    expect(await res.json()).toEqual(effective)
-    expect(getJsonMock).toHaveBeenCalledWith('/global/config')
+    expect(await res.json()).toEqual({ entries })
+    expect(configGetMock).toHaveBeenCalledWith({ location: { directory: ws.workspacePath } })
     const persisted = await readOpenCodeConfigFile()
     expect(persisted?.content).toEqual({ $schema: 'https://opencode.ai/config.json' })
   })
 
-  it('GET /api/internal/opencode-config/effective returns 503 when the server is unavailable', async () => {
-    getJsonMock.mockImplementation(() => Promise.reject(new UpstreamError(502, 'Proxy request failed')))
+  it('GET /api/internal/opencode-config/effective returns 503 when the server is unreachable', async () => {
+    configGetMock.mockImplementation(() => Promise.reject(new ClientError('Transport')))
 
     const res = await app.request('/api/internal/opencode-config/effective', { headers: authHeaders() })
 
     expect(res.status).toBe(503)
+    const body = await res.json() as { error: string }
+    expect(body.error).toBe('OpenCode server unavailable')
+  })
+
+  it('GET /api/internal/opencode-config/effective returns 502 when the server rejects the request', async () => {
+    configGetMock.mockImplementation(() => Promise.reject(new ClientError('UnexpectedStatus')))
+
+    const res = await app.request('/api/internal/opencode-config/effective', { headers: authHeaders() })
+
+    expect(res.status).toBe(502)
+    const body = await res.json() as { error: string }
+    expect(body.error).toBe('Failed to get effective OpenCode config')
   })
 })

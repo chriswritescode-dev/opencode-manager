@@ -22,6 +22,7 @@ import { useOpenCodeConfigFile, OPEN_CODE_CONFIG_QUERY_KEY } from '@/hooks/useOp
 import { showToast } from '@/lib/toast'
 import { invalidateConfigCaches } from '@/lib/queryInvalidation'
 import { getOpenCodeApiErrorMessage } from '@/lib/opencode-errors'
+import { mcpServersFromConfig } from '@opencode-manager/shared/opencode'
 import { FetchError } from '@/api/fetchWrapper'
 import { getPreferredOpenCodeConfigSource, downloadOpenCodeConfigSource } from '@/api/types/settings'
 import type { OpenCodeConfigFile, OpenCodeConfigSaveResponse, OpenCodeImportStatus } from '@/api/types/settings'
@@ -459,7 +460,7 @@ export function OpenCodeConfigManager() {
                 <div className="flex min-w-0 items-center gap-3">
                   <h4 className={SECTION_TITLE_CLASS}>MCP Servers</h4>
                   <span className={SECTION_META_CLASS}>
-                    {Object.keys((config.content.mcp as Record<string, unknown> | undefined) ?? {}).length} configured
+                    {Object.keys(mcpServersFromConfig(config.content.mcp)).length} configured
                   </span>
                 </div>
                 <ChevronDown className={cn(SECTION_CHEVRON_CLASS, expandedSections.mcp && 'rotate-180')} />

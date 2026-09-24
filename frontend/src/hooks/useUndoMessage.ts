@@ -1,71 +1,57 @@
 import { useMutation, useQueryClient } from '@tanstack/react-query'
-import { createOpenCodeClient } from '@/api/opencode'
+import { clearRevert, stageRevert } from '@/api/opencode'
 import { showToast } from '@/lib/toast'
-import { messagesQueryKey } from '@/lib/queryInvalidation'
-import type { MessageWithParts } from '@/api/types'
+import { sessionTranscriptQueryKey } from '@/lib/queryInvalidation'
 
 interface UseUndoMessageOptions {
-  opcodeUrl: string | null
   sessionId: string
   directory?: string
   onSuccess?: (restoredPrompt: string) => void
 }
 
-interface UndoMessageContext {
-  previousMessages?: MessageWithParts[]
-}
-
-export function useUndoMessage({ 
-  opcodeUrl, 
-  sessionId, 
+export function useUndoMessage({
+  sessionId,
   directory,
-  onSuccess 
+  onSuccess
 }: UseUndoMessageOptions) {
   const queryClient = useQueryClient()
 
-  return useMutation<string, Error, { messageID: string; messageContent: string }, UndoMessageContext>({
+  return useMutation<string, Error, { messageID: string; messageContent: string }>({
     mutationFn: async ({ messageID, messageContent }: { messageID: string, messageContent: string }) => {
-      if (!opcodeUrl) throw new Error('OpenCode URL not available')
-      
-      const client = createOpenCodeClient(opcodeUrl, directory)
-      await client.revertMessage(sessionId, { messageID })
+      await stageRevert(sessionId, messageID)
       return messageContent
     },
-    onMutate: async ({ messageID }) => {
-      const queryKey = messagesQueryKey(opcodeUrl, sessionId, directory)
-      
-      await queryClient.cancelQueries({ queryKey })
-      
-      const previousMessages = queryClient.getQueryData<MessageWithParts[]>(queryKey)
-      
-      if (previousMessages) {
-        const messageIndex = previousMessages.findIndex(m => m.info.id === messageID)
-        if (messageIndex !== -1) {
-          const newMessages = previousMessages.slice(0, messageIndex)
-          queryClient.setQueryData(queryKey, newMessages)
-        }
-      }
-      
-      return { previousMessages }
-    },
-    onError: (_error, _variables, _context: UndoMessageContext | undefined) => {
-      if (_context?.previousMessages) {
-        queryClient.setQueryData(
-          messagesQueryKey(opcodeUrl, sessionId, directory),
-          _context.previousMessages
-        )
-      }
-      
+    onError: () => {
       showToast.error('Failed to undo message')
     },
     onSuccess: (restoredPrompt) => {
+      queryClient.invalidateQueries({ queryKey: sessionTranscriptQueryKey(sessionId) })
       queryClient.invalidateQueries({
-        queryKey: messagesQueryKey(opcodeUrl, sessionId, directory)
-      })
-      queryClient.invalidateQueries({
-        queryKey: ['opencode', 'session', opcodeUrl, sessionId, directory]
+        queryKey: ['opencode', 'session', sessionId, directory]
       })
       onSuccess?.(restoredPrompt)
+    }
+  })
+}
+
+interface UseRedoMessageOptions {
+  sessionId: string
+  directory?: string
+}
+
+export function useRedoMessage({ sessionId, directory }: UseRedoMessageOptions) {
+  const queryClient = useQueryClient()
+
+  return useMutation({
+    mutationFn: async () => clearRevert(sessionId),
+    onError: () => {
+      showToast.error('Failed to redo message')
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: sessionTranscriptQueryKey(sessionId) })
+      queryClient.invalidateQueries({
+        queryKey: ['opencode', 'session', sessionId, directory]
+      })
     }
   })
 }

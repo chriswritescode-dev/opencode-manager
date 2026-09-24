@@ -1,4 +1,4 @@
-export function buildGhEnvPluginSource(): string {
+export function buildGhEnvPluginSource(id: string): string {
   return `const TTL_MS = 5000
 let cache = new Map()
 
@@ -26,13 +26,13 @@ async function fetchGhEnv(cwd) {
   }
 }
 
-export default async function () {
-  return {
-    'shell.env': async (input, output) => {
-      const env = await fetchGhEnv(input.cwd)
-      Object.assign(output.env, env)
-    },
-  }
+export default {
+  id: '${id}',
+  async setup(ctx) {
+    await ctx.shell.hook('create.before', async (event) => {
+      Object.assign(event.env, await fetchGhEnv(event.cwd))
+    })
+  },
 }
 `
 }

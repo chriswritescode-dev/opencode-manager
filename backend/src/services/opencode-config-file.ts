@@ -1,10 +1,10 @@
 import { createHash } from 'crypto'
-import { readFile, readdir, rm, stat } from 'fs/promises'
+import { readFile, readdir, rename, rm, stat } from 'fs/promises'
 import path from 'path'
 import { isDeepStrictEqual } from 'node:util'
 import { applyEdits, modify, type JSONPath } from 'jsonc-parser'
 import type { ZodIssue } from 'zod'
-import { getConfigPath, getOpenCodeHealthWatchPath } from '@opencode-manager/shared/config/env'
+import { getConfigPath, getOpenCodeConfigHome, getOpenCodeHealthWatchPath } from '@opencode-manager/shared/config/env'
 import {
   DEFAULT_OPENCODE_CONFIG_SOURCE_NAME,
   OPENCODE_CONFIG_SOURCE_NAMES,
@@ -27,6 +27,12 @@ import { ensureDirectoryExists } from './file-operations'
 export const OPENCODE_CONFIG_SEED = JSON.stringify({ $schema: 'https://opencode.ai/config.json' }, null, 2)
 
 export const HEALTH_WATCH_MAX_ENTRIES = 20
+
+export const LEGACY_OPENCODE_CONFIG_SOURCE_NAME = 'config.json'
+
+const OPENCODE_CONFIG_ARCHIVE_DIR_NAME = 'opencode-configs-archive'
+
+export type OpenCodeConfigRestorableSourceName = OpenCodeConfigSourceName | typeof LEGACY_OPENCODE_CONFIG_SOURCE_NAME
 
 const OPENCODE_CONFIG_SOURCE_ORDER: readonly OpenCodeConfigSourceName[] = OPENCODE_CONFIG_SOURCE_NAMES
 
@@ -99,7 +105,7 @@ export interface OpenCodeConfigSnapshot {
 }
 
 interface OpenCodeConfigSourceFileState {
-  name: OpenCodeConfigSourceName
+  name: OpenCodeConfigRestorableSourceName
   rawContent: string | null
 }
 
@@ -110,7 +116,7 @@ interface PreparedOpenCodeConfigSourceFileState extends OpenCodeConfigSourceFile
 }
 
 interface AppliedOpenCodeConfigSourceFileState {
-  name: OpenCodeConfigSourceName
+  name: OpenCodeConfigRestorableSourceName
   previousRawContent: string | null
   previousMode: number | undefined
 }
@@ -121,7 +127,7 @@ interface OpenCodeConfigPathOperation {
 }
 
 interface OpenCodeConfigSnapshotEnvelopeSource {
-  name: OpenCodeConfigSourceName
+  name: OpenCodeConfigRestorableSourceName
   rawContent: string
 }
 
@@ -135,7 +141,7 @@ function getOpenCodeConfigDirectory(): string {
   return getConfigPath()
 }
 
-function getOpenCodeConfigSourcePath(name: OpenCodeConfigSourceName): string {
+function getOpenCodeConfigSourcePath(name: OpenCodeConfigRestorableSourceName): string {
   return path.join(getOpenCodeConfigDirectory(), name)
 }
 
@@ -453,7 +459,7 @@ export async function updateOpenCodeConfigFile(
 }
 
 export function serializeOpenCodeConfigSourceSnapshot(
-  entries: ReadonlyArray<{ name: OpenCodeConfigSourceName; rawContent: string }>,
+  entries: ReadonlyArray<{ name: OpenCodeConfigRestorableSourceName; rawContent: string }>,
 ): string {
   const envelope: OpenCodeConfigSnapshotEnvelope = {
     marker: OPENCODE_CONFIG_SNAPSHOT_MARKER,
@@ -479,7 +485,15 @@ function isSnapshotEnvelopeCandidate(parsed: Record<string, unknown>): boolean {
   return hasOwn(parsed, 'marker') || (hasOwn(parsed, 'sources') && hasOwn(parsed, 'version'))
 }
 
-function parseOpenCodeConfigSnapshot(snapshot: string): Map<OpenCodeConfigSourceName, string> {
+function isRestorableOpenCodeConfigSourceName(value: string): value is OpenCodeConfigRestorableSourceName {
+  return isOpenCodeConfigSourceName(value) || value === LEGACY_OPENCODE_CONFIG_SOURCE_NAME
+}
+
+export function toOpenCodeConfigRestorableSourceName(value: string): OpenCodeConfigRestorableSourceName | null {
+  return isRestorableOpenCodeConfigSourceName(value) ? value : null
+}
+
+function parseOpenCodeConfigSnapshot(snapshot: string): Map<OpenCodeConfigRestorableSourceName, string> {
   let parsed: unknown
   try {
     parsed = parseJsonc(snapshot)
@@ -498,12 +512,12 @@ function parseOpenCodeConfigSnapshot(snapshot: string): Map<OpenCodeConfigSource
       throw new OpenCodeConfigSnapshotError('Invalid OpenCode config snapshot sources')
     }
 
-    const sources = new Map<OpenCodeConfigSourceName, string>()
+    const sources = new Map<OpenCodeConfigRestorableSourceName, string>()
     for (const entry of parsed.sources) {
       if (!isPlainObject(entry)) {
         throw new OpenCodeConfigSnapshotError('Invalid OpenCode config snapshot source')
       }
-      if (typeof entry.name !== 'string' || !isOpenCodeConfigSourceName(entry.name)) {
+      if (typeof entry.name !== 'string' || !isRestorableOpenCodeConfigSourceName(entry.name)) {
         throw new OpenCodeConfigSnapshotError(`Invalid OpenCode config snapshot source name: ${String(entry.name)}`)
       }
       if (typeof entry.rawContent !== 'string') {
@@ -550,7 +564,7 @@ async function applyOpenCodeConfigSourceFileStates(
   states: OpenCodeConfigSourceFileState[],
   current: OpenCodeConfigSnapshot,
 ): Promise<void> {
-  const previousByName = new Map<OpenCodeConfigSourceName, string | null>(
+  const previousByName = new Map<string, string | null>(
     current.sources.map((source) => [source.name, source.rawContent]),
   )
   const prepared: PreparedOpenCodeConfigSourceFileState[] = []
@@ -590,10 +604,14 @@ async function applyOpenCodeConfigSourceFileStates(
 export async function restoreOpenCodeConfigSnapshot(snapshot: string): Promise<OpenCodeConfigFile | null> {
   const desired = parseOpenCodeConfigSnapshot(snapshot)
   const current = await readOpenCodeConfigSnapshot()
-  const currentNames = new Set(current.sources.map((source) => source.name))
+  const currentNames = new Set<string>(current.sources.map((source) => source.name))
 
+  const restorableOrder: readonly OpenCodeConfigRestorableSourceName[] = [
+    ...OPENCODE_CONFIG_SOURCE_ORDER,
+    LEGACY_OPENCODE_CONFIG_SOURCE_NAME,
+  ]
   const states: OpenCodeConfigSourceFileState[] = []
-  for (const name of OPENCODE_CONFIG_SOURCE_ORDER) {
+  for (const name of restorableOrder) {
     if (desired.has(name)) {
       states.push({ name, rawContent: desired.get(name) ?? '' })
     } else if (currentNames.has(name)) {
@@ -602,7 +620,67 @@ export async function restoreOpenCodeConfigSnapshot(snapshot: string): Promise<O
   }
 
   await applyOpenCodeConfigSourceFileStates(states, current)
+  await foldLegacyConfigJsonSource()
   return readOpenCodeConfigFile()
+}
+
+async function archiveLegacyConfigJsonSource(rawContent: string): Promise<string> {
+  const archiveDirectory = path.join(getOpenCodeConfigHome(), OPENCODE_CONFIG_ARCHIVE_DIR_NAME)
+  await ensureDirectoryExists(archiveDirectory)
+  const timestamp = new Date().toISOString().replace(/[:.]/g, '-')
+  const archivePath = path.join(archiveDirectory, `${LEGACY_OPENCODE_CONFIG_SOURCE_NAME}.${timestamp}`)
+  await writeFileAtomic(archivePath, rawContent, { mode: 0o600 })
+  return archivePath
+}
+
+export async function foldLegacyConfigJsonSource(): Promise<boolean> {
+  const legacyPath = getOpenCodeConfigSourcePath(LEGACY_OPENCODE_CONFIG_SOURCE_NAME)
+
+  let rawContent: string
+  try {
+    rawContent = await readFile(legacyPath, 'utf8')
+  } catch (error) {
+    if ((error as NodeJS.ErrnoException).code !== 'ENOENT') {
+      logger.warn(`Failed to read legacy OpenCode config ${legacyPath}:`, error)
+    }
+    return false
+  }
+
+  try {
+    const legacyContent = parseJsonc(rawContent)
+    if (!isPlainObject(legacyContent)) {
+      logger.warn(`Leaving legacy OpenCode config ${legacyPath} in place: its root is not an object`)
+      return false
+    }
+
+    const [lowestPrecedenceSource] = (await readOpenCodeConfigSnapshot()).sources
+    if (lowestPrecedenceSource && !lowestPrecedenceSource.isValid) {
+      logger.warn(`Leaving legacy OpenCode config ${legacyPath} in place: ${lowestPrecedenceSource.path} is invalid`)
+      return false
+    }
+
+    const archivePath = await archiveLegacyConfigJsonSource(rawContent)
+    if (!lowestPrecedenceSource) {
+      const promotedPath = getOpenCodeConfigSourcePath('opencode.json')
+      await rename(legacyPath, promotedPath)
+      logger.info(`Folded legacy OpenCode config ${legacyPath} into ${promotedPath} and archived it to ${archivePath}`)
+      return true
+    }
+
+    const operations = collectOpenCodeConfigPathOperations(legacyContent, lowestPrecedenceSource.content)
+      .filter((operation) => operation.value !== undefined && !hasOpenCodeConfigPath(lowestPrecedenceSource.content, operation.path))
+    if (operations.length > 0) {
+      const updatedText = applyOpenCodeConfigPathOperations(lowestPrecedenceSource.rawContent, operations)
+      OpenCodeConfigSchema.parse(parseJsonc(updatedText))
+      await writeFileAtomic(lowestPrecedenceSource.path, updatedText, { mode: await existingFileMode(lowestPrecedenceSource.path) })
+    }
+    await rm(legacyPath, { force: true })
+    logger.info(`Folded legacy OpenCode config ${legacyPath} into ${lowestPrecedenceSource.path} and archived it to ${archivePath}`)
+    return true
+  } catch (error) {
+    logger.warn(`Failed to fold legacy OpenCode config ${legacyPath}:`, error)
+    return false
+  }
 }
 
 export async function pruneHealthWatchDirectory(dirPath: string): Promise<void> {

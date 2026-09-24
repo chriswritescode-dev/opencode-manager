@@ -2,9 +2,7 @@ import { useState, useEffect, useRef, useCallback } from 'react'
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription, DialogFooter } from '@/components/ui/dialog'
 import { Button } from '@/components/ui/button'
 import { Alert, AlertDescription } from '@/components/ui/alert'
-import { Input } from '@/components/ui/input'
-import { Label } from '@/components/ui/label'
-import { Loader2, ExternalLink, Key, XCircle, ChevronDown, ChevronUp, CheckCircle } from 'lucide-react'
+import { Loader2, ExternalLink, Key, XCircle, CheckCircle } from 'lucide-react'
 import type { McpAuthStartResponse } from '@/api/mcp'
 import { mcpApi } from '@/api/mcp'
 
@@ -13,7 +11,6 @@ interface McpOAuthDialogProps {
   onOpenChange: (open: boolean) => void
   serverName: string
   onStartAuth: () => Promise<McpAuthStartResponse>
-  onCompleteAuth: (code: string) => Promise<void>
   onCheckStatus?: () => Promise<boolean>
   onSuccess?: () => void
   directory?: string
@@ -26,17 +23,13 @@ export function McpOAuthDialog({
   onOpenChange, 
   serverName,
   onStartAuth,
-  onCompleteAuth,
   onCheckStatus,
   onSuccess,
   directory
 }: McpOAuthDialogProps) {
   const [step, setStep] = useState<Step>('loading')
-  const [loading, setLoading] = useState(false)
   const [authUrl, setAuthUrl] = useState<string | null>(null)
-  const [authCode, setAuthCode] = useState('')
   const [error, setError] = useState<string | null>(null)
-  const [showManualEntry, setShowManualEntry] = useState(false)
   const flowIdRef = useRef<string | null>(null)
   const flowPollingRef = useRef<ReturnType<typeof setInterval> | null>(null)
   const statusPollingRef = useRef<ReturnType<typeof setInterval> | null>(null)
@@ -78,10 +71,7 @@ export function McpOAuthDialog({
   const resetState = useCallback(() => {
     setStep('loading')
     setAuthUrl(null)
-    setAuthCode('')
     setError(null)
-    setLoading(false)
-    setShowManualEntry(false)
     stopAllPolling()
     doneRef.current = false
     flowIdRef.current = null
@@ -192,21 +182,6 @@ export function McpOAuthDialog({
     startStatusPolling()
   }
 
-  const handleCompleteManualAuth = async () => {
-    if (!authCode.trim()) return
-
-    setLoading(true)
-    setError(null)
-    try {
-      await onCompleteAuth(authCode.trim())
-      handleSuccess()
-    } catch (err) {
-      setError(err instanceof Error ? err.message : 'Failed to complete authentication')
-    } finally {
-      setLoading(false)
-    }
-  }
-
   const handleOpenChange = (newOpen: boolean) => {
     if (!newOpen) {
       resetState()
@@ -307,46 +282,15 @@ export function McpOAuthDialog({
                 </Button>
               )}
 
-              <ManualCodeEntry
-                showManualEntry={showManualEntry}
-                setShowManualEntry={setShowManualEntry}
-                authCode={authCode}
-                setAuthCode={setAuthCode}
-                loading={loading}
-                onSubmit={handleCompleteManualAuth}
-              />
             </div>
           )}
 
           {step === 'popup_closed' && (
-            <div className="space-y-4">
-              <div className="flex items-center justify-center py-4">
-                <Loader2 className="h-5 w-5 animate-spin text-blue-500" />
-                <span className="ml-2 text-sm text-muted-foreground">Checking authentication status...</span>
-              </div>
+            <div className="flex flex-col items-center justify-center py-6 gap-2">
+              <Loader2 className="h-5 w-5 animate-spin text-blue-500" />
               <p className="text-sm text-muted-foreground">
-                If authorization was completed, this will update shortly. Otherwise, paste the <code className="text-xs bg-muted px-1 py-0.5 rounded">code</code> parameter from the redirect URL below.
+                Checking authentication status...
               </p>
-              <div className="space-y-2">
-                <Label htmlFor="auth-code">Authorization Code</Label>
-                <div className="flex gap-2">
-                  <Input
-                    id="auth-code"
-                    value={authCode}
-                    onChange={(e) => setAuthCode(e.target.value)}
-                    placeholder="Paste code here..."
-                    disabled={loading}
-                    className="text-sm"
-                  />
-                  <Button
-                    onClick={handleCompleteManualAuth}
-                    disabled={loading || !authCode.trim()}
-                    size="sm"
-                  >
-                    {loading ? <Loader2 className="h-4 w-4 animate-spin" /> : 'Submit'}
-                  </Button>
-                </div>
-              </div>
               {authUrl && (
                 <Button
                   variant="outline"
@@ -355,7 +299,7 @@ export function McpOAuthDialog({
                   onClick={handleOpenAuthPage}
                 >
                   <ExternalLink className="h-4 w-4 mr-2" />
-                  Try Again
+                  Re-open authorization page
                 </Button>
               )}
             </div>
@@ -386,7 +330,6 @@ export function McpOAuthDialog({
             <Button
               variant="outline"
               onClick={() => handleOpenChange(false)}
-              disabled={loading}
             >
               Cancel
             </Button>
@@ -394,60 +337,5 @@ export function McpOAuthDialog({
         </DialogFooter>
       </DialogContent>
     </Dialog>
-  )
-}
-
-function ManualCodeEntry({
-  showManualEntry,
-  setShowManualEntry,
-  authCode,
-  setAuthCode,
-  loading,
-  onSubmit,
-}: {
-  showManualEntry: boolean
-  setShowManualEntry: (show: boolean) => void
-  authCode: string
-  setAuthCode: (code: string) => void
-  loading: boolean
-  onSubmit: () => void
-}) {
-  return (
-    <div className="border-t border-border pt-3">
-      <button
-        type="button"
-        onClick={() => setShowManualEntry(!showManualEntry)}
-        className="flex items-center gap-1 text-xs text-muted-foreground hover:text-foreground transition-colors w-full"
-      >
-        {showManualEntry ? <ChevronUp className="h-3 w-3" /> : <ChevronDown className="h-3 w-3" />}
-        Paste authorization code manually
-      </button>
-
-      {showManualEntry && (
-        <div className="space-y-2 mt-3">
-          <p className="text-xs text-muted-foreground">
-            After authorizing, copy the <code className="bg-muted px-1 py-0.5 rounded">code</code> parameter from the redirect URL in your browser.
-          </p>
-          <Label htmlFor="auth-code" className="text-xs">Authorization Code</Label>
-          <div className="flex gap-2">
-            <Input
-              id="auth-code"
-              value={authCode}
-              onChange={(e) => setAuthCode(e.target.value)}
-              placeholder="Paste code here..."
-              disabled={loading}
-              className="text-sm"
-            />
-            <Button
-              onClick={onSubmit}
-              disabled={loading || !authCode.trim()}
-              size="sm"
-            >
-              {loading ? <Loader2 className="h-4 w-4 animate-spin" /> : 'Submit'}
-            </Button>
-          </div>
-        </div>
-      )}
-    </div>
   )
 }

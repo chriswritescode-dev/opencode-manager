@@ -24,6 +24,8 @@ function getStatusBadge(status: McpStatus) {
   switch (status.status) {
     case 'connected':
       return <Badge variant="default" className="text-xs bg-green-600">Connected</Badge>
+    case 'pending':
+      return <Badge variant="outline" className="text-xs">Connecting</Badge>
     case 'disabled':
       return <Badge variant="secondary" className="text-xs">Disabled</Badge>
     case 'failed':
@@ -38,13 +40,6 @@ function getStatusBadge(status: McpStatus) {
         <Badge variant="outline" className="text-xs flex items-center gap-1 border-yellow-500 text-yellow-600">
           <Key className="h-3 w-3" />
           Auth Required
-        </Badge>
-      )
-    case 'needs_client_registration':
-      return (
-        <Badge variant="outline" className="text-xs flex items-center gap-1 border-orange-500 text-orange-600">
-          <AlertCircle className="h-3 w-3" />
-          Registration Required
         </Badge>
       )
     default:
@@ -92,10 +87,7 @@ export function McpServerCard({
   onDeleteServer
 }: McpServerCardProps) {
   const needsAuth = status?.status === 'needs_auth'
-  const isRemote = serverConfig.type === 'remote'
-  const hasOAuthConfig = isRemote && !!serverConfig.oauth
-  const hasOAuthError = status?.status === 'failed' && isRemote && /oauth|auth.*state/i.test(status.error)
-  const isOAuthServer = hasOAuthConfig || hasOAuthError || (needsAuth && isRemote)
+  const isOAuthServer = !!status?.integrationID
   const connectedWithOAuth = isOAuthServer && isConnected
   const showAuthButton = needsAuth || (isOAuthServer && status?.status === 'failed')
   const displayName = getServerDisplayName(serverId)

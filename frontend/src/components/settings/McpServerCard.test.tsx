@@ -101,4 +101,73 @@ describe('McpServerCard', () => {
     expect(onDeleteServer).toHaveBeenCalledTimes(1)
     expect(onDeleteServer).toHaveBeenCalledWith('my-test-server', 'My test server')
   })
+
+  it('renders the Connecting badge for a pending server', () => {
+    render(
+      <McpServerCard
+        serverId={serverId}
+        serverConfig={serverConfig}
+        status={{ status: 'pending' }}
+        isConnected={false}
+        errorMessage={null}
+        isAnyOperationPending={false}
+        togglingServerId={null}
+        isRemovingAuth={false}
+        onToggleServer={vi.fn()}
+        onDeleteServer={vi.fn()}
+        onAuthenticate={vi.fn()}
+        onRemoveAuth={vi.fn()}
+      />,
+    )
+
+    expect(screen.getByText('Connecting')).toBeInTheDocument()
+  })
+
+  it('offers auth for an OAuth integration even without an error message', () => {
+    render(
+      <McpServerCard
+        serverId={serverId}
+        serverConfig={serverConfig}
+        status={{ status: 'failed', error: 'MCP error -32000', integrationID: 'int-1' }}
+        isConnected={false}
+        errorMessage="MCP error -32000"
+        isAnyOperationPending={false}
+        togglingServerId={null}
+        isRemovingAuth={false}
+        onToggleServer={vi.fn()}
+        onDeleteServer={vi.fn()}
+        onAuthenticate={vi.fn()}
+        onRemoveAuth={vi.fn()}
+      />,
+    )
+
+    expect(screen.getByRole('button', { name: /Auth/ })).toBeInTheDocument()
+  })
+
+  it('offers remove auth for a connected OAuth integration', async () => {
+    const user = userEvent.setup()
+    const onRemoveAuth = vi.fn()
+
+    render(
+      <McpServerCard
+        serverId={serverId}
+        serverConfig={serverConfig}
+        status={{ status: 'connected', integrationID: 'int-1' }}
+        isConnected={true}
+        errorMessage={null}
+        isAnyOperationPending={false}
+        togglingServerId={null}
+        isRemovingAuth={false}
+        onToggleServer={vi.fn()}
+        onDeleteServer={vi.fn()}
+        onAuthenticate={vi.fn()}
+        onRemoveAuth={onRemoveAuth}
+      />,
+    )
+
+    await user.click(screen.getByLabelText('Actions for My test server'))
+    await user.click(screen.getByText('Remove Auth'))
+
+    expect(onRemoveAuth).toHaveBeenCalledWith('my-test-server')
+  })
 })

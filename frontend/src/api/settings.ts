@@ -333,7 +333,7 @@ export interface VersionInfo {
 
 export interface OpenCodeServerAuthStatus {
   isSet: boolean
-  source: 'db' | 'env' | 'none'
+  source: 'db' | 'env' | 'managed'
 }
 
 export async function getOpenCodeServerAuth(): Promise<OpenCodeServerAuthStatus> {

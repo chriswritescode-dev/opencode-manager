@@ -6,11 +6,11 @@ import { SessionDetail } from '../SessionDetail'
 
 const mocks = vi.hoisted(() => ({
   useSession: vi.fn(),
-  useMessages: vi.fn(),
+  useSessionTranscript: vi.fn(),
   useSSE: vi.fn(),
   useRepoActivity: vi.fn(),
   usePermissions: vi.fn(),
-  useQuestions: vi.fn(),
+  useForms: vi.fn(),
   useSSEHealth: vi.fn(),
   useConfig: vi.fn(),
   useOpenCodeClient: vi.fn(),
@@ -27,11 +27,14 @@ const mocks = vi.hoisted(() => ({
 
 vi.mock('@/hooks/useOpenCode', () => ({
   useSession: mocks.useSession,
-  useAbortSession: vi.fn(() => ({ mutate: vi.fn() })),
+  useInterruptSession: vi.fn(() => ({ mutate: vi.fn() })),
   useUpdateSession: vi.fn(() => ({ mutate: vi.fn() })),
   useCreateSession: vi.fn(() => ({ mutateAsync: vi.fn() })),
-  useMessages: mocks.useMessages,
   useConfig: mocks.useConfig,
+}))
+
+vi.mock('@/hooks/useSessionTranscript', () => ({
+  useSessionTranscript: mocks.useSessionTranscript,
 }))
 
 vi.mock('@/hooks/useModelSelection', () => ({
@@ -110,7 +113,7 @@ vi.mock('@/contexts/EventContext', async (importOriginal) => {
   return {
     ...(actual as object),
     usePermissions: mocks.usePermissions,
-    useQuestions: mocks.useQuestions,
+    useForms: mocks.useForms,
     useSSEHealth: mocks.useSSEHealth,
   }
 })
@@ -146,10 +149,6 @@ vi.mock('@/components/repo/ResetPermissionsDialog', () => ({
   ResetPermissionsDialog: vi.fn(() => null),
 }))
 
-vi.mock('@/components/repo/RepoLspDialog', () => ({
-  RepoLspDialog: vi.fn(() => null),
-}))
-
 vi.mock('@/components/repo/RepoSkillsDialog', () => ({
   RepoSkillsDialog: mocks.RepoSkillsDialog,
 }))
@@ -158,12 +157,12 @@ vi.mock('@/components/source-control', () => ({
   SourceControlPanel: vi.fn(() => null),
 }))
 
-vi.mock('@/components/session/QuestionPrompt', () => ({
-  QuestionPrompt: vi.fn(() => null),
+vi.mock('@/components/session/FormPrompt', () => ({
+  FormPrompt: vi.fn(() => null),
 }))
 
-vi.mock('@/components/session/MinimizedQuestionIndicator', () => ({
-  MinimizedQuestionIndicator: vi.fn(() => null),
+vi.mock('@/components/session/MinimizedFormIndicator', () => ({
+  MinimizedFormIndicator: vi.fn(() => null),
 }))
 
 vi.mock('@/components/notifications/PendingActionsGroup', () => ({
@@ -175,7 +174,14 @@ describe('SessionDetail assistant loading at repoId=0', () => {
     vi.clearAllMocks()
 
     mocks.useSession.mockReturnValue({ data: undefined, isLoading: false })
-    mocks.useMessages.mockReturnValue({ data: [], isLoading: false })
+    mocks.useSessionTranscript.mockReturnValue({
+      messages: [],
+      pending: [],
+      status: 'idle',
+      isLoading: false,
+      fetchOlder: vi.fn(),
+      hasOlder: false,
+    })
     mocks.useSSE.mockReturnValue({ isConnected: true, isReconnecting: false })
     mocks.useRepoActivity.mockReturnValue(undefined)
     mocks.usePermissions.mockReturnValue({
@@ -183,13 +189,13 @@ describe('SessionDetail assistant loading at repoId=0', () => {
       hasPermissionsForSession: vi.fn(() => false),
       syncForSession: vi.fn(),
     })
-    mocks.useQuestions.mockReturnValue({
+    mocks.useForms.mockReturnValue({
       current: null,
       getForSession: vi.fn(() => null),
       pendingCount: 0,
-      hasQuestionsForSession: vi.fn(() => false),
+      hasFormsForSession: vi.fn(() => false),
       reply: vi.fn(),
-      reject: vi.fn(),
+      cancel: vi.fn(),
       syncForSession: vi.fn(),
     })
     mocks.useSSEHealth.mockReturnValue({ isHealthy: true })
@@ -267,32 +273,32 @@ describe('SessionDetail assistant loading at repoId=0', () => {
 
   it('subscribes and caches using the session directory when it differs from the repo path', async () => {
     mocks.useSession.mockReturnValue({
-      data: { id: 'sess-wt-1', directory: '/abs/worktrees/job-1-run-1', title: 'Scheduled run', time: {} },
+      data: { id: 'sess-wt-1', location: { directory: '/abs/worktrees/job-1-run-1' }, title: 'Scheduled run', time: {} },
       isLoading: false,
     })
 
     renderAssistantSession('sess-wt-1')
 
     await waitFor(() => {
-      expect(mocks.useSSE.mock.calls.at(-1)?.[1]).toBe('/abs/worktrees/job-1-run-1')
+      expect(mocks.useSSE.mock.calls.at(-1)?.[0]).toBe('/abs/worktrees/job-1-run-1')
     })
 
-    expect(mocks.useMessages.mock.calls.at(-1)?.[2]).toBe('/abs/worktrees/job-1-run-1')
+    expect(mocks.useSessionTranscript.mock.calls.at(-1)?.[1]).toBe('/abs/worktrees/job-1-run-1')
   })
 
   it('keeps using the repo path when the session lives in the repo directory', async () => {
     mocks.useSession.mockReturnValue({
-      data: { id: 'sess-asst-1', directory: '/abs/assistant', title: 'Assistant chat', time: {} },
+      data: { id: 'sess-asst-1', location: { directory: '/abs/assistant' }, title: 'Assistant chat', time: {} },
       isLoading: false,
     })
 
     renderAssistantSession('sess-asst-1')
 
     await waitFor(() => {
-      expect(mocks.useSSE.mock.calls.at(-1)?.[1]).toBe('/abs/assistant')
+      expect(mocks.useSSE.mock.calls.at(-1)?.[0]).toBe('/abs/assistant')
     })
 
-    expect(mocks.useMessages.mock.calls.at(-1)?.[2]).toBe('/abs/assistant')
+    expect(mocks.useSessionTranscript.mock.calls.at(-1)?.[1]).toBe('/abs/assistant')
   })
 
   it('shows the loading state for a non-assistant session whose repo has not loaded', async () => {

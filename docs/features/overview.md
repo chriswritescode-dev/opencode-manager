@@ -108,9 +108,9 @@ OpenCode Manager provides a comprehensive web interface for managing OpenCode AI
 ### OpenCode Server Health
 
 - **Live Status** — Server health indicator in Settings (Healthy/Unhealthy/Starting)
-- **Graceful Restart** — Active sessions are aborted and resumed with `continue` after restart
+- **Graceful Restart** — Interrupted sessions resume natively after restart
 - **Auto-Recovery** — Configurable health monitoring with automatic recovery on failure
-- **Version Management** — View current versions and trigger OpenCode upgrades from the UI
+- **Version Management** — View current versions and trigger OpenCode 2 upgrades from the UI
 
 [Learn more →](server-health.md)
 

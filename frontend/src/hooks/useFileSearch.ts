@@ -1,6 +1,6 @@
 import { useState, useEffect } from 'react'
 import { useQuery } from '@tanstack/react-query'
-import { fetchWrapper } from '@/api/fetchWrapper'
+import { findFiles } from '@/api/opencode'
 
 export interface FileSearchResult {
   files: string[]
@@ -9,7 +9,6 @@ export interface FileSearchResult {
 }
 
 export function useFileSearch(
-  opcodeUrl: string | null,
   query: string,
   enabled: boolean = true,
   directory?: string
@@ -22,22 +21,9 @@ export function useFileSearch(
   }, [query])
 
   const { data, isLoading, error } = useQuery({
-    queryKey: ['file-search', opcodeUrl, debouncedQuery, directory],
-    queryFn: async () => {
-      if (!opcodeUrl || !debouncedQuery) return []
-      
-      const params = new URLSearchParams({ query: debouncedQuery })
-      if (directory) {
-        params.append('directory', directory)
-      }
-      
-      const data = await fetchWrapper<string[]>(
-        `${opcodeUrl}/find/file?${params.toString()}`
-      )
-      
-      return data
-    },
-    enabled: enabled && !!opcodeUrl && !!debouncedQuery,
+    queryKey: ['file-search', debouncedQuery, directory],
+    queryFn: () => findFiles({ directory, query: debouncedQuery }),
+    enabled: enabled && !!debouncedQuery,
     staleTime: 60000,
   })
 

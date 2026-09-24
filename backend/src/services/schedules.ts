@@ -7,6 +7,7 @@ import {
   type ScheduleRunTriggerSource,
   type UpdateScheduleJobRequest,
 } from '@opencode-manager/shared/types'
+import { openCodeLocation, type SessionMessageAssistant, type SessionMessageInfo } from '@opencode-manager/shared/opencode'
 import { buildSchedulePermissionRuleset } from '@opencode-manager/shared/schemas'
 import { getRepoById } from '../db/queries'
 import type { ScheduleJobWithRepo } from '../db/schedules'
@@ -59,41 +60,6 @@ class ScheduleServiceError extends Error {
   }
 }
 
-interface SessionResponse {
-  id: string
-}
-
-interface SessionMessagePart {
-  type?: string
-  text?: string
-}
-
-interface SessionMessage {
-  info?: {
-    id?: string
-    sessionID?: string
-    role?: string
-    time?: {
-      created?: number
-      completed?: number
-    }
-    error?: {
-      name?: string
-      data?: {
-        message?: string
-      }
-    }
-  }
-  parts?: SessionMessagePart[]
-}
-
-interface SessionStatus {
-  type: 'idle' | 'retry' | 'busy'
-  attempt?: number
-  message?: string
-  next?: number
-}
-
 const SESSION_STOPPED_ERROR = 'The session stopped without producing an assistant response. This usually means OpenCode restarted mid-run or the session was interrupted. Open the linked session to inspect any partial output and rerun if needed.'
 
 interface SessionSignal {
@@ -116,72 +82,14 @@ function buildSessionTitle(job: ScheduleJob): string {
   return `Scheduled: ${job.name}`
 }
 
-type SkillInfo = {
-  name: string
-  description: string
-  location: string
-  content: string
-}
+type SkillAttachment = { id: string }
 
-async function fetchSkillContent(slugs: string[], repoPath: string, openCodeClient: OpenCodeClient): Promise<string[]> {
-  try {
-    const response = await openCodeClient.forward({
-      method: 'GET',
-      path: '/skill',
-      directory: repoPath,
-    })
-    if (!response.ok) {
-      logger.warn(`Failed to fetch skills from OpenCode (${response.status}), falling back to name-only injection`)
-      return []
-    }
-    const skills = await response.json() as SkillInfo[]
-    
-    const skillBlocks = slugs
-      .map((slug) => {
-        const skill = skills.find((s) => s.name === slug || s.name.endsWith(`/${slug}`) || s.name.endsWith(`-${slug}`))
-        if (!skill) {
-          logger.warn(`Skill "${slug}" not found in OpenCode skill list`)
-          return null
-        }
-        return [
-          `<skill_content name="${skill.name}">`,
-          `# Skill: ${skill.name}`,
-          '',
-          skill.content.trim(),
-          '</skill_content>',
-        ].join('\n')
-      })
-      .filter((block): block is string => block !== null)
-    
-    const foundCount = skillBlocks.length
-    if (foundCount < slugs.length) {
-      logger.warn(`Only ${foundCount} of ${slugs.length} requested skills were found`)
-    }
-    
-    return skillBlocks
-  } catch (error) {
-    logger.warn('Error fetching skills from OpenCode, falling back to name-only injection:', error)
-    return []
-  }
-}
-
-async function buildPromptWithSkills(
-  prompt: string,
-  skillMetadata: ScheduleJob['skillMetadata'],
-  repoPath: string,
-  openCodeClient: OpenCodeClient,
-): Promise<string> {
-  if (!skillMetadata || !skillMetadata.skillSlugs || skillMetadata.skillSlugs.length === 0) return prompt
-
-  const skillBlocks = await fetchSkillContent(skillMetadata.skillSlugs, repoPath, openCodeClient)
-  const notesLine = skillMetadata.notes ? `\nSkill notes: ${skillMetadata.notes}` : ''
-
-  if (skillBlocks.length === 0) {
-    const skillList = skillMetadata.skillSlugs.join(', ')
-    return `${prompt}\n\nFor this task, use the following skills: ${skillList}${notesLine}`
-  }
-
-  return `${prompt}\n\nThe following skills have been loaded for this task:\n\n${skillBlocks.join('\n\n')}${notesLine}`
+function extractAssistantMessageText(content: SessionMessageAssistant['content'] | undefined): string {
+  return (content ?? [])
+    .filter((part) => part.type === 'text')
+    .map((part) => part.text.replace(/<think>[\s\S]*?<\/think>\s*/g, '').trim())
+    .filter(Boolean)
+    .join('\n\n')
 }
 
 function buildRunLog(input: {
@@ -247,64 +155,40 @@ function buildRunStartedLog(input: {
   ].join('\n')
 }
 
-function extractAssistantMessageText(parts: SessionMessagePart[] | undefined): string {
-  return (parts ?? [])
-    .filter((part) => part.type === 'text' && typeof part.text === 'string')
-    .map((part) => part.text?.replace(/<think>[\s\S]*?<\/think>\s*/g, '').trim() ?? '')
-    .filter(Boolean)
-    .join('\n\n')
-}
-
-function getAssistantMessageState(messages: SessionMessage[]): {
+function getAssistantMessageState(messages: SessionMessageInfo[]): {
   responseText: string | null
   errorText: string | null
   completed: boolean
 } | null {
-  const assistantMessage = [...messages]
-    .reverse()
-    .find((message) => message.info?.role === 'assistant')
+  const assistantMessage = messages.find(
+    (message): message is SessionMessageAssistant => message.type === 'assistant',
+  )
 
   if (!assistantMessage) {
     return null
   }
 
   return {
-    responseText: extractAssistantMessageText(assistantMessage.parts) || null,
-    errorText: assistantMessage.info?.error?.data?.message ?? assistantMessage.info?.error?.name ?? null,
-    completed: Boolean(assistantMessage.info?.time?.completed),
+    responseText: extractAssistantMessageText(assistantMessage.content) || null,
+    errorText: assistantMessage.error?.message ?? null,
+    completed: Boolean(assistantMessage.time.completed),
   }
 }
 
 function getSessionEventId(event: SSEEvent): string | null {
-  const properties = event.properties as {
-    sessionID?: string
-    info?: { id?: string }
-  }
-
-  return properties.sessionID ?? properties.info?.id ?? null
+  return 'sessionID' in event.data && typeof event.data.sessionID === 'string' ? event.data.sessionID : null
 }
 
 function getSessionErrorText(event: SSEEvent): string | null {
-  const properties = event.properties as {
-    error?: {
-      name?: string
-      data?: {
-        message?: string
-      }
-    }
+  if (event.type !== 'session.execution.failed') {
+    return null
   }
 
-  return properties.error?.data?.message ?? properties.error?.name ?? null
+  return event.data.error.message || null
 }
 
 function getSessionStatusType(event: SSEEvent): string | null {
-  const properties = event.properties as {
-    status?: {
-      type?: string
-    }
-  }
-
-  return properties.status?.type ?? null
+  return event.type === 'session.status' ? event.data.status.type : null
 }
 
 function createSessionMonitor(directory: string, sessionId: string): SessionMonitor {
@@ -331,12 +215,21 @@ function createSessionMonitor(directory: string, sessionId: string): SessionMoni
       return
     }
 
-    if (event.type === 'session.error') {
+    if (event.type === 'session.execution.failed') {
       push({ errorText: getSessionErrorText(event) ?? 'The session reported an unknown error.', disposed: false })
       return
     }
 
-    if (event.type === 'session.idle' || (event.type === 'session.status' && getSessionStatusType(event) === 'idle')) {
+    if (event.type === 'session.execution.interrupted') {
+      push({ errorText: 'The session execution was interrupted.', disposed: false })
+      return
+    }
+
+    if (
+      event.type === 'session.idle'
+      || event.type === 'session.execution.succeeded'
+      || (event.type === 'session.status' && getSessionStatusType(event) === 'idle')
+    ) {
       push({ errorText: null, disposed: false })
     }
   })
@@ -570,7 +463,7 @@ export class ScheduleService {
       throw new ScheduleServiceError('Cannot delete a run while it is in progress. Cancel it first.', 409)
     }
 
-    await this.worktreeManager.pruneRunArtifacts(repo, [{ runBranch: run.runBranch, worktreePath: run.worktreePath, workspaceId: run.workspaceId }])
+    await this.worktreeManager.pruneRunArtifacts(repo, [{ runBranch: run.runBranch, worktreePath: run.worktreePath }])
     const deleted = deleteScheduleRunById(this.db, repoId, jobId, runId)
     if (!deleted) {
       throw new ScheduleServiceError('Run not found', 404)
@@ -610,7 +503,6 @@ export class ScheduleService {
         updateScheduleRunWorktree(this.db, repoId, jobId, run.id, {
           worktreePath: wt.worktreePath,
           runBranch: wt.runBranch,
-          workspaceId: wt.workspaceId,
         })
       }
 
@@ -618,23 +510,19 @@ export class ScheduleService {
         preferredModel: job.model,
       })
       const sessionTitle = buildSessionTitle(job)
-      const sessionResponse = await this.openCodeClient.forward({
-        method: 'POST',
-        path: '/session',
-        directory: runDirectory,
-        body: JSON.stringify({
+      let session: { id: string }
+      try {
+        session = await this.openCodeClient.api.session.create({
           title: sessionTitle,
           agent: job.agentSlug ?? undefined,
-          permission: buildSchedulePermissionRuleset(job.permissionConfig),
-        }),
-        headers: { 'Content-Type': 'application/json' },
-      })
-
-      if (!sessionResponse.ok) {
-        throw new ScheduleServiceError('Failed to create OpenCode session', 502)
+          model: { providerID: model.providerID, id: model.id, variant: model.variant },
+          location: { directory: runDirectory },
+          permissions: buildSchedulePermissionRuleset(job.permissionConfig),
+        })
+      } catch (error) {
+        throw new ScheduleServiceError(getErrorMessage(error) || 'Failed to create OpenCode session', 502)
       }
 
-      const session = await sessionResponse.json() as SessionResponse
       const runWithSession = updateScheduleRunMetadata(this.db, repoId, jobId, run.id, {
         sessionId: session.id,
         sessionTitle,
@@ -659,7 +547,6 @@ export class ScheduleService {
         sessionId: session.id,
         sessionTitle,
         triggerSource,
-        model,
         sessionMonitor,
         directory: runDirectory,
       })
@@ -718,31 +605,23 @@ export class ScheduleService {
       throw new ScheduleServiceError('Only running schedule runs can be cancelled', 409)
     }
 
-    const runDirectory = run.worktreePath ?? repo.fullPath
-
     if (run.sessionId) {
-      const messages = await this.listSessionMessages(runDirectory, run.sessionId)
-      const assistantState = getAssistantMessageState(messages)
+      const outcome = await this.readAssistantOutcome(run.sessionId)
 
-      if (assistantState?.completed || assistantState?.errorText) {
+      if (outcome.kind === 'settled') {
         await this.finalizeRecoveredRun(job, run, {
-          status: assistantState.errorText ? 'failed' : 'completed',
-          responseText: assistantState.responseText,
-          errorText: assistantState.errorText,
+          status: outcome.errorText ? 'failed' : 'completed',
+          responseText: outcome.responseText,
+          errorText: outcome.errorText,
         }, repo)
 
         return this.getRun(repoId, jobId, runId)
       }
 
-      const abortResponse = await this.openCodeClient.forward({
-        method: 'POST',
-        path: `/session/${run.sessionId}/abort`,
-        directory: runDirectory,
-      })
-
-      if (!abortResponse.ok) {
-        const errorText = await abortResponse.text()
-        throw new ScheduleServiceError(errorText || 'Failed to cancel schedule run', 502)
+      try {
+        await this.openCodeClient.api.session.interrupt({ sessionID: run.sessionId })
+      } catch (error) {
+        throw new ScheduleServiceError(getErrorMessage(error) || 'Failed to cancel schedule run', 502)
       }
     }
 
@@ -788,28 +667,19 @@ export class ScheduleService {
     sessionId: string
     sessionTitle: string
     triggerSource: ScheduleRunTriggerSource
-    model: { providerID: string; modelID: string }
     sessionMonitor: SessionMonitor
     directory: string
   }): Promise<void> {
     const repo = this.assertRepo(input.repoId)
 
     try {
-      const promptResponse = await this.openCodeClient.forward({
-        method: 'POST',
-        path: `/session/${input.sessionId}/prompt_async`,
-        directory: input.directory,
-        body: JSON.stringify({
-          parts: [{ type: 'text', text: await buildPromptWithSkills(input.job.prompt, input.job.skillMetadata, input.directory, this.openCodeClient) }],
-          model: input.model,
-        }),
-        headers: { 'Content-Type': 'application/json' },
+      const skills = await this.resolveSkillAttachments(input.directory, input.job.skillMetadata)
+      const notes = input.job.skillMetadata?.notes?.trim()
+      await this.openCodeClient.api.session.prompt({
+        sessionID: input.sessionId,
+        text: notes ? `${input.job.prompt}\n\nSkill notes: ${notes}` : input.job.prompt,
+        ...(skills.length > 0 ? { skills } : {}),
       })
-
-      if (!promptResponse.ok) {
-        const errorText = await promptResponse.text()
-        throw new ScheduleServiceError(errorText || 'Failed to run scheduled prompt', 502)
-      }
 
       input.sessionMonitor.markSubmitted()
 
@@ -821,7 +691,6 @@ export class ScheduleService {
         sessionId: input.sessionId,
         sessionTitle: input.sessionTitle,
         triggerSource: input.triggerSource,
-        directory: input.directory,
       })
       return
     } catch (error) {
@@ -869,34 +738,10 @@ export class ScheduleService {
     sessionId: string
     sessionTitle: string
     triggerSource: ScheduleRunTriggerSource
-    directory: string
-    initialSessionStatus?: SessionStatus
   }): Promise<void> {
     try {
-      const sessionStatus = input.initialSessionStatus
-      if (sessionStatus && sessionStatus.type === 'idle') {
-        const repo = this.assertRepo(input.repoId)
-        const messages = await this.listSessionMessages(input.directory, input.sessionId)
-        const assistantState = getAssistantMessageState(messages)
-        if (assistantState?.completed || assistantState?.errorText) {
-          await this.finalizeRecoveredRun(input.job, {
-            id: input.runId,
-            repoId: input.repoId,
-            jobId: input.job.id,
-            sessionId: input.sessionId,
-            sessionTitle: input.sessionTitle,
-            triggerSource: input.triggerSource,
-          } as ScheduleRun, {
-            status: assistantState.errorText ? 'failed' : 'completed',
-            responseText: assistantState.responseText,
-            errorText: assistantState.errorText,
-          }, repo)
-          return
-        }
-      }
-
       const repo = this.assertRepo(input.repoId)
-      const currentAssistantState = await this.readSettledAssistantState(input.directory, input.sessionId)
+      const currentAssistantState = await this.readSettledAssistantState(input.sessionId)
       if (currentAssistantState) {
         await this.finalizeRecoveredRun(input.job, {
           id: input.runId,
@@ -913,7 +758,7 @@ export class ScheduleService {
         return
       }
 
-      const response = await this.waitForAssistantMessage(input.sessionId, input.sessionMonitor, input.directory)
+      const response = await this.waitForAssistantMessage(input.sessionId, input.sessionMonitor)
       const currentRun = getScheduleRunById(this.db, input.repoId, input.job.id, input.runId)
       if (!currentRun || currentRun.status !== 'running') {
         return
@@ -1011,22 +856,18 @@ export class ScheduleService {
         return
       }
 
-      const messages = await this.listSessionMessages(runDirectory, run.sessionId)
-      const assistantState = getAssistantMessageState(messages)
+      const outcome = await this.readAssistantOutcome(run.sessionId)
 
-      if (assistantState?.completed || assistantState?.errorText) {
+      if (outcome.kind === 'settled') {
         await this.finalizeRecoveredRun(job, run, {
-          status: assistantState.errorText ? 'failed' : 'completed',
-          responseText: assistantState.responseText,
-          errorText: assistantState.errorText,
+          status: outcome.errorText ? 'failed' : 'completed',
+          responseText: outcome.responseText,
+          errorText: outcome.errorText,
         }, repo)
         return
       }
 
-      const sessionStatuses = await this.getSessionStatuses(runDirectory)
-      const sessionStatus = run.sessionId ? sessionStatuses[run.sessionId] : undefined
-
-      if (sessionStatus && sessionStatus.type !== 'idle') {
+      if (outcome.kind === 'busy') {
         const sessionMonitor = createSessionMonitor(runDirectory, run.sessionId)
         void this.monitorRunCompletion({
           sessionMonitor,
@@ -1036,15 +877,13 @@ export class ScheduleService {
           sessionId: run.sessionId,
           sessionTitle: run.sessionTitle ?? buildSessionTitle(job),
           triggerSource: run.triggerSource,
-          initialSessionStatus: sessionStatus,
-          directory: runDirectory,
         })
         return
       }
 
       await this.finalizeRecoveredRun(job, run, {
         status: 'failed',
-        responseText: assistantState?.responseText ?? null,
+        responseText: outcome.responseText,
         errorText: 'This run was interrupted before completion, likely because OpenCode Manager restarted while it was in progress. Open the linked session to inspect the partial output and rerun if needed.',
       }, repo)
     } catch (error) {
@@ -1109,12 +948,11 @@ export class ScheduleService {
           worktreePath: fresh.worktreePath,
           runBranch: fresh.runBranch,
           triggerSource: fresh.triggerSource,
-          workspaceId: fresh.workspaceId,
         })
-        updateScheduleRunWorktree(this.db, repoId, jobId, runId, { worktreePath: null, commitHash, workspaceId: null })
+        updateScheduleRunWorktree(this.db, repoId, jobId, runId, { worktreePath: null, commitHash })
       } catch (error) {
         logger.error(`Failed to finalize worktree for run ${runId}:`, error)
-        updateScheduleRunWorktree(this.db, repoId, jobId, runId, { worktreePath: null, workspaceId: null })
+        updateScheduleRunWorktree(this.db, repoId, jobId, runId, { worktreePath: null })
       }
     } finally {
       ScheduleService.activeTeardowns.delete(key)
@@ -1124,15 +962,14 @@ export class ScheduleService {
   /**
    * An assistant message completing is not the end of a run: a multi-step agent
    * settles one message per tool call. Only a session that has gone idle has
-   * finished, and only then is the final message guaranteed to carry its parts.
+   * finished, and only then is the final message guaranteed to carry its content.
    */
-  private async readAssistantOutcome(directory: string, sessionId: string): Promise<AssistantOutcome> {
-    const sessionStatus = (await this.getSessionStatuses(directory))[sessionId]
-    if (sessionStatus && sessionStatus.type !== 'idle') {
+  private async readAssistantOutcome(sessionId: string): Promise<AssistantOutcome> {
+    if (await this.isSessionActive(sessionId)) {
       return { kind: 'busy' }
     }
 
-    const assistantState = getAssistantMessageState(await this.listSessionMessages(directory, sessionId))
+    const assistantState = getAssistantMessageState(await this.listSessionMessages(sessionId))
     if (assistantState?.completed || assistantState?.errorText) {
       return { kind: 'settled', responseText: assistantState.responseText, errorText: assistantState.errorText }
     }
@@ -1141,10 +978,9 @@ export class ScheduleService {
   }
 
   private async readSettledAssistantState(
-    directory: string,
     sessionId: string,
   ): Promise<{ responseText: string | null; errorText: string | null } | null> {
-    const outcome = await this.readAssistantOutcome(directory, sessionId)
+    const outcome = await this.readAssistantOutcome(sessionId)
     return outcome.kind === 'settled'
       ? { responseText: outcome.responseText, errorText: outcome.errorText }
       : null
@@ -1153,20 +989,19 @@ export class ScheduleService {
   private async waitForAssistantMessage(
     sessionId: string,
     sessionMonitor: SessionMonitor,
-    directory: string,
   ): Promise<{ responseText: string | null; errorText: string | null }> {
     for (;;) {
       const signal = await sessionMonitor.nextSignal()
 
       if (signal.errorText || signal.disposed) {
-        const messages = await this.listSessionMessages(directory, sessionId)
+        const messages = await this.listSessionMessages(sessionId)
         return {
           responseText: getAssistantMessageState(messages)?.responseText ?? null,
           errorText: signal.errorText ?? SESSION_STOPPED_ERROR,
         }
       }
 
-      const outcome = await this.readAssistantOutcome(directory, sessionId)
+      const outcome = await this.readAssistantOutcome(sessionId)
 
       if (outcome.kind === 'busy') {
         continue
@@ -1180,34 +1015,53 @@ export class ScheduleService {
     }
   }
 
-  private async listSessionMessages(directory: string, sessionId: string): Promise<SessionMessage[]> {
-    const messagesResponse = await this.openCodeClient.forward({
-      method: 'GET',
-      path: `/session/${sessionId}/message`,
-      directory,
-    })
-
-    if (!messagesResponse.ok) {
-      const errorText = await messagesResponse.text()
-      throw new ScheduleServiceError(errorText || 'Failed to fetch session messages', 502)
+  private async listSessionMessages(sessionId: string): Promise<SessionMessageInfo[]> {
+    try {
+      const response = await this.openCodeClient.api.message.list({
+        sessionID: sessionId,
+        order: 'desc',
+        limit: 20,
+      })
+      return response.data
+    } catch (error) {
+      throw new ScheduleServiceError(getErrorMessage(error) || 'Failed to fetch session messages', 502)
     }
-
-    return await messagesResponse.json() as SessionMessage[]
   }
 
-  private async getSessionStatuses(directory: string): Promise<Record<string, SessionStatus>> {
-    const response = await this.openCodeClient.forward({
-      method: 'GET',
-      path: '/session/status',
-      directory,
-    })
+  private async isSessionActive(sessionId: string): Promise<boolean> {
+    try {
+      const active = await this.openCodeClient.api.session.active()
+      return sessionId in active
+    } catch (error) {
+      throw new ScheduleServiceError(getErrorMessage(error) || 'Failed to fetch active sessions', 502)
+    }
+  }
 
-    if (!response.ok) {
-      const errorText = await response.text()
-      throw new ScheduleServiceError(errorText || 'Failed to fetch session statuses', 502)
+  private async resolveSkillAttachments(
+    directory: string,
+    skillMetadata: ScheduleJob['skillMetadata'],
+  ): Promise<SkillAttachment[]> {
+    const slugs = skillMetadata?.skillSlugs ?? []
+    if (slugs.length === 0) {
+      return []
     }
 
-    return await response.json() as Record<string, SessionStatus>
+    let availableSkills: Set<string>
+    try {
+      const response = await this.openCodeClient.api.skill.list(openCodeLocation(directory))
+      availableSkills = new Set(response.data.map((skill) => skill.id))
+    } catch (error) {
+      logger.warn('Failed to list skills for the scheduled run; continuing without skill attachments:', error)
+      return []
+    }
+
+    return slugs.flatMap((slug) => {
+      if (!availableSkills.has(slug)) {
+        logger.warn(`Skill "${slug}" is not available in this location; dropping it from the scheduled run`)
+        return []
+      }
+      return [{ id: slug }]
+    })
   }
 
   private assertRepo(repoId: number) {

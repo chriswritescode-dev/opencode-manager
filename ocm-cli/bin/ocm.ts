@@ -117,8 +117,8 @@ async function requireToken(state: OcmState): Promise<string> {
   return token
 }
 
-async function warmUpInstance(managerUrl: string, token: string, directory: string): Promise<void> {
-  const url = `${managerUrl}/api/opencode-proxy/session?directory=${encodeURIComponent(directory)}`
+async function warmUpInstance(managerUrl: string, token: string, repoId: number): Promise<void> {
+  const url = `${managerUrl}/api/opencode-proxy/repos/${repoId}/api/session?limit=1`
   for (let attempt = 1; attempt <= 3; attempt++) {
     try {
       const res = await fetch(url, { headers: { Authorization: `Bearer ${token}` } })
@@ -133,19 +133,17 @@ async function warmUpInstance(managerUrl: string, token: string, directory: stri
   }
 }
 
-async function attach(managerUrl: string, token: string, repo: ManagerRepo): Promise<never> {
-  await warmUpInstance(managerUrl, token, repo.directory)
-  const proxyUrl = `${managerUrl}/api/opencode-proxy`
+async function attach(managerUrl: string, token: string, repo: ManagerRepo, cwd: string): Promise<never> {
+  await warmUpInstance(managerUrl, token, repo.repoId)
+  const proxyUrl = `${managerUrl}/api/opencode-proxy/repos/${repo.repoId}`
   const args = [
-    'attach',
+    '--server',
     proxyUrl,
-    '--dir', repo.directory,
-    '--password', token,
-    '--username', 'opencode',
   ]
   const child = spawn('opencode', args, {
     stdio: 'inherit',
-    env: { ...process.env, ...buildRemoteAttachEnv(managerUrl, repo.name) },
+    cwd,
+    env: { ...process.env, OPENCODE_PASSWORD: token, ...buildRemoteAttachEnv(managerUrl, repo.name) },
   })
   child.on('close', (code) => process.exit(code ?? 0))
   child.on('error', (err) => die(`failed to spawn opencode: ${err.message}`))
@@ -306,7 +304,7 @@ async function cmdUse(args: string[]): Promise<void> {
     lastRepoBranch: repo.branch,
   })
 
-  await attach(state.managerUrl, token, repo)
+  await attach(state.managerUrl, token, repo, process.cwd())
 }
 
 async function cmdDefault(): Promise<void> {
@@ -339,13 +337,13 @@ async function cmdDefault(): Promise<void> {
         lastRepoDir: repo.directory,
         lastRepoBranch: repo.branch,
       })
-      await attach(state.managerUrl, token, toManagerRepo(repo))
+      await attach(state.managerUrl, token, toManagerRepo(repo), result.repoRoot)
       return
     }
     case 'last': {
       const repo = result.repo
       info(`attaching to ${repo.name} (last used)`)
-      await attach(state.managerUrl, token, toManagerRepo(repo))
+      await attach(state.managerUrl, token, toManagerRepo(repo), process.cwd())
       return
     }
     case 'cwd-ambiguous': {

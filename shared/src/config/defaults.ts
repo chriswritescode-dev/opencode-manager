@@ -13,7 +13,6 @@ export const DEFAULTS = {
   OPENCODE: {
     PORT: 5551,
     HOST: '127.0.0.1',
-    PUBLIC_URL: '', // Optional: public URL for OAuth callbacks (e.g., https://mydomain.com)
     HEALTH_WATCH_ENABLED: true,
     HEALTH_POLL_MS: 30000,
     HEALTH_FAILURE_THRESHOLD: 2,
@@ -28,7 +27,6 @@ export const DEFAULTS = {
     REPOS_DIR: 'repos',
     SCHEDULE_WORKTREES_DIR: 'schedule-worktrees',
     CONFIG_DIR: '.config/opencode',
-    AUTH_FILE: '.opencode/state/opencode/auth.json',
   },
 
   SANDBOX: {
@@ -100,7 +98,7 @@ export const GIT_PROVIDERS = {
   BITBUCKET: 'bitbucket.org',
 } as const
 
-export const OPENCODE_CONFIG_SOURCE_NAMES = ['config.json', 'opencode.json', 'opencode.jsonc'] as const
+export const OPENCODE_CONFIG_SOURCE_NAMES = ['opencode.json', 'opencode.jsonc'] as const
 export type OpenCodeConfigSourceName = (typeof OPENCODE_CONFIG_SOURCE_NAMES)[number]
 
 export type Config = typeof DEFAULTS

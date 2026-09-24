@@ -160,7 +160,7 @@ function buildLegacyAssistantAgentPrompt(): string {
   ].join('\n')
 }
 
-function buildAssistantDefaultAgentMdFromPrompt(prompt: string): string {
+function buildAssistantDefaultAgentMdFromPrompt(prompt: string, shellPermissionKey: 'bash' | 'shell'): string {
   const permission = buildAssistantAgentPermission()
 
   return `---
@@ -172,7 +172,7 @@ permission:
   glob: ${permission.glob}
   grep: ${permission.grep}
   list: ${permission.list}
-  bash: ${permission.bash}
+  ${shellPermissionKey}: ${permission.shell}
   external_directory: ${permission.external_directory}
 ---
 
@@ -181,7 +181,7 @@ ${prompt}
 }
 
 function buildLegacyAssistantDefaultAgentMd(): string {
-  return buildAssistantDefaultAgentMdFromPrompt(buildLegacyAssistantAgentPrompt())
+  return buildAssistantDefaultAgentMdFromPrompt(buildLegacyAssistantAgentPrompt(), 'bash')
 }
 
 function buildPreviousAssistantAgentsMd(): string {
@@ -296,24 +296,24 @@ function buildAssistantAgentPrompt(): string {
   ].join('\n')
 }
 
-function buildAssistantAgentPermission(): { read: 'allow'; edit: 'allow'; glob: 'allow'; grep: 'allow'; list: 'allow'; bash: 'allow'; external_directory: 'ask' } {
+function buildAssistantAgentPermission(): { read: 'allow'; edit: 'allow'; glob: 'allow'; grep: 'allow'; list: 'allow'; shell: 'allow'; external_directory: 'ask' } {
   return {
     read: 'allow',
     edit: 'allow',
     glob: 'allow',
     grep: 'allow',
     list: 'allow',
-    bash: 'allow',
+    shell: 'allow',
     external_directory: 'ask',
   }
 }
 
 function buildPreviousAssistantDefaultAgentMd(): string {
-  return buildAssistantDefaultAgentMdFromPrompt(buildPreviousAssistantAgentPrompt())
+  return buildAssistantDefaultAgentMdFromPrompt(buildPreviousAssistantAgentPrompt(), 'bash')
 }
 
 export function buildAssistantDefaultAgentMd(): string {
-  return buildAssistantDefaultAgentMdFromPrompt(buildAssistantAgentPrompt())
+  return buildAssistantDefaultAgentMdFromPrompt(buildAssistantAgentPrompt(), 'shell')
 }
 
 export function buildSchedulesSkill(): string {
@@ -691,7 +691,7 @@ Returns the updated settings object with the same structure as GET.
 
 ### POST /assistant/reload
 
-Reload the assistant workspace by disposing the current OpenCode instance. Use this after editing \`.opencode/agents/assistant.md\` or \`opencode.json\` so changes take effect on the next message.
+Reload the OpenCode server configuration, rebuilding every loaded location. Use this after editing \`.opencode/agents/assistant.md\` or \`opencode.json\` so changes take effect on the next message.
 
 **Note:** Always confirm with the user before reloading, as it re-bootstraps the workspace.
 
@@ -715,11 +715,11 @@ Reload the assistant workspace by disposing the current OpenCode instance. Use t
 
 ## OpenCode Configuration
 
-The global configuration files on disk are the source of truth. Use the \`ocm\` tool's \`request\` action with the endpoints below to read or change them; never edit the files directly. Global sources merge in order: \`config.json\`, \`opencode.json\`, then \`opencode.jsonc\`.
+The global configuration files on disk are the source of truth. Use the \`ocm\` tool's \`request\` action with the endpoints below to read or change them; never edit the files directly. Global sources merge in order: \`opencode.json\`, then \`opencode.jsonc\`.
 
 ### GET /opencode-config
 
-Read the merged persisted global configuration and its source files. Returns \`404\` when no source exists. This is not the running instance configuration: project overrides and expanded environment values are not included. \`GET /opencode-config/effective\` reads the running server's effective global configuration separately; never copy that response into a save.
+Read the merged persisted global configuration and its source files. Returns \`404\` when no source exists. This is not the running instance configuration: project overrides and expanded environment values are not included. \`GET /opencode-config/effective\` reads the running server's configuration separately as \`entries\`: the configuration documents and discovery directories in precedence order, lowest first, each shaped as \`{ type: 'document', path, info }\` or \`{ type: 'directory', path }\`. Its \`info\` values are expanded for the running server; never copy this response into a save.
 
 **Response (\`OpenCodeConfigFile\`):**
 \`\`\`ts
@@ -748,13 +748,13 @@ Read the merged persisted global configuration and its source files. Returns \`4
 
 ### PUT /opencode-config
 
-Read the merged persisted configuration first, change only the keys the user asked for, and send the complete object back with its revision. Only changed fields are patched into the preferred existing source: JSONC, JSON, then legacy config.json. New installations use opencode.jsonc. Unchanged inherited values and comments are preserved. Removing a field removes only its override in the write target; a lower-priority value can reappear.
+Read the merged persisted configuration first, change only the keys the user asked for, and send the complete object back with its revision. Only changed fields are patched into the preferred existing source: JSONC, then JSON. New installations use opencode.jsonc. Unchanged inherited values and comments are preserved. Removing a field removes only its override in the write target; a lower-priority value can reappear.
 
 For a raw edit, send a string with the exact source name from \`sources\`. Never send merged JSON as raw source text. A \`409\` means the source files changed: read again and reconcile rather than retrying stale content.
 
 **Request Body:**
 \`\`\`ts
-{ content: object | string, expectedRevision: string, source?: "config.json" | "opencode.json" | "opencode.jsonc" }
+{ content: object | string, expectedRevision: string, source?: "opencode.json" | "opencode.jsonc" }
 \`\`\`
 
 **Example:**
@@ -866,7 +866,6 @@ List all repos available to OpenCode Manager. The repos are returned in the orde
 export function buildAssistantOpenCodeConfig(): OpenCodeConfigInput {
   const config: OpenCodeConfigInput = {
     default_agent: ASSISTANT_DEFAULT_AGENT_NAME,
-    instructions: ['AGENTS.md'],
     permission: buildAssistantAgentPermission(),
     agent: {
       [ASSISTANT_DEFAULT_AGENT_NAME]: { mode: 'primary' },

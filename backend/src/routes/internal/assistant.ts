@@ -1,6 +1,6 @@
 import { Hono } from 'hono'
 import type { OpenCodeClient } from '../../services/opencode/client'
-import { getAssistantModeDirectory } from '../../services/assistant-mode'
+import { logger } from '../../utils/logger'
 import { TokenBucketRateLimiter } from '../../utils/rate-limit'
 
 export function createInternalAssistantRoutes(openCodeClient: OpenCodeClient) {
@@ -15,9 +15,10 @@ export function createInternalAssistantRoutes(openCodeClient: OpenCodeClient) {
       return c.json({ error: 'Rate limit exceeded' }, 429)
     }
 
-    const directory = getAssistantModeDirectory()
-    const response = await openCodeClient.forward({ method: 'POST', path: '/instance/dispose', directory })
-    if (!response.ok) {
+    try {
+      await openCodeClient.api.location.reload()
+    } catch (error) {
+      logger.error('Failed to reload assistant workspace:', error)
       return c.json({ error: 'Failed to reload assistant workspace' }, 502)
     }
 

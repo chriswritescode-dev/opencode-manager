@@ -21,10 +21,6 @@ const JSONC_RAW = `{
   "theme": "system"
 }`
 
-const CONFIG_JSON_RAW = `{
-  "theme": "dark"
-}`
-
 const config = makeOpenCodeConfigFile({ rawContent: RAW })
 
 const multiSourceConfig = makeOpenCodeConfigFile({
@@ -34,7 +30,6 @@ const multiSourceConfig = makeOpenCodeConfigFile({
   sources: [
     makeOpenCodeConfigSource({ name: 'opencode.jsonc', path: '/workspace/.config/opencode/opencode.jsonc', rawContent: JSONC_RAW }),
     makeOpenCodeConfigSource({ name: 'opencode.json', path: '/workspace/.config/opencode/opencode.json', rawContent: RAW }),
-    makeOpenCodeConfigSource({ name: 'config.json', path: '/workspace/.config/opencode/config.json', rawContent: CONFIG_JSON_RAW }),
   ],
 })
 
@@ -382,18 +377,18 @@ describe('OpenCodeConfigEditor', () => {
     const user = userEvent.setup()
 
     await user.click(screen.getByRole('combobox', { name: 'Source file' }))
-    await user.click(screen.getByRole('option', { name: 'config.json' }))
+    await user.click(screen.getByRole('option', { name: 'opencode.json' }))
 
-    expect(screen.getByText('Edit config.json')).toBeInTheDocument()
-    expect(screen.getByText('/workspace/.config/opencode/config.json')).toBeInTheDocument()
+    expect(screen.getByText('Edit opencode.json')).toBeInTheDocument()
+    expect(screen.getByText('/workspace/.config/opencode/opencode.json')).toBeInTheDocument()
     const textarea = screen.getByLabelText('Config content') as HTMLTextAreaElement
-    expect(textarea).toHaveValue(CONFIG_JSON_RAW)
+    expect(textarea).toHaveValue(RAW)
 
     const next = '{\n  "theme": "light"\n}'
     setContent(textarea, next)
     await user.click(screen.getByRole('button', { name: 'Update' }))
     await waitFor(() => {
-      expect(onUpdate).toHaveBeenCalledWith({ content: next, source: 'config.json', expectedRevision: 'rev-2' })
+      expect(onUpdate).toHaveBeenCalledWith({ content: next, source: 'opencode.json', expectedRevision: 'rev-2' })
     })
   })
 
@@ -413,10 +408,10 @@ describe('OpenCodeConfigEditor', () => {
     const user = userEvent.setup()
 
     await user.click(screen.getByRole('combobox', { name: 'Source file' }))
-    await user.click(screen.getByRole('option', { name: 'config.json' }))
+    await user.click(screen.getByRole('option', { name: 'opencode.json' }))
     await user.click(screen.getByRole('button', { name: 'Download' }))
 
-    expect(saveFile).toHaveBeenCalledWith(expect.any(Blob), 'config.json')
+    expect(saveFile).toHaveBeenCalledWith(expect.any(Blob), 'opencode.json')
   })
 
   it('surfaces a conflict error without discarding the raw text', async () => {
@@ -480,7 +475,6 @@ describe('OpenCodeConfigEditor', () => {
       updatedAt: 3,
       sources: [
         makeOpenCodeConfigSource({ name: 'opencode.json', path: '/workspace/.config/opencode/opencode.json', rawContent: RAW }),
-        makeOpenCodeConfigSource({ name: 'config.json', path: '/workspace/.config/opencode/config.json', rawContent: CONFIG_JSON_RAW }),
       ],
     })
     rerender(<OpenCodeConfigEditor config={sourceRemovedConfig} isOpen onClose={onClose} onUpdate={onUpdate} />)
@@ -567,7 +561,7 @@ describe('OpenCodeConfigEditor', () => {
 
     const notice = screen.getByText('Multiple configuration files are merged').closest('[role="alert"]') as HTMLElement
     expect(notice).toBeInTheDocument()
-    expect(notice).toHaveTextContent('config.json, opencode.json, opencode.jsonc')
+    expect(notice).toHaveTextContent('opencode.json, opencode.jsonc')
     expect(notice).toHaveTextContent('Saves apply only to opencode.jsonc')
     expect(notice).toHaveTextContent('For simpler configuration, consolidate the settings you need into one file, then remove redundant files after verifying the result.')
 
@@ -583,10 +577,10 @@ describe('OpenCodeConfigEditor', () => {
     expect(notice).toHaveTextContent('Saves apply only to opencode.jsonc')
 
     await user.click(screen.getByRole('combobox', { name: 'Source file' }))
-    await user.click(screen.getByRole('option', { name: 'config.json' }))
+    await user.click(screen.getByRole('option', { name: 'opencode.json' }))
 
     const updatedNotice = screen.getByText('Multiple configuration files are merged').closest('[role="alert"]') as HTMLElement
-    expect(updatedNotice).toHaveTextContent('Saves apply only to config.json')
+    expect(updatedNotice).toHaveTextContent('Saves apply only to opencode.json')
   })
 
   it('shows the file details disclosure expanded for a single source', () => {

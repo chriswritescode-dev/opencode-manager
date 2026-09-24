@@ -37,7 +37,7 @@ vi.mock('./OAuthAuthorizeDialog', () => ({
     providerName: string
     methods: unknown[]
     onOpenChange: (open: boolean) => void
-    onSuccess: (response: OAuthAuthorizeResponse, methodIndex: number) => void
+    onSuccess: (response: OAuthAuthorizeResponse, methodID: string) => void
   }) => (open ? <div data-testid="oauth-authorize-dialog">{providerId}</div> : null),
 }))
 
@@ -50,7 +50,6 @@ vi.mock('./OAuthCallbackDialog', () => ({
     providerId: string
     providerName: string
     authResponse: OAuthAuthorizeResponse
-    methodIndex: number
     onOpenChange: (open: boolean) => void
     onSuccess: () => void
   }) => (open ? <div data-testid="oauth-callback-dialog">{providerId}</div> : null),
@@ -114,8 +113,8 @@ function mockProviderData() {
   })
   vi.mocked(providerCredentialsApi.list).mockResolvedValue(['anthropic', 'openai'])
   vi.mocked(oauthApi.getAuthMethods).mockResolvedValue({
-    anthropic: [{ type: 'oauth', label: 'OAuth' }],
-    google: [{ type: 'oauth', label: 'OAuth' }],
+    anthropic: [{ id: 'oauth', type: 'oauth', label: 'OAuth' }],
+    google: [{ id: 'oauth', type: 'oauth', label: 'OAuth' }],
   })
 }
 

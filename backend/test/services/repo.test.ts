@@ -1,7 +1,12 @@
 import path from 'path'
-import { beforeEach, describe, expect, it, vi } from 'vitest'
-import { getReposPath } from '@opencode-manager/shared/config/env'
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
+import { Database } from 'bun:sqlite'
+import { getReposPath, getScheduleWorktreesPath } from '@opencode-manager/shared/config/env'
 import type { GitAuthService } from '../../src/services/git-auth'
+import type { OpenCodeClient } from '../../src/services/opencode/client'
+import type { Repo } from '../../src/types/repo'
+import { migrate } from '../../src/db/migration-runner'
+import { allMigrations } from '../../src/db/migrations'
 
 const executeCommand = vi.fn()
 const ensureDirectoryExists = vi.fn()
@@ -12,6 +17,11 @@ const createRepo = vi.fn()
 const updateRepoStatus = vi.fn()
 const updateRepoBranch = vi.fn()
 const deleteRepo = vi.fn()
+const listRepos = vi.fn()
+
+const resolveProjectId = vi.fn()
+const isGitMainCheckout = vi.fn()
+const getSettings = vi.fn()
 
 const lstat = vi.fn()
 const stat = vi.fn()
@@ -33,6 +43,16 @@ vi.mock('fs/promises', () => ({
 vi.mock('../../src/utils/fs-safe', () => ({
   mkdirSafe,
   mkdirSyncSafe: vi.fn(),
+  canonicalPathSync: (target: string) => target,
+}))
+
+vi.mock('../../src/services/settings', () => ({
+  SettingsService: vi.fn().mockImplementation(() => ({ getSettings })),
+}))
+
+vi.mock('../../src/services/project-id-resolver', () => ({
+  resolveProjectId,
+  isGitMainCheckout,
 }))
 
 vi.mock('../../src/utils/process', () => ({
@@ -50,6 +70,7 @@ vi.mock('../../src/db/queries', () => ({
   updateRepoStatus,
   updateRepoBranch,
   deleteRepo,
+  listRepos,
 }))
 
 const mockGitAuthService = {
@@ -422,5 +443,140 @@ describe('repo service', () => {
     expect(result.repos).toHaveLength(1)
     expect(result.repos[0]?.fullPath).toBe(repoRoot)
     expect(createRepo).toHaveBeenCalledTimes(1)
+  })
+})
+
+describe('getSiblingRepos worktree API', () => {
+  type SiblingRepo = Repo & { currentBranch: string | undefined; worktreeStrategy?: string }
+
+  let db: Database
+
+  function createRepoRow(id: number, localPath: string, overrides: Partial<Repo> = {}): Repo {
+    return {
+      id,
+      repoUrl: 'https://github.com/test/repo',
+      localPath,
+      fullPath: path.join(getReposPath(), localPath),
+      sourcePath: path.join(getReposPath(), localPath),
+      branch: 'main',
+      defaultBranch: 'main',
+      cloneStatus: 'ready',
+      clonedAt: Date.now(),
+      ...overrides,
+    }
+  }
+
+  function createClient(worktrees: Array<{ directory: string; strategy?: string }>, overrides: {
+    locationGet?: () => Promise<{ directory: string; project: { id: string; directory: string; canonical: string } }>
+    worktreeList?: () => Promise<Array<{ directory: string; strategy?: string }>>
+  } = {}): OpenCodeClient {
+    return {
+      api: {
+        location: {
+          get: overrides.locationGet ?? (async () => ({
+            directory: path.join(getReposPath(), 'repo-a'),
+            project: { id: 'commit-A', directory: path.join(getReposPath(), 'repo-a'), canonical: path.join(getReposPath(), 'repo-a') },
+          })),
+        },
+        worktree: {
+          list: overrides.worktreeList ?? (async () => worktrees),
+        },
+      },
+    } as unknown as OpenCodeClient
+  }
+
+  beforeEach(() => {
+    db = new Database(':memory:')
+    migrate(db, allMigrations)
+    getSettings.mockReturnValue({ preferences: { repoOrder: [] }, updatedAt: Date.now() })
+    resolveProjectId.mockResolvedValue('commit-A')
+    isGitMainCheckout.mockResolvedValue(false)
+    listRepos.mockReturnValue([createRepoRow(1, 'repo-a')])
+  })
+
+  afterEach(() => {
+    db.close()
+  })
+
+  it('maps worktree entries to worktree siblings', async () => {
+    const { getSiblingRepos } = await import('../../src/services/repo')
+    const client = createClient([{ directory: '/worktrees/feature-x', strategy: 'git' }])
+
+    const siblings = await getSiblingRepos(db, 1, {}, client) as SiblingRepo[]
+
+    expect(siblings).toHaveLength(2)
+    expect(siblings[1]).toMatchObject({
+      id: -1,
+      fullPath: '/worktrees/feature-x',
+      localPath: 'feature-x',
+      worktreeStrategy: 'git',
+    })
+    expect(siblings[1]?.branch).toBeUndefined()
+    expect(siblings[1]?.currentBranch).toBeUndefined()
+  })
+
+  it('excludes the target repo, repos root, schedule root, known siblings, and main checkouts', async () => {
+    const { getSiblingRepos } = await import('../../src/services/repo')
+    const repoA = path.join(getReposPath(), 'repo-a')
+    const repoB = path.join(getReposPath(), 'repo-b')
+    const scheduleDir = path.join(getScheduleWorktreesPath(), 'run-1')
+    listRepos.mockReturnValue([createRepoRow(1, 'repo-a'), createRepoRow(2, 'repo-b')])
+    isGitMainCheckout.mockImplementation(async (directory: string) => directory === '/worktrees/main-checkout')
+    const client = createClient([
+      { directory: repoA, strategy: 'git' },
+      { directory: getReposPath(), strategy: 'git' },
+      { directory: scheduleDir, strategy: 'git' },
+      { directory: repoB, strategy: 'git' },
+      { directory: '/worktrees/main-checkout', strategy: 'git' },
+      { directory: '/worktrees/feature-x', strategy: 'git' },
+    ])
+
+    const siblings = await getSiblingRepos(db, 1, {}, client) as SiblingRepo[]
+
+    expect(siblings).toHaveLength(3)
+    expect(siblings.filter((sibling) => sibling.id === -1).map((sibling) => sibling.fullPath)).toEqual(['/worktrees/feature-x'])
+  })
+
+  it('excludes an active schedule run worktree path', async () => {
+    const { getSiblingRepos } = await import('../../src/services/repo')
+    const activePath = '/worktrees/active-run'
+    db.prepare('INSERT INTO schedule_runs (job_id, repo_id, trigger_source, status, started_at, created_at, worktree_path) VALUES (?, ?, ?, ?, ?, ?, ?)').run(1, 1, 'manual', 'running', Date.now(), Date.now(), activePath)
+    const client = createClient([
+      { directory: activePath, strategy: 'git' },
+      { directory: '/worktrees/feature-x', strategy: 'git' },
+    ])
+
+    const siblings = await getSiblingRepos(db, 1, {}, client) as SiblingRepo[]
+
+    expect(siblings).toHaveLength(2)
+    expect(siblings[1]?.fullPath).toBe('/worktrees/feature-x')
+  })
+
+  it('returns only repo siblings when the location lookup rejects', async () => {
+    const { getSiblingRepos } = await import('../../src/services/repo')
+    const client = createClient([], {
+      locationGet: async () => {
+        throw new Error('location unavailable')
+      },
+    })
+
+    const siblings = await getSiblingRepos(db, 1, {}, client) as SiblingRepo[]
+
+    expect(siblings).toHaveLength(1)
+    expect(siblings[0]?.id).toBe(1)
+  })
+
+  it('returns only repo siblings when the worktree list rejects', async () => {
+    const { getSiblingRepos } = await import('../../src/services/repo')
+    const client = createClient([], {
+      worktreeList: async () => {
+        throw new Error('worktree list unavailable')
+      },
+    })
+
+    const siblings = await getSiblingRepos(db, 1, {}, client) as SiblingRepo[]
+
+    expect(siblings).toHaveLength(1)
+    expect(siblings[0]?.id).toBe(1)
   })
 })

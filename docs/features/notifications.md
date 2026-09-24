@@ -26,7 +26,7 @@ A notification is suppressed when a visible tab is already viewing the session t
 
 The title is the action (`Run Command`, `Edit File`, `Question`, `Error`, `Session complete`) and the body is `<repo> · <detail>`, for example `oc-manager · pnpm test`. Bodies are truncated to 140 characters. Permission and question notifications stay on screen until dismissed; every notification carries the event timestamp and re-alerts when a newer event for the same session replaces it.
 
-Clicking a notification opens the session that raised it (`/repos/<id>/sessions/<sessionId>`). The service worker prefers a tab already showing that session, then the focused tab, then any visible tab, and only that one tab navigates; with no tab open a new window is opened. Sessions running in OpenCode workspace worktrees or opencode-forge loop worktrees resolve to their parent repository through the shared OpenCode project id, and Assistant sessions open with the `assistant=1` parameter the Assistant view requires.
+Clicking a notification opens the session that raised it (`/repos/<id>/sessions/<sessionId>`). The service worker prefers a tab already showing that session, then the focused tab, then any visible tab, and only that one tab navigates; with no tab open a new window is opened. Sessions running in OpenCode worktrees or opencode-forge loop worktrees resolve to their parent repository through the shared OpenCode project id, and Assistant sessions open with the `assistant=1` parameter the Assistant view requires.
 
 ## Browser Compatibility
 

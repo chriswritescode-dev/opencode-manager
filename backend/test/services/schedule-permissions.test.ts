@@ -5,11 +5,11 @@ describe('buildSchedulePermissionRuleset', () => {
   it('returns the allow-all baseline with default deny rules when given null', () => {
     const result = buildSchedulePermissionRuleset(null)
 
-    expect(result[0]).toEqual({ permission: '*', pattern: '*', action: 'allow' })
-    expect(result).toContainEqual({ permission: 'external_directory', pattern: '*', action: 'deny' })
-    expect(result).toContainEqual({ permission: 'question', pattern: '*', action: 'deny' })
+    expect(result[0]).toEqual({ action: '*', resource: '*', effect: 'allow' })
+    expect(result).toContainEqual({ action: 'external_directory', resource: '*', effect: 'deny' })
+    expect(result).toContainEqual({ action: 'question', resource: '*', effect: 'deny' })
     for (const pattern of DEFAULT_DESTRUCTIVE_BASH_PATTERNS) {
-      expect(result).toContainEqual({ permission: 'bash', pattern, action: 'deny' })
+      expect(result).toContainEqual({ action: 'shell', resource: pattern, effect: 'deny' })
     }
   })
 
@@ -21,8 +21,8 @@ describe('buildSchedulePermissionRuleset', () => {
     })
 
     expect(result).toEqual([
-      { permission: '*', pattern: '*', action: 'allow' },
-      { permission: 'question', pattern: '*', action: 'deny' },
+      { action: '*', resource: '*', effect: 'allow' },
+      { action: 'question', resource: '*', effect: 'deny' },
     ])
   })
 
@@ -33,10 +33,10 @@ describe('buildSchedulePermissionRuleset', () => {
       bashDenyPatterns: [],
     })
 
-    expect(result).toEqual([{ permission: '*', pattern: '*', action: 'allow' }])
+    expect(result).toEqual([{ action: '*', resource: '*', effect: 'allow' }])
   })
 
-  it('includes a single custom bash deny pattern alongside external_directory and question denies', () => {
+  it('includes a single custom shell deny pattern alongside external_directory and question denies', () => {
     const result = buildSchedulePermissionRuleset({
       allowExternalDirectory: false,
       allowQuestions: false,
@@ -44,10 +44,10 @@ describe('buildSchedulePermissionRuleset', () => {
     })
 
     expect(result).toEqual([
-      { permission: '*', pattern: '*', action: 'allow' },
-      { permission: 'external_directory', pattern: '*', action: 'deny' },
-      { permission: 'question', pattern: '*', action: 'deny' },
-      { permission: 'bash', pattern: 'rm -rf *', action: 'deny' },
+      { action: '*', resource: '*', effect: 'allow' },
+      { action: 'external_directory', resource: '*', effect: 'deny' },
+      { action: 'question', resource: '*', effect: 'deny' },
+      { action: 'shell', resource: 'rm -rf *', effect: 'deny' },
     ])
   })
 })

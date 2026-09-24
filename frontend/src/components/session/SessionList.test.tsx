@@ -8,14 +8,14 @@ import { SessionList } from './SessionList'
 const { createSessionMock, deleteSessionMock, sessionsData, createSessionState, fetchNextPageMock, hasNextPageRef, isFetchingNextPageRef, isFetchNextPageErrorRef, useRealSessionsHookRef, lastSessionsHookArgs, sessionPinsData, togglePinMock } = vi.hoisted(() => ({
   createSessionMock: vi.fn(),
   deleteSessionMock: vi.fn(),
-  sessionsData: [] as Array<{ id: string; title: string; directory: string; workspaceID?: string; parentID?: string; time: { updated: number } }>,
+  sessionsData: [] as Array<{ id: string; title: string; location: { directory: string }; parentID?: string; time: { updated: number } }>,
   createSessionState: { directory: undefined as string | undefined },
   fetchNextPageMock: vi.fn(),
   hasNextPageRef: { current: false },
   isFetchingNextPageRef: { current: false },
   isFetchNextPageErrorRef: { current: false },
   useRealSessionsHookRef: { current: false },
-  lastSessionsHookArgs: { current: undefined as { opcodeUrl: string; directories: string[]; options?: { search?: string; limit?: number } } | undefined },
+  lastSessionsHookArgs: { current: undefined as { directories: string[]; options?: { search?: string; limit?: number } } | undefined },
   sessionPinsData: [] as Array<{ sessionId: string; directory: string; pinnedAt: number }>,
   togglePinMock: vi.fn(),
 }))
@@ -24,11 +24,11 @@ vi.mock('@/hooks/useOpenCode', async (importOriginal) => {
   const actual = await importOriginal<typeof import('@/hooks/useOpenCode')>()
   return {
     ...actual,
-    useSessionsAcrossDirectories: (opcodeUrl: string, directories: string[], options?: { search?: string; limit?: number }) => {
+    useSessionsAcrossDirectories: (directories: string[], options?: { search?: string; limit?: number }) => {
       if (useRealSessionsHookRef.current) {
-        return actual.useSessionsAcrossDirectories(opcodeUrl, directories, options)
+        return actual.useSessionsAcrossDirectories(directories, options)
       }
-      lastSessionsHookArgs.current = { opcodeUrl, directories, options }
+      lastSessionsHookArgs.current = { directories, options }
       const data = options?.search ? [] : sessionsData
       return {
         data,
@@ -39,7 +39,7 @@ vi.mock('@/hooks/useOpenCode', async (importOriginal) => {
         isFetchNextPageError: isFetchNextPageErrorRef.current,
       }
     },
-    useCreateSession: (_opcodeUrl: string, directory?: string) => {
+    useCreateSession: (directory?: string) => {
       createSessionState.directory = directory
       return { mutate: createSessionMock }
     },
@@ -55,9 +55,9 @@ vi.mock('@/hooks/useSessionPins', () => ({
 describe('SessionList', () => {
   beforeEach(() => {
     sessionsData.splice(0, sessionsData.length,
-      { id: 'ses_same', title: 'audit: mic-warmup 1/2 #2', directory: '/w/a', workspaceID: 'wrk_a', time: { updated: Date.now() } },
-      { id: 'ses_same', title: 'audit: mic-warmup 1/2 #2', directory: '/w/b', workspaceID: 'wrk_b', time: { updated: Date.now() } },
-      { id: 'ses_same', title: 'audit: mic-warmup 1/2 #2', directory: '/w/c', workspaceID: 'wrk_c', time: { updated: Date.now() } },
+      { id: 'ses_same', title: 'audit: mic-warmup 1/2 #2', location: { directory: '/w/a' }, time: { updated: Date.now() } },
+      { id: 'ses_same', title: 'audit: mic-warmup 1/2 #2', location: { directory: '/w/b' }, time: { updated: Date.now() } },
+      { id: 'ses_same', title: 'audit: mic-warmup 1/2 #2', location: { directory: '/w/c' }, time: { updated: Date.now() } },
     )
     createSessionMock.mockReset()
     createSessionState.directory = undefined
@@ -73,12 +73,11 @@ describe('SessionList', () => {
     togglePinMock.mockReset()
   })
 
-  it('selects duplicate session IDs independently by workspace directory', async () => {
+  it('selects duplicate session IDs independently by directory', async () => {
     const user = userEvent.setup()
 
     render(
       <SessionList
-        opcodeUrl="/api/opencode"
         directories={['/w/a', '/w/b', '/w/c']}
         onSelectSession={vi.fn()}
       />,
@@ -99,9 +98,9 @@ describe('SessionList', () => {
 
     await waitFor(() => {
       expect(deleteSessionMock).toHaveBeenCalledWith([
-        { id: 'ses_same', directory: '/w/a', workspaceID: 'wrk_a' },
-        { id: 'ses_same', directory: '/w/b', workspaceID: 'wrk_b' },
-        { id: 'ses_same', directory: '/w/c', workspaceID: 'wrk_c' },
+        { id: 'ses_same', directory: '/w/a' },
+        { id: 'ses_same', directory: '/w/b' },
+        { id: 'ses_same', directory: '/w/c' },
       ])
     })
   })
@@ -109,14 +108,13 @@ describe('SessionList', () => {
   it('deduplicates repeated session records from the same workspace directory', async () => {
     const user = userEvent.setup()
     sessionsData.splice(0, sessionsData.length,
-      { id: 'ses_same', title: 'audit: mic-warmup 1/2 #2', directory: '/w/a', time: { updated: Date.now() } },
-      { id: 'ses_same', title: 'audit: mic-warmup 1/2 #2', directory: '/w/a', time: { updated: Date.now() } },
-      { id: 'ses_same', title: 'audit: mic-warmup 1/2 #2', directory: '/w/a', time: { updated: Date.now() } },
+      { id: 'ses_same', title: 'audit: mic-warmup 1/2 #2', location: { directory: '/w/a' }, time: { updated: Date.now() } },
+      { id: 'ses_same', title: 'audit: mic-warmup 1/2 #2', location: { directory: '/w/a' }, time: { updated: Date.now() } },
+      { id: 'ses_same', title: 'audit: mic-warmup 1/2 #2', location: { directory: '/w/a' }, time: { updated: Date.now() } },
     )
 
     render(
       <SessionList
-        opcodeUrl="/api/opencode"
         directories={['/w/a', '/w/a', '/w/a']}
         onSelectSession={vi.fn()}
       />,
@@ -136,7 +134,6 @@ describe('SessionList', () => {
 
     render(
       <SessionList
-        opcodeUrl="/api/opencode"
         directories={['/w/a', '/w/b']}
         createDirectory="/w/b"
         onSelectSession={vi.fn()}
@@ -154,7 +151,6 @@ describe('SessionList', () => {
 
     render(
       <SessionList
-        opcodeUrl="/api/opencode"
         directories={['/w/a']}
         onSelectSession={vi.fn()}
       />,
@@ -174,7 +170,6 @@ describe('SessionList', () => {
 
     render(
       <SessionList
-        opcodeUrl="/api/opencode"
         directories={['/w/a']}
         onSelectSession={vi.fn()}
       />,
@@ -198,7 +193,6 @@ describe('SessionList', () => {
 
     render(
       <SessionList
-        opcodeUrl="/api/opencode"
         directories={['/w/a']}
         onSelectSession={vi.fn()}
       />,
@@ -222,7 +216,6 @@ describe('SessionList', () => {
 
     render(
       <SessionList
-        opcodeUrl="/api/opencode"
         directories={['/w/a']}
         onSelectSession={vi.fn()}
       />,
@@ -242,7 +235,6 @@ describe('SessionList', () => {
 
     render(
       <SessionList
-        opcodeUrl="/api/opencode"
         directories={['/w/a']}
         onSelectSession={vi.fn()}
       />,
@@ -258,7 +250,6 @@ describe('SessionList', () => {
 
     render(
       <SessionList
-        opcodeUrl="/api/opencode"
         directories={['/w/a']}
         onSelectSession={vi.fn()}
       />,
@@ -271,15 +262,14 @@ describe('SessionList', () => {
 
   it('auto-fetches next page when all visible sessions are filtered out as child sessions', async () => {
     sessionsData.splice(0, sessionsData.length,
-      { id: 'child1', title: 'child session', directory: '/w/a', parentID: 'parent1', time: { updated: Date.now() } },
-      { id: 'child2', title: 'child session 2', directory: '/w/a', parentID: 'parent2', time: { updated: Date.now() } },
+      { id: 'child1', title: 'child session', location: { directory: '/w/a' }, parentID: 'parent1', time: { updated: Date.now() } },
+      { id: 'child2', title: 'child session 2', location: { directory: '/w/a' }, parentID: 'parent2', time: { updated: Date.now() } },
     )
     hasNextPageRef.current = true
     isFetchingNextPageRef.current = false
 
     render(
       <SessionList
-        opcodeUrl="/api/opencode"
         directories={['/w/a']}
         onSelectSession={vi.fn()}
       />,
@@ -292,14 +282,14 @@ describe('SessionList', () => {
 
   it('auto-fetches next page when filtered sessions underfill the scroll viewport', async () => {
     sessionsData.splice(0, sessionsData.length,
-      { id: 'root1', title: 'root session 1', directory: '/w/a', time: { updated: 4 } },
-      { id: 'root2', title: 'root session 2', directory: '/w/a', time: { updated: 3 } },
-      { id: 'root3', title: 'root session 3', directory: '/w/a', time: { updated: 2 } },
-      { id: 'root4', title: 'root session 4', directory: '/w/a', time: { updated: 1 } },
+      { id: 'root1', title: 'root session 1', location: { directory: '/w/a' }, time: { updated: 4 } },
+      { id: 'root2', title: 'root session 2', location: { directory: '/w/a' }, time: { updated: 3 } },
+      { id: 'root3', title: 'root session 3', location: { directory: '/w/a' }, time: { updated: 2 } },
+      { id: 'root4', title: 'root session 4', location: { directory: '/w/a' }, time: { updated: 1 } },
       ...Array.from({ length: 21 }, (_, index) => ({
         id: `child${index}`,
         title: `child session ${index}`,
-        directory: '/w/a',
+        location: { directory: '/w/a' },
         parentID: `root${index}`,
         time: { updated: index },
       })),
@@ -313,8 +303,7 @@ describe('SessionList', () => {
     try {
       render(
         <SessionList
-          opcodeUrl="/api/opencode"
-          directories={['/w/a']}
+            directories={['/w/a']}
           onSelectSession={vi.fn()}
         />,
       )
@@ -340,12 +329,11 @@ describe('SessionList', () => {
     const pinnedTime = Date.now()
     sessionPinsData.push({ sessionId: 'ses_a', directory: '/w/a', pinnedAt: pinnedTime })
     sessionsData.splice(0, sessionsData.length,
-      { id: 'ses_a', title: 'pinned session', directory: '/w/a', time: { updated: pinnedTime } },
+      { id: 'ses_a', title: 'pinned session', location: { directory: '/w/a' }, time: { updated: pinnedTime } },
     )
 
     render(
       <SessionList
-        opcodeUrl="/api/opencode"
         directories={['/w/a']}
         onSelectSession={vi.fn()}
       />,
@@ -360,12 +348,11 @@ describe('SessionList', () => {
   it('calls togglePinMock with correct args when Pin to top is clicked', async () => {
     const user = userEvent.setup()
     sessionsData.splice(0, sessionsData.length,
-      { id: 'ses_x', title: 'test session', directory: '/w/a', time: { updated: Date.now() } },
+      { id: 'ses_x', title: 'test session', location: { directory: '/w/a' }, time: { updated: Date.now() } },
     )
 
     render(
       <SessionList
-        opcodeUrl="/api/opencode"
         directories={['/w/a']}
         onSelectSession={vi.fn()}
       />,
@@ -386,7 +373,6 @@ describe('SessionList', () => {
 
     render(
       <SessionList
-        opcodeUrl="/api/opencode"
         directories={['/w/a']}
         onSelectSession={vi.fn()}
       />,
@@ -413,7 +399,6 @@ describe('SessionList', () => {
 
     render(
       <SessionList
-        opcodeUrl="/api/opencode"
         directories={['/w/a']}
         onSelectSession={vi.fn()}
       />,
@@ -431,7 +416,6 @@ describe('SessionList', () => {
 
     render(
       <SessionList
-        opcodeUrl="/api/opencode"
         directories={['/w/a']}
         onSelectSession={vi.fn()}
       />,
@@ -451,6 +435,7 @@ describe('SessionList', () => {
         projectID: 'proj_1',
         title: `root session ${index}`,
         time: { created: 100 + index, updated: 100 + index },
+        location: { directory: '/w/a' },
       })),
       ...Array.from({ length: 21 }, (_, index) => ({
         id: `child${index}`,
@@ -458,6 +443,7 @@ describe('SessionList', () => {
         parentID: `root${index}`,
         title: `child session ${index}`,
         time: { created: index, updated: index },
+        location: { directory: '/w/a' },
       })),
     ]
 
@@ -479,7 +465,7 @@ describe('SessionList', () => {
         })
       }
       return Promise.resolve(new Response(JSON.stringify({
-        items: pageOneItems,
+        data: pageOneItems,
         cursor: { next: 'cursor_next' },
       }), { status: 200, headers: { 'Content-Type': 'application/json' } }))
     })
@@ -496,8 +482,7 @@ describe('SessionList', () => {
     try {
       const rendered = render(
         <SessionList
-          opcodeUrl="/api/opencode"
-          directories={['/w/a']}
+            directories={['/w/a']}
           onSelectSession={vi.fn()}
         />,
         { wrapper },
@@ -532,7 +517,8 @@ describe('SessionList', () => {
       expect(screen.queryByText('child session 0')).toBeNull()
 
       resolveRecovery?.(new Response(JSON.stringify({
-        items: [{ id: 'older_root', projectID: 'proj_1', title: 'older root session', time: { created: 1, updated: 1 } }],
+        data: [{ id: 'older_root', projectID: 'proj_1', title: 'older root session', time: { created: 1, updated: 1 }, location: { directory: '/w/a' } }],
+        cursor: {},
       }), { status: 200, headers: { 'Content-Type': 'application/json' } }))
 
       await waitFor(() => {

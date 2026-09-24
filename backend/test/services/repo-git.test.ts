@@ -9,12 +9,13 @@ import { migrate } from '../../src/db/migration-runner'
 import { allMigrations } from '../../src/db/migrations'
 import { createRepo, getRepoById, getRepoByLocalPath } from '../../src/db/queries'
 import { resolveOpenCodeProjectId } from '@opencode-manager/shared/project-id'
+import { isWorktreeSibling } from '@opencode-manager/shared/utils'
 import { getReposPath, getScheduleWorktreesPath } from '@opencode-manager/shared/config/env'
 import type { GitAuthService } from '../../src/services/git-auth'
 import type { OpenCodeClient } from '../../src/services/opencode/client'
 import type { Repo } from '../../src/types/repo'
 
-type SiblingRepo = Repo & { currentBranch: string | undefined; workspaceId?: string }
+type SiblingRepo = Repo & { currentBranch: string | undefined; worktreeStrategy?: string }
 
 const workspaceRoot = mkdtempSync(path.join(tmpdir(), 'repo-git-'))
 process.env.WORKSPACE_PATH = workspaceRoot
@@ -999,27 +1000,36 @@ describe('repo service real git', () => {
       mkdirSync(activeWorktree, { recursive: true })
       mkdirSync(activeWorkspace, { recursive: true })
       const scheduleDir = path.join(getScheduleWorktreesPath(), uniqueName('sibling-ws-schedule'))
-      db.prepare('INSERT INTO schedule_runs (job_id, repo_id, trigger_source, status, started_at, created_at, worktree_path, workspace_id) VALUES (?, ?, ?, ?, ?, ?, ?, ?)').run(1, a.id, 'manual', 'running', Date.now(), Date.now(), activeWorktree, null)
-      db.prepare('INSERT INTO schedule_runs (job_id, repo_id, trigger_source, status, started_at, created_at, worktree_path, workspace_id) VALUES (?, ?, ?, ?, ?, ?, ?, ?)').run(1, a.id, 'manual', 'running', Date.now(), Date.now(), null, 'ws-active')
+      db.prepare('INSERT INTO schedule_runs (job_id, repo_id, trigger_source, status, started_at, created_at, worktree_path) VALUES (?, ?, ?, ?, ?, ?, ?)').run(1, a.id, 'manual', 'running', Date.now(), Date.now(), activeWorktree)
+      db.prepare('INSERT INTO schedule_runs (job_id, repo_id, trigger_source, status, started_at, created_at, worktree_path) VALUES (?, ?, ?, ?, ?, ?, ?)').run(1, a.id, 'manual', 'running', Date.now(), Date.now(), activeWorkspace)
       const client = {
-        getJson: async () => [
-          { id: 'ws-extra', type: 'worktree', name: 'extra', branch: 'feature', directory: extraDir, projectID: projectId },
-          { id: 'ws-dup', type: 'worktree', name: 'dup', branch: 'main', directory: duplicateDir, projectID: projectId },
-          { id: 'ws-dup-2', type: 'worktree', name: 'dup-2', branch: 'main', directory: duplicateDir, projectID: projectId },
-          { id: 'ws-target', type: 'worktree', name: 'target', branch: 'main', directory: repoA, projectID: projectId },
-          { id: 'ws-repos-root', type: 'worktree', name: 'root', branch: 'main', directory: getReposPath(), projectID: projectId },
-          { id: 'ws-schedule', type: 'worktree', name: 'sched', branch: 'main', directory: scheduleDir, projectID: projectId },
-          { id: 'ws-active-worktree', type: 'worktree', name: 'aw', branch: 'main', directory: activeWorktree, projectID: projectId },
-          { id: 'ws-active', type: 'worktree', name: 'aws', branch: 'main', directory: activeWorkspace, projectID: projectId },
-          { id: 'ws-null-dir', type: 'worktree', name: 'null', branch: null, directory: null, projectID: projectId },
-          { id: 'ws-other', type: 'worktree', name: 'other', branch: null, directory: extraDir, projectID: 'other' },
-        ],
+        api: {
+          location: {
+            get: async () => ({ directory: repoA, project: { id: projectId, directory: repoA, canonical: repoA } }),
+          },
+          worktree: {
+            list: async () => [
+              { directory: extraDir, strategy: 'git' },
+              { directory: duplicateDir, strategy: 'git' },
+              { directory: duplicateDir, strategy: 'git' },
+              { directory: repoA, strategy: 'git' },
+              { directory: getReposPath(), strategy: 'git' },
+              { directory: scheduleDir, strategy: 'git' },
+              { directory: activeWorktree, strategy: 'git' },
+              { directory: activeWorkspace, strategy: 'git' },
+            ],
+          },
+        },
       } as unknown as OpenCodeClient
 
       const siblings = await getSiblingRepos(db, a.id, {}, client) as SiblingRepo[]
-      const workspaceSiblings = siblings.filter((repo) => repo.workspaceId)
+      const worktreeSiblings = siblings.filter((repo) => isWorktreeSibling(repo))
 
-      expect(workspaceSiblings.map((repo) => repo.workspaceId)).toEqual(['ws-extra', 'ws-dup'])
+      expect(worktreeSiblings.map((repo) => repo.fullPath)).toEqual([extraDir, duplicateDir])
+      expect(worktreeSiblings.every((repo) => repo.id === -1)).toBe(true)
+      expect(worktreeSiblings.every((repo) => repo.localPath === path.basename(repo.fullPath))).toBe(true)
+      expect(worktreeSiblings.every((repo) => repo.worktreeStrategy === 'git')).toBe(true)
+      expect(worktreeSiblings.every((repo) => repo.branch === undefined && repo.currentBranch === undefined)).toBe(true)
     })
 
     it('returns repo siblings when the OpenCode client fails', async () => {
@@ -1039,15 +1049,22 @@ describe('repo service real git', () => {
         clonedAt: Date.now(),
       })
       const client = {
-        getJson: async () => {
-          throw new Error('upstream unavailable')
+        api: {
+          location: {
+            get: async () => {
+              throw new Error('upstream unavailable')
+            },
+          },
+          worktree: {
+            list: async () => [],
+          },
         },
       } as unknown as OpenCodeClient
 
       const siblings = await getSiblingRepos(db, a.id, {}, client) as SiblingRepo[]
 
       expect(siblings.some((repo) => repo.id === a.id)).toBe(true)
-      expect(siblings.some((repo) => repo.workspaceId)).toBe(false)
+      expect(siblings.some((repo) => isWorktreeSibling(repo))).toBe(false)
     })
 
     it('resolves the project id with the shared resolver', async () => {

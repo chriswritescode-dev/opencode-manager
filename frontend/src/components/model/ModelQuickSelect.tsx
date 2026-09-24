@@ -4,7 +4,6 @@ import { useModelSelection } from '@/hooks/useModelSelection'
 import { useVariants } from '@/hooks/useVariants'
 import { formatModelName, formatProviderName, getProviders } from '@/api/providers'
 import { useQuery } from '@tanstack/react-query'
-import { useOpenCodeClient } from '@/hooks/useOpenCode'
 import { BottomSheet } from '@/components/ui/bottom-sheet'
 import {
   DropdownMenu,
@@ -17,7 +16,6 @@ import { Input } from '@/components/ui/input'
 import type { Model, Provider } from '@/api/providers'
 
 interface ModelQuickSelectProps {
-  opcodeUrl: string | null | undefined
   directory?: string
   disabled?: boolean
   children: React.ReactNode
@@ -182,7 +180,6 @@ function VirtualizedList<T>({
 }
 
 export function ModelQuickSelect({
-  opcodeUrl,
   directory,
   disabled,
   children,
@@ -192,14 +189,12 @@ export function ModelQuickSelect({
   const [searchQuery, setSearchQuery] = useState('')
   const deferredSearchQuery = useDeferredValue(searchQuery)
   const [selectedProviderId, setSelectedProviderId] = useState<string | null>(null)
-  const { model, modelString, recentModels, favoriteModels, setModel, toggleFavorite, removeRecentModel } = useModelSelection(opcodeUrl, directory)
-  const { availableVariants, currentVariant, setVariant, clearVariant, hasVariants } = useVariants(opcodeUrl, directory)
-  const client = useOpenCodeClient(opcodeUrl, directory)
+  const { model, modelString, recentModels, favoriteModels, setModel, toggleFavorite, removeRecentModel } = useModelSelection(directory)
+  const { availableVariants, currentVariant, setVariant, clearVariant, hasVariants } = useVariants(directory)
 
   const { data: providersData } = useQuery({
-    queryKey: ['opencode', 'providers', opcodeUrl, directory],
+    queryKey: ['opencode', 'providers', directory],
     queryFn: () => getProviders(directory),
-    enabled: !!client,
     staleTime: 30000,
   })
 

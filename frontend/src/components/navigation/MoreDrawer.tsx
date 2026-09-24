@@ -9,16 +9,13 @@ import { useUIState } from '@/stores/uiStateStore'
 import { useQuery } from '@tanstack/react-query'
 import { getRepo } from '@/api/repos'
 import { useRefreshOnOpen } from '@/hooks/useRefreshOnOpen'
-import { OPENCODE_API_ENDPOINT } from '@/config'
 import { SideDrawer, SideDrawerContent } from '@/components/ui/side-drawer'
 import { FileBrowserSheet } from '@/components/file-browser/FileBrowserSheet'
 import { buildMoreItems } from './moreDrawerItems'
 import { useSwipeBack } from '@/hooks/useMobile'
 import { getRepoDisplayName } from '@/lib/utils'
 import { getPathWithReturnTo, isAssistantPath } from '@/lib/navigation'
-import type { components } from '@/api/opencode-types'
-
-type CommandType = components['schemas']['Command']
+import type { CommandInfo } from '@opencode-manager/shared/opencode'
 
 interface MoreDrawerProps {
   isOpen: boolean
@@ -40,7 +37,7 @@ export function MoreDrawer({ isOpen, onClose }: MoreDrawerProps) {
   const isSessionDetail = /^\/repos\/\d+\/sessions\/[^/]+$/.test(location.pathname)
   const isAssistantRoute = isAssistantPath(location.pathname)
   const isAssistantSession = isSessionDetail && searchParams.get('assistant') === '1'
-  const { filterCommands } = useCommands(isSessionDetail ? OPENCODE_API_ENDPOINT : null)
+  const { filterCommands } = useCommands({ enabled: isSessionDetail })
   const activePromptFileBasePath = useUIState((state) => state.activePromptFileBasePath)
   const selectPromptCommand = useUIState((state) => state.selectPromptCommand)
   const selectPromptFile = useUIState((state) => state.selectPromptFile)
@@ -95,7 +92,7 @@ export function MoreDrawer({ isOpen, onClose }: MoreDrawerProps) {
     }
   }
 
-  const handleCommandClick = (command: CommandType) => {
+  const handleCommandClick = (command: CommandInfo) => {
     selectPromptCommand(command)
     onClose()
   }

@@ -1,373 +1,203 @@
 import { describe, it, expect, vi } from 'vitest'
-import { collectSessionEvents, rewriteEventsForRemote, transferSession, planReplayBatches, moveReminderText, type HistoryEventRow, type ReplayEvent, type TransferDeps } from '../src/session-move.js'
+import { rewriteTransferForRemote, transferSession, moveReminderText, type TransferDeps } from '../src/session-move.js'
+import type { SessionMessageInfo, SessionTransferData } from '@opencode-manager/shared/opencode'
 
-describe('collectSessionEvents', () => {
-  it('collects a session\'s events in seq order with remapped aggregateID', () => {
-    const rows: HistoryEventRow[] = [
-      { id: 'e3', aggregate_id: 'ses_a', seq: 2, type: 'append', data: { text: 'c' } },
-      { id: 'e1', aggregate_id: 'ses_a', seq: 0, type: 'append', data: { text: 'a' } },
-      { id: 'e2', aggregate_id: 'ses_a', seq: 1, type: 'append', data: { text: 'b' } },
-      { id: 'e4', aggregate_id: 'ses_b', seq: 0, type: 'append', data: { text: 'x' } },
-    ]
+const ctx = { localRoot: '/Users/x/repo', remoteRoot: '/workspace/repos/repo' }
 
-    const result = collectSessionEvents(rows, 'ses_a')
+function makeTransfer(messages: SessionMessageInfo[] = [], directory = '/Users/x/repo'): SessionTransferData {
+  return {
+    info: {
+      id: 'ses_a',
+      projectID: 'proj_1',
+      cost: 0,
+      tokens: { input: 0, output: 0, reasoning: 0, cache: { read: 0, write: 0 } },
+      time: { created: 1, updated: 2 },
+      location: { directory },
+    },
+    messages,
+  } as unknown as SessionTransferData
+}
 
-    expect(result).toEqual({
-      kind: 'ok',
-      events: [
-        { id: 'e1', aggregateID: 'ses_a', seq: 0, type: 'append', data: { text: 'a' } },
-        { id: 'e2', aggregateID: 'ses_a', seq: 1, type: 'append', data: { text: 'b' } },
-        { id: 'e3', aggregateID: 'ses_a', seq: 2, type: 'append', data: { text: 'c' } },
-      ],
-    })
-  })
+function userWithFile(uri: string): SessionMessageInfo {
+  return {
+    id: 'msg_user',
+    time: { created: 1 },
+    type: 'user',
+    text: 'hi',
+    files: [{ data: '', mime: 'image/png', source: { type: 'uri', uri } }],
+  } as unknown as SessionMessageInfo
+}
 
-  it('returns empty when the session has no events', () => {
-    const rows: HistoryEventRow[] = [
-      { id: 'e1', aggregate_id: 'other', seq: 0, type: 'append', data: {} },
-    ]
-
-    const result = collectSessionEvents(rows, 'unknown')
-
-    expect(result).toEqual({ kind: 'empty' })
-  })
-
-  it('detects a gap in the sequence', () => {
-    const rows: HistoryEventRow[] = [
-      { id: 'e1', aggregate_id: 'ses_a', seq: 0, type: 'append', data: {} },
-      { id: 'e2', aggregate_id: 'ses_a', seq: 1, type: 'append', data: {} },
-      { id: 'e3', aggregate_id: 'ses_a', seq: 3, type: 'append', data: {} },
-    ]
-
-    const result = collectSessionEvents(rows, 'ses_a')
-
-    expect(result).toEqual({ kind: 'gap', missingSeq: 2 })
-  })
-
-  it('detects a gap when sequence does not start at 0', () => {
-    const rows: HistoryEventRow[] = [
-      { id: 'e1', aggregate_id: 'ses_a', seq: 1, type: 'append', data: {} },
-      { id: 'e2', aggregate_id: 'ses_a', seq: 2, type: 'append', data: {} },
-    ]
-
-    const result = collectSessionEvents(rows, 'ses_a')
-
-    expect(result).toEqual({ kind: 'gap', missingSeq: 0 })
-  })
-})
-
-describe('rewriteEventsForRemote', () => {
-  const ctx = {
-    localRoot: '/Users/x/repo',
-    remoteRoot: '/workspace/repos/repo',
-  }
-
-  it('rewrites session.created info directory to the remote root', () => {
-    const events: ReplayEvent[] = [
+function assistantWithToolFile(uri: string): SessionMessageInfo {
+  return {
+    id: 'msg_assistant',
+    time: { created: 2 },
+    type: 'assistant',
+    agent: 'code',
+    model: { id: 'm', providerID: 'p' },
+    content: [
       {
-        id: 'e1', aggregateID: 'ses_a', seq: 0,
-        type: 'session.created.1',
-        data: { info: { directory: '/Users/x/repo' } },
+        type: 'tool',
+        id: 'tool_1',
+        name: 'read',
+        state: { status: 'completed', input: {}, content: [{ type: 'file', uri, mime: 'image/png' }] },
+        time: { created: 2 },
       },
-    ]
+    ],
+  } as unknown as SessionMessageInfo
+}
 
-    const result = rewriteEventsForRemote(events, ctx)
+describe('rewriteTransferForRemote', () => {
+  it('rewrites info.location.directory to the remote root', () => {
+    const result = rewriteTransferForRemote(makeTransfer(), ctx)
 
-    expect(result[0]!.data.info).toEqual({ directory: '/workspace/repos/repo' })
-  })
-
-  it('rewrites session.updated info directory to the remote root', () => {
-    const events: ReplayEvent[] = [
-      {
-        id: 'e1', aggregateID: 'ses_a', seq: 0,
-        type: 'session.updated.2',
-        data: { info: { directory: '/Users/x/repo' } },
-      },
-    ]
-
-    const result = rewriteEventsForRemote(events, ctx)
-
-    expect(result[0]!.data.info).toEqual({ directory: '/workspace/repos/repo' })
+    expect(result.info.location.directory).toBe('/workspace/repos/repo')
   })
 
   it('preserves subdirectories under the repo root', () => {
-    const events: ReplayEvent[] = [
-      {
-        id: 'e1', aggregateID: 'ses_a', seq: 0,
-        type: 'session.created.1',
-        data: { info: { directory: '/Users/x/repo/packages/app' } },
-      },
-    ]
+    const result = rewriteTransferForRemote(makeTransfer([], '/Users/x/repo/packages/app'), ctx)
 
-    const result = rewriteEventsForRemote(events, ctx)
-
-    expect(result[0]!.data.info).toEqual({ directory: '/workspace/repos/repo/packages/app' })
+    expect(result.info.location.directory).toBe('/workspace/repos/repo/packages/app')
   })
 
-  it('rewrites session.next.moved location directory', () => {
-    const events: ReplayEvent[] = [
-      {
-        id: 'e1', aggregateID: 'ses_a', seq: 0,
-        type: 'session.next.moved.1',
-        data: { location: { directory: '/Users/x/repo/src' } },
-      },
-    ]
+  it('rewrites a user file attachment uri under the local root', () => {
+    const result = rewriteTransferForRemote(makeTransfer([userWithFile('/Users/x/repo/src/img.png')]), ctx)
 
-    const result = rewriteEventsForRemote(events, ctx)
-
-    expect(result[0]!.data.location).toEqual({ directory: '/workspace/repos/repo/src' })
+    const files = (result.messages[0] as unknown as { files: { source: { uri: string } }[] }).files
+    expect(files[0]!.source.uri).toBe('/workspace/repos/repo/src/img.png')
   })
 
-  it('rewrites assistant message path cwd and root', () => {
-    const events: ReplayEvent[] = [
-      {
-        id: 'e1', aggregateID: 'ses_a', seq: 3,
-        type: 'message.updated.1',
-        data: { info: { id: 'msg_1', role: 'assistant', path: { cwd: '/Users/x/repo/src', root: '/Users/x/repo' } } },
-      },
-    ]
+  it('rewrites an assistant tool file uri under the local root', () => {
+    const result = rewriteTransferForRemote(makeTransfer([assistantWithToolFile('/Users/x/repo/out.png')]), ctx)
 
-    const result = rewriteEventsForRemote(events, ctx)
-
-    expect(result[0]!.data.info).toEqual({
-      id: 'msg_1',
-      role: 'assistant',
-      path: { cwd: '/workspace/repos/repo/src', root: '/workspace/repos/repo' },
-    })
+    const content = (result.messages[0] as unknown as { content: { state: { content: { uri: string }[] } }[] }).content
+    expect(content[0]!.state.content[0]!.uri).toBe('/workspace/repos/repo/out.png')
   })
 
-  it('leaves message paths outside the local root untouched', () => {
-    const events: ReplayEvent[] = [
-      {
-        id: 'e1', aggregateID: 'ses_a', seq: 3,
-        type: 'message.updated.1',
-        data: { info: { id: 'msg_1', role: 'assistant', path: { cwd: '/Users/x/repo-other', root: '/Users/x/repo-other' } } },
-      },
-      {
-        id: 'e2', aggregateID: 'ses_a', seq: 4,
-        type: 'message.updated.1',
-        data: { info: { id: 'msg_2', role: 'user' } },
-      },
-    ]
+  it('leaves uris outside the local root untouched', () => {
+    const result = rewriteTransferForRemote(makeTransfer([userWithFile('/elsewhere/img.png')]), ctx)
 
-    const result = rewriteEventsForRemote(events, ctx)
-
-    expect(result[0]!.data.info).toEqual({ id: 'msg_1', role: 'assistant', path: { cwd: '/Users/x/repo-other', root: '/Users/x/repo-other' } })
-    expect(result[1]!.data.info).toEqual({ id: 'msg_2', role: 'user' })
+    const files = (result.messages[0] as unknown as { files: { source: { uri: string } }[] }).files
+    expect(files[0]!.source.uri).toBe('/elsewhere/img.png')
   })
 
-  it('strips workspaceID from info', () => {
-    const events: ReplayEvent[] = [
-      {
-        id: 'e1', aggregateID: 'ses_a', seq: 0,
-        type: 'session.created.1',
-        data: { info: { directory: '/Users/x/repo', workspaceID: 'ws_abc' } },
-      },
-    ]
+  it('rewrites a file:// user attachment uri under the local root, preserving encoding', () => {
+    const result = rewriteTransferForRemote(makeTransfer([userWithFile('file:///Users/x/repo/a%20b.png')]), ctx)
 
-    const result = rewriteEventsForRemote(events, ctx)
-
-    expect(result[0]!.data.info).toEqual({ directory: '/workspace/repos/repo' })
-    expect('workspaceID' in result[0]!.data.info).toBe(false)
+    const files = (result.messages[0] as unknown as { files: { source: { uri: string } }[] }).files
+    expect(files[0]!.source.uri).toBe('file:///workspace/repos/repo/a%20b.png')
   })
 
-  it('strips workspaceID from location on moved events', () => {
-    const events: ReplayEvent[] = [
-      {
-        id: 'e1', aggregateID: 'ses_a', seq: 0,
-        type: 'session.next.moved.1',
-        data: { location: { directory: '/Users/x/repo', workspaceID: 'ws_abc' } },
-      },
-    ]
+  it('rewrites a file:// assistant tool file uri under the local root', () => {
+    const result = rewriteTransferForRemote(makeTransfer([assistantWithToolFile('file:///Users/x/repo/out.png')]), ctx)
 
-    const result = rewriteEventsForRemote(events, ctx)
-
-    expect(result[0]!.data.location).toEqual({ directory: '/workspace/repos/repo' })
-    expect('workspaceID' in result[0]!.data.location).toBe(false)
+    const content = (result.messages[0] as unknown as { content: { state: { content: { uri: string }[] } }[] }).content
+    expect(content[0]!.state.content[0]!.uri).toBe('file:///workspace/repos/repo/out.png')
   })
 
-  it('coerces ISO time string in data.timestamp to epoch millis (per 686c820d)', () => {
-    const iso = '2026-07-01T10:00:00.000Z'
-    const events: ReplayEvent[] = [
-      {
-        id: 'e1', aggregateID: 'ses_a', seq: 0,
-        type: 'session.next.agent.switched.1',
-        data: { timestamp: iso, agent: 'code' },
-      },
-    ]
+  it('preserves file:// query and hash when relocating', () => {
+    const result = rewriteTransferForRemote(makeTransfer([userWithFile('file:///Users/x/repo/a.png?v=1#frag')]), ctx)
 
-    const result = rewriteEventsForRemote(events, ctx)
-
-    expect(result[0]!.data.timestamp).toBe(Date.parse(iso))
-    expect(typeof result[0]!.data.timestamp).toBe('number')
+    const files = (result.messages[0] as unknown as { files: { source: { uri: string } }[] }).files
+    expect(files[0]!.source.uri).toBe('file:///workspace/repos/repo/a.png?v=1#frag')
   })
 
-  it('leaves already-numeric timestamp untouched', () => {
-    const epoch = 1778974142967
-    const events: ReplayEvent[] = [
-      {
-        id: 'e1', aggregateID: 'ses_a', seq: 0,
-        type: 'session.next.model.switched.1',
-        data: { timestamp: epoch },
-      },
-    ]
+  it('leaves a file:// uri outside the local root untouched', () => {
+    const uri = 'file:///elsewhere/img.png'
+    const result = rewriteTransferForRemote(makeTransfer([userWithFile(uri)]), ctx)
 
-    const result = rewriteEventsForRemote(events, ctx)
-
-    expect(result[0]!.data.timestamp).toBe(epoch)
+    const files = (result.messages[0] as unknown as { files: { source: { uri: string } }[] }).files
+    expect(files[0]!.source.uri).toBe(uri)
   })
 
-  it('leaves unrelated events untouched without mutating input', () => {
-    const events: ReplayEvent[] = [
-      {
-        id: 'e1', aggregateID: 'ses_a', seq: 0,
-        type: 'session.next.step.ended.2',
-        data: { sessionID: 'ses_a', step: { kind: 'code' } },
-      },
-    ]
-    const frozen = JSON.parse(JSON.stringify(events))
+  it('does not relocate a file:// uri that only shares a prefix with the local root', () => {
+    const uri = 'file:///Users/x/repo-other/img.png'
+    const result = rewriteTransferForRemote(makeTransfer([userWithFile(uri)]), ctx)
 
-    const result = rewriteEventsForRemote(events, ctx)
+    const files = (result.messages[0] as unknown as { files: { source: { uri: string } }[] }).files
+    expect(files[0]!.source.uri).toBe(uri)
+  })
 
-    expect(result[0]!.data).toEqual(frozen[0]!.data)
-    expect(events).toEqual(frozen)
+  it('leaves data uris and external http urls untouched', () => {
+    const dataUri = 'data:image/png;base64,AAAA'
+    const httpUri = 'https://example.com/img.png'
+    const result = rewriteTransferForRemote(makeTransfer([userWithFile(dataUri), userWithFile(httpUri)]), ctx)
+
+    const dataFiles = (result.messages[0] as unknown as { files: { source: { uri: string } }[] }).files
+    const httpFiles = (result.messages[1] as unknown as { files: { source: { uri: string } }[] }).files
+    expect(dataFiles[0]!.source.uri).toBe(dataUri)
+    expect(httpFiles[0]!.source.uri).toBe(httpUri)
+  })
+
+  it('does not mutate a file:// input transfer', () => {
+    const input = makeTransfer([userWithFile('file:///Users/x/repo/a%20b.png')])
+    const frozen = structuredClone(input)
+
+    rewriteTransferForRemote(input, ctx)
+
+    expect(input).toEqual(frozen)
+  })
+
+  it('does not mutate the input transfer', () => {
+    const input = makeTransfer([userWithFile('/Users/x/repo/src/img.png')])
+    const frozen = structuredClone(input)
+
+    rewriteTransferForRemote(input, ctx)
+
+    expect(input).toEqual(frozen)
   })
 })
-
-describe('planReplayBatches', () => {
-  it('splits events into batches of batchSize (default 10)', () => {
-    const events = Array.from({ length: 25 }, (_, i) => ({
-      id: `e${i}`, aggregateID: 'ses_a', seq: i, type: 'append', data: {},
-    }))
-
-    const batches = planReplayBatches(events)
-
-    expect(batches).toHaveLength(3)
-    expect(batches[0]).toHaveLength(10)
-    expect(batches[1]).toHaveLength(10)
-    expect(batches[2]).toHaveLength(5)
-    expect(batches[0]![0]!.seq).toBe(0)
-    expect(batches[1]![0]!.seq).toBe(10)
-    expect(batches[2]![0]!.seq).toBe(20)
-  })
-
-  it('returns a single batch when events fit within batchSize', () => {
-    const events = Array.from({ length: 3 }, (_, i) => ({
-      id: `e${i}`, aggregateID: 'ses_a', seq: i, type: 'append', data: {},
-    }))
-
-    const batches = planReplayBatches(events, 10)
-
-    expect(batches).toHaveLength(1)
-    expect(batches[0]).toHaveLength(3)
-  })
-
-  it('returns empty array for empty events', () => {
-    expect(planReplayBatches([])).toEqual([])
-  })
-})
-
-function makeHistoryEvents(sessionID: string, count: number, opts: { root?: string; types?: string[] } = {}): HistoryEventRow[] {
-  const root = opts.root ?? '/Users/x/repo'
-  const types = opts.types ?? ['session.created.1']
-  return Array.from({ length: count }, (_, i) => ({
-    id: `e${i}`,
-    aggregate_id: sessionID,
-    seq: i,
-    type: types[Math.min(i, types.length - 1)]!,
-    data: { info: { directory: root }, timestamp: '2026-07-01T10:00:00.000Z' },
-  }))
-}
 
 describe('transferSession', () => {
   const input = { sessionID: 'ses_a', localRoot: '/Users/x/repo', remoteDirectory: '/workspace/repos/repo' }
 
-  it('moves a session by replaying its full history in ordered batches', async () => {
-    const history = makeHistoryEvents('ses_a', 25)
-    const replayCalls: { dir: string; events: ReplayEvent[] }[] = []
-
-    const deps: TransferDeps = {
-      fetchLocalHistory: vi.fn().mockResolvedValue(history),
-      replayEvents: vi.fn().mockImplementation(async (dir: string, events: ReplayEvent[]) => {
-        replayCalls.push({ dir, events })
-        return { sessionID: 'ses_a' }
-      }),
-    }
-
-    const result = await transferSession(input, deps)
-
-    expect(result).toEqual({ kind: 'moved', sessionID: 'ses_a', replayedEvents: 25 })
-    expect(replayCalls).toHaveLength(3)
-    expect(replayCalls[0]!.dir).toBe('/workspace/repos/repo')
-    expect(replayCalls[0]!.events).toHaveLength(10)
-    expect(replayCalls[0]!.events[0]!.seq).toBe(0)
-    expect(replayCalls[1]!.events).toHaveLength(10)
-    expect(replayCalls[2]!.events).toHaveLength(5)
-
-    expect(replayCalls[0]!.events[0]!.data.info.directory).toBe('/workspace/repos/repo')
-  })
-
-  it('reports replay progress after each batch', async () => {
-    const history = makeHistoryEvents('ses_a', 25)
+  it('exports, imports the rewritten transfer, and reports progress', async () => {
+    const data = makeTransfer([userWithFile('/Users/x/repo/src/img.png')])
+    const importCalls: { directory: string; data: SessionTransferData }[] = []
     const progress: [number, number][] = []
 
     const deps: TransferDeps = {
-      fetchLocalHistory: vi.fn().mockResolvedValue(history),
-      replayEvents: vi.fn().mockResolvedValue({ sessionID: 'ses_a' }),
-      onProgress: (replayed, total) => progress.push([replayed, total]),
-    }
-
-    await transferSession(input, deps)
-
-    expect(progress).toEqual([[0, 25], [10, 25], [20, 25], [25, 25]])
-  })
-
-  it('reports a missing session', async () => {
-    const deps: TransferDeps = {
-      fetchLocalHistory: vi.fn().mockResolvedValue([]),
-      replayEvents: vi.fn(),
-    }
-
-    const result = await transferSession(input, deps)
-
-    expect(result).toEqual({ kind: 'not-found' })
-    expect(deps.replayEvents).not.toHaveBeenCalled()
-  })
-
-  it('refuses to transfer corrupt history', async () => {
-    const rows: HistoryEventRow[] = [
-      { id: 'e0', aggregate_id: 'ses_a', seq: 0, type: 'session.created.1', data: {} },
-      { id: 'e2', aggregate_id: 'ses_a', seq: 2, type: 'session.updated.2', data: {} },
-    ]
-
-    const deps: TransferDeps = {
-      fetchLocalHistory: vi.fn().mockResolvedValue(rows),
-      replayEvents: vi.fn(),
-    }
-
-    const result = await transferSession(input, deps)
-
-    expect(result).toEqual({ kind: 'corrupt-history', missingSeq: 1 })
-    expect(deps.replayEvents).not.toHaveBeenCalled()
-  })
-
-  it('surfaces replay failure and stops', async () => {
-    const history = makeHistoryEvents('ses_a', 25)
-    let callCount = 0
-
-    const deps: TransferDeps = {
-      fetchLocalHistory: vi.fn().mockResolvedValue(history),
-      replayEvents: vi.fn().mockImplementation(async () => {
-        callCount++
-        if (callCount === 2) throw new Error('Replay diverged')
+      exportSession: vi.fn().mockResolvedValue(data),
+      importSession: vi.fn().mockImplementation(async (directory: string, transferred: SessionTransferData) => {
+        importCalls.push({ directory, data: transferred })
         return { sessionID: 'ses_a' }
       }),
+      onProgress: (transferred, total) => progress.push([transferred, total]),
     }
 
     const result = await transferSession(input, deps)
 
-    expect(result).toEqual({ kind: 'replay-failed', message: 'Replay diverged' })
-    expect(callCount).toBe(2)
+    expect(result).toEqual({ kind: 'moved', sessionID: 'ses_a', replayedEvents: 1 })
+    expect(deps.exportSession).toHaveBeenCalledWith('ses_a')
+    expect(importCalls).toHaveLength(1)
+    expect(importCalls[0]!.directory).toBe('/workspace/repos/repo')
+    expect(importCalls[0]!.data.info.location.directory).toBe('/workspace/repos/repo')
+    const files = (importCalls[0]!.data.messages[0] as unknown as { files: { source: { uri: string } }[] }).files
+    expect(files[0]!.source.uri).toBe('/workspace/repos/repo/src/img.png')
+    expect(progress).toEqual([[0, 1], [1, 1]])
+  })
+
+  it('reports an export failure without importing', async () => {
+    const deps: TransferDeps = {
+      exportSession: vi.fn().mockRejectedValue(new Error('export failed')),
+      importSession: vi.fn(),
+    }
+
+    const result = await transferSession(input, deps)
+
+    expect(result).toEqual({ kind: 'replay-failed', message: 'export failed' })
+    expect(deps.importSession).not.toHaveBeenCalled()
+  })
+
+  it('reports an import failure', async () => {
+    const deps: TransferDeps = {
+      exportSession: vi.fn().mockResolvedValue(makeTransfer()),
+      importSession: vi.fn().mockRejectedValue(new Error('import diverged')),
+    }
+
+    const result = await transferSession(input, deps)
+
+    expect(result).toEqual({ kind: 'replay-failed', message: 'import diverged' })
   })
 })
 

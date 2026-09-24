@@ -55,7 +55,7 @@ import { installAssistantWorkspace } from './services/assistant-mode'
 import { detectSandboxCapability } from './services/sandbox/capability'
 import { SandboxRuntimeService, stopWorkspaceSandboxOnShutdown } from './services/sandbox/runtime'
 import { getOpenCodeImportStatus, syncOpenCodeImport } from './services/opencode-import'
-import { readOpenCodeConfigFile } from './services/opencode-config-file'
+import { readOpenCodeConfigFile, foldLegacyConfigJsonSource, withOpenCodeConfigLock } from './services/opencode-config-file'
 import { seedOpenCodeConfigFile } from './services/opencode-config-apply'
 import { OpenCodeSupervisor } from './services/opencode-supervisor'
 import { OpenCodeRestartCoordinator } from './services/opencode-restart-coordinator'
@@ -112,6 +112,8 @@ let ipcServer: IPCServer | undefined
 const gitAuthService = new GitAuthService()
 let openCodeSupervisor: OpenCodeSupervisor | undefined
 async function ensureOpenCodeConfigFileExists(): Promise<void> {
+  await withOpenCodeConfigLock(foldLegacyConfigJsonSource)
+
   const existing = await readOpenCodeConfigFile()
   if (existing) {
     if (!existing.isValid) {
@@ -222,7 +224,7 @@ try {
 
 const settingsServiceForSchedules = new SettingsService(db)
 const credentialProvider = new CredentialProvider(db)
-const scheduleWorktreeManager = new ScheduleWorktreeManager(gitAuthService, settingsServiceForSchedules, credentialProvider, db, openCodeClient)
+const scheduleWorktreeManager = new ScheduleWorktreeManager(gitAuthService, settingsServiceForSchedules, credentialProvider, db)
 const scheduleService = new ScheduleService(db, openCodeClient, scheduleWorktreeManager)
 const scheduleRunnerInstance = new ScheduleRunner(scheduleService)
 
@@ -255,7 +257,7 @@ sseAggregator.setScheduledSessionsResolver(
   () => scheduleService.getActiveRunSessions(),
 )
 
-const openCodeRestartCoordinator = new OpenCodeRestartCoordinator(openCodeClient, sseAggregator)
+const openCodeRestartCoordinator = new OpenCodeRestartCoordinator(sseAggregator)
 setOpenCodeRestartCoordinator(openCodeRestartCoordinator)
 
 void scheduleRunnerInstance.start()
@@ -277,8 +279,8 @@ protectedApi.route('/repos', createRepoRoutes(db, gitAuthService, scheduleServic
 protectedApi.route('/settings', createSettingsRoutes(db, gitAuthService, openCodeClient, openCodeSupervisor))
   protectedApi.route('/files', createFileRoutes())
   protectedApi.route('/filesystem', createFilesystemRoutes())
-protectedApi.route('/providers', createProvidersRoutes(openCodeClient, openCodeSupervisor))
-protectedApi.route('/oauth', createOAuthRoutes(openCodeClient, openCodeSupervisor))
+protectedApi.route('/providers', createProvidersRoutes(openCodeClient))
+protectedApi.route('/oauth', createOAuthRoutes(openCodeClient))
 protectedApi.route('/tts', createTTSRoutes(db))
 protectedApi.route('/stt', createSTTRoutes(db))
 protectedApi.route('/sse', createSSERoutes())

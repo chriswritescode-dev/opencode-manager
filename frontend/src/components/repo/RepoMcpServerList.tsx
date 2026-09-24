@@ -4,7 +4,7 @@ import { Badge } from '@/components/ui/badge'
 import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger } from '@/components/ui/dropdown-menu'
 import { DropdownMenuSeparator } from '@/components/ui/dropdown-menu'
 import { Loader2, XCircle, AlertCircle, Plug, Shield, Key, RefreshCw, ChevronDown } from 'lucide-react'
-import type { McpStatus, McpServerConfig } from '@/api/mcp'
+import type { McpStatus } from '@/api/mcp'
 
 
 interface RepoMcpServerListProps {
@@ -12,7 +12,6 @@ interface RepoMcpServerListProps {
   serverIds: string[]
   isLoadingStatus: boolean
   localStatus: Record<string, McpStatus>
-  mcpServers: Record<string, McpServerConfig>
   toggleMutation: {
     mutate: (variables: { serverId: string; enable: boolean }) => void
     isPending: boolean
@@ -30,7 +29,6 @@ export function RepoMcpServerList({
   serverIds,
   isLoadingStatus,
   localStatus,
-  mcpServers,
   toggleMutation,
   removeAuthMutation,
   onAuthClick,
@@ -41,32 +39,14 @@ export function RepoMcpServerList({
     return name.charAt(0).toUpperCase() + name.slice(1)
   }
 
-  const getDescription = (serverConfig: McpServerConfig): string => {
-    if (serverConfig.type === 'local' && serverConfig.command) {
-      const command = serverConfig.command.join(' ')
-      if (command.includes('filesystem')) return 'File system access'
-      if (command.includes('git')) return 'Git repository operations'
-      if (command.includes('sqlite')) return 'SQLite database access'
-      if (command.includes('postgres')) return 'PostgreSQL database access'
-      if (command.includes('brave-search')) return 'Web search via Brave'
-      if (command.includes('github')) return 'GitHub repository access'
-      if (command.includes('slack')) return 'Slack integration'
-      if (command.includes('puppeteer')) return 'Web automation'
-      if (command.includes('fetch')) return 'HTTP requests'
-      if (command.includes('memory')) return 'Persistent memory'
-      return `Local: ${command}`
-    } else if (serverConfig.type === 'remote' && serverConfig.url) {
-      return serverConfig.url
-    }
-    return 'MCP server'
-  }
-
   const getStatusBadge = (status?: McpStatus) => {
     if (!status) return null
 
     switch (status.status) {
       case 'connected':
         return <Badge variant="default" className="text-xs bg-green-600">Connected</Badge>
+      case 'pending':
+        return <Badge variant="outline" className="text-xs">Connecting</Badge>
       case 'disabled':
         return <Badge className="text-xs bg-gray-700 text-gray-300 border-gray-600 dark:bg-gray-700 dark:text-gray-300 dark:border-gray-600">Disabled</Badge>
       case 'failed':
@@ -103,15 +83,11 @@ export function RepoMcpServerList({
       ) : (
         <div className="space-y-3">
           {serverIds.map((serverId) => {
-            const serverConfig = mcpServers[serverId]
             const status = localStatus[serverId]
             const isConnected = status?.status === 'connected'
             const needsAuth = status?.status === 'needs_auth'
             const failed = status?.status === 'failed'
-            const isRemote = serverConfig?.type === 'remote'
-            const hasOAuthConfig = isRemote && !!serverConfig?.oauth
-            const hasOAuthError = failed && isRemote && !!status?.error && /oauth|auth.*state/i.test(status.error)
-            const isOAuthServer = hasOAuthConfig || hasOAuthError || (needsAuth && isRemote)
+            const isOAuthServer = !!status?.integrationID
             const connectedWithOAuth = isOAuthServer && isConnected
             const showAuthButton = needsAuth || (isOAuthServer && failed)
 
@@ -180,9 +156,6 @@ export function RepoMcpServerList({
                       getStatusBadge(status)
                     )}
                   </div>
-                  <p className="text-xs text-muted-foreground truncate">
-                    {serverConfig ? getDescription(serverConfig) : 'MCP server'}
-                  </p>
                   {failed && status.status === 'failed' && (
                     <div className="flex items-center gap-1 mt-1 text-xs text-red-500">
                       <XCircle className="w-3 h-3 flex-shrink-0" />

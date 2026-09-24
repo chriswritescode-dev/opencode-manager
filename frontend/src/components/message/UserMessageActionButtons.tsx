@@ -4,7 +4,6 @@ import { useUndoMessage } from '@/hooks/useUndoMessage'
 import { useMobile } from '@/hooks/useMobile'
 
 interface UserMessageActionButtonsProps {
-  opcodeUrl: string
   sessionId: string
   directory?: string
   userMessageId: string
@@ -13,7 +12,6 @@ interface UserMessageActionButtonsProps {
 }
 
 export const UserMessageActionButtons = memo(function UserMessageActionButtons({
-  opcodeUrl,
   sessionId,
   directory,
   userMessageId,
@@ -22,7 +20,6 @@ export const UserMessageActionButtons = memo(function UserMessageActionButtons({
 }: UserMessageActionButtonsProps) {
   const isMobile = useMobile()
   const undoMessage = useUndoMessage({ 
-    opcodeUrl, 
     sessionId, 
     directory,
     onSuccess: onUndo

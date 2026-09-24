@@ -1,16 +1,34 @@
 import { describe, it, expect } from 'vitest'
 import { getMessagesContentVersion } from '../sessionContentVersion'
-import type { MessageWithParts } from '@/api/types'
+import type {
+  SessionMessageAssistant,
+  SessionMessageAssistantTool,
+  SessionMessageInfo,
+} from '@opencode-manager/shared/opencode'
 
-const baseMessage: Pick<MessageWithParts['info'], 'id' | 'role' | 'time'> = {
+const makeAssistant = (content: SessionMessageAssistant['content']): SessionMessageInfo => ({
   id: 'msg-1',
-  role: 'assistant',
-  time: { start: 1000 },
-}
+  type: 'assistant',
+  agent: 'build',
+  model: { providerID: 'p', id: 'm' },
+  time: { created: 1000, completed: 2000 },
+  content,
+})
 
-function makeMessage(parts: MessageWithParts['parts']): MessageWithParts {
-  return { info: { ...baseMessage, id: 'msg-1' }, parts }
-}
+const makeUser = (text: string): SessionMessageInfo => ({
+  id: 'msg-1',
+  type: 'user',
+  text,
+  time: { created: 1000 },
+})
+
+const makeTool = (state: SessionMessageAssistantTool['state']): SessionMessageAssistantTool => ({
+  type: 'tool',
+  id: 'p1',
+  name: 'read',
+  state,
+  time: { created: 1000 },
+})
 
 describe('getMessagesContentVersion', () => {
   it('returns 0 for undefined', () => {
@@ -22,144 +40,112 @@ describe('getMessagesContentVersion', () => {
   })
 
   it('is stable across two calls with the same input', () => {
-    const msgs = [makeMessage([
-      { type: 'text', id: 'p1', sessionID: 's1', messageID: 'm1', text: 'hello' },
-    ])]
+    const msgs = [makeAssistant([{ type: 'text', text: 'hello' }])]
     const v1 = getMessagesContentVersion(msgs)
     const v2 = getMessagesContentVersion(msgs)
     expect(v1).toBe(v2)
   })
 
   it('changes when a text part text is extended', () => {
-    const msgs = [makeMessage([
-      { type: 'text', id: 'p1', sessionID: 's1', messageID: 'm1', text: 'hello' },
-    ])]
-    const v1 = getMessagesContentVersion(msgs)
-
-    const msgs2 = [makeMessage([
-      { type: 'text', id: 'p1', sessionID: 's1', messageID: 'm1', text: 'hello world' },
-    ])]
-    const v2 = getMessagesContentVersion(msgs2)
+    const v1 = getMessagesContentVersion([makeAssistant([{ type: 'text', text: 'hello' }])])
+    const v2 = getMessagesContentVersion([makeAssistant([{ type: 'text', text: 'hello world' }])])
 
     expect(v2).not.toBe(v1)
   })
 
   it('changes when a tool part output changes', () => {
-    const msgs = [makeMessage([
-      {
-        type: 'tool', id: 'p1', sessionID: 's1', messageID: 'm1',
-        callID: 'c1', tool: 'read',
-        state: { status: 'completed' as const, input: {}, output: 'foo', title: 't', metadata: {}, time: { start: 1000, end: 2000 } },
-      },
-    ])]
-    const v1 = getMessagesContentVersion(msgs)
+    const v1 = getMessagesContentVersion([
+      makeAssistant([
+        makeTool({ status: 'completed', input: {}, content: [{ type: 'text', text: 'foo' }], metadata: {} }),
+      ]),
+    ])
 
-    const msgs2 = [makeMessage([
-      {
-        type: 'tool', id: 'p1', sessionID: 's1', messageID: 'm1',
-        callID: 'c1', tool: 'read',
-        state: { status: 'completed' as const, input: {}, output: 'foobar', title: 't', metadata: {}, time: { start: 1000, end: 2000 } },
-      },
-    ])]
-    const v2 = getMessagesContentVersion(msgs2)
+    const v2 = getMessagesContentVersion([
+      makeAssistant([
+        makeTool({ status: 'completed', input: {}, content: [{ type: 'text', text: 'foobar' }], metadata: {} }),
+      ]),
+    ])
 
     expect(v2).not.toBe(v1)
   })
 
   it('changes when a tool part status transitions', () => {
-    const pendingMsgs = [makeMessage([
-      {
-        type: 'tool', id: 'p1', sessionID: 's1', messageID: 'm1',
-        callID: 'c1', tool: 'read',
-        state: { status: 'pending' as const, input: {}, raw: '{}' },
-      },
-    ])]
-    const vPending = getMessagesContentVersion(pendingMsgs)
+    const vStreaming = getMessagesContentVersion([
+      makeAssistant([makeTool({ status: 'streaming', input: '{"path"' })]),
+    ])
 
-    const runningMsgs = [makeMessage([
-      {
-        type: 'tool', id: 'p1', sessionID: 's1', messageID: 'm1',
-        callID: 'c1', tool: 'read',
-        state: { status: 'running' as const, input: {}, time: { start: 1000 } },
-      },
-    ])]
-    const vRunning = getMessagesContentVersion(runningMsgs)
+    const vRunning = getMessagesContentVersion([
+      makeAssistant([makeTool({ status: 'running', input: {}, metadata: {} })]),
+    ])
 
-    expect(vRunning).not.toBe(vPending)
+    expect(vRunning).not.toBe(vStreaming)
   })
 
   it('changes when a tool part has an error', () => {
-    const msgsOk = [makeMessage([
-      {
-        type: 'tool', id: 'p1', sessionID: 's1', messageID: 'm1',
-        callID: 'c1', tool: 'read',
-        state: { status: 'completed' as const, input: {}, output: '', title: 't', metadata: {}, time: { start: 1000, end: 2000 } },
-      },
-    ])]
-    const vOk = getMessagesContentVersion(msgsOk)
+    const vOk = getMessagesContentVersion([
+      makeAssistant([
+        makeTool({ status: 'completed', input: {}, content: [{ type: 'text', text: '' }], metadata: {} }),
+      ]),
+    ])
 
-    const msgsError = [makeMessage([
-      {
-        type: 'tool', id: 'p1', sessionID: 's1', messageID: 'm1',
-        callID: 'c1', tool: 'read',
-        state: { status: 'error' as const, input: {}, error: 'Failed to read', metadata: {}, time: { start: 1000, end: 2000 } },
-      },
-    ])]
-    const vError = getMessagesContentVersion(msgsError)
+    const vError = getMessagesContentVersion([
+      makeAssistant([
+        makeTool({
+          status: 'error',
+          input: {},
+          error: { type: 'tool.failed', message: 'Failed to read' },
+          metadata: {},
+        }),
+      ]),
+    ])
 
     expect(vError).not.toBe(vOk)
   })
 
   it('accounts for reasoning part text length', () => {
-    const msgs = [makeMessage([
-      { type: 'reasoning', id: 'p1', sessionID: 's1', messageID: 'm1', text: 'thinking...' },
-    ])]
+    const msgs = [makeAssistant([{ type: 'reasoning', text: 'thinking...' }])]
     expect(getMessagesContentVersion(msgs)).toBeGreaterThan(0)
   })
 
   it('changes when tool status transitions between same-length strings', () => {
-    // 'pending' and 'running' are both 7 characters – length-only
-    // versioning would miss this.
-    const pendingMsgs = [makeMessage([
-      {
-        type: 'tool', id: 'p1', sessionID: 's1', messageID: 'm1',
-        callID: 'c1', tool: 'read',
-        state: { status: 'pending' as const, input: {} },
-      },
-    ])]
-    const vPending = getMessagesContentVersion(pendingMsgs)
+    const vRunning = getMessagesContentVersion([
+      makeAssistant([makeTool({ status: 'running', input: {}, metadata: {} })]),
+    ])
 
-    const runningMsgs = [makeMessage([
-      {
-        type: 'tool', id: 'p1', sessionID: 's1', messageID: 'm1',
-        callID: 'c1', tool: 'read',
-        state: { status: 'running' as const, input: {} },
-      },
-    ])]
-    const vRunning = getMessagesContentVersion(runningMsgs)
+    const vError = getMessagesContentVersion([
+      makeAssistant([
+        makeTool({
+          status: 'error',
+          input: {},
+          error: { type: 'tool.failed', message: 'failed' },
+          metadata: {},
+        }),
+      ]),
+    ])
 
-    expect(vRunning).not.toBe(vPending)
+    expect(vError).not.toBe(vRunning)
   })
 
   it('changes when tool output changes to different text of the same length', () => {
-    const msgsFoo = [makeMessage([
-      {
-        type: 'tool', id: 'p1', sessionID: 's1', messageID: 'm1',
-        callID: 'c1', tool: 'read',
-        state: { status: 'completed' as const, input: {}, output: 'foo', metadata: {}, time: { start: 1000, end: 2000 } },
-      },
-    ])]
-    const vFoo = getMessagesContentVersion(msgsFoo)
+    const vFoo = getMessagesContentVersion([
+      makeAssistant([
+        makeTool({ status: 'completed', input: {}, content: [{ type: 'text', text: 'foo' }], metadata: {} }),
+      ]),
+    ])
 
-    const msgsBar = [makeMessage([
-      {
-        type: 'tool', id: 'p1', sessionID: 's1', messageID: 'm1',
-        callID: 'c1', tool: 'read',
-        state: { status: 'completed' as const, input: {}, output: 'bar', metadata: {}, time: { start: 1000, end: 2000 } },
-      },
-    ])]
-    const vBar = getMessagesContentVersion(msgsBar)
+    const vBar = getMessagesContentVersion([
+      makeAssistant([
+        makeTool({ status: 'completed', input: {}, content: [{ type: 'text', text: 'bar' }], metadata: {} }),
+      ]),
+    ])
 
     expect(vBar).not.toBe(vFoo)
+  })
+
+  it('accounts for user message text', () => {
+    const v1 = getMessagesContentVersion([makeUser('hello')])
+    const v2 = getMessagesContentVersion([makeUser('hello world')])
+
+    expect(v2).not.toBe(v1)
   })
 })

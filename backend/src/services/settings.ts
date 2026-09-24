@@ -1,4 +1,5 @@
 import { Database } from 'bun:sqlite'
+import { randomBytes } from 'node:crypto'
 import { logger } from '../utils/logger'
 import { parseJsonc } from '@opencode-manager/shared/utils'
 import { encryptSecret, decryptSecret } from '../utils/crypto'
@@ -11,6 +12,11 @@ import {
   UserPreferencesSchema,
   DEFAULT_USER_PREFERENCES,
 } from '../types/settings'
+
+const CUSTOM_OPENCODE_SERVER_PASSWORD_KEY = 'opencode_server_password'
+const MANAGED_OPENCODE_SERVER_PASSWORD_KEY = 'opencode_server_managed_password'
+
+export type OpenCodeServerPasswordSource = 'db' | 'env' | 'managed'
 
 interface OpenCodeServerPasswordState {
   value: string
@@ -124,26 +130,59 @@ export class SettingsService {
     logger.info('Saved last known good config')
   }
 
-  getOpenCodeServerPassword(): string {
-    const row = this.db.prepare('SELECT value FROM app_secrets WHERE key = ?').get('opencode_server_password') as { value: string } | undefined
+  private readSecret(key: string): string | null {
+    const row = this.db.prepare('SELECT value FROM app_secrets WHERE key = ?').get(key) as { value: string } | undefined
     if (!row) {
-      return ENV.OPENCODE.SERVER_PASSWORD
+      return null
     }
     try {
       return decryptSecret(row.value)
     } catch (error) {
-      logger.error('Failed to decrypt opencode_server_password, falling back to env', error)
-      return ENV.OPENCODE.SERVER_PASSWORD
+      logger.error(`Failed to decrypt ${key}`, error)
+      return null
     }
   }
 
-  hasStoredOpenCodeServerPassword(): boolean {
-    const row = this.db.prepare('SELECT 1 FROM app_secrets WHERE key = ?').get('opencode_server_password')
-    return Boolean(row)
+  getOrCreateManagedOpenCodeServerPassword(): string {
+    const existing = this.readSecret(MANAGED_OPENCODE_SERVER_PASSWORD_KEY)
+    if (existing !== null) {
+      return existing
+    }
+
+    const password = randomBytes(32).toString('base64url')
+    const now = Date.now()
+    this.db.prepare(`
+      INSERT INTO app_secrets (key, value, created_at, updated_at) VALUES (?, ?, ?, ?)
+      ON CONFLICT(key) DO NOTHING
+    `).run(MANAGED_OPENCODE_SERVER_PASSWORD_KEY, encryptSecret(password), now, now)
+
+    const stored = this.readSecret(MANAGED_OPENCODE_SERVER_PASSWORD_KEY)
+    if (stored === null) {
+      throw new Error('Failed to persist the managed OpenCode server password')
+    }
+    return stored
+  }
+
+  getOpenCodeServerPassword(): string {
+    const stored = this.readSecret(CUSTOM_OPENCODE_SERVER_PASSWORD_KEY)
+    if (stored !== null) {
+      return stored
+    }
+    if (ENV.OPENCODE.SERVER_PASSWORD) {
+      return ENV.OPENCODE.SERVER_PASSWORD
+    }
+    return this.getOrCreateManagedOpenCodeServerPassword()
+  }
+
+  getOpenCodeServerPasswordSource(): OpenCodeServerPasswordSource {
+    if (this.readSecret(CUSTOM_OPENCODE_SERVER_PASSWORD_KEY) !== null) {
+      return 'db'
+    }
+    return ENV.OPENCODE.SERVER_PASSWORD ? 'env' : 'managed'
   }
 
   getStoredOpenCodeServerPasswordState(): OpenCodeServerPasswordState | null {
-    const row = this.db.prepare('SELECT value, created_at, updated_at FROM app_secrets WHERE key = ?').get('opencode_server_password') as { value: string; created_at: number; updated_at: number } | undefined
+    const row = this.db.prepare('SELECT value, created_at, updated_at FROM app_secrets WHERE key = ?').get(CUSTOM_OPENCODE_SERVER_PASSWORD_KEY) as { value: string; created_at: number; updated_at: number } | undefined
     if (!row) {
       return null
     }
@@ -164,7 +203,7 @@ export class SettingsService {
     this.db.prepare(`
       INSERT INTO app_secrets (key, value, created_at, updated_at) VALUES (?, ?, ?, ?)
       ON CONFLICT(key) DO UPDATE SET value = excluded.value, created_at = excluded.created_at, updated_at = excluded.updated_at
-    `).run('opencode_server_password', state.value, state.createdAt, state.updatedAt)
+    `).run(CUSTOM_OPENCODE_SERVER_PASSWORD_KEY, state.value, state.createdAt, state.updatedAt)
   }
 
   setOpenCodeServerPassword(password: string): void {
@@ -173,10 +212,10 @@ export class SettingsService {
     this.db.prepare(`
       INSERT INTO app_secrets (key, value, created_at, updated_at) VALUES (?, ?, ?, ?)
       ON CONFLICT(key) DO UPDATE SET value = excluded.value, updated_at = excluded.updated_at
-    `).run('opencode_server_password', encrypted, now, now)
+    `).run(CUSTOM_OPENCODE_SERVER_PASSWORD_KEY, encrypted, now, now)
   }
 
   clearOpenCodeServerPassword(): void {
-    this.db.prepare('DELETE FROM app_secrets WHERE key = ?').run('opencode_server_password')
+    this.db.prepare('DELETE FROM app_secrets WHERE key = ?').run(CUSTOM_OPENCODE_SERVER_PASSWORD_KEY)
   }
 }

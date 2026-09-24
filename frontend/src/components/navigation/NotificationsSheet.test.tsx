@@ -2,7 +2,7 @@ import { render, screen, fireEvent } from '@testing-library/react'
 import { describe, it, expect, vi } from 'vitest'
 import { MemoryRouter } from 'react-router-dom'
 import { NotificationsSheet } from './NotificationsSheet'
-import { usePermissions, useQuestions } from '@/contexts/EventContext'
+import { usePermissions, useForms } from '@/contexts/EventContext'
 
 vi.mock('@/contexts/EventContext')
 
@@ -19,17 +19,15 @@ describe('NotificationsSheet', () => {
       current: null,
       respond: vi.fn(),
       dismiss: vi.fn(),
-      getForCallID: vi.fn(),
       hasForSession: vi.fn(),
     })
-    vi.mocked(useQuestions).mockReturnValue({
+    vi.mocked(useForms).mockReturnValue({
       pendingCount: 0,
       navigateToCurrent: vi.fn(),
       current: null,
       reply: vi.fn(),
-      reject: vi.fn(),
+      cancel: vi.fn(),
       dismiss: vi.fn(),
-      getForCallID: vi.fn(),
       hasForSession: vi.fn(),
     })
     const handleClose = vi.fn()
@@ -48,28 +46,21 @@ describe('NotificationsSheet', () => {
       current: {
         id: 'perm-1',
         sessionID: 'session-1',
-        permission: 'write',
-        patterns: ['/test/pattern'],
+        action: 'shell',
+        resources: ['/test/pattern'],
         metadata: {},
-        always: [],
-        tool: {
-          messageID: 'msg-1',
-          callID: 'call-1',
-        },
       },
       respond: vi.fn(),
       dismiss: vi.fn(),
-      getForCallID: vi.fn(),
       hasForSession: vi.fn(),
     })
-    vi.mocked(useQuestions).mockReturnValue({
+    vi.mocked(useForms).mockReturnValue({
       pendingCount: 0,
       navigateToCurrent: vi.fn(),
       current: null,
       reply: vi.fn(),
-      reject: vi.fn(),
+      cancel: vi.fn(),
       dismiss: vi.fn(),
-      getForCallID: vi.fn(),
       hasForSession: vi.fn(),
     })
     const handleClose = vi.fn()
@@ -78,10 +69,11 @@ describe('NotificationsSheet', () => {
       { wrapper: ({ children }) => <MemoryRouter>{children}</MemoryRouter> },
     )
     expect(screen.getByText('Pending permissions')).toBeInTheDocument()
+    expect(screen.getByText('Run Command')).toBeInTheDocument()
     expect(screen.getByText('+1 more')).toBeInTheDocument()
   })
 
-  it('renders question section with pending count', () => {
+  it('renders form section with pending count', () => {
     vi.mocked(usePermissions).mockReturnValue({
       pendingCount: 0,
       setShowDialog: vi.fn(),
@@ -89,29 +81,20 @@ describe('NotificationsSheet', () => {
       current: null,
       respond: vi.fn(),
       dismiss: vi.fn(),
-      getForCallID: vi.fn(),
       hasForSession: vi.fn(),
     })
-    vi.mocked(useQuestions).mockReturnValue({
+    vi.mocked(useForms).mockReturnValue({
       pendingCount: 1,
       navigateToCurrent: vi.fn(),
       current: {
-        id: 'q-1',
+        id: 'form-1',
         sessionID: 'session-1',
-        questions: [{
-          question: 'Test question',
-          options: [],
-        }],
-        metadata: {},
-        tool: {
-          messageID: 'msg-1',
-          callID: 'call-1',
-        },
+        title: 'Test question',
+        fields: [{ key: 'q0', type: 'string', options: [] }],
       },
       reply: vi.fn(),
-      reject: vi.fn(),
+      cancel: vi.fn(),
       dismiss: vi.fn(),
-      getForCallID: vi.fn(),
       hasForSession: vi.fn(),
     })
     const handleClose = vi.fn()
@@ -119,7 +102,7 @@ describe('NotificationsSheet', () => {
       <NotificationsSheet isOpen onClose={handleClose} />,
       { wrapper: ({ children }) => <MemoryRouter>{children}</MemoryRouter> },
     )
-    expect(screen.getByText('Pending questions')).toBeInTheDocument()
+    expect(screen.getByText('Pending forms')).toBeInTheDocument()
     expect(screen.getByText('Test question')).toBeInTheDocument()
   })
 
@@ -134,28 +117,21 @@ describe('NotificationsSheet', () => {
       current: {
         id: 'perm-1',
         sessionID: 'session-1',
-        permission: 'write',
-        patterns: ['/test/pattern'],
+        action: 'shell',
+        resources: ['/test/pattern'],
         metadata: {},
-        always: [],
-        tool: {
-          messageID: 'msg-1',
-          callID: 'call-1',
-        },
       },
       respond: vi.fn(),
       dismiss: vi.fn(),
-      getForCallID: vi.fn(),
       hasForSession: vi.fn(),
     })
-    vi.mocked(useQuestions).mockReturnValue({
+    vi.mocked(useForms).mockReturnValue({
       pendingCount: 0,
       navigateToCurrent: vi.fn(),
       current: null,
       reply: vi.fn(),
-      reject: vi.fn(),
+      cancel: vi.fn(),
       dismiss: vi.fn(),
-      getForCallID: vi.fn(),
       hasForSession: vi.fn(),
     })
     render(
@@ -168,8 +144,8 @@ describe('NotificationsSheet', () => {
     expect(handleClose).toHaveBeenCalled()
   })
 
-  it('calls navigateToCurrent and onClose when question is clicked', () => {
-    const navigateToQuestionMock = vi.fn()
+  it('calls navigateToCurrent and onClose when form is clicked', () => {
+    const navigateToFormMock = vi.fn()
     const handleClose = vi.fn()
     vi.mocked(usePermissions).mockReturnValue({
       pendingCount: 0,
@@ -178,29 +154,20 @@ describe('NotificationsSheet', () => {
       current: null,
       respond: vi.fn(),
       dismiss: vi.fn(),
-      getForCallID: vi.fn(),
       hasForSession: vi.fn(),
     })
-    vi.mocked(useQuestions).mockReturnValue({
+    vi.mocked(useForms).mockReturnValue({
       pendingCount: 1,
-      navigateToCurrent: navigateToQuestionMock,
+      navigateToCurrent: navigateToFormMock,
       current: {
-        id: 'q-1',
+        id: 'form-1',
         sessionID: 'session-1',
-        questions: [{
-          question: 'Test question',
-          options: [],
-        }],
-        metadata: {},
-        tool: {
-          messageID: 'msg-1',
-          callID: 'call-1',
-        },
+        title: 'Test question',
+        fields: [{ key: 'q0', type: 'string', options: [] }],
       },
       reply: vi.fn(),
-      reject: vi.fn(),
+      cancel: vi.fn(),
       dismiss: vi.fn(),
-      getForCallID: vi.fn(),
       hasForSession: vi.fn(),
     })
     render(
@@ -208,7 +175,7 @@ describe('NotificationsSheet', () => {
       { wrapper: ({ children }) => <MemoryRouter>{children}</MemoryRouter> },
     )
     fireEvent.click(screen.getByText('Test question'))
-    expect(navigateToQuestionMock).toHaveBeenCalled()
+    expect(navigateToFormMock).toHaveBeenCalled()
     expect(handleClose).toHaveBeenCalled()
   })
 })

@@ -9,7 +9,7 @@ export interface PartitionedSessions {
 export function partitionSessions(
   sessions: Session[],
   pinnedKeys: Set<string>,
-  keyFn: (session: { id: string; directory?: string }) => string,
+  keyFn: (session: Session) => string,
   now: number = Date.now(),
 ): PartitionedSessions {
   const startOfDay = new Date(now)

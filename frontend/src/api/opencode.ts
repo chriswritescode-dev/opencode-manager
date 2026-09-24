@@ -1,356 +1,373 @@
-import type { paths } from './opencode-types'
-import { fetchWrapper, fetchWrapperVoid } from './fetchWrapper'
+import { openCodeApi, toFetchError } from './opencodeApi'
+import type {
+  CommandInfo,
+  FormAnswer,
+  FormInfo,
+  ModelRef,
+  PermissionRequest,
+  PromptMention,
+  SessionInboxCompaction,
+  SessionInboxUser,
+  SessionInfo,
+  SessionMessageInfo,
+  SessionRevert,
+} from '@opencode-manager/shared/opencode'
+import type { SessionSnapshot } from '@/lib/session-projection'
 
-type SessionListResponse = paths['/session']['get']['responses']['200']['content']['application/json']
-type SessionResponse = paths['/session/{sessionID}']['get']['responses']['200']['content']['application/json']
-type SessionListParams = NonNullable<paths['/session']['get']['parameters']['query']> & {
-  roots?: boolean
-}
-type CreateSessionRequest = NonNullable<paths['/session']['post']['requestBody']>['content']['application/json']
-type MessageListResponse = paths['/session/{sessionID}/message']['get']['responses']['200']['content']['application/json']
-type SendPromptAsyncRequest = NonNullable<paths['/session/{sessionID}/prompt_async']['post']['requestBody']>['content']['application/json']
-type ConfigResponse = paths['/config']['get']['responses']['200']['content']['application/json']
-type CommandListResponse = paths['/command']['get']['responses']['200']['content']['application/json']
-type CommandRequest = NonNullable<paths['/session/{sessionID}/command']['post']['requestBody']>['content']['application/json']
-type SendCommandResponse = paths['/session/{sessionID}/command']['post']['responses']['200']['content']['application/json']
-type ShellRequest = NonNullable<paths['/session/{sessionID}/shell']['post']['requestBody']>['content']['application/json']
-type AgentListResponse = paths['/agent']['get']['responses']['200']['content']['application/json']
-type PermissionListResponse = paths['/permission']['get']['responses']['200']['content']['application/json']
-type QuestionListResponse = paths['/question']['get']['responses']['200']['content']['application/json']
-type LspStatusResponse = paths['/lsp']['get']['responses']['200']['content']['application/json']
-type LspStatus = LspStatusResponse[number]
-
-type LegacySession = SessionListResponse[number]
-
-/** Pre-v1.16.0 session shape returned by /api/session */
-type SessionV2InfoV1 = {
-  id: string
-  parentID?: string
-  projectID: string
-  workspaceID?: string
-  title: string
-  time: { created: number; updated: number; compacting?: number; archived?: number }
-  path?: unknown
+export interface PromptFileInput {
+  uri: string
+  name?: string
+  description?: string
+  mention?: PromptMention
 }
 
-/** v1.16.0+ session shape returned by /api/session */
-type SessionV2InfoV2 = {
+export interface PromptAgentInput {
+  name: string
+  mention?: PromptMention
+}
+
+export interface PromptSkillInput {
   id: string
-  parentID?: string
-  projectID: string
-  title: string
-  time: { created: number; updated: number; archived?: number }
-  location: { directory: string; workspaceID?: string }
+  mention?: PromptMention
+}
+
+export interface SessionPage {
+  items: SessionInfo[]
+  nextCursor?: string
+}
+
+export interface SessionPageInput {
+  directory: string
+  limit?: number
+  order?: 'asc' | 'desc'
+  search?: string
+  cursor?: string
+}
+
+export interface CreateSessionInput {
+  directory?: string
+  title?: string
   agent?: string
-  model?: { id: string; providerID: string; variant?: string }
-  cost: number
-  tokens: { input: number; output: number; reasoning: number; cache: { read: number; write: number } }
-  subpath?: string
+  model?: string
 }
 
-type SessionV2Info = SessionV2InfoV1 | SessionV2InfoV2
-type SessionPageCursor = { previous?: string; next?: string }
-
-/** Response from /api/session — may be old (items) or new (data) format */
-type SessionPageResponse = {
-  data?: SessionV2InfoV2[]
-  items?: SessionV2InfoV1[]
-  cursor?: SessionPageCursor
-}
-type SessionPageParams = { limit?: number; order?: 'asc' | 'desc'; search?: string; cursor?: string }
-type SessionPage = { items: LegacySession[]; nextCursor?: string }
-
-function isNewSession(session: SessionV2Info): session is SessionV2InfoV2 {
-  return 'location' in session && session.location !== undefined
+export interface FindFilesInput {
+  directory?: string
+  query: string
+  limit?: number
 }
 
-function toLegacySession(session: SessionV2Info, directory?: string): LegacySession {
-  if (isNewSession(session)) {
-    return {
-      id: session.id,
-      projectID: session.projectID,
-      workspaceID: session.location.workspaceID,
-      directory: directory ?? session.location.directory ?? '',
-      parentID: session.parentID,
-      title: session.title || 'Untitled Session',
-      version: 'v2',
-      time: session.time,
-    } as LegacySession
-  }
-  return {
-    id: session.id,
-    projectID: session.projectID,
-    workspaceID: session.workspaceID,
-    directory: directory ?? '',
-    parentID: session.parentID,
-    title: session.title || 'Untitled Session',
-    version: 'v2',
-    time: session.time,
-  } as LegacySession
+export interface SessionMessagesPage {
+  messages: SessionMessageInfo[]
+  nextCursor?: string
 }
 
-export type { SendCommandResponse, LspStatus }
+export interface SessionMessagesInput {
+  cursor?: string
+  limit?: number
+}
 
-export class OpenCodeClient {
-  private baseURL: string
-  private directory?: string
+export interface SendPromptInput {
+  sessionID: string
+  text: string
+  files?: PromptFileInput[]
+  agents?: PromptAgentInput[]
+  skills?: PromptSkillInput[]
+  delivery?: 'steer' | 'queue'
+}
 
-  constructor(baseURL: string, directory?: string) {
-    this.baseURL = baseURL
-    this.directory = directory
-  }
+export interface RunCommandInput {
+  sessionID: string
+  name: string
+  text: string
+  files?: PromptFileInput[]
+  agents?: PromptAgentInput[]
+  skills?: PromptSkillInput[]
+  delivery?: 'steer' | 'queue'
+}
 
-  setDirectory(directory: string) {
-    this.directory = directory
-  }
+export function parseModelRef(model: string): ModelRef | undefined {
+  const [providerID, ...rest] = model.split('/')
+  const [id, variant] = rest.join('/').split('#')
+  if (!providerID || !id) return undefined
+  return { providerID, id, ...(variant ? { variant } : {}) }
+}
 
-  private getParams(params?: Record<string, string | number | boolean | undefined>) {
-    if (!this.directory) return params
-    return { ...params, directory: this.directory }
-  }
-
-  async listSessions(params?: SessionListParams) {
-    return fetchWrapper<SessionListResponse>(`${this.baseURL}/session`, {
-      params: this.getParams(params),
+export async function listSessionPage(input: SessionPageInput): Promise<SessionPage> {
+  try {
+    const { data, cursor } = await openCodeApi.session.list({
+      directory: input.directory,
+      parentID: 'null',
+      limit: input.limit,
+      order: input.order,
+      search: input.search,
+      cursor: input.cursor,
     })
+    return { items: data, nextCursor: cursor.next ?? undefined }
+  } catch (error) {
+    throw toFetchError(error)
   }
+}
 
-  async listSessionsPage(params?: SessionPageParams): Promise<SessionPage> {
-    const isCursorRequest = params?.cursor !== undefined
-    const queryParams = isCursorRequest
-      ? { cursor: params.cursor }
-      : this.getParams({
-          ...(params?.limit !== undefined && { limit: params.limit }),
-          ...(params?.order !== undefined && { order: params.order }),
-          ...(params?.search !== undefined && { search: params.search }),
-        })
-    const response = await fetchWrapper<SessionPageResponse>(`${this.baseURL}/api/session`, {
-      params: queryParams,
+export async function getSession(sessionID: string): Promise<SessionInfo> {
+  try {
+    return await openCodeApi.session.get({ sessionID })
+  } catch (error) {
+    throw toFetchError(error)
+  }
+}
+
+export async function createSession(input: CreateSessionInput): Promise<SessionInfo> {
+  const model = input.model ? parseModelRef(input.model) : undefined
+  try {
+    return await openCodeApi.session.create({
+      ...(input.title !== undefined ? { title: input.title } : {}),
+      ...(input.agent !== undefined ? { agent: input.agent } : {}),
+      ...(model ? { model } : {}),
+      ...(input.directory ? { location: { directory: input.directory } } : {}),
     })
-    const rawItems = response.data ?? response.items ?? []
-    return {
-      items: rawItems.map((item) => toLegacySession(item, this.directory)),
-      nextCursor: response.cursor?.next,
-    }
+  } catch (error) {
+    throw toFetchError(error)
   }
+}
 
-  async getSession(sessionID: string) {
-    return fetchWrapper<SessionResponse>(`${this.baseURL}/session/${sessionID}`, {
-      params: this.getParams(),
+export async function deleteSession(sessionID: string): Promise<void> {
+  try {
+    await openCodeApi.session.remove({ sessionID })
+  } catch (error) {
+    throw toFetchError(error)
+  }
+}
+
+export async function renameSession(sessionID: string, title: string): Promise<void> {
+  try {
+    await openCodeApi.session.update({ sessionID, title })
+  } catch (error) {
+    throw toFetchError(error)
+  }
+}
+
+export async function forkSession(sessionID: string, before?: string): Promise<SessionInfo> {
+  try {
+    return await openCodeApi.session.fork({
+      sessionID,
+      ...(before ? { before } : {}),
     })
+  } catch (error) {
+    throw toFetchError(error)
   }
+}
 
-  async createSession(data: CreateSessionRequest) {
-    return fetchWrapper<SessionResponse>(`${this.baseURL}/session`, {
-      method: 'POST',
-      params: this.getParams(),
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify(data),
+export async function switchSessionModel(sessionID: string, model: ModelRef): Promise<void> {
+  try {
+    await openCodeApi.session.switchModel({ sessionID, model })
+  } catch (error) {
+    throw toFetchError(error)
+  }
+}
+
+export async function switchSessionAgent(sessionID: string, agent: string): Promise<void> {
+  try {
+    await openCodeApi.session.switchAgent({ sessionID, agent })
+  } catch (error) {
+    throw toFetchError(error)
+  }
+}
+
+export async function sendPrompt(input: SendPromptInput): Promise<SessionInboxUser> {
+  try {
+    return await openCodeApi.session.prompt({
+      sessionID: input.sessionID,
+      text: input.text,
+      ...(input.files ? { files: input.files } : {}),
+      ...(input.agents ? { agents: input.agents } : {}),
+      ...(input.skills ? { skills: input.skills } : {}),
+      ...(input.delivery ? { delivery: input.delivery } : {}),
     })
+  } catch (error) {
+    throw toFetchError(error)
   }
+}
 
-  async deleteSession(sessionID: string) {
-    return fetchWrapperVoid(`${this.baseURL}/session/${sessionID}`, {
-      method: 'DELETE',
-      params: this.getParams(),
+export async function runCommand(input: RunCommandInput): Promise<void> {
+  try {
+    await openCodeApi.session.command({
+      sessionID: input.sessionID,
+      name: input.name,
+      text: input.text,
+      ...(input.files ? { files: input.files } : {}),
+      ...(input.agents ? { agents: input.agents } : {}),
+      ...(input.skills ? { skills: input.skills } : {}),
+      ...(input.delivery ? { delivery: input.delivery } : {}),
     })
+  } catch (error) {
+    throw toFetchError(error)
   }
+}
 
-  async deleteWorkspace(workspaceID: string) {
-    return fetchWrapperVoid(`${this.baseURL}/experimental/workspace/${workspaceID}`, {
-      method: 'DELETE',
-      params: this.getParams(),
-    })
+export async function runShell(sessionID: string, command: string): Promise<void> {
+  try {
+    await openCodeApi.session.shell({ sessionID, command })
+  } catch (error) {
+    throw toFetchError(error)
   }
+}
 
-  async updateSession(sessionID: string, data: { title?: string }) {
-    return fetchWrapper(`${this.baseURL}/session/${sessionID}`, {
-      method: 'PATCH',
-      params: this.getParams(),
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify(data),
-    })
+export async function interruptSession(sessionID: string): Promise<void> {
+  try {
+    await openCodeApi.session.interrupt({ sessionID })
+  } catch (error) {
+    throw toFetchError(error)
   }
+}
 
-  async forkSession(sessionID: string, messageID?: string) {
-    return fetchWrapper<SessionResponse>(`${this.baseURL}/session/${sessionID}/fork`, {
-      method: 'POST',
-      params: this.getParams(),
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ messageID }),
-    })
+export async function stageRevert(sessionID: string, messageID: string): Promise<SessionRevert> {
+  try {
+    return await openCodeApi.session.revert.stage({ sessionID, messageID })
+  } catch (error) {
+    throw toFetchError(error)
   }
+}
 
-  async abortSession(sessionID: string) {
-    return fetchWrapper(`${this.baseURL}/session/${sessionID}/abort`, {
-      method: 'POST',
-      params: this.getParams(),
-    })
+export async function commitRevert(sessionID: string): Promise<void> {
+  try {
+    await openCodeApi.session.revert.commit({ sessionID })
+  } catch (error) {
+    throw toFetchError(error)
   }
+}
 
-  async listMessages(sessionID: string) {
-    return fetchWrapper<MessageListResponse>(`${this.baseURL}/session/${sessionID}/message`, {
-      params: this.getParams(),
-    })
+export async function clearRevert(sessionID: string): Promise<void> {
+  try {
+    await openCodeApi.session.revert.clear({ sessionID })
+  } catch (error) {
+    throw toFetchError(error)
   }
+}
 
-  async sendPromptAsync(sessionID: string, data: SendPromptAsyncRequest): Promise<void> {
-    return fetchWrapperVoid(
-      `${this.baseURL}/session/${sessionID}/prompt_async`,
-      {
-        method: 'POST',
-        params: this.getParams(),
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(data),
-        timeout: 0,
-      }
+export async function compactSession(sessionID: string): Promise<SessionInboxCompaction> {
+  try {
+    return await openCodeApi.session.compact({ sessionID })
+  } catch (error) {
+    throw toFetchError(error)
+  }
+}
+
+export async function activateSkill(sessionID: string, id: string): Promise<void> {
+  try {
+    await openCodeApi.session.skill({ sessionID, id })
+  } catch (error) {
+    throw toFetchError(error)
+  }
+}
+
+export async function listCommands(directory?: string): Promise<CommandInfo[]> {
+  try {
+    const { data } = await openCodeApi.command.list(
+      directory ? { location: { directory } } : undefined,
     )
-  }
-
-  async summarizeSession(sessionID: string, providerID: string, modelID: string) {
-    return fetchWrapper(`${this.baseURL}/session/${sessionID}/summarize`, {
-      method: 'POST',
-      params: this.getParams(),
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ providerID, modelID }),
-    })
-  }
-
-  async getConfig() {
-    return fetchWrapper<ConfigResponse>(`${this.baseURL}/config`, {
-      params: this.getParams(),
-    })
-  }
-
-  async getLSPStatus() {
-    return fetchWrapper<LspStatusResponse>(`${this.baseURL}/lsp`, {
-      params: this.getParams(),
-    })
-  }
-
-  async updateConfig(config: Partial<ConfigResponse>) {
-    return fetchWrapper<ConfigResponse>(`${this.baseURL}/config`, {
-      method: 'PATCH',
-      params: this.getParams(),
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify(config),
-    })
-  }
-
-  async getProviders() {
-    return fetchWrapper(`${this.baseURL}/provider`, {
-      params: this.getParams(),
-    })
-  }
-
-  async getConfigProviders() {
-    return fetchWrapper(`${this.baseURL}/config/providers`, {
-      params: this.getParams(),
-    })
-  }
-
-  async listCommands() {
-    return fetchWrapper<CommandListResponse>(`${this.baseURL}/command`, {
-      params: this.getParams(),
-    })
-  }
-
-  async sendCommand(sessionID: string, data: CommandRequest): Promise<SendCommandResponse> {
-    return fetchWrapper<SendCommandResponse>(`${this.baseURL}/session/${sessionID}/command`, {
-      method: 'POST',
-      params: this.getParams(),
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify(data),
-      timeout: 0,
-    })
-  }
-
-  async sendShell(sessionID: string, data: ShellRequest) {
-    return fetchWrapper(`${this.baseURL}/session/${sessionID}/shell`, {
-      method: 'POST',
-      params: this.getParams(),
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify(data),
-    })
-  }
-
-  async respondToPermission(permissionID: string, response: 'once' | 'always' | 'reject') {
-    return fetchWrapper(`${this.baseURL}/permission/${permissionID}/reply`, {
-      method: 'POST',
-      params: this.getParams(),
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ reply: response }),
-    })
-  }
-
-  async listPendingPermissions() {
-    return fetchWrapper<PermissionListResponse>(`${this.baseURL}/permission`, {
-      params: this.getParams(),
-    })
-  }
-
-  async replyToQuestion(requestID: string, answers: string[][]) {
-    return fetchWrapper(`${this.baseURL}/question/${requestID}/reply`, {
-      method: 'POST',
-      params: this.getParams(),
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ answers }),
-    })
-  }
-
-  async rejectQuestion(requestID: string) {
-    return fetchWrapper(`${this.baseURL}/question/${requestID}/reject`, {
-      method: 'POST',
-      params: this.getParams(),
-    })
-  }
-
-  async listPendingQuestions() {
-    return fetchWrapper<QuestionListResponse>(`${this.baseURL}/question`, {
-      params: this.getParams(),
-    })
-  }
-
-  async listAgents() {
-    return fetchWrapper<AgentListResponse>(`${this.baseURL}/agent`, {
-      params: this.getParams(),
-    })
-  }
-
-  async revertMessage(sessionID: string, data: { messageID: string, partID?: string }) {
-    return fetchWrapper(`${this.baseURL}/session/${sessionID}/revert`, {
-      method: 'POST',
-      params: this.getParams(),
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify(data),
-    })
-  }
-
-  async unrevertSession(sessionID: string) {
-    return fetchWrapper(`${this.baseURL}/session/${sessionID}/unrevert`, {
-      method: 'POST',
-      params: this.getParams(),
-    })
-  }
-
-  async getSessionStatuses() {
-    return fetchWrapper<Record<string, { type: 'idle' } | { type: 'busy' } | { type: 'retry'; attempt: number; message: string; next: number }>>(`${this.baseURL}/session/status`, {
-      params: this.getParams(),
-    })
-  }
-
-  getEventSourceURL() {
-    const base = this.baseURL.startsWith('http')
-      ? this.baseURL
-      : `${window.location.origin}${this.baseURL}`
-    const url = new URL(`${base}/event`)
-    if (this.directory) {
-      url.searchParams.set('directory', this.directory)
-    }
-    return url.toString()
+    return data
+  } catch (error) {
+    throw toFetchError(error)
   }
 }
 
-export const createOpenCodeClient = (baseURL: string, directory?: string) => {
-  return new OpenCodeClient(baseURL, directory)
+export async function listPendingPermissions(directory: string): Promise<PermissionRequest[]> {
+  try {
+    const { data } = await openCodeApi.permission.request.list({ location: { directory } })
+    return data
+  } catch (error) {
+    throw toFetchError(error)
+  }
+}
+
+export async function replyPermission(
+  sessionID: string,
+  requestID: string,
+  decision: 'once' | 'always' | 'reject',
+  message?: string,
+): Promise<void> {
+  try {
+    await openCodeApi.permission.reply({
+      sessionID,
+      requestID,
+      decision,
+      ...(message ? { message } : {}),
+    })
+  } catch (error) {
+    throw toFetchError(error)
+  }
+}
+
+export async function listPendingForms(directory: string): Promise<FormInfo[]> {
+  try {
+    const { data } = await openCodeApi.form.list({ location: { directory } })
+    return data
+  } catch (error) {
+    throw toFetchError(error)
+  }
+}
+
+export async function replyForm(sessionID: string, formID: string, answer: FormAnswer): Promise<void> {
+  try {
+    await openCodeApi.session.form.reply({ sessionID, formID, answer })
+  } catch (error) {
+    throw toFetchError(error)
+  }
+}
+
+export async function cancelForm(sessionID: string, formID: string): Promise<void> {
+  try {
+    await openCodeApi.session.form.cancel({ sessionID, formID })
+  } catch (error) {
+    throw toFetchError(error)
+  }
+}
+
+export async function findFiles(input: FindFilesInput): Promise<string[]> {
+  try {
+    const { data } = await openCodeApi.file.find({
+      ...(input.directory ? { location: { directory: input.directory } } : {}),
+      query: input.query,
+      type: 'file',
+      limit: input.limit,
+    })
+    return data.map((entry) => entry.path)
+  } catch (error) {
+    throw toFetchError(error)
+  }
+}
+
+export async function listSessionMessages(
+  sessionID: string,
+  input: SessionMessagesInput = {},
+): Promise<SessionMessagesPage> {
+  try {
+    const { data, cursor } = await openCodeApi.message.list({
+      sessionID,
+      ...(input.limit === undefined ? {} : { limit: input.limit }),
+      ...(input.cursor === undefined ? { order: 'desc' as const } : { cursor: input.cursor }),
+    })
+    return { messages: [...data].reverse(), nextCursor: cursor.next ?? undefined }
+  } catch (error) {
+    throw toFetchError(error)
+  }
+}
+
+export async function readSessionSnapshot(sessionID: string): Promise<SessionSnapshot> {
+  try {
+    const [page, pending, active] = await Promise.all([
+      listSessionMessages(sessionID),
+      openCodeApi.session.inbox.list({ sessionID }),
+      openCodeApi.session.active(),
+    ])
+    return {
+      messages: page.messages,
+      nextCursor: page.nextCursor,
+      pending,
+      status: active[sessionID] ? 'busy' : 'idle',
+    }
+  } catch (error) {
+    throw toFetchError(error)
+  }
 }

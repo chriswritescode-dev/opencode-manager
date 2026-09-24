@@ -1,12 +1,15 @@
 import { FetchError } from '@opencode-manager/shared'
-import type { components } from '@/api/opencode-types'
 
-export type OpenCodeError =
-  | components['schemas']['ProviderAuthError']
-  | components['schemas']['UnknownError']
-  | components['schemas']['MessageOutputLengthError']
-  | components['schemas']['MessageAbortedError']
-  | components['schemas']['APIError']
+export interface OpenCodeError {
+  name?: string
+  message?: string
+  data?: {
+    message?: string
+    status?: number
+    providerID?: string
+  }
+  reason?: string
+}
 
 export interface ParsedError {
   title: string
@@ -19,46 +22,25 @@ export interface ParsedError {
 export function parseOpenCodeError(error: OpenCodeError | undefined | null): ParsedError | null {
   if (!error) return null
 
-  switch (error.name) {
-    case 'ProviderAuthError':
-      return {
-        title: 'Authentication Failed',
-        message: error.data.message || `Authentication failed for provider: ${error.data.providerID}`,
-        isRetryable: false,
-        providerID: error.data.providerID,
-      }
+  if (error.reason) {
+    return {
+      title: 'Error',
+      message: error.message || 'An unexpected error occurred',
+      isRetryable: error.reason === 'Transport' || error.reason === 'UnexpectedStatus',
+    }
+  }
 
-    case 'UnknownError':
-      return {
-        title: 'Error',
-        message: error.data.message || 'An unknown error occurred',
-        isRetryable: true,
-      }
+  const message = error.data?.message || error.message
+  if (!message) return null
 
-    case 'MessageOutputLengthError':
-      return {
-        title: 'Response Too Long',
-        message: 'The model response exceeded the maximum allowed length',
-        isRetryable: false,
-      }
+  const statusCode = error.data?.status
 
-    case 'MessageAbortedError':
-      return null 
-
-    case 'APIError':
-      return {
-        title: `API Error${error.data.statusCode ? ` (${error.data.statusCode})` : ''}`,
-        message: error.data.message || 'An API error occurred',
-        isRetryable: error.data.isRetryable,
-        statusCode: error.data.statusCode,
-      }
-
-    default:
-      return {
-        title: 'Error',
-        message: 'An unexpected error occurred',
-        isRetryable: true,
-      }
+  return {
+    title: error.name || 'Error',
+    message,
+    isRetryable: statusCode === undefined || statusCode >= 500,
+    ...(statusCode === undefined ? {} : { statusCode }),
+    ...(error.data?.providerID ? { providerID: error.data.providerID } : {}),
   }
 }
 

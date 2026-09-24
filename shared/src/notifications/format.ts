@@ -1,21 +1,15 @@
 const PERMISSION_LABELS: Record<string, string> = {
   read: 'Read File',
   edit: 'Edit File',
-  write: 'Write File',
   glob: 'Search Files',
   grep: 'Search Content',
-  list: 'List Directory',
-  bash: 'Run Command',
-  task: 'Run Task',
+  shell: 'Run Command',
+  subagent: 'Run Subagent',
   external_directory: 'External Access',
-  todowrite: 'Write Todo',
-  todoread: 'Read Todo',
   question: 'Ask Question',
   webfetch: 'Fetch URL',
   websearch: 'Web Search',
-  codesearch: 'Code Search',
-  lsp: 'LSP Action',
-  doom_loop: 'Repeated Action',
+  skill: 'Use Skill',
 }
 
 export function getPermissionLabel(permission: string): string {
@@ -24,9 +18,9 @@ export function getPermissionLabel(permission: string): string {
 }
 
 interface PermissionLike {
-  permission?: unknown
+  action?: unknown
   metadata?: unknown
-  patterns?: unknown
+  resources?: unknown
 }
 
 export interface PermissionDetail {
@@ -35,21 +29,18 @@ export interface PermissionDetail {
 }
 
 export function getPermissionDetail(input: PermissionLike): PermissionDetail {
-  const permission = typeof input.permission === 'string' ? input.permission : ''
+  const action = typeof input.action === 'string' ? input.action : ''
   const metadata = (input.metadata && typeof input.metadata === 'object' ? input.metadata : {}) as Record<string, unknown>
+  const resources = Array.isArray(input.resources) ? input.resources.filter((resource): resource is string => typeof resource === 'string') : []
   const str = (v: unknown): string | undefined => (typeof v === 'string' && v.length > 0 ? v : undefined)
 
-  switch (permission) {
-    case 'bash': {
-      const command = str(metadata.command)
-      if (command) return { primary: command }
-      break
-    }
-    case 'edit':
-    case 'write': {
-      const filePath = str(metadata.filePath)
+  switch (action) {
+    case 'edit': {
+      const files = Array.isArray(metadata.files) ? metadata.files : []
+      const first = (files[0] && typeof files[0] === 'object' ? files[0] : {}) as Record<string, unknown>
+      const filePath = str(first.file) ?? str(metadata.filepath)
       if (filePath) {
-        const diff = str(metadata.diff)
+        const diff = str(first.patch) ?? str(metadata.diff)
         return { primary: filePath, secondary: diff ? diff.slice(0, 500) + (diff.length > 500 ? '\n...' : '') : undefined }
       }
       break
@@ -59,35 +50,15 @@ export function getPermissionDetail(input: PermissionLike): PermissionDetail {
       if (url) return { primary: url }
       break
     }
-    case 'external_directory': {
-      const value = str(metadata.command) ?? str(metadata.filepath)
-      if (value) return { primary: value }
-      break
-    }
-    case 'doom_loop': {
-      const tool = str(metadata.tool)
-      if (tool) {
-        const input2 = metadata.input
-        return { primary: `Tool: ${tool}`, secondary: input2 ? JSON.stringify(input2, null, 2).slice(0, 300) : undefined }
-      }
-      break
-    }
   }
 
-  return { primary: fallbackPattern(input) }
+  return { primary: resources.join('\n') }
 }
 
-function fallbackPattern(input: PermissionLike): string {
-  const patterns = Array.isArray(input.patterns) ? input.patterns.filter((p): p is string => typeof p === 'string') : []
-  return patterns.join('\n')
+interface FormLike {
+  title?: unknown
 }
 
-interface QuestionLike {
-  questions?: unknown
-}
-
-export function getQuestionText(input: QuestionLike): string {
-  const questions = Array.isArray(input.questions) ? input.questions : []
-  const first = questions[0] as { question?: unknown } | undefined
-  return first && typeof first.question === 'string' && first.question.length > 0 ? first.question : ''
+export function getFormText(form: FormLike | null | undefined): string {
+  return form && typeof form.title === 'string' && form.title.length > 0 ? form.title : ''
 }

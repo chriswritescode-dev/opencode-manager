@@ -30,6 +30,10 @@
   <img src="docs/images/ocmgr-mobile.webp" alt="Mobile view" height="400" style="border: none; margin-left: 12px" />
 </p>
 
+## Requirements
+
+OpenCode Manager requires **OpenCode 2.0.0 or newer** (bundled 2.0.15). OpenCode 1.x is not supported. If you are upgrading from OpenCode 1.x, see the [v1 → v2 migration guide](https://opencode.ai/v2/docs/migrate-v1).
+
 ## Quick Start
 
 ```bash

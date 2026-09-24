@@ -2,8 +2,8 @@ import { z } from "zod";
 
 export const NotificationEventType = {
   PERMISSION_ASKED: "permission.asked",
-  QUESTION_ASKED: "question.asked",
-  SESSION_ERROR: "session.error",
+  FORM_CREATED: "form.created",
+  SESSION_FAILED: "session.execution.failed",
   SESSION_IDLE: "session.idle",
 } as const;
 

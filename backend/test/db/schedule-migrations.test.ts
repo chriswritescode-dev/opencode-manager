@@ -1,7 +1,9 @@
 import { describe, expect, it, vi } from 'vitest'
+import { Database } from 'bun:sqlite'
 import migration007 from '../../src/db/migrations/007-schedules'
 import migration008 from '../../src/db/migrations/008-schedule-cron-support'
 import migration015 from '../../src/db/migrations/015-schedule-worktree-isolation'
+import migration021 from '../../src/db/migrations/021-drop-schedule-run-workspace-id'
 
 describe('schedule migrations', () => {
   it('creates schedule jobs with nullable interval minutes in v7', () => {
@@ -149,5 +151,58 @@ describe('migration 015 - schedule worktree isolation', () => {
     migration015.up(db as never)
 
     expect(db.run).not.toHaveBeenCalledWith(expect.stringContaining('ALTER TABLE'))
+  })
+})
+
+describe('migration 021 - drop schedule run workspace id', () => {
+  it('drops the workspace_id column when present', () => {
+    const db = {
+      prepare: vi.fn().mockImplementation(() => ({
+        all: vi.fn().mockReturnValue([
+          { name: 'id' },
+          { name: 'workspace_id' },
+        ]),
+      })),
+      run: vi.fn(),
+    }
+
+    migration021.up(db as never)
+
+    expect(db.prepare).toHaveBeenCalledWith('PRAGMA table_info(schedule_runs)')
+    expect(db.run).toHaveBeenCalledWith('ALTER TABLE schedule_runs DROP COLUMN workspace_id')
+  })
+
+  it('skips the ALTER TABLE when workspace_id is already gone', () => {
+    const db = {
+      prepare: vi.fn().mockImplementation(() => ({
+        all: vi.fn().mockReturnValue([
+          { name: 'id' },
+          { name: 'worktree_path' },
+        ]),
+      })),
+      run: vi.fn(),
+    }
+
+    migration021.up(db as never)
+
+    expect(db.run).not.toHaveBeenCalled()
+  })
+
+  it('drops the column and preserves the remaining run data on a real database', () => {
+    const db = new Database(':memory:')
+    db.run('CREATE TABLE schedule_runs (id INTEGER PRIMARY KEY, worktree_path TEXT, workspace_id TEXT)')
+    db.run("INSERT INTO schedule_runs (id, worktree_path, workspace_id) VALUES (1, '/wt/1', 'wrk_1')")
+
+    migration021.up(db)
+    migration021.up(db)
+
+    const columns = (db.prepare('PRAGMA table_info(schedule_runs)').all() as { name: string }[]).map((column) => column.name)
+    expect(columns).not.toContain('workspace_id')
+    expect(columns).toContain('worktree_path')
+
+    const row = db.prepare('SELECT id, worktree_path FROM schedule_runs WHERE id = 1').get() as { id: number; worktree_path: string }
+    expect(row.worktree_path).toBe('/wt/1')
+
+    db.close()
   })
 })

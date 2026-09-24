@@ -1,65 +1,12 @@
 import { API_BASE_URL } from "@/config";
 import { settingsApi } from "./settings";
 import { fetchWrapper } from "./fetchWrapper";
+import { openCodeApi } from "./opencodeApi";
+import type { ModelInfo } from "@opencode-manager/shared/opencode";
+import type { CredentialListResponse, CredentialStatusResponse, PromptAnswer } from "@opencode-manager/shared/schemas";
 import type { OpenCodeConfigFile } from "./types/settings";
 
 export type ProviderSource = "configured" | "local" | "builtin";
-
-export interface OpenCodeModel {
-  id: string;
-  providerID: string;
-  name: string;
-  api: {
-    id: string;
-    url?: string;
-    npm: string;
-  };
-  status: "active" | "deprecated";
-  headers: Record<string, string>;
-  options: Record<string, unknown>;
-  cost: {
-    input: number;
-    output: number;
-    cache?: {
-      read: number;
-      write: number;
-    };
-  };
-  limit: {
-    context: number;
-    output: number;
-  };
-  capabilities: {
-    temperature: boolean;
-    reasoning: boolean;
-    attachment: boolean;
-    toolcall: boolean;
-    input: {
-      text: boolean;
-      audio: boolean;
-      image: boolean;
-      video: boolean;
-      pdf: boolean;
-    };
-    output: {
-      text: boolean;
-      audio: boolean;
-      image: boolean;
-      video: boolean;
-      pdf: boolean;
-    };
-  };
-  variants?: Record<string, Record<string, unknown>>;
-}
-
-export interface OpenCodeProvider {
-  id: string;
-  source: "custom" | "builtin";
-  name: string;
-  env: string[];
-  options: Record<string, unknown>;
-  models: Record<string, OpenCodeModel>;
-}
 
 export interface Model {
   id: string;
@@ -156,86 +103,88 @@ function classifyProviderSource(providerId: string, isFromConfig: boolean): Prov
   return "configured";
 }
 
-
-interface OpenCodeProviderResponse {
-  all: OpenCodeProvider[];
-  connected: string[];
-  default: Record<string, string>;
-}
-
 export interface ProvidersResult {
   providers: Provider[];
   connected: string[];
   default: Record<string, string>;
 }
 
-async function getProvidersFromOpenCodeServer(directory?: string): Promise<ProvidersResult> {
-  try {
-    const response = await fetchWrapper<OpenCodeProviderResponse>(`${API_BASE_URL}/api/opencode/provider`, {
-      params: { directory },
-    });
+const MODEL_MODALITIES = ["text", "audio", "image", "video", "pdf"] as const;
+type ModelModality = (typeof MODEL_MODALITIES)[number];
 
-    if (response?.all && Array.isArray(response.all)) {
-      const connectedSet = new Set(response.connected || []);
+const isModelModality = (value: string): value is ModelModality =>
+  (MODEL_MODALITIES as readonly string[]).includes(value);
 
-      const providers = response.all.map((openCodeProvider: OpenCodeProvider) => {
-        const models: Record<string, Model> = {};
-
-        Object.entries(openCodeProvider.models).forEach(([modelId, openCodeModel]) => {
-          models[modelId] = {
-            id: openCodeModel.api.id || modelId,
-            key: modelId,
-            name: openCodeModel.name,
-            attachment: openCodeModel.capabilities.attachment,
-            reasoning: openCodeModel.capabilities.reasoning,
-            temperature: openCodeModel.capabilities.temperature,
-            tool_call: openCodeModel.capabilities.toolcall,
-            cost: {
-              input: openCodeModel.cost.input,
-              output: openCodeModel.cost.output,
-              cache_read: openCodeModel.cost.cache?.read ?? 0,
-              cache_write: openCodeModel.cost.cache?.write ?? 0,
-            },
-            limit: {
-              context: openCodeModel.limit.context,
-              output: openCodeModel.limit.output,
-            },
-            modalities: {
-              input: Object.keys(openCodeModel.capabilities.input).filter(
-                (key) => openCodeModel.capabilities.input[key as keyof typeof openCodeModel.capabilities.input]
-              ) as ("text" | "audio" | "image" | "video" | "pdf")[],
-              output: Object.keys(openCodeModel.capabilities.output).filter(
-                (key) => openCodeModel.capabilities.output[key as keyof typeof openCodeModel.capabilities.output]
-              ) as ("text" | "audio" | "image" | "video" | "pdf")[],
-            },
-            provider: {
-              npm: openCodeModel.api.npm,
-            },
-            variants: openCodeModel.variants,
-          };
-        });
-
-        return {
-          id: openCodeProvider.id,
-          name: openCodeProvider.name,
-          env: openCodeProvider.env,
-          models,
-          options: openCodeProvider.options,
-          isConnected: connectedSet.has(openCodeProvider.id),
-        };
-      });
-
-      return { providers, connected: response.connected || [], default: response.default || {} };
-    }
-  } catch {
-    // Silently return empty providers on failure - graceful degradation
-  }
-
-  return { providers: [], connected: [], default: {} };
+function mapModelInfo(model: ModelInfo): Model {
+  const cost = model.cost.find((item) => item.tier === undefined) ?? model.cost[0];
+  return {
+    id: model.modelID,
+    key: model.id,
+    name: model.name,
+    release_date: new Date(model.time.released).toISOString().slice(0, 10),
+    attachment: model.capabilities.input.some((item) => item !== "text"),
+    reasoning: false,
+    temperature: false,
+    tool_call: model.capabilities.tools,
+    cost: cost
+      ? {
+          input: cost.input,
+          output: cost.output,
+          cache_read: cost.cache.read,
+          cache_write: cost.cache.write,
+        }
+      : undefined,
+    limit: {
+      context: model.limit.context,
+      output: model.limit.output,
+    },
+    modalities: {
+      input: model.capabilities.input.filter(isModelModality),
+      output: model.capabilities.output.filter(isModelModality),
+    },
+    status: model.status === "alpha" ? "alpha" : model.status === "beta" ? "beta" : undefined,
+    options: model.settings,
+    variants: Object.fromEntries(model.variants.map((variant) => [variant.id, variant.settings ?? {}])),
+  };
 }
 
 export async function getProviders(directory?: string): Promise<ProvidersResult> {
-  return await getProvidersFromOpenCodeServer(directory);
+  try {
+    const location = directory ? { location: { directory } } : undefined;
+    const [providerResult, modelResult, defaultResult] = await Promise.all([
+      openCodeApi.provider.list(location),
+      openCodeApi.model.list(location),
+      openCodeApi.model.default(location),
+    ]);
+
+    const connected = providerResult.data.map((provider) => provider.id);
+    const connectedSet = new Set(connected);
+
+    const providers = providerResult.data.map((provider) => {
+      const models: Record<string, Model> = {};
+      for (const model of modelResult.data) {
+        if (model.providerID !== provider.id || model.status === "deprecated") continue;
+        models[model.id] = mapModelInfo(model);
+      }
+      return {
+        id: provider.id,
+        name: provider.name,
+        env: [],
+        models,
+        options: provider.settings,
+        isConnected: connectedSet.has(provider.id),
+      };
+    });
+
+    const defaultModel: Record<string, string> = {};
+    if (defaultResult.data) {
+      defaultModel[defaultResult.data.providerID] = defaultResult.data.id;
+    }
+
+    return { providers, connected, default: defaultModel };
+  } catch {
+    return { providers: [], connected: [], default: {} };
+  }
 }
 
 export async function getOpenCodeModelState(): Promise<OpenCodeModelState> {
@@ -269,12 +218,15 @@ export async function toggleOpenCodeFavoriteModel(model: ModelSelection): Promis
 async function getConfiguredProviders(connectedIds: Set<string>, config?: OpenCodeConfigFile): Promise<ProviderWithModels[]> {
   try {
     const resolvedConfig = config ?? await settingsApi.getOpenCodeConfig();
-    if (!resolvedConfig.content.provider) return [];
+    const configured = {
+      ...(resolvedConfig.content.providers as Record<string, ConfigProvider> | undefined),
+      ...(resolvedConfig.content.provider as Record<string, ConfigProvider> | undefined),
+    };
+    if (Object.keys(configured).length === 0) return [];
 
-    const configProviders = resolvedConfig.content.provider as Record<string, ConfigProvider>;
     const result: ProviderWithModels[] = [];
 
-    for (const [providerId, providerConfig] of Object.entries(configProviders)) {
+    for (const [providerId, providerConfig] of Object.entries(configured)) {
       if (!providerConfig || typeof providerConfig !== "object") continue;
 
       const source = classifyProviderSource(providerId, true);
@@ -316,34 +268,46 @@ async function getConfiguredProviders(connectedIds: Set<string>, config?: OpenCo
 }
 
 export async function getProvidersWithModels(directory?: string, config?: OpenCodeConfigFile): Promise<ProviderWithModels[]> {
-  const { providers: builtinProviders, connected } = await getProviders(directory);
+  const { providers: resolvedProviders, connected } = await getProviders(directory);
   const connectedIds = new Set(connected);
 
   const configuredProviders = await getConfiguredProviders(connectedIds, config);
-  const configuredIds = new Set(configuredProviders.map((p) => p.id));
+  const configuredById = new Map(configuredProviders.map((provider) => [provider.id, provider]));
+  const resolvedIds = new Set(resolvedProviders.map((provider) => provider.id));
 
-  const builtinResult: ProviderWithModels[] = builtinProviders
-    .filter((provider) => !configuredIds.has(provider.id))
-    .map((provider) => {
-      const models = Object.entries(provider.models || {}).map(([id, model]) => ({
-        ...model,
-        id: model.id || id,
-        key: id,
-        name: model.name || id,
-      }));
-      return {
-        id: provider.id,
-        name: provider.name,
-        api: provider.api,
-        env: provider.env || [],
-        npm: provider.npm,
-        models,
-        source: "builtin" as ProviderSource,
-        isConnected: provider.isConnected ?? false,
-      };
-    });
+  const mergedProviders: ProviderWithModels[] = resolvedProviders.map((provider) => {
+    const configured = configuredById.get(provider.id);
+    const resolvedModels = Object.entries(provider.models || {}).map(([id, model]) => ({
+      ...model,
+      id: model.id || id,
+      key: id,
+      name: model.name || id,
+    }));
+    const resolvedModelIdentifiers = new Set(
+      resolvedModels.flatMap((model) => [model.key, model.id]).filter((value): value is string => Boolean(value)),
+    );
+    const configuredOnlyModels = configured
+      ? configured.models.filter(
+          (model) =>
+            !resolvedModelIdentifiers.has(model.key ?? "") && !resolvedModelIdentifiers.has(model.id),
+        )
+      : [];
 
-  const allProviders = [...configuredProviders, ...builtinResult];
+    return {
+      id: provider.id,
+      name: provider.name || configured?.name || provider.id,
+      api: provider.api ?? configured?.api,
+      env: provider.env?.length ? provider.env : configured?.env ?? [],
+      npm: provider.npm ?? configured?.npm,
+      models: [...resolvedModels, ...configuredOnlyModels],
+      source: configured ? configured.source : "builtin",
+      isConnected: provider.isConnected ?? false,
+    };
+  });
+
+  const configOnlyProviders = configuredProviders.filter((provider) => !resolvedIds.has(provider.id));
+
+  const allProviders = [...mergedProviders, ...configOnlyProviders];
 
   allProviders.sort((a, b) => {
     if (a.isConnected !== b.isConnected) {
@@ -379,22 +343,22 @@ export function formatProviderName(
 
 export const providerCredentialsApi = {
   list: async (): Promise<string[]> => {
-    const { providers } = await fetchWrapper<{ providers: string[] }>(`${API_BASE_URL}/api/providers/credentials`);
+    const { providers } = await fetchWrapper<CredentialListResponse>(`${API_BASE_URL}/api/providers/credentials`);
     return providers;
   },
 
   getStatus: async (providerId: string): Promise<boolean> => {
-    const { hasCredentials } = await fetchWrapper<{ hasCredentials: boolean }>(
+    const { hasCredentials } = await fetchWrapper<CredentialStatusResponse>(
       `${API_BASE_URL}/api/providers/${providerId}/credentials/status`
     );
     return hasCredentials;
   },
 
-  set: async (providerId: string, apiKey: string): Promise<void> => {
+  set: async (providerId: string, apiKey: string, answer?: PromptAnswer): Promise<void> => {
     await fetchWrapper(`${API_BASE_URL}/api/providers/${providerId}/credentials`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ apiKey }),
+      body: JSON.stringify({ apiKey, answer }),
     });
   },
 

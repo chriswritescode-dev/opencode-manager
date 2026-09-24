@@ -1,7 +1,7 @@
 import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest'
 import { renderHook, act } from '@testing-library/react'
 import { useAutoScroll } from './useAutoScroll'
-import type { Message } from '../api/types'
+import type { SessionMessageInfo } from '@opencode-manager/shared/opencode'
 
 function createScrollContainer() {
   const div = document.createElement('div')
@@ -63,14 +63,13 @@ describe('useAutoScroll', () => {
     vi.clearAllTimers()
   })
 
-  const createMessage = (id: string, role: 'user' | 'assistant'): Message => ({
+  const createMessage = (id: string, type: 'user' | 'assistant'): SessionMessageInfo => ({
     id,
-    sessionID: 'session-1',
-    role,
+    type,
     time: { created: Date.now() },
-  } as Message)
+  } as SessionMessageInfo)
 
-  const setupHook = (messages: Message[], sessionId = 'session-1') => {
+  const setupHook = (messages: SessionMessageInfo[], sessionId = 'session-1') => {
     containerHarness = createScrollContainer()
     const containerRef = { current: containerHarness.div }
     const onScrollStateChange = vi.fn()
@@ -454,6 +453,87 @@ describe('useAutoScroll', () => {
         messages: newMessages,
         sessionId: 'session-1',
         contentVersion: newMessages.length,
+        onScrollStateChange,
+      })
+    })
+
+    act(() => {
+      vi.advanceTimersByTime(100)
+    })
+
+    expect(containerHarness.getScrollTop()).toBe(containerHarness.div.scrollHeight - containerHarness.div.clientHeight)
+  })
+
+  it('does not force bottom when older history is prepended and the tail user message is unchanged', () => {
+    const messages = [createMessage('1', 'assistant'), createMessage('2', 'user')]
+    const { renderResult, containerHarness, onScrollStateChange } = setupHook(messages)
+
+    act(() => {
+      vi.advanceTimersByTime(100)
+    })
+
+    const userPosition = 100
+    act(() => {
+      containerHarness.setScrollTop(userPosition)
+      containerHarness.div.dispatchEvent(
+        new WheelEvent('wheel', {
+          deltaY: -50,
+          bubbles: true,
+        })
+      )
+    })
+
+    expect(onScrollStateChange).toHaveBeenCalledWith(true)
+
+    containerHarness.setScrollHeight(containerHarness.div.scrollHeight + 200)
+
+    const olderPage = [createMessage('0', 'user'), ...messages]
+
+    act(() => {
+      renderResult.rerender({
+        containerRef: { current: containerHarness.div },
+        messages: olderPage,
+        sessionId: 'session-1',
+        contentVersion: olderPage.length,
+        onScrollStateChange,
+      })
+    })
+
+    act(() => {
+      vi.advanceTimersByTime(100)
+    })
+
+    expect(containerHarness.getScrollTop()).toBe(userPosition)
+  })
+
+  it('still forces bottom when a genuinely new user message is appended', () => {
+    const messages = [createMessage('1', 'assistant')]
+    const { renderResult, containerHarness, onScrollStateChange } = setupHook(messages)
+
+    act(() => {
+      vi.advanceTimersByTime(100)
+    })
+
+    act(() => {
+      containerHarness.setScrollTop(100)
+      containerHarness.div.dispatchEvent(
+        new WheelEvent('wheel', {
+          deltaY: -50,
+          bubbles: true,
+        })
+      )
+    })
+
+    expect(onScrollStateChange).toHaveBeenCalledWith(true)
+
+    const appended = [...messages, createMessage('2', 'user')]
+
+    act(() => {
+      renderResult.rerender({
+        containerRef: { current: containerHarness.div },
+        messages: appended,
+        sessionId: 'session-1',
+        contentVersion: appended.length,
         onScrollStateChange,
       })
     })

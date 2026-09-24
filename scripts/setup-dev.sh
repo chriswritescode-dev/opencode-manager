@@ -32,7 +32,15 @@ echo "✅ Git is installed"
 # Check if OpenCode TUI is installed
 if ! opencode --version &> /dev/null; then
   echo "❌ OpenCode TUI is not installed. Please install it with:"
-  echo "   curl -fsSL https://opencode.ai/install | bash"
+  echo "   curl -fsSL https://opencode.ai/v2/install | bash"
+  exit 1
+fi
+
+OPENCODE_VERSION="$(opencode --version 2>&1 | grep -oE '[0-9]+\.[0-9]+\.[0-9]+' | head -1)"
+
+if ! printf '%s\n%s\n' "2.0.0" "$OPENCODE_VERSION" | sort -V -C; then
+  echo "❌ OpenCode 2.0.0 or newer is required. Please upgrade it with:"
+  echo "   curl -fsSL https://opencode.ai/v2/install | bash"
   exit 1
 fi
 

@@ -2,13 +2,13 @@ import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest'
 import type { Database } from 'bun:sqlite'
 import { Hono } from 'hono'
 import { createSettingsRoutes } from '../../src/routes/settings'
-import { encryptSecret } from '../../src/utils/crypto'
+import { decryptSecret, encryptSecret } from '../../src/utils/crypto'
 import { ENV } from '@opencode-manager/shared/config/env'
 import { opencodeServerManager } from '../../src/services/opencode-single-server'
 import { OpenCodeSupervisor } from '../../src/services/opencode-supervisor'
 import type { OpenCodeClient } from '../../src/services/opencode/client'
 import type { GitAuthService } from '../../src/services/git-auth'
-import type { SettingsService } from '../../src/services/settings'
+import { SettingsService } from '../../src/services/settings'
 
 vi.mock('bun:sqlite', () => ({
   Database: class Database {},
@@ -22,7 +22,6 @@ vi.mock('../../src/services/opencode-single-server', () => ({
     clearStartupError: vi.fn(),
     getLastStartupError: vi.fn(() => null),
     checkHealth: vi.fn(() => true),
-    reinitializeBinDirectory: vi.fn(),
   },
   ConfigReloadError: class ConfigReloadError extends Error {
     validationIssues = []
@@ -31,6 +30,7 @@ vi.mock('../../src/services/opencode-single-server', () => ({
 
 describe('OpenCode Server Auth Routes', () => {
   let db: Database
+  let secrets: Map<string, { value: string; created_at: number; updated_at: number }>
   let app: Hono
   let originalPassword: string
   const mockRestart = opencodeServerManager.restart as ReturnType<typeof vi.fn>
@@ -40,7 +40,9 @@ describe('OpenCode Server Auth Routes', () => {
     setEnvPassword('')
     vi.clearAllMocks()
 
-    db = createTestDb()
+    const testDb = createTestDb()
+    db = testDb.db
+    secrets = testDb.secrets
 
     const mockGitAuthService = {} as GitAuthService
     const mockOpenCodeClient = {} as OpenCodeClient
@@ -54,11 +56,43 @@ describe('OpenCode Server Auth Routes', () => {
   })
 
   describe('GET /api/settings/opencode-server-auth', () => {
-    it('returns source none when no password is configured', async () => {
+    it('reports the managed source without persisting a password on status reads', async () => {
       const response = await app.request('/api/settings/opencode-server-auth')
 
       expect(response.status).toBe(200)
-      expect(await response.json()).toEqual({ isSet: false, source: 'none' })
+      expect(await response.json()).toEqual({ isSet: true, source: 'managed' })
+      expect(secrets.size).toBe(0)
+    })
+
+    it('generates and persists an encrypted managed password when the password is resolved', () => {
+      const password = new SettingsService(db).getOpenCodeServerPassword()
+
+      const managed = secrets.get('opencode_server_managed_password')
+      expect(managed).toBeDefined()
+      expect(managed?.value).not.toBe(password)
+      expect(decryptSecret(managed!.value)).toBe(password)
+      expect(password).toMatch(/^[A-Za-z0-9_-]{43}$/)
+    })
+
+    it('returns the same managed password across concurrent resolution', async () => {
+      const service = new SettingsService(db)
+      const passwords = await Promise.all([
+        Promise.resolve().then(() => service.getOrCreateManagedOpenCodeServerPassword()),
+        Promise.resolve().then(() => service.getOrCreateManagedOpenCodeServerPassword()),
+        Promise.resolve().then(() => service.getOpenCodeServerPassword()),
+      ])
+
+      expect(new Set(passwords).size).toBe(1)
+      expect(passwords[2]).toBe(passwords[0])
+      expect(secrets.size).toBe(1)
+    })
+
+    it('keeps a stored managed password stable when it already exists', () => {
+      const first = new SettingsService(db).getOrCreateManagedOpenCodeServerPassword()
+      const second = new SettingsService(db).getOrCreateManagedOpenCodeServerPassword()
+
+      expect(second).toBe(first)
+      expect(secrets.size).toBe(1)
     })
 
     it('returns source env when only env password is configured', async () => {
@@ -88,6 +122,13 @@ describe('OpenCode Server Auth Routes', () => {
       expect(response.status).toBe(200)
       expect(await response.json()).toEqual({ isSet: true, source: 'db' })
     })
+
+    it('prefers the stored custom password over the managed password', async () => {
+      insertPassword('testpassword123')
+      new SettingsService(db).getOrCreateManagedOpenCodeServerPassword()
+
+      expect(new SettingsService(db).getOpenCodeServerPassword()).toBe('testpassword123')
+    })
   })
 
   describe('PATCH /api/settings/opencode-server-auth', () => {
@@ -107,7 +148,7 @@ describe('OpenCode Server Auth Routes', () => {
       expect(row?.value).not.toBe('testpassword123')
     })
 
-    it('clears stored password and returns none source without env fallback', async () => {
+    it('clears stored password and reverts to the managed password without env fallback', async () => {
       insertPassword('testpassword123')
 
       const response = await app.request('/api/settings/opencode-server-auth', {
@@ -117,7 +158,7 @@ describe('OpenCode Server Auth Routes', () => {
       })
 
       expect(response.status).toBe(200)
-      expect(await response.json()).toEqual({ isSet: false, source: 'none' })
+      expect(await response.json()).toEqual({ isSet: true, source: 'managed' })
       expect(mockRestart).toHaveBeenCalledOnce()
       expect(db.prepare('SELECT 1 FROM app_secrets WHERE key = ?').get('opencode_server_password')).toBeUndefined()
     })
@@ -135,6 +176,21 @@ describe('OpenCode Server Auth Routes', () => {
       expect(response.status).toBe(200)
       expect(await response.json()).toEqual({ isSet: true, source: 'env' })
       expect(mockRestart).toHaveBeenCalledOnce()
+    })
+
+    it('keeps the managed password when clearing a custom password', async () => {
+      insertPassword('testpassword123')
+      const managedBefore = new SettingsService(db).getOrCreateManagedOpenCodeServerPassword()
+
+      const response = await app.request('/api/settings/opencode-server-auth', {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ password: null }),
+      })
+
+      expect(response.status).toBe(200)
+      expect(await response.json()).toEqual({ isSet: true, source: 'managed' })
+      expect(new SettingsService(db).getOpenCodeServerPassword()).toBe(managedBefore)
     })
 
     it('returns 400 when password is shorter than 8 characters', async () => {
@@ -245,8 +301,8 @@ describe('OpenCode Server Auth Routes', () => {
       isLastStartupErrorNonRecoverable: vi.fn(() => false),
       setLifecycleInitialized: vi.fn((value: boolean) => { lifecycle.initialized = value }),
       getPort: vi.fn(() => 5551),
-      getVersion: vi.fn(() => '1.0.137'),
-      getMinVersion: vi.fn(() => '1.0.137'),
+      getVersion: vi.fn(() => '2.0.15'),
+      getMinVersion: vi.fn(() => '2.0.15'),
       isVersionSupported: vi.fn(() => true),
     }
     const supervisor = new OpenCodeSupervisor(manager as unknown as never, {} as SettingsService, {
@@ -274,17 +330,17 @@ describe('OpenCode Server Auth Routes', () => {
     })
   }
 
-  function createTestDb(): Database {
+  function createTestDb(): { db: Database; secrets: Map<string, { value: string; created_at: number; updated_at: number }> } {
     const secrets = new Map<string, { value: string; created_at: number; updated_at: number }>()
 
-    return {
+    const db = {
       exec: vi.fn(),
       close: vi.fn(),
       prepare: vi.fn((sql: string) => ({
         get: (key: string) => {
           if (sql.includes('SELECT value')) {
             const secret = secrets.get(key)
-            return secret === undefined ? undefined : secret
+            return secret === undefined ? undefined : { value: secret.value }
           }
           if (sql.includes('SELECT 1 FROM app_secrets')) {
             return secrets.has(key) ? { 1: 1 } : undefined
@@ -293,20 +349,27 @@ describe('OpenCode Server Auth Routes', () => {
         },
         run: (key: string, value?: string, createdAt?: number, updatedAt?: number) => {
           if (sql.includes('INSERT INTO app_secrets') && value !== undefined) {
+            if (sql.includes('DO NOTHING') && secrets.has(key)) {
+              return { changes: 0 }
+            }
             const existing = secrets.get(key)
             secrets.set(key, {
               value,
               created_at: createdAt ?? existing?.created_at ?? Date.now(),
               updated_at: updatedAt ?? Date.now(),
             })
+            return { changes: 1 }
           }
           if (sql.includes('DELETE FROM app_secrets')) {
             secrets.delete(key)
+            return { changes: 1 }
           }
-          return { changes: 1 }
+          return { changes: 0 }
         },
         all: vi.fn(() => []),
       })),
     } as unknown as Database
+
+    return { db, secrets }
   }
 })

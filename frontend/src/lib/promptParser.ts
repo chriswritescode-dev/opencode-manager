@@ -1,4 +1,5 @@
-import type { ContentPart, FileAttachmentInfo, ImageAttachment } from '@/api/types'
+import type { PromptAgentInput, PromptFileInput, PromptSkillInput } from '@/api/opencode'
+import type { FileAttachmentInfo, ImageAttachment } from '@/api/types'
 
 export const MENTION_PATTERN = /@([A-Za-z0-9_\-./]+)/g
 export const MENTION_TRIGGER_PATTERN = /(^|\s)@([A-Za-z0-9_\-./]*)$/
@@ -38,60 +39,45 @@ export function filterAgentsByQuery(agents: AgentInfo[], query: string): AgentIn
   )
 }
 
-export function parsePromptToParts(
+export interface ParsedPromptInput {
+  text: string
+  files: PromptFileInput[]
+  agents: PromptAgentInput[]
+  skills: PromptSkillInput[]
+}
+
+export function parsePromptToInput(
   rawInput: string,
   fileMap: Map<string, FileAttachmentInfo>,
+  agentNames: string[],
   imageAttachments?: ImageAttachment[]
-): ContentPart[] {
-  const parts: ContentPart[] = []
-  let lastIndex = 0
-  
+): ParsedPromptInput {
+  const files: PromptFileInput[] = []
+  const agents: PromptAgentInput[] = []
+  const agentNameByLowercase = new Map(agentNames.map((name) => [name.toLowerCase(), name]))
+
   for (const match of rawInput.matchAll(MENTION_PATTERN)) {
     const matchIndex = match.index!
-    
-    if (matchIndex > lastIndex) {
-      const textContent = rawInput.slice(lastIndex, matchIndex)
-      if (textContent.trim()) {
-        parts.push({ type: 'text', content: textContent })
-      }
-    }
-    
     const mentionText = match[1]
+    const mention = { start: matchIndex, end: matchIndex + match[0].length, text: match[0] }
+
     const file = fileMap.get(mentionText.toLowerCase())
-    
     if (file) {
-      parts.push({
-        type: 'file',
-        path: file.path,
-        name: file.name
-      })
-    } else {
-      parts.push({ type: 'text', content: match[0] })
+      files.push({ uri: `file://${file.path}`, name: file.name, mention })
+      continue
     }
-    
-    lastIndex = matchIndex + match[0].length
-  }
-  
-  if (lastIndex < rawInput.length) {
-    const textContent = rawInput.slice(lastIndex)
-    if (textContent.trim()) {
-      parts.push({ type: 'text', content: textContent })
+
+    const agentName = agentNameByLowercase.get(mentionText.toLowerCase())
+    if (agentName) {
+      agents.push({ name: agentName, mention })
     }
   }
-  
-  if (imageAttachments && imageAttachments.length > 0) {
-    for (const attachment of imageAttachments) {
-      parts.push({
-        type: 'image',
-        id: attachment.id,
-        filename: attachment.filename,
-        mime: attachment.mime,
-        dataUrl: attachment.dataUrl
-      })
-    }
+
+  for (const attachment of imageAttachments ?? []) {
+    files.push({ uri: attachment.dataUrl, name: attachment.filename })
   }
-  
-  return parts.length > 0 ? parts : [{ type: 'text', content: '' }]
+
+  return { text: rawInput, files, agents, skills: [] }
 }
 
 export function getFilename(path: string): string {

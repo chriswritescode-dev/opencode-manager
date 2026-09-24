@@ -6,11 +6,11 @@ import { SessionDetail } from '../SessionDetail'
 
 const mocks = vi.hoisted(() => ({
   useSession: vi.fn(),
-  useMessages: vi.fn(),
+  useSessionTranscript: vi.fn(),
   useSSE: vi.fn(),
   useRepoActivity: vi.fn(),
   usePermissions: vi.fn(),
-  useQuestions: vi.fn(),
+  useForms: vi.fn(),
   useSSEHealth: vi.fn(),
   useConfig: vi.fn(),
   useOpenCodeClient: vi.fn(),
@@ -24,16 +24,19 @@ const mocks = vi.hoisted(() => ({
   useSidebarAction: vi.fn(),
   useSessionStatusForSession: vi.fn(),
   syncPermissionsForSession: vi.fn(),
-  syncQuestionsForSession: vi.fn(),
+  syncFormsForSession: vi.fn(),
 }))
 
 vi.mock('@/hooks/useOpenCode', () => ({
   useSession: mocks.useSession,
-  useAbortSession: vi.fn(() => ({ mutate: vi.fn() })),
+  useInterruptSession: vi.fn(() => ({ mutate: vi.fn() })),
   useUpdateSession: vi.fn(() => ({ mutate: vi.fn() })),
   useCreateSession: vi.fn(() => ({ mutateAsync: vi.fn() })),
-  useMessages: mocks.useMessages,
   useConfig: mocks.useConfig,
+}))
+
+vi.mock('@/hooks/useSessionTranscript', () => ({
+  useSessionTranscript: mocks.useSessionTranscript,
 }))
 
 vi.mock('@/hooks/useModelSelection', () => ({
@@ -112,7 +115,7 @@ vi.mock('@/contexts/EventContext', async (importOriginal) => {
   return {
     ...(actual as object),
     usePermissions: mocks.usePermissions,
-    useQuestions: mocks.useQuestions,
+    useForms: mocks.useForms,
     useSSEHealth: mocks.useSSEHealth,
   }
 })
@@ -137,11 +140,10 @@ vi.mock('@/components/session/SessionList', () => ({ SessionList: vi.fn(() => nu
 vi.mock('@/components/file-browser/FileBrowserSheet', () => ({ FileBrowserSheet: vi.fn(() => null) }))
 vi.mock('@/components/repo/RepoMcpDialog', () => ({ RepoMcpDialog: vi.fn(() => null) }))
 vi.mock('@/components/repo/ResetPermissionsDialog', () => ({ ResetPermissionsDialog: vi.fn(() => null) }))
-vi.mock('@/components/repo/RepoLspDialog', () => ({ RepoLspDialog: vi.fn(() => null) }))
 vi.mock('@/components/repo/RepoSkillsDialog', () => ({ RepoSkillsDialog: vi.fn(() => null) }))
 vi.mock('@/components/source-control', () => ({ SourceControlPanel: vi.fn(() => null) }))
-vi.mock('@/components/session/QuestionPrompt', () => ({ QuestionPrompt: vi.fn(() => null) }))
-vi.mock('@/components/session/MinimizedQuestionIndicator', () => ({ MinimizedQuestionIndicator: vi.fn(() => null) }))
+vi.mock('@/components/session/FormPrompt', () => ({ FormPrompt: vi.fn(() => null) }))
+vi.mock('@/components/session/MinimizedFormIndicator', () => ({ MinimizedFormIndicator: vi.fn(() => null) }))
 vi.mock('@/components/notifications/PendingActionsGroup', () => ({ PendingActionsGroup: vi.fn(() => null) }))
 
 const findPendingActionsQuery = (queryClient: QueryClient): Query | undefined =>
@@ -155,21 +157,21 @@ describe('SessionDetail pending-actions polling gating', () => {
     vi.clearAllMocks()
 
     mocks.useSession.mockReturnValue({ data: undefined, isLoading: false })
-    mocks.useMessages.mockReturnValue({ data: [], isLoading: false })
+    mocks.useSessionTranscript.mockReturnValue(emptyTranscript())
     mocks.useRepoActivity.mockReturnValue(undefined)
     mocks.usePermissions.mockReturnValue({
       pendingCount: 0,
       hasPermissionsForSession: vi.fn(() => false),
       syncForSession: mocks.syncPermissionsForSession,
     })
-    mocks.useQuestions.mockReturnValue({
+    mocks.useForms.mockReturnValue({
       current: null,
       getForSession: vi.fn(() => null),
       pendingCount: 0,
-      hasQuestionsForSession: vi.fn(() => false),
+      hasFormsForSession: vi.fn(() => false),
       reply: vi.fn(),
-      reject: vi.fn(),
-      syncForSession: mocks.syncQuestionsForSession,
+      cancel: vi.fn(),
+      syncForSession: mocks.syncFormsForSession,
     })
     mocks.useSSEHealth.mockReturnValue({ isHealthy: true })
     mocks.useConfig.mockReturnValue({ data: undefined, isLoading: false })
@@ -191,6 +193,15 @@ describe('SessionDetail pending-actions polling gating', () => {
   const createQueryClient = () =>
     new QueryClient({ defaultOptions: { queries: { retry: false } } })
 
+  const emptyTranscript = (status: 'idle' | 'busy' | 'retry' = 'idle') => ({
+    messages: [],
+    pending: [],
+    status,
+    isLoading: false,
+    fetchOlder: vi.fn(),
+    hasOlder: false,
+  })
+
   const renderSessionDetail = (queryClient: QueryClient) =>
     render(
       <MemoryRouter initialEntries={['/repos/1/sessions/session-1']}>
@@ -204,7 +215,7 @@ describe('SessionDetail pending-actions polling gating', () => {
 
   it('polls on the sync interval when disconnected and the session is active', async () => {
     mocks.useSSE.mockReturnValue({ isConnected: false, isReconnecting: false })
-    mocks.useSessionStatusForSession.mockReturnValue({ type: 'busy' })
+    mocks.useSessionTranscript.mockReturnValue(emptyTranscript('busy'))
 
     const queryClient = createQueryClient()
     renderSessionDetail(queryClient)
@@ -219,7 +230,7 @@ describe('SessionDetail pending-actions polling gating', () => {
 
   it('does not poll while the SSE stream is connected', async () => {
     mocks.useSSE.mockReturnValue({ isConnected: true, isReconnecting: false })
-    mocks.useSessionStatusForSession.mockReturnValue({ type: 'busy' })
+    mocks.useSessionTranscript.mockReturnValue(emptyTranscript('busy'))
 
     const queryClient = createQueryClient()
     renderSessionDetail(queryClient)
@@ -234,7 +245,7 @@ describe('SessionDetail pending-actions polling gating', () => {
 
   it('does not poll when disconnected but the session is idle with no incomplete messages', async () => {
     mocks.useSSE.mockReturnValue({ isConnected: false, isReconnecting: false })
-    mocks.useSessionStatusForSession.mockReturnValue({ type: 'idle' })
+    mocks.useSessionTranscript.mockReturnValue(emptyTranscript('idle'))
 
     const queryClient = createQueryClient()
     renderSessionDetail(queryClient)
@@ -245,25 +256,5 @@ describe('SessionDetail pending-actions polling gating', () => {
 
     const query = findPendingActionsQuery(queryClient)
     expect((query?.options as { refetchInterval?: unknown }).refetchInterval).toBe(false)
-  })
-
-  it('requests message fallback polling while the SSE stream is disconnected', async () => {
-    mocks.useSSE.mockReturnValue({ isConnected: false, isReconnecting: true })
-
-    const queryClient = createQueryClient()
-    renderSessionDetail(queryClient)
-
-    const calls = mocks.useMessages.mock.calls
-    expect(calls[calls.length - 1][3]).toEqual({ fallbackPoll: true })
-  })
-
-  it('does not request message fallback polling while the SSE stream is connected', async () => {
-    mocks.useSSE.mockReturnValue({ isConnected: true, isReconnecting: false })
-
-    const queryClient = createQueryClient()
-    renderSessionDetail(queryClient)
-
-    const calls = mocks.useMessages.mock.calls
-    expect(calls[calls.length - 1][3]).toEqual({ fallbackPoll: false })
   })
 })

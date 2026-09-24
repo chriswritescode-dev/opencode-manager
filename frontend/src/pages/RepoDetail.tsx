@@ -16,7 +16,6 @@ import { useDialogParam } from "@/hooks/useDialogParam";
 import { useWorktreeTab } from "@/hooks/useWorktreeTab";
 import { WorktreeTabs } from "@/components/repo/WorktreeTabs";
 import { WorkspaceManager } from "@/components/repo/WorkspaceManager";
-import { OPENCODE_API_ENDPOINT } from "@/config";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { GitBranch, Plus, Loader2, Layers } from "lucide-react";
@@ -25,6 +24,7 @@ import { ResetPermissionsDialog } from "@/components/repo/ResetPermissionsDialog
 import { PendingActionsGroup } from "@/components/notifications/PendingActionsGroup";
 import { getRepoDisplayName } from "@/lib/utils";
 import { useSidebarAction } from "@/hooks/useSidebarAction";
+import { isWorktreeSibling } from "@opencode-manager/shared/utils";
 
 export function RepoDetail() {
   const { id } = useParams<{ id: string }>();
@@ -52,10 +52,8 @@ export function RepoDetail() {
   const deleteWorkspaces = useDeleteRepoWorkspaces(repoId);
   const createWorkspace = useCreateRepoWorkspace(repoId);
 
-  const opcodeUrl = OPENCODE_API_ENDPOINT;
-
   const workspaceSiblings = useMemo(
-    () => (siblings ?? []).filter((sibling) => !!sibling.workspaceId && !!sibling.fullPath),
+    () => (siblings ?? []).filter((sibling) => isWorktreeSibling(sibling) && !!sibling.fullPath),
     [siblings],
   );
 
@@ -99,7 +97,7 @@ export function RepoDetail() {
 
   const activeWorkspaceLabel = activeWorkspaceDirectory ? directoryLabels[activeWorkspaceDirectory] : undefined;
 
-  useSSE(opcodeUrl, subscriptionDirectories);
+  useSSE(subscriptionDirectories);
 
   const sessionUrl = useCallback(
     (sessionId: string) => {
@@ -109,7 +107,7 @@ export function RepoDetail() {
     [repoId, activeTab],
   );
 
-  const createSessionMutation = useCreateSession(opcodeUrl, composerDirectory, (session) => {
+  const createSessionMutation = useCreateSession(composerDirectory, (session) => {
     navigate(sessionUrl(session.id));
   });
 
@@ -211,7 +209,7 @@ export function RepoDetail() {
           </div>
           <Button
             onClick={() => handleCreateSession()}
-            disabled={!opcodeUrl || createSessionMutation.isPending}
+            disabled={createSessionMutation.isPending}
             size="sm"
             className="sm:hidden h-10 w-10 p-0 bg-blue-600 hover:bg-blue-700 text-white transition-all duration-200 hover:scale-105"
           >
@@ -237,14 +235,13 @@ export function RepoDetail() {
         activeWorkspaceDirectory={activeWorkspaceDirectory}
         onActiveWorkspaceChange={setActiveWorkspaceDirectory}
         onCreateWorkspace={() => setCreateWorkspaceOpen(true)}
-        onDelete={(workspaceIds) => deleteWorkspaces.mutate(workspaceIds)}
+        onDelete={(directories) => deleteWorkspaces.mutate(directories)}
         isDeleting={deleteWorkspaces.isPending}
       />
 
       <div className="flex-1 flex flex-col min-h-0">
-        {opcodeUrl && sessionListDirectories.length > 0 && (
+        {sessionListDirectories.length > 0 && (
           <SessionList
-            opcodeUrl={opcodeUrl}
             directories={sessionListDirectories}
             directoryLabels={activeTab === 'workspaces' ? directoryLabels : undefined}
             createDirectory={activeTab === 'workspaces' ? workspaceComposerDirectory : baseDirectory}
