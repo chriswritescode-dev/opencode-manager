@@ -462,7 +462,7 @@ function flattenEventEnvelope(parsed: unknown): unknown {
     typeof (parsed as { payload: unknown }).payload === 'object'
   ) {
     const { payload, directory } = parsed as SSEEventEnvelope
-    return { ...payload, directory }
+    return typeof directory === 'string' ? { ...payload, directory } : { ...payload }
   }
   return parsed
 }

@@ -44,7 +44,6 @@ vi.mock('@/hooks/useOpenCode', () => ({
   useSendPrompt: () => ({ mutate: mocks.useSendPromptMutate, isPending: mocks.sendPromptPending() }),
   useInterruptSession: () => ({ mutate: vi.fn() }),
   useSendShell: () => ({ mutate: vi.fn(), isPending: false }),
-  useOpenCodeClient: () => ({}),
   useAgents: () => ({ data: [] }),
 }))
 

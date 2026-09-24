@@ -4,7 +4,7 @@ import { TextPart } from './TextPart'
 import { ToolCallPart } from './ToolCallPart'
 import { useSettings } from '@/hooks/useSettings'
 
-export type AssistantContentPart = SessionMessageAssistant['content'][number]
+type AssistantContentPart = SessionMessageAssistant['content'][number]
 
 interface MessagePartProps {
   part: AssistantContentPart

@@ -22,13 +22,6 @@ import type { SessionInfo } from '@opencode-manager/shared/opencode'
 export type Session = SessionInfo
 export type PermissionResponse = 'once' | 'always' | 'reject'
 
-export type { FormAnswer, FormField, FormInfo, PermissionRequest } from '@opencode-manager/shared/opencode'
-
-export type ContentPart = 
-  | { type: 'text', content: string }
-  | { type: 'file', path: string, name: string }
-  | { type: 'image', id: string, filename: string, mime: string, dataUrl: string }
-
 export interface FileAttachmentInfo {
   path: string
   name: string

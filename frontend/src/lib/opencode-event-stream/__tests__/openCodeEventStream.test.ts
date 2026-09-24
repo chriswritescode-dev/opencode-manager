@@ -28,6 +28,21 @@ describe('OpenCodeEventStream', () => {
     })
   })
 
+  it('delivers location-less events without a directory', () => {
+    const transport = new TestEventStreamTransport()
+    const stream = new OpenCodeEventStream({ transport })
+    const onEvent = vi.fn()
+
+    stream.subscribeGlobalMonitor({ directories: ['/repo'], onEvent })
+    transport.openConnection()
+    transport.connected()
+    transport.message({ directory: null, payload: { type: 'provider.updated', data: {} } })
+    transport.message({ payload: { type: 'credential.updated', data: {} } })
+
+    expect(onEvent).toHaveBeenNthCalledWith(1, { type: 'provider.updated', data: {} })
+    expect(onEvent).toHaveBeenNthCalledWith(2, { type: 'credential.updated', data: {} })
+  })
+
   it('publishes health through monitor output', () => {
     const transport = new TestEventStreamTransport()
     const stream = new OpenCodeEventStream({ transport })

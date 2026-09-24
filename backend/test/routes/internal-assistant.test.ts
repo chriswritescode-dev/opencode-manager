@@ -11,6 +11,13 @@ import { migrate } from '../../src/db/migration-runner'
 import type { OpenCodeClient } from '../../src/services/opencode/client'
 import type { ScheduleWorktreeManager } from '../../src/services/schedule-worktree'
 
+const readOpenCodeConfigFileMock = vi.hoisted(() => vi.fn())
+
+vi.mock('../../src/services/opencode-config-file', async (importOriginal) => ({
+  ...await importOriginal<typeof import('../../src/services/opencode-config-file')>(),
+  readOpenCodeConfigFile: readOpenCodeConfigFileMock,
+}))
+
 describe('internal/assistant routes', () => {
   let db: Database
   let scheduleService: ScheduleService
@@ -24,6 +31,7 @@ describe('internal/assistant routes', () => {
     db = new Database(':memory:')
     migrate(db, allMigrations)
 
+    readOpenCodeConfigFileMock.mockReset().mockResolvedValue({ isValid: true })
     reloadMock = vi.fn().mockResolvedValue(undefined)
     const openCodeClient = {
       api: { location: { reload: reloadMock } },
@@ -54,7 +62,7 @@ describe('internal/assistant routes', () => {
     expect(body.success).toBe(true)
   })
 
-  it('reloads every loaded location without a directory argument', async () => {
+  it('reloads OpenCode through the shared location reload without a directory argument', async () => {
     await app.request('/api/internal/assistant/reload', {
       method: 'POST',
       headers: { authorization: `Bearer ${token}` },
@@ -105,6 +113,19 @@ describe('internal/assistant routes', () => {
     expect(res.status).toBe(502)
     const body = await res.json() as { error: string }
     expect(body.error).toBe('Failed to reload assistant workspace')
+  })
+
+  it('returns 400 without reloading when the OpenCode config is invalid', async () => {
+    const validationIssues = [{ path: 'model', message: 'Invalid model' }]
+    readOpenCodeConfigFileMock.mockResolvedValue({ isValid: false, validationIssues })
+    const res = await app.request('/api/internal/assistant/reload', {
+      method: 'POST',
+      headers: { authorization: `Bearer ${token}` },
+    })
+    expect(res.status).toBe(400)
+    const body = await res.json() as { error: string; validationIssues: unknown }
+    expect(body).toEqual({ error: 'OpenCode global configuration is invalid', validationIssues })
+    expect(reloadMock).not.toHaveBeenCalled()
   })
 
 })

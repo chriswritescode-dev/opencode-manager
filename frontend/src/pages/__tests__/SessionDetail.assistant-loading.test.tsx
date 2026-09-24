@@ -13,7 +13,6 @@ const mocks = vi.hoisted(() => ({
   useForms: vi.fn(),
   useSSEHealth: vi.fn(),
   useConfig: vi.fn(),
-  useOpenCodeClient: vi.fn(),
   useSettings: vi.fn(),
   useSettingsDialog: vi.fn(),
   useMobile: vi.fn(),
@@ -39,10 +38,6 @@ vi.mock('@/hooks/useSessionTranscript', () => ({
 
 vi.mock('@/hooks/useModelSelection', () => ({
   useModelSelection: vi.fn(() => ({ model: null, modelString: null })),
-}))
-
-vi.mock('@/hooks/useOpenCodeClient', () => ({
-  useOpenCodeClient: mocks.useOpenCodeClient,
 }))
 
 vi.mock('@/hooks/useTTS', () => ({
@@ -129,10 +124,6 @@ vi.mock('@/api/repos', () => ({
   } : null)),
 }))
 
-vi.mock('@/components/model/ModelSelectDialog', () => ({
-  ModelSelectDialog: vi.fn(() => null),
-}))
-
 vi.mock('@/components/session/SessionList', () => ({
   SessionList: vi.fn(() => null),
 }))
@@ -200,7 +191,6 @@ describe('SessionDetail assistant loading at repoId=0', () => {
     })
     mocks.useSSEHealth.mockReturnValue({ isHealthy: true })
     mocks.useConfig.mockReturnValue({ data: undefined, isLoading: false })
-    mocks.useOpenCodeClient.mockReturnValue({})
     mocks.useSettings.mockReturnValue({
       preferences: { expandToolCalls: false },
       updateSettings: vi.fn(),

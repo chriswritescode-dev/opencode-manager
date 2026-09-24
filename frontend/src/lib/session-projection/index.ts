@@ -3,7 +3,10 @@ export {
   applySessionEvent,
   emptySessionTranscript,
   hydrateSessionTranscript,
-  sessionIDFromEvent,
+  eventsReplayableOverSnapshot,
+  mergeNewestPage,
+  sessionEventRequiresResync,
   type SessionSnapshot,
   type SessionTranscript,
+  type TranscriptCache,
 } from './applySessionEvent'

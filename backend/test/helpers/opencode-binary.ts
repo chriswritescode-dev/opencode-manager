@@ -7,12 +7,13 @@ import { randomBytes } from 'crypto'
 import os from 'os'
 import path from 'path'
 import { buildOpenCodeBasicAuth, isSupportedOpenCodeVersion } from '@opencode-manager/shared/opencode'
+import { OPENCODE_SERVICE_SERVE_ARGS, prepareOpenCodeServiceLaunch } from '../../src/services/opencode-service-mode'
 
 const VERSION_TIMEOUT_MS = 5000
 const SERVE_READY_TIMEOUT_MS = 60000
 const SERVE_POLL_INTERVAL_MS = 250
 const RUN_TIMEOUT_MS = 90000
-const STOP_TIMEOUT_MS = 5000
+const STOP_TIMEOUT_MS = 10000
 
 const OPENCODE_BINARY_CANDIDATES = ['opencode', '/usr/local/bin/opencode', '/opt/opencode/bin/opencode']
 
@@ -25,8 +26,12 @@ export type OpenCodeRunResult = {
 export type OpenCodeServe = {
   baseUrl: string
   password: string
+  port: number
   homeDirectory: string
   configHome: string
+  directories: OpenCodeServeDirectories
+  readOutput: () => string
+  terminate: () => Promise<void>
   stop: () => Promise<void>
 }
 
@@ -113,59 +118,108 @@ async function waitForServerInfo(baseUrl: string, password: string, child: Retur
   throw new Error(`OpenCode server did not become ready: ${readStderr()}`)
 }
 
-export async function startOpenCodeServe(options: { env?: NodeJS.ProcessEnv } = {}): Promise<OpenCodeServe> {
+export type OpenCodeServeDirectories = {
+  root: string
+  homeDirectory: string
+  configHome: string
+  dataHome: string
+  stateHome: string
+  cacheHome: string
+}
+
+export type OpenCodeServeOptions = {
+  env?: NodeJS.ProcessEnv
+  service?: boolean
+  directories?: OpenCodeServeDirectories
+  password?: string
+  port?: number
+}
+
+export async function createOpenCodeServeDirectories(env: NodeJS.ProcessEnv = {}): Promise<OpenCodeServeDirectories> {
+  const root = await mkdtemp(path.join(os.tmpdir(), 'ocm-opencode-serve-'))
+  const directories: OpenCodeServeDirectories = {
+    root,
+    homeDirectory: env.HOME ?? path.join(root, 'home'),
+    configHome: env.XDG_CONFIG_HOME ?? path.join(root, 'config'),
+    dataHome: env.XDG_DATA_HOME ?? path.join(root, 'data'),
+    stateHome: env.XDG_STATE_HOME ?? path.join(root, 'state'),
+    cacheHome: env.XDG_CACHE_HOME ?? path.join(root, 'cache'),
+  }
+  for (const directory of [directories.homeDirectory, directories.configHome, directories.dataHome, directories.stateHome, directories.cacheHome]) {
+    await mkdir(directory, { recursive: true })
+  }
+  return directories
+}
+
+export async function startOpenCodeServe(options: OpenCodeServeOptions = {}): Promise<OpenCodeServe> {
   const binary = resolveOpenCode2Binary()
   if (!binary) throw new Error('no OpenCode 2 binary is available for the binary-backed test')
-  const root = await mkdtemp(path.join(os.tmpdir(), 'ocm-opencode-serve-'))
-  const password = randomBytes(24).toString('base64url')
-  const homeDirectory = options.env?.HOME ?? path.join(root, 'home')
-  const configHome = options.env?.XDG_CONFIG_HOME ?? path.join(root, 'config')
+  const ownsDirectories = options.directories === undefined
+  const directories = options.directories ?? await createOpenCodeServeDirectories(options.env)
+  const password = options.password ?? randomBytes(24).toString('base64url')
   const env: NodeJS.ProcessEnv = {
     ...process.env,
-    HOME: homeDirectory,
-    XDG_CONFIG_HOME: configHome,
-    XDG_DATA_HOME: path.join(root, 'data'),
-    XDG_STATE_HOME: path.join(root, 'state'),
-    XDG_CACHE_HOME: path.join(root, 'cache'),
     OPENCODE_DISABLE_MODELS_FETCH: '1',
     ...options.env,
+    HOME: directories.homeDirectory,
+    XDG_CONFIG_HOME: directories.configHome,
+    XDG_DATA_HOME: directories.dataHome,
+    XDG_STATE_HOME: directories.stateHome,
+    XDG_CACHE_HOME: directories.cacheHome,
     OPENCODE_SERVER_PASSWORD: password,
   }
-  for (const directory of new Set([env.HOME, env.XDG_CONFIG_HOME, env.XDG_DATA_HOME, env.XDG_STATE_HOME, env.XDG_CACHE_HOME])) {
-    if (typeof directory === 'string' && directory.length > 0) await mkdir(directory, { recursive: true })
+  if (options.service) {
+    await prepareOpenCodeServiceLaunch({ XDG_CONFIG_HOME: directories.configHome, XDG_STATE_HOME: directories.stateHome, OPENCODE_CONFIG_DIR: env.OPENCODE_CONFIG_DIR }, password)
   }
 
-  const port = await getFreePort()
-  const child = spawn(binary, ['serve', '--port', String(port), '--hostname', '127.0.0.1'], {
+  const port = options.port ?? await getFreePort()
+  const args = options.service
+    ? [...OPENCODE_SERVICE_SERVE_ARGS, '--port', String(port), '--hostname', '127.0.0.1']
+    : ['serve', '--port', String(port), '--hostname', '127.0.0.1']
+  const child = spawn(binary, args, {
     stdio: ['ignore', 'pipe', 'pipe'],
     env,
   })
-  let stderr = ''
-  child.stderr?.on('data', (chunk: Buffer) => {
-    stderr += chunk.toString()
-  })
+  let output = ''
+  const appendOutput = (chunk: Buffer) => {
+    output += chunk.toString()
+  }
+  child.stdout?.on('data', appendOutput)
+  child.stderr?.on('data', appendOutput)
+
+  const removeOwnedDirectories = async () => {
+    if (ownsDirectories) await rm(directories.root, { recursive: true, force: true })
+  }
 
   const baseUrl = `http://127.0.0.1:${port}`
   try {
-    await waitForServerInfo(baseUrl, password, child, () => stderr)
+    await waitForServerInfo(baseUrl, password, child, () => output)
   } catch (error) {
     child.kill('SIGKILL')
-    await rm(root, { recursive: true, force: true })
+    await removeOwnedDirectories()
     throw error
+  }
+
+  const terminate = async (): Promise<void> => {
+    if (child.exitCode === null && child.signalCode === null) {
+      child.kill('SIGTERM')
+      await Promise.race([once(child, 'close'), delay(STOP_TIMEOUT_MS)])
+      if (child.exitCode === null && child.signalCode === null) child.kill('SIGKILL')
+    }
   }
 
   return {
     baseUrl,
     password,
-    homeDirectory,
-    configHome,
+    port,
+    homeDirectory: directories.homeDirectory,
+    configHome: directories.configHome,
+    directories,
+    readOutput: () => output,
+    terminate,
     stop: async () => {
-      if (child.exitCode === null && child.signalCode === null) {
-        child.kill('SIGTERM')
-        await Promise.race([once(child, 'close'), delay(STOP_TIMEOUT_MS)])
-        if (child.exitCode === null && child.signalCode === null) child.kill('SIGKILL')
-      }
-      await rm(root, { recursive: true, force: true })
+      await terminate()
+      await removeOwnedDirectories()
     },
   }
 }

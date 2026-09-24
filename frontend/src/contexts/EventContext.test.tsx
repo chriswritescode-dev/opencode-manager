@@ -576,6 +576,108 @@ describe('EventProvider permissions and forms', () => {
     })
   })
 
+  it('does not invalidate the transcript on form reply or cancel events', async () => {
+    mocks.listRepos.mockResolvedValue([{ id: 123, fullPath: '/repo' }])
+    mocks.listPendingForms.mockResolvedValue([pendingForm, secondPendingForm])
+    const queryClient = createTestQueryClient()
+    const invalidateQueries = vi.spyOn(queryClient, 'invalidateQueries')
+
+    render(<Harness />, { wrapper: createWrapper(queryClient) })
+
+    await waitFor(() => {
+      expect(screen.getByTestId('count')).toHaveTextContent('2')
+    })
+    invalidateQueries.mockClear()
+
+    const lastSubscribeCall = mocks.subscribeGlobalMonitor.mock.calls[mocks.subscribeGlobalMonitor.mock.calls.length - 1]
+    const onEvent = lastSubscribeCall[0].onEvent as (data: unknown) => void
+
+    act(() => {
+      onEvent({ type: 'form.replied', data: { id: 'form-1', sessionID: 'session-1', answer: {} }, directory: '/repo' })
+      onEvent({ type: 'form.cancelled', data: { id: 'form-2', sessionID: 'session-2' }, directory: '/repo' })
+    })
+
+    await waitFor(() => {
+      expect(screen.getByTestId('count')).toHaveTextContent('0')
+    })
+    expect(invalidateQueries).not.toHaveBeenCalled()
+  })
+
+  it.each([
+    'credential.updated',
+    'credential.switched',
+    'integration.updated',
+    'provider.updated',
+    'model.updated',
+  ])('invalidates provider, model, credential, and auth-method caches on a location-less %s event', async (type) => {
+    const queryClient = createTestQueryClient()
+    const invalidateQueries = vi.spyOn(queryClient, 'invalidateQueries')
+
+    render(<Harness />, { wrapper: createWrapper(queryClient) })
+
+    await waitFor(() => expect(mocks.subscribeGlobalMonitor).toHaveBeenCalled())
+    invalidateQueries.mockClear()
+
+    const lastSubscribeCall = mocks.subscribeGlobalMonitor.mock.calls[mocks.subscribeGlobalMonitor.mock.calls.length - 1]
+    const onEvent = lastSubscribeCall[0].onEvent as (data: unknown) => void
+
+    act(() => {
+      onEvent({ type, data: {} })
+    })
+
+    for (const queryKey of [
+      ['providers'],
+      ['provider-credentials'],
+      ['provider-auth-methods'],
+      ['providers-with-models'],
+      ['opencode', 'providers'],
+    ]) {
+      expect(invalidateQueries).toHaveBeenCalledWith({ queryKey })
+    }
+  })
+
+  it('reconciles every tracked directory concurrently on an upstream resync', async () => {
+    mocks.listRepos.mockResolvedValue([
+      { id: 1, fullPath: '/repo-a' },
+      { id: 2, fullPath: '/repo-b' },
+    ])
+
+    render(<Harness />, { wrapper: createWrapper() })
+
+    await waitFor(() => {
+      expect(mocks.listPendingForms).toHaveBeenCalledWith('/repo-b')
+    })
+    await act(async () => {
+      await Promise.resolve()
+    })
+
+    const pending = new Map<string, () => void>()
+    mocks.listPendingPermissions.mockImplementation(
+      (directory: string) =>
+        new Promise((resolve) => {
+          pending.set(directory, () => resolve([]))
+        }),
+    )
+    mocks.listPendingPermissions.mockClear()
+    mocks.listPendingForms.mockClear()
+
+    const lastSubscribeCall = mocks.subscribeGlobalMonitor.mock.calls[mocks.subscribeGlobalMonitor.mock.calls.length - 1]
+    const onResync = lastSubscribeCall[0].onResync as (() => void) | undefined
+
+    act(() => {
+      onResync?.()
+    })
+
+    expect(mocks.listPendingPermissions).toHaveBeenCalledWith('/repo-a')
+    expect(mocks.listPendingPermissions).toHaveBeenCalledWith('/repo-b')
+    expect(mocks.listPendingForms).toHaveBeenCalledWith('/repo-a')
+    expect(mocks.listPendingForms).toHaveBeenCalledWith('/repo-b')
+
+    await act(async () => {
+      pending.forEach((resolve) => resolve())
+    })
+  })
+
   it('resolves a session directory from the infinite-query session list cache', async () => {
     mocks.listRepos.mockResolvedValue([{ id: 123, fullPath: '/repo' }])
 

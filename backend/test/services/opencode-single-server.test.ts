@@ -157,6 +157,20 @@ const mkdirMock = fs.mkdir as any
 const readFileMock = fs.readFile as any
 const readdirMock = fs.readdir as any
 const rmMock = fs.rm as any
+const writeFileMock = fs.writeFile as any
+const renameMock = fs.rename as any
+
+const SERVICE_SETTINGS_PATH = '/test/workspace/.config/opencode/service.json'
+const SERVICE_REGISTRATION_PATH = '/test/workspace/.opencode/state/opencode/service.json'
+
+function readWrittenServiceSettings(): Record<string, unknown> {
+  const rename = [...renameMock.mock.calls].reverse().find((call: unknown[]) => call[1] === SERVICE_SETTINGS_PATH) as [string, string] | undefined
+  if (!rename) throw new Error('the OpenCode service settings file was not written')
+  const write = [...writeFileMock.mock.calls].reverse().find((call: unknown[]) => call[0] === rename[0]) as [string, string, { mode: number }] | undefined
+  if (!write) throw new Error('the OpenCode service settings temp file was not written')
+  expect(write[2].mode).toBe(0o600)
+  return JSON.parse(write[1]) as Record<string, unknown>
+}
 const execSyncMock = execSync as any
 const childSpawnSyncMock = spawnSync as any
 const readdirSyncMock = readdirSync as any
@@ -231,6 +245,18 @@ describe('OpenCodeServerManager - server auth', () => {
     }
   }
 
+  async function runPastTerminationGrace<T>(operation: () => Promise<T>): Promise<T> {
+    vi.useFakeTimers({ toFake: ['setTimeout', 'Date'] })
+    try {
+      const pending = operation()
+      pending.catch(() => {})
+      await vi.advanceTimersByTimeAsync(15000)
+      return await pending
+    } finally {
+      vi.useRealTimers()
+    }
+  }
+
   it('rebuilds the client with env password when no DB password is stored', async () => {
     setOpenCodeEnv({ host: '127.0.0.1', password: 'envpassword123' })
     const { opencodeServerManager } = await import('../../src/services/opencode-single-server')
@@ -284,7 +310,8 @@ describe('OpenCodeServerManager - server auth', () => {
     const spawnEnv = (spawnMock.mock.calls[0] as unknown as [string, string[], { env: Record<string, string> }])[2].env
     const managedPassword = readStoredEncryptedSecret(passwordDb, 'opencode_server_managed_password')
     expect(managedPassword).toMatch(/^[A-Za-z0-9_-]{43}$/)
-    expect(spawnEnv.OPENCODE_SERVER_PASSWORD).toBe(managedPassword)
+    expect(readWrittenServiceSettings()).toEqual({ password: managedPassword })
+    expect(spawnEnv).not.toHaveProperty('OPENCODE_SERVER_PASSWORD')
     expect(spawnEnv).not.toHaveProperty('OPENCODE_SERVER_USERNAME')
     expect(createOpenCodeClientMock).toHaveBeenCalledWith(managedPassword, '0.0.0.0')
     expect(manager.getLastStartupError()).toBeNull()
@@ -297,7 +324,8 @@ describe('OpenCodeServerManager - server auth', () => {
     await OpenCodeServerManager.getInstance().start()
 
     const spawnEnv = (spawnMock.mock.calls[0] as unknown as [string, string[], { env: Record<string, string> }])[2].env
-    expect(spawnEnv.OPENCODE_SERVER_PASSWORD).toBe('envpassword123')
+    expect(readWrittenServiceSettings()).toEqual({ password: 'envpassword123' })
+    expect(spawnEnv).not.toHaveProperty('OPENCODE_SERVER_PASSWORD')
     expect(spawnEnv).not.toHaveProperty('OPENCODE_SERVER_USERNAME')
   })
 
@@ -319,14 +347,14 @@ describe('OpenCodeServerManager - server auth', () => {
 
     expect(spawnMock).toHaveBeenCalledWith(
       'opencode',
-      ['serve', '--port', '5551', '--hostname', '0.0.0.0'],
+      ['serve', '--service', '--port', '5551', '--hostname', '0.0.0.0'],
       expect.objectContaining({
         env: expect.objectContaining({
           OCM_SANDBOX_ENFORCED: 'true',
-          OPENCODE_SERVER_PASSWORD: 'envpassword123',
         }),
       })
     )
+    expect(readWrittenServiceSettings()).toEqual({ password: 'envpassword123' })
   })
 
   it('uses the managed password for an enforced server bound to an external host', async () => {
@@ -347,7 +375,8 @@ describe('OpenCodeServerManager - server auth', () => {
     await manager.start()
 
     const spawnEnv = (spawnMock.mock.calls[0] as unknown as [string, string[], { env: Record<string, string> }])[2].env
-    expect(spawnEnv.OPENCODE_SERVER_PASSWORD).toBe(readStoredEncryptedSecret(passwordDb, 'opencode_server_managed_password'))
+    expect(readWrittenServiceSettings()).toEqual({ password: readStoredEncryptedSecret(passwordDb, 'opencode_server_managed_password') })
+    expect(spawnEnv).not.toHaveProperty('OPENCODE_SERVER_PASSWORD')
     expect(spawnEnv).not.toHaveProperty('OPENCODE_SERVER_USERNAME')
   })
 
@@ -598,6 +627,81 @@ describe('OpenCodeServerManager - server auth', () => {
       expect(env.XDG_CONFIG_HOME).toBe('/test/workspace/.config')
     } finally {
       delete process.env.OPENCODE_CONFIG
+    }
+  })
+
+  it('delivers only the managed password through the service settings file and drops inherited and user-supplied password env vars', async () => {
+    setOpenCodeEnv({ host: '127.0.0.1', password: 'envpassword123' })
+    const { OpenCodeServerManager } = await import('../../src/services/opencode-single-server')
+    const manager = OpenCodeServerManager.getInstance()
+    manager.setDatabase(createPreferencesDb({
+      serverEnvVars: [
+        { key: 'OPENCODE_PASSWORD', value: 'user-stray-password' },
+        { key: 'OPENCODE_SERVER_PASSWORD', value: 'user-server-password' },
+      ],
+    }))
+    process.env.OPENCODE_PASSWORD = 'inherited-stray-password'
+    try {
+      await manager.start()
+
+      const env = (spawnMock.mock.calls[0] as unknown as [unknown, unknown, { env: Record<string, string> }])[2].env
+      expect(env).not.toHaveProperty('OPENCODE_PASSWORD')
+      expect(env).not.toHaveProperty('OPENCODE_SERVER_PASSWORD')
+      expect(readWrittenServiceSettings()).toEqual({ password: 'envpassword123' })
+    } finally {
+      delete process.env.OPENCODE_PASSWORD
+    }
+  })
+
+  it('spawns OpenCode in service mode after clearing a stale service registration and persisting the managed password', async () => {
+    setOpenCodeEnv({ host: '127.0.0.1', password: 'envpassword123' })
+    const { OpenCodeServerManager } = await import('../../src/services/opencode-single-server')
+
+    await OpenCodeServerManager.getInstance().start()
+
+    const [, args, options] = spawnMock.mock.calls[0] as unknown as [string, string[], { env: Record<string, string> }]
+    expect(args).toEqual(['serve', '--service', '--port', '5551', '--hostname', '127.0.0.1'])
+    expect(options.env.XDG_CONFIG_HOME).toBe('/test/workspace/.config')
+    expect(options.env.XDG_STATE_HOME).toBe('/test/workspace/.opencode/state')
+    expect(readWrittenServiceSettings()).toEqual({ password: 'envpassword123' })
+    expect(rmMock).toHaveBeenCalledWith(SERVICE_REGISTRATION_PATH, { force: true })
+    const spawnOrder = spawnMock.mock.invocationCallOrder[0] ?? 0
+    const registrationRemovalIndex = rmMock.mock.calls.findIndex((call: unknown[]) => call[0] === SERVICE_REGISTRATION_PATH)
+    const settingsWriteIndex = renameMock.mock.calls.findIndex((call: unknown[]) => call[1] === SERVICE_SETTINGS_PATH)
+    expect(rmMock.mock.invocationCallOrder[registrationRemovalIndex]).toBeLessThan(spawnOrder)
+    expect(renameMock.mock.invocationCallOrder[settingsWriteIndex]).toBeLessThan(spawnOrder)
+  })
+
+  it('writes the service settings into a user-supplied OPENCODE_CONFIG_DIR because OpenCode reads them from its global config directory', async () => {
+    setOpenCodeEnv({ host: '127.0.0.1', password: 'envpassword123' })
+    const { OpenCodeServerManager } = await import('../../src/services/opencode-single-server')
+    const manager = OpenCodeServerManager.getInstance()
+    manager.setDatabase(createPreferencesDb({
+      serverEnvVars: [{ key: 'OPENCODE_CONFIG_DIR', value: '/tmp/user-config-dir' }],
+    }))
+
+    await manager.start()
+
+    const env = (spawnMock.mock.calls[0] as unknown as [unknown, unknown, { env: Record<string, string> }])[2].env
+    expect(env.OPENCODE_CONFIG_DIR).toBe('/tmp/user-config-dir')
+    expect(renameMock).toHaveBeenCalledWith(expect.any(String), '/tmp/user-config-dir/service.json')
+    expect(renameMock).not.toHaveBeenCalledWith(expect.any(String), SERVICE_SETTINGS_PATH)
+  })
+
+  it('refuses to spawn when the service settings cannot be written', async () => {
+    setOpenCodeEnv({ host: '127.0.0.1', password: 'envpassword123' })
+    renameMock.mockImplementation(async (_from: string, to: string) => {
+      if (to === SERVICE_SETTINGS_PATH) throw new Error('read-only config home')
+    })
+    const { OpenCodeServerManager } = await import('../../src/services/opencode-single-server')
+    const manager = OpenCodeServerManager.getInstance()
+
+    try {
+      await expect(manager.start()).rejects.toThrow('Failed to prepare the OpenCode service settings: read-only config home')
+      expect(spawnMock).not.toHaveBeenCalled()
+      expect(manager.getLastStartupError()).toContain('read-only config home')
+    } finally {
+      renameMock.mockReset()
     }
   })
 
@@ -1125,7 +1229,7 @@ describe('OpenCodeServerManager - server auth', () => {
       const rmMock = fs.rm as unknown as ReturnType<typeof vi.fn>
       rmMock.mockClear()
 
-      await expect(manager.stop()).rejects.toThrow('refusing to complete the stop')
+      await expect(runPastTerminationGrace(() => manager.stop())).rejects.toThrow('refusing to complete the stop')
       expect(rmMock).not.toHaveBeenCalledWith(
         '/test/workspace/.opencode/state/opencode-server-child.json',
         { force: true },
@@ -1198,7 +1302,7 @@ describe('OpenCodeServerManager - server auth', () => {
       const rmMock = fs.rm as unknown as ReturnType<typeof vi.fn>
       rmMock.mockClear()
 
-      await expect(manager.stop()).rejects.toThrow('refusing to complete the stop')
+      await expect(runPastTerminationGrace(() => manager.stop())).rejects.toThrow('refusing to complete the stop')
       expect(killSpy).toHaveBeenCalledWith(-1234, 'SIGTERM')
       expect(killSpy).toHaveBeenCalledWith(-1234, 'SIGKILL')
       expect(rmMock).not.toHaveBeenCalledWith(
@@ -1242,7 +1346,7 @@ describe('OpenCodeServerManager - server auth', () => {
       const rmMock = fs.rm as unknown as ReturnType<typeof vi.fn>
       rmMock.mockClear()
 
-      await expect(manager.restart()).rejects.toThrow('refusing to complete the stop')
+      await expect(runPastTerminationGrace(() => manager.restart())).rejects.toThrow('refusing to complete the stop')
       expect(rmMock).not.toHaveBeenCalledWith(
         '/test/workspace/.opencode/state/opencode-server-child.json',
         { force: true },
@@ -1840,7 +1944,7 @@ describe('OpenCodeServerManager - server auth', () => {
       const manager = OpenCodeServerManager.getInstance()
       manager.setDatabase(createPasswordDb(null))
 
-      await expect(manager.start()).rejects.toThrow('refusing to start an enforced server')
+      await expect(runPastTerminationGrace(() => manager.start())).rejects.toThrow('refusing to start an enforced server')
       expect(manager.getLastStartupError()).toContain('9999')
       expect(spawnMock).not.toHaveBeenCalled()
     } finally {
@@ -2711,7 +2815,7 @@ describe('OpenCodeServerManager - server auth', () => {
     await expect(manager.start()).rejects.toThrow('OpenCode 1.18.32 is not supported')
 
     expect(spawnMock).not.toHaveBeenCalled()
-    expect(manager.getLastStartupError()).toContain('requires OpenCode 2.0.0 or newer')
+    expect(manager.getLastStartupError()).toContain('requires OpenCode >=2.0.15 <3.0.0')
     expect(manager.isLastStartupErrorNonRecoverable()).toBe(true)
   })
 

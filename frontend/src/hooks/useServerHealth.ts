@@ -31,7 +31,7 @@ export function useServerHealth(enabled = true) {
 
   const restartMutation = useMutation({
     mutationFn: async () => {
-      return await settingsApi.reloadOpenCodeConfig()
+      return await settingsApi.restartOpenCodeServer()
     },
     onSuccess: () => {
       invalidateConfigCaches(queryClient)

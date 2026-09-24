@@ -1,7 +1,7 @@
 import type { V2Event } from '@opencode-manager/shared/opencode'
 
 export const SESSION_ID = 'ses_1'
-export const OTHER_SESSION_ID = 'ses_2'
+const OTHER_SESSION_ID = 'ses_2'
 
 export const eventID = (seq: number) => `evt_01J8Z00000000000000000${String(seq).padStart(3, '0')}`
 export const messageID = (seq: number) => `msg_01J8Z00000000000000000${String(seq).padStart(3, '0')}`
@@ -233,53 +233,6 @@ export const textStreamSequence: V2Event[] = [
       ordinal: 0,
       text: 'Hello world',
     },
-  },
-]
-
-export const textGrowthSequence: V2Event[] = [
-  {
-    id: eventID(140),
-    created: 14000,
-    type: 'session.step.started',
-    durable: durable(140),
-    data: {
-      sessionID: SESSION_ID,
-      assistantMessageID: ASSISTANT_MESSAGE_ID,
-      agent: 'build',
-      model: { id: 'claude-sonnet-4-5', providerID: 'anthropic' },
-      started: 14000,
-    },
-  },
-  {
-    id: eventID(141),
-    created: 14010,
-    type: 'session.text.started',
-    durable: durable(141),
-    data: { sessionID: SESSION_ID, assistantMessageID: ASSISTANT_MESSAGE_ID, ordinal: 0 },
-  },
-  {
-    id: eventID(142),
-    created: 14011,
-    type: 'session.text.delta',
-    data: { sessionID: SESSION_ID, assistantMessageID: ASSISTANT_MESSAGE_ID, ordinal: 0, delta: 'Hello ' },
-  },
-  {
-    id: eventID(143),
-    created: 14012,
-    type: 'session.text.delta',
-    data: { sessionID: SESSION_ID, assistantMessageID: ASSISTANT_MESSAGE_ID, ordinal: 0, delta: 'world' },
-  },
-  {
-    id: eventID(144),
-    created: 14013,
-    type: 'session.text.delta',
-    data: { sessionID: SESSION_ID, assistantMessageID: ASSISTANT_MESSAGE_ID, ordinal: 0, delta: '!' },
-  },
-  {
-    id: eventID(145),
-    created: 14014,
-    type: 'session.text.delta',
-    data: { sessionID: SESSION_ID, assistantMessageID: ASSISTANT_MESSAGE_ID, ordinal: 0, delta: '?' },
   },
 ]
 

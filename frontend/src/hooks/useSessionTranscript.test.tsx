@@ -1,4 +1,4 @@
-import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
+import { QueryClient, QueryClientProvider, focusManager } from '@tanstack/react-query'
 import { act, render, renderHook, waitFor } from '@testing-library/react'
 import type { ReactNode } from 'react'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
@@ -9,19 +9,18 @@ import type {
 } from '@opencode-manager/shared/opencode'
 import { useSessionTranscript } from './useSessionTranscript'
 import { ContextUsageIndicator } from '@/components/session/ContextUsageIndicator'
+import { applySessionEvent, emptySessionTranscript } from '@/lib/session-projection'
+import { sessionTranscriptQueryKey } from '@/lib/queryInvalidation'
 import {
   ASSISTANT_MESSAGE_ID,
   SESSION_ID,
   TOOL_ID,
   USER_INBOX_ID,
-  compactionSequence,
   eventID,
   executionSequence,
-  failedCompactionSequence,
   messageID,
   otherSessionSequence,
   promptSequence,
-  textGrowthSequence,
   textStreamSequence,
 } from '@/lib/session-projection/fixtures'
 
@@ -293,30 +292,9 @@ describe('useSessionTranscript', () => {
     expect(result.current.messages.some((message) => message.id === waitingPrompt.id)).toBe(true)
   })
 
-  it('replaces buffered initial-load events with the authoritative snapshot', async () => {
-    const staleRead = deferred<{
-      messages: SessionMessageInfo[]
-      pending: SessionInboxInfo[]
-      status: 'idle'
-    }>()
-    const authoritative = {
-      messages: [
-        seededMessages[0] as SessionMessageInfo,
-        {
-          id: ASSISTANT_MESSAGE_ID,
-          type: 'assistant' as const,
-          agent: 'build',
-          model: { id: 'claude-sonnet-4-5', providerID: 'anthropic' },
-          content: [{ type: 'text' as const, text: 'Hello world' }],
-          time: { created: 2000, streamed: 2020, completed: 2020 },
-        },
-      ],
-      pending: [],
-      status: 'idle' as const,
-    }
-    mocks.readSessionSnapshot
-      .mockReturnValueOnce(staleRead.promise)
-      .mockResolvedValue(authoritative)
+  it('applies events buffered during the initial load onto the snapshot with a single read', async () => {
+    const initialRead = deferred<SnapshotValue>()
+    mocks.readSessionSnapshot.mockReturnValueOnce(initialRead.promise)
     const queryClient = createQueryClient()
     const { result } = renderHook(() => useSessionTranscript(SESSION_ID, DIRECTORY), {
       wrapper: createWrapper(queryClient),
@@ -329,17 +307,132 @@ describe('useSessionTranscript', () => {
     })
 
     await act(async () => {
-      staleRead.resolve({ messages: seededMessages, pending: [], status: 'idle' })
+      initialRead.resolve({ messages: seededMessages, pending: [], status: 'idle' })
     })
-
-    await waitFor(() => expect(mocks.readSessionSnapshot).toHaveBeenCalledTimes(2))
 
     await waitFor(() => {
       const assistant = result.current.messages[1]
       if (assistant?.type !== 'assistant') throw new Error('expected an assistant message')
-      expect(assistant.content).toEqual([{ type: 'text', text: 'Hello world' }])
+      expect(assistant.content).toEqual([{ type: 'text', text: 'Hello ' }])
     })
     expect(result.current.messages).toHaveLength(2)
+    expect(mocks.readSessionSnapshot).toHaveBeenCalledTimes(1)
+  })
+
+  it('does not re-append a buffered delta for a part the snapshot already contains', async () => {
+    const initialRead = deferred<SnapshotValue>()
+    mocks.readSessionSnapshot.mockReturnValueOnce(initialRead.promise)
+    const queryClient = createQueryClient()
+    const { result } = renderHook(() => useSessionTranscript(SESSION_ID, DIRECTORY), {
+      wrapper: createWrapper(queryClient),
+    })
+
+    await waitFor(() => expect(mocks.readSessionSnapshot).toHaveBeenCalledTimes(1))
+
+    act(() => {
+      testTransport().message(textStreamSequence[2])
+    })
+
+    const assistantWithText: SessionMessageInfo = {
+      id: ASSISTANT_MESSAGE_ID,
+      type: 'assistant',
+      agent: 'build',
+      model: { id: 'claude-sonnet-4-5', providerID: 'anthropic' },
+      content: [{ type: 'text', text: 'Hello ' }],
+      time: { created: 1020 },
+    }
+    await act(async () => {
+      initialRead.resolve({ messages: [seededMessages[0], assistantWithText], pending: [], status: 'idle' })
+    })
+
+    await waitFor(() => {
+      const assistant = result.current.messages[1]
+      if (assistant?.type !== 'assistant') throw new Error('expected an assistant message')
+      expect(assistant.content).toEqual([{ type: 'text', text: 'Hello ' }])
+    })
+    expect(mocks.readSessionSnapshot).toHaveBeenCalledTimes(1)
+  })
+
+  it('does not refetch the transcript on window focus', async () => {
+    const queryClient = createQueryClient()
+    const { result } = renderHook(() => useSessionTranscript(SESSION_ID, DIRECTORY), {
+      wrapper: createWrapper(queryClient),
+    })
+
+    await waitFor(() => expect(result.current.messages).toHaveLength(2))
+
+    act(() => {
+      testTransport().connected()
+    })
+    await waitFor(() => expect(mocks.readSessionSnapshot).toHaveBeenCalledTimes(2))
+
+    act(() => {
+      focusManager.setFocused(false)
+      focusManager.setFocused(true)
+    })
+
+    await new Promise((resolve) => setTimeout(resolve, 20))
+    expect(mocks.readSessionSnapshot).toHaveBeenCalledTimes(2)
+    focusManager.setFocused(undefined)
+  })
+
+  it('polls the newest page every 5s while the event stream is disconnected and stops once connected', async () => {
+    vi.useFakeTimers()
+    try {
+      const queryClient = createQueryClient()
+      const { result } = renderHook(() => useSessionTranscript(SESSION_ID, DIRECTORY), {
+        wrapper: createWrapper(queryClient),
+      })
+
+      await act(async () => {
+        await vi.advanceTimersByTimeAsync(0)
+      })
+      expect(mocks.readSessionSnapshot).toHaveBeenCalledTimes(1)
+      expect(result.current.messages).toHaveLength(2)
+
+      await act(async () => {
+        await vi.advanceTimersByTimeAsync(5000)
+      })
+      expect(mocks.readSessionSnapshot).toHaveBeenCalledTimes(2)
+
+      act(() => {
+        testTransport().connected()
+      })
+      await act(async () => {
+        await vi.advanceTimersByTimeAsync(0)
+      })
+      const readsAfterConnect = mocks.readSessionSnapshot.mock.calls.length
+
+      await act(async () => {
+        await vi.advanceTimersByTimeAsync(15000)
+      })
+      expect(mocks.readSessionSnapshot).toHaveBeenCalledTimes(readsAfterConnect)
+    } finally {
+      vi.useRealTimers()
+    }
+  })
+
+  it('reads the newest page once when execution ends while a tool is still running', async () => {
+    const running = promptSequence.slice(0, 15).reduce(applySessionEvent, emptySessionTranscript)
+    mocks.readSessionSnapshot.mockResolvedValue({
+      messages: running.messages,
+      pending: [],
+      status: 'busy',
+    })
+    const queryClient = createQueryClient()
+    const { result } = renderHook(() => useSessionTranscript(SESSION_ID, DIRECTORY), {
+      wrapper: createWrapper(queryClient),
+    })
+
+    await waitFor(() => expect(result.current.status).toBe('busy'))
+
+    act(() => {
+      testTransport().message(executionSequence[1])
+    })
+
+    await waitFor(() => expect(mocks.readSessionSnapshot).toHaveBeenCalledTimes(2))
+    await new Promise((resolve) => setTimeout(resolve, 20))
+    expect(mocks.readSessionSnapshot).toHaveBeenCalledTimes(2)
   })
 
   it('does not roll back a settled execution when a delayed reconnect read resolves', async () => {
@@ -447,7 +540,7 @@ describe('useSessionTranscript', () => {
     ])
   })
 
-  it('keeps a message only the authoritative reconnect read contains', async () => {
+  it('applies a status event buffered during the reconnect read without re-reading', async () => {
     const queryClient = createQueryClient()
     const { result } = renderHook(() => useSessionTranscript(SESSION_ID, DIRECTORY), {
       wrapper: createWrapper(queryClient),
@@ -489,264 +582,75 @@ describe('useSessionTranscript', () => {
     })
 
     await act(async () => {
-      reconnectRead.resolve({ messages: seededMessages, pending: [], status: 'idle' })
+      reconnectRead.resolve({ messages: [...seededMessages, reconnected], pending: [], status: 'idle' })
     })
 
-    await waitFor(() => expect(mocks.readSessionSnapshot).toHaveBeenCalledTimes(3))
     await waitFor(() => expect(result.current.messages).toHaveLength(3))
     expect(result.current.messages.map((message) => message.id)).toEqual([
       USER_INBOX_ID,
       ASSISTANT_MESSAGE_ID,
       reconnected.id,
     ])
-    expect(result.current.status).toBe('idle')
+    expect(result.current.status).toBe('busy')
+    expect(mocks.readSessionSnapshot).toHaveBeenCalledTimes(2)
   })
 
-  it('keeps the live projection when every newest-page read overlaps and settles on the authoritative read', async () => {
-    const frames: FrameRequestCallback[] = []
-    const requestAnimationFrame = vi
-      .spyOn(globalThis, 'requestAnimationFrame')
-      .mockImplementation((callback) => {
-        frames.push(callback)
-        return frames.length
-      })
-    const flushFrames = () => {
-      act(() => {
-        frames.splice(0).forEach((frame) => frame(0))
-      })
-    }
-    const reads = [0, 1, 2, 3, 4].map(() => deferred<SnapshotValue>())
-    const streamed = textGrowthSequence.slice(2, 6)
-    const overlapped: SnapshotValue[] = [
-      { text: 'Hello ' },
-      { text: 'Hello world' },
-      { text: 'Hello world!' },
-      { text: 'Hello world!?' },
-    ].map(({ text }) => ({
-      messages: [
-        seededMessages[0] as SessionMessageInfo,
-        {
-          id: ASSISTANT_MESSAGE_ID,
-          type: 'assistant' as const,
-          agent: 'build',
-          model: { id: 'claude-sonnet-4-5', providerID: 'anthropic' },
-          content: [{ type: 'text' as const, text }],
-          time: { created: 14000 },
-        },
-      ],
-      pending: [],
-      status: 'idle' as const,
-    }))
-    const authoritative: SnapshotValue = {
-      messages: [
-        seededMessages[0] as SessionMessageInfo,
-        {
-          id: ASSISTANT_MESSAGE_ID,
-          type: 'assistant',
-          agent: 'build',
-          model: { id: 'claude-sonnet-4-5', providerID: 'anthropic' },
-          content: [{ type: 'text', text: 'Hello world!?' }],
-          time: { created: 14000, streamed: 14014, completed: 14014 },
-        },
-        {
-          id: messageID(300),
-          type: 'synthetic',
-          text: 'Server only',
-          time: { created: 30000 },
-        },
-      ],
-      pending: [],
-      status: 'idle',
-    }
-    const seededSnapshot: SnapshotValue = {
+  it('keeps older loaded pages and the older cursor after an overlapping newest-page read', async () => {
+    mocks.readSessionSnapshot.mockResolvedValue({
       messages: seededMessages,
       pending: [],
       status: 'idle',
+      nextCursor: 'cursor_1',
+    })
+    const queryClient = createQueryClient()
+    const { result } = renderHook(() => useSessionTranscript(SESSION_ID, DIRECTORY), {
+      wrapper: createWrapper(queryClient),
+    })
+
+    await waitFor(() => expect(result.current.hasOlder).toBe(true))
+
+    const olderMessage: SessionMessageInfo = {
+      id: messageID(0),
+      type: 'synthetic',
+      text: 'Earlier',
+      time: { created: 900 },
     }
-    mocks.readSessionSnapshot
-      .mockResolvedValueOnce(seededSnapshot)
-      .mockReturnValueOnce(reads[0].promise)
-      .mockReturnValueOnce(reads[1].promise)
-      .mockReturnValueOnce(reads[2].promise)
-      .mockReturnValueOnce(reads[3].promise)
-      .mockResolvedValueOnce(authoritative)
-    try {
-      const queryClient = createQueryClient()
-      const cachedTranscript = () => {
-        const cached = queryClient.getQueryData<{ transcript: SessionTranscript }>([
-          'opencode',
-          'transcript',
-          SESSION_ID,
-        ])
-        if (!cached) throw new Error('expected a cached transcript')
-        return cached.transcript
-      }
-      const { result } = renderHook(() => useSessionTranscript(SESSION_ID, DIRECTORY), {
-        wrapper: createWrapper(queryClient),
-      })
+    mocks.listSessionMessages.mockResolvedValueOnce({ messages: [olderMessage], nextCursor: 'cursor_0' })
+    await act(async () => {
+      await result.current.fetchOlder()
+    })
 
-      await waitFor(() => expect(result.current.messages).toHaveLength(2))
-
-      act(() => {
-        testTransport().fail()
-        testTransport().connected()
-      })
-
-      await waitFor(() => expect(mocks.readSessionSnapshot).toHaveBeenCalledTimes(2))
-
-      for (let attempt = 0; attempt < 4; attempt += 1) {
-        act(() => {
-          if (attempt === 0) {
-            testTransport().message(textGrowthSequence[0])
-            testTransport().message(textGrowthSequence[1])
-          }
-          testTransport().message(streamed[attempt])
-        })
-        flushFrames()
-        await act(async () => {
-          reads[attempt]?.resolve(overlapped[attempt] as SnapshotValue)
-        })
-        if (attempt < 3) {
-          await waitFor(() => expect(mocks.readSessionSnapshot).toHaveBeenCalledTimes(attempt + 3))
-        }
-      }
-
-      expect(mocks.readSessionSnapshot).toHaveBeenCalledTimes(5)
-      expect(cachedTranscript().messages[1]?.content).toEqual([
-        { type: 'text', text: 'Hello world!?' },
-      ])
-
-      await waitFor(() => expect(mocks.readSessionSnapshot).toHaveBeenCalledTimes(6))
-
-      await act(async () => {
-        reads[4]?.resolve(authoritative)
-      })
-
-      await waitFor(() => expect(result.current.messages).toHaveLength(3))
-      expect(result.current.messages.map((message) => message.id)).toEqual([
-        USER_INBOX_ID,
-        ASSISTANT_MESSAGE_ID,
-        messageID(300),
-      ])
-      expect(result.current.status).toBe('idle')
-    } finally {
-      requestAnimationFrame.mockRestore()
+    const newer: SessionMessageInfo = {
+      id: messageID(300),
+      type: 'synthetic',
+      text: 'Later',
+      time: { created: 30000 },
     }
-  })
-
-  it('keeps one failed compaction when overlapping reads settle on the authoritative transcript', async () => {
-    const frames: FrameRequestCallback[] = []
-    const requestAnimationFrame = vi
-      .spyOn(globalThis, 'requestAnimationFrame')
-      .mockImplementation((callback) => {
-        frames.push(callback)
-        return frames.length
-      })
-    const flushFrames = () => {
-      act(() => {
-        frames.splice(0).forEach((frame) => frame(0))
-      })
-    }
-    const failedCompaction: SessionMessageInfo = {
-      id: messageID(53),
-      type: 'compaction',
-      status: 'failed',
-      reason: 'manual',
-      error: { type: 'compaction.failed', message: 'provider unavailable' },
-      time: { created: 5030 },
-    }
-    const failedSnapshot: SnapshotValue = {
-      messages: [...seededMessages, failedCompaction],
+    mocks.readSessionSnapshot.mockResolvedValue({
+      messages: [...seededMessages, newer],
       pending: [],
       status: 'idle',
-    }
-    const reads = [0, 1, 2, 3, 4].map(() => deferred<SnapshotValue>())
-    const authoritative: SnapshotValue = {
-      messages: [
-        ...failedSnapshot.messages,
-        {
-          id: messageID(300),
-          type: 'synthetic',
-          text: 'Server only',
-          time: { created: 30000 },
-        },
-      ],
-      pending: [],
-      status: 'idle',
-    }
-    mocks.readSessionSnapshot
-      .mockResolvedValueOnce(failedSnapshot)
-      .mockReturnValueOnce(reads[0].promise)
-      .mockReturnValueOnce(reads[1].promise)
-      .mockReturnValueOnce(reads[2].promise)
-      .mockReturnValueOnce(reads[3].promise)
-      .mockReturnValueOnce(reads[4].promise)
-    try {
-      const queryClient = createQueryClient()
-      const cachedTranscript = () => {
-        const cached = queryClient.getQueryData<{ transcript: SessionTranscript }>([
-          'opencode',
-          'transcript',
-          SESSION_ID,
-        ])
-        if (!cached) throw new Error('expected a cached transcript')
-        return cached.transcript
-      }
-      const { result } = renderHook(() => useSessionTranscript(SESSION_ID, DIRECTORY), {
-        wrapper: createWrapper(queryClient),
-      })
+      nextCursor: 'cursor_new',
+    })
 
-      await waitFor(() => expect(result.current.messages).toHaveLength(3))
+    act(() => {
+      testTransport().resync()
+    })
 
-      act(() => {
-        testTransport().fail()
-        testTransport().connected()
-      })
-
-      await waitFor(() => expect(mocks.readSessionSnapshot).toHaveBeenCalledTimes(2))
-
-      for (let attempt = 0; attempt < 4; attempt += 1) {
-        act(() => {
-          if (attempt === 0) {
-            testTransport().message(failedCompactionSequence[0])
-          } else if (attempt < 3) {
-            testTransport().message(compactionSequence[1])
-          } else {
-            testTransport().message(failedCompactionSequence[1])
-          }
-        })
-        flushFrames()
-        await act(async () => {
-          reads[attempt]?.resolve(failedSnapshot)
-        })
-        if (attempt < 3) {
-          await waitFor(() => expect(mocks.readSessionSnapshot).toHaveBeenCalledTimes(attempt + 3))
-        }
-      }
-
-      expect(mocks.readSessionSnapshot).toHaveBeenCalledTimes(5)
-      expect(
-        cachedTranscript().messages.filter((message) => message.type === 'compaction'),
-      ).toEqual([failedCompaction])
-
-      await waitFor(() => expect(mocks.readSessionSnapshot).toHaveBeenCalledTimes(6))
-
-      await act(async () => {
-        reads[4]?.resolve(authoritative)
-      })
-
-      await waitFor(() => expect(result.current.messages).toHaveLength(4))
-      expect(result.current.messages.filter((message) => message.type === 'compaction')).toEqual([
-        failedCompaction,
-      ])
-      expect(result.current.messages.some((message) => message.id === messageID(300))).toBe(true)
-      expect(result.current.status).toBe('idle')
-    } finally {
-      requestAnimationFrame.mockRestore()
-    }
+    await waitFor(() => expect(result.current.messages).toHaveLength(4))
+    expect(result.current.messages.map((message) => message.id)).toEqual([
+      olderMessage.id,
+      USER_INBOX_ID,
+      ASSISTANT_MESSAGE_ID,
+      newer.id,
+    ])
+    expect(queryClient.getQueryData<{ nextCursor?: string }>(sessionTranscriptQueryKey(SESSION_ID))?.nextCursor).toBe(
+      'cursor_0',
+    )
+    expect(mocks.readSessionSnapshot).toHaveBeenCalledTimes(2)
   })
 
-  it('discards an older-page response superseded by a newest-page read', async () => {
+  it('discards an older-page response superseded by a newest-page read that leaves a gap', async () => {
     mocks.readSessionSnapshot.mockResolvedValue({
       messages: seededMessages,
       pending: [],
@@ -768,12 +672,13 @@ describe('useSessionTranscript', () => {
     })
     expect(mocks.listSessionMessages).toHaveBeenCalledWith(SESSION_ID, { cursor: 'cursor_1' })
 
-    const reconnectRead = deferred<{
-      messages: SessionMessageInfo[]
-      pending: SessionInboxInfo[]
-      status: 'idle'
-      nextCursor: string
-    }>()
+    const gapPage: SessionMessageInfo = {
+      id: messageID(300),
+      type: 'synthetic',
+      text: 'Much later',
+      time: { created: 30000 },
+    }
+    const reconnectRead = deferred<SnapshotValue>()
     mocks.readSessionSnapshot.mockReturnValue(reconnectRead.promise)
 
     act(() => {
@@ -785,7 +690,7 @@ describe('useSessionTranscript', () => {
 
     await act(async () => {
       reconnectRead.resolve({
-        messages: seededMessages,
+        messages: [gapPage],
         pending: [],
         status: 'idle',
         nextCursor: 'cursor_2',
@@ -803,10 +708,9 @@ describe('useSessionTranscript', () => {
       await older
     })
 
-    expect(result.current.messages.map((message) => message.id)).toEqual([
-      USER_INBOX_ID,
-      ASSISTANT_MESSAGE_ID,
-    ])
+    await waitFor(() =>
+      expect(result.current.messages.map((message) => message.id)).toEqual([gapPage.id]),
+    )
 
     mocks.listSessionMessages.mockResolvedValue({ messages: [] })
     await act(async () => {

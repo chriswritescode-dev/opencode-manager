@@ -1,8 +1,7 @@
 import { useMemo } from 'react'
 import { useModelSelection } from './useModelSelection'
 import { useModelStore } from '@/stores/modelStore'
-import { getProviders } from '@/api/providers'
-import { useQuery } from '@tanstack/react-query'
+import { useProviders } from './useProviders'
 
 export interface UseVariantsResult {
   availableVariants: string[]
@@ -17,12 +16,7 @@ export function useVariants(directory?: string): UseVariantsResult {
   const { model } = useModelSelection(directory)
   const { setVariant: setStoreVariant, clearVariant: clearStoreVariant } = useModelStore()
 
-   const { data: providersData, isLoading } = useQuery({
-     queryKey: ['opencode', 'providers', directory],
-     queryFn: () => getProviders(directory),
-     enabled: !!model,
-     staleTime: 30000,
-   })
+   const { data: providersData, isLoading } = useProviders(directory, { enabled: !!model })
 
    const currentModel = useMemo(() => {
      if (!model || isLoading || !providersData?.providers || providersData.providers.length === 0) return null

@@ -1,25 +1,23 @@
 import { API_BASE_URL } from "@/config"
-import type {
-  OAuthAttemptStatus,
-  OAuthAuthorizeResponse,
-  PromptAnswer,
-  ProviderAuthMethods,
-} from "@opencode-manager/shared/schemas"
+import type { FormAnswer, IntegrationMethod } from "@opencode-manager/shared/opencode"
+import type { OAuthAttemptStatus, OAuthAuthorizeResponse } from "@opencode-manager/shared/schemas"
 import { fetchWrapper, fetchWrapperVoid } from "./fetchWrapper"
 
 export type {
-  OAuthAttemptStatus,
-  OAuthAuthorizeResponse,
-  PromptAnswer,
-  PromptAnswerValue,
-  PromptCondition,
-  PromptField,
-  ProviderAuthMethod,
-  ProviderAuthMethods,
-} from "@opencode-manager/shared/schemas"
+  FormAnswer,
+  FormField,
+  FormValue,
+  IntegrationKeyMethod,
+  IntegrationMethod,
+  IntegrationOAuthMethod,
+} from "@opencode-manager/shared/opencode"
+
+export type { OAuthAuthorizeResponse } from "@opencode-manager/shared/schemas"
+
+type ProviderAuthMethods = Record<string, IntegrationMethod[]>
 
 export const oauthApi = {
-  authorize: async (providerId: string, methodID: string, answer?: PromptAnswer): Promise<OAuthAuthorizeResponse> =>
+  authorize: async (providerId: string, methodID: string, answer?: FormAnswer): Promise<OAuthAuthorizeResponse> =>
     fetchWrapper<OAuthAuthorizeResponse>(`${API_BASE_URL}/api/oauth/${providerId}/oauth/authorize`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },

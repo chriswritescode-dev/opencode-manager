@@ -1,20 +1,26 @@
 import { spawnSync } from 'child_process'
-import { promises as fs, readdirSync } from 'fs'
+import { createWriteStream, promises as fs, readdirSync } from 'fs'
 import os from 'os'
 import path from 'path'
+import { Readable } from 'stream'
+import { pipeline } from 'stream/promises'
+import type { ReadableStream as WebReadableStream } from 'stream/web'
 import {
-  OPENCODE_MIN_VERSION,
   buildOpenCodeReleaseAsset,
+  compareOpenCodeVersions,
+  describeUnsupportedOpenCodeVersion,
+  isStableOpenCodeVersion,
   isSupportedOpenCodeVersion,
+  normalizeOpenCodeVersion,
+  parseOpenCodeVersionOutput,
 } from '@opencode-manager/shared/opencode'
 import { mkdirSafe } from '../utils/fs-safe'
-import { compareVersions } from '../utils/version-utils'
 import { getOpenCodeHome } from './opencode-home'
 
 const OPENCODE_REGISTRY_URL = 'https://registry.npmjs.org/@opencode/cli'
-const OPENCODE_STABLE_VERSION_PATTERN = /^\d+\.\d+\.\d+$/
+const OPENCODE_REGISTRY_LATEST_URL = `${OPENCODE_REGISTRY_URL}/latest`
+const OPENCODE_VERSION_CACHE_TTL_MS = 5 * 60 * 1000
 const OPENCODE_MUSL_LOADER_PREFIX = 'ld-musl-'
-const OPENCODE_VERSION_PATTERN = /(\d+\.\d+\.\d+)/
 
 export interface OpenCodeInstallTarget {
   platform: NodeJS.Platform
@@ -33,11 +39,26 @@ export interface InstallOpenCodeOptions {
   target?: OpenCodeInstallTarget
 }
 
+export interface OpenCodeRegistryOptions {
+  fetch?: typeof fetch
+  now?: () => number
+}
+
 interface OpenCodeRegistry {
-  'dist-tags'?: Record<string, unknown>
   versions?: Record<string, unknown>
   time?: Record<string, unknown>
 }
+
+interface OpenCodeRegistryLatest {
+  version?: unknown
+}
+
+interface CachedOpenCodeReleases {
+  releases: OpenCodeRelease[]
+  fetchedAt: number
+}
+
+let cachedOpenCodeReleases: CachedOpenCodeReleases | null = null
 
 export function resolveOpenCodeBinaryPath(homeDirectory: string): string {
   return path.join(homeDirectory, '.opencode', 'bin', 'opencode')
@@ -59,42 +80,62 @@ function hasMuslLoader(): boolean {
   }
 }
 
-async function fetchOpenCodeRegistry(fetchFn: typeof fetch): Promise<OpenCodeRegistry> {
-  const response = await fetchFn(OPENCODE_REGISTRY_URL)
+function isInstallableOpenCodeVersion(version: string): boolean {
+  return isStableOpenCodeVersion(version) && isSupportedOpenCodeVersion(version)
+}
+
+async function fetchOpenCodeRegistryJson<T>(fetchFn: typeof fetch, url: string): Promise<T> {
+  const response = await fetchFn(url)
   if (!response.ok) {
     throw new Error(`Failed to fetch OpenCode releases: registry responded with HTTP ${response.status}`)
   }
-  return await response.json() as OpenCodeRegistry
+  return await response.json() as T
 }
 
-export async function listOpenCodeVersions(fetchFn: typeof fetch = fetch): Promise<OpenCodeRelease[]> {
-  const registry = await fetchOpenCodeRegistry(fetchFn)
+export function clearOpenCodeVersionCache(): void {
+  cachedOpenCodeReleases = null
+}
+
+export async function listOpenCodeVersions(options: OpenCodeRegistryOptions = {}): Promise<OpenCodeRelease[]> {
+  const now = (options.now ?? Date.now)()
+  if (cachedOpenCodeReleases && now - cachedOpenCodeReleases.fetchedAt < OPENCODE_VERSION_CACHE_TTL_MS) {
+    return cachedOpenCodeReleases.releases
+  }
+
+  const registry = await fetchOpenCodeRegistryJson<OpenCodeRegistry>(options.fetch ?? fetch, OPENCODE_REGISTRY_URL)
   const publishedTimes = registry.time ?? {}
-  return Object.keys(registry.versions ?? {})
-    .filter((version) => OPENCODE_STABLE_VERSION_PATTERN.test(version) && isSupportedOpenCodeVersion(version))
+  const releases = Object.keys(registry.versions ?? {})
+    .filter(isInstallableOpenCodeVersion)
     .map((version) => ({
       version,
       publishedAt: typeof publishedTimes[version] === 'string' ? publishedTimes[version] as string : null,
     }))
-    .sort((left, right) => compareVersions(right.version, left.version))
+    .sort((left, right) => compareOpenCodeVersions(right.version, left.version))
+
+  cachedOpenCodeReleases = { releases, fetchedAt: now }
+  return releases
 }
 
-export async function latestOpenCodeVersion(fetchFn: typeof fetch = fetch): Promise<string> {
-  const registry = await fetchOpenCodeRegistry(fetchFn)
-  const latest = registry['dist-tags']?.latest
-  if (typeof latest !== 'string' || !isSupportedOpenCodeVersion(latest)) {
-    throw new Error(`OpenCode registry latest release is not a supported version: ${String(latest)}`)
+export async function latestOpenCodeVersion(options: OpenCodeRegistryOptions = {}): Promise<string> {
+  const latest = await fetchOpenCodeRegistryJson<OpenCodeRegistryLatest>(options.fetch ?? fetch, OPENCODE_REGISTRY_LATEST_URL)
+  if (typeof latest.version !== 'string' || !isInstallableOpenCodeVersion(latest.version)) {
+    throw new Error(`OpenCode registry latest release is not a supported version: ${String(latest.version)}`)
   }
-  return latest.trim().replace(/^v/, '')
+  return normalizeOpenCodeVersion(latest.version)
+}
+
+async function downloadToFile(response: Response, filePath: string): Promise<void> {
+  if (!response.body) throw new Error('OpenCode download returned an empty body')
+  await pipeline(Readable.fromWeb(response.body as WebReadableStream<Uint8Array>), createWriteStream(filePath))
 }
 
 export async function installOpenCodeVersion(
   version: string,
   options: InstallOpenCodeOptions = {},
 ): Promise<string> {
-  const requestedVersion = version.trim().replace(/^v/, '')
-  if (!isSupportedOpenCodeVersion(requestedVersion)) {
-    throw new Error(`OpenCode ${OPENCODE_MIN_VERSION} or newer is required; refusing to install ${version}`)
+  const requestedVersion = normalizeOpenCodeVersion(version)
+  if (!isInstallableOpenCodeVersion(requestedVersion)) {
+    throw new Error(`${describeUnsupportedOpenCodeVersion(version)}; refusing to install it`)
   }
 
   const fetchFn = options.fetch ?? fetch
@@ -109,7 +150,7 @@ export async function installOpenCodeVersion(
     if (!response.ok) {
       throw new Error(`Failed to download OpenCode ${requestedVersion} from ${asset.url}: HTTP ${response.status}`)
     }
-    await fs.writeFile(archivePath, new Uint8Array(await response.arrayBuffer()))
+    await downloadToFile(response, archivePath)
 
     const extraction = asset.archive === 'zip'
       ? spawnSync('unzip', ['-o', archivePath, '-d', stagingDirectory], { encoding: 'utf8' })
@@ -125,7 +166,7 @@ export async function installOpenCodeVersion(
     await fs.chmod(stagedBinaryPath, 0o755)
 
     const probe = spawnSync(stagedBinaryPath, ['--version'], { encoding: 'utf8' })
-    const detectedVersion = `${probe.stdout ?? ''}${probe.stderr ?? ''}`.match(OPENCODE_VERSION_PATTERN)?.[1]
+    const detectedVersion = parseOpenCodeVersionOutput(`${probe.stdout ?? ''}${probe.stderr ?? ''}`)
     if (detectedVersion !== requestedVersion) {
       throw new Error(`Downloaded OpenCode binary reports ${detectedVersion ?? 'no version'}; expected ${requestedVersion}`)
     }

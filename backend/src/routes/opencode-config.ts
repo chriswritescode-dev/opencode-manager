@@ -66,6 +66,7 @@ export function createOpenCodeConfigRoutes(settingsService: SettingsService, ope
         source: parsed.data.source,
         expectedRevision: parsed.data.expectedRevision,
         settingsService,
+        openCodeClient,
       })
       const { status, body: responseBody } = toOpenCodeConfigApplyResponse(result)
       return c.json(responseBody, status)

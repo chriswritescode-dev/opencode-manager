@@ -385,6 +385,46 @@ describe('MessageThread', () => {
     expect(screen.getByText('QUEUED')).toBeInTheDocument()
   })
 
+  it('renders step file changes from the assistant snapshot and opens clicked files', () => {
+    setupSettings({ simpleChatMode: false, showReasoning: false })
+    const onFileClick = vi.fn()
+
+    render(
+      <MessageThread
+        sessionID="test-session"
+        messages={[
+          assistantMessage('2', [textPart('Updated files')], {
+            snapshot: { start: 'aaa', end: 'bbbbbbbbcccc', files: ['/workspace/repos/app/src/a.ts'] },
+          }),
+        ]}
+        pending={[]}
+        onFileClick={onFileClick}
+      />,
+    )
+
+    expect(screen.getByText('File Changes (1 file)')).toBeInTheDocument()
+    fireEvent.click(screen.getByText('app/src/a.ts'))
+    expect(onFileClick).toHaveBeenCalledWith('/workspace/repos/app/src/a.ts')
+  })
+
+  it('hides step file changes in simple chat mode', () => {
+    setupSettings({ simpleChatMode: true, showReasoning: false })
+
+    render(
+      <MessageThread
+        sessionID="test-session"
+        messages={[
+          assistantMessage('2', [textPart('Updated files')], {
+            snapshot: { files: ['/workspace/repos/app/src/a.ts'] },
+          }),
+        ]}
+        pending={[]}
+      />,
+    )
+
+    expect(screen.queryByText(/File Changes/)).not.toBeInTheDocument()
+  })
+
   it('shows the empty state when there are no messages or pending prompts', () => {
     setupSettings({ simpleChatMode: false, showReasoning: false })
 

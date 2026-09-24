@@ -5,19 +5,9 @@ import { createStubOpenCodeClient } from '../../test/helpers/stub-opencode-clien
 import { FetchOpenCodeClient } from '../services/opencode/client'
 import { resolveOpenCode2Binary, startOpenCodeServe } from '../../test/helpers/opencode-binary'
 import { buildOpenCodeBasicAuth, ClientError } from '@opencode-manager/shared/opencode'
-import type { IntegrationInfo, IntegrationMethod } from '@opencode-manager/shared/opencode'
-import type { OAuthAttemptStatus, OAuthAuthorizeResponse, ProviderAuthMethod } from '@opencode-manager/shared/schemas'
+import type { IntegrationInfo, IntegrationKeyMethod, IntegrationMethod, IntegrationOAuthMethod } from '@opencode-manager/shared/opencode'
+import type { OAuthAttemptStatus, OAuthAuthorizeResponse } from '@opencode-manager/shared/schemas'
 import type { OpenCodeClient } from '../services/opencode/client'
-
-const restartMock = vi.hoisted(() => ({
-  restartOpenCode: vi.fn(async () => ({ resumedSessionIDs: [] })),
-  reloadOpenCodeConfig: vi.fn(async () => ({ resumedSessionIDs: [] })),
-}))
-
-vi.mock('../services/opencode-restart', () => ({
-  restartOpenCode: restartMock.restartOpenCode,
-  reloadOpenCodeConfig: restartMock.reloadOpenCodeConfig,
-}))
 
 const LOCATION = { directory: '/tmp/repo' }
 
@@ -101,7 +91,7 @@ describe('oauth routes /auth-methods', () => {
 
   const envMethod: IntegrationMethod = { type: 'env', names: ['ANTHROPIC_API_KEY'] }
 
-  it('normalizes V2 methods, forms, and conditions for every integration', async () => {
+  it('passes V2 methods and forms through for every integration', async () => {
     const client = createStubOpenCodeClient()
     vi.mocked(client.api.integration.list).mockResolvedValueOnce({
       location: LOCATION,
@@ -118,51 +108,10 @@ describe('oauth routes /auth-methods', () => {
     expect(res.status).toBe(200)
     const data = (await res.json()) as { providers: Record<string, unknown> }
     expect(data.providers).toEqual({
-      'github-copilot': [
-        {
-          id: 'device',
-          type: 'oauth',
-          label: 'Login with GitHub Copilot',
-          fields: [
-            {
-              type: 'select',
-              key: 'deploymentType',
-              message: 'Select GitHub deployment type',
-              options: [
-                { label: 'GitHub.com', value: 'github.com' },
-                { label: 'GitHub Enterprise', value: 'enterprise' },
-              ],
-              required: true,
-            },
-            {
-              type: 'text',
-              key: 'enterpriseUrl',
-              message: 'Enter your GitHub Enterprise URL or domain',
-              placeholder: 'company.ghe.com or https://company.ghe.com',
-              required: true,
-              when: [{ key: 'deploymentType', op: 'eq', value: 'enterprise' }],
-            },
-          ],
-        },
-        { id: 'env', type: 'env', label: 'ANTHROPIC_API_KEY' },
-      ],
-      azure: [
-        {
-          id: 'key',
-          type: 'key',
-          label: 'API key',
-          fields: [
-            {
-              type: 'text',
-              key: 'resourceName',
-              message: 'Enter Azure Resource Name',
-              required: true,
-            },
-          ],
-        },
-      ],
-      opencode: [{ id: 'device', type: 'oauth', label: 'OpenCode Console account', fields: [] }],
-      digitalocean: [{ id: 'browser', type: 'command', label: 'Login with DigitalOcean' }],
+      'github-copilot': [oauthMethod, envMethod],
+      azure: [keyMethod],
+      opencode: [hiddenFieldMethod],
+      digitalocean: [commandMethod],
     })
   })
 
@@ -199,8 +148,6 @@ describe('oauth routes /:id/oauth/authorize', () => {
       methodID: 'device',
       answer: { deploymentType: 'github.com' },
     })
-    expect(restartMock.restartOpenCode).not.toHaveBeenCalled()
-    expect(restartMock.reloadOpenCodeConfig).not.toHaveBeenCalled()
   })
 
   it('returns 400 on an invalid body', async () => {
@@ -227,19 +174,40 @@ describe('oauth routes /:id/oauth/authorize', () => {
     })
   })
 
-  it('returns 404 when the integration is gone', async () => {
+  it('retries once after a loading integration becomes available', async () => {
     const client = createStubOpenCodeClient()
-    vi.mocked(client.api.integration.oauth.connect).mockRejectedValueOnce(
-      taggedError('IntegrationNotFoundError', 'Integration not found: github-copilot'),
-    )
+    const connect = vi.mocked(client.api.integration.oauth.connect)
+    connect.mockRejectedValueOnce(taggedError('IntegrationNotFoundError', 'Integration not found: github-copilot'))
 
     const res = await authorizeRequest(createOAuthApp(client))
 
-    expect(res.status).toBe(404)
-    expect(await res.json()).toEqual({
-      error: 'Integration not found: github-copilot',
-      code: 'IntegrationNotFoundError',
-    })
+    expect(res.status).toBe(200)
+    expect(((await res.json()) as OAuthAuthorizeResponse).attemptID).toBe('con_stub')
+    expect(connect).toHaveBeenCalledTimes(2)
+    expect(vi.mocked(client.api.integration.get)).toHaveBeenCalledWith({ integrationID: 'github-copilot' })
+  })
+
+  it('returns 404 when the integration is gone', async () => {
+    vi.useFakeTimers()
+    try {
+      const client = createStubOpenCodeClient()
+      const notFound = taggedError('IntegrationNotFoundError', 'Integration not found: github-copilot')
+      vi.mocked(client.api.integration.oauth.connect).mockRejectedValue(notFound)
+      vi.mocked(client.api.integration.get).mockRejectedValue(notFound)
+
+      const pending = authorizeRequest(createOAuthApp(client))
+      await vi.runAllTimersAsync()
+      const res = await pending
+
+      expect(res.status).toBe(404)
+      expect(await res.json()).toEqual({
+        error: 'Integration not found: github-copilot',
+        code: 'IntegrationNotFoundError',
+      })
+      expect(vi.mocked(client.api.integration.oauth.connect)).toHaveBeenCalledTimes(1)
+    } finally {
+      vi.useRealTimers()
+    }
   })
 })
 
@@ -291,7 +259,7 @@ describe('oauth routes /:id/oauth/:attemptID', () => {
 })
 
 describe('oauth routes /:id/oauth/callback', () => {
-  it('completes the V2 attempt with the pasted code without restarting', async () => {
+  it('completes the V2 attempt with the pasted code', async () => {
     const client = createStubOpenCodeClient()
     const complete = vi.mocked(client.api.integration.oauth.complete)
 
@@ -307,8 +275,6 @@ describe('oauth routes /:id/oauth/callback', () => {
       attemptID: 'con_stub',
       code: 'pasted-code',
     })
-    expect(restartMock.restartOpenCode).not.toHaveBeenCalled()
-    expect(restartMock.reloadOpenCodeConfig).not.toHaveBeenCalled()
   })
 
   it('returns 400 on an invalid body', async () => {
@@ -352,7 +318,7 @@ describe('oauth routes /:id/oauth/callback', () => {
 })
 
 describe('oauth routes /:id/oauth/:attemptID delete', () => {
-  it('cancels the V2 attempt without restarting', async () => {
+  it('cancels the V2 attempt', async () => {
     const client = createStubOpenCodeClient()
     const cancel = vi.mocked(client.api.integration.oauth.cancel)
 
@@ -361,7 +327,6 @@ describe('oauth routes /:id/oauth/:attemptID delete', () => {
     expect(res.status).toBe(200)
     expect(await res.json()).toEqual({ success: true })
     expect(cancel).toHaveBeenCalledWith({ integrationID: 'github-copilot', attemptID: 'con_stub' })
-    expect(restartMock.restartOpenCode).not.toHaveBeenCalled()
   })
 
   it('returns 502 when the upstream is unreachable', async () => {
@@ -391,12 +356,21 @@ describe.skipIf(!openCodeBinary)('oauth routes against a real OpenCode 2 server'
       const methodsResponse = await app.request('/oauth/auth-methods')
       expect(methodsResponse.status).toBe(200)
       const { providers } = (await methodsResponse.json()) as {
-        providers: Record<string, ProviderAuthMethod[]>
+        providers: Record<string, IntegrationMethod[]>
       }
-      const device = providers['github-copilot']?.find((method) => method.id === 'device')
-      expect(device?.fields?.map((field) => field.key)).toEqual(['deploymentType', 'enterpriseUrl'])
-      expect(providers.opencode?.map((method) => method.id)).toEqual(['key', 'env', 'device'])
-      expect(providers.azure?.find((method) => method.type === 'key')?.fields?.map((field) => field.key)).toEqual(['resourceName'])
+      const device = providers['github-copilot']?.find(
+        (method): method is IntegrationOAuthMethod => method.type === 'oauth' && method.id === 'device',
+      )
+      expect(device?.form?.map((field) => field.key)).toEqual(['deploymentType', 'enterpriseUrl'])
+      expect(
+        providers.opencode?.map((method) =>
+          method.type === 'oauth' || method.type === 'command' ? method.id : method.type,
+        ),
+      ).toEqual(['key', 'env', 'device'])
+      const azureKey = providers.azure?.find(
+        (method): method is IntegrationKeyMethod => method.type === 'key',
+      )
+      expect(azureKey?.form?.map((field) => field.key)).toEqual(['resourceName'])
 
       const authorizeResponse = await app.request('/oauth/github-copilot/oauth/authorize', {
         method: 'POST',

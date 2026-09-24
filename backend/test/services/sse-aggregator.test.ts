@@ -53,7 +53,7 @@ function rawEvent(input: RawEventInput): string {
   })
 }
 
-function parseFrame(frame: string): { directory?: string; payload: { id?: string; type: string; data: Record<string, unknown> } } {
+function parseFrame(frame: string): { directory: string | null; payload: { id?: string; type: string; data: Record<string, unknown> } } {
   return JSON.parse(frame.replace(/^event: message\ndata: /, '').trim())
 }
 
@@ -142,14 +142,44 @@ describe('SSEAggregator raw V2 event handling', () => {
     })
   })
 
-  it('drops events without a location directory', () => {
-    const client = createCapturingClient()
-    sseAggregator.addClient('drop-a', client.callback, client.writeFrame, ['/r'])
+  it('delivers events without a location directory to every connected client with a null directory', () => {
+    const subscribed = createCapturingClient()
+    const unsubscribed = createCapturingClient()
+    sseAggregator.addClient('global-a', subscribed.callback, subscribed.writeFrame, ['/r'])
+    sseAggregator.addClient('global-b', unsubscribed.callback, unsubscribed.writeFrame, [])
 
-    emitRawEvent({ type: 'server.connected', data: {} })
+    emitRawEvent({ id: 'evt_global', type: 'server.connected', data: {} })
 
-    expect(client.frames).toHaveLength(0)
+    const expected = {
+      directory: null,
+      payload: { id: 'evt_global', created: 1, type: 'server.connected', data: {} },
+    }
+    expect(subscribed.frames.map(parseFrame)).toEqual([expected])
+    expect(unsubscribed.frames.map(parseFrame)).toEqual([expected])
     expect(sseAggregator.getActiveSessions()).toEqual({})
+  })
+
+  it('embeds the raw upstream payload in the client envelope without re-serializing it', () => {
+    const client = createCapturingClient()
+    sseAggregator.addClient('raw-a', client.callback, client.writeFrame, ['/r'])
+    const raw = '{"type":"session.idle","id":"evt_raw","created":7,"location":{"directory":"/r"},"data":{"sessionID":"ses_1","extra":{"b":2,"a":1}}}'
+
+    ;(sseAggregator as unknown as { handleUpstreamMessage(data: string): void }).handleUpstreamMessage(raw)
+
+    expect(client.frames).toEqual([`event: message\ndata: {"directory":"/r","payload":${raw}}\n\n`])
+    expect(parseFrame(client.frames[0]!)).toEqual({ directory: '/r', payload: JSON.parse(raw) })
+  })
+
+  it('re-serializes a multi-line upstream payload so the client frame stays a single data line', () => {
+    const client = createCapturingClient()
+    sseAggregator.addClient('raw-b', client.callback, client.writeFrame, ['/r'])
+    const event = { type: 'session.idle', id: 'evt_ml', created: 3, location: { directory: '/r' }, data: { sessionID: 'ses_1' } }
+
+    ;(sseAggregator as unknown as { handleUpstreamMessage(data: string): void }).handleUpstreamMessage(JSON.stringify(event, null, 2))
+
+    expect(client.frames).toHaveLength(1)
+    expect(client.frames[0]!.split('\n').filter(line => line.startsWith('data: '))).toHaveLength(1)
+    expect(parseFrame(client.frames[0]!)).toEqual({ directory: '/r', payload: event })
   })
 
   it('marks a session idle on session.idle and on terminal execution events', () => {
@@ -413,6 +443,49 @@ describe('SSEAggregator session status replay on upstream reconnect', () => {
     expect(statuses).toHaveLength(1)
     expect(statuses[0]?.directory).toBe('/repo/new')
     expect(statuses[0]?.payload.data).toEqual({ sessionID: 'ses-new', status: { type: 'busy' } })
+  })
+
+  it('resolves untracked running session directories concurrently', async () => {
+    const api = makeApi({ active: { 'ses-x': { type: 'running' }, 'ses-y': { type: 'running' } } })
+    const pending: Array<() => void> = []
+    vi.mocked(api.session.get).mockImplementation((input) => new Promise((resolve) => {
+      const sessionID = (input as { sessionID: string }).sessionID
+      pending.push(() => resolve({ location: { directory: `/repo/${sessionID}` } } as unknown as Awaited<ReturnType<OpenCodeApi['session']['get']>>))
+    }))
+    sseAggregator.setPendingActionsFetcher({ api })
+
+    const client = createCapturingClient()
+    sseAggregator.addClient('status-5', client.callback, client.writeFrame, ['/repo/ses-x', '/repo/ses-y'])
+
+    const replay = (sseAggregator as unknown as { replaySessionStatusesForTrackedDirectories(): Promise<void> }).replaySessionStatusesForTrackedDirectories()
+    await flushReplay()
+
+    expect(api.session.get).toHaveBeenCalledTimes(2)
+    pending.forEach(resolve => resolve())
+    await replay
+
+    expect(client.frames.map(parseFrame).map(p => p.directory).sort()).toEqual(['/repo/ses-x', '/repo/ses-y'])
+  })
+
+  it('does not replay pending actions to already connected clients on upstream reconnect', async () => {
+    const fetcher = makeFetcher({
+      permissions: { '/repo/a': [{ id: 'perm-1', sessionID: 'ses-a', action: 'shell', resources: ['ls'] }] },
+    })
+    sseAggregator.setPendingActionsFetcher(fetcher)
+    const client = createCapturingClient()
+    sseAggregator.addClient('status-6', client.callback, client.writeFrame, ['/repo/a'])
+    await flushReplay()
+    vi.mocked(fetcher.api.permission.request.list).mockClear()
+    vi.mocked(fetcher.api.form.list).mockClear()
+
+    ;(sseAggregator as unknown as { handleUpstreamOpen(wasConnectedBefore: boolean): void }).handleUpstreamOpen(true)
+    await flushReplay()
+
+    expect(fetcher.api.permission.request.list).not.toHaveBeenCalled()
+    expect(fetcher.api.form.list).not.toHaveBeenCalled()
+    expect(fetcher.api.session.active).toHaveBeenCalledTimes(1)
+    expect(client.events.filter(event => event.event === 'resync')).toHaveLength(1)
+    expect(client.events.filter(event => event.event === 'message')).toHaveLength(1)
   })
 
   it('does nothing when no api is configured', async () => {

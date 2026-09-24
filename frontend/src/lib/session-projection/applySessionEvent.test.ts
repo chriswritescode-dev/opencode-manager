@@ -4,6 +4,8 @@ import {
   applySessionEvent,
   emptySessionTranscript,
   hydrateSessionTranscript,
+  mergeNewestPage,
+  sessionEventRequiresResync,
   type SessionTranscript,
 } from './applySessionEvent'
 import {
@@ -294,6 +296,22 @@ describe('applySessionEvent', () => {
     ])
   })
 
+  it('ends only the running compaction and appends when none is running', () => {
+    const failed = applyAll(failedCompactionSequence)
+    const ended = applySessionEvent(failed, compactionSequence[2] as V2Event)
+
+    expect(ended.messages).toHaveLength(2)
+    expect(ended.messages).toMatchObject([
+      { id: messageID(53), type: 'compaction', status: 'failed' },
+      {
+        id: messageID(52),
+        type: 'compaction',
+        status: 'completed',
+        summary: 'Summarizing the previous turn.',
+      },
+    ])
+  })
+
   it('does not duplicate a re-applied synthetic message', () => {
     const once = applySessionEvent(emptySessionTranscript, syntheticSequence[0])
 
@@ -527,6 +545,75 @@ describe('applySessionEvent', () => {
         data: { sessionID: 'ses_1', assistantMessageID: 'msg_missing', ordinal: 0, delta: 'late' },
       }),
     ).toBe(transcript)
+  })
+})
+
+describe('sessionEventRequiresResync', () => {
+  const executionEnded = executionSequence[1] as V2Event
+
+  it('requires a resync when execution ends while a tool is still running', () => {
+    const transcript = applyAll(promptSequence.slice(0, 15))
+
+    expect(sessionEventRequiresResync(applySessionEvent(transcript, executionEnded), executionEnded)).toBe(true)
+  })
+
+  it('requires a resync when execution ends before the active assistant completes', () => {
+    const transcript = applyAll(promptSequence.slice(0, 7))
+
+    expect(sessionEventRequiresResync(applySessionEvent(transcript, executionEnded), executionEnded)).toBe(true)
+  })
+
+  it('does not require a resync when execution ends on a settled transcript', () => {
+    const transcript = applyAll(promptSequence)
+
+    expect(sessionEventRequiresResync(applySessionEvent(transcript, executionEnded), executionEnded)).toBe(false)
+  })
+
+  it('does not require a resync for events other than execution end', () => {
+    const transcript = applyAll(promptSequence.slice(0, 15))
+
+    expect(sessionEventRequiresResync(transcript, promptSequence[14] as V2Event)).toBe(false)
+  })
+})
+
+describe('mergeNewestPage', () => {
+  const older = { id: messageID(0), type: 'synthetic' as const, text: 'Earlier', time: { created: 900 } }
+  const user = { id: USER_INBOX_ID, type: 'user' as const, text: 'Run the tests', time: { created: 1000 } }
+  const newer = { id: messageID(300), type: 'synthetic' as const, text: 'Later', time: { created: 30000 } }
+
+  it('keeps older loaded messages and the older cursor when the newest page overlaps', () => {
+    const merged = mergeNewestPage(
+      { transcript: { ...emptySessionTranscript, messages: [older, user] }, nextCursor: 'cursor_0' },
+      { messages: [user, newer], pending: [], status: 'idle', nextCursor: 'cursor_1' },
+    )
+
+    expect(merged.nextCursor).toBe('cursor_0')
+    expect(merged.transcript.messages.map((message) => message.id)).toEqual([
+      older.id,
+      user.id,
+      newer.id,
+    ])
+  })
+
+  it('replaces the cache when the newest page leaves a gap', () => {
+    const merged = mergeNewestPage(
+      { transcript: { ...emptySessionTranscript, messages: [older, user] }, nextCursor: 'cursor_0' },
+      { messages: [newer], pending: [], status: 'idle', nextCursor: 'cursor_1' },
+    )
+
+    expect(merged.nextCursor).toBe('cursor_1')
+    expect(merged.transcript.messages).toEqual([newer])
+  })
+
+  it('replaces the cache when the newest page holds the whole history', () => {
+    const merged = mergeNewestPage(
+      { transcript: { ...emptySessionTranscript, messages: [older, user] }, nextCursor: 'cursor_0' },
+      { messages: [user, newer], pending: [], status: 'busy' },
+    )
+
+    expect(merged.nextCursor).toBeUndefined()
+    expect(merged.transcript.messages).toEqual([user, newer])
+    expect(merged.transcript.status).toBe('busy')
   })
 })
 

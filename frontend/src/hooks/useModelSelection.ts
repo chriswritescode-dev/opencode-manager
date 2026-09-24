@@ -1,7 +1,8 @@
 import { useEffect, useMemo } from 'react'
 import { keepPreviousData, useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { useModelStore, modelExists, type ModelSelection } from '@/stores/modelStore'
-import { addOpenCodeRecentModel, getOpenCodeModelState, getProviders, removeOpenCodeRecentModel, toggleOpenCodeFavoriteModel, type OpenCodeModelState } from '@/api/providers'
+import { useProviders } from './useProviders'
+import { addOpenCodeRecentModel, getOpenCodeConfigModel, getOpenCodeModelState, removeOpenCodeRecentModel, toggleOpenCodeFavoriteModel, type OpenCodeModelState } from '@/api/providers'
 
 interface UseModelSelectionResult {
   model: ModelSelection | null
@@ -25,11 +26,7 @@ const isSameModel = (left: ModelSelection, right: ModelSelection) => (
 export function useModelSelection(directory?: string): UseModelSelectionResult {
   const queryClient = useQueryClient()
   
-  const { data: providersData } = useQuery({
-    queryKey: ['opencode', 'providers', directory],
-    queryFn: () => getProviders(directory),
-    staleTime: 30000,
-  })
+  const { data: providersData } = useProviders(directory)
 
   const { 
     model, 
@@ -45,6 +42,12 @@ export function useModelSelection(directory?: string): UseModelSelectionResult {
     queryFn: () => getOpenCodeModelState(),
     staleTime: 30000,
     placeholderData: keepPreviousData,
+  })
+
+  const { data: configModelString, isLoading: isConfigModelLoading } = useQuery({
+    queryKey: ['opencode', 'config', 'model', directory],
+    queryFn: () => getOpenCodeConfigModel(directory),
+    staleTime: 30000,
   })
 
   const updateRecentModel = useMutation({
@@ -117,13 +120,6 @@ export function useModelSelection(directory?: string): UseModelSelectionResult {
     return raw.filter((m) => modelExists(m, providers))
   }, [modelState?.favorite, providers])
 
-  const resolvedDefaultModelString = providersData?.providers
-    .map((provider) => {
-      const modelID = providersData.default[provider.id]
-      return modelID ? `${provider.id}/${modelID}` : null
-    })
-    .find((value): value is string => Boolean(value))
-
   const firstAvailableModelString = providersData?.providers
     .map((provider) => {
       const modelID = Object.keys(provider.models || {})[0]
@@ -132,14 +128,14 @@ export function useModelSelection(directory?: string): UseModelSelectionResult {
     .find((value): value is string => Boolean(value))
 
   useEffect(() => {
-    if (isModelStateLoading) return
+    if (isModelStateLoading || isConfigModelLoading) return
     validateAndSyncModel(
-      resolvedDefaultModelString,
+      configModelString ?? undefined,
       providersData?.providers,
       modelState?.recent ?? [],
       firstAvailableModelString,
     )
-  }, [isModelStateLoading, modelState?.recent, resolvedDefaultModelString, firstAvailableModelString, providersData, validateAndSyncModel])
+  }, [isModelStateLoading, isConfigModelLoading, modelState?.recent, configModelString, firstAvailableModelString, providersData, validateAndSyncModel])
 
   useEffect(() => {
     if (modelState) {

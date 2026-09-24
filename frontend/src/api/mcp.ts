@@ -1,58 +1,41 @@
 import { API_BASE_URL } from '@/config'
 import { fetchWrapper } from './fetchWrapper'
-import { openCodeApi, toFetchError } from './opencodeApi'
-import { isMcpServerNotFoundError } from '@opencode-manager/shared/opencode'
+import { callOpenCode } from './opencodeApi'
 import {
+  isMcpServerNotFoundError,
   mcpStatusByName,
-  toV2McpServerConfig,
+  openCodeLocation,
   type McpServerConfig,
   type McpStatusMap,
 } from '@opencode-manager/shared/opencode'
 
-export type { McpServerConfig, McpStatus, McpStatusMap } from '@opencode-manager/shared/opencode'
+export type { McpServerConfig, McpStatus } from '@opencode-manager/shared/opencode'
 
 export interface McpAuthStartResponse {
   authorizationUrl: string
   flowId: string
 }
 
-export type McpOAuthFlowStatus =
+type McpOAuthFlowStatus =
   | { status: 'pending' }
   | { status: 'completed'; serverName: string }
   | { status: 'failed'; error: string }
   | { status: 'unknown' }
 
-function locationInput(directory?: string) {
-  return directory ? { location: { directory } } : undefined
-}
-
-async function requestV2<T>(operation: () => Promise<T>): Promise<T> {
-  try {
-    return await operation()
-  } catch (error) {
-    throw toFetchError(error)
-  }
-}
-
 export const mcpApi = {
   async getStatus(directory?: string): Promise<McpStatusMap> {
-    const { data } = await requestV2(() => openCodeApi.mcp.list(locationInput(directory)))
+    const { data } = await callOpenCode((api) => api.mcp.list(openCodeLocation(directory)))
     return mcpStatusByName(data)
   },
 
   async addServer(name: string, config: McpServerConfig): Promise<void> {
-    await requestV2(() =>
-      openCodeApi.mcp.add({
-        server: name,
-        config: toV2McpServerConfig(config, window.location.origin),
-      }),
-    )
+    await callOpenCode((api) => api.mcp.add({ server: name, config }))
   },
 
   async removeServer(name: string): Promise<void> {
-    await requestV2(async () => {
+    await callOpenCode(async (api) => {
       try {
-        await openCodeApi.mcp.remove({ server: name })
+        await api.mcp.remove({ server: name })
       } catch (error) {
         if (!isMcpServerNotFoundError(error)) throw error
       }
@@ -60,21 +43,11 @@ export const mcpApi = {
   },
 
   async connect(name: string, directory?: string): Promise<void> {
-    await requestV2(() =>
-      openCodeApi.mcp.connect({
-        server: name,
-        ...(directory ? { location: { directory } } : {}),
-      }),
-    )
+    await callOpenCode((api) => api.mcp.connect({ server: name, ...openCodeLocation(directory) }))
   },
 
   async disconnect(name: string, directory?: string): Promise<void> {
-    await requestV2(() =>
-      openCodeApi.mcp.disconnect({
-        server: name,
-        ...(directory ? { location: { directory } } : {}),
-      }),
-    )
+    await callOpenCode((api) => api.mcp.disconnect({ server: name, ...openCodeLocation(directory) }))
   },
 
   async startAuth(name: string, directory?: string): Promise<McpAuthStartResponse> {

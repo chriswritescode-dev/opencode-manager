@@ -13,7 +13,7 @@ Mobile-first web interface for [OpenCode](https://opencode.ai) AI agents. Manage
 </p>
 
 !!! warning "Requires OpenCode 2"
-    OpenCode Manager requires **OpenCode 2.0.0 or newer** (bundled 2.0.15). OpenCode 1.x is not supported. If you are upgrading from OpenCode 1.x, see the [v1 → v2 migration guide](https://opencode.ai/v2/docs/migrate-v1).
+    OpenCode Manager requires **OpenCode 2.x at 2.0.15 or newer** (bundled 2.0.15). OpenCode 1.x and 3.x are not supported. If you are upgrading from OpenCode 1.x, see the [v1 → v2 migration guide](https://opencode.ai/v2/docs/migrate-v1).
 
 ## Quick Start
 

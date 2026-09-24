@@ -319,19 +319,18 @@ describe('useSendPrompt', () => {
     expect(mocks.setError).not.toHaveBeenCalled()
   })
 
-  it('invalidates the transcript query on success', async () => {
+  it('does not refetch the event-driven transcript after a successful send', async () => {
     const invalidateSpy = vi.spyOn(queryClient, 'invalidateQueries')
-    const sessionID = 'session-invalidate'
+    const refetchSpy = vi.spyOn(queryClient, 'refetchQueries')
 
     const { result } = renderHookWithProviders()
 
     await result.current.mutateAsync({
-      sessionID,
+      sessionID: 'session-no-refetch',
       text: 'Hello',
     })
 
-    expect(invalidateSpy).toHaveBeenCalledWith({
-      queryKey: sessionTranscriptQueryKey(sessionID),
-    })
+    expect(invalidateSpy).not.toHaveBeenCalled()
+    expect(refetchSpy).not.toHaveBeenCalled()
   })
 })

@@ -36,10 +36,15 @@ if ! opencode --version &> /dev/null; then
   exit 1
 fi
 
+REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+OPENCODE_PINNED_VERSION="$(sed -n 's/^ARG OPENCODE_VERSION=//p' "$REPO_ROOT/Dockerfile" | head -1)"
+OPENCODE_PINNED_MAJOR="${OPENCODE_PINNED_VERSION%%.*}"
 OPENCODE_VERSION="$(opencode --version 2>&1 | grep -oE '[0-9]+\.[0-9]+\.[0-9]+' | head -1)"
 
-if ! printf '%s\n%s\n' "2.0.0" "$OPENCODE_VERSION" | sort -V -C; then
-  echo "❌ OpenCode 2.0.0 or newer is required. Please upgrade it with:"
+if [ -z "$OPENCODE_PINNED_VERSION" ] \
+  || [ "${OPENCODE_VERSION%%.*}" != "$OPENCODE_PINNED_MAJOR" ] \
+  || ! printf '%s\n%s\n' "$OPENCODE_PINNED_VERSION" "$OPENCODE_VERSION" | sort -V -C; then
+  echo "❌ OpenCode ${OPENCODE_VERSION:-unknown} is not supported; OpenCode >=${OPENCODE_PINNED_VERSION} <$((OPENCODE_PINNED_MAJOR + 1)).0.0 is required. Please install it with:"
   echo "   curl -fsSL https://opencode.ai/v2/install | bash"
   exit 1
 fi

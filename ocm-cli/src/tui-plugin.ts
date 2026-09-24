@@ -12,7 +12,8 @@ import { transferSession, moveReminderText } from './session-move.js'
 import { createManagerSessionTransfer } from './remote-session.js'
 import { confirmDialog, selectDialog } from './tui-dialogs.js'
 import { setPendingWarp, runPendingWarp } from './warp.js'
-import { pushPhaseProgress, replayProgress } from './move-progress.js'
+import { pushPhaseProgress, importProgress } from './move-progress.js'
+import { warmRepoProxy } from './repo-proxy.js'
 import type { MoveProgress } from './move-progress.js'
 
 export type MoveProgressSetter = (progress: MoveProgress | null) => void
@@ -131,6 +132,8 @@ async function runSessionMove(context: Context, setMoveProgress: MoveProgressSet
     const matchedRepoId = matched.repoId
     const remoteRepo = repos.find((r) => r.repoId === matchedRepoId)!
 
+    await warmRepoProxy(state.managerUrl, token, matchedRepoId)
+
     const managerApi = new ManagerApi(state.managerUrl, token)
     const target = await resolveMoveTarget(managerApi, matched, remoteRepo.directory, localBranch)
     const discardReasons = target.repoId === null ? [] : await describeRemoteDiscard(plan.repoRoot, managerApi, target.repoId)
@@ -161,7 +164,7 @@ async function runSessionMove(context: Context, setMoveProgress: MoveProgressSet
       {
         exportSession: (id) => context.client.session.export({ sessionID: id }),
         importSession: transfer.importSession,
-        onProgress: (transferred, total) => setMoveProgress(replayProgress(transferred, total)),
+        onProgress: (transferred, total) => setMoveProgress(importProgress(transferred, total)),
       },
     )
 
@@ -172,16 +175,16 @@ async function runSessionMove(context: Context, setMoveProgress: MoveProgressSet
         setMoveProgress(null)
         const warp = await confirmDialog(context, { title: 'Attach to moved session?', message: 'Exit this TUI and attach to the moved session on the Manager now?' })
         if (warp) {
-          await fetch(`${state.managerUrl}/api/opencode-proxy/repos/${pushed.repoId}/api/session?limit=1`, { headers: { authorization: `Bearer ${token}` } }).catch(() => undefined)
+          await warmRepoProxy(state.managerUrl, token, pushed.repoId)
           setPendingWarp({ managerUrl: state.managerUrl, token, repoId: pushed.repoId, sessionID: result.sessionID, repoName: matched.name })
           context.keymap.dispatch('app.exit')
           return
         }
-        context.ui.toast.show({ variant: 'success', message: `Session moved to Manager (${result.replayedEvents} events). Local copy kept — run \`ocm\` to attach.` })
+        context.ui.toast.show({ variant: 'success', message: `Session moved to Manager (${result.importedMessages} messages). Local copy kept — run \`ocm\` to attach.` })
         break
       }
-      case 'replay-failed':
-        context.ui.toast.show({ variant: 'error', message: `Replay failed: ${result.message}` })
+      case 'import-failed':
+        context.ui.toast.show({ variant: 'error', message: `Session import failed: ${result.message}` })
         break
     }
   } catch (err) {

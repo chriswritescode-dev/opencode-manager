@@ -1,33 +1,35 @@
-import { useCallback, useEffect, useMemo, useRef } from 'react'
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { useQuery, useQueryClient } from '@tanstack/react-query'
-import type { V2Event } from '@opencode-manager/shared/opencode'
+import { sessionIDFromEvent, type V2Event } from '@opencode-manager/shared/opencode'
 import { listSessionMessages, readSessionSnapshot } from '@/api/opencode'
 import { openCodeEventStream } from '@/lib/opencode-event-stream'
 import { sessionTranscriptQueryKey } from '@/lib/queryInvalidation'
 import {
   applySessionEvent,
   emptySessionTranscript,
-  hydrateSessionTranscript,
-  sessionIDFromEvent,
+  eventsReplayableOverSnapshot,
+  mergeNewestPage,
+  sessionEventRequiresResync,
   type SessionSnapshot,
   type SessionTranscript,
+  type TranscriptCache,
 } from '@/lib/session-projection'
-
-interface TranscriptCache {
-  transcript: SessionTranscript
-  nextCursor?: string
-}
 
 interface NewestPageRead {
   buffered: V2Event[]
   queued: Set<V2Event>
 }
 
-const MAX_NEWEST_PAGE_READS = 4
-const RESYNC_SETTLE_MS = 150
+const TRANSCRIPT_FALLBACK_POLL_INTERVAL_MS = 5000
 
-function hydrateCache(snapshot: SessionSnapshot): TranscriptCache {
-  return { transcript: hydrateSessionTranscript(snapshot), nextCursor: snapshot.nextCursor }
+function applyEvents(transcript: SessionTranscript, events: V2Event[]) {
+  let requiresResync = false
+  const next = events.reduce((current, event) => {
+    const applied = applySessionEvent(current, event)
+    if (sessionEventRequiresResync(applied, event)) requiresResync = true
+    return applied
+  }, transcript)
+  return { transcript: next, requiresResync }
 }
 
 export function useSessionTranscript(sessionID: string, directory: string) {
@@ -40,50 +42,10 @@ export function useSessionTranscript(sessionID: string, directory: string) {
   const newestReadRef = useRef<NewestPageRead | null>(null)
   const newestReadGenerationRef = useRef(0)
   const cursorGenerationRef = useRef(0)
-  const settleTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
-  const resyncPendingRef = useRef(false)
-  const readNewestPageRef = useRef<(() => Promise<TranscriptCache>) | null>(null)
+  const latestNewestReadRef = useRef<Promise<TranscriptCache> | null>(null)
+  const [isStreamConnected, setIsStreamConnected] = useState(false)
 
-  const currentCache = useCallback(
-    (): TranscriptCache =>
-      queryClient.getQueryData<TranscriptCache>(queryKey) ?? {
-        transcript: emptySessionTranscript,
-      },
-    [queryClient, queryKey],
-  )
-
-  const clearSettleTimer = useCallback(() => {
-    if (settleTimerRef.current === null) return
-    clearTimeout(settleTimerRef.current)
-    settleTimerRef.current = null
-  }, [])
-
-  const scheduleResync = useCallback(() => {
-    resyncPendingRef.current = true
-    clearSettleTimer()
-    settleTimerRef.current = setTimeout(() => {
-      settleTimerRef.current = null
-      resyncPendingRef.current = false
-      void readNewestPageRef.current?.().catch(() => undefined)
-    }, RESYNC_SETTLE_MS)
-  }, [clearSettleTimer])
-
-  const commitNewestPage = useCallback(
-    (read: NewestPageRead, snapshot: SessionSnapshot): TranscriptCache => {
-      clearSettleTimer()
-      resyncPendingRef.current = false
-      queuedEventsRef.current = queuedEventsRef.current.filter(
-        (event) => !read.queued.has(event),
-      )
-      const next = hydrateCache(snapshot)
-      cursorGenerationRef.current += 1
-      queryClient.setQueryData<TranscriptCache>(queryKey, next)
-      return next
-    },
-    [clearSettleTimer, queryClient, queryKey],
-  )
-
-  const readNewestPage = useCallback(async (): Promise<TranscriptCache> => {
+  const performNewestPageRead = useCallback(async (): Promise<TranscriptCache> => {
     const generation = (newestReadGenerationRef.current += 1)
     const read: NewestPageRead = {
       buffered: [],
@@ -93,30 +55,45 @@ export function useSessionTranscript(sessionID: string, directory: string) {
     let snapshot: SessionSnapshot
     try {
       snapshot = await readSessionSnapshot(sessionID)
-      for (let attempt = 1; attempt < MAX_NEWEST_PAGE_READS; attempt += 1) {
-        if (newestReadGenerationRef.current !== generation) break
-        if (read.buffered.length === 0) break
-        read.buffered = []
-        read.queued = new Set(queuedEventsRef.current)
-        snapshot = await readSessionSnapshot(sessionID)
-      }
     } finally {
       if (newestReadRef.current === read) newestReadRef.current = null
     }
     if (newestReadGenerationRef.current !== generation) {
-      return queryClient.getQueryData<TranscriptCache>(queryKey) ?? hydrateCache(snapshot)
+      return (
+        latestNewestReadRef.current ??
+        queryClient.getQueryData<TranscriptCache>(queryKey) ??
+        mergeNewestPage(undefined, snapshot)
+      )
     }
-    if (read.buffered.length > 0) {
-      scheduleResync()
-      return currentCache()
+    const current = queryClient.getQueryData<TranscriptCache>(queryKey)
+    const applied = new Set(read.buffered)
+    queuedEventsRef.current = queuedEventsRef.current.filter(
+      (event) => !read.queued.has(event) && !applied.has(event),
+    )
+    const merged = mergeNewestPage(current, snapshot)
+    const next: TranscriptCache = {
+      ...merged,
+      transcript: eventsReplayableOverSnapshot(read.buffered).reduce(applySessionEvent, merged.transcript),
     }
-    return commitNewestPage(read, snapshot)
-  }, [commitNewestPage, currentCache, queryClient, queryKey, scheduleResync, sessionID])
+    if (next.nextCursor !== current?.nextCursor) cursorGenerationRef.current += 1
+    queryClient.setQueryData<TranscriptCache>(queryKey, next)
+    return next
+  }, [queryClient, queryKey, sessionID])
+
+  const readNewestPage = useCallback((): Promise<TranscriptCache> => {
+    const read = performNewestPageRead()
+    latestNewestReadRef.current = read
+    return read
+  }, [performNewestPageRead])
 
   const query = useQuery({
     queryKey,
     queryFn: () => readNewestPage(),
     enabled: Boolean(sessionID && directory),
+    staleTime: Infinity,
+    refetchOnWindowFocus: false,
+    refetchOnMount: 'always',
+    refetchInterval: isStreamConnected ? false : TRANSCRIPT_FALLBACK_POLL_INTERVAL_MS,
   })
 
   const fetchOlder = useCallback(async () => {
@@ -147,18 +124,23 @@ export function useSessionTranscript(sessionID: string, directory: string) {
   useEffect(() => {
     if (!sessionID || !directory) return
 
-    readNewestPageRef.current = readNewestPage
+    const refreshNewestPage = () => {
+      void readNewestPage().catch(() => undefined)
+    }
 
     const flush = () => {
       frameRef.current = null
       const events = queuedEventsRef.current
       if (events.length === 0) return
       queuedEventsRef.current = []
-      queryClient.setQueryData<TranscriptCache>(queryKey, (current) => {
-        const base = current ?? { transcript: emptySessionTranscript }
-        const transcript = events.reduce(applySessionEvent, base.transcript)
-        return transcript === base.transcript ? base : { ...base, transcript }
-      })
+      const base = queryClient.getQueryData<TranscriptCache>(queryKey) ?? {
+        transcript: emptySessionTranscript,
+      }
+      const { transcript, requiresResync } = applyEvents(base.transcript, events)
+      if (transcript !== base.transcript) {
+        queryClient.setQueryData<TranscriptCache>(queryKey, { ...base, transcript })
+      }
+      if (requiresResync) refreshNewestPage()
     }
 
     const subscription = openCodeEventStream.subscribeGlobalMonitor({
@@ -168,7 +150,6 @@ export function useSessionTranscript(sessionID: string, directory: string) {
         if (sessionIDFromEvent(event) !== sessionID) return
         newestReadRef.current?.buffered.push(event)
         queuedEventsRef.current.push(event)
-        if (resyncPendingRef.current) scheduleResync()
         if (frameRef.current === null) {
           frameRef.current = requestAnimationFrame(flush)
         }
@@ -176,12 +157,11 @@ export function useSessionTranscript(sessionID: string, directory: string) {
       onStatusChange: (connected) => {
         const wasConnected = connectedRef.current
         connectedRef.current = connected
+        setIsStreamConnected(connected)
         if (!connected || wasConnected !== false) return
-        void readNewestPage().catch(() => undefined)
+        refreshNewestPage()
       },
-      onResync: () => {
-        void readNewestPage().catch(() => undefined)
-      },
+      onResync: refreshNewestPage,
     })
 
     return () => {
@@ -189,15 +169,14 @@ export function useSessionTranscript(sessionID: string, directory: string) {
         cancelAnimationFrame(frameRef.current)
         frameRef.current = null
       }
-      clearSettleTimer()
-      resyncPendingRef.current = false
-      readNewestPageRef.current = null
       newestReadGenerationRef.current += 1
+      latestNewestReadRef.current = null
+      connectedRef.current = null
       queuedEventsRef.current = []
       newestReadRef.current = null
       subscription.dispose()
     }
-  }, [clearSettleTimer, directory, queryClient, queryKey, readNewestPage, scheduleResync, sessionID])
+  }, [directory, queryClient, queryKey, readNewestPage, sessionID])
 
   return {
     messages: query.data?.transcript.messages ?? [],

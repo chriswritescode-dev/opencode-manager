@@ -23,6 +23,7 @@ describe('internal/opencode-config routes', () => {
   let ws: Awaited<ReturnType<typeof createTempAssistantWorkspace>>
   let configGetMock: ReturnType<typeof vi.fn>
   let forwardRawMock: ReturnType<typeof vi.fn>
+  let locationReloadMock: ReturnType<typeof vi.fn>
 
   function configPath(name: string): string {
     return path.join(ws.workspacePath, '.config/opencode', name)
@@ -38,8 +39,9 @@ describe('internal/opencode-config routes', () => {
     migrate(db, allMigrations)
     configGetMock = vi.fn(() => Promise.resolve([]))
     forwardRawMock = vi.fn(() => Promise.resolve(new Response('{}')))
+    locationReloadMock = vi.fn(() => Promise.resolve())
     const openCodeClient = {
-      api: { config: { get: configGetMock } },
+      api: { config: { get: configGetMock }, location: { reload: locationReloadMock } },
       forwardRaw: forwardRawMock,
     } as unknown as OpenCodeClient
     const stubWorktreeManager = { prepare: () => Promise.resolve(null), finalize: () => Promise.resolve({ commitHash: null }) } as unknown as ScheduleWorktreeManager
@@ -91,7 +93,7 @@ describe('internal/opencode-config routes', () => {
     expect(body.revision).toMatch(/^[a-f0-9]{64}$/)
   })
 
-  it('PUT /api/internal/opencode-config writes the file, reports restartRequired, and never calls the OpenCode API', async () => {
+  it('PUT /api/internal/opencode-config writes the file and applies it through a location reload without a restart', async () => {
     await writeOpenCodeConfigFile(OPENCODE_CONFIG_SEED, 'opencode.jsonc')
 
     const res = await app.request('/api/internal/opencode-config', {
@@ -102,8 +104,9 @@ describe('internal/opencode-config routes', () => {
 
     expect(res.status).toBe(200)
     const body = await res.json() as { restartRequired?: boolean; content: Record<string, unknown> }
-    expect(body.restartRequired).toBe(true)
+    expect(body.restartRequired).toBeUndefined()
     expect(body.content).toEqual({ $schema: 'https://opencode.ai/config.json', plugin: ['x'] })
+    expect(locationReloadMock).toHaveBeenCalledTimes(1)
     expect(configGetMock).not.toHaveBeenCalled()
     expect(forwardRawMock).not.toHaveBeenCalled()
 
@@ -124,6 +127,7 @@ describe('internal/opencode-config routes', () => {
     expect(res.status).toBe(200)
     const body = await res.json() as { restartRequired?: boolean }
     expect(body.restartRequired).toBeUndefined()
+    expect(locationReloadMock).not.toHaveBeenCalled()
     await expect(readFile(configPath('opencode.json'), 'utf8')).resolves.toBe(commented)
   })
 

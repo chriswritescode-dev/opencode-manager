@@ -507,4 +507,109 @@ describe('FormPrompt', () => {
       expect(screen.getByRole('button', { name: 'Dismiss' })).toBeInTheDocument()
     })
   })
+
+  describe('conditional and external fields', () => {
+    const conditionalForm: FormInfo = {
+      id: 'form-conditional',
+      sessionID: 'session-1',
+      title: 'Configure',
+      fields: [
+        {
+          key: 'deploymentType',
+          title: 'Deployment',
+          type: 'string',
+          options: [
+            { value: 'github.com', label: 'GitHub.com' },
+            { value: 'enterprise', label: 'GitHub Enterprise' },
+          ],
+          default: 'github.com',
+        },
+        {
+          key: 'enterpriseUrl',
+          title: 'Enterprise URL',
+          type: 'string',
+          required: true,
+          when: [{ key: 'deploymentType', op: 'eq', value: 'enterprise' }],
+        },
+      ],
+    }
+
+    it('submits while a conditional required field stays hidden', async () => {
+      const onReply = vi.fn().mockResolvedValue(undefined)
+      render(<FormPrompt form={conditionalForm} onReply={onReply} onCancel={vi.fn()} />)
+
+      expect(screen.queryByLabelText(/Enterprise URL/)).not.toBeInTheDocument()
+      const submit = screen.getByRole('button', { name: 'Submit' })
+      expect(submit).toBeEnabled()
+
+      await userEvent.click(submit)
+      await waitFor(() =>
+        expect(onReply).toHaveBeenCalledWith('form-conditional', { deploymentType: 'github.com' }),
+      )
+    })
+
+    it('reveals and requires the conditional field once its condition matches', async () => {
+      const onReply = vi.fn().mockResolvedValue(undefined)
+      render(<FormPrompt form={conditionalForm} onReply={onReply} onCancel={vi.fn()} />)
+
+      await userEvent.click(screen.getByText('GitHub Enterprise'))
+
+      const submit = screen.getByRole('button', { name: 'Submit' })
+      expect(submit).toBeDisabled()
+
+      await userEvent.type(screen.getByLabelText(/Enterprise URL/), 'company.ghe.com')
+      expect(submit).toBeEnabled()
+
+      await userEvent.click(submit)
+      await waitFor(() =>
+        expect(onReply).toHaveBeenCalledWith('form-conditional', {
+          deploymentType: 'enterprise',
+          enterpriseUrl: 'company.ghe.com',
+        }),
+      )
+    })
+
+    it('renders an external field as a link card', () => {
+      const form: FormInfo = {
+        id: 'form-external',
+        sessionID: 'session-1',
+        title: 'Approve',
+        fields: [
+          {
+            key: 'approve',
+            type: 'external',
+            url: 'https://example.com/approve',
+            title: 'Approve access',
+            description: 'Do it in the provider dashboard',
+          },
+        ],
+      }
+      render(<FormPrompt form={form} onReply={vi.fn()} onCancel={vi.fn()} />)
+
+      const link = screen.getByRole('link', { name: /Approve access/ })
+      expect(link).toHaveAttribute('href', 'https://example.com/approve')
+      expect(link).toHaveAttribute('target', '_blank')
+      expect(link).toHaveAttribute('rel', 'noopener noreferrer')
+      expect(screen.getByText('Do it in the provider dashboard')).toBeInTheDocument()
+    })
+
+    it('does not render an external field with a non-http url', () => {
+      const form: FormInfo = {
+        id: 'form-external-unsafe',
+        sessionID: 'session-1',
+        title: 'Approve',
+        fields: [
+          {
+            key: 'approve',
+            type: 'external',
+            url: 'javascript:alert(1)',
+            title: 'Approve access',
+          },
+        ],
+      }
+      render(<FormPrompt form={form} onReply={vi.fn()} onCancel={vi.fn()} />)
+
+      expect(screen.queryByRole('link', { name: /Approve access/ })).not.toBeInTheDocument()
+    })
+  })
 })

@@ -487,7 +487,7 @@ describe('OpenCodeConfigManager', () => {
 
     const { showToast } = await import('@/lib/toast')
     await waitFor(() => expect(showToast.success).toHaveBeenCalledWith('Configuration updated'))
-    expect(showToast.success).not.toHaveBeenCalledWith('Configuration saved. Restart the server to apply changes.')
+    expect(showToast.success).not.toHaveBeenCalledWith('Configuration saved, but OpenCode could not reload it. Restart the server to apply changes.')
   })
 
   it('asks for a restart after a semantic structured change', async () => {
@@ -505,7 +505,7 @@ describe('OpenCodeConfigManager', () => {
 
     const { showToast } = await import('@/lib/toast')
     await waitFor(() => {
-      expect(showToast.success).toHaveBeenCalledWith('Configuration saved. Restart the server to apply changes.')
+      expect(showToast.success).toHaveBeenCalledWith('Configuration saved, but OpenCode could not reload it. Restart the server to apply changes.')
     })
   })
 

@@ -8,7 +8,7 @@ import { useSessionStatus } from '@/stores/sessionStatusStore'
 import { useSendErrorStore } from '@/stores/sendErrorStore'
 import { openCodeEventStream } from '@/lib/opencode-event-stream'
 import type { EventStreamSubscription } from '@/lib/opencode-event-stream'
-import { openCodeApi } from '@/api/opencodeApi'
+import { listActiveSessions } from '@/api/opencode'
 
 const STATUS_POLL_INTERVAL_MS = 5000
 
@@ -27,10 +27,10 @@ const invalidateSessionQueryIfCached = (
   queryClient.invalidateQueries({ queryKey })
 }
 
-const applySessionSelectionIfCached = (
+const patchSessionIfCached = (
   queryClient: ReturnType<typeof useQueryClient>,
   sessionID: string,
-  patch: Partial<Pick<SessionInfo, 'model' | 'agent'>>,
+  patch: Partial<Pick<SessionInfo, 'model' | 'agent' | 'revert'>>,
 ) => {
   const queryKey = ['opencode', 'session', sessionID]
   if (queryClient.getQueryCache().findAll({ queryKey }).length === 0) return
@@ -45,7 +45,7 @@ const handleRestartServer = async () => {
   })
 
   try {
-    const result = await settingsApi.reloadOpenCodeConfig()
+    const result = await settingsApi.restartOpenCodeServer()
     if (result.success) {
       showToast.success(result.message || 'OpenCode server restarted', {
         id: 'restart-server',
@@ -116,15 +116,26 @@ export const useSSE = (directory?: string | string[], currentSessionId?: string)
         break
 
       case 'session.model.selected':
-        applySessionSelectionIfCached(queryClient, event.data.sessionID, {
+        patchSessionIfCached(queryClient, event.data.sessionID, {
           model: event.data.model,
         })
         break
 
       case 'session.agent.selected':
-        applySessionSelectionIfCached(queryClient, event.data.sessionID, {
+        patchSessionIfCached(queryClient, event.data.sessionID, {
           agent: event.data.agent,
         })
+        break
+
+      case 'session.revert.staged':
+        patchSessionIfCached(queryClient, event.data.sessionID, {
+          revert: event.data.revert,
+        })
+        break
+
+      case 'session.revert.cleared':
+      case 'session.revert.committed':
+        patchSessionIfCached(queryClient, event.data.sessionID, { revert: undefined })
         break
 
       case 'session.deleted':
@@ -183,7 +194,7 @@ export const useSSE = (directory?: string | string[], currentSessionId?: string)
     const syncVersion = ++statusSyncVersionRef.current
 
     try {
-      const active = await openCodeApi.session.active()
+      const active = await listActiveSessions()
       if (mountedRef.current && statusSyncVersionRef.current === syncVersion && active) {
         const statuses = Object.fromEntries(
           Object.keys(active).map((sessionID) => [sessionID, { type: 'busy' as const }]),
@@ -207,17 +218,24 @@ export const useSSE = (directory?: string | string[], currentSessionId?: string)
     return () => clearInterval(interval)
   }, [primaryDirectory, fetchInitialData])
 
-  const syncCurrentSession = useCallback(() => {
+  const refreshCurrentSession = useCallback(() => {
     const sessionId = sessionIdRef.current
     if (!sessionId || !primaryDirectory) return
 
     queryClient.invalidateQueries({
       queryKey: ['opencode', 'session', sessionId, primaryDirectory],
     })
+  }, [queryClient, primaryDirectory])
+
+  const syncCurrentSession = useCallback(() => {
+    const sessionId = sessionIdRef.current
+    if (!sessionId || !primaryDirectory) return
+
+    refreshCurrentSession()
     queryClient.invalidateQueries({
       queryKey: ['opencode', 'pending-actions', sessionId, primaryDirectory],
     })
-  }, [queryClient, primaryDirectory])
+  }, [queryClient, primaryDirectory, refreshCurrentSession])
 
   useEffect(() => {
     mountedRef.current = true
@@ -250,10 +268,17 @@ export const useSSE = (directory?: string | string[], currentSessionId?: string)
       }
     }
 
+    const handleResync = () => {
+      if (!mountedRef.current) return
+      invalidateSessionListCaches(queryClient)
+      refreshCurrentSession()
+    }
+
     const subscription = openCodeEventStream.subscribeGlobalMonitor({
       directories: directoriesList,
       onEvent: handleMessage,
       onStatusChange: handleStatusChange,
+      onResync: handleResync,
     })
     eventStreamSubscriptionRef.current = subscription
 
@@ -281,7 +306,7 @@ export const useSSE = (directory?: string | string[], currentSessionId?: string)
         eventStreamSubscriptionRef.current = null
       }
     }
-  }, [directoryKey, directoriesList, handleSSEEvent, fetchInitialData, syncCurrentSession])
+  }, [directoryKey, directoriesList, handleSSEEvent, fetchInitialData, syncCurrentSession, refreshCurrentSession, queryClient])
 
   useEffect(() => {
     if (isConnected && document.visibilityState === 'visible') {

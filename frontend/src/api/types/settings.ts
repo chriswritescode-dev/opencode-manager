@@ -109,6 +109,12 @@ export interface OpenCodeConfigSaveResponse extends OpenCodeConfigFile {
   restartRequired?: boolean
 }
 
+export interface OpenCodeRestartResponse {
+  success: boolean
+  message: string
+  interruptedSessions: string[]
+}
+
 export interface OpenCodeImportStatus {
   configSourcePath: string | null
   configSourcePaths: string[]

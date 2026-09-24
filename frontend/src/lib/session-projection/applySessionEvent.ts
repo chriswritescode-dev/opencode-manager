@@ -20,6 +20,11 @@ export interface SessionSnapshot {
   nextCursor?: string
 }
 
+export interface TranscriptCache {
+  transcript: SessionTranscript
+  nextCursor?: string
+}
+
 export const emptySessionTranscript: SessionTranscript = {
   messages: [],
   pending: [],
@@ -193,6 +198,91 @@ function latestCompactionIndex(transcript: SessionTranscript): number {
   return findLastIndex(transcript.messages, (message) => message.type === 'compaction')
 }
 
+function runningCompactionIndex(transcript: SessionTranscript): number {
+  return findLastIndex(
+    transcript.messages,
+    (message) => message.type === 'compaction' && message.status === 'running',
+  )
+}
+
+function isExecutionEndEvent(event: V2Event): boolean {
+  return (
+    event.type === 'session.execution.succeeded' ||
+    event.type === 'session.execution.failed' ||
+    event.type === 'session.execution.interrupted'
+  )
+}
+
+function hasUnsettledTool(transcript: SessionTranscript): boolean {
+  return transcript.messages.some(
+    (message) =>
+      message.type === 'assistant' &&
+      message.content.some(
+        (part) =>
+          part.type === 'tool' &&
+          (part.state.status === 'streaming' || part.state.status === 'running'),
+      ),
+  )
+}
+
+function hasIncompleteLatestAssistant(transcript: SessionTranscript): boolean {
+  const index = findLastIndex(transcript.messages, (message) => message.type === 'assistant')
+  const latest = transcript.messages[index]
+  return latest?.type === 'assistant' && !latest.time.completed
+}
+
+function hasUnsettledAssistant(transcript: SessionTranscript): boolean {
+  return hasUnsettledTool(transcript) || hasIncompleteLatestAssistant(transcript)
+}
+
+export function sessionEventRequiresResync(transcript: SessionTranscript, event: V2Event): boolean {
+  return isExecutionEndEvent(event) && hasUnsettledAssistant(transcript)
+}
+
+function streamedPartKey(event: V2Event): { key: string; started: boolean } | undefined {
+  switch (event.type) {
+    case 'session.text.started':
+    case 'session.text.delta':
+      return {
+        key: `text:${event.data.assistantMessageID}:${event.data.ordinal}`,
+        started: event.type === 'session.text.started',
+      }
+    case 'session.reasoning.started':
+    case 'session.reasoning.delta':
+      return {
+        key: `reasoning:${event.data.assistantMessageID}:${event.data.ordinal}`,
+        started: event.type === 'session.reasoning.started',
+      }
+    case 'session.tool.input.started':
+    case 'session.tool.input.delta':
+      return {
+        key: `tool:${event.data.assistantMessageID}:${event.data.id}`,
+        started: event.type === 'session.tool.input.started',
+      }
+    case 'session.compaction.started':
+    case 'session.compaction.delta':
+      return {
+        key: `compaction:${event.data.sessionID}`,
+        started: event.type === 'session.compaction.started',
+      }
+    default:
+      return undefined
+  }
+}
+
+export function eventsReplayableOverSnapshot(events: readonly V2Event[]): V2Event[] {
+  const startedAfterSnapshot = new Set<string>()
+  return events.filter((event) => {
+    const part = streamedPartKey(event)
+    if (!part) return true
+    if (part.started) {
+      startedAfterSnapshot.add(part.key)
+      return true
+    }
+    return startedAfterSnapshot.has(part.key)
+  })
+}
+
 export function hydrateSessionTranscript(snapshot: SessionSnapshot): SessionTranscript {
   return snapshot.pending.reduce(admitInboxItem, {
     messages: snapshot.messages,
@@ -201,11 +291,23 @@ export function hydrateSessionTranscript(snapshot: SessionSnapshot): SessionTran
   })
 }
 
-export function sessionIDFromEvent(event: V2Event): string | undefined {
-  const data: unknown = event.data
-  if (typeof data !== 'object' || data === null) return undefined
-  if (!('sessionID' in data) || typeof data.sessionID !== 'string') return undefined
-  return data.sessionID
+export function mergeNewestPage(
+  current: TranscriptCache | undefined,
+  snapshot: SessionSnapshot,
+): TranscriptCache {
+  const page = hydrateSessionTranscript(snapshot)
+  const replaced = { transcript: page, nextCursor: snapshot.nextCursor }
+  if (!current || snapshot.nextCursor === undefined) return replaced
+  const pageIDs = new Set(page.messages.map((message) => message.id))
+  const overlapIndex = current.transcript.messages.findIndex((message) => pageIDs.has(message.id))
+  if (overlapIndex < 0) return replaced
+  const older = current.transcript.messages
+    .slice(0, overlapIndex)
+    .filter((message) => !pageIDs.has(message.id))
+  return {
+    transcript: { ...page, messages: [...older, ...page.messages] },
+    nextCursor: current.nextCursor,
+  }
 }
 
 export function applySessionEvent(transcript: SessionTranscript, event: V2Event): SessionTranscript {
@@ -556,10 +658,7 @@ export function applySessionEvent(transcript: SessionTranscript, event: V2Event)
       })
     }
     case 'session.compaction.delta': {
-      const index = findLastIndex(
-        transcript.messages,
-        (message) => message.type === 'compaction' && message.status === 'running',
-      )
+      const index = runningCompactionIndex(transcript)
       const current = transcript.messages[index]
       if (current?.type !== 'compaction' || current.status !== 'running') return transcript
       const messages = transcript.messages.slice()
@@ -567,9 +666,18 @@ export function applySessionEvent(transcript: SessionTranscript, event: V2Event)
       return { ...transcript, messages }
     }
     case 'session.compaction.ended': {
-      const index = latestCompactionIndex(transcript)
+      const index = runningCompactionIndex(transcript)
       const current = transcript.messages[index]
       if (current?.type !== 'compaction') {
+        const latest = transcript.messages[latestCompactionIndex(transcript)]
+        if (
+          latest?.type === 'compaction' &&
+          latest.status === 'completed' &&
+          latest.summary === event.data.text &&
+          latest.recent === event.data.recent
+        ) {
+          return transcript
+        }
         return appendMessage(transcript, {
           id: messageIDFromEvent(event.id),
           type: 'compaction',

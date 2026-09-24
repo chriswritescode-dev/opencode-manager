@@ -4,97 +4,9 @@ import {
   OAuthAuthorizeRequestSchema,
   OAuthCallbackRequestSchema,
 } from '../../../shared/src/schemas/auth'
-import type { ProviderAuthMethod } from '../../../shared/src/schemas/auth'
-import type { FormField, IntegrationMethod } from '@opencode-manager/shared/opencode'
 import type { OpenCodeClient } from '../services/opencode/client'
+import { runWhenIntegrationReady } from '../services/opencode/integration-ready'
 import { handleOpenCodeError } from '../utils/route-helpers'
-
-function finiteNumber(value: number | string | undefined): number | undefined {
-  return typeof value === 'number' && Number.isFinite(value) ? value : undefined
-}
-
-function promptField(field: FormField) {
-  const message = field.title ?? field.description ?? field.key
-
-  if (field.type === 'external') {
-    return { type: 'external' as const, key: field.key, message, url: field.url }
-  }
-
-  const condition = field.when?.map((when) => ({ key: when.key, op: when.op, value: when.value }))
-
-  if (field.type === 'string' && field.options) {
-    return {
-      type: 'select' as const,
-      key: field.key,
-      message,
-      options: field.options.map(({ label, value }) => ({ label, value })),
-      required: field.required,
-      default: field.default,
-      when: condition,
-    }
-  }
-
-  if (field.type === 'string') {
-    return {
-      type: 'text' as const,
-      key: field.key,
-      message,
-      placeholder: field.placeholder,
-      required: field.required,
-      default: field.default,
-      when: condition,
-    }
-  }
-
-  if (field.type === 'boolean') {
-    return { type: 'boolean' as const, key: field.key, message, required: field.required, default: field.default, when: condition }
-  }
-
-  if (field.type === 'multiselect') {
-    return {
-      type: 'multiselect' as const,
-      key: field.key,
-      message,
-      options: field.options.map(({ label, value }) => ({ label, value })),
-      required: field.required,
-      default: field.default,
-      when: condition,
-    }
-  }
-
-  return {
-    type: 'number' as const,
-    key: field.key,
-    message,
-    minimum: finiteNumber(field.minimum),
-    maximum: finiteNumber(field.maximum),
-    required: field.required,
-    default: finiteNumber(field.default),
-    when: condition,
-  }
-}
-
-function providerAuthMethod(method: IntegrationMethod): ProviderAuthMethod {
-  if (method.type === 'env') {
-    return { id: 'env', type: 'env', label: method.names.join(', ') }
-  }
-
-  const fields = method.type === 'oauth' || method.type === 'key'
-    ? method.form
-      ?.filter((field) => field.type === 'external' || !field.hidden)
-      .map(promptField)
-    : undefined
-
-  if (method.type === 'command') {
-    return { id: method.id, type: 'command', label: method.label, fields }
-  }
-
-  if (method.type === 'oauth') {
-    return { id: method.id, type: 'oauth', label: method.label, fields }
-  }
-
-  return { id: 'key', type: 'key', label: method.label ?? 'API key', fields }
-}
 
 export function createOAuthRoutes(openCodeClient: OpenCodeClient) {
   const app = new Hono()
@@ -103,10 +15,7 @@ export function createOAuthRoutes(openCodeClient: OpenCodeClient) {
     try {
       const integrations = await openCodeClient.api.integration.list()
       const providers = Object.fromEntries(
-        integrations.data.map((integration) => [
-          integration.id,
-          integration.methods.map(providerAuthMethod),
-        ]),
+        integrations.data.map((integration) => [integration.id, integration.methods]),
       )
       return c.json({ providers })
     } catch (error) {
@@ -119,11 +28,14 @@ export function createOAuthRoutes(openCodeClient: OpenCodeClient) {
       const body = await c.req.json()
       const validated = OAuthAuthorizeRequestSchema.parse(body)
 
-      const attempt = await openCodeClient.api.integration.oauth.connect({
-        integrationID: c.req.param('id'),
-        methodID: validated.methodID,
-        answer: validated.answer,
-      })
+      const integrationID = c.req.param('id')
+      const attempt = await runWhenIntegrationReady(openCodeClient.api, { integrationID }, () =>
+        openCodeClient.api.integration.oauth.connect({
+          integrationID,
+          methodID: validated.methodID,
+          answer: validated.answer,
+        }),
+      )
 
       return c.json({
         attemptID: attempt.data.attemptID,

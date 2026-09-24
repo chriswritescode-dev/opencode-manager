@@ -2,7 +2,7 @@ import { logger } from '../../utils/logger'
 import { ENV } from '@opencode-manager/shared/config/env'
 import { createOpenCodeApi, type OpenCodeApi } from '@opencode-manager/shared/opencode'
 import { getOpenCodeBasicAuthHeader, type OpenCodePasswordResolver } from './auth'
-import { getOpenCodeUpstreamBaseUrl } from './upstream'
+import { getOpenCodeUpstreamBaseUrl, withDefaultOpenCodeDirectory } from './upstream'
 
 export interface OpenCodeClient {
   readonly api: OpenCodeApi
@@ -45,7 +45,7 @@ export class FetchOpenCodeClient implements OpenCodeClient {
   }
 
   private async fetchWithResolvedAuth(input: Parameters<typeof fetch>[0], init?: Parameters<typeof fetch>[1]): Promise<Response> {
-    const headers = new Headers(init?.headers)
+    const headers = new Headers(withDefaultOpenCodeDirectory(Object.fromEntries(new Headers(init?.headers))))
     const basicAuth = await this.getBasicAuth()
 
     if (basicAuth) {
@@ -58,7 +58,7 @@ export class FetchOpenCodeClient implements OpenCodeClient {
   private async request(req: { method: string; path: string; body?: string; headers?: Record<string, string> }): Promise<Response> {
     const url = new URL(this.resolveBaseUrl() + req.path)
 
-    const headers: Record<string, string> = { ...(req.headers ?? {}) }
+    const headers: Record<string, string> = withDefaultOpenCodeDirectory({ ...(req.headers ?? {}) })
 
     const basicAuth = await this.getBasicAuth()
 

@@ -65,15 +65,15 @@ export type TransferDeps = {
 export type TransferInput = { sessionID: string; localRoot: string; remoteDirectory: string }
 
 export type TransferResult =
-  | { kind: 'moved'; sessionID: string; replayedEvents: number }
-  | { kind: 'replay-failed'; message: string }
+  | { kind: 'moved'; sessionID: string; importedMessages: number }
+  | { kind: 'import-failed'; message: string }
 
 export async function transferSession(input: TransferInput, deps: TransferDeps): Promise<TransferResult> {
   let data: SessionTransferData
   try {
     data = await deps.exportSession(input.sessionID)
   } catch (err) {
-    return { kind: 'replay-failed', message: err instanceof Error ? err.message : String(err) }
+    return { kind: 'import-failed', message: err instanceof Error ? err.message : String(err) }
   }
 
   const rewritten = rewriteTransferForRemote(data, {
@@ -86,11 +86,11 @@ export async function transferSession(input: TransferInput, deps: TransferDeps):
   try {
     await deps.importSession(input.remoteDirectory, rewritten)
   } catch (err) {
-    return { kind: 'replay-failed', message: err instanceof Error ? err.message : String(err) }
+    return { kind: 'import-failed', message: err instanceof Error ? err.message : String(err) }
   }
 
   deps.onProgress?.(total, total)
-  return { kind: 'moved', sessionID: input.sessionID, replayedEvents: total }
+  return { kind: 'moved', sessionID: input.sessionID, importedMessages: total }
 }
 
 export function moveReminderText(directory: string): string {

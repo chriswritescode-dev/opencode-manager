@@ -9,6 +9,7 @@ import { Hono } from 'hono'
 import { serve } from '@hono/node-server'
 import type { Database } from 'bun:sqlite'
 import { buildOpenCodeBasicAuth } from '@opencode-manager/shared/opencode'
+import { getWorkspacePath } from '@opencode-manager/shared/config/env'
 import { createOpenCodeProxyRoutes } from '../../src/routes/opencode-proxy'
 import type { SettingsService } from '../../src/services/settings'
 import { OpenCodeSupervisor } from '../../src/services/opencode-supervisor'
@@ -36,7 +37,8 @@ vi.mock('../../src/db/queries', () => ({
 
 const upstreamBaseUrl = vi.hoisted(() => ({ value: 'http://127.0.0.1:5551' }))
 
-vi.mock('../../src/services/opencode/upstream', () => ({
+vi.mock('../../src/services/opencode/upstream', async (importOriginal) => ({
+  ...await importOriginal<typeof import('../../src/services/opencode/upstream')>(),
   getOpenCodeUpstreamBaseUrl: () => upstreamBaseUrl.value,
 }))
 
@@ -202,6 +204,17 @@ describe('opencode-proxy routes', () => {
 
     expect(fetchHeaders['x-opencode-directory']).toBe('/home/user/project')
     expect(fetchHeaders['x-opencode-workspace']).toBe('my-workspace')
+  })
+
+  it('defaults x-opencode-directory to the workspace when the caller sends no location', async () => {
+    const upstreamFetch = upstreamOk()
+
+    await app.request('/api/opencode-proxy/doc', {
+      headers: { Authorization: 'Bearer test-internal-token' },
+    })
+
+    const fetchHeaders = (upstreamFetch.mock.calls[0] as [string, RequestInit])[1].headers as Record<string, string>
+    expect(fetchHeaders['x-opencode-directory']).toBe(encodeURIComponent(getWorkspacePath()))
   })
 
   it('returns 501 for WebSocket upgrade requests', async () => {

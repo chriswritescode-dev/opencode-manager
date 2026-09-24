@@ -1,9 +1,12 @@
-import { openCodeApi, toFetchError } from './opencodeApi'
+import { openCodeLocation } from '@opencode-manager/shared/opencode'
+import { callOpenCode } from './opencodeApi'
 import type {
+  AgentInfo,
   CommandInfo,
   FormAnswer,
   FormInfo,
   ModelRef,
+  OpenCodeApi,
   PermissionRequest,
   PromptMention,
   SessionInboxCompaction,
@@ -30,6 +33,8 @@ export interface PromptSkillInput {
   id: string
   mention?: PromptMention
 }
+
+export type ActiveSessions = Awaited<ReturnType<OpenCodeApi['session']['active']>>
 
 export interface SessionPage {
   items: SessionInfo[]
@@ -94,104 +99,76 @@ export function parseModelRef(model: string): ModelRef | undefined {
 }
 
 export async function listSessionPage(input: SessionPageInput): Promise<SessionPage> {
-  try {
-    const { data, cursor } = await openCodeApi.session.list({
+  const { data, cursor } = await callOpenCode((api) =>
+    api.session.list({
       directory: input.directory,
       parentID: 'null',
       limit: input.limit,
       order: input.order,
       search: input.search,
       cursor: input.cursor,
-    })
-    return { items: data, nextCursor: cursor.next ?? undefined }
-  } catch (error) {
-    throw toFetchError(error)
-  }
+    }),
+  )
+  return { items: data, nextCursor: cursor.next ?? undefined }
 }
 
 export async function getSession(sessionID: string): Promise<SessionInfo> {
-  try {
-    return await openCodeApi.session.get({ sessionID })
-  } catch (error) {
-    throw toFetchError(error)
-  }
+  return callOpenCode((api) => api.session.get({ sessionID }))
 }
 
 export async function createSession(input: CreateSessionInput): Promise<SessionInfo> {
   const model = input.model ? parseModelRef(input.model) : undefined
-  try {
-    return await openCodeApi.session.create({
+  return callOpenCode((api) =>
+    api.session.create({
       ...(input.title !== undefined ? { title: input.title } : {}),
       ...(input.agent !== undefined ? { agent: input.agent } : {}),
       ...(model ? { model } : {}),
-      ...(input.directory ? { location: { directory: input.directory } } : {}),
-    })
-  } catch (error) {
-    throw toFetchError(error)
-  }
+      ...openCodeLocation(input.directory),
+    }),
+  )
 }
 
 export async function deleteSession(sessionID: string): Promise<void> {
-  try {
-    await openCodeApi.session.remove({ sessionID })
-  } catch (error) {
-    throw toFetchError(error)
-  }
+  await callOpenCode((api) => api.session.remove({ sessionID }))
 }
 
 export async function renameSession(sessionID: string, title: string): Promise<void> {
-  try {
-    await openCodeApi.session.update({ sessionID, title })
-  } catch (error) {
-    throw toFetchError(error)
-  }
+  await callOpenCode((api) => api.session.update({ sessionID, title }))
 }
 
 export async function forkSession(sessionID: string, before?: string): Promise<SessionInfo> {
-  try {
-    return await openCodeApi.session.fork({
+  return callOpenCode((api) =>
+    api.session.fork({
       sessionID,
       ...(before ? { before } : {}),
-    })
-  } catch (error) {
-    throw toFetchError(error)
-  }
+    }),
+  )
 }
 
 export async function switchSessionModel(sessionID: string, model: ModelRef): Promise<void> {
-  try {
-    await openCodeApi.session.switchModel({ sessionID, model })
-  } catch (error) {
-    throw toFetchError(error)
-  }
+  await callOpenCode((api) => api.session.switchModel({ sessionID, model }))
 }
 
 export async function switchSessionAgent(sessionID: string, agent: string): Promise<void> {
-  try {
-    await openCodeApi.session.switchAgent({ sessionID, agent })
-  } catch (error) {
-    throw toFetchError(error)
-  }
+  await callOpenCode((api) => api.session.switchAgent({ sessionID, agent }))
 }
 
 export async function sendPrompt(input: SendPromptInput): Promise<SessionInboxUser> {
-  try {
-    return await openCodeApi.session.prompt({
+  return callOpenCode((api) =>
+    api.session.prompt({
       sessionID: input.sessionID,
       text: input.text,
       ...(input.files ? { files: input.files } : {}),
       ...(input.agents ? { agents: input.agents } : {}),
       ...(input.skills ? { skills: input.skills } : {}),
       ...(input.delivery ? { delivery: input.delivery } : {}),
-    })
-  } catch (error) {
-    throw toFetchError(error)
-  }
+    }),
+  )
 }
 
 export async function runCommand(input: RunCommandInput): Promise<void> {
-  try {
-    await openCodeApi.session.command({
+  await callOpenCode((api) =>
+    api.session.command({
       sessionID: input.sessionID,
       name: input.name,
       text: input.text,
@@ -199,86 +176,55 @@ export async function runCommand(input: RunCommandInput): Promise<void> {
       ...(input.agents ? { agents: input.agents } : {}),
       ...(input.skills ? { skills: input.skills } : {}),
       ...(input.delivery ? { delivery: input.delivery } : {}),
-    })
-  } catch (error) {
-    throw toFetchError(error)
-  }
+    }),
+  )
 }
 
 export async function runShell(sessionID: string, command: string): Promise<void> {
-  try {
-    await openCodeApi.session.shell({ sessionID, command })
-  } catch (error) {
-    throw toFetchError(error)
-  }
+  await callOpenCode((api) => api.session.shell({ sessionID, command }))
 }
 
 export async function interruptSession(sessionID: string): Promise<void> {
-  try {
-    await openCodeApi.session.interrupt({ sessionID })
-  } catch (error) {
-    throw toFetchError(error)
-  }
+  await callOpenCode((api) => api.session.interrupt({ sessionID }))
 }
 
 export async function stageRevert(sessionID: string, messageID: string): Promise<SessionRevert> {
-  try {
-    return await openCodeApi.session.revert.stage({ sessionID, messageID })
-  } catch (error) {
-    throw toFetchError(error)
-  }
+  return callOpenCode((api) => api.session.revert.stage({ sessionID, messageID }))
 }
 
 export async function commitRevert(sessionID: string): Promise<void> {
-  try {
-    await openCodeApi.session.revert.commit({ sessionID })
-  } catch (error) {
-    throw toFetchError(error)
-  }
+  await callOpenCode((api) => api.session.revert.commit({ sessionID }))
 }
 
 export async function clearRevert(sessionID: string): Promise<void> {
-  try {
-    await openCodeApi.session.revert.clear({ sessionID })
-  } catch (error) {
-    throw toFetchError(error)
-  }
+  await callOpenCode((api) => api.session.revert.clear({ sessionID }))
 }
 
 export async function compactSession(sessionID: string): Promise<SessionInboxCompaction> {
-  try {
-    return await openCodeApi.session.compact({ sessionID })
-  } catch (error) {
-    throw toFetchError(error)
-  }
+  return callOpenCode((api) => api.session.compact({ sessionID }))
 }
 
 export async function activateSkill(sessionID: string, id: string): Promise<void> {
-  try {
-    await openCodeApi.session.skill({ sessionID, id })
-  } catch (error) {
-    throw toFetchError(error)
-  }
+  await callOpenCode((api) => api.session.skill({ sessionID, id }))
+}
+
+export async function listActiveSessions(): Promise<ActiveSessions> {
+  return callOpenCode((api) => api.session.active())
+}
+
+export async function listAgents(directory?: string): Promise<AgentInfo[]> {
+  const { data } = await callOpenCode((api) => api.agent.list(openCodeLocation(directory)))
+  return data
 }
 
 export async function listCommands(directory?: string): Promise<CommandInfo[]> {
-  try {
-    const { data } = await openCodeApi.command.list(
-      directory ? { location: { directory } } : undefined,
-    )
-    return data
-  } catch (error) {
-    throw toFetchError(error)
-  }
+  const { data } = await callOpenCode((api) => api.command.list(openCodeLocation(directory)))
+  return data
 }
 
 export async function listPendingPermissions(directory: string): Promise<PermissionRequest[]> {
-  try {
-    const { data } = await openCodeApi.permission.request.list({ location: { directory } })
-    return data
-  } catch (error) {
-    throw toFetchError(error)
-  }
+  const { data } = await callOpenCode((api) => api.permission.request.list(openCodeLocation(directory)))
+  return data
 }
 
 export async function replyPermission(
@@ -287,87 +233,65 @@ export async function replyPermission(
   decision: 'once' | 'always' | 'reject',
   message?: string,
 ): Promise<void> {
-  try {
-    await openCodeApi.permission.reply({
+  await callOpenCode((api) =>
+    api.permission.reply({
       sessionID,
       requestID,
       decision,
       ...(message ? { message } : {}),
-    })
-  } catch (error) {
-    throw toFetchError(error)
-  }
+    }),
+  )
 }
 
 export async function listPendingForms(directory: string): Promise<FormInfo[]> {
-  try {
-    const { data } = await openCodeApi.form.list({ location: { directory } })
-    return data
-  } catch (error) {
-    throw toFetchError(error)
-  }
+  const { data } = await callOpenCode((api) => api.form.list(openCodeLocation(directory)))
+  return data
 }
 
 export async function replyForm(sessionID: string, formID: string, answer: FormAnswer): Promise<void> {
-  try {
-    await openCodeApi.session.form.reply({ sessionID, formID, answer })
-  } catch (error) {
-    throw toFetchError(error)
-  }
+  await callOpenCode((api) => api.session.form.reply({ sessionID, formID, answer }))
 }
 
 export async function cancelForm(sessionID: string, formID: string): Promise<void> {
-  try {
-    await openCodeApi.session.form.cancel({ sessionID, formID })
-  } catch (error) {
-    throw toFetchError(error)
-  }
+  await callOpenCode((api) => api.session.form.cancel({ sessionID, formID }))
 }
 
 export async function findFiles(input: FindFilesInput): Promise<string[]> {
-  try {
-    const { data } = await openCodeApi.file.find({
-      ...(input.directory ? { location: { directory: input.directory } } : {}),
+  const { data } = await callOpenCode((api) =>
+    api.file.find({
+      ...openCodeLocation(input.directory),
       query: input.query,
       type: 'file',
       limit: input.limit,
-    })
-    return data.map((entry) => entry.path)
-  } catch (error) {
-    throw toFetchError(error)
-  }
+    }),
+  )
+  return data.map((entry) => entry.path)
 }
 
 export async function listSessionMessages(
   sessionID: string,
   input: SessionMessagesInput = {},
 ): Promise<SessionMessagesPage> {
-  try {
-    const { data, cursor } = await openCodeApi.message.list({
+  const { data, cursor } = await callOpenCode((api) =>
+    api.message.list({
       sessionID,
       ...(input.limit === undefined ? {} : { limit: input.limit }),
       ...(input.cursor === undefined ? { order: 'desc' as const } : { cursor: input.cursor }),
-    })
-    return { messages: [...data].reverse(), nextCursor: cursor.next ?? undefined }
-  } catch (error) {
-    throw toFetchError(error)
-  }
+    }),
+  )
+  return { messages: [...data].reverse(), nextCursor: cursor.next ?? undefined }
 }
 
 export async function readSessionSnapshot(sessionID: string): Promise<SessionSnapshot> {
-  try {
-    const [page, pending, active] = await Promise.all([
-      listSessionMessages(sessionID),
-      openCodeApi.session.inbox.list({ sessionID }),
-      openCodeApi.session.active(),
-    ])
-    return {
-      messages: page.messages,
-      nextCursor: page.nextCursor,
-      pending,
-      status: active[sessionID] ? 'busy' : 'idle',
-    }
-  } catch (error) {
-    throw toFetchError(error)
+  const [page, pending, active] = await Promise.all([
+    listSessionMessages(sessionID),
+    callOpenCode((api) => api.session.inbox.list({ sessionID })),
+    listActiveSessions(),
+  ])
+  return {
+    messages: page.messages,
+    nextCursor: page.nextCursor,
+    pending,
+    status: active[sessionID] ? 'busy' : 'idle',
   }
 }

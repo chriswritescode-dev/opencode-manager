@@ -1,9 +1,9 @@
 import { API_BASE_URL } from "@/config";
 import { settingsApi } from "./settings";
 import { fetchWrapper } from "./fetchWrapper";
-import { openCodeApi } from "./opencodeApi";
-import type { ModelInfo } from "@opencode-manager/shared/opencode";
-import type { CredentialListResponse, CredentialStatusResponse, PromptAnswer } from "@opencode-manager/shared/schemas";
+import { callOpenCode } from "./opencodeApi";
+import { openCodeLocation, type ConfigEntry, type FormAnswer, type ModelInfo } from "@opencode-manager/shared/opencode";
+import type { CredentialListResponse, CredentialStatusResponse } from "@opencode-manager/shared/schemas";
 import type { OpenCodeConfigFile } from "./types/settings";
 
 export type ProviderSource = "configured" | "local" | "builtin";
@@ -106,7 +106,7 @@ function classifyProviderSource(providerId: string, isFromConfig: boolean): Prov
 export interface ProvidersResult {
   providers: Provider[];
   connected: string[];
-  default: Record<string, string>;
+  models: ModelInfo[];
 }
 
 const MODEL_MODALITIES = ["text", "audio", "image", "video", "pdf"] as const;
@@ -150,12 +150,10 @@ function mapModelInfo(model: ModelInfo): Model {
 
 export async function getProviders(directory?: string): Promise<ProvidersResult> {
   try {
-    const location = directory ? { location: { directory } } : undefined;
-    const [providerResult, modelResult, defaultResult] = await Promise.all([
-      openCodeApi.provider.list(location),
-      openCodeApi.model.list(location),
-      openCodeApi.model.default(location),
-    ]);
+    const location = openCodeLocation(directory);
+    const [providerResult, modelResult] = await callOpenCode((api) =>
+      Promise.all([api.provider.list(location), api.model.list(location)]),
+    );
 
     const connected = providerResult.data.map((provider) => provider.id);
     const connectedSet = new Set(connected);
@@ -176,14 +174,28 @@ export async function getProviders(directory?: string): Promise<ProvidersResult>
       };
     });
 
-    const defaultModel: Record<string, string> = {};
-    if (defaultResult.data) {
-      defaultModel[defaultResult.data.providerID] = defaultResult.data.id;
-    }
-
-    return { providers, connected, default: defaultModel };
+    return { providers, connected, models: modelResult.data };
   } catch {
-    return { providers: [], connected: [], default: {} };
+    return { providers: [], connected: [], models: [] };
+  }
+}
+
+type ConfigDocumentModel = Extract<ConfigEntry, { type: "document" }>["info"]["model"];
+
+function formatConfigModel(model: NonNullable<ConfigDocumentModel>): string {
+  return typeof model === "string" ? model : `${model.providerID}/${model.model}`;
+}
+
+export async function getOpenCodeConfigModel(directory?: string): Promise<string | null> {
+  try {
+    const entries = await callOpenCode((api) => api.config.get(openCodeLocation(directory)));
+    const model = entries.reduce<ConfigDocumentModel>(
+      (current, entry) => (entry.type === "document" && entry.info.model ? entry.info.model : current),
+      undefined,
+    );
+    return model ? formatConfigModel(model) : null;
+  } catch {
+    return null;
   }
 }
 
@@ -354,7 +366,7 @@ export const providerCredentialsApi = {
     return hasCredentials;
   },
 
-  set: async (providerId: string, apiKey: string, answer?: PromptAnswer): Promise<void> => {
+  set: async (providerId: string, apiKey: string, answer?: FormAnswer): Promise<void> => {
     await fetchWrapper(`${API_BASE_URL}/api/providers/${providerId}/credentials`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },

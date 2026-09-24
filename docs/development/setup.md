@@ -6,7 +6,7 @@ Guide for setting up a local development environment.
 
 - [pnpm](https://pnpm.io/installation) - Package manager (required for workspaces)
 - [Bun](https://bun.sh) - Backend runtime
-- [OpenCode TUI](https://opencode.ai) 2.0.0 or newer - `curl -fsSL https://opencode.ai/v2/install | bash`
+- [OpenCode TUI](https://opencode.ai) 2.x, 2.0.15 or newer - `curl -fsSL https://opencode.ai/v2/install | bash`
 
 ## Installation
 

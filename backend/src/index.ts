@@ -58,8 +58,6 @@ import { getOpenCodeImportStatus, syncOpenCodeImport } from './services/opencode
 import { readOpenCodeConfigFile, foldLegacyConfigJsonSource, withOpenCodeConfigLock } from './services/opencode-config-file'
 import { seedOpenCodeConfigFile } from './services/opencode-config-apply'
 import { OpenCodeSupervisor } from './services/opencode-supervisor'
-import { OpenCodeRestartCoordinator } from './services/opencode-restart-coordinator'
-import { setOpenCodeRestartCoordinator } from './services/opencode-restart'
 import { logger } from './utils/logger'
 import { 
   getWorkspacePath, 
@@ -256,9 +254,6 @@ sseAggregator.start()
 sseAggregator.setScheduledSessionsResolver(
   () => scheduleService.getActiveRunSessions(),
 )
-
-const openCodeRestartCoordinator = new OpenCodeRestartCoordinator(sseAggregator)
-setOpenCodeRestartCoordinator(openCodeRestartCoordinator)
 
 void scheduleRunnerInstance.start()
 

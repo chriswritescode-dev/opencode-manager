@@ -2,8 +2,8 @@ import { useCallback, useDeferredValue, useEffect, useLayoutEffect, useMemo, use
 import { Check, ChevronDown, ChevronLeft, ChevronRight, Clock, Search, Star, Trash2, X } from 'lucide-react'
 import { useModelSelection } from '@/hooks/useModelSelection'
 import { useVariants } from '@/hooks/useVariants'
-import { formatModelName, formatProviderName, getProviders } from '@/api/providers'
-import { useQuery } from '@tanstack/react-query'
+import { formatModelName, formatProviderName } from '@/api/providers'
+import { useProviders } from '@/hooks/useProviders'
 import { BottomSheet } from '@/components/ui/bottom-sheet'
 import {
   DropdownMenu,
@@ -192,11 +192,7 @@ export function ModelQuickSelect({
   const { model, modelString, recentModels, favoriteModels, setModel, toggleFavorite, removeRecentModel } = useModelSelection(directory)
   const { availableVariants, currentVariant, setVariant, clearVariant, hasVariants } = useVariants(directory)
 
-  const { data: providersData } = useQuery({
-    queryKey: ['opencode', 'providers', directory],
-    queryFn: () => getProviders(directory),
-    staleTime: 30000,
-  })
+  const { data: providersData } = useProviders(directory)
 
   const providers = providersData?.providers ?? EMPTY_PROVIDERS
 

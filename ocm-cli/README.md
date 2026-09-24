@@ -6,6 +6,19 @@ OpenCode Manager CLI and plugin package.
 can also mirror a local git repo up to Manager or pull a Manager repo back down
 to the local working tree.
 
+## Compatibility
+
+| ocm | OpenCode Manager | Local OpenCode |
+|---|---|---|
+| 0.3.x | >= 0.19.0 | >= 2.0.15, < 3 |
+
+ocm 0.3.0 attaches through the repo-scoped Manager proxy
+(`/api/opencode-proxy/repos/:repoId`), loads its plugin from the OpenCode 2
+`cli.json` `plugins` list, and moves sessions with OpenCode 2 session
+export/import. Older Managers lack that route; `ocm` then fails with
+`OpenCode Manager at <url> is too old for ocm 0.3.0; upgrade the Manager to >= 0.19.0`.
+Use ocm 0.2.x with OpenCode Manager < 0.19.0 and OpenCode 1.x.
+
 ## Install
 
 ```bash
@@ -33,6 +46,11 @@ On Linux the token is stored as plaintext JSON protected only by file
 permissions. CLI state is stored at `~/.config/opencode-manager/state.json`.
 Windows is unsupported: the same file store is used, but the `0600` mode is not
 enforced there.
+
+`ocm` passes the token to the local `opencode` client it launches as
+`OPENCODE_PASSWORD`. That variable belongs only to the local client process; never
+set `OPENCODE_PASSWORD` in the OpenCode Manager server environment (the Manager
+strips it because it would override the Manager-managed OpenCode password).
 
 `OCM_TOKEN` overrides the token store for reads; `ocm login` always writes to
 the platform store and `ocm logout` cannot remove the override. Run `ocm status`
@@ -111,12 +129,12 @@ on the Manager immediately. Use it from inside an OpenCode session after
 `ocm login` and after the repo already exists on the Manager
 (`ocm push --create` if needed).
 
-Enable it in `tui.json`:
+Enable it in `~/.config/opencode/cli.json`:
 
 ```jsonc
 {
-  "$schema": "https://opencode.ai/tui.json",
-  "plugin": ["@opencode-manager/ocm-cli"]
+  "$schema": "https://opencode.ai/v2/cli.json",
+  "plugins": ["@opencode-manager/ocm-cli"]
 }
 ```
 
@@ -126,7 +144,8 @@ global installs); the plugin surface is TUI-only.
 ## Requirements
 
 - macOS or Linux (Windows is unsupported)
-- OpenCode 2.x available on `PATH`
+- OpenCode >= 2.0.15 (same major, 2.x) available on `PATH`
+- OpenCode Manager >= 0.19.0
 - `git` and `tar` (with gzip support, i.e. the `-z` flag) available on `PATH`
 - `bash`, used for hidden token entry and interactive confirmations
 - macOS only: `/usr/bin/security`, used for Keychain-backed token storage (Linux uses a mode-`0600` file under the user config dir `~/.config/opencode-manager`)

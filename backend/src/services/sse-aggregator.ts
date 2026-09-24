@@ -1,8 +1,7 @@
 import { EventSource } from 'eventsource'
 import { logger } from '../utils/logger'
 import { DEFAULTS } from '@opencode-manager/shared/config'
-import type { SSEEventEnvelope } from '@opencode-manager/shared'
-import type { OpenCodeApi, V2Event } from '@opencode-manager/shared/opencode'
+import { openCodeLocation, type OpenCodeApi, type V2Event } from '@opencode-manager/shared/opencode'
 import { getOpenCodeBasicAuthHeader, type OpenCodePasswordResolver } from './opencode/auth'
 import { getOpenCodeUpstreamBaseUrl } from './opencode/upstream'
 import { encodeSSEFrame } from '../utils/sse-frame'
@@ -34,6 +33,11 @@ export interface ScheduledSessionRef {
 type ReplayEventType = 'permission.asked' | 'form.created' | 'session.status'
 
 const { RECONNECT_DELAY_MS, MAX_RECONNECT_DELAY_MS } = DEFAULTS.SSE
+const MULTILINE_PATTERN = /[\r\n]/
+
+function serializeEnvelope(directory: string | null, payloadJson: string): string {
+  return '{"directory":' + JSON.stringify(directory) + ',"payload":' + payloadJson + '}'
+}
 
 class SSEAggregator {
   private static instance: SSEAggregator
@@ -187,30 +191,14 @@ class SSEAggregator {
     ))
   }
 
-  private async replayPendingActionsForAllClients(): Promise<void> {
-    const fetcher = this.pendingActionsFetcher
-    if (!fetcher) return
-
-    const tasks: Promise<void>[] = []
-    this.clients.forEach((client) => {
-      const directories = Array.from(client.directories)
-      if (directories.length === 0) return
-      tasks.push(this.replayPendingActionsForClient(client.id, directories))
-    })
-
-    if (tasks.length === 0) return
-    logger.info(`replay: replaying pending actions to ${tasks.length} client(s) after upstream reconnect`)
-    await Promise.allSettled(tasks)
-  }
-
   private async replayPendingActionsForDirectory(
     clientId: string,
     directory: string,
     fetcher: PendingActionsFetcher,
   ): Promise<void> {
     const [permissionsResult, formsResult] = await Promise.allSettled([
-      fetcher.api.permission.request.list({ location: { directory } }),
-      fetcher.api.form.list({ location: { directory } }),
+      fetcher.api.permission.request.list(openCodeLocation(directory)),
+      fetcher.api.form.list(openCodeLocation(directory)),
     ])
 
     if (permissionsResult.status === 'rejected') {
@@ -237,9 +225,8 @@ class SSEAggregator {
     if (!client || !client.directories.has(directory)) return
 
     for (const event of events) {
-      const envelope: SSEEventEnvelope = { directory, payload: event }
       try {
-        client.callback('message', JSON.stringify(envelope))
+        client.callback('message', serializeEnvelope(directory, JSON.stringify(event)))
       } catch (error) {
         logger.error(`replay: failed to deliver ${event.type} to client ${clientId}:`, error)
         return
@@ -273,8 +260,12 @@ class SSEAggregator {
       replayed++
     }
 
-    for (const sessionID of runningIDs) {
-      const directory = tracked.get(sessionID) ?? await this.resolveSessionDirectory(fetcher, sessionID)
+    const runningDirectories = await Promise.all(runningIDs.map(async (sessionID) => ({
+      sessionID,
+      directory: tracked.get(sessionID) ?? await this.resolveSessionDirectory(fetcher, sessionID),
+    })))
+
+    for (const { sessionID, directory } of runningDirectories) {
       if (!directory) continue
       this.deliverEvent(directory, this.buildReplayEvent('session.status', directory, { sessionID, status: { type: 'busy' } }))
       replayed++
@@ -378,7 +369,6 @@ class SSEAggregator {
     this.everConnected = true
     this.broadcastResync()
     if (wasConnectedBefore) {
-      void this.replayPendingActionsForAllClients()
       void this.replaySessionStatusesForTrackedDirectories()
     }
   }
@@ -409,17 +399,23 @@ class SSEAggregator {
       return
     }
 
-    const directory = event?.location?.directory
-    if (!event?.type || !directory) return
+    if (!event?.type) return
+
+    const payloadJson = MULTILINE_PATTERN.test(data) ? JSON.stringify(event) : data
+    const directory = event.location?.directory
 
     try {
-      this.deliverEvent(directory, event)
+      if (directory) {
+        this.deliverEvent(directory, event, payloadJson)
+      } else {
+        this.writeEnvelopeToClients(this.clients.keys(), null, payloadJson)
+      }
     } catch (error) {
       logger.error(`SSE failed to handle ${event.type} event:`, error)
     }
   }
 
-  private deliverEvent(directory: string, event: SSEEvent): void {
+  private deliverEvent(directory: string, event: SSEEvent, payloadJson?: string): void {
     this.handleEvent(directory, event)
 
     this.eventListeners.forEach(listener => {
@@ -429,11 +425,15 @@ class SSEAggregator {
     const subscriberIds = this.directoryClients.get(directory)
     if (!subscriberIds || subscriberIds.size === 0) return
 
-    const envelope: SSEEventEnvelope = { directory, payload: event }
-    const frame = encodeSSEFrame('message', JSON.stringify(envelope))
-    for (const clientId of subscriberIds) {
+    this.writeEnvelopeToClients(subscriberIds, directory, payloadJson ?? JSON.stringify(event))
+  }
+
+  private writeEnvelopeToClients(clientIds: Iterable<string>, directory: string | null, payloadJson: string): void {
+    let frame: Uint8Array | null = null
+    for (const clientId of clientIds) {
       const client = this.clients.get(clientId)
       if (!client) continue
+      frame ??= encodeSSEFrame('message', serializeEnvelope(directory, payloadJson))
       try {
         client.writeFrame(frame)
       } catch (error) {

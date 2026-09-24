@@ -1,45 +1,6 @@
 import { describe, it, expect } from 'vitest'
 import { FetchError } from '@opencode-manager/shared'
-import { parseNetworkError, parseOpenCodeError, isGatewayTimeout } from './opencode-errors'
-
-describe('parseOpenCodeError', () => {
-  it('reads a V2 declared error body with its name, message, and status', () => {
-    expect(parseOpenCodeError({
-      name: 'SessionBusyError',
-      data: { message: 'Session is busy', status: 409 },
-    })).toEqual({
-      title: 'SessionBusyError',
-      message: 'Session is busy',
-      isRetryable: false,
-      statusCode: 409,
-    })
-  })
-
-  it('treats a statusless V2 error as retryable', () => {
-    expect(parseOpenCodeError({ name: 'UnknownError', data: { message: 'Boom' } })).toEqual({
-      title: 'UnknownError',
-      message: 'Boom',
-      isRetryable: true,
-    })
-  })
-
-  it('reads a V2 ClientError reason from the error message', () => {
-    expect(parseOpenCodeError({
-      name: 'ClientError',
-      message: 'Transport',
-      reason: 'Transport',
-    })).toEqual({
-      title: 'Error',
-      message: 'Transport',
-      isRetryable: true,
-    })
-  })
-
-  it('returns null when there is no message to show', () => {
-    expect(parseOpenCodeError({ name: 'Error' })).toBeNull()
-    expect(parseOpenCodeError(undefined)).toBeNull()
-  })
-})
+import { parseNetworkError, isGatewayTimeout } from './opencode-errors'
 
 describe('parseNetworkError', () => {
   it('classifies TypeError("Failed to fetch") as Connection Failed', () => {

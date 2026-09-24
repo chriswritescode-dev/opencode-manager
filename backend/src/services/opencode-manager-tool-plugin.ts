@@ -3,7 +3,7 @@ import { ASSISTANT_NOTIFICATION_LIMITS } from '@opencode-manager/shared/schemas'
 
 export const MANAGER_TOOL_NAME = 'ocm'
 
-export const MANAGER_TOOL_REQUEST_TIMEOUT_MS = 15000
+const MANAGER_TOOL_REQUEST_TIMEOUT_MS = 15000
 
 export const MANAGER_TOOL_ALLOWED_ROUTES = [
   'GET /settings',
@@ -30,11 +30,11 @@ export const MANAGER_TOOL_ALLOWED_ROUTES = [
   'POST /repos/*/schedules/*/runs/*/cancel',
 ] as const
 
-export const MANAGER_TOOL_ALLOWED_METHODS = ['GET', 'POST', 'PUT', 'PATCH', 'DELETE'] as const
+const MANAGER_TOOL_ALLOWED_METHODS = ['GET', 'POST', 'PUT', 'PATCH', 'DELETE'] as const
 
-export const MANAGER_TOOL_ACTION_NAMES = ['send_notification', 'request'] as const
+const MANAGER_TOOL_ACTION_NAMES = ['send_notification', 'request'] as const
 
-export const ManagerToolNotificationParamsSchema = z
+const ManagerToolNotificationParamsSchema = z
   .object({
     title: z.string().min(1).max(ASSISTANT_NOTIFICATION_LIMITS.TITLE_MAX).describe('The notification title.'),
     body: z.string().min(1).max(ASSISTANT_NOTIFICATION_LIMITS.BODY_MAX).describe('The notification body.'),
@@ -45,7 +45,7 @@ export const ManagerToolNotificationParamsSchema = z
   .strict()
   .describe('Send a push notification to every device the user has registered.')
 
-export const ManagerToolRequestParamsSchema = z
+const ManagerToolRequestParamsSchema = z
   .object({
     method: z.enum(MANAGER_TOOL_ALLOWED_METHODS).describe('The HTTP method for the internal API route.'),
     path: z.string().min(1).max(500).describe('The internal API route path, such as /settings or /repos/0/schedules. Query strings are allowed.'),
@@ -80,7 +80,7 @@ function requiredKeysOf(schema: z.ZodType): string[] {
   return jsonSchema.required ?? []
 }
 
-export function buildManagerToolInputJsonSchema(): Record<string, unknown> {
+function buildManagerToolInputJsonSchema(): Record<string, unknown> {
   const jsonSchema: Record<string, unknown> = z.toJSONSchema(
     z
       .object({
@@ -95,7 +95,7 @@ export function buildManagerToolInputJsonSchema(): Record<string, unknown> {
   return jsonSchema
 }
 
-export function buildManagerToolActionRequiredKeys(): Record<string, string[]> {
+function buildManagerToolActionRequiredKeys(): Record<string, string[]> {
   return Object.fromEntries(MANAGER_TOOL_ACTION_NAMES.map((name) => [name, requiredKeysOf(MANAGER_TOOL_ACTION_PARAMS_SCHEMAS[name])]))
 }
 

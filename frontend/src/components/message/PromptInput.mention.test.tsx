@@ -40,7 +40,6 @@ vi.mock('@/hooks/useOpenCode', async () => {
   return {
     ...actual,
     useAgents: () => ({ data: mocks.agents }),
-    useOpenCodeClient: () => null,
   }
 })
 

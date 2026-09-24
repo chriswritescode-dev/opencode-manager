@@ -1,11 +1,11 @@
 import { Switch } from '@/components/ui/switch'
 import { Button } from '@/components/ui/button'
-import { Badge } from '@/components/ui/badge'
 import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger } from '@/components/ui/dropdown-menu'
 import { DropdownMenuSeparator } from '@/components/ui/dropdown-menu'
 import { Loader2, XCircle, AlertCircle, Plug, Shield, Key, RefreshCw, ChevronDown } from 'lucide-react'
 import type { McpStatus } from '@/api/mcp'
-
+import { formatMcpServerName } from '@/lib/mcp'
+import { McpStatusBadge } from '@/components/settings/McpStatusBadge'
 
 interface RepoMcpServerListProps {
   hasFetchedStatus: boolean
@@ -34,39 +34,6 @@ export function RepoMcpServerList({
   onAuthClick,
   onRemoveAuthClick,
 }: RepoMcpServerListProps) {
-  const getDisplayName = (serverId: string): string => {
-    const name = serverId.replace(/[-_]/g, ' ')
-    return name.charAt(0).toUpperCase() + name.slice(1)
-  }
-
-  const getStatusBadge = (status?: McpStatus) => {
-    if (!status) return null
-
-    switch (status.status) {
-      case 'connected':
-        return <Badge variant="default" className="text-xs bg-green-600">Connected</Badge>
-      case 'pending':
-        return <Badge variant="outline" className="text-xs">Connecting</Badge>
-      case 'disabled':
-        return <Badge className="text-xs bg-gray-700 text-gray-300 border-gray-600 dark:bg-gray-700 dark:text-gray-300 dark:border-gray-600">Disabled</Badge>
-      case 'failed':
-        return (
-          <Badge variant="destructive" className="text-xs flex items-center gap-1">
-            <AlertCircle className="h-3 w-3" />
-            Failed
-          </Badge>
-        )
-      case 'needs_auth':
-        return (
-          <Badge variant="outline" className="text-xs border-yellow-500 text-yellow-600">
-            Needs Auth
-          </Badge>
-        )
-      default:
-        return <Badge variant="outline" className="text-xs">Unknown</Badge>
-    }
-  }
-
   return (
     <div className="px-4 sm:px-6 py-3 sm:py-4 flex-1 overflow-y-auto min-h-0">
       {hasFetchedStatus && serverIds.length === 0 ? (
@@ -99,7 +66,7 @@ export function RepoMcpServerList({
                 <div className="flex-1 min-w-0">
                   <div className="flex items-center gap-2 mb-1">
                     <p className="text-sm font-medium truncate">
-                      {getDisplayName(serverId)}
+                      {formatMcpServerName(serverId)}
                     </p>
                     {(showAuthButton || connectedWithOAuth) ? (
                       <DropdownMenu>
@@ -153,7 +120,7 @@ export function RepoMcpServerList({
                         </DropdownMenuContent>
                       </DropdownMenu>
                     ) : (
-                      getStatusBadge(status)
+                      status && <McpStatusBadge status={status} />
                     )}
                   </div>
                   {failed && status.status === 'failed' && (

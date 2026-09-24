@@ -8,7 +8,11 @@ import { Loader2 } from 'lucide-react'
 import { Switch } from '@/components/ui/switch'
 import { useMcpServers } from '@/hooks/useMcpServers'
 import { settingsApi } from '@/api/settings'
-import { toV2McpServerConfig, type McpServerConfig, type V2McpServerConfig } from '@opencode-manager/shared/opencode'
+import {
+  mcpOAuthRedirectUri,
+  type McpServerConfig,
+  type McpTimeoutConfig,
+} from '@opencode-manager/shared/opencode'
 import { useMutation, useQueryClient } from '@tanstack/react-query'
 
 interface AddMcpServerDialogProps {
@@ -38,13 +42,17 @@ export function AddMcpServerDialog({ open, onOpenChange, onUpdate }: AddMcpServe
   const queryClient = useQueryClient()
   const { addServerAsync, isAddingServer } = useMcpServers()
 
-  const parseTimeout = (): number | undefined => {
+  const buildTimeout = (): McpTimeoutConfig | undefined => {
     const parsed = parseInt(timeout)
-    return Number.isFinite(parsed) ? parsed : undefined
+    return Number.isFinite(parsed) ? { catalog: parsed, execution: parsed } : undefined
   }
 
   const buildMcpServerConfig = (): McpServerConfig => {
-    const parsedTimeout = parseTimeout()
+    const timeoutConfig = buildTimeout()
+    const shared = {
+      disabled: !enabled,
+      ...(timeoutConfig ? { timeout: timeoutConfig } : {}),
+    }
 
     if (serverType === 'local') {
       const commandArray = command.split(' ').filter((arg) => arg.trim())
@@ -60,10 +68,9 @@ export function AddMcpServerDialog({ open, onOpenChange, onUpdate }: AddMcpServe
 
       return {
         type: 'local',
-        enabled,
         command: commandArray,
         ...(Object.keys(environmentVariables).length > 0 ? { environment: environmentVariables } : {}),
-        ...(parsedTimeout === undefined ? {} : { timeout: parsedTimeout }),
+        ...shared,
       }
     }
 
@@ -73,18 +80,18 @@ export function AddMcpServerDialog({ open, onOpenChange, onUpdate }: AddMcpServe
 
     return {
       type: 'remote',
-      enabled,
       url: url.trim(),
       ...(oauthEnabled
         ? {
             oauth: {
-              ...(oauthClientId.trim() ? { clientId: oauthClientId.trim() } : {}),
-              ...(oauthClientSecret.trim() ? { clientSecret: oauthClientSecret.trim() } : {}),
+              ...(oauthClientId.trim() ? { client_id: oauthClientId.trim() } : {}),
+              ...(oauthClientSecret.trim() ? { client_secret: oauthClientSecret.trim() } : {}),
               ...(oauthScope.trim() ? { scope: oauthScope.trim() } : {}),
+              redirect_uri: mcpOAuthRedirectUri(window.location.origin),
             },
           }
         : {}),
-      ...(parsedTimeout === undefined ? {} : { timeout: parsedTimeout }),
+      ...shared,
     }
   }
 
@@ -93,15 +100,12 @@ export function AddMcpServerDialog({ open, onOpenChange, onUpdate }: AddMcpServe
       const config = await settingsApi.getOpenCodeConfig()
       const mcpServerConfig = buildMcpServerConfig()
       const mcp = (config.content.mcp as Record<string, unknown> | undefined) ?? {}
-      const servers = { ...(mcp.servers as Record<string, V2McpServerConfig> | undefined) }
-
-      servers[serverId] = toV2McpServerConfig(mcpServerConfig, window.location.origin)
 
       await onUpdate({
         ...config.content,
         mcp: {
           ...mcp,
-          servers,
+          servers: { ...(mcp.servers as Record<string, unknown> | undefined), [serverId]: mcpServerConfig },
         },
       })
 
@@ -325,7 +329,7 @@ export function AddMcpServerDialog({ open, onOpenChange, onUpdate }: AddMcpServe
                 className="bg-background border-border"
               />
               <p className="text-xs text-muted-foreground">
-                Timeout in milliseconds for fetching tools (default: 5000)
+                Timeout in milliseconds for listing and calling tools
               </p>
             </div>
 

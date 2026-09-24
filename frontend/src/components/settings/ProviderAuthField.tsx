@@ -1,48 +1,67 @@
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
-import { Badge } from '@/components/ui/badge'
 import { Checkbox } from '@/components/ui/checkbox'
 import { MultiSelect } from '@/components/ui/multi-select'
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
-import type { PromptAnswerValue, PromptField } from '@/api/oauth'
+import { ExternalFieldCard } from '@/components/ui/external-field-card'
+import type { FormField, FormValue } from '@/api/oauth'
 
 interface ProviderAuthFieldProps {
-  field: PromptField
-  value: PromptAnswerValue | undefined
+  field: FormField
+  value: FormValue | undefined
   disabled: boolean
-  onChange: (value: PromptAnswerValue | undefined) => void
+  onChange: (value: FormValue | undefined) => void
+}
+
+function fieldLabel(field: FormField): string {
+  return field.title ?? field.key
 }
 
 function FieldControl({ field, value, disabled, onChange }: ProviderAuthFieldProps) {
-  if (field.type === 'text') {
+  if (field.type === 'boolean') {
     return (
-      <Input
-        id={field.key}
-        value={typeof value === 'string' ? value : ''}
-        onChange={(e) => onChange(e.target.value)}
-        placeholder={field.placeholder}
-        className="bg-background border-border"
-        disabled={disabled}
-      />
+      <div className="flex items-center gap-2">
+        <Checkbox
+          id={field.key}
+          checked={value === true}
+          onCheckedChange={(checked) => onChange(checked === true)}
+          disabled={disabled}
+        />
+        <Label htmlFor={field.key} className="cursor-pointer">
+          {fieldLabel(field)}
+        </Label>
+      </div>
     )
   }
 
-  if (field.type === 'number') {
+  if (field.type === 'number' || field.type === 'integer') {
     return (
       <Input
         id={field.key}
         type="number"
-        value={typeof value === 'number' ? String(value) : ''}
+        value={typeof value === 'number' || typeof value === 'string' ? String(value) : ''}
         onChange={(e) => onChange(e.target.value === '' ? undefined : Number(e.target.value))}
-        min={field.minimum}
-        max={field.maximum}
+        min={typeof field.minimum === 'number' ? field.minimum : undefined}
+        max={typeof field.maximum === 'number' ? field.maximum : undefined}
+        step={field.type === 'integer' ? 1 : 'any'}
         className="bg-background border-border"
         disabled={disabled}
       />
     )
   }
 
-  if (field.type === 'select') {
+  if (field.type === 'multiselect') {
+    return (
+      <MultiSelect
+        value={Array.isArray(value) ? value : []}
+        onChange={(next) => onChange(next)}
+        options={field.options}
+        disabled={disabled}
+      />
+    )
+  }
+
+  if (field.type === 'string' && field.options && field.options.length > 0) {
     return (
       <Select
         value={typeof value === 'string' ? value : ''}
@@ -63,72 +82,30 @@ function FieldControl({ field, value, disabled, onChange }: ProviderAuthFieldPro
     )
   }
 
-  if (field.type === 'multiselect') {
-    return (
-      <MultiSelect
-        value={Array.isArray(value) ? value : []}
-        onChange={(next) => onChange(next)}
-        options={field.options}
-        disabled={disabled}
-      />
-    )
-  }
-
-  if (field.type === 'boolean') {
-    return (
-      <div className="flex items-center gap-2">
-        <Checkbox
-          id={field.key}
-          checked={value === true}
-          onCheckedChange={(checked) => onChange(checked === true)}
-          disabled={disabled}
-        />
-        <Label htmlFor={field.key} className="cursor-pointer">
-          {field.message}
-        </Label>
-      </div>
-    )
-  }
-
   return (
-    <div className="space-y-2">
-      <div className="flex items-center gap-2">
-        <a
-          href={field.url}
-          target="_blank"
-          rel="noreferrer"
-          className="text-sm text-primary underline-offset-4 hover:underline"
-        >
-          {field.message}
-        </a>
-        <Badge variant="secondary" className="text-xs shrink-0">
-          External step
-        </Badge>
-      </div>
-      <div className="flex items-center gap-2">
-        <Checkbox
-          id={field.key}
-          checked={value === true}
-          onCheckedChange={(checked) => onChange(checked === true)}
-          disabled={disabled}
-        />
-        <Label htmlFor={field.key} className="cursor-pointer text-sm">
-          I have completed this step
-        </Label>
-      </div>
-    </div>
+    <Input
+      id={field.key}
+      value={typeof value === 'string' ? value : ''}
+      onChange={(e) => onChange(e.target.value)}
+      placeholder={field.type === 'string' ? field.placeholder : undefined}
+      className="bg-background border-border"
+      disabled={disabled}
+    />
   )
 }
 
 export function ProviderAuthField(props: ProviderAuthFieldProps) {
   const { field } = props
 
+  if (field.type === 'external') {
+    return <ExternalFieldCard field={field} />
+  }
+
   return (
     <div className="space-y-2">
-      {field.type !== 'boolean' && field.type !== 'external' && (
-        <Label htmlFor={field.key}>{field.message}</Label>
-      )}
+      {field.type !== 'boolean' && <Label htmlFor={field.key}>{fieldLabel(field)}</Label>}
       <FieldControl {...props} />
+      {field.description && <p className="text-xs text-muted-foreground">{field.description}</p>}
     </div>
   )
 }

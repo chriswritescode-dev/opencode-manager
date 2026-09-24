@@ -1,8 +1,9 @@
-import type {
-  SessionMessageAssistant,
-  SessionMessageInfo,
-  SessionMessageShell,
-  SessionMessageUser,
+import {
+  toolContentText,
+  type SessionMessageAssistant,
+  type SessionMessageInfo,
+  type SessionMessageShell,
+  type SessionMessageUser,
 } from '@opencode-manager/shared/opencode'
 import type { Session } from '@/api/types'
 import { saveFile } from './download'
@@ -38,10 +39,7 @@ function formatToolPart(part: AssistantTool): string {
   }
 
   if (state.status === 'completed') {
-    const output = state.content
-      .filter((entry) => entry.type === 'text')
-      .map((entry) => entry.text)
-      .join('\n')
+    const output = toolContentText(state.content, { separator: '\n' })
     if (output) {
       content += '**Output:**\n```\n'
       content += output

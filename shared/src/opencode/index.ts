@@ -3,27 +3,29 @@ import { OpenCode } from '@opencode/client'
 export type {
   AgentInfo,
   CommandInfo,
+  ConfigEntry,
   FileDiffInfo,
   FormAnswer,
+  FormExternalField,
   FormField,
   FormInfo,
+  FormValue,
+  FormWhen,
   IntegrationInfo,
+  IntegrationKeyMethod,
   IntegrationMethod,
+  IntegrationOAuthMethod,
   McpServer,
   ModelInfo,
   ModelRef,
-  OpenCodeEvent,
   PermissionRequest,
   PromptAgentAttachment,
   PromptFileAttachment,
   PromptMention,
   PromptSkillAttachment,
-  ProviderInfo,
   SessionInfo,
   SessionInboxCompaction,
   SessionInboxInfo,
-  SessionInboxMove,
-  SessionInboxSynthetic,
   SessionInboxUser,
   SessionMessageAssistant,
   SessionMessageAssistantReasoning,
@@ -38,46 +40,44 @@ export type {
   SessionStatus,
   SessionStructuredError,
   SessionTransferData,
-  SessionsResponse,
   SkillInfo,
-  ToolContent,
-  ToolFileContent,
-  ToolTextContent,
   V2Event,
-  WorktreeError,
 } from '@opencode/client'
 
-export { ClientError, isMcpServerNotFoundError, isWorktreeError } from '@opencode/client'
+export { ClientError, isIntegrationNotFoundError, isMcpServerNotFoundError, isWorktreeError } from '@opencode/client'
+
+export { assistantText, sessionIDFromEvent, toolContentText } from './content'
+
+export type { AssistantTextOptions, ToolContentTextOptions } from './content'
 
 export {
   MCP_OAUTH_CALLBACK_PATH,
-  fromV2McpServerConfig,
   mcpOAuthRedirectUri,
-  mcpServerConfigFromConfig,
   mcpServersFromConfig,
   mcpStatusByName,
-  toV2McpServerConfig,
 } from './mcp'
 
 export type {
-  McpOAuthConfig,
   McpServerConfig,
   McpStatus,
   McpStatusMap,
-  McpStatusName,
-  V2McpLocalConfig,
-  V2McpOAuthConfig,
-  V2McpRemoteConfig,
-  V2McpServerConfig,
-  V2McpTimeoutConfig,
+  McpTimeoutConfig,
 } from './mcp'
 
 export {
-  OPENCODE_MIN_VERSION,
   OPENCODE_PINNED_VERSION,
+  OPENCODE_SUPPORTED_VERSION_RANGE,
   buildOpenCodeReleaseAsset,
+  compareOpenCodeVersions,
+  describeUnsupportedOpenCodeVersion,
+  isStableOpenCodeVersion,
   isSupportedOpenCodeVersion,
+  normalizeOpenCodeVersion,
+  parseOpenCodeVersion,
+  parseOpenCodeVersionOutput,
 } from './release'
+
+export type { OpenCodeVersion } from './release'
 
 export const OPENCODE_SERVER_USERNAME = 'opencode'
 
@@ -108,8 +108,12 @@ export function createOpenCodeApi(options: OpenCodeApiOptions): OpenCodeApi {
   })
 }
 
-export function openCodeLocation(directory: string): { location: { directory: string } } {
-  return { location: { directory } }
+export interface OpenCodeLocation {
+  location: { directory: string }
+}
+
+export function openCodeLocation(directory: string | undefined): OpenCodeLocation | undefined {
+  return directory ? { location: { directory } } : undefined
 }
 
 const OPENCODE_ERROR_STATUS_BY_TAG: Record<string, number> = {

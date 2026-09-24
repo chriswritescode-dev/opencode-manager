@@ -9,17 +9,13 @@ const mocks = vi.hoisted(() => ({
   active: vi.fn(),
 }))
 
-vi.mock('@/api/opencodeApi', () => ({
-  openCodeApi: {
-    session: {
-      active: mocks.active,
-    },
-  },
+vi.mock('@/api/opencode', () => ({
+  listActiveSessions: mocks.active,
 }))
 
 vi.mock('@/api/settings', () => ({
   settingsApi: {
-    reloadOpenCodeConfig: vi.fn(),
+    restartOpenCodeServer: vi.fn(),
   },
 }))
 
@@ -409,6 +405,125 @@ describe('useSSE', () => {
       model: { providerID: 'openai', id: 'gpt-4' },
       agent: 'plan',
     })
+
+    unmount()
+  })
+
+  it('patches the cached session revert from revert lifecycle events', async () => {
+    const queryClient = new QueryClient({
+      defaultOptions: {
+        queries: { retry: false },
+      },
+    })
+    const sessionKey = ['opencode', 'session', 'session-1', '/repo']
+    queryClient.setQueryData(sessionKey, { id: 'session-1' })
+
+    const { result, unmount } = renderHook(
+      () => useSSE('/repo', 'session-1'),
+      { wrapper: createWrapper(queryClient) }
+    )
+
+    await waitFor(() => expect(MockEventSource.instances).toHaveLength(1))
+    await connect(0, 'client-1')
+    await waitFor(() => expect(result.current.isConnected).toBe(true))
+
+    act(() => {
+      MockEventSource.instances[0].emit('message', {
+        type: 'session.revert.staged',
+        directory: '/repo',
+        data: { sessionID: 'session-1', revert: { messageID: 'message-3' } },
+      })
+    })
+
+    expect(queryClient.getQueryData(sessionKey)).toMatchObject({ revert: { messageID: 'message-3' } })
+
+    act(() => {
+      MockEventSource.instances[0].emit('message', {
+        type: 'session.revert.cleared',
+        directory: '/repo',
+        data: { sessionID: 'session-1' },
+      })
+    })
+
+    expect(queryClient.getQueryData<{ revert?: unknown }>(sessionKey)?.revert).toBeUndefined()
+
+    act(() => {
+      MockEventSource.instances[0].emit('message', {
+        type: 'session.revert.staged',
+        directory: '/repo',
+        data: { sessionID: 'session-1', revert: { messageID: 'message-4' } },
+      })
+      MockEventSource.instances[0].emit('message', {
+        type: 'session.revert.committed',
+        directory: '/repo',
+        data: { sessionID: 'session-1' },
+      })
+    })
+
+    expect(queryClient.getQueryData<{ revert?: unknown }>(sessionKey)?.revert).toBeUndefined()
+
+    unmount()
+  })
+
+  it('refreshes session lists and the current session on an upstream resync without re-reading pending actions', async () => {
+    const queryClient = new QueryClient({
+      defaultOptions: {
+        queries: { retry: false },
+      },
+    })
+    const invalidateQueries = vi.spyOn(queryClient, 'invalidateQueries')
+
+    const { result, unmount } = renderHook(
+      () => useSSE('/repo', 'session-1'),
+      { wrapper: createWrapper(queryClient) }
+    )
+
+    await waitFor(() => expect(MockEventSource.instances).toHaveLength(1))
+    await connect(0, 'client-1')
+    await waitFor(() => expect(result.current.isConnected).toBe(true))
+    invalidateQueries.mockClear()
+
+    act(() => {
+      MockEventSource.instances[0].emit('resync', { timestamp: Date.now() })
+    })
+
+    expect(invalidateQueries).toHaveBeenCalledWith({
+      queryKey: ['opencode', 'session', 'session-1', '/repo'],
+    })
+    expect(invalidateQueries).toHaveBeenCalledWith(
+      expect.objectContaining({ predicate: expect.any(Function) }),
+    )
+    expect(invalidateQueries).not.toHaveBeenCalledWith({
+      queryKey: ['opencode', 'pending-actions', 'session-1', '/repo'],
+    })
+
+    unmount()
+  })
+
+  it('handles envelopes whose directory is null', async () => {
+    const queryClient = new QueryClient({
+      defaultOptions: {
+        queries: { retry: false },
+      },
+    })
+
+    const { result, unmount } = renderHook(
+      () => useSSE('/repo', 'session-1'),
+      { wrapper: createWrapper(queryClient) }
+    )
+
+    await waitFor(() => expect(MockEventSource.instances).toHaveLength(1))
+    await connect(0, 'client-1')
+    await waitFor(() => expect(result.current.isConnected).toBe(true))
+
+    act(() => {
+      MockEventSource.instances[0].emit('message', {
+        directory: null,
+        payload: { type: 'session.execution.started', data: { sessionID: 'session-9' } },
+      })
+    })
+
+    expect(useSessionStatus.getState().getStatus('session-9')).toEqual({ type: 'busy' })
 
     unmount()
   })

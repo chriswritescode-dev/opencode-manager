@@ -11,9 +11,7 @@ import { resolveOpenCodeProjectId } from '@opencode-manager/shared/project-id'
 import { resolveTarget, formatRepoIdentities, parseRepoIdPositional, restrictMatchesToRequestedRepo } from '../src/resolve-target.js'
 import { buildRemoteAttachEnv } from '../src/remote-context.js'
 import { type ManagerRepo, fetchRepos, toRemoteRepoSummaries } from '../src/manager-repos.js'
-import packageJson from '../package.json' with { type: 'json' }
-
-const VERSION = packageJson.version
+import { OCM_VERSION as VERSION, repoProxyUrl, warmRepoProxy } from '../src/repo-proxy.js'
 
 const USAGE = `ocm v${VERSION} - OpenCode Manager workspace launcher
 
@@ -117,37 +115,19 @@ async function requireToken(state: OcmState): Promise<string> {
   return token
 }
 
-async function warmUpInstance(managerUrl: string, token: string, repoId: number): Promise<void> {
-  const url = `${managerUrl}/api/opencode-proxy/repos/${repoId}/api/session?limit=1`
-  for (let attempt = 1; attempt <= 3; attempt++) {
-    try {
-      const res = await fetch(url, { headers: { Authorization: `Bearer ${token}` } })
-      if (res.ok) {
-        await res.text()
-        return
-      }
-    } catch {
-      /* retry */
-    }
-    await new Promise((resolve) => setTimeout(resolve, attempt * 500))
-  }
-}
-
 async function attach(managerUrl: string, token: string, repo: ManagerRepo, cwd: string): Promise<never> {
-  await warmUpInstance(managerUrl, token, repo.repoId)
-  const proxyUrl = `${managerUrl}/api/opencode-proxy/repos/${repo.repoId}`
-  const args = [
-    '--server',
-    proxyUrl,
-  ]
-  const child = spawn('opencode', args, {
+  try {
+    await warmRepoProxy(managerUrl, token, repo.repoId)
+  } catch (err) {
+    die(err instanceof Error ? err.message : String(err))
+  }
+  const child = spawn('opencode', ['--server', repoProxyUrl(managerUrl, repo.repoId)], {
     stdio: 'inherit',
     cwd,
     env: { ...process.env, OPENCODE_PASSWORD: token, ...buildRemoteAttachEnv(managerUrl, repo.name) },
   })
   child.on('close', (code) => process.exit(code ?? 0))
   child.on('error', (err) => die(`failed to spawn opencode: ${err.message}`))
-  // hand control to child
   return undefined as never
 }
 

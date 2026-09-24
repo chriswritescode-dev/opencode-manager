@@ -266,7 +266,7 @@ Read the merged configuration first, change only the keys the user asked for, an
 ```
 
 **Response:**
-Returns the refreshed `OpenCodeConfigFile`. Adds `restartRequired: true` when the change needs an OpenCode server restart.
+Returns the refreshed `OpenCodeConfigFile`. Semantic changes are applied with an OpenCode location reload, without a restart. Adds `restartRequired: true` only when that reload fails.
 
 **Status Codes:**
 - `200`: Configuration written

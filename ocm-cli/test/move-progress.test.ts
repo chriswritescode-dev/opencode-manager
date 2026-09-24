@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest'
-import { renderProgressBar, formatMoveProgress, pushPhaseProgress, replayProgress } from '../src/move-progress'
+import { renderProgressBar, formatMoveProgress, pushPhaseProgress, importProgress } from '../src/move-progress'
 
 describe('renderProgressBar', () => {
   it('fills proportionally and reports a percentage', () => {
@@ -41,8 +41,8 @@ describe('phase mapping', () => {
     expect(pushPhaseProgress({ kind: 'patching' })).toEqual({ label: 'applying local changes', fraction: null })
   })
 
-  it('maps replay counts to a fraction', () => {
-    expect(replayProgress(3, 12)).toEqual({ label: 'replaying session 3/12 events', fraction: 0.25 })
-    expect(replayProgress(0, 0).fraction).toBeNull()
+  it('maps import counts to a fraction', () => {
+    expect(importProgress(3, 12)).toEqual({ label: 'importing session 3/12 messages', fraction: 0.25 })
+    expect(importProgress(0, 0).fraction).toBeNull()
   })
 })

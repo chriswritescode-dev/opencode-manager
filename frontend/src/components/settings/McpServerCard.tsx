@@ -2,12 +2,14 @@ import { Badge } from '@/components/ui/badge'
 import { Switch } from '@/components/ui/switch'
 import { Button } from '@/components/ui/button'
 import { SettingsListRow, type SettingsListRowAction } from '@/components/ui/settings-list'
-import { XCircle, AlertCircle, Key, Shield, Trash2, RefreshCw } from 'lucide-react'
+import { XCircle, Key, Shield, Trash2, RefreshCw } from 'lucide-react'
 import type { McpStatus, McpServerConfig } from '@/api/mcp'
+import { formatMcpServerName } from '@/lib/mcp'
+import { McpStatusBadge } from './McpStatusBadge'
 
 interface McpServerCardProps {
   serverId: string
-  serverConfig: McpServerConfig
+  serverConfig?: McpServerConfig
   status?: McpStatus
   isConnected: boolean
   errorMessage: string | null
@@ -20,40 +22,8 @@ interface McpServerCardProps {
   onDeleteServer: (serverId: string, serverName: string) => void
 }
 
-function getStatusBadge(status: McpStatus) {
-  switch (status.status) {
-    case 'connected':
-      return <Badge variant="default" className="text-xs bg-green-600">Connected</Badge>
-    case 'pending':
-      return <Badge variant="outline" className="text-xs">Connecting</Badge>
-    case 'disabled':
-      return <Badge variant="secondary" className="text-xs">Disabled</Badge>
-    case 'failed':
-      return (
-        <Badge variant="destructive" className="text-xs flex items-center gap-1">
-          <AlertCircle className="h-3 w-3" />
-          Failed
-        </Badge>
-      )
-    case 'needs_auth':
-      return (
-        <Badge variant="outline" className="text-xs flex items-center gap-1 border-yellow-500 text-yellow-600">
-          <Key className="h-3 w-3" />
-          Auth Required
-        </Badge>
-      )
-    default:
-      return <Badge variant="outline" className="text-xs">Unknown</Badge>
-  }
-}
-
-function getServerDisplayName(serverId: string): string {
-  const name = serverId.replace(/[-_]/g, ' ')
-  return name.charAt(0).toUpperCase() + name.slice(1)
-}
-
-function getServerDescription(serverConfig: McpServerConfig): string {
-  if (serverConfig.type === 'local' && serverConfig.command) {
+function getServerDescription(serverConfig: McpServerConfig | undefined): string {
+  if (serverConfig?.type === 'local') {
     const command = serverConfig.command.join(' ')
     if (command.includes('filesystem')) return 'File system access'
     if (command.includes('git')) return 'Git repository operations'
@@ -66,7 +36,7 @@ function getServerDescription(serverConfig: McpServerConfig): string {
     if (command.includes('fetch')) return 'HTTP requests'
     if (command.includes('memory')) return 'Persistent memory'
     return `Local command: ${command}`
-  } else if (serverConfig.type === 'remote' && serverConfig.url) {
+  } else if (serverConfig?.type === 'remote') {
     return `Remote server: ${serverConfig.url}`
   }
   return 'MCP server'
@@ -90,7 +60,7 @@ export function McpServerCard({
   const isOAuthServer = !!status?.integrationID
   const connectedWithOAuth = isOAuthServer && isConnected
   const showAuthButton = needsAuth || (isOAuthServer && status?.status === 'failed')
-  const displayName = getServerDisplayName(serverId)
+  const displayName = formatMcpServerName(serverId)
 
   const actions: SettingsListRowAction[] = []
   if (showAuthButton && onAuthenticate) {
@@ -114,7 +84,7 @@ export function McpServerCard({
               <Shield className="h-3 w-3 text-muted-foreground" />
             </span>
           )}
-          {status ? getStatusBadge(status) : (
+          {status ? <McpStatusBadge status={status} /> : (
             <Badge variant="outline" className="text-xs">Loading...</Badge>
           )}
         </>

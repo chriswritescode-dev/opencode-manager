@@ -9,6 +9,7 @@ export function createStubOpenCodeClient(overrides: Partial<OpenCodeClient> = {}
         info: vi.fn(async () => ({ version: '2.0.15', pid: 1234, urls: [], paths: { tmp: '/tmp' } })),
       },
       location: {
+        reload: vi.fn(async () => undefined),
         get: vi.fn(async () => ({
           directory: '/tmp/repo',
           project: { id: 'commit-A', directory: '/tmp/repo', canonical: '/tmp/repo' },

@@ -5,6 +5,7 @@ import { logger } from '../utils/logger'
 import { handleOpenCodeError } from '../utils/route-helpers'
 import type { IntegrationInfo } from '@opencode-manager/shared/opencode'
 import type { OpenCodeClient } from '../services/opencode/client'
+import { runWhenIntegrationReady } from '../services/opencode/integration-ready'
 import {
   addRecentModel,
   ModelSelectionSchema,
@@ -91,11 +92,14 @@ export function createProvidersRoutes(openCodeClient: OpenCodeClient) {
       const body = await c.req.json()
       const validated = SetCredentialRequestSchema.parse(body)
 
-      await openCodeClient.api.integration.connect.key({
-        integrationID: c.req.param('id'),
-        key: validated.apiKey,
-        ...(validated.answer ? { answer: validated.answer } : {}),
-      })
+      const integrationID = c.req.param('id')
+      await runWhenIntegrationReady(openCodeClient.api, { integrationID }, () =>
+        openCodeClient.api.integration.connect.key({
+          integrationID,
+          key: validated.apiKey,
+          ...(validated.answer ? { answer: validated.answer } : {}),
+        }),
+      )
 
       return c.json({ success: true })
     } catch (error) {

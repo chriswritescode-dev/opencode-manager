@@ -1,12 +1,7 @@
 import { useRouteError, isRouteErrorResponse } from 'react-router-dom'
 import { AlertTriangle, RefreshCw, LogIn, WifiOff } from 'lucide-react'
 import { Button } from '@/components/ui/button'
-import { parseNetworkError, parseOpenCodeError } from '@/lib/opencode-errors'
-import type { OpenCodeError } from '@/lib/opencode-errors'
-
-function isOpenCodeError(error: unknown): error is OpenCodeError {
-  return typeof error === 'object' && error !== null && ('data' in error || 'reason' in error)
-}
+import { parseNetworkError } from '@/lib/opencode-errors'
 
 function getErrorDetails(error: unknown) {
   if (isRouteErrorResponse(error)) {
@@ -32,11 +27,6 @@ function getErrorDetails(error: unknown) {
       isRetryable: true,
       statusCode: error.status,
     }
-  }
-
-  if (isOpenCodeError(error)) {
-    const parsed = parseOpenCodeError(error)
-    if (parsed) return parsed
   }
 
   if (error instanceof Error) {

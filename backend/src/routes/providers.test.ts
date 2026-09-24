@@ -24,16 +24,6 @@ vi.mock('../services/opencode-model-state', async (importOriginal) => {
   }
 })
 
-const restartMock = vi.hoisted(() => ({
-  restartOpenCode: vi.fn(async () => ({ resumedSessionIDs: [] })),
-  reloadOpenCodeConfig: vi.fn(async () => ({ resumedSessionIDs: [] })),
-}))
-
-vi.mock('../services/opencode-restart', () => ({
-  restartOpenCode: restartMock.restartOpenCode,
-  reloadOpenCodeConfig: restartMock.reloadOpenCodeConfig,
-}))
-
 const LOCATION = { directory: '/tmp/repo' }
 
 function integrationFixture(overrides: Partial<IntegrationInfo> = {}): IntegrationInfo {
@@ -265,7 +255,7 @@ describe('providers routes', () => {
       })
     }
 
-    it('connects the key through V2 integrations without restarting the server', async () => {
+    it('connects the key through V2 integrations', async () => {
       const client = createStubOpenCodeClient()
       const connectKey = vi.mocked(client.api.integration.connect.key)
 
@@ -274,8 +264,6 @@ describe('providers routes', () => {
       expect(res.status).toBe(200)
       expect(await res.json()).toEqual({ success: true })
       expect(connectKey).toHaveBeenCalledWith({ integrationID: 'anthropic', key: 'sk-test' })
-      expect(restartMock.restartOpenCode).not.toHaveBeenCalled()
-      expect(restartMock.reloadOpenCodeConfig).not.toHaveBeenCalled()
     })
 
     it('forwards the form answer for key methods that declare required fields', async () => {
@@ -294,7 +282,6 @@ describe('providers routes', () => {
         key: 'az-test',
         answer: { resourceName: 'my-models' },
       })
-      expect(restartMock.restartOpenCode).not.toHaveBeenCalled()
     })
 
     it('returns 400 on an invalid body', async () => {
@@ -306,19 +293,40 @@ describe('providers routes', () => {
       expect(vi.mocked(client.api.integration.connect.key)).not.toHaveBeenCalled()
     })
 
-    it('returns 404 for a missing integration', async () => {
+    it('retries once after a loading integration becomes available', async () => {
       const client = createStubOpenCodeClient()
-      vi.mocked(client.api.integration.connect.key).mockRejectedValueOnce(
-        taggedError('IntegrationNotFoundError', 'Integration not found: nope'),
-      )
+      const connectKey = vi.mocked(client.api.integration.connect.key)
+      connectKey.mockRejectedValueOnce(taggedError('IntegrationNotFoundError', 'Integration not found: anthropic'))
 
-      const res = await connectRequest(createCredentialApp(client), 'nope')
+      const res = await connectRequest(createCredentialApp(client))
 
-      expect(res.status).toBe(404)
-      expect(await res.json()).toEqual({
-        error: 'Integration not found: nope',
-        code: 'IntegrationNotFoundError',
-      })
+      expect(res.status).toBe(200)
+      expect(await res.json()).toEqual({ success: true })
+      expect(connectKey).toHaveBeenCalledTimes(2)
+      expect(vi.mocked(client.api.integration.get)).toHaveBeenCalledWith({ integrationID: 'anthropic' })
+    })
+
+    it('returns 404 for a missing integration', async () => {
+      vi.useFakeTimers()
+      try {
+        const client = createStubOpenCodeClient()
+        const notFound = taggedError('IntegrationNotFoundError', 'Integration not found: nope')
+        vi.mocked(client.api.integration.connect.key).mockRejectedValue(notFound)
+        vi.mocked(client.api.integration.get).mockRejectedValue(notFound)
+
+        const pending = connectRequest(createCredentialApp(client), 'nope')
+        await vi.runAllTimersAsync()
+        const res = await pending
+
+        expect(res.status).toBe(404)
+        expect(await res.json()).toEqual({
+          error: 'Integration not found: nope',
+          code: 'IntegrationNotFoundError',
+        })
+        expect(vi.mocked(client.api.integration.connect.key)).toHaveBeenCalledTimes(1)
+      } finally {
+        vi.useRealTimers()
+      }
     })
 
     it('returns 502 when the key is rejected', async () => {
@@ -338,7 +346,7 @@ describe('providers routes', () => {
   })
 
   describe('DELETE /:id/credentials', () => {
-    it('removes every credential connection of the integration without restarting the server', async () => {
+    it('removes every credential connection of the integration', async () => {
       const client = createStubOpenCodeClient()
       vi.mocked(client.api.integration.get).mockResolvedValueOnce({
         location: LOCATION,
@@ -355,8 +363,6 @@ describe('providers routes', () => {
       expect(remove).toHaveBeenCalledTimes(2)
       expect(remove).toHaveBeenCalledWith({ credentialID: 'cred_1' })
       expect(remove).toHaveBeenCalledWith({ credentialID: 'cred_2' })
-      expect(restartMock.restartOpenCode).not.toHaveBeenCalled()
-      expect(restartMock.reloadOpenCodeConfig).not.toHaveBeenCalled()
     })
 
     it('removes nothing when the integration has no credential connection', async () => {
@@ -392,7 +398,7 @@ describe('providers routes', () => {
 const openCodeBinary = resolveOpenCode2Binary()
 
 describe.skipIf(!openCodeBinary)('providers routes against a real OpenCode 2 server', () => {
-  it('connects an anthropic key and reports the credential without restarting', async () => {
+  it('connects an anthropic key and reports the credential', async () => {
     const serve = await startOpenCodeServe()
     try {
       const client = new FetchOpenCodeClient({

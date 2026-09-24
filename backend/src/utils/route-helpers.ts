@@ -1,6 +1,6 @@
 import type { Context } from 'hono'
 import type { ContentfulStatusCode } from 'hono/utils/http-status'
-import { ClientError } from '@opencode-manager/shared/opencode'
+import { ClientError, openCodeErrorStatus } from '@opencode-manager/shared/opencode'
 import { isOAuthErrorCode, type OAuthErrorCode } from '@opencode-manager/shared/schemas'
 import { getErrorMessage } from './error-utils'
 import { logger } from './logger'
@@ -43,12 +43,6 @@ export function handleServiceError(
   return c.json({ error: getErrorMessage(error) }, 500)
 }
 
-const NOT_FOUND_OPENCODE_ERROR_TAGS = new Set<string>([
-  'IntegrationNotFoundError',
-  'IntegrationAttemptNotFoundError',
-  'IntegrationMethodNotFoundError',
-])
-
 export interface OpenCodeErrorPayload {
   error: string
   code?: OAuthErrorCode
@@ -65,7 +59,7 @@ export function mapOpenCodeError(error: unknown, fallback: string): OpenCodeErro
   const tag = (error as { _tag?: unknown })._tag
   if (typeof tag === 'string') {
     return {
-      status: NOT_FOUND_OPENCODE_ERROR_TAGS.has(tag) ? 404 : 502,
+      status: openCodeErrorStatus(error) === 404 ? 404 : 502,
       payload: {
         error: error.message || fallback,
         ...(isOAuthErrorCode(tag) ? { code: tag } : {}),

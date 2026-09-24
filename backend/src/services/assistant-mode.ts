@@ -691,9 +691,9 @@ Returns the updated settings object with the same structure as GET.
 
 ### POST /assistant/reload
 
-Reload the OpenCode server configuration, rebuilding every loaded location. Use this after editing \`.opencode/agents/assistant.md\` or \`opencode.json\` so changes take effect on the next message.
+Reload the OpenCode configuration without restarting the server, rebuilding every loaded location. OpenCode re-reads \`opencode.json\`/\`opencode.jsonc\`, agents, commands, skills, plugins, and \`AGENTS.md\`; running sessions, including this one, keep running. Use this after editing \`.opencode/agents/assistant.md\` or other workspace files so changes take effect on the next message. Returns \`400\` with \`validationIssues\` when the OpenCode configuration is invalid.
 
-**Note:** Always confirm with the user before reloading, as it re-bootstraps the workspace.
+**Note:** Always confirm with the user before reloading.
 
 **Rate Limiting:** 5 requests per minute per token. Returns \`429 Too Many Requests\` with \`Retry-After\` header when exceeded.
 
@@ -775,17 +775,21 @@ For a raw edit, send a string with the exact source name from \`sources\`. Never
 \`\`\`
 
 **Response:**
-Returns the refreshed merged configuration and source files. Adds \`restartRequired: true\` for semantic configuration changes, except changes limited to \`mcp\`, which are saved without it; to make an MCP change take effect immediately, tell the user to reconnect or reload the server from Settings → MCP. Comment-only changes do not require a restart. Saving never silently drops unsupported fields.
+Returns the refreshed merged configuration and source files. A semantic change is applied automatically: the Manager reloads OpenCode without restarting the server, so agents, permissions, providers, models, and plugins take effect on the next message and running sessions keep running. Changes limited to \`mcp\` are saved without a reload; to make an MCP change take effect immediately, tell the user to reconnect the server from Settings → MCP. Comment-only changes do nothing. Saving never silently drops unsupported fields.
+
+The response adds \`restartRequired: true\` only when the automatic reload failed, for example because the OpenCode server is unavailable.
 
 Returns \`400\` for invalid configuration and \`409\` for a stale revision.
 
 When the response contains \`restartRequired: true\`, tell the user to restart the OpenCode server from Settings. Never attempt the restart yourself: it would terminate your own session.
 
+Only changes to how the OpenCode process is launched need a user restart from Settings: server environment variables, Git credentials and identity, sandbox enforcement, rotating the manager token, the server password, and installing or upgrading the OpenCode version. You cannot make these changes through this API.
+
 ## Safety
 
 - The settings PATCH endpoint rejects any attempt to modify credentials, API keys, or other sensitive settings; guide the user to the full UI for Git, TTS, and STT credentials
 - PUT /opencode-config patches changed global settings, including \`plugin\`, \`mcp\`, and \`provider\` entries; change only the keys the user explicitly asked for and never add plugins, MCP servers, or provider credentials the user did not request
-- The settings PATCH endpoint does NOT trigger OpenCode reload or restart
+- The settings PATCH endpoint does NOT trigger an OpenCode reload or restart
 `
 }
 

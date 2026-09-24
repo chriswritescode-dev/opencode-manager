@@ -5,25 +5,26 @@ import { Badge } from '@/components/ui/badge'
 import { ExternalLink } from 'lucide-react'
 import {
   oauthApi,
+  type FormAnswer,
+  type FormValue,
+  type IntegrationMethod,
+  type IntegrationOAuthMethod,
   type OAuthAuthorizeResponse,
-  type PromptAnswer,
-  type PromptAnswerValue,
-  type ProviderAuthMethod,
 } from '@/api/oauth'
-import { buildAnswer, defaultAnswer, hasFields, hasMissingAnswers, setAnswerValue, visibleFields } from '@/lib/oauthFields'
+import { buildAnswer, hasFields, hasMissingAnswers, resolveAnswers, setAnswerValue, visibleFields } from '@/lib/formFields'
 import { mapOAuthError } from '@/lib/oauthErrors'
 import { ProviderAuthField } from './ProviderAuthField'
 
 interface OAuthAuthorizeDialogProps {
   providerId: string
   providerName: string
-  methods: ProviderAuthMethod[]
+  methods: IntegrationMethod[]
   open: boolean
   onOpenChange: (open: boolean) => void
   onSuccess: (response: OAuthAuthorizeResponse, methodID: string) => void
 }
 
-function isBrowserLocalMethod(method: ProviderAuthMethod): boolean {
+function isBrowserLocalMethod(method: IntegrationOAuthMethod): boolean {
   return method.label.toLowerCase().includes('browser')
 }
 
@@ -38,29 +39,29 @@ export function OAuthAuthorizeDialog({
   const [isLoading, setIsLoading] = useState(false)
   const [error, setError] = useState<string | null>(null)
   const [selectedMethodID, setSelectedMethodID] = useState<string | null>(null)
-  const [answers, setAnswers] = useState<Record<string, PromptAnswer>>({})
+  const [answers, setAnswers] = useState<Record<string, FormAnswer>>({})
   const [autoStarted, setAutoStarted] = useState(false)
 
   const oauthMethods = useMemo(() => {
     return methods
-      .filter((method) => method.type === 'oauth')
+      .filter((method): method is IntegrationOAuthMethod => method.type === 'oauth')
       .filter((method) => !(providerId === 'openai' && isBrowserLocalMethod(method)))
   }, [methods, providerId])
 
   const getAnswer = useCallback(
-    (method: ProviderAuthMethod) => ({ ...defaultAnswer(method), ...answers[method.id] }),
+    (method: IntegrationOAuthMethod) => resolveAnswers(method.form, answers[method.id]),
     [answers],
   )
 
-  const handleAnswerChange = useCallback((methodID: string, key: string, value: PromptAnswerValue | undefined) => {
+  const handleAnswerChange = useCallback((methodID: string, key: string, value: FormValue | undefined) => {
     setAnswers((prev) => setAnswerValue(prev, methodID, key, value))
   }, [])
 
-  const handleAuthorize = useCallback(async (method: ProviderAuthMethod) => {
+  const handleAuthorize = useCallback(async (method: IntegrationOAuthMethod) => {
     const answer = getAnswer(method)
-    const fields = visibleFields(method, answer)
+    const fields = visibleFields(method.form ?? [], answer)
 
-    if (hasMissingAnswers(method, answer)) {
+    if (hasMissingAnswers(method.form ?? [], answer)) {
       setError('Please complete all required authentication fields')
       setSelectedMethodID(method.id)
       return
@@ -74,7 +75,7 @@ export function OAuthAuthorizeDialog({
       const response = await oauthApi.authorize(
         providerId,
         method.id,
-        fields.length > 0 ? buildAnswer(method, answer) : undefined,
+        fields.length > 0 ? buildAnswer(method.form ?? [], answer) : undefined,
       )
       onSuccess(response, method.id)
     } catch (err) {
@@ -89,17 +90,17 @@ export function OAuthAuthorizeDialog({
       const method = oauthMethods[0]
       setAutoStarted(true)
       setSelectedMethodID(method.id)
-      if (!hasFields(method)) {
+      if (!hasFields(method.form)) {
         void handleAuthorize(method)
       }
     }
   }, [open, oauthMethods, autoStarted, isLoading, handleAuthorize])
 
-  const handleMethodSelection = (method: ProviderAuthMethod) => {
+  const handleMethodSelection = (method: IntegrationOAuthMethod) => {
     setError(null)
     setSelectedMethodID(method.id)
 
-    if (!hasFields(method)) {
+    if (!hasFields(method.form)) {
       void handleAuthorize(method)
     }
   }
@@ -131,8 +132,8 @@ export function OAuthAuthorizeDialog({
           {oauthMethods.map((method) => {
             const isBrowserLocal = isBrowserLocalMethod(method)
             const answer = getAnswer(method)
-            const fields = visibleFields(method, answer)
-            const canSubmit = !hasMissingAnswers(method, answer)
+            const fields = visibleFields(method.form ?? [], answer)
+            const canSubmit = !hasMissingAnswers(method.form ?? [], answer)
 
             return (
               <div key={method.id} className="space-y-3">
@@ -155,7 +156,7 @@ export function OAuthAuthorizeDialog({
                   )}
                 </div>
 
-                {selectedMethodID === method.id && hasFields(method) && (
+                {selectedMethodID === method.id && hasFields(method.form) && (
                   <div className="space-y-3 pl-4 sm:pl-10 pr-1 py-2">
                     {fields.map((field) => (
                       <ProviderAuthField

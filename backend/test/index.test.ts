@@ -10,9 +10,9 @@ vi.mock('@hono/node-server', () => ({
 }))
 
 const supervisorMock = vi.hoisted(() => ({
-  start: vi.fn().mockResolvedValue({ healthy: true, port: 5551, state: 'running', resumedSessionIDs: [] }),
+  start: vi.fn().mockResolvedValue({ healthy: true, port: 5551, state: 'running' }),
   stop: vi.fn().mockResolvedValue(undefined),
-  restart: vi.fn().mockResolvedValue({ healthy: true, resumedSessionIDs: [] }),
+  restart: vi.fn().mockResolvedValue({ healthy: true }),
   getLastStartupError: vi.fn().mockReturnValue(null),
 }))
 
@@ -102,7 +102,7 @@ const serverManagerMock = vi.hoisted(() => ({
   getVersion: vi.fn().mockReturnValue('1.2.27'),
   fetchVersion: vi.fn().mockResolvedValue('1.2.27'),
   setDatabase: vi.fn(),
-  start: vi.fn().mockResolvedValue({ healthy: true, port: 5551, state: 'running', resumedSessionIDs: [] }),
+  start: vi.fn().mockResolvedValue({ healthy: true, port: 5551, state: 'running' }),
   stop: vi.fn().mockResolvedValue(undefined),
   getEffectiveServerHost: vi.fn().mockReturnValue('127.0.0.1'),
   getLastStartupError: vi.fn().mockReturnValue(null),
@@ -120,15 +120,6 @@ vi.mock('../src/services/opencode-single-server', async (importOriginal) => {
     opencodeServerManager: serverManagerMock,
   }
 })
-
-const restartCoordinatorMock = vi.hoisted(() => ({
-  runWithResume: vi.fn(),
-  captureResumableSessions: vi.fn().mockReturnValue([]),
-}))
-
-vi.mock('../src/services/opencode-restart-coordinator', () => ({
-  OpenCodeRestartCoordinator: vi.fn().mockImplementation(() => restartCoordinatorMock),
-}))
 
 vi.mock('../src/services/git-auth', () => ({
   GitAuthService: vi.fn().mockImplementation(() => ({

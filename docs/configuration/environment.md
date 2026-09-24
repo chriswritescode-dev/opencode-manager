@@ -99,6 +99,8 @@ When configured, users can enable push notifications in Settings → Notificatio
 | `OPENCODE_HEALTH_FAILURE_THRESHOLD` | Failed health checks before recovery starts | `2` |
 | `OPENCODE_SERVER_PASSWORD` | Basic Auth password for the managed OpenCode server. OpenCode 2 always requires one: when unset, OpenCode Manager generates and persists a password (override it any time via Settings → OpenCode → Server Auth). DB-stored passwords override this env var. | auto-generated |
 
+> **Upgrade note:** `OPENCODE_PUBLIC_URL` is no longer used. MCP OAuth redirects now point at the Manager's `/api/mcp-oauth-proxy/callback`, built from the request: the scheme comes from `X-Forwarded-Proto` (first value, `http` or `https` only), then the `Origin` header, then `http`; the host comes from `X-Forwarded-Host` when present, otherwise `Host`. Behind a reverse proxy, forward `X-Forwarded-Proto` and `X-Forwarded-Host` (or preserve `Host`) and remove `OPENCODE_PUBLIC_URL`; the Manager logs a warning at startup while it is still set.
+
 ## OpenCode Import
 
 | Variable | Description | Default |

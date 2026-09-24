@@ -3,7 +3,7 @@ import type { Database } from 'bun:sqlite'
 import { readFile } from 'fs/promises'
 import { opencodeServerManager } from '../services/opencode-single-server'
 import type { OpenCodeSupervisor } from '../services/opencode-supervisor'
-import { compareVersions } from '../utils/version-utils'
+import { compareOpenCodeVersions, normalizeOpenCodeVersion, parseOpenCodeVersion } from '@opencode-manager/shared/opencode'
 import { githubFetch } from '../utils/github'
 import { logger } from '../utils/logger'
 import { SandboxRuntimeService } from '../services/sandbox/runtime'
@@ -179,8 +179,10 @@ export function createHealthRoutes(db: Database, openCodeSupervisor?: OpenCodeSu
       })
     }
 
-    const latestVersion = latestRelease.tagName.replace(/^v/, '')
-    const isUpdateAvailable = compareVersions(currentVersion, latestVersion) < 0
+    const latestVersion = normalizeOpenCodeVersion(latestRelease.tagName)
+    const isUpdateAvailable = parseOpenCodeVersion(currentVersion) !== null
+      && parseOpenCodeVersion(latestVersion) !== null
+      && compareOpenCodeVersions(currentVersion, latestVersion) < 0
 
     return c.json({
       currentVersion,

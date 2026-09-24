@@ -7,6 +7,7 @@ import { mcpApi, type McpStatus, type McpAuthStartResponse } from '@/api/mcp'
 import { useMutation, useQueryClient } from '@tanstack/react-query'
 import { invalidateSessionCaches } from '@/lib/queryInvalidation'
 import { showToast } from '@/lib/toast'
+import { formatMcpServerName } from '@/lib/mcp'
 
 interface RepoMcpDialogProps {
   open: boolean
@@ -98,11 +99,6 @@ export function RepoMcpDialog({ open, onOpenChange, directory }: RepoMcpDialogPr
     }
   }, [open, directory, fetchStatus])
 
-  const getDisplayName = (serverId: string): string => {
-    const name = serverId.replace(/[-_]/g, ' ')
-    return name.charAt(0).toUpperCase() + name.slice(1)
-  }
-
   if (!directory) return null
 
   return (
@@ -137,7 +133,7 @@ export function RepoMcpDialog({ open, onOpenChange, directory }: RepoMcpDialogPr
           onCancel={() => setRemoveAuthConfirmServer(null)}
           title="Remove Authentication"
           description="This will remove the OAuth credentials for this MCP server at this location. You will need to re-authenticate to use this server here again."
-          itemName={removeAuthConfirmServer ? getDisplayName(removeAuthConfirmServer) : ''}
+          itemName={removeAuthConfirmServer ? formatMcpServerName(removeAuthConfirmServer) : ''}
           isDeleting={removeAuthMutation.isPending}
         />
 

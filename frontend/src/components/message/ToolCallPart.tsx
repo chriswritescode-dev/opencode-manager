@@ -1,6 +1,6 @@
 import { useState, useRef, useEffect, useMemo, memo } from 'react'
 import { unwrapSandboxExecCommand } from '@opencode-manager/shared/utils'
-import type { SessionMessageAssistantTool } from '@opencode-manager/shared/opencode'
+import { toolContentText, type SessionMessageAssistantTool } from '@opencode-manager/shared/opencode'
 import { useSettings } from '@/hooks/useSettings'
 import { useUserBash } from '@/stores/userBashStore'
 import { useSessionStatusForSession } from '@/stores/sessionStatusStore'
@@ -55,12 +55,7 @@ function toolMetadata(part: SessionMessageAssistantTool): Record<string, unknown
 
 function toolOutputText(part: SessionMessageAssistantTool): string {
   if (part.state.status === 'streaming') return ''
-  const content = part.state.status === 'running' ? undefined : part.state.content
-  if (!content) return ''
-  return content
-    .filter((entry) => entry.type === 'text')
-    .map((entry) => entry.text)
-    .join('\n\n')
+  return toolContentText(part.state.status === 'running' ? undefined : part.state.content)
 }
 
 function getSubagentSessionId(part: SessionMessageAssistantTool): string | undefined {

@@ -32,7 +32,7 @@
 
 ## Requirements
 
-OpenCode Manager requires **OpenCode 2.0.0 or newer** (bundled 2.0.15). OpenCode 1.x is not supported. If you are upgrading from OpenCode 1.x, see the [v1 → v2 migration guide](https://opencode.ai/v2/docs/migrate-v1).
+OpenCode Manager requires **OpenCode 2.x at 2.0.15 or newer** (bundled 2.0.15). OpenCode 1.x and 3.x are not supported. If you are upgrading from OpenCode 1.x, see the [v1 → v2 migration guide](https://opencode.ai/v2/docs/migrate-v1). On first start, OpenCode 2 migrates V1 session history in the background, so older sessions can be missing or incomplete until it finishes; progress is reported by OpenCode at `GET /api/experimental/migration/v1`.
 
 ## Quick Start
 

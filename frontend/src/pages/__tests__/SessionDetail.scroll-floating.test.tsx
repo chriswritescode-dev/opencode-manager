@@ -14,7 +14,6 @@ const mocks = vi.hoisted(() => ({
   useForms: vi.fn(),
   useSSEHealth: vi.fn(),
   useConfig: vi.fn(),
-  useOpenCodeClient: vi.fn(),
   useSettings: vi.fn(),
   useSettingsDialog: vi.fn(),
   useMobile: vi.fn(),
@@ -48,7 +47,6 @@ vi.mock('@/hooks/useOpenCode', () => ({
   useSendPrompt: vi.fn(() => ({ mutate: vi.fn() })),
   useSendShell: vi.fn(() => ({ mutate: vi.fn() })),
   useAgents: vi.fn(() => ({ data: [] })),
-  useOpenCodeClient: mocks.useOpenCodeClient,
 }))
 
 vi.mock('@/hooks/useSessionTranscript', () => ({
@@ -149,10 +147,6 @@ vi.mock('@/api/repos', () => ({
     repoType: 'github' as const,
   })),
   initializeAssistantMode: vi.fn(() => Promise.resolve({ directory: '/test/repo' })),
-}))
-
-vi.mock('@/components/model/ModelSelectDialog', () => ({
-  ModelSelectDialog: vi.fn(() => null),
 }))
 
 vi.mock('@/components/session/SessionList', () => ({
@@ -272,7 +266,6 @@ describe('SessionDetail scroll floating button', () => {
     })
     mocks.useSSEHealth.mockReturnValue({ isHealthy: true })
     mocks.useConfig.mockReturnValue({ data: undefined, isLoading: false })
-    mocks.useOpenCodeClient.mockReturnValue({})
     mocks.useVisualViewport.mockReturnValue({ keyboardHeight: 0 })
     mocks.useKeyboardShortcuts.mockReturnValue({ leaderActive: false })
     mocks.useDialogParam.mockReturnValue([false, vi.fn()])

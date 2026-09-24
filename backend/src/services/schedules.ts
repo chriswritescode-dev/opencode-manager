@@ -7,7 +7,7 @@ import {
   type ScheduleRunTriggerSource,
   type UpdateScheduleJobRequest,
 } from '@opencode-manager/shared/types'
-import { openCodeLocation, type SessionMessageAssistant, type SessionMessageInfo } from '@opencode-manager/shared/opencode'
+import { assistantText, openCodeLocation, sessionIDFromEvent, type SessionMessageAssistant, type SessionMessageInfo } from '@opencode-manager/shared/opencode'
 import { buildSchedulePermissionRuleset } from '@opencode-manager/shared/schemas'
 import { getRepoById } from '../db/queries'
 import type { ScheduleJobWithRepo } from '../db/schedules'
@@ -83,14 +83,6 @@ function buildSessionTitle(job: ScheduleJob): string {
 }
 
 type SkillAttachment = { id: string }
-
-function extractAssistantMessageText(content: SessionMessageAssistant['content'] | undefined): string {
-  return (content ?? [])
-    .filter((part) => part.type === 'text')
-    .map((part) => part.text.replace(/<think>[\s\S]*?<\/think>\s*/g, '').trim())
-    .filter(Boolean)
-    .join('\n\n')
-}
 
 function buildRunLog(input: {
   job: ScheduleJob
@@ -169,14 +161,10 @@ function getAssistantMessageState(messages: SessionMessageInfo[]): {
   }
 
   return {
-    responseText: extractAssistantMessageText(assistantMessage.content) || null,
+    responseText: assistantText(assistantMessage.content, { stripThink: true }) || null,
     errorText: assistantMessage.error?.message ?? null,
     completed: Boolean(assistantMessage.time.completed),
   }
-}
-
-function getSessionEventId(event: SSEEvent): string | null {
-  return 'sessionID' in event.data && typeof event.data.sessionID === 'string' ? event.data.sessionID : null
 }
 
 function getSessionErrorText(event: SSEEvent): string | null {
@@ -211,7 +199,7 @@ function createSessionMonitor(directory: string, sessionId: string): SessionMoni
       return
     }
 
-    if (getSessionEventId(event) !== sessionId) {
+    if (sessionIDFromEvent(event) !== sessionId) {
       return
     }
 
@@ -516,7 +504,7 @@ export class ScheduleService {
           title: sessionTitle,
           agent: job.agentSlug ?? undefined,
           model: { providerID: model.providerID, id: model.id, variant: model.variant },
-          location: { directory: runDirectory },
+          ...openCodeLocation(runDirectory),
           permissions: buildSchedulePermissionRuleset(job.permissionConfig),
         })
       } catch (error) {

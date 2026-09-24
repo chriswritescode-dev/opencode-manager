@@ -63,7 +63,7 @@ describe('RestartServerDialog', () => {
     render(<RestartServerDialog {...baseProps} activeSessionCount={2} />)
 
     expect(screen.getByText(/2 sessions/)).toBeInTheDocument()
-    expect(screen.getByText(/continue/)).toBeInTheDocument()
+    expect(screen.getByText(/resumes them automatically/)).toBeInTheDocument()
   })
 
   it('does not render the active-session warning when activeSessionCount is omitted', () => {

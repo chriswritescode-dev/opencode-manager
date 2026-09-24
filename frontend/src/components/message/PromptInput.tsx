@@ -29,8 +29,8 @@ import { VoiceStatusOverlay, type VoiceStatusOverlayState } from './VoiceStatusO
 import { detectMentionTrigger, parsePromptToInput, getFilename, filterAgentsByQuery } from '@/lib/promptParser'
 import { randomId } from '@/lib/utils'
 import { showToast } from '@/lib/toast'
-import { formatModelName, getProviders } from '@/api/providers'
-import { useQuery } from '@tanstack/react-query'
+import { formatModelName } from '@/api/providers'
+import { useProviders } from '@/hooks/useProviders'
 
 
 import type { CommandInfo, ModelRef } from '@opencode-manager/shared/opencode'
@@ -1042,11 +1042,7 @@ if (isIOS && isSecureContext && navigator.clipboard && navigator.clipboard.read)
 
   const appliedSessionModelRef = useRef<string | undefined>(undefined)
 
-  const { data: providersData } = useQuery({
-    queryKey: ['opencode', 'providers', directory],
-    queryFn: () => getProviders(directory),
-    staleTime: 30000,
-  })
+  const { data: providersData } = useProviders(directory)
 
   const { model, modelString, setModel: setStoredModel, restoreSessionModel } = useModelSelection(directory)
   const setStoreVariant = useModelStore((state) => state.setVariant)

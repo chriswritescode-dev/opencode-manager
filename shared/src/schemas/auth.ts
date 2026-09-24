@@ -1,21 +1,17 @@
 import { z } from "zod";
 
-export const PromptAnswerValueSchema = z.union([
+export const FormAnswerValueSchema = z.union([
   z.string(),
   z.number(),
   z.boolean(),
   z.array(z.string()),
 ]);
 
-export const PromptAnswerSchema = z.record(z.string(), PromptAnswerValueSchema);
-
-export type PromptAnswerValue = z.infer<typeof PromptAnswerValueSchema>;
-
-export type PromptAnswer = z.infer<typeof PromptAnswerSchema>;
+export const FormAnswerSchema = z.record(z.string(), FormAnswerValueSchema);
 
 export const SetCredentialRequestSchema = z.object({
   apiKey: z.string().min(1),
-  answer: PromptAnswerSchema.optional(),
+  answer: FormAnswerSchema.optional(),
 });
 
 export type SetCredentialRequest = z.infer<typeof SetCredentialRequestSchema>;
@@ -32,98 +28,9 @@ export const CredentialListResponseSchema = z.object({
 
 export type CredentialListResponse = z.infer<typeof CredentialListResponseSchema>;
 
-export const PromptConditionSchema = z.object({
-  key: z.string(),
-  op: z.enum(["eq", "neq"]),
-  value: z.union([z.string(), z.number(), z.boolean()]),
-});
-
-export type PromptCondition = z.infer<typeof PromptConditionSchema>;
-
-export const PromptFieldSchema = z.discriminatedUnion("type", [
-  z.object({
-    type: z.literal("text"),
-    key: z.string(),
-    message: z.string(),
-    placeholder: z.string().optional(),
-    required: z.boolean().optional(),
-    default: z.string().optional(),
-    when: z.array(PromptConditionSchema).optional(),
-  }),
-  z.object({
-    type: z.literal("select"),
-    key: z.string(),
-    message: z.string(),
-    options: z.array(z.object({
-      label: z.string(),
-      value: z.string(),
-    })),
-    required: z.boolean().optional(),
-    default: z.string().optional(),
-    when: z.array(PromptConditionSchema).optional(),
-  }),
-  z.object({
-    type: z.literal("boolean"),
-    key: z.string(),
-    message: z.string(),
-    required: z.boolean().optional(),
-    default: z.boolean().optional(),
-    when: z.array(PromptConditionSchema).optional(),
-  }),
-  z.object({
-    type: z.literal("multiselect"),
-    key: z.string(),
-    message: z.string(),
-    options: z.array(z.object({
-      label: z.string(),
-      value: z.string(),
-    })),
-    required: z.boolean().optional(),
-    default: z.array(z.string()).optional(),
-    when: z.array(PromptConditionSchema).optional(),
-  }),
-  z.object({
-    type: z.literal("number"),
-    key: z.string(),
-    message: z.string(),
-    minimum: z.number().optional(),
-    maximum: z.number().optional(),
-    required: z.boolean().optional(),
-    default: z.number().optional(),
-    when: z.array(PromptConditionSchema).optional(),
-  }),
-  z.object({
-    type: z.literal("external"),
-    key: z.string(),
-    message: z.string(),
-    url: z.string(),
-  }),
-]);
-
-export type PromptField = z.infer<typeof PromptFieldSchema>;
-
-export const ProviderAuthMethodSchema = z.object({
-  id: z.string(),
-  type: z.enum(["oauth", "key", "command", "env"]),
-  label: z.string(),
-  fields: z.array(PromptFieldSchema).optional(),
-});
-
-export type ProviderAuthMethod = z.infer<typeof ProviderAuthMethodSchema>;
-
-export const ProviderAuthMethodsSchema = z.record(z.string(), z.array(ProviderAuthMethodSchema));
-
-export type ProviderAuthMethods = z.infer<typeof ProviderAuthMethodsSchema>;
-
-export const ProviderAuthMethodsResponseSchema = z.object({
-  providers: ProviderAuthMethodsSchema,
-});
-
-export type ProviderAuthMethodsResponse = z.infer<typeof ProviderAuthMethodsResponseSchema>;
-
 export const OAuthAuthorizeRequestSchema = z.object({
   methodID: z.string().min(1),
-  answer: PromptAnswerSchema.optional(),
+  answer: FormAnswerSchema.optional(),
 });
 
 export type OAuthAuthorizeRequest = z.infer<typeof OAuthAuthorizeRequestSchema>;

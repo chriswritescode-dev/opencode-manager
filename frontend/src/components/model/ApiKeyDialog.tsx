@@ -14,8 +14,8 @@ import { Label } from "@/components/ui/label";
 import { Loader2, Key, ExternalLink } from "lucide-react";
 import { providerCredentialsApi } from "@/api/providers";
 import type { ProviderWithModels } from "@/api/providers";
-import { oauthApi, type PromptAnswer, type PromptAnswerValue } from "@/api/oauth";
-import { buildAnswer, defaultAnswer, hasMissingAnswers, setAnswerValue, visibleFields } from "@/lib/oauthFields";
+import { oauthApi, type FormAnswer, type FormValue, type IntegrationKeyMethod } from "@/api/oauth";
+import { buildAnswer, hasMissingAnswers, methodIdentifier, resolveAnswers, setAnswerValue, visibleFields } from "@/lib/formFields";
 import { mapOAuthError } from "@/lib/oauthErrors";
 import { ProviderAuthField } from "@/components/settings/ProviderAuthField";
 
@@ -35,7 +35,7 @@ export function ApiKeyDialog({
   mode = 'add',
 }: ApiKeyDialogProps) {
   const [apiKey, setApiKey] = useState("");
-  const [answers, setAnswers] = useState<Record<string, PromptAnswer>>({});
+  const [answers, setAnswers] = useState<Record<string, FormAnswer>>({});
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
@@ -46,23 +46,23 @@ export function ApiKeyDialog({
   });
 
   const keyMethod = useMemo(
-    () => (provider ? authMethods?.[provider.id]?.find((method) => method.type === 'key') : undefined),
+    () => (provider ? authMethods?.[provider.id]?.find((method): method is IntegrationKeyMethod => method.type === 'key') : undefined),
     [authMethods, provider],
   );
 
   const answer = useMemo(
-    () => (keyMethod ? { ...defaultAnswer(keyMethod), ...answers[keyMethod.id] } : {}),
+    () => resolveAnswers(keyMethod?.form, keyMethod ? answers[methodIdentifier(keyMethod)] : undefined),
     [keyMethod, answers],
   );
 
   const fields = useMemo(
-    () => (keyMethod ? visibleFields(keyMethod, answer) : []),
+    () => (keyMethod ? visibleFields(keyMethod.form ?? [], answer) : []),
     [keyMethod, answer],
   );
 
-  const canSubmit = apiKey.trim().length > 0 && (!keyMethod || !hasMissingAnswers(keyMethod, answer));
+  const canSubmit = apiKey.trim().length > 0 && (!keyMethod || !hasMissingAnswers(keyMethod.form ?? [], answer));
 
-  const handleAnswerChange = useCallback((methodID: string, key: string, value: PromptAnswerValue | undefined) => {
+  const handleAnswerChange = useCallback((methodID: string, key: string, value: FormValue | undefined) => {
     setAnswers((prev) => setAnswerValue(prev, methodID, key, value));
   }, []);
 
@@ -73,7 +73,7 @@ export function ApiKeyDialog({
     setError(null);
 
     try {
-      const requestAnswer = keyMethod && fields.length > 0 ? buildAnswer(keyMethod, answer) : undefined;
+      const requestAnswer = keyMethod && fields.length > 0 ? buildAnswer(keyMethod.form ?? [], answer) : undefined;
       await providerCredentialsApi.set(provider.id, apiKey.trim(), requestAnswer);
       setApiKey("");
       setAnswers({});
@@ -142,7 +142,7 @@ export function ApiKeyDialog({
                   field={field}
                   value={answer[field.key]}
                   disabled={isSubmitting}
-                  onChange={(value) => handleAnswerChange(keyMethod.id, field.key, value)}
+                  onChange={(value) => handleAnswerChange(methodIdentifier(keyMethod), field.key, value)}
                 />
               ))}
             </div>

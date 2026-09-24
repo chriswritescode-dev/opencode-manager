@@ -1,14 +1,14 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest'
-import { getProviders, getProvidersWithModels, providerCredentialsApi } from './providers'
+import { getOpenCodeConfigModel, getProviders, getProvidersWithModels, providerCredentialsApi } from './providers'
 import { API_BASE_URL } from '@/config'
 import { makeOpenCodeConfigFile } from '@/test/fixtures/opencode-config'
 
-const { mockGetOpenCodeConfig, mockFetchWrapper, mockProviderList, mockModelList, mockModelDefault } = vi.hoisted(() => ({
+const { mockGetOpenCodeConfig, mockFetchWrapper, mockProviderList, mockModelList, mockConfigGet } = vi.hoisted(() => ({
   mockGetOpenCodeConfig: vi.fn(),
   mockFetchWrapper: vi.fn(),
   mockProviderList: vi.fn(),
   mockModelList: vi.fn(),
-  mockModelDefault: vi.fn(),
+  mockConfigGet: vi.fn(),
 }))
 
 vi.mock('./settings', () => ({
@@ -22,10 +22,12 @@ vi.mock('./fetchWrapper', () => ({
 }))
 
 vi.mock('./opencodeApi', () => ({
-  openCodeApi: {
-    provider: { list: mockProviderList },
-    model: { list: mockModelList, default: mockModelDefault },
-  },
+  callOpenCode: (operation: (api: unknown) => Promise<unknown>) =>
+    operation({
+      provider: { list: mockProviderList },
+      model: { list: mockModelList },
+      config: { get: mockConfigGet },
+    }),
 }))
 
 const config = makeOpenCodeConfigFile({
@@ -63,10 +65,9 @@ describe('getProviders', () => {
     vi.clearAllMocks()
     mockProviderList.mockResolvedValue({ location: { directory: '/repo' }, data: [] })
     mockModelList.mockResolvedValue({ location: { directory: '/repo' }, data: [] })
-    mockModelDefault.mockResolvedValue({ location: { directory: '/repo' }, data: null })
   })
 
-  it('maps V2 providers, models, and the default into the UI shape', async () => {
+  it('maps V2 providers and models into the UI shape', async () => {
     mockProviderList.mockResolvedValue({
       location: { directory: '/repo' },
       data: [
@@ -104,27 +105,9 @@ describe('getProviders', () => {
         },
       ],
     })
-    mockModelDefault.mockResolvedValue({
-      location: { directory: '/repo' },
-      data: {
-        id: 'claude-sonnet-4',
-        modelID: 'claude-sonnet-4-20250514',
-        providerID: 'anthropic',
-        name: 'Claude Sonnet 4',
-        capabilities: { tools: true, input: ['text'], output: ['text'] },
-        variants: [],
-        time: { released: 0 },
-        cost: [],
-        status: 'active',
-        enabled: true,
-        limit: { context: 200000, output: 64000 },
-      },
-    })
-
     const result = await getProviders('/repo')
 
     expect(result.connected).toEqual(['anthropic'])
-    expect(result.default).toEqual({ anthropic: 'claude-sonnet-4' })
     expect(result.providers).toHaveLength(1)
     expect(result.providers[0].models['claude-sonnet-4']).toMatchObject({
       key: 'claude-sonnet-4',
@@ -145,18 +128,60 @@ describe('getProviders', () => {
     await expect(getProviders('/repo')).resolves.toEqual({
       providers: [],
       connected: [],
-      default: {},
+      models: [],
     })
+  })
+})
+
+describe('getOpenCodeConfigModel', () => {
+  beforeEach(() => {
+    vi.clearAllMocks()
+  })
+
+  it('reads a string config model for the directory', async () => {
+    mockConfigGet.mockResolvedValue([{ type: 'document', info: { model: 'anthropic/claude-sonnet-4' } }])
+
+    await expect(getOpenCodeConfigModel('/repo')).resolves.toBe('anthropic/claude-sonnet-4')
+    expect(mockConfigGet).toHaveBeenCalledWith({ location: { directory: '/repo' } })
+  })
+
+  it('formats an object config model as provider/model', async () => {
+    mockConfigGet.mockResolvedValue([
+      { type: 'document', info: { model: { providerID: 'openai', model: 'gpt-4o', variant: 'high' } } },
+    ])
+
+    await expect(getOpenCodeConfigModel()).resolves.toBe('openai/gpt-4o')
+    expect(mockConfigGet).toHaveBeenCalledWith(undefined)
+  })
+
+  it('uses the last document that sets a model', async () => {
+    mockConfigGet.mockResolvedValue([
+      { type: 'document', info: { model: 'anthropic/claude-sonnet-4' } },
+      { type: 'document', info: { model: { providerID: 'openai', model: 'gpt-4o' } } },
+      { type: 'document', info: {} },
+    ])
+
+    await expect(getOpenCodeConfigModel('/repo')).resolves.toBe('openai/gpt-4o')
+  })
+
+  it('returns null when no document sets a model', async () => {
+    mockConfigGet.mockResolvedValue([{ type: 'document', info: {} }])
+
+    await expect(getOpenCodeConfigModel('/repo')).resolves.toBeNull()
+  })
+
+  it('returns null when the config read fails', async () => {
+    mockConfigGet.mockRejectedValue(new Error('upstream down'))
+
+    await expect(getOpenCodeConfigModel('/repo')).resolves.toBeNull()
   })
 })
 
 describe('getProvidersWithModels', () => {
   beforeEach(() => {
     vi.clearAllMocks()
-    mockFetchWrapper.mockResolvedValue({ all: [], connected: [], default: {} })
     mockProviderList.mockResolvedValue({ location: { directory: '/repo' }, data: [] })
     mockModelList.mockResolvedValue({ location: { directory: '/repo' }, data: [] })
-    mockModelDefault.mockResolvedValue({ location: { directory: '/repo' }, data: null })
   })
 
   it('uses the supplied config instead of re-reading it', async () => {

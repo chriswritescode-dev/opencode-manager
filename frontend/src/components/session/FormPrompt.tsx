@@ -2,7 +2,9 @@ import { useEffect, useId, useRef, useState, type ReactNode } from 'react'
 import { X, ChevronDown, ChevronUp, Check, Loader2 } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import { Textarea } from '@/components/ui/textarea'
+import { ExternalFieldCard } from '@/components/ui/external-field-card'
 import type { FormAnswer, FormField, FormInfo } from '@opencode-manager/shared/opencode'
+import { buildAnswer, hasMissingAnswers, visibleFields } from '@/lib/formFields'
 import { cn } from '@/lib/utils'
 import { showToast } from '@/lib/toast'
 
@@ -66,8 +68,8 @@ interface FormPromptProps {
 }
 
 export function FormPrompt({ form, onReply, onCancel, onMinimize }: FormPromptProps) {
-  const fields = form.fields.filter(isAnswerableField)
-  const [state, setState] = useState<FormPromptState>(() => buildInitialState(fields))
+  const candidateFields = form.fields.filter(isAnswerableField)
+  const [state, setState] = useState<FormPromptState>(() => buildInitialState(candidateFields))
   const { answer, customValues, customDrafts } = state
   const [expandedCustom, setExpandedCustom] = useState<string | null>(null)
   const [isMinimized, setIsMinimized] = useState(false)
@@ -119,26 +121,15 @@ export function FormPrompt({ form, onReply, onCancel, onMinimize }: FormPromptPr
     return value
   }
 
-  const isFieldAnswered = (field: AnswerableFormField): boolean => {
+  const effectiveAnswers: FormAnswer = {}
+  for (const field of candidateFields) {
     const value = getEffectiveAnswer(field)
-    if (field.type === 'boolean') return typeof value === 'boolean'
-    if (field.type === 'multiselect') return Array.isArray(value) && value.length > 0
-    return value !== undefined && value !== ''
+    if (value !== undefined) effectiveAnswers[field.key] = value
   }
 
-  const canSubmit = fields.every((field) => field.required !== true || isFieldAnswered(field))
-
-  const buildSubmission = (): FormAnswer => {
-    const result: FormAnswer = {}
-    for (const field of fields) {
-      const value = getEffectiveAnswer(field)
-      if (value === undefined) continue
-      if (typeof value === 'string' && value === '') continue
-      if (Array.isArray(value) && value.length === 0) continue
-      result[field.key] = value
-    }
-    return result
-  }
+  const renderFields = visibleFields(form.fields, effectiveAnswers)
+  const canSubmit = !hasMissingAnswers(form.fields, effectiveAnswers)
+  const buildSubmission = (): FormAnswer => buildAnswer(form.fields, effectiveAnswers)
 
   const handleMinimize = () => {
     setIsMinimized(true)
@@ -338,7 +329,13 @@ export function FormPrompt({ form, onReply, onCancel, onMinimize }: FormPromptPr
 
       {!isMinimized && (
         <div className="p-2 sm:p-3 max-h-[50vh] sm:max-h-[70vh] overflow-y-auto overflow-x-hidden bg-background/60 dark:bg-black/30 space-y-3">
-          {fields.map((field) => renderField(field))}
+          {renderFields.map((field) =>
+            field.type === 'external' ? (
+              <ExternalFieldCard key={field.key} field={field} />
+            ) : (
+              renderField(field)
+            ),
+          )}
         </div>
       )}
 

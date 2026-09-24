@@ -1,47 +1,10 @@
 import { FetchError } from '@opencode-manager/shared'
 
-export interface OpenCodeError {
-  name?: string
-  message?: string
-  data?: {
-    message?: string
-    status?: number
-    providerID?: string
-  }
-  reason?: string
-}
-
 export interface ParsedError {
   title: string
   message: string
   isRetryable: boolean
   statusCode?: number
-  providerID?: string
-}
-
-export function parseOpenCodeError(error: OpenCodeError | undefined | null): ParsedError | null {
-  if (!error) return null
-
-  if (error.reason) {
-    return {
-      title: 'Error',
-      message: error.message || 'An unexpected error occurred',
-      isRetryable: error.reason === 'Transport' || error.reason === 'UnexpectedStatus',
-    }
-  }
-
-  const message = error.data?.message || error.message
-  if (!message) return null
-
-  const statusCode = error.data?.status
-
-  return {
-    title: error.name || 'Error',
-    message,
-    isRetryable: statusCode === undefined || statusCode >= 500,
-    ...(statusCode === undefined ? {} : { statusCode }),
-    ...(error.data?.providerID ? { providerID: error.data.providerID } : {}),
-  }
 }
 
 export function isGatewayTimeout(error: unknown): boolean {
@@ -113,11 +76,6 @@ export function parseNetworkError(error: unknown): ParsedError {
     message: 'An unexpected error occurred',
     isRetryable: true,
   }
-}
-
-export function getErrorMessage(error: OpenCodeError | undefined | null): string {
-  const parsed = parseOpenCodeError(error)
-  return parsed ? `${parsed.title}: ${parsed.message}` : ''
 }
 
 /**

@@ -14,7 +14,6 @@ const mocks = vi.hoisted(() => ({
   useForms: vi.fn(),
   useSSEHealth: vi.fn(),
   useConfig: vi.fn(),
-  useOpenCodeClient: vi.fn(),
   useMobile: vi.fn(),
   useAutoScroll: vi.fn(),
   useDialogParam: vi.fn(),
@@ -74,7 +73,6 @@ vi.mock('@/hooks/useOpenCode', () => ({
   useSendPrompt: vi.fn(() => ({ mutate: vi.fn() })),
   useSendShell: vi.fn(() => ({ mutate: vi.fn() })),
   useAgents: vi.fn(() => ({ data: [] })),
-  useOpenCodeClient: mocks.useOpenCodeClient,
 }))
 
 vi.mock('@/hooks/useSessionTranscript', () => ({
@@ -177,7 +175,6 @@ vi.mock('@/api/repos', () => ({
   initializeAssistantMode: vi.fn(() => Promise.resolve({ directory: '/test/repo' })),
 }))
 
-vi.mock('@/components/model/ModelSelectDialog', () => ({ ModelSelectDialog: vi.fn(() => null) }))
 vi.mock('@/components/session/SessionList', () => ({ SessionList: vi.fn(() => null) }))
 vi.mock('@/components/file-browser/FileBrowserSheet', () => ({ FileBrowserSheet: vi.fn(() => null) }))
 vi.mock('@/components/repo/RepoMcpDialog', () => ({ RepoMcpDialog: vi.fn(() => null) }))
@@ -235,7 +232,6 @@ describe('SessionDetail export history', () => {
     })
     mocks.useSSEHealth.mockReturnValue({ isHealthy: true })
     mocks.useConfig.mockReturnValue({ data: undefined, isLoading: false })
-    mocks.useOpenCodeClient.mockReturnValue({})
     mocks.useMobile.mockReturnValue(false)
     mocks.useAutoScroll.mockReturnValue({ scrollToBottom: vi.fn() })
     mocks.useDialogParam.mockReturnValue([false, vi.fn()])

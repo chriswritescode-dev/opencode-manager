@@ -44,21 +44,20 @@ describe('ApiKeyDialog', () => {
     vi.mocked(oauthApi.getAuthMethods).mockResolvedValue({
       azure: [
         {
-          id: 'key',
           type: 'key',
           label: 'API key',
-          fields: [
+          form: [
             {
-              type: 'text',
               key: 'resourceName',
-              message: 'Enter Azure Resource Name',
+              type: 'string',
+              title: 'Enter Azure Resource Name',
               placeholder: 'e.g. my-models',
               required: true,
             },
           ],
         },
       ],
-      anthropic: [{ id: 'key', type: 'key', label: 'API key' }],
+      anthropic: [{ type: 'key', label: 'API key' }],
     })
   })
 
@@ -119,5 +118,53 @@ describe('ApiKeyDialog', () => {
       await screen.findByText('The provider rejected the authentication details. Please check them and try again.'),
     ).toBeInTheDocument()
     expect(onSuccess).not.toHaveBeenCalled()
+  })
+
+  it('keeps Connect enabled while a conditional required field is hidden and renders external fields', async () => {
+    const user = userEvent.setup()
+    vi.mocked(oauthApi.getAuthMethods).mockResolvedValue({
+      azure: [
+        {
+          type: 'key',
+          label: 'API key',
+          form: [
+            {
+              key: 'deploymentType',
+              type: 'string',
+              title: 'Deployment',
+              required: true,
+              default: 'github.com',
+              options: [
+                { value: 'github.com', label: 'GitHub.com' },
+                { value: 'enterprise', label: 'GitHub Enterprise' },
+              ],
+            },
+            {
+              key: 'enterpriseUrl',
+              type: 'string',
+              title: 'Enterprise URL',
+              required: true,
+              when: [{ key: 'deploymentType', op: 'eq', value: 'enterprise' }],
+            },
+            {
+              key: 'docs',
+              type: 'external',
+              url: 'https://example.com/docs',
+              title: 'Read the docs',
+            },
+          ],
+        },
+      ],
+    })
+    renderDialog(azureProvider)
+
+    await user.type(await screen.findByLabelText('API Key'), 'az-test')
+
+    expect(screen.queryByLabelText('Enterprise URL')).not.toBeInTheDocument()
+    expect(screen.getByRole('button', { name: 'Connect' })).toBeEnabled()
+
+    const link = screen.getByRole('link', { name: /Read the docs/ })
+    expect(link).toHaveAttribute('href', 'https://example.com/docs')
+    expect(link).toHaveAttribute('rel', 'noopener noreferrer')
   })
 })

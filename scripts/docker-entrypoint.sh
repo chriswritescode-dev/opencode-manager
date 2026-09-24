@@ -42,10 +42,22 @@ grant_kvm_access() {
   echo "Granted node access to $dev (group '$group_name', gid $dev_gid)"
 }
 
-MIN_OPENCODE_VERSION="2.0.0"
+OPENCODE_SUPPORTED_FLOOR="${OPENCODE_BUNDLED_VERSION:-}"
 
 version_gte() {
   printf '%s\n%s\n' "$2" "$1" | sort -V -C
+}
+
+is_supported_opencode_version() {
+  local version="$1"
+  [[ "$version" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]] || return 1
+  [ -n "$OPENCODE_SUPPORTED_FLOOR" ] || return 1
+  [ "${version%%.*}" = "${OPENCODE_SUPPORTED_FLOOR%%.*}" ] || return 1
+  version_gte "$version" "$OPENCODE_SUPPORTED_FLOOR"
+}
+
+supported_opencode_range() {
+  printf '>=%s <%s.0.0\n' "$OPENCODE_SUPPORTED_FLOOR" "$(( ${OPENCODE_SUPPORTED_FLOOR%%.*} + 1 ))"
 }
 
 read_opencode_version() {
@@ -76,10 +88,6 @@ install_opencode() {
     echo "ERROR: OPENCODE_BUNDLED_VERSION='$opencode_version' is not an X.Y.Z version; refusing to download it" >&2
     return 1
   fi
-  if ! version_gte "$opencode_version" "$MIN_OPENCODE_VERSION"; then
-    echo "ERROR: OPENCODE_BUNDLED_VERSION=$opencode_version is below the minimum supported $MIN_OPENCODE_VERSION; refusing to download it" >&2
-    return 1
-  fi
   echo "Installing OpenCode ${opencode_version}..."
   local staging
   staging="$(mktemp -d)"
@@ -102,8 +110,8 @@ reconcile_persisted_opencode() {
     rm -f "$persisted_path"
     return 0
   fi
-  if ! version_gte "$persisted_version" "$MIN_OPENCODE_VERSION"; then
-    echo "Persisted OpenCode $persisted_version is below the minimum supported $MIN_OPENCODE_VERSION; removing it so the bundled OpenCode 2 binary is used"
+  if ! is_supported_opencode_version "$persisted_version"; then
+    echo "Persisted OpenCode $persisted_version is outside the supported range $(supported_opencode_range); removing it so the bundled OpenCode $OPENCODE_SUPPORTED_FLOOR binary is used"
     rm -f "$persisted_path"
     return 0
   fi
@@ -147,10 +155,10 @@ OPENCODE_VERSION="$(read_opencode_version)"
 echo "OpenCode is installed (version: $OPENCODE_VERSION)"
 
 if [ "$OPENCODE_VERSION" != "unknown" ]; then
-  if version_gte "$OPENCODE_VERSION" "$MIN_OPENCODE_VERSION"; then
-    echo "OpenCode version meets minimum requirement (>=$MIN_OPENCODE_VERSION)"
+  if is_supported_opencode_version "$OPENCODE_VERSION"; then
+    echo "OpenCode version is within the supported range $(supported_opencode_range)"
   else
-    echo "OpenCode version $OPENCODE_VERSION is below minimum required version $MIN_OPENCODE_VERSION"
+    echo "OpenCode version $OPENCODE_VERSION is outside the supported range $(supported_opencode_range)"
     echo "Reinstalling bundled OpenCode version ${OPENCODE_BUNDLED_VERSION}..."
     install_opencode
 

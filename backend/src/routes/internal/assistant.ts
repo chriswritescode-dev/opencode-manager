@@ -1,5 +1,7 @@
 import { Hono } from 'hono'
 import type { OpenCodeClient } from '../../services/opencode/client'
+import { reloadOpenCodeConfig } from '../../services/opencode-restart'
+import { ConfigReloadError } from '../../services/opencode-single-server'
 import { logger } from '../../utils/logger'
 import { TokenBucketRateLimiter } from '../../utils/rate-limit'
 
@@ -16,9 +18,12 @@ export function createInternalAssistantRoutes(openCodeClient: OpenCodeClient) {
     }
 
     try {
-      await openCodeClient.api.location.reload()
+      await reloadOpenCodeConfig(openCodeClient)
     } catch (error) {
       logger.error('Failed to reload assistant workspace:', error)
+      if (error instanceof ConfigReloadError) {
+        return c.json({ error: error.message, validationIssues: error.validationIssues }, 400)
+      }
       return c.json({ error: 'Failed to reload assistant workspace' }, 502)
     }
 

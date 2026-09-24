@@ -23,6 +23,7 @@ import {
 import type { Repo } from "../types/repo";
 import { getReposPath } from "@opencode-manager/shared/config/env";
 import { ASSISTANT_REPO_ID } from "@opencode-manager/shared/utils";
+import { sessionIDFromEvent } from "@opencode-manager/shared/opencode";
 import { resolveProjectId } from "./project-id-resolver";
 import path from "path";
 
@@ -74,9 +75,7 @@ function resolveEventSessionId(event: SSEEvent): string | undefined {
   if (event.type === NotificationEventType.FORM_CREATED) {
     return event.data.form.sessionID;
   }
-  return "sessionID" in event.data && typeof event.data.sessionID === "string"
-    ? event.data.sessionID
-    : undefined;
+  return sessionIDFromEvent(event);
 }
 
 export function buildNotificationUrl(

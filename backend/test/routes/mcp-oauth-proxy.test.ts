@@ -93,10 +93,11 @@ function createApp(client: OpenCodeClient = createClient(), requireAuth?: Middle
 async function startFlow(
   app: ReturnType<typeof createApp>,
   body: Record<string, unknown> = {},
+  headers: Record<string, string> = {},
 ): Promise<Response> {
   return app.request('/start', {
     method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
+    headers: { 'Content-Type': 'application/json', ...headers },
     body: JSON.stringify({ serverName: SERVER_NAME, ...body }),
   })
 }
@@ -322,6 +323,59 @@ describe('mcp oauth proxy routes', () => {
         },
       })
       expect(api.mcp.list).toHaveBeenCalledTimes(1)
+    })
+
+    describe('redirect origin', () => {
+      const remoteServerApi = () => createApi({
+        config: {
+          get: vi.fn(async () => [
+            {
+              type: 'document' as const,
+              path: '/tmp/repo/opencode.json',
+              info: {
+                mcp: { servers: { [SERVER_NAME]: { type: 'remote' as const, url: 'https://mcp.example.com' } } },
+              },
+            },
+          ]),
+        },
+      })
+
+      const redirectUriFor = async (headers: Record<string, string>) => {
+        const api = remoteServerApi()
+        const res = await startFlow(createApp(createClient(api)), {}, headers)
+        expect(res.status).toBe(200)
+        const [input] = (api.mcp.add as ReturnType<typeof vi.fn>).mock.calls[0] as [
+          { config: { oauth: { redirect_uri: string } } },
+        ]
+        return input.config.oauth.redirect_uri
+      }
+
+      it('prefers the first X-Forwarded-Proto value with X-Forwarded-Host over Origin', async () => {
+        expect(
+          await redirectUriFor({
+            'X-Forwarded-Proto': 'https, http',
+            'X-Forwarded-Host': 'manager.example.com, proxy.internal',
+            Host: 'localhost:5003',
+            Origin: 'http://ignored.example.com',
+          }),
+        ).toBe(`https://manager.example.com${CALLBACK_PATH}`)
+      })
+
+      it('uses X-Forwarded-Proto with the Host header when no forwarded host is sent', async () => {
+        expect(await redirectUriFor({ 'X-Forwarded-Proto': 'https', Host: 'manager.example.com' })).toBe(
+          `https://manager.example.com${CALLBACK_PATH}`,
+        )
+      })
+
+      it('ignores an unsupported X-Forwarded-Proto and falls back to Origin', async () => {
+        expect(
+          await redirectUriFor({ 'X-Forwarded-Proto': 'javascript', Origin: 'https://origin.example.com' }),
+        ).toBe(`https://origin.example.com${CALLBACK_PATH}`)
+      })
+
+      it('falls back to http on the host without forwarded headers or Origin', async () => {
+        expect(await redirectUriFor({ Host: 'manager.local:5003' })).toBe(`http://manager.local:5003${CALLBACK_PATH}`)
+      })
     })
 
     it('ignores config entries that are not remote OAuth servers', async () => {

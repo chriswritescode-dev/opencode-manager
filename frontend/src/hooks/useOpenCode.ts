@@ -8,6 +8,7 @@ import {
   renameSession,
   activateSkill,
   interruptSession,
+  listAgents,
   runShell,
   sendPrompt,
   switchSessionAgent,
@@ -17,7 +18,6 @@ import {
   type PromptSkillInput,
 } from "../api/opencode";
 import { FetchError } from "../api/fetchWrapper";
-import { openCodeApi } from "../api/opencodeApi";
 import type { ModelRef, SessionInfo } from "@opencode-manager/shared/opencode";
 import { parseNetworkError, isGatewayTimeout } from "../lib/opencode-errors";
 import { showToast } from "../lib/toast";
@@ -27,13 +27,8 @@ import { invalidateSessionListCaches, sessionTranscriptQueryKey } from "../lib/q
 import { buildSessionKey } from "../lib/sessionKey";
 import { toggleSessionPin } from "../api/sessionPins";
 import { SESSION_PINS_QUERY_KEY } from "./useSessionPins";
-import { admitInboxItem, type SessionTranscript } from "../lib/session-projection";
+import { admitInboxItem, type TranscriptCache } from "../lib/session-projection";
 import type { SessionPin } from "@opencode-manager/shared/schemas";
-
-interface TranscriptCache {
-  transcript: SessionTranscript
-  nextCursor?: string
-}
 
 const isSameModelRef = (left: ModelRef, right: ModelRef | undefined) =>
   right !== undefined &&
@@ -371,11 +366,8 @@ export const useSendPrompt = (directory?: string) => {
         kind: 'network',
       });
     },
-    onSuccess: async (_inbox, variables) => {
-      const { sessionID } = variables;
-
-      useSendErrorStore.getState().clearError(sessionID);
-      await queryClient.invalidateQueries({ queryKey: sessionTranscriptQueryKey(sessionID) });
+    onSuccess: (_inbox, variables) => {
+      useSendErrorStore.getState().clearError(variables.sessionID);
     },
   });
 };
@@ -463,9 +455,7 @@ export const useSendShell = (directory?: string) => {
 export const useAgents = (directory?: string) => {
   return useQuery({
     queryKey: ["opencode", "agents", directory],
-    queryFn: async () => (await openCodeApi.agent.list(
-      directory ? { location: { directory } } : undefined,
-    )).data,
+    queryFn: () => listAgents(directory),
   });
 };
 

@@ -6,7 +6,7 @@ import { buildManagerToolPluginSource } from '../opencode-manager-tool-plugin'
 import { buildSandboxPluginSource } from '../opencode-sandbox-plugin'
 import { ensureSandboxShellShim } from '../sandbox/shell-shim'
 
-export const MANAGED_OPENCODE_PLUGIN_IDS = {
+const MANAGED_OPENCODE_PLUGIN_IDS = {
   ghEnv: 'ocm.gh-env',
   manager: 'ocm.manager',
   sandbox: 'ocm.sandbox',

@@ -6,14 +6,14 @@ import type { Database } from 'bun:sqlite'
 import { SettingsService } from '../services/settings'
 import { writeFileContent, readFileContent, fileExists } from '../services/file-operations'
 import { archiveBrokenOpenCodeConfigFile, deleteOpenCodeConfigFile } from '../services/opencode-config-file'
-import { restoreLastKnownGoodOpenCodeConfig } from '../services/opencode-config-apply'
+import { reloadOpenCodeOrMarkRestartPending, restoreLastKnownGoodOpenCodeConfig } from '../services/opencode-config-apply'
 import { createOpenCodeConfigRoutes } from './opencode-config'
 import type { OpenCodeClient } from '../services/opencode/client'
 import { getAgentsMdPath } from '@opencode-manager/shared/config/env'
-import { openCodeLocation } from '@opencode-manager/shared/opencode'
 import {
   UserPreferencesSchema,
   type SandboxPreferences,
+  type UserPreferences,
 } from '../types/settings'
 import type { GitCredential } from '@opencode-manager/shared'
 import {
@@ -22,7 +22,6 @@ import {
   SkillScopeSchema,
   InstallSkillFromGithubRequestSchema,
   InstallSkillUploadRequestSchema,
-  type SkillScope,
 } from '@opencode-manager/shared'
 import { logger } from '../utils/logger'
 import {
@@ -34,12 +33,11 @@ import { sseAggregator } from '../services/sse-aggregator'
 import type { OpenCodeSupervisor } from '../services/opencode-supervisor'
 import { detectSandboxCapability } from '../services/sandbox/capability'
 import { getProcessIdentityAttestationError } from '../services/opencode/process-identity'
-import { restartOpenCode, reloadOpenCodeConfig, getOpenCodeRestartCoordinator } from '../services/opencode-restart'
+import { restartOpenCode, reloadOpenCodeConfig, assertValidOpenCodeConfig, listActiveUserSessions } from '../services/opencode-restart'
 import type { GitAuthService } from '../services/git-auth'
 import { DEFAULT_AGENTS_MD } from '../constants'
 import { validateSSHPrivateKey } from '../utils/ssh-validation'
 import { encryptSecret } from '../utils/crypto'
-import { compareVersions, isValidVersion } from '../utils/version-utils'
 import { getImportedSessionDirectories, getOpenCodeImportStatus, OpenCodeImportProtectionError, syncOpenCodeImport } from '../services/opencode-import'
 import { relinkReposFromSessionDirectories } from '../services/repo'
 import {
@@ -59,18 +57,14 @@ import {
   deleteOpenCodeDirectoryFile,
 } from '../services/opencode-directory-files'
 import { parseUploadManifest, readUploadedManifestFiles, UploadValidationError } from './upload-utils'
-import { getRepoById } from '../db/queries'
 import { installOpenCodeVersion, latestOpenCodeVersion, listOpenCodeVersions } from '../services/opencode-installer'
-import { OPENCODE_MIN_VERSION, isSupportedOpenCodeVersion } from '@opencode-manager/shared/opencode'
-
-async function restartOpenCodeSafe(openCodeSupervisor: OpenCodeSupervisor | undefined, context: string): Promise<void> {
-  try {
-    await restartOpenCode(openCodeSupervisor)
-    logger.info(`Restarted OpenCode server after ${context}`)
-  } catch (restartError) {
-    logger.warn(`Failed to restart OpenCode server after ${context}:`, restartError)
-  }
-}
+import {
+  compareOpenCodeVersions,
+  describeUnsupportedOpenCodeVersion,
+  isStableOpenCodeVersion,
+  isSupportedOpenCodeVersion,
+  normalizeOpenCodeVersion,
+} from '@opencode-manager/shared/opencode'
 
 async function installVerifiedOpenCodeVersion(
   version: string,
@@ -93,42 +87,8 @@ async function installVerifiedOpenCodeVersion(
   return installedVersion
 }
 
-async function dispatchSkillReload(
-  db: Database,
-  openCodeClient: OpenCodeClient,
-  openCodeSupervisor: OpenCodeSupervisor | undefined,
-  repoId: number,
-): Promise<void> {
-  const repo = getRepoById(db, repoId)
-  if (!repo) {
-    logger.warn(`Cannot dispatch skill reload: repo ${repoId} not found`)
-    return
-  }
-
-  await restartOpenCodeSafe(openCodeSupervisor, 'skill install')
-
-  try {
-    await openCodeClient.api.skill.list(openCodeLocation(repo.fullPath))
-    logger.info(`Dispatched skill reload for project ${repo.fullPath}`)
-  } catch (dispatchError) {
-    logger.warn('Failed to dispatch skill reload:', dispatchError)
-  }
-}
-
-async function reloadAfterSkillInstall(
-  db: Database,
-  openCodeClient: OpenCodeClient,
-  openCodeSupervisor: OpenCodeSupervisor | undefined,
-  scope: SkillScope,
-  repoId: number | undefined,
-): Promise<boolean> {
-  if (scope === 'project' && repoId !== undefined) {
-    await dispatchSkillReload(db, openCodeClient, openCodeSupervisor, repoId)
-    return false
-  }
-
-  opencodeServerManager.markRestartPending()
-  return true
+async function reloadOpenCodeForChange(openCodeClient: OpenCodeClient): Promise<{ restartRequired: boolean }> {
+  return { restartRequired: await reloadOpenCodeOrMarkRestartPending(openCodeClient) === 'restart_pending' }
 }
 
 const OPENCODE_DIRECTORY_UPLOAD_ERROR_STATUS: ReadonlyArray<readonly [string, 400]> = [
@@ -193,6 +153,27 @@ function sandboxEnforcementChanged(
 ): boolean {
   if (next === undefined) return false
   return (previous?.enabled ?? false) !== next.enabled
+}
+
+function preferenceChanged(previous: unknown, next: unknown): boolean {
+  return next !== undefined && JSON.stringify(previous) !== JSON.stringify(next)
+}
+
+function listOpenCodeRestartReasons(previous: UserPreferences, next: Partial<UserPreferences>): string[] {
+  return [
+    sandboxEnforcementChanged(previous.sandbox, next.sandbox) && 'sandbox',
+    preferenceChanged(previous.gitCredentials ?? [], next.gitCredentials) && 'git credentials',
+    preferenceChanged(previous.gitIdentity ?? {}, next.gitIdentity) && 'git identity',
+    preferenceChanged(previous.serverEnvVars ?? [], next.serverEnvVars) && 'server environment variables',
+    preferenceChanged(previous.disabledDefaultServerEnvVars ?? [], next.disabledDefaultServerEnvVars) && 'default server environment variables',
+  ].filter((reason): reason is string => typeof reason === 'string')
+}
+
+function markOpenCodeRestartPendingFor(reasons: string[]): boolean {
+  if (reasons.length === 0) return false
+  logger.info(`${reasons.join(', ')} changed, marking OpenCode server restart as pending`)
+  opencodeServerManager.markRestartPending()
+  return true
 }
 
 function parseOptionalRepoId(value: string | undefined): number | undefined {
@@ -320,25 +301,9 @@ export function createSettingsRoutes(db: Database, gitAuthService: GitAuthServic
 
       const settings = settingsService.updateSettings(validated.preferences, userId)
 
-      const sandboxChanged = sandboxEnforcementChanged(currentSettings.preferences.sandbox, validated.preferences.sandbox)
-
-      const credentialsChanged = validated.preferences.gitCredentials !== undefined &&
-        JSON.stringify(currentSettings.preferences.gitCredentials || []) !== JSON.stringify(validated.preferences.gitCredentials)
-
-      const identityChanged = validated.preferences.gitIdentity !== undefined &&
-        JSON.stringify(currentSettings.preferences.gitIdentity || {}) !== JSON.stringify(validated.preferences.gitIdentity)
-
-      const restartReasons = [
-        sandboxChanged && 'sandbox',
-        credentialsChanged && 'git credentials',
-        identityChanged && 'git identity',
-      ].filter((reason): reason is string => typeof reason === 'string')
-
-      const restartRequired = restartReasons.length > 0
-      if (restartRequired) {
-        logger.info(`${restartReasons.join(', ')} changed, marking OpenCode server restart as pending`)
-        opencodeServerManager.markRestartPending()
-      }
+      const restartRequired = markOpenCodeRestartPendingFor(
+        listOpenCodeRestartReasons(currentSettings.preferences, validated.preferences),
+      )
 
       return c.json(restartRequired ? { ...settings, restartRequired: true } : settings)
     } catch (error) {
@@ -359,13 +324,11 @@ export function createSettingsRoutes(db: Database, gitAuthService: GitAuthServic
       const currentSettings = settingsService.getSettings(userId)
       const settings = settingsService.resetSettings(userId)
 
-      const sandboxChanged = sandboxEnforcementChanged(currentSettings.preferences.sandbox, settings.preferences.sandbox)
-      if (sandboxChanged) {
-        logger.info('Sandbox enforcement changed, marking OpenCode server restart as pending')
-        opencodeServerManager.markRestartPending()
-      }
+      const restartRequired = markOpenCodeRestartPendingFor(
+        listOpenCodeRestartReasons(currentSettings.preferences, settings.preferences),
+      )
 
-      return c.json(sandboxChanged ? { ...settings, restartRequired: true } : settings)
+      return c.json(restartRequired ? { ...settings, restartRequired: true } : settings)
     } catch (error) {
       logger.error('Failed to reset settings:', error)
       return c.json({ error: 'Failed to reset settings' }, 500)
@@ -379,11 +342,11 @@ export function createSettingsRoutes(db: Database, gitAuthService: GitAuthServic
     try {
       logger.info('Manual OpenCode server restart requested')
       opencodeServerManager.clearStartupError()
-      const { resumedSessionIDs } = await restartOpenCode(openCodeSupervisor)
+      const { interruptedSessionIDs } = await restartOpenCode(openCodeSupervisor)
       return c.json({
         success: true,
         message: 'OpenCode server restarted successfully',
-        resumedSessions: resumedSessionIDs,
+        interruptedSessions: interruptedSessionIDs,
       })
     } catch (error) {
       logger.error('Failed to restart OpenCode server:', error)
@@ -471,11 +434,10 @@ export function createSettingsRoutes(db: Database, gitAuthService: GitAuthServic
   app.post('/opencode-reload', async (c) => {
     try {
       logger.info('OpenCode configuration reload requested')
-      const { resumedSessionIDs } = await reloadOpenCodeConfig(openCodeSupervisor)
+      await reloadOpenCodeConfig(openCodeClient)
       return c.json({
         success: true,
-        message: 'OpenCode server restarted with the current configuration',
-        resumedSessions: resumedSessionIDs,
+        message: 'OpenCode configuration reloaded',
       })
     } catch (error) {
       logger.error('Failed to reload OpenCode config:', error)
@@ -508,9 +470,10 @@ export function createSettingsRoutes(db: Database, gitAuthService: GitAuthServic
       logger.info('Rolled back to the previous working config')
 
       try {
-        await reloadOpenCodeConfig(openCodeSupervisor)
+        await assertValidOpenCodeConfig()
+        await restartOpenCode(openCodeSupervisor)
       } catch (reloadError) {
-        logger.error('Rollback config reload failed, attempting restart:', reloadError)
+        logger.error('Rollback config restart failed, attempting restart without the config file:', reloadError)
 
         await archiveBrokenOpenCodeConfigFile()
         const deleted = await deleteOpenCodeConfigFile()
@@ -536,7 +499,7 @@ export function createSettingsRoutes(db: Database, gitAuthService: GitAuthServic
 
       return c.json({
         success: true,
-        message: 'Server reloaded with the previous working config',
+        message: 'Server restarted with the previous working config',
       })
     } catch (error) {
       logger.error('Failed to rollback OpenCode config:', error)
@@ -552,7 +515,7 @@ export function createSettingsRoutes(db: Database, gitAuthService: GitAuthServic
       const latestVersion = await latestOpenCodeVersion()
       logger.info(`Latest OpenCode version: ${latestVersion}`)
 
-      if (oldVersion && compareVersions(latestVersion, oldVersion) <= 0) {
+      if (oldVersion && isSupportedOpenCodeVersion(oldVersion) && compareOpenCodeVersions(latestVersion, oldVersion) <= 0) {
         logger.info('OpenCode is already up to date or version unchanged')
         return c.json({
           success: true,
@@ -663,12 +626,12 @@ export function createSettingsRoutes(db: Database, gitAuthService: GitAuthServic
       const body = await c.req.json()
       const { version } = z.object({ version: z.string().min(1) }).parse(body)
 
-      requestedVersion = version.replace(/^v/, '').trim()
-      if (!isValidVersion(requestedVersion)) {
+      requestedVersion = normalizeOpenCodeVersion(version)
+      if (!isStableOpenCodeVersion(requestedVersion)) {
         return c.json({ error: 'Invalid version format. Must be in MAJOR.MINOR.PATCH format (e.g., 2.0.15)' }, 400)
       }
       if (!isSupportedOpenCodeVersion(requestedVersion)) {
-        return c.json({ error: `OpenCode ${OPENCODE_MIN_VERSION} or newer is required` }, 400)
+        return c.json({ error: describeUnsupportedOpenCodeVersion(requestedVersion) }, 400)
       }
     } catch (error) {
       logger.error('Failed to parse OpenCode version install request:', error)
@@ -853,10 +816,7 @@ export function createSettingsRoutes(db: Database, gitAuthService: GitAuthServic
       await writeFileContent(agentsMdPath, content)
       logger.info(`Updated AGENTS.md at: ${agentsMdPath}`)
       
-      await restartOpenCode(openCodeSupervisor)
-      logger.info('Restarted OpenCode server after AGENTS.md update')
-      
-      return c.json({ success: true })
+      return c.json({ success: true, ...await reloadOpenCodeForChange(openCodeClient) })
     } catch (error) {
       logger.error('Failed to update AGENTS.md:', error)
       if (error instanceof z.ZodError) {
@@ -898,9 +858,8 @@ export function createSettingsRoutes(db: Database, gitAuthService: GitAuthServic
       const files = await readUploadedManifestFiles(formData, markdownManifest)
 
       const result = await installOpenCodeDirectoryFiles(kind, files)
-      opencodeServerManager.markRestartPending()
 
-      return c.json({ ...result, restartRequired: true })
+      return c.json({ ...result, ...await reloadOpenCodeForChange(openCodeClient) })
     } catch (error) {
       logger.error('Failed to install OpenCode directory files:', error)
 
@@ -960,9 +919,8 @@ export function createSettingsRoutes(db: Database, gitAuthService: GitAuthServic
         .parse(body)
 
       const result = await updateOpenCodeDirectoryFile(kind, relativePath, content)
-      opencodeServerManager.markRestartPending()
 
-      return c.json({ ...result, restartRequired: true })
+      return c.json({ ...result, ...await reloadOpenCodeForChange(openCodeClient) })
     } catch (error) {
       return handleOpenCodeDirectoryFileError(c, error, 'update')
     }
@@ -974,9 +932,8 @@ export function createSettingsRoutes(db: Database, gitAuthService: GitAuthServic
       const relativePath = z.string().min(1).parse(c.req.query('relativePath'))
 
       await deleteOpenCodeDirectoryFile(kind, relativePath)
-      opencodeServerManager.markRestartPending()
 
-      return c.json({ kind, relativePath, restartRequired: true })
+      return c.json({ kind, relativePath, ...await reloadOpenCodeForChange(openCodeClient) })
     } catch (error) {
       return handleOpenCodeDirectoryFileError(c, error, 'delete')
     }
@@ -996,9 +953,7 @@ export function createSettingsRoutes(db: Database, gitAuthService: GitAuthServic
 
         const result = await installSkillFromGithubTree(db, validated)
 
-        const restartRequired = await reloadAfterSkillInstall(db, openCodeClient, openCodeSupervisor, validated.scope, validated.repoId)
-
-        return c.json({ ...result, restartRequired })
+        return c.json({ ...result, ...await reloadOpenCodeForChange(openCodeClient) })
       }
 
       if (contentType.includes('multipart/form-data')) {
@@ -1032,9 +987,7 @@ export function createSettingsRoutes(db: Database, gitAuthService: GitAuthServic
 
         const result = await installSkillFromUploadedFiles(db, uploadRequest, files)
 
-        const restartRequired = await reloadAfterSkillInstall(db, openCodeClient, openCodeSupervisor, uploadRequest.scope, uploadRequest.repoId)
-
-        return c.json({ ...result, restartRequired })
+        return c.json({ ...result, ...await reloadOpenCodeForChange(openCodeClient) })
       }
 
       return c.json({ error: 'Unsupported content type. Use application/json or multipart/form-data' }, 400)
@@ -1097,9 +1050,7 @@ export function createSettingsRoutes(db: Database, gitAuthService: GitAuthServic
 
       const skill = await createSkill(db, validated)
 
-      opencodeServerManager.markRestartPending()
-
-      return c.json({ ...skill, restartRequired: true })
+      return c.json({ ...skill, ...await reloadOpenCodeForChange(openCodeClient) })
     } catch (error) {
       logger.error('Failed to create skill:', error)
       if (error instanceof z.ZodError) {
@@ -1126,9 +1077,7 @@ export function createSettingsRoutes(db: Database, gitAuthService: GitAuthServic
 
       const skill = await updateSkill(db, openCodeClient, name, scope, validated, repoId)
 
-      opencodeServerManager.markRestartPending()
-
-      return c.json({ ...skill, restartRequired: true })
+      return c.json({ ...skill, ...await reloadOpenCodeForChange(openCodeClient) })
     } catch (error) {
       logger.error('Failed to update skill:', error)
       if (error instanceof z.ZodError) {
@@ -1159,9 +1108,7 @@ export function createSettingsRoutes(db: Database, gitAuthService: GitAuthServic
 
       await deleteSkill(db, name, scope, repoId)
 
-      opencodeServerManager.markRestartPending()
-
-      return c.json({ success: true, restartRequired: true })
+      return c.json({ success: true, ...await reloadOpenCodeForChange(openCodeClient) })
     } catch (error) {
       logger.error('Failed to delete skill:', error)
       if (error instanceof z.ZodError) {
@@ -1369,7 +1316,7 @@ export function createSettingsRoutes(db: Database, gitAuthService: GitAuthServic
   })
 
   app.get('/opencode-active-sessions', (c) => {
-    const sessions = getOpenCodeRestartCoordinator()?.captureResumableSessions() ?? []
+    const sessions = listActiveUserSessions()
     return c.json({ count: sessions.length, sessions })
   })
 

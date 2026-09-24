@@ -1,7 +1,7 @@
 import { useEffect, useRef } from 'react'
 import { useTTS } from './useTTS'
 import { useSettings } from './useSettings'
-import type { SessionMessageInfo } from '@opencode-manager/shared/opencode'
+import { assistantText, type SessionMessageInfo } from '@opencode-manager/shared/opencode'
 
 interface UseAutoPlayLastResponseParams {
   sessionId: string
@@ -16,8 +16,7 @@ interface PlayableAssistantMessage {
 }
 
 export function getAssistantText(message: SessionMessageInfo | undefined): string {
-  if (message?.type !== 'assistant') return ''
-  return message.content.filter(part => part.type === 'text').map(part => part.text).join('\n\n')
+  return message?.type === 'assistant' ? assistantText(message.content) : ''
 }
 
 export function getLatestPlayableAssistantMessage(messages: SessionMessageInfo[] | undefined): PlayableAssistantMessage | undefined {

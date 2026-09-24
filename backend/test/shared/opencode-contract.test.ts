@@ -1,14 +1,24 @@
+import { readFileSync } from 'fs'
+import { join } from 'path'
 import { describe, expect, it } from 'vitest'
 import {
-  OPENCODE_MIN_VERSION,
   OPENCODE_PINNED_VERSION,
   OPENCODE_SERVER_USERNAME,
+  OPENCODE_SUPPORTED_VERSION_RANGE,
   buildOpenCodeBasicAuth,
   buildOpenCodeReleaseAsset,
+  compareOpenCodeVersions,
   createOpenCodeApi,
+  describeUnsupportedOpenCodeVersion,
+  isStableOpenCodeVersion,
   isSupportedOpenCodeVersion,
+  normalizeOpenCodeVersion,
   openCodeLocation,
+  parseOpenCodeVersion,
+  parseOpenCodeVersionOutput,
 } from '@opencode-manager/shared/opencode'
+
+const REPO_ROOT = join(__dirname, '..', '..', '..')
 
 interface CapturedRequest {
   url: string
@@ -35,47 +45,112 @@ function createFetchSpy() {
 
 describe('OpenCode v2 contract', () => {
   describe('version policy', () => {
-    it('pins the client version and the fixed V2 server username', () => {
-      expect(OPENCODE_MIN_VERSION).toBe('2.0.0')
+    it('pins the client version, derives the floor from it and fixes the V2 server username', () => {
       expect(OPENCODE_PINNED_VERSION).toBe('2.0.15')
+      expect(OPENCODE_SUPPORTED_VERSION_RANGE).toBe('>=2.0.15 <3.0.0')
       expect(OPENCODE_SERVER_USERNAME).toBe('opencode')
     })
 
-    it('accepts v2 releases at or above the minimum and rejects other majors', () => {
+    it('accepts releases of the pinned major at or above the pin and rejects everything else', () => {
       expect(isSupportedOpenCodeVersion('1.18.32')).toBe(false)
-      expect(isSupportedOpenCodeVersion('2.0.0')).toBe(true)
+      expect(isSupportedOpenCodeVersion('2.0.0')).toBe(false)
+      expect(isSupportedOpenCodeVersion('2.0.14')).toBe(false)
       expect(isSupportedOpenCodeVersion('2.0.15')).toBe(true)
+      expect(isSupportedOpenCodeVersion('2.0.16')).toBe(true)
       expect(isSupportedOpenCodeVersion('2.1.0')).toBe(true)
-      expect(isSupportedOpenCodeVersion('v2.0.0')).toBe(true)
+      expect(isSupportedOpenCodeVersion('v2.0.15')).toBe(true)
+      expect(isSupportedOpenCodeVersion(' v2.0.15 ')).toBe(true)
       expect(isSupportedOpenCodeVersion('3.0.0')).toBe(false)
+      expect(isSupportedOpenCodeVersion('3.1.0')).toBe(false)
       expect(isSupportedOpenCodeVersion('not-a-version')).toBe(false)
     })
 
-    it('rejects prereleases of the minimum version', () => {
-      expect(isSupportedOpenCodeVersion('2.0.0-alpha.1')).toBe(false)
-      expect(isSupportedOpenCodeVersion('2.0.0-alpha')).toBe(false)
-      expect(isSupportedOpenCodeVersion('2.0.0-rc.1+build.5')).toBe(false)
-      expect(isSupportedOpenCodeVersion('2.0.0-0')).toBe(false)
+    it('rejects prereleases of the pinned version', () => {
+      expect(isSupportedOpenCodeVersion('2.0.15-alpha.1')).toBe(false)
+      expect(isSupportedOpenCodeVersion('2.0.15-alpha')).toBe(false)
+      expect(isSupportedOpenCodeVersion('2.0.15-rc.1+build.5')).toBe(false)
+      expect(isSupportedOpenCodeVersion('2.0.15-0')).toBe(false)
     })
 
-    it('accepts prereleases of higher numeric cores', () => {
+    it('accepts prereleases of higher numeric cores within the pinned major', () => {
       expect(isSupportedOpenCodeVersion('2.1.0-beta.1')).toBe(true)
-      expect(isSupportedOpenCodeVersion('2.0.1-rc.2')).toBe(true)
+      expect(isSupportedOpenCodeVersion('2.0.16-rc.2')).toBe(true)
+      expect(isSupportedOpenCodeVersion('3.0.0-beta.1')).toBe(false)
     })
 
     it('ignores build metadata for precedence', () => {
-      expect(isSupportedOpenCodeVersion('2.0.0+build')).toBe(true)
-      expect(isSupportedOpenCodeVersion('2.0.0+2.0.0')).toBe(true)
+      expect(isSupportedOpenCodeVersion('2.0.15+build')).toBe(true)
+      expect(isSupportedOpenCodeVersion('2.0.15+2.0.0')).toBe(true)
     })
 
     it('rejects malformed and incomplete versions', () => {
       expect(isSupportedOpenCodeVersion('2garbage')).toBe(false)
       expect(isSupportedOpenCodeVersion('2')).toBe(false)
       expect(isSupportedOpenCodeVersion('2.0')).toBe(false)
-      expect(isSupportedOpenCodeVersion('2.0.0.1')).toBe(false)
-      expect(isSupportedOpenCodeVersion('02.0.0')).toBe(false)
-      expect(isSupportedOpenCodeVersion('2.0.0-alpha..1')).toBe(false)
+      expect(isSupportedOpenCodeVersion('2.0.15.1')).toBe(false)
+      expect(isSupportedOpenCodeVersion('02.0.15')).toBe(false)
+      expect(isSupportedOpenCodeVersion('2.0.15-alpha..1')).toBe(false)
       expect(isSupportedOpenCodeVersion('')).toBe(false)
+    })
+
+    it('describes the supported range for unsupported versions', () => {
+      expect(describeUnsupportedOpenCodeVersion('3.0.0')).toBe(
+        'OpenCode 3.0.0 is not supported; OpenCode Manager requires OpenCode >=2.0.15 <3.0.0',
+      )
+    })
+  })
+
+  describe('version parsing', () => {
+    it('normalizes surrounding whitespace and a leading v', () => {
+      expect(normalizeOpenCodeVersion(' v2.0.15\n')).toBe('2.0.15')
+      expect(normalizeOpenCodeVersion('2.0.15')).toBe('2.0.15')
+    })
+
+    it('parses version components and prerelease identifiers', () => {
+      expect(parseOpenCodeVersion('v2.1.3-beta.4')).toEqual({ major: 2, minor: 1, patch: 3, prerelease: ['beta', 4] })
+      expect(parseOpenCodeVersion('2.1')).toBeNull()
+    })
+
+    it('identifies stable MAJOR.MINOR.PATCH versions', () => {
+      expect(isStableOpenCodeVersion('v2.0.15')).toBe(true)
+      expect(isStableOpenCodeVersion('2.1.0-beta.1')).toBe(false)
+      expect(isStableOpenCodeVersion('2.0.15; cat /etc/passwd')).toBe(false)
+    })
+
+    it('orders versions by semver precedence', () => {
+      expect(compareOpenCodeVersions('2.0.15', '2.0.14')).toBeGreaterThan(0)
+      expect(compareOpenCodeVersions('v2.0.15', '2.0.15')).toBe(0)
+      expect(compareOpenCodeVersions('2.0.9', '2.0.10')).toBeLessThan(0)
+      expect(compareOpenCodeVersions('2.1.0-beta.1', '2.1.0')).toBeLessThan(0)
+      expect(() => compareOpenCodeVersions('invalid', '2.0.15')).toThrow(/invalid/)
+    })
+
+    it('extracts the version from opencode --version output', () => {
+      expect(parseOpenCodeVersionOutput('2.0.15\n')).toBe('2.0.15')
+      expect(parseOpenCodeVersionOutput('opencode v2.0.15\n')).toBe('2.0.15')
+      expect(parseOpenCodeVersionOutput('opencode 2.1.0-beta.1 (linux-x64)')).toBe('2.1.0-beta.1')
+      expect(parseOpenCodeVersionOutput('version 2.0.15.')).toBe('2.0.15')
+      expect(parseOpenCodeVersionOutput('warning: something\nopencode 2.0.15')).toBe('2.0.15')
+      expect(parseOpenCodeVersionOutput('no version here')).toBeNull()
+      expect(parseOpenCodeVersionOutput('')).toBeNull()
+    })
+  })
+
+  describe('pinned version sources', () => {
+    it('keeps the Dockerfile OPENCODE_VERSION default in sync with the pin', () => {
+      const dockerfile = readFileSync(join(REPO_ROOT, 'Dockerfile'), 'utf8')
+      expect(dockerfile).toMatch(new RegExp(`^ARG OPENCODE_VERSION=${OPENCODE_PINNED_VERSION.replace(/\./g, '\\.')}$`, 'm'))
+      expect(dockerfile).toMatch(/^ENV OPENCODE_BUNDLED_VERSION=\$\{OPENCODE_VERSION\}$/m)
+    })
+
+    it('makes the shell scripts derive the pin from the Dockerfile or the bundled version instead of hardcoding it', () => {
+      const entrypoint = readFileSync(join(REPO_ROOT, 'scripts', 'docker-entrypoint.sh'), 'utf8')
+      const setupDev = readFileSync(join(REPO_ROOT, 'scripts', 'setup-dev.sh'), 'utf8')
+      expect(entrypoint).toContain('OPENCODE_SUPPORTED_FLOOR="${OPENCODE_BUNDLED_VERSION:-}"')
+      expect(setupDev).toContain("sed -n 's/^ARG OPENCODE_VERSION=//p' \"$REPO_ROOT/Dockerfile\"")
+      for (const script of [entrypoint, setupDev]) {
+        expect(script).not.toMatch(/(?<![\d.])\d+\.\d+\.\d+(?![\d.])/)
+      }
     })
   })
 

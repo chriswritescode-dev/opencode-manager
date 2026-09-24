@@ -1,5 +1,6 @@
 import { memo, useCallback, useMemo, useState } from 'react'
 import { Pencil, Loader2, Volume2, VolumeX } from 'lucide-react'
+import { assistantText } from '@opencode-manager/shared/opencode'
 import type {
   PromptAgentAttachment,
   PromptFileAttachment,
@@ -15,6 +16,7 @@ import type {
 import { MessagePart } from './MessagePart'
 import { MessageError } from './MessageError'
 import { RetryPart } from './RetryPart'
+import { StepFileChanges } from './StepFileChanges'
 import { UserMessageActionButtons } from './UserMessageActionButtons'
 import { EditableUserMessage, ClickableUserMessage } from './EditableUserMessage'
 import { useSettings } from '@/hooks/useSettings'
@@ -26,11 +28,7 @@ function getMessageText(message: SessionMessageInfo): string {
     case 'user':
       return message.text
     case 'assistant':
-      return message.content
-        .filter((part) => part.type === 'text')
-        .map((part) => part.text)
-        .join('\n\n')
-        .trim()
+      return assistantText(message.content).trim()
     case 'synthetic':
     case 'system':
     case 'skill':
@@ -57,6 +55,7 @@ function hasRenderableContent(
     case 'user':
       return message.text.trim().length > 0 || (message.files?.length ?? 0) > 0
     case 'assistant':
+      if (!simpleChatMode && (message.snapshot?.files?.length ?? 0) > 0) return true
       return message.content.some((part) => {
         if (part.type === 'text') return part.text.trim().length > 0
         if (part.type === 'reasoning') return !simpleChatMode && showReasoning && part.text.trim().length > 0
@@ -439,6 +438,13 @@ const MessageRow = memo(function MessageRow({
                 />
               </div>
             ))}
+            {!simpleChatMode && message.snapshot?.files && (
+              <StepFileChanges
+                files={message.snapshot.files}
+                snapshot={message.snapshot.end}
+                onFileClick={onFileClick}
+              />
+            )}
             {message.retry && <RetryPart retry={message.retry} />}
             {message.error && <MessageError error={message.error} />}
           </div>

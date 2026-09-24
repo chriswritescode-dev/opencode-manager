@@ -16,6 +16,6 @@ export type SSESubscribeRequest = z.infer<typeof SSESubscribeSchema>;
 export type SSEVisibilityRequest = z.infer<typeof SSEVisibilitySchema>;
 
 export interface SSEEventEnvelope {
-  directory?: string;
+  directory?: string | null;
   payload: V2Event;
 }

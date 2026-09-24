@@ -13,18 +13,27 @@ import {
   withOpenCodeConfigLock,
 } from './opencode-config-file'
 import { opencodeServerManager } from './opencode-single-server'
+import { reloadOpenCodeConfig } from './opencode-restart'
+import type { OpenCodeClient } from './opencode/client'
 import type { SettingsService } from './settings'
+import { logger } from '../utils/logger'
+
+export type OpenCodeReloadOutcome = 'reloaded' | 'restart_pending'
 
 export type ApplyOpenCodeConfigResult =
-  | { status: 'restart_pending'; config: OpenCodeConfigFile }
   | { status: 'applied'; config: OpenCodeConfigFile }
+  | { status: 'reloaded'; config: OpenCodeConfigFile }
+  | { status: 'restart_pending'; config: OpenCodeConfigFile }
 
 export interface ApplyOpenCodeConfigInput {
   content: Record<string, unknown> | string
   source?: OpenCodeConfigSourceName
   expectedRevision?: string
   settingsService: SettingsService
+  openCodeClient: OpenCodeClient
 }
+
+const MCP_CONFIG_KEY = 'mcp'
 
 export async function captureLastKnownGoodOpenCodeConfig(settingsService: SettingsService): Promise<OpenCodeConfigFile | null> {
   const previous = await readOpenCodeConfigFile()
@@ -66,26 +75,33 @@ export function toOpenCodeConfigApplyResponse(
   }
 }
 
-function requiresOpenCodeRestart(previous: OpenCodeConfigFile | null, next: OpenCodeConfigFile): boolean {
+export async function reloadOpenCodeOrMarkRestartPending(openCodeClient: OpenCodeClient): Promise<OpenCodeReloadOutcome> {
+  try {
+    await reloadOpenCodeConfig(openCodeClient)
+    return 'reloaded'
+  } catch (error) {
+    logger.warn('OpenCode configuration reload failed, marking a server restart as pending:', error)
+    opencodeServerManager.markRestartPending()
+    return 'restart_pending'
+  }
+}
+
+function listChangedTopLevelKeys(previous: Record<string, unknown>, next: Record<string, unknown>): string[] {
+  const keys = new Set([...Object.keys(previous), ...Object.keys(next)])
+  return [...keys].filter((key) => !isDeepStrictEqual(previous[key], next[key]))
+}
+
+function requiresOpenCodeReload(previous: OpenCodeConfigFile | null, next: OpenCodeConfigFile): boolean {
   if (previous?.isValid !== next.isValid) {
     return true
   }
-
-  const previousContent = previous?.content ?? {}
-  const keys = new Set([...Object.keys(previousContent), ...Object.keys(next.content)])
-  for (const key of keys) {
-    if (!isDeepStrictEqual(previousContent[key], next.content[key]) && key !== 'mcp') {
-      return true
-    }
-  }
-
-  return false
+  return listChangedTopLevelKeys(previous?.content ?? {}, next.content).some((key) => key !== MCP_CONFIG_KEY)
 }
 
 export async function applyOpenCodeConfigUpdate(
   input: ApplyOpenCodeConfigInput,
 ): Promise<ApplyOpenCodeConfigResult> {
-  return withOpenCodeConfigLock(async () => {
+  const { reloadRequired, config } = await withOpenCodeConfigLock(async () => {
     const { content, source, expectedRevision, settingsService } = input
 
     const snapshot = await readOpenCodeConfigSnapshot()
@@ -103,11 +119,12 @@ export async function applyOpenCodeConfigUpdate(
       }
     }
 
-    if (requiresOpenCodeRestart(previous, next)) {
-      opencodeServerManager.markRestartPending()
-      return { status: 'restart_pending', config: next }
-    }
-
-    return { status: 'applied', config: next }
+    return { reloadRequired: requiresOpenCodeReload(previous, next), config: next }
   })
+
+  if (!reloadRequired) {
+    return { status: 'applied', config }
+  }
+
+  return { status: await reloadOpenCodeOrMarkRestartPending(input.openCodeClient), config }
 }

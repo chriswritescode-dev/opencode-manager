@@ -16,7 +16,12 @@ import {
 } from '../utils/ssh-key-manager'
 import { decryptSecret } from '../utils/crypto'
 import { BLOCKED_SERVER_ENV_KEYS, DEFAULT_SERVER_ENV_VARS } from '@opencode-manager/shared'
-import { OPENCODE_MIN_VERSION, isSupportedOpenCodeVersion } from '@opencode-manager/shared/opencode'
+import {
+  OPENCODE_PINNED_VERSION,
+  describeUnsupportedOpenCodeVersion,
+  isSupportedOpenCodeVersion,
+  parseOpenCodeVersionOutput,
+} from '@opencode-manager/shared/opencode'
 import { resolveOpenCodeBinaryPath } from './opencode-installer'
 import { SettingsService } from './settings'
 import {
@@ -39,11 +44,13 @@ import { SandboxRuntimeService } from './sandbox/runtime'
 import { CredentialProvider } from './credential-provider'
 import { mkdirSafe, writeFileAtomic } from '../utils/fs-safe'
 import { createProcessLogForwarder } from '../utils/log-buffer'
+import { OPENCODE_SERVICE_SERVE_ARGS, prepareOpenCodeServiceLaunch } from './opencode-service-mode'
 
 
 const MAX_STDERR_SIZE = 10240
 const STARTUP_HEALTH_TIMEOUT_MS = 30000
-const PROCESS_EXIT_GRACE_MS = 2000
+const PROCESS_SIGTERM_GRACE_MS = 10000
+const PROCESS_SIGKILL_CONFIRM_MS = 2000
 const PROCESS_EXIT_POLL_MS = 50
 const CHILD_STATE_MARKER_REFRESH_MS = 60000
 
@@ -350,9 +357,9 @@ class OpenCodeServerManager {
           )
         }
         try {
-          await this.terminateAttestedPredecessor(PROCESS_EXIT_GRACE_MS)
+          await this.terminateAttestedPredecessor()
           if (existingProcesses.length > 0) {
-            await this.terminatePortOwners(existingProcesses, PROCESS_EXIT_GRACE_MS)
+            await this.terminatePortOwners(existingProcesses)
           }
         } catch (cleanupError) {
           this.failNonRecoverable(
@@ -442,10 +449,10 @@ class OpenCodeServerManager {
     }
     let replacingExistingServer = false
     if (sandboxEnforced) {
-      await this.terminateAttestedPredecessor(PROCESS_EXIT_GRACE_MS)
+      await this.terminateAttestedPredecessor()
       if (existingProcesses.length > 0) {
         logger.warn('Sandbox enforcement enabled: killing existing OpenCode server to guarantee a sandboxed startup')
-        await this.terminatePortOwners(existingProcesses, PROCESS_EXIT_GRACE_MS)
+        await this.terminatePortOwners(existingProcesses)
         replacingExistingServer = true
       }
     } else if (existingProcesses.length > 0) {
@@ -454,7 +461,7 @@ class OpenCodeServerManager {
       if (healthy) {
         if (isDevelopment) {
           logger.warn('Development mode: Killing existing server for hot reload')
-          await this.terminatePortOwners(existingProcesses, PROCESS_EXIT_GRACE_MS)
+          await this.terminatePortOwners(existingProcesses)
           replacingExistingServer = true
         } else {
           const childState = await readChildStateMarker()
@@ -470,17 +477,17 @@ class OpenCodeServerManager {
             return
           }
           logger.warn(`Existing OpenCode server on port ${openCodeServerPort} is not attested as a matching unenforced child; terminating it to guarantee consistent sandbox enforcement`)
-          await this.terminatePortOwners(existingProcesses, PROCESS_EXIT_GRACE_MS)
+          await this.terminatePortOwners(existingProcesses)
           replacingExistingServer = true
         }
       } else {
         logger.warn('Killing unhealthy OpenCode server')
-        await this.terminatePortOwners(existingProcesses, PROCESS_EXIT_GRACE_MS)
+        await this.terminatePortOwners(existingProcesses)
         replacingExistingServer = true
       }
     }
 
-    await this.reconcileExitedChildMarker(PROCESS_EXIT_GRACE_MS)
+    await this.reconcileExitedChildMarker()
 
     const openCodeServerDirectory = getOpenCodeServerDirectory()
     const openCodeConfigPath = getOpenCodeConfigPath()
@@ -538,7 +545,7 @@ class OpenCodeServerManager {
     await this.fetchVersion()
     if (this.version && !this.isVersionSupported()) {
       this.failNonRecoverable(
-        `OpenCode ${this.version} is not supported; OpenCode Manager requires OpenCode ${OPENCODE_MIN_VERSION} or newer. Install a 2.x version from Settings → OpenCode.`,
+        `${describeUnsupportedOpenCodeVersion(this.version)}. Install a supported version from Settings → OpenCode.`,
       )
     }
     await this.resetAgentTmpDirectory()
@@ -566,6 +573,7 @@ class OpenCodeServerManager {
     const microsandboxEnv = resolveManagerMicrosandboxEnv()
 
     const cleanEnv = { ...process.env }
+    delete cleanEnv.OPENCODE_PASSWORD
     delete cleanEnv.OPENCODE_SERVER_PASSWORD
     delete cleanEnv.OPENCODE_RUN_ID
     delete cleanEnv.OPENCODE_PROCESS_ROLE
@@ -574,33 +582,43 @@ class OpenCodeServerManager {
     delete cleanEnv.OPENCODE_CONFIG
     delete userEnvVars.OPENCODE_CONFIG
 
+    const serverEnv = {
+      ...cleanEnv,
+      ...userEnvVars,
+      ...microsandboxEnv,
+      ...gitEnv,
+      ...gitIdentityEnv,
+      ...(this.db
+        ? {
+          OCM_INTERNAL_API_URL: `http://localhost:${ENV.SERVER.PORT}/api/internal`,
+          OCM_INTERNAL_TOKEN: getOrCreateInternalToken(this.db),
+        }
+        : {}),
+      OCM_SANDBOX_ENFORCED: sandboxEnforced ? 'true' : 'false',
+      GIT_SSH_COMMAND: gitSshCommand,
+      XDG_DATA_HOME: getOpenCodeStateHome(),
+      XDG_STATE_HOME: getOpenCodeStateHome(),
+      XDG_CONFIG_HOME: getOpenCodeConfigHome(),
+      TMPDIR: getOpenCodeTmpHome(),
+    }
+
+    try {
+      await prepareOpenCodeServiceLaunch(serverEnv, password)
+    } catch (error) {
+      const message = `Failed to prepare the OpenCode service settings: ${error instanceof Error ? error.message : String(error)}`
+      this.lastStartupError = message
+      logger.error(message)
+      throw new Error(message)
+    }
+
     this.serverProcess = spawn(
       openCodeExecutable,
-      ['serve', '--port', openCodeServerPort.toString(), '--hostname', openCodeServerHost],
+      [...OPENCODE_SERVICE_SERVE_ARGS, '--port', openCodeServerPort.toString(), '--hostname', openCodeServerHost],
       {
         cwd: openCodeServerDirectory,
         detached: !isDevelopment,
         stdio: isDevelopment ? 'inherit' : ['ignore', 'pipe', 'pipe'],
-        env: {
-          ...cleanEnv,
-          ...userEnvVars,
-          ...microsandboxEnv,
-          ...gitEnv,
-          ...gitIdentityEnv,
-          ...(this.db
-            ? {
-              OCM_INTERNAL_API_URL: `http://localhost:${ENV.SERVER.PORT}/api/internal`,
-              OCM_INTERNAL_TOKEN: getOrCreateInternalToken(this.db),
-            }
-            : {}),
-          OCM_SANDBOX_ENFORCED: sandboxEnforced ? 'true' : 'false',
-          GIT_SSH_COMMAND: gitSshCommand,
-          XDG_DATA_HOME: getOpenCodeStateHome(),
-          XDG_STATE_HOME: getOpenCodeStateHome(),
-          XDG_CONFIG_HOME: getOpenCodeConfigHome(),
-          TMPDIR: getOpenCodeTmpHome(),
-          OPENCODE_SERVER_PASSWORD: password,
-        }
+        env: serverEnv,
       }
     )
 
@@ -731,7 +749,7 @@ class OpenCodeServerManager {
 
     try {
       if (!this.serverPid) {
-        await this.reconcileExitedChildMarker(PROCESS_EXIT_GRACE_MS)
+        await this.reconcileExitedChildMarker()
         return
       }
 
@@ -768,7 +786,6 @@ class OpenCodeServerManager {
         await this.terminateAndConfirm(
           pid,
           groupTarget,
-          PROCESS_EXIT_GRACE_MS,
           'OpenCode server',
           'retained live processes after SIGTERM and SIGKILL; refusing to complete the stop while host-executed processes may survive',
         )
@@ -828,7 +845,7 @@ class OpenCodeServerManager {
   }
 
   getMinVersion(): string {
-    return OPENCODE_MIN_VERSION
+    return OPENCODE_PINNED_VERSION
   }
 
   isVersionSupported(): boolean {
@@ -896,9 +913,9 @@ class OpenCodeServerManager {
     try {
       const executable = resolveOpenCodeExecutable() ?? 'opencode'
       const result = spawnSync(executable, ['--version'], { encoding: 'utf8' })
-      const match = `${result.stdout ?? ''}${result.stderr ?? ''}`.match(/(\d+\.\d+\.\d+)/)
-      if (match && match[1]) {
-        this.version = match[1]
+      const version = parseOpenCodeVersionOutput(`${result.stdout ?? ''}${result.stderr ?? ''}`)
+      if (version) {
+        this.version = version
         return this.version
       }
     } catch (error) {
@@ -946,15 +963,14 @@ class OpenCodeServerManager {
   private async terminateAndConfirm(
     pid: number,
     groupTarget: number | null,
-    graceMs: number,
     context: string,
     failurePhrase: string,
   ): Promise<void> {
     this.signalProcessOrGroup(pid, groupTarget, 'SIGTERM')
-    const exited = await this.waitForProcessOrGroupExit(pid, groupTarget, graceMs)
+    const exited = await this.waitForProcessOrGroupExit(pid, groupTarget, PROCESS_SIGTERM_GRACE_MS)
     if (exited) return
     this.signalProcessOrGroup(pid, groupTarget, 'SIGKILL')
-    const killed = await this.waitForProcessOrGroupExit(pid, groupTarget, graceMs)
+    const killed = await this.waitForProcessOrGroupExit(pid, groupTarget, PROCESS_SIGKILL_CONFIRM_MS)
     if (!killed) {
       const message = `${context} (PID ${pid}${groupTarget !== null ? `, process group ${groupTarget}` : ''}) ${failurePhrase}`
       this.lastStartupError = message
@@ -963,7 +979,7 @@ class OpenCodeServerManager {
     }
   }
 
-  private async terminatePortOwners(processes: Array<{pid: number}>, graceMs: number): Promise<void> {
+  private async terminatePortOwners(processes: Array<{pid: number}>): Promise<void> {
     const targets = processes.map((proc) => {
       const pgid = readProcessGroupId(proc.pid)
       return { pid: proc.pid, groupTarget: pgid !== null && pgid === proc.pid ? proc.pid : null }
@@ -973,7 +989,7 @@ class OpenCodeServerManager {
     }
     const survivors: number[] = []
     for (const target of targets) {
-      const exited = await this.waitForProcessOrGroupExit(target.pid, target.groupTarget, graceMs)
+      const exited = await this.waitForProcessOrGroupExit(target.pid, target.groupTarget, PROCESS_SIGKILL_CONFIRM_MS)
       if (!exited) {
         survivors.push(target.pid)
       }
@@ -1015,7 +1031,7 @@ class OpenCodeServerManager {
     return { pid, groupTarget, pidAttested, groupAttested }
   }
 
-  private async terminateAttestedPredecessor(graceMs: number): Promise<void> {
+  private async terminateAttestedPredecessor(): Promise<void> {
     const marker = await readChildStateMarker()
     if (marker === null) return
     const target = this.resolveAttestedProcessTarget(marker)
@@ -1035,13 +1051,12 @@ class OpenCodeServerManager {
     await this.terminateAndConfirm(
       target.pid,
       target.groupTarget,
-      graceMs,
       'Previous OpenCode server process',
       'retained live processes after SIGTERM and SIGKILL; refusing to start an enforced server while host-executed processes may survive',
     )
   }
 
-  private async reconcileExitedChildMarker(graceMs: number): Promise<void> {
+  private async reconcileExitedChildMarker(): Promise<void> {
     this.isHealthy = false
     this.stopChildStateMarkerRefresh()
     const marker = await readChildStateMarker()
@@ -1054,7 +1069,6 @@ class OpenCodeServerManager {
       await this.terminateAndConfirm(
         target.pid,
         target.groupTarget,
-        graceMs,
         'OpenCode server',
         'retained live processes after SIGTERM and SIGKILL; refusing to complete the stop while host-executed processes may survive',
       )
@@ -1076,7 +1090,6 @@ class OpenCodeServerManager {
         await this.terminateAndConfirm(
           target.pid,
           target.groupTarget,
-          graceMs,
           'Previous OpenCode server process group',
           'retained live processes after SIGTERM and SIGKILL; refusing to replace the child state marker while host-executed processes may survive',
         )

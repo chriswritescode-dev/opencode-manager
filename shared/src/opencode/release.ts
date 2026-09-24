@@ -1,4 +1,3 @@
-export const OPENCODE_MIN_VERSION = '2.0.0'
 export const OPENCODE_PINNED_VERSION = '2.0.15'
 
 const OPENCODE_RELEASE_BASE_URL = 'https://opencode.ai/files/bin'
@@ -18,7 +17,7 @@ const OPENCODE_PLATFORM_ARCHIVES: Partial<Record<NodeJS.Platform, 'tar.gz' | 'zi
 
 type OpenCodePrereleaseIdentifier = number | string
 
-interface OpenCodeVersion {
+export interface OpenCodeVersion {
   major: number
   minor: number
   patch: number
@@ -26,10 +25,18 @@ interface OpenCodeVersion {
 }
 
 const OPENCODE_VERSION_PATTERN =
-  /^v?(0|[1-9]\d*)\.(0|[1-9]\d*)\.(0|[1-9]\d*)(?:-((?:0|[1-9]\d*|\d*[a-zA-Z-][0-9a-zA-Z-]*)(?:\.(?:0|[1-9]\d*|\d*[a-zA-Z-][0-9a-zA-Z-]*))*))?(?:\+([0-9a-zA-Z-]+(?:\.[0-9a-zA-Z-]+)*))?$/
+  /^(0|[1-9]\d*)\.(0|[1-9]\d*)\.(0|[1-9]\d*)(?:-((?:0|[1-9]\d*|\d*[a-zA-Z-][0-9a-zA-Z-]*)(?:\.(?:0|[1-9]\d*|\d*[a-zA-Z-][0-9a-zA-Z-]*))*))?(?:\+([0-9a-zA-Z-]+(?:\.[0-9a-zA-Z-]+)*))?$/
 
-function parseOpenCodeVersion(version: string): OpenCodeVersion | null {
-  const match = OPENCODE_VERSION_PATTERN.exec(version.trim())
+const OPENCODE_STABLE_VERSION_PATTERN = /^(0|[1-9]\d*)\.(0|[1-9]\d*)\.(0|[1-9]\d*)$/
+
+const OPENCODE_VERSION_OUTPUT_PATTERN = /(?<![\d.])v?(\d+\.\d+\.\d+(?:-[0-9A-Za-z.-]+)?(?:\+[0-9A-Za-z.-]+)?)/g
+
+export function normalizeOpenCodeVersion(version: string): string {
+  return version.trim().replace(/^v/, '')
+}
+
+export function parseOpenCodeVersion(version: string): OpenCodeVersion | null {
+  const match = OPENCODE_VERSION_PATTERN.exec(normalizeOpenCodeVersion(version))
   if (!match) return null
   return {
     major: Number(match[1]),
@@ -39,6 +46,18 @@ function parseOpenCodeVersion(version: string): OpenCodeVersion | null {
       ? match[4].split('.').map((identifier) => (/^\d+$/.test(identifier) ? Number(identifier) : identifier))
       : [],
   }
+}
+
+export function isStableOpenCodeVersion(version: string): boolean {
+  return OPENCODE_STABLE_VERSION_PATTERN.test(normalizeOpenCodeVersion(version))
+}
+
+export function parseOpenCodeVersionOutput(output: string): string | null {
+  for (const match of output.matchAll(OPENCODE_VERSION_OUTPUT_PATTERN)) {
+    const candidate = (match[1] ?? '').replace(/[.+-]+$/, '')
+    if (parseOpenCodeVersion(candidate)) return candidate
+  }
+  return null
 }
 
 function compareOpenCodePrereleaseIdentifiers(
@@ -66,18 +85,40 @@ function compareOpenCodePrereleaseIdentifiers(
   return 0
 }
 
-function compareOpenCodeVersions(left: OpenCodeVersion, right: OpenCodeVersion): number {
+function compareParsedOpenCodeVersions(left: OpenCodeVersion, right: OpenCodeVersion): number {
   if (left.major !== right.major) return left.major - right.major
   if (left.minor !== right.minor) return left.minor - right.minor
   if (left.patch !== right.patch) return left.patch - right.patch
   return compareOpenCodePrereleaseIdentifiers(left.prerelease, right.prerelease)
 }
 
+export function compareOpenCodeVersions(left: string, right: string): number {
+  const parsedLeft = parseOpenCodeVersion(left)
+  const parsedRight = parseOpenCodeVersion(right)
+  if (!parsedLeft || !parsedRight) {
+    throw new Error(`Cannot compare invalid OpenCode versions: ${left} and ${right}`)
+  }
+  return compareParsedOpenCodeVersions(parsedLeft, parsedRight)
+}
+
+function parsePinnedOpenCodeVersion(): OpenCodeVersion {
+  const pinned = parseOpenCodeVersion(OPENCODE_PINNED_VERSION)
+  if (!pinned) throw new Error(`OPENCODE_PINNED_VERSION is not a valid version: ${OPENCODE_PINNED_VERSION}`)
+  return pinned
+}
+
+const OPENCODE_PINNED = parsePinnedOpenCodeVersion()
+
+export const OPENCODE_SUPPORTED_VERSION_RANGE = `>=${OPENCODE_PINNED_VERSION} <${OPENCODE_PINNED.major + 1}.0.0`
+
 export function isSupportedOpenCodeVersion(version: string): boolean {
   const parsed = parseOpenCodeVersion(version)
-  const minimum = parseOpenCodeVersion(OPENCODE_MIN_VERSION)
-  if (!parsed || !minimum) return false
-  return parsed.major === minimum.major && compareOpenCodeVersions(parsed, minimum) >= 0
+  if (!parsed) return false
+  return parsed.major === OPENCODE_PINNED.major && compareParsedOpenCodeVersions(parsed, OPENCODE_PINNED) >= 0
+}
+
+export function describeUnsupportedOpenCodeVersion(version: string): string {
+  return `OpenCode ${version} is not supported; OpenCode Manager requires OpenCode ${OPENCODE_SUPPORTED_VERSION_RANGE}`
 }
 
 export function buildOpenCodeReleaseAsset(

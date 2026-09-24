@@ -5,7 +5,7 @@ import { buildOpenCodeBasicAuth } from '@opencode-manager/shared/opencode'
 import { createInternalTokenMiddleware } from '../auth/internal-token-middleware'
 import type { SettingsService } from '../services/settings'
 import { opencodeServerManager } from '../services/opencode-single-server'
-import { getOpenCodeUpstreamBaseUrl } from '../services/opencode/upstream'
+import { getOpenCodeUpstreamBaseUrl, withDefaultOpenCodeDirectory } from '../services/opencode/upstream'
 import { getRepoById } from '../db/queries'
 
 const HOP_BY_HOP_HEADERS = new Set([
@@ -23,7 +23,7 @@ const HOP_BY_HOP_HEADERS = new Set([
   'authorization',
 ])
 
-export interface ProxyRequestParts {
+interface ProxyRequestParts {
   method: string
   path: string
   headers: Record<string, string>
@@ -84,13 +84,14 @@ export function createOpenCodeProxyRoutes(db: Database, settingsService: Setting
     const url = new URL(c.req.url)
     const hasBody = c.req.method !== 'GET' && c.req.method !== 'HEAD'
 
-    const headers: Record<string, string> = {}
+    const forwardedHeaders: Record<string, string> = {}
     c.req.raw.headers.forEach((value, key) => {
       const lowerKey = key.toLowerCase()
       if (!HOP_BY_HOP_HEADERS.has(lowerKey)) {
-        headers[key] = value
+        forwardedHeaders[key] = value
       }
     })
+    const headers = withDefaultOpenCodeDirectory(forwardedHeaders)
 
     headers['Authorization'] = buildOpenCodeBasicAuth(settingsService.getOpenCodeServerPassword())
 

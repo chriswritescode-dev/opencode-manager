@@ -4,6 +4,7 @@ import { chmodSync, mkdirSync, mkdtempSync, readFileSync, rmSync, statSync, writ
 import { tmpdir } from 'os'
 import { join } from 'path'
 import {
+  clearOpenCodeVersionCache,
   installOpenCodeVersion,
   latestOpenCodeVersion,
   listOpenCodeVersions,
@@ -104,6 +105,7 @@ let workDirectory: string
 
 beforeEach(() => {
   workDirectory = mkdtempSync(join(tmpdir(), 'opencode-installer-'))
+  clearOpenCodeVersionCache()
 })
 
 afterEach(() => {
@@ -176,18 +178,21 @@ describe('installOpenCodeVersion', () => {
     const { calls, fetchFn } = createFetch(null)
 
     await expect(installOpenCodeVersion('1.18.32', { fetch: fetchFn, homeDirectory, target: linuxTarget }))
-      .rejects.toThrow(/2\.0\.0 or newer/)
+      .rejects.toThrow('OpenCode 1.18.32 is not supported; OpenCode Manager requires OpenCode >=2.0.15 <3.0.0')
     expect(calls).toEqual([])
   })
 
-  it('rejects a version outside the supported 2.x line before downloading anything', async () => {
-    const homeDirectory = join(workDirectory, 'home')
-    const { calls, fetchFn } = createFetch(null)
+  it.each(['2.0.14', '3.0.0', '2.1.0-beta.1', '2.0.15; rm -rf /'])(
+    'rejects %s outside the supported stable range before downloading anything',
+    async (version) => {
+      const homeDirectory = join(workDirectory, 'home')
+      const { calls, fetchFn } = createFetch(null)
 
-    await expect(installOpenCodeVersion('3.0.0', { fetch: fetchFn, homeDirectory, target: linuxTarget }))
-      .rejects.toThrow(/2\.0\.0 or newer/)
-    expect(calls).toEqual([])
-  })
+      await expect(installOpenCodeVersion(version, { fetch: fetchFn, homeDirectory, target: linuxTarget }))
+        .rejects.toThrow(/requires OpenCode >=2\.0\.15 <3\.0\.0/)
+      expect(calls).toEqual([])
+    },
+  )
 
   it('fails and leaves no binary behind when the download is not available', async () => {
     const homeDirectory = join(workDirectory, 'home')
@@ -200,7 +205,7 @@ describe('installOpenCodeVersion', () => {
 
   it('fails and leaves no binary behind when the archive reports a different version', async () => {
     const homeDirectory = join(workDirectory, 'home')
-    const archivePath = createArchive(workDirectory, '2.0.14')
+    const archivePath = createArchive(workDirectory, '2.0.16')
     const { fetchFn } = createFetch(archivePath)
 
     await expect(installOpenCodeVersion('2.0.15', { fetch: fetchFn, homeDirectory, target: linuxTarget }))
@@ -235,62 +240,101 @@ describe('installOpenCodeVersion', () => {
 
 describe('listOpenCodeVersions', () => {
   const registryPayload = {
-    'dist-tags': { latest: '2.0.15' },
     versions: {
       '1.18.32': {},
       '2.0.0': {},
+      '2.0.14': {},
       '2.0.15': {},
+      '2.0.16': {},
       '2.1.0-beta.1': {},
       '3.0.0': {},
       'not-a-version': {},
     },
     time: {
-      '2.0.0': '2026-01-01T00:00:00.000Z',
       '2.0.15': '2026-02-01T00:00:00.000Z',
+      '2.0.16': '2026-03-01T00:00:00.000Z',
     },
   }
 
-  it('lists only supported stable 2.x releases, newest first', async () => {
+  it('lists only supported stable releases within the pinned major, newest first', async () => {
     const { calls, fetchFn } = createRegistryFetch(registryPayload)
 
-    const versions = await listOpenCodeVersions(fetchFn)
+    const versions = await listOpenCodeVersions({ fetch: fetchFn })
 
     expect(versions).toEqual([
+      { version: '2.0.16', publishedAt: '2026-03-01T00:00:00.000Z' },
       { version: '2.0.15', publishedAt: '2026-02-01T00:00:00.000Z' },
-      { version: '2.0.0', publishedAt: '2026-01-01T00:00:00.000Z' },
     ])
     expect(calls).toEqual(['https://registry.npmjs.org/@opencode/cli'])
   })
 
   it('reports a null publishedAt when the registry has no timestamp for a version', async () => {
     const { fetchFn } = createRegistryFetch({
-      versions: { '2.0.3': {} },
+      versions: { '2.0.20': {} },
       time: {},
     })
 
-    await expect(listOpenCodeVersions(fetchFn)).resolves.toEqual([
-      { version: '2.0.3', publishedAt: null },
+    await expect(listOpenCodeVersions({ fetch: fetchFn })).resolves.toEqual([
+      { version: '2.0.20', publishedAt: null },
     ])
   })
 
-  it('throws when the registry request fails', async () => {
-    const { fetchFn } = createRegistryFetch({}, 500)
+  it('serves the cached list within five minutes without refetching', async () => {
+    const { calls, fetchFn } = createRegistryFetch(registryPayload)
+    let now = 1_000_000
 
-    await expect(listOpenCodeVersions(fetchFn)).rejects.toThrow(/500/)
+    const first = await listOpenCodeVersions({ fetch: fetchFn, now: () => now })
+    now += 5 * 60 * 1000 - 1
+    const second = await listOpenCodeVersions({ fetch: fetchFn, now: () => now })
+
+    expect(second).toEqual(first)
+    expect(calls).toHaveLength(1)
+  })
+
+  it('refreshes the list once the five minute cache expires', async () => {
+    const stale = createRegistryFetch(registryPayload)
+    const fresh = createRegistryFetch({ versions: { '2.0.17': {} }, time: {} })
+    let now = 1_000_000
+
+    await listOpenCodeVersions({ fetch: stale.fetchFn, now: () => now })
+    now += 5 * 60 * 1000
+    const refreshed = await listOpenCodeVersions({ fetch: fresh.fetchFn, now: () => now })
+
+    expect(refreshed).toEqual([{ version: '2.0.17', publishedAt: null }])
+    expect(stale.calls).toHaveLength(1)
+    expect(fresh.calls).toHaveLength(1)
+  })
+
+  it('does not cache a failed registry request', async () => {
+    const failing = createRegistryFetch({}, 500)
+    const working = createRegistryFetch(registryPayload)
+
+    await expect(listOpenCodeVersions({ fetch: failing.fetchFn })).rejects.toThrow(/500/)
+    await expect(listOpenCodeVersions({ fetch: working.fetchFn })).resolves.toHaveLength(2)
+    expect(working.calls).toHaveLength(1)
   })
 })
 
 describe('latestOpenCodeVersion', () => {
-  it('reads the registry latest dist-tag', async () => {
-    const { calls, fetchFn } = createRegistryFetch({ 'dist-tags': { latest: '2.0.15' } })
+  it('reads the registry latest release document', async () => {
+    const { calls, fetchFn } = createRegistryFetch({ name: '@opencode/cli', version: '2.0.15' })
 
-    await expect(latestOpenCodeVersion(fetchFn)).resolves.toBe('2.0.15')
-    expect(calls).toEqual(['https://registry.npmjs.org/@opencode/cli'])
+    await expect(latestOpenCodeVersion({ fetch: fetchFn })).resolves.toBe('2.0.15')
+    expect(calls).toEqual(['https://registry.npmjs.org/@opencode/cli/latest'])
   })
 
-  it('throws when the registry latest tag is not a supported version', async () => {
-    const { fetchFn } = createRegistryFetch({ 'dist-tags': { latest: '1.18.32' } })
+  it.each(['1.18.32', '2.0.14', '3.0.0', '2.1.0-beta.1'])(
+    'throws when the registry latest release %s is outside the supported range',
+    async (version) => {
+      const { fetchFn } = createRegistryFetch({ version })
 
-    await expect(latestOpenCodeVersion(fetchFn)).rejects.toThrow(/1\.18\.32/)
+      await expect(latestOpenCodeVersion({ fetch: fetchFn })).rejects.toThrow(version)
+    },
+  )
+
+  it('throws when the latest request fails', async () => {
+    const { fetchFn } = createRegistryFetch({}, 502)
+
+    await expect(latestOpenCodeVersion({ fetch: fetchFn })).rejects.toThrow(/502/)
   })
 })

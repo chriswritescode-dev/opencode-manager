@@ -34,6 +34,7 @@ vi.mock('../../../src/utils/logger', () => ({
 
 import { createOpenCodeClient, FetchOpenCodeClient } from '../../../src/services/opencode/client'
 import { ENV } from '@opencode-manager/shared/config/env'
+import { openCodeLocation } from '@opencode-manager/shared/opencode'
 
 describe('OpenCodeClient', () => {
   const baseUrl = 'http://127.0.0.1:5551'
@@ -72,6 +73,22 @@ describe('OpenCodeClient', () => {
       expect((capturedInit?.headers as Record<string, string>)['host']).toBeUndefined()
       expect((capturedInit?.headers as Record<string, string>)['connection']).toBeUndefined()
       expect((capturedInit?.headers as Record<string, string>)['authorization']).toBeUndefined()
+      expect((capturedInit?.headers as Record<string, string>)['x-opencode-directory']).toBe(encodeURIComponent('/test/workspace'))
+    })
+
+    it('keeps a caller-supplied x-opencode-directory header', async () => {
+      let capturedInit: RequestInit | undefined
+      const fetchFn = async (_: URL | Request | string, init?: RequestInit) => {
+        capturedInit = init
+        return new Response(JSON.stringify({}), { status: 200 })
+      }
+      const client = new FetchOpenCodeClient({ baseUrl, basicAuth: '', fetchFn: fetchFn as unknown as typeof fetch })
+
+      await client.forwardRaw(new Request('http://localhost:5003/api/opencode/api/config', {
+        headers: { 'X-OpenCode-Directory': '%2Frepo%2Fb' },
+      }))
+
+      expect((capturedInit?.headers as Record<string, string>)['x-opencode-directory']).toBe('%2Frepo%2Fb')
     })
 
     it('should read body for POST but not for GET/HEAD', async () => {
@@ -219,6 +236,21 @@ describe('OpenCodeClient', () => {
         `Basic ${Buffer.from('opencode:first-password').toString('base64')}`,
         `Basic ${Buffer.from('opencode:second-password').toString('base64')}`,
       ])
+    })
+
+    it('scopes location-less requests to the workspace and leaves explicit locations to the query', async () => {
+      const captured: Array<{ url: string; directory: string | null }> = []
+      const fetchFn = async (input: URL | Request | string, init?: RequestInit) => {
+        captured.push({ url: input.toString(), directory: new Headers(init?.headers).get('x-opencode-directory') })
+        return new Response(JSON.stringify({ data: [] }), { status: 200, headers: { 'Content-Type': 'application/json' } })
+      }
+      const client = new FetchOpenCodeClient({ baseUrl, basicAuth: '', fetchFn: fetchFn as unknown as typeof fetch })
+
+      await client.api.integration.list().catch(() => undefined)
+      await client.api.skill.list(openCodeLocation('/repo/a')).catch(() => undefined)
+
+      expect(captured[0]).toEqual({ url: `${baseUrl}/api/integration`, directory: encodeURIComponent('/test/workspace') })
+      expect(captured[1]?.url).toBe(`${baseUrl}/api/skill?location%5Bdirectory%5D=%2Frepo%2Fa`)
     })
 
     it('fails the info probe when the upstream answers 401', async () => {

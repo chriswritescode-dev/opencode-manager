@@ -167,7 +167,7 @@ describe('transferSession', () => {
 
     const result = await transferSession(input, deps)
 
-    expect(result).toEqual({ kind: 'moved', sessionID: 'ses_a', replayedEvents: 1 })
+    expect(result).toEqual({ kind: 'moved', sessionID: 'ses_a', importedMessages: 1 })
     expect(deps.exportSession).toHaveBeenCalledWith('ses_a')
     expect(importCalls).toHaveLength(1)
     expect(importCalls[0]!.directory).toBe('/workspace/repos/repo')
@@ -185,7 +185,7 @@ describe('transferSession', () => {
 
     const result = await transferSession(input, deps)
 
-    expect(result).toEqual({ kind: 'replay-failed', message: 'export failed' })
+    expect(result).toEqual({ kind: 'import-failed', message: 'export failed' })
     expect(deps.importSession).not.toHaveBeenCalled()
   })
 
@@ -197,7 +197,7 @@ describe('transferSession', () => {
 
     const result = await transferSession(input, deps)
 
-    expect(result).toEqual({ kind: 'replay-failed', message: 'import diverged' })
+    expect(result).toEqual({ kind: 'import-failed', message: 'import diverged' })
   })
 })
 

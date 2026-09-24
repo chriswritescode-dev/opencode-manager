@@ -21,6 +21,7 @@ const mocks = vi.hoisted(() => ({
   setPendingWarp: vi.fn(),
   runPendingWarp: vi.fn(),
   mirrorTargetPlan: vi.fn(),
+  warmRepoProxy: vi.fn(),
 }))
 
 vi.mock('../src/state.js', () => ({
@@ -53,6 +54,8 @@ vi.mock('../src/warp.js', () => ({
   setPendingWarp: mocks.setPendingWarp,
   runPendingWarp: mocks.runPendingWarp,
 }))
+
+vi.mock('../src/repo-proxy.js', () => ({ warmRepoProxy: mocks.warmRepoProxy }))
 
 vi.mock('../src/manager-api.js', () => ({
   ManagerApi: class {
@@ -140,6 +143,7 @@ function stubTransfer(options: { importError?: Error; reminderError?: Error } = 
 function configureMove(fake: ReturnType<typeof createFakeContext>) {
   mocks.readState.mockReturnValue({ managerUrl: 'https://manager.example' })
   mocks.getToken.mockResolvedValue('tok')
+  mocks.warmRepoProxy.mockResolvedValue(undefined)
   mocks.fetchRepos.mockResolvedValue(repos)
   mocks.toRemoteRepoSummaries.mockImplementation((r: unknown) => r)
   mocks.prepareMirror.mockResolvedValue({ repoRoot: '/Users/x/repo', localProjectId: 'proj_1', matched: [matched] })
@@ -253,5 +257,22 @@ describe('ocm.session.move command', () => {
     expect(addReminder).toHaveBeenCalledTimes(1)
     expect(mocks.setPendingWarp).not.toHaveBeenCalled()
     expect(fake.toast).toHaveBeenCalledWith(expect.objectContaining({ variant: 'success' }))
+  })
+
+  it('stops before pushing when the Manager lacks the repo proxy route', async () => {
+    const fake = createFakeContext()
+    configureMove(fake)
+    const { importSession } = stubTransfer()
+    const tooOld = 'OpenCode Manager at https://manager.example is too old for ocm 0.3.0; upgrade the Manager to >= 0.19.0'
+    mocks.warmRepoProxy.mockRejectedValue(new Error(tooOld))
+
+    await invokeMove(fake)
+
+    expect(mocks.warmRepoProxy).toHaveBeenCalledWith('https://manager.example', 'tok', 1)
+    expect(fake.confirm).not.toHaveBeenCalled()
+    expect(mocks.mirrorUpFast).not.toHaveBeenCalled()
+    expect(fake.exportMock).not.toHaveBeenCalled()
+    expect(importSession).not.toHaveBeenCalled()
+    expect(fake.toast).toHaveBeenCalledWith({ variant: 'error', message: tooOld })
   })
 })

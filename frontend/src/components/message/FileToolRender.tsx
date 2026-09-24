@@ -70,7 +70,7 @@ interface FileToolRenderProps {
   onFileClick?: (filePath: string, lineNumber?: number) => void
 }
 
-export function FileToolRender({ part, filediff, filePath, content, toolName, onFileClick }: FileToolRenderProps) {
+function FileToolRender({ part, filediff, filePath, content, toolName, onFileClick }: FileToolRenderProps) {
   const { preferences } = useSettings()
   const isReadTool = toolName === 'Read'
   const isEditTool = toolName === 'Edit'

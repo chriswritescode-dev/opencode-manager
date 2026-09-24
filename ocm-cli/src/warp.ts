@@ -1,5 +1,6 @@
 import { spawnSync } from 'node:child_process'
 import { buildRemoteAttachEnv } from './remote-context.js'
+import { repoProxyUrl } from './repo-proxy.js'
 
 export type WarpTarget = {
   managerUrl: string
@@ -30,7 +31,7 @@ export function takePendingWarp(): WarpTarget | undefined {
 export function buildAttachArgs(target: WarpTarget): string[] {
   return [
     '--server',
-    `${target.managerUrl}/api/opencode-proxy/repos/${target.repoId}`,
+    repoProxyUrl(target.managerUrl, target.repoId),
     '--session',
     target.sessionID,
   ]

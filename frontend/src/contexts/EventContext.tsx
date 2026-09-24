@@ -15,7 +15,7 @@ import type { PermissionResponse, SSHHostKeyRequest, Repo } from '@/api/types'
 import { showToast } from '@/lib/toast'
 import { openCodeEventStream, type EventStreamHealthState } from '@/lib/opencode-event-stream'
 import { addToSessionKeyedState, removeFromSessionKeyedState } from '@/lib/sessionKeyedState'
-import { invalidateRepoGitCachesDebounced } from '@/lib/queryInvalidation'
+import { invalidateProviderCaches, invalidateRepoGitCachesDebounced } from '@/lib/queryInvalidation'
 
 type PermissionsBySession = Record<string, PermissionRequest[]>
 type FormsBySession = Record<string, FormInfo[]>
@@ -323,18 +323,20 @@ export function EventProvider({ children }: { children: React.ReactNode }) {
   }, [currentPermission, getRepoIdForSession, navigate])
 
   const reconcilePendingActionsForDirectories = useCallback(async (directories: string[]) => {
-    for (const directory of directories) {
+    await Promise.all(directories.map(async (directory) => {
       try {
-        const pendingPermissions = await listPendingPermissions(directory)
+        const [pendingPermissions, pendingForms] = await Promise.all([
+          listPendingPermissions(directory),
+          listPendingForms(directory),
+        ])
         reconcilePermissionsForDirectory(directory, pendingPermissions)
-        const pendingForms = await listPendingForms(directory)
         reconcileFormsForDirectory(directory, pendingForms)
       } catch (error) {
         if (import.meta.env.DEV) {
           console.warn(`Failed to fetch pending actions for ${directory}:`, error)
         }
       }
-    }
+    }))
   }, [reconcilePermissionsForDirectory, reconcileFormsForDirectory])
 
   const collectTrackedDirectories = useCallback((): string[] => {
@@ -395,9 +397,15 @@ export function EventProvider({ children }: { children: React.ReactNode }) {
         case 'form.cancelled': {
           const { id, sessionID } = event.data
           removeForm(id, sessionID)
-          queryClient.invalidateQueries({ queryKey: ['opencode', 'transcript', sessionID] })
           break
         }
+        case 'credential.updated':
+        case 'credential.switched':
+        case 'integration.updated':
+        case 'provider.updated':
+        case 'model.updated':
+          invalidateProviderCaches(queryClient)
+          break
         case 'ssh.host-key-request':
           setSSHHostKeyRequest(event.properties)
           break

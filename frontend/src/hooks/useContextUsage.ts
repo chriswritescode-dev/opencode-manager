@@ -1,8 +1,8 @@
 import { useMemo } from 'react'
 import { skipToken, useQuery } from '@tanstack/react-query'
-import { openCodeApi } from '@/api/opencodeApi'
+import { useProviders } from '@/hooks/useProviders'
 import { sessionTranscriptQueryKey } from '@/lib/queryInvalidation'
-import type { SessionTranscript } from '@/lib/session-projection'
+import type { TranscriptCache } from '@/lib/session-projection'
 
 interface ContextUsage {
   totalTokens: number
@@ -10,10 +10,6 @@ interface ContextUsage {
   usagePercentage: number | null
   currentModel: string | null
   isLoading: boolean
-}
-
-interface TranscriptCache {
-  transcript: SessionTranscript
 }
 
 export const useContextUsage = (sessionID: string | undefined, directory?: string): ContextUsage => {
@@ -24,13 +20,8 @@ export const useContextUsage = (sessionID: string | undefined, directory?: strin
   const transcriptData = transcriptQuery.data
   const messagesLoading = transcriptQuery.isPending
 
-  const { data: models } = useQuery({
-    queryKey: ['opencode', 'models', directory],
-    queryFn: async () => (await openCodeApi.model.list(
-      directory ? { location: { directory } } : undefined,
-    )).data,
-    staleTime: 5 * 60 * 1000,
-  })
+  const { data: providersData } = useProviders(directory)
+  const models = providersData?.models
 
   return useMemo(() => {
     const messages = transcriptData?.transcript.messages ?? []

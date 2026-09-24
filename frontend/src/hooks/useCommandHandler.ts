@@ -7,7 +7,7 @@ import { showToast } from '@/lib/toast'
 import type { CommandInfo, ModelRef } from '@opencode-manager/shared/opencode'
 import { useSessionStatus } from '@/stores/sessionStatusStore'
 
-export interface CommandSubmission {
+interface CommandSubmission {
   text: string
   files?: PromptFileInput[]
   agents?: PromptAgentInput[]

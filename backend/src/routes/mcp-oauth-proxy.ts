@@ -6,10 +6,11 @@ import { z } from 'zod'
 import {
   MCP_OAUTH_CALLBACK_PATH,
   mcpOAuthRedirectUri,
-  mcpServerConfigFromConfig,
+  mcpServersFromConfig,
   openCodeLocation,
 } from '@opencode-manager/shared/opencode'
-import type { V2McpServerConfig } from '@opencode-manager/shared/opencode'
+import type { McpServerConfig } from '@opencode-manager/shared/opencode'
+import { ENV } from '@opencode-manager/shared/config/env'
 import type { OpenCodeClient } from '../services/opencode/client'
 import { storeMcpOAuthFlow, consumeMcpOAuthFlow, getMcpOAuthFlowByAttempt } from '../services/mcp-oauth-state'
 import { logger } from '../utils/logger'
@@ -23,13 +24,21 @@ const DirectoryQuerySchema = z.object({
   directory: z.string().optional(),
 })
 
+function firstHeaderValue(c: Context, name: string): string | undefined {
+  const value = c.req.header(name)?.split(',')[0]?.trim()
+  return value || undefined
+}
+
+function forwardedScheme(c: Context): 'http' | 'https' | undefined {
+  const proto = firstHeaderValue(c, 'x-forwarded-proto')?.toLowerCase()
+  return proto === 'http' || proto === 'https' ? proto : undefined
+}
+
 function requestOrigin(c: Context): string {
-  const host = c.req.header('host')
-  const forwardedProto = c.req.header('x-forwarded-proto')
-  if (forwardedProto && host) {
-    return `${forwardedProto}://${host}`
-  }
-  return c.req.header('origin') || `http://${host ?? 'localhost:5003'}`
+  const host = firstHeaderValue(c, 'x-forwarded-host') ?? c.req.header('host') ?? 'localhost:5003'
+  const scheme = forwardedScheme(c)
+  if (scheme) return `${scheme}://${host}`
+  return c.req.header('origin') || `http://${host}`
 }
 
 function escapeHtml(unsafe: string): string {
@@ -76,29 +85,31 @@ function probeLoopbackPort(): Promise<number> {
 }
 
 export function createMcpOauthProxyRoutes(openCodeClient: OpenCodeClient, requireAuth?: MiddlewareHandler) {
+  if (ENV.OPENCODE.LEGACY_PUBLIC_URL) {
+    logger.warn('OPENCODE_PUBLIC_URL is set but no longer used; MCP OAuth redirects are derived from X-Forwarded-Proto/X-Forwarded-Host, Origin, or Host')
+  }
+
   const app = new Hono()
   const api = openCodeClient.api
 
-  const location = (directory: string | undefined) => (directory ? openCodeLocation(directory) : undefined)
-
   const findServer = async (serverName: string, directory: string | undefined) => {
-    const servers = (await api.mcp.list(location(directory))).data
+    const servers = (await api.mcp.list(openCodeLocation(directory))).data
     return servers.find((server) => server.name === serverName)
   }
 
   const readServerConfig = async (serverName: string, directory: string | undefined) => {
-    const entries = await api.config.get(location(directory))
-    let config: V2McpServerConfig | undefined
+    const entries = await api.config.get(openCodeLocation(directory))
+    let config: McpServerConfig | undefined
     for (const entry of entries) {
       if (entry.type !== 'document') continue
-      config = mcpServerConfigFromConfig(entry.info.mcp, serverName) ?? config
+      config = mcpServersFromConfig(entry.info.mcp)[serverName] ?? config
     }
     return config
   }
 
   const cancelAttempt = async (integrationID: string, attemptID: string, directory: string | undefined) => {
     try {
-      await api.integration.oauth.cancel({ integrationID, attemptID, ...location(directory) })
+      await api.integration.oauth.cancel({ integrationID, attemptID, ...openCodeLocation(directory) })
     } catch (error) {
       logger.warn(`Failed to cancel MCP OAuth attempt ${attemptID}:`, error)
     }
@@ -117,7 +128,7 @@ export function createMcpOauthProxyRoutes(openCodeClient: OpenCodeClient, requir
 
       await api.mcp.add({
         server: server.name,
-        ...location(directory),
+        ...openCodeLocation(directory),
         config: {
           ...v2Config,
           oauth: {
@@ -153,7 +164,7 @@ export function createMcpOauthProxyRoutes(openCodeClient: OpenCodeClient, requir
 
       const callbackPort = await reserveCallbackPort(server, requestOrigin(c), directory)
 
-      const integration = (await api.integration.get({ integrationID: server.integrationID, ...location(directory) })).data
+      const integration = (await api.integration.get({ integrationID: server.integrationID, ...openCodeLocation(directory) })).data
       const method = integration.methods.find((candidate) => candidate.type === 'oauth')
       if (!method) {
         return c.json({ error: 'OAuth method not found for this MCP server' }, 400)
@@ -163,7 +174,7 @@ export function createMcpOauthProxyRoutes(openCodeClient: OpenCodeClient, requir
         await api.integration.oauth.connect({
           integrationID: server.integrationID,
           methodID: method.id,
-          ...location(directory),
+          ...openCodeLocation(directory),
         })
       ).data
 
@@ -200,7 +211,7 @@ export function createMcpOauthProxyRoutes(openCodeClient: OpenCodeClient, requir
         await api.integration.oauth.status({
           integrationID: flow.integrationID,
           attemptID: flow.attemptID,
-          ...location(flow.directory),
+          ...openCodeLocation(flow.directory),
         })
       ).data
 
@@ -277,7 +288,7 @@ export function createMcpOauthProxyRoutes(openCodeClient: OpenCodeClient, requir
         return c.json({ success: true })
       }
 
-      const integration = (await api.integration.get({ integrationID: server.integrationID, ...location(directory) })).data
+      const integration = (await api.integration.get({ integrationID: server.integrationID, ...openCodeLocation(directory) })).data
       for (const connection of integration.connections) {
         if (connection.type === 'credential') {
           await api.credential.remove({ credentialID: connection.id })

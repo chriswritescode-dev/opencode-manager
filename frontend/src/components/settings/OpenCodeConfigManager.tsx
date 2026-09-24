@@ -160,7 +160,7 @@ export function OpenCodeConfigManager() {
   const applyOpenCodeConfigSave = (result: OpenCodeConfigSaveResponse) => {
     queryClient.setQueryData<OpenCodeConfigFile>(OPEN_CODE_CONFIG_QUERY_KEY, result)
     if (result.restartRequired) {
-      showToast.success('Configuration saved. Restart the server to apply changes.')
+      showToast.success('Configuration saved, but OpenCode could not reload it. Restart the server to apply changes.')
     } else {
       showToast.success('Configuration updated')
     }
@@ -210,7 +210,7 @@ export function OpenCodeConfigManager() {
            <div className="flex items-center gap-2">
              <AlertTriangle className="h-4 w-4 shrink-0 text-amber-500" />
              <p className="text-sm">
-               Configuration changes are saved but require a server restart to take effect.
+               Some saved changes require a server restart to take effect.
              </p>
            </div>
            <Button

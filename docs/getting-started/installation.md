@@ -21,7 +21,7 @@ Open [http://localhost:5003](http://localhost:5003) in your browser.
 
 The container automatically:
 
-- Installs OpenCode 2 if not present (bundled 2.0.15; 2.0.0 or newer required)
+- Installs OpenCode 2 if not present (bundled 2.0.15; 2.x at 2.0.15 or newer required)
 - Builds and serves the frontend
 - Creates persistent volumes for the workspace, database, and OpenCode binary
 - Configures health checks and auto-restart
@@ -67,7 +67,7 @@ For contributors who want to develop locally instead of using Docker.
 
 - [pnpm](https://pnpm.io/installation) - Package manager (required for workspaces)
 - [Bun](https://bun.sh) - Backend runtime
-- [OpenCode TUI](https://opencode.ai) 2.0.0 or newer - `curl -fsSL https://opencode.ai/v2/install | bash`
+- [OpenCode TUI](https://opencode.ai) 2.x, 2.0.15 or newer - `curl -fsSL https://opencode.ai/v2/install | bash`
 - [Node.js 24+](https://nodejs.org/en/about/previous-releases)
 
 ### Setup

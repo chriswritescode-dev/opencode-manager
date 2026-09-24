@@ -1,13 +1,13 @@
-import { ClientError, createOpenCodeApi, openCodeErrorStatus } from '@opencode-manager/shared/opencode'
+import { ClientError, createOpenCodeApi, openCodeErrorStatus, type OpenCodeApi } from '@opencode-manager/shared/opencode'
 import { FetchError } from '@opencode-manager/shared'
 import { OPENCODE_API_ENDPOINT } from '@/config'
 
-export const openCodeApi = createOpenCodeApi({
+const openCodeApi = createOpenCodeApi({
   baseUrl: new URL(OPENCODE_API_ENDPOINT, window.location.origin).toString(),
   fetch: (input, init) => fetch(input, { ...init, credentials: 'include' }),
 })
 
-export function toFetchError(error: unknown): FetchError {
+function toFetchError(error: unknown): FetchError {
   if (error instanceof FetchError) {
     return error
   }
@@ -23,4 +23,12 @@ export function toFetchError(error: unknown): FetchError {
   }
 
   return new FetchError('Request failed', status ?? 0)
+}
+
+export async function callOpenCode<T>(operation: (api: OpenCodeApi) => Promise<T>): Promise<T> {
+  try {
+    return await operation(openCodeApi)
+  } catch (error) {
+    throw toFetchError(error)
+  }
 }

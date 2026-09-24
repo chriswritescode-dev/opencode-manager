@@ -1,4 +1,4 @@
-import { describe, it, expect } from 'vitest'
+import { describe, it, expect, vi } from 'vitest'
 import { getMessagesContentVersion } from '../sessionContentVersion'
 import type {
   SessionMessageAssistant,
@@ -6,13 +6,17 @@ import type {
   SessionMessageInfo,
 } from '@opencode-manager/shared/opencode'
 
-const makeAssistant = (content: SessionMessageAssistant['content']): SessionMessageInfo => ({
+const makeAssistant = (
+  content: SessionMessageAssistant['content'],
+  extra: Partial<SessionMessageAssistant> = {},
+): SessionMessageAssistant => ({
   id: 'msg-1',
   type: 'assistant',
   agent: 'build',
   model: { providerID: 'p', id: 'm' },
   time: { created: 1000, completed: 2000 },
   content,
+  ...extra,
 })
 
 const makeUser = (text: string): SessionMessageInfo => ({
@@ -147,5 +151,80 @@ describe('getMessagesContentVersion', () => {
     const v2 = getMessagesContentVersion([makeUser('hello world')])
 
     expect(v2).not.toBe(v1)
+  })
+
+  it('does not recompute an unchanged message object', () => {
+    const message = makeAssistant([{ type: 'text', text: 'hello' }])
+    const content = message.content
+    let contentReads = 0
+    Object.defineProperty(message, 'content', {
+      get: () => {
+        contentReads += 1
+        return content
+      },
+    })
+
+    const v1 = getMessagesContentVersion([message])
+    const v2 = getMessagesContentVersion([message, makeUser('next')])
+    const v3 = getMessagesContentVersion([message])
+
+    expect(contentReads).toBe(1)
+    expect(v3).toBe(v1)
+    expect(v2).not.toBe(v1)
+  })
+
+  it('does not stringify tool metadata containing large diffs', () => {
+    const stringify = vi.spyOn(JSON, 'stringify')
+    const largePatch = '+'.repeat(200_000)
+
+    getMessagesContentVersion([
+      makeAssistant([
+        makeTool({
+          status: 'completed',
+          input: {},
+          content: [{ type: 'text', text: 'done' }],
+          metadata: { files: [{ file: '/repo/a.ts', patch: largePatch, additions: 1, deletions: 0 }] },
+        }),
+      ]),
+    ])
+
+    expect(stringify).not.toHaveBeenCalled()
+    stringify.mockRestore()
+  })
+
+  it('changes when tool metadata gains files', () => {
+    const file = { file: '/repo/a.ts', patch: '+a', additions: 1, deletions: 0 }
+    const v1 = getMessagesContentVersion([
+      makeAssistant([
+        makeTool({ status: 'completed', input: {}, content: [], metadata: { files: [file] } }),
+      ]),
+    ])
+    const v2 = getMessagesContentVersion([
+      makeAssistant([
+        makeTool({ status: 'completed', input: {}, content: [], metadata: { files: [file, file] } }),
+      ]),
+    ])
+
+    expect(v2).not.toBe(v1)
+  })
+
+  it('changes when running tool metadata output grows', () => {
+    const v1 = getMessagesContentVersion([
+      makeAssistant([makeTool({ status: 'running', input: {}, metadata: { output: 'line 1' } })]),
+    ])
+    const v2 = getMessagesContentVersion([
+      makeAssistant([makeTool({ status: 'running', input: {}, metadata: { output: 'line 1\nline 2' } })]),
+    ])
+
+    expect(v2).not.toBe(v1)
+  })
+
+  it('changes when the step snapshot records changed files', () => {
+    const base = makeAssistant([{ type: 'text', text: 'done' }])
+    const withFiles = makeAssistant([{ type: 'text', text: 'done' }], {
+      snapshot: { files: ['/repo/a.ts', '/repo/b.ts'] },
+    })
+
+    expect(getMessagesContentVersion([withFiles])).not.toBe(getMessagesContentVersion([base]))
   })
 })

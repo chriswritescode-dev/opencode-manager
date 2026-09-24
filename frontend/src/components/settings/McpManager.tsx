@@ -14,6 +14,8 @@ import type { McpAuthStartResponse } from '@/api/mcp'
 import { mcpApi } from '@/api/mcp'
 import { mcpServersFromConfig } from '@opencode-manager/shared/opencode'
 import { showToast } from '@/lib/toast'
+import { getOpenCodeApiErrorMessage } from '@/lib/opencode-errors'
+import { formatMcpServerName } from '@/lib/mcp'
 
 interface McpManagerProps {
   config: {
@@ -24,16 +26,9 @@ interface McpManagerProps {
 
 function withoutMcpServer(mcp: unknown, serverId: string): Record<string, unknown> {
   const current = (mcp && typeof mcp === 'object' ? mcp : {}) as Record<string, unknown>
-  const next: Record<string, unknown> = { ...current }
-  delete next[serverId]
-
-  if (current.servers && typeof current.servers === 'object') {
-    const servers = { ...(current.servers as Record<string, unknown>) }
-    delete servers[serverId]
-    next.servers = servers
-  }
-
-  return next
+  const servers = { ...(current.servers as Record<string, unknown> | undefined) }
+  delete servers[serverId]
+  return { ...current, servers }
 }
 
 export function McpManager({ config, onUpdate }: McpManagerProps) {
@@ -55,10 +50,14 @@ export function McpManager({ config, onUpdate }: McpManagerProps) {
   } = useMcpServers()
 
   const mcpServers = useMemo(() => mcpServersFromConfig(config?.content?.mcp), [config])
+  const serverIds = useMemo(
+    () => [...new Set([...Object.keys(mcpServers), ...Object.keys(mcpStatus ?? {})])],
+    [mcpServers, mcpStatus],
+  )
 
   const deleteServerMutation = useMutation({
     mutationFn: async (serverId: string) => {
-      if (config) {
+      if (config && mcpServers[serverId]) {
         await onUpdate({
           ...config.content,
           mcp: withoutMcpServer(config.content.mcp, serverId),
@@ -72,8 +71,8 @@ export function McpManager({ config, onUpdate }: McpManagerProps) {
       await refetchStatus()
       setDeleteConfirmServer(null)
     },
-    onError: () => {
-      showToast.error('Failed to delete MCP server')
+    onError: (error) => {
+      showToast.error(getOpenCodeApiErrorMessage(error, 'Failed to delete MCP server'))
     },
   })
 
@@ -199,11 +198,11 @@ export function McpManager({ config, onUpdate }: McpManagerProps) {
       <SettingsList
         isLoading={false}
         error={null}
-        isEmpty={Object.keys(mcpServers).length === 0}
+        isEmpty={serverIds.length === 0}
         emptyTitle="No MCP servers configured"
         emptyHint="Add your first server to get started."
       >
-        {Object.entries(mcpServers).map(([serverId, serverConfig]) => {
+        {serverIds.map((serverId) => {
           const status = mcpStatus?.[serverId]
           const isConnected = status?.status === 'connected'
           const errorMessage = getErrorMessage(serverId)
@@ -212,7 +211,7 @@ export function McpManager({ config, onUpdate }: McpManagerProps) {
             <McpServerCard
               key={serverId}
               serverId={serverId}
-              serverConfig={serverConfig}
+              serverConfig={mcpServers[serverId]}
               status={status}
               isConnected={isConnected}
               errorMessage={errorMessage}
@@ -255,14 +254,9 @@ export function McpManager({ config, onUpdate }: McpManagerProps) {
         onCancel={() => setRemoveAuthConfirmServer(null)}
         title="Remove Authentication"
         description="This will remove the OAuth credentials for this MCP server. You will need to re-authenticate to use this server again."
-        itemName={mcpServers[removeAuthConfirmServer || ''] ? getDisplayName(removeAuthConfirmServer || '') : ''}
+        itemName={removeAuthConfirmServer ? formatMcpServerName(removeAuthConfirmServer) : ''}
         isDeleting={isRemovingAuth}
       />
     </div>
   )
-
-  function getDisplayName(serverId: string): string {
-    const name = serverId.replace(/[-_]/g, ' ')
-    return name.charAt(0).toUpperCase() + name.slice(1)
-  }
 }

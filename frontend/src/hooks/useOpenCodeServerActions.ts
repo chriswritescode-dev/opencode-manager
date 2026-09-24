@@ -1,5 +1,6 @@
 import { useState } from 'react'
-import { useMutation, useQueryClient } from '@tanstack/react-query'
+import { useMutation, useQueryClient, type QueryClient } from '@tanstack/react-query'
+import type { SessionInfo } from '@opencode-manager/shared/opencode'
 import { settingsApi } from '@/api/settings'
 import { showToast } from '@/lib/toast'
 import { refreshOpenCodeServerCaches } from '@/lib/queryInvalidation'
@@ -7,6 +8,20 @@ import { getOpenCodeApiErrorMessage } from '@/lib/opencode-errors'
 
 const RESTART_TOAST_ID = 'opencode-restart'
 const UPGRADE_TOAST_ID = 'upgrade-opencode'
+
+function resolveSessionLabel(queryClient: QueryClient, sessionID: string): string {
+  const title = queryClient
+    .getQueriesData<SessionInfo>({ queryKey: ['opencode', 'session', sessionID] })
+    .map(([, session]) => session?.title)
+    .find((candidate): candidate is string => Boolean(candidate))
+  return title ?? sessionID
+}
+
+export function describeInterruptedSessions(queryClient: QueryClient, sessionIDs: string[]): string | undefined {
+  if (sessionIDs.length === 0) return undefined
+  const labels = sessionIDs.map((sessionID) => resolveSessionLabel(queryClient, sessionID)).join(', ')
+  return `Interrupted: ${labels}. OpenCode resumes them automatically.`
+}
 
 /**
  * Centralizes OpenCode server restart/upgrade actions shared by the settings
@@ -60,8 +75,11 @@ export function useOpenCodeServerActions() {
   const performRestart = async () => {
     showToast.loading('Restarting OpenCode server...', { id: RESTART_TOAST_ID })
     try {
-      await restartServerMutation.mutateAsync()
-      showToast.success('Server restarted successfully', { id: RESTART_TOAST_ID })
+      const { interruptedSessions } = await restartServerMutation.mutateAsync()
+      showToast.success('Server restarted successfully', {
+        id: RESTART_TOAST_ID,
+        description: describeInterruptedSessions(queryClient, interruptedSessions),
+      })
     } catch (error) {
       showToast.error(getOpenCodeApiErrorMessage(error, 'Failed to restart OpenCode server'), { id: RESTART_TOAST_ID })
     }

@@ -109,7 +109,6 @@ function mockProviderData() {
       apiKeyProviderWithoutKey,
     ],
     connected: [],
-    default: {},
   })
   vi.mocked(providerCredentialsApi.list).mockResolvedValue(['anthropic', 'openai'])
   vi.mocked(oauthApi.getAuthMethods).mockResolvedValue({
