@@ -15,10 +15,12 @@ import {
 import {
   loadGeneratedPlugin,
   type GeneratedPlugin,
+  type PermissionEvaluateEvent,
   type ShellCreateBeforeEvent,
   type ToolExecuteAfterEvent,
 } from '../helpers/opencode-plugin-context'
 import { resolveOpenCode2Binary, runOpenCodeStandalone } from '../helpers/opencode-binary'
+import { getConfigPath } from '@opencode-manager/shared/config/env'
 
 const UNAVAILABLE_PREFIX = 'Sandbox enforcement is on but the sandbox is unavailable: '
 const WORKDIR = '/workspace/repos/ai-test'
@@ -136,6 +138,15 @@ describe('ocm-sandbox plugin', () => {
     expect(ghEnvStat.isSymbolicLink()).toBe(false)
     expect(await fs.readFile(sandboxPath, 'utf-8')).toContain("ctx.shell.hook('create.before'")
     expect(await fs.readFile(ghEnvPath, 'utf-8')).toContain("id: 'ocm.gh-env'")
+  })
+
+  it('default-exports the registry sandbox id and bakes the service settings path into the generated source', async () => {
+    const plugin = await loadPlugin(configHome)
+    const source = await fs.readFile(path.join(getOpenCodePluginDir(configHome), 'ocm-sandbox.js'), 'utf-8')
+
+    expect(plugin.id).toBe('ocm.sandbox')
+    expect(source).toContain("id: 'ocm.sandbox'")
+    expect(source).toContain(`var SERVICE_SETTINGS_PATH = path.resolve(${JSON.stringify(path.join(getConfigPath(), 'service.json'))})`)
   })
 
   describe('create.before hook', () => {
@@ -356,6 +367,102 @@ describe('ocm-sandbox plugin', () => {
       await plugin.triggerToolExecuteAfter(event)
 
       expect(event.result).toBeUndefined()
+    })
+  })
+
+  describe('permission evaluate hook', () => {
+    const serviceSettingsPath = path.join(getConfigPath(), 'service.json')
+    const configDirectory = path.dirname(serviceSettingsPath)
+    const ancestorDirectory = path.dirname(configDirectory)
+
+    function permissionEvaluateEvent(overrides: Partial<PermissionEvaluateEvent> = {}): PermissionEvaluateEvent {
+      return { action: 'read', resources: [serviceSettingsPath], ...overrides }
+    }
+
+    it('denies a resource that resolves to the service settings file', async () => {
+      const plugin = await loadPlugin(configHome)
+      const event = permissionEvaluateEvent()
+
+      await plugin.triggerPermissionEvaluate(event)
+
+      expect(event.effect).toBe('deny')
+      expect(event.message).toContain('service.json')
+    })
+
+    it('leaves the effect untouched when enforcement is off', async () => {
+      delete process.env.OCM_SANDBOX_ENFORCED
+      const plugin = await loadPlugin(configHome)
+      const event = permissionEvaluateEvent()
+
+      await plugin.triggerPermissionEvaluate(event)
+
+      expect(event.effect).toBeUndefined()
+      expect(event.message).toBeUndefined()
+    })
+
+    it('denies a grep or glob whose metadata path is the config directory or an ancestor', async () => {
+      const plugin = await loadPlugin(configHome)
+      const events = [
+        permissionEvaluateEvent({ action: 'grep', resources: ['**/*.ts'], metadata: { path: configDirectory, root: '.' } }),
+        permissionEvaluateEvent({ action: 'glob', resources: ['*'], metadata: { path: ancestorDirectory, root: ancestorDirectory } }),
+        permissionEvaluateEvent({ action: 'glob', resources: ['*'], metadata: { path: '/workspace/repos/ai-test', root: configDirectory } }),
+        permissionEvaluateEvent({ action: 'grep', resources: ['password'], metadata: { path: serviceSettingsPath, root: '.' } }),
+      ]
+      for (const event of events) {
+        await plugin.triggerPermissionEvaluate(event)
+        expect(event.effect, `${event.action} ${String(event.metadata?.path)}`).toBe('deny')
+      }
+    })
+
+    it('allows a grep or glob whose metadata path points elsewhere, even when the pattern could name the file', async () => {
+      const plugin = await loadPlugin(configHome)
+      const searchRoot = path.join(ancestorDirectory, 'repos', 'ai-test')
+      const events = [
+        permissionEvaluateEvent({ action: 'grep', resources: ['service.json'], metadata: { path: searchRoot, root: '.' } }),
+        permissionEvaluateEvent({ action: 'glob', resources: ['**/service.json'], metadata: { path: searchRoot, root: '.' } }),
+        permissionEvaluateEvent({ action: 'grep', resources: ['service.json'], metadata: { path: '.', root: '.' } }),
+        permissionEvaluateEvent({ action: 'glob', resources: ['service.json'], metadata: { path: undefined, root: '.' } }),
+      ]
+      for (const event of events) {
+        await plugin.triggerPermissionEvaluate(event)
+        expect(event.effect, `${event.action} ${String(event.metadata?.path)}`).toBeUndefined()
+      }
+    })
+
+    it('denies an external_directory grant for the config directory or an ancestor', async () => {
+      const plugin = await loadPlugin(configHome)
+      for (const resource of [configDirectory, path.join(configDirectory, '*'), path.join(ancestorDirectory, '*')]) {
+        const event = permissionEvaluateEvent({ action: 'external_directory', resources: [resource] })
+        await plugin.triggerPermissionEvaluate(event)
+        expect(event.effect, resource).toBe('deny')
+      }
+    })
+
+    it('allows an unrelated path', async () => {
+      const plugin = await loadPlugin(configHome)
+      const event = permissionEvaluateEvent({ resources: [path.join(ancestorDirectory, 'repos', 'ai-test', 'README.md')] })
+
+      await plugin.triggerPermissionEvaluate(event)
+
+      expect(event.effect).toBeUndefined()
+    })
+
+    it('allows a sibling file in the config directory for read', async () => {
+      const plugin = await loadPlugin(configHome)
+      const event = permissionEvaluateEvent({ resources: [path.join(configDirectory, 'opencode.json')] })
+
+      await plugin.triggerPermissionEvaluate(event)
+
+      expect(event.effect).toBeUndefined()
+    })
+
+    it('ignores resources that are not strings', async () => {
+      const plugin = await loadPlugin(configHome)
+      const event = permissionEvaluateEvent({ resources: [undefined as unknown as string, serviceSettingsPath] })
+
+      await plugin.triggerPermissionEvaluate(event)
+
+      expect(event.effect).toBe('deny')
     })
   })
 })

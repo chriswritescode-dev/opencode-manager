@@ -20,12 +20,12 @@ vi.mock('@/api/oauth', () => ({
   },
 }))
 
-function providerFixture(id: string, name: string, env: string[]): ProviderWithModels {
-  return { id, name, env, models: [], source: 'builtin', isConnected: false }
+function providerFixture(id: string, name: string): ProviderWithModels {
+  return { id, name, models: [], source: 'builtin', isConnected: false }
 }
 
-const azureProvider = providerFixture('azure', 'Azure', ['AZURE_API_KEY'])
-const anthropicProvider = providerFixture('anthropic', 'Anthropic', ['ANTHROPIC_API_KEY'])
+const azureProvider = providerFixture('azure', 'Azure')
+const anthropicProvider = providerFixture('anthropic', 'Anthropic')
 
 function renderDialog(provider: ProviderWithModels, onSuccess = vi.fn()) {
   const queryClient = new QueryClient({ defaultOptions: { queries: { retry: false } } })

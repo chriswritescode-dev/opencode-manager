@@ -5,7 +5,11 @@ import { buildOpenCodeBasicAuth } from '@opencode-manager/shared/opencode'
 import { createInternalTokenMiddleware } from '../auth/internal-token-middleware'
 import type { SettingsService } from '../services/settings'
 import { opencodeServerManager } from '../services/opencode-single-server'
-import { getOpenCodeUpstreamBaseUrl, withDefaultOpenCodeDirectory } from '../services/opencode/upstream'
+import {
+  getOpenCodeUpstreamBaseUrl,
+  OPENCODE_DIRECTORY_HEADER,
+  withDefaultOpenCodeDirectory,
+} from '../services/opencode/upstream'
 import { getRepoById } from '../db/queries'
 
 const HOP_BY_HOP_HEADERS = new Set([
@@ -28,18 +32,18 @@ interface ProxyRequestParts {
   path: string
   headers: Record<string, string>
   searchParams: URLSearchParams
-  bodyText: string | undefined
-  isJson: boolean
 }
 
 type ProxyRewrite = (parts: ProxyRequestParts) => void
+
+type ProxyBodyRewrite = (bodyText: string) => string | undefined
 
 function isJsonContentType(contentType: string | undefined): boolean {
   return (contentType ?? '').toLowerCase().includes('application/json')
 }
 
 function rewriteRepoLocation(parts: ProxyRequestParts, directory: string): void {
-  parts.headers['x-opencode-directory'] = encodeURIComponent(directory)
+  parts.headers[OPENCODE_DIRECTORY_HEADER] = encodeURIComponent(directory)
 
   if (parts.searchParams.has('location[directory]')) {
     parts.searchParams.set('location[directory]', directory)
@@ -48,21 +52,23 @@ function rewriteRepoLocation(parts: ProxyRequestParts, directory: string): void 
   if (parts.method === 'GET' && parts.path === '/api/session') {
     parts.searchParams.set('directory', directory)
   }
+}
 
-  if (!parts.isJson || parts.bodyText === undefined) return
-
+function rewriteRepoLocationBody(bodyText: string, directory: string): string | undefined {
+  let parsed: unknown
   try {
-    const parsed = JSON.parse(parts.bodyText) as unknown
-    if (parsed && typeof parsed === 'object' && !Array.isArray(parsed)) {
-      const location = (parsed as { location?: unknown }).location
-      if (location && typeof location === 'object' && !Array.isArray(location)) {
-        ;(parsed as { location: Record<string, unknown> }).location = { ...location, directory }
-        parts.bodyText = JSON.stringify(parsed)
-      }
-    }
+    parsed = JSON.parse(bodyText)
   } catch {
-    // Leave malformed bodies untouched.
+    return undefined
   }
+
+  if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) return undefined
+
+  const location = (parsed as { location?: unknown }).location
+  if (!location || typeof location !== 'object' || Array.isArray(location)) return undefined
+
+  ;(parsed as { location: Record<string, unknown> }).location = { ...location, directory }
+  return JSON.stringify(parsed)
 }
 
 export function createOpenCodeProxyRoutes(db: Database, settingsService: SettingsService) {
@@ -70,7 +76,12 @@ export function createOpenCodeProxyRoutes(db: Database, settingsService: Setting
 
   app.use('/*', createInternalTokenMiddleware(db))
 
-  async function forwardToOpenCode(c: Context, pathSuffix: string, rewrite?: ProxyRewrite): Promise<Response> {
+  async function forwardToOpenCode(
+    c: Context,
+    pathSuffix: string,
+    rewrite?: ProxyRewrite,
+    rewriteBody?: ProxyBodyRewrite,
+  ): Promise<Response> {
     if (!opencodeServerManager.isLifecycleInitialized()) {
       return c.json({ error: 'OpenCode lifecycle initialization is incomplete; refusing to proxy to an unmanaged server' }, 503)
     }
@@ -95,22 +106,27 @@ export function createOpenCodeProxyRoutes(db: Database, settingsService: Setting
 
     headers['Authorization'] = buildOpenCodeBasicAuth(settingsService.getOpenCodeServerPassword())
 
+    const isJson = isJsonContentType(headers['content-type'] ?? headers['Content-Type'])
+    const shouldBufferBody = rewriteBody !== undefined && hasBody && isJson
+    const rawBody = shouldBufferBody ? await c.req.arrayBuffer() : undefined
+
     let requestBody: RequestInit['body'] = hasBody ? c.req.raw.body : undefined
 
     if (rewrite) {
-      const rawBody = hasBody ? await c.req.arrayBuffer() : undefined
-      const isJson = isJsonContentType(headers['content-type'] ?? headers['Content-Type'])
       const parts: ProxyRequestParts = {
         method: c.req.method,
         path: pathSuffix,
         headers,
         searchParams: url.searchParams,
-        bodyText: isJson && rawBody && rawBody.byteLength > 0 ? new TextDecoder().decode(rawBody) : undefined,
-        isJson,
       }
       rewrite(parts)
       url.search = parts.searchParams.toString()
-      requestBody = parts.bodyText === undefined ? rawBody : parts.bodyText
+    }
+
+    if (rewriteBody && rawBody !== undefined) {
+      const bodyText = rawBody.byteLength > 0 ? new TextDecoder().decode(rawBody) : undefined
+      const rewrittenBody = bodyText === undefined ? undefined : rewriteBody(bodyText)
+      requestBody = rewrittenBody === undefined ? rawBody : rewrittenBody
     }
 
     const upstreamUrl = `${getOpenCodeUpstreamBaseUrl()}${pathSuffix}${url.search}`
@@ -152,7 +168,12 @@ export function createOpenCodeProxyRoutes(db: Database, settingsService: Setting
     const url = new URL(c.req.url)
     const pathSuffix = url.pathname.replace(/^\/api\/opencode-proxy\/repos\/[^/]+/, '') || '/'
 
-    return forwardToOpenCode(c, pathSuffix, (parts) => rewriteRepoLocation(parts, repo.fullPath))
+    return forwardToOpenCode(
+      c,
+      pathSuffix,
+      (parts) => rewriteRepoLocation(parts, repo.fullPath),
+      (bodyText) => rewriteRepoLocationBody(bodyText, repo.fullPath),
+    )
   })
 
   app.all('/*', async (c) => {

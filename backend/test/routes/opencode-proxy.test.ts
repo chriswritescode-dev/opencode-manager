@@ -869,7 +869,7 @@ describe('opencode-proxy repo-scoped mount', () => {
     expect(forwarded).toEqual({ title: 'x', location: { directory: '/srv/repos/my-repo' } })
   })
 
-  it('leaves a non-JSON body untouched', async () => {
+  it('streams a non-JSON body through untouched', async () => {
     getRepoByIdMock.mockReturnValue(readyRepo)
     const upstreamFetch = upstreamOk()
 
@@ -884,8 +884,45 @@ describe('opencode-proxy repo-scoped mount', () => {
 
     expect(res.status).toBe(200)
     const fetchCall = upstreamFetch.mock.calls[0] as [string, RequestInit]
-    const forwarded = new TextDecoder().decode(fetchCall[1].body as ArrayBuffer)
-    expect(forwarded).toBe('location=/local/dir')
+    expect(fetchCall[1].body).toBeInstanceOf(ReadableStream)
+    expect(await new Response(fetchCall[1].body as ReadableStream).text()).toBe('location=/local/dir')
+  })
+
+  it('forwards a JSON body without a location unchanged', async () => {
+    getRepoByIdMock.mockReturnValue(readyRepo)
+    const upstreamFetch = upstreamOk()
+    const body = JSON.stringify({ title: 'x' })
+
+    const res = await app.request('/api/opencode-proxy/repos/7/api/session', {
+      method: 'POST',
+      headers: {
+        Authorization: 'Bearer test-internal-token',
+        'Content-Type': 'application/json',
+      },
+      body,
+    })
+
+    expect(res.status).toBe(200)
+    const fetchCall = upstreamFetch.mock.calls[0] as [string, RequestInit]
+    expect(new TextDecoder().decode(fetchCall[1].body as ArrayBuffer)).toBe(body)
+  })
+
+  it('forwards a malformed JSON body unchanged', async () => {
+    getRepoByIdMock.mockReturnValue(readyRepo)
+    const upstreamFetch = upstreamOk()
+
+    const res = await app.request('/api/opencode-proxy/repos/7/api/session', {
+      method: 'POST',
+      headers: {
+        Authorization: 'Bearer test-internal-token',
+        'Content-Type': 'application/json',
+      },
+      body: '{not json',
+    })
+
+    expect(res.status).toBe(200)
+    const fetchCall = upstreamFetch.mock.calls[0] as [string, RequestInit]
+    expect(new TextDecoder().decode(fetchCall[1].body as ArrayBuffer)).toBe('{not json')
   })
 })
 

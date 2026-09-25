@@ -48,7 +48,7 @@ export { ClientError, isIntegrationNotFoundError, isMcpServerNotFoundError, isWo
 
 export { assistantText, sessionIDFromEvent, toolContentText } from './content'
 
-export type { AssistantTextOptions, ToolContentTextOptions } from './content'
+export { formatOpenCodeModelRef, parseOpenCodeModelRef } from './modelRef'
 
 export {
   MCP_OAUTH_CALLBACK_PATH,
@@ -76,8 +76,6 @@ export {
   parseOpenCodeVersion,
   parseOpenCodeVersionOutput,
 } from './release'
-
-export type { OpenCodeVersion } from './release'
 
 export const OPENCODE_SERVER_USERNAME = 'opencode'
 

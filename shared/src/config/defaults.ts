@@ -101,6 +101,8 @@ export const GIT_PROVIDERS = {
 export const OPENCODE_CONFIG_SOURCE_NAMES = ['opencode.json', 'opencode.jsonc'] as const
 export type OpenCodeConfigSourceName = (typeof OPENCODE_CONFIG_SOURCE_NAMES)[number]
 
+export const LEGACY_OPENCODE_CONFIG_SOURCE_NAME = 'config.json'
+
 export type Config = typeof DEFAULTS
 export type AllowedMimeType = (typeof ALLOWED_MIME_TYPES)[number]
 export type GitProvider = (typeof GIT_PROVIDERS)[keyof typeof GIT_PROVIDERS]

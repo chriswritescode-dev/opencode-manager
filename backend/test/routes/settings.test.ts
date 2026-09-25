@@ -215,7 +215,6 @@ vi.mock('../../src/services/opencode-single-server', async (importOriginal) => {
 
 const openCodeInstallerMock = vi.hoisted(() => ({
   installOpenCodeVersion: vi.fn(),
-  latestOpenCodeVersion: vi.fn(),
 }))
 
 vi.mock('../../src/services/opencode-installer', async (importOriginal) => {
@@ -223,7 +222,6 @@ vi.mock('../../src/services/opencode-installer', async (importOriginal) => {
   return {
     ...actual,
     installOpenCodeVersion: openCodeInstallerMock.installOpenCodeVersion,
-    latestOpenCodeVersion: openCodeInstallerMock.latestOpenCodeVersion,
   }
 })
 
@@ -291,7 +289,7 @@ vi.mock('@opencode-manager/shared/config/env', () => ({
 }))
 
 import { createSettingsRoutes } from '../../src/routes/settings'
-import { clearOpenCodeVersionCache } from '../../src/services/opencode-installer'
+import { clearOpenCodeVersionCache, OpenCodeInstallError } from '../../src/services/opencode-installer'
 import { getImportedSessionDirectories, getOpenCodeImportStatus, OpenCodeImportProtectionError, syncOpenCodeImport } from '../../src/services/opencode-import'
 import { relinkReposFromSessionDirectories } from '../../src/services/repo'
 import { opencodeServerManager } from '../../src/services/opencode-single-server'
@@ -314,7 +312,6 @@ const mockGetImportedSessionDirectories = getImportedSessionDirectories as Retur
 const mockRelinkReposFromSessionDirectories = relinkReposFromSessionDirectories as ReturnType<typeof vi.fn>
 const mockDetectSandboxCapability = detectSandboxCapability as ReturnType<typeof vi.fn>
 const mockInstallOpenCodeVersion = openCodeInstallerMock.installOpenCodeVersion
-const mockLatestOpenCodeVersion = openCodeInstallerMock.latestOpenCodeVersion
 
 describe('Settings Routes - OpenCode Upgrade', () => {
   let settingsApp: ReturnType<typeof createSettingsRoutes>
@@ -344,8 +341,11 @@ describe('Settings Routes - OpenCode Upgrade', () => {
     mockDetectSandboxCapability.mockReturnValue({ available: true, msbVersion: 'msb 1.0.0' })
     mockInstallOpenCodeVersion.mockReset()
     mockInstallOpenCodeVersion.mockResolvedValue('/home/node/.opencode/bin/opencode')
-    mockLatestOpenCodeVersion.mockReset()
-    mockLatestOpenCodeVersion.mockResolvedValue('2.0.15')
+    clearOpenCodeVersionCache()
+    vi.stubGlobal('fetch', vi.fn().mockResolvedValue(new Response(JSON.stringify({
+      versions: { '2.0.15': {} },
+      time: {},
+    }), { status: 200 })))
     forceProcessAttestation(true)
     sandboxRuntimeServiceMock.SandboxRuntimeService.mockReset()
     sandboxRuntimeServiceMock.SandboxRuntimeService.mockImplementation(() => ({
@@ -375,6 +375,10 @@ describe('Settings Routes - OpenCode Upgrade', () => {
       duplicatePathCount: 0,
       errors: [],
     })
+  })
+
+  afterEach(() => {
+    vi.unstubAllGlobals()
   })
 
   describe('OpenCode config routes', () => {
@@ -719,7 +723,6 @@ describe('Settings Routes - OpenCode Upgrade', () => {
     describe('successful upgrade scenarios', () => {
       it('should install the latest version and respond with success', async () => {
         mockGetVersion.mockReturnValueOnce('2.0.14')
-        mockLatestOpenCodeVersion.mockResolvedValueOnce('2.0.15')
         mockFetchVersion.mockResolvedValueOnce('2.0.15')
         mockInstallOpenCodeVersion.mockResolvedValueOnce('/home/node/.opencode/bin/opencode')
 
@@ -740,7 +743,6 @@ describe('Settings Routes - OpenCode Upgrade', () => {
 
       it('should not install when the latest version is not newer', async () => {
         mockGetVersion.mockReturnValueOnce('2.0.15')
-        mockLatestOpenCodeVersion.mockResolvedValueOnce('2.0.15')
 
         const req = new Request('http://localhost/opencode-upgrade', {
           method: 'POST'
@@ -758,7 +760,6 @@ describe('Settings Routes - OpenCode Upgrade', () => {
 
       it('should replace an unsupported newer major with the latest supported release', async () => {
         mockGetVersion.mockReturnValueOnce('3.0.0')
-        mockLatestOpenCodeVersion.mockResolvedValueOnce('2.0.15')
         mockFetchVersion.mockResolvedValueOnce('2.0.15')
         mockInstallOpenCodeVersion.mockResolvedValueOnce('/home/node/.opencode/bin/opencode')
 
@@ -772,7 +773,6 @@ describe('Settings Routes - OpenCode Upgrade', () => {
 
       it('should restart directly after a successful upgrade', async () => {
         mockGetVersion.mockReturnValueOnce('2.0.14')
-        mockLatestOpenCodeVersion.mockResolvedValueOnce('2.0.15')
         mockFetchVersion.mockResolvedValueOnce('2.0.15')
         mockInstallOpenCodeVersion.mockResolvedValueOnce('/home/node/.opencode/bin/opencode')
 
@@ -787,7 +787,6 @@ describe('Settings Routes - OpenCode Upgrade', () => {
       it('allows upgrading while sandbox enforcement is active', async () => {
         mockIsSandboxEnforced.mockReturnValue(true)
         mockGetVersion.mockReturnValueOnce('2.0.14')
-        mockLatestOpenCodeVersion.mockResolvedValueOnce('2.0.15')
         mockFetchVersion.mockResolvedValueOnce('2.0.15')
         mockInstallOpenCodeVersion.mockResolvedValueOnce('/home/node/.opencode/bin/opencode')
 
@@ -800,11 +799,10 @@ describe('Settings Routes - OpenCode Upgrade', () => {
     })
 
     describe('failure and recovery scenarios', () => {
-      it('should attempt server recovery when the install fails', async () => {
+      it('should attempt server recovery when the install fails after the binary swap started', async () => {
         mockGetVersion.mockReturnValueOnce('2.0.14')
           .mockReturnValueOnce('2.0.14')
-        mockLatestOpenCodeVersion.mockResolvedValueOnce('2.0.15')
-        mockInstallOpenCodeVersion.mockRejectedValueOnce(new Error('download failed'))
+        mockInstallOpenCodeVersion.mockRejectedValueOnce(new OpenCodeInstallError('download failed', true))
 
         const req = new Request('http://localhost/opencode-upgrade', {
           method: 'POST'
@@ -824,11 +822,30 @@ describe('Settings Routes - OpenCode Upgrade', () => {
         expect(json.error).toContain('recovered')
       })
 
+      it('should not restart the server when the install fails before the binary swap', async () => {
+        mockGetVersion.mockReturnValueOnce('2.0.14')
+        mockInstallOpenCodeVersion.mockRejectedValueOnce(new OpenCodeInstallError('download failed', false))
+
+        const req = new Request('http://localhost/opencode-upgrade', {
+          method: 'POST'
+        })
+        const res = await settingsApp.fetch(req)
+        const json = await res.json() as Record<string, unknown>
+
+        expect(mockRestart).not.toHaveBeenCalled()
+        expect(res.status).toBe(500)
+        expect(json).toMatchObject({
+          upgraded: false,
+          recovered: false,
+          oldVersion: '2.0.14',
+          newVersion: '2.0.14'
+        })
+      })
+
       it('should return 500 when recovery fails', async () => {
         mockGetVersion.mockReturnValueOnce('2.0.14')
           .mockReturnValueOnce('2.0.14')
-        mockLatestOpenCodeVersion.mockResolvedValueOnce('2.0.15')
-        mockInstallOpenCodeVersion.mockRejectedValueOnce(new Error('download failed'))
+        mockInstallOpenCodeVersion.mockRejectedValueOnce(new OpenCodeInstallError('download failed', true))
         mockRestart.mockRejectedValueOnce(new Error('Restart failed'))
 
         const req = new Request('http://localhost/opencode-upgrade', {
@@ -845,7 +862,6 @@ describe('Settings Routes - OpenCode Upgrade', () => {
     describe('version handling', () => {
       it('should install and restart when getVersion returns null', async () => {
         mockGetVersion.mockReturnValueOnce(null)
-        mockLatestOpenCodeVersion.mockResolvedValueOnce('2.0.15')
         mockFetchVersion.mockResolvedValueOnce('2.0.15')
         mockInstallOpenCodeVersion.mockResolvedValueOnce('/home/node/.opencode/bin/opencode')
 
@@ -868,7 +884,6 @@ describe('Settings Routes - OpenCode Upgrade', () => {
 
       it('should fail recovery when the installed version cannot be detected', async () => {
         mockGetVersion.mockReturnValueOnce(null)
-        mockLatestOpenCodeVersion.mockResolvedValueOnce('2.0.15')
         mockFetchVersion.mockResolvedValueOnce(null)
         mockInstallOpenCodeVersion.mockResolvedValueOnce('/home/node/.opencode/bin/opencode')
 
@@ -889,7 +904,6 @@ describe('Settings Routes - OpenCode Upgrade', () => {
 
       it('should not report success when an override still resolves to the older version', async () => {
         mockGetVersion.mockReturnValueOnce('2.0.14')
-        mockLatestOpenCodeVersion.mockResolvedValueOnce('2.0.15')
         mockFetchVersion.mockResolvedValueOnce('2.0.14')
         mockInstallOpenCodeVersion.mockResolvedValueOnce('/home/node/.opencode/bin/opencode')
 
@@ -979,11 +993,11 @@ describe('Settings Routes - OpenCode Upgrade', () => {
     })
 
     describe('failure and recovery', () => {
-      it('should recover the server when the version install fails', async () => {
+      it('should recover the server when the version install fails after the binary swap started', async () => {
         mockGetVersion.mockReturnValueOnce('2.0.14')
           .mockReturnValueOnce('2.0.14')
         mockFetchVersion.mockResolvedValueOnce('2.0.14')
-        mockInstallOpenCodeVersion.mockRejectedValueOnce(new Error('download failed'))
+        mockInstallOpenCodeVersion.mockRejectedValueOnce(new OpenCodeInstallError('download failed', true))
 
         const req = new Request('http://localhost/opencode-install-version', {
           method: 'POST',
@@ -996,6 +1010,23 @@ describe('Settings Routes - OpenCode Upgrade', () => {
         expect(mockRestart).toHaveBeenCalled()
         expect(res.status).toBe(400)
         expect(json.recovered).toBe(true)
+      })
+
+      it('should not restart the server when the version install fails before the binary swap', async () => {
+        mockGetVersion.mockReturnValueOnce('2.0.14')
+        mockInstallOpenCodeVersion.mockRejectedValueOnce(new OpenCodeInstallError('download failed', false))
+
+        const req = new Request('http://localhost/opencode-install-version', {
+          method: 'POST',
+          body: JSON.stringify({ version: '2.0.15' }),
+          headers: { 'Content-Type': 'application/json' }
+        })
+        const res = await settingsApp.fetch(req)
+        const json = await res.json() as Record<string, unknown>
+
+        expect(mockRestart).not.toHaveBeenCalled()
+        expect(res.status).toBe(500)
+        expect(json.recovered).toBe(false)
       })
     })
 
@@ -1084,21 +1115,59 @@ describe('Settings Routes - OpenCode Upgrade', () => {
     })
   })
 
+  describe('OPENCODE_BIN externally managed binary', () => {
+    let originalBin: string | undefined
+
+    beforeEach(() => {
+      originalBin = process.env.OPENCODE_BIN
+      process.env.OPENCODE_BIN = '/usr/local/bin/opencode'
+    })
+
+    afterEach(() => {
+      if (originalBin === undefined) delete process.env.OPENCODE_BIN
+      else process.env.OPENCODE_BIN = originalBin
+    })
+
+    it('refuses POST /opencode-upgrade with 409 without installing or restarting', async () => {
+      const res = await settingsApp.fetch(new Request('http://localhost/opencode-upgrade', { method: 'POST' }))
+      const json = await res.json() as Record<string, unknown>
+
+      expect(res.status).toBe(409)
+      expect(json.error).toContain('OPENCODE_BIN')
+      expect(mockInstallOpenCodeVersion).not.toHaveBeenCalled()
+      expect(mockRestart).not.toHaveBeenCalled()
+    })
+
+    it('refuses POST /opencode-install-version with 409 without installing or restarting', async () => {
+      const res = await settingsApp.fetch(new Request('http://localhost/opencode-install-version', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ version: '2.0.15' }),
+      }))
+      const json = await res.json() as Record<string, unknown>
+
+      expect(res.status).toBe(409)
+      expect(json.error).toContain('OPENCODE_BIN')
+      expect(mockInstallOpenCodeVersion).not.toHaveBeenCalled()
+      expect(mockRestart).not.toHaveBeenCalled()
+    })
+  })
+
   describe('error scenarios - server stability', () => {
-    it('should not crash when the install throws an unexpected error', async () => {
+    it('should not restart the server when the install fails before the binary swap', async () => {
       mockGetVersion.mockReturnValueOnce('2.0.14')
-          .mockReturnValue('2.0.14')
-      mockLatestOpenCodeVersion.mockResolvedValueOnce('2.0.15')
-      mockInstallOpenCodeVersion.mockRejectedValueOnce(new Error('Unexpected error'))
+      mockInstallOpenCodeVersion.mockRejectedValueOnce(new OpenCodeInstallError('Unexpected error', false))
       mockRestart.mockResolvedValue(undefined)
 
       const req = new Request('http://localhost/opencode-upgrade', {
         method: 'POST'
       })
       const res = await settingsApp.fetch(req)
+      const json = await res.json() as Record<string, unknown>
 
-      expect(res.status).toBe(400)
-      await expect(res.json()).resolves.toBeDefined()
+      expect(res.status).toBe(500)
+      expect(mockRestart).not.toHaveBeenCalled()
+      expect(json).toMatchObject({ recovered: false, upgraded: false })
     })
 
     it('should not crash when getVersion throws error during failure recovery', async () => {
@@ -1106,8 +1175,7 @@ describe('Settings Routes - OpenCode Upgrade', () => {
           .mockImplementationOnce(() => {
             throw new Error('GetVersion failed')
           })
-      mockLatestOpenCodeVersion.mockResolvedValueOnce('2.0.15')
-      mockInstallOpenCodeVersion.mockRejectedValueOnce(new Error('install failed'))
+      mockInstallOpenCodeVersion.mockRejectedValueOnce(new OpenCodeInstallError('install failed', true))
       mockRestart.mockResolvedValue(undefined)
 
       const req = new Request('http://localhost/opencode-upgrade', {
@@ -1122,7 +1190,6 @@ describe('Settings Routes - OpenCode Upgrade', () => {
     it('should handle fetchVersion throwing error during normal upgrade', async () => {
       mockGetVersion.mockReturnValueOnce('2.0.14')
         .mockReturnValueOnce('2.0.14')
-      mockLatestOpenCodeVersion.mockResolvedValueOnce('2.0.15')
       mockFetchVersion.mockRejectedValueOnce(new Error('Fetch version failed'))
       mockInstallOpenCodeVersion.mockResolvedValueOnce('/home/node/.opencode/bin/opencode')
 
@@ -1140,8 +1207,7 @@ describe('Settings Routes - OpenCode Upgrade', () => {
     it('should not leave server in broken state when the install fails', async () => {
       mockGetVersion.mockReturnValueOnce('2.0.14')
           .mockReturnValueOnce('2.0.14')
-      mockLatestOpenCodeVersion.mockResolvedValueOnce('2.0.15')
-      mockInstallOpenCodeVersion.mockRejectedValueOnce(new Error('install failed'))
+      mockInstallOpenCodeVersion.mockRejectedValueOnce(new OpenCodeInstallError('install failed', true))
       mockRestart.mockResolvedValue(undefined)
 
       const req = new Request('http://localhost/opencode-upgrade', {
@@ -1153,89 +1219,6 @@ describe('Settings Routes - OpenCode Upgrade', () => {
       expect(mockClearStartupError).toHaveBeenCalled()
       expect(mockRestart).toHaveBeenCalled()
       expect(json.recovered).toBe(true)
-    })
-  })
-
-  describe('POST /opencode-reload', () => {
-    const validConfigFile = {
-      path: '/tmp/test-workspace/.config/opencode.json',
-      content: {},
-      rawContent: '{}',
-      isValid: true,
-      updatedAt: 1,
-    }
-    let openCodeClient: ReturnType<typeof createStubOpenCodeClient>
-    let app: ReturnType<typeof createSettingsRoutes>
-    let supervisor: { restart: ReturnType<typeof vi.fn> }
-
-    beforeEach(() => {
-      vi.clearAllMocks()
-      mockReadOpenCodeConfigFile.mockReset()
-      mockRestart.mockReset()
-      openCodeClient = createStubOpenCodeClient()
-      supervisor = { restart: vi.fn().mockResolvedValue({ healthy: true }) }
-      app = createSettingsRoutes(
-        testDb,
-        { getGitEnvironment: vi.fn().mockReturnValue({}) } as any,
-        openCodeClient,
-        supervisor as any,
-      )
-    })
-
-    it('reloads the OpenCode configuration without restarting the server when the config is valid', async () => {
-      mockReadOpenCodeConfigFile.mockResolvedValueOnce(validConfigFile)
-
-      const res = await app.fetch(new Request('http://localhost/opencode-reload', { method: 'POST' }))
-      const json = await res.json() as Record<string, unknown>
-
-      expect(res.status).toBe(200)
-      expect(json).toEqual({ success: true, message: 'OpenCode configuration reloaded' })
-      expect(openCodeClient.api.location.reload).toHaveBeenCalledTimes(1)
-      expect(supervisor.restart).not.toHaveBeenCalled()
-      expect(mockRestart).not.toHaveBeenCalled()
-    })
-
-    it('should propagate validationIssues and not reload when the config is invalid', async () => {
-      const validationIssues = [
-        { path: 'command.review', message: 'Invalid field' },
-        { path: 'agent.temperature', message: 'Temperature out of range' }
-      ]
-
-      mockReadOpenCodeConfigFile.mockResolvedValueOnce({ ...validConfigFile, isValid: false, validationIssues })
-
-      const res = await app.fetch(new Request('http://localhost/opencode-reload', { method: 'POST' }))
-      const json = await res.json() as Record<string, unknown>
-
-      expect(res.status).toBe(500)
-      expect(json.error).toBe('OpenCode global configuration is invalid')
-      expect(json.details).toBe('command.review: Invalid field; agent.temperature: Temperature out of range')
-      expect(json.validationIssues).toEqual(validationIssues)
-      expect(openCodeClient.api.location.reload).not.toHaveBeenCalled()
-    })
-
-    it('should return 500 and not reload when every global config source is absent', async () => {
-      mockReadOpenCodeConfigFile.mockResolvedValueOnce(null)
-
-      const res = await app.fetch(new Request('http://localhost/opencode-reload', { method: 'POST' }))
-      const json = await res.json() as Record<string, unknown>
-
-      expect(res.status).toBe(500)
-      expect(json.error).toBe('No OpenCode global configuration files found')
-      expect(json.details).toBe('No OpenCode global configuration files found')
-      expect(openCodeClient.api.location.reload).not.toHaveBeenCalled()
-    })
-
-    it('should return a generic error when the location reload fails', async () => {
-      mockReadOpenCodeConfigFile.mockResolvedValueOnce(validConfigFile)
-      vi.mocked(openCodeClient.api.location.reload).mockRejectedValueOnce(new Error('Some other error'))
-
-      const res = await app.fetch(new Request('http://localhost/opencode-reload', { method: 'POST' }))
-      const json = await res.json() as Record<string, unknown>
-
-      expect(res.status).toBe(500)
-      expect(json.error).toBe('Failed to reload OpenCode configuration')
-      expect(json.details).toBe('Some other error')
-      expect(supervisor.restart).not.toHaveBeenCalled()
     })
   })
 
@@ -1290,7 +1273,7 @@ describe('Settings Routes - OpenCode Upgrade', () => {
       expect(res.status).toBe(200)
       expect(json.success).toBe(true)
       expect(json.message).toBe('OpenCode server restarted successfully')
-      expect(json.interruptedSessions).toEqual([])
+      expect(json.interruptedSessions).toBeUndefined()
     })
 
     it('returns 500 when a manager restart fails without a supervisor', async () => {
@@ -1439,17 +1422,14 @@ describe('Settings Routes - OpenCode Upgrade', () => {
       expect(opencodeServerManager.markRestartPending).toHaveBeenCalledTimes(1)
     })
 
-    it.each([
-      ['server environment variables', { serverEnvVars: [] }, { serverEnvVars: [{ key: 'FOO', value: 'bar' }] }],
-      ['disabled default server environment variables', { disabledDefaultServerEnvVars: [] }, { disabledDefaultServerEnvVars: ['NODE_OPTIONS'] }],
-    ])('requires a restart when the %s change', async (_label, previous, next) => {
-      mockGetSettings.mockReturnValue({ preferences: previous, updatedAt: 1 })
-      mockUpdateSettings.mockReturnValue({ preferences: next, updatedAt: 2 })
+    it('requires a restart when server environment variables change', async () => {
+      mockGetSettings.mockReturnValue({ preferences: { serverEnvVars: [] }, updatedAt: 1 })
+      mockUpdateSettings.mockReturnValue({ preferences: { serverEnvVars: [{ key: 'FOO', value: 'bar' }] }, updatedAt: 2 })
 
       const res = await settingsApp.fetch(new Request('http://localhost/', {
         method: 'PATCH',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ preferences: next }),
+        body: JSON.stringify({ preferences: { serverEnvVars: [{ key: 'FOO', value: 'bar' }] } }),
       }))
       const json = await res.json() as Record<string, unknown>
 
@@ -1726,8 +1706,6 @@ describe('Settings Routes - versions, directory files, skills, MCP and maintenan
     mockFetchVersion.mockResolvedValue('2.0.15')
     mockInstallOpenCodeVersion.mockReset()
     mockInstallOpenCodeVersion.mockResolvedValue('/home/node/.opencode/bin/opencode')
-    mockLatestOpenCodeVersion.mockReset()
-    mockLatestOpenCodeVersion.mockResolvedValue('2.0.15')
     mockClearStartupError.mockReturnValue(undefined)
     mockSpawnSync.mockReturnValue({ status: 0, stdout: '', stderr: '' })
     mockValidateSSHPrivateKey.mockResolvedValue({ valid: true, hasPassphrase: false })
@@ -1791,6 +1769,20 @@ describe('Settings Routes - versions, directory files, skills, MCP and maintenan
     })
   })
 
+  describe('POST /opencode-upgrade', () => {
+    it('returns 500 without restarting when the registry lookup fails', async () => {
+      fetchMock.mockResolvedValue(new Response('unavailable', { status: 503 }))
+
+      const res = await app.request(new Request('http://localhost/opencode-upgrade', { method: 'POST' }))
+      const json = await res.json() as { error: string; recovered: boolean }
+
+      expect(res.status).toBe(500)
+      expect(json.error).toBe('Failed to upgrade OpenCode')
+      expect(json.recovered).toBe(false)
+      expect(supervisor.restart).not.toHaveBeenCalled()
+    })
+  })
+
   describe('POST /opencode-install-version', () => {
     it('installs the requested version and restarts the server', async () => {
       mockGetVersion.mockReturnValue('2.0.14')
@@ -1813,7 +1805,7 @@ describe('Settings Routes - versions, directory files, skills, MCP and maintenan
       expect(mockInstallOpenCodeVersion).toHaveBeenCalledWith('2.0.15')
     })
 
-    it('returns 500 without recovery when the version install fails and the server cannot be recovered', async () => {
+    it('returns 500 without restarting when the version install fails before the binary swap', async () => {
       mockGetVersion.mockReturnValue('2.0.14')
       mockFetchVersion.mockResolvedValue('2.0.15')
       mockInstallOpenCodeVersion.mockRejectedValueOnce(new Error('download failed'))
@@ -1829,6 +1821,7 @@ describe('Settings Routes - versions, directory files, skills, MCP and maintenan
       expect(res.status).toBe(500)
       expect(json.recovered).toBe(false)
       expect(json.newVersion).toBe('2.0.14')
+      expect(supervisor.restart).not.toHaveBeenCalled()
     })
   })
 

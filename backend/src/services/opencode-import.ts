@@ -6,11 +6,11 @@ import { Database as SQLiteDatabase } from 'bun:sqlite'
 import { getConfigPath, getWorkspacePath } from '@opencode-manager/shared/config/env'
 import {
   DEFAULT_OPENCODE_CONFIG_SOURCE_NAME,
+  LEGACY_OPENCODE_CONFIG_SOURCE_NAME,
   OPENCODE_CONFIG_SOURCE_NAMES,
   selectPreferredOpenCodeConfigSourceName,
 } from '@opencode-manager/shared'
 import {
-  LEGACY_OPENCODE_CONFIG_SOURCE_NAME,
   parseOpenCodeConfigContent,
   restoreOpenCodeConfigSnapshot,
   serializeOpenCodeConfigSourceSnapshot,

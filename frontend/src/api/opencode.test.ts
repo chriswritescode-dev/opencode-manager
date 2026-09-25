@@ -124,13 +124,13 @@ describe('OpenCode facade', () => {
     expect(session.id).toBe('ses_new')
   })
 
-  it('creates a session without location when no directory is provided', async () => {
+  it('creates a session with the required location and no optional fields', async () => {
     fetchMock.mockResolvedValue(jsonResponse({ data: sessionInfo('ses_new', '/repo') }))
 
-    await createSession({ agent: 'build' })
+    await createSession({ directory: '/repo' })
 
     expect(lastRequest().init.method).toBe('POST')
-    expect(lastRequest().init.body).toBe(JSON.stringify({ agent: 'build' }))
+    expect(lastRequest().init.body).toBe(JSON.stringify({ location: { directory: '/repo' } }))
   })
 
   it('deletes a session through the V2 session route', async () => {

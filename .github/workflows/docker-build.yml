@@ -20,14 +20,12 @@ jobs:
         id: versions
         run: |
           UV_VERSION=0.12.7
-          OPENCODE_VERSION=2.0.15
           MICROSANDBOX_VERSION=0.7.2
           PLAYWRIGHT_VERSION=1.63.0
           echo "uv=${UV_VERSION}" >> $GITHUB_OUTPUT
-          echo "opencode=${OPENCODE_VERSION}" >> $GITHUB_OUTPUT
           echo "microsandbox=${MICROSANDBOX_VERSION}" >> $GITHUB_OUTPUT
           echo "playwright=${PLAYWRIGHT_VERSION}" >> $GITHUB_OUTPUT
-          echo "Versions: uv=${UV_VERSION} (pinned), opencode=${OPENCODE_VERSION} (bundled default), microsandbox=${MICROSANDBOX_VERSION} (pinned), playwright=${PLAYWRIGHT_VERSION} (pinned)"
+          echo "Versions: uv=${UV_VERSION} (pinned), microsandbox=${MICROSANDBOX_VERSION} (pinned), playwright=${PLAYWRIGHT_VERSION} (pinned)"
 
       - name: Docker meta
         id: meta
@@ -63,7 +61,6 @@ jobs:
           labels: ${{ steps.meta.outputs.labels }}
           build-args: |
             UV_VERSION=${{ steps.versions.outputs.uv }}
-            OPENCODE_VERSION=${{ steps.versions.outputs.opencode }}
             MICROSANDBOX_VERSION=${{ steps.versions.outputs.microsandbox }}
             PLAYWRIGHT_VERSION=${{ steps.versions.outputs.playwright }}
           cache-from: type=gha

@@ -112,17 +112,12 @@ export const ServerEnvVarSchema = z.object({
 
 type ServerEnvVar = z.infer<typeof ServerEnvVarSchema>
 
-export const DEFAULT_SERVER_ENV_VARS = [
-  {
-    key: 'OPENCODE_EXPERIMENTAL_WORKSPACES',
-    value: 'true',
-  },
-] as const satisfies readonly ServerEnvVar[];
-
 export const BLOCKED_SERVER_ENV_KEYS = [
   'OPENCODE_PASSWORD',
   'OPENCODE_SERVER_PASSWORD',
   'OPENCODE_CONFIG',
+  'OPENCODE_CONFIG_DIR',
+  'OPENCODE_CONFIG_CONTENT',
   'XDG_DATA_HOME',
   'XDG_STATE_HOME',
   'XDG_CONFIG_HOME',
@@ -222,7 +217,6 @@ export const DEFAULT_USER_PREFERENCES = {
   repoSortMode: 'recent' as const,
   serverEnvVars: [] as ServerEnvVar[],
   sandbox: DEFAULT_SANDBOX_PREFERENCES,
-  disabledDefaultServerEnvVars: [] as string[],
 };
 
 export const SettingsResponseSchema = z.object({

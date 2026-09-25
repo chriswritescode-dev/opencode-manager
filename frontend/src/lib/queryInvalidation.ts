@@ -8,10 +8,8 @@ export function sessionTranscriptQueryKey(sessionID: string | null | undefined) 
 export function invalidateProviderCaches(queryClient: QueryClient) {
   queryClient.invalidateQueries({ queryKey: ['provider-credentials'] })
   queryClient.invalidateQueries({ queryKey: ['provider-auth-methods'] })
-  queryClient.invalidateQueries({ queryKey: ['providers'] })
   queryClient.invalidateQueries({ queryKey: ['providers-with-models'] })
   queryClient.invalidateQueries({ queryKey: ['opencode', 'providers'] })
-  queryClient.invalidateQueries({ queryKey: ['providers-for-execution-model'] })
 }
 
 interface ConfigInvalidationOptions {
@@ -30,7 +28,6 @@ export function invalidateConfigCaches(
   }
   queryClient.invalidateQueries({ queryKey: ['health'] })
   queryClient.invalidateQueries({ queryKey: ['mcp-status'] })
-  queryClient.invalidateQueries({ queryKey: ['opencode-skills'] })
   queryClient.invalidateQueries({ queryKey: ['managed-skills'] })
   queryClient.invalidateQueries({ queryKey: ['opencode-directory-files'] })
   invalidateProviderCaches(queryClient)
@@ -52,7 +49,6 @@ export function refreshOpenCodeServerCaches(queryClient: QueryClient, version?: 
 export function invalidateSkillCaches(queryClient: QueryClient) {
   queryClient.invalidateQueries({ queryKey: ['settings', 'skills'] })
   queryClient.invalidateQueries({ queryKey: ['managed-skills'] })
-  queryClient.invalidateQueries({ queryKey: ['opencode-skills'] })
   queryClient.invalidateQueries({ queryKey: ['health'] })
 }
 
@@ -165,6 +161,47 @@ export function invalidateSessionListCachesDebounced(queryClient: QueryClient, d
     setTimeout(() => {
       sessionListInvalidationTimers.delete(queryClient)
       invalidateSessionListCaches(queryClient)
+    }, delayMs),
+  )
+}
+
+const queryKeysInvalidationTimers = new WeakMap<QueryClient, Map<string, ReturnType<typeof setTimeout>>>()
+
+export function invalidateQueryKeysDebounced(
+  queryClient: QueryClient,
+  queryKeys: readonly (readonly unknown[])[],
+  delayMs = 200,
+) {
+  const existingTimers = queryKeysInvalidationTimers.get(queryClient)
+  const timers = existingTimers ?? new Map<string, ReturnType<typeof setTimeout>>()
+  if (!existingTimers) {
+    queryKeysInvalidationTimers.set(queryClient, timers)
+  }
+
+  const timerKey = JSON.stringify(queryKeys)
+  const existing = timers.get(timerKey)
+  if (existing) clearTimeout(existing)
+  timers.set(
+    timerKey,
+    setTimeout(() => {
+      timers.delete(timerKey)
+      for (const queryKey of queryKeys) {
+        queryClient.invalidateQueries({ queryKey: [...queryKey] })
+      }
+    }, delayMs),
+  )
+}
+
+const providerInvalidationTimers = new WeakMap<QueryClient, ReturnType<typeof setTimeout>>()
+
+export function invalidateProviderCachesDebounced(queryClient: QueryClient, delayMs = 200) {
+  const existing = providerInvalidationTimers.get(queryClient)
+  if (existing) clearTimeout(existing)
+  providerInvalidationTimers.set(
+    queryClient,
+    setTimeout(() => {
+      providerInvalidationTimers.delete(queryClient)
+      invalidateProviderCaches(queryClient)
     }, delayMs),
   )
 }

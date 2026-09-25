@@ -1,6 +1,7 @@
 import { promises as fs } from 'fs'
 import { lstat, realpath } from 'fs/promises'
 import path from 'path'
+import { OPENCODE_CONFIG_SOURCE_NAMES } from '@opencode-manager/shared'
 import { parseJsonc } from '@opencode-manager/shared/utils'
 import { logger } from '../utils/logger'
 import { existingFileMode, mkdirSafe, writeFileAtomic } from '../utils/fs-safe'
@@ -50,10 +51,8 @@ function getToolDirs(configHome: string): string[] {
 function getNativeOpenCodeConfigPaths(configHome: string): string[] {
   const home = getOpenCodeHome()
   return [
-    path.join(configHome, 'opencode', 'opencode.json'),
-    path.join(configHome, 'opencode', 'opencode.jsonc'),
-    path.join(home, '.opencode', 'opencode.json'),
-    path.join(home, '.opencode', 'opencode.jsonc'),
+    ...OPENCODE_CONFIG_SOURCE_NAMES.map((name) => path.join(configHome, 'opencode', name)),
+    ...OPENCODE_CONFIG_SOURCE_NAMES.map((name) => path.join(home, '.opencode', name)),
   ]
 }
 
@@ -75,7 +74,7 @@ function getManagedConfigPaths(): string[] {
     dirs.push(override)
   }
   return [...new Set(dirs)].flatMap((dir) =>
-    ['opencode.json', 'opencode.jsonc'].map((file) => path.join(dir, file)),
+    OPENCODE_CONFIG_SOURCE_NAMES.map((file) => path.join(dir, file)),
   )
 }
 

@@ -3,12 +3,14 @@ import { act, renderHook, waitFor } from '@testing-library/react'
 import type { ReactNode } from 'react'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import type { SessionInfo } from '@opencode-manager/shared/opencode'
-import { useDeleteSession, useSession, useSessionsAcrossDirectories } from './useOpenCode'
+import { useCreateSession, useDeleteSession, useSession, useSessionsAcrossDirectories } from './useOpenCode'
 import { FetchError } from '../api/fetchWrapper'
+import { showToast } from '../lib/toast'
 
 const mocks = vi.hoisted(() => ({
   listSessionPage: vi.fn(),
   deleteSession: vi.fn(),
+  createSession: vi.fn(),
 }))
 
 vi.mock('../lib/toast', () => ({
@@ -24,6 +26,7 @@ vi.mock('@/api/opencode', async (importOriginal) => {
     ...actual,
     listSessionPage: mocks.listSessionPage,
     deleteSession: mocks.deleteSession,
+    createSession: mocks.createSession,
   }
 })
 
@@ -177,5 +180,41 @@ describe('useSession', () => {
     expect(result.current.error).toBeInstanceOf(FetchError)
     expect((result.current.error as FetchError).statusCode).toBe(404)
     expect(fetchMock).toHaveBeenCalledTimes(1)
+  })
+})
+
+describe('useCreateSession', () => {
+  beforeEach(() => {
+    mocks.createSession.mockReset()
+    mocks.createSession.mockResolvedValue(sessionInfo('ses_new', '/w/a'))
+  })
+
+  it('refuses to create a session without a directory and reports the error', async () => {
+    const queryClient = createQueryClient()
+    const { result } = renderHook(() => useCreateSession(undefined), {
+      wrapper: createWrapper(queryClient),
+    })
+
+    await act(async () => {
+      await expect(result.current.mutateAsync({ agent: undefined })).rejects.toThrow(
+        'A directory is required to create a session',
+      )
+    })
+
+    expect(mocks.createSession).not.toHaveBeenCalled()
+    expect(showToast.error).toHaveBeenCalled()
+  })
+
+  it('creates a session in the provided directory', async () => {
+    const queryClient = createQueryClient()
+    const { result } = renderHook(() => useCreateSession('/w/a'), {
+      wrapper: createWrapper(queryClient),
+    })
+
+    await act(async () => {
+      await result.current.mutateAsync({ agent: undefined })
+    })
+
+    expect(mocks.createSession).toHaveBeenCalledWith({ directory: '/w/a', agent: undefined })
   })
 })

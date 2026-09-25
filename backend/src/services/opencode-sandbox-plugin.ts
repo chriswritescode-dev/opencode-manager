@@ -6,14 +6,18 @@ import {
 
 export const SANDBOX_PLAN_TIMEOUT_MS = sandboxPlanTimeoutMs()
 
-export function buildSandboxPluginSource(shellShimPath: string): string {
+export function buildSandboxPluginSource(id: string, shellShimPath: string, serviceSettingsPath: string): string {
   return `import { existsSync } from 'fs'
+import path from 'path'
 
 var SANDBOX_UNAVAILABLE_PREFIX = ${JSON.stringify(SANDBOX_UNAVAILABLE_PREFIX)}
 var PLAN_TIMEOUT_MS = ${SANDBOX_PLAN_TIMEOUT_MS}
 var SHELL_SHIM_PATH = ${JSON.stringify(shellShimPath)}
 var ENV_WORKDIR = ${JSON.stringify(SANDBOX_SHELL_ENV_WORKDIR)}
 var FORWARDED_ENV_NAMES = ${JSON.stringify(SANDBOX_FORWARDED_ENV_NAMES)}
+var SERVICE_SETTINGS_PATH = path.resolve(${JSON.stringify(serviceSettingsPath)})
+var SERVICE_SETTINGS_DIRECTORY = path.dirname(SERVICE_SETTINGS_PATH)
+var SERVICE_SETTINGS_DENIED = 'OpenCode Manager denies access to its service settings file (service.json), which holds the OpenCode server password.'
 
 function isEnforced() {
   return process.env.OCM_SANDBOX_ENFORCED === 'true'
@@ -21,6 +25,59 @@ function isEnforced() {
 
 function unavailable(reason) {
   return new Error(SANDBOX_UNAVAILABLE_PREFIX + reason)
+}
+
+function isWithin(directory, target) {
+  var relative = path.relative(directory, target)
+  return relative === '' || (relative !== '..' && !relative.startsWith('..' + path.sep) && !path.isAbsolute(relative))
+}
+
+function globDirectory(resource) {
+  var trimmed = resource
+  while (trimmed.length > 0 && trimmed.charAt(trimmed.length - 1) === '*') {
+    trimmed = trimmed.slice(0, -1)
+  }
+  while (trimmed.length > 1 && (trimmed.charAt(trimmed.length - 1) === '/' || trimmed.charAt(trimmed.length - 1) === path.sep)) {
+    trimmed = trimmed.slice(0, -1)
+  }
+  return trimmed.length === 0 ? path.parse(SERVICE_SETTINGS_PATH).root : trimmed
+}
+
+function resourceResolvesToServiceSettings(resource) {
+  return typeof resource === 'string' && resource.length > 0 && path.resolve(resource) === SERVICE_SETTINGS_PATH
+}
+
+function externalDirectoryTargetsServiceSettings(resource) {
+  if (typeof resource !== 'string' || resource.length === 0) return false
+  return isWithin(path.resolve(globDirectory(resource)), SERVICE_SETTINGS_DIRECTORY)
+}
+
+function absolutePathTargetsServiceSettings(value) {
+  if (typeof value !== 'string' || value.length === 0 || !path.isAbsolute(value)) return false
+  var resolved = path.resolve(value)
+  return resolved === SERVICE_SETTINGS_PATH || isWithin(resolved, SERVICE_SETTINGS_DIRECTORY)
+}
+
+function metadataTargetsServiceSettings(metadata) {
+  if (metadata === null || typeof metadata !== 'object') return false
+  return absolutePathTargetsServiceSettings(metadata.path)
+    || (metadata.root !== metadata.path && absolutePathTargetsServiceSettings(metadata.root))
+}
+
+function deniesServiceSettings(event) {
+  if (event.action === 'grep' || event.action === 'glob') {
+    return metadataTargetsServiceSettings(event.metadata)
+  }
+  if (!Array.isArray(event.resources)) return false
+  for (var index = 0; index < event.resources.length; index += 1) {
+    var resource = event.resources[index]
+    if (event.action === 'external_directory') {
+      if (externalDirectoryTargetsServiceSettings(resource)) return true
+    } else if (resourceResolvesToServiceSettings(resource)) {
+      return true
+    }
+  }
+  return false
 }
 
 function lockAccessor(target, key, value) {
@@ -105,8 +162,13 @@ async function pinSandboxShell(event) {
 }
 
 export default {
-  id: 'ocm.sandbox',
+  id: '${id}',
   async setup(ctx) {
+    await ctx.permission.hook('evaluate', (event) => {
+      if (!isEnforced() || !deniesServiceSettings(event)) return
+      event.effect = 'deny'
+      event.message = SERVICE_SETTINGS_DENIED
+    })
     await ctx.shell.hook('create.before', async (event) => {
       if (!isEnforced()) return
       await pinSandboxShell(event)

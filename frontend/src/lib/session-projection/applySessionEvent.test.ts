@@ -2,10 +2,13 @@ import { describe, expect, it } from 'vitest'
 import type { SessionMessageAssistant, V2Event } from '@opencode-manager/shared/opencode'
 import {
   applySessionEvent,
+  applySessionEvents,
   emptySessionTranscript,
+  eventsReplayableOverSnapshot,
   hydrateSessionTranscript,
   mergeNewestPage,
   sessionEventRequiresResync,
+  type SessionMessageContentUpdatedEvent,
   type SessionTranscript,
 } from './applySessionEvent'
 import {
@@ -29,7 +32,7 @@ import {
   statusSequence,
   syntheticSequence,
   textStreamSequence,
-} from './fixtures'
+} from '@/test/fixtures/session-projection'
 
 function applyAll(events: V2Event[]): SessionTranscript {
   return events.reduce(applySessionEvent, emptySessionTranscript)
@@ -573,6 +576,101 @@ describe('sessionEventRequiresResync', () => {
     const transcript = applyAll(promptSequence.slice(0, 15))
 
     expect(sessionEventRequiresResync(transcript, promptSequence[14] as V2Event)).toBe(false)
+  })
+
+  it('requires a resync when assistant message content is updated', () => {
+    const transcript = applyAll(promptSequence)
+    const contentUpdated: SessionMessageContentUpdatedEvent = {
+      type: 'session.message.content.updated',
+    }
+
+    expect(sessionEventRequiresResync(transcript, contentUpdated)).toBe(true)
+  })
+})
+
+describe('eventsReplayableOverSnapshot', () => {
+  it('replays buffered parts the snapshot does not contain yet', () => {
+    const snapshot = applyAll(textStreamSequence.slice(0, 1))
+    const buffered = textStreamSequence.slice(1, 3)
+
+    expect(eventsReplayableOverSnapshot(buffered, snapshot)).toEqual(buffered)
+  })
+
+  it('drops a started text part the snapshot already contains', () => {
+    const snapshot = applyAll(textStreamSequence.slice(0, 3))
+    const buffered = textStreamSequence.slice(1, 3)
+
+    const replayed = eventsReplayableOverSnapshot(buffered, snapshot)
+
+    expect(replayed).toEqual([])
+
+    const applied = replayed.reduce(applySessionEvent, snapshot)
+
+    expect(assistantMessage(applied).content.filter((part) => part.type === 'text')).toHaveLength(1)
+    expect(contentPart(applied, 'text').text).toBe('Hello ')
+  })
+
+  it('drops a started reasoning part the snapshot already contains', () => {
+    const snapshot = applyAll(promptSequence.slice(2, 9))
+    const buffered = promptSequence.slice(7, 9)
+
+    const replayed = eventsReplayableOverSnapshot(buffered, snapshot)
+
+    expect(replayed).toEqual([])
+  })
+
+  it('drops a started tool input the snapshot already contains', () => {
+    const snapshot = applyAll(promptSequence.slice(2, 13))
+    const buffered = promptSequence.slice(11, 13)
+
+    const replayed = eventsReplayableOverSnapshot(buffered, snapshot)
+
+    expect(replayed).toEqual([])
+
+    const applied = replayed.reduce(applySessionEvent, snapshot)
+
+    expect(assistantMessage(applied).content.filter((part) => part.type === 'tool')).toHaveLength(1)
+  })
+})
+
+describe('applySessionEvents', () => {
+  it('produces the same transcript as sequential single-event application', () => {
+    const sequential = promptSequence.reduce(applySessionEvent, emptySessionTranscript)
+    const batch = applySessionEvents(emptySessionTranscript, promptSequence)
+
+    expect(batch.transcript).toEqual(sequential)
+  })
+
+  it('reports requiresResync for a flush that ends execution with an unsettled tool', () => {
+    const running = applyAll(promptSequence.slice(0, 15))
+    const batch = applySessionEvents(running, [executionSequence[1] as V2Event])
+
+    expect(batch.requiresResync).toBe(true)
+  })
+
+  it('does not report requiresResync for a settled flush', () => {
+    const settled = applyAll(promptSequence)
+    const batch = applySessionEvents(settled, [executionSequence[1] as V2Event])
+
+    expect(batch.requiresResync).toBe(false)
+  })
+
+  it('keeps the reference identity of messages the batch does not change', () => {
+    const base = applyAll(promptSequence.slice(0, 3))
+    const baseAssistant = assistantMessage(base)
+    const batch = applySessionEvents(base, [textStreamSequence[1], textStreamSequence[2]])
+
+    expect(batch.transcript).not.toBe(base)
+    expect(batch.transcript.messages[0]).toBe(base.messages[0])
+    expect(assistantMessage(batch.transcript)).not.toBe(baseAssistant)
+    expect(contentPart(batch.transcript, 'text').text).toBe('Hello ')
+  })
+
+  it('returns the base transcript when no event changes it', () => {
+    const base = applyAll(promptSequence)
+    const batch = applySessionEvents(base, [promptSequence[13] as V2Event])
+
+    expect(batch.transcript).toBe(base)
   })
 })
 

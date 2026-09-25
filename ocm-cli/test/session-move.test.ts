@@ -177,6 +177,17 @@ describe('transferSession', () => {
     expect(progress).toEqual([[0, 1], [1, 1]])
   })
 
+  it('returns the imported session id rather than the local one', async () => {
+    const deps: TransferDeps = {
+      exportSession: vi.fn().mockResolvedValue(makeTransfer()),
+      importSession: vi.fn().mockResolvedValue({ sessionID: 'ses_remote' }),
+    }
+
+    const result = await transferSession(input, deps)
+
+    expect(result).toEqual({ kind: 'moved', sessionID: 'ses_remote', importedMessages: 0 })
+  })
+
   it('reports an export failure without importing', async () => {
     const deps: TransferDeps = {
       exportSession: vi.fn().mockRejectedValue(new Error('export failed')),

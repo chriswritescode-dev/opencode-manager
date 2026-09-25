@@ -6,10 +6,12 @@ import { CodeEditor } from '@/components/ui/code-editor'
 import { EditorFindBar } from '@/components/ui/editor-find-bar'
 import { useFindInText } from '@/lib/useFindInText'
 import { settingsApi } from '@/api/settings'
+import { useOpenCodeApplyFeedback } from '@/hooks/useOpenCodeApplyFeedback'
 import { showToast } from '@/lib/toast'
 
 export function AgentsMdEditor() {
   const queryClient = useQueryClient()
+  const applyOpenCodeSaveFeedback = useOpenCodeApplyFeedback()
   const [content, setContent] = useState('')
   const [savedContent, setSavedContent] = useState('')
   const hasChanges = content !== savedContent
@@ -33,11 +35,10 @@ export function AgentsMdEditor() {
 
   const updateMutation = useMutation({
     mutationFn: (newContent: string) => settingsApi.updateAgentsMd(newContent),
-    onSuccess: (_data, newContent) => {
+    onSuccess: (result, newContent) => {
       setSavedContent(newContent)
       queryClient.invalidateQueries({ queryKey: ['agents-md'] })
-      queryClient.invalidateQueries({ queryKey: ['opencode', 'agents'] })
-      showToast.success('AGENTS.md saved and server restarted')
+      applyOpenCodeSaveFeedback({ appliedMessage: 'AGENTS.md saved', restartRequired: result.restartRequired })
     },
     onError: () => {
       showToast.error('Failed to save AGENTS.md')
@@ -47,14 +48,14 @@ export function AgentsMdEditor() {
   const resetToDefaultMutation = useMutation({
     mutationFn: async () => {
       const { content: defaultContent } = await settingsApi.getDefaultAgentsMd()
-      await settingsApi.updateAgentsMd(defaultContent)
-      return defaultContent
+      const result = await settingsApi.updateAgentsMd(defaultContent)
+      return { defaultContent, restartRequired: result.restartRequired }
     },
-    onSuccess: (defaultContent) => {
+    onSuccess: ({ defaultContent, restartRequired }) => {
       queryClient.invalidateQueries({ queryKey: ['agents-md'] })
       setContent(defaultContent)
       setSavedContent(defaultContent)
-      showToast.success('AGENTS.md reset to default and server restarted')
+      applyOpenCodeSaveFeedback({ appliedMessage: 'AGENTS.md reset to default', restartRequired })
     },
     onError: () => {
       showToast.error('Failed to reset AGENTS.md')

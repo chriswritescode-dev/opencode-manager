@@ -7,7 +7,7 @@ import { randomBytes } from 'crypto'
 import os from 'os'
 import path from 'path'
 import { buildOpenCodeBasicAuth, isSupportedOpenCodeVersion } from '@opencode-manager/shared/opencode'
-import { OPENCODE_SERVICE_SERVE_ARGS, prepareOpenCodeServiceLaunch } from '../../src/services/opencode-service-mode'
+import { OPENCODE_SERVICE_SERVE_ARGS, getOpenCodeServiceRegistrationPath, writeOpenCodeServiceSettings } from '../../src/services/opencode-service-mode'
 
 const VERSION_TIMEOUT_MS = 5000
 const SERVE_READY_TIMEOUT_MS = 60000
@@ -169,7 +169,8 @@ export async function startOpenCodeServe(options: OpenCodeServeOptions = {}): Pr
     OPENCODE_SERVER_PASSWORD: password,
   }
   if (options.service) {
-    await prepareOpenCodeServiceLaunch({ XDG_CONFIG_HOME: directories.configHome, XDG_STATE_HOME: directories.stateHome, OPENCODE_CONFIG_DIR: env.OPENCODE_CONFIG_DIR }, password)
+    await rm(getOpenCodeServiceRegistrationPath({ XDG_CONFIG_HOME: directories.configHome, XDG_STATE_HOME: directories.stateHome }), { force: true })
+    await writeOpenCodeServiceSettings(path.join(directories.configHome, 'opencode'), password)
   }
 
   const port = options.port ?? await getFreePort()

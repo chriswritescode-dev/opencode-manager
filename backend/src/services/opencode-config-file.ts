@@ -7,6 +7,7 @@ import type { ZodIssue } from 'zod'
 import { getConfigPath, getOpenCodeConfigHome, getOpenCodeHealthWatchPath } from '@opencode-manager/shared/config/env'
 import {
   DEFAULT_OPENCODE_CONFIG_SOURCE_NAME,
+  LEGACY_OPENCODE_CONFIG_SOURCE_NAME,
   OPENCODE_CONFIG_SOURCE_NAMES,
   isOpenCodeConfigSourceName,
   selectPreferredOpenCodeConfigSourceName,
@@ -27,8 +28,6 @@ import { ensureDirectoryExists } from './file-operations'
 export const OPENCODE_CONFIG_SEED = JSON.stringify({ $schema: 'https://opencode.ai/config.json' }, null, 2)
 
 export const HEALTH_WATCH_MAX_ENTRIES = 20
-
-export const LEGACY_OPENCODE_CONFIG_SOURCE_NAME = 'config.json'
 
 const OPENCODE_CONFIG_ARCHIVE_DIR_NAME = 'opencode-configs-archive'
 

@@ -29,15 +29,26 @@ export type GeneratedTool = {
   [key: string]: unknown
 }
 
+export type PermissionEvaluateEvent = {
+  action: string
+  resources?: ReadonlyArray<string>
+  metadata?: Record<string, unknown>
+  effect?: string
+  message?: string
+  [key: string]: unknown
+}
+
 export type GeneratedPlugin = {
   id: string
   triggerShellCreateBefore: (event: ShellCreateBeforeEvent) => Promise<void>
   triggerToolExecuteAfter: (event: ToolExecuteAfterEvent) => Promise<void>
+  triggerPermissionEvaluate: (event: PermissionEvaluateEvent) => Promise<void>
   registeredTools: () => GeneratedTool[]
 }
 
 type ShellHookCallback = (event: ShellCreateBeforeEvent) => Promise<void> | void
 type ToolHookCallback = (event: ToolExecuteAfterEvent) => Promise<void> | void
+type PermissionHookCallback = (event: PermissionEvaluateEvent) => Promise<void> | void
 type ToolTransformCallback = (editor: { add: (tool: GeneratedTool) => void }) => void
 
 type Registration = { dispose: () => Promise<void> }
@@ -49,6 +60,9 @@ type PluginContext = {
   tool: {
     hook: (name: string, callback: ToolHookCallback) => Promise<Registration>
     transform: (callback: ToolTransformCallback) => Promise<Registration>
+  }
+  permission: {
+    hook: (name: string, callback: PermissionHookCallback) => Promise<Registration>
   }
 }
 
@@ -69,6 +83,7 @@ function createRegistry<Event>(name: string) {
 function createPluginContext() {
   const shellCreateBefore = createRegistry<ShellCreateBeforeEvent>('create.before')
   const toolExecuteAfter = createRegistry<ToolExecuteAfterEvent>('execute.after')
+  const permissionEvaluate = createRegistry<PermissionEvaluateEvent>('evaluate')
   const transforms: ToolTransformCallback[] = []
 
   const context: PluginContext = {
@@ -88,12 +103,19 @@ function createPluginContext() {
         return { dispose: async () => undefined }
       },
     },
+    permission: {
+      hook: async (name, callback) => {
+        if (name !== 'evaluate') throw new Error(`unexpected permission hook ${name}`)
+        return permissionEvaluate.register(callback)
+      },
+    },
   }
 
   return {
     context,
     triggerShellCreateBefore: (event: ShellCreateBeforeEvent) => shellCreateBefore.trigger(event),
     triggerToolExecuteAfter: (event: ToolExecuteAfterEvent) => toolExecuteAfter.trigger(event),
+    triggerPermissionEvaluate: (event: PermissionEvaluateEvent) => permissionEvaluate.trigger(event),
     registeredTools: () => {
       const tools: GeneratedTool[] = []
       const editor = { add: (tool: GeneratedTool) => tools.push(tool) }
@@ -127,6 +149,7 @@ export async function loadGeneratedPlugin(file: string): Promise<GeneratedPlugin
     id,
     triggerShellCreateBefore: registrations.triggerShellCreateBefore,
     triggerToolExecuteAfter: registrations.triggerToolExecuteAfter,
+    triggerPermissionEvaluate: registrations.triggerPermissionEvaluate,
     registeredTools: registrations.registeredTools,
   }
 }

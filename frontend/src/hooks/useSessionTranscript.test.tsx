@@ -22,7 +22,7 @@ import {
   otherSessionSequence,
   promptSequence,
   textStreamSequence,
-} from '@/lib/session-projection/fixtures'
+} from '@/test/fixtures/session-projection'
 
 const mocks = vi.hoisted(() => ({
   listSessionMessages: vi.fn(),
@@ -330,6 +330,41 @@ describe('useSessionTranscript', () => {
     await waitFor(() => expect(mocks.readSessionSnapshot).toHaveBeenCalledTimes(1))
 
     act(() => {
+      testTransport().message(textStreamSequence[2])
+    })
+
+    const assistantWithText: SessionMessageInfo = {
+      id: ASSISTANT_MESSAGE_ID,
+      type: 'assistant',
+      agent: 'build',
+      model: { id: 'claude-sonnet-4-5', providerID: 'anthropic' },
+      content: [{ type: 'text', text: 'Hello ' }],
+      time: { created: 1020 },
+    }
+    await act(async () => {
+      initialRead.resolve({ messages: [seededMessages[0], assistantWithText], pending: [], status: 'idle' })
+    })
+
+    await waitFor(() => {
+      const assistant = result.current.messages[1]
+      if (assistant?.type !== 'assistant') throw new Error('expected an assistant message')
+      expect(assistant.content).toEqual([{ type: 'text', text: 'Hello ' }])
+    })
+    expect(mocks.readSessionSnapshot).toHaveBeenCalledTimes(1)
+  })
+
+  it('does not duplicate a buffered text part the snapshot already contains', async () => {
+    const initialRead = deferred<SnapshotValue>()
+    mocks.readSessionSnapshot.mockReturnValueOnce(initialRead.promise)
+    const queryClient = createQueryClient()
+    const { result } = renderHook(() => useSessionTranscript(SESSION_ID, DIRECTORY), {
+      wrapper: createWrapper(queryClient),
+    })
+
+    await waitFor(() => expect(mocks.readSessionSnapshot).toHaveBeenCalledTimes(1))
+
+    act(() => {
+      testTransport().message(textStreamSequence[1])
       testTransport().message(textStreamSequence[2])
     })
 

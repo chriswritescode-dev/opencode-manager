@@ -1,4 +1,4 @@
-import { openCodeLocation } from '@opencode-manager/shared/opencode'
+import { openCodeLocation, parseOpenCodeModelRef } from '@opencode-manager/shared/opencode'
 import { callOpenCode } from './opencodeApi'
 import type {
   AgentInfo,
@@ -8,7 +8,6 @@ import type {
   ModelRef,
   OpenCodeApi,
   PermissionRequest,
-  PromptMention,
   SessionInboxCompaction,
   SessionInboxUser,
   SessionInfo,
@@ -17,22 +16,13 @@ import type {
 } from '@opencode-manager/shared/opencode'
 import type { SessionSnapshot } from '@/lib/session-projection'
 
-export interface PromptFileInput {
-  uri: string
-  name?: string
-  description?: string
-  mention?: PromptMention
-}
+type SessionPromptInput = Parameters<OpenCodeApi['session']['prompt']>[0]
 
-export interface PromptAgentInput {
-  name: string
-  mention?: PromptMention
-}
+export type PromptFileInput = NonNullable<SessionPromptInput['files']>[number]
 
-export interface PromptSkillInput {
-  id: string
-  mention?: PromptMention
-}
+export type PromptAgentInput = NonNullable<SessionPromptInput['agents']>[number]
+
+export type PromptSkillInput = NonNullable<SessionPromptInput['skills']>[number]
 
 export type ActiveSessions = Awaited<ReturnType<OpenCodeApi['session']['active']>>
 
@@ -50,7 +40,7 @@ export interface SessionPageInput {
 }
 
 export interface CreateSessionInput {
-  directory?: string
+  directory: string
   title?: string
   agent?: string
   model?: string
@@ -81,21 +71,18 @@ export interface SendPromptInput {
   delivery?: 'steer' | 'queue'
 }
 
-export interface RunCommandInput {
-  sessionID: string
-  name: string
-  text: string
-  files?: PromptFileInput[]
-  agents?: PromptAgentInput[]
-  skills?: PromptSkillInput[]
-  delivery?: 'steer' | 'queue'
-}
+export type RunCommandInput = SendPromptInput & { name: string }
 
-export function parseModelRef(model: string): ModelRef | undefined {
-  const [providerID, ...rest] = model.split('/')
-  const [id, variant] = rest.join('/').split('#')
-  if (!providerID || !id) return undefined
-  return { providerID, id, ...(variant ? { variant } : {}) }
+type PromptFields = Pick<SendPromptInput, 'text' | 'files' | 'agents' | 'skills' | 'delivery'>
+
+function buildPromptFields(input: PromptFields) {
+  return {
+    text: input.text,
+    ...(input.files ? { files: input.files } : {}),
+    ...(input.agents ? { agents: input.agents } : {}),
+    ...(input.skills ? { skills: input.skills } : {}),
+    ...(input.delivery ? { delivery: input.delivery } : {}),
+  }
 }
 
 export async function listSessionPage(input: SessionPageInput): Promise<SessionPage> {
@@ -117,13 +104,13 @@ export async function getSession(sessionID: string): Promise<SessionInfo> {
 }
 
 export async function createSession(input: CreateSessionInput): Promise<SessionInfo> {
-  const model = input.model ? parseModelRef(input.model) : undefined
+  const model = input.model ? parseOpenCodeModelRef(input.model) : undefined
   return callOpenCode((api) =>
     api.session.create({
       ...(input.title !== undefined ? { title: input.title } : {}),
       ...(input.agent !== undefined ? { agent: input.agent } : {}),
       ...(model ? { model } : {}),
-      ...openCodeLocation(input.directory),
+      location: { directory: input.directory },
     }),
   )
 }
@@ -157,11 +144,7 @@ export async function sendPrompt(input: SendPromptInput): Promise<SessionInboxUs
   return callOpenCode((api) =>
     api.session.prompt({
       sessionID: input.sessionID,
-      text: input.text,
-      ...(input.files ? { files: input.files } : {}),
-      ...(input.agents ? { agents: input.agents } : {}),
-      ...(input.skills ? { skills: input.skills } : {}),
-      ...(input.delivery ? { delivery: input.delivery } : {}),
+      ...buildPromptFields(input),
     }),
   )
 }
@@ -171,11 +154,7 @@ export async function runCommand(input: RunCommandInput): Promise<void> {
     api.session.command({
       sessionID: input.sessionID,
       name: input.name,
-      text: input.text,
-      ...(input.files ? { files: input.files } : {}),
-      ...(input.agents ? { agents: input.agents } : {}),
-      ...(input.skills ? { skills: input.skills } : {}),
-      ...(input.delivery ? { delivery: input.delivery } : {}),
+      ...buildPromptFields(input),
     }),
   )
 }

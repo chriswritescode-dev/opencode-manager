@@ -80,7 +80,10 @@ export function createProvidersRoutes(openCodeClient: OpenCodeClient) {
 
   app.get('/:id/credentials/status', async (c) => {
     try {
-      const integration = await openCodeClient.api.integration.get({ integrationID: c.req.param('id') })
+      const integrationID = c.req.param('id')
+      const integration = await runWhenIntegrationReady(openCodeClient.api, { integrationID }, () =>
+        openCodeClient.api.integration.get({ integrationID }),
+      )
       return c.json({ hasCredentials: credentialConnections(integration.data).length > 0 })
     } catch (error) {
       return handleOpenCodeError(c, error, 'Failed to check credential status')
@@ -112,7 +115,10 @@ export function createProvidersRoutes(openCodeClient: OpenCodeClient) {
 
   app.delete('/:id/credentials', async (c) => {
     try {
-      const integration = await openCodeClient.api.integration.get({ integrationID: c.req.param('id') })
+      const integrationID = c.req.param('id')
+      const integration = await runWhenIntegrationReady(openCodeClient.api, { integrationID }, () =>
+        openCodeClient.api.integration.get({ integrationID }),
+      )
 
       for (const connection of credentialConnections(integration.data)) {
         await openCodeClient.api.credential.remove({ credentialID: connection.id })

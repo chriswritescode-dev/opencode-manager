@@ -27,13 +27,13 @@ import { logger } from '../utils/logger'
 import {
   discoverModelsCached,
 } from '../utils/discovery-cache'
-import { opencodeServerManager, ConfigReloadError } from '../services/opencode-single-server'
+import { opencodeServerManager } from '../services/opencode-single-server'
 import { getOrCreateInternalToken, rotateInternalToken } from '../services/internal-token'
 import { sseAggregator } from '../services/sse-aggregator'
 import type { OpenCodeSupervisor } from '../services/opencode-supervisor'
 import { detectSandboxCapability } from '../services/sandbox/capability'
 import { getProcessIdentityAttestationError } from '../services/opencode/process-identity'
-import { restartOpenCode, reloadOpenCodeConfig, assertValidOpenCodeConfig, listActiveUserSessions } from '../services/opencode-restart'
+import { restartOpenCode, assertValidOpenCodeConfig, listActiveUserSessions } from '../services/opencode-restart'
 import type { GitAuthService } from '../services/git-auth'
 import { DEFAULT_AGENTS_MD } from '../constants'
 import { validateSSHPrivateKey } from '../utils/ssh-validation'
@@ -57,7 +57,7 @@ import {
   deleteOpenCodeDirectoryFile,
 } from '../services/opencode-directory-files'
 import { parseUploadManifest, readUploadedManifestFiles, UploadValidationError } from './upload-utils'
-import { installOpenCodeVersion, latestOpenCodeVersion, listOpenCodeVersions } from '../services/opencode-installer'
+import { installOpenCodeVersion, listOpenCodeVersions, OpenCodeInstallError } from '../services/opencode-installer'
 import {
   compareOpenCodeVersions,
   describeUnsupportedOpenCodeVersion,
@@ -73,22 +73,107 @@ async function installVerifiedOpenCodeVersion(
 ): Promise<string> {
   await installOpenCodeVersion(version)
 
-  const installedVersion = await opencodeServerManager.fetchVersion()
-  logger.info(`New OpenCode version: ${installedVersion}`)
+  try {
+    const installedVersion = await opencodeServerManager.fetchVersion()
+    logger.info(`New OpenCode version: ${installedVersion}`)
 
-  if (installedVersion !== version) {
-    throw new Error(`OpenCode install did not result in version ${version}; detected ${installedVersion ?? 'unknown'}`)
+    if (installedVersion !== version) {
+      throw new Error(`OpenCode install did not result in version ${version}; detected ${installedVersion ?? 'unknown'}`)
+    }
+
+    opencodeServerManager.clearStartupError()
+    await restartOpenCode(openCodeSupervisor)
+    logger.info(`OpenCode server restarted after ${context}`)
+
+    return installedVersion
+  } catch (error) {
+    if (error instanceof OpenCodeInstallError) throw error
+    throw new OpenCodeInstallError(error instanceof Error ? error.message : String(error), true, { cause: error })
   }
-
-  opencodeServerManager.clearStartupError()
-  await restartOpenCode(openCodeSupervisor)
-  logger.info(`OpenCode server restarted after ${context}`)
-
-  return installedVersion
 }
 
 async function reloadOpenCodeForChange(openCodeClient: OpenCodeClient): Promise<{ restartRequired: boolean }> {
   return { restartRequired: await reloadOpenCodeOrMarkRestartPending(openCodeClient) === 'restart_pending' }
+}
+
+const OPENCODE_BIN_MANAGED_MESSAGE =
+  'The OpenCode binary is externally managed via OPENCODE_BIN; upgrade and version install are disabled'
+
+function isOpenCodeBinaryExternallyManaged(): boolean {
+  const binary = process.env.OPENCODE_BIN
+  return typeof binary === 'string' && binary.length > 0
+}
+
+interface OpenCodeInstallFailureMessages {
+  failed: string
+  recovered: string
+  unrecovered: string
+}
+
+async function buildOpenCodeInstallFailureResponse(
+  openCodeSupervisor: OpenCodeSupervisor | undefined,
+  error: unknown,
+  oldVersion: string | null,
+  messages: OpenCodeInstallFailureMessages,
+): Promise<{ status: 400 | 500; body: Record<string, unknown> }> {
+  const details = error instanceof Error ? error.message : 'Unknown error'
+
+  if (!(error instanceof OpenCodeInstallError) || !error.swapStarted) {
+    logger.warn(`${messages.failed}: installation did not reach the binary swap, not restarting the server`)
+    return {
+      status: 500,
+      body: { error: messages.failed, details, oldVersion, newVersion: oldVersion, upgraded: false, recovered: false },
+    }
+  }
+
+  opencodeServerManager.clearStartupError()
+
+  let recovered = false
+  let recoveryMessage = ''
+  try {
+    await restartOpenCode(openCodeSupervisor)
+    logger.warn('OpenCode server restarted after install failure')
+    recovered = true
+    recoveryMessage = 'Server recovered'
+  } catch (recoveryError) {
+    logger.error('Failed to recover OpenCode server:', recoveryError)
+    recoveryMessage = recoveryError instanceof Error ? recoveryError.message : 'Unknown error'
+  }
+
+  let currentVersion: string | null | undefined = oldVersion
+  try {
+    currentVersion = opencodeServerManager.getVersion() || oldVersion
+  } catch (versionError) {
+    logger.error('Failed to get version after recovery:', versionError)
+    currentVersion = oldVersion
+  }
+
+  return recovered
+    ? {
+        status: 400,
+        body: {
+          success: false,
+          error: messages.recovered,
+          details,
+          oldVersion,
+          newVersion: currentVersion,
+          upgraded: false,
+          recovered: true,
+          recoveryMessage,
+        },
+      }
+    : {
+        status: 500,
+        body: {
+          error: messages.unrecovered,
+          details,
+          oldVersion,
+          newVersion: currentVersion,
+          upgraded: false,
+          recovered: false,
+          recoveryMessage,
+        },
+      }
 }
 
 const OPENCODE_DIRECTORY_UPLOAD_ERROR_STATUS: ReadonlyArray<readonly [string, 400]> = [
@@ -165,7 +250,6 @@ function listOpenCodeRestartReasons(previous: UserPreferences, next: Partial<Use
     preferenceChanged(previous.gitCredentials ?? [], next.gitCredentials) && 'git credentials',
     preferenceChanged(previous.gitIdentity ?? {}, next.gitIdentity) && 'git identity',
     preferenceChanged(previous.serverEnvVars ?? [], next.serverEnvVars) && 'server environment variables',
-    preferenceChanged(previous.disabledDefaultServerEnvVars ?? [], next.disabledDefaultServerEnvVars) && 'default server environment variables',
   ].filter((reason): reason is string => typeof reason === 'string')
 }
 
@@ -342,11 +426,10 @@ export function createSettingsRoutes(db: Database, gitAuthService: GitAuthServic
     try {
       logger.info('Manual OpenCode server restart requested')
       opencodeServerManager.clearStartupError()
-      const { interruptedSessionIDs } = await restartOpenCode(openCodeSupervisor)
+      await restartOpenCode(openCodeSupervisor)
       return c.json({
         success: true,
         message: 'OpenCode server restarted successfully',
-        interruptedSessions: interruptedSessionIDs,
       })
     } catch (error) {
       logger.error('Failed to restart OpenCode server:', error)
@@ -431,33 +514,6 @@ export function createSettingsRoutes(db: Database, gitAuthService: GitAuthServic
     }
   })
 
-  app.post('/opencode-reload', async (c) => {
-    try {
-      logger.info('OpenCode configuration reload requested')
-      await reloadOpenCodeConfig(openCodeClient)
-      return c.json({
-        success: true,
-        message: 'OpenCode configuration reloaded',
-      })
-    } catch (error) {
-      logger.error('Failed to reload OpenCode config:', error)
-      if (error instanceof ConfigReloadError) {
-        const details = error.validationIssues.length > 0
-          ? error.validationIssues.map((issue) => `${issue.path}: ${issue.message}`).join('; ')
-          : error.message
-        return c.json({
-          error: error.message,
-          details,
-          validationIssues: error.validationIssues,
-        }, 500)
-      }
-      return c.json({
-        error: 'Failed to reload OpenCode configuration',
-        details: error instanceof Error ? error.message : 'Unknown error'
-      }, 500)
-    }
-  })
-
   app.post('/opencode-rollback', async (c) => {
     try {
       logger.info('OpenCode config rollback requested')
@@ -508,12 +564,20 @@ export function createSettingsRoutes(db: Database, gitAuthService: GitAuthServic
   })
 
   app.post('/opencode-upgrade', async (c) => {
+    if (isOpenCodeBinaryExternallyManaged()) {
+      return c.json({ error: OPENCODE_BIN_MANAGED_MESSAGE }, 409)
+    }
+
     const oldVersion = opencodeServerManager.getVersion()
     logger.info(`Current OpenCode version: ${oldVersion}`)
 
     try {
-      const latestVersion = await latestOpenCodeVersion()
-      logger.info(`Latest OpenCode version: ${latestVersion}`)
+      const [latestRelease] = await listOpenCodeVersions()
+      if (!latestRelease) {
+        throw new Error('No supported OpenCode release is available in the registry')
+      }
+      const latestVersion = latestRelease.version
+      logger.info(`Latest supported OpenCode version: ${latestVersion}`)
 
       if (oldVersion && isSupportedOpenCodeVersion(oldVersion) && compareOpenCodeVersions(latestVersion, oldVersion) <= 0) {
         logger.info('OpenCode is already up to date or version unchanged')
@@ -540,52 +604,12 @@ export function createSettingsRoutes(db: Database, gitAuthService: GitAuthServic
       })
     } catch (error) {
       logger.error('Failed to upgrade OpenCode:', error)
-      logger.warn('Attempting to recover OpenCode server...')
-
-      let recovered = false
-      let recoveryMessage = ''
-
-      opencodeServerManager.clearStartupError()
-      try {
-        await restartOpenCode(openCodeSupervisor)
-        logger.warn('OpenCode server restarted after upgrade failure')
-        recovered = true
-        recoveryMessage = 'Server recovered'
-      } catch (recoveryError) {
-        logger.error('Failed to recover OpenCode server:', recoveryError)
-        recovered = false
-        recoveryMessage = recoveryError instanceof Error ? recoveryError.message : 'Unknown error'
-      }
-
-      let currentVersion: string | null | undefined = oldVersion
-      try {
-        currentVersion = opencodeServerManager.getVersion() || oldVersion
-      } catch (versionError) {
-        logger.error('Failed to get version after recovery:', versionError)
-        currentVersion = oldVersion
-      }
-
-      return c.json(
-        recovered ? {
-          success: false,
-          error: 'Upgrade failed but server recovered',
-          details: error instanceof Error ? error.message : 'Unknown error',
-          oldVersion,
-          newVersion: currentVersion,
-          upgraded: false,
-          recovered: true,
-          recoveryMessage
-        } : {
-          error: 'Failed to upgrade OpenCode and could not recover',
-          details: error instanceof Error ? error.message : 'Unknown error',
-          oldVersion,
-          newVersion: currentVersion,
-          upgraded: false,
-          recovered: false,
-          recoveryMessage
-        },
-        recovered ? 400 : 500
-      )
+      const { status, body } = await buildOpenCodeInstallFailureResponse(openCodeSupervisor, error, oldVersion, {
+        failed: 'Failed to upgrade OpenCode',
+        recovered: 'Upgrade failed but server recovered',
+        unrecovered: 'Failed to upgrade OpenCode and could not recover',
+      })
+      return c.json(body, status)
     }
   })
 
@@ -618,6 +642,10 @@ export function createSettingsRoutes(db: Database, gitAuthService: GitAuthServic
   })
 
   app.post('/opencode-install-version', async (c) => {
+    if (isOpenCodeBinaryExternallyManaged()) {
+      return c.json({ error: OPENCODE_BIN_MANAGED_MESSAGE }, 409)
+    }
+
     const oldVersion = opencodeServerManager.getVersion()
     logger.info(`Current OpenCode version: ${oldVersion}`)
 
@@ -650,44 +678,12 @@ export function createSettingsRoutes(db: Database, gitAuthService: GitAuthServic
       })
     } catch (error) {
       logger.error('Failed to install OpenCode version:', error)
-      logger.warn('Attempting to recover OpenCode server...')
-
-      let recovered = false
-      let recoveryMessage = ''
-
-      opencodeServerManager.clearStartupError()
-      try {
-        await restartOpenCode(openCodeSupervisor)
-        logger.warn('OpenCode server restarted after install failure')
-        recovered = true
-        recoveryMessage = 'Server recovered'
-      } catch (recoveryError) {
-        logger.error('Failed to recover OpenCode server:', recoveryError)
-        recovered = false
-        recoveryMessage = recoveryError instanceof Error ? recoveryError.message : 'Unknown error'
-      }
-
-      const currentVersion = opencodeServerManager.getVersion() || oldVersion
-
-      return c.json(
-        recovered ? {
-          success: false,
-          error: 'Version install failed but server recovered',
-          details: error instanceof Error ? error.message : 'Unknown error',
-          oldVersion,
-          newVersion: currentVersion,
-          recovered: true,
-          recoveryMessage
-        } : {
-          error: 'Failed to install OpenCode version and could not recover',
-          details: error instanceof Error ? error.message : 'Unknown error',
-          oldVersion,
-          newVersion: currentVersion,
-          recovered: false,
-          recoveryMessage
-        },
-        recovered ? 400 : 500
-      )
+      const { status, body } = await buildOpenCodeInstallFailureResponse(openCodeSupervisor, error, oldVersion, {
+        failed: 'Failed to install OpenCode version',
+        recovered: 'Version install failed but server recovered',
+        unrecovered: 'Failed to install OpenCode version and could not recover',
+      })
+      return c.json(body, status)
     }
   })
 

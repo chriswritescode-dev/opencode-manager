@@ -1,5 +1,4 @@
 import { useState, useCallback, useMemo } from "react";
-import { useQuery } from "@tanstack/react-query";
 import {
   Dialog,
   DialogContent,
@@ -14,10 +13,11 @@ import { Label } from "@/components/ui/label";
 import { Loader2, Key, ExternalLink } from "lucide-react";
 import { providerCredentialsApi } from "@/api/providers";
 import type { ProviderWithModels } from "@/api/providers";
-import { oauthApi, type FormAnswer, type FormValue, type IntegrationKeyMethod } from "@/api/oauth";
+import { type FormAnswer, type FormValue, type IntegrationKeyMethod } from "@/api/oauth";
 import { buildAnswer, hasMissingAnswers, methodIdentifier, resolveAnswers, setAnswerValue, visibleFields } from "@/lib/formFields";
 import { mapOAuthError } from "@/lib/oauthErrors";
 import { ProviderAuthField } from "@/components/settings/ProviderAuthField";
+import { useProviderAuthMethods } from "@/hooks/useProviderAuthMethods";
 
 interface ApiKeyDialogProps {
   open: boolean;
@@ -39,11 +39,7 @@ export function ApiKeyDialog({
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
-  const { data: authMethods } = useQuery({
-    queryKey: ['provider-auth-methods'],
-    queryFn: () => oauthApi.getAuthMethods(),
-    enabled: open && !!provider,
-  });
+  const { data: authMethods } = useProviderAuthMethods({ enabled: open && !!provider });
 
   const keyMethod = useMemo(
     () => (provider ? authMethods?.[provider.id]?.find((method): method is IntegrationKeyMethod => method.type === 'key') : undefined),
@@ -94,7 +90,7 @@ export function ApiKeyDialog({
 
   if (!provider) return null;
 
-  const envVarName = provider.env?.[0] || `${provider.id.toUpperCase()}_API_KEY`;
+  const envVarName = `${provider.id.toUpperCase()}_API_KEY`;
   const isEditMode = mode === 'edit';
 
   return (

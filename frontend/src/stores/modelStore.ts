@@ -1,4 +1,5 @@
 import { create } from 'zustand'
+import { parseOpenCodeModelRef } from '@opencode-manager/shared/opencode'
 import type { Provider } from '@/api/providers'
 
 export interface ModelSelection {
@@ -29,11 +30,9 @@ export function modelExists(model: ModelSelection | null, providers: Provider[])
   )
 }
 
-function parseModelString(model: string): ModelSelection | null {
-  const [providerID, ...rest] = model.split('/')
-  const modelID = rest.join('/')
-  if (!providerID || !modelID) return null
-  return { providerID, modelID }
+function modelSelectionFromString(model: string): ModelSelection | null {
+  const ref = parseOpenCodeModelRef(model)
+  return ref ? { providerID: ref.providerID, modelID: ref.id } : null
 }
 
 function mergeVariants(
@@ -75,7 +74,7 @@ export const useModelStore = create<ModelStore>()((set, get) => ({
     if (!force && state.lastConfigModel === configModel) return
 
     if (configModel) {
-      const parsed = parseModelString(configModel)
+      const parsed = modelSelectionFromString(configModel)
       if (parsed) {
         set({ model: parsed, lastConfigModel: configModel })
         return
@@ -95,7 +94,7 @@ export const useModelStore = create<ModelStore>()((set, get) => ({
     const state = get()
     if (state.model && modelExists(state.model, providers)) return
 
-    const parsedConfig = configModel ? parseModelString(configModel) : null
+    const parsedConfig = configModel ? modelSelectionFromString(configModel) : null
     if (parsedConfig && modelExists(parsedConfig, providers)) {
       get().syncFromConfig(configModel, true)
       return
@@ -107,7 +106,7 @@ export const useModelStore = create<ModelStore>()((set, get) => ({
       return
     }
 
-    const parsedFallback = fallbackModel ? parseModelString(fallbackModel) : null
+    const parsedFallback = fallbackModel ? modelSelectionFromString(fallbackModel) : null
     if (parsedFallback && modelExists(parsedFallback, providers)) {
       set({ model: parsedFallback, lastConfigModel: configModel })
       return

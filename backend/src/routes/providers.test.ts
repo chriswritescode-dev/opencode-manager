@@ -230,19 +230,42 @@ describe('providers routes', () => {
       expect(await res.json()).toEqual({ hasCredentials: false })
     })
 
-    it('returns 404 for a missing integration', async () => {
+    it('retries once after a loading integration becomes available', async () => {
       const client = createStubOpenCodeClient()
-      vi.mocked(client.api.integration.get).mockRejectedValueOnce(
-        taggedError('IntegrationNotFoundError', 'Integration not found: nope'),
-      )
-
-      const res = await createCredentialApp(client).request('/providers/nope/credentials/status')
-
-      expect(res.status).toBe(404)
-      expect(await res.json()).toEqual({
-        error: 'Integration not found: nope',
-        code: 'IntegrationNotFoundError',
+      const get = vi.mocked(client.api.integration.get)
+      get.mockRejectedValueOnce(taggedError('IntegrationNotFoundError', 'Integration not found: anthropic'))
+      get.mockResolvedValue({
+        location: LOCATION,
+        data: integrationFixture({ connections: [credentialConnection('cred_1')] }),
       })
+
+      const res = await createCredentialApp(client).request('/providers/anthropic/credentials/status')
+
+      expect(res.status).toBe(200)
+      expect(await res.json()).toEqual({ hasCredentials: true })
+      expect(get).toHaveBeenCalledTimes(3)
+    })
+
+    it('returns 404 for a missing integration', async () => {
+      vi.useFakeTimers()
+      try {
+        const client = createStubOpenCodeClient()
+        vi.mocked(client.api.integration.get).mockRejectedValue(
+          taggedError('IntegrationNotFoundError', 'Integration not found: nope'),
+        )
+
+        const pending = createCredentialApp(client).request('/providers/nope/credentials/status')
+        await vi.runAllTimersAsync()
+        const res = await pending
+
+        expect(res.status).toBe(404)
+        expect(await res.json()).toEqual({
+          error: 'Integration not found: nope',
+          code: 'IntegrationNotFoundError',
+        })
+      } finally {
+        vi.useRealTimers()
+      }
     })
   })
 
@@ -378,19 +401,43 @@ describe('providers routes', () => {
       expect(vi.mocked(client.api.credential.remove)).not.toHaveBeenCalled()
     })
 
-    it('returns 404 for a missing integration', async () => {
+    it('retries once after a loading integration becomes available', async () => {
       const client = createStubOpenCodeClient()
-      vi.mocked(client.api.integration.get).mockRejectedValueOnce(
-        taggedError('IntegrationNotFoundError', 'Integration not found: nope'),
-      )
-
-      const res = await createCredentialApp(client).request('/providers/nope/credentials', { method: 'DELETE' })
-
-      expect(res.status).toBe(404)
-      expect(await res.json()).toEqual({
-        error: 'Integration not found: nope',
-        code: 'IntegrationNotFoundError',
+      const get = vi.mocked(client.api.integration.get)
+      get.mockRejectedValueOnce(taggedError('IntegrationNotFoundError', 'Integration not found: anthropic'))
+      get.mockResolvedValue({
+        location: LOCATION,
+        data: integrationFixture({ connections: [credentialConnection('cred_1')] }),
       })
+
+      const res = await createCredentialApp(client).request('/providers/anthropic/credentials', { method: 'DELETE' })
+
+      expect(res.status).toBe(200)
+      expect(await res.json()).toEqual({ success: true })
+      expect(vi.mocked(client.api.credential.remove)).toHaveBeenCalledWith({ credentialID: 'cred_1' })
+      expect(get).toHaveBeenCalledTimes(3)
+    })
+
+    it('returns 404 for a missing integration', async () => {
+      vi.useFakeTimers()
+      try {
+        const client = createStubOpenCodeClient()
+        vi.mocked(client.api.integration.get).mockRejectedValue(
+          taggedError('IntegrationNotFoundError', 'Integration not found: nope'),
+        )
+
+        const pending = createCredentialApp(client).request('/providers/nope/credentials', { method: 'DELETE' })
+        await vi.runAllTimersAsync()
+        const res = await pending
+
+        expect(res.status).toBe(404)
+        expect(await res.json()).toEqual({
+          error: 'Integration not found: nope',
+          code: 'IntegrationNotFoundError',
+        })
+      } finally {
+        vi.useRealTimers()
+      }
     })
   })
 })

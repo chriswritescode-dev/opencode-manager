@@ -1,11 +1,8 @@
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import { mcpApi } from '@/api/mcp'
 import type { McpServerConfig } from '@/api/mcp'
+import { invalidateSessionCaches } from '@/lib/queryInvalidation'
 import { showToast as toast } from '@/lib/toast'
-
-const SESSION_QUERY_PREDICATE = (query: { queryKey: readonly unknown[] }) =>
-  query.queryKey[0] === 'opencode' &&
-  (query.queryKey[1] === 'sessions' || query.queryKey[1] === 'session' || query.queryKey[1] === 'messages')
 
 export function useMcpServers() {
   const queryClient = useQueryClient()
@@ -22,7 +19,7 @@ export function useMcpServers() {
       mcpApi.addServer(name, config),
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['mcp-status'] })
-      queryClient.invalidateQueries({ predicate: SESSION_QUERY_PREDICATE })
+      invalidateSessionCaches(queryClient)
       toast.success('MCP server added successfully')
     },
     onError: (error: Error) => {
@@ -34,7 +31,7 @@ export function useMcpServers() {
     mutationFn: (name: string) => mcpApi.connect(name),
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['mcp-status'] })
-      queryClient.invalidateQueries({ predicate: SESSION_QUERY_PREDICATE })
+      invalidateSessionCaches(queryClient)
       toast.success('MCP server connected')
     },
     onError: (error: Error) => {
@@ -46,7 +43,7 @@ export function useMcpServers() {
     mutationFn: (name: string) => mcpApi.disconnect(name),
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['mcp-status'] })
-      queryClient.invalidateQueries({ predicate: SESSION_QUERY_PREDICATE })
+      invalidateSessionCaches(queryClient)
       toast.success('MCP server disconnected')
     },
     onError: (error: Error) => {
@@ -66,7 +63,7 @@ export function useMcpServers() {
     mutationFn: (name: string) => mcpApi.removeAuth(name),
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['mcp-status'] })
-      queryClient.invalidateQueries({ predicate: SESSION_QUERY_PREDICATE })
+      invalidateSessionCaches(queryClient)
       toast.success('Authentication credentials removed')
     },
     onError: (error: Error) => {

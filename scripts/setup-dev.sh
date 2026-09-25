@@ -37,14 +37,12 @@ if ! opencode --version &> /dev/null; then
 fi
 
 REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
-OPENCODE_PINNED_VERSION="$(sed -n 's/^ARG OPENCODE_VERSION=//p' "$REPO_ROOT/Dockerfile" | head -1)"
-OPENCODE_PINNED_MAJOR="${OPENCODE_PINNED_VERSION%%.*}"
+source "$REPO_ROOT/scripts/lib/opencode-release.sh"
+OPENCODE_SUPPORTED_FLOOR="$(sed -n 's/^ARG OPENCODE_VERSION=//p' "$REPO_ROOT/Dockerfile" | head -1)"
 OPENCODE_VERSION="$(opencode --version 2>&1 | grep -oE '[0-9]+\.[0-9]+\.[0-9]+' | head -1)"
 
-if [ -z "$OPENCODE_PINNED_VERSION" ] \
-  || [ "${OPENCODE_VERSION%%.*}" != "$OPENCODE_PINNED_MAJOR" ] \
-  || ! printf '%s\n%s\n' "$OPENCODE_PINNED_VERSION" "$OPENCODE_VERSION" | sort -V -C; then
-  echo "❌ OpenCode ${OPENCODE_VERSION:-unknown} is not supported; OpenCode >=${OPENCODE_PINNED_VERSION} <$((OPENCODE_PINNED_MAJOR + 1)).0.0 is required. Please install it with:"
+if [ -z "$OPENCODE_SUPPORTED_FLOOR" ] || ! is_supported_opencode_version "$OPENCODE_VERSION"; then
+  echo "❌ OpenCode ${OPENCODE_VERSION:-unknown} is not supported; OpenCode $(supported_opencode_range) is required. Please install it with:"
   echo "   curl -fsSL https://opencode.ai/v2/install | bash"
   exit 1
 fi

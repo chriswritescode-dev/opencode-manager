@@ -15,10 +15,6 @@ export interface ActiveUserSession {
   directory: string
 }
 
-export interface OpenCodeRestartResult {
-  interruptedSessionIDs: string[]
-}
-
 export function listActiveUserSessions(source: ActiveSessionsSource = sseAggregator): ActiveUserSession[] {
   const scheduled = source.getScheduledSessionIds()
   return Object.entries(source.getActiveSessions()).flatMap(([directory, sessionIDs]) =>
@@ -45,13 +41,11 @@ async function restartServer(supervisor: OpenCodeSupervisor | undefined, reason:
 export async function restartOpenCode(
   supervisor?: OpenCodeSupervisor,
   reason: OpenCodeOperationReason = 'settings_restart',
-): Promise<OpenCodeRestartResult> {
-  const interruptedSessionIDs = listActiveUserSessions().map((session) => session.sessionID)
+): Promise<void> {
   const healthy = await restartServer(supervisor, reason)
   if (!healthy) {
     throw restartFailureError()
   }
-  return { interruptedSessionIDs }
 }
 
 export async function assertValidOpenCodeConfig(): Promise<void> {

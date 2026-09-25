@@ -1,9 +1,10 @@
 import { createOpenCodeApi } from '@opencode-manager/shared/opencode'
 import type { SessionTransferData } from '@opencode-manager/shared/opencode'
+import { repoProxyBaseUrl } from './repo-proxy.js'
 
 export function createManagerSessionTransfer(managerUrl: string, token: string) {
   const api = createOpenCodeApi({
-    baseUrl: `${managerUrl}/api/opencode-proxy`,
+    baseUrl: repoProxyBaseUrl(managerUrl),
     password: token,
   })
 

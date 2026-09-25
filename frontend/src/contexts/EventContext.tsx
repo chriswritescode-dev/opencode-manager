@@ -15,7 +15,7 @@ import type { PermissionResponse, SSHHostKeyRequest, Repo } from '@/api/types'
 import { showToast } from '@/lib/toast'
 import { openCodeEventStream, type EventStreamHealthState } from '@/lib/opencode-event-stream'
 import { addToSessionKeyedState, removeFromSessionKeyedState } from '@/lib/sessionKeyedState'
-import { invalidateProviderCaches, invalidateRepoGitCachesDebounced } from '@/lib/queryInvalidation'
+import { invalidateProviderCachesDebounced, invalidateQueryKeysDebounced, invalidateRepoGitCachesDebounced } from '@/lib/queryInvalidation'
 
 type PermissionsBySession = Record<string, PermissionRequest[]>
 type FormsBySession = Record<string, FormInfo[]>
@@ -90,6 +90,7 @@ interface EventContextValue {
       message?: string,
     ) => Promise<void>
     dismiss: (permissionID: string, sessionID?: string) => void
+    getForToolCall: (toolCallID: string, messageID?: string) => PermissionRequest | null
     hasForSession: (sessionID: string) => boolean
     showDialog: boolean
     setShowDialog: (show: boolean) => void
@@ -292,6 +293,19 @@ export function EventProvider({ children }: { children: React.ReactNode }) {
     return (permissionsBySession[sessionID]?.length ?? 0) > 0
   }, [permissionsBySession])
 
+  const getPermissionForToolCall = useCallback((
+    toolCallID: string,
+    messageID?: string,
+  ): PermissionRequest | null => {
+    const match = allPermissions.find(
+      (permission) =>
+        permission.source?.type === 'tool' &&
+        permission.source.id === toolCallID &&
+        (messageID === undefined || permission.source.messageID === messageID),
+    )
+    return match ?? null
+  }, [allPermissions])
+
   const getFormForSession = useCallback((sessionID: string): FormInfo | null => {
     return formsBySession[sessionID]?.[0] ?? null
   }, [formsBySession])
@@ -404,7 +418,16 @@ export function EventProvider({ children }: { children: React.ReactNode }) {
         case 'integration.updated':
         case 'provider.updated':
         case 'model.updated':
-          invalidateProviderCaches(queryClient)
+          invalidateProviderCachesDebounced(queryClient)
+          break
+        case 'agent.updated':
+          invalidateQueryKeysDebounced(queryClient, [['opencode', 'agents']])
+          break
+        case 'command.updated':
+          invalidateQueryKeysDebounced(queryClient, [['opencode', 'commands']])
+          break
+        case 'config.updated':
+          invalidateQueryKeysDebounced(queryClient, [['opencode', 'config'], ['opencode-config']])
           break
         case 'ssh.host-key-request':
           setSSHHostKeyRequest(event.properties)
@@ -481,6 +504,7 @@ export function EventProvider({ children }: { children: React.ReactNode }) {
       pendingCount: allPermissions.length,
       respond: replyToPermission,
       dismiss: removePermission,
+      getForToolCall: getPermissionForToolCall,
       hasForSession: hasPermissionsForSession,
       showDialog: showPermissionDialog,
       setShowDialog: setShowPermissionDialog,
@@ -508,6 +532,7 @@ export function EventProvider({ children }: { children: React.ReactNode }) {
     replyToPermission,
     removePermission,
     hasPermissionsForSession,
+    getPermissionForToolCall,
     showPermissionDialog,
     navigateToCurrentPermission,
     syncPermissionsForSession,
@@ -538,6 +563,14 @@ export function useEventContext() {
 export function usePermissions() {
   const { permissions } = useEventContext()
   return permissions
+}
+
+export function useToolCallPermission(
+  toolCallID: string,
+  messageID?: string,
+): PermissionRequest | null {
+  const context = useContext(EventContext)
+  return context?.permissions.getForToolCall(toolCallID, messageID) ?? null
 }
 
 export function useForms() {

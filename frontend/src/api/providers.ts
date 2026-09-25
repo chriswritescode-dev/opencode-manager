@@ -12,30 +12,9 @@ export interface Model {
   id: string;
   key?: string;
   name: string;
-  release_date?: string;
-  attachment?: boolean;
-  reasoning?: boolean;
-  temperature?: boolean;
-  tool_call?: boolean;
-  cost?: {
-    input: number;
-    output: number;
-    cache_read?: number;
-    cache_write?: number;
-  };
   limit?: {
     context: number;
     output: number;
-  };
-  modalities?: {
-    input: ("text" | "audio" | "image" | "video" | "pdf")[];
-    output: ("text" | "audio" | "image" | "video" | "pdf")[];
-  };
-  experimental?: boolean;
-  status?: "alpha" | "beta";
-  options?: Record<string, unknown>;
-  provider?: {
-    npm: string;
   };
   variants?: Record<string, Record<string, unknown>>;
 }
@@ -44,11 +23,8 @@ export interface Provider {
   id: string;
   name: string;
   api?: string;
-  env: string[];
   npm?: string;
   models: Record<string, Model>;
-  options?: Record<string, unknown>;
-  source?: ProviderSource;
   isConnected?: boolean;
 }
 
@@ -56,7 +32,6 @@ export interface ProviderWithModels {
   id: string;
   name: string;
   api?: string;
-  env: string[];
   npm?: string;
   models: Model[];
   source: ProviderSource;
@@ -109,41 +84,15 @@ export interface ProvidersResult {
   models: ModelInfo[];
 }
 
-const MODEL_MODALITIES = ["text", "audio", "image", "video", "pdf"] as const;
-type ModelModality = (typeof MODEL_MODALITIES)[number];
-
-const isModelModality = (value: string): value is ModelModality =>
-  (MODEL_MODALITIES as readonly string[]).includes(value);
-
 function mapModelInfo(model: ModelInfo): Model {
-  const cost = model.cost.find((item) => item.tier === undefined) ?? model.cost[0];
   return {
     id: model.modelID,
     key: model.id,
     name: model.name,
-    release_date: new Date(model.time.released).toISOString().slice(0, 10),
-    attachment: model.capabilities.input.some((item) => item !== "text"),
-    reasoning: false,
-    temperature: false,
-    tool_call: model.capabilities.tools,
-    cost: cost
-      ? {
-          input: cost.input,
-          output: cost.output,
-          cache_read: cost.cache.read,
-          cache_write: cost.cache.write,
-        }
-      : undefined,
     limit: {
       context: model.limit.context,
       output: model.limit.output,
     },
-    modalities: {
-      input: model.capabilities.input.filter(isModelModality),
-      output: model.capabilities.output.filter(isModelModality),
-    },
-    status: model.status === "alpha" ? "alpha" : model.status === "beta" ? "beta" : undefined,
-    options: model.settings,
     variants: Object.fromEntries(model.variants.map((variant) => [variant.id, variant.settings ?? {}])),
   };
 }
@@ -155,21 +104,20 @@ export async function getProviders(directory?: string): Promise<ProvidersResult>
       Promise.all([api.provider.list(location), api.model.list(location)]),
     );
 
-    const connected = providerResult.data.map((provider) => provider.id);
+    const activeProviders = providerResult.data.filter((provider) => provider.activation !== "disabled");
+    const connected = activeProviders.map((provider) => provider.id);
     const connectedSet = new Set(connected);
 
-    const providers = providerResult.data.map((provider) => {
+    const providers = activeProviders.map((provider) => {
       const models: Record<string, Model> = {};
       for (const model of modelResult.data) {
-        if (model.providerID !== provider.id || model.status === "deprecated") continue;
+        if (model.providerID !== provider.id || model.status === "deprecated" || !model.enabled) continue;
         models[model.id] = mapModelInfo(model);
       }
       return {
         id: provider.id,
         name: provider.name,
-        env: [],
         models,
-        options: provider.settings,
         isConnected: connectedSet.has(provider.id),
       };
     });
@@ -264,7 +212,6 @@ async function getConfiguredProviders(connectedIds: Set<string>, config?: OpenCo
         id: providerId,
         name: providerConfig.name || providerId,
         api: providerConfig.api || providerConfig.options?.baseURL,
-        env: [],
         npm: providerConfig.npm,
         models,
         source,
@@ -309,7 +256,6 @@ export async function getProvidersWithModels(directory?: string, config?: OpenCo
       id: provider.id,
       name: provider.name || configured?.name || provider.id,
       api: provider.api ?? configured?.api,
-      env: provider.env?.length ? provider.env : configured?.env ?? [],
       npm: provider.npm ?? configured?.npm,
       models: [...resolvedModels, ...configuredOnlyModels],
       source: configured ? configured.source : "builtin",

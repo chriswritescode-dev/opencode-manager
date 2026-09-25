@@ -4,7 +4,7 @@ import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
 import { MemoryRouter } from 'react-router-dom'
 import { MessagePart } from './MessagePart'
 import { applySessionEvent, emptySessionTranscript } from '@/lib/session-projection'
-import { promptSequence } from '@/lib/session-projection/fixtures'
+import { promptSequence } from '@/test/fixtures/session-projection'
 import type {
   SessionMessageAssistantReasoning,
   SessionMessageAssistantText,

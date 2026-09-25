@@ -6,8 +6,8 @@ import { join } from 'path'
 import {
   clearOpenCodeVersionCache,
   installOpenCodeVersion,
-  latestOpenCodeVersion,
   listOpenCodeVersions,
+  OpenCodeInstallError,
   resolveOpenCodeBinaryPath,
   resolveOpenCodeInstallTarget,
 } from '../../src/services/opencode-installer'
@@ -315,26 +315,38 @@ describe('listOpenCodeVersions', () => {
   })
 })
 
-describe('latestOpenCodeVersion', () => {
-  it('reads the registry latest release document', async () => {
-    const { calls, fetchFn } = createRegistryFetch({ name: '@opencode/cli', version: '2.0.15' })
+describe('OpenCodeInstallError swap signalling', () => {
+  it('marks an unsupported version as not having started the binary swap', async () => {
+    const homeDirectory = join(workDirectory, 'home')
+    const { calls, fetchFn } = createFetch(null)
 
-    await expect(latestOpenCodeVersion({ fetch: fetchFn })).resolves.toBe('2.0.15')
-    expect(calls).toEqual(['https://registry.npmjs.org/@opencode/cli/latest'])
+    const promise = installOpenCodeVersion('1.18.32', { fetch: fetchFn, homeDirectory, target: linuxTarget })
+
+    await expect(promise).rejects.toBeInstanceOf(OpenCodeInstallError)
+    await expect(promise).rejects.toMatchObject({ swapStarted: false })
+    expect(calls).toEqual([])
   })
 
-  it.each(['1.18.32', '2.0.14', '3.0.0', '2.1.0-beta.1'])(
-    'throws when the registry latest release %s is outside the supported range',
-    async (version) => {
-      const { fetchFn } = createRegistryFetch({ version })
+  it('marks a pre-swap download failure as not having started the binary swap', async () => {
+    const homeDirectory = join(workDirectory, 'home')
+    const { fetchFn } = createFetch(null, 404)
 
-      await expect(latestOpenCodeVersion({ fetch: fetchFn })).rejects.toThrow(version)
-    },
-  )
+    const promise = installOpenCodeVersion('2.0.15', { fetch: fetchFn, homeDirectory, target: linuxTarget })
 
-  it('throws when the latest request fails', async () => {
-    const { fetchFn } = createRegistryFetch({}, 502)
+    await expect(promise).rejects.toBeInstanceOf(OpenCodeInstallError)
+    await expect(promise).rejects.toMatchObject({ swapStarted: false })
+    expect(() => statSync(resolveOpenCodeBinaryPath(homeDirectory))).toThrow()
+  })
 
-    await expect(latestOpenCodeVersion({ fetch: fetchFn })).rejects.toThrow(/502/)
+  it('marks a failure while replacing the binary as having started the binary swap', async () => {
+    const homeDirectory = join(workDirectory, 'home')
+    mkdirSync(resolveOpenCodeBinaryPath(homeDirectory), { recursive: true })
+    const archivePath = createArchive(workDirectory, '2.0.15')
+    const { fetchFn } = createFetch(archivePath)
+
+    const promise = installOpenCodeVersion('2.0.15', { fetch: fetchFn, homeDirectory, target: linuxTarget })
+
+    await expect(promise).rejects.toBeInstanceOf(OpenCodeInstallError)
+    await expect(promise).rejects.toMatchObject({ swapStarted: true })
   })
 })

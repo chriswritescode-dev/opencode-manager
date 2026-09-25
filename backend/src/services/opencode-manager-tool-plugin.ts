@@ -112,7 +112,7 @@ function buildManagerToolDescription(): string {
     .join('\n')
 }
 
-export function buildManagerToolPluginSource(): string {
+export function buildManagerToolPluginSource(id: string): string {
   return `var REQUEST_TIMEOUT_MS = ${MANAGER_TOOL_REQUEST_TIMEOUT_MS}
 
 var ALLOWED_ROUTES = ${JSON.stringify(MANAGER_TOOL_ALLOWED_ROUTES)}
@@ -239,7 +239,7 @@ async function runAction(input, signal) {
 }
 
 export default {
-  id: 'ocm.manager',
+  id: '${id}',
   async setup(ctx) {
     await ctx.tool.transform(function (editor) {
       editor.add({

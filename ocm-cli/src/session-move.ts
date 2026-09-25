@@ -83,14 +83,15 @@ export async function transferSession(input: TransferInput, deps: TransferDeps):
   const total = rewritten.messages.length
   deps.onProgress?.(0, total)
 
+  let imported: { sessionID: string }
   try {
-    await deps.importSession(input.remoteDirectory, rewritten)
+    imported = await deps.importSession(input.remoteDirectory, rewritten)
   } catch (err) {
     return { kind: 'import-failed', message: err instanceof Error ? err.message : String(err) }
   }
 
   deps.onProgress?.(total, total)
-  return { kind: 'moved', sessionID: input.sessionID, importedMessages: total }
+  return { kind: 'moved', sessionID: imported.sessionID, importedMessages: total }
 }
 
 export function moveReminderText(directory: string): string {

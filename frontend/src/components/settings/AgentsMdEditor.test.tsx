@@ -7,9 +7,13 @@ import { AgentsMdEditor } from './AgentsMdEditor'
 vi.mock('@/api/settings', () => ({
   settingsApi: {
     getAgentsMd: vi.fn().mockResolvedValue({ content: '# Rules\n\nline two\nline three\n' }),
-    updateAgentsMd: vi.fn().mockResolvedValue(undefined),
+    updateAgentsMd: vi.fn().mockResolvedValue({ success: true, restartRequired: false }),
     getDefaultAgentsMd: vi.fn().mockResolvedValue({ content: '# Default' }),
   },
+}))
+
+vi.mock('@/lib/toast', () => ({
+  showToast: { success: vi.fn(), error: vi.fn(), info: vi.fn(), loading: vi.fn(), warning: vi.fn(), dismiss: vi.fn() },
 }))
 
 const createWrapper = () => {
@@ -83,9 +87,9 @@ describe('AgentsMdEditor', () => {
   it('locks the editor while a save is pending and preserves submitted content', async () => {
     const user = userEvent.setup()
     const { settingsApi } = await import('@/api/settings')
-    let resolveSave: () => void = () => {}
+    let resolveSave: (value: { success: boolean; restartRequired?: boolean }) => void = () => {}
     ;(settingsApi.updateAgentsMd as ReturnType<typeof vi.fn>).mockReturnValueOnce(
-      new Promise<void>((resolve) => {
+      new Promise<{ success: boolean; restartRequired?: boolean }>((resolve) => {
         resolveSave = resolve
       }),
     )
@@ -101,7 +105,7 @@ describe('AgentsMdEditor', () => {
       // user-event refuses to type into a disabled element; expected
     }
     expect(textarea).toHaveValue(edited)
-    resolveSave()
+    resolveSave({ success: true, restartRequired: false })
     await waitFor(() => expect(textarea).not.toBeDisabled())
     expect(textarea).toHaveValue(edited)
   })
@@ -121,5 +125,44 @@ describe('AgentsMdEditor', () => {
     fireEvent.change(textarea, { target: { value: 'A' } })
     await waitFor(() => expect(settingsApi.getAgentsMd).toHaveBeenCalledTimes(2))
     expect(textarea).toHaveValue('A')
+  })
+
+  it('reports a save as applied without a restart', async () => {
+    const user = userEvent.setup()
+    const { settingsApi } = await import('@/api/settings')
+    const { showToast } = await import('@/lib/toast')
+    ;(settingsApi.updateAgentsMd as ReturnType<typeof vi.fn>).mockResolvedValueOnce({ success: true, restartRequired: false })
+    render(<AgentsMdEditor />, { wrapper: createWrapper() })
+    const textarea = (await screen.findByLabelText('AGENTS.md content')) as HTMLTextAreaElement
+    fireEvent.change(textarea, { target: { value: '# Rules\n\napplied\n' } })
+    await user.click(screen.getByRole('button', { name: 'Save' }))
+    await waitFor(() => expect(showToast.success).toHaveBeenCalledWith('AGENTS.md saved'))
+  })
+
+  it('requests a restart when the in-place reload fails', async () => {
+    const user = userEvent.setup()
+    const { settingsApi } = await import('@/api/settings')
+    const { showToast } = await import('@/lib/toast')
+    ;(settingsApi.updateAgentsMd as ReturnType<typeof vi.fn>).mockResolvedValueOnce({ success: true, restartRequired: true })
+    render(<AgentsMdEditor />, { wrapper: createWrapper() })
+    const textarea = (await screen.findByLabelText('AGENTS.md content')) as HTMLTextAreaElement
+    fireEvent.change(textarea, { target: { value: '# Rules\n\nneeds restart\n' } })
+    await user.click(screen.getByRole('button', { name: 'Save' }))
+    await waitFor(() =>
+      expect(showToast.success).toHaveBeenCalledWith(
+        'Configuration saved, but OpenCode could not reload it. Restart the server to apply changes.',
+      ),
+    )
+  })
+
+  it('reports resetting to default as applied without a restart', async () => {
+    const user = userEvent.setup()
+    const { settingsApi } = await import('@/api/settings')
+    const { showToast } = await import('@/lib/toast')
+    ;(settingsApi.updateAgentsMd as ReturnType<typeof vi.fn>).mockResolvedValueOnce({ success: true, restartRequired: false })
+    render(<AgentsMdEditor />, { wrapper: createWrapper() })
+    await screen.findByLabelText('AGENTS.md content')
+    await user.click(screen.getByRole('button', { name: 'Reset to Default' }))
+    await waitFor(() => expect(showToast.success).toHaveBeenCalledWith('AGENTS.md reset to default'))
   })
 })

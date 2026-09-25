@@ -18,9 +18,18 @@ import { mkdirSafe } from '../utils/fs-safe'
 import { getOpenCodeHome } from './opencode-home'
 
 const OPENCODE_REGISTRY_URL = 'https://registry.npmjs.org/@opencode/cli'
-const OPENCODE_REGISTRY_LATEST_URL = `${OPENCODE_REGISTRY_URL}/latest`
 const OPENCODE_VERSION_CACHE_TTL_MS = 5 * 60 * 1000
 const OPENCODE_MUSL_LOADER_PREFIX = 'ld-musl-'
+
+export class OpenCodeInstallError extends Error {
+  readonly swapStarted: boolean
+
+  constructor(message: string, swapStarted: boolean, options?: ErrorOptions) {
+    super(message, options)
+    this.name = 'OpenCodeInstallError'
+    this.swapStarted = swapStarted
+  }
+}
 
 export interface OpenCodeInstallTarget {
   platform: NodeJS.Platform
@@ -47,10 +56,6 @@ export interface OpenCodeRegistryOptions {
 interface OpenCodeRegistry {
   versions?: Record<string, unknown>
   time?: Record<string, unknown>
-}
-
-interface OpenCodeRegistryLatest {
-  version?: unknown
 }
 
 interface CachedOpenCodeReleases {
@@ -116,14 +121,6 @@ export async function listOpenCodeVersions(options: OpenCodeRegistryOptions = {}
   return releases
 }
 
-export async function latestOpenCodeVersion(options: OpenCodeRegistryOptions = {}): Promise<string> {
-  const latest = await fetchOpenCodeRegistryJson<OpenCodeRegistryLatest>(options.fetch ?? fetch, OPENCODE_REGISTRY_LATEST_URL)
-  if (typeof latest.version !== 'string' || !isInstallableOpenCodeVersion(latest.version)) {
-    throw new Error(`OpenCode registry latest release is not a supported version: ${String(latest.version)}`)
-  }
-  return normalizeOpenCodeVersion(latest.version)
-}
-
 async function downloadToFile(response: Response, filePath: string): Promise<void> {
   if (!response.body) throw new Error('OpenCode download returned an empty body')
   await pipeline(Readable.fromWeb(response.body as WebReadableStream<Uint8Array>), createWriteStream(filePath))
@@ -135,7 +132,7 @@ export async function installOpenCodeVersion(
 ): Promise<string> {
   const requestedVersion = normalizeOpenCodeVersion(version)
   if (!isInstallableOpenCodeVersion(requestedVersion)) {
-    throw new Error(`${describeUnsupportedOpenCodeVersion(version)}; refusing to install it`)
+    throw new OpenCodeInstallError(`${describeUnsupportedOpenCodeVersion(version)}; refusing to install it`, false)
   }
 
   const fetchFn = options.fetch ?? fetch
@@ -143,6 +140,8 @@ export async function installOpenCodeVersion(
   const asset = buildOpenCodeReleaseAsset(requestedVersion, options.target ?? resolveOpenCodeInstallTarget())
   const binaryPath = resolveOpenCodeBinaryPath(homeDirectory)
   const stagingDirectory = await fs.mkdtemp(path.join(os.tmpdir(), 'opencode-install-'))
+
+  let swapStarted = false
 
   try {
     const archivePath = path.join(stagingDirectory, asset.archive === 'zip' ? 'opencode.zip' : 'opencode.tar.gz')
@@ -174,6 +173,7 @@ export async function installOpenCodeVersion(
     const binDirectory = path.dirname(binaryPath)
     await mkdirSafe(binDirectory)
     const pendingPath = path.join(binDirectory, `.opencode.ocm-tmp-${process.pid}-${Date.now()}`)
+    swapStarted = true
     try {
       await fs.copyFile(stagedBinaryPath, pendingPath)
       await fs.chmod(pendingPath, 0o755)
@@ -184,6 +184,9 @@ export async function installOpenCodeVersion(
     }
 
     return binaryPath
+  } catch (error) {
+    if (error instanceof OpenCodeInstallError) throw error
+    throw new OpenCodeInstallError(error instanceof Error ? error.message : String(error), swapStarted, { cause: error })
   } finally {
     await fs.rm(stagingDirectory, { recursive: true, force: true })
   }

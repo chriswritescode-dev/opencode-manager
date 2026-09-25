@@ -174,7 +174,7 @@ export const settingsApi = {
     return fetchWrapper(`${API_BASE_URL}/api/settings/agents-md/default`)
   },
 
-  updateAgentsMd: async (content: string): Promise<{ success: boolean }> => {
+  updateAgentsMd: async (content: string): Promise<{ success: boolean; restartRequired?: boolean }> => {
     return fetchWrapper(`${API_BASE_URL}/api/settings/agents-md`, {
       method: 'PUT',
       headers: { 'Content-Type': 'application/json' },

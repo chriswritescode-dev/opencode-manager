@@ -5,14 +5,16 @@ import { Badge } from '@/components/ui/badge'
 import { Input } from '@/components/ui/input'
 import { DeleteDialog } from '@/components/ui/delete-dialog'
 import { Loader2, Check, X, Shield, ChevronDown, ChevronRight, Key, Search, Pencil, Trash2 } from 'lucide-react'
-import { providerCredentialsApi, getProviders } from '@/api/providers'
+import { providerCredentialsApi } from '@/api/providers'
 import type { Provider } from '@/api/providers'
-import { oauthApi, type OAuthAuthorizeResponse } from '@/api/oauth'
+import { type OAuthAuthorizeResponse } from '@/api/oauth'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { OAuthAuthorizeDialog } from './OAuthAuthorizeDialog'
 import { OAuthCallbackDialog } from './OAuthCallbackDialog'
 import { ApiKeyDialog } from '@/components/model/ApiKeyDialog'
 import { invalidateProviderCaches } from '@/lib/queryInvalidation'
+import { useProviders } from '@/hooks/useProviders'
+import { useProviderAuthMethods } from '@/hooks/useProviderAuthMethods'
 
 export function ProviderSettings() {
   const [selectedProvider, setSelectedProvider] = useState<string | null>(null)
@@ -28,11 +30,7 @@ export function ProviderSettings() {
   const [deleteTarget, setDeleteTarget] = useState<string | null>(null)
   const queryClient = useQueryClient()
 
-  const { data: providersData, isLoading: providersLoading } = useQuery({
-    queryKey: ['providers'],
-    queryFn: () => getProviders(),
-    staleTime: 300000,
-  })
+  const { data: providersData, isLoading: providersLoading } = useProviders()
 
   const providers = providersData?.providers
 
@@ -41,10 +39,7 @@ export function ProviderSettings() {
     queryFn: () => providerCredentialsApi.list(),
   })
 
-  const { data: authMethods } = useQuery({
-    queryKey: ['provider-auth-methods'],
-    queryFn: () => oauthApi.getAuthMethods(),
-  })
+  const { data: authMethods } = useProviderAuthMethods()
 
   const deleteCredentialMutation = useMutation({
     mutationFn: (providerId: string) => providerCredentialsApi.delete(providerId),
@@ -421,7 +416,6 @@ export function ProviderSettings() {
             id: apiKeyProvider.id,
             name: apiKeyProvider.name,
             api: apiKeyProvider.api,
-            env: apiKeyProvider.env || [],
             npm: apiKeyProvider.npm,
             models: Object.entries(apiKeyProvider.models || {}).map(([id, model]) => ({
               id,

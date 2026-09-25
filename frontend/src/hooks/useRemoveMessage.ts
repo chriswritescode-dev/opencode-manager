@@ -1,10 +1,10 @@
 import { useMutation, useQueryClient } from '@tanstack/react-query'
 import {
   commitRevert,
-  parseModelRef,
   sendPrompt,
   stageRevert,
 } from '@/api/opencode'
+import { parseOpenCodeModelRef } from '@opencode-manager/shared/opencode'
 import { useSyncSessionSelection } from '@/hooks/useOpenCode'
 import { showToast } from '@/lib/toast'
 import { sessionTranscriptQueryKey } from '@/lib/queryInvalidation'
@@ -58,7 +58,7 @@ export function useRefreshMessage({ sessionId, directory }: UseRefreshMessageOpt
     }) => {
       await removeMessage.mutateAsync({ messageID: assistantMessageID })
 
-      const modelRef = model ? parseModelRef(model) : undefined
+      const modelRef = model ? parseOpenCodeModelRef(model) : undefined
       await syncSelection({ sessionID: sessionId, model: modelRef, agent })
 
       await sendPrompt({

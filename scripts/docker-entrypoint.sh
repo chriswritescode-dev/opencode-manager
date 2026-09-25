@@ -6,6 +6,7 @@ export BUN_INSTALL="$HOME/.bun"
 export PATH="$BUN_INSTALL/bin:$HOME/.opencode/bin:/usr/local/bin:$PATH"
 
 source /usr/local/lib/ocm/container-user.sh
+source /usr/local/lib/ocm/opencode-release.sh
 
 grant_kvm_access() {
   local dev="${1:-/dev/kvm}"
@@ -44,22 +45,6 @@ grant_kvm_access() {
 
 OPENCODE_SUPPORTED_FLOOR="${OPENCODE_BUNDLED_VERSION:-}"
 
-version_gte() {
-  printf '%s\n%s\n' "$2" "$1" | sort -V -C
-}
-
-is_supported_opencode_version() {
-  local version="$1"
-  [[ "$version" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]] || return 1
-  [ -n "$OPENCODE_SUPPORTED_FLOOR" ] || return 1
-  [ "${version%%.*}" = "${OPENCODE_SUPPORTED_FLOOR%%.*}" ] || return 1
-  version_gte "$version" "$OPENCODE_SUPPORTED_FLOOR"
-}
-
-supported_opencode_range() {
-  printf '>=%s <%s.0.0\n' "$OPENCODE_SUPPORTED_FLOOR" "$(( ${OPENCODE_SUPPORTED_FLOOR%%.*} + 1 ))"
-}
-
 read_opencode_version() {
   local binary
   binary="$(command -v "${1:-opencode}" 2>/dev/null || true)"
@@ -69,35 +54,14 @@ read_opencode_version() {
   runuser -u node -- "$binary" --version 2>&1 | grep -oE '[0-9]+\.[0-9]+\.[0-9]+' | head -1 || true
 }
 
-opencode_arch_suffix() {
-  local arch
-  arch="$(uname -m | sed 's/x86_64/x64/; s/aarch64/arm64/')"
-  if ls /lib/ld-musl-* >/dev/null 2>&1; then
-    arch="${arch}-musl"
-  fi
-  printf '%s\n' "$arch"
-}
-
 install_opencode() {
   local opencode_version="${OPENCODE_BUNDLED_VERSION:-}"
   if [ -z "$opencode_version" ]; then
     echo "ERROR: OPENCODE_BUNDLED_VERSION is not set; refusing to guess the pinned OpenCode build" >&2
     return 1
   fi
-  if [[ ! "$opencode_version" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
-    echo "ERROR: OPENCODE_BUNDLED_VERSION='$opencode_version' is not an X.Y.Z version; refusing to download it" >&2
-    return 1
-  fi
   echo "Installing OpenCode ${opencode_version}..."
-  local staging
-  staging="$(mktemp -d)"
-  curl -fsSL "https://opencode.ai/files/bin/${opencode_version}/opencode-linux-$(opencode_arch_suffix).tar.gz" \
-    -o "$staging/opencode.tar.gz"
-  tar -xzf "$staging/opencode.tar.gz" -C "$staging"
-  mkdir -p "$HOME/.opencode/bin"
-  mv "$staging/opencode" "$HOME/.opencode/bin/opencode"
-  chmod 755 "$HOME/.opencode/bin/opencode"
-  rm -rf "$staging"
+  download_opencode_to "$opencode_version" "$HOME/.opencode/bin/opencode"
 }
 
 reconcile_persisted_opencode() {

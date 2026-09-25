@@ -19,6 +19,7 @@ import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import { useServerHealth } from '@/hooks/useServerHealth'
 import { useOpenCodeServerActions } from '@/hooks/useOpenCodeServerActions'
 import { useOpenCodeConfigFile, OPEN_CODE_CONFIG_QUERY_KEY } from '@/hooks/useOpenCodeConfigFile'
+import { useOpenCodeApplyFeedback } from '@/hooks/useOpenCodeApplyFeedback'
 import { showToast } from '@/lib/toast'
 import { invalidateConfigCaches } from '@/lib/queryInvalidation'
 import { getOpenCodeApiErrorMessage } from '@/lib/opencode-errors'
@@ -76,6 +77,7 @@ export function OpenCodeConfigManager() {
   const hostImportContentId = `${sectionIdPrefix}-host-import`
 
   const queryClient = useQueryClient()
+  const applyOpenCodeSaveFeedback = useOpenCodeApplyFeedback()
   const { data: health } = useServerHealth()
   const [expandedSections, setExpandedSections] = useState<Record<ConfigSectionKey, boolean>>({
     agentsMd: false,
@@ -159,12 +161,10 @@ export function OpenCodeConfigManager() {
 
   const applyOpenCodeConfigSave = (result: OpenCodeConfigSaveResponse) => {
     queryClient.setQueryData<OpenCodeConfigFile>(OPEN_CODE_CONFIG_QUERY_KEY, result)
-    if (result.restartRequired) {
-      showToast.success('Configuration saved, but OpenCode could not reload it. Restart the server to apply changes.')
-    } else {
-      showToast.success('Configuration updated')
-    }
-    invalidateConfigCaches(queryClient, { skipOpenCodeConfig: true })
+    applyOpenCodeSaveFeedback({
+      appliedMessage: 'Configuration updated',
+      restartRequired: result.restartRequired,
+    })
   }
 
   const updateConfigContent = async (newContent: Record<string, unknown>) => {
@@ -279,7 +279,7 @@ export function OpenCodeConfigManager() {
           </div>
 
           <p className="text-xs text-muted-foreground">
-            Merged persisted settings. Saves write to the preferred config file; removing a value deletes its override so an inherited value can reappear. Restart the server to apply changes.
+            Merged persisted settings. Saves write to the preferred config file; removing a value deletes its override so an inherited value can reappear. Saves are applied to the running server; a restart is only requested if applying them fails.
           </p>
 
           <OpenCodeConfigSourcesNotice config={config} />

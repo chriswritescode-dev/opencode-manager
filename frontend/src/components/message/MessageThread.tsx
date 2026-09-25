@@ -397,6 +397,7 @@ const MessageRow = memo(function MessageRow({
               <div key={`${message.id}-${part.id}-${partIndex}`}>
                 <MessagePart
                   part={part}
+                  messageID={message.id}
                   onFileClick={onFileClick}
                   onChildSessionClick={onChildSessionClick}
                 />
@@ -433,6 +434,7 @@ const MessageRow = memo(function MessageRow({
               <div key={`${message.id}-${part.type}-${partIndex}`}>
                 <MessagePart
                   part={part}
+                  messageID={message.id}
                   onFileClick={onFileClick}
                   onChildSessionClick={onChildSessionClick}
                 />

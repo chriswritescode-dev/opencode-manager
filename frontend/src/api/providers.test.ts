@@ -113,13 +113,34 @@ describe('getProviders', () => {
       key: 'claude-sonnet-4',
       id: 'claude-sonnet-4-20250514',
       name: 'Claude Sonnet 4',
-      attachment: true,
-      tool_call: true,
-      cost: { input: 3, output: 15, cache_read: 0.3, cache_write: 3.75 },
       limit: { context: 200000, output: 64000 },
       variants: { thinking: { reasoning: 'high' } },
     })
     expect(result.providers[0].models['claude-legacy']).toBeUndefined()
+  })
+
+  it('excludes disabled models and disabled providers from the picker', async () => {
+    mockProviderList.mockResolvedValue({
+      location: { directory: '/repo' },
+      data: [
+        { id: 'anthropic', name: 'Anthropic', activation: 'enabled' },
+        { id: 'disabled-provider', name: 'Disabled', activation: 'disabled' },
+      ],
+    })
+    mockModelList.mockResolvedValue({
+      location: { directory: '/repo' },
+      data: [
+        makeAnthropicModel(),
+        makeAnthropicModel({ id: 'claude-disabled', modelID: 'claude-disabled', enabled: false }),
+        makeAnthropicModel({ id: 'claude-off-provider', modelID: 'claude-off-provider', providerID: 'disabled-provider' }),
+      ],
+    })
+
+    const result = await getProviders('/repo')
+
+    expect(result.connected).toEqual(['anthropic'])
+    expect(result.providers.map((provider) => provider.id)).toEqual(['anthropic'])
+    expect(Object.keys(result.providers[0].models)).toEqual(['claude-sonnet-4'])
   })
 
   it('degrades to an empty result when the upstream call fails', async () => {
@@ -278,7 +299,6 @@ describe('getProvidersWithModels', () => {
     expect(anthropic?.models.map((model) => model.key).sort()).toEqual(['claude-opus-4', 'claude-sonnet-4'])
     const sonnet = anthropic?.models.find((model) => model.key === 'claude-sonnet-4')
     expect(sonnet?.limit).toEqual({ context: 200000, output: 64000 })
-    expect(sonnet?.cost).toEqual({ input: 3, output: 15, cache_read: 0.3, cache_write: 3.75 })
     expect(sonnet?.variants).toEqual({ thinking: { reasoning: 'high' } })
   })
 

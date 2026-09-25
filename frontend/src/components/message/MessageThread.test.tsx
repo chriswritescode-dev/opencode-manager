@@ -8,7 +8,7 @@ import {
   compactionSequence,
   promptSequence,
   shellSequence,
-} from '@/lib/session-projection/fixtures'
+} from '@/test/fixtures/session-projection'
 import type {
   SessionInboxUser,
   SessionMessageAssistant,

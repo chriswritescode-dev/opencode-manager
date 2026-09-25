@@ -23,7 +23,14 @@ ocm 0.3.0 requires a local OpenCode 2 client (>= 2.0.15, same major), is configu
 OpenCode Manager at <url> is too old for ocm 0.3.0; upgrade the Manager to >= 0.19.0
 ```
 
-Keep ocm 0.2.x for OpenCode Manager < 0.19.0 and OpenCode 1.x.
+Keep ocm 0.2.x for OpenCode Manager < 0.19.0 and OpenCode 1.x: install it pinned with
+`pnpm add -g @opencode-manager/ocm-cli@0.2`, and pin the plugin entry to
+`@opencode-manager/ocm-cli@0.2` in your OpenCode 1.x TUI config so it does not resolve to
+the latest release. ocm is published together with each OpenCode Manager release.
+
+When the Manager rejects the stored token (`401`), returns another error, or cannot be
+reached while `ocm` prepares the repo-scoped route, `ocm` and `/ocm-move` stop before
+attaching with a message naming the cause.
 
 ## Architecture Overview
 
@@ -135,8 +142,12 @@ OPENCODE_PASSWORD=<manager-token> \
 
 `OPENCODE_PASSWORD` is set only on this local `opencode` client invocation that `ocm` execs, from the stored Manager token; you do not need to export it yourself. Never put `OPENCODE_PASSWORD` in the OpenCode Manager server environment: the Manager strips it from its own env because it would override the Manager-managed OpenCode server password.
 
-The repo-scoped proxy mount pins the request location to the repo directory, so the
-child TUI can run from any local working directory. The child takes over the terminal
+The repo-scoped proxy mount sets the repo directory as the default request location
+(the `x-opencode-directory` header, a `location[directory]` query, the session list
+`directory` filter, and a `location` in a JSON body), so the child TUI can run from any
+local working directory. It is convenience scoping, not isolation: routes addressed by
+session ID are not restricted to the repo, and the Manager token grants full access to
+the OpenCode API through the unscoped `/api/opencode-proxy/*` route as well. The child takes over the terminal
 (`stdio: inherit`); closing the TUI exits `ocm` but leaves the Manager-side session
 intact.
 
@@ -181,4 +192,4 @@ The CLI's environment and token inputs:
 | `/api/internal/repo-mirror/:repoId/up` | POST | Receive tarball, write to repo dir |
 | `/api/internal/repo-mirror/:repoId/down` | GET | Stream tarball of repo dir |
 | `/api/opencode-proxy/*` | ALL | Token-protected proxy from Manager to single OpenCode server |
-| `/api/opencode-proxy/repos/:repoId/*` | ALL | Repo-scoped proxy that pins the request location to the repo directory |
+| `/api/opencode-proxy/repos/:repoId/*` | ALL | Token-protected proxy that defaults the request location to the repo directory |

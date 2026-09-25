@@ -160,7 +160,7 @@ const rmMock = fs.rm as any
 const writeFileMock = fs.writeFile as any
 const renameMock = fs.rename as any
 
-const SERVICE_SETTINGS_PATH = '/test/workspace/.config/opencode/service.json'
+const SERVICE_SETTINGS_PATH = '/test/workspace/config/service.json'
 const SERVICE_REGISTRATION_PATH = '/test/workspace/.opencode/state/opencode/service.json'
 
 function readWrittenServiceSettings(): Record<string, unknown> {
@@ -577,7 +577,7 @@ describe('OpenCodeServerManager - server auth', () => {
     expect(env.OCM_INTERNAL_TOKEN).toBe(storedInternalToken)
   })
 
-  it('passes through user-supplied OPENCODE_CONFIG_CONTENT and OPENCODE_CONFIG_DIR serverEnvVars', async () => {
+  it('drops user-supplied OPENCODE_CONFIG_CONTENT and OPENCODE_CONFIG_DIR serverEnvVars', async () => {
     const { OpenCodeServerManager } = await import('../../src/services/opencode-single-server')
     const manager = OpenCodeServerManager.getInstance()
     manager.setDatabase(createPreferencesDb({
@@ -590,11 +590,11 @@ describe('OpenCodeServerManager - server auth', () => {
     await manager.start()
 
     const env = (spawnMock.mock.calls[0] as unknown as [unknown, unknown, { env: Record<string, string> }])[2].env
-    expect(env.OPENCODE_CONFIG_CONTENT).toBe('{"plugin":["file:///evil.js"]}')
-    expect(env.OPENCODE_CONFIG_DIR).toBe('/tmp/evil-config')
+    expect(env.OPENCODE_CONFIG_CONTENT).toBeUndefined()
+    expect(env.OPENCODE_CONFIG_DIR).toBeUndefined()
   })
 
-  it('passes inherited OPENCODE_CONFIG_CONTENT and OPENCODE_CONFIG_DIR through to the spawned env', async () => {
+  it('drops inherited OPENCODE_CONFIG_CONTENT and OPENCODE_CONFIG_DIR from the spawned env', async () => {
     const { OpenCodeServerManager } = await import('../../src/services/opencode-single-server')
     const manager = OpenCodeServerManager.getInstance()
     manager.setDatabase(createPasswordDb(null))
@@ -604,8 +604,8 @@ describe('OpenCodeServerManager - server auth', () => {
       await manager.start()
 
       const env = (spawnMock.mock.calls[0] as unknown as [unknown, unknown, { env: Record<string, string> }])[2].env
-      expect(env.OPENCODE_CONFIG_CONTENT).toBe('{"plugin":["file:///evil.js"]}')
-      expect(env.OPENCODE_CONFIG_DIR).toBe('/tmp/evil-config')
+      expect(env.OPENCODE_CONFIG_CONTENT).toBeUndefined()
+      expect(env.OPENCODE_CONFIG_DIR).toBeUndefined()
     } finally {
       delete process.env.OPENCODE_CONFIG_CONTENT
       delete process.env.OPENCODE_CONFIG_DIR
@@ -672,7 +672,7 @@ describe('OpenCodeServerManager - server auth', () => {
     expect(renameMock.mock.invocationCallOrder[settingsWriteIndex]).toBeLessThan(spawnOrder)
   })
 
-  it('writes the service settings into a user-supplied OPENCODE_CONFIG_DIR because OpenCode reads them from its global config directory', async () => {
+  it('drops a user-supplied OPENCODE_CONFIG_DIR and writes the service settings into the manager config directory', async () => {
     setOpenCodeEnv({ host: '127.0.0.1', password: 'envpassword123' })
     const { OpenCodeServerManager } = await import('../../src/services/opencode-single-server')
     const manager = OpenCodeServerManager.getInstance()
@@ -683,9 +683,9 @@ describe('OpenCodeServerManager - server auth', () => {
     await manager.start()
 
     const env = (spawnMock.mock.calls[0] as unknown as [unknown, unknown, { env: Record<string, string> }])[2].env
-    expect(env.OPENCODE_CONFIG_DIR).toBe('/tmp/user-config-dir')
-    expect(renameMock).toHaveBeenCalledWith(expect.any(String), '/tmp/user-config-dir/service.json')
-    expect(renameMock).not.toHaveBeenCalledWith(expect.any(String), SERVICE_SETTINGS_PATH)
+    expect(env.OPENCODE_CONFIG_DIR).toBeUndefined()
+    expect(renameMock).toHaveBeenCalledWith(expect.any(String), SERVICE_SETTINGS_PATH)
+    expect(renameMock).not.toHaveBeenCalledWith(expect.any(String), '/tmp/user-config-dir/service.json')
   })
 
   it('refuses to spawn when the service settings cannot be written', async () => {

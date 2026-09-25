@@ -131,9 +131,9 @@ The container entrypoint (`scripts/docker-entrypoint.sh`) automatically:
 
 1. **Verifies Bun** is installed (installed at build time, fallback install if missing)
 2. **Reconciles the persisted OpenCode home binary** (`/home/node/.opencode/bin/opencode`):
-   - any valid persisted binary at or above the minimum version (2.0.0) is retained, including a user-selected version newer or older than the image-bundled `OPENCODE_BUNDLED_VERSION`;
-   - a persisted binary that is malformed, unversioned, or below the minimum version is removed (only that binary), so `PATH` falls back to the image-bundled `/usr/local/bin/opencode` without a download
-3. **Installs OpenCode** only when no usable binary is present: if opencode is missing entirely, or if the surviving binary is still below the minimum version (2.0.0), the pinned bundled version is downloaded from `https://opencode.ai/files/bin/` into the persisted `bin` volume
+   - a persisted binary inside the supported range is retained, including a user-selected version newer than the image-bundled `OPENCODE_BUNDLED_VERSION`. The supported range is a stable `X.Y.Z` release at or above the bundled version with the same major version (`>=OPENCODE_BUNDLED_VERSION <next major`);
+   - a persisted binary that is malformed, unversioned, a prerelease, or outside the supported range is removed (only that binary), so `PATH` falls back to the image-bundled `/usr/local/bin/opencode` without a download
+3. **Installs OpenCode** only when no usable binary is present: if opencode is missing entirely, or if the surviving binary is still outside the supported range, the pinned bundled version is downloaded from `https://opencode.ai/files/bin/` into the persisted `bin` volume
 4. **Validates AUTH_SECRET** is set (required for startup)
 5. **Aligns the `node` account** to `PUID`/`PGID` (default `1000`) before chowning the workspace, the `/app/data` directory, and the `node` home directory. If `PUID`/`PGID` are already used by another account in the image, startup aborts with an explicit error. Group alignment runs first, so a free `PGID` combined with an occupied `PUID` mutates `/etc/group` before the UID collision is detected and aborts startup; realign to the original ids or pick a free pair before retrying.
 
@@ -277,9 +277,9 @@ Persists the OpenCode binary that the Manager's installer (from the UI's OpenCod
 
 On startup the entrypoint reconciles the persisted binary:
 
-- any valid persisted binary at or above the minimum version (2.0.0) is retained, including a user-selected version newer or older than the image-bundled `OPENCODE_BUNDLED_VERSION`;
+- a persisted binary inside the supported range (a stable release `>=OPENCODE_BUNDLED_VERSION` with the same major version) is retained, including a user-selected version newer than the image-bundled one;
 - a malformed or unversioned persisted binary is removed so `PATH` falls back to the image-bundled `/usr/local/bin/opencode`, avoiding a download;
-- a persisted binary still below the minimum version (2.0.0) is removed so the pinned bundled OpenCode 2 binary is used, downloaded from `https://opencode.ai/files/bin/` into this volume.
+- a persisted binary outside the supported range (older than the bundled version, a prerelease, or a different major version) is removed so the pinned bundled OpenCode 2 binary is used; it is downloaded from `https://opencode.ai/files/bin/` into this volume only when no supported binary remains on `PATH`.
 
 A fresh volume starts empty and the image-bundled binary is used until an upgrade installs into the volume.
 

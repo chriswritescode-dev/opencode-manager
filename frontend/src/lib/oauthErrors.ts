@@ -1,5 +1,5 @@
 import { FetchError } from '@opencode-manager/shared'
-import { OAUTH_ERROR_CODES, type OAuthErrorCode } from '@opencode-manager/shared/schemas'
+import { isOAuthErrorCode, type OAuthErrorCode } from '@opencode-manager/shared/schemas'
 
 const ERROR_MESSAGES: Record<OAuthErrorCode, string> = {
   IntegrationNotFoundError: 'This provider is no longer available. Please reopen settings and try again.',
@@ -7,10 +7,6 @@ const ERROR_MESSAGES: Record<OAuthErrorCode, string> = {
   IntegrationMethodNotFoundError: 'The selected authentication method is no longer available. Please choose another one.',
   InvalidRequestError: 'The provider rejected the authentication details. Please check them and try again.',
   ClientError: 'Could not reach the OpenCode server. Please try again.',
-}
-
-function isOAuthErrorCode(code: string): code is OAuthErrorCode {
-  return (OAUTH_ERROR_CODES as readonly string[]).includes(code)
 }
 
 export function mapOAuthError(err: unknown, context: 'authorize' | 'callback' | 'credential'): string {

@@ -5,13 +5,11 @@ import { listSessionMessages, readSessionSnapshot } from '@/api/opencode'
 import { openCodeEventStream } from '@/lib/opencode-event-stream'
 import { sessionTranscriptQueryKey } from '@/lib/queryInvalidation'
 import {
-  applySessionEvent,
+  applySessionEvents,
   emptySessionTranscript,
   eventsReplayableOverSnapshot,
   mergeNewestPage,
-  sessionEventRequiresResync,
   type SessionSnapshot,
-  type SessionTranscript,
   type TranscriptCache,
 } from '@/lib/session-projection'
 
@@ -21,16 +19,6 @@ interface NewestPageRead {
 }
 
 const TRANSCRIPT_FALLBACK_POLL_INTERVAL_MS = 5000
-
-function applyEvents(transcript: SessionTranscript, events: V2Event[]) {
-  let requiresResync = false
-  const next = events.reduce((current, event) => {
-    const applied = applySessionEvent(current, event)
-    if (sessionEventRequiresResync(applied, event)) requiresResync = true
-    return applied
-  }, transcript)
-  return { transcript: next, requiresResync }
-}
 
 export function useSessionTranscript(sessionID: string, directory: string) {
   const queryClient = useQueryClient()
@@ -73,7 +61,10 @@ export function useSessionTranscript(sessionID: string, directory: string) {
     const merged = mergeNewestPage(current, snapshot)
     const next: TranscriptCache = {
       ...merged,
-      transcript: eventsReplayableOverSnapshot(read.buffered).reduce(applySessionEvent, merged.transcript),
+      transcript: applySessionEvents(
+        merged.transcript,
+        eventsReplayableOverSnapshot(read.buffered, merged.transcript),
+      ).transcript,
     }
     if (next.nextCursor !== current?.nextCursor) cursorGenerationRef.current += 1
     queryClient.setQueryData<TranscriptCache>(queryKey, next)
@@ -136,7 +127,7 @@ export function useSessionTranscript(sessionID: string, directory: string) {
       const base = queryClient.getQueryData<TranscriptCache>(queryKey) ?? {
         transcript: emptySessionTranscript,
       }
-      const { transcript, requiresResync } = applyEvents(base.transcript, events)
+      const { transcript, requiresResync } = applySessionEvents(base.transcript, events)
       if (transcript !== base.transcript) {
         queryClient.setQueryData<TranscriptCache>(queryKey, { ...base, transcript })
       }

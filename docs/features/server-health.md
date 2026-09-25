@@ -61,9 +61,8 @@ Earlier releases stored named configuration profiles in the Manager database. On
 
 When you restart the OpenCode server (manually or through an upgrade), active sessions are handled gracefully:
 
-1. **Capture** — The Manager captures all active user sessions (excluding subagent and scheduled-run sessions) before restarting
-2. **Restart** — The OpenCode server process is stopped and started fresh
-3. **Resume** — OpenCode 2 resumes interrupted executions natively on boot; the Manager reports the sessions it captured as running again once the server is healthy, and makes no abort or `continue` calls itself
+1. **Restart** — The OpenCode server process is stopped with a grace period so in-flight turns are suspended, then started fresh
+2. **Resume** — OpenCode 2 resumes interrupted executions natively on boot and continues each turn in its transcript; the Manager makes no abort or `continue` calls itself and does not report individual sessions
 
 ### Confirmation
 
@@ -71,20 +70,21 @@ If there are active sessions when you click **Restart**, a confirmation dialog s
 
 ## Upgrading OpenCode
 
-Click **Update** to check for and install the latest OpenCode 2 version. The process:
+Click **Update** to check for and install the newest supported OpenCode 2 version. The process:
 
-1. Checks the currently installed version against the latest release on the OpenCode 2 channel (the `@opencode/cli` package on npm)
+1. Checks the currently installed version against the newest stable release of the `@opencode/cli` package on npm that is inside the supported range (at or above the pinned version, same major version); newer major versions are never selected
 2. Downloads the matching binary from `https://opencode.ai/files/bin/<version>/` and verifies it before installing to `~/.opencode/bin/opencode`
 3. Restarts the server using the same session-resume flow described above
 4. The new version is displayed in the status panel after restart
 
-Installing a specific version from Settings → OpenCode works the same way; versions below 2.0.0 are rejected before any download. If the upgrade fails but the server recovers to a usable state, a recovery notice is shown with the fallback version.
+Installing a specific version from Settings → OpenCode works the same way; versions outside the supported range are rejected before any download. A failure before the installed binary is replaced (registry lookup, download, or extraction) returns an error without restarting the server. If the failure happens after the binary is replaced and the server recovers to a usable state, a recovery notice is shown with the fallback version.
+
+When `OPENCODE_BIN` is set, the OpenCode binary is managed outside the Manager: **Update** and version installs are refused with `409` and nothing is downloaded or restarted.
 
 ## Manual Restart Triggers
 
 Besides the explicit **Restart** button, the server is automatically restarted when:
 
-- **Assistant workspace is reloaded** — Via the `POST /assistant/reload` internal API endpoint
 - **Config import completes** — Importing a standalone OpenCode config into the workspace
 - **Version upgrade** — After installing a new OpenCode version
 

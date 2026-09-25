@@ -4,6 +4,7 @@ import type { ReactNode } from 'react'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { useSSE } from './useSSE'
 import { useSessionStatus } from '../stores/sessionStatusStore'
+import { showToast } from '@/lib/toast'
 
 const mocks = vi.hoisted(() => ({
   active: vi.fn(),
@@ -11,12 +12,6 @@ const mocks = vi.hoisted(() => ({
 
 vi.mock('@/api/opencode', () => ({
   listActiveSessions: mocks.active,
-}))
-
-vi.mock('@/api/settings', () => ({
-  settingsApi: {
-    restartOpenCodeServer: vi.fn(),
-  },
 }))
 
 vi.mock('@/lib/toast', () => ({
@@ -641,6 +636,148 @@ describe('useSSE', () => {
 
     expect(invalidateQueries).not.toHaveBeenCalled()
     expect(setQueryData).not.toHaveBeenCalled()
+
+    unmount()
+  })
+
+  it('invalidates the session list on terminal execution, metadata, and usage events', async () => {
+    const queryClient = new QueryClient({
+      defaultOptions: {
+        queries: { retry: false },
+      },
+    })
+    const invalidateQueries = vi.spyOn(queryClient, 'invalidateQueries')
+
+    const { result, unmount } = renderHook(
+      () => useSSE('/repo', 'session-1'),
+      { wrapper: createWrapper(queryClient) }
+    )
+
+    await waitFor(() => expect(MockEventSource.instances).toHaveLength(1))
+    await connect(0, 'client-1')
+    await waitFor(() => expect(result.current.isConnected).toBe(true))
+
+    const emit = (type: string, data: Record<string, unknown>) => {
+      act(() => {
+        MockEventSource.instances[0].emit('message', { type, directory: '/repo', data })
+      })
+    }
+
+    for (const type of ['session.execution.succeeded', 'session.execution.failed', 'session.execution.interrupted']) {
+      invalidateQueries.mockClear()
+      emit(type, { sessionID: 'session-2' })
+      await waitFor(() => {
+        expect(invalidateQueries).toHaveBeenCalledWith(
+          expect.objectContaining({ predicate: expect.any(Function) }),
+        )
+      })
+    }
+
+    for (const type of ['session.metadata.updated', 'session.usage.updated']) {
+      invalidateQueries.mockClear()
+      emit(type, { sessionID: 'session-2', metadata: {}, cost: 0, tokens: {} })
+      await waitFor(() => {
+        expect(invalidateQueries).toHaveBeenCalledWith(
+          expect.objectContaining({ predicate: expect.any(Function) }),
+        )
+      })
+    }
+
+    unmount()
+  })
+
+  it('does not invalidate the session list on per-token delta events', async () => {
+    const queryClient = new QueryClient({
+      defaultOptions: {
+        queries: { retry: false },
+      },
+    })
+    const invalidateQueries = vi.spyOn(queryClient, 'invalidateQueries')
+
+    const { result, unmount } = renderHook(
+      () => useSSE('/repo', 'session-1'),
+      { wrapper: createWrapper(queryClient) }
+    )
+
+    await waitFor(() => expect(MockEventSource.instances).toHaveLength(1))
+    await connect(0, 'client-1')
+    await waitFor(() => expect(result.current.isConnected).toBe(true))
+    invalidateQueries.mockClear()
+
+    act(() => {
+      for (const type of ['session.text.delta', 'session.reasoning.delta', 'session.tool.input.delta']) {
+        MockEventSource.instances[0].emit('message', {
+          type,
+          directory: '/repo',
+          data: { sessionID: 'session-2' },
+        })
+      }
+    })
+
+    await act(async () => {
+      await new Promise((resolve) => setTimeout(resolve, 300))
+    })
+
+    expect(invalidateQueries).not.toHaveBeenCalled()
+
+    unmount()
+  })
+
+  it('does not show an update toast on installation.update-available', async () => {
+    const queryClient = new QueryClient({
+      defaultOptions: {
+        queries: { retry: false },
+      },
+    })
+
+    const { result, unmount } = renderHook(
+      () => useSSE('/repo', 'session-1'),
+      { wrapper: createWrapper(queryClient) }
+    )
+
+    await waitFor(() => expect(MockEventSource.instances).toHaveLength(1))
+    await connect(0, 'client-1')
+    await waitFor(() => expect(result.current.isConnected).toBe(true))
+
+    act(() => {
+      MockEventSource.instances[0].emit('message', {
+        type: 'installation.update-available',
+        directory: '/repo',
+        data: { version: '2.0.0' },
+      })
+    })
+
+    expect(showToast.info).not.toHaveBeenCalled()
+    expect(showToast.loading).not.toHaveBeenCalled()
+
+    unmount()
+  })
+
+  it('shows an updated toast on installation.updated', async () => {
+    const queryClient = new QueryClient({
+      defaultOptions: {
+        queries: { retry: false },
+      },
+    })
+
+    const { result, unmount } = renderHook(
+      () => useSSE('/repo', 'session-1'),
+      { wrapper: createWrapper(queryClient) }
+    )
+
+    await waitFor(() => expect(MockEventSource.instances).toHaveLength(1))
+    await connect(0, 'client-1')
+    await waitFor(() => expect(result.current.isConnected).toBe(true))
+
+    act(() => {
+      MockEventSource.instances[0].emit('message', {
+        type: 'installation.updated',
+        directory: '/repo',
+        data: { version: '2.0.0' },
+      })
+    })
+
+    expect(showToast.success).toHaveBeenCalled()
 
     unmount()
   })

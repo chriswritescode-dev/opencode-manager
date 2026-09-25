@@ -3,7 +3,6 @@ import { useQueryClient } from '@tanstack/react-query'
 import type { SessionInfo, V2Event } from '@opencode-manager/shared/opencode'
 import { invalidateSessionListCaches, invalidateSessionListCachesDebounced } from '@/lib/queryInvalidation'
 import { showToast } from '@/lib/toast'
-import { settingsApi } from '@/api/settings'
 import { useSessionStatus } from '@/stores/sessionStatusStore'
 import { useSendErrorStore } from '@/stores/sendErrorStore'
 import { openCodeEventStream } from '@/lib/opencode-event-stream'
@@ -38,36 +37,6 @@ const patchSessionIfCached = (
     current ? { ...current, ...patch } : current,
   )
 }
-
-const handleRestartServer = async () => {
-  showToast.loading('Restarting OpenCode server...', {
-    id: 'restart-server',
-  })
-
-  try {
-    const result = await settingsApi.restartOpenCodeServer()
-    if (result.success) {
-      showToast.success(result.message || 'OpenCode server restarted', {
-        id: 'restart-server',
-        duration: 3000,
-      })
-      setTimeout(() => {
-        window.location.reload()
-      }, 2000)
-    } else {
-      showToast.error(result.message || 'Failed to restart OpenCode server', {
-        id: 'restart-server',
-        duration: 5000,
-      })
-    }
-  } catch (error) {
-    showToast.error(error instanceof Error ? error.message : 'Failed to restart OpenCode server', {
-      id: 'restart-server',
-      duration: 5000,
-    })
-  }
-}
-
 
 export const useSSE = (directory?: string | string[], currentSessionId?: string) => {
   const directoriesList = useMemo(() => {
@@ -164,23 +133,18 @@ export const useSSE = (directory?: string | string[], currentSessionId?: string)
       case 'session.execution.failed':
       case 'session.execution.interrupted':
         setSessionStatus(event.data.sessionID, { type: 'idle' })
+        invalidateSessionListCachesDebounced(queryClient)
+        break
+
+      case 'session.metadata.updated':
+      case 'session.usage.updated':
+        invalidateSessionListCachesDebounced(queryClient)
         break
 
       case 'installation.updated':
         showToast.success(`OpenCode updated to v${event.data.version}`, {
           description: 'The server has been successfully upgraded.',
           duration: 5000,
-        })
-        break
-
-      case 'installation.update-available':
-        showToast.info(`OpenCode v${event.data.version} is available`, {
-          description: 'A new version is ready to install.',
-          action: {
-            label: 'Reload to Update',
-            onClick: handleRestartServer
-          },
-          duration: 10000,
         })
         break
 

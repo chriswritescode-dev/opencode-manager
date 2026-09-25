@@ -1,12 +1,14 @@
 export {
   admitInboxItem,
   applySessionEvent,
+  applySessionEvents,
   emptySessionTranscript,
-  hydrateSessionTranscript,
   eventsReplayableOverSnapshot,
   mergeNewestPage,
   sessionEventRequiresResync,
+  type SessionMessageContentUpdatedEvent,
   type SessionSnapshot,
   type SessionTranscript,
+  type SessionTranscriptBatch,
   type TranscriptCache,
 } from './applySessionEvent'

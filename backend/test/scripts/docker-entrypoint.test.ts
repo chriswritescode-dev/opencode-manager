@@ -29,13 +29,12 @@ const extractSupportedFloor = () => {
   return match[0]
 }
 
+const releaseHelperPath = join(repoRoot, 'scripts/lib/opencode-release.sh')
+
 const installPrelude = () => [
   extractSupportedFloor(),
-  extractShellFunction('version_gte'),
-  extractShellFunction('is_supported_opencode_version'),
-  extractShellFunction('supported_opencode_range'),
+  readFileSync(releaseHelperPath, 'utf-8'),
   extractShellFunction('read_opencode_version'),
-  extractShellFunction('opencode_arch_suffix'),
   extractShellFunction('install_opencode'),
   extractShellFunction('reconcile_persisted_opencode'),
 ].join('\n')

@@ -60,9 +60,9 @@ vi.mock('../../src/utils/fs-safe', async (importOriginal) => {
   }
 })
 
+import { LEGACY_OPENCODE_CONFIG_SOURCE_NAME } from '@opencode-manager/shared'
 import {
   HEALTH_WATCH_MAX_ENTRIES,
-  LEGACY_OPENCODE_CONFIG_SOURCE_NAME,
   OPENCODE_CONFIG_SEED,
   OpenCodeConfigConflictError,
   OpenCodeConfigShadowedRemovalError,

@@ -255,7 +255,7 @@ describe('settings routes — serverEnvVars', () => {
         preferences: {
           serverEnvVars: [
             {
-              key: 'OPENCODE_EXPERIMENTAL_WORKSPACES',
+              key: 'OPENCODE_EXPERIMENTAL_FEATURE',
               value: 'true',
             },
           ],
@@ -267,7 +267,7 @@ describe('settings routes — serverEnvVars', () => {
     const data = (await patchRes.json()) as { preferences: { serverEnvVars: Array<{ key: string; value: string }> } }
     expect(data.preferences.serverEnvVars).toEqual([
       {
-        key: 'OPENCODE_EXPERIMENTAL_WORKSPACES',
+        key: 'OPENCODE_EXPERIMENTAL_FEATURE',
         value: 'true',
       },
     ])
@@ -493,16 +493,16 @@ describe('settings routes — active session reporting', () => {
     expect(body.sessions).toEqual([])
   })
 
-  it('POST /opencode-restart returns the sessions interrupted by the restart', async () => {
+  it('POST /opencode-restart restarts the server without reporting interrupted sessions', async () => {
     stubActiveSessions({ '/a': ['s1'] })
     const restart = vi.fn().mockResolvedValue({ healthy: true })
 
     app = createTestApp(db, { restart } as unknown as OpenCodeSupervisor)
     const res = await app.request('/settings/opencode-restart', { method: 'POST' })
     expect(res.status).toBe(200)
-    const body = (await res.json()) as { success: boolean; interruptedSessions: string[] }
+    const body = (await res.json()) as { success: boolean; interruptedSessions?: string[] }
     expect(body.success).toBe(true)
-    expect(body.interruptedSessions).toEqual(['s1'])
+    expect(body.interruptedSessions).toBeUndefined()
     expect(restart).toHaveBeenCalledWith('settings_restart')
   })
 })

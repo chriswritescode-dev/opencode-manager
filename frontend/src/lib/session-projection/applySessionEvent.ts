@@ -25,6 +25,15 @@ export interface TranscriptCache {
   nextCursor?: string
 }
 
+export interface SessionTranscriptBatch {
+  transcript: SessionTranscript
+  requiresResync: boolean
+}
+
+export interface SessionMessageContentUpdatedEvent {
+  type: 'session.message.content.updated'
+}
+
 export const emptySessionTranscript: SessionTranscript = {
   messages: [],
   pending: [],
@@ -36,6 +45,17 @@ type AssistantText = Extract<AssistantContent, { type: 'text' }>
 type AssistantReasoning = Extract<AssistantContent, { type: 'reasoning' }>
 type AssistantTool = Extract<AssistantContent, { type: 'tool' }>
 
+interface TranscriptDraft {
+  transcript: SessionTranscript
+  messages: SessionMessageInfo[]
+  pending: SessionInboxInfo[]
+  status: SessionTranscript['status']
+  retry?: SessionStatus
+  messagesChanged: boolean
+  pendingChanged: boolean
+  statusChanged: boolean
+}
+
 const messageIDFromEvent = (eventID: string) => eventID.replace(/^evt_/, 'msg_')
 
 function findLastIndex<T>(items: T[], match: (item: T) => boolean): number {
@@ -46,12 +66,20 @@ function findLastIndex<T>(items: T[], match: (item: T) => boolean): number {
   return -1
 }
 
-function upsertById<T extends { id: string }>(items: T[], item: T): T[] {
-  const index = findLastIndex(items, (entry) => entry.id === item.id)
-  if (index < 0) return [...items, item]
-  const next = items.slice()
-  next[index] = item
-  return next
+function findMessageIndex(messages: SessionMessageInfo[], messageID: string): number {
+  return findLastIndex(messages, (message) => message.id === messageID)
+}
+
+function hasMessage(messages: SessionMessageInfo[], messageID: string): boolean {
+  return findMessageIndex(messages, messageID) >= 0
+}
+
+function findAssistantMessage(
+  messages: SessionMessageInfo[],
+  messageID: string,
+): SessionMessageAssistant | undefined {
+  const message = messages[findMessageIndex(messages, messageID)]
+  return message?.type === 'assistant' ? message : undefined
 }
 
 function materializeInboxMessage(item: SessionInboxInfo): SessionMessageInfo | undefined {
@@ -64,44 +92,87 @@ function materializeInboxMessage(item: SessionInboxInfo): SessionMessageInfo | u
   return undefined
 }
 
-export function admitInboxItem(transcript: SessionTranscript, item: SessionInboxInfo): SessionTranscript {
-  const pending = upsertById(transcript.pending, item)
-  const materialized = materializeInboxMessage(item)
-  const messages = materialized ? upsertById(transcript.messages, materialized) : transcript.messages
-  return { ...transcript, pending, messages }
-}
-
-function removePending(transcript: SessionTranscript, inboxID: string): SessionTranscript {
-  const pending = transcript.pending.filter((item) => item.id !== inboxID)
-  if (pending.length === transcript.pending.length) return transcript
-  return { ...transcript, pending }
-}
-
-function retractInboxItem(transcript: SessionTranscript, inboxID: string): SessionTranscript {
-  const pending = transcript.pending.filter((item) => item.id !== inboxID)
-  const index = findLastIndex(transcript.messages, (message) => message.id === inboxID)
-  if (index < 0) {
-    if (pending.length === transcript.pending.length) return transcript
-    return { ...transcript, pending }
+function createDraft(transcript: SessionTranscript): TranscriptDraft {
+  return {
+    transcript,
+    messages: transcript.messages,
+    pending: transcript.pending,
+    status: transcript.status,
+    retry: transcript.retry,
+    messagesChanged: false,
+    pendingChanged: false,
+    statusChanged: false,
   }
-  const messages = transcript.messages.slice()
-  messages.splice(index, 1)
-  return { ...transcript, pending, messages }
+}
+
+function writableMessages(draft: TranscriptDraft): SessionMessageInfo[] {
+  if (!draft.messagesChanged) {
+    draft.messages = draft.transcript.messages.slice()
+    draft.messagesChanged = true
+  }
+  return draft.messages
+}
+
+function writablePending(draft: TranscriptDraft): SessionInboxInfo[] {
+  if (!draft.pendingChanged) {
+    draft.pending = draft.transcript.pending.slice()
+    draft.pendingChanged = true
+  }
+  return draft.pending
+}
+
+function commitDraft(draft: TranscriptDraft): SessionTranscript {
+  if (!draft.messagesChanged && !draft.pendingChanged && !draft.statusChanged) {
+    return draft.transcript
+  }
+  return {
+    messages: draft.messages,
+    pending: draft.pending,
+    status: draft.status,
+    ...(draft.retry === undefined ? {} : { retry: draft.retry }),
+  }
+}
+
+function upsertMessage(draft: TranscriptDraft, message: SessionMessageInfo): void {
+  const messages = writableMessages(draft)
+  const index = findMessageIndex(messages, message.id)
+  if (index < 0) messages.push(message)
+  else messages[index] = message
+}
+
+function removePendingItem(draft: TranscriptDraft, inboxID: string): void {
+  const index = findLastIndex(draft.pending, (item) => item.id === inboxID)
+  if (index < 0) return
+  writablePending(draft).splice(index, 1)
+}
+
+function admitInboxItemToDraft(draft: TranscriptDraft, item: SessionInboxInfo): void {
+  const pending = writablePending(draft)
+  const index = findLastIndex(pending, (entry) => entry.id === item.id)
+  if (index < 0) pending.push(item)
+  else pending[index] = item
+  const materialized = materializeInboxMessage(item)
+  if (materialized) upsertMessage(draft, materialized)
+}
+
+function retractInboxItemFromDraft(draft: TranscriptDraft, inboxID: string): void {
+  const pendingIndex = findLastIndex(draft.pending, (item) => item.id === inboxID)
+  if (pendingIndex >= 0) writablePending(draft).splice(pendingIndex, 1)
+  const messageIndex = findMessageIndex(draft.messages, inboxID)
+  if (messageIndex >= 0) writableMessages(draft).splice(messageIndex, 1)
 }
 
 function replaceAssistant(
-  transcript: SessionTranscript,
+  draft: TranscriptDraft,
   messageID: string,
   edit: (assistant: SessionMessageAssistant) => SessionMessageAssistant,
-): SessionTranscript {
-  const index = findLastIndex(transcript.messages, (message) => message.id === messageID)
-  const current = transcript.messages[index]
-  if (current?.type !== 'assistant') return transcript
+): void {
+  const index = findMessageIndex(draft.messages, messageID)
+  const current = draft.messages[index]
+  if (current?.type !== 'assistant') return
   const next = edit(current)
-  if (next === current) return transcript
-  const messages = transcript.messages.slice()
-  messages[index] = next
-  return { ...transcript, messages }
+  if (next === current) return
+  writableMessages(draft)[index] = next
 }
 
 function replaceContent(
@@ -160,47 +231,56 @@ function editTool(
 }
 
 function editActiveAssistant(
-  transcript: SessionTranscript,
+  draft: TranscriptDraft,
   edit: (assistant: SessionMessageAssistant) => SessionMessageAssistant,
-): SessionTranscript {
+): void {
   const index = findLastIndex(
-    transcript.messages,
+    draft.messages,
     (message) => message.type === 'assistant' && !message.time.completed,
   )
-  const active = transcript.messages[index]
-  if (active?.type !== 'assistant') return transcript
+  const active = draft.messages[index]
+  if (active?.type !== 'assistant') return
   const next = edit(active)
-  if (next === active) return transcript
-  const messages = transcript.messages.slice()
-  messages[index] = next
-  return { ...transcript, messages }
+  if (next === active) return
+  writableMessages(draft)[index] = next
+}
+
+function appendMessage(draft: TranscriptDraft, message: SessionMessageInfo): void {
+  if (hasMessage(draft.messages, message.id)) return
+  writableMessages(draft).push(message)
 }
 
 function setStatus(
-  transcript: SessionTranscript,
+  draft: TranscriptDraft,
   status: SessionTranscript['status'],
   retry?: SessionStatus,
-): SessionTranscript {
-  if (transcript.status === status && transcript.retry === retry) return transcript
-  return { ...transcript, status, retry }
+): void {
+  if (draft.status === status && draft.retry === retry) return
+  draft.status = status
+  draft.retry = retry
+  draft.statusChanged = true
 }
 
-function appendMessage(transcript: SessionTranscript, message: SessionMessageInfo): SessionTranscript {
-  if (hasMessage(transcript, message.id)) return transcript
-  return { ...transcript, messages: [...transcript.messages, message] }
+function truncateFrom(draft: TranscriptDraft, to: string): void {
+  const pending = writablePending(draft)
+  for (let index = pending.length - 1; index >= 0; index -= 1) {
+    const item = pending[index]
+    if (item !== undefined && item.id >= to) pending.splice(index, 1)
+  }
+  const messages = writableMessages(draft)
+  for (let index = messages.length - 1; index >= 0; index -= 1) {
+    const item = messages[index]
+    if (item !== undefined && item.id >= to) messages.splice(index, 1)
+  }
 }
 
-function hasMessage(transcript: SessionTranscript, messageID: string): boolean {
-  return findLastIndex(transcript.messages, (message) => message.id === messageID) >= 0
+function latestCompactionIndex(messages: SessionMessageInfo[]): number {
+  return findLastIndex(messages, (message) => message.type === 'compaction')
 }
 
-function latestCompactionIndex(transcript: SessionTranscript): number {
-  return findLastIndex(transcript.messages, (message) => message.type === 'compaction')
-}
-
-function runningCompactionIndex(transcript: SessionTranscript): number {
+function runningCompactionIndex(messages: SessionMessageInfo[]): number {
   return findLastIndex(
-    transcript.messages,
+    messages,
     (message) => message.type === 'compaction' && message.status === 'running',
   )
 }
@@ -213,8 +293,8 @@ function isExecutionEndEvent(event: V2Event): boolean {
   )
 }
 
-function hasUnsettledTool(transcript: SessionTranscript): boolean {
-  return transcript.messages.some(
+function hasUnsettledTool(messages: SessionMessageInfo[]): boolean {
+  return messages.some(
     (message) =>
       message.type === 'assistant' &&
       message.content.some(
@@ -225,18 +305,21 @@ function hasUnsettledTool(transcript: SessionTranscript): boolean {
   )
 }
 
-function hasIncompleteLatestAssistant(transcript: SessionTranscript): boolean {
-  const index = findLastIndex(transcript.messages, (message) => message.type === 'assistant')
-  const latest = transcript.messages[index]
+function hasIncompleteLatestAssistant(messages: SessionMessageInfo[]): boolean {
+  const latest = messages[findLastIndex(messages, (message) => message.type === 'assistant')]
   return latest?.type === 'assistant' && !latest.time.completed
 }
 
-function hasUnsettledAssistant(transcript: SessionTranscript): boolean {
-  return hasUnsettledTool(transcript) || hasIncompleteLatestAssistant(transcript)
+function hasUnsettledAssistantMessages(messages: SessionMessageInfo[]): boolean {
+  return hasUnsettledTool(messages) || hasIncompleteLatestAssistant(messages)
 }
 
-export function sessionEventRequiresResync(transcript: SessionTranscript, event: V2Event): boolean {
-  return isExecutionEndEvent(event) && hasUnsettledAssistant(transcript)
+export function sessionEventRequiresResync(
+  transcript: SessionTranscript,
+  event: V2Event | SessionMessageContentUpdatedEvent,
+): boolean {
+  if (event.type === 'session.message.content.updated') return true
+  return isExecutionEndEvent(event) && hasUnsettledAssistantMessages(transcript.messages)
 }
 
 function streamedPartKey(event: V2Event): { key: string; started: boolean } | undefined {
@@ -270,17 +353,67 @@ function streamedPartKey(event: V2Event): { key: string; started: boolean } | un
   }
 }
 
-export function eventsReplayableOverSnapshot(events: readonly V2Event[]): V2Event[] {
+function countContentParts(
+  message: SessionMessageAssistant | undefined,
+  type: 'text' | 'reasoning',
+): number {
+  if (!message) return 0
+  let count = 0
+  for (const part of message.content) {
+    if (part.type === type) count += 1
+  }
+  return count
+}
+
+function snapshotHasStartedPart(snapshot: SessionTranscript, event: V2Event): boolean {
+  switch (event.type) {
+    case 'session.text.started':
+      return (
+        countContentParts(
+          findAssistantMessage(snapshot.messages, event.data.assistantMessageID),
+          'text',
+        ) > event.data.ordinal
+      )
+    case 'session.reasoning.started':
+      return (
+        countContentParts(
+          findAssistantMessage(snapshot.messages, event.data.assistantMessageID),
+          'reasoning',
+        ) > event.data.ordinal
+      )
+    case 'session.tool.input.started': {
+      const message = findAssistantMessage(snapshot.messages, event.data.assistantMessageID)
+      return (
+        message?.content.some((part) => part.type === 'tool' && part.id === event.data.id) ??
+        false
+      )
+    }
+    default:
+      return false
+  }
+}
+
+export function eventsReplayableOverSnapshot(
+  events: readonly V2Event[],
+  snapshot: SessionTranscript,
+): V2Event[] {
   const startedAfterSnapshot = new Set<string>()
   return events.filter((event) => {
     const part = streamedPartKey(event)
     if (!part) return true
     if (part.started) {
+      if (snapshotHasStartedPart(snapshot, event)) return false
       startedAfterSnapshot.add(part.key)
       return true
     }
     return startedAfterSnapshot.has(part.key)
   })
+}
+
+export function admitInboxItem(transcript: SessionTranscript, item: SessionInboxInfo): SessionTranscript {
+  const draft = createDraft(transcript)
+  admitInboxItemToDraft(draft, item)
+  return commitDraft(draft)
 }
 
 export function hydrateSessionTranscript(snapshot: SessionSnapshot): SessionTranscript {
@@ -310,43 +443,44 @@ export function mergeNewestPage(
   }
 }
 
-export function applySessionEvent(transcript: SessionTranscript, event: V2Event): SessionTranscript {
+function applyEventToDraft(draft: TranscriptDraft, event: V2Event): void {
   switch (event.type) {
     case 'session.inbox.enqueued':
-      return admitInboxItem(transcript, {
+      admitInboxItemToDraft(draft, {
         id: event.data.inboxID,
         sessionID: event.data.sessionID,
         time: { created: event.created },
         ...event.data.item,
       })
+      return
     case 'session.inbox.delivered': {
-      const wasPending = findLastIndex(transcript.pending, (item) => item.id === event.data.inboxID) >= 0
-      const pending = removePending(transcript, event.data.inboxID)
-      const index = findLastIndex(transcript.messages, (message) => message.id === event.data.inboxID)
-      const message = transcript.messages[index]
-      if (index < 0 || !wasPending || message === undefined) return pending
-      const messages = transcript.messages.slice()
+      const wasPending =
+        findLastIndex(draft.pending, (item) => item.id === event.data.inboxID) >= 0
+      removePendingItem(draft, event.data.inboxID)
+      const index = findMessageIndex(draft.messages, event.data.inboxID)
+      const message = draft.messages[index]
+      if (index < 0 || !wasPending || message === undefined) return
+      const messages = writableMessages(draft)
       messages.splice(index, 1)
       messages.push({ ...message, time: { ...message.time, created: event.created } })
-      return { ...pending, messages }
+      return
     }
     case 'session.inbox.cancelled':
-      return retractInboxItem(transcript, event.data.inboxID)
+      retractInboxItemFromDraft(draft, event.data.inboxID)
+      return
     case 'session.inbox.delivery.changed': {
-      const index = findLastIndex(transcript.pending, (item) => item.id === event.data.inboxID)
-      const current = transcript.pending[index]
-      if (current === undefined || current.delivery === event.data.delivery) return transcript
-      const pending = transcript.pending.slice()
-      pending[index] = { ...current, delivery: event.data.delivery }
-      return { ...transcript, pending }
+      const index = findLastIndex(draft.pending, (item) => item.id === event.data.inboxID)
+      const current = draft.pending[index]
+      if (current === undefined || current.delivery === event.data.delivery) return
+      writablePending(draft)[index] = { ...current, delivery: event.data.delivery }
+      return
     }
     case 'session.step.started': {
       const { assistantMessageID, agent, model, snapshot, started } = event.data
-      const index = findLastIndex(transcript.messages, (message) => message.id === assistantMessageID)
-      const current = transcript.messages[index]
+      const index = findMessageIndex(draft.messages, assistantMessageID)
+      const current = draft.messages[index]
       if (current?.type === 'assistant') {
-        const messages = transcript.messages.slice()
-        messages[index] = {
+        writableMessages(draft)[index] = {
           ...current,
           agent,
           model,
@@ -358,14 +492,14 @@ export function applySessionEvent(transcript: SessionTranscript, event: V2Event)
           time: { created: started, streamed: undefined, completed: undefined },
           ...(snapshot ? { snapshot: { ...current.snapshot, start: snapshot } } : {}),
         }
-        return { ...transcript, messages }
+        return
       }
-      const completed = editActiveAssistant(transcript, (active) => ({
+      editActiveAssistant(draft, (active) => ({
         ...active,
         retry: undefined,
         time: { ...active.time, completed: event.created },
       }))
-      return appendMessage(completed, {
+      appendMessage(draft, {
         id: assistantMessageID,
         type: 'assistant',
         agent,
@@ -375,14 +509,16 @@ export function applySessionEvent(transcript: SessionTranscript, event: V2Event)
         ...(snapshot ? { snapshot: { start: snapshot } } : {}),
         time: { created: started },
       })
+      return
     }
     case 'session.step.streamed':
-      return replaceAssistant(transcript, event.data.assistantMessageID, (assistant) => ({
+      replaceAssistant(draft, event.data.assistantMessageID, (assistant) => ({
         ...assistant,
         time: { ...assistant.time, streamed: event.created },
       }))
+      return
     case 'session.step.ended':
-      return replaceAssistant(transcript, event.data.assistantMessageID, (assistant) => ({
+      replaceAssistant(draft, event.data.assistantMessageID, (assistant) => ({
         ...assistant,
         time: { ...assistant.time, completed: event.created },
         finish: event.data.finish,
@@ -400,8 +536,9 @@ export function applySessionEvent(transcript: SessionTranscript, event: V2Event)
             }
           : {}),
       }))
+      return
     case 'session.step.failed':
-      return replaceAssistant(transcript, event.data.assistantMessageID, (assistant) => ({
+      replaceAssistant(draft, event.data.assistantMessageID, (assistant) => ({
         ...assistant,
         time: { ...assistant.time, completed: event.created },
         finish: event.data.finish ?? 'error',
@@ -422,25 +559,29 @@ export function applySessionEvent(transcript: SessionTranscript, event: V2Event)
             }
           : {}),
       }))
+      return
     case 'session.text.started':
-      return replaceAssistant(transcript, event.data.assistantMessageID, (assistant) => ({
+      replaceAssistant(draft, event.data.assistantMessageID, (assistant) => ({
         ...assistant,
         content: [...assistant.content, { type: 'text', text: '' }],
       }))
+      return
     case 'session.text.delta':
-      return replaceAssistant(transcript, event.data.assistantMessageID, (assistant) =>
+      replaceAssistant(draft, event.data.assistantMessageID, (assistant) =>
         editText(assistant, (text) => ({ ...text, text: text.text + event.data.delta })),
       )
+      return
     case 'session.text.ended':
-      return replaceAssistant(transcript, event.data.assistantMessageID, (assistant) =>
+      replaceAssistant(draft, event.data.assistantMessageID, (assistant) =>
         editText(assistant, (text) => ({
           ...text,
           text: event.data.text,
           ...(event.data.state === undefined ? {} : { state: event.data.state }),
         })),
       )
+      return
     case 'session.reasoning.started':
-      return replaceAssistant(transcript, event.data.assistantMessageID, (assistant) => ({
+      replaceAssistant(draft, event.data.assistantMessageID, (assistant) => ({
         ...assistant,
         content: [
           ...assistant.content,
@@ -452,15 +593,17 @@ export function applySessionEvent(transcript: SessionTranscript, event: V2Event)
           },
         ],
       }))
+      return
     case 'session.reasoning.delta':
-      return replaceAssistant(transcript, event.data.assistantMessageID, (assistant) =>
+      replaceAssistant(draft, event.data.assistantMessageID, (assistant) =>
         editReasoning(assistant, (reasoning) => ({
           ...reasoning,
           text: reasoning.text + event.data.delta,
         })),
       )
+      return
     case 'session.reasoning.ended':
-      return replaceAssistant(transcript, event.data.assistantMessageID, (assistant) =>
+      replaceAssistant(draft, event.data.assistantMessageID, (assistant) =>
         editReasoning(assistant, (reasoning) => ({
           ...reasoning,
           text: event.data.text,
@@ -468,8 +611,9 @@ export function applySessionEvent(transcript: SessionTranscript, event: V2Event)
           time: { created: reasoning.time?.created ?? event.created, completed: event.created },
         })),
       )
+      return
     case 'session.tool.input.started':
-      return replaceAssistant(transcript, event.data.assistantMessageID, (assistant) => ({
+      replaceAssistant(draft, event.data.assistantMessageID, (assistant) => ({
         ...assistant,
         content: [
           ...assistant.content,
@@ -482,24 +626,27 @@ export function applySessionEvent(transcript: SessionTranscript, event: V2Event)
           },
         ],
       }))
+      return
     case 'session.tool.input.delta':
-      return replaceAssistant(transcript, event.data.assistantMessageID, (assistant) =>
+      replaceAssistant(draft, event.data.assistantMessageID, (assistant) =>
         editTool(assistant, event.data.id, (tool) =>
           tool.state.status === 'streaming'
             ? { ...tool, state: { status: 'streaming', input: tool.state.input + event.data.delta } }
             : tool,
         ),
       )
+      return
     case 'session.tool.input.ended':
-      return replaceAssistant(transcript, event.data.assistantMessageID, (assistant) =>
+      replaceAssistant(draft, event.data.assistantMessageID, (assistant) =>
         editTool(assistant, event.data.id, (tool) =>
           tool.state.status === 'streaming'
             ? { ...tool, state: { status: 'streaming', input: event.data.text } }
             : tool,
         ),
       )
+      return
     case 'session.tool.called':
-      return replaceAssistant(transcript, event.data.assistantMessageID, (assistant) =>
+      replaceAssistant(draft, event.data.assistantMessageID, (assistant) =>
         editTool(assistant, event.data.id, (tool) => ({
           ...tool,
           executed: event.data.executed,
@@ -508,16 +655,18 @@ export function applySessionEvent(transcript: SessionTranscript, event: V2Event)
           state: { status: 'running', input: event.data.input, metadata: {} },
         })),
       )
+      return
     case 'session.tool.progress':
-      return replaceAssistant(transcript, event.data.assistantMessageID, (assistant) =>
+      replaceAssistant(draft, event.data.assistantMessageID, (assistant) =>
         editTool(assistant, event.data.id, (tool) =>
           tool.state.status === 'running'
             ? { ...tool, state: { ...tool.state, metadata: event.data.metadata } }
             : tool,
         ),
       )
+      return
     case 'session.tool.success':
-      return replaceAssistant(transcript, event.data.assistantMessageID, (assistant) =>
+      replaceAssistant(draft, event.data.assistantMessageID, (assistant) =>
         editTool(assistant, event.data.id, (tool) => {
           if (tool.state.status !== 'running') return tool
           return {
@@ -534,8 +683,9 @@ export function applySessionEvent(transcript: SessionTranscript, event: V2Event)
           }
         }),
       )
+      return
     case 'session.tool.failed':
-      return replaceAssistant(transcript, event.data.assistantMessageID, (assistant) =>
+      replaceAssistant(draft, event.data.assistantMessageID, (assistant) =>
         editTool(assistant, event.data.id, (tool) => {
           if (tool.state.status !== 'streaming' && tool.state.status !== 'running') return tool
           return {
@@ -553,13 +703,15 @@ export function applySessionEvent(transcript: SessionTranscript, event: V2Event)
           }
         }),
       )
+      return
     case 'session.retry.scheduled':
-      return replaceAssistant(transcript, event.data.assistantMessageID, (assistant) => ({
+      replaceAssistant(draft, event.data.assistantMessageID, (assistant) => ({
         ...assistant,
         retry: { attempt: event.data.attempt, at: event.data.at, error: event.data.error },
       }))
+      return
     case 'session.shell.started':
-      return appendMessage(transcript, {
+      appendMessage(draft, {
         id: messageIDFromEvent(event.id),
         type: 'shell',
         shellID: event.data.shell.id,
@@ -572,34 +724,35 @@ export function applySessionEvent(transcript: SessionTranscript, event: V2Event)
             : event.metadata,
         time: { created: event.created },
       })
+      return
     case 'session.shell.ended': {
       const index = findLastIndex(
-        transcript.messages,
+        draft.messages,
         (message) => message.type === 'shell' && message.shellID === event.data.shell.id,
       )
-      const current = transcript.messages[index]
-      if (current?.type !== 'shell') return transcript
-      const messages = transcript.messages.slice()
-      messages[index] = {
+      const current = draft.messages[index]
+      if (current?.type !== 'shell') return
+      writableMessages(draft)[index] = {
         ...current,
         status: event.data.shell.status,
         exit: event.data.shell.exit,
         output: event.data.output,
         time: { ...current.time, completed: event.created },
       }
-      return { ...transcript, messages }
+      return
     }
     case 'session.synthetic':
-      return appendMessage(transcript, {
+      appendMessage(draft, {
         id: messageIDFromEvent(event.id),
         type: 'synthetic',
         text: event.data.text,
         description: event.data.description,
-        metadata: event.data.metadata,
+        metadata: event.metadata,
         time: { created: event.created },
       })
+      return
     case 'session.skill.activated':
-      return appendMessage(transcript, {
+      appendMessage(draft, {
         id: messageIDFromEvent(event.id),
         type: 'skill',
         skill: event.data.id,
@@ -608,9 +761,10 @@ export function applySessionEvent(transcript: SessionTranscript, event: V2Event)
         metadata: event.metadata,
         time: { created: event.created },
       })
+      return
     case 'session.instructions.updated':
-      if (event.data.text === undefined) return transcript
-      return appendMessage(transcript, {
+      if (event.data.text === undefined) return
+      appendMessage(draft, {
         id: messageIDFromEvent(event.id),
         type: 'system',
         text: event.data.text,
@@ -618,24 +772,27 @@ export function applySessionEvent(transcript: SessionTranscript, event: V2Event)
         metadata: event.metadata,
         time: { created: event.created },
       })
+      return
     case 'session.agent.selected':
-      return appendMessage(transcript, {
+      appendMessage(draft, {
         id: messageIDFromEvent(event.id),
         type: 'agent-switched',
         agent: event.data.agent,
         previous: event.data.previous,
         time: { created: event.created },
       })
+      return
     case 'session.model.selected':
-      return appendMessage(transcript, {
+      appendMessage(draft, {
         id: messageIDFromEvent(event.id),
         type: 'model-switched',
         model: event.data.model,
         previous: event.data.previous,
         time: { created: event.created },
       })
+      return
     case 'session.moved':
-      return appendMessage(transcript, {
+      appendMessage(draft, {
         id: messageIDFromEvent(event.id),
         type: 'location-switched',
         location: event.data.location,
@@ -643,11 +800,12 @@ export function applySessionEvent(transcript: SessionTranscript, event: V2Event)
         subpath: event.data.subpath,
         time: { created: event.created },
       })
+      return
     case 'session.compaction.started': {
-      const base = event.data.inputID ? removePending(transcript, event.data.inputID) : transcript
+      if (event.data.inputID) removePendingItem(draft, event.data.inputID)
       const id = event.data.inputID ?? messageIDFromEvent(event.id)
-      if (hasMessage(base, id)) return base
-      return appendMessage(base, {
+      if (hasMessage(draft.messages, id)) return
+      appendMessage(draft, {
         id,
         type: 'compaction',
         status: 'running',
@@ -656,29 +814,29 @@ export function applySessionEvent(transcript: SessionTranscript, event: V2Event)
         recent: event.data.recent ?? '',
         time: { created: event.created },
       })
+      return
     }
     case 'session.compaction.delta': {
-      const index = runningCompactionIndex(transcript)
-      const current = transcript.messages[index]
-      if (current?.type !== 'compaction' || current.status !== 'running') return transcript
-      const messages = transcript.messages.slice()
-      messages[index] = { ...current, summary: current.summary + event.data.text }
-      return { ...transcript, messages }
+      const index = runningCompactionIndex(draft.messages)
+      const current = draft.messages[index]
+      if (current?.type !== 'compaction' || current.status !== 'running') return
+      writableMessages(draft)[index] = { ...current, summary: current.summary + event.data.text }
+      return
     }
     case 'session.compaction.ended': {
-      const index = runningCompactionIndex(transcript)
-      const current = transcript.messages[index]
+      const index = runningCompactionIndex(draft.messages)
+      const current = draft.messages[index]
       if (current?.type !== 'compaction') {
-        const latest = transcript.messages[latestCompactionIndex(transcript)]
+        const latest = draft.messages[latestCompactionIndex(draft.messages)]
         if (
           latest?.type === 'compaction' &&
           latest.status === 'completed' &&
           latest.summary === event.data.text &&
           latest.recent === event.data.recent
         ) {
-          return transcript
+          return
         }
-        return appendMessage(transcript, {
+        appendMessage(draft, {
           id: messageIDFromEvent(event.id),
           type: 'compaction',
           status: 'completed',
@@ -691,9 +849,9 @@ export function applySessionEvent(transcript: SessionTranscript, event: V2Event)
           tokens: event.data.tokens,
           time: { created: event.created },
         })
+        return
       }
-      const messages = transcript.messages.slice()
-      messages[index] = {
+      writableMessages(draft)[index] = {
         ...current,
         status: 'completed',
         reason: event.data.reason,
@@ -705,16 +863,14 @@ export function applySessionEvent(transcript: SessionTranscript, event: V2Event)
         tokens: event.data.tokens,
         metadata: event.metadata ? { ...current.metadata, ...event.metadata } : current.metadata,
       }
-      return { ...transcript, messages }
+      return
     }
     case 'session.compaction.failed': {
-      const pending = event.data.inputID
-        ? removePending(transcript, event.data.inputID)
-        : transcript
-      const index = latestCompactionIndex(pending)
-      const current = pending.messages[index]
+      if (event.data.inputID) removePendingItem(draft, event.data.inputID)
+      const index = latestCompactionIndex(draft.messages)
+      const current = draft.messages[index]
       if (current?.type !== 'compaction') {
-        return appendMessage(pending, {
+        appendMessage(draft, {
           id: event.data.inputID ?? messageIDFromEvent(event.id),
           type: 'compaction',
           status: 'failed',
@@ -725,9 +881,9 @@ export function applySessionEvent(transcript: SessionTranscript, event: V2Event)
           tokens: event.data.tokens,
           time: { created: event.created },
         })
+        return
       }
-      const messages = pending.messages.slice()
-      messages[index] = {
+      writableMessages(draft)[index] = {
         ...current,
         status: 'failed',
         reason: event.data.reason,
@@ -735,39 +891,42 @@ export function applySessionEvent(transcript: SessionTranscript, event: V2Event)
         cost: event.data.cost,
         tokens: event.data.tokens,
       }
-      return { ...pending, messages }
+      return
     }
     case 'session.revert.staged':
     case 'session.revert.cleared':
-      return transcript
-    case 'session.revert.committed': {
-      const pending = transcript.pending.filter((item) => item.id < event.data.to)
-      const messages = transcript.messages.filter((message) => message.id < event.data.to)
-      return { ...transcript, pending, messages }
-    }
+      return
+    case 'session.revert.committed':
+      truncateFrom(draft, event.data.to)
+      return
     case 'session.status':
       if (event.data.status.type === 'retry') {
-        return setStatus(transcript, 'retry', event.data.status)
+        setStatus(draft, 'retry', event.data.status)
+        return
       }
-      if (event.data.status.type === 'busy') return setStatus(transcript, 'busy')
-      return setStatus(transcript, 'idle')
+      if (event.data.status.type === 'busy') {
+        setStatus(draft, 'busy')
+        return
+      }
+      setStatus(draft, 'idle')
+      return
     case 'session.idle':
-      return setStatus(transcript, 'idle')
+      setStatus(draft, 'idle')
+      return
     case 'session.execution.started':
-      return setStatus(transcript, 'busy')
+      setStatus(draft, 'busy')
+      return
     case 'session.execution.succeeded':
     case 'session.execution.failed':
     case 'session.execution.interrupted': {
-      const idle = setStatus(
-        editActiveAssistant(transcript, (assistant) =>
-          assistant.retry === undefined ? assistant : { ...assistant, retry: undefined },
-        ),
-        'idle',
+      editActiveAssistant(draft, (assistant) =>
+        assistant.retry === undefined ? assistant : { ...assistant, retry: undefined },
       )
+      setStatus(draft, 'idle')
       if (event.type === 'session.execution.interrupted' && event.data.reason === 'shutdown') {
-        return idle
+        return
       }
-      return appendMessage(idle, {
+      appendMessage(draft, {
         id: messageIDFromEvent(event.id),
         type: 'idle',
         outcome:
@@ -779,7 +938,35 @@ export function applySessionEvent(transcript: SessionTranscript, event: V2Event)
         metadata: event.metadata,
         time: { created: event.created },
       })
+      return
     }
   }
-  return transcript
+}
+
+export function applySessionEvent(transcript: SessionTranscript, event: V2Event): SessionTranscript {
+  const draft = createDraft(transcript)
+  applyEventToDraft(draft, event)
+  return commitDraft(draft)
+}
+
+export function applySessionEvents(
+  transcript: SessionTranscript,
+  events: readonly V2Event[],
+): SessionTranscriptBatch {
+  const draft = createDraft(transcript)
+  let requiresResync = false
+  for (const event of events) {
+    applyEventToDraft(draft, event)
+    if (sessionEventRequiresResync(draftTranscript(draft), event)) requiresResync = true
+  }
+  return { transcript: commitDraft(draft), requiresResync }
+}
+
+function draftTranscript(draft: TranscriptDraft): SessionTranscript {
+  return {
+    messages: draft.messages,
+    pending: draft.pending,
+    status: draft.status,
+    ...(draft.retry === undefined ? {} : { retry: draft.retry }),
+  }
 }

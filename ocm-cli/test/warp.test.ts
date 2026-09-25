@@ -1,6 +1,6 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest'
 import type { WarpTarget } from '../src/warp.js'
-import { setPendingWarp, takePendingWarp, buildAttachArgs, runPendingWarp } from '../src/warp.js'
+import { setPendingWarp, takePendingWarp, buildAttachInvocation, runPendingWarp } from '../src/warp.js'
 import { REMOTE_MANAGER_URL_ENV, REMOTE_REPO_NAME_ENV } from '../src/remote-context.js'
 
 const sampleTarget: WarpTarget = {
@@ -11,11 +11,26 @@ const sampleTarget: WarpTarget = {
   repoName: 'my-repo',
 }
 
-describe('buildAttachArgs', () => {
-  it('produces the exact argv array for a sample target', () => {
-    const args = buildAttachArgs(sampleTarget)
+describe('buildAttachInvocation', () => {
+  it('produces the server args and attach env for a target without a session', () => {
+    const invocation = buildAttachInvocation({ managerUrl: 'https://manager.example.com', token: 'tok_abc123', repoId: 42, repoName: 'my-repo' })
 
-    expect(args).toEqual([
+    expect(invocation.args).toEqual([
+      '--server',
+      'https://manager.example.com/api/opencode-proxy/repos/42',
+    ])
+    expect(invocation.env).toEqual({
+      ...process.env,
+      OPENCODE_PASSWORD: 'tok_abc123',
+      [REMOTE_MANAGER_URL_ENV]: 'https://manager.example.com',
+      [REMOTE_REPO_NAME_ENV]: 'my-repo',
+    })
+  })
+
+  it('appends the session arg when the target has one', () => {
+    const invocation = buildAttachInvocation(sampleTarget)
+
+    expect(invocation.args).toEqual([
       '--server',
       'https://manager.example.com/api/opencode-proxy/repos/42',
       '--session',
@@ -55,21 +70,17 @@ describe('runPendingWarp', () => {
   it('calls spawn once with the correct args and env', () => {
     const spawn = vi.fn()
     setPendingWarp(sampleTarget)
+    const invocation = buildAttachInvocation(sampleTarget)
 
     runPendingWarp(spawn)
 
     expect(spawn).toHaveBeenCalledOnce()
     expect(spawn).toHaveBeenCalledWith(
       'opencode',
-      buildAttachArgs(sampleTarget),
+      invocation.args,
       {
         stdio: 'inherit',
-        env: {
-          ...process.env,
-          OPENCODE_PASSWORD: sampleTarget.token,
-          [REMOTE_MANAGER_URL_ENV]: sampleTarget.managerUrl,
-          [REMOTE_REPO_NAME_ENV]: sampleTarget.repoName,
-        },
+        env: invocation.env,
       },
     )
   })

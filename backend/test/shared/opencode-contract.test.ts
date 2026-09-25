@@ -1,4 +1,4 @@
-import { readFileSync } from 'fs'
+import { readdirSync, readFileSync } from 'fs'
 import { join } from 'path'
 import { describe, expect, it } from 'vitest'
 import {
@@ -146,10 +146,19 @@ describe('OpenCode v2 contract', () => {
     it('makes the shell scripts derive the pin from the Dockerfile or the bundled version instead of hardcoding it', () => {
       const entrypoint = readFileSync(join(REPO_ROOT, 'scripts', 'docker-entrypoint.sh'), 'utf8')
       const setupDev = readFileSync(join(REPO_ROOT, 'scripts', 'setup-dev.sh'), 'utf8')
+      const releaseHelper = readFileSync(join(REPO_ROOT, 'scripts', 'lib', 'opencode-release.sh'), 'utf8')
       expect(entrypoint).toContain('OPENCODE_SUPPORTED_FLOOR="${OPENCODE_BUNDLED_VERSION:-}"')
       expect(setupDev).toContain("sed -n 's/^ARG OPENCODE_VERSION=//p' \"$REPO_ROOT/Dockerfile\"")
-      for (const script of [entrypoint, setupDev]) {
+      for (const script of [entrypoint, setupDev, releaseHelper]) {
         expect(script).not.toMatch(/(?<![\d.])\d+\.\d+\.\d+(?![\d.])/)
+      }
+    })
+
+    it('never sets or passes OPENCODE_VERSION from a GitHub workflow', () => {
+      const workflowsDir = join(REPO_ROOT, '.github', 'workflows')
+      for (const entry of readdirSync(workflowsDir, { withFileTypes: true })) {
+        if (!entry.isFile()) continue
+        expect(readFileSync(join(workflowsDir, entry.name), 'utf8')).not.toContain('OPENCODE_VERSION')
       }
     })
   })

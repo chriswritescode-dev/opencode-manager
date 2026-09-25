@@ -78,6 +78,15 @@ const secondPendingPermission: PermissionRequest = {
   metadata: {},
 }
 
+const sourcedPermission: PermissionRequest = {
+  id: 'permission-3',
+  sessionID: 'session-1',
+  action: 'shell',
+  resources: ['echo hello'],
+  metadata: {},
+  source: { type: 'tool', messageID: 'msg_1', id: 'call_1' },
+}
+
 function Harness() {
   const { current, pendingCount, syncForSession, navigateToCurrent, cancel, reply, getForSession } = useForms()
   const permissions = usePermissions()
@@ -92,6 +101,13 @@ function Harness() {
       <div data-testid="for-session-unknown">{getForSession('session-unknown')?.id ?? 'none'}</div>
       <div data-testid="permission-count">{permissions.pendingCount}</div>
       <div data-testid="permission-current">{permissions.current?.id ?? 'none'}</div>
+      <div data-testid="permission-tool-call">{permissions.getForToolCall('call_1', 'msg_1')?.id ?? 'none'}</div>
+      <div data-testid="permission-tool-call-other-message">
+        {permissions.getForToolCall('call_1', 'msg_other')?.id ?? 'none'}
+      </div>
+      <div data-testid="permission-tool-call-other-id">
+        {permissions.getForToolCall('call_other', 'msg_1')?.id ?? 'none'}
+      </div>
       <div data-testid="path">{location.pathname}</div>
       <button onClick={() => syncForSession('/repo', 'session-1')}>Sync</button>
       <button onClick={() => permissions.syncForSession('/repo', 'session-1')}>Sync Permissions</button>
@@ -549,6 +565,33 @@ describe('EventProvider permissions and forms', () => {
     })
   })
 
+  it('resolves a pending permission by its source tool call and message', async () => {
+    mocks.listRepos.mockResolvedValue([{ id: 123, fullPath: '/repo' }])
+
+    render(<Harness />, { wrapper: createWrapper() })
+
+    await waitFor(() => {
+      expect(mocks.subscribeGlobalMonitor).toHaveBeenCalled()
+    })
+
+    const lastSubscribeCall = mocks.subscribeGlobalMonitor.mock.calls[mocks.subscribeGlobalMonitor.mock.calls.length - 1]
+    const onEvent = lastSubscribeCall[0].onEvent as (data: unknown) => void
+
+    act(() => {
+      onEvent({
+        type: 'permission.asked',
+        data: sourcedPermission,
+        directory: '/repo',
+      })
+    })
+
+    await waitFor(() => {
+      expect(screen.getByTestId('permission-tool-call')).toHaveTextContent('permission-3')
+    })
+    expect(screen.getByTestId('permission-tool-call-other-message')).toHaveTextContent('none')
+    expect(screen.getByTestId('permission-tool-call-other-id')).toHaveTextContent('none')
+  })
+
   it('removes a pending form on a form.cancelled event', async () => {
     mocks.listRepos.mockResolvedValue([{ id: 123, fullPath: '/repo' }])
     mocks.listPendingForms.mockResolvedValue([pendingForm])
@@ -609,7 +652,7 @@ describe('EventProvider permissions and forms', () => {
     'integration.updated',
     'provider.updated',
     'model.updated',
-  ])('invalidates provider, model, credential, and auth-method caches on a location-less %s event', async (type) => {
+  ])('invalidates provider caches on a location-less %s event', async (type) => {
     const queryClient = createTestQueryClient()
     const invalidateQueries = vi.spyOn(queryClient, 'invalidateQueries')
 
@@ -625,15 +668,91 @@ describe('EventProvider permissions and forms', () => {
       onEvent({ type, data: {} })
     })
 
-    for (const queryKey of [
-      ['providers'],
-      ['provider-credentials'],
-      ['provider-auth-methods'],
-      ['providers-with-models'],
-      ['opencode', 'providers'],
-    ]) {
+    await waitFor(() => {
+      for (const queryKey of [
+        ['provider-credentials'],
+        ['provider-auth-methods'],
+        ['providers-with-models'],
+        ['opencode', 'providers'],
+      ]) {
+        expect(invalidateQueries).toHaveBeenCalledWith({ queryKey })
+      }
+    })
+    expect(invalidateQueries).not.toHaveBeenCalledWith({ queryKey: ['providers'] })
+    expect(invalidateQueries).not.toHaveBeenCalledWith({ queryKey: ['providers-for-execution-model'] })
+  })
+
+  it('collapses a burst of provider events into a single provider invalidation flush', async () => {
+    const queryClient = createTestQueryClient()
+    const invalidateQueries = vi.spyOn(queryClient, 'invalidateQueries')
+
+    render(<Harness />, { wrapper: createWrapper(queryClient) })
+
+    await waitFor(() => expect(mocks.subscribeGlobalMonitor).toHaveBeenCalled())
+    invalidateQueries.mockClear()
+
+    const lastSubscribeCall = mocks.subscribeGlobalMonitor.mock.calls[mocks.subscribeGlobalMonitor.mock.calls.length - 1]
+    const onEvent = lastSubscribeCall[0].onEvent as (data: unknown) => void
+
+    act(() => {
+      onEvent({ type: 'credential.updated', data: {} })
+      onEvent({ type: 'provider.updated', data: {} })
+      onEvent({ type: 'model.updated', data: {} })
+      onEvent({ type: 'integration.updated', data: {} })
+      onEvent({ type: 'credential.switched', data: {} })
+      onEvent({ type: 'provider.updated', data: {} })
+    })
+
+    await waitFor(() => {
+      expect(invalidateQueries).toHaveBeenCalledWith({ queryKey: ['opencode', 'providers'] })
+    })
+    expect(invalidateQueries).toHaveBeenCalledTimes(4)
+  })
+
+  it.each<[string, string[]]>([
+    ['agent.updated', ['opencode', 'agents']],
+    ['command.updated', ['opencode', 'commands']],
+  ])('invalidates the %s cache', async (type, queryKey) => {
+    const queryClient = createTestQueryClient()
+    const invalidateQueries = vi.spyOn(queryClient, 'invalidateQueries')
+
+    render(<Harness />, { wrapper: createWrapper(queryClient) })
+
+    await waitFor(() => expect(mocks.subscribeGlobalMonitor).toHaveBeenCalled())
+    invalidateQueries.mockClear()
+
+    const lastSubscribeCall = mocks.subscribeGlobalMonitor.mock.calls[mocks.subscribeGlobalMonitor.mock.calls.length - 1]
+    const onEvent = lastSubscribeCall[0].onEvent as (data: unknown) => void
+
+    act(() => {
+      onEvent({ type, data: {} })
+    })
+
+    await waitFor(() => {
       expect(invalidateQueries).toHaveBeenCalledWith({ queryKey })
-    }
+    })
+  })
+
+  it('invalidates both config caches on config.updated', async () => {
+    const queryClient = createTestQueryClient()
+    const invalidateQueries = vi.spyOn(queryClient, 'invalidateQueries')
+
+    render(<Harness />, { wrapper: createWrapper(queryClient) })
+
+    await waitFor(() => expect(mocks.subscribeGlobalMonitor).toHaveBeenCalled())
+    invalidateQueries.mockClear()
+
+    const lastSubscribeCall = mocks.subscribeGlobalMonitor.mock.calls[mocks.subscribeGlobalMonitor.mock.calls.length - 1]
+    const onEvent = lastSubscribeCall[0].onEvent as (data: unknown) => void
+
+    act(() => {
+      onEvent({ type: 'config.updated', data: {} })
+    })
+
+    await waitFor(() => {
+      expect(invalidateQueries).toHaveBeenCalledWith({ queryKey: ['opencode', 'config'] })
+      expect(invalidateQueries).toHaveBeenCalledWith({ queryKey: ['opencode-config'] })
+    })
   })
 
   it('reconciles every tracked directory concurrently on an upstream resync', async () => {

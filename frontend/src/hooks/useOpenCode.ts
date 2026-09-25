@@ -145,6 +145,9 @@ export const useCreateSession = (
       agent?: string;
       model?: string;
     }) => {
+      if (!directory) {
+        throw new Error('A directory is required to create a session');
+      }
       return createSession({ directory, ...data });
     },
     onSuccess: (session) => {

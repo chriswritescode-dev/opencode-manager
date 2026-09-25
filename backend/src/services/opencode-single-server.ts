@@ -15,7 +15,7 @@ import {
   parseSSHHost
 } from '../utils/ssh-key-manager'
 import { decryptSecret } from '../utils/crypto'
-import { BLOCKED_SERVER_ENV_KEYS, DEFAULT_SERVER_ENV_VARS } from '@opencode-manager/shared'
+import { BLOCKED_SERVER_ENV_KEYS } from '@opencode-manager/shared'
 import {
   OPENCODE_PINNED_VERSION,
   describeUnsupportedOpenCodeVersion,
@@ -396,11 +396,7 @@ class OpenCodeServerManager {
         const settingsService = new SettingsService(this.db)
         const settings = settingsService.getSettings('default')
         const gitCredentials = credentialProvider.getGitCredentials()
-        const disabledDefaultEnvVars = new Set(settings.preferences.disabledDefaultServerEnvVars || [])
-        const rawEnvVars = [
-          ...DEFAULT_SERVER_ENV_VARS.filter((envVar) => !disabledDefaultEnvVars.has(envVar.key)),
-          ...(settings.preferences.serverEnvVars || []),
-        ]
+        const rawEnvVars = settings.preferences.serverEnvVars || []
         if (rawEnvVars.length > 0) {
           userEnvVars = Object.fromEntries(
             rawEnvVars
@@ -580,7 +576,11 @@ class OpenCodeServerManager {
     delete cleanEnv.OPENCODE_PID
     delete cleanEnv.OPENCODE
     delete cleanEnv.OPENCODE_CONFIG
+    delete cleanEnv.OPENCODE_CONFIG_DIR
+    delete cleanEnv.OPENCODE_CONFIG_CONTENT
     delete userEnvVars.OPENCODE_CONFIG
+    delete userEnvVars.OPENCODE_CONFIG_DIR
+    delete userEnvVars.OPENCODE_CONFIG_CONTENT
 
     const serverEnv = {
       ...cleanEnv,

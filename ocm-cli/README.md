@@ -17,7 +17,10 @@ ocm 0.3.0 attaches through the repo-scoped Manager proxy
 `cli.json` `plugins` list, and moves sessions with OpenCode 2 session
 export/import. Older Managers lack that route; `ocm` then fails with
 `OpenCode Manager at <url> is too old for ocm 0.3.0; upgrade the Manager to >= 0.19.0`.
-Use ocm 0.2.x with OpenCode Manager < 0.19.0 and OpenCode 1.x.
+Use ocm 0.2.x with OpenCode Manager < 0.19.0 and OpenCode 1.x, installed pinned
+(`pnpm add -g @opencode-manager/ocm-cli@0.2`) with the OpenCode 1.x plugin entry pinned to
+`@opencode-manager/ocm-cli@0.2`. ocm is published together with each OpenCode Manager
+release.
 
 ## Install
 

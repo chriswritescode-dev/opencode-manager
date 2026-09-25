@@ -69,23 +69,17 @@ ARG PLAYWRIGHT_VERSION=1.63.0
 # install without invalidating the rest of the build cache.
 ARG TOOLS_CACHEBUST=0
 
+COPY scripts/lib/opencode-release.sh /usr/local/lib/ocm/opencode-release.sh
+
 RUN echo "Installing uv=${UV_VERSION} opencode=${OPENCODE_VERSION} (cachebust=${TOOLS_CACHEBUST})" && \
     curl -LsSf https://astral.sh/uv/${UV_VERSION}/install.sh | UV_NO_MODIFY_PATH=1 sh && \
     mv /root/.local/bin/uv /usr/local/bin/uv && \
     mv /root/.local/bin/uvx /usr/local/bin/uvx && \
     chmod +x /usr/local/bin/uv /usr/local/bin/uvx && \
     test "$(uv --version | cut -d' ' -f2)" = "${UV_VERSION}" && \
+    . /usr/local/lib/ocm/opencode-release.sh && \
     echo "Downloading opencode ${OPENCODE_VERSION}..." && \
-    OC_ARCH=$(uname -m) && \
-    if [ "$OC_ARCH" = "aarch64" ]; then OC_ARCH="arm64"; fi && \
-    if [ "$OC_ARCH" = "x86_64" ]; then OC_ARCH="x64"; fi && \
-    OC_DOWNLOAD_URL="https://opencode.ai/files/bin/${OPENCODE_VERSION}/opencode-linux-${OC_ARCH}.tar.gz" && \
-    curl -fsSL "$OC_DOWNLOAD_URL" -o /tmp/opencode.tar.gz && \
-    tar -xzf /tmp/opencode.tar.gz -C /tmp && \
-    mkdir -p /opt/opencode/bin && \
-    mv /tmp/opencode /opt/opencode/bin/opencode && \
-    chmod 755 /opt/opencode/bin/opencode && \
-    rm -f /tmp/opencode.tar.gz && \
+    download_opencode_to "${OPENCODE_VERSION}" /opt/opencode/bin/opencode && \
     ln -s /opt/opencode/bin/opencode /usr/local/bin/opencode && \
     echo "opencode ${OPENCODE_VERSION} installed successfully"
 

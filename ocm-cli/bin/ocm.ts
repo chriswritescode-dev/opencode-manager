@@ -9,9 +9,9 @@ import { createProgressReporter } from '../src/progress.js'
 import { getBranchName, getOriginUrl } from '../src/local-repo.js'
 import { resolveOpenCodeProjectId } from '@opencode-manager/shared/project-id'
 import { resolveTarget, formatRepoIdentities, parseRepoIdPositional, restrictMatchesToRequestedRepo } from '../src/resolve-target.js'
-import { buildRemoteAttachEnv } from '../src/remote-context.js'
+import { buildAttachInvocation } from '../src/warp.js'
 import { type ManagerRepo, fetchRepos, toRemoteRepoSummaries } from '../src/manager-repos.js'
-import { OCM_VERSION as VERSION, repoProxyUrl, warmRepoProxy } from '../src/repo-proxy.js'
+import { OCM_VERSION as VERSION, warmRepoProxy } from '../src/repo-proxy.js'
 
 const USAGE = `ocm v${VERSION} - OpenCode Manager workspace launcher
 
@@ -121,10 +121,11 @@ async function attach(managerUrl: string, token: string, repo: ManagerRepo, cwd:
   } catch (err) {
     die(err instanceof Error ? err.message : String(err))
   }
-  const child = spawn('opencode', ['--server', repoProxyUrl(managerUrl, repo.repoId)], {
+  const { args, env } = buildAttachInvocation({ managerUrl, token, repoId: repo.repoId, repoName: repo.name })
+  const child = spawn('opencode', args, {
     stdio: 'inherit',
     cwd,
-    env: { ...process.env, OPENCODE_PASSWORD: token, ...buildRemoteAttachEnv(managerUrl, repo.name) },
+    env,
   })
   child.on('close', (code) => process.exit(code ?? 0))
   child.on('error', (err) => die(`failed to spawn opencode: ${err.message}`))

@@ -96,18 +96,13 @@ describe('restartOpenCode', () => {
     managerMock.getLastStartupError.mockReturnValue(null)
   })
 
-  it('returns the user sessions that were active when the restart began', async () => {
-    aggregatorMock.getActiveSessions.mockReturnValue({ '/a': ['session-1', 'sub-1'], '/b': ['session-2'] })
-    aggregatorMock.isSubagentSession.mockImplementation((id: string) => id === 'sub-1')
+  it('restarts the server without reporting interrupted sessions', async () => {
+    aggregatorMock.getActiveSessions.mockReturnValue({ '/a': ['session-1'] })
     const supervisor = createSupervisor(true)
-    vi.mocked(supervisor.restart).mockImplementation(async () => {
-      aggregatorMock.getActiveSessions.mockReturnValue({})
-      return { healthy: true } as Awaited<ReturnType<OpenCodeSupervisor['restart']>>
-    })
 
     const result = await restartOpenCode(supervisor)
 
-    expect(result).toEqual({ interruptedSessionIDs: ['session-1', 'session-2'] })
+    expect(result).toBeUndefined()
     expect(supervisor.restart).toHaveBeenCalledWith('settings_restart')
   })
 
@@ -115,12 +110,6 @@ describe('restartOpenCode', () => {
     managerMock.getLastStartupError.mockReturnValue('OpenCode server failed to become healthy')
 
     await expect(restartOpenCode(createSupervisor(false))).rejects.toThrow('OpenCode server failed to become healthy')
-  })
-
-  it('returns no interrupted sessions when nothing was active', async () => {
-    const result = await restartOpenCode(createSupervisor(true))
-
-    expect(result).toEqual({ interruptedSessionIDs: [] })
   })
 
   it('uses a generic failure message when no startup error is recorded', async () => {

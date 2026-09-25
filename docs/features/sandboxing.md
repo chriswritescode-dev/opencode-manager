@@ -19,7 +19,7 @@ The microVM sees repositories through bind mounts at the same paths used by the 
 | Shell API (`POST /api/shell`) | Yes; it spawns through the same `Shell.create` path as the `shell` tool. It is not badged in the UI because the surface fires no `tool.execute.after` hook |
 | Slash-command shell templates (`` !`cmd` ``, `POST /api/session/:sessionID/command`) | No; OpenCode expands each interpolation itself with the configured shell, directly on the host and outside `Shell.create`, so the `create.before` hook never sees it |
 | PTY terminals (`POST /api/pty`, `POST /api/pty/:ptyID/connect`) | No; normal OpenCode behavior, with the user's configured shell |
-| OpenCode file tools | No |
+| OpenCode file tools | No; while enforcement is on they are denied the global configuration directory (see [Mounts and Secrets](#mounts-and-secrets)) |
 | Manager-side git operations | No |
 | Plugins and custom tools | No; normal OpenCode behavior |
 | The `ocm` tool (`ocm-manager.js`) | No; runs in the Manager's OpenCode process |
@@ -122,6 +122,14 @@ The following remain outside the microVM:
 | `/workspace/.opencode/state` (except `opencode/tool-output`, `opencode/worktree`, and `opencode/forge/worktrees`) | Provider and MCP credentials, the forge database |
 
 OpenCode's host process still reads these paths normally. They are omitted only from the agent command environment.
+
+The configuration directory also holds `service.json`, where the Manager writes the managed OpenCode server password for service mode. OpenCode's default agent permissions allow the host-side file tools to read the global configuration directory, and that password grants the full OpenCode API, including unsandboxed PTY terminals. While enforcement is on, `ocm-sandbox.js` therefore denies, through OpenCode's permission `evaluate` hook:
+
+- `read` of `service.json` itself;
+- `grep` and `glob` whose absolute search path is the configuration directory or one of its ancestors;
+- `external_directory` access to the configuration directory or one of its ancestors.
+
+As a consequence, the host-side file tools cannot read the top-level configuration files (`opencode.json`, `opencode.jsonc`, `service.json`) while enforcement is on; agents read and change the OpenCode configuration through the `ocm` tool instead. The `skills` subdirectory is unaffected.
 
 ## Enabling and Enforcement
 

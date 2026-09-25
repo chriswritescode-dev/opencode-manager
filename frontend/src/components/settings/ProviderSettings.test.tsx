@@ -88,7 +88,6 @@ function providerFixture(id: string, name: string, modelCount: number): Provider
   return {
     id,
     name,
-    env: [],
     models: Object.fromEntries(
       Array.from({ length: modelCount }, (_, index) => [`model-${index}`, {} as Model]),
     ),

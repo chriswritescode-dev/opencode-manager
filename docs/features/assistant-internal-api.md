@@ -208,7 +208,7 @@ Returns the updated settings object.
 
 ### OpenCode Configuration
 
-The global OpenCode configuration files in the workspace `.config/opencode/` directory are the source of truth, and these endpoints are the only supported way to change them. The two sources OpenCode 2 reads are merged in order — `opencode.json`, `opencode.jsonc` — with later files overriding earlier ones. A legacy `config.json` is folded into a recognized source and archived; it is never read as a live source. The schema accepts both V1-compatible keys and native OpenCode 2 fields, so a V2-native config passes validation. The endpoint applies the same rules as the Settings UI: any semantic change is written to disk and marks an OpenCode server restart as required; comment-only edits and changes limited to `mcp` do not.
+The global OpenCode configuration files in the workspace `.config/opencode/` directory are the source of truth, and these endpoints are the only supported way to change them. The two sources OpenCode 2 reads are merged in order — `opencode.json`, `opencode.jsonc` — with later files overriding earlier ones. A legacy `config.json` is folded into a recognized source and archived; it is never read as a live source. The schema accepts both V1-compatible keys and native OpenCode 2 fields, so a V2-native config passes validation. The endpoint applies the same rules as the Settings UI: any semantic change is written to disk and applied to the running server with an in-place OpenCode location reload, and it is flagged as restart required only when that reload fails; comment-only edits do nothing, and changes limited to `mcp` are saved without a reload.
 
 **GET `/api/internal/opencode-config`**
 
