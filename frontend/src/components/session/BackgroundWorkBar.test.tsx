@@ -55,10 +55,13 @@ function renderBar(messages: SessionMessageInfo[], isSessionActive: boolean) {
   const wrapper = ({ children }: { children: ReactNode }) => (
     <QueryClientProvider client={queryClient}>{children}</QueryClientProvider>
   )
-  return render(
-    <BackgroundWorkBar sessionID="session-1" directory="/repo" messages={messages} isSessionActive={isSessionActive} />,
-    { wrapper },
-  )
+  return {
+    ...render(
+      <BackgroundWorkBar sessionID="session-1" directory="/repo" messages={messages} isSessionActive={isSessionActive} />,
+      { wrapper },
+    ),
+    queryClient,
+  }
 }
 
 describe('BackgroundWorkBar', () => {
@@ -116,5 +119,32 @@ describe('BackgroundWorkBar', () => {
 
     expect(await screen.findByText('server listening on 3000')).toBeInTheDocument()
     expect(api.readShellOutput).toHaveBeenCalledWith('dev', '/repo', 0, 50_000)
+  })
+
+  it('reads the final output when the shell exits during an in-flight poll', async () => {
+    let resolveFirst: ((value: { output: string; cursor: number; size: number; truncated: boolean }) => void) | undefined
+    let calls = 0
+    api.listShells.mockResolvedValue([shell('dev')])
+    api.readShellOutput.mockImplementation(() => {
+      calls += 1
+      if (calls === 1) {
+        return new Promise<{ output: string; cursor: number; size: number; truncated: boolean }>((resolve) => {
+          resolveFirst = resolve
+        })
+      }
+      return Promise.resolve({ output: 'final tail', cursor: 10, size: 10, truncated: false })
+    })
+    const { queryClient } = renderBar([], false)
+
+    fireEvent.click(await screen.findByRole('button', { name: /1 background shell$/ }))
+    fireEvent.click(screen.getByRole('button', { name: 'Output' }))
+    await waitFor(() => expect(calls).toBe(1))
+
+    api.listShells.mockResolvedValue([])
+    await queryClient.invalidateQueries({ queryKey: ['opencode', 'shells', '/repo'] })
+
+    expect(await screen.findByText('final tail')).toBeInTheDocument()
+
+    resolveFirst?.({ output: '', cursor: 0, size: 0, truncated: false })
   })
 })

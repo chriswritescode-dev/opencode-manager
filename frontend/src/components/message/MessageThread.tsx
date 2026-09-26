@@ -213,8 +213,10 @@ function noticeMetadataString(message: SessionNoticeMessage, key: string): strin
 }
 
 function sessionNoticeContent(message: SessionNoticeMessage): SessionNoticeContent {
-  const text = message.type === 'system' ? message.description ?? 'Instructions updated' : message.description ?? ''
   const source = noticeMetadataString(message, 'source')
+  const text = message.type === 'system'
+    ? message.description ?? 'Instructions updated'
+    : message.description ?? (source === 'shell' || source === 'subagent' ? '' : message.text)
   if (source !== 'shell' && source !== 'subagent') return { text }
 
   const state = noticeMetadataString(message, 'state')
@@ -262,6 +264,7 @@ function SessionNotice({
       <button
         type="button"
         onClick={() => onChildSessionClick(childID)}
+        aria-live="polite"
         className="my-1 block w-full px-3 py-1 text-left text-xs truncate hover:underline"
       >
         {content}
@@ -269,7 +272,7 @@ function SessionNotice({
     )
   }
 
-  return <div className="my-1 px-3 py-1 text-xs truncate">{content}</div>
+  return <div aria-live="polite" className="my-1 px-3 py-1 text-xs truncate">{content}</div>
 }
 
 function ShellMessage({ message }: { message: SessionMessageShell }) {

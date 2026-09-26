@@ -36,14 +36,14 @@ function appendShellOutput(previous: ShellOutputState, output: string, truncated
 function useShellOutput(shellID: string, directory: string, running: boolean): ShellOutputState {
   const [state, setState] = useState<ShellOutputState>({ output: '', truncated: false })
   const cursorRef = useRef(0)
-  const loadingRef = useRef(false)
 
   useEffect(() => {
     let cancelled = false
+    let loading = false
 
     const load = async () => {
-      if (loadingRef.current) return
-      loadingRef.current = true
+      if (loading) return
+      loading = true
       let cursor = cursorRef.current
       let output = ''
       let truncated = false
@@ -65,7 +65,7 @@ function useShellOutput(shellID: string, directory: string, running: boolean): S
       } catch {
         return
       } finally {
-        loadingRef.current = false
+        loading = false
         if (!cancelled) {
           cursorRef.current = cursor
           if (output || truncated) setState((previous) => appendShellOutput(previous, output, truncated))

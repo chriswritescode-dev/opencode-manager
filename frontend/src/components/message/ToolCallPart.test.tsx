@@ -4,6 +4,7 @@ import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
 import { MemoryRouter } from 'react-router-dom'
 import type { PermissionRequest, SessionMessageAssistantTool } from '@opencode-manager/shared/opencode'
 import { ToolCallPart } from './ToolCallPart'
+import { useUserBash } from '@/stores/userBashStore'
 
 const mocks = vi.hoisted(() => ({
   useSettings: vi.fn(),
@@ -110,6 +111,7 @@ describe('ToolCallPart background indicator', () => {
       isUpdating: false,
     })
     mocks.useToolCallPermission.mockReturnValue(null)
+    useUserBash.setState({ userBashCommands: new Map() })
   })
 
   const completedShell = (metadata: Record<string, unknown>): SessionMessageAssistantTool => ({
@@ -135,5 +137,14 @@ describe('ToolCallPart background indicator', () => {
     renderWithProviders(<ToolCallPart part={completedShell({ status: 'completed', shellID: 'sh_1' })} messageID="msg_1" />)
 
     expect(screen.queryByText('background')).not.toBeInTheDocument()
+  })
+
+  it('marks a backgrounded user-bash command with a background indicator', () => {
+    useUserBash.setState({ userBashCommands: new Map([['npm run dev', Date.now()]]) })
+
+    renderWithProviders(<ToolCallPart part={completedShell({ status: 'running', shellID: 'sh_1' })} messageID="msg_1" />)
+
+    expect(screen.getByText('background')).toBeInTheDocument()
+    expect(screen.queryByText('✓')).not.toBeInTheDocument()
   })
 })

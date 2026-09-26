@@ -278,10 +278,15 @@ export const ToolCallPart = memo(function ToolCallPart({ part, messageID, onFile
     return (
       <div className="my-2">
         <div className="flex items-center gap-2 text-sm mb-2">
-          <span className="text-green-600 dark:text-green-400">✓</span>
+          {isBackgrounded ? (
+            <Loader2 className="w-3.5 h-3.5 animate-spin text-yellow-600 dark:text-yellow-400" />
+          ) : (
+            <span className="text-green-600 dark:text-green-400">✓</span>
+          )}
           <span className="font-medium">$</span>
           <span className="text-foreground">{command}</span>
           {sandboxIndicator}
+          {backgroundIndicator}
           {ran !== undefined && completed !== undefined && (
             <span className="text-muted-foreground text-xs ml-auto">
               {((completed - ran) / 1000).toFixed(2)}s

@@ -191,6 +191,18 @@ describe('MessageThread', () => {
     expect(onChildSessionClick).toHaveBeenCalledWith('child-1')
   })
 
+  it('renders a synthetic message that only carries text', () => {
+    setupSettings({ simpleChatMode: false, showReasoning: false })
+
+    const messages: SessionMessageInfo[] = [
+      { id: 'syn-text', type: 'synthetic', text: 'Background task finished', time: { created: Date.now() } },
+    ]
+
+    render(<MessageThread sessionID="test-session" messages={messages} pending={[]} />)
+
+    expect(screen.getByText(/Background task finished/)).toBeInTheDocument()
+  })
+
   it('renders assistant message with only a subagent part as standalone row without header', () => {
     setupSettings({ simpleChatMode: false, showReasoning: false })
 
