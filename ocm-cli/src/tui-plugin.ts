@@ -10,6 +10,7 @@ import type { MirrorPlan, RemoteRepoSummary } from './mirror.js'
 import { getBranchName } from './local-repo.js'
 import { transferSession, moveReminderText } from './session-move.js'
 import { createManagerSessionTransfer } from './remote-session.js'
+import type { ManagerSessionTransfer } from './remote-session.js'
 import { confirmDialog, selectDialog } from './tui-dialogs.js'
 import { setPendingWarp, runPendingWarp } from './warp.js'
 import { pushPhaseProgress, importProgress } from './move-progress.js'
@@ -20,19 +21,26 @@ export type MoveProgressSetter = (progress: MoveProgress | null) => void
 
 export async function setupOcm(context: Context, setMoveProgress: MoveProgressSetter): Promise<() => void> {
   showInstallNotice(context)
-  context.keymap.layer(() => ({
-    commands: [
-      {
-        id: 'ocm.session.move',
-        title: 'Move session to Manager',
-        description: 'Push repo state and move this session to OpenCode Manager',
-        group: 'OpenCode Manager',
-        palette: true,
-        slash: { name: 'ocm-move' },
-        run: () => runSessionMove(context, setMoveProgress),
-      },
-    ],
-  }))
+  context.ui.slot({
+    append: 'app',
+    render: () => {
+      context.keymap.layer(() => ({
+        mode: 'global',
+        commands: [
+          {
+            id: 'ocm.session.move',
+            title: 'Move session to Manager',
+            description: 'Push repo state and move this session to OpenCode Manager',
+            group: 'OpenCode Manager',
+            palette: true,
+            slash: { name: 'ocm-move' },
+            run: () => runSessionMove(context, setMoveProgress),
+          },
+        ],
+      }))
+      return null
+    },
+  })
   return () => runPendingWarp()
 }
 
@@ -48,6 +56,16 @@ function showInstallNotice(context: Context): void {
       : `Linked at ${notice.link}`,
     duration: 10000,
   })
+}
+
+async function describeMoveBlocker(transfer: ManagerSessionTransfer, sessionID: string, parentID: string | undefined): Promise<string | null> {
+  if (await transfer.sessionExists(sessionID)) {
+    return `Session ${sessionID} is already on the Manager, so it cannot be moved again. Nothing was pushed. Run \`ocm\` to attach to it.`
+  }
+  if (parentID && !(await transfer.sessionExists(parentID))) {
+    return `This is a subagent session and its parent ${parentID} is not on the Manager. Move the parent session first. Nothing was pushed.`
+  }
+  return null
 }
 
 async function describeRemoteDiscard(repoRoot: string, managerApi: ManagerApi, repoId: number): Promise<string[]> {
@@ -134,6 +152,13 @@ async function runSessionMove(context: Context, setMoveProgress: MoveProgressSet
 
     await warmRepoProxy(state.managerUrl, token, matchedRepoId)
 
+    const transfer = createManagerSessionTransfer(state.managerUrl, token)
+    const blocker = await describeMoveBlocker(transfer, sessionID, session.parentID)
+    if (blocker) {
+      context.ui.toast.show({ variant: 'error', message: blocker })
+      return
+    }
+
     const managerApi = new ManagerApi(state.managerUrl, token)
     const target = await resolveMoveTarget(managerApi, matched, remoteRepo.directory, localBranch)
     const discardReasons = target.repoId === null ? [] : await describeRemoteDiscard(plan.repoRoot, managerApi, target.repoId)
@@ -158,7 +183,6 @@ async function runSessionMove(context: Context, setMoveProgress: MoveProgressSet
     })
     const remoteDirectory = pushed.fullPath
 
-    const transfer = createManagerSessionTransfer(state.managerUrl, token)
     const result = await transferSession(
       { sessionID, localRoot: plan.repoRoot, remoteDirectory },
       {

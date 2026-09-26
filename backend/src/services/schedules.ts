@@ -326,8 +326,9 @@ export class ScheduleService {
     return getScheduleJobById(this.db, repoId, jobId)
   }
 
-  createJob(repoId: number, input: CreateScheduleJobRequest): ScheduleJob {
-    this.assertRepo(repoId)
+  async createJob(repoId: number, input: CreateScheduleJobRequest): Promise<ScheduleJob> {
+    const repo = this.assertRepo(repoId)
+    await this.assertAgentAvailable(repo.fullPath, input.agentSlug?.trim() || null)
 
     try {
       const job = createScheduleJob(this.db, repoId, buildCreateSchedulePersistenceInput(input))
@@ -338,9 +339,12 @@ export class ScheduleService {
     }
   }
 
-  updateJob(repoId: number, jobId: number, input: UpdateScheduleJobRequest): ScheduleJob {
-    this.assertRepo(repoId)
+  async updateJob(repoId: number, jobId: number, input: UpdateScheduleJobRequest): Promise<ScheduleJob> {
+    const repo = this.assertRepo(repoId)
     const existing = this.assertJob(repoId, jobId)
+    if (input.agentSlug !== undefined) {
+      await this.assertAgentAvailable(repo.fullPath, input.agentSlug?.trim() || null)
+    }
     let job: ScheduleJob | null
 
     try {
@@ -494,7 +498,7 @@ export class ScheduleService {
         })
       }
 
-      await this.assertAgentAvailable(runDirectory, job.agentSlug)
+      const runJob = { ...job, agentSlug: await this.resolveRunAgent(runDirectory, job.agentSlug) }
       const model = await resolveOpenCodeModel(this.openCodeClient, runDirectory, {
         preferredModel: job.model,
       })
@@ -503,7 +507,7 @@ export class ScheduleService {
       try {
         session = await this.openCodeClient.api.session.create({
           title: sessionTitle,
-          agent: job.agentSlug ?? undefined,
+          agent: runJob.agentSlug ?? undefined,
           model: { providerID: model.providerID, id: model.id, variant: model.variant },
           ...openCodeLocation(runDirectory),
           permissions: buildSchedulePermissionRuleset(job.permissionConfig),
@@ -516,7 +520,7 @@ export class ScheduleService {
         sessionId: session.id,
         sessionTitle,
         logText: buildRunStartedLog({
-          job,
+          job: runJob,
           triggerSource,
           sessionId: session.id,
           sessionTitle,
@@ -531,7 +535,7 @@ export class ScheduleService {
 
       void this.submitPromptAndMonitor({
         repoId,
-        job,
+        job: runJob,
         runId: run.id,
         sessionId: session.id,
         sessionTitle,
@@ -1026,24 +1030,38 @@ export class ScheduleService {
     }
   }
 
+  private async listAgentIds(directory: string): Promise<Set<string>> {
+    try {
+      const response = await this.openCodeClient.api.agent.list(openCodeLocation(directory))
+      return new Set(response.data.map((agent) => agent.id))
+    } catch (error) {
+      throw new ScheduleServiceError(getErrorMessage(error) || 'Failed to list agents', 502)
+    }
+  }
+
   /**
    * OpenCode admits a prompt for a session whose agent does not exist at its location
-   * but never delivers it, so an unknown agent must fail the run before the session is created.
+   * but never delivers it, so a scheduled run falls back to the default agent when its agent is gone.
    */
+  private async resolveRunAgent(directory: string, agentSlug: string | null): Promise<string | null> {
+    if (!agentSlug) {
+      return null
+    }
+
+    if ((await this.listAgentIds(directory)).has(agentSlug)) {
+      return agentSlug
+    }
+
+    logger.warn(`Agent "${agentSlug}" is not available in ${directory}; running the schedule with the default agent`)
+    return null
+  }
+
   private async assertAgentAvailable(directory: string, agentSlug: string | null): Promise<void> {
     if (!agentSlug) {
       return
     }
 
-    let agentIds: Set<string>
-    try {
-      const response = await this.openCodeClient.api.agent.list(openCodeLocation(directory))
-      agentIds = new Set(response.data.map((agent) => agent.id))
-    } catch (error) {
-      throw new ScheduleServiceError(getErrorMessage(error) || 'Failed to list agents', 502)
-    }
-
-    if (!agentIds.has(agentSlug)) {
+    if (!(await this.listAgentIds(directory)).has(agentSlug)) {
       throw new ScheduleServiceError(
         `Agent "${agentSlug}" is not available in ${directory}. Choose an agent defined for this repo in the schedule settings, or clear the agent to use the default.`,
         400,

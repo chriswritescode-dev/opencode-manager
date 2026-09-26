@@ -86,7 +86,7 @@ export function ScheduleJobDialog({ open, onOpenChange, job, isSaving, onSubmit,
   const effectiveRepoId = selectedRepoId ?? job?.repoId
   const { scheduleTarget } = useScheduleTarget(open ? effectiveRepoId : undefined)
   const scheduleDirectory = scheduleTarget?.fullPath
-  const { data: agents = [] } = useAgents(scheduleDirectory, { enabled: !!scheduleDirectory })
+  const { data: agents = [], isSuccess: agentsLoaded } = useAgents(scheduleDirectory, { enabled: !!scheduleDirectory })
 
   const { data: skills = [], isLoading: skillsLoading } = useQuery({
     queryKey: ['managed-skills'],
@@ -186,6 +186,8 @@ export function ScheduleJobDialog({ open, onOpenChange, job, isSaving, onSubmit,
       }))
   }, [agents])
 
+  const selectedAgentSlug = agentsLoaded && !agentOptions.some((option) => option.value === agentSlug) ? '' : agentSlug
+
   useEffect(() => {
     if (!open) {
       return
@@ -258,7 +260,7 @@ export function ScheduleJobDialog({ open, onOpenChange, job, isSaving, onSubmit,
       name: name.trim(),
       description: description.trim() || undefined,
       enabled,
-      agentSlug: agentSlug.trim() || undefined,
+      agentSlug: selectedAgentSlug.trim() || undefined,
       model: resolvedModel ?? undefined,
       prompt: prompt.trim(),
       branch: branch.trim() || null,
@@ -328,7 +330,7 @@ export function ScheduleJobDialog({ open, onOpenChange, job, isSaving, onSubmit,
             onNameChange={setName}
             description={description}
             onDescriptionChange={setDescription}
-            agentSlug={agentSlug}
+            agentSlug={selectedAgentSlug}
             onAgentSlugChange={setAgentSlug}
             agentOptions={agentOptions}
             model={resolvedModel ?? ''}

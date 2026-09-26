@@ -1,6 +1,8 @@
 import { spawn, spawnSync } from 'child_process'
-import { basename } from 'path'
-import { readState, writeState, clearState, getStatePath, type OcmState } from '../src/state.js'
+import { basename, dirname, resolve } from 'path'
+import { fileURLToPath } from 'url'
+import { readState, writeState, clearState, getStatePath, writeInstallNotice, type OcmState } from '../src/state.js'
+import { installVendoredOcm, resolveOpenCodeConfigDir, InstallError, OCM_PLUGIN_SPEC } from '../src/vendor-install.js'
 import { getToken, setToken, deleteToken, hasStoredToken, describeTokenStore, describeTokenWriteTarget, envToken, TOKEN_ENV, TokenStoreError } from '../src/internal-token-store.js'
 import { ManagerApi, ManagerApiError } from '../src/manager-api.js'
 import { mirrorUp, mirrorDown, mirrorUpFast, mirrorDownFast, prepareMirror, MirrorAbort, checkPushDivergence, checkPullDivergence, describePushDivergence } from '../src/mirror.js'
@@ -28,6 +30,8 @@ Usage:
                                                   Mirror $PWD to the matching Manager repo (fast patch sync by default)
   ocm pull [repoId] [--force] [--full]
                                                   Mirror the matching Manager repo over $PWD (fast patch sync by default)
+  ocm install [--dir <path>] [--force] [--no-link]
+                                                  Vendor the CLI + TUI plugin into the OpenCode config dir
   ocm --version             Show the installed ocm version
   ocm --help                Show this help
 `
@@ -515,6 +519,51 @@ async function cmdPull(args: string[]): Promise<void> {
   info(`pulled ${plan.matched[0]!.name} -> ${plan.repoRoot}`)
 }
 
+function getSourceDistDir(): string {
+  return resolve(dirname(fileURLToPath(import.meta.url)), '..', 'dist')
+}
+
+export async function cmdInstall(args: string[]): Promise<void> {
+  let configDir: string | undefined
+  let force = false
+  let link = true
+
+  for (let i = 0; i < args.length; i++) {
+    const arg = args[i]!
+    if (arg === '--force') force = true
+    else if (arg === '--no-link') link = false
+    else if (arg === '--dir') {
+      configDir = args[++i]
+      if (!configDir) die('usage: ocm install [--dir <path>] [--force] [--no-link]')
+    } else if (arg.startsWith('--dir=')) {
+      configDir = arg.slice('--dir='.length)
+    } else {
+      die(`unknown option: ${arg}. run \`ocm --help\``)
+    }
+  }
+
+  const resolvedConfigDir = configDir ?? resolveOpenCodeConfigDir()
+
+  let result
+  try {
+    result = installVendoredOcm({ sourceDistDir: getSourceDistDir(), configDir: resolvedConfigDir, force, link })
+  } catch (err) {
+    if (err instanceof InstallError) die(err.message)
+    throw err
+  }
+
+  info(`vendored ocm into ${result.pluginDir}`)
+  info(result.copied.length > 0 ? `copied: ${result.copied.join(', ')}` : 'package files already up to date')
+  info(result.configChanged ? `registered ${OCM_PLUGIN_SPEC} in ${result.configFile}` : `plugin already registered in ${result.configFile}`)
+  if (result.binLink === null) {
+    info('skipped the ocm symlink (--no-link)')
+  } else {
+    writeInstallNotice({ link: result.binLink, binDir: dirname(result.binLink), pathMissing: result.pathMissing })
+    info(result.binLinkChanged ? `linked ${result.binLink}` : `already linked at ${result.binLink}`)
+    if (result.pathMissing) info('note: add export PATH="$HOME/.local/bin:$PATH" to your shell rc')
+  }
+}
+
 async function main(): Promise<void> {
   const [, , cmd, ...rest] = process.argv
 
@@ -555,6 +604,9 @@ async function main(): Promise<void> {
         break
       case 'pull':
         await cmdPull(rest)
+        break
+      case 'install':
+        await cmdInstall(rest)
         break
       default:
         die(`unknown command: ${cmd}. run \`ocm --help\``)

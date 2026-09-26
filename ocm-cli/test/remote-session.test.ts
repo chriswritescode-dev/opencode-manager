@@ -53,5 +53,36 @@ describe('createManagerSessionTransfer', () => {
     expect(String(url)).toBe('https://manager.example/api/opencode-proxy/api/session/ses_new/synthetic')
     const body = JSON.parse(init.body as string) as Record<string, unknown>
     expect(body.text).toBe('hello')
+    expect(body.resume).toBe(false)
+  })
+
+  function jsonResponse(status: number, body: unknown) {
+    return new Response(JSON.stringify(body), { status, headers: { 'content-type': 'application/json' } })
+  }
+
+  it('reports an existing Manager session', async () => {
+    const fetchMock = vi.fn().mockResolvedValue(jsonResponse(200, { data: { id: 'ses_a' } }))
+    vi.stubGlobal('fetch', fetchMock)
+
+    const transfer = createManagerSessionTransfer('https://manager.example', 'tok_123')
+
+    await expect(transfer.sessionExists('ses_a')).resolves.toBe(true)
+    expect(String(fetchMock.mock.calls[0]![0])).toBe('https://manager.example/api/opencode-proxy/api/session/ses_a')
+  })
+
+  it('reports a missing Manager session only for SessionNotFoundError', async () => {
+    vi.stubGlobal('fetch', vi.fn().mockResolvedValue(jsonResponse(404, { _tag: 'SessionNotFoundError', sessionID: 'ses_a', message: 'Session not found' })))
+
+    const transfer = createManagerSessionTransfer('https://manager.example', 'tok_123')
+
+    await expect(transfer.sessionExists('ses_a')).resolves.toBe(false)
+  })
+
+  it('rethrows other failures instead of treating the session as missing', async () => {
+    vi.stubGlobal('fetch', vi.fn().mockResolvedValue(new Response('Not Found', { status: 404 })))
+
+    const transfer = createManagerSessionTransfer('https://manager.example', 'tok_123')
+
+    await expect(transfer.sessionExists('ses_a')).rejects.toBeDefined()
   })
 })

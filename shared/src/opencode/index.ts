@@ -44,7 +44,7 @@ export type {
   V2Event,
 } from '@opencode/client'
 
-export { ClientError, isIntegrationNotFoundError, isMcpServerNotFoundError, isWorktreeError } from '@opencode/client'
+export { ClientError, isIntegrationNotFoundError, isMcpServerNotFoundError, isSessionNotFoundError, isWorktreeError } from '@opencode/client'
 
 export { assistantText, sessionIDFromEvent, toolContentText } from './content'
 

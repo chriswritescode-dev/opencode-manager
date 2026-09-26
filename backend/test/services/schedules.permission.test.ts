@@ -243,22 +243,27 @@ describe('ScheduleService permission ruleset in session creation', () => {
     })
   })
 
-  it('fails the run without creating a session when the agent is not available at the run location', async () => {
+  it('runs with the default agent when the agent is not available at the run location', async () => {
     mocks.getScheduleJobById.mockReturnValue({ ...baseJob, agentSlug: 'assistant' })
-    mocks.updateScheduleRun.mockReturnValue({ ...baseRun, status: 'failed' })
+    mocks.updateScheduleRunMetadata.mockReturnValue({ ...baseRun, sessionId: 'ses-perm-4' })
 
-    const stub = createStubScheduleApi({ agents: ['build', 'plan'] })
+    const stub = createStubScheduleApi({
+      sessionID: 'ses-perm-4',
+      messages: [assistantMessage('', { completed: true })],
+      agents: ['build', 'plan'],
+    })
     const service = new ScheduleService(
       {} as never,
       createStubOpenCodeClient({ api: stub.api }),
       mocks.stubWorktreeManager as never,
     )
 
-    await expect(service.runJob(42, 7, 'manual')).rejects.toMatchObject({
-      status: 400,
-      message: expect.stringContaining('Agent "assistant" is not available'),
-    })
-    expect(stub.api.session.create).not.toHaveBeenCalled()
-    expect(mocks.updateScheduleRun).toHaveBeenCalledWith(expect.anything(), 42, 7, baseRun.id, expect.objectContaining({ status: 'failed' }))
+    await service.runJob(42, 7, 'manual')
+
+    expect(stub.api.session.create).toHaveBeenCalledWith(expect.objectContaining({ agent: undefined }))
+    expect(mocks.updateScheduleRunMetadata).toHaveBeenCalledWith(
+      expect.anything(), 42, 7, baseRun.id,
+      expect.objectContaining({ logText: expect.stringContaining('Agent: default') }),
+    )
   })
 })

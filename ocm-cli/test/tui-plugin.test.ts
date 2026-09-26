@@ -102,31 +102,42 @@ function makeTransfer(): SessionTransferData {
   } as unknown as SessionTransferData
 }
 
-function createFakeContext() {
+function createFakeContext(session: { location: { directory: string }; parentID?: string } = { location: { directory: '/Users/x/repo' } }) {
   const exportMock = vi.fn()
   const confirm = vi.fn()
   const select = vi.fn()
   const toast = vi.fn()
   const layer = vi.fn()
   const dispatch = vi.fn()
+  const slot = vi.fn(() => () => undefined)
 
   const context = {
     ui: {
       router: { current: () => ({ type: 'session', sessionID: 'ses_a' }) },
       toast: { show: toast },
       dialog: { confirm, select },
+      slot,
     },
     data: {
-      session: { get: () => ({ location: { directory: '/Users/x/repo' } }) },
+      session: { get: () => session },
     },
     keymap: { layer, dispatch },
     client: { session: { export: exportMock } },
   } as unknown as Context
 
-  return { context, exportMock, confirm, select, toast, layer, dispatch }
+  return { context, exportMock, confirm, select, toast, layer, dispatch, slot }
 }
 
-function stubTransfer(options: { importError?: Error; reminderError?: Error } = {}) {
+function renderAppSlot(fake: ReturnType<typeof createFakeContext>) {
+  const claim = fake.slot.mock.calls.map((call) => (call as unknown[])[0] as { append?: string; render: () => unknown }).find((c) => c.append === 'app')!
+  claim.render()
+}
+
+function stubTransfer(options: { importError?: Error; reminderError?: Error; onManager?: string[]; existsError?: Error } = {}) {
+  const sessionExists = vi.fn(async (sessionID: string) => {
+    if (options.existsError) throw options.existsError
+    return (options.onManager ?? []).includes(sessionID)
+  })
   const importSession = vi.fn(async () => {
     mocks.calls.push('import')
     if (options.importError) throw options.importError
@@ -136,8 +147,8 @@ function stubTransfer(options: { importError?: Error; reminderError?: Error } = 
     mocks.calls.push('synthetic')
     if (options.reminderError) throw options.reminderError
   })
-  mocks.createManagerSessionTransfer.mockReturnValue({ importSession, addReminder })
-  return { importSession, addReminder }
+  mocks.createManagerSessionTransfer.mockReturnValue({ sessionExists, importSession, addReminder })
+  return { sessionExists, importSession, addReminder }
 }
 
 function configureMove(fake: ReturnType<typeof createFakeContext>) {
@@ -177,6 +188,7 @@ function configureMove(fake: ReturnType<typeof createFakeContext>) {
 
 async function invokeMove(fake: ReturnType<typeof createFakeContext>) {
   await setupOcm(fake.context, vi.fn())
+  renderAppSlot(fake)
   const factory = fake.layer.mock.calls[0]![0] as () => { commands: { id: string; run: () => Promise<void> }[] }
   const command = factory().commands.find((entry) => entry.id === 'ocm.session.move')!
   await command.run()
@@ -185,6 +197,23 @@ async function invokeMove(fake: ReturnType<typeof createFakeContext>) {
 beforeEach(() => {
   vi.resetAllMocks()
   mocks.calls.length = 0
+})
+
+describe('setupOcm', () => {
+  it('registers commands from the app slot so the host keymap provider is mounted', async () => {
+    const fake = createFakeContext()
+
+    await setupOcm(fake.context, vi.fn())
+
+    expect(fake.layer).not.toHaveBeenCalled()
+    expect(fake.slot).toHaveBeenCalledWith(expect.objectContaining({ append: 'app' }))
+
+    renderAppSlot(fake)
+
+    expect(fake.layer).toHaveBeenCalledTimes(1)
+    const factory = fake.layer.mock.calls[0]![0] as () => { mode?: string }
+    expect(factory().mode).toBe('global')
+  })
 })
 
 describe('ocm.session.move command', () => {
@@ -257,6 +286,61 @@ describe('ocm.session.move command', () => {
     expect(addReminder).toHaveBeenCalledTimes(1)
     expect(mocks.setPendingWarp).not.toHaveBeenCalled()
     expect(fake.toast).toHaveBeenCalledWith(expect.objectContaining({ variant: 'success' }))
+  })
+
+  function expectNothingPushed(fake: ReturnType<typeof createFakeContext>, importSession: ReturnType<typeof vi.fn>) {
+    expect(mocks.mirrorTargetPlan).not.toHaveBeenCalled()
+    expect(fake.confirm).not.toHaveBeenCalled()
+    expect(mocks.mirrorUpFast).not.toHaveBeenCalled()
+    expect(fake.exportMock).not.toHaveBeenCalled()
+    expect(importSession).not.toHaveBeenCalled()
+  }
+
+  it('refuses to push when the session is already on the Manager', async () => {
+    const fake = createFakeContext()
+    configureMove(fake)
+    const { sessionExists, importSession } = stubTransfer({ onManager: ['ses_a'] })
+
+    await invokeMove(fake)
+
+    expect(sessionExists).toHaveBeenCalledWith('ses_a')
+    expectNothingPushed(fake, importSession)
+    expect(fake.toast).toHaveBeenCalledWith(expect.objectContaining({ variant: 'error', message: expect.stringContaining('already on the Manager') }))
+  })
+
+  it('refuses to push a subagent session whose parent is not on the Manager', async () => {
+    const fake = createFakeContext({ location: { directory: '/Users/x/repo' }, parentID: 'ses_parent' })
+    configureMove(fake)
+    const { sessionExists, importSession } = stubTransfer()
+
+    await invokeMove(fake)
+
+    expect(sessionExists).toHaveBeenCalledWith('ses_parent')
+    expectNothingPushed(fake, importSession)
+    expect(fake.toast).toHaveBeenCalledWith(expect.objectContaining({ variant: 'error', message: expect.stringContaining('Move the parent session first') }))
+  })
+
+  it('moves a subagent session once its parent is on the Manager', async () => {
+    const fake = createFakeContext({ location: { directory: '/Users/x/repo' }, parentID: 'ses_parent' })
+    configureMove(fake)
+    const { importSession } = stubTransfer({ onManager: ['ses_parent'] })
+    fake.exportMock.mockResolvedValue(makeTransfer())
+
+    await invokeMove(fake)
+
+    expect(mocks.mirrorUpFast).toHaveBeenCalledTimes(1)
+    expect(importSession).toHaveBeenCalledTimes(1)
+  })
+
+  it('refuses to push when the Manager session check fails', async () => {
+    const fake = createFakeContext()
+    configureMove(fake)
+    const { importSession } = stubTransfer({ existsError: new Error('proxy unreachable') })
+
+    await invokeMove(fake)
+
+    expectNothingPushed(fake, importSession)
+    expect(fake.toast).toHaveBeenCalledWith({ variant: 'error', message: 'proxy unreachable' })
   })
 
   it('stops before pushing when the Manager lacks the repo proxy route', async () => {

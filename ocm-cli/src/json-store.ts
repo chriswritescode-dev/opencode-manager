@@ -10,7 +10,7 @@ function isPermissionError(err: unknown): boolean {
   return code === 'EACCES' || code === 'EPERM'
 }
 
-function removeQuietly(filePath: string): void {
+export function removeQuietly(filePath: string): void {
   try {
     unlinkSync(filePath)
   } catch {

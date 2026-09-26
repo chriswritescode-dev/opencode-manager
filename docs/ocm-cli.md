@@ -46,7 +46,7 @@ There is no per-repo OpenCode process. All sessions share one OpenCode server on
 
 ## 1. Install
 
-The CLI is published as `@opencode-manager/ocm-cli`. There are two install paths.
+The CLI is published as `@opencode-manager/ocm-cli`. There are four install paths.
 
 ### Option A — install via OpenCode's plugin loader (recommended)
 
@@ -80,7 +80,36 @@ pnpm add -g @opencode-manager/ocm-cli
 
 This puts `ocm` on your PATH via the package manager's own bin shim. The `~/.local/bin` symlink is skipped for global installs.
 
-### Option C — from this repository (dev)
+### Option C — vendored, self-contained
+
+The package needs no install step: `dist/ocm.js` bundles everything, and `dist/tui.js` bundles everything except `@opencode/plugin/tui`, `@opentui/core`, `@opentui/solid`, and `solid-js`, which OpenCode provides at runtime. `ocm install` copies the package into your OpenCode config directory, registers the plugin in `cli.json`, and links the binary onto your PATH:
+
+```bash
+pnpm dlx @opencode-manager/ocm-cli install
+```
+
+If `ocm` is already installed (Option A or B), run the same command directly:
+
+```bash
+ocm install
+```
+
+The command is idempotent: re-run it to upgrade after a new release, or run the wrapper script below to vendor a local build. It writes the plugin as `./plugin/ocm-cli/dist`, a directory entry — OpenCode 2 loads `tui.js` from a directory entry and skips entries that name a file directly.
+
+| Flag | Effect |
+|---|---|
+| `--dir <path>` | Install into a different OpenCode config directory (default: `$OPENCODE_CONFIG_DIR`, else `$XDG_CONFIG_HOME/opencode`, else `~/.config/opencode`) |
+| `--no-link` | Skip the `~/.local/bin/ocm` symlink |
+| `--force` | Replace a non-symlink `ocm` already at the link path |
+
+From this repository, build the package and run the wrapper script instead:
+
+```bash
+pnpm --filter @opencode-manager/ocm-cli build
+./ocm-cli/scripts/install.sh
+```
+
+### Option D — from this repository (dev)
 
 ```bash
 pnpm install
@@ -117,6 +146,7 @@ ocm list                  List ready repos from the manager
 ocm use <repoId|name>     Attach to a specific repo and remember it as last
 ocm push [--force] [--create] [--yes] [--full]   Mirror $PWD to the matching Manager repo (fast bundle/patch sync by default)
 ocm pull [--force] [--full]                      Mirror the matching Manager repo over $PWD (fast bundle/patch sync by default)
+ocm install [--dir <path>] [--force] [--no-link]  Vendor the CLI + TUI plugin into the OpenCode config dir
 ocm --help                Show this help
 ```
 

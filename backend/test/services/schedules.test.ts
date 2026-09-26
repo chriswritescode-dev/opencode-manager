@@ -805,7 +805,7 @@ describe('ScheduleService', () => {
     expect(mocks.listScheduleRunsByJob).toHaveBeenCalledWith(expect.anything(), 42, 7, 10)
   })
 
-  it('creates and updates jobs using normalized persistence input', () => {
+  it('creates and updates jobs using normalized persistence input', async () => {
     const stub = createStubScheduleApi()
     const service = makeService(stub.api)
     const createdJob = { ...job, id: 8, name: 'Daily release summary' }
@@ -816,19 +816,49 @@ describe('ScheduleService', () => {
     mocks.buildUpdatedSchedulePersistenceInput.mockReturnValue({ name: 'Updated release summary' })
     mocks.updateScheduleJob.mockReturnValue(updatedJob)
 
-    const createResult = service.createJob(42, {
+    const createResult = await service.createJob(42, {
       name: 'Daily release summary',
       enabled: true,
       scheduleMode: 'interval',
       intervalMinutes: 60,
       prompt: 'Summarize release readiness.',
     })
-    const updateResult = service.updateJob(42, 7, { name: 'Updated release summary' })
+    const updateResult = await service.updateJob(42, 7, { name: 'Updated release summary' })
 
     expect(createResult).toEqual(createdJob)
     expect(updateResult).toEqual(updatedJob)
     expect(mocks.buildCreateSchedulePersistenceInput).toHaveBeenCalled()
     expect(mocks.buildUpdatedSchedulePersistenceInput).toHaveBeenCalledWith(job, { name: 'Updated release summary' })
+    expect(stub.api.agent.list).not.toHaveBeenCalled()
+  })
+
+  it('rejects saving a job whose agent is not available in the repo', async () => {
+    const stub = createStubScheduleApi({ agents: ['build', 'plan'] })
+    const service = makeService(stub.api)
+
+    await expect(service.createJob(42, {
+      name: 'Daily release summary',
+      enabled: true,
+      scheduleMode: 'interval',
+      intervalMinutes: 60,
+      prompt: 'Summarize release readiness.',
+      agentSlug: 'assistant',
+    })).rejects.toMatchObject({ status: 400, message: expect.stringContaining('Agent "assistant" is not available') })
+    await expect(service.updateJob(42, 7, { agentSlug: 'assistant' })).rejects.toMatchObject({ status: 400 })
+
+    expect(mocks.createScheduleJob).not.toHaveBeenCalled()
+    expect(mocks.updateScheduleJob).not.toHaveBeenCalled()
+  })
+
+  it('saves a job whose agent is available and allows clearing the agent', async () => {
+    const stub = createStubScheduleApi({ agents: ['build', 'plan'] })
+    const service = makeService(stub.api)
+    mocks.buildUpdatedSchedulePersistenceInput.mockReturnValue({})
+    mocks.updateScheduleJob.mockReturnValue(job)
+
+    await expect(service.updateJob(42, 7, { agentSlug: 'plan' })).resolves.toEqual(job)
+    await expect(service.updateJob(42, 7, { agentSlug: null })).resolves.toEqual(job)
+    expect(stub.api.agent.list).toHaveBeenCalledTimes(1)
   })
 
   it('throws when deleting or loading missing records', () => {

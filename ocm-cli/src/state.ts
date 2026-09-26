@@ -45,6 +45,14 @@ export function clearState(): void {
   }
 }
 
+export function writeInstallNotice(notice: InstallNotice): void {
+  try {
+    writeJsonFileAtomic(INSTALL_NOTICE_FILE, notice)
+  } catch {
+    return
+  }
+}
+
 export function readInstallNotice(): InstallNotice | null {
   let parsed: InstallNotice | null
   try {

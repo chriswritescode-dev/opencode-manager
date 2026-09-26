@@ -121,6 +121,14 @@ describe('cli state file', () => {
     expect(readInstallNotice()).toBeNull()
   })
 
+  it('writes an install notice for the next TUI launch', async () => {
+    const { readInstallNotice, writeInstallNotice } = await loadState()
+
+    writeInstallNotice({ link: '/home/me/.local/bin/ocm', binDir: '/home/me/.local/bin', pathMissing: false })
+
+    expect(readInstallNotice()).toEqual({ link: '/home/me/.local/bin/ocm', binDir: '/home/me/.local/bin', pathMissing: false })
+  })
+
   it('keeps an unreadable install notice instead of consuming it', async () => {
     if (process.platform === 'win32' || process.getuid?.() === 0) return
     const { readInstallNotice } = await loadState()

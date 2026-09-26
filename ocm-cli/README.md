@@ -32,6 +32,15 @@ The package exposes the `ocm` binary and an OpenCode plugin entrypoint. Global
 installs link the binary through the package manager. Local workspace installs
 also create a best-effort `~/.local/bin/ocm` symlink.
 
+The package is also self-contained for a vendored install with no package
+manager. `ocm install` copies the package into
+`~/.config/opencode/plugin/ocm-cli`, registers `./plugin/ocm-cli/dist` in
+`cli.json`, and links `ocm` at `~/.local/bin/ocm`. Run it without an existing
+`ocm` via `pnpm dlx @opencode-manager/ocm-cli install`, or from a local build
+via `./scripts/install.sh`. The command is idempotent, so re-run it to upgrade.
+Use the `dist` directory, not `dist/tui.js`: OpenCode 2 loads `tui.js` from
+directory entries and skips file entries.
+
 ## Login
 
 ```bash
@@ -71,6 +80,7 @@ ocm list
 ocm use <repoId|name>
 ocm push [repoId] [--force] [--create] [--yes] [--full]
 ocm pull [repoId] [--force] [--full]
+ocm install [--dir <path>] [--force] [--no-link]
 ocm logout
 ```
 

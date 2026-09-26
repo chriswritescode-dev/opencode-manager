@@ -69,7 +69,7 @@ export function createScheduleRoutes(scheduleService: ScheduleService) {
       const repoId = parseId(c.req.param('id'), 'repo id', ScheduleServiceError)
       const body = await c.req.json()
       const input = CreateScheduleJobRequestSchema.parse(body)
-      const job = scheduleService.createJob(repoId, input)
+      const job = await scheduleService.createJob(repoId, input)
       return c.json({ job }, 201)
     } catch (error) {
       return handleServiceError(c, error, 'Failed to create schedule', ScheduleServiceError)
@@ -96,7 +96,7 @@ export function createScheduleRoutes(scheduleService: ScheduleService) {
       const jobId = parseId(c.req.param('jobId'), 'schedule id', ScheduleServiceError)
       const body = await c.req.json()
       const input = UpdateScheduleJobRequestSchema.parse(body)
-      const job = scheduleService.updateJob(repoId, jobId, input)
+      const job = await scheduleService.updateJob(repoId, jobId, input)
       return c.json({ job })
     } catch (error) {
       return handleServiceError(c, error, 'Failed to update schedule', ScheduleServiceError)
