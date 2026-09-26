@@ -28,6 +28,21 @@ describe('OpenCodeEventStream', () => {
     })
   })
 
+  it('delivers location-less events without a directory', () => {
+    const transport = new TestEventStreamTransport()
+    const stream = new OpenCodeEventStream({ transport })
+    const onEvent = vi.fn()
+
+    stream.subscribeGlobalMonitor({ directories: ['/repo'], onEvent })
+    transport.openConnection()
+    transport.connected()
+    transport.message({ directory: null, payload: { type: 'provider.updated', data: {} } })
+    transport.message({ payload: { type: 'credential.updated', data: {} } })
+
+    expect(onEvent).toHaveBeenNthCalledWith(1, { type: 'provider.updated', data: {} })
+    expect(onEvent).toHaveBeenNthCalledWith(2, { type: 'credential.updated', data: {} })
+  })
+
   it('publishes health through monitor output', () => {
     const transport = new TestEventStreamTransport()
     const stream = new OpenCodeEventStream({ transport })
@@ -141,6 +156,19 @@ describe('OpenCodeEventStream', () => {
     const healthyState = healthStates.at(-1)
     expect(healthyState?.isConnected).toBe(true)
     expect(healthyState?.isHealthy).toBe(true)
+  })
+
+  it('notifies the global monitor when the upstream stream resynchronizes', () => {
+    const transport = new TestEventStreamTransport()
+    const stream = new OpenCodeEventStream({ transport })
+    const onResync = vi.fn()
+
+    stream.subscribeGlobalMonitor({ directories: ['/repo'], onEvent: vi.fn(), onResync })
+    transport.openConnection()
+    transport.connected()
+    transport.resync()
+
+    expect(onResync).toHaveBeenCalledTimes(1)
   })
 
   it('reports visibility through the transport adapter', async () => {

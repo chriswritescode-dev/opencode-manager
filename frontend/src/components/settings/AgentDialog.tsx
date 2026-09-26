@@ -11,6 +11,7 @@ import { Switch } from '@/components/ui/switch'
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
 import { Combobox, type ComboboxOption } from '@/components/ui/combobox'
 import { useProvidersWithModels } from '@/hooks/useProvidersWithModels'
+import { parseOpenCodeModelRef } from '@opencode-manager/shared/opencode'
 
 const agentFormSchema = z.object({
   name: z.string().min(1, 'Agent name is required').regex(/^[a-z0-9-]+$/, 'Must be lowercase letters, numbers, and hyphens only'),
@@ -52,9 +53,12 @@ interface Agent {
 }
 
 function parseModelString(model?: string): { providerId: string; modelId: string } {
-  if (!model) return { providerId: '', modelId: '' }
-  const [providerId, ...rest] = model.split('/')
-  return { providerId: providerId || '', modelId: rest.join('/') || '' }
+  const ref = model ? parseOpenCodeModelRef(model) : undefined
+  if (!ref) return { providerId: '', modelId: '' }
+  return {
+    providerId: ref.providerID,
+    modelId: ref.variant ? `${ref.id}#${ref.variant}` : ref.id,
+  }
 }
 
 interface AgentDialogProps {

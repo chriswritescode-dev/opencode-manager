@@ -21,11 +21,8 @@ vi.mock('@/api/providers', () => ({
   getProvidersWithModels: () => Promise.resolve([]),
 }))
 
-vi.mock('@/api/opencode', () => ({
-  createOpenCodeClient: () => ({
-    listAgents: () => Promise.resolve([]),
-    getConfig: () => Promise.resolve(null),
-  }),
+vi.mock('@/hooks/useOpenCode', () => ({
+  useAgents: () => ({ data: [] }),
 }))
 
 vi.mock('@/api/settings', () => ({

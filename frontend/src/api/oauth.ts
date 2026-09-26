@@ -1,38 +1,48 @@
 import { API_BASE_URL } from "@/config"
-import type { components, operations } from "./opencode-types"
-import { fetchWrapper } from "./fetchWrapper"
+import type { FormAnswer, IntegrationMethod } from "@opencode-manager/shared/opencode"
+import type { OAuthAttemptStatus, OAuthAuthorizeResponse } from "@opencode-manager/shared/schemas"
+import { fetchWrapper, fetchWrapperVoid } from "./fetchWrapper"
 
-type OpenCodeAuthorizeRequest = NonNullable<operations["provider.oauth.authorize"]["requestBody"]>["content"]["application/json"]
+export type {
+  FormAnswer,
+  FormField,
+  FormValue,
+  IntegrationKeyMethod,
+  IntegrationMethod,
+  IntegrationOAuthMethod,
+} from "@opencode-manager/shared/opencode"
 
-export type OAuthAuthorizeResponse = components["schemas"]["ProviderAuthAuthorization"]
+export type { OAuthAuthorizeResponse } from "@opencode-manager/shared/schemas"
 
-export type OAuthCallbackRequest = NonNullable<operations["provider.oauth.callback"]["requestBody"]>["content"]["application/json"]
-
-export type ProviderAuthMethod = components["schemas"]["ProviderAuthMethod"]
-
-export interface ProviderAuthMethods {
-  [providerId: string]: ProviderAuthMethod[]
-}
+type ProviderAuthMethods = Record<string, IntegrationMethod[]>
 
 export const oauthApi = {
-  authorize: async (providerId: string, method: number, inputs?: OpenCodeAuthorizeRequest["inputs"]): Promise<OAuthAuthorizeResponse> =>
-    fetchWrapper(`${API_BASE_URL}/api/oauth/${providerId}/oauth/authorize`, {
+  authorize: async (providerId: string, methodID: string, answer?: FormAnswer): Promise<OAuthAuthorizeResponse> =>
+    fetchWrapper<OAuthAuthorizeResponse>(`${API_BASE_URL}/api/oauth/${providerId}/oauth/authorize`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ method, inputs }),
+      body: JSON.stringify({ methodID, answer }),
     }),
 
-  callback: async (providerId: string, request: OAuthCallbackRequest): Promise<boolean> =>
-    fetchWrapper(`${API_BASE_URL}/api/oauth/${providerId}/oauth/callback`, {
+  getStatus: async (providerId: string, attemptID: string): Promise<OAuthAttemptStatus> =>
+    fetchWrapper<OAuthAttemptStatus>(`${API_BASE_URL}/api/oauth/${providerId}/oauth/${attemptID}`),
+
+  callback: async (providerId: string, attemptID: string, code?: string): Promise<void> =>
+    fetchWrapperVoid(`${API_BASE_URL}/api/oauth/${providerId}/oauth/callback`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify(request),
+      body: JSON.stringify({ attemptID, code }),
+    }),
+
+  cancel: async (providerId: string, attemptID: string): Promise<void> =>
+    fetchWrapperVoid(`${API_BASE_URL}/api/oauth/${providerId}/oauth/${attemptID}`, {
+      method: 'DELETE',
     }),
 
   getAuthMethods: async (): Promise<ProviderAuthMethods> => {
-    const { providers, ...rest } = await fetchWrapper<{ providers?: ProviderAuthMethods } & ProviderAuthMethods>(
+    const { providers } = await fetchWrapper<{ providers: ProviderAuthMethods }>(
       `${API_BASE_URL}/api/oauth/auth-methods`
     )
-    return providers || rest
+    return providers
   },
 }

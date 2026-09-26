@@ -1,41 +1,12 @@
 import { logger } from '../../utils/logger'
 import { ENV } from '@opencode-manager/shared/config/env'
+import { createOpenCodeApi, type OpenCodeApi } from '@opencode-manager/shared/opencode'
 import { getOpenCodeBasicAuthHeader, type OpenCodePasswordResolver } from './auth'
-import { getOpenCodeUpstreamBaseUrl } from './upstream'
-
-export interface ForwardRequest {
-  method: string
-  path: string
-  body?: string
-  headers?: Record<string, string>
-  directory?: string
-  signal?: AbortSignal
-}
-
-export interface JsonRequestOptions {
-  directory?: string
-  headers?: Record<string, string>
-  signal?: AbortSignal
-}
-
-export class UpstreamError extends Error {
-  constructor(
-    public readonly status: number,
-    public readonly bodyText: string,
-    message?: string,
-  ) {
-    super(message ?? `OpenCode upstream returned ${status}`)
-    this.name = 'UpstreamError'
-  }
-}
+import { getOpenCodeUpstreamBaseUrl, withDefaultOpenCodeDirectory } from './upstream'
 
 export interface OpenCodeClient {
-  forward(req: ForwardRequest): Promise<Response>
+  readonly api: OpenCodeApi
   forwardRaw(request: Request): Promise<Response>
-  getJson<T>(path: string, opts?: JsonRequestOptions): Promise<T>
-  postJson<T>(path: string, body: unknown, opts?: JsonRequestOptions): Promise<T>
-  setProviderAuth(providerId: string, apiKey: string): Promise<boolean>
-  deleteProviderAuth(providerId: string): Promise<boolean>
 }
 
 export type OpenCodeClientHost = string | (() => string)
@@ -48,7 +19,14 @@ export interface FetchOpenCodeClientConfig {
 }
 
 export class FetchOpenCodeClient implements OpenCodeClient {
-  constructor(private readonly config: FetchOpenCodeClientConfig) {}
+  readonly api: OpenCodeApi
+
+  constructor(private readonly config: FetchOpenCodeClientConfig) {
+    this.api = createOpenCodeApi({
+      baseUrl: this.resolveBaseUrl(),
+      fetch: ((input, init) => this.fetchWithResolvedAuth(input, init)) as typeof fetch,
+    })
+  }
 
   private get fetchFn(): typeof fetch {
     return this.config.fetchFn ?? fetch
@@ -63,17 +41,25 @@ export class FetchOpenCodeClient implements OpenCodeClient {
       return this.config.basicAuth ?? ''
     }
 
-    return await getOpenCodeBasicAuthHeader(this.config.passwordResolver) ?? ''
+    return await getOpenCodeBasicAuthHeader(this.config.passwordResolver)
   }
 
-  private async request(req: ForwardRequest): Promise<Response> {
-    const url = new URL(this.resolveBaseUrl() + req.path)
+  private async fetchWithResolvedAuth(input: Parameters<typeof fetch>[0], init?: Parameters<typeof fetch>[1]): Promise<Response> {
+    const headers = new Headers(withDefaultOpenCodeDirectory(Object.fromEntries(new Headers(init?.headers))))
+    const basicAuth = await this.getBasicAuth()
 
-    if (req.directory) {
-      url.searchParams.set('directory', req.directory)
+    if (basicAuth) {
+      headers.set('Authorization', basicAuth)
     }
 
-    const headers: Record<string, string> = { ...(req.headers ?? {}) }
+    return this.fetchFn(input, { ...init, headers })
+  }
+
+  private async request(req: { method: string; path: string; body?: string; headers?: Record<string, string> }): Promise<Response> {
+    const url = new URL(this.resolveBaseUrl() + req.path)
+
+    const headers: Record<string, string> = withDefaultOpenCodeDirectory({ ...(req.headers ?? {}) })
+
     const basicAuth = await this.getBasicAuth()
 
     if (basicAuth) {
@@ -85,7 +71,6 @@ export class FetchOpenCodeClient implements OpenCodeClient {
         method: req.method,
         headers,
         body: req.body,
-        signal: req.signal,
       })
 
       const filteredHeaders: Record<string, string> = {}
@@ -120,10 +105,6 @@ export class FetchOpenCodeClient implements OpenCodeClient {
     }
   }
 
-  async forward(req: ForwardRequest): Promise<Response> {
-    return this.request(req)
-  }
-
   async forwardRaw(request: Request): Promise<Response> {
     const url = new URL(request.url)
     const cleanPathname = url.pathname.replace(/^\/api\/opencode/, '')
@@ -151,88 +132,6 @@ export class FetchOpenCodeClient implements OpenCodeClient {
       headers,
     })
   }
-
-  async getJson<T>(path: string, opts?: JsonRequestOptions): Promise<T> {
-    const response = await this.request({
-      method: 'GET',
-      path,
-      directory: opts?.directory,
-      headers: opts?.headers,
-      signal: opts?.signal,
-    })
-
-    if (!response.ok) {
-      const bodyText = await response.text()
-      throw new UpstreamError(response.status, bodyText)
-    }
-
-    return (await response.json()) as T
-  }
-
-  async postJson<T>(path: string, body: unknown, opts?: JsonRequestOptions): Promise<T> {
-    const headers: Record<string, string> = {
-      'Content-Type': 'application/json',
-      ...(opts?.headers ?? {}),
-    }
-
-    const response = await this.request({
-      method: 'POST',
-      path,
-      body: JSON.stringify(body),
-      headers,
-      directory: opts?.directory,
-      signal: opts?.signal,
-    })
-
-    if (!response.ok) {
-      const bodyText = await response.text()
-      throw new UpstreamError(response.status, bodyText)
-    }
-
-    return (await response.json()) as T
-  }
-
-  async setProviderAuth(providerId: string, apiKey: string): Promise<boolean> {
-    const response = await this.request({
-      method: 'PUT',
-      path: `/auth/${encodeURIComponent(providerId)}`,
-      body: JSON.stringify({ type: 'api', key: apiKey }),
-      headers: { 'Content-Type': 'application/json' },
-    })
-
-    if (response.ok) {
-      logger.info(`Set OpenCode auth for provider: ${providerId}`)
-      return true
-    }
-
-    if (response.status === 502) {
-      logger.error(`Failed to set OpenCode auth for provider: ${providerId}`)
-      return false
-    }
-
-    logger.error(`Failed to set OpenCode auth: ${response.status} ${response.statusText}`)
-    return false
-  }
-
-  async deleteProviderAuth(providerId: string): Promise<boolean> {
-    const response = await this.request({
-      method: 'DELETE',
-      path: `/auth/${encodeURIComponent(providerId)}`,
-    })
-
-    if (response.ok) {
-      logger.info(`Deleted OpenCode auth for provider: ${providerId}`)
-      return true
-    }
-
-    if (response.status === 502) {
-      logger.error(`Failed to delete OpenCode auth for provider: ${providerId}`)
-      return false
-    }
-
-    logger.error(`Failed to delete OpenCode auth: ${response.status} ${response.statusText}`)
-    return false
-  }
 }
 
 export function createOpenCodeClient(
@@ -243,7 +142,7 @@ export function createOpenCodeClient(
   const baseUrl: OpenCodeClientHost = () => getOpenCodeUpstreamBaseUrl(resolveConfiguredHost())
   const passwordResolver = typeof passwordOverride === 'function' ? passwordOverride : undefined
   const password = typeof passwordOverride === 'string' ? passwordOverride : ENV.OPENCODE.SERVER_PASSWORD
-  const basicAuth = getOpenCodeBasicAuthHeader(password)
+  const basicAuth = password ? getOpenCodeBasicAuthHeader(password) : null
 
   return new FetchOpenCodeClient({ baseUrl, basicAuth, passwordResolver })
 }

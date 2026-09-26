@@ -30,6 +30,10 @@
   <img src="docs/images/ocmgr-mobile.webp" alt="Mobile view" height="400" style="border: none; margin-left: 12px" />
 </p>
 
+## Requirements
+
+OpenCode Manager requires **OpenCode 2.x at 2.0.15 or newer** (bundled 2.0.15). OpenCode 1.x and 3.x are not supported. If you are upgrading from OpenCode 1.x, see the [v1 → v2 migration guide](https://opencode.ai/v2/docs/migrate-v1). On first start, OpenCode 2 migrates V1 session history in the background, so older sessions can be missing or incomplete until it finishes; progress is reported by OpenCode at `GET /api/experimental/migration/v1`.
+
 ## Quick Start
 
 ```bash
@@ -103,7 +107,7 @@ For OAuth, Passkeys, Push Notifications (VAPID), and advanced configuration, see
 
 ## `ocm` CLI
 
-OpenCode Manager ships an `ocm` CLI (from `ocm-cli/`) that attaches your local OpenCode TUI to a repo hosted on the Manager. It lists ready repos, attaches via the Manager's `/api/opencode-proxy` (so prompts run on the Manager's filesystem against a single shared OpenCode server), and can sync the working tree up or down with `ocm push` / `ocm pull` (fast git bundle + working-tree patch by default; pass `--full` for the legacy tarball mirror). Running `ocm` inside a local clone auto-detects the matching Manager repo by `origin` URL.
+OpenCode Manager ships an `ocm` CLI (from `ocm-cli/`) that attaches your local OpenCode TUI to a repo hosted on the Manager. It lists ready repos, attaches with `opencode --server` through the Manager's repo-scoped `/api/opencode-proxy/repos/:repoId` route (so prompts run on the Manager's filesystem against a single shared OpenCode server), and can sync the working tree up or down with `ocm push` / `ocm pull` (fast git bundle + working-tree patch by default; pass `--full` for the legacy tarball mirror). Running `ocm` inside a local clone auto-detects the matching Manager repo by `origin` URL.
 
 See the [`ocm` CLI guide](docs/ocm-cli.md) for setup and commands.
 

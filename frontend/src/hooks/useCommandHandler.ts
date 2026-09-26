@@ -1,76 +1,71 @@
 import { useState, useCallback } from 'react'
 import { useNavigate } from 'react-router-dom'
-import { createOpenCodeClient } from '@/api/opencode'
-import { useCreateSession } from '@/hooks/useOpenCode'
-import { useModelSelection } from '@/hooks/useModelSelection'
+import { compactSession, runCommand } from '@/api/opencode'
+import type { PromptAgentInput, PromptFileInput, PromptSkillInput } from '@/api/opencode'
+import { useCreateSession, useSyncSessionSelection } from '@/hooks/useOpenCode'
 import { showToast } from '@/lib/toast'
-import type { components } from '@/api/opencode-types'
+import type { CommandInfo, ModelRef } from '@opencode-manager/shared/opencode'
 import { useSessionStatus } from '@/stores/sessionStatusStore'
 
-type CommandType = components['schemas']['Command']
+interface CommandSubmission {
+  text: string
+  files?: PromptFileInput[]
+  agents?: PromptAgentInput[]
+  skills?: PromptSkillInput[]
+}
 
 interface CommandHandlerProps {
-  opcodeUrl: string
   sessionID: string
   directory?: string
+  model?: ModelRef
   onShowSessionsDialog?: () => void
   onShowModelsDialog?: () => void
   onShowHelpDialog?: () => void
   onToggleDetails?: () => boolean
   onExportSession?: () => void
+  onUndo?: () => void | Promise<void>
+  onRedo?: () => void | Promise<void>
   currentAgent?: string
 }
 
 export function useCommandHandler({
-  opcodeUrl,
   sessionID,
   directory,
+  model,
   onShowSessionsDialog,
   onShowModelsDialog,
   onShowHelpDialog,
   onToggleDetails,
   onExportSession,
+  onUndo,
+  onRedo,
   currentAgent
 }: CommandHandlerProps) {
   const navigate = useNavigate()
-  const createSession = useCreateSession(opcodeUrl, directory)
-  const { model, modelString } = useModelSelection(opcodeUrl, directory)
+  const createSession = useCreateSession(directory)
+  const syncSelection = useSyncSessionSelection(directory)
   const setSessionStatus = useSessionStatus((state) => state.setStatus)
   const [loading, setLoading] = useState(false)
 
-  const executeCommand = useCallback(async (command: CommandType, args: string = '') => {
-    if (!opcodeUrl) return
-
+  const executeCommand = useCallback(async (command: CommandInfo, submission: CommandSubmission = { text: '' }): Promise<boolean> => {
     setLoading(true)
-    
+
     try {
-      const client = createOpenCodeClient(opcodeUrl, directory)
-      
       switch (command.name) {
         case 'sessions':
         case 'resume':
         case 'continue':
           onShowSessionsDialog?.()
-          break
-          
+          return true
+
         case 'models':
           onShowModelsDialog?.()
-          break
-          
-        case 'themes': {
-          await client.sendCommand(sessionID, {
-            command: command.name,
-            arguments: args,
-            agent: currentAgent,
-            model: modelString || undefined
-          })
-          break
-        }
-          
+          return true
+
         case 'help':
           onShowHelpDialog?.()
-          break
-          
+          return true
+
         case 'new':
         case 'clear': {
           try {
@@ -91,72 +86,58 @@ export function useCommandHandler({
           } catch (error) {
             showToast.error(`Failed to create new session: ${error instanceof Error ? error.message : 'Unknown error'}`)
           }
-          break
+          return true
         }
-          
+
         case 'details':
           if (onToggleDetails) {
             const expanded = onToggleDetails()
             showToast.success(expanded ? 'Tool details expanded' : 'Tool details collapsed')
           }
-          break
-          
+          return true
+
         case 'export':
-          if (onExportSession) {
-            onExportSession()
-          }
-          break
+          onExportSession?.()
+          return true
 
-        case 'compact':
-        case 'summarize': {
-          if (!model?.providerID || !model?.modelID) {
-            showToast.error('No model selected. Please select a provider and model first.')
-            break
-          }
-
+        case 'compact': {
           showToast.loading('Compacting session...', { id: `compact-${sessionID}` })
 
           setSessionStatus(sessionID, { type: 'compact' })
 
-          await client.summarizeSession(
-            sessionID,
-            model.providerID,
-            model.modelID
-          )
-          break
-        }
-          
-        case 'share':
-        case 'unshare':
-        case 'undo':
-        case 'redo':
-        case 'editor':
-        case 'init': {
-          await client.sendCommand(sessionID, {
-            command: command.name,
-            arguments: args,
-            agent: currentAgent,
-            model: modelString || undefined
-          })
-          break
+          await compactSession(sessionID)
+          return true
         }
 
+        case 'undo':
+          await onUndo?.()
+          return false
+
+        case 'redo':
+          await onRedo?.()
+          return false
+
         default: {
-          await client.sendCommand(sessionID, {
-            command: command.name,
-            arguments: args,
-            agent: currentAgent,
-            model: modelString || undefined
+          await syncSelection({ sessionID, model, agent: currentAgent })
+          await runCommand({
+            sessionID,
+            name: command.name,
+            text: submission.text,
+            ...(submission.files ? { files: submission.files } : {}),
+            ...(submission.agents ? { agents: submission.agents } : {}),
+            ...(submission.skills ? { skills: submission.skills } : {}),
           })
+          return true
         }
       }
     } catch (error) {
       showToast.error(`Command failed: ${error instanceof Error ? error.message : 'Unknown error'}`)
       setSessionStatus(sessionID, { type: 'idle' })
+      return false
     } finally {
       setLoading(false)
     }
-  }, [sessionID, opcodeUrl, directory, onShowSessionsDialog, onShowModelsDialog, onShowHelpDialog, onToggleDetails, onExportSession, createSession, navigate, model, modelString, currentAgent, setSessionStatus])
+  }, [sessionID, model, onShowSessionsDialog, onShowModelsDialog, onShowHelpDialog, onToggleDetails, onExportSession, onUndo, onRedo, createSession, navigate, syncSelection, currentAgent, setSessionStatus])
 
   return {
     executeCommand,

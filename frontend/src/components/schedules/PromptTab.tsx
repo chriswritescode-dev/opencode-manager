@@ -143,7 +143,7 @@ export function PromptTab({
               onPromptChange(event.target.value)
             }}
             className="min-h-[320px]"
-            placeholder="Review the repo, summarize notable risks, and open a session I can inspect later."
+            placeholder="Review the repo, note notable risks, and open a session I can inspect later."
           />
         </div>
         <p className="text-xs text-muted-foreground">

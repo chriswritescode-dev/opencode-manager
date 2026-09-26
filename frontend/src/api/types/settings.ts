@@ -5,7 +5,6 @@ import {
   DEFAULT_USER_PREFERENCES,
   DEFAULT_LEADER_KEY,
   BLOCKED_SERVER_ENV_KEYS,
-  DEFAULT_SERVER_ENV_VARS,
   selectPreferredOpenCodeConfigSourceName,
   type TTSConfig,
   type STTConfig,
@@ -27,7 +26,7 @@ import type { NotificationPreferences } from '@opencode-manager/shared/types'
 import { saveFile } from '@/lib/download'
 
 export type { TTSConfig, STTConfig, OpenCodeConfigFile, OpenCodeConfigSourceFile, OpenCodeConfigSourceName, UpdateOpenCodeConfigRequest, ModelConfig, ProviderConfig, SandboxPreferences, NotificationPreferences, SkillFileInfo, CreateSkillRequest, UpdateSkillRequest, SkillScope, InstallSkillFromGithubRequest, InstallSkillResponse }
-export { DEFAULT_TTS_CONFIG, DEFAULT_STT_CONFIG, DEFAULT_KEYBOARD_SHORTCUTS, DEFAULT_USER_PREFERENCES, DEFAULT_LEADER_KEY, BLOCKED_SERVER_ENV_KEYS, DEFAULT_SERVER_ENV_VARS }
+export { DEFAULT_TTS_CONFIG, DEFAULT_STT_CONFIG, DEFAULT_KEYBOARD_SHORTCUTS, DEFAULT_USER_PREFERENCES, DEFAULT_LEADER_KEY, BLOCKED_SERVER_ENV_KEYS }
 export { isOpenCodeConfigSourceName } from '@opencode-manager/shared'
 
 export function getOpenCodeConfigSources(config: OpenCodeConfigFile): OpenCodeConfigSourceFile[] {
@@ -91,7 +90,6 @@ export interface UserPreferences {
   repoOrder?: number[]
   repoSortMode?: 'recent' | 'manual' | 'name'
   serverEnvVars?: Array<{ key: string; value: string }>
-  disabledDefaultServerEnvVars?: string[]
   sandbox?: SandboxPreferences
 }
 
@@ -107,6 +105,11 @@ export interface UpdateSettingsRequest {
 
 export interface OpenCodeConfigSaveResponse extends OpenCodeConfigFile {
   restartRequired?: boolean
+}
+
+export interface OpenCodeRestartResponse {
+  success: boolean
+  message: string
 }
 
 export interface OpenCodeImportStatus {

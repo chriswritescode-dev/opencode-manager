@@ -1,12 +1,22 @@
 import { spawnSync } from 'node:child_process'
 import { buildRemoteAttachEnv } from './remote-context.js'
+import { repoProxyUrl } from './repo-proxy.js'
 
-export type WarpTarget = {
+export type AttachTarget = {
   managerUrl: string
   token: string
-  directory: string
-  sessionID: string
+  repoId: number
   repoName: string
+  sessionID?: string
+}
+
+export type WarpTarget = AttachTarget & {
+  sessionID: string
+}
+
+export type AttachInvocation = {
+  args: string[]
+  env: NodeJS.ProcessEnv
 }
 
 export type WarpSpawn = (
@@ -27,25 +37,21 @@ export function takePendingWarp(): WarpTarget | undefined {
   return t
 }
 
-export function buildAttachArgs(target: WarpTarget): string[] {
-  return [
-    'attach',
-    `${target.managerUrl}/api/opencode-proxy`,
-    '--dir', target.directory,
-    '--session', target.sessionID,
-    '--password', target.token,
-    '--username', 'opencode',
-  ]
+export function buildAttachInvocation(target: AttachTarget): AttachInvocation {
+  const args = ['--server', repoProxyUrl(target.managerUrl, target.repoId)]
+  if (target.sessionID) args.push('--session', target.sessionID)
+  return {
+    args,
+    env: { ...process.env, OPENCODE_PASSWORD: target.token, ...buildRemoteAttachEnv(target.managerUrl, target.repoName) },
+  }
 }
 
 export function runPendingWarp(spawn: WarpSpawn = spawnSync): void {
   const target = takePendingWarp()
   if (!target) return
   try {
-    spawn('opencode', buildAttachArgs(target), {
-      stdio: 'inherit',
-      env: { ...process.env, ...buildRemoteAttachEnv(target.managerUrl, target.repoName) },
-    })
+    const { args, env } = buildAttachInvocation(target)
+    spawn('opencode', args, { stdio: 'inherit', env })
   } catch {
     void 0
   }

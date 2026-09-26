@@ -32,7 +32,18 @@ echo "✅ Git is installed"
 # Check if OpenCode TUI is installed
 if ! opencode --version &> /dev/null; then
   echo "❌ OpenCode TUI is not installed. Please install it with:"
-  echo "   curl -fsSL https://opencode.ai/install | bash"
+  echo "   curl -fsSL https://opencode.ai/v2/install | bash"
+  exit 1
+fi
+
+REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+source "$REPO_ROOT/scripts/lib/opencode-release.sh"
+OPENCODE_SUPPORTED_FLOOR="$(sed -n 's/^ARG OPENCODE_VERSION=//p' "$REPO_ROOT/Dockerfile" | head -1)"
+OPENCODE_VERSION="$(opencode --version 2>&1 | grep -oE '[0-9]+\.[0-9]+\.[0-9]+' | head -1)"
+
+if [ -z "$OPENCODE_SUPPORTED_FLOOR" ] || ! is_supported_opencode_version "$OPENCODE_VERSION"; then
+  echo "❌ OpenCode ${OPENCODE_VERSION:-unknown} is not supported; OpenCode $(supported_opencode_range) is required. Please install it with:"
+  echo "   curl -fsSL https://opencode.ai/v2/install | bash"
   exit 1
 fi
 

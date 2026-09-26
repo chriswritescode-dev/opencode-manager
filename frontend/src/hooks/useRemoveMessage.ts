@@ -1,167 +1,80 @@
 import { useMutation, useQueryClient } from '@tanstack/react-query'
-import { createOpenCodeClient } from '@/api/opencode'
+import {
+  commitRevert,
+  sendPrompt,
+  stageRevert,
+} from '@/api/opencode'
+import { parseOpenCodeModelRef } from '@opencode-manager/shared/opencode'
+import { useSyncSessionSelection } from '@/hooks/useOpenCode'
 import { showToast } from '@/lib/toast'
-import { messagesQueryKey } from '@/lib/queryInvalidation'
-import type { Message, Part, MessageWithParts } from '@/api/types'
+import { sessionTranscriptQueryKey } from '@/lib/queryInvalidation'
 
 interface UseRemoveMessageOptions {
-  opcodeUrl: string | null
   sessionId: string
   directory?: string
 }
 
-interface RemoveMessageContext {
-  previousMessages?: MessageWithParts[]
-}
-
-export function useRemoveMessage({ opcodeUrl, sessionId, directory }: UseRemoveMessageOptions) {
+export function useRemoveMessage({ sessionId, directory }: UseRemoveMessageOptions) {
   const queryClient = useQueryClient()
 
-  return useMutation<unknown, Error, { messageID: string; partID?: string }, RemoveMessageContext>({
-    mutationFn: async ({ messageID, partID }: { messageID: string, partID?: string }) => {
-      if (!opcodeUrl) throw new Error('OpenCode URL not available')
-      
-      const client = createOpenCodeClient(opcodeUrl, directory)
-      return client.revertMessage(sessionId, { messageID, partID })
+  return useMutation({
+    mutationFn: async ({ messageID }: { messageID: string }) => {
+      await stageRevert(sessionId, messageID)
+      await commitRevert(sessionId)
     },
-    onMutate: async ({ messageID }) => {
-      const queryKey = messagesQueryKey(opcodeUrl, sessionId, directory)
-      
-      await queryClient.cancelQueries({ queryKey })
-      
-      const previousMessages = queryClient.getQueryData<MessageWithParts[]>(queryKey)
-      
-      if (previousMessages) {
-        const messageIndex = previousMessages.findIndex(m => m.info.id === messageID)
-        if (messageIndex !== -1) {
-          const newMessages = previousMessages.slice(0, messageIndex)
-          queryClient.setQueryData(queryKey, newMessages)
-        }
-      }
-      
-      return { previousMessages }
-    },
-    onError: (_error, _variables, _context: RemoveMessageContext | undefined) => {
-      if (_context?.previousMessages) {
-        queryClient.setQueryData(
-          messagesQueryKey(opcodeUrl, sessionId, directory),
-          _context.previousMessages
-        )
-      }
-      
+    onError: () => {
       showToast.error('Failed to remove message')
     },
     onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: sessionTranscriptQueryKey(sessionId) })
       queryClient.invalidateQueries({
-        queryKey: messagesQueryKey(opcodeUrl, sessionId, directory)
-      })
-      queryClient.invalidateQueries({
-        queryKey: ['opencode', 'session', opcodeUrl, sessionId, directory]
+        queryKey: ['opencode', 'session', sessionId, directory]
       })
     }
   })
 }
 
 interface UseRefreshMessageOptions {
-  opcodeUrl: string | null
   sessionId: string
   directory?: string
 }
 
-export function useRefreshMessage({ opcodeUrl, sessionId, directory }: UseRefreshMessageOptions) {
+export function useRefreshMessage({ sessionId, directory }: UseRefreshMessageOptions) {
   const queryClient = useQueryClient()
-  const removeMessage = useRemoveMessage({ opcodeUrl, sessionId, directory })
+  const removeMessage = useRemoveMessage({ sessionId, directory })
+  const syncSelection = useSyncSessionSelection(directory)
 
   return useMutation({
-    mutationFn: async ({ 
-      assistantMessageID, 
+    mutationFn: async ({
+      assistantMessageID,
       userMessageContent,
       model,
       agent
-    }: { 
+    }: {
       assistantMessageID: string
       userMessageContent: string
       model?: string
       agent?: string
     }) => {
-      if (!opcodeUrl) throw new Error('OpenCode URL not available')
-      
       await removeMessage.mutateAsync({ messageID: assistantMessageID })
-      
-      const client = createOpenCodeClient(opcodeUrl, directory)
-      
-      const optimisticUserID = `optimistic_user_${Date.now()}_${Math.random()}`
-      const userMessageInfo = {
-        id: optimisticUserID,
-        role: 'user' as const,
+
+      const modelRef = model ? parseOpenCodeModelRef(model) : undefined
+      await syncSelection({ sessionID: sessionId, model: modelRef, agent })
+
+      await sendPrompt({
         sessionID: sessionId,
-        time: { created: Date.now() }
-      } as Message
-
-      const userMessageParts = [{
-        id: `${optimisticUserID}_part_0`,
-        type: 'text' as const,
         text: userMessageContent,
-        messageID: optimisticUserID,
-        sessionID: sessionId
-      }] as Part[]
+      })
 
-      const optimisticMessageWithParts: MessageWithParts = {
-        info: userMessageInfo,
-        parts: userMessageParts,
-      }
-
-      queryClient.setQueryData<MessageWithParts[]>(
-        messagesQueryKey(opcodeUrl, sessionId, directory),
-        (old) => [...(old || []), optimisticMessageWithParts]
-      )
-      
-      interface RefreshPromptRequest {
-        parts: Array<{ type: 'text'; text: string }>
-        model?: { providerID: string; modelID: string }
-        agent?: string
-      }
-
-      const requestData: RefreshPromptRequest = {
-        parts: [{ type: 'text', text: userMessageContent }]
-      }
-
-      if (model) {
-        const [providerID, modelID] = model.split('/')
-        if (providerID && modelID) {
-          requestData.model = { providerID, modelID }
-        }
-      }
-
-      if (agent) {
-        requestData.agent = agent
-      }
-
-      await client.sendPromptAsync(sessionId, requestData)
-
-      return { optimisticUserID, userMessageContent }
+      return { userMessageContent }
     },
     onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: sessionTranscriptQueryKey(sessionId) })
       queryClient.invalidateQueries({
-        queryKey: messagesQueryKey(opcodeUrl, sessionId, directory)
-      })
-      queryClient.invalidateQueries({
-        queryKey: ['opencode', 'session', opcodeUrl, sessionId, directory]
+        queryKey: ['opencode', 'session', sessionId, directory]
       })
     },
-    onError: (_, variables) => {
-      void variables
-      queryClient.setQueryData<MessageWithParts[]>(
-        messagesQueryKey(opcodeUrl, sessionId, directory),
-        (old) => {
-          const messages = old || []
-          const optimisticIndex = messages.findIndex((m) => m.info.id.startsWith('optimistic_user_'))
-          if (optimisticIndex !== -1) {
-            return messages.slice(0, optimisticIndex)
-          }
-          return messages
-        }
-      )
+    onError: () => {
       showToast.error('Failed to refresh message')
     }
   })

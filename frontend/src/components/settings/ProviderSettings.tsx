@@ -5,21 +5,22 @@ import { Badge } from '@/components/ui/badge'
 import { Input } from '@/components/ui/input'
 import { DeleteDialog } from '@/components/ui/delete-dialog'
 import { Loader2, Check, X, Shield, ChevronDown, ChevronRight, Key, Search, Pencil, Trash2 } from 'lucide-react'
-import { providerCredentialsApi, getProviders } from '@/api/providers'
+import { providerCredentialsApi } from '@/api/providers'
 import type { Provider } from '@/api/providers'
-import { oauthApi, type OAuthAuthorizeResponse } from '@/api/oauth'
+import { type OAuthAuthorizeResponse } from '@/api/oauth'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { OAuthAuthorizeDialog } from './OAuthAuthorizeDialog'
 import { OAuthCallbackDialog } from './OAuthCallbackDialog'
 import { ApiKeyDialog } from '@/components/model/ApiKeyDialog'
 import { invalidateProviderCaches } from '@/lib/queryInvalidation'
+import { useProviders } from '@/hooks/useProviders'
+import { useProviderAuthMethods } from '@/hooks/useProviderAuthMethods'
 
 export function ProviderSettings() {
   const [selectedProvider, setSelectedProvider] = useState<string | null>(null)
   const [oauthDialogOpen, setOauthDialogOpen] = useState(false)
   const [oauthCallbackDialogOpen, setOauthCallbackDialogOpen] = useState(false)
   const [oauthResponse, setOauthResponse] = useState<OAuthAuthorizeResponse | null>(null)
-  const [oauthMethodIndex, setOauthMethodIndex] = useState<number | null>(null)
   const [connectedExpanded, setConnectedExpanded] = useState(false)
   const [availableExpanded, setAvailableExpanded] = useState(true)
   const [availableSearch, setAvailableSearch] = useState('')
@@ -29,11 +30,7 @@ export function ProviderSettings() {
   const [deleteTarget, setDeleteTarget] = useState<string | null>(null)
   const queryClient = useQueryClient()
 
-  const { data: providersData, isLoading: providersLoading } = useQuery({
-    queryKey: ['providers'],
-    queryFn: () => getProviders(),
-    staleTime: 300000,
-  })
+  const { data: providersData, isLoading: providersLoading } = useProviders()
 
   const providers = providersData?.providers
 
@@ -42,10 +39,7 @@ export function ProviderSettings() {
     queryFn: () => providerCredentialsApi.list(),
   })
 
-  const { data: authMethods } = useQuery({
-    queryKey: ['provider-auth-methods'],
-    queryFn: () => oauthApi.getAuthMethods(),
-  })
+  const { data: authMethods } = useProviderAuthMethods()
 
   const deleteCredentialMutation = useMutation({
     mutationFn: (providerId: string) => providerCredentialsApi.delete(providerId),
@@ -69,16 +63,14 @@ export function ProviderSettings() {
     setDeleteTarget(null)
   }
 
-  const handleOAuthAuthorize = (response: OAuthAuthorizeResponse, methodIndex: number) => {
+  const handleOAuthAuthorize = (response: OAuthAuthorizeResponse) => {
     setOauthResponse(response)
-    setOauthMethodIndex(methodIndex)
     setOauthDialogOpen(false)
     setOauthCallbackDialogOpen(true)
   }
 
   const handleOAuthDialogClose = () => {
     setOauthDialogOpen(false)
-    setOauthMethodIndex(null)
     setSelectedProvider(null)
   }
 
@@ -86,7 +78,6 @@ export function ProviderSettings() {
     invalidateProviderCaches(queryClient)
     setOauthCallbackDialogOpen(false)
     setOauthResponse(null)
-    setOauthMethodIndex(null)
     setSelectedProvider(null)
   }
 
@@ -252,12 +243,11 @@ export function ProviderSettings() {
           />
         )}
 
-        {selectedProvider && oauthResponse && oauthMethodIndex !== null && (
+        {selectedProvider && oauthResponse && (
           <OAuthCallbackDialog
             providerId={selectedProvider}
             providerName={selectedProviderName}
             authResponse={oauthResponse}
-            methodIndex={oauthMethodIndex}
             open={oauthCallbackDialogOpen}
             onOpenChange={setOauthCallbackDialogOpen}
             onSuccess={handleOAuthSuccess}
@@ -426,7 +416,6 @@ export function ProviderSettings() {
             id: apiKeyProvider.id,
             name: apiKeyProvider.name,
             api: apiKeyProvider.api,
-            env: apiKeyProvider.env || [],
             npm: apiKeyProvider.npm,
             models: Object.entries(apiKeyProvider.models || {}).map(([id, model]) => ({
               id,

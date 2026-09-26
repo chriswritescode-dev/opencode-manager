@@ -37,17 +37,17 @@ export const SchedulePermissionConfigSchema = z.object({
 })
 export type SchedulePermissionConfig = z.infer<typeof SchedulePermissionConfigSchema>
 
-export type SchedulePermissionAction = 'allow' | 'deny' | 'ask'
+export type SchedulePermissionEffect = 'allow' | 'deny' | 'ask'
 
 /**
- * A single OpenCode session permission rule. `permission` is the tool name
- * (e.g. `bash`, `external_directory`, or `*` for all), `pattern` is the glob
- * matched against the tool argument, and `action` is the resulting decision.
+ * A single OpenCode 2 session permission rule. `action` is the tool or permission
+ * action (e.g. `shell`, `external_directory`, or `*` for all), `resource` is the
+ * glob matched against the tool argument, and `effect` is the resulting decision.
  */
 export interface SchedulePermissionRule {
-  permission: string
-  pattern: string
-  action: SchedulePermissionAction
+  action: string
+  resource: string
+  effect: SchedulePermissionEffect
 }
 
 export type SchedulePermissionRuleset = SchedulePermissionRule[]
@@ -55,11 +55,11 @@ export type SchedulePermissionRuleset = SchedulePermissionRule[]
 /**
  * Builds the OpenCode session permission ruleset for an unattended scheduled run.
  *
- * OpenCode's `POST /session` `permission` field expects an ordered array of
- * `{ permission, pattern, action }` rules (`PermissionV1.Ruleset`), evaluated
- * with last-match-wins semantics (see https://opencode.ai/docs/permissions).
+ * OpenCode's `POST /session` `permissions` field expects an ordered array of
+ * `{ action, resource, effect }` rules (`Permission.Ruleset`), evaluated with
+ * last-match-wins semantics (see https://opencode.ai/docs/permissions).
  * A leading `*`/`*` allow rule sets the allow-all baseline; the trailing
- * `external_directory`, `question` and `bash` deny rules then override it for
+ * `external_directory`, `question` and `shell` deny rules then override it for
  * external directory access, agent questions that would block an unattended run
  * with nobody to answer them, and matching destructive command patterns.
  */
@@ -67,15 +67,15 @@ export function buildSchedulePermissionRuleset(
   config: SchedulePermissionConfig | null | undefined,
 ): SchedulePermissionRuleset {
   const cfg = SchedulePermissionConfigSchema.parse(config ?? {})
-  const ruleset: SchedulePermissionRuleset = [{ permission: '*', pattern: '*', action: 'allow' }]
+  const ruleset: SchedulePermissionRuleset = [{ action: '*', resource: '*', effect: 'allow' }]
   if (!cfg.allowExternalDirectory) {
-    ruleset.push({ permission: 'external_directory', pattern: '*', action: 'deny' })
+    ruleset.push({ action: 'external_directory', resource: '*', effect: 'deny' })
   }
   if (!cfg.allowQuestions) {
-    ruleset.push({ permission: 'question', pattern: '*', action: 'deny' })
+    ruleset.push({ action: 'question', resource: '*', effect: 'deny' })
   }
   for (const pattern of cfg.bashDenyPatterns) {
-    ruleset.push({ permission: 'bash', pattern, action: 'deny' })
+    ruleset.push({ action: 'shell', resource: pattern, effect: 'deny' })
   }
   return ruleset
 }
@@ -120,7 +120,6 @@ export const ScheduleRunSchema = z.object({
   runBranch: z.string().nullable(),
   commitHash: z.string().nullable(),
   worktreePath: z.string().nullable(),
-  workspaceId: z.string().nullable(),
 })
 export type ScheduleRun = z.infer<typeof ScheduleRunSchema>
 

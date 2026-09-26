@@ -2,19 +2,18 @@ import { Hono, type Context } from 'hono'
 import { z } from 'zod'
 import { spawnSync } from 'child_process'
 import { randomUUID } from 'crypto'
-import { existsSync } from 'fs'
-import { resolve, dirname } from 'path'
 import type { Database } from 'bun:sqlite'
 import { SettingsService } from '../services/settings'
 import { writeFileContent, readFileContent, fileExists } from '../services/file-operations'
 import { archiveBrokenOpenCodeConfigFile, deleteOpenCodeConfigFile } from '../services/opencode-config-file'
-import { restoreLastKnownGoodOpenCodeConfig } from '../services/opencode-config-apply'
+import { reloadOpenCodeOrMarkRestartPending, restoreLastKnownGoodOpenCodeConfig } from '../services/opencode-config-apply'
 import { createOpenCodeConfigRoutes } from './opencode-config'
 import type { OpenCodeClient } from '../services/opencode/client'
 import { getAgentsMdPath } from '@opencode-manager/shared/config/env'
 import {
   UserPreferencesSchema,
   type SandboxPreferences,
+  type UserPreferences,
 } from '../types/settings'
 import type { GitCredential } from '@opencode-manager/shared'
 import {
@@ -23,27 +22,24 @@ import {
   SkillScopeSchema,
   InstallSkillFromGithubRequestSchema,
   InstallSkillUploadRequestSchema,
-  type SkillScope,
 } from '@opencode-manager/shared'
 import { logger } from '../utils/logger'
 import {
   discoverModelsCached,
 } from '../utils/discovery-cache'
-import { opencodeServerManager, ConfigReloadError, resolveOpenCodeExecutable } from '../services/opencode-single-server'
+import { opencodeServerManager } from '../services/opencode-single-server'
 import { getOrCreateInternalToken, rotateInternalToken } from '../services/internal-token'
 import { sseAggregator } from '../services/sse-aggregator'
 import type { OpenCodeSupervisor } from '../services/opencode-supervisor'
 import { detectSandboxCapability } from '../services/sandbox/capability'
 import { getProcessIdentityAttestationError } from '../services/opencode/process-identity'
-import { restartOpenCode, reloadOpenCodeConfig, getOpenCodeRestartCoordinator } from '../services/opencode-restart'
+import { restartOpenCode, assertValidOpenCodeConfig, listActiveUserSessions } from '../services/opencode-restart'
 import type { GitAuthService } from '../services/git-auth'
 import { DEFAULT_AGENTS_MD } from '../constants'
 import { validateSSHPrivateKey } from '../utils/ssh-validation'
 import { encryptSecret } from '../utils/crypto'
-import { compareVersions, isValidVersion } from '../utils/version-utils'
 import { getImportedSessionDirectories, getOpenCodeImportStatus, OpenCodeImportProtectionError, syncOpenCodeImport } from '../services/opencode-import'
 import { relinkReposFromSessionDirectories } from '../services/repo'
-import { ENV } from '@opencode-manager/shared/config/env'
 import {
   listManagedSkills,
   getSkill,
@@ -61,79 +57,123 @@ import {
   deleteOpenCodeDirectoryFile,
 } from '../services/opencode-directory-files'
 import { parseUploadManifest, readUploadedManifestFiles, UploadValidationError } from './upload-utils'
-import { getRepoById } from '../db/queries'
-import { githubFetch } from '../utils/github'
+import { installOpenCodeVersion, listOpenCodeVersions, OpenCodeInstallError } from '../services/opencode-installer'
+import {
+  compareOpenCodeVersions,
+  describeUnsupportedOpenCodeVersion,
+  isStableOpenCodeVersion,
+  isSupportedOpenCodeVersion,
+  normalizeOpenCodeVersion,
+} from '@opencode-manager/shared/opencode'
 
-function getOpenCodeInstallMethod(): string {
-  const homePath = process.env.HOME || ''
-  const opencodePath = process.env.OPENCOD_PATH || resolve(homePath, '.opencode', 'bin', 'opencode')
-  
-  if (!existsSync(opencodePath)) return 'curl'
-  
+async function installVerifiedOpenCodeVersion(
+  version: string,
+  openCodeSupervisor: OpenCodeSupervisor | undefined,
+  context: string,
+): Promise<string> {
+  await installOpenCodeVersion(version)
+
   try {
-    const opencodeDir = dirname(opencodePath)
-    if (opencodeDir.includes('.opencode')) return 'curl'
-    
-    if (opencodePath.includes('/homebrew/') || opencodePath.includes('/HOMEBREW/')) return 'brew'
-    if (opencodePath.includes('/.npm/') || opencodePath.includes('/node_modules/')) return 'npm'
-    if (opencodePath.includes('/.pnpm/')) return 'pnpm'
-    if (opencodePath.includes('/.bun/')) return 'bun'
-  } catch {
-    return 'curl'
+    const installedVersion = await opencodeServerManager.fetchVersion()
+    logger.info(`New OpenCode version: ${installedVersion}`)
+
+    if (installedVersion !== version) {
+      throw new Error(`OpenCode install did not result in version ${version}; detected ${installedVersion ?? 'unknown'}`)
+    }
+
+    opencodeServerManager.clearStartupError()
+    await restartOpenCode(openCodeSupervisor)
+    logger.info(`OpenCode server restarted after ${context}`)
+
+    return installedVersion
+  } catch (error) {
+    if (error instanceof OpenCodeInstallError) throw error
+    throw new OpenCodeInstallError(error instanceof Error ? error.message : String(error), true, { cause: error })
   }
-  
-  return 'curl'
 }
 
-async function restartOpenCodeSafe(openCodeSupervisor: OpenCodeSupervisor | undefined, context: string): Promise<void> {
+async function reloadOpenCodeForChange(openCodeClient: OpenCodeClient): Promise<{ restartRequired: boolean }> {
+  return { restartRequired: await reloadOpenCodeOrMarkRestartPending(openCodeClient) === 'restart_pending' }
+}
+
+const OPENCODE_BIN_MANAGED_MESSAGE =
+  'The OpenCode binary is externally managed via OPENCODE_BIN; upgrade and version install are disabled'
+
+function isOpenCodeBinaryExternallyManaged(): boolean {
+  const binary = process.env.OPENCODE_BIN
+  return typeof binary === 'string' && binary.length > 0
+}
+
+interface OpenCodeInstallFailureMessages {
+  failed: string
+  recovered: string
+  unrecovered: string
+}
+
+async function buildOpenCodeInstallFailureResponse(
+  openCodeSupervisor: OpenCodeSupervisor | undefined,
+  error: unknown,
+  oldVersion: string | null,
+  messages: OpenCodeInstallFailureMessages,
+): Promise<{ status: 400 | 500; body: Record<string, unknown> }> {
+  const details = error instanceof Error ? error.message : 'Unknown error'
+
+  if (!(error instanceof OpenCodeInstallError) || !error.swapStarted) {
+    logger.warn(`${messages.failed}: installation did not reach the binary swap, not restarting the server`)
+    return {
+      status: 500,
+      body: { error: messages.failed, details, oldVersion, newVersion: oldVersion, upgraded: false, recovered: false },
+    }
+  }
+
+  opencodeServerManager.clearStartupError()
+
+  let recovered = false
+  let recoveryMessage = ''
   try {
     await restartOpenCode(openCodeSupervisor)
-    logger.info(`Restarted OpenCode server after ${context}`)
-  } catch (restartError) {
-    logger.warn(`Failed to restart OpenCode server after ${context}:`, restartError)
-  }
-}
-
-async function dispatchSkillReload(
-  db: Database,
-  openCodeClient: OpenCodeClient,
-  openCodeSupervisor: OpenCodeSupervisor | undefined,
-  repoId: number,
-): Promise<void> {
-  const repo = getRepoById(db, repoId)
-  if (!repo) {
-    logger.warn(`Cannot dispatch skill reload: repo ${repoId} not found`)
-    return
+    logger.warn('OpenCode server restarted after install failure')
+    recovered = true
+    recoveryMessage = 'Server recovered'
+  } catch (recoveryError) {
+    logger.error('Failed to recover OpenCode server:', recoveryError)
+    recoveryMessage = recoveryError instanceof Error ? recoveryError.message : 'Unknown error'
   }
 
-  await restartOpenCodeSafe(openCodeSupervisor, 'skill install')
-
+  let currentVersion: string | null | undefined = oldVersion
   try {
-    await openCodeClient.forward({
-      method: 'GET',
-      path: '/skill',
-      directory: repo.fullPath,
-    })
-    logger.info(`Dispatched skill reload for project ${repo.fullPath}`)
-  } catch (dispatchError) {
-    logger.warn('Failed to dispatch skill reload:', dispatchError)
-  }
-}
-
-async function reloadAfterSkillInstall(
-  db: Database,
-  openCodeClient: OpenCodeClient,
-  openCodeSupervisor: OpenCodeSupervisor | undefined,
-  scope: SkillScope,
-  repoId: number | undefined,
-): Promise<boolean> {
-  if (scope === 'project' && repoId !== undefined) {
-    await dispatchSkillReload(db, openCodeClient, openCodeSupervisor, repoId)
-    return false
+    currentVersion = opencodeServerManager.getVersion() || oldVersion
+  } catch (versionError) {
+    logger.error('Failed to get version after recovery:', versionError)
+    currentVersion = oldVersion
   }
 
-  opencodeServerManager.markRestartPending()
-  return true
+  return recovered
+    ? {
+        status: 400,
+        body: {
+          success: false,
+          error: messages.recovered,
+          details,
+          oldVersion,
+          newVersion: currentVersion,
+          upgraded: false,
+          recovered: true,
+          recoveryMessage,
+        },
+      }
+    : {
+        status: 500,
+        body: {
+          error: messages.unrecovered,
+          details,
+          oldVersion,
+          newVersion: currentVersion,
+          upgraded: false,
+          recovered: false,
+          recoveryMessage,
+        },
+      }
 }
 
 const OPENCODE_DIRECTORY_UPLOAD_ERROR_STATUS: ReadonlyArray<readonly [string, 400]> = [
@@ -200,6 +240,26 @@ function sandboxEnforcementChanged(
   return (previous?.enabled ?? false) !== next.enabled
 }
 
+function preferenceChanged(previous: unknown, next: unknown): boolean {
+  return next !== undefined && JSON.stringify(previous) !== JSON.stringify(next)
+}
+
+function listOpenCodeRestartReasons(previous: UserPreferences, next: Partial<UserPreferences>): string[] {
+  return [
+    sandboxEnforcementChanged(previous.sandbox, next.sandbox) && 'sandbox',
+    preferenceChanged(previous.gitCredentials ?? [], next.gitCredentials) && 'git credentials',
+    preferenceChanged(previous.gitIdentity ?? {}, next.gitIdentity) && 'git identity',
+    preferenceChanged(previous.serverEnvVars ?? [], next.serverEnvVars) && 'server environment variables',
+  ].filter((reason): reason is string => typeof reason === 'string')
+}
+
+function markOpenCodeRestartPendingFor(reasons: string[]): boolean {
+  if (reasons.length === 0) return false
+  logger.info(`${reasons.join(', ')} changed, marking OpenCode server restart as pending`)
+  opencodeServerManager.markRestartPending()
+  return true
+}
+
 function parseOptionalRepoId(value: string | undefined): number | undefined {
   if (value === undefined) return undefined
   const parsed = parseInt(value, 10)
@@ -215,34 +275,6 @@ function parseBooleanFormValue(value: unknown): boolean | undefined {
 
 function getMarkdownUploadManifest(manifest: ReturnType<typeof parseUploadManifest>) {
   return manifest.filter(entry => entry.relativePath.toLowerCase().endsWith('.md'))
-}
-
-function execWithTimeout(
-  args: [executable: string, ...commandArgs: string[]],
-  timeoutMs: number,
-  env?: Record<string, string>
-): { output: string; timedOut: boolean } {
-  const result = spawnSync(args[0], args.slice(1), {
-    encoding: 'utf8',
-    timeout: timeoutMs,
-    killSignal: 'SIGKILL',
-    env: env ? { ...process.env, ...env } : undefined
-  })
-
-  if (result.signal === 'SIGKILL' || result.error?.message?.includes('TIMEOUT')) {
-    return { output: '', timedOut: true }
-  }
-
-  if (result.error) {
-    throw result.error
-  }
-
-  const output = (result.stdout || '') + (result.stderr || '')
-  if (result.status !== 0) {
-    throw new Error(output || `Command exited with status ${result.status}`)
-  }
-
-  return { output, timedOut: false }
 }
 
 function spawnWithTimeout(args: string[], timeoutMs: number, env?: Record<string, string>): { output: string; timedOut: boolean } {
@@ -278,12 +310,6 @@ const UpdateCustomCommandSchema = z.object({
 
 
 
-const ConnectMcpDirectorySchema = z.object({
-  directory: z.string().min(1),
-})
-
-const McpAuthDirectorySchema = ConnectMcpDirectorySchema
-
 const TestSSHConnectionSchema = z.object({
   host: z.string().min(1),
   sshPrivateKey: z.string().min(1),
@@ -294,13 +320,6 @@ const SyncOpenCodeImportSchema = z.object({
   overwriteState: z.boolean().optional(),
 })
 
-
-async function extractOpenCodeError(response: Response, defaultError: string): Promise<string> {
-  const errorObj = await response.json().catch(() => null)
-  return (errorObj && typeof errorObj === 'object' && 'error' in errorObj)
-    ? String(errorObj.error)
-    : defaultError
-}
 
 export function createSettingsRoutes(db: Database, gitAuthService: GitAuthService, openCodeClient: OpenCodeClient, openCodeSupervisor?: OpenCodeSupervisor) {
   const app = new Hono()
@@ -366,25 +385,9 @@ export function createSettingsRoutes(db: Database, gitAuthService: GitAuthServic
 
       const settings = settingsService.updateSettings(validated.preferences, userId)
 
-      const sandboxChanged = sandboxEnforcementChanged(currentSettings.preferences.sandbox, validated.preferences.sandbox)
-
-      const credentialsChanged = validated.preferences.gitCredentials !== undefined &&
-        JSON.stringify(currentSettings.preferences.gitCredentials || []) !== JSON.stringify(validated.preferences.gitCredentials)
-
-      const identityChanged = validated.preferences.gitIdentity !== undefined &&
-        JSON.stringify(currentSettings.preferences.gitIdentity || {}) !== JSON.stringify(validated.preferences.gitIdentity)
-
-      const restartReasons = [
-        sandboxChanged && 'sandbox',
-        credentialsChanged && 'git credentials',
-        identityChanged && 'git identity',
-      ].filter((reason): reason is string => typeof reason === 'string')
-
-      const restartRequired = restartReasons.length > 0
-      if (restartRequired) {
-        logger.info(`${restartReasons.join(', ')} changed, marking OpenCode server restart as pending`)
-        opencodeServerManager.markRestartPending()
-      }
+      const restartRequired = markOpenCodeRestartPendingFor(
+        listOpenCodeRestartReasons(currentSettings.preferences, validated.preferences),
+      )
 
       return c.json(restartRequired ? { ...settings, restartRequired: true } : settings)
     } catch (error) {
@@ -405,13 +408,11 @@ export function createSettingsRoutes(db: Database, gitAuthService: GitAuthServic
       const currentSettings = settingsService.getSettings(userId)
       const settings = settingsService.resetSettings(userId)
 
-      const sandboxChanged = sandboxEnforcementChanged(currentSettings.preferences.sandbox, settings.preferences.sandbox)
-      if (sandboxChanged) {
-        logger.info('Sandbox enforcement changed, marking OpenCode server restart as pending')
-        opencodeServerManager.markRestartPending()
-      }
+      const restartRequired = markOpenCodeRestartPendingFor(
+        listOpenCodeRestartReasons(currentSettings.preferences, settings.preferences),
+      )
 
-      return c.json(sandboxChanged ? { ...settings, restartRequired: true } : settings)
+      return c.json(restartRequired ? { ...settings, restartRequired: true } : settings)
     } catch (error) {
       logger.error('Failed to reset settings:', error)
       return c.json({ error: 'Failed to reset settings' }, 500)
@@ -425,11 +426,10 @@ export function createSettingsRoutes(db: Database, gitAuthService: GitAuthServic
     try {
       logger.info('Manual OpenCode server restart requested')
       opencodeServerManager.clearStartupError()
-      const { resumedSessionIDs } = await restartOpenCode(openCodeSupervisor)
+      await restartOpenCode(openCodeSupervisor)
       return c.json({
         success: true,
         message: 'OpenCode server restarted successfully',
-        resumedSessions: resumedSessionIDs,
       })
     } catch (error) {
       logger.error('Failed to restart OpenCode server:', error)
@@ -514,34 +514,6 @@ export function createSettingsRoutes(db: Database, gitAuthService: GitAuthServic
     }
   })
 
-  app.post('/opencode-reload', async (c) => {
-    try {
-      logger.info('OpenCode configuration reload requested')
-      const { resumedSessionIDs } = await reloadOpenCodeConfig(openCodeSupervisor)
-      return c.json({
-        success: true,
-        message: 'OpenCode server restarted with the current configuration',
-        resumedSessions: resumedSessionIDs,
-      })
-    } catch (error) {
-      logger.error('Failed to reload OpenCode config:', error)
-      if (error instanceof ConfigReloadError) {
-        const details = error.validationIssues.length > 0
-          ? error.validationIssues.map((issue) => `${issue.path}: ${issue.message}`).join('; ')
-          : error.message
-        return c.json({
-          error: error.message,
-          details,
-          validationIssues: error.validationIssues,
-        }, 500)
-      }
-      return c.json({
-        error: 'Failed to reload OpenCode configuration',
-        details: error instanceof Error ? error.message : 'Unknown error'
-      }, 500)
-    }
-  })
-
   app.post('/opencode-rollback', async (c) => {
     try {
       logger.info('OpenCode config rollback requested')
@@ -554,9 +526,10 @@ export function createSettingsRoutes(db: Database, gitAuthService: GitAuthServic
       logger.info('Rolled back to the previous working config')
 
       try {
-        await reloadOpenCodeConfig(openCodeSupervisor)
+        await assertValidOpenCodeConfig()
+        await restartOpenCode(openCodeSupervisor)
       } catch (reloadError) {
-        logger.error('Rollback config reload failed, attempting restart:', reloadError)
+        logger.error('Rollback config restart failed, attempting restart without the config file:', reloadError)
 
         await archiveBrokenOpenCodeConfigFile()
         const deleted = await deleteOpenCodeConfigFile()
@@ -582,7 +555,7 @@ export function createSettingsRoutes(db: Database, gitAuthService: GitAuthServic
 
       return c.json({
         success: true,
-        message: 'Server reloaded with the previous working config',
+        message: 'Server restarted with the previous working config',
       })
     } catch (error) {
       logger.error('Failed to rollback OpenCode config:', error)
@@ -591,133 +564,70 @@ export function createSettingsRoutes(db: Database, gitAuthService: GitAuthServic
   })
 
   app.post('/opencode-upgrade', async (c) => {
+    if (isOpenCodeBinaryExternallyManaged()) {
+      return c.json({ error: OPENCODE_BIN_MANAGED_MESSAGE }, 409)
+    }
+
     const oldVersion = opencodeServerManager.getVersion()
     logger.info(`Current OpenCode version: ${oldVersion}`)
 
     try {
-      const installMethod = getOpenCodeInstallMethod()
-      const openCodeExecutable = resolveOpenCodeExecutable() ?? 'opencode'
-      logger.info(`Running opencode upgrade --method ${installMethod} with 90s timeout...`)
-      const { output: upgradeOutput, timedOut } = execWithTimeout([openCodeExecutable, 'upgrade', '--method', installMethod], 90000)
-      logger.info(`Upgrade output: ${upgradeOutput}`)
-
-      if (timedOut) {
-        logger.warn('OpenCode upgrade timed out after 90 seconds')
-        throw new Error('Upgrade command timed out after 90 seconds')
+      const [latestRelease] = await listOpenCodeVersions()
+      if (!latestRelease) {
+        throw new Error('No supported OpenCode release is available in the registry')
       }
+      const latestVersion = latestRelease.version
+      logger.info(`Latest supported OpenCode version: ${latestVersion}`)
 
-      const newVersion = await opencodeServerManager.fetchVersion()
-      logger.info(`New OpenCode version: ${newVersion}`)
-
-      const upgraded = oldVersion && newVersion && compareVersions(newVersion, oldVersion) > 0
-
-      if (upgraded) {
-        logger.info(`OpenCode upgraded from v${oldVersion} to v${newVersion}`)
-        opencodeServerManager.clearStartupError()
-        await restartOpenCode(openCodeSupervisor)
-        logger.info('OpenCode server restarted after upgrade')
-
-        return c.json({
-          success: true,
-          message: `OpenCode upgraded from v${oldVersion} to v${newVersion} and restarted`,
-          oldVersion,
-          newVersion,
-          upgraded: true
-        })
-      } else {
+      if (oldVersion && isSupportedOpenCodeVersion(oldVersion) && compareOpenCodeVersions(latestVersion, oldVersion) <= 0) {
         logger.info('OpenCode is already up to date or version unchanged')
         return c.json({
           success: true,
           message: 'OpenCode is already up to date',
           oldVersion,
-          newVersion,
+          newVersion: oldVersion,
           upgraded: false
         })
       }
+
+      logger.info(`Installing OpenCode ${latestVersion} from opencode.ai...`)
+      const newVersion = await installVerifiedOpenCodeVersion(latestVersion, openCodeSupervisor, 'upgrade')
+
+      return c.json({
+        success: true,
+        message: oldVersion
+          ? `OpenCode upgraded from v${oldVersion} to v${newVersion} and restarted`
+          : `OpenCode v${newVersion} installed and restarted`,
+        oldVersion,
+        newVersion,
+        upgraded: true
+      })
     } catch (error) {
       logger.error('Failed to upgrade OpenCode:', error)
-      logger.warn('Attempting to recover OpenCode server...')
-
-      let recovered = false
-      let recoveryMessage = ''
-
-      opencodeServerManager.clearStartupError()
-      try {
-        await restartOpenCode(openCodeSupervisor)
-        logger.warn('OpenCode server restarted after upgrade failure')
-        recovered = true
-        recoveryMessage = 'Server recovered'
-      } catch (recoveryError) {
-        logger.error('Failed to recover OpenCode server:', recoveryError)
-        recovered = false
-        recoveryMessage = recoveryError instanceof Error ? recoveryError.message : 'Unknown error'
-      }
-
-      let currentVersion: string | null | undefined = oldVersion
-      try {
-        currentVersion = opencodeServerManager.getVersion() || oldVersion
-      } catch (versionError) {
-        logger.error('Failed to get version after recovery:', versionError)
-        currentVersion = oldVersion
-      }
-
-      return c.json(
-        recovered ? {
-          success: false,
-          error: 'Upgrade failed but server recovered',
-          details: error instanceof Error ? error.message : 'Unknown error',
-          oldVersion,
-          newVersion: currentVersion,
-          upgraded: false,
-          recovered: true,
-          recoveryMessage
-        } : {
-          error: 'Failed to upgrade OpenCode and could not recover',
-          details: error instanceof Error ? error.message : 'Unknown error',
-          oldVersion,
-          newVersion: currentVersion,
-          upgraded: false,
-          recovered: false,
-          recoveryMessage
-        },
-        recovered ? 400 : 500
-      )
+      const { status, body } = await buildOpenCodeInstallFailureResponse(openCodeSupervisor, error, oldVersion, {
+        failed: 'Failed to upgrade OpenCode',
+        recovered: 'Upgrade failed but server recovered',
+        unrecovered: 'Failed to upgrade OpenCode and could not recover',
+      })
+      return c.json(body, status)
     }
   })
 
   app.get('/opencode-versions', async (c) => {
     try {
-      logger.info('Fetching available OpenCode versions from GitHub')
-      
-      const response = await githubFetch('https://api.github.com/repos/sst/opencode/releases?per_page=20', {
-        accept: 'application/vnd.github.v3+json',
-      })
-      
-      if (!response.ok) {
-        throw new Error(`GitHub API returned ${response.status}`)
-      }
-      
-      const releases = await response.json() as Array<{
-        tag_name: string
-        name: string
-        published_at: string
-        prerelease: boolean
-      }>
+      logger.info('Fetching available OpenCode versions from the npm registry')
 
-      const versions = releases
-        .filter(r => !r.prerelease)
-        .map(r => {
-          const version = r.tag_name.replace(/^v/, '')
-          return {
-            version,
-            tag: r.tag_name,
-            name: r.name,
-            publishedAt: r.published_at,
-          }
-        })
-      
+      const releases = await listOpenCodeVersions()
+
+      const versions = releases.map(release => ({
+        version: release.version,
+        tag: `v${release.version}`,
+        name: `v${release.version}`,
+        publishedAt: release.publishedAt,
+      }))
+
       const currentVersion = opencodeServerManager.getVersion()
-      
+
       return c.json({
         versions,
         currentVersion
@@ -732,45 +642,33 @@ export function createSettingsRoutes(db: Database, gitAuthService: GitAuthServic
   })
 
   app.post('/opencode-install-version', async (c) => {
+    if (isOpenCodeBinaryExternallyManaged()) {
+      return c.json({ error: OPENCODE_BIN_MANAGED_MESSAGE }, 409)
+    }
+
     const oldVersion = opencodeServerManager.getVersion()
     logger.info(`Current OpenCode version: ${oldVersion}`)
 
+    let requestedVersion: string
     try {
       const body = await c.req.json()
       const { version } = z.object({ version: z.string().min(1) }).parse(body)
 
-      const versionWithoutPrefix = version.replace(/^v/, '')
-      if (!isValidVersion(versionWithoutPrefix)) {
-        throw new Error('Invalid version format. Must be in MAJOR.MINOR.PATCH format (e.g., 1.2.27)')
+      requestedVersion = normalizeOpenCodeVersion(version)
+      if (!isStableOpenCodeVersion(requestedVersion)) {
+        return c.json({ error: 'Invalid version format. Must be in MAJOR.MINOR.PATCH format (e.g., 2.0.15)' }, 400)
       }
-
-      logger.info(`Installing OpenCode version: ${version}`)
-      const versionArg = version.startsWith('v') ? version : `v${version}`
-      const installMethod = getOpenCodeInstallMethod()
-      const openCodeExecutable = resolveOpenCodeExecutable() ?? 'opencode'
-      logger.info(`Running opencode upgrade ${versionArg} --method ${installMethod} with 90s timeout...`)
-
-      const { output: upgradeOutput, timedOut } = execWithTimeout(
-        [openCodeExecutable, 'upgrade', versionArg, '--method', installMethod],
-        90000
-      )
-      logger.info(`Upgrade output: ${upgradeOutput}`)
-
-      if (timedOut) {
-        logger.warn('OpenCode version install timed out after 90 seconds')
-        throw new Error('Version install command timed out after 90 seconds')
+      if (!isSupportedOpenCodeVersion(requestedVersion)) {
+        return c.json({ error: describeUnsupportedOpenCodeVersion(requestedVersion) }, 400)
       }
+    } catch (error) {
+      logger.error('Failed to parse OpenCode version install request:', error)
+      return c.json({ error: 'Invalid version format. Must be in MAJOR.MINOR.PATCH format (e.g., 2.0.15)' }, 400)
+    }
 
-      const newVersion = await opencodeServerManager.fetchVersion()
-      logger.info(`New OpenCode version: ${newVersion}`)
-
-      if (newVersion !== versionWithoutPrefix) {
-        throw new Error(`OpenCode version install did not result in the requested version ${versionWithoutPrefix}; detected ${newVersion ?? 'unknown'}`)
-      }
-
-      opencodeServerManager.clearStartupError()
-      await restartOpenCode(openCodeSupervisor)
-      logger.info('OpenCode server restarted after version change')
+    try {
+      logger.info(`Installing OpenCode version: ${requestedVersion}`)
+      const newVersion = await installVerifiedOpenCodeVersion(requestedVersion, openCodeSupervisor, 'version change')
 
       return c.json({
         success: true,
@@ -780,44 +678,12 @@ export function createSettingsRoutes(db: Database, gitAuthService: GitAuthServic
       })
     } catch (error) {
       logger.error('Failed to install OpenCode version:', error)
-      logger.warn('Attempting to recover OpenCode server...')
-
-      let recovered = false
-      let recoveryMessage = ''
-
-      opencodeServerManager.clearStartupError()
-      try {
-        await restartOpenCode(openCodeSupervisor)
-        logger.warn('OpenCode server restarted after install failure')
-        recovered = true
-        recoveryMessage = 'Server recovered'
-      } catch (recoveryError) {
-        logger.error('Failed to recover OpenCode server:', recoveryError)
-        recovered = false
-        recoveryMessage = recoveryError instanceof Error ? recoveryError.message : 'Unknown error'
-      }
-
-      const currentVersion = opencodeServerManager.getVersion() || oldVersion
-
-      return c.json(
-        recovered ? {
-          success: false,
-          error: 'Version install failed but server recovered',
-          details: error instanceof Error ? error.message : 'Unknown error',
-          oldVersion,
-          newVersion: currentVersion,
-          recovered: true,
-          recoveryMessage
-        } : {
-          error: 'Failed to install OpenCode version and could not recover',
-          details: error instanceof Error ? error.message : 'Unknown error',
-          oldVersion,
-          newVersion: currentVersion,
-          recovered: false,
-          recoveryMessage
-        },
-        recovered ? 400 : 500
-      )
+      const { status, body } = await buildOpenCodeInstallFailureResponse(openCodeSupervisor, error, oldVersion, {
+        failed: 'Failed to install OpenCode version',
+        recovered: 'Version install failed but server recovered',
+        unrecovered: 'Failed to install OpenCode version and could not recover',
+      })
+      return c.json(body, status)
     }
   })
 
@@ -946,10 +812,7 @@ export function createSettingsRoutes(db: Database, gitAuthService: GitAuthServic
       await writeFileContent(agentsMdPath, content)
       logger.info(`Updated AGENTS.md at: ${agentsMdPath}`)
       
-      await restartOpenCode(openCodeSupervisor)
-      logger.info('Restarted OpenCode server after AGENTS.md update')
-      
-      return c.json({ success: true })
+      return c.json({ success: true, ...await reloadOpenCodeForChange(openCodeClient) })
     } catch (error) {
       logger.error('Failed to update AGENTS.md:', error)
       if (error instanceof z.ZodError) {
@@ -991,9 +854,8 @@ export function createSettingsRoutes(db: Database, gitAuthService: GitAuthServic
       const files = await readUploadedManifestFiles(formData, markdownManifest)
 
       const result = await installOpenCodeDirectoryFiles(kind, files)
-      opencodeServerManager.markRestartPending()
 
-      return c.json({ ...result, restartRequired: true })
+      return c.json({ ...result, ...await reloadOpenCodeForChange(openCodeClient) })
     } catch (error) {
       logger.error('Failed to install OpenCode directory files:', error)
 
@@ -1053,9 +915,8 @@ export function createSettingsRoutes(db: Database, gitAuthService: GitAuthServic
         .parse(body)
 
       const result = await updateOpenCodeDirectoryFile(kind, relativePath, content)
-      opencodeServerManager.markRestartPending()
 
-      return c.json({ ...result, restartRequired: true })
+      return c.json({ ...result, ...await reloadOpenCodeForChange(openCodeClient) })
     } catch (error) {
       return handleOpenCodeDirectoryFileError(c, error, 'update')
     }
@@ -1067,9 +928,8 @@ export function createSettingsRoutes(db: Database, gitAuthService: GitAuthServic
       const relativePath = z.string().min(1).parse(c.req.query('relativePath'))
 
       await deleteOpenCodeDirectoryFile(kind, relativePath)
-      opencodeServerManager.markRestartPending()
 
-      return c.json({ kind, relativePath, restartRequired: true })
+      return c.json({ kind, relativePath, ...await reloadOpenCodeForChange(openCodeClient) })
     } catch (error) {
       return handleOpenCodeDirectoryFileError(c, error, 'delete')
     }
@@ -1089,9 +949,7 @@ export function createSettingsRoutes(db: Database, gitAuthService: GitAuthServic
 
         const result = await installSkillFromGithubTree(db, validated)
 
-        const restartRequired = await reloadAfterSkillInstall(db, openCodeClient, openCodeSupervisor, validated.scope, validated.repoId)
-
-        return c.json({ ...result, restartRequired })
+        return c.json({ ...result, ...await reloadOpenCodeForChange(openCodeClient) })
       }
 
       if (contentType.includes('multipart/form-data')) {
@@ -1125,9 +983,7 @@ export function createSettingsRoutes(db: Database, gitAuthService: GitAuthServic
 
         const result = await installSkillFromUploadedFiles(db, uploadRequest, files)
 
-        const restartRequired = await reloadAfterSkillInstall(db, openCodeClient, openCodeSupervisor, uploadRequest.scope, uploadRequest.repoId)
-
-        return c.json({ ...result, restartRequired })
+        return c.json({ ...result, ...await reloadOpenCodeForChange(openCodeClient) })
       }
 
       return c.json({ error: 'Unsupported content type. Use application/json or multipart/form-data' }, 400)
@@ -1190,9 +1046,7 @@ export function createSettingsRoutes(db: Database, gitAuthService: GitAuthServic
 
       const skill = await createSkill(db, validated)
 
-      opencodeServerManager.markRestartPending()
-
-      return c.json({ ...skill, restartRequired: true })
+      return c.json({ ...skill, ...await reloadOpenCodeForChange(openCodeClient) })
     } catch (error) {
       logger.error('Failed to create skill:', error)
       if (error instanceof z.ZodError) {
@@ -1219,9 +1073,7 @@ export function createSettingsRoutes(db: Database, gitAuthService: GitAuthServic
 
       const skill = await updateSkill(db, openCodeClient, name, scope, validated, repoId)
 
-      opencodeServerManager.markRestartPending()
-
-      return c.json({ ...skill, restartRequired: true })
+      return c.json({ ...skill, ...await reloadOpenCodeForChange(openCodeClient) })
     } catch (error) {
       logger.error('Failed to update skill:', error)
       if (error instanceof z.ZodError) {
@@ -1252,9 +1104,7 @@ export function createSettingsRoutes(db: Database, gitAuthService: GitAuthServic
 
       await deleteSkill(db, name, scope, repoId)
 
-      opencodeServerManager.markRestartPending()
-
-      return c.json({ success: true, restartRequired: true })
+      return c.json({ success: true, ...await reloadOpenCodeForChange(openCodeClient) })
     } catch (error) {
       logger.error('Failed to delete skill:', error)
       if (error instanceof z.ZodError) {
@@ -1389,125 +1239,13 @@ export function createSettingsRoutes(db: Database, gitAuthService: GitAuthServic
     }
   })
 
-  // MCP directory-aware endpoints
-  app.post('/mcp/:name/connectdirectory', async (c) => {
-    try {
-      const serverName = c.req.param('name')
-      const body = await c.req.json()
-      const { directory } = ConnectMcpDirectorySchema.parse(body)
-      
-      const response = await (openCodeClient).forward({
-        method: 'POST',
-        path: `/mcp/${encodeURIComponent(serverName)}/connect`,
-        directory,
-      })
-      
-      if (!response.ok) {
-        const errorMsg = await extractOpenCodeError(response, 'Failed to connect MCP server')
-        return c.json({ error: errorMsg }, 400)
-      }
-      
-      return c.json({ success: true })
-    } catch (error) {
-      logger.error('Failed to connect MCP server for directory:', error)
-      if (error instanceof z.ZodError) {
-        return c.json({ error: 'Invalid request data', details: error.issues }, 400)
-      }
-      return c.json({ error: 'Failed to connect MCP server' }, 500)
-    }
-  })
-
-  app.post('/mcp/:name/disconnectdirectory', async (c) => {
-    try {
-      const serverName = c.req.param('name')
-      const body = await c.req.json()
-      const { directory } = ConnectMcpDirectorySchema.parse(body)
-      
-      const response = await (openCodeClient).forward({
-        method: 'POST',
-        path: `/mcp/${encodeURIComponent(serverName)}/disconnect`,
-        directory,
-      })
-      
-      if (!response.ok) {
-        const errorMsg = await extractOpenCodeError(response, 'Failed to disconnect MCP server')
-        return c.json({ error: errorMsg }, 400)
-      }
-      
-      return c.json({ success: true })
-    } catch (error) {
-      logger.error('Failed to disconnect MCP server for directory:', error)
-      if (error instanceof z.ZodError) {
-        return c.json({ error: 'Invalid request data', details: error.issues }, 400)
-      }
-      return c.json({ error: 'Failed to disconnect MCP server' }, 500)
-    }
-  })
-
-  app.post('/mcp/:name/authdirectedir', async (c) => {
-    try {
-      const serverName = c.req.param('name')
-      const body = await c.req.json()
-      const { directory } = McpAuthDirectorySchema.parse(body)
-      
-      const response = await (openCodeClient).forward({
-        method: 'POST',
-        path: `/mcp/${encodeURIComponent(serverName)}/auth/authenticate`,
-        directory,
-      })
-      
-      if (!response.ok) {
-        const errorMsg = await extractOpenCodeError(response, 'Failed to authenticate MCP server')
-        return c.json({ error: errorMsg }, 400)
-      }
-      
-      return c.json(await response.json())
-    } catch (error) {
-      logger.error('Failed to authenticate MCP server for directory:', error)
-      if (error instanceof z.ZodError) {
-        return c.json({ error: 'Invalid request data', details: error.issues }, 400)
-      }
-      return c.json({ error: 'Failed to authenticate MCP server' }, 500)
-    }
-  })
-
-  app.delete('/mcp/:name/authdir', async (c) => {
-    try {
-      const serverName = c.req.param('name')
-      const body = await c.req.json()
-      const { directory } = ConnectMcpDirectorySchema.parse(body)
-      
-      const response = await (openCodeClient).forward({
-        method: 'DELETE',
-        path: `/mcp/${encodeURIComponent(serverName)}/auth`,
-        directory,
-      })
-      
-      if (!response.ok) {
-        const errorMsg = await extractOpenCodeError(response, 'Failed to remove MCP auth')
-        return c.json({ error: errorMsg }, 400)
-      }
-      
-      return c.json({ success: true })
-    } catch (error) {
-      logger.error('Failed to remove MCP auth for directory:', error)
-      if (error instanceof z.ZodError) {
-        return c.json({ error: 'Invalid request data', details: error.issues }, 400)
-      }
-      return c.json({ error: 'Failed to remove MCP auth' }, 500)
-    }
-  })
-
   const OpenCodeServerAuthBodySchema = z.object({
     password: z.union([z.string().min(8), z.null()]),
   })
 
   app.get('/opencode-server-auth', async (c) => {
     try {
-      const hasStored = settingsService.hasStoredOpenCodeServerPassword()
-      const source = hasStored ? 'db' : ENV.OPENCODE.SERVER_PASSWORD ? 'env' : 'none'
-      const isSet = source !== 'none'
-      return c.json({ isSet, source })
+      return c.json({ isSet: true, source: settingsService.getOpenCodeServerPasswordSource() })
     } catch (error) {
       logger.error('Failed to get OpenCode server auth status:', error)
       return c.json({ error: 'Failed to get OpenCode server auth status' }, 500)
@@ -1541,10 +1279,7 @@ export function createSettingsRoutes(db: Database, gitAuthService: GitAuthServic
 
       sseAggregator.reconnect()
 
-      const hasStored = settingsService.hasStoredOpenCodeServerPassword()
-      const source = hasStored ? 'db' : ENV.OPENCODE.SERVER_PASSWORD ? 'env' : 'none'
-      const isSet = source !== 'none'
-      return c.json({ isSet, source })
+      return c.json({ isSet: true, source: settingsService.getOpenCodeServerPasswordSource() })
     } catch (error) {
       logger.error('Failed to update OpenCode server auth:', error)
       if (error instanceof z.ZodError) {
@@ -1577,7 +1312,7 @@ export function createSettingsRoutes(db: Database, gitAuthService: GitAuthServic
   })
 
   app.get('/opencode-active-sessions', (c) => {
-    const sessions = getOpenCodeRestartCoordinator()?.captureResumableSessions() ?? []
+    const sessions = listActiveUserSessions()
     return c.json({ count: sessions.length, sessions })
   })
 

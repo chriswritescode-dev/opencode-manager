@@ -1,5 +1,5 @@
 import { useRef, useEffect, useCallback } from 'react'
-import type { Message } from '@/api/types'
+import type { SessionMessageInfo } from '@opencode-manager/shared/opencode'
 
 const SCROLL_LOCK_MS = 300
 const BOTTOM_THRESHOLD_PX = 48
@@ -8,7 +8,7 @@ const SCROLL_TO_BOTTOM_FRAME_COUNT = 2
 
 interface UseAutoScrollOptions {
   containerRef?: React.RefObject<HTMLDivElement | null>
-  messages?: Message[]
+  messages?: SessionMessageInfo[]
   sessionId?: string
   contentVersion?: number
   onScrollStateChange?: (isScrolledUp: boolean) => void
@@ -26,6 +26,7 @@ export function useAutoScroll({
   onScrollStateChange
 }: UseAutoScrollOptions): UseAutoScrollReturn {
   const lastMessageCountRef = useRef(0)
+  const lastMessageIdRef = useRef<string | undefined>(undefined)
   const hasInitialScrolledRef = useRef(false)
   const userScrolledAtRef = useRef(0)
   const userDisengagedRef = useRef(false)
@@ -63,6 +64,7 @@ export function useAutoScroll({
 
   useEffect(() => {
     lastMessageCountRef.current = 0
+    lastMessageIdRef.current = undefined
     hasInitialScrolledRef.current = false
     userScrolledAtRef.current = 0
     userDisengagedRef.current = false
@@ -203,18 +205,23 @@ export function useAutoScroll({
     const prevCount = lastMessageCountRef.current
     lastMessageCountRef.current = currentCount
 
+    const lastMessage = messages[currentCount - 1]
+    const previousLastMessageId = lastMessageIdRef.current
+    lastMessageIdRef.current = lastMessage?.id
+
     if (!hasInitialScrolledRef.current && currentCount > 0) {
       hasInitialScrolledRef.current = true
       scrollToBottom()
       return
     }
 
-    if (currentCount > prevCount) {
-      const newMessage = messages[currentCount - 1]
-      if (newMessage?.role === 'user') {
-        scrollToBottom()
-        return
-      }
+    if (
+      currentCount > prevCount &&
+      lastMessage?.type === 'user' &&
+      lastMessage.id !== previousLastMessageId
+    ) {
+      scrollToBottom()
+      return
     }
 
     const timeSinceUserScroll = Date.now() - userScrolledAtRef.current

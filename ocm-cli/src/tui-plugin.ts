@@ -1,4 +1,4 @@
-import type { TuiPluginApi } from './tui-types.js'
+import type { Context } from '@opencode/plugin/tui/context'
 import { readInstallNotice, readState } from './state.js'
 import { getToken } from './internal-token-store.js'
 import { TokenStoreError } from './token-store.js'
@@ -9,38 +9,38 @@ import { prepareMirror, checkPushDivergence, describePushDivergence, mirrorUpFas
 import type { MirrorPlan, RemoteRepoSummary } from './mirror.js'
 import { getBranchName } from './local-repo.js'
 import { transferSession, moveReminderText } from './session-move.js'
-import { createManagerReplay, createManagerPromptAsync } from './remote-replay.js'
-import { readSessionEvents } from './local-history.js'
+import { createManagerSessionTransfer } from './remote-session.js'
 import { confirmDialog, selectDialog } from './tui-dialogs.js'
 import { setPendingWarp, runPendingWarp } from './warp.js'
-import { pushPhaseProgress, replayProgress } from './move-progress.js'
+import { pushPhaseProgress, importProgress } from './move-progress.js'
+import { warmRepoProxy } from './repo-proxy.js'
 import type { MoveProgress } from './move-progress.js'
 
 export type MoveProgressSetter = (progress: MoveProgress | null) => void
 
-export async function setupOcm(api: TuiPluginApi, setMoveProgress: MoveProgressSetter): Promise<void> {
-  showInstallNotice(api)
-  api.keymap.registerLayer({
+export async function setupOcm(context: Context, setMoveProgress: MoveProgressSetter): Promise<() => void> {
+  showInstallNotice(context)
+  context.keymap.layer(() => ({
     commands: [
       {
-        name: 'ocm.session.move',
+        id: 'ocm.session.move',
         title: 'Move session to Manager',
-        desc: 'Push repo state and move this session to OpenCode Manager',
-        category: 'OpenCode Manager',
-        namespace: 'palette',
-        slashName: 'ocm-move',
-        run: () => runSessionMove(api, setMoveProgress),
+        description: 'Push repo state and move this session to OpenCode Manager',
+        group: 'OpenCode Manager',
+        palette: true,
+        slash: { name: 'ocm-move' },
+        run: () => runSessionMove(context, setMoveProgress),
       },
     ],
-  })
-  api.lifecycle.onDispose(() => runPendingWarp())
+  }))
+  return () => runPendingWarp()
 }
 
-function showInstallNotice(api: TuiPluginApi): void {
+function showInstallNotice(context: Context): void {
   const notice = readInstallNotice()
   if (!notice) return
 
-  api.ui.toast({
+  context.ui.toast.show({
     variant: 'success',
     title: 'ocm installed',
     message: notice.pathMissing
@@ -83,24 +83,24 @@ async function resolveMoveTarget(managerApi: ManagerApi, matched: RemoteRepoSumm
   return managerApi.mirrorTargetPlan(matched.repoId, localBranch)
 }
 
-async function runSessionMove(api: TuiPluginApi, setMoveProgress: MoveProgressSetter): Promise<void> {
+async function runSessionMove(context: Context, setMoveProgress: MoveProgressSetter): Promise<void> {
   try {
-    const current = api.route.current
-    if (current.name !== 'session' || !current.params) {
-      api.ui.toast({ variant: 'error', message: 'Not in a session' })
+    const current = context.ui.router.current()
+    if (current.type !== 'session') {
+      context.ui.toast.show({ variant: 'error', message: 'Not in a session' })
       return
     }
-    const sessionID = String(current.params.sessionID)
+    const sessionID = current.sessionID
 
-    const session = api.state.session.get(sessionID)
-    if (!session?.directory) {
-      api.ui.toast({ variant: 'error', message: 'Session has no directory' })
+    const session = context.data.session.get(sessionID)
+    if (!session?.location.directory) {
+      context.ui.toast.show({ variant: 'error', message: 'Session has no directory' })
       return
     }
 
     const state = readState()
     if (!state?.managerUrl) {
-      api.ui.toast({ variant: 'error', message: 'No manager configured. Run `ocm login <url>` first.' })
+      context.ui.toast.show({ variant: 'error', message: 'No manager configured. Run `ocm login <url>` first.' })
       return
     }
 
@@ -109,34 +109,36 @@ async function runSessionMove(api: TuiPluginApi, setMoveProgress: MoveProgressSe
       token = await getToken(state.managerUrl)
     } catch (err) {
       const reason = err instanceof TokenStoreError ? err.message : String(err)
-      api.ui.toast({ variant: 'error', message: `Token store unavailable: ${reason}` })
+      context.ui.toast.show({ variant: 'error', message: `Token store unavailable: ${reason}` })
       return
     }
     if (!token) {
-      api.ui.toast({ variant: 'error', message: `No token stored. Run \`ocm login ${state.managerUrl}\`.` })
+      context.ui.toast.show({ variant: 'error', message: `No token stored. Run \`ocm login ${state.managerUrl}\`.` })
       return
     }
 
     const repos = await fetchRepos(state.managerUrl, token)
-    const plan = await prepareMirror(session.directory, toRemoteRepoSummaries(repos))
+    const plan = await prepareMirror(session.location.directory, toRemoteRepoSummaries(repos))
 
     if (plan.matched.length === 0) {
-      api.ui.toast({ variant: 'error', message: 'No matching Manager repo; run `ocm push --create` first' })
+      context.ui.toast.show({ variant: 'error', message: 'No matching Manager repo; run `ocm push --create` first' })
       return
     }
 
     const localBranch = getBranchName(plan.repoRoot)
     const matched = pickMatchedRepo(plan.matched, localBranch)
-      ?? await selectDialog(api, 'Move session to Manager repo', plan.matched.map((r) => ({ title: r.name, description: `id=${r.repoId} branch=${r.branch ?? '-'}`, value: r })))
+      ?? await selectDialog(context, 'Move session to Manager repo', plan.matched.map((r) => ({ title: r.name, description: `id=${r.repoId} branch=${r.branch ?? '-'}`, value: r })))
     if (!matched) return
     const matchedRepoId = matched.repoId
     const remoteRepo = repos.find((r) => r.repoId === matchedRepoId)!
+
+    await warmRepoProxy(state.managerUrl, token, matchedRepoId)
 
     const managerApi = new ManagerApi(state.managerUrl, token)
     const target = await resolveMoveTarget(managerApi, matched, remoteRepo.directory, localBranch)
     const discardReasons = target.repoId === null ? [] : await describeRemoteDiscard(plan.repoRoot, managerApi, target.repoId)
 
-    const proceed = await confirmDialog(api, {
+    const proceed = await confirmDialog(context, {
       title: 'Move session to Manager',
       message: moveConfirmMessage(matched.name, target, discardReasons),
     })
@@ -156,45 +158,38 @@ async function runSessionMove(api: TuiPluginApi, setMoveProgress: MoveProgressSe
     })
     const remoteDirectory = pushed.fullPath
 
+    const transfer = createManagerSessionTransfer(state.managerUrl, token)
     const result = await transferSession(
       { sessionID, localRoot: plan.repoRoot, remoteDirectory },
       {
-        fetchLocalHistory: () => readSessionEvents(sessionID),
-        replayEvents: createManagerReplay(state.managerUrl, token),
-        onProgress: (replayed, total) => setMoveProgress(replayProgress(replayed, total)),
+        exportSession: (id) => context.client.session.export({ sessionID: id }),
+        importSession: transfer.importSession,
+        onProgress: (transferred, total) => setMoveProgress(importProgress(transferred, total)),
       },
     )
 
     switch (result.kind) {
       case 'moved': {
         setMoveProgress({ label: 'notifying moved session', fraction: null })
-        await createManagerPromptAsync(state.managerUrl, token)(remoteDirectory, result.sessionID, moveReminderText(remoteDirectory)).catch(() => undefined)
+        await transfer.addReminder(result.sessionID, moveReminderText(remoteDirectory)).catch(() => undefined)
         setMoveProgress(null)
-        const warp = await confirmDialog(api, { title: 'Attach to moved session?', message: 'Exit this TUI and attach to the moved session on the Manager now?' })
+        const warp = await confirmDialog(context, { title: 'Attach to moved session?', message: 'Exit this TUI and attach to the moved session on the Manager now?' })
         if (warp) {
-          await fetch(`${state.managerUrl}/api/opencode-proxy/session?directory=${encodeURIComponent(remoteDirectory)}`, { headers: { authorization: `Bearer ${token}` } }).catch(() => undefined)
-          setPendingWarp({ managerUrl: state.managerUrl, token, directory: remoteDirectory, sessionID: result.sessionID, repoName: matched.name })
-          api.keymap.dispatchCommand('app.exit')
+          await warmRepoProxy(state.managerUrl, token, pushed.repoId)
+          setPendingWarp({ managerUrl: state.managerUrl, token, repoId: pushed.repoId, sessionID: result.sessionID, repoName: matched.name })
+          context.keymap.dispatch('app.exit')
           return
         }
-        api.ui.toast({ variant: 'success', message: `Session moved to Manager (${result.replayedEvents} events). Local copy kept — run \`ocm\` to attach.` })
+        context.ui.toast.show({ variant: 'success', message: `Session moved to Manager (${result.importedMessages} messages). Local copy kept — run \`ocm\` to attach.` })
         break
       }
-      case 'not-found':
-        api.ui.toast({ variant: 'error', message: 'No durable history found for this session' })
-        break
-      case 'corrupt-history':
-        api.ui.toast({ variant: 'error', message: `Session history has a gap at sequence ${result.missingSeq}` })
-        break
-      case 'replay-failed':
-        api.ui.toast({ variant: 'error', message: `Replay failed: ${result.message}` })
+      case 'import-failed':
+        context.ui.toast.show({ variant: 'error', message: `Session import failed: ${result.message}` })
         break
     }
   } catch (err) {
-    api.ui.toast({ variant: 'error', message: err instanceof Error ? err.message : String(err) })
+    context.ui.toast.show({ variant: 'error', message: err instanceof Error ? err.message : String(err) })
   } finally {
     setMoveProgress(null)
   }
 }
-
-export { readRemoteContext } from './remote-context.js'

@@ -1,10 +1,17 @@
-import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest'
-import { readFile, writeFile, mkdir, rm } from 'fs/promises'
-import { dirname } from 'path'
+import { describe, it, expect, vi, beforeEach } from 'vitest'
+import { createServer } from 'node:http'
+import type { AddressInfo } from 'node:net'
+import { mkdir, mkdtemp, writeFile } from 'node:fs/promises'
+import { tmpdir } from 'node:os'
+import path from 'node:path'
 import type { MiddlewareHandler } from 'hono'
 import { createMcpOauthProxyRoutes } from '../../src/routes/mcp-oauth-proxy'
 import { createStubOpenCodeClient } from '../helpers/stub-opencode-client'
+import { FetchOpenCodeClient } from '../../src/services/opencode/client'
+import { resolveOpenCode2Binary, startOpenCodeServe } from '../helpers/opencode-binary'
+import { buildOpenCodeBasicAuth } from '@opencode-manager/shared/opencode'
 import type { OpenCodeClient } from '../../src/services/opencode/client'
+import type { OpenCodeApi } from '@opencode-manager/shared/opencode'
 
 vi.mock('../../src/utils/logger', () => ({
   logger: {
@@ -15,38 +22,71 @@ vi.mock('../../src/utils/logger', () => ({
   },
 }))
 
-const WORKSPACE_PATH = '/tmp/test-workspace'
-const MCP_AUTH_PATH = `${WORKSPACE_PATH}/.opencode/state/opencode/mcp-auth.json`
-const SERVER_URL = 'https://mcp.example.com'
-const AUTHORIZATION_ENDPOINT = `${SERVER_URL}/authorize`
-const TOKEN_ENDPOINT = `${SERVER_URL}/token`
-const REGISTRATION_ENDPOINT = `${SERVER_URL}/register`
+const SERVER_NAME = 'my-server'
+const INTEGRATION_ID = 'int-1'
+const ATTEMPT_ID = 'att-1'
+const AUTHORIZATION_URL = 'https://auth.example.com/authorize?client_id=client-1&state=state-1'
+const CALLBACK_PATH = '/api/mcp-oauth-proxy/callback'
 
-const fetchMock = vi.fn()
+const realFetch = globalThis.fetch
+const fetchMock = vi.fn(async () => new Response('ok', { status: 200 }))
 
-function jsonResponse(body: unknown, status = 200): Response {
-  return new Response(JSON.stringify(body), {
-    status,
-    headers: { 'Content-Type': 'application/json' },
-  })
-}
-
-function textResponse(body: string, status = 200): Response {
-  return new Response(body, { status })
-}
-
-function discoveryMetadata(overrides: Record<string, unknown> = {}) {
+function createApi(overrides: Record<string, unknown> = {}): OpenCodeApi {
   return {
-    authorization_endpoint: AUTHORIZATION_ENDPOINT,
-    token_endpoint: TOKEN_ENDPOINT,
+    mcp: {
+      list: vi.fn(async () => ({
+        location: { directory: '/tmp/repo' },
+        data: [{ name: SERVER_NAME, status: { status: 'needs_auth' as const }, integrationID: INTEGRATION_ID }],
+      })),
+      add: vi.fn(async () => undefined),
+      remove: vi.fn(async () => undefined),
+      connect: vi.fn(async () => undefined),
+      disconnect: vi.fn(async () => undefined),
+    },
+    config: {
+      get: vi.fn(async () => []),
+    },
+    integration: {
+      get: vi.fn(async () => ({
+        location: { directory: '/tmp/repo' },
+        data: {
+          id: INTEGRATION_ID,
+          name: SERVER_NAME,
+          methods: [{ id: 'method-1', type: 'oauth' as const, label: SERVER_NAME }],
+          connections: [],
+        },
+      })),
+      oauth: {
+        connect: vi.fn(async () => ({
+          location: { directory: '/tmp/repo' },
+          data: {
+            attemptID: ATTEMPT_ID,
+            url: AUTHORIZATION_URL,
+            instructions: 'Authorize in your browser',
+            mode: 'auto' as const,
+            time: { created: 0, expires: 0 },
+          },
+        })),
+        status: vi.fn(async () => ({
+          location: { directory: '/tmp/repo' },
+          data: { status: 'pending' as const, time: { created: 0, expires: 0 } },
+        })),
+        complete: vi.fn(async () => undefined),
+        cancel: vi.fn(async () => undefined),
+      },
+    },
+    credential: {
+      remove: vi.fn(async () => undefined),
+    },
     ...overrides,
-  }
+  } as unknown as OpenCodeApi
 }
 
-function createApp(
-  client: OpenCodeClient = createStubOpenCodeClient(),
-  requireAuth?: MiddlewareHandler,
-) {
+function createClient(api: OpenCodeApi = createApi()): OpenCodeClient {
+  return { ...createStubOpenCodeClient(), api }
+}
+
+function createApp(client: OpenCodeClient = createClient(), requireAuth?: MiddlewareHandler) {
   return createMcpOauthProxyRoutes(client, requireAuth)
 }
 
@@ -58,197 +98,180 @@ async function startFlow(
   return app.request('/start', {
     method: 'POST',
     headers: { 'Content-Type': 'application/json', ...headers },
-    body: JSON.stringify({ serverName: 'my-server', serverUrl: SERVER_URL, ...body }),
+    body: JSON.stringify({ serverName: SERVER_NAME, ...body }),
   })
-}
-
-async function readAuthFile(): Promise<Record<string, {
-  serverUrl: string
-  tokens: Record<string, unknown>
-  clientInfo: Record<string, unknown>
-}>> {
-  return JSON.parse(await readFile(MCP_AUTH_PATH, 'utf-8')) as Record<string, {
-    serverUrl: string
-    tokens: Record<string, unknown>
-    clientInfo: Record<string, unknown>
-  }>
 }
 
 describe('mcp oauth proxy routes', () => {
-  beforeEach(async () => {
-    fetchMock.mockReset()
+  beforeEach(() => {
+    vi.clearAllMocks()
     vi.stubGlobal('fetch', fetchMock)
-    await rm(MCP_AUTH_PATH, { force: true })
-  })
-
-  afterEach(async () => {
-    vi.unstubAllGlobals()
-    await rm(MCP_AUTH_PATH, { force: true })
+    fetchMock.mockResolvedValue(new Response('ok', { status: 200 }))
   })
 
   describe('POST /start', () => {
-    it('returns 400 when OAuth metadata discovery responds with an error', async () => {
-      fetchMock.mockResolvedValueOnce(textResponse('not found', 404))
+    it('starts an integration OAuth attempt and returns its authorization URL', async () => {
+      const api = createApi()
+      const app = createApp(createClient(api))
 
-      const res = await startFlow(createApp())
-      const json = await res.json() as { error: string }
-
-      expect(res.status).toBe(400)
-      expect(json.error).toBe('OAuth metadata discovery failed for this MCP server')
-      expect(fetchMock).toHaveBeenCalledWith(
-        `${SERVER_URL}/.well-known/oauth-authorization-server`,
-        expect.objectContaining({ headers: { 'MCP-Protocol-Version': '2025-03-26' } }),
-      )
-    })
-
-    it('returns 400 when OAuth metadata discovery throws', async () => {
-      fetchMock.mockRejectedValueOnce(new Error('network down'))
-
-      const res = await startFlow(createApp())
-      const json = await res.json() as { error: string }
-
-      expect(res.status).toBe(400)
-      expect(json.error).toBe('OAuth metadata discovery failed for this MCP server')
-    })
-
-    it('returns 400 when the server has no registration endpoint and no clientId is provided', async () => {
-      fetchMock.mockResolvedValueOnce(jsonResponse(discoveryMetadata()))
-
-      const res = await startFlow(createApp())
-      const json = await res.json() as { error: string }
-
-      expect(res.status).toBe(400)
-      expect(json.error).toBe('Server does not support dynamic client registration and no clientId provided')
-      expect(fetchMock).toHaveBeenCalledTimes(1)
-    })
-
-    it('builds the authorization URL with a provided clientId and forwarded proto', async () => {
-      fetchMock.mockResolvedValueOnce(jsonResponse(discoveryMetadata()))
-
-      const res = await startFlow(
-        createApp(),
-        { clientId: 'client-123', scope: 'read write' },
-        { 'x-forwarded-proto': 'https', host: 'manager.example.com' },
-      )
+      const res = await startFlow(app)
       const json = await res.json() as { authorizationUrl: string; flowId: string }
-      const authUrl = new URL(json.authorizationUrl)
 
       expect(res.status).toBe(200)
-      expect(`${authUrl.origin}${authUrl.pathname}`).toBe(AUTHORIZATION_ENDPOINT)
-      expect(authUrl.searchParams.get('response_type')).toBe('code')
-      expect(authUrl.searchParams.get('client_id')).toBe('client-123')
-      expect(authUrl.searchParams.get('redirect_uri')).toBe('https://manager.example.com/api/mcp-oauth-proxy/callback')
-      expect(authUrl.searchParams.get('state')).toBe(json.flowId)
-      expect(authUrl.searchParams.get('code_challenge')).toMatch(/^[A-Za-z0-9_-]{43}$/)
-      expect(authUrl.searchParams.get('code_challenge_method')).toBe('S256')
-      expect(authUrl.searchParams.get('scope')).toBe('read write')
-      expect(fetchMock).toHaveBeenCalledTimes(1)
+      expect(json).toEqual({ authorizationUrl: AUTHORIZATION_URL, flowId: ATTEMPT_ID })
+      expect(api.mcp.list).toHaveBeenCalledWith(undefined)
+      expect(api.integration.get).toHaveBeenCalledWith({ integrationID: INTEGRATION_ID })
+      expect(api.integration.oauth.connect).toHaveBeenCalledWith({
+        integrationID: INTEGRATION_ID,
+        methodID: 'method-1',
+      })
     })
 
-    it('uses the origin header for the callback URL when no forwarded proto is present', async () => {
-      fetchMock.mockResolvedValueOnce(jsonResponse(discoveryMetadata()))
+    it('scopes the V2 calls to the requested directory', async () => {
+      const api = createApi({
+        config: {
+          get: vi.fn(async () => [
+            {
+              type: 'document' as const,
+              path: '/tmp/project/opencode.json',
+              info: {
+                mcp: {
+                  servers: {
+                    [SERVER_NAME]: {
+                      type: 'remote' as const,
+                      url: 'https://mcp.example.com',
+                      oauth: { redirect_uri: `http://localhost:5003${CALLBACK_PATH}` },
+                    },
+                  },
+                },
+              },
+            },
+          ]),
+        },
+      })
+      const app = createApp(createClient(api))
 
-      const res = await startFlow(
-        createApp(),
-        { clientId: 'client-123' },
-        { origin: 'http://localhost:5173' },
-      )
-      const json = await res.json() as { authorizationUrl: string }
-      const authUrl = new URL(json.authorizationUrl)
+      const res = await startFlow(app, { directory: '/tmp/project' })
 
       expect(res.status).toBe(200)
-      expect(authUrl.searchParams.get('redirect_uri')).toBe('http://localhost:5173/api/mcp-oauth-proxy/callback')
+      expect(api.mcp.list).toHaveBeenCalledWith({ location: { directory: '/tmp/project' } })
+      expect(api.config.get).toHaveBeenCalledWith({ location: { directory: '/tmp/project' } })
+      expect(api.mcp.add).toHaveBeenCalledWith({
+        server: SERVER_NAME,
+        location: { directory: '/tmp/project' },
+        config: {
+          type: 'remote',
+          url: 'https://mcp.example.com',
+          oauth: {
+            redirect_uri: `http://localhost:5003${CALLBACK_PATH}`,
+            callback_port: expect.any(Number),
+          },
+        },
+      })
+      expect(api.integration.get).toHaveBeenCalledWith({
+        integrationID: INTEGRATION_ID,
+        location: { directory: '/tmp/project' },
+      })
+      expect(api.integration.oauth.connect).toHaveBeenCalledWith({
+        integrationID: INTEGRATION_ID,
+        methodID: 'method-1',
+        location: { directory: '/tmp/project' },
+      })
     })
 
-    it('falls back to the request host for the callback URL', async () => {
-      fetchMock.mockResolvedValueOnce(jsonResponse(discoveryMetadata()))
-
-      const res = await startFlow(createApp(), { clientId: 'client-123' }, { host: 'manager.example.com' })
-      const json = await res.json() as { authorizationUrl: string }
-      const authUrl = new URL(json.authorizationUrl)
-
-      expect(res.status).toBe(200)
-      expect(authUrl.searchParams.get('redirect_uri')).toBe('http://manager.example.com/api/mcp-oauth-proxy/callback')
-    })
-
-    it('falls back to localhost:5003 for the callback URL when no host headers are present', async () => {
-      fetchMock.mockResolvedValueOnce(jsonResponse(discoveryMetadata()))
-
-      const res = await startFlow(createApp(), { clientId: 'client-123' })
-      const json = await res.json() as { authorizationUrl: string }
-      const authUrl = new URL(json.authorizationUrl)
-
-      expect(res.status).toBe(200)
-      expect(authUrl.searchParams.get('redirect_uri')).toBe('http://localhost:5003/api/mcp-oauth-proxy/callback')
-    })
-
-    it('registers a client dynamically when no clientId is provided', async () => {
-      fetchMock
-        .mockResolvedValueOnce(jsonResponse(discoveryMetadata({ registration_endpoint: REGISTRATION_ENDPOINT })))
-        .mockResolvedValueOnce(jsonResponse({ client_id: 'dynamic-client' }))
-
-      const res = await startFlow(createApp())
-      const json = await res.json() as { authorizationUrl: string }
-      const authUrl = new URL(json.authorizationUrl)
-      const registrationCall = fetchMock.mock.calls[1]!
-      const registrationInit = registrationCall[1] as RequestInit
-      const registrationBody = JSON.parse(registrationInit.body as string) as Record<string, unknown>
-
-      expect(res.status).toBe(200)
-      expect(authUrl.searchParams.get('client_id')).toBe('dynamic-client')
-      expect(registrationCall[0]).toBe(REGISTRATION_ENDPOINT)
-      expect(registrationInit.method).toBe('POST')
-      expect(registrationBody.redirect_uris).toEqual(['http://localhost:5003/api/mcp-oauth-proxy/callback'])
-      expect(registrationBody.client_name).toBe('OpenCode Manager')
-      expect(registrationBody.token_endpoint_auth_method).toBe('none')
-    })
-
-    it('registers with client_secret_post when a clientSecret is provided', async () => {
-      fetchMock
-        .mockResolvedValueOnce(jsonResponse(discoveryMetadata({ registration_endpoint: REGISTRATION_ENDPOINT })))
-        .mockResolvedValueOnce(jsonResponse({ client_id: 'dynamic-client', client_secret: 'dynamic-secret' }))
-
-      const res = await startFlow(createApp(), { clientSecret: 'seed-secret' })
-      const registrationCall = fetchMock.mock.calls[1]!
-      const registrationInit = registrationCall[1] as RequestInit
-      const registrationBody = JSON.parse(registrationInit.body as string) as Record<string, unknown>
-
-      expect(res.status).toBe(200)
-      expect(registrationBody.token_endpoint_auth_method).toBe('client_secret_post')
-    })
-
-    it('returns 500 when dynamic client registration responds with an error', async () => {
-      fetchMock
-        .mockResolvedValueOnce(jsonResponse(discoveryMetadata({ registration_endpoint: REGISTRATION_ENDPOINT })))
-        .mockResolvedValueOnce(textResponse('bad request', 400))
-
-      const res = await startFlow(createApp())
-      const json = await res.json() as { error: string }
-
-      expect(res.status).toBe(500)
-      expect(json.error).toContain('Dynamic client registration failed')
-    })
-
-    it('returns 500 when the registration request throws', async () => {
-      fetchMock
-        .mockResolvedValueOnce(jsonResponse(discoveryMetadata({ registration_endpoint: REGISTRATION_ENDPOINT })))
-        .mockRejectedValueOnce(new Error('connection refused'))
-
-      const res = await startFlow(createApp())
-      const json = await res.json() as { error: string }
-
-      expect(res.status).toBe(500)
-      expect(json.error).toBe('connection refused')
-    })
-
-    it('returns 500 when the request body fails schema validation', async () => {
-      const res = await createApp().request('/start', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ serverName: 'my-server', serverUrl: 'not-a-url' }),
+    it('returns 404 when the MCP server is not registered', async () => {
+      const api = createApi({
+        mcp: {
+          list: vi.fn(async () => ({ location: { directory: '/tmp/repo' }, data: [] })),
+          add: vi.fn(async () => undefined),
+        },
       })
 
+      const res = await startFlow(createApp(createClient(api)))
+      const json = await res.json() as { error: string }
+
+      expect(res.status).toBe(404)
+      expect(json.error).toBe('MCP server not found')
+    })
+
+    it('returns 400 when the server has no OAuth integration', async () => {
+      const api = createApi({
+        mcp: {
+          list: vi.fn(async () => ({
+            location: { directory: '/tmp/repo' },
+            data: [{ name: SERVER_NAME, status: { status: 'connected' as const } }],
+          })),
+          add: vi.fn(async () => undefined),
+        },
+      })
+
+      const res = await startFlow(createApp(createClient(api)))
+      const json = await res.json() as { error: string }
+
+      expect(res.status).toBe(400)
+      expect(json.error).toBe('MCP server is not registered for OAuth')
+    })
+
+    it('returns 400 when the integration exposes no OAuth method', async () => {
+      const api = createApi({
+        integration: {
+          get: vi.fn(async () => ({
+            location: { directory: '/tmp/repo' },
+            data: { id: INTEGRATION_ID, name: SERVER_NAME, methods: [], connections: [] },
+          })),
+          oauth: {
+            connect: vi.fn(async () => {
+              throw new Error('should not connect')
+            }),
+            status: vi.fn(),
+            complete: vi.fn(),
+            cancel: vi.fn(),
+          },
+        },
+      })
+
+      const res = await startFlow(createApp(createClient(api)))
+      const json = await res.json() as { error: string }
+
+      expect(res.status).toBe(400)
+      expect(json.error).toBe('OAuth method not found for this MCP server')
+    })
+
+    it('returns 500 when the authorization URL carries no state', async () => {
+      const api = createApi({
+        integration: {
+          get: vi.fn(async () => ({
+            location: { directory: '/tmp/repo' },
+            data: {
+              id: INTEGRATION_ID,
+              name: SERVER_NAME,
+              methods: [{ id: 'method-1', type: 'oauth' as const, label: SERVER_NAME }],
+              connections: [],
+            },
+          })),
+          oauth: {
+            connect: vi.fn(async () => ({
+              location: { directory: '/tmp/repo' },
+              data: {
+                attemptID: ATTEMPT_ID,
+                url: 'https://auth.example.com/authorize',
+                instructions: 'Authorize in your browser',
+                mode: 'auto' as const,
+                time: { created: 0, expires: 0 },
+              },
+            })),
+            status: vi.fn(),
+            complete: vi.fn(),
+            cancel: vi.fn(),
+          },
+        },
+      })
+
+      const res = await startFlow(createApp(createClient(api)))
+      const json = await res.json() as { error: string }
+
       expect(res.status).toBe(500)
+      expect(json.error).toBe('Authorization URL is missing the state parameter')
     })
 
     it('returns 500 when the request body is not valid JSON', async () => {
@@ -260,26 +283,218 @@ describe('mcp oauth proxy routes', () => {
 
       expect(res.status).toBe(500)
     })
+
+    it('reserves a free loopback port and keeps the Manager callback', async () => {
+      const api = createApi({
+        config: {
+          get: vi.fn(async () => [
+            {
+              type: 'document' as const,
+              path: '/tmp/repo/opencode.json',
+              info: {
+                mcp: {
+                  servers: {
+                    [SERVER_NAME]: {
+                      type: 'remote' as const,
+                      url: 'https://mcp.example.com',
+                      oauth: { redirect_uri: `http://localhost:5003${CALLBACK_PATH}` },
+                    },
+                  },
+                },
+              },
+            },
+          ]),
+        },
+      })
+      const app = createApp(createClient(api))
+
+      const res = await startFlow(app)
+
+      expect(res.status).toBe(200)
+      expect(api.mcp.add).toHaveBeenCalledWith({
+        server: SERVER_NAME,
+        config: {
+          type: 'remote',
+          url: 'https://mcp.example.com',
+          oauth: {
+            redirect_uri: `http://localhost:5003${CALLBACK_PATH}`,
+            callback_port: expect.any(Number),
+          },
+        },
+      })
+      expect(api.mcp.list).toHaveBeenCalledTimes(1)
+    })
+
+    describe('redirect origin', () => {
+      const remoteServerApi = () => createApi({
+        config: {
+          get: vi.fn(async () => [
+            {
+              type: 'document' as const,
+              path: '/tmp/repo/opencode.json',
+              info: {
+                mcp: { servers: { [SERVER_NAME]: { type: 'remote' as const, url: 'https://mcp.example.com' } } },
+              },
+            },
+          ]),
+        },
+      })
+
+      const redirectUriFor = async (headers: Record<string, string>) => {
+        const api = remoteServerApi()
+        const res = await startFlow(createApp(createClient(api)), {}, headers)
+        expect(res.status).toBe(200)
+        const [input] = (api.mcp.add as ReturnType<typeof vi.fn>).mock.calls[0] as [
+          { config: { oauth: { redirect_uri: string } } },
+        ]
+        return input.config.oauth.redirect_uri
+      }
+
+      it('prefers the first X-Forwarded-Proto value with X-Forwarded-Host over Origin', async () => {
+        expect(
+          await redirectUriFor({
+            'X-Forwarded-Proto': 'https, http',
+            'X-Forwarded-Host': 'manager.example.com, proxy.internal',
+            Host: 'localhost:5003',
+            Origin: 'http://ignored.example.com',
+          }),
+        ).toBe(`https://manager.example.com${CALLBACK_PATH}`)
+      })
+
+      it('uses X-Forwarded-Proto with the Host header when no forwarded host is sent', async () => {
+        expect(await redirectUriFor({ 'X-Forwarded-Proto': 'https', Host: 'manager.example.com' })).toBe(
+          `https://manager.example.com${CALLBACK_PATH}`,
+        )
+      })
+
+      it('ignores an unsupported X-Forwarded-Proto and falls back to Origin', async () => {
+        expect(
+          await redirectUriFor({ 'X-Forwarded-Proto': 'javascript', Origin: 'https://origin.example.com' }),
+        ).toBe(`https://origin.example.com${CALLBACK_PATH}`)
+      })
+
+      it('falls back to http on the host without forwarded headers or Origin', async () => {
+        expect(await redirectUriFor({ Host: 'manager.local:5003' })).toBe(`http://manager.local:5003${CALLBACK_PATH}`)
+      })
+    })
+
+    it('ignores config entries that are not remote OAuth servers', async () => {
+      const api = createApi({
+        config: {
+          get: vi.fn(async () => [
+            {
+              type: 'document' as const,
+              path: '/tmp/repo/opencode.json',
+              info: {
+                mcp: {
+                  servers: {
+                    [SERVER_NAME]: { type: 'local' as const, command: ['npx', 'server'] },
+                  },
+                },
+              },
+            },
+          ]),
+        },
+      })
+      const app = createApp(createClient(api))
+
+      const res = await startFlow(app)
+
+      expect(res.status).toBe(200)
+      expect(api.mcp.add).not.toHaveBeenCalled()
+    })
   })
 
   describe('GET /status/:flowId', () => {
-    it('returns unknown for an unknown flow', async () => {
-      const res = await createApp().request('/status/does-not-exist')
+    it('returns unknown for an attempt that was never started here', async () => {
+      const res = await createApp().request('/status/unknown-attempt')
 
       expect(res.status).toBe(200)
       expect(await res.json()).toEqual({ status: 'unknown' })
     })
 
-    it('returns pending for a started flow', async () => {
-      fetchMock.mockResolvedValueOnce(jsonResponse(discoveryMetadata()))
-      const app = createApp()
-      const started = await startFlow(app, { clientId: 'client-123' })
-      const { flowId } = await started.json() as { flowId: string }
+    it('maps a pending attempt to pending', async () => {
+      const api = createApi()
+      const app = createApp(createClient(api))
+      await startFlow(app)
 
-      const res = await app.request(`/status/${flowId}`)
+      const res = await app.request(`/status/${ATTEMPT_ID}`)
 
       expect(res.status).toBe(200)
       expect(await res.json()).toEqual({ status: 'pending' })
+      expect(api.integration.oauth.status).toHaveBeenCalledWith({
+        integrationID: INTEGRATION_ID,
+        attemptID: ATTEMPT_ID,
+      })
+    })
+
+    it('maps a complete attempt to completed with the server name', async () => {
+      const api = createApi({
+        integration: {
+          get: createApi().integration.get,
+          oauth: {
+            connect: createApi().integration.oauth.connect,
+            status: vi.fn(async () => ({
+              location: { directory: '/tmp/repo' },
+              data: { status: 'complete' as const, time: { created: 0, expires: 0 } },
+            })),
+            complete: vi.fn(async () => undefined),
+            cancel: vi.fn(async () => undefined),
+          },
+        },
+      })
+      const app = createApp(createClient(api))
+      await startFlow(app)
+
+      const res = await app.request(`/status/${ATTEMPT_ID}`)
+
+      expect(await res.json()).toEqual({ status: 'completed', serverName: SERVER_NAME })
+    })
+
+    it('maps a failed attempt to failed with its message', async () => {
+      const api = createApi({
+        integration: {
+          get: createApi().integration.get,
+          oauth: {
+            connect: createApi().integration.oauth.connect,
+            status: vi.fn(async () => ({
+              location: { directory: '/tmp/repo' },
+              data: { status: 'failed' as const, message: 'token exchange failed', time: { created: 0, expires: 0 } },
+            })),
+            complete: vi.fn(async () => undefined),
+            cancel: vi.fn(async () => undefined),
+          },
+        },
+      })
+      const app = createApp(createClient(api))
+      await startFlow(app)
+
+      const res = await app.request(`/status/${ATTEMPT_ID}`)
+
+      expect(await res.json()).toEqual({ status: 'failed', error: 'token exchange failed' })
+    })
+
+    it('maps an expired attempt to failed', async () => {
+      const api = createApi({
+        integration: {
+          get: createApi().integration.get,
+          oauth: {
+            connect: createApi().integration.oauth.connect,
+            status: vi.fn(async () => ({
+              location: { directory: '/tmp/repo' },
+              data: { status: 'expired' as const, time: { created: 0, expires: 0 } },
+            })),
+            complete: vi.fn(async () => undefined),
+            cancel: vi.fn(async () => undefined),
+          },
+        },
+      })
+      const app = createApp(createClient(api))
+      await startFlow(app)
+
+      const res = await app.request(`/status/${ATTEMPT_ID}`)
+
+      expect(await res.json()).toEqual({ status: 'failed', error: 'Authorization expired' })
     })
   })
 
@@ -291,34 +506,6 @@ describe('mcp oauth proxy routes', () => {
       expect(await res.text()).toContain('Missing State')
     })
 
-    it('returns 400 and marks the flow failed when the provider reports an error', async () => {
-      fetchMock.mockResolvedValueOnce(jsonResponse(discoveryMetadata()))
-      const app = createApp()
-      const started = await startFlow(app, { clientId: 'client-123' })
-      const { flowId } = await started.json() as { flowId: string }
-
-      const res = await app.request(`/callback?state=${flowId}&error=access_denied&error_description=User%20denied`)
-      const statusRes = await app.request(`/status/${flowId}`)
-
-      expect(res.status).toBe(400)
-      expect(await res.text()).toContain('Authorization Failed')
-      expect(await statusRes.json()).toEqual({ status: 'failed', error: 'User denied' })
-    })
-
-    it('returns 400 when the authorization code is missing', async () => {
-      fetchMock.mockResolvedValueOnce(jsonResponse(discoveryMetadata()))
-      const app = createApp()
-      const started = await startFlow(app, { clientId: 'client-123' })
-      const { flowId } = await started.json() as { flowId: string }
-
-      const res = await app.request(`/callback?state=${flowId}`)
-      const statusRes = await app.request(`/status/${flowId}`)
-
-      expect(res.status).toBe(400)
-      expect(await res.text()).toContain('Missing Code')
-      expect(await statusRes.json()).toEqual({ status: 'failed', error: 'No authorization code received' })
-    })
-
     it('returns 400 for an unknown or expired state', async () => {
       const res = await createApp().request('/callback?code=abc&state=unknown-state')
 
@@ -326,161 +513,590 @@ describe('mcp oauth proxy routes', () => {
       expect(await res.text()).toContain('Session Expired')
     })
 
-    it('returns 500 when the token exchange responds with an error', async () => {
-      fetchMock.mockResolvedValueOnce(jsonResponse(discoveryMetadata()))
-      const app = createApp()
-      const started = await startFlow(app, { clientId: 'client-123' })
-      const { flowId } = await started.json() as { flowId: string }
-      fetchMock.mockResolvedValueOnce(textResponse('invalid_grant', 400))
+    it('forwards the code and state to the attempt loopback listener', async () => {
+      const api = createApi()
+      const app = createApp(createClient(api))
+      await startFlow(app)
 
-      const res = await app.request(`/callback?code=auth-code&state=${flowId}`)
-      const statusRes = await app.request(`/status/${flowId}`)
-
-      expect(res.status).toBe(500)
-      expect(await res.text()).toContain('Token Exchange Failed')
-      expect(await statusRes.json()).toEqual({ status: 'failed', error: 'Token exchange failed' })
-    })
-
-    it('returns 500 when the token exchange request throws', async () => {
-      fetchMock.mockResolvedValueOnce(jsonResponse(discoveryMetadata()))
-      const app = createApp()
-      const started = await startFlow(app, { clientId: 'client-123' })
-      const { flowId } = await started.json() as { flowId: string }
-      fetchMock.mockRejectedValueOnce(new Error('token endpoint down'))
-
-      const res = await app.request(`/callback?code=auth-code&state=${flowId}`)
-      const statusRes = await app.request(`/status/${flowId}`)
-
-      expect(res.status).toBe(500)
-      expect(await res.text()).toContain('Unexpected Error')
-      expect(await statusRes.json()).toEqual({ status: 'failed', error: 'Unexpected error during token exchange' })
-    })
-
-    it('writes tokens to mcp-auth.json and reconnects with the directory', async () => {
-      const forward = vi.fn(async () => new Response('{}', { status: 200 }))
-      const app = createApp(createStubOpenCodeClient({ forward }))
-      fetchMock.mockResolvedValueOnce(jsonResponse(discoveryMetadata()))
-      const started = await startFlow(app, { clientId: 'client-123', directory: '/tmp/project' })
-      const { flowId } = await started.json() as { flowId: string }
-      const before = Math.floor(Date.now() / 1000)
-      fetchMock.mockResolvedValueOnce(jsonResponse({
-        access_token: 'access-token',
-        refresh_token: 'refresh-token',
-        expires_in: 3600,
-        scope: 'read write',
-        token_type: 'Bearer',
-      }))
-
-      const res = await app.request(`/callback?code=auth-code&state=${flowId}`)
-      const auth = await readAuthFile()
-      const statusRes = await app.request(`/status/${flowId}`)
+      const res = await app.request(`/callback?code=auth-code&state=state-1`)
+      const forwarded = new URL(String((fetchMock.mock.calls[0] as unknown[])[0]))
 
       expect(res.status).toBe(200)
       expect(await res.text()).toContain('Authentication Successful')
-      expect(auth['my-server']!.serverUrl).toBe(SERVER_URL)
-      expect(auth['my-server']!.tokens.accessToken).toBe('access-token')
-      expect(auth['my-server']!.tokens.refreshToken).toBe('refresh-token')
-      expect(auth['my-server']!.tokens.scope).toBe('read write')
-      expect(auth['my-server']!.tokens.expiresAt).toBeGreaterThanOrEqual(before + 3600)
-      expect(auth['my-server']!.clientInfo).toEqual({ clientId: 'client-123' })
-      expect(forward).toHaveBeenCalledTimes(2)
-      expect(forward).toHaveBeenNthCalledWith(1, {
-        method: 'POST',
-        path: '/mcp/my-server/connect',
-        directory: '/tmp/project',
-      })
-      expect(forward).toHaveBeenNthCalledWith(2, {
-        method: 'POST',
-        path: '/mcp/my-server/connect',
-      })
-      expect(await statusRes.json()).toEqual({ status: 'completed', serverName: 'my-server' })
+      expect(forwarded.protocol).toBe('http:')
+      expect(forwarded.hostname).toBe('127.0.0.1')
+      expect(forwarded.port).toMatch(/^\d+$/)
+      expect(forwarded.pathname).toBe(CALLBACK_PATH)
+      expect(forwarded.searchParams.get('code')).toBe('auth-code')
+      expect(forwarded.searchParams.get('state')).toBe('state-1')
+      expect(forwarded.searchParams.has('iss')).toBe(false)
     })
 
-    it('merges tokens into an existing mcp-auth.json without dropping other servers', async () => {
-      await mkdir(dirname(MCP_AUTH_PATH), { recursive: true })
-      await writeFile(MCP_AUTH_PATH, JSON.stringify({ existing: { serverUrl: 'https://old.example.com' } }))
+    it('forwards the iss parameter unchanged when the provider sends one', async () => {
+      const api = createApi()
+      const app = createApp(createClient(api))
+      await startFlow(app)
+
+      const issuer = 'https://auth.example.com/tenant/one'
+      const res = await app.request(`/callback?code=auth-code&state=state-1&iss=${encodeURIComponent(issuer)}`)
+      const forwarded = new URL(String((fetchMock.mock.calls[0] as unknown[])[0]))
+
+      expect(res.status).toBe(200)
+      expect(forwarded.searchParams.get('iss')).toBe(issuer)
+      expect(String(forwarded)).toContain(`iss=${encodeURIComponent(issuer)}`)
+    })
+
+    it('forwards an iss parameter the provider did not require', async () => {
+      const api = createApi()
+      const app = createApp(createClient(api))
+      await startFlow(app)
+
+      const res = await app.request(`/callback?code=auth-code&state=state-1&iss=${encodeURIComponent('https://other.example.com')}`)
+      const forwarded = new URL(String((fetchMock.mock.calls[0] as unknown[])[0]))
+
+      expect(res.status).toBe(200)
+      expect(forwarded.searchParams.get('iss')).toBe('https://other.example.com')
+    })
+
+    it('cancels the attempt and fails when the provider reports an error', async () => {
+      const api = createApi()
+      const app = createApp(createClient(api))
+      await startFlow(app)
+
+      const res = await app.request(`/callback?state=state-1&error=access_denied&error_description=User%20denied`)
+
+      expect(res.status).toBe(400)
+      expect(await res.text()).toContain('Authorization Failed')
+      expect(api.integration.oauth.cancel).toHaveBeenCalledWith({
+        integrationID: INTEGRATION_ID,
+        attemptID: ATTEMPT_ID,
+      })
+      expect(fetchMock).not.toHaveBeenCalled()
+    })
+
+    it('cancels the attempt when the authorization code is missing', async () => {
+      const api = createApi()
+      const app = createApp(createClient(api))
+      await startFlow(app)
+
+      const res = await app.request(`/callback?state=state-1`)
+
+      expect(res.status).toBe(400)
+      expect(await res.text()).toContain('Missing Code')
+      expect(api.integration.oauth.cancel).toHaveBeenCalledWith({
+        integrationID: INTEGRATION_ID,
+        attemptID: ATTEMPT_ID,
+      })
+    })
+
+    it('renders a failure page when the loopback listener rejects the code', async () => {
+      fetchMock.mockResolvedValueOnce(new Response('invalid_grant', { status: 400 }))
       const app = createApp()
-      fetchMock.mockResolvedValueOnce(jsonResponse(discoveryMetadata()))
-      const started = await startFlow(app, { clientId: 'client-123' })
-      const { flowId } = await started.json() as { flowId: string }
-      fetchMock.mockResolvedValueOnce(jsonResponse({ access_token: 'access-token' }))
+      await startFlow(app)
 
-      const res = await app.request(`/callback?code=auth-code&state=${flowId}`)
-      const auth = await readAuthFile()
+      const res = await app.request(`/callback?code=auth-code&state=state-1`)
 
-      expect(res.status).toBe(200)
-      expect(auth.existing).toEqual({ serverUrl: 'https://old.example.com' })
-      expect(auth['my-server']!.tokens.accessToken).toBe('access-token')
-      expect(auth['my-server']!.tokens.expiresAt).toBeUndefined()
+      expect(res.status).toBe(400)
+      expect(await res.text()).toContain('Authentication Failed')
     })
 
-    it('still reports success when the reconnect trigger fails', async () => {
-      const forward = vi.fn(async () => {
-        throw new Error('reconnect failed')
-      })
-      const app = createApp(createStubOpenCodeClient({ forward }))
-      fetchMock.mockResolvedValueOnce(jsonResponse(discoveryMetadata()))
-      const started = await startFlow(app, { clientId: 'client-123' })
-      const { flowId } = await started.json() as { flowId: string }
-      fetchMock.mockResolvedValueOnce(jsonResponse({ access_token: 'access-token' }))
-
-      const res = await app.request(`/callback?code=auth-code&state=${flowId}`)
-
-      expect(res.status).toBe(200)
-      expect(await res.text()).toContain('Authentication Successful')
-      expect(forward).toHaveBeenCalledTimes(1)
-    })
-
-    it('sends the client secret during token exchange when one was registered', async () => {
+    it('renders a failure page when the loopback listener is unreachable', async () => {
+      fetchMock.mockRejectedValueOnce(new Error('connection refused'))
       const app = createApp()
-      fetchMock
-        .mockResolvedValueOnce(jsonResponse(discoveryMetadata({ registration_endpoint: REGISTRATION_ENDPOINT })))
-        .mockResolvedValueOnce(jsonResponse({ client_id: 'dynamic-client', client_secret: 'dynamic-secret' }))
-      const started = await startFlow(app)
-      const { flowId } = await started.json() as { flowId: string }
-      fetchMock.mockResolvedValueOnce(jsonResponse({ access_token: 'access-token' }))
+      await startFlow(app)
 
-      const res = await app.request(`/callback?code=auth-code&state=${flowId}`)
-      const tokenCall = fetchMock.mock.calls[2]!
-      const tokenInit = tokenCall[1] as RequestInit
-      const params = tokenInit.body as URLSearchParams
+      const res = await app.request(`/callback?code=auth-code&state=state-1`)
+
+      expect(res.status).toBe(500)
+      expect(await res.text()).toContain('Authentication Failed')
+    })
+
+    it('consumes the state so a replayed callback is rejected', async () => {
+      const app = createApp()
+      await startFlow(app)
+      await app.request(`/callback?code=auth-code&state=state-1`)
+
+      const replay = await app.request(`/callback?code=auth-code&state=state-1`)
+
+      expect(replay.status).toBe(400)
+      expect(await replay.text()).toContain('Session Expired')
+      expect(fetchMock).toHaveBeenCalledTimes(1)
+    })
+
+    it('forwards to the loopback listener of the directory-scoped attempt', async () => {
+      const api = createApi()
+      const app = createApp(createClient(api))
+      await startFlow(app, { directory: '/tmp/project' })
+
+      const res = await app.request(`/callback?code=auth-code&state=state-1`)
+      const forwarded = new URL(String((fetchMock.mock.calls[0] as unknown[])[0]))
 
       expect(res.status).toBe(200)
-      expect(tokenCall[0]).toBe(TOKEN_ENDPOINT)
-      expect(params.get('grant_type')).toBe('authorization_code')
-      expect(params.get('client_id')).toBe('dynamic-client')
-      expect(params.get('client_secret')).toBe('dynamic-secret')
-      expect(params.get('code')).toBe('auth-code')
-      expect(params.get('code_verifier')).toBeTruthy()
-      expect(params.get('redirect_uri')).toBe('http://localhost:5003/api/mcp-oauth-proxy/callback')
+      expect(forwarded.pathname).toBe(CALLBACK_PATH)
+      expect(forwarded.searchParams.get('state')).toBe('state-1')
+    })
+
+    it('keeps the callback reachable without the Manager auth middleware', async () => {
+      const api = createApi()
+      const denyExceptStart: MiddlewareHandler = async (c, next) => {
+        if (c.req.path === '/start') {
+          return next()
+        }
+        return c.json({ error: 'unauthorized' }, 401)
+      }
+      const app = createApp(createClient(api), denyExceptStart)
+      await startFlow(app)
+
+      const callbackRes = await app.request(`/callback?code=auth-code&state=state-1`)
+      const statusRes = await app.request(`/status/${ATTEMPT_ID}`)
+      const credentialsRes = await app.request(`/credentials/${SERVER_NAME}`, { method: 'DELETE' })
+
+      expect(statusRes.status).toBe(401)
+      expect(credentialsRes.status).toBe(401)
+      expect(callbackRes.status).toBe(200)
+      expect(await callbackRes.text()).toContain('Authentication Successful')
+    })
+  })
+
+  describe('DELETE /credentials/:serverName', () => {
+    it('removes every credential connection of the server integration', async () => {
+      const api = createApi({
+        integration: {
+          get: vi.fn(async () => ({
+            location: { directory: '/tmp/repo' },
+            data: {
+              id: INTEGRATION_ID,
+              name: SERVER_NAME,
+              methods: [],
+              connections: [
+                { type: 'credential' as const, id: 'cred-1', label: 'one', method: 'oauth' as const },
+                { type: 'credential' as const, id: 'cred-2', label: 'two', method: 'oauth' as const },
+                { type: 'env' as const, name: 'API_KEY' },
+              ],
+            },
+          })),
+          oauth: createApi().integration.oauth,
+        },
+      })
+      const app = createApp(createClient(api))
+
+      const res = await app.request(`/credentials/${SERVER_NAME}`, { method: 'DELETE' })
+
+      expect(res.status).toBe(200)
+      expect(await res.json()).toEqual({ success: true })
+      expect(api.credential.remove).toHaveBeenCalledTimes(2)
+      expect(api.credential.remove).toHaveBeenNthCalledWith(1, { credentialID: 'cred-1' })
+      expect(api.credential.remove).toHaveBeenNthCalledWith(2, { credentialID: 'cred-2' })
+    })
+
+    it('scopes the lookup to the requested directory', async () => {
+      const api = createApi()
+      const app = createApp(createClient(api))
+
+      const res = await app.request(`/credentials/${SERVER_NAME}?directory=/tmp/project`, { method: 'DELETE' })
+
+      expect(res.status).toBe(200)
+      expect(api.mcp.list).toHaveBeenCalledWith({ location: { directory: '/tmp/project' } })
+      expect(api.integration.get).toHaveBeenCalledWith({
+        integrationID: INTEGRATION_ID,
+        location: { directory: '/tmp/project' },
+      })
+    })
+
+    it('succeeds when the server is unknown', async () => {
+      const api = createApi({
+        mcp: {
+          list: vi.fn(async () => ({ location: { directory: '/tmp/repo' }, data: [] })),
+          add: vi.fn(async () => undefined),
+        },
+      })
+      const app = createApp(createClient(api))
+
+      const res = await app.request(`/credentials/${SERVER_NAME}`, { method: 'DELETE' })
+
+      expect(res.status).toBe(200)
+      expect(await res.json()).toEqual({ success: true })
+      expect(api.credential.remove).not.toHaveBeenCalled()
+    })
+
+    it('succeeds when the server has no OAuth integration', async () => {
+      const api = createApi({
+        mcp: {
+          list: vi.fn(async () => ({
+            location: { directory: '/tmp/repo' },
+            data: [{ name: SERVER_NAME, status: { status: 'connected' as const } }],
+          })),
+          add: vi.fn(async () => undefined),
+        },
+      })
+      const app = createApp(createClient(api))
+
+      const res = await app.request(`/credentials/${SERVER_NAME}`, { method: 'DELETE' })
+
+      expect(res.status).toBe(200)
+      expect(await res.json()).toEqual({ success: true })
+      expect(api.integration.get).not.toHaveBeenCalled()
     })
   })
 
   describe('requireAuth middleware', () => {
     const denyAuth: MiddlewareHandler = async (c) => c.json({ error: 'unauthorized' }, 401)
-    const allowAuth: MiddlewareHandler = async (c, next) => {
-      await next()
-    }
 
-    it('protects /start and /status but not /callback when the middleware rejects', async () => {
-      const app = createApp(createStubOpenCodeClient(), denyAuth)
+    it('protects every route except the callback', async () => {
+      const app = createApp(createClient(), denyAuth)
 
       const startRes = await startFlow(app)
-      const statusRes = await app.request('/status/anything')
+      const statusRes = await app.request(`/status/${ATTEMPT_ID}`)
+      const credentialsRes = await app.request(`/credentials/${SERVER_NAME}`, { method: 'DELETE' })
       const callbackRes = await app.request('/callback')
 
       expect(startRes.status).toBe(401)
       expect(statusRes.status).toBe(401)
+      expect(credentialsRes.status).toBe(401)
       expect(callbackRes.status).toBe(400)
     })
-
-    it('allows requests through when the middleware calls next', async () => {
-      const app = createApp(createStubOpenCodeClient(), allowAuth)
-      fetchMock.mockResolvedValueOnce(jsonResponse(discoveryMetadata()))
-
-      const res = await startFlow(app, { clientId: 'client-123' })
-
-      expect(res.status).toBe(200)
-    })
   })
+})
+
+function listenOnLoopback(server: ReturnType<typeof createServer>): Promise<number> {
+  return new Promise((resolve) => {
+    server.listen(0, '127.0.0.1', () => resolve((server.address() as AddressInfo).port))
+  })
+}
+
+function closeLoopback(server: ReturnType<typeof createServer>): Promise<void> {
+  return new Promise((resolve) => server.close(() => resolve()))
+}
+
+async function startFakeMcpOAuthServer(options: { issuerSupport?: boolean } = {}): Promise<{
+  origin: string
+  mcpUrl: string
+  requests: string[]
+  stop: () => Promise<void>
+}> {
+  const requests: string[] = []
+  const server = createServer((req, res) => {
+    const origin = `http://127.0.0.1:${(server.address() as AddressInfo).port}`
+    requests.push(`${req.method} ${req.url}`)
+    const url = new URL(req.url ?? '/', origin)
+    const json = (body: unknown) => {
+      res.writeHead(200, { 'Content-Type': 'application/json' })
+      res.end(JSON.stringify(body))
+    }
+
+    if (url.pathname === '/.well-known/oauth-protected-resource') {
+      return json({ resource: `${origin}/mcp`, authorization_servers: [origin] })
+    }
+    if (url.pathname === '/.well-known/oauth-authorization-server') {
+      return json({
+        issuer: origin,
+        authorization_endpoint: `${origin}/authorize`,
+        token_endpoint: `${origin}/token`,
+        registration_endpoint: `${origin}/register`,
+        response_types_supported: ['code'],
+        grant_types_supported: ['authorization_code', 'refresh_token'],
+        code_challenge_methods_supported: ['S256'],
+        token_endpoint_auth_methods_supported: ['none'],
+        ...(options.issuerSupport ? { authorization_response_iss_parameter_supported: true } : {}),
+      })
+    }
+    if (url.pathname === '/register') {
+      return json({ client_id: 'test-client', redirect_uris: [`${origin}/callback`] })
+    }
+    if (url.pathname === '/token') {
+      return json({
+        access_token: 'test-access-token',
+        refresh_token: 'test-refresh-token',
+        token_type: 'Bearer',
+        expires_in: 3600,
+      })
+    }
+    res.writeHead(401, {
+      'Content-Type': 'application/json',
+      'WWW-Authenticate': `Bearer resource_metadata="${origin}/.well-known/oauth-protected-resource"`,
+    })
+    res.end(JSON.stringify({ error: 'unauthorized' }))
+  })
+
+  const port = await listenOnLoopback(server)
+  const origin = `http://127.0.0.1:${port}`
+  return { origin, mcpUrl: `${origin}/mcp`, requests, stop: () => closeLoopback(server) }
+}
+
+const openCodeBinary = resolveOpenCode2Binary()
+
+type McpServerSummary = { name: string; status: { status: string }; integrationID?: string }
+
+async function waitForMcpServer(
+  client: OpenCodeClient,
+  location: { location: { directory: string } } | undefined,
+  predicate: (server: McpServerSummary) => boolean,
+): Promise<McpServerSummary> {
+  const deadline = Date.now() + 15000
+  while (Date.now() < deadline) {
+    try {
+      const server = (await client.api.mcp.list(location)).data.find((candidate) => candidate.name === SERVER_NAME)
+      if (server && predicate(server)) return server
+    } catch {
+      // the server may still be starting
+    }
+    await new Promise((resolve) => setTimeout(resolve, 250))
+  }
+  throw new Error(`MCP server ${SERVER_NAME} did not reach the expected state`)
+}
+
+describe.skipIf(!openCodeBinary)('mcp oauth proxy routes against a real OpenCode 2 server', () => {
+  beforeEach(() => {
+    vi.stubGlobal('fetch', realFetch)
+  })
+
+  it('completes the attempt through the loopback listener and stores the credential in V2', async () => {
+    const fake = await startFakeMcpOAuthServer()
+    const workspace = await mkdtemp(path.join(tmpdir(), 'ocm-mcp-oauth-'))
+    const configPath = path.join(workspace, '.config', 'opencode', 'opencode.json')
+
+    const serve = await startOpenCodeServe({ env: { XDG_CONFIG_HOME: path.join(workspace, '.config') } })
+    try {
+      const client = new FetchOpenCodeClient({
+        baseUrl: serve.baseUrl,
+        basicAuth: buildOpenCodeBasicAuth(serve.password),
+      })
+      const app = createApp(client)
+
+      await mkdir(path.dirname(configPath), { recursive: true })
+      await writeFile(
+        configPath,
+        JSON.stringify({
+          mcp: {
+            servers: {
+              [SERVER_NAME]: {
+                type: 'remote',
+                url: fake.mcpUrl,
+                oauth: { redirect_uri: `http://localhost:5003${CALLBACK_PATH}` },
+              },
+            },
+          },
+        }),
+      )
+
+      await waitForMcpServer(client, undefined, () => true)
+
+      const startRes = await startFlow(app)
+      const started = (await startRes.json()) as { authorizationUrl: string; flowId: string }
+      expect(startRes.status).toBe(200)
+
+      const authorizationUrl = new URL(started.authorizationUrl)
+      expect(authorizationUrl.searchParams.get('state')).toBeTruthy()
+      expect(authorizationUrl.searchParams.get('redirect_uri')).toBe(`http://localhost:5003${CALLBACK_PATH}`)
+
+      const state = authorizationUrl.searchParams.get('state')!
+      const callbackRes = await app.request(`/callback?code=auth-code&state=${state}`)
+      expect(callbackRes.status).toBe(200)
+      expect(await callbackRes.text()).toContain('Authentication Successful')
+
+      const listed = await waitForMcpServer(client, undefined, (server) => server.status.status !== 'needs_auth')
+
+      const integration = (await client.api.integration.get({ integrationID: listed.integrationID! })).data
+      expect(integration.connections.some((connection) => connection.type === 'credential')).toBe(true)
+    } finally {
+      await fake.stop()
+      await serve.stop()
+    }
+  }, 180000)
+
+  it('completes repository-scoped OAuth without touching a same-name default-location server', async () => {
+    const repoFake = await startFakeMcpOAuthServer()
+    const defaultFake = await startFakeMcpOAuthServer()
+    const workspace = await mkdtemp(path.join(tmpdir(), 'ocm-mcp-oauth-repo-'))
+    const configPath = path.join(workspace, '.config', 'opencode', 'opencode.json')
+    const repoDirectory = path.join(workspace, 'repo')
+
+    const serve = await startOpenCodeServe({ env: { XDG_CONFIG_HOME: path.join(workspace, '.config') } })
+    try {
+      const client = new FetchOpenCodeClient({
+        baseUrl: serve.baseUrl,
+        basicAuth: buildOpenCodeBasicAuth(serve.password),
+      })
+      const app = createApp(client)
+
+      await mkdir(path.dirname(configPath), { recursive: true })
+      await writeFile(
+        configPath,
+        JSON.stringify({
+          mcp: {
+            servers: {
+              [SERVER_NAME]: {
+                type: 'remote',
+                url: defaultFake.mcpUrl,
+                oauth: { redirect_uri: `http://localhost:5003${CALLBACK_PATH}` },
+              },
+            },
+          },
+        }),
+      )
+      await mkdir(repoDirectory, { recursive: true })
+      await writeFile(
+        path.join(repoDirectory, 'opencode.json'),
+        JSON.stringify({
+          mcp: {
+            servers: {
+              [SERVER_NAME]: {
+                type: 'remote',
+                url: repoFake.mcpUrl,
+                oauth: { redirect_uri: `http://localhost:5003${CALLBACK_PATH}` },
+              },
+            },
+          },
+        }),
+      )
+
+      const repoLocation = { location: { directory: repoDirectory } }
+      const defaultServer = await waitForMcpServer(client, undefined, (server) => server.status.status !== 'pending')
+      await waitForMcpServer(client, repoLocation, () => true)
+
+      const startRes = await startFlow(app, { directory: repoDirectory })
+      const started = (await startRes.json()) as { authorizationUrl: string; flowId: string }
+      expect(startRes.status).toBe(200)
+
+      const authorizationUrl = new URL(started.authorizationUrl)
+      const state = authorizationUrl.searchParams.get('state')!
+      expect(authorizationUrl.searchParams.get('redirect_uri')).toBe(`http://localhost:5003${CALLBACK_PATH}`)
+
+      const callbackRes = await app.request(`/callback?code=auth-code&state=${state}`)
+      expect(callbackRes.status).toBe(200)
+      expect(await callbackRes.text()).toContain('Authentication Successful')
+
+      const repoServer = await waitForMcpServer(client, repoLocation, (server) => server.status.status !== 'needs_auth')
+      const repoIntegration = (
+        await client.api.integration.get({ integrationID: repoServer.integrationID!, ...repoLocation })
+      ).data
+      expect(repoIntegration.connections.some((connection) => connection.type === 'credential')).toBe(true)
+
+      const defaultAfter = (await client.api.mcp.list()).data.find((server) => server.name === SERVER_NAME)
+      expect(defaultAfter?.integrationID).toBe(defaultServer.integrationID)
+      expect(defaultAfter?.status.status).toBe('needs_auth')
+      const defaultIntegration = (
+        await client.api.integration.get({ integrationID: defaultServer.integrationID! })
+      ).data
+      expect(defaultIntegration.connections.some((connection) => connection.type === 'credential')).toBe(false)
+    } finally {
+      await repoFake.stop()
+      await defaultFake.stop()
+      await serve.stop()
+    }
+  }, 180000)
+
+  it('completes an attempt whose callback carries the matching issuer', async () => {
+    const fake = await startFakeMcpOAuthServer({ issuerSupport: true })
+    const workspace = await mkdtemp(path.join(tmpdir(), 'ocm-mcp-oauth-iss-'))
+    const configPath = path.join(workspace, '.config', 'opencode', 'opencode.json')
+
+    const serve = await startOpenCodeServe({ env: { XDG_CONFIG_HOME: path.join(workspace, '.config') } })
+    try {
+      const client = new FetchOpenCodeClient({
+        baseUrl: serve.baseUrl,
+        basicAuth: buildOpenCodeBasicAuth(serve.password),
+      })
+      const app = createApp(client)
+
+      await mkdir(path.dirname(configPath), { recursive: true })
+      await writeFile(
+        configPath,
+        JSON.stringify({
+          mcp: {
+            servers: {
+              [SERVER_NAME]: {
+                type: 'remote',
+                url: fake.mcpUrl,
+                oauth: { redirect_uri: `http://localhost:5003${CALLBACK_PATH}` },
+              },
+            },
+          },
+        }),
+      )
+
+      await waitForMcpServer(client, undefined, () => true)
+
+      const startRes = await startFlow(app)
+      const started = (await startRes.json()) as { authorizationUrl: string; flowId: string }
+      expect(startRes.status).toBe(200)
+
+      const authorizationUrl = new URL(started.authorizationUrl)
+      const state = authorizationUrl.searchParams.get('state')!
+      const callbackRes = await app.request(
+        `/callback?code=auth-code&state=${state}&iss=${encodeURIComponent(fake.origin)}`,
+      )
+      expect(callbackRes.status).toBe(200)
+      expect(await callbackRes.text()).toContain('Authentication Successful')
+
+      const listed = await waitForMcpServer(client, undefined, (server) => server.status.status !== 'needs_auth')
+
+      const integration = (await client.api.integration.get({ integrationID: listed.integrationID! })).data
+      expect(integration.connections.some((connection) => connection.type === 'credential')).toBe(true)
+    } finally {
+      await fake.stop()
+      await serve.stop()
+    }
+  }, 180000)
+
+  it('rejects a mismatched issuer without storing a credential', async () => {
+    const fake = await startFakeMcpOAuthServer({ issuerSupport: true })
+    const workspace = await mkdtemp(path.join(tmpdir(), 'ocm-mcp-oauth-iss-mismatch-'))
+    const configPath = path.join(workspace, '.config', 'opencode', 'opencode.json')
+
+    const serve = await startOpenCodeServe({ env: { XDG_CONFIG_HOME: path.join(workspace, '.config') } })
+    try {
+      const client = new FetchOpenCodeClient({
+        baseUrl: serve.baseUrl,
+        basicAuth: buildOpenCodeBasicAuth(serve.password),
+      })
+      const app = createApp(client)
+
+      await mkdir(path.dirname(configPath), { recursive: true })
+      await writeFile(
+        configPath,
+        JSON.stringify({
+          mcp: {
+            servers: {
+              [SERVER_NAME]: {
+                type: 'remote',
+                url: fake.mcpUrl,
+                oauth: { redirect_uri: `http://localhost:5003${CALLBACK_PATH}` },
+              },
+            },
+          },
+        }),
+      )
+
+      await waitForMcpServer(client, undefined, () => true)
+
+      const startRes = await startFlow(app)
+      const started = (await startRes.json()) as { authorizationUrl: string; flowId: string }
+      expect(startRes.status).toBe(200)
+
+      const authorizationUrl = new URL(started.authorizationUrl)
+      const state = authorizationUrl.searchParams.get('state')!
+      const callbackRes = await app.request(
+        `/callback?code=auth-code&state=${state}&iss=${encodeURIComponent('https://other.example.com')}`,
+      )
+      expect(callbackRes.status).toBe(200)
+
+      const statusDeadline = Date.now() + 15000
+      let status = 'unknown'
+      while (Date.now() < statusDeadline && status !== 'failed') {
+        const statusRes = await app.request(`/status/${started.flowId}`)
+        status = ((await statusRes.json()) as { status: string }).status
+        if (status !== 'failed') await new Promise((resolve) => setTimeout(resolve, 250))
+      }
+      expect(status).toBe('failed')
+
+      const listed = (await client.api.mcp.list()).data.find((server) => server.name === SERVER_NAME)
+      expect(listed?.status.status).toBe('needs_auth')
+      const integration = (await client.api.integration.get({ integrationID: listed!.integrationID! })).data
+      expect(integration.connections.some((connection) => connection.type === 'credential')).toBe(false)
+    } finally {
+      await fake.stop()
+      await serve.stop()
+    }
+  }, 180000)
 })

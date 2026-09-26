@@ -15,9 +15,9 @@ import { FileBrowserSheet } from "@/components/file-browser/FileBrowserSheet";
 import { Dialog, DialogContent, DialogTitle } from "@/components/ui/dialog";
 import { Button } from "@/components/ui/button";
 import { ContextUsageIndicator } from "@/components/session/ContextUsageIndicator";
-import { useSession, useAbortSession, useUpdateSession, useMessages, useCreateSession } from "@/hooks/useOpenCode";
+import { useSession, useInterruptSession, useUpdateSession, useCreateSession } from "@/hooks/useOpenCode";
+import { useSessionTranscript } from "@/hooks/useSessionTranscript";
 import { useRepoActivity } from "@/hooks/useRepoActivity";
-import { OPENCODE_API_ENDPOINT } from "@/config";
 import { useSSE } from "@/hooks/useSSE";
 import { useUIState } from "@/stores/uiStateStore";
 import { useSettings } from "@/hooks/useSettings";
@@ -32,37 +32,57 @@ import { getAssistantText, getLatestPlayableAssistantMessage, useAutoPlayLastRes
 import { useEffect, useRef, useCallback, useMemo } from "react";
 import { MessageSkeleton } from "@/components/message/MessageSkeleton";
 import { exportSession, downloadMarkdown } from "@/lib/exportSession";
-import type { MessageWithParts } from "@/api/types";
 import { getMessagesContentVersion } from "./sessionContentVersion";
 import { showToast } from "@/lib/toast";
 import { getRepoDisplayName } from "@/lib/utils";
 import { RepoMcpDialog } from "@/components/repo/RepoMcpDialog";
 import { ResetPermissionsDialog } from "@/components/repo/ResetPermissionsDialog";
-import { RepoLspDialog } from "@/components/repo/RepoLspDialog";
 import { RepoSkillsDialog } from "@/components/repo/RepoSkillsDialog";
-import { createOpenCodeClient } from "@/api/opencode";
-import { usePermissions, useQuestions } from "@/contexts/EventContext";
-import { useSessionStatusForSession } from "@/stores/sessionStatusStore";
-import type { QuestionRequest } from "@/api/types";
-import { QuestionPrompt } from "@/components/session/QuestionPrompt";
-import { MinimizedQuestionIndicator } from "@/components/session/MinimizedQuestionIndicator";
+import { compactSession, forkSession, listSessionMessages } from "@/api/opencode";
+import { useRedoMessage, useUndoMessage } from "@/hooks/useUndoMessage";
+import { usePermissions, useForms } from "@/contexts/EventContext";
+import type { FormInfo, SessionMessageInfo } from "@opencode-manager/shared/opencode";
+import { FormPrompt } from "@/components/session/FormPrompt";
+import { MinimizedFormIndicator } from "@/components/session/MinimizedFormIndicator";
 import { PendingActionsGroup } from "@/components/notifications/PendingActionsGroup";
 import { SourceControlPanel } from "@/components/source-control";
 import { SessionSendErrorBanner } from "@/components/session/SessionSendErrorBanner";
-import { SessionTodoDisplay } from "@/components/message/SessionTodoDisplay";
 import { useDialogParam } from "@/hooks/useDialogParam";
 import { useSidebarAction } from "@/hooks/useSidebarAction";
 import { SessionMoreButton } from "@/components/navigation/SessionMoreButton";
 
-const compareMessageIds = (id1: string, id2: string): number => {
-  const num1 = parseInt(id1, 10)
-  const num2 = parseInt(id2, 10)
-  if (!isNaN(num1) && !isNaN(num2)) return num1 - num2
-  return id1.localeCompare(id2)
-}
+const OLDER_HISTORY_SCROLL_THRESHOLD_PX = 200
 
 const PENDING_ACTION_SYNC_INTERVAL_MS = 30000
 const PROMPT_OVERLAY_CLEARANCE_PX = 16
+
+function applyRevertBoundary(
+  messages: SessionMessageInfo[],
+  revertMessageID: string | undefined,
+): SessionMessageInfo[] {
+  if (!revertMessageID) return messages
+  const revertIndex = messages.findIndex((message) => message.id === revertMessageID)
+  if (revertIndex < 0) return messages
+  return messages.slice(0, revertIndex)
+}
+
+async function fetchCompleteSessionHistory(sessionID: string): Promise<SessionMessageInfo[]> {
+  let history: SessionMessageInfo[] = []
+  const seenIds = new Set<string>()
+  const seenCursors = new Set<string>()
+  let cursor: string | undefined
+
+  for (;;) {
+    const page = await listSessionMessages(sessionID, cursor === undefined ? {} : { cursor })
+    const older = page.messages.filter((message) => !seenIds.has(message.id))
+    for (const message of older) seenIds.add(message.id)
+    history = [...older, ...history]
+
+    if (!page.nextCursor || seenCursors.has(page.nextCursor)) return history
+    seenCursors.add(page.nextCursor)
+    cursor = page.nextCursor
+  }
+}
 
 function SessionRouteFallback({ message, backTo, backLabel }: { message: string; backTo: string; backLabel: string }) {
   const navigate = useNavigate();
@@ -88,7 +108,6 @@ export function SessionDetail() {
   const promptInputRef = useRef<PromptInputHandle>(null);
   const [sessionsDialogOpen, setSessionsDialogOpen] = useState(false);
   const [fileBrowserOpen, setFileBrowserOpen] = useDialogParam('files');
-  const [lspDialogOpen, setLspDialogOpen] = useDialogParam('lsp');
   const [mcpDialogOpen, setMcpDialogOpen] = useDialogParam('mcp');
   const [skillsDialogOpen, setSkillsDialogOpen] = useDialogParam('skills');
   const [sourceControlOpen, setSourceControlOpen] = useDialogParam('sourceControl');
@@ -96,7 +115,7 @@ export function SessionDetail() {
   const [selectedFilePath, setSelectedFilePath] = useState<string | undefined>();
   const [showScrollButton, setShowScrollButton] = useState(false);
   const [hasPromptContent, setHasPromptContent] = useState(false);
-  const [minimizedQuestion, setMinimizedQuestion] = useState<QuestionRequest | null>(null);
+  const [minimizedFormId, setMinimizedFormId] = useState<string | null>(null);
 
   const isMobile = useMobile();
   const { keyboardHeight } = useVisualViewport();
@@ -130,8 +149,6 @@ export function SessionDetail() {
 
   useRepoActivity(repoId, Boolean(repo));
 
-  const opcodeUrl = OPENCODE_API_ENDPOINT;
-  
   const sessionRouteSuffix = isAssistantSession ? '?assistant=1' : '';
 
   const repoDirectory = repo?.fullPath;
@@ -143,68 +160,73 @@ export function SessionDetail() {
   ) ?? repoDirectory;
 
   const { data: session, isLoading: sessionLoading, error: sessionQueryError } = useSession(
-    opcodeUrl,
     sessionId,
     sessionDirectory,
   );
 
   useEffect(() => {
-    const directory = session?.directory;
+    const directory = session?.location.directory;
     if (!sessionId || !directory) return;
     setResolvedSessionDirectory((current) => (
       current?.sessionId === sessionId && current.directory === directory
         ? current
         : { sessionId, directory }
     ));
-  }, [sessionId, session?.directory]);
+  }, [sessionId, session?.location.directory]);
 
-  const { isConnected, isReconnecting } = useSSE(opcodeUrl, sessionDirectory, sessionId);
+  const { isConnected, isReconnecting } = useSSE(sessionDirectory, sessionId);
 
-  const { data: rawMessages, isLoading: messagesLoading } = useMessages(opcodeUrl, sessionId, sessionDirectory, { fallbackPoll: !isConnected });
+  const {
+    messages: transcriptMessages,
+    pending: pendingPrompts,
+    status: transcriptStatus,
+    isLoading: messagesLoading,
+    fetchOlder,
+    hasOlder,
+  } = useSessionTranscript(sessionId ?? '', sessionDirectory ?? '');
 
-  const messages = useMemo(() => {
-    if (!rawMessages) return undefined
-    const revertMessageID = session?.revert?.messageID
-    if (!revertMessageID) return rawMessages
-    return rawMessages.filter(msgWithParts => compareMessageIds(msgWithParts.info.id, revertMessageID) < 0)
-  }, [rawMessages, session?.revert?.messageID]);
-
-  const getMessagesWithParts = useCallback((): MessageWithParts[] | undefined => {
-    return messages
-  }, [messages])
+  const messages = useMemo(
+    () => applyRevertBoundary(transcriptMessages, session?.revert?.messageID),
+    [transcriptMessages, session?.revert?.messageID],
+  );
 
   const messagesContentVersion = useMemo(() => getMessagesContentVersion(messages), [messages]);
 
   const { scrollToBottom } = useAutoScroll({
     containerRef: messageContainerRef,
-    messages: messages?.map(m => m.info),
+    messages,
     sessionId,
     contentVersion: messagesContentVersion,
     onScrollStateChange: setShowScrollButton
   });
-  const abortSession = useAbortSession(opcodeUrl, sessionDirectory, sessionId);
-  const updateSession = useUpdateSession(opcodeUrl, sessionDirectory);
-  const createSession = useCreateSession(opcodeUrl, sessionDirectory);
-  const { model, modelString } = useModelSelection(opcodeUrl, sessionDirectory);
+
+  const handleMessageScroll = useCallback((event: React.UIEvent<HTMLDivElement>) => {
+    if (!hasOlder || !fetchOlder) return
+    if (event.currentTarget.scrollTop > OLDER_HISTORY_SCROLL_THRESHOLD_PX) return
+    void fetchOlder().catch(() => undefined)
+  }, [fetchOlder, hasOlder]);
+  const interruptSession = useInterruptSession();
+  const updateSession = useUpdateSession(sessionDirectory);
+  const createSession = useCreateSession(sessionDirectory);
+  const { modelString } = useModelSelection(sessionDirectory);
   const isEditingMessage = useUIState((state) => state.isEditingMessage);
   const setActivePromptFileBasePath = useUIState((state) => state.setActivePromptFileBasePath);
   const { isEnabled: ttsEnabled } = useTTS();
-  const sessionStatus = useSessionStatusForSession(sessionId);
   const { syncForSession: syncPermissionsForSession } = usePermissions();
-  const { getForSession: getQuestionForSession, reply: replyToQuestion, reject: rejectQuestion, syncForSession: syncQuestionsForSession } = useQuestions();
-  const currentQuestion = sessionId ? getQuestionForSession(sessionId) : null;
+  const { getForSession: getFormForSession, reply: replyToForm, cancel: cancelForm, syncForSession: syncFormsForSession } = useForms();
+  const currentForm = sessionId ? getFormForSession(sessionId) : null;
+  const minimizedForm = currentForm && currentForm.id === minimizedFormId ? currentForm : null;
 
-  const lastAssistantMessage = messages?.filter(m => m.info.role === 'assistant').at(-1);
+  const lastAssistantMessage = messages.filter(m => m.type === 'assistant').at(-1);
   const lastAssistantText = getAssistantText(lastAssistantMessage);
   const latestPlayableAssistant = useMemo(() => getLatestPlayableAssistantMessage(messages), [messages]);
   
   const isSessionActive = useMemo(() => {
-    if (session?.time?.compacting) return true
-    if (sessionStatus.type !== 'idle') return true
-    if (lastAssistantMessage && !('completed' in lastAssistantMessage.info.time)) return true
+    if (transcriptStatus !== 'idle') return true
+    if (lastAssistantMessage && lastAssistantMessage.time.completed === undefined) return true
     return false
-  }, [lastAssistantMessage, session?.time?.compacting, sessionStatus.type])
-  const hasIncompleteMessages = lastAssistantMessage ? !('completed' in lastAssistantMessage.info.time && lastAssistantMessage.info.time.completed) : false;
+  }, [lastAssistantMessage, transcriptStatus])
+  const hasIncompleteMessages = lastAssistantMessage ? lastAssistantMessage.time.completed === undefined : false;
   const isStreamingResponse = hasIncompleteMessages && isSessionActive;
   const workspaceBasePath = repo?.localPath;
 
@@ -226,30 +248,34 @@ export function SessionDetail() {
   const handleShowSessionsDialog = useCallback(() => setSessionsDialogOpen(true), []);
   const handleShowHelpDialog = useCallback(() => openSettings(), [openSettings]);
 
-  const handleMinimizeQuestion = useCallback((question: QuestionRequest) => {
-    setMinimizedQuestion(question)
-  }, [])
-  
-  const handleRestoreQuestion = useCallback(() => {
-    setMinimizedQuestion(null)
+  const handleMinimizeForm = useCallback((form: FormInfo) => {
+    setMinimizedFormId(form.id)
   }, [])
 
-  useEffect(() => {
-    if (minimizedQuestion && minimizedQuestion.sessionID !== sessionId) {
-      setMinimizedQuestion(null)
+  const handleRestoreForm = useCallback(() => {
+    setMinimizedFormId(null)
+  }, [])
+
+  const handleDismissMinimizedForm = useCallback(async () => {
+    if (!minimizedFormId) return
+    try {
+      await cancelForm(minimizedFormId)
+      setMinimizedFormId(null)
+    } catch {
+      showToast.error('Failed to dismiss form')
     }
-  }, [sessionId, minimizedQuestion])
+  }, [cancelForm, minimizedFormId])
 
   const syncPendingActionsForSession = useCallback(async () => {
     if (!sessionDirectory || !sessionId) return
     await Promise.all([
       syncPermissionsForSession(sessionDirectory, sessionId),
-      syncQuestionsForSession(sessionDirectory, sessionId),
+      syncFormsForSession(sessionDirectory, sessionId),
     ])
-  }, [sessionDirectory, sessionId, syncPermissionsForSession, syncQuestionsForSession])
+  }, [sessionDirectory, sessionId, syncPermissionsForSession, syncFormsForSession])
 
   useQuery({
-    queryKey: ['opencode', 'pending-actions', opcodeUrl, sessionId, sessionDirectory],
+    queryKey: ['opencode', 'pending-actions', sessionId, sessionDirectory],
     queryFn: async () => {
       await syncPendingActionsForSession()
       return null
@@ -277,48 +303,55 @@ export function SessionDetail() {
     handleNewSession();
   });
 
+  const undoMessage = useUndoMessage({
+    sessionId: sessionId ?? '',
+    directory: sessionDirectory,
+    onSuccess: (restoredPrompt) => promptInputRef.current?.setPromptValue(restoredPrompt),
+  });
+  const redoMessage = useRedoMessage({
+    sessionId: sessionId ?? '',
+    directory: sessionDirectory,
+  });
+
   const handleCompact = useCallback(async () => {
-    if (!opcodeUrl || !sessionId) return;
-    if (!model?.providerID || !model?.modelID) {
-      showToast.error('No model selected. Please select a provider and model first.');
-      return;
-    }
+    if (!sessionId) return;
 
     showToast.loading('Compacting session...', { id: `compact-${sessionId}` });
 
     try {
-      const client = createOpenCodeClient(opcodeUrl, sessionDirectory);
-      await client.summarizeSession(sessionId, model.providerID, model.modelID);
+      await compactSession(sessionId);
     } catch (error) {
       showToast.error(`Compact failed: ${error instanceof Error ? error.message : 'Unknown error'}`);
     }
-  }, [opcodeUrl, sessionId, model, sessionDirectory]);
+  }, [sessionId]);
 
   const handleUndo = useCallback(async () => {
-    if (!opcodeUrl || !sessionId) return;
+    if (!sessionId) return;
+    const lastUserMessage = [...messages].reverse().find((message) => message.type === 'user');
+    if (!lastUserMessage || lastUserMessage.type !== 'user') return;
     try {
-      const client = createOpenCodeClient(opcodeUrl, sessionDirectory);
-      await client.sendCommand(sessionId, { command: 'undo', arguments: '' });
-    } catch (error) {
-      showToast.error(`Undo failed: ${error instanceof Error ? error.message : 'Unknown error'}`);
+      await undoMessage.mutateAsync({
+        messageID: lastUserMessage.id,
+        messageContent: lastUserMessage.text,
+      });
+    } catch {
+      // The undo hook surfaces the failure.
     }
-  }, [opcodeUrl, sessionId, sessionDirectory]);
+  }, [messages, sessionId, undoMessage]);
 
   const handleRedo = useCallback(async () => {
-    if (!opcodeUrl || !sessionId) return;
+    if (!sessionId) return;
     try {
-      const client = createOpenCodeClient(opcodeUrl, sessionDirectory);
-      await client.sendCommand(sessionId, { command: 'redo', arguments: '' });
-    } catch (error) {
-      showToast.error(`Redo failed: ${error instanceof Error ? error.message : 'Unknown error'}`);
+      await redoMessage.mutateAsync();
+    } catch {
+      // The redo hook surfaces the failure.
     }
-  }, [opcodeUrl, sessionId, sessionDirectory]);
+  }, [sessionId, redoMessage]);
 
   const handleFork = useCallback(async () => {
-    if (!opcodeUrl || !sessionId) return;
+    if (!sessionId) return;
     try {
-      const client = createOpenCodeClient(opcodeUrl, sessionDirectory);
-      const forkedSession = await client.forkSession(sessionId);
+      const forkedSession = await forkSession(sessionId);
       if (forkedSession?.id) {
         navigate(`/repos/${repoId}/sessions/${forkedSession.id}${sessionRouteSuffix}`);
         showToast.success('Session forked');
@@ -326,7 +359,7 @@ export function SessionDetail() {
     } catch (error) {
       showToast.error(`Fork failed: ${error instanceof Error ? error.message : 'Unknown error'}`);
     }
-  }, [opcodeUrl, sessionId, sessionDirectory, navigate, repoId, sessionRouteSuffix]);
+  }, [sessionId, navigate, repoId, sessionRouteSuffix]);
 
   const handleCloseSession = useCallback(() => {
     const tab = new URLSearchParams(location.search).get('repoTab') ?? undefined;
@@ -361,9 +394,9 @@ export function SessionDetail() {
       ) as HTMLButtonElement;
       submitButton?.click();
     },
-    abortSession: () => {
+    interruptSession: () => {
       if (sessionId) {
-        abortSession.mutate(sessionId);
+        interruptSession.mutate(sessionId);
       }
     },
   });
@@ -413,17 +446,27 @@ export function SessionDetail() {
   }, [preferences?.expandToolCalls, updateSettings]);
 
   const handleExportSession = useCallback(async () => {
-    const data = getMessagesWithParts()
-    if (!data || !session) {
+    if (!session || !sessionId) {
       showToast.error('No session data to export')
       return
     }
-    
-    const { filename, content } = exportSession(data, session)
+
+    let history: SessionMessageInfo[]
+    try {
+      history = await fetchCompleteSessionHistory(sessionId)
+    } catch {
+      showToast.error('Failed to export session')
+      return
+    }
+
+    const { filename, content } = exportSession(
+      applyRevertBoundary(history, session.revert?.messageID),
+      session,
+    )
     if (await downloadMarkdown(content, filename)) {
       showToast.success(`Exported to ${filename}`)
     }
-  }, [getMessagesWithParts, session]);
+  }, [session, sessionId]);
 
   const handleUndoMessage = useCallback((restoredPrompt: string) => {
     promptInputRef.current?.setPromptValue(restoredPrompt)
@@ -513,9 +556,8 @@ export function SessionDetail() {
               <PendingActionsGroup />
             </div>
             <ContextUsageIndicator
-              opcodeUrl={opcodeUrl}
-              sessionID={sessionId}
               directory={sessionDirectory}
+              sessionID={sessionId}
               isConnected={isConnected}
               isReconnecting={isReconnecting}
             />
@@ -523,21 +565,19 @@ export function SessionDetail() {
           </Header.Actions>
         </Header>
 
-        <div className="px-3 sm:px-4">
-          <SessionTodoDisplay sessionID={sessionId} />
-        </div>
       </div>
 
       <div className="relative flex-1 overflow-hidden flex flex-col">
-        <div key={sessionId} data-testid="session-message-scroll" ref={messageContainerRef} className="flex-1 overflow-y-auto overflow-x-hidden overscroll-contain [mask-image:linear-gradient(to_bottom,transparent,black_16px,black)]" style={{ paddingBottom: promptOverlayHeight + inputBottomOffset + PROMPT_OVERLAY_CLEARANCE_PX }}>
+        <div key={sessionId} data-testid="session-message-scroll" ref={messageContainerRef} onScroll={handleMessageScroll} className="flex-1 overflow-y-auto overflow-x-hidden overscroll-contain [mask-image:linear-gradient(to_bottom,transparent,black_16px,black)]" style={{ paddingBottom: promptOverlayHeight + inputBottomOffset + PROMPT_OVERLAY_CLEARANCE_PX }}>
           {repoLoading || sessionLoading || messagesLoading ? (
             <MessageSkeleton />
-          ) : opcodeUrl && sessionDirectory ? (
+          ) : sessionDirectory ? (
             <MessageThread 
-              opcodeUrl={opcodeUrl} 
               sessionID={sessionId} 
               directory={sessionDirectory}
               messages={messages}
+              pending={pendingPrompts}
+              isSessionBusy={isSessionActive}
               onFileClick={handleFileClick}
               onChildSessionClick={handleChildSessionClick}
               onUndoMessage={handleUndoMessage}
@@ -545,7 +585,7 @@ export function SessionDetail() {
             />
           ) : null}
         </div>
-        {opcodeUrl && sessionDirectory && !isEditingMessage && (
+        {sessionDirectory && !isEditingMessage && (
           <div
             ref={promptOverlayRef}
             className="absolute left-0 right-0 flex justify-center"
@@ -555,7 +595,7 @@ export function SessionDetail() {
               <div className="absolute -top-9 right-0 z-50 flex flex-col items-end gap-2">
                 {ttsEnabled && !hasPromptContent && !isSessionActive && latestPlayableAssistant && (
                   <FloatingTTSButton
-                    messageId={latestPlayableAssistant.message.info.id}
+                    messageId={latestPlayableAssistant.messageId}
                     content={latestPlayableAssistant.text}
                   />
                 )}
@@ -580,26 +620,25 @@ export function SessionDetail() {
                   <span className="text-sm font-medium">Waiting for shortcut key...</span>
                 </div>
               )}
-              {minimizedQuestion && minimizedQuestion.sessionID === sessionId && (
-                <MinimizedQuestionIndicator
-                  question={minimizedQuestion}
-                  onRestore={handleRestoreQuestion}
-                  onDismiss={() => rejectQuestion(minimizedQuestion.id)}
+              {minimizedForm && (
+                <MinimizedFormIndicator
+                  form={minimizedForm}
+                  onRestore={handleRestoreForm}
+                  onDismiss={handleDismissMinimizedForm}
                 />
               )}
-              {!minimizedQuestion && currentQuestion && (
-                <QuestionPrompt
-                  key={currentQuestion.id}
-                  question={currentQuestion}
-                  onReply={replyToQuestion}
-                  onReject={rejectQuestion}
-                  onMinimize={() => handleMinimizeQuestion(currentQuestion)}
+              {currentForm && !minimizedForm && (
+                <FormPrompt
+                  key={currentForm.id}
+                  form={currentForm}
+                  onReply={replyToForm}
+                  onCancel={cancelForm}
+                  onMinimize={() => handleMinimizeForm(currentForm)}
                 />
               )}
               <SessionSendErrorBanner sessionId={sessionId} isConnected={isConnected} isReconnecting={isReconnecting} />
               <PromptInput
                 ref={promptInputRef}
-                opcodeUrl={opcodeUrl}
                 directory={sessionDirectory}
                 sessionID={sessionId}
                 showScrollButton={showScrollButton && !hasPromptContent}
@@ -610,6 +649,8 @@ export function SessionDetail() {
                 onShowHelpDialog={handleShowHelpDialog}
                 onToggleDetails={handleToggleDetails}
                 onExportSession={handleExportSession}
+                onUndo={handleUndo}
+                onRedo={handleRedo}
                 onPromptChange={setHasPromptContent}
               />
             </div>
@@ -622,9 +663,8 @@ export function SessionDetail() {
         <DialogContent className="max-w-4xl max-h-[80vh]">
           <DialogTitle>Sessions</DialogTitle>
           <div className="overflow-y-auto max-h-[60vh] mt-4">
-            {opcodeUrl && (
+            {sessionDirectory && (
               <SessionList
-                opcodeUrl={opcodeUrl}
                 directory={repoDirectory}
                 activeSessionID={sessionId || undefined}
                 onSelectSession={(sessionID) => {
@@ -646,20 +686,12 @@ export function SessionDetail() {
         initialSelectedFile={selectedFilePath}
       />
 
-      <RepoLspDialog
-        open={lspDialogOpen}
-        onOpenChange={setLspDialogOpen}
-        opcodeUrl={opcodeUrl}
-        directory={repoDirectory}
-      />
-
-      {opcodeUrl && sessionId && (
+      {sessionId && (
         <RepoSkillsDialog
           open={skillsDialogOpen}
           onOpenChange={setSkillsDialogOpen}
           repoId={repoId}
           sessionId={sessionId}
-          opcodeUrl={opcodeUrl}
           directory={repoDirectory}
           onSkillLoaded={(skill) => showToast.success(`Loaded skill: ${skill.name}`)}
         />

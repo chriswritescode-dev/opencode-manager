@@ -1,4 +1,4 @@
-import { useState, useCallback } from "react";
+import { useState, useCallback, useMemo } from "react";
 import {
   Dialog,
   DialogContent,
@@ -13,6 +13,11 @@ import { Label } from "@/components/ui/label";
 import { Loader2, Key, ExternalLink } from "lucide-react";
 import { providerCredentialsApi } from "@/api/providers";
 import type { ProviderWithModels } from "@/api/providers";
+import { type FormAnswer, type FormValue, type IntegrationKeyMethod } from "@/api/oauth";
+import { buildAnswer, hasMissingAnswers, methodIdentifier, resolveAnswers, setAnswerValue, visibleFields } from "@/lib/formFields";
+import { mapOAuthError } from "@/lib/oauthErrors";
+import { ProviderAuthField } from "@/components/settings/ProviderAuthField";
+import { useProviderAuthMethods } from "@/hooks/useProviderAuthMethods";
 
 interface ApiKeyDialogProps {
   open: boolean;
@@ -30,36 +35,62 @@ export function ApiKeyDialog({
   mode = 'add',
 }: ApiKeyDialogProps) {
   const [apiKey, setApiKey] = useState("");
+  const [answers, setAnswers] = useState<Record<string, FormAnswer>>({});
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
+  const { data: authMethods } = useProviderAuthMethods({ enabled: open && !!provider });
+
+  const keyMethod = useMemo(
+    () => (provider ? authMethods?.[provider.id]?.find((method): method is IntegrationKeyMethod => method.type === 'key') : undefined),
+    [authMethods, provider],
+  );
+
+  const answer = useMemo(
+    () => resolveAnswers(keyMethod?.form, keyMethod ? answers[methodIdentifier(keyMethod)] : undefined),
+    [keyMethod, answers],
+  );
+
+  const fields = useMemo(
+    () => (keyMethod ? visibleFields(keyMethod.form ?? [], answer) : []),
+    [keyMethod, answer],
+  );
+
+  const canSubmit = apiKey.trim().length > 0 && (!keyMethod || !hasMissingAnswers(keyMethod.form ?? [], answer));
+
+  const handleAnswerChange = useCallback((methodID: string, key: string, value: FormValue | undefined) => {
+    setAnswers((prev) => setAnswerValue(prev, methodID, key, value));
+  }, []);
+
   const handleSubmit = useCallback(async () => {
-    if (!provider || !apiKey.trim()) return;
+    if (!provider || !canSubmit) return;
 
     setIsSubmitting(true);
     setError(null);
 
     try {
-      await providerCredentialsApi.set(provider.id, apiKey.trim());
+      const requestAnswer = keyMethod && fields.length > 0 ? buildAnswer(keyMethod.form ?? [], answer) : undefined;
+      await providerCredentialsApi.set(provider.id, apiKey.trim(), requestAnswer);
       setApiKey("");
+      setAnswers({});
       onSuccess();
     } catch (err) {
-      setError("Failed to save API key. Please try again.");
-      console.error("Failed to set API key:", err);
+      setError(mapOAuthError(err, 'credential'));
     } finally {
       setIsSubmitting(false);
     }
-  }, [provider, apiKey, onSuccess]);
+  }, [provider, canSubmit, keyMethod, fields, answer, apiKey, onSuccess]);
 
   const handleClose = useCallback(() => {
     setApiKey("");
+    setAnswers({});
     setError(null);
     onOpenChange(false);
   }, [onOpenChange]);
 
   if (!provider) return null;
 
-  const envVarName = provider.env?.[0] || `${provider.id.toUpperCase()}_API_KEY`;
+  const envVarName = `${provider.id.toUpperCase()}_API_KEY`;
   const isEditMode = mode === 'edit';
 
   return (
@@ -88,7 +119,7 @@ export function ApiKeyDialog({
               value={apiKey}
               onChange={(e) => setApiKey(e.target.value)}
               onKeyDown={(e) => {
-                if (e.key === "Enter" && apiKey.trim()) {
+                if (e.key === "Enter" && canSubmit) {
                   handleSubmit();
                 }
               }}
@@ -98,6 +129,20 @@ export function ApiKeyDialog({
               Environment variable: <code className="bg-muted px-1 py-0.5 rounded">{envVarName}</code>
             </p>
           </div>
+
+          {keyMethod && fields.length > 0 && (
+            <div className="space-y-3">
+              {fields.map((field) => (
+                <ProviderAuthField
+                  key={field.key}
+                  field={field}
+                  value={answer[field.key]}
+                  disabled={isSubmitting}
+                  onChange={(value) => handleAnswerChange(methodIdentifier(keyMethod), field.key, value)}
+                />
+              ))}
+            </div>
+          )}
 
           {error && (
             <p className="text-sm text-destructive">{error}</p>
@@ -120,7 +165,7 @@ export function ApiKeyDialog({
           <Button variant="outline" onClick={handleClose} disabled={isSubmitting}>
             Cancel
           </Button>
-          <Button onClick={handleSubmit} disabled={!apiKey.trim() || isSubmitting}>
+          <Button onClick={handleSubmit} disabled={!canSubmit || isSubmitting}>
             {isSubmitting ? (
               <>
                 <Loader2 className="h-4 w-4 mr-2 animate-spin" />

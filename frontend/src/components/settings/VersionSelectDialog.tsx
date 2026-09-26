@@ -73,7 +73,7 @@ export function VersionSelectDialog({ open, onOpenChange }: VersionSelectDialogP
         <DialogHeader>
           <DialogTitle>Select OpenCode Version</DialogTitle>
           <DialogDescription>
-            Choose a version to install. Current version: {data?.currentVersion ? `v${data.currentVersion}` : 'Unknown'}
+            Choose an OpenCode 2 release to install. Current version: {data?.currentVersion ? `v${data.currentVersion}` : 'Unknown'}
           </DialogDescription>
         </DialogHeader>
 

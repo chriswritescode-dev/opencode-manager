@@ -13,9 +13,10 @@ import type {
   InstallSkillFromGithubRequest,
   InstallSkillResponse,
   OpenCodeDirectoryFileInfo,
+  OpenCodeRestartResponse,
 } from './types/settings'
 import { API_BASE_URL } from '@/config'
-import { fetchWrapper, FetchError } from './fetchWrapper'
+import { fetchWrapper } from './fetchWrapper'
 
 const DEFAULT_USER_ID = 'default'
 
@@ -85,7 +86,7 @@ export const settingsApi = {
     })
   },
 
-  restartOpenCodeServer: async (): Promise<{ success: boolean; message: string; details?: string }> => {
+  restartOpenCodeServer: async (): Promise<OpenCodeRestartResponse> => {
     return fetchWrapper(`${API_BASE_URL}/api/settings/opencode-restart`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
@@ -94,23 +95,6 @@ export const settingsApi = {
 
   getActiveOpenCodeSessions: async (): Promise<{ count: number; sessions: { sessionID: string; directory: string }[] }> => {
     return fetchWrapper(`${API_BASE_URL}/api/settings/opencode-active-sessions`)
-  },
-
-  reloadOpenCodeConfig: async (): Promise<{ success: boolean; message: string; details?: string }> => {
-    try {
-      return fetchWrapper(`${API_BASE_URL}/api/settings/opencode-reload`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-      })
-    } catch (error) {
-      if (error instanceof FetchError && error.statusCode === 404) {
-        return fetchWrapper(`${API_BASE_URL}/api/settings/opencode-restart`, {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-        })
-      }
-      throw error
-    }
   },
 
   rollbackOpenCodeConfig: async (): Promise<{ success: boolean; message: string; fallback?: boolean }> => {
@@ -190,7 +174,7 @@ export const settingsApi = {
     return fetchWrapper(`${API_BASE_URL}/api/settings/agents-md/default`)
   },
 
-  updateAgentsMd: async (content: string): Promise<{ success: boolean }> => {
+  updateAgentsMd: async (content: string): Promise<{ success: boolean; restartRequired?: boolean }> => {
     return fetchWrapper(`${API_BASE_URL}/api/settings/agents-md`, {
       method: 'PUT',
       headers: { 'Content-Type': 'application/json' },
@@ -333,7 +317,7 @@ export interface VersionInfo {
 
 export interface OpenCodeServerAuthStatus {
   isSet: boolean
-  source: 'db' | 'env' | 'none'
+  source: 'db' | 'env' | 'managed'
 }
 
 export async function getOpenCodeServerAuth(): Promise<OpenCodeServerAuthStatus> {

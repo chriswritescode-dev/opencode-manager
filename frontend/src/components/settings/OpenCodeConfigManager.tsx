@@ -19,9 +19,11 @@ import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import { useServerHealth } from '@/hooks/useServerHealth'
 import { useOpenCodeServerActions } from '@/hooks/useOpenCodeServerActions'
 import { useOpenCodeConfigFile, OPEN_CODE_CONFIG_QUERY_KEY } from '@/hooks/useOpenCodeConfigFile'
+import { useOpenCodeApplyFeedback } from '@/hooks/useOpenCodeApplyFeedback'
 import { showToast } from '@/lib/toast'
 import { invalidateConfigCaches } from '@/lib/queryInvalidation'
 import { getOpenCodeApiErrorMessage } from '@/lib/opencode-errors'
+import { mcpServersFromConfig } from '@opencode-manager/shared/opencode'
 import { FetchError } from '@/api/fetchWrapper'
 import { getPreferredOpenCodeConfigSource, downloadOpenCodeConfigSource } from '@/api/types/settings'
 import type { OpenCodeConfigFile, OpenCodeConfigSaveResponse, OpenCodeImportStatus } from '@/api/types/settings'
@@ -75,6 +77,7 @@ export function OpenCodeConfigManager() {
   const hostImportContentId = `${sectionIdPrefix}-host-import`
 
   const queryClient = useQueryClient()
+  const applyOpenCodeSaveFeedback = useOpenCodeApplyFeedback()
   const { data: health } = useServerHealth()
   const [expandedSections, setExpandedSections] = useState<Record<ConfigSectionKey, boolean>>({
     agentsMd: false,
@@ -158,12 +161,10 @@ export function OpenCodeConfigManager() {
 
   const applyOpenCodeConfigSave = (result: OpenCodeConfigSaveResponse) => {
     queryClient.setQueryData<OpenCodeConfigFile>(OPEN_CODE_CONFIG_QUERY_KEY, result)
-    if (result.restartRequired) {
-      showToast.success('Configuration saved. Restart the server to apply changes.')
-    } else {
-      showToast.success('Configuration updated')
-    }
-    invalidateConfigCaches(queryClient, { skipOpenCodeConfig: true })
+    applyOpenCodeSaveFeedback({
+      appliedMessage: 'Configuration updated',
+      restartRequired: result.restartRequired,
+    })
   }
 
   const updateConfigContent = async (newContent: Record<string, unknown>) => {
@@ -209,7 +210,7 @@ export function OpenCodeConfigManager() {
            <div className="flex items-center gap-2">
              <AlertTriangle className="h-4 w-4 shrink-0 text-amber-500" />
              <p className="text-sm">
-               Configuration changes are saved but require a server restart to take effect.
+               Some saved changes require a server restart to take effect.
              </p>
            </div>
            <Button
@@ -278,7 +279,7 @@ export function OpenCodeConfigManager() {
           </div>
 
           <p className="text-xs text-muted-foreground">
-            Merged persisted settings. Saves write to the preferred config file; removing a value deletes its override so an inherited value can reappear. Restart the server to apply changes.
+            Merged persisted settings. Saves write to the preferred config file; removing a value deletes its override so an inherited value can reappear. Saves are applied to the running server; a restart is only requested if applying them fails.
           </p>
 
           <OpenCodeConfigSourcesNotice config={config} />
@@ -459,7 +460,7 @@ export function OpenCodeConfigManager() {
                 <div className="flex min-w-0 items-center gap-3">
                   <h4 className={SECTION_TITLE_CLASS}>MCP Servers</h4>
                   <span className={SECTION_META_CLASS}>
-                    {Object.keys((config.content.mcp as Record<string, unknown> | undefined) ?? {}).length} configured
+                    {Object.keys(mcpServersFromConfig(config.content.mcp)).length} configured
                   </span>
                 </div>
                 <ChevronDown className={cn(SECTION_CHEVRON_CLASS, expandedSections.mcp && 'rotate-180')} />

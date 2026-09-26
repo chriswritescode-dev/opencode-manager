@@ -25,18 +25,27 @@ Local servers run as processes on your machine:
 
 ```json
 {
-  "name": "filesystem",
-  "command": "npx",
-  "args": ["-y", "@modelcontextprotocol/server-filesystem", "/workspace"]
+  "mcp": {
+    "servers": {
+      "filesystem": {
+        "type": "local",
+        "command": [
+          "npx",
+          "-y",
+          "@modelcontextprotocol/server-filesystem",
+          "/workspace"
+        ]
+      }
+    }
+  }
 }
 ```
 
 | Field | Description |
 |-------|-------------|
-| `name` | Unique identifier |
-| `command` | Executable to run |
-| `args` | Command arguments |
-| `env` | Environment variables (optional) |
+| Name (key under `mcp.servers`) | Unique identifier |
+| `command` | Executable and its arguments, as one array |
+| `environment` | Environment variables (optional) |
 
 ### Remote Servers (HTTP)
 
@@ -49,20 +58,26 @@ Remote servers are accessed over HTTP/SSE:
 
 ```json
 {
-  "name": "remote-tools",
-  "url": "https://mcp.example.com/sse"
+  "mcp": {
+    "servers": {
+      "remote-tools": {
+        "type": "remote",
+        "url": "https://mcp.example.com/sse"
+      }
+    }
+  }
 }
 ```
 
 | Field | Description |
 |-------|-------------|
-| `name` | Unique identifier |
-| `url` | Server SSE endpoint |
+| Name (key under `mcp.servers`) | Unique identifier |
+| `url` | Server endpoint |
 | `headers` | HTTP headers (optional) |
 
 ## Server Templates
 
-Pre-built configurations for common MCP servers:
+Pre-built configurations for common MCP servers, in the OpenCode 2 `mcp.servers` shape the Manager writes:
 
 ### Filesystem
 
@@ -70,9 +85,19 @@ Access local files and directories:
 
 ```json
 {
-  "name": "filesystem",
-  "command": "npx",
-  "args": ["-y", "@modelcontextprotocol/server-filesystem", "/path/to/dir"]
+  "mcp": {
+    "servers": {
+      "filesystem": {
+        "type": "local",
+        "command": [
+          "npx",
+          "-y",
+          "@modelcontextprotocol/server-filesystem",
+          "/path/to/dir"
+        ]
+      }
+    }
+  }
 }
 ```
 
@@ -82,11 +107,20 @@ Interact with GitHub repositories:
 
 ```json
 {
-  "name": "github",
-  "command": "npx",
-  "args": ["-y", "@modelcontextprotocol/server-github"],
-  "env": {
-    "GITHUB_TOKEN": "your-token-here"
+  "mcp": {
+    "servers": {
+      "github": {
+        "type": "local",
+        "command": [
+          "npx",
+          "-y",
+          "@modelcontextprotocol/server-github"
+        ],
+        "environment": {
+          "GITHUB_TOKEN": "your-token-here"
+        }
+      }
+    }
   }
 }
 ```
@@ -97,11 +131,20 @@ Query PostgreSQL databases:
 
 ```json
 {
-  "name": "postgres",
-  "command": "npx",
-  "args": ["-y", "@modelcontextprotocol/server-postgres"],
-  "env": {
-    "DATABASE_URL": "postgres://user:pass@host:5432/db"
+  "mcp": {
+    "servers": {
+      "postgres": {
+        "type": "local",
+        "command": [
+          "npx",
+          "-y",
+          "@modelcontextprotocol/server-postgres"
+        ],
+        "environment": {
+          "DATABASE_URL": "postgres://user:pass@host:5432/db"
+        }
+      }
+    }
   }
 }
 ```
@@ -112,11 +155,20 @@ Web search capabilities:
 
 ```json
 {
-  "name": "brave-search",
-  "command": "npx",
-  "args": ["-y", "@modelcontextprotocol/server-brave-search"],
-  "env": {
-    "BRAVE_API_KEY": "your-api-key"
+  "mcp": {
+    "servers": {
+      "brave-search": {
+        "type": "local",
+        "command": [
+          "npx",
+          "-y",
+          "@modelcontextprotocol/server-brave-search"
+        ],
+        "environment": {
+          "BRAVE_API_KEY": "your-api-key"
+        }
+      }
+    }
   }
 }
 ```

@@ -76,6 +76,8 @@ import { opencodeServerManager } from '../../src/services/opencode-single-server
 import type { GitAuthService } from '../../src/services/git-auth'
 import type { ScheduleService } from '../../src/services/schedules'
 import type { AssistantModeStatus, Repo } from '@opencode-manager/shared/types'
+import type { OpenCodeApi } from '@opencode-manager/shared/opencode'
+import { ClientError } from '@opencode-manager/shared/opencode'
 import { getAssistantModeStatus, ensureAssistantMode, buildAssistantRepo } from '../../src/services/assistant-mode'
 
 const mockGitAuthService = {
@@ -334,7 +336,7 @@ describe('Repo Routes', () => {
       expect(res.status).toBe(404)
     })
 
-    it('should return 400 without disposing when repo has no directory', async () => {
+    it('should return 400 without resolving the project when repo has no directory', async () => {
       const mockRepo = {
         id: 1,
         repoUrl: undefined,
@@ -348,38 +350,47 @@ describe('Repo Routes', () => {
       }
       vi.mocked(db.getRepoById).mockReturnValue(mockRepo)
 
-      const forward = vi.fn(async () => new Response(JSON.stringify(true), { status: 200 }))
-      const app = createRepoRoutes(mockDb, mockGitAuthService, mockScheduleService, createStubOpenCodeClient({ forward }))
+      const locationGet = vi.fn(async () => ({
+        directory: '/tmp/test-repo',
+        project: { id: 'project-A', directory: '/tmp/test-repo', canonical: '/tmp/test-repo' },
+      }))
+      const app = createRepoRoutes(mockDb, mockGitAuthService, mockScheduleService, createStubOpenCodeClient({
+        api: { location: { get: locationGet } } as unknown as OpenCodeApi,
+      }))
       const res = await app.request('/1/reset-permissions', { method: 'POST' })
 
       expect(res.status).toBe(400)
-      expect(forward).not.toHaveBeenCalled()
+      expect(locationGet).not.toHaveBeenCalled()
     })
 
-    it('should dispose only the repo directory and return success', async () => {
-      const mockRepo = {
-        id: 1,
-        repoUrl: 'https://github.com/test/repo',
-        localPath: 'repos/test-repo',
-        fullPath: '/tmp/test-repo',
-        sourcePath: '/tmp/test-repo/.git',
-        branch: 'main',
-        defaultBranch: 'main',
-        cloneStatus: 'ready' as const,
-        clonedAt: Date.now(),
-      }
-      vi.mocked(db.getRepoById).mockReturnValue(mockRepo)
+    it('should resolve the repo project, remove its saved permissions, and return the removed count', async () => {
+      vi.mocked(db.getRepoById).mockReturnValue(createMockRepo({ id: 1, fullPath: '/tmp/test-repo' }))
 
-      const forward = vi.fn(async () => new Response(JSON.stringify(true), { status: 200 }))
-      const app = createRepoRoutes(mockDb, mockGitAuthService, mockScheduleService, createStubOpenCodeClient({ forward }))
+      const locationGet = vi.fn(async () => ({
+        directory: '/tmp/test-repo',
+        project: { id: 'project-A', directory: '/tmp/test-repo', canonical: '/tmp/test-repo' },
+      }))
+      const savedList = vi.fn(async () => [
+        { id: 'perm-1', projectID: 'project-A', action: 'bash', resource: '*', time: { created: 1, updated: 1 } },
+        { id: 'perm-2', projectID: 'project-A', action: 'edit', resource: '*', time: { created: 2, updated: 2 } },
+      ])
+      const savedRemove = vi.fn(async () => undefined)
+
+      const app = createRepoRoutes(mockDb, mockGitAuthService, mockScheduleService, createStubOpenCodeClient({
+        api: {
+          location: { get: locationGet },
+          permission: { saved: { list: savedList, remove: savedRemove } },
+        } as unknown as OpenCodeApi,
+      }))
       const res = await app.request('/1/reset-permissions', { method: 'POST' })
 
       expect(res.status).toBe(200)
-      expect(forward).toHaveBeenCalledWith({
-        method: 'POST',
-        path: '/instance/dispose',
-        directory: '/tmp/test-repo',
-      })
+      expect(await res.json()).toEqual({ removed: 2 })
+      expect(locationGet).toHaveBeenCalledWith({ location: { directory: '/tmp/test-repo' } })
+      expect(savedList).toHaveBeenCalledWith({ projectID: 'project-A' })
+      expect(savedRemove).toHaveBeenCalledTimes(2)
+      expect(savedRemove).toHaveBeenCalledWith({ id: 'perm-1' })
+      expect(savedRemove).toHaveBeenCalledWith({ id: 'perm-2' })
     })
   })
 
@@ -939,30 +950,42 @@ describe('Repo Routes', () => {
   })
 
   describe('POST /:id/reset-permissions upstream failure', () => {
-    it('should return 500 when the upstream dispose fails', async () => {
-      vi.mocked(db.getRepoById).mockReturnValue(createMockRepo({ id: 1 }))
-      const forward = vi.fn(async () => new Response('nope', { status: 500 }))
+    it('should return 502 when the OpenCode API call fails', async () => {
+      vi.mocked(db.getRepoById).mockReturnValue(createMockRepo({ id: 1, fullPath: '/tmp/test-repo' }))
+      const locationGet = vi.fn(async () => {
+        throw new ClientError('Transport')
+      })
 
-      const app = createRepoRoutes(mockDb, mockGitAuthService, mockScheduleService, createStubOpenCodeClient({ forward }))
+      const app = createRepoRoutes(mockDb, mockGitAuthService, mockScheduleService, createStubOpenCodeClient({
+        api: { location: { get: locationGet } } as unknown as OpenCodeApi,
+      }))
+      const res = await app.request('/1/reset-permissions', { method: 'POST' })
+
+      expect(res.status).toBe(502)
+      expect(await res.json()).toEqual({ error: 'Failed to reset permissions', code: 'ClientError' })
+    })
+
+    it('should return 500 when listing saved permissions throws', async () => {
+      vi.mocked(db.getRepoById).mockReturnValue(createMockRepo({ id: 1, fullPath: '/tmp/test-repo' }))
+      const locationGet = vi.fn(async () => ({
+        directory: '/tmp/test-repo',
+        project: { id: 'project-A', directory: '/tmp/test-repo', canonical: '/tmp/test-repo' },
+      }))
+      const savedList = vi.fn(async () => {
+        throw new Error('list failed')
+      })
+
+      const app = createRepoRoutes(mockDb, mockGitAuthService, mockScheduleService, createStubOpenCodeClient({
+        api: {
+          location: { get: locationGet },
+          permission: { saved: { list: savedList, remove: vi.fn() } },
+        } as unknown as OpenCodeApi,
+      }))
       const res = await app.request('/1/reset-permissions', { method: 'POST' })
 
       expect(res.status).toBe(500)
       const body = await res.json() as { error: string }
       expect(body.error).toBe('Failed to reset permissions')
-    })
-
-    it('should return 500 when forwarding throws', async () => {
-      vi.mocked(db.getRepoById).mockReturnValue(createMockRepo({ id: 1 }))
-      const forward = vi.fn(async () => {
-        throw new Error('forward failed')
-      })
-
-      const app = createRepoRoutes(mockDb, mockGitAuthService, mockScheduleService, createStubOpenCodeClient({ forward }))
-      const res = await app.request('/1/reset-permissions', { method: 'POST' })
-
-      expect(res.status).toBe(500)
-      const body = await res.json() as { error: string }
-      expect(body.error).toBe('forward failed')
     })
   })
 

@@ -1,76 +1,60 @@
-import { fetchWrapper } from './fetchWrapper'
 import { API_BASE_URL } from '@/config'
+import { fetchWrapper } from './fetchWrapper'
+import { callOpenCode } from './opencodeApi'
+import {
+  isMcpServerNotFoundError,
+  mcpStatusByName,
+  openCodeLocation,
+  type McpServerConfig,
+  type McpStatusMap,
+} from '@opencode-manager/shared/opencode'
 
-export type McpStatus = 
-  | { status: 'connected' }
-  | { status: 'disabled' }
-  | { status: 'failed'; error: string }
-  | { status: 'needs_auth' }
-  | { status: 'needs_client_registration'; error: string }
-
-export type McpStatusMap = Record<string, McpStatus>
-
-export interface McpServerConfig {
-  type: 'local' | 'remote'
-  enabled?: boolean
-  command?: string[]
-  url?: string
-  environment?: Record<string, string>
-  headers?: Record<string, string>
-  timeout?: number
-  oauth?: boolean | {
-    clientId?: string
-    clientSecret?: string
-    scope?: string
-  }
-}
-
-export interface AddMcpServerRequest {
-  name: string
-  config: McpServerConfig
-}
+export type { McpServerConfig, McpStatus } from '@opencode-manager/shared/opencode'
 
 export interface McpAuthStartResponse {
   authorizationUrl: string
   flowId: string
 }
 
-export type McpOAuthFlowStatus = 
+type McpOAuthFlowStatus =
   | { status: 'pending' }
   | { status: 'completed'; serverName: string }
   | { status: 'failed'; error: string }
   | { status: 'unknown' }
 
 export const mcpApi = {
-  async getStatus(): Promise<McpStatusMap> {
-    return fetchWrapper(`${API_BASE_URL}/api/opencode/mcp`)
+  async getStatus(directory?: string): Promise<McpStatusMap> {
+    const { data } = await callOpenCode((api) => api.mcp.list(openCodeLocation(directory)))
+    return mcpStatusByName(data)
   },
 
-  async addServer(name: string, config: McpServerConfig): Promise<McpStatusMap> {
-    return fetchWrapper(`${API_BASE_URL}/api/opencode/mcp`, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ name, config }),
+  async addServer(name: string, config: McpServerConfig): Promise<void> {
+    await callOpenCode((api) => api.mcp.add({ server: name, config }))
+  },
+
+  async removeServer(name: string): Promise<void> {
+    await callOpenCode(async (api) => {
+      try {
+        await api.mcp.remove({ server: name })
+      } catch (error) {
+        if (!isMcpServerNotFoundError(error)) throw error
+      }
     })
   },
 
-  async connect(name: string): Promise<boolean> {
-    return fetchWrapper(`${API_BASE_URL}/api/opencode/mcp/${encodeURIComponent(name)}/connect`, {
-      method: 'POST',
-    })
+  async connect(name: string, directory?: string): Promise<void> {
+    await callOpenCode((api) => api.mcp.connect({ server: name, ...openCodeLocation(directory) }))
   },
 
-  async disconnect(name: string): Promise<boolean> {
-    return fetchWrapper(`${API_BASE_URL}/api/opencode/mcp/${encodeURIComponent(name)}/disconnect`, {
-      method: 'POST',
-    })
+  async disconnect(name: string, directory?: string): Promise<void> {
+    await callOpenCode((api) => api.mcp.disconnect({ server: name, ...openCodeLocation(directory) }))
   },
 
-  async startAuth(name: string, serverUrl: string, scope?: string, clientId?: string, clientSecret?: string, directory?: string): Promise<McpAuthStartResponse> {
+  async startAuth(name: string, directory?: string): Promise<McpAuthStartResponse> {
     return fetchWrapper(`${API_BASE_URL}/api/mcp-oauth-proxy/start`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ serverName: name, serverUrl, scope, clientId, clientSecret, directory }),
+      body: JSON.stringify({ serverName: name, directory }),
     })
   },
 
@@ -82,69 +66,10 @@ export const mcpApi = {
     }
   },
 
-  async completeAuth(name: string, code: string): Promise<McpStatus> {
-    return fetchWrapper(`${API_BASE_URL}/api/opencode/mcp/${encodeURIComponent(name)}/auth/callback`, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ code }),
-    })
-  },
-
-  async authenticate(name: string): Promise<McpStatus> {
-    return fetchWrapper(`${API_BASE_URL}/api/opencode/mcp/${encodeURIComponent(name)}/auth/authenticate`, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({}),
-    })
-  },
-
-  async removeAuth(name: string): Promise<{ success: true }> {
-    return fetchWrapper(`${API_BASE_URL}/api/opencode/mcp/${encodeURIComponent(name)}/auth`, {
+  async removeAuth(name: string, directory?: string): Promise<{ success: true }> {
+    return fetchWrapper(`${API_BASE_URL}/api/mcp-oauth-proxy/credentials/${encodeURIComponent(name)}`, {
       method: 'DELETE',
-    })
-  },
-
-  async getStatusFor(directory: string): Promise<McpStatusMap> {
-    return fetchWrapper(`${API_BASE_URL}/api/opencode/mcp`, {
-      params: { directory },
-    })
-  },
-
-  async getConfigForDirectory(directory: string): Promise<Record<string, unknown>> {
-    return fetchWrapper(`${API_BASE_URL}/api/opencode/config`, {
-      params: { directory },
-    })
-  },
-
-  async connectDirectory(name: string, directory: string): Promise<boolean> {
-    return fetchWrapper(`${API_BASE_URL}/api/settings/mcp/${encodeURIComponent(name)}/connectdirectory`, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ directory }),
-    })
-  },
-
-  async disconnectDirectory(name: string, directory: string): Promise<boolean> {
-    return fetchWrapper(`${API_BASE_URL}/api/settings/mcp/${encodeURIComponent(name)}/disconnectdirectory`, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ directory }),
-    })
-  },
-
-  async authenticateDirectory(name: string, directory: string): Promise<McpStatus> {
-    return fetchWrapper(`${API_BASE_URL}/api/settings/mcp/${encodeURIComponent(name)}/authdirectedir`, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ directory }),
-    })
-  },
-
-  async removeAuthDirectory(name: string, directory: string): Promise<{ success: true }> {
-    return fetchWrapper(`${API_BASE_URL}/api/settings/mcp/${encodeURIComponent(name)}/authdir`, {
-      method: 'DELETE',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ directory }),
+      params: directory ? { directory } : undefined,
     })
   },
 }

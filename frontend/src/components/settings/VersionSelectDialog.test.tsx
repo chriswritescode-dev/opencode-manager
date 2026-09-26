@@ -37,20 +37,20 @@ describe('VersionSelectDialog', () => {
     vi.clearAllMocks()
     mockGetOpenCodeVersions.mockResolvedValue({
       versions: [
-        { version: '1.19.0', tag: 'v1.19.0', name: '', publishedAt: '2026-01-01T00:00:00Z' },
-        { version: '1.18.16', tag: 'v1.18.16', name: '', publishedAt: '2025-12-01T00:00:00Z' },
+        { version: '2.1.0', tag: 'v2.1.0', name: '', publishedAt: '2026-01-01T00:00:00Z' },
+        { version: '2.0.15', tag: 'v2.0.15', name: '', publishedAt: '2025-12-01T00:00:00Z' },
       ],
-      currentVersion: '1.18.16',
+      currentVersion: '2.0.15',
     })
-    mockInstallOpenCodeVersion.mockResolvedValue({ success: true, message: 'ok', oldVersion: null, newVersion: '1.19.0' })
+    mockInstallOpenCodeVersion.mockResolvedValue({ success: true, message: 'ok', oldVersion: null, newVersion: '2.1.0' })
   })
 
   it('lists versions and allows selection', async () => {
     const user = userEvent.setup()
     renderDialog()
 
-    expect(await screen.findByText('v1.19.0')).toBeInTheDocument()
-    const row = screen.getByRole('button', { name: /v1\.19\.0/ })
+    expect(await screen.findByText('v2.1.0')).toBeInTheDocument()
+    const row = screen.getByRole('button', { name: /v2\.1\.0/ })
     expect(row).toBeEnabled()
     expect(screen.getByRole('button', { name: /Select version/i })).toBeDisabled()
 
@@ -62,22 +62,22 @@ describe('VersionSelectDialog', () => {
   it('installs the selected version', async () => {
     mockGetOpenCodeVersions.mockResolvedValue({
       versions: [
-        { version: '1.19.0', tag: 'v1.19.0', name: '', publishedAt: '2026-01-01T00:00:00Z' },
-        { version: '1.18.16', tag: 'v1.18.16', name: '', publishedAt: '2025-12-01T00:00:00Z' },
+        { version: '2.1.0', tag: 'v2.1.0', name: '', publishedAt: '2026-01-01T00:00:00Z' },
+        { version: '2.0.15', tag: 'v2.0.15', name: '', publishedAt: '2025-12-01T00:00:00Z' },
       ],
-      currentVersion: '1.17.0',
+      currentVersion: '2.0.14',
     })
 
     const user = userEvent.setup()
     renderDialog()
 
-    expect(await screen.findByText('v1.19.0')).toBeInTheDocument()
-    const versionRow = screen.getByRole('button', { name: /v1\.19\.0/ })
+    expect(await screen.findByText('v2.1.0')).toBeInTheDocument()
+    const versionRow = screen.getByRole('button', { name: /v2\.1\.0/ })
 
     await user.click(versionRow)
     await user.click(screen.getByRole('button', { name: /^Install$/i }))
 
-    expect(mockInstallOpenCodeVersion).toHaveBeenCalledWith('1.19.0')
-    expect(refreshOpenCodeServerCaches).toHaveBeenCalledWith(expect.any(QueryClient), '1.19.0')
+    expect(mockInstallOpenCodeVersion).toHaveBeenCalledWith('2.1.0')
+    expect(refreshOpenCodeServerCaches).toHaveBeenCalledWith(expect.any(QueryClient), '2.1.0')
   })
 })

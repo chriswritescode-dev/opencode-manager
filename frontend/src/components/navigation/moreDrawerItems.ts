@@ -1,5 +1,5 @@
 import type { LucideIcon } from 'lucide-react'
-import { Plug, Sparkles, ShieldOff, CalendarClock, GitCommitHorizontal, Code2, Settings, LogOut, Plus, Bot, Folder, Clock, SquarePlus, Home } from 'lucide-react'
+import { Plug, Sparkles, ShieldOff, CalendarClock, GitCommitHorizontal, Settings, LogOut, Plus, Bot, Folder, Clock, SquarePlus, Home } from 'lucide-react'
 import { getAssistantPath, isAssistantPath } from '@/lib/navigation'
 import type { SidebarActionKey } from '@/hooks/useSidebarAction'
 
@@ -78,7 +78,6 @@ function buildRouteNavModel(pathname: string): NavModel {
       { key: 'files', label: 'Files', icon: Folder, dialog: 'files' },
       { key: 'mcp', label: 'MCP', icon: Plug, dialog: 'mcp' },
       { key: 'skills', label: 'Skills', icon: Sparkles, dialog: 'skills' },
-      { key: 'lsp', label: 'LSP', icon: Code2, dialog: 'lsp' },
       { key: 'reset-permissions', label: 'Reset Permissions', icon: ShieldOff, dialog: 'resetPermissions', danger: true },
       { key: 'schedules', label: 'Schedules', icon: CalendarClock, to: `/repos/${sessionDetailMatch[1]}/schedules` },
       { key: 'source-control', label: 'Source Control', icon: GitCommitHorizontal, dialog: 'sourceControl' },

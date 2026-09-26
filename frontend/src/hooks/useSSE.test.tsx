@@ -4,24 +4,14 @@ import type { ReactNode } from 'react'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { useSSE } from './useSSE'
 import { useSessionStatus } from '../stores/sessionStatusStore'
-import { useSendErrorStore } from '../stores/sendErrorStore'
-import type { MessageWithParts } from '@/api/types'
-import { createTextPart } from '@/lib/partsBatcher'
+import { showToast } from '@/lib/toast'
 
 const mocks = vi.hoisted(() => ({
-  getSessionStatuses: vi.fn(),
+  active: vi.fn(),
 }))
 
 vi.mock('@/api/opencode', () => ({
-  OpenCodeClient: vi.fn(() => ({
-    getSessionStatuses: mocks.getSessionStatuses,
-  })),
-}))
-
-vi.mock('@/api/settings', () => ({
-  settingsApi: {
-    reloadOpenCodeConfig: vi.fn(),
-  },
+  listActiveSessions: mocks.active,
 }))
 
 vi.mock('@/lib/toast', () => ({
@@ -70,19 +60,30 @@ describe('useSSE', () => {
   beforeEach(() => {
     vi.clearAllMocks()
     MockEventSource.instances = []
-    mocks.getSessionStatuses.mockResolvedValue({})
+    mocks.active.mockResolvedValue({})
     useSessionStatus.getState().replaceStatuses({})
-    useSendErrorStore.setState({ errors: {}, queuedPrompts: {} })
     globalThis.EventSource = MockEventSource as unknown as typeof EventSource
     globalThis.fetch = vi.fn(() => Promise.resolve({ ok: true } as Response))
   })
 
   afterEach(() => {
     useSessionStatus.getState().replaceStatuses({})
-    useSendErrorStore.setState({ errors: {}, queuedPrompts: {} })
     globalThis.EventSource = originalEventSource
     globalThis.fetch = originalFetch
   })
+
+  const createWrapper = (queryClient: QueryClient) => {
+    return ({ children }: { children: ReactNode }) => (
+      <QueryClientProvider client={queryClient}>{children}</QueryClientProvider>
+    )
+  }
+
+  const connect = async (index: number, clientId: string) => {
+    act(() => {
+      MockEventSource.instances[index].emit('connected', { clientId })
+    })
+    await waitFor(() => expect(MockEventSource.instances).toHaveLength(index + 1))
+  }
 
   it('invalidates active session data after reconnecting', async () => {
     const queryClient = new QueryClient({
@@ -91,21 +92,15 @@ describe('useSSE', () => {
       },
     })
     const invalidateQueries = vi.spyOn(queryClient, 'invalidateQueries')
-    const wrapper = ({ children }: { children: ReactNode }) => (
-      <QueryClientProvider client={queryClient}>{children}</QueryClientProvider>
-    )
 
     const { result, unmount } = renderHook(
-      () => useSSE('http://localhost:5551', '/repo', 'session-1'),
-      { wrapper }
+      () => useSSE('/repo', 'session-1'),
+      { wrapper: createWrapper(queryClient) }
     )
 
     await waitFor(() => expect(MockEventSource.instances).toHaveLength(1))
 
-    act(() => {
-      MockEventSource.instances[0].emit('connected', { clientId: 'client-1' })
-    })
-
+    await connect(0, 'client-1')
     await waitFor(() => expect(result.current.isConnected).toBe(true))
     invalidateQueries.mockClear()
 
@@ -121,16 +116,14 @@ describe('useSSE', () => {
 
     await waitFor(() => expect(MockEventSource.instances).toHaveLength(2))
 
-    act(() => {
-      MockEventSource.instances[1].emit('connected', { clientId: 'client-2' })
-    })
+    await connect(1, 'client-2')
 
     await waitFor(() => {
       expect(invalidateQueries).toHaveBeenCalledWith({
-        queryKey: ['opencode', 'session', 'http://localhost:5551', 'session-1', '/repo'],
+        queryKey: ['opencode', 'session', 'session-1', '/repo'],
       })
       expect(invalidateQueries).toHaveBeenCalledWith({
-        queryKey: ['opencode', 'messages', 'http://localhost:5551', 'session-1', '/repo'],
+        queryKey: ['opencode', 'pending-actions', 'session-1', '/repo'],
       })
     })
 
@@ -143,22 +136,17 @@ describe('useSSE', () => {
         queries: { retry: false },
       },
     })
-    const wrapper = ({ children }: { children: ReactNode }) => (
-      <QueryClientProvider client={queryClient}>{children}</QueryClientProvider>
-    )
 
     useSessionStatus.getState().setStatus('session-1', { type: 'busy' })
 
     const { unmount } = renderHook(
-      () => useSSE('http://localhost:5551', '/repo', 'session-1'),
-      { wrapper }
+      () => useSSE('/repo', 'session-1'),
+      { wrapper: createWrapper(queryClient) }
     )
 
     await waitFor(() => expect(MockEventSource.instances).toHaveLength(1))
 
-    act(() => {
-      MockEventSource.instances[0].emit('connected', { clientId: 'client-1' })
-    })
+    await connect(0, 'client-1')
 
     await waitFor(() => {
       expect(useSessionStatus.getState().getStatus('session-1')).toEqual({ type: 'idle' })
@@ -187,37 +175,30 @@ describe('useSSE', () => {
         queries: { retry: false },
       },
     })
-    const wrapper = ({ children }: { children: ReactNode }) => (
-      <QueryClientProvider client={queryClient}>{children}</QueryClientProvider>
-    )
 
-    let resolveRepoA: (value: Record<string, { type: 'busy' }>) => void = () => {}
-    let resolveRepoB: (value: Record<string, { type: 'busy' }>) => void = () => {}
-    mocks.getSessionStatuses
+    let resolveRepoA: (value: Record<string, { type: 'running' }>) => void = () => {}
+    let resolveRepoB: (value: Record<string, { type: 'running' }>) => void = () => {}
+    mocks.active
       .mockImplementationOnce(() => new Promise((resolve) => { resolveRepoA = resolve }))
       .mockImplementationOnce(() => new Promise((resolve) => { resolveRepoB = resolve }))
 
     const { rerender, unmount } = renderHook(
-      ({ directory }) => useSSE('http://localhost:5551', directory, 'session-1'),
-      { wrapper, initialProps: { directory: '/repo-a' } }
+      ({ directory }) => useSSE(directory, 'session-1'),
+      { wrapper: createWrapper(queryClient), initialProps: { directory: '/repo-a' } }
     )
 
     await waitFor(() => expect(MockEventSource.instances).toHaveLength(1))
 
-    act(() => {
-      MockEventSource.instances[0].emit('connected', { clientId: 'client-1' })
-    })
+    await connect(0, 'client-1')
 
     rerender({ directory: '/repo-b' })
 
     await waitFor(() => expect(MockEventSource.instances).toHaveLength(2))
 
-    act(() => {
-      MockEventSource.instances[1].emit('connected', { clientId: 'client-2' })
-    })
+    await connect(1, 'client-2')
 
     await act(async () => {
-      resolveRepoB({ 'session-b': { type: 'busy' } })
+      resolveRepoB({ 'session-b': { type: 'running' } })
     })
 
     await waitFor(() => {
@@ -225,7 +206,7 @@ describe('useSSE', () => {
     })
 
     await act(async () => {
-      resolveRepoA({ 'session-a': { type: 'busy' } })
+      resolveRepoA({ 'session-a': { type: 'running' } })
     })
 
     expect(useSessionStatus.getState().getStatus('session-b')).toEqual({ type: 'busy' })
@@ -234,59 +215,36 @@ describe('useSSE', () => {
     unmount()
   })
 
-  it('sets single-session cache and invalidates session list on session.updated', async () => {
+  it('invalidates the session list and cached session query on session.created', async () => {
     const queryClient = new QueryClient({
       defaultOptions: {
         queries: { retry: false },
       },
     })
-    const invalidateQueriesSpy = vi.spyOn(queryClient, 'invalidateQueries')
-    const setQueryDataSpy = vi.spyOn(queryClient, 'setQueryData')
-
-    const wrapper = ({ children }: { children: ReactNode }) => (
-      <QueryClientProvider client={queryClient}>{children}</QueryClientProvider>
-    )
+    const invalidateQueries = vi.spyOn(queryClient, 'invalidateQueries')
+    queryClient.setQueryData(['opencode', 'session', 'session-2', '/repo'], { id: 'session-2' })
 
     const { result, unmount } = renderHook(
-      () => useSSE('http://localhost:5551', '/repo', 'session-1'),
-      { wrapper }
+      () => useSSE('/repo', 'session-1'),
+      { wrapper: createWrapper(queryClient) }
     )
 
     await waitFor(() => expect(MockEventSource.instances).toHaveLength(1))
-
-    act(() => {
-      MockEventSource.instances[0].emit('connected', { clientId: 'client-1' })
-    })
-
+    await connect(0, 'client-1')
     await waitFor(() => expect(result.current.isConnected).toBe(true))
-
-    // Clear initial connection-related calls
-    invalidateQueriesSpy.mockClear()
-    setQueryDataSpy.mockClear()
-
-    const sessionData = {
-      id: 'session-2',
-      projectID: 'proj-1',
-      title: 'Updated Session',
-      time: { created: 1000, updated: 2000 },
-    }
+    invalidateQueries.mockClear()
 
     act(() => {
       MockEventSource.instances[0].emit('message', {
-        type: 'session.updated',
-        properties: { info: sessionData },
+        type: 'session.created',
+        directory: '/repo',
+        data: { sessionID: 'session-2', projectID: 'proj-1', slug: 'slug', location: { directory: '/repo' } },
       })
     })
 
     await waitFor(() => {
-      expect(setQueryDataSpy).toHaveBeenCalledWith(
-        ['opencode', 'session', 'http://localhost:5551', 'session-2', '/repo'],
-        sessionData,
-      )
-    })
-
-    await waitFor(() => {
-      expect(invalidateQueriesSpy).toHaveBeenCalledWith(
+      expect(invalidateQueries).toHaveBeenCalledWith({ queryKey: ['opencode', 'session', 'session-2'] })
+      expect(invalidateQueries).toHaveBeenCalledWith(
         expect.objectContaining({ predicate: expect.any(Function) }),
       )
     })
@@ -294,43 +252,308 @@ describe('useSSE', () => {
     unmount()
   })
 
-  it('clears optimistic active status when session status reports idle', async () => {
+  it('invalidates the session list and cached session query on session.renamed', async () => {
     const queryClient = new QueryClient({
       defaultOptions: {
         queries: { retry: false },
       },
     })
-    const wrapper = ({ children }: { children: ReactNode }) => (
-      <QueryClientProvider client={queryClient}>{children}</QueryClientProvider>
-    )
-
-    queryClient.setQueryData(
-      ['opencode', 'messages', 'http://localhost:5551', 'session-1', '/repo'],
-      [],
-    )
-    useSessionStatus.getState().setOptimisticActive('session-1')
+    const invalidateQueries = vi.spyOn(queryClient, 'invalidateQueries')
+    queryClient.setQueryData(['opencode', 'session', 'session-2', '/repo'], { id: 'session-2' })
 
     const { result, unmount } = renderHook(
-      () => useSSE('http://localhost:5551', '/repo', 'session-1'),
-      { wrapper },
+      () => useSSE('/repo', 'session-1'),
+      { wrapper: createWrapper(queryClient) }
     )
 
     await waitFor(() => expect(MockEventSource.instances).toHaveLength(1))
+    await connect(0, 'client-1')
+    await waitFor(() => expect(result.current.isConnected).toBe(true))
+    invalidateQueries.mockClear()
 
     act(() => {
-      MockEventSource.instances[0].emit('connected', { clientId: 'client-1' })
+      MockEventSource.instances[0].emit('message', {
+        type: 'session.renamed',
+        directory: '/repo',
+        data: { sessionID: 'session-2', title: 'Renamed' },
+      })
     })
 
+    await waitFor(() => {
+      expect(invalidateQueries).toHaveBeenCalledWith({ queryKey: ['opencode', 'session', 'session-2'] })
+      expect(invalidateQueries).toHaveBeenCalledWith(
+        expect.objectContaining({ predicate: expect.any(Function) }),
+      )
+    })
+
+    unmount()
+  })
+
+  it('invalidates the session list and removes the session query on session.deleted', async () => {
+    const queryClient = new QueryClient({
+      defaultOptions: {
+        queries: { retry: false },
+      },
+    })
+    const invalidateQueries = vi.spyOn(queryClient, 'invalidateQueries')
+    const removeQueries = vi.spyOn(queryClient, 'removeQueries')
+    queryClient.setQueryData(['opencode', 'session', 'session-2', '/repo'], { id: 'session-2' })
+
+    const { result, unmount } = renderHook(
+      () => useSSE('/repo', 'session-1'),
+      { wrapper: createWrapper(queryClient) }
+    )
+
+    await waitFor(() => expect(MockEventSource.instances).toHaveLength(1))
+    await connect(0, 'client-1')
     await waitFor(() => expect(result.current.isConnected).toBe(true))
-    useSessionStatus.getState().setOptimisticActive('session-1')
+    invalidateQueries.mockClear()
+
+    act(() => {
+      MockEventSource.instances[0].emit('message', {
+        type: 'session.deleted',
+        directory: '/repo',
+        data: { sessionID: 'session-2' },
+      })
+    })
+
+    await waitFor(() => {
+      expect(removeQueries).toHaveBeenCalledWith({ queryKey: ['opencode', 'session', 'session-2'] })
+      expect(invalidateQueries).toHaveBeenCalledWith(
+        expect.objectContaining({ predicate: expect.any(Function) }),
+      )
+    })
+
+    unmount()
+  })
+
+  it('invalidates the session list on session.moved', async () => {
+    const queryClient = new QueryClient({
+      defaultOptions: {
+        queries: { retry: false },
+      },
+    })
+    const invalidateQueries = vi.spyOn(queryClient, 'invalidateQueries')
+
+    const { result, unmount } = renderHook(
+      () => useSSE('/repo', 'session-1'),
+      { wrapper: createWrapper(queryClient) }
+    )
+
+    await waitFor(() => expect(MockEventSource.instances).toHaveLength(1))
+    await connect(0, 'client-1')
+    await waitFor(() => expect(result.current.isConnected).toBe(true))
+    invalidateQueries.mockClear()
+
+    act(() => {
+      MockEventSource.instances[0].emit('message', {
+        type: 'session.moved',
+        directory: '/repo',
+        data: { sessionID: 'session-2', projectID: 'proj-1', location: { directory: '/repo-2' } },
+      })
+    })
+
+    await waitFor(() => {
+      expect(invalidateQueries).toHaveBeenCalledWith(
+        expect.objectContaining({ predicate: expect.any(Function) }),
+      )
+    })
+
+    unmount()
+  })
+
+  it('reconciles model and agent selection events into the cached session', async () => {
+    const queryClient = new QueryClient({
+      defaultOptions: {
+        queries: { retry: false },
+      },
+    })
+    queryClient.setQueryData(['opencode', 'session', 'session-2', '/repo'], {
+      id: 'session-2',
+      agent: 'build',
+      model: { providerID: 'anthropic', id: 'claude' },
+    })
+
+    const { result, unmount } = renderHook(
+      () => useSSE('/repo', 'session-1'),
+      { wrapper: createWrapper(queryClient) }
+    )
+
+    await waitFor(() => expect(MockEventSource.instances).toHaveLength(1))
+    await connect(0, 'client-1')
+    await waitFor(() => expect(result.current.isConnected).toBe(true))
+
+    act(() => {
+      MockEventSource.instances[0].emit('message', {
+        type: 'session.model.selected',
+        directory: '/repo',
+        data: { sessionID: 'session-2', model: { providerID: 'openai', id: 'gpt-4' } },
+      })
+      MockEventSource.instances[0].emit('message', {
+        type: 'session.agent.selected',
+        directory: '/repo',
+        data: { sessionID: 'session-2', agent: 'plan' },
+      })
+    })
+
+    expect(queryClient.getQueryData(['opencode', 'session', 'session-2', '/repo'])).toMatchObject({
+      model: { providerID: 'openai', id: 'gpt-4' },
+      agent: 'plan',
+    })
+
+    unmount()
+  })
+
+  it('patches the cached session revert from revert lifecycle events', async () => {
+    const queryClient = new QueryClient({
+      defaultOptions: {
+        queries: { retry: false },
+      },
+    })
+    const sessionKey = ['opencode', 'session', 'session-1', '/repo']
+    queryClient.setQueryData(sessionKey, { id: 'session-1' })
+
+    const { result, unmount } = renderHook(
+      () => useSSE('/repo', 'session-1'),
+      { wrapper: createWrapper(queryClient) }
+    )
+
+    await waitFor(() => expect(MockEventSource.instances).toHaveLength(1))
+    await connect(0, 'client-1')
+    await waitFor(() => expect(result.current.isConnected).toBe(true))
+
+    act(() => {
+      MockEventSource.instances[0].emit('message', {
+        type: 'session.revert.staged',
+        directory: '/repo',
+        data: { sessionID: 'session-1', revert: { messageID: 'message-3' } },
+      })
+    })
+
+    expect(queryClient.getQueryData(sessionKey)).toMatchObject({ revert: { messageID: 'message-3' } })
+
+    act(() => {
+      MockEventSource.instances[0].emit('message', {
+        type: 'session.revert.cleared',
+        directory: '/repo',
+        data: { sessionID: 'session-1' },
+      })
+    })
+
+    expect(queryClient.getQueryData<{ revert?: unknown }>(sessionKey)?.revert).toBeUndefined()
+
+    act(() => {
+      MockEventSource.instances[0].emit('message', {
+        type: 'session.revert.staged',
+        directory: '/repo',
+        data: { sessionID: 'session-1', revert: { messageID: 'message-4' } },
+      })
+      MockEventSource.instances[0].emit('message', {
+        type: 'session.revert.committed',
+        directory: '/repo',
+        data: { sessionID: 'session-1' },
+      })
+    })
+
+    expect(queryClient.getQueryData<{ revert?: unknown }>(sessionKey)?.revert).toBeUndefined()
+
+    unmount()
+  })
+
+  it('refreshes session lists and the current session on an upstream resync without re-reading pending actions', async () => {
+    const queryClient = new QueryClient({
+      defaultOptions: {
+        queries: { retry: false },
+      },
+    })
+    const invalidateQueries = vi.spyOn(queryClient, 'invalidateQueries')
+
+    const { result, unmount } = renderHook(
+      () => useSSE('/repo', 'session-1'),
+      { wrapper: createWrapper(queryClient) }
+    )
+
+    await waitFor(() => expect(MockEventSource.instances).toHaveLength(1))
+    await connect(0, 'client-1')
+    await waitFor(() => expect(result.current.isConnected).toBe(true))
+    invalidateQueries.mockClear()
+
+    act(() => {
+      MockEventSource.instances[0].emit('resync', { timestamp: Date.now() })
+    })
+
+    expect(invalidateQueries).toHaveBeenCalledWith({
+      queryKey: ['opencode', 'session', 'session-1', '/repo'],
+    })
+    expect(invalidateQueries).toHaveBeenCalledWith(
+      expect.objectContaining({ predicate: expect.any(Function) }),
+    )
+    expect(invalidateQueries).not.toHaveBeenCalledWith({
+      queryKey: ['opencode', 'pending-actions', 'session-1', '/repo'],
+    })
+
+    unmount()
+  })
+
+  it('handles envelopes whose directory is null', async () => {
+    const queryClient = new QueryClient({
+      defaultOptions: {
+        queries: { retry: false },
+      },
+    })
+
+    const { result, unmount } = renderHook(
+      () => useSSE('/repo', 'session-1'),
+      { wrapper: createWrapper(queryClient) }
+    )
+
+    await waitFor(() => expect(MockEventSource.instances).toHaveLength(1))
+    await connect(0, 'client-1')
+    await waitFor(() => expect(result.current.isConnected).toBe(true))
+
+    act(() => {
+      MockEventSource.instances[0].emit('message', {
+        directory: null,
+        payload: { type: 'session.execution.started', data: { sessionID: 'session-9' } },
+      })
+    })
+
+    expect(useSessionStatus.getState().getStatus('session-9')).toEqual({ type: 'busy' })
+
+    unmount()
+  })
+
+  it('applies session.status and session.idle to the status store', async () => {
+    const queryClient = new QueryClient({
+      defaultOptions: {
+        queries: { retry: false },
+      },
+    })
+
+    const { result, unmount } = renderHook(
+      () => useSSE('/repo', 'session-1'),
+      { wrapper: createWrapper(queryClient) }
+    )
+
+    await waitFor(() => expect(MockEventSource.instances).toHaveLength(1))
+    await connect(0, 'client-1')
+    await waitFor(() => expect(result.current.isConnected).toBe(true))
 
     act(() => {
       MockEventSource.instances[0].emit('message', {
         type: 'session.status',
-        properties: {
-          sessionID: 'session-1',
-          status: { type: 'idle' },
-        },
+        directory: '/repo',
+        data: { sessionID: 'session-1', status: { type: 'busy' } },
+      })
+    })
+
+    expect(useSessionStatus.getState().getStatus('session-1')).toEqual({ type: 'busy' })
+
+    act(() => {
+      MockEventSource.instances[0].emit('message', {
+        type: 'session.idle',
+        directory: '/repo',
+        data: { sessionID: 'session-1' },
       })
     })
 
@@ -339,412 +562,223 @@ describe('useSSE', () => {
     unmount()
   })
 
-  it('stores queued prompt text for restoration when the queued session errors', async () => {
+  it('applies session execution lifecycle events to the status store', async () => {
     const queryClient = new QueryClient({
       defaultOptions: {
         queries: { retry: false },
       },
     })
-    const wrapper = ({ children }: { children: ReactNode }) => (
-      <QueryClientProvider client={queryClient}>{children}</QueryClientProvider>
-    )
-
-    useSendErrorStore.getState().setQueuedPrompt('session-1', 'queued message')
 
     const { result, unmount } = renderHook(
-      () => useSSE('http://localhost:5551', '/repo', 'session-1'),
-      { wrapper },
+      () => useSSE('/repo', 'session-1'),
+      { wrapper: createWrapper(queryClient) }
     )
 
     await waitFor(() => expect(MockEventSource.instances).toHaveLength(1))
-
-    act(() => {
-      MockEventSource.instances[0].emit('connected', { clientId: 'client-1' })
-    })
-
+    await connect(0, 'client-1')
     await waitFor(() => expect(result.current.isConnected).toBe(true))
 
-    act(() => {
-      MockEventSource.instances[0].emit('message', {
-        type: 'message.updated',
-        properties: {
-          info: {
-            id: 'assistant-current',
-            role: 'assistant',
-            sessionID: 'session-1',
-            time: { created: 1 },
-          },
-        },
-      })
-    })
-
-    act(() => {
-      MockEventSource.instances[0].emit('message', {
-        type: 'session.error',
-        properties: {
-          sessionID: 'session-1',
-          error: {
-            name: 'UnknownError',
-            data: { message: 'Queued send failed' },
-          },
-        },
-      })
-    })
-
-    expect(useSendErrorStore.getState().getError('session-1')).toEqual({
-      sessionID: 'session-1',
-      title: 'Error',
-      message: 'Queued send failed',
-      failedPrompt: 'queued message',
-      kind: 'session',
-    })
-
-    unmount()
-  })
-
-  it('retracts a network send error when the server confirms session activity', async () => {
-    const queryClient = new QueryClient({ defaultOptions: { queries: { retry: false } } })
-    const wrapper = ({ children }: { children: ReactNode }) => (
-      <QueryClientProvider client={queryClient}>{children}</QueryClientProvider>
-    )
-
-    useSendErrorStore.getState().setError({
-      sessionID: 'session-1',
-      title: 'Connection Failed',
-      message: 'Could not connect to the server.',
-      failedPrompt: 'in-flight prompt',
-      kind: 'network',
-    })
-
-    const { result, unmount } = renderHook(
-      () => useSSE('http://localhost:5551', '/repo', 'session-1'),
-      { wrapper },
-    )
-
-    await waitFor(() => expect(MockEventSource.instances).toHaveLength(1))
-    act(() => {
-      MockEventSource.instances[0].emit('connected', { clientId: 'client-1' })
-    })
-    await waitFor(() => expect(result.current.isConnected).toBe(true))
-
-    act(() => {
-      MockEventSource.instances[0].emit('message', {
-        type: 'message.updated',
-        properties: {
-          info: { id: 'assistant-1', role: 'assistant', sessionID: 'session-1', time: { created: 1 } },
-        },
-      })
-    })
-
-    expect(useSendErrorStore.getState().getError('session-1')).toBeNull()
-
-    unmount()
-  })
-
-  it('retracts a network send error when the session goes idle', async () => {
-    const queryClient = new QueryClient({ defaultOptions: { queries: { retry: false } } })
-    const wrapper = ({ children }: { children: ReactNode }) => (
-      <QueryClientProvider client={queryClient}>{children}</QueryClientProvider>
-    )
-
-    useSendErrorStore.getState().setError({
-      sessionID: 'session-1',
-      title: 'Request Timeout',
-      message: 'The request took too long.',
-      kind: 'network',
-    })
-
-    const { result, unmount } = renderHook(
-      () => useSSE('http://localhost:5551', '/repo', 'session-1'),
-      { wrapper },
-    )
-
-    await waitFor(() => expect(MockEventSource.instances).toHaveLength(1))
-    act(() => {
-      MockEventSource.instances[0].emit('connected', { clientId: 'client-1' })
-    })
-    await waitFor(() => expect(result.current.isConnected).toBe(true))
-
-    act(() => {
-      MockEventSource.instances[0].emit('message', {
-        type: 'session.idle',
-        properties: { sessionID: 'session-1' },
-      })
-    })
-
-    expect(useSendErrorStore.getState().getError('session-1')).toBeNull()
-
-    unmount()
-  })
-
-  it('preserves a server-reported session error when the session later goes idle', async () => {
-    const queryClient = new QueryClient({ defaultOptions: { queries: { retry: false } } })
-    const wrapper = ({ children }: { children: ReactNode }) => (
-      <QueryClientProvider client={queryClient}>{children}</QueryClientProvider>
-    )
-
-    useSendErrorStore.getState().setQueuedPrompt('session-1', 'queued message')
-
-    const { result, unmount } = renderHook(
-      () => useSSE('http://localhost:5551', '/repo', 'session-1'),
-      { wrapper },
-    )
-
-    await waitFor(() => expect(MockEventSource.instances).toHaveLength(1))
-    act(() => {
-      MockEventSource.instances[0].emit('connected', { clientId: 'client-1' })
-    })
-    await waitFor(() => expect(result.current.isConnected).toBe(true))
-
-    act(() => {
-      MockEventSource.instances[0].emit('message', {
-        type: 'session.error',
-        properties: {
-          sessionID: 'session-1',
-          error: { name: 'UnknownError', data: { message: 'Queued send failed' } },
-        },
-      })
-    })
-
-    act(() => {
-      MockEventSource.instances[0].emit('message', {
-        type: 'session.idle',
-        properties: { sessionID: 'session-1' },
-      })
-    })
-
-    expect(useSendErrorStore.getState().getError('session-1')).not.toBeNull()
-
-    unmount()
-  })
-
-  it('does not create a send error banner once the queued prompt has been cleared', async () => {
-    const queryClient = new QueryClient({
-      defaultOptions: {
-        queries: { retry: false },
-      },
-    })
-    const wrapper = ({ children }: { children: ReactNode }) => (
-      <QueryClientProvider client={queryClient}>{children}</QueryClientProvider>
-    )
-
-    useSendErrorStore.getState().setQueuedPrompt('session-1', 'queued message')
-
-    const { result, unmount } = renderHook(
-      () => useSSE('http://localhost:5551', '/repo', 'session-1'),
-      { wrapper },
-    )
-
-    await waitFor(() => expect(MockEventSource.instances).toHaveLength(1))
-
-    act(() => {
-      MockEventSource.instances[0].emit('connected', { clientId: 'client-1' })
-    })
-
-    await waitFor(() => expect(result.current.isConnected).toBe(true))
-
-    act(() => {
-      MockEventSource.instances[0].emit('message', {
-        type: 'message.updated',
-        properties: {
-          info: {
-            id: 'queued-user',
-            role: 'user',
-            sessionID: 'session-1',
-            time: { created: 1 },
-          },
-        },
-      })
-    })
-
-    act(() => {
-      MockEventSource.instances[0].emit('message', {
-        type: 'session.error',
-        properties: {
-          sessionID: 'session-1',
-          error: {
-            name: 'UnknownError',
-            data: { message: 'Unrelated failure' },
-          },
-        },
-      })
-    })
-
-    expect(useSendErrorStore.getState().getError('session-1')).toBeNull()
-
-    unmount()
-  })
-
-  it('routes streamed part deltas to the event directory in multi-directory subscriptions', async () => {
-    const origRAF = window.requestAnimationFrame
-    window.requestAnimationFrame = ((cb: FrameRequestCallback) => {
-      cb(0)
-      return 0
-    }) as typeof window.requestAnimationFrame
-
-    try {
-      const queryClient = new QueryClient({
-        defaultOptions: { queries: { retry: false } },
-      })
-
-      // Seed both directory caches before rendering the hook
-      queryClient.setQueryData(
-        ['opencode', 'messages', 'http://localhost:5551', 'session-1', '/repo-a'],
-        [{
-          ...assistantMessage('session-1', 'message-1'),
-          parts: [createTextPart('session-1', 'message-1', 'part-1', 'A')],
-        }],
-      )
-      queryClient.setQueryData(
-        ['opencode', 'messages', 'http://localhost:5551', 'session-1', '/repo-b'],
-        [{
-          ...assistantMessage('session-1', 'message-1'),
-          parts: [createTextPart('session-1', 'message-1', 'part-1', 'B')],
-        }],
-      )
-
-      const wrapper = ({ children }: { children: ReactNode }) => (
-        <QueryClientProvider client={queryClient}>{children}</QueryClientProvider>
-      )
-
-      // Use stable reference to avoid re-render loop with inline array
-      const directories = ['/repo-a', '/repo-b']
-      const { result, unmount } = renderHook(
-        () => useSSE('http://localhost:5551', directories, 'session-1'),
-        { wrapper },
-      )
-
-      await waitFor(() => {
-        expect(MockEventSource.instances.length).toBeGreaterThanOrEqual(1)
-      })
-
-      const eventSource = MockEventSource.instances[MockEventSource.instances.length - 1]
-
+    const emit = (type: string, data: Record<string, unknown>) => {
       act(() => {
-        eventSource.emit('connected', { clientId: 'client-1' })
+        MockEventSource.instances[0].emit('message', { type, directory: '/repo', data })
       })
-
-      await waitFor(() => expect(result.current.isConnected).toBe(true))
-
-      act(() => {
-        eventSource.emit('message', {
-          type: 'message.part.delta',
-          directory: '/repo-b',
-          properties: {
-            sessionID: 'session-1',
-            messageID: 'message-1',
-            partID: 'part-1',
-            field: 'text',
-            delta: ' + streamed',
-          },
-        })
-      })
-
-      const repoBData = queryClient.getQueryData<MessageWithParts[]>([
-        'opencode', 'messages', 'http://localhost:5551', 'session-1', '/repo-b',
-      ])
-      expect(repoBData![0].parts[0]).toHaveProperty('text', 'B + streamed')
-
-      const repoAData = queryClient.getQueryData<MessageWithParts[]>([
-        'opencode', 'messages', 'http://localhost:5551', 'session-1', '/repo-a',
-      ])
-      expect(repoAData![0].parts[0]).toHaveProperty('text', 'A')
-
-      unmount()
-    } finally {
-      window.requestAnimationFrame = origRAF
     }
+
+    emit('session.execution.started', { sessionID: 'session-1' })
+    expect(useSessionStatus.getState().getStatus('session-1')).toEqual({ type: 'busy' })
+
+    emit('session.execution.succeeded', { sessionID: 'session-1' })
+    expect(useSessionStatus.getState().getStatus('session-1')).toEqual({ type: 'idle' })
+
+    emit('session.execution.started', { sessionID: 'session-1' })
+    emit('session.execution.failed', { sessionID: 'session-1', error: { message: 'failed' } })
+    expect(useSessionStatus.getState().getStatus('session-1')).toEqual({ type: 'idle' })
+
+    emit('session.execution.started', { sessionID: 'session-1' })
+    emit('session.execution.interrupted', { sessionID: 'session-1', reason: 'user' })
+    expect(useSessionStatus.getState().getStatus('session-1')).toEqual({ type: 'idle' })
+
+    unmount()
   })
 
-  it('processes part deltas when directory transitions from undefined to a real value', async () => {
-    const origRAF = window.requestAnimationFrame
-    window.requestAnimationFrame = ((cb: FrameRequestCallback) => {
-      cb(0)
-      return 0
-    }) as typeof window.requestAnimationFrame
+  it('ignores message, todo, and form events', async () => {
+    const queryClient = new QueryClient({
+      defaultOptions: {
+        queries: { retry: false },
+      },
+    })
+    const invalidateQueries = vi.spyOn(queryClient, 'invalidateQueries')
+    const setQueryData = vi.spyOn(queryClient, 'setQueryData')
 
-    try {
-      const queryClient = new QueryClient({
-        defaultOptions: { queries: { retry: false } },
-      })
-      const wrapper = ({ children }: { children: ReactNode }) => (
-        <QueryClientProvider client={queryClient}>{children}</QueryClientProvider>
-      )
+    const { result, unmount } = renderHook(
+      () => useSSE('/repo', 'session-1'),
+      { wrapper: createWrapper(queryClient) }
+    )
 
-      // Seed cache with an empty part
-      queryClient.setQueryData(
-        ['opencode', 'messages', 'http://localhost:5551', 'session-1', '/repo'],
-        [{
-          ...assistantMessage('session-1', 'message-1'),
-          parts: [createTextPart('session-1', 'message-1', 'part-1', '')],
-        }],
-      )
+    await waitFor(() => expect(MockEventSource.instances).toHaveLength(1))
+    await connect(0, 'client-1')
+    await waitFor(() => expect(result.current.isConnected).toBe(true))
+    invalidateQueries.mockClear()
+    setQueryData.mockClear()
 
-      // Initial render with directory=undefined — batcher should be created eagerly
-      const { rerender, unmount } = renderHook(
-        ({ directory }) => useSSE('http://localhost:5551', directory, 'session-1'),
-        { wrapper, initialProps: { directory: undefined as string | undefined } },
-      )
+    act(() => {
+      const events = [
+        { type: 'message.updated', data: { info: { id: 'message-1', sessionID: 'session-1' } } },
+        { type: 'message.removed', data: { sessionID: 'session-1', messageID: 'message-1' } },
+        { type: 'todo.updated', data: { sessionID: 'session-1', todos: [] } },
+        { type: 'form.replied', data: { id: 'form-1', sessionID: 'session-1', answer: {} } },
+        { type: 'form.cancelled', data: { id: 'form-1', sessionID: 'session-1' } },
+      ]
+      for (const event of events) {
+        MockEventSource.instances[0].emit('message', { ...event, directory: '/repo' })
+      }
+    })
 
-      // No SSE subscription yet because directoriesList is empty
-      expect(MockEventSource.instances).toHaveLength(0)
+    expect(invalidateQueries).not.toHaveBeenCalled()
+    expect(setQueryData).not.toHaveBeenCalled()
 
-      // Re-render with a real directory to start the SSE subscription
-      rerender({ directory: '/repo' })
+    unmount()
+  })
 
-      await waitFor(() => expect(MockEventSource.instances).toHaveLength(1))
-      const eventSource = MockEventSource.instances[0]
+  it('invalidates the session list on terminal execution, metadata, and usage events', async () => {
+    const queryClient = new QueryClient({
+      defaultOptions: {
+        queries: { retry: false },
+      },
+    })
+    const invalidateQueries = vi.spyOn(queryClient, 'invalidateQueries')
 
+    const { result, unmount } = renderHook(
+      () => useSSE('/repo', 'session-1'),
+      { wrapper: createWrapper(queryClient) }
+    )
+
+    await waitFor(() => expect(MockEventSource.instances).toHaveLength(1))
+    await connect(0, 'client-1')
+    await waitFor(() => expect(result.current.isConnected).toBe(true))
+
+    const emit = (type: string, data: Record<string, unknown>) => {
       act(() => {
-        eventSource.emit('connected', { clientId: 'client-1' })
+        MockEventSource.instances[0].emit('message', { type, directory: '/repo', data })
       })
+    }
 
-      // Emit a part delta — the batcher was created on the initial mount,
-      // so it should process the event even though directory was undefined at mount time
-      act(() => {
-        eventSource.emit('message', {
-          type: 'message.part.delta',
+    for (const type of ['session.execution.succeeded', 'session.execution.failed', 'session.execution.interrupted']) {
+      invalidateQueries.mockClear()
+      emit(type, { sessionID: 'session-2' })
+      await waitFor(() => {
+        expect(invalidateQueries).toHaveBeenCalledWith(
+          expect.objectContaining({ predicate: expect.any(Function) }),
+        )
+      })
+    }
+
+    for (const type of ['session.metadata.updated', 'session.usage.updated']) {
+      invalidateQueries.mockClear()
+      emit(type, { sessionID: 'session-2', metadata: {}, cost: 0, tokens: {} })
+      await waitFor(() => {
+        expect(invalidateQueries).toHaveBeenCalledWith(
+          expect.objectContaining({ predicate: expect.any(Function) }),
+        )
+      })
+    }
+
+    unmount()
+  })
+
+  it('does not invalidate the session list on per-token delta events', async () => {
+    const queryClient = new QueryClient({
+      defaultOptions: {
+        queries: { retry: false },
+      },
+    })
+    const invalidateQueries = vi.spyOn(queryClient, 'invalidateQueries')
+
+    const { result, unmount } = renderHook(
+      () => useSSE('/repo', 'session-1'),
+      { wrapper: createWrapper(queryClient) }
+    )
+
+    await waitFor(() => expect(MockEventSource.instances).toHaveLength(1))
+    await connect(0, 'client-1')
+    await waitFor(() => expect(result.current.isConnected).toBe(true))
+    invalidateQueries.mockClear()
+
+    act(() => {
+      for (const type of ['session.text.delta', 'session.reasoning.delta', 'session.tool.input.delta']) {
+        MockEventSource.instances[0].emit('message', {
+          type,
           directory: '/repo',
-          properties: {
-            sessionID: 'session-1',
-            messageID: 'message-1',
-            partID: 'part-1',
-            field: 'text',
-            delta: 'streamed content',
-          },
+          data: { sessionID: 'session-2' },
         })
-      })
+      }
+    })
 
-      await waitFor(() => {
-        const data = queryClient.getQueryData<MessageWithParts[]>([
-          'opencode', 'messages', 'http://localhost:5551', 'session-1', '/repo',
-        ])
-        expect(data![0].parts[0]).toHaveProperty('text', 'streamed content')
-      })
+    await act(async () => {
+      await new Promise((resolve) => setTimeout(resolve, 300))
+    })
 
-      unmount()
-    } finally {
-      window.requestAnimationFrame = origRAF
-    }
+    expect(invalidateQueries).not.toHaveBeenCalled()
+
+    unmount()
+  })
+
+  it('does not show an update toast on installation.update-available', async () => {
+    const queryClient = new QueryClient({
+      defaultOptions: {
+        queries: { retry: false },
+      },
+    })
+
+    const { result, unmount } = renderHook(
+      () => useSSE('/repo', 'session-1'),
+      { wrapper: createWrapper(queryClient) }
+    )
+
+    await waitFor(() => expect(MockEventSource.instances).toHaveLength(1))
+    await connect(0, 'client-1')
+    await waitFor(() => expect(result.current.isConnected).toBe(true))
+
+    act(() => {
+      MockEventSource.instances[0].emit('message', {
+        type: 'installation.update-available',
+        directory: '/repo',
+        data: { version: '2.0.0' },
+      })
+    })
+
+    expect(showToast.info).not.toHaveBeenCalled()
+    expect(showToast.loading).not.toHaveBeenCalled()
+
+    unmount()
+  })
+
+  it('shows an updated toast on installation.updated', async () => {
+    const queryClient = new QueryClient({
+      defaultOptions: {
+        queries: { retry: false },
+      },
+    })
+
+    const { result, unmount } = renderHook(
+      () => useSSE('/repo', 'session-1'),
+      { wrapper: createWrapper(queryClient) }
+    )
+
+    await waitFor(() => expect(MockEventSource.instances).toHaveLength(1))
+    await connect(0, 'client-1')
+    await waitFor(() => expect(result.current.isConnected).toBe(true))
+
+    act(() => {
+      MockEventSource.instances[0].emit('message', {
+        type: 'installation.updated',
+        directory: '/repo',
+        data: { version: '2.0.0' },
+      })
+    })
+
+    expect(showToast.success).toHaveBeenCalled()
+
+    unmount()
   })
 })
-
-function assistantMessage(sessionID: string, messageID: string): MessageWithParts {
-  return {
-    info: {
-      id: messageID,
-      sessionID,
-      role: 'assistant',
-      time: { created: Date.now() },
-      parentID: '',
-      modelID: 'test-model',
-      providerID: 'test-provider',
-      mode: 'test',
-      agent: 'test-agent',
-      path: { cwd: '/test', root: '/test' },
-      cost: 0,
-      tokens: { input: 0, output: 0, reasoning: 0, cache: { read: 0, write: 0 } },
-    },
-    parts: [],
-  }
-}

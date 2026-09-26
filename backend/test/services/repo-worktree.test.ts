@@ -79,5 +79,18 @@ describe('repo worktree helpers', () => {
       const worktreeList = execSync(`git -C "${baseRepoPath}" worktree list`, { encoding: 'utf-8' })
       expect(worktreeList).not.toContain(worktreePath)
     })
+
+    it('removes a linked worktree created with git worktree add', async () => {
+      const linkedPath = path.join(tmpDir, 'linked-manual')
+      execSync(`git -C "${baseRepoPath}" worktree add -b manual/linked "${linkedPath}"`, { env })
+      expect(existsSync(linkedPath)).toBe(true)
+
+      await removeWorktree(baseRepoPath, linkedPath)
+
+      expect(existsSync(linkedPath)).toBe(false)
+
+      const worktreeList = execSync(`git -C "${baseRepoPath}" worktree list`, { encoding: 'utf-8' })
+      expect(worktreeList).not.toContain(linkedPath)
+    })
   })
 })

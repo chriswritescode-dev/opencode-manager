@@ -1,16 +1,14 @@
 import { create } from 'zustand'
-import type { components } from '@/api/opencode-types'
-
-type CommandType = components['schemas']['Command']
+import type { CommandInfo } from '@opencode-manager/shared/opencode'
 
 interface UIStateStore {
   isEditingMessage: boolean
   activePromptFileBasePath: string | null
-  pendingPromptCommand: { id: number; command: CommandType } | null
+  pendingPromptCommand: { id: number; command: CommandInfo } | null
   pendingPromptFile: { id: number; path: string } | null
   setIsEditingMessage: (isEditing: boolean) => void
   setActivePromptFileBasePath: (basePath: string | null) => void
-  selectPromptCommand: (command: CommandType) => void
+  selectPromptCommand: (command: CommandInfo) => void
   clearPendingPromptCommand: () => void
   selectPromptFile: (path: string) => void
   clearPendingPromptFile: () => void
@@ -23,7 +21,7 @@ export const useUIState = create<UIStateStore>((set) => ({
   pendingPromptFile: null,
   setIsEditingMessage: (isEditing: boolean) => set({ isEditingMessage: isEditing }),
   setActivePromptFileBasePath: (basePath: string | null) => set({ activePromptFileBasePath: basePath }),
-  selectPromptCommand: (command: CommandType) => set({ pendingPromptCommand: { id: Date.now(), command } }),
+  selectPromptCommand: (command: CommandInfo) => set({ pendingPromptCommand: { id: Date.now(), command } }),
   clearPendingPromptCommand: () => set({ pendingPromptCommand: null }),
   selectPromptFile: (path: string) => set({ pendingPromptFile: { id: Date.now(), path } }),
   clearPendingPromptFile: () => set({ pendingPromptFile: null }),

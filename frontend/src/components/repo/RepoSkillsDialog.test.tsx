@@ -8,7 +8,7 @@ import type { SkillFileInfo } from '@opencode-manager/shared'
 
 const mocks = vi.hoisted(() => ({
   listManagedSkills: vi.fn(),
-  sendCommand: vi.fn(),
+  activateSkill: vi.fn(),
 }))
 
 vi.mock('@/api/settings', () => ({
@@ -19,9 +19,7 @@ vi.mock('@/api/settings', () => ({
 }))
 
 vi.mock('@/api/opencode', () => ({
-  OpenCodeClient: vi.fn(() => ({
-    sendCommand: mocks.sendCommand,
-  })),
+  activateSkill: mocks.activateSkill,
 }))
 
 vi.mock('@/lib/toast', () => ({
@@ -150,9 +148,9 @@ describe('RepoSkillsDialog', () => {
   })
 
   describe('load functionality', () => {
-    it('makes skill cards clickable when sessionId and opcodeUrl are provided', async () => {
+    it('makes skill cards clickable when sessionId is provided', async () => {
       mocks.listManagedSkills.mockResolvedValue(mockSkills)
-      mocks.sendCommand.mockResolvedValue(undefined)
+      mocks.activateSkill.mockResolvedValue(undefined)
 
       const onSkillLoaded = vi.fn()
       const onOpenChange = vi.fn()
@@ -163,7 +161,6 @@ describe('RepoSkillsDialog', () => {
           onOpenChange={onOpenChange}
           repoId={1}
           sessionId="test-session"
-          opcodeUrl="http://localhost:5551"
           directory="/test/repo"
           onSkillLoaded={onSkillLoaded}
         />,
@@ -200,7 +197,7 @@ describe('RepoSkillsDialog', () => {
 
     it('calls sendCommand and closes dialog on card click', async () => {
       mocks.listManagedSkills.mockResolvedValue(mockSkills)
-      mocks.sendCommand.mockReturnValue(new Promise(() => {}))
+      mocks.activateSkill.mockReturnValue(new Promise(() => {}))
 
       const onSkillLoaded = vi.fn()
       const onOpenChange = vi.fn()
@@ -212,7 +209,6 @@ describe('RepoSkillsDialog', () => {
           onOpenChange={onOpenChange}
           repoId={1}
           sessionId="test-session"
-          opcodeUrl="http://localhost:5551"
           directory="/test/repo"
           onSkillLoaded={onSkillLoaded}
         />,
@@ -228,16 +224,13 @@ describe('RepoSkillsDialog', () => {
 
       expect(onOpenChange).toHaveBeenCalledWith(false)
       expect(onSkillLoaded).toHaveBeenCalledWith(mockSkills[0])
-      expect(mocks.sendCommand).toHaveBeenCalledWith('test-session', {
-        command: 'test-skill',
-        arguments: '',
-      })
+      expect(mocks.activateSkill).toHaveBeenCalledWith('test-session', 'test-skill')
     })
 
-    it('shows toast error on sendCommand failure', async () => {
+    it('shows toast error on activateSkill failure', async () => {
       const { showToast } = await import('@/lib/toast')
       mocks.listManagedSkills.mockResolvedValue(mockSkills)
-      mocks.sendCommand.mockRejectedValue(new Error('Failed to load'))
+      mocks.activateSkill.mockRejectedValue(new Error('Failed to load'))
 
       const onOpenChange = vi.fn()
       const user = userEvent.setup()
@@ -248,7 +241,6 @@ describe('RepoSkillsDialog', () => {
           onOpenChange={onOpenChange}
           repoId={1}
           sessionId="test-session"
-          opcodeUrl="http://localhost:5551"
           directory="/test/repo"
         />,
         { wrapper: createWrapper() }

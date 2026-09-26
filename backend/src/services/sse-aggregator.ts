@@ -1,7 +1,7 @@
 import { EventSource } from 'eventsource'
 import { logger } from '../utils/logger'
 import { DEFAULTS } from '@opencode-manager/shared/config'
-import type { SSEEventEnvelope, SSEEventPayload } from '@opencode-manager/shared'
+import { openCodeLocation, type OpenCodeApi, type V2Event } from '@opencode-manager/shared/opencode'
 import { getOpenCodeBasicAuthHeader, type OpenCodePasswordResolver } from './opencode/auth'
 import { getOpenCodeUpstreamBaseUrl } from './opencode/upstream'
 import { encodeSSEFrame } from '../utils/sse-frame'
@@ -19,10 +19,10 @@ interface SSEClient {
   activeSessionId: string | null
 }
 
-export type SSEEvent = SSEEventPayload
+export type SSEEvent = V2Event
 
 export interface PendingActionsFetcher {
-  getJson<T>(path: string, opts?: { directory?: string; signal?: AbortSignal }): Promise<T>
+  api: OpenCodeApi
 }
 
 export interface ScheduledSessionRef {
@@ -30,22 +30,14 @@ export interface ScheduledSessionRef {
   directory: string
 }
 
-interface PendingPermission {
-  id: string
-  sessionID: string
-  [key: string]: unknown
-}
-
-interface PendingQuestion {
-  id: string
-  sessionID: string
-  [key: string]: unknown
-}
-
-type SessionStatusValue = { type: string } & Record<string, unknown>
-type SessionStatusMap = Record<string, SessionStatusValue>
+type ReplayEventType = 'permission.asked' | 'form.created' | 'session.status'
 
 const { RECONNECT_DELAY_MS, MAX_RECONNECT_DELAY_MS } = DEFAULTS.SSE
+const MULTILINE_PATTERN = /[\r\n]/
+
+function serializeEnvelope(directory: string | null, payloadJson: string): string {
+  return '{"directory":' + JSON.stringify(directory) + ',"payload":' + payloadJson + '}'
+}
 
 class SSEAggregator {
   private static instance: SSEAggregator
@@ -63,6 +55,7 @@ class SSEAggregator {
   private pendingActionsFetcher: PendingActionsFetcher | null = null
   private passwordResolver: OpenCodePasswordResolver | null = null
   private scheduledSessionsResolver: (() => ScheduledSessionRef[]) | null = null
+  private replayEventCount = 0
 
   private constructor() {}
 
@@ -198,125 +191,121 @@ class SSEAggregator {
     ))
   }
 
-  private async replayPendingActionsForAllClients(): Promise<void> {
-    const fetcher = this.pendingActionsFetcher
-    if (!fetcher) return
+  private async replayPendingActionsForDirectory(
+    clientId: string,
+    directory: string,
+    fetcher: PendingActionsFetcher,
+  ): Promise<void> {
+    const [permissionsResult, formsResult] = await Promise.allSettled([
+      fetcher.api.permission.request.list(openCodeLocation(directory)),
+      fetcher.api.form.list(openCodeLocation(directory)),
+    ])
 
-    const tasks: Promise<void>[] = []
-    this.clients.forEach((client) => {
-      const directories = Array.from(client.directories)
-      if (directories.length === 0) return
-      tasks.push(this.replayPendingActionsForClient(client.id, directories))
-    })
+    if (permissionsResult.status === 'rejected') {
+      logger.warn(`replay: failed to fetch pending permissions for ${directory}: ${String(permissionsResult.reason)}`)
+    } else {
+      this.emitReplayEventsToClient(clientId, directory, permissionsResult.value.data.map(request =>
+        this.buildReplayEvent('permission.asked', directory, request)
+      ))
+    }
 
-    if (tasks.length === 0) return
-    logger.info(`replay: replaying pending actions to ${tasks.length} client(s) after upstream reconnect`)
-    await Promise.allSettled(tasks)
+    if (formsResult.status === 'rejected') {
+      logger.warn(`replay: failed to fetch pending forms for ${directory}: ${String(formsResult.reason)}`)
+    } else {
+      this.emitReplayEventsToClient(clientId, directory, formsResult.value.data.map(form =>
+        this.buildReplayEvent('form.created', directory, { form })
+      ))
+    }
+  }
+
+  private emitReplayEventsToClient(clientId: string, directory: string, events: V2Event[]): void {
+    if (events.length === 0) return
+
+    const client = this.clients.get(clientId)
+    if (!client || !client.directories.has(directory)) return
+
+    for (const event of events) {
+      try {
+        client.callback('message', serializeEnvelope(directory, JSON.stringify(event)))
+      } catch (error) {
+        logger.error(`replay: failed to deliver ${event.type} to client ${clientId}:`, error)
+        return
+      }
+    }
+
+    logger.info(`replay: sent ${events.length} pending action(s) for ${directory} to client ${clientId}`)
   }
 
   private async replaySessionStatusesForTrackedDirectories(): Promise<void> {
     const fetcher = this.pendingActionsFetcher
     if (!fetcher) return
 
-    const scheduledByDirectory = this.getScheduledSessionsByDirectory()
-    const directories = new Set<string>(scheduledByDirectory.keys())
-    this.clients.forEach((client) => {
-      client.directories.forEach(dir => directories.add(dir))
-    })
-
-    if (directories.size === 0) return
-    logger.info(`replay: replaying session statuses for ${directories.size} directory(ies) after upstream reconnect`)
-    await Promise.allSettled(Array.from(directories).map(directory =>
-      this.replaySessionStatusesForDirectory(directory, fetcher, scheduledByDirectory.get(directory))
-    ))
-  }
-
-  private async replaySessionStatusesForDirectory(
-    directory: string,
-    fetcher: PendingActionsFetcher,
-    scheduledSessionIDs?: Set<string>,
-  ): Promise<void> {
-    let statuses: SessionStatusMap
+    let running: Record<string, { type: string }>
     try {
-      statuses = await fetcher.getJson<SessionStatusMap>('/session/status', { directory })
+      running = await fetcher.api.session.active()
     } catch (error) {
-      logger.warn(`replay: failed to fetch session statuses for ${directory}: ${String(error)}`)
+      logger.warn(`replay: failed to fetch active sessions: ${String(error)}`)
       return
     }
 
-    if (!statuses) return
-
-    const tracked = new Set(this.activeSessions.get(directory) ?? [])
-    scheduledSessionIDs?.forEach(sessionID => tracked.add(sessionID))
-    const nowActive = new Set<string>()
+    const tracked = this.getTrackedSessions()
+    const runningIDs = Object.keys(running ?? {})
+    const runningSet = new Set(runningIDs)
 
     let replayed = 0
-    for (const [sessionID, status] of Object.entries(statuses)) {
-      if (!sessionID || !status || status.type === 'idle') continue
-      nowActive.add(sessionID)
-      const data = JSON.stringify({ directory, payload: { type: 'session.status', properties: { sessionID, status } } })
-      this.handleUpstreamMessage(data)
+
+    for (const [sessionID, directory] of tracked) {
+      if (runningSet.has(sessionID)) continue
+      this.deliverEvent(directory, this.buildReplayEvent('session.status', directory, { sessionID, status: { type: 'idle' } }))
       replayed++
     }
 
-    let cleared = 0
-    for (const sessionID of tracked) {
-      if (nowActive.has(sessionID)) continue
-      const data = JSON.stringify({ directory, payload: { type: 'session.status', properties: { sessionID, status: { type: 'idle' } } } })
-      this.handleUpstreamMessage(data)
-      cleared++
+    const runningDirectories = await Promise.all(runningIDs.map(async (sessionID) => ({
+      sessionID,
+      directory: tracked.get(sessionID) ?? await this.resolveSessionDirectory(fetcher, sessionID),
+    })))
+
+    for (const { sessionID, directory } of runningDirectories) {
+      if (!directory) continue
+      this.deliverEvent(directory, this.buildReplayEvent('session.status', directory, { sessionID, status: { type: 'busy' } }))
+      replayed++
     }
 
-    if (replayed > 0 || cleared > 0) {
-      logger.info(`replay: re-emitted ${replayed} active and ${cleared} idle session status(es) for ${directory}`)
-    }
-  }
-
-  private async replayPendingActionsForDirectory(
-    clientId: string,
-    directory: string,
-    fetcher: PendingActionsFetcher,
-  ): Promise<void> {
-    const [permissionsResult, questionsResult] = await Promise.allSettled([
-      fetcher.getJson<PendingPermission[]>('/permission', { directory }),
-      fetcher.getJson<PendingQuestion[]>('/question', { directory }),
-    ])
-
-    if (permissionsResult.status === 'rejected') {
-      logger.warn(`replay: failed to fetch pending permissions for ${directory}: ${String(permissionsResult.reason)}`)
-    } else {
-      this.emitPendingEventsToClient(clientId, directory, 'permission.asked', permissionsResult.value)
-    }
-
-    if (questionsResult.status === 'rejected') {
-      logger.warn(`replay: failed to fetch pending questions for ${directory}: ${String(questionsResult.reason)}`)
-    } else {
-      this.emitPendingEventsToClient(clientId, directory, 'question.asked', questionsResult.value)
+    if (replayed > 0) {
+      logger.info(`replay: re-emitted ${replayed} session status(es) after upstream reconnect`)
     }
   }
 
-  private emitPendingEventsToClient(
-    clientId: string,
-    directory: string,
-    type: 'permission.asked' | 'question.asked',
-    items: Array<PendingPermission | PendingQuestion> | null,
-  ): void {
-    if (!items || items.length === 0) return
-
-    const client = this.clients.get(clientId)
-    if (!client || !client.directories.has(directory)) return
-
-    for (const item of items) {
-      const payload = JSON.stringify({ directory, payload: { type, properties: item } })
-      try {
-        client.callback('message', payload)
-      } catch (error) {
-        logger.error(`replay: failed to deliver ${type} to client ${clientId}:`, error)
-        return
-      }
+  private getTrackedSessions(): Map<string, string> {
+    const tracked = new Map<string, string>()
+    this.activeSessions.forEach((sessionIDs, directory) => {
+      sessionIDs.forEach(sessionID => tracked.set(sessionID, directory))
+    })
+    for (const ref of this.getScheduledSessions()) {
+      tracked.set(ref.sessionID, ref.directory)
     }
+    return tracked
+  }
 
-    logger.info(`replay: sent ${items.length} ${type} event(s) for ${directory} to client ${clientId}`)
+  private async resolveSessionDirectory(fetcher: PendingActionsFetcher, sessionID: string): Promise<string | null> {
+    try {
+      const session = await fetcher.api.session.get({ sessionID })
+      return session.location.directory
+    } catch (error) {
+      logger.warn(`replay: failed to resolve directory for session ${sessionID}: ${String(error)}`)
+      return null
+    }
+  }
+
+  private buildReplayEvent(type: ReplayEventType, directory: string, data: unknown): V2Event {
+    this.replayEventCount += 1
+    return {
+      id: `ocm_replay_${this.replayEventCount}`,
+      created: Date.now(),
+      type,
+      location: { directory },
+      data,
+    } as V2Event
   }
 
   private async connectUpstream(): Promise<void> {
@@ -326,13 +315,13 @@ class SSEAggregator {
       this.upstream = null
     }
 
-    const url = `${getOpenCodeUpstreamBaseUrl()}/global/event`
+    const url = `${getOpenCodeUpstreamBaseUrl()}/api/event`
     const wasConnectedBefore = this.everConnected
     logger.info(`SSE connecting to OpenCode global stream: ${url}`)
 
     const authHeader = this.passwordResolver
       ? await getOpenCodeBasicAuthHeader(this.passwordResolver)
-      : getOpenCodeBasicAuthHeader()
+      : null
 
     if (!this.started) return
 
@@ -353,14 +342,7 @@ class SSEAggregator {
     this.upstream = es
 
     es.onopen = () => {
-      logger.info('SSE global stream connected')
-      this.upstreamConnected = true
-      this.reconnectDelay = RECONNECT_DELAY_MS
-      this.everConnected = true
-      if (wasConnectedBefore) {
-        void this.replayPendingActionsForAllClients()
-        void this.replaySessionStatusesForTrackedDirectories()
-      }
+      this.handleUpstreamOpen(wasConnectedBefore)
     }
 
     es.onerror = (event) => {
@@ -380,6 +362,21 @@ class SSEAggregator {
     }
   }
 
+  private handleUpstreamOpen(wasConnectedBefore: boolean): void {
+    logger.info('SSE global stream connected')
+    this.upstreamConnected = true
+    this.reconnectDelay = RECONNECT_DELAY_MS
+    this.everConnected = true
+    this.broadcastResync()
+    if (wasConnectedBefore) {
+      void this.replaySessionStatusesForTrackedDirectories()
+    }
+  }
+
+  private broadcastResync(): void {
+    this.broadcastToAll('resync', JSON.stringify({ timestamp: Date.now() }))
+  }
+
   private scheduleReconnect(): void {
     if (!this.started || this.reconnectTimeout) return
     this.reconnectTimeout = setTimeout(() => {
@@ -395,82 +392,110 @@ class SSEAggregator {
   }
 
   private handleUpstreamMessage(data: string): void {
-    let envelope: SSEEventEnvelope
+    let event: V2Event
     try {
-      envelope = JSON.parse(data) as SSEEventEnvelope
+      event = JSON.parse(data) as V2Event
     } catch {
       return
     }
 
-    if (!envelope.directory || !envelope.payload?.type) return
+    if (!event?.type) return
 
-    const directory = envelope.directory
-    const parsed = envelope.payload
+    const payloadJson = MULTILINE_PATTERN.test(data) ? JSON.stringify(event) : data
+    const directory = event.location?.directory
 
-    this.handleEvent(directory, parsed)
+    try {
+      if (directory) {
+        this.deliverEvent(directory, event, payloadJson)
+      } else {
+        this.writeEnvelopeToClients(this.clients.keys(), null, payloadJson)
+      }
+    } catch (error) {
+      logger.error(`SSE failed to handle ${event.type} event:`, error)
+    }
+  }
+
+  private deliverEvent(directory: string, event: SSEEvent, payloadJson?: string): void {
+    this.handleEvent(directory, event)
 
     this.eventListeners.forEach(listener => {
-      try { listener(directory, parsed) } catch { /* ignore listener errors */ }
+      try { listener(directory, event) } catch { /* ignore listener errors */ }
     })
 
     const subscriberIds = this.directoryClients.get(directory)
-    if (subscriberIds && subscriberIds.size > 0) {
-      let frame: Uint8Array | undefined
-      const getFrame = (): Uint8Array => (frame ??= encodeSSEFrame('message', data))
-      for (const clientId of subscriberIds) {
-        const client = this.clients.get(clientId)
-        if (!client) continue
-        try {
-          client.writeFrame(getFrame())
-        } catch (error) {
-          logger.error(`Failed to send to client ${client.id}:`, error)
-        }
+    if (!subscriberIds || subscriberIds.size === 0) return
+
+    this.writeEnvelopeToClients(subscriberIds, directory, payloadJson ?? JSON.stringify(event))
+  }
+
+  private writeEnvelopeToClients(clientIds: Iterable<string>, directory: string | null, payloadJson: string): void {
+    let frame: Uint8Array | null = null
+    for (const clientId of clientIds) {
+      const client = this.clients.get(clientId)
+      if (!client) continue
+      frame ??= encodeSSEFrame('message', serializeEnvelope(directory, payloadJson))
+      try {
+        client.writeFrame(frame)
+      } catch (error) {
+        logger.error(`Failed to send to client ${client.id}:`, error)
       }
     }
   }
 
   private handleEvent(directory: string, event: SSEEvent): void {
-    const { type, properties } = event
-
-    if (type === 'session.status') {
-      const sessionID = properties.sessionID as string
-      const status = properties.status as { type: string }
-
-      if (!sessionID || !status) return
-
-      const isActive = status.type === 'busy' || status.type === 'retry' || status.type === 'compact'
-
-      if (isActive) {
-        this.markSessionActive(directory, sessionID)
-      } else if (status.type === 'idle') {
-        this.markSessionIdle(directory, sessionID)
-      }
-    } else if (type === 'session.idle') {
-      const sessionID = properties.sessionID as string
-      if (sessionID) {
-        this.markSessionIdle(directory, sessionID)
-      }
-    } else if (type === 'session.created' || type === 'session.updated') {
-      const info = properties.info as { id?: string; parentID?: string } | undefined
-      if (info?.id && info.parentID) {
-        let sessions = this.subagentSessions.get(directory)
-        if (!sessions) {
-          sessions = new Set()
-          this.subagentSessions.set(directory, sessions)
+    switch (event.type) {
+      case 'session.status': {
+        const { sessionID, status } = event.data
+        if (status.type === 'idle') {
+          this.markSessionIdle(directory, sessionID)
+        } else {
+          this.markSessionActive(directory, sessionID)
         }
-        sessions.add(info.id)
+        return
       }
-    } else if (type === 'session.deleted') {
-      const info = properties.info as { id?: string } | undefined
-      if (info?.id) {
-        const sessions = this.subagentSessions.get(directory)
-        if (sessions) {
-          sessions.delete(info.id)
-          if (sessions.size === 0) {
-            this.subagentSessions.delete(directory)
-          }
+      case 'session.idle': {
+        this.markSessionIdle(directory, event.data.sessionID)
+        return
+      }
+      case 'session.execution.started': {
+        this.markSessionActive(directory, event.data.sessionID)
+        return
+      }
+      case 'session.execution.succeeded':
+      case 'session.execution.failed':
+      case 'session.execution.interrupted': {
+        this.markSessionIdle(directory, event.data.sessionID)
+        return
+      }
+      case 'session.created': {
+        const { sessionID, parentID } = event.data
+        if (parentID) {
+          this.markSubagentSession(directory, sessionID)
         }
+        return
       }
+      case 'session.deleted': {
+        this.unmarkSubagentSession(directory, event.data.sessionID)
+        return
+      }
+    }
+  }
+
+  private markSubagentSession(directory: string, sessionID: string): void {
+    let sessions = this.subagentSessions.get(directory)
+    if (!sessions) {
+      sessions = new Set()
+      this.subagentSessions.set(directory, sessions)
+    }
+    sessions.add(sessionID)
+  }
+
+  private unmarkSubagentSession(directory: string, sessionID: string): void {
+    const sessions = this.subagentSessions.get(directory)
+    if (!sessions) return
+    sessions.delete(sessionID)
+    if (sessions.size === 0) {
+      this.subagentSessions.delete(directory)
     }
   }
 
@@ -541,19 +566,6 @@ class SSEAggregator {
 
   private getScheduledSessions(): ScheduledSessionRef[] {
     return this.scheduledSessionsResolver?.() ?? []
-  }
-
-  private getScheduledSessionsByDirectory(): Map<string, Set<string>> {
-    const byDirectory = new Map<string, Set<string>>()
-    for (const ref of this.getScheduledSessions()) {
-      let sessions = byDirectory.get(ref.directory)
-      if (!sessions) {
-        sessions = new Set()
-        byDirectory.set(ref.directory, sessions)
-      }
-      sessions.add(ref.sessionID)
-    }
-    return byDirectory
   }
 
   getActiveDirectories(): string[] {

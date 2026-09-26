@@ -65,7 +65,7 @@ function PermissionDialogWrapper() {
   const {
     current: currentPermission,
     pendingCount,
-    respond: respondToPermission,
+    respond: replyToPermission,
     showDialog,
     setShowDialog,
   } = usePermissions()
@@ -75,7 +75,7 @@ function PermissionDialogWrapper() {
       permission={currentPermission}
       pendingCount={pendingCount}
       isFromDifferentSession={false}
-      onRespond={respondToPermission}
+      onRespond={replyToPermission}
       open={showDialog}
       onOpenChange={setShowDialog}
       repoDirectory={null}

@@ -110,6 +110,26 @@ describe('opencode-import service', () => {
     expect(mockWriteOpenCodeConfigFile).toHaveBeenCalledWith(expect.stringContaining('opencode.jsonc'))
   })
 
+  it('mirrors a host config.json alongside the native sources', async () => {
+    const jsonPath = path.join(os.homedir(), '.config', 'opencode', 'opencode.json')
+    const legacyPath = path.join(os.homedir(), '.config', 'opencode', 'config.json')
+    mockExistsSync.mockImplementation((candidate: string) => [jsonPath, legacyPath].includes(candidate))
+    mockFileExists.mockResolvedValue(false)
+    const rawJson = '{"model":"lower"}'
+    const rawLegacy = '{"theme":"dark"}'
+    mockReadFileContent.mockImplementation(async (candidate: string) =>
+      candidate === legacyPath ? rawLegacy : rawJson)
+
+    const result = await syncOpenCodeImport({})
+
+    expect(result.configSourcePaths).toEqual([jsonPath, legacyPath])
+    expect(result.configSourcePath).toBe(legacyPath)
+    const snapshot = mockWriteOpenCodeConfigFile.mock.calls[0]![0] as string
+    expect(snapshot).toContain(JSON.stringify(rawJson))
+    expect(snapshot).toContain(JSON.stringify(rawLegacy))
+    expect(snapshot).toContain('config.json')
+  })
+
   it('detects importable host config and state paths with opencode.db', async () => {
     process.env.OPENCODE_IMPORT_CONFIG_PATH = '/import/opencode-config/opencode.json'
     process.env.OPENCODE_IMPORT_STATE_PATH = '/import/opencode-state'

@@ -18,17 +18,17 @@ OpenCode Manager runs a supervised OpenCode server process to handle agent sessi
 
 The panel also displays:
 
-- **OpenCode version** — The installed version of the OpenCode server (e.g., `v1.17.11`)
+- **OpenCode version** — The installed version of the OpenCode server (e.g., `v2.0.15`). OpenCode Manager requires OpenCode 2.x at 2.0.15 or newer; a 1.x, 3.x, or older 2.x binary fails to start.
 - **Manager version** — The current OpenCode Manager version (e.g., `v0.14.5`)
 
 ## Health Monitoring
 
-The Manager periodically polls the OpenCode server's health endpoint. If the server becomes unresponsive:
+The Manager periodically polls the OpenCode server's health endpoint (`GET /api/info`, authenticated with the managed password). A 401 or a non-JSON response counts as unhealthy. If the server becomes unresponsive:
 
 1. The Manager logs the failure and increments a failure counter
 2. After a configurable number of consecutive failures (default: 2), automatic recovery begins
 3. Recovery restarts the OpenCode server process
-4. In-flight sessions are aborted and resumed once the server is healthy again
+4. OpenCode 2 resumes interrupted executions natively on boot, so the Manager makes no abort or `continue` calls itself
 
 ### Configuration
 
@@ -42,7 +42,7 @@ Health monitoring is configured through environment variables:
 
 ## Configuration Recovery
 
-The on-disk global configuration files in `.config/opencode/` are the source of truth. OpenCode merges up to three recognized sources in order — `config.json`, `opencode.json`, then `opencode.jsonc` — with later files overriding matching keys from earlier ones. The Manager reads and edits the same set: saves patch only the changed paths into the preferred existing source (`opencode.jsonc` > `opencode.json` > `config.json`), preserving comments and untouched keys, and a fresh installation is seeded with `opencode.jsonc`. When a source exists at boot but fails validation, the Manager logs a warning and starts with the files unchanged — an invalid config is never automatically replaced or rolled back during boot.
+The on-disk global configuration files in `.config/opencode/` are the source of truth. OpenCode 2 reads the two recognized sources in order — `opencode.json`, then `opencode.jsonc` — with later files overriding matching keys from earlier ones. The Manager reads and edits the same set: saves patch only the changed paths into the preferred existing source (`opencode.jsonc` > `opencode.json`), preserving comments and untouched keys, and a fresh installation is seeded with `opencode.jsonc`. The schema accepts both V1-compatible keys and native OpenCode 2 fields, so a V2-native config is not flagged invalid. MCP servers are always written in the native OpenCode 2 shape under `mcp.servers.<name>` — `type` (`local` with `command`, optional `cwd` and `environment`; or `remote` with `url`, optional `headers` and `oauth` using `client_id`, `client_secret`, `scope`, and `redirect_uri`), plus optional `disabled` and `timeout` (`startup`, `catalog`, `execution` in milliseconds). Legacy flat `mcp.<name>` entries are never written; OpenCode 2 still normalizes them on load, so they appear in Settings → MCP from the running server's status but must be moved under `mcp.servers` to be edited or removed from the Manager. A legacy `config.json`, which OpenCode 2 ignores, is folded into the lowest-precedence source it does not override and archived on startup. When a source exists at boot but fails validation, the Manager logs a warning and starts with the files unchanged — an invalid config is never automatically replaced or rolled back during boot.
 
 The health-watch ladder is the only automatic repair path. When the supervised OpenCode server fails repeated health checks, recovery runs these actions in order until the server is healthy:
 
@@ -61,10 +61,8 @@ Earlier releases stored named configuration profiles in the Manager database. On
 
 When you restart the OpenCode server (manually or through an upgrade), active sessions are handled gracefully:
 
-1. **Capture** — The Manager captures all active user sessions (excluding subagent and scheduled-run sessions)
-2. **Abort** — Active sessions are aborted cleanly on the running server
-3. **Restart** — The OpenCode server process is stopped and started fresh
-4. **Resume** — Once healthy, a `continue` prompt is automatically sent to each previously active session
+1. **Restart** — The OpenCode server process is stopped with a grace period so in-flight turns are suspended, then started fresh
+2. **Resume** — OpenCode 2 resumes interrupted executions natively on boot and continues each turn in its transcript; the Manager makes no abort or `continue` calls itself and does not report individual sessions
 
 ### Confirmation
 
@@ -72,23 +70,24 @@ If there are active sessions when you click **Restart**, a confirmation dialog s
 
 ## Upgrading OpenCode
 
-Click **Update** to check for and install the latest OpenCode version. The process:
+Click **Update** to check for and install the newest supported OpenCode 2 version. The process:
 
-1. Checks the currently installed version against the latest available release
-2. Downloads and installs the update if available
+1. Checks the currently installed version against the newest stable release of the `@opencode/cli` package on npm that is inside the supported range (at or above the pinned version, same major version); newer major versions are never selected
+2. Downloads the matching binary from `https://opencode.ai/files/bin/<version>/` and verifies it before installing to `~/.opencode/bin/opencode`
 3. Restarts the server using the same session-resume flow described above
 4. The new version is displayed in the status panel after restart
 
-If the upgrade fails but the server recovers to a usable state, a recovery notice is shown with the fallback version.
+Installing a specific version from Settings → OpenCode works the same way; versions outside the supported range are rejected before any download. A failure before the installed binary is replaced (registry lookup, download, or extraction) returns an error without restarting the server. If the failure happens after the binary is replaced and the server recovers to a usable state, a recovery notice is shown with the fallback version.
+
+When `OPENCODE_BIN` is set, the OpenCode binary is managed outside the Manager: **Update** and version installs are refused with `409` and nothing is downloaded or restarted.
 
 ## Manual Restart Triggers
 
 Besides the explicit **Restart** button, the server is automatically restarted when:
 
-- **Assistant workspace is reloaded** — Via the `POST /assistant/reload` internal API endpoint
 - **Config import completes** — Importing a standalone OpenCode config into the workspace
 - **Version upgrade** — After installing a new OpenCode version
 
-Saving the OpenCode configuration never restarts the server on its own. Any change to the merged configuration is written to disk and flagged as **restart required**; the server keeps running on the previous configuration until you restart it. Two exceptions do not set the flag: comment-only edits, and changes limited to the `mcp` section, which the Settings UI applies to the running server directly. Saving a provider credential, or completing a provider OAuth flow, restarts the server through the same session-resume flow so newly configured providers are discovered.
+Saving the OpenCode configuration never restarts the server. A change to the merged configuration is written to disk and applied immediately with an OpenCode location reload, which re-reads the configuration, agents, commands, skills, plugins, and `AGENTS.md` for every loaded location without interrupting running sessions. Comment-only edits do nothing, and changes limited to the `mcp` section are applied by the Settings UI through the MCP API. The change is flagged as **restart required** only when the reload fails, for example because the server is unavailable. Changes to how the server process is launched still need a restart: server environment variables, Git credentials and identity, sandbox enforcement, manager token rotation, the server password, and OpenCode version installs. Saving a provider credential, or completing a provider OAuth flow, applies to the running server immediately without a restart, because OpenCode 2 stores credentials in its database and broadcasts the change.
 
 A save is rejected with `409` when the files changed since you loaded them (stale revision), or when it would remove a value that is defined only in a lower-priority source file — removing it from the preferred file would leave the inherited value in effect.

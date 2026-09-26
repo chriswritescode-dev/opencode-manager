@@ -1,8 +1,10 @@
 import { Hono } from 'hono'
 import { z } from 'zod'
 import { UpdateOpenCodeConfigRequestSchema } from '@opencode-manager/shared/schemas'
+import { getWorkspacePath } from '@opencode-manager/shared/config/env'
+import { ClientError, openCodeLocation } from '@opencode-manager/shared/opencode'
 import type { SettingsService } from '../services/settings'
-import { UpstreamError, type OpenCodeClient } from '../services/opencode/client'
+import type { OpenCodeClient } from '../services/opencode/client'
 import {
   OpenCodeConfigConflictError,
   OpenCodeConfigShadowedRemovalError,
@@ -31,12 +33,12 @@ export function createOpenCodeConfigRoutes(settingsService: SettingsService, ope
 
   app.get('/effective', async (c) => {
     try {
-      const config = await openCodeClient.getJson<Record<string, unknown>>('/global/config')
-      return c.json(config)
+      const entries = await openCodeClient.api.config.get(openCodeLocation(getWorkspacePath()))
+      return c.json({ entries })
     } catch (error) {
       logger.error('Failed to get effective OpenCode config:', error)
-      if (error instanceof UpstreamError) {
-        if (error.status === 502) {
+      if (error instanceof ClientError) {
+        if (error.reason === 'Transport') {
           return c.json({ error: 'OpenCode server unavailable' }, 503)
         }
         return c.json({ error: 'Failed to get effective OpenCode config' }, 502)
@@ -64,6 +66,7 @@ export function createOpenCodeConfigRoutes(settingsService: SettingsService, ope
         source: parsed.data.source,
         expectedRevision: parsed.data.expectedRevision,
         settingsService,
+        openCodeClient,
       })
       const { status, body: responseBody } = toOpenCodeConfigApplyResponse(result)
       return c.json(responseBody, status)

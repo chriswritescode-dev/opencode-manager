@@ -1,11 +1,12 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest'
 import type { Database } from 'bun:sqlite'
-import * as crypto from 'crypto'
 import * as fs from 'fs/promises'
 import * as path from 'path'
 
+const testWorkspacePath = vi.hoisted(() => `/tmp/test-workspace-${Math.random().toString(36).slice(2)}`)
+
 vi.mock('@opencode-manager/shared/config/env', () => ({
-  getWorkspacePath: vi.fn(() => '/tmp/test-workspace'),
+  getWorkspacePath: vi.fn(() => testWorkspacePath),
   getReposPath: vi.fn(() => '/tmp/test-repos'),
   getOpenCodeConfigFilePath: vi.fn(() => '/tmp/test-workspace/.config/opencode.json'),
   getAgentsMdPath: vi.fn(() => '/tmp/test-workspace/AGENTS.md'),
@@ -14,7 +15,7 @@ vi.mock('@opencode-manager/shared/config/env', () => ({
   ENV: {
     SERVER: { PORT: 5003, HOST: '0.0.0.0', NODE_ENV: 'test' },
     AUTH: { TRUSTED_ORIGINS: 'http://localhost:5173', SECRET: 'test-secret-for-encryption-key-32c' },
-    WORKSPACE: { BASE_PATH: '/tmp/test-workspace', REPOS_DIR: 'repos', CONFIG_DIR: 'config', AUTH_FILE: 'auth.json' },
+    WORKSPACE: { BASE_PATH: '/tmp/test-workspace', REPOS_DIR: 'repos', CONFIG_DIR: 'config' },
     OPENCODE: { PORT: 5551, HOST: '127.0.0.1' },
     DATABASE: { PATH: ':memory:' },
     FILE_LIMITS: {
@@ -36,8 +37,6 @@ vi.mock('../../src/utils/logger', () => ({
   }
 }))
 
-let testWorkspacePath: string = '/tmp/test-workspace'
-
 const mockPrepare = vi.fn()
 const mockExec = vi.fn()
 const mockDatabase = {
@@ -56,9 +55,6 @@ import { encryptSecret, decryptSecret } from '../../src/utils/crypto'
 describe('SSH Integration Tests', () => {
    beforeEach(async () => {
      vi.clearAllMocks()
-
-     const uniqueId = crypto.randomUUID()
-     testWorkspacePath = `/tmp/test-workspace-${uniqueId}`
 
      mockPrepare.mockReturnValue({
       run: vi.fn(),

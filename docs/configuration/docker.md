@@ -131,9 +131,9 @@ The container entrypoint (`scripts/docker-entrypoint.sh`) automatically:
 
 1. **Verifies Bun** is installed (installed at build time, fallback install if missing)
 2. **Reconciles the persisted OpenCode home binary** (`/home/node/.opencode/bin/opencode`):
-   - any valid persisted binary is retained, including a user-selected version older than the image-bundled `OPENCODE_BUNDLED_VERSION`;
-   - a persisted binary that is malformed or unversioned is removed (only that binary), so `PATH` falls back to the image-bundled `/usr/local/bin/opencode` without a download
-3. **Installs OpenCode** only when no usable binary is present: if opencode is missing entirely, or if the surviving binary is still below the minimum version (1.0.137), the pinned bundled version is downloaded into the persisted `bin` volume
+   - a persisted binary inside the supported range is retained, including a user-selected version newer than the image-bundled `OPENCODE_BUNDLED_VERSION`. The supported range is a stable `X.Y.Z` release at or above the bundled version with the same major version (`>=OPENCODE_BUNDLED_VERSION <next major`);
+   - a persisted binary that is malformed, unversioned, a prerelease, or outside the supported range is removed (only that binary), so `PATH` falls back to the image-bundled `/usr/local/bin/opencode` without a download
+3. **Installs OpenCode** only when no usable binary is present: if opencode is missing entirely, or if the surviving binary is still outside the supported range, the pinned bundled version is downloaded from `https://opencode.ai/files/bin/` into the persisted `bin` volume
 4. **Validates AUTH_SECRET** is set (required for startup)
 5. **Aligns the `node` account** to `PUID`/`PGID` (default `1000`) before chowning the workspace, the `/app/data` directory, and the `node` home directory. If `PUID`/`PGID` are already used by another account in the image, startup aborts with an explicit error. Group alignment runs first, so a free `PGID` combined with an occupied `PUID` mutates `/etc/group` before the UID collision is detected and aborts startup; realign to the original ids or pick a free pair before retrying.
 
@@ -273,13 +273,13 @@ volumes:
   - opencode-bin:/home/node/.opencode/bin
 ```
 
-Persists the OpenCode binary that OpenCode's own `upgrade --method curl` command (run from the UI's OpenCode settings) installs into `~/.opencode/bin`, so an upgrade survives container recreations. The volume is limited to the binary and leaves existing workspace and XDG persistence behavior for config, auth, and chat state unchanged.
+Persists the OpenCode binary that the Manager's installer (from the UI's OpenCode settings) writes into `~/.opencode/bin`, so an upgrade survives container recreations. The volume is limited to the binary and leaves existing workspace and XDG persistence behavior for config, auth, and chat state unchanged.
 
 On startup the entrypoint reconciles the persisted binary:
 
-- any valid persisted binary is retained, including a user-selected version older than the image-bundled `OPENCODE_BUNDLED_VERSION`;
+- a persisted binary inside the supported range (a stable release `>=OPENCODE_BUNDLED_VERSION` with the same major version) is retained, including a user-selected version newer than the image-bundled one;
 - a malformed or unversioned persisted binary is removed so `PATH` falls back to the image-bundled `/usr/local/bin/opencode`, avoiding a download;
-- a persisted binary still below the minimum version (1.0.137) is replaced by the pinned bundled version, which is downloaded into this volume.
+- a persisted binary outside the supported range (older than the bundled version, a prerelease, or a different major version) is removed so the pinned bundled OpenCode 2 binary is used; it is downloaded from `https://opencode.ai/files/bin/` into this volume only when no supported binary remains on `PATH`.
 
 A fresh volume starts empty and the image-bundled binary is used until an upgrade installs into the volume.
 
@@ -309,7 +309,7 @@ services:
       - ${OCM_OPENCODE_STATE_HOST_PATH}:/import/opencode-state:ro
 ```
 
-`OPENCODE_IMPORT_CONFIG_PATH` imports a single file. For a host with multiple recognized config files (`config.json`, `opencode.json`, `opencode.jsonc`), omit it and mount `${OCM_OPENCODE_CONFIG_HOST_PATH}` writable at the container's OpenCode config directory (`/home/node/.config/opencode`) instead. Import mirrors the host's recognized files into the workspace and removes workspace copies absent on the host.
+`OPENCODE_IMPORT_CONFIG_PATH` imports a single file. For a host with multiple config files (`opencode.json`, `opencode.jsonc`, and a legacy `config.json`), omit it and mount `${OCM_OPENCODE_CONFIG_HOST_PATH}` writable at the container's OpenCode config directory (`/home/node/.config/opencode`) instead. Import mirrors the host's files into the workspace, removes workspace copies absent on the host, and folds a mirrored legacy `config.json` into the workspace config.
 
 Why the repo mount uses the host path as the container path:
 
@@ -513,8 +513,8 @@ By default, the OpenCode server binds to `127.0.0.1` inside the container and is
 
 You only need to expose the OpenCode server on an external interface if you have a specific use case that requires other services or machines to connect directly to it.
 
-!!! warning "Sandbox enforcement is agent-tool-scoped"
-    Sandbox enforcement applies only to the OpenCode agent `bash` tool. The rewrite runs as a plugin hook inside the OpenCode process, so it guards both proxied and direct connections to the OpenCode server. WebUI shell, slash shell, PTY, and server binding follow normal OpenCode behavior while sandboxing is enabled (see [Agent Sandboxing](../features/sandboxing.md)).
+!!! warning "Sandbox enforcement is shell-scoped"
+    Sandbox enforcement applies to every shell spawn that goes through OpenCode's `Shell.create`: the agent `shell` tool, the WebUI `!command` shell, and the shell API (`POST /api/shell`). The rewrite runs as a plugin hook inside the OpenCode process, so it guards both proxied and direct connections to the OpenCode server. PTY terminals, slash-command shell interpolation (a `` !`cmd` `` template is expanded by OpenCode with the configured shell directly on the host), and server binding follow normal OpenCode behavior while sandboxing is enabled (see [Agent Sandboxing](../features/sandboxing.md)).
 
 ### How to Expose Safely
 
@@ -522,7 +522,7 @@ To expose the OpenCode server on the host network:
 
 1. **Set `OPENCODE_HOST=0.0.0.0`** in your environment
 2. **Add port `5551:5551`** to the compose ports
-3. **Set `OPENCODE_SERVER_PASSWORD`** — this is **required**; the managed OpenCode server will refuse to start without it
+3. **Set `OPENCODE_SERVER_PASSWORD`** — recommended so the exposed server uses a password you control; without it OpenCode Manager generates and persists one
 
 Example compose override:
 
@@ -538,13 +538,10 @@ services:
 
 ### Password Configuration
 
-The password can be configured in two ways:
+OpenCode 2 always requires Basic Auth on the managed server, so a password is always in effect. It is resolved in this order:
 
-1. **Environment variable:** Set `OPENCODE_SERVER_PASSWORD` in your `.env` file or compose environment
-2. **Via UI:** Use Settings → OpenCode → Server Auth to set a password at runtime
+1. **Via UI:** Use Settings → OpenCode → Server Auth to set a password at runtime
+2. **Environment variable:** Set `OPENCODE_SERVER_PASSWORD` in your `.env` file or compose environment
+3. **Auto-generated:** When neither is configured, OpenCode Manager generates a random password and persists it in its database
 
-**DB-stored passwords take precedence over the environment variable.** If you set a password via the UI, it will override the env var.
-
-### Startup Guard
-
-If you set `OPENCODE_HOST=0.0.0.0` (or any non-localhost host) without configuring a password (either via env var or UI), the managed OpenCode server will refuse to start with an error message explaining how to fix it. The OpenCode Manager UI/API may remain available so you can configure a password and restart the managed server. The password guard applies in both sandboxing modes — an enforced server binds the configured `OPENCODE_HOST` like any other server.
+**DB-stored passwords take precedence over the environment variable, which takes precedence over the auto-generated password.**

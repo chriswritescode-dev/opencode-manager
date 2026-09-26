@@ -1,162 +1,102 @@
 import { Hono } from 'hono'
-import type { ContentfulStatusCode } from 'hono/utils/http-status'
-import type { OpenCodeClient } from '../services/opencode/client'
 import { z } from 'zod'
-import { logger } from '../utils/logger'
 import {
   OAuthAuthorizeRequestSchema,
-  OAuthAuthorizeResponseSchema,
   OAuthCallbackRequestSchema,
-  OpenCodeOAuthErrorSchema,
-  oauthErrorCode
 } from '../../../shared/src/schemas/auth'
-import type { OAuthErrorCode } from '../../../shared/src/schemas/auth'
-import { reloadOpenCodeConfig } from '../services/opencode-restart'
-import type { OpenCodeSupervisor } from '../services/opencode-supervisor'
+import type { OpenCodeClient } from '../services/opencode/client'
+import { runWhenIntegrationReady } from '../services/opencode/integration-ready'
+import { handleOpenCodeError } from '../utils/route-helpers'
 
-type OAuthPhase = 'authorize' | 'callback'
-
-const PHASE_FALLBACK: Record<OAuthPhase, string> = {
-  authorize: 'OAuth authorization failed',
-  callback: 'OAuth callback failed',
-}
-
-interface OAuthFailure {
-  payload: { error: string; code?: OAuthErrorCode; detail?: string }
-  status: ContentfulStatusCode
-}
-
-export function buildOAuthFailure(body: string, upstreamStatus: number, phase: OAuthPhase): OAuthFailure {
-  const status: ContentfulStatusCode =
-    upstreamStatus >= 400 && upstreamStatus <= 599 ? (upstreamStatus as ContentfulStatusCode) : 502
-
-  let parsed: unknown
-  try {
-    parsed = JSON.parse(body)
-  } catch {
-    return { payload: { error: PHASE_FALLBACK[phase] }, status }
-  }
-
-  const result = OpenCodeOAuthErrorSchema.safeParse(parsed)
-  if (!result.success) {
-    return { payload: { error: PHASE_FALLBACK[phase] }, status }
-  }
-
-  const error = result.data
-  const isTagged = '_tag' in error
-  const message = isTagged ? error.message : error.data.message
-  const field = isTagged ? error.field : error.data.field
-  const detail = [message?.replace(/\s+/g, ' ').trim(), field ? `field: ${field}` : undefined]
-    .filter(Boolean)
-    .join(' — ')
-
-  return {
-    payload: {
-      error: PHASE_FALLBACK[phase],
-      code: oauthErrorCode(error),
-      ...(detail ? { detail } : {}),
-    },
-    status,
-  }
-}
-
-export function createOAuthRoutes(openCodeClient: OpenCodeClient, openCodeSupervisor?: OpenCodeSupervisor) {
+export function createOAuthRoutes(openCodeClient: OpenCodeClient) {
   const app = new Hono()
+
+  app.get('/auth-methods', async (c) => {
+    try {
+      const integrations = await openCodeClient.api.integration.list()
+      const providers = Object.fromEntries(
+        integrations.data.map((integration) => [integration.id, integration.methods]),
+      )
+      return c.json({ providers })
+    } catch (error) {
+      return handleOpenCodeError(c, error, 'Failed to get provider auth methods')
+    }
+  })
 
   app.post('/:id/oauth/authorize', async (c) => {
     try {
-      const providerId = c.req.param('id')
       const body = await c.req.json()
       const validated = OAuthAuthorizeRequestSchema.parse(body)
-      
-      const response = await openCodeClient.forward({
-        method: 'POST',
-        path: `/provider/${encodeURIComponent(providerId)}/oauth/authorize`,
-        body: JSON.stringify(validated),
-        headers: { 'Content-Type': 'application/json' },
+
+      const integrationID = c.req.param('id')
+      const attempt = await runWhenIntegrationReady(openCodeClient.api, { integrationID }, () =>
+        openCodeClient.api.integration.oauth.connect({
+          integrationID,
+          methodID: validated.methodID,
+          answer: validated.answer,
+        }),
+      )
+
+      return c.json({
+        attemptID: attempt.data.attemptID,
+        url: attempt.data.url,
+        instructions: attempt.data.instructions,
+        mode: attempt.data.mode,
       })
-
-      if (!response.ok) {
-        const error = await response.text()
-        logger.error(`OAuth authorize failed for ${providerId}:`, error)
-        const failure = buildOAuthFailure(error, response.status, 'authorize')
-        return c.json(failure.payload, failure.status)
-      }
-
-      const data = await response.json()
-      const validatedResponse = OAuthAuthorizeResponseSchema.parse(data)
-      
-      return c.json(validatedResponse)
     } catch (error) {
-      logger.error('OAuth authorize error:', error)
       if (error instanceof z.ZodError) {
         return c.json({ error: 'Invalid request data', details: error.issues }, 400)
       }
-      return c.json({ error: 'OAuth authorization failed' }, 500)
+      return handleOpenCodeError(c, error, 'OAuth authorization failed')
+    }
+  })
+
+  app.get('/:id/oauth/:attemptID', async (c) => {
+    try {
+      const attempt = await openCodeClient.api.integration.oauth.status({
+        integrationID: c.req.param('id'),
+        attemptID: c.req.param('attemptID'),
+      })
+
+      const { status } = attempt.data
+      return c.json(status === 'failed'
+        ? { status, message: attempt.data.message }
+        : { status })
+    } catch (error) {
+      return handleOpenCodeError(c, error, 'Failed to get OAuth status')
     }
   })
 
   app.post('/:id/oauth/callback', async (c) => {
     try {
-      const providerId = c.req.param('id')
       const body = await c.req.json()
       const validated = OAuthCallbackRequestSchema.parse(body)
-      
-      const response = await openCodeClient.forward({
-        method: 'POST',
-        path: `/provider/${encodeURIComponent(providerId)}/oauth/callback`,
-        body: JSON.stringify(validated),
-        headers: { 'Content-Type': 'application/json' },
+
+      await openCodeClient.api.integration.oauth.complete({
+        integrationID: c.req.param('id'),
+        attemptID: validated.attemptID,
+        code: validated.code,
       })
 
-      if (!response.ok) {
-        const error = await response.text()
-        logger.error(`OAuth callback failed for ${providerId}:`, error)
-        const failure = buildOAuthFailure(error, response.status, 'callback')
-        return c.json(failure.payload, failure.status)
-      }
-
-      const data = await response.json()
-
-      try {
-        await reloadOpenCodeConfig(openCodeSupervisor)
-      } catch (reloadError) {
-        logger.warn(`Failed to reload OpenCode config after OAuth callback for ${providerId}:`, reloadError)
-      }
-
-      return c.json(data)
+      return c.json({ success: true })
     } catch (error) {
-      logger.error('OAuth callback error:', error)
       if (error instanceof z.ZodError) {
         return c.json({ error: 'Invalid request data', details: error.issues }, 400)
       }
-      return c.json({ error: 'OAuth callback failed' }, 500)
+      return handleOpenCodeError(c, error, 'OAuth callback failed')
     }
   })
 
-  app.get('/auth-methods', async (c) => {
+  app.delete('/:id/oauth/:attemptID', async (c) => {
     try {
-      const response = await openCodeClient.forward({
-        method: 'GET',
-        path: '/provider/auth',
+      await openCodeClient.api.integration.oauth.cancel({
+        integrationID: c.req.param('id'),
+        attemptID: c.req.param('attemptID'),
       })
 
-      if (!response.ok) {
-        const error = await response.text()
-        logger.error('Failed to get provider auth methods:', error)
-        return c.json({ error: 'Failed to get provider auth methods' }, 500)
-      }
-
-      const data = await response.json()
-      
-      // The OpenCode server returns the format we need directly
-      return c.json({ providers: data })
+      return c.json({ success: true })
     } catch (error) {
-      logger.error('Provider auth methods error:', error)
-      if (error instanceof z.ZodError) {
-        return c.json({ error: 'Invalid response data', details: error.issues }, 500)
-      }
-      return c.json({ error: 'Failed to get provider auth methods' }, 500)
+      return handleOpenCodeError(c, error, 'Failed to cancel OAuth authorization')
     }
   })
 

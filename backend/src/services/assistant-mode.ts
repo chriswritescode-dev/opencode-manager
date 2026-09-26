@@ -160,7 +160,7 @@ function buildLegacyAssistantAgentPrompt(): string {
   ].join('\n')
 }
 
-function buildAssistantDefaultAgentMdFromPrompt(prompt: string): string {
+function buildAssistantDefaultAgentMdFromPrompt(prompt: string, shellPermissionKey: 'bash' | 'shell'): string {
   const permission = buildAssistantAgentPermission()
 
   return `---
@@ -172,7 +172,7 @@ permission:
   glob: ${permission.glob}
   grep: ${permission.grep}
   list: ${permission.list}
-  bash: ${permission.bash}
+  ${shellPermissionKey}: ${permission.shell}
   external_directory: ${permission.external_directory}
 ---
 
@@ -181,7 +181,7 @@ ${prompt}
 }
 
 function buildLegacyAssistantDefaultAgentMd(): string {
-  return buildAssistantDefaultAgentMdFromPrompt(buildLegacyAssistantAgentPrompt())
+  return buildAssistantDefaultAgentMdFromPrompt(buildLegacyAssistantAgentPrompt(), 'bash')
 }
 
 function buildPreviousAssistantAgentsMd(): string {
@@ -296,24 +296,24 @@ function buildAssistantAgentPrompt(): string {
   ].join('\n')
 }
 
-function buildAssistantAgentPermission(): { read: 'allow'; edit: 'allow'; glob: 'allow'; grep: 'allow'; list: 'allow'; bash: 'allow'; external_directory: 'ask' } {
+function buildAssistantAgentPermission(): { read: 'allow'; edit: 'allow'; glob: 'allow'; grep: 'allow'; list: 'allow'; shell: 'allow'; external_directory: 'ask' } {
   return {
     read: 'allow',
     edit: 'allow',
     glob: 'allow',
     grep: 'allow',
     list: 'allow',
-    bash: 'allow',
+    shell: 'allow',
     external_directory: 'ask',
   }
 }
 
 function buildPreviousAssistantDefaultAgentMd(): string {
-  return buildAssistantDefaultAgentMdFromPrompt(buildPreviousAssistantAgentPrompt())
+  return buildAssistantDefaultAgentMdFromPrompt(buildPreviousAssistantAgentPrompt(), 'bash')
 }
 
 export function buildAssistantDefaultAgentMd(): string {
-  return buildAssistantDefaultAgentMdFromPrompt(buildAssistantAgentPrompt())
+  return buildAssistantDefaultAgentMdFromPrompt(buildAssistantAgentPrompt(), 'shell')
 }
 
 export function buildSchedulesSkill(): string {
@@ -691,9 +691,9 @@ Returns the updated settings object with the same structure as GET.
 
 ### POST /assistant/reload
 
-Reload the assistant workspace by disposing the current OpenCode instance. Use this after editing \`.opencode/agents/assistant.md\` or \`opencode.json\` so changes take effect on the next message.
+Reload the OpenCode configuration without restarting the server, rebuilding every loaded location. OpenCode re-reads \`opencode.json\`/\`opencode.jsonc\`, agents, commands, skills, plugins, and \`AGENTS.md\`; running sessions, including this one, keep running. Use this after editing \`.opencode/agents/assistant.md\` or other workspace files so changes take effect on the next message. Returns \`400\` with \`validationIssues\` when the OpenCode configuration is invalid.
 
-**Note:** Always confirm with the user before reloading, as it re-bootstraps the workspace.
+**Note:** Always confirm with the user before reloading.
 
 **Rate Limiting:** 5 requests per minute per token. Returns \`429 Too Many Requests\` with \`Retry-After\` header when exceeded.
 
@@ -715,11 +715,11 @@ Reload the assistant workspace by disposing the current OpenCode instance. Use t
 
 ## OpenCode Configuration
 
-The global configuration files on disk are the source of truth. Use the \`ocm\` tool's \`request\` action with the endpoints below to read or change them; never edit the files directly. Global sources merge in order: \`config.json\`, \`opencode.json\`, then \`opencode.jsonc\`.
+The global configuration files on disk are the source of truth. Use the \`ocm\` tool's \`request\` action with the endpoints below to read or change them; never edit the files directly. Global sources merge in order: \`opencode.json\`, then \`opencode.jsonc\`.
 
 ### GET /opencode-config
 
-Read the merged persisted global configuration and its source files. Returns \`404\` when no source exists. This is not the running instance configuration: project overrides and expanded environment values are not included. \`GET /opencode-config/effective\` reads the running server's effective global configuration separately; never copy that response into a save.
+Read the merged persisted global configuration and its source files. Returns \`404\` when no source exists. This is not the running instance configuration: project overrides and expanded environment values are not included. \`GET /opencode-config/effective\` reads the running server's configuration separately as \`entries\`: the configuration documents and discovery directories in precedence order, lowest first, each shaped as \`{ type: 'document', path, info }\` or \`{ type: 'directory', path }\`. Its \`info\` values are expanded for the running server; never copy this response into a save.
 
 **Response (\`OpenCodeConfigFile\`):**
 \`\`\`ts
@@ -748,13 +748,13 @@ Read the merged persisted global configuration and its source files. Returns \`4
 
 ### PUT /opencode-config
 
-Read the merged persisted configuration first, change only the keys the user asked for, and send the complete object back with its revision. Only changed fields are patched into the preferred existing source: JSONC, JSON, then legacy config.json. New installations use opencode.jsonc. Unchanged inherited values and comments are preserved. Removing a field removes only its override in the write target; a lower-priority value can reappear.
+Read the merged persisted configuration first, change only the keys the user asked for, and send the complete object back with its revision. Only changed fields are patched into the preferred existing source: JSONC, then JSON. New installations use opencode.jsonc. Unchanged inherited values and comments are preserved. Removing a field removes only its override in the write target; a lower-priority value can reappear.
 
 For a raw edit, send a string with the exact source name from \`sources\`. Never send merged JSON as raw source text. A \`409\` means the source files changed: read again and reconcile rather than retrying stale content.
 
 **Request Body:**
 \`\`\`ts
-{ content: object | string, expectedRevision: string, source?: "config.json" | "opencode.json" | "opencode.jsonc" }
+{ content: object | string, expectedRevision: string, source?: "opencode.json" | "opencode.jsonc" }
 \`\`\`
 
 **Example:**
@@ -775,17 +775,21 @@ For a raw edit, send a string with the exact source name from \`sources\`. Never
 \`\`\`
 
 **Response:**
-Returns the refreshed merged configuration and source files. Adds \`restartRequired: true\` for semantic configuration changes, except changes limited to \`mcp\`, which are saved without it; to make an MCP change take effect immediately, tell the user to reconnect or reload the server from Settings → MCP. Comment-only changes do not require a restart. Saving never silently drops unsupported fields.
+Returns the refreshed merged configuration and source files. A semantic change is applied automatically: the Manager reloads OpenCode without restarting the server, so agents, permissions, providers, models, and plugins take effect on the next message and running sessions keep running. Changes limited to \`mcp\` are saved without a reload; to make an MCP change take effect immediately, tell the user to reconnect the server from Settings → MCP. Comment-only changes do nothing. Saving never silently drops unsupported fields.
+
+The response adds \`restartRequired: true\` only when the automatic reload failed, for example because the OpenCode server is unavailable.
 
 Returns \`400\` for invalid configuration and \`409\` for a stale revision.
 
 When the response contains \`restartRequired: true\`, tell the user to restart the OpenCode server from Settings. Never attempt the restart yourself: it would terminate your own session.
 
+Only changes to how the OpenCode process is launched need a user restart from Settings: server environment variables, Git credentials and identity, sandbox enforcement, rotating the manager token, the server password, and installing or upgrading the OpenCode version. You cannot make these changes through this API.
+
 ## Safety
 
 - The settings PATCH endpoint rejects any attempt to modify credentials, API keys, or other sensitive settings; guide the user to the full UI for Git, TTS, and STT credentials
 - PUT /opencode-config patches changed global settings, including \`plugin\`, \`mcp\`, and \`provider\` entries; change only the keys the user explicitly asked for and never add plugins, MCP servers, or provider credentials the user did not request
-- The settings PATCH endpoint does NOT trigger OpenCode reload or restart
+- The settings PATCH endpoint does NOT trigger an OpenCode reload or restart
 `
 }
 
@@ -866,7 +870,6 @@ List all repos available to OpenCode Manager. The repos are returned in the orde
 export function buildAssistantOpenCodeConfig(): OpenCodeConfigInput {
   const config: OpenCodeConfigInput = {
     default_agent: ASSISTANT_DEFAULT_AGENT_NAME,
-    instructions: ['AGENTS.md'],
     permission: buildAssistantAgentPermission(),
     agent: {
       [ASSISTANT_DEFAULT_AGENT_NAME]: { mode: 'primary' },

@@ -1,53 +1,44 @@
 import { Hono } from 'hono'
-import type { OpenCodeClient } from '../services/opencode/client'
+import type { Context, MiddlewareHandler } from 'hono'
+import { createServer } from 'node:net'
+import type { AddressInfo } from 'node:net'
 import { z } from 'zod'
-import crypto from 'crypto'
-import path from 'path'
-import { readFile, writeFile } from 'fs/promises'
-import { storeMcpOAuthFlow, consumeMcpOAuthFlow, deleteMcpOAuthFlow, markMcpOAuthFlowCompleted, markMcpOAuthFlowFailed, getMcpOAuthFlowResult } from '../services/mcp-oauth-state'
+import {
+  MCP_OAUTH_CALLBACK_PATH,
+  mcpOAuthRedirectUri,
+  mcpServersFromConfig,
+  openCodeLocation,
+} from '@opencode-manager/shared/opencode'
+import type { McpServerConfig } from '@opencode-manager/shared/opencode'
+import { ENV } from '@opencode-manager/shared/config/env'
+import type { OpenCodeClient } from '../services/opencode/client'
+import { storeMcpOAuthFlow, consumeMcpOAuthFlow, getMcpOAuthFlowByAttempt } from '../services/mcp-oauth-state'
 import { logger } from '../utils/logger'
-import { mkdirSafe } from '../utils/fs-safe'
-import { getWorkspacePath } from '@opencode-manager/shared/config/env'
 
 const StartSchema = z.object({
-  serverName: z.string(),
-  serverUrl: z.string().url(),
-  scope: z.string().optional(),
-  clientId: z.string().optional(),
-  clientSecret: z.string().optional(),
+  serverName: z.string().min(1),
   directory: z.string().optional(),
 })
 
-function getMcpAuthPath(): string {
-  return path.join(getWorkspacePath(), '.opencode/state/opencode/mcp-auth.json')
+const DirectoryQuerySchema = z.object({
+  directory: z.string().optional(),
+})
+
+function firstHeaderValue(c: Context, name: string): string | undefined {
+  const value = c.req.header(name)?.split(',')[0]?.trim()
+  return value || undefined
 }
 
-async function readMcpAuth(): Promise<Record<string, unknown>> {
-  try {
-    const content = await readFile(getMcpAuthPath(), 'utf-8')
-    return JSON.parse(content) as Record<string, unknown>
-  } catch {
-    return {}
-  }
+function forwardedScheme(c: Context): 'http' | 'https' | undefined {
+  const proto = firstHeaderValue(c, 'x-forwarded-proto')?.toLowerCase()
+  return proto === 'http' || proto === 'https' ? proto : undefined
 }
 
-async function writeMcpAuth(data: Record<string, unknown>): Promise<void> {
-  const filePath = getMcpAuthPath()
-  await mkdirSafe(path.dirname(filePath))
-  await writeFile(filePath, JSON.stringify(data, null, 2), { mode: 0o600 })
-}
-
-function generateState(): string {
-  return crypto.randomBytes(32).toString('hex')
-}
-
-function generateCodeVerifier(): string {
-  return crypto.randomBytes(32).toString('base64url')
-}
-
-async function generateCodeChallenge(verifier: string): Promise<string> {
-  const hash = crypto.createHash('sha256').update(verifier).digest()
-  return hash.toString('base64url')
+function requestOrigin(c: Context): string {
+  const host = firstHeaderValue(c, 'x-forwarded-host') ?? c.req.header('host') ?? 'localhost:5003'
+  const scheme = forwardedScheme(c)
+  if (scheme) return `${scheme}://${host}`
+  return c.req.header('origin') || `http://${host}`
 }
 
 function escapeHtml(unsafe: string): string {
@@ -82,142 +73,168 @@ function renderPage(heading: string, message: string, isSuccess: boolean): strin
 </html>`
 }
 
-async function discoverOAuthMetadata(serverUrl: string): Promise<{
-  authorization_endpoint: string
-  token_endpoint: string
-  registration_endpoint?: string
-} | undefined> {
-  const url = new URL('/.well-known/oauth-authorization-server', serverUrl)
-  try {
-    const response = await fetch(url.toString(), {
-      headers: { 'MCP-Protocol-Version': '2025-03-26' },
+function probeLoopbackPort(): Promise<number> {
+  return new Promise((resolve, reject) => {
+    const server = createServer()
+    server.once('error', reject)
+    server.listen(0, '127.0.0.1', () => {
+      const { port } = server.address() as AddressInfo
+      server.close(() => resolve(port))
     })
-    if (!response.ok) return undefined
-    return await response.json() as {
-      authorization_endpoint: string
-      token_endpoint: string
-      registration_endpoint?: string
-    }
-  } catch {
-    return undefined
-  }
-}
-
-async function registerClient(
-  serverUrl: string,
-  registrationEndpoint: string | undefined,
-  callbackUrl: string,
-  clientSecret?: string,
-): Promise<{ client_id: string; client_secret?: string }> {
-  const regUrl = registrationEndpoint || new URL('/register', serverUrl).toString()
-  
-  const response = await fetch(regUrl, {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({
-      redirect_uris: [callbackUrl],
-      client_name: 'OpenCode Manager',
-      client_uri: 'https://opencode.ai',
-      grant_types: ['authorization_code', 'refresh_token'],
-      response_types: ['code'],
-      token_endpoint_auth_method: clientSecret ? 'client_secret_post' : 'none',
-    }),
   })
-
-  if (!response.ok) {
-    const text = await response.text()
-    throw new Error(`Dynamic client registration failed: ${response.status} ${text}`)
-  }
-
-  const result = await response.json() as { client_id: string; client_secret?: string }
-  return result
 }
-
- 
-import type { MiddlewareHandler } from 'hono'
 
 export function createMcpOauthProxyRoutes(openCodeClient: OpenCodeClient, requireAuth?: MiddlewareHandler) {
+  if (ENV.OPENCODE.LEGACY_PUBLIC_URL) {
+    logger.warn('OPENCODE_PUBLIC_URL is set but no longer used; MCP OAuth redirects are derived from X-Forwarded-Proto/X-Forwarded-Host, Origin, or Host')
+  }
+
   const app = new Hono()
+  const api = openCodeClient.api
+
+  const findServer = async (serverName: string, directory: string | undefined) => {
+    const servers = (await api.mcp.list(openCodeLocation(directory))).data
+    return servers.find((server) => server.name === serverName)
+  }
+
+  const readServerConfig = async (serverName: string, directory: string | undefined) => {
+    const entries = await api.config.get(openCodeLocation(directory))
+    let config: McpServerConfig | undefined
+    for (const entry of entries) {
+      if (entry.type !== 'document') continue
+      config = mcpServersFromConfig(entry.info.mcp)[serverName] ?? config
+    }
+    return config
+  }
+
+  const cancelAttempt = async (integrationID: string, attemptID: string, directory: string | undefined) => {
+    try {
+      await api.integration.oauth.cancel({ integrationID, attemptID, ...openCodeLocation(directory) })
+    } catch (error) {
+      logger.warn(`Failed to cancel MCP OAuth attempt ${attemptID}:`, error)
+    }
+  }
+
+  // V2 binds the redirect URI's port on the OpenCode host's loopback for the lifetime of an attempt, so
+  // the Manager's own port would collide. Re-add the server on a free loopback port before connecting;
+  // the browser still reaches the Manager because the redirect URI stays the Manager's callback.
+  const reserveCallbackPort = async (server: { name: string; integrationID?: string }, origin: string, directory: string | undefined) => {
+    const port = await probeLoopbackPort()
+    if (!server.integrationID) return port
+
+    try {
+      const v2Config = await readServerConfig(server.name, directory)
+      if (!v2Config || v2Config.type !== 'remote') return port
+
+      await api.mcp.add({
+        server: server.name,
+        ...openCodeLocation(directory),
+        config: {
+          ...v2Config,
+          oauth: {
+            ...(v2Config.oauth === false ? {} : v2Config.oauth ?? {}),
+            redirect_uri: mcpOAuthRedirectUri(origin),
+            callback_port: port,
+          },
+        },
+      })
+    } catch (error) {
+      logger.warn(`Failed to reserve a loopback callback port for ${server.name}:`, error)
+    }
+    return port
+  }
 
   if (requireAuth) {
     app.use('/start', requireAuth)
     app.use('/status/*', requireAuth)
+    app.use('/credentials/*', requireAuth)
   }
 
   app.post('/start', async (c) => {
     try {
-      const body = await c.req.json()
-      const { serverName, serverUrl, scope, clientId, clientSecret, directory } = StartSchema.parse(body)
+      const { serverName, directory } = StartSchema.parse(await c.req.json())
 
-      const origin = c.req.header('x-forwarded-proto') && c.req.header('host')
-        ? `${c.req.header('x-forwarded-proto')}://${c.req.header('host')}`
-        : c.req.header('origin') || `http://${c.req.header('host') || 'localhost:5003'}`
-      const callbackUrl = `${origin}/api/mcp-oauth-proxy/callback`
-
-      const metadata = await discoverOAuthMetadata(serverUrl)
-      if (!metadata) {
-        return c.json({ error: 'OAuth metadata discovery failed for this MCP server' }, 400)
+      const server = await findServer(serverName, directory)
+      if (!server) {
+        return c.json({ error: 'MCP server not found' }, 404)
+      }
+      if (!server.integrationID) {
+        return c.json({ error: 'MCP server is not registered for OAuth' }, 400)
       }
 
-      let resolvedClientId = clientId
-      let resolvedClientSecret = clientSecret
+      const callbackPort = await reserveCallbackPort(server, requestOrigin(c), directory)
 
-      if (!resolvedClientId) {
-        if (!metadata.registration_endpoint) {
-          return c.json({ error: 'Server does not support dynamic client registration and no clientId provided' }, 400)
-        }
-        const registered = await registerClient(serverUrl, metadata.registration_endpoint, callbackUrl, clientSecret)
-        resolvedClientId = registered.client_id
-        resolvedClientSecret = registered.client_secret
-        logger.info(`Registered OAuth client for ${serverName}: ${resolvedClientId}`)
+      const integration = (await api.integration.get({ integrationID: server.integrationID, ...openCodeLocation(directory) })).data
+      const method = integration.methods.find((candidate) => candidate.type === 'oauth')
+      if (!method) {
+        return c.json({ error: 'OAuth method not found for this MCP server' }, 400)
       }
 
-      const state = generateState()
-      const codeVerifier = generateCodeVerifier()
-      const codeChallenge = await generateCodeChallenge(codeVerifier)
+      const attempt = (
+        await api.integration.oauth.connect({
+          integrationID: server.integrationID,
+          methodID: method.id,
+          ...openCodeLocation(directory),
+        })
+      ).data
 
-      storeMcpOAuthFlow(state, {
+      const state = new URL(attempt.url).searchParams.get('state')
+      if (!state) {
+        return c.json({ error: 'Authorization URL is missing the state parameter' }, 500)
+      }
+
+      storeMcpOAuthFlow({
+        state,
         serverName,
-        serverUrl,
-        codeVerifier,
-        clientId: resolvedClientId,
-        clientSecret: resolvedClientSecret,
-        callbackUrl,
-        tokenEndpoint: metadata.token_endpoint,
+        integrationID: server.integrationID,
+        attemptID: attempt.attemptID,
         directory,
+        callbackPort,
       })
 
-      const authUrl = new URL(metadata.authorization_endpoint)
-      authUrl.searchParams.set('response_type', 'code')
-      authUrl.searchParams.set('client_id', resolvedClientId)
-      authUrl.searchParams.set('redirect_uri', callbackUrl)
-      authUrl.searchParams.set('state', state)
-      authUrl.searchParams.set('code_challenge', codeChallenge)
-      authUrl.searchParams.set('code_challenge_method', 'S256')
-      if (scope) {
-        authUrl.searchParams.set('scope', scope)
-      }
-
-      return c.json({ authorizationUrl: authUrl.toString(), flowId: state })
+      return c.json({ authorizationUrl: attempt.url, flowId: attempt.attemptID })
     } catch (error) {
       logger.error('MCP OAuth start failed:', error)
-      const message = error instanceof Error ? error.message : 'Failed to start OAuth flow'
-      return c.json({ error: message }, 500)
+      return c.json({ error: 'Failed to start OAuth flow' }, 500)
     }
   })
 
   app.get('/status/:flowId', async (c) => {
-    const flowId = c.req.param('flowId')
-    const result = getMcpOAuthFlowResult(flowId)
-    if (!result) {
+    const attemptID = c.req.param('flowId')
+    const flow = getMcpOAuthFlowByAttempt(attemptID)
+    if (!flow) {
       return c.json({ status: 'unknown' })
     }
-    return c.json(result)
+
+    try {
+      const attempt = (
+        await api.integration.oauth.status({
+          integrationID: flow.integrationID,
+          attemptID: flow.attemptID,
+          ...openCodeLocation(flow.directory),
+        })
+      ).data
+
+      if (attempt.status === 'complete') {
+        return c.json({ status: 'completed', serverName: flow.serverName })
+      }
+      if (attempt.status === 'failed') {
+        return c.json({ status: 'failed', error: attempt.message })
+      }
+      if (attempt.status === 'expired') {
+        return c.json({ status: 'failed', error: 'Authorization expired' })
+      }
+      return c.json({ status: 'pending' })
+    } catch (error) {
+      logger.error('MCP OAuth status lookup failed:', error)
+      return c.json({ status: 'unknown' })
+    }
   })
 
   app.get('/callback', async (c) => {
     const code = c.req.query('code')
     const state = c.req.query('state')
+    const issuer = c.req.query('iss')
     const error = c.req.query('error')
     const errorDescription = c.req.query('error_description')
 
@@ -225,96 +242,63 @@ export function createMcpOauthProxyRoutes(openCodeClient: OpenCodeClient, requir
       return c.html(renderPage('Missing State', 'No state parameter. Please try again.', false), 400)
     }
 
-    if (error) {
-      markMcpOAuthFlowFailed(state, errorDescription || error)
-      deleteMcpOAuthFlow(state)
-      return c.html(renderPage('Authorization Failed', errorDescription || error, false), 400)
-    }
-
-    if (!code) {
-      markMcpOAuthFlowFailed(state, 'No authorization code received')
-      deleteMcpOAuthFlow(state)
-      return c.html(renderPage('Missing Code', 'No authorization code. Please try again.', false), 400)
-    }
-
     const flow = consumeMcpOAuthFlow(state)
     if (!flow) {
       return c.html(renderPage('Session Expired', 'Authorization session expired. Please try again.', false), 400)
     }
 
+    if (error) {
+      await cancelAttempt(flow.integrationID, flow.attemptID, flow.directory)
+      return c.html(renderPage('Authorization Failed', errorDescription || error, false), 400)
+    }
+
+    if (!code) {
+      await cancelAttempt(flow.integrationID, flow.attemptID, flow.directory)
+      return c.html(renderPage('Missing Code', 'No authorization code. Please try again.', false), 400)
+    }
+
     try {
-      const params = new URLSearchParams({
-        grant_type: 'authorization_code',
-        client_id: flow.clientId,
-        code,
-        code_verifier: flow.codeVerifier,
-        redirect_uri: flow.callbackUrl,
-      })
-      if (flow.clientSecret) {
-        params.set('client_secret', flow.clientSecret)
-      }
+      // Hand the code to the OpenCode host's loopback listener, which owns PKCE, the token exchange,
+      // and the credential; the Manager only relays the browser's redirect.
+      const callbackUrl = new URL(MCP_OAUTH_CALLBACK_PATH, `http://127.0.0.1:${flow.callbackPort}`)
+      callbackUrl.searchParams.set('code', code)
+      callbackUrl.searchParams.set('state', state)
+      if (issuer) callbackUrl.searchParams.set('iss', issuer)
 
-      const tokenResponse = await fetch(flow.tokenEndpoint, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
-        body: params,
-      })
-
-      if (!tokenResponse.ok) {
-        const errText = await tokenResponse.text()
-        logger.error(`Token exchange failed for ${flow.serverName}: ${tokenResponse.status} ${errText}`)
-        markMcpOAuthFlowFailed(state, 'Token exchange failed')
-        return c.html(renderPage('Token Exchange Failed', 'Failed to exchange code for tokens. Please try again.', false), 500)
-      }
-
-      const tokens = await tokenResponse.json() as {
-        access_token: string
-        refresh_token?: string
-        expires_in?: number
-        scope?: string
-        token_type?: string
-      }
-
-      const authData = await readMcpAuth()
-      authData[flow.serverName] = {
-        ...(authData[flow.serverName] as Record<string, unknown> || {}),
-        serverUrl: flow.serverUrl,
-        tokens: {
-          accessToken: tokens.access_token,
-          refreshToken: tokens.refresh_token,
-          expiresAt: tokens.expires_in ? Math.floor(Date.now() / 1000) + tokens.expires_in : undefined,
-          scope: tokens.scope,
-        },
-        clientInfo: {
-          clientId: flow.clientId,
-          clientSecret: flow.clientSecret,
-        },
-      }
-      await writeMcpAuth(authData)
-      logger.info(`Wrote OAuth tokens to mcp-auth.json for ${flow.serverName}`)
-      markMcpOAuthFlowCompleted(state, flow.serverName)
-
-      try {
-        await openCodeClient.forward({
-          method: 'POST',
-          path: `/mcp/${encodeURIComponent(flow.serverName)}/connect`,
-          directory: flow.directory,
-        })
-        if (flow.directory) {
-          await openCodeClient.forward({
-            method: 'POST',
-            path: `/mcp/${encodeURIComponent(flow.serverName)}/connect`,
-          })
-        }
-      } catch {
-        logger.warn(`Failed to trigger reconnect for ${flow.serverName}, may need manual reconnect`)
+      const response = await fetch(callbackUrl)
+      if (!response.ok) {
+        logger.warn(`MCP OAuth callback was rejected for ${flow.serverName}: ${response.status}`)
+        return c.html(renderPage('Authentication Failed', 'Failed to complete authorization. Please try again.', false), 400)
       }
 
       return c.html(renderPage('Authentication Successful', 'You can close this window now.', true))
-    } catch (err) {
-      logger.error('MCP OAuth callback failed:', err)
-      markMcpOAuthFlowFailed(state, 'Unexpected error during token exchange')
-      return c.html(renderPage('Unexpected Error', 'An error occurred. Please try again.', false), 500)
+    } catch (forwardError) {
+      logger.error('MCP OAuth callback forward failed:', forwardError)
+      return c.html(renderPage('Authentication Failed', 'Failed to complete authorization. Please try again.', false), 500)
+    }
+  })
+
+  app.delete('/credentials/:serverName', async (c) => {
+    try {
+      const serverName = c.req.param('serverName')
+      const { directory } = DirectoryQuerySchema.parse(c.req.query())
+
+      const server = await findServer(serverName, directory)
+      if (!server?.integrationID) {
+        return c.json({ success: true })
+      }
+
+      const integration = (await api.integration.get({ integrationID: server.integrationID, ...openCodeLocation(directory) })).data
+      for (const connection of integration.connections) {
+        if (connection.type === 'credential') {
+          await api.credential.remove({ credentialID: connection.id })
+        }
+      }
+
+      return c.json({ success: true })
+    } catch (error) {
+      logger.error('Failed to remove MCP credentials:', error)
+      return c.json({ error: 'Failed to remove MCP credentials' }, 500)
     }
   })
 

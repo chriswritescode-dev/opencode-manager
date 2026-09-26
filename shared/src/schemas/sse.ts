@@ -1,4 +1,5 @@
 import { z } from "zod";
+import type { V2Event } from "../opencode";
 
 export const SSESubscribeSchema = z.object({
   clientId: z.string().min(1),
@@ -14,14 +15,7 @@ export const SSEVisibilitySchema = z.object({
 export type SSESubscribeRequest = z.infer<typeof SSESubscribeSchema>;
 export type SSEVisibilityRequest = z.infer<typeof SSEVisibilitySchema>;
 
-export interface SSEEventPayload {
-  type: string;
-  properties: Record<string, unknown>;
-}
-
 export interface SSEEventEnvelope {
-  directory?: string;
-  project?: string;
-  workspace?: string;
-  payload: SSEEventPayload;
+  directory?: string | null;
+  payload: V2Event;
 }

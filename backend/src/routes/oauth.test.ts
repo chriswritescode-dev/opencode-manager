@@ -1,241 +1,398 @@
 import { describe, it, expect, vi } from 'vitest'
 import { Hono } from 'hono'
-import { createOAuthRoutes, buildOAuthFailure } from './oauth'
+import { createOAuthRoutes } from './oauth'
 import { createStubOpenCodeClient } from '../../test/helpers/stub-opencode-client'
-import { PROVIDER_AUTH_ERROR_NAMES } from '../../../shared/src/schemas/auth'
+import { FetchOpenCodeClient } from '../services/opencode/client'
+import { resolveOpenCode2Binary, startOpenCodeServe } from '../../test/helpers/opencode-binary'
+import { buildOpenCodeBasicAuth, ClientError } from '@opencode-manager/shared/opencode'
+import type { IntegrationInfo, IntegrationKeyMethod, IntegrationMethod, IntegrationOAuthMethod } from '@opencode-manager/shared/opencode'
+import type { OAuthAttemptStatus, OAuthAuthorizeResponse } from '@opencode-manager/shared/schemas'
+import type { OpenCodeClient } from '../services/opencode/client'
 
-function createTestApp(clientOverrides: Parameters<typeof createStubOpenCodeClient>[0] = {}): Hono {
+const LOCATION = { directory: '/tmp/repo' }
+
+function taggedError(tag: string, message: string): Error {
+  return Object.assign(new Error(message), { _tag: tag })
+}
+
+function createOAuthApp(client: OpenCodeClient): Hono {
   const app = new Hono()
-  app.route('/oauth', createOAuthRoutes(createStubOpenCodeClient(clientOverrides)))
+  app.route('/oauth', createOAuthRoutes(client))
   return app
 }
 
-function upstreamFailure(body: unknown, status = 400): Parameters<typeof createStubOpenCodeClient>[0] {
+function integrationFixture(overrides: Partial<IntegrationInfo> = {}): IntegrationInfo {
   return {
-    forward: vi.fn(async () => new Response(JSON.stringify(body), { status })),
+    id: 'github-copilot',
+    name: 'GitHub Copilot',
+    methods: [],
+    connections: [],
+    ...overrides,
   }
 }
 
-describe('buildOAuthFailure against captured opencode 1.18.7 responses', () => {
-  it('classifies a real ProviderAuthOauthMissing callback response', () => {
-    const failure = buildOAuthFailure(
-      '{"name":"ProviderAuthOauthMissing","data":{"providerID":"openai"}}',
-      400,
-      'callback',
-    )
-    expect(failure.status).toBe(400)
-    expect(failure.payload).toEqual({
-      error: 'OAuth callback failed',
-      code: 'ProviderAuthOauthMissing',
-    })
+function authorizeRequest(app: Hono, providerId = 'github-copilot', body: unknown = { methodID: 'device' }) {
+  return app.request(`/oauth/${providerId}/oauth/authorize`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(body),
   })
+}
 
-  it('flattens the multiline message a real BadRequest payload carries', () => {
-    const failure = buildOAuthFailure(
-      '{"name":"BadRequest","data":{"message":"Missing key\\n  at [\\"method\\"]","kind":"Payload"}}',
-      400,
-      'callback',
-    )
-    expect(failure.payload.code).toBe('BadRequest')
-    expect(failure.payload.detail).toBe('Missing key at ["method"]')
+function callbackRequest(app: Hono, providerId = 'github-copilot', body: unknown = { attemptID: 'con_stub' }) {
+  return app.request(`/oauth/${providerId}/oauth/callback`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(body),
   })
-
-  it('falls back without a code for a real UnknownError defect response', () => {
-    const failure = buildOAuthFailure(
-      '{"name":"UnknownError","data":{"message":"Unexpected server error. Check server logs for details.","ref":"err_00568566"}}',
-      500,
-      'authorize',
-    )
-    expect(failure.status).toBe(500)
-    expect(failure.payload).toEqual({ error: 'OAuth authorization failed' })
-  })
-})
-
-describe('buildOAuthFailure', () => {
-  it('forwards every upstream ProviderAuthError name as the code', () => {
-    for (const name of PROVIDER_AUTH_ERROR_NAMES) {
-      const failure = buildOAuthFailure(JSON.stringify({ name, data: {} }), 400, 'authorize')
-      expect(failure.payload.code).toBe(name)
-      expect(failure.status).toBe(400)
-    }
-  })
-
-  it('forwards the tagged InvalidRequestError shape', () => {
-    const failure = buildOAuthFailure(
-      JSON.stringify({ _tag: 'InvalidRequestError', message: 'method out of range' }),
-      400,
-      'authorize',
-    )
-    expect(failure.payload.code).toBe('InvalidRequestError')
-    expect(failure.payload.detail).toBe('method out of range')
-  })
-
-  it('surfaces upstream message and field as detail for validation failures', () => {
-    const failure = buildOAuthFailure(
-      JSON.stringify({
-        name: 'ProviderAuthValidationFailed',
-        data: { field: 'apiKey', message: 'must start with sk-' },
-      }),
-      400,
-      'authorize',
-    )
-    expect(failure.payload.code).toBe('ProviderAuthValidationFailed')
-    expect(failure.payload.detail).toBe('must start with sk- — field: apiKey')
-  })
-
-  it('omits detail when upstream carries no message or field', () => {
-    const failure = buildOAuthFailure(
-      JSON.stringify({ name: 'ProviderAuthOauthCallbackFailed', data: {} }),
-      400,
-      'callback',
-    )
-    expect(failure.payload.detail).toBeUndefined()
-    expect(failure.payload.error).toBe('OAuth callback failed')
-  })
-
-  it('falls back to the phase generic without a code for non-JSON bodies', () => {
-    const failure = buildOAuthFailure('upstream exploded', 500, 'authorize')
-    expect(failure.payload).toEqual({ error: 'OAuth authorization failed' })
-    expect(failure.status).toBe(500)
-  })
-
-  it('falls back to the phase generic for JSON that is not the upstream contract', () => {
-    const failure = buildOAuthFailure(JSON.stringify({ name: 'SomethingElse' }), 400, 'callback')
-    expect(failure.payload).toEqual({ error: 'OAuth callback failed' })
-  })
-
-  it('replaces out-of-range upstream statuses with 502', () => {
-    expect(buildOAuthFailure('boom', 200, 'authorize').status).toBe(502)
-    expect(buildOAuthFailure('boom', 0, 'authorize').status).toBe(502)
-  })
-})
+}
 
 describe('oauth routes /auth-methods', () => {
-  it('wraps the upstream catalogue as { providers }', async () => {
-    const upstream = { anthropic: [{ type: 'oauth', label: 'Anthropic OAuth' }] }
-    const app = createTestApp({
-      forward: vi.fn(async () => new Response(JSON.stringify(upstream), { status: 200 })),
+  const oauthMethod: IntegrationMethod = {
+    id: 'device',
+    type: 'oauth',
+    label: 'Login with GitHub Copilot',
+    form: [
+      {
+        key: 'deploymentType',
+        title: 'Select GitHub deployment type',
+        required: true,
+        type: 'string',
+        options: [
+          { value: 'github.com', label: 'GitHub.com', description: 'Public' },
+          { value: 'enterprise', label: 'GitHub Enterprise' },
+        ],
+      },
+      {
+        key: 'enterpriseUrl',
+        title: 'Enter your GitHub Enterprise URL or domain',
+        required: true,
+        when: [{ key: 'deploymentType', op: 'eq', value: 'enterprise' }],
+        type: 'string',
+        placeholder: 'company.ghe.com or https://company.ghe.com',
+      },
+    ],
+  }
+
+  const keyMethod: IntegrationMethod = {
+    type: 'key',
+    label: 'API key',
+    form: [{ key: 'resourceName', type: 'string', title: 'Enter Azure Resource Name', required: true }],
+  }
+
+  const hiddenFieldMethod: IntegrationMethod = {
+    id: 'device',
+    type: 'oauth',
+    label: 'OpenCode Console account',
+    form: [{ key: 'server', type: 'string', format: 'uri', hidden: true, default: 'https://opencode.ai/console' }],
+  }
+
+  const commandMethod: IntegrationMethod = { id: 'browser', type: 'command', label: 'Login with DigitalOcean', command: ['doctl', 'auth', 'init'] }
+
+  const envMethod: IntegrationMethod = { type: 'env', names: ['ANTHROPIC_API_KEY'] }
+
+  it('passes V2 methods and forms through for every integration', async () => {
+    const client = createStubOpenCodeClient()
+    vi.mocked(client.api.integration.list).mockResolvedValueOnce({
+      location: LOCATION,
+      data: [
+        integrationFixture({ methods: [oauthMethod, envMethod] }),
+        integrationFixture({ id: 'azure', name: 'Azure', methods: [keyMethod] }),
+        integrationFixture({ id: 'opencode', name: 'OpenCode Console', methods: [hiddenFieldMethod] }),
+        integrationFixture({ id: 'digitalocean', name: 'DigitalOcean', methods: [commandMethod] }),
+      ],
     })
-    const res = await app.request('/oauth/auth-methods')
+
+    const res = await createOAuthApp(client).request('/oauth/auth-methods')
+
     expect(res.status).toBe(200)
-    const data = (await res.json()) as { providers: typeof upstream }
-    expect(data.providers).toEqual(upstream)
+    const data = (await res.json()) as { providers: Record<string, unknown> }
+    expect(data.providers).toEqual({
+      'github-copilot': [oauthMethod, envMethod],
+      azure: [keyMethod],
+      opencode: [hiddenFieldMethod],
+      digitalocean: [commandMethod],
+    })
   })
 
-  it('returns 500 when upstream fails', async () => {
-    const app = createTestApp({
-      forward: vi.fn(async () => new Response('internal failure', { status: 500 })),
-    })
-    const res = await app.request('/oauth/auth-methods')
-    expect(res.status).toBe(500)
+  it('returns 502 when the upstream is unreachable', async () => {
+    const client = createStubOpenCodeClient()
+    vi.mocked(client.api.integration.list).mockRejectedValueOnce(new ClientError('UnexpectedStatus'))
+
+    const res = await createOAuthApp(client).request('/oauth/auth-methods')
+
+    expect(res.status).toBe(502)
+    expect(await res.json()).toEqual({ error: 'Failed to get provider auth methods', code: 'ClientError' })
   })
 })
 
 describe('oauth routes /:id/oauth/authorize', () => {
-  const validBody = { method: 0 }
+  it('starts the V2 attempt with the method and answer and returns it', async () => {
+    const client = createStubOpenCodeClient()
+    const connect = vi.mocked(client.api.integration.oauth.connect)
 
-  function authorizeRequest(app: Hono, body: unknown = validBody) {
-    return app.request('/oauth/openai/oauth/authorize', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify(body),
+    const res = await authorizeRequest(createOAuthApp(client), 'github-copilot', {
+      methodID: 'device',
+      answer: { deploymentType: 'github.com' },
     })
-  }
 
-  it('forwards the validated body and returns the parsed response', async () => {
-    const upstream = {
-      url: 'https://auth.example.com',
-      method: 'auto' as const,
-      instructions: 'Open this page',
-    }
-    const forward = vi.fn(async () => new Response(JSON.stringify(upstream), { status: 200 }))
-    const app = createTestApp({ forward })
-    const res = await authorizeRequest(app)
     expect(res.status).toBe(200)
-    expect(await res.json()).toEqual(upstream)
-    expect(forward).toHaveBeenCalledWith(
-      expect.objectContaining({
-        method: 'POST',
-        path: '/provider/openai/oauth/authorize',
-      }),
-    )
-  })
-
-  it('returns 400 on invalid body', async () => {
-    const res = await authorizeRequest(createTestApp(), {})
-    expect(res.status).toBe(400)
-  })
-
-  it('forwards the upstream error code and 400 status', async () => {
-    const app = createTestApp(
-      upstreamFailure({ name: 'ProviderAuthOauthMissing', data: { providerID: 'openai' } }),
-    )
-    const res = await authorizeRequest(app)
-    expect(res.status).toBe(400)
     expect(await res.json()).toEqual({
-      error: 'OAuth authorization failed',
-      code: 'ProviderAuthOauthMissing',
+      attemptID: 'con_stub',
+      url: 'https://example.com/authorize',
+      instructions: 'Authorize in your browser',
+      mode: 'auto',
+    })
+    expect(connect).toHaveBeenCalledWith({
+      integrationID: 'github-copilot',
+      methodID: 'device',
+      answer: { deploymentType: 'github.com' },
     })
   })
 
-  it('falls back to the generic authorize message for unrecognized upstream errors', async () => {
-    const app = createTestApp(upstreamFailure('totally unexpected', 500))
-    const res = await authorizeRequest(app)
-    expect(res.status).toBe(500)
-    expect(await res.json()).toEqual({ error: 'OAuth authorization failed' })
+  it('returns 400 on an invalid body', async () => {
+    const client = createStubOpenCodeClient()
+
+    const res = await authorizeRequest(createOAuthApp(client), 'github-copilot', { answer: {} })
+
+    expect(res.status).toBe(400)
+    expect(vi.mocked(client.api.integration.oauth.connect)).not.toHaveBeenCalled()
+  })
+
+  it('returns 502 with the upstream message when the answer is incomplete', async () => {
+    const client = createStubOpenCodeClient()
+    vi.mocked(client.api.integration.oauth.connect).mockRejectedValueOnce(
+      taggedError('InvalidRequestError', 'Missing required form field: deploymentType'),
+    )
+
+    const res = await authorizeRequest(createOAuthApp(client))
+
+    expect(res.status).toBe(502)
+    expect(await res.json()).toEqual({
+      error: 'Missing required form field: deploymentType',
+      code: 'InvalidRequestError',
+    })
+  })
+
+  it('retries once after a loading integration becomes available', async () => {
+    const client = createStubOpenCodeClient()
+    const connect = vi.mocked(client.api.integration.oauth.connect)
+    connect.mockRejectedValueOnce(taggedError('IntegrationNotFoundError', 'Integration not found: github-copilot'))
+
+    const res = await authorizeRequest(createOAuthApp(client))
+
+    expect(res.status).toBe(200)
+    expect(((await res.json()) as OAuthAuthorizeResponse).attemptID).toBe('con_stub')
+    expect(connect).toHaveBeenCalledTimes(2)
+    expect(vi.mocked(client.api.integration.get)).toHaveBeenCalledWith({ integrationID: 'github-copilot' })
+  })
+
+  it('returns 404 when the integration is gone', async () => {
+    vi.useFakeTimers()
+    try {
+      const client = createStubOpenCodeClient()
+      const notFound = taggedError('IntegrationNotFoundError', 'Integration not found: github-copilot')
+      vi.mocked(client.api.integration.oauth.connect).mockRejectedValue(notFound)
+      vi.mocked(client.api.integration.get).mockRejectedValue(notFound)
+
+      const pending = authorizeRequest(createOAuthApp(client))
+      await vi.runAllTimersAsync()
+      const res = await pending
+
+      expect(res.status).toBe(404)
+      expect(await res.json()).toEqual({
+        error: 'Integration not found: github-copilot',
+        code: 'IntegrationNotFoundError',
+      })
+      expect(vi.mocked(client.api.integration.oauth.connect)).toHaveBeenCalledTimes(1)
+    } finally {
+      vi.useRealTimers()
+    }
+  })
+})
+
+describe('oauth routes /:id/oauth/:attemptID', () => {
+  it('reports a pending attempt', async () => {
+    const client = createStubOpenCodeClient()
+    vi.mocked(client.api.integration.oauth.status).mockResolvedValueOnce({
+      location: LOCATION,
+      data: { status: 'pending', time: { created: 0, expires: 0 } },
+    })
+
+    const res = await createOAuthApp(client).request('/oauth/github-copilot/oauth/con_stub')
+
+    expect(res.status).toBe(200)
+    expect(await res.json()).toEqual({ status: 'pending' })
+    expect(vi.mocked(client.api.integration.oauth.status)).toHaveBeenCalledWith({
+      integrationID: 'github-copilot',
+      attemptID: 'con_stub',
+    })
+  })
+
+  it('reports a failed attempt with its message', async () => {
+    const client = createStubOpenCodeClient()
+    vi.mocked(client.api.integration.oauth.status).mockResolvedValueOnce({
+      location: LOCATION,
+      data: { status: 'failed', message: 'Authorization denied', time: { created: 0, expires: 0 } },
+    })
+
+    const res = await createOAuthApp(client).request('/oauth/github-copilot/oauth/con_stub')
+
+    expect(res.status).toBe(200)
+    expect(await res.json()).toEqual({ status: 'failed', message: 'Authorization denied' })
+  })
+
+  it('returns 404 when the attempt is gone', async () => {
+    const client = createStubOpenCodeClient()
+    vi.mocked(client.api.integration.oauth.status).mockRejectedValueOnce(
+      taggedError('IntegrationAttemptNotFoundError', 'OAuth attempt not found: con_stub'),
+    )
+
+    const res = await createOAuthApp(client).request('/oauth/github-copilot/oauth/con_stub')
+
+    expect(res.status).toBe(404)
+    expect(await res.json()).toEqual({
+      error: 'OAuth attempt not found: con_stub',
+      code: 'IntegrationAttemptNotFoundError',
+    })
   })
 })
 
 describe('oauth routes /:id/oauth/callback', () => {
-  const validBody = { method: 0 }
+  it('completes the V2 attempt with the pasted code', async () => {
+    const client = createStubOpenCodeClient()
+    const complete = vi.mocked(client.api.integration.oauth.complete)
 
-  function callbackRequest(app: Hono, body: unknown = validBody) {
-    return app.request('/oauth/openai/oauth/callback', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify(body),
+    const res = await callbackRequest(createOAuthApp(client), 'github-copilot', {
+      attemptID: 'con_stub',
+      code: 'pasted-code',
     })
-  }
 
-  it('forwards the validated body and returns upstream data', async () => {
-    const forward = vi.fn(async () => new Response(JSON.stringify({ ok: true }), { status: 200 }))
-    const app = createTestApp({ forward })
-    const res = await callbackRequest(app)
     expect(res.status).toBe(200)
-    expect(await res.json()).toEqual({ ok: true })
-    expect(forward).toHaveBeenCalledWith(
-      expect.objectContaining({
-        method: 'POST',
-        path: '/provider/openai/oauth/callback',
-      }),
-    )
-  })
-
-  it('returns 400 on invalid callback body', async () => {
-    const res = await callbackRequest(createTestApp(), { foo: 'bar' })
-    expect(res.status).toBe(400)
-  })
-
-  it('forwards the upstream code and validation detail', async () => {
-    const app = createTestApp(
-      upstreamFailure({
-        name: 'ProviderAuthValidationFailed',
-        data: { field: 'code', message: 'code is not valid' },
-      }),
-    )
-    const res = await callbackRequest(app)
-    expect(res.status).toBe(400)
-    expect(await res.json()).toEqual({
-      error: 'OAuth callback failed',
-      code: 'ProviderAuthValidationFailed',
-      detail: 'code is not valid — field: code',
+    expect(await res.json()).toEqual({ success: true })
+    expect(complete).toHaveBeenCalledWith({
+      integrationID: 'github-copilot',
+      attemptID: 'con_stub',
+      code: 'pasted-code',
     })
   })
 
-  it('falls back to the generic callback message for unrecognized upstream errors', async () => {
-    const app = createTestApp(upstreamFailure('unknown boom', 500))
-    const res = await callbackRequest(app)
-    expect(res.status).toBe(500)
-    expect(await res.json()).toEqual({ error: 'OAuth callback failed' })
+  it('returns 400 on an invalid body', async () => {
+    const client = createStubOpenCodeClient()
+
+    const res = await callbackRequest(createOAuthApp(client), 'github-copilot', { code: 'pasted-code' })
+
+    expect(res.status).toBe(400)
+    expect(vi.mocked(client.api.integration.oauth.complete)).not.toHaveBeenCalled()
   })
+
+  it('returns 404 when the attempt is gone', async () => {
+    const client = createStubOpenCodeClient()
+    vi.mocked(client.api.integration.oauth.complete).mockRejectedValueOnce(
+      taggedError('IntegrationAttemptNotFoundError', 'OAuth attempt not found: con_stub'),
+    )
+
+    const res = await callbackRequest(createOAuthApp(client))
+
+    expect(res.status).toBe(404)
+    expect(await res.json()).toEqual({
+      error: 'OAuth attempt not found: con_stub',
+      code: 'IntegrationAttemptNotFoundError',
+    })
+  })
+
+  it('returns 502 when the provider rejects the code', async () => {
+    const client = createStubOpenCodeClient()
+    vi.mocked(client.api.integration.oauth.complete).mockRejectedValueOnce(
+      taggedError('InvalidRequestError', 'Authorization code is required'),
+    )
+
+    const res = await callbackRequest(createOAuthApp(client), 'github-copilot', { attemptID: 'con_stub', code: 'bad' })
+
+    expect(res.status).toBe(502)
+    expect(await res.json()).toEqual({
+      error: 'Authorization code is required',
+      code: 'InvalidRequestError',
+    })
+  })
+})
+
+describe('oauth routes /:id/oauth/:attemptID delete', () => {
+  it('cancels the V2 attempt', async () => {
+    const client = createStubOpenCodeClient()
+    const cancel = vi.mocked(client.api.integration.oauth.cancel)
+
+    const res = await createOAuthApp(client).request('/oauth/github-copilot/oauth/con_stub', { method: 'DELETE' })
+
+    expect(res.status).toBe(200)
+    expect(await res.json()).toEqual({ success: true })
+    expect(cancel).toHaveBeenCalledWith({ integrationID: 'github-copilot', attemptID: 'con_stub' })
+  })
+
+  it('returns 502 when the upstream is unreachable', async () => {
+    const client = createStubOpenCodeClient()
+    vi.mocked(client.api.integration.oauth.cancel).mockRejectedValueOnce(new ClientError('UnexpectedStatus'))
+
+    const res = await createOAuthApp(client).request('/oauth/github-copilot/oauth/con_stub', { method: 'DELETE' })
+
+    expect(res.status).toBe(502)
+    expect(await res.json()).toEqual({ error: 'Failed to cancel OAuth authorization', code: 'ClientError' })
+  })
+})
+
+const openCodeBinary = resolveOpenCode2Binary()
+
+describe.skipIf(!openCodeBinary)('oauth routes against a real OpenCode 2 server', () => {
+  it('maps the real integration catalogue and starts and cancels an OAuth attempt', async () => {
+    const serve = await startOpenCodeServe()
+    try {
+      const client = new FetchOpenCodeClient({
+        baseUrl: serve.baseUrl,
+        basicAuth: buildOpenCodeBasicAuth(serve.password),
+      })
+      const app = new Hono()
+      app.route('/oauth', createOAuthRoutes(client))
+
+      const methodsResponse = await app.request('/oauth/auth-methods')
+      expect(methodsResponse.status).toBe(200)
+      const { providers } = (await methodsResponse.json()) as {
+        providers: Record<string, IntegrationMethod[]>
+      }
+      const device = providers['github-copilot']?.find(
+        (method): method is IntegrationOAuthMethod => method.type === 'oauth' && method.id === 'device',
+      )
+      expect(device?.form?.map((field) => field.key)).toEqual(['deploymentType', 'enterpriseUrl'])
+      expect(
+        providers.opencode?.map((method) =>
+          method.type === 'oauth' || method.type === 'command' ? method.id : method.type,
+        ),
+      ).toEqual(['key', 'env', 'device'])
+      const azureKey = providers.azure?.find(
+        (method): method is IntegrationKeyMethod => method.type === 'key',
+      )
+      expect(azureKey?.form?.map((field) => field.key)).toEqual(['resourceName'])
+
+      const authorizeResponse = await app.request('/oauth/github-copilot/oauth/authorize', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ methodID: 'device', answer: { deploymentType: 'github.com' } }),
+      })
+      expect(authorizeResponse.status).toBe(200)
+      const attempt = (await authorizeResponse.json()) as OAuthAuthorizeResponse
+      expect(attempt.mode).toBe('auto')
+      expect(attempt.url).toContain('github.com/login/device')
+
+      const statusResponse = await app.request(`/oauth/github-copilot/oauth/${attempt.attemptID}`)
+      expect(statusResponse.status).toBe(200)
+      expect((await statusResponse.json()) as OAuthAttemptStatus).toEqual({ status: 'pending' })
+
+      const cancelResponse = await app.request(`/oauth/github-copilot/oauth/${attempt.attemptID}`, {
+        method: 'DELETE',
+      })
+      expect(cancelResponse.status).toBe(200)
+      expect(await cancelResponse.json()).toEqual({ success: true })
+    } finally {
+      await serve.stop()
+    }
+  }, 120000)
 })

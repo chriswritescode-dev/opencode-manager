@@ -9,6 +9,7 @@ import { getRepoRoot, getDirtyPaths, getHeadSha, getBranchName, getMirrorPatch, 
 import { resolveOpenCodeProjectId } from '@opencode-manager/shared/project-id'
 import type { ManagerApi } from './manager-api.js'
 import { ManagerApiError } from './manager-api.js'
+import { delay } from './delay.js'
 
 const HARDCODED_EXCLUDES = ['node_modules', 'dist', '.next', '.venv', '__pycache__', '.turbo', '.DS_Store', '._*']
 const PART_RETRIES = 3
@@ -145,10 +146,6 @@ export interface MirrorUpOpts {
   force: boolean
   create?: { name: string; originUrl: string | null; branch: string | null }
   onProgress?: (p: MirrorProgress) => void
-}
-
-function delay(ms: number): Promise<void> {
-  return new Promise((resolve) => setTimeout(resolve, ms))
 }
 
 function isRetryablePartError(err: unknown): boolean {

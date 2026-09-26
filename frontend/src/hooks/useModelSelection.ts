@@ -1,9 +1,8 @@
 import { useEffect, useMemo } from 'react'
 import { keepPreviousData, useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
-import { useConfig } from './useOpenCode'
-import { useOpenCodeClient } from './useOpenCode'
 import { useModelStore, modelExists, type ModelSelection } from '@/stores/modelStore'
-import { addOpenCodeRecentModel, getOpenCodeModelState, getProviders, removeOpenCodeRecentModel, toggleOpenCodeFavoriteModel, type OpenCodeModelState } from '@/api/providers'
+import { useProviders } from './useProviders'
+import { addOpenCodeRecentModel, getOpenCodeConfigModel, getOpenCodeModelState, removeOpenCodeRecentModel, toggleOpenCodeFavoriteModel, type OpenCodeModelState } from '@/api/providers'
 
 interface UseModelSelectionResult {
   model: ModelSelection | null
@@ -24,20 +23,10 @@ const isSameModel = (left: ModelSelection, right: ModelSelection) => (
   left.providerID === right.providerID && left.modelID === right.modelID
 )
 
-export function useModelSelection(
-  opcodeUrl: string | null | undefined,
-  directory?: string
-): UseModelSelectionResult {
-  const { data: config } = useConfig(opcodeUrl, directory)
-  const client = useOpenCodeClient(opcodeUrl, directory)
+export function useModelSelection(directory?: string): UseModelSelectionResult {
   const queryClient = useQueryClient()
   
-  const { data: providersData } = useQuery({
-    queryKey: ['opencode', 'providers', opcodeUrl, directory],
-    queryFn: () => getProviders(directory),
-    enabled: !!client,
-    staleTime: 30000,
-  })
+  const { data: providersData } = useProviders(directory)
 
   const { 
     model, 
@@ -49,19 +38,24 @@ export function useModelSelection(
   } = useModelStore()
 
   const { data: modelState, isLoading: isModelStateLoading } = useQuery({
-    queryKey: [...modelStateQueryKey, opcodeUrl, directory],
+    queryKey: [...modelStateQueryKey, directory],
     queryFn: () => getOpenCodeModelState(),
-    enabled: !!client,
     staleTime: 30000,
     placeholderData: keepPreviousData,
+  })
+
+  const { data: configModelString, isLoading: isConfigModelLoading } = useQuery({
+    queryKey: ['opencode', 'config', 'model', directory],
+    queryFn: () => getOpenCodeConfigModel(directory),
+    staleTime: 30000,
   })
 
   const updateRecentModel = useMutation({
     mutationFn: addOpenCodeRecentModel,
     onSuccess: (state) => {
       syncModelState(state)
-      queryClient.setQueryData([...modelStateQueryKey, opcodeUrl, directory], state)
-      queryClient.invalidateQueries({ queryKey: [...modelStateQueryKey, opcodeUrl, directory] })
+      queryClient.setQueryData([...modelStateQueryKey, directory], state)
+      queryClient.invalidateQueries({ queryKey: [...modelStateQueryKey, directory] })
     },
     onError: (error) => {
       console.error('Failed to sync recent model to backend', error)
@@ -72,8 +66,8 @@ export function useModelSelection(
     mutationFn: toggleOpenCodeFavoriteModel,
     onSuccess: (state) => {
       syncModelState(state)
-      queryClient.setQueryData([...modelStateQueryKey, opcodeUrl, directory], state)
-      queryClient.invalidateQueries({ queryKey: [...modelStateQueryKey, opcodeUrl, directory] })
+      queryClient.setQueryData([...modelStateQueryKey, directory], state)
+      queryClient.invalidateQueries({ queryKey: [...modelStateQueryKey, directory] })
     },
     onError: (error) => {
       console.error('Failed to toggle favorite model on backend', error)
@@ -83,7 +77,7 @@ export function useModelSelection(
   const removeRecentMutation = useMutation({
     mutationFn: removeOpenCodeRecentModel,
     onMutate: async (removedModel) => {
-      const queryKey = [...modelStateQueryKey, opcodeUrl, directory]
+      const queryKey = [...modelStateQueryKey, directory]
       await queryClient.cancelQueries({ queryKey })
       const previousState = queryClient.getQueryData<OpenCodeModelState>(queryKey)
 
@@ -100,13 +94,13 @@ export function useModelSelection(
     },
     onSuccess: (state) => {
       syncModelState(state)
-      queryClient.setQueryData([...modelStateQueryKey, opcodeUrl, directory], state)
-      queryClient.invalidateQueries({ queryKey: [...modelStateQueryKey, opcodeUrl, directory] })
+      queryClient.setQueryData([...modelStateQueryKey, directory], state)
+      queryClient.invalidateQueries({ queryKey: [...modelStateQueryKey, directory] })
     },
     onError: (error, _removedModel, context) => {
       if (context?.previousState) {
         syncModelState(context.previousState)
-        queryClient.setQueryData([...modelStateQueryKey, opcodeUrl, directory], context.previousState)
+        queryClient.setQueryData([...modelStateQueryKey, directory], context.previousState)
       }
       console.error('Failed to remove recent model on backend', error)
     },
@@ -126,17 +120,22 @@ export function useModelSelection(
     return raw.filter((m) => modelExists(m, providers))
   }, [modelState?.favorite, providers])
 
-  const defaultModelString = providersData?.providers
+  const firstAvailableModelString = providersData?.providers
     .map((provider) => {
-      const modelID = providersData.default[provider.id] || Object.keys(provider.models || {})[0]
+      const modelID = Object.keys(provider.models || {})[0]
       return modelID ? `${provider.id}/${modelID}` : null
     })
     .find((value): value is string => Boolean(value))
 
   useEffect(() => {
-    if (isModelStateLoading) return
-    validateAndSyncModel(config?.model, providersData?.providers, modelState?.recent ?? [], defaultModelString)
-  }, [config?.model, isModelStateLoading, modelState?.recent, defaultModelString, providersData, validateAndSyncModel])
+    if (isModelStateLoading || isConfigModelLoading) return
+    validateAndSyncModel(
+      configModelString ?? undefined,
+      providersData?.providers,
+      modelState?.recent ?? [],
+      firstAvailableModelString,
+    )
+  }, [isModelStateLoading, isConfigModelLoading, modelState?.recent, configModelString, firstAvailableModelString, providersData, validateAndSyncModel])
 
   useEffect(() => {
     if (modelState) {

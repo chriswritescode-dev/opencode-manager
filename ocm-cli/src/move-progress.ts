@@ -36,6 +36,6 @@ export function pushPhaseProgress(phase: MirrorUpFastPhase): MoveProgress {
   }
 }
 
-export function replayProgress(replayed: number, total: number): MoveProgress {
-  return { label: `replaying session ${replayed}/${total} events`, fraction: total > 0 ? replayed / total : null }
+export function importProgress(imported: number, total: number): MoveProgress {
+  return { label: `importing session ${imported}/${total} messages`, fraction: total > 0 ? imported / total : null }
 }

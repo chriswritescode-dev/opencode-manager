@@ -2,8 +2,16 @@ import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
 import { act, renderHook, waitFor } from '@testing-library/react'
 import type { ReactNode } from 'react'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
-import { useDeleteSession, useMessages, useSessionsAcrossDirectories } from './useOpenCode'
-import { useSendErrorStore } from '../stores/sendErrorStore'
+import type { SessionInfo } from '@opencode-manager/shared/opencode'
+import { useCreateSession, useDeleteSession, useSession, useSessionsAcrossDirectories } from './useOpenCode'
+import { FetchError } from '../api/fetchWrapper'
+import { showToast } from '../lib/toast'
+
+const mocks = vi.hoisted(() => ({
+  listSessionPage: vi.fn(),
+  deleteSession: vi.fn(),
+  createSession: vi.fn(),
+}))
 
 vi.mock('../lib/toast', () => ({
   showToast: {
@@ -12,82 +20,42 @@ vi.mock('../lib/toast', () => ({
   },
 }))
 
-describe('useDeleteSession', () => {
-  const fetchMock = vi.fn()
+vi.mock('@/api/opencode', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('@/api/opencode')>()
+  return {
+    ...actual,
+    listSessionPage: mocks.listSessionPage,
+    deleteSession: mocks.deleteSession,
+    createSession: mocks.createSession,
+  }
+})
 
-  beforeEach(() => {
-    fetchMock.mockReset()
-    vi.stubGlobal('fetch', fetchMock)
-  })
+const sessionInfo = (id: string, directory: string, updated = 1000): SessionInfo => ({
+  id,
+  projectID: 'proj_1',
+  title: `Session ${id}`,
+  time: { created: 1000, updated },
+  location: { directory },
+  cost: 0,
+  tokens: { input: 0, output: 0, reasoning: 0, cache: { read: 0, write: 0 } },
+})
 
-  afterEach(() => {
-    vi.unstubAllGlobals()
-  })
+const createWrapper = (queryClient: QueryClient) => {
+  return ({ children }: { children: ReactNode }) => (
+    <QueryClientProvider client={queryClient}>{children}</QueryClientProvider>
+  )
+}
 
-  it('falls back to workspace delete for stale workspace session deletes', async () => {
-    fetchMock
-      .mockResolvedValueOnce(new Response('Workspace not found: wrk_stale', { status: 500 }))
-      .mockResolvedValueOnce(new Response(null, { status: 204 }))
-
-    const queryClient = new QueryClient({ defaultOptions: { queries: { retry: false }, mutations: { retry: false } } })
-    const wrapper = ({ children }: { children: ReactNode }) => (
-      <QueryClientProvider client={queryClient}>{children}</QueryClientProvider>
-    )
-
-    const { result } = renderHook(() => useDeleteSession('/api/opencode', ['/w/stale']), { wrapper })
-
-    await act(async () => {
-      await result.current.mutateAsync([
-        { id: 'ses_1', directory: '/w/stale', workspaceID: 'wrk_stale' },
-        { id: 'ses_2', directory: '/w/stale', workspaceID: 'wrk_stale' },
-      ])
-    })
-
-    expect(fetchMock).toHaveBeenCalledTimes(2)
-    expect(fetchMock).toHaveBeenNthCalledWith(
-      1,
-      'http://localhost/api/opencode/session/ses_1?directory=%2Fw%2Fstale',
-      expect.objectContaining({ method: 'DELETE' }),
-    )
-    expect(fetchMock).toHaveBeenNthCalledWith(
-      2,
-      'http://localhost/api/opencode/experimental/workspace/wrk_stale?directory=%2Fw%2Fstale',
-      expect.objectContaining({ method: 'DELETE' }),
-    )
-  })
-
-  it('falls back to workspace delete for OpenCode unknown session delete failures', async () => {
-    fetchMock
-      .mockResolvedValueOnce(new Response(JSON.stringify({
-        name: 'UnknownError',
-        data: { message: 'Unexpected server error. Check server logs for details.' },
-      }), { status: 500, headers: { 'Content-Type': 'application/json' } }))
-      .mockResolvedValueOnce(new Response(null, { status: 204 }))
-
-    const queryClient = new QueryClient({ defaultOptions: { queries: { retry: false }, mutations: { retry: false } } })
-    const wrapper = ({ children }: { children: ReactNode }) => (
-      <QueryClientProvider client={queryClient}>{children}</QueryClientProvider>
-    )
-
-    const { result } = renderHook(() => useDeleteSession('/api/opencode', ['/w/existing']), { wrapper })
-
-    await act(async () => {
-      await result.current.mutateAsync([{ id: 'ses_1', directory: '/w/existing', workspaceID: 'wrk_existing' }])
-    })
-
-    expect(fetchMock).toHaveBeenCalledTimes(2)
-    expect(fetchMock).toHaveBeenNthCalledWith(
-      2,
-      'http://localhost/api/opencode/experimental/workspace/wrk_existing?directory=%2Fw%2Fexisting',
-      expect.objectContaining({ method: 'DELETE' }),
-    )
-  })
+const createQueryClient = () => new QueryClient({
+  defaultOptions: { queries: { retry: false }, mutations: { retry: false } },
 })
 
 describe('useSessionsAcrossDirectories', () => {
   const fetchMock = vi.fn()
 
   beforeEach(() => {
+    mocks.listSessionPage.mockReset()
+    mocks.deleteSession.mockReset()
     fetchMock.mockReset()
     vi.stubGlobal('fetch', fetchMock)
   })
@@ -96,245 +64,157 @@ describe('useSessionsAcrossDirectories', () => {
     vi.unstubAllGlobals()
   })
 
-  it('fetches first page of sessions with v2 pagination and adapted items', async () => {
-    fetchMock.mockResolvedValueOnce(
-      new Response(JSON.stringify({
-        items: [
-          { id: 'session-1', projectID: 'proj-1', title: 'Test Session', time: { created: 1000, updated: 1000 } },
-        ],
-        cursor: { next: 'cursor_abc' },
-      }), { headers: { 'Content-Type': 'application/json' } }),
-    )
-
-    const queryClient = new QueryClient({ defaultOptions: { queries: { retry: false }, mutations: { retry: false } } })
-    const wrapper = ({ children }: { children: ReactNode }) => (
-      <QueryClientProvider client={queryClient}>{children}</QueryClientProvider>
-    )
-
-    const { result } = renderHook(() => useSessionsAcrossDirectories('/api/opencode', ['/repo']), { wrapper })
-
-    await waitFor(() => {
-      expect(result.current.isLoading).toBe(false)
+  it('pages sessions across two directories through the V2 facade', async () => {
+    mocks.listSessionPage.mockImplementation(async ({ directory, cursor }: { directory: string; cursor?: string }) => {
+      if (cursor === 'cursor_a') {
+        return { items: [sessionInfo('ses_a2', '/w/a', 2000)] }
+      }
+      return directory === '/w/a'
+        ? { items: [sessionInfo('ses_a1', '/w/a')], nextCursor: 'cursor_a' }
+        : { items: [sessionInfo('ses_b1', '/w/b')] }
     })
 
-    expect(result.current.data).toHaveLength(1)
-    expect(result.current.data[0].id).toBe('session-1')
-    expect(result.current.data[0].title).toBe('Test Session')
-    expect(result.current.hasNextPage).toBe(true)
-    expect(fetchMock).toHaveBeenCalledTimes(1)
-    expect(fetchMock).toHaveBeenCalledWith(
-      'http://localhost/api/opencode/api/session?limit=25&order=desc&directory=%2Frepo',
-      expect.objectContaining({ credentials: 'include' }),
-    )
-  })
-
-  it('fetches next page via cursor when fetchNextPage is called and flattens items', async () => {
-    fetchMock
-      .mockResolvedValueOnce(
-        new Response(JSON.stringify({
-          items: [
-            { id: 'session-1', projectID: 'proj-1', title: 'Page 1', time: { created: 1000, updated: 1000 } },
-          ],
-          cursor: { next: 'cursor_next' },
-        }), { headers: { 'Content-Type': 'application/json' } }),
-      )
-      .mockResolvedValueOnce(
-        new Response(JSON.stringify({
-          items: [
-            { id: 'session-2', projectID: 'proj-1', title: 'Page 2', time: { created: 2000, updated: 2000 } },
-          ],
-        }), { headers: { 'Content-Type': 'application/json' } }),
-      )
-
-    const queryClient = new QueryClient({ defaultOptions: { queries: { retry: false }, mutations: { retry: false } } })
-    const wrapper = ({ children }: { children: ReactNode }) => (
-      <QueryClientProvider client={queryClient}>{children}</QueryClientProvider>
-    )
-
-    const { result } = renderHook(() => useSessionsAcrossDirectories('/api/opencode', ['/repo']), { wrapper })
-
-    await waitFor(() => {
-      expect(result.current.isLoading).toBe(false)
-    })
-
-    expect(result.current.data).toHaveLength(1)
-    expect(result.current.data[0].id).toBe('session-1')
-
-    await act(async () => {
-      result.current.fetchNextPage()
-    })
-
-    await waitFor(() => {
-      expect(result.current.data).toHaveLength(2)
-    })
-
-    expect(result.current.data[0].id).toBe('session-1')
-    expect(result.current.data[1].id).toBe('session-2')
-    expect(fetchMock).toHaveBeenCalledTimes(2)
-    expect(fetchMock).toHaveBeenNthCalledWith(
-      2,
-      'http://localhost/api/opencode/api/session?cursor=cursor_next',
-      expect.objectContaining({ credentials: 'include' }),
-    )
-  })
-
-  it('handles multi-directory cursors and only fetches directories with nextCursor', async () => {
-    fetchMock
-      .mockResolvedValueOnce(
-        new Response(JSON.stringify({
-          items: [
-            { id: 'session-a1', projectID: 'proj-1', title: 'Session A1', time: { created: 1000, updated: 1000 } },
-          ],
-          cursor: { next: 'cursor_a' },
-        }), { headers: { 'Content-Type': 'application/json' } }),
-      )
-      .mockResolvedValueOnce(
-        new Response(JSON.stringify({
-          items: [
-            { id: 'session-b1', projectID: 'proj-1', title: 'Session B1', time: { created: 1000, updated: 1000 } },
-          ],
-        }), { headers: { 'Content-Type': 'application/json' } }),
-      )
-      .mockResolvedValueOnce(
-        new Response(JSON.stringify({
-          items: [
-            { id: 'session-a2', projectID: 'proj-1', title: 'Session A2', time: { created: 2000, updated: 2000 } },
-          ],
-        }), { headers: { 'Content-Type': 'application/json' } }),
-      )
-
-    const queryClient = new QueryClient({ defaultOptions: { queries: { retry: false }, mutations: { retry: false } } })
-    const wrapper = ({ children }: { children: ReactNode }) => (
-      <QueryClientProvider client={queryClient}>{children}</QueryClientProvider>
-    )
-
+    const queryClient = createQueryClient()
     const { result } = renderHook(
-      () => useSessionsAcrossDirectories('/api/opencode', ['/w/a', '/w/b']),
-      { wrapper },
+      () => useSessionsAcrossDirectories(['/w/a', '/w/b']),
+      { wrapper: createWrapper(queryClient) },
     )
 
     await waitFor(() => {
       expect(result.current.isLoading).toBe(false)
     })
 
-    expect(result.current.data).toHaveLength(2)
+    expect(result.current.data.map((session) => session.id)).toEqual(['ses_a1', 'ses_b1'])
     expect(result.current.hasNextPage).toBe(true)
+    expect(mocks.listSessionPage).toHaveBeenCalledWith({
+      directory: '/w/a',
+      limit: 25,
+      order: 'desc',
+      search: undefined,
+    })
+    expect(mocks.listSessionPage).toHaveBeenCalledWith({
+      directory: '/w/b',
+      limit: 25,
+      order: 'desc',
+      search: undefined,
+    })
 
     await act(async () => {
-      result.current.fetchNextPage()
+      await result.current.fetchNextPage()
     })
 
     await waitFor(() => {
       expect(result.current.data).toHaveLength(3)
     })
 
-    expect(fetchMock).toHaveBeenCalledTimes(3)
-    expect(fetchMock).toHaveBeenNthCalledWith(
-      3,
-      'http://localhost/api/opencode/api/session?cursor=cursor_a',
-      expect.objectContaining({ credentials: 'include' }),
-    )
+    expect(mocks.listSessionPage).toHaveBeenCalledWith({ directory: '/w/a', cursor: 'cursor_a' })
+    expect(result.current.data.map((session) => session.id)).toEqual(['ses_a1', 'ses_b1', 'ses_a2'])
   })
 
-  it('sends search parameter when search option is provided', async () => {
-    fetchMock.mockResolvedValueOnce(
-      new Response(JSON.stringify({
-        items: [
-          { id: 'session-1', projectID: 'proj-1', title: 'Deploy Session', time: { created: 1000, updated: 1000 } },
-        ],
-      }), { headers: { 'Content-Type': 'application/json' } }),
-    )
+  it('passes the trimmed search to every directory page', async () => {
+    mocks.listSessionPage.mockResolvedValue({ items: [] })
 
-    const queryClient = new QueryClient({ defaultOptions: { queries: { retry: false }, mutations: { retry: false } } })
-    const wrapper = ({ children }: { children: ReactNode }) => (
-      <QueryClientProvider client={queryClient}>{children}</QueryClientProvider>
-    )
-
-    const { result } = renderHook(
-      () => useSessionsAcrossDirectories('/api/opencode', ['/repo'], { search: 'deploy' }),
-      { wrapper },
+    const queryClient = createQueryClient()
+    renderHook(
+      () => useSessionsAcrossDirectories(['/w/a'], { search: '  deploy  ' }),
+      { wrapper: createWrapper(queryClient) },
     )
 
     await waitFor(() => {
-      expect(result.current.isLoading).toBe(false)
+      expect(mocks.listSessionPage).toHaveBeenCalledWith({
+        directory: '/w/a',
+        limit: 25,
+        order: 'desc',
+        search: 'deploy',
+      })
+    })
+  })
+
+  it('deletes each session through the facade and invalidates the session list cache', async () => {
+    mocks.deleteSession.mockResolvedValue(undefined)
+
+    const queryClient = createQueryClient()
+    const listKey = ['opencode', 'sessions', '/w/a', { search: undefined, limit: 25 }]
+    queryClient.setQueryData(listKey, { pages: [{ items: [], cursors: {} }], pageParams: [undefined] })
+
+    const { result } = renderHook(() => useDeleteSession(['/w/a']), {
+      wrapper: createWrapper(queryClient),
     })
 
-    expect(fetchMock).toHaveBeenCalledWith(
-      'http://localhost/api/opencode/api/session?limit=25&order=desc&search=deploy&directory=%2Frepo',
-      expect.objectContaining({ credentials: 'include' }),
-    )
+    await act(async () => {
+      await result.current.mutateAsync({ id: 'ses_a1', directory: '/w/a' })
+    })
+
+    expect(mocks.deleteSession).toHaveBeenCalledWith('ses_a1')
+    await waitFor(() => {
+      expect(queryClient.getQueryState(listKey)?.isInvalidated).toBe(true)
+    })
   })
 })
 
-describe('useMessages send error reconciliation', () => {
-  const fetchMock = vi.fn()
-
-  beforeEach(() => {
-    fetchMock.mockReset()
-    vi.stubGlobal('fetch', fetchMock)
-    useSendErrorStore.setState({ errors: {}, queuedPrompts: {} })
-  })
-
+describe('useSession', () => {
   afterEach(() => {
     vi.unstubAllGlobals()
   })
 
-  it('clears a stale network send error when fetched messages contain the prompt', async () => {
-    useSendErrorStore.getState().setError({
-      sessionID: 'session-1',
-      title: 'Error',
-      message: 'Load failed',
-      failedPrompt: 'sent while backgrounded',
-      kind: 'network',
-    })
-
-    fetchMock.mockResolvedValueOnce(new Response(JSON.stringify([
-      {
-        info: { id: 'user-1', role: 'user', sessionID: 'session-1', time: { created: 1 } },
-        parts: [{ id: 'part-1', type: 'text', text: 'sent while backgrounded', messageID: 'user-1', sessionID: 'session-1' }],
-      },
-    ]), { headers: { 'Content-Type': 'application/json' } }))
-
-    const queryClient = new QueryClient({ defaultOptions: { queries: { retry: false } } })
-    const wrapper = ({ children }: { children: ReactNode }) => (
-      <QueryClientProvider client={queryClient}>{children}</QueryClientProvider>
+  it('maps a deleted session to a non-retried 404 through the real facade', async () => {
+    const fetchMock = vi.fn().mockResolvedValue(
+      new Response(
+        JSON.stringify({
+          _tag: 'SessionNotFoundError',
+          sessionID: 'ses_missing',
+          message: 'Session not found',
+        }),
+        { status: 404, headers: { 'Content-Type': 'application/json' } },
+      ),
     )
+    vi.stubGlobal('fetch', fetchMock)
 
-    renderHook(() => useMessages('/api/opencode', 'session-1', '/repo'), { wrapper })
-
-    await waitFor(() => {
-      expect(useSendErrorStore.getState().getError('session-1')).toBeNull()
+    const queryClient = createQueryClient()
+    const { result } = renderHook(() => useSession('ses_missing', '/w/a'), {
+      wrapper: createWrapper(queryClient),
     })
+
+    await waitFor(() => expect(result.current.isError).toBe(true))
+
+    expect(result.current.error).toBeInstanceOf(FetchError)
+    expect((result.current.error as FetchError).statusCode).toBe(404)
+    expect(fetchMock).toHaveBeenCalledTimes(1)
+  })
+})
+
+describe('useCreateSession', () => {
+  beforeEach(() => {
+    mocks.createSession.mockReset()
+    mocks.createSession.mockResolvedValue(sessionInfo('ses_new', '/w/a'))
   })
 
-  it('keeps a network send error when fetched messages do not contain the prompt', async () => {
-    useSendErrorStore.getState().setError({
-      sessionID: 'session-1',
-      title: 'Error',
-      message: 'Load failed',
-      failedPrompt: 'missing prompt',
-      kind: 'network',
+  it('refuses to create a session without a directory and reports the error', async () => {
+    const queryClient = createQueryClient()
+    const { result } = renderHook(() => useCreateSession(undefined), {
+      wrapper: createWrapper(queryClient),
     })
 
-    fetchMock.mockResolvedValueOnce(new Response(JSON.stringify([
-      {
-        info: { id: 'user-1', role: 'user', sessionID: 'session-1', time: { created: 1 } },
-        parts: [{ id: 'part-1', type: 'text', text: 'different prompt', messageID: 'user-1', sessionID: 'session-1' }],
-      },
-    ]), { headers: { 'Content-Type': 'application/json' } }))
-
-    const queryClient = new QueryClient({ defaultOptions: { queries: { retry: false } } })
-    const wrapper = ({ children }: { children: ReactNode }) => (
-      <QueryClientProvider client={queryClient}>{children}</QueryClientProvider>
-    )
-
-    renderHook(() => useMessages('/api/opencode', 'session-1', '/repo'), { wrapper })
-
-    await waitFor(() => {
-      expect(fetchMock).toHaveBeenCalledTimes(1)
+    await act(async () => {
+      await expect(result.current.mutateAsync({ agent: undefined })).rejects.toThrow(
+        'A directory is required to create a session',
+      )
     })
-    expect(useSendErrorStore.getState().getError('session-1')).toEqual(expect.objectContaining({
-      failedPrompt: 'missing prompt',
-    }))
+
+    expect(mocks.createSession).not.toHaveBeenCalled()
+    expect(showToast.error).toHaveBeenCalled()
+  })
+
+  it('creates a session in the provided directory', async () => {
+    const queryClient = createQueryClient()
+    const { result } = renderHook(() => useCreateSession('/w/a'), {
+      wrapper: createWrapper(queryClient),
+    })
+
+    await act(async () => {
+      await result.current.mutateAsync({ agent: undefined })
+    })
+
+    expect(mocks.createSession).toHaveBeenCalledWith({ directory: '/w/a', agent: undefined })
   })
 })

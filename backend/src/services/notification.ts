@@ -10,7 +10,7 @@ import {
 import {
   getPermissionLabel,
   getPermissionDetail,
-  getQuestionText,
+  getFormText,
 } from "@opencode-manager/shared/notifications";
 import { SettingsService } from "./settings";
 import { sseAggregator, type SSEEvent } from "./sse-aggregator";
@@ -23,6 +23,7 @@ import {
 import type { Repo } from "../types/repo";
 import { getReposPath } from "@opencode-manager/shared/config/env";
 import { ASSISTANT_REPO_ID } from "@opencode-manager/shared/utils";
+import { sessionIDFromEvent } from "@opencode-manager/shared/opencode";
 import { resolveProjectId } from "./project-id-resolver";
 import path from "path";
 
@@ -36,28 +37,28 @@ const EVENT_CONFIG: Record<
   string,
   {
     preferencesKey: keyof typeof DEFAULT_NOTIFICATION_PREFERENCES.events;
-    titleFn: (props: Record<string, unknown>) => string;
-    bodyFn: (props: Record<string, unknown>) => string;
+    titleFn: (data: Record<string, unknown>) => string;
+    bodyFn: (data: Record<string, unknown>) => string;
   }
 > = {
   [NotificationEventType.PERMISSION_ASKED]: {
     preferencesKey: "permissionAsked",
-    titleFn: (props) =>
+    titleFn: (data) =>
       getPermissionLabel(
-        typeof props.permission === "string" ? props.permission : ""
+        typeof data.action === "string" ? data.action : ""
       ),
-    bodyFn: (props) => getPermissionDetail(props).primary || "Approval required",
+    bodyFn: (data) => getPermissionDetail(data).primary || "Approval required",
   },
-  [NotificationEventType.QUESTION_ASKED]: {
+  [NotificationEventType.FORM_CREATED]: {
     preferencesKey: "questionAsked",
     titleFn: () => "Question",
-    bodyFn: (props) => getQuestionText(props) || "A question needs your answer",
+    bodyFn: (data) => getFormText(data.form as { title?: unknown }) || "A question needs your answer",
   },
-  [NotificationEventType.SESSION_ERROR]: {
+  [NotificationEventType.SESSION_FAILED]: {
     preferencesKey: "sessionError",
     titleFn: () => "Error",
-    bodyFn: (props) => {
-      const error = props.error as { message?: string } | undefined;
+    bodyFn: (data) => {
+      const error = data.error as { message?: string } | undefined;
       return error?.message ?? "A session encountered an error";
     },
   },
@@ -70,6 +71,13 @@ const EVENT_CONFIG: Record<
 
 const MAX_BODY_LENGTH = 140;
 
+function resolveEventSessionId(event: SSEEvent): string | undefined {
+  if (event.type === NotificationEventType.FORM_CREATED) {
+    return event.data.form.sessionID;
+  }
+  return sessionIDFromEvent(event);
+}
+
 export function buildNotificationUrl(
   repo: Pick<Repo, "id"> | null,
   sessionId: string | undefined
@@ -81,7 +89,7 @@ export function buildNotificationUrl(
 }
 
 export function buildEventNotificationPayload(
-  event: SSEEvent,
+  event: Pick<SSEEvent, "type" | "data">,
   context: {
     repoName?: string;
     repoId?: number;
@@ -93,9 +101,9 @@ export function buildEventNotificationPayload(
   const config = EVENT_CONFIG[event.type];
   if (!config) return null;
 
-  const title = config.titleFn(event.properties);
+  const title = config.titleFn(event.data);
 
-  const detail = config.bodyFn(event.properties);
+  const detail = config.bodyFn(event.data);
   const rawBody = context.repoName
     ? `${context.repoName} · ${detail}`
     : detail;
@@ -292,7 +300,7 @@ export class NotificationService {
     const config = EVENT_CONFIG[event.type];
     if (!config) return;
 
-    const sessionId = event.properties.sessionID as string | undefined;
+    const sessionId = resolveEventSessionId(event);
     if (sessionId && sseAggregator.isSessionBeingViewed(sessionId)) return;
     if (sessionId && sseAggregator.isSubagentSession(sessionId)) return;
 

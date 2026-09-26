@@ -11,7 +11,7 @@ vi.mock('@opencode-manager/shared/config/env', () => ({
   ENV: {
     SERVER: { PORT: 5003, HOST: '0.0.0.0', NODE_ENV: 'test' },
     AUTH: { TRUSTED_ORIGINS: 'http://localhost:5173', SECRET: 'test-secret-for-encryption-key-32c' },
-    WORKSPACE: { BASE_PATH: '/tmp/ssh-key-test-workspace', REPOS_DIR: 'repos', CONFIG_DIR: 'config', AUTH_FILE: 'auth.json' },
+    WORKSPACE: { BASE_PATH: '/tmp/ssh-key-test-workspace', REPOS_DIR: 'repos', CONFIG_DIR: 'config' },
     OPENCODE: { PORT: 5551, HOST: '127.0.0.1' },
     DATABASE: { PATH: ':memory:' },
     FILE_LIMITS: {

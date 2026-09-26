@@ -9,11 +9,9 @@ import { createProgressReporter } from '../src/progress.js'
 import { getBranchName, getOriginUrl } from '../src/local-repo.js'
 import { resolveOpenCodeProjectId } from '@opencode-manager/shared/project-id'
 import { resolveTarget, formatRepoIdentities, parseRepoIdPositional, restrictMatchesToRequestedRepo } from '../src/resolve-target.js'
-import { buildRemoteAttachEnv } from '../src/remote-context.js'
+import { buildAttachInvocation } from '../src/warp.js'
 import { type ManagerRepo, fetchRepos, toRemoteRepoSummaries } from '../src/manager-repos.js'
-import packageJson from '../package.json' with { type: 'json' }
-
-const VERSION = packageJson.version
+import { OCM_VERSION as VERSION, warmRepoProxy } from '../src/repo-proxy.js'
 
 const USAGE = `ocm v${VERSION} - OpenCode Manager workspace launcher
 
@@ -117,39 +115,20 @@ async function requireToken(state: OcmState): Promise<string> {
   return token
 }
 
-async function warmUpInstance(managerUrl: string, token: string, directory: string): Promise<void> {
-  const url = `${managerUrl}/api/opencode-proxy/session?directory=${encodeURIComponent(directory)}`
-  for (let attempt = 1; attempt <= 3; attempt++) {
-    try {
-      const res = await fetch(url, { headers: { Authorization: `Bearer ${token}` } })
-      if (res.ok) {
-        await res.text()
-        return
-      }
-    } catch {
-      /* retry */
-    }
-    await new Promise((resolve) => setTimeout(resolve, attempt * 500))
+async function attach(managerUrl: string, token: string, repo: ManagerRepo, cwd: string): Promise<never> {
+  try {
+    await warmRepoProxy(managerUrl, token, repo.repoId)
+  } catch (err) {
+    die(err instanceof Error ? err.message : String(err))
   }
-}
-
-async function attach(managerUrl: string, token: string, repo: ManagerRepo): Promise<never> {
-  await warmUpInstance(managerUrl, token, repo.directory)
-  const proxyUrl = `${managerUrl}/api/opencode-proxy`
-  const args = [
-    'attach',
-    proxyUrl,
-    '--dir', repo.directory,
-    '--password', token,
-    '--username', 'opencode',
-  ]
+  const { args, env } = buildAttachInvocation({ managerUrl, token, repoId: repo.repoId, repoName: repo.name })
   const child = spawn('opencode', args, {
     stdio: 'inherit',
-    env: { ...process.env, ...buildRemoteAttachEnv(managerUrl, repo.name) },
+    cwd,
+    env,
   })
   child.on('close', (code) => process.exit(code ?? 0))
   child.on('error', (err) => die(`failed to spawn opencode: ${err.message}`))
-  // hand control to child
   return undefined as never
 }
 
@@ -306,7 +285,7 @@ async function cmdUse(args: string[]): Promise<void> {
     lastRepoBranch: repo.branch,
   })
 
-  await attach(state.managerUrl, token, repo)
+  await attach(state.managerUrl, token, repo, process.cwd())
 }
 
 async function cmdDefault(): Promise<void> {
@@ -339,13 +318,13 @@ async function cmdDefault(): Promise<void> {
         lastRepoDir: repo.directory,
         lastRepoBranch: repo.branch,
       })
-      await attach(state.managerUrl, token, toManagerRepo(repo))
+      await attach(state.managerUrl, token, toManagerRepo(repo), result.repoRoot)
       return
     }
     case 'last': {
       const repo = result.repo
       info(`attaching to ${repo.name} (last used)`)
-      await attach(state.managerUrl, token, toManagerRepo(repo))
+      await attach(state.managerUrl, token, toManagerRepo(repo), process.cwd())
       return
     }
     case 'cwd-ambiguous': {

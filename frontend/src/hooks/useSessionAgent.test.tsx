@@ -1,7 +1,7 @@
 import { renderHook, waitFor } from '@testing-library/react'
 import { describe, it, expect, beforeEach, vi } from 'vitest'
 import { useSessionAgent, resolveDefaultSessionAgent } from './useSessionAgent'
-import { useMessages, useConfig, useAgents } from './useOpenCode'
+import { useSession, useAgents } from './useOpenCode'
 import { useSessionAgentStore } from '../stores/sessionAgentStore'
 
 const sessionAgentStoreMock = vi.hoisted(() => {
@@ -27,8 +27,7 @@ const sessionAgentStoreMock = vi.hoisted(() => {
 })
 
 vi.mock('./useOpenCode', () => ({
-  useMessages: vi.fn(),
-  useConfig: vi.fn(),
+  useSession: vi.fn(),
   useAgents: vi.fn(),
 }))
 
@@ -42,68 +41,43 @@ beforeEach(() => {
 })
 
 describe('resolveDefaultSessionAgent', () => {
-  it('returns config.default_agent when present and agents not loaded', () => {
-    const result = resolveDefaultSessionAgent('code', undefined, false)
-    expect(result).toBe('code')
-  })
-
-  it('returns config.default_agent when present and agent is in visible primary agents', () => {
+  it('returns first visible primary/all agent when agents are loaded', () => {
     const agents = [
-      { name: 'code', mode: 'primary' },
-      { name: 'build', mode: 'primary' },
+      { id: 'assistant', name: 'assistant', mode: 'primary' },
+      { id: 'code', name: 'code', mode: 'all' },
     ]
-    const result = resolveDefaultSessionAgent('code', agents, true)
-    expect(result).toBe('code')
-  })
-
-  it('returns config.default_agent case-insensitively when in primary agents', () => {
-    const agents = [{ name: 'Code', mode: 'primary' }]
-    const result = resolveDefaultSessionAgent('code', agents, true)
-    expect(result).toBe('Code')
-  })
-
-  it('returns first visible primary/all agent when config default is absent', () => {
-    const agents = [
-      { name: 'assistant', mode: 'primary' },
-      { name: 'code', mode: 'all' },
-    ]
-    const result = resolveDefaultSessionAgent(undefined, agents, true)
-    expect(result).toBe('assistant')
+    expect(resolveDefaultSessionAgent(agents, true)).toBe('assistant')
   })
 
   it('ignores hidden agents as fallback candidates', () => {
     const agents = [
-      { name: 'hidden-agent', mode: 'primary', hidden: true },
-      { name: 'build', mode: 'primary' },
+      { id: 'hidden-agent', name: 'hidden-agent', mode: 'primary', hidden: true },
+      { id: 'build', name: 'build', mode: 'primary' },
     ]
-    const result = resolveDefaultSessionAgent(undefined, agents, true)
-    expect(result).toBe('build')
+    expect(resolveDefaultSessionAgent(agents, true)).toBe('build')
   })
 
   it('ignores agents that are not primary or all mode', () => {
     const agents = [
-      { name: 'sub-agent', mode: 'secondary' },
-      { name: 'build', mode: 'primary' },
+      { id: 'sub-agent', name: 'sub-agent', mode: 'secondary' },
+      { id: 'build', name: 'build', mode: 'primary' },
     ]
-    const result = resolveDefaultSessionAgent(undefined, agents, true)
-    expect(result).toBe('build')
+    expect(resolveDefaultSessionAgent(agents, true)).toBe('build')
   })
 
-  it('falls back to build only when no config default and no primary agent available', () => {
-    const result = resolveDefaultSessionAgent(undefined, undefined, false)
-    expect(result).toBe('build')
+  it('falls back to build when no primary agent is available', () => {
+    expect(resolveDefaultSessionAgent(undefined, false)).toBe('build')
+    expect(resolveDefaultSessionAgent([], true)).toBe('build')
   })
 
-  it('falls back to first visible primary agent when config default is unavailable and agents loaded', () => {
-    const agents = [{ name: 'code', mode: 'primary' }]
-    const result = resolveDefaultSessionAgent('missing-agent', agents, true)
-    expect(result).toBe('code')
+  it('returns the first visible primary agent when agents load', () => {
+    const agents = [{ id: 'code', name: 'code', mode: 'primary' }]
+    expect(resolveDefaultSessionAgent(agents, true)).toBe('code')
   })
 
-  it('returns assistant when assistant workspace config sets default_agent to assistant', () => {
-    const agents = [{ name: 'assistant', mode: 'primary' }]
-    const result = resolveDefaultSessionAgent('assistant', agents, true)
-    expect(result).toBe('assistant')
+  it('returns assistant when assistant is the first visible primary agent', () => {
+    const agents = [{ id: 'assistant', name: 'assistant', mode: 'primary' }]
+    expect(resolveDefaultSessionAgent(agents, true)).toBe('assistant')
   })
 })
 
@@ -113,24 +87,21 @@ describe('useSessionAgent', () => {
     useSessionAgentStore.setState({ agents: {} })
   })
 
-  it('returns config default agent for empty loaded messages with stale store build', async () => {
-    vi.mocked(useMessages).mockReturnValue({
-      data: [],
-      isLoading: false,
-    } as unknown as ReturnType<typeof useMessages>)
-    vi.mocked(useConfig).mockReturnValue({
-      data: { default_agent: 'code' },
-    } as ReturnType<typeof useConfig>)
+  it('returns the first primary agent when the session has no agent yet', async () => {
+    vi.mocked(useSession).mockReturnValue({
+      data: undefined,
+      isLoading: true,
+    } as unknown as ReturnType<typeof useSession>)
     vi.mocked(useAgents).mockReturnValue({
       data: [
-        { name: 'code', mode: 'primary' },
-        { name: 'assistant', mode: 'primary' },
+        { id: 'code', name: 'code', mode: 'primary' },
+        { id: 'assistant', name: 'assistant', mode: 'primary' },
       ],
       isSuccess: true,
     } as ReturnType<typeof useAgents>)
 
     const { result } = renderHook(() =>
-      useSessionAgent('http://localhost:5551', 'session-1', '/assistant')
+      useSessionAgent('session-1', '/assistant')
     )
 
     await waitFor(() => {
@@ -138,34 +109,25 @@ describe('useSessionAgent', () => {
     })
   })
 
-  it('returns message-derived agent when latest user message has agent', async () => {
-    const messagesData = [
-      {
-        info: {
-          role: 'user',
-          agent: 'assistant',
-          model: { providerID: 'provider', modelID: 'model' },
-          variant: 'variant-1',
-        },
+  it('returns the session-derived agent and model when the session has them', async () => {
+    vi.mocked(useSession).mockReturnValue({
+      data: {
+        id: 'session-1',
+        agent: 'assistant',
+        model: { providerID: 'provider', id: 'model', variant: 'variant-1' },
       },
-    ]
-    vi.mocked(useMessages).mockReturnValue({
-      data: messagesData,
       isLoading: false,
-    } as ReturnType<typeof useMessages>)
-    vi.mocked(useConfig).mockReturnValue({
-      data: { default_agent: 'code' },
-    } as ReturnType<typeof useConfig>)
+    } as unknown as ReturnType<typeof useSession>)
     vi.mocked(useAgents).mockReturnValue({
       data: [
-        { name: 'code', mode: 'primary' },
-        { name: 'assistant', mode: 'primary' },
+        { id: 'code', name: 'code', mode: 'primary' },
+        { id: 'assistant', name: 'assistant', mode: 'primary' },
       ],
       isSuccess: true,
     } as ReturnType<typeof useAgents>)
 
     const { result } = renderHook(() =>
-      useSessionAgent('http://localhost:5551', 'session-1', '/assistant')
+      useSessionAgent('session-1', '/assistant')
     )
 
     await waitFor(() => {
@@ -175,34 +137,26 @@ describe('useSessionAgent', () => {
     })
   })
 
-  it('keeps the cached conversation selection while messages refetch in the background', async () => {
-    vi.mocked(useMessages).mockReturnValue({
-      data: [
-        {
-          info: {
-            role: 'user',
-            agent: 'assistant',
-            model: { providerID: 'provider', modelID: 'session-model' },
-            variant: 'session-variant',
-          },
-        },
-      ],
+  it('keeps the session selection while the session refetches in the background', async () => {
+    vi.mocked(useSession).mockReturnValue({
+      data: {
+        id: 'session-1',
+        agent: 'assistant',
+        model: { providerID: 'provider', id: 'session-model', variant: 'session-variant' },
+      },
       isLoading: false,
       isFetching: true,
-    } as ReturnType<typeof useMessages>)
-    vi.mocked(useConfig).mockReturnValue({
-      data: { default_agent: 'code' },
-    } as ReturnType<typeof useConfig>)
+    } as unknown as ReturnType<typeof useSession>)
     vi.mocked(useAgents).mockReturnValue({
       data: [
-        { name: 'code', mode: 'primary' },
-        { name: 'assistant', mode: 'primary' },
+        { id: 'code', name: 'code', mode: 'primary' },
+        { id: 'assistant', name: 'assistant', mode: 'primary' },
       ],
       isSuccess: true,
     } as ReturnType<typeof useAgents>)
 
     const { result } = renderHook(() =>
-      useSessionAgent('http://localhost:5551', 'session-1', '/assistant')
+      useSessionAgent('session-1', '/assistant')
     )
 
     await waitFor(() => {
@@ -212,26 +166,23 @@ describe('useSessionAgent', () => {
     })
   })
 
-  it('falls back to the stored session agent instead of the default while messages load', async () => {
+  it('falls back to the stored session agent instead of the default while the session loads', async () => {
     useSessionAgentStore.setState({ agents: { 'session-1': 'assistant' } })
-    vi.mocked(useMessages).mockReturnValue({
+    vi.mocked(useSession).mockReturnValue({
       data: undefined,
       isLoading: true,
       isFetching: true,
-    } as ReturnType<typeof useMessages>)
-    vi.mocked(useConfig).mockReturnValue({
-      data: { default_agent: 'code' },
-    } as ReturnType<typeof useConfig>)
+    } as ReturnType<typeof useSession>)
     vi.mocked(useAgents).mockReturnValue({
       data: [
-        { name: 'code', mode: 'primary' },
-        { name: 'assistant', mode: 'primary' },
+        { id: 'code', name: 'code', mode: 'primary' },
+        { id: 'assistant', name: 'assistant', mode: 'primary' },
       ],
       isSuccess: true,
     } as ReturnType<typeof useAgents>)
 
     const { result } = renderHook(() =>
-      useSessionAgent('http://localhost:5551', 'session-1', '/assistant')
+      useSessionAgent('session-1', '/assistant')
     )
 
     await waitFor(() => {
@@ -240,20 +191,17 @@ describe('useSessionAgent', () => {
   })
 
   it('does not persist default agent fallback to store', async () => {
-    vi.mocked(useMessages).mockReturnValue({
-      data: [],
-      isLoading: false,
-    } as unknown as ReturnType<typeof useMessages>)
-    vi.mocked(useConfig).mockReturnValue({
-      data: { default_agent: 'code' },
-    } as ReturnType<typeof useConfig>)
+    vi.mocked(useSession).mockReturnValue({
+      data: undefined,
+      isLoading: true,
+    } as unknown as ReturnType<typeof useSession>)
     vi.mocked(useAgents).mockReturnValue({
-      data: [{ name: 'code', mode: 'primary' }],
+      data: [{ id: 'code', name: 'code', mode: 'primary' }],
       isSuccess: true,
     } as ReturnType<typeof useAgents>)
 
     renderHook(() =>
-      useSessionAgent('http://localhost:5551', 'session-1', '/assistant')
+      useSessionAgent('session-1', '/assistant')
     )
 
     await waitFor(() => {
@@ -262,25 +210,22 @@ describe('useSessionAgent', () => {
     })
   })
 
-  it('ignores stale stored agent when unavailable in loaded primary agents', async () => {
+  it('ignores a stale stored agent when unavailable in loaded primary agents', async () => {
     useSessionAgentStore.setState({ agents: { 'session-1': 'build' } })
-    vi.mocked(useMessages).mockReturnValue({
-      data: [],
-      isLoading: false,
-    } as unknown as ReturnType<typeof useMessages>)
-    vi.mocked(useConfig).mockReturnValue({
-      data: { default_agent: 'code' },
-    } as ReturnType<typeof useConfig>)
+    vi.mocked(useSession).mockReturnValue({
+      data: undefined,
+      isLoading: true,
+    } as unknown as ReturnType<typeof useSession>)
     vi.mocked(useAgents).mockReturnValue({
       data: [
-        { name: 'code', mode: 'primary' },
-        { name: 'architect', mode: 'primary' },
+        { id: 'code', name: 'code', mode: 'primary' },
+        { id: 'architect', name: 'architect', mode: 'primary' },
       ],
       isSuccess: true,
     } as ReturnType<typeof useAgents>)
 
     const { result } = renderHook(() =>
-      useSessionAgent('http://localhost:5551', 'session-1', '/assistant')
+      useSessionAgent('session-1', '/assistant')
     )
 
     await waitFor(() => {
@@ -288,35 +233,28 @@ describe('useSessionAgent', () => {
     })
   })
 
-  it('uses latest message agent only when it is available in loaded primary agents', async () => {
-    vi.mocked(useMessages).mockReturnValue({
-      data: [
-        {
-          info: {
-            role: 'user',
-            agent: 'build',
-          },
-        },
-      ],
+  it('falls back to the default agent when the session agent is unavailable in loaded primary agents', async () => {
+    vi.mocked(useSession).mockReturnValue({
+      data: {
+        id: 'session-1',
+        agent: 'build',
+      },
       isLoading: false,
-    } as ReturnType<typeof useMessages>)
-    vi.mocked(useConfig).mockReturnValue({
-      data: { default_agent: 'architect' },
-    } as ReturnType<typeof useConfig>)
+    } as unknown as ReturnType<typeof useSession>)
     vi.mocked(useAgents).mockReturnValue({
       data: [
-        { name: 'code', mode: 'primary' },
-        { name: 'architect', mode: 'primary' },
+        { id: 'code', name: 'code', mode: 'primary' },
+        { id: 'architect', name: 'architect', mode: 'primary' },
       ],
       isSuccess: true,
     } as ReturnType<typeof useAgents>)
 
     const { result } = renderHook(() =>
-      useSessionAgent('http://localhost:5551', 'session-1', '/assistant')
+      useSessionAgent('session-1', '/assistant')
     )
 
     await waitFor(() => {
-      expect(result.current.agent).toBe('architect')
+      expect(result.current.agent).toBe('code')
     })
   })
 })

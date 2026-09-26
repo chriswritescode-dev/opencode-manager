@@ -16,9 +16,10 @@ import { getErrorMessage } from '../utils/error-utils'
 import { sseAggregator } from './sse-aggregator'
 import { resolveProjectId, isGitMainCheckout } from './project-id-resolver'
 import { listRepos } from '../db/queries'
-import { listActiveScheduleRunWorkspaces } from '../db/schedules'
+import { listActiveScheduleRunWorktreePaths } from '../db/schedules'
 import { SettingsService } from './settings'
 import type { OpenCodeClient } from './opencode/client'
+import { openCodeLocation } from '@opencode-manager/shared/opencode'
 import { canonicalPathSync, mkdirSafe } from '../utils/fs-safe'
 
 const GIT_CLONE_TIMEOUT = 300000
@@ -1162,12 +1163,17 @@ export function isRepoInUse(db: Database, repoId: number): boolean {
   return sseAggregator.getActiveDirectories().includes(repo.fullPath)
 }
 
+export async function resolveRepoProjectId(openCodeClient: OpenCodeClient, directory: string): Promise<string> {
+  const { project } = await openCodeClient.api.location.get(openCodeLocation(directory))
+  return project.id
+}
+
 export async function getSiblingRepos(
   database: Database,
   repoId: number,
   gitEnv: Record<string, string>,
   openCodeClient?: OpenCodeClient,
-): Promise<Array<Repo & { currentBranch: string | undefined }>> {
+): Promise<Array<Repo & { currentBranch: string | undefined; worktreeStrategy?: string }>> {
   const settingsService = new SettingsService(database)
   const settings = settingsService.getSettings()
   const allRepos = listRepos(database, settings.preferences.repoOrder)
@@ -1200,88 +1206,60 @@ export async function getSiblingRepos(
   if (!openCodeClient) return repoSiblings
 
   try {
-    const workspaces = await openCodeClient.getJson<Array<{
-      id: string
-      type: string
-      name: string | null
-      branch: string | null
-      directory: string | null
-      projectID: string
-    }>>('/experimental/workspace', { directory: target.fullPath })
+    const projectID = await resolveRepoProjectId(openCodeClient, target.fullPath)
+    const worktrees = await openCodeClient.api.worktree.list({ projectID })
 
-    // Normalize paths so a workspace pointing at a real repo directory can never
-    // be exposed as deletable. Deleting an OpenCode workspace recursively removes
-    // its directory, so the current repo directory and all known managed repo
-    // directories must be excluded regardless of trailing slashes or symlinks.
-    // Workspaces that are git main checkouts (not linked worktrees) are also
-    // excluded so the project's origin/main repository can never be surfaced
-    // as deletable.
     const knownDirectories = new Set(repoSiblings.map((repo) => canonicalPathSync(path.resolve(repo.fullPath))))
     const targetDirectory = canonicalPathSync(path.resolve(target.fullPath))
     const reposRoot = canonicalPathSync(path.resolve(getReposPath()))
     const scheduleWorktreeRoot = canonicalPathSync(path.resolve(getScheduleWorktreesPath()))
-
-    // Schedule runs may create their isolated worktree via the OpenCode workspace
-    // API, which places it outside getScheduleWorktreesPath(). Exclude any live
-    // run's workspace/worktree so an in-progress run is never surfaced as a
-    // deletable Sibling during the window it exists.
-    const activeRuns = listActiveScheduleRunWorkspaces(database)
-    const activeRunWorkspaceIds = new Set(activeRuns.map((run) => run.workspaceId).filter((id): id is string => id !== null))
     const activeRunDirectories = new Set(
-      activeRuns.map((run) => run.worktreePath).filter((p): p is string => p !== null).map((p) => canonicalPathSync(path.resolve(p))),
+      listActiveScheduleRunWorktreePaths(database).map((p) => canonicalPathSync(path.resolve(p))),
     )
 
-    const candidates = workspaces.filter((workspace) => {
-      if (workspace.projectID !== targetProjectId) return false
-      if (!workspace.directory) return false
-
-      const workspaceDirectory = canonicalPathSync(path.resolve(workspace.directory))
-      if (workspaceDirectory === targetDirectory) return false
-      if (workspaceDirectory === reposRoot) return false
-      if (workspaceDirectory.startsWith(`${scheduleWorktreeRoot}${path.sep}`)) return false
-      if (activeRunWorkspaceIds.has(workspace.id)) return false
-      if (activeRunDirectories.has(workspaceDirectory)) return false
-      if (knownDirectories.has(workspaceDirectory)) return false
-
+    const candidates = worktrees.filter((worktree) => {
+      const directory = canonicalPathSync(path.resolve(worktree.directory))
+      if (directory === targetDirectory) return false
+      if (directory === reposRoot) return false
+      if (directory.startsWith(`${scheduleWorktreeRoot}${path.sep}`)) return false
+      if (activeRunDirectories.has(directory)) return false
+      if (knownDirectories.has(directory)) return false
       return true
     })
 
     const mainChecks = await Promise.all(
-      candidates.map((workspace) => isGitMainCheckout(workspace.directory!).catch(() => false)),
+      candidates.map((worktree) => isGitMainCheckout(worktree.directory).catch(() => false)),
     )
 
-    const uniqueWorkspaces = new Map<string, typeof candidates[number]>()
+    const uniqueWorktrees = new Map<string, typeof candidates[number]>()
     candidates
       .filter((_, index) => !mainChecks[index])
-      .forEach((workspace) => {
-        const directory = canonicalPathSync(path.resolve(workspace.directory!))
-        if (!uniqueWorkspaces.has(directory)) {
-          uniqueWorkspaces.set(directory, workspace)
+      .forEach((worktree) => {
+        const directory = canonicalPathSync(path.resolve(worktree.directory))
+        if (!uniqueWorktrees.has(directory)) {
+          uniqueWorktrees.set(directory, worktree)
         }
       })
 
-    const workspaceSiblings = Array.from(uniqueWorkspaces.values())
-      .map((workspace) => ({
-        id: -1,
-        repoUrl: target.repoUrl,
-        localPath: workspace.name ?? workspace.id,
-        fullPath: workspace.directory!,
-        sourcePath: workspace.directory!,
-        branch: workspace.branch ?? undefined,
-        defaultBranch: target.defaultBranch,
-        cloneStatus: 'ready' as const,
-        clonedAt: Date.now(),
-        isWorktree: true,
-        isLocal: true,
-        currentBranch: workspace.branch ?? undefined,
-        workspaceId: workspace.id,
-        workspaceType: workspace.type,
-        workspaceName: workspace.name ?? undefined,
-      }))
+    const worktreeSiblings = Array.from(uniqueWorktrees.values()).map((worktree) => ({
+      id: -1,
+      repoUrl: target.repoUrl,
+      localPath: path.basename(worktree.directory),
+      fullPath: worktree.directory,
+      sourcePath: worktree.directory,
+      branch: undefined,
+      defaultBranch: target.defaultBranch,
+      cloneStatus: 'ready' as const,
+      clonedAt: Date.now(),
+      isWorktree: true,
+      isLocal: true,
+      currentBranch: undefined,
+      worktreeStrategy: worktree.strategy,
+    }))
 
-    return [...repoSiblings, ...workspaceSiblings]
+    return [...repoSiblings, ...worktreeSiblings]
   } catch (error) {
-    logger.warn('Failed to list OpenCode workspaces:', error)
+    logger.warn('Failed to list OpenCode worktrees:', error)
     return repoSiblings
   }
 }

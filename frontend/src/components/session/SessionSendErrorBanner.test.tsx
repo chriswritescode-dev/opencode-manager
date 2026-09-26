@@ -111,18 +111,6 @@ describe('SessionSendErrorBanner', () => {
     expect(screen.getByText('Connection Failed')).toBeInTheDocument()
   })
 
-  it('renders a session-kind error even while disconnected', () => {
-    useSendErrorStore.getState().setQueuedPrompt('test-session', 'queued message')
-    useSendErrorStore.getState().failQueuedPrompt({
-      sessionID: 'test-session',
-      title: 'Session error',
-      message: 'Server reported failure',
-    })
-
-    render(<SessionSendErrorBanner sessionId="test-session" isConnected={false} isReconnecting={false} />)
-    expect(screen.getByText('Session error')).toBeInTheDocument()
-  })
-
   it('renders a previously hidden network error after reconnecting', () => {
     useSendErrorStore.getState().setError({
       sessionID: 'test-session',

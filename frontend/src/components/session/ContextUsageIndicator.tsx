@@ -1,9 +1,8 @@
 import { useContextUsage } from '@/hooks/useContextUsage'
 
 interface ContextUsageIndicatorProps {
-  opcodeUrl: string | null
-  sessionID: string | undefined
   directory?: string
+  sessionID: string | undefined
   isConnected: boolean
   isReconnecting?: boolean
 }
@@ -14,8 +13,8 @@ const getUsageTextColor = (percentage: number) => {
   return 'text-red-700 dark:text-red-400'
 }
 
-export function ContextUsageIndicator({ opcodeUrl, sessionID, directory, isConnected, isReconnecting }: ContextUsageIndicatorProps) {
-  const { totalTokens, contextLimit, usagePercentage, isLoading } = useContextUsage(opcodeUrl, sessionID, directory)
+export function ContextUsageIndicator({ directory, sessionID, isConnected, isReconnecting }: ContextUsageIndicatorProps) {
+  const { totalTokens, contextLimit, usagePercentage, isLoading } = useContextUsage(sessionID, directory)
 
   if (isLoading) {
     return (

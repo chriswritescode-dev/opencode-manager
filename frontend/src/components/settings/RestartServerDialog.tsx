@@ -28,7 +28,7 @@ export function RestartServerDialog({
           <DialogTitle>Restart OpenCode Server?</DialogTitle>
           <DialogDescription>
             {activeSessionCount && activeSessionCount > 0
-              ? `${activeSessionCount} session${activeSessionCount === 1 ? '' : 's'} ${activeSessionCount === 1 ? 'is' : 'are'} currently working. Restarting will interrupt ${activeSessionCount === 1 ? 'it' : 'them'} and send "continue" to resume after the server is healthy.`
+              ? `${activeSessionCount} session${activeSessionCount === 1 ? '' : 's'} ${activeSessionCount === 1 ? 'is' : 'are'} currently working. Restarting will interrupt ${activeSessionCount === 1 ? 'it' : 'them'}, and OpenCode resumes ${activeSessionCount === 1 ? 'it' : 'them'} automatically once the server is back.`
               : 'Restart the OpenCode server after your changes are saved to apply them to the running server.'
             }
           </DialogDescription>

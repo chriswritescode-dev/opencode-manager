@@ -1,4 +1,5 @@
 import { Hono } from 'hono'
+import { z } from 'zod'
 import type { ContentfulStatusCode } from 'hono/utils/http-status'
 import type { Database } from 'bun:sqlite'
 import type { Repo } from '@opencode-manager/shared/types'
@@ -10,17 +11,24 @@ import { SettingsService } from '../services/settings'
 import type { OpenCodeClient } from '../services/opencode/client'
 import { logger } from '../utils/logger'
 import { getErrorMessage, getStatusCode } from '../utils/error-utils'
-import { ASSISTANT_REPO_ID } from '@opencode-manager/shared/utils'
+import { handleOpenCodeError } from '../utils/route-helpers'
+import { ASSISTANT_REPO_ID, isWorktreeSibling } from '@opencode-manager/shared/utils'
+import { isWorktreeError, openCodeLocation } from '@opencode-manager/shared/opencode'
 import { createRepoGitRoutes } from './repo-git'
 import { createScheduleRoutes } from './schedules'
 import type { GitAuthService } from '../services/git-auth'
 import { ScheduleService } from '../services/schedules'
 import { ensureAssistantMode, getAssistantModeStatus, buildAssistantRepo } from '../services/assistant-mode'
+import { canonicalPathSync } from '../utils/fs-safe'
 import path from 'path'
 
 function resolveRepo(database: Database, id: number): Repo | null {
   return getRepoById(database, id) ?? (id === ASSISTANT_REPO_ID ? buildAssistantRepo() : null)
 }
+
+const DeleteWorkspaceRequestSchema = z.object({
+  directory: z.string().trim().min(1),
+})
 
 function withRepoSettings(database: Database, repo: Repo): Repo {
   return {
@@ -248,7 +256,7 @@ app.get('/', async (c) => {
     }
   })
 
-  app.delete('/:id/workspaces/:workspaceId', async (c) => {
+  app.delete('/:id/workspaces', async (c) => {
     try {
       const id = parseInt(c.req.param('id'))
       if (Number.isNaN(id)) return c.json({ error: 'Invalid repo id' }, 400)
@@ -256,17 +264,26 @@ app.get('/', async (c) => {
       const repo = getRepoById(database, id)
       if (!repo || repo.cloneStatus !== 'ready') return c.json({ error: 'Repo not found' }, 404)
 
-      const workspaceId = c.req.param('workspaceId')
-      if (!workspaceId.startsWith('wrk')) return c.json({ error: 'Invalid workspace id' }, 400)
+      const body = await c.req.json().catch(() => null)
+      const parsed = DeleteWorkspaceRequestSchema.safeParse(body)
+      if (!parsed.success) return c.json({ error: 'directory is required' }, 400)
+      const directory = parsed.data.directory
 
-      const response = await openCodeClient.forward({
-        method: 'DELETE',
-        path: `/experimental/workspace/${encodeURIComponent(workspaceId)}`,
-        directory: repo.fullPath,
-      })
+      const siblings = await repoService.getSiblingRepos(database, id, gitAuthService.getGitEnvironment(), openCodeClient)
+      const requestedDirectory = canonicalPathSync(path.resolve(directory))
+      const worktree = siblings.find(
+        (sibling) => isWorktreeSibling(sibling) && canonicalPathSync(path.resolve(sibling.fullPath)) === requestedDirectory,
+      )
+      if (!worktree) return c.json({ error: 'Not a deletable worktree of this repo' }, 400)
 
-      if (!response.ok) {
-        return c.json({ error: await response.text() || 'Failed to delete workspace' }, response.status as ContentfulStatusCode)
+      try {
+        const projectID = await repoService.resolveRepoProjectId(openCodeClient, repo.fullPath)
+        await openCodeClient.api.worktree.remove({ projectID, directory: worktree.fullPath, force: true })
+      } catch (error: unknown) {
+        if (isWorktreeError(error)) {
+          return c.json({ error: error.data.message }, 409)
+        }
+        throw error
       }
 
       return c.json({ success: true })
@@ -284,27 +301,17 @@ app.get('/', async (c) => {
       const repo = getRepoById(database, id)
       if (!repo || repo.cloneStatus !== 'ready') return c.json({ error: 'Repo not found' }, 404)
 
-      const response = await openCodeClient.forward({
-        method: 'POST',
-        path: '/experimental/workspace',
-        directory: repo.fullPath,
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ type: 'worktree', branch: null }),
-      })
-
-      const body = await response.text()
-      if (!response.ok) {
-        return c.json({ error: body || 'Failed to create workspace' }, response.status as ContentfulStatusCode)
-      }
-
-      let workspace: unknown
       try {
-        workspace = body ? JSON.parse(body) : { success: true }
-      } catch {
-        return c.json({ error: 'Failed to create workspace' }, 500)
+        const projectID = await repoService.resolveRepoProjectId(openCodeClient, repo.fullPath)
+        const worktree = await openCodeClient.api.worktree.create({ projectID })
+        return c.json(worktree)
+      } catch (error: unknown) {
+        if (isWorktreeError(error)) {
+          return c.json({ error: error.data.message }, 409)
+        }
+        logger.error('Failed to create workspace:', error)
+        return c.json({ error: getErrorMessage(error) }, 500)
       }
-
-      return c.json(workspace)
     } catch (error: unknown) {
       logger.error('Failed to create workspace:', error)
       return c.json({ error: getErrorMessage(error) }, 500)
@@ -465,23 +472,18 @@ app.get('/', async (c) => {
         return c.json({ error: 'Repo has no directory to reset' }, 400)
       }
 
-      const response = await openCodeClient.forward({
-        method: 'POST',
-        path: '/instance/dispose',
-        directory: repo.fullPath,
-      })
-      
-      if (!response.ok) {
-        const errorText = await response.text()
-        logger.error(`Failed to reset permissions for repo ${id}:`, errorText)
-        return c.json({ error: 'Failed to reset permissions' }, 500)
+      const location = await openCodeClient.api.location.get(openCodeLocation(repo.fullPath))
+      const savedPermissions = await openCodeClient.api.permission.saved.list({ projectID: location.project.id })
+
+      for (const permission of savedPermissions) {
+        await openCodeClient.api.permission.saved.remove({ id: permission.id })
       }
-      
-      logger.info(`Reset permissions for repo ${id} (${repo.fullPath})`)
-      return c.json({ success: true })
+
+      logger.info(`Reset permissions for repo ${id} (${repo.fullPath}): removed ${savedPermissions.length}`)
+      return c.json({ removed: savedPermissions.length })
     } catch (error: unknown) {
       logger.error('Failed to reset permissions:', error)
-      return c.json({ error: getErrorMessage(error) }, 500)
+      return handleOpenCodeError(c, error, 'Failed to reset permissions')
     }
   })
 

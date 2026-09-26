@@ -19,13 +19,17 @@ The token has two in-product consumers, neither of which is an agent:
 | Generated plugins (`ocm-manager.js`, `ocm-sandbox.js`, `ocm-gh-env.js`) | The `OCM_INTERNAL_TOKEN` environment variable, injected into the OpenCode child process |
 | External clients such as the `ocm` CLI | Settings -> Manager Token, served by `GET /api/settings/manager-token` |
 
+The generated plugins are OpenCode 2 plugin modules — plain, dependency-free objects that default-export `{ id, setup }` and register their hooks and tools through the `setup` context. The Manager writes them to `<config home>/opencode/plugins/`; the legacy `opencode/plugin/` files are removed on install.
+
 Agents never authenticate against this API themselves. They call the `ocm` tool, which holds the token inside the Manager process.
 
 ## The `ocm` Tool
 
 The Manager installs a generated plugin (`ocm-manager.js`) that gives every agent an `ocm` tool. The tool calls this API from inside the Manager's own OpenCode process, so it needs no token, no base URL, and no network access from the agent shell.
 
-That makes it the only path that works everywhere: a scheduled run executes in a throwaway worktree with no token of its own, and a sandboxed `bash` call runs in a microVM where `localhost` is the guest, not the Manager.
+That makes it the only path that works everywhere: a scheduled run executes in a throwaway worktree with no token of its own, and a sandboxed `shell` call runs in a microVM where `localhost` is the guest, not the Manager.
+
+OpenCode 2 validates the tool's arguments against a JSON Schema before it calls `execute`, so the `ocm` tool declares its `action` and `params` shape as a JSON Schema derived from the same Zod definitions the tool uses.
 
 The tool has two actions.
 
@@ -83,7 +87,7 @@ POST /repos/*/schedules/*/runs/*/cancel
 
 - `POST /notifications/send` — use the `send_notification` action instead.
 - `GET /git-credentials/gh-env` — returns the GitHub CLI environment (`GH_TOKEN`, `GITHUB_TOKEN`) for the OpenCode host process; it must not be readable by the agent.
-- `POST /sandbox/shell` — the sandbox planner's internal route that resolves and pins the shell for a `bash` call; exposing it would let the agent drive shell planning directly.
+- `POST /sandbox/shell` — the sandbox planner's internal route that resolves and pins the shell for a `shell` call; exposing it would let the agent drive shell planning directly.
 - `/repos/*/mirror/*` — the repo mirror protocol that the `ocm` CLI uses to sync entire repositories; it can create, replace, patch, or delete whole repos, so it stays reserved for the CLI.
 
 Agents should use the `ocm` tool rather than the raw bearer-token endpoints below. Those endpoints remain available to the frontend, generated plugins, and other Manager-internal clients.
@@ -204,7 +208,7 @@ Returns the updated settings object.
 
 ### OpenCode Configuration
 
-The global OpenCode configuration files in the workspace `.config/opencode/` directory are the source of truth, and these endpoints are the only supported way to change them. Up to three sources are recognized and merged in OpenCode order — `config.json`, `opencode.json`, `opencode.jsonc` — with later files overriding earlier ones. The endpoint applies the same rules as the Settings UI: any semantic change is written to disk and marks an OpenCode server restart as required; comment-only edits and changes limited to `mcp` do not.
+The global OpenCode configuration files in the workspace `.config/opencode/` directory are the source of truth, and these endpoints are the only supported way to change them. The two sources OpenCode 2 reads are merged in order — `opencode.json`, `opencode.jsonc` — with later files overriding earlier ones. A legacy `config.json` is folded into a recognized source and archived; it is never read as a live source. The schema accepts both V1-compatible keys and native OpenCode 2 fields, so a V2-native config passes validation. The endpoint applies the same rules as the Settings UI: any semantic change is written to disk and applied to the running server with an in-place OpenCode location reload, and it is flagged as restart required only when that reload fails; comment-only edits do nothing, and changes limited to `mcp` are saved without a reload.
 
 **GET `/api/internal/opencode-config`**
 
@@ -217,7 +221,7 @@ Read the merged persisted configuration and its source files. This is not the ru
   content: object           // Merged configuration across all sources
   rawContent: string        // Raw content of the preferred write target
   sources: Array<{          // Recognized source files, in merge order
-    name: 'config.json' | 'opencode.json' | 'opencode.jsonc'
+    name: 'opencode.json' | 'opencode.jsonc'
     path: string
     rawContent: string
     content: object
@@ -240,7 +244,7 @@ Read the merged persisted configuration and its source files. This is not the ru
 
 **GET `/api/internal/opencode-config/effective`**
 
-Read the running server's effective global configuration (OpenCode `GET /global/config`). Never copy this response into a save.
+Read the running server's configuration as `entries`: the configuration documents and discovery directories in precedence order, lowest first, each shaped as `{ type: 'document', path, info }` or `{ type: 'directory', path }`. Its `info` values are expanded for the running server, so never copy this response into a save.
 
 **Status Codes:**
 - `200`: Effective configuration returned
@@ -250,19 +254,19 @@ Read the running server's effective global configuration (OpenCode `GET /global/
 
 **PUT `/api/internal/opencode-config`**
 
-Read the merged configuration first, change only the keys the user asked for, and send the complete object back with its `revision`. Only changed paths are patched into the preferred existing source (`opencode.jsonc` > `opencode.json` > `config.json`; a new installation gets `opencode.jsonc`); comments, unknown keys, and untouched inherited values are preserved. For a raw edit, send a string as `content` together with the exact `source` name.
+Read the merged configuration first, change only the keys the user asked for, and send the complete object back with its `revision`. Only changed paths are patched into the preferred existing source (`opencode.jsonc` > `opencode.json`; a new installation gets `opencode.jsonc`); comments, unknown keys, and untouched inherited values are preserved. For a raw edit, send a string as `content` together with the exact `source` name.
 
 **Request Body:**
 ```ts
 {
   content: object | string    // Complete merged object, or raw text for one source
   expectedRevision?: string   // From GET; a stale value is rejected with 409
-  source?: 'config.json' | 'opencode.json' | 'opencode.jsonc'  // Required for raw string edits
+  source?: 'opencode.json' | 'opencode.jsonc'  // Required for raw string edits
 }
 ```
 
 **Response:**
-Returns the refreshed `OpenCodeConfigFile`. Adds `restartRequired: true` when the change needs an OpenCode server restart.
+Returns the refreshed `OpenCodeConfigFile`. Semantic changes are applied with an OpenCode location reload, without a restart. Adds `restartRequired: true` only when that reload fails.
 
 **Status Codes:**
 - `200`: Configuration written
@@ -275,7 +279,7 @@ Returns the refreshed `OpenCodeConfigFile`. Adds `restartRequired: true` when th
 
 **POST `/api/internal/assistant/reload`**
 
-Reload the assistant workspace by disposing the current OpenCode instance. Use this after editing `.opencode/agents/assistant.md` or `opencode.json` so changes take effect on the next message.
+Reload the OpenCode server configuration, rebuilding every loaded location. Use this after editing `.opencode/agents/assistant.md` or `opencode.json` so changes take effect on the next message.
 
 **Rate Limiting:** 5 requests per minute per token. Returns `429 Too Many Requests` with `Retry-After` header when exceeded.
 

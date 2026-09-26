@@ -29,7 +29,6 @@
     "lint:frontend": "pnpm --filter frontend lint",
     "lint:backend": "pnpm --filter backend lint",
     "lint:fix": "pnpm run lint:cli -- --fix && pnpm run lint:frontend -- --fix && pnpm run lint:backend -- --fix",
-    "generate:openapi": "bun scripts/generate-openapi.ts",
     "docker:build": "docker-compose build",
     "docker:up": "docker-compose up -d",
     "docker:down": "docker-compose down",

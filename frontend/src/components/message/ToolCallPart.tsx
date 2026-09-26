@@ -1,17 +1,15 @@
 import { useState, useRef, useEffect, useMemo, memo } from 'react'
 import { unwrapSandboxExecCommand } from '@opencode-manager/shared/utils'
-import type { components } from '@/api/opencode-types'
+import { toolContentText, type SessionMessageAssistantTool } from '@opencode-manager/shared/opencode'
 import { useSettings } from '@/hooks/useSettings'
 import { useUserBash } from '@/stores/userBashStore'
 import { useSessionStatusForSession } from '@/stores/sessionStatusStore'
-import { usePermissions, useQuestions } from '@/contexts/EventContext'
+import { useToolCallPermission } from '@/contexts/EventContext'
 import { detectFileReferences } from '@/lib/fileReferences'
 import { ExternalLink, Loader2, Shield } from 'lucide-react'
 import { Badge } from '@/components/ui/badge'
 import { CopyButton } from '@/components/ui/copy-button'
 import { getToolSpecificRender } from './FileToolRender'
-
-type ToolPart = components['schemas']['ToolPart']
 
 const DISPLAY_LIMIT = 30_000
 const DISPLAY_HEAD_LENGTH = 20_000
@@ -41,18 +39,30 @@ function BoundedPre({ content, className }: { content: string; className: string
 }
 
 interface ToolCallPartProps {
-  part: ToolPart
+  part: SessionMessageAssistantTool
+  messageID?: string
   onFileClick?: (filePath: string, lineNumber?: number) => void
   onChildSessionClick?: (sessionId: string) => void
-  simpleChatMode?: boolean
 }
 
-function getTaskSessionId(part: ToolPart): string | undefined {
-  let sessionId = part.metadata?.sessionId as string | undefined
-  if (!sessionId && part.state.status !== 'pending' && 'metadata' in part.state) {
-    sessionId = part.state.metadata?.sessionId as string | undefined
-  }
-  return sessionId
+function toolInput(part: SessionMessageAssistantTool): Record<string, unknown> | undefined {
+  if (part.state.status === 'streaming') return undefined
+  return part.state.input
+}
+
+function toolMetadata(part: SessionMessageAssistantTool): Record<string, unknown> {
+  if (part.state.status === 'streaming') return {}
+  return part.state.metadata ?? {}
+}
+
+function toolOutputText(part: SessionMessageAssistantTool): string {
+  if (part.state.status === 'streaming') return ''
+  return toolContentText(part.state.status === 'running' ? undefined : part.state.content)
+}
+
+function getSubagentSessionId(part: SessionMessageAssistantTool): string | undefined {
+  const sessionID = toolMetadata(part).sessionID
+  return typeof sessionID === 'string' ? sessionID : undefined
 }
 
 function ClickableJson({ json, onFileClick }: { json: unknown; onFileClick?: (filePath: string) => void }) {
@@ -95,41 +105,37 @@ function ClickableJson({ json, onFileClick }: { json: unknown; onFileClick?: (fi
   return <pre className="bg-accent p-2 rounded text-xs overflow-x-auto whitespace-pre-wrap break-words">{parts}</pre>
 }
 
-export const ToolCallPart = memo(function ToolCallPart({ part, onFileClick, onChildSessionClick }: ToolCallPartProps) {
+export const ToolCallPart = memo(function ToolCallPart({ part, messageID, onFileClick, onChildSessionClick }: ToolCallPartProps) {
   const { preferences } = useSettings()
   const { userBashCommands } = useUserBash()
-  const taskSessionId = part.tool === 'task' ? getTaskSessionId(part) : undefined
-  const taskSessionStatus = useSessionStatusForSession(taskSessionId)
-  const { getForCallID: getPermissionForCallID } = usePermissions()
-  const { getForCallID: getQuestionForCallID } = useQuestions()
+  const isSubagent = part.name === 'subagent'
+  const subagentSessionId = isSubagent ? getSubagentSessionId(part) : undefined
+  const subagentSessionStatus = useSessionStatusForSession(subagentSessionId)
+  const pendingPermission = useToolCallPermission(part.id, messageID)
+  const isWaitingPermission = part.state.status === 'running' && pendingPermission !== null
   const outputRef = useRef<HTMLDivElement>(null)
-  const rawCommand = part.tool === 'bash' && typeof part.state.input?.command === 'string'
-    ? part.state.input.command
+  const input = toolInput(part)
+  const rawCommand = part.name === 'shell' && typeof input?.command === 'string'
+    ? input.command
     : undefined
   const displayCommand = useMemo(
     () => (rawCommand === undefined ? undefined : unwrapSandboxExecCommand(rawCommand)),
     [rawCommand]
   )
-  const isSandboxedCommand = rawCommand !== undefined && (
-    displayCommand !== rawCommand ||
-    (part.state.status === 'completed' && (part.state.metadata as Record<string, unknown> | undefined)?.sandbox === true)
-  )
+  const isSandboxedCommand =
+    part.state.status === 'completed' &&
+    (toolMetadata(part).sandbox === true ||
+      (rawCommand !== undefined && displayCommand !== rawCommand))
   const isUserBashCommand = part.state.status === 'completed' &&
     typeof displayCommand === 'string' &&
     userBashCommands.has(displayCommand)
-  const isTodoTool = part.tool === 'todowrite' || part.tool === 'todoread'
-  const [expanded, setExpanded] = useState(isUserBashCommand || isTodoTool || (preferences?.expandToolCalls ?? false))
-
-  const pendingPermission = getPermissionForCallID(part.callID, part.sessionID)
-  const isWaitingPermission = part.state.status === 'running' && !!pendingPermission
-  const pendingQuestion = getQuestionForCallID(part.callID, part.sessionID)
-  const isWaitingQuestion = part.state.status === 'running' && !!pendingQuestion
+  const [expanded, setExpanded] = useState(isUserBashCommand || (preferences?.expandToolCalls ?? false))
 
   useEffect(() => {
-    if (part.tool === 'bash' && expanded && outputRef.current) {
+    if (part.name === 'shell' && expanded && outputRef.current) {
       outputRef.current.scrollIntoView({ behavior: 'smooth', block: 'nearest' })
     }
-  }, [expanded, part.tool])
+  }, [expanded, part.name])
 
   const getStatusColor = () => {
     switch (part.state.status) {
@@ -139,7 +145,6 @@ export const ToolCallPart = memo(function ToolCallPart({ part, onFileClick, onCh
         return 'text-red-600 dark:text-red-400'
       case 'running':
         if (isWaitingPermission) return 'text-orange-600 dark:text-orange-400'
-        if (isWaitingQuestion) return 'text-blue-600 dark:text-blue-400'
         return 'text-yellow-600 dark:text-yellow-400'
       default:
         return 'text-muted-foreground'
@@ -154,7 +159,7 @@ export const ToolCallPart = memo(function ToolCallPart({ part, onFileClick, onCh
         return <span>✗</span>
       case 'running':
         return <Loader2 className="w-3.5 h-3.5 animate-spin" />
-      case 'pending':
+      case 'streaming':
         return <span className="inline-block w-2 h-2 rounded-full bg-current animate-pulse" />
       default:
         return <span>○</span>
@@ -162,36 +167,32 @@ export const ToolCallPart = memo(function ToolCallPart({ part, onFileClick, onCh
   }
 
   const getPreviewText = () => {
-    if (part.state.status === 'pending') return null
-
-    const input = part.state.input as Record<string, unknown>
     if (!input) return null
 
-    switch (part.tool) {
+    switch (part.name) {
       case 'read':
       case 'write':
       case 'edit':
-        return (input.filePath as string) || null
-      case 'bash':
+      case 'patch':
+        return (input.path as string) || null
+      case 'shell':
         return displayCommand || null
       case 'glob':
-        return (input.pattern as string) || null
       case 'grep':
         return (input.pattern as string) || null
-      case 'list':
-        return (input.path as string) || '.'
-      case 'task':
+      case 'subagent':
         return (input.description as string) || null
-      case 'todowrite':
-      case 'todoread':
-        return null
+      case 'webfetch':
+        return (input.url as string) || null
+      case 'websearch':
+        return (input.query as string) || null
       default:
         return null
     }
   }
 
   const previewText = getPreviewText()
-  const isFileTool = ['read', 'write', 'edit'].includes(part.tool)
+  const isFileTool = ['read', 'write', 'edit', 'patch'].includes(part.name)
   const sandboxIndicator = isSandboxedCommand ? (
     <Badge
       variant="outline"
@@ -203,19 +204,16 @@ export const ToolCallPart = memo(function ToolCallPart({ part, onFileClick, onCh
     </Badge>
   ) : null
 
-  if (part.tool === 'task') {
-    const sessionId = taskSessionId
-    const description = previewText || 'Sub-agent task'
+  if (isSubagent) {
     const status = part.state.status
-
-    const isPending = status === 'pending'
-    const isRunning = status === 'running' && taskSessionStatus.type !== 'idle'
-    const isCompleted = status === 'completed' || (status === 'running' && !!sessionId && taskSessionStatus.type === 'idle')
+    const isRunning = status === 'running' && subagentSessionStatus.type !== 'idle'
+    const isCompleted = status === 'completed' || (status === 'running' && !!subagentSessionId && subagentSessionStatus.type === 'idle')
     const isError = status === 'error'
+    const description = previewText || 'Sub-agent task'
 
     const content = (
       <div className="flex items-center gap-2 min-w-0">
-        {isPending && (
+        {status === 'streaming' && (
           <div className="flex gap-1">
             <span className="w-2 h-2 rounded-full bg-muted-foreground" />
             <span className="w-2 h-2 rounded-full bg-muted-foreground" />
@@ -233,14 +231,14 @@ export const ToolCallPart = memo(function ToolCallPart({ part, onFileClick, onCh
         {isError && <span className="text-red-600 text-sm font-medium">✗</span>}
         <span className="font-medium text-foreground truncate">{description}</span>
         <span className="text-[11px] font-medium text-orange-600 dark:text-orange-400 shrink-0">sub-agent</span>
-        {sessionId && <ExternalLink className="w-3 h-3 shrink-0 text-blue-600 dark:text-blue-400" />}
+        {subagentSessionId && <ExternalLink className="w-3 h-3 shrink-0 text-blue-600 dark:text-blue-400" />}
       </div>
     )
 
-    if (sessionId) {
+    if (subagentSessionId) {
       return (
         <button
-          onClick={() => onChildSessionClick?.(sessionId)}
+          onClick={() => onChildSessionClick?.(subagentSessionId)}
           className="my-1 w-full rounded-lg border border-blue-500/20 bg-blue-500/5 px-3 py-1.5 text-left text-xs text-muted-foreground hover:bg-blue-500/10 hover:border-blue-500/30 transition-all duration-200 shadow-sm shadow-blue-500/5"
           title="View subagent session"
         >
@@ -256,18 +254,6 @@ export const ToolCallPart = memo(function ToolCallPart({ part, onFileClick, onCh
     )
   }
 
-  if (isTodoTool) {
-    if (part.state.status === 'error') {
-      return (
-        <div className="my-2 text-sm text-red-600 dark:text-red-400">
-          Error updating tasks: {part.state.error}
-        </div>
-      )
-    }
-
-    return null
-  }
-
   const toolSpecificRender = getToolSpecificRender(part, onFileClick)
   if (toolSpecificRender) {
     return toolSpecificRender
@@ -275,7 +261,9 @@ export const ToolCallPart = memo(function ToolCallPart({ part, onFileClick, onCh
 
   if (isUserBashCommand) {
     const command = displayCommand ?? ''
-    const output = part.state.status === 'completed' ? part.state.output : ''
+    const output = toolOutputText(part)
+    const ran = part.state.status === 'streaming' ? undefined : part.state.status === 'running' ? undefined : part.time.ran
+    const completed = part.state.status === 'streaming' ? undefined : part.state.status === 'running' ? undefined : part.time.completed
     return (
       <div className="my-2">
         <div className="flex items-center gap-2 text-sm mb-2">
@@ -283,15 +271,15 @@ export const ToolCallPart = memo(function ToolCallPart({ part, onFileClick, onCh
           <span className="font-medium">$</span>
           <span className="text-foreground">{command}</span>
           {sandboxIndicator}
-          {part.state.status === 'completed' && part.state.time && (
+          {ran !== undefined && completed !== undefined && (
             <span className="text-muted-foreground text-xs ml-auto">
-              {((part.state.time.end - part.state.time.start) / 1000).toFixed(2)}s
+              {((completed - ran) / 1000).toFixed(2)}s
             </span>
           )}
         </div>
         <div className="relative">
-          <BoundedPre content={output ?? ''} className="bg-accent p-3 rounded text-xs overflow-x-auto whitespace-pre-wrap" />
-          <CopyButton content={output ?? ''} title="Copy output" className="absolute top-2 right-2" />
+          <BoundedPre content={output} className="bg-accent p-3 rounded text-xs overflow-x-auto whitespace-pre-wrap" />
+          <CopyButton content={output} title="Copy output" className="absolute top-2 right-2" />
         </div>
       </div>
     )
@@ -301,9 +289,8 @@ export const ToolCallPart = memo(function ToolCallPart({ part, onFileClick, onCh
     switch (part.state.status) {
       case 'running':
         if (isWaitingPermission) return 'border-orange-500/50 shadow-sm shadow-orange-500/20'
-        if (isWaitingQuestion) return 'border-blue-500/50 shadow-sm shadow-blue-500/20'
         return 'border-yellow-500/50 shadow-sm shadow-yellow-500/10'
-      case 'pending':
+      case 'streaming':
         return 'border-blue-500/30'
       case 'error':
         return 'border-red-500/30'
@@ -314,6 +301,8 @@ export const ToolCallPart = memo(function ToolCallPart({ part, onFileClick, onCh
     }
   }
 
+  const output = toolOutputText(part)
+
   return (
     <div ref={outputRef} className={`border rounded-lg overflow-hidden my-2 transition-all ${getBorderStyle()}`}>
       <button
@@ -321,7 +310,7 @@ export const ToolCallPart = memo(function ToolCallPart({ part, onFileClick, onCh
         className="w-full px-4 py-2 bg-card hover:bg-card-hover text-left flex items-center gap-2 text-sm min-w-0"
       >
         <span className={getStatusColor()}>{getStatusIcon()}</span>
-        <span className="font-medium">{part.tool}</span>
+        <span className="font-medium">{part.name}</span>
         {sandboxIndicator}
 
         {previewText && isFileTool ? (
@@ -341,28 +330,12 @@ export const ToolCallPart = memo(function ToolCallPart({ part, onFileClick, onCh
           <span className="text-muted-foreground text-xs truncate">{previewText}</span>
         ) : null}
 
-        {part.tool === 'task' && (() => {
-          const sessionId = getTaskSessionId(part)
-          return sessionId ? (
-            <span
-              onClick={(e) => {
-                e.stopPropagation()
-                onChildSessionClick?.(sessionId)
-              }}
-              className="text-blue-600 dark:text-blue-400 text-xs hover:text-blue-700 dark:hover:text-blue-300 cursor-pointer underline decoration-dotted flex items-center gap-1"
-              title="View subagent session"
-            >
-              <ExternalLink className="w-3 h-3" />
-              View Session
-            </span>
-          ) : null
-        })()}
-         <span className="text-muted-foreground text-xs ml-auto">({isWaitingPermission ? 'awaiting permission' : isWaitingQuestion ? 'awaiting answer' : part.state.status})</span>
+        <span className="text-muted-foreground text-xs ml-auto">{isWaitingPermission ? 'awaiting permission' : part.state.status}</span>
       </button>
 
       {expanded && (
         <div className="bg-card space-y-2 p-3">
-          {part.state.status === 'pending' && (
+          {part.state.status === 'streaming' && (
             <div className="flex items-center gap-2 text-sm text-muted-foreground">
               <div className="flex gap-0.5">
                 <span className="w-1.5 h-1.5 rounded-full bg-blue-500 animate-bounce" style={{ animationDelay: '0ms' }} />
@@ -374,47 +347,39 @@ export const ToolCallPart = memo(function ToolCallPart({ part, onFileClick, onCh
           )}
 
           {part.state.status === 'running' && (
-            <>
-              {part.tool === 'bash' ? (
-                <div className="text-sm">
-                  <div className="flex items-center gap-2 mb-1">
-                    <div className="text-muted-foreground">Command:</div>
-                    <CopyButton
-                      content={displayCommand ?? ''}
-                      title="Copy command"
-                    />
-                  </div>
-                  <div className="bg-accent p-2 rounded text-xs overflow-x-auto whitespace-pre-wrap break-words">
-                    <span className="text-green-600 dark:text-green-400">$</span> {displayCommand ?? ''}
-                  </div>
-                  <div className={`flex items-center gap-2 mt-2 text-xs ${isWaitingPermission ? 'text-orange-600 dark:text-orange-400' : 'text-yellow-600 dark:text-yellow-400'}`}>
-                    <Loader2 className="w-3 h-3 animate-spin" />
-                    <span>{isWaitingPermission ? 'Waiting for permission...' : 'Running...'}</span>
-                  </div>
+            part.name === 'shell' ? (
+              <div className="text-sm">
+                <div className="flex items-center gap-2 mb-1">
+                  <div className="text-muted-foreground">Command:</div>
+                  <CopyButton content={displayCommand ?? ''} title="Copy command" />
                 </div>
-              ) : (
-                <div className="text-sm">
-                  <div className="text-muted-foreground mb-1">Input:</div>
-                  <ClickableJson json={part.state.input} onFileClick={onFileClick} />
-                  <div className={`flex items-center gap-2 mt-2 text-xs ${isWaitingPermission ? 'text-orange-600 dark:text-orange-400' : 'text-yellow-600 dark:text-yellow-400'}`}>
-                    <Loader2 className="w-3 h-3 animate-spin" />
-                    <span>{isWaitingPermission ? 'Waiting for permission...' : 'Running...'}</span>
-                  </div>
+                <div className="bg-accent p-2 rounded text-xs overflow-x-auto whitespace-pre-wrap break-words">
+                  <span className="text-green-600 dark:text-green-400">$</span> {displayCommand ?? ''}
                 </div>
-              )}
-            </>
+                <div className={`flex items-center gap-2 mt-2 text-xs ${isWaitingPermission ? 'text-orange-600 dark:text-orange-400' : 'text-yellow-600 dark:text-yellow-400'}`}>
+                  <Loader2 className="w-3 h-3 animate-spin" />
+                  <span>{isWaitingPermission ? 'Waiting for permission...' : 'Running...'}</span>
+                </div>
+              </div>
+            ) : (
+              <div className="text-sm">
+                <div className="text-muted-foreground mb-1">Input:</div>
+                <ClickableJson json={part.state.input} onFileClick={onFileClick} />
+                <div className={`flex items-center gap-2 mt-2 text-xs ${isWaitingPermission ? 'text-orange-600 dark:text-orange-400' : 'text-yellow-600 dark:text-yellow-400'}`}>
+                  <Loader2 className="w-3 h-3 animate-spin" />
+                  <span>{isWaitingPermission ? 'Waiting for permission...' : 'Running...'}</span>
+                </div>
+              </div>
+            )
           )}
 
           {part.state.status === 'completed' && (
             <>
-              {part.tool === 'bash' ? (
+              {part.name === 'shell' ? (
                 <div className="text-sm">
                   <div className="flex items-center gap-2 mb-1">
                     <div className="text-muted-foreground">Command:</div>
-                    <CopyButton
-                      content={displayCommand ?? ''}
-                      title="Copy command"
-                    />
+                    <CopyButton content={displayCommand ?? ''} title="Copy command" />
                   </div>
                   <div className="bg-accent p-2 rounded text-xs overflow-x-auto whitespace-pre-wrap break-words">
                     <span className="text-green-600 dark:text-green-400">$</span> {displayCommand ?? ''}
@@ -426,21 +391,21 @@ export const ToolCallPart = memo(function ToolCallPart({ part, onFileClick, onCh
                   <ClickableJson json={part.state.input} onFileClick={onFileClick} />
                 </div>
               )}
-              <div className="text-sm">
-                <div className="text-muted-foreground mb-1">Output:</div>
-                <div className="relative">
-                  <BoundedPre
-                    content={part.state.status === 'completed' ? part.state.output ?? '' : ''}
-                    className="bg-accent p-2 rounded text-xs overflow-x-auto whitespace-pre-wrap break-all"
-                  />
-                  {part.state.status === 'completed' && part.state.output && (
-                    <CopyButton content={part.state.output} title="Copy output" className="absolute top-1 right-1" iconSize="sm" />
-                  )}
+              {output && (
+                <div className="text-sm">
+                  <div className="text-muted-foreground mb-1">Output:</div>
+                  <div className="relative">
+                    <BoundedPre
+                      content={output}
+                      className="bg-accent p-2 rounded text-xs overflow-x-auto whitespace-pre-wrap break-all"
+                    />
+                    <CopyButton content={output} title="Copy output" className="absolute top-1 right-1" iconSize="sm" />
+                  </div>
                 </div>
-              </div>
-              {part.state.time && (
+              )}
+              {part.time.ran !== undefined && part.time.completed !== undefined && (
                 <div className="text-xs text-muted-foreground">
-                  Duration: {((part.state.time.end - part.state.time.start) / 1000).toFixed(2)}s
+                  Duration: {((part.time.completed - part.time.ran) / 1000).toFixed(2)}s
                 </div>
               )}
             </>
@@ -450,7 +415,7 @@ export const ToolCallPart = memo(function ToolCallPart({ part, onFileClick, onCh
             <div className="text-sm">
               <div className="text-red-600 dark:text-red-400 mb-1">Error:</div>
               <BoundedPre
-                content={part.state.error ?? ''}
+                content={part.state.error.message}
                 className="bg-accent p-2 rounded text-xs overflow-x-auto whitespace-pre-wrap break-words text-red-600 dark:text-red-300"
               />
             </div>

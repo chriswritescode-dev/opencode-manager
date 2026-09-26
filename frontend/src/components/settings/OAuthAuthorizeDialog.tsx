@@ -1,146 +1,114 @@
 import { useState, useMemo, useEffect, useCallback } from 'react'
 import { Button } from '@/components/ui/button'
 import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from '@/components/ui/dialog'
-import { Input } from '@/components/ui/input'
-import { Label } from '@/components/ui/label'
 import { Badge } from '@/components/ui/badge'
-import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
 import { ExternalLink } from 'lucide-react'
-import { oauthApi, type OAuthAuthorizeResponse, type ProviderAuthMethod } from '@/api/oauth'
+import {
+  oauthApi,
+  type FormAnswer,
+  type FormValue,
+  type IntegrationMethod,
+  type IntegrationOAuthMethod,
+  type OAuthAuthorizeResponse,
+} from '@/api/oauth'
+import { buildAnswer, hasFields, hasMissingAnswers, resolveAnswers, setAnswerValue, visibleFields } from '@/lib/formFields'
 import { mapOAuthError } from '@/lib/oauthErrors'
+import { ProviderAuthField } from './ProviderAuthField'
 
 interface OAuthAuthorizeDialogProps {
   providerId: string
   providerName: string
-  methods: ProviderAuthMethod[]
+  methods: IntegrationMethod[]
   open: boolean
   onOpenChange: (open: boolean) => void
-  onSuccess: (response: OAuthAuthorizeResponse, methodIndex: number) => void
+  onSuccess: (response: OAuthAuthorizeResponse, methodID: string) => void
 }
 
-type OAuthPrompt = NonNullable<ProviderAuthMethod['prompts']>[number]
-
-function isBrowserLocalMethod(method: ProviderAuthMethod): boolean {
+function isBrowserLocalMethod(method: IntegrationOAuthMethod): boolean {
   return method.label.toLowerCase().includes('browser')
 }
 
-function getVisiblePrompts(method: ProviderAuthMethod, inputs: Record<string, string>): OAuthPrompt[] {
-  const visiblePrompts: OAuthPrompt[] = []
-  const activeInputs: Record<string, string> = {}
-
-  for (const prompt of method.prompts ?? []) {
-    const isVisible = !('when' in prompt) || !prompt.when || activeInputs[prompt.when.key] === prompt.when.value
-
-    if (!isVisible) {
-      continue
-    }
-
-    visiblePrompts.push(prompt)
-
-    if (inputs[prompt.key]) {
-      activeInputs[prompt.key] = inputs[prompt.key]
-    }
-  }
-
-  return visiblePrompts
-}
-
-function hasPrompts(method: ProviderAuthMethod): boolean {
-  return (method.prompts?.length ?? 0) > 0
-}
-
-export function OAuthAuthorizeDialog({ 
-  providerId, 
+export function OAuthAuthorizeDialog({
+  providerId,
   providerName,
   methods,
-  open, 
-  onOpenChange, 
-  onSuccess 
+  open,
+  onOpenChange,
+  onSuccess,
 }: OAuthAuthorizeDialogProps) {
   const [isLoading, setIsLoading] = useState(false)
   const [error, setError] = useState<string | null>(null)
-  const [selectedMethodIndex, setSelectedMethodIndex] = useState<number | null>(null)
-  const [promptInputs, setPromptInputs] = useState<Record<number, Record<string, string>>>({})
+  const [selectedMethodID, setSelectedMethodID] = useState<string | null>(null)
+  const [answers, setAnswers] = useState<Record<string, FormAnswer>>({})
   const [autoStarted, setAutoStarted] = useState(false)
-
-  const getMethodInputs = useCallback((methodIndex: number) => promptInputs[methodIndex] || {}, [promptInputs])
 
   const oauthMethods = useMemo(() => {
     return methods
-      .flatMap((method, index) => method.type === 'oauth' ? [{ method, index }] : [])
-      .filter(({ method }: { method: ProviderAuthMethod }) => {
-        if (providerId === 'openai' && isBrowserLocalMethod(method)) {
-          return false
-        }
-        return true
-      })
+      .filter((method): method is IntegrationOAuthMethod => method.type === 'oauth')
+      .filter((method) => !(providerId === 'openai' && isBrowserLocalMethod(method)))
   }, [methods, providerId])
 
-  const handleAuthorize = useCallback(async (methodIndex: number) => {
-    const method = methods[methodIndex]
-    const methodInputs = getMethodInputs(methodIndex)
-    const visiblePrompts = getVisiblePrompts(method, methodInputs)
-    const missingPrompt = visiblePrompts.some((prompt) => !methodInputs[prompt.key]?.trim())
+  const getAnswer = useCallback(
+    (method: IntegrationOAuthMethod) => resolveAnswers(method.form, answers[method.id]),
+    [answers],
+  )
 
-    if (missingPrompt) {
-      setError('Please complete all authentication fields')
-      setSelectedMethodIndex(methodIndex)
+  const handleAnswerChange = useCallback((methodID: string, key: string, value: FormValue | undefined) => {
+    setAnswers((prev) => setAnswerValue(prev, methodID, key, value))
+  }, [])
+
+  const handleAuthorize = useCallback(async (method: IntegrationOAuthMethod) => {
+    const answer = getAnswer(method)
+    const fields = visibleFields(method.form ?? [], answer)
+
+    if (hasMissingAnswers(method.form ?? [], answer)) {
+      setError('Please complete all required authentication fields')
+      setSelectedMethodID(method.id)
       return
     }
 
     setIsLoading(true)
     setError(null)
-    setSelectedMethodIndex(methodIndex)
+    setSelectedMethodID(method.id)
 
     try {
-      const inputs = visiblePrompts.length > 0
-        ? Object.fromEntries(
-            visiblePrompts.map((prompt) => [prompt.key, methodInputs[prompt.key].trim()])
-          )
-        : undefined
-      const response = await oauthApi.authorize(providerId, methodIndex, inputs)
-      onSuccess(response, methodIndex)
+      const response = await oauthApi.authorize(
+        providerId,
+        method.id,
+        fields.length > 0 ? buildAnswer(method.form ?? [], answer) : undefined,
+      )
+      onSuccess(response, method.id)
     } catch (err) {
       setError(mapOAuthError(err, 'authorize'))
     } finally {
       setIsLoading(false)
     }
-  }, [methods, providerId, onSuccess, getMethodInputs])
+  }, [getAnswer, providerId, onSuccess])
 
   useEffect(() => {
     if (open && oauthMethods.length === 1 && !autoStarted && !isLoading) {
-      const { index } = oauthMethods[0]
+      const method = oauthMethods[0]
       setAutoStarted(true)
-      setSelectedMethodIndex(index)
-      if (!hasPrompts(methods[index])) {
-        void handleAuthorize(index)
+      setSelectedMethodID(method.id)
+      if (!hasFields(method.form)) {
+        void handleAuthorize(method)
       }
     }
-  }, [open, oauthMethods, autoStarted, isLoading, methods, handleAuthorize])
+  }, [open, oauthMethods, autoStarted, isLoading, handleAuthorize])
 
-  const handleMethodSelection = (methodIndex: number) => {
+  const handleMethodSelection = (method: IntegrationOAuthMethod) => {
     setError(null)
-    setSelectedMethodIndex(methodIndex)
+    setSelectedMethodID(method.id)
 
-    if (!hasPrompts(methods[methodIndex])) {
-      void handleAuthorize(methodIndex)
+    if (!hasFields(method.form)) {
+      void handleAuthorize(method)
     }
-  }
-
-  const handlePromptChange = (methodIndex: number, key: string, value: string) => {
-    setPromptInputs((prev) => ({
-      ...prev,
-      [methodIndex]: {
-        ...prev[methodIndex],
-        [key]: value,
-      },
-    }))
   }
 
   const handleClose = () => {
     setError(null)
-    setPromptInputs({})
-    setSelectedMethodIndex(null)
+    setAnswers({})
+    setSelectedMethodID(null)
     onOpenChange(false)
   }
 
@@ -161,23 +129,25 @@ export function OAuthAuthorizeDialog({
         )}
 
         <div className="space-y-4">
-          {oauthMethods.map(({ method, index }) => {
+          {oauthMethods.map((method) => {
             const isBrowserLocal = isBrowserLocalMethod(method)
-            const methodInputs = getMethodInputs(index)
-            const visiblePrompts = getVisiblePrompts(method, methodInputs)
-            const canSubmitPrompts = visiblePrompts.every((prompt) => methodInputs[prompt.key]?.trim())
-            
+            const answer = getAnswer(method)
+            const fields = visibleFields(method.form ?? [], answer)
+            const canSubmit = !hasMissingAnswers(method.form ?? [], answer)
+
             return (
-              <div key={index} className="space-y-3">
+              <div key={method.id} className="space-y-3">
                 <div className="flex items-center gap-2 flex-wrap sm:flex-nowrap">
                   <Button
-                    onClick={() => handleMethodSelection(index)}
+                    onClick={() => handleMethodSelection(method)}
                     disabled={isLoading}
                     className="flex-1 justify-start min-w-0"
-                    variant={selectedMethodIndex === index ? 'default' : 'outline'}
+                    variant={selectedMethodID === method.id ? 'default' : 'outline'}
                   >
                     <ExternalLink className="h-4 w-4 mr-2 shrink-0" />
-                    <span className="truncate">{isLoading && selectedMethodIndex === index ? 'Authorizing...' : method.label}</span>
+                    <span className="truncate">
+                      {isLoading && selectedMethodID === method.id ? 'Authorizing...' : method.label}
+                    </span>
                   </Button>
                   {isBrowserLocal && (
                     <Badge variant="secondary" className="text-xs shrink-0">
@@ -186,54 +156,28 @@ export function OAuthAuthorizeDialog({
                   )}
                 </div>
 
-                {selectedMethodIndex === index && hasPrompts(method) && (
+                {selectedMethodID === method.id && hasFields(method.form) && (
                   <div className="space-y-3 pl-4 sm:pl-10 pr-1 py-2">
-                    {visiblePrompts.map((prompt) => (
-                      prompt.type === 'text' ? (
-                        <div key={prompt.key} className="space-y-2">
-                          <Label htmlFor={prompt.key}>{prompt.message}</Label>
-                          <Input
-                            id={prompt.key}
-                            value={methodInputs[prompt.key] || ''}
-                            onChange={(e) => handlePromptChange(index, prompt.key, e.target.value)}
-                            placeholder={prompt.placeholder}
-                            className="bg-background border-border"
-                            disabled={isLoading}
-                          />
-                        </div>
-                      ) : (
-                        <div key={prompt.key} className="space-y-2">
-                          <Label>{prompt.message}</Label>
-                          <Select
-                            value={methodInputs[prompt.key] || ''}
-                            onValueChange={(value) => handlePromptChange(index, prompt.key, value)}
-                            disabled={isLoading}
-                          >
-                            <SelectTrigger className="bg-background border-border">
-                              <SelectValue placeholder="Select an option" />
-                            </SelectTrigger>
-                            <SelectContent>
-                              {prompt.options.map((option) => (
-                                <SelectItem key={option.value} value={option.value}>
-                                  {option.label}
-                                </SelectItem>
-                              ))}
-                            </SelectContent>
-                          </Select>
-                        </div>
-                      )
+                    {fields.map((field) => (
+                      <ProviderAuthField
+                        key={field.key}
+                        field={field}
+                        value={answer[field.key]}
+                        disabled={isLoading}
+                        onChange={(value) => handleAnswerChange(method.id, field.key, value)}
+                      />
                     ))}
 
                     <Button
-                      onClick={() => void handleAuthorize(index)}
-                      disabled={isLoading || !canSubmitPrompts}
+                      onClick={() => void handleAuthorize(method)}
+                      disabled={isLoading || !canSubmit}
                       className="w-full"
                     >
-                      {isLoading && selectedMethodIndex === index ? 'Authorizing...' : 'Continue'}
+                      {isLoading && selectedMethodID === method.id ? 'Authorizing...' : 'Continue'}
                     </Button>
                   </div>
                 )}
-                
+
                 {isBrowserLocal && (
                   <p className="text-xs text-muted-foreground pl-1 break-words">
                     This method relies on a callback server started by OpenCode and may not work when OCM is remote.

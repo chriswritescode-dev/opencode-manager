@@ -1,6 +1,6 @@
 import { describe, it, expect, afterEach } from 'vitest'
-import { ENV } from '@opencode-manager/shared/config/env'
-import { getOpenCodeUpstreamBaseUrl } from '../../../src/services/opencode/upstream'
+import { ENV, getWorkspacePath } from '@opencode-manager/shared/config/env'
+import { getOpenCodeUpstreamBaseUrl, withDefaultOpenCodeDirectory } from '../../../src/services/opencode/upstream'
 
 const originalHost = ENV.OPENCODE.HOST
 
@@ -42,5 +42,19 @@ describe('getOpenCodeUpstreamBaseUrl', () => {
     setHost('192.168.1.10')
     expect(getOpenCodeUpstreamBaseUrl('::1')).toBe(`http://[::1]:${ENV.OPENCODE.PORT}`)
     expect(getOpenCodeUpstreamBaseUrl(() => '10.0.0.5')).toBe(`http://10.0.0.5:${ENV.OPENCODE.PORT}`)
+  })
+})
+
+describe('withDefaultOpenCodeDirectory', () => {
+  it('scopes a request without a directory header to the workspace', () => {
+    expect(withDefaultOpenCodeDirectory({ accept: 'application/json' })).toEqual({
+      accept: 'application/json',
+      'x-opencode-directory': encodeURIComponent(getWorkspacePath()),
+    })
+  })
+
+  it('keeps a caller-supplied directory header regardless of its case', () => {
+    const headers = { 'X-OpenCode-Directory': '%2Frepo' }
+    expect(withDefaultOpenCodeDirectory(headers)).toBe(headers)
   })
 })

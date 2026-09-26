@@ -15,9 +15,7 @@ function makeProvider(overrides: Partial<Provider>): Provider {
     id: overrides.id ?? 'test-provider',
     name: overrides.name ?? 'Test Provider',
     models: overrides.models ?? {},
-    env: [],
     isConnected: true,
-    options: {},
     ...overrides,
   }
 }
@@ -231,6 +229,19 @@ describe('syncFromConfig', () => {
     useModelStore.getState().syncFromConfig('invalid')
     expect(useModelStore.getState().model).toBeNull()
     expect(useModelStore.getState().lastConfigModel).toBe('invalid')
+  })
+
+  it('strips a model variant when syncing the config model', () => {
+    useModelStore.getState().syncFromConfig('anthropic/claude-sonnet-4#high')
+    expect(useModelStore.getState().model).toEqual({ providerID: 'anthropic', modelID: 'claude-sonnet-4' })
+  })
+
+  it('keeps slashes inside the model id when syncing the config model', () => {
+    useModelStore.getState().syncFromConfig('openrouter/anthropic/claude-sonnet-4')
+    expect(useModelStore.getState().model).toEqual({
+      providerID: 'openrouter',
+      modelID: 'anthropic/claude-sonnet-4',
+    })
   })
 
   it('handles undefined config string', () => {

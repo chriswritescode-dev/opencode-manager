@@ -6,15 +6,16 @@ function createSession(id: string, updated: number, directory = '/test'): Sessio
   return {
     id,
     projectID: 'proj-1',
-    directory,
     title: `Session ${id}`,
-    version: '1',
     time: { created: updated - 10000, updated },
+    location: { directory },
+    cost: 0,
+    tokens: { input: 0, output: 0, reasoning: 0, cache: { read: 0, write: 0 } },
   }
 }
 
-const keyFn = (s: { id: string; directory?: string }) =>
-  `${s.directory ?? ''}:${s.id}`
+const keyFn = (s: Session) =>
+  `${s.location.directory}:${s.id}`
 
 describe('partitionSessions', () => {
   it('places pinned sessions in pinned array sorted by updated desc', () => {

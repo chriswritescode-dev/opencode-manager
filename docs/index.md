@@ -12,6 +12,9 @@ Mobile-first web interface for [OpenCode](https://opencode.ai) AI agents. Manage
   <img src="images/ocmgr-mobile.webp" alt="Mobile view" class="hero hero-mobile" style="border: none" />
 </p>
 
+!!! warning "Requires OpenCode 2"
+    OpenCode Manager requires **OpenCode 2.x at 2.0.15 or newer** (bundled 2.0.15). OpenCode 1.x and 3.x are not supported. If you are upgrading from OpenCode 1.x, see the [v1 → v2 migration guide](https://opencode.ai/v2/docs/migrate-v1).
+
 ## Quick Start
 
 ```bash

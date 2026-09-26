@@ -53,7 +53,6 @@ interface ScheduleRunRow {
   run_branch: string | null
   commit_hash: string | null
   worktree_path: string | null
-  workspace_id: string | null
 }
 
 function parseSkillMetadata(raw: string | null) {
@@ -126,7 +125,6 @@ function rowToScheduleRun(row: ScheduleRunRow): ScheduleRun {
     runBranch: row.run_branch,
     commitHash: row.commit_hash,
     worktreePath: row.worktree_path,
-    workspaceId: row.workspace_id,
   })
 }
 
@@ -260,39 +258,25 @@ export interface ScheduleRunArtifact {
   status: ScheduleRunStatus
   runBranch: string | null
   worktreePath: string | null
-  workspaceId: string | null
 }
 
 export function listScheduleRunArtifactsByJob(db: Database, repoId: number, jobId: number): ScheduleRunArtifact[] {
   const rows = db
-    .prepare('SELECT id, status, run_branch, worktree_path, workspace_id FROM schedule_runs WHERE repo_id = ? AND job_id = ? ORDER BY id DESC')
-    .all(repoId, jobId) as { id: number; status: string; run_branch: string | null; worktree_path: string | null; workspace_id: string | null }[]
+    .prepare('SELECT id, status, run_branch, worktree_path FROM schedule_runs WHERE repo_id = ? AND job_id = ? ORDER BY id DESC')
+    .all(repoId, jobId) as { id: number; status: string; run_branch: string | null; worktree_path: string | null }[]
   return rows.map((row) => ({
     id: row.id,
     status: row.status as ScheduleRunStatus,
     runBranch: row.run_branch,
     worktreePath: row.worktree_path,
-    workspaceId: row.workspace_id,
   }))
 }
 
-export interface ActiveScheduleRunWorkspace {
-  worktreePath: string | null
-  workspaceId: string | null
-}
-
-/**
- * Returns the worktree directories and OpenCode workspace IDs of schedule runs
- * that still hold a live worktree/workspace (both columns are cleared to null
- * on finalize). Used to keep an in-progress run's isolated worktree out of the
- * deletable Sibling surface, since worktrees created via the OpenCode workspace
- * API live outside getScheduleWorktreesPath().
- */
-export function listActiveScheduleRunWorkspaces(db: Database): ActiveScheduleRunWorkspace[] {
+export function listActiveScheduleRunWorktreePaths(db: Database): string[] {
   const rows = db
-    .prepare('SELECT worktree_path, workspace_id FROM schedule_runs WHERE worktree_path IS NOT NULL OR workspace_id IS NOT NULL')
-    .all() as { worktree_path: string | null; workspace_id: string | null }[]
-  return rows.map((row) => ({ worktreePath: row.worktree_path, workspaceId: row.workspace_id }))
+    .prepare('SELECT worktree_path FROM schedule_runs WHERE worktree_path IS NOT NULL')
+    .all() as { worktree_path: string }[]
+  return rows.map((row) => row.worktree_path)
 }
 
 export function deleteScheduleRunById(db: Database, repoId: number, jobId: number, runId: number): boolean {
@@ -445,7 +429,7 @@ export function updateScheduleRunWorktree(
   repoId: number,
   jobId: number,
   runId: number,
-  input: { worktreePath?: string | null; runBranch?: string | null; commitHash?: string | null; workspaceId?: string | null },
+  input: { worktreePath?: string | null; runBranch?: string | null; commitHash?: string | null },
 ): ScheduleRun | null {
   const existing = getScheduleRunById(db, repoId, jobId, runId)
   if (!existing) {
@@ -454,7 +438,7 @@ export function updateScheduleRunWorktree(
 
   const stmt = db.prepare(`
     UPDATE schedule_runs
-    SET worktree_path = ?, run_branch = ?, commit_hash = ?, workspace_id = ?
+    SET worktree_path = ?, run_branch = ?, commit_hash = ?
     WHERE repo_id = ? AND job_id = ? AND id = ?
   `)
 
@@ -462,7 +446,6 @@ export function updateScheduleRunWorktree(
     input.worktreePath === undefined ? existing.worktreePath : input.worktreePath,
     input.runBranch === undefined ? existing.runBranch : input.runBranch,
     input.commitHash === undefined ? existing.commitHash : input.commitHash,
-    input.workspaceId === undefined ? existing.workspaceId : input.workspaceId,
     repoId,
     jobId,
     runId,
@@ -517,8 +500,7 @@ export function listScheduleRunsByJob(db: Database, repoId: number, jobId: numbe
       error_text,
       run_branch,
       commit_hash,
-      worktree_path,
-      workspace_id
+      worktree_path
     FROM schedule_runs
     WHERE repo_id = ? AND job_id = ?
     ORDER BY started_at DESC
@@ -642,7 +624,7 @@ export function listAllScheduleRuns(db: Database, options: ListAllRunsOptions = 
       sr.started_at, sr.finished_at, sr.created_at,
       sr.session_id, sr.session_title,
       NULL AS log_text, NULL AS response_text, sr.error_text,
-      sr.run_branch, sr.commit_hash, sr.worktree_path, sr.workspace_id,
+      sr.run_branch, sr.commit_hash, sr.worktree_path,
       sj.name AS job_name, r.local_path AS repo_path, r.name AS repo_name,
       r.repo_url AS repo_url, r.source_path AS repo_source_path
     FROM schedule_runs sr

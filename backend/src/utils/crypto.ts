@@ -5,12 +5,20 @@ const ENCRYPTION_KEY_SALT = Buffer.from('opencode-ssh-key-salt-v1', 'utf8')
 const IV_LENGTH = 16
 const KEY_LENGTH = 32
 
+let derivedKey: Buffer | undefined
+let derivedKeySecret: string | undefined
+
 function deriveKey(): Buffer {
   const secret = ENV.AUTH.SECRET
   if (!secret) {
     throw new Error('AUTH_SECRET must be configured for encryption')
   }
-  return scryptSync(secret, ENCRYPTION_KEY_SALT, KEY_LENGTH)
+  if (derivedKey && derivedKeySecret === secret) {
+    return derivedKey
+  }
+  derivedKey = scryptSync(secret, ENCRYPTION_KEY_SALT, KEY_LENGTH)
+  derivedKeySecret = secret
+  return derivedKey
 }
 
 export function encryptSecret(plaintext: string): string {

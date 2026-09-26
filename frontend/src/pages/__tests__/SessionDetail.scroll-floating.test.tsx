@@ -7,14 +7,13 @@ import { SessionDetail } from '../SessionDetail'
 
 const mocks = vi.hoisted(() => ({
   useSession: vi.fn(),
-  useMessages: vi.fn(),
+  useSessionTranscript: vi.fn(),
   useSSE: vi.fn(),
   useRepoActivity: vi.fn(),
   usePermissions: vi.fn(),
-  useQuestions: vi.fn(),
+  useForms: vi.fn(),
   useSSEHealth: vi.fn(),
   useConfig: vi.fn(),
-  useOpenCodeClient: vi.fn(),
   useSettings: vi.fn(),
   useSettingsDialog: vi.fn(),
   useMobile: vi.fn(),
@@ -41,15 +40,17 @@ vi.mock('@/config', () => ({
 
 vi.mock('@/hooks/useOpenCode', () => ({
   useSession: mocks.useSession,
-  useAbortSession: vi.fn(() => ({ mutate: vi.fn() })),
+  useInterruptSession: vi.fn(() => ({ mutate: vi.fn() })),
   useUpdateSession: vi.fn(() => ({ mutate: vi.fn() })),
   useCreateSession: vi.fn(() => ({ mutateAsync: vi.fn() })),
-  useMessages: mocks.useMessages,
   useConfig: mocks.useConfig,
   useSendPrompt: vi.fn(() => ({ mutate: vi.fn() })),
   useSendShell: vi.fn(() => ({ mutate: vi.fn() })),
   useAgents: vi.fn(() => ({ data: [] })),
-  useOpenCodeClient: mocks.useOpenCodeClient,
+}))
+
+vi.mock('@/hooks/useSessionTranscript', () => ({
+  useSessionTranscript: mocks.useSessionTranscript,
 }))
 
 vi.mock('@/hooks/useModelSelection', () => ({
@@ -128,7 +129,7 @@ vi.mock('@/contexts/EventContext', async (importOriginal) => {
   return {
     ...(actual as object),
     usePermissions: mocks.usePermissions,
-    useQuestions: mocks.useQuestions,
+    useForms: mocks.useForms,
     useSSEHealth: mocks.useSSEHealth,
   }
 })
@@ -148,10 +149,6 @@ vi.mock('@/api/repos', () => ({
   initializeAssistantMode: vi.fn(() => Promise.resolve({ directory: '/test/repo' })),
 }))
 
-vi.mock('@/components/model/ModelSelectDialog', () => ({
-  ModelSelectDialog: vi.fn(() => null),
-}))
-
 vi.mock('@/components/session/SessionList', () => ({
   SessionList: vi.fn(() => null),
 }))
@@ -168,10 +165,6 @@ vi.mock('@/components/repo/ResetPermissionsDialog', () => ({
   ResetPermissionsDialog: vi.fn(() => null),
 }))
 
-vi.mock('@/components/repo/RepoLspDialog', () => ({
-  RepoLspDialog: vi.fn(() => null),
-}))
-
 vi.mock('@/components/repo/RepoSkillsDialog', () => ({
   RepoSkillsDialog: vi.fn(() => null),
 }))
@@ -180,12 +173,12 @@ vi.mock('@/components/source-control', () => ({
   SourceControlPanel: vi.fn(() => null),
 }))
 
-vi.mock('@/components/session/QuestionPrompt', () => ({
-  QuestionPrompt: vi.fn(() => null),
+vi.mock('@/components/session/FormPrompt', () => ({
+  FormPrompt: vi.fn(() => null),
 }))
 
-vi.mock('@/components/session/MinimizedQuestionIndicator', () => ({
-  MinimizedQuestionIndicator: vi.fn(() => null),
+vi.mock('@/components/session/MinimizedFormIndicator', () => ({
+  MinimizedFormIndicator: vi.fn(() => null),
 }))
 
 vi.mock('@/components/notifications/PendingActionsGroup', () => ({
@@ -247,7 +240,14 @@ describe('SessionDetail scroll floating button', () => {
     mockScrollToBottom = vi.fn()
 
     mocks.useSession.mockReturnValue({ data: undefined, isLoading: false })
-    mocks.useMessages.mockReturnValue({ data: [], isLoading: false })
+    mocks.useSessionTranscript.mockReturnValue({
+      messages: [],
+      pending: [],
+      status: 'idle',
+      isLoading: false,
+      fetchOlder: vi.fn(),
+      hasOlder: false,
+    })
     mocks.useSSE.mockReturnValue({ isConnected: true, isReconnecting: false })
     mocks.useRepoActivity.mockReturnValue(undefined)
     mocks.usePermissions.mockReturnValue({
@@ -255,18 +255,17 @@ describe('SessionDetail scroll floating button', () => {
       hasPermissionsForSession: vi.fn(() => false),
       syncForSession: vi.fn(),
     })
-    mocks.useQuestions.mockReturnValue({
+    mocks.useForms.mockReturnValue({
       current: null,
       getForSession: vi.fn(() => null),
       pendingCount: 0,
-      hasQuestionsForSession: vi.fn(() => false),
+      hasFormsForSession: vi.fn(() => false),
       reply: vi.fn(),
-      reject: vi.fn(),
+      cancel: vi.fn(),
       syncForSession: vi.fn(),
     })
     mocks.useSSEHealth.mockReturnValue({ isHealthy: true })
     mocks.useConfig.mockReturnValue({ data: undefined, isLoading: false })
-    mocks.useOpenCodeClient.mockReturnValue({})
     mocks.useVisualViewport.mockReturnValue({ keyboardHeight: 0 })
     mocks.useKeyboardShortcuts.mockReturnValue({ leaderActive: false })
     mocks.useDialogParam.mockReturnValue([false, vi.fn()])
@@ -286,6 +285,14 @@ describe('SessionDetail scroll floating button', () => {
   }) => {
     mocks.useMobile.mockReturnValue(opts.mobile)
     mocks.useSessionStatusForSession.mockReturnValue({ type: opts.sessionActive ? 'busy' : 'idle' })
+    mocks.useSessionTranscript.mockReturnValue({
+      messages: [],
+      pending: [],
+      status: opts.sessionActive ? 'busy' : 'idle',
+      isLoading: false,
+      fetchOlder: vi.fn(),
+      hasOlder: false,
+    })
     mocks.useAutoScroll.mockImplementation(
       ({ onScrollStateChange }: { onScrollStateChange?: (v: boolean) => void }) => {
         if (opts.showScrollButton) {

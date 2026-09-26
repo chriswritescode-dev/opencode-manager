@@ -1,10 +1,9 @@
 import { useState, useRef, useEffect, useMemo, useImperativeHandle, forwardRef, memo, useCallback, type KeyboardEvent, type PointerEvent as ReactPointerEvent } from 'react'
-import { useSendPrompt, useAbortSession, useSendShell, useAgents } from '@/hooks/useOpenCode'
+import { useSendPrompt, useInterruptSession, useSendShell, useAgents } from '@/hooks/useOpenCode'
 import { useCommands } from '@/hooks/useCommands'
 import { useCommandHandler } from '@/hooks/useCommandHandler'
 import { useFileSearch } from '@/hooks/useFileSearch'
 import { useModelSelection } from '@/hooks/useModelSelection'
-import { useOpenCodeClient } from '@/hooks/useOpenCode'
 import { useVariants } from '@/hooks/useVariants'
 import { useSessionAgent } from '@/hooks/useSessionAgent'
 import { useSTT } from '@/hooks/useSTT'
@@ -27,14 +26,14 @@ import { SessionStatusIndicator } from '@/components/ui/session-status-indicator
 import { ModelQuickSelect } from '@/components/model/ModelQuickSelect'
 import { AgentQuickSelect } from '@/components/agent/AgentQuickSelect'
 import { VoiceStatusOverlay, type VoiceStatusOverlayState } from './VoiceStatusOverlay'
-import { detectMentionTrigger, parsePromptToParts, getFilename, filterAgentsByQuery } from '@/lib/promptParser'
+import { detectMentionTrigger, parsePromptToInput, getFilename, filterAgentsByQuery } from '@/lib/promptParser'
 import { randomId } from '@/lib/utils'
 import { showToast } from '@/lib/toast'
-import { formatModelName, getProviders } from '@/api/providers'
-import { useQuery } from '@tanstack/react-query'
+import { formatModelName } from '@/api/providers'
+import { useProviders } from '@/hooks/useProviders'
 
 
-import type { components } from '@/api/opencode-types'
+import type { CommandInfo, ModelRef } from '@opencode-manager/shared/opencode'
 import type { FileAttachmentInfo, ImageAttachment } from '@/api/types'
 
 const ACCEPTED_IMAGE_TYPES = ["image/png", "image/jpeg", "image/gif", "image/webp", "image/heic", "image/heif"]
@@ -55,8 +54,6 @@ const VOICE_SEND_SWIPE_DISARM_THRESHOLD = 8
 type VoiceButtonVariant = 'desktop' | 'mobile'
 
 
-type CommandType = components['schemas']['Command']
-
 export interface PromptInputHandle {
   setPromptValue: (value: string) => void
   clearPrompt: () => void
@@ -64,7 +61,6 @@ export interface PromptInputHandle {
 }
 
 interface PromptInputProps {
-  opcodeUrl: string
   directory?: string
   sessionID: string
   showScrollButton?: boolean
@@ -75,11 +71,12 @@ interface PromptInputProps {
   onShowHelpDialog?: () => void
   onToggleDetails?: () => boolean
   onExportSession?: () => void
+  onUndo?: () => void | Promise<void>
+  onRedo?: () => void | Promise<void>
   onPromptChange?: (hasContent: boolean) => void
 }
 
 export const PromptInput = memo(forwardRef<PromptInputHandle, PromptInputProps>(function PromptInput({ 
-  opcodeUrl,
   directory,
   sessionID,
   showScrollButton,
@@ -90,6 +87,8 @@ export const PromptInput = memo(forwardRef<PromptInputHandle, PromptInputProps>(
   onShowHelpDialog,
   onToggleDetails,
   onExportSession,
+  onUndo,
+  onRedo,
   onPromptChange
 }, ref) {
   const [prompt, setPrompt] = useState('')
@@ -104,7 +103,6 @@ export const PromptInput = memo(forwardRef<PromptInputHandle, PromptInputProps>(
   const [mentionRange, setMentionRange] = useState<{ start: number, end: number } | null>(null)
   const [selectedMentionIndex, setSelectedMentionIndex] = useState(0)
   const [selectedCommandIndex, setSelectedCommandIndex] = useState(0)
-  const [selectedAgent, setSelectedAgent] = useState<string | null>(null)
   const [localMode, setLocalMode] = useState<string | null>(null)
   const [isTogglingRecording, setIsTogglingRecording] = useState(false)
   const [isVoiceSwipeArmed, setIsVoiceSwipeArmed] = useState(false)
@@ -171,7 +169,6 @@ export const PromptInput = memo(forwardRef<PromptInputHandle, PromptInputProps>(
     setAttachedFiles(new Map())
     revokeBlobUrls(submittedImageAttachments)
     setImageAttachments([])
-    setSelectedAgent(null)
     clearSTT()
   }, [clearSTT])
 
@@ -199,7 +196,6 @@ export const PromptInput = memo(forwardRef<PromptInputHandle, PromptInputProps>(
       setAttachedFiles(new Map())
       revokeBlobUrls(imageAttachments)
       setImageAttachments([])
-      setSelectedAgent(null)
       resetVoiceGestureState()
       if (isRecording) {
         abortRecording()
@@ -212,34 +208,23 @@ export const PromptInput = memo(forwardRef<PromptInputHandle, PromptInputProps>(
       fileInputRef.current?.click()
     }
   }), [imageAttachments, clearSTT, isRecording, abortRecording, resetVoiceGestureState])
-  const sessionAgent = useSessionAgent(opcodeUrl, sessionID, directory)
+  const sessionAgent = useSessionAgent(sessionID, directory)
   const currentMode = localMode ?? sessionAgent.agent
   const setStoredAgent = useSessionAgentStore((s) => s.setAgent)
-  const sendPrompt = useSendPrompt(opcodeUrl, directory)
-  const sendShell = useSendShell(opcodeUrl, directory)
+  const sendPrompt = useSendPrompt(directory)
+  const sendShell = useSendShell(directory)
   const isPromptSubmitPending = sendPrompt.isPending || sendShell.isPending
-  const abortSession = useAbortSession(opcodeUrl, directory, sessionID)
-  const { filterCommands } = useCommands(opcodeUrl)
-  const { executeCommand } = useCommandHandler({
-    opcodeUrl,
-    sessionID,
-    directory,
-    onShowSessionsDialog,
-    onShowModelsDialog: undefined,
-    onShowHelpDialog,
-    onToggleDetails,
-    onExportSession,
-    currentAgent: currentMode
-  })
+  const interruptSession = useInterruptSession()
+  const { filterCommands } = useCommands({ directory })
   
   const { files: searchResults } = useFileSearch(
-    opcodeUrl,
     mentionQuery,
     showMentionSuggestions,
     directory
   )
   
-  const { data: agents = [] } = useAgents(opcodeUrl, directory)
+  const { data: agents = [] } = useAgents(directory)
+  const agentNames = useMemo(() => agents.map((agent) => agent.name), [agents])
   const failedPrompt = useSendErrorStore((state) => state.errors[sessionID]?.failedPrompt)
   const restoredFailedPromptRef = useRef<string | null>(null)
 
@@ -294,25 +279,26 @@ export const PromptInput = memo(forwardRef<PromptInputHandle, PromptInputProps>(
 
     if (isStreamingResponse) {
       onScrollToBottom()
-      const parts = parsePromptToParts(prompt, attachedFiles, imageAttachments)
-      const agentUsed = selectedAgent || currentMode
+      const parsed = parsePromptToInput(prompt, attachedFiles, agentNames, imageAttachments)
       const submittedPrompt = prompt
       const submittedAttachedFiles = attachedFiles
       const submittedImageAttachments = imageAttachments
       sendPrompt.mutate(
         {
           sessionID,
-          prompt: submittedPrompt,
-          parts,
-          model: currentModel,
-          agent: agentUsed,
-          variant: currentVariant,
+          text: parsed.text,
+          files: parsed.files,
+          agents: parsed.agents,
+          skills: parsed.skills,
+          model: modelRef,
+          agent: currentMode,
+          delivery: 'queue',
         },
         {
           onSuccess: () => clearSubmittedPrompt(submittedPrompt, submittedAttachedFiles, submittedImageAttachments)
         }
       )
-      setStoredAgent(sessionID, agentUsed)
+      setStoredAgent(sessionID, currentMode)
       if (model) {
         setStoredModel({ providerID: model.providerID, modelID: model.modelID })
       }
@@ -329,7 +315,6 @@ export const PromptInput = memo(forwardRef<PromptInputHandle, PromptInputProps>(
         {
           sessionID,
           command,
-          agent: currentMode
         },
         {
           onSuccess: () => {
@@ -352,15 +337,26 @@ export const PromptInput = memo(forwardRef<PromptInputHandle, PromptInputProps>(
       const command = filterCommands(commandName)[0]
       
       if (command) {
-        executeCommand(command, commandArgs?.trim() || '')
-        setPrompt('')
-        clearSTT()
+        const parsed = parsePromptToInput(commandArgs?.trim() || '', attachedFiles, agentNames, imageAttachments)
+        const submittedPrompt = prompt
+        const submittedAttachedFiles = attachedFiles
+        const submittedImageAttachments = imageAttachments
+
+        void executeCommand(command, {
+          text: parsed.text,
+          files: parsed.files,
+          agents: parsed.agents,
+          skills: parsed.skills,
+        }).then((shouldClear) => {
+          if (shouldClear) {
+            clearSubmittedPrompt(submittedPrompt, submittedAttachedFiles, submittedImageAttachments)
+          }
+        })
         return
       }
     }
 
-    const parts = parsePromptToParts(prompt, attachedFiles, imageAttachments)
-    const agentUsed = selectedAgent || currentMode
+    const parsed = parsePromptToInput(prompt, attachedFiles, agentNames, imageAttachments)
     const submittedPrompt = prompt
     const submittedAttachedFiles = attachedFiles
     const submittedImageAttachments = imageAttachments
@@ -374,11 +370,12 @@ export const PromptInput = memo(forwardRef<PromptInputHandle, PromptInputProps>(
     sendPrompt.mutate(
       {
         sessionID,
-        prompt: submittedPrompt,
-        parts,
-        model: currentModel,
-        agent: agentUsed,
-        variant: currentVariant
+        text: parsed.text,
+        files: parsed.files,
+        agents: parsed.agents,
+        skills: parsed.skills,
+        model: modelRef,
+        agent: currentMode,
       },
       {
         onSuccess: () => {
@@ -393,7 +390,7 @@ export const PromptInput = memo(forwardRef<PromptInputHandle, PromptInputProps>(
 
     onScrollToBottom()
 
-    setStoredAgent(sessionID, agentUsed)
+    setStoredAgent(sessionID, currentMode)
     if (model) {
       setStoredModel({ providerID: model.providerID, modelID: model.modelID })
     }
@@ -402,49 +399,32 @@ export const PromptInput = memo(forwardRef<PromptInputHandle, PromptInputProps>(
   handleSubmitRef.current = handleSubmit
 
   const handleStop = () => {
-    abortSession.mutate(sessionID)
+    interruptSession.mutate(sessionID)
   }
 
-  const handleCommandSelect = useCallback(async (command: CommandType) => {
+  const handleCommandSelect = useCallback(async (command: CommandInfo) => {
     if (!textareaRef.current) return
-    
+
     setShowSuggestions(false)
     setSuggestionQuery('')
-    
-    if (command.template) {
-      const cleanedTemplate = command.template
-        .replace(/\$ARGUMENTS/g, '')
-        .replace(/\$\d+/g, '')
-        .trim()
-      
-      setPrompt(cleanedTemplate)
-      
-      setTimeout(() => {
-        if (textareaRef.current) {
-          textareaRef.current.focus()
-          textareaRef.current.setSelectionRange(cleanedTemplate.length, cleanedTemplate.length)
-          textareaRef.current.scrollTop = textareaRef.current.scrollHeight
-        }
-      }, 0)
-    } else {
-      const cursorPosition = textareaRef.current.selectionStart
-      const commandMatch = prompt.slice(0, cursorPosition).match(/(^|\s)\/([a-zA-Z0-9_-]*)$/)
-      
-      const beforeCommand = commandMatch ? prompt.slice(0, commandMatch.index) : ''
-      const afterCommand = commandMatch ? prompt.slice(cursorPosition) : ''
-      const newPrompt = beforeCommand + '/' + command.name + ' ' + afterCommand
-      
-      setPrompt(newPrompt)
-      
-      setTimeout(() => {
-        if (textareaRef.current) {
-          const newCursorPos = beforeCommand.length + command.name.length + 2
-          textareaRef.current.focus()
-          textareaRef.current.setSelectionRange(newCursorPos, newCursorPos)
-          textareaRef.current.scrollTop = textareaRef.current.scrollHeight
-        }
-      }, 0)
-    }
+
+    const cursorPosition = textareaRef.current.selectionStart
+    const commandMatch = prompt.slice(0, cursorPosition).match(/(^|\s)\/([a-zA-Z0-9_-]*)$/)
+
+    const beforeCommand = commandMatch ? prompt.slice(0, commandMatch.index) : ''
+    const afterCommand = commandMatch ? prompt.slice(cursorPosition) : ''
+    const newPrompt = beforeCommand + '/' + command.name + ' ' + afterCommand
+
+    setPrompt(newPrompt)
+
+    setTimeout(() => {
+      if (textareaRef.current) {
+        const newCursorPos = beforeCommand.length + command.name.length + 2
+        textareaRef.current.focus()
+        textareaRef.current.setSelectionRange(newCursorPos, newCursorPos)
+        textareaRef.current.scrollTop = textareaRef.current.scrollHeight
+      }
+    }, 0)
   }, [prompt])
 
   useEffect(() => {
@@ -501,7 +481,6 @@ export const PromptInput = memo(forwardRef<PromptInputHandle, PromptInputProps>(
     if (item.type === 'agent') {
       const newPrompt = beforeMention + '@' + item.value + ' ' + afterMention
       setPrompt(newPrompt)
-      setSelectedAgent(item.value)
       
       setTimeout(() => {
         if (textareaRef.current) {
@@ -520,12 +499,12 @@ export const PromptInput = memo(forwardRef<PromptInputHandle, PromptInputProps>(
     setMentionRange(null)
   }
 
-  const handleAgentChange = (agentName: string) => {
-    setLocalMode(agentName)
-    setStoredAgent(sessionID, agentName)
-    const agent = agents.find(a => a.name === agentName)
+  const handleAgentChange = (agentId: string) => {
+    setLocalMode(agentId)
+    setStoredAgent(sessionID, agentId)
+    const agent = agents.find(a => a.id === agentId)
     if (agent?.model) {
-      setStoredModel({ providerID: agent.model.providerID, modelID: agent.model.modelID })
+      setStoredModel({ providerID: agent.model.providerID, modelID: agent.model.id })
     }
   }
 
@@ -1063,15 +1042,9 @@ if (isIOS && isSecureContext && navigator.clipboard && navigator.clipboard.read)
 
   const appliedSessionModelRef = useRef<string | undefined>(undefined)
 
-  const client = useOpenCodeClient(opcodeUrl, directory)
-  const { data: providersData } = useQuery({
-    queryKey: ['opencode', 'providers', opcodeUrl, directory],
-    queryFn: () => getProviders(directory),
-    enabled: !!client,
-    staleTime: 30000,
-  })
+  const { data: providersData } = useProviders(directory)
 
-  const { model, modelString, setModel: setStoredModel, restoreSessionModel } = useModelSelection(opcodeUrl, directory)
+  const { model, modelString, setModel: setStoredModel, restoreSessionModel } = useModelSelection(directory)
   const setStoreVariant = useModelStore((state) => state.setVariant)
   const clearStoreVariant = useModelStore((state) => state.clearVariant)
 
@@ -1109,7 +1082,26 @@ if (isIOS && isSecureContext && navigator.clipboard && navigator.clipboard.read)
   const isMobile = useMobile()
   const { setShowDialog, hasForSession: hasPermissionsForSession } = usePermissions()
   const hasPendingPermissionForSession = hasPermissionsForSession(sessionID)
-  const { hasVariants, currentVariant, cycleVariant } = useVariants(opcodeUrl, directory)
+  const { hasVariants, currentVariant, cycleVariant } = useVariants(directory)
+  const modelRef = useMemo<ModelRef | undefined>(
+    () => model
+      ? { providerID: model.providerID, id: model.modelID, ...(currentVariant ? { variant: currentVariant } : {}) }
+      : undefined,
+    [model, currentVariant],
+  )
+  const { executeCommand } = useCommandHandler({
+    sessionID,
+    directory,
+    model: modelRef,
+    currentAgent: currentMode,
+    onShowSessionsDialog,
+    onShowModelsDialog: undefined,
+    onShowHelpDialog,
+    onToggleDetails,
+    onExportSession,
+    onUndo,
+    onRedo
+  })
   const showStopButton = isSessionActive
   const hideSecondaryButtons = isMobile && isSessionActive
   const showMobileScrollButton = isMobile && showScrollButton
@@ -1310,7 +1302,6 @@ return (
           ) : (
             <>
               <AgentQuickSelect
-                opcodeUrl={opcodeUrl}
                 directory={directory}
                 currentAgent={currentMode}
                 onAgentChange={handleAgentChange}
@@ -1323,7 +1314,6 @@ return (
             ) : (
                !hideSecondaryButtons && (
                   <ModelQuickSelect
-                    opcodeUrl={opcodeUrl}
                     directory={directory}
                   >
 <button

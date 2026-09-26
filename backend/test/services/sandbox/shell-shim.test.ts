@@ -7,7 +7,6 @@ import { getReposPath } from '@opencode-manager/shared/config/env'
 import { WORKSPACE_SANDBOX_NAME } from '../../../src/services/sandbox/command'
 import {
   SANDBOX_FORWARDED_ENV_NAMES,
-  SANDBOX_SHELL_ENV_HOST_SHELL,
   SANDBOX_SHELL_ENV_WORKDIR,
 } from '../../../src/services/sandbox/shell-shim'
 
@@ -203,10 +202,11 @@ describe('sandbox shell shim', () => {
     }
   })
 
-  it('passes through to the host shell when the workdir env is unset and never invokes msb', async () => {
-    const fakeBin = mkdtempSync(path.join(tmpdir(), 'ocm-shim-passthrough-'))
+  it('refuses to run the payload and never invokes msb when the workdir env is unset', async () => {
+    const fakeBin = mkdtempSync(path.join(tmpdir(), 'ocm-shim-failclosed-'))
     const configHome = mkdtempSync(path.join(tmpdir(), 'ocm-shim-config-'))
     const msbCaptureFile = path.join(fakeBin, 'msb-invoked.txt')
+    const payloadFile = path.join(fakeBin, 'payload-ran.txt')
     const msbPath = path.join(fakeBin, 'msb')
     writeFileSync(msbPath, ['#!/bin/sh', `printf 'invoked' > "${msbCaptureFile}"`].join('\n'), { mode: 0o755 })
     const originalMsbPath = process.env.MSB_PATH
@@ -220,59 +220,11 @@ describe('sandbox shell shim', () => {
 
       const env: Record<string, string | undefined> = { ...process.env }
       delete env[SANDBOX_SHELL_ENV_WORKDIR]
-      delete env[SANDBOX_SHELL_ENV_HOST_SHELL]
-      const result = spawnSync(shimPath, ['-c', 'echo passthrough-ok'], { encoding: 'utf8', env })
-      expect(result.status).toBe(0)
-      expect(result.stdout).toBe('passthrough-ok\n')
+      const result = spawnSync(shimPath, ['-c', `touch ${payloadFile}`], { encoding: 'utf8', env })
+      expect(result.status).toBe(126)
+      expect(result.stderr).toContain('ocm-sandbox-shell: sandbox working directory missing; refusing to run on the host')
+      expect(existsSync(payloadFile)).toBe(false)
       expect(existsSync(msbCaptureFile)).toBe(false)
-    } finally {
-      if (originalMsbPath === undefined) {
-        delete process.env.MSB_PATH
-      } else {
-        process.env.MSB_PATH = originalMsbPath
-      }
-      rmSync(fakeBin, { recursive: true, force: true })
-      rmSync(configHome, { recursive: true, force: true })
-    }
-  })
-
-  it('lets OCM_SANDBOX_HOST_SHELL override the baked default host shell in the passthrough branch', async () => {
-    const fakeBin = mkdtempSync(path.join(tmpdir(), 'ocm-shim-hostshell-'))
-    const configHome = mkdtempSync(path.join(tmpdir(), 'ocm-shim-config-'))
-    const msbCaptureFile = path.join(fakeBin, 'msb-invoked.txt')
-    const msbPath = path.join(fakeBin, 'msb')
-    writeFileSync(msbPath, ['#!/bin/sh', `printf 'invoked' > "${msbCaptureFile}"`].join('\n'), { mode: 0o755 })
-    const fakeShellPath = path.join(fakeBin, 'custom-host-shell')
-    const shellCaptureFile = path.join(fakeBin, 'shell-argv.txt')
-    writeFileSync(
-      fakeShellPath,
-      [
-        '#!/bin/sh',
-        `printf '%s\\0' "$0" "$@" > "${shellCaptureFile}"`,
-        'sh "$@"',
-      ].join('\n'),
-      { mode: 0o755 },
-    )
-    const originalMsbPath = process.env.MSB_PATH
-    process.env.MSB_PATH = msbPath
-    try {
-      vi.resetModules()
-      const shimMod = await import('../../../src/services/sandbox/shell-shim')
-      const commandMod = await import('../../../src/services/sandbox/command')
-      commandMod.overrideSandboxExecutableTrustValidator(() => true)
-      const shimPath = await shimMod.ensureSandboxShellShim(configHome)
-
-      const env: Record<string, string | undefined> = { ...process.env, [SANDBOX_SHELL_ENV_HOST_SHELL]: fakeShellPath }
-      delete env[SANDBOX_SHELL_ENV_WORKDIR]
-      const command = 'echo custom-shell-ok'
-      const result = spawnSync(shimPath, ['-c', command], { encoding: 'utf8', env })
-      expect(result.status).toBe(0)
-      expect(result.stdout).toBe('custom-shell-ok\n')
-      expect(existsSync(msbCaptureFile)).toBe(false)
-
-      const shellArgv = readFileSync(shellCaptureFile, 'utf8').split('\0').filter((element) => element !== '')
-      expect(shellArgv[0]).toBe(fakeShellPath)
-      expect(shellArgv[shellArgv.indexOf('-c') + 1]).toBe(command)
     } finally {
       if (originalMsbPath === undefined) {
         delete process.env.MSB_PATH

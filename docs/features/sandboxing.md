@@ -1,10 +1,10 @@
 # Agent Sandboxing
 
-Run OpenCode agent `bash` tool commands inside an isolated microVM instead of directly in the Manager container. Sandboxing does not restrict trusted OpenCode configuration or extensions and is not a per-project permission boundary.
+Run OpenCode agent `shell` tool commands inside an isolated microVM instead of directly in the Manager container. Sandboxing does not restrict trusted OpenCode configuration or extensions and is not a per-project permission boundary.
 
 ## Overview
 
-When sandboxing is enabled, every command an OpenCode agent runs through the `bash` tool is executed inside a microVM managed by [`msb`](https://github.com/superradcompany/microsandbox). OpenCode itself continues to run in the Manager container and loads the same global and project configuration, providers, models, plugins, tools, MCP servers, formatters, LSP servers, hooks, and shell settings as it does with sandboxing disabled.
+When sandboxing is enabled, every command an OpenCode agent runs through the `shell` tool is executed inside a microVM managed by [`msb`](https://github.com/superradcompany/microsandbox). OpenCode itself continues to run in the Manager container and loads the same global and project configuration, providers, models, plugins, tools, MCP servers, formatters, LSP servers, hooks, and shell settings as it does with sandboxing disabled.
 
 The microVM sees repositories through bind mounts at the same paths used by the Manager. Agent commands therefore operate on the same files while running under a separate kernel without access to Manager configuration, provider credentials, or SSH keys.
 
@@ -12,46 +12,48 @@ The microVM sees repositories through bind mounts at the same paths used by the 
 
 | Execution path | Through the microVM |
 |----------------|---------------------|
-| Chat session `bash` tool calls | Yes |
-| Scheduled run `bash` tool calls | Yes |
-| Subagent `bash` tool calls | Yes |
-| WebUI `!command` shell mode (`POST /session/:id/shell`) | Yes; it carries a tool call id like the `bash` tool, so it is planned and routed into the microVM. It is not badged in the UI because the surface fires no `tool.execute.after` hook |
-| Slash-command shell templates (`` !`cmd` ``, `POST /session/:id/command`) | No; normal OpenCode behavior |
-| PTY terminals (`POST /pty`, `/pty/:id/connect`) | No; normal OpenCode behavior |
-| OpenCode file tools | No |
+| Chat session `shell` tool calls | Yes |
+| Scheduled run `shell` tool calls | Yes |
+| Subagent `shell` tool calls | Yes |
+| WebUI `!command` shell mode (`POST /api/session/:sessionID/shell`) | Yes; it spawns through the same `Shell.create` path as the `shell` tool, so it is planned and routed into the microVM. It is not badged in the UI because the surface fires no `tool.execute.after` hook |
+| Shell API (`POST /api/shell`) | Yes; it spawns through the same `Shell.create` path as the `shell` tool. It is not badged in the UI because the surface fires no `tool.execute.after` hook |
+| Slash-command shell templates (`` !`cmd` ``, `POST /api/session/:sessionID/command`) | No; OpenCode expands each interpolation itself with the configured shell, directly on the host and outside `Shell.create`, so the `create.before` hook never sees it |
+| PTY terminals (`POST /api/pty`, `POST /api/pty/:ptyID/connect`) | No; normal OpenCode behavior, with the user's configured shell |
+| OpenCode file tools | No; while enforcement is on they are denied the global configuration directory (see [Mounts and Secrets](#mounts-and-secrets)) |
 | Manager-side git operations | No |
 | Plugins and custom tools | No; normal OpenCode behavior |
 | The `ocm` tool (`ocm-manager.js`) | No; runs in the Manager's OpenCode process |
 | Local MCP servers | No; normal OpenCode behavior |
 | Formatters, LSP servers, and hooks | No; normal OpenCode behavior |
 | Custom provider modules | No; normal OpenCode behavior |
-| Explicit OpenCode `shell` configuration | Overridden while enforcement is on |
 
-The Manager generates a POSIX shell shim and points OpenCode's `shell` setting at it, so the agent `bash` tool spawns the shim instead of a host shell. The Manager-owned `ocm-sandbox.js` plugin pins that setting and, before each `bash` spawn, asks the Manager for the sandbox working directory and injects it as `OCM_SANDBOX_WORKDIR`. The shim routes the command into the microVM through `msb exec` whenever that variable is set. Both the pinned setting and the injected directory are locked and verified so a later plugin cannot silently restore host execution. If the sandbox cannot be prepared, the tool call fails instead of running on the host.
+OpenCode 2 routes the agent `shell` tool, WebUI `!command` shell mode, and the shell API through `Shell.create`, which triggers the `shell` domain `create.before` hook with a mutable `{ command, cwd, timeout, shell, env }` before spawning. The Manager-owned `ocm-sandbox.js` plugin registers that hook: while enforcement is on, it asks the Manager for the sandbox working directory and pins both the generated shim as the shell and that directory as `OCM_SANDBOX_WORKDIR` on the event. The event carries no tool call id, so every `Shell.create` spawn is sandboxed rather than only the ones with a tool call. PTY terminals and slash-command shell templates use separate paths and are not affected.
+
+Both pinned values are locked accessors, and the plugin verifies each lock, so a later plugin cannot silently restore host execution. The shim fails closed as well: without `OCM_SANDBOX_WORKDIR` it prints an error to stderr and exits 126 instead of running the command on the host. If the sandbox cannot be prepared, the spawn fails instead of running on the host.
 
 The command the agent wrote is never rewritten. It reaches `msb exec` as a single argument, so the recorded tool call, the permission rules, and the model's own context all keep the original command.
 
-Each sandboxed `bash` call is marked `sandbox` in its tool metadata, which the WebUI shows as a green badge on the tool call. Metadata is not sent to the model.
+Each sandboxed `shell` call is marked `sandbox` in its tool metadata, which the WebUI shows as a green badge on the tool call. Metadata is not sent to the model.
 
 ## OpenCode Configuration
 
 Sandbox enforcement does not sanitize, rewrite, filter, or replace OpenCode configuration files. Global and project configuration loads normally, configured plugins are installed normally, and config, MCP, and authentication API requests are forwarded unchanged.
 
-The single exception is the in-memory `shell` setting: while enforcement is on, the sandbox plugin pins it to the generated shim. No configuration file is modified. A shell the user configured is remembered and handed back to the shim for the surfaces that are not the agent `bash` tool.
+Enforcement does not change the configured `shell` setting. The plugin pins the shim per spawn instead, so the setting is left as the user configured it and the shell it names still applies to PTY terminals and to slash-command shell templates.
 
 Existing `.ocm-sandbox-backup` and `.ocm-quarantine` artifacts created by older releases are restored during startup and are no longer created.
 
-Configured extensions execute with OpenCode's normal host-process privileges. This includes plugins, custom tools, local MCP servers, formatters, LSP servers, hooks, custom provider modules, and explicit shell configuration. These are trusted configuration outside the agent `bash` isolation boundary.
+Configured extensions execute with OpenCode's normal host-process privileges. This includes plugins, custom tools, local MCP servers, formatters, LSP servers, hooks, custom provider modules, explicit shell configuration, and slash-command shell templates. These are trusted configuration outside the agent `shell` isolation boundary.
 
 ## Other Shell Surfaces
 
-Slash-command shell templates and PTY terminals follow OpenCode's normal host-process behavior during enforcement. WebUI `!command` shell mode **is** sandboxed: OpenCode builds a synthetic tool part for it and passes that part's call id to `shell.env`, so it is planned and routed into the microVM exactly like an agent `bash` call.
+WebUI `!command` shell mode and the shell API (`POST /api/shell`) **are** sandboxed: both spawn through the same `Shell.create` path as the `shell` tool, so they are planned and routed into the microVM.
 
-The unsandboxed surfaces also spawn the shim, because it is the configured shell, but no working directory is injected for them, so the shim passes the command straight through to the host shell. PTY terminals receive the user's configured shell; slash-command shell templates fire no `shell.env` hook at all and fall back to the shell the Manager resolved at startup rather than a login shell.
+PTY terminals follow OpenCode's normal host-process behavior during enforcement and use the user's configured shell. Slash-command shell templates are not sandboxed either: when a command template contains a `` !`cmd` `` interpolation, OpenCode resolves the configured shell and runs the command directly on the host before the resulting prompt is sent, without going through `Shell.create` or its `create.before` hook. That interpolation is trusted configuration outside the agent `shell` isolation boundary.
 
-The `shell.env` hook input carries only `{ cwd, sessionID?, callID? }`, so the presence of a call id is the only available discriminator. It separates session-attached shells (the `bash` tool and `!command` mode) from PTY creation, which has no session context. It cannot distinguish the `bash` tool from `!command` mode.
+There is no fallback to a host shell in the `Shell.create` path: the shim refuses to run without a pinned sandbox working directory, so a spawn whose plan, shim, or lock is unavailable is refused instead of running on the host.
 
-The OpenCode server binds to the configured `OPENCODE_HOST` regardless of enforcement, so the password guard for non-loopback hosts applies in both modes.
+The OpenCode server binds to the configured `OPENCODE_HOST` regardless of enforcement; OpenCode 2 always requires a password, so the managed server always starts with the password resolved by the Manager.
 
 ## Host Requirements
 
@@ -91,15 +93,15 @@ The microVM receives writable bind mounts for:
 |-----------|-------------------|
 | `/workspace/repos` | Project root |
 | `/workspace/schedule-worktrees` | Project root |
-| `/workspace/.opencode/state/opencode/worktree` | Project root: worktrees created through OpenCode's workspace API |
+| `/workspace/.opencode/state/opencode/worktree` | Project root: worktrees created through OpenCode's worktree API |
 | `/workspace/.opencode/state/opencode/forge/worktrees` | Project root: worktrees created by the opencode-forge plugin for its loops |
 | `/workspace/.opencode/state/opencode/tool-output` | Where OpenCode saves the full content of a truncated tool result before handing the agent that absolute path |
 | `/workspace/.config/opencode/skills` | Global skills, including the scripts and reference files a skill bundles and refers to by absolute path |
-| `/workspace/.opencode/tmp/opencode` | The temporary directory the `bash` tool description tells agents to use for work outside the workspace |
+| `/workspace/.opencode/tmp/opencode` | The temporary directory the `shell` tool description tells agents to use for work outside the workspace |
 
-Each is mounted at the identical guest path. That is the point: OpenCode hands the model absolute host paths, and the host-side `read`, `write`, and `glob` tools resolve them against the container. A path that is not mounted resolves for those tools but not for a sandboxed `bash` call, which is how an agent ends up searching for a file it was just told the exact location of.
+Each is mounted at the identical guest path. That is the point: OpenCode hands the model absolute host paths, and the host-side `read`, `write`, and `glob` tools resolve them against the container. A path that is not mounted resolves for those tools but not for a sandboxed `shell` call, which is how an agent ends up searching for a file it was just told the exact location of.
 
-Only the four project roots are accepted as working directories. The other three mounts are readable and writable but are never a valid working directory, so `bash` calls still have to run inside a repository or a worktree.
+Only the four project roots are accepted as working directories. The other three mounts are readable and writable but are never a valid working directory, so `shell` calls still have to run inside a repository or a worktree.
 
 No internal API token exists anywhere under the mounted roots. The token lives in the Manager's database and reaches the generated plugins only through the `OCM_INTERNAL_TOKEN` environment variable of the Manager's own OpenCode process, which is never part of the guest environment.
 
@@ -107,7 +109,7 @@ Because `localhost` inside the microVM is the guest rather than the Manager, and
 
 The microVM also mounts a runtime-owned tmpfs at `/tmp`. It is sized to one quarter of the microVM memory, clamped to 1-512 MiB, so agent commands get guest-only scratch space that is not backed by a host filesystem.
 
-The agent temporary directory is separate from that tmpfs. The Manager sets `TMPDIR=/workspace/.opencode/tmp` on the OpenCode child, which puts OpenCode's own temporary directory at `/workspace/.opencode/tmp/opencode` — the path its `bash` tool description advertises — so the same files are visible to sandboxed commands and to the host-side file tools. Everything else under `TMPDIR` (temporary files from host-side `git`, `gh`, and MCP servers) stays out of the guest. The Manager empties the mounted directory each time it starts the OpenCode child, matching the lifetime it had in the container's `/tmp`; it clears the contents rather than the directory itself, because replacing the directory would detach a running microVM's bind mount.
+The agent temporary directory is separate from that tmpfs. The Manager sets `TMPDIR=/workspace/.opencode/tmp` on the OpenCode child, which puts OpenCode's own temporary directory at `/workspace/.opencode/tmp/opencode` — the path its `shell` tool description advertises — so the same files are visible to sandboxed commands and to the host-side file tools. Everything else under `TMPDIR` (temporary files from host-side `git`, `gh`, and MCP servers) stays out of the guest. The Manager empties the mounted directory each time it starts the OpenCode child, matching the lifetime it had in the container's `/tmp`; it clears the contents rather than the directory itself, because replacing the directory would detach a running microVM's bind mount.
 
 The following remain outside the microVM:
 
@@ -115,11 +117,19 @@ The following remain outside the microVM:
 |-----------|----------|
 | `/workspace/config` | SSH configuration and known hosts |
 | `/workspace/.ssh-keys` | Repository SSH private keys |
-| `/workspace/.config/opencode/plugin`, `/workspace/.config/ocm` | Generated plugins and the shell shim — the enforcement mechanism itself |
+| `/workspace/.config/opencode/plugins`, `/workspace/.config/ocm` | Generated plugins and the shell shim — the enforcement mechanism itself |
 | `/workspace/.config/opencode` (except `skills`) | OpenCode configuration |
 | `/workspace/.opencode/state` (except `opencode/tool-output`, `opencode/worktree`, and `opencode/forge/worktrees`) | Provider and MCP credentials, the forge database |
 
 OpenCode's host process still reads these paths normally. They are omitted only from the agent command environment.
+
+The configuration directory also holds `service.json`, where the Manager writes the managed OpenCode server password for service mode. OpenCode's default agent permissions allow the host-side file tools to read the global configuration directory, and that password grants the full OpenCode API, including unsandboxed PTY terminals. While enforcement is on, `ocm-sandbox.js` therefore denies, through OpenCode's permission `evaluate` hook:
+
+- `read` of `service.json` itself;
+- `grep` and `glob` whose absolute search path is the configuration directory or one of its ancestors;
+- `external_directory` access to the configuration directory or one of its ancestors.
+
+As a consequence, the host-side file tools cannot read the top-level configuration files (`opencode.json`, `opencode.jsonc`, `service.json`) while enforcement is on; agents read and change the OpenCode configuration through the `ocm` tool instead. The `skills` subdirectory is unaffected.
 
 ## Enabling and Enforcement
 
@@ -127,8 +137,8 @@ OpenCode's host process still reads these paths normally. They are omitted only 
 2. Restart the OpenCode server when prompted.
 3. The Manager starts the new child with `OCM_SANDBOX_ENFORCED=true`.
 4. The Manager writes the shell shim next to the generated plugins and refuses to start an enforced server if it cannot.
-5. The sandbox plugin resolves each `bash` tool working directory through the internal planner and pins it for the shim.
-6. If capability detection, planning, boot, attestation, or working-directory pinning fails, the tool call fails instead of running on the host.
+5. The sandbox plugin resolves the `Shell.create` working directory through the internal planner and pins the shim and that directory for the spawn.
+6. If capability detection, planning, boot, attestation, or shell pinning fails, the spawn fails instead of running on the host.
 
 A directory outside the mounted roots fails with:
 
@@ -140,14 +150,14 @@ The enforcement stamp remains authoritative for the lifetime of the OpenCode chi
 
 ## Worktree Placement
 
-- Scheduled runs use worktrees under `/workspace/schedule-worktrees` when OpenCode's workspace API returns a path beneath unmounted state storage.
-- OpenCode's own workspace worktrees (`/workspace/.opencode/state/opencode/worktree`) and opencode-forge loop worktrees (`/workspace/.opencode/state/opencode/forge/worktrees`) are project roots, so agent `bash` calls run inside them without further configuration. Both live under OpenCode's data directory because the Manager sets `XDG_DATA_HOME=/workspace/.opencode/state`.
-- Any other worktree location outside the mounted roots is created normally; only a later agent `bash` call whose working directory is outside the mounts is refused by the planner.
+- Scheduled runs use raw git worktrees under `/workspace/schedule-worktrees`.
+- OpenCode's own worktrees (`/workspace/.opencode/state/opencode/worktree`, created through its `/api/worktree` API) and opencode-forge loop worktrees (`/workspace/.opencode/state/opencode/forge/worktrees`) are project roots, so agent `shell` calls run inside them without further configuration. Both live under OpenCode's data directory because the Manager sets `XDG_DATA_HOME=/workspace/.opencode/state`.
+- Any other worktree location outside the mounted roots is created normally; only a later agent `shell` call whose working directory is outside the mounts is refused by the planner.
 - External repositories symlinked into `/workspace/repos` remain outside the microVM because the link target is not mounted.
 
 ## Git Credentials in the Sandbox
 
-The guest environment is empty by default, so a sandboxed `git push`, `git pull`, or `gh` call has no credentials and fails to authenticate. This applies to agent `bash` calls and to WebUI `!command` shell mode alike, since both are routed into the microVM.
+The guest environment is empty by default, so a sandboxed `git push`, `git pull`, or `gh` call has no credentials and fails to authenticate. This applies to agent `shell` calls, WebUI `!command` shell mode, and the shell API alike, since all three are routed into the microVM.
 
 Forwarding is opt-in, off by default:
 
@@ -243,7 +253,7 @@ The Manager image itself carries the same Chromium runtime libraries, resolved b
 - With sandboxing enabled the image pull and microVM boot happen at Manager startup, so commands normally pay neither. A command that runs before the warm-up finishes waits on that same boot, bounded by `SANDBOX_START_TIMEOUT_MS`.
 - `SANDBOX_IMAGE` must contain every tool the agent expects to run.
 - `SANDBOX_EXEC_USER` must match the workspace owner so commands can write mounted files.
-- A `shell` the user configured does not apply to slash-command shell templates while enforcement is on, and is bypassed for `!command` shell mode because that surface is routed into the microVM.
+- A `shell` the user configured does not apply to the `shell` tool, `!command` shell mode, or the shell API while enforcement is on, because all three are routed into the microVM; PTY terminals and slash-command shell templates still use it.
 - Credentials injected into OpenCode's host shell environment are not forwarded into the microVM unless git credential forwarding is enabled; see [Git Credentials in the Sandbox](#git-credentials-in-the-sandbox).
 - Message parts recorded by older releases still hold the old `msb exec` wrapper; the WebUI unwraps them for display and still badges them.
-- Plugins and other configured host-process extensions are trusted and are not isolated by agent `bash` sandboxing.
+- Plugins and other configured host-process extensions are trusted and are not isolated by agent `shell` sandboxing.

@@ -1,56 +1,44 @@
 import { useEffect, useRef, useState, useCallback, useMemo } from 'react'
 import { useQueryClient } from '@tanstack/react-query'
-import { useOpenCodeClient } from './useOpenCode'
-import { invalidateSessionListCaches, invalidateSessionListCachesDebounced, messagesQueryKey } from '@/lib/queryInvalidation'
-import type { SSEEvent, MessageWithParts } from '@/api/types'
+import type { SessionInfo, V2Event } from '@opencode-manager/shared/opencode'
+import { invalidateSessionListCaches, invalidateSessionListCachesDebounced } from '@/lib/queryInvalidation'
 import { showToast } from '@/lib/toast'
-import { settingsApi } from '@/api/settings'
 import { useSessionStatus } from '@/stores/sessionStatusStore'
-import { useSessionTodos } from '@/stores/sessionTodosStore'
 import { useSendErrorStore } from '@/stores/sendErrorStore'
 import { openCodeEventStream } from '@/lib/opencode-event-stream'
 import type { EventStreamSubscription } from '@/lib/opencode-event-stream'
-import { parseOpenCodeError } from '@/lib/opencode-errors'
-import { createPartsBatcher } from '@/lib/partsBatcher'
+import { listActiveSessions } from '@/api/opencode'
 
 const STATUS_POLL_INTERVAL_MS = 5000
 
-const getEventDirectory = (event: SSEEvent): string | undefined => {
-  const directory = (event as { directory?: unknown }).directory
-  return typeof directory === 'string' ? directory : undefined
+type V2StreamEvent = V2Event & { directory?: string }
+
+const getEventDirectory = (event: V2StreamEvent): string | undefined => {
+  return typeof event.directory === 'string' ? event.directory : undefined
 }
 
-const handleRestartServer = async () => {
-  showToast.loading('Restarting OpenCode server...', {
-    id: 'restart-server',
-  })
-
-  try {
-    const result = await settingsApi.reloadOpenCodeConfig()
-    if (result.success) {
-      showToast.success(result.message || 'OpenCode server restarted', {
-        id: 'restart-server',
-        duration: 3000,
-      })
-      setTimeout(() => {
-        window.location.reload()
-      }, 2000)
-    } else {
-      showToast.error(result.message || 'Failed to restart OpenCode server', {
-        id: 'restart-server',
-        duration: 5000,
-      })
-    }
-  } catch (error) {
-    showToast.error(error instanceof Error ? error.message : 'Failed to restart OpenCode server', {
-      id: 'restart-server',
-      duration: 5000,
-    })
-  }
+const invalidateSessionQueryIfCached = (
+  queryClient: ReturnType<typeof useQueryClient>,
+  sessionID: string,
+) => {
+  const queryKey = ['opencode', 'session', sessionID]
+  if (queryClient.getQueryCache().findAll({ queryKey }).length === 0) return
+  queryClient.invalidateQueries({ queryKey })
 }
 
+const patchSessionIfCached = (
+  queryClient: ReturnType<typeof useQueryClient>,
+  sessionID: string,
+  patch: Partial<Pick<SessionInfo, 'model' | 'agent' | 'revert'>>,
+) => {
+  const queryKey = ['opencode', 'session', sessionID]
+  if (queryClient.getQueryCache().findAll({ queryKey }).length === 0) return
+  queryClient.setQueriesData<SessionInfo>({ queryKey }, (current) =>
+    current ? { ...current, ...patch } : current,
+  )
+}
 
-export const useSSE = (opcodeUrl: string | null | undefined, directory?: string | string[], currentSessionId?: string) => {
+export const useSSE = (directory?: string | string[], currentSessionId?: string) => {
   const directoriesList = useMemo(() => {
     if (!directory) return [] as string[]
     if (Array.isArray(directory)) return directory.filter(Boolean)
@@ -60,7 +48,6 @@ export const useSSE = (opcodeUrl: string | null | undefined, directory?: string 
   const primaryDirectory = directoriesList[0]
   // eslint-disable-next-line react-hooks/exhaustive-deps
   const directorySet = useMemo(() => new Set(directoriesList), [directoryKey])
-  const client = useOpenCodeClient(opcodeUrl, primaryDirectory)
   const queryClient = useQueryClient()
   const mountedRef = useRef(true)
   const sessionIdRef = useRef(currentSessionId)
@@ -72,25 +59,6 @@ export const useSSE = (opcodeUrl: string | null | undefined, directory?: string 
   const [isReconnecting, setIsReconnecting] = useState(false)
   const setSessionStatus = useSessionStatus((state) => state.setStatus)
   const replaceSessionStatuses = useSessionStatus((state) => state.replaceStatuses)
-  const setSessionTodos = useSessionTodos((state) => state.setTodos)
-  const batcherRef = useRef<ReturnType<typeof createPartsBatcher> | null>(null)
-
-  useEffect(() => {
-    if (!opcodeUrl) {
-      batcherRef.current?.destroy()
-      batcherRef.current = null
-      return
-    }
-
-    if (!batcherRef.current) {
-      batcherRef.current = createPartsBatcher(queryClient, opcodeUrl)
-    }
-
-    return () => {
-      batcherRef.current?.destroy()
-      batcherRef.current = null
-    }
-  }, [queryClient, opcodeUrl])
 
   const resolveCacheDirectory = useCallback(
     (eventDirectory: string | undefined): string | undefined => {
@@ -100,268 +68,101 @@ export const useSSE = (opcodeUrl: string | null | undefined, directory?: string 
     [directorySet, primaryDirectory],
   )
 
-  const handleSSEEvent = useCallback((event: SSEEvent) => {
+  const handleSSEEvent = useCallback((event: V2StreamEvent) => {
     const eventDirectory = getEventDirectory(event)
-    if (eventDirectory && directorySet.size > 0 && !directorySet.has(eventDirectory)) return
     const cacheDirectory = resolveCacheDirectory(eventDirectory)
+    if (eventDirectory && directorySet.size > 0 && cacheDirectory !== eventDirectory) return
 
     switch (event.type) {
       case 'session.created':
-      case 'session.updated':
-        if ('info' in event.properties) {
-          const session = event.properties.info
-          const sessionQueryKey = ['opencode', 'session', opcodeUrl, session.id, cacheDirectory]
-
-          queryClient.setQueryData(sessionQueryKey, session)
-          invalidateSessionListCachesDebounced(queryClient)
-          break
-        }
         invalidateSessionListCachesDebounced(queryClient)
+        invalidateSessionQueryIfCached(queryClient, event.data.sessionID)
+        break
+
+      case 'session.renamed':
+        invalidateSessionListCachesDebounced(queryClient)
+        invalidateSessionQueryIfCached(queryClient, event.data.sessionID)
+        break
+
+      case 'session.model.selected':
+        patchSessionIfCached(queryClient, event.data.sessionID, {
+          model: event.data.model,
+        })
+        break
+
+      case 'session.agent.selected':
+        patchSessionIfCached(queryClient, event.data.sessionID, {
+          agent: event.data.agent,
+        })
+        break
+
+      case 'session.revert.staged':
+        patchSessionIfCached(queryClient, event.data.sessionID, {
+          revert: event.data.revert,
+        })
+        break
+
+      case 'session.revert.cleared':
+      case 'session.revert.committed':
+        patchSessionIfCached(queryClient, event.data.sessionID, { revert: undefined })
         break
 
       case 'session.deleted':
-        invalidateSessionListCaches(queryClient, opcodeUrl)
-        if ('sessionID' in event.properties) {
-          queryClient.invalidateQueries({ 
-            queryKey: ['opencode', 'session', opcodeUrl, event.properties.sessionID, cacheDirectory] 
-          })
-        }
+        invalidateSessionListCaches(queryClient)
+        queryClient.removeQueries({ queryKey: ['opencode', 'session', event.data.sessionID] })
         break
 
-      case 'session.status': {
-        if (!('sessionID' in event.properties && 'status' in event.properties)) break
-        const { sessionID, status } = event.properties
-        setSessionStatus(sessionID, status)
+      case 'session.moved':
+        invalidateSessionListCachesDebounced(queryClient)
         break
-      }
 
-      case 'message.part.updated':
-      case 'messagev2.part.updated': {
-        if (!('part' in event.properties)) break
-        const { part } = event.properties
-        batcherRef.current?.queuePartUpdate(part.sessionID, part, cacheDirectory)
+      case 'session.status':
+        setSessionStatus(event.data.sessionID, event.data.status)
         break
-      }
 
-      case 'message.part.delta': {
-        if (!('sessionID' in event.properties && 'messageID' in event.properties && 'partID' in event.properties && 'field' in event.properties && 'delta' in event.properties)) break
-        const { sessionID, messageID, partID, field, delta } = event.properties
-        batcherRef.current?.queuePartDelta(sessionID, messageID, partID, field, delta, cacheDirectory)
+      case 'session.idle':
+        setSessionStatus(event.data.sessionID, { type: 'idle' })
+        useSendErrorStore.getState().clearNetworkError(event.data.sessionID)
         break
-      }
 
-      case 'message.updated':
-      case 'messagev2.updated': {
-        if (!('info' in event.properties)) break
-        
-        const { info } = event.properties
-        const sessionID = info.sessionID
-        useSendErrorStore.getState().clearNetworkError(sessionID)
-        if (info.role === 'user') {
-          useSendErrorStore.getState().clearQueuedPrompt(sessionID)
-        }
-
-        const queryKey = messagesQueryKey(opcodeUrl, sessionID, cacheDirectory)
-        const currentData = queryClient.getQueryData<MessageWithParts[]>(queryKey)
-        if (!currentData) {
-          queryClient.invalidateQueries({ queryKey })
-          return
-        }
-        
-        const messageExists = currentData.some(msgWithParts => msgWithParts.info.id === info.id)
-        
-        if (!messageExists) {
-          const filteredData = info.role === 'user' 
-            ? currentData.filter(msgWithParts => !msgWithParts.info.id.startsWith('optimistic_'))
-            : currentData
-          queryClient.setQueryData(queryKey, [...filteredData, { info, parts: [] }])
-        } else {
-          const updated = currentData.map(msgWithParts => {
-            if (msgWithParts.info.id !== info.id) return msgWithParts
-            return { ...msgWithParts, info: { ...info } }
-          })
-          queryClient.setQueryData(queryKey, updated)
-        }
-        
-        batcherRef.current?.flush({ sessionID, directory: cacheDirectory })
+      case 'session.execution.started':
+        setSessionStatus(event.data.sessionID, { type: 'busy' })
         break
-      }
 
-      case 'message.removed':
-      case 'messagev2.removed': {
-        if (!('sessionID' in event.properties && 'messageID' in event.properties)) break
-        
-        const { sessionID, messageID } = event.properties
-        
-        queryClient.setQueryData<MessageWithParts[]>(
-          messagesQueryKey(opcodeUrl, sessionID, cacheDirectory),
-          (old) => {
-            if (!old) return old
-            return old.filter(msgWithParts => msgWithParts.info.id !== messageID)
-          }
-        )
+      case 'session.execution.succeeded':
+      case 'session.execution.failed':
+      case 'session.execution.interrupted':
+        setSessionStatus(event.data.sessionID, { type: 'idle' })
+        invalidateSessionListCachesDebounced(queryClient)
         break
-      }
 
-      case 'message.part.removed':
-      case 'messagev2.part.removed': {
-        if (!('sessionID' in event.properties && 'messageID' in event.properties && 'partID' in event.properties)) break
-        
-        const { sessionID, messageID, partID } = event.properties
-        
-        batcherRef.current?.queuePartRemoval(sessionID, messageID, partID, cacheDirectory)
-        break
-      }
-
-      case 'session.compacted': {
-        if (!('sessionID' in event.properties)) break
-        
-        const { sessionID } = event.properties
-        setSessionStatus(sessionID, { type: 'idle' })
-        showToast.dismiss(`compact-${sessionID}`)
-        showToast.success('Session compacted')
-        queryClient.invalidateQueries({ 
-          queryKey: messagesQueryKey(opcodeUrl, sessionID, cacheDirectory) 
-        })
-        break
-      }
-
-      case 'session.idle': {
-        if (!('sessionID' in event.properties)) break
-        
-        const { sessionID } = event.properties
-        
-        setSessionStatus(sessionID, { type: 'idle' })
-        useSendErrorStore.getState().clearNetworkError(sessionID)
-        
-        batcherRef.current?.flush({ sessionID, directory: cacheDirectory })
-        
-        const queryKey = messagesQueryKey(opcodeUrl, sessionID, cacheDirectory)
-        const currentData = queryClient.getQueryData<MessageWithParts[]>(queryKey)
-        if (!currentData) {
-          queryClient.invalidateQueries({ queryKey })
-          break
-        }
-        
-        const now = Date.now()
-        const updated = currentData.map(msgWithParts => {
-          const msg = msgWithParts.info
-          if (msg.role !== 'assistant') return msgWithParts
-          
-          if ('completed' in msg.time && msg.time.completed) return msgWithParts
-          
-          const updatedParts = msgWithParts.parts.map(part => {
-            if (part.type !== 'tool') return part
-            if (part.state.status !== 'running' && part.state.status !== 'pending') return part
-            return {
-              ...part,
-              state: {
-                ...part.state,
-                status: 'completed' as const,
-                output: part.state.status === 'running' ? '[Session ended - output not captured]' : '[Tool was pending when session ended]',
-                title: part.state.status === 'running' ? (part.state as { title?: string }).title || '' : '',
-                metadata: (part.state as { metadata?: Record<string, unknown> }).metadata || {},
-                time: {
-                  start: (part.state as { time?: { start: number } }).time?.start || now,
-                  end: now
-                }
-              }
-            }
-          })
-          
-          return {
-            ...msgWithParts,
-            info: {
-              ...msg,
-              time: { ...msg.time, completed: now }
-            },
-            parts: updatedParts
-          }
-        })
-        
-        queryClient.setQueryData(queryKey, updated)
-        break
-      }
-
-      case 'todo.updated':
-        if ('sessionID' in event.properties && 'todos' in event.properties) {
-          const { sessionID, todos } = event.properties
-          setSessionTodos(sessionID, todos)
-          queryClient.invalidateQueries({ 
-            queryKey: ['opencode', 'todos', opcodeUrl, sessionID, cacheDirectory] 
-          })
-        }
+      case 'session.metadata.updated':
+      case 'session.usage.updated':
+        invalidateSessionListCachesDebounced(queryClient)
         break
 
       case 'installation.updated':
-        if ('version' in event.properties) {
-          showToast.success(`OpenCode updated to v${event.properties.version}`, {
-            description: 'The server has been successfully upgraded.',
-            duration: 5000,
-          })
-        }
-        break
-
-      case 'installation.update-available':
-        if ('version' in event.properties) {
-          showToast.info(`OpenCode v${event.properties.version} is available`, {
-            description: 'A new version is ready to install.',
-            action: {
-              label: 'Reload to Update',
-              onClick: handleRestartServer
-            },
-            duration: 10000,
-          })
-        }
-        break
-
-      case 'session.error': {
-        if (!('error' in event.properties)) break
-        const sessionID = 'sessionID' in event.properties ? event.properties.sessionID : undefined
-        const parsed = parseOpenCodeError(event.properties.error)
-        if (sessionID && parsed) {
-          useSendErrorStore.getState().failQueuedPrompt({
-            sessionID,
-            title: parsed.title,
-            message: parsed.message,
-          })
-        }
-        if (sessionID === currentSessionId) break
-        
-        const error = event.properties.error
-        if (error?.name === 'MessageAbortedError') break
-        
-        if (parsed) {
-          showToast.error(parsed.title, {
-            description: parsed.message,
-            duration: 2500,
-          })
-        }
-        break
-      }
-
-      case 'question.replied':
-      case 'question.rejected': {
-        if (!('sessionID' in event.properties)) break
-        const { sessionID } = event.properties
-        queryClient.invalidateQueries({ 
-          queryKey: messagesQueryKey(opcodeUrl, sessionID, cacheDirectory) 
+        showToast.success(`OpenCode updated to v${event.data.version}`, {
+          description: 'The server has been successfully upgraded.',
+          duration: 5000,
         })
         break
-      }
 
       default:
         break
     }
-  }, [queryClient, opcodeUrl, directorySet, resolveCacheDirectory, setSessionStatus, setSessionTodos, currentSessionId])
+  }, [queryClient, directorySet, resolveCacheDirectory, setSessionStatus])
 
   const fetchInitialData = useCallback(async () => {
-    if (!client || !primaryDirectory || !mountedRef.current) return
+    if (!primaryDirectory || !mountedRef.current) return
     const syncVersion = ++statusSyncVersionRef.current
-    
+
     try {
-      const statuses = await client.getSessionStatuses()
-      if (mountedRef.current && statusSyncVersionRef.current === syncVersion && statuses) {
+      const active = await listActiveSessions()
+      if (mountedRef.current && statusSyncVersionRef.current === syncVersion && active) {
+        const statuses = Object.fromEntries(
+          Object.keys(active).map((sessionID) => [sessionID, { type: 'busy' as const }]),
+        )
         replaceSessionStatuses(statuses)
       }
     } catch (err) {
@@ -369,37 +170,41 @@ export const useSSE = (opcodeUrl: string | null | undefined, directory?: string 
         throw err
       }
     }
-  }, [client, primaryDirectory, replaceSessionStatuses])
+  }, [primaryDirectory, replaceSessionStatuses])
 
   useEffect(() => {
-    if (!client || !primaryDirectory) return
+    if (!primaryDirectory) return
 
     const interval = setInterval(() => {
       void fetchInitialData().catch(() => undefined)
     }, STATUS_POLL_INTERVAL_MS)
 
     return () => clearInterval(interval)
-  }, [client, primaryDirectory, fetchInitialData])
+  }, [primaryDirectory, fetchInitialData])
+
+  const refreshCurrentSession = useCallback(() => {
+    const sessionId = sessionIdRef.current
+    if (!sessionId || !primaryDirectory) return
+
+    queryClient.invalidateQueries({
+      queryKey: ['opencode', 'session', sessionId, primaryDirectory],
+    })
+  }, [queryClient, primaryDirectory])
 
   const syncCurrentSession = useCallback(() => {
     const sessionId = sessionIdRef.current
-    if (!sessionId || !opcodeUrl || !primaryDirectory) return
+    if (!sessionId || !primaryDirectory) return
 
+    refreshCurrentSession()
     queryClient.invalidateQueries({
-      queryKey: ['opencode', 'session', opcodeUrl, sessionId, primaryDirectory],
+      queryKey: ['opencode', 'pending-actions', sessionId, primaryDirectory],
     })
-    queryClient.invalidateQueries({
-      queryKey: messagesQueryKey(opcodeUrl, sessionId, primaryDirectory),
-    })
-    queryClient.invalidateQueries({
-      queryKey: ['opencode', 'pending-actions', opcodeUrl, sessionId, primaryDirectory],
-    })
-  }, [queryClient, opcodeUrl, primaryDirectory])
+  }, [queryClient, primaryDirectory, refreshCurrentSession])
 
   useEffect(() => {
     mountedRef.current = true
     
-    if (!opcodeUrl || directoriesList.length === 0) {
+    if (directoriesList.length === 0) {
       statusSyncVersionRef.current += 1
       setIsConnected(false)
       setIsReconnecting(false)
@@ -408,7 +213,7 @@ export const useSSE = (opcodeUrl: string | null | undefined, directory?: string 
 
     const handleMessage = (data: unknown) => {
       if (data && typeof data === 'object' && 'type' in data) {
-        handleSSEEvent(data as SSEEvent)
+        handleSSEEvent(data as V2StreamEvent)
       }
     }
 
@@ -427,10 +232,17 @@ export const useSSE = (opcodeUrl: string | null | undefined, directory?: string 
       }
     }
 
+    const handleResync = () => {
+      if (!mountedRef.current) return
+      invalidateSessionListCaches(queryClient)
+      refreshCurrentSession()
+    }
+
     const subscription = openCodeEventStream.subscribeGlobalMonitor({
       directories: directoriesList,
       onEvent: handleMessage,
       onStatusChange: handleStatusChange,
+      onResync: handleResync,
     })
     eventStreamSubscriptionRef.current = subscription
 
@@ -458,7 +270,7 @@ export const useSSE = (opcodeUrl: string | null | undefined, directory?: string 
         eventStreamSubscriptionRef.current = null
       }
     }
-  }, [opcodeUrl, directoryKey, directoriesList, handleSSEEvent, fetchInitialData, syncCurrentSession])
+  }, [directoryKey, directoriesList, handleSSEEvent, fetchInitialData, syncCurrentSession, refreshCurrentSession, queryClient])
 
   useEffect(() => {
     if (isConnected && document.visibilityState === 'visible') {

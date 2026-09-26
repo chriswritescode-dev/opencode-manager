@@ -15,13 +15,13 @@ export function useDeleteRepoWorkspaces(repoId: number | undefined) {
   const queryClient = useQueryClient()
 
   return useMutation({
-    mutationFn: async (workspaceIds: string[]) => {
+    mutationFn: async (directories: string[]) => {
       if (!repoId) throw new Error('Repo id is required')
       const results = await Promise.allSettled(
-        workspaceIds.map((workspaceId) => deleteRepoWorkspace(repoId, workspaceId)),
+        directories.map((directory) => deleteRepoWorkspace(repoId, directory)),
       )
       const failed = results.filter((result) => result.status === 'rejected').length
-      return { total: workspaceIds.length, failed }
+      return { total: directories.length, failed }
     },
     onSuccess: ({ total, failed }) => {
       queryClient.invalidateQueries({ queryKey: ['repo', 'siblings', repoId] })

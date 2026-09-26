@@ -28,9 +28,7 @@ const stubGitAuthService = {
   getGitCredentials: async () => [],
 } as unknown as GitAuthService
 
-function createTestApp(db: Database, openCodeClient: OpenCodeClient = createStubOpenCodeClient({
-  getJson: mock(async () => []) as any,
-})): Hono {
+function createTestApp(db: Database, openCodeClient: OpenCodeClient = createStubOpenCodeClient()): Hono {
   const app = new Hono()
   const scheduleService = {
     createSchedule: () => {},
@@ -90,71 +88,54 @@ describe('GET /api/repos/:id/siblings', () => {
     expect(data.map((d) => d.id).sort((a, b) => a - b)).toEqual([1, 2, 3])
   })
 
-  it('includes OpenCode workspaces that are not manager repo rows', async () => {
+  it('includes OpenCode worktrees that are not manager repo rows', async () => {
     mock.module('../services/project-id-resolver', () => ({
       resolveProjectId: (() => Promise.resolve('commit-A')) as any,
       isGitMainCheckout: (() => Promise.resolve(false)) as any,
     }))
 
     createRepo(db, { localPath: 'repo-a', defaultBranch: 'main', cloneStatus: 'ready', clonedAt: Date.now(), isLocal: true })
-    app = createTestApp(db, createStubOpenCodeClient({
-      getJson: mock(async () => ([{
-        id: 'wrk_test',
-        type: 'worktree',
-        name: 'plugin-workspace',
-        branch: 'plugin-branch',
-        directory: '/tmp/plugin-workspace',
-        projectID: 'commit-A',
-      }])) as any,
-    }))
+    const client = createStubOpenCodeClient()
+    client.api.worktree.list = mock(async () => ([{
+      directory: '/tmp/plugin-workspace',
+      strategy: 'plugin-strategy',
+    }])) as any
+    app = createTestApp(db, client)
 
     const res = await app.request('/repos/1/siblings')
     expect(res.status).toBe(200)
-    const data = await res.json() as Array<{ id: number; workspaceId?: string; currentBranch?: string }>
+    const data = await res.json() as Array<{ id: number; fullPath?: string; localPath?: string; worktreeStrategy?: string; currentBranch?: string }>
     expect(data).toHaveLength(2)
     expect(data[1]).toMatchObject({
       id: -1,
-      workspaceId: 'wrk_test',
-      currentBranch: 'plugin-branch',
+      fullPath: '/tmp/plugin-workspace',
+      localPath: 'plugin-workspace',
+      worktreeStrategy: 'plugin-strategy',
     })
+    expect(data[1]?.currentBranch).toBeUndefined()
   })
 
-  it('deduplicates OpenCode workspaces with the same directory', async () => {
+  it('deduplicates OpenCode worktrees with the same directory', async () => {
     mock.module('../services/project-id-resolver', () => ({
       resolveProjectId: (() => Promise.resolve('commit-A')) as any,
       isGitMainCheckout: (() => Promise.resolve(false)) as any,
     }))
 
     createRepo(db, { localPath: 'repo-a', defaultBranch: 'main', cloneStatus: 'ready', clonedAt: Date.now(), isLocal: true })
-    app = createTestApp(db, createStubOpenCodeClient({
-      getJson: mock(async () => ([
-        {
-          id: 'wrk_first',
-          type: 'worktree',
-          name: 'duplicate-workspace',
-          branch: 'duplicate-branch',
-          directory: '/tmp/duplicate-workspace',
-          projectID: 'commit-A',
-        },
-        {
-          id: 'wrk_second',
-          type: 'worktree',
-          name: 'duplicate-workspace',
-          branch: 'duplicate-branch',
-          directory: '/tmp/duplicate-workspace/',
-          projectID: 'commit-A',
-        },
-      ])) as any,
-    }))
+    const client = createStubOpenCodeClient()
+    client.api.worktree.list = mock(async () => ([
+      { directory: '/tmp/duplicate-workspace', strategy: 'git' },
+      { directory: '/tmp/duplicate-workspace/', strategy: 'git' },
+    ])) as any
+    app = createTestApp(db, client)
 
     const res = await app.request('/repos/1/siblings')
     expect(res.status).toBe(200)
-    const data = await res.json() as Array<{ workspaceId?: string }>
-    expect(data.filter((entry) => entry.workspaceId)).toHaveLength(1)
-    expect(data.some((entry) => entry.workspaceId === 'wrk_first')).toBe(true)
+    const data = await res.json() as Array<{ worktreeStrategy?: string }>
+    expect(data.filter((entry) => entry.worktreeStrategy !== undefined)).toHaveLength(1)
   })
 
-  it('excludes a workspace pointing at the repo directory so it cannot be deleted', async () => {
+  it('excludes a worktree pointing at the repo directory so it cannot be deleted', async () => {
     mock.module('../services/project-id-resolver', () => ({
       resolveProjectId: (() => Promise.resolve('commit-A')) as any,
       isGitMainCheckout: (() => Promise.resolve(false)) as any,
@@ -162,25 +143,21 @@ describe('GET /api/repos/:id/siblings', () => {
 
     createRepo(db, { localPath: 'repo-a', defaultBranch: 'main', cloneStatus: 'ready', clonedAt: Date.now(), isLocal: true })
     const repoDirectory = path.join(getReposPath(), 'repo-a')
-    app = createTestApp(db, createStubOpenCodeClient({
-      getJson: mock(async () => ([{
-        id: 'wrk_self',
-        type: 'worktree',
-        name: 'self-workspace',
-        branch: 'main',
-        directory: `${repoDirectory}/`,
-        projectID: 'commit-A',
-      }])) as any,
-    }))
+    const client = createStubOpenCodeClient()
+    client.api.worktree.list = mock(async () => ([{
+      directory: `${repoDirectory}/`,
+      strategy: 'git',
+    }])) as any
+    app = createTestApp(db, client)
 
     const res = await app.request('/repos/1/siblings')
     expect(res.status).toBe(200)
-    const data = await res.json() as Array<{ id: number; workspaceId?: string }>
+    const data = await res.json() as Array<{ id: number; worktreeStrategy?: string }>
     expect(data).toHaveLength(1)
-    expect(data.some((d) => d.workspaceId === 'wrk_self')).toBe(false)
+    expect(data.some((d) => d.worktreeStrategy !== undefined)).toBe(false)
   })
 
-  it('excludes a workspace that is a git main checkout so the main repo cannot be deleted', async () => {
+  it('excludes a worktree that is a git main checkout so the main repo cannot be deleted', async () => {
     mock.module('../services/project-id-resolver', () => ({
       resolveProjectId: (() => Promise.resolve('commit-A')) as any,
       isGitMainCheckout: ((dir: string) =>
@@ -188,32 +165,18 @@ describe('GET /api/repos/:id/siblings', () => {
     }))
 
     createRepo(db, { localPath: 'repo-wt', defaultBranch: 'main', cloneStatus: 'ready', clonedAt: Date.now(), isLocal: true })
-    app = createTestApp(db, createStubOpenCodeClient({
-      getJson: mock(async () => ([
-        {
-          id: 'wrk_main',
-          type: 'worktree',
-          name: 'main-checkout',
-          branch: 'dev',
-          directory: '/Users/dev/main-repo',
-          projectID: 'commit-A',
-        },
-        {
-          id: 'wrk_linked',
-          type: 'worktree',
-          name: 'feature',
-          branch: 'feature/x',
-          directory: '/Users/dev/worktrees/feature-x',
-          projectID: 'commit-A',
-        },
-      ])) as any,
-    }))
+    const client = createStubOpenCodeClient()
+    client.api.worktree.list = mock(async () => ([
+      { directory: '/Users/dev/main-repo', strategy: 'git' },
+      { directory: '/Users/dev/worktrees/feature-x', strategy: 'git' },
+    ])) as any
+    app = createTestApp(db, client)
 
     const res = await app.request('/repos/1/siblings')
     expect(res.status).toBe(200)
-    const data = await res.json() as Array<{ workspaceId?: string }>
-    expect(data.some((d) => d.workspaceId === 'wrk_main')).toBe(false)
-    expect(data.some((d) => d.workspaceId === 'wrk_linked')).toBe(true)
+    const data = await res.json() as Array<{ worktreeStrategy?: string; fullPath?: string }>
+    expect(data.some((d) => d.fullPath === '/Users/dev/main-repo')).toBe(false)
+    expect(data.some((d) => d.fullPath === '/Users/dev/worktrees/feature-x')).toBe(true)
   })
 
   it('excludes repos with non-matching projectID', async () => {
@@ -286,39 +249,44 @@ describe('GET /api/repos/:id/siblings', () => {
   })
 })
 
-describe('DELETE /api/repos/:id/workspaces/:workspaceId', () => {
+describe('DELETE /api/repos/:id/workspaces', () => {
   let db: Database
-  let captured: { path: string; directory?: string } | null
 
   beforeEach(() => {
     db = createTestDb()
-    captured = null
   })
 
   afterEach(() => {
     db.close()
   })
 
-  it('forwards workspace delete to OpenCode with repo directory', async () => {
-    createRepo(db, { localPath: 'repo-a', defaultBranch: 'main', cloneStatus: 'ready', clonedAt: Date.now(), isLocal: true })
-    const forward = mock(async (req: Parameters<OpenCodeClient['forward']>[0]) => {
-      captured = { path: req.path, directory: req.directory }
-      return new Response(JSON.stringify({ id: 'wrk_test' }), { status: 200 })
-    })
-    const app = createTestApp(db, createStubOpenCodeClient({
-      forward,
+  it('removes a worktree sibling of the repo', async () => {
+    mock.module('../services/project-id-resolver', () => ({
+      resolveProjectId: (() => Promise.resolve('commit-A')) as any,
+      isGitMainCheckout: (() => Promise.resolve(false)) as any,
     }))
 
-    const res = await app.request('/repos/1/workspaces/wrk_test', { method: 'DELETE' })
+    createRepo(db, { localPath: 'repo-a', defaultBranch: 'main', cloneStatus: 'ready', clonedAt: Date.now(), isLocal: true })
+    const remove = mock(async () => undefined)
+    const client = createStubOpenCodeClient()
+    client.api.worktree.list = mock(async () => ([{ directory: '/tmp/worktree-one', strategy: 'git' }])) as any
+    client.api.worktree.remove = remove as any
+    const app = createTestApp(db, client)
+
+    const res = await app.request('/repos/1/workspaces', {
+      method: 'DELETE',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ directory: '/tmp/worktree-one' }),
+    })
 
     expect(res.status).toBe(200)
-    expect(captured?.path).toBe('/experimental/workspace/wrk_test')
-    expect(captured?.directory?.endsWith('/repos/repo-a')).toBe(true)
+    expect(await res.json()).toEqual({ success: true })
+    expect(remove).toHaveBeenCalledWith({ projectID: 'commit-A', directory: '/tmp/worktree-one', force: true })
   })
 
   it('returns 400 for a non-numeric repo id', async () => {
     const app = createTestApp(db)
-    const res = await app.request('/repos/abc/workspaces/wrk_test', { method: 'DELETE' })
+    const res = await app.request('/repos/abc/workspaces', { method: 'DELETE' })
 
     expect(res.status).toBe(400)
   })
@@ -326,36 +294,121 @@ describe('DELETE /api/repos/:id/workspaces/:workspaceId', () => {
   it('returns 404 when the repo is missing or not ready', async () => {
     const app = createTestApp(db)
 
-    const missing = await app.request('/repos/1/workspaces/wrk_test', { method: 'DELETE' })
+    const missing = await app.request('/repos/1/workspaces', { method: 'DELETE' })
     expect(missing.status).toBe(404)
 
     createRepo(db, { localPath: 'repo-a', defaultBranch: 'main', cloneStatus: 'cloning', clonedAt: Date.now(), isLocal: true })
-    const notReady = await app.request('/repos/1/workspaces/wrk_test', { method: 'DELETE' })
+    const notReady = await app.request('/repos/1/workspaces', { method: 'DELETE' })
     expect(notReady.status).toBe(404)
   })
 
-  it('returns 400 for an invalid workspace id', async () => {
+  it('returns 400 when the body has no directory', async () => {
     createRepo(db, { localPath: 'repo-a', defaultBranch: 'main', cloneStatus: 'ready', clonedAt: Date.now(), isLocal: true })
     const app = createTestApp(db)
-    const res = await app.request('/repos/1/workspaces/bad-id', { method: 'DELETE' })
-
-    expect(res.status).toBe(400)
-  })
-
-  it('forwards an upstream error status', async () => {
-    createRepo(db, { localPath: 'repo-a', defaultBranch: 'main', cloneStatus: 'ready', clonedAt: Date.now(), isLocal: true })
-    const app = createTestApp(db, createStubOpenCodeClient({
-      forward: mock(async () => new Response('bad request', { status: 400 })) as any,
-    }))
-    const res = await app.request('/repos/1/workspaces/wrk_test', { method: 'DELETE' })
+    const res = await app.request('/repos/1/workspaces', { method: 'DELETE' })
 
     expect(res.status).toBe(400)
     const data = await res.json() as { error: string }
-    expect(data.error).toBe('bad request')
+    expect(data.error).toBe('directory is required')
+  })
+
+  it('returns 400 for null, primitive, and array JSON bodies without calling worktree removal', async () => {
+    createRepo(db, { localPath: 'repo-a', defaultBranch: 'main', cloneStatus: 'ready', clonedAt: Date.now(), isLocal: true })
+    const remove = mock(async () => undefined)
+    const client = createStubOpenCodeClient()
+    client.api.worktree.remove = remove as any
+    const app = createTestApp(db, client)
+
+    for (const body of ['null', '42', '"directory"', '[]']) {
+      const res = await app.request('/repos/1/workspaces', {
+        method: 'DELETE',
+        headers: { 'Content-Type': 'application/json' },
+        body,
+      })
+
+      expect(res.status).toBe(400)
+      const data = await res.json() as { error: string }
+      expect(data.error).toBe('directory is required')
+    }
+
+    expect(remove).not.toHaveBeenCalled()
+  })
+
+  it('returns 400 when directory is missing or not a nonempty string', async () => {
+    createRepo(db, { localPath: 'repo-a', defaultBranch: 'main', cloneStatus: 'ready', clonedAt: Date.now(), isLocal: true })
+    const remove = mock(async () => undefined)
+    const client = createStubOpenCodeClient()
+    client.api.worktree.remove = remove as any
+    const app = createTestApp(db, client)
+
+    for (const body of ['{}', '{"directory":42}', '{"directory":""}', '{"directory":"   "}']) {
+      const res = await app.request('/repos/1/workspaces', {
+        method: 'DELETE',
+        headers: { 'Content-Type': 'application/json' },
+        body,
+      })
+
+      expect(res.status).toBe(400)
+      const data = await res.json() as { error: string }
+      expect(data.error).toBe('directory is required')
+    }
+
+    expect(remove).not.toHaveBeenCalled()
+  })
+
+  it('returns 400 when the directory is not a deletable worktree sibling', async () => {
+    mock.module('../services/project-id-resolver', () => ({
+      resolveProjectId: (() => Promise.resolve('commit-A')) as any,
+      isGitMainCheckout: (() => Promise.resolve(false)) as any,
+    }))
+
+    createRepo(db, { localPath: 'repo-a', defaultBranch: 'main', cloneStatus: 'ready', clonedAt: Date.now(), isLocal: true })
+    const client = createStubOpenCodeClient()
+    client.api.worktree.list = mock(async () => ([{ directory: '/tmp/other-worktree', strategy: 'git' }])) as any
+    const app = createTestApp(db, client)
+
+    const res = await app.request('/repos/1/workspaces', {
+      method: 'DELETE',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ directory: '/tmp/unknown-worktree' }),
+    })
+
+    expect(res.status).toBe(400)
+    const data = await res.json() as { error: string }
+    expect(data.error).toBe('Not a deletable worktree of this repo')
+  })
+
+  it('returns 409 with the worktree error message', async () => {
+    mock.module('../services/project-id-resolver', () => ({
+      resolveProjectId: (() => Promise.resolve('commit-A')) as any,
+      isGitMainCheckout: (() => Promise.resolve(false)) as any,
+    }))
+
+    createRepo(db, { localPath: 'repo-a', defaultBranch: 'main', cloneStatus: 'ready', clonedAt: Date.now(), isLocal: true })
+    const client = createStubOpenCodeClient()
+    client.api.worktree.list = mock(async () => ([{ directory: '/tmp/worktree-one', strategy: 'git' }])) as any
+    client.api.worktree.remove = mock(async () => {
+      throw Object.assign(new Error('cannot remove'), { name: 'WorktreeError', data: { message: 'cannot remove' } })
+    }) as any
+    const app = createTestApp(db, client)
+
+    const res = await app.request('/repos/1/workspaces', {
+      method: 'DELETE',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ directory: '/tmp/worktree-one' }),
+    })
+
+    expect(res.status).toBe(409)
+    const data = await res.json() as { error: string }
+    expect(data.error).toBe('cannot remove')
   })
 
   it('returns 500 when reading the repo throws', async () => {
-    const res = await createTestApp(createThrowingDb()).request('/repos/1/workspaces/wrk_test', { method: 'DELETE' })
+    const res = await createTestApp(createThrowingDb()).request('/repos/1/workspaces', {
+      method: 'DELETE',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ directory: '/tmp/worktree-one' }),
+    })
 
     expect(res.status).toBe(500)
   })
@@ -363,34 +416,27 @@ describe('DELETE /api/repos/:id/workspaces/:workspaceId', () => {
 
 describe('POST /api/repos/:id/workspaces', () => {
   let db: Database
-  let captured: { path: string; directory?: string; body?: string } | null
 
   beforeEach(() => {
     db = createTestDb()
-    captured = null
   })
 
   afterEach(() => {
     db.close()
   })
 
-  it('forwards workspace creation to OpenCode with repo directory', async () => {
+  it('creates a worktree through the V2 API', async () => {
     createRepo(db, { localPath: 'repo-a', defaultBranch: 'main', cloneStatus: 'ready', clonedAt: Date.now(), isLocal: true })
-    const forward = mock(async (req: Parameters<OpenCodeClient['forward']>[0]) => {
-      captured = { path: req.path, directory: req.directory, body: req.body }
-      return new Response(JSON.stringify({ id: 'wrk_test', type: 'worktree', directory: '/tmp/wrk-test' }), { status: 200 })
-    })
-    const app = createTestApp(db, createStubOpenCodeClient({
-      forward,
-    }))
+    const create = mock(async () => ({ directory: '/tmp/wrk-test' }))
+    const client = createStubOpenCodeClient()
+    client.api.worktree.create = create as any
+    const app = createTestApp(db, client)
 
     const res = await app.request('/repos/1/workspaces', { method: 'POST' })
 
     expect(res.status).toBe(200)
-    expect(captured?.path).toBe('/experimental/workspace')
-    expect(captured?.directory?.endsWith('/repos/repo-a')).toBe(true)
-    expect(JSON.parse(captured?.body ?? '{}')).toEqual({ type: 'worktree', branch: null })
-    expect(await res.json()).toMatchObject({ id: 'wrk_test', type: 'worktree' })
+    expect(await res.json()).toEqual({ directory: '/tmp/wrk-test' })
+    expect(create).toHaveBeenCalledWith({ projectID: 'commit-A' })
   })
 
   it('returns 400 for a non-numeric repo id', async () => {
@@ -411,39 +457,34 @@ describe('POST /api/repos/:id/workspaces', () => {
     expect(notReady.status).toBe(404)
   })
 
-  it('forwards an upstream error status', async () => {
+  it('returns 409 on a worktree error', async () => {
     createRepo(db, { localPath: 'repo-a', defaultBranch: 'main', cloneStatus: 'ready', clonedAt: Date.now(), isLocal: true })
-    const app = createTestApp(db, createStubOpenCodeClient({
-      forward: mock(async () => new Response('boom', { status: 502 })) as any,
-    }))
+    const client = createStubOpenCodeClient()
+    client.api.worktree.create = mock(async () => {
+      throw Object.assign(new Error('cannot create'), { name: 'WorktreeError', data: { message: 'cannot create' } })
+    }) as any
+    const app = createTestApp(db, client)
+
     const res = await app.request('/repos/1/workspaces', { method: 'POST' })
 
-    expect(res.status).toBe(502)
+    expect(res.status).toBe(409)
     const data = await res.json() as { error: string }
-    expect(data.error).toBe('boom')
+    expect(data.error).toBe('cannot create')
   })
 
-  it('returns 500 when the upstream body is not JSON', async () => {
+  it('returns 500 on an unexpected error', async () => {
     createRepo(db, { localPath: 'repo-a', defaultBranch: 'main', cloneStatus: 'ready', clonedAt: Date.now(), isLocal: true })
-    const app = createTestApp(db, createStubOpenCodeClient({
-      forward: mock(async () => new Response('not-json', { status: 200 })) as any,
-    }))
+    const client = createStubOpenCodeClient()
+    client.api.location.get = mock(async () => {
+      throw new Error('location failed')
+    }) as any
+    const app = createTestApp(db, client)
+
     const res = await app.request('/repos/1/workspaces', { method: 'POST' })
 
     expect(res.status).toBe(500)
     const data = await res.json() as { error: string }
-    expect(data.error).toBe('Failed to create workspace')
-  })
-
-  it('returns success for an empty upstream response body', async () => {
-    createRepo(db, { localPath: 'repo-a', defaultBranch: 'main', cloneStatus: 'ready', clonedAt: Date.now(), isLocal: true })
-    const app = createTestApp(db, createStubOpenCodeClient({
-      forward: mock(async () => new Response('', { status: 200 })) as any,
-    }))
-    const res = await app.request('/repos/1/workspaces', { method: 'POST' })
-
-    expect(res.status).toBe(200)
-    expect(await res.json()).toEqual({ success: true })
+    expect(data.error).toBe('location failed')
   })
 })
 

@@ -94,18 +94,18 @@ When configured, users can enable push notifications in Settings → Notificatio
 |----------|-------------|---------|
 | `OPENCODE_SERVER_PORT` | Port for the OpenCode CLI server | `5551` |
 | `OPENCODE_HOST` | OpenCode server bind address | `127.0.0.1` |
-| `OPENCODE_PUBLIC_URL` | Public URL passed to OpenCode for OAuth callbacks | - |
 | `OPENCODE_HEALTH_WATCH_ENABLED` | Enable OpenCode health watcher and recovery | `true` (`false` in tests) |
 | `OPENCODE_HEALTH_POLL_MS` | OpenCode health watcher poll interval | `30000` |
 | `OPENCODE_HEALTH_FAILURE_THRESHOLD` | Failed health checks before recovery starts | `2` |
-| `OPENCODE_SERVER_PASSWORD` | Basic Auth password required when binding OpenCode to a non-loopback host. Can also be set via UI (Settings → OpenCode → Server Auth). DB-stored passwords override this env var. | - |
-| `OPENCODE_SERVER_USERNAME` | Basic Auth username | `opencode` |
+| `OPENCODE_SERVER_PASSWORD` | Basic Auth password for the managed OpenCode server. OpenCode 2 always requires one: when unset, OpenCode Manager generates and persists a password (override it any time via Settings → OpenCode → Server Auth). DB-stored passwords override this env var. | auto-generated |
+
+> **Upgrade note:** `OPENCODE_PUBLIC_URL` is no longer used. MCP OAuth redirects now point at the Manager's `/api/mcp-oauth-proxy/callback`, built from the request: the scheme comes from `X-Forwarded-Proto` (first value, `http` or `https` only), then the `Origin` header, then `http`; the host comes from `X-Forwarded-Host` when present, otherwise `Host`. Behind a reverse proxy, forward `X-Forwarded-Proto` and `X-Forwarded-Host` (or preserve `Host`) and remove `OPENCODE_PUBLIC_URL`; the Manager logs a warning at startup while it is still set.
 
 ## OpenCode Import
 
 | Variable | Description | Default |
 |----------|-------------|---------|
-| `OPENCODE_IMPORT_CONFIG_PATH` | Existing standalone OpenCode config file to import on first startup. When set to a single file, only that file is imported. When unset, the host's recognized config files (`config.json`, `opencode.json`, `opencode.jsonc`) are mirrored into the workspace and workspace copies absent on the host are removed | - |
+| `OPENCODE_IMPORT_CONFIG_PATH` | Existing standalone OpenCode config file to import on first startup. When set to a single file, only that file is imported. When unset, the host's `opencode.json`, `opencode.jsonc`, and legacy `config.json` are mirrored into the workspace, workspace copies absent on the host are removed, and the mirrored legacy file is folded into the workspace config | - |
 | `OPENCODE_IMPORT_STATE_PATH` | Existing standalone OpenCode state directory to import on first startup | - |
 
 ## Agent Sandboxing

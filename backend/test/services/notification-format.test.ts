@@ -1,55 +1,70 @@
 import { describe, it, expect } from 'vitest'
-import { getPermissionLabel, getPermissionDetail, getQuestionText } from '@opencode-manager/shared/notifications'
+import { getPermissionLabel, getPermissionDetail, getFormText } from '@opencode-manager/shared/notifications'
 import { buildEventNotificationPayload, buildNotificationUrl } from '../../src/services/notification'
 import { ASSISTANT_REPO_ID } from '@opencode-manager/shared/utils'
 
 const ctx = { repoName: 'oc-manager', repoId: 1, sessionId: 'ses_1', directory: '/abs/repo', url: '/repos/1/sessions/ses_1' }
 
 describe('getPermissionLabel', () => {
-  it('maps known permission types to friendly labels', () => {
-    expect(getPermissionLabel('bash')).toBe('Run Command')
+  it('maps known V2 permission actions to friendly labels', () => {
+    expect(getPermissionLabel('shell')).toBe('Run Command')
+    expect(getPermissionLabel('subagent')).toBe('Run Subagent')
     expect(getPermissionLabel('webfetch')).toBe('Fetch URL')
     expect(getPermissionLabel('edit')).toBe('Edit File')
   })
-  it('capitalizes unknown types', () => {
+  it('capitalizes unknown actions', () => {
     expect(getPermissionLabel('frobnicate')).toBe('Frobnicate')
   })
 })
 
 describe('getPermissionDetail', () => {
-  it('returns the bash command', () => {
-    expect(getPermissionDetail({ permission: 'bash', metadata: { command: 'rm -rf node_modules' } }).primary).toBe('rm -rf node_modules')
+  it('returns the shell command from resources', () => {
+    expect(getPermissionDetail({ action: 'shell', resources: ['rm -rf node_modules'] }).primary).toBe('rm -rf node_modules')
   })
-  it('returns the edited file path with a diff secondary', () => {
-    const detail = getPermissionDetail({ permission: 'edit', metadata: { filePath: 'src/index.ts', diff: 'a\nb' } })
+  it('returns the edited file path with a patch secondary', () => {
+    const detail = getPermissionDetail({
+      action: 'edit',
+      resources: ['src/index.ts'],
+      metadata: { files: [{ file: 'src/index.ts', patch: 'a\nb' }] },
+    })
+    expect(detail.primary).toBe('src/index.ts')
+    expect(detail.secondary).toBe('a\nb')
+  })
+  it('returns the patched file path from patch metadata', () => {
+    const detail = getPermissionDetail({
+      action: 'edit',
+      resources: ['src/index.ts'],
+      metadata: { filepath: 'src/index.ts', diff: 'a\nb' },
+    })
     expect(detail.primary).toBe('src/index.ts')
     expect(detail.secondary).toBe('a\nb')
   })
   it('returns the fetched url', () => {
-    expect(getPermissionDetail({ permission: 'webfetch', metadata: { url: 'https://example.com' } }).primary).toBe('https://example.com')
+    expect(getPermissionDetail({ action: 'webfetch', metadata: { url: 'https://example.com' } }).primary).toBe('https://example.com')
   })
-  it('falls back to patterns when metadata is missing', () => {
-    expect(getPermissionDetail({ permission: 'bash', patterns: ['git *'] }).primary).toBe('git *')
+  it('falls back to resources when metadata is missing', () => {
+    expect(getPermissionDetail({ action: 'read', resources: ['/abs/file.ts'] }).primary).toBe('/abs/file.ts')
   })
-  it('returns empty primary when no detail available', () => {
-    expect(getPermissionDetail({ permission: 'bash' }).primary).toBe('')
+  it('returns empty primary when no detail is available', () => {
+    expect(getPermissionDetail({ action: 'shell' }).primary).toBe('')
   })
 })
 
-describe('getQuestionText', () => {
-  it('returns the first question text', () => {
-    expect(getQuestionText({ questions: [{ question: 'Deploy to prod?' }] })).toBe('Deploy to prod?')
+describe('getFormText', () => {
+  it('returns the form title', () => {
+    expect(getFormText({ title: 'Deploy to prod?' })).toBe('Deploy to prod?')
   })
-  it('returns empty string when no questions', () => {
-    expect(getQuestionText({ questions: [] })).toBe('')
-    expect(getQuestionText({})).toBe('')
+  it('returns empty string when there is no title', () => {
+    expect(getFormText({ title: '' })).toBe('')
+    expect(getFormText({})).toBe('')
+    expect(getFormText(null)).toBe('')
   })
 })
 
 describe('buildEventNotificationPayload', () => {
-  it('formats a bash permission as "Run Command" title with repo-prefixed body', () => {
+  it('formats a shell permission as "Run Command" title with repo-prefixed body', () => {
     const p = buildEventNotificationPayload(
-      { type: 'permission.asked', properties: { permission: 'bash', metadata: { command: 'rm -rf node_modules' }, patterns: ['rm *'] } },
+      { type: 'permission.asked', data: { sessionID: 'ses_1', action: 'shell', resources: ['rm -rf node_modules'] } },
       ctx,
     )!
     expect(p.title).toBe('Run Command')
@@ -62,7 +77,15 @@ describe('buildEventNotificationPayload', () => {
 
   it('formats an edit permission with the file path', () => {
     const p = buildEventNotificationPayload(
-      { type: 'permission.asked', properties: { permission: 'edit', metadata: { filePath: 'src/index.ts' } } },
+      {
+        type: 'permission.asked',
+        data: {
+          sessionID: 'ses_1',
+          action: 'edit',
+          resources: ['src/index.ts'],
+          metadata: { files: [{ file: 'src/index.ts', patch: 'a\nb' }] },
+        },
+      },
       ctx,
     )!
     expect(p.title).toBe('Edit File')
@@ -71,24 +94,24 @@ describe('buildEventNotificationPayload', () => {
 
   it('uses "Approval required" body when no detail is available', () => {
     const p = buildEventNotificationPayload(
-      { type: 'permission.asked', properties: { permission: 'bash' } },
+      { type: 'permission.asked', data: { sessionID: 'ses_1', action: 'shell', resources: [] } },
       ctx,
     )!
     expect(p.body).toBe('oc-manager · Approval required')
   })
 
-  it('formats a question as "Question" title with repo-prefixed body', () => {
+  it('formats a form as "Question" title with repo-prefixed body', () => {
     const p = buildEventNotificationPayload(
-      { type: 'question.asked', properties: { questions: [{ question: 'Deploy to prod?' }] } },
+      { type: 'form.created', data: { form: { id: 'form-1', sessionID: 'ses_1', title: 'Deploy to prod?', fields: [] } } },
       ctx,
     )!
     expect(p.title).toBe('Question')
     expect(p.body).toBe('oc-manager · Deploy to prod?')
   })
 
-  it('formats session.error as "Error" title with repo-prefixed body', () => {
+  it('formats session.execution.failed as "Error" title with the failure message', () => {
     const p = buildEventNotificationPayload(
-      { type: 'session.error', properties: { error: { message: 'boom' } } },
+      { type: 'session.execution.failed', data: { sessionID: 'ses_1', error: { type: 'provider', message: 'boom' } } },
       ctx,
     )!
     expect(p.title).toBe('Error')
@@ -96,14 +119,14 @@ describe('buildEventNotificationPayload', () => {
   })
 
   it('formats session.idle as "Session complete" with repo-prefixed body', () => {
-    const p = buildEventNotificationPayload({ type: 'session.idle', properties: {} }, ctx)!
+    const p = buildEventNotificationPayload({ type: 'session.idle', data: { sessionID: 'ses_1' } }, ctx)!
     expect(p.title).toBe('Session complete')
     expect(p.body).toBe('oc-manager · Your session has finished processing')
   })
 
   it('omits the repo prefix when no repoName is provided', () => {
     const p = buildEventNotificationPayload(
-      { type: 'permission.asked', properties: { permission: 'bash', metadata: { command: 'ls' } } },
+      { type: 'permission.asked', data: { sessionID: 'ses_1', action: 'shell', resources: ['ls'] } },
       { url: '/' },
     )!
     expect(p.title).toBe('Run Command')
@@ -112,13 +135,13 @@ describe('buildEventNotificationPayload', () => {
   })
 
   it('returns null for unknown event types', () => {
-    expect(buildEventNotificationPayload({ type: 'session.created', properties: {} }, ctx)).toBeNull()
+    expect(buildEventNotificationPayload({ type: 'session.created', data: { sessionID: 'ses_1' } }, ctx)).toBeNull()
   })
 
   it('truncates the prefixed body to 140 chars with an ellipsis', () => {
     const long = 'x'.repeat(300)
     const p = buildEventNotificationPayload(
-      { type: 'permission.asked', properties: { permission: 'bash', metadata: { command: long } } },
+      { type: 'permission.asked', data: { sessionID: 'ses_1', action: 'shell', resources: [long] } },
       ctx,
     )!
     expect(p.body.length).toBeLessThanOrEqual(140)

@@ -2,10 +2,10 @@ import { renderHook, waitFor } from '@testing-library/react'
 import { describe, expect, it, vi, beforeEach } from 'vitest'
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
 import { useCommands } from './useCommands'
-import { createOpenCodeClient } from '../api/opencode'
+import { listCommands } from '../api/opencode'
 
 vi.mock('../api/opencode', () => ({
-  createOpenCodeClient: vi.fn(),
+  listCommands: vi.fn(),
 }))
 
 const createWrapper = () => {
@@ -24,8 +24,8 @@ describe('useCommands', () => {
     vi.clearAllMocks()
   })
 
-  it('returns commands in alphabetical order when there is no query', () => {
-    const { result } = renderHook(() => useCommands(null), { wrapper: createWrapper() })
+  it('returns built-in commands in alphabetical order when disabled', () => {
+    const { result } = renderHook(() => useCommands({ enabled: false }), { wrapper: createWrapper() })
 
     expect(result.current.filterCommands('').map(command => command.name).slice(0, 5)).toEqual([
       'clear',
@@ -34,10 +34,11 @@ describe('useCommands', () => {
       'details',
       'editor',
     ])
+    expect(listCommands).not.toHaveBeenCalled()
   })
 
   it('prioritizes exact and prefix matches before other matches', () => {
-    const { result } = renderHook(() => useCommands(null), { wrapper: createWrapper() })
+    const { result } = renderHook(() => useCommands({ enabled: false }), { wrapper: createWrapper() })
 
     expect(result.current.filterCommands('co').map(command => command.name)).toEqual([
       'compact',
@@ -50,14 +51,12 @@ describe('useCommands', () => {
   })
 
   it('sorts loaded custom commands with built-in commands', async () => {
-    vi.mocked(createOpenCodeClient).mockReturnValue({
-      listCommands: vi.fn().mockResolvedValue([
-        { name: 'zebra', description: '', template: '', agent: '', model: '', hints: [] },
-        { name: 'alpha', description: '', template: '', agent: '', model: '', hints: [] },
-      ]),
-    } as unknown as ReturnType<typeof createOpenCodeClient>)
+    vi.mocked(listCommands).mockResolvedValue([
+      { name: 'zebra', description: 'Zebra' },
+      { name: 'alpha', description: 'Alpha' },
+    ])
 
-    const { result } = renderHook(() => useCommands('http://localhost:5551'), { wrapper: createWrapper() })
+    const { result } = renderHook(() => useCommands({ directory: '/repo' }), { wrapper: createWrapper() })
 
     await waitFor(() => {
       expect(result.current.filterCommands('').map(command => command.name).slice(0, 3)).toEqual([
@@ -66,5 +65,7 @@ describe('useCommands', () => {
         'compact',
       ])
     })
+
+    expect(listCommands).toHaveBeenCalledWith('/repo')
   })
 })

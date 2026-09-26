@@ -97,6 +97,21 @@ describe('buildSettingsSkill', () => {
     expect(skill).toContain('Never attempt the restart yourself')
   })
 
+  it('documents the effective config entries and forbids saving them', () => {
+    const skill = buildSettingsSkill()
+    expect(skill).toContain('GET /opencode-config/effective')
+    expect(skill).toContain('entries')
+    expect(skill).toContain("type: 'document'")
+    expect(skill).toContain("type: 'directory'")
+    expect(skill).toContain('never copy this response into a save')
+  })
+
+  it('documents the assistant reload as rebuilding every loaded location', () => {
+    const skill = buildSettingsSkill()
+    expect(skill).toContain('rebuilding every loaded location')
+    expect(skill).not.toContain('disposing the current OpenCode instance')
+  })
+
   it('still lists apiKey and endpoint as forbidden', () => {
     const skill = buildSettingsSkill()
     expect(skill).toContain('tts.apiKey')
@@ -202,14 +217,14 @@ describe('ensureAssistantMode', () => {
     const opencodeJson = JSON.parse(opencodeJsonContent)
 
     expect(opencodeJson.default_agent).toBe('assistant')
-    expect(opencodeJson.instructions).toEqual(['AGENTS.md'])
+    expect(opencodeJson.instructions).toBeUndefined()
     expect(opencodeJson.permission).toEqual({
       read: 'allow',
       edit: 'allow',
       glob: 'allow',
       grep: 'allow',
       list: 'allow',
-      bash: 'allow',
+      shell: 'allow',
       external_directory: 'ask',
     })
     expect(opencodeJson.agent?.assistant).toEqual({ mode: 'primary' })

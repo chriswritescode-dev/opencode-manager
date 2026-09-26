@@ -14,6 +14,7 @@ interface Subscriber {
   onEvent: OpenCodeEventHandler
   onStatusChange?: EventStreamStatusHandler
   onHealthChange?: (state: EventStreamHealthState) => void
+  onResync?: () => void
   directories: Set<string>
 }
 
@@ -49,8 +50,9 @@ export class OpenCodeEventStream {
     onEvent: OpenCodeEventHandler
     onStatusChange?: EventStreamStatusHandler
     onHealthChange?: (state: EventStreamHealthState) => void
+    onResync?: () => void
   }): GlobalMonitorSubscription {
-    const id = this.addSubscriber(input.onEvent, input.onStatusChange, input.onHealthChange, input.directories)
+    const id = this.addSubscriber(input.onEvent, input.onStatusChange, input.onHealthChange, input.directories, input.onResync)
 
     return {
       updateDirectories: (directories) => this.updateSubscriberDirectories(id, directories),
@@ -69,6 +71,7 @@ export class OpenCodeEventStream {
     onStatusChange?: EventStreamStatusHandler,
     onHealthChange?: (state: EventStreamHealthState) => void,
     directories: string[] = [],
+    onResync?: () => void,
   ): string {
     const id = `sub_${++this.subscriberIdCounter}`
 
@@ -92,6 +95,7 @@ export class OpenCodeEventStream {
       onEvent,
       onStatusChange,
       onHealthChange,
+      onResync,
       directories: initialDirectories,
     })
 
@@ -194,6 +198,7 @@ export class OpenCodeEventStream {
       onMessage: (data) => this.handleMessage(data),
       onConnected: (data) => this.handleConnected(data),
       onHeartbeat: () => this.markActivity(),
+      onResync: () => this.handleResync(),
     })
     this.startConnectTimeout()
   }
@@ -393,6 +398,17 @@ export class OpenCodeEventStream {
     })
   }
 
+  private handleResync(): void {
+    this.markActivity()
+    this.subscribers.forEach((subscriber) => {
+      try {
+        subscriber.onResync?.()
+      } catch {
+        void 0
+      }
+    })
+  }
+
   private broadcast(data: unknown): void {
     this.subscribers.forEach((subscriber) => {
       try {
@@ -446,7 +462,7 @@ function flattenEventEnvelope(parsed: unknown): unknown {
     typeof (parsed as { payload: unknown }).payload === 'object'
   ) {
     const { payload, directory } = parsed as SSEEventEnvelope
-    return { ...payload, directory }
+    return typeof directory === 'string' ? { ...payload, directory } : { ...payload }
   }
   return parsed
 }

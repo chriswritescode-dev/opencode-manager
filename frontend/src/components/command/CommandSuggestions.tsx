@@ -1,15 +1,13 @@
 import { useEffect, useRef } from 'react'
 import { Command } from 'lucide-react'
-import type { components } from '@/api/opencode-types'
+import type { CommandInfo } from '@opencode-manager/shared/opencode'
 import { useTouchTapSelect } from '@/hooks/useTouchTapSelect'
-
-type CommandType = components['schemas']['Command']
 
 interface CommandSuggestionsProps {
   isOpen: boolean
   query: string
-  commands: CommandType[]
-  onSelect: (command: CommandType) => void
+  commands: CommandInfo[]
+  onSelect: (command: CommandInfo) => void
   onClose: () => void
   selectedIndex?: number
 }

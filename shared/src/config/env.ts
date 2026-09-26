@@ -67,12 +67,11 @@ export const ENV = {
   OPENCODE: {
     PORT: getEnvNumber('OPENCODE_SERVER_PORT', DEFAULTS.OPENCODE.PORT),
     HOST: getEnvString('OPENCODE_HOST', DEFAULTS.OPENCODE.HOST),
-    PUBLIC_URL: getEnvString('OPENCODE_PUBLIC_URL', ''), // Public URL for OAuth callbacks
     HEALTH_WATCH_ENABLED: getEnvBoolean('OPENCODE_HEALTH_WATCH_ENABLED', defaultHealthWatchEnabled),
     HEALTH_POLL_MS: getEnvNumber('OPENCODE_HEALTH_POLL_MS', DEFAULTS.OPENCODE.HEALTH_POLL_MS),
     HEALTH_FAILURE_THRESHOLD: getEnvNumber('OPENCODE_HEALTH_FAILURE_THRESHOLD', DEFAULTS.OPENCODE.HEALTH_FAILURE_THRESHOLD),
     SERVER_PASSWORD: getEnvString('OPENCODE_SERVER_PASSWORD', ''),
-    SERVER_USERNAME: getEnvString('OPENCODE_SERVER_USERNAME', 'opencode'),
+    LEGACY_PUBLIC_URL: getEnvString('OPENCODE_PUBLIC_URL', ''),
   },
 
   DATABASE: {
@@ -85,7 +84,6 @@ export const ENV = {
     REPOS_DIR: DEFAULTS.WORKSPACE.REPOS_DIR,
     SCHEDULE_WORKTREES_DIR: DEFAULTS.WORKSPACE.SCHEDULE_WORKTREES_DIR,
     CONFIG_DIR: DEFAULTS.WORKSPACE.CONFIG_DIR,
-    AUTH_FILE: DEFAULTS.WORKSPACE.AUTH_FILE,
   },
 
   SANDBOX: {
@@ -162,7 +160,6 @@ export const getConfigPath = () => path.join(ENV.WORKSPACE.BASE_PATH, ENV.WORKSP
 export { OPENCODE_CONFIG_SOURCE_NAMES } from './defaults'
 export const getOpenCodeConfigFilePath = () => path.join(ENV.WORKSPACE.BASE_PATH, ENV.WORKSPACE.CONFIG_DIR, 'opencode.json')
 export const getAgentsMdPath = () => path.join(ENV.WORKSPACE.BASE_PATH, ENV.WORKSPACE.CONFIG_DIR, 'AGENTS.md')
-export const getAuthPath = () => path.join(ENV.WORKSPACE.BASE_PATH, ENV.WORKSPACE.AUTH_FILE)
 export const getDatabasePath = () => ENV.DATABASE.PATH
 
 export const getApiUrl = (port: number = ENV.SERVER.PORT): string => {

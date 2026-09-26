@@ -152,5 +152,5 @@ async function openOrFocusClient(url: string): Promise<void> {
 }
 
 function isHighPriority(eventType?: string, priority?: 'normal' | 'high'): boolean {
-  return eventType === "permission.asked" || eventType === "question.asked" || priority === 'high';
+  return eventType === "permission.asked" || eventType === "form.created" || priority === 'high';
 }

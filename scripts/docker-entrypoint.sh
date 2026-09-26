@@ -6,6 +6,7 @@ export BUN_INSTALL="$HOME/.bun"
 export PATH="$BUN_INSTALL/bin:$HOME/.opencode/bin:/usr/local/bin:$PATH"
 
 source /usr/local/lib/ocm/container-user.sh
+source /usr/local/lib/ocm/opencode-release.sh
 
 grant_kvm_access() {
   local dev="${1:-/dev/kvm}"
@@ -42,11 +43,7 @@ grant_kvm_access() {
   echo "Granted node access to $dev (group '$group_name', gid $dev_gid)"
 }
 
-MIN_OPENCODE_VERSION="1.0.137"
-
-version_gte() {
-  printf '%s\n%s\n' "$2" "$1" | sort -V -C
-}
+OPENCODE_SUPPORTED_FLOOR="${OPENCODE_BUNDLED_VERSION:-}"
 
 read_opencode_version() {
   local binary
@@ -63,24 +60,8 @@ install_opencode() {
     echo "ERROR: OPENCODE_BUNDLED_VERSION is not set; refusing to guess the pinned OpenCode build" >&2
     return 1
   fi
-  if [[ ! "$opencode_version" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
-    echo "ERROR: OPENCODE_BUNDLED_VERSION='$opencode_version' is not an X.Y.Z version; refusing to download it" >&2
-    return 1
-  fi
-  if ! version_gte "$opencode_version" "$MIN_OPENCODE_VERSION"; then
-    echo "ERROR: OPENCODE_BUNDLED_VERSION=$opencode_version is below the minimum supported $MIN_OPENCODE_VERSION; refusing to download it" >&2
-    return 1
-  fi
   echo "Installing OpenCode ${opencode_version}..."
-  local staging
-  staging="$(mktemp -d)"
-  curl -fsSL "https://github.com/anomalyco/opencode/releases/download/v${opencode_version}/opencode-linux-$(uname -m | sed 's/x86_64/x64/; s/aarch64/arm64/').tar.gz" \
-    -o "$staging/opencode.tar.gz"
-  tar -xzf "$staging/opencode.tar.gz" -C "$staging"
-  mkdir -p "$HOME/.opencode/bin"
-  mv "$staging/opencode" "$HOME/.opencode/bin/opencode"
-  chmod 755 "$HOME/.opencode/bin/opencode"
-  rm -rf "$staging"
+  download_opencode_to "$opencode_version" "$HOME/.opencode/bin/opencode"
 }
 
 reconcile_persisted_opencode() {
@@ -90,6 +71,11 @@ reconcile_persisted_opencode() {
   persisted_version="$(read_opencode_version "$persisted_path")"
   if [ -z "$persisted_version" ]; then
     echo "Persisted OpenCode at $persisted_path is malformed or unversioned; removing it to fall back to the bundled binary"
+    rm -f "$persisted_path"
+    return 0
+  fi
+  if ! is_supported_opencode_version "$persisted_version"; then
+    echo "Persisted OpenCode $persisted_version is outside the supported range $(supported_opencode_range); removing it so the bundled OpenCode $OPENCODE_SUPPORTED_FLOOR binary is used"
     rm -f "$persisted_path"
     return 0
   fi
@@ -133,10 +119,10 @@ OPENCODE_VERSION="$(read_opencode_version)"
 echo "OpenCode is installed (version: $OPENCODE_VERSION)"
 
 if [ "$OPENCODE_VERSION" != "unknown" ]; then
-  if version_gte "$OPENCODE_VERSION" "$MIN_OPENCODE_VERSION"; then
-    echo "OpenCode version meets minimum requirement (>=$MIN_OPENCODE_VERSION)"
+  if is_supported_opencode_version "$OPENCODE_VERSION"; then
+    echo "OpenCode version is within the supported range $(supported_opencode_range)"
   else
-    echo "OpenCode version $OPENCODE_VERSION is below minimum required version $MIN_OPENCODE_VERSION"
+    echo "OpenCode version $OPENCODE_VERSION is outside the supported range $(supported_opencode_range)"
     echo "Reinstalling bundled OpenCode version ${OPENCODE_BUNDLED_VERSION}..."
     install_opencode
 

@@ -1,6 +1,7 @@
 import { useCallback, useState, useMemo, useEffect, useRef } from "react";
 import { useSessionsAcrossDirectories, useDeleteSession, useCreateSession } from "@/hooks/useOpenCode";
 import type { DeleteSessionTarget } from "@/hooks/useOpenCode";
+import type { Session } from "@/api/types";
 import { useSessionPins, useToggleSessionPin } from '@/hooks/useSessionPins';
 import { buildSessionKey } from '@/lib/sessionKey';
 import { partitionSessions } from './session-partition';
@@ -12,7 +13,6 @@ import { Input } from "@/components/ui/input";
 import { Search, Trash2, Pencil, X } from "lucide-react";
 
 interface SessionListProps {
-  opcodeUrl: string;
   directory?: string;
   directories?: string[];
   createDirectory?: string;
@@ -22,7 +22,6 @@ interface SessionListProps {
 }
 
 export const SessionList = ({
-  opcodeUrl,
   directory,
   directories,
   createDirectory,
@@ -37,13 +36,13 @@ export const SessionList = ({
   const directorySet = useMemo(() => new Set(directoriesList), [directoriesList]);
   const primaryDirectory = directoriesList[0];
   const sessionCreateDirectory = createDirectory ?? primaryDirectory;
-  const getSessionSelectionKey = useCallback((session: { id: string; directory?: string }) =>
-    buildSessionKey(session.directory ?? primaryDirectory, session.id),
-  [primaryDirectory]);
+  const getSessionSelectionKey = useCallback((session: Session) =>
+    buildSessionKey(session.location.directory, session.id),
+  []);
   const [searchQuery, setSearchQuery] = useState("");
-  const { data: sessions, isLoading, fetchNextPage, hasNextPage, isFetchingNextPage, isFetchNextPageError } = useSessionsAcrossDirectories(opcodeUrl, directoriesList, { search: searchQuery, limit: 25 });
-  const deleteSession = useDeleteSession(opcodeUrl, directoriesList);
-  const createSession = useCreateSession(opcodeUrl, sessionCreateDirectory, (newSession) => {
+  const { data: sessions, isLoading, fetchNextPage, hasNextPage, isFetchingNextPage, isFetchNextPageError } = useSessionsAcrossDirectories(directoriesList, { search: searchQuery, limit: 25 });
+  const deleteSession = useDeleteSession(directoriesList);
+  const createSession = useCreateSession(sessionCreateDirectory, (newSession) => {
     onSelectSession(newSession.id);
   });
   const { data: sessionPins } = useSessionPins();
@@ -63,7 +62,7 @@ export const SessionList = ({
 
     const filtered = sessions.filter((session) => {
       if (session.parentID) return false;
-      if (directorySet.size > 0 && session.directory && !directorySet.has(session.directory)) return false;
+      if (directorySet.size > 0 && !directorySet.has(session.location.directory)) return false;
       return true;
     });
 
@@ -83,8 +82,8 @@ export const SessionList = ({
     [filteredSessions, pinnedKeys, getSessionSelectionKey],
   );
 
-  const handleTogglePin = (session: { id: string; directory?: string }) => {
-    const directory = session.directory ?? primaryDirectory ?? '';
+  const handleTogglePin = (session: Session) => {
+    const directory = session.location.directory;
     const key = getSessionSelectionKey(session);
     togglePin.mutate({ sessionId: session.id, directory, pinned: !pinnedKeys.has(key) });
   };
@@ -153,18 +152,12 @@ export const SessionList = ({
     }
   }
 
-  const getDeleteTarget = (session: { id: string; directory?: string; workspaceID?: string }): DeleteSessionTarget => {
-    const target: Extract<DeleteSessionTarget, { id: string }> = {
-      id: session.id,
-      directory: session.directory ?? primaryDirectory,
-    };
-    if (session.workspaceID) {
-      target.workspaceID = session.workspaceID;
-    }
-    return target;
-  };
+  const getDeleteTarget = (session: Session): DeleteSessionTarget => ({
+    id: session.id,
+    directory: session.location.directory,
+  });
 
-  const handleDelete = (session: { id: string; directory?: string; workspaceID?: string }, e: React.MouseEvent<HTMLButtonElement>) => {
+  const handleDelete = (session: Session, e: React.MouseEvent<HTMLButtonElement>) => {
     e.stopPropagation();
     setSessionToDelete(getDeleteTarget(session));
     setDeleteDialogOpen(true);
@@ -187,7 +180,7 @@ export const SessionList = ({
     setManageMode(false);
   };
 
-  const toggleSessionSelection = (session: { id: string; directory?: string }, selected: boolean) => {
+  const toggleSessionSelection = (session: Session, selected: boolean) => {
     const selectionKey = getSessionSelectionKey(session);
     const newSelected = new Set(selectedSessions);
     if (selected) {
@@ -230,7 +223,7 @@ export const SessionList = ({
         isSelected={selectedSessions.has(key)}
         isActive={activeSessionID === session.id}
         manageMode={manageMode}
-        workspaceLabel={session.directory ? directoryLabels?.[session.directory] : undefined}
+        workspaceLabel={directoryLabels?.[session.location.directory]}
         isPinned={isPinned}
         onSelect={onSelectSession}
         onToggleSelection={(selected) => toggleSessionSelection(session, selected)}

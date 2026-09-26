@@ -1,6 +1,6 @@
 import { BottomSheet, BottomSheetHeader, BottomSheetContent } from '@/components/ui/bottom-sheet'
-import { usePermissions, useQuestions } from '@/contexts/EventContext'
-import { getQuestionText } from '@opencode-manager/shared/notifications'
+import { usePermissions, useForms } from '@/contexts/EventContext'
+import { getFormText, getPermissionDetail, getPermissionLabel } from '@opencode-manager/shared/notifications'
 import { Bell, HelpCircle } from 'lucide-react'
 
 interface NotificationsSheetProps {
@@ -16,10 +16,10 @@ export function NotificationsSheet({ isOpen, onClose }: NotificationsSheetProps)
     navigateToCurrent: navigateToPermission,
   } = usePermissions()
   const {
-    current: currentQuestion,
-    pendingCount: questionCount,
-    navigateToCurrent: navigateToQuestion,
-  } = useQuestions()
+    current: currentForm,
+    pendingCount: formCount,
+    navigateToCurrent: navigateToForm,
+  } = useForms()
 
   const handlePermissionClick = () => {
     navigateToPermission()
@@ -27,8 +27,8 @@ export function NotificationsSheet({ isOpen, onClose }: NotificationsSheetProps)
     onClose()
   }
 
-  const handleQuestionClick = () => {
-    navigateToQuestion()
+  const handleFormClick = () => {
+    navigateToForm()
     onClose()
   }
 
@@ -53,11 +53,11 @@ export function NotificationsSheet({ isOpen, onClose }: NotificationsSheetProps)
                   onClick={handlePermissionClick}
                   className="flex flex-col items-start gap-1 p-3 rounded-lg border border-border hover:bg-accent transition-colors text-left w-full"
                 >
-                  <span className="font-medium text-foreground capitalize">
-                    {currentPermission.permission.replace(/_/g, ' ')}
+                  <span className="font-medium text-foreground">
+                    {getPermissionLabel(currentPermission.action)}
                   </span>
                   <span className="text-xs text-muted-foreground truncate w-full">
-                    {currentPermission.patterns?.[0] || 'View details'}
+                    {getPermissionDetail(currentPermission).primary || 'View details'}
                   </span>
                 </button>
               )}
@@ -73,31 +73,31 @@ export function NotificationsSheet({ isOpen, onClose }: NotificationsSheetProps)
         <div>
           <div className="flex items-center gap-2 mb-3">
             <HelpCircle className="w-5 h-5 text-blue-500" />
-            <h3 className="font-semibold text-foreground">Pending questions</h3>
+            <h3 className="font-semibold text-foreground">Pending forms</h3>
           </div>
-          {questionCount === 0 ? (
+          {formCount === 0 ? (
             <div className="text-muted-foreground text-sm py-4">
               You're all caught up
             </div>
           ) : (
             <div className="flex flex-col gap-2">
-              {currentQuestion && (
+              {currentForm && (
                 <button
                   type="button"
-                  onClick={handleQuestionClick}
+                  onClick={handleFormClick}
                   className="flex flex-col items-start gap-1 p-3 rounded-lg border border-border hover:bg-accent transition-colors text-left w-full"
                 >
                   <span className="font-medium text-foreground">
-                    {getQuestionText(currentQuestion) || 'Question'}
+                    {getFormText(currentForm) || 'Form'}
                   </span>
                   <span className="text-xs text-muted-foreground truncate w-full">
                     Tap to view
                   </span>
                 </button>
               )}
-              {questionCount > 1 && (
+              {formCount > 1 && (
                 <div className="text-xs text-muted-foreground px-3">
-                  +{questionCount - 1} more
+                  +{formCount - 1} more
                 </div>
               )}
             </div>

@@ -1,30 +1,38 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest'
-import { renderHook, waitFor } from '@testing-library/react'
+import { renderHook } from '@testing-library/react'
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
 import { createElement } from 'react'
 import { useSendPrompt } from './useOpenCode'
 import { FetchError } from '../api/fetchWrapper'
-import { messagesQueryKey } from '../lib/queryInvalidation'
+import { sessionTranscriptQueryKey } from '../lib/queryInvalidation'
+import { emptySessionTranscript } from '../lib/session-projection'
+import type { SessionInboxUser } from '@opencode-manager/shared/opencode'
 
-const mockSendPromptAsync = vi.fn()
-const mockSetOptimisticActive = vi.fn()
-const mockClearStatus = vi.fn()
+const mocks = vi.hoisted(() => ({
+  sendPrompt: vi.fn(),
+  switchSessionModel: vi.fn(),
+  switchSessionAgent: vi.fn(),
+  setOptimisticActive: vi.fn(),
+  clearStatus: vi.fn(),
+  clearError: vi.fn(),
+  setError: vi.fn(),
+}))
 
 vi.mock('../api/opencode', async () => {
   const actual = await vi.importActual('../api/opencode')
   return {
     ...actual,
-    OpenCodeClient: vi.fn().mockImplementation(() => ({
-      sendPromptAsync: mockSendPromptAsync,
-    })),
+    sendPrompt: mocks.sendPrompt,
+    switchSessionModel: mocks.switchSessionModel,
+    switchSessionAgent: mocks.switchSessionAgent,
   }
 })
 
 vi.mock('@/stores/sessionStatusStore', () => ({
   useSessionStatus: Object.assign(vi.fn(() => vi.fn()), {
     getState: () => ({
-      setOptimisticActive: mockSetOptimisticActive,
-      clearStatus: mockClearStatus,
+      setOptimisticActive: mocks.setOptimisticActive,
+      clearStatus: mocks.clearStatus,
     }),
   }),
 }))
@@ -42,31 +50,37 @@ vi.mock('../lib/opencode-errors', () => ({
   isGatewayTimeout: vi.fn((err) => err?.statusCode === 524),
 }))
 
-const mockClearError = vi.fn()
-const mockSetError = vi.fn()
-const mockSetQueuedPrompt = vi.fn()
-const mockClearQueuedPrompt = vi.fn()
-const mockFailQueuedPrompt = vi.fn()
-
 vi.mock('../stores/sendErrorStore', () => ({
   useSendErrorStore: {
     getState: () => ({
-      clearError: mockClearError,
-      setError: mockSetError,
-      setQueuedPrompt: mockSetQueuedPrompt,
-      clearQueuedPrompt: mockClearQueuedPrompt,
-      failQueuedPrompt: mockFailQueuedPrompt,
-      getError: vi.fn(),
+      clearError: mocks.clearError,
+      setError: mocks.setError,
     }),
   },
 }))
 
+const inboxItem = (sessionID: string, text: string): SessionInboxUser => ({
+  id: `inbox_${text}`,
+  sessionID,
+  time: { created: 1000 },
+  type: 'user',
+  payload: { text },
+  delivery: 'queue',
+})
+
+const sessionInfo = (overrides: Record<string, unknown> = {}) => ({
+  id: 'test-session',
+  projectID: 'proj_1',
+  time: { created: 1000, updated: 1000 },
+  location: { directory: '/test' },
+  ...overrides,
+})
+
 const createTestQueryClient = () =>
   new QueryClient({
     defaultOptions: {
-      queries: {
-        retry: false,
-      },
+      queries: { retry: false },
+      mutations: { retry: false },
     },
   })
 
@@ -76,227 +90,247 @@ describe('useSendPrompt', () => {
   beforeEach(() => {
     vi.clearAllMocks()
     queryClient = createTestQueryClient()
-    mockSendPromptAsync.mockResolvedValue(undefined)
+    mocks.sendPrompt.mockResolvedValue(inboxItem('test-session', 'Hello'))
+    mocks.switchSessionModel.mockResolvedValue(undefined)
+    mocks.switchSessionAgent.mockResolvedValue(undefined)
   })
 
   const renderHookWithProviders = () =>
-    renderHook(
-      () => useSendPrompt('http://localhost:5551', '/test'),
-      {
-        wrapper: ({ children }) =>
-          createElement(QueryClientProvider, { client: queryClient }, children),
-      }
-    )
+    renderHook(() => useSendPrompt('/test'), {
+      wrapper: ({ children }) =>
+        createElement(QueryClientProvider, { client: queryClient }, children),
+    })
 
-  it('proceeds when no providers in cache', async () => {
-    const { result } = renderHookWithProviders()
+  const setSession = (session: Record<string, unknown>) => {
+    queryClient.setQueryData(['opencode', 'session', 'test-session', '/test'], session)
+  }
 
-    await expect(
-      result.current.mutateAsync({
-        sessionID: 'test-session',
-        prompt: 'Hello',
-        model: 'anthropic/claude-sonnet-4',
-      })
-    ).resolves.toBeUndefined()
-
-    expect(mockSendPromptAsync).toHaveBeenCalledWith(
-      'test-session',
-      expect.objectContaining({ parts: expect.any(Array) }),
-    )
-  })
-
-  it('throws FetchError with MODEL_UNAVAILABLE when model not in providers', async () => {
-    queryClient.setQueryData(
-      ['opencode', 'providers', 'http://localhost:5551', '/test'],
-      {
-        providers: [
-          {
-            id: 'openai',
-            name: 'OpenAI',
-            models: {
-              'gpt-4': { id: 'gpt-4', name: 'GPT-4' },
-            },
-            isConnected: true,
-          },
-        ],
-        connected: ['openai'],
-        default: {},
-      }
-    )
-
-    const { result } = renderHookWithProviders()
-
-    let error: Error | undefined
-    try {
-      await result.current.mutateAsync({
-        sessionID: 'test-session',
-        prompt: 'Hello',
-        model: 'anthropic/claude-sonnet-4',
-      })
-    } catch (e) {
-      error = e as Error
-    }
-
-    expect(error).toBeInstanceOf(FetchError)
-    expect((error as FetchError).code).toBe('MODEL_UNAVAILABLE')
-    expect((error as FetchError).statusCode).toBe(409)
-    expect(error!.message).toBe('Selected model is no longer available. Pick a different model.')
-    expect(mockSendPromptAsync).not.toHaveBeenCalled()
-  })
-
-  it('proceeds when model exists in providers', async () => {
-    queryClient.setQueryData(
-      ['opencode', 'providers', 'http://localhost:5551', '/test'],
-      {
-        providers: [
-          {
-            id: 'anthropic',
-            name: 'Anthropic',
-            models: {
-              'claude-sonnet-4': { id: 'claude-sonnet-4', name: 'Claude Sonnet 4' },
-            },
-            isConnected: true,
-          },
-        ],
-        connected: ['anthropic'],
-        default: {},
-      }
-    )
-
-    const { result } = renderHookWithProviders()
-
-    await expect(
-      result.current.mutateAsync({
-        sessionID: 'test-session',
-        prompt: 'Hello',
-        model: 'anthropic/claude-sonnet-4',
-      })
-    ).resolves.toBeUndefined()
-
-    expect(mockSendPromptAsync).toHaveBeenCalledWith(
-      'test-session',
-      expect.objectContaining({
-        parts: expect.any(Array),
-        model: { providerID: 'anthropic', modelID: 'claude-sonnet-4' },
-      }),
-    )
-  })
-
-  it('clears stored send error on successful send', async () => {
-    mockClearError.mockClear()
-
-    const { result } = renderHookWithProviders()
-
-    await expect(
-      result.current.mutateAsync({
-        sessionID: 'session-1',
-        prompt: 'Hello',
-      })
-    ).resolves.toBeUndefined()
-
-    expect(mockClearError).toHaveBeenCalledWith('session-1')
-  })
-
-  it('stores the raw prompt for restoration when parts omit file mentions', async () => {
-    const { result } = renderHookWithProviders()
-
-    await expect(
-      result.current.mutateAsync({
-        sessionID: 'session-raw',
-        prompt: 'please inspect @App.tsx',
-        parts: [
-          { type: 'text', content: 'please inspect ' },
-          { type: 'file', path: '/repo/src/App.tsx', name: 'App.tsx' },
-        ],
-      })
-    ).resolves.toBeUndefined()
-
-    expect(mockSetQueuedPrompt).toHaveBeenCalledWith('session-raw', 'please inspect @App.tsx')
-  })
-
-  it('stores queued prompt before the async request resolves', async () => {
-    let resolveAsync: () => void = () => {}
-    mockSendPromptAsync.mockImplementationOnce(() => new Promise<void>((resolve) => {
-      resolveAsync = resolve
+  it('sends a V2 prompt without switching when the model and agent match the session', async () => {
+    setSession(sessionInfo({
+      agent: 'build',
+      model: { providerID: 'anthropic', id: 'claude-sonnet-4' },
     }))
 
     const { result } = renderHookWithProviders()
 
-    const pending = result.current.mutateAsync({
-      sessionID: 'session-pending',
-      prompt: 'pending queued prompt',
+    await result.current.mutateAsync({
+      sessionID: 'test-session',
+      text: 'Hello',
+      model: { providerID: 'anthropic', id: 'claude-sonnet-4' },
+      agent: 'build',
     })
 
-    await waitFor(() => {
-      expect(mockSetQueuedPrompt).toHaveBeenCalledWith('session-pending', 'pending queued prompt')
+    expect(mocks.switchSessionModel).not.toHaveBeenCalled()
+    expect(mocks.switchSessionAgent).not.toHaveBeenCalled()
+    expect(mocks.sendPrompt).toHaveBeenCalledWith({
+      sessionID: 'test-session',
+      text: 'Hello',
+      files: undefined,
+      agents: undefined,
+      skills: undefined,
+      delivery: undefined,
     })
-
-    resolveAsync()
-    await expect(pending).resolves.toBeUndefined()
   })
 
-  it('clears queued prompt and stores failed prompt on network failure', async () => {
-    const queryKey = messagesQueryKey('http://localhost:5551', 'session-lost', '/test')
-    queryClient.setQueryData(queryKey, [
-      { info: { id: 'optimistic_user_1' }, parts: [] },
+  it('switches the model before prompting when the selection changed', async () => {
+    setSession(sessionInfo({
+      agent: 'build',
+      model: { providerID: 'anthropic', id: 'claude-sonnet-4' },
+    }))
+
+    const { result } = renderHookWithProviders()
+
+    await result.current.mutateAsync({
+      sessionID: 'test-session',
+      text: 'Hello',
+      model: { providerID: 'openai', id: 'gpt-4', variant: 'v1' },
+      agent: 'build',
+    })
+
+    expect(mocks.switchSessionModel).toHaveBeenCalledWith('test-session', {
+      providerID: 'openai',
+      id: 'gpt-4',
+      variant: 'v1',
+    })
+    expect(mocks.switchSessionModel.mock.invocationCallOrder[0]).toBeLessThan(
+      mocks.sendPrompt.mock.invocationCallOrder[0],
+    )
+    expect(mocks.switchSessionAgent).not.toHaveBeenCalled()
+  })
+
+  it('switches the agent before prompting when the selection changed', async () => {
+    setSession(sessionInfo({
+      agent: 'build',
+      model: { providerID: 'anthropic', id: 'claude-sonnet-4' },
+    }))
+
+    const { result } = renderHookWithProviders()
+
+    await result.current.mutateAsync({
+      sessionID: 'test-session',
+      text: 'Hello',
+      model: { providerID: 'anthropic', id: 'claude-sonnet-4' },
+      agent: 'plan',
+    })
+
+    expect(mocks.switchSessionAgent).toHaveBeenCalledWith('test-session', 'plan')
+    expect(mocks.switchSessionModel).not.toHaveBeenCalled()
+  })
+
+  it('switches back to a previously cached model after an intermediate switch', async () => {
+    const modelA = { providerID: 'anthropic', id: 'claude-sonnet-4' }
+    const modelB = { providerID: 'openai', id: 'gpt-4' }
+    setSession(sessionInfo({ agent: 'build', model: modelA }))
+
+    const { result } = renderHookWithProviders()
+
+    await result.current.mutateAsync({ sessionID: 'test-session', text: 'first', model: modelB })
+    await result.current.mutateAsync({ sessionID: 'test-session', text: 'second', model: modelA })
+
+    expect(mocks.switchSessionModel.mock.calls).toEqual([
+      ['test-session', modelB],
+      ['test-session', modelA],
     ])
-    mockSendPromptAsync.mockRejectedValueOnce(new TypeError('Failed to fetch'))
+  })
+
+  it('switches back to a previously cached agent after an intermediate switch', async () => {
+    setSession(sessionInfo({ agent: 'build', model: { providerID: 'anthropic', id: 'claude-sonnet-4' } }))
+
+    const { result } = renderHookWithProviders()
+
+    await result.current.mutateAsync({ sessionID: 'test-session', text: 'first', agent: 'plan' })
+    await result.current.mutateAsync({ sessionID: 'test-session', text: 'second', agent: 'build' })
+
+    expect(mocks.switchSessionAgent.mock.calls).toEqual([
+      ['test-session', 'plan'],
+      ['test-session', 'build'],
+    ])
+  })
+
+  it('keeps the cached selection when a switch fails', async () => {
+    setSession(sessionInfo({ agent: 'build', model: { providerID: 'anthropic', id: 'claude-sonnet-4' } }))
+    mocks.switchSessionModel.mockRejectedValueOnce(new Error('switch failed'))
+
+    const { result } = renderHookWithProviders()
+
+    await expect(
+      result.current.mutateAsync({
+        sessionID: 'test-session',
+        text: 'Hello',
+        model: { providerID: 'openai', id: 'gpt-4' },
+      }),
+    ).rejects.toThrow('switch failed')
+
+    expect(
+      queryClient.getQueryData<{ model?: unknown }>(['opencode', 'session', 'test-session', '/test'])?.model,
+    ).toEqual({ providerID: 'anthropic', id: 'claude-sonnet-4' })
+  })
+
+  it('keeps a successful model switch when the following agent switch fails', async () => {
+    setSession(sessionInfo({ agent: 'build', model: { providerID: 'anthropic', id: 'claude-sonnet-4' } }))
+    mocks.switchSessionAgent.mockRejectedValueOnce(new Error('agent switch failed'))
+
+    const { result } = renderHookWithProviders()
+
+    await expect(
+      result.current.mutateAsync({
+        sessionID: 'test-session',
+        text: 'Hello',
+        model: { providerID: 'openai', id: 'gpt-4' },
+        agent: 'plan',
+      }),
+    ).rejects.toThrow('agent switch failed')
+
+    const cached = queryClient.getQueryData<{ model?: unknown; agent?: string }>([
+      'opencode',
+      'session',
+      'test-session',
+      '/test',
+    ])
+    expect(cached?.model).toEqual({ providerID: 'openai', id: 'gpt-4' })
+    expect(cached?.agent).toBe('build')
+  })
+
+  it('adds the returned inbox item to the transcript pending state immediately', async () => {
+    mocks.sendPrompt.mockResolvedValue(inboxItem('test-session', 'queued prompt'))
+    queryClient.setQueryData(sessionTranscriptQueryKey('test-session'), {
+      transcript: emptySessionTranscript,
+    })
+
+    const { result } = renderHookWithProviders()
+
+    await result.current.mutateAsync({
+      sessionID: 'test-session',
+      text: 'queued prompt',
+      delivery: 'queue',
+    })
+
+    const cached = queryClient.getQueryData<{
+      transcript: { pending: SessionInboxUser[] }
+    }>(sessionTranscriptQueryKey('test-session'))
+
+    expect(cached?.transcript.pending.map((item) => item.id)).toEqual(['inbox_queued prompt'])
+  })
+
+  it('clears the stored send error on success', async () => {
+    const { result } = renderHookWithProviders()
+
+    await result.current.mutateAsync({
+      sessionID: 'session-1',
+      text: 'Hello',
+    })
+
+    expect(mocks.clearError).toHaveBeenCalledWith('session-1')
+  })
+
+  it('stores the failed prompt for restoration on network failure', async () => {
+    mocks.sendPrompt.mockRejectedValueOnce(new TypeError('Failed to fetch'))
 
     const { result } = renderHookWithProviders()
 
     await expect(
       result.current.mutateAsync({
         sessionID: 'session-lost',
-        prompt: 'keep this prompt',
+        text: 'keep this prompt',
       })
     ).rejects.toThrow('Failed to fetch')
 
-    expect(mockClearQueuedPrompt).toHaveBeenCalledWith('session-lost')
-    expect(mockClearStatus).toHaveBeenCalledWith('session-lost')
-    expect(mockSetError).toHaveBeenCalledWith(expect.objectContaining({
+    expect(mocks.clearStatus).toHaveBeenCalledWith('session-lost')
+    expect(mocks.setError).toHaveBeenCalledWith(expect.objectContaining({
       sessionID: 'session-lost',
       failedPrompt: 'keep this prompt',
       kind: 'network',
     }))
-    expect(queryClient.getQueryData(queryKey)).toEqual([])
   })
 
   it('surfaces no error on gateway timeout (524)', async () => {
-    const queryKey = messagesQueryKey('http://localhost:5551', 'session-524', '/test')
-    queryClient.setQueryData(queryKey, [
-      { info: { id: 'optimistic_user_1' }, parts: [] },
-    ])
-    mockSendPromptAsync.mockRejectedValueOnce(new FetchError('Gateway timeout', 524))
+    mocks.sendPrompt.mockRejectedValueOnce(new FetchError('Gateway timeout', 524))
 
     const { result } = renderHookWithProviders()
 
     await expect(
       result.current.mutateAsync({
         sessionID: 'session-524',
-        prompt: 'long running prompt',
+        text: 'long running prompt',
       })
     ).rejects.toThrow('Gateway timeout')
 
-    expect(queryClient.getQueryData(queryKey)).toEqual([])
-    expect(mockClearStatus).not.toHaveBeenCalled()
-    expect(mockSetError).not.toHaveBeenCalled()
+    expect(mocks.clearStatus).not.toHaveBeenCalled()
+    expect(mocks.setError).not.toHaveBeenCalled()
   })
 
-  it('invalidates the messages query on success', async () => {
+  it('does not refetch the event-driven transcript after a successful send', async () => {
     const invalidateSpy = vi.spyOn(queryClient, 'invalidateQueries')
-    const sessionID = 'session-invalidate'
+    const refetchSpy = vi.spyOn(queryClient, 'refetchQueries')
 
     const { result } = renderHookWithProviders()
 
-    await expect(
-      result.current.mutateAsync({
-        sessionID,
-        prompt: 'Hello',
-      })
-    ).resolves.toBeUndefined()
-
-    expect(invalidateSpy).toHaveBeenCalledWith({
-      queryKey: messagesQueryKey('http://localhost:5551', sessionID, '/test'),
+    await result.current.mutateAsync({
+      sessionID: 'session-no-refetch',
+      text: 'Hello',
     })
+
+    expect(invalidateSpy).not.toHaveBeenCalled()
+    expect(refetchSpy).not.toHaveBeenCalled()
   })
 })

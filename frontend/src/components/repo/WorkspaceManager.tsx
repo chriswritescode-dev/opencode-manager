@@ -10,7 +10,7 @@ interface WorkspaceManagerProps {
   open: boolean
   onOpenChange: (open: boolean) => void
   workspaces: RepoSibling[]
-  onDelete: (workspaceIds: string[]) => void
+  onDelete: (directories: string[]) => void
   activeWorkspaceDirectory?: string
   onActiveWorkspaceChange: (directory: string) => void
   onCreateWorkspace: () => void
@@ -46,8 +46,7 @@ export function WorkspaceManager({
       const haystack = [
         workspaceLabel(workspace),
         workspace.fullPath,
-        workspace.workspaceName,
-        workspace.workspaceId,
+        workspace.worktreeStrategy,
       ]
         .filter(Boolean)
         .join(' ')
@@ -56,28 +55,28 @@ export function WorkspaceManager({
     })
   }, [searchQuery, workspaces])
 
-  const selectableIds = useMemo(
-    () => filteredWorkspaces.map((workspace) => workspace.workspaceId).filter((id): id is string => !!id),
+  const selectableDirectories = useMemo(
+    () => filteredWorkspaces.map((workspace) => workspace.fullPath).filter((directory): directory is string => !!directory),
     [filteredWorkspaces],
   )
 
-  const allSelected = selectableIds.length > 0 && selectableIds.every((id) => selected.has(id))
+  const allSelected = selectableDirectories.length > 0 && selectableDirectories.every((directory) => selected.has(directory))
   const selectedCount = selected.size
 
-  const toggle = (workspaceId: string, checked: boolean) => {
+  const toggle = (directory: string, checked: boolean) => {
     setSelected((prev) => {
       const next = new Set(prev)
       if (checked) {
-        next.add(workspaceId)
+        next.add(directory)
       } else {
-        next.delete(workspaceId)
+        next.delete(directory)
       }
       return next
     })
   }
 
   const toggleAll = () => {
-    setSelected(allSelected ? new Set() : new Set(selectableIds))
+    setSelected(allSelected ? new Set() : new Set(selectableDirectories))
   }
 
   const handleConfirm = () => {
@@ -175,10 +174,10 @@ export function WorkspaceManager({
 
             <div className="flex min-h-0 flex-1 flex-col gap-1 overflow-y-auto pr-1">
             {filteredWorkspaces.map((workspace) => {
-              if (!workspace.workspaceId) return null
-              const workspaceId = workspace.workspaceId
-              const isChecked = selected.has(workspaceId)
-              const isActive = !!workspace.fullPath && workspace.fullPath === activeWorkspaceDirectory
+              if (!workspace.fullPath) return null
+              const directory = workspace.fullPath
+              const isChecked = selected.has(directory)
+              const isActive = directory === activeWorkspaceDirectory
               const label = workspaceLabel(workspace)
               const rowClassName = isActive
                 ? 'border-primary/50 bg-primary/10 text-foreground'
@@ -186,12 +185,10 @@ export function WorkspaceManager({
               if (!manageMode) {
                 return (
                   <button
-                    key={workspaceId}
+                    key={directory}
                     type="button"
-                    disabled={!workspace.fullPath}
                     onClick={() => {
-                      if (!workspace.fullPath) return
-                      onActiveWorkspaceChange(workspace.fullPath)
+                      onActiveWorkspaceChange(directory)
                       onOpenChange(false)
                     }}
                     className={`flex min-h-11 items-center gap-2 rounded-md border px-3 py-2 text-sm text-left ${rowClassName}`}
@@ -200,32 +197,28 @@ export function WorkspaceManager({
                     <GitBranch className="h-3.5 w-3.5 text-primary flex-shrink-0" />
                     <span className={isActive ? 'truncate text-orange-600 dark:text-orange-400' : 'truncate'}>{label}</span>
                     {isActive && <span className="text-xs text-orange-600 dark:text-orange-400">Selected</span>}
-                    {workspace.fullPath && (
-                      <span className="ml-auto hidden truncate text-xs text-muted-foreground md:block md:max-w-[45%]">
-                        {workspace.fullPath}
-                      </span>
-                    )}
+                    <span className="ml-auto hidden truncate text-xs text-muted-foreground md:block md:max-w-[45%]">
+                      {directory}
+                    </span>
                   </button>
                 )
               }
               return (
                 <div
-                  key={workspaceId}
+                  key={directory}
                   className="flex min-h-11 items-center gap-2 rounded-md border border-border bg-muted/30 px-3 py-2 text-sm hover:bg-muted/50"
                 >
                   <Checkbox
                     checked={isChecked}
                     disabled={isDeleting}
-                    onCheckedChange={(checked) => toggle(workspaceId, checked === true)}
-                    aria-label={`Select workspace ${label}`}
+                    onCheckedChange={(checked) => toggle(directory, checked === true)}
+                    aria-label={`Select workspace ${directory}`}
                   />
                   <GitBranch className="h-3.5 w-3.5 text-primary flex-shrink-0" />
                   <span className="truncate">{label}</span>
-                  {workspace.fullPath && (
-                    <span className="ml-auto hidden truncate text-xs text-muted-foreground md:block md:max-w-[45%]">
-                      {workspace.fullPath}
-                    </span>
-                  )}
+                  <span className="ml-auto hidden truncate text-xs text-muted-foreground md:block md:max-w-[45%]">
+                    {directory}
+                  </span>
                 </div>
               )
             })}

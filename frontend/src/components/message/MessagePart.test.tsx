@@ -3,36 +3,21 @@ import { render, screen, fireEvent } from '@testing-library/react'
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
 import { MemoryRouter } from 'react-router-dom'
 import { MessagePart } from './MessagePart'
-import type { MessagePart as MessagePartType } from '@/api/types'
+import { applySessionEvent, emptySessionTranscript } from '@/lib/session-projection'
+import { promptSequence } from '@/test/fixtures/session-projection'
+import type {
+  SessionMessageAssistantReasoning,
+  SessionMessageAssistantText,
+  SessionMessageAssistantTool,
+} from '@opencode-manager/shared/opencode'
 
 const mocks = vi.hoisted(() => ({
-  useTTS: vi.fn(),
   useSettings: vi.fn(),
-  usePermissions: vi.fn(),
-  useQuestions: vi.fn(),
-}))
-
-vi.mock('@/hooks/useTTS', () => ({
-  useTTS: mocks.useTTS,
 }))
 
 vi.mock('@/hooks/useSettings', () => ({
   useSettings: mocks.useSettings,
 }))
-
-vi.mock('@/contexts/EventContext', () => ({
-  usePermissions: () => mocks.usePermissions(),
-  useQuestions: () => mocks.useQuestions(),
-}))
-
-interface MockTTSReturn {
-  speakMessage: ReturnType<typeof vi.fn>
-  stop: ReturnType<typeof vi.fn>
-  activeMessageId: string | null
-  isPlaying: boolean
-  isLoading: boolean
-  isEnabled: boolean
-}
 
 interface MockSettingsReturn {
   preferences: {
@@ -40,281 +25,248 @@ interface MockSettingsReturn {
     showReasoning: boolean
     expandToolCalls: boolean
     expandDiffs: boolean
-    autoScroll: boolean
-    theme: 'dark' | 'light' | 'system'
-    mode: 'plan' | 'build'
   } | undefined
-  isLoading: boolean
-  updateSettings: ReturnType<typeof vi.fn>
-  isUpdating: boolean
 }
 
-describe('MessagePart', () => {
-  const mockSpeakMessage = vi.fn()
-  const mockStop = vi.fn()
+const setupSettings = (preferences: MockSettingsReturn['preferences']) => {
+  mocks.useSettings.mockReturnValue({
+    preferences,
+    isLoading: false,
+    updateSettings: vi.fn(),
+    isUpdating: false,
+  })
+}
 
+const renderWithProviders = (ui: React.ReactElement) => {
+  const queryClient = new QueryClient()
+  return render(
+    <QueryClientProvider client={queryClient}>
+      <MemoryRouter>{ui}</MemoryRouter>
+    </QueryClientProvider>,
+  )
+}
+
+const textPart = (text: string): SessionMessageAssistantText => ({ type: 'text', text })
+
+const reasoningPart = (text: string): SessionMessageAssistantReasoning => ({ type: 'reasoning', text })
+
+const toolPart = (
+  name: string,
+  state: SessionMessageAssistantTool['state'],
+  time: SessionMessageAssistantTool['time'] = { created: Date.now() },
+): SessionMessageAssistantTool => ({
+  type: 'tool',
+  id: `tool_${name}`,
+  name,
+  state,
+  time,
+})
+
+const completedShell = (
+  input: Record<string, unknown>,
+  content: string,
+  metadata: Record<string, unknown> = {},
+): SessionMessageAssistantTool =>
+  toolPart('shell', {
+    status: 'completed',
+    input,
+    content: [{ type: 'text', text: content }],
+    metadata,
+  })
+
+describe('MessagePart', () => {
   beforeEach(() => {
-    mockSpeakMessage.mockClear()
-    mockStop.mockClear()
-    mocks.useSettings.mockReturnValue({
-      preferences: {
+    vi.clearAllMocks()
+    setupSettings({
+      simpleChatMode: false,
+      showReasoning: false,
+      expandToolCalls: false,
+      expandDiffs: true,
+    })
+  })
+
+  it('renders a text part', () => {
+    renderWithProviders(<MessagePart part={textPart('Hello, this is a text message')} />)
+
+    expect(screen.getByText('Hello, this is a text message')).toBeInTheDocument()
+  })
+
+  it('renders null for an empty text part', () => {
+    const { container } = renderWithProviders(<MessagePart part={textPart('   ')} />)
+
+    expect(container.firstChild).toBeNull()
+  })
+
+  describe('reasoning', () => {
+    it('renders null when showReasoning is false', () => {
+      setupSettings({
         simpleChatMode: false,
         showReasoning: false,
         expandToolCalls: false,
         expandDiffs: true,
-        autoScroll: true,
-        theme: 'dark' as const,
-        mode: 'build' as const,
-      },
-      isLoading: false,
-      updateSettings: vi.fn(),
-      isUpdating: false,
+      })
+
+      const { container } = renderWithProviders(<MessagePart part={reasoningPart('This is the reasoning text')} />)
+
+      expect(container.firstChild).toBeNull()
     })
-    mocks.usePermissions.mockReturnValue({
-      getForCallID: vi.fn(() => null),
+
+    it('renders the reasoning part when showReasoning is true', () => {
+      setupSettings({
+        simpleChatMode: false,
+        showReasoning: true,
+        expandToolCalls: false,
+        expandDiffs: true,
+      })
+
+      renderWithProviders(<MessagePart part={reasoningPart('This is the reasoning text')} />)
+
+      expect(screen.getByText('Reasoning')).toBeInTheDocument()
+      expect(screen.getByText('This is the reasoning text')).toBeInTheDocument()
     })
-    mocks.useQuestions.mockReturnValue({
-      getForCallID: vi.fn(() => null),
+
+    it('renders null in simpleChatMode even when showReasoning is true', () => {
+      setupSettings({
+        simpleChatMode: true,
+        showReasoning: true,
+        expandToolCalls: false,
+        expandDiffs: true,
+      })
+
+      const { container } = renderWithProviders(<MessagePart part={reasoningPart('This is the reasoning text')} />)
+
+      expect(container.firstChild).toBeNull()
     })
   })
 
-  const setup = (options: {
-    ttsEnabled?: boolean
-    autoPlay?: boolean
-    activeMessageId?: string | null
-    isPlaying?: boolean
-    isLoading?: boolean
-  } = {}) => {
-    const mockTTS: MockTTSReturn = {
-      speakMessage: mockSpeakMessage,
-      stop: mockStop,
-      activeMessageId: options.activeMessageId ?? null,
-      isPlaying: options.isPlaying ?? false,
-      isLoading: options.isLoading ?? false,
-      isEnabled: options.ttsEnabled ?? true,
-    }
-    mocks.useTTS.mockReturnValue(mockTTS)
-  }
+  describe('tool parts', () => {
+    it('renders a completed shell tool with its output', () => {
+      renderWithProviders(<MessagePart part={completedShell({ command: 'git status' }, 'clean tree')} />)
 
-  const setupSettings = (preferences: MockSettingsReturn['preferences']) => {
-    mocks.useSettings.mockReturnValue({
-      preferences,
-      isLoading: false,
-      updateSettings: vi.fn(),
-      isUpdating: false,
+      expect(screen.getByText('shell')).toBeInTheDocument()
+      expect(screen.getByText('git status')).toBeInTheDocument()
+
+      fireEvent.click(screen.getByRole('button'))
+
+      expect(screen.getByText('clean tree')).toBeInTheDocument()
     })
-  }
 
-  const createStepFinishPart = (messageID: string): MessagePartType => ({
-    type: 'step-finish',
-    messageID,
-    sessionID: 'test-session',
-    cost: 0.01,
-    tokens: {
-      input: 100,
-      output: 50,
-      cache: { read: 0, write: 0 },
-    },
-    time: {
-      start: Date.now(),
-      end: Date.now() + 100,
-    },
-  })
+    it('renders a running shell tool with its command', () => {
+      renderWithProviders(
+        <MessagePart
+          part={toolPart('shell', { status: 'running', input: { command: 'bun test' }, metadata: {} })}
+        />,
+      )
 
-  const TEST_MESSAGE_ID = 'message-1'
-  const TEST_CONTENT = 'Test message content'
+      expect(screen.getByText('bun test')).toBeInTheDocument()
+    })
 
-  it('renders TTS button for step-finish part with message text', () => {
-    setup()
-    const part = createStepFinishPart(TEST_MESSAGE_ID)
-    
-    render(
-      <MessagePart
-        part={part}
-        messageTextContent={TEST_CONTENT}
-      />
-    )
-    
-    expect(screen.getByRole('button')).toBeInTheDocument()
-    expect(screen.getByTitle('Read aloud')).toBeInTheDocument()
-  })
+    it('renders a streaming tool with a preparing state', () => {
+      renderWithProviders(<MessagePart part={toolPart('shell', { status: 'streaming', input: '' })} />)
 
-  it('does not render TTS button when message text is empty', () => {
-    setup()
-    const part = createStepFinishPart(TEST_MESSAGE_ID)
-    
-    render(
-      <MessagePart
-        part={part}
-        messageTextContent=""
-      />
-    )
-    
-    expect(screen.queryByRole('button')).not.toBeInTheDocument()
-  })
+      expect(screen.getByText('shell')).toBeInTheDocument()
+    })
 
-  it('does not render TTS button when TTS is disabled', () => {
-    setup({ ttsEnabled: false })
-    const part = createStepFinishPart(TEST_MESSAGE_ID)
-    
-    render(
-      <MessagePart
-        part={part}
-        messageTextContent={TEST_CONTENT}
-      />
-    )
-    
-    expect(screen.queryByRole('button')).not.toBeInTheDocument()
-  })
+    it('renders an error tool with the error message', () => {
+      renderWithProviders(
+        <MessagePart
+          part={toolPart('shell', {
+            status: 'error',
+            input: { command: 'bun test' },
+            error: { type: 'tool.failed', message: 'command exited 1' },
+          })}
+        />,
+      )
 
-  it('calls speakMessage with message id on tap when idle', () => {
-    setup()
-    const part = createStepFinishPart(TEST_MESSAGE_ID)
-    
-    render(
-      <MessagePart
-        part={part}
-        messageTextContent={TEST_CONTENT}
-      />
-    )
-    
-    const button = screen.getByRole('button')
-    fireEvent.click(button)
-    
-    expect(mockSpeakMessage).toHaveBeenCalledTimes(1)
-    expect(mockSpeakMessage).toHaveBeenCalledWith(TEST_MESSAGE_ID, TEST_CONTENT)
-  })
+      fireEvent.click(screen.getByRole('button'))
 
-  it('calls stop on tap when this message is active', () => {
-    const mockTTSForTest: MockTTSReturn = {
-      speakMessage: mockSpeakMessage,
-      stop: mockStop,
-      activeMessageId: TEST_MESSAGE_ID,
-      isPlaying: true,
-      isLoading: false,
-      isEnabled: true,
-    }
-    mocks.useTTS.mockReturnValue(mockTTSForTest)
-    
-    const part = createStepFinishPart(TEST_MESSAGE_ID)
-    
-    render(
-      <MessagePart
-        part={part}
-        messageTextContent={TEST_CONTENT}
-      />
-    )
-    
-    const button = screen.getByRole('button')
-    fireEvent.click(button)
-    
-    expect(mockStop).toHaveBeenCalledTimes(1)
-    expect(mockSpeakMessage).not.toHaveBeenCalled()
-  })
+      expect(screen.getByText('command exited 1')).toBeInTheDocument()
+    })
 
-  it('shows active state when this message is playing', () => {
-    setup({ activeMessageId: TEST_MESSAGE_ID, isPlaying: true })
-    const part = createStepFinishPart(TEST_MESSAGE_ID)
-    
-    render(
-      <MessagePart
-        part={part}
-        messageTextContent={TEST_CONTENT}
-      />
-    )
-    
-    const button = screen.getByRole('button')
-    expect(button).toHaveClass('bg-red-500/20')
-    expect(button).toHaveClass('text-red-500')
-  })
+    it('renders a tool part projected from the shared fixtures', () => {
+      const transcript = promptSequence.reduce(applySessionEvent, emptySessionTranscript)
+      const assistant = transcript.messages.find((message) => message.type === 'assistant')
+      const projected = assistant?.type === 'assistant'
+        ? assistant.content.find((part) => part.type === 'tool')
+        : undefined
 
-  it('shows active state when this message is loading', () => {
-    setup({ activeMessageId: TEST_MESSAGE_ID, isLoading: true })
-    const part = createStepFinishPart(TEST_MESSAGE_ID)
-    
-    render(
-      <MessagePart
-        part={part}
-        messageTextContent={TEST_CONTENT}
-      />
-    )
-    
-    const button = screen.getByRole('button')
-    expect(button).toHaveClass('bg-red-500/20')
-  })
+      expect(projected).toBeDefined()
 
-  it('does not show active state when different message is playing', () => {
-    setup({ activeMessageId: 'other-message', isPlaying: true })
-    const part = createStepFinishPart(TEST_MESSAGE_ID)
-    
-    render(
-      <MessagePart
-        part={part}
-        messageTextContent={TEST_CONTENT}
-      />
-    )
-    
-    const button = screen.getByRole('button')
-    expect(button).not.toHaveClass('bg-red-500/20')
-  })
+      renderWithProviders(<MessagePart part={projected!} />)
 
-  it('tracks playback by message id not text', () => {
-    setup({ activeMessageId: TEST_MESSAGE_ID, isPlaying: true })
-    const part1 = createStepFinishPart(TEST_MESSAGE_ID)
-    const part2 = createStepFinishPart('message-2')
-    
-    const { rerender } = render(
-      <MessagePart
-        part={part1}
-        messageTextContent={TEST_CONTENT}
-      />
-    )
-    
-    expect(screen.getByRole('button')).toHaveClass('bg-red-500/20')
-    
-    rerender(
-      <MessagePart
-        part={part2}
-        messageTextContent={TEST_CONTENT}
-      />
-    )
-    
-    expect(screen.getByRole('button')).not.toHaveClass('bg-red-500/20')
+      expect(screen.getByText('shell')).toBeInTheDocument()
+      expect(screen.getByText('bun test')).toBeInTheDocument()
+
+      fireEvent.click(screen.getByRole('button'))
+
+      expect(screen.getByText('12 tests passed')).toBeInTheDocument()
+    })
+
+    it('renders null for a non-subagent tool in simpleChatMode', () => {
+      setupSettings({
+        simpleChatMode: true,
+        showReasoning: false,
+        expandToolCalls: false,
+        expandDiffs: true,
+      })
+
+      const { container } = renderWithProviders(
+        <MessagePart part={completedShell({ command: 'git status' }, 'clean')} />,
+      )
+
+      expect(container.firstChild).toBeNull()
+    })
+
+    it('renders the subagent tool in simpleChatMode', () => {
+      setupSettings({
+        simpleChatMode: true,
+        showReasoning: false,
+        expandToolCalls: false,
+        expandDiffs: true,
+      })
+
+      const onChildSessionClick = vi.fn()
+      renderWithProviders(
+        <MessagePart
+          part={toolPart('subagent', {
+            status: 'completed',
+            input: { description: 'Review changes' },
+            content: [{ type: 'text', text: 'done' }],
+            metadata: { sessionID: 'child-session' },
+          })}
+          onChildSessionClick={onChildSessionClick}
+        />,
+      )
+
+      expect(screen.getByText('Review changes')).toBeInTheDocument()
+      expect(screen.getByText('sub-agent')).toBeInTheDocument()
+
+      fireEvent.click(screen.getByRole('button'))
+      expect(onChildSessionClick).toHaveBeenCalledWith('child-session')
+    })
   })
 
   describe('sandbox indicator', () => {
-    const createBashPart = (command: string, metadata?: Record<string, unknown>): MessagePartType => ({
-      type: 'tool',
-      tool: 'bash',
-      sessionID: 'test-session',
-      state: {
-        status: 'completed',
-        input: { command },
-        output: 'ok',
-        ...(metadata === undefined ? {} : { metadata }),
-        time: { start: Date.now(), end: Date.now() + 100 },
-      },
-    })
+    const wrapped =
+      "'/usr/local/bin/msb' exec ocm-workspace --no-tty -q -u '1001:1001' -w '/workspace/repos/ai-test' --timeout 600s -- sh -c 'git status'"
 
-    const wrapped = "'/usr/local/bin/msb' exec ocm-workspace --no-tty -q -u '1001:1001' -w '/workspace/repos/ai-test' --timeout 600s -- sh -c 'git status'"
-
-    it('shows the sandbox badge for a bash call the sandbox plugin marked', () => {
-      render(<MessagePart part={createBashPart('git status', { sandbox: true })} />)
+    it('shows the sandbox badge for a completed shell call the sandbox plugin marked', () => {
+      renderWithProviders(<MessagePart part={completedShell({ command: 'git status' }, 'ok', { sandbox: true })} />)
 
       expect(screen.getByText('sandbox')).toBeInTheDocument()
       expect(screen.getByText('git status')).toBeInTheDocument()
     })
 
-    it('shows the sandbox badge and the unwrapped command for a legacy recorded sandbox call', () => {
-      render(<MessagePart part={createBashPart(wrapped)} />)
+    it('shows the sandbox badge and unwrapped command for a legacy recorded sandbox call', () => {
+      renderWithProviders(<MessagePart part={completedShell({ command: wrapped }, 'ok')} />)
 
       expect(screen.getByText('sandbox')).toBeInTheDocument()
       expect(screen.getByText('git status')).toBeInTheDocument()
       expect(screen.queryByText(/msb/)).toBeNull()
     })
 
-    it('omits the sandbox badge for a host bash call', () => {
-      render(<MessagePart part={createBashPart('git status')} />)
+    it('omits the sandbox badge for a host shell call', () => {
+      renderWithProviders(<MessagePart part={completedShell({ command: 'git status' }, 'ok')} />)
 
       expect(screen.queryByText('sandbox')).toBeNull()
       expect(screen.getByText('git status')).toBeInTheDocument()
@@ -322,26 +274,13 @@ describe('MessagePart', () => {
   })
 
   describe('tool output clamping', () => {
-    const createBashPartWithOutput = (output: string): MessagePartType => ({
-      type: 'tool',
-      tool: 'bash',
-      sessionID: 'test-session',
-      state: {
-        status: 'completed',
-        input: { command: 'echo big' },
-        output,
-        time: { start: Date.now(), end: Date.now() + 100 },
-      },
-    })
-
     const expandTool = () => {
       fireEvent.click(screen.getByRole('button'))
     }
 
     it('renders small output in full without omission marker', () => {
-      setup()
       const output = Array.from({ length: 200 }, (_, i) => `line ${i}`).join('\n')
-      render(<MessagePart part={createBashPartWithOutput(output)} />)
+      renderWithProviders(<MessagePart part={completedShell({ command: 'echo big' }, output)} />)
 
       expandTool()
 
@@ -352,7 +291,6 @@ describe('MessagePart', () => {
     })
 
     it('clamps very large output with a marker and keeps head and tail', () => {
-      setup()
       const lines: string[] = []
       for (let i = 0; lines.join('\n').length < 200_000; i++) {
         lines.push(`line-${i} ${'x'.repeat(80)} marker-start-${i === 0 ? 'FIRST' : ''}${i === 0 ? 'FIRST-marker-end' : ''}`)
@@ -361,7 +299,7 @@ describe('MessagePart', () => {
       const startMarker = 'marker-start-FIRST'
       const endContent = `line-${lines.length - 1}`
 
-      render(<MessagePart part={createBashPartWithOutput(output)} />)
+      renderWithProviders(<MessagePart part={completedShell({ command: 'echo big' }, output)} />)
 
       expandTool()
 
@@ -376,7 +314,6 @@ describe('MessagePart', () => {
     })
 
     it('copies the full unclamped output via the copy button', async () => {
-      setup()
       const writeText = vi.fn().mockResolvedValue(undefined)
       Object.assign(navigator, { clipboard: { writeText } })
 
@@ -386,7 +323,7 @@ describe('MessagePart', () => {
       }
       const output = lines.join('\n')
 
-      render(<MessagePart part={createBashPartWithOutput(output)} />)
+      renderWithProviders(<MessagePart part={completedShell({ command: 'echo big' }, output)} />)
 
       expandTool()
 
@@ -397,433 +334,102 @@ describe('MessagePart', () => {
     })
   })
 
-  describe('simpleChatMode', () => {
-    const createToolPart = (): MessagePartType => ({
-      type: 'tool',
-      tool: 'edit',
-      sessionID: 'test-session',
-      state: {
-        status: 'completed',
-        input: { filePath: '/test/file.txt' },
-        time: { start: Date.now(), end: Date.now() + 100 },
-      },
+  describe('file tools', () => {
+    it('renders an edit tool diff', () => {
+      renderWithProviders(
+        <MessagePart
+          part={toolPart('edit', {
+            status: 'completed',
+            input: { path: '/test/file.txt' },
+            content: [{ type: 'text', text: 'edited' }],
+            metadata: {
+              files: [
+                {
+                  file: '/test/file.txt',
+                  patch: '@@ -1 +1 @@\n-old\n+new',
+                  additions: 1,
+                  deletions: 1,
+                  status: 'modified',
+                },
+              ],
+            },
+          })}
+        />,
+      )
+
+      expect(screen.getByText('/test/file.txt')).toBeInTheDocument()
+      expect(screen.getByText('+1')).toBeInTheDocument()
+      expect(screen.getByText('-1')).toBeInTheDocument()
     })
 
-    const createPatchPart = (): MessagePartType => ({
-      type: 'patch',
-      hash: 'abc123',
-      files: ['/test/file.txt'],
-      sessionID: 'test-session',
+    it('renders a write tool with its file path', () => {
+      renderWithProviders(
+        <MessagePart
+          part={toolPart('write', {
+            status: 'completed',
+            input: { path: '/test/file.txt', content: 'hello' },
+            content: [{ type: 'text', text: 'Wrote file successfully' }],
+            metadata: {},
+          })}
+        />,
+      )
+
+      expect(screen.getByText('/test/file.txt')).toBeInTheDocument()
     })
 
-    const createReasoningPart = (): MessagePartType => ({
-      type: 'reasoning',
-      text: 'This is the reasoning text',
-      sessionID: 'test-session',
+    it('renders every file of a multi-file patch with per-file links', () => {
+      const onFileClick = vi.fn()
+      renderWithProviders(
+        <MessagePart
+          part={toolPart('patch', {
+            status: 'completed',
+            input: { patchText: '*** Begin Patch\n*** Update File: src/a.ts\n*** End Patch' },
+            content: [{ type: 'text', text: 'Success. Updated the following files:\nM src/a.ts\nM src/b.ts' }],
+            metadata: {
+              files: [
+                { file: 'src/a.ts', patch: '@@ -1 +1 @@\n-old-a\n+new-a', additions: 1, deletions: 1, status: 'modified' },
+                { file: 'src/b.ts', patch: '@@ -1 +1 @@\n-old-b\n+new-b', additions: 2, deletions: 3, status: 'modified' },
+              ],
+            },
+          })}
+          onFileClick={onFileClick}
+        />,
+      )
+
+      expect(screen.getByText('src/a.ts')).toBeInTheDocument()
+      expect(screen.getByText('src/b.ts')).toBeInTheDocument()
+
+      const buttons = screen.getAllByRole('button')
+      expect(buttons).toHaveLength(2)
+      fireEvent.click(buttons[0])
+      fireEvent.click(buttons[1])
+
+      expect(screen.getByText('+new-a')).toBeInTheDocument()
+      expect(screen.getByText('+new-b')).toBeInTheDocument()
+
+      fireEvent.click(screen.getByText('src/a.ts'))
+      expect(onFileClick).toHaveBeenCalledWith('src/a.ts')
+      fireEvent.click(screen.getByText('src/b.ts'))
+      expect(onFileClick).toHaveBeenCalledWith('src/b.ts')
     })
 
-    const createSnapshotPart = (): MessagePartType => ({
-      type: 'snapshot',
-      snapshot: 'snapshot-data',
-      sessionID: 'test-session',
-    })
+    it('falls back to the generic tool output when a patch has no diff metadata', () => {
+      renderWithProviders(
+        <MessagePart
+          part={toolPart('patch', {
+            status: 'completed',
+            input: { patchText: 'not a patch' },
+            content: [{ type: 'text', text: 'patch verification failed' }],
+            metadata: {},
+          })}
+        />,
+      )
 
-    const createAgentPart = (): MessagePartType => ({
-      type: 'agent',
-      name: 'test-agent',
-      sessionID: 'test-session',
-    })
+      expect(screen.getByText('patch')).toBeInTheDocument()
 
-    const createStepFinishPart = (): MessagePartType => ({
-      type: 'step-finish',
-      messageID: 'test-message',
-      sessionID: 'test-session',
-      cost: 0.01,
-      tokens: {
-        input: 100,
-        output: 50,
-        cache: { read: 0, write: 0 },
-      },
-      time: {
-        start: Date.now(),
-        end: Date.now() + 100,
-      },
-    })
-
-    const createTextPart = (): MessagePartType => ({
-      type: 'text',
-      text: 'Hello, this is a text message',
-      sessionID: 'test-session',
-    })
-
-    const createSubtaskPart = (): MessagePartType => ({
-      type: 'subtask',
-      prompt: 'Please review this change',
-      description: 'Review changes',
-      agent: 'auditor',
-      command: 'review',
-      sessionID: 'test-session',
-    })
-
-    it('renders null for non-task tool part when simpleChatMode is true', () => {
-      setupSettings({
-        simpleChatMode: true,
-        showReasoning: false,
-        expandToolCalls: false,
-        expandDiffs: true,
-        autoScroll: true,
-        theme: 'dark',
-        mode: 'build',
-      })
-      
-      const part = createToolPart()
-      const { container } = render(<MessagePart part={part} />)
-      
-      expect(container.firstChild).toBeNull()
-    })
-
-    it('renders a compact clickable task row when simpleChatMode is true', () => {
-      setupSettings({
-        simpleChatMode: true,
-        showReasoning: false,
-        expandToolCalls: false,
-        expandDiffs: true,
-        autoScroll: true,
-        theme: 'dark',
-        mode: 'build',
-      })
-
-      const part = {
-        ...createToolPart(),
-        tool: 'task',
-        callID: 'call-1',
-        metadata: { sessionId: 'child-session' },
-        state: {
-          status: 'completed',
-          input: { description: 'Review changes' },
-          output: 'done',
-          time: { start: Date.now(), end: Date.now() + 100 },
-        },
-      } as MessagePartType
-      const onChildSessionClick = vi.fn()
-
-      render(<MessagePart part={part} onChildSessionClick={onChildSessionClick} />)
-
-      expect(screen.getByText('Review changes')).toBeInTheDocument()
-      expect(screen.getByText('sub-agent')).toBeInTheDocument()
-      expect(screen.queryByText('View details')).not.toBeInTheDocument()
       fireEvent.click(screen.getByRole('button'))
-      expect(onChildSessionClick).toHaveBeenCalledWith('child-session')
-    })
 
-    it('renders a compact subtask row when simpleChatMode is true', () => {
-      setupSettings({
-        simpleChatMode: true,
-        showReasoning: false,
-        expandToolCalls: false,
-        expandDiffs: true,
-        autoScroll: true,
-        theme: 'dark',
-        mode: 'build',
-      })
-
-      render(<MessagePart part={createSubtaskPart()} />)
-
-      expect(screen.getByText('Review changes')).toBeInTheDocument()
-      expect(screen.getByText('sub-agent')).toBeInTheDocument()
-      expect(screen.queryByText('auditor')).not.toBeInTheDocument()
-      expect(screen.queryByText('Please review this change')).not.toBeInTheDocument()
-    })
-
-    it('renders the same compact subtask row when simpleChatMode is false', () => {
-      setupSettings({
-        simpleChatMode: false,
-        showReasoning: false,
-        expandToolCalls: false,
-        expandDiffs: true,
-        autoScroll: true,
-        theme: 'dark',
-        mode: 'build',
-      })
-
-      render(<MessagePart part={createSubtaskPart()} />)
-
-      expect(screen.getByText('Review changes')).toBeInTheDocument()
-      expect(screen.getByText('sub-agent')).toBeInTheDocument()
-      expect(screen.queryByText('Sub-agent: auditor')).not.toBeInTheDocument()
-      expect(screen.queryByText('Please review this change')).not.toBeInTheDocument()
-    })
-
-    it('renders null for patch part when simpleChatMode is true', () => {
-      setupSettings({
-        simpleChatMode: true,
-        showReasoning: false,
-        expandToolCalls: false,
-        expandDiffs: true,
-        autoScroll: true,
-        theme: 'dark',
-        mode: 'build',
-      })
-      
-      const part = createPatchPart()
-      const { container } = render(<MessagePart part={part} />)
-      
-      expect(container.firstChild).toBeNull()
-    })
-
-    it('renders null for reasoning part when simpleChatMode is true', () => {
-      setupSettings({
-        simpleChatMode: true,
-        showReasoning: true,
-        expandToolCalls: false,
-        expandDiffs: true,
-        autoScroll: true,
-        theme: 'dark',
-        mode: 'build',
-      })
-      
-      const part = createReasoningPart()
-      const { container } = render(<MessagePart part={part} />)
-      
-      expect(container.firstChild).toBeNull()
-    })
-
-    it('renders null for snapshot part when simpleChatMode is true', () => {
-      setupSettings({
-        simpleChatMode: true,
-        showReasoning: false,
-        expandToolCalls: false,
-        expandDiffs: true,
-        autoScroll: true,
-        theme: 'dark',
-        mode: 'build',
-      })
-      
-      const part = createSnapshotPart()
-      const { container } = render(<MessagePart part={part} />)
-      
-      expect(container.firstChild).toBeNull()
-    })
-
-    it('renders null for agent part when simpleChatMode is true', () => {
-      setupSettings({
-        simpleChatMode: true,
-        showReasoning: false,
-        expandToolCalls: false,
-        expandDiffs: true,
-        autoScroll: true,
-        theme: 'dark',
-        mode: 'build',
-      })
-      
-      const part = createAgentPart()
-      const { container } = render(<MessagePart part={part} />)
-      
-      expect(container.firstChild).toBeNull()
-    })
-
-    it('renders text part when simpleChatMode is true', () => {
-      setupSettings({
-        simpleChatMode: true,
-        showReasoning: false,
-        expandToolCalls: false,
-        expandDiffs: true,
-        autoScroll: true,
-        theme: 'dark',
-        mode: 'build',
-      })
-      
-      const part = createTextPart()
-      render(<MessagePart part={part} />)
-      
-      expect(screen.getByText('Hello, this is a text message')).toBeInTheDocument()
-    })
-
-    it('renders tool part when simpleChatMode is false', () => {
-      setupSettings({
-        simpleChatMode: false,
-        showReasoning: false,
-        expandToolCalls: false,
-        expandDiffs: true,
-        autoScroll: true,
-        theme: 'dark',
-        mode: 'build',
-      })
-      
-      const part = createToolPart()
-      const queryClient = new QueryClient()
-      const { container } = render(
-        <QueryClientProvider client={queryClient}>
-          <MemoryRouter>
-            <MessagePart part={part} />
-          </MemoryRouter>
-        </QueryClientProvider>
-      )
-      
-      expect(container.firstChild).not.toBeNull()
-    })
-
-    it('renders patch part when simpleChatMode is false', () => {
-      setupSettings({
-        simpleChatMode: false,
-        showReasoning: false,
-        expandToolCalls: false,
-        expandDiffs: true,
-        autoScroll: true,
-        theme: 'dark',
-        mode: 'build',
-      })
-      
-      const part = createPatchPart()
-      const { container } = render(<MessagePart part={part} />)
-      
-      expect(container.firstChild).not.toBeNull()
-    })
-
-    it('renders snapshot part when simpleChatMode is false', () => {
-      setupSettings({
-        simpleChatMode: false,
-        showReasoning: false,
-        expandToolCalls: false,
-        expandDiffs: true,
-        autoScroll: true,
-        theme: 'dark',
-        mode: 'build',
-      })
-      
-      const part = createSnapshotPart()
-      const { container } = render(<MessagePart part={part} />)
-      
-      expect(container.firstChild).not.toBeNull()
-    })
-
-    it('renders agent part when simpleChatMode is false', () => {
-      setupSettings({
-        simpleChatMode: false,
-        showReasoning: false,
-        expandToolCalls: false,
-        expandDiffs: true,
-        autoScroll: true,
-        theme: 'dark',
-        mode: 'build',
-      })
-      
-      const part = createAgentPart()
-      const { container } = render(<MessagePart part={part} />)
-      
-      expect(container.firstChild).not.toBeNull()
-    })
-
-    it('renders null for step-finish part when simpleChatMode is true', () => {
-      setupSettings({
-        simpleChatMode: true,
-        showReasoning: false,
-        expandToolCalls: false,
-        expandDiffs: true,
-        autoScroll: true,
-        theme: 'dark',
-        mode: 'build',
-      })
-      
-      const part = createStepFinishPart()
-      const { container } = render(<MessagePart part={part} />)
-      
-      expect(container.firstChild).toBeNull()
-    })
-
-    it('renders step-finish part when simpleChatMode is false', () => {
-      setupSettings({
-        simpleChatMode: false,
-        showReasoning: false,
-        expandToolCalls: false,
-        expandDiffs: true,
-        autoScroll: true,
-        theme: 'dark',
-        mode: 'build',
-      })
-      
-      const part = createStepFinishPart()
-      const { container } = render(<MessagePart part={part} />)
-      
-      expect(container.firstChild).not.toBeNull()
-    })
-  })
-
-  describe('showReasoning', () => {
-    const createReasoningPart = (): MessagePartType => ({
-      type: 'reasoning',
-      text: 'This is the reasoning text',
-      sessionID: 'test-session',
-    })
-
-    it('renders null for reasoning part when showReasoning is false', () => {
-      setupSettings({
-        simpleChatMode: false,
-        showReasoning: false,
-        expandToolCalls: false,
-        expandDiffs: true,
-        autoScroll: true,
-        theme: 'dark',
-        mode: 'build',
-      })
-      
-      const part = createReasoningPart()
-      const { container } = render(<MessagePart part={part} />)
-      
-      expect(container.firstChild).toBeNull()
-    })
-
-    it('renders reasoning part when showReasoning is true', () => {
-      setupSettings({
-        simpleChatMode: false,
-        showReasoning: true,
-        expandToolCalls: false,
-        expandDiffs: true,
-        autoScroll: true,
-        theme: 'dark',
-        mode: 'build',
-      })
-      
-      const part = createReasoningPart()
-      render(<MessagePart part={part} />)
-      
-      expect(screen.getByText('This is the reasoning text')).toBeInTheDocument()
-      expect(screen.getByText('Reasoning')).toBeInTheDocument()
-    })
-  })
-
-  describe('synthetic text parts', () => {
-    const createTextPart = (overrides: Partial<MessagePartType>): MessagePartType => ({
-      type: 'text',
-      text: 'hello',
-      sessionID: 'test-session',
-      messageID: 'm1',
-      ...overrides,
-    } as MessagePartType)
-
-    it('does not render synthetic text parts', () => {
-      setup()
-      const part = createTextPart({
-        text: 'Called the Read tool with the following input: {"filePath":"/x/README.md"}',
-        synthetic: true,
-      } as Partial<MessagePartType>)
-
-      const { container } = render(
-        <MessagePart part={part} role="user" allParts={[part]} partIndex={0} />,
-      )
-
-      expect(container.firstChild).toBeNull()
-    })
-
-    it('renders non-synthetic text parts normally', () => {
-      setup()
-      const part = createTextPart({ text: 'Just a normal user message' })
-
-      render(
-        <MessagePart part={part} role="user" allParts={[part]} partIndex={0} />,
-      )
-
-      expect(screen.getByText('Just a normal user message')).toBeInTheDocument()
+      expect(screen.getByText('patch verification failed')).toBeInTheDocument()
     })
   })
 })

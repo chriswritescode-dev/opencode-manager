@@ -48,7 +48,6 @@ function makeRunRow(overrides: Record<string, unknown> = {}) {
     run_branch: null,
     commit_hash: null,
     worktree_path: null,
-    workspace_id: null,
     ...overrides,
   }
 }
@@ -305,7 +304,6 @@ describe('schedule database queries', () => {
     expect(updateStmt.run).toHaveBeenCalledWith(
       '/worktrees/feature-branch',
       'feature-x',
-      null,
       null,
       42,
       7,
@@ -609,8 +607,8 @@ describe('schedule database queries', () => {
   it('listScheduleRunArtifactsByJob maps run branch/worktree rows', () => {
     const stmt = {
       all: vi.fn().mockReturnValue([
-        { id: 3, status: 'completed', run_branch: 'schedule/7/run-3', worktree_path: null, workspace_id: null },
-        { id: 2, status: 'running', run_branch: 'schedule/7/run-2', worktree_path: '/wt/2', workspace_id: null },
+        { id: 3, status: 'completed', run_branch: 'schedule/7/run-3', worktree_path: null },
+        { id: 2, status: 'running', run_branch: 'schedule/7/run-2', worktree_path: '/wt/2' },
       ]),
     }
     mockDb.prepare.mockReturnValue(stmt)
@@ -619,9 +617,24 @@ describe('schedule database queries', () => {
 
     expect(stmt.all).toHaveBeenCalledWith(42, 7)
     expect(artifacts).toEqual([
-      { id: 3, status: 'completed', runBranch: 'schedule/7/run-3', worktreePath: null, workspaceId: null },
-      { id: 2, status: 'running', runBranch: 'schedule/7/run-2', worktreePath: '/wt/2', workspaceId: null },
+      { id: 3, status: 'completed', runBranch: 'schedule/7/run-3', worktreePath: null },
+      { id: 2, status: 'running', runBranch: 'schedule/7/run-2', worktreePath: '/wt/2' },
     ])
+  })
+
+  it('listActiveScheduleRunWorktreePaths returns only non-null worktree paths', () => {
+    const stmt = {
+      all: vi.fn().mockReturnValue([
+        { worktree_path: '/wt/2' },
+        { worktree_path: '/wt/9' },
+      ]),
+    }
+    mockDb.prepare.mockReturnValue(stmt)
+
+    const paths = schedulesDb.listActiveScheduleRunWorktreePaths(mockDb)
+
+    expect(mockDb.prepare).toHaveBeenCalledWith('SELECT worktree_path FROM schedule_runs WHERE worktree_path IS NOT NULL')
+    expect(paths).toEqual(['/wt/2', '/wt/9'])
   })
 
   it('deleteScheduleRunById deletes a single run row', () => {

@@ -487,7 +487,7 @@ describe('OpenCodeConfigManager', () => {
 
     const { showToast } = await import('@/lib/toast')
     await waitFor(() => expect(showToast.success).toHaveBeenCalledWith('Configuration updated'))
-    expect(showToast.success).not.toHaveBeenCalledWith('Configuration saved. Restart the server to apply changes.')
+    expect(showToast.success).not.toHaveBeenCalledWith('Configuration saved, but OpenCode could not reload it. Restart the server to apply changes.')
   })
 
   it('asks for a restart after a semantic structured change', async () => {
@@ -505,7 +505,7 @@ describe('OpenCodeConfigManager', () => {
 
     const { showToast } = await import('@/lib/toast')
     await waitFor(() => {
-      expect(showToast.success).toHaveBeenCalledWith('Configuration saved. Restart the server to apply changes.')
+      expect(showToast.success).toHaveBeenCalledWith('Configuration saved, but OpenCode could not reload it. Restart the server to apply changes.')
     })
   })
 
@@ -636,7 +636,6 @@ describe('OpenCodeConfigManager', () => {
       path: '/workspace/.config/opencode/opencode.jsonc',
       rawContent: '{}',
       sources: [
-        makeOpenCodeConfigSource({ name: 'config.json', path: '/workspace/.config/opencode/config.json' }),
         makeOpenCodeConfigSource({ name: 'opencode.json', path: '/workspace/.config/opencode/opencode.json' }),
         makeOpenCodeConfigSource({ name: 'opencode.jsonc', path: '/workspace/.config/opencode/opencode.jsonc' }),
       ],
@@ -647,7 +646,7 @@ describe('OpenCodeConfigManager', () => {
 
     const notice = (await screen.findByText('Multiple configuration files are merged')).closest('[role="alert"]') as HTMLElement
     expect(notice).toBeInTheDocument()
-    expect(notice).toHaveTextContent('config.json, opencode.json, opencode.jsonc')
+    expect(notice).toHaveTextContent('opencode.json, opencode.jsonc')
     expect(notice).toHaveTextContent('Saves apply only to opencode.jsonc')
     expect(notice).toHaveTextContent('For simpler configuration, consolidate the settings you need into one file, then remove redundant files after verifying the result.')
   })

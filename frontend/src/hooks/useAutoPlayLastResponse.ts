@@ -1,34 +1,34 @@
 import { useEffect, useRef } from 'react'
 import { useTTS } from './useTTS'
 import { useSettings } from './useSettings'
-import type { MessageWithParts } from '@/api/types'
+import { assistantText, type SessionMessageInfo } from '@opencode-manager/shared/opencode'
 
 interface UseAutoPlayLastResponseParams {
   sessionId: string
-  lastAssistantMessage: MessageWithParts | undefined
+  lastAssistantMessage: SessionMessageInfo | undefined
   lastAssistantText: string
   isStreamingResponse: boolean
 }
 
 interface PlayableAssistantMessage {
-  message: MessageWithParts
+  messageId: string
   text: string
 }
 
-export function getAssistantText(message: MessageWithParts | undefined): string {
-  return (message?.parts ?? []).filter(p => p.type === 'text').map(p => p.text).join('\n\n')
+export function getAssistantText(message: SessionMessageInfo | undefined): string {
+  return message?.type === 'assistant' ? assistantText(message.content) : ''
 }
 
-export function getLatestPlayableAssistantMessage(messages: MessageWithParts[] | undefined): PlayableAssistantMessage | undefined {
+export function getLatestPlayableAssistantMessage(messages: SessionMessageInfo[] | undefined): PlayableAssistantMessage | undefined {
   return messages
-    ?.filter(message => message.info.role === 'assistant')
-    .map(message => ({ message, text: getAssistantText(message) }))
+    ?.filter(message => message.type === 'assistant')
+    .map(message => ({ messageId: message.id, text: getAssistantText(message) }))
     .filter(({ text }) => text.trim().length > 0)
     .at(-1)
 }
 
-function isMessageCompleted(message: MessageWithParts['info']): boolean {
-  return message.role === 'assistant' && message.time.completed !== undefined
+function isMessageCompleted(message: SessionMessageInfo): boolean {
+  return message.type === 'assistant' && message.time.completed !== undefined
 }
 
 export function useAutoPlayLastResponse({
@@ -73,8 +73,8 @@ export function useAutoPlayLastResponse({
       return
     }
     
-    const messageId = lastAssistantMessage.info.id
-    const isCompleted = isMessageCompleted(lastAssistantMessage.info)
+    const messageId = lastAssistantMessage.id
+    const isCompleted = isMessageCompleted(lastAssistantMessage)
     const wasCompleted = lastKnownCompletedRef.current[messageId] ?? false
     
     if (!isCompleted) {

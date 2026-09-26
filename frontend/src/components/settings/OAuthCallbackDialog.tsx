@@ -1,4 +1,4 @@
-import { useState } from 'react'
+import { useState, useEffect, useRef } from 'react'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
@@ -13,46 +13,92 @@ interface OAuthCallbackDialogProps {
   providerId: string
   providerName: string
   authResponse: OAuthAuthorizeResponse
-  methodIndex: number
   open: boolean
   onOpenChange: (open: boolean) => void
   onSuccess: () => void
 }
 
-export function OAuthCallbackDialog({ 
-  providerId, 
-  providerName, 
+const POLL_INTERVAL_MS = 2000
+
+export function OAuthCallbackDialog({
+  providerId,
+  providerName,
   authResponse,
-  methodIndex,
-  open, 
-  onOpenChange, 
-  onSuccess 
+  open,
+  onOpenChange,
+  onSuccess,
 }: OAuthCallbackDialogProps) {
   const [isLoading, setIsLoading] = useState(false)
-  const [loadingMessage, setLoadingMessage] = useState('')
   const [authCode, setAuthCode] = useState('')
   const [error, setError] = useState<string | null>(null)
+  const isAutoMethod = authResponse.mode === 'auto'
+  const completedRef = useRef(false)
+  const onSuccessRef = useRef(onSuccess)
+  onSuccessRef.current = onSuccess
+
+  useEffect(() => {
+    completedRef.current = false
+    setIsLoading(false)
+    setAuthCode('')
+    setError(null)
+  }, [authResponse.attemptID])
+
+  useEffect(() => {
+    if (!open || !isAutoMethod) return
+
+    let cancelled = false
+    setIsLoading(true)
+    setError(null)
+
+    const poll = async () => {
+      while (!cancelled) {
+        try {
+          const status = await oauthApi.getStatus(providerId, authResponse.attemptID)
+          if (cancelled) return
+
+          if (status.status === 'complete') {
+            completedRef.current = true
+            setIsLoading(false)
+            onSuccessRef.current()
+            return
+          }
+
+          if (status.status === 'failed' || status.status === 'expired') {
+            setIsLoading(false)
+            setError(status.message ?? 'Authentication failed')
+            return
+          }
+        } catch (err) {
+          if (!cancelled) {
+            setIsLoading(false)
+            setError(mapOAuthError(err, 'callback'))
+          }
+          return
+        }
+
+        await new Promise((resolve) => setTimeout(resolve, POLL_INTERVAL_MS))
+      }
+    }
+
+    void poll()
+
+    return () => {
+      cancelled = true
+    }
+  }, [open, isAutoMethod, providerId, authResponse.attemptID])
 
   const handleCallback = async () => {
     setIsLoading(true)
-    setLoadingMessage('Completing authentication...')
     setError(null)
 
     try {
-      setLoadingMessage('Restarting server with new credentials...')
-      await oauthApi.callback(
-        providerId, 
-        authResponse.method === 'code' 
-          ? { method: methodIndex, code: authCode.trim() }
-          : { method: methodIndex }
-      )
-      onSuccess()
+      await oauthApi.callback(providerId, authResponse.attemptID, authCode.trim() || undefined)
+      completedRef.current = true
+      onSuccessRef.current()
     } catch (err) {
       setError(mapOAuthError(err, 'callback'))
-      console.error('OAuth callback error:', err)
     } finally {
       setIsLoading(false)
-      setLoadingMessage('')
     }
   }
 
@@ -63,10 +109,13 @@ export function OAuthCallbackDialog({
   const handleClose = () => {
     setError(null)
     setAuthCode('')
+
+    if (!completedRef.current) {
+      void oauthApi.cancel(providerId, authResponse.attemptID).catch(() => undefined)
+    }
+
     onOpenChange(false)
   }
-
-  const isAutoMethod = authResponse.method === 'auto'
 
   // Extract device/user code from instructions (e.g., "Enter code: 596A-E304")
   const codeMatch = authResponse.instructions.match(/(?:Enter code|User code|Device code)[:\s]+([A-Z0-9-]+)/i)
@@ -78,7 +127,7 @@ export function OAuthCallbackDialog({
         <DialogHeader>
           <DialogTitle>Complete {providerName} Authentication</DialogTitle>
           <DialogDescription>
-            {isAutoMethod 
+            {isAutoMethod
               ? 'Follow the instructions below to complete authentication.'
               : 'Enter the authorization code from the provider.'
             }
@@ -95,7 +144,7 @@ export function OAuthCallbackDialog({
           <div className="space-y-3">
             <div className="bg-muted p-3 rounded-md">
               <p className="text-sm mb-2">{authResponse.instructions}</p>
-              
+
               {deviceCode && (
                 <div className="flex items-center gap-2 mb-3">
                   <code className="flex-1 bg-background px-3 py-2 rounded text-sm font-mono">
@@ -111,7 +160,7 @@ export function OAuthCallbackDialog({
                   />
                 </div>
               )}
-              
+
               <div className="flex gap-2">
                 <Button
                   onClick={handleOpenAuthUrl}
@@ -154,26 +203,32 @@ export function OAuthCallbackDialog({
                   className="bg-background border-border"
                   disabled={isLoading}
                 />
+                <Button
+                  onClick={handleCallback}
+                  className="w-full"
+                  disabled={isLoading || !authCode.trim()}
+                >
+                  {isLoading ? (
+                    <>
+                      <Loader2 className="h-4 w-4 mr-2 animate-spin" />
+                      Completing...
+                    </>
+                  ) : (
+                    <>
+                      <CheckCircle className="h-4 w-4 mr-2" />
+                      Complete Authentication
+                    </>
+                  )}
+                </Button>
               </div>
             )}
 
-            <Button
-              onClick={handleCallback}
-              className="w-full"
-              disabled={isLoading || (!isAutoMethod && !authCode.trim())}
-            >
-              {isLoading ? (
-                <>
-                  <Loader2 className="h-4 w-4 mr-2 animate-spin" />
-                  {loadingMessage || 'Completing...'}
-                </>
-              ) : (
-                <>
-                  <CheckCircle className="h-4 w-4 mr-2" />
-                  Complete Authentication
-                </>
-              )}
-            </Button>
+            {isAutoMethod && (
+              <div className="flex items-center justify-center gap-2 text-sm text-muted-foreground">
+                <Loader2 className="h-4 w-4 animate-spin" />
+                Waiting for authorization to complete...
+              </div>
+            )}
           </div>
         </div>
       </DialogContent>

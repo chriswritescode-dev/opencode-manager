@@ -12,7 +12,6 @@ import { useAgents } from '@/hooks/useOpenCode'
 import { getAgentStyleVars } from '@/lib/agent-colors'
 
 interface AgentQuickSelectProps {
-  opcodeUrl: string | null | undefined
   directory?: string
   currentAgent: string
   onAgentChange: (agent: string) => void
@@ -20,6 +19,7 @@ interface AgentQuickSelectProps {
 }
 
 interface AgentInfo {
+  id: string
   name: string
   color?: string
   description?: string
@@ -27,8 +27,8 @@ interface AgentInfo {
   hidden?: boolean
 }
 
-const findAgentColor = (agents: AgentInfo[], agentName: string): string | undefined => {
-  return agents.find(a => a.name.toLowerCase() === agentName.toLowerCase())?.color
+const findAgent = (agents: AgentInfo[], agentId: string): AgentInfo | undefined => {
+  return agents.find(a => a.id.toLowerCase() === agentId.toLowerCase())
 }
 
 const bashStyleVars: Record<string, string> = {
@@ -49,13 +49,12 @@ const bashStyleVars: Record<string, string> = {
 }
 
 export function AgentQuickSelect({
-  opcodeUrl,
   directory,
   currentAgent,
   onAgentChange,
   isBashMode = false,
 }: AgentQuickSelectProps) {
-  const { data: agents = [] } = useAgents(opcodeUrl, directory)
+  const { data: agents = [] } = useAgents(directory)
 
   const primaryAgents = useMemo(() => {
     return agents.filter(
@@ -65,14 +64,15 @@ export function AgentQuickSelect({
     )
   }, [agents])
 
-  const handleSelect = (agentName: string) => {
-    onAgentChange(agentName)
+  const handleSelect = (agentId: string) => {
+    onAgentChange(agentId)
   }
 
+  const currentAgentInfo = findAgent(agents, currentAgent)
   const styleVars = isBashMode 
     ? bashStyleVars 
-    : getAgentStyleVars(currentAgent, findAgentColor(agents, currentAgent))
-  const displayName = isBashMode ? 'Bash' : capitalize(currentAgent)
+    : getAgentStyleVars(currentAgent, currentAgentInfo?.color)
+  const displayName = isBashMode ? 'Bash' : capitalize(currentAgentInfo?.name ?? currentAgent)
 
   const buttonContent = (
     <button
@@ -92,13 +92,13 @@ export function AgentQuickSelect({
       <DropdownMenuContent align="start" className="w-64">
         {primaryAgents.map((agent) => {
           const apiColor = agent.color
-          const itemStyleVars = getAgentStyleVars(agent.name, apiColor)
-          const isSelected = agent.name.toLowerCase() === currentAgent.toLowerCase()
+          const itemStyleVars = getAgentStyleVars(agent.id, apiColor)
+          const isSelected = agent.id.toLowerCase() === currentAgent.toLowerCase()
           
           return (
             <DropdownMenuItem
-              key={agent.name}
-              onClick={() => handleSelect(agent.name)}
+              key={agent.id}
+              onClick={() => handleSelect(agent.id)}
               className="group flex items-center justify-between"
             >
               <div className="flex flex-col min-w-0">

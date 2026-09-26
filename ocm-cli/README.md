@@ -6,6 +6,22 @@ OpenCode Manager CLI and plugin package.
 can also mirror a local git repo up to Manager or pull a Manager repo back down
 to the local working tree.
 
+## Compatibility
+
+| ocm | OpenCode Manager | Local OpenCode |
+|---|---|---|
+| 0.3.x | >= 0.19.0 | >= 2.0.15, < 3 |
+
+ocm 0.3.0 attaches through the repo-scoped Manager proxy
+(`/api/opencode-proxy/repos/:repoId`), loads its plugin from the OpenCode 2
+`cli.json` `plugins` list, and moves sessions with OpenCode 2 session
+export/import. Older Managers lack that route; `ocm` then fails with
+`OpenCode Manager at <url> is too old for ocm 0.3.0; upgrade the Manager to >= 0.19.0`.
+Use ocm 0.2.x with OpenCode Manager < 0.19.0 and OpenCode 1.x, installed pinned
+(`pnpm add -g @opencode-manager/ocm-cli@0.2`) with the OpenCode 1.x plugin entry pinned to
+`@opencode-manager/ocm-cli@0.2`. ocm is published together with each OpenCode Manager
+release.
+
 ## Install
 
 ```bash
@@ -33,6 +49,11 @@ On Linux the token is stored as plaintext JSON protected only by file
 permissions. CLI state is stored at `~/.config/opencode-manager/state.json`.
 Windows is unsupported: the same file store is used, but the `0600` mode is not
 enforced there.
+
+`ocm` passes the token to the local `opencode` client it launches as
+`OPENCODE_PASSWORD`. That variable belongs only to the local client process; never
+set `OPENCODE_PASSWORD` in the OpenCode Manager server environment (the Manager
+strips it because it would override the Manager-managed OpenCode password).
 
 `OCM_TOKEN` overrides the token store for reads; `ocm login` always writes to
 the platform store and `ocm logout` cannot remove the override. Run `ocm status`
@@ -87,9 +108,9 @@ branch, and path. The default attach reports the same details.
 
 ## OpenCode TUI plugin
 
-The package exposes an OpenCode TUI plugin through its `./tui` package export.
-Configure the package name and OpenCode resolves that TUI entrypoint
-automatically. When attached to a Manager via `ocm`, the plugin shows a
+The package exposes an OpenCode 2 TUI plugin (`{ id, setup }`) through its `./tui`
+package export. Configure the package name and OpenCode resolves that TUI
+entrypoint automatically. When attached to a Manager via `ocm`, the plugin shows a
 `REMOTE <host> · <repo>` indicator at the bottom of the TUI; local launches
 show nothing. It registers `/ocm-move`, which keeps the local session and
 copies the active session to the Manager after replacing the Manager repo's
@@ -102,19 +123,21 @@ yet. When multiple Manager repos match, the one already on your branch is
 chosen; otherwise a picker dialog lets you choose. A confirmation dialog gates
 the move before any push, states where the state will land, and lists any
 server-side work (uncommitted changes or commits not present locally) that will
-be discarded there. While the move runs, a spinner with the current phase and a
+be discarded there. The session moves by exporting it from the local OpenCode 2
+server and importing it through the Manager proxy, followed by a synthetic
+reminder. While the move runs, a spinner with the current phase and a
 progress bar is shown next to the prompt. On success
 you can optionally warp — exit the local TUI and attach to the moved session
 on the Manager immediately. Use it from inside an OpenCode session after
 `ocm login` and after the repo already exists on the Manager
 (`ocm push --create` if needed).
 
-Enable it in `tui.json`:
+Enable it in `~/.config/opencode/cli.json`:
 
 ```jsonc
 {
-  "$schema": "https://opencode.ai/tui.json",
-  "plugin": ["@opencode-manager/ocm-cli"]
+  "$schema": "https://opencode.ai/v2/cli.json",
+  "plugins": ["@opencode-manager/ocm-cli"]
 }
 ```
 
@@ -124,7 +147,8 @@ global installs); the plugin surface is TUI-only.
 ## Requirements
 
 - macOS or Linux (Windows is unsupported)
-- `opencode` available on `PATH`
+- OpenCode >= 2.0.15 (same major, 2.x) available on `PATH`
+- OpenCode Manager >= 0.19.0
 - `git` and `tar` (with gzip support, i.e. the `-z` flag) available on `PATH`
 - `bash`, used for hidden token entry and interactive confirmations
 - macOS only: `/usr/bin/security`, used for Keychain-backed token storage (Linux uses a mode-`0600` file under the user config dir `~/.config/opencode-manager`)

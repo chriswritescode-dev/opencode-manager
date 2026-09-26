@@ -1,21 +1,27 @@
 import { opencodeServerManager, ConfigReloadError } from './opencode-single-server'
 import { readOpenCodeConfigFile } from './opencode-config-file'
+import { sseAggregator } from './sse-aggregator'
+import type { OpenCodeClient } from './opencode/client'
 import type { OpenCodeOperationReason, OpenCodeSupervisor } from './opencode-supervisor'
-import type { OpenCodeRestartCoordinator } from './opencode-restart-coordinator'
 
-let restartCoordinator: OpenCodeRestartCoordinator | null = null
-
-/**
- * Registers the process-wide restart coordinator so every restart path can
- * abort and resume in-flight sessions consistently. Passing null disables
- * resume (used by tests and pre-initialization paths).
- */
-export function setOpenCodeRestartCoordinator(coordinator: OpenCodeRestartCoordinator | null): void {
-  restartCoordinator = coordinator
+export interface ActiveSessionsSource {
+  getActiveSessions(): Record<string, string[]>
+  isSubagentSession(sessionId: string): boolean
+  getScheduledSessionIds(): Set<string>
 }
 
-export function getOpenCodeRestartCoordinator(): OpenCodeRestartCoordinator | null {
-  return restartCoordinator
+export interface ActiveUserSession {
+  sessionID: string
+  directory: string
+}
+
+export function listActiveUserSessions(source: ActiveSessionsSource = sseAggregator): ActiveUserSession[] {
+  const scheduled = source.getScheduledSessionIds()
+  return Object.entries(source.getActiveSessions()).flatMap(([directory, sessionIDs]) =>
+    sessionIDs
+      .filter((sessionID) => !source.isSubagentSession(sessionID) && !scheduled.has(sessionID))
+      .map((sessionID) => ({ sessionID, directory })),
+  )
 }
 
 function restartFailureError(): Error {
@@ -23,55 +29,26 @@ function restartFailureError(): Error {
   return new Error(startupError ?? 'OpenCode server restart did not complete successfully')
 }
 
-async function performRestart(supervisor: OpenCodeSupervisor | undefined, reason: OpenCodeOperationReason): Promise<boolean> {
+async function restartServer(supervisor: OpenCodeSupervisor | undefined, reason: OpenCodeOperationReason): Promise<boolean> {
   if (supervisor) {
     return (await supervisor.restart(reason)).healthy
   }
   opencodeServerManager.clearStartupError()
   await opencodeServerManager.restart()
-  const healthy = await opencodeServerManager.checkHealth()
-  if (!healthy) {
-    throw restartFailureError()
-  }
-  return healthy
+  return opencodeServerManager.checkHealth()
 }
 
-/**
- * The single entry point for restarting the OpenCode server. Every restart
- * trigger (manual restart, version upgrade/install, workspace config change,
- * restart-sensitive config saves) routes through here so that interrupted user
- * sessions are aborted and resumed uniformly when a coordinator is registered.
- * A full process restart drops in-flight sessions; resuming re-issues a
- * "continue" prompt once the server is healthy again.
- */
 export async function restartOpenCode(
   supervisor?: OpenCodeSupervisor,
   reason: OpenCodeOperationReason = 'settings_restart',
-): Promise<{ resumedSessionIDs: string[] }> {
-  if (restartCoordinator) {
-    const result = await restartCoordinator.runWithResume(() => performRestart(supervisor, reason))
-    if (!result.healthy) {
-      throw restartFailureError()
-    }
-    return { resumedSessionIDs: result.resumedSessionIDs }
+): Promise<void> {
+  const healthy = await restartServer(supervisor, reason)
+  if (!healthy) {
+    throw restartFailureError()
   }
-  if (supervisor) {
-    const status = await supervisor.restart(reason)
-    if (!status.healthy) {
-      throw restartFailureError()
-    }
-  } else {
-    opencodeServerManager.clearStartupError()
-    await opencodeServerManager.restart()
-    const healthy = await opencodeServerManager.checkHealth()
-    if (!healthy) {
-      throw restartFailureError()
-    }
-  }
-  return { resumedSessionIDs: [] }
 }
 
-export async function reloadOpenCodeConfig(supervisor?: OpenCodeSupervisor): Promise<{ resumedSessionIDs: string[] }> {
+export async function assertValidOpenCodeConfig(): Promise<void> {
   const config = await readOpenCodeConfigFile()
   if (!config) {
     throw new ConfigReloadError('No OpenCode global configuration files found')
@@ -79,5 +56,9 @@ export async function reloadOpenCodeConfig(supervisor?: OpenCodeSupervisor): Pro
   if (!config.isValid) {
     throw new ConfigReloadError('OpenCode global configuration is invalid', config.validationIssues)
   }
-  return restartOpenCode(supervisor, 'settings_reload')
+}
+
+export async function reloadOpenCodeConfig(openCodeClient: OpenCodeClient): Promise<void> {
+  await assertValidOpenCodeConfig()
+  await openCodeClient.api.location.reload()
 }

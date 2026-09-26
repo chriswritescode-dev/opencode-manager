@@ -1,10 +1,12 @@
 import { promises as fs } from 'fs'
 import { lstat, realpath } from 'fs/promises'
 import path from 'path'
+import { OPENCODE_CONFIG_SOURCE_NAMES } from '@opencode-manager/shared'
 import { parseJsonc } from '@opencode-manager/shared/utils'
 import { logger } from '../utils/logger'
 import { existingFileMode, mkdirSafe, writeFileAtomic } from '../utils/fs-safe'
 import { withOpenCodeConfigLock } from './opencode-config-file'
+import { getOpenCodeHome } from './opencode-home'
 import { getOpenCodePluginDir } from './opencode/plugin-registry'
 import {
   isRecord,
@@ -15,10 +17,6 @@ import {
 const PLUGIN_CONFIG_BACKUP_SUFFIX = '.ocm-sandbox-backup'
 const QUARANTINE_CONFLICT_SUFFIX = '.ocm-conflict'
 const QUARANTINE_MANIFEST_FILENAME = '.ocm-quarantine-manifest.json'
-
-export function getOpenCodePluginDiscoveryHome(): string {
-  return process.env.HOME ?? '/home/node'
-}
 
 type QuarantineManifestEntry = {
   original: string
@@ -31,17 +29,17 @@ type QuarantineManifest = {
 }
 
 function getPluginDirs(configHome: string): string[] {
-  const home = getOpenCodePluginDiscoveryHome()
+  const home = getOpenCodeHome()
   return [
+    path.join(configHome, 'opencode', 'plugin'),
     getOpenCodePluginDir(configHome),
-    path.join(configHome, 'opencode', 'plugins'),
     path.join(home, '.opencode', 'plugin'),
     path.join(home, '.opencode', 'plugins'),
   ]
 }
 
 function getToolDirs(configHome: string): string[] {
-  const home = getOpenCodePluginDiscoveryHome()
+  const home = getOpenCodeHome()
   return [
     path.join(configHome, 'opencode', 'tool'),
     path.join(configHome, 'opencode', 'tools'),
@@ -51,13 +49,10 @@ function getToolDirs(configHome: string): string[] {
 }
 
 function getNativeOpenCodeConfigPaths(configHome: string): string[] {
-  const home = getOpenCodePluginDiscoveryHome()
+  const home = getOpenCodeHome()
   return [
-    path.join(configHome, 'opencode', 'opencode.json'),
-    path.join(configHome, 'opencode', 'opencode.jsonc'),
-    path.join(configHome, 'opencode', 'config.json'),
-    path.join(home, '.opencode', 'opencode.json'),
-    path.join(home, '.opencode', 'opencode.jsonc'),
+    ...OPENCODE_CONFIG_SOURCE_NAMES.map((name) => path.join(configHome, 'opencode', name)),
+    ...OPENCODE_CONFIG_SOURCE_NAMES.map((name) => path.join(home, '.opencode', name)),
   ]
 }
 
@@ -79,7 +74,7 @@ function getManagedConfigPaths(): string[] {
     dirs.push(override)
   }
   return [...new Set(dirs)].flatMap((dir) =>
-    ['opencode.json', 'opencode.jsonc'].map((file) => path.join(dir, file)),
+    OPENCODE_CONFIG_SOURCE_NAMES.map((file) => path.join(dir, file)),
   )
 }
 

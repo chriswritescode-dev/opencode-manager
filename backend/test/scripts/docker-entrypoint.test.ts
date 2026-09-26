@@ -23,15 +23,17 @@ const extractShellFunction = (name: string) => {
   return match[0]
 }
 
-const extractMinOpenCodeVersion = () => {
-  const match = readFileSync(entrypointPath, 'utf-8').match(/^MIN_OPENCODE_VERSION="[^"]+"$/m)
-  if (!match) throw new Error('MIN_OPENCODE_VERSION not found in docker-entrypoint.sh')
+const extractSupportedFloor = () => {
+  const match = readFileSync(entrypointPath, 'utf-8').match(/^OPENCODE_SUPPORTED_FLOOR="[^"]+"$/m)
+  if (!match) throw new Error('OPENCODE_SUPPORTED_FLOOR not found in docker-entrypoint.sh')
   return match[0]
 }
 
+const releaseHelperPath = join(repoRoot, 'scripts/lib/opencode-release.sh')
+
 const installPrelude = () => [
-  extractMinOpenCodeVersion(),
-  extractShellFunction('version_gte'),
+  extractSupportedFloor(),
+  readFileSync(releaseHelperPath, 'utf-8'),
   extractShellFunction('read_opencode_version'),
   extractShellFunction('install_opencode'),
   extractShellFunction('reconcile_persisted_opencode'),
@@ -191,7 +193,7 @@ const runOpenCodeSection = (snippet: string, env: Record<string, string> = {}) =
       OCM_STUB_LOG: logPath,
       OCM_STUB_RUNUSER_EXEC: '1',
       HOME: homeDir,
-      OPENCODE_BUNDLED_VERSION: '1.18.16',
+      OPENCODE_BUNDLED_VERSION: '2.0.15',
       ...env,
     },
   })
@@ -205,7 +207,7 @@ while [ "$#" -gt 0 ]; do
   shift
 done
 mkdir -p "$HOME/.opencode/bin"
-printf '#!/bin/bash\\necho 1.18.16\\n' > "$HOME/.opencode/bin/opencode"
+printf '#!/bin/bash\\necho %s\\n' "$OPENCODE_BUNDLED_VERSION" > "$HOME/.opencode/bin/opencode"
 chmod +x "$HOME/.opencode/bin/opencode"
 printf 'fake binary\\n' > "$(dirname "$out")/opencode"`)
   writeStub('tar', `echo "tar $*" >> "$OCM_STUB_LOG"`)
@@ -219,7 +221,7 @@ describe('install_opencode', () => {
     const res = runOpenCodeSection(`${installPrelude()}\ninstall_opencode`)
     expect(res.status).toBe(0)
     const urls = curlLog().join(' ')
-    expect(urls).toMatch(/\/releases\/download\/v1\.18\.16\//)
+    expect(urls).toMatch(/https:\/\/opencode\.ai\/files\/bin\/2\.0\.15\/opencode-linux-(x64|arm64)\.tar\.gz/)
     expect(urls).not.toContain('/releases/latest/download/')
     expect(urls).not.toContain('/tmp/opencode.tar.gz')
   })
@@ -231,16 +233,6 @@ describe('install_opencode', () => {
     })
     expect(res.status).not.toBe(0)
     expect(res.stderr).toContain('OPENCODE_BUNDLED_VERSION is not set')
-    expect(curlLog()).toHaveLength(0)
-  })
-
-  it('refuses to download an OPENCODE_BUNDLED_VERSION below the supported minimum', () => {
-    stubInstallTools()
-    const res = runOpenCodeSection(`${installPrelude()}\ninstall_opencode`, {
-      OPENCODE_BUNDLED_VERSION: '1.0.136',
-    })
-    expect(res.status).not.toBe(0)
-    expect(res.stderr).toContain('below the minimum supported')
     expect(curlLog()).toHaveLength(0)
   })
 
@@ -257,11 +249,11 @@ describe('install_opencode', () => {
   it('honors an OPENCODE_BUNDLED_VERSION override for the download URL', () => {
     stubInstallTools()
     const res = runOpenCodeSection(`${installPrelude()}\ninstall_opencode`, {
-      OPENCODE_BUNDLED_VERSION: '1.22.0',
+      OPENCODE_BUNDLED_VERSION: '2.1.0',
     })
     expect(res.status).toBe(0)
     const urls = curlLog().join(' ')
-    expect(urls).toMatch(/\/releases\/download\/v1\.22\.0\//)
+    expect(urls).toMatch(/https:\/\/opencode\.ai\/files\/bin\/2\.1\.0\/opencode-linux-(x64|arm64)\.tar\.gz/)
     expect(urls).not.toContain('/releases/latest/download/')
   })
 
@@ -271,7 +263,7 @@ describe('install_opencode', () => {
     expect(res.status).toBe(0)
     expect(res.stdout).toContain('OpenCode not found. Installing...')
     const urls = curlLog().join(' ')
-    expect(urls).toMatch(/\/releases\/download\/v1\.18\.16\//)
+    expect(urls).toMatch(/https:\/\/opencode\.ai\/files\/bin\/2\.0\.15\/opencode-linux-(x64|arm64)\.tar\.gz/)
     expect(urls).not.toContain('/releases/latest/download/')
   })
 
@@ -280,9 +272,9 @@ describe('install_opencode', () => {
     writeStub('opencode', `echo "opencode version 1.0.0"`)
     const res = runOpenCodeSection(`${installPrelude()}\n${extractOpenCodeInstallSection()}`)
     expect(res.status).toBe(0)
-    expect(res.stdout).toContain('below minimum required version')
+    expect(res.stdout).toContain('OpenCode version 1.0.0 is outside the supported range >=2.0.15 <3.0.0')
     const urls = curlLog().join(' ')
-    expect(urls).toMatch(/\/releases\/download\/v1\.18\.16\//)
+    expect(urls).toMatch(/https:\/\/opencode\.ai\/files\/bin\/2\.0\.15\/opencode-linux-(x64|arm64)\.tar\.gz/)
     expect(urls).not.toContain('/releases/latest/download/')
   })
 })
@@ -306,7 +298,7 @@ if [ -z "$OCM_EXECUTED_AS_NODE" ]; then
   echo "persisted binary executed outside runuser" >&2
   exit 1
 fi
-echo "opencode version 1.22.0"`)
+echo "opencode version 2.0.15"`)
     chmodSync(homeBinPath(), 0o755)
     const res = runOpenCodeSection(`${installPrelude()}\n${extractOpenCodeInstallSection()}`)
     expect(res.status).toBe(0)
@@ -317,56 +309,73 @@ echo "opencode version 1.22.0"`)
 
   it('retains a persisted home binary equal to the bundled version', () => {
     mkdirSync(join(stubDir, 'home/.opencode/bin'), { recursive: true })
-    writeBinary(join(stubDir, 'home/.opencode/bin'), '1.18.16')
+    writeBinary(join(stubDir, 'home/.opencode/bin'), '2.0.15')
     const res = runOpenCodeSection(`${installPrelude()}\n${extractOpenCodeInstallSection()}`)
     expect(res.status).toBe(0)
     expect(res.stdout).toContain('retaining it')
     expect(existsSync(homeBinPath())).toBe(true)
-    expect(res.stdout).toContain('OpenCode is installed (version: 1.18.16)')
+    expect(res.stdout).toContain('OpenCode is installed (version: 2.0.15)')
     expect(curlLog()).toHaveLength(0)
   })
 
   it('retains a persisted home binary newer than the bundled version', () => {
     mkdirSync(join(stubDir, 'home/.opencode/bin'), { recursive: true })
-    writeBinary(join(stubDir, 'home/.opencode/bin'), '1.22.0')
+    writeBinary(join(stubDir, 'home/.opencode/bin'), '2.1.0')
     const res = runOpenCodeSection(`${installPrelude()}\n${extractOpenCodeInstallSection()}`)
     expect(res.status).toBe(0)
     expect(res.stdout).toContain('retaining it')
     expect(existsSync(homeBinPath())).toBe(true)
-    expect(res.stdout).toContain('OpenCode is installed (version: 1.22.0)')
+    expect(res.stdout).toContain('OpenCode is installed (version: 2.1.0)')
     expect(curlLog()).toHaveLength(0)
   })
 
-  it('retains a persisted home binary older than the bundled version but above the minimum', () => {
+  it.each(['2.0.0', '2.0.14', '3.0.0', '3.2.1', '1.0.0'])(
+    'replaces a persisted home binary %s outside the supported range with the bundled version',
+    (version) => {
+      stubInstallTools()
+      mkdirSync(join(stubDir, 'home/.opencode/bin'), { recursive: true })
+      writeBinary(join(stubDir, 'home/.opencode/bin'), version)
+      const res = runOpenCodeSection(`${installPrelude()}\n${extractOpenCodeInstallSection()}`)
+      expect(res.status).toBe(0)
+      expect(res.stdout).not.toContain('retaining it')
+      expect(res.stdout).toContain(`Persisted OpenCode ${version} is outside the supported range >=2.0.15 <3.0.0`)
+      expect(res.stdout).toContain('Installing OpenCode 2.0.15...')
+      expect(existsSync(homeBinPath())).toBe(true)
+      const urls = curlLog().join(' ')
+      expect(urls).toMatch(/https:\/\/opencode\.ai\/files\/bin\/2\.0\.15\/opencode-linux-(x64|arm64)\.tar\.gz/)
+    },
+  )
+
+  it('falls back to the bundled binary on PATH after removing a persisted 3.x binary', () => {
     mkdirSync(join(stubDir, 'home/.opencode/bin'), { recursive: true })
-    writeBinary(join(stubDir, 'home/.opencode/bin'), '1.10.0')
-    const res = runOpenCodeSection(`${installPrelude()}\n${extractOpenCodeInstallSection()}`)
+    writeBinary(join(stubDir, 'home/.opencode/bin'), '3.0.0')
+    mkdirSync(join(stubDir, 'bundled'), { recursive: true })
+    writeBinary(join(stubDir, 'bundled'), '2.0.15')
+    const res = runOpenCodeSection(`${installPrelude()}\n${extractOpenCodeInstallSection()}`, {
+      PATH: bundledFirstPath(),
+    })
     expect(res.status).toBe(0)
-    expect(res.stdout).toContain('retaining it')
-    expect(existsSync(homeBinPath())).toBe(true)
-    expect(res.stdout).toContain('OpenCode is installed (version: 1.10.0)')
+    expect(existsSync(homeBinPath())).toBe(false)
+    expect(res.stdout).toContain('OpenCode is installed (version: 2.0.15)')
+    expect(res.stdout).toContain('within the supported range >=2.0.15 <3.0.0')
     expect(curlLog()).toHaveLength(0)
   })
 
-  it('replaces a persisted home binary below the minimum version with the bundled version', () => {
-    stubInstallTools()
+  it('treats every persisted binary as unsupported when the bundled version is unknown', () => {
     mkdirSync(join(stubDir, 'home/.opencode/bin'), { recursive: true })
-    writeBinary(join(stubDir, 'home/.opencode/bin'), '1.0.0')
-    const res = runOpenCodeSection(`${installPrelude()}\n${extractOpenCodeInstallSection()}`)
+    writeBinary(join(stubDir, 'home/.opencode/bin'), '2.0.15')
+    const res = runOpenCodeSection(`${installPrelude()}\nreconcile_persisted_opencode`, {
+      OPENCODE_BUNDLED_VERSION: '',
+    })
     expect(res.status).toBe(0)
-    expect(res.stdout).toContain('retaining it')
-    expect(res.stdout).toContain('below minimum required version')
-    expect(res.stdout).toContain('Reinstalling bundled OpenCode version 1.18.16...')
-    const urls = curlLog().join(' ')
-    expect(urls).toMatch(/\/releases\/download\/v1\.18\.16\//)
-    expect(urls).not.toContain('/releases/latest/download/')
+    expect(existsSync(homeBinPath())).toBe(false)
   })
 
   it('removes a malformed persisted home binary and selects the bundled binary without downloading', () => {
     mkdirSync(join(stubDir, 'home/.opencode/bin'), { recursive: true })
     writeBinary(join(stubDir, 'home/.opencode/bin'), 'garbage')
     mkdirSync(join(stubDir, 'bundled'), { recursive: true })
-    writeBinary(join(stubDir, 'bundled'), '1.18.16')
+    writeBinary(join(stubDir, 'bundled'), '2.0.15')
     const res = runOpenCodeSection(`${installPrelude()}\n${extractOpenCodeInstallSection()}`, {
       PATH: bundledFirstPath(),
     })
@@ -374,7 +383,33 @@ echo "opencode version 1.22.0"`)
     expect(res.stdout).toContain('malformed or unversioned')
     expect(existsSync(homeBinPath())).toBe(false)
     expect(existsSync(bundledBinPath())).toBe(true)
-    expect(res.stdout).toContain('OpenCode is installed (version: 1.18.16)')
+    expect(res.stdout).toContain('OpenCode is installed (version: 2.0.15)')
     expect(curlLog()).toHaveLength(0)
+  })
+
+  it('removes a persisted 1.x binary and installs the bundled 2.x binary', () => {
+    stubInstallTools()
+    mkdirSync(join(stubDir, 'home/.opencode/bin'), { recursive: true })
+    writeBinary(join(stubDir, 'home/.opencode/bin'), '1.18.16')
+    const res = runOpenCodeSection(
+      `${installPrelude()}\nreconcile_persisted_opencode\nif [ -e "$HOME/.opencode/bin/opencode" ]; then echo "PERSISTED_PRESENT"; else echo "PERSISTED_REMOVED"; fi\n${extractOpenCodeInstallSection()}`
+    )
+    expect(res.status).toBe(0)
+    expect(res.stdout).toContain('Persisted OpenCode 1.18.16 is outside the supported range >=2.0.15 <3.0.0')
+    expect(res.stdout).toContain('PERSISTED_REMOVED')
+    expect(res.stdout).not.toContain('PERSISTED_PRESENT')
+    expect(existsSync(homeBinPath())).toBe(true)
+    expect(res.stdout).toContain('Installing OpenCode 2.0.15...')
+    const urls = curlLog().join(' ')
+    expect(urls).toMatch(/https:\/\/opencode\.ai\/files\/bin\/2\.0\.15\/opencode-linux-(x64|arm64)\.tar\.gz/)
+  })
+
+  it('appends -musl to the arch suffix when the musl loader is present', () => {
+    stubInstallTools()
+    writeStub('ls', 'exit 0')
+    const res = runOpenCodeSection(`${installPrelude()}\ninstall_opencode`)
+    expect(res.status).toBe(0)
+    const urls = curlLog().join(' ')
+    expect(urls).toMatch(/https:\/\/opencode\.ai\/files\/bin\/2\.0\.15\/opencode-linux-(x64|arm64)-musl\.tar\.gz/)
   })
 })

@@ -2,10 +2,15 @@ import { afterEach, describe, expect, it, vi } from 'vitest'
 import { BLOCKED_SERVER_ENV_KEYS, DEFAULT_USER_PREFERENCES, UserPreferencesSchema } from '@opencode-manager/shared/schemas'
 
 describe('settings schema - BLOCKED_SERVER_ENV_KEYS', () => {
-  it('does not block config-source, auth-content, or test env keys', () => {
+  it('blocks the OpenCode config source keys so the manager keeps a single on-disk config store', () => {
     const blocked = new Set<string>(BLOCKED_SERVER_ENV_KEYS)
-    expect(blocked.has('OPENCODE_CONFIG_CONTENT')).toBe(false)
-    expect(blocked.has('OPENCODE_CONFIG_DIR')).toBe(false)
+    expect(blocked.has('OPENCODE_CONFIG')).toBe(true)
+    expect(blocked.has('OPENCODE_CONFIG_DIR')).toBe(true)
+    expect(blocked.has('OPENCODE_CONFIG_CONTENT')).toBe(true)
+  })
+
+  it('does not block auth-content or test env keys', () => {
+    const blocked = new Set<string>(BLOCKED_SERVER_ENV_KEYS)
     expect(blocked.has('OPENCODE_AUTH_CONTENT')).toBe(false)
     expect(blocked.has('OPENCODE_TEST_HOME')).toBe(false)
     expect(blocked.has('OPENCODE_TEST_MANAGED_CONFIG_DIR')).toBe(false)
@@ -14,15 +19,24 @@ describe('settings schema - BLOCKED_SERVER_ENV_KEYS', () => {
     expect(blocked.has('ENV')).toBe(false)
   })
 
-  it('still blocks manager-owned password, username, config, and XDG keys', () => {
+  it('still blocks manager-owned password and XDG keys', () => {
     const blocked = new Set<string>(BLOCKED_SERVER_ENV_KEYS)
     expect(blocked.has('OPENCODE_SERVER_PASSWORD')).toBe(true)
-    expect(blocked.has('OPENCODE_SERVER_USERNAME')).toBe(true)
-    expect(blocked.has('OPENCODE_CONFIG')).toBe(true)
     expect(blocked.has('XDG_DATA_HOME')).toBe(true)
     expect(blocked.has('XDG_STATE_HOME')).toBe(true)
     expect(blocked.has('XDG_CONFIG_HOME')).toBe(true)
     expect(blocked.has('TMPDIR')).toBe(true)
+  })
+})
+
+describe('settings schema - disabledDefaultServerEnvVars tolerance', () => {
+  it('still parses a stored disabledDefaultServerEnvVars value so existing databases keep loading', () => {
+    const prefs = UserPreferencesSchema.parse({
+      ...DEFAULT_USER_PREFERENCES,
+      disabledDefaultServerEnvVars: ['NODE_OPTIONS'],
+    })
+
+    expect(prefs.disabledDefaultServerEnvVars).toEqual(['NODE_OPTIONS'])
   })
 })
 
