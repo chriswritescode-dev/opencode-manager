@@ -118,24 +118,19 @@ describe('buildNavModel', () => {
     expect(model.primary[1].to).toBe('/assistant')
   })
 
-  it('returns new-session and assistant primary CTAs for repo detail', () => {
+  it('returns only the assistant primary CTA for repo detail', () => {
     const model = buildNavModel('/repos/5')
-    expect(model.primary).toHaveLength(2)
-    expect(model.primary[0].key).toBe('new-session')
-    expect(model.primary[0].onSelect).toBe('new-session')
-    expect(model.primary[1].key).toBe('assistant')
-    expect(model.primary[1].to).toBe('/assistant')
+    expect(model.primary).toHaveLength(1)
+    expect(model.primary[0].key).toBe('assistant')
+    expect(model.primary[0].to).toBe('/assistant')
   })
 
-  it('returns new-session and assistant primary CTAs for session detail', () => {
+  it('returns only the assistant primary CTA for session detail', () => {
     const model = buildNavModel('/repos/5/sessions/abc')
-    expect(model.primary).toHaveLength(2)
-    expect(model.primary[0].key).toBe('new-session')
-    expect(model.primary[0].onSelect).toBe('new-session')
-    expect(model.primary[0].variant).toBe('primary')
-    expect(model.primary[1].key).toBe('assistant')
-    expect(model.primary[1].to).toBe('/assistant')
-    expect(model.primary[1].variant).toBe('secondary')
+    expect(model.primary).toHaveLength(1)
+    expect(model.primary[0].key).toBe('assistant')
+    expect(model.primary[0].to).toBe('/assistant')
+    expect(model.primary[0].variant).toBe('secondary')
   })
 
   it('returns new-session and assistant primary CTAs for assistant workspace', () => {

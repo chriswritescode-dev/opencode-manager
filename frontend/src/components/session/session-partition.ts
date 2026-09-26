@@ -6,9 +6,37 @@ export interface PartitionedSessions {
   older: Session[]
 }
 
+export interface SelectRootSessionsOptions {
+  directories?: ReadonlySet<string>
+  keyFn: (session: Session) => string
+}
+
+export function selectRootSessions(
+  sessions: Session[],
+  options: SelectRootSessionsOptions,
+): Session[] {
+  const { directories, keyFn } = options
+  const roots = sessions.filter((session) => {
+    if (session.parentID) return false
+    const directory = session.location.directory
+    if (directories && directories.size > 0 && directory && !directories.has(directory)) return false
+    return true
+  })
+
+  const uniqueSessions = new Map<string, Session>()
+  for (const session of roots) {
+    const key = keyFn(session)
+    if (!uniqueSessions.has(key)) {
+      uniqueSessions.set(key, session)
+    }
+  }
+
+  return Array.from(uniqueSessions.values()).sort((a, b) => b.time.updated - a.time.updated)
+}
+
 export function partitionSessions(
   sessions: Session[],
-  pinnedKeys: Set<string>,
+  pinnedKeys: ReadonlySet<string>,
   keyFn: (session: Session) => string,
   now: number = Date.now(),
 ): PartitionedSessions {

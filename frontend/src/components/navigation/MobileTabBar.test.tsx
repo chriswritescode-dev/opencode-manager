@@ -59,7 +59,32 @@ describe('MobileTabBar', () => {
       </QueryClientProvider>,
     )
     expect(screen.getByText('Repos')).toBeInTheDocument()
-    expect(screen.getByText('Schedules')).toBeInTheDocument()
+    expect(screen.getByText('Git')).toBeInTheDocument()
+    expect(screen.queryByText('Schedules')).not.toBeInTheDocument()
+    const labels = screen.getAllByRole('button').map((button) => button.textContent)
+    expect(labels).toEqual(['Repos', 'Files', 'Git', 'Assistant', 'More'])
+  })
+
+  it('opens the source control dialog when Git is clicked on repo detail path', async () => {
+    vi.mocked(useMobile).mockReturnValue(true)
+    const queryClient = new QueryClient()
+    const user = userEvent.setup()
+
+    render(
+      <QueryClientProvider client={queryClient}>
+        <MemoryRouter initialEntries={['/repos/123']}>
+          <Routes>
+            <Route path="*" element={<>
+              <MobileTabBar />
+              <LocationSpy />
+            </>} />
+          </Routes>
+        </MemoryRouter>
+      </QueryClientProvider>,
+    )
+
+    await user.click(screen.getByRole('button', { name: 'Git' }))
+    expect(screen.getByTestId('location')).toHaveTextContent('dialog=sourceControl')
   })
 
   it('renders global tabs on assistant session list path', () => {
@@ -152,6 +177,7 @@ describe('MobileTabBar', () => {
     expect(screen.getByText('Assistant')).toBeInTheDocument()
     expect(screen.getByText('Schedules')).toBeInTheDocument()
     expect(screen.getByText('More')).toBeInTheDocument()
+    expect(screen.queryByText('Git')).not.toBeInTheDocument()
   })
 
   it('renders tab bar on /schedules path', () => {

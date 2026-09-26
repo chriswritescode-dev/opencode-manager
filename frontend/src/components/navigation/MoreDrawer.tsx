@@ -1,6 +1,6 @@
 import { useNavigate, useLocation, useParams } from 'react-router-dom'
 import { useState, useRef, useEffect } from 'react'
-import { ChevronDown, ChevronRight, Command as CommandIcon, FileText, X, GitBranch } from 'lucide-react'
+import { ChevronDown, ChevronRight, Command as CommandIcon, FileText, FolderGit2, X, GitBranch } from 'lucide-react'
 import { useAuth } from '@/hooks/useAuth'
 import { useServerHealth } from '@/hooks/useServerHealth'
 import { useCommands } from '@/hooks/useCommands'
@@ -11,11 +11,12 @@ import { getRepo } from '@/api/repos'
 import { useRefreshOnOpen } from '@/hooks/useRefreshOnOpen'
 import { SideDrawer, SideDrawerContent } from '@/components/ui/side-drawer'
 import { FileBrowserSheet } from '@/components/file-browser/FileBrowserSheet'
-import { buildMoreItems } from './moreDrawerItems'
+import { buildMoreItems, buildNavModel } from './moreDrawerItems'
 import { useSwipeBack } from '@/hooks/useMobile'
 import { getRepoDisplayName } from '@/lib/utils'
 import { getPathWithReturnTo, isAssistantPath } from '@/lib/navigation'
 import type { CommandInfo } from '@opencode-manager/shared/opencode'
+import { useMobileTabBar } from '@/hooks/useMobileTabBar'
 
 interface MoreDrawerProps {
   isOpen: boolean
@@ -41,6 +42,7 @@ export function MoreDrawer({ isOpen, onClose }: MoreDrawerProps) {
   const activePromptFileBasePath = useUIState((state) => state.activePromptFileBasePath)
   const selectPromptCommand = useUIState((state) => state.selectPromptCommand)
   const selectPromptFile = useUIState((state) => state.selectPromptFile)
+  const { open: openMobileSheet } = useMobileTabBar()
 
   useEffect(() => {
     if (isOpen && swipeRef.current) {
@@ -116,6 +118,9 @@ export function MoreDrawer({ isOpen, onClose }: MoreDrawerProps) {
   }
 
   const items = buildMoreItems(location.pathname)
+  const assistantCta = isSessionDetail && !isAssistantSession
+    ? buildNavModel(location.pathname).primary.find((cta) => cta.key === 'assistant')
+    : undefined
   const commands = filterCommands('')
 
   const opencodeVersion = health?.opencodeVersion
@@ -160,6 +165,25 @@ export function MoreDrawer({ isOpen, onClose }: MoreDrawerProps) {
         <SideDrawerContent className="flex flex-col gap-1">
           {isSessionDetail && (
             <div className="flex flex-col gap-1">
+              <button
+                type="button"
+                onClick={() => openMobileSheet('repos')}
+                className="flex items-center gap-3 p-3 rounded-lg hover:bg-accent transition-colors text-left w-full"
+              >
+                <FolderGit2 className="w-5 h-5 text-muted-foreground" />
+                <span className="font-medium text-foreground flex-1">Repos</span>
+                <ChevronRight className="w-4 h-4 text-muted-foreground" />
+              </button>
+              {assistantCta?.to && (
+                <button
+                  type="button"
+                  onClick={() => navigate(assistantCta.to!)}
+                  className="flex items-center gap-3 p-3 rounded-lg hover:bg-accent transition-colors text-left w-full"
+                >
+                  <assistantCta.icon className="w-5 h-5 text-muted-foreground" />
+                  <span className="font-medium text-foreground flex-1">{assistantCta.label}</span>
+                </button>
+              )}
               <button
                 type="button"
                 onClick={() => setCommandsOpen((open) => !open)}

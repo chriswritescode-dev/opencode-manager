@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest'
-import { partitionSessions } from './session-partition'
+import { partitionSessions, selectRootSessions } from './session-partition'
 import type { Session } from '@/api/types'
 
 function createSession(id: string, updated: number, directory = '/test'): Session {
@@ -16,6 +16,53 @@ function createSession(id: string, updated: number, directory = '/test'): Sessio
 
 const keyFn = (s: Session) =>
   `${s.location.directory}:${s.id}`
+
+describe('selectRootSessions', () => {
+  it('drops sessions that have a parentID', () => {
+    const sessions = [
+      createSession('root', 2000),
+      { ...createSession('child', 1000), parentID: 'root' },
+    ]
+
+    const result = selectRootSessions(sessions, { keyFn })
+
+    expect(result.map((s) => s.id)).toEqual(['root'])
+  })
+
+  it('drops sessions outside the directory set but keeps sessions with no directory', () => {
+    const sessions = [
+      createSession('inside', 3000, '/a'),
+      createSession('outside', 2000, '/b'),
+      { ...createSession('no-directory', 1000), location: {} as Session['location'] },
+    ]
+
+    const result = selectRootSessions(sessions, { directories: new Set(['/a']), keyFn })
+
+    expect(result.map((s) => s.id)).toEqual(['inside', 'no-directory'])
+  })
+
+  it('keeps the first occurrence when deduping by key', () => {
+    const first = createSession('dup', 2000, '/a')
+    const second = createSession('dup', 5000, '/a')
+
+    const result = selectRootSessions([first, second], { keyFn })
+
+    expect(result).toHaveLength(1)
+    expect(result[0].time.updated).toBe(2000)
+  })
+
+  it('returns the result sorted by updated descending', () => {
+    const sessions = [
+      createSession('old', 1000),
+      createSession('new', 3000),
+      createSession('mid', 2000),
+    ]
+
+    const result = selectRootSessions(sessions, { keyFn })
+
+    expect(result.map((s) => s.id)).toEqual(['new', 'mid', 'old'])
+  })
+})
 
 describe('partitionSessions', () => {
   it('places pinned sessions in pinned array sorted by updated desc', () => {

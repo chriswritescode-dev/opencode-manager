@@ -8,12 +8,15 @@ import { useUrlParams } from '@/hooks/useUrlParams'
 import { buildNavModel, type MoreDrawerItem, type NavPrimaryCta } from '@/components/navigation/moreDrawerItems'
 import { getPathWithReturnTo } from '@/lib/navigation'
 import { RepoQuickSwitchSheet } from '@/components/navigation/RepoQuickSwitchSheet'
+import { DesktopSessionTree } from '@/components/navigation/DesktopSessionTree'
 import {
   Sidebar,
   SidebarSection,
   SidebarItem,
 } from '@/components/ui/sidebar'
 import { FolderGit2 } from 'lucide-react'
+
+const ACCOUNT_ITEM_KEYS = new Set(['settings', 'logout'])
 
 export function DesktopSidebar() {
   const location = useLocation()
@@ -73,10 +76,12 @@ export function DesktopSidebar() {
     { key: 'repos', label: 'Repos', icon: FolderGit2 },
     ...routeItems,
   ]
+  const toolItems = navItems.filter((item) => !ACCOUNT_ITEM_KEYS.has(item.key))
+  const accountItems = navItems.filter((item) => ACCOUNT_ITEM_KEYS.has(item.key))
 
   return (
     <>
-      <Sidebar collapsed={collapsed} onToggle={toggle} className='mt-2'>
+      <Sidebar collapsed={collapsed} onToggle={toggle} widthClass='w-72' className='mt-2'>
         {primary.length > 0 && (
           <SidebarSection collapsed={collapsed}>
             {primary.map((item: NavPrimaryCta) => (
@@ -93,18 +98,52 @@ export function DesktopSidebar() {
           </SidebarSection>
         )}
 
-        <div className="flex flex-col gap-1 p-2 pt-0">
-          {navItems.map((item: MoreDrawerItem) => (
-            <SidebarItem
-              key={item.key}
-              icon={item.icon}
-              label={item.label}
-              collapsed={collapsed}
-              onClick={() => handleItemClick(item)}
-              danger={item.danger}
-            />
-          ))}
-        </div>
+        {collapsed ? (
+          <div className="flex flex-col gap-1 p-2 pt-0">
+            {navItems.map((item: MoreDrawerItem) => (
+              <SidebarItem
+                key={item.key}
+                icon={item.icon}
+                label={item.label}
+                collapsed={collapsed}
+                onClick={() => handleItemClick(item)}
+                danger={item.danger}
+              />
+            ))}
+          </div>
+        ) : (
+          <>
+            <div className="flex min-h-0 flex-1 flex-col border-t border-border">
+              <DesktopSessionTree />
+            </div>
+
+            <div className="flex flex-col gap-1 border-t border-border p-2">
+              {toolItems.map((item: MoreDrawerItem) => (
+                <SidebarItem
+                  key={item.key}
+                  icon={item.icon}
+                  label={item.label}
+                  collapsed={false}
+                  onClick={() => handleItemClick(item)}
+                  danger={item.danger}
+                />
+              ))}
+            </div>
+
+            <div className="flex gap-1 border-t border-border p-2">
+              {accountItems.map((item: MoreDrawerItem) => (
+                <SidebarItem
+                  key={item.key}
+                  icon={item.icon}
+                  label={item.label}
+                  collapsed
+                  onClick={() => handleItemClick(item)}
+                  danger={item.danger}
+                />
+              ))}
+            </div>
+          </>
+        )}
       </Sidebar>
 
       <RepoQuickSwitchSheet

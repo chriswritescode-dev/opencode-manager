@@ -64,10 +64,7 @@ function buildRouteNavModel(pathname: string): NavModel {
     ]
 
     return {
-      primary: [
-        { key: 'new-session', label: 'New Session', icon: SquarePlus, onSelect: 'new-session', variant: 'primary' },
-        getAssistantNavItem(pathname),
-      ],
+      primary: [getAssistantNavItem(pathname)],
       items,
     }
   }
@@ -85,10 +82,7 @@ function buildRouteNavModel(pathname: string): NavModel {
     ]
 
     return {
-      primary: [
-        { key: 'new-session', label: 'New Session', icon: SquarePlus, onSelect: 'new-session', variant: 'primary' },
-        getAssistantNavItem(pathname),
-      ],
+      primary: [getAssistantNavItem(pathname)],
       items,
     }
   }

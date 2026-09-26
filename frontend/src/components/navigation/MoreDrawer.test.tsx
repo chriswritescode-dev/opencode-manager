@@ -262,4 +262,44 @@ describe('MoreDrawer', () => {
     expect(navigateMock).toHaveBeenCalledWith('/repos/1/schedules?returnTo=%2Frepos%2F1%2Fsessions%2Fsession-1%3Fassistant%3D1')
   })
 
+  it('swaps the menu for the Repos sheet from a session', () => {
+    const navigateMock = vi.fn()
+    vi.mocked(useNavigate).mockReturnValue(navigateMock)
+    mockAuth()
+    mockServerHealth()
+    renderMoreDrawer({ initialEntry: '/repos/1/sessions/session-1?mobileTab=more', routePath: '/repos/:id/sessions/:sessionId' })
+
+    fireEvent.click(screen.getByText('Repos'))
+
+    expect(navigateMock).toHaveBeenCalledWith({ search: 'mobileTab=repos' }, { replace: false })
+  })
+
+  it('keeps Home and hides the Repos row outside a session', () => {
+    mockAuth()
+    mockServerHealth()
+    renderMoreDrawer({ initialEntry: '/repos/1', routePath: '/repos/:id' })
+
+    expect(screen.getByText('Home')).toBeInTheDocument()
+    expect(screen.queryByText('Repos')).not.toBeInTheDocument()
+  })
+
+  it('offers the Assistant from a repo session', () => {
+    const navigateMock = vi.fn()
+    vi.mocked(useNavigate).mockReturnValue(navigateMock)
+    mockAuth()
+    mockServerHealth()
+    renderMoreDrawer({ initialEntry: '/repos/1/sessions/session-1', routePath: '/repos/:id/sessions/:sessionId' })
+
+    fireEvent.click(screen.getByRole('button', { name: 'Assistant' }))
+
+    expect(navigateMock).toHaveBeenCalledWith('/assistant')
+  })
+
+  it('does not offer the Assistant from an assistant session', () => {
+    mockAuth()
+    mockServerHealth()
+    renderMoreDrawer({ initialEntry: '/repos/1/sessions/session-1?assistant=1', routePath: '/repos/:id/sessions/:sessionId' })
+
+    expect(screen.queryByRole('button', { name: 'Assistant' })).not.toBeInTheDocument()
+  })
 })

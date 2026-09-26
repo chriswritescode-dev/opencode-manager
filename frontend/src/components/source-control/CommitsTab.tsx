@@ -1,32 +1,12 @@
 import { useGitLog } from '@/api/git'
 import { Loader2, GitCommit, AlertCircle, ArrowUp } from 'lucide-react'
-import { cn } from '@/lib/utils'
+import { cn, formatShortRelativeTime } from '@/lib/utils'
 import { GIT_UI_COLORS } from '@/lib/git-status-styles'
 
 interface CommitsTabProps {
   repoId: number
   branch: string
   onSelectCommit?: (hash: string) => void
-}
-
-function formatRelativeTime(timestamp: string): string {
-  const date = new Date(parseInt(timestamp, 10) * 1000)
-
-  const now = new Date()
-  const diffMs = now.getTime() - date.getTime()
-  const diffSeconds = Math.floor(diffMs / 1000)
-  const diffMinutes = Math.floor(diffSeconds / 60)
-  const diffHours = Math.floor(diffMinutes / 60)
-  const diffDays = Math.floor(diffHours / 24)
-  const diffWeeks = Math.floor(diffDays / 7)
-  const diffMonths = Math.floor(diffDays / 30)
-
-  if (diffSeconds < 60) return 'just now'
-  if (diffMinutes < 60) return `${diffMinutes}m ago`
-  if (diffHours < 24) return `${diffHours}h ago`
-  if (diffDays < 7) return `${diffDays}d ago`
-  if (diffWeeks < 4) return `${diffWeeks}w ago`
-  return `${diffMonths}mo ago`
 }
 
 export function CommitsTab({ repoId, branch, onSelectCommit }: CommitsTabProps) {
@@ -78,7 +58,7 @@ export function CommitsTab({ repoId, branch, onSelectCommit }: CommitsTabProps) 
                 <span>·</span>
                 <span className="truncate">{commit.authorName}</span>
                 <span>·</span>
-                <span className="flex-shrink-0">{formatRelativeTime(commit.date)}</span>
+                <span className="flex-shrink-0">{formatShortRelativeTime(new Date(parseInt(commit.date, 10) * 1000))}</span>
                 {commit.unpushed && (
                   <span className={cn('flex items-center gap-0.5 px-1 rounded', GIT_UI_COLORS.unpushed)}>
                     <ArrowUp className="w-3 h-3" />

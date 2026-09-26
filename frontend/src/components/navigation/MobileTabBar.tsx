@@ -1,6 +1,6 @@
 import { memo, useMemo } from 'react'
 import { useLocation, useNavigate } from 'react-router-dom'
-import { FolderGit2, FolderOpen, CalendarClock, Menu, Info, History, Bot } from 'lucide-react'
+import { FolderGit2, FolderOpen, CalendarClock, Menu, Info, History, Bot, GitCommitHorizontal } from 'lucide-react'
 import { cn } from '@/lib/utils'
 import { useMobile } from '@/hooks/useMobile'
 import { useMobileTabBar } from '@/hooks/useMobileTabBar'
@@ -64,9 +64,15 @@ function getMobileTabRouteState(pathname: string): MobileTabRouteState {
 }
 
 function buildGlobalTabs({ pathname, openSheet, open, close, navigate, isInsideRepo, repoId, updateParams }: GlobalTabsArgs): TabDef[] {
+  const openRepoDialog = (dialog: string) => {
+    updateParams((p) => { p.set('dialog', dialog); p.delete('mobileTab') }, 'push')
+  }
+
+  const inRepo = isInsideRepo && repoId !== null
+
   const handleFilesClick = () => {
-    if (isInsideRepo && repoId) {
-      updateParams((p) => { p.set('dialog', 'files'); p.delete('mobileTab') }, 'push')
+    if (inRepo) {
+      openRepoDialog('files')
     } else {
       open('files')
     }
@@ -92,6 +98,15 @@ function buildGlobalTabs({ pathname, openSheet, open, close, navigate, isInsideR
       onClick: handleFilesClick,
       active: openSheet === 'files',
     },
+    ...(inRepo
+      ? [{
+          key: 'source-control',
+          label: 'Git',
+          icon: GitCommitHorizontal,
+          onClick: () => openRepoDialog('sourceControl'),
+          active: false,
+        }]
+      : []),
     {
       key: 'assistant',
       label: 'Assistant',
@@ -99,13 +114,15 @@ function buildGlobalTabs({ pathname, openSheet, open, close, navigate, isInsideR
       onClick: handleAssistantClick,
       active: isAssistantPath(pathname) && !openSheet,
     },
-    {
-      key: 'schedules',
-      label: 'Schedules',
-      icon: CalendarClock,
-      onClick: () => navigate('/schedules'),
-      active: pathname === '/schedules' && !openSheet,
-    },
+    ...(!inRepo
+      ? [{
+          key: 'schedules',
+          label: 'Schedules',
+          icon: CalendarClock,
+          onClick: () => navigate('/schedules'),
+          active: pathname === '/schedules' && !openSheet,
+        }]
+      : []),
     {
       key: 'more',
       label: 'More',

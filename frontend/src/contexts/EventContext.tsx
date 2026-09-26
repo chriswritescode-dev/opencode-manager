@@ -4,6 +4,7 @@ import { useNavigate } from 'react-router-dom'
 import { useQueryClient, useQuery } from '@tanstack/react-query'
 import {
   cancelForm,
+  listActiveSessions,
   listPendingForms,
   listPendingPermissions,
   replyForm,
@@ -15,7 +16,13 @@ import type { PermissionResponse, SSHHostKeyRequest, Repo } from '@/api/types'
 import { showToast } from '@/lib/toast'
 import { openCodeEventStream, type EventStreamHealthState } from '@/lib/opencode-event-stream'
 import { addToSessionKeyedState, removeFromSessionKeyedState } from '@/lib/sessionKeyedState'
-import { invalidateProviderCachesDebounced, invalidateQueryKeysDebounced, invalidateRepoGitCachesDebounced } from '@/lib/queryInvalidation'
+import { busyStatusesFromActiveSessions, useSessionStatus } from '@/stores/sessionStatusStore'
+import {
+  invalidateProviderCachesDebounced,
+  invalidateQueryKeysDebounced,
+  invalidateRepoGitCachesDebounced,
+  invalidateSessionListCachesDebounced,
+} from '@/lib/queryInvalidation'
 
 type PermissionsBySession = Record<string, PermissionRequest[]>
 type FormsBySession = Record<string, FormInfo[]>
@@ -150,6 +157,7 @@ export function EventProvider({ children }: { children: React.ReactNode }) {
   const sessionDirectoriesRef = useRef<Map<string, string>>(new Map())
   const prevPermissionCountRef = useRef(0)
   const initialFetchDoneRef = useRef(false)
+  const statusSyncVersionRef = useRef(0)
   const subscriptionRef = useRef<ReturnType<typeof openCodeEventStream.subscribeGlobalMonitor> | null>(null)
   const reposRef = useRef<typeof repos>(null)
 
@@ -371,6 +379,29 @@ export function EventProvider({ children }: { children: React.ReactNode }) {
     await reconcilePendingActionsForDirectories([...new Set(reposToUse.map(r => r.fullPath))])
   }, [reconcilePendingActionsForDirectories])
 
+  const fetchInitialSessionStatuses = useCallback(async () => {
+    const syncVersion = ++statusSyncVersionRef.current
+    const snapshotToken = useSessionStatus.getState().beginStatusSnapshot()
+
+    try {
+      const active = await listActiveSessions()
+      if (statusSyncVersionRef.current !== syncVersion) {
+        useSessionStatus.getState().endStatusSnapshot(snapshotToken)
+        return
+      }
+      useSessionStatus.getState().replaceStatuses(
+        busyStatusesFromActiveSessions(active),
+        undefined,
+        snapshotToken,
+      )
+    } catch (error) {
+      useSessionStatus.getState().endStatusSnapshot(snapshotToken)
+      if (import.meta.env.DEV) {
+        console.warn('Failed to fetch active sessions:', error)
+      }
+    }
+  }, [])
+
   const syncPermissionsForSession = useCallback(async (directory: string, sessionID: string) => {
     const pendingPermissions = await listPendingPermissions(directory)
     rememberSessionDirectory(sessionID, directory)
@@ -413,6 +444,34 @@ export function EventProvider({ children }: { children: React.ReactNode }) {
           removeForm(id, sessionID)
           break
         }
+        case 'session.status': {
+          const { sessionID, status } = event.data
+          useSessionStatus.getState().setStatus(sessionID, status, event.directory)
+          break
+        }
+        case 'session.idle': {
+          useSessionStatus.getState().setStatus(event.data.sessionID, { type: 'idle' })
+          break
+        }
+        case 'session.execution.started': {
+          useSessionStatus.getState().setStatus(event.data.sessionID, { type: 'busy' }, event.directory)
+          break
+        }
+        case 'session.execution.succeeded':
+        case 'session.execution.failed':
+        case 'session.execution.interrupted': {
+          useSessionStatus.getState().setStatus(event.data.sessionID, { type: 'idle' })
+          invalidateSessionListCachesDebounced(queryClient)
+          break
+        }
+        case 'session.created':
+        case 'session.renamed':
+        case 'session.deleted':
+        case 'session.moved':
+        case 'session.metadata.updated':
+        case 'session.usage.updated':
+          invalidateSessionListCachesDebounced(queryClient)
+          break
         case 'credential.updated':
         case 'credential.switched':
         case 'integration.updated':
@@ -455,6 +514,9 @@ export function EventProvider({ children }: { children: React.ReactNode }) {
       if (connected) {
         initialFetchDoneRef.current = false
         fetchInitialPendingData()
+        fetchInitialSessionStatuses()
+      } else {
+        statusSyncVersionRef.current += 1
       }
     }
 
@@ -473,10 +535,11 @@ export function EventProvider({ children }: { children: React.ReactNode }) {
     subscriptionRef.current = subscription
     
     return () => {
+      statusSyncVersionRef.current += 1
       subscription.dispose()
       subscriptionRef.current = null
     }
-  }, [addPermission, removePermission, addForm, removeForm, rememberSessionDirectory, fetchInitialPendingData, queryClient, handleHealthChange, reconcilePendingActionsForDirectories, collectTrackedDirectories])
+  }, [addPermission, removePermission, addForm, removeForm, rememberSessionDirectory, fetchInitialPendingData, fetchInitialSessionStatuses, queryClient, handleHealthChange, reconcilePendingActionsForDirectories, collectTrackedDirectories])
 
   useEffect(() => {
     reposRef.current = repos

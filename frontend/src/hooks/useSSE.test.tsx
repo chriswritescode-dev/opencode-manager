@@ -61,13 +61,13 @@ describe('useSSE', () => {
     vi.clearAllMocks()
     MockEventSource.instances = []
     mocks.active.mockResolvedValue({})
-    useSessionStatus.getState().replaceStatuses({})
+    useSessionStatus.setState({ statuses: new Map(), statusCache: new Map(), statusDirectories: new Map(), statusRevisions: new Map(), revision: 0 })
     globalThis.EventSource = MockEventSource as unknown as typeof EventSource
     globalThis.fetch = vi.fn(() => Promise.resolve({ ok: true } as Response))
   })
 
   afterEach(() => {
-    useSessionStatus.getState().replaceStatuses({})
+    useSessionStatus.setState({ statuses: new Map(), statusCache: new Map(), statusDirectories: new Map(), statusRevisions: new Map(), revision: 0 })
     globalThis.EventSource = originalEventSource
     globalThis.fetch = originalFetch
   })
@@ -211,6 +211,114 @@ describe('useSSE', () => {
 
     expect(useSessionStatus.getState().getStatus('session-b')).toEqual({ type: 'busy' })
     expect(useSessionStatus.getState().getStatus('session-a')).toEqual({ type: 'idle' })
+
+    unmount()
+  })
+
+  it('keeps other directories active sessions when reconciling the global snapshot', async () => {
+    const queryClient = new QueryClient({
+      defaultOptions: {
+        queries: { retry: false },
+      },
+    })
+
+    useSessionStatus.getState().setStatus('other', { type: 'busy' }, '/other')
+    useSessionStatus.getState().setStatus('inactive', { type: 'busy' }, '/repo')
+    mocks.active.mockResolvedValue({ other: { type: 'running' } })
+
+    const { unmount } = renderHook(
+      () => useSSE('/repo', 'session-1'),
+      { wrapper: createWrapper(queryClient) }
+    )
+
+    await waitFor(() => expect(MockEventSource.instances).toHaveLength(1))
+
+    await connect(0, 'client-1')
+
+    await waitFor(() => {
+      expect(useSessionStatus.getState().getStatus('other')).toEqual({ type: 'busy' })
+      expect(useSessionStatus.getState().getStatus('inactive')).toEqual({ type: 'idle' })
+    })
+
+    unmount()
+  })
+
+  it('preserves a live status that arrives while the global snapshot is in flight', async () => {
+    const queryClient = new QueryClient({
+      defaultOptions: {
+        queries: { retry: false },
+      },
+    })
+
+    let resolveActive: (value: Record<string, { type: 'running' }>) => void = () => {}
+    mocks.active.mockImplementationOnce(() => new Promise((resolve) => { resolveActive = resolve }))
+
+    const { unmount } = renderHook(
+      () => useSSE('/repo', 'session-1'),
+      { wrapper: createWrapper(queryClient) }
+    )
+
+    await waitFor(() => expect(MockEventSource.instances).toHaveLength(1))
+
+    await connect(0, 'client-1')
+
+    act(() => {
+      MockEventSource.instances[0].emit('message', {
+        type: 'session.execution.started',
+        directory: '/repo',
+        data: { sessionID: 'session-live' },
+      })
+    })
+
+    await act(async () => {
+      resolveActive({})
+      await Promise.resolve()
+    })
+
+    await waitFor(() => {
+      expect(useSessionStatus.getState().getStatus('session-live')).toEqual({ type: 'busy' })
+    })
+
+    unmount()
+  })
+
+  it('does not let an in-flight global snapshot revert an idle event received after it began', async () => {
+    const queryClient = new QueryClient({
+      defaultOptions: {
+        queries: { retry: false },
+      },
+    })
+
+    useSessionStatus.getState().setStatus('session-idle', { type: 'busy' }, '/repo')
+
+    let resolveActive: (value: Record<string, { type: 'running' }>) => void = () => {}
+    mocks.active.mockImplementationOnce(() => new Promise((resolve) => { resolveActive = resolve }))
+
+    const { unmount } = renderHook(
+      () => useSSE('/repo', 'session-1'),
+      { wrapper: createWrapper(queryClient) }
+    )
+
+    await waitFor(() => expect(MockEventSource.instances).toHaveLength(1))
+
+    await connect(0, 'client-1')
+
+    act(() => {
+      MockEventSource.instances[0].emit('message', {
+        type: 'session.idle',
+        directory: '/repo',
+        data: { sessionID: 'session-idle' },
+      })
+    })
+
+    await act(async () => {
+      resolveActive({ 'session-idle': { type: 'running' } })
+      await Promise.resolve()
+    })
+
+    await waitFor(() => {
+      expect(useSessionStatus.getState().getStatus('session-idle')).toEqual({ type: 'idle' })
+    })
 
     unmount()
   })

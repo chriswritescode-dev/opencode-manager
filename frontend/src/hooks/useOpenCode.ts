@@ -25,7 +25,7 @@ import { showToast } from "../lib/toast";
 import { useSendErrorStore } from "../stores/sendErrorStore";
 import { useSessionStatus } from "../stores/sessionStatusStore";
 import { invalidateSessionListCaches, sessionTranscriptQueryKey } from "../lib/queryInvalidation";
-import { buildSessionKey } from "../lib/sessionKey";
+import { buildPinnedSessionKeys, buildSessionKey } from "../lib/sessionKey";
 import { toggleSessionPin } from "../api/sessionPins";
 import { SESSION_PINS_QUERY_KEY } from "./useSessionPins";
 import { admitInboxItem, type TranscriptCache } from "../lib/session-projection";
@@ -232,7 +232,7 @@ const cleanupSessionPins = (
 ) => {
   const pins = queryClient.getQueryData<SessionPin[]>(SESSION_PINS_QUERY_KEY) ?? [];
   if (pins.length === 0) return;
-  const pinnedKeys = new Set(pins.map((p) => buildSessionKey(p.directory, p.sessionId)));
+  const pinnedKeys = buildPinnedSessionKeys(pins);
   const targets = (Array.isArray(variables) ? variables : [variables])
     .map((target) => ({
       sessionId: getDeleteSessionTargetId(target),

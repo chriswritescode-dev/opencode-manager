@@ -5,12 +5,14 @@ import type { ReactNode } from 'react'
 import { MemoryRouter, useLocation } from 'react-router-dom'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 import type { FormInfo, PermissionRequest } from '@opencode-manager/shared/opencode'
+import { useSessionStatus } from '@/stores/sessionStatusStore'
 import { EventProvider, useEventContext, useForms, usePermissions, useSSEHealth } from './EventContext'
 
 const mocks = vi.hoisted(() => ({
   listRepos: vi.fn(),
   listPendingPermissions: vi.fn(),
   listPendingForms: vi.fn(),
+  listActiveSessions: vi.fn(),
   replyPermission: vi.fn(),
   replyForm: vi.fn(),
   cancelForm: vi.fn(),
@@ -23,6 +25,7 @@ vi.mock('@/api/repos', () => ({
 }))
 
 vi.mock('@/api/opencode', () => ({
+  listActiveSessions: mocks.listActiveSessions,
   listPendingPermissions: mocks.listPendingPermissions,
   listPendingForms: mocks.listPendingForms,
   replyPermission: mocks.replyPermission,
@@ -126,6 +129,14 @@ function createTestQueryClient() {
   })
 }
 
+function createDeferred<T>() {
+  let resolve!: (value: T) => void
+  const promise = new Promise<T>((res) => {
+    resolve = res
+  })
+  return { promise, resolve }
+}
+
 function createWrapper(queryClient = createTestQueryClient()) {
   return ({ children }: { children: ReactNode }) => (
     <MemoryRouter>
@@ -153,10 +164,12 @@ describe('EventProvider permissions and forms', () => {
     mocks.listRepos.mockResolvedValue([])
     mocks.listPendingPermissions.mockResolvedValue([])
     mocks.listPendingForms.mockResolvedValue([])
+    mocks.listActiveSessions.mockResolvedValue({})
     mocks.replyPermission.mockResolvedValue(undefined)
     mocks.replyForm.mockResolvedValue(undefined)
     mocks.cancelForm.mockResolvedValue(undefined)
     mocks.getHealth.mockReturnValue({ isConnected: false, isHealthy: false, lastEventAt: null, isStalled: false })
+    useSessionStatus.setState({ statuses: new Map(), statusCache: new Map(), statusDirectories: new Map(), statusRevisions: new Map(), revision: 0 })
     mocks.subscribeGlobalMonitor.mockReturnValue({
       dispose: vi.fn(),
       updateDirectories: vi.fn(),
@@ -955,5 +968,265 @@ describe('EventProvider permissions and forms', () => {
 
     expect(afterBooleanChange).toBe(initialRenderCount + 1)
     expect(renderCount).toBe(afterBooleanChange)
+  })
+
+  it('applies a session.status event from the global monitor to the status store', async () => {
+    render(<Harness />, { wrapper: createWrapper() })
+
+    await waitFor(() => expect(mocks.subscribeGlobalMonitor).toHaveBeenCalled())
+
+    const lastSubscribeCall = mocks.subscribeGlobalMonitor.mock.calls[mocks.subscribeGlobalMonitor.mock.calls.length - 1]
+    const onEvent = lastSubscribeCall[0].onEvent as (data: unknown) => void
+
+    act(() => {
+      onEvent({
+        type: 'session.status',
+        data: { sessionID: 'session-9', status: { type: 'busy' } },
+        directory: '/repo',
+      })
+    })
+
+    expect(useSessionStatus.getState().getStatus('session-9')).toEqual({ type: 'busy' })
+  })
+
+  it('applies execution lifecycle and idle events from the global monitor to the status store', async () => {
+    render(<Harness />, { wrapper: createWrapper() })
+
+    await waitFor(() => expect(mocks.subscribeGlobalMonitor).toHaveBeenCalled())
+
+    const lastSubscribeCall = mocks.subscribeGlobalMonitor.mock.calls[mocks.subscribeGlobalMonitor.mock.calls.length - 1]
+    const onEvent = lastSubscribeCall[0].onEvent as (data: unknown) => void
+
+    act(() => {
+      onEvent({ type: 'session.execution.started', data: { sessionID: 'session-9' }, directory: '/repo' })
+    })
+    expect(useSessionStatus.getState().getStatus('session-9')).toEqual({ type: 'busy' })
+
+    act(() => {
+      onEvent({ type: 'session.execution.succeeded', data: { sessionID: 'session-9' }, directory: '/repo' })
+    })
+    expect(useSessionStatus.getState().getStatus('session-9')).toEqual({ type: 'idle' })
+
+    act(() => {
+      onEvent({ type: 'session.execution.started', data: { sessionID: 'session-9' }, directory: '/repo' })
+      onEvent({ type: 'session.idle', data: { sessionID: 'session-9' }, directory: '/repo' })
+    })
+    expect(useSessionStatus.getState().getStatus('session-9')).toEqual({ type: 'idle' })
+  })
+
+  it('reconciles the global active snapshot on reconnect and clears omitted sessions', async () => {
+    mocks.listRepos.mockResolvedValue([{ id: 123, fullPath: '/repo' }])
+    mocks.listActiveSessions.mockResolvedValue({ 'session-other': { type: 'running' } })
+
+    render(<Harness />, { wrapper: createWrapper() })
+
+    await waitFor(() => expect(mocks.subscribeGlobalMonitor).toHaveBeenCalled())
+
+    act(() => {
+      useSessionStatus.getState().setStatus('session-other', { type: 'busy' }, '/other')
+      useSessionStatus.getState().setStatus('session-stale', { type: 'busy' }, '/repo')
+    })
+
+    const lastSubscribeCall = mocks.subscribeGlobalMonitor.mock.calls[mocks.subscribeGlobalMonitor.mock.calls.length - 1]
+    const handleStatusChange = lastSubscribeCall[0].onStatusChange as (connected: boolean) => void
+
+    act(() => {
+      handleStatusChange(true)
+    })
+
+    await waitFor(() => {
+      expect(useSessionStatus.getState().getStatus('session-other')).toEqual({ type: 'busy' })
+      expect(useSessionStatus.getState().getStatus('session-stale')).toEqual({ type: 'idle' })
+    })
+  })
+
+  it('ignores a superseded connect snapshot that resolves after a newer reconnect snapshot', async () => {
+    mocks.listRepos.mockResolvedValue([{ id: 123, fullPath: '/repo' }])
+
+    const first = createDeferred<Record<string, unknown>>()
+    const second = createDeferred<Record<string, unknown>>()
+    mocks.listActiveSessions
+      .mockReturnValueOnce(first.promise)
+      .mockReturnValueOnce(second.promise)
+
+    render(<Harness />, { wrapper: createWrapper() })
+
+    await waitFor(() => expect(mocks.subscribeGlobalMonitor).toHaveBeenCalled())
+
+    const lastSubscribeCall = mocks.subscribeGlobalMonitor.mock.calls[mocks.subscribeGlobalMonitor.mock.calls.length - 1]
+    const handleStatusChange = lastSubscribeCall[0].onStatusChange as (connected: boolean) => void
+
+    act(() => {
+      handleStatusChange(true)
+    })
+    expect(mocks.listActiveSessions).toHaveBeenCalledTimes(1)
+
+    act(() => {
+      handleStatusChange(false)
+      handleStatusChange(true)
+    })
+    expect(mocks.listActiveSessions).toHaveBeenCalledTimes(2)
+
+    await act(async () => {
+      second.resolve({ 'session-new': { type: 'running' } })
+      await second.promise
+    })
+    await waitFor(() => {
+      expect(useSessionStatus.getState().getStatus('session-new')).toEqual({ type: 'busy' })
+    })
+
+    await act(async () => {
+      first.resolve({ 'session-old': { type: 'running' } })
+      await first.promise
+    })
+
+    expect(useSessionStatus.getState().getStatus('session-new')).toEqual({ type: 'busy' })
+    expect(useSessionStatus.getState().getStatus('session-old')).toEqual({ type: 'idle' })
+  })
+
+  it('does not apply a global snapshot that resolves after unmount', async () => {
+    mocks.listRepos.mockResolvedValue([{ id: 123, fullPath: '/repo' }])
+
+    const deferred = createDeferred<Record<string, unknown>>()
+    mocks.listActiveSessions.mockReturnValueOnce(deferred.promise)
+
+    const { unmount } = render(<Harness />, { wrapper: createWrapper() })
+
+    await waitFor(() => expect(mocks.subscribeGlobalMonitor).toHaveBeenCalled())
+
+    const lastSubscribeCall = mocks.subscribeGlobalMonitor.mock.calls[mocks.subscribeGlobalMonitor.mock.calls.length - 1]
+    const handleStatusChange = lastSubscribeCall[0].onStatusChange as (connected: boolean) => void
+
+    act(() => {
+      handleStatusChange(true)
+    })
+    expect(mocks.listActiveSessions).toHaveBeenCalledTimes(1)
+
+    unmount()
+
+    await act(async () => {
+      deferred.resolve({ 'session-late': { type: 'running' } })
+      await deferred.promise
+    })
+
+    expect(useSessionStatus.getState().getStatus('session-late')).toEqual({ type: 'idle' })
+  })
+
+  it('does not let a deferred connect snapshot revert an idle event received while it was in flight', async () => {
+    mocks.listRepos.mockResolvedValue([{ id: 123, fullPath: '/repo' }])
+
+    const deferred = createDeferred<Record<string, unknown>>()
+    mocks.listActiveSessions.mockReturnValueOnce(deferred.promise)
+
+    render(<Harness />, { wrapper: createWrapper() })
+
+    await waitFor(() => expect(mocks.subscribeGlobalMonitor).toHaveBeenCalled())
+
+    const lastSubscribeCall = mocks.subscribeGlobalMonitor.mock.calls[mocks.subscribeGlobalMonitor.mock.calls.length - 1]
+    const onEvent = lastSubscribeCall[0].onEvent as (data: unknown) => void
+    const handleStatusChange = lastSubscribeCall[0].onStatusChange as (connected: boolean) => void
+
+    act(() => {
+      handleStatusChange(true)
+    })
+    expect(mocks.listActiveSessions).toHaveBeenCalledTimes(1)
+
+    act(() => {
+      onEvent({ type: 'session.status', data: { sessionID: 'session-a', status: { type: 'busy' } }, directory: '/repo' })
+      onEvent({ type: 'session.idle', data: { sessionID: 'session-a' }, directory: '/repo' })
+    })
+
+    await act(async () => {
+      deferred.resolve({ 'session-a': { type: 'running' } })
+      await deferred.promise
+    })
+
+    expect(useSessionStatus.getState().getStatus('session-a')).toEqual({ type: 'idle' })
+  })
+
+  it('does not let a deferred empty connect snapshot erase a session that started while it was in flight', async () => {
+    mocks.listRepos.mockResolvedValue([{ id: 123, fullPath: '/repo' }])
+
+    const deferred = createDeferred<Record<string, unknown>>()
+    mocks.listActiveSessions.mockReturnValueOnce(deferred.promise)
+
+    render(<Harness />, { wrapper: createWrapper() })
+
+    await waitFor(() => expect(mocks.subscribeGlobalMonitor).toHaveBeenCalled())
+
+    const lastSubscribeCall = mocks.subscribeGlobalMonitor.mock.calls[mocks.subscribeGlobalMonitor.mock.calls.length - 1]
+    const onEvent = lastSubscribeCall[0].onEvent as (data: unknown) => void
+    const handleStatusChange = lastSubscribeCall[0].onStatusChange as (connected: boolean) => void
+
+    act(() => {
+      handleStatusChange(true)
+    })
+    expect(mocks.listActiveSessions).toHaveBeenCalledTimes(1)
+
+    act(() => {
+      onEvent({ type: 'session.execution.started', data: { sessionID: 'session-a' }, directory: '/repo' })
+    })
+
+    await act(async () => {
+      deferred.resolve({})
+      await deferred.promise
+    })
+
+    expect(useSessionStatus.getState().getStatus('session-a')).toEqual({ type: 'busy' })
+  })
+
+  it('does not let a deferred connect snapshot resurrect an unknown session that went idle', async () => {
+    mocks.listRepos.mockResolvedValue([{ id: 123, fullPath: '/repo' }])
+
+    const deferred = createDeferred<Record<string, unknown>>()
+    mocks.listActiveSessions.mockReturnValueOnce(deferred.promise)
+
+    render(<Harness />, { wrapper: createWrapper() })
+
+    await waitFor(() => expect(mocks.subscribeGlobalMonitor).toHaveBeenCalled())
+
+    const lastSubscribeCall = mocks.subscribeGlobalMonitor.mock.calls[mocks.subscribeGlobalMonitor.mock.calls.length - 1]
+    const onEvent = lastSubscribeCall[0].onEvent as (data: unknown) => void
+    const handleStatusChange = lastSubscribeCall[0].onStatusChange as (connected: boolean) => void
+
+    act(() => {
+      handleStatusChange(true)
+    })
+    expect(mocks.listActiveSessions).toHaveBeenCalledTimes(1)
+
+    act(() => {
+      onEvent({ type: 'session.idle', data: { sessionID: 'session-unseen' }, directory: '/repo' })
+    })
+
+    await act(async () => {
+      deferred.resolve({ 'session-unseen': { type: 'running' } })
+      await deferred.promise
+    })
+
+    expect(useSessionStatus.getState().getStatus('session-unseen')).toEqual({ type: 'idle' })
+  })
+
+  it('debounces a session list invalidation on session lifecycle events', async () => {
+    const queryClient = createTestQueryClient()
+    const invalidateQueries = vi.spyOn(queryClient, 'invalidateQueries')
+    queryClient.setQueryData(['opencode', 'sessions', '/repo'], { pages: [], pageParams: [] })
+
+    render(<Harness />, { wrapper: createWrapper(queryClient) })
+
+    await waitFor(() => expect(mocks.subscribeGlobalMonitor).toHaveBeenCalled())
+
+    const lastSubscribeCall = mocks.subscribeGlobalMonitor.mock.calls[mocks.subscribeGlobalMonitor.mock.calls.length - 1]
+    const onEvent = lastSubscribeCall[0].onEvent as (data: unknown) => void
+
+    act(() => {
+      onEvent({ type: 'session.created', data: { sessionID: 'session-9' }, directory: '/repo' })
+      onEvent({ type: 'session.renamed', data: { sessionID: 'session-9', title: 'Renamed' }, directory: '/repo' })
+      onEvent({ type: 'session.deleted', data: { sessionID: 'session-9' }, directory: '/repo' })
+    })
+
+    await waitFor(() => {
+      expect(queryClient.getQueryState(['opencode', 'sessions', '/repo'])?.isInvalidated).toBe(true)
+    })
+    expect(invalidateQueries).toHaveBeenCalledTimes(1)
   })
 })

@@ -3,8 +3,8 @@ import { useSessionsAcrossDirectories, useDeleteSession, useCreateSession } from
 import type { DeleteSessionTarget } from "@/hooks/useOpenCode";
 import type { Session } from "@/api/types";
 import { useSessionPins, useToggleSessionPin } from '@/hooks/useSessionPins';
-import { buildSessionKey } from '@/lib/sessionKey';
-import { partitionSessions } from './session-partition';
+import { buildSessionKey, buildPinnedSessionKeys } from '@/lib/sessionKey';
+import { partitionSessions, selectRootSessions } from './session-partition';
 import { DeleteSessionDialog } from "./DeleteSessionDialog";
 import { SessionCard } from "./SessionCard";
 import { Card } from "@/components/ui/card";
@@ -48,7 +48,7 @@ export const SessionList = ({
   const { data: sessionPins } = useSessionPins();
   const togglePin = useToggleSessionPin();
   const pinnedKeys = useMemo(
-    () => new Set((sessionPins ?? []).map((p) => buildSessionKey(p.directory, p.sessionId))),
+    () => buildPinnedSessionKeys(sessionPins ?? []),
     [sessionPins],
   );
   const [deleteDialogOpen, setDeleteDialogOpen] = useState(false);
@@ -57,25 +57,10 @@ export const SessionList = ({
   const [manageMode, setManageMode] = useState(false);
   const sessionListRef = useRef<HTMLDivElement>(null);
 
-  const filteredSessions = useMemo(() => {
-    if (!sessions) return [];
-
-    const filtered = sessions.filter((session) => {
-      if (session.parentID) return false;
-      if (directorySet.size > 0 && !directorySet.has(session.location.directory)) return false;
-      return true;
-    });
-
-    const uniqueSessions = new Map<string, (typeof filtered)[number]>();
-    filtered.forEach((session) => {
-      const key = getSessionSelectionKey(session);
-      if (!uniqueSessions.has(key)) {
-        uniqueSessions.set(key, session);
-      }
-    });
-
-    return Array.from(uniqueSessions.values()).sort((a, b) => b.time.updated - a.time.updated);
-  }, [sessions, directorySet, getSessionSelectionKey]);
+  const filteredSessions = useMemo(
+    () => selectRootSessions(sessions ?? [], { directories: directorySet, keyFn: getSessionSelectionKey }),
+    [sessions, directorySet, getSessionSelectionKey],
+  );
 
   const { pinned: pinnedSessions, today: todaySessions, older: olderSessions } = useMemo(
     () => partitionSessions(filteredSessions, pinnedKeys, getSessionSelectionKey),

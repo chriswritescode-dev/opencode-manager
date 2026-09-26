@@ -3,7 +3,7 @@ import { useQueryClient } from '@tanstack/react-query'
 import type { SessionInfo, V2Event } from '@opencode-manager/shared/opencode'
 import { invalidateSessionListCaches, invalidateSessionListCachesDebounced, shellsQueryKey } from '@/lib/queryInvalidation'
 import { showToast } from '@/lib/toast'
-import { useSessionStatus } from '@/stores/sessionStatusStore'
+import { busyStatusesFromActiveSessions, useSessionStatus } from '@/stores/sessionStatusStore'
 import { useSendErrorStore } from '@/stores/sendErrorStore'
 import { openCodeEventStream } from '@/lib/opencode-event-stream'
 import type { EventStreamSubscription } from '@/lib/opencode-event-stream'
@@ -59,6 +59,8 @@ export const useSSE = (directory?: string | string[], currentSessionId?: string)
   const [isReconnecting, setIsReconnecting] = useState(false)
   const setSessionStatus = useSessionStatus((state) => state.setStatus)
   const replaceSessionStatuses = useSessionStatus((state) => state.replaceStatuses)
+  const beginStatusSnapshot = useSessionStatus((state) => state.beginStatusSnapshot)
+  const endStatusSnapshot = useSessionStatus((state) => state.endStatusSnapshot)
 
   const resolveCacheDirectory = useCallback(
     (eventDirectory: string | undefined): string | undefined => {
@@ -117,7 +119,7 @@ export const useSSE = (directory?: string | string[], currentSessionId?: string)
         break
 
       case 'session.status':
-        setSessionStatus(event.data.sessionID, event.data.status)
+        setSessionStatus(event.data.sessionID, event.data.status, eventDirectory ?? primaryDirectory)
         break
 
       case 'session.idle':
@@ -126,7 +128,7 @@ export const useSSE = (directory?: string | string[], currentSessionId?: string)
         break
 
       case 'session.execution.started':
-        setSessionStatus(event.data.sessionID, { type: 'busy' })
+        setSessionStatus(event.data.sessionID, { type: 'busy' }, eventDirectory ?? primaryDirectory)
         break
 
       case 'session.execution.succeeded':
@@ -168,26 +170,27 @@ export const useSSE = (directory?: string | string[], currentSessionId?: string)
       default:
         break
     }
-  }, [queryClient, directorySet, resolveCacheDirectory, setSessionStatus])
+  }, [queryClient, directorySet, resolveCacheDirectory, setSessionStatus, primaryDirectory])
 
   const fetchInitialData = useCallback(async () => {
     if (!primaryDirectory || !mountedRef.current) return
     const syncVersion = ++statusSyncVersionRef.current
+    const snapshotToken = beginStatusSnapshot()
 
     try {
       const active = await listActiveSessions()
       if (mountedRef.current && statusSyncVersionRef.current === syncVersion && active) {
-        const statuses = Object.fromEntries(
-          Object.keys(active).map((sessionID) => [sessionID, { type: 'busy' as const }]),
-        )
-        replaceSessionStatuses(statuses)
+        replaceSessionStatuses(busyStatusesFromActiveSessions(active), undefined, snapshotToken)
+      } else {
+        endStatusSnapshot(snapshotToken)
       }
     } catch (err) {
+      endStatusSnapshot(snapshotToken)
       if (err instanceof Error && !err.message.includes('aborted')) {
         throw err
       }
     }
-  }, [primaryDirectory, replaceSessionStatuses])
+  }, [primaryDirectory, replaceSessionStatuses, beginStatusSnapshot, endStatusSnapshot])
 
   useEffect(() => {
     if (!primaryDirectory) return

@@ -1,17 +1,17 @@
 import { useState, useMemo } from 'react'
 import { useNavigate, useLocation } from 'react-router-dom'
-import { useQuery } from '@tanstack/react-query'
 import { useRefreshOnOpen } from '@/hooks/useRefreshOnOpen'
 import { Input } from '@/components/ui/input'
 import { BottomSheet, BottomSheetHeader, BottomSheetContent } from '@/components/ui/bottom-sheet'
 import { Button } from '@/components/ui/button'
-import { cn, getRepoDisplayName } from '@/lib/utils'
-import { listRepos } from '@/api/repos'
+import { getRepoDisplayName } from '@/lib/utils'
 import { AddRepoDialog } from '@/components/repo/AddRepoDialog'
-import { FolderGit2, Check, Plus, GitBranch } from 'lucide-react'
+import { FolderGit2, Plus } from 'lucide-react'
 import { useUrlParams } from '@/hooks/useUrlParams'
-import { ASSISTANT_REPO_ID } from '@opencode-manager/shared/utils'
-import { getAssistantPath, isAssistantPath } from '@/lib/navigation'
+import { getAssistantPath } from '@/lib/navigation'
+import { NewSessionButton, RepoSessionNavList, SearchClearButton } from '@/components/navigation/RepoSessionNav'
+import { getActiveRepoId } from '@/components/navigation/sidebar-session-tree'
+import { useNavigableRepos } from '@/hooks/useSidebarRepoGroups'
 
 interface RepoQuickSwitchSheetProps {
   isOpen: boolean
@@ -24,35 +24,19 @@ export function RepoQuickSwitchSheet({ isOpen, onClose }: RepoQuickSwitchSheetPr
   const { searchParams } = useUrlParams()
   const [searchQuery, setSearchQuery] = useState('')
   const [addRepoOpen, setAddRepoOpen] = useState(false)
+  const activeRepoId = getActiveRepoId(location.pathname)
 
-  const activeRepoId = useMemo(() => {
-    if (isAssistantPath(location.pathname)) return null
-    const match = location.pathname.match(/^\/repos\/(\d+)/)
-    return match ? Number(match[1]) : null
-  }, [location.pathname])
+  const { repos, isLoading, refetch } = useNavigableRepos(isOpen)
 
-  const { data: repos, isLoading, refetch } = useQuery({
-    queryKey: ['repos'],
-    queryFn: listRepos,
-    enabled: isOpen,
-  })
-
-  useRefreshOnOpen(isOpen, () => { void refetch() })
-
-  const regularRepos = useMemo(
-    () => repos?.filter((r) => r.id !== ASSISTANT_REPO_ID) ?? null,
-    [repos],
-  )
+  useRefreshOnOpen(isOpen, refetch)
 
   const filteredRepos = useMemo(() => {
-    if (!regularRepos) return []
-    const sorted = [...regularRepos].sort((a, b) => (b.lastAccessedAt ?? 0) - (a.lastAccessedAt ?? 0))
-    if (!searchQuery.trim()) return sorted
+    if (!searchQuery.trim()) return repos
     const query = searchQuery.toLowerCase()
-    return sorted.filter((repo) =>
+    return repos.filter((repo) =>
       getRepoDisplayName(repo).toLowerCase().includes(query)
     )
-  }, [regularRepos, searchQuery])
+  }, [repos, searchQuery])
 
   const isUrlControlledSheet = searchParams.get('mobileTab') === 'repos'
 
@@ -82,16 +66,19 @@ export function RepoQuickSwitchSheet({ isOpen, onClose }: RepoQuickSwitchSheetPr
       <BottomSheet isOpen={isOpen} onClose={onClose} heightClass="h-[70dvh]" ariaLabel="Switch repo">
         <BottomSheetHeader>
           <div className="flex items-center gap-2">
-            <Input
-              type="text"
-              placeholder="Search projects..."
-              value={searchQuery}
-              onChange={(e) => setSearchQuery(e.target.value)}
-              autoFocus
-              className="flex-1"
-              autoComplete="off"
-              name="repo-quick-switch"
-            />
+            <div className="relative flex-1">
+              <Input
+                type="text"
+                placeholder="Search projects..."
+                value={searchQuery}
+                onChange={(e) => setSearchQuery(e.target.value)}
+                autoFocus
+                className="pr-9"
+                autoComplete="off"
+                name="repo-quick-switch"
+              />
+              {searchQuery.length > 0 && <SearchClearButton onClear={() => setSearchQuery('')} />}
+            </div>
             <Button
               type="button"
               size="lg"
@@ -107,68 +94,29 @@ export function RepoQuickSwitchSheet({ isOpen, onClose }: RepoQuickSwitchSheetPr
             </Button>
           </div>
         </BottomSheetHeader>
-      <BottomSheetContent className="flex flex-col gap-2 overflow-y-auto pt-2">
+      <BottomSheetContent className="flex flex-col px-0 pt-0 gap-0">
         {isLoading ? (
-          <div className="flex flex-col gap-2">
+          <div className="flex flex-col gap-2 px-4 pt-3">
             {Array.from({ length: 5 }).map((_, i) => (
               <div key={i} className="h-14 rounded-lg bg-muted animate-pulse" />
             ))}
           </div>
         ) : filteredRepos.length === 0 ? (
-          <div className="flex flex-col items-center justify-center py-12 text-muted-foreground">
+          <div className="flex flex-col items-center justify-center px-4 pt-3 pb-12 text-muted-foreground">
             <FolderGit2 className="h-12 w-12 mb-3 opacity-50" />
             <p className="text-sm">No repos found</p>
           </div>
         ) : (
-          <div className="flex flex-col gap-2">
-            {filteredRepos.map((repo) => {
-              const isActive = repo.id === activeRepoId
-              const branchToDisplay = repo.currentBranch || repo.branch
-              return (
-                <button
-                  key={repo.id}
-                  type="button"
-                  onClick={() => handleClick(repo.id)}
-                  aria-current={isActive ? 'page' : undefined}
-                  className={cn(
-                    'group flex items-center gap-3 p-3 rounded-lg border transition-all text-left w-full',
-                    isActive
-                      ? 'border-primary bg-primary/5'
-                      : 'border-border hover:border-accent hover:bg-accent/50',
-                  )}
-                >
-                  <div className="flex-shrink-0">
-                    <div
-                      className={cn(
-                        'flex items-center justify-center w-8 h-8 rounded-md',
-                        isActive ? 'bg-primary text-primary-foreground' : 'bg-primary/10 text-primary',
-                      )}
-                    >
-                      <FolderGit2 className="h-4 w-4" />
-                    </div>
-                  </div>
-                  <div className="flex-1 min-w-0">
-                    <div className="font-medium text-sm text-foreground truncate">
-                      {getRepoDisplayName(repo)}
-                    </div>
-                    {branchToDisplay && (
-                      <div
-                        className={cn(
-                          'flex items-center gap-1 text-xs',
-                          repo.isWorktree ? 'text-purple-400' : 'text-muted-foreground',
-                        )}
-                      >
-                        <GitBranch className="h-3 w-3 shrink-0" />
-                        <span className="truncate">{branchToDisplay}</span>
-                      </div>
-                    )}
-                  </div>
-                  {isActive && <Check className="h-4 w-4 text-primary flex-shrink-0" />}
-                </button>
-              )
-            })}
-          </div>
+          <RepoSessionNavList
+            repos={filteredRepos}
+            activeRepoId={activeRepoId}
+            isVisible={isOpen}
+            onOpenRepo={handleClick}
+            onSelectSession={(path) => navigateAndClose(path)}
+            renderActions={(repo) => <NewSessionButton repo={repo} onOpenSession={(path) => navigateAndClose(path)} />}
+          />
         )}
+        <div aria-hidden="true" className="h-16 shrink-0" />
       </BottomSheetContent>
       </BottomSheet>
       <AddRepoDialog open={addRepoOpen} onOpenChange={setAddRepoOpen} />
