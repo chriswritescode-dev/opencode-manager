@@ -124,6 +124,7 @@ vi.mock('@/api/repos', () => ({
   } : null)),
 }))
 
+vi.mock('@/components/session/BackgroundWorkBar', () => ({ BackgroundWorkBar: vi.fn(() => null) }))
 vi.mock('@/components/session/SessionList', () => ({
   SessionList: vi.fn(() => null),
 }))

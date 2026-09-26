@@ -26,6 +26,10 @@ export type PromptSkillInput = NonNullable<SessionPromptInput['skills']>[number]
 
 export type ActiveSessions = Awaited<ReturnType<OpenCodeApi['session']['active']>>
 
+export type ShellInfo = Awaited<ReturnType<OpenCodeApi['shell']['list']>>['data'][number]
+
+export type ShellOutputChunk = Awaited<ReturnType<OpenCodeApi['shell']['output']>>['data']
+
 export interface SessionPage {
   items: SessionInfo[]
   nextCursor?: string
@@ -165,6 +169,31 @@ export async function runShell(sessionID: string, command: string): Promise<void
 
 export async function interruptSession(sessionID: string): Promise<void> {
   await callOpenCode((api) => api.session.interrupt({ sessionID }))
+}
+
+export async function backgroundSession(sessionID: string): Promise<void> {
+  await callOpenCode((api) => api.session.background({ sessionID }))
+}
+
+export async function listShells(directory: string): Promise<ShellInfo[]> {
+  const { data } = await callOpenCode((api) => api.shell.list(openCodeLocation(directory)))
+  return data
+}
+
+export async function readShellOutput(
+  id: string,
+  directory: string,
+  cursor: number,
+  limit: number,
+): Promise<ShellOutputChunk> {
+  const { data } = await callOpenCode((api) =>
+    api.shell.output({ id, cursor, limit, ...openCodeLocation(directory) }),
+  )
+  return data
+}
+
+export async function removeShell(id: string, directory: string): Promise<void> {
+  await callOpenCode((api) => api.shell.remove({ id, ...openCodeLocation(directory) }))
 }
 
 export async function stageRevert(sessionID: string, messageID: string): Promise<SessionRevert> {

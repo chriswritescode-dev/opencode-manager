@@ -47,6 +47,7 @@ import { MinimizedFormIndicator } from "@/components/session/MinimizedFormIndica
 import { PendingActionsGroup } from "@/components/notifications/PendingActionsGroup";
 import { SourceControlPanel } from "@/components/source-control";
 import { SessionSendErrorBanner } from "@/components/session/SessionSendErrorBanner";
+import { BackgroundWorkBar } from "@/components/session/BackgroundWorkBar";
 import { useDialogParam } from "@/hooks/useDialogParam";
 import { useSidebarAction } from "@/hooks/useSidebarAction";
 import { SessionMoreButton } from "@/components/navigation/SessionMoreButton";
@@ -637,6 +638,12 @@ export function SessionDetail() {
                 />
               )}
               <SessionSendErrorBanner sessionId={sessionId} isConnected={isConnected} isReconnecting={isReconnecting} />
+              <BackgroundWorkBar
+                sessionID={sessionId}
+                directory={sessionDirectory}
+                messages={messages}
+                isSessionActive={isSessionActive}
+              />
               <PromptInput
                 ref={promptInputRef}
                 directory={sessionDirectory}

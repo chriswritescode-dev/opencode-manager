@@ -128,6 +128,69 @@ describe('MessageThread', () => {
     useUIState.getState().setIsEditingMessage(false)
   })
 
+  it('renders instruction updates as a single notice line without the instruction body', () => {
+    setupSettings({ simpleChatMode: false, showReasoning: false })
+
+    const messages: SessionMessageInfo[] = [
+      { id: 'sys-1', type: 'system', text: '# Code Mode\nfull instruction body', time: { created: Date.now() } },
+      {
+        id: 'sys-2',
+        type: 'system',
+        text: 'agents body',
+        description: 'Instructions updated: AGENTS.md',
+        time: { created: Date.now() },
+      },
+    ]
+
+    render(<MessageThread sessionID="test-session" messages={messages} pending={[]} />)
+
+    expect(screen.getByText(/Instructions updated$/)).toBeInTheDocument()
+    expect(screen.getByText(/Instructions updated: AGENTS\.md/)).toBeInTheDocument()
+    expect(screen.queryByText(/full instruction body/)).not.toBeInTheDocument()
+    expect(screen.queryByText(/agents body/)).not.toBeInTheDocument()
+  })
+
+  it('renders background completion notices as status lines instead of raw payloads', () => {
+    setupSettings({ simpleChatMode: false, showReasoning: false })
+
+    const onChildSessionClick = vi.fn()
+    const messages: SessionMessageInfo[] = [
+      {
+        id: 'syn-shell',
+        type: 'synthetic',
+        text: '<shell id="job-1" state="error" command="pnpm test">\nboom\n</shell>',
+        description: 'pnpm   test',
+        metadata: { source: 'shell', state: 'error' },
+        time: { created: Date.now() },
+      },
+      {
+        id: 'syn-subagent',
+        type: 'synthetic',
+        text: '<subagent sessionID="child-1" state="completed" description="Explore">\ndone\n</subagent>',
+        description: 'Explore',
+        metadata: { source: 'subagent', state: 'completed', childID: 'child-1', agent: 'explore' },
+        time: { created: Date.now() },
+      },
+    ]
+
+    render(
+      <MessageThread
+        sessionID="test-session"
+        messages={messages}
+        pending={[]}
+        onChildSessionClick={onChildSessionClick}
+      />,
+    )
+
+    expect(screen.getByText('! Shell failed')).toBeInTheDocument()
+    expect(screen.getByText('· pnpm test')).toBeInTheDocument()
+    expect(screen.queryByText(/<shell/)).not.toBeInTheDocument()
+    expect(screen.queryByText(/<subagent/)).not.toBeInTheDocument()
+
+    fireEvent.click(screen.getByText('↳ Explore finished'))
+    expect(onChildSessionClick).toHaveBeenCalledWith('child-1')
+  })
+
   it('renders assistant message with only a subagent part as standalone row without header', () => {
     setupSettings({ simpleChatMode: false, showReasoning: false })
 

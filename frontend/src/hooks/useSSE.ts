@@ -1,13 +1,13 @@
 import { useEffect, useRef, useState, useCallback, useMemo } from 'react'
 import { useQueryClient } from '@tanstack/react-query'
 import type { SessionInfo, V2Event } from '@opencode-manager/shared/opencode'
-import { invalidateSessionListCaches, invalidateSessionListCachesDebounced } from '@/lib/queryInvalidation'
+import { invalidateSessionListCaches, invalidateSessionListCachesDebounced, shellsQueryKey } from '@/lib/queryInvalidation'
 import { showToast } from '@/lib/toast'
 import { useSessionStatus } from '@/stores/sessionStatusStore'
 import { useSendErrorStore } from '@/stores/sendErrorStore'
 import { openCodeEventStream } from '@/lib/opencode-event-stream'
 import type { EventStreamSubscription } from '@/lib/opencode-event-stream'
-import { listActiveSessions } from '@/api/opencode'
+import { listActiveSessions, type ShellInfo } from '@/api/opencode'
 
 const STATUS_POLL_INTERVAL_MS = 5000
 
@@ -141,6 +141,23 @@ export const useSSE = (directory?: string | string[], currentSessionId?: string)
         invalidateSessionListCachesDebounced(queryClient)
         break
 
+      case 'shell.created': {
+        const info = event.data.info
+        queryClient.setQueryData<ShellInfo[]>(shellsQueryKey(cacheDirectory), (current) =>
+          current ? [...current.filter((shell) => shell.id !== info.id), info] : current,
+        )
+        break
+      }
+
+      case 'shell.exited':
+      case 'shell.deleted': {
+        const id = event.data.id
+        queryClient.setQueryData<ShellInfo[]>(shellsQueryKey(cacheDirectory), (current) =>
+          current?.filter((shell) => shell.id !== id),
+        )
+        break
+      }
+
       case 'installation.updated':
         showToast.success(`OpenCode updated to v${event.data.version}`, {
           description: 'The server has been successfully upgraded.',
@@ -235,6 +252,7 @@ export const useSSE = (directory?: string | string[], currentSessionId?: string)
     const handleResync = () => {
       if (!mountedRef.current) return
       invalidateSessionListCaches(queryClient)
+      queryClient.invalidateQueries({ queryKey: ['opencode', 'shells'] })
       refreshCurrentSession()
     }
 

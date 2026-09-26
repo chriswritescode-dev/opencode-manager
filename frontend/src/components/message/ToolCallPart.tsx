@@ -193,6 +193,16 @@ export const ToolCallPart = memo(function ToolCallPart({ part, messageID, onFile
 
   const previewText = getPreviewText()
   const isFileTool = ['read', 'write', 'edit', 'patch'].includes(part.name)
+  const isBackgrounded = part.state.status === 'completed' && toolMetadata(part).status === 'running'
+  const backgroundIndicator = isBackgrounded ? (
+    <Badge
+      variant="outline"
+      className="shrink-0 border-yellow-600/40 bg-yellow-500/10 text-yellow-700 dark:text-yellow-400"
+      title="Continues running in the background; the session is notified when it finishes"
+    >
+      background
+    </Badge>
+  ) : null
   const sandboxIndicator = isSandboxedCommand ? (
     <Badge
       variant="outline"
@@ -206,8 +216,8 @@ export const ToolCallPart = memo(function ToolCallPart({ part, messageID, onFile
 
   if (isSubagent) {
     const status = part.state.status
-    const isRunning = status === 'running' && subagentSessionStatus.type !== 'idle'
-    const isCompleted = status === 'completed' || (status === 'running' && !!subagentSessionId && subagentSessionStatus.type === 'idle')
+    const isRunning = (status === 'running' || isBackgrounded) && subagentSessionStatus.type !== 'idle'
+    const isCompleted = !isRunning && (status === 'completed' || (status === 'running' && !!subagentSessionId && subagentSessionStatus.type === 'idle'))
     const isError = status === 'error'
     const description = previewText || 'Sub-agent task'
 
@@ -231,6 +241,7 @@ export const ToolCallPart = memo(function ToolCallPart({ part, messageID, onFile
         {isError && <span className="text-red-600 text-sm font-medium">✗</span>}
         <span className="font-medium text-foreground truncate">{description}</span>
         <span className="text-[11px] font-medium text-orange-600 dark:text-orange-400 shrink-0">sub-agent</span>
+        {backgroundIndicator}
         {subagentSessionId && <ExternalLink className="w-3 h-3 shrink-0 text-blue-600 dark:text-blue-400" />}
       </div>
     )
@@ -312,6 +323,7 @@ export const ToolCallPart = memo(function ToolCallPart({ part, messageID, onFile
         <span className={getStatusColor()}>{getStatusIcon()}</span>
         <span className="font-medium">{part.name}</span>
         {sandboxIndicator}
+        {backgroundIndicator}
 
         {previewText && isFileTool ? (
           <span

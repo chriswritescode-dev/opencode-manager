@@ -63,8 +63,10 @@ function hasRenderableContent(
         return false
       })
     case 'synthetic':
-    case 'system':
-      return message.text.trim().length > 0
+    case 'system': {
+      const notice = sessionNoticeContent(message)
+      return notice.completion !== undefined || notice.text.trim().length > 0
+    }
     case 'shell':
     case 'skill':
     case 'compaction':
@@ -192,6 +194,82 @@ function MessageDivider({ label }: { label: string }) {
       <span className="h-px flex-1 bg-border" />
     </div>
   )
+}
+
+type SessionNoticeMessage = Extract<SessionMessageInfo, { type: 'synthetic' | 'system' }>
+
+interface SessionNoticeContent {
+  text: string
+  completion?: {
+    heading: string
+    state?: string
+    childID?: string
+  }
+}
+
+function noticeMetadataString(message: SessionNoticeMessage, key: string): string | undefined {
+  const value = message.metadata?.[key]
+  return typeof value === 'string' ? value : undefined
+}
+
+function sessionNoticeContent(message: SessionNoticeMessage): SessionNoticeContent {
+  const text = message.type === 'system' ? message.description ?? 'Instructions updated' : message.description ?? ''
+  const source = noticeMetadataString(message, 'source')
+  if (source !== 'shell' && source !== 'subagent') return { text }
+
+  const state = noticeMetadataString(message, 'state')
+  const agent = noticeMetadataString(message, 'agent')
+  const actor = source === 'shell' ? 'Shell' : agent ? agent.charAt(0).toUpperCase() + agent.slice(1) : 'Subagent'
+  const status = state === 'error' ? 'failed' : state === 'completed' || state === undefined ? 'finished' : state
+  return {
+    text: source === 'shell' ? text.replace(/\s+/g, ' ').trim() : text,
+    completion: {
+      heading: `${state === 'completed' ? '↳' : '!'} ${actor} ${status}`,
+      state,
+      childID: source === 'subagent' ? noticeMetadataString(message, 'childID') : undefined,
+    },
+  }
+}
+
+function SessionNotice({
+  message,
+  onChildSessionClick,
+}: {
+  message: SessionNoticeMessage
+  onChildSessionClick?: (sessionId: string) => void
+}) {
+  const { text, completion } = sessionNoticeContent(message)
+
+  if (!completion) {
+    return <div className="my-1 px-3 py-1 text-xs text-muted-foreground truncate">◈ {text}</div>
+  }
+
+  const tone = completion.state === 'error'
+    ? 'text-destructive'
+    : completion.state === 'cancelled'
+      ? 'text-amber-600 dark:text-amber-400'
+      : 'text-blue-600 dark:text-blue-400'
+  const content = (
+    <>
+      <span className={tone}>{completion.heading}</span>
+      {text && <span className="text-muted-foreground"> · {text}</span>}
+    </>
+  )
+  const childID = completion.childID
+
+  if (childID && onChildSessionClick) {
+    return (
+      <button
+        type="button"
+        onClick={() => onChildSessionClick(childID)}
+        className="my-1 block w-full px-3 py-1 text-left text-xs truncate hover:underline"
+      >
+        {content}
+      </button>
+    )
+  }
+
+  return <div className="my-1 px-3 py-1 text-xs truncate">{content}</div>
 }
 
 function ShellMessage({ message }: { message: SessionMessageShell }) {
@@ -490,11 +568,7 @@ const MessageRow = memo(function MessageRow({
   }
 
   if (message.type === 'synthetic' || message.type === 'system') {
-    return (
-      <div className="my-1 px-3 py-1.5 text-xs italic text-muted-foreground whitespace-pre-wrap">
-        {message.text}
-      </div>
-    )
+    return <SessionNotice message={message} onChildSessionClick={onChildSessionClick} />
   }
 
   return null

@@ -8,6 +8,7 @@ import {
   renameSession,
   activateSkill,
   interruptSession,
+  backgroundSession,
   listAgents,
   runShell,
   sendPrompt,
@@ -371,6 +372,15 @@ export const useSendPrompt = (directory?: string) => {
     },
     onSuccess: (_inbox, variables) => {
       useSendErrorStore.getState().clearError(variables.sessionID);
+    },
+  });
+};
+
+export const useBackgroundSession = () => {
+  return useMutation({
+    mutationFn: (sessionID: string) => backgroundSession(sessionID),
+    onError: (error) => {
+      showToast.error(error instanceof Error ? error.message : "Failed to move work to the background");
     },
   });
 };

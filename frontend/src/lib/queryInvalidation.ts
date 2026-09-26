@@ -5,6 +5,10 @@ export function sessionTranscriptQueryKey(sessionID: string | null | undefined) 
   return ['opencode', 'transcript', sessionID]
 }
 
+export function shellsQueryKey(directory: string | null | undefined) {
+  return ['opencode', 'shells', directory]
+}
+
 export function invalidateProviderCaches(queryClient: QueryClient) {
   queryClient.invalidateQueries({ queryKey: ['provider-credentials'] })
   queryClient.invalidateQueries({ queryKey: ['provider-auth-methods'] })

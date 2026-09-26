@@ -99,3 +99,41 @@ describe('ToolCallPart permission indicator', () => {
     expect(screen.queryByText('awaiting permission')).not.toBeInTheDocument()
   })
 })
+
+describe('ToolCallPart background indicator', () => {
+  beforeEach(() => {
+    vi.clearAllMocks()
+    mocks.useSettings.mockReturnValue({
+      preferences: { expandToolCalls: false },
+      isLoading: false,
+      updateSettings: vi.fn(),
+      isUpdating: false,
+    })
+    mocks.useToolCallPermission.mockReturnValue(null)
+  })
+
+  const completedShell = (metadata: Record<string, unknown>): SessionMessageAssistantTool => ({
+    type: 'tool',
+    id: 'call_2',
+    name: 'shell',
+    time: { created: 1, ran: 2, completed: 3 },
+    state: {
+      status: 'completed',
+      input: { command: 'npm run dev' },
+      content: [{ type: 'text', text: 'Command moved to the background (shell ID: sh_1).' }],
+      metadata,
+    },
+  })
+
+  it('marks a shell call that returned while its command keeps running', () => {
+    renderWithProviders(<ToolCallPart part={completedShell({ status: 'running', shellID: 'sh_1' })} messageID="msg_1" />)
+
+    expect(screen.getByText('background')).toBeInTheDocument()
+  })
+
+  it('does not mark a shell call that finished normally', () => {
+    renderWithProviders(<ToolCallPart part={completedShell({ status: 'completed', shellID: 'sh_1' })} messageID="msg_1" />)
+
+    expect(screen.queryByText('background')).not.toBeInTheDocument()
+  })
+})

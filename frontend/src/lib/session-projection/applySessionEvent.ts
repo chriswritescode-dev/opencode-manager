@@ -416,9 +416,25 @@ export function admitInboxItem(transcript: SessionTranscript, item: SessionInbox
   return commitDraft(draft)
 }
 
+function settleEndedAssistants(messages: SessionMessageInfo[]): SessionMessageInfo[] {
+  let endedAt: number | undefined
+  let settled: SessionMessageInfo[] | undefined
+  for (let index = messages.length - 1; index >= 0; index -= 1) {
+    const message = messages[index]
+    if (message?.type === 'idle') {
+      endedAt = message.time.created
+      continue
+    }
+    if (message?.type !== 'assistant' || message.time.completed !== undefined || endedAt === undefined) continue
+    settled ??= [...messages]
+    settled[index] = { ...message, time: { ...message.time, completed: endedAt } }
+  }
+  return settled ?? messages
+}
+
 export function hydrateSessionTranscript(snapshot: SessionSnapshot): SessionTranscript {
   return snapshot.pending.reduce(admitInboxItem, {
-    messages: snapshot.messages,
+    messages: settleEndedAssistants(snapshot.messages),
     pending: [],
     status: snapshot.status,
   })

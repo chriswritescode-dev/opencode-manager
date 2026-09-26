@@ -491,6 +491,63 @@ describe('useSSE', () => {
     expect(invalidateQueries).not.toHaveBeenCalledWith({
       queryKey: ['opencode', 'pending-actions', 'session-1', '/repo'],
     })
+    expect(invalidateQueries).toHaveBeenCalledWith({ queryKey: ['opencode', 'shells'] })
+
+    unmount()
+  })
+
+  it('tracks background shells from shell lifecycle events', async () => {
+    const queryClient = new QueryClient({
+      defaultOptions: {
+        queries: { retry: false },
+      },
+    })
+    const running = (id: string) => ({
+      id,
+      status: 'running',
+      command: `sleep ${id}`,
+      cwd: '/repo',
+      shell: 'zsh',
+      file: `/tmp/${id}.log`,
+      metadata: { sessionID: 'session-1' },
+      time: { started: 1 },
+    })
+    queryClient.setQueryData(['opencode', 'shells', '/repo'], [running('shell-1')])
+
+    const { result, unmount } = renderHook(
+      () => useSSE('/repo', 'session-1'),
+      { wrapper: createWrapper(queryClient) }
+    )
+
+    await waitFor(() => expect(MockEventSource.instances).toHaveLength(1))
+    await connect(0, 'client-1')
+    await waitFor(() => expect(result.current.isConnected).toBe(true))
+
+    act(() => {
+      MockEventSource.instances[0].emit('message', {
+        type: 'shell.created',
+        directory: '/repo',
+        data: { info: running('shell-2') },
+      })
+      MockEventSource.instances[0].emit('message', {
+        type: 'shell.exited',
+        directory: '/repo',
+        data: { id: 'shell-1', exit: 0, status: 'exited' },
+      })
+    })
+
+    expect(queryClient.getQueryData<Array<{ id: string }>>(['opencode', 'shells', '/repo'])?.map((shell) => shell.id))
+      .toEqual(['shell-2'])
+
+    act(() => {
+      MockEventSource.instances[0].emit('message', {
+        type: 'shell.deleted',
+        directory: '/repo',
+        data: { id: 'shell-2' },
+      })
+    })
+
+    expect(queryClient.getQueryData(['opencode', 'shells', '/repo'])).toEqual([])
 
     unmount()
   })

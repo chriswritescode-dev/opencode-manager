@@ -745,4 +745,43 @@ describe('hydrateSessionTranscript', () => {
       },
     ])
   })
+
+  it('settles an assistant left open by an execution that ended before its first step', () => {
+    const openAssistant: SessionMessageAssistant = {
+      id: 'msg_open',
+      type: 'assistant',
+      agent: 'build',
+      model: { providerID: 'p', id: 'm' },
+      content: [],
+      time: { created: 1100 },
+    }
+    const transcript = hydrateSessionTranscript({
+      messages: [
+        { id: USER_INBOX_ID, type: 'user', text: 'hi', time: { created: 1000 } },
+        openAssistant,
+        { id: 'msg_idle', type: 'idle', outcome: 'interrupted', time: { created: 1200 } },
+      ],
+      pending: [],
+      status: 'idle',
+    })
+
+    expect(transcript.messages[1]).toMatchObject({ id: 'msg_open', time: { created: 1100, completed: 1200 } })
+  })
+
+  it('leaves the assistant of a still-running execution open', () => {
+    const messages = [
+      { id: USER_INBOX_ID, type: 'user' as const, text: 'hi', time: { created: 1000 } },
+      {
+        id: 'msg_running',
+        type: 'assistant' as const,
+        agent: 'build',
+        model: { providerID: 'p', id: 'm' },
+        content: [],
+        time: { created: 1100 },
+      },
+    ]
+    const transcript = hydrateSessionTranscript({ messages, pending: [], status: 'busy' })
+
+    expect(transcript.messages).toBe(messages)
+  })
 })
