@@ -11,6 +11,7 @@ export interface ScheduleApiState {
   messages: SessionMessageInfo[]
   active: Record<string, { type: 'running' }>
   skills: SkillInfo[]
+  agents: string[]
   createError?: Error
   promptError?: Error
   interruptError?: Error
@@ -30,6 +31,7 @@ export function createStubScheduleApi(state: Partial<ScheduleApiState> = {}): Sc
     messages: [],
     active: {},
     skills: [],
+    agents: ['build', 'plan'],
     ...state,
   }
 
@@ -65,6 +67,9 @@ export function createStubScheduleApi(state: Partial<ScheduleApiState> = {}): Sc
         if (resolved.skillError) throw resolved.skillError
         return { location: { directory: '' }, data: resolved.skills }
       }),
+    },
+    agent: {
+      list: vi.fn(async () => ({ location: { directory: '' }, data: resolved.agents.map((id) => ({ id, name: id })) })),
     },
   }
 

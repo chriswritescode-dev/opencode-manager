@@ -494,6 +494,7 @@ export class ScheduleService {
         })
       }
 
+      await this.assertAgentAvailable(runDirectory, job.agentSlug)
       const model = await resolveOpenCodeModel(this.openCodeClient, runDirectory, {
         preferredModel: job.model,
       })
@@ -1022,6 +1023,31 @@ export class ScheduleService {
       return sessionId in active
     } catch (error) {
       throw new ScheduleServiceError(getErrorMessage(error) || 'Failed to fetch active sessions', 502)
+    }
+  }
+
+  /**
+   * OpenCode admits a prompt for a session whose agent does not exist at its location
+   * but never delivers it, so an unknown agent must fail the run before the session is created.
+   */
+  private async assertAgentAvailable(directory: string, agentSlug: string | null): Promise<void> {
+    if (!agentSlug) {
+      return
+    }
+
+    let agentIds: Set<string>
+    try {
+      const response = await this.openCodeClient.api.agent.list(openCodeLocation(directory))
+      agentIds = new Set(response.data.map((agent) => agent.id))
+    } catch (error) {
+      throw new ScheduleServiceError(getErrorMessage(error) || 'Failed to list agents', 502)
+    }
+
+    if (!agentIds.has(agentSlug)) {
+      throw new ScheduleServiceError(
+        `Agent "${agentSlug}" is not available in ${directory}. Choose an agent defined for this repo in the schedule settings, or clear the agent to use the default.`,
+        400,
+      )
     }
   }
 

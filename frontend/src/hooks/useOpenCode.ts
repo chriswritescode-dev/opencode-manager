@@ -455,10 +455,11 @@ export const useSendShell = (directory?: string) => {
   });
 };
 
-export const useAgents = (directory?: string) => {
+export const useAgents = (directory?: string, options?: { enabled?: boolean }) => {
   return useQuery({
     queryKey: ["opencode", "agents", directory],
     queryFn: () => listAgents(directory),
+    enabled: options?.enabled ?? true,
   });
 };
 

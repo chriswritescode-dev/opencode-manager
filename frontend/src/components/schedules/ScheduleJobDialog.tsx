@@ -4,6 +4,7 @@ import type { CreateScheduleJobRequest, PromptTemplate, ScheduleJob } from '@ope
 import { useScheduleModels } from '@/hooks/useScheduleModels'
 import { resolveScheduleModel } from '@/lib/schedules/schedule-model'
 import { useAgents } from '@/hooks/useOpenCode'
+import { useScheduleTarget } from '@/hooks/useScheduleTarget'
 import { settingsApi } from '@/api/settings'
 import { listRepos, listBranches } from '@/api/repos'
 import type { Repo } from '@/api/types'
@@ -82,7 +83,10 @@ export function ScheduleJobDialog({ open, onOpenChange, job, isSaving, onSubmit,
     [model, modelDirty, availableModelKeys, configDefaultModel],
   )
 
-  const { data: agents = [] } = useAgents()
+  const effectiveRepoId = selectedRepoId ?? job?.repoId
+  const { scheduleTarget } = useScheduleTarget(open ? effectiveRepoId : undefined)
+  const scheduleDirectory = scheduleTarget?.fullPath
+  const { data: agents = [] } = useAgents(scheduleDirectory, { enabled: !!scheduleDirectory })
 
   const { data: skills = [], isLoading: skillsLoading } = useQuery({
     queryKey: ['managed-skills'],
@@ -98,7 +102,6 @@ export function ScheduleJobDialog({ open, onOpenChange, job, isSaving, onSubmit,
     staleTime: 5 * 60 * 1000,
   })
 
-  const effectiveRepoId = selectedRepoId ?? job?.repoId
   const branchesEnabled = open && effectiveRepoId !== undefined && effectiveRepoId !== ASSISTANT_REPO_ID
 
   const { data: branchData, isLoading: branchesLoading } = useQuery({

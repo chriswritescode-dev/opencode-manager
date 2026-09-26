@@ -222,6 +222,7 @@ describe('ScheduleService permission ruleset in session creation', () => {
     const stub = createStubScheduleApi({
       sessionID: 'ses-perm-3',
       messages: [assistantMessage('', { completed: true })],
+      agents: ['build', 'my-agent'],
     })
     const service = new ScheduleService(
       {} as never,
@@ -240,5 +241,24 @@ describe('ScheduleService permission ruleset in session creation', () => {
         permissions: buildSchedulePermissionRuleset(null),
       })
     })
+  })
+
+  it('fails the run without creating a session when the agent is not available at the run location', async () => {
+    mocks.getScheduleJobById.mockReturnValue({ ...baseJob, agentSlug: 'assistant' })
+    mocks.updateScheduleRun.mockReturnValue({ ...baseRun, status: 'failed' })
+
+    const stub = createStubScheduleApi({ agents: ['build', 'plan'] })
+    const service = new ScheduleService(
+      {} as never,
+      createStubOpenCodeClient({ api: stub.api }),
+      mocks.stubWorktreeManager as never,
+    )
+
+    await expect(service.runJob(42, 7, 'manual')).rejects.toMatchObject({
+      status: 400,
+      message: expect.stringContaining('Agent "assistant" is not available'),
+    })
+    expect(stub.api.session.create).not.toHaveBeenCalled()
+    expect(mocks.updateScheduleRun).toHaveBeenCalledWith(expect.anything(), 42, 7, baseRun.id, expect.objectContaining({ status: 'failed' }))
   })
 })

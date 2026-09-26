@@ -10,6 +10,7 @@ Element.prototype.scrollIntoView = vi.fn()
 const mocks = vi.hoisted(() => ({
   templates: [] as Array<{ id: number; title: string; description: string; category: string; cadenceHint: string; suggestedName: string; suggestedDescription: string; prompt: string }>,
   useDeletePromptTemplateMutate: vi.fn(),
+  useAgents: vi.fn((..._args: unknown[]) => ({ data: [] })),
 }))
 
 vi.mock('@/hooks/usePromptTemplates', () => ({
@@ -24,7 +25,7 @@ vi.mock('@/api/providers', () => ({
 }))
 
 vi.mock('@/hooks/useOpenCode', () => ({
-  useAgents: () => ({ data: [] }),
+  useAgents: mocks.useAgents,
 }))
 
 vi.mock('@/api/settings', () => ({
@@ -36,6 +37,9 @@ vi.mock('@/api/settings', () => ({
 vi.mock('@/api/repos', () => ({
   listRepos: () => Promise.resolve([]),
   listBranches: () => Promise.resolve({ branches: [], status: { ahead: 0, behind: 0 } }),
+  getRepo: () => Promise.reject(new Error('not used')),
+  getAssistantModeStatus: () => Promise.resolve({ directory: '/workspace/repos/assistant' }),
+  initializeAssistantMode: () => Promise.resolve(),
 }))
 
 function createWrapper() {
@@ -141,6 +145,26 @@ describe('ScheduleJobDialog — assistant create guard', () => {
     // Submit button should now be enabled
     await waitFor(() => {
       expect(screen.getByRole('button', { name: /Create schedule/i })).not.toBeDisabled()
+    })
+  })
+
+  it('lists agents from the selected repo directory instead of the default workspace', async () => {
+    render(
+      <ScheduleJobDialog
+        open
+        onOpenChange={vi.fn()}
+        showRepoSelector
+        repoId={0}
+        onRepoChange={vi.fn()}
+        onSubmit={vi.fn()}
+        isSaving={false}
+      />,
+      { wrapper: createWrapper() },
+    )
+
+    expect(mocks.useAgents).not.toHaveBeenCalledWith(undefined, { enabled: true })
+    await waitFor(() => {
+      expect(mocks.useAgents).toHaveBeenLastCalledWith('/workspace/repos/assistant', { enabled: true })
     })
   })
 })
