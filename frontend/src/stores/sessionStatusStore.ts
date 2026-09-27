@@ -193,8 +193,10 @@ export const useSessionStatus = create<SessionStatusStore>((set, get) => {
       for (const [sessionID, status] of Object.entries(statuses)) {
         if (isLiveAfterCapture(sessionID)) continue
         if (status.type === 'idle') continue
-        newMap.set(sessionID, status)
-        newCache.set(sessionID, getStatusHash(status))
+        const current = currentStatuses.get(sessionID)
+        const effective = status.type === 'busy' && current !== undefined && current.type !== 'idle' ? current : status
+        newMap.set(sessionID, effective)
+        newCache.set(sessionID, getStatusHash(effective))
       }
 
       const nextRevisions = prunedRevisions(currentRevisions)

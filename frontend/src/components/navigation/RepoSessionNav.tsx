@@ -223,7 +223,7 @@ export function RepoSessionNavList({
   const [expandedRepoId, setExpandedRepoId] = useState<number | null>(null)
 
   useEffect(() => {
-    if (isVisible) setExpandedRepoId(activeRepoId)
+    if (isVisible && activeRepoId !== null) setExpandedRepoId(activeRepoId)
   }, [isVisible, activeRepoId])
 
   return (

@@ -38,6 +38,22 @@ describe('sessionStatusStore', () => {
     useSessionStatus.getState().clearStatus('session-a')
   })
 
+  it('keeps a more specific live status when a snapshot reports the session as busy', () => {
+    const store = useSessionStatus.getState()
+    const retry = { type: 'retry' as const, attempt: 2, message: 'rate limited', next: 1234 }
+    store.setStatus('session-retry', retry)
+    store.setStatus('session-compact', { type: 'compact' })
+
+    const token = useSessionStatus.getState().beginStatusSnapshot()
+    useSessionStatus.getState().replaceStatuses(
+      { 'session-retry': { type: 'busy' }, 'session-compact': { type: 'busy' } },
+      token,
+    )
+
+    expect(useSessionStatus.getState().getStatus('session-retry')).toEqual(retry)
+    expect(useSessionStatus.getState().getStatus('session-compact')).toEqual({ type: 'compact' })
+  })
+
   it('maps active session ids to busy statuses', () => {
     expect(busyStatusesFromActiveSessions({ 'session-a': { type: 'running' } })).toEqual({
       'session-a': { type: 'busy' },
