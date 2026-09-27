@@ -1,8 +1,8 @@
 import type { Repo, Session } from '@/api/types'
 import { ASSISTANT_REPO_ID } from '@opencode-manager/shared/utils'
-import { getRepoDisplayName } from '@/lib/utils'
+import { getRepoBranchLabel, getRepoDisplayName } from '@/lib/utils'
 import { buildSessionKey } from '@/lib/sessionKey'
-import { isAssistantPath } from '@/lib/navigation'
+import { getSessionPath, isAssistantPath, parseRepoRoute } from '@/lib/navigation'
 import { partitionSessions, selectRootSessions } from '@/components/session/session-partition'
 
 export const SIDEBAR_SESSIONS_PER_REPO = 10
@@ -25,29 +25,18 @@ export interface SidebarRepoGroup {
   items: SidebarSessionItem[]
 }
 
-export function parseSidebarRouteSelection(pathname: string): {
-  repoId: number | null
-  sessionId: string | null
-} {
-  const match = /^\/repos\/(\d+)(?:\/sessions\/([^/]+))?/.exec(pathname)
-  if (!match) {
-    return { repoId: null, sessionId: null }
-  }
-
-  return {
-    repoId: Number(match[1]),
-    sessionId: match[2] ?? null,
-  }
-}
-
 export function isCurrentSessionItem(item: SidebarSessionItem, pathname: string): boolean {
-  const selection = parseSidebarRouteSelection(pathname)
+  const selection = parseRepoRoute(pathname)
   return item.repoId === selection.repoId && item.session.id === selection.sessionId
 }
 
 export function getActiveRepoId(pathname: string): number | null {
   if (isAssistantPath(pathname)) return null
-  return parseSidebarRouteSelection(pathname).repoId
+  return parseRepoRoute(pathname).repoId
+}
+
+export function isRepoReady(repo: Repo): boolean {
+  return repo.cloneStatus === 'ready'
 }
 
 export function selectNavigableRepos(repos: Repo[]): Repo[] {
@@ -93,10 +82,10 @@ export function buildSidebarRepoGroups(input: {
       session,
       repoId: repo.id,
       repoLabel: getRepoDisplayName(repo),
-      branchLabel: repo.currentBranch || repo.branch || null,
+      branchLabel: getRepoBranchLabel(repo),
       isWorktree: Boolean(repo.isWorktree),
       isPinned: pinnedKeys.has(key),
-      path: `/repos/${repo.id}/sessions/${session.id}`,
+      path: getSessionPath(repo.id, session.id),
     }
   }
 
@@ -106,7 +95,7 @@ export function buildSidebarRepoGroups(input: {
     return {
       repo,
       label: getRepoDisplayName(repo),
-      branchLabel: repo.currentBranch || repo.branch || null,
+      branchLabel: getRepoBranchLabel(repo),
       items: [...pinned, ...today, ...older].map((session) => createItem(session, repo)),
     }
   })

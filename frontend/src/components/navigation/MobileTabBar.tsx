@@ -6,7 +6,8 @@ import { useMobile } from '@/hooks/useMobile'
 import { useMobileTabBar } from '@/hooks/useMobileTabBar'
 import { useUrlParams } from '@/hooks/useUrlParams'
 import { useScheduleUrlState, type ScheduleTab } from '@/hooks/useScheduleUrlState'
-import { getAssistantPath, isAssistantPath } from '@/lib/navigation'
+import { getAssistantPath, isAssistantPath, parseRepoRoute } from '@/lib/navigation'
+import { openDialogParam } from '@/hooks/useDialogParam'
 
 interface TabDef {
   key: string
@@ -24,7 +25,7 @@ interface GlobalTabsArgs {
   close: ReturnType<typeof useMobileTabBar>['close']
   navigate: ReturnType<typeof useNavigate>
   isInsideRepo: boolean
-  repoId: string | null
+  repoId: number | null
   updateParams: ReturnType<typeof useUrlParams>['updateParams']
 }
 
@@ -33,7 +34,7 @@ type TabBarMode = 'hidden' | 'global' | 'schedule'
 interface MobileTabRouteState {
   mode: TabBarMode
   isInsideRepo: boolean
-  repoId: string | null
+  repoId: number | null
 }
 
 function getMobileTabRouteState(pathname: string): MobileTabRouteState {
@@ -41,20 +42,18 @@ function getMobileTabRouteState(pathname: string): MobileTabRouteState {
     return { mode: 'global', isInsideRepo: false, repoId: null }
   }
 
-  const repoMatch = pathname.match(/^\/repos\/(\d+)(?:\/([^/]+))?/)
-  const repoId = repoMatch?.[1] ?? null
-  const repoSection = repoMatch?.[2]
+  const { repoId, section: repoSection } = parseRepoRoute(pathname)
 
   if (pathname === '/' || pathname === '/schedules') {
     return { mode: 'global', isInsideRepo: false, repoId: null }
   }
 
-  if (!repoId) {
+  if (repoId === null) {
     return { mode: 'hidden', isInsideRepo: false, repoId: null }
   }
 
   switch (repoSection) {
-    case undefined:
+    case null:
       return { mode: 'global', isInsideRepo: true, repoId }
     case 'schedules':
       return { mode: 'schedule', isInsideRepo: true, repoId }
@@ -65,7 +64,7 @@ function getMobileTabRouteState(pathname: string): MobileTabRouteState {
 
 function buildGlobalTabs({ pathname, openSheet, open, close, navigate, isInsideRepo, repoId, updateParams }: GlobalTabsArgs): TabDef[] {
   const openRepoDialog = (dialog: string) => {
-    updateParams((p) => { p.set('dialog', dialog); p.delete('mobileTab') }, 'push')
+    openDialogParam(updateParams, dialog)
   }
 
   const inRepo = isInsideRepo && repoId !== null

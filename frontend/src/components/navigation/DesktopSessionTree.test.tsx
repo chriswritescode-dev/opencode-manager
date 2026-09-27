@@ -6,7 +6,6 @@ import { MemoryRouter, useLocation } from 'react-router-dom'
 import type { ReactNode } from 'react'
 import { TooltipProvider } from '@/components/ui/tooltip'
 import { DesktopSessionTree } from './DesktopSessionTree'
-import { SIDEBAR_SESSIONS_PER_REPO } from './sidebar-session-tree'
 import type { Repo } from '@/api/types'
 
 type SessionFixture = {
@@ -22,6 +21,8 @@ type SessionFixture = {
 
 type SessionsHookCall = { directories: string[]; options?: { search?: string; limit?: number } }
 
+type SessionPinFixture = { sessionId: string; directory: string; pinnedAt: number }
+
 const {
   listReposMock,
   sessionsData,
@@ -30,6 +31,9 @@ const {
   permissionSessions,
   formSessions,
   emptyOnSearch,
+  getSessionMock,
+  sessionPinsData,
+  sessionsHasNextPage,
 } = vi.hoisted(() => ({
   listReposMock: vi.fn(),
   sessionsData: [] as SessionFixture[],
@@ -38,11 +42,19 @@ const {
   permissionSessions: { current: new Set<string>() },
   formSessions: { current: new Set<string>() },
   emptyOnSearch: { current: false },
+  getSessionMock: vi.fn(),
+  sessionPinsData: { current: [] as SessionPinFixture[] },
+  sessionsHasNextPage: { current: false },
 }))
 
 vi.mock('@/api/repos', async (importOriginal) => {
   const actual = await importOriginal<typeof import('@/api/repos')>()
   return { ...actual, listRepos: listReposMock }
+})
+
+vi.mock('@/api/opencode', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('@/api/opencode')>()
+  return { ...actual, getSession: getSessionMock }
 })
 
 vi.mock('@/hooks/useOpenCode', async (importOriginal) => {
@@ -55,7 +67,7 @@ vi.mock('@/hooks/useOpenCode', async (importOriginal) => {
         options?.search && emptyOnSearch.current
           ? []
           : sessionsData.filter((session) => directories.includes(session.location.directory))
-      return { data, isLoading: false, isError: false }
+      return { data, isLoading: false, isError: false, hasNextPage: sessionsHasNextPage.current }
     },
     useCreateSession: (directory?: string) => ({
       mutate: (vars?: unknown) => {
@@ -66,7 +78,7 @@ vi.mock('@/hooks/useOpenCode', async (importOriginal) => {
 })
 
 vi.mock('@/hooks/useSessionPins', () => ({
-  useSessionPins: () => ({ data: [] }),
+  useSessionPins: () => ({ data: sessionPinsData.current }),
 }))
 
 vi.mock('@/contexts/EventContext', () => ({
@@ -145,6 +157,10 @@ describe('DesktopSessionTree', () => {
     permissionSessions.current = new Set()
     formSessions.current = new Set()
     emptyOnSearch.current = false
+    getSessionMock.mockReset()
+    getSessionMock.mockResolvedValue(undefined)
+    sessionPinsData.current = []
+    sessionsHasNextPage.current = false
   })
 
   it('lists every repo by last access, even inside a repo, with no Recent section', async () => {
@@ -219,13 +235,9 @@ describe('DesktopSessionTree', () => {
     expect(screen.getByRole('button', { name: /^Session a1/ })).not.toHaveAttribute('aria-current')
   })
 
-  it('offers All sessions once the open repo reaches the page size', async () => {
+  it('offers All sessions when there is a next page', async () => {
     const user = userEvent.setup()
-    sessionsData.push(
-      ...Array.from({ length: SIDEBAR_SESSIONS_PER_REPO }, (_, index) =>
-        createSession(`s${index + 1}`, '/repos/a', Date.now() - index - 1),
-      ),
-    )
+    sessionsHasNextPage.current = true
     render(<DesktopSessionTree />, { wrapper: createWrapper(['/repos/1/sessions/a1']) })
 
     await user.click(await screen.findByText('All sessions'))
@@ -233,12 +245,51 @@ describe('DesktopSessionTree', () => {
     expect(screen.getByTestId('location').textContent).toBe('/repos/1')
   })
 
-  it('hides All sessions below the page size', async () => {
+  it('hides All sessions when there is no next page', async () => {
     render(<DesktopSessionTree />, { wrapper: createWrapper(['/repos/1']) })
 
     await screen.findByRole('button', { name: /^Session a1/ })
 
     expect(screen.queryByText('All sessions')).toBeNull()
+  })
+
+  it('shows a pinned session that is outside the first page', async () => {
+    sessionsData.splice(
+      0,
+      sessionsData.length,
+      createSession('a1', '/repos/a', Date.now()),
+      createSession('a2', '/repos/a', Date.now() - 1000),
+    )
+    sessionPinsData.current = [{ sessionId: 'old', directory: '/repos/a', pinnedAt: 1 }]
+    getSessionMock.mockImplementation((id: string) =>
+      Promise.resolve(createSession(id, '/repos/a', Date.now() - 100000)),
+    )
+
+    render(<DesktopSessionTree />, { wrapper: createWrapper(['/repos/1']) })
+
+    await screen.findByRole('button', { name: /Session old/ })
+    const rows = screen.getAllByRole('button', { name: /Session / })
+    expect(rows[0]).toHaveTextContent('Session old')
+    expect(rows[0].querySelector('[aria-label="Pinned"]')).not.toBeNull()
+    expect(getSessionMock).toHaveBeenCalledWith('old')
+  })
+
+  it('keeps a non-ready repo navigable without actions or session requests', async () => {
+    const user = userEvent.setup()
+    const notReady = createRepo({ id: 4, fullPath: '/repos/d', name: 'Delta', cloneStatus: 'cloning' })
+    listReposMock.mockResolvedValue([repoA, notReady])
+
+    render(<DesktopSessionTree />, { wrapper: createWrapper(['/repos/4']) })
+
+    await screen.findByText('Delta')
+
+    expect(toggleFor('Delta')).toHaveAttribute('aria-expanded', 'true')
+    expect(screen.queryByRole('button', { name: 'New session in Delta' })).toBeNull()
+    expect(await screen.findByText('Repository not ready')).toBeTruthy()
+    expect(fetchedDirectories()).not.toContain('/repos/d')
+
+    await user.click(screen.getByRole('button', { name: 'Delta' }))
+    expect(screen.getByTestId('location').textContent).toBe('/repos/4')
   })
 
   it('commits the search on Enter across ready repos and clears with Escape', async () => {

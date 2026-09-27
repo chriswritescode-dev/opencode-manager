@@ -6,7 +6,7 @@ export type SessionStatusType =
   | { type: 'compact' }
   | { type: 'retry'; attempt: number; message: string; next: number }
 
-export interface StatusSnapshotToken {
+interface StatusSnapshotToken {
   revision: number
   order: number
 }
@@ -14,12 +14,11 @@ export interface StatusSnapshotToken {
 interface SessionStatusStore {
   statuses: Map<string, SessionStatusType>
   statusCache: Map<string, string>
-  statusDirectories: Map<string, string>
   statusRevisions: Map<string, number>
   revision: number
-  setStatus: (sessionID: string, status: SessionStatusType, directory?: string) => void
+  setStatus: (sessionID: string, status: SessionStatusType) => void
   setOptimisticActive: (sessionID: string, timeoutMs?: number) => void
-  replaceStatuses: (statuses: Record<string, SessionStatusType>, directory?: string, token?: StatusSnapshotToken) => void
+  replaceStatuses: (statuses: Record<string, SessionStatusType>, token: StatusSnapshotToken) => void
   beginStatusSnapshot: () => StatusSnapshotToken
   endStatusSnapshot: (token: StatusSnapshotToken) => void
   getStatus: (sessionID: string) => SessionStatusType
@@ -28,11 +27,10 @@ interface SessionStatusStore {
 
 const DEFAULT_STATUS: SessionStatusType = { type: 'idle' }
 const OPTIMISTIC_ACTIVE_TIMEOUT_MS = 120_000
-const GLOBAL_SNAPSHOT_SCOPE = '__global__'
 const optimisticActiveTimers = new Map<string, ReturnType<typeof setTimeout>>()
 const inFlightSnapshots = new Map<number, number>()
-const appliedSnapshotOrders = new Map<string, number>()
 let snapshotOrderCounter = 0
+let lastAppliedSnapshotOrder = 0
 
 const clearOptimisticActiveTimer = (sessionID: string): void => {
   const timer = optimisticActiveTimers.get(sessionID)
@@ -48,18 +46,10 @@ const getStatusHash = (status: SessionStatusType): string => {
   return status.type
 }
 
-const sameDirectories = (left: Map<string, string>, right: Map<string, string>): boolean => {
+const sameEntries = <V>(left: Map<string, V>, right: Map<string, V>): boolean => {
   if (left.size !== right.size) return false
-  for (const [sessionID, directory] of right.entries()) {
-    if (left.get(sessionID) !== directory) return false
-  }
-  return true
-}
-
-const sameRevisions = (left: Map<string, number>, right: Map<string, number>): boolean => {
-  if (left.size !== right.size) return false
-  for (const [sessionID, revision] of right.entries()) {
-    if (left.get(sessionID) !== revision) return false
+  for (const [sessionID, value] of right.entries()) {
+    if (left.get(sessionID) !== value) return false
   }
   return true
 }
@@ -80,263 +70,180 @@ const oldestInFlightSnapshotRevision = (): number | null => {
   return oldest
 }
 
+const prunedRevisions = (currentRevisions: Map<string, number>): Map<string, number> => {
+  const oldestSnapshotRevision = oldestInFlightSnapshotRevision()
+  const nextRevisions = new Map<string, number>()
+  if (oldestSnapshotRevision === null) return nextRevisions
+  for (const [sessionID, revision] of currentRevisions.entries()) {
+    if (revision > oldestSnapshotRevision) nextRevisions.set(sessionID, revision)
+  }
+  return nextRevisions
+}
+
 export function busyStatusesFromActiveSessions(active: Record<string, unknown>): Record<string, SessionStatusType> {
   return Object.fromEntries(
     Object.keys(active).map((sessionID) => [sessionID, { type: 'busy' as const }]),
   )
 }
 
-export const useSessionStatus = create<SessionStatusStore>((set, get) => ({
-  statuses: new Map(),
-  statusCache: new Map(),
-  statusDirectories: new Map(),
-  statusRevisions: new Map(),
-  revision: 0,
+export const useSessionStatus = create<SessionStatusStore>((set, get) => {
+  const recordRevisionPatch = (
+    state: SessionStatusStore,
+    sessionID: string,
+  ): Pick<SessionStatusStore, 'statusRevisions' | 'revision'> | null => {
+    if (inFlightSnapshots.size === 0) return null
+    const revision = state.revision + 1
+    const statusRevisions = new Map(state.statusRevisions)
+    statusRevisions.set(sessionID, revision)
+    return { statusRevisions, revision }
+  }
 
-  setStatus: (sessionID: string, status: SessionStatusType, directory?: string) => {
-    clearOptimisticActiveTimer(sessionID)
-    const hash = getStatusHash(status)
-    const previousHash = get().statusCache.get(sessionID)
+  const applyStatusPatch = (
+    state: SessionStatusStore,
+    sessionID: string,
+    status: SessionStatusType,
+  ): Partial<SessionStatusStore> => {
+    const statuses = new Map(state.statuses)
+    const statusCache = new Map(state.statusCache)
+    statuses.set(sessionID, status)
+    statusCache.set(sessionID, getStatusHash(status))
+    return { statuses, statusCache, ...(recordRevisionPatch(state, sessionID) ?? {}) }
+  }
 
-    if (status.type === 'idle') {
-      const hasState = previousHash !== undefined
-        || get().statusDirectories.has(sessionID)
-        || get().statusRevisions.has(sessionID)
-      if (!hasState && inFlightSnapshots.size === 0) return
+  return {
+    statuses: new Map(),
+    statusCache: new Map(),
+    statusRevisions: new Map(),
+    revision: 0,
 
-      const nextRevision = get().revision + 1
-      set((state) => {
-        const newMap = new Map(state.statuses)
-        const newCache = new Map(state.statusCache)
-        const newDirectories = new Map(state.statusDirectories)
-        const newRevisions = new Map(state.statusRevisions)
-        newMap.delete(sessionID)
-        newCache.delete(sessionID)
-        newDirectories.delete(sessionID)
-        newRevisions.set(sessionID, nextRevision)
-        return {
-          statuses: newMap,
-          statusCache: newCache,
-          statusDirectories: newDirectories,
-          statusRevisions: newRevisions,
-          revision: nextRevision,
-        }
-      })
-      return
-    }
-
-    const hashChanged = previousHash !== hash
-    const directoryChanged = Boolean(directory) && get().statusDirectories.get(sessionID) !== directory
-    const nextRevision = get().revision + 1
-
-    if (!hashChanged && !directoryChanged) {
-      set((state) => {
-        const newRevisions = new Map(state.statusRevisions)
-        newRevisions.set(sessionID, nextRevision)
-        return {
-          statusRevisions: newRevisions,
-          revision: nextRevision,
-        }
-      })
-      return
-    }
-
-    set((state) => {
-      const newMap = new Map(state.statuses)
-      const newCache = new Map(state.statusCache)
-      const newDirectories = new Map(state.statusDirectories)
-      const newRevisions = new Map(state.statusRevisions)
-      if (hashChanged) {
-        newMap.set(sessionID, status)
-        newCache.set(sessionID, hash)
-      }
-      if (directory) newDirectories.set(sessionID, directory)
-      newRevisions.set(sessionID, nextRevision)
-      return {
-        statuses: newMap,
-        statusCache: newCache,
-        statusDirectories: newDirectories,
-        statusRevisions: newRevisions,
-        revision: nextRevision,
-      }
-    })
-  },
-
-  setOptimisticActive: (sessionID: string, timeoutMs = OPTIMISTIC_ACTIVE_TIMEOUT_MS) => {
-    clearOptimisticActiveTimer(sessionID)
-
-    const timer = setTimeout(() => {
-      optimisticActiveTimers.delete(sessionID)
-      const currentStatus = get().getStatus(sessionID)
-      if (currentStatus.type === 'busy') {
+    setStatus: (sessionID: string, status: SessionStatusType) => {
+      if (status.type === 'idle') {
         get().clearStatus(sessionID)
+        return
       }
-    }, timeoutMs)
 
-    optimisticActiveTimers.set(sessionID, timer)
-
-    const hash = getStatusHash({ type: 'busy' })
-    const previousHash = get().statusCache.get(sessionID)
-    if (previousHash === hash) return
-
-    const nextRevision = get().revision + 1
-    set((state) => {
-      const newMap = new Map(state.statuses)
-      const newCache = new Map(state.statusCache)
-      const newRevisions = new Map(state.statusRevisions)
-      newMap.set(sessionID, { type: 'busy' })
-      newCache.set(sessionID, hash)
-      newRevisions.set(sessionID, nextRevision)
-      return {
-        statuses: newMap,
-        statusCache: newCache,
-        statusRevisions: newRevisions,
-        revision: nextRevision,
-      }
-    })
-  },
-
-  replaceStatuses: (statuses: Record<string, SessionStatusType>, directory?: string, token?: StatusSnapshotToken) => {
-    const scope = directory ?? GLOBAL_SNAPSHOT_SCOPE
-
-    if (token) {
-      releaseSnapshot(token)
-      const appliedOrder = appliedSnapshotOrders.get(scope)
-      if (appliedOrder !== undefined && token.order < appliedOrder) return
-      appliedSnapshotOrders.set(scope, token.order)
-    }
-
-    for (const sessionID of Object.keys(statuses)) {
       clearOptimisticActiveTimer(sessionID)
-    }
+      if (get().statusCache.get(sessionID) === getStatusHash(status)) {
+        const patch = recordRevisionPatch(get(), sessionID)
+        if (patch) set(patch)
+        return
+      }
 
-    const currentStatuses = get().statuses
-    const currentDirectories = get().statusDirectories
-    const currentRevisions = get().statusRevisions
-    const captureRevision = token?.revision
+      set((state) => applyStatusPatch(state, sessionID, status))
+    },
 
-    const isLiveAfterCapture = (sessionID: string): boolean => {
-      if (optimisticActiveTimers.has(sessionID)) return true
-      if (captureRevision === undefined) return false
-      const touched = currentRevisions.get(sessionID)
-      return touched !== undefined && touched > captureRevision
-    }
+    setOptimisticActive: (sessionID: string, timeoutMs = OPTIMISTIC_ACTIVE_TIMEOUT_MS) => {
+      clearOptimisticActiveTimer(sessionID)
 
-    const newMap = new Map<string, SessionStatusType>()
-    const newCache = new Map<string, string>()
-    const newDirectories = new Map<string, string>()
+      const timer = setTimeout(() => {
+        optimisticActiveTimers.delete(sessionID)
+        const currentStatus = get().getStatus(sessionID)
+        if (currentStatus.type === 'busy') {
+          get().clearStatus(sessionID)
+        }
+      }, timeoutMs)
 
-    for (const [sessionID, status] of currentStatuses.entries()) {
-      if (!isLiveAfterCapture(sessionID)) continue
-      newMap.set(sessionID, status)
-      newCache.set(sessionID, getStatusHash(status))
-      const recorded = currentDirectories.get(sessionID)
-      if (recorded !== undefined) newDirectories.set(sessionID, recorded)
-    }
+      optimisticActiveTimers.set(sessionID, timer)
 
-    if (directory !== undefined) {
+      if (get().statusCache.get(sessionID) === getStatusHash({ type: 'busy' })) {
+        const patch = recordRevisionPatch(get(), sessionID)
+        if (patch) set(patch)
+        return
+      }
+
+      set((state) => applyStatusPatch(state, sessionID, { type: 'busy' }))
+    },
+
+    replaceStatuses: (statuses: Record<string, SessionStatusType>, token: StatusSnapshotToken) => {
+      releaseSnapshot(token)
+
+      if (token.order < lastAppliedSnapshotOrder) {
+        const currentRevisions = get().statusRevisions
+        const nextRevisions = prunedRevisions(currentRevisions)
+        if (!sameEntries(currentRevisions, nextRevisions)) {
+          set({ statusRevisions: nextRevisions })
+        }
+        return
+      }
+      lastAppliedSnapshotOrder = token.order
+
+      for (const sessionID of Object.keys(statuses)) {
+        clearOptimisticActiveTimer(sessionID)
+      }
+
+      const currentStatuses = get().statuses
+      const currentRevisions = get().statusRevisions
+      const captureRevision = token.revision
+
+      const isLiveAfterCapture = (sessionID: string): boolean => {
+        if (optimisticActiveTimers.has(sessionID)) return true
+        const touched = currentRevisions.get(sessionID)
+        return touched !== undefined && touched > captureRevision
+      }
+
+      const newMap = new Map<string, SessionStatusType>()
+      const newCache = new Map<string, string>()
+
       for (const [sessionID, status] of currentStatuses.entries()) {
-        if (isLiveAfterCapture(sessionID)) continue
-        const recorded = currentDirectories.get(sessionID)
-        if (recorded === undefined || recorded === directory || sessionID in statuses) continue
+        if (!isLiveAfterCapture(sessionID)) continue
         newMap.set(sessionID, status)
         newCache.set(sessionID, getStatusHash(status))
-        newDirectories.set(sessionID, recorded)
       }
-    }
 
-    for (const [sessionID, status] of Object.entries(statuses)) {
-      if (isLiveAfterCapture(sessionID)) continue
-      if (status.type === 'idle') continue
-      newMap.set(sessionID, status)
-      newCache.set(sessionID, getStatusHash(status))
-      if (directory !== undefined) {
-        newDirectories.set(sessionID, directory)
-      } else {
-        const recorded = currentDirectories.get(sessionID)
-        if (recorded !== undefined) newDirectories.set(sessionID, recorded)
+      for (const [sessionID, status] of Object.entries(statuses)) {
+        if (isLiveAfterCapture(sessionID)) continue
+        if (status.type === 'idle') continue
+        newMap.set(sessionID, status)
+        newCache.set(sessionID, getStatusHash(status))
       }
-    }
 
-    for (const sessionID of [...newDirectories.keys()]) {
-      if (!newMap.has(sessionID)) newDirectories.delete(sessionID)
-    }
+      const nextRevisions = prunedRevisions(currentRevisions)
 
-    const oldestSnapshotRevision = oldestInFlightSnapshotRevision()
-    const newRevisions = new Map<string, number>()
-    for (const [sessionID, touched] of currentRevisions.entries()) {
-      if (newMap.has(sessionID) || (oldestSnapshotRevision !== null && touched > oldestSnapshotRevision)) {
-        newRevisions.set(sessionID, touched)
-      }
-    }
+      if (sameEntries(get().statusCache, newCache) && sameEntries(currentRevisions, nextRevisions)) return
 
-    if (!token) {
-      const currentCache = get().statusCache
-      if (currentCache.size === newCache.size) {
-        let unchanged = true
-        for (const [sessionID, hash] of newCache.entries()) {
-          if (currentCache.get(sessionID) !== hash) {
-            unchanged = false
-            break
-          }
-        }
-        if (unchanged && sameDirectories(currentDirectories, newDirectories) && sameRevisions(currentRevisions, newRevisions)) return
-      }
-    }
-
-    set({
-      statuses: newMap,
-      statusCache: newCache,
-      statusDirectories: newDirectories,
-      statusRevisions: newRevisions,
-    })
-  },
-
-  beginStatusSnapshot: () => {
-    const token: StatusSnapshotToken = {
-      revision: get().revision,
-      order: ++snapshotOrderCounter,
-    }
-    registerSnapshot(token)
-    return token
-  },
-
-  endStatusSnapshot: (token: StatusSnapshotToken) => {
-    releaseSnapshot(token)
-  },
-
-  getStatus: (sessionID: string) => {
-    return get().statuses.get(sessionID) || DEFAULT_STATUS
-  },
-
-  clearStatus: (sessionID: string) => {
-    clearOptimisticActiveTimer(sessionID)
-    const previousHash = get().statusCache.get(sessionID)
-    const hasState = previousHash !== undefined
-      || get().statusDirectories.has(sessionID)
-      || get().statusRevisions.has(sessionID)
-    if (!hasState && inFlightSnapshots.size === 0) return
-
-    const nextRevision = get().revision + 1
-    set((state) => {
-      const newMap = new Map(state.statuses)
-      const newCache = new Map(state.statusCache)
-      const newDirectories = new Map(state.statusDirectories)
-      const newRevisions = new Map(state.statusRevisions)
-      newMap.delete(sessionID)
-      newCache.delete(sessionID)
-      newDirectories.delete(sessionID)
-      newRevisions.set(sessionID, nextRevision)
-      return {
+      set({
         statuses: newMap,
         statusCache: newCache,
-        statusDirectories: newDirectories,
-        statusRevisions: newRevisions,
-        revision: nextRevision,
+        statusRevisions: nextRevisions,
+      })
+    },
+
+    beginStatusSnapshot: () => {
+      const token: StatusSnapshotToken = {
+        revision: get().revision,
+        order: ++snapshotOrderCounter,
       }
-    })
-  },
-}))
+      registerSnapshot(token)
+      return token
+    },
+
+    endStatusSnapshot: (token: StatusSnapshotToken) => {
+      releaseSnapshot(token)
+      if (inFlightSnapshots.size > 0) return
+      if (get().statusRevisions.size === 0) return
+      set({ statusRevisions: new Map() })
+    },
+
+    getStatus: (sessionID: string) => {
+      return get().statuses.get(sessionID) || DEFAULT_STATUS
+    },
+
+    clearStatus: (sessionID: string) => {
+      clearOptimisticActiveTimer(sessionID)
+      if (!get().statuses.has(sessionID) && inFlightSnapshots.size === 0) return
+
+      set((state) => {
+        const revisionPatch = recordRevisionPatch(state, sessionID)
+        if (!state.statuses.has(sessionID)) return revisionPatch ?? state
+        const statuses = new Map(state.statuses)
+        const statusCache = new Map(state.statusCache)
+        statuses.delete(sessionID)
+        statusCache.delete(sessionID)
+        return { statuses, statusCache, ...(revisionPatch ?? {}) }
+      })
+    },
+  }
+})
 
 export const useSessionStatusForSession = (sessionID: string | undefined): SessionStatusType => {
   return useSessionStatus((state) => 

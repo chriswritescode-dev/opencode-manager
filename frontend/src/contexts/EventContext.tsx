@@ -24,6 +24,8 @@ import {
   invalidateSessionListCachesDebounced,
 } from '@/lib/queryInvalidation'
 
+const STATUS_POLL_INTERVAL_MS = 5000
+
 type PermissionsBySession = Record<string, PermissionRequest[]>
 type FormsBySession = Record<string, FormInfo[]>
 type SSEHealthState = Pick<EventStreamHealthState, 'isConnected' | 'isHealthy' | 'isStalled'>
@@ -158,6 +160,7 @@ export function EventProvider({ children }: { children: React.ReactNode }) {
   const prevPermissionCountRef = useRef(0)
   const initialFetchDoneRef = useRef(false)
   const statusSyncVersionRef = useRef(0)
+  const statusPollIntervalRef = useRef<ReturnType<typeof setInterval> | null>(null)
   const subscriptionRef = useRef<ReturnType<typeof openCodeEventStream.subscribeGlobalMonitor> | null>(null)
   const reposRef = useRef<typeof repos>(null)
 
@@ -391,7 +394,6 @@ export function EventProvider({ children }: { children: React.ReactNode }) {
       }
       useSessionStatus.getState().replaceStatuses(
         busyStatusesFromActiveSessions(active),
-        undefined,
         snapshotToken,
       )
     } catch (error) {
@@ -401,6 +403,19 @@ export function EventProvider({ children }: { children: React.ReactNode }) {
       }
     }
   }, [])
+
+  const stopStatusPoll = useCallback(() => {
+    if (statusPollIntervalRef.current === null) return
+    clearInterval(statusPollIntervalRef.current)
+    statusPollIntervalRef.current = null
+  }, [])
+
+  const startStatusPoll = useCallback(() => {
+    stopStatusPoll()
+    statusPollIntervalRef.current = setInterval(() => {
+      void fetchInitialSessionStatuses()
+    }, STATUS_POLL_INTERVAL_MS)
+  }, [fetchInitialSessionStatuses, stopStatusPoll])
 
   const syncPermissionsForSession = useCallback(async (directory: string, sessionID: string) => {
     const pendingPermissions = await listPendingPermissions(directory)
@@ -446,7 +461,7 @@ export function EventProvider({ children }: { children: React.ReactNode }) {
         }
         case 'session.status': {
           const { sessionID, status } = event.data
-          useSessionStatus.getState().setStatus(sessionID, status, event.directory)
+          useSessionStatus.getState().setStatus(sessionID, status)
           break
         }
         case 'session.idle': {
@@ -454,14 +469,14 @@ export function EventProvider({ children }: { children: React.ReactNode }) {
           break
         }
         case 'session.execution.started': {
-          useSessionStatus.getState().setStatus(event.data.sessionID, { type: 'busy' }, event.directory)
+          useSessionStatus.getState().setStatus(event.data.sessionID, { type: 'busy' })
           break
         }
         case 'session.execution.succeeded':
         case 'session.execution.failed':
         case 'session.execution.interrupted': {
           useSessionStatus.getState().setStatus(event.data.sessionID, { type: 'idle' })
-          invalidateSessionListCachesDebounced(queryClient)
+          invalidateSessionListCachesDebounced(queryClient, event.directory)
           break
         }
         case 'session.created':
@@ -469,8 +484,7 @@ export function EventProvider({ children }: { children: React.ReactNode }) {
         case 'session.deleted':
         case 'session.moved':
         case 'session.metadata.updated':
-        case 'session.usage.updated':
-          invalidateSessionListCachesDebounced(queryClient)
+          invalidateSessionListCachesDebounced(queryClient, event.directory)
           break
         case 'credential.updated':
         case 'credential.switched':
@@ -515,8 +529,10 @@ export function EventProvider({ children }: { children: React.ReactNode }) {
         initialFetchDoneRef.current = false
         fetchInitialPendingData()
         fetchInitialSessionStatuses()
+        startStatusPoll()
       } else {
         statusSyncVersionRef.current += 1
+        stopStatusPoll()
       }
     }
 
@@ -536,10 +552,11 @@ export function EventProvider({ children }: { children: React.ReactNode }) {
     
     return () => {
       statusSyncVersionRef.current += 1
+      stopStatusPoll()
       subscription.dispose()
       subscriptionRef.current = null
     }
-  }, [addPermission, removePermission, addForm, removeForm, rememberSessionDirectory, fetchInitialPendingData, fetchInitialSessionStatuses, queryClient, handleHealthChange, reconcilePendingActionsForDirectories, collectTrackedDirectories])
+  }, [addPermission, removePermission, addForm, removeForm, rememberSessionDirectory, fetchInitialPendingData, fetchInitialSessionStatuses, startStatusPoll, stopStatusPoll, queryClient, handleHealthChange, reconcilePendingActionsForDirectories, collectTrackedDirectories])
 
   useEffect(() => {
     reposRef.current = repos

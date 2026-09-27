@@ -12,12 +12,55 @@ import {
   SessionNavRow,
   SessionNavStatus,
 } from '@/components/navigation/RepoSessionNav'
-import { getActiveRepoId, isCurrentSessionItem } from '@/components/navigation/sidebar-session-tree'
+import { getActiveRepoId, isCurrentSessionItem, isRepoReady } from '@/components/navigation/sidebar-session-tree'
+
+function SessionSearchInput({
+  hasActiveSearch,
+  onSubmit,
+  onClear,
+}: {
+  hasActiveSearch: boolean
+  onSubmit: (query: string) => void
+  onClear: () => void
+}) {
+  const [draft, setDraft] = useState('')
+
+  const clear = () => {
+    setDraft('')
+    onClear()
+  }
+
+  const handleKeyDown = (event: React.KeyboardEvent<HTMLInputElement>) => {
+    if (event.key === 'Enter') {
+      event.preventDefault()
+      onSubmit(draft.trim())
+    } else if (event.key === 'Escape') {
+      clear()
+    }
+  }
+
+  return (
+    <div className="relative">
+      <Search className="absolute left-2 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
+      <Input
+        value={draft}
+        onChange={(event) => setDraft(event.target.value)}
+        onKeyDown={handleKeyDown}
+        aria-label="Search sessions"
+        placeholder="Search sessions..."
+        autoComplete="off"
+        name="sidebar-session-search"
+        className="h-8 pl-8 pr-9"
+      />
+      {(draft.length > 0 || hasActiveSearch) && <SearchClearButton onClear={clear} />}
+    </div>
+  )
+}
 
 function SessionSearchResults({ repos, search }: { repos: Repo[]; search: string }) {
   const navigate = useNavigate()
   const location = useLocation()
-  const searchableRepos = useMemo(() => repos.filter((repo) => repo.cloneStatus === 'ready'), [repos])
+  const searchableRepos = useMemo(() => repos.filter(isRepoReady), [repos])
   const { groups, isLoading, isError } = useSidebarRepoGroups({ repos: searchableRepos, search })
   const matchingGroups = groups.filter((group) => group.items.length > 0)
 
@@ -55,41 +98,17 @@ function SessionSearchResults({ repos, search }: { repos: Repo[]; search: string
 export function DesktopSessionTree() {
   const navigate = useNavigate()
   const location = useLocation()
-  const [searchDraft, setSearchDraft] = useState('')
   const [search, setSearch] = useState('')
   const { repos, isLoading } = useNavigableRepos()
-
-  const clearSearch = () => {
-    setSearchDraft('')
-    setSearch('')
-  }
-
-  const handleSearchKeyDown = (event: React.KeyboardEvent<HTMLInputElement>) => {
-    if (event.key === 'Enter') {
-      event.preventDefault()
-      setSearch(searchDraft.trim())
-    } else if (event.key === 'Escape') {
-      clearSearch()
-    }
-  }
 
   return (
     <div className="flex min-h-0 flex-1 flex-col">
       <div className="px-2 pb-2">
-        <div className="relative">
-          <Search className="absolute left-2 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
-          <Input
-            value={searchDraft}
-            onChange={(event) => setSearchDraft(event.target.value)}
-            onKeyDown={handleSearchKeyDown}
-            aria-label="Search sessions"
-            placeholder="Search sessions..."
-            autoComplete="off"
-            name="sidebar-session-search"
-            className="h-8 pl-8 pr-9"
-          />
-          {(searchDraft.length > 0 || search.length > 0) && <SearchClearButton onClear={clearSearch} />}
-        </div>
+        <SessionSearchInput
+          hasActiveSearch={search.length > 0}
+          onSubmit={setSearch}
+          onClear={() => setSearch('')}
+        />
       </div>
 
       <div role="region" aria-label="Session navigator" className="min-h-0 flex-1 overflow-y-auto pb-2">

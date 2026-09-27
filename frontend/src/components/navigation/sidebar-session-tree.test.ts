@@ -4,7 +4,7 @@ import {
   buildSidebarRepoGroups,
   getActiveRepoId,
   isCurrentSessionItem,
-  parseSidebarRouteSelection,
+  isRepoReady,
   selectNavigableRepos,
 } from './sidebar-session-tree'
 
@@ -38,26 +38,6 @@ function createRepo(overrides: Partial<Repo> & { id: number; fullPath: string })
   }
 }
 
-describe('parseSidebarRouteSelection', () => {
-  it('parses a repo and session route', () => {
-    expect(parseSidebarRouteSelection('/repos/5/sessions/ses_1')).toEqual({
-      repoId: 5,
-      sessionId: 'ses_1',
-    })
-  })
-
-  it('parses a repo route without a session', () => {
-    expect(parseSidebarRouteSelection('/repos/5')).toEqual({
-      repoId: 5,
-      sessionId: null,
-    })
-  })
-
-  it('returns nulls for an unrelated route', () => {
-    expect(parseSidebarRouteSelection('/')).toEqual({ repoId: null, sessionId: null })
-  })
-})
-
 describe('getActiveRepoId', () => {
   it('returns the repo id for repo and session routes', () => {
     expect(getActiveRepoId('/repos/3')).toBe(3)
@@ -84,6 +64,14 @@ describe('isCurrentSessionItem', () => {
     expect(isCurrentSessionItem(item, '/repos/1/sessions/a1')).toBe(true)
     expect(isCurrentSessionItem(item, '/repos/1')).toBe(false)
     expect(isCurrentSessionItem(item, '/repos/2/sessions/a1')).toBe(false)
+  })
+})
+
+describe('isRepoReady', () => {
+  it('is true only for ready repos', () => {
+    expect(isRepoReady(createRepo({ id: 1, fullPath: '/repos/a' }))).toBe(true)
+    expect(isRepoReady(createRepo({ id: 2, fullPath: '/repos/b', cloneStatus: 'cloning' }))).toBe(false)
+    expect(isRepoReady(createRepo({ id: 3, fullPath: '/repos/c', cloneStatus: 'error' }))).toBe(false)
   })
 })
 

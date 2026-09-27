@@ -10,6 +10,24 @@ export function isAssistantPath(pathname: string): boolean {
   return pathname === '/assistant' || /^\/repos\/[^/]+\/assistant$/.test(pathname);
 }
 
+export function getSessionPath(repoId: number | string, sessionId: string): string {
+  return `/repos/${repoId}/sessions/${sessionId}`;
+}
+
+export function parseRepoRoute(pathname: string): { repoId: number | null; section: string | null; sessionId: string | null } {
+  const match = /^\/repos\/(\d+)(?:\/([^/]+)(?:\/([^/]+))?)?/.exec(pathname);
+  if (!match) {
+    return { repoId: null, section: null, sessionId: null };
+  }
+
+  const section = match[2] ?? null;
+  return {
+    repoId: Number(match[1]),
+    section,
+    sessionId: section === 'sessions' ? (match[3] ?? null) : null,
+  };
+}
+
 export function getSessionListPath(repoId: string | number, isAssistantSession: boolean, tab?: string): string {
   if (isAssistantSession) {
     return getAssistantSessionListPath();

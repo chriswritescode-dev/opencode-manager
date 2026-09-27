@@ -1,6 +1,16 @@
 import { useCallback } from 'react'
 import { useUrlParams } from './useUrlParams'
 
+export function openDialogParam(
+  updateParams: ReturnType<typeof useUrlParams>['updateParams'],
+  name: string,
+): void {
+  updateParams((p) => {
+    p.set('dialog', name)
+    p.delete('mobileTab')
+  }, 'push')
+}
+
 export function useDialogParam(name: string): [boolean, (open: boolean) => void] {
   const { searchParams, updateParams } = useUrlParams()
 
@@ -8,14 +18,15 @@ export function useDialogParam(name: string): [boolean, (open: boolean) => void]
 
   const setOpen = useCallback(
     (open: boolean) => {
+      if (open) {
+        openDialogParam(updateParams, name)
+        return
+      }
       updateParams((p) => {
-        if (open) {
-          p.set('dialog', name)
-          p.delete('mobileTab')
-        } else if (p.get('dialog') === name) {
+        if (p.get('dialog') === name) {
           p.delete('dialog')
         }
-      }, open ? 'push' : 'replace')
+      }, 'replace')
     },
     [updateParams, name],
   )

@@ -1,8 +1,13 @@
 import { clsx, type ClassValue } from "clsx"
 import { twMerge } from "tailwind-merge"
 import type { CSSProperties } from "react"
+import type { Repo } from "@/api/types"
 
 export { getRepoDisplayName } from '@opencode-manager/shared/utils'
+
+export function getRepoBranchLabel(repo: Pick<Repo, 'currentBranch' | 'branch'>): string | null {
+  return repo.currentBranch || repo.branch || null
+}
 
 export function cn(...inputs: ClassValue[]) {
   return twMerge(clsx(inputs))

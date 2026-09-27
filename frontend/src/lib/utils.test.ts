@@ -1,6 +1,7 @@
 import { describe, it, expect, afterEach } from 'vitest'
 import {
   getRepoDisplayName,
+  getRepoBranchLabel,
   sanitizeForTTS,
   randomId,
   formatShortRelativeTime,
@@ -150,6 +151,20 @@ describe('getRepoDisplayName', () => {
 
   it('handles null values properly', () => {
     expect(getRepoDisplayName({ repoUrl: null, localPath: null, sourcePath: null })).toBe('Repository')
+  })
+})
+
+describe('getRepoBranchLabel', () => {
+  it('prefers currentBranch', () => {
+    expect(getRepoBranchLabel({ currentBranch: 'feature/x', branch: 'main' })).toBe('feature/x')
+  })
+
+  it('falls back to branch', () => {
+    expect(getRepoBranchLabel({ branch: 'main' })).toBe('main')
+  })
+
+  it('returns null when neither is present', () => {
+    expect(getRepoBranchLabel({})).toBeNull()
   })
 })
 

@@ -4,15 +4,8 @@ import type { ReactNode } from 'react'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { useSSE } from './useSSE'
 import { useSessionStatus } from '../stores/sessionStatusStore'
+import { useSendErrorStore } from '../stores/sendErrorStore'
 import { showToast } from '@/lib/toast'
-
-const mocks = vi.hoisted(() => ({
-  active: vi.fn(),
-}))
-
-vi.mock('@/api/opencode', () => ({
-  listActiveSessions: mocks.active,
-}))
 
 vi.mock('@/lib/toast', () => ({
   showToast: {
@@ -60,14 +53,15 @@ describe('useSSE', () => {
   beforeEach(() => {
     vi.clearAllMocks()
     MockEventSource.instances = []
-    mocks.active.mockResolvedValue({})
-    useSessionStatus.setState({ statuses: new Map(), statusCache: new Map(), statusDirectories: new Map(), statusRevisions: new Map(), revision: 0 })
+    useSessionStatus.setState({ statuses: new Map(), statusCache: new Map(), statusRevisions: new Map(), revision: 0 })
+    useSendErrorStore.setState({ errors: {} })
     globalThis.EventSource = MockEventSource as unknown as typeof EventSource
     globalThis.fetch = vi.fn(() => Promise.resolve({ ok: true } as Response))
   })
 
   afterEach(() => {
-    useSessionStatus.setState({ statuses: new Map(), statusCache: new Map(), statusDirectories: new Map(), statusRevisions: new Map(), revision: 0 })
+    useSessionStatus.setState({ statuses: new Map(), statusCache: new Map(), statusRevisions: new Map(), revision: 0 })
+    useSendErrorStore.setState({ errors: {} })
     globalThis.EventSource = originalEventSource
     globalThis.fetch = originalFetch
   })
@@ -130,200 +124,7 @@ describe('useSSE', () => {
     unmount()
   })
 
-  it('clears stale active statuses from the initial status snapshot', async () => {
-    const queryClient = new QueryClient({
-      defaultOptions: {
-        queries: { retry: false },
-      },
-    })
-
-    useSessionStatus.getState().setStatus('session-1', { type: 'busy' })
-
-    const { unmount } = renderHook(
-      () => useSSE('/repo', 'session-1'),
-      { wrapper: createWrapper(queryClient) }
-    )
-
-    await waitFor(() => expect(MockEventSource.instances).toHaveLength(1))
-
-    await connect(0, 'client-1')
-
-    await waitFor(() => {
-      expect(useSessionStatus.getState().getStatus('session-1')).toEqual({ type: 'idle' })
-    })
-
-    unmount()
-  })
-
-  it('preserves optimistic active status when a poll snapshot omits the session', () => {
-    useSessionStatus.getState().setOptimisticActive('session-1', 10_000)
-
-    useSessionStatus.getState().replaceStatuses({})
-
-    expect(useSessionStatus.getState().getStatus('session-1')).toEqual({ type: 'busy' })
-
-    useSessionStatus.getState().replaceStatuses({
-      'session-1': { type: 'idle' },
-    })
-
-    expect(useSessionStatus.getState().getStatus('session-1')).toEqual({ type: 'idle' })
-  })
-
-  it('ignores stale status snapshots after the directory changes', async () => {
-    const queryClient = new QueryClient({
-      defaultOptions: {
-        queries: { retry: false },
-      },
-    })
-
-    let resolveRepoA: (value: Record<string, { type: 'running' }>) => void = () => {}
-    let resolveRepoB: (value: Record<string, { type: 'running' }>) => void = () => {}
-    mocks.active
-      .mockImplementationOnce(() => new Promise((resolve) => { resolveRepoA = resolve }))
-      .mockImplementationOnce(() => new Promise((resolve) => { resolveRepoB = resolve }))
-
-    const { rerender, unmount } = renderHook(
-      ({ directory }) => useSSE(directory, 'session-1'),
-      { wrapper: createWrapper(queryClient), initialProps: { directory: '/repo-a' } }
-    )
-
-    await waitFor(() => expect(MockEventSource.instances).toHaveLength(1))
-
-    await connect(0, 'client-1')
-
-    rerender({ directory: '/repo-b' })
-
-    await waitFor(() => expect(MockEventSource.instances).toHaveLength(2))
-
-    await connect(1, 'client-2')
-
-    await act(async () => {
-      resolveRepoB({ 'session-b': { type: 'running' } })
-    })
-
-    await waitFor(() => {
-      expect(useSessionStatus.getState().getStatus('session-b')).toEqual({ type: 'busy' })
-    })
-
-    await act(async () => {
-      resolveRepoA({ 'session-a': { type: 'running' } })
-    })
-
-    expect(useSessionStatus.getState().getStatus('session-b')).toEqual({ type: 'busy' })
-    expect(useSessionStatus.getState().getStatus('session-a')).toEqual({ type: 'idle' })
-
-    unmount()
-  })
-
-  it('keeps other directories active sessions when reconciling the global snapshot', async () => {
-    const queryClient = new QueryClient({
-      defaultOptions: {
-        queries: { retry: false },
-      },
-    })
-
-    useSessionStatus.getState().setStatus('other', { type: 'busy' }, '/other')
-    useSessionStatus.getState().setStatus('inactive', { type: 'busy' }, '/repo')
-    mocks.active.mockResolvedValue({ other: { type: 'running' } })
-
-    const { unmount } = renderHook(
-      () => useSSE('/repo', 'session-1'),
-      { wrapper: createWrapper(queryClient) }
-    )
-
-    await waitFor(() => expect(MockEventSource.instances).toHaveLength(1))
-
-    await connect(0, 'client-1')
-
-    await waitFor(() => {
-      expect(useSessionStatus.getState().getStatus('other')).toEqual({ type: 'busy' })
-      expect(useSessionStatus.getState().getStatus('inactive')).toEqual({ type: 'idle' })
-    })
-
-    unmount()
-  })
-
-  it('preserves a live status that arrives while the global snapshot is in flight', async () => {
-    const queryClient = new QueryClient({
-      defaultOptions: {
-        queries: { retry: false },
-      },
-    })
-
-    let resolveActive: (value: Record<string, { type: 'running' }>) => void = () => {}
-    mocks.active.mockImplementationOnce(() => new Promise((resolve) => { resolveActive = resolve }))
-
-    const { unmount } = renderHook(
-      () => useSSE('/repo', 'session-1'),
-      { wrapper: createWrapper(queryClient) }
-    )
-
-    await waitFor(() => expect(MockEventSource.instances).toHaveLength(1))
-
-    await connect(0, 'client-1')
-
-    act(() => {
-      MockEventSource.instances[0].emit('message', {
-        type: 'session.execution.started',
-        directory: '/repo',
-        data: { sessionID: 'session-live' },
-      })
-    })
-
-    await act(async () => {
-      resolveActive({})
-      await Promise.resolve()
-    })
-
-    await waitFor(() => {
-      expect(useSessionStatus.getState().getStatus('session-live')).toEqual({ type: 'busy' })
-    })
-
-    unmount()
-  })
-
-  it('does not let an in-flight global snapshot revert an idle event received after it began', async () => {
-    const queryClient = new QueryClient({
-      defaultOptions: {
-        queries: { retry: false },
-      },
-    })
-
-    useSessionStatus.getState().setStatus('session-idle', { type: 'busy' }, '/repo')
-
-    let resolveActive: (value: Record<string, { type: 'running' }>) => void = () => {}
-    mocks.active.mockImplementationOnce(() => new Promise((resolve) => { resolveActive = resolve }))
-
-    const { unmount } = renderHook(
-      () => useSSE('/repo', 'session-1'),
-      { wrapper: createWrapper(queryClient) }
-    )
-
-    await waitFor(() => expect(MockEventSource.instances).toHaveLength(1))
-
-    await connect(0, 'client-1')
-
-    act(() => {
-      MockEventSource.instances[0].emit('message', {
-        type: 'session.idle',
-        directory: '/repo',
-        data: { sessionID: 'session-idle' },
-      })
-    })
-
-    await act(async () => {
-      resolveActive({ 'session-idle': { type: 'running' } })
-      await Promise.resolve()
-    })
-
-    await waitFor(() => {
-      expect(useSessionStatus.getState().getStatus('session-idle')).toEqual({ type: 'idle' })
-    })
-
-    unmount()
-  })
-
-  it('invalidates the session list and cached session query on session.created', async () => {
+  it('invalidates the cached session query on session.created', async () => {
     const queryClient = new QueryClient({
       defaultOptions: {
         queries: { retry: false },
@@ -352,15 +153,12 @@ describe('useSSE', () => {
 
     await waitFor(() => {
       expect(invalidateQueries).toHaveBeenCalledWith({ queryKey: ['opencode', 'session', 'session-2'] })
-      expect(invalidateQueries).toHaveBeenCalledWith(
-        expect.objectContaining({ predicate: expect.any(Function) }),
-      )
     })
 
     unmount()
   })
 
-  it('invalidates the session list and cached session query on session.renamed', async () => {
+  it('invalidates the cached session query on session.renamed', async () => {
     const queryClient = new QueryClient({
       defaultOptions: {
         queries: { retry: false },
@@ -389,15 +187,12 @@ describe('useSSE', () => {
 
     await waitFor(() => {
       expect(invalidateQueries).toHaveBeenCalledWith({ queryKey: ['opencode', 'session', 'session-2'] })
-      expect(invalidateQueries).toHaveBeenCalledWith(
-        expect.objectContaining({ predicate: expect.any(Function) }),
-      )
     })
 
     unmount()
   })
 
-  it('invalidates the session list and removes the session query on session.deleted', async () => {
+  it('removes the session query on session.deleted', async () => {
     const queryClient = new QueryClient({
       defaultOptions: {
         queries: { retry: false },
@@ -427,44 +222,6 @@ describe('useSSE', () => {
 
     await waitFor(() => {
       expect(removeQueries).toHaveBeenCalledWith({ queryKey: ['opencode', 'session', 'session-2'] })
-      expect(invalidateQueries).toHaveBeenCalledWith(
-        expect.objectContaining({ predicate: expect.any(Function) }),
-      )
-    })
-
-    unmount()
-  })
-
-  it('invalidates the session list on session.moved', async () => {
-    const queryClient = new QueryClient({
-      defaultOptions: {
-        queries: { retry: false },
-      },
-    })
-    const invalidateQueries = vi.spyOn(queryClient, 'invalidateQueries')
-
-    const { result, unmount } = renderHook(
-      () => useSSE('/repo', 'session-1'),
-      { wrapper: createWrapper(queryClient) }
-    )
-
-    await waitFor(() => expect(MockEventSource.instances).toHaveLength(1))
-    await connect(0, 'client-1')
-    await waitFor(() => expect(result.current.isConnected).toBe(true))
-    invalidateQueries.mockClear()
-
-    act(() => {
-      MockEventSource.instances[0].emit('message', {
-        type: 'session.moved',
-        directory: '/repo',
-        data: { sessionID: 'session-2', projectID: 'proj-1', location: { directory: '/repo-2' } },
-      })
-    })
-
-    await waitFor(() => {
-      expect(invalidateQueries).toHaveBeenCalledWith(
-        expect.objectContaining({ predicate: expect.any(Function) }),
-      )
     })
 
     unmount()
@@ -660,7 +417,7 @@ describe('useSSE', () => {
     unmount()
   })
 
-  it('handles envelopes whose directory is null', async () => {
+  it('does not write session status from stream events', async () => {
     const queryClient = new QueryClient({
       defaultOptions: {
         queries: { retry: false },
@@ -677,22 +434,33 @@ describe('useSSE', () => {
     await waitFor(() => expect(result.current.isConnected).toBe(true))
 
     act(() => {
-      MockEventSource.instances[0].emit('message', {
-        directory: null,
-        payload: { type: 'session.execution.started', data: { sessionID: 'session-9' } },
-      })
+      const events = [
+        { type: 'session.status', directory: '/repo', data: { sessionID: 'session-1', status: { type: 'busy' } } },
+        { type: 'session.execution.started', directory: '/repo', data: { sessionID: 'session-1' } },
+        { type: 'session.idle', directory: '/repo', data: { sessionID: 'session-1' } },
+      ]
+      for (const event of events) {
+        MockEventSource.instances[0].emit('message', event)
+      }
     })
 
-    expect(useSessionStatus.getState().getStatus('session-9')).toEqual({ type: 'busy' })
+    expect(useSessionStatus.getState().getStatus('session-1')).toEqual({ type: 'idle' })
 
     unmount()
   })
 
-  it('applies session.status and session.idle to the status store', async () => {
+  it('clears the network send error on session.idle', async () => {
     const queryClient = new QueryClient({
       defaultOptions: {
         queries: { retry: false },
       },
+    })
+
+    useSendErrorStore.getState().setError({
+      sessionID: 'session-1',
+      title: 'Failed to send',
+      message: 'Network error',
+      kind: 'network',
     })
 
     const { result, unmount } = renderHook(
@@ -703,16 +471,6 @@ describe('useSSE', () => {
     await waitFor(() => expect(MockEventSource.instances).toHaveLength(1))
     await connect(0, 'client-1')
     await waitFor(() => expect(result.current.isConnected).toBe(true))
-
-    act(() => {
-      MockEventSource.instances[0].emit('message', {
-        type: 'session.status',
-        directory: '/repo',
-        data: { sessionID: 'session-1', status: { type: 'busy' } },
-      })
-    })
-
-    expect(useSessionStatus.getState().getStatus('session-1')).toEqual({ type: 'busy' })
 
     act(() => {
       MockEventSource.instances[0].emit('message', {
@@ -722,46 +480,7 @@ describe('useSSE', () => {
       })
     })
 
-    expect(useSessionStatus.getState().getStatus('session-1')).toEqual({ type: 'idle' })
-
-    unmount()
-  })
-
-  it('applies session execution lifecycle events to the status store', async () => {
-    const queryClient = new QueryClient({
-      defaultOptions: {
-        queries: { retry: false },
-      },
-    })
-
-    const { result, unmount } = renderHook(
-      () => useSSE('/repo', 'session-1'),
-      { wrapper: createWrapper(queryClient) }
-    )
-
-    await waitFor(() => expect(MockEventSource.instances).toHaveLength(1))
-    await connect(0, 'client-1')
-    await waitFor(() => expect(result.current.isConnected).toBe(true))
-
-    const emit = (type: string, data: Record<string, unknown>) => {
-      act(() => {
-        MockEventSource.instances[0].emit('message', { type, directory: '/repo', data })
-      })
-    }
-
-    emit('session.execution.started', { sessionID: 'session-1' })
-    expect(useSessionStatus.getState().getStatus('session-1')).toEqual({ type: 'busy' })
-
-    emit('session.execution.succeeded', { sessionID: 'session-1' })
-    expect(useSessionStatus.getState().getStatus('session-1')).toEqual({ type: 'idle' })
-
-    emit('session.execution.started', { sessionID: 'session-1' })
-    emit('session.execution.failed', { sessionID: 'session-1', error: { message: 'failed' } })
-    expect(useSessionStatus.getState().getStatus('session-1')).toEqual({ type: 'idle' })
-
-    emit('session.execution.started', { sessionID: 'session-1' })
-    emit('session.execution.interrupted', { sessionID: 'session-1', reason: 'user' })
-    expect(useSessionStatus.getState().getStatus('session-1')).toEqual({ type: 'idle' })
+    expect(useSendErrorStore.getState().getError('session-1')).toBeNull()
 
     unmount()
   })
@@ -801,52 +520,6 @@ describe('useSSE', () => {
 
     expect(invalidateQueries).not.toHaveBeenCalled()
     expect(setQueryData).not.toHaveBeenCalled()
-
-    unmount()
-  })
-
-  it('invalidates the session list on terminal execution, metadata, and usage events', async () => {
-    const queryClient = new QueryClient({
-      defaultOptions: {
-        queries: { retry: false },
-      },
-    })
-    const invalidateQueries = vi.spyOn(queryClient, 'invalidateQueries')
-
-    const { result, unmount } = renderHook(
-      () => useSSE('/repo', 'session-1'),
-      { wrapper: createWrapper(queryClient) }
-    )
-
-    await waitFor(() => expect(MockEventSource.instances).toHaveLength(1))
-    await connect(0, 'client-1')
-    await waitFor(() => expect(result.current.isConnected).toBe(true))
-
-    const emit = (type: string, data: Record<string, unknown>) => {
-      act(() => {
-        MockEventSource.instances[0].emit('message', { type, directory: '/repo', data })
-      })
-    }
-
-    for (const type of ['session.execution.succeeded', 'session.execution.failed', 'session.execution.interrupted']) {
-      invalidateQueries.mockClear()
-      emit(type, { sessionID: 'session-2' })
-      await waitFor(() => {
-        expect(invalidateQueries).toHaveBeenCalledWith(
-          expect.objectContaining({ predicate: expect.any(Function) }),
-        )
-      })
-    }
-
-    for (const type of ['session.metadata.updated', 'session.usage.updated']) {
-      invalidateQueries.mockClear()
-      emit(type, { sessionID: 'session-2', metadata: {}, cost: 0, tokens: {} })
-      await waitFor(() => {
-        expect(invalidateQueries).toHaveBeenCalledWith(
-          expect.objectContaining({ predicate: expect.any(Function) }),
-        )
-      })
-    }
 
     unmount()
   })

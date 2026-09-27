@@ -23,7 +23,6 @@ import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, D
 import { ResetPermissionsDialog } from "@/components/repo/ResetPermissionsDialog";
 import { PendingActionsGroup } from "@/components/notifications/PendingActionsGroup";
 import { getRepoDisplayName } from "@/lib/utils";
-import { useSidebarAction } from "@/hooks/useSidebarAction";
 import { isWorktreeSibling } from "@opencode-manager/shared/utils";
 
 export function RepoDetail() {
@@ -146,10 +145,6 @@ export function RepoDetail() {
   const handleSelectSession = (sessionId: string) => {
     navigate(sessionUrl(sessionId));
   };
-
-  useSidebarAction('new-session', () => {
-    handleCreateSession();
-  });
 
   if (repoLoading) {
     return (

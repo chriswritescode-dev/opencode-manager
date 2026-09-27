@@ -5,6 +5,7 @@ import {
   invalidateProviderCaches,
   invalidateProviderCachesDebounced,
   invalidateQueryKeysDebounced,
+  invalidateSessionListCachesDebounced,
   refreshOpenCodeServerCaches,
 } from './queryInvalidation'
 
@@ -92,6 +93,54 @@ describe('invalidateProviderCachesDebounced', () => {
 
     expect(invalidateQueries).toHaveBeenCalledTimes(4)
     expect(invalidateQueries).toHaveBeenCalledWith({ queryKey: ['opencode', 'providers'] })
+  })
+})
+
+describe('invalidateSessionListCachesDebounced', () => {
+  afterEach(() => {
+    vi.useRealTimers()
+  })
+
+  const sessionListKey = (directoryKey: string) => ['opencode', 'sessions', directoryKey]
+
+  it('invalidates only the session lists that include the event directory', () => {
+    vi.useFakeTimers()
+    const queryClient = new QueryClient()
+    queryClient.setQueryData(sessionListKey('/a'), { pages: [], pageParams: [] })
+    queryClient.setQueryData(sessionListKey('/b'), { pages: [], pageParams: [] })
+
+    invalidateSessionListCachesDebounced(queryClient, '/a')
+    vi.advanceTimersByTime(200)
+
+    expect(queryClient.getQueryState(sessionListKey('/a'))?.isInvalidated).toBe(true)
+    expect(queryClient.getQueryState(sessionListKey('/b'))?.isInvalidated).toBe(false)
+  })
+
+  it('merges directories reported within the debounce window into one flush', () => {
+    vi.useFakeTimers()
+    const queryClient = new QueryClient()
+    queryClient.setQueryData(sessionListKey('/a|/b'), { pages: [], pageParams: [] })
+    queryClient.setQueryData(sessionListKey('/c'), { pages: [], pageParams: [] })
+
+    invalidateSessionListCachesDebounced(queryClient, '/a')
+    invalidateSessionListCachesDebounced(queryClient, '/b')
+    vi.advanceTimersByTime(200)
+
+    expect(queryClient.getQueryState(sessionListKey('/a|/b'))?.isInvalidated).toBe(true)
+    expect(queryClient.getQueryState(sessionListKey('/c'))?.isInvalidated).toBe(false)
+  })
+
+  it('invalidates every session list when called without a directory', () => {
+    vi.useFakeTimers()
+    const queryClient = new QueryClient()
+    queryClient.setQueryData(sessionListKey('/a'), { pages: [], pageParams: [] })
+    queryClient.setQueryData(sessionListKey('/b'), { pages: [], pageParams: [] })
+
+    invalidateSessionListCachesDebounced(queryClient)
+    vi.advanceTimersByTime(200)
+
+    expect(queryClient.getQueryState(sessionListKey('/a'))?.isInvalidated).toBe(true)
+    expect(queryClient.getQueryState(sessionListKey('/b'))?.isInvalidated).toBe(true)
   })
 })
 

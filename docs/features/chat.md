@@ -140,8 +140,12 @@ Supported diagram types:
 
 Access your sessions from the sidebar:
 
-- Sessions are organized by repository
-- Most recent sessions appear first
+- Sessions are organized by repository; the current repository is expanded and one repository is open at a time
+- Pinned sessions appear first, followed by the most recent sessions
+- A live indicator marks sessions that are working, retrying, or compacting
+- **All sessions** opens the repository's full session list when it has more sessions than the sidebar shows
+- Repositories that are still cloning, or whose clone failed, show **Repository not ready** until they are ready
+- On desktop, type in the sidebar search box and press **Enter** to search sessions across all repositories; press **Escape** to clear
 - Click a session to resume
 
 ![Session List](../images/chat-session-list.png)

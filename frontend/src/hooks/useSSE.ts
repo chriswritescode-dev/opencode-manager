@@ -1,15 +1,12 @@
 import { useEffect, useRef, useState, useCallback, useMemo } from 'react'
 import { useQueryClient } from '@tanstack/react-query'
 import type { SessionInfo, V2Event } from '@opencode-manager/shared/opencode'
-import { invalidateSessionListCaches, invalidateSessionListCachesDebounced, shellsQueryKey } from '@/lib/queryInvalidation'
+import { invalidateSessionListCaches, shellsQueryKey } from '@/lib/queryInvalidation'
 import { showToast } from '@/lib/toast'
-import { busyStatusesFromActiveSessions, useSessionStatus } from '@/stores/sessionStatusStore'
 import { useSendErrorStore } from '@/stores/sendErrorStore'
 import { openCodeEventStream } from '@/lib/opencode-event-stream'
 import type { EventStreamSubscription } from '@/lib/opencode-event-stream'
-import { listActiveSessions, type ShellInfo } from '@/api/opencode'
-
-const STATUS_POLL_INTERVAL_MS = 5000
+import type { ShellInfo } from '@/api/opencode'
 
 type V2StreamEvent = V2Event & { directory?: string }
 
@@ -51,16 +48,11 @@ export const useSSE = (directory?: string | string[], currentSessionId?: string)
   const queryClient = useQueryClient()
   const mountedRef = useRef(true)
   const sessionIdRef = useRef(currentSessionId)
-  const statusSyncVersionRef = useRef(0)
   const eventStreamSubscriptionRef = useRef<EventStreamSubscription | null>(null)
   sessionIdRef.current = currentSessionId
   const [isConnected, setIsConnected] = useState(false)
   const [error, setError] = useState<string | null>(null)
   const [isReconnecting, setIsReconnecting] = useState(false)
-  const setSessionStatus = useSessionStatus((state) => state.setStatus)
-  const replaceSessionStatuses = useSessionStatus((state) => state.replaceStatuses)
-  const beginStatusSnapshot = useSessionStatus((state) => state.beginStatusSnapshot)
-  const endStatusSnapshot = useSessionStatus((state) => state.endStatusSnapshot)
 
   const resolveCacheDirectory = useCallback(
     (eventDirectory: string | undefined): string | undefined => {
@@ -77,12 +69,10 @@ export const useSSE = (directory?: string | string[], currentSessionId?: string)
 
     switch (event.type) {
       case 'session.created':
-        invalidateSessionListCachesDebounced(queryClient)
         invalidateSessionQueryIfCached(queryClient, event.data.sessionID)
         break
 
       case 'session.renamed':
-        invalidateSessionListCachesDebounced(queryClient)
         invalidateSessionQueryIfCached(queryClient, event.data.sessionID)
         break
 
@@ -110,37 +100,11 @@ export const useSSE = (directory?: string | string[], currentSessionId?: string)
         break
 
       case 'session.deleted':
-        invalidateSessionListCaches(queryClient)
         queryClient.removeQueries({ queryKey: ['opencode', 'session', event.data.sessionID] })
         break
 
-      case 'session.moved':
-        invalidateSessionListCachesDebounced(queryClient)
-        break
-
-      case 'session.status':
-        setSessionStatus(event.data.sessionID, event.data.status, eventDirectory ?? primaryDirectory)
-        break
-
       case 'session.idle':
-        setSessionStatus(event.data.sessionID, { type: 'idle' })
         useSendErrorStore.getState().clearNetworkError(event.data.sessionID)
-        break
-
-      case 'session.execution.started':
-        setSessionStatus(event.data.sessionID, { type: 'busy' }, eventDirectory ?? primaryDirectory)
-        break
-
-      case 'session.execution.succeeded':
-      case 'session.execution.failed':
-      case 'session.execution.interrupted':
-        setSessionStatus(event.data.sessionID, { type: 'idle' })
-        invalidateSessionListCachesDebounced(queryClient)
-        break
-
-      case 'session.metadata.updated':
-      case 'session.usage.updated':
-        invalidateSessionListCachesDebounced(queryClient)
         break
 
       case 'shell.created': {
@@ -170,37 +134,7 @@ export const useSSE = (directory?: string | string[], currentSessionId?: string)
       default:
         break
     }
-  }, [queryClient, directorySet, resolveCacheDirectory, setSessionStatus, primaryDirectory])
-
-  const fetchInitialData = useCallback(async () => {
-    if (!primaryDirectory || !mountedRef.current) return
-    const syncVersion = ++statusSyncVersionRef.current
-    const snapshotToken = beginStatusSnapshot()
-
-    try {
-      const active = await listActiveSessions()
-      if (mountedRef.current && statusSyncVersionRef.current === syncVersion && active) {
-        replaceSessionStatuses(busyStatusesFromActiveSessions(active), undefined, snapshotToken)
-      } else {
-        endStatusSnapshot(snapshotToken)
-      }
-    } catch (err) {
-      endStatusSnapshot(snapshotToken)
-      if (err instanceof Error && !err.message.includes('aborted')) {
-        throw err
-      }
-    }
-  }, [primaryDirectory, replaceSessionStatuses, beginStatusSnapshot, endStatusSnapshot])
-
-  useEffect(() => {
-    if (!primaryDirectory) return
-
-    const interval = setInterval(() => {
-      void fetchInitialData().catch(() => undefined)
-    }, STATUS_POLL_INTERVAL_MS)
-
-    return () => clearInterval(interval)
-  }, [primaryDirectory, fetchInitialData])
+  }, [queryClient, directorySet, resolveCacheDirectory])
 
   const refreshCurrentSession = useCallback(() => {
     const sessionId = sessionIdRef.current
@@ -225,7 +159,6 @@ export const useSSE = (directory?: string | string[], currentSessionId?: string)
     mountedRef.current = true
     
     if (directoriesList.length === 0) {
-      statusSyncVersionRef.current += 1
       setIsConnected(false)
       setIsReconnecting(false)
       return
@@ -244,7 +177,6 @@ export const useSSE = (directory?: string | string[], currentSessionId?: string)
       
       if (connected) {
         setError(null)
-        void fetchInitialData().catch(() => undefined)
         syncCurrentSession()
         eventStreamSubscriptionRef.current?.reportVisibility(document.visibilityState === 'visible', sessionIdRef.current)
       } else {
@@ -281,7 +213,6 @@ export const useSSE = (directory?: string | string[], currentSessionId?: string)
 
     return () => {
       mountedRef.current = false
-      statusSyncVersionRef.current += 1
       document.removeEventListener('visibilitychange', handleVisibilityChange)
       window.removeEventListener('focus', handleReconnect)
       window.removeEventListener('online', handleReconnect)
@@ -291,7 +222,7 @@ export const useSSE = (directory?: string | string[], currentSessionId?: string)
         eventStreamSubscriptionRef.current = null
       }
     }
-  }, [directoryKey, directoriesList, handleSSEEvent, fetchInitialData, syncCurrentSession, refreshCurrentSession, queryClient])
+  }, [directoryKey, directoriesList, handleSSEEvent, syncCurrentSession, refreshCurrentSession, queryClient])
 
   useEffect(() => {
     if (isConnected && document.visibilityState === 'visible') {

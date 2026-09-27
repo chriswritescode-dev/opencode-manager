@@ -6,10 +6,11 @@ import { SessionStatusIndicator } from '@/components/ui/session-status-indicator
 import { useForms, usePermissions } from '@/contexts/EventContext'
 import { useCreateSession } from '@/hooks/useOpenCode'
 import { useSidebarRepoGroups } from '@/hooks/useSidebarRepoGroups'
-import { cn, formatShortRelativeTime, getRepoDisplayName } from '@/lib/utils'
+import { cn, formatShortRelativeTime, getRepoBranchLabel, getRepoDisplayName } from '@/lib/utils'
+import { getSessionPath } from '@/lib/navigation'
 import {
-  SIDEBAR_SESSIONS_PER_REPO,
   isCurrentSessionItem,
+  isRepoReady,
   type SidebarSessionItem,
 } from '@/components/navigation/sidebar-session-tree'
 import type { Repo } from '@/api/types'
@@ -145,7 +146,7 @@ export function SessionNavStatus({ children }: { children: ReactNode }) {
   return <div className="flex h-10 items-center pl-4 text-xs text-muted-foreground">{children}</div>
 }
 
-export function SessionNavLink({ children, onClick }: { children: ReactNode; onClick: () => void }) {
+function SessionNavLink({ children, onClick }: { children: ReactNode; onClick: () => void }) {
   return (
     <button
       type="button"
@@ -178,7 +179,7 @@ interface RepoSessionListProps {
 function RepoSessionList({ repo, onSelectSession }: RepoSessionListProps) {
   const location = useLocation()
   const repos = useMemo(() => [repo], [repo])
-  const { groups, isLoading, isError } = useSidebarRepoGroups({ repos })
+  const { groups, isLoading, isError, hasMore } = useSidebarRepoGroups({ repos })
   const items = groups[0]?.items ?? []
 
   if (isLoading) return <SessionNavStatus>Loading sessions...</SessionNavStatus>
@@ -195,7 +196,7 @@ function RepoSessionList({ repo, onSelectSession }: RepoSessionListProps) {
           onSelect={onSelectSession}
         />
       ))}
-      {items.length >= SIDEBAR_SESSIONS_PER_REPO && (
+      {hasMore && (
         <SessionNavLink onClick={() => onSelectSession(`/repos/${repo.id}`)}>All sessions</SessionNavLink>
       )}
     </>
@@ -229,19 +230,24 @@ export function RepoSessionNavList({
     <div className="flex flex-col">
       {repos.map((repo) => {
         const isExpanded = expandedRepoId === repo.id
+        const ready = isRepoReady(repo)
         return (
           <RepoNavGroup
             key={repo.id}
             name={getRepoDisplayName(repo)}
-            branch={repo.currentBranch || repo.branch}
+            branch={getRepoBranchLabel(repo)}
             isWorktree={repo.isWorktree}
             isOpen={isExpanded}
             isCurrent={repo.id === activeRepoId}
             onOpenRepo={() => onOpenRepo(repo.id)}
             onToggle={() => setExpandedRepoId((current) => (current === repo.id ? null : repo.id))}
-            actions={renderActions?.(repo)}
+            actions={ready ? renderActions?.(repo) : undefined}
           >
-            <RepoSessionList repo={repo} onSelectSession={onSelectSession} />
+            {ready ? (
+              <RepoSessionList repo={repo} onSelectSession={onSelectSession} />
+            ) : (
+              <SessionNavStatus>Repository not ready</SessionNavStatus>
+            )}
           </RepoNavGroup>
         )
       })}
@@ -257,7 +263,7 @@ export function NewSessionButton({
   onOpenSession: (path: string) => void
 }) {
   const createSession = useCreateSession(repo.fullPath, (session) => {
-    onOpenSession(`/repos/${repo.id}/sessions/${session.id}`)
+    onOpenSession(getSessionPath(repo.id, session.id))
   })
 
   return (

@@ -49,7 +49,6 @@ import { SourceControlPanel } from "@/components/source-control";
 import { SessionSendErrorBanner } from "@/components/session/SessionSendErrorBanner";
 import { BackgroundWorkBar } from "@/components/session/BackgroundWorkBar";
 import { useDialogParam } from "@/hooks/useDialogParam";
-import { useSidebarAction } from "@/hooks/useSidebarAction";
 import { SessionMoreButton } from "@/components/navigation/SessionMoreButton";
 
 const OLDER_HISTORY_SCROLL_THRESHOLD_PX = 200
@@ -299,10 +298,6 @@ export function SessionDetail() {
       showToast.error('Failed to create new session');
     }
   }, [createSession, navigate, repoId, sessionRouteSuffix]);
-
-  useSidebarAction('new-session', () => {
-    handleNewSession();
-  });
 
   const undoMessage = useUndoMessage({
     sessionId: sessionId ?? '',

@@ -25,27 +25,8 @@ import {
 } from "./repo-list-state"
 import { RepoListControls } from "./RepoListControls"
 import { invalidateRepoListCaches } from "@/lib/queryInvalidation"
+import { formatShortRelativeTime } from "@/lib/utils"
 import { ASSISTANT_REPO_ID } from "@opencode-manager/shared/utils"
-
-function formatActivityLabel(timestamp: number): string {
-  const now = Date.now()
-  const diff = now - timestamp
-  const seconds = Math.floor(diff / 1000)
-  const minutes = Math.floor(seconds / 60)
-  const hours = Math.floor(minutes / 60)
-  const days = Math.floor(hours / 24)
-
-  if (days > 0) {
-    return days === 1 ? '1d ago' : `${days}d ago`
-  }
-  if (hours > 0) {
-    return hours === 1 ? '1h ago' : `${hours}h ago`
-  }
-  if (minutes > 0) {
-    return minutes === 1 ? '1m ago' : `${minutes}m ago`
-  }
-  return 'just now'
-}
 
 interface RepoCardWrapperProps {
   repo: Repo
@@ -458,7 +439,7 @@ export function RepoList() {
                               manageMode={isSelectionActive}
                               isMobile={isMobile}
                               isManualSort={isManualSort}
-                              activityLabel={formatActivityLabel(repo.activityTimestamp)}
+                              activityLabel={formatShortRelativeTime(new Date(repo.activityTimestamp))}
                               hasSelectedRepos={selectedRepos.size > 0}
                               selectionMode={selectionMode}
                             />
@@ -487,7 +468,7 @@ export function RepoList() {
                           gitStatus={gitStatuses?.get(repo.id)}
                           manageMode={isSelectionActive}
                           isMobile={isMobile}
-                          activityLabel={formatActivityLabel(repo.activityTimestamp)}
+                          activityLabel={formatShortRelativeTime(new Date(repo.activityTimestamp))}
                           hasSelectedRepos={selectedRepos.size > 0}
                           selectionMode={selectionMode}
                         />

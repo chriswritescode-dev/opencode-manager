@@ -155,18 +155,55 @@ export function invalidateSessionListCaches(queryClient: QueryClient) {
   })
 }
 
-const sessionListInvalidationTimers = new WeakMap<QueryClient, ReturnType<typeof setTimeout>>()
+interface SessionListInvalidationState {
+  timer: ReturnType<typeof setTimeout> | null
+  directories: Set<string>
+  invalidateAll: boolean
+}
 
-export function invalidateSessionListCachesDebounced(queryClient: QueryClient, delayMs = 200) {
-  const existing = sessionListInvalidationTimers.get(queryClient)
-  if (existing) clearTimeout(existing)
-  sessionListInvalidationTimers.set(
-    queryClient,
-    setTimeout(() => {
-      sessionListInvalidationTimers.delete(queryClient)
-      invalidateSessionListCaches(queryClient)
-    }, delayMs),
-  )
+const sessionListInvalidationStates = new WeakMap<QueryClient, SessionListInvalidationState>()
+
+function sessionListQueryMatchesDirectories(queryKey: readonly unknown[], directories: Set<string>) {
+  if (queryKey[0] !== 'opencode' || queryKey[1] !== 'sessions') return false
+  const directoryKey = queryKey[2]
+  if (typeof directoryKey !== 'string') return false
+  return directoryKey.split('|').some((directory) => directories.has(directory))
+}
+
+function flushSessionListInvalidation(
+  queryClient: QueryClient,
+  state: SessionListInvalidationState,
+) {
+  if (state.invalidateAll) {
+    invalidateSessionListCaches(queryClient)
+    return
+  }
+  queryClient.invalidateQueries({
+    predicate: (query) => sessionListQueryMatchesDirectories(query.queryKey, state.directories),
+  })
+}
+
+export function invalidateSessionListCachesDebounced(
+  queryClient: QueryClient,
+  directory?: string,
+  delayMs = 200,
+) {
+  const state = sessionListInvalidationStates.get(queryClient) ?? {
+    timer: null,
+    directories: new Set<string>(),
+    invalidateAll: false,
+  }
+  if (state.timer) clearTimeout(state.timer)
+  if (directory) {
+    state.directories.add(directory)
+  } else {
+    state.invalidateAll = true
+  }
+  sessionListInvalidationStates.set(queryClient, state)
+  state.timer = setTimeout(() => {
+    sessionListInvalidationStates.delete(queryClient)
+    flushSessionListInvalidation(queryClient, state)
+  }, delayMs)
 }
 
 const queryKeysInvalidationTimers = new WeakMap<QueryClient, Map<string, ReturnType<typeof setTimeout>>>()

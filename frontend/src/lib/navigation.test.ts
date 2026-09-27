@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { getSessionListPath, getSwipeBackTarget, getAssistantPath, getAssistantSessionListPath, isAssistantPath, getPathWithReturnTo, getReturnToPath } from './navigation';
+import { getSessionListPath, getSwipeBackTarget, getAssistantPath, getAssistantSessionListPath, isAssistantPath, getPathWithReturnTo, getReturnToPath, getSessionPath, parseRepoRoute } from './navigation';
 
 describe('getAssistantPath', () => {
   it('returns /assistant', () => {
@@ -57,6 +57,44 @@ describe('getSessionListPath', () => {
 
   it('ignores tab param for assistant sessions', () => {
     expect(getSessionListPath(42, true, 'workspaces')).toBe('/assistant');
+  });
+});
+
+describe('getSessionPath', () => {
+  it('builds a session detail path from a numeric or string repo id', () => {
+    expect(getSessionPath(5, 'ses_1')).toBe('/repos/5/sessions/ses_1');
+    expect(getSessionPath('5', 'ses_1')).toBe('/repos/5/sessions/ses_1');
+  });
+});
+
+describe('parseRepoRoute', () => {
+  it('parses a repo and session route', () => {
+    expect(parseRepoRoute('/repos/5/sessions/ses_1')).toEqual({
+      repoId: 5,
+      section: 'sessions',
+      sessionId: 'ses_1',
+    });
+  });
+
+  it('parses a repo route without a section', () => {
+    expect(parseRepoRoute('/repos/5')).toEqual({ repoId: 5, section: null, sessionId: null });
+  });
+
+  it('parses a repo section route without a session id', () => {
+    expect(parseRepoRoute('/repos/5/schedules')).toEqual({
+      repoId: 5,
+      section: 'schedules',
+      sessionId: null,
+    });
+    expect(parseRepoRoute('/repos/5/sessions')).toEqual({
+      repoId: 5,
+      section: 'sessions',
+      sessionId: null,
+    });
+  });
+
+  it('returns nulls for an unrelated route', () => {
+    expect(parseRepoRoute('/')).toEqual({ repoId: null, section: null, sessionId: null });
   });
 });
 

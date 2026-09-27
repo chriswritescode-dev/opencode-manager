@@ -5,7 +5,6 @@ const resetStore = () => {
   useSessionStatus.setState({
     statuses: new Map(),
     statusCache: new Map(),
-    statusDirectories: new Map(),
     statusRevisions: new Map(),
     revision: 0,
   })
@@ -16,75 +15,27 @@ describe('sessionStatusStore', () => {
     resetStore()
   })
 
-  it('carries over a busy session recorded for another directory', () => {
+  it('fully replaces the map for a global snapshot', () => {
     const store = useSessionStatus.getState()
-    store.setStatus('session-a', { type: 'busy' }, '/repo-a')
-    store.setStatus('session-b', { type: 'busy' }, '/repo-b')
+    store.setStatus('session-a', { type: 'busy' })
+    store.setStatus('session-b', { type: 'busy' })
 
-    useSessionStatus.getState().replaceStatuses({}, '/repo-a')
-
-    expect(useSessionStatus.getState().getStatus('session-a')).toEqual({ type: 'idle' })
-    expect(useSessionStatus.getState().getStatus('session-b')).toEqual({ type: 'busy' })
-  })
-
-  it('clears a busy session when its own directory snapshot omits it', () => {
-    useSessionStatus.getState().setStatus('session-a', { type: 'busy' }, '/repo-a')
-
-    useSessionStatus.getState().replaceStatuses({}, '/repo-a')
-
-    expect(useSessionStatus.getState().getStatus('session-a')).toEqual({ type: 'idle' })
-  })
-
-  it('fully replaces the map when no directory is supplied', () => {
-    const store = useSessionStatus.getState()
-    store.setStatus('session-a', { type: 'busy' }, '/repo-a')
-    store.setStatus('session-b', { type: 'busy' }, '/repo-b')
-
-    useSessionStatus.getState().replaceStatuses({ 'session-a': { type: 'busy' } })
+    const token = store.beginStatusSnapshot()
+    useSessionStatus.getState().replaceStatuses({ 'session-a': { type: 'busy' } }, token)
 
     expect(useSessionStatus.getState().getStatus('session-a')).toEqual({ type: 'busy' })
     expect(useSessionStatus.getState().getStatus('session-b')).toEqual({ type: 'idle' })
   })
 
-  it('preserves an optimistic active session across a directory snapshot', () => {
+  it('preserves an optimistic active session across a global snapshot', () => {
     useSessionStatus.getState().setOptimisticActive('session-a', 10_000)
 
-    useSessionStatus.getState().replaceStatuses({}, '/repo-b')
+    const token = useSessionStatus.getState().beginStatusSnapshot()
+    useSessionStatus.getState().replaceStatuses({}, token)
 
     expect(useSessionStatus.getState().getStatus('session-a')).toEqual({ type: 'busy' })
 
     useSessionStatus.getState().clearStatus('session-a')
-  })
-
-  it('records a directory when an unchanged status hash arrives', () => {
-    useSessionStatus.getState().setStatus('session-a', { type: 'busy' })
-
-    useSessionStatus.getState().replaceStatuses({ 'session-a': { type: 'busy' } }, '/repo-a')
-    useSessionStatus.getState().replaceStatuses({}, '/repo-b')
-
-    expect(useSessionStatus.getState().getStatus('session-a')).toEqual({ type: 'busy' })
-  })
-
-  it('prunes the recorded directory when clearStatus runs', () => {
-    const store = useSessionStatus.getState()
-    store.setStatus('session-a', { type: 'busy' }, '/repo-a')
-    store.clearStatus('session-a')
-    store.setStatus('session-a', { type: 'busy' })
-
-    useSessionStatus.getState().replaceStatuses({}, '/repo-b')
-
-    expect(useSessionStatus.getState().getStatus('session-a')).toEqual({ type: 'idle' })
-  })
-
-  it('prunes the recorded directory when a snapshot drops the session', () => {
-    const store = useSessionStatus.getState()
-    store.setStatus('session-a', { type: 'busy' }, '/repo-a')
-    store.replaceStatuses({}, '/repo-a')
-    store.setStatus('session-a', { type: 'busy' })
-
-    useSessionStatus.getState().replaceStatuses({}, '/repo-b')
-
-    expect(useSessionStatus.getState().getStatus('session-a')).toEqual({ type: 'idle' })
   })
 
   it('maps active session ids to busy statuses', () => {
@@ -93,16 +44,76 @@ describe('sessionStatusStore', () => {
     })
   })
 
+  it('leaves the store state untouched for an idle event on an untracked session with no snapshot in flight', () => {
+    const before = useSessionStatus.getState()
+
+    before.setStatus('untracked', { type: 'idle' })
+
+    expect(useSessionStatus.getState()).toBe(before)
+  })
+
+  it('leaves the statuses map identity unchanged for a repeated identical busy status outside a snapshot', () => {
+    const store = useSessionStatus.getState()
+    store.setStatus('session-a', { type: 'busy' })
+    const statuses = useSessionStatus.getState().statuses
+
+    store.setStatus('session-a', { type: 'busy' })
+
+    expect(useSessionStatus.getState().statuses).toBe(statuses)
+  })
+
+  it('clears recorded revisions when the last snapshot ends via replaceStatuses', () => {
+    const store = useSessionStatus.getState()
+    store.setStatus('session-a', { type: 'busy' })
+    const token = store.beginStatusSnapshot()
+    store.setStatus('session-b', { type: 'busy' })
+
+    useSessionStatus.getState().replaceStatuses({}, token)
+
+    expect(useSessionStatus.getState().statusRevisions.size).toBe(0)
+  })
+
+  it('clears recorded revisions when the last snapshot ends via endStatusSnapshot', () => {
+    const store = useSessionStatus.getState()
+    store.setStatus('session-a', { type: 'busy' })
+    const token = store.beginStatusSnapshot()
+    store.setStatus('session-b', { type: 'busy' })
+
+    useSessionStatus.getState().endStatusSnapshot(token)
+
+    expect(useSessionStatus.getState().statusRevisions.size).toBe(0)
+  })
+
+  it('does not replace the statuses map for an unchanged snapshot', () => {
+    const store = useSessionStatus.getState()
+    store.setStatus('session-a', { type: 'busy' })
+    const statuses = useSessionStatus.getState().statuses
+    const token = store.beginStatusSnapshot()
+
+    useSessionStatus.getState().replaceStatuses({ 'session-a': { type: 'busy' } }, token)
+
+    expect(useSessionStatus.getState().statuses).toBe(statuses)
+  })
+
+  it('keeps an event received during an in-flight snapshot over the snapshot', () => {
+    const store = useSessionStatus.getState()
+    const token = store.beginStatusSnapshot()
+    store.setStatus('session-a', { type: 'busy' })
+
+    useSessionStatus.getState().replaceStatuses({}, token)
+
+    expect(useSessionStatus.getState().getStatus('session-a')).toEqual({ type: 'busy' })
+  })
+
   it('does not let a snapshot captured before an idle event resurrect the session', () => {
     const store = useSessionStatus.getState()
-    store.setStatus('session-a', { type: 'busy' }, '/repo-a')
+    store.setStatus('session-a', { type: 'busy' })
 
     const snapshotRevision = store.beginStatusSnapshot()
     store.setStatus('session-a', { type: 'idle' })
 
     useSessionStatus.getState().replaceStatuses(
       { 'session-a': { type: 'busy' } },
-      undefined,
       snapshotRevision,
     )
 
@@ -112,9 +123,9 @@ describe('sessionStatusStore', () => {
   it('does not let an older empty snapshot erase a session that started after it was captured', () => {
     const store = useSessionStatus.getState()
     const snapshotRevision = store.beginStatusSnapshot()
-    store.setStatus('session-a', { type: 'busy' }, '/repo-a')
+    store.setStatus('session-a', { type: 'busy' })
 
-    useSessionStatus.getState().replaceStatuses({}, undefined, snapshotRevision)
+    useSessionStatus.getState().replaceStatuses({}, snapshotRevision)
 
     expect(useSessionStatus.getState().getStatus('session-a')).toEqual({ type: 'busy' })
   })
@@ -122,11 +133,10 @@ describe('sessionStatusStore', () => {
   it('applies unrelated snapshot entries while preserving a newer live entry', () => {
     const store = useSessionStatus.getState()
     const snapshotRevision = store.beginStatusSnapshot()
-    store.setStatus('session-live', { type: 'busy' }, '/repo-a')
+    store.setStatus('session-live', { type: 'busy' })
 
     useSessionStatus.getState().replaceStatuses(
       { 'session-snapshot': { type: 'busy' } },
-      undefined,
       snapshotRevision,
     )
 
@@ -136,10 +146,10 @@ describe('sessionStatusStore', () => {
 
   it('clears an inactive session from a snapshot captured after its last event', () => {
     const store = useSessionStatus.getState()
-    store.setStatus('session-a', { type: 'busy' }, '/repo-a')
+    store.setStatus('session-a', { type: 'busy' })
 
     const snapshotRevision = store.beginStatusSnapshot()
-    useSessionStatus.getState().replaceStatuses({}, undefined, snapshotRevision)
+    useSessionStatus.getState().replaceStatuses({}, snapshotRevision)
 
     expect(useSessionStatus.getState().getStatus('session-a')).toEqual({ type: 'idle' })
   })
@@ -151,7 +161,6 @@ describe('sessionStatusStore', () => {
 
     useSessionStatus.getState().replaceStatuses(
       { 'session-a': { type: 'busy' } },
-      undefined,
       snapshotRevision,
     )
 
@@ -165,7 +174,6 @@ describe('sessionStatusStore', () => {
 
     useSessionStatus.getState().replaceStatuses(
       { unseen: { type: 'busy' } },
-      undefined,
       snapshotRevision,
     )
 
@@ -174,11 +182,11 @@ describe('sessionStatusStore', () => {
 
   it('does not let a deferred empty snapshot erase a repeated busy event', () => {
     const store = useSessionStatus.getState()
-    store.setStatus('repeat', { type: 'busy' }, '/repo-a')
+    store.setStatus('repeat', { type: 'busy' })
     const snapshotRevision = store.beginStatusSnapshot()
-    store.setStatus('repeat', { type: 'busy' }, '/repo-a')
+    store.setStatus('repeat', { type: 'busy' })
 
-    useSessionStatus.getState().replaceStatuses({}, undefined, snapshotRevision)
+    useSessionStatus.getState().replaceStatuses({}, snapshotRevision)
 
     expect(useSessionStatus.getState().getStatus('repeat')).toEqual({ type: 'busy' })
   })
@@ -190,10 +198,9 @@ describe('sessionStatusStore', () => {
 
     useSessionStatus.getState().replaceStatuses(
       { active: { type: 'busy' } },
-      undefined,
       newer,
     )
-    useSessionStatus.getState().replaceStatuses({}, undefined, older)
+    useSessionStatus.getState().replaceStatuses({}, older)
 
     expect(useSessionStatus.getState().getStatus('active')).toEqual({ type: 'busy' })
   })
@@ -203,10 +210,9 @@ describe('sessionStatusStore', () => {
     const older = store.beginStatusSnapshot()
     const newer = store.beginStatusSnapshot()
 
-    useSessionStatus.getState().replaceStatuses({}, undefined, newer)
+    useSessionStatus.getState().replaceStatuses({}, newer)
     useSessionStatus.getState().replaceStatuses(
       { active: { type: 'busy' } },
-      undefined,
       older,
     )
 
@@ -218,10 +224,9 @@ describe('sessionStatusStore', () => {
     const older = store.beginStatusSnapshot()
     const newer = store.beginStatusSnapshot()
 
-    useSessionStatus.getState().replaceStatuses({}, undefined, older)
+    useSessionStatus.getState().replaceStatuses({}, older)
     useSessionStatus.getState().replaceStatuses(
       { active: { type: 'busy' } },
-      undefined,
       newer,
     )
 
