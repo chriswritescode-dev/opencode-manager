@@ -18,7 +18,7 @@ OpenCode Manager runs a supervised OpenCode server process to handle agent sessi
 
 The panel also displays:
 
-- **OpenCode version** — The installed version of the OpenCode server (e.g., `v2.0.15`). OpenCode Manager requires OpenCode 2.x at 2.0.15 or newer; a 1.x, 3.x, or older 2.x binary fails to start.
+- **OpenCode version** — The installed version of the OpenCode server (e.g., `v2.0.15`). OpenCode Manager requires OpenCode 2.x at 2.0.15 or newer; a 1.x or older 2.x binary fails to start.
 - **Manager version** — The current OpenCode Manager version (e.g., `v0.14.5`)
 
 ## Health Monitoring

@@ -27,12 +27,14 @@
 
 <p align="center">
   <img src="docs/images/ocmgr-main.webp" alt="OpenCode Manager" width="600" style="border: none" />
-  <img src="docs/images/ocmgr-mobile.webp" alt="Mobile view" height="400" style="border: none; margin-left: 12px" />
+  <br />
+  <img src="docs/images/ocmgr-mobile.webp" alt="Mobile view" height="400" style="border: 1px solid rgba(128,128,128,0.4); margin-left: 12px" />
+  <img src="docs/images/mobile-repo-session-sheet.webp" alt="Mobile repository and session switcher" height="400" style="border: 1px solid rgba(128,128,128,0.4); margin-left: 12px" />
 </p>
 
 ## Requirements
 
-OpenCode Manager requires **OpenCode 2.x at 2.0.15 or newer** (bundled 2.0.15). OpenCode 1.x and 3.x are not supported. If you are upgrading from OpenCode 1.x, see the [v1 → v2 migration guide](https://opencode.ai/v2/docs/migrate-v1). On first start, OpenCode 2 migrates V1 session history in the background, so older sessions can be missing or incomplete until it finishes; progress is reported by OpenCode at `GET /api/experimental/migration/v1`.
+OpenCode Manager requires **OpenCode 2.x at 2.0.15 or newer** (bundled 2.0.15); OpenCode 1.x is not supported. Upgrading from 1.x? See the [v1 → v2 migration guide](https://opencode.ai/v2/docs/migrate-v1). OpenCode 2 migrates V1 session history in the background on first start, so older sessions can be incomplete until it finishes; progress is reported at `GET /api/experimental/migration/v1`.
 
 ## Quick Start
 

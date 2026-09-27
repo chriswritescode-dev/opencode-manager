@@ -2,15 +2,6 @@
 
 Real-time chat interface for interacting with AI agents.
 
-## Starting a Session
-
-1. Select a repository from the sidebar
-2. Click **New Session** or type `/new`
-3. Type your message in the input field
-4. Press **Enter** to send
-
-Each session maintains its own conversation history and context.
-
 ## Real-time Streaming
 
 Messages stream in real-time using Server-Sent Events (SSE):
@@ -23,26 +14,11 @@ Messages stream in real-time using Server-Sent Events (SSE):
 
 ## Model Selection
 
-Click the **model name** in the chat prompt area to open the quick model switcher. From there you can:
-
-- Switch to a favorite or recently used model without leaving the chat
-- Toggle favorites (star icon next to the active model)
-- Pick a model variant (highlighted in orange when available)
-- Open **All Models…** to browse the full model list
-
-Each agent retains its own model selection — switching agents restores the model last used with that agent. See [AI Configuration](ai-config.md#model-selection) for the full reference.
+Click the **model name** in the chat prompt area to open the quick model switcher, where you can switch models, mark favorites, and pick variants without leaving the chat. Each agent keeps its own model selection. See [AI Configuration](ai-config.md#model-selection) for the full reference.
 
 ## Slash Commands
 
-Type `/` to see available commands:
-
-### Built-in Commands
-
-| Command | Description |
-|---------|-------------|
-| `/help` | Show available commands |
-| `/new` | Start a new session |
-| `/compact` | Compact session context |
+Type `/` to see available commands. Built-in commands are covered in the [Quick Start](../getting-started/quickstart.md#useful-commands).
 
 ### Custom Commands
 
@@ -65,14 +41,7 @@ Use with `/review` in chat.
 
 ## File Mentions
 
-Reference files in your prompts with `@`:
-
-1. Type `@` in the chat input
-2. Start typing a filename
-3. Select from the autocomplete dropdown
-4. The file reference is inserted
-
-When you send the message, the AI has access to that file's contents.
+Reference files and folders in prompts with `@`. Type `@`, start typing a name, and select from the autocomplete dropdown; the AI then has access to that file's contents.
 
 ### Multiple Files
 
@@ -160,13 +129,7 @@ Find sessions by content:
 
 ### Pinning Sessions
 
-Pin important sessions to the top of your session list:
-
-1. Open the session actions menu (three dots on the session card)
-2. Select **Pin to top**
-3. The session moves to a **Pinned** section above the **Recent** section
-
-Pinned sessions stay at the top regardless of age or activity. Unpin anytime from the same menu. See [Session Pinning](session-pins.md) for details.
+Pin important sessions to the top of the list. See [Session Pinning](session-pins.md) for details.
 
 ### Deleting Sessions
 
@@ -209,8 +172,6 @@ Use `/new` to start a new session when:
 
 | Shortcut | Action |
 |----------|--------|
-| `Enter` | Send message |
-| `Shift+Enter` | New line in message |
 | `↑` | Edit last message |
 | `/` | Open command menu |
 | `@` | Open file mention menu |

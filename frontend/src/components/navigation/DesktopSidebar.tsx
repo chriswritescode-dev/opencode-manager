@@ -39,6 +39,7 @@ export function DesktopSidebar() {
   }
 
   const { primary, items } = buildNavModel(location.pathname)
+  const desktopPrimary = primary.filter((item) => item.key !== 'new-repo')
 
   const handlePrimaryClick = (item: NavPrimaryCta) => {
     if (item.to) {
@@ -84,9 +85,9 @@ export function DesktopSidebar() {
   return (
     <>
       <Sidebar collapsed={collapsed} onToggle={toggle} widthClass='w-72' className='mt-2'>
-        {primary.length > 0 && (
+        {desktopPrimary.length > 0 && (
           <SidebarSection collapsed={collapsed}>
-            {primary.map((item: NavPrimaryCta) => (
+            {desktopPrimary.map((item: NavPrimaryCta) => (
               <SidebarItem
                 key={item.key}
                 icon={item.icon}

@@ -138,6 +138,11 @@
   box-shadow: 0 4px 6px -1px rgb(0 0 0 / 0.3);
 }
 
+.md-typeset img.phone,
+.md-typeset img.hero-mobile {
+  border: 1px solid rgba(255, 255, 255, 0.4);
+}
+
 .md-typeset img.phone {
   max-width: 300px;
 }
@@ -154,6 +159,7 @@
 }
 
 .md-typeset img.hero-mobile {
+  max-width: calc(50% - 16px);
   margin-left: 12px;
 }
 

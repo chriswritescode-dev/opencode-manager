@@ -104,7 +104,7 @@ describe('DesktopSidebar', () => {
     expect(container.firstChild).toBeNull()
   })
 
-  it('renders primary CTA for root path', () => {
+  it('hides the New Repo CTA for root path and renders Assistant', () => {
     vi.spyOn(useDesktopModule, 'useDesktop').mockReturnValue(true)
     vi.spyOn(useSidebarCollapsedModule, 'useSidebarCollapsed').mockReturnValue([false, vi.fn()])
     vi.spyOn(useAuthModule, 'useAuth').mockReturnValue({
@@ -115,7 +115,7 @@ describe('DesktopSidebar', () => {
 
     render(<DesktopSidebar />, { wrapper: createWrapper(['/']) })
 
-    expect(screen.getByText('New Repo')).toBeInTheDocument()
+    expect(screen.queryByText('New Repo')).toBeNull()
     expect(screen.getByText('Assistant')).toBeInTheDocument()
   })
 
@@ -174,14 +174,14 @@ describe('DesktopSidebar', () => {
       logout: vi.fn(),
     } as any)
 
-    render(<DesktopSidebar />, { wrapper: createWrapper(['/']) })
+    render(<DesktopSidebar />, { wrapper: createWrapper(['/schedules']) })
 
-    fireEvent.click(screen.getByText('New Repo'))
+    fireEvent.click(screen.getByText('New Schedule'))
 
     expect(dispatchEventSpy).toHaveBeenCalledWith(
       expect.objectContaining({
         type: 'oc:sidebar:action',
-        detail: { action: 'new-repo' },
+        detail: { action: 'new-schedule' },
       })
     )
   })
