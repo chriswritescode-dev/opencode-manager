@@ -1,6 +1,6 @@
 import { describe, it, expect, vi } from 'vitest'
 import { render, screen, fireEvent } from '@testing-library/react'
-import { Sidebar, SidebarSection, SidebarItem, SidebarCollapseToggle } from './sidebar'
+import { Sidebar, SidebarCollapsibleSection, SidebarSection, SidebarItem, SidebarCollapseToggle } from './sidebar'
 import { TooltipProvider } from './tooltip'
 import { Folder } from 'lucide-react'
 
@@ -55,6 +55,58 @@ describe('SidebarSection', () => {
     )
 
     expect(screen.queryByText('Test Section')).not.toBeInTheDocument()
+  })
+})
+
+describe('SidebarCollapsibleSection', () => {
+  it('renders label and children when expanded', () => {
+    render(
+      <SidebarCollapsibleSection label="Sessions" collapsed={false} onToggle={vi.fn()}>
+        <div>Content</div>
+      </SidebarCollapsibleSection>
+    )
+
+    expect(screen.getByRole('button', { name: 'Sessions' })).toHaveAttribute('aria-expanded', 'true')
+    expect(screen.getByText('Content')).toBeInTheDocument()
+  })
+
+  it('hides children when collapsed', () => {
+    render(
+      <SidebarCollapsibleSection label="Sessions" collapsed={true} onToggle={vi.fn()}>
+        <div>Content</div>
+      </SidebarCollapsibleSection>
+    )
+
+    expect(screen.getByRole('button', { name: 'Sessions' })).toHaveAttribute('aria-expanded', 'false')
+    expect(screen.queryByText('Content')).not.toBeInTheDocument()
+  })
+
+  it('calls onToggle when the header is clicked', () => {
+    const handleToggle = vi.fn()
+
+    render(
+      <SidebarCollapsibleSection label="Menu" collapsed={false} onToggle={handleToggle}>
+        <div>Content</div>
+      </SidebarCollapsibleSection>
+    )
+
+    fireEvent.click(screen.getByRole('button', { name: 'Menu' }))
+    expect(handleToggle).toHaveBeenCalledTimes(1)
+  })
+
+  it('applies contentClassName to the content wrapper', () => {
+    render(
+      <SidebarCollapsibleSection
+        label="Menu"
+        collapsed={false}
+        onToggle={vi.fn()}
+        contentClassName="overflow-y-auto"
+      >
+        <div>Content</div>
+      </SidebarCollapsibleSection>
+    )
+
+    expect(screen.getByText('Content').parentElement).toHaveClass('overflow-y-auto')
   })
 })
 

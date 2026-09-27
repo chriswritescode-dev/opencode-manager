@@ -1,5 +1,6 @@
+import { useId } from 'react'
 import type { LucideIcon } from 'lucide-react'
-import { ChevronLeft, ChevronRight } from 'lucide-react'
+import { ChevronDown, ChevronLeft, ChevronRight } from 'lucide-react'
 import { cn } from '@/lib/utils'
 import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip'
 
@@ -52,6 +53,46 @@ export function SidebarSection({ label, collapsed, children }: SidebarSectionPro
         </div>
       )}
       {children}
+    </div>
+  )
+}
+
+export interface SidebarCollapsibleSectionProps {
+  label: string
+  collapsed: boolean
+  onToggle: () => void
+  className?: string
+  contentClassName?: string
+  children: React.ReactNode
+}
+
+export function SidebarCollapsibleSection({
+  label,
+  collapsed,
+  onToggle,
+  className,
+  contentClassName,
+  children,
+}: SidebarCollapsibleSectionProps) {
+  const contentId = useId()
+
+  return (
+    <div className={cn('flex min-h-0 flex-col', className)}>
+      <button
+        type="button"
+        onClick={onToggle}
+        aria-expanded={!collapsed}
+        aria-controls={contentId}
+        className="flex w-full items-center justify-between gap-2 px-3 py-1.5 text-xs font-medium uppercase tracking-wider text-muted-foreground transition-colors hover:text-foreground"
+      >
+        <span className="truncate">{label}</span>
+        <ChevronDown className={cn('h-3.5 w-3.5 shrink-0 transition-transform', collapsed && '-rotate-90')} />
+      </button>
+      {!collapsed && (
+        <div id={contentId} className={cn('flex min-h-0 flex-1 flex-col', contentClassName)}>
+          {children}
+        </div>
+      )}
     </div>
   )
 }

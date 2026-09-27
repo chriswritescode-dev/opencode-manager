@@ -104,11 +104,12 @@ export function BottomSheet({
 export interface BottomSheetHeaderProps {
   title?: string
   children?: React.ReactNode
+  className?: string
 }
 
-export function BottomSheetHeader({ title, children }: BottomSheetHeaderProps) {
+export function BottomSheetHeader({ title, children, className }: BottomSheetHeaderProps) {
   return (
-    <div className="flex-shrink-0 border-b border-border bg-background px-4 py-3">
+    <div className={cn('flex-shrink-0 border-b border-border bg-background px-4 py-3', className)}>
       {title && (
         <h2 className="text-lg font-semibold text-foreground">{title}</h2>
       )}

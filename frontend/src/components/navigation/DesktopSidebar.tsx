@@ -1,7 +1,7 @@
 import { useState } from 'react'
 import { useLocation, useNavigate } from 'react-router-dom'
 import { useDesktop } from '@/hooks/useDesktop'
-import { useSidebarCollapsed } from '@/hooks/useSidebarCollapsed'
+import { useSidebarCollapsed, useSidebarSectionCollapsed } from '@/hooks/useSidebarCollapsed'
 import { emitSidebarAction } from '@/hooks/useSidebarAction'
 import { useAuth } from '@/hooks/useAuth'
 import { useUrlParams } from '@/hooks/useUrlParams'
@@ -11,6 +11,7 @@ import { RepoQuickSwitchSheet } from '@/components/navigation/RepoQuickSwitchShe
 import { DesktopSessionTree } from '@/components/navigation/DesktopSessionTree'
 import {
   Sidebar,
+  SidebarCollapsibleSection,
   SidebarSection,
   SidebarItem,
 } from '@/components/ui/sidebar'
@@ -23,6 +24,8 @@ export function DesktopSidebar() {
   const navigate = useNavigate()
   const { updateParams } = useUrlParams()
   const [collapsed, toggle] = useSidebarCollapsed()
+  const [sessionsCollapsed, toggleSessionsCollapsed] = useSidebarSectionCollapsed('sessions')
+  const [menuCollapsed, toggleMenuCollapsed] = useSidebarSectionCollapsed('menu')
   const [repoSwitcherOpen, setRepoSwitcherOpen] = useState(false)
   const { isAuthenticated, isLoading, logout } = useAuth()
 
@@ -113,22 +116,35 @@ export function DesktopSidebar() {
           </div>
         ) : (
           <>
-            <div className="flex min-h-0 flex-1 flex-col border-t border-border">
+            <SidebarCollapsibleSection
+              label="Sessions"
+              collapsed={sessionsCollapsed}
+              onToggle={toggleSessionsCollapsed}
+              className="border-t border-border"
+            >
               <DesktopSessionTree />
-            </div>
+            </SidebarCollapsibleSection>
 
-            <div className="flex flex-col gap-1 border-t border-border p-2">
-              {toolItems.map((item: MoreDrawerItem) => (
-                <SidebarItem
-                  key={item.key}
-                  icon={item.icon}
-                  label={item.label}
-                  collapsed={false}
-                  onClick={() => handleItemClick(item)}
-                  danger={item.danger}
-                />
-              ))}
-            </div>
+            <SidebarCollapsibleSection
+              label="Menu"
+              collapsed={menuCollapsed}
+              onToggle={toggleMenuCollapsed}
+              className="flex-1 min-h-fit border-t border-border"
+              contentClassName="overflow-y-auto"
+            >
+              <div className="flex flex-col gap-1 p-2 pt-0">
+                {toolItems.map((item: MoreDrawerItem) => (
+                  <SidebarItem
+                    key={item.key}
+                    icon={item.icon}
+                    label={item.label}
+                    collapsed={false}
+                    onClick={() => handleItemClick(item)}
+                    danger={item.danger}
+                  />
+                ))}
+              </div>
+            </SidebarCollapsibleSection>
 
             <div className="flex gap-1 border-t border-border p-2">
               {accountItems.map((item: MoreDrawerItem) => (

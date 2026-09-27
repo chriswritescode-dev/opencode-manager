@@ -64,7 +64,7 @@ export function RepoQuickSwitchSheet({ isOpen, onClose }: RepoQuickSwitchSheetPr
   return (
     <>
       <BottomSheet isOpen={isOpen} onClose={onClose} heightClass="h-[70dvh]" ariaLabel="Switch repo">
-        <BottomSheetHeader>
+        <BottomSheetHeader className="border-b-0">
           <div className="flex items-center gap-2">
             <div className="relative flex-1">
               <Input
