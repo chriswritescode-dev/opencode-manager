@@ -62,6 +62,7 @@ export function McpManager({ config, onUpdate }: McpManagerProps) {
           ...config.content,
           mcp: withoutMcpServer(config.content.mcp, serverId),
         })
+        return
       }
 
       await mcpApi.removeServer(serverId)

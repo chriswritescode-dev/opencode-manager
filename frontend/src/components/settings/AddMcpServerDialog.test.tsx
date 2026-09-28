@@ -8,11 +8,9 @@ import { makeOpenCodeConfigFile } from '@/test/fixtures/opencode-config'
 const {
   mockGetOpenCodeConfig,
   mockUpdateOpenCodeConfig,
-  mockAddServerAsync,
 } = vi.hoisted(() => ({
   mockGetOpenCodeConfig: vi.fn(),
   mockUpdateOpenCodeConfig: vi.fn(),
-  mockAddServerAsync: vi.fn(),
 }))
 
 vi.mock('@/api/settings', () => ({
@@ -20,10 +18,6 @@ vi.mock('@/api/settings', () => ({
     getOpenCodeConfig: mockGetOpenCodeConfig,
     updateOpenCodeConfig: mockUpdateOpenCodeConfig,
   },
-}))
-
-vi.mock('@/hooks/useMcpServers', () => ({
-  useMcpServers: () => ({ addServerAsync: mockAddServerAsync, isAddingServer: false }),
 }))
 
 vi.mock('@/lib/toast', () => ({
@@ -53,7 +47,6 @@ describe('AddMcpServerDialog', () => {
     vi.clearAllMocks()
     mockGetOpenCodeConfig.mockResolvedValue(config)
     mockUpdateOpenCodeConfig.mockResolvedValue(config)
-    mockAddServerAsync.mockResolvedValue(undefined)
   })
 
   it('issues exactly one config update through the owner callback and never writes directly', async () => {
@@ -78,7 +71,6 @@ describe('AddMcpServerDialog', () => {
         },
       },
     })
-    expect(mockAddServerAsync).toHaveBeenCalledTimes(1)
   })
 
   it('writes a remote server with V2 OAuth keys and the Manager callback', async () => {
@@ -107,7 +99,6 @@ describe('AddMcpServerDialog', () => {
       timeout: { catalog: 9000, execution: 9000 },
     }
     expect(onUpdate).toHaveBeenCalledWith({ mcp: { servers: { 'remote-tools': serverConfig } } })
-    expect(mockAddServerAsync).toHaveBeenCalledWith({ name: 'remote-tools', config: serverConfig })
   })
 
   it('passes only the merged content to onUpdate', async () => {

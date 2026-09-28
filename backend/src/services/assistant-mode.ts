@@ -721,19 +721,19 @@ The global configuration files on disk are the source of truth. Use the \`ocm\` 
 
 ### GET /opencode-config
 
-Read the merged persisted global configuration and its source files. Returns \`404\` when no source exists. This is not the running instance configuration: project overrides and expanded environment values are not included. \`GET /opencode-config/effective\` reads the running server's configuration separately as \`entries\`: the configuration documents and discovery directories in precedence order, lowest first, each shaped as \`{ type: 'document', path, info }\` or \`{ type: 'directory', path }\`. Its \`info\` values are expanded for the running server; never copy this response into a save.
+Read the merged persisted global configuration and its source files. Returns \`404\` when no source exists. Secret values are replaced with \`<redacted>\` and the raw source text is omitted, so a read never returns credentials; \`redactedPaths\` lists the hidden paths. This is not the running instance configuration: project overrides and expanded environment values are not included. \`GET /opencode-config/effective\` reads the running server's configuration separately as \`entries\`: the configuration documents and discovery directories in precedence order, lowest first, each shaped as \`{ type: 'document', path, info }\` or \`{ type: 'directory', path }\`. Its \`info\` values are expanded for the running server, with secrets redacted; never copy this response into a save.
 
-**Response (\`OpenCodeConfigFile\`):**
+**Response:**
 \`\`\`ts
 {
   path: string
-  content: object
-  rawContent: string
-  sources: Array<{ name: string, path: string, rawContent: string, content: object, isValid: boolean }>
-  revision: string
+  content: object           // secrets replaced with "<redacted>"
   isValid: boolean
   validationIssues?: Array<{ path: string, message: string }>
   updatedAt: number
+  sources: Array<{ name: string, path: string, content: object, isValid: boolean, validationIssues?: Array<{ path: string, message: string }>, updatedAt: number }>
+  revision: string
+  redactedPaths: string[]
 }
 \`\`\`
 
@@ -748,28 +748,31 @@ Read the merged persisted global configuration and its source files. Returns \`4
 }
 \`\`\`
 
-### PUT /opencode-config
+### PATCH /opencode-config
 
-Read the merged persisted configuration first, change only the keys the user asked for, and send the complete object back with its revision. Only changed fields are patched into the preferred existing source: JSONC, then JSON. New installations use opencode.jsonc. Unchanged inherited values and comments are preserved. Removing a field removes only its override in the write target; a lower-priority value can reappear.
+Change only the paths the user asked for. Send a nested \`patch\` object naming those paths and the values to set; every path you do not name is left untouched, and a \`null\` value removes a path. Only changed fields are patched into the preferred existing source: JSONC, then JSON. New installations use opencode.jsonc. Unchanged inherited values and comments are preserved.
 
-For a raw edit, send a string with the exact source name from \`sources\`. Never send merged JSON as raw source text. A \`409\` means the source files changed: read again and reconcile rather than retrying stale content.
+Send \`expectedRevision\` from a read. A \`409\` means the source files changed: read again and reconcile rather than retrying stale content.
 
 **Request Body:**
 \`\`\`ts
-{ content: object | string, expectedRevision: string, source?: "opencode.json" | "opencode.jsonc" }
+{ patch: object, expectedRevision?: string, source?: "opencode.json" | "opencode.jsonc" }
 \`\`\`
 
-**Example:**
+**Example** — change one MCP server's bearer token without reading the file:
 \`\`\`json
 {
   "action": "request",
   "params": {
-    "method": "PUT",
+    "method": "PATCH",
     "path": "/opencode-config",
     "body": {
-      "expectedRevision": "revision-from-get",
-      "content": {
-        "theme": "dark"
+      "patch": {
+        "mcp": {
+          "servers": {
+            "linear": { "headers": { "Authorization": "Bearer <token>" } }
+          }
+        }
       }
     }
   }
@@ -777,11 +780,34 @@ For a raw edit, send a string with the exact source name from \`sources\`. Never
 \`\`\`
 
 **Response:**
-Returns the refreshed merged configuration and source files. A semantic change is applied automatically: the Manager reloads OpenCode without restarting the server, so agents, permissions, providers, models, and plugins take effect on the next message and running sessions keep running. Changes limited to \`mcp\` are saved without a reload; to make an MCP change take effect immediately, tell the user to reconnect the server from Settings → MCP. Comment-only changes do nothing. Saving never silently drops unsupported fields.
+Returns the refreshed merged configuration and source files, with secrets redacted. A semantic change is applied automatically: the Manager reloads OpenCode without restarting the server, so agents, permissions, providers, models, and plugins take effect on the next message and running sessions keep running. An \`mcp\` change is applied the same way, and only the servers whose configuration changed reconnect. Comment-only changes do nothing. Saving never silently drops unsupported fields.
 
 The response adds \`restartRequired: true\` only when the automatic reload failed, for example because the OpenCode server is unavailable.
 
-Returns \`400\` for invalid configuration and \`409\` for a stale revision.
+Returns \`400\` for invalid configuration or a \`<redacted>\` value (\`paths\` lists them), and \`409\` for a stale revision.
+
+### GET /opencode-config/mcp
+
+List the configured MCP servers with their stored shape, enabled state, and live connection status. Use this to answer questions about MCP servers instead of reading the whole configuration. Header and environment values are never returned.
+
+\`type\` is \`local\` or \`remote\`, and \`command\` or \`url\` is included for the matching type. \`enabled\` reflects the stored flag. \`shape\` is \`servers\` for a native \`mcp.servers.<name>\` entry or \`legacy\` for a flat \`mcp.<name>\` entry, so you can address the entry by the path it actually uses. \`status\` is the live OpenCode status (\`connected\`, \`pending\`, \`disabled\`, \`failed\`, or \`needs_auth\`) when the server is reachable, and \`error\` carries the failure reason.
+
+**Response:**
+\`\`\`ts
+{
+  revision: string | null
+  servers: Array<{
+    name: string
+    type: 'local' | 'remote'
+    command?: string[]
+    url?: string
+    enabled: boolean
+    shape: 'servers' | 'legacy'
+    status?: 'connected' | 'pending' | 'disabled' | 'failed' | 'needs_auth'
+    error?: string
+  }>
+}
+\`\`\`
 
 When the response contains \`restartRequired: true\`, tell the user to restart the OpenCode server from Settings. Never attempt the restart yourself: it would terminate your own session.
 
@@ -790,7 +816,8 @@ Only changes to how the OpenCode process is launched need a user restart from Se
 ## Safety
 
 - The settings PATCH endpoint rejects any attempt to modify credentials, API keys, or other sensitive settings; guide the user to the full UI for Git, TTS, and STT credentials
-- PUT /opencode-config patches changed global settings, including \`plugin\`, \`mcp\`, and \`provider\` entries; change only the keys the user explicitly asked for and never add plugins, MCP servers, or provider credentials the user did not request
+- PATCH /opencode-config patches only the paths you name, including \`plugin\`, \`mcp\`, and \`provider\` entries; change only the keys the user explicitly asked for and never add plugins, MCP servers, or provider credentials the user did not request
+- GET /opencode-config redacts secrets; never reconstruct a secret you did not read, and never send a \`<redacted>\` value back
 - The settings PATCH endpoint does NOT trigger an OpenCode reload or restart
 `
 }

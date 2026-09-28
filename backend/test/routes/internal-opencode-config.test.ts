@@ -24,6 +24,9 @@ describe('internal/opencode-config routes', () => {
   let configGetMock: ReturnType<typeof vi.fn>
   let forwardRawMock: ReturnType<typeof vi.fn>
   let locationReloadMock: ReturnType<typeof vi.fn>
+  let mcpListMock: ReturnType<typeof vi.fn>
+  let mcpAddMock: ReturnType<typeof vi.fn>
+  let mcpRemoveMock: ReturnType<typeof vi.fn>
 
   function configPath(name: string): string {
     return path.join(ws.workspacePath, '.config/opencode', name)
@@ -40,8 +43,15 @@ describe('internal/opencode-config routes', () => {
     configGetMock = vi.fn(() => Promise.resolve([]))
     forwardRawMock = vi.fn(() => Promise.resolve(new Response('{}')))
     locationReloadMock = vi.fn(() => Promise.resolve())
+    mcpListMock = vi.fn(() => Promise.resolve({ data: [] }))
+    mcpAddMock = vi.fn(() => Promise.resolve())
+    mcpRemoveMock = vi.fn(() => Promise.resolve())
     const openCodeClient = {
-      api: { config: { get: configGetMock }, location: { reload: locationReloadMock } },
+      api: {
+        config: { get: configGetMock },
+        location: { reload: locationReloadMock },
+        mcp: { list: mcpListMock, add: mcpAddMock, remove: mcpRemoveMock },
+      },
       forwardRaw: forwardRawMock,
     } as unknown as OpenCodeClient
     const stubWorktreeManager = { prepare: () => Promise.resolve(null), finalize: () => Promise.resolve({ commitHash: null }) } as unknown as ScheduleWorktreeManager
@@ -69,8 +79,23 @@ describe('internal/opencode-config routes', () => {
     expect(body.error).toBe('No OpenCode config file found')
   })
 
-  it('GET /api/internal/opencode-config returns the merged persisted snapshot and sources', async () => {
-    await writeOpenCodeConfigFile(OPENCODE_CONFIG_SEED, 'opencode.jsonc')
+  it('GET /api/internal/opencode-config returns the merged snapshot with secrets redacted and no raw source', async () => {
+    await writeOpenCodeConfigFile(
+      JSON.stringify({
+        $schema: 'https://opencode.ai/config.json',
+        providers: { example: { apiKey: 'secret-key' } },
+        mcp: {
+          servers: {
+            linear: {
+              type: 'remote',
+              url: 'https://linear.example.com',
+              headers: { Authorization: 'Bearer secret' },
+            },
+          },
+        },
+      }),
+      'opencode.jsonc',
+    )
 
     const res = await app.request('/api/internal/opencode-config', { headers: authHeaders() })
 
@@ -78,19 +103,204 @@ describe('internal/opencode-config routes', () => {
     const body = await res.json() as {
       path: string
       content: Record<string, unknown>
-      rawContent: string
+      rawContent?: string
       isValid: boolean
       updatedAt: number
-      sources: Array<{ name: string; path: string; rawContent: string }>
+      sources: Array<{ name: string; path: string; content: Record<string, unknown>; rawContent?: string }>
       revision: string
+      redactedPaths: string[]
     }
     expect(body.path).toBe(configPath('opencode.jsonc'))
-    expect(body.rawContent).toBe(OPENCODE_CONFIG_SEED)
-    expect(body.content).toEqual({ $schema: 'https://opencode.ai/config.json' })
+    expect(body.rawContent).toBeUndefined()
+    expect(body.sources[0] && 'rawContent' in body.sources[0]).toBe(false)
+    expect(body.content).toEqual({
+      $schema: 'https://opencode.ai/config.json',
+      providers: { example: { apiKey: '<redacted>' } },
+      mcp: {
+        servers: {
+          linear: {
+            type: 'remote',
+            url: 'https://linear.example.com',
+            headers: { Authorization: '<redacted>' },
+          },
+        },
+      },
+    })
     expect(body.isValid).toBe(true)
     expect(body.updatedAt).toBeGreaterThan(0)
     expect(body.sources.map((source) => source.name)).toEqual(['opencode.jsonc'])
     expect(body.revision).toMatch(/^[a-f0-9]{64}$/)
+    expect(body.redactedPaths).toEqual([
+      'mcp.servers.linear.headers.Authorization',
+      'providers.example.apiKey',
+    ])
+  })
+
+  it('PATCH /api/internal/opencode-config merges only the named paths and reloads the server', async () => {
+    await writeOpenCodeConfigFile(JSON.stringify({ theme: 'dark', small_model: 's' }), 'opencode.jsonc')
+
+    const res = await app.request('/api/internal/opencode-config', {
+      method: 'PATCH',
+      headers: { 'content-type': 'application/json', ...authHeaders() },
+      body: JSON.stringify({
+        patch: { mcp: { servers: { linear: { type: 'remote', url: 'https://linear.example.com' } } } },
+      }),
+    })
+
+    expect(res.status).toBe(200)
+    const body = await res.json() as { content: Record<string, unknown>; rawContent?: string }
+    expect(body.content).toEqual({
+      theme: 'dark',
+      small_model: 's',
+      mcp: { servers: { linear: { type: 'remote', url: 'https://linear.example.com' } } },
+    })
+    expect(body.rawContent).toBeUndefined()
+    expect('rawContent' in body).toBe(false)
+    expect(mcpAddMock).not.toHaveBeenCalled()
+    expect(locationReloadMock).toHaveBeenCalledTimes(1)
+    const onDisk = JSON.parse(await readFile(configPath('opencode.jsonc'), 'utf8')) as Record<string, unknown>
+    expect(onDisk).toEqual(body.content)
+  })
+
+  it('PATCH /api/internal/opencode-config returns a redacted body without raw source', async () => {
+    await writeOpenCodeConfigFile(
+      JSON.stringify({ theme: 'dark', provider: { example: { apiKey: 'secret-key' } } }),
+      'opencode.jsonc',
+    )
+
+    const res = await app.request('/api/internal/opencode-config', {
+      method: 'PATCH',
+      headers: { 'content-type': 'application/json', ...authHeaders() },
+      body: JSON.stringify({ patch: { provider: { example: { apiKey: 'updated-secret' } } } }),
+    })
+
+    expect(res.status).toBe(200)
+    const body = await res.json() as {
+      content: Record<string, unknown>
+      rawContent?: string
+      sources: Array<{ content: Record<string, unknown>; rawContent?: string }>
+      redactedPaths: string[]
+    }
+    expect(body.rawContent).toBeUndefined()
+    expect('rawContent' in body).toBe(false)
+    expect(body.sources[0] && 'rawContent' in body.sources[0]).toBe(false)
+    expect(body.content).toEqual({
+      theme: 'dark',
+      provider: { example: { apiKey: '<redacted>' } },
+    })
+    expect(body.redactedPaths).toEqual(['provider.example.apiKey'])
+  })
+
+  it('PATCH /api/internal/opencode-config rejects a redacted placeholder without writing', async () => {
+    await writeOpenCodeConfigFile(JSON.stringify({ theme: 'dark' }), 'opencode.jsonc')
+    const before = await readFile(configPath('opencode.jsonc'), 'utf8')
+
+    const res = await app.request('/api/internal/opencode-config', {
+      method: 'PATCH',
+      headers: { 'content-type': 'application/json', ...authHeaders() },
+      body: JSON.stringify({ patch: { provider: { example: { apiKey: '<redacted>' } } } }),
+    })
+
+    expect(res.status).toBe(400)
+    const body = await res.json() as { error: string; paths: string[] }
+    expect(body.paths).toEqual(['provider.example.apiKey'])
+    expect(body.error).toContain('redacted placeholder')
+    await expect(readFile(configPath('opencode.jsonc'), 'utf8')).resolves.toBe(before)
+  })
+
+  it('PATCH /api/internal/opencode-config reloads for a non-mcp change', async () => {
+    await writeOpenCodeConfigFile(JSON.stringify({ theme: 'dark' }), 'opencode.jsonc')
+
+    const res = await app.request('/api/internal/opencode-config', {
+      method: 'PATCH',
+      headers: { 'content-type': 'application/json', ...authHeaders() },
+      body: JSON.stringify({ patch: { theme: 'light' } }),
+    })
+
+    expect(res.status).toBe(200)
+    const body = await res.json() as { content: Record<string, unknown> }
+    expect(body.content).toEqual({ theme: 'light' })
+    expect(locationReloadMock).toHaveBeenCalledTimes(1)
+  })
+
+  it('PATCH /api/internal/opencode-config returns 409 for a stale expectedRevision', async () => {
+    const initial = await writeOpenCodeConfigFile(OPENCODE_CONFIG_SEED, 'opencode.jsonc')
+    await writeFile(configPath('opencode.json'), '{"model":"a/b"}', 'utf8')
+
+    const res = await app.request('/api/internal/opencode-config', {
+      method: 'PATCH',
+      headers: { 'content-type': 'application/json', ...authHeaders() },
+      body: JSON.stringify({ patch: { theme: 'light' }, expectedRevision: initial.revision }),
+    })
+
+    expect(res.status).toBe(409)
+    const body = await res.json() as { expectedRevision: string; actualRevision: string }
+    expect(body.expectedRevision).toBe(initial.revision!)
+    expect(body.actualRevision).not.toBe(initial.revision!)
+  })
+
+  it('GET /api/internal/opencode-config/mcp lists configured servers with redacted config and live status', async () => {
+    await writeOpenCodeConfigFile(
+      JSON.stringify({
+        mcp: {
+          servers: {
+            linear: {
+              type: 'remote',
+              url: 'https://linear.example.com',
+              headers: { Authorization: 'Bearer secret' },
+            },
+            local: { type: 'local', command: ['npx', 'local'], disabled: true },
+          },
+          legacy: { type: 'local', command: ['npx', 'legacy'], enabled: false },
+        },
+      }),
+      'opencode.jsonc',
+    )
+    mcpListMock.mockResolvedValue({
+      data: [
+        { name: 'linear', status: { status: 'connected' } },
+        { name: 'local', status: { status: 'disabled' } },
+      ],
+    })
+
+    const res = await app.request('/api/internal/opencode-config/mcp', { headers: authHeaders() })
+
+    expect(res.status).toBe(200)
+    const body = await res.json() as {
+      revision: string | null
+      servers: Array<{
+        name: string
+        type: string
+        command?: string[]
+        url?: string
+        enabled: boolean
+        shape: string
+        status?: string
+      }>
+    }
+    expect(body.revision).toMatch(/^[a-f0-9]{64}$/)
+    expect(body.servers).toEqual([
+      { name: 'legacy', type: 'local', command: ['npx', 'legacy'], enabled: false, shape: 'legacy' },
+      { name: 'linear', type: 'remote', url: 'https://linear.example.com', enabled: true, shape: 'servers', status: 'connected' },
+      { name: 'local', type: 'local', command: ['npx', 'local'], enabled: false, shape: 'servers', status: 'disabled' },
+    ])
+    expect(mcpListMock).toHaveBeenCalledWith({ location: { directory: ws.workspacePath } })
+  })
+
+  it('GET /api/internal/opencode-config/mcp returns config-only when the server is unreachable', async () => {
+    await writeOpenCodeConfigFile(
+      JSON.stringify({ mcp: { servers: { local: { type: 'local', command: ['npx', 'local'] } } } }),
+      'opencode.jsonc',
+    )
+    mcpListMock.mockRejectedValue(new Error('unreachable'))
+
+    const res = await app.request('/api/internal/opencode-config/mcp', { headers: authHeaders() })
+
+    expect(res.status).toBe(200)
+    const body = await res.json() as { servers: Array<Record<string, unknown>> }
+    expect(body.servers).toEqual([
+      { name: 'local', type: 'local', command: ['npx', 'local'], enabled: true, shape: 'servers' },
+    ])
   })
 
   it('PUT /api/internal/opencode-config writes the file and applies it through a location reload without a restart', async () => {
@@ -144,6 +354,34 @@ describe('internal/opencode-config routes', () => {
     expect(res.status).toBe(200)
     await expect(readFile(configPath('opencode.json'), 'utf8')).resolves.toBe(submitted)
     await expect(readFile(configPath('opencode.jsonc'), 'utf8')).resolves.toBe(OPENCODE_CONFIG_SEED)
+  })
+
+  it('PUT /api/internal/opencode-config returns a redacted body without raw source', async () => {
+    await writeOpenCodeConfigFile(OPENCODE_CONFIG_SEED, 'opencode.jsonc')
+
+    const res = await app.request('/api/internal/opencode-config', {
+      method: 'PUT',
+      headers: { 'content-type': 'application/json', ...authHeaders() },
+      body: JSON.stringify({
+        content: { $schema: 'https://opencode.ai/config.json', provider: { example: { apiKey: 'secret-key' } } },
+      }),
+    })
+
+    expect(res.status).toBe(200)
+    const body = await res.json() as {
+      content: Record<string, unknown>
+      rawContent?: string
+      sources: Array<{ content: Record<string, unknown>; rawContent?: string }>
+      redactedPaths: string[]
+    }
+    expect(body.rawContent).toBeUndefined()
+    expect('rawContent' in body).toBe(false)
+    expect(body.sources[0] && 'rawContent' in body.sources[0]).toBe(false)
+    expect(body.content).toEqual({
+      $schema: 'https://opencode.ai/config.json',
+      provider: { example: { apiKey: '<redacted>' } },
+    })
+    expect(body.redactedPaths).toEqual(['provider.example.apiKey'])
   })
 
   it('PUT /api/internal/opencode-config returns 409 for a stale expectedRevision', async () => {
@@ -207,10 +445,14 @@ describe('internal/opencode-config routes', () => {
     expect(body.error).toBe('Invalid JSON')
   })
 
-  it('GET /api/internal/opencode-config/effective returns the running config entries without writing them back', async () => {
+  it('GET /api/internal/opencode-config/effective redacts document config entries without writing them back', async () => {
     await writeOpenCodeConfigFile(OPENCODE_CONFIG_SEED, 'opencode.jsonc')
     const entries = [
-      { type: 'document', path: configPath('opencode.jsonc'), info: { theme: 'dark' } },
+      {
+        type: 'document',
+        path: configPath('opencode.jsonc'),
+        info: { theme: 'dark', provider: { example: { apiKey: 'secret-key' } } },
+      },
       { type: 'directory', path: path.join(ws.workspacePath, '.config', 'opencode') },
     ]
     configGetMock.mockImplementation(() => Promise.resolve(entries))
@@ -218,7 +460,16 @@ describe('internal/opencode-config routes', () => {
     const res = await app.request('/api/internal/opencode-config/effective', { headers: authHeaders() })
 
     expect(res.status).toBe(200)
-    expect(await res.json()).toEqual({ entries })
+    expect(await res.json()).toEqual({
+      entries: [
+        {
+          type: 'document',
+          path: configPath('opencode.jsonc'),
+          info: { theme: 'dark', provider: { example: { apiKey: '<redacted>' } } },
+        },
+        { type: 'directory', path: path.join(ws.workspacePath, '.config', 'opencode') },
+      ],
+    })
     expect(configGetMock).toHaveBeenCalledWith({ location: { directory: ws.workspacePath } })
     const persisted = await readOpenCodeConfigFile()
     expect(persisted?.content).toEqual({ $schema: 'https://opencode.ai/config.json' })

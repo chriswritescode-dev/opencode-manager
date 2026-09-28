@@ -88,6 +88,14 @@ OpenCode Manager provides a comprehensive web interface for managing OpenCode AI
 
 [Learn more →](mobile.md)
 
+### Appearance & Themes
+
+- **Appearance** - Switch between light, dark, or system to match your device
+- **Theme** - Choose the Manager palette or one of 36 bundled OpenCode color themes
+- **Server-Stored** - Appearance preferences are saved on the Manager server, not only in your browser
+
+Both pickers live under **Settings → General**.
+
 ### Push Notifications
 
 - **Background Alerts** - Receive notifications when the app is closed

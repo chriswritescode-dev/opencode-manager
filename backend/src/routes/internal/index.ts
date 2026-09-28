@@ -29,7 +29,7 @@ export function createInternalRoutes(
   app.route('/schedules', createScheduleRoutes(scheduleService))
   app.route('/notifications', createInternalNotificationRoutes(notificationService))
   app.route('/settings', createInternalSettingsRoutes(settingsService))
-  app.route('/opencode-config', createOpenCodeConfigRoutes(settingsService, openCodeClient))
+  app.route('/opencode-config', createOpenCodeConfigRoutes(settingsService, openCodeClient, { redactSecrets: true }))
   const repos = new Hono()
   repos.route('/', createInternalRepoRoutes(db, settingsService))
   repos.route('/:id/schedules', createScheduleRoutes(scheduleService))

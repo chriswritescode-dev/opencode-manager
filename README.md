@@ -64,21 +64,23 @@ For local development setup, see the [Development Guide](https://chriswritescode
 - **Skills** — Extend agent capabilities with shareable, scoped skill definitions
 - **Notifications** — Push notifications for session events, questions, errors, and completions
 - **Audio** — Text-to-speech and speech-to-text (browser native and OpenAI-compatible APIs)
+- **Themes** — Light/dark/system appearance plus a color theme picker with the Manager default and 36 bundled OpenCode palettes
 - **Mobile & PWA** — Responsive mobile-first UI, installable on any device, iOS-optimized
 
 ## Architecture
 
-OpenCode Manager is a pnpm workspace with three TypeScript packages:
+OpenCode Manager is a pnpm workspace with four TypeScript packages:
 
 - `backend/` — Bun + Hono API server with Better Auth, SQLite migrations, OpenCode process management, SSE, schedules, and push notifications.
 - `frontend/` — React + Vite SPA using React Router, TanStack Query, Radix UI/Tailwind, service worker support, and mobile-first navigation.
 - `shared/` — shared Zod schemas, config helpers, types, and utilities consumed by both backend and frontend.
+- `ocm-cli/` — `ocm` CLI that attaches your local OpenCode TUI to a repo hosted on the Manager.
 
 A MkDocs Material site (`docs/`) provides guides, feature docs, configuration, and troubleshooting.
 
 ## Development
 
-This repo uses pnpm workspaces for `shared`, `backend`, and `frontend`.
+This repo uses pnpm workspaces for `shared`, `backend`, `frontend`, and `ocm-cli`.
 
 ```bash
 pnpm install

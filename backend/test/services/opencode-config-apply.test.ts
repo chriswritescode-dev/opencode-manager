@@ -65,7 +65,14 @@ function parseSnapshot(snapshot: string): { version: number; sources: Array<{ na
 }
 
 const locationReloadMock = vi.hoisted(() => vi.fn<() => Promise<void>>())
-const openCodeClient = { api: { location: { reload: locationReloadMock } } } as unknown as OpenCodeClient
+const mcpAddMock = vi.hoisted(() => vi.fn<() => Promise<void>>())
+const mcpRemoveMock = vi.hoisted(() => vi.fn<() => Promise<void>>())
+const openCodeClient = {
+  api: {
+    location: { reload: locationReloadMock },
+    mcp: { add: mcpAddMock, remove: mcpRemoveMock },
+  },
+} as unknown as OpenCodeClient
 
 describe('opencode-config-apply', () => {
   let workDir: string
@@ -79,6 +86,8 @@ describe('opencode-config-apply', () => {
   beforeEach(async () => {
     vi.clearAllMocks()
     locationReloadMock.mockReset().mockResolvedValue(undefined)
+    mcpAddMock.mockReset().mockResolvedValue(undefined)
+    mcpRemoveMock.mockReset().mockResolvedValue(undefined)
     workDir = await mkdtemp(path.join(tmpdir(), 'opencode-config-apply-'))
     paths.config = path.join(workDir, 'opencode.json')
     paths.configDir = workDir
@@ -323,18 +332,50 @@ describe('opencode-config-apply', () => {
     expect(clearStartupErrorMock).not.toHaveBeenCalled()
   })
 
-  it('applies an mcp-only change without reloading or marking a restart pending', async () => {
+  it('reloads an mcp-only change without touching the MCP API', async () => {
     await writeFile(sourcePath('opencode.json'), '{"theme":"dark"}', 'utf8')
+    const server = { type: 'local' as const, command: ['npx', 'local'] }
 
     const result = expectStatus(await applyOpenCodeConfigUpdate({
-      content: { theme: 'dark', mcp: { local: { type: 'local' } } },
+      content: { theme: 'dark', mcp: { servers: { local: server } } },
       settingsService,
       openCodeClient,
-    }), 'applied')
+    }), 'reloaded')
 
-    expect(result.config.content).toEqual({ theme: 'dark', mcp: { local: { type: 'local' } } })
+    expect(result.config.content).toEqual({ theme: 'dark', mcp: { servers: { local: server } } })
+    expect(locationReloadMock).toHaveBeenCalledOnce()
+    expect(mcpAddMock).not.toHaveBeenCalled()
+    expect(mcpRemoveMock).not.toHaveBeenCalled()
     expect(markRestartPendingMock).not.toHaveBeenCalled()
-    expect(locationReloadMock).not.toHaveBeenCalled()
+  })
+
+  it('reloads an mcp-only removal without touching the MCP API', async () => {
+    const server = { type: 'local' as const, command: ['npx', 'local'] }
+    await writeFile(sourcePath('opencode.json'), JSON.stringify({ theme: 'dark', mcp: { servers: { local: server } } }), 'utf8')
+
+    expectStatus(await applyOpenCodeConfigUpdate({
+      content: { theme: 'dark', mcp: { servers: {} } },
+      settingsService,
+      openCodeClient,
+    }), 'reloaded')
+
+    expect(locationReloadMock).toHaveBeenCalledOnce()
+    expect(mcpRemoveMock).not.toHaveBeenCalled()
+    expect(mcpAddMock).not.toHaveBeenCalled()
+  })
+
+  it('reloads an mcp-only change that touches a legacy flat entry', async () => {
+    await writeFile(sourcePath('opencode.json'), '{"theme":"dark"}', 'utf8')
+
+    expectStatus(await applyOpenCodeConfigUpdate({
+      content: { theme: 'dark', mcp: { legacy: { type: 'local', command: ['npx', 'legacy'] } } },
+      settingsService,
+      openCodeClient,
+    }), 'reloaded')
+
+    expect(locationReloadMock).toHaveBeenCalledOnce()
+    expect(mcpAddMock).not.toHaveBeenCalled()
+    expect(mcpRemoveMock).not.toHaveBeenCalled()
   })
 
   it('reloads when mcp changes alongside another key', async () => {

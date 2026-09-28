@@ -6,7 +6,6 @@ import { useMcpServers } from './useMcpServers'
 
 const mocks = vi.hoisted(() => ({
   getStatus: vi.fn(),
-  addServer: vi.fn(),
   connect: vi.fn(),
   disconnect: vi.fn(),
   startAuth: vi.fn(),
@@ -16,7 +15,6 @@ const mocks = vi.hoisted(() => ({
 vi.mock('@/api/mcp', () => ({
   mcpApi: {
     getStatus: mocks.getStatus,
-    addServer: mocks.addServer,
     connect: mocks.connect,
     disconnect: mocks.disconnect,
     startAuth: mocks.startAuth,
@@ -35,7 +33,7 @@ describe('useMcpServers', () => {
   beforeEach(() => {
     vi.clearAllMocks()
     mocks.getStatus.mockResolvedValue({})
-    mocks.addServer.mockResolvedValue(undefined)
+    mocks.connect.mockResolvedValue(undefined)
   })
 
   const createWrapper = (queryClient: QueryClient) =>
@@ -50,10 +48,7 @@ describe('useMcpServers', () => {
     const { result } = renderHook(() => useMcpServers(), { wrapper: createWrapper(queryClient) })
 
     await act(async () => {
-      await result.current.addServerAsync({
-        name: 'server',
-        config: { type: 'local', command: ['echo'] },
-      })
+      await result.current.connectAsync('server')
     })
 
     const predicateCall = invalidateQueries.mock.calls.find((call) => {

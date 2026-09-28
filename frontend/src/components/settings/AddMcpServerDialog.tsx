@@ -6,7 +6,6 @@ import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from '
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
 import { Loader2 } from 'lucide-react'
 import { Switch } from '@/components/ui/switch'
-import { useMcpServers } from '@/hooks/useMcpServers'
 import { settingsApi } from '@/api/settings'
 import {
   mcpOAuthRedirectUri,
@@ -40,7 +39,6 @@ export function AddMcpServerDialog({ open, onOpenChange, onUpdate }: AddMcpServe
   const [oauthScope, setOauthScope] = useState('')
   
   const queryClient = useQueryClient()
-  const { addServerAsync, isAddingServer } = useMcpServers()
 
   const buildTimeout = (): McpTimeoutConfig | undefined => {
     const parsed = parseInt(timeout)
@@ -108,10 +106,6 @@ export function AddMcpServerDialog({ open, onOpenChange, onUpdate }: AddMcpServe
           servers: { ...(mcp.servers as Record<string, unknown> | undefined), [serverId]: mcpServerConfig },
         },
       })
-
-      if (enabled) {
-        await addServerAsync({ name: serverId, config: mcpServerConfig })
-      }
     },
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['mcp-status'] })
@@ -154,7 +148,7 @@ export function AddMcpServerDialog({ open, onOpenChange, onUpdate }: AddMcpServe
     onOpenChange(false)
   }
 
-  const isPending = addMcpServerMutation.isPending || isAddingServer
+  const isPending = addMcpServerMutation.isPending
 
   return (
     <Dialog open={open} onOpenChange={handleClose}>
