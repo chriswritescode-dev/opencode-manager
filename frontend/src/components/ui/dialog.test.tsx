@@ -383,6 +383,21 @@ describe("DialogContent", () => {
   });
 });
 
+describe("DialogHeader", () => {
+  it("can shrink so a long title truncates instead of widening the dialog", () => {
+    render(
+      <Dialog open>
+        <DialogContent>
+          <DialogHeader data-testid="dialog-header">
+            <DialogTitle className="truncate">a very long command that would otherwise widen the dialog</DialogTitle>
+          </DialogHeader>
+        </DialogContent>
+      </Dialog>
+    );
+    expect(screen.getByTestId("dialog-header")).toHaveClass("min-w-0");
+  });
+});
+
 function stubVisualViewport(height: number) {
   const listeners = new Set<() => void>()
   Object.defineProperty(window, 'visualViewport', {

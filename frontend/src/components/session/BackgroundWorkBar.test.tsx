@@ -168,25 +168,24 @@ describe('BackgroundWorkBar', () => {
     expect(screen.queryByRole('button', { name: /Move to background/ })).not.toBeInTheDocument()
   })
 
-  it('keeps this session\'s completed shells visible and marks a killed shell', async () => {
+  it('hides completed shells and removes a killed shell', async () => {
     api.listShells.mockResolvedValue([shell('dev'), shell('other', 'session-2'), shell('done', 'session-1', 'exited')])
-    renderBar([], false)
+    const { container } = renderBar([], false)
 
-    fireEvent.click(await screen.findByRole('button', { name: /2 background tasks$/ }))
+    fireEvent.click(await screen.findByRole('button', { name: /1 background task$/ }))
 
     expect(screen.getByText('npm run dev')).toBeInTheDocument()
-    expect(screen.getByText('npm run done')).toBeInTheDocument()
+    expect(screen.queryByText('npm run done')).not.toBeInTheDocument()
     expect(screen.queryByText('npm run other')).not.toBeInTheDocument()
 
     fireEvent.click(screen.getByRole('button', { name: 'Kill npm run dev' }))
 
     await waitFor(() => expect(api.removeShell).toHaveBeenCalledWith('dev', '/repo'))
-    expect(await screen.findByText('killed')).toBeInTheDocument()
-    expect(screen.getByText('npm run dev')).toBeInTheDocument()
+    await waitFor(() => expect(container).toBeEmptyDOMElement())
     clearShellExitRecord('/repo', 'dev')
   })
 
-  it('updates a shell row from running to completed without removing it', async () => {
+  it('removes a shell row once it completes', async () => {
     api.listShells.mockResolvedValue([shell('dev')])
     const { queryClient } = renderBar([], false)
 
@@ -199,8 +198,8 @@ describe('BackgroundWorkBar', () => {
       ])
     })
 
-    expect(await screen.findByText('completed')).toBeInTheDocument()
-    expect(screen.getByText('npm run dev')).toBeInTheDocument()
+    await waitFor(() => expect(screen.queryByText('npm run dev')).not.toBeInTheDocument())
+    expect(screen.queryByRole('button', { name: /background task/ })).not.toBeInTheDocument()
   })
 
   it('preserves a shell created while a stale list fetch was in flight', async () => {
@@ -223,9 +222,9 @@ describe('BackgroundWorkBar', () => {
     expect(screen.queryByText('unavailable')).not.toBeInTheDocument()
   })
 
-  it('marks a running shell omitted from a fresh list as unavailable', async () => {
+  it('hides a running shell omitted from a fresh list once it becomes unavailable', async () => {
     api.listShells.mockResolvedValue([])
-    const { queryClient } = renderBar([], false)
+    const { queryClient, container } = renderBar([], false)
     await waitFor(() => expect(api.listShells).toHaveBeenCalled())
 
     await act(async () => {
@@ -233,9 +232,7 @@ describe('BackgroundWorkBar', () => {
       await queryClient.invalidateQueries({ queryKey: ['opencode', 'shells', '/repo'] })
     })
 
-    fireEvent.click(await screen.findByRole('button', { name: /1 background task$/ }))
-    expect(await screen.findByText('unavailable')).toBeInTheDocument()
-    expect(screen.queryByText('running')).not.toBeInTheDocument()
+    await waitFor(() => expect(container).toBeEmptyDOMElement())
   })
 
   it('does not resurrect a completed shell from a stale list fetch', async () => {
@@ -253,11 +250,11 @@ describe('BackgroundWorkBar', () => {
       await queryClient.invalidateQueries({ queryKey: ['opencode', 'shells', '/repo'] })
     })
 
-    await waitFor(() => expect(screen.getByText('completed')).toBeInTheDocument())
-    expect(screen.getByText('npm run dev')).toBeInTheDocument()
+    await waitFor(() => expect(screen.queryByText('npm run dev')).not.toBeInTheDocument())
+    expect(screen.queryByText('running')).not.toBeInTheDocument()
   })
 
-  it('shows a backgrounded subagent and completes it when the child goes idle', async () => {
+  it('shows a backgrounded subagent and removes it when the child goes idle', async () => {
     renderBar([backgroundSubagentTool('child-1')], false)
 
     fireEvent.click(await screen.findByRole('button', { name: /1 background task$/ }))
@@ -273,8 +270,7 @@ describe('BackgroundWorkBar', () => {
       useSessionStatus.getState().setStatus('child-1', { type: 'idle' })
     })
 
-    expect(await screen.findByText('completed')).toBeInTheDocument()
-    expect(screen.getByText('Explore')).toBeInTheDocument()
+    await waitFor(() => expect(screen.queryByText('Explore')).not.toBeInTheDocument())
   })
 
   it('treats an unknown child session as still running', async () => {
@@ -296,43 +292,35 @@ describe('BackgroundWorkBar', () => {
       time: { created: 1, updated: 2, idle: 2 },
       location: { directory: '/repo' },
     })
-    renderBar([backgroundSubagentTool('child-1')], false)
+    const { container } = renderBar([backgroundSubagentTool('child-1')], false)
 
-    fireEvent.click(await screen.findByRole('button', { name: /1 background task$/ }))
-
-    await waitFor(() => expect(screen.getByText('completed')).toBeInTheDocument())
-    expect(screen.queryByText('running')).not.toBeInTheDocument()
+    await waitFor(() => expect(api.getSession).toHaveBeenCalled())
+    await waitFor(() => expect(container).toBeEmptyDOMElement())
   })
 
-  it('shows a failed child session outcome as failed', async () => {
+  it('hides a failed child session outcome', async () => {
     act(() => {
       useSessionStatus.getState().setOutcome('child-1', 'failed')
       useSessionStatus.getState().setStatus('child-1', { type: 'idle' })
     })
-    renderBar([backgroundSubagentTool('child-1')], false)
+    const { container } = renderBar([backgroundSubagentTool('child-1')], false)
 
-    fireEvent.click(await screen.findByRole('button', { name: /1 background task$/ }))
-
-    expect(await screen.findByText('failed')).toBeInTheDocument()
-    expect(screen.queryByText('completed')).not.toBeInTheDocument()
+    await waitFor(() => expect(container).toBeEmptyDOMElement())
   })
 
-  it('shows an interrupted child session outcome as interrupted', async () => {
+  it('hides an interrupted child session outcome', async () => {
     act(() => {
       useSessionStatus.getState().setOutcome('child-1', 'interrupted')
       useSessionStatus.getState().setStatus('child-1', { type: 'idle' })
     })
-    renderBar([backgroundSubagentTool('child-1')], false)
+    const { container } = renderBar([backgroundSubagentTool('child-1')], false)
 
-    fireEvent.click(await screen.findByRole('button', { name: /1 background task$/ }))
-
-    expect(await screen.findByText('interrupted')).toBeInTheDocument()
-    expect(screen.queryByText('completed')).not.toBeInTheDocument()
+    await waitFor(() => expect(container).toBeEmptyDOMElement())
   })
 
-  it('keeps a deleted shell visible as unavailable', async () => {
+  it('hides a deleted shell once it becomes unavailable', async () => {
     api.listShells.mockResolvedValue([shell('dev')])
-    const { queryClient } = renderBar([], false)
+    const { queryClient, container } = renderBar([], false)
 
     fireEvent.click(await screen.findByRole('button', { name: /1 background task$/ }))
 
@@ -342,46 +330,37 @@ describe('BackgroundWorkBar', () => {
       ])
     })
 
-    expect(await screen.findByText('unavailable')).toBeInTheDocument()
-    expect(screen.getByText('npm run dev')).toBeInTheDocument()
-    expect(screen.queryByText('running')).not.toBeInTheDocument()
+    await waitFor(() => expect(container).toBeEmptyDOMElement())
   })
 
-  it('shows a historical shell absent from the fetched list as unavailable', async () => {
+  it('hides a historical shell absent from the fetched list', async () => {
     api.listShells.mockResolvedValue([])
-    renderBar([backgroundShellTool('sh-history', 'npm run history')], false)
+    const { container } = renderBar([backgroundShellTool('sh-history', 'npm run history')], false)
 
-    fireEvent.click(await screen.findByRole('button', { name: /1 background task$/ }))
-
-    expect(await screen.findByText('unavailable')).toBeInTheDocument()
-    expect(screen.getByText('npm run history')).toBeInTheDocument()
-    expect(screen.queryByText('running')).not.toBeInTheDocument()
+    await waitFor(() => expect(api.listShells).toHaveBeenCalled())
+    await waitFor(() => expect(container).toBeEmptyDOMElement())
   })
 
-  it('shows a historical shell absent from the list as completed from its notice', async () => {
+  it('hides a historical shell absent from the list once its notice reports completion', async () => {
     api.listShells.mockResolvedValue([])
-    renderBar(
+    const { container } = renderBar(
       [backgroundShellTool('sh-notice', 'npm run notice'), shellNotice('sh-notice', 'completed', 0)],
       false,
     )
 
-    fireEvent.click(await screen.findByRole('button', { name: /1 background task$/ }))
-
-    expect(await screen.findByText('completed')).toBeInTheDocument()
-    expect(screen.queryByText('unavailable')).not.toBeInTheDocument()
+    await waitFor(() => expect(api.listShells).toHaveBeenCalled())
+    await waitFor(() => expect(container).toBeEmptyDOMElement())
   })
 
-  it('shows a historical shell absent from the list as failed from its error notice', async () => {
+  it('hides a historical shell absent from the list once its error notice reports failure', async () => {
     api.listShells.mockResolvedValue([])
-    renderBar(
+    const { container } = renderBar(
       [backgroundShellTool('sh-notice', 'npm run notice'), shellNotice('sh-notice', 'error')],
       false,
     )
 
-    fireEvent.click(await screen.findByRole('button', { name: /1 background task$/ }))
-
-    expect(await screen.findByText('failed')).toBeInTheDocument()
-    expect(screen.queryByText('unavailable')).not.toBeInTheDocument()
+    await waitFor(() => expect(api.listShells).toHaveBeenCalled())
+    await waitFor(() => expect(container).toBeEmptyDOMElement())
   })
 
   it('keeps a historical shell unknown while its list is still loading', async () => {
@@ -396,18 +375,16 @@ describe('BackgroundWorkBar', () => {
 
   it('uses an already cached shell list when the bar remounts', async () => {
     const messages = [backgroundShellTool('sh-history', 'npm run history')]
-    const { queryClient, unmount } = renderBar(messages, false)
-    fireEvent.click(await screen.findByRole('button', { name: /1 background task$/ }))
-    expect(await screen.findByText('unavailable')).toBeInTheDocument()
+    const { queryClient, unmount, container } = renderBar(messages, false)
+    await waitFor(() => expect(container).toBeEmptyDOMElement())
     unmount()
 
-    render(
+    const remount = render(
       <QueryClientProvider client={queryClient}>
         <BackgroundWorkBar sessionID="session-1" directory="/repo" messages={messages} isSessionActive={false} />
       </QueryClientProvider>,
     )
-    fireEvent.click(screen.getByRole('button', { name: /1 background task$/ }))
-    expect(screen.getByText('unavailable')).toBeInTheDocument()
+    await waitFor(() => expect(remount.container).toBeEmptyDOMElement())
     expect(api.listShells).toHaveBeenCalledTimes(1)
   })
 
@@ -421,7 +398,7 @@ describe('BackgroundWorkBar', () => {
     act(() => {
       useSessionStatus.getState().setStatus('child-1', { type: 'idle' })
     })
-    expect(screen.getByText('completed')).toBeInTheDocument()
+    expect(screen.queryByText('Explore')).not.toBeInTheDocument()
 
     await act(async () => {
       resolveSession?.({
@@ -434,18 +411,17 @@ describe('BackgroundWorkBar', () => {
       })
     })
 
-    expect(screen.getByText('completed')).toBeInTheDocument()
+    expect(screen.queryByText('Explore')).not.toBeInTheDocument()
     expect(screen.queryByText('running')).not.toBeInTheDocument()
   })
 
   it('applies a shell exit recorded before the list was seeded', async () => {
     recordShellExit('/repo', { id: 'sh-seeded', status: 'exited', exit: 0 })
     api.listShells.mockResolvedValue([shell('sh-seeded')])
-    renderBar([], false)
+    const { container } = renderBar([], false)
 
-    fireEvent.click(await screen.findByRole('button', { name: /1 background task$/ }))
-
-    expect(await screen.findByText('completed')).toBeInTheDocument()
+    await waitFor(() => expect(api.listShells).toHaveBeenCalled())
+    await waitFor(() => expect(container).toBeEmptyDOMElement())
     clearShellExitRecord('/repo', 'sh-seeded')
   })
 

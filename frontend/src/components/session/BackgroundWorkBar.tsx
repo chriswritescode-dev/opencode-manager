@@ -220,7 +220,7 @@ export function BackgroundWorkBar({ sessionID, directory, messages, isSessionAct
     () => [
       ...shellBackgroundTasks(shells, collected.shells, collected.shellNotices, listLoaded),
       ...subagentBackgroundTasks(collected.subagents, childLifecycles),
-    ],
+    ].filter((task) => isRunningLifecycle(task.status)),
     [shells, collected, listLoaded, childLifecycles],
   )
 
