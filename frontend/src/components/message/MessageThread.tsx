@@ -479,6 +479,7 @@ const MessageRow = memo(function MessageRow({
                 <MessagePart
                   part={part}
                   messageID={message.id}
+                  directory={directory}
                   onFileClick={onFileClick}
                   onChildSessionClick={onChildSessionClick}
                 />
@@ -516,6 +517,7 @@ const MessageRow = memo(function MessageRow({
                 <MessagePart
                   part={part}
                   messageID={message.id}
+                  directory={directory}
                   onFileClick={onFileClick}
                   onChildSessionClick={onChildSessionClick}
                 />

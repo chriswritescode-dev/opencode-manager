@@ -9,6 +9,14 @@ export function shellsQueryKey(directory: string | null | undefined) {
   return ['opencode', 'shells', directory]
 }
 
+export function childSessionReconciliationQueryKey(sessionID: string | null | undefined) {
+  return ['opencode', 'session-reconcile', sessionID]
+}
+
+export function invalidateChildSessionCaches(queryClient: QueryClient) {
+  queryClient.invalidateQueries({ queryKey: ['opencode', 'session-reconcile'] })
+}
+
 export function invalidateProviderCaches(queryClient: QueryClient) {
   queryClient.invalidateQueries({ queryKey: ['provider-credentials'] })
   queryClient.invalidateQueries({ queryKey: ['provider-auth-methods'] })

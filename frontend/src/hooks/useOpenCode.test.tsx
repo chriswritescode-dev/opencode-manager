@@ -3,14 +3,16 @@ import { act, renderHook, waitFor } from '@testing-library/react'
 import type { ReactNode } from 'react'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import type { SessionInfo } from '@opencode-manager/shared/opencode'
-import { useCreateSession, useDeleteSession, useSession, useSessionsAcrossDirectories } from './useOpenCode'
+import { useChildSessionReconciliation, useCreateSession, useDeleteSession, useSession, useSessionsAcrossDirectories } from './useOpenCode'
 import { FetchError } from '../api/fetchWrapper'
 import { showToast } from '../lib/toast'
+import { useSessionStatus } from '../stores/sessionStatusStore'
 
 const mocks = vi.hoisted(() => ({
   listSessionPage: vi.fn(),
   deleteSession: vi.fn(),
   createSession: vi.fn(),
+  getSession: vi.fn(),
 }))
 
 vi.mock('../lib/toast', () => ({
@@ -22,11 +24,13 @@ vi.mock('../lib/toast', () => ({
 
 vi.mock('@/api/opencode', async (importOriginal) => {
   const actual = await importOriginal<typeof import('@/api/opencode')>()
+  mocks.getSession.mockImplementation(actual.getSession)
   return {
     ...actual,
     listSessionPage: mocks.listSessionPage,
     deleteSession: mocks.deleteSession,
     createSession: mocks.createSession,
+    getSession: mocks.getSession,
   }
 })
 
@@ -216,5 +220,93 @@ describe('useCreateSession', () => {
     })
 
     expect(mocks.createSession).toHaveBeenCalledWith({ directory: '/w/a', agent: undefined })
+  })
+})
+
+describe('useChildSessionReconciliation', () => {
+  beforeEach(() => {
+    mocks.getSession.mockReset()
+    useSessionStatus.setState({
+      statuses: new Map(),
+      statusCache: new Map(),
+      statusRevisions: new Map(),
+      knownSessions: new Set(),
+      outcomes: new Map(),
+      revision: 0,
+    })
+  })
+
+  const idleSession = (): SessionInfo => ({
+    ...sessionInfo('child-1', '/repo'),
+    time: { created: 1000, updated: 2000, idle: 2000 },
+  })
+
+  it('applies one guarded snapshot for multiple observers sharing one fetch', async () => {
+    let resolveSession: ((value: SessionInfo) => void) | undefined
+    mocks.getSession.mockImplementation(
+      () => new Promise<SessionInfo>((resolve) => { resolveSession = resolve }),
+    )
+
+    const queryClient = createQueryClient()
+    const wrapper = createWrapper(queryClient)
+    const first = renderHook(() => useChildSessionReconciliation('child-1'), { wrapper })
+    const second = renderHook(() => useChildSessionReconciliation('child-1'), { wrapper })
+
+    await waitFor(() => expect(mocks.getSession).toHaveBeenCalledTimes(1))
+
+    await act(async () => {
+      resolveSession?.(idleSession())
+    })
+
+    expect(mocks.getSession).toHaveBeenCalledTimes(1)
+    expect(useSessionStatus.getState().getStatus('child-1')).toEqual({ type: 'idle' })
+    expect(useSessionStatus.getState().isSessionKnown('child-1')).toBe(true)
+
+    first.unmount()
+    second.unmount()
+  })
+
+  it('releases the snapshot when unmounted while the request is pending', async () => {
+    let resolveSession: ((value: SessionInfo) => void) | undefined
+    mocks.getSession.mockImplementation(
+      () => new Promise<SessionInfo>((resolve) => { resolveSession = resolve }),
+    )
+
+    const queryClient = createQueryClient()
+    const wrapper = createWrapper(queryClient)
+    const { unmount } = renderHook(() => useChildSessionReconciliation('child-1'), { wrapper })
+
+    await waitFor(() => expect(mocks.getSession).toHaveBeenCalledTimes(1))
+
+    act(() => {
+      useSessionStatus.getState().setStatus('child-1', { type: 'busy' })
+    })
+    expect(useSessionStatus.getState().statusRevisions.size).toBeGreaterThan(0)
+
+    unmount()
+
+    await act(async () => {
+      resolveSession?.(idleSession())
+    })
+
+    await waitFor(() => expect(useSessionStatus.getState().statusRevisions.size).toBe(0))
+  })
+
+  it('clears a stale child outcome when the fresh snapshot is busy', async () => {
+    mocks.getSession.mockResolvedValue({
+      ...sessionInfo('child-1', '/repo'),
+      outcome: 'failed',
+    })
+    useSessionStatus.getState().setOutcome('child-1', 'failed')
+
+    const queryClient = createQueryClient()
+    renderHook(() => useChildSessionReconciliation('child-1'), {
+      wrapper: createWrapper(queryClient),
+    })
+
+    await waitFor(() => {
+      expect(useSessionStatus.getState().getStatus('child-1')).toEqual({ type: 'busy' })
+    })
+    expect(useSessionStatus.getState().getOutcome('child-1')).toBeUndefined()
   })
 })

@@ -18,6 +18,7 @@ import { openCodeEventStream, type EventStreamHealthState } from '@/lib/opencode
 import { addToSessionKeyedState, removeFromSessionKeyedState } from '@/lib/sessionKeyedState'
 import { busyStatusesFromActiveSessions, useSessionStatus } from '@/stores/sessionStatusStore'
 import {
+  invalidateChildSessionCaches,
   invalidateProviderCachesDebounced,
   invalidateQueryKeysDebounced,
   invalidateRepoGitCachesDebounced,
@@ -469,12 +470,24 @@ export function EventProvider({ children }: { children: React.ReactNode }) {
           break
         }
         case 'session.execution.started': {
+          useSessionStatus.getState().clearOutcome(event.data.sessionID)
           useSessionStatus.getState().setStatus(event.data.sessionID, { type: 'busy' })
           break
         }
-        case 'session.execution.succeeded':
-        case 'session.execution.failed':
+        case 'session.execution.succeeded': {
+          useSessionStatus.getState().setOutcome(event.data.sessionID, 'succeeded')
+          useSessionStatus.getState().setStatus(event.data.sessionID, { type: 'idle' })
+          invalidateSessionListCachesDebounced(queryClient, event.directory)
+          break
+        }
+        case 'session.execution.failed': {
+          useSessionStatus.getState().setOutcome(event.data.sessionID, 'failed')
+          useSessionStatus.getState().setStatus(event.data.sessionID, { type: 'idle' })
+          invalidateSessionListCachesDebounced(queryClient, event.directory)
+          break
+        }
         case 'session.execution.interrupted': {
+          useSessionStatus.getState().setOutcome(event.data.sessionID, 'interrupted')
           useSessionStatus.getState().setStatus(event.data.sessionID, { type: 'idle' })
           invalidateSessionListCachesDebounced(queryClient, event.directory)
           break
@@ -529,6 +542,7 @@ export function EventProvider({ children }: { children: React.ReactNode }) {
         initialFetchDoneRef.current = false
         fetchInitialPendingData()
         fetchInitialSessionStatuses()
+        invalidateChildSessionCaches(queryClient)
         startStatusPoll()
       } else {
         statusSyncVersionRef.current += 1
@@ -538,6 +552,8 @@ export function EventProvider({ children }: { children: React.ReactNode }) {
 
     const handleResync = () => {
       void reconcilePendingActionsForDirectories(collectTrackedDirectories())
+      void fetchInitialSessionStatuses()
+      invalidateChildSessionCaches(queryClient)
     }
 
     const initialDirectories = [...new Set((reposRef.current ?? []).map(r => r.fullPath))]

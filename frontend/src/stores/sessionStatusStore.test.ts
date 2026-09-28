@@ -6,6 +6,8 @@ const resetStore = () => {
     statuses: new Map(),
     statusCache: new Map(),
     statusRevisions: new Map(),
+    knownSessions: new Set(),
+    outcomes: new Map(),
     revision: 0,
   })
 }
@@ -60,12 +62,172 @@ describe('sessionStatusStore', () => {
     })
   })
 
-  it('leaves the store state untouched for an idle event on an untracked session with no snapshot in flight', () => {
+  it('records knowledge for an idle event on an untracked session without adding a status', () => {
     const before = useSessionStatus.getState()
 
     before.setStatus('untracked', { type: 'idle' })
 
-    expect(useSessionStatus.getState()).toBe(before)
+    const after = useSessionStatus.getState()
+    expect(after.statuses).toBe(before.statuses)
+    expect(after.getStatus('untracked')).toEqual({ type: 'idle' })
+    expect(after.isSessionKnown('untracked')).toBe(true)
+  })
+
+  it('keeps knowledge of a session after it goes idle', () => {
+    const store = useSessionStatus.getState()
+    store.setStatus('session-a', { type: 'busy' })
+    expect(store.isSessionKnown('session-a')).toBe(true)
+
+    store.setStatus('session-a', { type: 'idle' })
+
+    expect(useSessionStatus.getState().isSessionKnown('session-a')).toBe(true)
+    expect(useSessionStatus.getState().getStatus('session-a')).toEqual({ type: 'idle' })
+  })
+
+  it('marks sessions from a global snapshot as known', () => {
+    const store = useSessionStatus.getState()
+    const token = store.beginStatusSnapshot()
+
+    useSessionStatus.getState().replaceStatuses({ 'session-a': { type: 'busy' } }, token)
+
+    expect(useSessionStatus.getState().isSessionKnown('session-a')).toBe(true)
+    expect(useSessionStatus.getState().isSessionKnown('session-unknown')).toBe(false)
+  })
+
+  it('does not treat a session omitted from a later snapshot as finished', () => {
+    const store = useSessionStatus.getState()
+    store.setStatus('session-a', { type: 'busy' })
+
+    const token = store.beginStatusSnapshot()
+    useSessionStatus.getState().replaceStatuses({}, token)
+
+    expect(useSessionStatus.getState().isSessionKnown('session-a')).toBe(false)
+    expect(useSessionStatus.getState().getStatus('session-a')).toEqual({ type: 'idle' })
+  })
+
+  it('records a child outcome and preserves it when the status goes idle', () => {
+    const store = useSessionStatus.getState()
+    store.setStatus('child-a', { type: 'busy' })
+    store.setOutcome('child-a', 'failed')
+
+    store.setStatus('child-a', { type: 'idle' })
+
+    expect(useSessionStatus.getState().getOutcome('child-a')).toBe('failed')
+    expect(useSessionStatus.getState().isSessionKnown('child-a')).toBe(true)
+  })
+
+  it('clears a child outcome when a new execution starts', () => {
+    const store = useSessionStatus.getState()
+    store.setOutcome('child-a', 'interrupted')
+
+    store.clearOutcome('child-a')
+
+    expect(useSessionStatus.getState().getOutcome('child-a')).toBeUndefined()
+  })
+
+  it('applies an authoritative idle session snapshot from the child session query', () => {
+    const store = useSessionStatus.getState()
+    const token = store.beginStatusSnapshot()
+
+    store.applySessionSnapshot('child-a', {
+      id: 'child-a',
+      projectID: 'project-1',
+      cost: 0,
+      tokens: { input: 0, output: 0, reasoning: 0, cache: { read: 0, write: 0 } },
+      outcome: 'failed',
+      time: { created: 1, updated: 2, idle: 2 },
+      location: { directory: '/repo' },
+    }, token)
+
+    expect(useSessionStatus.getState().isSessionKnown('child-a')).toBe(true)
+    expect(useSessionStatus.getState().getStatus('child-a')).toEqual({ type: 'idle' })
+    expect(useSessionStatus.getState().getOutcome('child-a')).toBe('failed')
+  })
+
+  it('applies a running child session snapshot as busy', () => {
+    const store = useSessionStatus.getState()
+    const token = store.beginStatusSnapshot()
+
+    store.applySessionSnapshot('child-a', {
+      id: 'child-a',
+      projectID: 'project-1',
+      cost: 0,
+      tokens: { input: 0, output: 0, reasoning: 0, cache: { read: 0, write: 0 } },
+      time: { created: 1, updated: 2 },
+      location: { directory: '/repo' },
+    }, token)
+
+    expect(useSessionStatus.getState().isSessionKnown('child-a')).toBe(true)
+    expect(useSessionStatus.getState().getStatus('child-a')).toEqual({ type: 'busy' })
+  })
+
+  it('does not overwrite a newer live terminal event with a stale session snapshot', () => {
+    const store = useSessionStatus.getState()
+    const token = store.beginStatusSnapshot()
+    store.setStatus('child-a', { type: 'idle' })
+
+    store.applySessionSnapshot('child-a', {
+      id: 'child-a',
+      projectID: 'project-1',
+      cost: 0,
+      tokens: { input: 0, output: 0, reasoning: 0, cache: { read: 0, write: 0 } },
+      time: { created: 1, updated: 2 },
+      location: { directory: '/repo' },
+    }, token)
+
+    expect(useSessionStatus.getState().getStatus('child-a')).toEqual({ type: 'idle' })
+  })
+
+  it('clears a stale child outcome when a fresh authoritative busy snapshot arrives', () => {
+    const store = useSessionStatus.getState()
+    store.setOutcome('child-a', 'failed')
+    const token = store.beginStatusSnapshot()
+
+    store.applySessionSnapshot('child-a', {
+      id: 'child-a',
+      projectID: 'project-1',
+      cost: 0,
+      tokens: { input: 0, output: 0, reasoning: 0, cache: { read: 0, write: 0 } },
+      time: { created: 1, updated: 2 },
+      location: { directory: '/repo' },
+    }, token)
+
+    expect(useSessionStatus.getState().getOutcome('child-a')).toBeUndefined()
+    expect(useSessionStatus.getState().getStatus('child-a')).toEqual({ type: 'busy' })
+  })
+
+  it('preserves confirmed idle knowledge across a global snapshot', () => {
+    const store = useSessionStatus.getState()
+    store.setStatus('child-idle', { type: 'idle' })
+
+    const token = store.beginStatusSnapshot()
+    useSessionStatus.getState().replaceStatuses({}, token)
+
+    expect(useSessionStatus.getState().isSessionKnown('child-idle')).toBe(true)
+    expect(useSessionStatus.getState().getStatus('child-idle')).toEqual({ type: 'idle' })
+  })
+
+  it('turns a formerly active session omitted from a global snapshot unknown', () => {
+    const store = useSessionStatus.getState()
+    store.setStatus('child-active', { type: 'busy' })
+
+    const token = store.beginStatusSnapshot()
+    useSessionStatus.getState().replaceStatuses({}, token)
+
+    expect(useSessionStatus.getState().isSessionKnown('child-active')).toBe(false)
+  })
+
+  it('does not let a snapshot erase an idle event received in flight', () => {
+    const store = useSessionStatus.getState()
+    store.setStatus('child-active', { type: 'busy' })
+
+    const token = store.beginStatusSnapshot()
+    store.setStatus('child-active', { type: 'idle' })
+
+    useSessionStatus.getState().replaceStatuses({}, token)
+
+    expect(useSessionStatus.getState().isSessionKnown('child-active')).toBe(true)
+    expect(useSessionStatus.getState().getStatus('child-active')).toEqual({ type: 'idle' })
   })
 
   it('leaves the statuses map identity unchanged for a repeated identical busy status outside a snapshot', () => {

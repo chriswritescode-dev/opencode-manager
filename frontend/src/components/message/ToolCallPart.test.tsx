@@ -1,10 +1,11 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest'
-import { render, screen } from '@testing-library/react'
+import { act, render, screen, waitFor } from '@testing-library/react'
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
 import { MemoryRouter } from 'react-router-dom'
 import type { PermissionRequest, SessionMessageAssistantTool } from '@opencode-manager/shared/opencode'
 import { ToolCallPart } from './ToolCallPart'
 import { useUserBash } from '@/stores/userBashStore'
+import { useSessionStatus } from '@/stores/sessionStatusStore'
 
 const mocks = vi.hoisted(() => ({
   useSettings: vi.fn(),
@@ -19,8 +20,13 @@ vi.mock('@/contexts/EventContext', () => ({
   useToolCallPermission: mocks.useToolCallPermission,
 }))
 
-const renderWithProviders = (ui: React.ReactElement) => {
-  const queryClient = new QueryClient()
+vi.mock('@/api/opencode', async (importOriginal) => ({
+  ...(await importOriginal<typeof import('@/api/opencode')>()),
+  getSession: () => new Promise(() => {}),
+  listShells: () => Promise.resolve([]),
+}))
+
+const renderWithProviders = (ui: React.ReactElement, queryClient = new QueryClient()) => {
   return render(
     <QueryClientProvider client={queryClient}>
       <MemoryRouter>{ui}</MemoryRouter>
@@ -112,6 +118,13 @@ describe('ToolCallPart background indicator', () => {
     })
     mocks.useToolCallPermission.mockReturnValue(null)
     useUserBash.setState({ userBashCommands: new Map() })
+    useSessionStatus.setState({
+      statuses: new Map(),
+      statusCache: new Map(),
+      statusRevisions: new Map(),
+      knownSessions: new Set(),
+      revision: 0,
+    })
   })
 
   const completedShell = (metadata: Record<string, unknown>): SessionMessageAssistantTool => ({
@@ -126,6 +139,20 @@ describe('ToolCallPart background indicator', () => {
       metadata,
     },
   })
+
+  const completedSubagent = (metadata: Record<string, unknown>): SessionMessageAssistantTool => ({
+    type: 'tool',
+    id: 'call_3',
+    name: 'subagent',
+    time: { created: 1, ran: 2, completed: 3 },
+    state: {
+      status: 'completed',
+      input: { description: 'Explore' },
+      content: [{ type: 'text', text: 'Task moved to the background (session ID: ses_child).' }],
+      metadata,
+    },
+  })
+
 
   it('marks a shell call that returned while its command keeps running', () => {
     renderWithProviders(<ToolCallPart part={completedShell({ status: 'running', shellID: 'sh_1' })} messageID="msg_1" />)
@@ -146,5 +173,65 @@ describe('ToolCallPart background indicator', () => {
 
     expect(screen.getByText('background')).toBeInTheDocument()
     expect(screen.queryByText('✓')).not.toBeInTheDocument()
+  })
+
+  it('clears the background badge once the live shell completes', async () => {
+    const queryClient = new QueryClient({ defaultOptions: { queries: { retry: false } } })
+    queryClient.setQueryData(['opencode', 'shells', '/repo'], [
+      {
+        id: 'sh_1',
+        status: 'exited',
+        exit: 0,
+        command: 'npm run dev',
+        cwd: '/repo',
+        shell: 'zsh',
+        file: '/tmp/sh_1.log',
+        metadata: { sessionID: 'ses_1' },
+        time: { started: 1, completed: 2 },
+      },
+    ])
+
+    renderWithProviders(
+      <ToolCallPart part={completedShell({ status: 'running', shellID: 'sh_1' })} messageID="msg_1" directory="/repo" />,
+      queryClient,
+    )
+
+    await waitFor(() => expect(screen.queryByText('background')).not.toBeInTheDocument())
+    expect(screen.getByText('completed')).toBeInTheDocument()
+  })
+
+  it('shows a background shell missing from a loaded list as unavailable', async () => {
+    renderWithProviders(
+      <ToolCallPart
+        part={completedShell({ status: 'running', shellID: 'sh_missing' })}
+        messageID="msg_1"
+        directory="/repo"
+      />,
+    )
+
+    await waitFor(() => expect(screen.getByText('unavailable')).toBeInTheDocument())
+    expect(screen.queryByText('background')).not.toBeInTheDocument()
+  })
+
+  it('treats an unknown child session as running, not finished', () => {
+    renderWithProviders(
+      <ToolCallPart part={completedSubagent({ status: 'running', sessionID: 'child-unknown' })} messageID="msg_1" />,
+    )
+
+    expect(screen.getByText('background')).toBeInTheDocument()
+    expect(screen.queryByText('✓')).not.toBeInTheDocument()
+  })
+
+  it('completes a backgrounded subagent when the child session is known idle', async () => {
+    act(() => {
+      useSessionStatus.getState().setStatus('child-1', { type: 'idle' })
+    })
+
+    renderWithProviders(
+      <ToolCallPart part={completedSubagent({ status: 'running', sessionID: 'child-1' })} messageID="msg_1" />,
+    )
+
+    await waitFor(() => expect(screen.getByText('✓')).toBeInTheDocument())
+    expect(screen.queryByText('background')).not.toBeInTheDocument()
   })
 })

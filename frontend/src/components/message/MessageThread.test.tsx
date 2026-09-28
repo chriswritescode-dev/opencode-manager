@@ -1,5 +1,7 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest'
-import { render, screen, fireEvent } from '@testing-library/react'
+import { render as rtlRender, screen, fireEvent } from '@testing-library/react'
+import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
+import type { ReactElement } from 'react'
 import { MessageThread } from './MessageThread'
 import { useUIState } from '@/stores/uiStateStore'
 import { applySessionEvent, emptySessionTranscript } from '@/lib/session-projection'
@@ -47,6 +49,12 @@ vi.mock('@/hooks/useTTS', () => ({
   }),
 }))
 
+vi.mock('@/api/opencode', async (importOriginal) => ({
+  ...(await importOriginal<typeof import('@/api/opencode')>()),
+  getSession: () => new Promise(() => {}),
+  listShells: () => Promise.resolve([]),
+}))
+
 interface MockSettingsReturn {
   preferences: {
     simpleChatMode: boolean
@@ -61,6 +69,11 @@ const setupSettings = (preferences: MockSettingsReturn['preferences']) => {
     updateSettings: vi.fn(),
     isUpdating: false,
   })
+}
+
+const render = (ui: ReactElement) => {
+  const queryClient = new QueryClient({ defaultOptions: { queries: { retry: false } } })
+  return rtlRender(<QueryClientProvider client={queryClient}>{ui}</QueryClientProvider>)
 }
 
 const project = (events: V2Event[]): SessionMessageInfo[] =>

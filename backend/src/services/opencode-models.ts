@@ -1,4 +1,4 @@
-import type { ModelInfo, ModelRef } from '@opencode-manager/shared/opencode'
+import type { ConfigEntry, ModelInfo, ModelRef } from '@opencode-manager/shared/opencode'
 import { formatOpenCodeModelRef, openCodeLocation, parseOpenCodeModelRef } from '@opencode-manager/shared/opencode'
 import type { OpenCodeClient } from './opencode/client'
 
@@ -8,6 +8,16 @@ export interface ResolvedOpenCodeModel {
   variant?: string
   model: string
 }
+
+export interface ResolveOpenCodeModelOptions {
+  preferredModel?: string | null
+  signal?: AbortSignal
+}
+
+export const MODEL_LOAD_TIMEOUT_MS = 15_000
+export const MODEL_LOAD_POLL_MS = 500
+
+type ConfigDocumentModel = Extract<ConfigEntry, { type: 'document' }>['info']['model']
 
 function normalizeModelCandidate(model: string | null | undefined): string | null {
   if (!model) {
@@ -31,29 +41,24 @@ function findAvailable(models: ModelInfo[], ref: ModelRef): ModelInfo | undefine
   return models.find((model) => model.providerID === ref.providerID && model.id === ref.id)
 }
 
-export async function resolveOpenCodeModel(
-  client: OpenCodeClient,
-  directory: string,
-  options?: {
-    preferredModel?: string | null
-  },
-): Promise<ResolvedOpenCodeModel> {
-  const location = openCodeLocation(directory)
-  const [modelsResponse, defaultResponse] = await Promise.all([
-    client.api.model.list(location),
-    client.api.model.default(location),
-  ])
-  const models = modelsResponse.data
+function isTargetLoaded(models: ModelInfo[], targetRef: ModelRef | undefined): boolean {
+  return !targetRef || findAvailable(models, targetRef) !== undefined
+}
 
-  const preferred = normalizeModelCandidate(options?.preferredModel)
-  if (preferred) {
-    const parsedPreferred = parseOpenCodeModelRef(preferred)
-    if (parsedPreferred && findAvailable(models, parsedPreferred)) {
-      return toResolvedModel(parsedPreferred)
-    }
+function resolveFromLoadedModels(
+  models: ModelInfo[],
+  defaultModel: ModelInfo | null,
+  configuredRef: ModelRef | undefined,
+  preferredRef: ModelRef | undefined,
+): ResolvedOpenCodeModel | null {
+  if (preferredRef && findAvailable(models, preferredRef)) {
+    return toResolvedModel(preferredRef)
   }
 
-  const defaultModel = defaultResponse.data
+  if (configuredRef && findAvailable(models, configuredRef)) {
+    return toResolvedModel(configuredRef)
+  }
+
   if (defaultModel) {
     const defaultRef: ModelRef = { providerID: defaultModel.providerID, id: defaultModel.id }
     if (findAvailable(models, defaultRef)) {
@@ -62,9 +67,187 @@ export async function resolveOpenCodeModel(
   }
 
   const fallback = models.find((model) => model.enabled)
-  if (fallback) {
-    return toResolvedModel({ providerID: fallback.providerID, id: fallback.id })
+  return fallback ? toResolvedModel({ providerID: fallback.providerID, id: fallback.id }) : null
+}
+
+function toConfiguredRef(model: ConfigDocumentModel): ModelRef | undefined {
+  if (!model) {
+    return undefined
   }
 
-  throw new Error('No configured OpenCode models are available')
+  if (typeof model === 'string') {
+    return parseOpenCodeModelRef(model)
+  }
+
+  return {
+    providerID: model.providerID,
+    id: model.model,
+    ...(model.variant ? { variant: model.variant } : {}),
+  }
+}
+
+function sleep(ms: number, signal: AbortSignal): Promise<void> {
+  return new Promise((resolve) => {
+    if (signal.aborted) {
+      resolve()
+      return
+    }
+
+    const timer = setTimeout(() => {
+      signal.removeEventListener('abort', onAbort)
+      resolve()
+    }, ms)
+
+    function onAbort(): void {
+      clearTimeout(timer)
+      resolve()
+    }
+
+    signal.addEventListener('abort', onAbort, { once: true })
+
+    if (signal.aborted) {
+      onAbort()
+    }
+  })
+}
+
+type PollingResult<T> = { ok: true; value: T } | { ok: false }
+
+function isAbortLike(error: unknown, signal: AbortSignal): boolean {
+  if (error === signal.reason) {
+    return true
+  }
+
+  if (typeof error !== 'object' || error === null) {
+    return false
+  }
+
+  if ((error as { name?: unknown }).name === 'AbortError') {
+    return true
+  }
+
+  const cause = (error as { cause?: unknown }).cause
+  return cause !== undefined && cause !== error && isAbortLike(cause, signal)
+}
+
+async function runPollingRequest<T>(
+  request: () => Promise<T>,
+  external: AbortSignal | undefined,
+  deadline: AbortSignal,
+): Promise<PollingResult<T>> {
+  try {
+    return { ok: true, value: await request() }
+  } catch (error) {
+    external?.throwIfAborted()
+
+    if (deadline.aborted && isAbortLike(error, deadline)) {
+      return { ok: false }
+    }
+
+    throw error
+  }
+}
+
+async function readConfiguredRef(
+  client: OpenCodeClient,
+  location: ReturnType<typeof openCodeLocation>,
+  signal: AbortSignal,
+): Promise<ModelRef | undefined> {
+  const entries = await client.api.config.get(location, { signal })
+  const model = entries.reduce<ConfigDocumentModel>(
+    (current, entry) => (entry.type === 'document' && entry.info.model ? entry.info.model : current),
+    undefined,
+  )
+  return toConfiguredRef(model)
+}
+
+export async function resolveOpenCodeModel(
+  client: OpenCodeClient,
+  directory: string,
+  options?: ResolveOpenCodeModelOptions,
+): Promise<ResolvedOpenCodeModel> {
+  const location = openCodeLocation(directory)
+  const preferred = normalizeModelCandidate(options?.preferredModel)
+  const preferredRef = preferred ? parseOpenCodeModelRef(preferred) : undefined
+  const external = options?.signal
+
+  const timeoutController = new AbortController()
+  const timeoutId = setTimeout(() => {
+    timeoutController.abort(new Error('Timed out waiting for the OpenCode model catalog to load'))
+  }, MODEL_LOAD_TIMEOUT_MS)
+  const signal = external ? AbortSignal.any([external, timeoutController.signal]) : timeoutController.signal
+
+  let models: ModelInfo[] = []
+  let defaultModel: ModelInfo | null = null
+
+  try {
+    external?.throwIfAborted()
+
+    const configuredRef = await readConfiguredRef(client, location, signal)
+    const targetRef = preferredRef ?? configuredRef
+
+    for (;;) {
+      external?.throwIfAborted()
+
+      if (timeoutController.signal.aborted) {
+        break
+      }
+
+      const listResult = await runPollingRequest(
+        () => client.api.model.list(location, { signal }),
+        external,
+        timeoutController.signal,
+      )
+      if (!listResult.ok) {
+        break
+      }
+      models = listResult.value.data
+
+      external?.throwIfAborted()
+
+      if (timeoutController.signal.aborted) {
+        break
+      }
+
+      const defaultResult = await runPollingRequest(
+        () => client.api.model.default(location, { signal }),
+        external,
+        timeoutController.signal,
+      )
+      if (!defaultResult.ok) {
+        break
+      }
+      defaultModel = defaultResult.value.data
+
+      external?.throwIfAborted()
+
+      if (timeoutController.signal.aborted) {
+        break
+      }
+
+      const resolved = resolveFromLoadedModels(models, defaultModel, configuredRef, preferredRef)
+      if (resolved && isTargetLoaded(models, targetRef)) {
+        return resolved
+      }
+
+      await sleep(MODEL_LOAD_POLL_MS, signal)
+    }
+
+    external?.throwIfAborted()
+
+    const resolved = resolveFromLoadedModels(models, defaultModel, configuredRef, preferredRef)
+    if (resolved) {
+      return resolved
+    }
+
+    if (models.length === 0) {
+      throw timeoutController.signal.reason instanceof Error
+        ? timeoutController.signal.reason
+        : new Error('Timed out waiting for the OpenCode model catalog to load')
+    }
+
+    throw new Error('No configured OpenCode models are available')
+  } finally {
+    clearTimeout(timeoutId)
+  }
 }

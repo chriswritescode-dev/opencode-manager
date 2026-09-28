@@ -638,6 +638,7 @@ export function SessionDetail() {
                 directory={sessionDirectory}
                 messages={messages}
                 isSessionActive={isSessionActive}
+                onChildSessionClick={handleChildSessionClick}
               />
               <PromptInput
                 ref={promptInputRef}

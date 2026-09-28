@@ -1,12 +1,19 @@
 import { useEffect, useRef, useState, useCallback, useMemo } from 'react'
 import { useQueryClient } from '@tanstack/react-query'
 import type { SessionInfo, V2Event } from '@opencode-manager/shared/opencode'
-import { invalidateSessionListCaches, shellsQueryKey } from '@/lib/queryInvalidation'
+import { invalidateChildSessionCaches, invalidateSessionListCaches, shellsQueryKey } from '@/lib/queryInvalidation'
+import {
+  applyShellExit,
+  markShellDeleted,
+  recordShellDeleted,
+  recordShellExit,
+  upsertShell,
+  type ShellRecord,
+} from '@/lib/backgroundWork'
 import { showToast } from '@/lib/toast'
 import { useSendErrorStore } from '@/stores/sendErrorStore'
 import { openCodeEventStream } from '@/lib/opencode-event-stream'
 import type { EventStreamSubscription } from '@/lib/opencode-event-stream'
-import type { ShellInfo } from '@/api/opencode'
 
 type V2StreamEvent = V2Event & { directory?: string }
 
@@ -109,18 +116,34 @@ export const useSSE = (directory?: string | string[], currentSessionId?: string)
 
       case 'shell.created': {
         const info = event.data.info
-        queryClient.setQueryData<ShellInfo[]>(shellsQueryKey(cacheDirectory), (current) =>
-          current ? [...current.filter((shell) => shell.id !== info.id), info] : current,
-        )
+        const key = shellsQueryKey(cacheDirectory)
+        const current = queryClient.getQueryData<ShellRecord[]>(key)
+        if (!current) {
+          queryClient.invalidateQueries({ queryKey: key })
+          break
+        }
+        queryClient.setQueryData<ShellRecord[]>(key, (shells) => upsertShell(shells ?? [], info, cacheDirectory ?? ''))
         break
       }
 
-      case 'shell.exited':
+      case 'shell.exited': {
+        recordShellExit(cacheDirectory ?? '', event.data)
+        const key = shellsQueryKey(cacheDirectory)
+        const current = queryClient.getQueryData<ShellRecord[]>(key)
+        if (!current || !current.some((shell) => shell.id === event.data.id)) {
+          queryClient.invalidateQueries({ queryKey: key })
+          break
+        }
+        queryClient.setQueryData<ShellRecord[]>(key, (shells) => applyShellExit(shells ?? [], event.data))
+        break
+      }
+
       case 'shell.deleted': {
-        const id = event.data.id
-        queryClient.setQueryData<ShellInfo[]>(shellsQueryKey(cacheDirectory), (current) =>
-          current?.filter((shell) => shell.id !== id),
-        )
+        recordShellDeleted(cacheDirectory ?? '', event.data.id)
+        const key = shellsQueryKey(cacheDirectory)
+        const current = queryClient.getQueryData<ShellRecord[]>(key)
+        if (!current || !current.some((shell) => shell.id === event.data.id)) break
+        queryClient.setQueryData<ShellRecord[]>(key, (shells) => markShellDeleted(shells ?? [], event.data.id))
         break
       }
 
@@ -178,6 +201,8 @@ export const useSSE = (directory?: string | string[], currentSessionId?: string)
       if (connected) {
         setError(null)
         syncCurrentSession()
+        queryClient.invalidateQueries({ queryKey: ['opencode', 'shells'] })
+        invalidateChildSessionCaches(queryClient)
         eventStreamSubscriptionRef.current?.reportVisibility(document.visibilityState === 'visible', sessionIdRef.current)
       } else {
         setError('Connection lost. Reconnecting...')
@@ -188,6 +213,7 @@ export const useSSE = (directory?: string | string[], currentSessionId?: string)
       if (!mountedRef.current) return
       invalidateSessionListCaches(queryClient)
       queryClient.invalidateQueries({ queryKey: ['opencode', 'shells'] })
+      invalidateChildSessionCaches(queryClient)
       refreshCurrentSession()
     }
 

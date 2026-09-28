@@ -1,4 +1,4 @@
-import { beforeEach, describe, expect, it, vi } from 'vitest'
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import type { ScheduleJob, ScheduleRun } from '@opencode-manager/shared/types'
 import type { OpenCodeApi } from '@opencode-manager/shared/opencode'
 
@@ -175,6 +175,7 @@ describe('ScheduleService', () => {
     vi.clearAllMocks()
     Reflect.get(ScheduleService, 'activeRuns').clear()
     Reflect.get(ScheduleService, 'activeTeardowns')?.clear()
+    Reflect.get(ScheduleService, 'pendingCancels').clear()
 
     mocks.getRepoById.mockReturnValue(repo)
     mocks.getScheduleJobById.mockReturnValue(job)
@@ -314,7 +315,7 @@ describe('ScheduleService', () => {
     expect(mocks.resolveOpenCodeModel).toHaveBeenCalledWith(
       expect.anything(),
       repo.fullPath,
-      { preferredModel: 'openai/retired' },
+      { preferredModel: 'openai/retired', signal: expect.any(AbortSignal) },
     )
   })
 
@@ -875,7 +876,7 @@ describe('ScheduleService', () => {
   it('blocks deleteJob when a running run exists in activeRuns', () => {
     const stub = createStubScheduleApi()
     const service = makeService(stub.api)
-    Reflect.get(ScheduleService, 'activeRuns').add(7)
+    Reflect.get(ScheduleService, 'activeRuns').set(7, { runId: 5, abort: new AbortController() })
 
     expect(() => service.deleteJob(42, 7)).toThrow('Cannot delete a schedule while it is running. Cancel the run first.')
   })
@@ -894,7 +895,7 @@ describe('ScheduleService', () => {
     const onJobChange = vi.fn()
     service.setJobChangeHandler(onJobChange)
     mocks.listScheduleJobIdsByRepo.mockReturnValue([7, 8])
-    Reflect.get(ScheduleService, 'activeRuns').add(7)
+    Reflect.get(ScheduleService, 'activeRuns').set(7, { runId: 5, abort: new AbortController() })
 
     expect(() => service.prepareRepoDelete(42)).toThrow('Cannot delete a repo while a schedule run is in progress. Cancel the run first.')
     expect(onJobChange).not.toHaveBeenCalled()
@@ -1103,6 +1104,657 @@ describe('ScheduleService', () => {
         })
       })
     })
+  })
+})
+
+describe('ScheduleService startup cancellation', () => {
+  beforeEach(() => {
+    vi.clearAllMocks()
+    Reflect.get(ScheduleService, 'activeRuns').clear()
+    Reflect.get(ScheduleService, 'activeTeardowns')?.clear()
+    Reflect.get(ScheduleService, 'pendingCancels').clear()
+
+    mocks.getRepoById.mockReturnValue(repo)
+    mocks.getScheduleJobById.mockReturnValue(job)
+    mocks.getRunningScheduleRunByJob.mockReturnValue(null)
+    mocks.createScheduleRun.mockReturnValue(baseRun)
+    mocks.resolveOpenCodeModel.mockResolvedValue({ providerID: 'openai', id: 'gpt-5-mini', model: 'openai/gpt-5-mini' })
+    mocks.onEvent.mockReturnValue(vi.fn())
+    mocks.stubWorktreeManager.prepare.mockResolvedValue(null)
+    mocks.stubWorktreeManager.finalize.mockResolvedValue({ commitHash: null })
+  })
+
+  afterEach(() => {
+    Reflect.get(ScheduleService, 'activeRuns').clear()
+    Reflect.get(ScheduleService, 'activeTeardowns')?.clear()
+    Reflect.get(ScheduleService, 'pendingCancels').clear()
+  })
+
+  it('stops a startup cancelled while the model is resolving without creating or prompting a session', async () => {
+    const stub = createStubScheduleApi({ messages: [] })
+    const service = makeService(stub.api)
+
+    let resolveModel!: (value: { providerID: string; id: string; model: string }) => void
+    mocks.resolveOpenCodeModel.mockReturnValueOnce(new Promise((resolve) => { resolveModel = resolve }))
+
+    const runningRun: ScheduleRun = { ...baseRun, sessionId: null, sessionTitle: null }
+    const cancelledRun: ScheduleRun = {
+      ...runningRun,
+      status: 'cancelled',
+      finishedAt: Date.UTC(2026, 2, 9, 12, 10, 0),
+      errorText: 'Run cancelled by user.',
+    }
+    mocks.getScheduleRunById.mockReturnValue(runningRun)
+    mocks.updateScheduleRun.mockReturnValue(cancelledRun)
+
+    const runPromise = service.runJob(42, 7, 'manual')
+    await vi.waitFor(() => expect(mocks.resolveOpenCodeModel).toHaveBeenCalled())
+
+    await service.cancelRun(42, 7, 5)
+
+    resolveModel({ providerID: 'openai', id: 'gpt-5-mini', model: 'openai/gpt-5-mini' })
+    await runPromise
+
+    expect(stub.api.session.create).not.toHaveBeenCalled()
+    expect(stub.api.session.prompt).not.toHaveBeenCalled()
+    expect(mocks.updateScheduleRun).toHaveBeenCalledTimes(1)
+    expect(mocks.updateScheduleRun).toHaveBeenCalledWith(
+      expect.anything(),
+      42,
+      7,
+      5,
+      expect.objectContaining({ status: 'cancelled' }),
+    )
+  })
+
+  it('interrupts a session created concurrently with cancellation and never prompts it', async () => {
+    const stub = createStubScheduleApi({ sessionID: 'ses-cancel-race', messages: [] })
+    const service = makeService(stub.api)
+
+    let resolveCreate!: (value: { id: string }) => void
+    const createDeferred = new Promise<{ id: string }>((resolve) => { resolveCreate = resolve })
+    vi.mocked(stub.api.session.create).mockReturnValueOnce(createDeferred as never)
+
+    const runningRun: ScheduleRun = { ...baseRun, sessionId: null, sessionTitle: null }
+    const cancelledRun: ScheduleRun = {
+      ...runningRun,
+      status: 'cancelled',
+      finishedAt: Date.UTC(2026, 2, 9, 12, 10, 0),
+      errorText: 'Run cancelled by user.',
+    }
+    mocks.getScheduleRunById.mockReturnValue(runningRun)
+    mocks.updateScheduleRun.mockReturnValue(cancelledRun)
+
+    const runPromise = service.runJob(42, 7, 'manual')
+    await vi.waitFor(() => expect(stub.api.session.create).toHaveBeenCalled())
+
+    await service.cancelRun(42, 7, 5)
+
+    resolveCreate({ id: 'ses-cancel-race' })
+    await runPromise
+
+    expect(stub.api.session.interrupt).toHaveBeenCalledWith({ sessionID: 'ses-cancel-race' })
+    expect(stub.api.session.prompt).not.toHaveBeenCalled()
+    expect(mocks.updateScheduleRunMetadata).not.toHaveBeenCalled()
+  })
+
+  it('tears down a worktree prepared after cancellation instead of leaking it', async () => {
+    const stub = createStubScheduleApi({ messages: [] })
+    const service = makeService(stub.api)
+    const worktreePath = '/workspace/worktrees/job-7-run-5'
+    const runBranch = 'schedule/7/run-5'
+
+    let currentRun: ScheduleRun = { ...baseRun, sessionId: null, sessionTitle: null, worktreePath: null, runBranch: null }
+    mocks.getScheduleRunById.mockImplementation(() => currentRun)
+    mocks.updateScheduleRunWorktree.mockImplementation((_db, _repoId, _jobId, _runId, input) => {
+      currentRun = { ...currentRun, ...input }
+      return currentRun
+    })
+    mocks.updateScheduleRun.mockReturnValue({
+      ...currentRun,
+      status: 'cancelled',
+      finishedAt: Date.UTC(2026, 2, 9, 12, 10, 0),
+      errorText: 'Run cancelled by user.',
+    })
+
+    let resolvePrepare!: (value: { directory: string; worktreePath: string; runBranch: string }) => void
+    mocks.stubWorktreeManager.prepare.mockReturnValueOnce(new Promise((resolve) => { resolvePrepare = resolve }))
+    mocks.stubWorktreeManager.finalize.mockResolvedValue({ commitHash: 'abc123' })
+
+    const runPromise = service.runJob(42, 7, 'manual')
+    await vi.waitFor(() => expect(mocks.stubWorktreeManager.prepare).toHaveBeenCalled())
+
+    await service.cancelRun(42, 7, 5)
+
+    resolvePrepare({ directory: worktreePath, worktreePath, runBranch })
+    await runPromise
+
+    expect(mocks.stubWorktreeManager.finalize).toHaveBeenCalledWith(
+      repo,
+      job,
+      expect.objectContaining({ id: 5, worktreePath }),
+    )
+    expect(mocks.updateScheduleRunWorktree).toHaveBeenCalledWith(
+      expect.anything(),
+      42,
+      7,
+      5,
+      expect.objectContaining({ worktreePath: null, commitHash: 'abc123' }),
+    )
+    expect(stub.api.session.create).not.toHaveBeenCalled()
+  })
+
+  it('does not release the guard of a newer run when an older startup finishes cancelling', async () => {
+    const stub = createStubScheduleApi({ messages: [] })
+    const service = makeService(stub.api)
+
+    let resolveModel!: (value: { providerID: string; id: string; model: string }) => void
+    mocks.resolveOpenCodeModel.mockReturnValueOnce(new Promise((resolve) => { resolveModel = resolve }))
+
+    const runningRun: ScheduleRun = { ...baseRun, sessionId: null, sessionTitle: null }
+    mocks.getScheduleRunById.mockReturnValue(runningRun)
+    mocks.updateScheduleRun.mockReturnValue({ ...runningRun, status: 'cancelled' })
+
+    const runPromise = service.runJob(42, 7, 'manual')
+    await vi.waitFor(() => expect(mocks.resolveOpenCodeModel).toHaveBeenCalled())
+
+    await service.cancelRun(42, 7, 5)
+
+    const activeRuns = Reflect.get(ScheduleService, 'activeRuns') as Map<number, { runId: number; abort: AbortController }>
+    activeRuns.set(7, { runId: 6, abort: new AbortController() })
+
+    resolveModel({ providerID: 'openai', id: 'gpt-5-mini', model: 'openai/gpt-5-mini' })
+    await runPromise
+
+    expect(activeRuns.get(7)?.runId).toBe(6)
+  })
+
+  it('skips the prompt when cancellation lands while skills are loading', async () => {
+    const stub = createStubScheduleApi({ sessionID: 'ses-skill-cancel', skills: [skill('git-release')], messages: [] })
+    const service = makeService(stub.api)
+    const jobWithSkills: ScheduleJob = { ...job, skillMetadata: { skillSlugs: ['git-release'], notes: undefined } }
+    mocks.getScheduleJobById.mockReturnValue(jobWithSkills)
+
+    let resolveSkillList!: (value: unknown) => void
+    vi.mocked(stub.api.skill.list).mockReturnValueOnce(new Promise((resolve) => { resolveSkillList = resolve }) as never)
+
+    const runningRun: ScheduleRun = { ...baseRun, sessionId: 'ses-skill-cancel', sessionTitle: 'Scheduled: Weekly engineering summary' }
+    mocks.getScheduleRunById.mockReturnValue(runningRun)
+    mocks.updateScheduleRunMetadata.mockReturnValue(runningRun)
+    mocks.updateScheduleRun.mockReturnValue({ ...runningRun, status: 'cancelled' })
+
+    await service.runJob(42, 7, 'manual')
+    await vi.waitFor(() => expect(stub.api.skill.list).toHaveBeenCalled())
+
+    const unsubscribe = mocks.onEvent.mock.results.at(-1)?.value as ReturnType<typeof vi.fn>
+    await service.cancelRun(42, 7, 5)
+
+    resolveSkillList({ location: { directory: '' }, data: [skill('git-release')] })
+    await vi.waitFor(() => expect(unsubscribe).toHaveBeenCalled())
+
+    expect(stub.api.session.prompt).not.toHaveBeenCalled()
+    expect(mocks.updateScheduleRun).toHaveBeenCalledTimes(1)
+    expect(mocks.updateScheduleRun).toHaveBeenCalledWith(
+      expect.anything(),
+      42,
+      7,
+      5,
+      expect.objectContaining({ status: 'cancelled' }),
+    )
+  })
+
+  it('does not mark a cancelled run failed when the prompt rejects after cancellation', async () => {
+    const stub = createStubScheduleApi({ sessionID: 'ses-prompt-abort', messages: [] })
+    const service = makeService(stub.api)
+
+    let rejectPrompt!: (error: Error) => void
+    const promptDeferred = new Promise((_resolve, reject) => { rejectPrompt = reject })
+    vi.mocked(stub.api.session.prompt).mockReturnValueOnce(promptDeferred as never)
+
+    const runningRun: ScheduleRun = { ...baseRun, sessionId: 'ses-prompt-abort', sessionTitle: 'Scheduled: Weekly engineering summary' }
+    mocks.getScheduleRunById.mockReturnValue(runningRun)
+    mocks.updateScheduleRun.mockReturnValue({ ...runningRun, status: 'cancelled' })
+
+    await service.runJob(42, 7, 'manual')
+    await vi.waitFor(() => expect(stub.api.session.prompt).toHaveBeenCalled())
+
+    const unsubscribe = mocks.onEvent.mock.results.at(-1)?.value as ReturnType<typeof vi.fn>
+    await service.cancelRun(42, 7, 5)
+
+    rejectPrompt(new Error('Prompt aborted'))
+    await vi.waitFor(() => expect(unsubscribe).toHaveBeenCalled())
+
+    expect(mocks.updateScheduleRun).toHaveBeenCalledTimes(1)
+    expect(mocks.updateScheduleRun).toHaveBeenCalledWith(
+      expect.anything(),
+      42,
+      7,
+      5,
+      expect.objectContaining({ status: 'cancelled' }),
+    )
+  })
+
+  it('does not start monitoring when cancellation lands while the prompt is in flight', async () => {
+    const stub = createStubScheduleApi({ sessionID: 'ses-prompt-monitor', messages: [] })
+    const service = makeService(stub.api)
+
+    let resolvePrompt!: (value: unknown) => void
+    const promptDeferred = new Promise((resolve) => { resolvePrompt = resolve })
+    vi.mocked(stub.api.session.prompt).mockReturnValueOnce(promptDeferred as never)
+
+    const runningRun: ScheduleRun = { ...baseRun, sessionId: 'ses-prompt-monitor', sessionTitle: 'Scheduled: Weekly engineering summary' }
+    mocks.getScheduleRunById.mockReturnValue(runningRun)
+    mocks.updateScheduleRun.mockReturnValue({ ...runningRun, status: 'cancelled' })
+
+    await service.runJob(42, 7, 'manual')
+    await vi.waitFor(() => expect(stub.api.session.prompt).toHaveBeenCalled())
+
+    const unsubscribe = mocks.onEvent.mock.results.at(-1)?.value as ReturnType<typeof vi.fn>
+    await service.cancelRun(42, 7, 5)
+
+    resolvePrompt({})
+    await vi.waitFor(() => expect(unsubscribe).toHaveBeenCalled())
+
+    expect(stub.api.session.prompt).toHaveBeenCalledTimes(1)
+    expect(stub.api.session.active).toHaveBeenCalledTimes(1)
+    expect(mocks.updateScheduleRun).toHaveBeenCalledTimes(1)
+    expect(mocks.updateScheduleRun).toHaveBeenCalledWith(
+      expect.anything(),
+      42,
+      7,
+      5,
+      expect.objectContaining({ status: 'cancelled' }),
+    )
+  })
+})
+
+describe('ScheduleService monitor cancellation', () => {
+  beforeEach(() => {
+    vi.clearAllMocks()
+    Reflect.get(ScheduleService, 'activeRuns').clear()
+    Reflect.get(ScheduleService, 'activeTeardowns')?.clear()
+    Reflect.get(ScheduleService, 'pendingCancels').clear()
+
+    mocks.getRepoById.mockReturnValue(repo)
+    mocks.getScheduleJobById.mockReturnValue(job)
+    mocks.getRunningScheduleRunByJob.mockReturnValue(null)
+    mocks.createScheduleRun.mockReturnValue(baseRun)
+    mocks.resolveOpenCodeModel.mockResolvedValue({ providerID: 'openai', id: 'gpt-5-mini', model: 'openai/gpt-5-mini' })
+    mocks.onEvent.mockReturnValue(vi.fn())
+    mocks.stubWorktreeManager.prepare.mockResolvedValue(null)
+    mocks.stubWorktreeManager.finalize.mockResolvedValue({ commitHash: null })
+  })
+
+  afterEach(() => {
+    Reflect.get(ScheduleService, 'activeRuns').clear()
+    Reflect.get(ScheduleService, 'activeTeardowns')?.clear()
+    Reflect.get(ScheduleService, 'pendingCancels').clear()
+  })
+
+  function setupRunningMonitor(sessionID: string) {
+    const stub = createStubScheduleApi({ sessionID, messages: [] })
+    const service = makeService(stub.api)
+    const runningRun: ScheduleRun = {
+      ...baseRun,
+      sessionId: sessionID,
+      sessionTitle: 'Scheduled: Weekly engineering summary',
+    }
+    mocks.getScheduleRunById.mockReturnValue(runningRun)
+    mocks.updateScheduleRun.mockReturnValue({ ...runningRun, status: 'cancelled' })
+    return { stub, service }
+  }
+
+  it('does not overwrite cancelled with a completion that arrives after cancel', async () => {
+    const { stub, service } = setupRunningMonitor('ses-monitor-idle')
+
+    await service.runJob(42, 7, 'manual')
+    await vi.waitFor(() => expect(stub.api.session.active).toHaveBeenCalled())
+
+    const unsubscribe = mocks.onEvent.mock.results.at(-1)?.value as ReturnType<typeof vi.fn>
+    await service.cancelRun(42, 7, 5)
+
+    stub.state.messages = [assistantMessage('Late completion.', { completed: true })]
+    captureEventListener()(repo.fullPath, sessionIdleEvent(repo.fullPath, 'ses-monitor-idle'))
+
+    await vi.waitFor(() => expect(unsubscribe).toHaveBeenCalled())
+
+    expect(mocks.updateScheduleRun).toHaveBeenCalledTimes(1)
+    expect(mocks.updateScheduleRun).toHaveBeenCalledWith(
+      expect.anything(),
+      42,
+      7,
+      5,
+      expect.objectContaining({ status: 'cancelled' }),
+    )
+  })
+
+  it('does not overwrite cancelled with a monitor error that arrives after cancel', async () => {
+    const { stub, service } = setupRunningMonitor('ses-monitor-error')
+
+    await service.runJob(42, 7, 'manual')
+    await vi.waitFor(() => expect(stub.api.session.active).toHaveBeenCalled())
+
+    const unsubscribe = mocks.onEvent.mock.results.at(-1)?.value as ReturnType<typeof vi.fn>
+    await service.cancelRun(42, 7, 5)
+
+    stub.state.messageError = new Error('messages unavailable')
+    captureEventListener()(repo.fullPath, sessionIdleEvent(repo.fullPath, 'ses-monitor-error'))
+
+    await vi.waitFor(() => expect(unsubscribe).toHaveBeenCalled())
+
+    expect(mocks.updateScheduleRun).toHaveBeenCalledTimes(1)
+    expect(mocks.updateScheduleRun).toHaveBeenCalledWith(
+      expect.anything(),
+      42,
+      7,
+      5,
+      expect.objectContaining({ status: 'cancelled' }),
+    )
+  })
+
+  it('does not finalize a settled monitor after cancellation', async () => {
+    const stub = createStubScheduleApi({ sessionID: 'ses-monitor-settled', messages: [] })
+    const service = makeService(stub.api)
+    const runningRun: ScheduleRun = {
+      ...baseRun,
+      sessionId: 'ses-monitor-settled',
+      sessionTitle: 'Scheduled: Weekly engineering summary',
+    }
+    mocks.getScheduleRunById.mockReturnValue(runningRun)
+    mocks.updateScheduleRun.mockReturnValue({ ...runningRun, status: 'cancelled' })
+
+    let resolveActive!: (value: Record<string, { type: 'running' }>) => void
+    vi.mocked(stub.api.session.active).mockReturnValueOnce(new Promise((resolve) => { resolveActive = resolve }) as never)
+
+    await service.runJob(42, 7, 'manual')
+    await vi.waitFor(() => expect(stub.api.session.active).toHaveBeenCalledTimes(1))
+
+    await service.cancelRun(42, 7, 5)
+
+    stub.state.messages = [assistantMessage('Completed before monitor resolved.', { completed: true })]
+    resolveActive({})
+
+    await vi.waitFor(() => expect(mocks.updateScheduleRun).toHaveBeenCalled())
+
+    expect(mocks.updateScheduleRun).toHaveBeenCalledTimes(1)
+    expect(mocks.updateScheduleRun).toHaveBeenCalledWith(
+      expect.anything(),
+      42,
+      7,
+      5,
+      expect.objectContaining({ status: 'cancelled' }),
+    )
+  })
+
+  it('keeps monitoring when the interrupt fails during cancellation', async () => {
+    const stub = createStubScheduleApi({ sessionID: 'ses-interrupt-fail', messages: [], interruptError: new Error('Abort refused') })
+    const service = makeService(stub.api)
+    const runningRun: ScheduleRun = {
+      ...baseRun,
+      sessionId: 'ses-interrupt-fail',
+      sessionTitle: 'Scheduled: Weekly engineering summary',
+    }
+    mocks.getScheduleRunById.mockReturnValue(runningRun)
+    mocks.updateScheduleRun.mockReturnValue({ ...runningRun, status: 'completed' })
+
+    await service.runJob(42, 7, 'manual')
+    await vi.waitFor(() => expect(stub.api.session.active).toHaveBeenCalled())
+
+    const unsubscribe = mocks.onEvent.mock.results.at(-1)?.value as ReturnType<typeof vi.fn>
+    await expect(service.cancelRun(42, 7, 5)).rejects.toMatchObject({ status: 502 })
+
+    stub.state.messages = [assistantMessage('Finished after failed cancel.', { completed: true })]
+    captureEventListener()(repo.fullPath, sessionIdleEvent(repo.fullPath, 'ses-interrupt-fail'))
+
+    await vi.waitFor(() => expect(unsubscribe).toHaveBeenCalled())
+
+    expect(mocks.updateScheduleRun).toHaveBeenCalledTimes(1)
+    expect(mocks.updateScheduleRun).toHaveBeenCalledWith(
+      expect.anything(),
+      42,
+      7,
+      5,
+      expect.objectContaining({ status: 'completed' }),
+    )
+  })
+
+  it('holds monitor completion until a pending cancellation resolves', async () => {
+    const { stub, service } = setupRunningMonitor('ses-pending-monitor')
+    const worktreePath = '/workspace/worktrees/job-7-run-5'
+    const runBranch = 'schedule/7/run-5'
+    const runningRun: ScheduleRun = {
+      ...baseRun,
+      sessionId: 'ses-pending-monitor',
+      sessionTitle: 'Scheduled: Weekly engineering summary',
+      worktreePath,
+      runBranch,
+    }
+    let currentRun = runningRun
+    mocks.getScheduleRunById.mockImplementation(() => currentRun)
+    mocks.updateScheduleRun.mockImplementation((_db, _repoId, _jobId, _runId, input) => {
+      currentRun = { ...currentRun, ...input }
+      return currentRun
+    })
+    mocks.updateScheduleRunWorktree.mockImplementation((_db, _repoId, _jobId, _runId, input) => {
+      currentRun = { ...currentRun, ...input }
+      return currentRun
+    })
+    mocks.stubWorktreeManager.finalize.mockResolvedValue({ commitHash: 'abc123' })
+
+    await service.runJob(42, 7, 'manual')
+    await vi.waitFor(() => expect(stub.api.session.active).toHaveBeenCalled())
+
+    let resolveInterrupt!: (value: unknown) => void
+    vi.mocked(stub.api.session.interrupt).mockReturnValueOnce(new Promise((resolve) => { resolveInterrupt = resolve }) as never)
+
+    const cancelPromise = service.cancelRun(42, 7, 5)
+    await vi.waitFor(() => expect(stub.api.session.interrupt).toHaveBeenCalled())
+
+    stub.state.messages = [assistantMessage('Late completion.', { completed: true })]
+    captureEventListener()(repo.fullPath, sessionIdleEvent(repo.fullPath, 'ses-pending-monitor'))
+    await new Promise((resolve) => setTimeout(resolve, 0))
+
+    expect(mocks.updateScheduleRun).not.toHaveBeenCalled()
+    expect(mocks.stubWorktreeManager.finalize).not.toHaveBeenCalled()
+
+    resolveInterrupt({ interrupted: true })
+    await cancelPromise
+    await vi.waitFor(() => expect(mocks.updateScheduleRun).toHaveBeenCalled())
+
+    expect(mocks.updateScheduleRun).toHaveBeenCalledTimes(1)
+    expect(mocks.updateScheduleRun).toHaveBeenCalledWith(
+      expect.anything(),
+      42,
+      7,
+      5,
+      expect.objectContaining({ status: 'cancelled' }),
+    )
+    expect(mocks.stubWorktreeManager.finalize).toHaveBeenCalledTimes(1)
+  })
+
+  it('holds monitor status writes until a pending cancellation read resolves', async () => {
+    const { stub, service } = setupRunningMonitor('ses-pending-read')
+
+    await service.runJob(42, 7, 'manual')
+    await vi.waitFor(() => expect(stub.api.session.active).toHaveBeenCalledTimes(1))
+
+    let resolveActive!: (value: Record<string, { type: 'running' }>) => void
+    vi.mocked(stub.api.session.active).mockReturnValueOnce(new Promise((resolve) => { resolveActive = resolve }) as never)
+
+    const cancelPromise = service.cancelRun(42, 7, 5)
+    await vi.waitFor(() => expect(stub.api.session.active).toHaveBeenCalledTimes(2))
+
+    captureEventListener()(repo.fullPath, {
+      id: 'evt_pending_interrupted',
+      created: Date.now(),
+      type: 'session.execution.interrupted',
+      location: { directory: repo.fullPath },
+      data: { sessionID: 'ses-pending-read' },
+    })
+    await new Promise((resolve) => setTimeout(resolve, 0))
+
+    expect(mocks.updateScheduleRun).not.toHaveBeenCalled()
+
+    resolveActive({})
+    await cancelPromise
+    await vi.waitFor(() => expect(mocks.updateScheduleRun).toHaveBeenCalled())
+
+    expect(mocks.updateScheduleRun).toHaveBeenCalledTimes(1)
+    expect(mocks.updateScheduleRun).toHaveBeenCalledWith(
+      expect.anything(),
+      42,
+      7,
+      5,
+      expect.objectContaining({ status: 'cancelled' }),
+    )
+  })
+
+  it('holds the prompt until a pending cancellation resolves', async () => {
+    const stub = createStubScheduleApi({ sessionID: 'ses-pending-skill', skills: [skill('git-release')], messages: [] })
+    const service = makeService(stub.api)
+    const jobWithSkills: ScheduleJob = { ...job, skillMetadata: { skillSlugs: ['git-release'], notes: undefined } }
+    mocks.getScheduleJobById.mockReturnValue(jobWithSkills)
+    const runningRun: ScheduleRun = {
+      ...baseRun,
+      sessionId: 'ses-pending-skill',
+      sessionTitle: 'Scheduled: Weekly engineering summary',
+    }
+    mocks.getScheduleRunById.mockReturnValue(runningRun)
+    mocks.updateScheduleRun.mockReturnValue({ ...runningRun, status: 'cancelled' })
+
+    let resolveSkillList!: (value: unknown) => void
+    vi.mocked(stub.api.skill.list).mockReturnValueOnce(new Promise((resolve) => { resolveSkillList = resolve }) as never)
+
+    await service.runJob(42, 7, 'manual')
+    await vi.waitFor(() => expect(stub.api.skill.list).toHaveBeenCalled())
+
+    let resolveInterrupt!: (value: unknown) => void
+    vi.mocked(stub.api.session.interrupt).mockReturnValueOnce(new Promise((resolve) => { resolveInterrupt = resolve }) as never)
+
+    const cancelPromise = service.cancelRun(42, 7, 5)
+    await vi.waitFor(() => expect(stub.api.session.interrupt).toHaveBeenCalled())
+
+    resolveSkillList({ location: { directory: '' }, data: [skill('git-release')] })
+    await new Promise((resolve) => setTimeout(resolve, 0))
+
+    expect(stub.api.session.prompt).not.toHaveBeenCalled()
+
+    resolveInterrupt({ interrupted: true })
+    await cancelPromise
+    await new Promise((resolve) => setTimeout(resolve, 0))
+
+    expect(stub.api.session.prompt).not.toHaveBeenCalled()
+    expect(mocks.updateScheduleRun).toHaveBeenCalledTimes(1)
+    expect(mocks.updateScheduleRun).toHaveBeenCalledWith(
+      expect.anything(),
+      42,
+      7,
+      5,
+      expect.objectContaining({ status: 'cancelled' }),
+    )
+  })
+
+  it('holds a failed cancellation retry pending', async () => {
+    const { stub, service } = setupRunningMonitor('ses-cancel-retry')
+
+    await service.runJob(42, 7, 'manual')
+    await vi.waitFor(() => expect(stub.api.session.active).toHaveBeenCalled())
+
+    vi.mocked(stub.api.session.interrupt).mockRejectedValueOnce(new Error('Abort refused'))
+    await expect(service.cancelRun(42, 7, 5)).rejects.toMatchObject({ status: 502 })
+
+    let resolveRetry!: (value: unknown) => void
+    vi.mocked(stub.api.session.interrupt).mockReturnValueOnce(new Promise((resolve) => { resolveRetry = resolve }) as never)
+
+    const retryPromise = service.cancelRun(42, 7, 5)
+    await vi.waitFor(() => expect(stub.api.session.interrupt).toHaveBeenCalledTimes(2))
+
+    stub.state.messages = [assistantMessage('Late completion.', { completed: true })]
+    captureEventListener()(repo.fullPath, sessionIdleEvent(repo.fullPath, 'ses-cancel-retry'))
+    await new Promise((resolve) => setTimeout(resolve, 0))
+
+    expect(mocks.updateScheduleRun).not.toHaveBeenCalled()
+
+    resolveRetry({ interrupted: true })
+    await retryPromise
+    await vi.waitFor(() => expect(mocks.updateScheduleRun).toHaveBeenCalled())
+
+    expect(mocks.updateScheduleRun).toHaveBeenCalledTimes(1)
+    expect(mocks.updateScheduleRun).toHaveBeenCalledWith(
+      expect.anything(),
+      42,
+      7,
+      5,
+      expect.objectContaining({ status: 'cancelled' }),
+    )
+  })
+
+  it('rejects a duplicate cancellation while one is in progress', async () => {
+    const { stub, service } = setupRunningMonitor('ses-cancel-dup')
+
+    await service.runJob(42, 7, 'manual')
+    await vi.waitFor(() => expect(stub.api.session.active).toHaveBeenCalled())
+
+    let resolveInterrupt!: (value: unknown) => void
+    vi.mocked(stub.api.session.interrupt).mockReturnValueOnce(new Promise((resolve) => { resolveInterrupt = resolve }) as never)
+
+    const firstCancel = service.cancelRun(42, 7, 5)
+    await vi.waitFor(() => expect(stub.api.session.interrupt).toHaveBeenCalledTimes(1))
+
+    await expect(service.cancelRun(42, 7, 5)).rejects.toMatchObject({ status: 409 })
+    expect(stub.api.session.interrupt).toHaveBeenCalledTimes(1)
+
+    resolveInterrupt({ interrupted: true })
+    await firstCancel
+    await vi.waitFor(() => expect(mocks.updateScheduleRun).toHaveBeenCalled())
+
+    expect(mocks.updateScheduleRun).toHaveBeenCalledTimes(1)
+    expect(mocks.updateScheduleRun).toHaveBeenCalledWith(
+      expect.anything(),
+      42,
+      7,
+      5,
+      expect.objectContaining({ status: 'cancelled' }),
+    )
+  })
+
+  it('settles the decision from persisted state when finalization throws', async () => {
+    const stub = createStubScheduleApi({ sessionID: 'ses-finalize-throw', messages: [] })
+    const service = makeService(stub.api)
+    let currentRun: ScheduleRun = {
+      ...baseRun,
+      sessionId: 'ses-finalize-throw',
+      sessionTitle: 'Scheduled: Weekly engineering summary',
+    }
+    mocks.getScheduleRunById.mockImplementation(() => currentRun)
+    mocks.updateScheduleRun.mockImplementation((_db, _repoId, _jobId, _runId, input) => {
+      currentRun = { ...currentRun, ...input }
+      return currentRun
+    })
+    mocks.updateScheduleJobRunState.mockImplementationOnce(() => {
+      throw new Error('db write failed')
+    })
+
+    await service.runJob(42, 7, 'manual')
+    await vi.waitFor(() => expect(stub.api.session.active).toHaveBeenCalled())
+
+    const unsubscribe = mocks.onEvent.mock.results.at(-1)?.value as ReturnType<typeof vi.fn>
+    await expect(service.cancelRun(42, 7, 5)).rejects.toThrow('db write failed')
+
+    stub.state.messages = [assistantMessage('Late completion.', { completed: true })]
+    captureEventListener()(repo.fullPath, sessionIdleEvent(repo.fullPath, 'ses-finalize-throw'))
+    await vi.waitFor(() => expect(unsubscribe).toHaveBeenCalled())
+
+    await vi.waitFor(() => expect(Reflect.get(ScheduleService, 'activeRuns').has(7)).toBe(false))
+
+    expect(mocks.updateScheduleRun).toHaveBeenCalledTimes(1)
+    expect(mocks.updateScheduleRun).toHaveBeenCalledWith(
+      expect.anything(),
+      42,
+      7,
+      5,
+      expect.objectContaining({ status: 'cancelled' }),
+    )
   })
 })
 

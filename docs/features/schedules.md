@@ -14,6 +14,8 @@ Schedules make OpenCode Manager proactive instead of purely session-driven. Good
 
 Each run is stored with status, timestamps, logs, assistant output, and a linked session you can open and continue.
 
+Cancelling during startup stops model loading and prevents later prompt submission. If session creation was already in flight, the returned session is interrupted rather than prompted.
+
 ## Creating a Schedule
 
 1. Open a repository
@@ -65,7 +67,7 @@ Schedules can run with:
 - a custom agent slug
 - a specific model override when needed
 
-If a requested model is no longer available, OpenCode Manager falls back to a valid configured model for that provider so the run can still start when possible.
+OpenCode Manager allows up to 15 seconds for a fresh worktree's model catalog to load before treating a missing requested or configured model as unavailable. It prefers the schedule override, then the configured model, then OpenCode's default, then the first enabled model. A fallback can use a different provider. Model-catalog requests are bounded by that deadline.
 
 ## Skills
 

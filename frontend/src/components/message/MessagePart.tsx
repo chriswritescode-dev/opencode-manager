@@ -9,11 +9,12 @@ type AssistantContentPart = SessionMessageAssistant['content'][number]
 interface MessagePartProps {
   part: AssistantContentPart
   messageID?: string
+  directory?: string
   onFileClick?: (filePath: string, lineNumber?: number) => void
   onChildSessionClick?: (sessionId: string) => void
 }
 
-export const MessagePart = memo(function MessagePart({ part, messageID, onFileClick, onChildSessionClick }: MessagePartProps) {
+export const MessagePart = memo(function MessagePart({ part, messageID, directory, onFileClick, onChildSessionClick }: MessagePartProps) {
   const { preferences } = useSettings()
   const simpleChatMode = preferences?.simpleChatMode ?? false
   const showReasoning = preferences?.showReasoning ?? false
@@ -40,6 +41,7 @@ export const MessagePart = memo(function MessagePart({ part, messageID, onFileCl
         <ToolCallPart
           part={part}
           messageID={messageID}
+          directory={directory}
           onFileClick={onFileClick}
           onChildSessionClick={onChildSessionClick}
         />
