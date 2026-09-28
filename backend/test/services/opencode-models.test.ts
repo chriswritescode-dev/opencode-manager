@@ -225,6 +225,24 @@ describe('resolveOpenCodeModel', () => {
     expect(listCalls).toBe(3)
   })
 
+  it('resolves an object configured model and preserves its variant', async () => {
+    const client = createClientStub({
+      models: [model('openai', 'gpt-5')],
+      configEntries: [
+        { type: 'document', info: { model: { providerID: 'openai', model: 'gpt-5', variant: 'high' } } } as ConfigEntry,
+      ],
+    })
+
+    const result = await resolveOpenCodeModel(client, DIR)
+
+    expect(result).toEqual({
+      providerID: 'openai',
+      id: 'gpt-5',
+      variant: 'high',
+      model: 'openai/gpt-5#high',
+    })
+  })
+
   it('does not resolve a same-provider fallback before the target model loads', async () => {
     const client = createClientStub({
       models: [model('openai', 'gpt-4')],

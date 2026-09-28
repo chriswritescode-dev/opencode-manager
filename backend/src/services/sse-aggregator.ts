@@ -1,7 +1,7 @@
 import { EventSource } from 'eventsource'
 import { logger } from '../utils/logger'
 import { DEFAULTS } from '@opencode-manager/shared/config'
-import { openCodeLocation, type OpenCodeApi, type V2Event } from '@opencode-manager/shared/opencode'
+import { openCodeLocation, sessionIDFromEvent, type OpenCodeApi, type V2Event } from '@opencode-manager/shared/opencode'
 import { getOpenCodeBasicAuthHeader, type OpenCodePasswordResolver } from './opencode/auth'
 import { getOpenCodeUpstreamBaseUrl } from './opencode/upstream'
 import { encodeSSEFrame } from '../utils/sse-frame'
@@ -44,6 +44,7 @@ class SSEAggregator {
   private clients: Map<string, SSEClient> = new Map()
   private directoryClients: Map<string, Set<string>> = new Map()
   private activeSessions: Map<string, Set<string>> = new Map()
+  private sessionDirectories: Map<string, string> = new Map()
   private eventListeners: Set<SSEEventListener> = new Set()
   private subagentSessions: Map<string, Set<string>> = new Map()
   private upstream: EventSource | null = null
@@ -284,12 +285,14 @@ class SSEAggregator {
     for (const ref of this.getScheduledSessions()) {
       tracked.set(ref.sessionID, ref.directory)
     }
+    tracked.forEach((directory, sessionID) => this.sessionDirectories.set(sessionID, directory))
     return tracked
   }
 
   private async resolveSessionDirectory(fetcher: PendingActionsFetcher, sessionID: string): Promise<string | null> {
     try {
       const session = await fetcher.api.session.get({ sessionID })
+      this.sessionDirectories.set(sessionID, session.location.directory)
       return session.location.directory
     } catch (error) {
       logger.warn(`replay: failed to resolve directory for session ${sessionID}: ${String(error)}`)
@@ -403,29 +406,53 @@ class SSEAggregator {
 
     const payloadJson = MULTILINE_PATTERN.test(data) ? JSON.stringify(event) : data
     const directory = event.location?.directory
+    const sessionID = sessionIDFromEvent(event)
 
     try {
+      const resolvedDirectory = directory ?? (sessionID ? this.sessionDirectories.get(sessionID) : undefined)
+
+      if (sessionID && event.type === 'session.deleted') {
+        this.sessionDirectories.delete(sessionID)
+      } else if (directory && sessionID) {
+        this.sessionDirectories.set(sessionID, directory)
+      }
+
       if (directory) {
         this.deliverEvent(directory, event, payloadJson)
-      } else {
-        this.writeEnvelopeToClients(this.clients.keys(), null, payloadJson)
+        return
       }
+
+      if (resolvedDirectory) {
+        this.deliverResolvedEvent(resolvedDirectory, event, payloadJson)
+        return
+      }
+
+      this.writeEnvelopeToClients(this.clients.keys(), null, payloadJson)
     } catch (error) {
       logger.error(`SSE failed to handle ${event.type} event:`, error)
     }
   }
 
   private deliverEvent(directory: string, event: SSEEvent, payloadJson?: string): void {
-    this.handleEvent(directory, event)
-
-    this.eventListeners.forEach(listener => {
-      try { listener(directory, event) } catch { /* ignore listener errors */ }
-    })
+    this.notifyEvent(directory, event)
 
     const subscriberIds = this.directoryClients.get(directory)
     if (!subscriberIds || subscriberIds.size === 0) return
 
     this.writeEnvelopeToClients(subscriberIds, directory, payloadJson ?? JSON.stringify(event))
+  }
+
+  private deliverResolvedEvent(directory: string, event: SSEEvent, payloadJson: string): void {
+    this.notifyEvent(directory, event)
+    this.writeEnvelopeToClients(this.clients.keys(), null, payloadJson)
+  }
+
+  private notifyEvent(directory: string, event: SSEEvent): void {
+    this.handleEvent(directory, event)
+
+    this.eventListeners.forEach(listener => {
+      try { listener(directory, event) } catch { /* ignore listener errors */ }
+    })
   }
 
   private writeEnvelopeToClients(clientIds: Iterable<string>, directory: string | null, payloadJson: string): void {
@@ -594,6 +621,7 @@ class SSEAggregator {
     this.upstreamConnected = false
 
     this.activeSessions.clear()
+    this.sessionDirectories.clear()
     this.subagentSessions.clear()
     this.directoryClients.clear()
     this.clients.clear()

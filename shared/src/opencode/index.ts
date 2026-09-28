@@ -48,7 +48,7 @@ export { ClientError, isIntegrationNotFoundError, isMcpServerNotFoundError, isSe
 
 export { assistantText, sessionIDFromEvent, toolContentText } from './content'
 
-export { formatOpenCodeModelRef, parseOpenCodeModelRef } from './modelRef'
+export { formatOpenCodeModelRef, parseOpenCodeModelRef, selectConfiguredModelRef } from './modelRef'
 
 export {
   MCP_OAUTH_CALLBACK_PATH,

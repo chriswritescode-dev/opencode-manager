@@ -15,6 +15,7 @@ vi.mock('../../src/utils/logger', () => ({
 }))
 
 import type { OpenCodeApi } from '@opencode-manager/shared/opencode'
+import { sessionIDFromEvent } from '@opencode-manager/shared/opencode'
 import { sseAggregator, type PendingActionsFetcher } from '../../src/services/sse-aggregator'
 
 interface CapturedEvent {
@@ -645,5 +646,93 @@ describe('SSEAggregator directory-indexed broadcast', () => {
 
     emitRawEvent({ type: 'session.idle', location: { directory: '/b' }, data: { sessionID: 'ses-1' } })
     expect(clientB.frames).toHaveLength(1)
+  })
+})
+
+describe('SSEAggregator directory-less session event routing', () => {
+  beforeEach(() => {
+    sseAggregator.shutdown()
+    sseAggregator.setPendingActionsFetcher(null)
+    sseAggregator.setScheduledSessionsResolver(() => [])
+  })
+
+  it('resolves a directory-less terminal event from the remembered directory for listeners, active sessions, and all clients', () => {
+    const subscribed = createCapturingClient()
+    const global = createCapturingClient()
+    sseAggregator.addClient('resolved-a', subscribed.callback, subscribed.writeFrame, ['/r'])
+    sseAggregator.addClient('resolved-b', global.callback, global.writeFrame, [])
+
+    const seen: Array<{ directory: string; type: string; sessionID: string }> = []
+    sseAggregator.onEvent((directory, event) => {
+      seen.push({ directory, type: event.type, sessionID: sessionIDFromEvent(event) ?? '' })
+    })
+
+    emitRawEvent({ type: 'session.execution.started', location: { directory: '/r' }, data: { sessionID: 'ses_1' } })
+    expect(sseAggregator.getActiveSessions()).toEqual({ '/r': ['ses_1'] })
+
+    emitRawEvent({ type: 'session.execution.succeeded', data: { sessionID: 'ses_1' } })
+
+    expect(seen).toEqual([
+      { directory: '/r', type: 'session.execution.started', sessionID: 'ses_1' },
+      { directory: '/r', type: 'session.execution.succeeded', sessionID: 'ses_1' },
+    ])
+    expect(sseAggregator.getActiveSessions()).toEqual({})
+
+    expect(subscribed.frames.map(parseFrame)).toEqual([
+      {
+        directory: '/r',
+        payload: { id: 'evt_1', created: 1, type: 'session.execution.started', location: { directory: '/r' }, data: { sessionID: 'ses_1' } },
+      },
+      {
+        directory: null,
+        payload: { id: 'evt_1', created: 1, type: 'session.execution.succeeded', data: { sessionID: 'ses_1' } },
+      },
+    ])
+    expect(global.frames.map(parseFrame)).toEqual([
+      {
+        directory: null,
+        payload: { id: 'evt_1', created: 1, type: 'session.execution.succeeded', data: { sessionID: 'ses_1' } },
+      },
+    ])
+  })
+
+  it('broadcasts a directory-less event from an unknown session without notifying listeners', () => {
+    const client = createCapturingClient()
+    sseAggregator.addClient('unknown-a', client.callback, client.writeFrame, ['/r'])
+
+    const seen: string[] = []
+    sseAggregator.onEvent((_directory, event) => { seen.push(event.type) })
+
+    emitRawEvent({ type: 'session.execution.succeeded', data: { sessionID: 'ses_unknown' } })
+
+    expect(seen).toEqual([])
+    expect(sseAggregator.getActiveSessions()).toEqual({})
+    expect(client.frames.map(parseFrame)).toEqual([
+      {
+        directory: null,
+        payload: { id: 'evt_1', created: 1, type: 'session.execution.succeeded', data: { sessionID: 'ses_unknown' } },
+      },
+    ])
+  })
+
+  it('forgets the remembered directory when session.deleted arrives', () => {
+    const client = createCapturingClient()
+    sseAggregator.addClient('deleted-a', client.callback, client.writeFrame, ['/r'])
+
+    const seen: string[] = []
+    sseAggregator.onEvent((_directory, event) => { seen.push(event.type) })
+
+    emitRawEvent({ type: 'session.created', location: { directory: '/r' }, data: { sessionID: 'ses_del' } })
+    emitRawEvent({ type: 'session.deleted', data: { sessionID: 'ses_del' } })
+
+    seen.length = 0
+    emitRawEvent({ type: 'session.execution.succeeded', data: { sessionID: 'ses_del' } })
+
+    expect(seen).toEqual([])
+    expect(sseAggregator.getActiveSessions()).toEqual({})
+    expect(client.frames.map(parseFrame).at(-1)).toEqual({
+      directory: null,
+      payload: { id: 'evt_1', created: 1, type: 'session.execution.succeeded', data: { sessionID: 'ses_del' } },
+    })
   })
 })

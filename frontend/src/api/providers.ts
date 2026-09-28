@@ -2,7 +2,7 @@ import { API_BASE_URL } from "@/config";
 import { settingsApi } from "./settings";
 import { fetchWrapper } from "./fetchWrapper";
 import { callOpenCode } from "./opencodeApi";
-import { openCodeLocation, type ConfigEntry, type FormAnswer, type ModelInfo } from "@opencode-manager/shared/opencode";
+import { openCodeLocation, selectConfiguredModelRef, type FormAnswer, type ModelInfo } from "@opencode-manager/shared/opencode";
 import type { CredentialListResponse, CredentialStatusResponse } from "@opencode-manager/shared/schemas";
 import type { OpenCodeConfigFile } from "./types/settings";
 
@@ -128,20 +128,11 @@ export async function getProviders(directory?: string): Promise<ProvidersResult>
   }
 }
 
-type ConfigDocumentModel = Extract<ConfigEntry, { type: "document" }>["info"]["model"];
-
-function formatConfigModel(model: NonNullable<ConfigDocumentModel>): string {
-  return typeof model === "string" ? model : `${model.providerID}/${model.model}`;
-}
-
 export async function getOpenCodeConfigModel(directory?: string): Promise<string | null> {
   try {
     const entries = await callOpenCode((api) => api.config.get(openCodeLocation(directory)));
-    const model = entries.reduce<ConfigDocumentModel>(
-      (current, entry) => (entry.type === "document" && entry.info.model ? entry.info.model : current),
-      undefined,
-    );
-    return model ? formatConfigModel(model) : null;
+    const ref = selectConfiguredModelRef(entries);
+    return ref ? `${ref.providerID}/${ref.id}` : null;
   } catch {
     return null;
   }

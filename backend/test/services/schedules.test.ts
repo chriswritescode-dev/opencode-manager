@@ -386,6 +386,52 @@ describe('ScheduleService', () => {
     })
   })
 
+  it('completes from a directory-less session.execution.succeeded resolved to the run directory', async () => {
+    const stub = createStubScheduleApi({
+      sessionID: 'ses-run-exec',
+      active: { 'ses-run-exec': { type: 'running' } },
+    })
+    const service = makeService(stub.api)
+    const runWithSession: ScheduleRun = {
+      ...baseRun,
+      sessionId: 'ses-run-exec',
+      sessionTitle: 'Scheduled: Weekly engineering summary',
+      logText: 'Run started. Waiting for assistant response...',
+    }
+
+    mocks.updateScheduleRunMetadata.mockReturnValue(runWithSession)
+    mocks.getScheduleRunById.mockReturnValue(runWithSession)
+
+    await service.runJob(42, 7, 'manual')
+
+    await vi.waitFor(() => {
+      expect(stub.api.session.active).toHaveBeenCalled()
+    })
+    expect(mocks.updateScheduleRun).not.toHaveBeenCalled()
+
+    stub.state.active = {}
+    stub.state.messages = [assistantMessage('Execution summary.', { completed: true })]
+    captureEventListener()(repo.fullPath, {
+      id: 'evt_exec_succeeded',
+      created: Date.now(),
+      type: 'session.execution.succeeded',
+      data: { sessionID: 'ses-run-exec' },
+    })
+
+    await vi.waitFor(() => {
+      expect(mocks.updateScheduleRun).toHaveBeenCalledWith(
+        expect.anything(),
+        42,
+        7,
+        5,
+        expect.objectContaining({
+          status: 'completed',
+          responseText: 'Execution summary.',
+        }),
+      )
+    })
+  })
+
   it('keeps waiting when an intermediate assistant step completes while the session is still busy', async () => {
     const stub = createStubScheduleApi({
       sessionID: 'ses-multi',

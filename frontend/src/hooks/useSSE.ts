@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState, useCallback, useMemo } from 'react'
 import { useQueryClient } from '@tanstack/react-query'
 import type { SessionInfo, V2Event } from '@opencode-manager/shared/opencode'
-import { invalidateChildSessionCaches, invalidateSessionListCaches, shellsQueryKey } from '@/lib/queryInvalidation'
+import { invalidateSessionListCaches, invalidateShellCaches, shellsQueryKey } from '@/lib/queryInvalidation'
 import {
   applyShellExit,
   markShellDeleted,
@@ -201,8 +201,7 @@ export const useSSE = (directory?: string | string[], currentSessionId?: string)
       if (connected) {
         setError(null)
         syncCurrentSession()
-        queryClient.invalidateQueries({ queryKey: ['opencode', 'shells'] })
-        invalidateChildSessionCaches(queryClient)
+        invalidateShellCaches(queryClient)
         eventStreamSubscriptionRef.current?.reportVisibility(document.visibilityState === 'visible', sessionIdRef.current)
       } else {
         setError('Connection lost. Reconnecting...')
@@ -212,8 +211,7 @@ export const useSSE = (directory?: string | string[], currentSessionId?: string)
     const handleResync = () => {
       if (!mountedRef.current) return
       invalidateSessionListCaches(queryClient)
-      queryClient.invalidateQueries({ queryKey: ['opencode', 'shells'] })
-      invalidateChildSessionCaches(queryClient)
+      invalidateShellCaches(queryClient)
       refreshCurrentSession()
     }
 

@@ -75,6 +75,18 @@ const backgroundShellTool = (shellID: string, command = 'npm run dev'): SessionM
   time: { created: 1 },
 })
 
+const shellNotice = (
+  shellID: string,
+  state: 'completed' | 'error',
+  exit?: number,
+): SessionMessageInfo => ({
+  id: `notice-${shellID}`,
+  type: 'synthetic',
+  text: '',
+  metadata: { source: 'shell', shellID, state, ...(exit === undefined ? {} : { exit }) },
+  time: { created: 3 },
+})
+
 const backgroundSubagentTool = (childSessionID: string, description = 'Explore'): SessionMessageAssistant => ({
   id: 'msg-sub',
   type: 'assistant',
@@ -171,6 +183,7 @@ describe('BackgroundWorkBar', () => {
     await waitFor(() => expect(api.removeShell).toHaveBeenCalledWith('dev', '/repo'))
     expect(await screen.findByText('killed')).toBeInTheDocument()
     expect(screen.getByText('npm run dev')).toBeInTheDocument()
+    clearShellExitRecord('/repo', 'dev')
   })
 
   it('updates a shell row from running to completed without removing it', async () => {
@@ -343,6 +356,32 @@ describe('BackgroundWorkBar', () => {
     expect(await screen.findByText('unavailable')).toBeInTheDocument()
     expect(screen.getByText('npm run history')).toBeInTheDocument()
     expect(screen.queryByText('running')).not.toBeInTheDocument()
+  })
+
+  it('shows a historical shell absent from the list as completed from its notice', async () => {
+    api.listShells.mockResolvedValue([])
+    renderBar(
+      [backgroundShellTool('sh-notice', 'npm run notice'), shellNotice('sh-notice', 'completed', 0)],
+      false,
+    )
+
+    fireEvent.click(await screen.findByRole('button', { name: /1 background task$/ }))
+
+    expect(await screen.findByText('completed')).toBeInTheDocument()
+    expect(screen.queryByText('unavailable')).not.toBeInTheDocument()
+  })
+
+  it('shows a historical shell absent from the list as failed from its error notice', async () => {
+    api.listShells.mockResolvedValue([])
+    renderBar(
+      [backgroundShellTool('sh-notice', 'npm run notice'), shellNotice('sh-notice', 'error')],
+      false,
+    )
+
+    fireEvent.click(await screen.findByRole('button', { name: /1 background task$/ }))
+
+    expect(await screen.findByText('failed')).toBeInTheDocument()
+    expect(screen.queryByText('unavailable')).not.toBeInTheDocument()
   })
 
   it('keeps a historical shell unknown while its list is still loading', async () => {

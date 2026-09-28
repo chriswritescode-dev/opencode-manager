@@ -1,19 +1,35 @@
 import { describe, expect, it } from 'vitest'
+import type { SessionMessageInfo } from '@opencode-manager/shared/opencode'
 import {
   applyShellExit,
   childLifecycle,
   clearShellExitRecord,
+  collectBackgroundParts,
   isRunningLifecycle,
   markShellDeleted,
   reconcileShellList,
   recordShellDeleted,
   recordShellExit,
+  shellBackgroundTasks,
   shellLifecycle,
   shellToolLifecycle,
   subagentLifecycle,
   upsertShell,
   type ShellRecord,
 } from './backgroundWork'
+
+const shellNotice = (
+  id: string,
+  shellID: string,
+  state: 'completed' | 'error',
+  exit?: number,
+): SessionMessageInfo => ({
+  id,
+  type: 'synthetic',
+  text: '',
+  metadata: { source: 'shell', shellID, state, ...(exit === undefined ? {} : { exit }) },
+  time: { created: 1 },
+})
 
 const shell = (id: string, status: ShellRecord['status'], exit?: number, started = 1): ShellRecord => ({
   id,
@@ -106,6 +122,67 @@ describe('shellToolLifecycle', () => {
     expect(shellToolLifecycle('sh_1', undefined, false)).toBe('unknown')
     expect(shellToolLifecycle('sh_1', undefined, true)).toBe('unavailable')
   })
+
+  it('falls back to the transcript notice outcome when the shell is absent', () => {
+    expect(shellToolLifecycle('sh_1', undefined, true, 'completed')).toBe('completed')
+    expect(shellToolLifecycle('sh_1', undefined, true, 'failed')).toBe('failed')
+  })
+
+  it('prefers the live shell record over the transcript notice outcome', () => {
+    expect(shellToolLifecycle('sh_1', shell('sh_1', 'running'), true, 'failed')).toBe('running')
+  })
+})
+
+describe('collectBackgroundParts', () => {
+  it('collects shell completion notices by shell ID', () => {
+    const collected = collectBackgroundParts([
+      shellNotice('syn-1', 'sh_1', 'completed', 0),
+      shellNotice('syn-2', 'sh_2', 'error'),
+      shellNotice('syn-3', 'sh_3', 'completed'),
+    ])
+
+    expect(collected.shellNotices.get('sh_1')).toBe('completed')
+    expect(collected.shellNotices.get('sh_2')).toBe('failed')
+    expect(collected.shellNotices.get('sh_3')).toBe('completed')
+  })
+
+  it('ignores notices without a shell ID', () => {
+    const collected = collectBackgroundParts([
+      {
+        id: 'syn-1',
+        type: 'synthetic',
+        text: '',
+        metadata: { source: 'shell', state: 'completed' },
+        time: { created: 1 },
+      },
+    ])
+
+    expect(collected.shellNotices.size).toBe(0)
+  })
+})
+
+describe('shellBackgroundTasks', () => {
+  it('uses a transcript notice when the shell has no live record', () => {
+    const tasks = shellBackgroundTasks(
+      [],
+      [{ id: 'sh_1', label: 'npm run dev' }],
+      new Map([['sh_1', 'completed']]),
+      true,
+    )
+
+    expect(tasks[0]?.status).toBe('completed')
+  })
+
+  it('uses a failed transcript notice when the shell has no live record', () => {
+    const tasks = shellBackgroundTasks(
+      [],
+      [{ id: 'sh_1', label: 'npm run dev' }],
+      new Map([['sh_1', 'failed']]),
+      true,
+    )
+
+    expect(tasks[0]?.status).toBe('failed')
+  })
 })
 
 describe('reconcileShellList', () => {
@@ -173,6 +250,55 @@ describe('reconcileShellList', () => {
 
     clearShellExitRecord('/other', 'a')
   })
+
+  it('prunes a shell exit record once a later fetch confirms the terminal status', () => {
+    recordShellExit('/repo', { id: 'a', status: 'exited', exit: 0 })
+
+    const [result] = reconcileShellList([], [shell('a', 'exited', 0)], Date.now() + 1000, '/repo')
+
+    expect(result?.status).toBe('exited')
+
+    const [afterPrune] = upsertShell([], shell('a', 'running'), '/repo')
+    expect(afterPrune?.status).toBe('running')
+  })
+
+  it('keeps a shell exit record when the fetch started before it was written', () => {
+    const fetchStartedAt = Date.now() - 1000
+    recordShellExit('/repo', { id: 'a', status: 'exited', exit: 0 })
+
+    const [result] = reconcileShellList([], [shell('a', 'exited', 0)], fetchStartedAt, '/repo')
+
+    expect(result?.status).toBe('exited')
+
+    const [afterStaleFetch] = upsertShell([], shell('a', 'running'), '/repo')
+    expect(afterStaleFetch?.status).toBe('exited')
+
+    clearShellExitRecord('/repo', 'a')
+  })
+
+  it('prunes a shell exit record once a later fetch omits a terminal shell', () => {
+    recordShellExit('/repo', { id: 'a', status: 'exited', exit: 0 })
+    const cached = shell('a', 'exited', 0, 50)
+
+    const [result] = reconcileShellList([cached], [], Date.now() + 1000, '/repo')
+
+    expect(result?.status).toBe('exited')
+
+    const [afterPrune] = upsertShell([], shell('a', 'running'), '/repo')
+    expect(afterPrune?.status).toBe('running')
+  })
+
+  it('prunes a shell exit record once a later fetch omits the shell it marked', () => {
+    recordShellExit('/repo', { id: 'a', status: 'exited', exit: 0 })
+
+    const [result] = reconcileShellList([shell('a', 'running', undefined, 50)], [], Date.now() + 1000, '/repo')
+
+    expect(result?.status).toBe('exited')
+    expect(result?.exit).toBe(0)
+
+    const [afterPrune] = upsertShell([], shell('a', 'running'), '/repo')
+    expect(afterPrune?.status).toBe('running')
+  })
 })
 
 describe('upsertShell', () => {
@@ -186,6 +312,12 @@ describe('upsertShell', () => {
     const cached = shell('a', 'unavailable')
 
     expect(upsertShell([cached], shell('a', 'running'), '/repo')).toEqual([cached])
+  })
+
+  it('does not replace a terminal shell status with a different status', () => {
+    const cached = shell('a', 'killed')
+
+    expect(upsertShell([cached], shell('a', 'exited', 0), '/repo')).toEqual([cached])
   })
 
   it('does not resurrect a shell deleted before the cache was seeded', () => {
@@ -222,6 +354,12 @@ describe('applyShellExit', () => {
     const [result] = applyShellExit([shell('a', 'unavailable')], { id: 'a', status: 'running' })
 
     expect(result?.status).toBe('unavailable')
+  })
+
+  it('does not replace a killed shell with a later exit event', () => {
+    const [result] = applyShellExit([shell('a', 'killed')], { id: 'a', status: 'exited', exit: 0 })
+
+    expect(result?.status).toBe('killed')
   })
 
   it('leaves unrelated shells untouched', () => {

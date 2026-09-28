@@ -200,8 +200,8 @@ describe('ToolCallPart background indicator', () => {
     expect(screen.getByText('completed')).toBeInTheDocument()
   })
 
-  it('shows a background shell missing from a loaded list as unavailable', async () => {
-    renderWithProviders(
+  it('shows a background shell missing from a loaded list as a non-spinning unavailable icon', async () => {
+    const { container } = renderWithProviders(
       <ToolCallPart
         part={completedShell({ status: 'running', shellID: 'sh_missing' })}
         messageID="msg_1"
@@ -210,6 +210,36 @@ describe('ToolCallPart background indicator', () => {
     )
 
     await waitFor(() => expect(screen.getByText('unavailable')).toBeInTheDocument())
+    expect(screen.queryByText('background')).not.toBeInTheDocument()
+    expect(container.querySelector('.animate-spin')).toBeNull()
+  })
+
+  it('completes a background shell missing from the list from its notice', async () => {
+    const { container } = renderWithProviders(
+      <ToolCallPart
+        part={completedShell({ status: 'running', shellID: 'sh_notice' })}
+        messageID="msg_1"
+        directory="/repo"
+        shellOutcome="completed"
+      />,
+    )
+
+    await waitFor(() => expect(screen.getByText('completed')).toBeInTheDocument())
+    expect(screen.queryByText('background')).not.toBeInTheDocument()
+    expect(container.querySelector('.animate-spin')).toBeNull()
+  })
+
+  it('fails a background shell missing from the list from its notice', async () => {
+    renderWithProviders(
+      <ToolCallPart
+        part={completedShell({ status: 'running', shellID: 'sh_notice' })}
+        messageID="msg_1"
+        directory="/repo"
+        shellOutcome="failed"
+      />,
+    )
+
+    await waitFor(() => expect(screen.getByText('failed')).toBeInTheDocument())
     expect(screen.queryByText('background')).not.toBeInTheDocument()
   })
 

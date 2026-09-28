@@ -6,10 +6,11 @@ import type { SessionStatusType } from '@/stores/sessionStatusStore'
 export const BACKGROUNDABLE_TOOLS = new Set(['shell', 'subagent'])
 
 export type ChildOutcome = 'succeeded' | 'failed' | 'interrupted'
-export type ShellLifecycleStatus = ShellInfo['status'] | 'unavailable'
+export type ShellNoticeOutcome = 'completed' | 'failed'
+type ShellLifecycleStatus = ShellInfo['status'] | 'unavailable'
 export type ShellRecord = Omit<ShellInfo, 'status'> & { status: ShellLifecycleStatus }
-export type BackgroundTaskKind = 'shell' | 'subagent'
-export type BackgroundTaskStatus =
+type BackgroundTaskKind = 'shell' | 'subagent'
+type BackgroundTaskStatus =
   | 'running'
   | 'completed'
   | 'failed'
@@ -74,6 +75,10 @@ function metadataString(part: SessionMessageAssistantTool, key: string): string 
   return typeof value === 'string' ? value : undefined
 }
 
+export function subagentSessionID(part: SessionMessageAssistantTool): string | undefined {
+  return metadataString(part, 'sessionID')
+}
+
 function isBackgroundPart(part: SessionMessageAssistantTool): boolean {
   if (part.state.status !== 'completed') return false
   const metadata = toolMetadata(part)
@@ -87,10 +92,10 @@ export function backgroundShellID(part: SessionMessageAssistantTool): string | u
 
 export function backgroundChildSessionID(part: SessionMessageAssistantTool): string | undefined {
   if (part.name !== 'subagent' || !isBackgroundPart(part)) return undefined
-  return metadataString(part, 'sessionID')
+  return subagentSessionID(part)
 }
 
-export function isTerminalShell(shell: { status: ShellLifecycleStatus }): boolean {
+function isTerminalShell(shell: { status: ShellLifecycleStatus }): boolean {
   return shell.status !== 'running'
 }
 
@@ -131,14 +136,23 @@ export function shellToolLifecycle(
   shellID: string | undefined,
   shell: ShellRecord | undefined,
   listLoaded: boolean,
+  notice?: ShellNoticeOutcome,
 ): BackgroundTaskLifecycle {
   if (!shellID) return 'completed'
   if (shell) return shellLifecycle(shell)
+  if (notice) return notice
   return listLoaded ? 'unavailable' : 'unknown'
 }
 
 export function isRunningLifecycle(status: BackgroundTaskLifecycle): boolean {
   return status === 'running' || status === 'unknown'
+}
+
+export function backgroundTaskStatusColor(status: BackgroundTaskLifecycle): string {
+  if (status === 'completed') return 'text-success'
+  if (status === 'failed') return 'text-destructive'
+  if (status === 'unavailable') return 'text-muted-foreground'
+  return 'text-warning'
 }
 
 export function lifecycleLabel(status: BackgroundTaskLifecycle): string {
@@ -162,6 +176,16 @@ function markShellUnavailable(shell: ShellRecord): ShellRecord {
   }
 }
 
+function clearConfirmedShellExitRecord(
+  directory: string,
+  id: string,
+  record: ShellExitRecord | undefined,
+  fetchStartedAt: number,
+): void {
+  if (!record || record.completedAt > fetchStartedAt) return
+  clearShellExitRecord(directory, id)
+}
+
 export function reconcileShellList(
   existing: ShellRecord[],
   fetched: ShellInfo[],
@@ -174,6 +198,10 @@ export function reconcileShellList(
     const cached = existingByID.get(shell.id)
     if (cached && isTerminalShell(cached) && !isTerminalShell(shell)) return cached
     const record = shellExitRecord(directory, shell.id)
+    if (isTerminalShell(shell)) {
+      clearConfirmedShellExitRecord(directory, shell.id, record, fetchStartedAt)
+      return shell
+    }
     return record ? applyShellExitRecord(shell, record) : shell
   })
 
@@ -183,12 +211,18 @@ export function reconcileShellList(
       merged.push(shell)
       continue
     }
+    const record = shellExitRecord(directory, shell.id)
     if (isTerminalShell(shell)) {
+      clearConfirmedShellExitRecord(directory, shell.id, record, fetchStartedAt)
       merged.push(shell)
       continue
     }
-    const record = shellExitRecord(directory, shell.id)
-    merged.push(record ? applyShellExitRecord(shell, record) : markShellUnavailable(shell))
+    if (record) {
+      merged.push(applyShellExitRecord(shell, record))
+      clearConfirmedShellExitRecord(directory, shell.id, record, fetchStartedAt)
+      continue
+    }
+    merged.push(markShellUnavailable(shell))
   }
 
   return merged.sort((left, right) => left.time.started - right.time.started)
@@ -196,7 +230,7 @@ export function reconcileShellList(
 
 export function upsertShell(current: ShellRecord[], info: ShellInfo, directory: string): ShellRecord[] {
   const cached = current.find((shell) => shell.id === info.id)
-  if (cached && isTerminalShell(cached) && !isTerminalShell(info)) return current
+  if (cached && isTerminalShell(cached) && cached.status !== info.status) return current
   const record = shellExitRecord(directory, info.id)
   const next = record && !isTerminalShell(info) ? applyShellExitRecord(info, record) : info
   return [...current.filter((shell) => shell.id !== info.id), next]
@@ -207,7 +241,8 @@ export function applyShellExit(
   exit: { id: string; status: ShellInfo['status']; exit?: number },
 ): ShellRecord[] {
   return current.map((shell) => {
-    if (shell.id !== exit.id || shell.status === 'unavailable') return shell
+    if (shell.id !== exit.id) return shell
+    if (isTerminalShell(shell) && shell.status !== exit.status) return shell
     const terminal = exit.status !== 'running'
     return {
       ...shell,
@@ -225,45 +260,39 @@ export function markShellDeleted(current: ShellRecord[], id: string): ShellRecor
   })
 }
 
+interface BackgroundShellPart {
+  id: string
+  label: string
+}
+
+interface BackgroundSubagentPart {
+  childSessionID: string
+  label: string
+  toolStatus: SessionMessageAssistantTool['state']['status']
+}
+
+interface CollectedBackgroundParts {
+  shells: BackgroundShellPart[]
+  subagents: BackgroundSubagentPart[]
+  shellNotices: Map<string, ShellNoticeOutcome>
+}
+
+function shellNoticeFromMessage(message: SessionMessageInfo): { shellID: string; outcome: ShellNoticeOutcome } | undefined {
+  if (message.type !== 'synthetic' && message.type !== 'system') return undefined
+  const metadata = message.metadata
+  if (!metadata || metadata.source !== 'shell') return undefined
+  const shellID = metadata.shellID
+  if (typeof shellID !== 'string' || !shellID) return undefined
+  const exit = metadata.exit
+  const completed = metadata.state === 'completed' && (exit === undefined || exit === 0)
+  return { shellID, outcome: completed ? 'completed' : 'failed' }
+}
+
 function shellLabel(part: SessionMessageAssistantTool): string {
   if (part.state.status === 'streaming') return 'Shell command'
   const command = part.state.input.command
   if (typeof command !== 'string' || !command) return 'Shell command'
   return unwrapSandboxExecCommand(command)
-}
-
-export function shellBackgroundTasks(
-  shells: ShellRecord[],
-  messages: SessionMessageInfo[],
-  listLoaded: boolean,
-): BackgroundTask[] {
-  const tasks = new Map<string, BackgroundTask>()
-  for (const shell of shells) {
-    tasks.set(shell.id, {
-      id: shell.id,
-      kind: 'shell',
-      label: shell.command,
-      status: shellLifecycle(shell),
-      shell,
-    })
-  }
-
-  for (const message of messages) {
-    if (message.type !== 'assistant') continue
-    for (const part of message.content) {
-      if (part.type !== 'tool' || part.name !== 'shell') continue
-      const shellID = backgroundShellID(part)
-      if (!shellID || tasks.has(shellID)) continue
-      tasks.set(shellID, {
-        id: shellID,
-        kind: 'shell',
-        label: shellLabel(part),
-        status: listLoaded ? 'unavailable' : 'unknown',
-      })
-    }
-  }
-
-  return [...tasks.values()]
 }
 
 function subagentLabel(part: SessionMessageAssistantTool): string {
@@ -274,35 +303,78 @@ function subagentLabel(part: SessionMessageAssistantTool): string {
   return 'Sub-agent task'
 }
 
-export function subagentBackgroundTasks(
-  messages: SessionMessageInfo[],
-  statuses: Map<string, SessionStatusType>,
-  knownSessions: Set<string>,
-  outcomes: Map<string, ChildOutcome>,
-): BackgroundTask[] {
-  const tasks = new Map<string, BackgroundTask>()
+export function collectBackgroundParts(messages: SessionMessageInfo[]): CollectedBackgroundParts {
+  const shells = new Map<string, BackgroundShellPart>()
+  const subagents = new Map<string, BackgroundSubagentPart>()
+  const shellNotices = new Map<string, ShellNoticeOutcome>()
   for (const message of messages) {
+    const notice = shellNoticeFromMessage(message)
+    if (notice) {
+      if (!shellNotices.has(notice.shellID)) shellNotices.set(notice.shellID, notice.outcome)
+      continue
+    }
     if (message.type !== 'assistant') continue
     for (const part of message.content) {
-      if (part.type !== 'tool' || part.name !== 'subagent') continue
-      const childSessionID = backgroundChildSessionID(part)
-      if (!childSessionID) continue
-      tasks.set(childSessionID, {
-        id: childSessionID,
-        kind: 'subagent',
-        label: subagentLabel(part),
-        status: subagentLifecycle(
-          part.state.status,
-          true,
-          childLifecycle(
-            statuses.get(childSessionID) ?? { type: 'idle' },
-            knownSessions.has(childSessionID),
-            outcomes.get(childSessionID),
-          ),
-        ),
-        childSessionID,
-      })
+      if (part.type !== 'tool') continue
+      if (part.name === 'shell') {
+        const shellID = backgroundShellID(part)
+        if (!shellID || shells.has(shellID)) continue
+        shells.set(shellID, { id: shellID, label: shellLabel(part) })
+        continue
+      }
+      if (part.name === 'subagent') {
+        const childSessionID = backgroundChildSessionID(part)
+        if (!childSessionID) continue
+        subagents.set(childSessionID, {
+          childSessionID,
+          label: subagentLabel(part),
+          toolStatus: part.state.status,
+        })
+      }
     }
   }
+  return { shells: [...shells.values()], subagents: [...subagents.values()], shellNotices }
+}
+
+export function shellBackgroundTasks(
+  shells: ShellRecord[],
+  shellParts: BackgroundShellPart[],
+  notices: ReadonlyMap<string, ShellNoticeOutcome>,
+  listLoaded: boolean,
+): BackgroundTask[] {
+  const tasks = new Map<string, BackgroundTask>()
+  for (const shell of shells) {
+    tasks.set(shell.id, {
+      id: shell.id,
+      kind: 'shell',
+      label: shell.command,
+      status: shellToolLifecycle(shell.id, shell, listLoaded, notices.get(shell.id)),
+      shell,
+    })
+  }
+
+  for (const part of shellParts) {
+    if (tasks.has(part.id)) continue
+    tasks.set(part.id, {
+      id: part.id,
+      kind: 'shell',
+      label: part.label,
+      status: shellToolLifecycle(part.id, undefined, listLoaded, notices.get(part.id)),
+    })
+  }
+
   return [...tasks.values()]
+}
+
+export function subagentBackgroundTasks(
+  parts: BackgroundSubagentPart[],
+  lifecycles: Record<string, BackgroundTaskLifecycle>,
+): BackgroundTask[] {
+  return parts.map((part) => ({
+    id: part.childSessionID,
+    kind: 'subagent',
+    label: part.label,
+    status: subagentLifecycle(part.toolStatus, true, lifecycles[part.childSessionID] ?? 'unknown'),
+    childSessionID: part.childSessionID,
+  }))
 }

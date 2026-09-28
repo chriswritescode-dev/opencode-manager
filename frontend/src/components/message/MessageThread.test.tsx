@@ -204,6 +204,43 @@ describe('MessageThread', () => {
     expect(onChildSessionClick).toHaveBeenCalledWith('child-1')
   })
 
+  it('resolves a background shell tool from its completion notice', () => {
+    setupSettings({ simpleChatMode: false, showReasoning: false })
+
+    const messages: SessionMessageInfo[] = [
+      userMessage('1', 'Hello'),
+      assistantMessage('2', [
+        {
+          type: 'tool',
+          id: 'tool_shell',
+          name: 'shell',
+          state: {
+            status: 'completed',
+            input: { command: 'npm run dev' },
+            content: [{ type: 'text', text: 'started in the background' }],
+            metadata: { status: 'running', shellID: 'sh_notice' },
+          },
+          time: { created: Date.now(), completed: Date.now() + 100 },
+        },
+      ]),
+      {
+        id: 'syn-shell',
+        type: 'synthetic',
+        text: '',
+        metadata: { source: 'shell', shellID: 'sh_notice', state: 'completed', exit: 0 },
+        time: { created: Date.now() },
+      },
+    ]
+
+    const { container } = render(
+      <MessageThread sessionID="test-session" messages={messages} pending={[]} />,
+    )
+
+    expect(screen.getByText('completed')).toBeInTheDocument()
+    expect(screen.queryByText('unavailable')).not.toBeInTheDocument()
+    expect(container.querySelector('.animate-spin')).toBeNull()
+  })
+
   it('renders a synthetic message that only carries text', () => {
     setupSettings({ simpleChatMode: false, showReasoning: false })
 

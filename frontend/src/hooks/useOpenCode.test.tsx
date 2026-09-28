@@ -260,7 +260,7 @@ describe('useChildSessionReconciliation', () => {
 
     expect(mocks.getSession).toHaveBeenCalledTimes(1)
     expect(useSessionStatus.getState().getStatus('child-1')).toEqual({ type: 'idle' })
-    expect(useSessionStatus.getState().isSessionKnown('child-1')).toBe(true)
+    expect(useSessionStatus.getState().knownSessions.has('child-1')).toBe(true)
 
     first.unmount()
     second.unmount()
@@ -293,10 +293,8 @@ describe('useChildSessionReconciliation', () => {
   })
 
   it('clears a stale child outcome when the fresh snapshot is busy', async () => {
-    mocks.getSession.mockResolvedValue({
-      ...sessionInfo('child-1', '/repo'),
-      outcome: 'failed',
-    })
+    mocks.getSession.mockResolvedValue(sessionInfo('child-1', '/repo'))
+    useSessionStatus.getState().setStatus('child-1', { type: 'busy' })
     useSessionStatus.getState().setOutcome('child-1', 'failed')
 
     const queryClient = createQueryClient()
@@ -305,8 +303,24 @@ describe('useChildSessionReconciliation', () => {
     })
 
     await waitFor(() => {
-      expect(useSessionStatus.getState().getStatus('child-1')).toEqual({ type: 'busy' })
+      expect(useSessionStatus.getState().statuses.get('child-1')).toEqual({ type: 'busy' })
     })
-    expect(useSessionStatus.getState().getOutcome('child-1')).toBeUndefined()
+    expect(useSessionStatus.getState().outcomes.get('child-1')).toBeUndefined()
+  })
+
+  it('does not reconcile a child whose lifecycle is already terminal', async () => {
+    useSessionStatus.getState().setStatus('child-1', { type: 'idle' })
+
+    const queryClient = createQueryClient()
+    renderHook(() => useChildSessionReconciliation('child-1'), {
+      wrapper: createWrapper(queryClient),
+    })
+
+    await act(async () => {
+      await Promise.resolve()
+    })
+
+    expect(mocks.getSession).not.toHaveBeenCalled()
+    expect(queryClient.getQueryState(['opencode', 'session-reconcile', 'child-1'])?.fetchStatus).not.toBe('fetching')
   })
 })

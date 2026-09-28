@@ -393,17 +393,28 @@ export function EventProvider({ children }: { children: React.ReactNode }) {
         useSessionStatus.getState().endStatusSnapshot(snapshotToken)
         return
       }
+      const busyBeforeSnapshot = new Set<string>()
+      for (const [sessionID, status] of useSessionStatus.getState().statuses.entries()) {
+        if (status.type !== 'idle') busyBeforeSnapshot.add(sessionID)
+      }
       useSessionStatus.getState().replaceStatuses(
         busyStatusesFromActiveSessions(active),
         snapshotToken,
       )
+      const knownAfterSnapshot = useSessionStatus.getState().knownSessions
+      const becameUnknown = [...busyBeforeSnapshot].filter(
+        (sessionID) => !knownAfterSnapshot.has(sessionID),
+      )
+      if (becameUnknown.length > 0) {
+        invalidateChildSessionCaches(queryClient, becameUnknown)
+      }
     } catch (error) {
       useSessionStatus.getState().endStatusSnapshot(snapshotToken)
       if (import.meta.env.DEV) {
         console.warn('Failed to fetch active sessions:', error)
       }
     }
-  }, [])
+  }, [queryClient])
 
   const stopStatusPoll = useCallback(() => {
     if (statusPollIntervalRef.current === null) return
@@ -492,9 +503,13 @@ export function EventProvider({ children }: { children: React.ReactNode }) {
           invalidateSessionListCachesDebounced(queryClient, event.directory)
           break
         }
+        case 'session.deleted': {
+          useSessionStatus.getState().forgetSession(event.data.sessionID)
+          invalidateSessionListCachesDebounced(queryClient, event.directory)
+          break
+        }
         case 'session.created':
         case 'session.renamed':
-        case 'session.deleted':
         case 'session.moved':
         case 'session.metadata.updated':
           invalidateSessionListCachesDebounced(queryClient, event.directory)

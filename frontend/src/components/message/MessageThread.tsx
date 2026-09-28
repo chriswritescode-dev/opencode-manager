@@ -22,6 +22,7 @@ import { EditableUserMessage, ClickableUserMessage } from './EditableUserMessage
 import { useSettings } from '@/hooks/useSettings'
 import { useTTS } from '@/hooks/useTTS'
 import { CopyButton } from '@/components/ui/copy-button'
+import { backgroundShellID, collectBackgroundParts, type ShellNoticeOutcome } from '@/lib/backgroundWork'
 
 function getMessageText(message: SessionMessageInfo): string {
   switch (message.type) {
@@ -364,6 +365,7 @@ interface MessageRowProps {
   model?: string
   simpleChatMode: boolean
   showReasoning: boolean
+  shellOutcomes: ReadonlyMap<string, ShellNoticeOutcome>
 }
 
 const MessageRow = memo(function MessageRow({
@@ -382,8 +384,11 @@ const MessageRow = memo(function MessageRow({
   model,
   simpleChatMode,
   showReasoning,
+  shellOutcomes,
 }: MessageRowProps) {
   const messageTextContent = getMessageText(message)
+  const shellOutcomeFor = (part: SessionMessageAssistant['content'][number]) =>
+    part.type === 'tool' ? shellOutcomes.get(backgroundShellID(part) ?? '') : undefined
   const streaming = message.type === 'assistant' && message.time.completed === undefined
   const isEditingThisMessage = editingUserMessageId === message.id
   const canEditUserMessage = isLastUserMessage && !isSessionBusy
@@ -480,6 +485,7 @@ const MessageRow = memo(function MessageRow({
                   part={part}
                   messageID={message.id}
                   directory={directory}
+                  shellOutcome={shellOutcomeFor(part)}
                   onFileClick={onFileClick}
                   onChildSessionClick={onChildSessionClick}
                 />
@@ -518,6 +524,7 @@ const MessageRow = memo(function MessageRow({
                   part={part}
                   messageID={message.id}
                   directory={directory}
+                  shellOutcome={shellOutcomeFor(part)}
                   onFileClick={onFileClick}
                   onChildSessionClick={onChildSessionClick}
                 />
@@ -609,6 +616,15 @@ export const MessageThread = memo(function MessageThread({
 
   const lastUserMessageId = useMemo(() => findLastUserMessageId(messages), [messages])
 
+  const shellOutcomesKey = useMemo(
+    () => [...collectBackgroundParts(messages).shellNotices].map(([id, outcome]) => `${id}=${outcome}`).join(','),
+    [messages],
+  )
+  const shellOutcomes = useMemo(
+    () => new Map(shellOutcomesKey ? shellOutcomesKey.split(',').map((entry) => entry.split('=') as [string, ShellNoticeOutcome]) : []),
+    [shellOutcomesKey],
+  )
+
   const nextAssistantIdByMessageId = useMemo(() => {
     const map = new Map<string, string | undefined>()
     let nextAssistantId: string | undefined
@@ -658,6 +674,7 @@ export const MessageThread = memo(function MessageThread({
           model={model}
           simpleChatMode={simpleChatMode}
           showReasoning={showReasoning}
+          shellOutcomes={shellOutcomes}
         />
       ))}
       {pending.map((item) => (

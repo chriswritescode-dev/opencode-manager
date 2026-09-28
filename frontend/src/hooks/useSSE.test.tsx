@@ -3,6 +3,8 @@ import { act, renderHook, waitFor } from '@testing-library/react'
 import type { ReactNode } from 'react'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { useSSE } from './useSSE'
+import { useKillShell } from './useSessionShells'
+import { clearShellExitRecord } from '@/lib/backgroundWork'
 import { useSessionStatus } from '../stores/sessionStatusStore'
 import { useSendErrorStore } from '../stores/sendErrorStore'
 import { showToast } from '@/lib/toast'
@@ -15,6 +17,16 @@ vi.mock('@/lib/toast', () => ({
     loading: vi.fn(),
     success: vi.fn(),
   },
+}))
+
+const shellApi = vi.hoisted(() => ({
+  listShells: vi.fn(),
+  removeShell: vi.fn(),
+}))
+
+vi.mock('@/api/opencode', async (importOriginal) => ({
+  ...(await importOriginal<typeof import('@/api/opencode')>()),
+  ...shellApi,
 }))
 
 class MockEventSource {
@@ -53,6 +65,8 @@ describe('useSSE', () => {
   beforeEach(() => {
     vi.clearAllMocks()
     MockEventSource.instances = []
+    shellApi.listShells.mockResolvedValue([])
+    shellApi.removeShell.mockResolvedValue(undefined)
     useSessionStatus.setState({ statuses: new Map(), statusCache: new Map(), statusRevisions: new Map(), knownSessions: new Set(), outcomes: new Map(), revision: 0 })
     useSendErrorStore.setState({ errors: {} })
     globalThis.EventSource = MockEventSource as unknown as typeof EventSource
@@ -120,7 +134,7 @@ describe('useSSE', () => {
         queryKey: ['opencode', 'pending-actions', 'session-1', '/repo'],
       })
       expect(invalidateQueries).toHaveBeenCalledWith({ queryKey: ['opencode', 'shells'] })
-      expect(invalidateQueries).toHaveBeenCalledWith({ queryKey: ['opencode', 'session-reconcile'] })
+      expect(invalidateQueries).not.toHaveBeenCalledWith({ queryKey: ['opencode', 'session-reconcile'] })
     })
 
     unmount()
@@ -359,7 +373,7 @@ describe('useSSE', () => {
       queryKey: ['opencode', 'pending-actions', 'session-1', '/repo'],
     })
     expect(invalidateQueries).toHaveBeenCalledWith({ queryKey: ['opencode', 'shells'] })
-    expect(invalidateQueries).toHaveBeenCalledWith({ queryKey: ['opencode', 'session-reconcile'] })
+    expect(invalidateQueries).not.toHaveBeenCalledWith({ queryKey: ['opencode', 'session-reconcile'] })
 
     unmount()
   })
@@ -542,6 +556,55 @@ describe('useSSE', () => {
     ).toBe('exited')
 
     unmount()
+  })
+
+  it('keeps a killed shell killed after a later shell.exited event', async () => {
+    const queryClient = new QueryClient({
+      defaultOptions: {
+        queries: { retry: false },
+      },
+    })
+    const key = ['opencode', 'shells', '/repo']
+    queryClient.setQueryData(key, [
+      {
+        id: 'shell-1',
+        status: 'running',
+        command: 'sleep 1',
+        cwd: '/repo',
+        shell: 'zsh',
+        file: '/tmp/shell-1.log',
+        metadata: { sessionID: 'session-1' },
+        time: { started: 1 },
+      },
+    ])
+
+    const { result, unmount } = renderHook(
+      () => ({ sse: useSSE('/repo', 'session-1'), kill: useKillShell('/repo') }),
+      { wrapper: createWrapper(queryClient) },
+    )
+
+    await waitFor(() => expect(MockEventSource.instances).toHaveLength(1))
+    await connect(0, 'client-1')
+    await waitFor(() => expect(result.current.sse.isConnected).toBe(true))
+
+    await act(async () => {
+      await result.current.kill.mutateAsync('shell-1')
+    })
+
+    expect(queryClient.getQueryData<Array<{ status: string }>>(key)?.[0]?.status).toBe('killed')
+
+    act(() => {
+      MockEventSource.instances[0].emit('message', {
+        type: 'shell.exited',
+        directory: '/repo',
+        data: { id: 'shell-1', status: 'exited' },
+      })
+    })
+
+    expect(queryClient.getQueryData<Array<{ status: string }>>(key)?.[0]?.status).toBe('killed')
+
+    unmount()
+    clearShellExitRecord('/repo', 'shell-1')
   })
 
   it('does not write session status from stream events', async () => {

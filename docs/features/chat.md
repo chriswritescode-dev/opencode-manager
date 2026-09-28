@@ -12,6 +12,18 @@ Messages stream in real-time using Server-Sent Events (SSE):
 
 ![Chat Conversation](../images/chat-conversation.png)
 
+## Background Work
+
+While a shell command or subagent is running, **Move to background** above the prompt lets it keep running while the session continues. The background tasks bar lists each background shell and subagent with its status:
+
+- **running** - still working
+- **completed** / **failed** - finished, using the shell exit code or the subagent outcome
+- **killed** - you stopped the shell from the bar
+- **interrupted** - the subagent was interrupted
+- **unavailable** - OpenCode no longer knows the shell and the session has no completion notice for it
+
+Shell rows can show live output and be killed; subagent rows open the child session. Statuses are reconciled when the connection returns, so work that finished while you were away is shown as finished. After a page reload, a shell you killed is shown as **failed**, which matches OpenCode's own notice for it.
+
 ## Model Selection
 
 Click the **model name** in the chat prompt area to open the quick model switcher, where you can switch models, mark favorites, and pick variants without leaving the chat. Each agent keeps its own model selection. See [AI Configuration](ai-config.md#model-selection) for the full reference.

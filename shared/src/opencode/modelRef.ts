@@ -1,4 +1,6 @@
-import type { ModelRef } from '@opencode/client'
+import type { ConfigEntry, ModelRef } from '@opencode/client'
+
+type ConfigDocumentModel = Extract<ConfigEntry, { type: 'document' }>['info']['model']
 
 export function parseOpenCodeModelRef(model: string): ModelRef | undefined {
   const providerEnd = model.indexOf('/')
@@ -18,4 +20,20 @@ export function parseOpenCodeModelRef(model: string): ModelRef | undefined {
 
 export function formatOpenCodeModelRef(ref: ModelRef): string {
   return ref.variant ? `${ref.providerID}/${ref.id}#${ref.variant}` : `${ref.providerID}/${ref.id}`
+}
+
+export function selectConfiguredModelRef(entries: ConfigEntry[]): ModelRef | undefined {
+  const model = entries.reduce<ConfigDocumentModel>(
+    (current, entry) => (entry.type === 'document' && entry.info.model ? entry.info.model : current),
+    undefined,
+  )
+
+  if (!model) return undefined
+  if (typeof model === 'string') return parseOpenCodeModelRef(model)
+
+  return {
+    providerID: model.providerID,
+    id: model.model,
+    ...(model.variant ? { variant: model.variant } : {}),
+  }
 }

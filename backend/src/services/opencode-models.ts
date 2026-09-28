@@ -1,5 +1,5 @@
-import type { ConfigEntry, ModelInfo, ModelRef } from '@opencode-manager/shared/opencode'
-import { formatOpenCodeModelRef, openCodeLocation, parseOpenCodeModelRef } from '@opencode-manager/shared/opencode'
+import type { ModelInfo, ModelRef } from '@opencode-manager/shared/opencode'
+import { formatOpenCodeModelRef, openCodeLocation, parseOpenCodeModelRef, selectConfiguredModelRef } from '@opencode-manager/shared/opencode'
 import type { OpenCodeClient } from './opencode/client'
 
 export interface ResolvedOpenCodeModel {
@@ -16,8 +16,6 @@ export interface ResolveOpenCodeModelOptions {
 
 export const MODEL_LOAD_TIMEOUT_MS = 15_000
 export const MODEL_LOAD_POLL_MS = 500
-
-type ConfigDocumentModel = Extract<ConfigEntry, { type: 'document' }>['info']['model']
 
 function normalizeModelCandidate(model: string | null | undefined): string | null {
   if (!model) {
@@ -68,22 +66,6 @@ function resolveFromLoadedModels(
 
   const fallback = models.find((model) => model.enabled)
   return fallback ? toResolvedModel({ providerID: fallback.providerID, id: fallback.id }) : null
-}
-
-function toConfiguredRef(model: ConfigDocumentModel): ModelRef | undefined {
-  if (!model) {
-    return undefined
-  }
-
-  if (typeof model === 'string') {
-    return parseOpenCodeModelRef(model)
-  }
-
-  return {
-    providerID: model.providerID,
-    id: model.model,
-    ...(model.variant ? { variant: model.variant } : {}),
-  }
 }
 
 function sleep(ms: number, signal: AbortSignal): Promise<void> {
@@ -154,11 +136,7 @@ async function readConfiguredRef(
   signal: AbortSignal,
 ): Promise<ModelRef | undefined> {
   const entries = await client.api.config.get(location, { signal })
-  const model = entries.reduce<ConfigDocumentModel>(
-    (current, entry) => (entry.type === 'document' && entry.info.model ? entry.info.model : current),
-    undefined,
-  )
-  return toConfiguredRef(model)
+  return selectConfiguredModelRef(entries)
 }
 
 export async function resolveOpenCodeModel(
@@ -193,31 +171,30 @@ export async function resolveOpenCodeModel(
         break
       }
 
-      const listResult = await runPollingRequest(
-        () => client.api.model.list(location, { signal }),
-        external,
-        timeoutController.signal,
-      )
-      if (!listResult.ok) {
+      const [listResult, defaultResult] = await Promise.all([
+        runPollingRequest(
+          () => client.api.model.list(location, { signal }),
+          external,
+          timeoutController.signal,
+        ),
+        runPollingRequest(
+          () => client.api.model.default(location, { signal }),
+          external,
+          timeoutController.signal,
+        ),
+      ])
+
+      if (listResult.ok) {
+        models = listResult.value.data
+      }
+
+      if (defaultResult.ok) {
+        defaultModel = defaultResult.value.data
+      }
+
+      if (!listResult.ok || !defaultResult.ok) {
         break
       }
-      models = listResult.value.data
-
-      external?.throwIfAborted()
-
-      if (timeoutController.signal.aborted) {
-        break
-      }
-
-      const defaultResult = await runPollingRequest(
-        () => client.api.model.default(location, { signal }),
-        external,
-        timeoutController.signal,
-      )
-      if (!defaultResult.ok) {
-        break
-      }
-      defaultModel = defaultResult.value.data
 
       external?.throwIfAborted()
 

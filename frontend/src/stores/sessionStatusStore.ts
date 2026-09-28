@@ -8,7 +8,7 @@ export type SessionStatusType =
   | { type: 'compact' }
   | { type: 'retry'; attempt: number; message: string; next: number }
 
-export interface StatusSnapshotToken {
+interface StatusSnapshotToken {
   revision: number
   order: number
 }
@@ -29,9 +29,8 @@ interface SessionStatusStore {
   beginStatusSnapshot: () => StatusSnapshotToken
   endStatusSnapshot: (token: StatusSnapshotToken) => void
   getStatus: (sessionID: string) => SessionStatusType
-  getOutcome: (sessionID: string) => ChildOutcome | undefined
-  isSessionKnown: (sessionID: string) => boolean
   clearStatus: (sessionID: string) => void
+  forgetSession: (sessionID: string) => void
 }
 
 const DEFAULT_STATUS: SessionStatusType = { type: 'idle' }
@@ -319,14 +318,6 @@ export const useSessionStatus = create<SessionStatusStore>((set, get) => {
       return get().statuses.get(sessionID) || DEFAULT_STATUS
     },
 
-    getOutcome: (sessionID: string) => {
-      return get().outcomes.get(sessionID)
-    },
-
-    isSessionKnown: (sessionID: string) => {
-      return get().knownSessions.has(sessionID)
-    },
-
     clearStatus: (sessionID: string) => {
       clearOptimisticActiveTimer(sessionID)
       const knownPatch = markSessionKnown(get().knownSessions, sessionID)
@@ -349,6 +340,35 @@ export const useSessionStatus = create<SessionStatusStore>((set, get) => {
         return { statuses, statusCache, ...(revisionPatch ?? {}), ...knownFields }
       })
     },
+
+    forgetSession: (sessionID: string) => {
+      clearOptimisticActiveTimer(sessionID)
+      const current = get()
+      const hasSession =
+        current.statuses.has(sessionID) ||
+        current.statusCache.has(sessionID) ||
+        current.knownSessions.has(sessionID) ||
+        current.outcomes.has(sessionID)
+      if (!hasSession && inFlightSnapshots.size === 0) return
+
+      set((state) => {
+        const statuses = new Map(state.statuses)
+        const statusCache = new Map(state.statusCache)
+        const knownSessions = new Set(state.knownSessions)
+        const outcomes = new Map(state.outcomes)
+        statuses.delete(sessionID)
+        statusCache.delete(sessionID)
+        knownSessions.delete(sessionID)
+        outcomes.delete(sessionID)
+        return {
+          statuses,
+          statusCache,
+          knownSessions,
+          outcomes,
+          ...(recordRevisionPatch(state, sessionID) ?? {}),
+        }
+      })
+    },
   }
 })
 
@@ -356,10 +376,6 @@ export const useSessionStatusForSession = (sessionID: string | undefined): Sessi
   return useSessionStatus((state) => 
     sessionID ? (state.statuses.get(sessionID) ?? DEFAULT_STATUS) : DEFAULT_STATUS
   )
-}
-
-export const useIsSessionKnown = (sessionID: string | undefined): boolean => {
-  return useSessionStatus((state) => (sessionID ? state.knownSessions.has(sessionID) : false))
 }
 
 export const useChildLifecycleForSession = (sessionID: string | undefined): BackgroundTaskLifecycle => {

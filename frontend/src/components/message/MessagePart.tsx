@@ -3,6 +3,7 @@ import type { SessionMessageAssistant } from '@opencode-manager/shared/opencode'
 import { TextPart } from './TextPart'
 import { ToolCallPart } from './ToolCallPart'
 import { useSettings } from '@/hooks/useSettings'
+import type { ShellNoticeOutcome } from '@/lib/backgroundWork'
 
 type AssistantContentPart = SessionMessageAssistant['content'][number]
 
@@ -10,11 +11,12 @@ interface MessagePartProps {
   part: AssistantContentPart
   messageID?: string
   directory?: string
+  shellOutcome?: ShellNoticeOutcome
   onFileClick?: (filePath: string, lineNumber?: number) => void
   onChildSessionClick?: (sessionId: string) => void
 }
 
-export const MessagePart = memo(function MessagePart({ part, messageID, directory, onFileClick, onChildSessionClick }: MessagePartProps) {
+export const MessagePart = memo(function MessagePart({ part, messageID, directory, shellOutcome, onFileClick, onChildSessionClick }: MessagePartProps) {
   const { preferences } = useSettings()
   const simpleChatMode = preferences?.simpleChatMode ?? false
   const showReasoning = preferences?.showReasoning ?? false
@@ -42,6 +44,7 @@ export const MessagePart = memo(function MessagePart({ part, messageID, director
           part={part}
           messageID={messageID}
           directory={directory}
+          shellOutcome={shellOutcome}
           onFileClick={onFileClick}
           onChildSessionClick={onChildSessionClick}
         />

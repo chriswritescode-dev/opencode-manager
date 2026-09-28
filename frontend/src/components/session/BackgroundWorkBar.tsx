@@ -1,5 +1,6 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
-import { Ban, Bot, Check, ChevronDown, ChevronUp, ExternalLink, Loader2, MoveDownRight, Square, Terminal, XCircle } from 'lucide-react'
+import { Bot, Check, ChevronDown, ChevronUp, ExternalLink, Loader2, MoveDownRight, Square, Terminal } from 'lucide-react'
+import { useShallow } from 'zustand/react/shallow'
 import type { SessionMessageInfo } from '@opencode-manager/shared/opencode'
 import { readShellOutput } from '@/api/opencode'
 import { Button } from '@/components/ui/button'
@@ -7,8 +8,11 @@ import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } f
 import { useBackgroundSession, useChildSessionReconciliation } from '@/hooks/useOpenCode'
 import { useKillShell, useSessionShells } from '@/hooks/useSessionShells'
 import { useSessionStatus } from '@/stores/sessionStatusStore'
+import { BackgroundTaskStatusIcon } from './BackgroundTaskStatusIcon'
 import {
   BACKGROUNDABLE_TOOLS,
+  childLifecycle,
+  collectBackgroundParts,
   isRunningLifecycle,
   lifecycleLabel,
   shellBackgroundTasks,
@@ -119,15 +123,6 @@ function ShellOutputView({ shell, directory, running }: { shell: ShellRecord; di
   )
 }
 
-function BackgroundTaskStatusIcon({ status }: { status: BackgroundTaskLifecycle }) {
-  if (status === 'completed') return <Check className="h-3 w-3 text-success" />
-  if (status === 'failed') return <XCircle className="h-3 w-3 text-destructive" />
-  if (status === 'interrupted') return <Ban className="h-3 w-3 text-warning" />
-  if (status === 'killed') return <Square className="h-3 w-3 text-warning" />
-  if (status === 'unavailable') return <XCircle className="h-3 w-3 text-muted-foreground" />
-  return <Loader2 className="h-3 w-3 animate-spin text-warning" />
-}
-
 function BackgroundTaskKindIcon({ task }: { task: BackgroundTask }) {
   return task.kind === 'shell'
     ? <Terminal className="h-3 w-3 shrink-0 text-success" />
@@ -155,7 +150,7 @@ function BackgroundTaskRow({
       <BackgroundTaskKindIcon task={task} />
       <span className="min-w-0 flex-1 truncate font-mono" title={task.label}>{task.label}</span>
       <span className="flex items-center gap-1 text-muted-foreground">
-        <BackgroundTaskStatusIcon status={task.status} />
+        <BackgroundTaskStatusIcon status={task.status} className="h-3 w-3" />
         {lifecycleLabel(task.status)}
       </span>
       {task.kind === 'shell' && task.shell && (
@@ -202,9 +197,20 @@ interface BackgroundWorkBarProps {
 
 export function BackgroundWorkBar({ sessionID, directory, messages, isSessionActive, onChildSessionClick }: BackgroundWorkBarProps) {
   const { shells, listLoaded } = useSessionShells(sessionID, directory)
-  const statuses = useSessionStatus((state) => state.statuses)
-  const knownSessions = useSessionStatus((state) => state.knownSessions)
-  const outcomes = useSessionStatus((state) => state.outcomes)
+  const collected = useMemo(() => collectBackgroundParts(messages), [messages])
+  const childLifecycles = useSessionStatus(
+    useShallow((state) => {
+      const lifecycles: Record<string, BackgroundTaskLifecycle> = {}
+      for (const part of collected.subagents) {
+        lifecycles[part.childSessionID] = childLifecycle(
+          state.statuses.get(part.childSessionID) ?? { type: 'idle' },
+          state.knownSessions.has(part.childSessionID),
+          state.outcomes.get(part.childSessionID),
+        )
+      }
+      return lifecycles
+    }),
+  )
   const killShell = useKillShell(directory)
   const backgroundSession = useBackgroundSession()
   const [expanded, setExpanded] = useState(false)
@@ -212,10 +218,10 @@ export function BackgroundWorkBar({ sessionID, directory, messages, isSessionAct
 
   const tasks = useMemo(
     () => [
-      ...shellBackgroundTasks(shells, messages, listLoaded),
-      ...subagentBackgroundTasks(messages, statuses, knownSessions, outcomes),
+      ...shellBackgroundTasks(shells, collected.shells, collected.shellNotices, listLoaded),
+      ...subagentBackgroundTasks(collected.subagents, childLifecycles),
     ],
-    [shells, messages, listLoaded, statuses, knownSessions, outcomes],
+    [shells, collected, listLoaded, childLifecycles],
   )
 
   const hasRunningTask = tasks.some((task) => isRunningLifecycle(task.status))

@@ -23,7 +23,8 @@ import type { ModelRef, SessionInfo } from "@opencode-manager/shared/opencode";
 import { parseNetworkError, isGatewayTimeout } from "../lib/opencode-errors";
 import { showToast } from "../lib/toast";
 import { useSendErrorStore } from "../stores/sendErrorStore";
-import { useSessionStatus } from "../stores/sessionStatusStore";
+import { useSessionStatus, useChildLifecycleForSession } from "../stores/sessionStatusStore";
+import { isRunningLifecycle } from "../lib/backgroundWork";
 import { childSessionReconciliationQueryKey, invalidateSessionListCaches, sessionTranscriptQueryKey } from "../lib/queryInvalidation";
 import { buildPinnedSessionKeys, buildSessionKey } from "../lib/sessionKey";
 import { toggleSessionPin } from "../api/sessionPins";
@@ -148,6 +149,7 @@ export const useSession = (sessionID: string | undefined, directory?: string) =>
 };
 
 export const useChildSessionReconciliation = (sessionID: string | undefined) => {
+  const lifecycle = useChildLifecycleForSession(sessionID)
   useQuery({
     queryKey: childSessionReconciliationQueryKey(sessionID),
     queryFn: async () => {
@@ -160,11 +162,10 @@ export const useChildSessionReconciliation = (sessionID: string | undefined) => 
         useSessionStatus.getState().endStatusSnapshot(token);
       }
     },
-    enabled: !!sessionID,
-    staleTime: 0,
-    refetchOnMount: 'always',
-    refetchOnReconnect: true,
-    refetchOnWindowFocus: true,
+    enabled: !!sessionID && isRunningLifecycle(lifecycle),
+    staleTime: 5_000,
+    refetchOnWindowFocus: false,
+    refetchOnReconnect: false,
   });
 };
 
