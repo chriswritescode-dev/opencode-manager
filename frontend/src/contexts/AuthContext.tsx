@@ -41,7 +41,7 @@ export function AuthProvider({ children }: AuthProviderProps) {
   useEffect(() => {
     const fetchConfig = async () => {
       try {
-        const response = await fetch('/api/auth-info/config')
+        const response = await fetch('/api/auth-info/config', { credentials: 'include' })
         if (response.ok) {
           const data = await response.json()
           setConfig(data)

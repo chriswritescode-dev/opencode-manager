@@ -128,6 +128,7 @@ describe('WAV extension selection logic', () => {
       expect.objectContaining({
         method: 'POST',
         body: expect.any(FormData),
+        credentials: 'include',
       })
     )
 

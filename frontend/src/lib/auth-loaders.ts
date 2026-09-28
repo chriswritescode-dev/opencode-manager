@@ -15,7 +15,7 @@ async function fetchAuthConfig(): Promise<AuthConfig> {
     isFirstUser: false,
     adminConfigured: false,
   }
-  const response = await fetch('/api/auth-info/config')
+  const response = await fetch('/api/auth-info/config', { credentials: 'include' })
   if (!response.ok) {
     return defaultConfig
   }
