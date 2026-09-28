@@ -1,48 +1,37 @@
-function hexToRgb(hex: string): { r: number; g: number; b: number } | null {
-  const cleanHex = hex.replace(/^#/, '')
-  if (cleanHex.length !== 6) {
-    return null
-  }
-
-  const result = /^([a-f\d]{2})([a-f\d]{2})([a-f\d]{2})$/i.exec(cleanHex)
-  if (!result) {
-    return null
-  }
-
-  return {
-    r: parseInt(result[1], 16),
-    g: parseInt(result[2], 16),
-    b: parseInt(result[3], 16),
-  }
+const THEME_NAME_TOKENS: Record<string, string> = {
+  primary: 'var(--color-primary)',
+  secondary: 'var(--color-foreground)',
+  accent: 'var(--color-info)',
+  success: 'var(--color-success)',
+  warning: 'var(--color-warning)',
+  error: 'var(--color-destructive)',
+  info: 'var(--color-info)',
 }
 
-const DEFAULT_AGENT_COLORS: Record<string, { light: string; dark: string }> = {
-  plan:  { light: '#a753ae', dark: '#edb2f1' },
-  build: { light: '#034cff', dark: '#89b5ff' },
-  docs:  { light: '#ffb224', dark: '#ffb224' },
-  ask:   { light: '#0091ff', dark: '#0091ff' },
-}
+const DEFAULT_AGENT_NAMES = new Set(['plan', 'build', 'docs', 'ask'])
 
-const FALLBACK_COLOR = { light: '#6b7280', dark: '#9ca3af' }
+const FALLBACK_COLOR = 'var(--color-muted-foreground)'
 
-function isValidHex(color: string | undefined): color is string {
+function isValidHex(color: string | undefined): boolean {
   if (!color) return false
   return /^#[0-9A-Fa-f]{6}$/.test(color)
 }
 
-function getAgentColor(
-  agentName: string,
-  apiColor?: string
-): { light: string; dark: string } {
-  if (isValidHex(apiColor)) {
-    return { light: apiColor, dark: apiColor }
+function resolveAgentColor(agentName: string, apiColor?: string): string {
+  if (isValidHex(apiColor) && apiColor) {
+    return apiColor
+  }
+
+  if (apiColor) {
+    const themeToken = THEME_NAME_TOKENS[apiColor.toLowerCase()]
+    if (themeToken) {
+      return themeToken
+    }
   }
 
   const lookupName = agentName.toLowerCase()
-  const defaultColor = DEFAULT_AGENT_COLORS[lookupName]
-
-  if (defaultColor) {
-    return defaultColor
+  if (DEFAULT_AGENT_NAMES.has(lookupName)) {
+    return `var(--color-agent-${lookupName})`
   }
 
   return FALLBACK_COLOR
@@ -52,44 +41,16 @@ export function getAgentStyleVars(
   agentName: string,
   apiColor?: string
 ): Record<string, string> {
-  const colors = getAgentColor(agentName, apiColor)
-
-  const lightRgb = hexToRgb(colors.light)
-  const darkRgb = hexToRgb(colors.dark)
-
-  const fallbackLight = FALLBACK_COLOR.light
-  const fallbackDark = FALLBACK_COLOR.dark
-
-  const lightVars = lightRgb
-    ? {
-        r: lightRgb.r,
-        g: lightRgb.g,
-        b: lightRgb.b,
-      }
-    : hexToRgb(fallbackLight)!
-
-  const darkVars = darkRgb
-    ? {
-        r: darkRgb.r,
-        g: darkRgb.g,
-        b: darkRgb.b,
-      }
-    : hexToRgb(fallbackDark)!
+  const color = resolveAgentColor(agentName, apiColor)
+  const mix = (percent: number) => `color-mix(in oklab, ${color} ${percent}%, transparent)`
 
   return {
-    '--agent-color-light': colors.light,
-    '--agent-color-dark': colors.dark,
-    '--agent-bg-light': `rgba(${lightVars.r}, ${lightVars.g}, ${lightVars.b}, 0.2)`,
-    '--agent-bg-dark': `rgba(${darkVars.r}, ${darkVars.g}, ${darkVars.b}, 0.2)`,
-    '--agent-bg-hover-light': `rgba(${lightVars.r}, ${lightVars.g}, ${lightVars.b}, 0.3)`,
-    '--agent-bg-hover-dark': `rgba(${darkVars.r}, ${darkVars.g}, ${darkVars.b}, 0.3)`,
-    '--agent-border-light': `rgba(${lightVars.r}, ${lightVars.g}, ${lightVars.b}, 0.6)`,
-    '--agent-border-dark': `rgba(${darkVars.r}, ${darkVars.g}, ${darkVars.b}, 0.6)`,
-    '--agent-border-hover-light': `rgba(${lightVars.r}, ${lightVars.g}, ${lightVars.b}, 0.5)`,
-    '--agent-border-hover-dark': `rgba(${darkVars.r}, ${darkVars.g}, ${darkVars.b}, 0.5)`,
-    '--agent-shadow-light': `rgba(${lightVars.r}, ${lightVars.g}, ${lightVars.b}, 0.2)`,
-    '--agent-shadow-dark': `rgba(${darkVars.r}, ${darkVars.g}, ${darkVars.b}, 0.2)`,
-    '--agent-shadow-hover-light': `rgba(${lightVars.r}, ${lightVars.g}, ${lightVars.b}, 0.3)`,
-    '--agent-shadow-hover-dark': `rgba(${darkVars.r}, ${darkVars.g}, ${darkVars.b}, 0.3)`,
+    '--agent-color': color,
+    '--agent-bg': mix(20),
+    '--agent-bg-hover': mix(30),
+    '--agent-border': mix(60),
+    '--agent-border-hover': mix(50),
+    '--agent-shadow': mix(20),
+    '--agent-shadow-hover': mix(30),
   }
 }

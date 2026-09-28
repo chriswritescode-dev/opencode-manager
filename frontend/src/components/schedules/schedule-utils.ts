@@ -323,23 +323,23 @@ export function formatTimestamp(value: number | null): string {
 
 export function getRunTone(run: ScheduleRun): string {
   if (run.status === 'completed') {
-    return 'bg-emerald-500/15 text-emerald-300 border-emerald-500/30'
+    return 'bg-success/15 text-success border-success/30'
   }
 
   if (run.status === 'failed') {
-    return 'bg-red-500/15 text-red-300 border-red-500/30'
+    return 'bg-destructive/15 text-destructive border-destructive/30'
   }
 
   if (run.status === 'cancelled') {
-    return 'bg-slate-500/15 text-slate-300 border-slate-500/30'
+    return 'bg-muted text-muted-foreground border-border'
   }
 
-  return 'bg-amber-500/15 text-amber-300 border-amber-500/30'
+  return 'bg-warning/15 text-warning border-warning/30'
 }
 
 export function getJobStatusTone(job: ScheduleJob): string {
   return job.enabled
-    ? 'bg-emerald-500/10 text-emerald-600 dark:text-emerald-400 border-emerald-500/20'
+    ? 'bg-success/10 text-success border-success/20'
     : 'bg-muted text-muted-foreground border-border'
 }
 

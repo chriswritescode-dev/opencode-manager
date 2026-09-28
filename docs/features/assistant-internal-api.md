@@ -147,6 +147,7 @@ Retrieve the user's full settings and preferences.
 {
   preferences: {
     theme: 'dark' | 'light' | 'system',
+    colorTheme?: string,     // 'manager' or an OpenCode theme id from shared/src/themes; unknown stored ids read as 'manager'
     mode: 'plan' | 'build',
     defaultModel?: string,
     defaultAgent?: string,
@@ -177,11 +178,12 @@ Update a subset of safe user preferences.
 
 **Allowed Keys:**
 The following preference keys can be modified:
-- `theme`, `mode`, `defaultModel`, `defaultAgent`
+- `theme`, `colorTheme`, `mode`, `defaultModel`, `defaultAgent`
 - `autoScroll`, `expandDiffs`, `expandToolCalls`, `showReasoning`
 - `simpleChatMode`, `leaderKey`, `directShortcuts`
 - `keyboardShortcuts`, `customCommands`, `notifications`
 - `repoOrder`, `repoSortMode`
+- `colorTheme` must be `manager` or a catalog theme id; unknown ids return 400.
 - `tts` — Non-secret TTS preferences (`enabled`, `provider`, `autoPlay`, `voice`, `model`, `speed`). TTS must already be configured in the UI (the endpoint returns 400 otherwise).
 - `stt` — Non-secret STT preferences (`enabled`, `provider`, `model`, `language`). STT must already be configured in the UI (the endpoint returns 400 otherwise).
 

@@ -74,7 +74,7 @@ export function RunDetailPanel({ repoId, activeRun, selectedRunLoading, onCancel
         {selectedRunLoading && !activeRun ? (
           <div className="flex items-center justify-center p-4"><Loader2 className="h-6 w-6 animate-spin text-muted-foreground" /></div>
         ) : (
-          <pre className={`whitespace-pre-wrap break-words text-sm font-mono leading-6 ${activeRun.status === 'cancelled' ? 'text-muted-foreground' : 'text-red-300'}`}>{activeRun.errorText ?? 'No error recorded.'}</pre>
+          <pre className={`whitespace-pre-wrap break-words text-sm font-mono leading-6 ${activeRun.status === 'cancelled' ? 'text-muted-foreground' : 'text-destructive'}`}>{activeRun.errorText ?? 'No error recorded.'}</pre>
         )}
       </TabsContent>
     </Tabs>

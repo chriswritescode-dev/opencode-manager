@@ -9,7 +9,7 @@ interface McpStatusBadgeProps {
 export function McpStatusBadge({ status }: McpStatusBadgeProps) {
   switch (status.status) {
     case 'connected':
-      return <Badge variant="default" className="text-xs bg-green-600">Connected</Badge>
+      return <Badge variant="default" className="text-xs bg-success text-success-foreground">Connected</Badge>
     case 'pending':
       return <Badge variant="outline" className="text-xs">Connecting</Badge>
     case 'disabled':
@@ -23,7 +23,7 @@ export function McpStatusBadge({ status }: McpStatusBadgeProps) {
       )
     case 'needs_auth':
       return (
-        <Badge variant="outline" className="text-xs flex items-center gap-1 border-yellow-500 text-yellow-600">
+        <Badge variant="outline" className="text-xs flex items-center gap-1 border-warning text-warning">
           <Key className="h-3 w-3" />
           Auth Required
         </Badge>

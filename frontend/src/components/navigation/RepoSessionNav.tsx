@@ -72,18 +72,18 @@ export function RepoNavGroup({
           onClick={onOpenRepo}
           aria-current={isCurrent ? 'page' : undefined}
           className={cn(
-            'flex min-w-0 flex-1 flex-col justify-center gap-0.5 pr-2 text-left hover:bg-white/[0.03]',
+            'flex min-w-0 flex-1 flex-col justify-center gap-0.5 pr-2 text-left hover:bg-accent/30',
             onToggle ? 'pl-0' : 'pl-4',
           )}
         >
-          <span className="truncate text-[15px] font-bold tracking-tight text-orange-600 dark:text-orange-400">
+          <span className="truncate text-[15px] font-bold tracking-tight text-highlight">
             {name}
           </span>
           {branch && (
             <span
               className={cn(
                 'truncate font-mono text-[11.5px]',
-                isWorktree ? 'text-purple-400' : 'text-muted-foreground',
+                isWorktree ? 'text-primary' : 'text-muted-foreground',
               )}
             >
               {branch}
@@ -129,14 +129,14 @@ export function SessionNavRow({ item, isCurrent, onSelect, repoLabel }: SessionN
       </span>
       <span className="min-w-0 flex-1 truncate">{item.session.title || 'Untitled Session'}</span>
       {repoLabel && (
-        <span className="max-w-24 shrink-0 truncate text-xs text-orange-600 dark:text-orange-400">{repoLabel}</span>
+        <span className="max-w-24 shrink-0 truncate text-xs text-highlight">{repoLabel}</span>
       )}
       <SessionStatusIndicator sessionID={item.session.id} size="sm" />
       {hasPermission(item.session.id) && (
-        <Bell className="h-3 w-3 shrink-0 text-orange-500" aria-label="Pending permission" />
+        <Bell className="h-3 w-3 shrink-0 text-highlight" aria-label="Pending permission" />
       )}
       {hasForm(item.session.id) && (
-        <HelpCircle className="h-3 w-3 shrink-0 text-blue-500" aria-label="Pending form" />
+        <HelpCircle className="h-3 w-3 shrink-0 text-info" aria-label="Pending form" />
       )}
       <span className="ml-auto min-w-[30px] shrink-0 text-right text-xs tabular-nums text-muted-foreground">
         {formatShortRelativeTime(new Date(item.session.time.updated))}

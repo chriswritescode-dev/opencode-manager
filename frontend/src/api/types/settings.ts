@@ -21,11 +21,13 @@ import {
   type SkillScope,
   type InstallSkillFromGithubRequest,
   type InstallSkillResponse,
+  type SettingsResponse as SharedSettingsResponse,
 } from '@opencode-manager/shared'
 import type { NotificationPreferences } from '@opencode-manager/shared/types'
 import { saveFile } from '@/lib/download'
 
 export type { TTSConfig, STTConfig, OpenCodeConfigFile, OpenCodeConfigSourceFile, OpenCodeConfigSourceName, UpdateOpenCodeConfigRequest, ModelConfig, ProviderConfig, SandboxPreferences, NotificationPreferences, SkillFileInfo, CreateSkillRequest, UpdateSkillRequest, SkillScope, InstallSkillFromGithubRequest, InstallSkillResponse }
+export type { UserPreferences, UpdateSettingsRequest, CustomCommand, GitCredential, GitIdentity } from '@opencode-manager/shared'
 export { DEFAULT_TTS_CONFIG, DEFAULT_STT_CONFIG, DEFAULT_KEYBOARD_SHORTCUTS, DEFAULT_USER_PREFERENCES, DEFAULT_LEADER_KEY, BLOCKED_SERVER_ENV_KEYS }
 export { isOpenCodeConfigSourceName } from '@opencode-manager/shared'
 
@@ -43,65 +45,7 @@ export function downloadOpenCodeConfigSource(source: OpenCodeConfigSourceFile): 
   void saveFile(blob, source.name)
 }
 
-export interface CustomCommand {
-  name: string
-  description: string
-  promptTemplate: string
-}
-
-export interface GitCredential {
-  id?: string
-  name: string
-  host: string
-  type: 'pat' | 'ssh'
-  token?: string
-  sshPrivateKey?: string
-  sshPrivateKeyEncrypted?: string
-  hasPassphrase?: boolean
-  username?: string
-  passphrase?: string
-}
-
-export interface GitIdentity {
-  name: string
-  email: string
-}
-
-export interface UserPreferences {
-  theme: 'dark' | 'light' | 'system'
-  mode: 'plan' | 'build'
-  defaultModel?: string
-  defaultAgent?: string
-  autoScroll: boolean
-  expandDiffs: boolean
-  expandToolCalls: boolean
-  showReasoning: boolean
-  simpleChatMode: boolean
-  leaderKey?: string
-  directShortcuts?: string[]
-  keyboardShortcuts: Record<string, string>
-  customCommands: CustomCommand[]
-  gitCredentials?: GitCredential[]
-  defaultGitCredentialId?: string
-  gitIdentity?: GitIdentity
-  tts?: TTSConfig
-  stt?: STTConfig
-  notifications?: NotificationPreferences
-  repoOrder?: number[]
-  repoSortMode?: 'recent' | 'manual' | 'name'
-  serverEnvVars?: Array<{ key: string; value: string }>
-  sandbox?: SandboxPreferences
-}
-
-export interface SettingsResponse {
-  preferences: UserPreferences
-  updatedAt: number
-  restartRequired?: boolean
-}
-
-export interface UpdateSettingsRequest {
-  preferences: Partial<UserPreferences>
-}
+export type SettingsResponse = SharedSettingsResponse & { restartRequired?: boolean }
 
 export interface OpenCodeConfigSaveResponse extends OpenCodeConfigFile {
   restartRequired?: boolean

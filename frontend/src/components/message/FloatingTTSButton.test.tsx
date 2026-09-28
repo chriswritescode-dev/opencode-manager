@@ -239,7 +239,7 @@ describe('FloatingTTSButton', () => {
 
     const button = screen.getByRole('button', { name: /stop playback/i })
 
-    expect(button).toHaveClass('from-red-600')
+    expect(button).toHaveClass('bg-destructive')
     expect(button).toHaveClass('rounded-lg')
     expect(button).not.toHaveClass('rounded-full')
     expect(button).not.toHaveClass('hidden')
@@ -251,7 +251,7 @@ describe('FloatingTTSButton', () => {
     setup({ activeMessageId: TEST_MESSAGE_ID, isLoading: true })
     render(<FloatingTTSButton messageId={TEST_MESSAGE_ID} content={TEST_CONTENT} />)
 
-    expect(screen.getByRole('button', { name: /stop playback/i })).toHaveClass('from-red-600')
+    expect(screen.getByRole('button', { name: /stop playback/i })).toHaveClass('bg-destructive')
   })
 
   it('shows autoplay state with button color when autoPlay is enabled', () => {
@@ -260,7 +260,7 @@ describe('FloatingTTSButton', () => {
 
     const button = screen.getByRole('button', { name: /auto-play enabled/i })
 
-    expect(button).toHaveClass('from-blue-500')
+    expect(button).toHaveClass('bg-primary')
     expect(button).toHaveClass('rounded-lg')
     expect(screen.queryByText('Play')).not.toBeInTheDocument()
     expect(screen.queryByText('Auto')).not.toBeInTheDocument()
@@ -273,8 +273,8 @@ describe('FloatingTTSButton', () => {
 
     const button = screen.getByRole('button', { name: /play latest reply/i })
 
-    expect(button).toHaveClass('from-amber-500')
-    expect(button).not.toHaveClass('from-blue-500')
+    expect(button).toHaveClass('from-warning')
+    expect(button).not.toHaveClass('bg-primary')
     expect(screen.queryByText('Play')).not.toBeInTheDocument()
   })
 })

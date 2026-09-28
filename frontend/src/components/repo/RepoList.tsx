@@ -321,8 +321,8 @@ export function RepoList() {
       case !repos || repos.length === 0:
         return (
           <div className="text-center p-12">
-            <GitBranch className="w-12 h-12 mx-auto mb-4 text-zinc-600" />
-            <p className="text-zinc-500">
+            <GitBranch className="w-12 h-12 mx-auto mb-4 text-muted-foreground" />
+            <p className="text-muted-foreground">
               No repositories yet. Add one to get started.
             </p>
           </div>
@@ -406,8 +406,8 @@ export function RepoList() {
                 case sortedViewModels.length === 0:
                   return (
                     <div className="text-center p-12">
-                      <Search className="w-12 h-12 mx-auto mb-4 text-zinc-600" />
-                      <p className="text-zinc-500">
+                      <Search className="w-12 h-12 mx-auto mb-4 text-muted-foreground" />
+                      <p className="text-muted-foreground">
                         {sections[0]?.emptyMessage || `No repositories found${searchQuery ? ` matching "${searchQuery}"` : ''}`}
                       </p>
                     </div>

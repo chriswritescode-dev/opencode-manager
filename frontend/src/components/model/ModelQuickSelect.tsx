@@ -61,9 +61,15 @@ const VIRTUAL_LIST_OVERSCAN = 8
 const EMPTY_PROVIDERS: Provider[] = []
 const EMPTY_MODELS: ModelListItem[] = []
 const EMPTY_MODELS_BY_PROVIDER = new Map<string, ModelListItem[]>()
+const ICON_BUTTON_CLASS =
+  'flex h-9 w-9 items-center justify-center rounded-full border border-border bg-muted text-foreground/80 hover:bg-accent'
 
 function createSearchText(...values: string[]) {
   return values.join(' ').toLowerCase()
+}
+
+function formatModelCount(count: number) {
+  return `${count} ${count === 1 ? 'model' : 'models'}`
 }
 
 function createModelListItem(provider: Provider, modelID: string, model: Model): ModelListItem {
@@ -158,7 +164,7 @@ function VirtualizedList<T>({
       className={['h-full overflow-y-auto', className].filter(Boolean).join(' ')}
     >
       {items.length === 0 ? (
-        <div className="py-10 text-center text-sm text-white/50">{emptyLabel}</div>
+        <div className="py-10 text-center text-sm text-muted-foreground">{emptyLabel}</div>
       ) : (
         <div className="relative" style={{ height: items.length * itemHeight }}>
           {visibleItems.map((item, index) => (
@@ -444,17 +450,17 @@ export function ModelQuickSelect({
     return (
       <div
         key={item.key}
-        className={`group flex w-full items-center gap-2 rounded-xl py-2 text-left transition-colors hover:bg-white/5 ${isSelected ? 'bg-orange-500/10' : ''}`}
+        className={`group flex w-full items-center gap-2 rounded-xl py-2 text-left transition-colors hover:bg-accent ${isSelected ? 'bg-highlight/10' : ''}`}
       >
         <button
           type="button"
           onClick={() => handleModelSelect(item.providerID, item.modelID)}
           className="min-w-0 flex-1 px-2 text-left"
         >
-          <span className="block truncate text-sm font-medium text-white">
+          <span className="block truncate text-sm font-medium text-foreground">
             {getPrimaryLabel(item)}
           </span>
-          <span className="mt-0.5 block truncate text-xs text-white/50">
+          <span className="mt-0.5 block truncate text-xs text-muted-foreground">
             {getDescription(item)}
           </span>
         </button>
@@ -465,10 +471,10 @@ export function ModelQuickSelect({
               event.stopPropagation()
               removeRecentModel({ providerID: item.providerID, modelID: item.modelID })
             }}
-            className="rounded-full p-1.5 text-white/30 hover:bg-white/10 hover:text-white/70"
+            className="rounded-full p-1.5 text-muted-foreground hover:bg-accent hover:text-foreground"
             aria-label="Remove from recent"
           >
-            <Trash2 className="h-3.5 w-3.5 text-red-400" />
+            <Trash2 className="h-3.5 w-3.5 text-destructive" />
           </button>
         )}
         <button
@@ -477,12 +483,12 @@ export function ModelQuickSelect({
             event.stopPropagation()
             toggleFavorite({ providerID: item.providerID, modelID: item.modelID })
           }}
-          className="rounded-full p-1.5 text-white/50 transition-opacity hover:bg-white/10 hover:text-white"
+          className="rounded-full p-1.5 text-muted-foreground transition-opacity hover:bg-accent hover:text-foreground"
           aria-label={isFavorite ? 'Remove from favorites' : 'Add to favorites'}
         >
-          <Star className={`h-4 w-4 ${isFavorite ? 'fill-yellow-400 text-yellow-400' : ''}`} />
+          <Star className={`h-4 w-4 ${isFavorite ? 'fill-warning text-warning' : ''}`} />
         </button>
-        {isSelected && <Check className="h-5 w-5 shrink-0 pr-2 text-orange-500" />}
+        {isSelected && <Check className="h-5 w-5 shrink-0 pr-2 text-highlight" />}
       </div>
     )
   }
@@ -495,13 +501,31 @@ export function ModelQuickSelect({
         key={provider.id}
         type="button"
         onClick={() => handleProviderSelect(provider.id)}
-        className="flex w-full items-center gap-3 rounded-xl py-2.5 text-left transition-colors hover:bg-white/5"
+        className="flex w-full items-center gap-3 rounded-xl py-2.5 text-left transition-colors hover:bg-accent"
       >
         <span className="min-w-0 flex-1">
-          <span className="block truncate text-sm font-medium text-white">{provider.label}</span>
-          <span className="mt-0.5 block truncate text-xs text-white/50">{provider.count} {provider.count === 1 ? 'model' : 'models'}</span>
+          <span className="block truncate text-sm font-medium text-foreground">{provider.label}</span>
+          <span className="mt-0.5 block truncate text-xs text-muted-foreground">{formatModelCount(provider.count)}</span>
         </span>
-        <ChevronRight className="h-5 w-5 shrink-0 text-white/40" />
+        <ChevronRight className="h-5 w-5 shrink-0 text-muted-foreground" />
+      </button>
+    )
+  }
+
+  const renderSidebarProviderOption = (provider: ProviderListItem) => {
+    return (
+      <button
+        key={provider.id}
+        type="button"
+        onClick={() => handleProviderSelect(provider.id)}
+        className={`w-full text-left px-3 py-2 rounded-lg text-sm transition-colors ${
+          selectedProviderId === provider.id
+            ? 'bg-highlight/20 text-highlight font-medium'
+            : 'text-muted-foreground hover:bg-accent'
+        }`}
+      >
+        <div className="truncate">{provider.label}</div>
+        <div className="text-xs text-muted-foreground">{formatModelCount(provider.count)}</div>
       </button>
     )
   }
@@ -512,12 +536,12 @@ export function ModelQuickSelect({
     return (
       <>
         <DropdownMenuLabel>Variant</DropdownMenuLabel>
-        <DropdownMenuItem onClick={() => clearVariant()} className={!currentVariant ? 'text-orange-500' : ''}>
+        <DropdownMenuItem onClick={() => clearVariant()} className={!currentVariant ? 'text-highlight' : ''}>
           Default
           {!currentVariant && <Check className="ml-auto h-4 w-4" />}
         </DropdownMenuItem>
         {availableVariants.map(variant => (
-          <DropdownMenuItem key={variant} onClick={() => setVariant(variant)} className={currentVariant === variant ? 'text-orange-500' : ''}>
+          <DropdownMenuItem key={variant} onClick={() => setVariant(variant)} className={currentVariant === variant ? 'text-highlight' : ''}>
             <span className="capitalize">{variant}</span>
             {currentVariant === variant && <Check className="ml-auto h-4 w-4" />}
           </DropdownMenuItem>
@@ -550,7 +574,7 @@ export function ModelQuickSelect({
         isOpen={isOpen}
         onClose={() => handleOpenChange(false)}
         heightClass="h-[70dvh] max-h-[720px]"
-        className="z-[300] border-white/10 bg-zinc-950 text-white shadow-2xl md:mx-auto md:max-w-lg"
+        className="z-[300] border-border bg-popover text-foreground shadow-2xl md:mx-auto md:max-w-lg"
         ariaLabel="Select model"
       >
         <div className={`flex items-center justify-between gap-2 px-4 ${showAllModels ? 'pb-2 pt-2' : 'pb-3 pt-0'}`}>
@@ -559,18 +583,18 @@ export function ModelQuickSelect({
               <button
                 type="button"
                 onClick={handleMoreModelsBack}
-                className="flex h-9 w-9 shrink-0 items-center justify-center rounded-full border border-white/10 bg-white/5 text-white/80 hover:bg-white/10"
+                className={`${ICON_BUTTON_CLASS} shrink-0`}
                 aria-label="Back to quick models"
               >
                 <ChevronLeft className="h-5 w-5" />
               </button>
               <div className="relative flex-1">
-                <Search className="absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-white/40" />
+                <Search className="absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
                 <Input
                   value={searchQuery}
                   onChange={(event) => setSearchQuery(event.target.value)}
                   placeholder={selectedProviderId ? 'Search models...' : 'Search providers...'}
-                  className="h-9 border-white/10 bg-white/5 pl-9 text-sm text-white placeholder:text-white/40"
+                  className="h-9 border-border bg-muted pl-9 text-sm text-foreground placeholder:text-muted-foreground"
                   autoComplete="off"
                   name="model-search"
                 />
@@ -581,7 +605,7 @@ export function ModelQuickSelect({
               <button
                 type="button"
                 onClick={() => handleOpenChange(false)}
-                className="flex h-9 w-9 items-center justify-center rounded-full border border-white/10 bg-white/5 text-white/80 hover:bg-white/10"
+                className={ICON_BUTTON_CLASS}
                 aria-label="Close model selector"
               >
                 <X className="h-5 w-5" />
@@ -589,9 +613,9 @@ export function ModelQuickSelect({
               <div className="min-w-0 flex-1 px-3 text-center">
                 <h2 className="truncate text-base font-semibold tracking-tight">
                   {selectedModelLabel}
-                  <span className="ml-1.5 inline-block h-2 w-2 rounded-full bg-orange-500" />
+                  <span className="ml-1.5 inline-block h-2 w-2 rounded-full bg-highlight" />
                 </h2>
-                <p className="truncate text-xs text-white/45">
+                <p className="truncate text-xs text-muted-foreground">
                   {currentVariant ? `${selectedModelDescription} · ${currentVariant}` : selectedModelDescription}
                 </p>
               </div>
@@ -601,11 +625,11 @@ export function ModelQuickSelect({
                     <button
                       type="button"
                       disabled={!model && !hasVariants}
-                      className="flex h-9 w-24 items-center justify-center gap-1 rounded-md border border-white/10 bg-white/5 px-1.5 text-sm font-medium capitalize text-white/70 hover:bg-white/10 disabled:opacity-30"
+                      className="flex h-9 w-24 items-center justify-center gap-1 rounded-md border border-border bg-muted px-1.5 text-sm font-medium capitalize text-muted-foreground hover:bg-accent disabled:opacity-30"
                       aria-label={`Current variant: ${selectedVariantLabel}`}
                     >
                       <span className="truncate">{selectedVariantLabel}</span>
-                      <ChevronDown className="h-3.5 w-3.5 shrink-0 text-white/40" />
+                      <ChevronDown className="h-3.5 w-3.5 shrink-0 text-muted-foreground" />
                     </button>
                   </DropdownMenuTrigger>
                   <DropdownMenuContent align="end" className="z-[350] min-w-56">
@@ -620,47 +644,19 @@ export function ModelQuickSelect({
         {showAllModels ? (
           <div className="flex-1 flex overflow-hidden min-h-0">
             {/* Provider sidebar — desktop only */}
-            <div className="hidden md:flex md:flex-col w-48 lg:w-56 border-r border-white/10 overflow-y-auto flex-shrink-0">
+            <div className="hidden md:flex md:flex-col w-48 lg:w-56 border-r border-border overflow-y-auto flex-shrink-0">
               <div className="p-3 space-y-1">
                 {connectedProviderItems.length > 0 && (
                   <>
-                    <p className="px-3 pb-1 text-xs font-medium text-white/45">Connected</p>
-                    {connectedProviderItems.map(provider => (
-                      <button
-                        key={provider.id}
-                        type="button"
-                        onClick={() => handleProviderSelect(provider.id)}
-                        className={`w-full text-left px-3 py-2 rounded-lg text-sm transition-colors ${
-                          selectedProviderId === provider.id
-                            ? 'bg-orange-500/20 text-orange-300 font-medium'
-                            : 'text-white/70 hover:bg-white/5'
-                        }`}
-                      >
-                        <div className="truncate">{provider.label}</div>
-                        <div className="text-xs text-white/40">{provider.count} {provider.count === 1 ? 'model' : 'models'}</div>
-                      </button>
-                    ))}
-                    {availableProviderItems.length > 0 && <div className="mx-3 my-1 h-px bg-white/10" />}
+                    <p className="px-3 pb-1 text-xs font-medium text-muted-foreground">Connected</p>
+                    {connectedProviderItems.map(renderSidebarProviderOption)}
+                    {availableProviderItems.length > 0 && <div className="mx-3 my-1 h-px bg-border" />}
                   </>
                 )}
                 {availableProviderItems.length > 0 && (
                   <>
-                    <p className="px-3 pb-1 text-xs font-medium text-white/45">Available</p>
-                    {availableProviderItems.map(provider => (
-                      <button
-                        key={provider.id}
-                        type="button"
-                        onClick={() => handleProviderSelect(provider.id)}
-                        className={`w-full text-left px-3 py-2 rounded-lg text-sm transition-colors ${
-                          selectedProviderId === provider.id
-                            ? 'bg-orange-500/20 text-orange-300 font-medium'
-                            : 'text-white/70 hover:bg-white/5'
-                        }`}
-                      >
-                        <div className="truncate">{provider.label}</div>
-                        <div className="text-xs text-white/40">{provider.count} {provider.count === 1 ? 'model' : 'models'}</div>
-                      </button>
-                    ))}
+                    <p className="px-3 pb-1 text-xs font-medium text-muted-foreground">Available</p>
+                    {availableProviderItems.map(renderSidebarProviderOption)}
                   </>
                 )}
               </div>
@@ -698,20 +694,20 @@ export function ModelQuickSelect({
                     <div className="space-y-1">
                       {connectedProviderItems.length > 0 && (
                         <>
-                          <p className="px-1 pb-1 text-xs font-medium text-white/45">Connected</p>
+                          <p className="px-1 pb-1 text-xs font-medium text-muted-foreground">Connected</p>
                           {connectedProviderItems.map(renderProviderOption)}
-                          {availableProviderItems.length > 0 && <div className="-mx-4 my-2 h-px bg-white/10" />}
+                          {availableProviderItems.length > 0 && <div className="-mx-4 my-2 h-px bg-border" />}
                         </>
                       )}
                       {availableProviderItems.length > 0 && (
                         <>
-                          <p className="px-1 pb-1 text-xs font-medium text-white/45">Available</p>
+                          <p className="px-1 pb-1 text-xs font-medium text-muted-foreground">Available</p>
                           {availableProviderItems.map(renderProviderOption)}
                         </>
                       )}
                     </div>
                     {filteredProviderItems.length === 0 && (
-                      <div className="py-10 text-center text-sm text-white/50">No providers found</div>
+                      <div className="py-10 text-center text-sm text-muted-foreground">No providers found</div>
                     )}
                   </div>
                 )}
@@ -723,7 +719,7 @@ export function ModelQuickSelect({
             <div className="min-h-0 flex-1 space-y-4 overflow-y-auto px-4 pb-3">
               {quickSections.map(section => (
                 <section key={section.title}>
-                  <h3 className="mb-1.5 flex items-center gap-1.5 text-xs font-medium text-white/45">
+                  <h3 className="mb-1.5 flex items-center gap-1.5 text-xs font-medium text-muted-foreground">
                     {section.icon}
                     {section.title}
                   </h3>
@@ -733,14 +729,14 @@ export function ModelQuickSelect({
                 </section>
               ))}
             </div>
-            <div className="flex-shrink-0 border-t border-white/10">
+            <div className="flex-shrink-0 border-t border-border">
               <button
                 type="button"
                 onClick={() => setShowAllModels(true)}
-                className="flex w-full items-center justify-between bg-card px-6 py-4 text-left text-sm font-semibold text-white transition-colors hover:bg-accent active:bg-card"
+                className="flex w-full items-center justify-between bg-card px-6 py-4 text-left text-sm font-semibold text-foreground transition-colors hover:bg-accent active:bg-card"
               >
                 <span>More models</span>
-                <ChevronRight className="h-5 w-5 text-white/50" />
+                <ChevronRight className="h-5 w-5 text-muted-foreground" />
               </button>
             </div>
           </div>

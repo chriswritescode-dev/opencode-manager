@@ -3,6 +3,8 @@ import { render, screen } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { ServerEnvVarsSettings } from './ServerEnvVarsSettings'
 import { useSettings } from '@/hooks/useSettings'
+import type { UserPreferences } from '@/api/types/settings'
+import { createUseSettingsMock } from '@/test/test-utils'
 
 const mocks = vi.hoisted(() => ({
   updateSettingsAsync: vi.fn(),
@@ -13,17 +15,12 @@ vi.mock('@/hooks/useSettings')
 vi.mock('@/lib/toast', () => ({ showToast: mocks.showToast }))
 
 function mockSettings(serverEnvVars: Array<{ key: string; value: string }> = []): void {
-  vi.mocked(useSettings).mockReturnValue({
-    settings: undefined,
-    preferences: { serverEnvVars },
-    isLoading: false,
-    error: null,
-    updateSettings: vi.fn(),
-    updateSettingsAsync: mocks.updateSettingsAsync,
-    resetSettings: vi.fn(),
-    isUpdating: false,
-    isResetting: false,
-  } as ReturnType<typeof useSettings>)
+  vi.mocked(useSettings).mockReturnValue(
+    createUseSettingsMock({
+      preferences: { serverEnvVars } as UserPreferences,
+      updateSettingsAsync: mocks.updateSettingsAsync,
+    }),
+  )
 }
 
 describe('ServerEnvVarsSettings', () => {

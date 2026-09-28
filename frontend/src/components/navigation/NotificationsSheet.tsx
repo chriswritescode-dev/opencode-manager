@@ -38,7 +38,7 @@ export function NotificationsSheet({ isOpen, onClose }: NotificationsSheetProps)
       <BottomSheetContent className="flex flex-col gap-4">
         <div>
           <div className="flex items-center gap-2 mb-3">
-            <Bell className="w-5 h-5 text-orange-500" />
+            <Bell className="w-5 h-5 text-highlight" />
             <h3 className="font-semibold text-foreground">Pending permissions</h3>
           </div>
           {permissionCount === 0 ? (
@@ -72,7 +72,7 @@ export function NotificationsSheet({ isOpen, onClose }: NotificationsSheetProps)
 
         <div>
           <div className="flex items-center gap-2 mb-3">
-            <HelpCircle className="w-5 h-5 text-blue-500" />
+            <HelpCircle className="w-5 h-5 text-info" />
             <h3 className="font-semibold text-foreground">Pending forms</h3>
           </div>
           {formCount === 0 ? (

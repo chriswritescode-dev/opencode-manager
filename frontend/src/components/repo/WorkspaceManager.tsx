@@ -195,8 +195,8 @@ export function WorkspaceManager({
                     aria-pressed={isActive}
                   >
                     <GitBranch className="h-3.5 w-3.5 text-primary flex-shrink-0" />
-                    <span className={isActive ? 'truncate text-orange-600 dark:text-orange-400' : 'truncate'}>{label}</span>
-                    {isActive && <span className="text-xs text-orange-600 dark:text-orange-400">Selected</span>}
+                    <span className={isActive ? 'truncate text-highlight' : 'truncate'}>{label}</span>
+                    {isActive && <span className="text-xs text-highlight">Selected</span>}
                     <span className="ml-auto hidden truncate text-xs text-muted-foreground md:block md:max-w-[45%]">
                       {directory}
                     </span>

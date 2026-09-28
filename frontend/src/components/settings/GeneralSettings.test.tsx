@@ -6,6 +6,7 @@ import { useSettings } from '@/hooks/useSettings'
 import { useVersionCheck } from '@/hooks/useVersionCheck'
 import type { UserPreferences } from '@/api/types/settings'
 import type { VersionInfo } from '@/api/settings'
+import { createUseSettingsMock } from '@/test/test-utils'
 
 vi.mock('@/hooks/useSettings')
 vi.mock('@/hooks/useVersionCheck')
@@ -31,18 +32,7 @@ const baseVersionInfo: VersionInfo = {
 }
 
 function mockUseSettings(overrides: Partial<ReturnType<typeof useSettings>> = {}) {
-  vi.mocked(useSettings).mockReturnValue({
-    settings: undefined,
-    preferences: basePreferences,
-    isLoading: false,
-    error: null,
-    updateSettings: vi.fn(),
-    updateSettingsAsync: vi.fn(),
-    resetSettings: vi.fn(),
-    isUpdating: false,
-    isResetting: false,
-    ...overrides,
-  })
+  vi.mocked(useSettings).mockReturnValue(createUseSettingsMock({ preferences: basePreferences, ...overrides }))
 }
 
 function mockVersionInfo(overrides: Partial<VersionInfo> = {}) {
@@ -73,7 +63,7 @@ describe('GeneralSettings', () => {
     expect(screen.getByText('v1.2.3')).toBeInTheDocument()
     expect(screen.getByRole('link', { name: 'v1.3.0 available' })).toHaveAttribute('href', 'https://example.com/release')
 
-    expect(screen.getByLabelText('Theme')).toBeInTheDocument()
+    expect(screen.getByLabelText('Appearance')).toBeInTheDocument()
     expect(screen.getByRole('switch', { name: 'Simple chat mode' })).not.toBeChecked()
     expect(screen.getByRole('switch', { name: 'Auto-scroll' })).toBeChecked()
     expect(screen.getByRole('switch', { name: 'Show reasoning' })).not.toBeChecked()
@@ -88,13 +78,30 @@ describe('GeneralSettings', () => {
     mockVersionInfo()
     render(<GeneralSettings />)
 
-    await user.click(screen.getByRole('combobox', { name: 'Theme' }))
+    await user.click(screen.getByRole('combobox', { name: 'Appearance' }))
     await user.click(screen.getByRole('option', { name: 'Light' }))
 
     expect(updateSettings).toHaveBeenCalledWith({ theme: 'light' })
 
     await user.click(screen.getByRole('switch', { name: 'Auto-scroll' }))
     expect(updateSettings).toHaveBeenCalledWith({ autoScroll: false })
+  })
+
+  it('defaults the color theme to Manager and persists a chosen OpenCode theme', async () => {
+    const user = userEvent.setup()
+    const updateSettings = vi.fn()
+    mockUseSettings({ updateSettings })
+    mockVersionInfo()
+    render(<GeneralSettings />)
+
+    expect(screen.getByRole('combobox', { name: 'Theme' })).toHaveTextContent('Manager')
+
+    await user.click(screen.getByRole('combobox', { name: 'Theme' }))
+    expect(screen.getByRole('option', { name: 'Manager' })).toBeInTheDocument()
+    expect(screen.getByRole('option', { name: 'OpenCode' })).toBeInTheDocument()
+    await user.click(screen.getByRole('option', { name: 'Dracula' }))
+
+    expect(updateSettings).toHaveBeenCalledWith({ colorTheme: 'dracula' })
   })
 
   it('hides the reasoning, tool call, and diff rows while simple chat mode is on', () => {

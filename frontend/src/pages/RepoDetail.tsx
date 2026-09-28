@@ -192,7 +192,7 @@ export function RepoDetail() {
         <div className="flex items-center gap-2 min-w-0">
           <Header.Title>{repoName}</Header.Title>
           {isWorktree ? (
-            <Badge className="text-xs px-1.5 sm:px-2.5 py-0.5 bg-purple-600/20 text-purple-400 border-purple-600/40" title="Worktree">
+            <Badge className="text-xs px-1.5 sm:px-2.5 py-0.5 bg-primary/20 text-primary border-primary/40" title="Worktree">
               <GitBranch className="h-3 w-3 sm:mr-1" />
               <span className="hidden sm:inline">WT: {currentBranch}</span>
             </Badge>
@@ -206,7 +206,7 @@ export function RepoDetail() {
             onClick={() => handleCreateSession()}
             disabled={createSessionMutation.isPending}
             size="sm"
-            className="sm:hidden h-10 w-10 p-0 bg-blue-600 hover:bg-blue-700 text-white transition-all duration-200 hover:scale-105"
+            className="sm:hidden h-10 w-10 p-0 bg-primary hover:bg-primary-hover text-primary-foreground transition-all duration-200 hover:scale-105"
           >
             <Plus className="w-5 h-5" />
           </Button>
@@ -303,7 +303,7 @@ function CreateWorkspaceDialog({ open, onOpenChange, onCreate, isCreating }: Cre
       <DialogContent className="sm:max-w-[420px]">
         <DialogHeader>
           <DialogTitle className="flex items-center gap-2">
-            <Layers className="h-4 w-4 text-purple-400" />
+            <Layers className="h-4 w-4 text-primary" />
             Create Workspace
           </DialogTitle>
           <DialogDescription>
@@ -312,7 +312,7 @@ function CreateWorkspaceDialog({ open, onOpenChange, onCreate, isCreating }: Cre
         </DialogHeader>
         <div className="rounded-md border border-border bg-muted/30 p-3 text-sm">
           <div className="flex items-center gap-2 font-medium">
-            <GitBranch className="h-4 w-4 text-purple-400" />
+            <GitBranch className="h-4 w-4 text-primary" />
             Worktree
           </div>
           <p className="mt-1 text-xs text-muted-foreground">
@@ -323,7 +323,7 @@ function CreateWorkspaceDialog({ open, onOpenChange, onCreate, isCreating }: Cre
           <Button variant="outline" onClick={() => onOpenChange(false)} disabled={isCreating}>
             Cancel
           </Button>
-          <Button onClick={() => { void onCreate(); }} disabled={isCreating} className="bg-blue-600 hover:bg-blue-700 text-white">
+          <Button onClick={() => { void onCreate(); }} disabled={isCreating} className="bg-primary hover:bg-primary-hover text-primary-foreground">
             {isCreating ? (
               <>
                 <Loader2 className="h-4 w-4 mr-2 animate-spin" />

@@ -84,7 +84,7 @@ export function AgentsMdEditor() {
 
   if (error) {
     return (
-      <div className="text-center py-8 text-red-500">
+      <div className="text-center py-8 text-destructive">
         Failed to load AGENTS.md
       </div>
     )
@@ -155,7 +155,7 @@ export function AgentsMdEditor() {
       </div>
 
       {hasChanges && (
-        <p className="text-xs text-amber-500">You have unsaved changes</p>
+        <p className="text-xs text-warning">You have unsaved changes</p>
       )}
     </div>
   )

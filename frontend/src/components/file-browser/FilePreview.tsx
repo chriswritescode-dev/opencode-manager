@@ -10,6 +10,8 @@ import { MarkdownRenderer } from './MarkdownRenderer'
 
 const VIRTUALIZATION_THRESHOLD_BYTES = 50_000
 const MARKDOWN_PREVIEW_SIZE_LIMIT = 1_000_000
+const SUCCESS_TINT_BUTTON_CLASS = 'h-7 w-7 p-0 border border-success bg-success/10 text-success hover:bg-success/20 hover:text-success dark:hover:bg-success/20'
+const DESTRUCTIVE_TINT_BUTTON_CLASS = 'h-7 w-7 p-0 border border-destructive bg-destructive/10 text-destructive hover:bg-destructive/20 hover:text-destructive dark:hover:bg-destructive/20'
 
 interface FilePreviewProps {
   file: FileInfo
@@ -308,7 +310,7 @@ export const FilePreview = memo(function FilePreview({ file, hideHeader = false,
               return (
                 <div 
                   key={index}
-                  className={`flex transition-colors duration-300 ${isHighlighted ? 'bg-yellow-500/30' : ''}`}
+                  className={`flex transition-colors duration-300 ${isHighlighted ? 'bg-warning/30' : ''}`}
                   style={{ minHeight: '20px', lineHeight: '20px' }}
                 >
                   <span className="w-12 flex-shrink-0 text-right pr-3 text-muted-foreground select-none border-r border-border/50 text-xs">
@@ -368,10 +370,10 @@ export const FilePreview = memo(function FilePreview({ file, hideHeader = false,
                 <span className="truncate flex-shrink-0">{formatFileSize(file.size)}</span>
                 <span className="hidden sm:inline truncate flex-shrink-0">{formatDate(file.lastModified)}</span>
                 {shouldVirtualize && (
-                  <span className="text-xs text-blue-500 flex-shrink-0">Virtualized</span>
+                  <span className="text-xs text-info flex-shrink-0">Virtualized</span>
                 )}
                 {hasVirtualizedChanges && (
-                  <span className="text-xs text-yellow-500 flex-shrink-0">Unsaved changes</span>
+                  <span className="text-xs text-warning flex-shrink-0">Unsaved changes</span>
                 )}
               </div>
             </div>
@@ -379,10 +381,10 @@ export const FilePreview = memo(function FilePreview({ file, hideHeader = false,
             <div className="flex items-center gap-1 flex-shrink-0 mt-1">
               {isMarkdownFile && viewMode !== 'edit' && (
                 <Button 
-                  variant="outline" 
-                  size="sm" 
-                  onClick={(e) => { e.stopPropagation(); e.preventDefault(); setMarkdownPreview(!markdownPreview) }} 
-                  className={`h-7 w-7 p-0 ${markdownPreview ? 'bg-primary text-primary-foreground' : ''}`}
+                  variant={markdownPreview ? 'default' : 'outline'}
+                  size="sm"
+                  onClick={(e) => { e.stopPropagation(); e.preventDefault(); setMarkdownPreview(!markdownPreview) }}
+                  className="h-7 w-7 p-0"
                   title={markdownPreview ? "Show raw markdown" : "Preview rendered markdown"}
                 >
                   {markdownPreview ? <Code className="w-3 h-3" /> : <Eye className="w-3 h-3" />}
@@ -391,10 +393,10 @@ export const FilePreview = memo(function FilePreview({ file, hideHeader = false,
               
               {isTextFile && !markdownPreview && (
                 <Button 
-                  variant="outline" 
-                  size="sm" 
-                  onClick={(e) => { e.stopPropagation(); e.preventDefault(); setLineWrap(!lineWrap) }} 
-                  className={`h-7 w-7 p-0 ${lineWrap ? 'bg-primary text-primary-foreground' : ''}`}
+                  variant={lineWrap ? 'default' : 'outline'}
+                  size="sm"
+                  onClick={(e) => { e.stopPropagation(); e.preventDefault(); setLineWrap(!lineWrap) }}
+                  className="h-7 w-7 p-0"
                   title={lineWrap ? "Disable line wrap" : "Enable line wrap"}
                 >
                   <WrapText className="w-3 h-3" />
@@ -408,13 +410,13 @@ export const FilePreview = memo(function FilePreview({ file, hideHeader = false,
               )}
               
               {showSaveButton && (
-                <Button variant="outline" size="sm" onClick={(e) => { e.stopPropagation(); e.preventDefault(); if (shouldVirtualize) { handleVirtualizedSaveClick(); } else { handleSave(); } }} disabled={isSaving || (shouldVirtualize && !hasVirtualizedChanges)} className="border-green-600 bg-green-600/10 text-green-600 hover:bg-green-600/20 h-7 w-7 p-0">
+                <Button variant="ghost" size="sm" onClick={(e) => { e.stopPropagation(); e.preventDefault(); if (shouldVirtualize) { handleVirtualizedSaveClick(); } else { handleSave(); } }} disabled={isSaving || (shouldVirtualize && !hasVirtualizedChanges)} className={SUCCESS_TINT_BUTTON_CLASS}>
                   <Save className="w-3 h-3" />
                 </Button>
               )}
               
               {showCancelButton && (
-                <Button variant="outline" size="sm" onClick={(e) => { e.stopPropagation(); e.preventDefault(); handleCancel() }} className="border-destructive bg-destructive/10 text-destructive hover:bg-destructive/20 h-7 w-7 p-0">
+                <Button variant="ghost" size="sm" onClick={(e) => { e.stopPropagation(); e.preventDefault(); handleCancel() }} className={DESTRUCTIVE_TINT_BUTTON_CLASS}>
                   <XIcon className="w-3 h-3" />
                 </Button>
               )}
@@ -426,7 +428,7 @@ export const FilePreview = memo(function FilePreview({ file, hideHeader = false,
               )}
               
               {viewMode !== 'edit' && isMobileModal && onCloseModal && (
-                <Button variant="outline" size="sm" onClick={(e) => { e.stopPropagation(); e.preventDefault(); onCloseModal() }} className="border-destructive bg-destructive/10 text-destructive hover:bg-destructive/20 h-7 w-7 p-0">
+                <Button variant="ghost" size="sm" onClick={(e) => { e.stopPropagation(); e.preventDefault(); onCloseModal() }} className={DESTRUCTIVE_TINT_BUTTON_CLASS}>
                   <X className="w-3 h-3" />
                 </Button>
               )}

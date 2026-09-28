@@ -206,9 +206,9 @@ export function OpenCodeConfigManager() {
   return (
     <div className="min-w-0 space-y-4">
        {health?.opencodeRestartPending && (
-         <div className="flex flex-col gap-2 rounded-md border border-amber-500/40 bg-amber-500/10 p-3 sm:flex-row sm:items-center sm:justify-between">
+         <div className="flex flex-col gap-2 rounded-md border border-warning/40 bg-warning/10 p-3 sm:flex-row sm:items-center sm:justify-between">
            <div className="flex items-center gap-2">
-             <AlertTriangle className="h-4 w-4 shrink-0 text-amber-500" />
+             <AlertTriangle className="h-4 w-4 shrink-0 text-warning" />
              <p className="text-sm">
                Some saved changes require a server restart to take effect.
              </p>
@@ -242,7 +242,7 @@ export function OpenCodeConfigManager() {
         <>
           <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
             <div className="flex min-w-0 items-start gap-2">
-              <FileText className="mt-0.5 h-4 w-4 shrink-0 text-blue-500" />
+              <FileText className="mt-0.5 h-4 w-4 shrink-0 text-primary" />
               <div className="min-w-0">
                 <p className="truncate text-sm font-medium">{getConfigFileName(config.path)}</p>
                 <details className="text-xs text-muted-foreground">
@@ -332,14 +332,14 @@ export function OpenCodeConfigManager() {
             onClick={() => toggleSection('agentsMd', agentsMdRef)}
           >
             <div className="flex min-w-0 items-center gap-3">
-              <FileText className="h-4 w-4 shrink-0 text-blue-500" />
+              <FileText className="h-4 w-4 shrink-0 text-primary" />
               <div className="min-w-0 text-left">
                 <h4 className="text-sm font-medium">Global Agent Instructions (AGENTS.md)</h4>
                 <p className={SECTION_META_CLASS}>Applies across OpenCode</p>
               </div>
             </div>
             <div className="flex shrink-0 items-center gap-3">
-              <span className="text-xs font-medium text-blue-500">Edit AGENTS.md</span>
+              <span className="text-xs font-medium text-primary">Edit AGENTS.md</span>
               <ChevronDown className={cn(SECTION_CHEVRON_CLASS, expandedSections.agentsMd && 'rotate-180')} />
             </div>
           </button>
@@ -528,7 +528,7 @@ export function OpenCodeConfigManager() {
             onClick={() => toggleSection('hostImport', hostImportRef)}
           >
             <div className="flex min-w-0 items-center gap-3">
-              <Download className="h-4 w-4 shrink-0 text-blue-500" />
+              <Download className="h-4 w-4 shrink-0 text-primary" />
               <h4 className={SECTION_TITLE_CLASS}>Existing OpenCode Host Import</h4>
             </div>
             <ChevronDown className={cn(SECTION_CHEVRON_CLASS, expandedSections.hostImport && 'rotate-180')} />
@@ -582,7 +582,7 @@ export function OpenCodeConfigManager() {
               </div>
             </div>
             {!isImportStatusLoading && workspaceConfigPathsToRemove.length > 0 && (
-              <p className="flex items-start gap-2 text-xs text-amber-600 dark:text-amber-500">
+              <p className="flex items-start gap-2 text-xs text-warning">
                 <AlertTriangle className="mt-0.5 h-3.5 w-3.5 shrink-0" />
                 <span>
                   Importing replaces the workspace configuration files. These files will be removed:{' '}

@@ -6,6 +6,8 @@ import { useSettings } from '@/hooks/useSettings'
 import { useServerHealth } from '@/hooks/useServerHealth'
 import { showToast } from '@/lib/toast'
 import { FetchError } from '@/api/fetchWrapper'
+import type { UserPreferences } from '@/api/types/settings'
+import { createUseSettingsMock } from '@/test/test-utils'
 
 vi.mock('@/hooks/useSettings')
 vi.mock('@/hooks/useServerHealth')
@@ -15,18 +17,13 @@ vi.mock('@/lib/toast', () => ({
 
 function mockUseSettings(overrides: Partial<ReturnType<typeof useSettings>> = {}) {
   const updateSettingsAsync = vi.fn().mockResolvedValue(undefined)
-  vi.mocked(useSettings).mockReturnValue({
-    settings: undefined,
-    preferences: { sandbox: { enabled: false } },
-    isLoading: false,
-    error: null,
-    updateSettings: vi.fn(),
-    updateSettingsAsync,
-    resetSettings: vi.fn(),
-    isUpdating: false,
-    isResetting: false,
-    ...overrides,
-  })
+  vi.mocked(useSettings).mockReturnValue(
+    createUseSettingsMock({
+      preferences: { sandbox: { enabled: false } } as UserPreferences,
+      updateSettingsAsync,
+      ...overrides,
+    }),
+  )
   return { updateSettingsAsync }
 }
 

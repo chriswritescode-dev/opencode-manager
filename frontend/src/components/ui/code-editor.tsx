@@ -94,8 +94,8 @@ const EditorRow = memo(function EditorRow({
                 data-active-match={h.first && h.index === activeHighlightIndex ? 'true' : undefined}
                 className={
                   h.index === activeHighlightIndex
-                    ? 'rounded-sm bg-orange-400 text-black'
-                    : 'rounded-sm bg-yellow-300/60 text-black'
+                    ? 'rounded-sm bg-highlight text-highlight-foreground'
+                    : 'rounded-sm bg-warning/60 text-warning-foreground'
                 }
               >
                 {line.substring(h.start, h.end)}

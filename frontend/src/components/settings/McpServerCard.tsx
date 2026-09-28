@@ -91,7 +91,7 @@ export function McpServerCard({
       }
       description={getServerDescription(serverConfig)}
       belowDescription={errorMessage ? (
-        <div className="flex items-start gap-1.5 mt-1.5 text-xs text-red-500">
+        <div className="flex items-start gap-1.5 mt-1.5 text-xs text-destructive">
           <XCircle className="h-3 w-3 flex-shrink-0 mt-0.5" />
           <span className="break-words line-clamp-2">{errorMessage}</span>
         </div>

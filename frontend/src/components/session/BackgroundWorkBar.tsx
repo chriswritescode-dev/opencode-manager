@@ -150,7 +150,7 @@ export function BackgroundWorkBar({ sessionID, directory, messages, isSessionAct
             className="ml-auto flex items-center gap-1 rounded-md border border-border bg-card/60 px-2 py-1 text-muted-foreground hover:text-foreground"
             aria-expanded={expanded}
           >
-            <Loader2 className="h-3 w-3 animate-spin text-yellow-600 dark:text-yellow-400" />
+            <Loader2 className="h-3 w-3 animate-spin text-warning" />
             {shells.length} background shell{shells.length === 1 ? '' : 's'}
             {expanded ? <ChevronUp className="h-3 w-3" /> : <ChevronDown className="h-3 w-3" />}
           </button>
@@ -161,7 +161,7 @@ export function BackgroundWorkBar({ sessionID, directory, messages, isSessionAct
         <ul className="rounded-md border border-border bg-card/60">
           {shells.map((shell) => (
             <li key={shell.id} className="flex items-center gap-2 border-b border-border px-2 py-1 last:border-b-0">
-              <Terminal className="h-3 w-3 shrink-0 text-green-600 dark:text-green-400" />
+              <Terminal className="h-3 w-3 shrink-0 text-success" />
               <span className="min-w-0 flex-1 truncate font-mono" title={shell.command}>{shell.command}</span>
               <Button variant="ghost" size="sm" className="h-6 px-2 text-xs" onClick={() => setViewing(shell)}>
                 Output

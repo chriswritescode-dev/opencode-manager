@@ -194,7 +194,7 @@ export function ProviderSettings() {
                   </div>
                   <div className="flex flex-wrap items-center gap-2">
                     {hasKey ? (
-                      <Badge variant="default" className="bg-green-600 hover:bg-green-700 shrink-0">
+                      <Badge variant="default" className="bg-success text-success-foreground hover:bg-success/90 shrink-0">
                         <Check className="h-3 w-3 mr-1" />
                         Connected
                       </Badge>
@@ -304,7 +304,7 @@ export function ProviderSettings() {
                             )}
                           </div>
                           <div className="flex items-center gap-1">
-                            <Badge variant="default" className="bg-green-600 hover:bg-green-700 shrink-0 text-xs">
+                            <Badge variant="default" className="bg-success text-success-foreground hover:bg-success/90 shrink-0 text-xs">
                               <Check className="h-3 w-3 mr-1" />
                               Connected
                             </Badge>

@@ -263,7 +263,7 @@ export function McpOAuthDialog({
           {step === 'waiting' && (
             <div className="space-y-4">
               <div className="flex items-center justify-center py-4">
-                <Loader2 className="h-5 w-5 animate-spin text-blue-500" />
+                <Loader2 className="h-5 w-5 animate-spin text-primary" />
                 <span className="ml-2 text-sm text-muted-foreground">Waiting for authorization...</span>
               </div>
               <p className="text-xs text-center text-muted-foreground">
@@ -287,7 +287,7 @@ export function McpOAuthDialog({
 
           {step === 'popup_closed' && (
             <div className="flex flex-col items-center justify-center py-6 gap-2">
-              <Loader2 className="h-5 w-5 animate-spin text-blue-500" />
+              <Loader2 className="h-5 w-5 animate-spin text-primary" />
               <p className="text-sm text-muted-foreground">
                 Checking authentication status...
               </p>
@@ -307,7 +307,7 @@ export function McpOAuthDialog({
 
           {step === 'success' && (
             <div className="flex flex-col items-center justify-center py-6 gap-2">
-              <CheckCircle className="h-8 w-8 text-green-500" />
+              <CheckCircle className="h-8 w-8 text-success" />
               <p className="text-sm font-medium">Authentication successful</p>
             </div>
           )}

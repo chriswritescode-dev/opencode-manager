@@ -22,6 +22,31 @@
     <link rel="apple-touch-startup-image" href="/splash/splash-2048x2732.png" media="(device-width: 1024px) and (device-height: 1366px) and (-webkit-device-pixel-ratio: 2) and (orientation: portrait)" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover" />
     <meta name="theme-color" content="#0a0a0a" />
+    <script>
+      (function () {
+        try {
+          var snapshot = JSON.parse(localStorage.getItem('ocm-appearance'));
+          if (!snapshot) return;
+          var root = document.documentElement;
+          if (snapshot.dark) {
+            root.classList.add('dark');
+          } else {
+            root.classList.remove('dark');
+          }
+          if (snapshot.tokens) {
+            for (var token in snapshot.tokens) {
+              root.style.setProperty('--color-' + token, snapshot.tokens[token]);
+            }
+          }
+          if (snapshot.themeColor) {
+            var meta = document.querySelector('meta[name="theme-color"]');
+            if (meta) meta.setAttribute('content', snapshot.themeColor);
+          }
+        } catch (error) {
+          void error;
+        }
+      })();
+    </script>
     <meta name="description" content="AI-powered coding assistant interface" />
     <meta name="mobile-web-app-capable" content="yes" />
     <meta name="apple-mobile-web-app-capable" content="yes" />

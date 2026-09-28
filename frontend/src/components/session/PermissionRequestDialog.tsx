@@ -119,7 +119,7 @@ export function PermissionRequestDialog({
               </div>
             )}
             {isFromDifferentSession ? (
-              <div className="bg-amber-500/10 text-amber-600 dark:text-amber-400 border border-amber-500/20 rounded-md px-2 py-1.5 truncate">
+              <div className="bg-warning/10 text-warning border border-warning/20 rounded-md px-2 py-1.5 truncate">
                 From another session: <span className="font-medium">{displaySessionName}</span>
               </div>
             ) : (

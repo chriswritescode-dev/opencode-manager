@@ -26,7 +26,7 @@ export function WorktreeTabs({
   const workspaceLabel = value === 'workspaces' && activeWorkspaceLabel ? activeWorkspaceLabel : 'Workspaces'
   const tabClassName =
     'group min-w-0 flex-1 gap-1.5 px-2 sm:flex-none sm:px-3 data-[state=active]:border data-[state=active]:border-primary/50 data-[state=active]:bg-primary/10 data-[state=inactive]:hover:bg-accent data-[state=inactive]:hover:text-foreground'
-  const activeLabelClassName = 'group-data-[state=active]:text-orange-600 dark:group-data-[state=active]:text-orange-400'
+  const activeLabelClassName = 'group-data-[state=active]:text-highlight'
 
   return (
     <div className="px-4 pt-2 flex-shrink-0">

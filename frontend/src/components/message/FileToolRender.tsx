@@ -47,13 +47,13 @@ function PatchViewer({ patch }: { patch: string }) {
     <pre className="bg-accent p-2 text-xs overflow-x-auto">
       {lines.map((line, index) => {
         const tone = line.startsWith('@@')
-          ? 'text-blue-600 dark:text-blue-400'
+          ? 'text-info'
           : line.startsWith('+++') || line.startsWith('---')
             ? 'text-muted-foreground'
             : line.startsWith('+')
-              ? 'text-green-600 dark:text-green-400'
+              ? 'text-diff-add'
               : line.startsWith('-')
-                ? 'text-red-600 dark:text-red-400'
+                ? 'text-diff-delete'
                 : 'text-muted-foreground'
         return <div key={index} className={tone}>{line || ' '}</div>
       })}
@@ -102,12 +102,12 @@ function FileToolRender({ part, filediff, filePath, content, toolName, onFileCli
         className="w-full px-3 py-1.5 bg-card hover:bg-card-hover text-left flex items-center justify-between text-sm gap-2"
       >
         <div className="flex items-center gap-2 min-w-0">
-          <span className="text-green-600 dark:text-green-400 flex-shrink-0">✓</span>
+          <span className="text-success flex-shrink-0">✓</span>
           <span className="font-medium flex-shrink-0">{toolName}</span>
           {filePath && (
             <span 
               onClick={handleFileClick}
-              className="text-blue-600 dark:text-blue-400 text-xs truncate hover:underline cursor-pointer"
+              className="text-primary text-xs truncate hover:underline cursor-pointer"
             >
               {getRelativePath(filePath)}
             </span>

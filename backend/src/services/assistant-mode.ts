@@ -13,6 +13,7 @@ import {
   ensureDirectoryExists,
 } from './file-operations'
 import { ASSISTANT_NOTIFICATION_LIMITS, OpenCodeConfigSchema } from '@opencode-manager/shared/schemas'
+import { MANAGER_COLOR_THEME_ID, OPENCODE_THEMES } from '@opencode-manager/shared/themes'
 import { ASSISTANT_REPO_ID, ASSISTANT_REPO_PATH, ASSISTANT_OPENCODE_DIR_NAME } from '@opencode-manager/shared/utils'
 import { getAssistantModePath, getReposPath } from '@opencode-manager/shared/config/env'
 import type { Database } from 'bun:sqlite'
@@ -623,6 +624,7 @@ Retrieve the user's full settings, including all preferences.
 {
   preferences: {
     theme: 'dark' | 'light' | 'system',
+    colorTheme?: string, // one of: ${[MANAGER_COLOR_THEME_ID, ...OPENCODE_THEMES.map((theme) => theme.id)].join(', ')}
     mode: 'plan' | 'build',
     defaultModel?: string,
     defaultAgent?: string,
@@ -650,7 +652,7 @@ Update a subset of safe user preferences.
 
 **Allowed Keys:**
 The following preference keys can be modified:
-- \`theme\`, \`mode\`, \`defaultModel\`, \`defaultAgent\`
+- \`theme\`, \`colorTheme\`, \`mode\`, \`defaultModel\`, \`defaultAgent\`
 - \`autoScroll\`, \`expandDiffs\`, \`expandToolCalls\`, \`showReasoning\`
 - \`simpleChatMode\`, \`leaderKey\`, \`directShortcuts\`
 - \`keyboardShortcuts\`, \`customCommands\`, \`notifications\`

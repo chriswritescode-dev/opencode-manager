@@ -114,7 +114,7 @@ describe('RepoCard', () => {
     }
     const { container } = renderWithRouter(<RepoCard {...props} />)
 
-    const indicator = container.querySelector('.bg-orange-500')
+    const indicator = container.querySelector('.bg-highlight')
     expect(indicator).toBeTruthy()
   })
 

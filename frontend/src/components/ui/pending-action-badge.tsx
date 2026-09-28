@@ -6,14 +6,14 @@ type BadgeColor = 'orange' | 'blue'
 
 const colorStyles: Record<BadgeColor, { bg: string; hover: string; text: string }> = {
   orange: {
-    bg: 'bg-orange-500/10',
-    hover: 'hover:bg-orange-500/20',
-    text: 'text-orange-500',
+    bg: 'bg-highlight/10',
+    hover: 'hover:bg-highlight/20',
+    text: 'text-highlight',
   },
   blue: {
-    bg: 'bg-blue-500/10',
-    hover: 'hover:bg-blue-500/20',
-    text: 'text-blue-500',
+    bg: 'bg-info/10',
+    hover: 'hover:bg-info/20',
+    text: 'text-info',
   },
 }
 
@@ -56,7 +56,7 @@ export function PendingActionBadge({
       <span
         className={cn(
           'absolute -top-0.5 -right-0.5 w-2 h-2 rounded-full animate-pulse',
-          color === 'orange' ? 'bg-orange-500' : 'bg-blue-500'
+          color === 'orange' ? 'bg-highlight' : 'bg-info'
         )}
       />
     </Button>

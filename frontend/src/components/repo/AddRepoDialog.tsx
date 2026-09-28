@@ -238,11 +238,11 @@ export function AddRepoDialog({ open, onOpenChange }: AddRepoDialogProps) {
                 className="bg-muted border-border text-foreground placeholder:text-muted-foreground min-h-[44px] text-base"
               />
               {directoryNameError ? (
-                <p className="text-xs text-amber-400">
+                <p className="text-xs text-warning">
                   {directoryNameError}.
                 </p>
               ) : directoryCollision ? (
-                <p className="text-xs text-amber-400">
+                <p className="text-xs text-warning">
                   A repository named '{directoryName}' already exists.
                   {directoryCollision.repoUrl && directoryCollision.repoUrl !== repoUrl
                     ? ` (${directoryCollision.repoUrl})`
@@ -313,7 +313,7 @@ export function AddRepoDialog({ open, onOpenChange }: AddRepoDialogProps) {
             )}
           </Button>
           {mutation.isError && (
-            <p className="text-sm text-red-400">
+            <p className="text-sm text-destructive">
               {mutation.error.message}
             </p>
           )}

@@ -62,7 +62,7 @@ export function SettingsList({
   if (isLoading) {
     return (
       <div className="flex items-center justify-center py-8">
-        <Loader2 className="w-4 h-4 animate-spin text-blue-600 dark:text-blue-400" />
+        <Loader2 className="w-4 h-4 animate-spin text-primary" />
         <span className="ml-2 text-sm text-muted-foreground">{loadingLabel ?? 'Loading...'}</span>
       </div>
     )
@@ -71,7 +71,7 @@ export function SettingsList({
   if (error) {
     return (
       <div className="text-center py-6 text-muted-foreground">
-        <AlertCircle className="w-10 h-10 mx-auto mb-3 opacity-50 text-red-500" />
+        <AlertCircle className="w-10 h-10 mx-auto mb-3 opacity-50 text-destructive" />
         <p className="text-sm">{errorTitle ?? 'Failed to load'}</p>
         <p className="text-xs mt-1">{error.message}</p>
       </div>

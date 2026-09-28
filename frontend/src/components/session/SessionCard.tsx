@@ -52,13 +52,13 @@ export const SessionCard = ({
   return (
     <div className="relative" onClick={close}>
       <div
-        className={`absolute top-0.5 right-0 bottom-0.5 w-20 bg-red-600 flex items-center justify-center rounded-r-lg transition-opacity ${
+        className={`absolute top-0.5 right-0 bottom-0.5 w-20 bg-destructive flex items-center justify-center rounded-r-lg transition-opacity ${
           !isSwipingBack && (isOpen || swipeOffset > 40) ? "opacity-100" : "opacity-0 pointer-events-none"
         }`}
       >
         <button
           aria-label="Delete session"
-          className="h-full w-full flex items-center justify-center text-white hover:bg-red-700"
+          className="h-full w-full flex items-center justify-center text-destructive-foreground hover:bg-destructive/90"
           onClick={handleDeleteClick}
         >
           <Trash2 className="w-5 h-5" />
@@ -72,7 +72,7 @@ export const SessionCard = ({
               : "rounded-r-lg"
           } ${
             isSelected
-              ? "border-blue-500 shadow-lg shadow-blue-900/30 dark:shadow-blue-900/30 bg-accent"
+              ? "border-primary shadow-lg shadow-primary/30 bg-accent"
               : isActive
                 ? "bg-accent border-border"
                 : "bg-card border-border hover:bg-accent hover:border-border"
@@ -105,8 +105,8 @@ export const SessionCard = ({
                 </div>
                 <div className="flex-1 min-w-0">
                   <div className="flex items-center gap-1">
-                    {isPinned && <Pin className="w-3 h-3 text-orange-500 shrink-0" />}
-                    <h3 className="text-base font-semibold text-orange-600 dark:text-orange-400 truncate">
+                    {isPinned && <Pin className="w-3 h-3 text-highlight shrink-0" />}
+                    <h3 className="text-base font-semibold text-highlight truncate">
                       {session.title || "Untitled Session"}
                     </h3>
                   </div>
@@ -118,7 +118,7 @@ export const SessionCard = ({
                       })}
                     </span>
                     {workspaceLabel ? (
-                      <span className="text-purple-400 truncate max-w-[140px]">{workspaceLabel}</span>
+                      <span className="text-primary truncate max-w-[140px]">{workspaceLabel}</span>
                     ) : null}
                   </div>
                 </div>
@@ -127,8 +127,8 @@ export const SessionCard = ({
               <>
                 <div className="flex flex-col flex-1 min-w-0">
                   <div className="flex items-center gap-1">
-                    {isPinned && <Pin className="w-3 h-3 text-orange-500 shrink-0" />}
-                    <h3 className="text-sm font-semibold text-orange-600 dark:text-orange-400 truncate">
+                    {isPinned && <Pin className="w-3 h-3 text-highlight shrink-0" />}
+                    <h3 className="text-sm font-semibold text-highlight truncate">
                       {session.title || "Untitled Session"}
                     </h3>
                   </div>
@@ -140,7 +140,7 @@ export const SessionCard = ({
                       })}
                     </span>
                     {workspaceLabel ? (
-                      <span className="text-purple-400 truncate max-w-[120px]">{workspaceLabel}</span>
+                      <span className="text-primary truncate max-w-[120px]">{workspaceLabel}</span>
                     ) : null}
                     <SessionStatusIndicator sessionID={session.id} size="sm" />
                   </div>
@@ -176,7 +176,7 @@ export const SessionCard = ({
             {manageMode && (
               <button
                 aria-label="Delete session"
-                className="h-6 w-6 p-0 text-foreground hover:text-red-600 dark:hover:text-red-400 bg-transparent border-none cursor-pointer"
+                className="h-6 w-6 p-0 text-foreground hover:text-destructive bg-transparent border-none cursor-pointer"
                 onClick={(e) => {
                   e.stopPropagation();
                   onDelete(e);

@@ -46,7 +46,7 @@ export function StepFileChanges({ files, snapshot, onFileClick }: StepFileChange
             type="button"
             title={file}
             onClick={() => onFileClick?.(file)}
-            className="block max-w-full truncate text-left text-xs font-mono text-blue-600 dark:text-blue-400 hover:underline cursor-pointer"
+            className="block max-w-full truncate text-left text-xs font-mono text-primary hover:underline cursor-pointer"
           >
             {getRelativePath(file)}
           </button>

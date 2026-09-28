@@ -36,9 +36,9 @@ export function RunHistoryCards({
   )
 
   function getRunStatusIcon(status: ScheduleRun['status']) {
-    if (status === 'completed') return <CheckCircle2 className="h-3.5 w-3.5 text-green-400" />
-    if (status === 'failed') return <XCircle className="h-3.5 w-3.5 text-red-400" />
-    if (status === 'running') return <Loader2 className="h-3.5 w-3.5 animate-spin text-blue-400" />
+    if (status === 'completed') return <CheckCircle2 className="h-3.5 w-3.5 text-success" />
+    if (status === 'failed') return <XCircle className="h-3.5 w-3.5 text-destructive" />
+    if (status === 'running') return <Loader2 className="h-3.5 w-3.5 animate-spin text-primary" />
     return <Ban className="h-3.5 w-3.5 text-muted-foreground" />
   }
 
@@ -122,7 +122,7 @@ export function RunHistoryCards({
                     )}
                   </div>
                   {run.errorText && (
-                    <p className="mt-0.5 truncate text-xs text-red-400/80">{run.errorText}</p>
+                    <p className="mt-0.5 truncate text-xs text-destructive/80">{run.errorText}</p>
                   )}
                 </div>
                 <ChevronDown className={`h-6 w-6 flex-shrink-0 text-muted-foreground transition-transform duration-200 self-start ${isExpanded ? 'rotate-180' : ''}`} />
@@ -134,7 +134,7 @@ export function RunHistoryCards({
                   disabled={deleteRunPending}
                   title="Delete run"
                   aria-label="Delete run"
-                  className="flex items-center px-2.5 text-muted-foreground transition-colors hover:text-red-400 disabled:opacity-50"
+                  className="flex items-center px-2.5 text-muted-foreground transition-colors hover:text-destructive disabled:opacity-50"
                 >
                   <Trash2 className="h-4 w-4" />
                 </button>

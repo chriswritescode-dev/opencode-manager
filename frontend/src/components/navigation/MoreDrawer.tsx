@@ -150,7 +150,7 @@ export function MoreDrawer({ isOpen, onClose }: MoreDrawerProps) {
           {(repoDisplayName || currentBranch) && (
             <div className="flex items-center gap-2 text-xs text-muted-foreground">
               {repoDisplayName && (
-                <span className="font-medium text-orange-600 dark:text-orange-400">{repoDisplayName}</span>
+                <span className="font-medium text-highlight">{repoDisplayName}</span>
               )}
 
               {currentBranch && (
@@ -207,7 +207,7 @@ export function MoreDrawer({ isOpen, onClose }: MoreDrawerProps) {
                       onClick={() => handleCommandClick(command)}
                       className="flex w-full min-w-0 items-start gap-3 rounded-md px-3 py-2 text-left transition-colors hover:bg-accent"
                     >
-                      <span className="font-mono text-sm font-medium text-blue-600 dark:text-blue-400">{command.name}</span>
+                      <span className="font-mono text-sm font-medium text-primary">{command.name}</span>
                       {command.description && (
                         <span className="min-w-0 flex-1 truncate text-xs text-muted-foreground">{command.description}</span>
                       )}

@@ -122,14 +122,14 @@ function UserAttachments({ files: attachedFiles, agents: attachedAgents, skills:
           key={`file-${index}`}
           className="inline-flex items-center gap-1 px-2 py-1 rounded bg-muted border border-border text-sm text-foreground"
         >
-          <span className="text-blue-600 dark:text-blue-400">@</span>
+          <span className="text-primary">@</span>
           <span className="font-medium">{attachmentLabel(file)}</span>
         </span>
       ))}
       {agents.map((agent, index) => (
         <span
           key={`agent-${index}`}
-          className="inline-flex items-center px-2 py-1 rounded bg-purple-500/10 border border-purple-500/30 text-xs text-purple-600 dark:text-purple-400"
+          className="inline-flex items-center px-2 py-1 rounded bg-primary/10 border border-primary/30 text-xs text-primary"
         >
           agent: {agent.name}
         </span>
@@ -137,7 +137,7 @@ function UserAttachments({ files: attachedFiles, agents: attachedAgents, skills:
       {skills.map((skill, index) => (
         <span
           key={`skill-${index}`}
-          className="inline-flex items-center px-2 py-1 rounded bg-blue-500/10 border border-blue-500/30 text-xs text-blue-600 dark:text-blue-400"
+          className="inline-flex items-center px-2 py-1 rounded bg-info/10 border border-info/30 text-xs text-info"
         >
           skill: {skill.name}
         </span>
@@ -171,7 +171,7 @@ function TTSButton({ messageId, content }: TTSButtonProps) {
   return (
     <button
       onClick={handleClick}
-      className={`p-1.5 rounded ${isThisPlaying ? 'bg-red-500/20 text-red-500 hover:bg-red-500/30' : 'bg-card hover:bg-card-hover text-muted-foreground hover:text-foreground'}`}
+      className={`p-1.5 rounded ${isThisPlaying ? 'bg-destructive/20 text-destructive hover:bg-destructive/30' : 'bg-card hover:bg-card-hover text-muted-foreground hover:text-foreground'}`}
       title={isThisPlaying ? 'Stop playback' : 'Read aloud'}
       disabled={isLoading && !isThisPlaying}
     >
@@ -249,8 +249,8 @@ function SessionNotice({
   const tone = completion.state === 'error'
     ? 'text-destructive'
     : completion.state === 'cancelled'
-      ? 'text-amber-600 dark:text-amber-400'
-      : 'text-blue-600 dark:text-blue-400'
+      ? 'text-warning'
+      : 'text-info'
   const content = (
     <>
       <span className={tone}>{completion.heading}</span>
@@ -286,7 +286,7 @@ function ShellMessage({ message }: { message: SessionMessageShell }) {
   return (
     <div className="rounded-lg border border-border bg-card/50 p-2 my-1">
       <div className="flex items-center gap-2 text-sm min-w-0">
-        <span className="text-green-600 dark:text-green-400 shrink-0">$</span>
+        <span className="text-success shrink-0">$</span>
         <span className="text-foreground truncate">{message.command}</span>
         <span className="text-muted-foreground text-xs ml-auto shrink-0">{statusLabel}</span>
       </div>
@@ -312,7 +312,7 @@ function CompactionBanner({ message }: { message: SessionMessageCompaction }) {
 
   if (message.status === 'failed') {
     return (
-      <div className="my-1 rounded-lg border border-red-500/30 bg-red-500/10 px-3 py-1.5 text-xs text-red-600 dark:text-red-400">
+      <div className="my-1 rounded-lg border border-destructive/30 bg-destructive/10 px-3 py-1.5 text-xs text-destructive">
         Compaction failed: {message.error.message}
       </div>
     )
@@ -328,13 +328,13 @@ function CompactionBanner({ message }: { message: SessionMessageCompaction }) {
 
 function QueuedPromptRow({ item }: { item: SessionInboxUser }) {
   return (
-    <div className="w-full rounded-lg p-1.5 bg-amber-500/10 border border-amber-500/30">
+    <div className="w-full rounded-lg p-1.5 bg-warning/10 border border-warning/30">
       <div className="flex items-center gap-2 mb-1">
         <span className="text-xs font-medium text-muted-foreground">You</span>
         <span className="text-xs text-muted-foreground">
           {new Date(item.time.created).toLocaleTimeString()}
         </span>
-        <span className="text-xs font-semibold bg-amber-500 text-amber-950 px-1.5 py-0.5 rounded">
+        <span className="text-xs font-semibold bg-warning text-warning-foreground px-1.5 py-0.5 rounded">
           {item.delivery === 'queue' ? 'QUEUED' : 'STEERING'}
         </span>
       </div>
@@ -397,8 +397,8 @@ const MessageRow = memo(function MessageRow({
         <div
           className={`w-full rounded-lg p-1.5 ${
             isEditingThisMessage
-              ? 'bg-blue-600/30 border border-blue-600/50'
-              : 'bg-blue-600/20 border border-blue-600/30'
+              ? 'bg-primary/30 border border-primary/50'
+              : 'bg-primary/20 border border-primary/30'
           }`}
         >
           <div className="flex items-center justify-between gap-2 mb-1">
@@ -564,7 +564,7 @@ const MessageRow = memo(function MessageRow({
 
   if (message.type === 'skill') {
     return (
-      <div className="my-1 rounded-lg border border-blue-500/20 bg-blue-500/5 px-3 py-1.5 text-xs text-muted-foreground">
+      <div className="my-1 rounded-lg border border-info/20 bg-info/5 px-3 py-1.5 text-xs text-muted-foreground">
         Skill loaded: <span className="font-medium text-foreground">{message.name}</span>
       </div>
     )

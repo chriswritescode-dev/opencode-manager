@@ -82,10 +82,10 @@ export function FloatingTTSButton({ messageId, content }: FloatingTTSButtonProps
       : 'TTS controls'
   const pillAriaLabel = `${pillTitle}. ${autoPlay ? 'Auto-play enabled.' : 'Auto-play disabled.'} hold to toggle auto-play`
   const buttonToneClasses = showStop
-    ? 'justify-center px-3 py-1.5 rounded-lg bg-gradient-to-br from-red-600 to-red-700 border border-red-500/60 shadow-red-500/30 ring-red-500/20 hover:ring-red-500/40 text-white'
+    ? 'justify-center px-3 py-1.5 rounded-lg bg-destructive border border-destructive/60 shadow-destructive/30 ring-destructive/20 hover:ring-destructive/40 text-destructive-foreground'
     : autoPlay
-      ? 'justify-center px-3 py-1.5 rounded-lg bg-gradient-to-br from-blue-500 to-blue-600 border border-blue-400/60 shadow-blue-500/30 ring-blue-500/20 hover:ring-blue-500/40 text-white'
-      : 'justify-center px-3 py-1.5 rounded-lg bg-gradient-to-br from-amber-500 to-orange-600 border border-amber-400/60 shadow-amber-500/30 ring-amber-500/20 hover:ring-amber-500/40 text-white'
+      ? 'justify-center px-3 py-1.5 rounded-lg bg-primary border border-primary/60 shadow-primary/30 ring-primary/20 hover:ring-primary/40 text-primary-foreground'
+      : 'justify-center px-3 py-1.5 rounded-lg bg-gradient-to-br from-warning to-highlight border border-warning/60 shadow-warning/30 ring-warning/20 hover:ring-warning/40 text-warning-foreground'
 
   return (
       <button

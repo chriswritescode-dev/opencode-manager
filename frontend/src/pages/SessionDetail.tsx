@@ -520,7 +520,7 @@ export function SessionDetail() {
         data-testid="session-header-region"
         className="flex-shrink-0 overflow-hidden bg-background max-h-72 sm:max-h-80"
       >
-        <Header className="bg-background [&_button]:bg-black [&_button]:text-white [&_button]:border-zinc-700 [&_button:hover]:bg-zinc-900">
+        <Header className="bg-background [&_button]:bg-background [&_button]:text-foreground [&_button]:border-border [&_button:hover]:bg-accent">
           <div className="flex items-center gap-1.5 sm:gap-3 min-w-0 flex-1">
             {session?.parentID ? (
               <>
@@ -528,7 +528,7 @@ export function SessionDetail() {
                   variant="ghost"
                   size="sm"
                   onClick={handleParentSessionClick}
-                  className="text-purple-600 dark:text-purple-400 hover:text-purple-700 dark:hover:text-purple-300 hover:bg-purple-100 dark:hover:bg-purple-900/20 h-7 px-2 gap-1"
+                  className="text-primary hover:text-primary-hover hover:bg-primary/10 h-7 px-2 gap-1"
                   title="Back to parent session"
                 >
                   <CornerUpLeft className="w-3.5 h-3.5" />
@@ -544,7 +544,7 @@ export function SessionDetail() {
             <Header.EditableTitle
               value={session?.title || "Untitled Session"}
               onChange={handleSessionTitleUpdate}
-              subtitle={<span className="text-orange-600 dark:text-orange-400">{workspaceDisplayName}</span>}
+              subtitle={<span className="text-highlight">{workspaceDisplayName}</span>}
             />
           </div>
           <Header.Actions className="gap-2 sm:gap-4">
@@ -603,7 +603,7 @@ export function SessionDetail() {
                       handleClearPrompt()
                     }}
                     onClick={handleClearPrompt}
-                    className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-gradient-to-br from-red-600 to-red-700 hover:from-red-500 hover:to-red-600 text-destructive-foreground border border-red-500/60 hover:border-red-400 shadow-md shadow-red-500/30 hover:shadow-red-500/50 backdrop-blur-md transition-all duration-200 active:scale-95 hover:scale-105 ring-1 ring-red-500/20 hover:ring-red-500/40"
+                    className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-destructive hover:bg-destructive/90 text-destructive-foreground border border-destructive/60 hover:border-destructive shadow-md shadow-destructive/30 hover:shadow-destructive/50 backdrop-blur-md transition-all duration-200 active:scale-95 hover:scale-105 ring-1 ring-destructive/20 hover:ring-destructive/40"
                     aria-label="Clear"
                   >
                     <X className="w-5 h-5" />

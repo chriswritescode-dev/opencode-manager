@@ -17,7 +17,8 @@
     "./utils": "./src/utils/index.ts",
     "./notifications": "./src/notifications/index.ts",
     "./project-id": "./src/project-id-resolver.ts",
-    "./opencode": "./src/opencode/index.ts"
+    "./opencode": "./src/opencode/index.ts",
+    "./themes": "./src/themes/index.ts"
   },
   "dependencies": {
     "@opencode/client": "2.0.15",

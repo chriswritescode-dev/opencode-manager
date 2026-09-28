@@ -108,7 +108,7 @@ export function SkillLibraryList({
           <SettingsListRow
             key={getSkillKey(skill)}
             title={skill.name}
-            titleClassName="text-orange-600 dark:text-orange-400"
+            titleClassName="text-highlight"
             description={skill.description}
             onClick={primaryAction ? () => primaryAction.onClick(skill) : undefined}
             primaryAction={primaryAction ? { label: primaryAction.label, onClick: () => primaryAction.onClick(skill) } : undefined}

@@ -58,6 +58,30 @@ describe('internal/settings routes', () => {
     expect(body.preferences.mode).toBe('build')
   })
 
+  it('GET /api/internal/settings returns manager colorTheme by default', async () => {
+    const res = await app.request('/api/internal/settings', {
+      headers: { authorization: `Bearer ${token}` },
+    })
+    expect(res.status).toBe(200)
+    const body = await res.json() as { preferences: { colorTheme: string } }
+    expect(body.preferences.colorTheme).toBe('manager')
+  })
+
+  it('GET /api/internal/settings recovers from a stored colorTheme removed from the catalog without losing other preferences', async () => {
+    db.prepare(
+      `INSERT INTO user_preferences (user_id, preferences, updated_at)
+       VALUES (?, ?, ?)`
+    ).run('default', JSON.stringify({ colorTheme: 'removed-theme', autoScroll: false }), Date.now())
+
+    const res = await app.request('/api/internal/settings', {
+      headers: { authorization: `Bearer ${token}` },
+    })
+    expect(res.status).toBe(200)
+    const body = await res.json() as { preferences: { colorTheme: string; autoScroll: boolean } }
+    expect(body.preferences.colorTheme).toBe('manager')
+    expect(body.preferences.autoScroll).toBe(false)
+  })
+
   it('PATCH /api/internal/settings returns 401 without bearer token', async () => {
     const res = await app.request('/api/internal/settings', {
       method: 'PATCH',
@@ -84,6 +108,25 @@ describe('internal/settings routes', () => {
     expect(getRes.status).toBe(200)
     const body = await getRes.json() as { preferences: { theme: string } }
     expect(body.preferences.theme).toBe('dark')
+  })
+
+  it('PATCH /api/internal/settings with { colorTheme: "dracula" } persists and returns new settings', async () => {
+    const patchRes = await app.request('/api/internal/settings', {
+      method: 'PATCH',
+      body: JSON.stringify({ colorTheme: 'dracula' }),
+      headers: {
+        'content-type': 'application/json',
+        authorization: `Bearer ${token}`,
+      },
+    })
+    expect(patchRes.status).toBe(200)
+
+    const getRes = await app.request('/api/internal/settings', {
+      headers: { authorization: `Bearer ${token}` },
+    })
+    expect(getRes.status).toBe(200)
+    const body = await getRes.json() as { preferences: { colorTheme: string } }
+    expect(body.preferences.colorTheme).toBe('dracula')
   })
 
   it('PATCH /api/internal/settings with { gitCredentials: [...] } returns 400 (strict reject)', async () => {
@@ -120,6 +163,20 @@ describe('internal/settings routes', () => {
       },
     })
     expect(res.status).toBe(400)
+  })
+
+  it('PATCH /api/internal/settings with { colorTheme: "not-a-theme" } returns 400 (unknown theme reject)', async () => {
+    const res = await app.request('/api/internal/settings', {
+      method: 'PATCH',
+      body: JSON.stringify({ colorTheme: 'not-a-theme' }),
+      headers: {
+        'content-type': 'application/json',
+        authorization: `Bearer ${token}`,
+      },
+    })
+    expect(res.status).toBe(400)
+    const body = await res.json() as { error: string }
+    expect(body.error).toBe('Invalid request body')
   })
 
   it('PATCH /api/internal/settings with { tts: { voice: "x", speed: 1.5 } } merges and preserves apiKey/endpoint', async () => {

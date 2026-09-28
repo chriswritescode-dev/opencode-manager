@@ -207,7 +207,7 @@ export function BranchesTab({ repoId, currentBranch }: BranchesTabProps) {
                   key={branch.name}
                   className={cn(
                     'flex items-center gap-2 px-3 py-2 w-full text-left transition-colors',
-                    isCurrent && 'bg-orange-500/10',
+                    isCurrent && 'bg-highlight/10',
                     isCheckedOutElsewhere ? 'opacity-60 cursor-not-allowed' : 'hover:bg-accent/50'
                   )}
                   onClick={handleClick}
@@ -215,13 +215,13 @@ export function BranchesTab({ repoId, currentBranch }: BranchesTabProps) {
                   title={isCheckedOutElsewhere ? 'Branch is checked out in another worktree' : undefined}
                 >
                   {isRemote ? (
-                    <Globe className="w-4 h-4 text-blue-500" />
+                    <Globe className="w-4 h-4 text-info" />
                   ) : (
                     <GitBranch className={cn('w-4 h-4', isCurrent ? GIT_UI_COLORS.current : 'text-muted-foreground')} />
                   )}
                   <span className="flex-1 text-sm truncate">{branch.name}</span>
                   {(isCheckedOutElsewhere || (isCurrent && isRepoWorktree)) && (
-                    <span className="text-[10px] px-1.5 py-0.5 rounded bg-purple-500/20 text-purple-400">worktree</span>
+                    <span className="text-[10px] px-1.5 py-0.5 rounded bg-primary/20 text-primary">worktree</span>
                   )}
                   {branch.type === 'local' && !branch.upstream && !branch.isWorktree && !(isCurrent && isRepoWorktree) && (
                     <span className="text-[10px] px-1.5 py-0.5 rounded bg-muted text-muted-foreground">local</span>

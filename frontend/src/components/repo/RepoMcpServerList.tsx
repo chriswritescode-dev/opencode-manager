@@ -44,7 +44,7 @@ export function RepoMcpServerList({
         </div>
       ) : isLoadingStatus ? (
         <div className="flex items-center justify-center py-8">
-          <Loader2 className="w-4 h-4 animate-spin text-blue-600 dark:text-blue-400" />
+          <Loader2 className="w-4 h-4 animate-spin text-primary" />
           <span className="ml-2 text-sm text-muted-foreground">Loading...</span>
         </div>
       ) : (
@@ -76,17 +76,17 @@ export function RepoMcpServerList({
                             title="Click for options"
                           >
                             {status?.status === 'connected' && (
-                              <span className="text-xs bg-green-600 text-white px-2 py-0.5 rounded-full inline-flex items-center gap-1">
+                              <span className="text-xs bg-success text-success-foreground px-2 py-0.5 rounded-full inline-flex items-center gap-1">
                                 Connected<ChevronDown className="h-3 w-3" />
                               </span>
                             )}
                             {status?.status === 'needs_auth' && (
-                              <span className="text-xs border border-yellow-500 text-yellow-600 px-2 py-0.5 rounded-full inline-flex items-center gap-1">
+                              <span className="text-xs border border-warning text-warning px-2 py-0.5 rounded-full inline-flex items-center gap-1">
                                 Needs Auth<ChevronDown className="h-3 w-3" />
                               </span>
                             )}
                             {status?.status === 'failed' && (
-                              <span className="text-xs bg-red-500 text-white px-2 py-0.5 rounded-full inline-flex items-center gap-1">
+                              <span className="text-xs bg-destructive text-destructive-foreground px-2 py-0.5 rounded-full inline-flex items-center gap-1">
                                 <AlertCircle className="h-3 w-3" />Failed<ChevronDown className="h-3 w-3" />
                               </span>
                             )}
@@ -124,7 +124,7 @@ export function RepoMcpServerList({
                     )}
                   </div>
                   {failed && status.status === 'failed' && (
-                    <div className="flex items-center gap-1 mt-1 text-xs text-red-500">
+                    <div className="flex items-center gap-1 mt-1 text-xs text-destructive">
                       <XCircle className="w-3 h-3 flex-shrink-0" />
                       <span className="truncate">{status.error}</span>
                     </div>

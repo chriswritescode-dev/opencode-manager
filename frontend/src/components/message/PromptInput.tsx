@@ -1147,7 +1147,7 @@ if (isIOS && isSecureContext && navigator.clipboard && navigator.clipboard.read)
   const renderVoiceButton = (variant: VoiceButtonVariant) => {
     const isDesktop = variant === 'desktop'
     const isBusy = isRecording || isTogglingRecording || (isProcessing && !isRecording)
-    const spinnerClassName = `w-5 h-5 animate-spin rounded-full border-2 ${isDesktop ? 'border-muted-foreground' : 'border-white'} border-t-transparent`
+    const spinnerClassName = `w-5 h-5 animate-spin rounded-full border-2 ${isDesktop ? 'border-muted-foreground' : 'border-foreground'} border-t-transparent`
     const voiceGestureHandlers = isDesktop ? {} : {
       onPointerDown: handleVoicePointerDown,
       onPointerMove: handleVoicePointerMove,
@@ -1157,12 +1157,12 @@ if (isIOS && isSecureContext && navigator.clipboard && navigator.clipboard.read)
     const buttonClassName = isDesktop
       ? `hidden md:flex p-2 rounded-lg transition-all duration-200 active:scale-95 hover:scale-105 shadow-md border items-center justify-center touch-none select-none ${
         isBusy
-          ? 'bg-gradient-to-br from-red-600 to-red-700 hover:from-red-500 hover:to-red-600 text-destructive-foreground border-red-500/60 animate-pulse'
+          ? 'bg-destructive hover:bg-destructive/90 text-destructive-foreground border-destructive/60 animate-pulse'
           : 'bg-muted hover:bg-muted-foreground/20 text-muted-foreground hover:text-foreground border-border'
       }`
       : `px-4 py-2 rounded-lg transition-all duration-150 flex items-center justify-center min-w-[52px] border touch-none select-none ${
         isBusy
-          ? 'bg-gradient-to-t from-green-700 via-green-500 to-emerald-400 text-white border-green-300/70 shadow-lg shadow-green-500/40'
+          ? 'bg-success text-success-foreground border-success/70 shadow-lg shadow-success/40'
           : 'bg-muted hover:bg-muted-foreground/20 text-muted-foreground hover:text-foreground border-border active:bg-muted-foreground/30 active:scale-95'
       }`
 
@@ -1226,11 +1226,11 @@ if (isIOS && isSecureContext && navigator.clipboard && navigator.clipboard.read)
   
 
 return (
-    <div className={`relative backdrop-blur-md bg-background opacity-95 border border-border dark:border-white/30 rounded-xl p-2 md:p-3 mb-4 md:mb-1 w-full transition-all ${hasPendingPermissionForSession ? 'border-orange-500/50 ring-1 ring-orange-500/30' : ''}`}>
+    <div className={`relative backdrop-blur-md bg-background opacity-95 border border-border dark:border-border/30 rounded-xl p-2 md:p-3 mb-4 md:mb-1 w-full transition-all ${hasPendingPermissionForSession ? 'border-highlight/50 ring-1 ring-highlight/30' : ''}`}>
       {showStopButton && (
         <button
           onClick={handleStop}
-          className="absolute bottom-full right-0 mb-2 md:hidden z-50 p-3 rounded-xl transition-all duration-200 active:scale-95 hover:scale-105 bg-gradient-to-br from-red-600 to-red-700 hover:from-red-500 hover:to-red-600 text-destructive-foreground border border-red-500/60 shadow-lg shadow-red-500/30"
+          className="absolute bottom-full right-0 mb-2 md:hidden z-50 p-3 rounded-xl transition-all duration-200 active:scale-95 hover:scale-105 bg-destructive hover:bg-destructive/90 text-destructive-foreground border border-destructive/60 shadow-lg shadow-destructive/30"
           title="Stop"
         >
           <SquareFill className="w-5 h-5" />
@@ -1253,8 +1253,8 @@ return (
         }
         className={`w-full bg-muted/50 pl-2 md:pl-3 pr-3 py-2 text-[16px] text-foreground placeholder-muted-foreground focus:outline-none focus:bg-muted/70 resize-none min-h-[40px] max-h-[120px] disabled:opacity-50 disabled:cursor-not-allowed md:text-sm rounded-lg [field-sizing:content] ${
           isBashMode
-            ? 'border-purple-500/50 bg-purple-500/5 focus:bg-purple-500/10'
-            : isDragging ? 'border-blue-500/50 border-dashed bg-blue-500/5' : ''
+            ? 'border-primary/50 bg-primary/5 focus:bg-primary/10'
+            : isDragging ? 'border-info/50 border-dashed bg-info/5' : ''
         }`}
         rows={1}
       />
@@ -1286,7 +1286,7 @@ return (
               <button
                 type="button"
                 onClick={onScrollToBottom}
-                className="flex items-center gap-1.5 px-3 min-h-[36px] rounded-lg text-xs font-medium border bg-zinc-950/80 hover:bg-zinc-900/90 text-blue-300 hover:text-blue-200 border-blue-400/20 shadow-md backdrop-blur-md transition-all duration-200 active:scale-95 ring-1 ring-blue-400/15"
+                className="flex items-center gap-1.5 px-3 min-h-[36px] rounded-lg text-xs font-medium border bg-background/80 hover:bg-accent/90 text-primary hover:text-primary-hover border-primary/20 shadow-md backdrop-blur-md transition-all duration-200 active:scale-95 ring-1 ring-primary/15"
                 title="Scroll to bottom"
                 aria-label="Scroll to bottom"
               >
@@ -1317,11 +1317,11 @@ return (
                     directory={directory}
                   >
 <button
-                      className="px-2.5 py-0.5 md:px-3 min-h-[36px] min-w-0 rounded-lg text-xs md:text-sm font-medium border bg-muted border-border text-muted-foreground hover:bg-muted-foreground/10 hover:border-foreground/30 transition-colors cursor-pointer flex-1 md:flex-initial md:w-auto max-w-[110px] md:max-w-[220px] dark:border-white/30 flex flex-col items-start justify-center overflow-hidden"
+                      className="px-2.5 py-0.5 md:px-3 min-h-[36px] min-w-0 rounded-lg text-xs md:text-sm font-medium border bg-muted border-border text-muted-foreground hover:bg-muted-foreground/10 hover:border-foreground/30 transition-colors cursor-pointer flex-1 md:flex-initial md:w-auto max-w-[110px] md:max-w-[220px] dark:border-border/30 flex flex-col items-start justify-center overflow-hidden"
                     >
                       <span className="truncate w-full text-left">{displayModelName || 'Select model'}</span>
 {hasVariants && currentVariant && (
-                        <span className="text-[10px] text-orange-500 truncate w-full text-center capitalize">{currentVariant}</span>
+                        <span className="text-[10px] text-highlight truncate w-full text-center capitalize">{currentVariant}</span>
                       )}
                    </button>
                  </ModelQuickSelect>
@@ -1334,7 +1334,7 @@ return (
             {!isMobile && (
               <button
                 onClick={onScrollToBottom}
-                className={`p-2 rounded-lg bg-zinc-950/80 hover:bg-zinc-900/90 text-blue-300 hover:text-blue-200 transition-all duration-200 active:scale-95 hover:scale-105 shadow-md border border-blue-400/20 backdrop-blur-md ring-1 ring-blue-400/15 ${showScrollButton ? 'visible' : 'invisible'}`}
+                className={`p-2 rounded-lg bg-background/80 hover:bg-accent/90 text-primary hover:text-primary-hover transition-all duration-200 active:scale-95 hover:scale-105 shadow-md border border-primary/20 backdrop-blur-md ring-1 ring-primary/15 ${showScrollButton ? 'visible' : 'invisible'}`}
                 title="Scroll to bottom"
               >
                 <ArrowDown className="w-6 h-6" />
@@ -1343,7 +1343,7 @@ return (
 {showStopButton && (
             <button
               onClick={handleStop}
-              className="hidden md:block p-1.5 px-5 md:p-2 md:px-6 rounded-lg transition-all duration-200 active:scale-95 hover:scale-105 bg-gradient-to-br from-red-600 to-red-700 hover:from-red-500 hover:to-red-600 text-destructive-foreground border border-red-500/60 hover:border-red-400 shadow-md shadow-red-500/30 hover:shadow-red-500/40 ring-1 ring-red-500/20 hover:ring-red-500/30"
+              className="hidden md:block p-1.5 px-5 md:p-2 md:px-6 rounded-lg transition-all duration-200 active:scale-95 hover:scale-105 bg-destructive hover:bg-destructive/90 text-destructive-foreground border border-destructive/60 hover:border-destructive shadow-md shadow-destructive/30 hover:shadow-destructive/40 ring-1 ring-destructive/20 hover:ring-destructive/30"
               title="Stop"
             >
               <SquareFill className="w-4 h-4 md:w-5 md:h-5" />
@@ -1376,8 +1376,8 @@ return (
               disabled={hasPendingPermissionForSession ? false : ((!prompt.trim() && imageAttachments.length === 0) || (isPromptSubmitPending && !isStreamingResponse))}
               className={`px-4 md:px-5 py-1.5 md:py-2 rounded-lg text-sm font-medium transition-colors dark:border flex-shrink-0 min-w-[52px] ${
                 hasPendingPermissionForSession
-                  ? 'bg-orange-500 hover:bg-orange-600 border-orange-400 text-primary-foreground ring-orange-500/20'
-                  : 'bg-primary hover:bg-primary/90 disabled:bg-muted disabled:text-muted-foreground disabled:cursor-not-allowed text-primary-foreground border-white/30'
+                  ? 'bg-highlight hover:bg-highlight/90 border-highlight text-highlight-foreground ring-highlight/20'
+                  : 'bg-primary hover:bg-primary/90 disabled:bg-muted disabled:text-muted-foreground disabled:cursor-not-allowed text-primary-foreground border-border/30'
               }`}
               title={hasPendingPermissionForSession ? 'View pending permission' : (isStreamingResponse ? 'Queue message' : 'Send')}
             >

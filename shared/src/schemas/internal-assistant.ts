@@ -47,6 +47,7 @@ export const AssistantSTTPatchSchema = z.object({
 
 export const AssistantSettingsPatchSchema = UserPreferencesSchema.pick({
   theme: true,
+  colorTheme: true,
   mode: true,
   defaultModel: true,
   defaultAgent: true,

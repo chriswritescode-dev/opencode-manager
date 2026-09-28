@@ -14,7 +14,7 @@ function WaveformBars() {
       {[0, 1, 2, 3, 4].map((i) => (
         <div
           key={i}
-          className="w-1.5 rounded-full bg-white"
+          className="w-1.5 rounded-full bg-success-foreground"
           style={{
             height: '100%',
             animation: `waveBar 0.9s ease-in-out infinite`,
@@ -48,8 +48,8 @@ export function VoiceStatusOverlay({ show, label, state }: VoiceStatusOverlayPro
       className="pointer-events-none absolute inset-x-0 bottom-0 z-10"
     >
       <span className="sr-only">{label}</span>
-      <div className="animate-voice-overlay-in relative flex h-44 w-full flex-col items-center justify-between overflow-hidden rounded-xl border border-green-300/70 bg-gradient-to-t from-green-700 via-green-500 to-emerald-400 px-1 py-4 text-white shadow-lg shadow-green-500/40">
-        <div className="absolute inset-x-1 top-1 h-10 rounded-full bg-white/20 blur-sm" />
+      <div className="animate-voice-overlay-in relative flex h-44 w-full flex-col items-center justify-between overflow-hidden rounded-xl border border-success/70 bg-success px-1 py-4 text-success-foreground shadow-lg shadow-success/40">
+        <div className="absolute inset-x-1 top-1 h-10 rounded-full bg-success-foreground/20 blur-sm" />
         <div className="relative flex flex-1 flex-col items-center justify-center gap-1">
           {isLoading ? (
             state === 'processing' ? (

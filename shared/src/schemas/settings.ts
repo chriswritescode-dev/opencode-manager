@@ -1,6 +1,7 @@
 import { z } from "zod";
 import { NotificationPreferencesSchema, DEFAULT_NOTIFICATION_PREFERENCES } from "./notifications";
 import { OPENCODE_CONFIG_SOURCE_NAMES } from "../config/defaults";
+import { ColorThemeIdSchema, MANAGER_COLOR_THEME_ID } from "../themes";
 
 export const CustomCommandSchema = z.object({
   name: z.string(),
@@ -143,6 +144,7 @@ export const DEFAULT_SANDBOX_PREFERENCES: SandboxPreferences = {
 
 export const UserPreferencesSchema = z.object({
   theme: z.enum(["dark", "light", "system"]),
+  colorTheme: ColorThemeIdSchema.optional(),
   mode: z.enum(["plan", "build"]),
   defaultModel: z.string().optional(),
   defaultAgent: z.string().optional(),
@@ -197,6 +199,7 @@ export const DEFAULT_STT_CONFIG: STTConfig = {
 
 export const DEFAULT_USER_PREFERENCES = {
   theme: "dark" as const,
+  colorTheme: MANAGER_COLOR_THEME_ID,
   mode: "build" as const,
   autoScroll: true,
   expandDiffs: true,

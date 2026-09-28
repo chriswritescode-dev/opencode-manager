@@ -19,10 +19,10 @@ import { MobileTabBar } from '@/components/navigation/MobileTabBar'
 import { MobileSheetHost } from '@/components/navigation/MobileSheetHost'
 import { RouteErrorBoundary } from '@/components/ui/route-error-boundary'
 import { DesktopSidebar } from '@/components/navigation/DesktopSidebar'
-import { useTheme } from './hooks/useTheme'
 import { useRightEdgeSwipe, useSwipeBack } from './hooks/useMobile'
 import { useMobileTabBar } from '@/hooks/useMobileTabBar'
 import { TTSProvider } from './contexts/TTSContext'
+import { ThemeProvider } from './contexts/ThemeContext'
 import { AuthProvider } from './contexts/AuthContext'
 import { EventProvider, usePermissions, useEventContext } from '@/contexts/EventContext'
 import { SwipeNavigationProvider, useSwipeNavigation } from '@/contexts/SwipeNavigationContext'
@@ -88,7 +88,6 @@ function AppShell() {
   const location = useLocation()
   const rootRef = useRef<HTMLDivElement>(null)
   const { openSheet, open } = useMobileTabBar()
-  useTheme()
 
   const swipeNav = useSwipeNavigation()
 
@@ -153,31 +152,33 @@ function AppShell() {
   )
 
   return (
-    <AuthProvider>
-      <EventProvider>
-        <div ref={rootRef} className="flex h-dvh w-full min-w-0">
-          <DesktopSidebar />
-          <main className="flex-1 min-w-0 min-h-0 flex flex-col">
-            <Outlet />
-          </main>
-        </div>
-        <MobileTabBar />
-        <MobileSheetHost />
-        <PermissionDialogWrapper />
-        <SSHHostKeyDialogWrapper />
-        <SettingsDialog />
-        <HealthMonitor />
-        <VersionNotifier />
-        <PwaUpdatePrompt />
-        <Toaster
-          position="bottom-right"
-          expand={false}
-          richColors
-          closeButton
-          duration={2500}
-        />
-      </EventProvider>
-    </AuthProvider>
+    <ThemeProvider>
+      <AuthProvider>
+        <EventProvider>
+          <div ref={rootRef} className="flex h-dvh w-full min-w-0">
+            <DesktopSidebar />
+            <main className="flex-1 min-w-0 min-h-0 flex flex-col">
+              <Outlet />
+            </main>
+          </div>
+          <MobileTabBar />
+          <MobileSheetHost />
+          <PermissionDialogWrapper />
+          <SSHHostKeyDialogWrapper />
+          <SettingsDialog />
+          <HealthMonitor />
+          <VersionNotifier />
+          <PwaUpdatePrompt />
+          <Toaster
+            position="bottom-right"
+            expand={false}
+            richColors
+            closeButton
+            duration={2500}
+          />
+        </EventProvider>
+      </AuthProvider>
+    </ThemeProvider>
   )
 }
 

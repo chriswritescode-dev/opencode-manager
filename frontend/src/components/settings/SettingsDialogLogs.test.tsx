@@ -6,7 +6,7 @@ import type { ManagerLogEntry } from '@opencode-manager/shared/schemas'
 import { SettingsDialog } from './SettingsDialog'
 import { logsApi } from '@/api/logs'
 import { DEFAULTS } from '@/config'
-import { DESKTOP_MEDIA_QUERY } from '@/hooks/useMediaQuery'
+import { stubMatchMedia } from '@/test/test-utils'
 
 vi.mock('@/api/logs', () => ({
   logsApi: {
@@ -46,25 +46,6 @@ function makeResponse(entries: ManagerLogEntry[]) {
     dropped: 0,
     capacity: DEFAULTS.LOGS.BUFFER_CAPACITY,
   }
-}
-
-function stubMatchMedia(matches: boolean): void {
-  const listeners = new Set<() => void>()
-  const mediaQueryList = {
-    media: DESKTOP_MEDIA_QUERY,
-    matches,
-    addEventListener: (_type: string, listener: () => void) => {
-      listeners.add(listener)
-    },
-    removeEventListener: (_type: string, listener: () => void) => {
-      listeners.delete(listener)
-    },
-  }
-  Object.defineProperty(window, 'matchMedia', {
-    configurable: true,
-    writable: true,
-    value: () => mediaQueryList,
-  })
 }
 
 function createWrapper() {

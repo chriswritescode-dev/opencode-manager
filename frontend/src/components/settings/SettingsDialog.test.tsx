@@ -3,7 +3,7 @@ import { render, screen, fireEvent, within, act } from '@testing-library/react'
 import { MemoryRouter, useLocation, useNavigate } from 'react-router-dom'
 import { SettingsDialog } from './SettingsDialog'
 import { Dialog, DialogContent, DialogTitle } from '@/components/ui/dialog'
-import { DESKTOP_MEDIA_QUERY } from '@/hooks/useMediaQuery'
+import { stubMatchMedia } from '@/test/test-utils'
 
 vi.mock('@/components/settings/GeneralSettings', () => ({
   GeneralSettings: () => <div data-testid="general-settings">General Settings Content</div>,
@@ -52,27 +52,6 @@ vi.mock('@/hooks/useMobile', () => ({
     swipeStyles: {},
   })),
 }))
-
-function stubMatchMedia(matches: boolean): () => void {
-  const listeners = new Set<() => void>()
-  const mediaQueryList = {
-    media: DESKTOP_MEDIA_QUERY,
-    matches,
-    addEventListener: (_type: string, listener: () => void) => {
-      listeners.add(listener)
-    },
-    removeEventListener: (_type: string, listener: () => void) => {
-      listeners.delete(listener)
-    },
-  }
-  const original = window.matchMedia
-  void original
-  Object.defineProperty(window, 'matchMedia', {
-    configurable: true,
-    writable: true,
-    value: () => mediaQueryList,
-  })
-}
 
 describe('SettingsDialog', () => {
   beforeEach(() => {

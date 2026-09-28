@@ -36,8 +36,8 @@ export function OpenCodeServerAuthSettings({ isOpen: controlledOpen, onToggle }:
 
   const getStatusIcon = () => {
     if (!status) return null
-    if (status.source === 'db') return <CheckCircle2 className="h-4 w-4 text-green-500" />
-    if (status.source === 'env') return <CheckCircle2 className="h-4 w-4 text-blue-500" />
+    if (status.source === 'db') return <CheckCircle2 className="h-4 w-4 text-success" />
+    if (status.source === 'env') return <CheckCircle2 className="h-4 w-4 text-info" />
     return <CheckCircle2 className="h-4 w-4 text-muted-foreground" />
   }
 

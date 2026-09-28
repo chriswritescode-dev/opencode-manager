@@ -179,8 +179,8 @@ export function SidebarCollapseToggle({ collapsed, onToggle }: SidebarCollapseTo
       <span aria-hidden="true" className="relative flex items-center justify-center">
         <span
           className={cn(
-            'h-8 w-1 rounded-full bg-orange-500/60 transition-colors duration-150',
-            'group-hover:bg-orange-500 group-focus-visible:bg-orange-500'
+            'h-8 w-1 rounded-full bg-highlight/60 transition-colors duration-150',
+            'group-hover:bg-highlight group-focus-visible:bg-highlight'
           )}
         />
         <ChevronLeft

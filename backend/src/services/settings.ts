@@ -12,6 +12,7 @@ import {
   UserPreferencesSchema,
   DEFAULT_USER_PREFERENCES,
 } from '../types/settings'
+import { isColorThemeId, MANAGER_COLOR_THEME_ID } from '@opencode-manager/shared/themes'
 
 const CUSTOM_OPENCODE_SERVER_PASSWORD_KEY = 'opencode_server_password'
 const MANAGED_OPENCODE_SERVER_PASSWORD_KEY = 'opencode_server_managed_password'
@@ -63,7 +64,11 @@ export class SettingsService {
 
     try {
       const parsed = parseJsonc(row.preferences) as Record<string, unknown>
-      
+
+      if (!isColorThemeId(parsed.colorTheme)) {
+        parsed.colorTheme = MANAGER_COLOR_THEME_ID
+      }
+
       const validated = UserPreferencesSchema.parse({
         ...DEFAULT_USER_PREFERENCES,
         ...parsed,

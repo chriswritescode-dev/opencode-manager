@@ -1,5 +1,6 @@
 import { useSettings } from '@/hooks/useSettings'
 import { useVersionCheck } from '@/hooks/useVersionCheck'
+import { MANAGER_COLOR_THEME_ID, OPENCODE_THEMES, isColorThemeId } from '@opencode-manager/shared/themes'
 import { Loader2 } from 'lucide-react'
 import { Label } from '@/components/ui/label'
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
@@ -35,7 +36,7 @@ export function GeneralSettings() {
                   href={versionInfo.releaseUrl ?? ''}
                   target="_blank"
                   rel="noopener noreferrer"
-                  className="text-xs font-medium text-green-500 hover:text-green-400 transition-colors"
+                  className="text-xs font-medium text-success hover:text-success/80 transition-colors"
                 >
                   v{versionInfo.latestVersion} available
                 </a>
@@ -49,22 +50,49 @@ export function GeneralSettings() {
 
       <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between sm:gap-4">
         <div className="min-w-0 space-y-0.5">
-          <Label htmlFor="theme">Theme</Label>
+          <Label htmlFor="appearance">Appearance</Label>
           <p className="text-sm text-muted-foreground">
-            Choose your preferred color scheme
+            Choose light, dark, or follow your system
           </p>
         </div>
         <Select
           value={preferences?.theme || 'dark'}
           onValueChange={(value) => updateSettings({ theme: value as 'dark' | 'light' | 'system' })}
         >
-          <SelectTrigger id="theme" className="w-full shrink-0 sm:w-40">
+          <SelectTrigger id="appearance" className="w-full shrink-0 sm:w-40">
             <SelectValue placeholder="Select a theme" />
           </SelectTrigger>
           <SelectContent>
             <SelectItem value="dark">Dark</SelectItem>
             <SelectItem value="light">Light</SelectItem>
             <SelectItem value="system">System</SelectItem>
+          </SelectContent>
+        </Select>
+      </div>
+
+      <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between sm:gap-4">
+        <div className="min-w-0 space-y-0.5">
+          <Label htmlFor="colorTheme">Theme</Label>
+          <p className="text-sm text-muted-foreground">
+            Use the Manager palette or an OpenCode theme
+          </p>
+        </div>
+        <Select
+          value={preferences?.colorTheme ?? MANAGER_COLOR_THEME_ID}
+          onValueChange={(value) => {
+            if (isColorThemeId(value)) updateSettings({ colorTheme: value })
+          }}
+        >
+          <SelectTrigger id="colorTheme" className="w-full shrink-0 sm:w-40">
+            <SelectValue placeholder="Select a theme" />
+          </SelectTrigger>
+          <SelectContent className="max-h-80">
+            <SelectItem value={MANAGER_COLOR_THEME_ID}>Manager</SelectItem>
+            {OPENCODE_THEMES.map((theme) => (
+              <SelectItem key={theme.id} value={theme.id}>
+                {theme.name}
+              </SelectItem>
+            ))}
           </SelectContent>
         </Select>
       </div>
