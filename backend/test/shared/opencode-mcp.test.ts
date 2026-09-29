@@ -2,6 +2,7 @@ import { describe, expect, it } from 'vitest'
 import {
   MCP_OAUTH_CALLBACK_PATH,
   mcpOAuthRedirectUri,
+  mcpServerViewsFromConfig,
   mcpServersFromConfig,
   mcpStatusByName,
 } from '@opencode-manager/shared/opencode'
@@ -44,6 +45,47 @@ describe('mcpServersFromConfig', () => {
   it('returns an empty map for a missing config', () => {
     expect(mcpServersFromConfig(undefined)).toEqual({})
     expect(mcpServersFromConfig({ servers: [] })).toEqual({})
+  })
+})
+
+describe('mcpServerViewsFromConfig', () => {
+  it('normalizes native and legacy servers, reporting each shape and enabled state', () => {
+    expect(
+      mcpServerViewsFromConfig({
+        timeout: { catalog: 5000 },
+        legacy: { type: 'local', command: ['npx', 'legacy'], enabled: false },
+        servers: {
+          remote: { type: 'remote', url: 'https://native.example.com', disabled: true },
+          local: { type: 'local', command: ['npx', 'native'] },
+        },
+      }),
+    ).toEqual([
+      {
+        name: 'legacy',
+        type: 'local',
+        command: ['npx', 'legacy'],
+        enabled: false,
+        shape: 'legacy',
+      },
+      {
+        name: 'local',
+        type: 'local',
+        command: ['npx', 'native'],
+        enabled: true,
+        shape: 'servers',
+      },
+      {
+        name: 'remote',
+        type: 'remote',
+        url: 'https://native.example.com',
+        enabled: false,
+        shape: 'servers',
+      },
+    ])
+  })
+
+  it('returns an empty list for a missing config', () => {
+    expect(mcpServerViewsFromConfig(undefined)).toEqual([])
   })
 })
 

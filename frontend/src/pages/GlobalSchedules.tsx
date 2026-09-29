@@ -20,8 +20,7 @@ import { useSidebarAction } from '@/hooks/useSidebarAction'
 
 import type { ScheduleJobWithRepo, ScheduleRunWithContext } from '@/api/schedules'
 import { Combobox } from '@/components/ui/combobox'
-import { isAssistantRepoId } from '@/lib/schedules/schedule-target'
-import { getAssistantPath } from '@/lib/navigation'
+import { getRepoPath } from '@/lib/navigation'
 
 type StatusFilter = 'all' | 'enabled' | 'disabled'
 type ScheduleModeFilter = 'all' | 'cron' | 'interval'
@@ -284,7 +283,7 @@ export function GlobalSchedules() {
   const handleNavigateToRepo = (repoPath: string) => {
     const repoId = jobs.find((j) => j.repoPath === repoPath)?.repoId
     if (repoId === undefined) return
-    navigate(isAssistantRepoId(repoId) ? getAssistantPath() : `/repos/${repoId}`)
+    navigate(getRepoPath(repoId))
   }
 
   if (isLoading) {

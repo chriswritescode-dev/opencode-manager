@@ -40,6 +40,21 @@ describe('FilePreview header buttons', () => {
     expect(active.className).not.toMatch(OUTLINE_DARK_OVERRIDE)
   })
 
+  it('renders HTML files in a sandboxed iframe with a raw toggle', () => {
+    render(<FilePreview file={textFile('report.html', 'text/html')} />)
+
+    const frame = screen.getByTitle('report.html')
+    expect(frame.tagName).toBe('IFRAME')
+    expect(frame).toHaveAttribute('sandbox', 'allow-scripts')
+    expect(frame.getAttribute('src')).toContain('raw=true')
+    expect(screen.getByTitle('Open HTML in new tab')).toHaveAttribute('target', '_blank')
+
+    fireEvent.click(screen.getByTitle('Show raw HTML'))
+
+    expect(screen.queryByTitle('report.html')).not.toBeInTheDocument()
+    expect(screen.getByText('# heading')).toBeInTheDocument()
+  })
+
   it('keeps the success and destructive tints on the edit actions in dark mode', () => {
     render(<FilePreview file={textFile('Dockerfile', 'text/plain')} />)
 

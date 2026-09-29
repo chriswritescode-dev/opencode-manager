@@ -48,6 +48,7 @@ OpenCode Manager runs as a pnpm workspace:
 - A supervised OpenCode server handles agent sessions while the backend proxies API calls and streams events over SSE.
 - The React/Vite frontend uses React Router and TanStack Query to render repositories, sessions, schedules, settings, and mobile navigation.
 - The shared package keeps config, schemas, and TypeScript types aligned between backend and frontend.
+- The `ocm-cli/` package provides the `ocm` CLI that attaches a local OpenCode TUI to a Manager-hosted repo.
 
 ## Key Features
 
@@ -71,6 +72,7 @@ OpenCode Manager runs as a pnpm workspace:
 - `backend/` — Bun + Hono API routes, services, database migrations, auth, schedules, and OpenCode integration.
 - `frontend/` — React + Vite app, pages, components, hooks, API clients, stores, contexts, and PWA assets.
 - `shared/` — Workspace package for schemas, types, config, and utilities.
+- `ocm-cli/` — `ocm` CLI that attaches a local OpenCode TUI to a Manager-hosted repo.
 - `docs/` — MkDocs Material documentation.
 - `scripts/`, `Dockerfile`, `docker-compose.yml` — Setup, build, and deployment support.
 

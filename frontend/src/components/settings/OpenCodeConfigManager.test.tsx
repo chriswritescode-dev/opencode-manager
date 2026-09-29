@@ -15,7 +15,6 @@ const {
   mockListManagedSkills,
   mockListOpenCodeDirectoryFiles,
   mockGetAgentsMd,
-  mockAddServerAsync,
   healthState,
 } = vi.hoisted(() => ({
   mockGetOpenCodeConfig: vi.fn(),
@@ -26,7 +25,6 @@ const {
   mockListManagedSkills: vi.fn(),
   mockListOpenCodeDirectoryFiles: vi.fn(),
   mockGetAgentsMd: vi.fn(),
-  mockAddServerAsync: vi.fn(),
   healthState: { data: { opencode: 'healthy', opencodeRestartPending: false } as Record<string, unknown> },
 }))
 
@@ -41,9 +39,6 @@ vi.mock('@/hooks/useMcpServers', () => ({
     isError: false,
     error: null,
     refetch: vi.fn(),
-    addServer: vi.fn(),
-    addServerAsync: mockAddServerAsync,
-    isAddingServer: false,
     connect: vi.fn(),
     connectAsync: vi.fn(),
     isConnecting: false,
@@ -123,7 +118,6 @@ describe('OpenCodeConfigManager', () => {
     mockUpdateOpenCodeConfig.mockResolvedValue(defaultConfig)
     mockRestartOpenCodeServer.mockResolvedValue({ success: true, message: 'ok' })
     mockGetActiveOpenCodeSessions.mockResolvedValue({ count: 2, sessions: [] })
-    mockAddServerAsync.mockResolvedValue(undefined)
   })
 
   it('shows uploaded command and agent directory files in settings', async () => {
@@ -408,7 +402,6 @@ describe('OpenCodeConfigManager', () => {
     await waitFor(() => expect(mockUpdateOpenCodeConfig).toHaveBeenCalledTimes(1))
     const [payload] = mockUpdateOpenCodeConfig.mock.calls[0]
     expect(payload.expectedRevision).toBe('rev-A')
-    expect(mockAddServerAsync).toHaveBeenCalledTimes(1)
   })
 
   it('sends the revision from the previous save on the next structured save', async () => {

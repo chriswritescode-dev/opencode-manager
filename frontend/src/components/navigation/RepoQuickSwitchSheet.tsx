@@ -8,7 +8,7 @@ import { getRepoDisplayName } from '@/lib/utils'
 import { AddRepoDialog } from '@/components/repo/AddRepoDialog'
 import { FolderGit2, Plus } from 'lucide-react'
 import { useUrlParams } from '@/hooks/useUrlParams'
-import { getAssistantPath } from '@/lib/navigation'
+import { getAssistantPath, getRepoPath } from '@/lib/navigation'
 import { NewSessionButton, RepoSessionNavList, SearchClearButton } from '@/components/navigation/RepoSessionNav'
 import { getActiveRepoId } from '@/components/navigation/sidebar-session-tree'
 import { useNavigableRepos } from '@/hooks/useSidebarRepoGroups'
@@ -58,7 +58,7 @@ export function RepoQuickSwitchSheet({ isOpen, onClose }: RepoQuickSwitchSheetPr
       return
     }
 
-    navigateAndClose(`/repos/${id}`, { replace: true })
+    navigateAndClose(getRepoPath(id), { replace: true })
   }
 
   return (

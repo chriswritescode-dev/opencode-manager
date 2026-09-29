@@ -1,6 +1,5 @@
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import { mcpApi } from '@/api/mcp'
-import type { McpServerConfig } from '@/api/mcp'
 import { invalidateSessionCaches } from '@/lib/queryInvalidation'
 import { showToast as toast } from '@/lib/toast'
 
@@ -12,19 +11,6 @@ export function useMcpServers() {
     queryFn: () => mcpApi.getStatus(),
     refetchInterval: 5000,
     staleTime: 2000,
-  })
-
-  const addServerMutation = useMutation({
-    mutationFn: ({ name, config }: { name: string; config: McpServerConfig }) =>
-      mcpApi.addServer(name, config),
-    onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: ['mcp-status'] })
-      invalidateSessionCaches(queryClient)
-      toast.success('MCP server added successfully')
-    },
-    onError: (error: Error) => {
-      toast.error(`Failed to add MCP server: ${error.message}`)
-    },
   })
 
   const connectMutation = useMutation({
@@ -77,10 +63,6 @@ export function useMcpServers() {
     isError: statusQuery.isError,
     error: statusQuery.error,
     refetch: statusQuery.refetch,
-
-    addServer: addServerMutation.mutate,
-    addServerAsync: addServerMutation.mutateAsync,
-    isAddingServer: addServerMutation.isPending,
 
     connect: connectMutation.mutate,
     connectAsync: connectMutation.mutateAsync,

@@ -23,8 +23,6 @@ vi.mock('@/hooks/useMcpServers', () => ({
     disconnect: vi.fn(),
     removeAuthAsync: vi.fn(),
     isRemovingAuth: false,
-    addServerAsync: vi.fn(),
-    isAddingServer: false,
   }),
 }))
 
@@ -81,8 +79,8 @@ describe('McpManager', () => {
 
     await deleteServer(user, 'Configured')
 
-    await waitFor(() => expect(mockRemoveServer).toHaveBeenCalledWith('configured'))
-    expect(onUpdate).toHaveBeenCalledWith({ mcp: { servers: {} } })
+    await waitFor(() => expect(onUpdate).toHaveBeenCalledWith({ mcp: { servers: {} } }))
+    expect(mockRemoveServer).not.toHaveBeenCalled()
   })
 
   it('skips the config update for a server that is not in mcp.servers', async () => {
@@ -96,7 +94,7 @@ describe('McpManager', () => {
     expect(onUpdate).not.toHaveBeenCalled()
   })
 
-  it('surfaces the shadowed-removal message from the backend', async () => {
+  it('surfaces the config save error when deleting a configured server', async () => {
     const message = 'Cannot remove mcp.servers.configured: defined in opencode.json, not in opencode.jsonc'
     const onUpdate = vi.fn<(content: Record<string, unknown>) => Promise<void>>().mockRejectedValue(new FetchError(message, 409))
     const user = userEvent.setup()

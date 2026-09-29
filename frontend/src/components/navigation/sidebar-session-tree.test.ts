@@ -44,10 +44,14 @@ describe('getActiveRepoId', () => {
     expect(getActiveRepoId('/repos/3/sessions/abc')).toBe(3)
   })
 
-  it('returns null outside a repo and on assistant routes', () => {
+  it('returns null outside a repo', () => {
     expect(getActiveRepoId('/')).toBeNull()
-    expect(getActiveRepoId('/assistant')).toBeNull()
-    expect(getActiveRepoId('/repos/1/assistant')).toBeNull()
+  })
+
+  it('returns the assistant repo id on assistant routes', () => {
+    expect(getActiveRepoId('/assistant')).toBe(0)
+    expect(getActiveRepoId('/repos/1/assistant')).toBe(0)
+    expect(getActiveRepoId('/repos/0/sessions/abc')).toBe(0)
   })
 })
 
@@ -76,14 +80,14 @@ describe('isRepoReady', () => {
 })
 
 describe('selectNavigableRepos', () => {
-  it('excludes the assistant repo but keeps repos that are not ready', () => {
+  it('pins the assistant repo first and keeps repos that are not ready', () => {
     const repos = [
-      createRepo({ id: 0, fullPath: '/assistant' }),
-      createRepo({ id: 1, fullPath: '/repos/a' }),
+      createRepo({ id: 1, fullPath: '/repos/a', lastAccessedAt: 20 }),
       createRepo({ id: 2, fullPath: '/repos/b', cloneStatus: 'cloning' }),
+      createRepo({ id: 0, fullPath: '/assistant', lastAccessedAt: 10 }),
     ]
 
-    expect(selectNavigableRepos(repos).map((repo) => repo.id)).toEqual([1, 2])
+    expect(selectNavigableRepos(repos).map((repo) => repo.id)).toEqual([0, 1, 2])
   })
 
   it('sorts by last access, newest first, with never-accessed repos last', () => {
@@ -171,6 +175,17 @@ describe('buildSidebarRepoGroups', () => {
     expect(item.isWorktree).toBe(true)
     expect(item.isPinned).toBe(true)
     expect(item.path).toBe('/repos/3/sessions/w1')
+  })
+
+  it('labels assistant sessions and links them in assistant mode', () => {
+    const assistant = createRepo({ id: 0, fullPath: '/assistant', localPath: 'assistant' })
+    const sessions = [createSession('s1', atStartOfDay(1000), '/assistant')]
+
+    const [group] = buildSidebarRepoGroups({ repos: [assistant], sessions, pinnedKeys: new Set(), now: NOW })
+
+    expect(group.label).toBe('Assistant')
+    expect(group.items[0].path).toBe('/repos/0/sessions/s1?assistant=1')
+    expect(isCurrentSessionItem(group.items[0], '/repos/0/sessions/s1')).toBe(true)
   })
 
   it('falls back to repo.branch when currentBranch is absent', () => {

@@ -144,19 +144,10 @@ export const FileBrowser = forwardRef<FileBrowserHandle, FileBrowserProps>(funct
   
   const dropZoneRef = useRef<HTMLDivElement>(null)
   const uploadCancelledRef = useRef(false)
+  const loadRequestRef = useRef(0)
   const isMobile = useMobile()
 
   const { data: initialFileData, error: initialFileError } = useFile(initialSelectedFile)
-
-useEffect(() => {
-  if (initialFileData) {
-    setSelectedFile(initialFileData)
-    if (isMobile) {
-      setIsPreviewModalOpen(true)
-      onPreviewStateChange?.(true)
-    }
-  }
-}, [initialFileData, isMobile, onPreviewStateChange])
 
 useEffect(() => {
   if (initialFileError) {
@@ -165,6 +156,7 @@ useEffect(() => {
 }, [initialFileError])
 
   const loadFiles = useCallback(async (path: string) => {
+    const request = ++loadRequestRef.current
     setLoading(true)
     setError(null)
     
@@ -175,13 +167,15 @@ useEffect(() => {
       }
       
       const data = await response.json()
+      if (request !== loadRequestRef.current) return
       setFiles(data)
       setCurrentPath(path)
       onDirectoryLoad?.({ workspaceRoot: data.workspaceRoot, currentPath: path })
     } catch (err) {
+      if (request !== loadRequestRef.current) return
       setError(err instanceof Error ? err.message : 'Failed to load files')
     } finally {
-      setLoading(false)
+      if (request === loadRequestRef.current) setLoading(false)
     }
   }, [onDirectoryLoad])
 
@@ -447,6 +441,23 @@ useEffect(() => {
   useEffect(() => {
     loadFiles(basePath)
   }, [basePath, loadFiles])
+
+  useEffect(() => {
+    if (!initialFileData) return
+    setError(null)
+    if (initialFileData.isDirectory) {
+      setSelectedFile(null)
+      void loadFiles(initialFileData.path)
+      return
+    }
+    setSelectedFile(initialFileData)
+  }, [initialFileData, loadFiles])
+
+  useEffect(() => {
+    if (!initialFileData || initialFileData.isDirectory || !isMobile) return
+    setIsPreviewModalOpen(true)
+    onPreviewStateChange?.(true)
+  }, [initialFileData, isMobile, onPreviewStateChange])
 
   useEffect(() => {
     const handleFileSaved = (event: CustomEvent<{ path: string; content?: string }>) => {

@@ -6,7 +6,7 @@ export interface FileReference {
   fullMatch: string
 }
 
-const FILE_REFERENCE_PATTERN = /\b([\w\-./]+\.(ts|tsx|js|jsx|py|java|cpp|c|h|hpp|go|rs|rb|php|swift|kt|cs|vue|svelte|css|scss|sass|less|html|xml|json|yaml|yml|md|txt|sh|bash|sql|graphql|proto|toml|ini|conf|env))(?::(\d+))?\b/gi
+const FILE_REFERENCE_PATTERN = /(?<![\w\-./:])([\w\-./]+\.(ts|tsx|js|jsx|py|java|cpp|c|h|hpp|go|rs|rb|php|swift|kt|cs|vue|svelte|css|scss|sass|less|html|htm|xml|json|yaml|yml|md|txt|sh|bash|sql|graphql|proto|toml|ini|conf|env))(?::(\d+))?\b/gi
 
 export function detectFileReferences(text: string): FileReference[] {
   const references: FileReference[] = []

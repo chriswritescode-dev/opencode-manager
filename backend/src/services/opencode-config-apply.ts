@@ -10,6 +10,7 @@ import {
   restoreOpenCodeConfigSnapshot,
   serializeOpenCodeConfigSnapshot,
   updateOpenCodeConfigFile,
+  type OpenCodeConfigUpdateMode,
   withOpenCodeConfigLock,
 } from './opencode-config-file'
 import { opencodeServerManager } from './opencode-single-server'
@@ -29,11 +30,10 @@ export interface ApplyOpenCodeConfigInput {
   content: Record<string, unknown> | string
   source?: OpenCodeConfigSourceName
   expectedRevision?: string
+  mode?: OpenCodeConfigUpdateMode
   settingsService: SettingsService
   openCodeClient: OpenCodeClient
 }
-
-const MCP_CONFIG_KEY = 'mcp'
 
 export async function captureLastKnownGoodOpenCodeConfig(settingsService: SettingsService): Promise<OpenCodeConfigFile | null> {
   const previous = await readOpenCodeConfigFile()
@@ -95,19 +95,19 @@ function requiresOpenCodeReload(previous: OpenCodeConfigFile | null, next: OpenC
   if (previous?.isValid !== next.isValid) {
     return true
   }
-  return listChangedTopLevelKeys(previous?.content ?? {}, next.content).some((key) => key !== MCP_CONFIG_KEY)
+  return listChangedTopLevelKeys(previous?.content ?? {}, next.content).length > 0
 }
 
 export async function applyOpenCodeConfigUpdate(
   input: ApplyOpenCodeConfigInput,
 ): Promise<ApplyOpenCodeConfigResult> {
   const { reloadRequired, config } = await withOpenCodeConfigLock(async () => {
-    const { content, source, expectedRevision, settingsService } = input
+    const { content, source, expectedRevision, mode, settingsService } = input
 
     const snapshot = await readOpenCodeConfigSnapshot()
     const previous = await readOpenCodeConfigFile(snapshot)
 
-    const next = await updateOpenCodeConfigFile(content, { source, expectedRevision, snapshot })
+    const next = await updateOpenCodeConfigFile(content, { source, expectedRevision, snapshot, mode })
 
     if (previous?.isValid) {
       const snapshot = serializeOpenCodeConfigSnapshot(previous)

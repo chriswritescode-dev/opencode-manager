@@ -86,6 +86,88 @@ describe('FileBrowserSheet', () => {
   })
 })
 
+describe('FileBrowser initial selection', () => {
+  it('navigates into an initially selected directory even when the base listing resolves later', async () => {
+    const directory = (path: string, children: string[]) => ({
+      name: path.split('/').pop(),
+      path,
+      isDirectory: true,
+      size: 0,
+      lastModified: new Date().toISOString(),
+      children: children.map((name) => ({ name, path: `${path}/${name}`, isDirectory: true, size: 0, lastModified: new Date().toISOString() })),
+    })
+    const fetchMock = vi.fn(async (input: RequestInfo | URL) => {
+      const path = new URL(String(input), 'http://localhost').searchParams.get('path')
+      if (path === 'repo') {
+        await new Promise((resolve) => setTimeout(resolve, 50))
+        return new Response(JSON.stringify(directory('repo', ['frontend'])), { status: 200, headers: { 'Content-Type': 'application/json' } })
+      }
+      return new Response(JSON.stringify(directory('repo/frontend', ['src'])), { status: 200, headers: { 'Content-Type': 'application/json' } })
+    })
+    vi.stubGlobal('fetch', fetchMock)
+    const ref = { current: null as unknown as FileBrowserHandle }
+
+    try {
+      render(
+        <FileBrowser ref={ref as never} basePath="repo" embedded={true} initialSelectedFile="repo/frontend" />,
+        { wrapper: createWrapper() }
+      )
+
+      expect(await screen.findByText('src')).toBeInTheDocument()
+      await new Promise((resolve) => setTimeout(resolve, 100))
+      expect(ref.current.getCurrentPath()).toBe('repo/frontend')
+      expect(screen.queryByText('frontend')).not.toBeInTheDocument()
+    } finally {
+      vi.unstubAllGlobals()
+    }
+  })
+
+  it('does not reload the initial directory when the viewport changes', async () => {
+    const directory = (path: string, children: string[]) => ({
+      name: path.split('/').pop(),
+      path,
+      isDirectory: true,
+      size: 0,
+      lastModified: new Date().toISOString(),
+      children: children.map((name) => ({ name, path: `${path}/${name}`, isDirectory: true, size: 0, lastModified: new Date().toISOString() })),
+    })
+    const fetchMock = vi.fn(async (input: RequestInfo | URL) => {
+      const path = new URL(String(input), 'http://localhost').searchParams.get('path')
+      if (path === 'repo') {
+        await new Promise((resolve) => setTimeout(resolve, 50))
+        return new Response(JSON.stringify(directory('repo', ['frontend'])), { status: 200, headers: { 'Content-Type': 'application/json' } })
+      }
+      return new Response(JSON.stringify(directory('repo/frontend', ['src'])), { status: 200, headers: { 'Content-Type': 'application/json' } })
+    })
+    vi.stubGlobal('fetch', fetchMock)
+    const mobileSpy = vi.spyOn(useMobile, 'useMobile').mockReturnValue(false)
+    const ref = { current: null as unknown as FileBrowserHandle }
+
+    try {
+      const { rerender } = render(
+        <FileBrowser ref={ref as never} basePath="repo" embedded={true} initialSelectedFile="repo/frontend" />,
+        { wrapper: createWrapper() }
+      )
+
+      expect(await screen.findByText('src')).toBeInTheDocument()
+      await new Promise((resolve) => setTimeout(resolve, 100))
+      const callsBefore = fetchMock.mock.calls.length
+
+      mobileSpy.mockReturnValue(true)
+      rerender(
+        <FileBrowser ref={ref as never} basePath="repo" embedded={true} initialSelectedFile="repo/frontend" />
+      )
+
+      await new Promise((resolve) => setTimeout(resolve, 100))
+      expect(fetchMock.mock.calls.length).toBe(callsBefore)
+      expect(ref.current.getCurrentPath()).toBe('repo/frontend')
+    } finally {
+      mobileSpy.mockRestore()
+      vi.unstubAllGlobals()
+    }
+  })
+})
+
 describe('FileBrowser navigation', () => {
   it('exposes imperative handle with goBack, canGoBack, and getCurrentPath', () => {
     const ref = { current: null as unknown as FileBrowserHandle }

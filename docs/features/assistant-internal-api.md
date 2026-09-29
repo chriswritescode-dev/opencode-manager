@@ -63,7 +63,8 @@ The `path` is relative to the internal API base (for example `/settings` or `/re
 GET /settings
 PATCH /settings
 GET /opencode-config
-PUT /opencode-config
+GET /opencode-config/mcp
+PATCH /opencode-config
 POST /assistant/reload
 GET /repos
 GET /repos/*/git-info
@@ -210,22 +211,22 @@ Returns the updated settings object.
 
 ### OpenCode Configuration
 
-The global OpenCode configuration files in the workspace `.config/opencode/` directory are the source of truth, and these endpoints are the only supported way to change them. The two sources OpenCode 2 reads are merged in order — `opencode.json`, `opencode.jsonc` — with later files overriding earlier ones. A legacy `config.json` is folded into a recognized source and archived; it is never read as a live source. The schema accepts both V1-compatible keys and native OpenCode 2 fields, so a V2-native config passes validation. The endpoint applies the same rules as the Settings UI: any semantic change is written to disk and applied to the running server with an in-place OpenCode location reload, and it is flagged as restart required only when that reload fails; comment-only edits do nothing, and changes limited to `mcp` are saved without a reload.
+The global OpenCode configuration files in the workspace `.config/opencode/` directory are the source of truth, and these endpoints are the only supported way to change them. The two sources OpenCode 2 reads are merged in order — `opencode.json`, `opencode.jsonc` — with later files overriding earlier ones. A legacy `config.json` is folded into a recognized source and archived; it is never read as a live source. The schema accepts both V1-compatible keys and native OpenCode 2 fields, so a V2-native config passes validation. The endpoints apply the same rules as the Settings UI: any semantic change is written to disk and applied to the running server, and it is flagged as restart required only when that apply fails; comment-only edits do nothing, and `mcp` changes go through the same location reload, which reconnects only the servers whose configuration changed.
+
+The agent-facing surface is redacted: every read and write response replaces secret values with `<redacted>` and omits the raw source text, a write containing `<redacted>` is rejected, and `PATCH` changes only the paths it names, so an agent never has to read or reproduce the whole file. The public surface the Settings UI uses keeps full fidelity and the whole-document `PUT`.
 
 **GET `/api/internal/opencode-config`**
 
-Read the merged persisted configuration and its source files. This is not the running instance configuration: project overrides and expanded environment values are not included.
+Read the merged persisted configuration and its source files, with secret values redacted and the raw source text omitted. This is not the running instance configuration: project overrides and expanded environment values are not included.
 
-**Response (`OpenCodeConfigFile`):**
+**Response:**
 ```ts
 {
   path: string              // Absolute path of the preferred write target
-  content: object           // Merged configuration across all sources
-  rawContent: string        // Raw content of the preferred write target
-  sources: Array<{          // Recognized source files, in merge order
+  content: object           // Merged configuration across all sources, secrets replaced with "<redacted>"
+  sources: Array<{          // Recognized source files, in merge order, raw content omitted
     name: 'opencode.json' | 'opencode.jsonc'
     path: string
-    rawContent: string
     content: object
     isValid: boolean
     validationIssues?: Array<{ path: string, message: string }>
@@ -235,6 +236,7 @@ Read the merged persisted configuration and its source files. This is not the ru
   isValid: boolean          // Whether every source passes schema validation
   validationIssues?: Array<{ path: string, message: string }>
   updatedAt: number         // Newest source mtime
+  redactedPaths: string[]    // Dotted paths whose values were replaced
 }
 ```
 
@@ -244,9 +246,35 @@ Read the merged persisted configuration and its source files. This is not the ru
 - `404`: No config source found
 - `500`: Server error
 
+**GET `/api/internal/opencode-config/mcp`**
+
+List the configured MCP servers with their stored shape, enabled state, and live connection status. Header and environment values are never returned.
+
+**Response:**
+```ts
+{
+  revision: string | null
+  servers: Array<{
+    name: string
+    type: 'local' | 'remote'
+    command?: string[]      // For local servers
+    url?: string            // For remote servers
+    enabled: boolean
+    shape: 'servers' | 'legacy'  // Native mcp.servers.<name> or flat mcp.<name>
+    status?: 'connected' | 'pending' | 'disabled' | 'failed' | 'needs_auth'
+    error?: string
+  }>
+}
+```
+
+**Status Codes:**
+- `200`: MCP server list returned
+- `401`: Missing or invalid bearer token
+- `500`: Server error
+
 **GET `/api/internal/opencode-config/effective`**
 
-Read the running server's configuration as `entries`: the configuration documents and discovery directories in precedence order, lowest first, each shaped as `{ type: 'document', path, info }` or `{ type: 'directory', path }`. Its `info` values are expanded for the running server, so never copy this response into a save.
+Read the running server's configuration as `entries`: the configuration documents and discovery directories in precedence order, lowest first, each shaped as `{ type: 'document', path, info }` or `{ type: 'directory', path }`. Its `info` values are expanded for the running server, so never copy this response into a save. Secret values in `info` are replaced with `<redacted>`.
 
 **Status Codes:**
 - `200`: Effective configuration returned
@@ -254,27 +282,29 @@ Read the running server's configuration as `entries`: the configuration document
 - `502`: OpenCode returned an error
 - `503`: OpenCode server unavailable
 
-**PUT `/api/internal/opencode-config`**
+**PATCH `/api/internal/opencode-config`**
 
-Read the merged configuration first, change only the keys the user asked for, and send the complete object back with its `revision`. Only changed paths are patched into the preferred existing source (`opencode.jsonc` > `opencode.json`; a new installation gets `opencode.jsonc`); comments, unknown keys, and untouched inherited values are preserved. For a raw edit, send a string as `content` together with the exact `source` name.
+Change only the paths the request names. Only those paths are patched into the preferred existing source (`opencode.jsonc` > `opencode.json`; a new installation gets `opencode.jsonc`); comments, unknown keys, and untouched inherited values are preserved. A `null` value removes a path. Removing a path defined only in a lower-priority source is rejected (`409`).
+
+The public route keeps the whole-document `PUT` for the Settings UI; the internal route exposes `PATCH` instead.
 
 **Request Body:**
 ```ts
 {
-  content: object | string    // Complete merged object, or raw text for one source
+  patch: object              // Nested paths to set; null removes a path
   expectedRevision?: string   // From GET; a stale value is rejected with 409
-  source?: 'opencode.json' | 'opencode.jsonc'  // Required for raw string edits
+  source?: 'opencode.json' | 'opencode.jsonc'
 }
 ```
 
 **Response:**
-Returns the refreshed `OpenCodeConfigFile`. Semantic changes are applied with an OpenCode location reload, without a restart. Adds `restartRequired: true` only when that reload fails.
+Returns the refreshed redacted configuration. Semantic changes, including `mcp`, are applied with an OpenCode location reload, without a restart; only the MCP servers whose configuration changed reconnect. Adds `restartRequired: true` only when that apply fails.
 
 **Status Codes:**
 - `200`: Configuration written
-- `400`: Invalid request body, invalid configuration, or a source file that is not valid JSON/JSONC (`sources` lists them)
+- `400`: Invalid request body, invalid configuration, a source file that is not valid JSON/JSONC (`sources` lists them), or a value equal to `<redacted>` (`paths` lists them)
 - `401`: Missing or invalid bearer token
-- `409`: Stale `expectedRevision` (`expectedRevision`/`actualRevision` in the body), or the save would remove a value defined only in a lower-priority source (`paths`/`sources` in the body)
+- `409`: Stale `expectedRevision` (`expectedRevision`/`actualRevision` in the body), or the patch would remove a value defined only in a lower-priority source (`paths`/`sources` in the body)
 - `500`: Server error
 
 ### Assistant

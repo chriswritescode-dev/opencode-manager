@@ -41,10 +41,13 @@ const OPENCODE_CONFIG_SNAPSHOT_MARKER = 'opencode-config-snapshot'
 
 const OPENCODE_CONFIG_SNAPSHOT_ARTIFACT_PREFIX = 'opencode-config-broken'
 
+export type OpenCodeConfigUpdateMode = 'replace' | 'merge'
+
 export interface UpdateOpenCodeConfigOptions {
   source?: OpenCodeConfigSourceName
   expectedRevision?: string
   snapshot?: OpenCodeConfigSnapshot
+  mode?: OpenCodeConfigUpdateMode
 }
 
 export class OpenCodeConfigConflictError extends Error {
@@ -85,6 +88,18 @@ export class OpenCodeConfigShadowedRemovalError extends Error {
     this.name = 'OpenCodeConfigShadowedRemovalError'
     this.paths = paths
     this.sources = sources
+  }
+}
+
+export const OPENCODE_CONFIG_REDACTED_VALUE = '<redacted>'
+
+export class OpenCodeConfigRedactedValueError extends Error {
+  readonly paths: string[]
+
+  constructor(paths: string[]) {
+    super('Configuration contains redacted placeholder values')
+    this.name = 'OpenCodeConfigRedactedValueError'
+    this.paths = paths
   }
 }
 
@@ -177,9 +192,45 @@ function defineOwnConfigValue(target: Record<string, unknown>, key: string, valu
   Object.defineProperty(target, key, { value, enumerable: true, writable: true, configurable: true })
 }
 
+function stripNullOpenCodeConfigValues(value: unknown): unknown {
+  if (!isPlainObject(value)) return value
+  const output: Record<string, unknown> = {}
+  for (const key of Object.keys(value)) {
+    const entry = value[key]
+    if (entry === null) continue
+    defineOwnConfigValue(output, key, stripNullOpenCodeConfigValues(entry))
+  }
+  return output
+}
+
+function collectOpenCodeConfigRedactedPaths(value: unknown, basePath: string[] = []): string[] {
+  const paths: string[] = []
+  if (typeof value === 'string') {
+    if (value === OPENCODE_CONFIG_REDACTED_VALUE) paths.push(basePath.join('.'))
+    return paths
+  }
+  if (Array.isArray(value)) {
+    value.forEach((entry, index) => {
+      paths.push(...collectOpenCodeConfigRedactedPaths(entry, [...basePath, String(index)]))
+    })
+    return paths
+  }
+  if (isPlainObject(value)) {
+    for (const key of Object.keys(value)) {
+      paths.push(...collectOpenCodeConfigRedactedPaths(value[key], [...basePath, key]))
+    }
+  }
+  return paths
+}
+
+interface MergeOpenCodeConfigValuesOptions {
+  deleteNullValues?: boolean
+}
+
 function mergeOpenCodeConfigValues(
   target: Record<string, unknown>,
   source: Record<string, unknown>,
+  options: MergeOpenCodeConfigValuesOptions = {},
 ): Record<string, unknown> {
   const output: Record<string, unknown> = {}
   for (const key of Object.keys(target)) {
@@ -187,14 +238,20 @@ function mergeOpenCodeConfigValues(
   }
   for (const key of Object.keys(source)) {
     const sourceValue = source[key]
+    if (options.deleteNullValues && sourceValue === null) {
+      delete output[key]
+      continue
+    }
     const targetValue = hasOwn(output, key) ? output[key] : undefined
-    defineOwnConfigValue(
-      output,
-      key,
-      isPlainObject(targetValue) && isPlainObject(sourceValue)
-        ? mergeOpenCodeConfigValues(targetValue, sourceValue)
-        : sourceValue,
-    )
+    let nextValue: unknown
+    if (isPlainObject(targetValue) && isPlainObject(sourceValue)) {
+      nextValue = mergeOpenCodeConfigValues(targetValue, sourceValue, options)
+    } else if (options.deleteNullValues) {
+      nextValue = stripNullOpenCodeConfigValues(sourceValue)
+    } else {
+      nextValue = sourceValue
+    }
+    defineOwnConfigValue(output, key, nextValue)
   }
   return output
 }
@@ -348,27 +405,37 @@ export async function writeOpenCodeConfigFile(
 }
 
 function collectOpenCodeConfigPathOperations(
-  requested: Record<string, unknown>,
+  next: Record<string, unknown>,
   current: Record<string, unknown>,
+  mode: OpenCodeConfigUpdateMode,
   basePath: JSONPath = [],
 ): OpenCodeConfigPathOperation[] {
   const operations: OpenCodeConfigPathOperation[] = []
 
-  for (const key of Object.keys(requested)) {
-    const requestedValue = requested[key]
+  for (const key of Object.keys(next)) {
+    const nextValue = next[key]
     const hasCurrent = hasOwn(current, key)
     const currentValue = hasCurrent ? current[key] : undefined
     const nextPath = [...basePath, key]
-    if (isPlainObject(requestedValue) && isPlainObject(currentValue)) {
-      operations.push(...collectOpenCodeConfigPathOperations(requestedValue, currentValue, nextPath))
-    } else if (!hasCurrent || !isDeepStrictEqual(requestedValue, currentValue)) {
-      operations.push({ path: nextPath, value: requestedValue })
+    if (mode === 'merge' && nextValue === null) {
+      if (hasCurrent) operations.push({ path: nextPath, value: undefined })
+      continue
+    }
+    if (isPlainObject(nextValue) && isPlainObject(currentValue)) {
+      operations.push(...collectOpenCodeConfigPathOperations(nextValue, currentValue, mode, nextPath))
+      continue
+    }
+    const appliedValue = mode === 'merge' ? stripNullOpenCodeConfigValues(nextValue) : nextValue
+    if (!hasCurrent || !isDeepStrictEqual(appliedValue, currentValue)) {
+      operations.push({ path: nextPath, value: appliedValue })
     }
   }
 
-  for (const key of Object.keys(current)) {
-    if (hasOwn(requested, key)) continue
-    operations.push({ path: [...basePath, key], value: undefined })
+  if (mode === 'replace') {
+    for (const key of Object.keys(current)) {
+      if (hasOwn(next, key)) continue
+      operations.push({ path: [...basePath, key], value: undefined })
+    }
   }
 
   return operations
@@ -437,15 +504,24 @@ export async function updateOpenCodeConfigFile(
     return writeOpenCodeConfigFile(content, targetName, snapshot)
   }
 
+  const redactedPaths = collectOpenCodeConfigRedactedPaths(content)
+  if (redactedPaths.length > 0) {
+    throw new OpenCodeConfigRedactedValueError(redactedPaths)
+  }
+
   const invalidSources = snapshot.sources.filter((source) => !source.isValid).map((source) => source.name)
   if (invalidSources.length > 0) {
     throw new OpenCodeConfigSourceInvalidError(invalidSources)
   }
 
-  OpenCodeConfigSchema.parse(content)
+  const mode = options.mode ?? 'replace'
+  const operations = collectOpenCodeConfigPathOperations(content, snapshot.content, mode)
+
+  OpenCodeConfigSchema.parse(
+    mode === 'merge' ? mergeOpenCodeConfigValues(snapshot.content, content, { deleteNullValues: true }) : content,
+  )
 
   const originalText = targetSource?.rawContent ?? '{}\n'
-  const operations = collectOpenCodeConfigPathOperations(content, snapshot.content)
   assertNoShadowedOpenCodeConfigRemovals(operations, targetSource, snapshot.sources, targetName)
   const updatedText = applyOpenCodeConfigPathOperations(originalText, operations)
 
@@ -666,7 +742,7 @@ export async function foldLegacyConfigJsonSource(): Promise<boolean> {
       return true
     }
 
-    const operations = collectOpenCodeConfigPathOperations(legacyContent, lowestPrecedenceSource.content)
+    const operations = collectOpenCodeConfigPathOperations(legacyContent, lowestPrecedenceSource.content, 'replace')
       .filter((operation) => operation.value !== undefined && !hasOpenCodeConfigPath(lowestPrecedenceSource.content, operation.path))
     if (operations.length > 0) {
       const updatedText = applyOpenCodeConfigPathOperations(lowestPrecedenceSource.rawContent, operations)

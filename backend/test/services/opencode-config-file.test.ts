@@ -63,8 +63,10 @@ vi.mock('../../src/utils/fs-safe', async (importOriginal) => {
 import { LEGACY_OPENCODE_CONFIG_SOURCE_NAME } from '@opencode-manager/shared'
 import {
   HEALTH_WATCH_MAX_ENTRIES,
+  OPENCODE_CONFIG_REDACTED_VALUE,
   OPENCODE_CONFIG_SEED,
   OpenCodeConfigConflictError,
+  OpenCodeConfigRedactedValueError,
   OpenCodeConfigShadowedRemovalError,
   OpenCodeConfigSnapshotError,
   archiveBrokenOpenCodeConfigFile,
@@ -247,6 +249,162 @@ describe('opencode-config-file', () => {
     expect(targetContent).toContain('"theme": "light"')
     expect(targetContent).toContain('"small_model": "small"')
     await expect(readFile(sourcePath('opencode.json'), 'utf8')).resolves.toBe(lower)
+  })
+
+  it('merges only the patched paths and leaves every other field untouched', async () => {
+    const lower = '{\n  // lower config\n  "model": "lower/model"\n}\n'
+    const target = '{\n  // target config\n  "theme": "dark",\n  "small_model": "small"\n}\n'
+    await writeFile(sourcePath('opencode.json'), lower, 'utf8')
+    await writeFile(sourcePath('opencode.jsonc'), target, 'utf8')
+
+    const updated = await updateOpenCodeConfigFile({ theme: 'light' }, { mode: 'merge' })
+
+    expect(updated.content).toEqual({ model: 'lower/model', theme: 'light', small_model: 'small' })
+    const targetContent = await readFile(sourcePath('opencode.jsonc'), 'utf8')
+    expect(targetContent).toContain('// target config')
+    expect(targetContent).toContain('"theme": "light"')
+    expect(targetContent).toContain('"small_model": "small"')
+    await expect(readFile(sourcePath('opencode.json'), 'utf8')).resolves.toBe(lower)
+  })
+
+  it('merges a nested patch, creating paths that do not exist yet', async () => {
+    const raw = JSON.stringify({
+      mcp: {
+        servers: {
+          linear: { type: 'remote', url: 'https://linear.example.com', headers: { Authorization: 'Bearer old' } },
+        },
+      },
+    })
+    await writeFile(sourcePath('opencode.json'), raw, 'utf8')
+
+    const updated = await updateOpenCodeConfigFile(
+      {
+        mcp: {
+          servers: {
+            linear: { headers: { Authorization: 'Bearer new' } },
+            github: { type: 'local', command: ['npx', 'github'] },
+          },
+        },
+      },
+      { mode: 'merge' },
+    )
+
+    expect(updated.content).toEqual({
+      mcp: {
+        servers: {
+          linear: { type: 'remote', url: 'https://linear.example.com', headers: { Authorization: 'Bearer new' } },
+          github: { type: 'local', command: ['npx', 'github'] },
+        },
+      },
+    })
+    const onDisk = JSON.parse(await readFile(sourcePath('opencode.json'), 'utf8')) as Record<string, unknown>
+    expect(onDisk).toEqual(updated.content)
+  })
+
+  it('removes a patched path with a null value', async () => {
+    await writeFile(sourcePath('opencode.json'), JSON.stringify({ theme: 'dark', small_model: 's' }), 'utf8')
+
+    const updated = await updateOpenCodeConfigFile({ small_model: null }, { mode: 'merge' })
+
+    expect(updated.content).toEqual({ theme: 'dark' })
+    const onDisk = JSON.parse(await readFile(sourcePath('opencode.json'), 'utf8')) as Record<string, unknown>
+    expect(onDisk).toEqual({ theme: 'dark' })
+  })
+
+  it('treats a merge patch with unchanged values as no change', async () => {
+    const raw = '{\n  // keep this comment\n  "theme": "dark"\n}\n'
+    await writeFile(sourcePath('opencode.json'), raw, 'utf8')
+
+    const updated = await updateOpenCodeConfigFile({ theme: 'dark' }, { mode: 'merge' })
+
+    expect(updated.rawContent).toBe(raw)
+  })
+
+  it('rejects a merge patch whose merged result is schema-invalid and writes nothing', async () => {
+    const raw = '{"theme":"dark"}'
+    await writeFile(sourcePath('opencode.json'), raw, 'utf8')
+
+    await expect(updateOpenCodeConfigFile({ model: 5 }, { mode: 'merge' })).rejects.toBeInstanceOf(ZodError)
+
+    await expect(readFile(sourcePath('opencode.json'), 'utf8')).resolves.toBe(raw)
+  })
+
+  it('rejects a merge patch that removes a value only a lower-priority source defines', async () => {
+    const lower = '{"theme":"light"}'
+    const target = '{"model":"b"}'
+    await writeFile(sourcePath('opencode.json'), lower, 'utf8')
+    await writeFile(sourcePath('opencode.jsonc'), target, 'utf8')
+
+    const error = await updateOpenCodeConfigFile({ theme: null }, { mode: 'merge' }).catch((caught: unknown) => caught)
+
+    expect(error).toBeInstanceOf(OpenCodeConfigShadowedRemovalError)
+    expect((error as OpenCodeConfigShadowedRemovalError).paths).toEqual(['theme'])
+    expect((error as OpenCodeConfigShadowedRemovalError).sources).toEqual(['opencode.json'])
+    await expect(readFile(sourcePath('opencode.jsonc'), 'utf8')).resolves.toBe(target)
+    await expect(readFile(sourcePath('opencode.json'), 'utf8')).resolves.toBe(lower)
+  })
+
+  it('merges into an existing nested object while deleting sibling keys with null', async () => {
+    const raw = JSON.stringify({
+      mcp: { servers: { linear: { url: 'https://linear.example.com', headers: { Authorization: 'Bearer old', 'X-Keep': '1' } } } },
+    })
+    await writeFile(sourcePath('opencode.json'), raw, 'utf8')
+
+    const updated = await updateOpenCodeConfigFile(
+      { mcp: { servers: { linear: { headers: { Authorization: null } } } } },
+      { mode: 'merge' },
+    )
+
+    expect(updated.content).toEqual({
+      mcp: { servers: { linear: { url: 'https://linear.example.com', headers: { 'X-Keep': '1' } } } },
+    })
+    const onDisk = JSON.parse(await readFile(sourcePath('opencode.json'), 'utf8')) as Record<string, unknown>
+    expect(onDisk).toEqual(updated.content)
+  })
+
+  it('strips nested nulls when a merge patch creates a new path', async () => {
+    await writeFile(sourcePath('opencode.json'), '{"theme":"dark"}', 'utf8')
+
+    const updated = await updateOpenCodeConfigFile(
+      { mcp: { servers: { linear: { url: 'https://linear.example.com', headers: { Authorization: null, 'X-Trace': 'on' } } } } },
+      { mode: 'merge' },
+    )
+
+    expect(updated.content).toEqual({
+      theme: 'dark',
+      mcp: { servers: { linear: { url: 'https://linear.example.com', headers: { 'X-Trace': 'on' } } } },
+    })
+    const onDisk = await readFile(sourcePath('opencode.json'), 'utf8')
+    expect(onDisk).not.toContain('null')
+    expect(JSON.parse(onDisk)).toEqual(updated.content)
+  })
+
+  it('rejects a redacted placeholder in a merge patch and writes nothing', async () => {
+    const raw = '{"theme":"dark"}'
+    await writeFile(sourcePath('opencode.json'), raw, 'utf8')
+
+    const error = await updateOpenCodeConfigFile(
+      { mcp: { servers: { linear: { headers: { Authorization: OPENCODE_CONFIG_REDACTED_VALUE } } } } },
+      { mode: 'merge' },
+    ).catch((caught: unknown) => caught)
+
+    expect(error).toBeInstanceOf(OpenCodeConfigRedactedValueError)
+    expect((error as OpenCodeConfigRedactedValueError).paths).toEqual(['mcp.servers.linear.headers.Authorization'])
+    await expect(readFile(sourcePath('opencode.json'), 'utf8')).resolves.toBe(raw)
+  })
+
+  it('rejects a redacted placeholder in replace content including array indexes and writes nothing', async () => {
+    const raw = '{"theme":"dark"}'
+    await writeFile(sourcePath('opencode.json'), raw, 'utf8')
+
+    const error = await updateOpenCodeConfigFile({
+      theme: 'light',
+      instructions: ['keep', OPENCODE_CONFIG_REDACTED_VALUE],
+    }).catch((caught: unknown) => caught)
+
+    expect(error).toBeInstanceOf(OpenCodeConfigRedactedValueError)
+    expect((error as OpenCodeConfigRedactedValueError).paths).toEqual(['instructions.1'])
+    await expect(readFile(sourcePath('opencode.json'), 'utf8')).resolves.toBe(raw)
   })
 
   it('removes an override from the target source only and reveals inherited values', async () => {

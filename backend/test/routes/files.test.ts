@@ -166,6 +166,17 @@ describe('File Routes', () => {
       expect(getFile).toHaveBeenCalledWith('test-repo/test.txt')
     })
 
+    it('should serve raw content inside a CSP sandbox', async () => {
+      getFile.mockResolvedValue({ ...mockFileInfo, name: 'report.html', mimeType: 'text/html', size: 13 })
+      vi.mocked(fileService.getRawFileContent).mockResolvedValue(Buffer.from('<h1>hi</h1>\n\n'))
+
+      const response = await app.request('/api/files?path=test-repo/report.html&raw=true')
+
+      expect(response.status).toBe(200)
+      expect(response.headers.get('Content-Type')).toBe('text/html')
+      expect(response.headers.get('Content-Security-Policy')).toBe('sandbox allow-scripts')
+    })
+
     it('should return 404 when path does not exist', async () => {
       getFile.mockRejectedValue({ message: 'File or directory not found', statusCode: 404 })
 

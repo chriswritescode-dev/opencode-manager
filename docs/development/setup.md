@@ -60,6 +60,7 @@ opencode-manager/
 │   │   └── contexts/     # React contexts
 │   └── public/           # Static assets
 ├── shared/               # @opencode-manager/shared types and utilities
+├── ocm-cli/              # ocm CLI for attaching a local OpenCode TUI to Manager repos
 ├── workspace/            # Runtime workspace for OpenCode
 ├── docs/                 # Documentation
 ├── scripts/              # Build and utility scripts
@@ -75,8 +76,8 @@ opencode-manager/
 pnpm dev          # Start both backend and frontend (runs setup-dev.sh first)
 pnpm dev:backend  # Start backend only
 pnpm dev:frontend # Start frontend only
-pnpm build        # Build both packages
-pnpm lint         # Lint both packages
+pnpm build        # Build all packages
+pnpm lint         # Lint all packages
 pnpm test         # Run all tests
 ```
 

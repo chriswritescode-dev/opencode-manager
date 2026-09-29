@@ -53,12 +53,14 @@ export { formatOpenCodeModelRef, parseOpenCodeModelRef, selectConfiguredModelRef
 export {
   MCP_OAUTH_CALLBACK_PATH,
   mcpOAuthRedirectUri,
+  mcpServerViewsFromConfig,
   mcpServersFromConfig,
   mcpStatusByName,
 } from './mcp'
 
 export type {
   McpServerConfig,
+  McpServerView,
   McpStatus,
   McpStatusMap,
   McpTimeoutConfig,

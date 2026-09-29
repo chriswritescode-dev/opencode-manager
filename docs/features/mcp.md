@@ -196,6 +196,12 @@ Remove a server:
 
 Use the refresh button in **Settings > MCP Servers** to reload the current connection status after changing a server outside the UI or completing OAuth.
 
+### Configuration Shape
+
+The Manager writes and edits the OpenCode 2 shape, `mcp.servers.<name>`, with `disabled` for the toggle. OpenCode also still accepts the older flat `mcp.<name>` shape with `enabled` and normalizes it on load, so a configuration written by an earlier version (or by hand) keeps working. The Manager manages only `mcp.servers` entries; move a flat entry under `mcp.servers` to manage it.
+
+Saving an MCP change reloads the OpenCode configuration, which reconnects only the servers whose configuration changed, with `{env:}` and `{file:}` values expanded. A remote server that has gone through OAuth in the Manager holds a runtime override that takes precedence over the file, so later edits to that server take effect after an OpenCode restart from Settings.
+
 ## Server Status
 
 Monitor server health:

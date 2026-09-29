@@ -224,20 +224,20 @@ describe('ocm-manager plugin', () => {
     expect(JSON.parse(init.body)).toEqual({ theme: 'dark' })
   })
 
-  it('sends a PUT request with a JSON body', async () => {
+  it('sends a PATCH request to the config route with a JSON body', async () => {
     const fetchMock = jsonResponse({})
     vi.stubGlobal('fetch', fetchMock)
     const tool = await loadTool(configHome)
 
-    await runTool(tool, { action: 'request', params: { method: 'PUT', path: '/opencode-config', body: { content: { theme: 'dark' } } } })
+    await runTool(tool, { action: 'request', params: { method: 'PATCH', path: '/opencode-config', body: { patch: { theme: 'dark' } } } })
 
     expect(fetchMock).toHaveBeenCalledTimes(1)
     const [url, init] = fetchMock.mock.calls[0] ?? []
     expect(url).toBe('http://localhost:5003/api/internal/opencode-config')
-    expect(init.method).toBe('PUT')
+    expect(init.method).toBe('PATCH')
     expect(init.headers.Authorization).toBe('Bearer secret-token')
     expect(init.headers['content-type']).toBe('application/json')
-    expect(JSON.parse(init.body)).toEqual({ content: { theme: 'dark' } })
+    expect(JSON.parse(init.body)).toEqual({ patch: { theme: 'dark' } })
   })
 
   it('allows every route in the exported allow list', async () => {
@@ -263,6 +263,7 @@ describe('ocm-manager plugin', () => {
       ['GET', '/repos/0/mirror/head'],
       ['POST', '/notifications/send'],
       ['DELETE', '/settings'],
+      ['PUT', '/opencode-config'],
     ] as const
 
     for (const [method, path] of deniedRoutes) {

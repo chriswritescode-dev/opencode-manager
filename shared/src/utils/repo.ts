@@ -135,11 +135,13 @@ function getPathBaseName(filePath: string): string {
 }
 
 export function getRepoDisplayName(repo: {
+  id?: number
   name?: string | null
   repoUrl?: string | null
   localPath?: string | null
   sourcePath?: string | null
 }): string {
+  if (repo.id === ASSISTANT_REPO_ID) return ASSISTANT_REPO_NAME
   if (repo.name && repo.name.trim()) return repo.name.trim()
   const fromLocalPath = repo.localPath ? getPathBaseName(repo.localPath) : ''
   if (repo.repoUrl) return getRepoNameFromUrl(repo.repoUrl) || fromLocalPath || 'Repository'

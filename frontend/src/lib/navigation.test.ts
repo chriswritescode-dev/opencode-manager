@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { getSessionListPath, getSwipeBackTarget, getAssistantPath, getAssistantSessionListPath, isAssistantPath, getPathWithReturnTo, getReturnToPath, getSessionPath, parseRepoRoute } from './navigation';
+import { getSessionListPath, getSwipeBackTarget, getAssistantPath, getAssistantSessionListPath, isAssistantPath, getPathWithReturnTo, getReturnToPath, getRepoPath, getSessionPath, parseRepoRoute } from './navigation';
 
 describe('getAssistantPath', () => {
   it('returns /assistant', () => {
@@ -64,6 +64,18 @@ describe('getSessionPath', () => {
   it('builds a session detail path from a numeric or string repo id', () => {
     expect(getSessionPath(5, 'ses_1')).toBe('/repos/5/sessions/ses_1');
     expect(getSessionPath('5', 'ses_1')).toBe('/repos/5/sessions/ses_1');
+  });
+
+  it('marks assistant repo sessions with the assistant param', () => {
+    expect(getSessionPath(0, 'ses_1')).toBe('/repos/0/sessions/ses_1?assistant=1');
+    expect(getSessionPath('0', 'ses_1')).toBe('/repos/0/sessions/ses_1?assistant=1');
+  });
+});
+
+describe('getRepoPath', () => {
+  it('routes the assistant repo to the assistant page and others to their repo page', () => {
+    expect(getRepoPath(0)).toBe('/assistant');
+    expect(getRepoPath(5)).toBe('/repos/5');
   });
 });
 

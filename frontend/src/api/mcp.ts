@@ -5,7 +5,6 @@ import {
   isMcpServerNotFoundError,
   mcpStatusByName,
   openCodeLocation,
-  type McpServerConfig,
   type McpStatusMap,
 } from '@opencode-manager/shared/opencode'
 
@@ -26,10 +25,6 @@ export const mcpApi = {
   async getStatus(directory?: string): Promise<McpStatusMap> {
     const { data } = await callOpenCode((api) => api.mcp.list(openCodeLocation(directory)))
     return mcpStatusByName(data)
-  },
-
-  async addServer(name: string, config: McpServerConfig): Promise<void> {
-    await callOpenCode((api) => api.mcp.add({ server: name, config }))
   },
 
   async removeServer(name: string): Promise<void> {

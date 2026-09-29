@@ -422,3 +422,10 @@ export const UpdateOpenCodeConfigRequestSchema = z.object({
   source: OpenCodeConfigSourceNameSchema.optional(),
   expectedRevision: z.string().optional(),
 });
+
+export const UpdateOpenCodeConfigPatchRequestSchema = z.object({
+  patch: z.record(z.string(), z.unknown()),
+  source: OpenCodeConfigSourceNameSchema.optional(),
+  expectedRevision: z.string().optional(),
+});
+

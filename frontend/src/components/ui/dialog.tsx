@@ -125,7 +125,7 @@ const DialogContent = React.forwardRef<
         )}
         {!hideCloseButton && !fullscreen && (
           <DialogPrimitive.Close 
-            className="absolute right-4 rounded-sm opacity-70 ring-offset-background transition-opacity hover:opacity-100 focus:outline-none focus:ring-2 focus:ring-ring focus:ring-offset-2 disabled:pointer-events-none data-[state=open]:bg-accent data-[state=open]:text-muted-foreground"
+            className="absolute right-4 rounded-sm opacity-70 ring-offset-background transition-opacity hover:opacity-100 focus:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 disabled:pointer-events-none data-[state=open]:bg-accent data-[state=open]:text-muted-foreground"
             style={mobileFullscreen ? {
               top: 'calc(env(safe-area-inset-top, 0px) + 1rem)',
             } : { top: '1rem' }}
