@@ -1,6 +1,6 @@
 import { useState, useCallback, useRef, useEffect, memo } from 'react'
 import { Button } from '@/components/ui/button'
-import { Download, X, Edit3, Save, X as XIcon, WrapText, Eye, Code } from 'lucide-react'
+import { Download, X, Edit3, Save, X as XIcon, WrapText, Eye, Code, ExternalLink } from 'lucide-react'
 import type { FileInfo } from '@/types/files'
 import { getFileApiUrl } from '@/api/files'
 import { saveFileFromUrl } from '@/lib/download'
@@ -24,6 +24,9 @@ interface FilePreviewProps {
 
 export const FilePreview = memo(function FilePreview({ file, hideHeader = false, isMobileModal = false, onCloseModal, onFileSaved, initialLineNumber }: FilePreviewProps) {
   const isMarkdownFile = file.name.toLowerCase().endsWith('.md') || file.name.toLowerCase().endsWith('.mdx') || file.mimeType === 'text/markdown'
+  const isHtmlFile = /\.html?$/i.test(file.name) || file.mimeType === 'text/html'
+  const hasRenderedPreview = isMarkdownFile || isHtmlFile
+  const previewLabel = isHtmlFile ? 'HTML' : 'markdown'
   
   const [viewMode, setViewMode] = useState<'preview' | 'edit'>('preview')
   const [editContent, setEditContent] = useState('')
@@ -31,7 +34,7 @@ export const FilePreview = memo(function FilePreview({ file, hideHeader = false,
   const [hasVirtualizedChanges, setHasVirtualizedChanges] = useState(false)
   const [highlightedLine, setHighlightedLine] = useState<number | undefined>(initialLineNumber)
   const [lineWrap, setLineWrap] = useState(true)
-  const [markdownPreview, setMarkdownPreview] = useState(isMarkdownFile)
+  const [renderedPreview, setRenderedPreview] = useState(hasRenderedPreview)
   const [isLoadingAllContent, setIsLoadingAllContent] = useState(false)
   const [fullContentLoaded, setFullContentLoaded] = useState(false)
   const [fullContent, setFullContent] = useState<string | null>(null)
@@ -41,16 +44,18 @@ export const FilePreview = memo(function FilePreview({ file, hideHeader = false,
   
   const shouldVirtualize = file.size > VIRTUALIZATION_THRESHOLD_BYTES && !file.mimeType?.startsWith('image/')
   const isMarkdownTooLarge = file.size > MARKDOWN_PREVIEW_SIZE_LIMIT
+  const showHtmlPreview = isHtmlFile && renderedPreview && viewMode !== 'edit'
+  const rawFileUrl = getFileApiUrl(file.path, { params: { raw: true } })
   
   useEffect(() => {
     setFullContentLoaded(false)
-    setMarkdownPreview(isMarkdownFile)
+    setRenderedPreview(hasRenderedPreview)
     setFullContent(null)
     setLocalMdContent(null)
-  }, [file.path, isMarkdownFile])
+  }, [file.path, hasRenderedPreview])
   
   useEffect(() => {
-    if (shouldVirtualize && isMarkdownFile && markdownPreview && !isMarkdownTooLarge && !fullContentLoaded) {
+    if (shouldVirtualize && isMarkdownFile && renderedPreview && !isMarkdownTooLarge && !fullContentLoaded) {
       const loadContent = async () => {
         if (!virtualizedRef.current) return
         setIsLoadingAllContent(true)
@@ -66,7 +71,7 @@ export const FilePreview = memo(function FilePreview({ file, hideHeader = false,
       const timer = setTimeout(loadContent, 0)
       return () => clearTimeout(timer)
     }
-  }, [shouldVirtualize, isMarkdownFile, markdownPreview, isMarkdownTooLarge, fullContentLoaded])
+  }, [shouldVirtualize, isMarkdownFile, renderedPreview, isMarkdownTooLarge, fullContentLoaded])
   
   
 
@@ -216,7 +221,7 @@ export const FilePreview = memo(function FilePreview({ file, hideHeader = false,
       return (
         <div className="flex justify-center p-4">
           <img 
-            src={getFileApiUrl(file.path, { params: { raw: true } })}
+            src={rawFileUrl}
             alt={file.name}
             className="max-w-full h-auto object-contain rounded"
           />
@@ -224,8 +229,19 @@ export const FilePreview = memo(function FilePreview({ file, hideHeader = false,
       )
     }
 
+    if (showHtmlPreview) {
+      return (
+        <iframe
+          src={rawFileUrl}
+          title={file.name}
+          sandbox="allow-scripts"
+          className="w-full h-full border-0 bg-white"
+        />
+      )
+    }
+
     if (shouldVirtualize && isTextFile) {
-      const showMarkdownPreview = isMarkdownFile && markdownPreview && viewMode !== 'edit'
+      const showMarkdownPreview = isMarkdownFile && renderedPreview && viewMode !== 'edit'
       
       return (
         <>
@@ -248,7 +264,7 @@ export const FilePreview = memo(function FilePreview({ file, hideHeader = false,
               {isMarkdownTooLarge ? (
                 <div className="flex flex-col items-center justify-center h-32 gap-2 text-muted-foreground">
                   <span>File too large for markdown preview (max 1MB)</span>
-                  <Button variant="outline" size="sm" onClick={() => setMarkdownPreview(false)}>
+                  <Button variant="outline" size="sm" onClick={() => setRenderedPreview(false)}>
                     View raw
                   </Button>
                 </div>
@@ -295,7 +311,7 @@ export const FilePreview = memo(function FilePreview({ file, hideHeader = false,
           )
         }
         
-        if (isMarkdownFile && markdownPreview) {
+        if (isMarkdownFile && renderedPreview) {
           return <MarkdownRenderer content={displayContent} onContentChange={handleLocalMarkdownContentChange} />
         }
         
@@ -379,19 +395,27 @@ export const FilePreview = memo(function FilePreview({ file, hideHeader = false,
             </div>
             
             <div className="flex items-center gap-1 flex-shrink-0 mt-1">
-              {isMarkdownFile && viewMode !== 'edit' && (
+              {hasRenderedPreview && viewMode !== 'edit' && (
                 <Button 
-                  variant={markdownPreview ? 'default' : 'outline'}
+                  variant={renderedPreview ? 'default' : 'outline'}
                   size="sm"
-                  onClick={(e) => { e.stopPropagation(); e.preventDefault(); setMarkdownPreview(!markdownPreview) }}
+                  onClick={(e) => { e.stopPropagation(); e.preventDefault(); setRenderedPreview(!renderedPreview) }}
                   className="h-7 w-7 p-0"
-                  title={markdownPreview ? "Show raw markdown" : "Preview rendered markdown"}
+                  title={renderedPreview ? `Show raw ${previewLabel}` : `Preview rendered ${previewLabel}`}
                 >
-                  {markdownPreview ? <Code className="w-3 h-3" /> : <Eye className="w-3 h-3" />}
+                  {renderedPreview ? <Code className="w-3 h-3" /> : <Eye className="w-3 h-3" />}
+                </Button>
+              )}
+
+              {isHtmlFile && viewMode !== 'edit' && (
+                <Button variant="outline" size="sm" asChild className="h-7 w-7 p-0">
+                  <a href={rawFileUrl} target="_blank" rel="noopener noreferrer" title="Open HTML in new tab" onClick={(e) => e.stopPropagation()}>
+                    <ExternalLink className="w-3 h-3" />
+                  </a>
                 </Button>
               )}
               
-              {isTextFile && !markdownPreview && (
+              {isTextFile && !renderedPreview && (
                 <Button 
                   variant={lineWrap ? 'default' : 'outline'}
                   size="sm"
@@ -439,9 +463,9 @@ export const FilePreview = memo(function FilePreview({ file, hideHeader = false,
       
       <div 
         ref={contentRef}
-        className={`flex-1 ${viewMode === 'edit' && !shouldVirtualize ? 'overflow-hidden' : shouldVirtualize ? '' : 'overflow-y-auto overscroll-contain'} min-h-0 overflow-x-hidden`}
+        className={`flex-1 ${viewMode === 'edit' && !shouldVirtualize ? 'overflow-hidden' : shouldVirtualize || showHtmlPreview ? '' : 'overflow-y-auto overscroll-contain'} min-h-0 overflow-x-hidden`}
       >
-        <div className={`${shouldVirtualize ? 'h-full' : 'p-2'} min-w-0`}>
+        <div className={`${shouldVirtualize || showHtmlPreview ? 'h-full' : 'p-2'} min-w-0`}>
           {renderContent()}
         </div>
       </div>

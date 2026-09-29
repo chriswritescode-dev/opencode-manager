@@ -9,7 +9,7 @@ import { detectFileReferences } from '@/lib/fileReferences'
 import { ExternalLink, Loader2, Shield } from 'lucide-react'
 import { Badge } from '@/components/ui/badge'
 import { CopyButton } from '@/components/ui/copy-button'
-import { getToolSpecificRender } from './FileToolRender'
+import { getToolInputPath, getToolSpecificRender } from './FileToolRender'
 
 const DISPLAY_LIMIT = 30_000
 const DISPLAY_HEAD_LENGTH = 20_000
@@ -174,7 +174,7 @@ export const ToolCallPart = memo(function ToolCallPart({ part, messageID, onFile
       case 'write':
       case 'edit':
       case 'patch':
-        return (input.path as string) || null
+        return getToolInputPath(input) ?? null
       case 'shell':
         return displayCommand || null
       case 'glob':

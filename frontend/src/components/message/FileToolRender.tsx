@@ -134,16 +134,22 @@ function FileToolRender({ part, filediff, filePath, content, toolName, onFileCli
 
 function fileDiffs(part: SessionMessageAssistantTool): FileDiffInfo[] {
   if (part.state.status !== 'completed') return []
-  const files = part.state.metadata?.files
-  if (!Array.isArray(files)) return []
+  const metadata = part.state.metadata
+  const files: unknown[] = Array.isArray(metadata?.files) ? metadata.files : [metadata?.filediff]
   return files.filter(isFileDiff)
+}
+
+/** Returns the file path a file tool was called with, accepting both the `path` and legacy `filePath` input keys. */
+export function getToolInputPath(input: Record<string, unknown> | undefined): string | undefined {
+  const value = input?.path ?? input?.filePath
+  return typeof value === 'string' && value ? value : undefined
 }
 
 export function getToolSpecificRender(part: SessionMessageAssistantTool, onFileClick?: (filePath: string) => void): React.ReactElement | null {
   if (part.state.status !== 'completed') return null
 
   const input = part.state.input
-  const inputPath = typeof input.path === 'string' ? input.path : undefined
+  const inputPath = getToolInputPath(input)
 
   if (part.name === 'edit' || part.name === 'patch') {
     const diffs = fileDiffs(part)

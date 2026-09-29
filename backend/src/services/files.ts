@@ -64,6 +64,7 @@ export async function getRawFileContent(userPath: string): Promise<Buffer> {
 
 export async function getFile(userPath: string): Promise<FileInfo> {
   const validatedPath = validatePath(userPath)
+  const responsePath = path.isAbsolute(userPath.trim()) ? path.relative(SHARED_WORKSPACE_BASE, validatedPath) : userPath
   logger.info(`Getting file for path: ${userPath} -> ${validatedPath}`)
   
   try {
@@ -84,7 +85,7 @@ export async function getFile(userPath: string): Promise<FileInfo> {
       for (const entry of entries) {
         children.push({
           name: entry.name,
-          path: path.join(userPath, entry.name),
+          path: path.join(responsePath, entry.name),
           isDirectory: entry.isDirectory,
           size: entry.size,
           lastModified: entry.lastModified,
@@ -93,7 +94,7 @@ export async function getFile(userPath: string): Promise<FileInfo> {
       
       return {
         name: path.basename(validatedPath),
-        path: userPath,
+        path: responsePath,
         isDirectory: true,
         size: 0,
         children: children.sort((a, b) => {
@@ -127,7 +128,7 @@ export async function getFile(userPath: string): Promise<FileInfo> {
       
       return {
         name: path.basename(validatedPath),
-        path: userPath,
+        path: responsePath,
         isDirectory: false,
         size: stats.size,
         mimeType,
@@ -234,14 +235,21 @@ export async function renameOrMoveFile(userPath: string, body: { newPath: string
   }
 }
 
+function isWithinBase(resolved: string, basePath: string): boolean {
+  return resolved === basePath || resolved.startsWith(`${basePath}${path.sep}`)
+}
+
 function validatePath(userPath: string): string {
   const trimmed = userPath.trim()
   const normalized = path.normalize(trimmed || '.')
-  const fullPath = path.join(SHARED_WORKSPACE_BASE, normalized)
-  const resolved = path.resolve(fullPath)
-  
   const basePath = path.resolve(WORKSPACE_BASE)
-  if (resolved !== basePath && !resolved.startsWith(`${basePath}${path.sep}`)) {
+
+  if (path.isAbsolute(normalized) && isWithinBase(path.resolve(normalized), basePath)) {
+    return path.resolve(normalized)
+  }
+
+  const resolved = path.resolve(path.join(SHARED_WORKSPACE_BASE, normalized))
+  if (!isWithinBase(resolved, basePath)) {
     throw { message: 'Path traversal detected', statusCode: 403 }
   }
   

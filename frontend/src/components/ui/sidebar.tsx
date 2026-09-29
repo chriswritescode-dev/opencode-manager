@@ -120,7 +120,7 @@ export function SidebarItem({
 
   const baseClasses = cn(
     'flex items-center gap-3 rounded-md transition-colors duration-150',
-    'focus:outline-none focus:ring-2 focus:ring-ring focus:ring-offset-2 focus:ring-offset-background',
+    'focus:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 focus-visible:ring-offset-background',
     asPrimary ? 'p-3 text-sm font-medium' : 'p-2.5 text-sm',
     variant === 'primary' && 'bg-primary text-primary-foreground hover:bg-primary/90',
     variant === 'secondary' && 'bg-secondary text-secondary-foreground hover:bg-secondary/80',

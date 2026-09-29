@@ -386,6 +386,30 @@ describe('files service', () => {
   })
 
   describe('path traversal protection', () => {
+    it('reads an absolute path that lies inside the workspace', async () => {
+      const absolutePath = await writeLines(`${relativeRoot}/report.html`, '<h1>hi</h1>')
+
+      const buffer = await getRawFileContent(absolutePath)
+
+      expect(buffer.toString('utf8')).toBe('<h1>hi</h1>')
+    })
+
+    it('returns repos-relative paths for directories requested by absolute path', async () => {
+      await writeLines(`${relativeRoot}/sub/a.txt`, 'a')
+
+      const result = await getFile(path.join(reposPath, relativeRoot, 'sub'))
+
+      expect(result.path).toBe(`${relativeRoot}/sub`)
+      expect(result.children?.map((child) => child.path)).toEqual([`${relativeRoot}/sub/a.txt`])
+    })
+
+    it('treats an absolute path outside the workspace as repos-relative', async () => {
+      await expect(getRawFileContent('/etc/passwd')).rejects.toEqual({
+        message: 'File not found or cannot be read',
+        statusCode: 404,
+      })
+    })
+
     it('rejects traversal in getFile', async () => {
       await expect(getFile('../../etc/passwd')).rejects.toEqual({
         message: 'Path traversal detected',

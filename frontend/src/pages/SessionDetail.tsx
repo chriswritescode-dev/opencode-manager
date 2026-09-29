@@ -400,19 +400,16 @@ export function SessionDetail() {
   
 
   const handleFileClick = useCallback((filePath: string) => {
-    let pathToOpen = filePath
-    
-    if (filePath.startsWith('/') && repo?.fullPath) {
-      const workspaceReposPath = repo.fullPath.substring(0, repo.fullPath.lastIndexOf('/'))
-      
-      if (filePath.startsWith(workspaceReposPath + '/')) {
-        pathToOpen = filePath.substring(workspaceReposPath.length + 1)
-      }
-    }
-    
+    const absolutePath = filePath.startsWith('/') || !sessionDirectory
+      ? filePath
+      : `${sessionDirectory}/${filePath.replace(/^\.\//, '')}`
+    const repoRoot = repo?.fullPath
+    const pathToOpen = repoRoot && repo?.localPath && absolutePath.startsWith(`${repoRoot}/`)
+      ? `${repo.localPath}/${absolutePath.slice(repoRoot.length + 1)}`
+      : absolutePath
     setSelectedFilePath(pathToOpen)
     setFileBrowserOpen(true)
-  }, [repo?.fullPath, setFileBrowserOpen]);
+  }, [repo?.fullPath, repo?.localPath, sessionDirectory, setFileBrowserOpen]);
 
   const handleSessionTitleUpdate = useCallback((newTitle: string) => {
     if (sessionId) {

@@ -120,6 +120,7 @@ export function createFileRoutes() {
           headers: {
             'Content-Type': result.mimeType || 'application/octet-stream',
             'Content-Length': result.size.toString(),
+            'Content-Security-Policy': 'sandbox allow-scripts',
           }
         })
       }

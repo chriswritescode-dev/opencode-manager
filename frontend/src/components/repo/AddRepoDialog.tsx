@@ -285,7 +285,7 @@ export function AddRepoDialog({ open, onOpenChange }: AddRepoDialogProps) {
                 checked={skipSSHVerification}
                 onChange={(e) => setSkipSSHVerification(e.target.checked)}
                 disabled={mutation.isPending}
-                className="mt-1 h-5 w-5 rounded border-border bg-muted text-primary focus:ring-primary"
+                className="mt-1 h-5 w-5 rounded border-border bg-muted text-primary focus-visible:ring-primary"
               />
               <div className="flex-1">
                 <label htmlFor="skip-ssh-verification" className="cursor-pointer text-sm text-foreground">

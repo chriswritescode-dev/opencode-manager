@@ -377,6 +377,35 @@ describe('MessagePart', () => {
       expect(screen.getByText('/test/file.txt')).toBeInTheDocument()
     })
 
+    it('makes legacy filePath read, write, and filediff edit calls clickable', () => {
+      const onFileClick = vi.fn()
+      const legacy = (name: string, metadata: Record<string, unknown>) =>
+        toolPart(name, {
+          status: 'completed',
+          input: { filePath: `/test/${name}.html` },
+          content: [{ type: 'text', text: 'ok' }],
+          metadata,
+        })
+
+      renderWithProviders(
+        <>
+          <MessagePart part={legacy('read', {})} onFileClick={onFileClick} />
+          <MessagePart part={legacy('write', {})} onFileClick={onFileClick} />
+          <MessagePart
+            part={legacy('edit', { filediff: { file: '/test/edit.html', patch: '@@ -1 +1 @@\n-a\n+b', additions: 1, deletions: 1 } })}
+            onFileClick={onFileClick}
+          />
+        </>,
+      )
+
+      fireEvent.click(screen.getByText('/test/read.html'))
+      fireEvent.click(screen.getByText('/test/write.html'))
+      fireEvent.click(screen.getByText('/test/edit.html'))
+
+      expect(onFileClick.mock.calls.map(([filePath]) => filePath)).toEqual(['/test/read.html', '/test/write.html', '/test/edit.html'])
+      expect(screen.getByText('+1')).toBeInTheDocument()
+    })
+
     it('renders every file of a multi-file patch with per-file links', () => {
       const onFileClick = vi.fn()
       renderWithProviders(
