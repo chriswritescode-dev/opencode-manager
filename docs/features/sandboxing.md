@@ -246,7 +246,7 @@ Pin a concrete tag or digest rather than a floating one. Attestation compares th
 
 Override any tool pin at build time with its `ARG`, for example `--build-arg PLAYWRIGHT_VERSION=1.62.0` or `--build-arg RUST_VERSION=1.97.0`; the build asserts the installed version, so a typo fails early instead of shipping a stale tool. If your project drives Playwright itself, match this version to the one in your `package.json`; a mismatched browser revision makes Playwright refuse to launch. Rebuild and republish the guest image, then update the `SANDBOX.IMAGE` digest, whenever you change a pin.
 
-The Manager image itself carries the same Chromium runtime libraries, resolved by `playwright install-deps chromium` for the same `PLAYWRIGHT_VERSION` at build time. That is what makes a Playwright e2e suite run in a container with sandboxing off, where the agent has no root or sudo to install them at runtime. Both images track one pin, so bumping `PLAYWRIGHT_VERSION` refreshes the sandbox browser and the Manager's system libraries together.
+The Manager image itself carries the same Chromium browser and `playwright` package, installed by `playwright install --with-deps chromium` for the same `PLAYWRIGHT_VERSION` at build time and made world-readable. That is what makes browser automation run in a container with sandboxing off, where the agent has no root or sudo to install them at runtime; `NODE_PATH=/usr/local/lib/node_modules` lets agent code resolve `playwright` from any working directory. Both images track one pin, so bumping `PLAYWRIGHT_VERSION` refreshes the sandbox browser and the Manager's browser together.
 
 ## Caveats
 

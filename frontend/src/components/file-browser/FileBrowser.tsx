@@ -236,21 +236,23 @@ useEffect(() => {
     getCurrentPath: () => currentPath,
   }), [currentPath, goToParentDirectory, canNavigateUp])
 
-  const handleFileSelect = useCallback(async (file: FileInfo) => {
-    if (file.isDirectory) {
-      setSelectedFile(null)
-      return
-    }
-    
-    // Fetch the full file content when selecting a file
+  const openFilePath = useCallback(async (path: string) => {
     setLoading(true)
     try {
-      const response = await fetch(getFileApiUrl(file.path))
+      const response = await fetch(getFileApiUrl(path))
       if (!response.ok) {
         throw new Error(`Failed to load file: ${response.statusText}`)
       }
       
-      const fullFileData = await response.json()
+      const fullFileData: FileInfo = await response.json()
+      if (fullFileData.isDirectory) {
+        setSelectedFile(null)
+        setIsPreviewModalOpen(false)
+        onPreviewStateChange?.(false)
+        await loadFiles(fullFileData.path)
+        return
+      }
+
       setSelectedFile(fullFileData)
       onFileSelect?.(fullFileData)
       
@@ -265,7 +267,16 @@ useEffect(() => {
     } finally {
       setLoading(false)
     }
-  }, [onFileSelect, isMobile, onPreviewStateChange])
+  }, [onFileSelect, isMobile, onPreviewStateChange, loadFiles])
+
+  const handleFileSelect = useCallback(async (file: FileInfo) => {
+    if (file.isDirectory) {
+      setSelectedFile(null)
+      return
+    }
+
+    await openFilePath(file.path)
+  }, [openFilePath])
 
   const handleCloseModal = useCallback(() => {
     setIsPreviewModalOpen(false)
@@ -639,7 +650,7 @@ useEffect(() => {
           {!isMobile && (
             <div className="flex-1 overflow-y-auto min-h-0 h-full">
               {selectedFile && !selectedFile.isDirectory ? (
-                <FilePreview key={selectedFile.path} file={selectedFile} />
+                <FilePreview key={selectedFile.path} file={selectedFile} onOpenFile={openFilePath} />
               ) : (
                 <div className="flex items-center justify-center h-full text-muted-foreground">
                   Select a file to preview
@@ -655,6 +666,7 @@ useEffect(() => {
           onClose={handleCloseModal}
           file={selectedFile}
           showFilePreviewHeader={true}
+          onOpenFile={openFilePath}
         />
       </div>
     )
@@ -740,7 +752,7 @@ useEffect(() => {
           {!isMobile && (
             <div className="flex-1 overflow-y-auto min-h-0 ">
               {selectedFile && !selectedFile.isDirectory ? (
-                <FilePreview key={selectedFile.path} file={selectedFile} />
+                <FilePreview key={selectedFile.path} file={selectedFile} onOpenFile={openFilePath} />
               ) : (
                 <div className="flex items-center justify-center h-64 text-muted-foreground">
                   Select a file to preview
@@ -756,6 +768,7 @@ useEffect(() => {
         isOpen={isMobile && isPreviewModalOpen}
         onClose={handleCloseModal}
         file={selectedFile}
+        onOpenFile={openFilePath}
       />
       
       {uploadDialog}

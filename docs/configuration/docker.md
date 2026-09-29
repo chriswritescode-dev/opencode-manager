@@ -491,6 +491,7 @@ Instructions for AI agents working in the container:
 - Reserved ports information
 - Available dev server ports
 - Docker-specific guidelines
+- Pre-installed browser automation (Playwright and Chromium)
 
 ### Editing
 

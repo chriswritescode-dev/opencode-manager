@@ -4,13 +4,18 @@ import remarkGfm from 'remark-gfm'
 import rehypeHighlight from 'rehype-highlight'
 import rehypeRaw from 'rehype-raw'
 import { markdownComponents } from './MarkdownComponents'
+import { resolveLinkedFilePath } from './resolve-link-path'
 import type { Components } from 'react-markdown'
 
 interface MarkdownRendererProps {
   content: string
   className?: string
   onContentChange?: (newContent: string) => void
+  filePath?: string
+  onOpenFile?: (path: string) => void
 }
+
+const EXTERNAL_LINK = /^https?:\/\//i
 
 interface TaskItem {
   lineIndex: number
@@ -29,7 +34,7 @@ function parseTaskItems(content: string): TaskItem[] {
   return items
 }
 
-export const MarkdownRenderer = memo(function MarkdownRenderer({ content, className = '', onContentChange }: MarkdownRendererProps) {
+export const MarkdownRenderer = memo(function MarkdownRenderer({ content, className = '', onContentChange, filePath, onOpenFile }: MarkdownRendererProps) {
   const taskItems = useMemo(() => parseTaskItems(content), [content])
 
   const handleToggle = useCallback((taskItem: TaskItem) => {
@@ -73,6 +78,32 @@ export const MarkdownRenderer = memo(function MarkdownRenderer({ content, classN
       }
 
       return <input type={type} checked={checked} disabled={disabled} {...rest} />
+    },
+    a(props) {
+      const { href, children, ...rest } = props
+      delete (rest as Record<string, unknown>).node
+
+      const linkedPath = href && filePath && onOpenFile ? resolveLinkedFilePath(filePath, href) : null
+      if (linkedPath && onOpenFile) {
+        return (
+          <a
+            href={href}
+            {...rest}
+            onClick={(event) => {
+              event.preventDefault()
+              onOpenFile(linkedPath)
+            }}
+          >
+            {children}
+          </a>
+        )
+      }
+
+      if (href && EXTERNAL_LINK.test(href)) {
+        return <a href={href} target="_blank" rel="noopener noreferrer" {...rest}>{children}</a>
+      }
+
+      return <a href={href} {...rest}>{children}</a>
     },
   }
 

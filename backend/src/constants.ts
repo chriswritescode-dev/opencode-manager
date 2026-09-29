@@ -49,6 +49,20 @@ Prefer **pnpm** or **bun** over npm for installing dependencies to save disk spa
  - uv is pre-installed in the container and provides faster package installation
  - .venv directories created in repos will persist but can be removed safely
 
+## Browser Automation
+
+Playwright and Chromium are pre-installed, so browser automation runs without a project-local install:
+
+- The \`playwright\` package resolves from any working directory via \`NODE_PATH\`
+- Chromium is installed at \`PLAYWRIGHT_BROWSERS_PATH\`
+- Run scripts with \`node\`, \`bun\`, or \`pnpm\`; no extra setup is needed
+
+\`\`\`bash
+node -e "const { chromium } = require('playwright'); (async () => { const browser = await chromium.launch(); const page = await browser.newPage(); await page.goto('https://example.com'); console.log(await page.title()); await browser.close(); })();"
+\`\`\`
+
+If Chromium fails to launch because the host kernel restricts user namespaces, pass \`--no-sandbox\`; the container is already the isolation boundary.
+
 ## General Guidelines
 
 - This file is merged with any AGENTS.md files in individual repositories
