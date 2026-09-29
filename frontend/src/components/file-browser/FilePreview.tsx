@@ -1,6 +1,6 @@
 import { useState, useCallback, useRef, useEffect, memo } from 'react'
 import { Button } from '@/components/ui/button'
-import { Download, X, Edit3, Save, X as XIcon, WrapText, Eye, Code, ExternalLink } from 'lucide-react'
+import { Download, X, Edit3, Save, X as XIcon, WrapText, Eye, Code, ExternalLink, Maximize2 } from 'lucide-react'
 import type { FileInfo } from '@/types/files'
 import { getFileApiUrl } from '@/api/files'
 import { saveFileFromUrl } from '@/lib/download'
@@ -41,6 +41,9 @@ export const FilePreview = memo(function FilePreview({ file, hideHeader = false,
   const [localMdContent, setLocalMdContent] = useState<string | null>(null)
   const virtualizedRef = useRef<VirtualizedTextViewHandle>(null)
   const contentRef = useRef<HTMLDivElement>(null)
+  const isMobilePreview = isMobileModal || Boolean(onCloseModal)
+  const [isFullscreen, setIsFullscreen] = useState(isMobilePreview)
+  const isDesktopFullscreen = isFullscreen && !isMobilePreview
   
   const shouldVirtualize = file.size > VIRTUALIZATION_THRESHOLD_BYTES && !file.mimeType?.startsWith('image/')
   const isMarkdownTooLarge = file.size > MARKDOWN_PREVIEW_SIZE_LIMIT
@@ -373,10 +376,10 @@ export const FilePreview = memo(function FilePreview({ file, hideHeader = false,
   const showCancelButton = viewMode === 'edit'
 
   return (
-    <div className="h-full flex flex-col bg-background">
-      {!hideHeader && (
+    <div className={`${isDesktopFullscreen ? 'fixed inset-0 z-50' : 'h-full'} relative flex flex-col bg-background`}>
+      {!hideHeader && !isDesktopFullscreen && (
         <>
-          <div className={`flex items-start gap-2 px-3 py-2 border-b border-border flex-shrink-0 overflow-hidden ${isMobileModal ? 'pt-3' : ''}`}>
+          <div className={`relative z-10 flex items-start gap-2 px-3 py-2 border-b border-border flex-shrink-0 overflow-hidden ${isMobileModal ? 'pt-3' : ''}`}>
             <div className="flex-1 min-w-0 overflow-hidden">
               <h3 className="text-foreground text-sm font-medium break-all leading-tight">
                 {file.name}
@@ -451,14 +454,32 @@ export const FilePreview = memo(function FilePreview({ file, hideHeader = false,
                 </Button>
               )}
               
+              {!isMobilePreview && !isFullscreen && viewMode !== 'edit' && (
+                <Button variant="outline" size="sm" onClick={(e) => { e.stopPropagation(); e.preventDefault(); setIsFullscreen(true) }} className="h-7 w-7 p-0" title="Enter fullscreen">
+                  <Maximize2 className="w-3 h-3" />
+                </Button>
+              )}
+              
               {viewMode !== 'edit' && isMobileModal && onCloseModal && (
-                <Button variant="ghost" size="sm" onClick={(e) => { e.stopPropagation(); e.preventDefault(); onCloseModal() }} className={DESTRUCTIVE_TINT_BUTTON_CLASS}>
+                <Button variant="ghost" size="sm" onClick={(e) => { e.stopPropagation(); e.preventDefault(); onCloseModal() }} className={DESTRUCTIVE_TINT_BUTTON_CLASS} title="Close preview">
                   <X className="w-3 h-3" />
                 </Button>
               )}
             </div>
           </div>
         </>
+      )}
+
+      {isFullscreen && (isDesktopFullscreen || hideHeader) && (
+        <Button
+          variant="ghost"
+          size="sm"
+          onClick={(e) => { e.stopPropagation(); e.preventDefault(); if (isMobilePreview) { onCloseModal?.() } else { setIsFullscreen(false) } }}
+          className="absolute top-2 right-2 z-[60] h-6 w-6 p-0 rounded-full bg-background/80 text-muted-foreground shadow-sm backdrop-blur-sm hover:bg-muted hover:text-foreground"
+          title={isMobilePreview ? 'Close preview' : 'Exit fullscreen'}
+        >
+          <X className="w-3.5 h-3.5" />
+        </Button>
       )}
       
       <div 
