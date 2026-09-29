@@ -111,10 +111,6 @@ RUN echo "Installing microsandbox=${MICROSANDBOX_VERSION} (cachebust=${TOOLS_CAC
     chmod -R a+rX /opt/microsandbox && \
     msb --version
 
-RUN echo "Installing Chromium runtime libraries for playwright=${PLAYWRIGHT_VERSION} (cachebust=${TOOLS_CACHEBUST})" && \
-    npx --yes "playwright@${PLAYWRIGHT_VERSION}" install-deps chromium && \
-    rm -rf /var/lib/apt/lists/* /root/.npm
-
 ENV NODE_ENV=production
 ENV HOST=0.0.0.0
 ENV PORT=5003
@@ -125,6 +121,16 @@ ENV XDG_CACHE_HOME=/home/node/.cache
 ENV OPENCODE_BUNDLED_VERSION=${OPENCODE_VERSION}
 ENV MSB_PATH=/usr/local/bin/msb
 ENV MSB_LIBKRUNFW_PATH=/opt/microsandbox/lib/libkrunfw.so
+ENV PLAYWRIGHT_BROWSERS_PATH=/ms-playwright
+ENV NODE_PATH=/usr/local/lib/node_modules
+
+RUN echo "Installing playwright=${PLAYWRIGHT_VERSION} chromium (cachebust=${TOOLS_CACHEBUST})" && \
+    npm install -g "playwright@${PLAYWRIGHT_VERSION}" && \
+    test "$(playwright --version | awk '{print $2}')" = "${PLAYWRIGHT_VERSION}" && \
+    playwright install --with-deps chromium && \
+    chown -R node:node "${PLAYWRIGHT_BROWSERS_PATH}" && \
+    chmod -R a+rX "${PLAYWRIGHT_BROWSERS_PATH}" && \
+    rm -rf /var/lib/apt/lists/* /root/.npm
 
 COPY --from=deps --chown=node:node /app/node_modules ./node_modules
 COPY --from=builder /app/shared ./shared

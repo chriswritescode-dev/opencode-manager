@@ -20,9 +20,10 @@ interface FilePreviewProps {
   onCloseModal?: () => void
   onFileSaved?: () => void
   initialLineNumber?: number
+  onOpenFile?: (path: string) => void
 }
 
-export const FilePreview = memo(function FilePreview({ file, hideHeader = false, isMobileModal = false, onCloseModal, onFileSaved, initialLineNumber }: FilePreviewProps) {
+export const FilePreview = memo(function FilePreview({ file, hideHeader = false, isMobileModal = false, onCloseModal, onFileSaved, initialLineNumber, onOpenFile }: FilePreviewProps) {
   const isMarkdownFile = file.name.toLowerCase().endsWith('.md') || file.name.toLowerCase().endsWith('.mdx') || file.mimeType === 'text/markdown'
   const isHtmlFile = /\.html?$/i.test(file.name) || file.mimeType === 'text/html'
   const hasRenderedPreview = isMarkdownFile || isHtmlFile
@@ -276,7 +277,7 @@ export const FilePreview = memo(function FilePreview({ file, hideHeader = false,
                   <div className="w-6 h-6 border-2 border-muted-foreground border-t-transparent rounded-full animate-spin" />
                 </div>
               ) : fullContent ? (
-                <MarkdownRenderer content={fullContent} onContentChange={handleFullMarkdownContentChange} />
+                <MarkdownRenderer content={fullContent} onContentChange={handleFullMarkdownContentChange} filePath={file.path} onOpenFile={onOpenFile} />
               ) : null}
             </>
           )}
@@ -315,7 +316,7 @@ export const FilePreview = memo(function FilePreview({ file, hideHeader = false,
         }
         
         if (isMarkdownFile && renderedPreview) {
-          return <MarkdownRenderer content={displayContent} onContentChange={handleLocalMarkdownContentChange} />
+          return <MarkdownRenderer content={displayContent} onContentChange={handleLocalMarkdownContentChange} filePath={file.path} onOpenFile={onOpenFile} />
         }
         
         const lines = displayContent.split('\n')

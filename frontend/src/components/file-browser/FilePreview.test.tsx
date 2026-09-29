@@ -89,6 +89,22 @@ describe('FilePreview header buttons', () => {
     expect(onCloseModal).toHaveBeenCalled()
   })
 
+  it('opens relative markdown links in the file browser and external links in a new tab', () => {
+    const onOpenFile = vi.fn()
+    const file = {
+      ...textFile('index.md', 'text/markdown'),
+      content: btoa('- [ ] [report](sub/report.html)\n\n[site](https://example.com)'),
+    }
+    render(<FilePreview file={file} onOpenFile={onOpenFile} />)
+
+    fireEvent.click(screen.getByRole('link', { name: 'report' }))
+    expect(onOpenFile).toHaveBeenCalledWith('docker/sub/report.html')
+
+    const external = screen.getByRole('link', { name: 'site' })
+    expect(external).toHaveAttribute('target', '_blank')
+    expect(external).toHaveAttribute('rel', 'noopener noreferrer')
+  })
+
   it('keeps the success and destructive tints on the edit actions in dark mode', () => {
     render(<FilePreview file={textFile('Dockerfile', 'text/plain')} />)
 
