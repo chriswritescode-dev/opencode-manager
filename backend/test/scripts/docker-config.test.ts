@@ -161,16 +161,23 @@ describe('chromium runtime libraries for playwright', () => {
   const sandboxDockerfile = read(join(repoRoot, 'Dockerfile.sandbox'))
   const workflow = read(join(repoRoot, '.github/workflows/docker-build.yml'))
   const installRun = dockerfile.slice(
-    dockerfile.indexOf('Installing Chromium runtime libraries'),
-    dockerfile.indexOf('ENV NODE_ENV=production'),
+    dockerfile.indexOf('Installing playwright='),
+    dockerfile.indexOf('COPY --from=deps --chown=node:node /app/node_modules'),
   )
 
   it('declares PLAYWRIGHT_VERSION next to the other tool args', () => {
     expect(dockerfile).toMatch(/ARG PLAYWRIGHT_VERSION=1\.63\.0/)
   })
 
-  it('resolves the system dependency list from the pinned playwright version', () => {
-    expect(installRun).toMatch(/npx --yes "playwright@\$\{PLAYWRIGHT_VERSION\}" install-deps chromium/)
+  it('installs the pinned playwright and verifies its version', () => {
+    expect(installRun).toContain('npm install -g "playwright@${PLAYWRIGHT_VERSION}"')
+    expect(installRun).toContain('test "$(playwright --version | awk \'{print $2}\')" = "${PLAYWRIGHT_VERSION}"')
+  })
+
+  it('preinstalls chromium with its system dependencies into a shared browsers path', () => {
+    expect(dockerfile).toContain('ENV PLAYWRIGHT_BROWSERS_PATH=/ms-playwright')
+    expect(installRun).toContain('playwright install --with-deps chromium')
+    expect(installRun).toContain('chown -R node:node "${PLAYWRIGHT_BROWSERS_PATH}"')
   })
 
   it('does not hand-maintain a package list', () => {
