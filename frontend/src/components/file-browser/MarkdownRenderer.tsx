@@ -4,7 +4,8 @@ import remarkGfm from 'remark-gfm'
 import rehypeHighlight from 'rehype-highlight'
 import rehypeRaw from 'rehype-raw'
 import { markdownComponents } from './MarkdownComponents'
-import { resolveLinkedFilePath } from './resolve-link-path'
+import { MarkdownLink } from '@/components/ui/markdown-link'
+import { resolvePathFromFile } from '@/lib/markdownLinks'
 import type { Components } from 'react-markdown'
 
 interface MarkdownRendererProps {
@@ -14,8 +15,6 @@ interface MarkdownRendererProps {
   filePath?: string
   onOpenFile?: (path: string) => void
 }
-
-const EXTERNAL_LINK = /^https?:\/\//i
 
 interface TaskItem {
   lineIndex: number
@@ -59,6 +58,14 @@ export const MarkdownRenderer = memo(function MarkdownRenderer({ content, classN
     }
   }, [handleToggle, taskItems])
 
+  const handleOpenLocalPath = useMemo(() => {
+    if (!filePath || !onOpenFile) return undefined
+    return (linkPath: string) => {
+      const resolvedPath = resolvePathFromFile(filePath, linkPath)
+      if (resolvedPath) onOpenFile(resolvedPath)
+    }
+  }, [filePath, onOpenFile])
+
   const components: Components = {
     ...markdownComponents,
     input(props) {
@@ -80,30 +87,7 @@ export const MarkdownRenderer = memo(function MarkdownRenderer({ content, classN
       return <input type={type} checked={checked} disabled={disabled} {...rest} />
     },
     a(props) {
-      const { href, children, ...rest } = props
-      delete (rest as Record<string, unknown>).node
-
-      const linkedPath = href && filePath && onOpenFile ? resolveLinkedFilePath(filePath, href) : null
-      if (linkedPath && onOpenFile) {
-        return (
-          <a
-            href={href}
-            {...rest}
-            onClick={(event) => {
-              event.preventDefault()
-              onOpenFile(linkedPath)
-            }}
-          >
-            {children}
-          </a>
-        )
-      }
-
-      if (href && EXTERNAL_LINK.test(href)) {
-        return <a href={href} target="_blank" rel="noopener noreferrer" {...rest}>{children}</a>
-      }
-
-      return <a href={href} {...rest}>{children}</a>
+      return <MarkdownLink {...props} onOpenLocalPath={handleOpenLocalPath} />
     },
   }
 

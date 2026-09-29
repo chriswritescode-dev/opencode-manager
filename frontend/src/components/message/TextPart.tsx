@@ -6,11 +6,13 @@ import rehypeRaw from 'rehype-raw'
 import mermaid from 'mermaid'
 import { Maximize2, X, AlertCircle } from 'lucide-react'
 import { CopyButton } from '@/components/ui/copy-button'
+import { MarkdownLink } from '@/components/ui/markdown-link'
 import { useTheme } from '@/hooks/useTheme'
 import 'highlight.js/styles/github-dark.css'
 
 interface TextPartProps {
   text: string
+  onFileClick?: (filePath: string) => void
 }
 
 interface MermaidBlockProps {
@@ -181,7 +183,7 @@ function isMermaidBlockComplete(text: string): boolean {
   return false
 }
 
-export function TextPart({ text }: TextPartProps) {
+export function TextPart({ text, onFileClick }: TextPartProps) {
   const mermaidComplete = React.useMemo(() => {
     return text ? isMermaidBlockComplete(text) : false
   }, [text])
@@ -257,7 +259,10 @@ export function TextPart({ text }: TextPartProps) {
                 <table>{children}</table>
               </div>
             )
-          }
+          },
+          a(props) {
+            return <MarkdownLink {...props} onOpenLocalPath={onFileClick} />
+          },
         }}
       >
         {text}
