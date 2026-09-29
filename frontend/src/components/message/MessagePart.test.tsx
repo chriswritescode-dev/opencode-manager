@@ -91,6 +91,23 @@ describe('MessagePart', () => {
     expect(screen.getByText('Hello, this is a text message')).toBeInTheDocument()
   })
 
+  it('opens local markdown links in a text part through onFileClick and external links in a new tab', () => {
+    const onFileClick = vi.fn()
+    renderWithProviders(
+      <MessagePart
+        part={textPart('[recap](recaps/daily-overview.html)\n\n[site](https://example.com)')}
+        onFileClick={onFileClick}
+      />,
+    )
+
+    fireEvent.click(screen.getByRole('link', { name: 'recap' }))
+    expect(onFileClick).toHaveBeenCalledWith('recaps/daily-overview.html')
+
+    const external = screen.getByRole('link', { name: 'site' })
+    expect(external).toHaveAttribute('target', '_blank')
+    expect(external).toHaveAttribute('rel', 'noopener noreferrer')
+  })
+
   it('renders null for an empty text part', () => {
     const { container } = renderWithProviders(<MessagePart part={textPart('   ')} />)
 
