@@ -141,8 +141,10 @@ function fileDiffs(part: SessionMessageAssistantTool): FileDiffInfo[] {
 
 /** Returns the file path a file tool was called with, accepting both the `path` and legacy `filePath` input keys. */
 export function getToolInputPath(input: Record<string, unknown> | undefined): string | undefined {
-  const value = input?.path ?? input?.filePath
-  return typeof value === 'string' && value ? value : undefined
+  const path = input?.path
+  if (typeof path === 'string' && path) return path
+  const filePath = input?.filePath
+  return typeof filePath === 'string' && filePath ? filePath : undefined
 }
 
 export function getToolSpecificRender(part: SessionMessageAssistantTool, onFileClick?: (filePath: string) => void): React.ReactElement | null {

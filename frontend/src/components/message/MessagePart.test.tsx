@@ -406,6 +406,25 @@ describe('MessagePart', () => {
       expect(screen.getByText('+1')).toBeInTheDocument()
     })
 
+    it('falls back to filePath when path is empty', () => {
+      const onFileClick = vi.fn()
+      renderWithProviders(
+        <MessagePart
+          part={toolPart('read', {
+            status: 'completed',
+            input: { path: '', filePath: '/test/fallback.html' },
+            content: [{ type: 'text', text: 'ok' }],
+            metadata: {},
+          })}
+          onFileClick={onFileClick}
+        />,
+      )
+
+      fireEvent.click(screen.getByText('/test/fallback.html'))
+
+      expect(onFileClick).toHaveBeenCalledWith('/test/fallback.html')
+    })
+
     it('renders every file of a multi-file patch with per-file links', () => {
       const onFileClick = vi.fn()
       renderWithProviders(

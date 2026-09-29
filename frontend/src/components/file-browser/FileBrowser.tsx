@@ -451,11 +451,13 @@ useEffect(() => {
       return
     }
     setSelectedFile(initialFileData)
-    if (isMobile) {
-      setIsPreviewModalOpen(true)
-      onPreviewStateChange?.(true)
-    }
-  }, [initialFileData, isMobile, onPreviewStateChange, loadFiles])
+  }, [initialFileData, loadFiles])
+
+  useEffect(() => {
+    if (!initialFileData || initialFileData.isDirectory || !isMobile) return
+    setIsPreviewModalOpen(true)
+    onPreviewStateChange?.(true)
+  }, [initialFileData, isMobile, onPreviewStateChange])
 
   useEffect(() => {
     const handleFileSaved = (event: CustomEvent<{ path: string; content?: string }>) => {
