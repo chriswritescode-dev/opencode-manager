@@ -1,3 +1,5 @@
+import { ASSISTANT_REPO_ID } from '@opencode-manager/shared/utils';
+
 export function getAssistantPath(): string {
   return '/assistant';
 }
@@ -10,8 +12,17 @@ export function isAssistantPath(pathname: string): boolean {
   return pathname === '/assistant' || /^\/repos\/[^/]+\/assistant$/.test(pathname);
 }
 
+function isAssistantRepo(repoId: number | string): boolean {
+  return String(repoId) === String(ASSISTANT_REPO_ID);
+}
+
+export function getRepoPath(repoId: number | string): string {
+  return isAssistantRepo(repoId) ? getAssistantPath() : `/repos/${repoId}`;
+}
+
 export function getSessionPath(repoId: number | string, sessionId: string): string {
-  return `/repos/${repoId}/sessions/${sessionId}`;
+  const suffix = isAssistantRepo(repoId) ? '?assistant=1' : '';
+  return `/repos/${repoId}/sessions/${sessionId}${suffix}`;
 }
 
 export function parseRepoRoute(pathname: string): { repoId: number | null; section: string | null; sessionId: string | null } {

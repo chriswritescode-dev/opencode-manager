@@ -6,7 +6,7 @@ import { useForms, usePermissions } from '@/contexts/EventContext'
 import { useCreateSession } from '@/hooks/useOpenCode'
 import { useSidebarRepoGroups } from '@/hooks/useSidebarRepoGroups'
 import { cn, formatShortRelativeTime, getRepoBranchLabel, getRepoDisplayName } from '@/lib/utils'
-import { getSessionPath } from '@/lib/navigation'
+import { getRepoPath, getSessionPath } from '@/lib/navigation'
 import {
   isCurrentSessionItem,
   isRepoReady,
@@ -200,7 +200,7 @@ function RepoSessionList({ repo, onSelectSession }: RepoSessionListProps) {
         />
       ))}
       {hasMore && (
-        <SessionNavLink onClick={() => onSelectSession(`/repos/${repo.id}`)}>All sessions</SessionNavLink>
+        <SessionNavLink onClick={() => onSelectSession(getRepoPath(repo.id))}>All sessions</SessionNavLink>
       )}
     </>
   )

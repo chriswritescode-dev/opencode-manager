@@ -5,6 +5,7 @@ import { useCreateSession } from "@/hooks/useOpenCode"
 import { useDialogParam } from "@/hooks/useDialogParam"
 import { useSidebarAction } from "@/hooks/useSidebarAction"
 import { useSSE } from "@/hooks/useSSE"
+import { getSessionPath } from "@/lib/navigation"
 import { Button } from "@/components/ui/button"
 import { Header } from "@/components/ui/header"
 import { SessionList } from "@/components/session/SessionList"
@@ -35,7 +36,7 @@ export function AssistantRedirect() {
   useSSE(assistantDirectory)
 
   const createSessionMutation = useCreateSession(assistantDirectory, (session) => {
-    navigate(`/repos/${repoId}/sessions/${session.id}?assistant=1`)
+    navigate(getSessionPath(repoId, session.id))
   })
 
   const handleCreateSession = async () => {
@@ -72,7 +73,7 @@ export function AssistantRedirect() {
         ) : (
           <SessionList
             directory={assistantDirectory}
-            onSelectSession={(sessionId) => navigate(`/repos/${repoId}/sessions/${sessionId}?assistant=1`)}
+            onSelectSession={(sessionId) => navigate(getSessionPath(repoId, sessionId))}
           />
         )}
       </div>

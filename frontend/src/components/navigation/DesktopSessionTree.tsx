@@ -13,6 +13,7 @@ import {
   SessionNavStatus,
 } from '@/components/navigation/RepoSessionNav'
 import { getActiveRepoId, isCurrentSessionItem, isRepoReady } from '@/components/navigation/sidebar-session-tree'
+import { getRepoPath } from '@/lib/navigation'
 
 function SessionSearchInput({
   hasActiveSearch,
@@ -78,7 +79,7 @@ function SessionSearchResults({ repos, search }: { repos: Repo[]; search: string
           isWorktree={group.repo.isWorktree}
           isOpen
           isCurrent={group.repo.id === getActiveRepoId(location.pathname)}
-          onOpenRepo={() => navigate(`/repos/${group.repo.id}`)}
+          onOpenRepo={() => navigate(getRepoPath(group.repo.id))}
           actions={<NewSessionButton repo={group.repo} onOpenSession={navigate} />}
         >
           {group.items.map((item) => (
@@ -121,7 +122,7 @@ export function DesktopSessionTree() {
             repos={repos}
             activeRepoId={getActiveRepoId(location.pathname)}
             isVisible
-            onOpenRepo={(repoId) => navigate(`/repos/${repoId}`)}
+            onOpenRepo={(repoId) => navigate(getRepoPath(repoId))}
             onSelectSession={navigate}
             renderActions={(repo) => <NewSessionButton repo={repo} onOpenSession={navigate} />}
           />

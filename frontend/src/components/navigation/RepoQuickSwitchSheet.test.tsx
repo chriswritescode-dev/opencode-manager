@@ -243,7 +243,7 @@ describe('RepoQuickSwitchSheet', () => {
     })
   })
 
-  it('does not show assistant as a repo option', async () => {
+  it('shows assistant as the first repo option', async () => {
     vi.mocked(listRepos).mockResolvedValue([
       {
         id: ASSISTANT_REPO_ID,
@@ -276,7 +276,8 @@ describe('RepoQuickSwitchSheet', () => {
       expect(screen.getByText('repo1')).toBeInTheDocument()
     })
 
-    expect(screen.queryByText('Assistant')).not.toBeInTheDocument()
+    const repoNames = screen.getAllByText(/^(Assistant|repo1)$/).map((node) => node.textContent)
+    expect(repoNames).toEqual(['Assistant', 'repo1'])
   })
 
   it('navigates on repo click and closes sheet', async () => {

@@ -31,7 +31,7 @@ export function isCurrentSessionItem(item: SidebarSessionItem, pathname: string)
 }
 
 export function getActiveRepoId(pathname: string): number | null {
-  if (isAssistantPath(pathname)) return null
+  if (isAssistantPath(pathname)) return ASSISTANT_REPO_ID
   return parseRepoRoute(pathname).repoId
 }
 
@@ -40,9 +40,10 @@ export function isRepoReady(repo: Repo): boolean {
 }
 
 export function selectNavigableRepos(repos: Repo[]): Repo[] {
-  return repos
-    .filter((repo) => repo.id !== ASSISTANT_REPO_ID)
-    .sort((a, b) => (b.lastAccessedAt ?? 0) - (a.lastAccessedAt ?? 0))
+  const isAssistant = (repo: Repo) => Number(repo.id === ASSISTANT_REPO_ID)
+  return [...repos].sort(
+    (a, b) => isAssistant(b) - isAssistant(a) || (b.lastAccessedAt ?? 0) - (a.lastAccessedAt ?? 0),
+  )
 }
 
 export function buildSidebarRepoGroups(input: {
