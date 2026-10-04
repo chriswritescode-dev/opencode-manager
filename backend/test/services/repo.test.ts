@@ -580,3 +580,51 @@ describe('getSiblingRepos worktree API', () => {
     expect(siblings[0]?.id).toBe(1)
   })
 })
+
+describe('resolveRepoForDirectory', () => {
+  function createReadyRepo(id: number, localPath: string): Repo {
+    return {
+      id,
+      repoUrl: 'https://github.com/test/repo',
+      localPath,
+      fullPath: path.join(getReposPath(), localPath),
+      sourcePath: path.join(getReposPath(), localPath),
+      branch: 'main',
+      defaultBranch: 'main',
+      cloneStatus: 'ready',
+      clonedAt: Date.now(),
+    }
+  }
+
+  beforeEach(() => {
+    vi.clearAllMocks()
+  })
+
+  it('resolves a workspace directory that shares a repo OpenCode project id', async () => {
+    const { resolveRepoForDirectory } = await import('../../src/services/repo')
+    const repo = createReadyRepo(1, 'repo-a')
+    const workspaceDirectory = '/worktrees/feature-x'
+    getRepoBySourcePath.mockReturnValue(null)
+    getRepoByLocalPath.mockReturnValue(null)
+    listRepos.mockReturnValue([repo])
+    resolveProjectId.mockImplementation(async (directory: string) =>
+      directory === workspaceDirectory || directory === repo.fullPath ? 'commit-A' : null,
+    )
+
+    const result = await resolveRepoForDirectory({} as never, workspaceDirectory)
+
+    expect(result).toBe(repo)
+  })
+
+  it('returns null for a directory that matches no repo', async () => {
+    const { resolveRepoForDirectory } = await import('../../src/services/repo')
+    getRepoBySourcePath.mockReturnValue(null)
+    getRepoByLocalPath.mockReturnValue(null)
+    listRepos.mockReturnValue([createReadyRepo(1, 'repo-a')])
+    resolveProjectId.mockResolvedValue(null)
+
+    const result = await resolveRepoForDirectory({} as never, '/unknown/directory')
+
+    expect(result).toBeNull()
+  })
+})

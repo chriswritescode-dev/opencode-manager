@@ -11,7 +11,7 @@ Push notifications allow you to receive alerts on your mobile device or desktop 
 - A **session encounters an error** during execution
 - A **session completes successfully**
 
-A notification is suppressed when a visible tab is already viewing the session that raised it, preventing duplicate alerts while you're actively monitoring that session. Subagent sessions never notify.
+A notification is suppressed when a visible tab is already viewing the session that raised it, preventing duplicate alerts while you're actively monitoring that session. Subagent sessions never notify. A permission request that a session answers automatically (Accept everything mode) sends no notification. Goal outcome pushes are not sent when you paused or cancelled the goal yourself, when the turn failed (the regular error notification covers it), or while you are viewing the session.
 
 ## Supported Events
 
@@ -21,6 +21,7 @@ A notification is suppressed when a visible tab is already viewing the session t
 | `questionAsked` | Agent asks a clarifying question | Enabled |
 | `sessionError` | Session encounters an error | Enabled |
 | `sessionIdle` | Session completes successfully | Disabled |
+| `goalOutcome` | A session goal completes, is blocked, stops, or pauses | Enabled |
 
 ## Content and Click Behaviour
 
@@ -121,3 +122,4 @@ Control which events trigger notifications:
 - **Question Asked** - Get notified when agent has a question (default: on)
 - **Session Error** - Get notified on session errors (default: on)
 - **Session Complete** - Get notified when session finishes (default: off)
+- **Goal outcomes** - Get notified when a session goal completes, is blocked, stops, or pauses (default: on)

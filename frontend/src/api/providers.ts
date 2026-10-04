@@ -284,6 +284,10 @@ export function formatModelName(model: Model): string {
   return model.name || model.id;
 }
 
+export function providerModelRef(provider: { id: string }, model: { id: string; key?: string }): string {
+  return `${provider.id}/${model.key ?? model.id}`;
+}
+
 export function formatProviderName(
   provider: Provider | ProviderWithModels,
 ): string {

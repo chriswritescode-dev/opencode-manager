@@ -255,6 +255,30 @@ describe('ocm-manager plugin', () => {
     }
   })
 
+  it('allows session routes and rejects session deletion', async () => {
+    const tool = await loadTool(configHome)
+    const allowedRoutes = [
+      ['POST', '/sessions'],
+      ['GET', '/sessions/abc/reply'],
+    ] as const
+
+    for (const [method, path] of allowedRoutes) {
+      const fetchMock = jsonResponse({})
+      vi.stubGlobal('fetch', fetchMock)
+
+      await runTool(tool, { action: 'request', params: { method, path } })
+
+      expect(fetchMock).toHaveBeenCalledTimes(1)
+    }
+
+    const fetchMock = jsonResponse({})
+    vi.stubGlobal('fetch', fetchMock)
+
+    await expect(runTool(tool, { action: 'request', params: { method: 'DELETE', path: '/sessions/abc' } }))
+      .rejects.toThrow(/is not an allowed OpenCode Manager route/)
+    expect(fetchMock).not.toHaveBeenCalled()
+  })
+
   it('rejects non-allow-listed routes without calling the API', async () => {
     const tool = await loadTool(configHome)
     const deniedRoutes = [
@@ -264,6 +288,7 @@ describe('ocm-manager plugin', () => {
       ['POST', '/notifications/send'],
       ['DELETE', '/settings'],
       ['PUT', '/opencode-config'],
+      ['DELETE', '/sessions/abc'],
     ] as const
 
     for (const [method, path] of deniedRoutes) {

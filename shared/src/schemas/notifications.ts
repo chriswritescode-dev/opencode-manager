@@ -17,6 +17,7 @@ export const NotificationPreferencesSchema = z.object({
     questionAsked: z.boolean(),
     sessionError: z.boolean(),
     sessionIdle: z.boolean(),
+    goalOutcome: z.boolean().optional(),
   }),
 });
 
@@ -27,6 +28,7 @@ export const DEFAULT_NOTIFICATION_PREFERENCES = {
     questionAsked: true,
     sessionError: true,
     sessionIdle: false,
+    goalOutcome: true,
   },
 };
 

@@ -3,7 +3,7 @@ import { ASSISTANT_NOTIFICATION_LIMITS } from '@opencode-manager/shared/schemas'
 
 export const MANAGER_TOOL_NAME = 'ocm'
 
-const MANAGER_TOOL_REQUEST_TIMEOUT_MS = 15000
+const MANAGER_TOOL_REQUEST_TIMEOUT_MS = 60000
 
 export const MANAGER_TOOL_ALLOWED_ROUTES = [
   'GET /settings',
@@ -16,6 +16,11 @@ export const MANAGER_TOOL_ALLOWED_ROUTES = [
   'GET /repos',
   'GET /repos/*/git-info',
   'GET /opencode-workspaces',
+  'GET /sessions',
+  'POST /sessions',
+  'POST /sessions/*/prompt',
+  'GET /sessions/*/reply',
+  'POST /sessions/*/fork',
   'GET /schedules/all',
   'GET /schedules/all/runs',
   'GET /repos/*/schedules',
@@ -106,7 +111,7 @@ function buildManagerToolDescription(): string {
     'The action runs inside OpenCode Manager itself, so it needs no token and no network access from the agent shell, and it works in sandboxed sessions and scheduled runs.',
     'Actions:',
     '- send_notification: send a push notification to every device the user has registered.',
-    '- request: call an allow-listed internal API route to read and manage settings, the OpenCode configuration file, repos, OpenCode workspaces, and schedules.',
+    '- request: call an allow-listed internal API route to read and manage settings, the OpenCode configuration file, repos, OpenCode workspaces, sessions (list, create, follow up, read the latest reply, fork), and schedules.',
     'Allowed request routes:',
   ]
     .concat(MANAGER_TOOL_ALLOWED_ROUTES.map((route) => `- ${route}`))

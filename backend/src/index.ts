@@ -36,6 +36,9 @@ import { createAuth } from './auth'
 import { createAuthMiddleware } from './auth/middleware'
 import { createPromptTemplateRoutes } from './routes/prompt-templates'
 import { createSessionPinRoutes } from './routes/session-pins'
+import { createSessionPermissionModeRoutes } from './routes/session-permission-modes'
+import { createSessionGoalRoutes } from './routes/session-goals'
+import { createMultiRunRoutes } from './routes/multi-runs'
 import { createLogRoutes } from './routes/logs'
 import { createInternalRoutes } from './routes/internal'
 import { sweepStaleUploadSessions } from './routes/internal/repo-mirror-helpers'
@@ -44,6 +47,9 @@ import { createAuthenticatedOpenCodeProxyRoutes } from './routes/opencode-auth-p
 import { sseAggregator } from './services/sse-aggregator'
 import { ensureDirectoryExists, writeFileContent, fileExists } from './services/file-operations'
 import { SettingsService } from './services/settings'
+import { SessionPermissionModeService } from './services/session-permission-modes'
+import { SessionGoalService } from './services/session-goals'
+import { MultiRunService } from './services/multi-runs'
 import { opencodeServerManager } from './services/opencode-single-server'
 import { createOpenCodeClient } from './services/opencode/client'
 import { NotificationService } from './services/notification'
@@ -227,6 +233,34 @@ const scheduleService = new ScheduleService(db, openCodeClient, scheduleWorktree
 const scheduleRunnerInstance = new ScheduleRunner(scheduleService)
 
 const notificationService = new NotificationService(db)
+const sessionSettingsService = new SettingsService(db)
+const sessionPermissionModeService = new SessionPermissionModeService(db, openCodeClient, sessionSettingsService)
+const sessionGoalService = new SessionGoalService(db, openCodeClient, sessionSettingsService, {
+  onOutcome: (goal) => {
+    void notificationService.notifyGoalOutcome(goal).catch((error) => {
+      logger.error('Goal outcome notification error:', error)
+    })
+  },
+  resolveSessionLock: async (sessionId) =>
+    (await sessionPermissionModeService.getEffectiveMode(sessionId)).lockedReason,
+})
+sessionGoalService.loadOpenGoals()
+
+const multiRunService = new MultiRunService(db, openCodeClient, gitAuthService)
+
+sseAggregator.onEvent((directory, event) => {
+  sessionPermissionModeService.handleEvent(directory, event).catch((err) => {
+    logger.error('Session permission mode event handling error:', err)
+  })
+  sessionGoalService.handleEvent(directory, event).catch((err) => {
+    logger.error('Session goal event handling error:', err)
+  })
+})
+
+notificationService.addEventSuppressor(async (event, sessionId) => {
+  if (event.type !== 'permission.asked' || !sessionId) return false
+  return (await sessionPermissionModeService.getEffectiveMode(sessionId)).mode === 'auto'
+})
 
 if (ENV.VAPID.PUBLIC_KEY && ENV.VAPID.PRIVATE_KEY) {
   if (!ENV.VAPID.SUBJECT) {
@@ -249,7 +283,16 @@ if (ENV.VAPID.PUBLIC_KEY && ENV.VAPID.PRIVATE_KEY) {
 
 sseAggregator.setPendingActionsFetcher(openCodeClient)
 sseAggregator.setPasswordResolver(() => new SettingsService(db).getOpenCodeServerPassword())
+sseAggregator.onUpstreamConnected(() => {
+  void sessionPermissionModeService.acceptPendingRequestsForActiveSessions().catch((err) => {
+    logger.error('Failed to accept pending permission requests for active sessions:', err)
+  })
+})
 sseAggregator.start()
+
+void sessionGoalService.recoverOpenGoals().catch((error) => {
+  logger.error('Session goal recovery error:', error)
+})
 
 sseAggregator.setScheduledSessionsResolver(
   () => scheduleService.getActiveRunSessions(),
@@ -264,7 +307,7 @@ app.route('/api/auth-info', createAuthInfoRoutes(auth, db))
 app.route('/api/health', createHealthRoutes(db, openCodeSupervisor))
 
 app.route('/api/mcp-oauth-proxy', createMcpOauthProxyRoutes(openCodeClient, requireAuth))
-app.route('/api/internal', createInternalRoutes(db, scheduleService, notificationService, settingsService, openCodeClient))
+app.route('/api/internal', createInternalRoutes(db, scheduleService, notificationService, settingsService, openCodeClient, sessionPermissionModeService))
 app.route('/api/opencode-proxy', createOpenCodeProxyRoutes(db, settingsService))
 
 const protectedApi = new Hono()
@@ -283,6 +326,9 @@ protectedApi.route('/ssh', createSSHRoutes(gitAuthService))
 protectedApi.route('/notifications', createNotificationRoutes(notificationService))
 protectedApi.route('/prompt-templates', createPromptTemplateRoutes(db))
 protectedApi.route('/session-pins', createSessionPinRoutes(db))
+protectedApi.route('/session-permission-modes', createSessionPermissionModeRoutes(sessionPermissionModeService))
+protectedApi.route('/session-goals', createSessionGoalRoutes(sessionGoalService))
+protectedApi.route('/multi-runs', createMultiRunRoutes(multiRunService))
 protectedApi.route('/schedules', createScheduleRoutes(scheduleService))
 protectedApi.route('/logs', createLogRoutes())
 

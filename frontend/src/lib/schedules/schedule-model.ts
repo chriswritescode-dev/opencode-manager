@@ -1,4 +1,5 @@
 import type { ProviderWithModels } from '@/api/providers'
+import { providerModelRef } from '@/api/providers'
 import type { OpenCodeConfigFile } from '@/api/types/settings'
 
 function normalizeModel(model: unknown): string | null {
@@ -11,7 +12,7 @@ export function buildAvailableModelKeys(providers: ProviderWithModels[]): Set<st
   const keys = new Set<string>()
   for (const provider of providers) {
     for (const model of provider.models) {
-      keys.add(`${provider.id}/${model.key ?? model.id}`)
+      keys.add(providerModelRef(provider, model))
       keys.add(`${provider.id}/${model.id}`)
     }
   }

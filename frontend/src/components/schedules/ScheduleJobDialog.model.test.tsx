@@ -21,7 +21,8 @@ vi.mock('@/hooks/usePromptTemplates', () => ({
   useDeletePromptTemplate: () => ({ mutate: vi.fn(), isPending: false }),
 }))
 
-vi.mock('@/api/providers', () => ({
+vi.mock('@/api/providers', async (importOriginal) => ({
+  ...(await importOriginal<typeof import('@/api/providers')>()),
   getProvidersWithModels: mockGetProvidersWithModels,
 }))
 

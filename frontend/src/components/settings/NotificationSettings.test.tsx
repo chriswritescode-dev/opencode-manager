@@ -170,4 +170,18 @@ describe('NotificationSettings', () => {
     render(<NotificationSettings />)
     expect(screen.getByText(/not supported in this browser/i)).toBeInTheDocument()
   })
+
+  it('writes the goal outcome preference and defaults it on', async () => {
+    const user = userEvent.setup()
+    const updateEventPreference = vi.fn()
+    mockNotifications({ updateEventPreference })
+    render(<NotificationSettings />)
+
+    const toggle = screen.getByRole('switch', { name: 'Goal outcomes' })
+    expect(toggle).toBeChecked()
+
+    await user.click(toggle)
+
+    expect(updateEventPreference).toHaveBeenCalledWith('goalOutcome', false)
+  })
 })

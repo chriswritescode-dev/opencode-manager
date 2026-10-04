@@ -7,7 +7,7 @@ import type { Database } from 'bun:sqlite'
 import type { Repo, CreateRepoInput } from '../types/repo'
 import { logger } from '../utils/logger'
 import { getReposPath, getScheduleWorktreesPath } from '@opencode-manager/shared/config/env'
-import { normalizeRepoDirectoryName, sanitizeRepoDirectoryName, sanitizeBranchForDirectory, getRepoBaseDirectoryName, normalizeRepoUrlForCompare, isSSHUrl, normalizeSSHUrl, SCP_STYLE_URL_PATTERN } from '@opencode-manager/shared/utils'
+import { normalizeRepoDirectoryName, sanitizeRepoDirectoryName, sanitizeBranchForDirectory, getRepoBaseDirectoryName, normalizeRepoUrlForCompare, isSSHUrl, normalizeSSHUrl, isWorktreeSibling, SCP_STYLE_URL_PATTERN } from '@opencode-manager/shared/utils'
 import type { GitAuthService } from './git-auth'
 import { isGitHubHttpsUrl } from '../utils/git-auth'
 import path from 'path'
@@ -121,7 +121,7 @@ function buildWorkspaceAliasCandidates(sourcePath: string, rootPath?: string): s
     if (relativePath && !relativePath.startsWith('..')) {
       const relativeAlias = relativePath
         .split(path.sep)
-        .map(sanitizeRepoDirectoryName)
+        .map((segment) => sanitizeRepoDirectoryName(segment))
         .filter(Boolean)
         .join('--')
 
@@ -1168,6 +1168,30 @@ export async function resolveRepoProjectId(openCodeClient: OpenCodeClient, direc
   return project.id
 }
 
+export async function resolveRepoForDirectory(
+  database: Database,
+  directory: string,
+): Promise<Repo | null> {
+  const repo =
+    getRepoBySourcePath(database, path.resolve(directory)) ??
+    getRepoByLocalPath(database, path.relative(getReposPath(), directory))
+  if (repo) return repo
+
+  const projectId = await resolveProjectId(directory)
+  if (!projectId) return null
+
+  const readyRepos = listRepos(database).filter(
+    (candidate) => candidate.cloneStatus === 'ready',
+  )
+  for (const candidate of readyRepos) {
+    const candidateProjectId = await resolveProjectId(candidate.fullPath).catch(
+      () => null,
+    )
+    if (candidateProjectId === projectId) return candidate
+  }
+  return null
+}
+
 export async function getSiblingRepos(
   database: Database,
   repoId: number,
@@ -1262,4 +1286,45 @@ export async function getSiblingRepos(
     logger.warn('Failed to list OpenCode worktrees:', error)
     return repoSiblings
   }
+}
+
+export class RepoWorkspaceError extends Error {
+  readonly status: 400
+
+  constructor(message: string, status: 400) {
+    super(message)
+    this.name = 'RepoWorkspaceError'
+    this.status = status
+  }
+}
+
+export async function createRepoWorkspace(
+  openCodeClient: OpenCodeClient,
+  repo: Repo,
+  options: { name?: string; ref?: string } = {},
+): Promise<{ directory: string }> {
+  const projectID = await resolveRepoProjectId(openCodeClient, repo.fullPath)
+  return openCodeClient.api.worktree.create({
+    projectID,
+    ...(options.name ? { name: options.name } : {}),
+    ...(options.ref ? { branch: options.ref } : {}),
+  })
+}
+
+export async function removeRepoWorkspace(
+  database: Database,
+  openCodeClient: OpenCodeClient,
+  gitEnv: Record<string, string>,
+  repo: Repo,
+  directory: string,
+): Promise<void> {
+  const siblings = await getSiblingRepos(database, repo.id, gitEnv, openCodeClient)
+  const requestedDirectory = canonicalPathSync(path.resolve(directory))
+  const worktree = siblings.find(
+    (sibling) => isWorktreeSibling(sibling) && canonicalPathSync(path.resolve(sibling.fullPath)) === requestedDirectory,
+  )
+  if (!worktree) throw new RepoWorkspaceError('Not a deletable worktree of this repo', 400)
+
+  const projectID = await resolveRepoProjectId(openCodeClient, repo.fullPath)
+  await openCodeClient.api.worktree.remove({ projectID, directory: worktree.fullPath, force: true })
 }

@@ -86,6 +86,7 @@ vi.mock('../src/services/skills', () => ({
 
 const sseAggregatorMock = vi.hoisted(() => ({
   onEvent: vi.fn(),
+  onUpstreamConnected: vi.fn(),
   setPendingActionsFetcher: vi.fn(),
   setPasswordResolver: vi.fn(),
   setScheduledSessionsResolver: vi.fn(),

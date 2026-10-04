@@ -15,7 +15,7 @@ The assistant workspace is a special repository-like directory managed and maint
 
 ## Skills Provided
 
-Four skills are provisioned automatically when assistant mode is initialized:
+Five skills are provisioned automatically when assistant mode is initialized:
 
 | Skill | What it teaches |
 |-------|----------------|
@@ -23,6 +23,7 @@ Four skills are provisioned automatically when assistant mode is initialized:
 | `notifications` | Send push notifications to registered user devices with the `ocm` `send_notification` action |
 | `manager-settings` | Read and patch user preferences, read and update the OpenCode configuration file, and reload the assistant workspace, through the `ocm` `request` action |
 | `repo-management` | List all managed repositories through the `ocm` `request` action |
+| `session-management` | List, create, follow up, read the reply of, and fork sessions through the `ocm` `request` action |
 
 The assistant manages the Manager's global OpenCode configuration file through the `ocm` tool (`/opencode-config`), and the file on disk is the source of truth.
 

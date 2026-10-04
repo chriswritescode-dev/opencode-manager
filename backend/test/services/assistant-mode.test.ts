@@ -1,8 +1,9 @@
 import { describe, expect, it, beforeEach, afterEach } from 'bun:test'
+import type { SessionPermissionModeService } from '../../src/services/session-permission-modes'
 import path from 'path'
 import { access, readFile, writeFile } from 'fs/promises'
 import { Hono } from 'hono'
-import { ensureAssistantMode, getAssistantModeStatus, buildSchedulesSkill, buildReposSkill, buildSettingsSkill, buildAssistantDefaultAgentMd, buildAssistantOpenCodeConfig, buildAssistantRepo, installAssistantWorkspace } from '../../src/services/assistant-mode'
+import { ensureAssistantMode, getAssistantModeStatus, buildSchedulesSkill, buildReposSkill, buildSettingsSkill, buildSessionsSkill, buildAssistantDefaultAgentMd, buildAssistantOpenCodeConfig, buildAssistantRepo, installAssistantWorkspace } from '../../src/services/assistant-mode'
 import { createTempAssistantWorkspace, createTestDb, mockRepo } from '../helpers/assistant-workspace'
 import { createInternalRoutes } from '../../src/routes/internal'
 import { ScheduleService } from '../../src/services/schedules'
@@ -57,6 +58,49 @@ describe('buildReposSkill', () => {
   it('does not document the removed openCodeConfigName field', () => {
     const skill = buildReposSkill()
     expect(skill).not.toContain('openCodeConfigName')
+  })
+})
+
+describe('buildSessionsSkill', () => {
+  it('instructs the agent to use the ocm tool request action', () => {
+    const skill = buildSessionsSkill()
+    expect(skill).toContain('name: session-management')
+    expect(skill).toContain('"action": "request"')
+    expect(skill).toContain('"path": "/sessions?repoId=1&limit=10"')
+    expect(skill).not.toContain('curl')
+  })
+
+  it('documents every session route and that creation returns immediately', () => {
+    const skill = buildSessionsSkill()
+    expect(skill).toContain('GET /sessions')
+    expect(skill).toContain('POST /sessions')
+    expect(skill).toContain('POST /sessions/:sessionId/prompt')
+    expect(skill).toContain('GET /sessions/:sessionId/reply')
+    expect(skill).toContain('POST /sessions/:sessionId/fork')
+    expect(skill).toContain('returns as soon as the prompt is queued')
+    expect(skill).toContain('poll')
+  })
+
+  it('documents that there is no delete route', () => {
+    const skill = buildSessionsSkill()
+    expect(skill).toContain('There is no delete route')
+    expect(skill).not.toContain('DELETE /sessions')
+  })
+
+  it('documents the ask permission mode and workspace timeout behavior', () => {
+    const skill = buildSessionsSkill()
+    expect(skill).toContain('`ask` permission mode')
+    expect(skill).toContain('keep the mode the user chose')
+    expect(skill).toContain('may still have succeeded')
+    expect(skill).toContain('before retrying')
+  })
+
+  it('documents the reply wait parameter and workspace repoId semantics', () => {
+    const skill = buildSessionsSkill()
+    expect(skill).toContain('waitMs=30000')
+    expect(skill).toContain('OpenCode workspace')
+    expect(skill).toContain('belongs to no known repo')
+    expect(skill).toContain('capped')
   })
 })
 
@@ -175,6 +219,7 @@ describe('ensureAssistantMode', () => {
     const opencodeJson = await readFile(path.join(ws.assistantDir, 'opencode.json'), 'utf8')
     const skill = await readFile(path.join(ws.assistantDir, '.opencode/skills/schedule-management/SKILL.md'), 'utf8')
     const repoSkill = await readFile(path.join(ws.assistantDir, '.opencode/skills/repo-management/SKILL.md'), 'utf8')
+    const sessionSkill = await readFile(path.join(ws.assistantDir, '.opencode/skills/session-management/SKILL.md'), 'utf8')
     const assistantAgent = await readFile(path.join(ws.assistantDir, '.opencode/agents/assistant.md'), 'utf8')
 
     expect(agentsMd).toContain('.opencode/agents/assistant.md')
@@ -192,6 +237,9 @@ describe('ensureAssistantMode', () => {
     expect(repoSkill).toContain('GET /repos')
     expect(repoSkill).not.toContain('Authorization: Bearer')
     expect(repoSkill).not.toContain('.opencode/internal-token')
+    expect(sessionSkill).toContain('name: session-management')
+    expect(sessionSkill).toContain('GET /sessions')
+    expect(sessionSkill).not.toContain('Authorization: Bearer')
     expect(assistantAgent).toContain('mode: primary')
     expect(assistantAgent).toContain('Default OpenCode Manager assistant workspace agent')
     expect(assistantAgent).not.toContain('v file')
@@ -212,6 +260,7 @@ describe('ensureAssistantMode', () => {
     const notificationsSkillPath = path.join(ws.assistantDir, '.opencode/skills/notifications/SKILL.md')
     const settingsSkillPath = path.join(ws.assistantDir, '.opencode/skills/manager-settings/SKILL.md')
     const reposSkillPath = path.join(ws.assistantDir, '.opencode/skills/repo-management/SKILL.md')
+    const sessionsSkillPath = path.join(ws.assistantDir, '.opencode/skills/session-management/SKILL.md')
     const assistantAgentPath = path.join(ws.assistantDir, '.opencode/agents/assistant.md')
 
     const opencodeJsonContent = await readFile(opencodeJsonPath, 'utf8')
@@ -262,6 +311,10 @@ describe('ensureAssistantMode', () => {
     expect(reposSkillContent).toContain('name: repo-management')
     expect(reposSkillContent).toContain('List repos available')
 
+    const sessionsSkillContent = await readFile(sessionsSkillPath, 'utf8')
+    expect(sessionsSkillContent).toContain('name: session-management')
+    expect(sessionsSkillContent).toContain('Create and follow up')
+
     const assistantAgentContent = await readFile(assistantAgentPath, 'utf8')
     expect(assistantAgentContent).toContain('mode: primary')
     expect(assistantAgentContent).toContain('Self-Editing')
@@ -274,6 +327,8 @@ describe('ensureAssistantMode', () => {
     expect(result.files.agentsMd?.exists).toBe(true)
     expect(result.repoManagementSkill?.path).toBe(reposSkillPath)
     expect(result.repoManagementSkill?.created).toBe(true)
+    expect(result.sessionManagementSkill?.path).toBe(sessionsSkillPath)
+    expect(result.sessionManagementSkill?.created).toBe(true)
     expect(result.defaultAgent?.name).toBe('assistant')
     expect(result.defaultAgent?.path).toBe(assistantAgentPath)
     expect(result.defaultAgent?.exists).toBe(true)
@@ -287,6 +342,8 @@ describe('ensureAssistantMode', () => {
 
     expect(status.repoManagementSkill?.path).toBe(path.join(ws.assistantDir, '.opencode/skills/repo-management/SKILL.md'))
     expect(status.repoManagementSkill?.created).toBe(false)
+    expect(status.sessionManagementSkill?.path).toBe(path.join(ws.assistantDir, '.opencode/skills/session-management/SKILL.md'))
+    expect(status.sessionManagementSkill?.created).toBe(false)
   })
 
   it('preserves custom assistant agent content on subsequent ensureAssistantMode calls', async () => {
@@ -629,7 +686,7 @@ describe('assistant-mode end-to-end', () => {
     const notificationService = new NotificationService(db)
     const settingsService = new SettingsService(db)
     const app = new Hono()
-    app.route('/api/internal', createInternalRoutes(db, scheduleService, notificationService, settingsService, createOpenCodeClient()))
+    app.route('/api/internal', createInternalRoutes(db, scheduleService, notificationService, settingsService, createOpenCodeClient(), {} as SessionPermissionModeService))
 
     const unauth = await app.request('/api/internal/schedules/all')
     expect(unauth.status).toBe(401)

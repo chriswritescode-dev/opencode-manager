@@ -57,7 +57,7 @@ OpenCode Manager runs as a pnpm workspace:
 - **Files** — Directory browser with tree view, syntax highlighting, create/rename/delete, ZIP download — [Learn more](features/files.md)
 - **Schedules** — Recurring repo jobs with reusable prompts, run history, linked sessions — [Learn more](features/schedules.md)
 - **Session Pinning** — Pin important sessions to the top of the session list — [Learn more](features/session-pins.md)
-- **Assistant Mode** — Dedicated AI workspace with auto-provisioned skills for schedule management, notifications, settings, and repo listing — [Learn more](features/assistant-mode.md)
+- **Assistant Mode** — Dedicated AI workspace with auto-provisioned skills for schedule management, notifications, settings, repo listing, and session management — [Learn more](features/assistant-mode.md)
 - **AI Configuration** — Model/provider setup, OAuth for Anthropic/GitHub Copilot, custom agents — [Learn more](features/ai-config.md)
 - **Server Health & Restart** — Monitor server status, graceful restarts with session resume, auto-recovery — [Learn more](features/server-health.md)
 - **Manager Logs** — Manager log lines plus captured OpenCode server stdout/stderr in Settings, with level/source filters, search, and pause/copy controls — [Learn more](features/logs.md)

@@ -52,6 +52,7 @@ import { PendingActionsGroup } from "@/components/notifications/PendingActionsGr
 import { SourceControlPanel } from "@/components/source-control";
 import { SessionSendErrorBanner } from "@/components/session/SessionSendErrorBanner";
 import { BackgroundWorkBar } from "@/components/session/BackgroundWorkBar";
+import { SessionGoalBar } from "@/components/session/SessionGoalBar";
 import { useDialogParam } from "@/hooks/useDialogParam";
 import { SessionMoreButton } from "@/components/navigation/SessionMoreButton";
 import { SideQuestionDialog } from "@/components/session/SideQuestionDialog";
@@ -759,6 +760,7 @@ export function SessionDetail() {
                 />
               )}
               <SessionSendErrorBanner sessionId={sessionId} isConnected={isConnected} isReconnecting={isReconnecting} />
+              <SessionGoalBar sessionID={sessionId} />
               <BackgroundWorkBar
                 sessionID={sessionId}
                 directory={sessionDirectory}

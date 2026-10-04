@@ -70,6 +70,16 @@ describe('getSessionPath', () => {
     expect(getSessionPath(0, 'ses_1')).toBe('/repos/0/sessions/ses_1?assistant=1');
     expect(getSessionPath('0', 'ses_1')).toBe('/repos/0/sessions/ses_1?assistant=1');
   });
+
+  it('includes a repoTab query param when provided', () => {
+    expect(getSessionPath(5, 'ses_1', { repoTab: 'workspaces' })).toBe('/repos/5/sessions/ses_1?repoTab=workspaces');
+  });
+
+  it('combines the assistant and repoTab query params', () => {
+    expect(getSessionPath(0, 'ses_1', { repoTab: 'workspaces' })).toBe(
+      '/repos/0/sessions/ses_1?assistant=1&repoTab=workspaces'
+    );
+  });
 });
 
 describe('getRepoPath', () => {

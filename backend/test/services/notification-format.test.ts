@@ -1,9 +1,39 @@
 import { describe, it, expect } from 'vitest'
-import { getPermissionLabel, getPermissionDetail, getFormText } from '@opencode-manager/shared/notifications'
+import {
+  getPermissionLabel,
+  getPermissionDetail,
+  getFormText,
+  getGoalOutcomeTitle,
+  getGoalStopReasonLabel,
+} from '@opencode-manager/shared/notifications'
 import { buildEventNotificationPayload, buildNotificationUrl } from '../../src/services/notification'
 import { ASSISTANT_REPO_ID } from '@opencode-manager/shared/utils'
 
 const ctx = { repoName: 'oc-manager', repoId: 1, sessionId: 'ses_1', directory: '/abs/repo', url: '/repos/1/sessions/ses_1' }
+
+describe('goal notification labels', () => {
+  it('maps goal stop reasons to human labels', () => {
+    expect(getGoalStopReasonLabel('cancelled')).toBe('Cancelled')
+    expect(getGoalStopReasonLabel('user_paused')).toBe('Paused by user')
+    expect(getGoalStopReasonLabel('continuation_limit')).toBe('Continuation limit reached')
+    expect(getGoalStopReasonLabel('turn_error')).toBe('Turn failed')
+    expect(getGoalStopReasonLabel('interrupted')).toBe('Interrupted')
+    expect(getGoalStopReasonLabel('audit_failed')).toBe('Audit failed')
+    expect(getGoalStopReasonLabel('session_deleted')).toBe('Session deleted')
+  })
+
+  it('derives the notification title from the status', () => {
+    expect(getGoalOutcomeTitle('active')).toBe('Goal active')
+    expect(getGoalOutcomeTitle('paused')).toBe('Goal paused')
+    expect(getGoalOutcomeTitle('completed')).toBe('Goal completed')
+    expect(getGoalOutcomeTitle('blocked')).toBe('Goal blocked')
+    expect(getGoalOutcomeTitle('stopped')).toBe('Goal stopped')
+  })
+
+  it('resolves a stop reason label', () => {
+    expect(getGoalStopReasonLabel('token_budget')).toBe('Token budget reached')
+  })
+})
 
 describe('getPermissionLabel', () => {
   it('maps known V2 permission actions to friendly labels', () => {

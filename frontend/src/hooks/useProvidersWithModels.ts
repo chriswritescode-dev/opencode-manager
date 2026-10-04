@@ -12,7 +12,7 @@ export function useProvidersWithModels({ enabled, directory, keyParts }: UseProv
   const { data: config, isLoading: isConfigLoading } = useOpenCodeConfigFile(enabled)
 
   const query = useQuery({
-    queryKey: ['providers-with-models', ...(keyParts ?? [])],
+    queryKey: ['providers-with-models', directory ?? null, ...(keyParts ?? [])],
     queryFn: () => getProvidersWithModels(directory, config),
     enabled: enabled && !isConfigLoading,
     staleTime: 5 * 60 * 1000,

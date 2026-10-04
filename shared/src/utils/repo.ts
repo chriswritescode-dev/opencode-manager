@@ -3,17 +3,34 @@ export const ASSISTANT_REPO_NAME = 'Assistant'
 export const ASSISTANT_REPO_PATH = 'assistant'
 export const ASSISTANT_OPENCODE_DIR_NAME = '.opencode'
 
+export function buildSessionPath(
+  repoId: number | string,
+  sessionId: string,
+  options?: { repoTab?: string },
+): string {
+  const params = new URLSearchParams()
+  if (String(repoId) === String(ASSISTANT_REPO_ID)) {
+    params.set('assistant', '1')
+  }
+  if (options?.repoTab) {
+    params.set('repoTab', options.repoTab)
+  }
+  const search = params.toString()
+
+  return `/repos/${repoId}/sessions/${sessionId}${search ? `?${search}` : ''}`
+}
+
 function trimTrailingChar(value: string, char: string): string {
   let end = value.length
   while (end > 0 && value[end - 1] === char) end--
   return value.slice(0, end)
 }
 
-export function sanitizeRepoDirectoryName(input: string): string {
+export function sanitizeRepoDirectoryName(input: string, fallback = 'repo'): string {
   const collapsed = input.trim().replace(/[^a-zA-Z0-9._-]+/g, '-').replace(/^-+/, '')
   const sanitized = trimTrailingChar(collapsed, '-')
 
-  return sanitized || 'repo'
+  return sanitized || fallback
 }
 
 export function getRepoDirectoryNameError(input: string): string | null {

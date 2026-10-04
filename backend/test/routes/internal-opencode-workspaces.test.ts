@@ -1,4 +1,5 @@
 import { describe, it, expect, beforeEach, vi } from 'vitest'
+import type { SessionPermissionModeService } from '../../src/services/session-permission-modes'
 import { Hono } from 'hono'
 import type { Database } from 'bun:sqlite'
 import { createInternalRoutes } from '../../src/routes/internal'
@@ -82,7 +83,7 @@ describe('internal-opencode-workspaces routes', () => {
       forwardRaw: vi.fn(),
     } as unknown as OpenCodeClient
     app = new Hono()
-    app.route('/api/internal', createInternalRoutes(mockDb, scheduleService, notificationService, settingsService, openCodeClient))
+    app.route('/api/internal', createInternalRoutes(mockDb, scheduleService, notificationService, settingsService, openCodeClient, {} as SessionPermissionModeService))
     token = 'test-internal-token'
   })
 

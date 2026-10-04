@@ -2,31 +2,30 @@ import { Database } from "bun:sqlite";
 import webpush from "web-push";
 import { logger } from "../utils/logger";
 import type { PushSubscriptionRecord } from "../types/settings";
-import type { PushNotificationPayload } from "@opencode-manager/shared/types";
+import type {
+  NotificationPreferences,
+  PushNotificationPayload,
+} from "@opencode-manager/shared/types";
 import {
   NotificationEventType,
   DEFAULT_NOTIFICATION_PREFERENCES,
+  type SessionGoal,
 } from "@opencode-manager/shared/schemas";
 import {
   getPermissionLabel,
   getPermissionDetail,
   getFormText,
+  getGoalOutcomeTitle,
+  getGoalStopReasonLabel,
 } from "@opencode-manager/shared/notifications";
 import { SettingsService } from "./settings";
 import { sseAggregator, type SSEEvent } from "./sse-aggregator";
-import {
-  getRepoByLocalPath,
-  getRepoBySourcePath,
-  getRepoName,
-  listRepos,
-} from "../db/queries";
+import { getRepoName } from "../db/queries";
 import { getScheduleRunBySessionId } from "../db/schedules";
 import type { Repo } from "../types/repo";
-import { getReposPath } from "@opencode-manager/shared/config/env";
-import { ASSISTANT_REPO_ID } from "@opencode-manager/shared/utils";
+import { buildSessionPath } from "@opencode-manager/shared/utils";
 import { sessionIDFromEvent } from "@opencode-manager/shared/opencode";
-import { resolveProjectId } from "./project-id-resolver";
-import path from "path";
+import { resolveRepoForDirectory } from "./repo";
 
 interface VapidConfig {
   publicKey: string;
@@ -77,6 +76,30 @@ const RUN_OUTCOME_EVENTS = new Set<string>([
   NotificationEventType.SESSION_FAILED,
 ]);
 
+function truncateWithEllipsis(text: string, maxLength: number): string {
+  if (maxLength <= 0) return "";
+  if (text.length <= maxLength) return text;
+  if (maxLength === 1) return "…";
+  return `${text.slice(0, maxLength - 1)}…`;
+}
+
+function buildGoalOutcomeBody(goal: SessionGoal, repoName: string | undefined): string {
+  const reason = goal.stopReason
+    ? getGoalStopReasonLabel(goal.stopReason)
+    : goal.lastReason?.trim() || undefined;
+  const prefix = repoName ? `${repoName} · ` : "";
+  const separator = " — ";
+
+  const reasonBudget = Math.max(0, MAX_BODY_LENGTH - prefix.length - separator.length);
+  const boundedReason = reason ? truncateWithEllipsis(reason, reasonBudget) : "";
+  const suffix = boundedReason ? `${separator}${boundedReason}` : "";
+
+  const objectiveBudget = Math.max(0, MAX_BODY_LENGTH - prefix.length - suffix.length);
+  const objective = truncateWithEllipsis(goal.objective, objectiveBudget);
+
+  return truncateWithEllipsis(`${prefix}${objective}${suffix}`, MAX_BODY_LENGTH);
+}
+
 function resolveEventSessionId(event: SSEEvent): string | undefined {
   if (event.type === NotificationEventType.FORM_CREATED) {
     return event.data.form.sessionID;
@@ -94,8 +117,7 @@ export function buildNotificationUrl(
 ): string {
   if (!repo) return "/";
   if (!sessionId) return `/repos/${repo.id}`;
-  const suffix = repo.id === ASSISTANT_REPO_ID ? "?assistant=1" : "";
-  return `/repos/${repo.id}/sessions/${sessionId}${suffix}`;
+  return buildSessionPath(repo.id, sessionId);
 }
 
 export function buildEventNotificationPayload(
@@ -117,10 +139,7 @@ export function buildEventNotificationPayload(
   const rawBody = context.repoName
     ? `${context.repoName} · ${detail}`
     : detail;
-  const body =
-    rawBody.length > MAX_BODY_LENGTH
-      ? `${rawBody.slice(0, MAX_BODY_LENGTH - 1)}…`
-      : rawBody;
+  const body = truncateWithEllipsis(rawBody, MAX_BODY_LENGTH);
 
   return {
     title,
@@ -139,9 +158,12 @@ export function buildEventNotificationPayload(
   };
 }
 
+type EventSuppressor = (event: SSEEvent, sessionId: string | undefined) => Promise<boolean>;
+
 export class NotificationService {
   private vapidConfig: VapidConfig | null = null;
   private settingsService: SettingsService;
+  private eventSuppressors: EventSuppressor[] = [];
 
   constructor(private db: Database) {
     this.settingsService = new SettingsService(db);
@@ -176,6 +198,10 @@ export class NotificationService {
 
   getVapidPublicKey(): string | null {
     return this.vapidConfig?.publicKey ?? null;
+  }
+
+  addEventSuppressor(suppressor: EventSuppressor): void {
+    this.eventSuppressors.push(suppressor);
   }
 
   isConfigured(): boolean {
@@ -289,25 +315,24 @@ export class NotificationService {
     return run ? buildScheduleRunReportUrl(run.id) : null;
   }
 
-  private async resolveRepoForDirectory(directory: string): Promise<Repo | null> {
-    const repo =
-      getRepoBySourcePath(this.db, path.resolve(directory)) ??
-      getRepoByLocalPath(this.db, path.relative(getReposPath(), directory));
-    if (repo) return repo;
+  private async deliverToSubscribers(
+    payload: PushNotificationPayload,
+    shouldNotify: (preferences: NotificationPreferences) => boolean
+  ): Promise<void> {
+    if (!this.isConfigured()) return;
 
-    const projectId = await resolveProjectId(directory);
-    if (!projectId) return null;
+    const userIds = this.getAllUserIds();
+    if (userIds.length === 0) return;
 
-    const readyRepos = listRepos(this.db).filter(
-      (candidate) => candidate.cloneStatus === "ready"
-    );
-    for (const candidate of readyRepos) {
-      const candidateProjectId = await resolveProjectId(candidate.fullPath).catch(
-        () => null
-      );
-      if (candidateProjectId === projectId) return candidate;
+    for (const userId of userIds) {
+      const settings = this.settingsService.getSettings(userId);
+      const notifPrefs =
+        settings.preferences.notifications ?? DEFAULT_NOTIFICATION_PREFERENCES;
+
+      if (!shouldNotify(notifPrefs)) continue;
+
+      await this.sendToUser(userId, payload);
     }
-    return null;
   }
 
   async handleSSEEvent(
@@ -321,12 +346,11 @@ export class NotificationService {
     if (sessionId && sseAggregator.isSessionBeingViewed(sessionId)) return;
     if (sessionId && sseAggregator.isSubagentSession(sessionId)) return;
 
-    if (!this.isConfigured()) return;
+    for (const suppressor of this.eventSuppressors) {
+      if (await suppressor(event, sessionId)) return;
+    }
 
-    const userIds = this.getAllUserIds();
-    if (userIds.length === 0) return;
-
-    const repo = directory ? await this.resolveRepoForDirectory(directory) : null;
+    const repo = directory ? await resolveRepoForDirectory(this.db, directory) : null;
     const repoId = repo?.id;
     const repoName = repo ? getRepoName(repo) : undefined;
     const reportUrl = RUN_OUTCOME_EVENTS.has(event.type) ? this.getScheduleRunReportUrl(sessionId) : null;
@@ -341,16 +365,45 @@ export class NotificationService {
     });
     if (!payload) return;
 
-    for (const userId of userIds) {
-      const settings = this.settingsService.getSettings(userId);
-      const notifPrefs =
-        settings.preferences.notifications ?? DEFAULT_NOTIFICATION_PREFERENCES;
+    await this.deliverToSubscribers(
+      payload,
+      (preferences) =>
+        preferences.enabled &&
+        preferences.events[config.preferencesKey] === true
+    );
+  }
 
-      if (!notifPrefs.enabled) continue;
-      if (!notifPrefs.events[config.preferencesKey]) continue;
+  async notifyGoalOutcome(goal: SessionGoal): Promise<void> {
+    if (goal.stopReason === "turn_error") return;
+    if (goal.stopReason === "cancelled" || goal.stopReason === "user_paused") return;
+    if (sseAggregator.isSessionBeingViewed(goal.sessionId)) return;
 
-      await this.sendToUser(userId, payload);
-    }
+    const repo = goal.directory
+      ? await resolveRepoForDirectory(this.db, goal.directory)
+      : null;
+    const repoName = repo ? getRepoName(repo) : undefined;
+
+    const payload: PushNotificationPayload = {
+      title: getGoalOutcomeTitle(goal.status),
+      body: buildGoalOutcomeBody(goal, repoName),
+      tag: `session-goal-${goal.id}`,
+      timestamp: Date.now(),
+      renotify: true,
+      data: {
+        eventType: "session.goal.outcome",
+        sessionId: goal.sessionId,
+        directory: goal.directory,
+        repoId: repo?.id,
+        repoName,
+        url: buildNotificationUrl(repo, goal.sessionId),
+      },
+    };
+
+    await this.deliverToSubscribers(
+      payload,
+      (preferences) =>
+        preferences.enabled && preferences.events.goalOutcome !== false
+    );
   }
 
   async sendTestNotification(userId: string): Promise<void> {

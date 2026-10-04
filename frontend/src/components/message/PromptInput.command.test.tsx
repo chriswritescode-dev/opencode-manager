@@ -82,6 +82,19 @@ vi.mock('@/components/model/ModelQuickSelect', () => ({
   ),
 }))
 
+vi.mock('@/components/session/PermissionModeToggle', () => ({
+  PermissionModeToggle: () => null,
+}))
+
+vi.mock('@/hooks/useSessionGoals', () => ({
+  useSessionGoal: () => ({ data: undefined }),
+  useStartSessionGoal: () => ({ mutateAsync: vi.fn(), isPending: false }),
+}))
+
+vi.mock('@/hooks/useSessionPermissionMode', () => ({
+  useSessionPermissionMode: () => ({ data: undefined }),
+}))
+
 vi.mock('@/components/ui/session-status-indicator', () => ({
   SessionStatusIndicator: () => <div>SessionStatus</div>,
 }))

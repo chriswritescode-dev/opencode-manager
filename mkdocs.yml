@@ -33,6 +33,7 @@ nav:
     - Chat & Sessions: features/chat.md
     - Session Pinning: features/session-pins.md
     - Schedules & Recurring Jobs: features/schedules.md
+    - Multi-run: features/multi-run.md
     - AI Configuration: features/ai-config.md
     - Skills: features/skills.md
     - MCP Servers: features/mcp.md

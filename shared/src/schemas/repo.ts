@@ -96,6 +96,10 @@ export const AssistantModeStatusSchema = z.object({
     path: z.string(),
     created: z.boolean(),
   }).optional(),
+  sessionManagementSkill: z.object({
+    path: z.string(),
+    created: z.boolean(),
+  }).optional(),
   defaultAgent: z.object({
     name: z.literal('assistant'),
     path: z.string(),

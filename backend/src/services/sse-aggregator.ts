@@ -46,6 +46,7 @@ class SSEAggregator {
   private activeSessions: Map<string, Set<string>> = new Map()
   private sessionDirectories: Map<string, string> = new Map()
   private eventListeners: Set<SSEEventListener> = new Set()
+  private upstreamConnectedListeners: Set<() => void> = new Set()
   private subagentSessions: Map<string, Set<string>> = new Map()
   private upstream: EventSource | null = null
   private reconnectTimeout: ReturnType<typeof setTimeout> | null = null
@@ -370,10 +371,17 @@ class SSEAggregator {
     this.upstreamConnected = true
     this.reconnectDelay = RECONNECT_DELAY_MS
     this.everConnected = true
+    this.notifyUpstreamConnected()
     this.broadcastResync()
     if (wasConnectedBefore) {
       void this.replaySessionStatusesForTrackedDirectories()
     }
+  }
+
+  private notifyUpstreamConnected(): void {
+    this.upstreamConnectedListeners.forEach(listener => {
+      try { listener() } catch { /* ignore listener errors */ }
+    })
   }
 
   private broadcastResync(): void {
@@ -394,6 +402,11 @@ class SSEAggregator {
     return () => { this.eventListeners.delete(listener) }
   }
 
+  onUpstreamConnected(listener: () => void): () => void {
+    this.upstreamConnectedListeners.add(listener)
+    return () => { this.upstreamConnectedListeners.delete(listener) }
+  }
+
   private handleUpstreamMessage(data: string): void {
     let event: V2Event
     try {
@@ -407,14 +420,17 @@ class SSEAggregator {
     const payloadJson = MULTILINE_PATTERN.test(data) ? JSON.stringify(event) : data
     const directory = event.location?.directory
     const sessionID = sessionIDFromEvent(event)
+    const forkParentId = event.type === 'session.forked' ? event.data.parentID : undefined
+    const inheritedDirectory = forkParentId ? this.sessionDirectories.get(forkParentId) : undefined
 
     try {
-      const resolvedDirectory = directory ?? (sessionID ? this.sessionDirectories.get(sessionID) : undefined)
+      const rememberedDirectory = directory ?? inheritedDirectory
+      const resolvedDirectory = rememberedDirectory ?? (sessionID ? this.sessionDirectories.get(sessionID) : undefined)
 
       if (sessionID && event.type === 'session.deleted') {
         this.sessionDirectories.delete(sessionID)
-      } else if (directory && sessionID) {
-        this.sessionDirectories.set(sessionID, directory)
+      } else if (sessionID && rememberedDirectory) {
+        this.sessionDirectories.set(sessionID, rememberedDirectory)
       }
 
       if (directory) {
@@ -626,6 +642,7 @@ class SSEAggregator {
     this.directoryClients.clear()
     this.clients.clear()
     this.eventListeners.clear()
+    this.upstreamConnectedListeners.clear()
   }
 
   broadcastToAll(event: string, data: string): void {

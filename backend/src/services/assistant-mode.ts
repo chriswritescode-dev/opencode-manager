@@ -31,6 +31,7 @@ const ASSISTANT_SCHEDULES_SKILL_DIR = 'schedule-management'
 const ASSISTANT_NOTIFICATIONS_SKILL_DIR = 'notifications'
 const ASSISTANT_SETTINGS_SKILL_DIR = 'manager-settings'
 const ASSISTANT_REPOS_SKILL_DIR = 'repo-management'
+const ASSISTANT_SESSIONS_SKILL_DIR = 'session-management'
 const ASSISTANT_SKILL_FILENAME = 'SKILL.md'
 const ASSISTANT_AGENTS_DIR = 'agents'
 const ASSISTANT_DEFAULT_AGENT_NAME = 'assistant'
@@ -75,6 +76,10 @@ function getSettingsSkillPath(assistantDir: string): string {
 
 function getReposSkillPath(assistantDir: string): string {
   return path.join(assistantDir, ASSISTANT_OPENCODE_DIR, ASSISTANT_SKILLS_DIR, ASSISTANT_REPOS_SKILL_DIR, ASSISTANT_SKILL_FILENAME)
+}
+
+function getSessionsSkillPath(assistantDir: string): string {
+  return path.join(assistantDir, ASSISTANT_OPENCODE_DIR, ASSISTANT_SKILLS_DIR, ASSISTANT_SESSIONS_SKILL_DIR, ASSISTANT_SKILL_FILENAME)
 }
 
 function getAssistantDefaultAgentPath(assistantDir: string): string {
@@ -897,6 +902,174 @@ List all repos available to OpenCode Manager. The repos are returned in the orde
 `
 }
 
+export function buildSessionsSkill(): string {
+  return `---
+name: session-management
+description: Create and follow up on OpenCode sessions with the ${MANAGER_TOOL_NAME} tool
+---
+
+## When to Load
+
+Load this skill when the user asks you to start work in a repo, hand a task to a new session, follow up on a running session, read what a session replied, or fork a session.
+
+## Tool
+
+Use the \`${MANAGER_TOOL_NAME}\` tool with the \`request\` action. The tool runs inside OpenCode Manager, so it needs no token, no base URL, and no network access from the shell. It works the same in a normal session, a sandboxed session, and a scheduled run. Paths are relative to the internal API (for example \`/sessions?repoId=1\` or \`/sessions/ses_abc/prompt\`) and query strings are allowed.
+
+**Arguments:**
+\`\`\`ts
+{
+  action: 'request',
+  params: {
+    method: 'GET' | 'POST' | 'PUT' | 'PATCH' | 'DELETE',
+    path: string   // relative internal API path; query strings allowed
+    body?: object  // JSON body for POST and PATCH routes
+  }
+}
+\`\`\`
+
+## Endpoints
+
+### GET /sessions
+
+List sessions, newest first. Pass \`repoId\` to restrict the list to one repo; this covers every OpenCode workspace of that repo, not only the repo directory. Pass \`limit\` (1-50, default 10) to bound it.
+
+Query params: \`repoId\`, \`limit\`
+
+\`\`\`json
+{
+  "action": "request",
+  "params": {
+    "method": "GET",
+    "path": "/sessions?repoId=1&limit=10"
+  }
+}
+\`\`\`
+
+**Response:**
+\`\`\`ts
+{
+  sessions: Array<{
+    id: string
+    title: string | null
+    directory: string
+    repoId: number | null   // null when the directory belongs to no known repo
+    busy: boolean           // true while the session is running
+    outcome: 'succeeded' | 'failed' | 'interrupted' | null
+    updated: number
+  }>
+}
+\`\`\`
+
+### POST /sessions
+
+Create a session in a repo and send the first prompt. The response returns as soon as the prompt is queued, not when the run finishes. Use \`GET /sessions/:sessionId/reply\` to read the result.
+
+Sessions created through this tool always start in \`ask\` permission mode; existing sessions keep the mode the user chose.
+
+Pass \`worktree: true\` to run the session in a new isolated workspace instead of the repo directory. Creating a workspace can take tens of seconds; if the request times out it may still have succeeded, so call \`GET /sessions\` before retrying. \`ref\` selects the base ref for that workspace. \`model\` must be an available model reference; an unavailable model is rejected with \`400\` rather than silently substituted.
+
+\`\`\`json
+{
+  "action": "request",
+  "params": {
+    "method": "POST",
+    "path": "/sessions",
+    "body": {
+      "repoId": 1,
+      "prompt": "Fix the failing login test",
+      "title": "Fix login test",
+      "worktree": true
+    }
+  }
+}
+\`\`\`
+
+**Response (\`201\`):**
+\`\`\`ts
+{
+  sessionId: string
+  repoId: number
+  directory: string
+  workspaceDirectory: string | null
+  model: string
+  title: string | null
+  url: string   // deep link to open the session in the UI
+}
+\`\`\`
+
+### POST /sessions/:sessionId/prompt
+
+Queue a follow-up prompt for an existing session.
+
+\`\`\`json
+{
+  "action": "request",
+  "params": {
+    "method": "POST",
+    "path": "/sessions/ses_abc/prompt",
+    "body": { "text": "Also add a regression test" }
+  }
+}
+\`\`\`
+
+**Response (\`202\`):** \`{ "queued": true }\`
+
+### GET /sessions/:sessionId/reply
+
+Read the latest assistant reply for a session and whether it is still running. Prefer \`?waitMs=30000\` (integer, 0-45000) to wait for the session to settle instead of polling in a loop; the response returns once it settles or the timeout elapses. \`responseText\` is capped.
+
+\`\`\`json
+{
+  "action": "request",
+  "params": {
+    "method": "GET",
+    "path": "/sessions/ses_abc/reply?waitMs=30000"
+  }
+}
+\`\`\`
+
+**Response:**
+\`\`\`ts
+{
+  busy: boolean
+  responseText: string | null   // latest assistant text, null when there is none yet
+  errorText: string | null      // assistant error message, null when the turn succeeded
+  completed: boolean            // true once the latest assistant turn finished
+}
+\`\`\`
+
+### POST /sessions/:sessionId/fork
+
+Fork a session, optionally before a specific message. Omit \`beforeMessageId\` to fork from the current point. The forked session starts in \`ask\` permission mode.
+
+\`\`\`json
+{
+  "action": "request",
+  "params": {
+    "method": "POST",
+    "path": "/sessions/ses_abc/fork",
+    "body": { "beforeMessageId": "msg_123" }
+  }
+}
+\`\`\`
+
+**Response:**
+\`\`\`ts
+{
+  sessionId: string   // the new forked session
+  directory: string
+}
+\`\`\`
+
+## Notes
+
+- Session creation always goes through OpenCode Manager, which validates the repo and the requested model before creating anything
+- There is no delete route. Deleting sessions and workspaces stays out of this tool
+- An unknown session returns \`404\`; other failures return \`502\`
+`
+}
+
 export function buildAssistantOpenCodeConfig(): OpenCodeConfigInput {
   const config: OpenCodeConfigInput = {
     default_agent: ASSISTANT_DEFAULT_AGENT_NAME,
@@ -1004,6 +1177,7 @@ export async function ensureAssistantMode(
   await ensureDirectoryExists(path.join(assistantDir, ASSISTANT_OPENCODE_DIR, ASSISTANT_SKILLS_DIR, ASSISTANT_NOTIFICATIONS_SKILL_DIR))
   await ensureDirectoryExists(path.join(assistantDir, ASSISTANT_OPENCODE_DIR, ASSISTANT_SKILLS_DIR, ASSISTANT_SETTINGS_SKILL_DIR))
   await ensureDirectoryExists(path.join(assistantDir, ASSISTANT_OPENCODE_DIR, ASSISTANT_SKILLS_DIR, ASSISTANT_REPOS_SKILL_DIR))
+  await ensureDirectoryExists(path.join(assistantDir, ASSISTANT_OPENCODE_DIR, ASSISTANT_SKILLS_DIR, ASSISTANT_SESSIONS_SKILL_DIR))
 
   const schedulesSkillContent = buildSchedulesSkill()
   const existingSchedulesSkillContent = await fileExists(skillPath) ? await readFileContent(skillPath) : undefined
@@ -1034,6 +1208,14 @@ export async function ensureAssistantMode(
   const reposSkillCreated = !hasSameContentHash(existingReposSkillContent, reposSkillContent)
   if (reposSkillCreated) {
     await writeFileContent(reposSkillPath, reposSkillContent)
+  }
+
+  const sessionsSkillPath = getSessionsSkillPath(assistantDir)
+  const sessionsSkillContent = buildSessionsSkill()
+  const existingSessionsSkillContent = await fileExists(sessionsSkillPath) ? await readFileContent(sessionsSkillPath) : undefined
+  const sessionsSkillCreated = !hasSameContentHash(existingSessionsSkillContent, sessionsSkillContent)
+  if (sessionsSkillCreated) {
+    await writeFileContent(sessionsSkillPath, sessionsSkillContent)
   }
 
   const assistantAgentExists = await fileExists(assistantAgentPath)
@@ -1097,6 +1279,10 @@ export async function ensureAssistantMode(
     repoManagementSkill: {
       path: reposSkillPath,
       created: reposSkillCreated,
+    },
+    sessionManagementSkill: {
+      path: sessionsSkillPath,
+      created: sessionsSkillCreated,
     },
     defaultAgent: {
       name: ASSISTANT_DEFAULT_AGENT_NAME,
@@ -1201,6 +1387,7 @@ export async function getAssistantModeStatus(repo: Repo): Promise<AssistantModeS
   const notificationsSkillPath = getNotificationsSkillPath(assistantDir)
   const settingsSkillPath = getSettingsSkillPath(assistantDir)
   const reposSkillPath = getReposSkillPath(assistantDir)
+  const sessionsSkillPath = getSessionsSkillPath(assistantDir)
   const assistantAgentPath = getAssistantDefaultAgentPath(assistantDir)
 
   const agentsMdExists = await fileExists(agentsMdPath)
@@ -1237,6 +1424,10 @@ export async function getAssistantModeStatus(repo: Repo): Promise<AssistantModeS
     },
     repoManagementSkill: {
       path: reposSkillPath,
+      created: false,
+    },
+    sessionManagementSkill: {
+      path: sessionsSkillPath,
       created: false,
     },
     defaultAgent: {

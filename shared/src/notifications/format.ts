@@ -1,3 +1,32 @@
+import type { SessionGoalStatus, SessionGoalStopReason } from '../schemas/session-goals'
+
+const GOAL_OUTCOME_TITLES: Record<SessionGoalStatus, string> = {
+  active: 'Goal active',
+  paused: 'Goal paused',
+  completed: 'Goal completed',
+  blocked: 'Goal blocked',
+  stopped: 'Goal stopped',
+}
+
+const GOAL_STOP_REASON_LABELS: Record<SessionGoalStopReason, string> = {
+  cancelled: 'Cancelled',
+  user_paused: 'Paused by user',
+  continuation_limit: 'Continuation limit reached',
+  token_budget: 'Token budget reached',
+  turn_error: 'Turn failed',
+  interrupted: 'Interrupted',
+  audit_failed: 'Audit failed',
+  session_deleted: 'Session deleted',
+}
+
+export function getGoalOutcomeTitle(status: SessionGoalStatus): string {
+  return GOAL_OUTCOME_TITLES[status]
+}
+
+export function getGoalStopReasonLabel(stopReason: SessionGoalStopReason): string {
+  return GOAL_STOP_REASON_LABELS[stopReason]
+}
+
 const PERMISSION_LABELS: Record<string, string> = {
   read: 'Read File',
   edit: 'Edit File',

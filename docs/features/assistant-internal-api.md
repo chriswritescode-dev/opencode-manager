@@ -83,6 +83,11 @@ DELETE /repos/*/schedules/*/runs
 GET /repos/*/schedules/*/runs/*
 DELETE /repos/*/schedules/*/runs/*
 POST /repos/*/schedules/*/runs/*/cancel
+GET /sessions
+POST /sessions
+POST /sessions/*/prompt
+GET /sessions/*/reply
+POST /sessions/*/fork
 ```
 
 **Deliberately not allow-listed:**
@@ -371,13 +376,157 @@ Retrieve a list of all managed repositories, ordered by the user's repo preferen
 - `401`: Missing or invalid bearer token
 - `500`: Server error (database failure)
 
+### Sessions
+
+These routes back the `session-management` skill, so an agent can start work in a repo, hand a task to a new session, follow it up, read its reply, and fork it. Session creation always goes through the Manager's session launcher, which validates the repository and the requested model before creating anything. Malformed JSON is rejected with `{ "error": "Invalid JSON" }`; a body that fails validation is rejected with `{ "error": "Invalid request body", "details": [...] }`; unknown upstream failures return `502`.
+
+**GET `/api/internal/sessions`**
+
+List sessions, newest first. Pass `repoId` to restrict the list to one repo — this covers every OpenCode workspace of that repo, not only the repo directory — and `limit` (1-50, default 10) to bound it.
+
+**Query Parameters:**
+- `repoId` (optional): Restrict to a repository. An unknown id returns `404`.
+- `limit` (optional): 1-50, default 10.
+
+**Response:**
+```ts
+{
+  sessions: Array<{
+    id: string
+    title: string | null
+    directory: string
+    repoId: number | null   // null only when the directory belongs to no known repo
+    busy: boolean           // true while the session is running
+    outcome: 'succeeded' | 'failed' | 'interrupted' | null
+    updated: number
+  }>
+}
+```
+
+**Status Codes:**
+- `200`: Session list returned
+- `400`: Invalid query
+- `401`: Missing or invalid bearer token
+- `404`: Repository not found
+- `502`: OpenCode error
+
+**POST `/api/internal/sessions`**
+
+Create a session in a repo and send the first prompt. The response returns as soon as the prompt is queued, not when the run finishes; poll `GET /api/internal/sessions/:sessionId/reply` for the result. Pass `worktree: true` to run in a new isolated workspace, with `ref` selecting its base ref. A requested `model` must be available; an unavailable model is rejected with `400` rather than silently substituted. Sessions created here are pinned to **ask** permission mode. With `worktree: true`, creation can take tens of seconds; a request that times out may still have succeeded, so check `GET /api/internal/sessions` before retrying.
+
+**Request Body:**
+```ts
+{
+  repoId: number
+  prompt: string          // 1-20000 characters
+  title?: string          // max 200 characters
+  model?: string
+  agent?: string
+  worktree?: boolean
+  ref?: string
+}
+```
+
+**Response (`201`):**
+```ts
+{
+  sessionId: string
+  repoId: number
+  directory: string
+  workspaceDirectory: string | null
+  model: string
+  title: string | null
+  url: string   // deep link to open the session in the UI
+}
+```
+
+**Status Codes:**
+- `201`: Session created and prompt queued
+- `400`: Invalid request body, or the requested model is unavailable
+- `401`: Missing or invalid bearer token
+- `404`: Repository not found
+- `502`: OpenCode error
+
+**POST `/api/internal/sessions/:sessionId/prompt`**
+
+Queue a follow-up prompt for an existing session.
+
+**Request Body:**
+```ts
+{
+  text: string   // 1-20000 characters
+}
+```
+
+**Response (`202`):**
+```ts
+{ queued: true }
+```
+
+**Status Codes:**
+- `202`: Prompt queued
+- `400`: Invalid request body
+- `401`: Missing or invalid bearer token
+- `404`: Session not found
+- `502`: OpenCode error
+
+**GET `/api/internal/sessions/:sessionId/reply`**
+
+Read the latest assistant reply for a session and whether it is still running. Poll this after creating a session or queueing a prompt until `busy` is `false`. Pass `waitMs` (0-45000) to wait until the session settles instead of polling in a loop; the response returns when it settles or the timeout elapses. `responseText` is capped at 20,000 characters, with a truncation marker appended when it is longer.
+
+**Response:**
+```ts
+{
+  busy: boolean
+  responseText: string | null   // latest assistant text, null when there is none yet
+  errorText: string | null      // assistant error message, null when the turn succeeded
+  completed: boolean            // true once the latest assistant turn finished
+}
+```
+
+**Status Codes:**
+- `200`: Reply state returned
+- `400`: Invalid `waitMs`
+- `401`: Missing or invalid bearer token
+- `404`: Session not found
+- `502`: OpenCode error
+
+**POST `/api/internal/sessions/:sessionId/fork`**
+
+Fork a session, optionally before a specific message. Omit `beforeMessageId` to fork from the current point. The forked session is pinned to **ask** permission mode.
+
+**Request Body:**
+```ts
+{
+  beforeMessageId?: string
+}
+```
+
+**Response:**
+```ts
+{
+  sessionId: string   // the new forked session
+  directory: string
+}
+```
+
+**Status Codes:**
+- `200`: Session forked
+- `400`: Invalid request body
+- `401`: Missing or invalid bearer token
+- `404`: Session not found
+- `502`: OpenCode error
+
+There is no delete route for sessions. Deleting sessions and workspaces stays out of this tool, as does changing permission modes and starting goals.
+
 ## Skills
 
-The assistant workspace includes four skills that document these capabilities:
+The assistant workspace includes five skills that document these capabilities:
 
 1. **Schedule Management** (`.opencode/skills/schedule-management/SKILL.md`) — manage schedule jobs and runs through the `ocm` `request` action.
 2. **Notifications** (`.opencode/skills/notifications/SKILL.md`) — send push notifications through the `ocm` `send_notification` action.
 3. **Manager Settings** (`.opencode/skills/manager-settings/SKILL.md`) — read and patch user preferences, read and update the OpenCode configuration file, and reload the assistant workspace through the `ocm` `request` action.
 4. **Repo Management** (`.opencode/skills/repo-management/SKILL.md`) — list managed repositories through the `ocm` `request` action.
+5. **Session Management** (`.opencode/skills/session-management/SKILL.md`) — list, create, follow up, read the reply of, and fork sessions through the `ocm` `request` action.
 
 These skills are automatically provisioned when assistant mode is initialized and contain detailed examples and usage patterns.

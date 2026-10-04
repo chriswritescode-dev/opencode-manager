@@ -29,6 +29,9 @@ OpenCode Manager provides a comprehensive web interface for managing OpenCode AI
 - **Slash Commands** - Built-in (`/help`, `/new`, `/compact`) and custom commands
 - **File Mentions** - Reference files with `@filename` autocomplete
 - **Plan/Build Modes** - Toggle between read-only and file-change modes
+- **Permission Modes** — Ask every time or Accept everything, per session, with a default for new sessions
+- **Session Goals** — Keep a session working toward an objective until an auditor model says it is done or blocked
+- **Multi-run** — Run one prompt across up to five models at once, optionally each in its own workspace
 - **Per-Agent Model Selection** — Each agent retains its own model selection independently
 - **Session Pinning** — Pin important sessions to a dedicated section at the top of the session list
 - **Mermaid Diagrams** - Visual diagram rendering in chat
@@ -108,7 +111,8 @@ Both pickers live under **Settings → General**.
 ### Assistant Mode
 
 - **Dedicated AI Workspace** — Isolated assistant directory with managed configuration and a built-in bearer-token API
-- **Auto-Provisioned Skills** — Schedule management, notifications, settings, and repo listing skills available out of the box
+- **Auto-Provisioned Skills** — Schedule management, notifications, settings, repo listing, and session management skills available out of the box
+- **Session Management** — List, create, follow up, read the reply of, and fork sessions through the `ocm` tool
 - **Session Continuity** — Navigating to the assistant always resumes the most recent session or creates one automatically
 
 [Learn more →](assistant-mode.md)

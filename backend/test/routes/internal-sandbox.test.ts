@@ -1,4 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it, mock, vi } from 'bun:test'
+import type { SessionPermissionModeService } from '../../src/services/session-permission-modes'
 import { Hono } from 'hono'
 import { Database } from 'bun:sqlite'
 import { mkdirSync, rmSync } from 'node:fs'
@@ -93,7 +94,7 @@ describe('internal sandbox routes', () => {
     const notificationService = new NotificationService(db)
     settingsService = new SettingsService(db)
     app = new Hono()
-    app.route('/api/internal', createInternalRoutes(db, scheduleService, notificationService, settingsService, openCodeClient))
+    app.route('/api/internal', createInternalRoutes(db, scheduleService, notificationService, settingsService, openCodeClient, {} as SessionPermissionModeService))
     token = getOrCreateInternalToken(db)
     repoDir = path.join(getReposPath(), 'sandbox-route-test')
     mkdirSync(repoDir, { recursive: true })

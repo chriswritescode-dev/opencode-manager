@@ -1,4 +1,5 @@
 import { describe, it, expect, beforeEach, afterEach, vi } from 'bun:test'
+import type { SessionPermissionModeService } from '../../src/services/session-permission-modes'
 import { Hono } from 'hono'
 import { Database } from 'bun:sqlite'
 import { readFile, writeFile } from 'fs/promises'
@@ -59,7 +60,7 @@ describe('internal/opencode-config routes', () => {
     const notificationService = new NotificationService(db)
     const settingsService = new SettingsService(db)
     app = new Hono()
-    app.route('/api/internal', createInternalRoutes(db, scheduleService, notificationService, settingsService, openCodeClient))
+    app.route('/api/internal', createInternalRoutes(db, scheduleService, notificationService, settingsService, openCodeClient, {} as SessionPermissionModeService))
     token = getOrCreateInternalToken(db)
   })
 

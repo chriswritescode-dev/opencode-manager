@@ -1,4 +1,4 @@
-import { ASSISTANT_REPO_ID } from '@opencode-manager/shared/utils';
+import { ASSISTANT_REPO_ID, buildSessionPath } from '@opencode-manager/shared/utils';
 
 export function getAssistantPath(): string {
   return '/assistant';
@@ -20,9 +20,8 @@ export function getRepoPath(repoId: number | string): string {
   return isAssistantRepo(repoId) ? getAssistantPath() : `/repos/${repoId}`;
 }
 
-export function getSessionPath(repoId: number | string, sessionId: string): string {
-  const suffix = isAssistantRepo(repoId) ? '?assistant=1' : '';
-  return `/repos/${repoId}/sessions/${sessionId}${suffix}`;
+export function getSessionPath(repoId: number | string, sessionId: string, options?: { repoTab?: string }): string {
+  return buildSessionPath(repoId, sessionId, options);
 }
 
 export function parseRepoRoute(pathname: string): { repoId: number | null; section: string | null; sessionId: string | null } {

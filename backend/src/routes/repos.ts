@@ -12,14 +12,13 @@ import type { OpenCodeClient } from '../services/opencode/client'
 import { logger } from '../utils/logger'
 import { getErrorMessage, getStatusCode } from '../utils/error-utils'
 import { handleOpenCodeError } from '../utils/route-helpers'
-import { ASSISTANT_REPO_ID, isWorktreeSibling } from '@opencode-manager/shared/utils'
+import { ASSISTANT_REPO_ID } from '@opencode-manager/shared/utils'
 import { isWorktreeError, openCodeLocation } from '@opencode-manager/shared/opencode'
 import { createRepoGitRoutes } from './repo-git'
 import { createScheduleRoutes } from './schedules'
 import type { GitAuthService } from '../services/git-auth'
 import { ScheduleService } from '../services/schedules'
 import { ensureAssistantMode, getAssistantModeStatus, buildAssistantRepo } from '../services/assistant-mode'
-import { canonicalPathSync } from '../utils/fs-safe'
 import path from 'path'
 
 function resolveRepo(database: Database, id: number): Repo | null {
@@ -267,19 +266,13 @@ app.get('/', async (c) => {
       const body = await c.req.json().catch(() => null)
       const parsed = DeleteWorkspaceRequestSchema.safeParse(body)
       if (!parsed.success) return c.json({ error: 'directory is required' }, 400)
-      const directory = parsed.data.directory
-
-      const siblings = await repoService.getSiblingRepos(database, id, gitAuthService.getGitEnvironment(), openCodeClient)
-      const requestedDirectory = canonicalPathSync(path.resolve(directory))
-      const worktree = siblings.find(
-        (sibling) => isWorktreeSibling(sibling) && canonicalPathSync(path.resolve(sibling.fullPath)) === requestedDirectory,
-      )
-      if (!worktree) return c.json({ error: 'Not a deletable worktree of this repo' }, 400)
 
       try {
-        const projectID = await repoService.resolveRepoProjectId(openCodeClient, repo.fullPath)
-        await openCodeClient.api.worktree.remove({ projectID, directory: worktree.fullPath, force: true })
+        await repoService.removeRepoWorkspace(database, openCodeClient, gitAuthService.getGitEnvironment(), repo, parsed.data.directory)
       } catch (error: unknown) {
+        if (error instanceof repoService.RepoWorkspaceError) {
+          return c.json({ error: error.message }, error.status)
+        }
         if (isWorktreeError(error)) {
           return c.json({ error: error.data.message }, 409)
         }
@@ -302,8 +295,7 @@ app.get('/', async (c) => {
       if (!repo || repo.cloneStatus !== 'ready') return c.json({ error: 'Repo not found' }, 404)
 
       try {
-        const projectID = await repoService.resolveRepoProjectId(openCodeClient, repo.fullPath)
-        const worktree = await openCodeClient.api.worktree.create({ projectID })
+        const worktree = await repoService.createRepoWorkspace(openCodeClient, repo)
         return c.json(worktree)
       } catch (error: unknown) {
         if (isWorktreeError(error)) {

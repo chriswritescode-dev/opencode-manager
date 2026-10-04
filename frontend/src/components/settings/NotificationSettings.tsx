@@ -213,6 +213,24 @@ export function NotificationSettings() {
                       }
                     />
                   </div>
+
+                  <div className="flex items-start justify-between gap-4 py-3">
+                    <div className="min-w-0 space-y-0.5">
+                      <Label htmlFor="notifGoalOutcome" className="text-base">
+                        Goal outcomes
+                      </Label>
+                      <p className="text-sm text-muted-foreground">
+                        When a session goal completes, blocks or stops
+                      </p>
+                    </div>
+                    <Switch
+                      id="notifGoalOutcome"
+                      checked={preferences.events.goalOutcome ?? true}
+                      onCheckedChange={(checked) =>
+                        updateEventPreference("goalOutcome", checked)
+                      }
+                    />
+                  </div>
                 </>
               )}
             </div>

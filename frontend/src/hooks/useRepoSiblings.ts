@@ -2,9 +2,13 @@ import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { createRepoWorkspace, deleteRepoWorkspace, getRepoSiblings, type RepoSibling } from '@/api/repos'
 import { showToast } from '@/lib/toast'
 
+export function repoSiblingsQueryKey(repoId: number | undefined) {
+  return ['repo', 'siblings', repoId] as const
+}
+
 export function useRepoSiblings(repoId: number | undefined) {
   return useQuery<RepoSibling[]>({
-    queryKey: ['repo', 'siblings', repoId],
+    queryKey: repoSiblingsQueryKey(repoId),
     queryFn: () => getRepoSiblings(repoId!),
     enabled: !!repoId && repoId > 0,
     staleTime: 30_000,
@@ -24,7 +28,7 @@ export function useDeleteRepoWorkspaces(repoId: number | undefined) {
       return { total: directories.length, failed }
     },
     onSuccess: ({ total, failed }) => {
-      queryClient.invalidateQueries({ queryKey: ['repo', 'siblings', repoId] })
+      queryClient.invalidateQueries({ queryKey: repoSiblingsQueryKey(repoId) })
       const deleted = total - failed
       if (failed === 0) {
         showToast.success(deleted === 1 ? 'Workspace deleted' : `${deleted} workspaces deleted`)
@@ -49,7 +53,7 @@ export function useCreateRepoWorkspace(repoId: number | undefined) {
       return createRepoWorkspace(repoId)
     },
     onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: ['repo', 'siblings', repoId] })
+      queryClient.invalidateQueries({ queryKey: repoSiblingsQueryKey(repoId) })
       showToast.success('Workspace created')
     },
     onError: () => {

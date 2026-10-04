@@ -1,4 +1,5 @@
 import { describe, it, expect, beforeEach, vi } from 'vitest'
+import type { SessionPermissionModeService } from '../../src/services/session-permission-modes'
 import { Hono } from 'hono'
 import { Database } from 'bun:sqlite'
 import { createInternalRoutes } from '../../src/routes/internal'
@@ -43,7 +44,7 @@ describe('internal/assistant routes', () => {
     notificationService = new NotificationService(db)
     settingsService = new SettingsService(db)
     app = new Hono()
-    app.route('/api/internal', createInternalRoutes(db, scheduleService, notificationService, settingsService, openCodeClient))
+    app.route('/api/internal', createInternalRoutes(db, scheduleService, notificationService, settingsService, openCodeClient, {} as SessionPermissionModeService))
     token = getOrCreateInternalToken(db)
   })
 

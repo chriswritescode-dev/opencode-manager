@@ -346,9 +346,13 @@ export function deleteRepo(db: Database, id: number): void {
     return
   }
 
-  for (const table of TABLES_WITH_REPO_ID) {
-    db.prepare(`DELETE FROM ${table} WHERE repo_id = ?`).run(id)
-  }
-  const stmt = db.prepare('DELETE FROM repos WHERE id = ?')
-  stmt.run(id)
+  const remove = db.transaction(() => {
+    db.prepare('DELETE FROM multi_run_entries WHERE multi_run_id IN (SELECT id FROM multi_runs WHERE repo_id = ?)').run(id)
+    db.prepare('DELETE FROM multi_runs WHERE repo_id = ?').run(id)
+    for (const table of TABLES_WITH_REPO_ID) {
+      db.prepare(`DELETE FROM ${table} WHERE repo_id = ?`).run(id)
+    }
+    db.prepare('DELETE FROM repos WHERE id = ?').run(id)
+  })
+  remove()
 }

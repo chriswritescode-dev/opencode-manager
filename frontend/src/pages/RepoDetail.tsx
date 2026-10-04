@@ -7,6 +7,7 @@ import { FileBrowserSheet } from "@/components/file-browser/FileBrowserSheet";
 import { Header } from "@/components/ui/header";
 import { RepoMcpDialog } from "@/components/repo/RepoMcpDialog";
 import { RepoSkillsDialog } from "@/components/repo/RepoSkillsDialog";
+import { MultiRunDialog } from "@/components/repo/MultiRunDialog";
 import { SourceControlPanel } from "@/components/source-control";
 import { useCreateSession } from "@/hooks/useOpenCode";
 import { useRepoActivity } from "@/hooks/useRepoActivity";
@@ -18,7 +19,7 @@ import { WorktreeTabs } from "@/components/repo/WorktreeTabs";
 import { WorkspaceManager } from "@/components/repo/WorkspaceManager";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
-import { GitBranch, Plus, Loader2, Layers } from "lucide-react";
+import { GitBranch, Plus, Loader2, Layers, Columns3 } from "lucide-react";
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { ResetPermissionsDialog } from "@/components/repo/ResetPermissionsDialog";
 import { PendingActionsGroup } from "@/components/notifications/PendingActionsGroup";
@@ -34,6 +35,7 @@ export function RepoDetail() {
   const [skillsDialogOpen, setSkillsDialogOpen] = useDialogParam('skills');
   const [sourceControlOpen, setSourceControlOpen] = useDialogParam('sourceControl');
   const [resetPermissionsOpen, setResetPermissionsOpen] = useDialogParam('resetPermissions');
+  const [multiRunOpen, setMultiRunOpen] = useDialogParam('multiRun');
   const [createWorkspaceOpen, setCreateWorkspaceOpen] = useState(false);
   const [workspaceSelectorOpen, setWorkspaceSelectorOpen] = useState(false);
   const [activeWorkspaceDirectory, setActiveWorkspaceDirectory] = useState<string | undefined>();
@@ -203,6 +205,16 @@ export function RepoDetail() {
             <PendingActionsGroup />
           </div>
           <Button
+            onClick={() => setMultiRunOpen(true)}
+            aria-label="Multi-run"
+            variant="outline"
+            size="sm"
+            className="h-10 sm:h-9"
+          >
+            <Columns3 className="w-4 h-4 sm:mr-2" />
+            <span className="hidden sm:inline">Multi-run</span>
+          </Button>
+          <Button
             onClick={() => handleCreateSession()}
             disabled={createSessionMutation.isPending}
             size="sm"
@@ -295,6 +307,14 @@ export function RepoDetail() {
         open={resetPermissionsOpen}
         onOpenChange={setResetPermissionsOpen}
         repoId={repoId}
+      />
+
+      <MultiRunDialog
+        repoId={repoId}
+        directory={baseDirectory}
+        defaultBaseRef={currentBranch}
+        open={multiRunOpen}
+        onOpenChange={setMultiRunOpen}
       />
     </div>
   );

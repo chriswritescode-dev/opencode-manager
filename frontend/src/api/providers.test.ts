@@ -1,5 +1,5 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest'
-import { getOpenCodeConfigModel, getProviders, getProvidersWithModels, providerCredentialsApi } from './providers'
+import { getOpenCodeConfigModel, getProviders, getProvidersWithModels, providerCredentialsApi, providerModelRef } from './providers'
 import { API_BASE_URL } from '@/config'
 import { makeOpenCodeConfigFile } from '@/test/fixtures/opencode-config'
 
@@ -320,6 +320,18 @@ describe('getProvidersWithModels', () => {
     const anthropic = providers.find((provider) => provider.id === 'anthropic')
     expect(anthropic?.models.map((model) => model.key).sort()).toEqual(['claude-custom', 'claude-sonnet-4'])
     expect(anthropic?.models.find((model) => model.key === 'claude-custom')?.name).toBe('Claude Custom')
+  })
+})
+
+describe('providerModelRef', () => {
+  it('prefers the catalog key over the backing model id', () => {
+    expect(providerModelRef({ id: 'anthropic' }, { id: 'claude-sonnet-4-20250514', key: 'claude-sonnet-4' })).toBe(
+      'anthropic/claude-sonnet-4'
+    )
+  })
+
+  it('falls back to the model id when no key is present', () => {
+    expect(providerModelRef({ id: 'openai' }, { id: 'gpt-4o' })).toBe('openai/gpt-4o')
   })
 })
 

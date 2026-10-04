@@ -583,6 +583,34 @@ describe('SSEAggregator upstream resynchronization signal', () => {
 
     expect(client.events.filter(event => event.event === 'resync')).toHaveLength(1)
   })
+
+  it('invokes onUpstreamConnected listeners on the first and every later upstream connect', () => {
+    const listener = vi.fn()
+    const unsubscribe = sseAggregator.onUpstreamConnected(listener)
+
+    const openUpstream = (sseAggregator as unknown as { handleUpstreamOpen(wasConnectedBefore: boolean): void }).handleUpstreamOpen.bind(sseAggregator)
+    openUpstream(false)
+    openUpstream(true)
+
+    expect(listener).toHaveBeenCalledTimes(2)
+
+    unsubscribe()
+    openUpstream(true)
+
+    expect(listener).toHaveBeenCalledTimes(2)
+  })
+
+  it('isolates a throwing onUpstreamConnected listener from the others', () => {
+    const throwing = vi.fn(() => { throw new Error('boom') })
+    const healthy = vi.fn()
+    sseAggregator.onUpstreamConnected(throwing)
+    sseAggregator.onUpstreamConnected(healthy)
+
+    ;(sseAggregator as unknown as { handleUpstreamOpen(wasConnectedBefore: boolean): void }).handleUpstreamOpen(false)
+
+    expect(throwing).toHaveBeenCalledTimes(1)
+    expect(healthy).toHaveBeenCalledTimes(1)
+  })
 })
 
 describe('SSEAggregator directory-indexed broadcast', () => {
@@ -734,5 +762,38 @@ describe('SSEAggregator directory-less session event routing', () => {
       directory: null,
       payload: { id: 'evt_1', created: 1, type: 'session.execution.succeeded', data: { sessionID: 'ses_del' } },
     })
+  })
+
+  it('resolves a directory-less session.forked from the remembered parent directory and notifies listeners', () => {
+    const subscribed = createCapturingClient()
+    const global = createCapturingClient()
+    sseAggregator.addClient('fork-a', subscribed.callback, subscribed.writeFrame, ['/r'])
+    sseAggregator.addClient('fork-b', global.callback, global.writeFrame, [])
+
+    const seen: Array<{ directory: string; type: string; sessionID: string }> = []
+    sseAggregator.onEvent((directory, event) => {
+      seen.push({ directory, type: event.type, sessionID: sessionIDFromEvent(event) ?? '' })
+    })
+
+    emitRawEvent({ type: 'session.created', location: { directory: '/r' }, data: { sessionID: 'ses_source' } })
+    seen.length = 0
+
+    emitRawEvent({ type: 'session.forked', data: { sessionID: 'ses_fork', parentID: 'ses_source', boundary: { messageID: 'msg_1' } } })
+
+    expect(seen).toEqual([{ directory: '/r', type: 'session.forked', sessionID: 'ses_fork' }])
+
+    const forkPayload = {
+      id: 'evt_1',
+      created: 1,
+      type: 'session.forked',
+      data: { sessionID: 'ses_fork', parentID: 'ses_source', boundary: { messageID: 'msg_1' } },
+    }
+    expect(subscribed.frames.map(parseFrame).at(-1)).toEqual({ directory: null, payload: forkPayload })
+    expect(global.frames.map(parseFrame).at(-1)).toEqual({ directory: null, payload: forkPayload })
+
+    seen.length = 0
+    emitRawEvent({ type: 'session.execution.succeeded', data: { sessionID: 'ses_fork' } })
+
+    expect(seen).toEqual([{ directory: '/r', type: 'session.execution.succeeded', sessionID: 'ses_fork' }])
   })
 })

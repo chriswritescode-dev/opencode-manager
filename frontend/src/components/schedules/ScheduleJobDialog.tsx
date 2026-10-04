@@ -2,6 +2,7 @@ import { useEffect, useMemo, useRef, useState } from 'react'
 import { useQuery } from '@tanstack/react-query'
 import type { CreateScheduleJobRequest, PromptTemplate, ScheduleJob, ScheduleMcpServer } from '@opencode-manager/shared/types'
 import { useScheduleModels } from '@/hooks/useScheduleModels'
+import { providerModelRef } from '@/api/providers'
 import { resolveScheduleModel } from '@/lib/schedules/schedule-model'
 import { useAgents } from '@/hooks/useOpenCode'
 import { useScheduleTarget } from '@/hooks/useScheduleTarget'
@@ -161,7 +162,7 @@ export function ScheduleJobDialog({ open, onOpenChange, job, isSaving, onSubmit,
       const providerModel = provider?.models.find((m) => m.key === modelId || m.id === modelId)
       configuredValues.add(configDefaultModel)
       if (providerModel) {
-        configuredValues.add(`${providerId}/${providerModel.key ?? providerModel.id}`)
+        configuredValues.add(providerModelRef({ id: providerId }, providerModel))
         configuredValues.add(`${providerId}/${providerModel.id}`)
       }
       configuredModels.push({
@@ -174,11 +175,11 @@ export function ScheduleJobDialog({ open, onOpenChange, job, isSaving, onSubmit,
 
     const allModels = providerModels.flatMap((provider) =>
       provider.models
-        .filter((providerModel) => !configuredValues.has(`${provider.id}/${providerModel.key ?? providerModel.id}`))
+        .filter((providerModel) => !configuredValues.has(providerModelRef(provider, providerModel)))
         .map((providerModel) => ({
-          value: `${provider.id}/${providerModel.key ?? providerModel.id}`,
+          value: providerModelRef(provider, providerModel),
           label: providerModel.name || providerModel.key || providerModel.id,
-          description: `${provider.id}/${providerModel.key ?? providerModel.id}`,
+          description: providerModelRef(provider, providerModel),
           group: provider.name,
         })),
     )
