@@ -377,6 +377,15 @@ describe('OpenCodeModelDialog — model discovery', () => {
     vi.mocked(settingsApi.discoverOpenCodeModels).mockReset()
   })
 
+  it('shows current MiniMax model metadata examples', async () => {
+    const { OpenCodeModelDialog } = await import('./OpenCodeModelDialog')
+    render(<OpenCodeModelDialog {...discoveryProps} />)
+
+    expect(screen.getByPlaceholderText('e.g., MiniMax-M3')).toBeInTheDocument()
+    expect(screen.getByPlaceholderText('e.g., 1000000')).toBeInTheDocument()
+    expect(screen.getByPlaceholderText(/"adaptive": \{\}[\s\S]*"disabled": \{\}/)).toBeInTheDocument()
+  })
+
   it('shows a Discover button when a new API provider has a base URL', async () => {
     const { OpenCodeModelDialog } = await import('./OpenCodeModelDialog')
     render(<OpenCodeModelDialog {...discoveryProps} />)
@@ -429,7 +438,7 @@ describe('OpenCodeModelDialog — model discovery', () => {
       expect(screen.getByText(/1 model found/i)).toBeInTheDocument()
     })
 
-    const providerModelInput = screen.getByPlaceholderText('e.g., MiniMax-M2.7')
+    const providerModelInput = screen.getByPlaceholderText('e.g., MiniMax-M3')
     fireEvent.focus(providerModelInput)
 
     const option = await screen.findByRole('button', { name: 'gpt-4o' })
