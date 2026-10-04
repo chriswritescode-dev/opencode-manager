@@ -37,4 +37,18 @@ describe('internal git-credentials routes', () => {
     expect(res.status).toBe(200)
     expect(await res.json()).toEqual({})
   })
+
+  it('GET /gh-env returns only GH env for a repo cwd', async () => {
+    settingsService.updateSettings({
+      gitCredentials: [
+        { name: 'github', host: 'github.com', type: 'pat', token: 'ghp_repo_token' } as GitCredential,
+      ],
+      gitIdentities: [{ id: 'work', name: 'Work User', email: 'work@example.com' }],
+    })
+
+    const res = await app.request('/gh-env?cwd=/tmp/any-repo')
+
+    expect(res.status).toBe(200)
+    expect(await res.json()).toEqual({ GH_TOKEN: 'ghp_repo_token', GITHUB_TOKEN: 'ghp_repo_token' })
+  })
 })

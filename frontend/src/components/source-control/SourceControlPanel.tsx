@@ -8,8 +8,10 @@ import { useGit } from '@/hooks/useGit'
 import { ChangesTab } from './ChangesTab'
 import { CommitsTab } from './CommitsTab'
 import { BranchesTab } from './BranchesTab'
+import { StashTab } from './StashTab'
 import { CommitDetailView } from './CommitDetailView'
 import { GitErrorBanner } from './GitErrorBanner'
+import { GitOperationBanner } from './GitOperationBanner'
 import { FileDiffView } from '@/components/file-browser/FileDiffView'
 import { Button } from '@/components/ui/button'
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from '@/components/ui/dialog'
@@ -24,6 +26,7 @@ import {
   ArrowDown,
   RefreshCw,
   ArrowDownFromLine,
+  Archive,
   X,
 } from 'lucide-react'
 import { cn } from '@/lib/utils'
@@ -39,7 +42,7 @@ interface SourceControlPanelProps {
   repoName?: string
 }
 
-type Tab = 'changes' | 'commits' | 'branches'
+type Tab = 'changes' | 'commits' | 'branches' | 'stash'
 type View = 'default' | 'commit-detail'
 
 export function SourceControlPanel({
@@ -102,6 +105,7 @@ export function SourceControlPanel({
     { id: 'changes', label: 'Changes', icon: FileCode },
     { id: 'commits', label: 'Commits', icon: History },
     { id: 'branches', label: 'Branches', icon: GitBranch },
+    { id: 'stash', label: 'Stash', icon: Archive },
   ]
 
   const changesCount = status?.files.length || 0
@@ -176,6 +180,10 @@ export function SourceControlPanel({
         </div>
       </div>
 
+      {status?.operation && (
+        <GitOperationBanner repoId={repoId} operation={status.operation} />
+      )}
+
       {gitError && (
         <GitErrorBanner error={gitError} onDismiss={() => setGitError(null)} />
       )}
@@ -234,6 +242,9 @@ export function SourceControlPanel({
           )}
           {activeTab === 'branches' && currentView === 'default' && (
             <BranchesTab repoId={repoId} currentBranch={displayBranch} />
+          )}
+          {activeTab === 'stash' && currentView === 'default' && (
+            <StashTab repoId={repoId} />
           )}
 
           {currentView === 'commit-detail' && selectedCommit && (

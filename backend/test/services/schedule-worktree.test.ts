@@ -61,15 +61,6 @@ describe('ScheduleWorktreeManager', () => {
     setupSSHForRepoUrl: vi.fn().mockResolvedValue(false),
     cleanupSSHKey: vi.fn().mockResolvedValue(undefined),
   }
-  const mockSettingsService = {
-    getSettings: vi.fn(() => ({
-      preferences: { gitIdentity: undefined },
-      updatedAt: Date.now(),
-    })),
-  }
-  const mockCredentialProvider = {
-    getGitCredentials: vi.fn(() => []),
-  }
   const mockDb = {} as any
 
   beforeAll(() => {
@@ -110,8 +101,6 @@ describe('ScheduleWorktreeManager', () => {
     const { ScheduleWorktreeManager } = await import('../../src/services/schedule-worktree')
     return new ScheduleWorktreeManager(
       mockGitAuthService as any,
-      mockSettingsService as any,
-      mockCredentialProvider as any,
       mockDb,
     )
   }

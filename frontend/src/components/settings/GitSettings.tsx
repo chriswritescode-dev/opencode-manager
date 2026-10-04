@@ -1,7 +1,7 @@
-import { useState, useEffect } from 'react'
+import { useState, useEffect, useRef } from 'react'
 import { useQuery, useQueryClient } from '@tanstack/react-query'
 import { useSettings } from '@/hooks/useSettings'
-import { Loader2, Plus, Trash2, Save, User, Key, Pencil } from 'lucide-react'
+import { Loader2, Plus, Trash2, Save, User, Users, Key, Pencil } from 'lucide-react'
 import { showToast } from '@/lib/toast'
 import { GitCredentialDialog, type GitCredentialSaveOptions } from './GitCredentialDialog'
 import { RestartServerDialog } from './RestartServerDialog'
@@ -9,7 +9,7 @@ import { Label } from '@/components/ui/label'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { randomId } from '@/lib/utils'
-import type { GitCredential, GitIdentity, UserPreferences } from '@/api/types/settings'
+import type { GitCredential, GitIdentity, GitIdentityProfile, UserPreferences } from '@/api/types/settings'
 import { listRepos, updateRepoGitCredential } from '@/api/repos'
 import { useOpenCodeServerActions } from '@/hooks/useOpenCodeServerActions'
 
@@ -22,11 +22,13 @@ export function GitSettings() {
   const queryClient = useQueryClient()
   const [gitCredentials, setGitCredentials] = useState<GitCredential[]>([])
   const [gitIdentity, setGitIdentity] = useState<GitIdentity>({ name: '', email: '' })
+  const [gitIdentities, setGitIdentities] = useState<GitIdentityProfile[]>([])
   const [defaultGitCredentialId, setDefaultGitCredentialId] = useState<string | undefined>()
   const [isSaving, setIsSaving] = useState(false)
   const [hasChanges, setHasChanges] = useState(false)
   const [isCredentialDialogOpen, setIsCredentialDialogOpen] = useState(false)
   const [editingCredentialIndex, setEditingCredentialIndex] = useState<number | null>(null)
+  const identityDirtyRef = useRef(false)
 
   const { data: repos = [] } = useQuery({
     queryKey: ['repos'],
@@ -58,16 +60,25 @@ export function GitSettings() {
   useEffect(() => {
     if (preferences) {
       setGitCredentials(preferences.gitCredentials || [])
-      setGitIdentity(preferences.gitIdentity || { name: '', email: '' })
       setDefaultGitCredentialId(preferences.defaultGitCredentialId)
-      setHasChanges(false)
+      if (!identityDirtyRef.current) {
+        setGitIdentity(preferences.gitIdentity || { name: '', email: '' })
+        setGitIdentities(preferences.gitIdentities || [])
+        setHasChanges(false)
+      }
     }
   }, [preferences])
 
-  const checkForIdentityChanges = (newIdentity: GitIdentity) => {
+  const identityListsEqual = (a: GitIdentityProfile[], b: GitIdentityProfile[]) =>
+    a.length === b.length && a.every((entry, index) =>
+      entry.id === b[index]?.id && entry.name === b[index]?.name && entry.email === b[index]?.email)
+
+  const checkForIdentityChanges = (newIdentity: GitIdentity, newIdentities: GitIdentityProfile[]) => {
     const currentIdentity = preferences?.gitIdentity || { name: '', email: '' }
     const identityChanged = currentIdentity.name !== newIdentity.name || currentIdentity.email !== newIdentity.email
-    setHasChanges(identityChanged)
+    const identitiesChanged = !identityListsEqual(preferences?.gitIdentities || [], newIdentities)
+    identityDirtyRef.current = identityChanged || identitiesChanged
+    setHasChanges(identityChanged || identitiesChanged)
   }
 
   const openAddCredentialDialog = () => {
@@ -122,7 +133,7 @@ export function GitSettings() {
     
     try {
       await saveGitSettings(
-        { gitCredentials: newCredentials, defaultGitCredentialId: nextDefaultGitCredentialId, gitIdentity },
+        { gitCredentials: newCredentials, defaultGitCredentialId: nextDefaultGitCredentialId },
         {
           successMessage: 'Credential saved',
           afterSave: () => syncRepoAssignments(nextCredential.id!, options.repoIds),
@@ -144,7 +155,7 @@ export function GitSettings() {
 
     try {
       await saveGitSettings(
-        { gitCredentials: newCredentials, defaultGitCredentialId: nextDefaultGitCredentialId, gitIdentity },
+        { gitCredentials: newCredentials, defaultGitCredentialId: nextDefaultGitCredentialId },
         {
           successMessage: 'Credential deleted',
           afterSave: removedCredentialId ? () => syncRepoAssignments(removedCredentialId, []) : undefined,
@@ -158,7 +169,25 @@ export function GitSettings() {
   const updateIdentity = (field: keyof GitIdentity, value: string) => {
     const newIdentity = { ...gitIdentity, [field]: value }
     setGitIdentity(newIdentity)
-    checkForIdentityChanges(newIdentity)
+    checkForIdentityChanges(newIdentity, gitIdentities)
+  }
+
+  const updateSavedIdentity = (index: number, field: keyof GitIdentity, value: string) => {
+    const newIdentities = gitIdentities.map((identity, i) => i === index ? { ...identity, [field]: value } : identity)
+    setGitIdentities(newIdentities)
+    checkForIdentityChanges(gitIdentity, newIdentities)
+  }
+
+  const addIdentity = () => {
+    const newIdentities = [...gitIdentities, { id: randomId(), name: '', email: '' }]
+    setGitIdentities(newIdentities)
+    checkForIdentityChanges(gitIdentity, newIdentities)
+  }
+
+  const removeIdentity = (index: number) => {
+    const newIdentities = gitIdentities.filter((_, i) => i !== index)
+    setGitIdentities(newIdentities)
+    checkForIdentityChanges(gitIdentity, newIdentities)
   }
 
   const saveAll = async () => {
@@ -166,9 +195,14 @@ export function GitSettings() {
     try {
       showToast.loading('Saving git configuration...', { id: 'git-config' })
       await saveGitSettings(
-        { gitCredentials, defaultGitCredentialId, gitIdentity },
-        { successMessage: 'Git configuration saved', toastId: 'git-config' }
+        { gitCredentials, defaultGitCredentialId, gitIdentity, gitIdentities },
+        {
+          successMessage: 'Git configuration saved',
+          toastId: 'git-config',
+        }
       )
+      await queryClient.invalidateQueries({ queryKey: ['repoGitIdentity'] })
+      identityDirtyRef.current = false
       setHasChanges(false)
     } catch {
       showToast.error('Failed to save git configuration', { id: 'git-config' })
@@ -212,7 +246,7 @@ export function GitSettings() {
           <div className="min-w-0 space-y-4">
             <div className="flex items-center gap-3">
               <User className="w-4 h-4 shrink-0 text-muted-foreground" />
-              <span className="font-medium">Identity</span>
+              <span className="font-medium">Default identity</span>
               <span className="ml-auto min-w-0 truncate text-xs text-muted-foreground">
                 {gitIdentity.name || gitIdentity.email ? `${gitIdentity.name || 'No name'} <${gitIdentity.email || 'No email'}>` : 'Not configured'}
               </span>
@@ -220,7 +254,7 @@ export function GitSettings() {
 
             <div className="space-y-4 sm:ml-7">
               <p className="text-sm text-muted-foreground">
-                Author identity used for git commits. Leave empty to use system defaults.
+                Used for commits by Manager and agents in repositories that have no identity of their own. Applies without restarting.
               </p>
               <div className="space-y-4">
                 <div className="space-y-2">
@@ -345,6 +379,88 @@ export function GitSettings() {
            </div>
          </div>
        </div>
+
+        <div className="border-t border-border p-4 sm:p-6">
+          <div className="flex items-center gap-3">
+            <Users className="w-4 h-4 shrink-0 text-muted-foreground" />
+            <span className="font-medium">Saved identities</span>
+            <span className="ml-auto text-xs text-muted-foreground">
+              {gitIdentities.length} saved
+            </span>
+          </div>
+
+          <div className="space-y-4 sm:ml-7">
+            <div className="flex items-center justify-between">
+              <p className="text-sm text-muted-foreground">
+                Presets you can apply to a repository from the commit box's "Commit as" selector. This writes the repository's local git config, shared by its worktrees.
+              </p>
+              <Button
+                type="button"
+                variant="outline"
+                size="sm"
+                onClick={addIdentity}
+                disabled={isSaving}
+              >
+                <Plus className="h-4 w-4 mr-2" />
+                Add
+              </Button>
+            </div>
+
+            {gitIdentities.length === 0 ? (
+              <div className="rounded-lg border border-dashed border-border p-4 text-center">
+                <p className="text-sm text-muted-foreground">
+                  No saved identities. Click "Add" to create one.
+                </p>
+              </div>
+            ) : (
+              <div className="space-y-3">
+                {gitIdentities.map((identity, index) => (
+                  <div key={identity.id} className="space-y-3 rounded-lg border border-border p-3">
+                    <div className="flex items-center justify-between">
+                      <span className="text-xs font-medium text-muted-foreground">Identity {index + 1}</span>
+                      <Button
+                        type="button"
+                        variant="ghost"
+                        size="sm"
+                        className="h-7 w-7 p-0 text-destructive hover:text-destructive"
+                        onClick={() => removeIdentity(index)}
+                        disabled={isSaving}
+                        title="Delete"
+                      >
+                        <Trash2 className="h-3.5 w-3.5" />
+                      </Button>
+                    </div>
+                    <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
+                      <div className="space-y-2">
+                        <Label htmlFor={`git-identity-${index}-name`}>Name</Label>
+                        <Input
+                          id={`git-identity-${index}-name`}
+                          placeholder="Your Name"
+                          value={identity.name}
+                          onChange={(e) => updateSavedIdentity(index, 'name', e.target.value)}
+                          disabled={isSaving}
+                          className="bg-background border-border text-foreground placeholder:text-muted-foreground"
+                        />
+                      </div>
+                      <div className="space-y-2">
+                        <Label htmlFor={`git-identity-${index}-email`}>Email</Label>
+                        <Input
+                          id={`git-identity-${index}-email`}
+                          type="email"
+                          placeholder="you@example.com"
+                          value={identity.email}
+                          onChange={(e) => updateSavedIdentity(index, 'email', e.target.value)}
+                          disabled={isSaving}
+                          className="bg-background border-border text-foreground placeholder:text-muted-foreground"
+                        />
+                      </div>
+                    </div>
+                  </div>
+                ))}
+              </div>
+            )}
+          </div>
+        </div>
 
         <GitCredentialDialog
          open={isCredentialDialogOpen}

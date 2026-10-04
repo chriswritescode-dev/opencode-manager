@@ -12,6 +12,7 @@ interface ConfirmDestructiveDialogProps {
   title: string
   description: ReactNode
   warning?: ReactNode
+  children?: ReactNode
   confirmLabel: string
   pendingLabel?: string
   cancelLabel?: string
@@ -26,6 +27,7 @@ export function ConfirmDestructiveDialog({
   title,
   description,
   warning,
+  children,
   confirmLabel,
   pendingLabel,
   cancelLabel = 'Cancel',
@@ -45,6 +47,8 @@ export function ConfirmDestructiveDialog({
             <AlertDescription className="break-all">{warning}</AlertDescription>
           </Alert>
         )}
+
+        {children}
 
         <DialogFooter className="gap-2">
           <Button

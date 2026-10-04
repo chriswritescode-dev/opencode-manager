@@ -6,35 +6,25 @@ vi.mock('bun:sqlite', () => ({
   Database: vi.fn()
 }))
 
-vi.mock('../../../src/services/settings', () => ({
-  SettingsService: vi.fn().mockImplementation(() => ({
-    getSettings: vi.fn().mockReturnValue({
-      preferences: {
-        gitIdentity: null,
-        gitCredentials: [],
-      },
-    }),
-  })),
-}))
-
 vi.mock('../../../src/utils/process', () => ({
   executeCommand: vi.fn(),
 }))
 
 vi.mock('../../../src/db/queries', () => ({
   getRepoById: vi.fn(),
-}))
-
-vi.mock('../../../src/utils/git-auth', () => ({
-  resolveGitIdentity: vi.fn().mockResolvedValue(null),
-  createGitIdentityEnv: vi.fn().mockReturnValue({}),
-  createSilentGitEnv: vi.fn(),
-  filterGitCredentials: vi.fn().mockReturnValue([]),
+  updateRepoBranch: vi.fn(),
+  listRepos: vi.fn(() => []),
 }))
 
 vi.mock('../../../src/utils/git-errors', () => ({
   isNoUpstreamError: vi.fn().mockReturnValue(false),
-  parseBranchNameFromError: vi.fn().mockReturnValue(null),
+  parseGitError: vi.fn(() => ({ code: 'UNKNOWN', statusCode: 500 })),
+  GitOperationError: class GitOperationError extends Error {
+    constructor(readonly code: string, message?: string, readonly details?: Record<string, unknown>) {
+      super(message)
+      this.name = 'GitOperationError'
+    }
+  },
 }))
 
 import { GitService } from '../../../src/services/git/GitService'
@@ -48,8 +38,6 @@ describe('GitService', () => {
   let service: GitService
   let database: Database
   let mockGitAuthService: GitAuthService
-  let mockSettingsService: any
-  let mockCredentialProvider: any
 
   beforeEach(() => {
     vi.clearAllMocks()
@@ -63,18 +51,7 @@ describe('GitService', () => {
       setSSHPort: vi.fn(),
       setupSSHForRepoUrl: vi.fn().mockResolvedValue(false),
     } as unknown as GitAuthService
-    mockSettingsService = {
-      getSettings: vi.fn().mockReturnValue({
-        preferences: {
-          gitIdentity: null,
-          gitCredentials: [],
-        },
-      }),
-    }
-    mockCredentialProvider = {
-      getGitCredentials: vi.fn().mockReturnValue([]),
-    }
-    service = new GitService(mockGitAuthService, mockSettingsService, mockCredentialProvider)
+    service = new GitService(mockGitAuthService)
   })
 
   describe('getStatus', () => {
@@ -98,6 +75,7 @@ describe('GitService', () => {
       expect(result.behind).toBe(0)
       expect(result.files).toEqual([])
       expect(result.hasChanges).toBe(false)
+      expect(result.operation).toBeNull()
     })
 
     it('parses modified files correctly', async () => {
@@ -712,7 +690,7 @@ describe('GitService', () => {
         clonedAt: 123456,
       }
       getRepoByIdMock.mockReturnValue(mockRepo)
-      executeCommandMock.mockResolvedValueOnce('main\n').mockResolvedValueOnce('')
+      executeCommandMock.mockResolvedValueOnce('refs/heads/main\n').mockResolvedValueOnce('')
 
       await service.push(1, { setUpstream: true }, database)
 
@@ -775,6 +753,7 @@ describe('GitService', () => {
       const mockRepo = { id: 1, fullPath: '/path/to/repo' }
       getRepoByIdMock.mockReturnValue(mockRepo as any)
       executeCommandMock.mockImplementation((args) => {
+        if (args.includes('symbolic-ref')) return Promise.resolve('refs/heads/main')
         if (args.includes('rev-parse')) return Promise.resolve('main')
         if (args.includes('branch')) return Promise.resolve('* main abc123 [origin/main] Initial commit\n  feature def456 [origin/feature] Feature work')
         if (args.includes('rev-list')) return Promise.resolve('0 0')
@@ -808,38 +787,6 @@ describe('GitService', () => {
       const result = await service.getBranchStatus(1, database)
 
       expect(result).toEqual({ ahead: 0, behind: 0 })
-    })
-  })
-
-  describe('createBranch', () => {
-    it('creates and switches to new branch', async () => {
-      const mockRepo = { id: 1, fullPath: '/path/to/repo' }
-      getRepoByIdMock.mockReturnValue(mockRepo as any)
-      executeCommandMock.mockResolvedValue("Switched to a new branch 'feature-branch'")
-
-      const result = await service.createBranch(1, 'feature-branch', database)
-
-      expect(executeCommandMock).toHaveBeenCalledWith(
-        ['git', '-C', expect.stringContaining('/path/to/repo'), 'checkout', '-b', 'feature-branch'],
-        { env: expect.any(Object) }
-      )
-      expect(result).toBe("Switched to a new branch 'feature-branch'")
-    })
-  })
-
-  describe('switchBranch', () => {
-    it('switches to existing branch', async () => {
-      const mockRepo = { id: 1, fullPath: '/path/to/repo' }
-      getRepoByIdMock.mockReturnValue(mockRepo as any)
-      executeCommandMock.mockResolvedValue("Switched to branch 'main'")
-
-      const result = await service.switchBranch(1, 'main', database)
-
-      expect(executeCommandMock).toHaveBeenCalledWith(
-        ['git', '-C', expect.stringContaining('/path/to/repo'), 'checkout', 'main'],
-        { env: expect.any(Object) }
-      )
-      expect(result).toBe("Switched to branch 'main'")
     })
   })
 
@@ -1460,6 +1407,48 @@ index abc123..def456 100644
 
       expect(result.truncated).toBe(true)
       expect(result.diff).toContain('... (diff truncated due to size)')
+    })
+  })
+
+  describe('operations', () => {
+    it('continues the in-progress operation with an editor that accepts defaults', async () => {
+      getRepoByIdMock.mockReturnValue({ id: 1, fullPath: '/path/to/repo' } as any)
+      vi.spyOn(service as any, 'getOperationState').mockResolvedValue({ kind: 'merge', conflictedFiles: ['file.txt'] })
+      executeCommandMock.mockResolvedValue('')
+
+      await service.continueOperation(1, database)
+
+      expect(executeCommandMock).toHaveBeenCalledWith(
+        ['git', '-C', '/path/to/repo', 'merge', '--continue'],
+        { env: expect.objectContaining({ GIT_EDITOR: 'true' }) }
+      )
+    })
+
+    it('aborts the in-progress operation without setting an editor', async () => {
+      getRepoByIdMock.mockReturnValue({ id: 1, fullPath: '/path/to/repo' } as any)
+      vi.spyOn(service as any, 'getOperationState').mockResolvedValue({ kind: 'cherry-pick', conflictedFiles: [] })
+      executeCommandMock.mockResolvedValue('')
+
+      await service.abortOperation(1, database)
+
+      expect(executeCommandMock).toHaveBeenCalledWith(
+        ['git', '-C', '/path/to/repo', 'cherry-pick', '--abort'],
+        { env: expect.not.objectContaining({ GIT_EDITOR: 'true' }) }
+      )
+    })
+
+    it('throws when continuing with no operation in progress', async () => {
+      getRepoByIdMock.mockReturnValue({ id: 1, fullPath: '/path/to/repo' } as any)
+      vi.spyOn(service as any, 'getOperationState').mockResolvedValue(null)
+
+      await expect(service.continueOperation(1, database)).rejects.toThrow('No operation in progress')
+    })
+
+    it('throws when aborting with no operation in progress', async () => {
+      getRepoByIdMock.mockReturnValue({ id: 1, fullPath: '/path/to/repo' } as any)
+      vi.spyOn(service as any, 'getOperationState').mockResolvedValue(null)
+
+      await expect(service.abortOperation(1, database)).rejects.toThrow('No operation in progress')
     })
   })
 })

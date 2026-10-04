@@ -87,6 +87,8 @@ export function invalidateRepoListCaches(queryClient: QueryClient) {
 interface RepoGitInvalidationOptions {
   invalidateStatus?: boolean
   invalidateRepoMeta?: boolean
+  invalidateStashes?: boolean
+  invalidateRepoListStatus?: boolean
 }
 
 export function invalidateRepoGitCaches(
@@ -94,6 +96,10 @@ export function invalidateRepoGitCaches(
   repoId?: number | null,
   options: RepoGitInvalidationOptions = {},
 ) {
+  if (options.invalidateStashes) {
+    queryClient.invalidateQueries({ queryKey: ['gitStashes'] })
+  }
+
   if (!repoId) {
     invalidateRepoListCaches(queryClient)
     queryClient.invalidateQueries({ queryKey: ['repo'] })
@@ -112,6 +118,9 @@ export function invalidateRepoGitCaches(
   if (options.invalidateStatus ?? true) {
     queryClient.invalidateQueries({ queryKey: ['gitStatus', repoId] })
   }
+  if (options.invalidateRepoListStatus) {
+    invalidateReposGitStatusCacheForRepo(queryClient, repoId)
+  }
   queryClient.invalidateQueries({ queryKey: ['gitLog', repoId] })
   queryClient.invalidateQueries({ queryKey: ['fileDiff', repoId] })
 }
@@ -119,6 +128,13 @@ export function invalidateRepoGitCaches(
 function reposGitStatusQueryIncludesRepo(queryKey: readonly unknown[], repoId: number) {
   const repoIds = queryKey[1]
   return queryKey[0] === 'reposGitStatus' && Array.isArray(repoIds) && repoIds.includes(repoId)
+}
+
+export function invalidateReposGitStatusCacheForRepo(queryClient: QueryClient, repoId: number) {
+  queryClient.invalidateQueries({
+    queryKey: ['reposGitStatus'],
+    predicate: (query) => reposGitStatusQueryIncludesRepo(query.queryKey, repoId),
+  })
 }
 
 export function setRepoGitStatusCaches(queryClient: QueryClient, repoId: number, data: GitStatusResponse) {

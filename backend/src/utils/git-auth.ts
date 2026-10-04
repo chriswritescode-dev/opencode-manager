@@ -1,5 +1,8 @@
 import type { GitCredential } from '@opencode-manager/shared'
 import { githubFetch } from './github'
+import { logger } from './logger'
+
+const GITHUB_USER_INFO_TIMEOUT_MS = 10_000
 
 export function isGitHubHttpsUrl(repoUrl: string): boolean {
   const url = normalizeGitCredentialUrl(repoUrl)
@@ -210,9 +213,10 @@ export function createGitIdentityEnv(identity: GitIdentity): Record<string, stri
 
 export async function fetchGitHubUserInfo(token: string): Promise<GitHubUserInfo | null> {
   try {
+    const signal = AbortSignal.timeout(GITHUB_USER_INFO_TIMEOUT_MS)
     const [userResponse, emailsResponse] = await Promise.all([
-      githubFetch('https://api.github.com/user', { token, apiVersion: '2022-11-28' }),
-      githubFetch('https://api.github.com/user/emails', { token, apiVersion: '2022-11-28' }),
+      githubFetch('https://api.github.com/user', { token, apiVersion: '2022-11-28', signal }),
+      githubFetch('https://api.github.com/user/emails', { token, apiVersion: '2022-11-28', signal }),
     ])
 
     if (!userResponse.ok) return null
@@ -236,7 +240,8 @@ export async function fetchGitHubUserInfo(token: string): Promise<GitHubUserInfo
       email,
       login: data.login
     }
-  } catch {
+  } catch (error) {
+    logger.warn(`Failed to fetch GitHub user info, falling back to the manual git identity: ${error instanceof Error ? error.message : String(error)}`)
     return null
   }
 }

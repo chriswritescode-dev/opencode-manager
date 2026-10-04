@@ -106,6 +106,12 @@ export const GitIdentitySchema = z.object({
 
 export type GitIdentity = z.infer<typeof GitIdentitySchema>;
 
+export const GitIdentityProfileSchema = GitIdentitySchema.extend({
+  id: z.string().min(1),
+});
+
+export type GitIdentityProfile = z.infer<typeof GitIdentityProfileSchema>;
+
 export const ServerEnvVarSchema = z.object({
   key: z.string().min(1),
   value: z.string(),
@@ -160,6 +166,7 @@ export const UserPreferencesSchema = z.object({
   gitCredentials: z.array(GitCredentialSchema).optional(),
   defaultGitCredentialId: z.string().optional(),
   gitIdentity: GitIdentitySchema.optional(),
+  gitIdentities: z.array(GitIdentityProfileSchema).optional(),
   tts: TTSConfigSchema.optional(),
   stt: STTConfigSchema.optional(),
   notifications: NotificationPreferencesSchema.optional(),

@@ -140,15 +140,26 @@ export async function addSessionContext(sessionID: string, text: string): Promis
   await callOpenCode((api) => api.session.synthetic({ sessionID, text, resume: false }))
 }
 
-export async function createSessionWithContext(input: CreateSessionInput, context: string): Promise<SessionInfo> {
+async function createSessionThen(
+  input: CreateSessionInput,
+  step: (session: SessionInfo) => Promise<unknown>,
+): Promise<SessionInfo> {
   const session = await createSession(input)
   try {
-    await addSessionContext(session.id, context)
+    await step(session)
   } catch (error) {
     await deleteSession(session.id).catch(() => undefined)
     throw error
   }
   return session
+}
+
+export async function createSessionWithContext(input: CreateSessionInput, context: string): Promise<SessionInfo> {
+  return createSessionThen(input, (session) => addSessionContext(session.id, context))
+}
+
+export async function createSessionWithPrompt(input: CreateSessionInput, text: string): Promise<SessionInfo> {
+  return createSessionThen(input, (session) => sendPrompt({ sessionID: session.id, text }))
 }
 
 export async function switchSessionModel(sessionID: string, model: ModelRef): Promise<void> {

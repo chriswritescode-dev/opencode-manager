@@ -5,6 +5,7 @@ import {
   invalidateProviderCaches,
   invalidateProviderCachesDebounced,
   invalidateQueryKeysDebounced,
+  invalidateRepoGitCaches,
   invalidateSessionListCachesDebounced,
   refreshOpenCodeServerCaches,
 } from './queryInvalidation'
@@ -54,6 +55,30 @@ describe('invalidateConfigCaches', () => {
     expect(invalidateQueries).not.toHaveBeenCalledWith({ queryKey: ['opencode-config'] })
     expect(invalidateQueries).toHaveBeenCalledWith({ queryKey: ['opencode', 'config'] })
     expect(invalidateQueries).toHaveBeenCalledWith({ queryKey: ['health'] })
+  })
+})
+
+describe('invalidateRepoGitCaches', () => {
+  it('invalidates the shared stash list prefix across every repo when requested', () => {
+    const queryClient = new QueryClient()
+    queryClient.setQueryData(['gitStashes', 1], { stashes: [] })
+    queryClient.setQueryData(['gitStashes', 2], { stashes: [] })
+
+    invalidateRepoGitCaches(queryClient, 1, { invalidateStashes: true })
+
+    expect(queryClient.getQueryState(['gitStashes', 1])?.isInvalidated).toBe(true)
+    expect(queryClient.getQueryState(['gitStashes', 2])?.isInvalidated).toBe(true)
+  })
+
+  it('invalidates the repo list status for the repo when requested', () => {
+    const queryClient = new QueryClient()
+    const invalidateQueries = vi.spyOn(queryClient, 'invalidateQueries')
+
+    invalidateRepoGitCaches(queryClient, 1, { invalidateRepoListStatus: true })
+
+    expect(invalidateQueries).toHaveBeenCalledWith(
+      expect.objectContaining({ queryKey: ['reposGitStatus'], predicate: expect.any(Function) }),
+    )
   })
 })
 

@@ -7,6 +7,7 @@ interface ExecuteCommandOptions {
   env?: Record<string, string>
   ignoreExitCode?: boolean
   timeout?: number
+  maxOutputChars?: number
 }
 
 export async function executeCommand(
@@ -50,6 +51,7 @@ export async function executeCommand(
     let stdout = ''
     let stderr = ''
     let isResolved = false
+    let outputCapped = false
 
     const timeoutId = options.timeout ? setTimeout(() => {
       if (!isResolved) {
@@ -60,7 +62,14 @@ export async function executeCommand(
     }, options.timeout) : undefined
 
     proc.stdout?.on('data', (data: Buffer) => {
+      if (outputCapped) return
+
       stdout += data.toString()
+      if (options.maxOutputChars !== undefined && stdout.length > options.maxOutputChars) {
+        outputCapped = true
+        stdout = stdout.slice(0, options.maxOutputChars)
+        proc.kill('SIGKILL')
+      }
     })
 
     proc.stderr?.on('data', (data: Buffer) => {
@@ -88,7 +97,15 @@ export async function executeCommand(
       const exitCode = code === null ? 1 : code
       const failureDetail = terminatedBySignal ? `signal ${signal}` : `code ${code}`
 
-      if (options.ignoreExitCode) {
+      if (outputCapped) {
+        resolve(options.ignoreExitCode
+          ? {
+            exitCode,
+            stdout,
+            stderr: terminatedBySignal ? `${stderr}Command terminated by signal ${signal}` : stderr,
+          }
+          : stdout)
+      } else if (options.ignoreExitCode) {
         resolve({
           exitCode,
           stdout,

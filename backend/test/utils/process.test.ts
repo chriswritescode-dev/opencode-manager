@@ -24,4 +24,20 @@ describe('executeCommand signal handling', () => {
 
     expect(result).toEqual({ exitCode: 0, stdout: '', stderr: '' })
   })
+
+  it('truncates stdout at maxOutputChars and resolves instead of rejecting', async () => {
+    const result = await executeCommand(
+      ['sh', '-c', 'i=0; while [ $i -lt 1000 ]; do printf "0123456789"; i=$((i+1)); done'],
+      { maxOutputChars: 100, silent: true },
+    )
+
+    expect(typeof result).toBe('string')
+    expect(result).toHaveLength(100)
+  })
+
+  it('returns the full stdout when it stays within maxOutputChars', async () => {
+    const result = await executeCommand(['sh', '-c', 'printf "hello"'], { maxOutputChars: 100, silent: true })
+
+    expect(result).toBe('hello')
+  })
 })

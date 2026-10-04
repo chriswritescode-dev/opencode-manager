@@ -8,9 +8,12 @@ OpenCode Manager provides a comprehensive web interface for managing OpenCode AI
 
 - **Multi-Repository Support** - Clone and manage multiple git repos with private repo support via GitHub PAT
 - **SSH Authentication** - SSH key authentication for git repositories
-- **Git Worktrees** - Work on multiple branches simultaneously
-- **Source Control Panel** - View changes, commits, and branches in a unified interface
+- **Git Worktrees** - Work on multiple branches simultaneously, integrate a worktree branch into another branch, and delete worktrees with optional local and remote branch cleanup
+- **Source Control Panel** - View changes, commits, branches, and stashes in a unified interface
 - **Diff Viewer** - Unified diffs with line numbers and change counts
+- **Conflict Resolution** - Continue or abort merge, rebase, and cherry-pick operations, or hand conflicts to an agent session
+- **AI Commit Messages** - Generate commit messages from staged changes using OpenCode's default model
+- **Per-Repository Identities** - A default git identity plus saved presets, written to each repository's git config (shared by its worktrees) for Manager commits and agent shells
 
 [Learn more →](git.md)
 

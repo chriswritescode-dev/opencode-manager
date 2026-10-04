@@ -10,6 +10,7 @@ interface DeleteDialogProps {
   description: ReactNode
   itemName?: string
   isDeleting?: boolean
+  children?: ReactNode
 }
 
 export function DeleteDialog({
@@ -20,7 +21,8 @@ export function DeleteDialog({
   title,
   description,
   itemName,
-  isDeleting = false
+  isDeleting = false,
+  children
 }: DeleteDialogProps) {
   return (
     <ConfirmDestructiveDialog
@@ -36,6 +38,8 @@ export function DeleteDialog({
       confirmLabel={title.includes('Configuration') ? 'Delete Configuration' : 'Delete'}
       pendingLabel="Deleting..."
       isPending={isDeleting}
-    />
+    >
+      {children}
+    </ConfirmDestructiveDialog>
   )
 }

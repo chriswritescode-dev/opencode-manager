@@ -12,9 +12,15 @@ export function isNoUpstreamError(error: Error): boolean {
   return patterns.some(pattern => pattern.test(error.message))
 }
 
-export function parseBranchNameFromError(error: Error): string | null {
-  const match = error.message.match(/The current branch (.+) has no upstream branch/i)
-  return match?.[1]?.trim() ?? null
+export class GitOperationError extends Error {
+  constructor(
+    readonly code: GitErrorCode,
+    message?: string,
+    readonly details?: Record<string, unknown>
+  ) {
+    super(message)
+    this.name = 'GitOperationError'
+  }
 }
 
 export interface GitErrorInfo {
@@ -22,6 +28,7 @@ export interface GitErrorInfo {
   summary: string
   detail: string
   statusCode: number
+  details?: Record<string, unknown>
 }
 
 interface ErrorPattern {
@@ -155,6 +162,34 @@ const ERROR_PATTERNS: ErrorPattern[] = [
     ],
   },
   {
+    code: 'BRANCH_CHECKED_OUT',
+    summary: 'This branch is currently checked out and cannot be deleted.',
+    statusCode: 409,
+    patterns: [
+      /cannot delete branch .*checked out/i,
+    ],
+  },
+  {
+    code: 'BRANCH_IN_OTHER_WORKTREE',
+    summary: 'This branch is checked out in another worktree and cannot be modified here.',
+    statusCode: 409,
+    patterns: [],
+  },
+  {
+    code: 'BRANCH_NOT_MERGED',
+    summary: 'This branch has unmerged commits. Merge it or delete it with force.',
+    statusCode: 409,
+    patterns: [
+      /is not fully merged/i,
+    ],
+  },
+  {
+    code: 'STASH_CHANGED',
+    summary: 'The stash list changed. Refresh and try again.',
+    statusCode: 409,
+    patterns: [],
+  },
+  {
     code: 'UNCOMMITTED_CHANGES',
     summary: 'You have uncommitted changes. Commit or stash them first.',
     statusCode: 409,
@@ -163,6 +198,42 @@ const ERROR_PATTERNS: ErrorPattern[] = [
       /local changes.*overwritten/i,
       /would lose uncommitted changes/i,
     ],
+  },
+  {
+    code: 'NO_OPERATION_IN_PROGRESS',
+    summary: 'No merge, rebase, cherry-pick, or revert is in progress.',
+    statusCode: 409,
+    patterns: [],
+  },
+  {
+    code: 'INTEGRATE_DETACHED_HEAD',
+    summary: 'Cannot integrate from a detached HEAD',
+    statusCode: 400,
+    patterns: [],
+  },
+  {
+    code: 'INTEGRATE_INTO_SELF',
+    summary: 'Cannot integrate a branch into itself',
+    statusCode: 400,
+    patterns: [],
+  },
+  {
+    code: 'INTEGRATE_TARGET_NOT_CHECKED_OUT',
+    summary: 'Target branch is not checked out in any worktree',
+    statusCode: 409,
+    patterns: [],
+  },
+  {
+    code: 'INTEGRATE_TARGET_NOT_MANAGED',
+    summary: 'Target checkout is not a managed repository',
+    statusCode: 409,
+    patterns: [],
+  },
+  {
+    code: 'INTEGRATE_NOTHING_TO_INTEGRATE',
+    summary: 'Nothing to integrate',
+    statusCode: 400,
+    patterns: [],
   },
 ]
 
@@ -193,6 +264,17 @@ export function parseGitError(error: unknown): GitErrorInfo {
   const rawMessage = getErrorMessage(error)
   const message = stripCommandFailedPrefix(rawMessage)
   const cleanedMessage = cleanGitProgressLines(message)
+
+  if (error instanceof GitOperationError) {
+    const entry = ERROR_PATTERNS.find((errorPattern) => errorPattern.code === error.code)
+    return {
+      code: error.code,
+      summary: entry?.summary ?? 'A git operation failed.',
+      detail: cleanedMessage || message,
+      statusCode: entry?.statusCode ?? 500,
+      ...(error.details ? { details: error.details } : {}),
+    }
+  }
 
   for (const errorPattern of ERROR_PATTERNS) {
     for (const pattern of errorPattern.patterns) {

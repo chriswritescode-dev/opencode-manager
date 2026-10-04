@@ -9,6 +9,7 @@ import {
   compactSession,
   createSession,
   createSessionWithContext,
+  createSessionWithPrompt,
   deleteSession,
   findFiles,
   forkSession,
@@ -209,6 +210,48 @@ describe('OpenCode facade', () => {
       .mockResolvedValueOnce(new Response(null, { status: 204 }))
 
     await expect(createSessionWithContext({ directory: '/abs/repos/my-repo' }, 'Run output')).rejects.toBeInstanceOf(FetchError)
+
+    const [deleteUrl, deleteInit] = fetchMock.mock.calls[2] ?? []
+    expect(String(deleteUrl)).toBe('http://localhost/api/opencode/api/session/ses_new')
+    expect((deleteInit as RequestInit).method).toBe('DELETE')
+  })
+
+  it('creates a session in a directory and sends a prompt', async () => {
+    fetchMock
+      .mockResolvedValueOnce(jsonResponse({ data: sessionInfo('ses_new', '/abs/repos/my-repo') }))
+      .mockResolvedValueOnce(
+        jsonResponse({
+          data: {
+            id: 'msg_1',
+            sessionID: 'ses_new',
+            time: { created: 1000 },
+            type: 'user',
+            payload: { text: 'Fix conflicts' },
+          },
+        }),
+      )
+
+    const session = await createSessionWithPrompt(
+      { directory: '/abs/repos/my-repo', title: 'Resolve merge conflicts' },
+      'Fix conflicts',
+    )
+
+    expect(session.id).toBe('ses_new')
+    const [createUrl] = fetchMock.mock.calls[0] ?? []
+    expect(String(createUrl)).toBe('http://localhost/api/opencode/api/session')
+    const [promptUrl, promptInit] = fetchMock.mock.calls[1] ?? []
+    expect(String(promptUrl)).toBe('http://localhost/api/opencode/api/session/ses_new/prompt')
+    expect((promptInit as RequestInit).method).toBe('POST')
+    expect((promptInit as RequestInit).body).toBe(JSON.stringify({ text: 'Fix conflicts' }))
+  })
+
+  it('deletes the new session when sending the prompt fails', async () => {
+    fetchMock
+      .mockResolvedValueOnce(jsonResponse({ data: sessionInfo('ses_new', '/abs/repos/my-repo') }))
+      .mockResolvedValueOnce(new Response('nope', { status: 400 }))
+      .mockResolvedValueOnce(new Response(null, { status: 204 }))
+
+    await expect(createSessionWithPrompt({ directory: '/abs/repos/my-repo' }, 'Fix conflicts')).rejects.toBeInstanceOf(FetchError)
 
     const [deleteUrl, deleteInit] = fetchMock.mock.calls[2] ?? []
     expect(String(deleteUrl)).toBe('http://localhost/api/opencode/api/session/ses_new')

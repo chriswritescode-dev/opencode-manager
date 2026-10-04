@@ -142,6 +142,14 @@ vi.mock('../../src/utils/discovery-cache', () => ({
   discoverModelsCached: mockDiscoverModelsCached,
 }))
 
+const { mockSyncManagerGitIdentityConfig } = vi.hoisted(() => ({
+  mockSyncManagerGitIdentityConfig: vi.fn(),
+}))
+
+vi.mock('../../src/services/git-identity', () => ({
+  syncManagerGitIdentityConfig: mockSyncManagerGitIdentityConfig,
+}))
+
 const { mockValidateSSHPrivateKey } = vi.hoisted(() => ({
   mockValidateSSHPrivateKey: vi.fn(),
 }))
@@ -149,6 +157,20 @@ const { mockValidateSSHPrivateKey } = vi.hoisted(() => ({
 vi.mock('../../src/utils/ssh-validation', () => ({
   validateSSHPrivateKey: mockValidateSSHPrivateKey,
 }))
+
+const { mockWriteTemporarySSHKey, mockCleanupSSHKey } = vi.hoisted(() => ({
+  mockWriteTemporarySSHKey: vi.fn(),
+  mockCleanupSSHKey: vi.fn(),
+}))
+
+vi.mock('../../src/utils/ssh-key-manager', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('../../src/utils/ssh-key-manager')>()
+  return {
+    ...actual,
+    writeTemporarySSHKey: mockWriteTemporarySSHKey,
+    cleanupSSHKey: mockCleanupSSHKey,
+  }
+})
 
 vi.mock('../../src/services/file-operations', () => ({
   writeFileContent: vi.fn(),
@@ -337,6 +359,8 @@ describe('Settings Routes - OpenCode Upgrade', () => {
     mockArchiveBrokenOpenCodeConfigFile.mockReset()
     mockRestoreOpenCodeConfigSnapshot.mockReset()
     mockApplyOpenCodeConfigUpdate.mockReset()
+    mockSyncManagerGitIdentityConfig.mockReset()
+    mockSyncManagerGitIdentityConfig.mockResolvedValue({ identity: null, error: null })
     mockDetectSandboxCapability.mockReset()
     mockDetectSandboxCapability.mockReturnValue({ available: true, msbVersion: 'msb 1.0.0' })
     mockInstallOpenCodeVersion.mockReset()
@@ -1399,7 +1423,7 @@ describe('Settings Routes - OpenCode Upgrade', () => {
       expect(opencodeServerManager.markRestartPending).toHaveBeenCalledTimes(1)
     })
 
-    it('requires a restart when the git identity changes', async () => {
+    it('does not require a restart when only the git identity changes and syncs the identity config', async () => {
       mockGetSettings.mockReturnValue({
         preferences: { gitIdentity: { name: 'Old', email: 'old@example.com' } },
         updatedAt: 1,
@@ -1418,8 +1442,9 @@ describe('Settings Routes - OpenCode Upgrade', () => {
       const json = await res.json() as Record<string, unknown>
 
       expect(res.status).toBe(200)
-      expect(json.restartRequired).toBe(true)
-      expect(opencodeServerManager.markRestartPending).toHaveBeenCalledTimes(1)
+      expect(json.restartRequired).toBeUndefined()
+      expect(opencodeServerManager.markRestartPending).not.toHaveBeenCalled()
+      expect(mockSyncManagerGitIdentityConfig).toHaveBeenCalledTimes(1)
     })
 
     it('requires a restart when server environment variables change', async () => {
@@ -1709,6 +1734,8 @@ describe('Settings Routes - versions, directory files, skills, MCP and maintenan
     mockClearStartupError.mockReturnValue(undefined)
     mockSpawnSync.mockReturnValue({ status: 0, stdout: '', stderr: '' })
     mockValidateSSHPrivateKey.mockResolvedValue({ valid: true, hasPassphrase: false })
+    mockWriteTemporarySSHKey.mockReset().mockResolvedValue('/tmp/test-ssh-key')
+    mockCleanupSSHKey.mockReset().mockResolvedValue(undefined)
     mockGetOpenCodeServerPasswordSource.mockReturnValue('managed')
     mockGetStoredOpenCodeServerPasswordState.mockReturnValue(null)
   })

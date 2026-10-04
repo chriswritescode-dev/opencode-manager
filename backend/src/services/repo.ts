@@ -930,6 +930,19 @@ export async function pullRepo(
   }
 }
 
+export async function resolveMainCheckoutPath(worktreePath: string): Promise<string | null> {
+  try {
+    const commonDir = await executeCommand(
+      ['git', '-C', path.resolve(worktreePath), 'rev-parse', '--path-format=absolute', '--git-common-dir'],
+      { silent: true }
+    )
+    const trimmed = commonDir.trim()
+    return trimmed ? path.dirname(trimmed) : null
+  } catch {
+    return null
+  }
+}
+
 export async function deleteRepoFiles(database: Database, repoId: number): Promise<void> {
   const repo = getRepoById(database, repoId)
   if (!repo) {
@@ -938,11 +951,13 @@ export async function deleteRepoFiles(database: Database, repoId: number): Promi
 
   const fullPath = path.resolve(getReposPath(), repo.localPath)
 
-  if (repo.isWorktree && repo.repoUrl) {
-    const { name: repoName } = normalizeRepoUrl(repo.repoUrl)
-    const baseRepoPath = path.resolve(getReposPath(), repoName)
+  if (repo.isWorktree) {
+    const baseRepoPath = await resolveMainCheckoutPath(fullPath)
+      ?? (repo.repoUrl ? path.resolve(getReposPath(), normalizeRepoUrl(repo.repoUrl).name) : null)
 
-    await removeWorktree(baseRepoPath, fullPath)
+    if (baseRepoPath) {
+      await removeWorktree(baseRepoPath, fullPath)
+    }
   }
 
   await executeCommand(['rm', '-rf', repo.localPath], getReposPath())

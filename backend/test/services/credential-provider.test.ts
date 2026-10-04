@@ -316,4 +316,25 @@ describe('CredentialProvider', () => {
       }
     })
   })
+
+  describe('resolveDefaultGitIdentity', () => {
+    const globalIdentity = { name: 'Global Agent', email: 'global@example.com' }
+    const workIdentity = { id: 'work', name: 'Work Agent', email: 'work@example.com' }
+
+    it('returns the manual identity when both fields are set', async () => {
+      settingsService.updateSettings({ gitIdentity: globalIdentity })
+
+      expect(await provider.resolveDefaultGitIdentity()).toEqual(globalIdentity)
+    })
+
+    it('falls back to the built-in default identity when nothing is configured', async () => {
+      expect(await provider.resolveDefaultGitIdentity()).toEqual({ name: 'OpenCode Agent', email: '' })
+    })
+
+    it('does not consult a repo-assigned preset', async () => {
+      settingsService.updateSettings({ gitIdentity: globalIdentity, gitIdentities: [workIdentity] })
+
+      expect(await provider.resolveDefaultGitIdentity()).toEqual(globalIdentity)
+    })
+  })
 })

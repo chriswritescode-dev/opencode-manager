@@ -1,6 +1,7 @@
 import { useQuery } from '@tanstack/react-query'
 import { fetchWrapper, FetchError } from './fetchWrapper'
 import { API_BASE_URL } from '@/config'
+import type { DeleteBranchRequest, DeleteBranchResult, GitStashEntry, IntegrateBranchRequest, IntegrateBranchResult, RenameBranchRequest, StashApplyRequest, StashDropRequest, StashPushRequest } from '@opencode-manager/shared'
 import type { GitStatusResponse, FileDiffResponse, GitCommit, CommitDetails } from '@/types/git'
 
 export async function fetchGitStatus(repoId: number): Promise<GitStatusResponse> {
@@ -73,6 +74,12 @@ export async function gitCommit(repoId: number, message: string, stagedPaths?: s
   })
 }
 
+export async function gitGenerateCommitMessage(repoId: number): Promise<{ message: string }> {
+  return fetchWrapper(`${API_BASE_URL}/api/repos/${repoId}/git/commit-message`, {
+    method: 'POST',
+  })
+}
+
 export async function gitStageFiles(repoId: number, paths: string[]): Promise<GitStatusResponse> {
   return fetchWrapper(`${API_BASE_URL}/api/repos/${repoId}/git/stage`, {
     method: 'POST',
@@ -105,12 +112,94 @@ export async function gitReset(repoId: number, commitHash: string): Promise<GitS
   })
 }
 
-export function useGitStatus(repoId: number | undefined) {
+export async function gitRenameBranch(repoId: number, request: RenameBranchRequest): Promise<GitStatusResponse> {
+  return fetchWrapper(`${API_BASE_URL}/api/repos/${repoId}/git/branches/rename`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(request),
+  })
+}
+
+export async function gitDeleteBranch(
+  repoId: number,
+  request: DeleteBranchRequest
+): Promise<DeleteBranchResult & { status: GitStatusResponse }> {
+  return fetchWrapper(`${API_BASE_URL}/api/repos/${repoId}/git/branches`, {
+    method: 'DELETE',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(request),
+  })
+}
+
+async function fetchGitStashes(repoId: number): Promise<{ stashes: GitStashEntry[] }> {
+  return fetchWrapper(`${API_BASE_URL}/api/repos/${repoId}/git/stash`)
+}
+
+export async function gitStashPush(repoId: number, request: StashPushRequest): Promise<GitStatusResponse> {
+  return fetchWrapper(`${API_BASE_URL}/api/repos/${repoId}/git/stash`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(request),
+  })
+}
+
+export async function gitStashApply(repoId: number, index: number, request: StashApplyRequest): Promise<GitStatusResponse> {
+  return fetchWrapper(`${API_BASE_URL}/api/repos/${repoId}/git/stash/${index}/apply`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(request),
+  })
+}
+
+export async function gitStashDrop(repoId: number, index: number, request: StashDropRequest): Promise<GitStatusResponse> {
+  return fetchWrapper(`${API_BASE_URL}/api/repos/${repoId}/git/stash/${index}`, {
+    method: 'DELETE',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(request),
+  })
+}
+
+export async function gitContinueOperation(repoId: number): Promise<GitStatusResponse> {
+  return fetchWrapper(`${API_BASE_URL}/api/repos/${repoId}/git/operation/continue`, {
+    method: 'POST',
+  })
+}
+
+export async function gitAbortOperation(repoId: number): Promise<GitStatusResponse> {
+  return fetchWrapper(`${API_BASE_URL}/api/repos/${repoId}/git/operation/abort`, {
+    method: 'POST',
+  })
+}
+
+export async function gitIntegrateBranch(
+  repoId: number,
+  request: IntegrateBranchRequest
+): Promise<IntegrateBranchResult & { targetStatus: GitStatusResponse }> {
+  return fetchWrapper(`${API_BASE_URL}/api/repos/${repoId}/git/integrate`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(request),
+  })
+}
+
+interface GitStatusQueryOptions {
+  refetchInterval?: number | false
+}
+
+export function useGitStatus(repoId: number | undefined, options: GitStatusQueryOptions = {}) {
   return useQuery({
     queryKey: ['gitStatus', repoId],
     queryFn: () => repoId ? fetchGitStatus(repoId) : Promise.reject(new Error('No repo ID')),
     enabled: !!repoId,
-    refetchInterval: false,
+    refetchInterval: options.refetchInterval ?? false,
+  })
+}
+
+export function useGitStashes(repoId: number | undefined) {
+  return useQuery({
+    queryKey: ['gitStashes', repoId],
+    queryFn: () => repoId ? fetchGitStashes(repoId) : Promise.reject(new Error('No repo ID')),
+    enabled: !!repoId,
   })
 }
 

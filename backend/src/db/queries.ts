@@ -3,6 +3,7 @@ import type { Repo, CreateRepoInput } from '../types/repo'
 import { getReposPath } from '@opencode-manager/shared/config/env'
 import { ASSISTANT_REPO_ID, ASSISTANT_REPO_PATH, getRepoDisplayName } from '@opencode-manager/shared/utils'
 import { getErrorMessage } from '../utils/error-utils'
+import { canonicalPathSync } from '../utils/fs-safe'
 import path from 'path'
 
 interface RepoRow {
@@ -93,12 +94,12 @@ export function setRepoSandboxGitCredentials(db: Database, repoId: number, allow
 }
 
 export function getRepoByDirectory(db: Database, directory: string): Repo | null {
-  const resolvedDirectory = path.resolve(directory)
+  const resolvedDirectory = canonicalPathSync(path.resolve(directory))
   const repos = listRepos(db)
 
   return repos
     .filter((repo) => {
-      const resolvedRepoPath = path.resolve(repo.fullPath)
+      const resolvedRepoPath = canonicalPathSync(path.resolve(repo.fullPath))
       const relativePath = path.relative(resolvedRepoPath, resolvedDirectory)
       return relativePath === '' || (!!relativePath && !relativePath.startsWith('..') && !path.isAbsolute(relativePath))
     })

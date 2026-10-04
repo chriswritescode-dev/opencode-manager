@@ -343,6 +343,11 @@ export function updateScheduleJobRunState(db: Database, repoId: number, jobId: n
   stmt.run(values.lastRunAt, values.nextRunAt ?? null, Date.now(), repoId, jobId)
 }
 
+export function updateScheduleJobsBranch(db: Database, repoId: number, from: string, to: string): number {
+  const stmt = db.prepare('UPDATE schedule_jobs SET branch = ?, updated_at = ? WHERE repo_id = ? AND branch = ?')
+  return stmt.run(to, Date.now(), repoId, from).changes
+}
+
 export function createScheduleRun(
   db: Database,
   input: {

@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest'
-import { parseGitError } from '../../src/utils/git-errors'
+import { GitOperationError, parseGitError } from '../../src/utils/git-errors'
 
 describe('parseGitError', () => {
   describe('AUTH_FAILED', () => {
@@ -183,6 +183,28 @@ describe('parseGitError', () => {
     })
   })
 
+  describe('BRANCH_NOT_MERGED', () => {
+    it('matches git refusing a safe branch delete', () => {
+      const error = new Error(
+        "Command failed with code 1: error: the branch 'feature' is not fully merged\n" +
+        "error: If you are sure you want to delete it, run 'git branch -D feature'"
+      )
+      const result = parseGitError(error)
+      expect(result.code).toBe('BRANCH_NOT_MERGED')
+      expect(result.statusCode).toBe(409)
+    })
+  })
+
+  describe('STASH_CHANGED', () => {
+    it('maps the typed stale stash error to its summary', () => {
+      const error = new GitOperationError('STASH_CHANGED', 'The stash list changed. Refresh and try again.')
+      const result = parseGitError(error)
+      expect(result.code).toBe('STASH_CHANGED')
+      expect(result.statusCode).toBe(409)
+      expect(result.summary).toBe('The stash list changed. Refresh and try again.')
+    })
+  })
+
   describe('UNKNOWN', () => {
     it('falls back for unrecognized errors', () => {
       const error = new Error('Command failed with code 1: something completely unexpected happened')
@@ -266,6 +288,30 @@ describe('parseGitError', () => {
       const result = parseGitError(error)
       const consecutiveNewlines = result.detail.match(/\n{3,}/g)
       expect(consecutiveNewlines).toBeNull()
+    })
+  })
+
+  describe('GitOperationError', () => {
+    it('maps a typed error by code to the table summary and status', () => {
+      const error = new GitOperationError('BRANCH_IN_OTHER_WORKTREE', 'custom message')
+      const result = parseGitError(error)
+
+      expect(result.code).toBe('BRANCH_IN_OTHER_WORKTREE')
+      expect(result.summary).toBe('This branch is checked out in another worktree and cannot be modified here.')
+      expect(result.statusCode).toBe(409)
+      expect(result.detail).toBe('custom message')
+    })
+
+    it('exposes typed error details', () => {
+      const error = new GitOperationError('MERGE_CONFLICT', 'Integration stopped on conflicts', {
+        targetRepoId: 2,
+        operation: { kind: 'merge', conflictedFiles: [] },
+      })
+      const result = parseGitError(error)
+
+      expect(result.code).toBe('MERGE_CONFLICT')
+      expect(result.statusCode).toBe(409)
+      expect(result.details).toEqual({ targetRepoId: 2, operation: { kind: 'merge', conflictedFiles: [] } })
     })
   })
 

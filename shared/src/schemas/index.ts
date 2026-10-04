@@ -1,5 +1,6 @@
 export * from './settings'
 export * from './repo'
+export * from './git'
 export * from './files'
 export * from './filesystem'
 export * from './opencode'

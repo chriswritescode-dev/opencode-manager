@@ -110,6 +110,7 @@ describe('RepoCard', () => {
         behind: 0,
         files: [{ path: 'file.txt', status: 'modified' as const, staged: false }],
         hasChanges: true,
+        operation: null,
       },
     }
     const { container } = renderWithRouter(<RepoCard {...props} />)
@@ -127,6 +128,7 @@ describe('RepoCard', () => {
         behind: 1,
         files: [],
         hasChanges: false,
+        operation: null,
       },
     }
     renderWithRouter(<RepoCard {...props} />)

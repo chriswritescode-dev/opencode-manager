@@ -11,6 +11,7 @@ import { createRepo, getRepoById, getRepoByLocalPath } from '../../src/db/querie
 import { resolveOpenCodeProjectId } from '@opencode-manager/shared/project-id'
 import { isWorktreeSibling } from '@opencode-manager/shared/utils'
 import { getReposPath, getScheduleWorktreesPath } from '@opencode-manager/shared/config/env'
+import { cloneOrigin, createCommittedRepo, createGitAuthService, createOrigin, git, uniqueName } from '../helpers/git-fixtures'
 import type { GitAuthService } from '../../src/services/git-auth'
 import type { OpenCodeClient } from '../../src/services/opencode/client'
 import type { Repo } from '../../src/types/repo'
@@ -28,64 +29,6 @@ const certPath = path.join(certDir, 'cert.pem')
 
 let certKey: Buffer
 let certPem: Buffer
-
-function git(args: string[], cwd?: string): string {
-  return execFileSync('git', args, {
-    cwd,
-    encoding: 'utf-8',
-    env: { ...process.env, GIT_TERMINAL_PROMPT: '0', GIT_CONFIG_NOSYSTEM: '1' },
-  }).trim()
-}
-
-function createCommittedRepo(repoPath: string, branch = 'main'): void {
-  mkdirSync(repoPath, { recursive: true })
-  git(['init', '-b', branch], repoPath)
-  git(['config', 'user.email', 'test@test.com'], repoPath)
-  git(['config', 'user.name', 'Test'], repoPath)
-  git(['commit', '--allow-empty', '-m', 'init'], repoPath)
-}
-
-function createOrigin(originPath: string, workPath: string, extraBranches: string[] = []): void {
-  mkdirSync(originPath, { recursive: true })
-  git(['init', '--bare', originPath])
-  mkdirSync(workPath, { recursive: true })
-  git(['init', '-b', 'main'], workPath)
-  git(['config', 'user.email', 'test@test.com'], workPath)
-  git(['config', 'user.name', 'Test'], workPath)
-  git(['commit', '--allow-empty', '-m', 'init'], workPath)
-  git(['remote', 'add', 'origin', originPath], workPath)
-  git(['push', 'origin', 'main'], workPath)
-  git(['symbolic-ref', 'HEAD', 'refs/heads/main'], originPath)
-
-  for (const branch of extraBranches) {
-    git(['checkout', '-b', branch], workPath)
-    git(['commit', '--allow-empty', '-m', branch], workPath)
-    git(['push', 'origin', branch], workPath)
-    git(['checkout', 'main'], workPath)
-  }
-}
-
-function cloneOrigin(originPath: string, clonePath: string): void {
-  git(['clone', originPath, clonePath])
-  git(['config', 'user.email', 'test@test.com'], clonePath)
-  git(['config', 'user.name', 'Test'], clonePath)
-}
-
-let seq = 0
-
-function uniqueName(prefix: string): string {
-  seq += 1
-  return `${prefix}-${seq}`
-}
-
-function createGitAuthService(env: Record<string, string> = {}): GitAuthService {
-  return {
-    getGitEnvironment: () => env,
-    getSSHEnvironment: () => ({}),
-    setupSSHForRepoUrl: async () => false,
-    cleanupSSHKey: async () => {},
-  } as unknown as GitAuthService
-}
 
 async function withTlsServer<T>(status: number, fn: (port: number) => Promise<T>): Promise<T> {
   const server = createServer({ key: certKey, cert: certPem }, (_req, res) => {
@@ -623,6 +566,23 @@ describe('repo service real git', () => {
       expect(repo.isWorktree).toBe(true)
       expect(existsSync(path.join(reposPath, `${baseName}-${branchName}`))).toBe(true)
       expect(git(['rev-parse', '--abbrev-ref', 'HEAD'], path.join(reposPath, `${baseName}-${branchName}`))).toBe(branchName)
+    })
+
+    it('creates a worktree for an existing remote-only branch', async () => {
+      const { cloneRepo } = await import('../../src/services/repo')
+      const origin = path.join(workspaceRoot, uniqueName('clone-wt-remote-origin.git'))
+      const work = path.join(workspaceRoot, uniqueName('clone-wt-remote-work'))
+      createOrigin(origin, work, ['wt-remote'])
+      const baseName = uniqueName('clone-wt-remote-base')
+      await cloneRepo(db, gitAuth, origin, { directoryName: baseName })
+
+      const repo = await cloneRepo(db, gitAuth, origin, { directoryName: baseName, branch: 'wt-remote', useWorktree: true })
+
+      const worktreePath = path.join(reposPath, `${baseName}-wt-remote`)
+      expect(repo.isWorktree).toBe(true)
+      expect(existsSync(worktreePath)).toBe(true)
+      expect(git(['rev-parse', '--abbrev-ref', 'HEAD'], worktreePath)).toBe('wt-remote')
+      expect(git(['rev-parse', '--abbrev-ref', 'wt-remote@{upstream}'], worktreePath)).toBe('origin/wt-remote')
     })
 
     it('reuses a valid existing base repo directory and checks out a local branch', async () => {

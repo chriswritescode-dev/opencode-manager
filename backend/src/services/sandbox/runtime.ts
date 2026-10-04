@@ -7,6 +7,7 @@ import { mkdirSafe } from '../../utils/fs-safe'
 import { logger } from '../../utils/logger'
 import { SettingsService } from '../settings'
 import { CredentialProvider } from '../credential-provider'
+import { getGitIdentityEnvForDirectory } from '../git-identity'
 import { getProcessIdentityAttestationError } from '../opencode/process-identity'
 import { detectSandboxCapability } from './capability'
 import {
@@ -879,7 +880,10 @@ export class SandboxRuntimeService {
     }
     try {
       await ensureWorkspaceSandbox()
-      const env = new CredentialProvider(this.db).getSandboxGitEnv({ cwd: directory })
+      const env = {
+        ...new CredentialProvider(this.db).getSandboxGitEnv({ cwd: directory }),
+        ...await getGitIdentityEnvForDirectory(directory, this.db),
+      }
       return Object.keys(env).length > 0
         ? { mode: 'sandbox', workdir: workDirectory, env }
         : { mode: 'sandbox', workdir: workDirectory }

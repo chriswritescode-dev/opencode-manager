@@ -4,6 +4,7 @@ interface GithubRequestOptions {
   token?: string
   apiVersion?: string
   accept?: string
+  signal?: AbortSignal
 }
 
 export function githubFetch(
@@ -17,7 +18,7 @@ export function githubFetch(
   }
   if (options.token) headers.Authorization = `Bearer ${options.token}`
   if (options.apiVersion) headers['X-GitHub-Api-Version'] = options.apiVersion
-  return fetchFn(url, { headers })
+  return fetchFn(url, { headers, signal: options.signal })
 }
 
 export async function githubFetchJson<T = unknown>(

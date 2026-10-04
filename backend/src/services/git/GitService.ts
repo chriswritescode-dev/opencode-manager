@@ -2,22 +2,62 @@ import { GitAuthService } from '../git-auth'
 import { executeCommand } from '../../utils/process'
 import { logger } from '../../utils/logger'
 import { getErrorMessage } from '../../utils/error-utils'
-import { getRepoById } from '../../db/queries'
-import { resolveGitIdentity, createGitIdentityEnv } from '../../utils/git-auth'
-import { isSSHUrl } from '@opencode-manager/shared/utils'
-import { isNoUpstreamError, parseBranchNameFromError } from '../../utils/git-errors'
-import { SettingsService } from '../settings'
-import { CredentialProvider } from '../credential-provider'
+import { getRepoById, getRepoByDirectory, updateRepoBranch, listRepos } from '../../db/queries'
+import { updateScheduleJobsBranch } from '../../db/schedules'
+import { isSSHUrl, getBranchNameError } from '@opencode-manager/shared/utils'
+import { GitOperationError, isNoUpstreamError, parseGitError } from '../../utils/git-errors'
+import { resolveMainCheckoutPath } from '../repo'
+import { MAX_COMMIT_PROMPT_DIFF_CHARS, type CommitMessageContext } from './commit-message-prompt'
 import type { Database } from 'bun:sqlite'
+import type { DeleteBranchResult, GitOperationKind, GitOperationState, GitStashEntry, IntegrateBranchRequest, IntegrateBranchResult, StashPushRequest } from '@opencode-manager/shared'
 import type { GitBranch, GitCommit, FileDiffResponse, GitDiffOptions, GitStatusResponse, GitFileStatus, GitFileStatusType, CommitDetails, CommitFile } from '../../types/git'
+import { canonicalPathSync } from '../../utils/fs-safe'
 import path from 'path'
+import { existsSync } from 'node:fs'
+
+function assertValidBranchName(name: string): void {
+  const error = getBranchNameError(name)
+  if (error) {
+    throw new Error(error)
+  }
+}
+
+function assertValidStashIndex(index: number): void {
+  if (!Number.isInteger(index) || index < 0) {
+    throw new Error(`Invalid stash index: ${index}`)
+  }
+}
+
+export class GitIntegrationConflictError extends GitOperationError {
+  constructor(
+    readonly targetRepoId: number,
+    readonly operation: GitOperationState
+  ) {
+    super('MERGE_CONFLICT', 'Integration stopped on conflicts', { targetRepoId, operation })
+    this.name = 'GitIntegrationConflictError'
+  }
+}
+
+export class BranchDeleteError extends Error {
+  constructor(
+    message: string,
+    readonly localDeleted: boolean,
+    readonly remoteDeleted: boolean
+  ) {
+    super(message)
+    this.name = 'BranchDeleteError'
+  }
+}
+
+export interface WorktreeBranchDeletionResult {
+  name: string
+  deleted: boolean
+  remoteDeleted: boolean
+  error?: string
+}
 
 export class GitService {
-  constructor(
-    private gitAuthService: GitAuthService,
-    private settingsService: SettingsService,
-    private credentialProvider: CredentialProvider
-  ) {}
+  constructor(private gitAuthService: GitAuthService) {}
 
   async getStatus(repoId: number, database: Database): Promise<GitStatusResponse> {
     try {
@@ -29,10 +69,11 @@ export class GitService {
       const repoPath = repo.fullPath
       const env = this.gitAuthService.getGitEnvironment()
 
-      const [branch, branchStatus, porcelainOutput] = await Promise.all([
+      const [branch, branchStatus, porcelainOutput, operation] = await Promise.all([
         this.getCurrentBranch(repoPath, env),
         this.getBranchStatusFromPath(repoPath, env),
-        executeCommand(['git', '-C', repoPath, 'status', '--porcelain'], { env })
+        executeCommand(['git', '-C', repoPath, 'status', '--porcelain'], { env }),
+        this.getOperationState(repoPath, env)
       ])
 
       const files = this.parsePorcelainOutput(porcelainOutput)
@@ -43,12 +84,54 @@ export class GitService {
         ahead: branchStatus.ahead,
         behind: branchStatus.behind,
         files,
-        hasChanges
+        hasChanges,
+        operation
       }
     } catch (error: unknown) {
       logger.error(`Failed to get status for repo ${repoId}:`, error)
       throw error
     }
+  }
+
+  private async getOperationState(repoPath: string, env: Record<string, string>): Promise<GitOperationState | null> {
+    const output = await executeCommand(
+      [
+        'git', '-C', repoPath, 'rev-parse',
+        '--git-path', 'rebase-merge',
+        '--git-path', 'rebase-apply',
+        '--git-path', 'MERGE_HEAD',
+        '--git-path', 'CHERRY_PICK_HEAD',
+        '--git-path', 'REVERT_HEAD',
+      ],
+      { env, silent: true }
+    )
+
+    const markerPaths = output.split('\n').map((entry) => entry.trim())
+    const markerExists = (index: number): boolean => {
+      const gitPath = markerPaths[index]
+      if (!gitPath) return false
+      const resolved = path.isAbsolute(gitPath) ? gitPath : path.resolve(repoPath, gitPath)
+      return existsSync(resolved)
+    }
+
+    const kind: GitOperationKind | null =
+      markerExists(0) || markerExists(1) ? 'rebase'
+        : markerExists(2) ? 'merge'
+          : markerExists(3) ? 'cherry-pick'
+            : markerExists(4) ? 'revert'
+              : null
+
+    if (!kind) {
+      return null
+    }
+
+    const conflictOutput = await executeCommand(
+      ['git', '-C', repoPath, 'diff', '--name-only', '--diff-filter=U', '-z'],
+      { env, silent: true }
+    )
+    const conflictedFiles = conflictOutput.split('\0').filter((entry) => entry.length > 0)
+
+    return { kind, conflictedFiles }
   }
 
   async getFileDiff(repoId: number, filePath: string, database: Database, options?: GitDiffOptions & { includeStaged?: boolean }): Promise<FileDiffResponse> {
@@ -198,14 +281,7 @@ export class GitService {
       }
 
       const repoPath = repo.fullPath
-      const authEnv = this.getEnvironmentForRepo(repo)
-
-      const settings = this.settingsService.getSettings('default')
-      const gitCredentials = this.credentialProvider.getGitCredentials()
-      const identity = await resolveGitIdentity(settings.preferences.gitIdentity, gitCredentials)
-      const identityEnv = identity ? createGitIdentityEnv(identity) : {}
-
-      const env = { ...authEnv, ...identityEnv }
+      const env = this.getEnvironmentForRepo(repo)
 
       const args = ['git', '-C', repoPath, 'commit', '-m', message]
 
@@ -220,6 +296,48 @@ export class GitService {
     } catch (error: unknown) {
       logger.error(`Failed to commit changes for repo ${repoId}:`, error)
       throw error
+    }
+  }
+
+  async getCommitMessageContext(repoId: number, database: Database): Promise<CommitMessageContext> {
+    const repo = getRepoById(database, repoId)
+    if (!repo) {
+      throw new Error('Repository not found')
+    }
+
+    const repoPath = path.resolve(repo.fullPath)
+    const env = this.gitAuthService.getGitEnvironment()
+
+    const stagedStat = await executeCommand(
+      ['git', '-C', repoPath, 'diff', '--cached', '--stat'],
+      { env }
+    )
+
+    if (!stagedStat.trim()) {
+      throw new Error('No staged changes')
+    }
+
+    const [stagedDiff, recentSubjects] = await Promise.all([
+      executeCommand(['git', '-C', repoPath, 'diff', '--cached'], { env, maxOutputChars: MAX_COMMIT_PROMPT_DIFF_CHARS + 1 }),
+      this.getRecentCommitSubjects(repoPath, env),
+    ])
+
+    return { stagedStat, stagedDiff, recentSubjects }
+  }
+
+  private async getRecentCommitSubjects(repoPath: string, env: Record<string, string>): Promise<string[]> {
+    if (!(await this.hasCommits(repoPath))) {
+      return []
+    }
+
+    try {
+      const output = await executeCommand(
+        ['git', '-C', repoPath, 'log', '-n', '10', '--format=%s'],
+        { env, silent: true }
+      )
+      return output.split('\n').map(line => line.trim()).filter(Boolean)
+    } catch {
+      return []
     }
   }
 
@@ -517,7 +635,7 @@ export class GitService {
     return 'modified'
   }
 
-  private async setupSSHIfNeeded(repoUrl: string | undefined, database: Database): Promise<void> {
+  private async setupSSHIfNeeded(repoUrl: string | undefined, database?: Database): Promise<void> {
     await this.gitAuthService.setupSSHForRepoUrl(repoUrl, database)
   }
 
@@ -544,6 +662,20 @@ export class GitService {
 
     const sshEnv = this.gitAuthService.getSSHEnvironment()
     return { ...baseEnv, ...sshEnv }
+  }
+
+  private async withRemoteAuth<T>(
+    repo: { id?: number; repoUrl?: string; fullPath: string },
+    run: (env: Record<string, string>) => Promise<T>,
+    options: { database?: Database; silent?: boolean } = {}
+  ): Promise<T> {
+    await this.setupSSHIfNeeded(repo.repoUrl, options.database)
+    try {
+      const env = this.getEnvironmentForRepo(repo, options.silent ?? false)
+      return await run(env)
+    } finally {
+      await this.cleanupSSHForRepo()
+    }
   }
 
   async resetToCommit(repoId: number, commitHash: string, database: Database): Promise<string> {
@@ -574,12 +706,9 @@ export class GitService {
 
     const fullPath = path.resolve(repo.fullPath)
 
-    await this.setupSSHIfNeeded(repo.repoUrl, database)
-
-    try {
-      const env = this.getEnvironmentForRepo(repo)
+    return this.withRemoteAuth(repo, async (env) => {
       if (options.setUpstream) {
-        return await this.pushWithUpstream(repoId, fullPath, env)
+        return this.pushWithUpstream(repoId, fullPath, env)
       }
 
       try {
@@ -587,13 +716,11 @@ export class GitService {
         return await executeCommand(args, { env })
       } catch (error) {
         if (isNoUpstreamError(error as Error)) {
-          return await this.pushWithUpstream(repoId, fullPath, env)
+          return this.pushWithUpstream(repoId, fullPath, env)
         }
         throw error
       }
-    } finally {
-      await this.cleanupSSHForRepo()
-    }
+    }, { database })
   }
 
   async fetch(repoId: number, database: Database): Promise<string> {
@@ -604,14 +731,11 @@ export class GitService {
 
     const fullPath = path.resolve(repo.fullPath)
 
-    await this.setupSSHIfNeeded(repo.repoUrl, database)
-
-    try {
-      const env = this.getEnvironmentForRepo(repo, true)
-      return await executeCommand(['git', '-C', fullPath, 'fetch', '--all', '--prune'], { env })
-    } finally {
-      await this.cleanupSSHForRepo()
-    }
+    return this.withRemoteAuth(
+      repo,
+      (env) => executeCommand(['git', '-C', fullPath, 'fetch', '--all', '--prune'], { env }),
+      { database, silent: true }
+    )
   }
 
   async pull(repoId: number, database: Database): Promise<string> {
@@ -622,14 +746,11 @@ export class GitService {
 
     const fullPath = path.resolve(repo.fullPath)
 
-    await this.setupSSHIfNeeded(repo.repoUrl, database)
-
-    try {
-      const env = this.getEnvironmentForRepo(repo, false)
-      return await executeCommand(['git', '-C', fullPath, 'pull'], { env })
-    } finally {
-      await this.cleanupSSHForRepo()
-    }
+    return this.withRemoteAuth(
+      repo,
+      (env) => executeCommand(['git', '-C', fullPath, 'pull'], { env }),
+      { database }
+    )
   }
 
   async getBranches(repoId: number, database: Database): Promise<GitBranch[]> {
@@ -641,13 +762,7 @@ export class GitService {
     const fullPath = path.resolve(repo.fullPath)
     const env = this.gitAuthService.getGitEnvironment()
 
-    let currentBranch = ''
-    try {
-      const currentStdout = await executeCommand(['git', '-C', fullPath, 'rev-parse', '--abbrev-ref', 'HEAD'], { env, silent: true })
-      currentBranch = currentStdout.trim()
-    } catch {
-      void 0
-    }
+    const currentBranch = await this.resolveHeadBranch(fullPath, env)
 
     const stdout = await executeCommand(['git', '-C', fullPath, 'branch', '-vv', '-a'], { env, silent: true })
     const lines = stdout.split('\n').filter(line => line.trim())
@@ -674,7 +789,7 @@ export class GitService {
       const branch: GitBranch = {
         name: branchName,
         type: branchName.startsWith('remotes/') ? 'remote' : 'local',
-        current: isCurrent && (branchName === currentBranch || branchName === `remotes/${currentBranch}`),
+        current: isCurrent && (branchName === currentBranch || (currentBranch !== null && branchName === `remotes/${currentBranch}`)),
         isWorktree
       }
 
@@ -728,32 +843,413 @@ export class GitService {
     }
   }
 
-  async createBranch(repoId: number, branchName: string, database: Database): Promise<string> {
+  async renameBranch(repoId: number, from: string, to: string, database: Database): Promise<string> {
     const repo = getRepoById(database, repoId)
     if (!repo) {
       throw new Error(`Repository not found`)
     }
 
+    assertValidBranchName(from)
+    assertValidBranchName(to)
+
     const fullPath = path.resolve(repo.fullPath)
     const env = this.gitAuthService.getGitEnvironment()
 
-    const result = await executeCommand(['git', '-C', fullPath, 'checkout', '-b', branchName], { env })
+    const currentBranch = await this.getCurrentBranch(fullPath, env)
+    if (currentBranch !== from && await this.isBranchCheckedOutInWorktree(fullPath, from, env)) {
+      throw new GitOperationError('BRANCH_IN_OTHER_WORKTREE', `Branch '${from}' is checked out in another worktree and cannot be renamed here`)
+    }
+
+    const result = await executeCommand(['git', '-C', fullPath, 'branch', '-m', '--', from, to], { env })
+
+    const renamedMainCheckout = await resolveMainCheckoutPath(fullPath)
+    const renamedMainCheckoutCanonical = renamedMainCheckout ? canonicalPathSync(renamedMainCheckout) : null
+
+    const relatedRepoIds: number[] = []
+    if (renamedMainCheckoutCanonical) {
+      for (const candidate of listRepos(database)) {
+        if (candidate.cloneStatus !== 'ready') continue
+        const candidateMainCheckout = await resolveMainCheckoutPath(candidate.fullPath)
+        if (candidateMainCheckout && canonicalPathSync(candidateMainCheckout) === renamedMainCheckoutCanonical) {
+          relatedRepoIds.push(candidate.id)
+        }
+      }
+    }
+
+    database.transaction(() => {
+      if (repo.branch === from) {
+        updateRepoBranch(database, repoId, to)
+      }
+      for (const relatedRepoId of relatedRepoIds) {
+        updateScheduleJobsBranch(database, relatedRepoId, from, to)
+      }
+    })()
 
     return result
   }
 
-  async switchBranch(repoId: number, branchName: string, database: Database): Promise<string> {
+  async getMainCheckoutPath(worktreePath: string): Promise<string> {
+    const mainCheckoutPath = await resolveMainCheckoutPath(worktreePath)
+    if (!mainCheckoutPath) {
+      throw new Error(`Could not determine the main checkout for worktree at ${worktreePath}`)
+    }
+    return mainCheckoutPath
+  }
+
+  async deleteWorktreeBranch(
+    repo: { id: number; fullPath: string; repoUrl?: string; branch?: string },
+    options: { deleteRemote: boolean },
+    removeWorktree: () => Promise<void>,
+    database: Database
+  ): Promise<WorktreeBranchDeletionResult> {
+    let name: string | null = null
+    let baseTarget: { fullPath: string; repoUrl?: string; id?: number } | null = null
+    let prepareError: string | null = null
+
+    try {
+      const env = this.getEnvironmentForRepo(repo)
+      name = await this.resolveHeadBranch(repo.fullPath, env) ?? repo.branch ?? null
+      if (!name) {
+        throw new Error('Could not determine the worktree branch')
+      }
+
+      const basePath = await this.getMainCheckoutPath(repo.fullPath)
+      const baseRepo = getRepoByDirectory(database, basePath)
+      baseTarget = baseRepo
+        ? { fullPath: baseRepo.fullPath, repoUrl: baseRepo.repoUrl, id: baseRepo.id }
+        : { fullPath: basePath, repoUrl: repo.repoUrl }
+    } catch (error: unknown) {
+      prepareError = getErrorMessage(error)
+    }
+
+    await removeWorktree()
+
+    if (prepareError || !name || !baseTarget) {
+      return {
+        name: name ?? repo.branch ?? '',
+        deleted: false,
+        remoteDeleted: false,
+        error: prepareError ?? 'Could not determine the worktree branch',
+      }
+    }
+
+    try {
+      const { remoteDeleted } = await this.deleteBranchAtPath(baseTarget, name, {
+        force: false,
+        deleteRemote: options.deleteRemote,
+      })
+      return { name, deleted: true, remoteDeleted }
+    } catch (error: unknown) {
+      const partial = error instanceof BranchDeleteError ? error : null
+      return {
+        name,
+        deleted: partial?.localDeleted ?? false,
+        remoteDeleted: partial?.remoteDeleted ?? false,
+        error: getErrorMessage(error),
+      }
+    }
+  }
+
+  async deleteBranchAtPath(
+    target: { fullPath: string; repoUrl?: string; id?: number },
+    name: string,
+    options: { force: boolean; deleteRemote: boolean }
+  ): Promise<DeleteBranchResult> {
+    assertValidBranchName(name)
+
+    const fullPath = path.resolve(target.fullPath)
+    const env = this.getEnvironmentForRepo(target)
+
+    const currentBranch = await this.getCurrentBranch(fullPath, env)
+    if (currentBranch === name) {
+      throw new GitOperationError('BRANCH_CHECKED_OUT', `Cannot delete branch '${name}' because it is currently checked out`)
+    }
+
+    let upstreamRemote: string | null = null
+    let upstreamBranch: string | null = null
+    if (options.deleteRemote) {
+      try {
+        const upstream = await executeCommand(
+          ['git', '-C', fullPath, 'rev-parse', '--abbrev-ref', `${name}@{upstream}`],
+          { env, silent: true }
+        )
+        const separator = upstream.trim().indexOf('/')
+        if (separator > 0) {
+          upstreamRemote = upstream.trim().slice(0, separator)
+          upstreamBranch = upstream.trim().slice(separator + 1)
+        }
+      } catch {
+        upstreamRemote = null
+        upstreamBranch = null
+      }
+    }
+
+    const deleteFlag = options.force ? '-D' : '-d'
+    try {
+      await executeCommand(['git', '-C', fullPath, 'branch', deleteFlag, '--', name], { env })
+    } catch (error: unknown) {
+      if (parseGitError(error).code === 'BRANCH_NOT_MERGED') {
+        throw new GitOperationError('BRANCH_NOT_MERGED', `Branch '${name}' was kept because it has unmerged commits.`)
+      }
+      throw error
+    }
+
+    let remoteDeleted = false
+    if (upstreamRemote && upstreamBranch) {
+      try {
+        await this.withRemoteAuth(target, async (remoteEnv) => {
+          await executeCommand(
+            ['git', '-C', fullPath, 'push', upstreamRemote, '--delete', upstreamBranch],
+            { env: remoteEnv }
+          )
+        })
+        remoteDeleted = true
+      } catch (error: unknown) {
+        throw new BranchDeleteError(getErrorMessage(error), true, false)
+      }
+    }
+
+    return { remoteDeleted }
+  }
+
+  async deleteBranch(
+    repoId: number,
+    request: { name: string; force: boolean; deleteRemote: boolean },
+    database: Database
+  ): Promise<DeleteBranchResult> {
     const repo = getRepoById(database, repoId)
     if (!repo) {
       throw new Error(`Repository not found`)
     }
 
-    const fullPath = path.resolve(repo.fullPath)
+    return this.deleteBranchAtPath(
+      { fullPath: repo.fullPath, repoUrl: repo.repoUrl, id: repo.id },
+      request.name,
+      { force: request.force, deleteRemote: request.deleteRemote }
+    )
+  }
+
+  private async listWorktreeCheckouts(repoPath: string, env: Record<string, string> | undefined): Promise<Array<{ path: string; branch: string | null }>> {
+    try {
+      const output = await executeCommand(['git', '-C', repoPath, 'worktree', 'list', '--porcelain'], { env, silent: true })
+      const checkouts: Array<{ path: string; branch: string | null }> = []
+      let current: { path: string; branch: string | null } | null = null
+
+      for (const line of output.split('\n')) {
+        if (line.startsWith('worktree ')) {
+          if (current) checkouts.push(current)
+          current = { path: line.slice('worktree '.length).trim(), branch: null }
+        } else if (line.startsWith('branch refs/heads/') && current) {
+          current.branch = line.slice('branch refs/heads/'.length).trim()
+        }
+      }
+      if (current) checkouts.push(current)
+
+      return checkouts
+    } catch {
+      return []
+    }
+  }
+
+  private async findCheckoutPath(repoPath: string, branch: string, env: Record<string, string> | undefined): Promise<string | null> {
+    const checkouts = await this.listWorktreeCheckouts(repoPath, env)
+    return checkouts.find((checkout) => checkout.branch === branch)?.path ?? null
+  }
+
+  async integrateBranch(repoId: number, request: IntegrateBranchRequest, database: Database): Promise<IntegrateBranchResult> {
+    const repo = getRepoById(database, repoId)
+    if (!repo) {
+      throw new Error('Repository not found')
+    }
+
+    const sourcePath = path.resolve(repo.fullPath)
+    const sourceEnv = this.getEnvironmentForRepo(repo)
+
+    const sourceBranch = await this.resolveHeadBranch(sourcePath, sourceEnv)
+    if (!sourceBranch) {
+      throw new GitOperationError('INTEGRATE_DETACHED_HEAD', 'Cannot integrate from a detached HEAD')
+    }
+
+    const sourceRef = `refs/heads/${sourceBranch}`
+
+    const targetBranch = request.targetBranch
+    if (targetBranch === sourceBranch) {
+      throw new GitOperationError('INTEGRATE_INTO_SELF', 'Cannot integrate a branch into itself')
+    }
+
+    const targetRef = `refs/heads/${targetBranch}`
+
+    const targetPath = await this.findCheckoutPath(sourcePath, targetBranch, sourceEnv)
+    if (!targetPath) {
+      throw new GitOperationError('INTEGRATE_TARGET_NOT_CHECKED_OUT', 'Target branch is not checked out in any worktree')
+    }
+
+    const targetRepo = getRepoByDirectory(database, targetPath)
+    if (!targetRepo || canonicalPathSync(path.resolve(targetRepo.fullPath)) !== canonicalPathSync(path.resolve(targetPath))) {
+      throw new GitOperationError('INTEGRATE_TARGET_NOT_MANAGED', 'Target checkout is not a managed repository')
+    }
+
+    const targetEnv = this.getEnvironmentForRepo(targetRepo)
+    const [porcelain, targetOperation] = await Promise.all([
+      executeCommand(['git', '-C', targetPath, 'status', '--porcelain'], { env: targetEnv }),
+      this.getOperationState(targetPath, targetEnv),
+    ])
+
+    const hasTrackedChanges = this.parsePorcelainOutput(porcelain).some((file) => file.status !== 'untracked')
+    if (hasTrackedChanges || targetOperation) {
+      throw new GitOperationError('UNCOMMITTED_CHANGES', 'You have uncommitted changes. Commit or stash them first.')
+    }
+
+    const countOutput = await executeCommand(
+      ['git', '-C', sourcePath, 'rev-list', '--count', `${targetRef}..${sourceRef}`],
+      { env: sourceEnv, silent: true }
+    )
+    const integratedCommits = Number.parseInt(countOutput.trim(), 10)
+    if (!integratedCommits) {
+      throw new GitOperationError('INTEGRATE_NOTHING_TO_INTEGRATE', 'Nothing to integrate')
+    }
+
+    const commandEnv = {
+      ...targetEnv,
+      GIT_EDITOR: 'true',
+    }
+
+    const args = request.strategy === 'cherry-pick'
+      ? ['git', '-C', targetPath, 'cherry-pick', `${targetRef}..${sourceRef}`]
+      : ['git', '-C', targetPath, 'merge', '--no-ff', '--no-edit', sourceRef]
+
+    try {
+      await executeCommand(args, { env: commandEnv })
+    } catch (error: unknown) {
+      const operation = await this.getOperationState(targetPath, targetEnv)
+      if (operation) {
+        throw new GitIntegrationConflictError(targetRepo.id, operation)
+      }
+      throw error
+    }
+
+    return { targetRepoId: targetRepo.id, integratedCommits }
+  }
+
+  async listStashes(repoId: number, database: Database): Promise<GitStashEntry[]> {
+    const repo = getRepoById(database, repoId)
+    if (!repo) {
+      throw new Error(`Repository not found`)
+    }
+
+    const repoPath = path.resolve(repo.fullPath)
     const env = this.gitAuthService.getGitEnvironment()
+    const output = await executeCommand(
+      ['git', '-C', repoPath, 'stash', 'list', '--format=%gd%x1f%H%x1f%gs%x1f%cI'],
+      { env, silent: true }
+    )
 
-    const result = await executeCommand(['git', '-C', fullPath, 'checkout', branchName], { env })
+    const stashes: GitStashEntry[] = []
 
-    return result
+    for (const line of output.split('\n')) {
+      if (!line.trim()) continue
+
+      const [ref, hash, subject, date] = line.split('\x1f')
+      if (!ref) continue
+
+      const indexMatch = ref.match(/^stash@\{(\d+)\}$/)
+      if (!indexMatch) continue
+
+      const subjectMatch = subject?.match(/^(?:WIP on|On) ([^:]+): ?(.*)$/)
+      stashes.push({
+        index: Number(indexMatch[1]),
+        ref,
+        hash: hash ?? '',
+        message: subjectMatch ? (subjectMatch[2] ?? '') : (subject ?? ''),
+        branch: subjectMatch ? (subjectMatch[1] ?? null) : null,
+        date: date ?? ''
+      })
+    }
+
+    return stashes
+  }
+
+  async pushStash(repoId: number, request: StashPushRequest, database: Database): Promise<string> {
+    const repo = getRepoById(database, repoId)
+    if (!repo) {
+      throw new Error(`Repository not found`)
+    }
+
+    const repoPath = path.resolve(repo.fullPath)
+    const env = this.getEnvironmentForRepo(repo)
+
+    const args = ['git', '-C', repoPath, 'stash', 'push']
+    if (request.includeUntracked) {
+      args.push('-u')
+    }
+    if (request.message) {
+      args.push('-m', request.message)
+    }
+
+    return executeCommand(args, { env })
+  }
+
+  async applyStash(repoId: number, index: number, hash: string, pop: boolean, database: Database): Promise<string> {
+    return this.runStashCommand(repoId, index, hash, [pop ? 'pop' : 'apply'], database)
+  }
+
+  async dropStash(repoId: number, index: number, hash: string, database: Database): Promise<string> {
+    return this.runStashCommand(repoId, index, hash, ['drop'], database)
+  }
+
+  private async runStashCommand(repoId: number, index: number, hash: string, action: string[], database: Database): Promise<string> {
+    assertValidStashIndex(index)
+
+    const repo = getRepoById(database, repoId)
+    if (!repo) {
+      throw new Error(`Repository not found`)
+    }
+
+    const repoPath = path.resolve(repo.fullPath)
+    const env = this.gitAuthService.getGitEnvironment()
+    const currentHash = await this.resolveStashHash(repoPath, index, env)
+    if (!currentHash || currentHash !== hash.trim()) {
+      throw new GitOperationError('STASH_CHANGED', 'The stash list changed. Refresh and try again.')
+    }
+
+    const args = ['git', '-C', repoPath, 'stash', ...action, `stash@{${index}}`]
+
+    return executeCommand(args, { env })
+  }
+
+  private async resolveStashHash(repoPath: string, index: number, env: Record<string, string>): Promise<string | null> {
+    try {
+      const output = await executeCommand(['git', '-C', repoPath, 'rev-parse', `stash@{${index}}`], { env, silent: true })
+      const hash = output.trim()
+      return hash || null
+    } catch {
+      return null
+    }
+  }
+
+  async continueOperation(repoId: number, database: Database): Promise<string> {
+    return this.runOperationCommand(repoId, database, '--continue')
+  }
+
+  async abortOperation(repoId: number, database: Database): Promise<string> {
+    return this.runOperationCommand(repoId, database, '--abort')
+  }
+
+  private async runOperationCommand(repoId: number, database: Database, action: '--continue' | '--abort'): Promise<string> {
+    const repo = getRepoById(database, repoId)
+    if (!repo) {
+      throw new Error(`Repository not found`)
+    }
+
+    const repoPath = path.resolve(repo.fullPath)
+    const env = this.getEnvironmentForRepo(repo)
+    const operation = await this.getOperationState(repoPath, env)
+    if (!operation) {
+      throw new GitOperationError('NO_OPERATION_IN_PROGRESS', 'No operation in progress')
+    }
+
+    const commandEnv = action === '--continue' ? { ...env, GIT_EDITOR: 'true' } : env
+    return executeCommand(['git', '-C', repoPath, operation.kind, action], { env: commandEnv })
   }
 
   private async getCurrentBranch(repoPath: string, env: Record<string, string> | undefined): Promise<string> {
@@ -763,6 +1259,20 @@ export class GitService {
     } catch {
       return ''
     }
+  }
+
+  private async resolveHeadBranch(repoPath: string, env: Record<string, string> | undefined): Promise<string | null> {
+    try {
+      const ref = await executeCommand(['git', '-C', repoPath, 'symbolic-ref', '--quiet', 'HEAD'], { env, silent: true })
+      const trimmed = ref.trim()
+      return trimmed.startsWith('refs/heads/') ? trimmed.slice('refs/heads/'.length) : null
+    } catch {
+      return null
+    }
+  }
+
+  private async isBranchCheckedOutInWorktree(repoPath: string, branch: string, env: Record<string, string> | undefined): Promise<boolean> {
+    return (await this.findCheckoutPath(repoPath, branch, env)) !== null
   }
 
   private async getBranchStatusFromPath(repoPath: string, env: Record<string, string> | undefined): Promise<{ ahead: number; behind: number }> {
@@ -981,21 +1491,8 @@ export class GitService {
     }
   }
 
-  private async pushWithUpstream(repoId: number, fullPath: string, env: Record<string, string>): Promise<string> {
-    let branchName: string | null = null
-
-    try {
-      const result = await executeCommand(
-        ['git', '-C', fullPath, 'rev-parse', '--abbrev-ref', 'HEAD'],
-        { env }
-      )
-      branchName = result.trim()
-      if (branchName === 'HEAD') {
-        branchName = null
-      }
-    } catch (error) {
-      branchName = parseBranchNameFromError(error as Error)
-    }
+  private async pushWithUpstream(_repoId: number, fullPath: string, env: Record<string, string>): Promise<string> {
+    const branchName = await this.resolveHeadBranch(fullPath, env)
 
     if (!branchName) {
       throw new Error('Unable to detect current branch. Ensure you are on a branch before pushing with --set-upstream.')
@@ -1004,4 +1501,8 @@ export class GitService {
     const args = ['git', '-C', fullPath, 'push', '--set-upstream', 'origin', branchName]
     return executeCommand(args, { env })
   }
+}
+
+export function createGitService(gitAuthService: GitAuthService): GitService {
+  return new GitService(gitAuthService)
 }

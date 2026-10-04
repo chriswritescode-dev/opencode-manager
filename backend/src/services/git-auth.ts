@@ -5,6 +5,7 @@ import { SSHHostKeyHandler } from '../ipc/sshHostKeyHandler'
 import { writeTemporarySSHKey, buildSSHCommand, buildSSHCommandWithKnownHosts, cleanupSSHKey, parseSSHHost } from '../utils/ssh-key-manager'
 import { decryptSecret } from '../utils/crypto'
 import { isSSHUrl, normalizeSSHUrl, extractHostFromSSHUrl } from '@opencode-manager/shared/utils'
+import { getOpenCodeConfigHome } from '@opencode-manager/shared/config/env'
 import type { GitCredential } from '@opencode-manager/shared'
 import { logger } from '../utils/logger'
 import { CredentialProvider } from './credential-provider'
@@ -84,7 +85,7 @@ export class GitAuthService {
     }
   }
 
-  async setupSSHForRepoUrl(repoUrl: string | undefined, database: Database, skipSSHVerification: boolean = false): Promise<boolean> {
+  async setupSSHForRepoUrl(repoUrl: string | undefined, database?: Database, skipSSHVerification: boolean = false): Promise<boolean> {
     if (!repoUrl || !isSSHUrl(repoUrl)) {
       return false
     }
@@ -159,6 +160,7 @@ export class GitAuthService {
       GIT_TERMINAL_PROMPT: '0',
       LANG: 'en_US.UTF-8',
       LC_ALL: 'en_US.UTF-8',
+      XDG_CONFIG_HOME: getOpenCodeConfigHome(),
     }
 
     if (silent) {

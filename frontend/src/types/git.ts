@@ -1,3 +1,5 @@
+import type { GitOperationState } from '@opencode-manager/shared'
+
 export type GitFileStatusType = 'modified' | 'added' | 'deleted' | 'renamed' | 'untracked' | 'copied'
 
 export interface GitFileStatus {
@@ -36,6 +38,7 @@ export interface GitStatusResponse {
   behind: number
   files: GitFileStatus[]
   hasChanges: boolean
+  operation: GitOperationState | null
 }
 
 export interface FileDiffResponse {

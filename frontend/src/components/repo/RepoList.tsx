@@ -3,9 +3,10 @@ import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query"
 import { DndContext, closestCenter, KeyboardSensor, MouseSensor, TouchSensor, useSensor, useSensors, type DragEndEvent } from "@dnd-kit/core"
 import { arrayMove, SortableContext, sortableKeyboardCoordinates, verticalListSortingStrategy, useSortable } from "@dnd-kit/sortable"
 import { CSS } from "@dnd-kit/utilities"
-import { listRepos, deleteRepo, updateRepoOrder } from "@/api/repos"
+import { listRepos, deleteRepo, updateRepoOrder, type DeleteBranchChoice } from "@/api/repos"
 import { fetchReposGitStatus } from "@/api/git"
 import { DeleteDialog } from "@/components/ui/delete-dialog"
+import { RadioOptionGroup, type RadioOption } from "@/components/ui/radio-option-group"
 import { GitBranch, Search, GripVertical } from "lucide-react"
 import type { Repo } from "@/api/types"
 import type { GitStatusResponse } from "@/types/git"
@@ -25,8 +26,15 @@ import {
 } from "./repo-list-state"
 import { RepoListControls } from "./RepoListControls"
 import { invalidateRepoListCaches } from "@/lib/queryInvalidation"
+import { showToast } from "@/lib/toast"
 import { formatShortRelativeTime } from "@/lib/utils"
 import { ASSISTANT_REPO_ID } from "@opencode-manager/shared/utils"
+
+const DELETE_BRANCH_OPTIONS: Array<RadioOption<DeleteBranchChoice>> = [
+  { value: 'none', label: 'Keep branch', description: 'Leave the branch in the parent repository.' },
+  { value: 'local', label: 'Delete local branch', description: 'Remove the branch from the parent repository.' },
+  { value: 'local-and-remote', label: 'Delete local and remote branch', description: 'Also delete the branch from origin.' },
+]
 
 interface RepoCardWrapperProps {
   repo: Repo
@@ -133,6 +141,7 @@ export function RepoList() {
   const { preferences, updateSettings } = useSettings()
   const [deleteDialogOpen, setDeleteDialogOpen] = useState(false)
   const [repoToDelete, setRepoToDelete] = useState<number | null>(null)
+  const [deleteBranchChoice, setDeleteBranchChoice] = useState<DeleteBranchChoice>('none')
   const [selectedRepos, setSelectedRepos] = useState<Set<number>>(new Set())
   const [selectionMode, setSelectionMode] = useState(false)
   const [searchQuery, setSearchQuery] = useState("")
@@ -209,11 +218,18 @@ export function RepoList() {
   }, [viewModels])
 
   const deleteMutation = useMutation({
-    mutationFn: deleteRepo,
-    onSuccess: () => {
+    mutationFn: (id: number) =>
+      deleteRepo(id, repoForDelete?.isWorktree ? { deleteBranch: deleteBranchChoice } : undefined),
+    onSuccess: (result) => {
       invalidateRepoListCaches(queryClient)
       setDeleteDialogOpen(false)
       setRepoToDelete(null)
+      setDeleteBranchChoice('none')
+      if (result.branch?.error) {
+        showToast.warning(`Deleted the worktree but failed to delete branch "${result.branch.name}"`, {
+          description: result.branch.error,
+        })
+      }
     },
   })
 
@@ -483,7 +499,12 @@ export function RepoList() {
 
       <DeleteDialog
         open={deleteDialogOpen}
-        onOpenChange={setDeleteDialogOpen}
+        onOpenChange={(open) => {
+          setDeleteDialogOpen(open)
+          if (!open) {
+            setDeleteBranchChoice('none')
+          }
+        }}
         onConfirm={() => {
           if (selectedRepos.size > 0) {
             batchDeleteMutation.mutate(Array.from(selectedRepos))
@@ -494,6 +515,7 @@ export function RepoList() {
         onCancel={() => {
           setDeleteDialogOpen(false)
           setRepoToDelete(null)
+          setDeleteBranchChoice('none')
           if (selectedRepos.size > 0) {
             setSelectedRepos(new Set())
             setSelectionMode(false)
@@ -505,9 +527,11 @@ export function RepoList() {
               ? "Unlink Multiple Repositories"
               : "Delete Multiple Repositories"
             : repoForDelete
-              ? repoForDelete.isLocal
-                ? "Unlink Repository"
-                : "Delete Repository"
+              ? repoForDelete.isWorktree
+                ? "Delete Worktree"
+                : repoForDelete.isLocal
+                  ? "Unlink Repository"
+                  : "Delete Repository"
               : "Delete Repository"
         }
         description={
@@ -517,7 +541,9 @@ export function RepoList() {
               : hasLocalRepos && !hasClonedRepos
                 ? `Are you sure you want to unlink ${selectedRepos.size} repositor${selectedRepos.size === 1 ? "y" : "ies"}? Only workspace references will be removed. Your original files will not be affected.`
                 : `Are you sure you want to delete ${selectedRepos.size} repositor${selectedRepos.size === 1 ? "y" : "ies"}? Cloned repositories will have their local files removed. Locally discovered repositories will only have their workspace references removed — original files will not be affected.`
-            : repoForDelete?.isLocal
+            : repoForDelete?.isWorktree
+              ? "Are you sure you want to delete this worktree? This will remove all local files. This action cannot be undone."
+              : repoForDelete?.isLocal
               ? (
                 <>
                   Are you sure you want to unlink this repository? Only the workspace reference will be removed.
@@ -533,7 +559,19 @@ export function RepoList() {
               : "Are you sure you want to delete this repository? This will remove all local files. This action cannot be undone."
         }
         isDeleting={deleteMutation.isPending || batchDeleteMutation.isPending}
-      />
+      >
+        {selectedRepos.size === 0 && repoForDelete?.isWorktree && (
+          <div>
+            <span className="mb-1.5 block text-sm font-medium text-foreground">Branch</span>
+            <RadioOptionGroup
+              name="delete-worktree-branch"
+              value={deleteBranchChoice}
+              onChange={setDeleteBranchChoice}
+              options={DELETE_BRANCH_OPTIONS}
+            />
+          </div>
+        )}
+      </DeleteDialog>
     </>
   )
 }

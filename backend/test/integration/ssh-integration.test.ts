@@ -12,6 +12,7 @@ vi.mock('@opencode-manager/shared/config/env', () => ({
   getAgentsMdPath: vi.fn(() => '/tmp/test-workspace/AGENTS.md'),
   getDatabasePath: vi.fn(() => ':memory:'),
   getConfigPath: vi.fn(() => '/tmp/test-workspace/config'),
+  getOpenCodeConfigHome: vi.fn(() => '/tmp/test-workspace/.config'),
   ENV: {
     SERVER: { PORT: 5003, HOST: '0.0.0.0', NODE_ENV: 'test' },
     AUTH: { TRUSTED_ORIGINS: 'http://localhost:5173', SECRET: 'test-secret-for-encryption-key-32c' },

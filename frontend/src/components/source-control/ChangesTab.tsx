@@ -2,11 +2,12 @@ import { useState } from 'react'
 import { useGitStatus } from '@/api/git'
 import { useGit } from '@/hooks/useGit'
 import { GitFlatFileList } from './GitFlatFileList'
+import { RepoGitIdentitySelect } from './RepoGitIdentitySelect'
 import { Button } from '@/components/ui/button'
 import { Textarea } from '@/components/ui/textarea'
 import { FileDiffView } from '@/components/file-browser/FileDiffView'
 import { DiscardDialog } from '@/components/ui/discard-dialog'
-import { Loader2, GitCommit, FileText, AlertCircle } from 'lucide-react'
+import { Loader2, GitCommit, FileText, AlertCircle, Sparkles } from 'lucide-react'
 
 interface ChangesTabProps {
   repoId: number
@@ -58,6 +59,16 @@ export function ChangesTab({ repoId, onFileSelect, onClearFileSelection, selecte
   const handleCommit = () => {
     git.commit.mutate({ message: commitMessage.trim() })
     setCommitMessage('')
+  }
+
+  const handleGenerateMessage = () => {
+    git.generateCommitMessage.mutate(undefined, {
+      onSuccess: ({ message }) => {
+        if (commitMessage.trim() === '' || window.confirm('Replace the current commit message?')) {
+          setCommitMessage(message)
+        }
+      },
+    })
   }
 
   if (isLoading) {
@@ -129,17 +140,36 @@ export function ChangesTab({ repoId, onFileSelect, onClearFileSelection, selecte
 
         {status.hasChanges && (
           <div className="p-3 border-t border-border space-y-2 flex-shrink-0">
-            <Textarea
-              placeholder="Commit message..."
-              value={commitMessage}
-              onChange={(e) => setCommitMessage(e.target.value)}
-              className="min-h-[80px] md:text-sm resize-none"
-              onKeyDown={(e) => {
-                if ((e.metaKey || e.ctrlKey) && e.key === 'Enter' && canCommit) {
-                  handleCommit()
-                }
-              }}
-            />
+            <RepoGitIdentitySelect repoId={repoId} />
+            <div className="relative">
+              <Textarea
+                placeholder="Commit message..."
+                value={commitMessage}
+                onChange={(e) => setCommitMessage(e.target.value)}
+                className="min-h-[80px] md:text-sm resize-none pr-10"
+                onKeyDown={(e) => {
+                  if ((e.metaKey || e.ctrlKey) && e.key === 'Enter' && canCommit) {
+                    handleCommit()
+                  }
+                }}
+              />
+              <Button
+                type="button"
+                size="sm"
+                variant="ghost"
+                className="absolute top-1 right-1 h-7 w-7 p-0"
+                onClick={handleGenerateMessage}
+                disabled={stagedFiles.length === 0 || git.generateCommitMessage.isPending}
+                aria-label="Generate commit message"
+                title="Generate commit message with AI"
+              >
+                {git.generateCommitMessage.isPending ? (
+                  <Loader2 className="w-4 h-4 animate-spin" />
+                ) : (
+                  <Sparkles className="w-4 h-4" />
+                )}
+              </Button>
+            </div>
             <Button
               onClick={handleCommit}
               disabled={!canCommit}

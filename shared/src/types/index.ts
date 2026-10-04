@@ -18,10 +18,26 @@ import {
   DiscoverReposRequestSchema,
   DiscoverReposResponseSchema,
   UpdateRepoRequestSchema,
+  DeleteRepoRequestSchema,
+  DeleteRepoResultSchema,
   RepoStatusSchema,
   AssistantModeStatusSchema,
   AssistantModeInitRequestSchema,
 } from '../schemas/repo'
+import {
+  RenameBranchRequestSchema,
+  DeleteBranchRequestSchema,
+  DeleteBranchResultSchema,
+  GitStashEntrySchema,
+  StashPushRequestSchema,
+  StashApplyRequestSchema,
+  StashDropRequestSchema,
+  GitOperationKindSchema,
+  GitOperationStateSchema,
+  IntegrateBranchRequestSchema,
+  IntegrateBranchResultSchema,
+  RepoGitIdentitySchema,
+} from '../schemas/git'
 import {
   FileInfoSchema,
   CreateFileRequestSchema,
@@ -73,8 +89,23 @@ export type DiscoverReposRequest = z.infer<typeof DiscoverReposRequestSchema>
 export type DiscoverReposResponse = z.infer<typeof DiscoverReposResponseSchema>
 export type RepoStatus = z.infer<typeof RepoStatusSchema>
 export type UpdateRepoRequest = z.infer<typeof UpdateRepoRequestSchema>
+export type DeleteRepoRequest = z.infer<typeof DeleteRepoRequestSchema>
+export type DeleteRepoResult = z.infer<typeof DeleteRepoResultSchema>
 export type AssistantModeStatus = z.infer<typeof AssistantModeStatusSchema>
 export type AssistantModeInitRequest = z.infer<typeof AssistantModeInitRequestSchema>
+
+export type RenameBranchRequest = z.infer<typeof RenameBranchRequestSchema>
+export type DeleteBranchRequest = z.infer<typeof DeleteBranchRequestSchema>
+export type DeleteBranchResult = z.infer<typeof DeleteBranchResultSchema>
+export type GitStashEntry = z.infer<typeof GitStashEntrySchema>
+export type StashPushRequest = z.infer<typeof StashPushRequestSchema>
+export type StashApplyRequest = z.infer<typeof StashApplyRequestSchema>
+export type StashDropRequest = z.infer<typeof StashDropRequestSchema>
+export type GitOperationKind = z.infer<typeof GitOperationKindSchema>
+export type GitOperationState = z.infer<typeof GitOperationStateSchema>
+export type IntegrateBranchRequest = z.infer<typeof IntegrateBranchRequestSchema>
+export type IntegrateBranchResult = z.infer<typeof IntegrateBranchResultSchema>
+export type RepoGitIdentity = z.infer<typeof RepoGitIdentitySchema>
 
 export type FileInfo = z.infer<typeof FileInfoSchema>
 export type CreateFileRequest = z.infer<typeof CreateFileRequestSchema>
@@ -111,7 +142,7 @@ export interface SuccessResponse {
 }
 
 export type { SSHHostKeyRequest, SSHHostKeyResponse, TrustedSSHHost } from '../schemas/ssh'
-export type { GitCredential } from '../schemas/settings'
+export type { GitCredential, GitIdentityProfile } from '../schemas/settings'
 export type {
   ProviderApiConfig,
   ModelConfig,

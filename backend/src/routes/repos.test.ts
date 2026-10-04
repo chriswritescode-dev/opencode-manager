@@ -11,6 +11,8 @@ import type { OpenCodeClient } from '../services/opencode/client'
 import type { Repo } from '@opencode-manager/shared/types'
 import { getReposPath } from '@opencode-manager/shared/config/env'
 import path from 'path'
+import { mkdirSync, mkdtempSync, rmSync } from 'node:fs'
+import { tmpdir } from 'node:os'
 
 beforeEach(() => {
   mock.module('../services/project-id-resolver', () => ({
@@ -572,5 +574,95 @@ describe('PATCH /api/repos/:id', () => {
   it('returns 500 when reading the repo throws', async () => {
     const res = await createTestApp(createThrowingDb()).request('/repos/1', { method: 'PATCH', body: JSON.stringify({ name: 'new-name' }), headers: { 'Content-Type': 'application/json' } })
     expect(res.status).toBe(500)
+  })
+})
+
+describe('DELETE /api/repos/:id', () => {
+  let db: Database
+  let app: Hono
+  let workspacePath: string
+  const originalWorkspacePath = process.env.WORKSPACE_PATH
+
+  beforeEach(() => {
+    workspacePath = mkdtempSync(path.join(tmpdir(), 'repos-delete-'))
+    process.env.WORKSPACE_PATH = workspacePath
+    mkdirSync(path.join(workspacePath, 'repos'), { recursive: true })
+    db = createTestDb()
+    app = createTestApp(db)
+  })
+
+  afterEach(() => {
+    db.close()
+    rmSync(workspacePath, { recursive: true, force: true })
+    if (originalWorkspacePath === undefined) {
+      delete process.env.WORKSPACE_PATH
+    } else {
+      process.env.WORKSPACE_PATH = originalWorkspacePath
+    }
+  })
+
+  it('rejects deleteBranch for a non-worktree repo', async () => {
+    createRepo(db, { localPath: 'repo-a', defaultBranch: 'main', cloneStatus: 'ready', clonedAt: Date.now(), isLocal: true })
+
+    const res = await app.request('/repos/1', {
+      method: 'DELETE',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ deleteBranch: 'local' }),
+    })
+
+    expect(res.status).toBe(400)
+    const data = await res.json() as { error: string }
+    expect(data.error).toBe('Only worktrees can delete their branch')
+    expect(getRepoById(db, 1)).not.toBeNull()
+  })
+
+  it('deletes a repo with no body and keeps the previous response shape', async () => {
+    createRepo(db, { localPath: 'repo-a', defaultBranch: 'main', cloneStatus: 'ready', clonedAt: Date.now(), isLocal: true })
+
+    const res = await app.request('/repos/1', { method: 'DELETE' })
+
+    expect(res.status).toBe(200)
+    expect(await res.json()).toEqual({ success: true })
+    expect(getRepoById(db, 1)).toBeNull()
+  })
+
+  it('returns 200 with branch.error when branch cleanup fails after the worktree removal', async () => {
+    createRepo(db, {
+      localPath: 'wt-missing',
+      branch: 'feature',
+      defaultBranch: 'main',
+      cloneStatus: 'ready',
+      clonedAt: Date.now(),
+      isLocal: true,
+      isWorktree: true,
+    })
+
+    const res = await app.request('/repos/1', {
+      method: 'DELETE',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ deleteBranch: 'local' }),
+    })
+
+    expect(res.status).toBe(200)
+    const data = await res.json() as { success: boolean; branch?: { name: string; deleted: boolean; remoteDeleted: boolean; error?: string } }
+    expect(data.success).toBe(true)
+    expect(data.branch?.name).toBe('feature')
+    expect(data.branch?.deleted).toBe(false)
+    expect(data.branch?.remoteDeleted).toBe(false)
+    expect(data.branch?.error).toBeTruthy()
+    expect(getRepoById(db, 1)).toBeNull()
+  })
+
+  it('returns 400 for an invalid deleteBranch value', async () => {
+    createRepo(db, { localPath: 'repo-a', defaultBranch: 'main', cloneStatus: 'ready', clonedAt: Date.now(), isLocal: true })
+
+    const res = await app.request('/repos/1', {
+      method: 'DELETE',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ deleteBranch: 'remote-only' }),
+    })
+
+    expect(res.status).toBe(400)
+    expect(getRepoById(db, 1)).not.toBeNull()
   })
 })

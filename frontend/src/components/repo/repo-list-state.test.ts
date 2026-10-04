@@ -36,6 +36,7 @@ const createMockGitStatus = (overrides: Partial<GitStatusResponse> = {}): GitSta
   behind: 0,
   files: [],
   hasChanges: false,
+  operation: null,
   ...overrides,
 })
 

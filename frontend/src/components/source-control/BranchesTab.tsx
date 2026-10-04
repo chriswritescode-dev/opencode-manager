@@ -4,17 +4,26 @@ import { listBranches, switchBranch, GitAuthError, getRepo } from '@/api/repos'
 import { fetchGitStatus } from '@/api/git'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
-import { Loader2, GitBranch, GitBranchPlus, Check, Plus, AlertCircle, Globe } from 'lucide-react'
+import { Checkbox } from '@/components/ui/checkbox'
+import { ConfirmDestructiveDialog } from '@/components/ui/confirm-destructive-dialog'
+import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger } from '@/components/ui/dropdown-menu'
+import { Loader2, GitBranch, GitBranchPlus, GitMerge, Check, Plus, AlertCircle, Globe, MoreHorizontal, Pencil, Trash2 } from 'lucide-react'
 import { cn } from '@/lib/utils'
 import { showToast } from '@/lib/toast'
 import { useGit } from '@/hooks/useGit'
 import { GIT_UI_COLORS } from '@/lib/git-status-styles'
 import { CreateWorktreeDialog } from '@/components/repo/CreateWorktreeDialog'
+import { IntegrateBranchDialog } from '@/components/source-control/IntegrateBranchDialog'
 import { invalidateRepoGitCaches, setRepoGitStatusCaches } from '@/lib/queryInvalidation'
 
 interface BranchesTabProps {
   repoId: number
   currentBranch: string
+}
+
+interface BranchTarget {
+  name: string
+  upstream?: string
 }
 
 export function BranchesTab({ repoId, currentBranch }: BranchesTabProps) {
@@ -23,6 +32,12 @@ export function BranchesTab({ repoId, currentBranch }: BranchesTabProps) {
   const [searchQuery, setSearchQuery] = useState('')
   const [isCreating, setIsCreating] = useState(false)
   const [worktreeDialogOpen, setWorktreeDialogOpen] = useState(false)
+  const [integrateDialogOpen, setIntegrateDialogOpen] = useState(false)
+  const [renamingBranch, setRenamingBranch] = useState<string | null>(null)
+  const [renameValue, setRenameValue] = useState('')
+  const [branchToDelete, setBranchToDelete] = useState<BranchTarget | null>(null)
+  const [forceDelete, setForceDelete] = useState(false)
+  const [deleteRemote, setDeleteRemote] = useState(false)
   const git = useGit(repoId)
 
   const { data: branches, isLoading, error, refetch } = useQuery({
@@ -77,6 +92,58 @@ export function BranchesTab({ repoId, currentBranch }: BranchesTabProps) {
       setNewBranchName('')
       setIsCreating(false)
       refetch()
+    } catch {
+      // Error handled by mutation
+    }
+  }
+
+  const startRename = (branch: BranchTarget) => {
+    setRenamingBranch(branch.name)
+    setRenameValue(branch.name)
+  }
+
+  const cancelRename = () => {
+    setRenamingBranch(null)
+    setRenameValue('')
+  }
+
+  const handleRename = async () => {
+    const nextName = renameValue.trim()
+    if (!renamingBranch || !nextName || nextName === renamingBranch) {
+      cancelRename()
+      return
+    }
+
+    try {
+      await git.renameBranch.mutateAsync({ from: renamingBranch, to: nextName })
+      cancelRename()
+    } catch {
+      // Error handled by mutation
+    }
+  }
+
+  const startDelete = (branch: BranchTarget) => {
+    setBranchToDelete({ name: branch.name, upstream: branch.upstream })
+    setForceDelete(false)
+    setDeleteRemote(false)
+  }
+
+  const closeDelete = () => {
+    setBranchToDelete(null)
+    setForceDelete(false)
+    setDeleteRemote(false)
+  }
+
+  const handleDelete = async () => {
+    if (!branchToDelete) return
+
+    try {
+      await git.deleteBranch.mutateAsync({
+        name: branchToDelete.name,
+        force: forceDelete,
+        deleteRemote: branchToDelete.upstream ? deleteRemote : false,
+      })
+      closeDelete()
     } catch {
       // Error handled by mutation
     }
@@ -178,6 +245,18 @@ export function BranchesTab({ repoId, currentBranch }: BranchesTabProps) {
                 <span className="hidden sm:inline ml-1">Worktree</span>
               </Button>
             )}
+            {isRepoWorktree && (
+              <Button
+                size="sm"
+                variant="outline"
+                className="h-10 md:h-8 flex-shrink-0"
+                onClick={() => setIntegrateDialogOpen(true)}
+                title="Integrate this worktree branch into another branch"
+              >
+                <GitMerge className="w-4 h-4" />
+                <span className="hidden sm:inline ml-1">Integrate</span>
+              </Button>
+            )}
           </div>
         )}
       </div>
@@ -202,32 +281,91 @@ export function BranchesTab({ repoId, currentBranch }: BranchesTabProps) {
                 switchBranchMutation.mutate(checkoutName)
               }
 
+              if (renamingBranch === branch.name) {
+                return (
+                  <div key={branch.name} className="flex items-center gap-2 px-3 py-2">
+                    <Input
+                      value={renameValue}
+                      onChange={(e) => setRenameValue(e.target.value)}
+                      className="h-10 md:h-8 md:text-sm flex-1 min-w-0"
+                      aria-label={`New name for branch ${renamingBranch}`}
+                      autoFocus
+                      onKeyDown={(e) => {
+                        if (e.key === 'Enter') handleRename()
+                        if (e.key === 'Escape') cancelRename()
+                      }}
+                    />
+                    <Button
+                      size="sm"
+                      className="h-10 md:h-8"
+                      onClick={handleRename}
+                      disabled={!renameValue.trim() || git.renameBranch.isPending}
+                    >
+                      {git.renameBranch.isPending ? <Loader2 className="w-4 h-4 animate-spin" /> : 'Rename'}
+                    </Button>
+                    <Button size="sm" variant="ghost" className="h-10 md:h-8" onClick={cancelRename}>
+                      Cancel
+                    </Button>
+                  </div>
+                )
+              }
+
               return (
-                <button
+                <div
                   key={branch.name}
                   className={cn(
-                    'flex items-center gap-2 px-3 py-2 w-full text-left transition-colors',
+                    'flex items-center gap-1 px-3 py-2 w-full transition-colors',
                     isCurrent && 'bg-highlight/10',
-                    isCheckedOutElsewhere ? 'opacity-60 cursor-not-allowed' : 'hover:bg-accent/50'
+                    isCheckedOutElsewhere ? 'opacity-60' : 'hover:bg-accent/50'
                   )}
-                  onClick={handleClick}
-                  disabled={isCurrent || isCheckedOutElsewhere || switchBranchMutation.isPending}
-                  title={isCheckedOutElsewhere ? 'Branch is checked out in another worktree' : undefined}
                 >
-                  {isRemote ? (
-                    <Globe className="w-4 h-4 text-info" />
-                  ) : (
-                    <GitBranch className={cn('w-4 h-4', isCurrent ? GIT_UI_COLORS.current : 'text-muted-foreground')} />
+                  <button
+                    className="flex items-center gap-2 flex-1 min-w-0 text-left"
+                    onClick={handleClick}
+                    disabled={isCurrent || isCheckedOutElsewhere || switchBranchMutation.isPending}
+                    title={isCheckedOutElsewhere ? 'Branch is checked out in another worktree' : undefined}
+                  >
+                    {isRemote ? (
+                      <Globe className="w-4 h-4 text-info" />
+                    ) : (
+                      <GitBranch className={cn('w-4 h-4', isCurrent ? GIT_UI_COLORS.current : 'text-muted-foreground')} />
+                    )}
+                    <span className="flex-1 text-sm truncate">{branch.name}</span>
+                    {(isCheckedOutElsewhere || (isCurrent && isRepoWorktree)) && (
+                      <span className="text-[10px] px-1.5 py-0.5 rounded bg-primary/20 text-primary">worktree</span>
+                    )}
+                    {branch.type === 'local' && !branch.upstream && !branch.isWorktree && !(isCurrent && isRepoWorktree) && (
+                      <span className="text-[10px] px-1.5 py-0.5 rounded bg-muted text-muted-foreground">local</span>
+                    )}
+                    {isCurrent && <Check className={`w-4 h-4 ${GIT_UI_COLORS.current}`} />}
+                  </button>
+                  {!isRemote && (
+                    <DropdownMenu>
+                      <DropdownMenuTrigger asChild>
+                        <button
+                          type="button"
+                          className="p-1 rounded text-muted-foreground hover:bg-accent"
+                          aria-label={`Actions for ${branch.name}`}
+                        >
+                          <MoreHorizontal className="w-4 h-4" />
+                        </button>
+                      </DropdownMenuTrigger>
+                      <DropdownMenuContent align="end">
+                        <DropdownMenuItem onSelect={() => startRename(branch)} disabled={isCheckedOutElsewhere}>
+                          <Pencil className="w-4 h-4 mr-2" />
+                          Rename
+                        </DropdownMenuItem>
+                        <DropdownMenuItem
+                          onSelect={() => startDelete(branch)}
+                          disabled={isCurrent || !!branch.isWorktree}
+                        >
+                          <Trash2 className="w-4 h-4 mr-2" />
+                          Delete
+                        </DropdownMenuItem>
+                      </DropdownMenuContent>
+                    </DropdownMenu>
                   )}
-                  <span className="flex-1 text-sm truncate">{branch.name}</span>
-                  {(isCheckedOutElsewhere || (isCurrent && isRepoWorktree)) && (
-                    <span className="text-[10px] px-1.5 py-0.5 rounded bg-primary/20 text-primary">worktree</span>
-                  )}
-                  {branch.type === 'local' && !branch.upstream && !branch.isWorktree && !(isCurrent && isRepoWorktree) && (
-                    <span className="text-[10px] px-1.5 py-0.5 rounded bg-muted text-muted-foreground">local</span>
-                  )}
-                  {isCurrent && <Check className={`w-4 h-4 ${GIT_UI_COLORS.current}`} />}
-                </button>
+                </div>
               )
             })}
           </div>
@@ -250,6 +388,46 @@ export function BranchesTab({ repoId, currentBranch }: BranchesTabProps) {
         repoUrl={repoUrl}
         defaultBaseBranch={activeBranch}
       />
+
+      <IntegrateBranchDialog
+        open={integrateDialogOpen}
+        onOpenChange={setIntegrateDialogOpen}
+        repoId={repoId}
+        sourceBranch={activeBranch}
+      />
+
+      <ConfirmDestructiveDialog
+        open={!!branchToDelete}
+        onOpenChange={(open) => {
+          if (!open) closeDelete()
+        }}
+        onConfirm={handleDelete}
+        onCancel={closeDelete}
+        title={`Delete branch "${branchToDelete?.name ?? ''}"?`}
+        description="This removes the local branch. This action cannot be undone."
+        confirmLabel="Delete"
+        pendingLabel="Deleting..."
+        isPending={git.deleteBranch.isPending}
+      >
+        <div className="space-y-3">
+          <label className="flex items-center gap-2 text-sm cursor-pointer">
+            <Checkbox
+              checked={forceDelete}
+              onCheckedChange={(checked) => setForceDelete(checked === true)}
+            />
+            Force delete unmerged branch
+          </label>
+          {branchToDelete?.upstream && (
+            <label className="flex items-center gap-2 text-sm cursor-pointer">
+              <Checkbox
+                checked={deleteRemote}
+                onCheckedChange={(checked) => setDeleteRemote(checked === true)}
+              />
+              Also delete remote branch
+            </label>
+          )}
+        </div>
+      </ConfirmDestructiveDialog>
     </div>
   )
 }

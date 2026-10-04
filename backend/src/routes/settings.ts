@@ -28,6 +28,7 @@ import {
   discoverModelsCached,
 } from '../utils/discovery-cache'
 import { opencodeServerManager } from '../services/opencode-single-server'
+import { syncManagerGitIdentityConfig } from '../services/git-identity'
 import { getOrCreateInternalToken, rotateInternalToken } from '../services/internal-token'
 import { sseAggregator } from '../services/sse-aggregator'
 import type { OpenCodeSupervisor } from '../services/opencode-supervisor'
@@ -248,9 +249,13 @@ function listOpenCodeRestartReasons(previous: UserPreferences, next: Partial<Use
   return [
     sandboxEnforcementChanged(previous.sandbox, next.sandbox) && 'sandbox',
     preferenceChanged(previous.gitCredentials ?? [], next.gitCredentials) && 'git credentials',
-    preferenceChanged(previous.gitIdentity ?? {}, next.gitIdentity) && 'git identity',
     preferenceChanged(previous.serverEnvVars ?? [], next.serverEnvVars) && 'server environment variables',
   ].filter((reason): reason is string => typeof reason === 'string')
+}
+
+function gitIdentityConfigChanged(previous: UserPreferences, next: Partial<UserPreferences>): boolean {
+  return preferenceChanged(previous.gitIdentity ?? {}, next.gitIdentity)
+    || preferenceChanged(previous.gitCredentials ?? [], next.gitCredentials)
 }
 
 function markOpenCodeRestartPendingFor(reasons: string[]): boolean {
@@ -385,6 +390,10 @@ export function createSettingsRoutes(db: Database, gitAuthService: GitAuthServic
 
       const settings = settingsService.updateSettings(validated.preferences, userId)
 
+      if (gitIdentityConfigChanged(currentSettings.preferences, validated.preferences)) {
+        await syncManagerGitIdentityConfig(db)
+      }
+
       const restartRequired = markOpenCodeRestartPendingFor(
         listOpenCodeRestartReasons(currentSettings.preferences, validated.preferences),
       )
@@ -407,6 +416,10 @@ export function createSettingsRoutes(db: Database, gitAuthService: GitAuthServic
       const userId = c.req.query('userId') || 'default'
       const currentSettings = settingsService.getSettings(userId)
       const settings = settingsService.resetSettings(userId)
+
+      if (gitIdentityConfigChanged(currentSettings.preferences, settings.preferences)) {
+        await syncManagerGitIdentityConfig(db)
+      }
 
       const restartRequired = markOpenCodeRestartPendingFor(
         listOpenCodeRestartReasons(currentSettings.preferences, settings.preferences),

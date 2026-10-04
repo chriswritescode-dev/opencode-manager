@@ -3,6 +3,7 @@ import type { ContentfulStatusCode } from 'hono/utils/http-status'
 import { ClientError, openCodeErrorStatus } from '@opencode-manager/shared/opencode'
 import { isOAuthErrorCode } from '@opencode-manager/shared/schemas'
 import { getErrorMessage } from './error-utils'
+import { parseGitError } from './git-errors'
 import { logger } from './logger'
 
 export function parseId(value: string | undefined, label?: string, ErrorClass?: new (message: string, status: number) => Error): number {
@@ -41,6 +42,39 @@ export function handleServiceError(
   }
   logger.error(fallback, error)
   return c.json({ error: getErrorMessage(error) }, 500)
+}
+
+export function respondWithGitError(c: Context, error: unknown, logMessage: string) {
+  logger.error(logMessage, error)
+  const gitError = parseGitError(error)
+  return c.json(
+    {
+      error: gitError.summary,
+      detail: gitError.detail,
+      code: gitError.code,
+      ...(gitError.details ? { details: gitError.details } : {}),
+    },
+    gitError.statusCode as ContentfulStatusCode
+  )
+}
+
+interface JsonBodySchema<T> {
+  safeParse(data: unknown): { success: true; data: T } | { success: false; error: { issues: Array<{ message?: string }> } }
+}
+
+export async function parseJsonBody<T>(c: Context, schema: JsonBodySchema<T>): Promise<T | Response> {
+  let body: unknown
+  try {
+    body = await c.req.json()
+  } catch {
+    return c.json({ error: 'Invalid JSON' }, 400)
+  }
+
+  const parsed = schema.safeParse(body)
+  if (!parsed.success) {
+    return c.json({ error: parsed.error.issues[0]?.message || 'Invalid request' }, 400)
+  }
+  return parsed.data
 }
 
 export function handleOpenCodeError(c: Context, error: unknown, fallback: string) {

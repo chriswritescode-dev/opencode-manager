@@ -48,7 +48,6 @@ import { opencodeServerManager } from './services/opencode-single-server'
 import { createOpenCodeClient } from './services/opencode/client'
 import { NotificationService } from './services/notification'
 import { ScheduleRunner, ScheduleService } from './services/schedules'
-import { CredentialProvider } from './services/credential-provider'
 import { ScheduleWorktreeManager } from './services/schedule-worktree'
 import { migrateGlobalSkills } from './services/skills'
 import { installAssistantWorkspace } from './services/assistant-mode'
@@ -220,9 +219,7 @@ try {
   logger.error('Failed to initialize workspace:', error)
 }
 
-const settingsServiceForSchedules = new SettingsService(db)
-const credentialProvider = new CredentialProvider(db)
-const scheduleWorktreeManager = new ScheduleWorktreeManager(gitAuthService, settingsServiceForSchedules, credentialProvider, db)
+const scheduleWorktreeManager = new ScheduleWorktreeManager(gitAuthService, db)
 const scheduleService = new ScheduleService(db, openCodeClient, scheduleWorktreeManager)
 const scheduleRunnerInstance = new ScheduleRunner(scheduleService)
 

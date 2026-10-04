@@ -4,7 +4,6 @@ import os from 'os'
 import { StringDecoder } from 'node:string_decoder'
 import { promises as fs, accessSync, constants } from 'fs'
 import { logger } from '../utils/logger'
-import { createGitIdentityEnv, resolveGitIdentity } from '../utils/git-auth'
 import {
   buildSSHCommandWithKnownHosts,
   buildSSHCommandWithConfig,
@@ -43,6 +42,7 @@ import { restoreQuarantinedOpenCodePlugins } from './opencode-plugin-quarantine'
 import { resolveProcessIdentityProvider } from './opencode/process-identity'
 import { SandboxRuntimeService } from './sandbox/runtime'
 import { CredentialProvider } from './credential-provider'
+import { syncManagerGitIdentityConfig } from './git-identity'
 import { mkdirSafe, writeFileAtomic } from '../utils/fs-safe'
 import { createProcessLogForwarder } from '../utils/log-buffer'
 import { OPENCODE_SERVICE_SERVE_ARGS, prepareOpenCodeServiceLaunch } from './opencode-service-mode'
@@ -435,14 +435,12 @@ class OpenCodeServerManager {
     const openCodeServerHost = getOpenCodeServerHost()
 
     let credentialProvider: CredentialProvider | null = null
-    let gitIdentityEnv: Record<string, string> = {}
     let userEnvVars: Record<string, string> = {}
     if (this.db) {
       try {
         credentialProvider = new CredentialProvider(this.db)
         const settingsService = new SettingsService(this.db)
         const settings = settingsService.getSettings('default')
-        const gitCredentials = credentialProvider.getGitCredentials()
         const rawEnvVars = settings.preferences.serverEnvVars || []
         if (rawEnvVars.length > 0) {
           userEnvVars = Object.fromEntries(
@@ -460,11 +458,7 @@ class OpenCodeServerManager {
           logger.info(`Injecting ${Object.keys(userEnvVars).length} custom server env vars`)
         }
 
-        const identity = await resolveGitIdentity(settings.preferences.gitIdentity, gitCredentials)
-        if (identity) {
-          gitIdentityEnv = createGitIdentityEnv(identity)
-          logger.info(`Git identity resolved: ${identity.name} <${identity.email}>`)
-        }
+        await syncManagerGitIdentityConfig(this.db)
       } catch (error) {
         logger.warn('Failed to get git settings:', error)
       }
@@ -641,7 +635,6 @@ class OpenCodeServerManager {
       ...userEnvVars,
       ...microsandboxEnv,
       ...gitEnv,
-      ...gitIdentityEnv,
       ...(this.db
         ? {
           OCM_INTERNAL_API_URL: `http://localhost:${ENV.SERVER.PORT}/api/internal`,

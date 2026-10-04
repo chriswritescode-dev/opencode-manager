@@ -6,13 +6,7 @@ import { execSync } from 'child_process'
 import { gitRemoteProjectId } from '@opencode-manager/shared/project-id'
 import { isGitMainCheckout, resolveProjectId } from './project-id-resolver'
 
-const GIT_ENV = {
-  ...process.env,
-  GIT_AUTHOR_NAME: 't',
-  GIT_AUTHOR_EMAIL: 't@t',
-  GIT_COMMITTER_NAME: 't',
-  GIT_COMMITTER_EMAIL: 't@t',
-}
+const COMMIT_IDENTITY_ARGS = ['-c', 'user.name=t', '-c', 'user.email=t@t']
 
 describe('resolveProjectId', () => {
   let base: string
@@ -33,7 +27,7 @@ describe('resolveProjectId', () => {
   it('prefers the normalized origin remote hash', async () => {
     const dir = mkdtempSync(path.join(base, 'remote-'))
     execSync(`git init -q "${dir}"`)
-    execSync(`git -C "${dir}" commit -q --allow-empty -m init`, { env: GIT_ENV })
+    execSync(`git -C "${dir}" ${COMMIT_IDENTITY_ARGS.join(' ')} commit -q --allow-empty -m init`)
     execSync(`git -C "${dir}" remote add origin git@github.com:Acme/App.git`)
 
     expect(await resolveProjectId(dir)).toBe(gitRemoteProjectId('git@github.com:Acme/App.git'))
@@ -42,7 +36,7 @@ describe('resolveProjectId', () => {
   it('falls back to the sorted first root commit when there is no remote', async () => {
     const dir = mkdtempSync(path.join(base, 'root-'))
     execSync(`git init -q "${dir}"`)
-    execSync(`git -C "${dir}" commit -q --allow-empty -m init`, { env: GIT_ENV })
+    execSync(`git -C "${dir}" ${COMMIT_IDENTITY_ARGS.join(' ')} commit -q --allow-empty -m init`)
 
     const rootCommit = execSync(`git -C "${dir}" rev-list --max-parents=0 HEAD`).toString().trim()
     expect(await resolveProjectId(dir)).toBe(rootCommit)
@@ -59,9 +53,7 @@ describe('isGitMainCheckout', () => {
     mainRepo = path.join(base, 'main')
     worktree = path.join(base, 'wt')
     execSync(`git init -q "${mainRepo}"`)
-    execSync(`git -C "${mainRepo}" commit -q --allow-empty -m init`, {
-      env: { ...process.env, GIT_AUTHOR_NAME: 't', GIT_AUTHOR_EMAIL: 't@t', GIT_COMMITTER_NAME: 't', GIT_COMMITTER_EMAIL: 't@t' },
-    })
+    execSync(`git -C "${mainRepo}" ${COMMIT_IDENTITY_ARGS.join(' ')} commit -q --allow-empty -m init`)
     execSync(`git -C "${mainRepo}" worktree add -q "${worktree}" -b feature`)
   })
 

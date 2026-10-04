@@ -5,9 +5,6 @@ import { getScheduleWorktreesPath } from '@opencode-manager/shared/config/env'
 import { ASSISTANT_REPO_ID } from '@opencode-manager/shared/utils'
 import type { Repo } from '../types/repo'
 import type { GitAuthService } from './git-auth'
-import type { SettingsService } from './settings'
-import type { CredentialProvider } from './credential-provider'
-import { resolveGitIdentity, createGitIdentityEnv } from '../utils/git-auth'
 import { isSSHUrl } from '@opencode-manager/shared/utils'
 import { executeCommand } from '../utils/process'
 import { resolveDefaultBranch, createWorktreeSafely, removeWorktree } from './repo'
@@ -34,8 +31,6 @@ export function buildRepoEnvForRepo(repo: { id?: number; fullPath: string }): Re
 export class ScheduleWorktreeManager {
   constructor(
     private readonly gitAuthService: GitAuthService,
-    private readonly settingsService: SettingsService,
-    private readonly credentialProvider: CredentialProvider,
     private readonly db: Database,
   ) {}
 
@@ -191,14 +186,6 @@ export class ScheduleWorktreeManager {
   private async buildGitEnv(repo: Repo, sshSetup: boolean, silent: boolean): Promise<Record<string, string>> {
     const baseEnv = this.gitAuthService.getGitEnvironment(silent)
     const sshEnv = sshSetup ? this.gitAuthService.getSSHEnvironment() : {}
-    const identityEnv = await this.buildIdentityEnv()
-    return { ...baseEnv, ...buildRepoEnvForRepo(repo), ...sshEnv, ...identityEnv }
-  }
-
-  private async buildIdentityEnv(): Promise<Record<string, string>> {
-    const settings = this.settingsService.getSettings()
-    const gitCredentials = this.credentialProvider.getGitCredentials()
-    const identity = await resolveGitIdentity(settings.preferences.gitIdentity, gitCredentials)
-    return identity ? createGitIdentityEnv(identity) : {}
+    return { ...baseEnv, ...buildRepoEnvForRepo(repo), ...sshEnv }
   }
 }

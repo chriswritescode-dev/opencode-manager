@@ -48,6 +48,20 @@ export const UpdateRepoRequestSchema = z.object({
   name: z.string().trim().max(100).nullable(),
 })
 
+export const DeleteRepoRequestSchema = z.object({
+  deleteBranch: z.enum(['none', 'local', 'local-and-remote']).default('none'),
+})
+
+export const DeleteRepoResultSchema = z.object({
+  success: z.literal(true),
+  branch: z.object({
+    name: z.string(),
+    deleted: z.boolean(),
+    remoteDeleted: z.boolean(),
+    error: z.string().optional(),
+  }).optional(),
+})
+
 export const DiscoverReposResponseSchema = z.object({
   repos: z.array(RepoSchema),
   discoveredCount: z.number().int().nonnegative(),

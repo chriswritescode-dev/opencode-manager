@@ -7,6 +7,8 @@ import {
   createGitEnv,
   createGhCliEnv,
   findGitHubCredential,
+  resolveGitIdentity,
+  type GitIdentity,
   type ResolvedGitCredential,
 } from '../utils/git-auth'
 import { limitForwardedGitConfigs, SANDBOX_MAX_FORWARDED_GIT_CONFIGS } from './sandbox/shell-shim'
@@ -93,6 +95,11 @@ export class CredentialProvider {
 
   getGhCliEnv(options: CredentialResolutionOptions = {}): Record<string, string> {
     return this.getGhCliEnvForContext(this.resolveContext(options))
+  }
+
+  async resolveDefaultGitIdentity(): Promise<GitIdentity | null> {
+    const preferences = this.getPreferences()
+    return resolveGitIdentity(preferences.gitIdentity, this.getCredentials(preferences))
   }
 
   private resolveContext(options: CredentialResolutionOptions, repo = this.resolveRepo(options)): CredentialResolutionContext {

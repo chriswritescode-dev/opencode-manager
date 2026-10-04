@@ -2,7 +2,7 @@ import type { Repo } from './types'
 import { FetchError, fetchWrapper, fetchWrapperVoid, fetchWrapperBlob } from './fetchWrapper'
 import { API_BASE_URL } from '@/config'
 import { saveFile } from '@/lib/download'
-import type { DiscoverReposResponse, AssistantModeStatus, AssistantModeInitRequest } from '@opencode-manager/shared/types'
+import type { DiscoverReposResponse, AssistantModeStatus, AssistantModeInitRequest, DeleteRepoRequest, DeleteRepoResult, RepoGitIdentity } from '@opencode-manager/shared/types'
 
 export interface CreateRepoOptions {
   repoUrl?: string
@@ -69,9 +69,18 @@ export async function createRepoWorkspace(repoId: number): Promise<RepoWorktree>
   })
 }
 
-export async function deleteRepo(id: number): Promise<void> {
-  return fetchWrapperVoid(`${API_BASE_URL}/api/repos/${id}`, {
+export type DeleteBranchChoice = NonNullable<DeleteRepoRequest['deleteBranch']>
+
+export interface DeleteRepoOptions {
+  deleteBranch?: DeleteBranchChoice
+}
+
+export async function deleteRepo(id: number, options?: DeleteRepoOptions): Promise<DeleteRepoResult> {
+  return fetchWrapper(`${API_BASE_URL}/api/repos/${id}`, {
     method: 'DELETE',
+    ...(options
+      ? { headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(options) }
+      : {}),
   })
 }
 
@@ -80,6 +89,18 @@ export async function updateRepoGitCredential(id: number, credentialId?: string)
     method: 'PATCH',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({ credentialId }),
+  })
+}
+
+export async function getRepoGitIdentity(id: number): Promise<RepoGitIdentity> {
+  return fetchWrapper(`${API_BASE_URL}/api/repos/${id}/git-identity`)
+}
+
+export async function updateRepoGitIdentity(id: number, identityId: string | null): Promise<RepoGitIdentity> {
+  return fetchWrapper(`${API_BASE_URL}/api/repos/${id}/git-identity`, {
+    method: 'PATCH',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ identityId }),
   })
 }
 

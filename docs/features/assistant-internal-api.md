@@ -167,6 +167,7 @@ Retrieve the user's full settings and preferences.
     repoSortMode: 'recent' | 'manual' | 'name',
     gitCredentials?: [...],  // Read-only
     gitIdentity?: {...},    // Read-only
+    gitIdentities?: [...],   // Read-only
     tts?: {...},            // Read-only
     stt?: {...},            // Read-only
   },
@@ -193,6 +194,7 @@ The following preference keys can be modified:
 The following keys are **NOT** allowed and will be rejected:
 - `gitCredentials` - Git credentials must be managed via the full UI
 - `gitIdentity` - Git identity must be managed via the full UI
+- `gitIdentities` - Git identity presets must be managed via the full UI
 - `tts.apiKey` - TTS credentials must be managed via the full UI
 - `tts.endpoint` - TTS endpoint must be managed via the full UI
 - `stt.apiKey` - STT credentials must be managed via the full UI

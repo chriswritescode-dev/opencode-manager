@@ -2,12 +2,13 @@ import { Hono } from 'hono'
 import { z } from 'zod'
 import type { ContentfulStatusCode } from 'hono/utils/http-status'
 import type { Database } from 'bun:sqlite'
-import type { Repo } from '@opencode-manager/shared/types'
-import { DiscoverReposRequestSchema, AssistantModeInitRequestSchema, UpdateRepoRequestSchema } from '@opencode-manager/shared/schemas'
+import type { DeleteRepoResult, Repo } from '@opencode-manager/shared/types'
+import { DiscoverReposRequestSchema, AssistantModeInitRequestSchema, UpdateRepoRequestSchema, DeleteRepoRequestSchema } from '@opencode-manager/shared/schemas'
 import { listRepos, getRepoById, updateLastAccessed, getRepoGitCredentialId, setRepoGitCredentialId, updateRepoName } from '../db/queries'
 import * as repoService from '../services/repo'
 import * as archiveService from '../services/archive'
 import { SettingsService } from '../services/settings'
+import { getEffectiveGitIdentity, setRepoGitIdentity } from '../services/git-identity'
 import type { OpenCodeClient } from '../services/opencode/client'
 import { logger } from '../utils/logger'
 import { getErrorMessage, getStatusCode } from '../utils/error-utils'
@@ -15,6 +16,7 @@ import { handleOpenCodeError } from '../utils/route-helpers'
 import { ASSISTANT_REPO_ID, isWorktreeSibling } from '@opencode-manager/shared/utils'
 import { isWorktreeError, openCodeLocation } from '@opencode-manager/shared/opencode'
 import { createRepoGitRoutes } from './repo-git'
+import { createGitService } from '../services/git/GitService'
 import { createScheduleRoutes } from './schedules'
 import type { GitAuthService } from '../services/git-auth'
 import { ScheduleService } from '../services/schedules'
@@ -44,8 +46,9 @@ export function createRepoRoutes(
   openCodeClient: OpenCodeClient,
 ) {
   const app = new Hono()
+  const git = createGitService(gitAuthService)
 
-  app.route('/', createRepoGitRoutes(database, gitAuthService))
+  app.route('/', createRepoGitRoutes(database, git, openCodeClient))
   app.route('/:id/schedules', createScheduleRoutes(scheduleService))
 
   app.post('/', async (c) => {
@@ -230,6 +233,54 @@ app.get('/', async (c) => {
     }
   })
 
+  app.get('/:id/git-identity', async (c) => {
+    try {
+      const id = parseInt(c.req.param('id'))
+      const repo = getRepoById(database, id)
+
+      if (!repo) {
+        return c.json({ error: 'Repo not found' }, 404)
+      }
+
+      return c.json(await getEffectiveGitIdentity(repo.fullPath, database))
+    } catch (error: unknown) {
+      logger.error('Failed to read repo git identity:', error)
+      return c.json({ error: getErrorMessage(error) }, 500)
+    }
+  })
+
+  app.patch('/:id/git-identity', async (c) => {
+    try {
+      const id = parseInt(c.req.param('id'))
+      const repo = getRepoById(database, id)
+
+      if (!repo) {
+        return c.json({ error: 'Repo not found' }, 404)
+      }
+
+      const body = await c.req.json()
+      const identityId = typeof body.identityId === 'string' && body.identityId.trim() !== ''
+        ? body.identityId.trim()
+        : null
+
+      let preset: { name: string; email: string } | null = null
+      if (identityId) {
+        const settingsService = new SettingsService(database)
+        const settings = settingsService.getSettings()
+        preset = (settings.preferences.gitIdentities || []).find((identity) => identity.id === identityId) ?? null
+        if (!preset) {
+          return c.json({ error: 'Identity not found' }, 400)
+        }
+      }
+
+      await setRepoGitIdentity(repo.fullPath, preset ? { name: preset.name, email: preset.email } : null)
+      return c.json(await getEffectiveGitIdentity(repo.fullPath, database))
+    } catch (error: unknown) {
+      logger.error('Failed to update repo git identity:', error)
+      return c.json({ error: getErrorMessage(error) }, 500)
+    }
+  })
+
   app.patch('/:id', async (c) => {
     try {
       const id = parseInt(c.req.param('id'))
@@ -327,16 +378,45 @@ app.get('/', async (c) => {
       }
 
       const repo = getRepoById(database, id)
-      
+
       if (!repo) {
         return c.json({ error: 'Repo not found' }, 404)
       }
-      
-      scheduleService.prepareRepoDelete(id)
-      
-      await repoService.deleteRepoFiles(database, id)
-      
-      return c.json({ success: true })
+
+      const body = await c.req.json().catch(() => null)
+      const parsed = DeleteRepoRequestSchema.safeParse(body ?? {})
+      if (!parsed.success) {
+        return c.json({ error: 'Invalid request' }, 400)
+      }
+      const { deleteBranch } = parsed.data
+
+      if (deleteBranch !== 'none' && !repo.isWorktree) {
+        return c.json({ error: 'Only worktrees can delete their branch' }, 400)
+      }
+
+      const removeWorktree = async () => {
+        scheduleService.prepareRepoDelete(id)
+        await repoService.deleteRepoFiles(database, id)
+      }
+
+      const result: DeleteRepoResult = { success: true }
+
+      if (deleteBranch === 'none') {
+        await removeWorktree()
+      } else {
+        result.branch = await git.deleteWorktreeBranch(
+          repo,
+          { deleteRemote: deleteBranch === 'local-and-remote' },
+          removeWorktree,
+          database,
+        )
+
+        if (result.branch.error) {
+          logger.warn(`Deleted worktree repo ${id} but failed to delete branch '${result.branch.name}': ${result.branch.error}`)
+        }
+      }
+
+      return c.json(result)
     } catch (error: unknown) {
       logger.error('Failed to delete repo:', error)
       return c.json({ error: getErrorMessage(error) }, 500)

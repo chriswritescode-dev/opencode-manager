@@ -56,6 +56,20 @@ export function sanitizeBranchForDirectory(branch: string): string {
   return branch.replace(/[\\/]/g, '-')
 }
 
+export function getBranchNameError(name: string): string | null {
+  const trimmed = name.trim()
+
+  if (!trimmed) {
+    return 'Branch name is required'
+  }
+
+  if (trimmed.startsWith('-')) {
+    return 'Branch name must not start with "-"'
+  }
+
+  return null
+}
+
 export function isWorktreeSibling(sibling: { worktreeStrategy?: string }): boolean {
   return sibling.worktreeStrategy !== undefined
 }
