@@ -202,6 +202,7 @@ vi.mock('@/hooks/useSessionGoals', () => ({
   useCancelSessionGoal: vi.fn(() => ({ mutate: vi.fn(), isPending: false })),
 }))
 vi.mock('@/components/session/SideQuestionDialog', () => ({ SideQuestionDialog: vi.fn(() => null) }))
+vi.mock('@/components/session/ChangesWalkthroughDialog', () => ({ ChangesWalkthroughDialog: vi.fn(() => null) }))
 vi.mock('@/components/session/SessionList', () => ({ SessionList: vi.fn(() => null) }))
 vi.mock('@/components/file-browser/FileBrowserSheet', () => ({ FileBrowserSheet: vi.fn(() => null) }))
 vi.mock('@/components/repo/RepoMcpDialog', () => ({ RepoMcpDialog: vi.fn(() => null) }))
@@ -293,6 +294,7 @@ describe('SessionDetail command actions', () => {
       skills: vi.fn(),
       sourceControl: vi.fn(),
       resetPermissions: vi.fn(),
+      walkthrough: vi.fn(),
     }
     mocks.useSessionStatusForSession.mockReturnValue({ type: 'idle' })
     mocks.compactSession.mockResolvedValue(undefined)
@@ -687,6 +689,17 @@ describe('SessionDetail command actions', () => {
     })
 
     expect(mocks.dialogSetters.skills).toHaveBeenCalledWith(true)
+  })
+
+  it('opens the walkthrough dialog from the showWalkthrough command action', async () => {
+    renderSessionDetail()
+    const showWalkthrough = await commandHandler('showWalkthrough')
+
+    await act(async () => {
+      await showWalkthrough()
+    })
+
+    expect(mocks.dialogSetters.walkthrough).toHaveBeenCalledWith(true)
   })
 
   it('opens settings from the showSettings command action', async () => {

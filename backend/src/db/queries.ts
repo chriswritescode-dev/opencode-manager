@@ -348,6 +348,7 @@ export function deleteRepo(db: Database, id: number): void {
   }
 
   const remove = db.transaction(() => {
+    db.prepare('DELETE FROM multi_run_fusions WHERE multi_run_id IN (SELECT id FROM multi_runs WHERE repo_id = ?)').run(id)
     db.prepare('DELETE FROM multi_run_entries WHERE multi_run_id IN (SELECT id FROM multi_runs WHERE repo_id = ?)').run(id)
     db.prepare('DELETE FROM multi_runs WHERE repo_id = ?').run(id)
     for (const table of TABLES_WITH_REPO_ID) {

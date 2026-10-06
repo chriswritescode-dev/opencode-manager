@@ -23,12 +23,15 @@ interface FakeLaunchClient {
   prompt: ReturnType<typeof vi.fn>
 }
 
-function createClient(overrides: { createError?: Error } = {}): FakeLaunchClient {
+function createClient(overrides: { createError?: Error; promptError?: Error } = {}): FakeLaunchClient {
   const create = vi.fn(async (input: { title?: string }) => {
     if (overrides.createError) throw overrides.createError
     return { id: 'ses_new', title: input?.title }
   })
-  const prompt = vi.fn(async () => ({}))
+  const prompt = vi.fn(async () => {
+    if (overrides.promptError) throw overrides.promptError
+    return {}
+  })
 
   const client = {
     api: {
@@ -206,8 +209,29 @@ describe('SessionLauncher', () => {
       status: 502,
       message: 'boom (workspace: /worktrees/feature-x)',
       workspaceDirectory: '/worktrees/feature-x',
+      sessionId: null,
     })
     expect(createWorkspace).toHaveBeenCalled()
+  })
+
+  it('keeps the created session id when prompting the session fails', async () => {
+    const repoId = readyRepo()
+    const { client, create } = createClient({ promptError: new Error('prompt boom') })
+    const { service } = createRepoWorkspaces({ directory: '/worktrees/feature-x' })
+    const launcher = new SessionLauncher(db, client, service)
+
+    const error = await launcher.launch({ repoId, prompt: 'hello', workspace: { name: 'feature-x' } }).catch(
+      (caught: unknown) => caught,
+    )
+
+    expect(create).toHaveBeenCalled()
+    expect(error).toBeInstanceOf(SessionLaunchError)
+    expect(error).toMatchObject({
+      status: 502,
+      message: 'prompt boom (workspace: /worktrees/feature-x)',
+      workspaceDirectory: '/worktrees/feature-x',
+      sessionId: 'ses_new',
+    })
   })
 
   it('exposes no workspace when workspace creation fails', async () => {

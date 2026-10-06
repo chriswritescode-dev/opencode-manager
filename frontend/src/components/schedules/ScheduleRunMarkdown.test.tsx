@@ -22,4 +22,22 @@ describe('ScheduleRunMarkdown links', () => {
     expect(link.getAttribute('target')).toBe('_blank')
     expect(link.getAttribute('rel')).toBe('noopener noreferrer')
   })
+
+  it('renders raw HTML from generated prose as inert text', () => {
+    const payload =
+      '<iframe srcdoc="&lt;script&gt;parent.document.documentElement.dataset.scheduleProbe = 1&lt;/script&gt;"></iframe>'
+    const { container } = render(<ScheduleRunMarkdown content={`Before\n\n${payload}\n\nAfter`} />)
+
+    expect(container.querySelector('iframe')).toBeNull()
+    expect(container.querySelector('script')).toBeNull()
+    expect(document.documentElement.dataset.scheduleProbe).toBeUndefined()
+    expect(screen.getByText(/iframe/)).toBeInTheDocument()
+  })
+
+  it('still renders GFM formatting', () => {
+    render(<ScheduleRunMarkdown content="**bold** and `code`" onOpenLocalPath={vi.fn()} />)
+
+    expect(screen.getByText('bold').tagName).toBe('STRONG')
+    expect(screen.getByText('code').tagName).toBe('CODE')
+  })
 })

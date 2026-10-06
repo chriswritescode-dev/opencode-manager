@@ -27,6 +27,8 @@ import migration025 from './025-session-permission-modes'
 import migration026 from './026-session-goals'
 import migration027 from './027-multi-runs'
 import migration202610061345 from './202610061345-schedule-workspace-mode'
+import migration202610061700 from './202610061700-multi-run-fusions'
+import migration202610061701 from './202610061701-change-walkthroughs'
 
 export const allMigrations: Migration[] = [
   migration001,
@@ -57,4 +59,6 @@ export const allMigrations: Migration[] = [
   migration026,
   migration027,
   migration202610061345,
+  migration202610061700,
+  migration202610061701,
 ]

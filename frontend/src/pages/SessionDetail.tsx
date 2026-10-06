@@ -63,6 +63,7 @@ import { useTerminalDialogParam } from "@/hooks/useOpenTerminal";
 import { SessionMoreButton } from "@/components/navigation/SessionMoreButton";
 import { SideQuestionDialog } from "@/components/session/SideQuestionDialog";
 import { SessionMessagePickerDialog } from "@/components/session/SessionMessagePickerDialog";
+import { ChangesWalkthroughDialog } from "@/components/session/ChangesWalkthroughDialog";
 
 const OLDER_HISTORY_SCROLL_THRESHOLD_PX = 200
 
@@ -128,6 +129,7 @@ export function SessionDetail() {
   const [actionsDialogOpen, setActionsDialogOpen] = useDialogParam('actions');
   const [previewOpen, setPreviewOpen] = useDialogParam('preview');
   const [resetPermissionsOpen, setResetPermissionsOpen] = useDialogParam('resetPermissions');
+  const [walkthroughOpen, setWalkthroughOpen] = useDialogParam('walkthrough');
   const [selectedFilePath, setSelectedFilePath] = useState<string | undefined>();
   const [showScrollButton, setShowScrollButton] = useState(false);
   const [hasPromptContent, setHasPromptContent] = useState(false);
@@ -298,6 +300,7 @@ export function SessionDetail() {
   const handleShowSessionsDialog = useCallback(() => setSessionsDialogOpen(true), []);
   const handleShowMcpDialog = useCallback(() => setMcpDialogOpen(true), [setMcpDialogOpen]);
   const handleShowSkillsDialog = useCallback(() => setSkillsDialogOpen(true), [setSkillsDialogOpen]);
+  const handleShowWalkthrough = useCallback(() => setWalkthroughOpen(true), [setWalkthroughOpen]);
   const handleConnectProvider = useCallback(() => setSettingsTab('providers'), [setSettingsTab]);
 
   const handleMinimizeForm = useCallback((form: FormInfo) => {
@@ -580,6 +583,7 @@ export function SessionDetail() {
     redo: handleRedo,
     showMcp: handleShowMcpDialog,
     showSkills: handleShowSkillsDialog,
+    showWalkthrough: handleShowWalkthrough,
     showSettings: openSettings,
     connectProvider: handleConnectProvider,
   }), [
@@ -598,6 +602,7 @@ export function SessionDetail() {
     handleRedo,
     handleShowMcpDialog,
     handleShowSkillsDialog,
+    handleShowWalkthrough,
     openSettings,
     handleConnectProvider,
   ]);
@@ -871,6 +876,14 @@ export function SessionDetail() {
           sessionId={sessionId}
           directory={repoDirectory}
           onSkillLoaded={(skill) => showToast.success(`Loaded skill: ${skill.name}`)}
+        />
+      )}
+
+      {sessionId && (
+        <ChangesWalkthroughDialog
+          sessionId={sessionId}
+          open={walkthroughOpen}
+          onOpenChange={setWalkthroughOpen}
         />
       )}
 

@@ -10,9 +10,12 @@ const mocks = vi.hoisted(() => ({
   listMultiRuns: vi.fn(),
   launchMultiRun: vi.fn(),
   discardMultiRunEntry: vi.fn(),
+  fuseMultiRun: vi.fn(),
   useProvidersWithModels: vi.fn(),
   useOpenCodeModelState: vi.fn(),
   listBranches: vi.fn(),
+  getChangeWalkthrough: vi.fn(),
+  generateChangeWalkthrough: vi.fn(),
 }))
 
 const mockNavigate = vi.fn()
@@ -26,6 +29,7 @@ vi.mock('@/api/multiRuns', () => ({
   listMultiRuns: mocks.listMultiRuns,
   launchMultiRun: mocks.launchMultiRun,
   discardMultiRunEntry: mocks.discardMultiRunEntry,
+  fuseMultiRun: mocks.fuseMultiRun,
 }))
 
 vi.mock('@/hooks/useProvidersWithModels', () => ({
@@ -38,6 +42,11 @@ vi.mock('@/hooks/useModelSelection', () => ({
 
 vi.mock('@/api/repos', () => ({
   listBranches: mocks.listBranches,
+}))
+
+vi.mock('@/api/changeWalkthroughs', () => ({
+  getChangeWalkthrough: mocks.getChangeWalkthrough,
+  generateChangeWalkthrough: mocks.generateChangeWalkthrough,
 }))
 
 vi.mock('@/lib/toast', () => ({
@@ -107,6 +116,67 @@ const startedRun: MultiRun = {
       updatedAt: 1,
     },
   ],
+  fusions: [],
+}
+
+const twoStartedRun: MultiRun = {
+  ...startedRun,
+  id: 5,
+  name: 'Pair',
+  entries: [
+    startedRun.entries[0],
+    {
+      id: 13,
+      model: 'anthropic/claude-opus',
+      status: 'started',
+      sessionId: 'ses_2',
+      directory: '/workspaces/sweep-2',
+      isolated: true,
+      error: null,
+      createdAt: 1,
+      updatedAt: 1,
+    },
+  ],
+}
+
+const fusedRun: MultiRun = {
+  id: 4,
+  repoId: 7,
+  name: 'Merged',
+  prompt: 'go',
+  isolated: true,
+  baseRef: 'main',
+  createdAt: 1,
+  entries: [
+    {
+      id: 21,
+      model: 'openai/gpt-4o',
+      status: 'discarded',
+      sessionId: null,
+      directory: null,
+      isolated: true,
+      error: null,
+      createdAt: 1,
+      updatedAt: 1,
+    },
+  ],
+  fusions: [
+    {
+      id: 31,
+      requestId: 'req-1',
+      model: 'openai/gpt-4o',
+      instructions: null,
+      isolated: true,
+      baseRef: 'main',
+      status: 'started',
+      sessionId: 'ses_fusion',
+      directory: '/workspaces/fusion',
+      error: null,
+      sources: [{ entryId: 21, sessionId: 'ses_1', model: 'openai/gpt-4o', truncated: true }],
+      createdAt: 1,
+      updatedAt: 1,
+    },
+  ],
 }
 
 function createWrapper() {
@@ -161,6 +231,7 @@ describe('MultiRunDialog', () => {
       status: { ahead: 0, behind: 0 },
     })
     mocks.listMultiRuns.mockResolvedValue([])
+    mocks.getChangeWalkthrough.mockResolvedValue({ walkthrough: null, currentDiffHash: null, stale: false })
   })
 
   it('lists favorite then recent models before provider groups without duplicates', () => {
@@ -391,5 +462,70 @@ describe('MultiRunDialog', () => {
     await waitFor(() => {
       expect(mocks.discardMultiRunEntry).toHaveBeenCalledWith(3, 11)
     })
+  })
+
+  it('disables Fuse for runs with fewer than two started entries', async () => {
+    const user = userEvent.setup()
+    mocks.listMultiRuns.mockResolvedValue([startedRun])
+    renderDialog()
+
+    await user.click(screen.getByRole('tab', { name: 'Runs' }))
+    await waitFor(() => expect(screen.getByText('openai/gpt-4o')).toBeInTheDocument())
+
+    expect(screen.getByRole('button', { name: /fuse/i })).toBeDisabled()
+  })
+
+  it('opens the fuse dialog for a run with two started entries', async () => {
+    const user = userEvent.setup()
+    mocks.listMultiRuns.mockResolvedValue([twoStartedRun])
+    renderDialog()
+
+    await user.click(screen.getByRole('tab', { name: 'Runs' }))
+    const fuseButton = await screen.findByRole('button', { name: /fuse/i })
+    expect(fuseButton).toBeEnabled()
+    await user.click(fuseButton)
+
+    expect(await screen.findByRole('dialog', { name: 'Fuse results' })).toBeInTheDocument()
+  })
+
+  it('lists fusions with truncation and opens the fusion session', async () => {
+    const user = userEvent.setup()
+    mocks.listMultiRuns.mockResolvedValue([fusedRun])
+    renderDialog()
+
+    await user.click(screen.getByRole('tab', { name: 'Runs' }))
+    await waitFor(() => expect(screen.getByText('Fusions')).toBeInTheDocument())
+    expect(screen.getByText('from 1 source (truncated)')).toBeInTheDocument()
+
+    await user.click(screen.getByRole('button', { name: /open/i }))
+    expect(mockNavigate).toHaveBeenCalledWith('/repos/7/sessions/ses_fusion?repoTab=workspaces')
+  })
+
+  it('opens the walkthrough dialog for an entry session', async () => {
+    const user = userEvent.setup()
+    mocks.listMultiRuns.mockResolvedValue([startedRun])
+    renderDialog()
+
+    await user.click(screen.getByRole('tab', { name: 'Runs' }))
+    await waitFor(() => expect(screen.getByText('openai/gpt-4o')).toBeInTheDocument())
+
+    await user.click(screen.getByRole('button', { name: /walkthrough/i }))
+
+    expect(await screen.findByText('Change walkthrough')).toBeInTheDocument()
+    await waitFor(() => expect(mocks.getChangeWalkthrough).toHaveBeenCalledWith('ses_1'))
+  })
+
+  it('opens the walkthrough dialog for a fusion session', async () => {
+    const user = userEvent.setup()
+    mocks.listMultiRuns.mockResolvedValue([fusedRun])
+    renderDialog()
+
+    await user.click(screen.getByRole('tab', { name: 'Runs' }))
+    await waitFor(() => expect(screen.getByText('Fusions')).toBeInTheDocument())
+
+    await user.click(screen.getByRole('button', { name: /walkthrough/i }))
+
+    expect(await screen.findByText('Change walkthrough')).toBeInTheDocument()
+    await waitFor(() => expect(mocks.getChangeWalkthrough).toHaveBeenCalledWith('ses_fusion'))
   })
 })

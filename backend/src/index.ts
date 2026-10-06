@@ -41,6 +41,7 @@ import { createSessionPinRoutes } from './routes/session-pins'
 import { createSessionPermissionModeRoutes } from './routes/session-permission-modes'
 import { createSessionGoalRoutes } from './routes/session-goals'
 import { createMultiRunRoutes } from './routes/multi-runs'
+import { createChangeWalkthroughRoutes } from './routes/change-walkthroughs'
 import { createLogRoutes } from './routes/logs'
 import { createPreviewRoutes, createPreviewAvailability } from './routes/preview'
 import { createPreviewGatewayApp, PreviewSessionStore } from './services/preview/gateway'
@@ -54,6 +55,7 @@ import { SettingsService } from './services/settings'
 import { SessionPermissionModeService } from './services/session-permission-modes'
 import { SessionGoalService } from './services/session-goals'
 import { MultiRunService } from './services/multi-runs'
+import { ChangeWalkthroughService } from './services/change-walkthroughs'
 import { opencodeServerManager } from './services/opencode-single-server'
 import { createOpenCodeClient } from './services/opencode/client'
 import { getOpenCodeUpstreamBaseUrl } from './services/opencode/upstream'
@@ -270,6 +272,7 @@ const sessionGoalService = new SessionGoalService(db, openCodeClient, sessionSet
 sessionGoalService.loadOpenGoals()
 
 const multiRunService = new MultiRunService(db, openCodeClient, repoWorkspaces)
+const changeWalkthroughService = new ChangeWalkthroughService(db, openCodeClient)
 
 sseAggregator.onEvent((directory, event) => {
   sessionPermissionModeService.handleEvent(directory, event).catch((err) => {
@@ -355,6 +358,7 @@ protectedApi.route('/session-pins', createSessionPinRoutes(db))
 protectedApi.route('/session-permission-modes', createSessionPermissionModeRoutes(sessionPermissionModeService))
 protectedApi.route('/session-goals', createSessionGoalRoutes(sessionGoalService))
 protectedApi.route('/multi-runs', createMultiRunRoutes(multiRunService))
+protectedApi.route('/change-walkthroughs', createChangeWalkthroughRoutes(changeWalkthroughService))
 protectedApi.route('/schedules', createScheduleRoutes(scheduleService))
 protectedApi.route('/logs', createLogRoutes())
 protectedApi.route('/preview', createPreviewRoutes({ store: previewSessionStore, isEnabled: previewAvailability.isEnabled }))

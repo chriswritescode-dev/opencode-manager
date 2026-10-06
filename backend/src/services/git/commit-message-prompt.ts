@@ -1,16 +1,13 @@
+import { truncateText } from '../../utils/text-truncate'
+
 export const MAX_COMMIT_PROMPT_DIFF_CHARS = 60_000
+
+const COMMIT_PROMPT_DIFF_TRUNCATION_MARKER = '\n[diff truncated]'
 
 export interface CommitMessageContext {
   stagedStat: string
   stagedDiff: string
   recentSubjects: string[]
-}
-
-function truncateDiff(diff: string): string {
-  if (diff.length <= MAX_COMMIT_PROMPT_DIFF_CHARS) {
-    return diff
-  }
-  return `${diff.slice(0, MAX_COMMIT_PROMPT_DIFF_CHARS)}\n[diff truncated]`
 }
 
 export function buildCommitMessagePrompt({ stagedStat, stagedDiff, recentSubjects }: CommitMessageContext): string {
@@ -31,7 +28,7 @@ export function buildCommitMessagePrompt({ stagedStat, stagedDiff, recentSubject
     stagedStat.trim(),
     '',
     'Staged diff:',
-    truncateDiff(stagedDiff),
+    truncateText(stagedDiff, MAX_COMMIT_PROMPT_DIFF_CHARS, COMMIT_PROMPT_DIFF_TRUNCATION_MARKER).text,
   ].join('\n')
 }
 

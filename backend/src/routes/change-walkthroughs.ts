@@ -1,0 +1,34 @@
+import { Hono } from 'hono'
+import { GenerateChangeWalkthroughRequestSchema } from '@opencode-manager/shared/schemas'
+import type { ChangeWalkthroughService } from '../services/change-walkthroughs'
+import { handleServiceError, parseJsonBody } from '../utils/route-helpers'
+import { ServiceError } from '../utils/service-error'
+
+export function createChangeWalkthroughRoutes(service: ChangeWalkthroughService) {
+  const app = new Hono()
+
+  app.get('/:sessionId', async (c) => {
+    try {
+      const state = await service.getState(c.req.param('sessionId'))
+      return c.json(state)
+    } catch (error) {
+      return handleServiceError(c, error, 'Failed to read change walkthrough', ServiceError)
+    }
+  })
+
+  app.post('/:sessionId', async (c) => {
+    const parsed = await parseJsonBody(c, GenerateChangeWalkthroughRequestSchema, { allowEmpty: true })
+    if (!parsed.ok) {
+      return parsed.response
+    }
+
+    try {
+      const { walkthrough, created } = await service.generate(c.req.param('sessionId'), parsed.data)
+      return c.json({ walkthrough }, created ? 201 : 200)
+    } catch (error) {
+      return handleServiceError(c, error, 'Failed to generate change walkthrough', ServiceError)
+    }
+  })
+
+  return app
+}

@@ -29,12 +29,19 @@ export interface LaunchedSession {
 export class SessionLaunchError extends Error {
   readonly status: 400 | 404 | 502
   readonly workspaceDirectory: string | null
+  readonly sessionId: string | null
 
-  constructor(message: string, status: 400 | 404 | 502, workspaceDirectory: string | null = null) {
+  constructor(
+    message: string,
+    status: 400 | 404 | 502,
+    workspaceDirectory: string | null = null,
+    sessionId: string | null = null,
+  ) {
     super(message)
     this.name = 'SessionLaunchError'
     this.status = status
     this.workspaceDirectory = workspaceDirectory
+    this.sessionId = sessionId
   }
 }
 
@@ -109,13 +116,22 @@ export class SessionLauncher {
         },
         ...openCodeLocation(directory),
       })
+    } catch (error) {
+      throw new SessionLaunchError(
+        withWorkspace(getErrorMessage(error) || 'Failed to create OpenCode session', workspaceDirectory),
+        502,
+        workspaceDirectory,
+      )
+    }
 
+    try {
       await this.openCodeClient.api.session.prompt({ sessionID: session.id, text: input.prompt })
     } catch (error) {
       throw new SessionLaunchError(
         withWorkspace(getErrorMessage(error) || 'Failed to create OpenCode session', workspaceDirectory),
         502,
         workspaceDirectory,
+        session.id,
       )
     }
 

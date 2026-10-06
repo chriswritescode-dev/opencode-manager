@@ -6,6 +6,7 @@ import { MemoryRouter, useLocation } from 'react-router-dom'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 import type { FormInfo, PermissionRequest } from '@opencode-manager/shared/opencode'
 import { useSessionStatus } from '@/stores/sessionStatusStore'
+import { changeWalkthroughQueryKey } from '@/hooks/useChangeWalkthrough'
 import { EventProvider, useEventContext, useForms, usePermissions, useSSEHealth } from './EventContext'
 
 const mocks = vi.hoisted(() => ({
@@ -1012,6 +1013,31 @@ describe('EventProvider permissions and forms', () => {
       onEvent({ type: 'session.idle', data: { sessionID: 'session-9' }, directory: '/repo' })
     })
     expect(useSessionStatus.getState().getStatus('session-9')).toEqual({ type: 'idle' })
+  })
+
+  it.each([
+    ['session.execution.succeeded', { sessionID: 'session-9' }],
+    ['session.execution.failed', { sessionID: 'session-9', error: { message: 'boom' } }],
+    ['session.execution.interrupted', { sessionID: 'session-9', reason: 'user' }],
+  ] as const)('invalidates the change walkthrough query on %s', async (type, data) => {
+    const queryClient = createTestQueryClient()
+    const invalidateQueries = vi.spyOn(queryClient, 'invalidateQueries')
+
+    render(<Harness />, { wrapper: createWrapper(queryClient) })
+
+    await waitFor(() => expect(mocks.subscribeGlobalMonitor).toHaveBeenCalled())
+    invalidateQueries.mockClear()
+
+    const lastSubscribeCall = mocks.subscribeGlobalMonitor.mock.calls[mocks.subscribeGlobalMonitor.mock.calls.length - 1]
+    const onEvent = lastSubscribeCall[0].onEvent as (data: unknown) => void
+
+    act(() => {
+      onEvent({ type, data, directory: '/repo' })
+    })
+
+    await waitFor(() => {
+      expect(invalidateQueries).toHaveBeenCalledWith({ queryKey: changeWalkthroughQueryKey('session-9') })
+    })
   })
 
   it('marks a child session as known from its execution lifecycle events', async () => {

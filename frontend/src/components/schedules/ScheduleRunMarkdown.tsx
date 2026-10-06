@@ -1,6 +1,5 @@
 import ReactMarkdown, { type Components } from 'react-markdown'
 import rehypeHighlight from 'rehype-highlight'
-import rehypeRaw from 'rehype-raw'
 import remarkGfm from 'remark-gfm'
 import { markdownComponents } from '@/components/file-browser/MarkdownComponents'
 import { MarkdownLink } from '@/components/ui/markdown-link'
@@ -23,7 +22,7 @@ export function ScheduleRunMarkdown({ content, onOpenLocalPath }: ScheduleRunMar
       <div className="prose prose-invert prose-enhanced max-w-none break-words text-foreground leading-snug">
         <ReactMarkdown
           remarkPlugins={[remarkGfm]}
-          rehypePlugins={[rehypeHighlight, rehypeRaw]}
+          rehypePlugins={[rehypeHighlight]}
           components={components}
         >
           {content}

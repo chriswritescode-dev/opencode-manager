@@ -1,10 +1,17 @@
-import { assistantText, sessionIDFromEvent, type SessionMessageAssistant, type SessionMessageInfo } from '@opencode-manager/shared/opencode'
+import {
+  assistantText,
+  sessionIDFromEvent,
+  type OpenCodeApi,
+  type SessionMessageAssistant,
+  type SessionMessageInfo,
+} from '@opencode-manager/shared/opencode'
+import { truncateText } from '../utils/text-truncate'
 import type { OpenCodeClient } from './opencode/client'
 import { sseAggregator, type SSEEvent } from './sse-aggregator'
 
 export const SESSION_REPLY_MAX_LENGTH = 20000
 
-const SESSION_REPLY_TRUNCATION_MARKER = '\n\n[reply truncated]'
+export const SESSION_REPLY_TRUNCATION_MARKER = '\n\n[reply truncated]'
 
 export interface AssistantReplyState {
   responseText: string | null
@@ -17,10 +24,7 @@ export interface SessionSettleSignal {
 }
 
 export function truncateSessionReply(text: string): string {
-  if (text.length <= SESSION_REPLY_MAX_LENGTH) {
-    return text
-  }
-  return `${text.slice(0, SESSION_REPLY_MAX_LENGTH)}${SESSION_REPLY_TRUNCATION_MARKER}`
+  return truncateText(text, SESSION_REPLY_MAX_LENGTH, SESSION_REPLY_TRUNCATION_MARKER).text
 }
 
 export function sessionSettleSignal(event: SSEEvent, sessionId: string): SessionSettleSignal | null {
@@ -110,7 +114,12 @@ export async function readLatestAssistantReply(client: OpenCodeClient, sessionId
   return getLatestAssistantReplyState(response.data)
 }
 
-export async function isSessionBusy(client: OpenCodeClient, sessionId: string): Promise<boolean> {
-  const active = await client.api.session.active()
+export type ActiveSessions = Awaited<ReturnType<OpenCodeApi['session']['active']>>
+
+export function isSessionBusyIn(active: ActiveSessions, sessionId: string): boolean {
   return sessionId in active
+}
+
+export async function isSessionBusy(client: OpenCodeClient, sessionId: string): Promise<boolean> {
+  return isSessionBusyIn(await client.api.session.active(), sessionId)
 }

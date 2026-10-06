@@ -16,6 +16,7 @@ import type { PermissionResponse, SSHHostKeyRequest, Repo } from '@/api/types'
 import { showToast } from '@/lib/toast'
 import { openCodeEventStream, type EventStreamHealthState } from '@/lib/opencode-event-stream'
 import { addToSessionKeyedState, removeFromSessionKeyedState } from '@/lib/sessionKeyedState'
+import { changeWalkthroughQueryKey } from '@/hooks/useChangeWalkthrough'
 import { busyStatusesFromActiveSessions, useSessionStatus } from '@/stores/sessionStatusStore'
 import {
   invalidateChildSessionCaches,
@@ -489,18 +490,21 @@ export function EventProvider({ children }: { children: React.ReactNode }) {
           useSessionStatus.getState().setOutcome(event.data.sessionID, 'succeeded')
           useSessionStatus.getState().setStatus(event.data.sessionID, { type: 'idle' })
           invalidateSessionListCachesDebounced(queryClient, event.directory)
+          queryClient.invalidateQueries({ queryKey: changeWalkthroughQueryKey(event.data.sessionID) })
           break
         }
         case 'session.execution.failed': {
           useSessionStatus.getState().setOutcome(event.data.sessionID, 'failed')
           useSessionStatus.getState().setStatus(event.data.sessionID, { type: 'idle' })
           invalidateSessionListCachesDebounced(queryClient, event.directory)
+          queryClient.invalidateQueries({ queryKey: changeWalkthroughQueryKey(event.data.sessionID) })
           break
         }
         case 'session.execution.interrupted': {
           useSessionStatus.getState().setOutcome(event.data.sessionID, 'interrupted')
           useSessionStatus.getState().setStatus(event.data.sessionID, { type: 'idle' })
           invalidateSessionListCachesDebounced(queryClient, event.directory)
+          queryClient.invalidateQueries({ queryKey: changeWalkthroughQueryKey(event.data.sessionID) })
           break
         }
         case 'session.deleted': {

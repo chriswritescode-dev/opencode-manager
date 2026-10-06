@@ -1,8 +1,8 @@
 import { useMutation, useQuery, useQueryClient, type QueryClient } from '@tanstack/react-query'
-import { discardMultiRunEntry, launchMultiRun, listMultiRuns } from '@/api/multiRuns'
+import { discardMultiRunEntry, fuseMultiRun, launchMultiRun, listMultiRuns } from '@/api/multiRuns'
 import { repoSiblingsQueryKey } from '@/hooks/useRepoSiblings'
 import { showToast } from '@/lib/toast'
-import type { LaunchMultiRunRequest, MultiRun } from '@opencode-manager/shared/schemas'
+import type { FuseMultiRunRequest, LaunchMultiRunRequest, MultiRun } from '@opencode-manager/shared/schemas'
 
 function multiRunQueryKey(repoId: number) {
   return ['multi-runs', repoId] as const
@@ -45,6 +45,27 @@ export function useLaunchMultiRun(repoId: number) {
     },
     onError: (error: unknown) => {
       showToast.error(error instanceof Error ? error.message : 'Failed to launch multi-run')
+    },
+  })
+}
+
+export function useFuseMultiRun(repoId: number) {
+  const queryClient = useQueryClient()
+
+  return useMutation({
+    mutationFn: ({ runId, request }: { runId: number; request: FuseMultiRunRequest }) =>
+      fuseMultiRun(runId, request),
+    onSuccess: (run, variables) => {
+      invalidateMultiRunCaches(queryClient, repoId)
+      const fusion = run.fusions.find((candidate) => candidate.requestId === variables.request.requestId)
+      if (fusion?.status === 'started') {
+        showToast.success('Fusion started')
+      } else if (fusion?.status === 'failed') {
+        showToast.error(fusion.error || 'Fusion failed')
+      }
+    },
+    onError: () => {
+      invalidateMultiRunCaches(queryClient, repoId)
     },
   })
 }
