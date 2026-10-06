@@ -33,6 +33,10 @@ export function getChangeWalkthrough(db: Database, sessionId: string): ChangeWal
   }
 }
 
+export function deleteChangeWalkthrough(db: Database, sessionId: string): void {
+  db.prepare('DELETE FROM change_walkthroughs WHERE session_id = ?').run(sessionId)
+}
+
 export function saveChangeWalkthrough(db: Database, walkthrough: ChangeWalkthrough): void {
   db.prepare(`
     INSERT INTO change_walkthroughs(session_id, diff_hash, payload, created_at)

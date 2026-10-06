@@ -108,6 +108,21 @@ describe('MessagePart', () => {
     expect(external).toHaveAttribute('rel', 'noopener noreferrer')
   })
 
+  it('strips unsafe raw HTML from a text part and keeps safe HTML', () => {
+    const { container } = renderWithProviders(
+      <MessagePart
+        part={textPart(
+          'Reply\n\n<iframe srcdoc="&lt;script&gt;parent.document.documentElement.dataset.chatProbe = 1&lt;/script&gt;"></iframe>\n\n<details><summary>Notes</summary>Body</details>',
+        )}
+      />,
+    )
+
+    expect(container.querySelector('iframe')).toBeNull()
+    expect(container.querySelector('script')).toBeNull()
+    expect(document.documentElement.dataset.chatProbe).toBeUndefined()
+    expect(container.querySelector('details summary')?.textContent).toBe('Notes')
+  })
+
   it('renders null for an empty text part', () => {
     const { container } = renderWithProviders(<MessagePart part={textPart('   ')} />)
 

@@ -1,13 +1,12 @@
 import React, { useEffect, useState, useId, useCallback } from 'react'
 import ReactMarkdown from 'react-markdown'
 import remarkGfm from 'remark-gfm'
-import rehypeHighlight from 'rehype-highlight'
-import rehypeRaw from 'rehype-raw'
 import mermaid from 'mermaid'
 import { Maximize2, X, AlertCircle } from 'lucide-react'
 import { CopyButton } from '@/components/ui/copy-button'
 import { MarkdownLink } from '@/components/ui/markdown-link'
 import { useTheme } from '@/hooks/useTheme'
+import { markdownRehypePlugins } from '@/lib/markdownRehypePlugins'
 
 interface TextPartProps {
   text: string
@@ -195,7 +194,7 @@ export function TextPart({ text, onFileClick }: TextPartProps) {
     <div className="prose prose-invert prose-enhanced max-w-none text-foreground overflow-hidden break-words leading-snug">
       <ReactMarkdown
         remarkPlugins={[remarkGfm]}
-        rehypePlugins={[rehypeHighlight, rehypeRaw]}
+        rehypePlugins={markdownRehypePlugins}
         components={{
           code({ className, children, ...props }) {
             const isInline = !className || !className.includes('language-')

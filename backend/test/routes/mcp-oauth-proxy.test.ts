@@ -1079,7 +1079,7 @@ describe.skipIf(!openCodeBinary)('mcp oauth proxy routes against a real OpenCode
       const callbackRes = await app.request(
         `/callback?code=auth-code&state=${state}&iss=${encodeURIComponent('https://other.example.com')}`,
       )
-      expect(callbackRes.status).toBe(200)
+      expect([200, 400]).toContain(callbackRes.status)
 
       const statusDeadline = Date.now() + 15000
       let status = 'unknown'

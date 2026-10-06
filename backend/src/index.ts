@@ -281,6 +281,11 @@ sseAggregator.onEvent((directory, event) => {
   sessionGoalService.handleEvent(directory, event).catch((err) => {
     logger.error('Session goal event handling error:', err)
   })
+  try {
+    changeWalkthroughService.handleEvent(event)
+  } catch (err) {
+    logger.error('Change walkthrough event handling error:', err)
+  }
 })
 
 notificationService.addEventSuppressor(async (event, sessionId) => {

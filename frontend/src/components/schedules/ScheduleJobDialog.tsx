@@ -2,8 +2,7 @@ import { useEffect, useMemo, useRef, useState } from 'react'
 import { useQuery } from '@tanstack/react-query'
 import type { CreateScheduleJobRequest, PromptTemplate, ScheduleJob, ScheduleMcpServer, ScheduleWorkspaceMode } from '@opencode-manager/shared/types'
 import { useScheduleModels } from '@/hooks/useScheduleModels'
-import { providerModelRef } from '@/api/providers'
-import { resolveScheduleModel } from '@/lib/schedules/schedule-model'
+import { buildScheduleModelOptions, resolveScheduleModel } from '@/lib/schedules/schedule-model'
 import { useAgents } from '@/hooks/useOpenCode'
 import { useScheduleTarget } from '@/hooks/useScheduleTarget'
 import { settingsApi } from '@/api/settings'
@@ -82,16 +81,16 @@ export function ScheduleJobDialog({ open, onOpenChange, job, isSaving, onSubmit,
   const { data: templates = EMPTY_TEMPLATES } = usePromptTemplates()
   const deleteTemplateMutation = useDeletePromptTemplate()
 
-  const { providerModels, availableModelKeys, configDefaultModel } = useScheduleModels(open)
+  const effectiveRepoId = selectedRepoId ?? job?.repoId
+  const { scheduleTarget } = useScheduleTarget(open ? effectiveRepoId : undefined)
+  const scheduleDirectory = scheduleTarget?.fullPath
+
+  const { providerModels, modelState, availableModelKeys, configDefaultModel } = useScheduleModels(open, scheduleDirectory)
 
   const resolvedModel = useMemo(
     () => (modelDirty ? (model.trim() || null) : resolveScheduleModel(model, availableModelKeys, configDefaultModel)),
     [model, modelDirty, availableModelKeys, configDefaultModel],
   )
-
-  const effectiveRepoId = selectedRepoId ?? job?.repoId
-  const { scheduleTarget } = useScheduleTarget(open ? effectiveRepoId : undefined)
-  const scheduleDirectory = scheduleTarget?.fullPath
   const { data: agents = [], isSuccess: agentsLoaded } = useAgents(scheduleDirectory, { enabled: !!scheduleDirectory })
 
   const { data: skills = [], isLoading: skillsLoading } = useQuery({
@@ -130,41 +129,10 @@ export function ScheduleJobDialog({ open, onOpenChange, job, isSaving, onSubmit,
     return [assistantOption, ...repoEntries]
   }, [repos])
 
-  const modelOptions = useMemo<ComboboxOption[]>(() => {
-    const configuredModels: ComboboxOption[] = []
-    const configuredValues = new Set<string>()
-
-    if (configDefaultModel) {
-      const [providerId, ...modelParts] = configDefaultModel.split('/')
-      const modelId = modelParts.join('/')
-      const provider = providerModels.find((p) => p.id === providerId)
-      const providerModel = provider?.models.find((m) => m.key === modelId || m.id === modelId)
-      configuredValues.add(configDefaultModel)
-      if (providerModel) {
-        configuredValues.add(providerModelRef({ id: providerId }, providerModel))
-        configuredValues.add(`${providerId}/${providerModel.id}`)
-      }
-      configuredModels.push({
-        value: configDefaultModel,
-        label: providerModel?.name || modelId,
-        description: configDefaultModel,
-        group: 'Configured',
-      })
-    }
-
-    const allModels = providerModels.flatMap((provider) =>
-      provider.models
-        .filter((providerModel) => !configuredValues.has(providerModelRef(provider, providerModel)))
-        .map((providerModel) => ({
-          value: providerModelRef(provider, providerModel),
-          label: providerModel.name || providerModel.key || providerModel.id,
-          description: providerModelRef(provider, providerModel),
-          group: provider.name,
-        })),
-    )
-
-    return [...configuredModels, ...allModels]
-  }, [providerModels, configDefaultModel])
+  const modelOptions = useMemo(
+    () => buildScheduleModelOptions(providerModels, modelState, configDefaultModel),
+    [providerModels, modelState, configDefaultModel],
+  )
 
   const agentOptions = useMemo<ComboboxOption[]>(() => {
     return getPrimaryAgents(agents).map((agent) => ({

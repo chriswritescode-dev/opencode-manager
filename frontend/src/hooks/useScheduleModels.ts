@@ -1,23 +1,25 @@
 import { useMemo } from 'react'
 import { useProvidersWithModels } from '@/hooks/useProvidersWithModels'
-import { useOpenCodeConfigFile } from '@/hooks/useOpenCodeConfigFile'
-import { buildAvailableModelKeys, getConfigDefaultModel } from '@/lib/schedules/schedule-model'
+import { useOpenCodeConfigModel, useOpenCodeModelState } from '@/hooks/useModelSelection'
+import { buildAvailableModelKeys } from '@/lib/schedules/schedule-model'
 
-export function useScheduleModels(enabled: boolean) {
+export function useScheduleModels(enabled: boolean, directory?: string) {
   const providersQuery = useProvidersWithModels({
     enabled,
+    directory,
     keyParts: ['schedule-models'],
   })
-  const { data: configFile, isLoading: configLoading } = useOpenCodeConfigFile(enabled)
+  const { data: modelState } = useOpenCodeModelState(directory, enabled)
+  const { data: configDefaultModel = null, isLoading: configLoading } = useOpenCodeConfigModel(directory, enabled)
   const providerModels = providersQuery.data
   const availableModelKeys = useMemo(
     () => (providersQuery.isSuccess ? buildAvailableModelKeys(providerModels) : null),
     [providersQuery.isSuccess, providerModels],
   )
-  const configDefaultModel = useMemo(() => getConfigDefaultModel(configFile), [configFile])
 
   return {
     providerModels,
+    modelState,
     availableModelKeys,
     configDefaultModel,
     isLoading: providersQuery.isLoading || configLoading,

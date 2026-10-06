@@ -1,6 +1,7 @@
-import type { ProviderWithModels } from '@/api/providers'
+import type { OpenCodeModelState, ProviderWithModels } from '@/api/providers'
 import { providerModelRef } from '@/api/providers'
-import type { OpenCodeConfigFile } from '@/api/types/settings'
+import type { ComboboxOption } from '@/components/ui/combobox'
+import { buildModelSections } from '@/lib/modelSections'
 
 function normalizeModel(model: unknown): string | null {
   if (typeof model !== 'string') return null
@@ -19,8 +20,38 @@ export function buildAvailableModelKeys(providers: ProviderWithModels[]): Set<st
   return keys
 }
 
-export function getConfigDefaultModel(configFile: OpenCodeConfigFile | undefined): string | null {
-  return normalizeModel(configFile?.content?.model)
+function findProviderModel(providers: ProviderWithModels[], ref: string) {
+  const [providerId, ...modelParts] = ref.split('/')
+  const modelId = modelParts.join('/')
+  const provider = providers.find((candidate) => candidate.id === providerId)
+  const model = provider?.models.find((candidate) => candidate.key === modelId || candidate.id === modelId)
+  return provider && model ? { value: providerModelRef(provider, model), label: model.name || modelId } : { value: ref, label: modelId || ref }
+}
+
+/** Builds schedule model options with the default, favorite, and recent models ahead of the provider groups. */
+export function buildScheduleModelOptions(
+  providers: ProviderWithModels[],
+  modelState: OpenCodeModelState | undefined,
+  defaultModel: string | null | undefined,
+): ComboboxOption[] {
+  const normalizedDefault = normalizeModel(defaultModel)
+  const defaultModelMatch = normalizedDefault ? findProviderModel(providers, normalizedDefault) : null
+  const sectionOptions = buildModelSections(providers, modelState).flatMap((section) =>
+    section.options
+      .filter((option) => option.value !== defaultModelMatch?.value)
+      .map((option) => ({
+        value: option.value,
+        label: option.label,
+        description: option.value,
+        group: section.title,
+      })),
+  )
+
+  if (!normalizedDefault || !defaultModelMatch) return sectionOptions
+  return [
+    { value: normalizedDefault, label: defaultModelMatch.label, description: normalizedDefault, group: 'Default' },
+    ...sectionOptions,
+  ]
 }
 
 export function resolveScheduleModel(

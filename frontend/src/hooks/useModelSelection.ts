@@ -33,6 +33,15 @@ export function useOpenCodeModelState(directory?: string, enabled = true) {
   })
 }
 
+export function useOpenCodeConfigModel(directory?: string, enabled = true) {
+  return useQuery({
+    queryKey: ['opencode', 'config', 'model', directory],
+    queryFn: () => getOpenCodeConfigModel(directory),
+    staleTime: 30000,
+    enabled,
+  })
+}
+
 export function useModelSelection(directory?: string): UseModelSelectionResult {
   const queryClient = useQueryClient()
   
@@ -49,11 +58,7 @@ export function useModelSelection(directory?: string): UseModelSelectionResult {
 
   const { data: modelState, isLoading: isModelStateLoading } = useOpenCodeModelState(directory)
 
-  const { data: configModelString, isLoading: isConfigModelLoading } = useQuery({
-    queryKey: ['opencode', 'config', 'model', directory],
-    queryFn: () => getOpenCodeConfigModel(directory),
-    staleTime: 30000,
-  })
+  const { data: configModelString, isLoading: isConfigModelLoading } = useOpenCodeConfigModel(directory)
 
   const updateRecentModel = useMutation({
     mutationFn: addOpenCodeRecentModel,

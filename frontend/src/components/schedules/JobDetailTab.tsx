@@ -14,6 +14,7 @@ import { useRemoveScheduleWorktrees, useScheduleWorktrees } from '@/hooks/useSch
 import { formatScheduleWorktreeLabel } from '@/lib/schedules/schedule-worktree'
 import { Bot, CalendarClock, Clock3, GitBranch, History, Loader2, Pencil, Play, Sparkles, Trash2 } from 'lucide-react'
 import { useScheduleModels } from '@/hooks/useScheduleModels'
+import { useScheduleTarget } from '@/hooks/useScheduleTarget'
 import { resolveScheduleModel } from '@/lib/schedules/schedule-model'
 
 interface JobDetailTabProps {
@@ -39,7 +40,8 @@ export function JobDetailTab({
   runningRun,
   isJobFetching,
 }: JobDetailTabProps) {
-  const { availableModelKeys, configDefaultModel } = useScheduleModels(Boolean(selectedJob))
+  const { scheduleTarget } = useScheduleTarget(selectedJob?.repoId)
+  const { availableModelKeys, configDefaultModel } = useScheduleModels(Boolean(selectedJob), scheduleTarget?.fullPath)
   const resolvedModel = resolveScheduleModel(selectedJob?.model, availableModelKeys, configDefaultModel)
   const { data: worktrees = [] } = useScheduleWorktrees(selectedJob?.repoId, selectedJob?.id ?? null)
   const removeWorktrees = useRemoveScheduleWorktrees()

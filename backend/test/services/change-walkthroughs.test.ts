@@ -8,9 +8,11 @@ import {
   WALKTHROUGH_TEXT_MAX_CHARS,
   type WalkthroughHunk,
 } from '@opencode-manager/shared/schemas'
+import { getChangeWalkthrough } from '../../src/db/change-walkthroughs'
 import { migrate } from '../../src/db/migration-runner'
 import { allMigrations } from '../../src/db/migrations'
 import type { OpenCodeClient } from '../../src/services/opencode/client'
+import type { SSEEvent } from '../../src/services/sse-aggregator'
 import {
   ChangeWalkthroughError,
   ChangeWalkthroughService,
@@ -106,6 +108,16 @@ function createTestDb(): Database {
   const db = new Database(':memory:')
   migrate(db, allMigrations)
   return db
+}
+
+function sessionEvent(type: string, sessionID: string): SSEEvent {
+  return {
+    id: `evt_${type}_${sessionID}`,
+    created: Date.now(),
+    type,
+    location: { directory: '/abs/repo' },
+    data: { sessionID },
+  } as unknown as SSEEvent
 }
 
 describe('computeChangesHash', () => {
@@ -512,5 +524,52 @@ describe('ChangeWalkthroughService', () => {
   it('rejects with 404 when generating for a missing session', async () => {
     await expect(service.generate('ses_missing', {})).rejects.toBeInstanceOf(ChangeWalkthroughError)
     await expect(service.generate('ses_missing', {})).rejects.toMatchObject({ status: 404 })
+  })
+
+  describe('handleEvent', () => {
+    const coveringReply = modelReply([{ title: 'A', explanation: 'x', hunkIds: ['f0h0', 'f0h1', 'f1h0'] }])
+
+    it('deletes the stored walkthrough when its session is deleted', async () => {
+      fake.setGenerateImpl(async () => coveringReply)
+      await service.generate(SESSION_ID, {})
+
+      service.handleEvent(sessionEvent('session.deleted', SESSION_ID))
+
+      expect(getChangeWalkthrough(db, SESSION_ID)).toBeNull()
+    })
+
+    it('keeps the stored walkthrough for other session events', async () => {
+      fake.setGenerateImpl(async () => coveringReply)
+      await service.generate(SESSION_ID, {})
+
+      service.handleEvent(sessionEvent('session.execution.succeeded', SESSION_ID))
+      service.handleEvent(sessionEvent('session.deleted', 'ses_other'))
+
+      expect(getChangeWalkthrough(db, SESSION_ID)).not.toBeNull()
+    })
+
+    it('does not store a walkthrough whose session was deleted during generation', async () => {
+      let resolveGenerate: (text: string) => void = () => {}
+      fake.setGenerateImpl(() => new Promise<string>((resolve) => {
+        resolveGenerate = resolve
+      }))
+
+      const pending = service.generate(SESSION_ID, {})
+      await vi.waitFor(() => expect(fake.generateCalls).toHaveLength(1))
+      service.handleEvent(sessionEvent('session.deleted', SESSION_ID))
+      resolveGenerate(coveringReply)
+
+      await expect(pending).rejects.toMatchObject({ status: 404 })
+      expect(getChangeWalkthrough(db, SESSION_ID)).toBeNull()
+    })
+
+    it('stores walkthroughs again after an earlier deletion of the same session id', async () => {
+      service.handleEvent(sessionEvent('session.deleted', SESSION_ID))
+      fake.setGenerateImpl(async () => coveringReply)
+
+      await service.generate(SESSION_ID, {})
+
+      expect(getChangeWalkthrough(db, SESSION_ID)).not.toBeNull()
+    })
   })
 })

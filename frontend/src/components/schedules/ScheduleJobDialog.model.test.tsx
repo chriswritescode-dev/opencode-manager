@@ -9,9 +9,11 @@ import type { ScheduleJob } from '@opencode-manager/shared/types'
 
 Element.prototype.scrollIntoView = vi.fn()
 
-const { mockGetProvidersWithModels, mockGetOpenCodeConfig } = vi.hoisted(() => ({
+const { mockGetProvidersWithModels, mockGetOpenCodeConfig, mockGetOpenCodeConfigModel, mockGetOpenCodeModelState } = vi.hoisted(() => ({
   mockGetProvidersWithModels: vi.fn(),
   mockGetOpenCodeConfig: vi.fn(),
+  mockGetOpenCodeConfigModel: vi.fn(),
+  mockGetOpenCodeModelState: vi.fn(),
 }))
 
 vi.mock('@/hooks/usePromptTemplates', () => ({
@@ -24,6 +26,8 @@ vi.mock('@/hooks/usePromptTemplates', () => ({
 vi.mock('@/api/providers', async (importOriginal) => ({
   ...(await importOriginal<typeof import('@/api/providers')>()),
   getProvidersWithModels: mockGetProvidersWithModels,
+  getOpenCodeConfigModel: mockGetOpenCodeConfigModel,
+  getOpenCodeModelState: mockGetOpenCodeModelState,
 }))
 
 vi.mock('@/hooks/useOpenCode', () => ({
@@ -53,7 +57,7 @@ const providers: ProviderWithModels[] = [
   },
 ]
 
-const config = makeOpenCodeConfigFile({ content: { model: 'openai/gpt-5' } })
+const config = makeOpenCodeConfigFile({ content: {} })
 
 function getJob(overrides: Partial<ScheduleJob> = {}): ScheduleJob {
   return {
@@ -97,6 +101,8 @@ describe('ScheduleJobDialog — model fallback', () => {
     vi.clearAllMocks()
     mockGetProvidersWithModels.mockResolvedValue(providers)
     mockGetOpenCodeConfig.mockResolvedValue(config)
+    mockGetOpenCodeConfigModel.mockResolvedValue('openai/gpt-5')
+    mockGetOpenCodeModelState.mockResolvedValue({ recent: [], favorite: [], variant: {} })
   })
 
   it('prefills the config default when the stored model no longer exists', async () => {
@@ -165,9 +171,7 @@ describe('ScheduleJobDialog — model fallback', () => {
         isConnected: true,
       },
     ])
-    mockGetOpenCodeConfig.mockResolvedValue(makeOpenCodeConfigFile({
-      content: { model: 'openai/gpt-5-2025-08-07' },
-    }))
+    mockGetOpenCodeConfigModel.mockResolvedValue('openai/gpt-5-2025-08-07')
 
     render(
       <ScheduleJobDialog

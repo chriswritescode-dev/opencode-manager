@@ -19,7 +19,7 @@ import {
   type WalkthroughStop,
 } from '@opencode-manager/shared/schemas'
 import { splitDiffHunks } from '@opencode-manager/shared/utils'
-import { getChangeWalkthrough, saveChangeWalkthrough } from '../db/change-walkthroughs'
+import { deleteChangeWalkthrough, getChangeWalkthrough, saveChangeWalkthrough } from '../db/change-walkthroughs'
 import { getErrorMessage } from '../utils/error-utils'
 import { ServiceError } from '../utils/service-error'
 import { truncateText } from '../utils/text-truncate'
@@ -27,6 +27,7 @@ import { extractFirstJsonObject } from '../utils/json-extract'
 import { GenerateTextTimeoutError, generateTextWithTimeout } from './opencode/generate-text'
 import type { OpenCodeClient } from './opencode/client'
 import { readSessionChanges } from './session-changes'
+import type { SSEEvent } from './sse-aggregator'
 
 const DEFAULT_TIMEOUT_MS = 120_000
 const HUNK_TRUNCATION_MARKER = '\n[hunk truncated]'
@@ -213,6 +214,7 @@ export function parseWalkthroughResponse(text: string, hunks: WalkthroughHunk[])
 
 export class ChangeWalkthroughService {
   private readonly inFlight = new Map<string, Promise<{ walkthrough: ChangeWalkthrough; created: boolean }>>()
+  private readonly deletedDuringGeneration = new Set<string>()
   private readonly timeoutMs: number
 
   constructor(
@@ -250,9 +252,23 @@ export class ChangeWalkthroughService {
 
     const pending = this.runGenerate(sessionId, request).finally(() => {
       this.inFlight.delete(sessionId)
+      this.deletedDuringGeneration.delete(sessionId)
     })
     this.inFlight.set(sessionId, pending)
     return pending
+  }
+
+  /** Removes the stored walkthrough of a deleted session, including one still being generated. */
+  handleEvent(event: SSEEvent): void {
+    if (event.type !== 'session.deleted') {
+      return
+    }
+
+    const { sessionID } = event.data
+    if (this.inFlight.has(sessionID)) {
+      this.deletedDuringGeneration.add(sessionID)
+    }
+    deleteChangeWalkthrough(this.db, sessionID)
   }
 
   private async runGenerate(
@@ -325,6 +341,10 @@ export class ChangeWalkthroughService {
       hunks,
       omittedFiles,
       createdAt: Date.now(),
+    }
+
+    if (this.deletedDuringGeneration.has(sessionId)) {
+      throw new ChangeWalkthroughError('Session not found', 404)
     }
 
     saveChangeWalkthrough(this.db, walkthrough)

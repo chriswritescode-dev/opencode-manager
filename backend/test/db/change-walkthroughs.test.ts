@@ -2,6 +2,7 @@ import { afterEach, beforeEach, describe, expect, it } from 'vitest'
 import { Database } from 'bun:sqlite'
 import type { ChangeWalkthrough } from '@opencode-manager/shared/schemas'
 import {
+  deleteChangeWalkthrough,
   ensureChangeWalkthroughTable,
   getChangeWalkthrough,
   saveChangeWalkthrough,
@@ -82,6 +83,20 @@ describe('change walkthroughs', () => {
 
     const stored = getChangeWalkthrough(db, SESSION_ID)
     expect(stored).toMatchObject({ diffHash: 'hash-2', summary: 'Updated', createdAt: 2_000 })
+  })
+
+  it('deletes only the walkthrough of the given session', () => {
+    saveChangeWalkthrough(db, walkthrough())
+    saveChangeWalkthrough(db, walkthrough({ sessionId: 'ses_other' }))
+
+    deleteChangeWalkthrough(db, SESSION_ID)
+
+    expect(getChangeWalkthrough(db, SESSION_ID)).toBeNull()
+    expect(getChangeWalkthrough(db, 'ses_other')).not.toBeNull()
+  })
+
+  it('ignores deleting a session without a stored walkthrough', () => {
+    expect(() => deleteChangeWalkthrough(db, 'ses_missing')).not.toThrow()
   })
 
   it('treats a corrupt payload as missing', () => {

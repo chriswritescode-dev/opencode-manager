@@ -23,15 +23,35 @@ describe('ScheduleRunMarkdown links', () => {
     expect(link.getAttribute('rel')).toBe('noopener noreferrer')
   })
 
-  it('renders raw HTML from generated prose as inert text', () => {
+  it('strips unsafe raw HTML from generated prose', () => {
     const payload =
-      '<iframe srcdoc="&lt;script&gt;parent.document.documentElement.dataset.scheduleProbe = 1&lt;/script&gt;"></iframe>'
+      '<iframe srcdoc="&lt;script&gt;parent.document.documentElement.dataset.scheduleProbe = 1&lt;/script&gt;"></iframe><img src="x" onerror="document.documentElement.dataset.scheduleProbe = 2">'
     const { container } = render(<ScheduleRunMarkdown content={`Before\n\n${payload}\n\nAfter`} />)
 
     expect(container.querySelector('iframe')).toBeNull()
     expect(container.querySelector('script')).toBeNull()
+    expect(container.querySelector('img')?.getAttribute('onerror')).toBeNull()
     expect(document.documentElement.dataset.scheduleProbe).toBeUndefined()
-    expect(screen.getByText(/iframe/)).toBeInTheDocument()
+    expect(screen.getByText('Before')).toBeInTheDocument()
+    expect(screen.getByText('After')).toBeInTheDocument()
+  })
+
+  it('renders safe raw HTML', () => {
+    const { container } = render(
+      <ScheduleRunMarkdown content={'<details><summary>More</summary>Hidden body</details>\n\nPress <kbd>Enter</kbd>'} />,
+    )
+
+    expect(container.querySelector('details summary')?.textContent).toBe('More')
+    expect(screen.getByText('Enter').tagName).toBe('KBD')
+  })
+
+  it('keeps syntax highlighting after sanitization', () => {
+    const { container } = render(<ScheduleRunMarkdown content={'```ts\nconst a = 1\n```'} />)
+
+    const code = container.querySelector('pre code')
+    expect(code?.className).toContain('language-ts')
+    expect(code?.className).toContain('hljs')
+    expect(code?.querySelector('[class^="hljs-"]')).not.toBeNull()
   })
 
   it('still renders GFM formatting', () => {

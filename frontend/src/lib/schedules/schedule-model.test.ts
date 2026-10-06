@@ -1,11 +1,10 @@
 import { describe, it, expect } from 'vitest'
 import {
   buildAvailableModelKeys,
-  getConfigDefaultModel,
+  buildScheduleModelOptions,
   resolveScheduleModel,
 } from './schedule-model'
 import type { ProviderWithModels } from '@/api/providers'
-import type { OpenCodeConfigFile } from '@/api/types/settings'
 
 function makeProvider(id: string, models: Array<{ id: string; key?: string }>): ProviderWithModels {
   return {
@@ -15,16 +14,6 @@ function makeProvider(id: string, models: Array<{ id: string; key?: string }>): 
     models: models.map((model) => ({ ...model, name: model.key ?? model.id })),
     source: 'builtin',
     isConnected: true,
-  }
-}
-
-function makeConfigFile(content: Record<string, unknown>): OpenCodeConfigFile {
-  return {
-    path: '/workspace/.config/opencode/opencode.json',
-    content,
-    rawContent: JSON.stringify(content),
-    isValid: true,
-    updatedAt: 0,
   }
 }
 
@@ -43,18 +32,34 @@ describe('buildAvailableModelKeys', () => {
   })
 })
 
-describe('getConfigDefaultModel', () => {
-  it('returns the configured model, trimmed, and ignores small_model', () => {
-    expect(getConfigDefaultModel(makeConfigFile({
-      model: ' openai/gpt-5 ',
-      small_model: 'openai/gpt-5-mini',
-    }))).toBe('openai/gpt-5')
+describe('buildScheduleModelOptions', () => {
+  const providers = [
+    makeProvider('anthropic', [{ id: 'claude-opus' }, { id: 'claude-sonnet' }]),
+    makeProvider('openai', [{ id: 'backing-gpt-5', key: 'gpt-5' }, { id: 'gpt-5-mini' }]),
+  ]
+
+  it('orders default, favorites, and recents ahead of providers without duplicates', () => {
+    const options = buildScheduleModelOptions(
+      providers,
+      {
+        favorite: [{ providerID: 'openai', modelID: 'gpt-5-mini' }],
+        recent: [{ providerID: 'anthropic', modelID: 'claude-sonnet' }, { providerID: 'openai', modelID: 'gpt-5' }],
+        variant: {},
+      },
+      'openai/backing-gpt-5',
+    )
+
+    expect(options.map((option) => [option.group, option.value])).toEqual([
+      ['Default', 'openai/backing-gpt-5'],
+      ['Favorites', 'openai/gpt-5-mini'],
+      ['Recent', 'anthropic/claude-sonnet'],
+      ['anthropic', 'anthropic/claude-opus'],
+    ])
   })
 
-  it('returns null when the model is missing or unset', () => {
-    expect(getConfigDefaultModel(undefined)).toBeNull()
-    expect(getConfigDefaultModel(makeConfigFile({}))).toBeNull()
-    expect(getConfigDefaultModel(makeConfigFile({ model: 42 }))).toBeNull()
+  it('keeps an unknown default model selectable', () => {
+    const options = buildScheduleModelOptions(providers, undefined, 'custom/model-x')
+    expect(options[0]).toEqual({ value: 'custom/model-x', label: 'model-x', description: 'custom/model-x', group: 'Default' })
   })
 })
 
