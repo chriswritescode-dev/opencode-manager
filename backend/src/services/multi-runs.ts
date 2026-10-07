@@ -18,6 +18,7 @@ import {
 import { getRepoById } from '../db/queries'
 import type { Repo } from '../types/repo'
 import { getErrorMessage } from '../utils/error-utils'
+import { logger } from '../utils/logger'
 import { ServiceError } from '../utils/service-error'
 import { buildFusionPrompt, buildFusionSourcePermissionRuleset, collectFusionSources } from './multi-run-fusion'
 import type { OpenCodeClient } from './opencode/client'
@@ -242,8 +243,9 @@ export class MultiRunService {
       return { run: this.reload(multiRunId), created: false }
     }
 
+    let launched: LaunchedSession | null = null
     try {
-      const launched = await this.sessionLauncher.launch({
+      launched = await this.sessionLauncher.launch({
         repoId: record.repoId,
         prompt: built.prompt,
         model: request.model,
@@ -265,8 +267,6 @@ export class MultiRunService {
         sessionId: launched.sessionId,
         directory: launched.directory,
       })
-
-      await this.permissionModes.applyDefaultMode(launched.sessionId, launched.directory)
     } catch (error) {
       const launchError = error instanceof SessionLaunchError ? error : null
       const workspaceDirectory = launchError?.workspaceDirectory ?? null
@@ -276,6 +276,14 @@ export class MultiRunService {
         ...(workspaceDirectory ? { directory: workspaceDirectory } : {}),
         ...(launchError?.sessionId ? { sessionId: launchError.sessionId } : {}),
       })
+    }
+
+    if (launched) {
+      try {
+        await this.permissionModes.applyDefaultMode(launched.sessionId, launched.directory)
+      } catch (error) {
+        logger.error(`Failed to apply the default permission mode to fusion session ${launched.sessionId}:`, error)
+      }
     }
 
     return { run: this.reload(multiRunId), created: true }

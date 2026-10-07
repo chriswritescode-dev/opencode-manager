@@ -25,6 +25,11 @@ const mocks = vi.hoisted(() => ({
   isGitMainCheckout: vi.fn(),
   executeCommand: vi.fn(),
   existsSync: vi.fn(),
+  loggerError: vi.fn(),
+}))
+
+vi.mock('../../src/utils/logger', () => ({
+  logger: { info: vi.fn(), warn: vi.fn(), error: mocks.loggerError, debug: vi.fn() },
 }))
 
 vi.mock('../../src/services/opencode-models', () => ({
@@ -749,6 +754,42 @@ describe('MultiRunService', () => {
 
     const fusionSessionId = fused.fusions[0]!.sessionId!
     expect(getSessionPermissionMode(db, fusionSessionId)).toBeNull()
+  })
+
+  it('keeps the fusion started and logs when applying the default permission mode fails', async () => {
+    const repoId = readyRepo()
+    const { client } = createClient()
+    const repoWorkspaces = createRepoWorkspaces()
+    const permissionModes = {
+      applyDefaultMode: vi.fn(async () => {
+        throw new Error('permission store unavailable')
+      }),
+    } as unknown as SessionPermissionModeService
+    const service = createService(client, repoWorkspaces.service, permissionModes)
+
+    const run = await service.launch({
+      repoId,
+      name: 'Sweep',
+      prompt: 'go',
+      models: ['openai/a', 'openai/b'],
+      isolate: true,
+    })
+    const entryIds = run.entries.map((entry) => entry.id)
+
+    const { run: fused } = await service.fuse(run.id, {
+      requestId: FUSE_REQUEST_ID,
+      entryIds,
+      model: 'openai/c',
+      isolate: false,
+    })
+
+    const fusion = fused.fusions[0]!
+    expect(fusion.status).toBe('started')
+    expect(fusion.sessionId).not.toBeNull()
+    expect(mocks.loggerError).toHaveBeenCalledWith(
+      expect.stringContaining(fusion.sessionId!),
+      expect.any(Error),
+    )
   })
 
   it('returns the same fusion for a repeated requestId and launches once', async () => {
