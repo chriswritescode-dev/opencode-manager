@@ -74,7 +74,10 @@ vi.mock('../src/manager-api.js', () => ({
       super(message)
     }
   },
+  isManagerRouteMissing: vi.fn(() => false),
 }))
+
+const noFeatures = { remote: undefined, goals: undefined }
 
 const matched = { repoId: 1, name: 'repo', projectId: 'proj_1', branch: 'main' }
 const repos = [
@@ -187,7 +190,7 @@ function configureMove(fake: ReturnType<typeof createFakeContext>) {
 }
 
 async function invokeMove(fake: ReturnType<typeof createFakeContext>) {
-  await setupOcm(fake.context, vi.fn())
+  await setupOcm(fake.context, vi.fn(), noFeatures)
   renderAppSlot(fake)
   const factory = fake.layer.mock.calls[0]![0] as () => { commands: { id: string; run: () => Promise<void> }[] }
   const command = factory().commands.find((entry) => entry.id === 'ocm.session.move')!
@@ -203,7 +206,7 @@ describe('setupOcm', () => {
   it('registers commands from the app slot so the host keymap provider is mounted', async () => {
     const fake = createFakeContext()
 
-    await setupOcm(fake.context, vi.fn())
+    await setupOcm(fake.context, vi.fn(), noFeatures)
 
     expect(fake.layer).not.toHaveBeenCalled()
     expect(fake.slot).toHaveBeenCalledWith(expect.objectContaining({ append: 'app' }))
@@ -213,6 +216,19 @@ describe('setupOcm', () => {
     expect(fake.layer).toHaveBeenCalledTimes(1)
     const factory = fake.layer.mock.calls[0]![0] as () => { mode?: string }
     expect(factory().mode).toBe('global')
+  })
+
+  it('exposes the goal slash command', async () => {
+    const fake = createFakeContext()
+
+    await setupOcm(fake.context, vi.fn(), noFeatures)
+    renderAppSlot(fake)
+
+    const factory = fake.layer.mock.calls[0]![0] as () => {
+      commands: { id: string; slash?: { name: string; arguments?: true } }[]
+    }
+    const goal = factory().commands.find((entry) => entry.id === 'ocm.goal')
+    expect(goal?.slash).toEqual({ name: 'goal', arguments: true })
   })
 })
 

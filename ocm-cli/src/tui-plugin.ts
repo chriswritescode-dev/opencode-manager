@@ -15,10 +15,18 @@ import { setPendingWarp, runPendingWarp } from './warp.js'
 import { pushPhaseProgress, importProgress } from './move-progress.js'
 import { warmRepoProxy } from './repo-proxy.js'
 import type { MoveProgress } from './move-progress.js'
+import { runGoalCommand } from './tui-goal.js'
+import type { GoalStore } from './goal-store.js'
+import type { RemoteContext } from './remote-context.js'
 
 export type MoveProgressSetter = (progress: MoveProgress | null) => void
 
-export async function setupOcm(context: Context, setMoveProgress: MoveProgressSetter): Promise<() => void> {
+export type OcmFeatures = {
+  remote: RemoteContext | undefined
+  goals: GoalStore | undefined
+}
+
+export async function setupOcm(context: Context, setMoveProgress: MoveProgressSetter, features: OcmFeatures): Promise<() => void> {
   showInstallNotice(context)
   context.ui.slot({
     append: 'app',
@@ -34,6 +42,15 @@ export async function setupOcm(context: Context, setMoveProgress: MoveProgressSe
             palette: true,
             slash: { name: 'ocm-move' },
             run: () => runSessionMove(context, setMoveProgress),
+          },
+          {
+            id: 'ocm.goal',
+            title: 'Goal',
+            description: 'Start, pause, resume, or cancel a Manager goal for this session',
+            group: 'OpenCode Manager',
+            palette: true,
+            slash: { name: 'goal', arguments: true },
+            run: (input) => runGoalCommand(context, { remote: features.remote, store: features.goals }, input),
           },
         ],
       }))
