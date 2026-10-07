@@ -1,7 +1,7 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest'
 import type { WarpTarget } from '../src/warp.js'
 import { setPendingWarp, takePendingWarp, buildAttachInvocation, runPendingWarp } from '../src/warp.js'
-import { REMOTE_MANAGER_URL_ENV, REMOTE_REPO_NAME_ENV } from '../src/remote-context.js'
+import { REMOTE_MANAGER_URL_ENV, REMOTE_REPO_ID_ENV, REMOTE_REPO_NAME_ENV } from '../src/remote-context.js'
 
 const sampleTarget: WarpTarget = {
   managerUrl: 'https://manager.example.com',
@@ -24,6 +24,7 @@ describe('buildAttachInvocation', () => {
       OPENCODE_PASSWORD: 'tok_abc123',
       [REMOTE_MANAGER_URL_ENV]: 'https://manager.example.com',
       [REMOTE_REPO_NAME_ENV]: 'my-repo',
+      [REMOTE_REPO_ID_ENV]: '42',
     })
   })
 

@@ -42,7 +42,7 @@ export function buildAttachInvocation(target: AttachTarget): AttachInvocation {
   if (target.sessionID) args.push('--session', target.sessionID)
   return {
     args,
-    env: { ...process.env, OPENCODE_PASSWORD: target.token, ...buildRemoteAttachEnv(target.managerUrl, target.repoName) },
+    env: { ...process.env, OPENCODE_PASSWORD: target.token, ...buildRemoteAttachEnv(target.managerUrl, target.repoName, target.repoId) },
   }
 }
 
