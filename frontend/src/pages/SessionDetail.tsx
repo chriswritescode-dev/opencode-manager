@@ -49,6 +49,7 @@ import type { PageCommandActions } from "@/lib/builtinCommands";
 import { useRedoMessage, useUndoMessage } from "@/hooks/useUndoMessage";
 import { usePermissions, useForms } from "@/contexts/EventContext";
 import type { FormInfo, SessionMessageInfo } from "@opencode-manager/shared/opencode";
+import { formatOpenCodeModelRef } from "@opencode-manager/shared/opencode";
 import { FormPrompt } from "@/components/session/FormPrompt";
 import { MinimizedFormIndicator } from "@/components/session/MinimizedFormIndicator";
 import { PendingActionsGroup } from "@/components/notifications/PendingActionsGroup";
@@ -63,6 +64,7 @@ import { useTerminalDialogParam } from "@/hooks/useOpenTerminal";
 import { SessionMoreButton } from "@/components/navigation/SessionMoreButton";
 import { SideQuestionDialog } from "@/components/session/SideQuestionDialog";
 import { SessionMessagePickerDialog } from "@/components/session/SessionMessagePickerDialog";
+import { ChangesWalkthroughDialog } from "@/components/session/ChangesWalkthroughDialog";
 
 const OLDER_HISTORY_SCROLL_THRESHOLD_PX = 200
 
@@ -128,6 +130,7 @@ export function SessionDetail() {
   const [actionsDialogOpen, setActionsDialogOpen] = useDialogParam('actions');
   const [previewOpen, setPreviewOpen] = useDialogParam('preview');
   const [resetPermissionsOpen, setResetPermissionsOpen] = useDialogParam('resetPermissions');
+  const [walkthroughOpen, setWalkthroughOpen] = useDialogParam('walkthrough');
   const [selectedFilePath, setSelectedFilePath] = useState<string | undefined>();
   const [showScrollButton, setShowScrollButton] = useState(false);
   const [hasPromptContent, setHasPromptContent] = useState(false);
@@ -257,7 +260,11 @@ export function SessionDetail() {
   const interruptSession = useInterruptSession();
   const { mutateAsync: updateSessionAsync } = useUpdateSession(sessionDirectory);
   const { mutateAsync: createSessionAsync } = useCreateSession(sessionDirectory);
-  const { modelString } = useModelSelection(sessionDirectory);
+  const modelSelectionSession = useMemo(
+    () => (sessionId ? { id: sessionId, agent: session?.agent, model: session?.model } : undefined),
+    [sessionId, session?.agent, session?.model],
+  );
+  const { modelRef } = useModelSelection(sessionDirectory, modelSelectionSession);
   const setSessionStatus = useSessionStatus((state) => state.setStatus);
   const isEditingMessage = useUIState((state) => state.isEditingMessage);
   const setActivePromptFileBasePath = useUIState((state) => state.setActivePromptFileBasePath);
@@ -298,6 +305,7 @@ export function SessionDetail() {
   const handleShowSessionsDialog = useCallback(() => setSessionsDialogOpen(true), []);
   const handleShowMcpDialog = useCallback(() => setMcpDialogOpen(true), [setMcpDialogOpen]);
   const handleShowSkillsDialog = useCallback(() => setSkillsDialogOpen(true), [setSkillsDialogOpen]);
+  const handleShowWalkthrough = useCallback(() => setWalkthroughOpen(true), [setWalkthroughOpen]);
   const handleConnectProvider = useCallback(() => setSettingsTab('providers'), [setSettingsTab]);
 
   const handleMinimizeForm = useCallback((form: FormInfo) => {
@@ -580,6 +588,7 @@ export function SessionDetail() {
     redo: handleRedo,
     showMcp: handleShowMcpDialog,
     showSkills: handleShowSkillsDialog,
+    showWalkthrough: handleShowWalkthrough,
     showSettings: openSettings,
     connectProvider: handleConnectProvider,
   }), [
@@ -598,6 +607,7 @@ export function SessionDetail() {
     handleRedo,
     handleShowMcpDialog,
     handleShowSkillsDialog,
+    handleShowWalkthrough,
     openSettings,
     handleConnectProvider,
   ]);
@@ -718,7 +728,7 @@ export function SessionDetail() {
               onFileClick={handleFileClick}
               onChildSessionClick={handleChildSessionClick}
               onUndoMessage={handleUndoMessage}
-              model={modelString || undefined}
+              model={modelRef ? formatOpenCodeModelRef(modelRef) : undefined}
             />
           ) : null}
         </div>
@@ -871,6 +881,14 @@ export function SessionDetail() {
           sessionId={sessionId}
           directory={repoDirectory}
           onSkillLoaded={(skill) => showToast.success(`Loaded skill: ${skill.name}`)}
+        />
+      )}
+
+      {sessionId && (
+        <ChangesWalkthroughDialog
+          sessionId={sessionId}
+          open={walkthroughOpen}
+          onOpenChange={setWalkthroughOpen}
         />
       )}
 

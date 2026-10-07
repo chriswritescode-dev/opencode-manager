@@ -14,6 +14,7 @@ function createRun(overrides: Partial<MultiRun> = {}): MultiRun {
     baseRef: null,
     createdAt: 1,
     entries: [],
+    fusions: [],
     ...overrides,
   }
 }
@@ -29,16 +30,27 @@ function launchBody(overrides: Record<string, unknown> = {}): string {
   })
 }
 
+function fuseBody(overrides: Record<string, unknown> = {}): string {
+  return JSON.stringify({
+    requestId: '11111111-1111-4111-8111-111111111111',
+    entryIds: [1, 2],
+    model: 'openai/a',
+    isolate: true,
+    ...overrides,
+  })
+}
+
 describe('multi-run routes', () => {
   let service: {
     list: ReturnType<typeof vi.fn>
     launch: ReturnType<typeof vi.fn>
     discard: ReturnType<typeof vi.fn>
+    fuse: ReturnType<typeof vi.fn>
   }
   let app: Hono
 
   beforeEach(() => {
-    service = { list: vi.fn(), launch: vi.fn(), discard: vi.fn() }
+    service = { list: vi.fn(), launch: vi.fn(), discard: vi.fn(), fuse: vi.fn() }
     app = new Hono()
     app.route('/multi-runs', createMultiRunRoutes(service as unknown as MultiRunService))
   })
@@ -146,5 +158,90 @@ describe('multi-run routes', () => {
     const res = await app.request('/multi-runs/3/entries/7/discard', { method: 'POST' })
 
     expect(res.status).toBe(404)
+  })
+
+  it('POST fusions fuses a run and returns 201 when created', async () => {
+    service.fuse.mockResolvedValue({ run: createRun(), created: true })
+
+    const res = await app.request('/multi-runs/3/fusions', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: fuseBody(),
+    })
+
+    expect(res.status).toBe(201)
+    await expect(res.json()).resolves.toEqual({ run: createRun() })
+    expect(service.fuse).toHaveBeenCalledWith(3, {
+      requestId: '11111111-1111-4111-8111-111111111111',
+      entryIds: [1, 2],
+      model: 'openai/a',
+      isolate: true,
+    })
+  })
+
+  it('POST fusions returns 200 for an idempotent replay', async () => {
+    service.fuse.mockResolvedValue({ run: createRun(), created: false })
+
+    const res = await app.request('/multi-runs/3/fusions', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: fuseBody(),
+    })
+
+    expect(res.status).toBe(200)
+    await expect(res.json()).resolves.toEqual({ run: createRun() })
+  })
+
+  it('POST fusions serialises an unavailable-sources error with code and details', async () => {
+    service.fuse.mockRejectedValue(
+      new MultiRunError('Some selected results are not ready to fuse', 409, {
+        code: 'FUSION_SOURCES_UNAVAILABLE',
+        details: {
+          unavailableSources: [
+            { entryId: 2, model: 'openai/b', reason: 'running', message: 'The session is still running.' },
+          ],
+        },
+      }),
+    )
+
+    const res = await app.request('/multi-runs/3/fusions', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: fuseBody(),
+    })
+
+    expect(res.status).toBe(409)
+    await expect(res.json()).resolves.toEqual({
+      error: 'Some selected results are not ready to fuse',
+      code: 'FUSION_SOURCES_UNAVAILABLE',
+      details: {
+        unavailableSources: [
+          { entryId: 2, model: 'openai/b', reason: 'running', message: 'The session is still running.' },
+        ],
+      },
+    })
+  })
+
+  it('POST fusions maps a missing run to 404', async () => {
+    service.fuse.mockRejectedValue(new MultiRunError('Multi-run not found', 404))
+
+    const res = await app.request('/multi-runs/3/fusions', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: fuseBody(),
+    })
+
+    expect(res.status).toBe(404)
+  })
+
+  it('POST fusions rejects a body with fewer than two entries with 400', async () => {
+    const res = await app.request('/multi-runs/3/fusions', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: fuseBody({ entryIds: [1] }),
+    })
+
+    expect(res.status).toBe(400)
+    expect(service.fuse).not.toHaveBeenCalled()
   })
 })

@@ -6,7 +6,7 @@ import { ApiKeyDialog } from './ApiKeyDialog'
 import { providerCredentialsApi } from '@/api/providers'
 import { oauthApi } from '@/api/oauth'
 import { FetchError } from '@/api/fetchWrapper'
-import type { ProviderWithModels } from '@/api/providers'
+import type { Provider } from '@/api/providers'
 
 vi.mock('@/api/providers', () => ({
   providerCredentialsApi: {
@@ -20,14 +20,14 @@ vi.mock('@/api/oauth', () => ({
   },
 }))
 
-function providerFixture(id: string, name: string): ProviderWithModels {
-  return { id, name, models: [], source: 'builtin', isConnected: false }
+function providerFixture(id: string, name: string): Provider {
+  return { id, name, models: [] }
 }
 
 const azureProvider = providerFixture('azure', 'Azure')
 const anthropicProvider = providerFixture('anthropic', 'Anthropic')
 
-function renderDialog(provider: ProviderWithModels, onSuccess = vi.fn()) {
+function renderDialog(provider: Provider, onSuccess = vi.fn()) {
   const queryClient = new QueryClient({ defaultOptions: { queries: { retry: false } } })
   render(
     <QueryClientProvider client={queryClient}>

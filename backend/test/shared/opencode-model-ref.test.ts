@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { formatOpenCodeModelRef, parseOpenCodeModelRef } from '@opencode-manager/shared/opencode'
+import { configModelRef, formatOpenCodeModelRef, parseOpenCodeModelRef } from '@opencode-manager/shared/opencode'
 
 describe('OpenCode model references', () => {
   describe('parseOpenCodeModelRef', () => {
@@ -55,6 +55,44 @@ describe('OpenCode model references', () => {
 
       expect(ref).toBeDefined()
       expect(formatOpenCodeModelRef(ref!)).toBe(model)
+    })
+  })
+
+  describe('configModelRef', () => {
+    it('parses a string reference', () => {
+      expect(configModelRef('anthropic/claude-sonnet-4')).toEqual({
+        providerID: 'anthropic',
+        id: 'claude-sonnet-4',
+      })
+    })
+
+    it('parses a string reference with a variant', () => {
+      expect(configModelRef('openai/gpt-5#high')).toEqual({
+        providerID: 'openai',
+        id: 'gpt-5',
+        variant: 'high',
+      })
+    })
+
+    it('maps an object reference with a variant', () => {
+      expect(configModelRef({ providerID: 'openai', model: 'gpt-5', variant: 'high' })).toEqual({
+        providerID: 'openai',
+        id: 'gpt-5',
+        variant: 'high',
+      })
+    })
+
+    it('maps an object reference without a variant', () => {
+      expect(configModelRef({ providerID: 'openai', model: 'gpt-5' })).toEqual({
+        providerID: 'openai',
+        id: 'gpt-5',
+      })
+    })
+
+    it('returns undefined for a missing or malformed reference', () => {
+      expect(configModelRef(undefined)).toBeUndefined()
+      expect(configModelRef(null)).toBeUndefined()
+      expect(configModelRef('openai')).toBeUndefined()
     })
   })
 })

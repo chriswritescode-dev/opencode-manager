@@ -198,11 +198,11 @@ describe('PromptInput STT Gesture Tests', () => {
       model: null,
       modelString: 'test-model',
       setModel: vi.fn(),
-      setActiveModel: vi.fn().mockReturnValue(false),
+      setActiveAgent: vi.fn(),
       recentModels: [],
       favoriteModels: [],
       toggleFavorite: vi.fn(),
-      isModelStateLoading: false,
+      isModelReady: true,
     })
     mocks.useVariants.mockReturnValue({
       hasVariants: false,

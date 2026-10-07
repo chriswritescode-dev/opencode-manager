@@ -1,4 +1,5 @@
 import { Combobox, type ComboboxOption } from '@/components/ui/combobox'
+import { ModelCombobox } from '@/components/model/ModelCombobox'
 import { BranchCombobox } from '@/components/repo/BranchCombobox'
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
@@ -20,7 +21,7 @@ type GeneralTabProps = {
   agentOptions: ComboboxOption[]
   model: string
   onModelChange: (value: string) => void
-  modelOptions: ComboboxOption[]
+  modelDirectory?: string
   enabled: boolean
   onEnabledChange: (value: boolean) => void
   branch: string
@@ -64,7 +65,7 @@ export function GeneralTab({
   agentOptions,
   model,
   onModelChange,
-  modelOptions,
+  modelDirectory,
   enabled,
   onEnabledChange,
   branch,
@@ -140,10 +141,11 @@ export function GeneralTab({
               <Label htmlFor="schedule-model">Model override</Label>
               <InfoHint text="Pick from detected OpenCode models or type a custom provider/model value." />
             </div>
-            <Combobox
+            <ModelCombobox
+              id="schedule-model"
               value={model}
               onChange={onModelChange}
-              options={modelOptions}
+              directory={modelDirectory}
               placeholder="Workspace default"
               allowCustomValue
               showClear

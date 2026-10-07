@@ -1,6 +1,6 @@
 import { fetchWrapper } from './fetchWrapper'
 import { API_BASE_URL } from '@/config'
-import type { LaunchMultiRunRequest, MultiRun } from '@opencode-manager/shared/schemas'
+import type { FuseMultiRunRequest, LaunchMultiRunRequest, MultiRun } from '@opencode-manager/shared/schemas'
 
 export async function listMultiRuns(repoId: number): Promise<MultiRun[]> {
   const res = await fetchWrapper<{ runs: MultiRun[] }>(`${API_BASE_URL}/api/multi-runs`, {
@@ -15,6 +15,18 @@ export async function launchMultiRun(request: LaunchMultiRunRequest): Promise<Mu
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify(request),
   })
+  return res.run
+}
+
+export async function fuseMultiRun(runId: number, request: FuseMultiRunRequest): Promise<MultiRun> {
+  const res = await fetchWrapper<{ run: MultiRun }>(
+    `${API_BASE_URL}/api/multi-runs/${encodeURIComponent(runId)}/fusions`,
+    {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(request),
+    },
+  )
   return res.run
 }
 

@@ -2,6 +2,7 @@ import { useMemo, useEffect } from 'react'
 import { useSession, useAgents } from './useOpenCode'
 import { useSessionAgentStore } from '@/stores/sessionAgentStore'
 import { getPrimaryAgents } from '@/lib/primaryAgents'
+import type { ModelRef } from '@opencode-manager/shared/opencode'
 
 interface AgentInfo {
   id: string
@@ -41,6 +42,8 @@ interface SessionAgentResult {
   agent: string
   model: { providerID: string; modelID: string } | undefined
   variant: string | undefined
+  sessionAgentId: string | undefined
+  modelRef: ModelRef | undefined
 }
 
 export function useSessionAgent(
@@ -69,8 +72,10 @@ export function useSessionAgent(
       agent: sessionAgent ?? fallbackAgent ?? defaultAgent,
       model,
       variant: session?.model?.variant,
+      sessionAgentId: session?.agent,
+      modelRef: session?.model,
     }
-  }, [sessionAgent, fallbackAgent, defaultAgent, session?.model])
+  }, [sessionAgent, fallbackAgent, defaultAgent, session?.model, session?.agent])
 
   useEffect(() => {
     if (session?.agent && sessionID) {
@@ -78,5 +83,11 @@ export function useSessionAgent(
     }
   }, [session?.agent, sessionID, setAgent])
 
-  return { agent: result.agent, model: result.model, variant: result.variant }
+  return {
+    agent: result.agent,
+    model: result.model,
+    variant: result.variant,
+    sessionAgentId: result.sessionAgentId,
+    modelRef: result.modelRef,
+  }
 }

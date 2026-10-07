@@ -22,12 +22,9 @@ export function formatOpenCodeModelRef(ref: ModelRef): string {
   return ref.variant ? `${ref.providerID}/${ref.id}#${ref.variant}` : `${ref.providerID}/${ref.id}`
 }
 
-export function selectConfiguredModelRef(entries: ConfigEntry[]): ModelRef | undefined {
-  const model = entries.reduce<ConfigDocumentModel>(
-    (current, entry) => (entry.type === 'document' && entry.info.model ? entry.info.model : current),
-    undefined,
-  )
-
+export function configModelRef(
+  model: string | { providerID: string; model: string; variant?: string } | undefined | null,
+): ModelRef | undefined {
   if (!model) return undefined
   if (typeof model === 'string') return parseOpenCodeModelRef(model)
 
@@ -36,4 +33,13 @@ export function selectConfiguredModelRef(entries: ConfigEntry[]): ModelRef | und
     id: model.model,
     ...(model.variant ? { variant: model.variant } : {}),
   }
+}
+
+export function selectConfiguredModelRef(entries: ConfigEntry[]): ModelRef | undefined {
+  const model = entries.reduce<ConfigDocumentModel>(
+    (current, entry) => (entry.type === 'document' && entry.info.model ? entry.info.model : current),
+    undefined,
+  )
+
+  return configModelRef(model)
 }

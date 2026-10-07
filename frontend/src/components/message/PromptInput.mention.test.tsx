@@ -171,11 +171,11 @@ describe('PromptInput agent mention submission', () => {
       model: { providerID: 'anthropic', modelID: 'claude-sonnet-4' },
       modelString: 'anthropic/claude-sonnet-4',
       setModel: vi.fn(),
-      setActiveModel: vi.fn(),
+      setActiveAgent: vi.fn(),
       recentModels: [],
       favoriteModels: [],
       toggleFavorite: vi.fn(),
-      isModelStateLoading: false,
+      isModelReady: true,
     })
     mocks.useVariants.mockReturnValue({ hasVariants: false, currentVariant: null, cycleVariant: vi.fn() })
     mocks.useSessionAgent.mockReturnValue({ agent: 'build' })

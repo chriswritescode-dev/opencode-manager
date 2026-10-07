@@ -1,5 +1,5 @@
 import type { ModelInfo, ModelRef } from '@opencode-manager/shared/opencode'
-import { formatOpenCodeModelRef, openCodeLocation, parseOpenCodeModelRef, selectConfiguredModelRef } from '@opencode-manager/shared/opencode'
+import { findModelInfo, formatOpenCodeModelRef, openCodeLocation, parseOpenCodeModelRef, selectConfiguredModelRef, selectEffectiveModelRef } from '@opencode-manager/shared/opencode'
 import type { OpenCodeClient } from './opencode/client'
 
 export interface ResolvedOpenCodeModel {
@@ -36,7 +36,7 @@ function toResolvedModel(ref: ModelRef): ResolvedOpenCodeModel {
 }
 
 function findAvailable(models: ModelInfo[], ref: ModelRef): ModelInfo | undefined {
-  return models.find((model) => model.providerID === ref.providerID && model.id === ref.id)
+  return findModelInfo(models, { providerID: ref.providerID, modelID: ref.id })
 }
 
 function isTargetLoaded(models: ModelInfo[], targetRef: ModelRef | undefined): boolean {
@@ -49,23 +49,13 @@ function resolveFromLoadedModels(
   configuredRef: ModelRef | undefined,
   preferredRef: ModelRef | undefined,
 ): ResolvedOpenCodeModel | null {
-  if (preferredRef && findAvailable(models, preferredRef)) {
-    return toResolvedModel(preferredRef)
-  }
+  const resolved = selectEffectiveModelRef({
+    models,
+    defaultModel,
+    candidates: [preferredRef, configuredRef],
+  })
 
-  if (configuredRef && findAvailable(models, configuredRef)) {
-    return toResolvedModel(configuredRef)
-  }
-
-  if (defaultModel) {
-    const defaultRef: ModelRef = { providerID: defaultModel.providerID, id: defaultModel.id }
-    if (findAvailable(models, defaultRef)) {
-      return toResolvedModel(defaultRef)
-    }
-  }
-
-  const fallback = models.find((model) => model.enabled)
-  return fallback ? toResolvedModel({ providerID: fallback.providerID, id: fallback.id }) : null
+  return resolved ? toResolvedModel(resolved) : null
 }
 
 function sleep(ms: number, signal: AbortSignal): Promise<void> {

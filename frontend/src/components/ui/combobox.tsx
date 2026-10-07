@@ -21,6 +21,8 @@ interface ComboboxProps {
   ariaLabel?: string
   onOpen?: () => void
   id?: string
+  listClassName?: string
+  filterOptions?: (options: ComboboxOption[], query: string) => ComboboxOption[]
 }
 
 function getOptionLabel(options: ComboboxOption[], value: string): string {
@@ -39,6 +41,8 @@ export function Combobox({
   ariaLabel,
   onOpen,
   id,
+  listClassName,
+  filterOptions,
 }: ComboboxProps) {
   const [isOpen, setIsOpen] = useState(false)
   const [inputValue, setInputValue] = useState(() => getOptionLabel(options, value))
@@ -69,12 +73,16 @@ export function Combobox({
   }, [options, value])
 
   const isExactMatch = options.some(o => o.value === value || o.label === inputValue)
-  
-  const filteredOptions = (isExactMatch && !isUserTyping) ? options : options.filter(option =>
-    option.value.toLowerCase().includes(inputValue.toLowerCase()) ||
-    option.label.toLowerCase().includes(inputValue.toLowerCase()) ||
-    (option.description?.toLowerCase().includes(inputValue.toLowerCase()))
-  )
+
+  const filteredOptions = (isExactMatch && !isUserTyping)
+    ? options
+    : filterOptions
+      ? filterOptions(options, inputValue)
+      : options.filter(option =>
+        option.value.toLowerCase().includes(inputValue.toLowerCase()) ||
+        option.label.toLowerCase().includes(inputValue.toLowerCase()) ||
+        (option.description?.toLowerCase().includes(inputValue.toLowerCase()))
+      )
 
   const groupedOptions = filteredOptions.reduce((acc, option) => {
     const group = option.group || ''
@@ -95,7 +103,7 @@ export function Combobox({
     const handleClickOutside = (e: MouseEvent) => {
       if (containerRef.current && !containerRef.current.contains(e.target as Node)) {
         setIsOpen(false)
-        if (allowCustomValue) {
+        if (allowCustomValue && isUserTyping) {
           onChange(inputValue)
         } else {
           restoreSelectedLabel()
@@ -105,7 +113,7 @@ export function Combobox({
 
     document.addEventListener('mousedown', handleClickOutside)
     return () => document.removeEventListener('mousedown', handleClickOutside)
-  }, [isOpen, inputValue, onChange, allowCustomValue, restoreSelectedLabel])
+  }, [isOpen, inputValue, onChange, allowCustomValue, restoreSelectedLabel, isUserTyping])
 
   useEffect(() => {
     if (!isOpen || !listRef.current) return
@@ -160,11 +168,15 @@ export function Combobox({
       case 'Tab':
         setIsOpen(false)
         if (allowCustomValue) {
-          onChange(inputValue)
+          if (isUserTyping) {
+            onChange(inputValue)
+          } else {
+            restoreSelectedLabel()
+          }
         }
         break
     }
-  }, [isOpen, selectedIndex, flatFilteredOptions, handleSelect, allowCustomValue, inputValue, onChange, restoreSelectedLabel])
+  }, [isOpen, selectedIndex, flatFilteredOptions, handleSelect, allowCustomValue, inputValue, onChange, restoreSelectedLabel, isUserTyping])
 
   const handleInputChange = useCallback((e: React.ChangeEvent<HTMLInputElement>) => {
     const newValue = e.target.value
@@ -248,7 +260,10 @@ export function Combobox({
         <div
           ref={listRef}
           role="listbox"
-          className="absolute z-[150] mt-1 w-full bg-popover border border-border rounded-md shadow-lg max-h-60 overflow-y-auto"
+          className={cn(
+            'absolute z-[150] mt-1 w-full bg-popover border border-border rounded-md shadow-lg max-h-60 overflow-y-auto',
+            listClassName
+          )}
         >
           {Object.entries(groupedOptions).map(([group, groupOptions]) => (
             <div key={group || 'default'}>

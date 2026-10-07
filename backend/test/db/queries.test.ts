@@ -242,6 +242,7 @@ describe('Database Queries', () => {
     it('should delete repo-scoped rows, including multi-runs, in one transaction', () => {
       mockDb.transaction.mockImplementation((fn: () => void) => fn)
 
+      const deleteFusionsStmt = { run: vi.fn().mockReturnValue({ changes: 3 }) }
       const deleteEntriesStmt = { run: vi.fn().mockReturnValue({ changes: 2 }) }
       const deleteMultiRunsStmt = { run: vi.fn().mockReturnValue({ changes: 1 }) }
       const deleteRunsStmt = { run: vi.fn().mockReturnValue({ changes: 2 }) }
@@ -249,6 +250,7 @@ describe('Database Queries', () => {
       const deleteSettingsStmt = { run: vi.fn().mockReturnValue({ changes: 0 }) }
       const deleteRepoStmt = { run: vi.fn().mockReturnValue({ changes: 1 }) }
       mockDb.prepare
+        .mockReturnValueOnce(deleteFusionsStmt)
         .mockReturnValueOnce(deleteEntriesStmt)
         .mockReturnValueOnce(deleteMultiRunsStmt)
         .mockReturnValueOnce(deleteJobsStmt)
@@ -260,18 +262,22 @@ describe('Database Queries', () => {
 
       expect(mockDb.transaction).toHaveBeenCalledTimes(1)
       expect(mockDb.prepare).toHaveBeenNthCalledWith(1,
+        'DELETE FROM multi_run_fusions WHERE multi_run_id IN (SELECT id FROM multi_runs WHERE repo_id = ?)'
+      )
+      expect(deleteFusionsStmt.run).toHaveBeenCalledWith(1)
+      expect(mockDb.prepare).toHaveBeenNthCalledWith(2,
         'DELETE FROM multi_run_entries WHERE multi_run_id IN (SELECT id FROM multi_runs WHERE repo_id = ?)'
       )
       expect(deleteEntriesStmt.run).toHaveBeenCalledWith(1)
-      expect(mockDb.prepare).toHaveBeenNthCalledWith(2, 'DELETE FROM multi_runs WHERE repo_id = ?')
+      expect(mockDb.prepare).toHaveBeenNthCalledWith(3, 'DELETE FROM multi_runs WHERE repo_id = ?')
       expect(deleteMultiRunsStmt.run).toHaveBeenCalledWith(1)
-      expect(mockDb.prepare).toHaveBeenNthCalledWith(3, 'DELETE FROM schedule_jobs WHERE repo_id = ?')
+      expect(mockDb.prepare).toHaveBeenNthCalledWith(4, 'DELETE FROM schedule_jobs WHERE repo_id = ?')
       expect(deleteJobsStmt.run).toHaveBeenCalledWith(1)
-      expect(mockDb.prepare).toHaveBeenNthCalledWith(4, 'DELETE FROM schedule_runs WHERE repo_id = ?')
+      expect(mockDb.prepare).toHaveBeenNthCalledWith(5, 'DELETE FROM schedule_runs WHERE repo_id = ?')
       expect(deleteRunsStmt.run).toHaveBeenCalledWith(1)
-      expect(mockDb.prepare).toHaveBeenNthCalledWith(5, 'DELETE FROM repo_settings WHERE repo_id = ?')
+      expect(mockDb.prepare).toHaveBeenNthCalledWith(6, 'DELETE FROM repo_settings WHERE repo_id = ?')
       expect(deleteSettingsStmt.run).toHaveBeenCalledWith(1)
-      expect(mockDb.prepare).toHaveBeenNthCalledWith(6,
+      expect(mockDb.prepare).toHaveBeenNthCalledWith(7,
         'DELETE FROM repos WHERE id = ?'
       )
       expect(deleteRepoStmt.run).toHaveBeenCalledWith(1)

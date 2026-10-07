@@ -1,6 +1,6 @@
 import { describe, it, expect, beforeEach, afterEach } from 'vitest'
 import { spawn, spawnSync } from 'child_process'
-import { chmodSync, existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'fs'
+import { chmodSync, copyFileSync, existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'fs'
 import { join } from 'path'
 import { tmpdir } from 'os'
 import { repoRoot } from '../helpers/repo-root'
@@ -54,13 +54,16 @@ afterEach(() => {
   rmSync(workDir, { recursive: true, force: true })
 })
 
-const runInstaller = (env: Record<string, string> = {}) =>
+const runInstaller = (
+  env: Record<string, string> = {},
+  path = `${stubDir}:/usr/bin:/bin`,
+) =>
   new Promise<{ status: number | null; stdout: string; stderr: string }>((resolve, reject) => {
-    const child = spawn('sh', [installerPath], {
+    const child = spawn('/bin/sh', [installerPath], {
       detached: true,
       stdio: ['ignore', 'pipe', 'pipe'],
       env: {
-        PATH: `${stubDir}:/usr/bin:/bin`,
+        PATH: path,
         HOME: workDir,
         OCM_DIR: installDir,
         OCM_STUB_LOG: logPath,
@@ -157,9 +160,11 @@ describe('install.sh', () => {
   })
 
   it('stops before downloading anything when Docker is missing', async () => {
-    rmSync(join(stubDir, 'docker'))
+    const isolatedBin = join(workDir, 'isolated-bin')
+    mkdirSync(isolatedBin)
+    copyFileSync(join(stubDir, 'curl'), join(isolatedBin, 'curl'))
 
-    const res = await runInstaller()
+    const res = await runInstaller({}, isolatedBin)
 
     expect(res.status).toBe(1)
     expect(res.stderr).toContain('Docker is required')

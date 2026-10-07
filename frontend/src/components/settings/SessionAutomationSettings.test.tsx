@@ -4,9 +4,32 @@ import userEvent from '@testing-library/user-event'
 import { SessionAutomationSettings } from './SessionAutomationSettings'
 import { useSettings } from '@/hooks/useSettings'
 import type { UserPreferences } from '@/api/types/settings'
+import type { Provider } from '@/api/providers'
 import { createUseSettingsMock } from '@/test/test-utils'
 
 vi.mock('@/hooks/useSettings')
+
+const mocks = vi.hoisted(() => ({
+  useProviders: vi.fn(),
+  useOpenCodeModelState: vi.fn(),
+  useOpenCodeDefaultModel: vi.fn(),
+}))
+
+vi.mock('@/hooks/useProviders', () => ({ useProviders: mocks.useProviders }))
+vi.mock('@/hooks/useModelSelection', () => ({
+  useOpenCodeModelState: mocks.useOpenCodeModelState,
+  useOpenCodeDefaultModel: mocks.useOpenCodeDefaultModel,
+}))
+
+const providers: Provider[] = [
+  {
+    id: 'anthropic',
+    name: 'Anthropic',
+    models: [
+      { id: 'claude-sonnet-4', key: 'claude-sonnet-4', name: 'Claude Sonnet 4', released: 0, free: false },
+    ],
+  },
+]
 
 const basePreferences: UserPreferences = {
   theme: 'dark',
@@ -33,6 +56,9 @@ describe('SessionAutomationSettings', () => {
 
   beforeEach(() => {
     vi.clearAllMocks()
+    mocks.useProviders.mockReturnValue({ data: { providers, models: [] } })
+    mocks.useOpenCodeModelState.mockReturnValue({ data: { favorite: [], recent: [], variant: {} } })
+    mocks.useOpenCodeDefaultModel.mockReturnValue({ data: null })
   })
 
   it('defaults the select to ask every time', () => {
@@ -58,26 +84,68 @@ describe('SessionAutomationSettings', () => {
     expect(updateSettings).toHaveBeenCalledWith({ sessionDefaults: { permissionMode: 'auto' } })
   })
 
-  it('saves the goal auditor model once on blur with the final value', () => {
-    const updateSettings = vi.fn()
-    mockUseSettings({
-      preferences: { ...basePreferences, sessionDefaults: { permissionMode: 'ask', goalMaxContinuations: 20 } },
-      updateSettings,
-    })
-    render(<SessionAutomationSettings />)
+  it('saves the goal auditor model chosen from the combobox after the debounce', () => {
+    vi.useFakeTimers()
+    try {
+      const updateSettings = vi.fn()
+      mockUseSettings({
+        preferences: { ...basePreferences, sessionDefaults: { permissionMode: 'ask', goalMaxContinuations: 20 } },
+        updateSettings,
+      })
+      render(<SessionAutomationSettings />)
 
-    const input = screen.getByLabelText('Goal auditor model')
-    fireEvent.change(input, { target: { value: 'anthropic/claude-sonnet-4' } })
-    fireEvent.blur(input)
+      fireEvent.focus(screen.getByLabelText('Goal auditor model'))
+      fireEvent.click(screen.getByRole('option', { name: /Claude Sonnet 4/ }))
+      act(() => {
+        vi.advanceTimersByTime(800)
+      })
 
-    expect(updateSettings).toHaveBeenCalledTimes(1)
-    expect(updateSettings).toHaveBeenCalledWith({
-      sessionDefaults: {
-        permissionMode: 'ask',
-        goalMaxContinuations: 20,
-        goalAuditorModel: 'anthropic/claude-sonnet-4',
-      },
-    })
+      expect(updateSettings).toHaveBeenCalledTimes(1)
+      expect(updateSettings).toHaveBeenCalledWith({
+        sessionDefaults: {
+          permissionMode: 'ask',
+          goalMaxContinuations: 20,
+          goalAuditorModel: 'anthropic/claude-sonnet-4',
+        },
+      })
+    } finally {
+      vi.useRealTimers()
+    }
+  })
+
+  it('clears the goal auditor model', () => {
+    vi.useFakeTimers()
+    try {
+      const updateSettings = vi.fn()
+      mockUseSettings({
+        preferences: {
+          ...basePreferences,
+          sessionDefaults: {
+            permissionMode: 'ask',
+            goalMaxContinuations: 20,
+            goalAuditorModel: 'anthropic/claude-sonnet-4',
+          },
+        },
+        updateSettings,
+      })
+      render(<SessionAutomationSettings />)
+
+      fireEvent.click(screen.getByRole('button', { name: 'Clear' }))
+      act(() => {
+        vi.advanceTimersByTime(800)
+      })
+
+      expect(updateSettings).toHaveBeenCalledTimes(1)
+      expect(updateSettings).toHaveBeenCalledWith({
+        sessionDefaults: {
+          permissionMode: 'ask',
+          goalMaxContinuations: 20,
+          goalAuditorModel: undefined,
+        },
+      })
+    } finally {
+      vi.useRealTimers()
+    }
   })
 
   it('saves the goal auditor model after the debounce without blurring', () => {

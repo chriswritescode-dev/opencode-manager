@@ -1,17 +1,24 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest'
-import { render, screen, waitFor } from '@testing-library/react'
+import { render, screen, waitFor, within } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
 import { ScheduleJobDialog } from './ScheduleJobDialog'
-import { makeOpenCodeConfigFile } from '@/test/fixtures/opencode-config'
-import type { ProviderWithModels } from '@/api/providers'
+import type { Provider } from '@/api/providers'
+import type { ModelInfo } from '@opencode-manager/shared/opencode'
 import type { ScheduleJob } from '@opencode-manager/shared/types'
 
 Element.prototype.scrollIntoView = vi.fn()
 
-const { mockGetProvidersWithModels, mockGetOpenCodeConfig } = vi.hoisted(() => ({
-  mockGetProvidersWithModels: vi.fn(),
-  mockGetOpenCodeConfig: vi.fn(),
+const {
+  mockGetProviders,
+  mockGetOpenCodeConfiguredModel,
+  mockGetOpenCodeServerDefaultModel,
+  mockGetOpenCodeModelState,
+} = vi.hoisted(() => ({
+  mockGetProviders: vi.fn(),
+  mockGetOpenCodeConfiguredModel: vi.fn(),
+  mockGetOpenCodeServerDefaultModel: vi.fn(),
+  mockGetOpenCodeModelState: vi.fn(),
 }))
 
 vi.mock('@/hooks/usePromptTemplates', () => ({
@@ -23,7 +30,10 @@ vi.mock('@/hooks/usePromptTemplates', () => ({
 
 vi.mock('@/api/providers', async (importOriginal) => ({
   ...(await importOriginal<typeof import('@/api/providers')>()),
-  getProvidersWithModels: mockGetProvidersWithModels,
+  getProviders: mockGetProviders,
+  getOpenCodeConfiguredModel: mockGetOpenCodeConfiguredModel,
+  getOpenCodeServerDefaultModel: mockGetOpenCodeServerDefaultModel,
+  getOpenCodeModelState: mockGetOpenCodeModelState,
 }))
 
 vi.mock('@/hooks/useOpenCode', () => ({
@@ -32,7 +42,6 @@ vi.mock('@/hooks/useOpenCode', () => ({
 
 vi.mock('@/api/settings', () => ({
   settingsApi: {
-    getOpenCodeConfig: mockGetOpenCodeConfig,
     listManagedSkills: () => Promise.resolve([]),
   },
 }))
@@ -42,18 +51,15 @@ vi.mock('@/api/repos', () => ({
   listBranches: () => Promise.resolve({ branches: [], status: { ahead: 0, behind: 0 } }),
 }))
 
-const providers: ProviderWithModels[] = [
+const providers: Provider[] = [
   {
     id: 'openai',
     name: 'OpenAI',
-    env: [],
-    models: [{ id: 'gpt-5', key: 'gpt-5', name: 'GPT-5' }],
-    source: 'configured',
-    isConnected: true,
+    models: [{ id: 'gpt-5', key: 'gpt-5', name: 'GPT-5', released: 0, free: false }],
   },
 ]
 
-const config = makeOpenCodeConfigFile({ content: { model: 'openai/gpt-5' } })
+const models = [{ providerID: 'openai', id: 'gpt-5' }] as unknown as ModelInfo[]
 
 function getJob(overrides: Partial<ScheduleJob> = {}): ScheduleJob {
   return {
@@ -95,11 +101,13 @@ function createWrapper() {
 describe('ScheduleJobDialog — model fallback', () => {
   beforeEach(() => {
     vi.clearAllMocks()
-    mockGetProvidersWithModels.mockResolvedValue(providers)
-    mockGetOpenCodeConfig.mockResolvedValue(config)
+    mockGetProviders.mockResolvedValue({ providers, models })
+    mockGetOpenCodeConfiguredModel.mockResolvedValue(null)
+    mockGetOpenCodeServerDefaultModel.mockResolvedValue(null)
+    mockGetOpenCodeModelState.mockResolvedValue({ recent: [], favorite: [], variant: {} })
   })
 
-  it('prefills the config default when the stored model no longer exists', async () => {
+  it('leaves the model at the workspace default when the stored model no longer exists', async () => {
     render(
       <ScheduleJobDialog
         open
@@ -112,10 +120,11 @@ describe('ScheduleJobDialog — model fallback', () => {
       { wrapper: createWrapper() },
     )
 
-    await waitFor(() => expect(screen.getByDisplayValue('GPT-5')).toBeInTheDocument())
+    await waitFor(() => expect(screen.queryByDisplayValue('openai/retired')).not.toBeInTheDocument())
+    expect(screen.getByPlaceholderText('Workspace default')).toBeInTheDocument()
   })
 
-  it('saves the resolved config default for a stale model', async () => {
+  it('saves no model override for a stale model', async () => {
     const user = userEvent.setup()
     const onSubmit = vi.fn()
 
@@ -131,10 +140,11 @@ describe('ScheduleJobDialog — model fallback', () => {
       { wrapper: createWrapper() },
     )
 
-    await waitFor(() => expect(screen.getByDisplayValue('GPT-5')).toBeInTheDocument())
+    await waitFor(() => expect(screen.queryByDisplayValue('openai/retired')).not.toBeInTheDocument())
     await user.click(screen.getByRole('button', { name: 'Save changes' }))
 
-    expect(onSubmit).toHaveBeenCalledWith(expect.objectContaining({ model: 'openai/gpt-5' }))
+    expect(onSubmit).toHaveBeenCalledTimes(1)
+    expect(onSubmit.mock.calls[0][0].model).toBeUndefined()
   })
 
   it('keeps a stored model that is still available', async () => {
@@ -153,22 +163,7 @@ describe('ScheduleJobDialog — model fallback', () => {
     await waitFor(() => expect(screen.getByDisplayValue('GPT-5')).toBeInTheDocument())
   })
 
-  it('does not duplicate a configured model referenced by its backing id', async () => {
-    const user = userEvent.setup()
-    mockGetProvidersWithModels.mockResolvedValue([
-      {
-        id: 'openai',
-        name: 'OpenAI',
-        env: [],
-        models: [{ id: 'gpt-5-2025-08-07', key: 'gpt-5', name: 'GPT-5' }],
-        source: 'configured',
-        isConnected: true,
-      },
-    ])
-    mockGetOpenCodeConfig.mockResolvedValue(makeOpenCodeConfigFile({
-      content: { model: 'openai/gpt-5-2025-08-07' },
-    }))
-
+  it('treats a stored backing model id as unavailable', async () => {
     render(
       <ScheduleJobDialog
         open
@@ -181,14 +176,12 @@ describe('ScheduleJobDialog — model fallback', () => {
       { wrapper: createWrapper() },
     )
 
-    const modelInput = await screen.findByDisplayValue('GPT-5')
-    await user.click(modelInput)
-
-    await waitFor(() => expect(screen.getAllByText('GPT-5')).toHaveLength(1))
+    await waitFor(() => expect(screen.queryByDisplayValue('openai/gpt-5-2025-08-07')).not.toBeInTheDocument())
+    expect(screen.getByPlaceholderText('Workspace default')).toBeInTheDocument()
   })
 
-  it('clears a stale model when availability is confirmed empty', async () => {
-    mockGetProvidersWithModels.mockResolvedValue([])
+  it('keeps a stored model when the catalog is confirmed empty', async () => {
+    mockGetProviders.mockResolvedValue({ providers: [], models: [] })
 
     render(
       <ScheduleJobDialog
@@ -202,7 +195,48 @@ describe('ScheduleJobDialog — model fallback', () => {
       { wrapper: createWrapper() },
     )
 
-    await waitFor(() => expect(screen.queryByDisplayValue('openai/retired')).not.toBeInTheDocument())
-    expect(screen.getByPlaceholderText('Workspace default')).toBeInTheDocument()
+    await waitFor(() => expect(screen.getByDisplayValue('openai/retired')).toBeInTheDocument())
+  })
+
+  it('shows Default from OpenCode when no model is configured', async () => {
+    const user = userEvent.setup()
+    mockGetProviders.mockResolvedValue({
+      providers: [
+        {
+          id: 'openai',
+          name: 'OpenAI',
+          models: [
+            { id: 'gpt-5', key: 'gpt-5', name: 'GPT-5', released: 0, free: false },
+            { id: 'gpt-4o', key: 'gpt-4o', name: 'GPT-4o', released: 0, free: false },
+          ],
+        },
+      ],
+      models: [
+        { providerID: 'openai', id: 'gpt-5' },
+        { providerID: 'openai', id: 'gpt-4o' },
+      ] as unknown as ModelInfo[],
+    })
+    mockGetOpenCodeServerDefaultModel.mockResolvedValue({ providerID: 'openai', id: 'gpt-5' })
+
+    render(
+      <ScheduleJobDialog
+        open
+        onOpenChange={vi.fn()}
+        job={getJob()}
+        isSaving={false}
+        onSubmit={vi.fn()}
+        repoId={1}
+      />,
+      { wrapper: createWrapper() },
+    )
+
+    const modelInput = await screen.findByPlaceholderText('Workspace default')
+    await user.click(modelInput)
+
+    const listbox = await screen.findByRole('listbox')
+    const defaultGroup = within(listbox).getByText('Default')
+    const providerGroup = within(listbox).getByText('OpenAI')
+    expect(within(listbox).getByText('Default: GPT-5')).toBeInTheDocument()
+    expect(defaultGroup.compareDocumentPosition(providerGroup) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy()
   })
 })

@@ -48,7 +48,31 @@ export { ClientError, isIntegrationNotFoundError, isMcpServerNotFoundError, isSe
 
 export { assistantText, sessionIDFromEvent, toolContentText } from './content'
 
-export { formatOpenCodeModelRef, parseOpenCodeModelRef, selectConfiguredModelRef } from './modelRef'
+export { configModelRef, formatOpenCodeModelRef, parseOpenCodeModelRef, selectConfiguredModelRef } from './modelRef'
+
+export {
+  addRecentModel,
+  compareCatalogModels,
+  cycleModelVariant,
+  decodeModelPreference,
+  favoriteModels,
+  findModelInfo,
+  isModelFree,
+  isSameModelRef,
+  isSameModelSelection,
+  modelPreferenceKey,
+  normalizeModelVariant,
+  recentModels,
+  removeRecentModel,
+  selectEffectiveModelRef,
+  selectInteractiveModel,
+  selectPreferredVariant,
+  setModelVariant,
+  toModelPreference,
+  toggleFavoriteModel,
+} from './modelPreference'
+
+export type { ModelPreference, ModelPreferenceDocument, ModelPreferenceModel } from './modelPreference'
 
 export {
   MCP_OAUTH_CALLBACK_PATH,

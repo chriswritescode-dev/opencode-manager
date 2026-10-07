@@ -10,9 +10,13 @@ const mocks = vi.hoisted(() => ({
   listMultiRuns: vi.fn(),
   launchMultiRun: vi.fn(),
   discardMultiRunEntry: vi.fn(),
-  useProvidersWithModels: vi.fn(),
+  fuseMultiRun: vi.fn(),
+  useProviders: vi.fn(),
   useOpenCodeModelState: vi.fn(),
+  useOpenCodeDefaultModel: vi.fn(),
   listBranches: vi.fn(),
+  getChangeWalkthrough: vi.fn(),
+  generateChangeWalkthrough: vi.fn(),
 }))
 
 const mockNavigate = vi.fn()
@@ -26,18 +30,25 @@ vi.mock('@/api/multiRuns', () => ({
   listMultiRuns: mocks.listMultiRuns,
   launchMultiRun: mocks.launchMultiRun,
   discardMultiRunEntry: mocks.discardMultiRunEntry,
+  fuseMultiRun: mocks.fuseMultiRun,
 }))
 
-vi.mock('@/hooks/useProvidersWithModels', () => ({
-  useProvidersWithModels: mocks.useProvidersWithModels,
+vi.mock('@/hooks/useProviders', () => ({
+  useProviders: mocks.useProviders,
 }))
 
 vi.mock('@/hooks/useModelSelection', () => ({
   useOpenCodeModelState: mocks.useOpenCodeModelState,
+  useOpenCodeDefaultModel: mocks.useOpenCodeDefaultModel,
 }))
 
 vi.mock('@/api/repos', () => ({
   listBranches: mocks.listBranches,
+}))
+
+vi.mock('@/api/changeWalkthroughs', () => ({
+  getChangeWalkthrough: mocks.getChangeWalkthrough,
+  generateChangeWalkthrough: mocks.generateChangeWalkthrough,
 }))
 
 vi.mock('@/lib/toast', () => ({
@@ -53,24 +64,20 @@ const providers = [
   {
     id: 'openai',
     name: 'OpenAI',
-    source: 'configured',
-    isConnected: true,
     models: [
-      { id: 'gpt-4o', name: 'GPT-4o' },
-      { id: 'gpt-4o-mini', name: 'GPT-4o mini' },
-      { id: 'gpt-4.1', name: 'GPT-4.1' },
+      { id: 'gpt-4o', name: 'GPT-4o', released: 0, free: false },
+      { id: 'gpt-4o-mini', name: 'GPT-4o mini', released: 0, free: false },
+      { id: 'gpt-4.1', name: 'GPT-4.1', released: 0, free: false },
     ],
   },
   {
     id: 'anthropic',
     name: 'Anthropic',
-    source: 'configured',
-    isConnected: true,
     models: [
-      { id: 'claude-opus', name: 'Claude Opus' },
-      { id: 'claude-sonnet', name: 'Claude Sonnet' },
-      { id: 'claude-haiku', name: 'Claude Haiku' },
-      { id: 'claude-sonnet-4-5', key: 'claude-sonnet-4.5', name: 'Claude Sonnet 4.5' },
+      { id: 'claude-opus', name: 'Claude Opus', released: 0, free: false },
+      { id: 'claude-sonnet', name: 'Claude Sonnet', released: 0, free: false },
+      { id: 'claude-haiku', name: 'Claude Haiku', released: 0, free: false },
+      { id: 'claude-sonnet-4-5', key: 'claude-sonnet-4.5', name: 'Claude Sonnet 4.5', released: 0, free: false },
     ],
   },
 ]
@@ -103,6 +110,67 @@ const startedRun: MultiRun = {
       directory: null,
       isolated: true,
       error: 'launch failed',
+      createdAt: 1,
+      updatedAt: 1,
+    },
+  ],
+  fusions: [],
+}
+
+const twoStartedRun: MultiRun = {
+  ...startedRun,
+  id: 5,
+  name: 'Pair',
+  entries: [
+    startedRun.entries[0],
+    {
+      id: 13,
+      model: 'anthropic/claude-opus',
+      status: 'started',
+      sessionId: 'ses_2',
+      directory: '/workspaces/sweep-2',
+      isolated: true,
+      error: null,
+      createdAt: 1,
+      updatedAt: 1,
+    },
+  ],
+}
+
+const fusedRun: MultiRun = {
+  id: 4,
+  repoId: 7,
+  name: 'Merged',
+  prompt: 'go',
+  isolated: true,
+  baseRef: 'main',
+  createdAt: 1,
+  entries: [
+    {
+      id: 21,
+      model: 'openai/gpt-4o',
+      status: 'discarded',
+      sessionId: null,
+      directory: null,
+      isolated: true,
+      error: null,
+      createdAt: 1,
+      updatedAt: 1,
+    },
+  ],
+  fusions: [
+    {
+      id: 31,
+      requestId: 'req-1',
+      model: 'openai/gpt-4o',
+      instructions: null,
+      isolated: true,
+      baseRef: 'main',
+      status: 'started',
+      sessionId: 'ses_fusion',
+      directory: '/workspaces/fusion',
+      error: null,
+      sources: [{ entryId: 21, sessionId: 'ses_1', model: 'openai/gpt-4o', truncated: true }],
       createdAt: 1,
       updatedAt: 1,
     },
@@ -150,8 +218,9 @@ describe('MultiRunDialog', () => {
 
   beforeEach(() => {
     vi.clearAllMocks()
-    mocks.useProvidersWithModels.mockReturnValue({ data: providers, isLoading: false })
+    mocks.useProviders.mockReturnValue({ data: { providers, models: [] }, isLoading: false })
     mocks.useOpenCodeModelState.mockReturnValue({ data: { recent: [], favorite: [], variant: {} } })
+    mocks.useOpenCodeDefaultModel.mockReturnValue({ data: null })
     mocks.listBranches.mockResolvedValue({
       branches: [
         { name: 'main', type: 'local', current: true },
@@ -161,6 +230,7 @@ describe('MultiRunDialog', () => {
       status: { ahead: 0, behind: 0 },
     })
     mocks.listMultiRuns.mockResolvedValue([])
+    mocks.getChangeWalkthrough.mockResolvedValue({ walkthrough: null, currentDiffHash: null, stale: false })
   })
 
   it('lists favorite then recent models before provider groups without duplicates', () => {
@@ -190,6 +260,22 @@ describe('MultiRunDialog', () => {
     ])
   })
 
+  it('lists the OpenCode default model first without repeating it', () => {
+    mocks.useOpenCodeDefaultModel.mockReturnValue({ data: 'anthropic/claude-sonnet' })
+    renderDialog()
+
+    expect(screen.getByText('Default')).toBeInTheDocument()
+    expect(checkboxLabels()).toEqual([
+      'Claude Sonnet',
+      'GPT-4o',
+      'GPT-4o mini',
+      'GPT-4.1',
+      'Claude Opus',
+      'Claude Haiku',
+      'Claude Sonnet 4.5',
+    ])
+  })
+
   it('filters models by every search term and keeps favorites first', async () => {
     const user = userEvent.setup()
     mocks.useOpenCodeModelState.mockReturnValue({
@@ -206,6 +292,35 @@ describe('MultiRunDialog', () => {
 
     await user.type(screen.getByLabelText('Search models'), 'zzz')
     expect(await screen.findByText('No models match your search.')).toBeInTheDocument()
+  })
+
+  it('shows the provider name on every search result', async () => {
+    const user = userEvent.setup()
+    mocks.useProviders.mockReturnValue({
+      data: {
+        providers: [
+          {
+            id: 'anthropic',
+            name: 'Anthropic',
+            models: [{ id: 'claude-sonnet', name: 'Claude Sonnet', released: 0, free: false }],
+          },
+          {
+            id: 'openrouter',
+            name: 'OpenRouter',
+            models: [{ id: 'claude-sonnet', name: 'Claude Sonnet', released: 0, free: false }],
+          },
+        ],
+        models: [],
+      },
+      isLoading: false,
+    })
+    renderDialog()
+
+    await user.type(screen.getByLabelText('Search models'), 'claude')
+    await waitFor(() => expect(checkboxLabels()).toEqual(['Claude Sonnet', 'Claude Sonnet']))
+
+    expect(screen.getByText('Anthropic')).toBeInTheDocument()
+    expect(screen.getByText('OpenRouter')).toBeInTheDocument()
   })
 
   it('keeps selections that are hidden by the search filter', async () => {
@@ -391,5 +506,70 @@ describe('MultiRunDialog', () => {
     await waitFor(() => {
       expect(mocks.discardMultiRunEntry).toHaveBeenCalledWith(3, 11)
     })
+  })
+
+  it('disables Fuse for runs with fewer than two started entries', async () => {
+    const user = userEvent.setup()
+    mocks.listMultiRuns.mockResolvedValue([startedRun])
+    renderDialog()
+
+    await user.click(screen.getByRole('tab', { name: 'Runs' }))
+    await waitFor(() => expect(screen.getByText('openai/gpt-4o')).toBeInTheDocument())
+
+    expect(screen.getByRole('button', { name: /fuse/i })).toBeDisabled()
+  })
+
+  it('opens the fuse dialog for a run with two started entries', async () => {
+    const user = userEvent.setup()
+    mocks.listMultiRuns.mockResolvedValue([twoStartedRun])
+    renderDialog()
+
+    await user.click(screen.getByRole('tab', { name: 'Runs' }))
+    const fuseButton = await screen.findByRole('button', { name: /fuse/i })
+    expect(fuseButton).toBeEnabled()
+    await user.click(fuseButton)
+
+    expect(await screen.findByRole('dialog', { name: 'Fuse results' })).toBeInTheDocument()
+  })
+
+  it('lists fusions with truncation and opens the fusion session', async () => {
+    const user = userEvent.setup()
+    mocks.listMultiRuns.mockResolvedValue([fusedRun])
+    renderDialog()
+
+    await user.click(screen.getByRole('tab', { name: 'Runs' }))
+    await waitFor(() => expect(screen.getByText('Fusions')).toBeInTheDocument())
+    expect(screen.getByText('from 1 source (truncated)')).toBeInTheDocument()
+
+    await user.click(screen.getByRole('button', { name: /open/i }))
+    expect(mockNavigate).toHaveBeenCalledWith('/repos/7/sessions/ses_fusion?repoTab=workspaces')
+  })
+
+  it('opens the walkthrough dialog for an entry session', async () => {
+    const user = userEvent.setup()
+    mocks.listMultiRuns.mockResolvedValue([startedRun])
+    renderDialog()
+
+    await user.click(screen.getByRole('tab', { name: 'Runs' }))
+    await waitFor(() => expect(screen.getByText('openai/gpt-4o')).toBeInTheDocument())
+
+    await user.click(screen.getByRole('button', { name: /walkthrough/i }))
+
+    expect(await screen.findByText('Change walkthrough')).toBeInTheDocument()
+    await waitFor(() => expect(mocks.getChangeWalkthrough).toHaveBeenCalledWith('ses_1'))
+  })
+
+  it('opens the walkthrough dialog for a fusion session', async () => {
+    const user = userEvent.setup()
+    mocks.listMultiRuns.mockResolvedValue([fusedRun])
+    renderDialog()
+
+    await user.click(screen.getByRole('tab', { name: 'Runs' }))
+    await waitFor(() => expect(screen.getByText('Fusions')).toBeInTheDocument())
+
+    await user.click(screen.getByRole('button', { name: /walkthrough/i }))
+
+    expect(await screen.findByText('Change walkthrough')).toBeInTheDocument()
+    await waitFor(() => expect(mocks.getChangeWalkthrough).toHaveBeenCalledWith('ses_fusion'))
   })
 })

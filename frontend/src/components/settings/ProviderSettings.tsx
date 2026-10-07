@@ -178,7 +178,7 @@ export function ProviderSettings() {
           <div className="divide-y divide-border">
             {oauthProviders.map((provider) => {
               const hasKey = hasCredentials(provider.id)
-              const modelCount = Object.keys(provider.models || {}).length
+              const modelCount = provider.models.length
 
               return (
                 <div key={provider.id} className="flex flex-wrap items-center justify-between gap-x-4 gap-y-2 py-3">
@@ -288,7 +288,7 @@ export function ProviderSettings() {
                 </p>
               ) : (
                 apiKeyProviders.connected.map((provider) => {
-                  const modelCount = Object.keys(provider.models || {}).length
+                  const modelCount = provider.models.length
                   return (
                     <Card key={provider.id} className="bg-card border-border">
                       <CardHeader className="p-3">
@@ -375,7 +375,7 @@ export function ProviderSettings() {
                   </p>
                 ) : (
                   filteredAvailableProviders.map((provider, index) => {
-                    const modelCount = Object.keys(provider.models || {}).length
+                    const modelCount = provider.models.length
                     return (
                       <div key={provider.id} className={`flex items-center justify-between gap-2 py-1.5 px-2 rounded-md hover:bg-accent/80 transition-colors ${index % 2 === 1 ? 'bg-accent/30' : ''}`}>
                         <div className="flex-1 min-w-0">
@@ -412,18 +412,7 @@ export function ProviderSettings() {
         <ApiKeyDialog
           open={apiKeyDialogOpen}
           onOpenChange={handleApiKeyDialogClose}
-          provider={{
-            id: apiKeyProvider.id,
-            name: apiKeyProvider.name,
-            api: apiKeyProvider.api,
-            npm: apiKeyProvider.npm,
-            models: Object.entries(apiKeyProvider.models || {}).map(([id, model]) => ({
-              id,
-              name: model.name || id,
-            })),
-            source: 'builtin',
-            isConnected: hasCredentials(apiKeyProvider.id),
-          }}
+          provider={apiKeyProvider}
           onSuccess={handleApiKeySuccess}
           mode={apiKeyMode}
         />

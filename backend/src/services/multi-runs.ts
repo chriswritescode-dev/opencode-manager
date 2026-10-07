@@ -1,18 +1,25 @@
 import type { Database } from 'bun:sqlite'
 import { existsSync } from 'node:fs'
-import type { LaunchMultiRunRequest, MultiRun } from '@opencode-manager/shared/schemas'
+import { resolve } from 'node:path'
+import type { FuseMultiRunRequest, LaunchMultiRunRequest, MultiRun } from '@opencode-manager/shared/schemas'
 import {
   createMultiRunWithEntries,
   getMultiRun,
   getMultiRunEntry,
+  getMultiRunFusionByRequest,
+  insertMultiRunFusion,
   listMultiRuns,
   updateMultiRunEntry,
+  updateMultiRunFusion,
   type MultiRunEntryRecord,
+  type MultiRunFusionRecord,
   type MultiRunRecord,
 } from '../db/multi-runs'
 import { getRepoById } from '../db/queries'
 import type { Repo } from '../types/repo'
 import { getErrorMessage } from '../utils/error-utils'
+import { ServiceError } from '../utils/service-error'
+import { buildFusionPrompt, collectFusionSources } from './multi-run-fusion'
 import type { OpenCodeClient } from './opencode/client'
 import { RepoWorkspaceError } from './repo'
 import type { RepoWorkspaceService } from './repo-workspace'
@@ -20,15 +27,7 @@ import { requireReadyRepo, SessionLauncher, SessionLaunchError, type LaunchedSes
 
 const MULTI_RUN_LIST_LIMIT = 20
 
-export class MultiRunError extends Error {
-  status: number
-
-  constructor(message: string, status: number) {
-    super(message)
-    this.name = 'MultiRunError'
-    this.status = status
-  }
-}
+export class MultiRunError extends ServiceError {}
 
 function toMultiRun(record: MultiRunRecord): MultiRun {
   return {
@@ -50,6 +49,21 @@ function toMultiRun(record: MultiRunRecord): MultiRun {
       createdAt: entry.createdAt,
       updatedAt: entry.updatedAt,
     })),
+    fusions: record.fusions.map((fusion) => ({
+      id: fusion.id,
+      requestId: fusion.requestId,
+      model: fusion.model,
+      instructions: fusion.instructions,
+      isolated: fusion.isolated,
+      baseRef: fusion.baseRef,
+      status: fusion.status,
+      sessionId: fusion.sessionId,
+      directory: fusion.directory,
+      error: fusion.error,
+      sources: fusion.sources,
+      createdAt: fusion.createdAt,
+      updatedAt: fusion.updatedAt,
+    })),
   }
 }
 
@@ -59,7 +73,7 @@ export class MultiRunService {
 
   constructor(
     private readonly db: Database,
-    openCodeClient: OpenCodeClient,
+    private readonly openCodeClient: OpenCodeClient,
     private readonly repoWorkspaces: RepoWorkspaceService,
   ) {
     this.sessionLauncher = new SessionLauncher(db, openCodeClient, repoWorkspaces)
@@ -128,16 +142,132 @@ export class MultiRunService {
         return
       }
 
-      const workspaceDirectory =
-        result.reason instanceof SessionLaunchError ? result.reason.workspaceDirectory : null
+      const launchError = result.reason instanceof SessionLaunchError ? result.reason : null
+      const workspaceDirectory = launchError?.workspaceDirectory ?? null
       updateMultiRunEntry(this.db, launch.entry.id, ['starting'], {
         status: 'failed',
         error: getErrorMessage(result.reason) || 'Failed to launch session',
         ...(workspaceDirectory ? { directory: workspaceDirectory } : {}),
+        ...(launchError?.sessionId ? { sessionId: launchError.sessionId } : {}),
       })
     })
 
     return this.reload(record.id)
+  }
+
+  async fuse(multiRunId: number, request: FuseMultiRunRequest): Promise<{ run: MultiRun; created: boolean }> {
+    const record = getMultiRun(this.db, multiRunId)
+    if (!record) {
+      throw new MultiRunError('Multi-run not found', 404)
+    }
+
+    if (getMultiRunFusionByRequest(this.db, multiRunId, request.requestId)) {
+      return { run: this.reload(multiRunId), created: false }
+    }
+
+    let repo: Repo
+    try {
+      repo = requireReadyRepo(this.db, record.repoId)
+    } catch (error) {
+      throw new MultiRunError(getErrorMessage(error) || 'Repository unavailable', 404)
+    }
+
+    const entriesById = new Map(record.entries.map((entry) => [entry.id, entry]))
+    const selectedEntries = request.entryIds.map((entryId) => {
+      const entry = entriesById.get(entryId)
+      if (!entry) {
+        throw new MultiRunError(`Unknown multi-run entry ${entryId}`, 400)
+      }
+      return entry
+    })
+
+    if (!request.isolate) {
+      const overlappingEntryIds = selectedEntries
+        .filter((entry) => entry.directory !== null && resolve(entry.directory) === resolve(repo.fullPath))
+        .map((entry) => entry.id)
+      if (overlappingEntryIds.length > 0) {
+        throw new MultiRunError(
+          'The synthesis cannot run in the repository checkout because a selected result ran there. Enable an isolated workspace.',
+          409,
+          { code: 'FUSION_DESTINATION_OVERLAPS_SOURCE', details: { entryIds: overlappingEntryIds } },
+        )
+      }
+    }
+
+    try {
+      await this.sessionLauncher.resolveModel(repo, request.model)
+    } catch (error) {
+      if (error instanceof SessionLaunchError) {
+        throw new MultiRunError(error.message, error.status)
+      }
+      throw new MultiRunError(getErrorMessage(error) || 'Failed to resolve model', 502)
+    }
+
+    await this.reconcileUncertainFusions(record)
+
+    const collection = await collectFusionSources(this.openCodeClient, selectedEntries)
+    if (collection.unavailable.length > 0) {
+      throw new MultiRunError('Some selected results are not ready to fuse', 409, {
+        code: 'FUSION_SOURCES_UNAVAILABLE',
+        details: { unavailableSources: collection.unavailable },
+      })
+    }
+
+    const built = buildFusionPrompt({
+      runName: record.name,
+      objective: record.prompt,
+      instructions: request.instructions,
+      sources: collection.ready,
+    })
+
+    const { fusion, created } = insertMultiRunFusion(this.db, {
+      multiRunId,
+      requestId: request.requestId,
+      model: request.model,
+      instructions: request.instructions ?? null,
+      isolated: request.isolate,
+      baseRef: request.baseRef ?? null,
+      sources: built.sources,
+    })
+
+    if (!created) {
+      return { run: this.reload(multiRunId), created: false }
+    }
+
+    try {
+      const launched = await this.sessionLauncher.launch({
+        repoId: record.repoId,
+        prompt: built.prompt,
+        model: request.model,
+        title: `${record.name} · fusion`,
+        ...(request.agent ? { agent: request.agent } : {}),
+        ...(request.isolate
+          ? {
+              workspace: {
+                name: `${record.name}-fusion-${fusion.id}`,
+                ...(request.baseRef ? { ref: request.baseRef } : {}),
+              },
+            }
+          : {}),
+      })
+
+      updateMultiRunFusion(this.db, fusion.id, ['starting'], {
+        status: 'started',
+        sessionId: launched.sessionId,
+        directory: launched.directory,
+      })
+    } catch (error) {
+      const launchError = error instanceof SessionLaunchError ? error : null
+      const workspaceDirectory = launchError?.workspaceDirectory ?? null
+      updateMultiRunFusion(this.db, fusion.id, ['starting'], {
+        status: 'failed',
+        error: getErrorMessage(error) || 'Failed to launch session',
+        ...(workspaceDirectory ? { directory: workspaceDirectory } : {}),
+        ...(launchError?.sessionId ? { sessionId: launchError.sessionId } : {}),
+      })
+    }
+
+    return { run: this.reload(multiRunId), created: true }
   }
 
   list(repoId: number): MultiRun[] {
@@ -205,6 +335,46 @@ export class MultiRunService {
         ? { workspace: { name: `${request.name}-${index + 1}`, ...(request.baseRef ? { ref: request.baseRef } : {}) } }
         : {}),
     })
+  }
+
+  private async reconcileUncertainFusions(record: MultiRunRecord): Promise<void> {
+    const uncertain = record.fusions.filter(
+      (fusion): fusion is MultiRunFusionRecord & { sessionId: string } =>
+        fusion.status === 'failed' && fusion.sessionId !== null,
+    )
+    if (uncertain.length === 0) {
+      return
+    }
+
+    const recovered = (
+      await Promise.all(
+        uncertain.map(async (fusion) => {
+          try {
+            const response = await this.openCodeClient.api.message.list({
+              sessionID: fusion.sessionId,
+              type: 'user',
+              order: 'asc',
+              limit: 1,
+            })
+            if (response.data.length === 0) {
+              return null
+            }
+          } catch {
+            return null
+          }
+
+          updateMultiRunFusion(this.db, fusion.id, ['failed'], { status: 'started', error: null })
+          return { fusionId: fusion.id, sessionId: fusion.sessionId }
+        }),
+      )
+    ).filter((entry): entry is { fusionId: number; sessionId: string } => entry !== null)
+
+    if (recovered.length > 0) {
+      throw new MultiRunError('An earlier fusion attempt is already running', 409, {
+        code: 'FUSION_ATTEMPT_RECOVERED',
+        details: { fusions: recovered },
+      })
+    }
   }
 
   private reload(multiRunId: number): MultiRun {

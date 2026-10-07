@@ -1,9 +1,12 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest'
 import { act, renderHook, waitFor } from '@testing-library/react'
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
-import { useModelSelection } from './useModelSelection'
+import { useModelSelection, useOpenCodeDefaultModel } from './useModelSelection'
+import { useProviders } from './useProviders'
 import { useModelStore, type ModelSelection } from '@/stores/modelStore'
 import * as providersApi from '@/api/providers'
+import type { Provider } from '@/api/providers'
+import type { ModelInfo } from '@opencode-manager/shared/opencode'
 
 const createTestQueryClient = () => new QueryClient({
   defaultOptions: {
@@ -18,7 +21,8 @@ vi.mock('@/api/providers', async () => {
   return {
     ...actual,
     getProviders: vi.fn(),
-    getOpenCodeConfigModel: vi.fn(),
+    getOpenCodeConfiguredModel: vi.fn(),
+    getOpenCodeServerDefaultModel: vi.fn(),
     getOpenCodeModelState: vi.fn(),
     addOpenCodeRecentModel: vi.fn(),
     removeOpenCodeRecentModel: vi.fn(),
@@ -27,49 +31,57 @@ vi.mock('@/api/providers', async () => {
 })
 
 const mockGetProviders = vi.mocked(providersApi.getProviders)
-const mockGetOpenCodeConfigModel = vi.mocked(providersApi.getOpenCodeConfigModel)
+const mockGetOpenCodeConfiguredModel = vi.mocked(providersApi.getOpenCodeConfiguredModel)
+const mockGetOpenCodeServerDefaultModel = vi.mocked(providersApi.getOpenCodeServerDefaultModel)
 const mockGetOpenCodeModelState = vi.mocked(providersApi.getOpenCodeModelState)
 const mockAddOpenCodeRecentModel = vi.mocked(providersApi.addOpenCodeRecentModel)
 const mockRemoveOpenCodeRecentModel = vi.mocked(providersApi.removeOpenCodeRecentModel)
 const mockToggleOpenCodeFavoriteModel = vi.mocked(providersApi.toggleOpenCodeFavoriteModel)
 
+const modelInfo = (providerID: string, id: string, variants: string[] = []): ModelInfo => ({
+  providerID,
+  id,
+  modelID: id,
+  name: id,
+  enabled: true,
+  status: 'active',
+  variants: variants.map((variant) => ({ id: variant })),
+  time: { released: 0 },
+  cost: [],
+  limit: { context: 0, output: 0 },
+} as unknown as ModelInfo)
+
+const provider = (id: string, name: string, modelIDs: string[]): Provider => ({
+  id,
+  name,
+  models: modelIDs.map((modelID) => ({
+    id: modelID,
+    key: modelID,
+    name: modelID,
+    released: 0,
+    free: false,
+  })),
+})
+
+const emptyState = () => ({ recent: [], favorite: [], variant: {} })
+
 describe('useModelSelection', () => {
   beforeEach(() => {
     vi.clearAllMocks()
-    useModelStore.getState().setModel({ providerID: 'test', modelID: 'test-model' })
-    useModelStore.getState().setActiveModel({ providerID: 'test', modelID: 'test-model' })
-    
-    mockGetProviders.mockResolvedValue({
-      providers: [],
-      connected: [],
-    })
-    mockGetOpenCodeConfigModel.mockResolvedValue(null)
-    mockGetOpenCodeModelState.mockResolvedValue({
-      recent: [],
-      favorite: [],
-      variant: {},
-    })
-    mockAddOpenCodeRecentModel.mockResolvedValue({
-      recent: [],
-      favorite: [],
-      variant: {},
-    })
-    mockRemoveOpenCodeRecentModel.mockResolvedValue({
-      recent: [],
-      favorite: [],
-      variant: {},
-    })
-    mockToggleOpenCodeFavoriteModel.mockResolvedValue({
-      recent: [],
-      favorite: [],
-      variant: {},
-    })
+    useModelStore.setState({ newSessionPicks: {}, sessionPicks: {}, activeAgent: null })
+
+    mockGetProviders.mockResolvedValue({ providers: [], models: [] })
+    mockGetOpenCodeConfiguredModel.mockResolvedValue(null)
+    mockGetOpenCodeModelState.mockResolvedValue(emptyState())
+    mockAddOpenCodeRecentModel.mockResolvedValue(emptyState())
+    mockRemoveOpenCodeRecentModel.mockResolvedValue(emptyState())
+    mockToggleOpenCodeFavoriteModel.mockResolvedValue(emptyState())
   })
 
-  const renderHookWithProviders = () => {
+  const renderHookWithProviders = (directory = '/test') => {
     const queryClient = createTestQueryClient()
     return renderHook(
-      () => useModelSelection('/test'),
+      () => useModelSelection(directory),
       {
         wrapper: ({ children }) => (
           <QueryClientProvider client={queryClient}>
@@ -80,89 +92,409 @@ describe('useModelSelection', () => {
     )
   }
 
-  it('does not restore before providers are loaded', async () => {
-    mockGetProviders.mockImplementation(() => new Promise(() => {}))
-
-    const { result } = renderHookWithProviders()
-
-    const testModel: ModelSelection = { providerID: 'anthropic', modelID: 'claude-sonnet-4' }
-    const returnValue = result.current.setActiveModel(testModel)
-
-    expect(returnValue).toBe(false)
-    expect(useModelStore.getState().model).not.toEqual(testModel)
-  })
-
-  it('restores when model exists in providers', async () => {
-    const providersData = {
-      providers: [
-        {
-          id: 'anthropic',
-          name: 'Anthropic',
-          models: {
-            'claude-sonnet-4': { id: 'claude-sonnet-4', name: 'Claude Sonnet 4' },
-          },
-          isConnected: true,
-          env: [],
-          options: {},
-        },
-      ],
-      connected: ['anthropic'],
+  describe('new-session selection order', () => {
+    const anthropic = provider('anthropic', 'Anthropic', ['claude-sonnet-4'])
+    const openai = provider('openai', 'OpenAI', ['gpt-4o'])
+    const catalog = {
+      providers: [anthropic, openai],
+      models: [modelInfo('anthropic', 'claude-sonnet-4'), modelInfo('openai', 'gpt-4o')],
     }
 
-    mockGetProviders.mockResolvedValue(providersData as any)
+    it('prefers the active agent model over the configured model', async () => {
+      mockGetProviders.mockResolvedValue(catalog)
+      mockGetOpenCodeConfiguredModel.mockResolvedValue('openai/gpt-4o')
+      useModelStore.getState().setActiveAgent({
+        id: 'build',
+        model: { providerID: 'anthropic', id: 'claude-sonnet-4' },
+      })
 
-    const { result } = renderHookWithProviders()
+      const { result } = renderHookWithProviders()
 
-    await waitFor(() => {
-      expect(result.current).toBeDefined()
+      await waitFor(() => {
+        expect(result.current.model).toEqual({ providerID: 'anthropic', modelID: 'claude-sonnet-4' })
+      })
     })
 
-    await waitFor(() => {
-      expect(mockGetProviders).toHaveBeenCalled()
+    it('prefers the configured model over the recent list', async () => {
+      mockGetProviders.mockResolvedValue(catalog)
+      mockGetOpenCodeConfiguredModel.mockResolvedValue('openai/gpt-4o')
+      mockGetOpenCodeModelState.mockResolvedValue({
+        recent: [{ providerID: 'anthropic', modelID: 'claude-sonnet-4' }],
+        favorite: [],
+        variant: {},
+      })
+      useModelStore.getState().setActiveAgent({ id: 'build' })
+
+      const { result } = renderHookWithProviders()
+
+      await waitFor(() => {
+        expect(result.current.model).toEqual({ providerID: 'openai', modelID: 'gpt-4o' })
+      })
     })
 
-    const testModel: ModelSelection = { providerID: 'anthropic', modelID: 'claude-sonnet-4' }
-    const returnValue = result.current.setActiveModel(testModel)
+    it('uses the first valid recent and skips an invalid one', async () => {
+      mockGetProviders.mockResolvedValue(catalog)
+      mockGetOpenCodeModelState.mockResolvedValue({
+        recent: [
+          { providerID: 'ghost', modelID: 'gone' },
+          { providerID: 'openai', modelID: 'gpt-4o' },
+        ],
+        favorite: [],
+        variant: {},
+      })
+      useModelStore.getState().setActiveAgent({ id: 'build' })
 
-    expect(returnValue).toBe(true)
-    expect(useModelStore.getState().model).toEqual(testModel)
+      const { result } = renderHookWithProviders()
+
+      await waitFor(() => {
+        expect(result.current.model).toEqual({ providerID: 'openai', modelID: 'gpt-4o' })
+      })
+    })
+
+    it('falls back to the first catalog model', async () => {
+      mockGetProviders.mockResolvedValue(catalog)
+      useModelStore.getState().setActiveAgent({ id: 'build' })
+
+      const { result } = renderHookWithProviders()
+
+      await waitFor(() => {
+        expect(result.current.model).toEqual({ providerID: 'anthropic', modelID: 'claude-sonnet-4' })
+      })
+    })
+
+    it('remembers a user pick per directory and agent', async () => {
+      mockGetProviders.mockResolvedValue(catalog)
+
+      const { result } = renderHookWithProviders()
+
+      await waitFor(() => {
+        expect(result.current.model).not.toBeNull()
+      })
+
+      act(() => {
+        result.current.setActiveAgent({ id: 'a' })
+      })
+      act(() => {
+        result.current.setModel({ providerID: 'openai', modelID: 'gpt-4o' })
+      })
+
+      await waitFor(() => {
+        expect(result.current.model).toEqual({ providerID: 'openai', modelID: 'gpt-4o' })
+      })
+
+      act(() => {
+        result.current.setActiveAgent({ id: 'b' })
+      })
+
+      await waitFor(() => {
+        expect(result.current.model).toEqual({ providerID: 'anthropic', modelID: 'claude-sonnet-4' })
+      })
+
+      act(() => {
+        result.current.setActiveAgent({ id: 'a' })
+      })
+
+      await waitFor(() => {
+        expect(result.current.model).toEqual({ providerID: 'openai', modelID: 'gpt-4o' })
+      })
+    })
+
+    it('returns null when the catalog is not loaded', () => {
+      mockGetProviders.mockImplementation(() => new Promise(() => {}))
+
+      const { result } = renderHookWithProviders()
+
+      expect(result.current.model).toBeNull()
+    })
+
+    it('does not record a recent when the active agent changes', async () => {
+      mockGetProviders.mockResolvedValue(catalog)
+
+      const { result } = renderHookWithProviders()
+
+      await waitFor(() => {
+        expect(result.current.model).not.toBeNull()
+      })
+
+      act(() => {
+        result.current.setActiveAgent({ id: 'a', model: { providerID: 'openai', id: 'gpt-4o' } })
+      })
+      act(() => {
+        result.current.setActiveAgent({ id: 'b' })
+      })
+
+      expect(mockAddOpenCodeRecentModel).not.toHaveBeenCalled()
+    })
   })
 
-  it('rejects unknown model after providers are loaded', async () => {
-    const providersData = {
-      providers: [
-        {
-          id: 'anthropic',
-          name: 'Anthropic',
-          models: {
-            'claude-sonnet-4': { id: 'claude-sonnet-4', name: 'Claude Sonnet 4' },
-          },
-          isConnected: true,
-          env: [],
-          options: {},
-        },
-      ],
-      connected: ['anthropic'],
+  describe('readiness', () => {
+    const catalog = {
+      providers: [provider('anthropic', 'Anthropic', ['claude-sonnet-4'])],
+      models: [modelInfo('anthropic', 'claude-sonnet-4')],
     }
 
-    mockGetProviders.mockResolvedValue(providersData as any)
+    it('is not ready and returns null while the model state loads', () => {
+      mockGetProviders.mockResolvedValue(catalog)
+      mockGetOpenCodeModelState.mockImplementation(() => new Promise(() => {}))
+
+      const { result } = renderHookWithProviders()
+
+      expect(result.current.isModelReady).toBe(false)
+      expect(result.current.model).toBeNull()
+    })
+
+    it('is not ready and returns null while the configured model loads', () => {
+      mockGetProviders.mockResolvedValue(catalog)
+      mockGetOpenCodeConfiguredModel.mockImplementation(() => new Promise(() => {}))
+
+      const { result } = renderHookWithProviders()
+
+      expect(result.current.isModelReady).toBe(false)
+      expect(result.current.model).toBeNull()
+    })
+
+    it('returns null while a directory switch serves placeholder catalog data', async () => {
+      const catalogA = {
+        providers: [provider('anthropic', 'Anthropic', ['claude-sonnet-4'])],
+        models: [modelInfo('anthropic', 'claude-sonnet-4')],
+      }
+      const catalogB = {
+        providers: [provider('openai', 'OpenAI', ['gpt-4o'])],
+        models: [modelInfo('openai', 'gpt-4o')],
+      }
+      let resolveB: (value: typeof catalogB) => void = () => {}
+      mockGetProviders.mockImplementation((directory?: string) => {
+        if (directory === '/b') return new Promise((resolve) => { resolveB = resolve })
+        return Promise.resolve(catalogA)
+      })
+
+      const queryClient = createTestQueryClient()
+      const { result, rerender } = renderHook(
+        ({ directory }: { directory: string }) => useModelSelection(directory),
+        {
+          initialProps: { directory: '/a' },
+          wrapper: ({ children }) => (
+            <QueryClientProvider client={queryClient}>{children}</QueryClientProvider>
+          ),
+        },
+      )
+
+      await waitFor(() => {
+        expect(result.current.model).toEqual({ providerID: 'anthropic', modelID: 'claude-sonnet-4' })
+      })
+
+      rerender({ directory: '/b' })
+
+      expect(result.current.isModelReady).toBe(false)
+      expect(result.current.model).toBeNull()
+
+      await act(async () => {
+        resolveB(catalogB)
+      })
+
+      await waitFor(() => {
+        expect(result.current.model).toEqual({ providerID: 'openai', modelID: 'gpt-4o' })
+      })
+    })
+  })
+
+  describe('session selection', () => {
+    const anthropic = provider('anthropic', 'Anthropic', ['claude-sonnet-4'])
+    const openai = provider('openai', 'OpenAI', ['gpt-4o'])
+    const catalog = {
+      providers: [anthropic, openai],
+      models: [modelInfo('anthropic', 'claude-sonnet-4', ['high', 'low']), modelInfo('openai', 'gpt-4o')],
+    }
+
+    const renderSession = (session: { id: string; agent?: string; model?: { providerID: string; id: string; variant?: string } }) => {
+      const queryClient = createTestQueryClient()
+      return renderHook(
+        () => useModelSelection('/test', session),
+        {
+          wrapper: ({ children }) => (
+            <QueryClientProvider client={queryClient}>{children}</QueryClientProvider>
+          ),
+        },
+      )
+    }
+
+    beforeEach(() => {
+      mockGetProviders.mockResolvedValue(catalog)
+      useModelStore.getState().setActiveAgent({ id: 'build' })
+    })
+
+    it('uses the durable session model with its variant', async () => {
+      const { result } = renderSession({
+        id: 's1',
+        agent: 'build',
+        model: { providerID: 'anthropic', id: 'claude-sonnet-4', variant: 'high' },
+      })
+
+      await waitFor(() => {
+        expect(result.current.selection).toEqual({
+          providerID: 'anthropic',
+          modelID: 'claude-sonnet-4',
+          variant: 'high',
+        })
+      })
+    })
+
+    it('does not write to the store when viewing a session', async () => {
+      const { result } = renderSession({
+        id: 's1',
+        agent: 'build',
+        model: { providerID: 'anthropic', id: 'claude-sonnet-4' },
+      })
+
+      await waitFor(() => {
+        expect(result.current.model).not.toBeNull()
+      })
+
+      expect(useModelStore.getState().sessionPicks).toEqual({})
+      expect(useModelStore.getState().newSessionPicks).toEqual({})
+    })
+
+    it('prefers a session pick over the durable selection', async () => {
+      useModelStore.getState().setSessionPick('s1', 'build', {
+        providerID: 'openai',
+        modelID: 'gpt-4o',
+      })
+
+      const { result } = renderSession({
+        id: 's1',
+        agent: 'build',
+        model: { providerID: 'anthropic', id: 'claude-sonnet-4' },
+      })
+
+      await waitFor(() => {
+        expect(result.current.model).toEqual({ providerID: 'openai', modelID: 'gpt-4o' })
+      })
+    })
+
+    it('ignores the durable selection when the session agent differs from the active agent', async () => {
+      useModelStore.getState().setActiveAgent({ id: 'plan' })
+
+      const { result } = renderSession({
+        id: 's1',
+        agent: 'build',
+        model: { providerID: 'anthropic', id: 'claude-sonnet-4' },
+      })
+
+      await waitFor(() => {
+        expect(result.current.model).toEqual({ providerID: 'anthropic', modelID: 'claude-sonnet-4' })
+      })
+    })
+
+    it('treats a default session variant as no variant without saved-preference fallback', async () => {
+      mockGetOpenCodeModelState.mockResolvedValue({
+        recent: [],
+        favorite: [],
+        variant: { 'anthropic/claude-sonnet-4': 'high' },
+      })
+
+      const { result } = renderSession({
+        id: 's1',
+        agent: 'build',
+        model: { providerID: 'anthropic', id: 'claude-sonnet-4', variant: 'default' },
+      })
+
+      await waitFor(() => {
+        expect(result.current.model).toEqual({ providerID: 'anthropic', modelID: 'claude-sonnet-4' })
+      })
+      expect(result.current.selection?.variant).toBeUndefined()
+    })
+
+    it('drops the session variant when the model does not declare it', async () => {
+      const { result } = renderSession({
+        id: 's1',
+        agent: 'build',
+        model: { providerID: 'openai', id: 'gpt-4o', variant: 'high' },
+      })
+
+      await waitFor(() => {
+        expect(result.current.model).toEqual({ providerID: 'openai', modelID: 'gpt-4o' })
+      })
+      expect(result.current.selection?.variant).toBeUndefined()
+    })
+
+    it('stores an explicit pick for the session agent', async () => {
+      const { result } = renderSession({
+        id: 's1',
+        agent: 'build',
+        model: { providerID: 'anthropic', id: 'claude-sonnet-4' },
+      })
+
+      await waitFor(() => {
+        expect(result.current.model).not.toBeNull()
+      })
+
+      act(() => {
+        result.current.setModel({ providerID: 'openai', modelID: 'gpt-4o' })
+      })
+
+      expect(useModelStore.getState().sessionPicks['s1'].build).toEqual({
+        providerID: 'openai',
+        modelID: 'gpt-4o',
+      })
+      await waitFor(() => {
+        expect(mockAddOpenCodeRecentModel).toHaveBeenCalledTimes(1)
+      })
+    })
+
+    it('drops the session draft when the pick equals the durable selection', async () => {
+      const { result } = renderSession({
+        id: 's1',
+        agent: 'build',
+        model: { providerID: 'anthropic', id: 'claude-sonnet-4' },
+      })
+
+      await waitFor(() => {
+        expect(result.current.model).not.toBeNull()
+      })
+
+      act(() => {
+        result.current.setModel({ providerID: 'anthropic', modelID: 'claude-sonnet-4' })
+      })
+
+      expect(useModelStore.getState().sessionPicks['s1']?.build).toBeUndefined()
+    })
+
+    it('does not mutate picks when the active agent switches inside a session', async () => {
+      const { result } = renderSession({
+        id: 's1',
+        agent: 'build',
+        model: { providerID: 'anthropic', id: 'claude-sonnet-4' },
+      })
+
+      await waitFor(() => {
+        expect(result.current.model).not.toBeNull()
+      })
+
+      act(() => {
+        result.current.setActiveAgent({ id: 'plan' })
+      })
+      act(() => {
+        result.current.setActiveAgent({ id: 'build' })
+      })
+
+      expect(useModelStore.getState().sessionPicks).toEqual({})
+      expect(useModelStore.getState().newSessionPicks).toEqual({})
+    })
+  })
+
+  it('records a recent on setModel', async () => {
+    mockGetProviders.mockResolvedValue({ providers: [], models: [] })
 
     const { result } = renderHookWithProviders()
 
-    await waitFor(() => {
-      expect(result.current).toBeDefined()
+    act(() => {
+      result.current.setModel({ providerID: 'openai', modelID: 'gpt-4o' })
     })
 
     await waitFor(() => {
-      expect(mockGetProviders).toHaveBeenCalled()
+      expect(mockAddOpenCodeRecentModel).toHaveBeenCalledTimes(1)
     })
-
-    const initialModel = useModelStore.getState().model
-    const testModel: ModelSelection = { providerID: 'anthropic', modelID: 'missing-model' }
-    const returnValue = result.current.setActiveModel(testModel)
-
-    expect(returnValue).toBe(false)
-    expect(useModelStore.getState().model).toEqual(initialModel)
+    expect(mockAddOpenCodeRecentModel.mock.calls[0][0]).toEqual({ providerID: 'openai', modelID: 'gpt-4o' })
   })
 
   describe('recentModels/favoriteModels derived from React Query', () => {
@@ -180,25 +512,11 @@ describe('useModelSelection', () => {
       })
       mockGetProviders.mockResolvedValue({
         providers: [
-          {
-            id: 'AI2',
-            name: 'AI2',
-            models: { foo: { id: 'foo', name: 'Foo' } },
-            isConnected: true,
-            env: [],
-            options: {},
-          },
-          {
-            id: 'VLLM',
-            name: 'VLLM',
-            models: { bar: { id: 'bar', name: 'Bar' } },
-            isConnected: true,
-            env: [],
-            options: {},
-          },
+          provider('AI2', 'AI2', ['foo']),
+          provider('VLLM', 'VLLM', ['bar']),
         ],
-        connected: ['AI2', 'VLLM'],
-      } as any)
+        models: [modelInfo('AI2', 'foo'), modelInfo('VLLM', 'bar')],
+      })
 
       const { result } = renderHookWithProviders()
 
@@ -234,10 +552,7 @@ describe('useModelSelection', () => {
         favorite: [{ providerID: 'VLLM', modelID: 'bar' }],
         variant: {},
       })
-      mockGetProviders.mockResolvedValue({
-        providers: [],
-        connected: [],
-      } as any)
+      mockGetProviders.mockResolvedValue({ providers: [], models: [] })
 
       const { result } = renderHookWithProviders()
 
@@ -249,132 +564,7 @@ describe('useModelSelection', () => {
     })
   })
 
-  describe('startup model resolution', () => {
-    const providersData = {
-      providers: [
-        {
-          id: 'anthropic',
-          name: 'Anthropic',
-          models: {
-            'claude-sonnet-4': { id: 'claude-sonnet-4', name: 'Claude Sonnet 4' },
-            'claude-opus-4': { id: 'claude-opus-4', name: 'Claude Opus 4' },
-          },
-          isConnected: true,
-          env: [],
-          options: {},
-        },
-        {
-          id: 'openai',
-          name: 'OpenAI',
-          models: {
-            'gpt-4o': { id: 'gpt-4o', name: 'GPT-4o' },
-          },
-          isConnected: true,
-          env: [],
-          options: {},
-        },
-      ],
-      connected: ['anthropic', 'openai'],
-    }
-
-    const recentState = (recent: ModelSelection[]) => ({ recent, favorite: [], variant: {} })
-
-    it('prefers the config model over a recent model', async () => {
-      mockGetProviders.mockResolvedValue(providersData as any)
-      mockGetOpenCodeConfigModel.mockResolvedValue('anthropic/claude-opus-4')
-      mockGetOpenCodeModelState.mockResolvedValue(recentState([{ providerID: 'openai', modelID: 'gpt-4o' }]))
-
-      const { result } = renderHookWithProviders()
-
-      await waitFor(() => {
-        expect(result.current.model).toEqual({ providerID: 'anthropic', modelID: 'claude-opus-4' })
-      })
-      expect(mockGetOpenCodeConfigModel).toHaveBeenCalledWith('/test')
-    })
-
-    it('falls through an unavailable config model to the first valid recent model', async () => {
-      mockGetProviders.mockResolvedValue(providersData as any)
-      mockGetOpenCodeConfigModel.mockResolvedValue('anthropic/missing-model')
-      mockGetOpenCodeModelState.mockResolvedValue(recentState([
-        { providerID: 'ghost', modelID: 'gone' },
-        { providerID: 'openai', modelID: 'gpt-4o' },
-      ]))
-
-      const { result } = renderHookWithProviders()
-
-      await waitFor(() => {
-        expect(result.current.model).toEqual({ providerID: 'openai', modelID: 'gpt-4o' })
-      })
-    })
-
-    it('prefers a valid recent model over the first available model', async () => {
-      mockGetProviders.mockResolvedValue(providersData as any)
-      mockGetOpenCodeModelState.mockResolvedValue(recentState([{ providerID: 'openai', modelID: 'gpt-4o' }]))
-
-      const { result } = renderHookWithProviders()
-
-      await waitFor(() => {
-        expect(result.current.model).toEqual({ providerID: 'openai', modelID: 'gpt-4o' })
-      })
-    })
-
-    it('falls back to the first available model without config or recent models', async () => {
-      mockGetProviders.mockResolvedValue(providersData as any)
-
-      const { result } = renderHookWithProviders()
-
-      await waitFor(() => {
-        expect(result.current.model).toEqual({ providerID: 'anthropic', modelID: 'claude-sonnet-4' })
-      })
-    })
-
-    it('waits for the config model to settle before resolving', async () => {
-      let resolveConfigModel: (value: string | null) => void = () => {}
-      mockGetProviders.mockResolvedValue(providersData as any)
-      mockGetOpenCodeConfigModel.mockImplementation(() => new Promise((resolve) => {
-        resolveConfigModel = resolve
-      }))
-      mockGetOpenCodeModelState.mockResolvedValue(recentState([
-        { providerID: 'ghost', modelID: 'gone' },
-        { providerID: 'openai', modelID: 'gpt-4o' },
-      ]))
-
-      const { result } = renderHookWithProviders()
-
-      await waitFor(() => {
-        expect(result.current.recentModels).toEqual([{ providerID: 'openai', modelID: 'gpt-4o' }])
-      })
-      expect(result.current.model).toEqual({ providerID: 'test', modelID: 'test-model' })
-
-      act(() => {
-        resolveConfigModel('anthropic/claude-opus-4')
-      })
-
-      await waitFor(() => {
-        expect(result.current.model).toEqual({ providerID: 'anthropic', modelID: 'claude-opus-4' })
-      })
-    })
-
-    it('keeps an explicit in-memory selection across a refresh', async () => {
-      mockGetProviders.mockResolvedValue(providersData as any)
-      mockGetOpenCodeModelState.mockResolvedValue({
-        recent: [{ providerID: 'anthropic', modelID: 'claude-sonnet-4' }],
-        favorite: [],
-        variant: {},
-      })
-      useModelStore.getState().setModel({ providerID: 'openai', modelID: 'gpt-4o' })
-
-      const { result } = renderHookWithProviders()
-
-      await waitFor(() => {
-        expect(mockGetProviders).toHaveBeenCalled()
-      })
-
-      expect(result.current.model).toEqual({ providerID: 'openai', modelID: 'gpt-4o' })
-    })
-  })
-
-  it('toggleFavorite calls toggleOpenCodeFavoriteModel and does not mutate Zustand', async () => {
+  it('toggleFavorite calls toggleOpenCodeFavoriteModel and does not mutate the store', async () => {
     const { result } = renderHookWithProviders()
 
     await waitFor(() => {
@@ -388,7 +578,7 @@ describe('useModelSelection', () => {
       expect(mockToggleOpenCodeFavoriteModel).toHaveBeenCalledTimes(1)
     })
     expect(mockToggleOpenCodeFavoriteModel.mock.calls[0][0]).toEqual(testModel)
-    expect(useModelStore.getState().model).not.toEqual(testModel)
+    expect(useModelStore.getState().newSessionPicks).toEqual({})
   })
 
   it('removes recent models optimistically and rolls back on failure', async () => {
@@ -426,63 +616,85 @@ describe('useModelSelection', () => {
       expect(result.current.recentModels).toEqual([removedModel, retainedModel])
     })
   })
+})
 
-  it('user selection still updates recents', async () => {
-    const providersData = {
-      providers: [
-        {
-          id: 'anthropic',
-          name: 'Anthropic',
-          models: {
-            'claude-sonnet-4': { id: 'claude-sonnet-4', name: 'Claude Sonnet 4' },
-          },
-          isConnected: true,
-          env: [],
-          options: {},
-        },
-      ],
-      connected: ['anthropic'],
-    }
+describe('useOpenCodeDefaultModel', () => {
+  beforeEach(() => {
+    vi.clearAllMocks()
+    mockGetOpenCodeConfiguredModel.mockResolvedValue(null)
+    mockGetOpenCodeServerDefaultModel.mockResolvedValue(null)
+  })
 
-    mockGetProviders.mockResolvedValue(providersData as any)
-    mockAddOpenCodeRecentModel.mockResolvedValue({
-      recent: [{ providerID: 'anthropic', modelID: 'claude-sonnet-4' }],
-      favorite: [],
-      variant: {},
+  const renderDefaultModel = (directory = '/test') => {
+    const queryClient = createTestQueryClient()
+    return renderHook(
+      () => ({
+        providers: useProviders(directory),
+        defaultModel: useOpenCodeDefaultModel(directory),
+      }),
+      {
+        wrapper: ({ children }) => (
+          <QueryClientProvider client={queryClient}>
+            {children}
+          </QueryClientProvider>
+        ),
+      },
+    )
+  }
+
+  it('prefers a configured model that is listed, with its variant', async () => {
+    mockGetOpenCodeConfiguredModel.mockResolvedValue('anthropic/claude-sonnet-4#thinking')
+    mockGetProviders.mockResolvedValue({
+      providers: [provider('anthropic', 'Anthropic', ['claude-sonnet-4'])],
+      models: [modelInfo('anthropic', 'claude-sonnet-4')],
     })
 
-    const { result } = renderHookWithProviders()
+    const { result } = renderDefaultModel()
 
     await waitFor(() => {
-      expect(result.current).toBeDefined()
-    })
-
-    await waitFor(() => {
-      expect(mockGetProviders).toHaveBeenCalled()
-    })
-
-    const testModel: ModelSelection = { providerID: 'anthropic', modelID: 'claude-sonnet-4' }
-    result.current.setModel(testModel)
-
-    expect(useModelStore.getState().model).toEqual(testModel)
-    await waitFor(() => {
-      expect(mockAddOpenCodeRecentModel).toHaveBeenCalled()
-      expect(mockAddOpenCodeRecentModel.mock.calls[0][0]).toEqual(testModel)
-    })
-
-    await waitFor(() => {
-      expect(mockAddOpenCodeRecentModel).toHaveBeenCalledTimes(1)
+      expect(result.current.defaultModel.data).toBe('anthropic/claude-sonnet-4#thinking')
     })
   })
 
-  it('restoreSessionModel sets model without requiring providers', async () => {
-    mockGetProviders.mockImplementation(() => new Promise(() => {}))
+  it('falls back to the server default when the configured model is not listed', async () => {
+    mockGetOpenCodeConfiguredModel.mockResolvedValue('openai/retired')
+    mockGetOpenCodeServerDefaultModel.mockResolvedValue({ providerID: 'openai', id: 'gpt-4o' })
+    mockGetProviders.mockResolvedValue({
+      providers: [provider('openai', 'OpenAI', ['gpt-4o'])],
+      models: [modelInfo('openai', 'gpt-4o')],
+    })
 
-    const { result } = renderHookWithProviders()
+    const { result } = renderDefaultModel()
 
-    const sessionModel: ModelSelection = { providerID: 'anthropic', modelID: 'claude-sonnet-4' }
-    result.current.restoreSessionModel(sessionModel)
+    await waitFor(() => {
+      expect(result.current.defaultModel.data).toBe('openai/gpt-4o')
+    })
+  })
 
-    expect(useModelStore.getState().model).toEqual(sessionModel)
+  it('falls back to the first enabled model when neither is available', async () => {
+    mockGetProviders.mockResolvedValue({
+      providers: [provider('anthropic', 'Anthropic', ['claude-sonnet-4'])],
+      models: [modelInfo('anthropic', 'claude-sonnet-4')],
+    })
+
+    const { result } = renderDefaultModel()
+
+    await waitFor(() => {
+      expect(result.current.defaultModel.data).toBe('anthropic/claude-sonnet-4')
+    })
+  })
+
+  it('fetches the catalog once when both hooks are mounted for the same directory', async () => {
+    mockGetProviders.mockResolvedValue({
+      providers: [provider('anthropic', 'Anthropic', ['claude-sonnet-4'])],
+      models: [modelInfo('anthropic', 'claude-sonnet-4')],
+    })
+
+    const { result } = renderDefaultModel()
+
+    await waitFor(() => {
+      expect(result.current.defaultModel.data).toBeDefined()
+    })
+    expect(mockGetProviders).toHaveBeenCalledTimes(1)
   })
 })

@@ -10,6 +10,7 @@ import { createUseSettingsMock } from '@/test/test-utils'
 
 vi.mock('@/hooks/useSettings')
 vi.mock('@/hooks/useVersionCheck')
+vi.mock('@/components/model/ModelCombobox', () => ({ ModelCombobox: () => null }))
 
 const basePreferences: UserPreferences = {
   theme: 'dark',

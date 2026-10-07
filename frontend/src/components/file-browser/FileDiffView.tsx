@@ -6,8 +6,6 @@ import {
   FileX,
   FileEdit,
   File,
-  Plus,
-  Minus,
   ArrowLeft,
   ExternalLink,
   X,
@@ -17,6 +15,7 @@ import { CopyButton } from "@/components/ui/copy-button";
 import { cn } from "@/lib/utils";
 import type { GitFileStatusType } from "@/types/git";
 import { GIT_STATUS_COLORS, GIT_STATUS_LABELS } from "@/lib/git-status-styles";
+import { DiffLines } from "./DiffLines";
 
 interface FileDiffViewProps {
   repoId: number;
@@ -27,63 +26,6 @@ interface FileDiffViewProps {
   onClose?: () => void;
   onOpenFile?: (path: string, lineNumber?: number) => void;
   isMobile?: boolean;
-}
-
-interface DiffLine {
-  type: "add" | "remove" | "context" | "header" | "hunk";
-  content: string;
-  oldLineNumber?: number;
-  newLineNumber?: number;
-}
-
-function parseDiff(diff: string): DiffLine[] {
-  const lines = diff.split("\n");
-  const result: DiffLine[] = [];
-  let oldLine = 0;
-  let newLine = 0;
-
-  for (const line of lines) {
-    if (
-      line.startsWith("diff --git") ||
-      line.startsWith("index ") ||
-      line.startsWith("---") ||
-      line.startsWith("+++")
-    ) {
-      result.push({ type: "header", content: line });
-    } else if (line.startsWith("@@")) {
-      const match = line.match(/@@ -(\d+)(?:,\d+)? \+(\d+)(?:,\d+)? @@/);
-      if (match) {
-        oldLine = parseInt(match[1], 10);
-        newLine = parseInt(match[2], 10);
-      }
-      result.push({ type: "hunk", content: line });
-    } else if (line.startsWith("+")) {
-      result.push({
-        type: "add",
-        content: line.substring(1),
-        newLineNumber: newLine,
-      });
-      newLine++;
-    } else if (line.startsWith("-")) {
-      result.push({
-        type: "remove",
-        content: line.substring(1),
-        oldLineNumber: oldLine,
-      });
-      oldLine++;
-    } else if (line.startsWith(" ") || line === "") {
-      result.push({
-        type: "context",
-        content: line.substring(1) || "",
-        oldLineNumber: oldLine,
-        newLineNumber: newLine,
-      });
-      oldLine++;
-      newLine++;
-    }
-  }
-
-  return result;
 }
 
 const statusConfig: Record<
@@ -127,92 +69,6 @@ const statusConfig: Record<
     label: GIT_STATUS_LABELS.copied,
   },
 };
-
-function DiffLineComponent({
-  line,
-  showLineNumbers,
-  onLineClick,
-}: {
-  line: DiffLine;
-  showLineNumbers: boolean;
-  onLineClick?: (lineNumber: number) => void;
-}) {
-  if (line.type === "header") {
-    return (
-      <div className="px-4 py-1 bg-muted/50 text-muted-foreground text-xs font-mono break-all border-b border-border/30">
-        {line.content}
-      </div>
-    );
-  }
-
-  if (line.type === "hunk") {
-    return (
-      <div className="px-4 py-1 bg-accent/20 text-accent-foreground text-xs font-mono break-all border-b border-border/20">
-        {line.content}
-      </div>
-    );
-  }
-
-  const bgClass =
-    line.type === "add"
-      ? "bg-diff-add/10"
-      : line.type === "remove"
-        ? "bg-diff-delete/10"
-        : "";
-
-  const textClass =
-    line.type === "add"
-      ? "text-diff-add"
-      : line.type === "remove"
-        ? "text-diff-delete"
-        : "text-foreground";
-
-  const lineNumber = line.newLineNumber ?? line.oldLineNumber;
-  const isClickable = onLineClick && lineNumber !== undefined;
-
-  return (
-    <div
-      className={cn(
-        "flex font-mono text-sm border-l-2 transition-colors min-w-0",
-        bgClass,
-        line.type === "add" && "border-l-diff-add",
-        line.type === "remove" && "border-l-diff-delete",
-        line.type === "context" && "border-l-transparent",
-        isClickable && "cursor-pointer hover:bg-accent/30",
-      )}
-      onClick={() =>
-        isClickable && lineNumber !== undefined && onLineClick(lineNumber)
-      }
-    >
-      {showLineNumbers && (
-          <div className="flex-shrink-0 w-20 flex text-xs text-muted-foreground bg-muted/30 select-none">
-          <span className="w-10 px-2 text-right border-r border-border/50">
-            {line.oldLineNumber || ""}
-          </span>
-          <span className="w-10 px-2 text-right border-r border-border/50">
-            {line.newLineNumber || ""}
-          </span>
-        </div>
-      )}
-      <div className="w-6 flex-shrink-0 flex items-center justify-center bg-muted/20">
-        {line.type === "add" && (
-          <Plus className="w-3 h-3 text-diff-add" />
-        )}
-        {line.type === "remove" && (
-          <Minus className="w-3 h-3 text-diff-delete" />
-        )}
-      </div>
-      <pre
-        className={cn(
-          "flex-1 min-w-0 px-2 py-0.5 whitespace-pre-wrap break-words overflow-hidden",
-          textClass,
-        )}
-      >
-        {line.content || " "}
-      </pre>
-    </div>
-  );
-}
 
 export function FileDiffView({
   repoId,
@@ -263,7 +119,6 @@ export function FileDiffView({
 
   const config = statusConfig[diffData.status];
   const Icon = config.icon;
-  const diffLines = diffData.diff ? parseDiff(diffData.diff) : [];
 
   return (
     <div className="flex flex-col h-full bg-background overflow-hidden">
@@ -362,18 +217,15 @@ export function FileDiffView({
           </div>
         ) : (
           <div className="border-t border-border/30">
-            {diffLines.map((line, index) => (
-              <DiffLineComponent
-                key={index}
-                line={line}
-                showLineNumbers={!isMobile}
-                onLineClick={
-                  onOpenFile
-                    ? (lineNum) => onOpenFile(filePath, lineNum)
-                    : undefined
-                }
-              />
-            ))}
+            <DiffLines
+              diff={diffData.diff}
+              showLineNumbers={!isMobile}
+              onLineClick={
+                onOpenFile
+                  ? (lineNum) => onOpenFile(filePath, lineNum)
+                  : undefined
+              }
+            />
           </div>
         )}
       </div>

@@ -181,6 +181,11 @@ describe('getTrustedOrigins', () => {
   })
 
   it('falls back to the local development origins', async () => {
-    await expect(loadTrustedOrigins(undefined)).resolves.toEqual(['http://localhost:5173', 'http://localhost:5003'])
+    await expect(loadTrustedOrigins(undefined)).resolves.toEqual([
+      'http://localhost:5173',
+      'http://localhost:5003',
+      'http://127.0.0.1:5173',
+      'http://127.0.0.1:5003',
+    ])
   })
 })

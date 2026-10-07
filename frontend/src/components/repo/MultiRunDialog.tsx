@@ -1,35 +1,33 @@
-import { memo, useCallback, useDeferredValue, useEffect, useMemo, useState, type ReactNode } from 'react'
+import { useCallback, useDeferredValue, useEffect, useMemo, useState } from 'react'
 import { useNavigate } from 'react-router-dom'
-import { Loader2, Trash2, ArrowUpRight, Clock, Search, Star } from 'lucide-react'
+import { Loader2, Trash2, ArrowUpRight, Search, Combine, BookOpen } from 'lucide-react'
 import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from '@/components/ui/dialog'
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { Textarea } from '@/components/ui/textarea'
 import { Switch } from '@/components/ui/switch'
-import { Checkbox } from '@/components/ui/checkbox'
 import { Badge } from '@/components/ui/badge'
 import { Label } from '@/components/ui/label'
 import { ConfirmDestructiveDialog } from '@/components/ui/confirm-destructive-dialog'
 import { SessionStatusIndicator } from '@/components/ui/session-status-indicator'
 import { BranchCombobox } from '@/components/repo/BranchCombobox'
-import { useProvidersWithModels } from '@/hooks/useProvidersWithModels'
-import { useOpenCodeModelState } from '@/hooks/useModelSelection'
+import { ModelCheckboxList } from '@/components/repo/ModelCheckboxList'
+import { FuseRunDialog } from '@/components/repo/FuseRunDialog'
+import { ChangesWalkthroughDialog } from '@/components/session/ChangesWalkthroughDialog'
+import { useModelSections } from '@/hooks/useModelSections'
 import { useDiscardMultiRunEntry, useLaunchMultiRun, useMultiRuns } from '@/hooks/useMultiRuns'
-import {
-  formatModelName,
-  formatProviderName,
-  providerModelRef,
-  type ModelSelection,
-  type OpenCodeModelState,
-  type ProviderWithModels,
-} from '@/api/providers'
+import { filterModelSections } from '@/lib/modelSections'
 import { buildSessionPath } from '@opencode-manager/shared/utils'
 import {
+  MULTI_RUN_FUSION_MIN_SOURCES,
   MULTI_RUN_MAX_MODELS,
   type LaunchMultiRunRequest,
+  type MultiRun,
   type MultiRunEntry,
   type MultiRunEntryStatus,
+  type MultiRunFusion,
+  type MultiRunFusionStatus,
 } from '@opencode-manager/shared/schemas'
 
 interface MultiRunDialogProps {
@@ -47,21 +45,6 @@ interface PendingDiscard {
   isolated: boolean
 }
 
-interface ModelOption {
-  value: string
-  label: string
-  providerName: string
-  searchText: string
-}
-
-interface ModelSection {
-  key: string
-  title: string
-  icon?: ReactNode
-  pinned: boolean
-  options: ModelOption[]
-}
-
 const STATUS_LABELS: Record<MultiRunEntryStatus, string> = {
   starting: 'Starting',
   started: 'Started',
@@ -69,52 +52,10 @@ const STATUS_LABELS: Record<MultiRunEntryStatus, string> = {
   discarded: 'Discarded',
 }
 
-function buildModelSections(providers: ProviderWithModels[], modelState: OpenCodeModelState | undefined): ModelSection[] {
-  const optionsByValue = new Map<string, ModelOption>()
-  const providerSections = providers.map((provider): ModelSection => {
-    const providerName = formatProviderName(provider)
-    const options = provider.models.map((model) => {
-      const label = formatModelName(model)
-      const value = providerModelRef(provider, model)
-      const option = { value, label, providerName, searchText: `${label} ${value} ${providerName}`.toLowerCase() }
-      optionsByValue.set(value, option)
-      return option
-    })
-    return { key: `provider:${provider.id}`, title: providerName, pinned: false, options }
-  })
-
-  const pinnedValues = new Set<string>()
-  const pinOptions = (selections: ModelSelection[] = []) =>
-    selections.flatMap((selection) => {
-      const option = optionsByValue.get(providerModelRef({ id: selection.providerID }, { id: selection.modelID }))
-      if (!option || pinnedValues.has(option.value)) return []
-      pinnedValues.add(option.value)
-      return [option]
-    })
-
-  const favoriteOptions = pinOptions(modelState?.favorite)
-  const recentOptions = pinOptions(modelState?.recent)
-  const sections: ModelSection[] = [
-    { key: 'favorites', title: 'Favorites', icon: <Star className="h-3.5 w-3.5" />, pinned: true, options: favoriteOptions },
-    { key: 'recent', title: 'Recent', icon: <Clock className="h-3.5 w-3.5" />, pinned: true, options: recentOptions },
-    ...providerSections.map((section) => ({
-      ...section,
-      options: section.options.filter((option) => !pinnedValues.has(option.value)),
-    })),
-  ]
-  return sections.filter((section) => section.options.length > 0)
-}
-
-function filterModelSections(sections: ModelSection[], query: string): ModelSection[] {
-  const terms = query.toLowerCase().split(/\s+/).filter(Boolean)
-  if (terms.length === 0) return sections
-
-  return sections
-    .map((section) => ({
-      ...section,
-      options: section.options.filter((option) => terms.every((term) => option.searchText.includes(term))),
-    }))
-    .filter((section) => section.options.length > 0)
+const FUSION_STATUS_LABELS: Record<MultiRunFusionStatus, string> = {
+  starting: 'Starting',
+  started: 'Started',
+  failed: 'Failed',
 }
 
 export function MultiRunDialog({
@@ -134,9 +75,10 @@ export function MultiRunDialog({
   const [modelSearch, setModelSearch] = useState('')
   const deferredModelSearch = useDeferredValue(modelSearch)
   const [pendingDiscard, setPendingDiscard] = useState<PendingDiscard | null>(null)
+  const [fuseRun, setFuseRun] = useState<MultiRun | null>(null)
+  const [walkthroughSessionId, setWalkthroughSessionId] = useState<string | null>(null)
 
-  const { data: providers } = useProvidersWithModels({ enabled: open, directory })
-  const { data: modelState } = useOpenCodeModelState(directory, open)
+  const { sections: modelSections } = useModelSections(directory, { enabled: open })
   const runsQuery = useMultiRuns(repoId, open)
   const launch = useLaunchMultiRun(repoId)
   const discard = useDiscardMultiRunEntry(repoId)
@@ -152,7 +94,6 @@ export function MultiRunDialog({
     setModelSearch('')
   }, [open, defaultBaseRef])
 
-  const modelSections = useMemo(() => buildModelSections(providers, modelState), [providers, modelState])
   const visibleModelSections = useMemo(
     () => filterModelSections(modelSections, deferredModelSearch),
     [modelSections, deferredModelSearch],
@@ -183,10 +124,9 @@ export function MultiRunDialog({
     launch.mutate(request, { onSuccess: () => setActiveTab('runs') })
   }
 
-  const openEntry = (entry: MultiRunEntry) => {
-    if (!entry.sessionId) return
+  const openEntry = (sessionId: string, isolated: boolean) => {
     onOpenChange(false)
-    navigate(buildSessionPath(repoId, entry.sessionId, entry.isolated ? { repoTab: 'workspaces' } : undefined))
+    navigate(buildSessionPath(repoId, sessionId, isolated ? { repoTab: 'workspaces' } : undefined))
   }
 
   const confirmDiscard = () => {
@@ -264,6 +204,7 @@ export function MultiRunDialog({
                     selectedModels={selectedModels}
                     onToggle={toggleModel}
                     emptyLabel={modelSections.length === 0 ? 'No models available.' : 'No models match your search.'}
+                    maxSelected={MULTI_RUN_MAX_MODELS}
                   />
                 </div>
               </div>
@@ -317,53 +258,112 @@ export function MultiRunDialog({
               ) : runs.length === 0 ? (
                 <p className="text-sm text-muted-foreground">No runs yet.</p>
               ) : (
-                runs.map((run) => (
-                  <div key={run.id} className="rounded-md border border-border">
-                    <div className="flex items-center justify-between gap-2 border-b border-border px-3 py-2">
-                      <span className="truncate text-sm font-medium">{run.name}</span>
-                      <span className="shrink-0 text-xs text-muted-foreground">
-                        {run.entries.length} model{run.entries.length === 1 ? '' : 's'}
-                      </span>
-                    </div>
-                    <div className="divide-y divide-border">
-                      {run.entries.map((entry) => (
-                        <div key={entry.id} className="flex flex-wrap items-center gap-2 px-3 py-2">
-                          <span className="min-w-0 flex-1 truncate text-sm">{entry.model}</span>
-                          <EntryStatus entry={entry} />
-                          {entry.status === 'failed' && entry.error ? (
-                            <span className="w-full text-xs text-destructive">{entry.error}</span>
-                          ) : null}
-                          <div className="flex items-center gap-1">
-                            {entry.sessionId ? (
-                              <Button variant="ghost" size="sm" onClick={() => openEntry(entry)}>
-                                <ArrowUpRight className="mr-1 h-3.5 w-3.5" />
-                                Open
-                              </Button>
-                            ) : null}
-                            {entry.status === 'started' || entry.status === 'failed' ? (
-                              <Button
-                                variant="ghost"
-                                size="sm"
-                                className="text-destructive hover:text-destructive"
-                                onClick={() =>
-                                  setPendingDiscard({
-                                    runId: run.id,
-                                    entryId: entry.id,
-                                    model: entry.model,
-                                    isolated: entry.isolated,
-                                  })
-                                }
-                              >
-                                <Trash2 className="mr-1 h-3.5 w-3.5" />
-                                Discard
-                              </Button>
-                            ) : null}
-                          </div>
+                runs.map((run) => {
+                  const startedEntries = run.entries.filter(
+                    (entry) => entry.status === 'started' && entry.sessionId,
+                  ).length
+                  return (
+                    <div key={run.id} className="rounded-md border border-border">
+                      <div className="flex items-center justify-between gap-2 border-b border-border px-3 py-2">
+                        <span className="truncate text-sm font-medium">{run.name}</span>
+                        <div className="flex shrink-0 items-center gap-1">
+                          <span className="text-xs text-muted-foreground">
+                            {run.entries.length} model{run.entries.length === 1 ? '' : 's'}
+                          </span>
+                          <Button
+                            variant="ghost"
+                            size="sm"
+                            disabled={startedEntries < MULTI_RUN_FUSION_MIN_SOURCES}
+                            onClick={() => setFuseRun(run)}
+                          >
+                            <Combine className="mr-1 h-3.5 w-3.5" />
+                            Fuse
+                          </Button>
                         </div>
-                      ))}
+                      </div>
+                      <div className="divide-y divide-border">
+                        {run.entries.map((entry) => {
+                          const sessionId = entry.sessionId
+                          return (
+                            <div key={entry.id} className="flex flex-wrap items-center gap-2 px-3 py-2">
+                              <span className="min-w-0 flex-1 truncate text-sm">{entry.model}</span>
+                              <EntryStatus entry={entry} />
+                              {entry.status === 'failed' && entry.error ? (
+                                <span className="w-full text-xs text-destructive">{entry.error}</span>
+                              ) : null}
+                              <div className="flex items-center gap-1">
+                                {sessionId ? (
+                                  <Button variant="ghost" size="sm" onClick={() => openEntry(sessionId, entry.isolated)}>
+                                    <ArrowUpRight className="mr-1 h-3.5 w-3.5" />
+                                    Open
+                                  </Button>
+                                ) : null}
+                                {sessionId ? (
+                                  <Button variant="ghost" size="sm" onClick={() => setWalkthroughSessionId(sessionId)}>
+                                    <BookOpen className="mr-1 h-3.5 w-3.5" />
+                                    Walkthrough
+                                  </Button>
+                                ) : null}
+                                {entry.status === 'started' || entry.status === 'failed' ? (
+                                  <Button
+                                    variant="ghost"
+                                    size="sm"
+                                    className="text-destructive hover:text-destructive"
+                                    onClick={() =>
+                                      setPendingDiscard({
+                                        runId: run.id,
+                                        entryId: entry.id,
+                                        model: entry.model,
+                                        isolated: entry.isolated,
+                                      })
+                                    }
+                                  >
+                                    <Trash2 className="mr-1 h-3.5 w-3.5" />
+                                    Discard
+                                  </Button>
+                                ) : null}
+                              </div>
+                            </div>
+                          )
+                        })}
+                      </div>
+                      {run.fusions.length > 0 ? (
+                        <div className="space-y-2 border-t border-border px-3 py-2">
+                          <p className="text-xs font-medium text-muted-foreground">Fusions</p>
+                          {run.fusions.map((fusion) => {
+                            const truncated = fusion.sources.some((source) => source.truncated)
+                            const sessionId = fusion.sessionId
+                            return (
+                              <div key={fusion.id} className="flex flex-wrap items-center gap-2">
+                                <span className="min-w-0 flex-1 truncate text-sm">{fusion.model}</span>
+                                <FusionStatus fusion={fusion} />
+                                <span className="text-xs text-muted-foreground">
+                                  from {fusion.sources.length} source{fusion.sources.length === 1 ? '' : 's'}
+                                  {truncated ? ' (truncated)' : ''}
+                                </span>
+                                {fusion.status === 'failed' && fusion.error ? (
+                                  <span className="w-full text-xs text-destructive">{fusion.error}</span>
+                                ) : null}
+                                {sessionId ? (
+                                  <Button variant="ghost" size="sm" onClick={() => openEntry(sessionId, fusion.isolated)}>
+                                    <ArrowUpRight className="mr-1 h-3.5 w-3.5" />
+                                    Open
+                                  </Button>
+                                ) : null}
+                                {sessionId ? (
+                                  <Button variant="ghost" size="sm" onClick={() => setWalkthroughSessionId(sessionId)}>
+                                    <BookOpen className="mr-1 h-3.5 w-3.5" />
+                                    Walkthrough
+                                  </Button>
+                                ) : null}
+                              </div>
+                            )
+                          })}
+                        </div>
+                      ) : null}
                     </div>
-                  </div>
-                ))
+                  )
+                })
               )}
             </TabsContent>
           </Tabs>
@@ -388,58 +388,49 @@ export function MultiRunDialog({
         pendingLabel="Discarding..."
         isPending={discard.isPending}
       />
+
+      {fuseRun ? (
+        <FuseRunDialog
+          repoId={repoId}
+          directory={directory}
+          run={fuseRun}
+          open
+          onOpenChange={(next) => {
+            if (!next) setFuseRun(null)
+          }}
+          onOpenSession={(sessionId, isolated) => {
+            setFuseRun(null)
+            openEntry(sessionId, isolated)
+          }}
+        />
+      ) : null}
+
+      {walkthroughSessionId ? (
+        <ChangesWalkthroughDialog
+          sessionId={walkthroughSessionId}
+          open
+          onOpenChange={(next) => {
+            if (!next) setWalkthroughSessionId(null)
+          }}
+        />
+      ) : null}
     </>
   )
 }
 
-interface ModelCheckboxListProps {
-  sections: ModelSection[]
-  selectedModels: string[]
-  onToggle: (value: string, checked: boolean) => void
-  emptyLabel: string
-}
-
-const ModelCheckboxList = memo(function ModelCheckboxList({
-  sections,
-  selectedModels,
-  onToggle,
-  emptyLabel,
-}: ModelCheckboxListProps) {
-  if (sections.length === 0) {
-    return <p className="p-3 text-sm text-muted-foreground">{emptyLabel}</p>
+function FusionStatus({ fusion }: { fusion: MultiRunFusion }) {
+  if (fusion.status === 'started' && fusion.sessionId) {
+    return (
+      <div className="flex items-center gap-2">
+        <SessionStatusIndicator sessionID={fusion.sessionId} size="sm" />
+        <Badge variant="secondary">{FUSION_STATUS_LABELS[fusion.status]}</Badge>
+      </div>
+    )
   }
 
-  return (
-    <>
-      {sections.map((section) => (
-        <div key={section.key} className="p-3 space-y-2">
-          <p className="flex items-center gap-1.5 text-xs font-medium text-muted-foreground">
-            {section.icon}
-            {section.title}
-          </p>
-          {section.options.map((option) => {
-            const checked = selectedModels.includes(option.value)
-            const atCapacity = selectedModels.length >= MULTI_RUN_MAX_MODELS && !checked
-            return (
-              <label key={option.value} className="flex items-center gap-2 text-sm">
-                <Checkbox
-                  aria-label={option.label}
-                  checked={checked}
-                  disabled={atCapacity}
-                  onCheckedChange={(next) => onToggle(option.value, next === true)}
-                />
-                <span className="truncate">{option.label}</span>
-                {section.pinned ? (
-                  <span className="ml-auto shrink-0 text-xs text-muted-foreground">{option.providerName}</span>
-                ) : null}
-              </label>
-            )
-          })}
-        </div>
-      ))}
-    </>
-  )
-})
+  const variant = fusion.status === 'failed' ? 'destructive' : 'secondary'
+  return <Badge variant={variant}>{FUSION_STATUS_LABELS[fusion.status]}</Badge>
+}
 
 function EntryStatus({ entry }: { entry: MultiRunEntry }) {
   if (entry.status === 'started' && entry.sessionId) {

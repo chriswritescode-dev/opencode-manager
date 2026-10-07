@@ -9,6 +9,7 @@ import type { CommitMessageContext } from '../services/git/commit-message-prompt
 import { RenameBranchRequestSchema, DeleteBranchRequestSchema, StashPushRequestSchema, StashApplyRequestSchema, StashDropRequestSchema, IntegrateBranchRequestSchema } from '@opencode-manager/shared'
 import type { GitService } from '../services/git/GitService'
 import type { OpenCodeClient } from '../services/opencode/client'
+import { GenerateTextTimeoutError, generateTextWithTimeout } from '../services/opencode/generate-text'
 import type { GitStatusResponse } from '../types/git'
 import type { Repo } from '../types/repo'
 import { getErrorMessage } from '../utils/error-utils'
@@ -17,13 +18,6 @@ const DEFAULT_COMMIT_MESSAGE_TIMEOUT_MS = 30_000
 
 export interface RepoGitRouteOptions {
   commitMessageTimeoutMs?: number
-}
-
-class CommitMessageTimeoutError extends Error {
-  constructor() {
-    super('Commit message generation timed out')
-    this.name = 'CommitMessageTimeoutError'
-  }
 }
 
 function parseStashIndex(raw: string | undefined): number | null {
@@ -174,25 +168,12 @@ export function createRepoGitRoutes(
       return c.json({ error: getErrorMessage(error) }, 400)
     }
 
-    const controller = new AbortController()
-    let timedOut = false
-    let timer: ReturnType<typeof setTimeout> | undefined
-    const timeout = new Promise<never>((_resolve, reject) => {
-      timer = setTimeout(() => {
-        timedOut = true
-        controller.abort()
-        reject(new CommitMessageTimeoutError())
-      }, commitMessageTimeoutMs)
-    })
-
     try {
-      const { text } = await Promise.race([
-        openCodeClient.api.generate.text(
-          { prompt: buildCommitMessagePrompt(context) },
-          { signal: controller.signal },
-        ),
-        timeout,
-      ])
+      const text = await generateTextWithTimeout(
+        openCodeClient,
+        { prompt: buildCommitMessagePrompt(context) },
+        commitMessageTimeoutMs,
+      )
       const message = normalizeGeneratedCommitMessage(text)
 
       if (!message) {
@@ -201,13 +182,11 @@ export function createRepoGitRoutes(
 
       return c.json({ message })
     } catch (error: unknown) {
-      if (timedOut) {
+      if (error instanceof GenerateTextTimeoutError) {
         return c.json({ error: 'Commit message generation timed out' }, 502)
       }
       logger.error('Failed to generate commit message:', error)
       return c.json({ error: getErrorMessage(error) }, 502)
-    } finally {
-      if (timer) clearTimeout(timer)
     }
   }))
 

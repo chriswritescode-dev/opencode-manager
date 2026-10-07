@@ -5,10 +5,12 @@ import {
   SESSION_REPLY_MAX_LENGTH,
   getLatestAssistantReplyState,
   isSessionBusy,
+  isSessionBusyIn,
   readLatestAssistantReply,
   sessionSettleSignal,
   truncateSessionReply,
   waitForSessionSettled,
+  type ActiveSessions,
 } from '../../src/services/session-reply'
 import { assistantMessage } from '../helpers/stub-schedule-api'
 
@@ -111,6 +113,16 @@ describe('isSessionBusy', () => {
 
   it('is false when the session is absent from the active set', async () => {
     await expect(isSessionBusy(createFakeClient([], {}), 'ses-1')).resolves.toBe(false)
+  })
+})
+
+describe('isSessionBusyIn', () => {
+  it('is true when the session appears in the fetched active set', () => {
+    expect(isSessionBusyIn({ 'ses-1': { type: 'running' } } as unknown as ActiveSessions, 'ses-1')).toBe(true)
+  })
+
+  it('is false when the session is absent from the fetched active set', () => {
+    expect(isSessionBusyIn({} as unknown as ActiveSessions, 'ses-1')).toBe(false)
   })
 })
 

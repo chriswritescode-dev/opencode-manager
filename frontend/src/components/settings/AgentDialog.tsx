@@ -1,7 +1,7 @@
 import { useForm } from 'react-hook-form'
 import { zodResolver } from '@hookform/resolvers/zod'
 import { z } from 'zod'
-import { useMemo, useEffect } from 'react'
+import { useEffect } from 'react'
 import { Button } from '@/components/ui/button'
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from '@/components/ui/dialog'
 import { Input } from '@/components/ui/input'
@@ -9,9 +9,8 @@ import { Form, FormControl, FormDescription, FormField, FormItem, FormLabel, For
 import { Textarea } from '@/components/ui/textarea'
 import { Switch } from '@/components/ui/switch'
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
-import { Combobox, type ComboboxOption } from '@/components/ui/combobox'
-import { useProvidersWithModels } from '@/hooks/useProvidersWithModels'
-import { parseOpenCodeModelRef } from '@opencode-manager/shared/opencode'
+import { ModelCombobox } from '@/components/model/ModelCombobox'
+import { configModelRef, formatOpenCodeModelRef } from '@opencode-manager/shared/opencode'
 
 const agentFormSchema = z.object({
   name: z.string().min(1, 'Agent name is required').regex(/^[a-z0-9-]+$/, 'Must be lowercase letters, numbers, and hyphens only'),
@@ -20,8 +19,7 @@ const agentFormSchema = z.object({
   mode: z.enum(['subagent', 'primary', 'all']),
   temperature: z.number().min(0).max(2),
   topP: z.number().min(0).max(1),
-  modelId: z.string().optional(),
-  providerId: z.string().optional(),
+  model: z.string().optional(),
   write: z.boolean(),
   edit: z.boolean(),
   bash: z.boolean(),
@@ -34,14 +32,14 @@ const agentFormSchema = z.object({
 
 type AgentFormValues = z.infer<typeof agentFormSchema>
 
-interface Agent {
+interface Agent<TModel = string> {
   prompt?: string
   description?: string
   mode?: 'subagent' | 'primary' | 'all'
   temperature?: number
   topP?: number
   top_p?: number
-  model?: string
+  model?: TModel
   tools?: Record<string, boolean>
   permission?: {
     edit?: 'ask' | 'allow' | 'deny'
@@ -52,41 +50,18 @@ interface Agent {
   [key: string]: unknown
 }
 
-function parseModelString(model?: string): { providerId: string; modelId: string } {
-  const ref = model ? parseOpenCodeModelRef(model) : undefined
-  if (!ref) return { providerId: '', modelId: '' }
-  return {
-    providerId: ref.providerID,
-    modelId: ref.variant ? `${ref.id}#${ref.variant}` : ref.id,
-  }
-}
+type StoredAgent = Agent<string | { providerID: string; model: string; variant?: string }>
 
 interface AgentDialogProps {
   open: boolean
   onOpenChange: (open: boolean) => void
   onSubmit: (name: string, agent: Agent) => void
-  editingAgent?: { name: string; agent: Agent } | null
+  editingAgent?: { name: string; agent: StoredAgent } | null
 }
 
 export function AgentDialog({ open, onOpenChange, onSubmit, editingAgent }: AgentDialogProps) {
-  const { data: providers } = useProvidersWithModels({ enabled: open })
-
-  const providerOptions: ComboboxOption[] = useMemo(() => {
-    const sourceLabels: Record<string, string> = {
-      configured: 'Custom',
-      local: 'Local',
-      builtin: 'Built-in',
-    }
-    return providers.map(p => ({
-      value: p.id,
-      label: p.name || p.id,
-      description: p.models.length > 0 ? `${p.models.length} models` : undefined,
-      group: sourceLabels[p.source] || 'Other',
-    }))
-  }, [providers])
-
-  const getDefaultValues = (agent?: { name: string; agent: Agent } | null): AgentFormValues => {
-    const parsed = parseModelString(agent?.agent.model)
+  const getDefaultValues = (agent?: { name: string; agent: StoredAgent } | null): AgentFormValues => {
+    const modelRef = configModelRef(agent?.agent.model)
     return {
       name: agent?.name || '',
       description: agent?.agent.description || '',
@@ -94,8 +69,7 @@ export function AgentDialog({ open, onOpenChange, onSubmit, editingAgent }: Agen
       mode: agent?.agent.mode || 'subagent',
       temperature: agent?.agent.temperature ?? 0.7,
       topP: agent?.agent.topP ?? agent?.agent.top_p ?? 1,
-      modelId: parsed.modelId,
-      providerId: parsed.providerId,
+      model: modelRef ? formatOpenCodeModelRef(modelRef) : '',
       write: agent?.agent.tools?.write ?? true,
       edit: agent?.agent.tools?.edit ?? true,
       bash: agent?.agent.tools?.bash ?? true,
@@ -118,23 +92,6 @@ export function AgentDialog({ open, onOpenChange, onSubmit, editingAgent }: Agen
     }
   }, [open, editingAgent, form])
 
-  const selectedProviderId = form.watch('providerId')
-
-  const modelOptions: ComboboxOption[] = useMemo(() => {
-    const selectedProvider = providers.find(p => p.id === selectedProviderId)
-    if (selectedProvider && selectedProvider.models.length > 0) {
-      return selectedProvider.models.map(m => ({
-        value: m.id,
-        label: m.name || m.id,
-      }))
-    }
-    return providers.flatMap(p => p.models.map(m => ({
-      value: m.id,
-      label: m.name || m.id,
-      group: p.name || p.id,
-    })))
-  }, [providers, selectedProviderId])
-
   const handleSubmit = (values: AgentFormValues) => {
     const agent: Agent = {
       prompt: values.prompt,
@@ -156,8 +113,8 @@ export function AgentDialog({ open, onOpenChange, onSubmit, editingAgent }: Agen
       }
     }
 
-    if (values.modelId && values.providerId) {
-      agent.model = `${values.providerId}/${values.modelId}`
+    if (values.model?.trim()) {
+      agent.model = values.model.trim()
     }
 
     onSubmit(values.name, agent)
@@ -307,50 +264,28 @@ export function AgentDialog({ open, onOpenChange, onSubmit, editingAgent }: Agen
                 />
               </div>
 
-              <div className="space-y-2">
-                <div className="text-sm font-medium">Model Configuration</div>
-                <div className="flex flex-col sm:grid grid-cols-2 gap-4">
-                  <FormField
-                    control={form.control}
-                    name="providerId"
-                    render={({ field }) => (
-                      <FormItem>
-                        <FormLabel>Provider ID</FormLabel>
-                        <FormControl>
-                          <Combobox
-                            value={field.value || ''}
-                            onChange={field.onChange}
-                            options={providerOptions}
-                            placeholder="Select or type provider..."
-                            allowCustomValue
-                          />
-                        </FormControl>
-                        <FormMessage />
-                      </FormItem>
-                    )}
-                  />
-
-                  <FormField
-                    control={form.control}
-                    name="modelId"
-                    render={({ field }) => (
-                      <FormItem>
-                        <FormLabel>Model ID</FormLabel>
-                        <FormControl>
-                          <Combobox
-                            value={field.value || ''}
-                            onChange={field.onChange}
-                            options={modelOptions}
-                            placeholder="Select or type model..."
-                            allowCustomValue
-                          />
-                        </FormControl>
-                        <FormMessage />
-                      </FormItem>
-                    )}
-                  />
-                </div>
-              </div>
+              <FormField
+                control={form.control}
+                name="model"
+                render={({ field }) => (
+                  <FormItem>
+                    <FormLabel>Model</FormLabel>
+                    <FormControl>
+                      <ModelCombobox
+                        id="agent-model"
+                        ariaLabel="Model"
+                        value={field.value || ''}
+                        onChange={field.onChange}
+                        enabled={open}
+                        placeholder="OpenCode default"
+                        allowCustomValue
+                        showClear
+                      />
+                    </FormControl>
+                    <FormMessage />
+                  </FormItem>
+                )}
+              />
 
               <div className="space-y-2">
                 <div className="text-sm font-medium">Tools Configuration</div>

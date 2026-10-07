@@ -10,9 +10,9 @@ import {
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
-import { Loader2, Key, ExternalLink } from "lucide-react";
+import { Loader2, Key } from "lucide-react";
 import { providerCredentialsApi } from "@/api/providers";
-import type { ProviderWithModels } from "@/api/providers";
+import type { Provider } from "@/api/providers";
 import { type FormAnswer, type FormValue, type IntegrationKeyMethod } from "@/api/oauth";
 import { buildAnswer, hasMissingAnswers, methodIdentifier, resolveAnswers, setAnswerValue, visibleFields } from "@/lib/formFields";
 import { mapOAuthError } from "@/lib/oauthErrors";
@@ -22,7 +22,7 @@ import { useProviderAuthMethods } from "@/hooks/useProviderAuthMethods";
 interface ApiKeyDialogProps {
   open: boolean;
   onOpenChange: (open: boolean) => void;
-  provider: ProviderWithModels | null;
+  provider: Provider | null;
   onSuccess: () => void;
   mode?: 'add' | 'edit';
 }
@@ -146,18 +146,6 @@ export function ApiKeyDialog({
 
           {error && (
             <p className="text-sm text-destructive">{error}</p>
-          )}
-
-          {provider.api && (
-            <a
-              href={provider.api}
-              target="_blank"
-              rel="noopener noreferrer"
-              className="inline-flex items-center gap-1 text-sm text-muted-foreground hover:text-foreground transition-colors"
-            >
-              <ExternalLink className="h-3 w-3" />
-              Get an API key
-            </a>
           )}
         </div>
 

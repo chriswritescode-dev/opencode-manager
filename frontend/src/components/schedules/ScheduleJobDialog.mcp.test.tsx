@@ -19,7 +19,7 @@ vi.mock('@/hooks/usePromptTemplates', () => ({
 }))
 
 vi.mock('@/api/providers', () => ({
-  getProvidersWithModels: () => Promise.resolve([]),
+  getProviders: () => Promise.resolve({ providers: [], models: [] }),
 }))
 
 vi.mock('@/hooks/useOpenCode', () => ({
