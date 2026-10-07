@@ -12,6 +12,25 @@ export type KeyHint = readonly [key: string, label: string]
 
 const PICKER_ROWS = 8
 
+/**
+ * Row colors matching OpenCode's select dialogs: every text in the cursor row uses the
+ * primary-action focused color on the focused background; a chosen row away from the
+ * cursor uses the selected form-field color for its marker and title.
+ */
+export function rowColors(theme: DialogTheme, state: { active: boolean; chosen?: boolean }) {
+  if (state.active) {
+    const text = theme.text.action.primary.focused
+    return { background: theme.background.action.primary.focused, title: text, detail: text, marker: text, bold: true }
+  }
+  return {
+    background: undefined,
+    title: state.chosen ? theme.text.formfield.selected : theme.text.base,
+    detail: theme.text.muted,
+    marker: state.chosen ? theme.text.formfield.selected : theme.text.muted,
+    bold: false,
+  }
+}
+
 /** True for the dialog-wide submit chord. */
 export function isSubmitKey(event: KeyEvent): boolean {
   return event.ctrl && event.name === 's'
@@ -253,24 +272,20 @@ export function ModelPicker(props: {
         <Show when={filtered().length > 0} fallback={<text fg={props.theme.text.muted}>No matching models</text>}>
           <For each={visible()}>
             {(option, index) => {
-              const active = () => props.focused && windowStart() + index() === cursor()
-              const chosen = () => props.selected.includes(option.value)
+              const colors = () =>
+                rowColors(props.theme, {
+                  active: props.focused && windowStart() + index() === cursor(),
+                  chosen: props.selected.includes(option.value),
+                })
               return (
-                <box
-                  flexDirection="row"
-                  gap={1}
-                  backgroundColor={active() ? props.theme.background.action.primary.focused : undefined}
-                >
-                  <text
-                    fg={chosen() ? props.theme.text.formfield.selected : props.theme.text.muted}
-                    flexShrink={0}
-                  >
+                <box flexDirection="row" gap={1} backgroundColor={colors().background}>
+                  <text fg={colors().marker} flexShrink={0}>
                     {marker(option.value)}
                   </text>
-                  <text fg={active() ? props.theme.text.action.primary.focused : props.theme.text.base} flexShrink={0}>
+                  <text fg={colors().title} attributes={colors().bold ? TextAttributes.BOLD : undefined} flexShrink={0}>
                     {option.title}
                   </text>
-                  <text fg={props.theme.text.muted} wrapMode="none" truncate>
+                  <text fg={colors().detail} wrapMode="none" truncate>
                     {option.description}
                   </text>
                 </box>

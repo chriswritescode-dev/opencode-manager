@@ -1,4 +1,5 @@
 /** @jsxImportSource @opentui/solid */
+import { TextAttributes } from '@opentui/core'
 import { useKeyboard } from '@opentui/solid'
 import { createEffect, createMemo, createSignal, For, on, onMount, Show } from 'solid-js'
 import type { Context } from '@opencode/plugin/tui/context'
@@ -25,6 +26,7 @@ import {
   TextAreaField,
   TextField,
   isSubmitKey,
+  rowColors,
   useFieldFocus,
 } from './tui-form.js'
 import type { DialogTheme } from './tui-form.js'
@@ -347,18 +349,19 @@ function MultiRunsDialog(props: MultiRunsDialogProps & { context: Context }) {
           <box width={RUN_LIST_WIDTH} flexShrink={0}>
             <For each={runs()}>
               {(item, index) => {
-                const active = () => index() === runIndex()
-                const focused = () => active() && pane() === 'runs'
+                const colors = () =>
+                  rowColors(theme, { active: index() === runIndex() && pane() === 'runs', chosen: index() === runIndex() })
                 return (
-                  <box backgroundColor={focused() ? theme.background.action.primary.focused : undefined}>
+                  <box backgroundColor={colors().background}>
                     <text
-                      fg={focused() ? theme.text.action.primary.focused : active() ? theme.text.formfield.selected : theme.text.base}
+                      fg={colors().title}
+                      attributes={colors().bold ? TextAttributes.BOLD : undefined}
                       wrapMode="none"
                       truncate
                     >
                       {item.name}
                     </text>
-                    <text fg={theme.text.muted} wrapMode="none" truncate>
+                    <text fg={colors().detail} wrapMode="none" truncate>
                       {runSummary(item)}
                     </text>
                   </box>
@@ -420,11 +423,7 @@ function RunDetails(props: {
         {(row, index) => {
           const active = () => props.focused && index() === props.rowIndex
           return (
-            <box
-              flexDirection="row"
-              gap={1}
-              backgroundColor={active() ? props.theme.background.action.primary.focused : undefined}
-            >
+            <box flexDirection="row" gap={1} backgroundColor={rowColors(props.theme, { active: active() }).background}>
               {row.kind === 'entry' ? (
                 <EntryRow theme={props.theme} entry={row.entry} active={active()} selected={props.fusionIds.includes(row.entry.id)} />
               ) : (
@@ -446,22 +445,22 @@ function RunDetails(props: {
 }
 
 function EntryRow(props: { theme: DialogTheme; entry: MultiRunEntry; active: boolean; selected: boolean }) {
+  const colors = () => rowColors(props.theme, { active: props.active, chosen: props.selected })
+  const statusColor = () =>
+    !props.active && props.entry.status === 'failed' ? props.theme.text.feedback.error.base : colors().detail
   return (
     <>
-      <text fg={props.selected ? props.theme.text.formfield.selected : props.theme.text.muted} flexShrink={0}>
+      <text fg={colors().marker} flexShrink={0}>
         {props.selected ? '[x]' : '[ ]'}
       </text>
       <text
-        fg={props.active ? props.theme.text.action.primary.focused : props.entry.status === 'discarded' ? props.theme.text.muted : props.theme.text.base}
+        fg={!props.active && props.entry.status === 'discarded' ? props.theme.text.muted : colors().title}
+        attributes={colors().bold ? TextAttributes.BOLD : undefined}
         flexShrink={0}
       >
         {props.entry.model}
       </text>
-      <text
-        fg={props.entry.status === 'failed' ? props.theme.text.feedback.error.base : props.theme.text.muted}
-        wrapMode="none"
-        truncate
-      >
+      <text fg={statusColor()} wrapMode="none" truncate>
         {formatEntryStatus(props.entry)}
       </text>
     </>
@@ -469,19 +468,18 @@ function EntryRow(props: { theme: DialogTheme; entry: MultiRunEntry; active: boo
 }
 
 function FusionRow(props: { theme: DialogTheme; fusion: MultiRunFusion; active: boolean }) {
+  const colors = () => rowColors(props.theme, { active: props.active })
+  const statusColor = () =>
+    !props.active && props.fusion.status === 'failed' ? props.theme.text.feedback.error.base : colors().detail
   return (
     <>
-      <text fg={props.theme.text.muted} flexShrink={0}>
+      <text fg={colors().detail} flexShrink={0}>
         {'  ⇢'}
       </text>
-      <text fg={props.active ? props.theme.text.action.primary.focused : props.theme.text.base} flexShrink={0}>
+      <text fg={colors().title} attributes={colors().bold ? TextAttributes.BOLD : undefined} flexShrink={0}>
         fusion {props.fusion.model}
       </text>
-      <text
-        fg={props.fusion.status === 'failed' ? props.theme.text.feedback.error.base : props.theme.text.muted}
-        wrapMode="none"
-        truncate
-      >
+      <text fg={statusColor()} wrapMode="none" truncate>
         {[props.fusion.status, props.fusion.error].filter(Boolean).join(' · ')}
       </text>
     </>
