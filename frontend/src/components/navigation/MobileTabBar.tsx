@@ -70,9 +70,10 @@ function buildGlobalTabs({ pathname, openSheet, open, close, navigate, isInsideR
   }
 
   const inRepo = isInsideRepo && repoId !== null
+  const filesAreScoped = inRepo || isAssistantPath(pathname)
 
   const handleFilesClick = () => {
-    if (inRepo) {
+    if (filesAreScoped) {
       openRepoDialog('files')
     } else {
       open('files')
