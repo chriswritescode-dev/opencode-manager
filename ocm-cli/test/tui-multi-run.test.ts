@@ -6,6 +6,7 @@ import {
   listModelOptions,
   openManagerSessions,
   runMultiRunCommand,
+  formatEntryStatus,
   MULTI_RUN_ATTACH_REQUIRED,
   MULTI_RUN_ROUTE_MISSING,
 } from '../src/tui-multi-run.js'
@@ -13,6 +14,7 @@ import { ManagerApiError } from '../src/manager-api.js'
 import type { ManagerApi } from '../src/manager-api.js'
 import { resolveManagerAuth } from '../src/manager-auth.js'
 import type { RemoteContext } from '../src/remote-context.js'
+import type { MultiRunFusion } from '@opencode-manager/shared/schemas'
 
 vi.mock('../src/manager-auth.js', () => ({
   resolveManagerAuth: vi.fn(),
@@ -72,6 +74,25 @@ function multiRun(overrides: Partial<MultiRun> = {}): MultiRun {
   }
 }
 
+function fusion(overrides: Partial<MultiRunFusion> = {}): MultiRunFusion {
+  return {
+    id: 9,
+    requestId: 'req-1',
+    model: 'anthropic/claude',
+    instructions: null,
+    isolated: true,
+    baseRef: null,
+    status: 'started',
+    sessionId: 'ses_f',
+    directory: '/work/f',
+    error: null,
+    sources: [],
+    createdAt: 1,
+    updatedAt: 1,
+    ...overrides,
+  }
+}
+
 function createFakeContext() {
   const toast = vi.fn()
   const prompt = vi.fn()
@@ -99,6 +120,8 @@ function makeApi() {
   return {
     launchMultiRun: vi.fn(async () => multiRun()),
     listMultiRuns: vi.fn(async () => [] as MultiRun[]),
+    fuseMultiRun: vi.fn(async () => multiRun()),
+    discardMultiRunEntry: vi.fn(async () => multiRun()),
   }
 }
 
@@ -169,6 +192,16 @@ describe('openManagerSessions', () => {
     expect(fake.open).not.toHaveBeenCalled()
     expect(fake.focus).not.toHaveBeenCalled()
     expect(fake.navigate).not.toHaveBeenCalled()
+  })
+})
+
+describe('formatEntryStatus', () => {
+  it('describes the status, isolation and error', () => {
+    expect(formatEntryStatus(entry({ status: 'started', isolated: true }))).toBe('Started · isolated')
+    expect(formatEntryStatus(entry({ status: 'failed', isolated: false, error: 'model unavailable' }))).toBe(
+      'Failed · shared directory · model unavailable',
+    )
+    expect(formatEntryStatus(entry({ status: 'discarded', isolated: true }))).toBe('Discarded · isolated')
   })
 })
 
@@ -341,29 +374,6 @@ describe('runMultiRunCommand', () => {
     expect(api.launchMultiRun).not.toHaveBeenCalled()
   })
 
-  it('asks for the prompt when the command has none', async () => {
-    const fake = createFakeContext()
-    const api = makeApi()
-    fake.list.mockReturnValue([model()])
-    fake.prompt.mockResolvedValueOnce('from dialog').mockResolvedValueOnce('sweep').mockResolvedValueOnce(undefined)
-    fake.select.mockResolvedValueOnce(0).mockResolvedValueOnce(-1).mockResolvedValueOnce(true)
-
-    await runMultiRunCommand(fake.context, depsFor(api), '/multirun')
-
-    expect(fake.prompt).toHaveBeenNthCalledWith(1, expect.objectContaining({ title: 'Multi-run prompt' }))
-    expect(api.launchMultiRun).toHaveBeenCalledWith(expect.objectContaining({ prompt: 'from dialog' }))
-  })
-
-  it('does nothing when the prompt dialog is dismissed', async () => {
-    const fake = createFakeContext()
-    const api = makeApi()
-    fake.prompt.mockResolvedValueOnce(undefined)
-
-    await runMultiRunCommand(fake.context, depsFor(api), '/multirun')
-
-    expect(api.launchMultiRun).not.toHaveBeenCalled()
-  })
-
   it('reports an auth failure without calling the API', async () => {
     const fake = createFakeContext()
     const api = makeApi()
@@ -397,6 +407,346 @@ describe('runMultiRunCommand', () => {
     fake.select.mockResolvedValueOnce(0).mockResolvedValueOnce(-1).mockResolvedValueOnce(true)
 
     await runMultiRunCommand(fake.context, depsFor(api), '/multirun fix it')
+
+    expect(fake.toast).toHaveBeenCalledWith({ variant: 'error', message: MULTI_RUN_ROUTE_MISSING })
+  })
+})
+
+describe('runMultiRunCommand browse', () => {
+  it('lists recent runs with a new multi-run option first', async () => {
+    const fake = createFakeContext()
+    const api = makeApi()
+    api.listMultiRuns.mockResolvedValue([
+      multiRun({
+        id: 3,
+        name: 'sweep',
+        entries: [entry({ id: 1, status: 'started' }), entry({ id: 2, status: 'failed', sessionId: null })],
+        fusions: [fusion()],
+      }),
+    ])
+    fake.select.mockResolvedValueOnce(undefined)
+
+    await runMultiRunCommand(fake.context, depsFor(api), '/multirun')
+
+    expect(api.listMultiRuns).toHaveBeenCalledWith(1)
+    expect(fake.select).toHaveBeenCalledWith(
+      expect.objectContaining({
+        title: 'Multi-runs',
+        options: [
+          { title: 'New multi-run…', value: { kind: 'new' } },
+          expect.objectContaining({
+            title: 'sweep',
+            description: '2 models · 1 started · 1 fusions',
+            value: expect.objectContaining({ kind: 'run' }),
+          }),
+        ],
+      }),
+    )
+    expect(api.launchMultiRun).not.toHaveBeenCalled()
+  })
+
+  it('launches a new multi-run from the list', async () => {
+    const fake = createFakeContext()
+    const api = makeApi()
+    fake.list.mockReturnValue([model()])
+    fake.select
+      .mockResolvedValueOnce({ kind: 'new' })
+      .mockResolvedValueOnce(0)
+      .mockResolvedValueOnce(-1)
+      .mockResolvedValueOnce(false)
+    fake.prompt.mockResolvedValueOnce('from list').mockResolvedValueOnce('sweep')
+
+    await runMultiRunCommand(fake.context, depsFor(api), '/multirun')
+
+    expect(fake.prompt).toHaveBeenNthCalledWith(1, expect.objectContaining({ title: 'Multi-run prompt' }))
+    expect(fake.prompt).toHaveBeenNthCalledWith(2, expect.objectContaining({ title: 'Multi-run name' }))
+    expect(api.launchMultiRun).toHaveBeenCalledWith(
+      expect.objectContaining({ repoId: 1, prompt: 'from list', name: 'sweep' }),
+    )
+  })
+
+  it('does nothing when the new multi-run prompt is dismissed', async () => {
+    const fake = createFakeContext()
+    const api = makeApi()
+    fake.select.mockResolvedValueOnce({ kind: 'new' })
+    fake.prompt.mockResolvedValueOnce(undefined)
+
+    await runMultiRunCommand(fake.context, depsFor(api), '/multirun')
+
+    expect(api.launchMultiRun).not.toHaveBeenCalled()
+  })
+
+  it('opens an entry session from the run menu', async () => {
+    const fake = createFakeContext()
+    const api = makeApi()
+    const run = multiRun({ id: 3, name: 'sweep', entries: [entry({ id: 1, sessionId: 'ses_1' })], fusions: [] })
+    api.listMultiRuns.mockResolvedValue([run])
+    fake.select
+      .mockResolvedValueOnce({ kind: 'run', run })
+      .mockResolvedValueOnce({ kind: 'open', sessionId: 'ses_1' })
+
+    await runMultiRunCommand(fake.context, depsFor(api), '/multirun')
+
+    expect(fake.select).toHaveBeenNthCalledWith(
+      2,
+      expect.objectContaining({
+        title: 'sweep',
+        options: expect.arrayContaining([
+          expect.objectContaining({
+            title: 'Open openai/gpt-5',
+            description: 'Started · isolated',
+            value: { kind: 'open', sessionId: 'ses_1' },
+          }),
+        ]),
+      }),
+    )
+    expect(fake.open).toHaveBeenCalledWith('ses_1')
+    expect(fake.focus).toHaveBeenCalledWith('ses_1')
+  })
+
+  it('opens a fusion session from the run menu', async () => {
+    const fake = createFakeContext()
+    const api = makeApi()
+    const run = multiRun({ id: 3, name: 'sweep', entries: [], fusions: [fusion({ sessionId: 'ses_f' })] })
+    api.listMultiRuns.mockResolvedValue([run])
+    fake.select
+      .mockResolvedValueOnce({ kind: 'run', run })
+      .mockResolvedValueOnce({ kind: 'open', sessionId: 'ses_f' })
+
+    await runMultiRunCommand(fake.context, depsFor(api), '/multirun')
+
+    expect(fake.select).toHaveBeenNthCalledWith(
+      2,
+      expect.objectContaining({
+        options: expect.arrayContaining([
+          expect.objectContaining({ title: 'Open fusion anthropic/claude', value: { kind: 'open', sessionId: 'ses_f' } }),
+        ]),
+      }),
+    )
+    expect(fake.open).toHaveBeenCalledWith('ses_f')
+  })
+
+  it('disables fusion until enough results have started', async () => {
+    const fake = createFakeContext()
+    const api = makeApi()
+    const run = multiRun({ id: 3, name: 'sweep', entries: [entry({ id: 1, status: 'started' })], fusions: [] })
+    api.listMultiRuns.mockResolvedValue([run])
+    fake.select.mockResolvedValueOnce({ kind: 'run', run }).mockResolvedValueOnce(undefined)
+
+    await runMultiRunCommand(fake.context, depsFor(api), '/multirun')
+
+    expect(fake.select).toHaveBeenNthCalledWith(
+      2,
+      expect.objectContaining({
+        options: expect.arrayContaining([
+          expect.objectContaining({ title: 'Fuse results…', disabled: true, value: { kind: 'fuse' } }),
+        ]),
+      }),
+    )
+  })
+
+  it('discards an entry after confirmation', async () => {
+    const fake = createFakeContext()
+    const api = makeApi()
+    const run = multiRun({ id: 3, name: 'sweep', entries: [entry({ id: 1, isolated: true })], fusions: [] })
+    api.listMultiRuns.mockResolvedValue([run])
+    fake.select
+      .mockResolvedValueOnce({ kind: 'run', run })
+      .mockResolvedValueOnce({ kind: 'discard', entry: run.entries[0] })
+    fake.confirm.mockResolvedValueOnce(true)
+
+    await runMultiRunCommand(fake.context, depsFor(api), '/multirun')
+
+    expect(fake.confirm).toHaveBeenCalledWith(
+      expect.objectContaining({ message: expect.stringContaining('workspace directory') }),
+    )
+    expect(api.discardMultiRunEntry).toHaveBeenCalledWith(3, 1)
+    expect(fake.toast).toHaveBeenCalledWith({ variant: 'success', message: 'Discarded openai/gpt-5' })
+  })
+
+  it('uses the plain discard message for a shared entry and skips the API on decline', async () => {
+    const fake = createFakeContext()
+    const api = makeApi()
+    const run = multiRun({ id: 3, name: 'sweep', entries: [entry({ id: 1, isolated: false })], fusions: [] })
+    api.listMultiRuns.mockResolvedValue([run])
+    fake.select
+      .mockResolvedValueOnce({ kind: 'run', run })
+      .mockResolvedValueOnce({ kind: 'discard', entry: run.entries[0] })
+    fake.confirm.mockResolvedValueOnce(false)
+
+    await runMultiRunCommand(fake.context, depsFor(api), '/multirun')
+
+    expect(fake.confirm).toHaveBeenCalledWith(
+      expect.objectContaining({ message: expect.not.stringContaining('workspace directory') }),
+    )
+    expect(api.discardMultiRunEntry).not.toHaveBeenCalled()
+  })
+
+  it('fuses selected results and opens the fusion session', async () => {
+    const fake = createFakeContext()
+    const api = makeApi()
+    const run = multiRun({
+      id: 3,
+      name: 'sweep',
+      baseRef: 'main',
+      entries: [
+        entry({ id: 1, sessionId: 'ses_1', isolated: true }),
+        entry({ id: 2, sessionId: 'ses_2', isolated: true }),
+      ],
+      fusions: [],
+    })
+    api.listMultiRuns.mockResolvedValue([run])
+    api.fuseMultiRun.mockImplementation(async (_runId, request) =>
+      multiRun({ fusions: [fusion({ requestId: request.requestId, sessionId: 'ses_f' })] }),
+    )
+    fake.list.mockReturnValue([model({ providerID: 'anthropic', id: 'claude', name: 'Claude' })])
+    fake.select
+      .mockResolvedValueOnce({ kind: 'run', run })
+      .mockResolvedValueOnce({ kind: 'fuse' })
+      .mockResolvedValueOnce(0)
+      .mockResolvedValueOnce(1)
+      .mockResolvedValueOnce(-1)
+      .mockResolvedValueOnce('anthropic/claude')
+      .mockResolvedValueOnce(true)
+    fake.prompt.mockResolvedValueOnce('compare').mockResolvedValueOnce('main')
+
+    await runMultiRunCommand(fake.context, depsFor(api), '/multirun')
+
+    expect(api.fuseMultiRun).toHaveBeenCalledWith(
+      3,
+      expect.objectContaining({
+        entryIds: [1, 2],
+        model: 'anthropic/claude',
+        instructions: 'compare',
+        isolate: true,
+        baseRef: 'main',
+        requestId: expect.any(String),
+      }),
+    )
+    expect(fake.prompt).toHaveBeenNthCalledWith(
+      2,
+      expect.objectContaining({ title: 'Start from', value: 'main' }),
+    )
+    expect(fake.open).toHaveBeenCalledWith('ses_f')
+  })
+
+  it('forces isolation when a selected source is not isolated', async () => {
+    const fake = createFakeContext()
+    const api = makeApi()
+    const run = multiRun({
+      id: 3,
+      name: 'sweep',
+      entries: [
+        entry({ id: 1, sessionId: 'ses_1', isolated: false }),
+        entry({ id: 2, sessionId: 'ses_2', isolated: true }),
+      ],
+      fusions: [],
+    })
+    api.listMultiRuns.mockResolvedValue([run])
+    api.fuseMultiRun.mockImplementation(async (_runId, request) =>
+      multiRun({ fusions: [fusion({ requestId: request.requestId })] }),
+    )
+    fake.list.mockReturnValue([model({ providerID: 'anthropic', id: 'claude', name: 'Claude' })])
+    fake.select
+      .mockResolvedValueOnce({ kind: 'run', run })
+      .mockResolvedValueOnce({ kind: 'fuse' })
+      .mockResolvedValueOnce(0)
+      .mockResolvedValueOnce(1)
+      .mockResolvedValueOnce(-1)
+      .mockResolvedValueOnce('anthropic/claude')
+    fake.prompt.mockResolvedValueOnce(undefined).mockResolvedValueOnce(undefined)
+
+    await runMultiRunCommand(fake.context, depsFor(api), '/multirun')
+
+    expect(api.fuseMultiRun).toHaveBeenCalledWith(3, expect.objectContaining({ isolate: true }))
+    expect(fake.select).toHaveBeenCalledTimes(6)
+  })
+
+  it('reports a failed fusion', async () => {
+    const fake = createFakeContext()
+    const api = makeApi()
+    const run = multiRun({
+      id: 3,
+      name: 'sweep',
+      entries: [entry({ id: 1, sessionId: 'ses_1' }), entry({ id: 2, sessionId: 'ses_2' })],
+      fusions: [],
+    })
+    api.listMultiRuns.mockResolvedValue([run])
+    api.fuseMultiRun.mockImplementation(async (_runId, request) =>
+      multiRun({
+        fusions: [fusion({ requestId: request.requestId, status: 'failed', sessionId: null, error: 'model overloaded' })],
+      }),
+    )
+    fake.list.mockReturnValue([model()])
+    fake.select
+      .mockResolvedValueOnce({ kind: 'run', run })
+      .mockResolvedValueOnce({ kind: 'fuse' })
+      .mockResolvedValueOnce(0)
+      .mockResolvedValueOnce(1)
+      .mockResolvedValueOnce(-1)
+      .mockResolvedValueOnce('openai/gpt-5')
+      .mockResolvedValueOnce(false)
+    fake.prompt.mockResolvedValueOnce(undefined)
+
+    await runMultiRunCommand(fake.context, depsFor(api), '/multirun')
+
+    expect(fake.toast).toHaveBeenCalledWith({ variant: 'error', message: 'model overloaded' })
+    expect(fake.open).not.toHaveBeenCalled()
+  })
+
+  it('lists unavailable sources when the Manager rejects the fusion', async () => {
+    const fake = createFakeContext()
+    const api = makeApi()
+    const run = multiRun({
+      id: 3,
+      name: 'sweep',
+      entries: [entry({ id: 1, sessionId: 'ses_1' }), entry({ id: 2, sessionId: 'ses_2' })],
+      fusions: [],
+    })
+    api.listMultiRuns.mockResolvedValue([run])
+    api.fuseMultiRun.mockRejectedValue(
+      new ManagerApiError('conflict', 409, 'FUSION_SOURCES_UNAVAILABLE', 'fuse multi-run', {
+        unavailableSources: [
+          { entryId: 1, model: 'openai/gpt-5', reason: 'not-started', message: 'has not started' },
+          { entryId: 2, model: 'anthropic/claude', reason: 'failed', message: 'failed' },
+        ],
+      }),
+    )
+    fake.list.mockReturnValue([model()])
+    fake.select
+      .mockResolvedValueOnce({ kind: 'run', run })
+      .mockResolvedValueOnce({ kind: 'fuse' })
+      .mockResolvedValueOnce(0)
+      .mockResolvedValueOnce(1)
+      .mockResolvedValueOnce(-1)
+      .mockResolvedValueOnce('openai/gpt-5')
+      .mockResolvedValueOnce(false)
+    fake.prompt.mockResolvedValueOnce(undefined)
+
+    await runMultiRunCommand(fake.context, depsFor(api), '/multirun')
+
+    expect(fake.toast).toHaveBeenCalledWith({
+      variant: 'error',
+      message: 'openai/gpt-5: has not started\nanthropic/claude: failed',
+    })
+  })
+
+  it('reports a list failure', async () => {
+    const fake = createFakeContext()
+    const api = makeApi()
+    api.listMultiRuns.mockRejectedValue(new ManagerApiError('list failed', 500, 'boom', 'list multi-runs'))
+
+    await runMultiRunCommand(fake.context, depsFor(api), '/multirun')
+
+    expect(fake.toast).toHaveBeenCalledWith({ variant: 'error', message: 'list failed' })
+  })
+
+  it('reports an outdated Manager when the list route is missing', async () => {
+    const fake = createFakeContext()
+    const api = makeApi()
+    api.listMultiRuns.mockRejectedValue(new ManagerApiError('not found', 404, null, 'list multi-runs'))
+
+    await runMultiRunCommand(fake.context, depsFor(api), '/multirun')
 
     expect(fake.toast).toHaveBeenCalledWith({ variant: 'error', message: MULTI_RUN_ROUTE_MISSING })
   })
