@@ -19,11 +19,12 @@ import { getRepoById } from '../db/queries'
 import type { Repo } from '../types/repo'
 import { getErrorMessage } from '../utils/error-utils'
 import { ServiceError } from '../utils/service-error'
-import { buildFusionPrompt, collectFusionSources } from './multi-run-fusion'
+import { buildFusionPrompt, buildFusionSourcePermissionRuleset, collectFusionSources } from './multi-run-fusion'
 import type { OpenCodeClient } from './opencode/client'
 import { RepoWorkspaceError } from './repo'
 import type { RepoWorkspaceService } from './repo-workspace'
 import { requireReadyRepo, SessionLauncher, SessionLaunchError, type LaunchedSession } from './session-launcher'
+import type { SessionPermissionModeService } from './session-permission-modes'
 
 const MULTI_RUN_LIST_LIMIT = 20
 
@@ -75,6 +76,7 @@ export class MultiRunService {
     private readonly db: Database,
     private readonly openCodeClient: OpenCodeClient,
     private readonly repoWorkspaces: RepoWorkspaceService,
+    private readonly permissionModes: SessionPermissionModeService,
   ) {
     this.sessionLauncher = new SessionLauncher(db, openCodeClient, repoWorkspaces)
   }
@@ -194,6 +196,12 @@ export class MultiRunService {
       }
     }
 
+    const sourcePermissions = buildFusionSourcePermissionRuleset(
+      selectedEntries
+        .map((entry) => entry.directory)
+        .filter((directory): directory is string => directory !== null),
+    )
+
     try {
       await this.sessionLauncher.resolveModel(repo, request.model)
     } catch (error) {
@@ -241,6 +249,7 @@ export class MultiRunService {
         model: request.model,
         title: `${record.name} · fusion`,
         ...(request.agent ? { agent: request.agent } : {}),
+        ...(sourcePermissions.length > 0 ? { permissions: sourcePermissions } : {}),
         ...(request.isolate
           ? {
               workspace: {
@@ -256,6 +265,8 @@ export class MultiRunService {
         sessionId: launched.sessionId,
         directory: launched.directory,
       })
+
+      await this.permissionModes.applyDefaultMode(launched.sessionId, launched.directory)
     } catch (error) {
       const launchError = error instanceof SessionLaunchError ? error : null
       const workspaceDirectory = launchError?.workspaceDirectory ?? null

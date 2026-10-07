@@ -177,6 +177,54 @@ describe('SessionPermissionModeService', () => {
     expect(service.defaultMode()).toBe('auto')
   })
 
+  it('stores the default auto mode for a launched session', async () => {
+    const settingsService = new SettingsService(db)
+    settingsService.updateSettings({ sessionDefaults: { permissionMode: 'auto' } })
+    const service = new SessionPermissionModeService(db, createFakeSessionPermissionClient(), settingsService)
+
+    await service.applyDefaultMode('ses_launched', DIRECTORY)
+
+    expect(getSessionPermissionMode(db, 'ses_launched')).toBe('auto')
+  })
+
+  it('stores no mode for a launched session when the default is ask', async () => {
+    const service = new SessionPermissionModeService(db, createFakeSessionPermissionClient(), new SettingsService(db))
+
+    await service.applyDefaultMode('ses_launched', DIRECTORY)
+
+    expect(getSessionPermissionMode(db, 'ses_launched')).toBeNull()
+  })
+
+  it('does not override an existing stored ask when applying the default auto mode', async () => {
+    const settingsService = new SettingsService(db)
+    settingsService.updateSettings({ sessionDefaults: { permissionMode: 'auto' } })
+    setSessionPermissionMode(db, 'ses_launched', 'ask')
+    const service = new SessionPermissionModeService(db, createFakeSessionPermissionClient(), settingsService)
+
+    await service.applyDefaultMode('ses_launched', DIRECTORY)
+
+    expect(getSessionPermissionMode(db, 'ses_launched')).toBe('ask')
+  })
+
+  it('accepts a pending request raised before the launched session mode was recorded', async () => {
+    const settingsService = new SettingsService(db)
+    settingsService.updateSettings({ sessionDefaults: { permissionMode: 'auto' } })
+    const client = createFakeSessionPermissionClient({
+      parents: { ses_launched: null },
+      pendingRequests: { [DIRECTORY]: [{ id: 'perm-launched', sessionID: 'ses_launched' }] },
+    })
+    const service = new SessionPermissionModeService(db, client, settingsService)
+
+    await service.applyDefaultMode('ses_launched', DIRECTORY)
+
+    expect(client.replyPermission).toHaveBeenCalledTimes(1)
+    expect(client.replyPermission).toHaveBeenCalledWith({
+      sessionID: 'ses_launched',
+      requestID: 'perm-launched',
+      decision: 'once',
+    })
+  })
+
   it('auto-accepts a permission request for an auto root session', async () => {
     setSessionPermissionMode(db, 'ses_root', 'auto')
     const client = createFakeSessionPermissionClient({ parents: { ses_root: null } })

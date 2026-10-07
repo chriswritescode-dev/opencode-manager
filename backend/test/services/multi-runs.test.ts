@@ -4,10 +4,13 @@ import { createRepo, deleteRepo } from '../../src/db/queries'
 import { migrate } from '../../src/db/migration-runner'
 import { allMigrations } from '../../src/db/migrations'
 import { createMultiRunWithEntries } from '../../src/db/multi-runs'
+import { getSessionPermissionMode } from '../../src/db/session-permission-modes'
 import { FusionContextLimitError } from '../../src/services/multi-run-fusion'
 import { MultiRunError, MultiRunService } from '../../src/services/multi-runs'
 import { RepoWorkspaceError } from '../../src/services/repo'
 import type { RepoWorkspaceService } from '../../src/services/repo-workspace'
+import { SessionPermissionModeService } from '../../src/services/session-permission-modes'
+import { SettingsService } from '../../src/services/settings'
 import type { Repo } from '../../src/types/repo'
 import type { OpenCodeClient } from '../../src/services/opencode/client'
 import { assistantMessage } from '../helpers/stub-schedule-api'
@@ -109,6 +112,9 @@ function createClient(sessions: Record<string, FakeSessionConfig> = {}): FakeMul
 
   const sessionDiff = vi.fn(async () => [])
 
+  const permissionRequestList = vi.fn(async () => ({ data: [] }))
+  const permissionReply = vi.fn(async () => ({}))
+
   const client = {
     api: {
       session: {
@@ -119,6 +125,10 @@ function createClient(sessions: Record<string, FakeSessionConfig> = {}): FakeMul
         diff: sessionDiff,
       },
       message: { list: messageList },
+      permission: {
+        request: { list: permissionRequestList },
+        reply: permissionReply,
+      },
     },
   } as unknown as OpenCodeClient
 
@@ -198,8 +208,16 @@ describe('MultiRunService', () => {
     return repo.id
   }
 
-  function createService(client: OpenCodeClient, repoWorkspaces: RepoWorkspaceService): MultiRunService {
-    return new MultiRunService(db, client, repoWorkspaces)
+  function createService(
+    client: OpenCodeClient,
+    repoWorkspaces: RepoWorkspaceService,
+    permissionModes: SessionPermissionModeService = new SessionPermissionModeService(
+      db,
+      client,
+      new SettingsService(db),
+    ),
+  ): MultiRunService {
+    return new MultiRunService(db, client, repoWorkspaces, permissionModes)
   }
 
   it('launches one session per model, each in its own workspace named from the group', async () => {
@@ -639,6 +657,98 @@ describe('MultiRunService', () => {
         directory: entry.directory,
       })),
     ).toEqual(before)
+  })
+
+  it('grants read access to the selected source workspaces and denies edits when fusing', async () => {
+    const repoId = readyRepo()
+    const { client, sessionCreate } = createClient()
+    const repoWorkspaces = createRepoWorkspaces()
+    const service = createService(client, repoWorkspaces.service)
+
+    const run = await service.launch({
+      repoId,
+      name: 'Sweep',
+      prompt: 'go',
+      models: ['openai/a', 'openai/b', 'openai/c'],
+      isolate: true,
+    })
+    const entryIds = run.entries.map((entry) => entry.id)
+    sessionCreate.mockClear()
+
+    await service.fuse(run.id, {
+      requestId: FUSE_REQUEST_ID,
+      entryIds: [entryIds[0]!, entryIds[2]!],
+      model: 'openai/d',
+      isolate: true,
+    })
+
+    expect(sessionCreate).toHaveBeenCalledTimes(1)
+    expect(sessionCreate.mock.calls[0]![0].permissions).toEqual([
+      { action: 'external_directory', resource: '/worktrees/Sweep-1/*', effect: 'allow' },
+      { action: 'edit', resource: '/worktrees/Sweep-1/*', effect: 'deny' },
+      { action: 'external_directory', resource: '/worktrees/Sweep-3/*', effect: 'allow' },
+      { action: 'edit', resource: '/worktrees/Sweep-3/*', effect: 'deny' },
+    ])
+    const serializedPermissions = JSON.stringify(sessionCreate.mock.calls[0]![0].permissions)
+    expect(serializedPermissions).not.toContain('Sweep-2')
+    expect(serializedPermissions).not.toContain('Sweep-fusion-1')
+  })
+
+  it('stores the default auto mode on the fusion session', async () => {
+    const repoId = readyRepo()
+    const { client, sessionCreate } = createClient()
+    const repoWorkspaces = createRepoWorkspaces()
+    const settingsService = new SettingsService(db)
+    settingsService.updateSettings({ sessionDefaults: { permissionMode: 'auto' } })
+    const permissionModes = new SessionPermissionModeService(db, client, settingsService)
+    const service = createService(client, repoWorkspaces.service, permissionModes)
+
+    const run = await service.launch({
+      repoId,
+      name: 'Sweep',
+      prompt: 'go',
+      models: ['openai/a', 'openai/b'],
+      isolate: true,
+    })
+    const entryIds = run.entries.map((entry) => entry.id)
+    sessionCreate.mockClear()
+
+    const { run: fused } = await service.fuse(run.id, {
+      requestId: FUSE_REQUEST_ID,
+      entryIds,
+      model: 'openai/c',
+      isolate: false,
+    })
+
+    const fusionSessionId = fused.fusions[0]!.sessionId!
+    expect(getSessionPermissionMode(db, fusionSessionId)).toBe('auto')
+  })
+
+  it('stores no mode on the fusion session when the default is ask', async () => {
+    const repoId = readyRepo()
+    const { client, sessionCreate } = createClient()
+    const repoWorkspaces = createRepoWorkspaces()
+    const service = createService(client, repoWorkspaces.service)
+
+    const run = await service.launch({
+      repoId,
+      name: 'Sweep',
+      prompt: 'go',
+      models: ['openai/a', 'openai/b'],
+      isolate: true,
+    })
+    const entryIds = run.entries.map((entry) => entry.id)
+    sessionCreate.mockClear()
+
+    const { run: fused } = await service.fuse(run.id, {
+      requestId: FUSE_REQUEST_ID,
+      entryIds,
+      model: 'openai/c',
+      isolate: false,
+    })
+
+    const fusionSessionId = fused.fusions[0]!.sessionId!
+    expect(getSessionPermissionMode(db, fusionSessionId)).toBeNull()
   })
 
   it('returns the same fusion for a repeated requestId and launches once', async () => {

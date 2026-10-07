@@ -122,6 +122,32 @@ describe('SessionLauncher', () => {
     })
   })
 
+  it('forwards a permission ruleset to session creation when provided', async () => {
+    const repoId = readyRepo()
+    const { client, create } = createClient()
+    const { service } = createRepoWorkspaces()
+    const launcher = new SessionLauncher(db, client, service)
+    const permissions = [
+      { action: 'external_directory', resource: '/repos/source/*', effect: 'allow' as const },
+      { action: 'edit', resource: '/repos/source/*', effect: 'deny' as const },
+    ]
+
+    await launcher.launch({ repoId, prompt: 'hello', permissions })
+
+    expect(create).toHaveBeenCalledWith(expect.objectContaining({ permissions }))
+  })
+
+  it('omits the permissions key from session creation when none are given', async () => {
+    const repoId = readyRepo()
+    const { client, create } = createClient()
+    const { service } = createRepoWorkspaces()
+    const launcher = new SessionLauncher(db, client, service)
+
+    await launcher.launch({ repoId, prompt: 'hello' })
+
+    expect(create.mock.calls[0]![0]).not.toHaveProperty('permissions')
+  })
+
   it('launches in a new workspace and prompts there', async () => {
     const repoId = readyRepo()
     const { client, create } = createClient()

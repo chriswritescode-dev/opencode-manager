@@ -9,7 +9,7 @@ import { RepoMcpDialog } from "@/components/repo/RepoMcpDialog";
 import { ProjectActionsMenu } from "@/components/repo/ProjectActionsMenu";
 import { RepoActionsDialog } from "@/components/repo/RepoActionsDialog";
 import { RepoSkillsDialog } from "@/components/repo/RepoSkillsDialog";
-import { MultiRunDialog } from "@/components/repo/MultiRunDialog";
+import { MultiRunSheet } from "@/components/repo/MultiRunSheet";
 import { SourceControlPanel } from "@/components/source-control";
 import { TerminalPanel } from "@/components/terminal/TerminalPanel";
 import { PreviewPanel } from "@/components/preview/PreviewPanel";
@@ -343,7 +343,7 @@ export function RepoDetail() {
         repoId={repoId}
       />
 
-      <MultiRunDialog
+      <MultiRunSheet
         repoId={repoId}
         directory={baseDirectory}
         defaultBaseRef={currentBranch}

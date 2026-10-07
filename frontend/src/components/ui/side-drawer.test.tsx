@@ -48,6 +48,20 @@ describe('SideDrawer', () => {
     expect(handleClose).toHaveBeenCalled()
   })
 
+  it('ignores an Escape key already handled by a nested layer', () => {
+    const handleClose = vi.fn()
+    render(
+      <SideDrawer isOpen onClose={handleClose} ariaLabel="Test drawer">
+        <div>Test content</div>
+      </SideDrawer>,
+    )
+    const handled = (event: KeyboardEvent) => event.preventDefault()
+    document.addEventListener('keydown', handled, { capture: true })
+    fireEvent.keyDown(document, { key: 'Escape' })
+    document.removeEventListener('keydown', handled, { capture: true })
+    expect(handleClose).not.toHaveBeenCalled()
+  })
+
 })
 
 describe('SideDrawerHeader', () => {

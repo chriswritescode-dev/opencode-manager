@@ -17,6 +17,7 @@ interface BranchComboboxProps {
   clearable?: boolean
   id?: string
   ariaLabel?: string
+  listClassName?: string
 }
 
 /**
@@ -34,6 +35,7 @@ export function BranchCombobox({
   clearable = false,
   id,
   ariaLabel,
+  listClassName,
 }: BranchComboboxProps) {
   const { data: branchesData, isLoading } = useRepoBranches(repoId, enabled)
 
@@ -69,6 +71,7 @@ export function BranchCombobox({
       allowCustomValue={false}
       showClear={clearable}
       ariaLabel={ariaLabel}
+      listClassName={listClassName}
     />
   )
 }

@@ -2,6 +2,7 @@ import { useCallback, useMemo } from 'react'
 import { Combobox, type ComboboxOption } from '@/components/ui/combobox'
 import { useModelSections } from '@/hooks/useModelSections'
 import { filterModelSections, toModelComboboxOptions } from '@/lib/modelSections'
+import { cn } from '@/lib/utils'
 
 interface ModelComboboxProps {
   value: string
@@ -15,6 +16,8 @@ interface ModelComboboxProps {
   id?: string
   disabled?: boolean
   className?: string
+  listClassName?: string
+  emptyMeansDefault?: boolean
 }
 
 export function ModelCombobox({
@@ -29,8 +32,11 @@ export function ModelCombobox({
   id,
   disabled,
   className,
+  listClassName,
+  emptyMeansDefault = true,
 }: ModelComboboxProps) {
-  const { sections, defaultModel } = useModelSections(directory, { enabled })
+  const { sections, defaultModel: openCodeDefaultModel } = useModelSections(directory, { enabled })
+  const defaultModel = emptyMeansDefault ? openCodeDefaultModel : null
 
   const options = useMemo(() => toModelComboboxOptions(sections, defaultModel), [sections, defaultModel])
 
@@ -53,7 +59,7 @@ export function ModelCombobox({
       ariaLabel={ariaLabel}
       disabled={disabled}
       className={className}
-      listClassName="max-h-[min(24rem,60vh)]"
+      listClassName={cn('max-h-[min(24rem,60vh)]', listClassName)}
     />
   )
 }

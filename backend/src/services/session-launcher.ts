@@ -8,6 +8,8 @@ import type { OpenCodeClient } from './opencode/client'
 import { resolveOpenCodeModel, type ResolvedOpenCodeModel } from './opencode-models'
 import type { RepoWorkspaceService } from './repo-workspace'
 
+type SessionCreateInput = NonNullable<Parameters<OpenCodeClient['api']['session']['create']>[0]>
+
 interface LaunchSessionInput {
   repoId: number
   prompt: string
@@ -15,6 +17,7 @@ interface LaunchSessionInput {
   model?: string
   agent?: string
   workspace?: { name?: string; ref?: string }
+  permissions?: SessionCreateInput['permissions']
 }
 
 export interface LaunchedSession {
@@ -109,6 +112,7 @@ export class SessionLauncher {
       session = await this.openCodeClient.api.session.create({
         ...(input.title ? { title: input.title } : {}),
         ...(input.agent ? { agent: input.agent } : {}),
+        ...(input.permissions ? { permissions: input.permissions } : {}),
         model: {
           providerID: model.providerID,
           id: model.id,

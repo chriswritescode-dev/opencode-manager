@@ -124,3 +124,9 @@ export const FusionUnavailableDetailsSchema = z.object({
 });
 
 export type FusionUnavailableDetails = z.infer<typeof FusionUnavailableDetailsSchema>;
+
+export const FusionRecoveredDetailsSchema = z.object({
+  fusions: z.array(z.object({ fusionId: z.number().int(), sessionId: z.string() })),
+});
+
+export type FusionRecoveredDetails = z.infer<typeof FusionRecoveredDetailsSchema>;
