@@ -1,4 +1,5 @@
 export * from './jsonc'
+export * from './record'
 export * from './repo'
 export * from './sandbox-command'
 export * from './semver'

@@ -12,8 +12,9 @@ const mocks = vi.hoisted(() => ({
   listMultiRuns: vi.fn(),
   launchMultiRun: vi.fn(),
   discardMultiRunEntry: vi.fn(),
-  useProvidersWithModels: vi.fn(),
+  useProviders: vi.fn(),
   useOpenCodeModelState: vi.fn(),
+  useOpenCodeDefaultModel: vi.fn(),
   listBranches: vi.fn(),
 }))
 
@@ -24,12 +25,13 @@ vi.mock('@/api/multiRuns', () => ({
   discardMultiRunEntry: mocks.discardMultiRunEntry,
 }))
 
-vi.mock('@/hooks/useProvidersWithModels', () => ({
-  useProvidersWithModels: mocks.useProvidersWithModels,
+vi.mock('@/hooks/useProviders', () => ({
+  useProviders: mocks.useProviders,
 }))
 
 vi.mock('@/hooks/useModelSelection', () => ({
   useOpenCodeModelState: mocks.useOpenCodeModelState,
+  useOpenCodeDefaultModel: mocks.useOpenCodeDefaultModel,
 }))
 
 vi.mock('@/api/repos', () => ({
@@ -49,19 +51,15 @@ const providers = [
   {
     id: 'openai',
     name: 'OpenAI',
-    source: 'configured',
-    isConnected: true,
     models: [
-      { id: 'gpt-4o', name: 'GPT-4o' },
-      { id: 'gpt-4.1', name: 'GPT-4.1' },
+      { id: 'gpt-4o', name: 'GPT-4o', released: 0, free: false },
+      { id: 'gpt-4.1', name: 'GPT-4.1', released: 0, free: false },
     ],
   },
   {
     id: 'anthropic',
     name: 'Anthropic',
-    source: 'configured',
-    isConnected: true,
-    models: [{ id: 'claude-opus', name: 'Claude Opus' }],
+    models: [{ id: 'claude-opus', name: 'Claude Opus', released: 0, free: false }],
   },
 ]
 
@@ -147,6 +145,13 @@ async function selectSourcesAndModel(user: ReturnType<typeof userEvent.setup>) {
   await user.click(screen.getByRole('checkbox', { name: 'GPT-4o' }))
 }
 
+function synthesisCheckboxLabels() {
+  return screen
+    .getAllByRole('checkbox')
+    .map((checkbox) => checkbox.getAttribute('aria-label') ?? '')
+    .filter((label) => !label.includes('/'))
+}
+
 describe('FuseRunDialog', () => {
   beforeAll(() => {
     Element.prototype.hasPointerCapture ??= () => false
@@ -157,8 +162,9 @@ describe('FuseRunDialog', () => {
 
   beforeEach(() => {
     vi.clearAllMocks()
-    mocks.useProvidersWithModels.mockReturnValue({ data: providers, isLoading: false })
+    mocks.useProviders.mockReturnValue({ data: { providers, models: [] }, isLoading: false })
     mocks.useOpenCodeModelState.mockReturnValue({ data: { recent: [], favorite: [], variant: {} } })
+    mocks.useOpenCodeDefaultModel.mockReturnValue({ data: null })
     mocks.listBranches.mockResolvedValue({
       branches: [
         { name: 'main', type: 'local', current: true },
@@ -401,5 +407,13 @@ describe('FuseRunDialog', () => {
     expect(
       await screen.findByText('An earlier attempt is already running. Open it from the Fusions list.'),
     ).toBeInTheDocument()
+  })
+
+  it('lists the OpenCode default model first without repeating it', () => {
+    mocks.useOpenCodeDefaultModel.mockReturnValue({ data: 'anthropic/claude-opus' })
+    renderFuseDialog()
+
+    expect(screen.getByText('Default')).toBeInTheDocument()
+    expect(synthesisCheckboxLabels()).toEqual(['Claude Opus', 'GPT-4o', 'GPT-4.1'])
   })
 })

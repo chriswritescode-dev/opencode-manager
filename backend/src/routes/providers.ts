@@ -3,22 +3,29 @@ import { z } from 'zod'
 import { SetCredentialRequestSchema } from '../../../shared/src/schemas/auth'
 import { logger } from '../utils/logger'
 import { handleOpenCodeError } from '../utils/route-helpers'
-import type { IntegrationInfo } from '@opencode-manager/shared/opencode'
+import {
+  addRecentModel,
+  removeRecentModel,
+  setModelVariant,
+  toggleFavoriteModel,
+  type IntegrationInfo,
+} from '@opencode-manager/shared/opencode'
 import type { OpenCodeClient } from '../services/opencode/client'
 import { runWhenIntegrationReady } from '../services/opencode/integration-ready'
 import {
-  addRecentModel,
   ModelSelectionSchema,
   readOpenCodeModelState,
-  removeRecentModel,
-  toggleFavoriteModel,
   updateOpenCodeModelState,
 } from '../services/opencode-model-state'
 
-const UpdateModelStateSchema = z.object({
+const ModelStateUpdateSchema = z.object({
   recent: ModelSelectionSchema.optional(),
   favorite: ModelSelectionSchema.optional(),
   removeRecent: ModelSelectionSchema.optional(),
+  variant: z.object({
+    model: ModelSelectionSchema,
+    value: z.string().min(1).nullable().optional(),
+  }).optional(),
 }).strict()
 
 function credentialConnections(integration: IntegrationInfo) {
@@ -41,7 +48,7 @@ export function createProvidersRoutes(openCodeClient: OpenCodeClient) {
   app.post('/model-state', async (c) => {
     try {
       const body = await c.req.json()
-      const validated = UpdateModelStateSchema.parse(body)
+      const validated = ModelStateUpdateSchema.parse(body)
 
       const nextState = await updateOpenCodeModelState((state) => {
         if (validated.favorite) {
@@ -52,6 +59,9 @@ export function createProvidersRoutes(openCodeClient: OpenCodeClient) {
         }
         if (validated.removeRecent) {
           return removeRecentModel(state, validated.removeRecent)
+        }
+        if (validated.variant) {
+          return setModelVariant(state, validated.variant.model, validated.variant.value ?? undefined)
         }
         return state
       })

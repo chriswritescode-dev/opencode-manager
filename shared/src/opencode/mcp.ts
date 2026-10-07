@@ -1,4 +1,5 @@
 import type { ConfigEntry, McpServer } from '@opencode/client'
+import { isRecord } from '../utils/record'
 
 export const MCP_OAUTH_CALLBACK_PATH = '/api/mcp-oauth-proxy/callback'
 
@@ -16,10 +17,6 @@ export type McpStatusMap = Record<string, McpStatus>
 
 export function mcpOAuthRedirectUri(origin: string): string {
   return new URL(MCP_OAUTH_CALLBACK_PATH, origin).toString()
-}
-
-function isRecord(value: unknown): value is Record<string, unknown> {
-  return typeof value === 'object' && value !== null && !Array.isArray(value)
 }
 
 function isMcpServerConfig(value: unknown): value is McpServerConfig {

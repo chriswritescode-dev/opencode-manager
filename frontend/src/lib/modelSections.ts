@@ -1,17 +1,23 @@
 import { Clock, Star, type LucideIcon } from 'lucide-react'
+import type { ComboboxOption } from '@/components/ui/combobox'
 import {
   formatModelName,
   formatProviderName,
   providerModelRef,
+  type Model,
   type ModelSelection,
   type OpenCodeModelState,
-  type ProviderWithModels,
+  type Provider,
 } from '@/api/providers'
+import { compareCatalogModels, parseOpenCodeModelRef } from '@opencode-manager/shared/opencode'
 
 export interface ModelOption {
   value: string
   label: string
+  providerID: string
+  modelID: string
   providerName: string
+  model: Model
   searchText: string
 }
 
@@ -19,25 +25,52 @@ export interface ModelSection {
   key: string
   title: string
   icon?: LucideIcon
-  pinned: boolean
+  providerID?: string
   options: ModelOption[]
 }
 
-export function buildModelSections(providers: ProviderWithModels[], modelState: OpenCodeModelState | undefined): ModelSection[] {
+function createOption(provider: Provider, model: Model, value: string): ModelOption {
+  const label = formatModelName(model)
+  const providerName = formatProviderName(provider)
+  return {
+    value,
+    label,
+    providerID: provider.id,
+    modelID: model.key ?? model.id,
+    providerName,
+    model,
+    searchText: `${label} ${value} ${providerName}`.toLowerCase(),
+  }
+}
+
+export function buildModelSections(
+  providers: Provider[],
+  modelState: OpenCodeModelState | undefined,
+  defaultModel?: string | null,
+): ModelSection[] {
   const optionsByValue = new Map<string, ModelOption>()
   const providerSections = providers.map((provider): ModelSection => {
-    const providerName = formatProviderName(provider)
     const options = provider.models.map((model) => {
-      const label = formatModelName(model)
-      const value = providerModelRef(provider, model)
-      const option = { value, label, providerName, searchText: `${label} ${value} ${providerName}`.toLowerCase() }
-      optionsByValue.set(value, option)
+      const option = createOption(provider, model, providerModelRef(provider, model))
+      optionsByValue.set(option.value, option)
       return option
     })
-    return { key: `provider:${provider.id}`, title: providerName, pinned: false, options }
+    return { key: `provider:${provider.id}`, providerID: provider.id, title: formatProviderName(provider), options }
   })
 
   const pinnedValues = new Set<string>()
+
+  const defaultOption = (() => {
+    if (!defaultModel) return undefined
+    const parsed = parseOpenCodeModelRef(defaultModel)
+    if (!parsed) return undefined
+    const provider = providers.find((entry) => entry.id === parsed.providerID)
+    const model = provider?.models.find((entry) => (entry.key ?? entry.id) === parsed.id)
+    if (!provider || !model) return undefined
+    if (!parsed.variant) pinnedValues.add(providerModelRef(provider, model))
+    return createOption(provider, model, defaultModel)
+  })()
+
   const pinOptions = (selections: ModelSelection[] = []) =>
     selections.flatMap((selection) => {
       const option = optionsByValue.get(providerModelRef({ id: selection.providerID }, { id: selection.modelID }))
@@ -49,8 +82,9 @@ export function buildModelSections(providers: ProviderWithModels[], modelState: 
   const favoriteOptions = pinOptions(modelState?.favorite)
   const recentOptions = pinOptions(modelState?.recent)
   const sections: ModelSection[] = [
-    { key: 'favorites', title: 'Favorites', icon: Star, pinned: true, options: favoriteOptions },
-    { key: 'recent', title: 'Recent', icon: Clock, pinned: true, options: recentOptions },
+    ...(defaultOption ? [{ key: 'default', title: 'Default', options: [defaultOption] }] : []),
+    { key: 'favorites', title: 'Favorites', icon: Star, options: favoriteOptions },
+    { key: 'recent', title: 'Recent', icon: Clock, options: recentOptions },
     ...providerSections.map((section) => ({
       ...section,
       options: section.options.filter((option) => !pinnedValues.has(option.value)),
@@ -59,14 +93,42 @@ export function buildModelSections(providers: ProviderWithModels[], modelState: 
   return sections.filter((section) => section.options.length > 0)
 }
 
+function compareSearchMatches(a: ModelOption, b: ModelOption): number {
+  return compareCatalogModels(
+    { name: a.label, free: a.model.free, released: a.model.released },
+    { name: b.label, free: b.model.free, released: b.model.released },
+  )
+}
+
 export function filterModelSections(sections: ModelSection[], query: string): ModelSection[] {
   const terms = query.toLowerCase().split(/\s+/).filter(Boolean)
   if (terms.length === 0) return sections
 
-  return sections
-    .map((section) => ({
-      ...section,
-      options: section.options.filter((option) => terms.every((term) => option.searchText.includes(term))),
-    }))
-    .filter((section) => section.options.length > 0)
+  const favoriteValues = new Set(
+    sections.find((section) => section.key === 'favorites')?.options.map((option) => option.value) ?? [],
+  )
+  const matches = sections
+    .flatMap((section) => section.options)
+    .filter((option) => terms.every((term) => option.searchText.includes(term)))
+    .sort(compareSearchMatches)
+  const results = [
+    ...matches.filter((option) => favoriteValues.has(option.value)),
+    ...matches.filter((option) => !favoriteValues.has(option.value)),
+  ]
+  if (results.length === 0) return []
+  return [{ key: 'results', title: 'Results', options: results }]
+}
+
+export function toModelComboboxOptions(sections: ModelSection[], defaultRef?: string | null): ComboboxOption[] {
+  return sections.flatMap((section) =>
+    section.options.map((option) => {
+      const isDefault = defaultRef != null && option.value === defaultRef
+      return {
+        value: isDefault ? '' : option.value,
+        label: isDefault ? `Default: ${option.label}` : option.label,
+        description: isDefault ? undefined : option.value,
+        group: section.title,
+      }
+    }),
+  )
 }

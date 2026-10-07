@@ -54,7 +54,7 @@ vi.mock('@/hooks/useSessionTranscript', () => ({
 }))
 
 vi.mock('@/hooks/useModelSelection', () => ({
-  useModelSelection: vi.fn(() => ({ model: null, modelString: null })),
+  useModelSelection: vi.fn(() => ({ model: null, modelString: null, modelRef: null })),
 }))
 
 vi.mock('@/hooks/useTTS', () => ({

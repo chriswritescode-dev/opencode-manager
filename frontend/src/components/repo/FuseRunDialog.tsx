@@ -10,10 +10,9 @@ import { Label } from '@/components/ui/label'
 import { SessionStatusIndicator } from '@/components/ui/session-status-indicator'
 import { BranchCombobox } from '@/components/repo/BranchCombobox'
 import { ModelCheckboxList } from '@/components/repo/ModelCheckboxList'
-import { useProvidersWithModels } from '@/hooks/useProvidersWithModels'
-import { useOpenCodeModelState } from '@/hooks/useModelSelection'
+import { useModelSections } from '@/hooks/useModelSections'
 import { useFuseMultiRun } from '@/hooks/useMultiRuns'
-import { buildModelSections, filterModelSections } from '@/lib/modelSections'
+import { filterModelSections } from '@/lib/modelSections'
 import { randomId } from '@/lib/utils'
 import {
   FUSION_INSTRUCTIONS_MAX_LENGTH,
@@ -63,8 +62,7 @@ export function FuseRunDialog({
   const deferredModelSearch = useDeferredValue(modelSearch)
 
   const fuse = useFuseMultiRun(repoId)
-  const { data: providers } = useProvidersWithModels({ enabled: open, directory })
-  const { data: modelState } = useOpenCodeModelState(directory, open)
+  const { sections: modelSections } = useModelSections(directory, { enabled: open })
 
   useEffect(() => {
     if (!open) return
@@ -77,7 +75,6 @@ export function FuseRunDialog({
     setRequestId(randomId())
   }, [open, run.id, run.baseRef])
 
-  const modelSections = useMemo(() => buildModelSections(providers, modelState), [providers, modelState])
   const visibleModelSections = useMemo(
     () => filterModelSections(modelSections, deferredModelSearch),
     [modelSections, deferredModelSearch],

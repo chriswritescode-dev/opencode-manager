@@ -1,27 +1,15 @@
-import { useMemo } from 'react'
-import { useProvidersWithModels } from '@/hooks/useProvidersWithModels'
-import { useOpenCodeConfigModel, useOpenCodeModelState } from '@/hooks/useModelSelection'
-import { buildAvailableModelKeys } from '@/lib/schedules/schedule-model'
+import { useProviders } from '@/hooks/useProviders'
+import type { ModelInfo } from '@opencode-manager/shared/opencode'
 
 export function useScheduleModels(enabled: boolean, directory?: string) {
-  const providersQuery = useProvidersWithModels({
-    enabled,
-    directory,
-    keyParts: ['schedule-models'],
-  })
-  const { data: modelState } = useOpenCodeModelState(directory, enabled)
-  const { data: configDefaultModel = null, isLoading: configLoading } = useOpenCodeConfigModel(directory, enabled)
-  const providerModels = providersQuery.data
-  const availableModelKeys = useMemo(
-    () => (providersQuery.isSuccess ? buildAvailableModelKeys(providerModels) : null),
-    [providersQuery.isSuccess, providerModels],
-  )
+  const providersQuery = useProviders(directory, { enabled })
+  const availableModels: ModelInfo[] | null =
+    providersQuery.isSuccess && !providersQuery.isPlaceholderData
+      ? providersQuery.data?.models ?? []
+      : null
 
   return {
-    providerModels,
-    modelState,
-    availableModelKeys,
-    configDefaultModel,
-    isLoading: providersQuery.isLoading || configLoading,
+    availableModels,
+    isLoading: providersQuery.isLoading,
   }
 }

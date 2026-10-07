@@ -1,6 +1,6 @@
 import { memo, useCallback, useMemo, useState } from 'react'
 import { Pencil, Loader2 } from 'lucide-react'
-import { assistantText } from '@opencode-manager/shared/opencode'
+import { assistantText, formatOpenCodeModelRef } from '@opencode-manager/shared/opencode'
 import type {
   PromptAgentAttachment,
   PromptFileAttachment,
@@ -524,7 +524,7 @@ const MessageRow = memo(function MessageRow({
   }
 
   if (message.type === 'model-switched') {
-    return <MessageDivider label={`Model: ${message.model.providerID}/${message.model.id}`} />
+    return <MessageDivider label={`Model: ${formatOpenCodeModelRef(message.model)}`} />
   }
 
   if (message.type === 'location-switched') {

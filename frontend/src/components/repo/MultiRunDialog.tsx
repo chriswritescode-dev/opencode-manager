@@ -15,10 +15,9 @@ import { BranchCombobox } from '@/components/repo/BranchCombobox'
 import { ModelCheckboxList } from '@/components/repo/ModelCheckboxList'
 import { FuseRunDialog } from '@/components/repo/FuseRunDialog'
 import { ChangesWalkthroughDialog } from '@/components/session/ChangesWalkthroughDialog'
-import { useProvidersWithModels } from '@/hooks/useProvidersWithModels'
-import { useOpenCodeModelState } from '@/hooks/useModelSelection'
+import { useModelSections } from '@/hooks/useModelSections'
 import { useDiscardMultiRunEntry, useLaunchMultiRun, useMultiRuns } from '@/hooks/useMultiRuns'
-import { buildModelSections, filterModelSections } from '@/lib/modelSections'
+import { filterModelSections } from '@/lib/modelSections'
 import { buildSessionPath } from '@opencode-manager/shared/utils'
 import {
   MULTI_RUN_FUSION_MIN_SOURCES,
@@ -79,8 +78,7 @@ export function MultiRunDialog({
   const [fuseRun, setFuseRun] = useState<MultiRun | null>(null)
   const [walkthroughSessionId, setWalkthroughSessionId] = useState<string | null>(null)
 
-  const { data: providers } = useProvidersWithModels({ enabled: open, directory })
-  const { data: modelState } = useOpenCodeModelState(directory, open)
+  const { sections: modelSections } = useModelSections(directory, { enabled: open })
   const runsQuery = useMultiRuns(repoId, open)
   const launch = useLaunchMultiRun(repoId)
   const discard = useDiscardMultiRunEntry(repoId)
@@ -96,7 +94,6 @@ export function MultiRunDialog({
     setModelSearch('')
   }, [open, defaultBaseRef])
 
-  const modelSections = useMemo(() => buildModelSections(providers, modelState), [providers, modelState])
   const visibleModelSections = useMemo(
     () => filterModelSections(modelSections, deferredModelSearch),
     [modelSections, deferredModelSearch],

@@ -1,408 +1,142 @@
-import { describe, it, expect, beforeEach, vi } from 'vitest'
-import { useModelStore, modelExists } from '@/stores/modelStore'
-import type { Provider } from '@/api/providers'
+import { describe, it, expect, beforeEach } from 'vitest'
+import { locationAgentKey, useModelStore } from '@/stores/modelStore'
 
-beforeEach(() => {
-  useModelStore.setState({
-    model: null,
-    variants: {},
-    lastConfigModel: undefined,
+const resetStore = () => {
+  useModelStore.setState({ newSessionPicks: {}, sessionPicks: {}, activeAgent: null })
+}
+
+describe('locationAgentKey', () => {
+  it('combines the directory and agent id', () => {
+    expect(locationAgentKey('/repo', 'build')).toBe(JSON.stringify(['/repo', 'build']))
+  })
+
+  it('normalizes missing values', () => {
+    expect(locationAgentKey(undefined, undefined)).toBe(JSON.stringify(['', '']))
+    expect(locationAgentKey(undefined, 'build')).toBe(JSON.stringify(['', 'build']))
   })
 })
 
-function makeProvider(overrides: Partial<Provider>): Provider {
-  return {
-    id: overrides.id ?? 'test-provider',
-    name: overrides.name ?? 'Test Provider',
-    models: overrides.models ?? {},
-    isConnected: true,
-    ...overrides,
-  }
-}
+describe('setNewSessionPick', () => {
+  beforeEach(resetStore)
 
-const openaiProviders = [
-  makeProvider({
-    id: 'openai',
-    models: { 'gpt-4o': { id: 'gpt-4o', name: 'GPT-4o' } },
-  }),
-]
-
-describe('validateAndSyncModel', () => {
-  beforeEach(() => {
-    useModelStore.setState({
-      model: null,
-      variants: {},
-      lastConfigModel: undefined,
-    })
+  it('stores a selection under its key', () => {
+    useModelStore.getState().setNewSessionPick('key', { providerID: 'anthropic', modelID: 'claude-sonnet-4' })
+    expect(useModelStore.getState().newSessionPicks.key).toEqual({ providerID: 'anthropic', modelID: 'claude-sonnet-4' })
   })
 
-  it('falls back to syncFromConfig when providers is undefined', () => {
-    useModelStore.getState().validateAndSyncModel('anthropic/claude-sonnet-4', undefined)
-
-    expect(useModelStore.getState().model).toEqual({ providerID: 'anthropic', modelID: 'claude-sonnet-4' })
+  it('stores the variant with the selection', () => {
+    useModelStore.getState().setNewSessionPick('key', { providerID: 'anthropic', modelID: 'claude-sonnet-4', variant: 'high' })
+    expect(useModelStore.getState().newSessionPicks.key.variant).toBe('high')
   })
 
-  it('uses config model when current model is missing and config is valid', () => {
-    useModelStore.setState({
-      model: { providerID: 'anthropic', modelID: 'claude-sonnet-4' },
-    })
-
-    useModelStore.getState().validateAndSyncModel('openai/gpt-4o', openaiProviders)
-
-    expect(useModelStore.getState().model).toEqual({ providerID: 'openai', modelID: 'gpt-4o' })
-  })
-
-  it('uses first valid recent model when config is invalid', () => {
-    useModelStore.setState({
-      model: { providerID: 'anthropic', modelID: 'claude-sonnet-4' },
-    })
-
-    useModelStore.getState().validateAndSyncModel('nonexistent/model', openaiProviders, [
-      { providerID: 'nonexistent', modelID: 'model' },
-      { providerID: 'openai', modelID: 'gpt-4o' },
-    ])
-
-    expect(useModelStore.getState().model).toEqual({ providerID: 'openai', modelID: 'gpt-4o' })
-  })
-
-  it('uses fallback model when config and recent are invalid', () => {
-    useModelStore.setState({
-      model: { providerID: 'anthropic', modelID: 'claude-sonnet-4' },
-    })
-
-    useModelStore.getState().validateAndSyncModel(
-      'nonexistent/model',
-      openaiProviders,
-      [{ providerID: 'nonexistent', modelID: 'model' }],
-      'openai/gpt-4o'
-    )
-
-    expect(useModelStore.getState().model).toEqual({ providerID: 'openai', modelID: 'gpt-4o' })
-  })
-
-  it('leaves model null when config, recent, and fallback are all invalid', () => {
-    useModelStore.setState({
-      model: { providerID: 'anthropic', modelID: 'claude-sonnet-4' },
-    })
-
-    useModelStore.getState().validateAndSyncModel(
-      'nonexistent/model',
-      openaiProviders,
-      [{ providerID: 'nonexistent', modelID: 'model' }],
-      'nonexistent/fallback'
-    )
-
-    expect(useModelStore.getState().model).toBeNull()
-  })
-
-  it('does not override a current model that exists in providers', () => {
-    useModelStore.setState({
-      model: { providerID: 'openai', modelID: 'gpt-4o' },
-    })
-
-    useModelStore.getState().validateAndSyncModel(
-      'nonexistent/model',
-      openaiProviders,
-      [{ providerID: 'nonexistent', modelID: 'model' }],
-      'nonexistent/fallback'
-    )
-
-    expect(useModelStore.getState().model).toEqual({ providerID: 'openai', modelID: 'gpt-4o' })
-  })
-
-  it('clears stale hydrated model when nothing resolves', () => {
-    const providers = [
-      makeProvider({
-        id: 'openrouter',
-        models: { 'qwen/qwen3-235b-a22b': { id: 'qwen/qwen3-235b-a22b', name: 'Qwen3 235B' } },
-      }),
-    ]
-
-    useModelStore.setState({
-      model: { providerID: 'openrouter', modelID: 'qwen/qwen3-35b' },
-    })
-
-    useModelStore.getState().validateAndSyncModel(undefined, providers)
-
-    expect(useModelStore.getState().model).toBeNull()
-  })
-
-  it('is idempotent when re-running with same valid state', () => {
-    const providers = [
-      makeProvider({
-        id: 'anthropic',
-        models: { 'claude-sonnet-4': { id: 'claude-sonnet-4', name: 'Claude Sonnet 4' } },
-      }),
-    ]
-
-    useModelStore.setState({
-      model: { providerID: 'anthropic', modelID: 'claude-sonnet-4' },
-    })
-
-    useModelStore.getState().validateAndSyncModel('anthropic/claude-sonnet-4', providers)
-
-    const afterFirst = useModelStore.getState()
+  it('does not notify subscribers when the selection is unchanged', () => {
+    useModelStore.getState().setNewSessionPick('key', { providerID: 'anthropic', modelID: 'claude-sonnet-4' })
 
     let updateCount = 0
     const unsubscribe = useModelStore.subscribe(() => {
       updateCount++
     })
 
-    useModelStore.getState().validateAndSyncModel('anthropic/claude-sonnet-4', providers)
+    useModelStore.getState().setNewSessionPick('key', { providerID: 'anthropic', modelID: 'claude-sonnet-4' })
     unsubscribe()
-
-    const afterSecond = useModelStore.getState()
 
     expect(updateCount).toBe(0)
-    expect(afterSecond.model).toEqual(afterFirst.model)
   })
-})
 
-describe('setModel', () => {
-  beforeEach(() => {
-    useModelStore.setState({
-      model: null,
-      variants: {},
-      lastConfigModel: undefined,
+  it('treats a default variant as no variant for equality', () => {
+    useModelStore.getState().setNewSessionPick('key', { providerID: 'anthropic', modelID: 'claude-sonnet-4' })
+
+    let updateCount = 0
+    const unsubscribe = useModelStore.subscribe(() => {
+      updateCount++
     })
-  })
 
-  it('sets the model', () => {
-    const model = { providerID: 'anthropic', modelID: 'claude-sonnet-4' }
-    useModelStore.getState().setModel(model)
-    expect(useModelStore.getState().model).toEqual(model)
-  })
-
-  it('replaces the previous model', () => {
-    useModelStore.setState({ model: { providerID: 'openai', modelID: 'gpt-4o' } })
-    useModelStore.getState().setModel({ providerID: 'anthropic', modelID: 'claude-sonnet-4' })
-    expect(useModelStore.getState().model).toEqual({ providerID: 'anthropic', modelID: 'claude-sonnet-4' })
-  })
-})
-
-describe('setActiveModel', () => {
-  beforeEach(() => {
-    useModelStore.setState({
-      model: null,
-      variants: {},
-      lastConfigModel: undefined,
-    })
-  })
-
-  it('sets the active model', () => {
-    const model = { providerID: 'anthropic', modelID: 'claude-sonnet-4' }
-    useModelStore.getState().setActiveModel(model)
-    expect(useModelStore.getState().model).toEqual(model)
-  })
-})
-
-describe('syncFromConfig', () => {
-  beforeEach(() => {
-    useModelStore.setState({
-      model: null,
-      variants: {},
-      lastConfigModel: undefined,
-    })
-  })
-
-  it('sets model and lastConfigModel from valid config string', () => {
-    useModelStore.getState().syncFromConfig('anthropic/claude-sonnet-4')
-    expect(useModelStore.getState().model).toEqual({ providerID: 'anthropic', modelID: 'claude-sonnet-4' })
-    expect(useModelStore.getState().lastConfigModel).toBe('anthropic/claude-sonnet-4')
-  })
-
-  it('does nothing when same config already synced', () => {
-    useModelStore.setState({ model: { providerID: 'anthropic', modelID: 'claude-sonnet-4' }, lastConfigModel: 'anthropic/claude-sonnet-4' })
-    useModelStore.getState().syncFromConfig('anthropic/claude-sonnet-4')
-
-    expect(useModelStore.getState().lastConfigModel).toBe('anthropic/claude-sonnet-4')
-  })
-
-  it('updates when force is true even if same config', () => {
-    useModelStore.setState({ model: { providerID: 'anthropic', modelID: 'claude-sonnet-4' }, lastConfigModel: 'anthropic/claude-sonnet-4' })
-    useModelStore.getState().syncFromConfig('anthropic/claude-sonnet-4', true)
-
-    expect(useModelStore.getState().lastConfigModel).toBe('anthropic/claude-sonnet-4')
-  })
-
-  it('handles invalid config string gracefully', () => {
-    useModelStore.getState().syncFromConfig('invalid')
-    expect(useModelStore.getState().model).toBeNull()
-    expect(useModelStore.getState().lastConfigModel).toBe('invalid')
-  })
-
-  it('strips a model variant when syncing the config model', () => {
-    useModelStore.getState().syncFromConfig('anthropic/claude-sonnet-4#high')
-    expect(useModelStore.getState().model).toEqual({ providerID: 'anthropic', modelID: 'claude-sonnet-4' })
-  })
-
-  it('keeps slashes inside the model id when syncing the config model', () => {
-    useModelStore.getState().syncFromConfig('openrouter/anthropic/claude-sonnet-4')
-    expect(useModelStore.getState().model).toEqual({
-      providerID: 'openrouter',
-      modelID: 'anthropic/claude-sonnet-4',
-    })
-  })
-
-  it('handles undefined config string', () => {
-    useModelStore.getState().syncFromConfig(undefined)
-    expect(useModelStore.getState().lastConfigModel).toBeUndefined()
-  })
-})
-
-describe('getModelString', () => {
-  beforeEach(() => {
-    useModelStore.setState({
-      model: null,
-      variants: {},
-      lastConfigModel: undefined,
-    })
-  })
-
-  it('returns null when no model selected', () => {
-    expect(useModelStore.getState().getModelString()).toBeNull()
-  })
-
-  it('returns providerID/modelID string when model is set', () => {
-    useModelStore.setState({ model: { providerID: 'anthropic', modelID: 'claude-sonnet-4' } })
-    expect(useModelStore.getState().getModelString()).toBe('anthropic/claude-sonnet-4')
-  })
-})
-
-describe('variants', () => {
-  beforeEach(() => {
-    useModelStore.setState({
-      model: null,
-      variants: {},
-      lastConfigModel: undefined,
-    })
-  })
-
-  it('setVariant stores variant for model', () => {
-    const model = { providerID: 'openai', modelID: 'gpt-4o' }
-    useModelStore.getState().setVariant(model, 'gpt-4o-2024-05-13')
-    expect(useModelStore.getState().variants['openai/gpt-4o']).toBe('gpt-4o-2024-05-13')
-  })
-
-  it('getVariant returns variant for model', () => {
-    const model = { providerID: 'openai', modelID: 'gpt-4o' }
-    useModelStore.getState().setVariant(model, 'gpt-4o-2024-05-13')
-    expect(useModelStore.getState().getVariant(model)).toBe('gpt-4o-2024-05-13')
-  })
-
-  it('getVariant returns undefined when no variant set', () => {
-    expect(useModelStore.getState().getVariant({ providerID: 'anthropic', modelID: 'claude-sonnet-4' })).toBeUndefined()
-  })
-
-  it('clearVariant removes variant for model', () => {
-    const model = { providerID: 'openai', modelID: 'gpt-4o' }
-    useModelStore.getState().setVariant(model, 'gpt-4o-2024-05-13')
-    useModelStore.getState().clearVariant(model)
-    expect(useModelStore.getState().variants['openai/gpt-4o']).toBeUndefined()
-  })
-
-  it('clearVariant is idempotent', () => {
-    const model = { providerID: 'openai', modelID: 'gpt-4o' }
-    expect(() => useModelStore.getState().clearVariant(model)).not.toThrow()
-  })
-
-  it('clearVariant does not notify subscribers when variant is already absent', () => {
-    const model = { providerID: 'openai', modelID: 'gpt-4o' }
-    const listener = vi.fn()
-    const unsubscribe = useModelStore.subscribe(listener)
-
-    useModelStore.getState().clearVariant(model)
-
+    useModelStore.getState().setNewSessionPick('key', { providerID: 'anthropic', modelID: 'claude-sonnet-4', variant: 'default' })
     unsubscribe()
-    expect(listener).not.toHaveBeenCalled()
+
+    expect(updateCount).toBe(0)
   })
 
-  it('setVariant does not notify subscribers when variant is unchanged', () => {
-    const model = { providerID: 'openai', modelID: 'gpt-4o' }
-    useModelStore.getState().setVariant(model, 'gpt-4o-2024-05-13')
-    const listener = vi.fn()
-    const unsubscribe = useModelStore.subscribe(listener)
+  it('updates when only the variant changes', () => {
+    useModelStore.getState().setNewSessionPick('key', { providerID: 'anthropic', modelID: 'claude-sonnet-4' })
+    useModelStore.getState().setNewSessionPick('key', { providerID: 'anthropic', modelID: 'claude-sonnet-4', variant: 'high' })
+    expect(useModelStore.getState().newSessionPicks.key.variant).toBe('high')
+  })
+})
 
-    useModelStore.getState().setVariant(model, 'gpt-4o-2024-05-13')
+describe('setSessionPick', () => {
+  beforeEach(resetStore)
 
+  it('stores a per-session agent selection', () => {
+    useModelStore.getState().setSessionPick('session-1', 'build', { providerID: 'anthropic', modelID: 'claude-sonnet-4' })
+    expect(useModelStore.getState().sessionPicks['session-1'].build).toEqual({
+      providerID: 'anthropic',
+      modelID: 'claude-sonnet-4',
+    })
+  })
+
+  it('keeps selections for different agents independent', () => {
+    useModelStore.getState().setSessionPick('session-1', 'build', { providerID: 'anthropic', modelID: 'claude-sonnet-4' })
+    useModelStore.getState().setSessionPick('session-1', 'plan', { providerID: 'openai', modelID: 'gpt-4o' })
+    expect(useModelStore.getState().sessionPicks['session-1'].build.modelID).toBe('claude-sonnet-4')
+    expect(useModelStore.getState().sessionPicks['session-1'].plan.modelID).toBe('gpt-4o')
+  })
+
+  it('removes the selection when set to undefined', () => {
+    useModelStore.getState().setSessionPick('session-1', 'build', { providerID: 'anthropic', modelID: 'claude-sonnet-4' })
+    useModelStore.getState().setSessionPick('session-1', 'build', undefined)
+    expect(useModelStore.getState().sessionPicks['session-1'].build).toBeUndefined()
+  })
+
+  it('does not notify subscribers when the selection is unchanged', () => {
+    useModelStore.getState().setSessionPick('session-1', 'build', { providerID: 'anthropic', modelID: 'claude-sonnet-4' })
+
+    let updateCount = 0
+    const unsubscribe = useModelStore.subscribe(() => {
+      updateCount++
+    })
+
+    useModelStore.getState().setSessionPick('session-1', 'build', { providerID: 'anthropic', modelID: 'claude-sonnet-4' })
     unsubscribe()
-    expect(listener).not.toHaveBeenCalled()
+
+    expect(updateCount).toBe(0)
   })
 })
 
-describe('syncModelState', () => {
-  beforeEach(() => {
-    useModelStore.setState({
-      model: null,
-      variants: {},
-      lastConfigModel: undefined,
+describe('setActiveAgent', () => {
+  beforeEach(resetStore)
+
+  it('stores the active agent', () => {
+    useModelStore.getState().setActiveAgent({ id: 'build', model: { providerID: 'anthropic', id: 'claude-sonnet-4' } })
+    expect(useModelStore.getState().activeAgent).toEqual({
+      id: 'build',
+      model: { providerID: 'anthropic', id: 'claude-sonnet-4' },
     })
   })
 
-  it('merges variants from model state', () => {
-    useModelStore.getState().syncModelState({
-      recent: [],
-      favorite: [],
-      variant: { 'anthropic/claude-sonnet-4': 'claude-sonnet-4-20250514' },
+  it('does not notify subscribers when the id and model ref are unchanged', () => {
+    useModelStore.getState().setActiveAgent({ id: 'build', model: { providerID: 'anthropic', id: 'claude-sonnet-4' } })
+
+    let updateCount = 0
+    const unsubscribe = useModelStore.subscribe(() => {
+      updateCount++
     })
 
-    expect(useModelStore.getState().variants['anthropic/claude-sonnet-4']).toBe('claude-sonnet-4-20250514')
+    useModelStore.getState().setActiveAgent({ id: 'build', model: { providerID: 'anthropic', id: 'claude-sonnet-4' } })
+    unsubscribe()
+
+    expect(updateCount).toBe(0)
   })
 
-  it('existing store variants take precedence over incoming variants', () => {
-    useModelStore.setState({ variants: { 'anthropic/claude-sonnet-4': 'existing-variant' } })
-
-    useModelStore.getState().syncModelState({
-      recent: [],
-      favorite: [],
-      variant: { 'anthropic/claude-sonnet-4': 'incoming-variant' },
-    })
-
-    expect(useModelStore.getState().variants['anthropic/claude-sonnet-4']).toBe('existing-variant')
+  it('updates when the agent model ref changes', () => {
+    useModelStore.getState().setActiveAgent({ id: 'build', model: { providerID: 'anthropic', id: 'claude-sonnet-4' } })
+    useModelStore.getState().setActiveAgent({ id: 'build', model: { providerID: 'openai', id: 'gpt-4o' } })
+    expect(useModelStore.getState().activeAgent?.model).toEqual({ providerID: 'openai', id: 'gpt-4o' })
   })
 
-  it('ignores recent and favorite fields from model state', () => {
-    useModelStore.getState().syncModelState({
-      recent: [{ providerID: 'openai', modelID: 'gpt-4o' }],
-      favorite: [{ providerID: 'anthropic', modelID: 'claude-sonnet-4' }],
-      variant: {},
-    })
-
-    const state = useModelStore.getState() as Record<string, unknown>
-    expect(state).not.toHaveProperty('recentModels')
-    expect(state).not.toHaveProperty('favoriteModels')
-  })
-})
-
-describe('modelExists', () => {
-  const providers = [
-    makeProvider({
-      id: 'openai',
-      models: { 'gpt-4o': { id: 'gpt-4o', name: 'GPT-4o' } },
-    }),
-    makeProvider({
-      id: 'anthropic',
-      models: { 'claude-sonnet-4': { id: 'claude-sonnet-4', name: 'Claude Sonnet 4' } },
-    }),
-  ]
-
-  it('returns true when provider and model exist', () => {
-    expect(modelExists({ providerID: 'openai', modelID: 'gpt-4o' }, providers)).toBe(true)
-  })
-
-  it('returns false when provider does not exist', () => {
-    expect(modelExists({ providerID: 'nonexistent', modelID: 'gpt-4o' }, providers)).toBe(false)
-  })
-
-  it('returns false when model does not exist in provider', () => {
-    expect(modelExists({ providerID: 'openai', modelID: 'nonexistent' }, providers)).toBe(false)
-  })
-
-  it('returns false when model is null', () => {
-    expect(modelExists(null, providers)).toBe(false)
-  })
-
-  it('returns false when providers list is empty', () => {
-    expect(modelExists({ providerID: 'openai', modelID: 'gpt-4o' }, [])).toBe(false)
+  it('updates when the agent id changes', () => {
+    useModelStore.getState().setActiveAgent({ id: 'build', model: { providerID: 'anthropic', id: 'claude-sonnet-4' } })
+    useModelStore.getState().setActiveAgent({ id: 'plan', model: { providerID: 'anthropic', id: 'claude-sonnet-4' } })
+    expect(useModelStore.getState().activeAgent?.id).toBe('plan')
   })
 })

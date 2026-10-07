@@ -1,5 +1,6 @@
 import { useMemo } from 'react'
 import { skipToken, useQuery } from '@tanstack/react-query'
+import { formatOpenCodeModelRef, findModelInfo } from '@opencode-manager/shared/opencode'
 import { useProviders } from '@/hooks/useProviders'
 import { sessionTranscriptQueryKey } from '@/lib/queryInvalidation'
 import type { TranscriptCache } from '@/lib/session-projection'
@@ -40,12 +41,12 @@ export const useContextUsage = (sessionID: string | undefined, directory?: strin
     const activeModel = latestAssistantMessage?.type === 'assistant' ? latestAssistantMessage.model : undefined
 
     const currentModel = activeModel
-      ? `${activeModel.providerID}/${activeModel.id}`
+      ? formatOpenCodeModelRef(activeModel)
       : null
 
     let contextLimit: number | null = null
     if (activeModel && models) {
-      const model = models.find(item => item.providerID === activeModel.providerID && item.id === activeModel.id)
+      const model = findModelInfo(models, { providerID: activeModel.providerID, modelID: activeModel.id })
       if (model?.limit) {
         contextLimit = model.limit.context
       }

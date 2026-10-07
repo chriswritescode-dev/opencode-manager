@@ -174,7 +174,35 @@ describe('useSendPrompt', () => {
     })
 
     expect(mocks.switchSessionAgent).toHaveBeenCalledWith('test-session', 'plan')
-    expect(mocks.switchSessionModel).not.toHaveBeenCalled()
+    expect(mocks.switchSessionModel).toHaveBeenCalledWith('test-session', {
+      providerID: 'anthropic',
+      id: 'claude-sonnet-4',
+    })
+    expect(mocks.switchSessionAgent.mock.invocationCallOrder[0]).toBeLessThan(
+      mocks.switchSessionModel.mock.invocationCallOrder[0],
+    )
+  })
+
+  it('switches the agent before the model when both changed', async () => {
+    setSession(sessionInfo({
+      agent: 'build',
+      model: { providerID: 'anthropic', id: 'claude-sonnet-4' },
+    }))
+
+    const { result } = renderHookWithProviders()
+
+    await result.current.mutateAsync({
+      sessionID: 'test-session',
+      text: 'Hello',
+      model: { providerID: 'openai', id: 'gpt-4' },
+      agent: 'plan',
+    })
+
+    expect(mocks.switchSessionAgent).toHaveBeenCalledWith('test-session', 'plan')
+    expect(mocks.switchSessionModel).toHaveBeenCalledWith('test-session', { providerID: 'openai', id: 'gpt-4' })
+    expect(mocks.switchSessionAgent.mock.invocationCallOrder[0]).toBeLessThan(
+      mocks.switchSessionModel.mock.invocationCallOrder[0],
+    )
   })
 
   it('switches back to a previously cached model after an intermediate switch', async () => {
@@ -226,9 +254,9 @@ describe('useSendPrompt', () => {
     ).toEqual({ providerID: 'anthropic', id: 'claude-sonnet-4' })
   })
 
-  it('keeps a successful model switch when the following agent switch fails', async () => {
+  it('keeps a successful agent switch when the following model switch fails', async () => {
     setSession(sessionInfo({ agent: 'build', model: { providerID: 'anthropic', id: 'claude-sonnet-4' } }))
-    mocks.switchSessionAgent.mockRejectedValueOnce(new Error('agent switch failed'))
+    mocks.switchSessionModel.mockRejectedValueOnce(new Error('model switch failed'))
 
     const { result } = renderHookWithProviders()
 
@@ -239,7 +267,7 @@ describe('useSendPrompt', () => {
         model: { providerID: 'openai', id: 'gpt-4' },
         agent: 'plan',
       }),
-    ).rejects.toThrow('agent switch failed')
+    ).rejects.toThrow('model switch failed')
 
     const cached = queryClient.getQueryData<{ model?: unknown; agent?: string }>([
       'opencode',
@@ -247,8 +275,27 @@ describe('useSendPrompt', () => {
       'test-session',
       '/test',
     ])
-    expect(cached?.model).toEqual({ providerID: 'openai', id: 'gpt-4' })
-    expect(cached?.agent).toBe('build')
+    expect(cached?.agent).toBe('plan')
+    expect(cached?.model).toEqual({ providerID: 'anthropic', id: 'claude-sonnet-4' })
+  })
+
+  it('does not switch the session model when the variant matches the durable selection', async () => {
+    setSession(sessionInfo({
+      agent: 'build',
+      model: { providerID: 'anthropic', id: 'claude-sonnet-4', variant: 'high' },
+    }))
+
+    const { result } = renderHookWithProviders()
+
+    await result.current.mutateAsync({
+      sessionID: 'test-session',
+      text: 'Hello',
+      model: { providerID: 'anthropic', id: 'claude-sonnet-4', variant: 'high' },
+      agent: 'build',
+    })
+
+    expect(mocks.switchSessionModel).not.toHaveBeenCalled()
+    expect(mocks.switchSessionAgent).not.toHaveBeenCalled()
   })
 
   it('adds the returned inbox item to the transcript pending state immediately', async () => {

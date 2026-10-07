@@ -2,6 +2,7 @@ import { useCallback, useEffect, useRef, useState } from 'react'
 import { useSettings } from '@/hooks/useSettings'
 import { Label } from '@/components/ui/label'
 import { Input } from '@/components/ui/input'
+import { ModelCombobox } from '@/components/model/ModelCombobox'
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
 import {
   DEFAULT_SESSION_DEFAULTS,
@@ -128,16 +129,18 @@ export function SessionAutomationSettings() {
         <div className="min-w-0 space-y-0.5">
           <Label htmlFor="goalAuditorModel">Goal auditor model</Label>
           <p className="text-sm text-muted-foreground">
-            Model that decides whether a session goal is done, as provider/model. Leave empty to use the OpenCode default model.
+            Model that decides whether a session goal is done. Leave empty to use the OpenCode default model.
           </p>
         </div>
-        <Input
+        <ModelCombobox
           id="goalAuditorModel"
+          ariaLabel="Goal auditor model"
           value={goalAuditorModel}
-          placeholder="provider/model"
+          onChange={setGoalAuditorModel}
+          placeholder="OpenCode default"
+          allowCustomValue
+          showClear
           className="w-full shrink-0 sm:w-64"
-          onChange={(event) => setGoalAuditorModel(event.target.value)}
-          onBlur={commitGoalFields}
         />
       </div>
 

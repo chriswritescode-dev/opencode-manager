@@ -185,11 +185,11 @@ describe('PromptInput command submission', () => {
       model: { providerID: 'anthropic', modelID: 'claude-sonnet-4' },
       modelString: 'anthropic/claude-sonnet-4',
       setModel: vi.fn(),
-      setActiveModel: vi.fn(),
+      setActiveAgent: vi.fn(),
       recentModels: [],
       favoriteModels: [],
       toggleFavorite: vi.fn(),
-      isModelStateLoading: false,
+      isModelReady: true,
     })
     mocks.useVariants.mockReturnValue({ hasVariants: false, currentVariant: null, cycleVariant: mocks.cycleVariant })
     mocks.useSessionAgent.mockReturnValue({ agent: 'build' })
@@ -231,6 +231,28 @@ describe('PromptInput command submission', () => {
     await screen.findByPlaceholderText('Send a message...')
     expect(other).toHaveFocus()
     other.remove()
+  })
+
+  it('disables submit and does not run a command while the model is not ready', async () => {
+    mocks.useModelSelection.mockReturnValue({
+      model: null,
+      modelString: null,
+      setModel: vi.fn(),
+      setActiveAgent: vi.fn(),
+      recentModels: [],
+      favoriteModels: [],
+      toggleFavorite: vi.fn(),
+      isModelReady: false,
+    })
+    renderComponent()
+
+    const input = await screen.findByPlaceholderText('Send a message...')
+    fireEvent.change(input, { target: { value: '/review' } })
+
+    const sendButton = screen.getByTitle('Send')
+    expect(sendButton).toBeDisabled()
+    fireEvent.click(sendButton)
+    expect(mocks.runCommand).not.toHaveBeenCalled()
   })
 
   it('sends parsed command attachments and offsets to runCommand without injecting the selected agent', async () => {

@@ -1,21 +1,18 @@
-import { describe, it, expect, vi } from 'vitest'
-import { render, screen } from '@testing-library/react'
+import { describe, it, expect, vi, beforeAll, beforeEach } from 'vitest'
+import { render, screen, within } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { ModelQuickSelect } from './ModelQuickSelect'
+import { buildModelSections } from '@/lib/modelSections'
+import type { ModelInfo } from '@opencode-manager/shared/opencode'
+import type { Provider } from '@/api/providers'
+
+const mocks = vi.hoisted(() => ({
+  useModelSelection: vi.fn(),
+  useModelSections: vi.fn(),
+}))
 
 vi.mock('@/hooks/useModelSelection', () => ({
-  useModelSelection: () => ({
-    model: { providerID: 'anthropic', modelID: 'claude-sonnet-4' },
-    modelString: 'anthropic/claude-sonnet-4',
-    recentModels: [],
-    favoriteModels: [],
-    setModel: vi.fn(),
-    setActiveModel: vi.fn(),
-    restoreSessionModel: vi.fn(),
-    toggleFavorite: vi.fn(),
-    removeRecentModel: vi.fn(),
-    isModelStateLoading: false,
-  }),
+  useModelSelection: mocks.useModelSelection,
 }))
 
 vi.mock('@/hooks/useVariants', () => ({
@@ -29,22 +26,102 @@ vi.mock('@/hooks/useVariants', () => ({
   }),
 }))
 
-vi.mock('@/hooks/useProviders', () => ({
-  useProviders: () => ({
-    data: {
-      providers: [
-        {
-          id: 'anthropic',
-          name: 'Anthropic',
-          isConnected: true,
-          models: {
-            'claude-sonnet-4': { id: 'claude-sonnet-4', name: 'Claude Sonnet 4' },
-          },
-        },
-      ],
-    },
-  }),
+vi.mock('@/hooks/useModelSections', () => ({
+  useModelSections: mocks.useModelSections,
 }))
+
+const providers: Provider[] = [
+  {
+    id: 'opencode-go',
+    name: 'OpenCode Go',
+    models: [{ id: 'go-1', key: 'go-1', name: 'Go Model One', released: 0, free: false }],
+  },
+  {
+    id: 'opencode',
+    name: 'OpenCode',
+    models: [{ id: 'zen-1', key: 'zen-1', name: 'Zen One', released: 0, free: false }],
+  },
+  {
+    id: 'anthropic',
+    name: 'Anthropic',
+    models: [
+      { id: 'claude-sonnet-4', key: 'claude-sonnet-4', name: 'Claude Sonnet 4', released: 0, free: false },
+      { id: 'claude-opus-5-5', key: 'claude-opus-5-5-fast', name: 'Claude Opus 5.5', released: 0, free: false },
+    ],
+  },
+  {
+    id: 'openai',
+    name: 'OpenAI',
+    models: [{ id: 'gpt-5', key: 'gpt-5', name: 'GPT-5', released: 0, free: false }],
+  },
+]
+
+interface Selection {
+  providerID: string
+  modelID: string
+}
+
+function selection(providerID: string, modelID: string): Selection {
+  return { providerID, modelID }
+}
+
+interface SelectionOptions {
+  favorite?: Selection[]
+  recent?: Selection[]
+  model?: Selection | null
+  info?: ModelInfo
+}
+
+function setModelSelection(options: SelectionOptions = {}) {
+  const favorite = options.favorite ?? []
+  const recent = options.recent ?? []
+  const model = options.model ?? null
+  const setModel = vi.fn()
+  const toggleFavorite = vi.fn()
+  const removeRecentModel = vi.fn()
+  const modelState = { favorite, recent, variant: {} }
+
+  mocks.useModelSelection.mockReturnValue({
+    model,
+    modelString: model ? `${model.providerID}/${model.modelID}` : null,
+    info: options.info,
+    activeAgent: null,
+    recentModels: recent,
+    favoriteModels: favorite,
+    configured: null,
+    modelState,
+    setModel,
+    setActiveAgent: vi.fn(),
+    toggleFavorite,
+    removeRecentModel,
+    isModelReady: true,
+  })
+
+  mocks.useModelSections.mockReturnValue({
+    providers,
+    sections: buildModelSections(providers, modelState),
+    defaultModel: null,
+    modelState,
+    isLoading: false,
+  })
+
+  return { setModel, toggleFavorite, removeRecentModel }
+}
+
+function sectionFor(title: string) {
+  const heading = screen.getByText(title)
+  const section = heading.closest('section')
+  if (!section) throw new Error(`No section for ${title}`)
+  return section
+}
+
+function firstOf(name: string) {
+  return screen.getAllByText(name)[0]
+}
+
+function isBefore(first: HTMLElement, second: HTMLElement) {
+  return (first.compareDocumentPosition(second) & Node.DOCUMENT_POSITION_FOLLOWING) !== 0
+}
 
 const DARK_ONLY_CLASS = /text-white|bg-zinc-950|bg-white\/|border-white\//
 
@@ -65,6 +142,18 @@ async function openSelector(user: ReturnType<typeof userEvent.setup>) {
 
   return screen.findByRole('dialog', { name: 'Select model' })
 }
+
+beforeAll(() => {
+  Object.defineProperty(HTMLElement.prototype, 'clientHeight', {
+    configurable: true,
+    get: () => 600,
+  })
+})
+
+beforeEach(() => {
+  vi.clearAllMocks()
+  setModelSelection()
+})
 
 describe('ModelQuickSelect theme tokens', () => {
   it('renders the quick view with theme tokens instead of dark-only classes', async () => {
@@ -113,12 +202,158 @@ describe('ModelQuickSelect controlled open', () => {
     render(<ModelQuickSelect open onOpenChange={onOpenChange} />)
 
     await user.click(screen.getByRole('button', { name: /More models/ }))
-    expect(screen.getByPlaceholderText('Search providers...')).toBeInTheDocument()
+    expect(screen.getByPlaceholderText('Search models...')).toBeInTheDocument()
 
     await user.keyboard('{Escape}')
 
     expect(onOpenChange).toHaveBeenCalledWith(false)
     expect(screen.getByRole('button', { name: /More models/ })).toBeInTheDocument()
-    expect(screen.queryByPlaceholderText('Search providers...')).not.toBeInTheDocument()
+    expect(screen.queryByPlaceholderText('Search models...')).not.toBeInTheDocument()
+  })
+})
+
+describe('ModelQuickSelect quick view', () => {
+  it('lists every valid favorite in model.json order', () => {
+    setModelSelection({ favorite: [selection('anthropic', 'claude-sonnet-4'), selection('openai', 'gpt-5')] })
+
+    render(<ModelQuickSelect open />)
+
+    const section = sectionFor('Favorites')
+    expect(section.textContent).toContain('Claude Sonnet 4')
+    expect(section.textContent).toContain('GPT-5')
+    expect(section.textContent!.indexOf('Claude Sonnet 4')).toBeLessThan(section.textContent!.indexOf('GPT-5'))
+  })
+
+  it('lists the valid recents that are not favorites', () => {
+    setModelSelection({
+      favorite: [selection('anthropic', 'claude-sonnet-4')],
+      recent: [selection('anthropic', 'claude-sonnet-4'), selection('openai', 'gpt-5')],
+    })
+
+    render(<ModelQuickSelect open />)
+
+    const section = sectionFor('Recent')
+    expect(section.textContent).toContain('GPT-5')
+    expect(section.textContent).not.toContain('Claude Sonnet 4')
+  })
+
+  it('keeps the active model listed with its check mark', () => {
+    setModelSelection({
+      favorite: [selection('anthropic', 'claude-sonnet-4')],
+      model: selection('anthropic', 'claude-sonnet-4'),
+    })
+
+    render(<ModelQuickSelect open />)
+
+    const section = sectionFor('Favorites')
+    expect(section.textContent).toContain('Claude Sonnet 4')
+    expect(section.querySelector('.text-highlight')).not.toBeNull()
+  })
+
+  it('shows the first catalog models under Models when there are no favorites or recents', () => {
+    render(<ModelQuickSelect open />)
+
+    const section = sectionFor('Models')
+    expect(section.textContent).toContain('Go Model One')
+    expect(section.textContent).toContain('Zen One')
+    expect(section.textContent).toContain('Claude Sonnet 4')
+    expect(section.textContent).not.toContain('GPT-5')
+  })
+
+  it('shows the catalog name of an active model that is not in the provider sections', () => {
+    setModelSelection({
+      model: selection('openai', 'gpt-5-legacy'),
+      info: { providerID: 'openai', id: 'gpt-5-legacy', name: 'GPT-5 Legacy' } as ModelInfo,
+    })
+
+    render(<ModelQuickSelect open />)
+
+    expect(screen.getByText('GPT-5 Legacy')).toBeInTheDocument()
+  })
+
+  it('calls the favorite and remove-recent handlers', async () => {
+    const user = userEvent.setup()
+    const { toggleFavorite, removeRecentModel } = setModelSelection({
+      favorite: [selection('anthropic', 'claude-sonnet-4')],
+      recent: [selection('openai', 'gpt-5')],
+    })
+
+    render(<ModelQuickSelect open />)
+
+    await user.click(screen.getByRole('button', { name: 'Remove from favorites' }))
+    expect(toggleFavorite).toHaveBeenCalledWith(selection('anthropic', 'claude-sonnet-4'))
+
+    await user.click(screen.getByRole('button', { name: 'Remove from recent' }))
+    expect(removeRecentModel).toHaveBeenCalledWith(selection('openai', 'gpt-5'))
+  })
+})
+
+describe('ModelQuickSelect more models', () => {
+  it('lists providers in catalog order', async () => {
+    const user = userEvent.setup()
+    render(<ModelQuickSelect open />)
+
+    await user.click(screen.getByRole('button', { name: /More models/ }))
+
+    const labels = ['OpenCode Go', 'OpenCode', 'Anthropic', 'OpenAI'].map(firstOf)
+    for (let index = 1; index < labels.length; index += 1) {
+      expect(isBefore(labels[index - 1], labels[index])).toBe(true)
+    }
+  })
+
+  it('keeps a favorite visible in its provider list and count', async () => {
+    const user = userEvent.setup()
+    setModelSelection({ favorite: [selection('openai', 'gpt-5')] })
+
+    render(<ModelQuickSelect open />)
+
+    await user.click(screen.getByRole('button', { name: /More models/ }))
+
+    const providerButton = screen.getAllByRole('button', { name: /OpenAI 1 model/ })[0]
+    expect(providerButton).toBeInTheDocument()
+
+    await user.click(providerButton)
+
+    expect(screen.getAllByText('GPT-5').length).toBeGreaterThan(0)
+  })
+
+  it('searches into one flat list with favorites first', async () => {
+    const user = userEvent.setup()
+    setModelSelection({ favorite: [selection('openai', 'gpt-5')] })
+
+    render(<ModelQuickSelect open />)
+
+    await user.click(screen.getByRole('button', { name: /More models/ }))
+    await user.type(screen.getByPlaceholderText('Search models...'), '5')
+
+    const favorite = (await screen.findAllByText('GPT-5'))[0]
+    const other = screen.getAllByText('Claude Opus 5.5')[0]
+
+    expect(screen.getAllByText('GPT-5')).toHaveLength(1)
+    expect(isBefore(favorite, other)).toBe(true)
+  })
+
+  it('scopes the search to the selected provider', async () => {
+    const user = userEvent.setup()
+    render(<ModelQuickSelect open />)
+
+    await user.click(screen.getByRole('button', { name: /More models/ }))
+    await user.click(screen.getAllByRole('button', { name: /Anthropic 2 models/ })[0])
+    await user.type(screen.getByPlaceholderText('Search models...'), '5')
+
+    expect((await screen.findAllByText('Claude Opus 5.5')).length).toBeGreaterThan(0)
+    expect(screen.queryByText('GPT-5')).not.toBeInTheDocument()
+  })
+
+  it('selects a model and closes the sheet', async () => {
+    const user = userEvent.setup()
+    const { setModel } = setModelSelection({ favorite: [selection('anthropic', 'claude-sonnet-4')] })
+
+    render(<ModelQuickSelect open />)
+
+    const section = sectionFor('Favorites')
+    await user.click(within(section).getByRole('button', { name: /Claude Sonnet 4/ }))
+
+    expect(setModel).toHaveBeenCalledWith(selection('anthropic', 'claude-sonnet-4'))
   })
 })

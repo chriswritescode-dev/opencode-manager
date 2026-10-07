@@ -1,31 +1,66 @@
-import { useEffect, useMemo } from 'react'
+import { useMemo } from 'react'
 import { keepPreviousData, useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
-import { useModelStore, modelExists, type ModelSelection } from '@/stores/modelStore'
+import { locationAgentKey, useModelStore, type ActiveAgent, type ModelPick, type ModelSelection } from '@/stores/modelStore'
 import { useProviders } from './useProviders'
-import { addOpenCodeRecentModel, getOpenCodeConfigModel, getOpenCodeModelState, removeOpenCodeRecentModel, toggleOpenCodeFavoriteModel, type OpenCodeModelState } from '@/api/providers'
+import { isModelAvailable } from '@/lib/modelCatalog'
+import {
+  addOpenCodeRecentModel,
+  getOpenCodeConfiguredModel,
+  getOpenCodeModelState,
+  getOpenCodeServerDefaultModel,
+  modelSelectionRef,
+  removeOpenCodeRecentModel,
+  toggleOpenCodeFavoriteModel,
+  type OpenCodeModelState,
+} from '@/api/providers'
+import {
+  addRecentModel,
+  findModelInfo,
+  formatOpenCodeModelRef,
+  isSameModelSelection,
+  modelPreferenceKey,
+  normalizeModelVariant,
+  parseOpenCodeModelRef,
+  removeRecentModel,
+  selectEffectiveModelRef,
+  selectInteractiveModel,
+  selectPreferredVariant,
+  toggleFavoriteModel,
+  type ModelInfo,
+  type ModelRef,
+} from '@opencode-manager/shared/opencode'
+
+export interface ModelSelectionSession {
+  id: string
+  agent?: string
+  model?: ModelRef
+}
 
 interface UseModelSelectionResult {
   model: ModelSelection | null
+  selection: ModelPick | null
+  info: ModelInfo | undefined
   modelString: string | null
+  modelRef: ModelRef | null
+  activeAgent: ActiveAgent | null
   recentModels: ModelSelection[]
   favoriteModels: ModelSelection[]
+  configured: ModelRef | null
+  modelState: OpenCodeModelState | undefined
+  isModelReady: boolean
   setModel: (model: ModelSelection) => void
-  setActiveModel: (model: ModelSelection) => boolean
-  restoreSessionModel: (model: ModelSelection) => void
+  setActiveAgent: (agent: ActiveAgent) => void
   toggleFavorite: (model: ModelSelection) => void
   removeRecentModel: (model: ModelSelection) => void
-  isModelStateLoading: boolean
 }
 
-const modelStateQueryKey = ['opencode', 'model-state']
+export function modelStateQueryKey() {
+  return ['opencode', 'model-state'] as const
+}
 
-const isSameModel = (left: ModelSelection, right: ModelSelection) => (
-  left.providerID === right.providerID && left.modelID === right.modelID
-)
-
-export function useOpenCodeModelState(directory?: string, enabled = true) {
+export function useOpenCodeModelState(_directory?: string, enabled = true) {
   return useQuery({
-    queryKey: [...modelStateQueryKey, directory],
+    queryKey: modelStateQueryKey(),
     queryFn: () => getOpenCodeModelState(),
     staleTime: 30000,
     placeholderData: keepPreviousData,
@@ -33,167 +68,313 @@ export function useOpenCodeModelState(directory?: string, enabled = true) {
   })
 }
 
-export function useOpenCodeConfigModel(directory?: string, enabled = true) {
+function useOpenCodeConfiguredModel(directory?: string, enabled = true) {
   return useQuery({
     queryKey: ['opencode', 'config', 'model', directory],
-    queryFn: () => getOpenCodeConfigModel(directory),
+    queryFn: () => getOpenCodeConfiguredModel(directory),
     staleTime: 30000,
     enabled,
   })
 }
 
-export function useModelSelection(directory?: string): UseModelSelectionResult {
+export function useOpenCodeDefaultModel(directory?: string, enabled = true) {
+  const providersQuery = useProviders(directory, { enabled })
+  const configuredQuery = useOpenCodeConfiguredModel(directory, enabled)
+  const defaultQuery = useQuery({
+    queryKey: ['opencode', 'providers', 'default-model', directory],
+    queryFn: () => getOpenCodeServerDefaultModel(directory),
+    staleTime: 30000,
+    enabled,
+  })
+
+  const data = useMemo(() => {
+    if (
+      !providersQuery.data ||
+      providersQuery.isPlaceholderData ||
+      configuredQuery.data === undefined ||
+      defaultQuery.data === undefined
+    ) {
+      return undefined
+    }
+    const configured = configuredQuery.data ? parseOpenCodeModelRef(configuredQuery.data) : undefined
+    const resolved = selectEffectiveModelRef({
+      models: providersQuery.data.models,
+      defaultModel: defaultQuery.data,
+      candidates: [configured],
+    })
+    return resolved ? formatOpenCodeModelRef(resolved) : null
+  }, [providersQuery.data, providersQuery.isPlaceholderData, configuredQuery.data, defaultQuery.data])
+
+  return {
+    data,
+    isLoading: providersQuery.isLoading || configuredQuery.isLoading || defaultQuery.isLoading,
+  }
+}
+
+export function useModelStateMutation<TInput>(
+  fetcher: (input: TInput) => Promise<OpenCodeModelState>,
+  applyOptimistic: (state: OpenCodeModelState, input: TInput) => OpenCodeModelState,
+  errorMessage: string,
+) {
   const queryClient = useQueryClient()
-  
-  const { data: providersData } = useProviders(directory)
 
-  const { 
-    model, 
-    setModel: setStoreModel,
-    setActiveModel: setStoreActiveModel,
-    syncModelState,
-    validateAndSyncModel, 
-    getModelString 
-  } = useModelStore()
-
-  const { data: modelState, isLoading: isModelStateLoading } = useOpenCodeModelState(directory)
-
-  const { data: configModelString, isLoading: isConfigModelLoading } = useOpenCodeConfigModel(directory)
-
-  const updateRecentModel = useMutation({
-    mutationFn: addOpenCodeRecentModel,
-    onSuccess: (state) => {
-      syncModelState(state)
-      queryClient.setQueryData([...modelStateQueryKey, directory], state)
-      queryClient.invalidateQueries({ queryKey: [...modelStateQueryKey, directory] })
-    },
-    onError: (error) => {
-      console.error('Failed to sync recent model to backend', error)
-    },
-  })
-
-  const updateFavoriteModel = useMutation({
-    mutationFn: toggleOpenCodeFavoriteModel,
-    onSuccess: (state) => {
-      syncModelState(state)
-      queryClient.setQueryData([...modelStateQueryKey, directory], state)
-      queryClient.invalidateQueries({ queryKey: [...modelStateQueryKey, directory] })
-    },
-    onError: (error) => {
-      console.error('Failed to toggle favorite model on backend', error)
-    },
-  })
-
-  const removeRecentMutation = useMutation({
-    mutationFn: removeOpenCodeRecentModel,
-    onMutate: async (removedModel) => {
-      const queryKey = [...modelStateQueryKey, directory]
+  return useMutation({
+    mutationFn: fetcher,
+    onMutate: async (input) => {
+      const queryKey = modelStateQueryKey()
       await queryClient.cancelQueries({ queryKey })
       const previousState = queryClient.getQueryData<OpenCodeModelState>(queryKey)
-
-      if (previousState) {
-        const nextState: OpenCodeModelState = {
-          ...previousState,
-          recent: previousState.recent.filter((model) => !isSameModel(model, removedModel)),
-        }
-        queryClient.setQueryData(queryKey, nextState)
-        syncModelState(nextState)
-      }
-
+      if (previousState) queryClient.setQueryData(queryKey, applyOptimistic(previousState, input))
       return { previousState }
     },
     onSuccess: (state) => {
-      syncModelState(state)
-      queryClient.setQueryData([...modelStateQueryKey, directory], state)
-      queryClient.invalidateQueries({ queryKey: [...modelStateQueryKey, directory] })
+      queryClient.setQueryData(modelStateQueryKey(), state)
     },
-    onError: (error, _removedModel, context) => {
+    onError: (error, _input, context) => {
       if (context?.previousState) {
-        syncModelState(context.previousState)
-        queryClient.setQueryData([...modelStateQueryKey, directory], context.previousState)
+        queryClient.setQueryData(modelStateQueryKey(), context.previousState)
       }
-      console.error('Failed to remove recent model on backend', error)
+      console.error(errorMessage, error)
     },
   })
+}
 
-  const providers = providersData?.providers
+interface PreferredSelectionContext {
+  models: ModelInfo[]
+  agentModel?: ModelRef
+  configured: ModelRef | null
+  preferences?: Record<string, string | undefined>
+}
+
+function preferredSelection(context: PreferredSelectionContext, model: ModelSelection): ModelPick {
+  return {
+    ...model,
+    variant: selectPreferredVariant({
+      model,
+      info: findModelInfo(context.models, model),
+      preferences: context.preferences,
+      agentModel: context.agentModel,
+      configured: context.configured,
+    }),
+  }
+}
+
+interface ResolveSelectionInput extends PreferredSelectionContext {
+  agentID?: string
+  newSessionPick?: ModelPick
+  sessionPicks?: Record<string, ModelPick | undefined>
+  session?: ModelSelectionSession
+  recent: ModelSelection[]
+}
+
+function resolveSelection(input: ResolveSelectionInput): ModelPick | undefined {
+  const { models, session } = input
+
+  if (session) {
+    const sessionPick = input.agentID ? input.sessionPicks?.[input.agentID] : undefined
+    const durable: ModelPick | undefined = session.model
+      ? {
+          providerID: session.model.providerID,
+          modelID: session.model.id,
+          variant: normalizeModelVariant(session.model.variant),
+        }
+      : undefined
+    const durableUsable = !session.agent || session.agent === input.agentID
+    const selected = [sessionPick, durableUsable ? durable : undefined].find(
+      (candidate): candidate is ModelPick =>
+        candidate !== undefined && findModelInfo(models, candidate) !== undefined,
+    )
+    if (selected) {
+      const info = findModelInfo(models, selected)
+      const variant = normalizeModelVariant(selected.variant)
+      return {
+        providerID: selected.providerID,
+        modelID: selected.modelID,
+        variant: info?.variants.some((entry) => entry.id === variant) ? variant : undefined,
+      }
+    }
+  }
+
+  const model = selectInteractiveModel({
+    models,
+    current: input.newSessionPick,
+    agentModel: input.agentModel,
+    configured: input.configured,
+    recent: input.recent,
+  })
+  return model ? preferredSelection(input, model) : undefined
+}
+
+function selectionKey(value: ModelPick): string {
+  return `${modelPreferenceKey(value)}:${normalizeModelVariant(value.variant) ?? 'default'}`
+}
+
+export function useModelSelection(
+  directory?: string,
+  session?: ModelSelectionSession,
+): UseModelSelectionResult {
+  const { data: catalog, isPlaceholderData: catalogIsPlaceholder } = useProviders(directory)
+
+  const activeAgent = useModelStore((state) => state.activeAgent)
+  const newSessionPicks = useModelStore((state) => state.newSessionPicks)
+  const sessionPicks = useModelStore((state) => state.sessionPicks)
+  const setNewSessionPick = useModelStore((state) => state.setNewSessionPick)
+  const setSessionPick = useModelStore((state) => state.setSessionPick)
+  const setActiveAgent = useModelStore((state) => state.setActiveAgent)
+
+  const { data: modelState } = useOpenCodeModelState()
+  const { data: configModelString } = useOpenCodeConfiguredModel(directory)
+
+  const isModelReady = Boolean(
+    catalog &&
+      !catalogIsPlaceholder &&
+      modelState !== undefined &&
+      configModelString !== undefined,
+  )
 
   const recentModels = useMemo(() => {
     const raw = modelState?.recent ?? []
-    if (!providers || providers.length === 0) return raw
-    return raw.filter((m) => modelExists(m, providers))
-  }, [modelState?.recent, providers])
+    if (!catalog || catalog.models.length === 0) return raw
+    return raw.filter((model) => isModelAvailable(catalog.models, model))
+  }, [modelState?.recent, catalog])
 
   const favoriteModels = useMemo(() => {
     const raw = modelState?.favorite ?? []
-    if (!providers || providers.length === 0) return raw
-    return raw.filter((m) => modelExists(m, providers))
-  }, [modelState?.favorite, providers])
+    if (!catalog || catalog.models.length === 0) return raw
+    return raw.filter((model) => isModelAvailable(catalog.models, model))
+  }, [modelState?.favorite, catalog])
 
-  const firstAvailableModelString = providersData?.providers
-    .map((provider) => {
-      const modelID = Object.keys(provider.models || {})[0]
-      return modelID ? `${provider.id}/${modelID}` : null
-    })
-    .find((value): value is string => Boolean(value))
+  const configured = useMemo(
+    () => (configModelString ? parseOpenCodeModelRef(configModelString) ?? null : null),
+    [configModelString],
+  )
 
-  useEffect(() => {
-    if (isModelStateLoading || isConfigModelLoading) return
-    validateAndSyncModel(
-      configModelString ?? undefined,
-      providersData?.providers,
-      modelState?.recent ?? [],
-      firstAvailableModelString,
+  const key = locationAgentKey(directory, activeAgent?.id)
+
+  const selection = useMemo(() => {
+    if (!isModelReady || !catalog) return null
+    return (
+      resolveSelection({
+        models: catalog.models,
+        agentID: activeAgent?.id,
+        agentModel: activeAgent?.model,
+        newSessionPick: newSessionPicks[key],
+        sessionPicks: session?.id ? sessionPicks[session.id] : undefined,
+        session,
+        configured,
+        recent: modelState?.recent ?? [],
+        preferences: modelState?.variant,
+      }) ?? null
     )
-  }, [isModelStateLoading, isConfigModelLoading, modelState?.recent, configModelString, firstAvailableModelString, providersData, validateAndSyncModel])
+  }, [
+    activeAgent?.id,
+    activeAgent?.model,
+    catalog,
+    configured,
+    isModelReady,
+    key,
+    modelState?.recent,
+    modelState?.variant,
+    newSessionPicks,
+    session,
+    sessionPicks,
+  ])
 
-  useEffect(() => {
-    if (modelState) {
-      syncModelState(modelState)
-    }
-  }, [modelState, syncModelState])
+  const info = useMemo(
+    () => (selection ? findModelInfo(catalog?.models ?? [], selection) : undefined),
+    [catalog, selection],
+  )
+
+  const model = selection
+    ? { providerID: selection.providerID, modelID: selection.modelID }
+    : null
+
+  const updateRecentModel = useModelStateMutation(
+    addOpenCodeRecentModel,
+    (state, nextModel) => addRecentModel(state, nextModel),
+    'Failed to sync recent model to backend',
+  )
+
+  const updateFavoriteModel = useModelStateMutation(
+    toggleOpenCodeFavoriteModel,
+    (state, nextModel) => toggleFavoriteModel(state, nextModel),
+    'Failed to toggle favorite model on backend',
+  )
+
+  const removeRecentMutation = useModelStateMutation(
+    removeOpenCodeRecentModel,
+    (state, nextModel) => removeRecentModel(state, nextModel),
+    'Failed to remove recent model on backend',
+  )
+
+  const preferred = (target: ModelSelection): ModelPick => {
+    if (!catalog) return { ...target }
+    return preferredSelection(
+      {
+        models: catalog.models,
+        agentModel: activeAgent?.model,
+        configured,
+        preferences: modelState?.variant,
+      },
+      target,
+    )
+  }
+
+  const setSessionDraft = (agentID: string, next: ModelPick) => {
+    if (!session) return
+    const durable: ModelPick | undefined = session.model
+      ? {
+          providerID: session.model.providerID,
+          modelID: session.model.id,
+          variant: normalizeModelVariant(session.model.variant),
+        }
+      : undefined
+    const durableUsable = !session.agent || session.agent === agentID
+    const drop = Boolean(durableUsable && durable && selectionKey(durable) === selectionKey(next))
+    setSessionPick(session.id, agentID, drop ? undefined : next)
+  }
 
   const setModel = (nextModel: ModelSelection) => {
-    setStoreModel(nextModel)
+    if (session?.id && activeAgent?.id) {
+      const next = selection && isSameModelSelection(selection, nextModel)
+        ? { ...selection }
+        : preferred(nextModel)
+      setSessionDraft(activeAgent.id, next)
+    } else {
+      setNewSessionPick(key, nextModel)
+    }
     updateRecentModel.mutate(nextModel)
-  }
-
-  const setActiveModel = (nextModel: ModelSelection): boolean => {
-    const providers = providersData?.providers
-    if (!providers) return false
-
-    const isAvailable = providers.some(
-      (provider) => provider.id === nextModel.providerID && provider.models && nextModel.modelID in provider.models
-    )
-
-    if (!isAvailable) return false
-
-    setStoreActiveModel(nextModel)
-    return true
-  }
-
-  const restoreSessionModel = (sessionModel: ModelSelection): void => {
-    setStoreActiveModel(sessionModel)
   }
 
   const toggleFavorite = (nextModel: ModelSelection) => {
     updateFavoriteModel.mutate(nextModel)
   }
 
-  const removeRecentModel = (nextModel: ModelSelection) => {
+  const removeRecent = (nextModel: ModelSelection) => {
     removeRecentMutation.mutate(nextModel)
   }
 
   return {
     model,
-    modelString: getModelString(),
+    selection,
+    info,
+    modelString: model ? modelSelectionRef(model) : null,
+    modelRef: selection
+      ? {
+          providerID: selection.providerID,
+          id: selection.modelID,
+          ...(selection.variant ? { variant: selection.variant } : {}),
+        }
+      : null,
+    activeAgent,
     recentModels,
     favoriteModels,
+    configured,
+    modelState,
+    isModelReady,
     setModel,
-    setActiveModel,
-    restoreSessionModel,
+    setActiveAgent,
     toggleFavorite,
-    removeRecentModel,
-    isModelStateLoading,
+    removeRecentModel: removeRecent,
   }
 }

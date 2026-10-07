@@ -90,6 +90,24 @@ describe('useRefreshMessage', () => {
     expect(mocks.switchSessionAgent).not.toHaveBeenCalled()
   })
 
+  it('preserves the session variant when resending with the same full ref', async () => {
+    setSession(sessionInfo({
+      model: { providerID: 'anthropic', id: 'claude-sonnet-4', variant: 'high' },
+    }))
+
+    const { result } = renderRefresh()
+
+    await result.current.mutateAsync({
+      assistantMessageID: 'assistant-1',
+      userMessageContent: 'edited text',
+      model: 'anthropic/claude-sonnet-4#high',
+      agent: 'build',
+    })
+
+    expect(mocks.switchSessionModel).not.toHaveBeenCalled()
+    expect(mocks.switchSessionAgent).not.toHaveBeenCalled()
+  })
+
   it('switches the model before resending when the edited message model changed', async () => {
     setSession(sessionInfo())
 
@@ -125,6 +143,12 @@ describe('useRefreshMessage', () => {
     })
 
     expect(mocks.switchSessionAgent).toHaveBeenCalledWith('test-session', 'plan')
-    expect(mocks.switchSessionModel).not.toHaveBeenCalled()
+    expect(mocks.switchSessionModel).toHaveBeenCalledWith('test-session', {
+      providerID: 'anthropic',
+      id: 'claude-sonnet-4',
+    })
+    expect(mocks.switchSessionAgent.mock.invocationCallOrder[0]).toBeLessThan(
+      mocks.switchSessionModel.mock.invocationCallOrder[0],
+    )
   })
 })

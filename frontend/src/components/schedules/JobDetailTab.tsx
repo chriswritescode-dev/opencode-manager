@@ -41,8 +41,8 @@ export function JobDetailTab({
   isJobFetching,
 }: JobDetailTabProps) {
   const { scheduleTarget } = useScheduleTarget(selectedJob?.repoId)
-  const { availableModelKeys, configDefaultModel } = useScheduleModels(Boolean(selectedJob), scheduleTarget?.fullPath)
-  const resolvedModel = resolveScheduleModel(selectedJob?.model, availableModelKeys, configDefaultModel)
+  const { availableModels } = useScheduleModels(Boolean(selectedJob), scheduleTarget?.fullPath)
+  const resolvedModel = resolveScheduleModel(selectedJob?.model, availableModels)
   const { data: worktrees = [] } = useScheduleWorktrees(selectedJob?.repoId, selectedJob?.id ?? null)
   const removeWorktrees = useRemoveScheduleWorktrees()
   const idleWorktreeCount = worktrees.filter((worktree) => !worktree.inUse).length

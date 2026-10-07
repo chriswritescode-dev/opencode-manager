@@ -41,7 +41,7 @@ export const ModelCheckboxList = memo(function ModelCheckboxList({
                   onCheckedChange={(next) => onToggle(option.value, next === true)}
                 />
                 <span className="truncate">{option.label}</span>
-                {section.pinned ? (
+                {!section.providerID ? (
                   <span className="ml-auto shrink-0 text-xs text-muted-foreground">{option.providerName}</span>
                 ) : null}
               </label>

@@ -1,4 +1,4 @@
-import { useQuery } from '@tanstack/react-query'
+import { keepPreviousData, useQuery } from '@tanstack/react-query'
 import { getProviders } from '@/api/providers'
 
 interface UseProvidersOptions {
@@ -11,5 +11,6 @@ export function useProviders(directory?: string, options: UseProvidersOptions = 
     queryFn: () => getProviders(directory),
     enabled: options.enabled ?? true,
     staleTime: 30000,
+    placeholderData: keepPreviousData,
   })
 }

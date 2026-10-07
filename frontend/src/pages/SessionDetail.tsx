@@ -49,6 +49,7 @@ import type { PageCommandActions } from "@/lib/builtinCommands";
 import { useRedoMessage, useUndoMessage } from "@/hooks/useUndoMessage";
 import { usePermissions, useForms } from "@/contexts/EventContext";
 import type { FormInfo, SessionMessageInfo } from "@opencode-manager/shared/opencode";
+import { formatOpenCodeModelRef } from "@opencode-manager/shared/opencode";
 import { FormPrompt } from "@/components/session/FormPrompt";
 import { MinimizedFormIndicator } from "@/components/session/MinimizedFormIndicator";
 import { PendingActionsGroup } from "@/components/notifications/PendingActionsGroup";
@@ -259,7 +260,11 @@ export function SessionDetail() {
   const interruptSession = useInterruptSession();
   const { mutateAsync: updateSessionAsync } = useUpdateSession(sessionDirectory);
   const { mutateAsync: createSessionAsync } = useCreateSession(sessionDirectory);
-  const { modelString } = useModelSelection(sessionDirectory);
+  const modelSelectionSession = useMemo(
+    () => (sessionId ? { id: sessionId, agent: session?.agent, model: session?.model } : undefined),
+    [sessionId, session?.agent, session?.model],
+  );
+  const { modelRef } = useModelSelection(sessionDirectory, modelSelectionSession);
   const setSessionStatus = useSessionStatus((state) => state.setStatus);
   const isEditingMessage = useUIState((state) => state.isEditingMessage);
   const setActivePromptFileBasePath = useUIState((state) => state.setActivePromptFileBasePath);
@@ -723,7 +728,7 @@ export function SessionDetail() {
               onFileClick={handleFileClick}
               onChildSessionClick={handleChildSessionClick}
               onUndoMessage={handleUndoMessage}
-              model={modelString || undefined}
+              model={modelRef ? formatOpenCodeModelRef(modelRef) : undefined}
             />
           ) : null}
         </div>

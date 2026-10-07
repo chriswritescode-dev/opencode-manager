@@ -11,8 +11,9 @@ const mocks = vi.hoisted(() => ({
   launchMultiRun: vi.fn(),
   discardMultiRunEntry: vi.fn(),
   fuseMultiRun: vi.fn(),
-  useProvidersWithModels: vi.fn(),
+  useProviders: vi.fn(),
   useOpenCodeModelState: vi.fn(),
+  useOpenCodeDefaultModel: vi.fn(),
   listBranches: vi.fn(),
   getChangeWalkthrough: vi.fn(),
   generateChangeWalkthrough: vi.fn(),
@@ -32,12 +33,13 @@ vi.mock('@/api/multiRuns', () => ({
   fuseMultiRun: mocks.fuseMultiRun,
 }))
 
-vi.mock('@/hooks/useProvidersWithModels', () => ({
-  useProvidersWithModels: mocks.useProvidersWithModels,
+vi.mock('@/hooks/useProviders', () => ({
+  useProviders: mocks.useProviders,
 }))
 
 vi.mock('@/hooks/useModelSelection', () => ({
   useOpenCodeModelState: mocks.useOpenCodeModelState,
+  useOpenCodeDefaultModel: mocks.useOpenCodeDefaultModel,
 }))
 
 vi.mock('@/api/repos', () => ({
@@ -62,24 +64,20 @@ const providers = [
   {
     id: 'openai',
     name: 'OpenAI',
-    source: 'configured',
-    isConnected: true,
     models: [
-      { id: 'gpt-4o', name: 'GPT-4o' },
-      { id: 'gpt-4o-mini', name: 'GPT-4o mini' },
-      { id: 'gpt-4.1', name: 'GPT-4.1' },
+      { id: 'gpt-4o', name: 'GPT-4o', released: 0, free: false },
+      { id: 'gpt-4o-mini', name: 'GPT-4o mini', released: 0, free: false },
+      { id: 'gpt-4.1', name: 'GPT-4.1', released: 0, free: false },
     ],
   },
   {
     id: 'anthropic',
     name: 'Anthropic',
-    source: 'configured',
-    isConnected: true,
     models: [
-      { id: 'claude-opus', name: 'Claude Opus' },
-      { id: 'claude-sonnet', name: 'Claude Sonnet' },
-      { id: 'claude-haiku', name: 'Claude Haiku' },
-      { id: 'claude-sonnet-4-5', key: 'claude-sonnet-4.5', name: 'Claude Sonnet 4.5' },
+      { id: 'claude-opus', name: 'Claude Opus', released: 0, free: false },
+      { id: 'claude-sonnet', name: 'Claude Sonnet', released: 0, free: false },
+      { id: 'claude-haiku', name: 'Claude Haiku', released: 0, free: false },
+      { id: 'claude-sonnet-4-5', key: 'claude-sonnet-4.5', name: 'Claude Sonnet 4.5', released: 0, free: false },
     ],
   },
 ]
@@ -220,8 +218,9 @@ describe('MultiRunDialog', () => {
 
   beforeEach(() => {
     vi.clearAllMocks()
-    mocks.useProvidersWithModels.mockReturnValue({ data: providers, isLoading: false })
+    mocks.useProviders.mockReturnValue({ data: { providers, models: [] }, isLoading: false })
     mocks.useOpenCodeModelState.mockReturnValue({ data: { recent: [], favorite: [], variant: {} } })
+    mocks.useOpenCodeDefaultModel.mockReturnValue({ data: null })
     mocks.listBranches.mockResolvedValue({
       branches: [
         { name: 'main', type: 'local', current: true },
@@ -261,6 +260,22 @@ describe('MultiRunDialog', () => {
     ])
   })
 
+  it('lists the OpenCode default model first without repeating it', () => {
+    mocks.useOpenCodeDefaultModel.mockReturnValue({ data: 'anthropic/claude-sonnet' })
+    renderDialog()
+
+    expect(screen.getByText('Default')).toBeInTheDocument()
+    expect(checkboxLabels()).toEqual([
+      'Claude Sonnet',
+      'GPT-4o',
+      'GPT-4o mini',
+      'GPT-4.1',
+      'Claude Opus',
+      'Claude Haiku',
+      'Claude Sonnet 4.5',
+    ])
+  })
+
   it('filters models by every search term and keeps favorites first', async () => {
     const user = userEvent.setup()
     mocks.useOpenCodeModelState.mockReturnValue({
@@ -277,6 +292,35 @@ describe('MultiRunDialog', () => {
 
     await user.type(screen.getByLabelText('Search models'), 'zzz')
     expect(await screen.findByText('No models match your search.')).toBeInTheDocument()
+  })
+
+  it('shows the provider name on every search result', async () => {
+    const user = userEvent.setup()
+    mocks.useProviders.mockReturnValue({
+      data: {
+        providers: [
+          {
+            id: 'anthropic',
+            name: 'Anthropic',
+            models: [{ id: 'claude-sonnet', name: 'Claude Sonnet', released: 0, free: false }],
+          },
+          {
+            id: 'openrouter',
+            name: 'OpenRouter',
+            models: [{ id: 'claude-sonnet', name: 'Claude Sonnet', released: 0, free: false }],
+          },
+        ],
+        models: [],
+      },
+      isLoading: false,
+    })
+    renderDialog()
+
+    await user.type(screen.getByLabelText('Search models'), 'claude')
+    await waitFor(() => expect(checkboxLabels()).toEqual(['Claude Sonnet', 'Claude Sonnet']))
+
+    expect(screen.getByText('Anthropic')).toBeInTheDocument()
+    expect(screen.getByText('OpenRouter')).toBeInTheDocument()
   })
 
   it('keeps selections that are hidden by the search filter', async () => {

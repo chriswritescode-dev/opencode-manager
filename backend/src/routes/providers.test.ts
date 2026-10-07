@@ -1,4 +1,7 @@
-import { describe, it, expect, beforeEach, vi } from 'vitest'
+import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest'
+import { mkdtemp, readFile, rm, writeFile } from 'node:fs/promises'
+import { tmpdir } from 'node:os'
+import path from 'node:path'
 import { Hono } from 'hono'
 import { createProvidersRoutes } from './providers'
 import { createStubOpenCodeClient } from '../../test/helpers/stub-opencode-client'
@@ -8,15 +11,27 @@ import { buildOpenCodeBasicAuth } from '@opencode-manager/shared/opencode'
 import { ClientError } from '@opencode-manager/shared/opencode'
 import type { IntegrationInfo } from '@opencode-manager/shared/opencode'
 import type { OpenCodeClient } from '../services/opencode/client'
-import type { OpenCodeModelStateRecord } from '../services/opencode-model-state'
+import type { ModelPreferenceDocument } from '@opencode-manager/shared/opencode'
+
+const modelStatePaths = vi.hoisted(() => ({ file: '' }))
+
+vi.mock('@opencode-manager/shared/config/env', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('@opencode-manager/shared/config/env')>()
+  return {
+    ...actual,
+    getOpenCodeModelStatePath: () => modelStatePaths.file,
+  }
+})
 
 const modelStateMock = vi.hoisted(() => ({
   readOpenCodeModelState: vi.fn(),
   updateOpenCodeModelState: vi.fn(),
+  actual: undefined as unknown,
 }))
 
 vi.mock('../services/opencode-model-state', async (importOriginal) => {
   const actual = await importOriginal<typeof import('../services/opencode-model-state')>()
+  modelStateMock.actual = actual
   return {
     ...actual,
     readOpenCodeModelState: modelStateMock.readOpenCodeModelState,
@@ -58,14 +73,14 @@ function createCredentialApp(client: OpenCodeClient): Hono {
 
 describe('providers routes', () => {
   let app: Hono
-  let storedState: OpenCodeModelStateRecord
+  let storedState: ModelPreferenceDocument
 
   beforeEach(() => {
     vi.clearAllMocks()
     storedState = { recent: [], favorite: [], variant: {} }
     modelStateMock.readOpenCodeModelState.mockImplementation(async () => storedState)
     modelStateMock.updateOpenCodeModelState.mockImplementation(
-      async (mutate: (state: OpenCodeModelStateRecord) => OpenCodeModelStateRecord) => {
+      async (mutate: (state: ModelPreferenceDocument) => ModelPreferenceDocument) => {
         storedState = mutate(storedState)
         return storedState
       },
@@ -136,6 +151,44 @@ describe('providers routes', () => {
       expect(data2.favorite).toHaveLength(0)
     })
 
+    it('with variant persists the named variant', async () => {
+      const res = await app.request('/providers/model-state', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          variant: { model: { providerID: 'anthropic', modelID: 'claude' }, value: 'high' },
+        }),
+      })
+
+      expect(res.status).toBe(200)
+      const data = (await res.json()) as { variant: Record<string, string | undefined> }
+      expect(data.variant).toEqual({ 'anthropic/claude': 'high' })
+    })
+
+    it('with variant value omitted or null persists default', async () => {
+      const model = { providerID: 'anthropic', modelID: 'claude' }
+
+      const omitted = await app.request('/providers/model-state', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ variant: { model } }),
+      })
+      expect(omitted.status).toBe(200)
+      expect(((await omitted.json()) as { variant: Record<string, string | undefined> }).variant).toEqual({
+        'anthropic/claude': 'default',
+      })
+
+      const explicitNull = await app.request('/providers/model-state', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ variant: { model, value: null } }),
+      })
+      expect(explicitNull.status).toBe(200)
+      expect(((await explicitNull.json()) as { variant: Record<string, string | undefined> }).variant).toEqual({
+        'anthropic/claude': 'default',
+      })
+    })
+
     it('with invalid body returns 400', async () => {
       const res = await app.request('/providers/model-state', {
         method: 'POST',
@@ -160,6 +213,56 @@ describe('providers routes', () => {
       expect(res.status).toBe(500)
       const data = (await res.json()) as { error: string }
       expect(data.error).toBe('Failed to update OpenCode model state')
+    })
+  })
+
+  describe('model-state response contract', () => {
+    let workDir: string
+
+    beforeEach(async () => {
+      workDir = await mkdtemp(path.join(tmpdir(), 'providers-model-state-'))
+      modelStatePaths.file = path.join(workDir, 'model.json')
+      const actual = modelStateMock.actual as typeof import('../services/opencode-model-state')
+      modelStateMock.readOpenCodeModelState.mockImplementation(actual.readOpenCodeModelState)
+      modelStateMock.updateOpenCodeModelState.mockImplementation(actual.updateOpenCodeModelState)
+      await writeFile(
+        modelStatePaths.file,
+        JSON.stringify({ recent: [], favorite: [], variant: {}, extra: 1 }),
+        'utf8',
+      )
+    })
+
+    afterEach(async () => {
+      await rm(workDir, { recursive: true, force: true })
+    })
+
+    it('GET omits unknown root keys', async () => {
+      const res = await app.request('/providers/model-state')
+
+      expect(res.status).toBe(200)
+      const data = (await res.json()) as Record<string, unknown>
+      expect(data).toEqual({ recent: [], favorite: [], variant: {} })
+      expect(data).not.toHaveProperty('extra')
+    })
+
+    it('POST omits unknown root keys from the response but preserves them in the file', async () => {
+      const res = await app.request('/providers/model-state', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ recent: { providerID: 'anthropic', modelID: 'claude' } }),
+      })
+
+      expect(res.status).toBe(200)
+      const data = (await res.json()) as Record<string, unknown>
+      expect(data).toEqual({
+        recent: [{ providerID: 'anthropic', modelID: 'claude' }],
+        favorite: [],
+        variant: {},
+      })
+      expect(data).not.toHaveProperty('extra')
+
+      const file = JSON.parse(await readFile(modelStatePaths.file, 'utf8')) as { extra: unknown }
+      expect(file.extra).toBe(1)
     })
   })
 

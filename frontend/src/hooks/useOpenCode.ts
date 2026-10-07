@@ -20,6 +20,7 @@ import {
 } from "../api/opencode";
 import { FetchError } from "../api/fetchWrapper";
 import type { ModelRef, SessionInfo } from "@opencode-manager/shared/opencode";
+import { isSameModelRef } from "@opencode-manager/shared/opencode";
 import { parseNetworkError, isGatewayTimeout } from "../lib/opencode-errors";
 import { showToast } from "../lib/toast";
 import { useSendErrorStore } from "../stores/sendErrorStore";
@@ -31,12 +32,6 @@ import { toggleSessionPin } from "../api/sessionPins";
 import { SESSION_PINS_QUERY_KEY } from "./useSessionPins";
 import { admitInboxItem, type TranscriptCache } from "../lib/session-projection";
 import type { SessionPin } from "@opencode-manager/shared/schemas";
-
-const isSameModelRef = (left: ModelRef, right: ModelRef | undefined) =>
-  right !== undefined &&
-  left.providerID === right.providerID &&
-  left.id === right.id &&
-  left.variant === right.variant;
 
 const SESSION_LIST_PAGE_SIZE = 25
 
@@ -327,14 +322,16 @@ export const useSyncSessionSelection = (directory?: string) => {
         sessionQueryKey(sessionID, directory),
       );
 
-      if (model && !isSameModelRef(model, session?.model)) {
-        await switchSessionModel(sessionID, model);
-        patchCachedSessionSelection(queryClient, sessionID, directory, { model });
-      }
-
+      let agentChanged = false;
       if (agent && agent !== session?.agent) {
         await switchSessionAgent(sessionID, agent);
         patchCachedSessionSelection(queryClient, sessionID, directory, { agent });
+        agentChanged = true;
+      }
+
+      if (model && (agentChanged || !isSameModelRef(model, session?.model))) {
+        await switchSessionModel(sessionID, model);
+        patchCachedSessionSelection(queryClient, sessionID, directory, { model });
       }
     },
     [queryClient, directory],

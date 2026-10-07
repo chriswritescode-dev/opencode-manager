@@ -1,7 +1,12 @@
-import { useMemo } from 'react'
-import { useModelSelection } from './useModelSelection'
-import { useModelStore } from '@/stores/modelStore'
-import { useProviders } from './useProviders'
+import { useCallback, useMemo } from 'react'
+import { useModelSelection, useModelStateMutation, type ModelSelectionSession } from './useModelSelection'
+import { useModelStore, type ModelSelection } from '@/stores/modelStore'
+import { saveOpenCodeModelVariant } from '@/api/providers'
+import {
+  cycleModelVariant,
+  normalizeModelVariant,
+  setModelVariant,
+} from '@opencode-manager/shared/opencode'
 
 export interface UseVariantsResult {
   availableVariants: string[]
@@ -12,66 +17,49 @@ export interface UseVariantsResult {
   hasVariants: boolean
 }
 
-export function useVariants(directory?: string): UseVariantsResult {
-  const { model } = useModelSelection(directory)
-  const { setVariant: setStoreVariant, clearVariant: clearStoreVariant } = useModelStore()
+interface SaveVariantInput {
+  model: ModelSelection
+  value: string | undefined
+}
 
-   const { data: providersData, isLoading } = useProviders(directory, { enabled: !!model })
+export function useVariants(
+  directory?: string,
+  session?: ModelSelectionSession,
+): UseVariantsResult {
+  const { model, selection, info } = useModelSelection(directory, session)
+  const activeAgent = useModelStore((state) => state.activeAgent)
+  const setSessionPick = useModelStore((state) => state.setSessionPick)
 
-   const currentModel = useMemo(() => {
-     if (!model || isLoading || !providersData?.providers || providersData.providers.length === 0) return null
-     for (const provider of providersData.providers) {
-      if (provider.id === model.providerID && provider.models) {
-        const modelData = provider.models[model.modelID]
-        if (modelData) {
-          return modelData
-        }
-      }
-    }
-    return null
-  }, [model, providersData, isLoading])
-
-  const availableVariants = useMemo(() => {
-    if (!currentModel?.variants) return []
-    return Object.keys(currentModel.variants)
-  }, [currentModel])
-
-  const currentVariant = useModelStore((state) =>
-    model ? state.variants[`${model.providerID}/${model.modelID}`] : undefined
+  const availableVariants = useMemo(
+    () => info?.variants.map((variant) => variant.id).filter((id) => id !== 'default') ?? [],
+    [info],
   )
 
-  const setVariant = useMemo(
-    () => (variant: string | undefined) => {
+  const currentVariant = selection?.variant
+
+  const saveVariant = useModelStateMutation(
+    ({ model, value }: SaveVariantInput) => saveOpenCodeModelVariant(model, value),
+    (state, input: SaveVariantInput) => setModelVariant(state, input.model, input.value),
+    'Failed to save model variant to backend',
+  )
+
+  const setVariant = useCallback(
+    (variant: string | undefined) => {
       if (!model) return
-      setStoreVariant(model, variant)
-    },
-    [model, setStoreVariant],
-  )
-
-  const cycleVariant = useMemo(() => {
-    return () => {
-      if (!model || availableVariants.length === 0) return
-
-      if (!currentVariant) {
-        setStoreVariant(model, availableVariants[0])
-      } else {
-        const currentIndex = availableVariants.indexOf(currentVariant)
-        if (currentIndex === availableVariants.length - 1) {
-          clearStoreVariant(model)
-        } else {
-          setStoreVariant(model, availableVariants[currentIndex + 1])
-        }
+      if (session?.id && activeAgent?.id) {
+        setSessionPick(session.id, activeAgent.id, { ...model, variant: normalizeModelVariant(variant) })
       }
-    }
-  }, [model, availableVariants, currentVariant, setStoreVariant, clearStoreVariant])
-
-  const clearVariant = useMemo(
-    () => () => {
-      if (!model) return
-      clearStoreVariant(model)
+      saveVariant.mutate({ model, value: variant })
     },
-    [model, clearStoreVariant],
+    [activeAgent?.id, model, saveVariant, session?.id, setSessionPick],
   )
+
+  const cycleVariant = useCallback(
+    () => setVariant(cycleModelVariant(currentVariant, availableVariants)),
+    [availableVariants, currentVariant, setVariant],
+  )
+
+  const clearVariant = useCallback(() => setVariant(undefined), [setVariant])
 
   return {
     availableVariants,

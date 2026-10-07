@@ -30,7 +30,6 @@ export function invalidateChildSessionCaches(queryClient: QueryClient, sessionID
 export function invalidateProviderCaches(queryClient: QueryClient) {
   queryClient.invalidateQueries({ queryKey: ['provider-credentials'] })
   queryClient.invalidateQueries({ queryKey: ['provider-auth-methods'] })
-  queryClient.invalidateQueries({ queryKey: ['providers-with-models'] })
   queryClient.invalidateQueries({ queryKey: ['opencode', 'providers'] })
 }
 

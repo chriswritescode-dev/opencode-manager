@@ -9,7 +9,6 @@ import { useSessionAgent } from '@/hooks/useSessionAgent'
 import { useSTT } from '@/hooks/useSTT'
 
 import { useUserBash } from '@/stores/userBashStore'
-import { useModelStore } from '@/stores/modelStore'
 import { useSessionAgentStore } from '@/stores/sessionAgentStore'
 import { useUIState } from '@/stores/uiStateStore'
 import { useSendErrorStore } from '@/stores/sendErrorStore'
@@ -36,11 +35,11 @@ import { detectMentionTrigger, parsePromptToInput, getFilename, filterAgentsByQu
 import { getNextPrimaryAgentId } from '@/lib/primaryAgents'
 import { randomId } from '@/lib/utils'
 import { showToast } from '@/lib/toast'
-import { formatModelName } from '@/api/providers'
+import { findModelInfo } from '@opencode-manager/shared/opencode'
 import { useProviders } from '@/hooks/useProviders'
 
 
-import type { CommandInfo, ModelRef } from '@opencode-manager/shared/opencode'
+import type { CommandInfo } from '@opencode-manager/shared/opencode'
 import type { FileAttachmentInfo, ImageAttachment } from '@/api/types'
 import { isBuiltinCommand, type CommandActions, type PageCommandActions } from '@/lib/builtinCommands'
 
@@ -313,6 +312,7 @@ export const PromptInput = memo(forwardRef<PromptInputHandle, PromptInputProps>(
   }
 
   const handleSubmit = async () => {
+    if (!isModelReady) return
     if (!prompt.trim() && imageAttachments.length === 0) return
     if (startGoal.isPending) return
 
@@ -336,7 +336,7 @@ export const PromptInput = memo(forwardRef<PromptInputHandle, PromptInputProps>(
           files: parsed.files,
           agents: parsed.agents,
           skills: parsed.skills,
-          model: modelRef,
+          model: modelRef ?? undefined,
           agent: currentMode,
           delivery: 'queue',
         },
@@ -345,9 +345,6 @@ export const PromptInput = memo(forwardRef<PromptInputHandle, PromptInputProps>(
         }
       )
       setStoredAgent(sessionID, currentMode)
-      if (model) {
-        setStoredModel({ providerID: model.providerID, modelID: model.modelID })
-      }
       return
     }
 
@@ -429,7 +426,7 @@ export const PromptInput = memo(forwardRef<PromptInputHandle, PromptInputProps>(
         files: parsed.files,
         agents: parsed.agents,
         skills: parsed.skills,
-        model: modelRef,
+        model: modelRef ?? undefined,
         agent: currentMode,
       },
       {
@@ -446,9 +443,6 @@ export const PromptInput = memo(forwardRef<PromptInputHandle, PromptInputProps>(
     onScrollToBottom()
 
     setStoredAgent(sessionID, currentMode)
-    if (model) {
-      setStoredModel({ providerID: model.providerID, modelID: model.modelID })
-    }
   }
 
   handleSubmitRef.current = handleSubmit
@@ -1084,33 +1078,23 @@ if (isIOS && isSecureContext && navigator.clipboard && navigator.clipboard.read)
     }
   }
 
-  const appliedSessionModelRef = useRef<string | undefined>(undefined)
-
   const { data: providersData } = useProviders(directory)
 
-  const { model, modelString, setModel: setStoredModel, restoreSessionModel } = useModelSelection(directory)
-  const setStoreVariant = useModelStore((state) => state.setVariant)
-  const clearStoreVariant = useModelStore((state) => state.clearVariant)
+  const modelSelectionSession = useMemo(
+    () => (sessionID
+      ? { id: sessionID, agent: sessionAgent.sessionAgentId, model: sessionAgent.modelRef }
+      : undefined),
+    [sessionID, sessionAgent.sessionAgentId, sessionAgent.modelRef],
+  )
 
-  const sessionModelSyncKey = sessionID ? `${directory ?? ''}:${sessionID}` : undefined
+  const { model, modelString, modelRef, setActiveAgent, isModelReady } = useModelSelection(directory, modelSelectionSession)
 
   useEffect(() => {
-    if (!sessionModelSyncKey) return
-    if (!sessionAgent.model) return
-
-    const sessionSelectionKey = `${sessionModelSyncKey}|${sessionAgent.model.providerID}/${sessionAgent.model.modelID}|${sessionAgent.variant ?? ''}`
-    if (appliedSessionModelRef.current === sessionSelectionKey) return
-
-    appliedSessionModelRef.current = sessionSelectionKey
-
-    restoreSessionModel(sessionAgent.model)
-
-    if (sessionAgent.variant) {
-      setStoreVariant(sessionAgent.model, sessionAgent.variant)
-    } else {
-      clearStoreVariant(sessionAgent.model)
-    }
-  }, [clearStoreVariant, sessionAgent.model, sessionAgent.variant, sessionModelSyncKey, restoreSessionModel, setStoreVariant])
+    setActiveAgent({
+      id: currentMode,
+      model: agents.find((agent) => agent.id === currentMode)?.model,
+    })
+  }, [agents, currentMode, setActiveAgent])
 
   const currentModel = modelString || ''
   const displayModelName = useMemo(() => {
@@ -1118,30 +1102,19 @@ if (isIOS && isSecureContext && navigator.clipboard && navigator.clipboard.read)
       return currentModel
     }
 
-    const provider = providersData?.providers.find((item) => item.id === model.providerID)
-    const modelData = provider?.models?.[model.modelID]
+    const info = findModelInfo(providersData?.models ?? [], model)
 
-    return modelData ? formatModelName(modelData) : model.modelID || currentModel
+    return info?.name || model.modelID || currentModel
   }, [currentModel, model, providersData])
   const isMobile = useMobile()
   const { setShowDialog, hasForSession: hasPermissionsForSession } = usePermissions()
   const hasPendingPermissionForSession = hasPermissionsForSession(sessionID)
-  const { hasVariants, currentVariant, cycleVariant } = useVariants(directory)
-  const modelRef = useMemo<ModelRef | undefined>(
-    () => model
-      ? { providerID: model.providerID, id: model.modelID, ...(currentVariant ? { variant: currentVariant } : {}) }
-      : undefined,
-    [model, currentVariant],
-  )
+  const { hasVariants, currentVariant, cycleVariant } = useVariants(directory, modelSelectionSession)
 
   const handleAgentChange = useCallback((agentId: string) => {
     setLocalMode(agentId)
     setStoredAgent(sessionID, agentId)
-    const agent = agents.find(a => a.id === agentId)
-    if (agent?.model) {
-      setStoredModel({ providerID: agent.model.providerID, modelID: agent.model.id })
-    }
-  }, [agents, sessionID, setStoredAgent, setStoredModel])
+  }, [sessionID, setStoredAgent])
 
   const handleCycleVariant = useCallback(() => {
     if (!hasVariants) {
@@ -1172,7 +1145,7 @@ if (isIOS && isSecureContext && navigator.clipboard && navigator.clipboard.read)
   const { executeCommand } = useCommandHandler({
     sessionID,
     directory,
-    model: modelRef,
+    model: modelRef ?? undefined,
     currentAgent: currentMode,
     actions: commandActionsWithPrompt,
   })
@@ -1380,6 +1353,7 @@ return (
                 directory={directory}
                 open={isModelPickerOpen}
                 onOpenChange={setIsModelPickerOpen}
+                session={modelSelectionSession}
               />
             </>
           ) : (
@@ -1412,6 +1386,7 @@ return (
                 directory={directory}
                 open={isModelPickerOpen}
                 onOpenChange={setIsModelPickerOpen}
+                session={modelSelectionSession}
               >
                 {!isSessionActive && !hideSecondaryButtons && (
                   <button
@@ -1481,7 +1456,7 @@ return (
             <button
               data-submit-prompt
               onClick={hasPendingPermissionForSession ? () => setShowDialog(true) : handleSubmit}
-              disabled={hasPendingPermissionForSession ? false : ((!prompt.trim() && imageAttachments.length === 0) || (isPromptSubmitPending && !isStreamingResponse))}
+              disabled={hasPendingPermissionForSession ? false : (!isModelReady || (!prompt.trim() && imageAttachments.length === 0) || (isPromptSubmitPending && !isStreamingResponse))}
               className={`px-4 md:px-5 py-1.5 md:py-2 rounded-lg text-sm font-medium transition-colors dark:border flex-shrink-0 min-w-[52px] ${
                 hasPendingPermissionForSession
                   ? 'bg-highlight hover:bg-highlight/90 border-highlight text-highlight-foreground ring-highlight/20'

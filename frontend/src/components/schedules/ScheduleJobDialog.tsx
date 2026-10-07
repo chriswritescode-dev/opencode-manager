@@ -2,7 +2,7 @@ import { useEffect, useMemo, useRef, useState } from 'react'
 import { useQuery } from '@tanstack/react-query'
 import type { CreateScheduleJobRequest, PromptTemplate, ScheduleJob, ScheduleMcpServer, ScheduleWorkspaceMode } from '@opencode-manager/shared/types'
 import { useScheduleModels } from '@/hooks/useScheduleModels'
-import { buildScheduleModelOptions, resolveScheduleModel } from '@/lib/schedules/schedule-model'
+import { resolveScheduleModel } from '@/lib/schedules/schedule-model'
 import { useAgents } from '@/hooks/useOpenCode'
 import { useScheduleTarget } from '@/hooks/useScheduleTarget'
 import { settingsApi } from '@/api/settings'
@@ -85,11 +85,11 @@ export function ScheduleJobDialog({ open, onOpenChange, job, isSaving, onSubmit,
   const { scheduleTarget } = useScheduleTarget(open ? effectiveRepoId : undefined)
   const scheduleDirectory = scheduleTarget?.fullPath
 
-  const { providerModels, modelState, availableModelKeys, configDefaultModel } = useScheduleModels(open, scheduleDirectory)
+  const { availableModels } = useScheduleModels(open, scheduleDirectory)
 
   const resolvedModel = useMemo(
-    () => (modelDirty ? (model.trim() || null) : resolveScheduleModel(model, availableModelKeys, configDefaultModel)),
-    [model, modelDirty, availableModelKeys, configDefaultModel],
+    () => (modelDirty ? (model.trim() || null) : resolveScheduleModel(model, availableModels)),
+    [model, modelDirty, availableModels],
   )
   const { data: agents = [], isSuccess: agentsLoaded } = useAgents(scheduleDirectory, { enabled: !!scheduleDirectory })
 
@@ -128,11 +128,6 @@ export function ScheduleJobDialog({ open, onOpenChange, job, isSaving, onSubmit,
       }))
     return [assistantOption, ...repoEntries]
   }, [repos])
-
-  const modelOptions = useMemo(
-    () => buildScheduleModelOptions(providerModels, modelState, configDefaultModel),
-    [providerModels, modelState, configDefaultModel],
-  )
 
   const agentOptions = useMemo<ComboboxOption[]>(() => {
     return getPrimaryAgents(agents).map((agent) => ({
@@ -296,7 +291,7 @@ export function ScheduleJobDialog({ open, onOpenChange, job, isSaving, onSubmit,
             agentOptions={agentOptions}
             model={resolvedModel ?? ''}
             onModelChange={handleModelChange}
-            modelOptions={modelOptions}
+            modelDirectory={scheduleDirectory}
             enabled={enabled}
             onEnabledChange={setEnabled}
             branch={branch}
