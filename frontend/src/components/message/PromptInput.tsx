@@ -1030,18 +1030,24 @@ if (isIOS && isSecureContext && navigator.clipboard && navigator.clipboard.read)
       return
     }
 
+    const suggestionStep = isMobile ? -1 : 1
+
     if (showMentionSuggestions && mentionSuggestions.length > 0) {
       if (e.key === 'ArrowDown') {
         e.preventDefault()
-        setSelectedMentionIndex(prev => 
-          prev < mentionSuggestions.length - 1 ? prev + 1 : prev
-        )
+        setSelectedMentionIndex(prev => {
+          const next = prev + suggestionStep
+          return next >= 0 && next < mentionSuggestions.length ? next : prev
+        })
         return
       }
       
       if (e.key === 'ArrowUp') {
         e.preventDefault()
-        setSelectedMentionIndex(prev => prev > 0 ? prev - 1 : 0)
+        setSelectedMentionIndex(prev => {
+          const next = prev - suggestionStep
+          return next >= 0 && next < mentionSuggestions.length ? next : prev
+        })
         return
       }
       
@@ -1066,13 +1072,13 @@ if (isIOS && isSecureContext && navigator.clipboard && navigator.clipboard.read)
     if (showSuggestions) {
       if (e.key === 'ArrowDown' && commandSuggestions.length > 0) {
         e.preventDefault()
-        setSelectedCommandIndex(prev => (prev + 1) % commandSuggestions.length)
+        setSelectedCommandIndex(prev => (prev + suggestionStep + commandSuggestions.length) % commandSuggestions.length)
         return
       }
       
       if (e.key === 'ArrowUp' && commandSuggestions.length > 0) {
         e.preventDefault()
-        setSelectedCommandIndex(prev => (prev - 1 + commandSuggestions.length) % commandSuggestions.length)
+        setSelectedCommandIndex(prev => (prev - suggestionStep + commandSuggestions.length) % commandSuggestions.length)
         return
       }
       

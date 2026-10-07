@@ -36,6 +36,8 @@ const mocks = vi.hoisted(() => ({
   useSendErrorStore: vi.fn(),
 }))
 
+const suggestionProps = vi.hoisted(() => ({ isOpen: false, selectedIndex: 0 }))
+
 vi.mock('@/api/opencode', async () => {
   const actual = await vi.importActual('@/api/opencode')
   return {
@@ -106,7 +108,13 @@ vi.mock('./ComposerToolsMenu', () => ({
 }))
 
 vi.mock('./PromptSuggestions', () => ({
-  PromptSuggestions: () => null,
+  PromptSuggestions: (props: { isOpen: boolean; selectedIndex: number }) => {
+    if (props.isOpen) {
+      suggestionProps.isOpen = true
+      suggestionProps.selectedIndex = props.selectedIndex
+    }
+    return null
+  },
 }))
 
 const createTestQueryClient = () => new QueryClient({
@@ -199,6 +207,8 @@ describe('PromptInput command submission', () => {
     mocks.useUserBash.mockImplementation((selector: (state: unknown) => unknown) => selector({ addUserBashCommand: vi.fn() }))
     mocks.useSessionAgentStore.mockImplementation((selector: (state: unknown) => unknown) => selector({ setAgent: mocks.setAgent }))
     mocks.useSendErrorStore.mockImplementation((selector: (state: unknown) => unknown) => selector({ errors: {} }))
+    suggestionProps.isOpen = false
+    suggestionProps.selectedIndex = 0
     useUIState.getState().clearPendingPromptCommand()
     useUIState.getState().clearPendingPromptFile()
   })
@@ -438,6 +448,51 @@ describe('PromptInput command submission', () => {
 
     await waitFor(() => expect(input).toHaveValue(''))
     expect(mocks.showToast.info).not.toHaveBeenCalled()
+  })
+
+  const commandSuggestions = () => ({
+    searchCommands: () => [
+      { item: { name: 'alpha', description: 'Alpha' }, ranges: [] },
+      { item: { name: 'beta', description: 'Beta' }, ranges: [] },
+      { item: { name: 'gamma', description: 'Gamma' }, ranges: [] },
+    ],
+    findCommand: () => undefined,
+    recentNames: [],
+  })
+
+  it('moves the command selection in the visual direction of the arrow on mobile', async () => {
+    mocks.useMobile.mockReturnValue(true)
+    mocks.useCommands.mockReturnValue(commandSuggestions())
+    renderComponent()
+
+    const input = await screen.findByPlaceholderText('Send a message...')
+    fireEvent.change(input, { target: { value: '/', selectionStart: 1 } })
+
+    await waitFor(() => expect(suggestionProps.isOpen).toBe(true))
+    expect(suggestionProps.selectedIndex).toBe(0)
+
+    fireEvent.keyDown(input, { key: 'ArrowUp' })
+    await waitFor(() => expect(suggestionProps.selectedIndex).toBe(1))
+
+    fireEvent.keyDown(input, { key: 'ArrowDown' })
+    await waitFor(() => expect(suggestionProps.selectedIndex).toBe(0))
+  })
+
+  it('keeps the desktop command arrow direction unchanged', async () => {
+    mocks.useCommands.mockReturnValue(commandSuggestions())
+    renderComponent()
+
+    const input = await screen.findByPlaceholderText('Send a message...')
+    fireEvent.change(input, { target: { value: '/', selectionStart: 1 } })
+
+    await waitFor(() => expect(suggestionProps.isOpen).toBe(true))
+    expect(suggestionProps.selectedIndex).toBe(0)
+
+    fireEvent.keyDown(input, { key: 'ArrowDown' })
+    await waitFor(() => expect(suggestionProps.selectedIndex).toBe(1))
+
+    fireEvent.keyDown(input, { key: 'ArrowUp' })
+    await waitFor(() => expect(suggestionProps.selectedIndex).toBe(0))
   })
 
   describe('mobile keybar', () => {

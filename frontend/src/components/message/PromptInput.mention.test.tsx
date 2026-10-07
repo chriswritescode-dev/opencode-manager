@@ -24,6 +24,8 @@ const mocks = vi.hoisted(() => ({
   useSendErrorStore: vi.fn(),
 }))
 
+const suggestionProps = vi.hoisted(() => ({ isOpen: false, selectedIndex: 0 }))
+
 vi.mock('@/api/opencode', async () => {
   const actual = await vi.importActual('@/api/opencode')
   return {
@@ -93,7 +95,17 @@ vi.mock('@/components/ui/session-status-indicator', () => ({
 }))
 
 vi.mock('./PromptSuggestions', () => ({
-  PromptSuggestions: () => null,
+  PromptSuggestions: (props: { isOpen: boolean; selectedIndex: number }) => {
+    if (props.isOpen) {
+      suggestionProps.isOpen = true
+      suggestionProps.selectedIndex = props.selectedIndex
+    }
+    return null
+  },
+}))
+
+vi.mock('./ComposerToolsMenu', () => ({
+  ComposerToolsMenu: () => null,
 }))
 
 const createTestQueryClient = () => new QueryClient({
@@ -180,6 +192,8 @@ describe('PromptInput agent mention submission', () => {
     mocks.useSessionAgent.mockReturnValue({ agent: 'build' })
     mocks.useUserBash.mockImplementation((selector: (state: unknown) => unknown) => selector({ addUserBashCommand: vi.fn() }))
     mocks.useSessionAgentStore.mockImplementation((selector: (state: unknown) => unknown) => selector({ setAgent: vi.fn() }))
+    suggestionProps.isOpen = false
+    suggestionProps.selectedIndex = 0
     useUIState.getState().clearPendingPromptCommand()
     useUIState.getState().clearPendingPromptFile()
   })
@@ -252,5 +266,46 @@ describe('PromptInput agent mention submission', () => {
     }))
     expect(mocks.switchSessionAgent).not.toHaveBeenCalled()
     expect(mocks.switchSessionModel).not.toHaveBeenCalled()
+  })
+
+  it('moves the mention selection in the visual direction of the arrow on mobile', async () => {
+    mocks.useMobile.mockReturnValue(true)
+    mocks.agents = [
+      { name: 'alpha', description: 'Alpha agent' },
+      { name: 'beta', description: 'Beta agent' },
+    ]
+    renderComponent()
+
+    const input = await screen.findByPlaceholderText('Send a message...')
+    fireEvent.change(input, { target: { value: '@', selectionStart: 1 } })
+
+    await waitFor(() => expect(suggestionProps.isOpen).toBe(true))
+    expect(suggestionProps.selectedIndex).toBe(0)
+
+    fireEvent.keyDown(input, { key: 'ArrowUp' })
+    await waitFor(() => expect(suggestionProps.selectedIndex).toBe(1))
+
+    fireEvent.keyDown(input, { key: 'ArrowDown' })
+    await waitFor(() => expect(suggestionProps.selectedIndex).toBe(0))
+  })
+
+  it('keeps the desktop arrow direction unchanged', async () => {
+    mocks.agents = [
+      { name: 'alpha', description: 'Alpha agent' },
+      { name: 'beta', description: 'Beta agent' },
+    ]
+    renderComponent()
+
+    const input = await screen.findByPlaceholderText('Send a message...')
+    fireEvent.change(input, { target: { value: '@', selectionStart: 1 } })
+
+    await waitFor(() => expect(suggestionProps.isOpen).toBe(true))
+    expect(suggestionProps.selectedIndex).toBe(0)
+
+    fireEvent.keyDown(input, { key: 'ArrowUp' })
+    expect(suggestionProps.selectedIndex).toBe(0)
+
+    fireEvent.keyDown(input, { key: 'ArrowDown' })
+    await waitFor(() => expect(suggestionProps.selectedIndex).toBe(1))
   })
 })
