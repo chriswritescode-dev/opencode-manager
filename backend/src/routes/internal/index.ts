@@ -17,9 +17,13 @@ import { createInternalSessionRoutes } from './sessions'
 import { createInternalAssistantRoutes } from './assistant'
 import { createInternalGitCredentialsRoutes } from './git-credentials'
 import { createInternalSandboxRoutes } from './sandbox'
+import { createSessionGoalRoutes } from '../session-goals'
+import { createMultiRunRoutes } from '../multi-runs'
 import type { SessionPermissionModeService } from '../../services/session-permission-modes'
 import type { RepoWorkspaceService } from '../../services/repo-workspace'
 import type { GitAuthService } from '../../services/git-auth'
+import type { SessionGoalService } from '../../services/session-goals'
+import type { MultiRunService } from '../../services/multi-runs'
 
 export function createInternalRoutes(
   db: Database,
@@ -30,10 +34,14 @@ export function createInternalRoutes(
   permissionModes: SessionPermissionModeService,
   repoWorkspaces: RepoWorkspaceService,
   gitAuthService: GitAuthService,
+  sessionGoals: SessionGoalService,
+  multiRuns: MultiRunService,
 ) {
   const app = new Hono()
   app.use('/*', createInternalTokenMiddleware(db))
   app.route('/schedules', createScheduleRoutes(scheduleService))
+  app.route('/session-goals', createSessionGoalRoutes(sessionGoals))
+  app.route('/multi-runs', createMultiRunRoutes(multiRuns))
   app.route('/notifications', createInternalNotificationRoutes(notificationService))
   app.route('/settings', createInternalSettingsRoutes(settingsService))
   app.route('/opencode-config', createOpenCodeConfigRoutes(settingsService, openCodeClient, { redactSecrets: true }))
