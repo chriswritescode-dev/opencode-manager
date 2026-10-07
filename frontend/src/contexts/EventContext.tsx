@@ -11,6 +11,7 @@ import {
   replyPermission,
 } from '@/api/opencode'
 import { listRepos } from '@/api/repos'
+import { FetchError } from '@opencode-manager/shared'
 import type { FormAnswer, FormInfo, PermissionRequest, V2Event } from '@opencode-manager/shared/opencode'
 import type { PermissionResponse, SSHHostKeyRequest, Repo } from '@/api/types'
 import { showToast } from '@/lib/toast'
@@ -284,7 +285,12 @@ export function EventProvider({ children }: { children: React.ReactNode }) {
     response: PermissionResponse,
     message?: string,
   ) => {
-    await replyPermission(sessionID, permissionID, response, message)
+    try {
+      await replyPermission(sessionID, permissionID, response, message)
+    } catch (error) {
+      if (!(error instanceof FetchError && error.statusCode === 404)) throw error
+      showToast.info('Permission request expired')
+    }
     removePermission(permissionID, sessionID)
   }, [removePermission])
 

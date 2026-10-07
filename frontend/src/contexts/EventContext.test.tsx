@@ -5,6 +5,7 @@ import type { ReactNode } from 'react'
 import { MemoryRouter, useLocation } from 'react-router-dom'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 import type { FormInfo, PermissionRequest } from '@opencode-manager/shared/opencode'
+import { FetchError } from '@opencode-manager/shared'
 import { useSessionStatus } from '@/stores/sessionStatusStore'
 import { changeWalkthroughQueryKey } from '@/hooks/useChangeWalkthrough'
 import { EventProvider, useEventContext, useForms, usePermissions, useSSEHealth } from './EventContext'
@@ -245,6 +246,24 @@ describe('EventProvider permissions and forms', () => {
       expect(mocks.replyPermission).toHaveBeenCalledWith('session-1', 'permission-1', 'reject', undefined)
       expect(screen.getByTestId('permission-count')).toHaveTextContent('1')
       expect(screen.getByTestId('permission-current')).toHaveTextContent('permission-2')
+    })
+  })
+
+  it('removes a permission the server no longer knows about when replying', async () => {
+    mocks.listPendingPermissions.mockResolvedValue([pendingPermission])
+    mocks.replyPermission.mockRejectedValue(new FetchError('Permission request not found', 404, 'PermissionNotFoundError'))
+
+    render(<Harness />, { wrapper: createWrapper() })
+
+    await userEvent.click(screen.getByRole('button', { name: 'Sync Permissions' }))
+
+    await waitFor(() => expect(screen.getByTestId('permission-count')).toHaveTextContent('1'))
+
+    await userEvent.click(screen.getByRole('button', { name: 'Reject Permission' }))
+
+    await waitFor(() => {
+      expect(screen.getByTestId('permission-count')).toHaveTextContent('0')
+      expect(screen.getByTestId('permission-current')).toHaveTextContent('none')
     })
   })
 
