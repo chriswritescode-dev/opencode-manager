@@ -11,11 +11,8 @@ import {
   withDefaultOpenCodeDirectory,
 } from '../services/opencode/upstream'
 import { getRepoById } from '../db/queries'
-import { getSiblingRepos, resolveRepoWorkingDirectory } from '../services/repo'
-import type { GitAuthService } from '../services/git-auth'
-import type { OpenCodeClient } from '../services/opencode/client'
-import type { Repo } from '@opencode-manager/shared/types'
-import type { RepoSibling } from '@opencode-manager/shared/utils'
+import { getWorkspacePath } from '@opencode-manager/shared/config/env'
+import { isPathWithinRoot } from '../services/sandbox/command'
 import { buildProxyResponseHeaders, filterProxyHeaders } from '../utils/proxy-headers'
 
 interface ProxyRequestParts {
@@ -27,11 +24,9 @@ interface ProxyRequestParts {
 
 type ProxyRewrite = (parts: ProxyRequestParts) => void
 
-type ProxyBodyRewrite = (bodyText: string) => Promise<string | undefined>
+type ProxyBodyRewrite = (bodyText: string) => string | undefined
 
-type RepoDirectoryResolver = (directory: string | undefined) => Promise<string>
-
-const REPO_SIBLINGS_CACHE_TTL_MS = 5_000
+type RepoDirectoryResolver = (directory: string | null | undefined) => string
 
 function isJsonContentType(contentType: string | undefined): boolean {
   return (contentType ?? '').toLowerCase().includes('application/json')
@@ -46,19 +41,28 @@ function decodeDirectoryHeader(value: string | undefined): string | undefined {
   }
 }
 
-function rewriteRepoLocation(parts: ProxyRequestParts, directory: string): void {
+/**
+ * Keeps a directory the Manager's OpenCode server owns (repos, OpenCode and schedule
+ * worktrees, all under the workspace) and maps anything else, such as the attaching
+ * client's local cwd, to the bound repo.
+ */
+function createRepoDirectoryResolver(repoPath: string): RepoDirectoryResolver {
+  return (directory) => (directory && isPathWithinRoot(getWorkspacePath(), directory) ? directory : repoPath)
+}
+
+function rewriteRepoLocation(parts: ProxyRequestParts, directory: string, resolveDirectory: RepoDirectoryResolver): void {
   parts.headers[OPENCODE_DIRECTORY_HEADER] = encodeURIComponent(directory)
 
   if (parts.searchParams.has('location[directory]')) {
     parts.searchParams.set('location[directory]', directory)
   }
 
-  if (parts.method === 'GET' && parts.path === '/api/session' && !parts.searchParams.has('project')) {
-    parts.searchParams.set('directory', directory)
+  if (parts.method === 'GET' && parts.path === '/api/session' && parts.searchParams.has('directory')) {
+    parts.searchParams.set('directory', resolveDirectory(parts.searchParams.get('directory')))
   }
 }
 
-async function rewriteRepoLocationBody(bodyText: string, resolveDirectory: RepoDirectoryResolver): Promise<string | undefined> {
+function rewriteRepoLocationBody(bodyText: string, resolveDirectory: RepoDirectoryResolver): string | undefined {
   let parsed: unknown
   try {
     parsed = JSON.parse(bodyText)
@@ -72,39 +76,15 @@ async function rewriteRepoLocationBody(bodyText: string, resolveDirectory: RepoD
   if (!location || typeof location !== 'object' || Array.isArray(location)) return undefined
 
   const requested = (location as { directory?: unknown }).directory
-  const directory = await resolveDirectory(typeof requested === 'string' ? requested : undefined)
+  const directory = resolveDirectory(typeof requested === 'string' ? requested : undefined)
   ;(parsed as { location: Record<string, unknown> }).location = { ...location, directory }
   return JSON.stringify(parsed)
 }
 
-export function createOpenCodeProxyRoutes(
-  db: Database,
-  settingsService: SettingsService,
-  gitAuthService: GitAuthService,
-  openCodeClient: OpenCodeClient,
-) {
+export function createOpenCodeProxyRoutes(db: Database, settingsService: SettingsService) {
   const app = new Hono()
-  const repoSiblingsCache = new Map<number, { expiresAt: number; siblings: Promise<RepoSibling[]> }>()
 
   app.use('/*', createInternalTokenMiddleware(db))
-
-  function loadRepoSiblings(repoId: number): Promise<RepoSibling[]> {
-    const cached = repoSiblingsCache.get(repoId)
-    if (cached && cached.expiresAt > Date.now()) return cached.siblings
-
-    const siblings = getSiblingRepos(db, repoId, gitAuthService.getGitEnvironment(), openCodeClient, { includeBranch: false })
-      .catch(() => {
-        repoSiblingsCache.delete(repoId)
-        return []
-      })
-    repoSiblingsCache.set(repoId, { expiresAt: Date.now() + REPO_SIBLINGS_CACHE_TTL_MS, siblings })
-    return siblings
-  }
-
-  function createRepoDirectoryResolver(repo: Repo): RepoDirectoryResolver {
-    return async (directory) =>
-      (await resolveRepoWorkingDirectory(repo, directory, () => loadRepoSiblings(repo.id))) ?? repo.fullPath
-  }
 
   async function forwardToOpenCode(
     c: Context,
@@ -149,7 +129,7 @@ export function createOpenCodeProxyRoutes(
 
     if (rewriteBody && rawBody !== undefined) {
       const bodyText = rawBody.byteLength > 0 ? new TextDecoder().decode(rawBody) : undefined
-      const rewrittenBody = bodyText === undefined ? undefined : await rewriteBody(bodyText)
+      const rewrittenBody = bodyText === undefined ? undefined : rewriteBody(bodyText)
       requestBody = rewrittenBody === undefined ? rawBody : rewrittenBody
     }
 
@@ -185,15 +165,15 @@ export function createOpenCodeProxyRoutes(
 
     const url = new URL(c.req.url)
     const pathSuffix = url.pathname.replace(/^\/api\/opencode-proxy\/repos\/[^/]+/, '') || '/'
-    const resolveDirectory = createRepoDirectoryResolver(repo)
-    const directory = await resolveDirectory(
+    const resolveDirectory = createRepoDirectoryResolver(repo.fullPath)
+    const directory = resolveDirectory(
       url.searchParams.get('location[directory]') || decodeDirectoryHeader(c.req.header(OPENCODE_DIRECTORY_HEADER)),
     )
 
     return forwardToOpenCode(
       c,
       pathSuffix,
-      (parts) => rewriteRepoLocation(parts, directory),
+      (parts) => rewriteRepoLocation(parts, directory, resolveDirectory),
       (bodyText) => rewriteRepoLocationBody(bodyText, resolveDirectory),
     )
   })
