@@ -1,7 +1,6 @@
 import type { Context } from '@opencode/plugin/tui/context'
-import { readInstallNotice, readState } from './state.js'
-import { getToken } from './internal-token-store.js'
-import { TokenStoreError } from './token-store.js'
+import { readInstallNotice } from './state.js'
+import { resolveManagerAuth } from './manager-auth.js'
 import { fetchRepos, toRemoteRepoSummaries } from './manager-repos.js'
 import { ManagerApi, ManagerApiError } from './manager-api.js'
 import type { MirrorTargetPlanResponse } from '@opencode-manager/shared/schemas'
@@ -116,26 +115,13 @@ async function runSessionMove(context: Context, setMoveProgress: MoveProgressSet
       return
     }
 
-    const state = readState()
-    if (!state?.managerUrl) {
-      context.ui.toast.show({ variant: 'error', message: 'No manager configured. Run `ocm login <url>` first.' })
+    const auth = await resolveManagerAuth()
+    if (!auth.ok) {
+      context.ui.toast.show({ variant: 'error', message: auth.message })
       return
     }
 
-    let token: string | null
-    try {
-      token = await getToken(state.managerUrl)
-    } catch (err) {
-      const reason = err instanceof TokenStoreError ? err.message : String(err)
-      context.ui.toast.show({ variant: 'error', message: `Token store unavailable: ${reason}` })
-      return
-    }
-    if (!token) {
-      context.ui.toast.show({ variant: 'error', message: `No token stored. Run \`ocm login ${state.managerUrl}\`.` })
-      return
-    }
-
-    const repos = await fetchRepos(state.managerUrl, token)
+    const repos = await fetchRepos(auth.managerUrl, auth.token)
     const plan = await prepareMirror(session.location.directory, toRemoteRepoSummaries(repos))
 
     if (plan.matched.length === 0) {
@@ -150,16 +136,16 @@ async function runSessionMove(context: Context, setMoveProgress: MoveProgressSet
     const matchedRepoId = matched.repoId
     const remoteRepo = repos.find((r) => r.repoId === matchedRepoId)!
 
-    await warmRepoProxy(state.managerUrl, token, matchedRepoId)
+    await warmRepoProxy(auth.managerUrl, auth.token, matchedRepoId)
 
-    const transfer = createManagerSessionTransfer(state.managerUrl, token)
+    const transfer = createManagerSessionTransfer(auth.managerUrl, auth.token)
     const blocker = await describeMoveBlocker(transfer, sessionID, session.parentID)
     if (blocker) {
       context.ui.toast.show({ variant: 'error', message: blocker })
       return
     }
 
-    const managerApi = new ManagerApi(state.managerUrl, token)
+    const managerApi = new ManagerApi(auth.managerUrl, auth.token)
     const target = await resolveMoveTarget(managerApi, matched, remoteRepo.directory, localBranch)
     const discardReasons = target.repoId === null ? [] : await describeRemoteDiscard(plan.repoRoot, managerApi, target.repoId)
 
@@ -199,8 +185,8 @@ async function runSessionMove(context: Context, setMoveProgress: MoveProgressSet
         setMoveProgress(null)
         const warp = await confirmDialog(context, { title: 'Attach to moved session?', message: 'Exit this TUI and attach to the moved session on the Manager now?' })
         if (warp) {
-          await warmRepoProxy(state.managerUrl, token, pushed.repoId)
-          setPendingWarp({ managerUrl: state.managerUrl, token, repoId: pushed.repoId, sessionID: result.sessionID, repoName: matched.name })
+          await warmRepoProxy(auth.managerUrl, auth.token, pushed.repoId)
+          setPendingWarp({ managerUrl: auth.managerUrl, token: auth.token, repoId: pushed.repoId, sessionID: result.sessionID, repoName: matched.name })
           context.keymap.dispatch('app.exit')
           return
         }

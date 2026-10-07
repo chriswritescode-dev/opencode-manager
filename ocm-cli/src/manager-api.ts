@@ -3,8 +3,15 @@ import { Readable } from 'stream'
 import {
   MirrorTargetEnsureResponseSchema,
   MirrorTargetPlanResponseSchema,
+  MultiRunSchema,
+  SessionGoalSchema,
+  type FuseMultiRunRequest,
+  type LaunchMultiRunRequest,
   type MirrorTargetEnsureResponse,
   type MirrorTargetPlanResponse,
+  type MultiRun,
+  type SessionGoal,
+  type StartSessionGoalRequest,
 } from '@opencode-manager/shared/schemas'
 
 export interface MirrorBeginOpts {
@@ -75,23 +82,30 @@ export class ManagerApiError extends Error {
     public readonly status: number,
     public readonly code: string | null,
     public readonly operation: string,
+    public readonly details: unknown = null,
   ) {
     super(message)
     this.name = 'ManagerApiError'
   }
 }
 
+export function isManagerRouteMissing(error: unknown): boolean {
+  return error instanceof ManagerApiError && error.status === 404 && error.code === null
+}
+
 async function formatErrorResponse(res: Response, operation: string): Promise<ManagerApiError> {
   const text = await res.text().catch(() => '')
   let code: string | null = null
   let detail = text
+  let details: unknown = null
   if (text) {
     try {
-      const parsed = JSON.parse(text) as { error?: unknown; message?: unknown }
+      const parsed = JSON.parse(text) as { error?: unknown; message?: unknown; details?: unknown }
       const errField = typeof parsed.error === 'string' ? parsed.error : null
       const msgField = typeof parsed.message === 'string' ? parsed.message : null
       code = errField
       detail = msgField ?? errField ?? text
+      details = parsed.details ?? null
     } catch {
       /* not JSON, keep raw text */
     }
@@ -99,7 +113,7 @@ async function formatErrorResponse(res: Response, operation: string): Promise<Ma
   const message = detail
     ? `${operation} failed (${res.status}): ${detail}`
     : `${operation} failed (${res.status})`
-  return new ManagerApiError(message, res.status, code, operation)
+  return new ManagerApiError(message, res.status, code, operation, details)
 }
 
 export class ManagerApi {
@@ -254,5 +268,95 @@ export class ManagerApi {
 
     if (!res.ok) throw await formatErrorResponse(res, 'mirror patch snapshot')
     return (await res.json()) as MirrorPatchSnapshot
+  }
+
+  async getLatestSessionGoal(sessionId: string): Promise<SessionGoal | null> {
+    const res = await fetch(`${this.baseUrl}/api/internal/session-goals?sessionId=${encodeURIComponent(sessionId)}`, {
+      headers: this.headers(),
+    })
+
+    if (!res.ok) throw await formatErrorResponse(res, 'read session goal')
+    const body = (await res.json()) as { goal: unknown }
+    return SessionGoalSchema.nullable().parse(body.goal)
+  }
+
+  async startSessionGoal(input: StartSessionGoalRequest): Promise<SessionGoal> {
+    const res = await fetch(`${this.baseUrl}/api/internal/session-goals`, {
+      method: 'POST',
+      headers: { ...this.headers(), 'Content-Type': 'application/json' },
+      body: JSON.stringify(input),
+    })
+
+    if (!res.ok) throw await formatErrorResponse(res, 'start session goal')
+    const body = (await res.json()) as { goal: unknown }
+    return SessionGoalSchema.parse(body.goal)
+  }
+
+  private async runSessionGoalAction(id: number, action: 'pause' | 'resume' | 'cancel'): Promise<SessionGoal> {
+    const res = await fetch(`${this.baseUrl}/api/internal/session-goals/${encodeURIComponent(id)}/${action}`, {
+      method: 'POST',
+      headers: this.headers(),
+    })
+
+    if (!res.ok) throw await formatErrorResponse(res, `${action} session goal`)
+    const body = (await res.json()) as { goal: unknown }
+    return SessionGoalSchema.parse(body.goal)
+  }
+
+  pauseSessionGoal(id: number): Promise<SessionGoal> {
+    return this.runSessionGoalAction(id, 'pause')
+  }
+
+  resumeSessionGoal(id: number): Promise<SessionGoal> {
+    return this.runSessionGoalAction(id, 'resume')
+  }
+
+  cancelSessionGoal(id: number): Promise<SessionGoal> {
+    return this.runSessionGoalAction(id, 'cancel')
+  }
+
+  async listMultiRuns(repoId: number): Promise<MultiRun[]> {
+    const res = await fetch(`${this.baseUrl}/api/internal/multi-runs?repoId=${encodeURIComponent(repoId)}`, {
+      headers: this.headers(),
+    })
+
+    if (!res.ok) throw await formatErrorResponse(res, 'list multi-runs')
+    const body = (await res.json()) as { runs: unknown }
+    return MultiRunSchema.array().parse(body.runs)
+  }
+
+  async launchMultiRun(request: LaunchMultiRunRequest): Promise<MultiRun> {
+    const res = await fetch(`${this.baseUrl}/api/internal/multi-runs`, {
+      method: 'POST',
+      headers: { ...this.headers(), 'Content-Type': 'application/json' },
+      body: JSON.stringify(request),
+    })
+
+    if (!res.ok) throw await formatErrorResponse(res, 'launch multi-run')
+    const body = (await res.json()) as { run: unknown }
+    return MultiRunSchema.parse(body.run)
+  }
+
+  async fuseMultiRun(runId: number, request: FuseMultiRunRequest): Promise<MultiRun> {
+    const res = await fetch(`${this.baseUrl}/api/internal/multi-runs/${encodeURIComponent(runId)}/fusions`, {
+      method: 'POST',
+      headers: { ...this.headers(), 'Content-Type': 'application/json' },
+      body: JSON.stringify(request),
+    })
+
+    if (!res.ok) throw await formatErrorResponse(res, 'fuse multi-run')
+    const body = (await res.json()) as { run: unknown }
+    return MultiRunSchema.parse(body.run)
+  }
+
+  async discardMultiRunEntry(runId: number, entryId: number): Promise<MultiRun> {
+    const res = await fetch(`${this.baseUrl}/api/internal/multi-runs/${encodeURIComponent(runId)}/entries/${encodeURIComponent(entryId)}/discard`, {
+      method: 'POST',
+      headers: this.headers(),
+    })
+
+    if (!res.ok) throw await formatErrorResponse(res, 'discard multi-run entry')
+    const body = (await res.json()) as { run: unknown }
+    return MultiRunSchema.parse(body.run)
   }
 }
