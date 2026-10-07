@@ -105,6 +105,7 @@ export interface SidebarItemProps {
   collapsed: boolean
   onClick?: () => void
   asPrimary?: boolean
+  dense?: boolean
   variant?: 'default' | 'primary' | 'secondary' | 'danger'
 }
 
@@ -115,13 +116,14 @@ export function SidebarItem({
   collapsed,
   onClick,
   asPrimary = false,
+  dense = false,
   variant = 'default',
 }: SidebarItemProps) {
 
   const baseClasses = cn(
     'flex items-center gap-3 rounded-md transition-colors duration-150',
     'focus:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 focus-visible:ring-offset-background',
-    asPrimary ? 'p-3 text-sm font-medium' : 'p-2.5 text-sm',
+    asPrimary ? 'p-3 text-sm font-medium' : dense ? 'px-2.5 py-1.5 text-sm' : 'p-2.5 text-sm',
     variant === 'primary' && 'bg-primary text-primary-foreground hover:bg-primary/90',
     variant === 'secondary' && 'bg-secondary text-secondary-foreground hover:bg-secondary/80',
     variant === 'danger' && 'text-destructive hover:bg-destructive/10',
@@ -137,7 +139,7 @@ export function SidebarItem({
       onClick={onClick}
       title={collapsed ? label : undefined}
     >
-      <Icon className={cn('h-5 w-5', 'flex-shrink-0')} />
+      <Icon className={cn(dense ? 'h-4 w-4' : 'h-5 w-5', 'flex-shrink-0')} />
       {!collapsed && <span className="truncate">{label}</span>}
       {collapsed && <span className="sr-only">{label}</span>}
     </button>

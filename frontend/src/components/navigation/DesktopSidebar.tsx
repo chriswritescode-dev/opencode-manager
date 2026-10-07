@@ -15,6 +15,7 @@ import {
   SidebarItem,
 } from '@/components/ui/sidebar'
 import { FolderGit2 } from 'lucide-react'
+import { cn } from '@/lib/utils'
 
 const ACCOUNT_ITEM_KEYS = new Set(['settings', 'logout'])
 
@@ -110,7 +111,7 @@ export function DesktopSidebar() {
               label="Sessions"
               collapsed={!isSectionOpen('sessions')}
               onToggle={() => toggleSection('sessions')}
-              className="border-t border-border"
+              className={cn('border-t border-border', isSectionOpen('sessions') && 'flex-1')}
             >
               <DesktopSessionTree />
             </SidebarCollapsibleSection>
@@ -119,16 +120,17 @@ export function DesktopSidebar() {
               label="Menu"
               collapsed={!isSectionOpen('menu')}
               onToggle={() => toggleSection('menu')}
-              className="flex-1 min-h-fit border-t border-border"
+              className={cn('border-t border-border', isSectionOpen('sessions') ? 'shrink-0 max-h-[40%]' : 'flex-1')}
               contentClassName="overflow-y-auto"
             >
-              <div className="flex flex-col gap-1 p-2 pt-0">
+              <div className="flex flex-col gap-0.5 p-2 pt-0">
                 {toolItems.map((item: MoreDrawerItem) => (
                   <SidebarItem
                     key={item.key}
                     icon={item.icon}
                     label={item.label}
                     collapsed={false}
+                    dense
                     onClick={() => handleItemClick(item)}
                     danger={item.danger}
                   />
