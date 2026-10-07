@@ -817,7 +817,7 @@ describe('opencode-proxy repo-scoped mount', () => {
     const fetchCall = upstreamFetch.mock.calls[0] as [string, RequestInit]
     const fetchHeaders = fetchCall[1].headers as Record<string, string>
     expect(fetchHeaders['x-opencode-directory']).toBe(encodeURIComponent('/srv/repos/my-repo'))
-    expect(fetchCall[0]).toBe('http://127.0.0.1:5551/api/session?limit=1&directory=%2Fsrv%2Frepos%2Fmy-repo')
+    expect(fetchCall[0]).toBe('http://127.0.0.1:5551/api/session?limit=1')
   })
 
   it('rewrites the location[directory] query value', async () => {
@@ -923,6 +923,85 @@ describe('opencode-proxy repo-scoped mount', () => {
     expect(res.status).toBe(200)
     const fetchCall = upstreamFetch.mock.calls[0] as [string, RequestInit]
     expect(new TextDecoder().decode(fetchCall[1].body as ArrayBuffer)).toBe('{not json')
+  })
+
+  describe('workspace directories', () => {
+    const worktreePath = join(getWorkspacePath(), '.opencode', 'state', 'opencode', 'worktree', 'abc123', 'feature')
+    const otherRepoPath = join(getWorkspacePath(), 'repos', 'other-repo')
+
+    beforeEach(() => {
+      getRepoByIdMock.mockReturnValue(readyRepo)
+    })
+
+    it('keeps a workspace x-opencode-directory', async () => {
+      const upstreamFetch = upstreamOk()
+
+      const res = await app.request('/api/opencode-proxy/repos/7/api/agent', {
+        headers: {
+          Authorization: 'Bearer test-internal-token',
+          'x-opencode-directory': encodeURIComponent(worktreePath),
+        },
+      })
+
+      expect(res.status).toBe(200)
+      const fetchCall = upstreamFetch.mock.calls[0] as [string, RequestInit]
+      expect((fetchCall[1].headers as Record<string, string>)['x-opencode-directory']).toBe(encodeURIComponent(worktreePath))
+    })
+
+    it('keeps another project location[directory] from the workspace', async () => {
+      const upstreamFetch = upstreamOk()
+
+      const res = await app.request(
+        `/api/opencode-proxy/repos/7/api/agent?location%5Bdirectory%5D=${encodeURIComponent(otherRepoPath)}`,
+        { headers: { Authorization: 'Bearer test-internal-token' } }
+      )
+
+      expect(res.status).toBe(200)
+      const fetchCall = upstreamFetch.mock.calls[0] as [string, RequestInit]
+      expect(new URL(fetchCall[0]).searchParams.get('location[directory]')).toBe(otherRepoPath)
+      expect((fetchCall[1].headers as Record<string, string>)['x-opencode-directory']).toBe(encodeURIComponent(otherRepoPath))
+    })
+
+    it('keeps a workspace body location.directory', async () => {
+      const upstreamFetch = upstreamOk()
+
+      const res = await app.request('/api/opencode-proxy/repos/7/api/session', {
+        method: 'POST',
+        headers: {
+          Authorization: 'Bearer test-internal-token',
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({ title: 'x', location: { directory: worktreePath } }),
+      })
+
+      expect(res.status).toBe(200)
+      const fetchCall = upstreamFetch.mock.calls[0] as [string, RequestInit]
+      expect(JSON.parse(fetchCall[1].body as string)).toEqual({ title: 'x', location: { directory: worktreePath } })
+    })
+
+    it('keeps a workspace directory filter on the session list', async () => {
+      const upstreamFetch = upstreamOk()
+
+      const res = await app.request(`/api/opencode-proxy/repos/7/api/session?directory=${encodeURIComponent(worktreePath)}`, {
+        headers: { Authorization: 'Bearer test-internal-token' },
+      })
+
+      expect(res.status).toBe(200)
+      const fetchCall = upstreamFetch.mock.calls[0] as [string, RequestInit]
+      expect(new URL(fetchCall[0]).searchParams.get('directory')).toBe(worktreePath)
+    })
+
+    it('does not add a directory filter to an unfiltered session list', async () => {
+      const upstreamFetch = upstreamOk()
+
+      const res = await app.request('/api/opencode-proxy/repos/7/api/session?limit=50&parentID=null', {
+        headers: { Authorization: 'Bearer test-internal-token' },
+      })
+
+      expect(res.status).toBe(200)
+      const fetchCall = upstreamFetch.mock.calls[0] as [string, RequestInit]
+      expect(new URL(fetchCall[0]).searchParams.has('directory')).toBe(false)
+    })
   })
 })
 

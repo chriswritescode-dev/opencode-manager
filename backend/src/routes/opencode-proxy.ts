@@ -11,6 +11,8 @@ import {
   withDefaultOpenCodeDirectory,
 } from '../services/opencode/upstream'
 import { getRepoById } from '../db/queries'
+import { getWorkspacePath } from '@opencode-manager/shared/config/env'
+import { isPathWithinRoot } from '../services/sandbox/command'
 import { buildProxyResponseHeaders, filterProxyHeaders } from '../utils/proxy-headers'
 
 interface ProxyRequestParts {
@@ -24,23 +26,43 @@ type ProxyRewrite = (parts: ProxyRequestParts) => void
 
 type ProxyBodyRewrite = (bodyText: string) => string | undefined
 
+type RepoDirectoryResolver = (directory: string | null | undefined) => string
+
 function isJsonContentType(contentType: string | undefined): boolean {
   return (contentType ?? '').toLowerCase().includes('application/json')
 }
 
-function rewriteRepoLocation(parts: ProxyRequestParts, directory: string): void {
+function decodeDirectoryHeader(value: string | undefined): string | undefined {
+  if (!value) return undefined
+  try {
+    return decodeURIComponent(value)
+  } catch {
+    return value
+  }
+}
+
+/**
+ * Keeps a directory the Manager's OpenCode server owns (repos, OpenCode and schedule
+ * worktrees, all under the workspace) and maps anything else, such as the attaching
+ * client's local cwd, to the bound repo.
+ */
+function createRepoDirectoryResolver(repoPath: string): RepoDirectoryResolver {
+  return (directory) => (directory && isPathWithinRoot(getWorkspacePath(), directory) ? directory : repoPath)
+}
+
+function rewriteRepoLocation(parts: ProxyRequestParts, directory: string, resolveDirectory: RepoDirectoryResolver): void {
   parts.headers[OPENCODE_DIRECTORY_HEADER] = encodeURIComponent(directory)
 
   if (parts.searchParams.has('location[directory]')) {
     parts.searchParams.set('location[directory]', directory)
   }
 
-  if (parts.method === 'GET' && parts.path === '/api/session') {
-    parts.searchParams.set('directory', directory)
+  if (parts.method === 'GET' && parts.path === '/api/session' && parts.searchParams.has('directory')) {
+    parts.searchParams.set('directory', resolveDirectory(parts.searchParams.get('directory')))
   }
 }
 
-function rewriteRepoLocationBody(bodyText: string, directory: string): string | undefined {
+function rewriteRepoLocationBody(bodyText: string, resolveDirectory: RepoDirectoryResolver): string | undefined {
   let parsed: unknown
   try {
     parsed = JSON.parse(bodyText)
@@ -53,6 +75,8 @@ function rewriteRepoLocationBody(bodyText: string, directory: string): string | 
   const location = (parsed as { location?: unknown }).location
   if (!location || typeof location !== 'object' || Array.isArray(location)) return undefined
 
+  const requested = (location as { directory?: unknown }).directory
+  const directory = resolveDirectory(typeof requested === 'string' ? requested : undefined)
   ;(parsed as { location: Record<string, unknown> }).location = { ...location, directory }
   return JSON.stringify(parsed)
 }
@@ -141,12 +165,16 @@ export function createOpenCodeProxyRoutes(db: Database, settingsService: Setting
 
     const url = new URL(c.req.url)
     const pathSuffix = url.pathname.replace(/^\/api\/opencode-proxy\/repos\/[^/]+/, '') || '/'
+    const resolveDirectory = createRepoDirectoryResolver(repo.fullPath)
+    const directory = resolveDirectory(
+      url.searchParams.get('location[directory]') || decodeDirectoryHeader(c.req.header(OPENCODE_DIRECTORY_HEADER)),
+    )
 
     return forwardToOpenCode(
       c,
       pathSuffix,
-      (parts) => rewriteRepoLocation(parts, repo.fullPath),
-      (bodyText) => rewriteRepoLocationBody(bodyText, repo.fullPath),
+      (parts) => rewriteRepoLocation(parts, directory, resolveDirectory),
+      (bodyText) => rewriteRepoLocationBody(bodyText, resolveDirectory),
     )
   })
 
