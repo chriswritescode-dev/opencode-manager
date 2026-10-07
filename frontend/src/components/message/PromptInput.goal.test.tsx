@@ -13,6 +13,7 @@ const mocks = vi.hoisted(() => ({
   useSessionGoal: vi.fn(),
   useSessionPermissionMode: vi.fn(),
   agents: [] as Array<{ id: string; name: string; description?: string; mode?: string; hidden?: boolean }>,
+  skills: [] as Array<{ id: string; name: string; description?: string }>,
   setAgent: vi.fn(),
   cycleVariant: vi.fn(),
   showToast: {
@@ -44,6 +45,7 @@ vi.mock('@/hooks/useOpenCode', async (importOriginal) => {
     useSendShell: () => ({ mutate: mocks.sendShell, isPending: false }),
     useInterruptSession: () => ({ mutate: mocks.interrupt }),
     useAgents: () => ({ data: mocks.agents }),
+    useSkills: () => ({ data: mocks.skills }),
   }
 })
 
@@ -121,12 +123,8 @@ vi.mock('@/components/ui/session-status-indicator', () => ({
   SessionStatusIndicator: () => <div>SessionStatus</div>,
 }))
 
-vi.mock('@/components/command/CommandSuggestions', () => ({
-  CommandSuggestions: () => <div>CommandSuggestions</div>,
-}))
-
-vi.mock('./MentionSuggestions', () => ({
-  MentionSuggestions: () => <div>MentionSuggestions</div>,
+vi.mock('./PromptSuggestions', () => ({
+  PromptSuggestions: () => null,
 }))
 
 const createTestQueryClient = () => new QueryClient({
@@ -179,7 +177,7 @@ describe('PromptInput goal mode', () => {
       abortRecording: vi.fn(),
       clear: vi.fn(),
     })
-    mocks.useCommands.mockReturnValue({ filterCommands: () => [] })
+    mocks.useCommands.mockReturnValue({ searchCommands: () => [], findCommand: () => undefined, recentNames: [] })
     mocks.useFileSearch.mockReturnValue({ files: [] })
     mocks.useModelSelection.mockReturnValue({
       model: { providerID: 'anthropic', modelID: 'claude-sonnet-4' },
@@ -298,7 +296,11 @@ describe('PromptInput goal mode', () => {
 
   it('does not start an armed goal for a slash command', async () => {
     stubMatchMedia(true)
-    mocks.useCommands.mockReturnValue({ filterCommands: () => [{ name: 'review' }] })
+    mocks.useCommands.mockReturnValue({
+      searchCommands: () => [],
+      findCommand: (name: string) => (name === 'review' ? { name: 'review' } : undefined),
+      recentNames: [],
+    })
     renderComponent({ isStreamingResponse: true })
 
     const input = await screen.findByPlaceholderText('Send a message...')

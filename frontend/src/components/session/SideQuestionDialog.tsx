@@ -75,7 +75,10 @@ export function SideQuestionDialog({
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
       <DialogContent className="max-w-2xl">
-        <DialogTitle>Side question</DialogTitle>
+        <div className="flex items-center gap-2 pr-6">
+          <DialogTitle className="flex-1">Side question</DialogTitle>
+          {answer && !pending && <CopyButton content={answer} title="Copy answer" />}
+        </div>
         <form onSubmit={handleSubmit} className="flex items-center gap-2 mt-4">
           <Input
             value={question}
@@ -102,11 +105,8 @@ export function SideQuestionDialog({
           </div>
         )}
         {answer && !pending && (
-          <div className="flex items-start gap-2">
-            <div className="min-w-0 flex-1 max-h-[50vh] overflow-y-auto">
-              <TextPart text={answer} />
-            </div>
-            <CopyButton content={answer} title="Copy answer" />
+          <div className="min-w-0 max-h-[50vh] overflow-y-auto">
+            <TextPart text={answer} />
           </div>
         )}
       </DialogContent>

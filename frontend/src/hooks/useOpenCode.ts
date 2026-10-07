@@ -10,6 +10,7 @@ import {
   interruptSession,
   backgroundSession,
   listAgents,
+  listSkills,
   runShell,
   sendPrompt,
   switchSessionAgent,
@@ -500,6 +501,14 @@ export const useAgents = (directory?: string, options?: { enabled?: boolean }) =
   return useQuery({
     queryKey: ["opencode", "agents", directory],
     queryFn: () => listAgents(directory),
+    enabled: options?.enabled ?? true,
+  });
+};
+
+export const useSkills = (directory?: string, options?: { enabled?: boolean }) => {
+  return useQuery({
+    queryKey: ["opencode", "skills", directory],
+    queryFn: () => listSkills(directory),
     enabled: options?.enabled ?? true,
   });
 };

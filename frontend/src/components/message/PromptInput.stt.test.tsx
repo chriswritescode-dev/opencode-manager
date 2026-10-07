@@ -46,6 +46,7 @@ vi.mock('@/hooks/useOpenCode', () => ({
   useInterruptSession: () => ({ mutate: vi.fn() }),
   useSendShell: () => ({ mutate: vi.fn(), isPending: false }),
   useAgents: () => ({ data: [] }),
+  useSkills: () => ({ data: [] }),
 }))
 
 vi.mock('@/hooks/useCommands', () => ({
@@ -121,12 +122,8 @@ vi.mock('@/components/ui/session-status-indicator', () => ({
   SessionStatusIndicator: () => <div>SessionStatus</div>,
 }))
 
-vi.mock('@/components/command/CommandSuggestions', () => ({
-  CommandSuggestions: () => <div>CommandSuggestions</div>,
-}))
-
-vi.mock('./MentionSuggestions', () => ({
-  MentionSuggestions: () => <div>MentionSuggestions</div>,
+vi.mock('./PromptSuggestions', () => ({
+  PromptSuggestions: () => null,
 }))
 
 interface MockSTTReturn {
@@ -191,7 +188,7 @@ describe('PromptInput STT Gesture Tests', () => {
       clear: mockClear,
     } as unknown as MockSTTReturn)
 
-    mocks.useCommands.mockReturnValue({ filterCommands: vi.fn() })
+    mocks.useCommands.mockReturnValue({ searchCommands: () => [], findCommand: vi.fn(), recentNames: [] })
     mocks.useCommandHandler.mockReturnValue({ executeCommand: vi.fn() })
     mocks.useFileSearch.mockReturnValue({ files: [] })
     mocks.useModelSelection.mockReturnValue({

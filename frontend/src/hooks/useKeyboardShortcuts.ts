@@ -121,6 +121,7 @@ export function useKeyboardShortcuts(actions: ShortcutActions = {}) {
   }, [])
 
   const handleKeyDown = useCallback((e: KeyboardEvent) => {
+    if (e.defaultPrevented) return
     const shortcut = parseEventShortcut(e)
     if (!shortcut) return
 

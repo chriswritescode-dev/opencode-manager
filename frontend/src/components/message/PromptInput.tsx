@@ -1,5 +1,5 @@
 import { useState, useRef, useEffect, useMemo, useImperativeHandle, forwardRef, memo, useCallback, type KeyboardEvent, type PointerEvent as ReactPointerEvent } from 'react'
-import { useSendPrompt, useInterruptSession, useSendShell, useAgents } from '@/hooks/useOpenCode'
+import { useSendPrompt, useInterruptSession, useSendShell, useAgents, useSkills } from '@/hooks/useOpenCode'
 import { useCommands } from '@/hooks/useCommands'
 import { useCommandHandler } from '@/hooks/useCommandHandler'
 import { useFileSearch } from '@/hooks/useFileSearch'
@@ -12,6 +12,8 @@ import { useUserBash } from '@/stores/userBashStore'
 import { useSessionAgentStore } from '@/stores/sessionAgentStore'
 import { useUIState } from '@/stores/uiStateStore'
 import { useSendErrorStore } from '@/stores/sendErrorStore'
+import { useRecentCommandsStore } from '@/stores/recentCommandsStore'
+import { useTouchTapSelect } from '@/hooks/useTouchTapSelect'
 import { useMobile } from '@/hooks/useMobile'
 import { FINE_POINTER_MEDIA_QUERY, useMediaQuery } from '@/hooks/useMediaQuery'
 
@@ -21,8 +23,7 @@ import { ArrowDown, Upload, X, Mic, MicOff, Target } from 'lucide-react'
 import { SquareFill } from '@/components/ui/square-fill'
 import { IconToggleButton } from '@/components/ui/icon-toggle-button'
 
-import { CommandSuggestions } from '@/components/command/CommandSuggestions'
-import { MentionSuggestions, type MentionItem } from './MentionSuggestions'
+import { PromptSuggestions, type PromptSuggestion } from './PromptSuggestions'
 import { SessionStatusIndicator } from '@/components/ui/session-status-indicator'
 import { ModelQuickSelect } from '@/components/model/ModelQuickSelect'
 import { AgentQuickSelect } from '@/components/agent/AgentQuickSelect'
@@ -31,7 +32,8 @@ import { PermissionModeToggle } from '@/components/session/PermissionModeToggle'
 import { ComposerToolsMenu } from './ComposerToolsMenu'
 import { useSessionGoal, useStartSessionGoal } from '@/hooks/useSessionGoals'
 import { useSessionPermissionMode } from '@/hooks/useSessionPermissionMode'
-import { detectMentionTrigger, parsePromptToInput, getFilename, filterAgentsByQuery } from '@/lib/promptParser'
+import { detectMentionTrigger, parsePromptToInput, getFilename, getDirectory, type MentionItem } from '@/lib/promptParser'
+import { matchText, rankByMatch, type MatchRange } from '@/lib/fuzzyMatch'
 import { getNextPrimaryAgentId } from '@/lib/primaryAgents'
 import { randomId } from '@/lib/utils'
 import { showToast } from '@/lib/toast'
@@ -60,6 +62,43 @@ const revokeBlobUrls = (attachments: ImageAttachment[]) => {
 }
 
 const ACCEPTED_FILE_TYPES = [...ACCEPTED_IMAGE_TYPES, "application/pdf"]
+
+const COMMAND_TRIGGER_PATTERN = /(^|\s)\/([a-zA-Z0-9_-]*)$/
+const FILE_FALLBACK_MATCH_TIER = 4
+const KEYBAR_HIDE_DELAY_MS = 250
+
+type KeybarKey = 'command' | 'mention' | 'bash'
+type ComposerMode = 'command' | 'mention' | 'bash'
+
+const KEYBAR_KEYS: Array<{ id: KeybarKey, symbol: string, label: string }> = [
+  { id: 'command', symbol: '/', label: 'cmd' },
+  { id: 'mention', symbol: '@', label: 'mention' },
+  { id: 'bash', symbol: '!', label: 'bash' },
+]
+
+const COMPOSER_MODE_STYLES: Record<ComposerMode, { label: string, frame: string, badge: string, key: string }> = {
+  command: {
+    label: 'COMMAND',
+    frame: 'border-primary/70 ring-1 ring-primary/40 shadow-lg shadow-primary/20',
+    badge: 'bg-primary text-primary-foreground',
+    key: 'bg-primary text-primary-foreground border-primary',
+  },
+  mention: {
+    label: 'MENTION',
+    frame: 'border-success/70 ring-1 ring-success/40 shadow-lg shadow-success/20',
+    badge: 'bg-success text-success-foreground',
+    key: 'bg-success text-success-foreground border-success',
+  },
+  bash: {
+    label: 'BASH',
+    frame: 'border-warning/70 ring-1 ring-warning/40 shadow-lg shadow-warning/20',
+    badge: 'bg-warning text-warning-foreground',
+    key: 'bg-warning text-warning-foreground border-warning',
+  },
+}
+
+const shiftRanges = (ranges: MatchRange[], offset: number): MatchRange[] =>
+  ranges.map(([start, end]) => [start + offset, end + offset])
 
 const VOICE_SEND_SWIPE_ARM_THRESHOLD = 24
 const VOICE_SEND_SWIPE_DISARM_THRESHOLD = 8
@@ -113,6 +152,9 @@ export const PromptInput = memo(forwardRef<PromptInputHandle, PromptInputProps>(
   const [isVoiceSwipeArmed, setIsVoiceSwipeArmed] = useState(false)
   const [isVoiceAutoSendPending, setIsVoiceAutoSendPending] = useState(false)
   const [isVoiceAutoSendWaitingForTranscript, setIsVoiceAutoSendWaitingForTranscript] = useState(false)
+  const [isPromptFocused, setIsPromptFocused] = useState(false)
+  const promptBlurTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
+  const pendingCommandSubmitRef = useRef(false)
   const lastAddedTranscriptRef = useRef('')
   const voiceGestureStartYRef = useRef<number | null>(null)
   const voiceSwipeArmedRef = useRef(false)
@@ -238,12 +280,11 @@ export const PromptInput = memo(forwardRef<PromptInputHandle, PromptInputProps>(
   const interruptSession = useInterruptSession()
   const { data: sessionGoal } = useSessionGoal(sessionID)
   const { data: permissionMode } = useSessionPermissionMode(sessionID)
-  const { filterCommands } = useCommands({ directory })
+  const { searchCommands, findCommand, recentNames } = useCommands({ directory })
+  const recordCommand = useRecentCommandsStore((state) => state.recordCommand)
   const isExactCommandPrompt = (value: string) => {
     const commandPrompt = parseCommandPrompt(value)
-    if (!commandPrompt) return false
-    const [command] = filterCommands(commandPrompt.name)
-    return command?.name.toLowerCase() === commandPrompt.name.toLowerCase()
+    return Boolean(commandPrompt && findCommand(commandPrompt.name))
   }
   
   const { files: searchResults } = useFileSearch(
@@ -253,7 +294,9 @@ export const PromptInput = memo(forwardRef<PromptInputHandle, PromptInputProps>(
   )
   
   const { data: agents = [] } = useAgents(directory)
+  const { data: skills = [] } = useSkills(directory)
   const agentNames = useMemo(() => agents.map((agent) => agent.name), [agents])
+  const skillIds = useMemo(() => skills.map((skill) => skill.id), [skills])
   const failedPrompt = useSendErrorStore((state) => state.errors[sessionID]?.failedPrompt)
   const restoredFailedPromptRef = useRef<string | null>(null)
 
@@ -274,28 +317,72 @@ export const PromptInput = memo(forwardRef<PromptInputHandle, PromptInputProps>(
     }
   }, [failedPrompt])
   
-  const mentionItems = useMemo((): MentionItem[] => {
-    const filteredAgents = filterAgentsByQuery(
-      agents.map(a => ({ name: a.name, description: a.description })),
-      mentionQuery
-    )
-    
-    const agentItems: MentionItem[] = filteredAgents.map(agent => ({
-      type: 'agent',
-      value: agent.name,
-      label: agent.name,
-      description: agent.description
+  const mentionSuggestions = useMemo((): PromptSuggestion<MentionItem>[] => {
+    const agentMatches = rankByMatch(agents, mentionQuery, {
+      getName: (agent) => agent.name,
+      getDescription: (agent) => agent.description,
+    }).map(({ item, tier, ranges }) => ({
+      tier,
+      suggestion: {
+        key: `agent-${item.name}`,
+        value: { type: 'agent', value: item.name } satisfies MentionItem,
+        kind: 'agent' as const,
+        label: item.name,
+        ranges,
+        detail: item.description || 'Agent',
+        tag: 'agent',
+      },
     }))
-    
-    const fileItems: MentionItem[] = searchResults.map(file => ({
-      type: 'file',
-      value: file,
-      label: getFilename(file),
-      description: file
+
+    const skillMatches = rankByMatch(skills, mentionQuery, {
+      getName: (skill) => skill.id,
+      getDescription: (skill) => skill.description,
+    }).map(({ item, tier, ranges }) => ({
+      tier,
+      suggestion: {
+        key: `skill-${item.id}`,
+        value: { type: 'skill', value: item.id } satisfies MentionItem,
+        kind: 'skill' as const,
+        label: item.id,
+        ranges,
+        detail: item.description || item.name,
+        tag: 'skill',
+      },
     }))
-    
-    return [...agentItems, ...fileItems]
-  }, [agents, searchResults, mentionQuery])
+
+    const fileMatches = searchResults.map((file) => {
+      const label = getFilename(file)
+      const match = matchText(mentionQuery, label)
+      return {
+        tier: match?.tier ?? FILE_FALLBACK_MATCH_TIER,
+        suggestion: {
+          key: `file-${file}`,
+          value: { type: 'file', value: file } satisfies MentionItem,
+          kind: 'file' as const,
+          label,
+          ranges: match?.ranges ?? [],
+          detail: getDirectory(file),
+          tag: 'file',
+        },
+      }
+    })
+
+    return [...agentMatches, ...skillMatches, ...fileMatches]
+      .sort((a, b) => a.tier - b.tier)
+      .map(({ suggestion }) => suggestion)
+  }, [agents, skills, searchResults, mentionQuery])
+
+  const commandSuggestions = useMemo((): PromptSuggestion<CommandInfo>[] =>
+    searchCommands(suggestionQuery).map(({ item, ranges }) => ({
+      key: item.name,
+      value: item,
+      kind: 'command',
+      label: `/${item.name}`,
+      ranges: shiftRanges(ranges, 1),
+      detail: item.description,
+      tag: !suggestionQuery && recentNames.includes(item.name) ? 'recent' : undefined,
+    })),
+  [searchCommands, suggestionQuery, recentNames])
   
 
   const addUserBashCommand = useUserBash((s) => s.addUserBashCommand)
@@ -321,7 +408,7 @@ export const PromptInput = memo(forwardRef<PromptInputHandle, PromptInputProps>(
 
     if (isStreamingResponse) {
       onScrollToBottom()
-      const parsed = parsePromptToInput(prompt, attachedFiles, agentNames, imageAttachments)
+      const parsed = parsePromptToInput(prompt, attachedFiles, agentNames, skillIds, imageAttachments)
       const submittedPrompt = prompt
       const submittedAttachedFiles = attachedFiles
       const submittedImageAttachments = imageAttachments
@@ -376,10 +463,11 @@ export const PromptInput = memo(forwardRef<PromptInputHandle, PromptInputProps>(
 
     const commandPrompt = parseCommandPrompt(prompt)
     if (commandPrompt) {
-      const command = filterCommands(commandPrompt.name)[0]
+      const command = findCommand(commandPrompt.name)
       
       if (command) {
-        const parsed = parsePromptToInput(commandPrompt.args?.trim() || '', attachedFiles, agentNames, imageAttachments)
+        recordCommand(command.name)
+        const parsed = parsePromptToInput(commandPrompt.args?.trim() || '', attachedFiles, agentNames, skillIds, imageAttachments)
         const submittedPrompt = prompt
         const submittedAttachedFiles = attachedFiles
         const submittedImageAttachments = imageAttachments
@@ -403,7 +491,7 @@ export const PromptInput = memo(forwardRef<PromptInputHandle, PromptInputProps>(
       }
     }
 
-    const parsed = parsePromptToInput(prompt, attachedFiles, agentNames, imageAttachments)
+    const parsed = parsePromptToInput(prompt, attachedFiles, agentNames, skillIds, imageAttachments)
     const submittedPrompt = prompt
     const submittedAttachedFiles = attachedFiles
     const submittedImageAttachments = imageAttachments
@@ -451,29 +539,46 @@ export const PromptInput = memo(forwardRef<PromptInputHandle, PromptInputProps>(
     interruptSession.mutate(sessionID)
   }
 
-  const handleCommandSelect = useCallback(async (command: CommandInfo) => {
+  const focusPromptAt = useCallback((cursorPosition: number) => {
+    setTimeout(() => {
+      if (!textareaRef.current) return
+      textareaRef.current.focus()
+      textareaRef.current.setSelectionRange(cursorPosition, cursorPosition)
+      textareaRef.current.scrollTop = textareaRef.current.scrollHeight
+    }, 0)
+  }, [])
+
+  const handleCommandSelect = useCallback((command: CommandInfo, submitAfterInsert = false) => {
     if (!textareaRef.current) return
 
     setShowSuggestions(false)
     setSuggestionQuery('')
 
     const cursorPosition = textareaRef.current.selectionStart
-    const commandMatch = prompt.slice(0, cursorPosition).match(/(^|\s)\/([a-zA-Z0-9_-]*)$/)
+    const commandMatch = prompt.slice(0, cursorPosition).match(COMMAND_TRIGGER_PATTERN)
 
-    const beforeCommand = commandMatch ? prompt.slice(0, commandMatch.index) : ''
+    const beforeCommand = commandMatch ? prompt.slice(0, (commandMatch.index ?? 0) + commandMatch[1].length) : ''
     const afterCommand = commandMatch ? prompt.slice(cursorPosition) : ''
     const newPrompt = beforeCommand + '/' + command.name + ' ' + afterCommand
 
-    setPrompt(newPrompt)
+    if (submitAfterInsert && newPrompt === prompt) {
+      handleSubmitRef.current()
+      return
+    }
 
-    setTimeout(() => {
-      if (textareaRef.current) {
-        const newCursorPos = beforeCommand.length + command.name.length + 2
-        textareaRef.current.focus()
-        textareaRef.current.setSelectionRange(newCursorPos, newCursorPos)
-        textareaRef.current.scrollTop = textareaRef.current.scrollHeight
-      }
-    }, 0)
+    pendingCommandSubmitRef.current = submitAfterInsert
+    setPrompt(newPrompt)
+    if (!submitAfterInsert) focusPromptAt(beforeCommand.length + command.name.length + 2)
+  }, [prompt, focusPromptAt])
+
+  const handleCommandSwipe = useCallback((command: CommandInfo) => {
+    handleCommandSelect(command, true)
+  }, [handleCommandSelect])
+
+  useEffect(() => {
+    if (!pendingCommandSubmitRef.current) return
+    pendingCommandSubmitRef.current = false
+    handleSubmitRef.current()
   }, [prompt])
 
   useEffect(() => {
@@ -505,15 +610,8 @@ export const PromptInput = memo(forwardRef<PromptInputHandle, PromptInputProps>(
       return next
     })
 
-    setTimeout(() => {
-      if (textareaRef.current) {
-        const newCursorPos = beforeMention.length + filename.length + 2
-        textareaRef.current.focus()
-        textareaRef.current.setSelectionRange(newCursorPos, newCursorPos)
-        textareaRef.current.scrollTop = textareaRef.current.scrollHeight
-      }
-    }, 0)
-  }, [directory, mentionRange, prompt])
+    focusPromptAt(beforeMention.length + filename.length + 2)
+  }, [directory, mentionRange, prompt, focusPromptAt])
 
   useEffect(() => {
     if (!pendingPromptFile) return
@@ -527,20 +625,11 @@ export const PromptInput = memo(forwardRef<PromptInputHandle, PromptInputProps>(
     const beforeMention = prompt.slice(0, mentionRange.start)
     const afterMention = prompt.slice(mentionRange.end)
     
-    if (item.type === 'agent') {
-      const newPrompt = beforeMention + '@' + item.value + ' ' + afterMention
-      setPrompt(newPrompt)
-      
-      setTimeout(() => {
-        if (textareaRef.current) {
-          const newCursorPos = beforeMention.length + item.value.length + 2
-          textareaRef.current.focus()
-          textareaRef.current.setSelectionRange(newCursorPos, newCursorPos)
-          textareaRef.current.scrollTop = textareaRef.current.scrollHeight
-        }
-      }, 0)
-    } else {
+    if (item.type === 'file') {
       insertFileMention(item.value, mentionRange)
+    } else {
+      setPrompt(beforeMention + '@' + item.value + ' ' + afterMention)
+      focusPromptAt(beforeMention.length + item.value.length + 2)
     }
     
     setShowMentionSuggestions(false)
@@ -941,11 +1030,11 @@ if (isIOS && isSecureContext && navigator.clipboard && navigator.clipboard.read)
       return
     }
 
-    if (showMentionSuggestions && mentionItems.length > 0) {
+    if (showMentionSuggestions && mentionSuggestions.length > 0) {
       if (e.key === 'ArrowDown') {
         e.preventDefault()
         setSelectedMentionIndex(prev => 
-          prev < mentionItems.length - 1 ? prev + 1 : prev
+          prev < mentionSuggestions.length - 1 ? prev + 1 : prev
         )
         return
       }
@@ -958,8 +1047,9 @@ if (isIOS && isSecureContext && navigator.clipboard && navigator.clipboard.read)
       
       if (e.key === 'Enter') {
         e.preventDefault()
-        if (mentionItems[selectedMentionIndex]) {
-          handleMentionSelect(mentionItems[selectedMentionIndex])
+        const selectedMention = mentionSuggestions[selectedMentionIndex]
+        if (selectedMention) {
+          handleMentionSelect(selectedMention.value)
         }
         return
       }
@@ -974,25 +1064,23 @@ if (isIOS && isSecureContext && navigator.clipboard && navigator.clipboard.read)
     }
     
     if (showSuggestions) {
-      const filteredCommands = filterCommands(suggestionQuery)
-      
-      if (e.key === 'ArrowDown') {
+      if (e.key === 'ArrowDown' && commandSuggestions.length > 0) {
         e.preventDefault()
-        setSelectedCommandIndex(prev => (prev + 1) % filteredCommands.length)
+        setSelectedCommandIndex(prev => (prev + 1) % commandSuggestions.length)
         return
       }
       
-      if (e.key === 'ArrowUp') {
+      if (e.key === 'ArrowUp' && commandSuggestions.length > 0) {
         e.preventDefault()
-        setSelectedCommandIndex(prev => (prev - 1 + filteredCommands.length) % filteredCommands.length)
+        setSelectedCommandIndex(prev => (prev - 1 + commandSuggestions.length) % commandSuggestions.length)
         return
       }
       
       if (e.key === 'Enter') {
         e.preventDefault()
-        const selectedCommand = filteredCommands[selectedCommandIndex]
+        const selectedCommand = commandSuggestions[selectedCommandIndex]
         if (selectedCommand) {
-          handleCommandSelect(selectedCommand)
+          handleCommandSelect(selectedCommand.value)
         }
         return
       }
@@ -1013,11 +1101,7 @@ if (isIOS && isSecureContext && navigator.clipboard && navigator.clipboard.read)
       }
       handleSubmit()
     } else if (e.key === 'Escape') {
-      setShowSuggestions(false)
-      setSuggestionQuery('')
-      setShowMentionSuggestions(false)
-      setMentionQuery('')
-      setMentionRange(null)
+      closeSuggestions()
       setPrompt('')
       revokeBlobUrls(imageAttachments)
       setImageAttachments([])
@@ -1048,8 +1132,18 @@ if (isIOS && isSecureContext && navigator.clipboard && navigator.clipboard.read)
       return
     }
 
-    const cursorPosition = e.target.selectionStart
-    
+    updateSuggestionTriggers(value, e.target.selectionStart)
+  }
+
+  const closeSuggestions = () => {
+    setShowSuggestions(false)
+    setSuggestionQuery('')
+    setShowMentionSuggestions(false)
+    setMentionQuery('')
+    setMentionRange(null)
+  }
+
+  const updateSuggestionTriggers = (value: string, cursorPosition: number) => {
     const mentionTrigger = detectMentionTrigger(value, cursorPosition)
     
     if (mentionTrigger) {
@@ -1057,25 +1151,98 @@ if (isIOS && isSecureContext && navigator.clipboard && navigator.clipboard.read)
       setMentionRange({ start: mentionTrigger.start, end: mentionTrigger.end })
       setShowMentionSuggestions(true)
       setSelectedMentionIndex(0)
-    } else {
-      const commandMatch = value.slice(0, cursorPosition).match(/(^|\s)\/([a-zA-Z0-9_-]*)$/)
-      
-      if (commandMatch) {
-        const query = commandMatch[2]
-        setSuggestionQuery(query)
-        setShowSuggestions(true)
-        setSelectedCommandIndex(0)
-      } else {
-        setShowSuggestions(false)
-        setSuggestionQuery('')
-      }
-      
-      if (showMentionSuggestions) {
-        setShowMentionSuggestions(false)
-        setMentionQuery('')
-        setMentionRange(null)
-      }
+      return
     }
+
+    const commandMatch = value.slice(0, cursorPosition).match(COMMAND_TRIGGER_PATTERN)
+    
+    if (commandMatch) {
+      setSuggestionQuery(commandMatch[2])
+      setShowSuggestions(true)
+      setSelectedCommandIndex(0)
+    } else {
+      setShowSuggestions(false)
+      setSuggestionQuery('')
+    }
+    
+    if (showMentionSuggestions) {
+      setShowMentionSuggestions(false)
+      setMentionQuery('')
+      setMentionRange(null)
+    }
+  }
+
+  const insertTriggerAtCursor = (trigger: '/' | '@') => {
+    const selectionStart = textareaRef.current?.selectionStart ?? prompt.length
+    const selectionEnd = textareaRef.current?.selectionEnd ?? prompt.length
+    const before = prompt.slice(0, selectionStart)
+    const separator = before && !/\s$/.test(before) ? ' ' : ''
+    const nextPrompt = `${before}${separator}${trigger}${prompt.slice(selectionEnd)}`
+    const cursorPosition = before.length + separator.length + 1
+
+    setPrompt(nextPrompt)
+    updateSuggestionTriggers(nextPrompt, cursorPosition)
+    focusPromptAt(cursorPosition)
+  }
+
+  const removeActiveTrigger = () => {
+    const cursorPosition = textareaRef.current?.selectionStart ?? prompt.length
+    const commandTokenStart = prompt.slice(0, cursorPosition).search(/\/[a-zA-Z0-9_-]*$/)
+    const tokenStart = showMentionSuggestions && mentionRange ? mentionRange.start : commandTokenStart
+    const start = tokenStart >= 0 ? tokenStart : cursorPosition
+
+    setPrompt(prompt.slice(0, start) + prompt.slice(cursorPosition))
+    closeSuggestions()
+    focusPromptAt(start)
+  }
+
+  const toggleBashMode = () => {
+    closeSuggestions()
+    if (isBashMode) {
+      const nextPrompt = prompt.replace(/^!/, '')
+      setIsBashMode(false)
+      setPrompt(nextPrompt)
+      focusPromptAt(nextPrompt.length)
+      return
+    }
+    setIsBashMode(true)
+    setPrompt('!')
+    focusPromptAt(1)
+  }
+
+  const isBashKeyEnabled = isBashMode || (prompt === '' && imageAttachments.length === 0)
+
+  const handleKeybarKey = (key: KeybarKey) => {
+    if (key === 'bash') {
+      if (isBashKeyEnabled) toggleBashMode()
+      return
+    }
+    if (isBashMode) return
+    const isActive = key === 'command' ? showSuggestions : showMentionSuggestions
+    if (isActive) {
+      removeActiveTrigger()
+      return
+    }
+    insertTriggerAtCursor(key === 'command' ? '/' : '@')
+  }
+
+  const keybarTouch = useTouchTapSelect(handleKeybarKey)
+
+  const clearPromptBlurTimer = useCallback(() => {
+    if (promptBlurTimerRef.current) clearTimeout(promptBlurTimerRef.current)
+    promptBlurTimerRef.current = null
+  }, [])
+
+  useEffect(() => clearPromptBlurTimer, [clearPromptBlurTimer])
+
+  const handlePromptFocus = () => {
+    clearPromptBlurTimer()
+    setIsPromptFocused(true)
+  }
+
+  const handlePromptBlur = () => {
+    clearPromptBlurTimer()
+    promptBlurTimerRef.current = setTimeout(() => setIsPromptFocused(false), KEYBAR_HIDE_DELAY_MS)
   }
 
   const { data: providersData } = useProviders(directory)
@@ -1149,6 +1316,17 @@ if (isIOS && isSecureContext && navigator.clipboard && navigator.clipboard.read)
     currentAgent: currentMode,
     actions: commandActionsWithPrompt,
   })
+  const isCommandListOpen = showSuggestions && commandSuggestions.length > 0
+  const isMentionListOpen = showMentionSuggestions && mentionSuggestions.length > 0
+  const composerMode: ComposerMode | null = isBashMode
+    ? 'bash'
+    : isMentionListOpen
+      ? 'mention'
+      : isCommandListOpen || isExactCommandPrompt(prompt)
+        ? 'command'
+        : null
+  const composerModeStyle = composerMode ? COMPOSER_MODE_STYLES[composerMode] : null
+  const isTakeoverOpen = isMobile && (isCommandListOpen || isMentionListOpen)
   const showStopButton = isSessionActive
   const hideSecondaryButtons = isMobile && isSessionActive
   const showMobileScrollButton = isMobile && showScrollButton
@@ -1287,11 +1465,21 @@ if (isIOS && isSecureContext && navigator.clipboard && navigator.clipboard.read)
   
 
 return (
-    <div className={`relative backdrop-blur-md bg-background opacity-95 border border-border dark:border-border/30 rounded-xl p-2 md:p-3 mb-4 md:mb-1 w-full transition-all ${hasPendingPermissionForSession ? 'border-highlight/50 ring-1 ring-highlight/30' : ''}`}>
+    <div className={`relative backdrop-blur-md bg-background opacity-95 border border-border dark:border-border/30 rounded-xl p-2 md:p-3 mb-4 md:mb-1 w-full transition-all ${hasPendingPermissionForSession ? 'border-highlight/50 ring-1 ring-highlight/30' : composerModeStyle?.frame ?? ''} ${isTakeoverOpen ? 'z-[60]' : ''}`}>
+      {composerModeStyle && (
+        <span
+          data-testid="composer-mode-badge"
+          className={`absolute -top-2.5 left-3 z-10 px-1.5 py-0.5 rounded text-[10px] font-bold tracking-widest pointer-events-none ${composerModeStyle.badge}`}
+        >
+          {composerModeStyle.label}
+        </span>
+      )}
       <textarea
         ref={textareaRef}
         value={prompt}
         onChange={handleInput}
+        onFocus={handlePromptFocus}
+        onBlur={handlePromptBlur}
         onKeyDown={handleKeyDown}
         onPaste={handlePaste}
         onDragOver={handleDragOver}
@@ -1304,7 +1492,7 @@ return (
         }
         className={`w-full bg-muted/50 pl-2 md:pl-3 pr-3 py-2 text-[16px] text-foreground placeholder-muted-foreground focus:outline-none focus:bg-muted/70 resize-none min-h-[40px] max-h-[120px] disabled:opacity-50 disabled:cursor-not-allowed md:text-sm rounded-lg [field-sizing:content] ${
           isBashMode
-            ? 'border-primary/50 bg-primary/5 focus:bg-primary/10'
+            ? 'border-warning/50 bg-warning/5 focus:bg-warning/10'
             : isDragging ? 'border-info/50 border-dashed bg-info/5' : ''
         }`}
         rows={1}
@@ -1468,29 +1656,64 @@ return (
             </button>
         </div>
       </div>
-      
-      <CommandSuggestions
+
+      {isMobile && isPromptFocused && !hasPendingPermissionForSession && (
+        <div role="toolbar" aria-label="Insert" className="flex items-center gap-1.5 mt-2 pt-2 border-t border-border/50">
+          {KEYBAR_KEYS.map((key) => {
+            const isActive = key.id === 'command'
+              ? showSuggestions
+              : key.id === 'mention'
+                ? showMentionSuggestions
+                : isBashMode
+            const isDisabled = key.id === 'bash' ? !isBashKeyEnabled : isBashMode
+            return (
+              <button
+                key={key.id}
+                type="button"
+                aria-pressed={isActive}
+                aria-label={`${key.label} ${key.symbol}`}
+                disabled={isDisabled}
+                onMouseDown={(e) => e.preventDefault()}
+                onTouchStart={keybarTouch.onTouchStart}
+                onTouchMove={keybarTouch.onTouchMove}
+                onTouchEnd={(e) => keybarTouch.onTouchEnd(e, key.id)}
+                onClick={() => keybarTouch.onClick(key.id)}
+                className={`flex items-center gap-1 min-h-[32px] px-3 rounded-lg border font-mono text-base font-bold transition-colors disabled:opacity-30 ${
+                  isActive ? COMPOSER_MODE_STYLES[key.id].key : 'bg-muted border-border text-foreground active:bg-muted-foreground/20'
+                }`}
+              >
+                {key.symbol}
+                <span className="font-sans text-[11px] font-medium opacity-80">{key.label}</span>
+              </button>
+            )
+          })}
+        </div>
+      )}
+
+      <PromptSuggestions
         isOpen={showSuggestions}
-        query={suggestionQuery}
-        commands={filterCommands(suggestionQuery)}
+        items={commandSuggestions}
+        selectedIndex={selectedCommandIndex}
+        takeover={isMobile}
         onSelect={handleCommandSelect}
+        onSwipeRight={handleCommandSwipe}
         onClose={() => {
           setShowSuggestions(false)
           setSuggestionQuery('')
         }}
-        selectedIndex={selectedCommandIndex}
       />
-      
-      <MentionSuggestions
+
+      <PromptSuggestions
         isOpen={showMentionSuggestions}
-        items={mentionItems}
+        items={mentionSuggestions}
+        selectedIndex={selectedMentionIndex}
+        takeover={isMobile}
         onSelect={handleMentionSelect}
         onClose={() => {
           setShowMentionSuggestions(false)
           setMentionQuery('')
           setMentionRange(null)
         }}
-        selectedIndex={selectedMentionIndex}
       />
     </div>
   )

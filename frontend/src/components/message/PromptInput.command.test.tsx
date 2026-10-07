@@ -12,6 +12,7 @@ const mocks = vi.hoisted(() => ({
   switchSessionModel: vi.fn(),
   switchSessionAgent: vi.fn(),
   agents: [] as Array<{ id: string; name: string; description?: string; mode?: string; hidden?: boolean }>,
+  skills: [] as Array<{ id: string; name: string; description?: string }>,
   setAgent: vi.fn(),
   cycleVariant: vi.fn(),
   showToast: {
@@ -50,6 +51,7 @@ vi.mock('@/hooks/useOpenCode', async () => {
   return {
     ...actual,
     useAgents: () => ({ data: mocks.agents }),
+    useSkills: () => ({ data: mocks.skills }),
   }
 })
 
@@ -99,12 +101,12 @@ vi.mock('@/components/ui/session-status-indicator', () => ({
   SessionStatusIndicator: () => <div>SessionStatus</div>,
 }))
 
-vi.mock('@/components/command/CommandSuggestions', () => ({
-  CommandSuggestions: () => <div>CommandSuggestions</div>,
+vi.mock('./ComposerToolsMenu', () => ({
+  ComposerToolsMenu: () => null,
 }))
 
-vi.mock('./MentionSuggestions', () => ({
-  MentionSuggestions: () => <div>MentionSuggestions</div>,
+vi.mock('./PromptSuggestions', () => ({
+  PromptSuggestions: () => null,
 }))
 
 const createTestQueryClient = () => new QueryClient({
@@ -174,11 +176,12 @@ describe('PromptInput command submission', () => {
       clear: vi.fn(),
     })
     mocks.useCommands.mockReturnValue({
-      filterCommands: (query: string) => {
-        if (query === 'review') return [{ name: 'review', description: 'Review' }]
-        const builtin = BUILTIN_COMMANDS.find((command) => command.name === query)
-        return builtin ? [builtin] : []
+      searchCommands: () => [],
+      findCommand: (name: string) => {
+        if (name === 'review') return { name: 'review', description: 'Review' }
+        return BUILTIN_COMMANDS.find((command) => command.name === name)
       },
+      recentNames: [],
     })
     mocks.useFileSearch.mockReturnValue({ files: [] })
     mocks.useModelSelection.mockReturnValue({
@@ -436,4 +439,68 @@ describe('PromptInput command submission', () => {
     await waitFor(() => expect(input).toHaveValue(''))
     expect(mocks.showToast.info).not.toHaveBeenCalled()
   })
+
+  describe('mobile keybar', () => {
+    beforeEach(() => {
+      mocks.useMobile.mockReturnValue(true)
+    })
+
+    it('shows only while the prompt is focused on mobile', async () => {
+      renderComponent()
+
+      const input = await screen.findByPlaceholderText('Send a message...')
+      expect(screen.queryByRole('toolbar', { name: 'Insert' })).not.toBeInTheDocument()
+
+      fireEvent.focus(input)
+      expect(screen.getByRole('toolbar', { name: 'Insert' })).toBeInTheDocument()
+    })
+
+    it('is not shown on desktop', async () => {
+      mocks.useMobile.mockReturnValue(false)
+      renderComponent()
+
+      fireEvent.focus(await screen.findByPlaceholderText('Send a message...'))
+      expect(screen.queryByRole('toolbar', { name: 'Insert' })).not.toBeInTheDocument()
+    })
+
+    it('inserts a separated trigger at the cursor', async () => {
+      renderComponent()
+
+      const input = await screen.findByPlaceholderText('Send a message...') as HTMLTextAreaElement
+      fireEvent.change(input, { target: { value: 'hello world' } })
+      fireEvent.focus(input)
+      input.setSelectionRange(5, 5)
+
+      fireEvent.click(screen.getByRole('button', { name: 'mention @' }))
+      expect(input).toHaveValue('hello @ world')
+
+      fireEvent.change(input, { target: { value: 'hello' } })
+      input.setSelectionRange(5, 5)
+      fireEvent.click(screen.getByRole('button', { name: 'cmd /' }))
+      expect(input).toHaveValue('hello /')
+    })
+
+    it('enables bash only for an empty prompt and toggles bash mode', async () => {
+      renderComponent()
+
+      const input = await screen.findByPlaceholderText('Send a message...')
+      fireEvent.focus(input)
+      fireEvent.change(input, { target: { value: 'text' } })
+      expect(screen.getByRole('button', { name: 'bash !' })).toBeDisabled()
+
+      fireEvent.change(input, { target: { value: '' } })
+      const bashKey = screen.getByRole('button', { name: 'bash !' })
+      expect(bashKey).toBeEnabled()
+
+      fireEvent.click(bashKey)
+      expect(input).toHaveValue('!')
+      expect(screen.getByTestId('composer-mode-badge')).toHaveTextContent('BASH')
+      expect(screen.getByRole('button', { name: 'cmd /' })).toBeDisabled()
+
+      fireEvent.click(screen.getByRole('button', { name: 'bash !' }))
+      expect(input).toHaveValue('')
+      expect(screen.queryByTestId('composer-mode-badge')).not.toBeInTheDocument()
+    })
+  })
 })
+

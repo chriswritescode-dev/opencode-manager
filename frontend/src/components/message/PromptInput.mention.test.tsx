@@ -11,6 +11,7 @@ const mocks = vi.hoisted(() => ({
   switchSessionAgent: vi.fn(),
   runCommand: vi.fn(),
   agents: [] as Array<{ name: string; description?: string }>,
+  skills: [] as Array<{ id: string; name: string; description?: string }>,
   useSTT: vi.fn(),
   useMobile: vi.fn(),
   useCommands: vi.fn(),
@@ -39,6 +40,7 @@ vi.mock('@/hooks/useOpenCode', async () => {
   return {
     ...actual,
     useAgents: () => ({ data: mocks.agents }),
+    useSkills: () => ({ data: mocks.skills }),
   }
 })
 
@@ -90,12 +92,8 @@ vi.mock('@/components/ui/session-status-indicator', () => ({
   SessionStatusIndicator: () => <div>SessionStatus</div>,
 }))
 
-vi.mock('@/components/command/CommandSuggestions', () => ({
-  CommandSuggestions: () => <div>CommandSuggestions</div>,
-}))
-
-vi.mock('./MentionSuggestions', () => ({
-  MentionSuggestions: () => <div>MentionSuggestions</div>,
+vi.mock('./PromptSuggestions', () => ({
+  PromptSuggestions: () => null,
 }))
 
 const createTestQueryClient = () => new QueryClient({
@@ -151,6 +149,7 @@ describe('PromptInput agent mention submission', () => {
     mocks.switchSessionAgent.mockResolvedValue(undefined)
     mocks.runCommand.mockResolvedValue(undefined)
     mocks.agents = [{ name: 'reviewer', description: 'Reviewer' }]
+    mocks.skills = [{ id: 'pr-review', name: 'PR Review', description: 'Review a PR' }]
     mocks.useMobile.mockReturnValue(false)
     mocks.useSTT.mockReturnValue({
       isRecording: false,
@@ -165,7 +164,7 @@ describe('PromptInput agent mention submission', () => {
       reset: vi.fn(),
       clear: vi.fn(),
     })
-    mocks.useCommands.mockReturnValue({ filterCommands: () => [] })
+    mocks.useCommands.mockReturnValue({ searchCommands: () => [], findCommand: () => undefined, recentNames: [] })
     mocks.useFileSearch.mockReturnValue({ files: [] })
     mocks.useModelSelection.mockReturnValue({
       model: { providerID: 'anthropic', modelID: 'claude-sonnet-4' },
@@ -219,6 +218,22 @@ describe('PromptInput agent mention submission', () => {
       delivery: 'queue',
     }))
     expect(mocks.switchSessionAgent).not.toHaveBeenCalled()
+  })
+
+  it('sends an @skill mention as a skill attachment', async () => {
+    renderComponent()
+
+    const input = await screen.findByPlaceholderText('Send a message...')
+    fireEvent.change(input, { target: { value: 'use @pr-review and @pr-review' } })
+    fireEvent.click(screen.getByTitle('Send'))
+
+    await waitFor(() => expect(mocks.sendPrompt).toHaveBeenCalled())
+
+    expect(mocks.sendPrompt).toHaveBeenCalledWith(expect.objectContaining({
+      text: 'use @pr-review and @pr-review',
+      agents: [],
+      skills: [{ id: 'pr-review', mention: { start: 4, end: 14, text: '@pr-review' } }],
+    }))
   })
 
   it('sends plain text without inferring an agent attachment or switching', async () => {

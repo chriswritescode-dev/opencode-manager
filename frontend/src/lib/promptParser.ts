@@ -10,9 +10,9 @@ export interface MentionTrigger {
   query: string
 }
 
-export interface AgentInfo {
-  name: string
-  description?: string
+export interface MentionItem {
+  type: 'file' | 'agent' | 'skill'
+  value: string
 }
 
 export function detectMentionTrigger(
@@ -32,13 +32,6 @@ export function detectMentionTrigger(
   }
 }
 
-export function filterAgentsByQuery(agents: AgentInfo[], query: string): AgentInfo[] {
-  const lowerQuery = query.toLowerCase()
-  return agents.filter(agent => 
-    agent.name.toLowerCase().includes(lowerQuery)
-  )
-}
-
 export interface ParsedPromptInput {
   text: string
   files: PromptFileInput[]
@@ -50,11 +43,14 @@ export function parsePromptToInput(
   rawInput: string,
   fileMap: Map<string, FileAttachmentInfo>,
   agentNames: string[],
+  skillIds: string[],
   imageAttachments?: ImageAttachment[]
 ): ParsedPromptInput {
   const files: PromptFileInput[] = []
   const agents: PromptAgentInput[] = []
+  const skills: PromptSkillInput[] = []
   const agentNameByLowercase = new Map(agentNames.map((name) => [name.toLowerCase(), name]))
+  const skillIdByLowercase = new Map(skillIds.map((id) => [id.toLowerCase(), id]))
 
   for (const match of rawInput.matchAll(MENTION_PATTERN)) {
     const matchIndex = match.index!
@@ -70,6 +66,12 @@ export function parsePromptToInput(
     const agentName = agentNameByLowercase.get(mentionText.toLowerCase())
     if (agentName) {
       agents.push({ name: agentName, mention })
+      continue
+    }
+
+    const skillId = skillIdByLowercase.get(mentionText.toLowerCase())
+    if (skillId && !skills.some((skill) => skill.id === skillId)) {
+      skills.push({ id: skillId, mention })
     }
   }
 
@@ -77,7 +79,7 @@ export function parsePromptToInput(
     files.push({ uri: attachment.dataUrl, name: attachment.filename })
   }
 
-  return { text: rawInput, files, agents, skills: [] }
+  return { text: rawInput, files, agents, skills }
 }
 
 export function getFilename(path: string): string {

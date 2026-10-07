@@ -4,6 +4,7 @@ import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
 import { useCommands } from './useCommands'
 import { listCommands } from '../api/opencode'
 import { BUILTIN_COMMANDS } from '@/lib/builtinCommands'
+import { useRecentCommandsStore } from '@/stores/recentCommandsStore'
 
 vi.mock('../api/opencode', () => ({
   listCommands: vi.fn(),
@@ -23,12 +24,13 @@ const createWrapper = () => {
 describe('useCommands', () => {
   beforeEach(() => {
     vi.clearAllMocks()
+    useRecentCommandsStore.setState({ names: [] })
   })
 
   it('returns the built-in commands sorted by name when disabled', () => {
     const { result } = renderHook(() => useCommands({ enabled: false }), { wrapper: createWrapper() })
 
-    const names = result.current.filterCommands('').map(command => command.name)
+    const names = result.current.searchCommands('').map(({ item }) => item.name)
 
     expect(names).toEqual([...names].sort((a, b) => a.localeCompare(b)))
     for (const command of BUILTIN_COMMANDS) {
@@ -44,13 +46,13 @@ describe('useCommands', () => {
   it('prioritizes exact and prefix matches before other matches', () => {
     const { result } = renderHook(() => useCommands({ enabled: false }), { wrapper: createWrapper() })
 
-    expect(result.current.filterCommands('co').map(command => command.name)).toEqual([
+    expect(result.current.searchCommands('co').map(({ item }) => item.name)).toEqual([
       'compact',
       'connect',
       'continue',
       'copy',
     ])
-    expect(result.current.filterCommands('do').map(command => command.name)).toEqual([
+    expect(result.current.searchCommands('do').map(({ item }) => item.name)).toEqual([
       'redo',
       'undo',
     ])
@@ -65,7 +67,7 @@ describe('useCommands', () => {
     const { result } = renderHook(() => useCommands({ directory: '/repo' }), { wrapper: createWrapper() })
 
     await waitFor(() => {
-      expect(result.current.filterCommands('').map(command => command.name).slice(0, 3)).toEqual([
+      expect(result.current.searchCommands('').map(({ item }) => item.name).slice(0, 3)).toEqual([
         'agent',
         'alpha',
         'btw',
@@ -81,12 +83,12 @@ describe('useCommands', () => {
     const { result } = renderHook(() => useCommands({ directory: '/repo' }), { wrapper: createWrapper() })
 
     await waitFor(() => {
-      expect(result.current.filterCommands('copy')).toEqual([
+      expect(result.current.searchCommands('copy').map(({ item }) => item)).toEqual([
         { name: 'copy', description: 'server copy' },
       ])
     })
 
-    const [copy] = result.current.filterCommands('copy')
+    const copy = result.current.findCommand('copy')!
     expect('action' in copy).toBe(false)
   })
 
@@ -96,12 +98,42 @@ describe('useCommands', () => {
     const { result } = renderHook(() => useCommands({ directory: '/repo' }), { wrapper: createWrapper() })
 
     await waitFor(() => {
-      expect(result.current.filterCommands('').some(command => command.name === 'xundo')).toBe(true)
+      expect(result.current.commands.some(command => command.name === 'xundo')).toBe(true)
     })
 
-    expect(result.current.filterCommands('undo').map(command => command.name)).toEqual([
+    expect(result.current.searchCommands('undo').map(({ item }) => item.name)).toEqual([
       'undo',
       'xundo',
+      'redo',
     ])
+  })
+
+  it('lists recent commands first for an empty query and uses recency to break ties', () => {
+    useRecentCommandsStore.setState({ names: ['copy', 'undo'] })
+    const { result } = renderHook(() => useCommands({ enabled: false }), { wrapper: createWrapper() })
+
+    expect(result.current.searchCommands('').map(({ item }) => item.name).slice(0, 2)).toEqual(['copy', 'undo'])
+    expect(result.current.searchCommands('co').map(({ item }) => item.name)).toEqual([
+      'copy',
+      'compact',
+      'connect',
+      'continue',
+    ])
+  })
+
+  it('matches command descriptions after name matches', async () => {
+    vi.mocked(listCommands).mockResolvedValue([{ name: 'ship', description: 'Deploy a preview build' }])
+    const { result } = renderHook(() => useCommands({ directory: '/repo' }), { wrapper: createWrapper() })
+
+    await waitFor(() => {
+      expect(result.current.searchCommands('preview').map(({ item }) => item.name)).toEqual(['ship'])
+    })
+  })
+
+  it('finds only exact command names, ignoring case', () => {
+    const { result } = renderHook(() => useCommands({ enabled: false }), { wrapper: createWrapper() })
+
+    expect(result.current.findCommand('UNDO')?.name).toBe('undo')
+    expect(result.current.findCommand('und')).toBeUndefined()
   })
 })
