@@ -35,7 +35,7 @@ export function SideDrawer({
 
   useEffect(() => {
     const handleEscape = (e: KeyboardEvent) => {
-      if (e.key === 'Escape' && isOpen) {
+      if (e.key === 'Escape' && isOpen && !e.defaultPrevented) {
         onClose()
       }
     }

@@ -204,7 +204,6 @@ describe('FuseMultiRunRequestSchema', () => {
     requestId: '00000000-0000-4000-8000-000000000000',
     entryIds: [1, 2],
     model: 'openai/gpt-5',
-    isolate: true,
   }
 
   it('accepts at least two unique entry ids', () => {

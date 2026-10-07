@@ -1,7 +1,7 @@
 import type { Database } from 'bun:sqlite'
 import { existsSync } from 'node:fs'
-import { resolve } from 'node:path'
 import type { FuseMultiRunRequest, LaunchMultiRunRequest, MultiRun } from '@opencode-manager/shared/schemas'
+import { ASSISTANT_REPO_ID } from '@opencode-manager/shared/utils'
 import {
   createMultiRunWithEntries,
   getMultiRun,
@@ -18,12 +18,14 @@ import {
 import { getRepoById } from '../db/queries'
 import type { Repo } from '../types/repo'
 import { getErrorMessage } from '../utils/error-utils'
+import { logger } from '../utils/logger'
 import { ServiceError } from '../utils/service-error'
-import { buildFusionPrompt, collectFusionSources } from './multi-run-fusion'
+import { buildFusionPrompt, buildFusionSourcePermissionRuleset, collectFusionSources } from './multi-run-fusion'
 import type { OpenCodeClient } from './opencode/client'
 import { RepoWorkspaceError } from './repo'
 import type { RepoWorkspaceService } from './repo-workspace'
 import { requireReadyRepo, SessionLauncher, SessionLaunchError, type LaunchedSession } from './session-launcher'
+import type { SessionPermissionModeService } from './session-permission-modes'
 
 const MULTI_RUN_LIST_LIMIT = 20
 
@@ -75,6 +77,7 @@ export class MultiRunService {
     private readonly db: Database,
     private readonly openCodeClient: OpenCodeClient,
     private readonly repoWorkspaces: RepoWorkspaceService,
+    private readonly permissionModes: SessionPermissionModeService,
   ) {
     this.sessionLauncher = new SessionLauncher(db, openCodeClient, repoWorkspaces)
   }
@@ -165,6 +168,12 @@ export class MultiRunService {
       return { run: this.reload(multiRunId), created: false }
     }
 
+    if (record.repoId === ASSISTANT_REPO_ID) {
+      throw new MultiRunError('Fusion needs a Git repository because it always runs in a new worktree.', 409, {
+        code: 'FUSION_REQUIRES_GIT_REPOSITORY',
+      })
+    }
+
     let repo: Repo
     try {
       repo = requireReadyRepo(this.db, record.repoId)
@@ -181,18 +190,11 @@ export class MultiRunService {
       return entry
     })
 
-    if (!request.isolate) {
-      const overlappingEntryIds = selectedEntries
-        .filter((entry) => entry.directory !== null && resolve(entry.directory) === resolve(repo.fullPath))
-        .map((entry) => entry.id)
-      if (overlappingEntryIds.length > 0) {
-        throw new MultiRunError(
-          'The synthesis cannot run in the repository checkout because a selected result ran there. Enable an isolated workspace.',
-          409,
-          { code: 'FUSION_DESTINATION_OVERLAPS_SOURCE', details: { entryIds: overlappingEntryIds } },
-        )
-      }
-    }
+    const sourcePermissions = buildFusionSourcePermissionRuleset(
+      selectedEntries
+        .map((entry) => entry.directory)
+        .filter((directory): directory is string => directory !== null),
+    )
 
     try {
       await this.sessionLauncher.resolveModel(repo, request.model)
@@ -225,7 +227,7 @@ export class MultiRunService {
       requestId: request.requestId,
       model: request.model,
       instructions: request.instructions ?? null,
-      isolated: request.isolate,
+      isolated: true,
       baseRef: request.baseRef ?? null,
       sources: built.sources,
     })
@@ -234,21 +236,19 @@ export class MultiRunService {
       return { run: this.reload(multiRunId), created: false }
     }
 
+    let launched: LaunchedSession | null = null
     try {
-      const launched = await this.sessionLauncher.launch({
+      launched = await this.sessionLauncher.launch({
         repoId: record.repoId,
         prompt: built.prompt,
         model: request.model,
         title: `${record.name} · fusion`,
         ...(request.agent ? { agent: request.agent } : {}),
-        ...(request.isolate
-          ? {
-              workspace: {
-                name: `${record.name}-fusion-${fusion.id}`,
-                ...(request.baseRef ? { ref: request.baseRef } : {}),
-              },
-            }
-          : {}),
+        permissions: sourcePermissions,
+        workspace: {
+          name: `${record.name}-fusion-${fusion.id}`,
+          ...(request.baseRef ? { ref: request.baseRef } : {}),
+        },
       })
 
       updateMultiRunFusion(this.db, fusion.id, ['starting'], {
@@ -265,6 +265,14 @@ export class MultiRunService {
         ...(workspaceDirectory ? { directory: workspaceDirectory } : {}),
         ...(launchError?.sessionId ? { sessionId: launchError.sessionId } : {}),
       })
+    }
+
+    if (launched) {
+      try {
+        await this.permissionModes.applyDefaultMode(launched.sessionId, launched.directory)
+      } catch (error) {
+        logger.error(`Failed to apply the default permission mode to fusion session ${launched.sessionId}:`, error)
+      }
     }
 
     return { run: this.reload(multiRunId), created: true }

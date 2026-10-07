@@ -1,13 +1,18 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { Database } from 'bun:sqlite'
+import { buildSchedulePermissionRuleset } from '@opencode-manager/shared/schemas'
+import { ASSISTANT_REPO_ID } from '@opencode-manager/shared/utils'
 import { createRepo, deleteRepo } from '../../src/db/queries'
 import { migrate } from '../../src/db/migration-runner'
 import { allMigrations } from '../../src/db/migrations'
-import { createMultiRunWithEntries } from '../../src/db/multi-runs'
+import { createMultiRunWithEntries, getMultiRun } from '../../src/db/multi-runs'
+import { getSessionPermissionMode } from '../../src/db/session-permission-modes'
 import { FusionContextLimitError } from '../../src/services/multi-run-fusion'
 import { MultiRunError, MultiRunService } from '../../src/services/multi-runs'
 import { RepoWorkspaceError } from '../../src/services/repo'
 import type { RepoWorkspaceService } from '../../src/services/repo-workspace'
+import { SessionPermissionModeService } from '../../src/services/session-permission-modes'
+import { SettingsService } from '../../src/services/settings'
 import type { Repo } from '../../src/types/repo'
 import type { OpenCodeClient } from '../../src/services/opencode/client'
 import { assistantMessage } from '../helpers/stub-schedule-api'
@@ -22,6 +27,11 @@ const mocks = vi.hoisted(() => ({
   isGitMainCheckout: vi.fn(),
   executeCommand: vi.fn(),
   existsSync: vi.fn(),
+  loggerError: vi.fn(),
+}))
+
+vi.mock('../../src/utils/logger', () => ({
+  logger: { info: vi.fn(), warn: vi.fn(), error: mocks.loggerError, debug: vi.fn() },
 }))
 
 vi.mock('../../src/services/opencode-models', () => ({
@@ -109,6 +119,9 @@ function createClient(sessions: Record<string, FakeSessionConfig> = {}): FakeMul
 
   const sessionDiff = vi.fn(async () => [])
 
+  const permissionRequestList = vi.fn(async () => ({ data: [] }))
+  const permissionReply = vi.fn(async () => ({}))
+
   const client = {
     api: {
       session: {
@@ -119,6 +132,10 @@ function createClient(sessions: Record<string, FakeSessionConfig> = {}): FakeMul
         diff: sessionDiff,
       },
       message: { list: messageList },
+      permission: {
+        request: { list: permissionRequestList },
+        reply: permissionReply,
+      },
     },
   } as unknown as OpenCodeClient
 
@@ -198,8 +215,16 @@ describe('MultiRunService', () => {
     return repo.id
   }
 
-  function createService(client: OpenCodeClient, repoWorkspaces: RepoWorkspaceService): MultiRunService {
-    return new MultiRunService(db, client, repoWorkspaces)
+  function createService(
+    client: OpenCodeClient,
+    repoWorkspaces: RepoWorkspaceService,
+    permissionModes: SessionPermissionModeService = new SessionPermissionModeService(
+      db,
+      client,
+      new SettingsService(db),
+    ),
+  ): MultiRunService {
+    return new MultiRunService(db, client, repoWorkspaces, permissionModes)
   }
 
   it('launches one session per model, each in its own workspace named from the group', async () => {
@@ -607,7 +632,6 @@ describe('MultiRunService', () => {
       requestId: FUSE_REQUEST_ID,
       entryIds,
       model: 'openai/c',
-      isolate: true,
       baseRef: 'develop',
     })
 
@@ -641,6 +665,131 @@ describe('MultiRunService', () => {
     ).toEqual(before)
   })
 
+  it('grants read access to the selected source workspaces and denies edits when fusing', async () => {
+    const repoId = readyRepo()
+    const { client, sessionCreate } = createClient()
+    const repoWorkspaces = createRepoWorkspaces()
+    const service = createService(client, repoWorkspaces.service)
+
+    const run = await service.launch({
+      repoId,
+      name: 'Sweep',
+      prompt: 'go',
+      models: ['openai/a', 'openai/b', 'openai/c'],
+      isolate: true,
+    })
+    const entryIds = run.entries.map((entry) => entry.id)
+    sessionCreate.mockClear()
+
+    await service.fuse(run.id, {
+      requestId: FUSE_REQUEST_ID,
+      entryIds: [entryIds[0]!, entryIds[2]!],
+      model: 'openai/d',
+    })
+
+    expect(sessionCreate).toHaveBeenCalledTimes(1)
+    expect(sessionCreate.mock.calls[0]![0].permissions).toEqual([
+      ...buildSchedulePermissionRuleset(null),
+      { action: 'external_directory', resource: '/worktrees/Sweep-1/*', effect: 'allow' },
+      { action: 'edit', resource: '/worktrees/Sweep-1/*', effect: 'deny' },
+      { action: 'external_directory', resource: '/worktrees/Sweep-3/*', effect: 'allow' },
+      { action: 'edit', resource: '/worktrees/Sweep-3/*', effect: 'deny' },
+    ])
+    const serializedPermissions = JSON.stringify(sessionCreate.mock.calls[0]![0].permissions)
+    expect(serializedPermissions).not.toContain('Sweep-2')
+    expect(serializedPermissions).not.toContain('Sweep-fusion-1')
+  })
+
+  it('stores the default auto mode on the fusion session', async () => {
+    const repoId = readyRepo()
+    const { client, sessionCreate } = createClient()
+    const repoWorkspaces = createRepoWorkspaces()
+    const settingsService = new SettingsService(db)
+    settingsService.updateSettings({ sessionDefaults: { permissionMode: 'auto' } })
+    const permissionModes = new SessionPermissionModeService(db, client, settingsService)
+    const service = createService(client, repoWorkspaces.service, permissionModes)
+
+    const run = await service.launch({
+      repoId,
+      name: 'Sweep',
+      prompt: 'go',
+      models: ['openai/a', 'openai/b'],
+      isolate: true,
+    })
+    const entryIds = run.entries.map((entry) => entry.id)
+    sessionCreate.mockClear()
+
+    const { run: fused } = await service.fuse(run.id, {
+      requestId: FUSE_REQUEST_ID,
+      entryIds,
+      model: 'openai/c',
+    })
+
+    const fusionSessionId = fused.fusions[0]!.sessionId!
+    expect(getSessionPermissionMode(db, fusionSessionId)).toBe('auto')
+  })
+
+  it('stores no mode on the fusion session when the default is ask', async () => {
+    const repoId = readyRepo()
+    const { client, sessionCreate } = createClient()
+    const repoWorkspaces = createRepoWorkspaces()
+    const service = createService(client, repoWorkspaces.service)
+
+    const run = await service.launch({
+      repoId,
+      name: 'Sweep',
+      prompt: 'go',
+      models: ['openai/a', 'openai/b'],
+      isolate: true,
+    })
+    const entryIds = run.entries.map((entry) => entry.id)
+    sessionCreate.mockClear()
+
+    const { run: fused } = await service.fuse(run.id, {
+      requestId: FUSE_REQUEST_ID,
+      entryIds,
+      model: 'openai/c',
+    })
+
+    const fusionSessionId = fused.fusions[0]!.sessionId!
+    expect(getSessionPermissionMode(db, fusionSessionId)).toBeNull()
+  })
+
+  it('keeps the fusion started and logs when applying the default permission mode fails', async () => {
+    const repoId = readyRepo()
+    const { client } = createClient()
+    const repoWorkspaces = createRepoWorkspaces()
+    const permissionModes = {
+      applyDefaultMode: vi.fn(async () => {
+        throw new Error('permission store unavailable')
+      }),
+    } as unknown as SessionPermissionModeService
+    const service = createService(client, repoWorkspaces.service, permissionModes)
+
+    const run = await service.launch({
+      repoId,
+      name: 'Sweep',
+      prompt: 'go',
+      models: ['openai/a', 'openai/b'],
+      isolate: true,
+    })
+    const entryIds = run.entries.map((entry) => entry.id)
+
+    const { run: fused } = await service.fuse(run.id, {
+      requestId: FUSE_REQUEST_ID,
+      entryIds,
+      model: 'openai/c',
+    })
+
+    const fusion = fused.fusions[0]!
+    expect(fusion.status).toBe('started')
+    expect(fusion.sessionId).not.toBeNull()
+    expect(mocks.loggerError).toHaveBeenCalledWith(
+      expect.stringContaining(fusion.sessionId!),
+      expect.any(Error),
+    )
+  })
+
   it('returns the same fusion for a repeated requestId and launches once', async () => {
     const repoId = readyRepo()
     const { client, sessionCreate } = createClient()
@@ -657,7 +806,7 @@ describe('MultiRunService', () => {
     const entryIds = run.entries.map((entry) => entry.id)
     sessionCreate.mockClear()
 
-    const request = { requestId: FUSE_REQUEST_ID, entryIds, model: 'openai/c', isolate: false }
+    const request = { requestId: FUSE_REQUEST_ID, entryIds, model: 'openai/c' }
     const first = await service.fuse(run.id, request)
     const second = await service.fuse(run.id, request)
 
@@ -686,7 +835,7 @@ describe('MultiRunService', () => {
     sessionCreate.mockClear()
 
     const error = await service
-      .fuse(run.id, { requestId: FUSE_REQUEST_ID, entryIds, model: 'openai/c', isolate: false })
+      .fuse(run.id, { requestId: FUSE_REQUEST_ID, entryIds, model: 'openai/c' })
       .catch((caught: unknown) => caught)
 
     expect(error).toBeInstanceOf(MultiRunError)
@@ -715,7 +864,7 @@ describe('MultiRunService', () => {
     sessionCreate.mockClear()
 
     const error = await service
-      .fuse(run.id, { requestId: FUSE_REQUEST_ID, entryIds, model: 'openai/c', isolate: false })
+      .fuse(run.id, { requestId: FUSE_REQUEST_ID, entryIds, model: 'openai/c' })
       .catch((caught: unknown) => caught)
 
     expect(error).toBeInstanceOf(FusionContextLimitError)
@@ -741,7 +890,7 @@ describe('MultiRunService', () => {
     sessionCreate.mockClear()
 
     const error = await service
-      .fuse(run.id, { requestId: FUSE_REQUEST_ID, entryIds, model: 'openai/retired', isolate: false })
+      .fuse(run.id, { requestId: FUSE_REQUEST_ID, entryIds, model: 'openai/retired' })
       .catch((caught: unknown) => caught)
 
     expect(error).toBeInstanceOf(MultiRunError)
@@ -772,7 +921,6 @@ describe('MultiRunService', () => {
       requestId: FUSE_REQUEST_ID,
       entryIds,
       model: 'openai/c',
-      isolate: true,
     })
 
     expect(created).toBe(true)
@@ -780,6 +928,7 @@ describe('MultiRunService', () => {
     expect(fusion.status).toBe('failed')
     expect(fusion.error).toContain('fusion boom')
     expect(fusion.directory).toBe('/worktrees/Sweep-fusion-1')
+    expect(fusion.isolated).toBe(true)
   })
 
   it('records the created session id on a failed fusion when the prompt is rejected', async () => {
@@ -803,7 +952,6 @@ describe('MultiRunService', () => {
       requestId: FUSE_REQUEST_ID,
       entryIds,
       model: 'openai/c',
-      isolate: false,
     })
 
     expect(created).toBe(true)
@@ -834,7 +982,6 @@ describe('MultiRunService', () => {
       requestId: FUSE_REQUEST_ID,
       entryIds,
       model: 'openai/c',
-      isolate: false,
     })
     const failedFusion = firstFused.fusions[0]!
     expect(failedFusion.status).toBe('failed')
@@ -847,7 +994,6 @@ describe('MultiRunService', () => {
         requestId: '22222222-2222-4222-8222-222222222222',
         entryIds,
         model: 'openai/c',
-        isolate: false,
       })
       .catch((caught: unknown) => caught)
 
@@ -883,7 +1029,6 @@ describe('MultiRunService', () => {
       requestId: FUSE_REQUEST_ID,
       entryIds,
       model: 'openai/c',
-      isolate: false,
     })
     expect(firstFused.fusions[0]!.status).toBe('failed')
 
@@ -893,7 +1038,6 @@ describe('MultiRunService', () => {
       requestId: '33333333-3333-4333-8333-333333333333',
       entryIds,
       model: 'openai/c',
-      isolate: false,
     })
 
     expect(created).toBe(true)
@@ -901,65 +1045,25 @@ describe('MultiRunService', () => {
     expect(fused.fusions.map((fusion) => fusion.status)).toEqual(['failed', 'started'])
   })
 
-  it('rejects a non-isolated fusion when a selected result ran in the repository checkout', async () => {
-    const repoId = readyRepo()
+  it('rejects fusion for the Assistant before creating a fusion', async () => {
     const { client, sessionCreate } = createClient()
     const repoWorkspaces = createRepoWorkspaces()
     const service = createService(client, repoWorkspaces.service)
-
-    const run = await service.launch({
-      repoId,
-      name: 'Sweep',
-      prompt: 'go',
-      models: ['openai/a', 'openai/b'],
-      isolate: false,
-    })
-    const entryIds = run.entries.map((entry) => entry.id)
-    sessionCreate.mockClear()
+    const record = createMultiRunWithEntries(
+      db,
+      { repoId: ASSISTANT_REPO_ID, name: 'Sweep', prompt: 'go', isolated: false, baseRef: null },
+      ['openai/a', 'openai/b'],
+    )
 
     const error = await service
-      .fuse(run.id, {
-        requestId: FUSE_REQUEST_ID,
-        entryIds,
-        model: 'openai/c',
-        isolate: false,
-      })
+      .fuse(record.id, { requestId: FUSE_REQUEST_ID, entryIds: record.entries.map((entry) => entry.id), model: 'openai/c' })
       .catch((caught: unknown) => caught)
 
     expect(error).toBeInstanceOf(MultiRunError)
-    expect(error).toMatchObject({ status: 409, code: 'FUSION_DESTINATION_OVERLAPS_SOURCE' })
-    expect((error as MultiRunError).details).toEqual({ entryIds })
+    expect(error).toMatchObject({ status: 409, code: 'FUSION_REQUIRES_GIT_REPOSITORY' })
+    expect(repoWorkspaces.create).not.toHaveBeenCalled()
     expect(sessionCreate).not.toHaveBeenCalled()
-    expect(service.list(repoId)[0]!.fusions).toEqual([])
-  })
-
-  it('allows an isolated fusion when the selected results ran in the repository checkout', async () => {
-    const repoId = readyRepo()
-    const { client, sessionCreate } = createClient()
-    const repoWorkspaces = createRepoWorkspaces()
-    const service = createService(client, repoWorkspaces.service)
-
-    const run = await service.launch({
-      repoId,
-      name: 'Sweep',
-      prompt: 'go',
-      models: ['openai/a', 'openai/b'],
-      isolate: false,
-    })
-    const entryIds = run.entries.map((entry) => entry.id)
-    sessionCreate.mockClear()
-
-    const { run: fused, created } = await service.fuse(run.id, {
-      requestId: FUSE_REQUEST_ID,
-      entryIds,
-      model: 'openai/c',
-      isolate: true,
-    })
-
-    expect(created).toBe(true)
-    expect(fused.fusions[0]!.status).toBe('started')
-    expect(fused.fusions[0]!.directory).toBe('/worktrees/Sweep-fusion-1')
-    expect(sessionCreate).toHaveBeenCalledTimes(1)
+    expect(getMultiRun(db, record.id)!.fusions).toEqual([])
   })
 
   it('rejects fusion with an entry id that does not belong to the run', async () => {
@@ -983,7 +1087,6 @@ describe('MultiRunService', () => {
         requestId: FUSE_REQUEST_ID,
         entryIds: [entryIds[0]!, 9999],
         model: 'openai/c',
-        isolate: false,
       })
       .catch((caught: unknown) => caught)
 

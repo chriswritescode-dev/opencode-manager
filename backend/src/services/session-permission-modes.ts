@@ -126,6 +126,21 @@ export class SessionPermissionModeService {
     return this.settingsService.getSettings().preferences.sessionDefaults?.permissionMode ?? 'ask'
   }
 
+  /**
+   * Records the default permission mode for a session after it has been launched
+   * and accepts any permission requests it raised before the mode was stored.
+   *
+   * Does nothing when the default mode is `ask`, since that needs no stored row.
+   */
+  async applyDefaultMode(sessionId: string, directory: string): Promise<void> {
+    if (this.defaultMode() !== 'auto') {
+      return
+    }
+
+    insertSessionPermissionModeIfAbsent(this.db, sessionId, 'auto')
+    await this.acceptPendingRequestsInDirectory(directory, sessionId)
+  }
+
   async acceptPendingRequestsForActiveSessions(): Promise<void> {
     try {
       const active = await this.openCodeClient.api.session.active()
