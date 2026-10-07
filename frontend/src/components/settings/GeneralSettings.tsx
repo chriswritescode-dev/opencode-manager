@@ -145,6 +145,20 @@ export function GeneralSettings() {
 
             <div className="flex items-start justify-between gap-4 py-3">
               <div className="min-w-0 space-y-0.5">
+                <Label htmlFor="groupToolCalls">Group exploration</Label>
+                <p className="text-sm text-muted-foreground">
+                  Collapse consecutive reads, searches, and fetches into one summary line
+                </p>
+              </div>
+              <Switch
+                id="groupToolCalls"
+                checked={preferences?.groupToolCalls ?? true}
+                onCheckedChange={(checked) => updateSettings({ groupToolCalls: checked })}
+              />
+            </div>
+
+            <div className="flex items-start justify-between gap-4 py-3">
+              <div className="min-w-0 space-y-0.5">
                 <Label htmlFor="expandToolCalls">Expand tool calls</Label>
                 <p className="text-sm text-muted-foreground">
                   Automatically expand tool call details by default
