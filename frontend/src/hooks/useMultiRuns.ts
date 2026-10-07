@@ -26,7 +26,7 @@ function buildStartingFusion(run: MultiRun, request: FuseMultiRunRequest): Multi
     requestId: request.requestId,
     model: request.model,
     instructions: request.instructions ?? null,
-    isolated: request.isolate,
+    isolated: true,
     baseRef: request.baseRef ?? null,
     status: 'starting',
     sessionId: null,

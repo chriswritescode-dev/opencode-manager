@@ -575,7 +575,7 @@ describe('MultiRunSheet', () => {
       expect(submit).toBeEnabled()
     })
 
-    it('submits the selected sources, model, instructions and isolated destination', async () => {
+    it('submits the selected sources, model, instructions and base ref', async () => {
       const user = userEvent.setup()
       mocks.fuseMultiRun.mockResolvedValue(fuseRun)
       renderSheet()
@@ -593,28 +593,11 @@ describe('MultiRunSheet', () => {
         entryIds: [11, 13],
         model: 'openai/gpt-4o',
         instructions: 'Merge the best ideas',
-        isolate: true,
         baseRef: 'main',
       })
     })
 
-    it('runs in the repository checkout without a base ref when chosen', async () => {
-      const user = userEvent.setup()
-      mocks.fuseMultiRun.mockResolvedValue(fuseRun)
-      renderSheet()
-
-      await selectSourcesAndModel(user)
-      await user.click(screen.getByRole('radio', { name: 'Repository checkout' }))
-      expect(screen.queryByRole('combobox', { name: 'Base ref' })).not.toBeInTheDocument()
-      await user.click(screen.getByRole('button', { name: /start fusion/i }))
-
-      await waitFor(() => expect(mocks.fuseMultiRun).toHaveBeenCalledTimes(1))
-      const [, request] = mocks.fuseMultiRun.mock.calls[0] as [number, FuseMultiRunRequest]
-      expect(request).toMatchObject({ isolate: false })
-      expect(request).not.toHaveProperty('baseRef')
-    })
-
-    it('forces isolation when a selected source ran in the repository checkout', async () => {
+    it('always runs the fusion in a new worktree without a destination choice', async () => {
       const user = userEvent.setup()
       mocks.listMultiRuns.mockResolvedValue([
         { ...fuseRun, entries: fuseRun.entries.map((item) => (item.id === 11 ? { ...item, isolated: false } : item)) },
@@ -623,11 +606,8 @@ describe('MultiRunSheet', () => {
 
       await selectSourcesAndModel(user)
 
-      expect(screen.getByRole('radio', { name: 'Repository checkout' })).toBeDisabled()
-      expect(screen.getByRole('radio', { name: 'Isolated' })).toHaveAttribute('aria-checked', 'true')
-      expect(
-        screen.getByText('Isolation is required because a selected result ran in the repository checkout.'),
-      ).toBeInTheDocument()
+      expect(screen.queryByRole('radio', { name: 'Repository checkout' })).not.toBeInTheDocument()
+      expect(screen.getByRole('combobox', { name: 'Base ref' })).toBeInTheDocument()
     })
 
     it('shows the new fusion as Starting while the request is pending', async () => {

@@ -116,8 +116,7 @@ export function MultiRunSheet({ repoId, directory, defaultBaseRef, open, onOpenC
       entryIds: selection.entryIds,
       model: submission.model,
       ...(submission.instructions ? { instructions: submission.instructions } : {}),
-      isolate: submission.isolate,
-      ...(submission.isolate && submission.baseRef ? { baseRef: submission.baseRef } : {}),
+      ...(submission.baseRef ? { baseRef: submission.baseRef } : {}),
     }
     fuse.mutate(
       { runId: selection.runId, request },

@@ -35,7 +35,6 @@ function fuseBody(overrides: Record<string, unknown> = {}): string {
     requestId: '11111111-1111-4111-8111-111111111111',
     entryIds: [1, 2],
     model: 'openai/a',
-    isolate: true,
     ...overrides,
   })
 }
@@ -175,7 +174,6 @@ describe('multi-run routes', () => {
       requestId: '11111111-1111-4111-8111-111111111111',
       entryIds: [1, 2],
       model: 'openai/a',
-      isolate: true,
     })
   })
 

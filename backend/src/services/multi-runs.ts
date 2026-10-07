@@ -1,7 +1,7 @@
 import type { Database } from 'bun:sqlite'
 import { existsSync } from 'node:fs'
-import { resolve } from 'node:path'
 import type { FuseMultiRunRequest, LaunchMultiRunRequest, MultiRun } from '@opencode-manager/shared/schemas'
+import { ASSISTANT_REPO_ID } from '@opencode-manager/shared/utils'
 import {
   createMultiRunWithEntries,
   getMultiRun,
@@ -168,6 +168,12 @@ export class MultiRunService {
       return { run: this.reload(multiRunId), created: false }
     }
 
+    if (record.repoId === ASSISTANT_REPO_ID) {
+      throw new MultiRunError('Fusion needs a Git repository because it always runs in a new worktree.', 409, {
+        code: 'FUSION_REQUIRES_GIT_REPOSITORY',
+      })
+    }
+
     let repo: Repo
     try {
       repo = requireReadyRepo(this.db, record.repoId)
@@ -183,19 +189,6 @@ export class MultiRunService {
       }
       return entry
     })
-
-    if (!request.isolate) {
-      const overlappingEntryIds = selectedEntries
-        .filter((entry) => entry.directory !== null && resolve(entry.directory) === resolve(repo.fullPath))
-        .map((entry) => entry.id)
-      if (overlappingEntryIds.length > 0) {
-        throw new MultiRunError(
-          'The synthesis cannot run in the repository checkout because a selected result ran there. Enable an isolated workspace.',
-          409,
-          { code: 'FUSION_DESTINATION_OVERLAPS_SOURCE', details: { entryIds: overlappingEntryIds } },
-        )
-      }
-    }
 
     const sourcePermissions = buildFusionSourcePermissionRuleset(
       selectedEntries
@@ -234,7 +227,7 @@ export class MultiRunService {
       requestId: request.requestId,
       model: request.model,
       instructions: request.instructions ?? null,
-      isolated: request.isolate,
+      isolated: true,
       baseRef: request.baseRef ?? null,
       sources: built.sources,
     })
@@ -252,14 +245,10 @@ export class MultiRunService {
         title: `${record.name} · fusion`,
         ...(request.agent ? { agent: request.agent } : {}),
         permissions: sourcePermissions,
-        ...(request.isolate
-          ? {
-              workspace: {
-                name: `${record.name}-fusion-${fusion.id}`,
-                ...(request.baseRef ? { ref: request.baseRef } : {}),
-              },
-            }
-          : {}),
+        workspace: {
+          name: `${record.name}-fusion-${fusion.id}`,
+          ...(request.baseRef ? { ref: request.baseRef } : {}),
+        },
       })
 
       updateMultiRunFusion(this.db, fusion.id, ['starting'], {

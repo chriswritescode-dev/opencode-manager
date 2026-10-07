@@ -92,7 +92,6 @@ export const FuseMultiRunRequestSchema = z.object({
     .refine((entryIds) => new Set(entryIds).size === entryIds.length, { message: "Entry ids must be unique" }),
   model: z.string().min(3),
   instructions: z.string().trim().max(FUSION_INSTRUCTIONS_MAX_LENGTH).optional(),
-  isolate: z.boolean(),
   baseRef: z.string().trim().min(1).optional(),
   agent: z.string().optional(),
 });
