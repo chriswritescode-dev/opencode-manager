@@ -179,7 +179,7 @@ export function WorktreeSessionGroups({
               <div className="flex min-w-0 items-center gap-2">
                 <span className="truncate text-sm font-medium">{label}</span>
                 {sourceLabel && source && (
-                  <span className={`shrink-0 rounded border px-1.5 text-[10px] leading-4 ${OWNER_BADGE_CLASS[source]}`}>{sourceLabel}</span>
+                  <span className={`shrink-0 rounded-none border px-1.5 text-[10px] leading-4 ${OWNER_BADGE_CLASS[source]}`}>{sourceLabel}</span>
                 )}
                 {isInUse && (
                   <span className="inline-flex shrink-0 items-center gap-1 rounded-full border border-success/40 bg-success/15 px-1.5 text-[10px] leading-4 text-success">
