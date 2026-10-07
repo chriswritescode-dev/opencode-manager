@@ -11,6 +11,11 @@ import {
   withDefaultOpenCodeDirectory,
 } from '../services/opencode/upstream'
 import { getRepoById } from '../db/queries'
+import { getSiblingRepos, resolveRepoWorkingDirectory } from '../services/repo'
+import type { GitAuthService } from '../services/git-auth'
+import type { OpenCodeClient } from '../services/opencode/client'
+import type { Repo } from '@opencode-manager/shared/types'
+import type { RepoSibling } from '@opencode-manager/shared/utils'
 import { buildProxyResponseHeaders, filterProxyHeaders } from '../utils/proxy-headers'
 
 interface ProxyRequestParts {
@@ -22,10 +27,23 @@ interface ProxyRequestParts {
 
 type ProxyRewrite = (parts: ProxyRequestParts) => void
 
-type ProxyBodyRewrite = (bodyText: string) => string | undefined
+type ProxyBodyRewrite = (bodyText: string) => Promise<string | undefined>
+
+type RepoDirectoryResolver = (directory: string | undefined) => Promise<string>
+
+const REPO_SIBLINGS_CACHE_TTL_MS = 5_000
 
 function isJsonContentType(contentType: string | undefined): boolean {
   return (contentType ?? '').toLowerCase().includes('application/json')
+}
+
+function decodeDirectoryHeader(value: string | undefined): string | undefined {
+  if (!value) return undefined
+  try {
+    return decodeURIComponent(value)
+  } catch {
+    return value
+  }
 }
 
 function rewriteRepoLocation(parts: ProxyRequestParts, directory: string): void {
@@ -35,12 +53,12 @@ function rewriteRepoLocation(parts: ProxyRequestParts, directory: string): void 
     parts.searchParams.set('location[directory]', directory)
   }
 
-  if (parts.method === 'GET' && parts.path === '/api/session') {
+  if (parts.method === 'GET' && parts.path === '/api/session' && !parts.searchParams.has('project')) {
     parts.searchParams.set('directory', directory)
   }
 }
 
-function rewriteRepoLocationBody(bodyText: string, directory: string): string | undefined {
+async function rewriteRepoLocationBody(bodyText: string, resolveDirectory: RepoDirectoryResolver): Promise<string | undefined> {
   let parsed: unknown
   try {
     parsed = JSON.parse(bodyText)
@@ -53,14 +71,40 @@ function rewriteRepoLocationBody(bodyText: string, directory: string): string | 
   const location = (parsed as { location?: unknown }).location
   if (!location || typeof location !== 'object' || Array.isArray(location)) return undefined
 
+  const requested = (location as { directory?: unknown }).directory
+  const directory = await resolveDirectory(typeof requested === 'string' ? requested : undefined)
   ;(parsed as { location: Record<string, unknown> }).location = { ...location, directory }
   return JSON.stringify(parsed)
 }
 
-export function createOpenCodeProxyRoutes(db: Database, settingsService: SettingsService) {
+export function createOpenCodeProxyRoutes(
+  db: Database,
+  settingsService: SettingsService,
+  gitAuthService: GitAuthService,
+  openCodeClient: OpenCodeClient,
+) {
   const app = new Hono()
+  const repoSiblingsCache = new Map<number, { expiresAt: number; siblings: Promise<RepoSibling[]> }>()
 
   app.use('/*', createInternalTokenMiddleware(db))
+
+  function loadRepoSiblings(repoId: number): Promise<RepoSibling[]> {
+    const cached = repoSiblingsCache.get(repoId)
+    if (cached && cached.expiresAt > Date.now()) return cached.siblings
+
+    const siblings = getSiblingRepos(db, repoId, gitAuthService.getGitEnvironment(), openCodeClient, { includeBranch: false })
+      .catch(() => {
+        repoSiblingsCache.delete(repoId)
+        return []
+      })
+    repoSiblingsCache.set(repoId, { expiresAt: Date.now() + REPO_SIBLINGS_CACHE_TTL_MS, siblings })
+    return siblings
+  }
+
+  function createRepoDirectoryResolver(repo: Repo): RepoDirectoryResolver {
+    return async (directory) =>
+      (await resolveRepoWorkingDirectory(repo, directory, () => loadRepoSiblings(repo.id))) ?? repo.fullPath
+  }
 
   async function forwardToOpenCode(
     c: Context,
@@ -105,7 +149,7 @@ export function createOpenCodeProxyRoutes(db: Database, settingsService: Setting
 
     if (rewriteBody && rawBody !== undefined) {
       const bodyText = rawBody.byteLength > 0 ? new TextDecoder().decode(rawBody) : undefined
-      const rewrittenBody = bodyText === undefined ? undefined : rewriteBody(bodyText)
+      const rewrittenBody = bodyText === undefined ? undefined : await rewriteBody(bodyText)
       requestBody = rewrittenBody === undefined ? rawBody : rewrittenBody
     }
 
@@ -141,12 +185,16 @@ export function createOpenCodeProxyRoutes(db: Database, settingsService: Setting
 
     const url = new URL(c.req.url)
     const pathSuffix = url.pathname.replace(/^\/api\/opencode-proxy\/repos\/[^/]+/, '') || '/'
+    const resolveDirectory = createRepoDirectoryResolver(repo)
+    const directory = await resolveDirectory(
+      url.searchParams.get('location[directory]') || decodeDirectoryHeader(c.req.header(OPENCODE_DIRECTORY_HEADER)),
+    )
 
     return forwardToOpenCode(
       c,
       pathSuffix,
-      (parts) => rewriteRepoLocation(parts, repo.fullPath),
-      (bodyText) => rewriteRepoLocationBody(bodyText, repo.fullPath),
+      (parts) => rewriteRepoLocation(parts, directory),
+      (bodyText) => rewriteRepoLocationBody(bodyText, resolveDirectory),
     )
   })
 

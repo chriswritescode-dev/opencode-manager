@@ -12,6 +12,8 @@ import { buildOpenCodeBasicAuth } from '@opencode-manager/shared/opencode'
 import { getWorkspacePath } from '@opencode-manager/shared/config/env'
 import { createOpenCodeProxyRoutes } from '../../src/routes/opencode-proxy'
 import type { SettingsService } from '../../src/services/settings'
+import type { GitAuthService } from '../../src/services/git-auth'
+import type { OpenCodeClient } from '../../src/services/opencode/client'
 import { OpenCodeSupervisor } from '../../src/services/opencode-supervisor'
 import { resolveOpenCode2Binary, startOpenCodeServe } from '../helpers/opencode-binary'
 
@@ -35,6 +37,13 @@ vi.mock('../../src/db/queries', () => ({
   getRepoById: getRepoByIdMock,
 }))
 
+const getSiblingReposMock = vi.hoisted(() => vi.fn().mockResolvedValue([]))
+
+vi.mock('../../src/services/repo', async (importOriginal) => ({
+  ...await importOriginal<typeof import('../../src/services/repo')>(),
+  getSiblingRepos: getSiblingReposMock,
+}))
+
 const upstreamBaseUrl = vi.hoisted(() => ({ value: 'http://127.0.0.1:5551' }))
 
 vi.mock('../../src/services/opencode/upstream', async (importOriginal) => ({
@@ -51,6 +60,10 @@ const mockSettingsService = {
 } as unknown as SettingsService
 
 const mockDb = {} as Database
+
+const mockGitAuthService = { getGitEnvironment: () => ({}) } as unknown as GitAuthService
+
+const mockOpenCodeClient = {} as OpenCodeClient
 
 function upstreamOk() {
   const upstreamFetch = vi.fn().mockResolvedValue(
@@ -69,7 +82,7 @@ describe('opencode-proxy routes', () => {
     isLifecycleInitializedMock.mockReturnValue(true)
     originalFetch = globalThis.fetch
     app = new Hono()
-    app.route('/api/opencode-proxy', createOpenCodeProxyRoutes(mockDb, mockSettingsService))
+    app.route('/api/opencode-proxy', createOpenCodeProxyRoutes(mockDb, mockSettingsService, mockGitAuthService, mockOpenCodeClient))
   })
 
   afterEach(() => {
@@ -771,7 +784,7 @@ describe('opencode-proxy repo-scoped mount', () => {
     isLifecycleInitializedMock.mockReturnValue(true)
     originalFetch = globalThis.fetch
     app = new Hono()
-    app.route('/api/opencode-proxy', createOpenCodeProxyRoutes(mockDb, mockSettingsService))
+    app.route('/api/opencode-proxy', createOpenCodeProxyRoutes(mockDb, mockSettingsService, mockGitAuthService, mockOpenCodeClient))
   })
 
   afterEach(() => {
@@ -924,6 +937,88 @@ describe('opencode-proxy repo-scoped mount', () => {
     const fetchCall = upstreamFetch.mock.calls[0] as [string, RequestInit]
     expect(new TextDecoder().decode(fetchCall[1].body as ArrayBuffer)).toBe('{not json')
   })
+
+  describe('repo worktrees', () => {
+    const worktreePath = '/srv/worktrees/my-repo-feature'
+
+    beforeEach(() => {
+      getRepoByIdMock.mockReturnValue(readyRepo)
+      getSiblingReposMock.mockResolvedValue([readyRepo, { ...readyRepo, id: -1, fullPath: worktreePath, worktreeSource: 'opencode' }])
+    })
+
+    it('keeps a worktree x-opencode-directory and scopes the session list to it', async () => {
+      const upstreamFetch = upstreamOk()
+
+      const res = await app.request('/api/opencode-proxy/repos/7/api/session?limit=1', {
+        headers: {
+          Authorization: 'Bearer test-internal-token',
+          'x-opencode-directory': encodeURIComponent(worktreePath),
+        },
+      })
+
+      expect(res.status).toBe(200)
+      const fetchCall = upstreamFetch.mock.calls[0] as [string, RequestInit]
+      expect((fetchCall[1].headers as Record<string, string>)['x-opencode-directory']).toBe(encodeURIComponent(worktreePath))
+      expect(new URL(fetchCall[0]).searchParams.get('directory')).toBe(worktreePath)
+    })
+
+    it('keeps a worktree location[directory] query value', async () => {
+      const upstreamFetch = upstreamOk()
+
+      const res = await app.request(
+        `/api/opencode-proxy/repos/7/api/agent?location%5Bdirectory%5D=${encodeURIComponent(worktreePath)}`,
+        { headers: { Authorization: 'Bearer test-internal-token' } }
+      )
+
+      expect(res.status).toBe(200)
+      const fetchCall = upstreamFetch.mock.calls[0] as [string, RequestInit]
+      expect(new URL(fetchCall[0]).searchParams.get('location[directory]')).toBe(worktreePath)
+      expect((fetchCall[1].headers as Record<string, string>)['x-opencode-directory']).toBe(encodeURIComponent(worktreePath))
+    })
+
+    it('keeps a worktree body location.directory', async () => {
+      const upstreamFetch = upstreamOk()
+
+      const res = await app.request('/api/opencode-proxy/repos/7/api/session', {
+        method: 'POST',
+        headers: {
+          Authorization: 'Bearer test-internal-token',
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({ title: 'x', location: { directory: worktreePath } }),
+      })
+
+      expect(res.status).toBe(200)
+      const fetchCall = upstreamFetch.mock.calls[0] as [string, RequestInit]
+      expect(JSON.parse(fetchCall[1].body as string)).toEqual({ title: 'x', location: { directory: worktreePath } })
+    })
+
+    it('does not add a directory filter to a project-scoped session list', async () => {
+      const upstreamFetch = upstreamOk()
+
+      const res = await app.request('/api/opencode-proxy/repos/7/api/session?project=prj_1&subpath=..%2Fx', {
+        headers: { Authorization: 'Bearer test-internal-token' },
+      })
+
+      expect(res.status).toBe(200)
+      const fetchCall = upstreamFetch.mock.calls[0] as [string, RequestInit]
+      expect(new URL(fetchCall[0]).searchParams.has('directory')).toBe(false)
+    })
+
+    it('loads siblings once across requests within the cache window', async () => {
+      upstreamOk()
+      const request = () => app.request('/api/opencode-proxy/repos/7/api/agent', {
+        headers: {
+          Authorization: 'Bearer test-internal-token',
+          'x-opencode-directory': encodeURIComponent(worktreePath),
+        },
+      })
+
+      await Promise.all([request(), request(), request()])
+
+      expect(getSiblingReposMock).toHaveBeenCalledTimes(1)
+    })
+  })
 })
 
 const SHIPPED_OPENCODE_BIN = resolveOpenCode2Binary()
@@ -1036,7 +1131,7 @@ describe.skipIf(SHIPPED_OPENCODE_BIN === null)('opencode-proxy repo-scoped mount
     getRepoByIdMock.mockReturnValue({ id: 1, fullPath: repoPath, cloneStatus: 'ready' })
 
     const proxyApp = new Hono()
-    proxyApp.route('/api/opencode-proxy', createOpenCodeProxyRoutes(mockDb, mockSettingsService))
+    proxyApp.route('/api/opencode-proxy', createOpenCodeProxyRoutes(mockDb, mockSettingsService, mockGitAuthService, mockOpenCodeClient))
     const proxyServer = await new Promise<ReturnType<typeof serve>>((resolve) => {
       const server = serve({ fetch: proxyApp.fetch, port: 0, hostname: '127.0.0.1' }, () => resolve(server))
     })
