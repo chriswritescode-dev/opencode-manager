@@ -1,5 +1,6 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { Database } from 'bun:sqlite'
+import { buildSchedulePermissionRuleset } from '@opencode-manager/shared/schemas'
 import { createRepo, deleteRepo } from '../../src/db/queries'
 import { migrate } from '../../src/db/migration-runner'
 import { allMigrations } from '../../src/db/migrations'
@@ -689,6 +690,7 @@ describe('MultiRunService', () => {
 
     expect(sessionCreate).toHaveBeenCalledTimes(1)
     expect(sessionCreate.mock.calls[0]![0].permissions).toEqual([
+      ...buildSchedulePermissionRuleset(null),
       { action: 'external_directory', resource: '/worktrees/Sweep-1/*', effect: 'allow' },
       { action: 'edit', resource: '/worktrees/Sweep-1/*', effect: 'deny' },
       { action: 'external_directory', resource: '/worktrees/Sweep-3/*', effect: 'allow' },

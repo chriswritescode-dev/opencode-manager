@@ -251,7 +251,7 @@ export class MultiRunService {
         model: request.model,
         title: `${record.name} · fusion`,
         ...(request.agent ? { agent: request.agent } : {}),
-        ...(sourcePermissions.length > 0 ? { permissions: sourcePermissions } : {}),
+        permissions: sourcePermissions,
         ...(request.isolate
           ? {
               workspace: {
