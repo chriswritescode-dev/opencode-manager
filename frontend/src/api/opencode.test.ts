@@ -392,6 +392,21 @@ describe('OpenCode facade', () => {
     expect((failure as FetchError).message).toBe('Session not found')
   })
 
+  it('preserves the declared error tag as FetchError.code', async () => {
+    fetchMock.mockResolvedValue(
+      new Response(
+        JSON.stringify({ _tag: 'PermissionNotFoundError', sessionID: 'ses_1', requestID: 'per_1', message: 'Permission request not found' }),
+        { status: 404, headers: { 'Content-Type': 'application/json' } },
+      ),
+    )
+
+    const failure = await replyPermission('ses_1', 'per_1', 'once').catch((error: unknown) => error)
+
+    expect(failure).toBeInstanceOf(FetchError)
+    expect((failure as FetchError).statusCode).toBe(404)
+    expect((failure as FetchError).code).toBe('PermissionNotFoundError')
+  })
+
   it('maps a declared V2 conflict error to 409', async () => {
     fetchMock.mockResolvedValue(
       new Response(

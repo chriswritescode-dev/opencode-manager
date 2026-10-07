@@ -1,10 +1,12 @@
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
 import { act, render, screen, waitFor } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
-import type { ReactNode } from 'react'
+import { useState, type ReactNode } from 'react'
 import { MemoryRouter, useLocation } from 'react-router-dom'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 import type { FormInfo, PermissionRequest } from '@opencode-manager/shared/opencode'
+import { FetchError } from '@opencode-manager/shared'
+import { showToast } from '@/lib/toast'
 import { useSessionStatus } from '@/stores/sessionStatusStore'
 import { changeWalkthroughQueryKey } from '@/hooks/useChangeWalkthrough'
 import { EventProvider, useEventContext, useForms, usePermissions, useSSEHealth } from './EventContext'
@@ -95,9 +97,14 @@ function Harness() {
   const { current, pendingCount, syncForSession, navigateToCurrent, cancel, reply, getForSession } = useForms()
   const permissions = usePermissions()
   const location = useLocation()
+  const [rejection, setRejection] = useState('none')
+  const recordRejection = (action: Promise<void>) => {
+    action.catch((error: unknown) => setRejection(error instanceof FetchError ? error.code ?? 'unknown' : 'unknown'))
+  }
 
   return (
     <div>
+      <div data-testid="rejection">{rejection}</div>
       <div data-testid="count">{pendingCount}</div>
       <div data-testid="current">{current?.id ?? 'none'}</div>
       <div data-testid="for-session-1">{getForSession('session-1')?.id ?? 'none'}</div>
@@ -116,9 +123,9 @@ function Harness() {
       <button onClick={() => syncForSession('/repo', 'session-1')}>Sync</button>
       <button onClick={() => permissions.syncForSession('/repo', 'session-1')}>Sync Permissions</button>
       <button onClick={navigateToCurrent}>Navigate</button>
-      <button onClick={() => current && cancel(current.id)}>Dismiss</button>
-      <button onClick={() => current && reply(current.id, { q0: 'Yes' })}>Reply</button>
-      <button onClick={() => permissions.current && permissions.respond(permissions.current.id, permissions.current.sessionID, 'reject')}>Reject Permission</button>
+      <button onClick={() => current && recordRejection(cancel(current.id))}>Dismiss</button>
+      <button onClick={() => current && recordRejection(reply(current.id, { q0: 'Yes' }))}>Reply</button>
+      <button onClick={() => permissions.current && recordRejection(permissions.respond(permissions.current.id, permissions.current.sessionID, 'reject'))}>Reject Permission</button>
       <button onClick={() => permissions.current && permissions.respond(permissions.current.id, permissions.current.sessionID, 'reject', 'not allowed')}>Reject Permission With Reason</button>
     </div>
   )
@@ -246,6 +253,88 @@ describe('EventProvider permissions and forms', () => {
       expect(screen.getByTestId('permission-count')).toHaveTextContent('1')
       expect(screen.getByTestId('permission-current')).toHaveTextContent('permission-2')
     })
+  })
+
+  it('removes a permission the server no longer knows about when replying', async () => {
+    mocks.listPendingPermissions.mockResolvedValue([pendingPermission])
+    mocks.replyPermission.mockRejectedValue(new FetchError('Permission request not found', 404, 'PermissionNotFoundError'))
+
+    render(<Harness />, { wrapper: createWrapper() })
+
+    await userEvent.click(screen.getByRole('button', { name: 'Sync Permissions' }))
+
+    await waitFor(() => expect(screen.getByTestId('permission-count')).toHaveTextContent('1'))
+
+    await userEvent.click(screen.getByRole('button', { name: 'Reject Permission' }))
+
+    await waitFor(() => {
+      expect(screen.getByTestId('permission-count')).toHaveTextContent('0')
+      expect(screen.getByTestId('permission-current')).toHaveTextContent('none')
+    })
+    expect(showToast.info).toHaveBeenCalledWith('Permission request expired')
+    expect(screen.getByTestId('rejection')).toHaveTextContent('none')
+  })
+
+  it('keeps a permission and rejects when the reply fails for another reason', async () => {
+    mocks.listPendingPermissions.mockResolvedValue([pendingPermission])
+    mocks.replyPermission.mockRejectedValue(new FetchError('Session not found', 404, 'SessionNotFoundError'))
+
+    render(<Harness />, { wrapper: createWrapper() })
+
+    await userEvent.click(screen.getByRole('button', { name: 'Sync Permissions' }))
+
+    await waitFor(() => expect(screen.getByTestId('permission-count')).toHaveTextContent('1'))
+
+    await userEvent.click(screen.getByRole('button', { name: 'Reject Permission' }))
+
+    await waitFor(() => expect(screen.getByTestId('rejection')).toHaveTextContent('SessionNotFoundError'))
+    expect(screen.getByTestId('permission-count')).toHaveTextContent('1')
+    expect(screen.getByTestId('permission-current')).toHaveTextContent('permission-1')
+    expect(showToast.info).not.toHaveBeenCalled()
+  })
+
+  it.each([
+    ['Reply', 'replyForm'],
+    ['Dismiss', 'cancelForm'],
+  ] as const)('removes a form the server no longer knows about on %s', async (button, mock) => {
+    mocks.listPendingForms.mockResolvedValue([pendingForm])
+    mocks[mock].mockRejectedValue(new FetchError('Form not found', 404, 'FormNotFoundError'))
+
+    render(<Harness />, { wrapper: createWrapper() })
+
+    await userEvent.click(screen.getByRole('button', { name: 'Sync' }))
+
+    await waitFor(() => expect(screen.getByTestId('count')).toHaveTextContent('1'))
+
+    await userEvent.click(screen.getByRole('button', { name: button }))
+
+    await waitFor(() => {
+      expect(screen.getByTestId('count')).toHaveTextContent('0')
+      expect(screen.getByTestId('current')).toHaveTextContent('none')
+    })
+    expect(showToast.info).toHaveBeenCalledWith('Form expired')
+    expect(screen.getByTestId('rejection')).toHaveTextContent('none')
+  })
+
+  it.each([
+    ['Reply', 'replyForm'],
+    ['Dismiss', 'cancelForm'],
+  ] as const)('keeps a form and rejects when %s fails for another reason', async (button, mock) => {
+    mocks.listPendingForms.mockResolvedValue([pendingForm])
+    mocks[mock].mockRejectedValue(new FetchError('Form already settled', 409, 'FormAlreadySettledError'))
+
+    render(<Harness />, { wrapper: createWrapper() })
+
+    await userEvent.click(screen.getByRole('button', { name: 'Sync' }))
+
+    await waitFor(() => expect(screen.getByTestId('count')).toHaveTextContent('1'))
+
+    await userEvent.click(screen.getByRole('button', { name: button }))
+
+    await waitFor(() => expect(screen.getByTestId('rejection')).toHaveTextContent('FormAlreadySettledError'))
+    expect(screen.getByTestId('count')).toHaveTextContent('1')
+    expect(screen.getByTestId('current')).toHaveTextContent('form-1')
+    expect(showToast.info).not.toHaveBeenCalled()
   })
 
   it('forwards an optional rejection message to the facade', async () => {

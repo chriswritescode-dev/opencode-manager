@@ -11,6 +11,7 @@ import {
   replyPermission,
 } from '@/api/opencode'
 import { listRepos } from '@/api/repos'
+import { FetchError } from '@opencode-manager/shared'
 import type { FormAnswer, FormInfo, PermissionRequest, V2Event } from '@opencode-manager/shared/opencode'
 import type { PermissionResponse, SSHHostKeyRequest, Repo } from '@/api/types'
 import { showToast } from '@/lib/toast'
@@ -94,6 +95,11 @@ interface EventContextValue {
   permissions: {
     current: PermissionRequest | null
     pendingCount: number
+    /**
+     * Replies to a permission request and removes it from the queue. Resolves, after showing an
+     * "expired" toast, when the server no longer knows the request (`PermissionNotFoundError`);
+     * rejects on any other failure and keeps the request queued.
+     */
     respond: (
       permissionID: string,
       sessionID: string,
@@ -111,7 +117,15 @@ interface EventContextValue {
   forms: {
     current: FormInfo | null
     pendingCount: number
+    /**
+     * Answers a form and removes it from the queue. Resolves, after showing an "expired" toast,
+     * when the server no longer knows the form (`FormNotFoundError`); rejects on any other failure.
+     */
     reply: (formID: string, answer: FormAnswer) => Promise<void>
+    /**
+     * Dismisses a form on the server and removes it from the queue, with the same
+     * resolve-on-`FormNotFoundError` contract as `reply`.
+     */
     cancel: (formID: string) => Promise<void>
     dismiss: (formID: string, sessionID?: string) => void
     getForSession: (sessionID: string) => FormInfo | null
@@ -121,6 +135,24 @@ interface EventContextValue {
   }
   sseHealth: SSEHealthState
   getRepoIdForSession: (sessionID: string) => number | null
+}
+
+/**
+ * Sends a reply to a pending server request and treats the request as settled when the server
+ * reports it no longer exists (`goneCode`), showing `expiredMessage` instead of rejecting.
+ * Every other failure is rethrown.
+ */
+async function settlePendingReply(
+  reply: () => Promise<void>,
+  goneCode: string,
+  expiredMessage: string,
+): Promise<void> {
+  try {
+    await reply()
+  } catch (error) {
+    if (!(error instanceof FetchError && error.code === goneCode)) throw error
+    showToast.info(expiredMessage)
+  }
 }
 
 const EventContext = createContext<EventContextValue | null>(null)
@@ -284,21 +316,25 @@ export function EventProvider({ children }: { children: React.ReactNode }) {
     response: PermissionResponse,
     message?: string,
   ) => {
-    await replyPermission(sessionID, permissionID, response, message)
+    await settlePendingReply(
+      () => replyPermission(sessionID, permissionID, response, message),
+      'PermissionNotFoundError',
+      'Permission request expired',
+    )
     removePermission(permissionID, sessionID)
   }, [removePermission])
 
   const replyToForm = useCallback(async (formID: string, answer: FormAnswer) => {
     const form = Object.values(formsBySession).flat().find(f => f.id === formID)
     if (!form) throw new Error('Form not found')
-    await replyForm(form.sessionID, formID, answer)
+    await settlePendingReply(() => replyForm(form.sessionID, formID, answer), 'FormNotFoundError', 'Form expired')
     removeForm(formID, form.sessionID)
   }, [formsBySession, removeForm])
 
   const cancelPendingForm = useCallback(async (formID: string) => {
     const form = Object.values(formsBySession).flat().find(f => f.id === formID)
     if (!form) throw new Error('Form not found')
-    await cancelForm(form.sessionID, formID)
+    await settlePendingReply(() => cancelForm(form.sessionID, formID), 'FormNotFoundError', 'Form expired')
     removeForm(formID, form.sessionID)
   }, [formsBySession, removeForm])
 
