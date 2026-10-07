@@ -106,6 +106,50 @@ describe('MobileTabBar', () => {
     expect(screen.getByText('Schedules')).toBeInTheDocument()
   })
 
+  it('opens the assistant-scoped file browser from the assistant route', async () => {
+    vi.mocked(useMobile).mockReturnValue(true)
+    const queryClient = new QueryClient()
+    const user = userEvent.setup()
+
+    render(
+      <QueryClientProvider client={queryClient}>
+        <MemoryRouter initialEntries={['/assistant']}>
+          <Routes>
+            <Route path="*" element={<>
+              <MobileTabBar />
+              <LocationSpy />
+            </>} />
+          </Routes>
+        </MemoryRouter>
+      </QueryClientProvider>,
+    )
+
+    await user.click(screen.getByRole('button', { name: 'Files' }))
+    expect(screen.getByTestId('location')).toHaveTextContent('dialog=files')
+  })
+
+  it('opens the global file browser from the repos route', async () => {
+    vi.mocked(useMobile).mockReturnValue(true)
+    const queryClient = new QueryClient()
+    const user = userEvent.setup()
+
+    render(
+      <QueryClientProvider client={queryClient}>
+        <MemoryRouter initialEntries={['/']}>
+          <Routes>
+            <Route path="*" element={<>
+              <MobileTabBar />
+              <LocationSpy />
+            </>} />
+          </Routes>
+        </MemoryRouter>
+      </QueryClientProvider>,
+    )
+
+    await user.click(screen.getByRole('button', { name: 'Files' }))
+    expect(screen.getByTestId('location')).toHaveTextContent('mobileTab=files')
+  })
+
   it('navigates to /assistant when assistant is clicked from repo context', async () => {
     vi.mocked(useMobile).mockReturnValue(true)
     const queryClient = new QueryClient()
