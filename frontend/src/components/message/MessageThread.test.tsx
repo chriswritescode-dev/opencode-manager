@@ -59,6 +59,7 @@ interface MockSettingsReturn {
   preferences: {
     simpleChatMode: boolean
     showReasoning: boolean
+    groupToolCalls?: boolean
   } | undefined
 }
 
@@ -113,6 +114,14 @@ const subagentTool = (description: string, sessionID?: string): SessionMessageAs
   time: { created: Date.now(), completed: Date.now() + 100 },
 })
 
+const readTool = (id: string, path: string): SessionMessageAssistantTool => ({
+  type: 'tool',
+  id,
+  name: 'read',
+  state: { status: 'completed', input: { path }, content: [{ type: 'text', text: 'contents' }], metadata: {} },
+  time: { created: Date.now(), ran: Date.now(), completed: Date.now() + 100 },
+})
+
 const textPart = (text: string): SessionMessageAssistant['content'][number] => ({ type: 'text', text })
 
 const reasoningPart = (text: string): SessionMessageAssistant['content'][number] => ({ type: 'reasoning', text })
@@ -139,6 +148,35 @@ describe('MessageThread', () => {
     })
     mocks.useSessionAgent.mockReturnValue({ agent: 'test-agent' })
     useUIState.getState().setIsEditingMessage(false)
+  })
+
+  it('collapses consecutive exploration tools into one expandable summary', () => {
+    setupSettings({ simpleChatMode: false, showReasoning: false })
+    const messages = [
+      assistantMessage('1', [readTool('r1', '/repo/a.ts'), readTool('r2', '/repo/b.ts'), shellTool('pnpm test')]),
+    ]
+
+    render(<MessageThread sessionID="test-session" messages={messages} pending={[]} />)
+
+    const summary = screen.getByRole('button', { name: /Explored: 2 reads/ })
+    expect(screen.queryByText('/repo/a.ts')).not.toBeInTheDocument()
+    expect(screen.getByText('pnpm test')).toBeInTheDocument()
+
+    fireEvent.click(summary)
+
+    expect(summary).toHaveAttribute('aria-expanded', 'true')
+    expect(screen.getByText('/repo/a.ts')).toBeInTheDocument()
+    expect(screen.getByText('/repo/b.ts')).toBeInTheDocument()
+  })
+
+  it('renders exploration tools individually when grouping is disabled', () => {
+    setupSettings({ simpleChatMode: false, showReasoning: false, groupToolCalls: false })
+    const messages = [assistantMessage('1', [readTool('r1', '/repo/a.ts'), readTool('r2', '/repo/b.ts')])]
+
+    render(<MessageThread sessionID="test-session" messages={messages} pending={[]} />)
+
+    expect(screen.queryByText(/Explored/)).not.toBeInTheDocument()
+    expect(screen.getByText('/repo/a.ts')).toBeInTheDocument()
   })
 
   it('renders instruction updates as a single notice line without the instruction body', () => {

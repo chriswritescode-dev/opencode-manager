@@ -55,6 +55,7 @@ export const AssistantSettingsPatchSchema = UserPreferencesSchema.pick({
   autoScroll: true,
   expandDiffs: true,
   expandToolCalls: true,
+  groupToolCalls: true,
   showReasoning: true,
   simpleChatMode: true,
   leaderKey: true,

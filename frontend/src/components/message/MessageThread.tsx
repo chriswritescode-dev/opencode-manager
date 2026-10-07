@@ -23,6 +23,8 @@ import { useSettings } from '@/hooks/useSettings'
 import { CopyButton } from '@/components/ui/copy-button'
 import { TTSButton } from '@/components/ui/tts-button'
 import { backgroundShellID, collectBackgroundParts, type ShellNoticeOutcome } from '@/lib/backgroundWork'
+import { groupExplorationParts, type AssistantContentItem } from '@/lib/explorationGroups'
+import { ExplorationGroup } from './ExplorationGroup'
 
 function getMessageText(message: SessionMessageInfo): string {
   switch (message.type) {
@@ -325,6 +327,7 @@ interface MessageRowProps {
   model?: string
   simpleChatMode: boolean
   showReasoning: boolean
+  groupToolCalls: boolean
   shellOutcomes: ReadonlyMap<string, ShellNoticeOutcome>
 }
 
@@ -344,6 +347,7 @@ const MessageRow = memo(function MessageRow({
   model,
   simpleChatMode,
   showReasoning,
+  groupToolCalls,
   shellOutcomes,
 }: MessageRowProps) {
   const messageTextContent = getMessageText(message)
@@ -456,6 +460,9 @@ const MessageRow = memo(function MessageRow({
       )
     }
 
+    const contentItems: AssistantContentItem[] = groupToolCalls && !simpleChatMode
+      ? groupExplorationParts(message.content, showReasoning)
+      : message.content.map((part) => ({ type: 'part', part }))
     const isFree = (message.cost ?? 0) === 0
     const totalTokens = message.tokens
       ? message.tokens.input + message.tokens.output + message.tokens.reasoning + message.tokens.cache.read
@@ -478,16 +485,26 @@ const MessageRow = memo(function MessageRow({
           </div>
 
           <div className="space-y-2">
-            {message.content.map((part, partIndex) => (
-              <div key={`${message.id}-${part.type}-${partIndex}`}>
-                <MessagePart
-                  part={part}
-                  messageID={message.id}
-                  directory={directory}
-                  shellOutcome={shellOutcomeFor(part)}
-                  onFileClick={onFileClick}
-                  onChildSessionClick={onChildSessionClick}
-                />
+            {contentItems.map((item, itemIndex) => (
+              <div key={`${message.id}-${item.type === 'exploration' ? `exploration-${item.parts[0].id}` : `${item.part.type}-${itemIndex}`}`}>
+                {item.type === 'exploration' ? (
+                  <ExplorationGroup
+                    parts={item.parts}
+                    messageID={message.id}
+                    directory={directory}
+                    onFileClick={onFileClick}
+                    onChildSessionClick={onChildSessionClick}
+                  />
+                ) : (
+                  <MessagePart
+                    part={item.part}
+                    messageID={message.id}
+                    directory={directory}
+                    shellOutcome={shellOutcomeFor(item.part)}
+                    onFileClick={onFileClick}
+                    onChildSessionClick={onChildSessionClick}
+                  />
+                )}
               </div>
             ))}
             {!simpleChatMode && message.snapshot?.files && (
@@ -573,6 +590,7 @@ export const MessageThread = memo(function MessageThread({
   const { preferences } = useSettings()
   const simpleChatMode = preferences?.simpleChatMode ?? false
   const showReasoning = preferences?.showReasoning ?? false
+  const groupToolCalls = preferences?.groupToolCalls ?? true
 
   const lastUserMessageId = useMemo(() => findLastUserMessageId(messages), [messages])
 
@@ -634,6 +652,7 @@ export const MessageThread = memo(function MessageThread({
           model={model}
           simpleChatMode={simpleChatMode}
           showReasoning={showReasoning}
+          groupToolCalls={groupToolCalls}
           shellOutcomes={shellOutcomes}
         />
       ))}
