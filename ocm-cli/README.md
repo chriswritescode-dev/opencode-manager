@@ -168,8 +168,9 @@ attached Manager repo through `ocm`:
   optional base ref. `ctrl+s` launches, and the started sessions open in tabs.
   With no prompt, `/multirun` opens the runs browser for the attached repo:
   pick a run, open entry or fusion sessions, discard entries (`d` twice), select
-  results with `space`, and press `f` to fuse them with a synthesis model. A
-  fusion always runs in a new worktree.
+  results with `space`, and press `f` to fuse them with a synthesis model. On
+  the run list, `f` fuses every started result of the highlighted run. A fusion
+  always runs in a new worktree.
 
 Both commands need an OpenCode Manager release that exposes
 `/api/internal/session-goals` and `/api/internal/multi-runs`. An older Manager

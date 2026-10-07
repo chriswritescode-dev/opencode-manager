@@ -298,6 +298,11 @@ describe('toggleFusionSource', () => {
     expect(toggleFusionSource(run, [1, 2], 1)).toEqual([2])
   })
 
+  it('keeps the selection in run order regardless of toggle order', () => {
+    expect(toggleFusionSource(run, [4], 1)).toEqual([1, 4])
+    expect(toggleFusionSource(run, [5, 2], 4)).toEqual([2, 4, 5])
+  })
+
   it('ignores entries that are not started and selections past the model limit', () => {
     expect(toggleFusionSource(run, [], 3)).toEqual([])
     expect(toggleFusionSource(run, [1, 2, 4, 5, 6], 99)).toEqual([1, 2, 4, 5, 6])

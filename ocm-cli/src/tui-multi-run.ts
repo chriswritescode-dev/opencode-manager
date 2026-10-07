@@ -141,12 +141,12 @@ export function canDiscard(entry: MultiRunEntry): boolean {
   return entry.status === 'started' || entry.status === 'failed'
 }
 
-/** Toggles an entry in the fusion selection, ignoring non-source entries and selections past the model limit. */
+/** Toggles an entry in the fusion selection, keeping run order and ignoring non-sources and selections past the model limit. */
 export function toggleFusionSource(run: MultiRun, selected: readonly number[], entryId: number): number[] {
-  if (selected.includes(entryId)) return selected.filter((id) => id !== entryId)
-  if (!startedEntries(run).some((entry) => entry.id === entryId)) return [...selected]
-  if (selected.length >= MULTI_RUN_MAX_MODELS) return [...selected]
-  return [...selected, entryId]
+  const sourceIds = startedEntries(run).map((entry) => entry.id)
+  if (selected.includes(entryId)) return sourceIds.filter((id) => id !== entryId && selected.includes(id))
+  if (!sourceIds.includes(entryId) || selected.length >= MULTI_RUN_MAX_MODELS) return sourceIds.filter((id) => selected.includes(id))
+  return sourceIds.filter((id) => id === entryId || selected.includes(id))
 }
 
 export function parseLaunchForm(form: LaunchFormInput, repoId: number): ActionResult<LaunchMultiRunRequest> {

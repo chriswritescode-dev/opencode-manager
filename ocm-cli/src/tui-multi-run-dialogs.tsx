@@ -281,6 +281,11 @@ function MultiRunsDialog(props: MultiRunsDialogProps & { context: Context }) {
       if ((name === 'return' || name === 'right') && current) {
         event.preventDefault()
         setPane('details')
+        return
+      }
+      if (name === 'f') {
+        event.preventDefault()
+        startFusion()
       }
       return
     }
@@ -326,7 +331,7 @@ function MultiRunsDialog(props: MultiRunsDialogProps & { context: Context }) {
 
   const hints = createMemo(() => {
     if (pane() === 'fuse') return [['tab', 'next field'], ['enter', 'pick model'], ['ctrl+s', 'fuse'], ['ctrl+b', 'back']] as const
-    if (pane() === 'runs') return [['↑↓', 'select run'], ['enter', 'open run'], ['n', 'new multi-run'], ['r', 'refresh']] as const
+    if (pane() === 'runs') return [['↑↓', 'select run'], ['enter', 'open run'], ['f', 'fuse results'], ['n', 'new multi-run'], ['r', 'refresh']] as const
     return [
       ['↑↓', 'move'],
       ['enter', 'open session'],
