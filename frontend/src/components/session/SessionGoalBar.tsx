@@ -8,7 +8,7 @@ import {
   useResumeSessionGoal,
   useSessionGoal,
 } from '@/hooks/useSessionGoals'
-import { getGoalOutcomeTitle, getGoalStopReasonLabel } from '@opencode-manager/shared/notifications'
+import { getGoalOutcomeTitle, getGoalStopReasonLabel, getGoalTokenLabel, getGoalTurnLabel } from '@opencode-manager/shared/notifications'
 import type { SessionGoalStatus } from '@opencode-manager/shared/schemas'
 
 const STATUS_CHIP_CLASSES: Record<SessionGoalStatus, string> = {
@@ -38,6 +38,7 @@ export function SessionGoalBar({ sessionID }: { sessionID: string }) {
 
   const terminal = isTerminal(goal.status)
   const reason = goal.stopReason ? getGoalStopReasonLabel(goal.stopReason) : goal.lastReason
+  const tokenLabel = getGoalTokenLabel(goal)
 
   return (
     <div className="mb-1 flex flex-col gap-1 rounded-lg border border-border bg-card px-2 py-1.5 text-xs">
@@ -52,13 +53,13 @@ export function SessionGoalBar({ sessionID }: { sessionID: string }) {
 
         {!terminal && (
           <span className="text-muted-foreground">
-            Turn {goal.continuationCount}/{goal.maxContinuations}
+            {getGoalTurnLabel(goal)}
           </span>
         )}
 
-        {!terminal && goal.tokenBudget !== null && (
+        {!terminal && tokenLabel !== null && (
           <span className="text-muted-foreground">
-            {goal.tokensUsed.toLocaleString()}/{goal.tokenBudget.toLocaleString()} tokens
+            {tokenLabel}
           </span>
         )}
 

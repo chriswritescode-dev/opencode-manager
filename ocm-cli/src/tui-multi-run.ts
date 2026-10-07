@@ -1,7 +1,10 @@
 import { randomUUID } from 'node:crypto'
 import type { Context, ToastOptions } from '@opencode/plugin/tui/context'
 import {
+  FuseMultiRunRequestSchema,
+  FusionRecoveredDetailsSchema,
   FusionUnavailableDetailsSchema,
+  LaunchMultiRunRequestSchema,
   MULTI_RUN_FUSION_MIN_SOURCES,
   MULTI_RUN_MAX_MODELS,
   type FuseMultiRunRequest,
@@ -14,7 +17,7 @@ import { formatOpenCodeModelRef } from '@opencode-manager/shared/opencode'
 import { ManagerApi, ManagerApiError, isManagerRouteMissing } from './manager-api.js'
 import { resolveManagerAuth } from './manager-auth.js'
 import type { ManagerAuthOk } from './manager-auth.js'
-import { confirmDialog, multiSelectDialog, promptDialog, selectDialog, slashArgument } from './tui-dialogs.js'
+import { slashArgument } from './tui-dialogs.js'
 import type { RemoteContext } from './remote-context.js'
 
 export const MULTI_RUN_ATTACH_REQUIRED =
@@ -27,8 +30,47 @@ export type ModelOption = {
   value: string
 }
 
+export type ActionResult<Value> = { ok: true; value: Value } | { ok: false; error: string }
+
+export type LaunchFormInput = {
+  prompt: string
+  name: string
+  models: string[]
+  isolate: boolean
+  baseRef: string
+}
+
+export type FusionFormInput = {
+  entryIds: number[]
+  model: string
+  baseRef: string
+  instructions: string
+}
+
+/** Multi-run operations the dialogs call. Launch and fuse open the started sessions themselves and resolve to an error message, or null. */
+export type MultiRunActions = {
+  loadModels(): Promise<ActionResult<ModelOption[]>>
+  list(): Promise<ActionResult<MultiRun[]>>
+  launch(form: LaunchFormInput): Promise<string | null>
+  discard(run: MultiRun, entry: MultiRunEntry): Promise<ActionResult<MultiRun>>
+  fuse(run: MultiRun, form: FusionFormInput): Promise<string | null>
+  open(sessionId: string): void
+}
+
+export type MultiRunLaunchDialogProps = {
+  actions: MultiRunActions
+  initialPrompt: string
+}
+
+export type MultiRunsDialogProps = {
+  actions: MultiRunActions
+  newRun: () => void
+}
+
 export type MultiRunCommandDeps = {
   remote: RemoteContext | undefined
+  showLaunchDialog: (props: MultiRunLaunchDialogProps) => void
+  showRunsDialog: (props: MultiRunsDialogProps) => void
   createApi?: (auth: ManagerAuthOk) => ManagerApi
 }
 
@@ -41,6 +83,16 @@ export async function listModelOptions(context: Context): Promise<ModelOption[]>
       const ref = formatOpenCodeModelRef({ providerID: model.providerID, id: model.id })
       return { title: model.name, description: ref, value: ref }
     })
+}
+
+/** Case-insensitive match of every whitespace-separated term against the model name or ref. */
+export function filterModelOptions(options: readonly ModelOption[], query: string): ModelOption[] {
+  const terms = query.toLowerCase().split(/\s+/).filter(Boolean)
+  if (terms.length === 0) return [...options]
+  return options.filter((option) => {
+    const haystack = `${option.title} ${option.value}`.toLowerCase()
+    return terms.every((term) => haystack.includes(term))
+  })
 }
 
 export function openManagerSessions(context: Context, sessionIDs: string[]): void {
@@ -56,8 +108,8 @@ export function openManagerSessions(context: Context, sessionIDs: string[]): voi
   context.ui.router.navigate({ type: 'session', sessionID: first })
 }
 
-function defaultMultiRunName(prompt: string): string {
-  return prompt.split('\n')[0].slice(0, 80)
+export function defaultMultiRunName(prompt: string): string {
+  return prompt.trim().split('\n')[0]!.slice(0, 80).trim()
 }
 
 const ENTRY_STATUS_LABELS: Record<MultiRunEntryStatus, string> = {
@@ -73,22 +125,87 @@ export function formatEntryStatus(entry: MultiRunEntry): string {
   return parts.join(' · ')
 }
 
-function startedSources(run: MultiRun): (MultiRunEntry & { sessionId: string })[] {
+export function runSummary(run: MultiRun): string {
+  const started = run.entries.filter((entry) => entry.status === 'started').length
+  return `${run.entries.length} models · ${started} started · ${run.fusions.length} fusions`
+}
+
+/** Started entries backed by a session: the sessions to open and the valid fusion sources. */
+export function startedEntries(run: MultiRun): (MultiRunEntry & { sessionId: string })[] {
   return run.entries.filter(
     (entry): entry is MultiRunEntry & { sessionId: string } => entry.status === 'started' && entry.sessionId !== null,
   )
 }
 
-function startedSessionIds(run: MultiRun): string[] {
-  return startedSources(run).map((entry) => entry.sessionId)
+export function canDiscard(entry: MultiRunEntry): boolean {
+  return entry.status === 'started' || entry.status === 'failed'
 }
 
-function runSummary(run: MultiRun): string {
-  const started = run.entries.filter((entry) => entry.status === 'started').length
-  return `${run.entries.length} models · ${started} started · ${run.fusions.length} fusions`
+/** Toggles an entry in the fusion selection, ignoring non-source entries and selections past the model limit. */
+export function toggleFusionSource(run: MultiRun, selected: readonly number[], entryId: number): number[] {
+  if (selected.includes(entryId)) return selected.filter((id) => id !== entryId)
+  if (!startedEntries(run).some((entry) => entry.id === entryId)) return [...selected]
+  if (selected.length >= MULTI_RUN_MAX_MODELS) return [...selected]
+  return [...selected, entryId]
 }
 
-function multiRunLaunchToast(run: MultiRun): ToastOptions {
+export function parseLaunchForm(form: LaunchFormInput, repoId: number): ActionResult<LaunchMultiRunRequest> {
+  const prompt = form.prompt.trim()
+  if (!prompt) return { ok: false, error: 'Enter a prompt to send to every model.' }
+  const name = form.name.trim() || defaultMultiRunName(prompt)
+  if (form.models.length === 0) return { ok: false, error: 'Choose at least one model.' }
+  if (form.models.length > MULTI_RUN_MAX_MODELS) return { ok: false, error: `Choose at most ${MULTI_RUN_MAX_MODELS} models.` }
+
+  const baseRef = form.baseRef.trim()
+  const parsed = LaunchMultiRunRequestSchema.safeParse({
+    repoId,
+    name,
+    prompt,
+    models: form.models,
+    isolate: form.isolate,
+    ...(form.isolate && baseRef ? { baseRef } : {}),
+  })
+  if (!parsed.success) return { ok: false, error: parsed.error.issues[0]?.message ?? 'Invalid multi-run.' }
+  return { ok: true, value: parsed.data }
+}
+
+export function parseFusionForm(form: FusionFormInput, requestId: string): ActionResult<FuseMultiRunRequest> {
+  if (form.entryIds.length < MULTI_RUN_FUSION_MIN_SOURCES) {
+    return { ok: false, error: `Select at least ${MULTI_RUN_FUSION_MIN_SOURCES} started results to fuse.` }
+  }
+  if (!form.model) return { ok: false, error: 'Choose a synthesis model.' }
+
+  const instructions = form.instructions.trim()
+  const baseRef = form.baseRef.trim()
+  const parsed = FuseMultiRunRequestSchema.safeParse({
+    requestId,
+    entryIds: form.entryIds,
+    model: form.model,
+    ...(instructions ? { instructions } : {}),
+    ...(baseRef ? { baseRef } : {}),
+  })
+  if (!parsed.success) return { ok: false, error: parsed.error.issues[0]?.message ?? 'Invalid fusion.' }
+  return { ok: true, value: parsed.data }
+}
+
+/** Maps a Manager error to a message, plus the session of an earlier fusion attempt the Manager recovered instead. */
+export function describeMultiRunError(error: unknown): { message: string; recoveredSessionId?: string } {
+  if (isManagerRouteMissing(error)) return { message: MULTI_RUN_ROUTE_MISSING }
+  if (!(error instanceof ManagerApiError)) return { message: error instanceof Error ? error.message : String(error) }
+
+  const unavailable = FusionUnavailableDetailsSchema.safeParse(error.details)
+  if (unavailable.success && unavailable.data.unavailableSources.length > 0) {
+    return { message: unavailable.data.unavailableSources.map((source) => `${source.model}: ${source.message}`).join('\n') }
+  }
+
+  const recovered = FusionRecoveredDetailsSchema.safeParse(error.details)
+  const recoveredSessionId = recovered.success ? recovered.data.fusions[0]?.sessionId : undefined
+  if (recoveredSessionId) return { message: 'An earlier fusion attempt is already running.', recoveredSessionId }
+
+  return { message: error.message }
+}
+
+export function multiRunLaunchToast(run: MultiRun): ToastOptions {
   const started = run.entries.filter((entry) => entry.status === 'started').length
   const failed = run.entries.filter((entry) => entry.status === 'failed')
   const lines = [`Launched ${run.name}: ${started}/${run.entries.length} started`]
@@ -96,245 +213,80 @@ function multiRunLaunchToast(run: MultiRun): ToastOptions {
   return { variant: failed.length > 0 ? 'warning' : 'success', message: lines.join('\n') }
 }
 
-function showMultiRunError(context: Context, error: unknown): void {
-  if (isManagerRouteMissing(error)) {
-    context.ui.toast.show({ variant: 'error', message: MULTI_RUN_ROUTE_MISSING })
-    return
-  }
-  if (error instanceof ManagerApiError) {
-    const unavailable = FusionUnavailableDetailsSchema.safeParse(error.details)
-    if (unavailable.success && unavailable.data.unavailableSources.length > 0) {
-      context.ui.toast.show({
-        variant: 'error',
-        message: unavailable.data.unavailableSources.map((source) => `${source.model}: ${source.message}`).join('\n'),
-      })
-      return
-    }
-    context.ui.toast.show({ variant: 'error', message: error.message })
-    return
-  }
-  context.ui.toast.show({ variant: 'error', message: error instanceof Error ? error.message : String(error) })
-}
-
-async function launchMultiRunFlow(context: Context, api: ManagerApi, repoId: number, prompt: string): Promise<void> {
-  const name = await promptDialog(context, {
-    title: 'Multi-run name',
-    description: 'Name this group of runs.',
-    placeholder: 'Sweep',
-    value: defaultMultiRunName(prompt),
-  })
-  if (!name) return
-
-  const models = await multiSelectDialog(context, {
-    title: 'Models',
-    options: await listModelOptions(context),
-    min: 1,
-    max: MULTI_RUN_MAX_MODELS,
-  })
-  if (!models) return
-
-  const isolate = await selectDialog<boolean>(context, 'Isolation', [
-    { title: 'Isolated worktrees (recommended)', value: true },
-    { title: 'Shared repo directory', value: false },
-  ])
-  if (isolate === undefined) return
-
-  const baseRef = isolate
-    ? await promptDialog(context, {
-        title: 'Start from',
-        description: 'Each isolated workspace starts from this branch.',
-        placeholder: 'Current HEAD',
-      })
-    : undefined
-
-  const request: LaunchMultiRunRequest = {
-    repoId,
-    name,
-    prompt,
-    models,
-    isolate,
-    ...(isolate && baseRef ? { baseRef } : {}),
-  }
-  const run = await api.launchMultiRun(request)
-  context.ui.toast.show(multiRunLaunchToast(run))
-  openManagerSessions(context, startedSessionIds(run))
-}
-
-type RunChoice = { kind: 'new' } | { kind: 'run'; run: MultiRun }
-
-type RunAction =
-  | { kind: 'open'; sessionId: string }
-  | { kind: 'fuse' }
-  | { kind: 'discard'; entry: MultiRunEntry }
-
-async function discardEntryFlow(context: Context, api: ManagerApi, run: MultiRun, entry: MultiRunEntry): Promise<void> {
-  const confirmed = await confirmDialog(context, {
-    title: 'Discard run',
-    message: entry.isolated
-      ? `Discard ${entry.model} and remove its workspace directory? This cannot be undone.`
-      : `Discard ${entry.model}? This cannot be undone.`,
-  })
-  if (!confirmed) return
-
-  await api.discardMultiRunEntry(run.id, entry.id)
-  context.ui.toast.show({ variant: 'success', message: `Discarded ${entry.model}` })
-}
-
-async function fuseMultiRunFlow(context: Context, api: ManagerApi, run: MultiRun): Promise<void> {
-  const entryIds = await multiSelectDialog<number>(context, {
-    title: 'Fusion sources',
-    options: startedSources(run).map((entry) => ({
-      title: entry.model,
-      description: formatEntryStatus(entry),
-      value: entry.id,
-    })),
-    min: MULTI_RUN_FUSION_MIN_SOURCES,
-    max: MULTI_RUN_MAX_MODELS,
-  })
-  if (!entryIds) return
-
-  const model = await selectDialog(context, 'Synthesis model', await listModelOptions(context))
-  if (!model) return
-
-  const instructions = await promptDialog(context, {
-    title: 'Instructions (optional)',
-    description: 'Optional guidance for the synthesis.',
-    placeholder: 'Optional guidance',
-  })
-
-  const requiresIsolation = run.entries.some((entry) => entryIds.includes(entry.id) && !entry.isolated)
-  let isolate = true
-  if (!requiresIsolation) {
-    const chosen = await selectDialog<boolean>(context, 'Isolation', [
-      { title: 'Isolated worktree (recommended)', value: true },
-      { title: 'Shared repo directory', value: false },
-    ])
-    if (chosen === undefined) return
-    isolate = chosen
-  }
-
-  const baseRef = isolate
-    ? await promptDialog(context, {
-        title: 'Start from',
-        description: 'The synthesis workspace starts from this branch.',
-        placeholder: 'Current HEAD',
-        value: run.baseRef ?? '',
-      })
-    : undefined
-
-  const requestId = randomUUID()
-  const request: FuseMultiRunRequest = {
-    requestId,
-    entryIds,
-    model,
-    isolate,
-    ...(instructions ? { instructions } : {}),
-    ...(isolate && baseRef ? { baseRef } : {}),
-  }
-
-  const updated = await api.fuseMultiRun(run.id, request)
-  const fusion = updated.fusions.find((candidate) => candidate.requestId === requestId)
-  if (!fusion) return
-  if (fusion.status === 'failed') {
-    context.ui.toast.show({ variant: 'error', message: fusion.error ?? `Fusion of ${fusion.model} failed` })
-    return
-  }
-
-  context.ui.toast.show({ variant: 'success', message: `Fused ${fusion.model}` })
-  if (fusion.sessionId) openManagerSessions(context, [fusion.sessionId])
-}
-
-async function browseRunFlow(context: Context, api: ManagerApi, run: MultiRun): Promise<void> {
-  const options: { title: string; description?: string; value: RunAction; disabled?: boolean }[] = []
-  for (const entry of run.entries) {
-    if (entry.sessionId) {
-      options.push({
-        title: `Open ${entry.model}`,
-        description: formatEntryStatus(entry),
-        value: { kind: 'open', sessionId: entry.sessionId },
-      })
-    }
-  }
-  for (const fusion of run.fusions) {
-    if (fusion.sessionId) {
-      options.push({ title: `Open fusion ${fusion.model}`, value: { kind: 'open', sessionId: fusion.sessionId } })
-    }
-  }
-  options.push({
-    title: 'Fuse results…',
-    value: { kind: 'fuse' },
-    disabled: startedSources(run).length < MULTI_RUN_FUSION_MIN_SOURCES,
-  })
-  for (const entry of run.entries) {
-    if (entry.status === 'started' || entry.status === 'failed') {
-      options.push({ title: `Discard ${entry.model}…`, value: { kind: 'discard', entry } })
-    }
-  }
-
-  const action = await selectDialog(context, run.name, options)
-  if (!action) return
-
-  if (action.kind === 'open') {
-    openManagerSessions(context, [action.sessionId])
-    return
-  }
-  if (action.kind === 'discard') {
-    await discardEntryFlow(context, api, run, action.entry)
-    return
-  }
-  await fuseMultiRunFlow(context, api, run)
-}
-
-async function browseMultiRunsFlow(context: Context, api: ManagerApi, repoId: number): Promise<void> {
-  const runs = await api.listMultiRuns(repoId)
-  const choice = await selectDialog<RunChoice>(context, 'Multi-runs', [
-    { title: 'New multi-run…', value: { kind: 'new' } },
-    ...runs.map((run) => ({ title: run.name, description: runSummary(run), value: { kind: 'run' as const, run } })),
-  ])
-  if (!choice) return
-
-  if (choice.kind === 'new') {
-    const prompt = await promptDialog(context, {
-      title: 'Multi-run prompt',
-      description: 'The prompt to send to every model.',
-      placeholder: 'Describe the task',
-    })
-    if (!prompt) return
-    await launchMultiRunFlow(context, api, repoId, prompt)
-    return
-  }
-
-  await browseRunFlow(context, api, choice.run)
-}
-
-export async function runMultiRunCommand(
-  context: Context,
-  deps: MultiRunCommandDeps,
-  input?: string,
-): Promise<void> {
+export async function runMultiRunCommand(context: Context, deps: MultiRunCommandDeps, input?: string): Promise<void> {
   try {
-    const remote = deps.remote
-    if (!remote?.repoId) {
+    const repoId = deps.remote?.repoId
+    if (!deps.remote || !repoId) {
       context.ui.toast.show({ variant: 'error', message: MULTI_RUN_ATTACH_REQUIRED })
       return
     }
 
-    const auth = await resolveManagerAuth(remote.managerUrl)
+    const auth = await resolveManagerAuth(deps.remote.managerUrl)
     if (!auth.ok) {
       context.ui.toast.show({ variant: 'error', message: auth.message })
       return
     }
 
     const api = deps.createApi ? deps.createApi(auth) : new ManagerApi(auth.managerUrl, auth.token)
-
+    const actions = createMultiRunActions(context, api, repoId)
     const prompt = slashArgument(input, 'multirun')
+
     if (prompt) {
-      await launchMultiRunFlow(context, api, remote.repoId, prompt)
+      deps.showLaunchDialog({ actions, initialPrompt: prompt })
       return
     }
 
-    await browseMultiRunsFlow(context, api, remote.repoId)
+    deps.showRunsDialog({ actions, newRun: () => deps.showLaunchDialog({ actions, initialPrompt: '' }) })
   } catch (error) {
-    showMultiRunError(context, error)
+    context.ui.toast.show({ variant: 'error', message: describeMultiRunError(error).message })
+  }
+}
+
+function createMultiRunActions(context: Context, api: ManagerApi, repoId: number): MultiRunActions {
+  const attempt = async <Value>(operation: () => Promise<Value>): Promise<ActionResult<Value>> => {
+    try {
+      return { ok: true, value: await operation() }
+    } catch (error) {
+      return { ok: false, error: describeMultiRunError(error).message }
+    }
+  }
+
+  return {
+    loadModels: () => attempt(() => listModelOptions(context)),
+    list: () => attempt(() => api.listMultiRuns(repoId)),
+    async launch(form) {
+      const parsed = parseLaunchForm(form, repoId)
+      if (!parsed.ok) return parsed.error
+      const result = await attempt(() => api.launchMultiRun(parsed.value))
+      if (!result.ok) return result.error
+      context.ui.toast.show(multiRunLaunchToast(result.value))
+      openManagerSessions(context, startedEntries(result.value).map((entry) => entry.sessionId))
+      return null
+    },
+    async discard(run, entry) {
+      const result = await attempt(() => api.discardMultiRunEntry(run.id, entry.id))
+      if (result.ok) context.ui.toast.show({ variant: 'success', message: `Discarded ${entry.model}` })
+      return result
+    },
+    async fuse(run, form) {
+      const requestId = randomUUID()
+      const parsed = parseFusionForm(form, requestId)
+      if (!parsed.ok) return parsed.error
+      try {
+        const updated = await api.fuseMultiRun(run.id, parsed.value)
+        const fusion = updated.fusions.find((candidate) => candidate.requestId === requestId)
+        if (fusion?.status === 'failed') return fusion.error ?? `Fusion with ${fusion.model} failed`
+        context.ui.toast.show({ variant: 'success', message: `Fusing with ${form.model}` })
+        if (fusion?.sessionId) openManagerSessions(context, [fusion.sessionId])
+        return null
+      } catch (error) {
+        const described = describeMultiRunError(error)
+        if (!described.recoveredSessionId) return described.message
+        context.ui.toast.show({ variant: 'info', message: `${described.message} Opened it instead.` })
+        openManagerSessions(context, [described.recoveredSessionId])
+        return null
+      }
+    },
+    open: (sessionId) => openManagerSessions(context, [sessionId]),
   }
 }

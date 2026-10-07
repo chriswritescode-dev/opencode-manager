@@ -16,15 +16,25 @@ import { pushPhaseProgress, importProgress } from './move-progress.js'
 import { warmRepoProxy } from './repo-proxy.js'
 import type { MoveProgress } from './move-progress.js'
 import { runGoalCommand } from './tui-goal.js'
+import type { GoalDialogProps } from './tui-goal.js'
 import { runMultiRunCommand } from './tui-multi-run.js'
+import type { MultiRunLaunchDialogProps, MultiRunsDialogProps } from './tui-multi-run.js'
+import { runOcmSwitch } from './tui-ocm.js'
 import type { GoalStore } from './goal-store.js'
 import type { RemoteContext } from './remote-context.js'
 
 export type MoveProgressSetter = (progress: MoveProgress | null) => void
 
+export type OcmDialogs = {
+  goal: (props: GoalDialogProps) => void
+  multiRunLaunch: (props: MultiRunLaunchDialogProps) => void
+  multiRuns: (props: MultiRunsDialogProps) => void
+}
+
 export type OcmFeatures = {
   remote: RemoteContext | undefined
   goals: GoalStore | undefined
+  dialogs: OcmDialogs
 }
 
 export async function setupOcm(context: Context, setMoveProgress: MoveProgressSetter, features: OcmFeatures): Promise<() => void> {
@@ -45,13 +55,23 @@ export async function setupOcm(context: Context, setMoveProgress: MoveProgressSe
             run: () => runSessionMove(context, setMoveProgress),
           },
           {
+            id: 'ocm.switch',
+            title: 'Switch server',
+            description: 'Attach this TUI to an OpenCode Manager repo, or go back to local opencode',
+            group: 'OpenCode Manager',
+            palette: true,
+            slash: { name: 'ocm' },
+            run: () => runOcmSwitch(context, { remote: features.remote }),
+          },
+          {
             id: 'ocm.goal',
             title: 'Goal',
             description: 'Start, pause, resume, or cancel a Manager goal for this session',
             group: 'OpenCode Manager',
             palette: true,
             slash: { name: 'goal', arguments: true },
-            run: (input) => runGoalCommand(context, { remote: features.remote, store: features.goals }, input),
+            run: (input) =>
+              runGoalCommand(context, { remote: features.remote, store: features.goals, showDialog: features.dialogs.goal }, input),
           },
           {
             id: 'ocm.multirun',
@@ -60,7 +80,16 @@ export async function setupOcm(context: Context, setMoveProgress: MoveProgressSe
             group: 'OpenCode Manager',
             palette: true,
             slash: { name: 'multirun', arguments: true },
-            run: (input) => runMultiRunCommand(context, { remote: features.remote }, input),
+            run: (input) =>
+              runMultiRunCommand(
+                context,
+                {
+                  remote: features.remote,
+                  showLaunchDialog: features.dialogs.multiRunLaunch,
+                  showRunsDialog: features.dialogs.multiRuns,
+                },
+                input,
+              ),
           },
         ],
       }))
@@ -213,7 +242,10 @@ async function runSessionMove(context: Context, setMoveProgress: MoveProgressSet
         const warp = await confirmDialog(context, { title: 'Attach to moved session?', message: 'Exit this TUI and attach to the moved session on the Manager now?' })
         if (warp) {
           await warmRepoProxy(auth.managerUrl, auth.token, pushed.repoId)
-          setPendingWarp({ managerUrl: auth.managerUrl, token: auth.token, repoId: pushed.repoId, sessionID: result.sessionID, repoName: matched.name })
+          setPendingWarp({
+            kind: 'attach',
+            target: { managerUrl: auth.managerUrl, token: auth.token, repoId: pushed.repoId, sessionID: result.sessionID, repoName: matched.name },
+          })
           context.keymap.dispatch('app.exit')
           return
         }

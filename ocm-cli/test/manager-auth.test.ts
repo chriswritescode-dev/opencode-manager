@@ -38,6 +38,17 @@ describe('resolveManagerAuth', () => {
     expect(mocks.getToken).toHaveBeenCalledWith('https://mgr.example')
   })
 
+  it('looks up the token under the normalized manager URL', async () => {
+    mocks.getToken.mockResolvedValue('tok')
+
+    await expect(resolveManagerAuth('  https://mgr.example//  ')).resolves.toEqual({
+      ok: true,
+      managerUrl: 'https://mgr.example',
+      token: 'tok',
+    })
+    expect(mocks.getToken).toHaveBeenCalledWith('https://mgr.example')
+  })
+
   it('reports a token store failure', async () => {
     mocks.readState.mockReturnValue({ managerUrl: 'https://mgr.example' })
     mocks.getToken.mockRejectedValue(new TokenStoreError('keychain locked', 'keychain'))

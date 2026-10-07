@@ -5,9 +5,11 @@ import {
   runGoalCommand,
   formatGoalStatus,
   goalOutcomeToast,
+  parseGoalForm,
   GOALS_ATTACH_REQUIRED,
   GOALS_ROUTE_MISSING,
 } from '../src/tui-goal.js'
+import type { GoalActions } from '../src/tui-goal.js'
 import { ManagerApiError } from '../src/manager-api.js'
 import type { ManagerApi } from '../src/manager-api.js'
 import { resolveManagerAuth } from '../src/manager-auth.js'
@@ -92,8 +94,16 @@ function makeStore() {
 }
 
 function depsFor(api: ReturnType<typeof makeApi>, store: GoalStore, createApi = vi.fn(() => api as unknown as ManagerApi)) {
-  return { remote, store, createApi }
+  return { remote, store, createApi, showDialog: vi.fn() }
 }
+
+async function dialogActions(fake: ReturnType<typeof createFakeContext>, api: ReturnType<typeof makeApi>, store: GoalStore): Promise<GoalActions> {
+  const deps = depsFor(api, store)
+  await runGoalCommand(fake.context, deps, '/goal')
+  return deps.showDialog.mock.calls[0]![0].actions
+}
+
+const blankLimits = { maxTurns: '', tokenBudget: '' }
 
 beforeEach(() => {
   vi.mocked(resolveManagerAuth).mockReset()
@@ -101,14 +111,14 @@ beforeEach(() => {
 })
 
 describe('formatGoalStatus', () => {
-  it('renders the outcome, turn counter, token budget and objective', () => {
+  it('renders the outcome, shared turn and token labels, and objective', () => {
     expect(
       formatGoalStatus(goal({ status: 'active', continuationCount: 2, maxContinuations: 5, tokenBudget: 1000, tokensUsed: 250 })),
-    ).toBe('Goal active · turn 2/5 · 250/1000 tokens · fix it')
+    ).toBe(`Goal active · Turn 2/5 · 250/${(1000).toLocaleString()} tokens · fix it`)
   })
 
   it('omits the token budget when there is none', () => {
-    expect(formatGoalStatus(goal({ status: 'paused', tokenBudget: null }))).toBe('Goal paused · turn 0/5 · fix it')
+    expect(formatGoalStatus(goal({ status: 'paused', tokenBudget: null }))).toBe('Goal paused · Turn 0/5 · fix it')
   })
 })
 
@@ -138,35 +148,66 @@ describe('goalOutcomeToast', () => {
   })
 })
 
-describe('runGoalCommand', () => {
-  it('refuses when not attached to a Manager', async () => {
-    const fake = createFakeContext()
-    const { store } = makeStore()
-    const createApi = vi.fn()
-
-    await runGoalCommand(fake.context, { remote: undefined, store, createApi }, '/goal fix it')
-
-    expect(fake.toast).toHaveBeenCalledWith({ variant: 'error', message: GOALS_ATTACH_REQUIRED })
-    expect(createApi).not.toHaveBeenCalled()
+describe('parseGoalForm', () => {
+  it('trims the objective and leaves blank limits to the Manager defaults', () => {
+    expect(parseGoalForm({ objective: '  fix it ', ...blankLimits }, 'ses_a', '/repo')).toEqual({
+      ok: true,
+      request: { sessionId: 'ses_a', directory: '/repo', objective: 'fix it' },
+    })
   })
 
-  it('refuses when no goal store is available', async () => {
+  it('passes explicit limits through', () => {
+    expect(parseGoalForm({ objective: 'fix it', maxTurns: ' 12 ', tokenBudget: '50000' }, 'ses_a', '/repo')).toEqual({
+      ok: true,
+      request: { sessionId: 'ses_a', directory: '/repo', objective: 'fix it', maxContinuations: 12, tokenBudget: 50000 },
+    })
+  })
+
+  it('rejects a blank objective and out-of-range or non-numeric limits', () => {
+    expect(parseGoalForm({ objective: ' ', ...blankLimits }, 'ses_a', '/repo')).toEqual({
+      ok: false,
+      error: 'Describe what this session should accomplish.',
+    })
+    for (const maxTurns of ['0', '201', 'ten', '1.5']) {
+      expect(parseGoalForm({ objective: 'x', maxTurns, tokenBudget: '' }, 'ses_a', '/repo')).toEqual({
+        ok: false,
+        error: 'Max turns must be a whole number from 1 to 200.',
+      })
+    }
+    for (const tokenBudget of ['0', '-5', 'lots']) {
+      expect(parseGoalForm({ objective: 'x', maxTurns: '', tokenBudget }, 'ses_a', '/repo')).toEqual({
+        ok: false,
+        error: 'Token budget must be a positive whole number.',
+      })
+    }
+  })
+})
+
+describe('runGoalCommand', () => {
+  it('refuses when not attached to a Manager or without a goal store', async () => {
     const fake = createFakeContext()
+    const api = makeApi()
+    const { store } = makeStore()
+    const detached = { ...depsFor(api, store), remote: undefined }
+    const storeless = { ...depsFor(api, store), store: undefined }
 
-    await runGoalCommand(fake.context, { remote, store: undefined }, '/goal fix it')
+    await runGoalCommand(fake.context, detached, '/goal fix it')
+    await runGoalCommand(fake.context, storeless, '/goal fix it')
 
+    expect(fake.toast).toHaveBeenCalledTimes(2)
     expect(fake.toast).toHaveBeenCalledWith({ variant: 'error', message: GOALS_ATTACH_REQUIRED })
+    expect(detached.createApi).not.toHaveBeenCalled()
   })
 
   it('refuses outside a session', async () => {
     const fake = createFakeContext({ type: 'home' })
     const { store } = makeStore()
-    const createApi = vi.fn()
+    const deps = depsFor(makeApi(), store)
 
-    await runGoalCommand(fake.context, { remote, store, createApi }, '/goal fix it')
+    await runGoalCommand(fake.context, deps, '/goal fix it')
 
     expect(fake.toast).toHaveBeenCalledWith({ variant: 'error', message: 'Not in a session' })
-    expect(createApi).not.toHaveBeenCalled()
+    expect(deps.createApi).not.toHaveBeenCalled()
   })
 
   it('reports an auth failure without calling the API', async () => {
@@ -184,23 +225,25 @@ describe('runGoalCommand', () => {
     expect(api.getLatestSessionGoal).not.toHaveBeenCalled()
   })
 
-  it('starts a goal and sends the objective as the next message', async () => {
+  it('starts a goal directly from the slash argument and sends the objective as the next message', async () => {
     const fake = createFakeContext()
     const api = makeApi()
     const started = goal({ status: 'active' })
     api.startSessionGoal.mockResolvedValue(started)
     const { store, set } = makeStore()
+    const deps = depsFor(api, store)
     fake.sessionPrompt.mockResolvedValue(undefined)
 
-    await runGoalCommand(fake.context, depsFor(api, store), '/goal Fix the flaky test')
+    await runGoalCommand(fake.context, deps, '/goal Fix the flaky test')
 
     expect(api.startSessionGoal).toHaveBeenCalledWith({ sessionId: 'ses_a', directory: '/repo', objective: 'Fix the flaky test' })
     expect(set).toHaveBeenCalledWith(started)
     expect(fake.sessionPrompt).toHaveBeenCalledWith({ sessionID: 'ses_a', text: 'Fix the flaky test', delivery: undefined })
     expect(api.startSessionGoal.mock.invocationCallOrder[0]).toBeLessThan(fake.sessionPrompt.mock.invocationCallOrder[0])
+    expect(deps.showDialog).not.toHaveBeenCalled()
   })
 
-  it('queues the prompt while the session is running', async () => {
+  it('queues the objective while the session is running', async () => {
     const fake = createFakeContext()
     const api = makeApi()
     api.startSessionGoal.mockResolvedValue(goal())
@@ -213,47 +256,97 @@ describe('runGoalCommand', () => {
     expect(fake.sessionPrompt).toHaveBeenCalledWith(expect.objectContaining({ delivery: 'queue' }))
   })
 
-  it('prompts for the objective when the command has none', async () => {
+  it('opens the dialog with the latest goal when the command has no objective', async () => {
+    const fake = createFakeContext()
+    const api = makeApi()
+    const last = goal({ status: 'completed' })
+    api.getLatestSessionGoal.mockResolvedValue(last)
+    const { store } = makeStore()
+    const deps = depsFor(api, store)
+
+    await runGoalCommand(fake.context, deps, '/goal')
+
+    expect(deps.showDialog).toHaveBeenCalledWith({
+      sessionID: 'ses_a',
+      store,
+      initialGoal: last,
+      initialObjective: '',
+      actions: expect.any(Object),
+    })
+    expect(api.startSessionGoal).not.toHaveBeenCalled()
+  })
+
+  it('opens the dialog instead of starting when a goal is already open', async () => {
+    const fake = createFakeContext()
+    const api = makeApi()
+    const active = goal({ status: 'active' })
+    api.getLatestSessionGoal.mockResolvedValue(active)
+    const { store } = makeStore()
+    const deps = depsFor(api, store)
+
+    await runGoalCommand(fake.context, deps, '/goal something else')
+
+    expect(deps.showDialog).toHaveBeenCalledWith(expect.objectContaining({ initialGoal: active, initialObjective: 'something else' }))
+    expect(api.startSessionGoal).not.toHaveBeenCalled()
+  })
+
+  it('reports Manager errors, including an outdated Manager', async () => {
+    const fake = createFakeContext()
+    const api = makeApi()
+    const { store } = makeStore()
+    api.getLatestSessionGoal.mockRejectedValueOnce(new ManagerApiError('read failed', 500, 'boom', 'read session goal'))
+    api.getLatestSessionGoal.mockRejectedValueOnce(new ManagerApiError('not found', 404, null, 'read session goal'))
+
+    await runGoalCommand(fake.context, depsFor(api, store), '/goal fix it')
+    await runGoalCommand(fake.context, depsFor(api, store), '/goal fix it')
+
+    expect(fake.toast).toHaveBeenNthCalledWith(1, { variant: 'error', message: 'read failed' })
+    expect(fake.toast).toHaveBeenNthCalledWith(2, { variant: 'error', message: GOALS_ROUTE_MISSING })
+  })
+})
+
+describe('goal dialog actions', () => {
+  it('starts a goal with explicit limits', async () => {
     const fake = createFakeContext()
     const api = makeApi()
     api.startSessionGoal.mockResolvedValue(goal())
-    const { store } = makeStore()
-    fake.dialogPrompt.mockResolvedValue('from dialog')
     fake.sessionPrompt.mockResolvedValue(undefined)
+    const { store } = makeStore()
+    const actions = await dialogActions(fake, api, store)
 
-    await runGoalCommand(fake.context, depsFor(api, store), '/goal')
+    await expect(actions.start({ objective: 'fix it', maxTurns: '8', tokenBudget: '' })).resolves.toBeNull()
 
-    expect(fake.dialogPrompt).toHaveBeenCalledWith(expect.objectContaining({ title: 'Start goal' }))
-    expect(api.startSessionGoal).toHaveBeenCalledWith(expect.objectContaining({ objective: 'from dialog' }))
+    expect(api.startSessionGoal).toHaveBeenCalledWith({ sessionId: 'ses_a', directory: '/repo', objective: 'fix it', maxContinuations: 8 })
   })
 
-  it('does nothing when the start prompt is dismissed', async () => {
+  it('returns a validation error without calling the API', async () => {
     const fake = createFakeContext()
     const api = makeApi()
     const { store } = makeStore()
-    fake.dialogPrompt.mockResolvedValue(undefined)
+    const actions = await dialogActions(fake, api, store)
 
-    await runGoalCommand(fake.context, depsFor(api, store), '/goal')
-
+    await expect(actions.start({ objective: 'fix it', maxTurns: '0', tokenBudget: '' })).resolves.toBe(
+      'Max turns must be a whole number from 1 to 200.',
+    )
     expect(api.startSessionGoal).not.toHaveBeenCalled()
-    expect(fake.sessionPrompt).not.toHaveBeenCalled()
   })
 
-  it('cancels the goal when sending the objective fails', async () => {
+  it('cancels the goal and explains why when sending the objective fails', async () => {
     const fake = createFakeContext()
     const api = makeApi()
     const started = goal({ status: 'active' })
     const cancelled = goal({ status: 'stopped', stopReason: 'cancelled' })
     api.startSessionGoal.mockResolvedValue(started)
     api.cancelSessionGoal.mockResolvedValue(cancelled)
-    const { store, set } = makeStore()
     fake.sessionPrompt.mockRejectedValue(new Error('send failed'))
+    const { store, set } = makeStore()
+    const actions = await dialogActions(fake, api, store)
 
-    await runGoalCommand(fake.context, depsFor(api, store), '/goal Fix it')
-
+    await expect(actions.start({ objective: 'fix it', ...blankLimits })).resolves.toBe(
+      'The goal was cancelled because the objective could not be sent: send failed',
+    )
     expect(api.cancelSessionGoal).toHaveBeenCalledWith(started.id)
     expect(set).toHaveBeenLastCalledWith(cancelled)
-    expect(fake.toast).toHaveBeenCalledWith({ variant: 'error', message: 'send failed' })
   })
 
   it('still reports the send failure when cancelling fails', async () => {
@@ -261,100 +354,42 @@ describe('runGoalCommand', () => {
     const api = makeApi()
     api.startSessionGoal.mockResolvedValue(goal())
     api.cancelSessionGoal.mockRejectedValue(new Error('cancel failed'))
-    const { store, set } = makeStore()
     fake.sessionPrompt.mockRejectedValue(new Error('send failed'))
-
-    await runGoalCommand(fake.context, depsFor(api, store), '/goal Fix it')
-
-    expect(set).toHaveBeenCalledTimes(1)
-    expect(fake.toast).toHaveBeenCalledWith({ variant: 'error', message: 'send failed' })
-  })
-
-  it('offers pause and cancel for an active goal', async () => {
-    const fake = createFakeContext()
-    const api = makeApi()
-    const active = goal({ status: 'active' })
-    const paused = goal({ status: 'paused' })
-    api.getLatestSessionGoal.mockResolvedValue(active)
-    api.pauseSessionGoal.mockResolvedValue(paused)
     const { store, set } = makeStore()
-    fake.select.mockResolvedValue('pause')
+    const actions = await dialogActions(fake, api, store)
 
-    await runGoalCommand(fake.context, depsFor(api, store), '/goal')
-
-    const options = fake.select.mock.calls[0][0].options as { title: string }[]
-    expect(options.map((option) => option.title)).toEqual(['Pause goal', 'Cancel goal'])
-    expect(api.pauseSessionGoal).toHaveBeenCalledWith(active.id)
-    expect(set).toHaveBeenCalledWith(paused)
-    expect(api.startSessionGoal).not.toHaveBeenCalled()
+    await expect(actions.start({ objective: 'fix it', ...blankLimits })).resolves.toMatch(/send failed$/)
+    expect(set).toHaveBeenCalledTimes(1)
   })
 
-  it('offers resume and cancel for a paused goal', async () => {
+  it('pauses, resumes, and cancels through the Manager and updates the store', async () => {
     const fake = createFakeContext()
     const api = makeApi()
     const paused = goal({ status: 'paused' })
     const resumed = goal({ status: 'active' })
-    api.getLatestSessionGoal.mockResolvedValue(paused)
-    api.resumeSessionGoal.mockResolvedValue(resumed)
-    const { store, set } = makeStore()
-    fake.select.mockResolvedValue('resume')
-
-    await runGoalCommand(fake.context, depsFor(api, store), '/goal')
-
-    const options = fake.select.mock.calls[0][0].options as { title: string }[]
-    expect(options.map((option) => option.title)).toEqual(['Resume goal', 'Cancel goal'])
-    expect(api.resumeSessionGoal).toHaveBeenCalledWith(paused.id)
-    expect(set).toHaveBeenCalledWith(resumed)
-  })
-
-  it('cancels an open goal', async () => {
-    const fake = createFakeContext()
-    const api = makeApi()
-    const active = goal({ status: 'active' })
     const stopped = goal({ status: 'stopped', stopReason: 'cancelled' })
-    api.getLatestSessionGoal.mockResolvedValue(active)
+    api.pauseSessionGoal.mockResolvedValue(paused)
+    api.resumeSessionGoal.mockResolvedValue(resumed)
     api.cancelSessionGoal.mockResolvedValue(stopped)
     const { store, set } = makeStore()
-    fake.select.mockResolvedValue('cancel')
+    const actions = await dialogActions(fake, api, store)
 
-    await runGoalCommand(fake.context, depsFor(api, store), '/goal')
+    await expect(actions.pause(goal())).resolves.toBeNull()
+    await expect(actions.resume(paused)).resolves.toBeNull()
+    await expect(actions.cancel(resumed)).resolves.toBeNull()
 
-    expect(api.cancelSessionGoal).toHaveBeenCalledWith(active.id)
-    expect(set).toHaveBeenCalledWith(stopped)
+    expect(api.pauseSessionGoal).toHaveBeenCalledWith(7)
+    expect(set.mock.calls.map((call) => call[0])).toEqual([paused, resumed, stopped])
   })
 
-  it('does nothing when the goal action dialog is dismissed', async () => {
+  it('returns a goal action failure as a message', async () => {
     const fake = createFakeContext()
     const api = makeApi()
-    api.getLatestSessionGoal.mockResolvedValue(goal({ status: 'active' }))
+    api.pauseSessionGoal.mockRejectedValue(new ManagerApiError('pause session goal failed (409): not active', 409, 'x', 'pause session goal'))
     const { store, set } = makeStore()
-    fake.select.mockResolvedValue(undefined)
+    const actions = await dialogActions(fake, api, store)
 
-    await runGoalCommand(fake.context, depsFor(api, store), '/goal')
-
-    expect(api.pauseSessionGoal).not.toHaveBeenCalled()
+    await expect(actions.pause(goal())).resolves.toBe('pause session goal failed (409): not active')
     expect(set).not.toHaveBeenCalled()
-  })
-
-  it('reports a Manager API error message', async () => {
-    const fake = createFakeContext()
-    const api = makeApi()
-    api.getLatestSessionGoal.mockRejectedValue(new ManagerApiError('read failed', 500, 'boom', 'read session goal'))
-    const { store } = makeStore()
-
-    await runGoalCommand(fake.context, depsFor(api, store), '/goal fix it')
-
-    expect(fake.toast).toHaveBeenCalledWith({ variant: 'error', message: 'read failed' })
-  })
-
-  it('reports an outdated Manager when the goal route is missing', async () => {
-    const fake = createFakeContext()
-    const api = makeApi()
-    api.getLatestSessionGoal.mockRejectedValue(new ManagerApiError('not found', 404, null, 'read session goal'))
-    const { store } = makeStore()
-
-    await runGoalCommand(fake.context, depsFor(api, store), '/goal fix it')
-
-    expect(fake.toast).toHaveBeenCalledWith({ variant: 'error', message: GOALS_ROUTE_MISSING })
   })
 })

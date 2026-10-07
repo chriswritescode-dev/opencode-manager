@@ -5,6 +5,8 @@ import {
   getFormText,
   getGoalOutcomeTitle,
   getGoalStopReasonLabel,
+  getGoalTurnLabel,
+  getGoalTokenLabel,
 } from '@opencode-manager/shared/notifications'
 import { buildEventNotificationPayload, buildNotificationUrl } from '../../src/services/notification'
 import { ASSISTANT_REPO_ID } from '@opencode-manager/shared/utils'
@@ -32,6 +34,20 @@ describe('goal notification labels', () => {
 
   it('resolves a stop reason label', () => {
     expect(getGoalStopReasonLabel('token_budget')).toBe('Token budget reached')
+  })
+})
+
+describe('goal progress labels', () => {
+  it('formats the turn counter', () => {
+    expect(getGoalTurnLabel({ continuationCount: 2, maxContinuations: 20 })).toBe('Turn 2/20')
+  })
+
+  it('formats the token usage with locale separators', () => {
+    expect(getGoalTokenLabel({ tokensUsed: 250, tokenBudget: 1000 })).toBe('250/1,000 tokens')
+  })
+
+  it('returns null when there is no token budget', () => {
+    expect(getGoalTokenLabel({ tokensUsed: 250, tokenBudget: null })).toBeNull()
   })
 })
 

@@ -2,6 +2,8 @@
 import { createSignal, createEffect, onCleanup, Show } from 'solid-js'
 import { Plugin } from '@opencode/plugin/tui'
 import { setupOcm } from './tui-plugin.js'
+import { showGoalDialog } from './tui-goal-dialog.js'
+import { showMultiRunLaunchDialog, showMultiRunsDialog } from './tui-multi-run-dialogs.js'
 import { formatMoveProgress } from './move-progress.js'
 import type { MoveProgress } from './move-progress.js'
 import { readRemoteContext } from './remote-context.js'
@@ -93,6 +95,14 @@ export default Plugin.define({
       })
     }
 
-    return setupOcm(context, setMoveProgress, { remote, goals })
+    return setupOcm(context, setMoveProgress, {
+      remote,
+      goals,
+      dialogs: {
+        goal: (props) => showGoalDialog(context, props),
+        multiRunLaunch: (props) => showMultiRunLaunchDialog(context, props),
+        multiRuns: (props) => showMultiRunsDialog(context, props),
+      },
+    })
   },
 })

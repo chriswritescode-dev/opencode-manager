@@ -14,6 +14,7 @@ import { resolveTarget, formatRepoIdentities, parseRepoIdPositional, restrictMat
 import { buildAttachInvocation } from '../src/warp.js'
 import { type ManagerRepo, fetchRepos, toRemoteRepoSummaries } from '../src/manager-repos.js'
 import { OCM_VERSION as VERSION, warmRepoProxy } from '../src/repo-proxy.js'
+import { normalizeManagerUrl } from '../src/manager-auth.js'
 
 const USAGE = `ocm v${VERSION} - OpenCode Manager workspace launcher
 
@@ -151,7 +152,7 @@ function findRepo(repos: ManagerRepo[], needle: string | number): ManagerRepo | 
 export async function cmdLogin(args: string[]): Promise<void> {
   const url = args[0]
   if (!url) die('usage: ocm login <url> [token]')
-  const normalisedUrl = url.replace(/\/+$/, '')
+  const normalisedUrl = normalizeManagerUrl(url)
 
   let token = args[1]
   if (!token) {

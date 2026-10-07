@@ -44,7 +44,6 @@ function fuseBody(overrides: Record<string, unknown> = {}) {
     requestId: '11111111-1111-4111-8111-111111111111',
     entryIds: [1, 2],
     model: 'openai/a',
-    isolate: true,
     ...overrides,
   }
 }

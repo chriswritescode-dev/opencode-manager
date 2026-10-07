@@ -8,9 +8,15 @@ export type ManagerAuth =
 
 export type ManagerAuthOk = Extract<ManagerAuth, { ok: true }>
 
+/** Canonical Manager URL form used as the token-store account: trimmed, without trailing slashes. */
+export function normalizeManagerUrl(url: string): string {
+  return url.trim().replace(/\/+$/, '')
+}
+
 export async function resolveManagerAuth(
-  managerUrl: string | undefined = readState()?.managerUrl,
+  rawManagerUrl: string | undefined = readState()?.managerUrl,
 ): Promise<ManagerAuth> {
+  const managerUrl = rawManagerUrl ? normalizeManagerUrl(rawManagerUrl) : ''
   if (!managerUrl) {
     return { ok: false, message: 'No manager configured. Run `ocm login <url>` first.' }
   }

@@ -138,7 +138,7 @@ describe('ManagerApi multi-runs', () => {
 
   it('fuses selected entries', async () => {
     const fetchMock = stubFetch(okResponse({ run }))
-    const request = { requestId: '11111111-1111-4111-8111-111111111111', entryIds: [1, 2], model: 'a/b', isolate: true }
+    const request = { requestId: '11111111-1111-4111-8111-111111111111', entryIds: [1, 2], model: 'a/b' }
 
     await expect(api.fuseMultiRun(3, request)).resolves.toEqual(run)
     expect(fetchMock).toHaveBeenCalledWith(`${BASE_URL}/api/internal/multi-runs/3/fusions`, {
@@ -166,7 +166,7 @@ describe('ManagerApiError', () => {
     const details = { unavailableSources: [{ entryId: 1, model: 'a/b', reason: 'running', message: 'still running' }] }
     stubFetch(errorResponse(409, JSON.stringify({ error: 'Fusion unavailable', details })))
 
-    const error = await api.fuseMultiRun(3, { requestId: '11111111-1111-4111-8111-111111111111', entryIds: [1, 2], model: 'a/b', isolate: true }).catch((err) => err)
+    const error = await api.fuseMultiRun(3, { requestId: '11111111-1111-4111-8111-111111111111', entryIds: [1, 2], model: 'a/b' }).catch((err) => err)
 
     expect(error).toBeInstanceOf(ManagerApiError)
     expect((error as ManagerApiError).status).toBe(409)

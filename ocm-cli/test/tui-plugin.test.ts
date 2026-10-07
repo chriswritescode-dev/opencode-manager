@@ -77,7 +77,7 @@ vi.mock('../src/manager-api.js', () => ({
   isManagerRouteMissing: vi.fn(() => false),
 }))
 
-const noFeatures = { remote: undefined, goals: undefined }
+const noFeatures = { remote: undefined, goals: undefined, dialogs: { goal: vi.fn(), multiRunLaunch: vi.fn(), multiRuns: vi.fn() } }
 
 const matched = { repoId: 1, name: 'repo', projectId: 'proj_1', branch: 'main' }
 const repos = [
@@ -242,6 +242,19 @@ describe('setupOcm', () => {
     }
     const multiRun = factory().commands.find((entry) => entry.id === 'ocm.multirun')
     expect(multiRun?.slash).toEqual({ name: 'multirun', arguments: true })
+  })
+
+  it('exposes the server switch slash command', async () => {
+    const fake = createFakeContext()
+
+    await setupOcm(fake.context, vi.fn(), noFeatures)
+    renderAppSlot(fake)
+
+    const factory = fake.layer.mock.calls[0]![0] as () => {
+      commands: { id: string; slash?: { name: string; arguments?: true } }[]
+    }
+    const command = factory().commands.find((entry) => entry.id === 'ocm.switch')
+    expect(command?.slash).toEqual({ name: 'ocm' })
   })
 })
 
