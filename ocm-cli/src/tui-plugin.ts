@@ -16,6 +16,7 @@ import { pushPhaseProgress, importProgress } from './move-progress.js'
 import { warmRepoProxy } from './repo-proxy.js'
 import type { MoveProgress } from './move-progress.js'
 import { runGoalCommand } from './tui-goal.js'
+import { runMultiRunCommand } from './tui-multi-run.js'
 import type { GoalStore } from './goal-store.js'
 import type { RemoteContext } from './remote-context.js'
 
@@ -51,6 +52,15 @@ export async function setupOcm(context: Context, setMoveProgress: MoveProgressSe
             palette: true,
             slash: { name: 'goal', arguments: true },
             run: (input) => runGoalCommand(context, { remote: features.remote, store: features.goals }, input),
+          },
+          {
+            id: 'ocm.multirun',
+            title: 'Multi-run',
+            description: 'Run one prompt across several models on OpenCode Manager',
+            group: 'OpenCode Manager',
+            palette: true,
+            slash: { name: 'multirun', arguments: true },
+            run: (input) => runMultiRunCommand(context, { remote: features.remote }, input),
           },
         ],
       }))

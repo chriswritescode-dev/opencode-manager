@@ -6,6 +6,8 @@ export type ManagerAuth =
   | { ok: true; managerUrl: string; token: string }
   | { ok: false; message: string }
 
+export type ManagerAuthOk = Extract<ManagerAuth, { ok: true }>
+
 export async function resolveManagerAuth(
   managerUrl: string | undefined = readState()?.managerUrl,
 ): Promise<ManagerAuth> {

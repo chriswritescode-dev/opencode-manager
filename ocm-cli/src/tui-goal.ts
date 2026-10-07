@@ -3,7 +3,7 @@ import type { SessionGoal } from '@opencode-manager/shared/schemas'
 import { getGoalOutcomeTitle, getGoalStopReasonLabel } from '@opencode-manager/shared/notifications'
 import { ManagerApi, ManagerApiError, isManagerRouteMissing } from './manager-api.js'
 import { resolveManagerAuth } from './manager-auth.js'
-import type { ManagerAuth } from './manager-auth.js'
+import type { ManagerAuthOk } from './manager-auth.js'
 import { promptDialog, selectDialog, slashArgument } from './tui-dialogs.js'
 import { isOpenGoal } from './goal-store.js'
 import type { GoalStore } from './goal-store.js'
@@ -12,8 +12,6 @@ import type { RemoteContext } from './remote-context.js'
 export const GOALS_ATTACH_REQUIRED =
   'Goals run on OpenCode Manager. Attach with `ocm` (or move this session with /ocm-move) first.'
 export const GOALS_ROUTE_MISSING = 'This OpenCode Manager does not expose goals to ocm; upgrade the Manager.'
-
-export type ManagerAuthOk = Extract<ManagerAuth, { ok: true }>
 
 export type GoalCommandDeps = {
   remote: RemoteContext | undefined

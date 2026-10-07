@@ -230,6 +230,19 @@ describe('setupOcm', () => {
     const goal = factory().commands.find((entry) => entry.id === 'ocm.goal')
     expect(goal?.slash).toEqual({ name: 'goal', arguments: true })
   })
+
+  it('exposes the multi-run slash command', async () => {
+    const fake = createFakeContext()
+
+    await setupOcm(fake.context, vi.fn(), noFeatures)
+    renderAppSlot(fake)
+
+    const factory = fake.layer.mock.calls[0]![0] as () => {
+      commands: { id: string; slash?: { name: string; arguments?: true } }[]
+    }
+    const multiRun = factory().commands.find((entry) => entry.id === 'ocm.multirun')
+    expect(multiRun?.slash).toEqual({ name: 'multirun', arguments: true })
+  })
 })
 
 describe('ocm.session.move command', () => {
