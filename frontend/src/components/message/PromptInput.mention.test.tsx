@@ -11,6 +11,7 @@ const mocks = vi.hoisted(() => ({
   switchSessionAgent: vi.fn(),
   runCommand: vi.fn(),
   agents: [] as Array<{ name: string; description?: string }>,
+  skills: [] as Array<{ id: string; name: string; description?: string }>,
   useSTT: vi.fn(),
   useMobile: vi.fn(),
   useCommands: vi.fn(),
@@ -22,6 +23,8 @@ const mocks = vi.hoisted(() => ({
   useSessionAgentStore: vi.fn(),
   useSendErrorStore: vi.fn(),
 }))
+
+const suggestionProps = vi.hoisted(() => ({ isOpen: false, selectedIndex: 0 }))
 
 vi.mock('@/api/opencode', async () => {
   const actual = await vi.importActual('@/api/opencode')
@@ -39,6 +42,7 @@ vi.mock('@/hooks/useOpenCode', async () => {
   return {
     ...actual,
     useAgents: () => ({ data: mocks.agents }),
+    useSkills: () => ({ data: mocks.skills }),
   }
 })
 
@@ -90,12 +94,18 @@ vi.mock('@/components/ui/session-status-indicator', () => ({
   SessionStatusIndicator: () => <div>SessionStatus</div>,
 }))
 
-vi.mock('@/components/command/CommandSuggestions', () => ({
-  CommandSuggestions: () => <div>CommandSuggestions</div>,
+vi.mock('./PromptSuggestions', () => ({
+  PromptSuggestions: (props: { isOpen: boolean; selectedIndex: number }) => {
+    if (props.isOpen) {
+      suggestionProps.isOpen = true
+      suggestionProps.selectedIndex = props.selectedIndex
+    }
+    return null
+  },
 }))
 
-vi.mock('./MentionSuggestions', () => ({
-  MentionSuggestions: () => <div>MentionSuggestions</div>,
+vi.mock('./ComposerToolsMenu', () => ({
+  ComposerToolsMenu: () => null,
 }))
 
 const createTestQueryClient = () => new QueryClient({
@@ -151,6 +161,7 @@ describe('PromptInput agent mention submission', () => {
     mocks.switchSessionAgent.mockResolvedValue(undefined)
     mocks.runCommand.mockResolvedValue(undefined)
     mocks.agents = [{ name: 'reviewer', description: 'Reviewer' }]
+    mocks.skills = [{ id: 'pr-review', name: 'PR Review', description: 'Review a PR' }]
     mocks.useMobile.mockReturnValue(false)
     mocks.useSTT.mockReturnValue({
       isRecording: false,
@@ -165,7 +176,7 @@ describe('PromptInput agent mention submission', () => {
       reset: vi.fn(),
       clear: vi.fn(),
     })
-    mocks.useCommands.mockReturnValue({ filterCommands: () => [] })
+    mocks.useCommands.mockReturnValue({ searchCommands: () => [], findCommand: () => undefined, recentNames: [] })
     mocks.useFileSearch.mockReturnValue({ files: [] })
     mocks.useModelSelection.mockReturnValue({
       model: { providerID: 'anthropic', modelID: 'claude-sonnet-4' },
@@ -181,6 +192,8 @@ describe('PromptInput agent mention submission', () => {
     mocks.useSessionAgent.mockReturnValue({ agent: 'build' })
     mocks.useUserBash.mockImplementation((selector: (state: unknown) => unknown) => selector({ addUserBashCommand: vi.fn() }))
     mocks.useSessionAgentStore.mockImplementation((selector: (state: unknown) => unknown) => selector({ setAgent: vi.fn() }))
+    suggestionProps.isOpen = false
+    suggestionProps.selectedIndex = 0
     useUIState.getState().clearPendingPromptCommand()
     useUIState.getState().clearPendingPromptFile()
   })
@@ -221,6 +234,22 @@ describe('PromptInput agent mention submission', () => {
     expect(mocks.switchSessionAgent).not.toHaveBeenCalled()
   })
 
+  it('sends an @skill mention as a skill attachment', async () => {
+    renderComponent()
+
+    const input = await screen.findByPlaceholderText('Send a message...')
+    fireEvent.change(input, { target: { value: 'use @pr-review and @pr-review' } })
+    fireEvent.click(screen.getByTitle('Send'))
+
+    await waitFor(() => expect(mocks.sendPrompt).toHaveBeenCalled())
+
+    expect(mocks.sendPrompt).toHaveBeenCalledWith(expect.objectContaining({
+      text: 'use @pr-review and @pr-review',
+      agents: [],
+      skills: [{ id: 'pr-review', mention: { start: 4, end: 14, text: '@pr-review' } }],
+    }))
+  })
+
   it('sends plain text without inferring an agent attachment or switching', async () => {
     renderComponent()
 
@@ -237,5 +266,46 @@ describe('PromptInput agent mention submission', () => {
     }))
     expect(mocks.switchSessionAgent).not.toHaveBeenCalled()
     expect(mocks.switchSessionModel).not.toHaveBeenCalled()
+  })
+
+  it('moves the mention selection in the visual direction of the arrow on mobile', async () => {
+    mocks.useMobile.mockReturnValue(true)
+    mocks.agents = [
+      { name: 'alpha', description: 'Alpha agent' },
+      { name: 'beta', description: 'Beta agent' },
+    ]
+    renderComponent()
+
+    const input = await screen.findByPlaceholderText('Send a message...')
+    fireEvent.change(input, { target: { value: '@', selectionStart: 1 } })
+
+    await waitFor(() => expect(suggestionProps.isOpen).toBe(true))
+    expect(suggestionProps.selectedIndex).toBe(0)
+
+    fireEvent.keyDown(input, { key: 'ArrowUp' })
+    await waitFor(() => expect(suggestionProps.selectedIndex).toBe(1))
+
+    fireEvent.keyDown(input, { key: 'ArrowDown' })
+    await waitFor(() => expect(suggestionProps.selectedIndex).toBe(0))
+  })
+
+  it('keeps the desktop arrow direction unchanged', async () => {
+    mocks.agents = [
+      { name: 'alpha', description: 'Alpha agent' },
+      { name: 'beta', description: 'Beta agent' },
+    ]
+    renderComponent()
+
+    const input = await screen.findByPlaceholderText('Send a message...')
+    fireEvent.change(input, { target: { value: '@', selectionStart: 1 } })
+
+    await waitFor(() => expect(suggestionProps.isOpen).toBe(true))
+    expect(suggestionProps.selectedIndex).toBe(0)
+
+    fireEvent.keyDown(input, { key: 'ArrowUp' })
+    expect(suggestionProps.selectedIndex).toBe(0)
+
+    fireEvent.keyDown(input, { key: 'ArrowDown' })
+    await waitFor(() => expect(suggestionProps.selectedIndex).toBe(1))
   })
 })

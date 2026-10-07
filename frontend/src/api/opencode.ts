@@ -13,6 +13,7 @@ import type {
   SessionInfo,
   SessionMessageInfo,
   SessionRevert,
+  SkillInfo,
 } from '@opencode-manager/shared/opencode'
 import type { SessionSnapshot } from '@/lib/session-projection'
 
@@ -270,6 +271,11 @@ export async function listAgents(directory?: string): Promise<AgentInfo[]> {
 
 export async function listCommands(directory?: string): Promise<CommandInfo[]> {
   const { data } = await callOpenCode((api) => api.command.list(openCodeLocation(directory)))
+  return data
+}
+
+export async function listSkills(directory?: string): Promise<SkillInfo[]> {
+  const { data } = await callOpenCode((api) => api.skill.list(openCodeLocation(directory)))
   return data
 }
 

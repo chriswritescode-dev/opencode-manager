@@ -1,17 +1,13 @@
+import { useCallback } from 'react'
 import { useQuery } from '@tanstack/react-query'
 import { listCommands } from '@/api/opencode'
 import type { CommandInfo } from '@opencode-manager/shared/opencode'
 import { BUILTIN_COMMANDS } from '@/lib/builtinCommands'
+import { rankByMatch } from '@/lib/fuzzyMatch'
+import { useRecentCommandsStore } from '@/stores/recentCommandsStore'
 
 function sortCommandsByName(commands: CommandInfo[]): CommandInfo[] {
   return [...commands].sort((a, b) => a.name.localeCompare(b.name))
-}
-
-function rankCommandMatch(command: CommandInfo, searchTerm: string): number {
-  const name = command.name.toLowerCase()
-  if (name === searchTerm) return 0
-  if (name.startsWith(searchTerm)) return 1
-  return 2
 }
 
 const SORTED_BUILTIN_COMMANDS = sortCommandsByName([...BUILTIN_COMMANDS])
@@ -23,6 +19,7 @@ interface UseCommandsOptions {
 
 export function useCommands(options: UseCommandsOptions = {}) {
   const { directory, enabled = true } = options
+  const recentNames = useRecentCommandsStore((state) => state.names)
 
   const { data: commands, isLoading: loading, error } = useQuery({
     queryKey: ['opencode', 'commands', directory ?? null],
@@ -38,23 +35,23 @@ export function useCommands(options: UseCommandsOptions = {}) {
     initialData: SORTED_BUILTIN_COMMANDS,
   })
 
-  const filterCommands = (query: string) => {
-    if (!query.trim()) return commands
+  const searchCommands = useCallback((query: string) => rankByMatch(commands, query, {
+    getName: (command) => command.name,
+    getDescription: (command) => command.description,
+    recent: recentNames,
+  }), [commands, recentNames])
 
-    const searchTerm = query.toLowerCase()
-    return commands
-      .filter(command => command.name.toLowerCase().includes(searchTerm))
-      .sort((a, b) => {
-        const rankDifference = rankCommandMatch(a, searchTerm) - rankCommandMatch(b, searchTerm)
-        if (rankDifference !== 0) return rankDifference
-        return a.name.localeCompare(b.name)
-      })
-  }
+  const findCommand = useCallback((name: string) => {
+    const lowerName = name.toLowerCase()
+    return commands.find((command) => command.name.toLowerCase() === lowerName)
+  }, [commands])
 
   return {
     commands,
+    recentNames,
     loading,
     error: error ? 'Failed to load commands' : null,
-    filterCommands
+    searchCommands,
+    findCommand,
   }
 }

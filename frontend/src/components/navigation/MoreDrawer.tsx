@@ -38,7 +38,7 @@ export function MoreDrawer({ isOpen, onClose }: MoreDrawerProps) {
   const isSessionDetail = /^\/repos\/\d+\/sessions\/[^/]+$/.test(location.pathname)
   const isAssistantRoute = isAssistantPath(location.pathname)
   const isAssistantSession = isSessionDetail && searchParams.get('assistant') === '1'
-  const { filterCommands } = useCommands({ enabled: isSessionDetail })
+  const { commands } = useCommands({ enabled: isSessionDetail })
   const activePromptFileBasePath = useUIState((state) => state.activePromptFileBasePath)
   const selectPromptCommand = useUIState((state) => state.selectPromptCommand)
   const selectPromptFile = useUIState((state) => state.selectPromptFile)
@@ -121,7 +121,6 @@ export function MoreDrawer({ isOpen, onClose }: MoreDrawerProps) {
   const assistantCta = isSessionDetail && !isAssistantSession
     ? buildNavModel(location.pathname).primary.find((cta) => cta.key === 'assistant')
     : undefined
-  const commands = filterCommands('')
 
   const opencodeVersion = health?.opencodeVersion
   const managerVersion = health?.opencodeManagerVersion

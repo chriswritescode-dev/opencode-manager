@@ -103,19 +103,12 @@ describe('MoreDrawer', () => {
     vi.clearAllMocks()
     vi.mocked(useNavigate).mockReturnValue(vi.fn())
     vi.mocked(useCommands).mockReturnValue({
-      commands: [],
+      commands: [{ name: 'help', description: 'Show help' }],
+      recentNames: [],
       loading: false,
       error: null,
-      filterCommands: vi.fn().mockReturnValue([
-        {
-          name: 'help',
-          description: 'Show help',
-          template: '',
-          agent: '',
-          model: '',
-          hints: [],
-        },
-      ]),
+      searchCommands: vi.fn(),
+      findCommand: vi.fn(),
     })
     useUIState.getState().clearPendingPromptCommand()
     useUIState.getState().clearPendingPromptFile()
