@@ -1,6 +1,6 @@
 import { describe, it, expect, afterEach } from 'vitest'
 import { ENV, getWorkspacePath } from '@opencode-manager/shared/config/env'
-import { getOpenCodeUpstreamBaseUrl, withDefaultOpenCodeDirectory } from '../../../src/services/opencode/upstream'
+import { getOpenCodeUpstreamBaseUrl, toWebSocketUrl, withDefaultOpenCodeDirectory } from '../../../src/services/opencode/upstream'
 
 const originalHost = ENV.OPENCODE.HOST
 
@@ -56,5 +56,27 @@ describe('withDefaultOpenCodeDirectory', () => {
   it('keeps a caller-supplied directory header regardless of its case', () => {
     const headers = { 'X-OpenCode-Directory': '%2Frepo' }
     expect(withDefaultOpenCodeDirectory(headers)).toBe(headers)
+  })
+})
+
+describe('toWebSocketUrl', () => {
+  it('maps an http URL to ws and preserves the path, port and query', () => {
+    expect(toWebSocketUrl('http://127.0.0.1:5551/api/pty/pty-1/connect?ticket=abc')).toBe(
+      'ws://127.0.0.1:5551/api/pty/pty-1/connect?ticket=abc',
+    )
+  })
+
+  it('maps an https URL to wss', () => {
+    expect(toWebSocketUrl('https://opencode.internal/api/pty/pty-1/connect')).toBe(
+      'wss://opencode.internal/api/pty/pty-1/connect',
+    )
+  })
+
+  it('leaves a ws URL unchanged', () => {
+    expect(toWebSocketUrl('ws://127.0.0.1:5551/api/pty/pty-1/connect')).toBe('ws://127.0.0.1:5551/api/pty/pty-1/connect')
+  })
+
+  it('leaves a wss URL unchanged', () => {
+    expect(toWebSocketUrl('wss://opencode.internal/api')).toBe('wss://opencode.internal/api')
   })
 })

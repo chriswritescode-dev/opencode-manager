@@ -1,16 +1,14 @@
 import { describe, it, expect, beforeAll, afterAll } from 'vitest'
 import { randomBytes } from 'node:crypto'
 import { request as httpRequest } from 'node:http'
-import type { Server } from 'node:http'
-import type { AddressInfo } from 'node:net'
 import type { Duplex } from 'node:stream'
 import { Hono } from 'hono'
-import { serve } from '@hono/node-server'
 import { createNodeWebSocket } from '@hono/node-ws'
 import {
   createPreviewGatewayApp,
   PreviewSessionStore,
 } from '../../../src/services/preview/gateway'
+import { startWebSocketServer, type WebSocketTestServer } from '../../helpers/websocket-server'
 
 class HandshakeError extends Error {
   constructor(readonly statusCode: number) {
@@ -156,8 +154,8 @@ class RawWebSocketClient {
   }
 }
 
-let upstreamServer: Server
-let gatewayServer: Server
+let upstream: WebSocketTestServer
+let gatewayServer: WebSocketTestServer
 let upstreamPort = 0
 let gatewayPort = 0
 let capturedUrl: URL | undefined
@@ -184,21 +182,6 @@ upstreamApp.get(
 
 upstreamApp.all('/*', (c) => c.json({ path: c.req.path, search: new URL(c.req.url).search }))
 
-function listen(server: Server): Promise<number> {
-  return new Promise((resolve) => {
-    if (server.listening) {
-      resolve((server.address() as AddressInfo).port)
-      return
-    }
-    server.once('listening', () => resolve((server.address() as AddressInfo).port))
-  })
-}
-
-function closeServer(server: Server): Promise<void> {
-  server.closeAllConnections()
-  return new Promise((resolve) => server.close(() => resolve()))
-}
-
 async function openSessionCookie(): Promise<string> {
   const token = store.issueStartToken({ port: upstreamPort, host: '127.0.0.1' })
   const res = await gateway.app.request(
@@ -211,19 +194,17 @@ async function openSessionCookie(): Promise<string> {
 }
 
 beforeAll(async () => {
-  upstreamServer = serve({ fetch: upstreamApp.fetch, port: 0, hostname: '127.0.0.1' }) as unknown as Server
-  upstreamWs.injectWebSocket(upstreamServer)
-  upstreamPort = await listen(upstreamServer)
+  upstream = await startWebSocketServer({ app: upstreamApp, injectWebSocket: upstreamWs.injectWebSocket })
+  upstreamPort = upstream.port
 
-  gatewayServer = serve({ fetch: gateway.app.fetch, port: 0, hostname: '127.0.0.1' }) as unknown as Server
-  gateway.injectWebSocket(gatewayServer)
-  gatewayPort = await listen(gatewayServer)
+  gatewayServer = await startWebSocketServer({ app: gateway.app, injectWebSocket: gateway.injectWebSocket })
+  gatewayPort = gatewayServer.port
 })
 
 afterAll(async () => {
   upstreamWs.wss.close()
-  await closeServer(upstreamServer)
-  await closeServer(gatewayServer)
+  await upstream.close()
+  await gatewayServer.close()
 })
 
 describe('Preview Gateway WebSocket', () => {

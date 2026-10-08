@@ -5,12 +5,7 @@ import { createNodeWebSocket, type NodeWebSocket } from '@hono/node-ws'
 import type { PreviewPort } from '@opencode-manager/shared/schemas'
 import { AUTH_COOKIE_PREFIX } from '../../auth/cookies'
 import { buildProxyResponseHeaders, filterProxyHeaders } from '../../utils/proxy-headers'
-import {
-  bridgeWebSocket,
-  forwardPeerMessage,
-  peerBufferedAmount,
-  type WebSocketBridge,
-} from '../../utils/websocket-bridge'
+import { bridgeWebSocket, createBridgedSocketEvents } from '../../utils/websocket-bridge'
 
 export const PREVIEW_COOKIE = 'ocm_preview'
 
@@ -229,39 +224,20 @@ export function createPreviewGatewayApp(store: PreviewSessionStore, fetchFn: typ
     upgradeWebSocket((c) => {
       const requestUrl = new URL(c.req.url)
       const protocols = parseProtocols(c.req.header('sec-websocket-protocol'))
-      let bridge: WebSocketBridge | undefined
 
-      return {
-        onOpen(_event, ws) {
-          const sessionId = readPreviewCookie(c.req.header('cookie'))
-          const session = sessionId ? store.getSession(sessionId) : undefined
-          if (!session) {
-            ws.close(1011)
-            return
-          }
+      return createBridgedSocketEvents((peer) => {
+        const sessionId = readPreviewCookie(c.req.header('cookie'))
+        const session = sessionId ? store.getSession(sessionId) : undefined
+        if (!session) {
+          throw new Error('Preview session expired. Reopen it from OpenCode Manager.')
+        }
 
-          let upstream: WebSocket
-          try {
-            upstream = new WebSocket(upstreamWebSocketUrl(session, requestUrl), protocols.length > 0 ? protocols : undefined)
-          } catch {
-            ws.close(1011)
-            return
-          }
-
-          bridge = bridgeWebSocket(upstream, {
-            send: (data) => ws.send(data),
-            close: (code, reason) => ws.close(code, reason),
-            bufferedAmount: () => peerBufferedAmount(ws),
-          })
-        },
-        async onMessage(event) {
-          if (!bridge) return
-          await forwardPeerMessage(bridge, event.data)
-        },
-        onClose() {
-          bridge?.close()
-        },
-      }
+        const upstream = new WebSocket(
+          upstreamWebSocketUrl(session, requestUrl),
+          protocols.length > 0 ? protocols : undefined,
+        )
+        return bridgeWebSocket(upstream, peer)
+      })
     }),
   )
 

@@ -6,24 +6,12 @@ import { getTrustedOrigins } from '@opencode-manager/shared/config/env'
 import type { GitAuthService } from '../services/git-auth'
 import type { OpenCodeClient } from '../services/opencode/client'
 import type { TerminalService } from '../services/terminal'
-import { forwardPeerMessage, peerBufferedAmount, type WebSocketBridge } from '../utils/websocket-bridge'
-import { getErrorMessage } from '../utils/error-utils'
+import { createBridgedSocketEvents, isAllowedUpgradeOrigin } from '../utils/websocket-bridge'
 import { resolveRepoRequestDirectory } from './repo-directory'
 
 interface RepoTerminalSocketVariables {
   terminalDirectory: string
   terminalCursor: number | undefined
-}
-
-const MAX_CLOSE_REASON_BYTES = 120
-
-function isAllowedUpgradeOrigin(
-  origin: string | undefined,
-  trustedOrigins: readonly string[],
-): boolean {
-  if (origin === undefined) return true
-  if (origin === 'null') return false
-  return trustedOrigins.includes(origin)
 }
 
 function parseCursor(raw: string | undefined): number | undefined | null {
@@ -32,12 +20,6 @@ function parseCursor(raw: string | undefined): number | undefined | null {
   const parsed = Number(raw)
   if (!Number.isSafeInteger(parsed) || parsed < -1) return null
   return parsed
-}
-
-function truncateCloseReason(message: string): string {
-  const bytes = Buffer.from(message, 'utf8')
-  if (bytes.length <= MAX_CLOSE_REASON_BYTES) return message
-  return bytes.subarray(0, MAX_CLOSE_REASON_BYTES).toString('utf8')
 }
 
 export function createRepoTerminalSocketRoutes(
@@ -79,40 +61,7 @@ export function createRepoTerminalSocketRoutes(
       const cursor = c.get('terminalCursor')
       const ptyID = c.req.param('ptyID')
 
-      let bridge: WebSocketBridge | undefined
-      let closed = false
-      let connectPromise: Promise<void> = Promise.resolve()
-
-      return {
-        onOpen(_event, ws) {
-          connectPromise = terminalService
-            .connect(directory, ptyID, cursor, {
-              send: (data) => ws.send(data),
-              close: (code, reason) => ws.close(code, reason),
-              bufferedAmount: () => peerBufferedAmount(ws),
-            })
-            .then((connected) => {
-              if (closed) {
-                connected.close()
-                return
-              }
-              bridge = connected
-            })
-            .catch((error: unknown) => {
-              if (closed) return
-              ws.close(1011, truncateCloseReason(getErrorMessage(error)))
-            })
-        },
-        async onMessage(event) {
-          await connectPromise
-          if (!bridge) return
-          await forwardPeerMessage(bridge, event.data)
-        },
-        onClose() {
-          closed = true
-          bridge?.close()
-        },
-      }
+      return createBridgedSocketEvents((peer) => terminalService.connect(directory, ptyID, cursor, peer))
     }),
   )
 

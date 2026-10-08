@@ -18,8 +18,8 @@ function createPty(overrides: Partial<PtyRecord> = {}): PtyRecord {
   return { id: 'pty-1', title: 'Terminal', command: 'sh', args: [], cwd: '/repo', status: 'running', pid: 1, ...overrides }
 }
 
-function createClient(pty: Record<string, unknown>): OpenCodeClient {
-  return { api: { pty } } as unknown as OpenCodeClient
+function createClient(pty: Record<string, unknown>, api: Record<string, unknown> = {}): OpenCodeClient {
+  return { api: { pty, ...api } } as unknown as OpenCodeClient
 }
 
 function createCredentialProvider(shellEnv: Record<string, string> = {}): CredentialProvider {
@@ -30,8 +30,9 @@ function createTerminalService(
   client: OpenCodeClient,
   provider: CredentialProvider,
   openSocket?: (url: string) => WebSocket,
+  baseUrl = 'http://127.0.0.1:5551',
 ): TerminalService {
-  return new TerminalService(client, provider, () => 'http://127.0.0.1:5551', openSocket)
+  return new TerminalService(client, provider, () => baseUrl, openSocket)
 }
 
 class FakeUpstreamSocket {
@@ -211,6 +212,16 @@ describe('TerminalService', () => {
   })
 
   describe('removeAll', () => {
+    function createSessionApi(pages: Array<{ data: Array<{ id: string }>; next: string | null }>) {
+      let index = 0
+      const list = vi.fn(async () => {
+        const page = pages[index] ?? { data: [], next: null }
+        index += 1
+        return { data: page.data, cursor: { next: page.next } }
+      })
+      return { list }
+    }
+
     it('removes every terminal and tolerates a 404', async () => {
       const list = vi.fn(async () => ({
         location: { directory: '/repo' },
@@ -220,7 +231,9 @@ describe('TerminalService', () => {
       const remove = vi.fn(async ({ ptyID }: { ptyID: string }) => {
         if (ptyID === 'a') throw notFound
       })
-      const service = createTerminalService(createClient({ list, remove }), createCredentialProvider())
+      const { list: sessionList } = createSessionApi([])
+      const client = createClient({ list, remove }, { session: { list: sessionList } })
+      const service = createTerminalService(client, createCredentialProvider())
 
       await expect(service.removeAll('/repo')).resolves.toBeUndefined()
       expect(remove).toHaveBeenCalledTimes(2)
@@ -236,7 +249,129 @@ describe('TerminalService', () => {
       const remove = vi.fn(async () => {
         throw new Error('boom')
       })
-      const service = createTerminalService(createClient({ list, remove }), createCredentialProvider())
+      const { list: sessionList } = createSessionApi([])
+      const client = createClient({ list, remove }, { session: { list: sessionList } })
+      const service = createTerminalService(client, createCredentialProvider())
+
+      await expect(service.removeAll('/repo')).rejects.toThrow('boom')
+      expect(sessionList).not.toHaveBeenCalled()
+    })
+
+    it('removes every persistent PTY across paginated sessions', async () => {
+      const list = vi.fn(async () => ({ location: { directory: '/repo' }, data: [] }))
+      const remove = vi.fn(async () => undefined)
+      const { list: sessionList } = createSessionApi([
+        { data: [{ id: 'ses-1' }], next: 'page-2' },
+        { data: [{ id: 'ses-2' }], next: null },
+      ])
+      const persistentList = vi.fn(async ({ sessionID }: { sessionID: string }) => [
+        { id: `${sessionID}-a` },
+        { id: `${sessionID}-b` },
+      ])
+      const persistentRemove = vi.fn(async () => undefined)
+      const client = createClient(
+        { list, remove },
+        {
+          session: { list: sessionList },
+          experimental: { persistentPty: { list: persistentList, remove: persistentRemove } },
+        },
+      )
+      const service = createTerminalService(client, createCredentialProvider())
+
+      await expect(service.removeAll('/repo')).resolves.toBeUndefined()
+
+      expect(sessionList).toHaveBeenNthCalledWith(1, { directory: '/repo' })
+      expect(sessionList).toHaveBeenNthCalledWith(2, { directory: '/repo', cursor: 'page-2' })
+      expect(persistentList).toHaveBeenCalledWith({ sessionID: 'ses-1' })
+      expect(persistentList).toHaveBeenCalledWith({ sessionID: 'ses-2' })
+      expect(persistentRemove).toHaveBeenCalledTimes(4)
+      expect(persistentRemove).toHaveBeenCalledWith({ ptyID: 'ses-1-a' })
+      expect(persistentRemove).toHaveBeenCalledWith({ ptyID: 'ses-1-b' })
+      expect(persistentRemove).toHaveBeenCalledWith({ ptyID: 'ses-2-a' })
+      expect(persistentRemove).toHaveBeenCalledWith({ ptyID: 'ses-2-b' })
+    })
+
+    it('treats a 404 from listing persistent PTYs as none', async () => {
+      const list = vi.fn(async () => ({ location: { directory: '/repo' }, data: [] }))
+      const remove = vi.fn(async () => undefined)
+      const { list: sessionList } = createSessionApi([{ data: [{ id: 'ses-1' }], next: null }])
+      const notFound = Object.assign(new Error('not found'), { _tag: 'PtyNotFoundError' })
+      const persistentList = vi.fn(async () => {
+        throw notFound
+      })
+      const persistentRemove = vi.fn(async () => undefined)
+      const client = createClient(
+        { list, remove },
+        {
+          session: { list: sessionList },
+          experimental: { persistentPty: { list: persistentList, remove: persistentRemove } },
+        },
+      )
+      const service = createTerminalService(client, createCredentialProvider())
+
+      await expect(service.removeAll('/repo')).resolves.toBeUndefined()
+      expect(persistentRemove).not.toHaveBeenCalled()
+    })
+
+    it('tolerates a 404 while removing a persistent PTY', async () => {
+      const list = vi.fn(async () => ({ location: { directory: '/repo' }, data: [] }))
+      const remove = vi.fn(async () => undefined)
+      const { list: sessionList } = createSessionApi([{ data: [{ id: 'ses-1' }], next: null }])
+      const notFound = Object.assign(new Error('not found'), { _tag: 'PtyNotFoundError' })
+      const persistentList = vi.fn(async () => [{ id: 'pp-1' }, { id: 'pp-2' }])
+      const persistentRemove = vi.fn(async ({ ptyID }: { ptyID: string }) => {
+        if (ptyID === 'pp-1') throw notFound
+      })
+      const client = createClient(
+        { list, remove },
+        {
+          session: { list: sessionList },
+          experimental: { persistentPty: { list: persistentList, remove: persistentRemove } },
+        },
+      )
+      const service = createTerminalService(client, createCredentialProvider())
+
+      await expect(service.removeAll('/repo')).resolves.toBeUndefined()
+      expect(persistentRemove).toHaveBeenCalledTimes(2)
+      expect(persistentRemove).toHaveBeenCalledWith({ ptyID: 'pp-1' })
+      expect(persistentRemove).toHaveBeenCalledWith({ ptyID: 'pp-2' })
+    })
+
+    it('propagates a non-404 failure from listing persistent PTYs', async () => {
+      const list = vi.fn(async () => ({ location: { directory: '/repo' }, data: [] }))
+      const remove = vi.fn(async () => undefined)
+      const { list: sessionList } = createSessionApi([{ data: [{ id: 'ses-1' }], next: null }])
+      const persistentList = vi.fn(async () => {
+        throw new Error('boom')
+      })
+      const client = createClient(
+        { list, remove },
+        {
+          session: { list: sessionList },
+          experimental: { persistentPty: { list: persistentList, remove: vi.fn(async () => undefined) } },
+        },
+      )
+      const service = createTerminalService(client, createCredentialProvider())
+
+      await expect(service.removeAll('/repo')).rejects.toThrow('boom')
+    })
+
+    it('propagates a non-404 failure from removing a persistent PTY', async () => {
+      const list = vi.fn(async () => ({ location: { directory: '/repo' }, data: [] }))
+      const remove = vi.fn(async () => undefined)
+      const { list: sessionList } = createSessionApi([{ data: [{ id: 'ses-1' }], next: null }])
+      const persistentList = vi.fn(async () => [{ id: 'pp-1' }])
+      const persistentRemove = vi.fn(async () => {
+        throw new Error('boom')
+      })
+      const client = createClient(
+        { list, remove },
+        {
+          session: { list: sessionList },
+          experimental: { persistentPty: { list: persistentList, remove: persistentRemove } },
+        },
+      )
+      const service = createTerminalService(client, createCredentialProvider())
 
       await expect(service.removeAll('/repo')).rejects.toThrow('boom')
     })
@@ -301,6 +436,26 @@ describe('TerminalService', () => {
 
       const url = new URL(opened!.url)
       expect(url.searchParams.has('cursor')).toBe(false)
+    })
+
+    it('uses wss when the upstream base is https', async () => {
+      const { client } = createConnectClient()
+      let opened: FakeUpstreamSocket | undefined
+      const service = createTerminalService(
+        client,
+        createCredentialProvider(),
+        (url) => {
+          opened = new FakeUpstreamSocket(url)
+          return opened as unknown as WebSocket
+        },
+        'https://opencode.internal',
+      )
+
+      await service.connect('/repo', 'pty-1', undefined, createPeer())
+
+      const url = new URL(opened!.url)
+      expect(url.protocol).toBe('wss:')
+      expect(url.pathname).toBe('/api/pty/pty-1/connect')
     })
 
     it('rejects an unknown terminal before requesting a ticket', async () => {

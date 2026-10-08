@@ -17,3 +17,11 @@ export function withDefaultOpenCodeDirectory(headers: Record<string, string>): R
   const hasDirectory = Object.keys(headers).some((key) => key.toLowerCase() === OPENCODE_DIRECTORY_HEADER)
   return hasDirectory ? headers : { ...headers, [OPENCODE_DIRECTORY_HEADER]: encodeURIComponent(getWorkspacePath()) }
 }
+
+/** Maps an http(s) URL to its ws(s) equivalent, leaving ws/wss URLs unchanged. */
+export function toWebSocketUrl(httpUrl: string): string {
+  const url = new URL(httpUrl)
+  if (url.protocol === 'https:') url.protocol = 'wss:'
+  else if (url.protocol === 'http:') url.protocol = 'ws:'
+  return url.toString()
+}
