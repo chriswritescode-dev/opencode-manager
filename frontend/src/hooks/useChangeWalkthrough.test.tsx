@@ -3,6 +3,7 @@ import { act, renderHook, waitFor } from '@testing-library/react'
 import type { ReactNode } from 'react'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 import { changeWalkthroughQueryKey, useChangeWalkthrough, useGenerateChangeWalkthrough } from './useChangeWalkthrough'
+import { DEFAULT_WALKTHROUGH_SOURCE } from '@opencode-manager/shared/schemas'
 import type { ChangeWalkthrough, ChangeWalkthroughState } from '@opencode-manager/shared/schemas'
 
 const mocks = vi.hoisted(() => ({
@@ -55,7 +56,7 @@ describe('useGenerateChangeWalkthrough', () => {
     mocks.generateChangeWalkthrough.mockReturnValue(pending.promise)
 
     const { result, rerender } = renderHook(
-      ({ sessionId }: { sessionId: string }) => useGenerateChangeWalkthrough(sessionId),
+      ({ sessionId }: { sessionId: string }) => useGenerateChangeWalkthrough(sessionId, DEFAULT_WALKTHROUGH_SOURCE),
       { initialProps: { sessionId: 'ses_A' }, wrapper: createWrapper(queryClient) },
     )
 
@@ -63,7 +64,7 @@ describe('useGenerateChangeWalkthrough', () => {
       result.current.mutate({})
     })
     await waitFor(() => {
-      expect(mocks.generateChangeWalkthrough).toHaveBeenCalledWith('ses_A', {})
+      expect(mocks.generateChangeWalkthrough).toHaveBeenCalledWith('ses_A', { source: { kind: 'session' } })
     })
 
     rerender({ sessionId: 'ses_B' })
@@ -73,9 +74,11 @@ describe('useGenerateChangeWalkthrough', () => {
     })
 
     await waitFor(() => {
-      expect(queryClient.getQueryData(changeWalkthroughQueryKey('ses_A'))).toEqual(state({ generating: true }))
+      expect(queryClient.getQueryData(changeWalkthroughQueryKey('ses_A', 'session'))).toEqual(
+        state({ generating: true }),
+      )
     })
-    expect(queryClient.getQueryData(changeWalkthroughQueryKey('ses_B'))).toBeUndefined()
+    expect(queryClient.getQueryData(changeWalkthroughQueryKey('ses_B', 'session'))).toBeUndefined()
   })
 })
 
@@ -92,7 +95,9 @@ describe('useChangeWalkthrough', () => {
         .mockResolvedValueOnce(state({ generating: true }))
         .mockResolvedValueOnce(state({ walkthrough: walkthroughForA }))
 
-      const { result } = renderHook(() => useChangeWalkthrough('ses_A', true), { wrapper: createWrapper(queryClient) })
+      const { result } = renderHook(() => useChangeWalkthrough('ses_A', true, DEFAULT_WALKTHROUGH_SOURCE), {
+        wrapper: createWrapper(queryClient),
+      })
 
       await waitFor(() => expect(result.current.data?.generating).toBe(true))
 
@@ -109,5 +114,25 @@ describe('useChangeWalkthrough', () => {
     } finally {
       vi.useRealTimers()
     }
+  })
+
+  it('invalidating the session key refetches every source', async () => {
+    const queryClient = new QueryClient({ defaultOptions: { queries: { retry: false } } })
+    mocks.getChangeWalkthrough.mockResolvedValue(state())
+
+    renderHook(() => useChangeWalkthrough('ses_A', true, { kind: 'staged' }), {
+      wrapper: createWrapper(queryClient),
+    })
+    renderHook(() => useChangeWalkthrough('ses_A', true, { kind: 'unstaged' }), {
+      wrapper: createWrapper(queryClient),
+    })
+
+    await waitFor(() => expect(mocks.getChangeWalkthrough).toHaveBeenCalledTimes(2))
+
+    await act(async () => {
+      await queryClient.invalidateQueries({ queryKey: changeWalkthroughQueryKey('ses_A') })
+    })
+
+    await waitFor(() => expect(mocks.getChangeWalkthrough).toHaveBeenCalledTimes(4))
   })
 })

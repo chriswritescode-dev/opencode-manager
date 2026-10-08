@@ -111,7 +111,7 @@ describe('ChangesWalkthroughSheet', () => {
     await user.click(generate)
 
     await waitFor(() => {
-      expect(mocks.generateChangeWalkthrough).toHaveBeenCalledWith('ses_1', {})
+      expect(mocks.generateChangeWalkthrough).toHaveBeenCalledWith('ses_1', { source: { kind: 'session' } })
     })
     expect(await screen.findByText('This change adds a greeting.')).toBeInTheDocument()
     expect(screen.getByText('Stop 1 of 2')).toBeInTheDocument()
@@ -156,7 +156,7 @@ describe('ChangesWalkthroughSheet', () => {
     await user.click(screen.getByRole('button', { name: 'Update walkthrough' }))
 
     await waitFor(() => {
-      expect(mocks.generateChangeWalkthrough).toHaveBeenCalledWith('ses_1', {})
+      expect(mocks.generateChangeWalkthrough).toHaveBeenCalledWith('ses_1', { source: { kind: 'session' } })
     })
   })
 
@@ -170,8 +170,104 @@ describe('ChangesWalkthroughSheet', () => {
     await user.click(screen.getByRole('button', { name: 'Regenerate walkthrough' }))
 
     await waitFor(() => {
-      expect(mocks.generateChangeWalkthrough).toHaveBeenCalledWith('ses_1', { regenerate: true })
+      expect(mocks.generateChangeWalkthrough).toHaveBeenCalledWith('ses_1', {
+        regenerate: true,
+        source: { kind: 'session' },
+      })
     })
+  })
+
+  it('switches to staged changes', async () => {
+    const user = userEvent.setup()
+    mocks.getChangeWalkthrough.mockResolvedValue(state({ walkthrough: null }))
+    mocks.generateChangeWalkthrough.mockResolvedValue(state())
+    renderSheet()
+
+    await user.click(screen.getByRole('combobox', { name: 'Changes to walk through' }))
+    await user.click(await screen.findByRole('option', { name: 'Staged' }))
+
+    await waitFor(() => {
+      expect(mocks.getChangeWalkthrough).toHaveBeenCalledWith('ses_1', { kind: 'staged' })
+    })
+
+    await user.click(await screen.findByRole('button', { name: 'Generate walkthrough' }))
+
+    await waitFor(() => {
+      expect(mocks.generateChangeWalkthrough).toHaveBeenCalledWith('ses_1', { source: { kind: 'staged' } })
+    })
+  })
+
+  it('sends the branch base', async () => {
+    const user = userEvent.setup()
+    mocks.getChangeWalkthrough.mockResolvedValue(state({ walkthrough: null }))
+    mocks.generateChangeWalkthrough.mockResolvedValue(state())
+    renderSheet()
+
+    await user.click(screen.getByRole('combobox', { name: 'Changes to walk through' }))
+    await user.click(await screen.findByRole('option', { name: 'Branch vs base' }))
+
+    const base = await screen.findByLabelText('Base branch')
+    await user.type(base, 'develop')
+    await user.tab()
+
+    await waitFor(() => {
+      expect(mocks.getChangeWalkthrough).toHaveBeenCalledWith('ses_1', { kind: 'branch', base: 'develop' })
+    })
+
+    await user.click(screen.getByRole('button', { name: 'Generate walkthrough' }))
+
+    await waitFor(() => {
+      expect(mocks.generateChangeWalkthrough).toHaveBeenCalledWith('ses_1', {
+        source: { kind: 'branch', base: 'develop' },
+      })
+    })
+  })
+
+  it('ignores an invalid pull request number', async () => {
+    const user = userEvent.setup()
+    mocks.getChangeWalkthrough.mockResolvedValue(state({ walkthrough: null }))
+    mocks.generateChangeWalkthrough.mockResolvedValue(state())
+    renderSheet()
+
+    await user.click(screen.getByRole('combobox', { name: 'Changes to walk through' }))
+    await user.click(await screen.findByRole('option', { name: 'Pull request' }))
+
+    const number = await screen.findByLabelText('Pull request number')
+    await user.type(number, '0')
+    await user.tab()
+
+    await user.click(screen.getByRole('button', { name: 'Generate walkthrough' }))
+
+    await waitFor(() => {
+      expect(mocks.generateChangeWalkthrough).toHaveBeenCalledWith('ses_1', { source: { kind: 'session' } })
+    })
+    expect(mocks.getChangeWalkthrough).not.toHaveBeenCalledWith(
+      'ses_1',
+      expect.objectContaining({ kind: 'pullRequest' }),
+    )
+  })
+
+  it('clears a generation error when the source changes', async () => {
+    const user = userEvent.setup()
+    mocks.getChangeWalkthrough.mockResolvedValue(state({ walkthrough: null }))
+    mocks.generateChangeWalkthrough.mockRejectedValue(
+      new FetchError('Not a git repository', 409, 'WALKTHROUGH_NOT_A_REPO'),
+    )
+    renderSheet()
+
+    await user.click(screen.getByRole('combobox', { name: 'Changes to walk through' }))
+    await user.click(await screen.findByRole('option', { name: 'Branch vs base' }))
+
+    await user.click(await screen.findByRole('button', { name: 'Generate walkthrough' }))
+    expect(await screen.findByText('Not a git repository')).toBeInTheDocument()
+
+    await user.click(screen.getByRole('combobox', { name: 'Changes to walk through' }))
+    await user.click(await screen.findByRole('option', { name: 'Staged' }))
+
+    await waitFor(() => {
+      expect(screen.queryByText('Not a git repository')).not.toBeInTheDocument()
+    })
+    expect(await screen.findByRole('button', { name: 'Generate walkthrough' })).toBeVisible()
   })
 
   it('shows progress while the server is generating instead of the generate button', async () => {
@@ -222,7 +318,7 @@ describe('ChangesWalkthroughSheet', () => {
     await user.click(screen.getByRole('button', { name: 'Retry unexplained stops' }))
 
     await waitFor(() => {
-      expect(mocks.generateChangeWalkthrough).toHaveBeenCalledWith('ses_1', {})
+      expect(mocks.generateChangeWalkthrough).toHaveBeenCalledWith('ses_1', { source: { kind: 'session' } })
     })
   })
 

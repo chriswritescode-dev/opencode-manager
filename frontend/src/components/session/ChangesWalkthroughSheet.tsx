@@ -4,16 +4,25 @@ import { ChevronLeft, ChevronRight, Loader2, RefreshCw } from 'lucide-react'
 import { SideDrawer, SideDrawerHeader } from '@/components/ui/side-drawer'
 import { Button } from '@/components/ui/button'
 import { Badge } from '@/components/ui/badge'
+import { Input } from '@/components/ui/input'
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
 import { DiffLines } from '@/components/file-browser/DiffLines'
 import { ScheduleRunMarkdown } from '@/components/schedules/ScheduleRunMarkdown'
 import { useChangeWalkthrough, useGenerateChangeWalkthrough } from '@/hooks/useChangeWalkthrough'
 import { GIT_STATUS_COLORS, GIT_STATUS_LABELS } from '@/lib/git-status-styles'
 import { cn } from '@/lib/utils'
-import { WalkthroughOmittedFileSchema } from '@opencode-manager/shared/schemas'
+import {
+  DEFAULT_WALKTHROUGH_SOURCE,
+  describeWalkthroughSource,
+  walkthroughSourceKey,
+  WalkthroughOmittedFileSchema,
+  WalkthroughSourceSchema,
+} from '@opencode-manager/shared/schemas'
 import type {
   ChangeWalkthrough,
   WalkthroughHunk,
   WalkthroughOmittedFile,
+  WalkthroughSource,
   WalkthroughStop,
 } from '@opencode-manager/shared/schemas'
 
@@ -86,6 +95,8 @@ interface ChangesWalkthroughContextValue {
   selectStop: (index: number) => void
   detailRef: RefObject<HTMLDivElement | null>
   failedStopCount: number
+  source: WalkthroughSource
+  setSource: (source: WalkthroughSource) => void
 }
 
 const ChangesWalkthroughContext = createContext<ChangesWalkthroughContextValue | null>(null)
@@ -96,6 +107,128 @@ function useChangesWalkthrough(): ChangesWalkthroughContextValue {
   return value
 }
 
+const WALKTHROUGH_SOURCE_OPTIONS: { value: WalkthroughSource['kind']; label: string }[] = [
+  { value: 'session', label: 'This session' },
+  { value: 'uncommitted', label: 'Uncommitted' },
+  { value: 'staged', label: 'Staged' },
+  { value: 'unstaged', label: 'Unstaged' },
+  { value: 'branch', label: 'Branch vs base' },
+  { value: 'pullRequest', label: 'Pull request' },
+]
+
+function walkthroughSourceLabel(source: WalkthroughSource): string {
+  return source.kind === 'session' ? 'the changes in this session' : describeWalkthroughSource(source)
+}
+
+function sourceBase(source: WalkthroughSource): string {
+  return source.kind === 'branch' || source.kind === 'pullRequest' ? source.base ?? '' : ''
+}
+
+function sourceNumber(source: WalkthroughSource): string {
+  return source.kind === 'pullRequest' ? String(source.number) : ''
+}
+
+/** Chooses which set of changes the walkthrough covers; git sources commit as soon as they are valid. */
+const WalkthroughSourcePicker = memo(function WalkthroughSourcePicker() {
+  const { source, setSource } = useChangesWalkthrough()
+  const [kind, setKind] = useState<WalkthroughSource['kind']>(source.kind)
+  const [baseInput, setBaseInput] = useState(sourceBase(source))
+  const [numberInput, setNumberInput] = useState(sourceNumber(source))
+
+  useEffect(() => {
+    setKind(source.kind)
+    setBaseInput(sourceBase(source))
+    setNumberInput(sourceNumber(source))
+  }, [source])
+
+  const commit = useCallback(
+    (candidate: unknown) => {
+      const parsed = WalkthroughSourceSchema.safeParse(candidate)
+      if (parsed.success) setSource(parsed.data)
+    },
+    [setSource],
+  )
+
+  const branchSource = useCallback((): WalkthroughSource => {
+    const base = baseInput.trim()
+    return base ? { kind: 'branch', base } : { kind: 'branch' }
+  }, [baseInput])
+
+  const pullRequestSource = useCallback((): WalkthroughSource => {
+    const base = baseInput.trim()
+    return base
+      ? { kind: 'pullRequest', number: Number(numberInput), base }
+      : { kind: 'pullRequest', number: Number(numberInput) }
+  }, [baseInput, numberInput])
+
+  const commitBase = useCallback(() => {
+    if (kind === 'branch') {
+      commit(branchSource())
+    } else if (kind === 'pullRequest') {
+      commit(pullRequestSource())
+    }
+  }, [kind, commit, branchSource, pullRequestSource])
+
+  const commitNumber = useCallback(() => {
+    commit(pullRequestSource())
+  }, [commit, pullRequestSource])
+
+  const handleKindChange = useCallback(
+    (next: WalkthroughSource['kind']) => {
+      setKind(next)
+      if (next === 'pullRequest') return
+      commit(next === 'branch' ? branchSource() : { kind: next })
+    },
+    [commit, branchSource],
+  )
+
+  return (
+    <div className="space-y-2">
+      <Select
+        value={kind}
+        onValueChange={(value) => handleKindChange(value as WalkthroughSource['kind'])}
+      >
+        <SelectTrigger aria-label="Changes to walk through">
+          <SelectValue />
+        </SelectTrigger>
+        <SelectContent>
+          {WALKTHROUGH_SOURCE_OPTIONS.map((option) => (
+            <SelectItem key={option.value} value={option.value}>
+              {option.label}
+            </SelectItem>
+          ))}
+        </SelectContent>
+      </Select>
+
+      {kind === 'branch' || kind === 'pullRequest' ? (
+        <Input
+          aria-label="Base branch"
+          placeholder="Default branch"
+          value={baseInput}
+          onChange={(event) => setBaseInput(event.target.value)}
+          onBlur={commitBase}
+          onKeyDown={(event) => {
+            if (event.key === 'Enter') commitBase()
+          }}
+        />
+      ) : null}
+
+      {kind === 'pullRequest' ? (
+        <Input
+          type="number"
+          aria-label="Pull request number"
+          value={numberInput}
+          onChange={(event) => setNumberInput(event.target.value)}
+          onBlur={commitNumber}
+          onKeyDown={(event) => {
+            if (event.key === 'Enter') commitNumber()
+          }}
+        />
+      ) : null}
+    </div>
+  )
+})
+
 interface ChangesWalkthroughProviderProps {
   sessionId: string
   active: boolean
@@ -104,8 +237,10 @@ interface ChangesWalkthroughProviderProps {
 
 /** Loads a session's change walkthrough and shares its state with the surrounding chrome and body. */
 export function ChangesWalkthroughProvider({ sessionId, active, children }: ChangesWalkthroughProviderProps) {
-  const stateQuery = useChangeWalkthrough(sessionId, active)
-  const generate = useGenerateChangeWalkthrough(sessionId)
+  const [source, setSource] = useState<WalkthroughSource>(DEFAULT_WALKTHROUGH_SOURCE)
+  const sourceKey = walkthroughSourceKey(source)
+  const stateQuery = useChangeWalkthrough(sessionId, active, source)
+  const generate = useGenerateChangeWalkthrough(sessionId, source)
   const resetGenerate = generate.reset
   const [stopIndex, setStopIndex] = useState(0)
   const detailRef = useRef<HTMLDivElement>(null)
@@ -119,11 +254,15 @@ export function ChangesWalkthroughProvider({ sessionId, active, children }: Chan
 
   useEffect(() => {
     resetGenerate()
-  }, [active, sessionId, resetGenerate])
+  }, [active, sessionId, sourceKey, resetGenerate])
+
+  useEffect(() => {
+    setSource(DEFAULT_WALKTHROUGH_SOURCE)
+  }, [sessionId])
 
   useEffect(() => {
     setStopIndex(0)
-  }, [active, sessionId, walkthrough?.createdAt])
+  }, [active, sessionId, sourceKey, walkthrough?.createdAt])
 
   const hunksById = new Map(walkthrough?.hunks.map((hunk) => [hunk.id, hunk]) ?? [])
   const stops = walkthrough?.stops ?? []
@@ -158,6 +297,8 @@ export function ChangesWalkthroughProvider({ sessionId, active, children }: Chan
     selectStop,
     detailRef,
     failedStopCount,
+    source,
+    setSource,
   }
 
   return <ChangesWalkthroughContext.Provider value={value}>{children}</ChangesWalkthroughContext.Provider>
@@ -232,12 +373,15 @@ export const ChangesWalkthroughView = memo(function ChangesWalkthroughView() {
     selectStop,
     detailRef,
     failedStopCount,
+    source,
   } = useChangesWalkthrough()
 
   const readyStopCount = stops.filter((stop) => stop.status === 'ready').length
 
   return (
     <div className="min-h-0 flex-1 space-y-4 overflow-y-auto p-4">
+      <WalkthroughSourcePicker />
+
       {error ? (
         <div className="space-y-2">
           <p className="text-sm text-destructive">{walkthroughErrorMessage(error)}</p>
@@ -264,7 +408,7 @@ export const ChangesWalkthroughView = memo(function ChangesWalkthroughView() {
         generating ? null : (
           <div className="space-y-4">
             <p className="text-sm text-muted-foreground">
-              Generate a step-by-step walkthrough of the changes in this session.
+              Generate a step-by-step walkthrough of {walkthroughSourceLabel(source)}.
             </p>
             <Button onClick={generate}>Generate walkthrough</Button>
           </div>
