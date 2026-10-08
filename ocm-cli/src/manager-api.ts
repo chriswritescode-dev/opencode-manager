@@ -151,21 +151,30 @@ export class ManagerApi {
       ...requestInit,
       headers: { ...baseHeaders, ...(requestInit.headers as Record<string, string> | undefined) },
     })
-    if (!res.ok) throw await this.handleErrorResponse(res, operation, feature === true)
+    if (!res.ok) throw await this.handleErrorResponse(res, operation, feature === true, requestInit.signal ?? undefined)
     return parse(await res.json())
   }
 
-  private async handleErrorResponse(res: Response, operation: string, feature: boolean): Promise<ManagerApiError> {
+  private async handleErrorResponse(
+    res: Response,
+    operation: string,
+    feature: boolean,
+    signal?: AbortSignal,
+  ): Promise<ManagerApiError> {
     const error = await formatErrorResponse(res, operation)
     if (feature && error.status === 401) {
-      return this.probeFeatureSupport(operation, error)
+      return this.probeFeatureSupport(operation, error, signal)
     }
     return error
   }
 
-  private async probeFeatureSupport(operation: string, fallback: ManagerApiError): Promise<ManagerApiError> {
+  private async probeFeatureSupport(
+    operation: string,
+    fallback: ManagerApiError,
+    signal?: AbortSignal,
+  ): Promise<ManagerApiError> {
     try {
-      const res = await fetch(`${this.baseUrl}/api/internal/opencode-workspaces`, { headers: this.headers() })
+      const res = await fetch(`${this.baseUrl}/api/internal/opencode-workspaces`, { headers: this.headers(), signal })
       if (res.ok) {
         return new ManagerApiError(
           `${operation} failed: this OpenCode Manager is too old for ocm goals and multi-runs; upgrade the Manager.`,

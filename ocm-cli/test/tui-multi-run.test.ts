@@ -660,17 +660,24 @@ describe('multi-run dialog actions', () => {
     expect(fake.open).not.toHaveBeenCalled()
   })
 
-  it('reuses the fusion request id while a network error leaves the outcome unknown', async () => {
+  it('reuses the fusion request id across reopened commands while a network error leaves the outcome unknown', async () => {
     const fake = createFakeContext()
     const api = makeApi()
-    api.fuseMultiRun.mockRejectedValue(new Error('offline'))
+    api.fuseMultiRun.mockRejectedValueOnce(new Error('offline'))
+    api.fuseMultiRun.mockRejectedValueOnce(new Error('offline'))
+    api.fuseMultiRun.mockImplementationOnce(async (_runId: number, request: { requestId: string }) =>
+      multiRun({ fusions: [fusion({ requestId: request.requestId, sessionId: 'ses_f' })] }),
+    )
+
     const actions = await launchActions(fake, api)
-
     await expect(actions.fuse(multiRun(), fusionForm())).resolves.toBe('offline')
     await expect(actions.fuse(multiRun(), fusionForm())).resolves.toBe('offline')
+    const reopened = await launchActions(createFakeContext(), api)
+    await expect(reopened.fuse(multiRun(), fusionForm())).resolves.toBeNull()
 
-    const [first, second] = api.fuseMultiRun.mock.calls.map((call) => (call[1] as { requestId: string }).requestId)
+    const [first, second, third] = api.fuseMultiRun.mock.calls.map((call) => (call[1] as { requestId: string }).requestId)
     expect(second).toBe(first)
+    expect(third).toBe(first)
   })
 
   it('mints a fresh fusion request id once the Manager has answered', async () => {

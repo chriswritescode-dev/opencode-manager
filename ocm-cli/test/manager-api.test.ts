@@ -261,6 +261,21 @@ describe('ManagerApi feature support', () => {
     expect((error as ManagerApiError).code).toBeNull()
     expect(isManagerRouteMissing(error)).toBe(false)
   })
+
+  it('forwards the caller abort signal to the token probe', async () => {
+    const fetchMock = vi.fn()
+      .mockResolvedValueOnce(errorResponse(401, JSON.stringify({ error: 'Unauthorized' })))
+      .mockResolvedValueOnce(okResponse({ workspaces: [] }))
+    vi.stubGlobal('fetch', fetchMock)
+    const controller = new AbortController()
+
+    await api.getLatestSessionGoal('ses_1', controller.signal).catch(() => undefined)
+
+    expect(fetchMock).toHaveBeenNthCalledWith(2, `${BASE_URL}/api/internal/opencode-workspaces`, {
+      headers: { Authorization: 'Bearer tok' },
+      signal: controller.signal,
+    })
+  })
 })
 
 describe('isManagerRouteMissing', () => {

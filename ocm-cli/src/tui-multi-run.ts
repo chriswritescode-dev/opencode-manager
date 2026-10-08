@@ -258,9 +258,9 @@ function fusionRequestKey(runId: number, form: FusionFormInput): string {
   return JSON.stringify([runId, [...form.entryIds].sort((a, b) => a - b), form.model, form.baseRef.trim(), form.instructions.trim()])
 }
 
-function createMultiRunActions(context: Context, api: ManagerApi, repoId: number): MultiRunActions {
-  const pendingFusions = new Map<string, string>()
+const pendingFusions = new Map<string, string>()
 
+function createMultiRunActions(context: Context, api: ManagerApi, repoId: number): MultiRunActions {
   const attempt = async <Value>(operation: () => Promise<Value>): Promise<ActionResult<Value>> => {
     try {
       return { ok: true, value: await operation() }
