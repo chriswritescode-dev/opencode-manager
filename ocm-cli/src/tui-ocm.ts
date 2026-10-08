@@ -24,15 +24,24 @@ const LOCAL_CATEGORY = 'Local'
 export async function runOcmSwitch(context: Context, deps: OcmSwitchDeps): Promise<void> {
   try {
     const auth = await resolveManagerAuth(deps.remote?.managerUrl)
-    if (!auth.ok) {
+    if (!auth.ok && !deps.remote) {
       context.ui.toast.show({ variant: 'error', message: auth.message })
       return
     }
 
-    const repos = (await fetchRepos(auth.managerUrl, auth.token)).filter((repo) => repo.cloneStatus === 'ready')
+    let repos: ManagerRepo[] = []
+    if (auth.ok) {
+      try {
+        repos = (await fetchRepos(auth.managerUrl, auth.token)).filter((repo) => repo.cloneStatus === 'ready')
+      } catch (error) {
+        if (!deps.remote) throw error
+      }
+    }
     const choice = deps.remote
       ? await chooseFromRemote(context, repos, deps.remote)
-      : await chooseFromLocal(context, repos, auth.managerUrl, deps.cwd ?? localDirectory(context))
+      : auth.ok
+        ? await chooseFromLocal(context, repos, auth.managerUrl, deps.cwd ?? localDirectory(context))
+        : undefined
     if (!choice) return
 
     if (choice.kind === 'local') {
@@ -40,6 +49,8 @@ export async function runOcmSwitch(context: Context, deps: OcmSwitchDeps): Promi
       context.keymap.dispatch('app.exit')
       return
     }
+
+    if (!auth.ok) return
 
     await warmRepoProxy(auth.managerUrl, auth.token, choice.repo.repoId)
     rememberLastRepo(choice.repo)

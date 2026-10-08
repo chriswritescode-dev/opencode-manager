@@ -174,7 +174,8 @@ attached Manager repo through `ocm`:
 
 Both commands need an OpenCode Manager release that exposes
 `/api/internal/session-goals` and `/api/internal/multi-runs`. An older Manager
-answers these requests with `401 Unauthorized`.
+answers these requests with `404 Not Found`, and the TUI reports that the
+Manager must be upgraded.
 
 Enable it in `~/.config/opencode/cli.json`:
 
