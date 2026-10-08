@@ -797,3 +797,46 @@ describe('SSEAggregator directory-less session event routing', () => {
     expect(seen).toEqual([{ directory: '/r', type: 'session.execution.succeeded', sessionID: 'ses_fork' }])
   })
 })
+
+describe('SSEAggregator location-scoped catalog event broadcast', () => {
+  beforeEach(() => {
+    sseAggregator.shutdown()
+    sseAggregator.setPendingActionsFetcher(null)
+    sseAggregator.setScheduledSessionsResolver(() => [])
+  })
+
+  it.each(['command.updated', 'agent.updated', 'skill.updated'])(
+    'broadcasts a location-scoped %s catalog event to every client without leaking other location-scoped events',
+    (type) => {
+      const subscribed = createCapturingClient()
+      const unsubscribed = createCapturingClient()
+      sseAggregator.addClient('catalog-a', subscribed.callback, subscribed.writeFrame, ['/repo-a'])
+      sseAggregator.addClient('catalog-b', unsubscribed.callback, unsubscribed.writeFrame, [])
+
+      const seen: Array<{ directory: string; type: string }> = []
+      sseAggregator.onEvent((directory, event) => {
+        seen.push({ directory, type: event.type })
+      })
+
+      emitRawEvent({ id: 'evt_catalog', type, location: { directory: '/repo-c' }, data: {} })
+
+      const expected = {
+        directory: null,
+        payload: { id: 'evt_catalog', created: 1, type, location: { directory: '/repo-c' }, data: {} },
+      }
+      expect(subscribed.frames.map(parseFrame)).toEqual([expected])
+      expect(unsubscribed.frames.map(parseFrame)).toEqual([expected])
+      expect(seen).toEqual([{ directory: '/repo-c', type }])
+
+      emitRawEvent({
+        id: 'evt_status',
+        type: 'session.status',
+        location: { directory: '/repo-c' },
+        data: { sessionID: 'ses-1', status: { type: 'busy' } },
+      })
+
+      expect(subscribed.frames).toHaveLength(1)
+      expect(unsubscribed.frames).toHaveLength(1)
+    },
+  )
+})
