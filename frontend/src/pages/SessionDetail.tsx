@@ -840,7 +840,7 @@ export function SessionDetail() {
           }
           setSessionsDialogOpen(false)
         }}
-        onActiveSessionDeleted={() => {
+        onDeleteActiveSession={() => {
           setSessionsDialogOpen(false)
           handleCloseSession()
         }}

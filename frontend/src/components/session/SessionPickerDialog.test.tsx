@@ -1,6 +1,6 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { useState } from 'react'
-import { render, screen, fireEvent, waitFor } from '@testing-library/react'
+import { render, screen, fireEvent, waitFor, act } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import type { Repo, Session } from '@/api/types'
 import { stubMatchMedia } from '@/test/test-utils'
@@ -88,18 +88,18 @@ function repo(id: number, name: string, fullPath: string): Repo {
 function renderPicker(overrides: Partial<React.ComponentProps<typeof SessionPickerDialog>> = {}) {
   const onOpenChange = vi.fn()
   const onSelectSession = vi.fn()
-  const onActiveSessionDeleted = vi.fn()
+  const onDeleteActiveSession = vi.fn()
   render(
     <SessionPickerDialog
       open
       onOpenChange={onOpenChange}
       currentRepo={mocks.repos[0]}
       onSelectSession={onSelectSession}
-      onActiveSessionDeleted={onActiveSessionDeleted}
+      onDeleteActiveSession={onDeleteActiveSession}
       {...overrides}
     />,
   )
-  return { onOpenChange, onSelectSession, onActiveSessionDeleted }
+  return { onOpenChange, onSelectSession, onDeleteActiveSession }
 }
 
 const combobox = () => screen.getByRole('combobox')
@@ -225,7 +225,7 @@ describe('SessionPickerDialog', () => {
             onOpenChange={setOpen}
             currentRepo={mocks.repos[0]}
             onSelectSession={vi.fn()}
-            onActiveSessionDeleted={vi.fn()}
+            onDeleteActiveSession={vi.fn()}
           />
         </>
       )
@@ -245,7 +245,7 @@ describe('SessionPickerDialog', () => {
       session('ses_1', 'First', '/w/a', 3000),
       session('ses_2', 'Second', '/w/a', 2000),
     ]
-    renderPicker()
+    const { onDeleteActiveSession } = renderPicker()
 
     fireEvent.keyDown(combobox(), { key: 'd', ctrlKey: true })
     expect(screen.getByText('Press Ctrl+D again to confirm')).toBeInTheDocument()
@@ -259,20 +259,32 @@ describe('SessionPickerDialog', () => {
 
     fireEvent.keyDown(combobox(), { key: 'd', ctrlKey: true })
     expect(mocks.deleteSessionMock).toHaveBeenCalledWith({ id: 'ses_2', directory: '/w/a' })
+    expect(onDeleteActiveSession).not.toHaveBeenCalled()
 
     await waitFor(() =>
       expect(screen.queryByText('Press Ctrl+D again to confirm')).not.toBeInTheDocument(),
     )
   })
 
-  it('notifies when the active session is deleted', async () => {
+  it('notifies when the active session is deleted before the delete completes', async () => {
     mocks.sessionsData = [session('ses_active', 'Active', '/w/a', 3000)]
-    const { onActiveSessionDeleted } = renderPicker({ activeSessionID: 'ses_active' })
+    let resolveDelete: () => void = () => undefined
+    mocks.deleteSessionMock.mockReturnValue(
+      new Promise<void>((resolve) => {
+        resolveDelete = resolve
+      }),
+    )
+    const { onDeleteActiveSession } = renderPicker({ activeSessionID: 'ses_active' })
 
     fireEvent.keyDown(combobox(), { key: 'd', ctrlKey: true })
     fireEvent.keyDown(combobox(), { key: 'd', ctrlKey: true })
 
-    await waitFor(() => expect(onActiveSessionDeleted).toHaveBeenCalled())
+    expect(mocks.deleteSessionMock).toHaveBeenCalledWith({ id: 'ses_active', directory: '/w/a' })
+    await waitFor(() => expect(onDeleteActiveSession).toHaveBeenCalled())
+
+    await act(async () => {
+      resolveDelete()
+    })
   })
 
   it('moves the cursor when a mouse pointer moves over a row', () => {
@@ -331,7 +343,7 @@ describe('SessionPickerDialog', () => {
             currentRepo={mocks.repos[0]}
             activeSessionID="ses_active"
             onSelectSession={vi.fn()}
-            onActiveSessionDeleted={vi.fn()}
+            onDeleteActiveSession={vi.fn()}
           />
         </>
       )

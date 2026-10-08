@@ -36,7 +36,7 @@ interface SessionPickerDialogProps {
   currentRepo: Repo | undefined
   activeSessionID?: string
   onSelectSession: (session: Session, repo: Repo) => void
-  onActiveSessionDeleted: () => void
+  onDeleteActiveSession: () => void
 }
 
 interface SessionPickerRow {
@@ -227,7 +227,7 @@ interface SessionPickerContentProps {
   currentRepo: Repo | undefined
   activeSessionID?: string
   onSelectSession: (session: Session, repo: Repo) => void
-  onActiveSessionDeleted: () => void
+  onDeleteActiveSession: () => void
   searchInputRef: React.RefObject<HTMLInputElement | null>
   hasFinePointer: boolean
 }
@@ -237,7 +237,7 @@ function SessionPickerContent({
   currentRepo,
   activeSessionID,
   onSelectSession,
-  onActiveSessionDeleted,
+  onDeleteActiveSession,
   searchInputRef,
   hasFinePointer,
 }: SessionPickerContentProps) {
@@ -349,14 +349,13 @@ function SessionPickerContent({
   )
 
   const performDelete = useCallback(
-    (session: Session) =>
-      deleteSession
+    (session: Session) => {
+      if (session.id === activeSessionID) onDeleteActiveSession()
+      return deleteSession
         .mutateAsync({ id: session.id, directory: session.location.directory })
-        .then(() => {
-          if (session.id === activeSessionID) onActiveSessionDeleted()
-        })
-        .catch(() => undefined),
-    [deleteSession, activeSessionID, onActiveSessionDeleted],
+        .catch(() => undefined)
+    },
+    [deleteSession, activeSessionID, onDeleteActiveSession],
   )
 
   const deleteRow = useCallback(
@@ -621,7 +620,7 @@ export function SessionPickerDialog({
   currentRepo,
   activeSessionID,
   onSelectSession,
-  onActiveSessionDeleted,
+  onDeleteActiveSession,
 }: SessionPickerDialogProps) {
   const searchInputRef = useRef<HTMLInputElement>(null)
   const hasFinePointer = useMediaQuery(FINE_POINTER_MEDIA_QUERY)
@@ -646,7 +645,7 @@ export function SessionPickerDialog({
           currentRepo={currentRepo}
           activeSessionID={activeSessionID}
           onSelectSession={onSelectSession}
-          onActiveSessionDeleted={onActiveSessionDeleted}
+          onDeleteActiveSession={onDeleteActiveSession}
           searchInputRef={searchInputRef}
           hasFinePointer={hasFinePointer}
         />

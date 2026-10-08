@@ -555,15 +555,27 @@ describe('OpenCode facade', () => {
   })
 
   it('stages, commits, and clears a session revert', async () => {
-    fetchMock.mockResolvedValue(jsonResponse({ data: { messageID: 'msg_1' } }))
+    fetchMock.mockImplementation((input: RequestInfo | URL) => {
+      const url = String(input)
+      if (url.endsWith('/interrupt')) return Promise.resolve(jsonResponse({ data: { interrupted: true } }))
+      if (url.endsWith('/wait')) return Promise.resolve(new Response(null, { status: 204 }))
+      if (url.endsWith('/revert/stage')) return Promise.resolve(jsonResponse({ data: { messageID: 'msg_1' } }))
+      return Promise.resolve(new Response(null, { status: 204 }))
+    })
 
     await stageRevert('ses_1', 'msg_1')
 
-    expect(lastRequest().url).toBe('http://localhost/api/opencode/api/session/ses_1/revert/stage')
-    expect(lastRequest().init.method).toBe('POST')
-    expect(lastRequest().init.body).toBe(JSON.stringify({ messageID: 'msg_1' }))
-
-    fetchMock.mockResolvedValue(new Response(null, { status: 204 }))
+    const stageRequests = fetchMock.mock.calls.map(([input, init]) => ({
+      url: String(input),
+      init: init as RequestInit,
+    }))
+    expect(stageRequests.map((request) => request.url)).toEqual([
+      'http://localhost/api/opencode/api/session/ses_1/interrupt',
+      'http://localhost/api/opencode/api/experimental/session/ses_1/wait',
+      'http://localhost/api/opencode/api/session/ses_1/revert/stage',
+    ])
+    expect(stageRequests.map((request) => request.init.method)).toEqual(['POST', 'POST', 'POST'])
+    expect(stageRequests[2].init.body).toBe(JSON.stringify({ messageID: 'msg_1' }))
 
     await commitRevert('ses_1')
     expect(lastRequest().url).toBe('http://localhost/api/opencode/api/session/ses_1/revert/commit')

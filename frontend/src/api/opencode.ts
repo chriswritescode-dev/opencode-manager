@@ -241,6 +241,8 @@ export async function removeShell(id: string, directory: string): Promise<void> 
 }
 
 export async function stageRevert(sessionID: string, messageID: string): Promise<SessionRevert> {
+  await interruptSession(sessionID)
+  await callOpenCode((api) => api.session.wait({ sessionID }))
   return callOpenCode((api) => api.session.revert.stage({ sessionID, messageID }))
 }
 
