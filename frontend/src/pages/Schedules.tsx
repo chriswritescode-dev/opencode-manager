@@ -40,7 +40,7 @@ export function Schedules() {
   const backHref = getReturnToPath(location.search, scheduleTarget.backHref)
 
   return (
-    <div className="h-dvh max-h-dvh overflow-hidden bg-background flex flex-col">
+    <div className="h-full max-h-full overflow-hidden bg-background flex flex-col">
       <Header>
         <Header.BackButton to={backHref} />
         <div className="min-w-0 flex-1 px-3">

@@ -80,7 +80,7 @@ export function Login() {
   const hasCredentials = config.enabledProviders.includes('credentials')
 
   return (
-    <div className="h-dvh flex flex-col items-center justify-center bg-gradient-to-br from-background via-background to-background p-4">
+    <div className="h-full flex flex-col items-center justify-center bg-gradient-to-br from-background via-background to-background p-4">
       <div className="w-full max-w-sm space-y-6">
         <div className="flex flex-col items-center space-y-2">
           <img 

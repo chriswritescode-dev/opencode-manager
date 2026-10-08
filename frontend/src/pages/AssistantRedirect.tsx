@@ -53,8 +53,8 @@ export function AssistantRedirect() {
   }
 
   return (
-    <div className="flex h-dvh max-h-dvh min-w-0">
-    <div className="flex-1 min-w-0 h-dvh max-h-dvh overflow-hidden bg-gradient-to-br from-background via-background to-background flex flex-col pb-[calc(env(safe-area-inset-bottom)+56px)] sm:pb-0">
+    <div className="flex h-full max-h-full min-w-0">
+    <div className="flex-1 min-w-0 h-full max-h-full overflow-hidden bg-gradient-to-br from-background via-background to-background flex flex-col pb-[calc(env(safe-area-inset-bottom)+56px)] sm:pb-0">
       <Header>
         <Header.BackButton to="/" />
         <Header.Title>Assistant</Header.Title>

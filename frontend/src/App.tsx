@@ -197,11 +197,14 @@ function AppShell() {
         <EventProvider>
           <KeyboardShortcutsProvider>
             <GlobalShortcuts />
-            <div ref={rootRef} className="flex h-dvh w-full min-w-0">
-              <DesktopSidebar />
-              <main className="flex-1 min-w-0 min-h-0 flex flex-col">
-                <Outlet />
-              </main>
+            <div className="flex h-dvh w-full min-w-0 flex-col">
+              <PwaUpdatePrompt />
+              <div ref={rootRef} className="flex flex-1 min-h-0 w-full min-w-0">
+                <DesktopSidebar />
+                <main className="flex-1 min-w-0 min-h-0 flex flex-col">
+                  <Outlet />
+                </main>
+              </div>
             </div>
             <MobileTabBar />
             <MobileSheetHost />
@@ -210,7 +213,6 @@ function AppShell() {
             <SettingsDialog />
             <HealthMonitor />
             <VersionNotifier />
-            <PwaUpdatePrompt />
             <ThemedToaster />
           </KeyboardShortcutsProvider>
         </EventProvider>
