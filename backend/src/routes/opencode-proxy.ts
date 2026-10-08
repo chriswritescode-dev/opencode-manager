@@ -1,5 +1,6 @@
 import { Hono } from 'hono'
 import type { Context } from 'hono'
+import type { UpgradeWebSocket } from 'hono/ws'
 import type { Database } from 'bun:sqlite'
 import { buildOpenCodeBasicAuth } from '@opencode-manager/shared/opencode'
 import { createInternalTokenMiddleware } from '../auth/internal-token-middleware'
@@ -8,12 +9,22 @@ import { opencodeServerManager } from '../services/opencode-single-server'
 import {
   getOpenCodeUpstreamBaseUrl,
   OPENCODE_DIRECTORY_HEADER,
+  toWebSocketUrl,
   withDefaultOpenCodeDirectory,
 } from '../services/opencode/upstream'
 import { getRepoById } from '../db/queries'
-import { getWorkspacePath } from '@opencode-manager/shared/config/env'
+import { getTrustedOrigins, getWorkspacePath } from '@opencode-manager/shared/config/env'
 import { isPathWithinRoot } from '../services/sandbox/command'
 import { buildProxyResponseHeaders, filterProxyHeaders } from '../utils/proxy-headers'
+import {
+  connectUpstreamWebSocket,
+  createBridgedSocketEvents,
+  isAllowedUpgradeOrigin,
+  type PendingUpstream,
+} from '../utils/websocket-bridge'
+
+const PROXY_PREFIX = /^\/api\/opencode-proxy(?:\/repos\/[^/]+)?/
+const PERSISTENT_PTY_CONNECT_PATH = /^\/api\/experimental\/persistent-pty\/[^/]+\/connect$/
 
 interface ProxyRequestParts {
   method: string
@@ -30,6 +41,26 @@ type RepoDirectoryResolver = (directory: string | null | undefined) => string
 
 function isJsonContentType(contentType: string | undefined): boolean {
   return (contentType ?? '').toLowerCase().includes('application/json')
+}
+
+function stripProxyPrefix(pathname: string): string {
+  return pathname.replace(PROXY_PREFIX, '') || '/'
+}
+
+function isWebSocketUpgrade(c: Context): boolean {
+  return (c.req.header('connection')?.toLowerCase() ?? '').includes('upgrade')
+    && c.req.header('upgrade')?.toLowerCase() === 'websocket'
+}
+
+/**
+ * Matches OpenCode's ticketed persistent PTY socket connects. WebSocket clients cannot
+ * send an Authorization header, so these rely on the single-use ticket minted through the
+ * authenticated proxy and validated by the upstream server. Only persistent PTY connects
+ * are ticketed; OpenCode's /api/pty route builds per-directory services before it can
+ * validate a ticket, so it must never bypass the internal token.
+ */
+function isTicketedPersistentPtyConnect(pathSuffix: string, searchParams: URLSearchParams): boolean {
+  return PERSISTENT_PTY_CONNECT_PATH.test(pathSuffix) && !!searchParams.get('ticket')
 }
 
 function decodeDirectoryHeader(value: string | undefined): string | undefined {
@@ -81,10 +112,37 @@ function rewriteRepoLocationBody(bodyText: string, resolveDirectory: RepoDirecto
   return JSON.stringify(parsed)
 }
 
-export function createOpenCodeProxyRoutes(db: Database, settingsService: SettingsService) {
+export function createOpenCodeProxyRoutes(db: Database, settingsService: SettingsService, upgradeWebSocket: UpgradeWebSocket) {
   const app = new Hono()
+  const requireInternalToken = createInternalTokenMiddleware(db)
 
-  app.use('/*', createInternalTokenMiddleware(db))
+  app.use('/*', (c, next) => {
+    const url = new URL(c.req.url)
+    const isTicketedSocket = isWebSocketUpgrade(c)
+      && isTicketedPersistentPtyConnect(stripProxyPrefix(url.pathname), url.searchParams)
+    return isTicketedSocket ? proxyTicketedPtySocket(c, url) : requireInternalToken(c, next)
+  })
+
+  async function proxyTicketedPtySocket(c: Context, url: URL): Promise<Response> {
+    if (!opencodeServerManager.isLifecycleInitialized()) {
+      return c.json({ error: 'OpenCode lifecycle initialization is incomplete; refusing to proxy to an unmanaged server' }, 503)
+    }
+
+    if (!isAllowedUpgradeOrigin(c.req.header('origin'), getTrustedOrigins())) {
+      return c.json({ error: 'Origin not allowed' }, 403)
+    }
+
+    const pathSuffix = stripProxyPrefix(url.pathname)
+    let pending: PendingUpstream
+    try {
+      pending = await connectUpstreamWebSocket(toWebSocketUrl(`${getOpenCodeUpstreamBaseUrl()}${pathSuffix}${url.search}`))
+    } catch {
+      return c.json({ error: 'PTY connection rejected' }, 403)
+    }
+
+    const upgrade = upgradeWebSocket(() => createBridgedSocketEvents((peer) => pending.attach(peer)))
+    return (await upgrade(c, async () => {})) ?? c.body(null)
+  }
 
   async function forwardToOpenCode(
     c: Context,
@@ -96,10 +154,8 @@ export function createOpenCodeProxyRoutes(db: Database, settingsService: Setting
       return c.json({ error: 'OpenCode lifecycle initialization is incomplete; refusing to proxy to an unmanaged server' }, 503)
     }
 
-    const connectionHeader = c.req.header('connection')?.toLowerCase() ?? ''
-    const upgradeHeader = c.req.header('upgrade')?.toLowerCase() ?? ''
-    if (connectionHeader.includes('upgrade') && upgradeHeader === 'websocket') {
-      return c.json({ error: 'WebSocket proxying is not supported' }, 501)
+    if (isWebSocketUpgrade(c)) {
+      return c.json({ error: 'WebSocket proxying is only supported for ticketed persistent PTY connects' }, 501)
     }
 
     const url = new URL(c.req.url)
@@ -164,7 +220,7 @@ export function createOpenCodeProxyRoutes(db: Database, settingsService: Setting
     }
 
     const url = new URL(c.req.url)
-    const pathSuffix = url.pathname.replace(/^\/api\/opencode-proxy\/repos\/[^/]+/, '') || '/'
+    const pathSuffix = stripProxyPrefix(url.pathname)
     const resolveDirectory = createRepoDirectoryResolver(repo.fullPath)
     const directory = resolveDirectory(
       url.searchParams.get('location[directory]') || decodeDirectoryHeader(c.req.header(OPENCODE_DIRECTORY_HEADER)),
@@ -180,7 +236,7 @@ export function createOpenCodeProxyRoutes(db: Database, settingsService: Setting
 
   app.all('/*', async (c) => {
     const url = new URL(c.req.url)
-    const pathSuffix = url.pathname.replace(/^\/api\/opencode-proxy/, '') || '/'
+    const pathSuffix = stripProxyPrefix(url.pathname)
 
     return forwardToOpenCode(c, pathSuffix)
   })

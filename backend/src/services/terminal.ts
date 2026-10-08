@@ -3,9 +3,11 @@ import { formatTerminalTitle, parseTerminalTitle } from '@opencode-manager/share
 import type { TerminalInfo, TerminalKind } from '@opencode-manager/shared/types'
 import type { OpenCodeClient } from './opencode/client'
 import type { CredentialProvider } from './credential-provider'
+import { toWebSocketUrl } from './opencode/upstream'
 import { bridgeWebSocket, type WebSocketBridge, type WebSocketPeer } from '../utils/websocket-bridge'
 
 type OpenCodePty = Awaited<ReturnType<OpenCodeClient['api']['pty']['list']>>['data'][number]
+type OpenCodePersistentPty = Awaited<ReturnType<OpenCodeClient['api']['experimental']['persistentPty']['list']>>[number]
 
 export interface CreateTerminalInput {
   kind: TerminalKind
@@ -79,6 +81,7 @@ export class TerminalService {
         throw error
       }
     }
+    await this.removePersistentTerminals(directory)
   }
 
   async connect(
@@ -101,9 +104,38 @@ export class TerminalService {
     socketUrl.searchParams.set('ticket', result.data.ticket)
     socketUrl.searchParams.set('location[directory]', directory)
     if (cursor !== undefined) socketUrl.searchParams.set('cursor', String(cursor))
-    socketUrl.protocol = socketUrl.protocol === 'https:' ? 'wss:' : 'ws:'
 
-    return bridgeWebSocket(this.openSocket(socketUrl.toString()), peer)
+    return bridgeWebSocket(this.openSocket(toWebSocketUrl(socketUrl.toString())), peer)
+  }
+
+  private async removePersistentTerminals(directory: string): Promise<void> {
+    let cursor: string | undefined
+    do {
+      const page = await this.openCodeClient.api.session.list({ directory, cursor })
+      for (const session of page.data) {
+        await this.removeSessionPersistentTerminals(session.id)
+      }
+      cursor = page.cursor.next ?? undefined
+    } while (cursor !== undefined)
+  }
+
+  private async removeSessionPersistentTerminals(sessionID: string): Promise<void> {
+    let terminals: OpenCodePersistentPty[]
+    try {
+      terminals = await this.openCodeClient.api.experimental.persistentPty.list({ sessionID })
+    } catch (error: unknown) {
+      if (openCodeErrorStatus(error) === 404) return
+      throw error
+    }
+
+    for (const terminal of terminals) {
+      try {
+        await this.openCodeClient.api.experimental.persistentPty.remove({ ptyID: terminal.id })
+      } catch (error: unknown) {
+        if (openCodeErrorStatus(error) === 404) continue
+        throw error
+      }
+    }
   }
 
   private toTerminalInfo(pty: OpenCodePty): TerminalInfo {

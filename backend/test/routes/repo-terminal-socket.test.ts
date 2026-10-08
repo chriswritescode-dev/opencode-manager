@@ -3,9 +3,7 @@ import { randomBytes } from 'node:crypto'
 import { request as httpRequest } from 'node:http'
 import { Hono } from 'hono'
 import { cors } from 'hono/cors'
-import { serve } from '@hono/node-server'
 import { createNodeWebSocket } from '@hono/node-ws'
-import type { Server } from 'node:http'
 import type { Database } from 'bun:sqlite'
 import type { Repo } from '@opencode-manager/shared/types'
 import { createRepoTerminalSocketRoutes } from '../../src/routes/repo-terminal-socket'
@@ -13,6 +11,7 @@ import { TerminalService } from '../../src/services/terminal'
 import type { GitAuthService } from '../../src/services/git-auth'
 import type { OpenCodeClient } from '../../src/services/opencode/client'
 import type { CredentialProvider } from '../../src/services/credential-provider'
+import { startWebSocketServer, type WebSocketTestServer } from '../helpers/websocket-server'
 
 vi.mock('../../src/services/repo', () => ({
   resolveRepoOrAssistant: vi.fn(),
@@ -49,8 +48,9 @@ const openCodeClient = {
 
 const credentialProvider = { getGhCliEnv: vi.fn(() => ({})) } as unknown as CredentialProvider
 
-let upstreamServer: Server
-let managerServer: Server
+let upstream: WebSocketTestServer
+let manager: WebSocketTestServer
+let authenticated: WebSocketTestServer
 let managerPort = 0
 let upstreamBase = ''
 let capturedUrl: URL | undefined
@@ -117,7 +117,6 @@ authenticatedApp.route(
   ),
 )
 
-let authenticatedServer: Server
 let authenticatedPort = 0
 
 interface RawHandshakeResult {
@@ -155,27 +154,6 @@ function rawHandshake(options: { port: number; path: string; origin?: string; co
   })
 }
 
-function listen(server: Server): Promise<number> {
-  return new Promise((resolve) => {
-    if (server.listening) {
-      resolve(readPort(server))
-      return
-    }
-    server.once('listening', () => resolve(readPort(server)))
-  })
-}
-
-function readPort(server: Server): number {
-  const address = server.address()
-  if (address && typeof address === 'object') return address.port
-  throw new Error('Server is not listening on a TCP port')
-}
-
-function closeServer(server: Server): Promise<void> {
-  server.closeAllConnections()
-  return new Promise((resolve) => server.close(() => resolve()))
-}
-
 function clientUrl(ptyID: string, directory = '/tmp/repo'): string {
   const url = new URL(`ws://127.0.0.1:${managerPort}/1/terminals/${ptyID}/connect`)
   url.searchParams.set('directory', directory)
@@ -210,17 +188,14 @@ async function waitFor(predicate: () => boolean, timeoutMs = 5000): Promise<void
 }
 
 beforeAll(async () => {
-  upstreamServer = serve({ fetch: upstreamApp.fetch, port: 0, hostname: '127.0.0.1' }) as unknown as Server
-  upstreamWs.injectWebSocket(upstreamServer)
-  upstreamBase = `http://127.0.0.1:${await listen(upstreamServer)}`
+  upstream = await startWebSocketServer({ app: upstreamApp, injectWebSocket: upstreamWs.injectWebSocket })
+  upstreamBase = `http://127.0.0.1:${upstream.port}`
 
-  managerServer = serve({ fetch: managerApp.fetch, port: 0, hostname: '127.0.0.1' }) as unknown as Server
-  managerWs.injectWebSocket(managerServer)
-  managerPort = await listen(managerServer)
+  manager = await startWebSocketServer({ app: managerApp, injectWebSocket: managerWs.injectWebSocket })
+  managerPort = manager.port
 
-  authenticatedServer = serve({ fetch: authenticatedApp.fetch, port: 0, hostname: '127.0.0.1' }) as unknown as Server
-  authenticatedWs.injectWebSocket(authenticatedServer)
-  authenticatedPort = await listen(authenticatedServer)
+  authenticated = await startWebSocketServer({ app: authenticatedApp, injectWebSocket: authenticatedWs.injectWebSocket })
+  authenticatedPort = authenticated.port
 
   vi.mocked(resolveRepoOrAssistant).mockImplementation((_db, id) => (id === 1 ? readyRepo : null))
   vi.mocked(resolveRepoWorkingDirectory).mockImplementation(async (_repo, directory) => {
@@ -234,9 +209,9 @@ afterAll(async () => {
   upstreamWs.wss.close()
   managerWs.wss.close()
   authenticatedWs.wss.close()
-  await closeServer(upstreamServer)
-  await closeServer(managerServer)
-  await closeServer(authenticatedServer)
+  await upstream.close()
+  await manager.close()
+  await authenticated.close()
 })
 
 describe('Repo Terminal Socket Route', () => {

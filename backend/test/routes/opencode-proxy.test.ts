@@ -1,19 +1,21 @@
-import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest'
-import { spawn } from 'child_process'
-import { createServer } from 'http'
+import { describe, it, expect, vi, beforeEach, afterEach, beforeAll, afterAll } from 'vitest'
+import { execFileSync, spawn } from 'child_process'
+import { createServer, request } from 'http'
+import type { Server } from 'http'
 import type { AddressInfo } from 'net'
 import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'fs'
 import { tmpdir } from 'os'
 import { join } from 'path'
 import { Hono } from 'hono'
-import { serve } from '@hono/node-server'
+import { createNodeWebSocket } from '@hono/node-ws'
 import type { Database } from 'bun:sqlite'
 import { buildOpenCodeBasicAuth } from '@opencode-manager/shared/opencode'
 import { getWorkspacePath } from '@opencode-manager/shared/config/env'
 import { createOpenCodeProxyRoutes } from '../../src/routes/opencode-proxy'
 import type { SettingsService } from '../../src/services/settings'
 import { OpenCodeSupervisor } from '../../src/services/opencode-supervisor'
-import { resolveOpenCode2Binary, startOpenCodeServe } from '../helpers/opencode-binary'
+import { resolveOpenCode2Binary, startOpenCodeServe, type OpenCodeServe } from '../helpers/opencode-binary'
+import { startWebSocketServer } from '../helpers/websocket-server'
 
 vi.mock('bun:sqlite', () => ({
   Database: vi.fn(),
@@ -52,6 +54,12 @@ const mockSettingsService = {
 
 const mockDb = {} as Database
 
+function createProxyApp(): Hono {
+  const proxyApp = new Hono()
+  proxyApp.route('/api/opencode-proxy', createOpenCodeProxyRoutes(mockDb, mockSettingsService, createNodeWebSocket({ app: proxyApp }).upgradeWebSocket))
+  return proxyApp
+}
+
 function upstreamOk() {
   const upstreamFetch = vi.fn().mockResolvedValue(
     new Response('ok', { status: 200, headers: { 'content-type': 'text/plain' } })
@@ -68,8 +76,7 @@ describe('opencode-proxy routes', () => {
     vi.clearAllMocks()
     isLifecycleInitializedMock.mockReturnValue(true)
     originalFetch = globalThis.fetch
-    app = new Hono()
-    app.route('/api/opencode-proxy', createOpenCodeProxyRoutes(mockDb, mockSettingsService))
+    app = createProxyApp()
   })
 
   afterEach(() => {
@@ -228,6 +235,45 @@ describe('opencode-proxy routes', () => {
     expect(res.status).toBe(501)
     const body = await res.json() as { error: string }
     expect(body.error).toContain('WebSocket')
+  })
+
+  it('still requires authorization for WebSocket upgrades without a PTY ticket', async () => {
+    const res = await app.request('/api/opencode-proxy/api/experimental/persistent-pty/pty_1/connect', {
+      headers: { Connection: 'Upgrade', Upgrade: 'websocket' },
+    })
+    expect(res.status).toBe(401)
+  })
+
+  it('requires authorization for a ticketed /api/pty connect', async () => {
+    const res = await app.request('/api/opencode-proxy/api/pty/pty_1/connect?ticket=abc', {
+      headers: { Connection: 'Upgrade', Upgrade: 'websocket' },
+    })
+    expect(res.status).toBe(401)
+  })
+
+  it('returns 403 for a ticketed persistent PTY connect from an untrusted origin', async () => {
+    const res = await app.request('/api/opencode-proxy/api/experimental/persistent-pty/pty_1/connect?ticket=abc', {
+      headers: { Connection: 'Upgrade', Upgrade: 'websocket', Origin: 'http://evil.example' },
+    })
+    expect(res.status).toBe(403)
+    const body = await res.json() as { error: string }
+    expect(body.error).toBe('Origin not allowed')
+  })
+
+  it('returns 503 for a ticketed persistent PTY connect before lifecycle initialization', async () => {
+    isLifecycleInitializedMock.mockReturnValue(false)
+    const res = await app.request('/api/opencode-proxy/api/experimental/persistent-pty/pty_1/connect?ticket=abc', {
+      headers: { Connection: 'Upgrade', Upgrade: 'websocket' },
+    })
+    expect(res.status).toBe(503)
+  })
+
+  it('does not resolve a repo for a ticketed persistent PTY connect through the repo mount', async () => {
+    const res = await app.request('/api/opencode-proxy/repos/999/api/experimental/persistent-pty/pty_1/connect?ticket=abc', {
+      headers: { Connection: 'Upgrade', Upgrade: 'websocket', Origin: 'http://evil.example' },
+    })
+    expect(res.status).toBe(403)
+    expect(getRepoByIdMock).not.toHaveBeenCalled()
   })
 
   it('preserves SSE content-type header from upstream', async () => {
@@ -770,8 +816,7 @@ describe('opencode-proxy repo-scoped mount', () => {
     vi.clearAllMocks()
     isLifecycleInitializedMock.mockReturnValue(true)
     originalFetch = globalThis.fetch
-    app = new Hono()
-    app.route('/api/opencode-proxy', createOpenCodeProxyRoutes(mockDb, mockSettingsService))
+    app = createProxyApp()
   })
 
   afterEach(() => {
@@ -1082,17 +1127,21 @@ function runOpenCodeAgainstProxy(
 }
 
 describe.skipIf(SHIPPED_OPENCODE_BIN === null)('opencode-proxy repo-scoped mount against the shipped OpenCode 2 binary', () => {
-  it('pins the repo directory for a client started from an unrelated cwd', async () => {
-    const root = mkdtempSync(join(tmpdir(), 'ocm-proxy-e2e-'))
-    const configHome = join(root, 'config')
-    const homeDirectory = join(root, 'home')
-    const clientCwd = join(root, 'client-cwd')
-    const repoPath = join(root, 'repo')
-    for (const directory of [join(configHome, 'opencode'), homeDirectory, clientCwd, repoPath, join(root, 'data'), join(root, 'state'), join(root, 'cache')]) {
+  let instanceRoot: string
+  let configHome: string
+  let homeDirectory: string
+  let instance: OpenCodeServe
+  let llm: { port: number; close: () => void }
+
+  beforeAll(async () => {
+    instanceRoot = mkdtempSync(join(tmpdir(), 'ocm-proxy-e2e-'))
+    configHome = join(instanceRoot, 'config')
+    homeDirectory = join(instanceRoot, 'home')
+    for (const directory of [join(configHome, 'opencode'), homeDirectory, join(instanceRoot, 'data'), join(instanceRoot, 'state'), join(instanceRoot, 'cache')]) {
       mkdirSync(directory, { recursive: true })
     }
 
-    const llm = await startMockLlm()
+    llm = await startMockLlm()
     writeFileSync(
       join(configHome, 'opencode', 'opencode.json'),
       JSON.stringify({
@@ -1109,17 +1158,33 @@ describe.skipIf(SHIPPED_OPENCODE_BIN === null)('opencode-proxy repo-scoped mount
       }),
     )
 
-    const instance = await startOpenCodeServe({ env: { HOME: homeDirectory, XDG_CONFIG_HOME: configHome } })
+    instance = await startOpenCodeServe({ env: { HOME: homeDirectory, XDG_CONFIG_HOME: configHome } })
+  })
+
+  afterEach(() => {
+    getOpenCodeServerPasswordMock.mockReturnValue('test-password')
+    upstreamBaseUrl.value = 'http://127.0.0.1:5551'
+  })
+
+  afterAll(async () => {
+    await instance.stop()
+    llm.close()
+    rmSync(instanceRoot, { recursive: true, force: true })
+  })
+
+  it('pins the repo directory for a client started from an unrelated cwd', async () => {
+    const root = mkdtempSync(join(tmpdir(), 'ocm-proxy-e2e-'))
+    const clientCwd = join(root, 'client-cwd')
+    const repoPath = join(root, 'repo')
+    for (const directory of [clientCwd, repoPath]) {
+      mkdirSync(directory, { recursive: true })
+    }
+
     upstreamBaseUrl.value = instance.baseUrl
     getOpenCodeServerPasswordMock.mockReturnValue(instance.password)
     getRepoByIdMock.mockReturnValue({ id: 1, fullPath: repoPath, cloneStatus: 'ready' })
 
-    const proxyApp = new Hono()
-    proxyApp.route('/api/opencode-proxy', createOpenCodeProxyRoutes(mockDb, mockSettingsService))
-    const proxyServer = await new Promise<ReturnType<typeof serve>>((resolve) => {
-      const server = serve({ fetch: proxyApp.fetch, port: 0, hostname: '127.0.0.1' }, () => resolve(server))
-    })
-    const proxyPort = (proxyServer.address() as AddressInfo).port
+    const { proxyServer, proxyPort } = await startProxyServer()
 
     try {
       const result = await runOpenCodeAgainstProxy(
@@ -1137,11 +1202,164 @@ describe.skipIf(SHIPPED_OPENCODE_BIN === null)('opencode-proxy repo-scoped mount
       expect(body.data.some((session) => session.location.directory === repoPath)).toBe(true)
     } finally {
       await new Promise<void>((resolve) => proxyServer.close(() => resolve()))
-      await instance.stop()
-      llm.close()
-      getOpenCodeServerPasswordMock.mockReturnValue('test-password')
-      upstreamBaseUrl.value = 'http://127.0.0.1:5551'
+      rmSync(root, { recursive: true, force: true })
+    }
+  }, 120000)
+
+  it('bridges a ticketed persistent PTY WebSocket for a remote client without an Authorization header', async () => {
+    const ptyDaemonsBefore = listPtyDaemonPids()
+    const root = mkdtempSync(join(tmpdir(), 'ocm-proxy-pty-'))
+    const repoPath = join(root, 'repo')
+    mkdirSync(repoPath, { recursive: true })
+
+    upstreamBaseUrl.value = instance.baseUrl
+    getOpenCodeServerPasswordMock.mockReturnValue(instance.password)
+    getRepoByIdMock.mockReturnValue({ id: 1, fullPath: repoPath, cloneStatus: 'ready' })
+
+    const { proxyServer, proxyPort } = await startProxyServer()
+    const repoProxy = `127.0.0.1:${proxyPort}/api/opencode-proxy/repos/1`
+    const clientAuth = 'Basic ' + Buffer.from('opencode:test-internal-token').toString('base64')
+    let leakedPtyDaemons: number[] = []
+
+    try {
+      const created = await fetch(`http://${repoProxy}/api/session`, {
+        method: 'POST',
+        headers: { Authorization: clientAuth, 'content-type': 'application/json' },
+        body: JSON.stringify({ title: 'pty-bridge' }),
+      })
+      expect(created.status, await created.clone().text()).toBe(200)
+      const sessionID = ((await created.json()) as { data: { id: string } }).data.id
+
+      const terminal = await fetch(`http://${repoProxy}/api/experimental/session/${sessionID}/terminal`, {
+        method: 'POST',
+        headers: { Authorization: clientAuth, 'content-type': 'application/json' },
+        body: JSON.stringify({ command: '/bin/sh', args: [], title: 'pty-bridge', env: {}, cwd: repoPath }),
+      })
+      expect(terminal.status, await terminal.clone().text()).toBe(200)
+      const ptyID = ((await terminal.json()) as { data: { id: string } }).data.id
+
+      const token = await fetch(`http://${repoProxy}/api/experimental/persistent-pty/${ptyID}/connect-token`, {
+        method: 'POST',
+        headers: { Authorization: clientAuth, 'x-opencode-ticket': '1' },
+      })
+      expect(token.status, await token.clone().text()).toBe(200)
+      const ticket = ((await token.json()) as { data: { ticket: string } }).data.ticket
+
+      const socket = new WebSocket(`ws://${repoProxy}/api/experimental/persistent-pty/${ptyID}/connect?ticket=${encodeURIComponent(ticket)}`)
+      socket.binaryType = 'arraybuffer'
+      const output = await new Promise<string>((resolve, reject) => {
+        let received = ''
+        let sent = false
+        const timer = setTimeout(() => reject(new Error(`timed out; received: ${received}`)), 20000)
+        socket.addEventListener('message', (event) => {
+          received += typeof event.data === 'string' ? event.data : new TextDecoder().decode(event.data as ArrayBuffer)
+          if (!sent && received.includes('replay_complete')) {
+            sent = true
+            socket.send('echo proxied-$((40+2))\n')
+          }
+          if (received.includes('proxied-42')) {
+            clearTimeout(timer)
+            resolve(received)
+          }
+        })
+        socket.addEventListener('close', (event) => {
+          clearTimeout(timer)
+          reject(new Error(`socket closed ${event.code}; received: ${received}`))
+        })
+      })
+      socket.close()
+
+      expect(output).toContain('proxied-42')
+    } finally {
+      await shutdownPersistentPty(repoProxy, clientAuth)
+      await new Promise<void>((resolve) => proxyServer.close(() => resolve()))
+      leakedPtyDaemons = await waitForNoNewPtyDaemons(ptyDaemonsBefore)
+      rmSync(root, { recursive: true, force: true })
+    }
+
+    expect(leakedPtyDaemons).toEqual([])
+  }, 120000)
+
+  it('rejects a persistent PTY connect with a bogus ticket as HTTP 403', async () => {
+    const root = mkdtempSync(join(tmpdir(), 'ocm-proxy-pty-'))
+    const repoPath = join(root, 'repo')
+    mkdirSync(repoPath, { recursive: true })
+
+    upstreamBaseUrl.value = instance.baseUrl
+    getOpenCodeServerPasswordMock.mockReturnValue(instance.password)
+    getRepoByIdMock.mockReturnValue({ id: 1, fullPath: repoPath, cloneStatus: 'ready' })
+
+    const { proxyServer, proxyPort } = await startProxyServer()
+
+    try {
+      const status = await readUpgradeRejectionStatus(
+        proxyPort,
+        '/api/opencode-proxy/repos/1/api/experimental/persistent-pty/pty_bogus/connect?ticket=bogus',
+      )
+      expect(status).toBe(403)
+    } finally {
+      await new Promise<void>((resolve) => proxyServer.close(() => resolve()))
       rmSync(root, { recursive: true, force: true })
     }
   }, 120000)
 })
+
+function listPtyDaemonPids(): number[] {
+  try {
+    return execFileSync('pgrep', ['-f', 'opencode-pty'], { encoding: 'utf8' })
+      .split('\n')
+      .map((line) => Number(line.trim()))
+      .filter((pid) => Number.isInteger(pid) && pid > 0)
+  } catch {
+    return []
+  }
+}
+
+async function waitForNoNewPtyDaemons(baseline: number[]): Promise<number[]> {
+  const deadline = Date.now() + 10000
+  let leaked: number[] = []
+  while (Date.now() < deadline) {
+    leaked = listPtyDaemonPids().filter((pid) => !baseline.includes(pid))
+    if (leaked.length === 0) return []
+    await new Promise((resolve) => setTimeout(resolve, 250))
+  }
+  return leaked
+}
+
+async function shutdownPersistentPty(repoProxy: string, clientAuth: string): Promise<void> {
+  await fetch(`http://${repoProxy}/api/experimental/persistent-pty/shutdown`, {
+    method: 'POST',
+    headers: { Authorization: clientAuth },
+  }).catch(() => undefined)
+}
+
+function readUpgradeRejectionStatus(port: number, path: string): Promise<number> {
+  return new Promise((resolve, reject) => {
+    const req = request({
+      host: '127.0.0.1',
+      port,
+      path,
+      headers: { Connection: 'Upgrade', Upgrade: 'websocket' },
+    })
+    req.on('response', (res) => {
+      res.resume()
+      resolve(res.statusCode ?? 0)
+    })
+    req.on('upgrade', (res) => {
+      res.destroy()
+      resolve(101)
+    })
+    req.on('error', reject)
+    req.end()
+  })
+}
+
+async function startProxyServer(): Promise<{ proxyServer: Server; proxyPort: number }> {
+  const { server, port } = await startWebSocketServer({
+    app: new Hono(),
+    register: (proxyApp, upgradeWebSocket) => {
+      proxyApp.route('/api/opencode-proxy', createOpenCodeProxyRoutes(mockDb, mockSettingsService, upgradeWebSocket))
+    },
+  })
+  return { proxyServer: server, proxyPort: port }
+}
