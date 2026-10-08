@@ -25,7 +25,7 @@ export function Sidebar({
   return (
     <aside
       className={cn(
-        'relative z-20 flex-shrink-0 border-r border-border bg-card/50 backdrop-blur-sm h-dvh flex flex-col pt-safe pb-safe transition-[width] duration-200',
+        'relative z-20 flex-shrink-0 border-r border-border bg-card/50 backdrop-blur-sm h-full flex flex-col pt-safe pb-safe transition-[width] duration-200',
         collapsed ? collapsedWidthClass : widthClass,
         className
       )}
