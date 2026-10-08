@@ -34,9 +34,10 @@ import { useSessionPermissionMode } from '@/hooks/useSessionPermissionMode'
 import { detectMentionTrigger, parsePromptToInput, getFilename, getDirectory, type MentionItem } from '@/lib/promptParser'
 import { matchText, rankByMatch, type MatchRange } from '@/lib/fuzzyMatch'
 import { getNextPrimaryAgentId } from '@/lib/primaryAgents'
+import { getNextFavoriteModel } from '@/lib/favoriteModels'
 import { randomId } from '@/lib/utils'
 import { showToast } from '@/lib/toast'
-import { findModelInfo } from '@opencode-manager/shared/opencode'
+import { findModelInfo, isSameModelSelection } from '@opencode-manager/shared/opencode'
 import { isOpenSessionGoal } from '@opencode-manager/shared/schemas'
 import { useProviders } from '@/hooks/useProviders'
 
@@ -112,6 +113,7 @@ export interface PromptInputHandle {
   openModelPicker: () => void
   cycleAgent: () => void
   cycleVariant: () => void
+  cycleFavoriteModel: () => void
 }
 
 interface PromptInputProps {
@@ -1229,7 +1231,7 @@ if (isIOS && isSecureContext && navigator.clipboard && navigator.clipboard.read)
     [sessionID, sessionAgent.sessionAgentId, sessionAgent.modelRef],
   )
 
-  const { model, modelString, modelRef, setActiveAgent, isModelReady } = useModelSelection(directory, modelSelectionSession)
+  const { model, modelString, modelRef, favoriteModels, setModel, setActiveAgent, isModelReady } = useModelSelection(directory, modelSelectionSession)
 
   useEffect(() => {
     setActiveAgent({
@@ -1266,6 +1268,18 @@ if (isIOS && isSecureContext && navigator.clipboard && navigator.clipboard.read)
     cycleVariant()
   }, [hasVariants, cycleVariant])
 
+  const handleCycleFavoriteModel = useCallback(() => {
+    const next = getNextFavoriteModel(favoriteModels, model)
+    if (!next) {
+      showToast.info('No favorite models')
+      return
+    }
+    if (model && isSameModelSelection(model, next)) {
+      return
+    }
+    setModel(next)
+  }, [favoriteModels, model, setModel])
+
   const handleCycleAgent = useCallback(() => {
     const next = getNextPrimaryAgentId(agents, currentMode)
     if (!next) {
@@ -1290,7 +1304,8 @@ if (isIOS && isSecureContext && navigator.clipboard && navigator.clipboard.read)
     },
     cycleAgent: handleCycleAgent,
     cycleVariant: handleCycleVariant,
-  }), [resetPrompt, openFilePicker, handleCycleAgent, handleCycleVariant])
+    cycleFavoriteModel: handleCycleFavoriteModel,
+  }), [resetPrompt, openFilePicker, handleCycleAgent, handleCycleVariant, handleCycleFavoriteModel])
 
   const commandActionsWithPrompt = useMemo<CommandActions>(
     () => ({

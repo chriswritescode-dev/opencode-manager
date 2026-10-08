@@ -81,6 +81,7 @@ export const DEFAULT_KEYBOARD_SHORTCUTS = {
   toggleSidebar: 'B',
   selectModel: 'M',
   variantCycle: 'Ctrl+T',
+  favoriteCycle: 'Ctrl+R',
   toggleTerminal: 'T',
   toggleSourceControl: '',
   timeline: 'G',
@@ -91,7 +92,7 @@ export const DEFAULT_KEYBOARD_SHORTCUTS = {
 
 export type KeyboardShortcutAction = keyof typeof DEFAULT_KEYBOARD_SHORTCUTS;
 
-export const DEFAULT_DIRECT_SHORTCUTS = ['submit', 'abort', 'clearPrompt', 'toggleMode', 'variantCycle', 'halfPageUp', 'halfPageDown'];
+export const DEFAULT_DIRECT_SHORTCUTS = ['submit', 'abort', 'clearPrompt', 'toggleMode', 'variantCycle', 'favoriteCycle', 'halfPageUp', 'halfPageDown'];
 
 export const GitCredentialSchema = z.object({
   id: z.string().optional(),

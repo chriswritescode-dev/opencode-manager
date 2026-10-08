@@ -606,6 +606,7 @@ export function SessionDetail() {
     exportSession: handleExportSession,
     toggleMode: () => promptInputRef.current?.cycleAgent(),
     variantCycle: () => promptInputRef.current?.cycleVariant(),
+    favoriteCycle: () => promptInputRef.current?.cycleFavoriteModel(),
     submit: () => document.querySelector<HTMLButtonElement>("[data-submit-prompt]")?.click(),
     abort: isSessionActive ? handleInterruptSession : undefined,
     clearPrompt: handleClearPrompt,
