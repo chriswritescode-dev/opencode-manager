@@ -55,7 +55,6 @@ WORKSPACE_PATH="./workspace"
 if [ ! -d "$WORKSPACE_PATH" ]; then
   echo "📁 Creating workspace directory at $WORKSPACE_PATH..."
   mkdir -p "$WORKSPACE_PATH/repos"
-  mkdir -p "$WORKSPACE_PATH/config"
   echo "✅ Workspace directory created"
 else
   echo "✅ Workspace directory exists"

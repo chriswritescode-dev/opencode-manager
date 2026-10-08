@@ -1,15 +1,45 @@
 import { Hono } from 'hono'
 import { AssistantSettingsPatchSchema } from '@opencode-manager/shared/schemas'
 import type { SettingsService } from '../../services/settings'
-import type { UserPreferences } from '@opencode-manager/shared/types'
+import type { SettingsResponse, UserPreferences } from '@opencode-manager/shared/types'
+import { OPENCODE_CONFIG_REDACTED_VALUE } from '../../services/opencode-config-file'
+
+function redactSecret<T extends string | undefined>(value: T): T {
+  return (value ? OPENCODE_CONFIG_REDACTED_VALUE : value) as T
+}
+
+/**
+ * Replaces stored credentials in a settings response with `<redacted>` so token clients such as the
+ * agent-facing `ocm` tool can read preferences without receiving secrets. Empty values stay empty, so a
+ * caller can still tell whether a credential is configured.
+ */
+function redactInternalSettings(settings: SettingsResponse): SettingsResponse {
+  const { preferences } = settings
+  return {
+    ...settings,
+    preferences: {
+      ...preferences,
+      gitCredentials: preferences.gitCredentials?.map((credential) => ({
+        ...credential,
+        token: redactSecret(credential.token),
+        sshPrivateKey: redactSecret(credential.sshPrivateKey),
+        sshPrivateKeyEncrypted: redactSecret(credential.sshPrivateKeyEncrypted),
+        passphrase: redactSecret(credential.passphrase),
+      })),
+      tts: preferences.tts && { ...preferences.tts, apiKey: redactSecret(preferences.tts.apiKey) },
+      stt: preferences.stt && { ...preferences.stt, apiKey: redactSecret(preferences.stt.apiKey) },
+      serverEnvVars: preferences.serverEnvVars?.map((envVar) => ({ ...envVar, value: redactSecret(envVar.value) })),
+      lastKnownGoodConfig: redactSecret(preferences.lastKnownGoodConfig),
+    },
+  }
+}
 
 export function createInternalSettingsRoutes(settingsService: SettingsService) {
   const app = new Hono()
 
   app.get('/', (c) => {
     const userId = c.req.query('userId') ?? 'default'
-    const settings = settingsService.getSettings(userId)
-    return c.json(settings)
+    return c.json(redactInternalSettings(settingsService.getSettings(userId)))
   })
 
   app.patch('/', async (c) => {
@@ -49,7 +79,7 @@ export function createInternalSettingsRoutes(settingsService: SettingsService) {
     }
 
     const updated = settingsService.updateSettings(updates as Partial<UserPreferences>, userId)
-    return c.json(updated)
+    return c.json(redactInternalSettings(updated))
   })
 
   return app

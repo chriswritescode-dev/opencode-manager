@@ -71,14 +71,17 @@ For local development setup, see the [Development Guide](https://opencodemanager
 
 - **Repositories & Git** — Multi-repo management, local discovery, SSH auth, worktrees, unified diffs, branch and commit management
 - **Chat & Sessions** — Real-time SSE streaming, slash commands, `@file` mentions, Plan/Build modes, Mermaid diagram rendering
+- **Multi-run & Goals** — Send one prompt to up to 5 models and fuse the results in a new worktree; set session goals and permission modes
 - **Files** — Directory browser with tree view, syntax highlighting, create/rename/delete, ZIP download
+- **Terminal & Preview** — Repo terminals, project actions, and an authenticated dev-server preview
 - **Assistant Mode** — Dedicated AI workspace with auto-provisioned skills for schedules, notifications, settings, and repo operations
-- **Schedules** — Recurring repo jobs with reusable prompts, run history, linked sessions, markdown-rendered output
+- **Schedules** — Recurring repo jobs on cron or interval in fresh, kept, or shared worktrees, with reusable prompts, attached MCP servers, run history, and linked sessions
 - **MCP Servers** — Add, configure, authenticate, and manage local or remote MCP servers with OAuth support
 - **AI Configuration** — Model/provider setup, API keys, OAuth for Anthropic and GitHub Copilot, custom agent definitions
 - **Skills** — Extend agent capabilities with shareable, scoped skill definitions
 - **Notifications** — Push notifications for session events, questions, errors, and completions
 - **Audio** — Text-to-speech and speech-to-text (browser native and OpenAI-compatible APIs)
+- **Agent Sandboxing** — Optional microVM isolation for agent shell commands
 - **Themes** — Light/dark/system appearance plus a color theme picker with the Manager default and 36 bundled OpenCode palettes
 - **Mobile & PWA** — Responsive mobile-first UI, installable on any device, iOS-optimized
 
@@ -126,7 +129,7 @@ For OAuth, Passkeys, Push Notifications (VAPID), and advanced configuration, see
 
 ## `ocm` CLI
 
-OpenCode Manager ships an `ocm` CLI (from `ocm-cli/`) that attaches your local OpenCode TUI to a repo hosted on the Manager. It lists ready repos, attaches with `opencode --server` through the Manager's repo-scoped `/api/opencode-proxy/repos/:repoId` route (so prompts run on the Manager's filesystem against a single shared OpenCode server), and can sync the working tree up or down with `ocm push` / `ocm pull` (fast git bundle + working-tree patch by default; pass `--full` for the legacy tarball mirror). Running `ocm` inside a local clone auto-detects the matching Manager repo by `origin` URL.
+OpenCode Manager ships an `ocm` CLI (from `ocm-cli/`) that attaches your local OpenCode TUI to a repo hosted on the Manager. It lists ready repos, attaches with `opencode --server` through the Manager's repo-scoped `/api/opencode-proxy/repos/:repoId` route (so prompts run on the Manager's filesystem against a single shared OpenCode server), and can sync the working tree up or down with `ocm push` / `ocm pull` (fast git bundle + working-tree patch by default; pass `--full` for the legacy tarball mirror). Running `ocm` inside a local clone attaches to the Manager repo with the same OpenCode project id (derived from the `origin` remote, else the cached id, else the root commit). Its TUI plugin adds `/ocm-move`, `/ocm` (switch server), `/ocm-goal` and `/ocm-multirun`.
 
 See the [`ocm` CLI guide](https://opencodemanager.app/docs/ocm-cli) for setup and commands.
 
