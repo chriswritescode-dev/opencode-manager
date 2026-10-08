@@ -142,7 +142,7 @@ describe('ChangesWalkthroughSheet', () => {
     expect(await screen.findByText('Stop 1 of 2')).toBeInTheDocument()
   })
 
-  it('shows the stale warning and regenerates', async () => {
+  it('updates a stale walkthrough incrementally', async () => {
     const user = userEvent.setup()
     mocks.getChangeWalkthrough.mockResolvedValue(state({ stale: true, currentDiffHash: 'hash-2' }))
     mocks.generateChangeWalkthrough.mockResolvedValue(state({ generating: true }))
@@ -152,10 +152,10 @@ describe('ChangesWalkthroughSheet', () => {
       await screen.findByText('Changes have been updated since this walkthrough was generated'),
     ).toBeInTheDocument()
 
-    await user.click(screen.getByRole('button', { name: 'Regenerate' }))
+    await user.click(screen.getByRole('button', { name: 'Update walkthrough' }))
 
     await waitFor(() => {
-      expect(mocks.generateChangeWalkthrough).toHaveBeenCalledWith('ses_1', { regenerate: true })
+      expect(mocks.generateChangeWalkthrough).toHaveBeenCalledWith('ses_1', {})
     })
   })
 
@@ -179,6 +179,50 @@ describe('ChangesWalkthroughSheet', () => {
 
     expect(await screen.findByText(/Generating walkthrough/)).toBeInTheDocument()
     expect(screen.queryByRole('button', { name: 'Generate walkthrough' })).not.toBeInTheDocument()
+  })
+
+  it('renders ready and pending stops while generating', async () => {
+    mocks.getChangeWalkthrough.mockResolvedValue(
+      state({
+        generating: true,
+        walkthrough: {
+          ...walkthrough,
+          stops: [
+            { ...walkthrough.stops[0], status: 'ready' },
+            { ...walkthrough.stops[1], status: 'pending', explanation: '' },
+          ],
+        },
+      }),
+    )
+    renderSheet()
+
+    expect(await screen.findByText('Introduces the greeting helper.')).toBeInTheDocument()
+    expect(screen.getByText(/1 of 2 stops explained/)).toBeInTheDocument()
+    expect(screen.getByLabelText('Explaining')).toBeInTheDocument()
+  })
+
+  it('retries unexplained stops', async () => {
+    const user = userEvent.setup()
+    mocks.getChangeWalkthrough.mockResolvedValue(
+      state({
+        walkthrough: {
+          ...walkthrough,
+          stops: [
+            { ...walkthrough.stops[0], status: 'failed', explanation: '' },
+            { ...walkthrough.stops[1], status: 'ready' },
+          ],
+        },
+      }),
+    )
+    mocks.generateChangeWalkthrough.mockResolvedValue(state({ generating: true }))
+    renderSheet()
+
+    expect(await screen.findByText('This stop could not be explained.')).toBeInTheDocument()
+    await user.click(screen.getByRole('button', { name: 'Retry unexplained stops' }))
+
+    await waitFor(() => {
+      expect(mocks.generateChangeWalkthrough).toHaveBeenCalledWith('ses_1', {})
+    })
   })
 
   it('renders a generation failure recorded by the server', async () => {

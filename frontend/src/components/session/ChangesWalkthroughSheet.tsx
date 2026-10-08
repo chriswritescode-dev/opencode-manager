@@ -85,6 +85,7 @@ interface ChangesWalkthroughContextValue {
   selectedHunks: WalkthroughHunk[]
   selectStop: (index: number) => void
   detailRef: RefObject<HTMLDivElement | null>
+  failedStopCount: number
 }
 
 const ChangesWalkthroughContext = createContext<ChangesWalkthroughContextValue | null>(null)
@@ -132,6 +133,10 @@ export function ChangesWalkthroughProvider({ sessionId, active, children }: Chan
     .map((id) => hunksById.get(id))
     .filter((hunk): hunk is WalkthroughHunk => hunk !== undefined)
 
+  const failedStopCount = stops.filter(
+    (stop) => stop.status === 'failed' || (stop.status === 'pending' && !generating),
+  ).length
+
   const selectStop = useCallback((index: number) => {
     setStopIndex(index)
     detailRef.current?.scrollIntoView?.({ block: 'start', behavior: 'smooth' })
@@ -152,6 +157,7 @@ export function ChangesWalkthroughProvider({ sessionId, active, children }: Chan
     selectedHunks,
     selectStop,
     detailRef,
+    failedStopCount,
   }
 
   return <ChangesWalkthroughContext.Provider value={value}>{children}</ChangesWalkthroughContext.Provider>
@@ -219,14 +225,16 @@ export const ChangesWalkthroughView = memo(function ChangesWalkthroughView() {
     error,
     contextLimitFiles,
     generate,
-    regenerate,
     stops,
     stopIndex,
     selectedStop,
     selectedHunks,
     selectStop,
     detailRef,
+    failedStopCount,
   } = useChangesWalkthrough()
+
+  const readyStopCount = stops.filter((stop) => stop.status === 'ready').length
 
   return (
     <div className="min-h-0 flex-1 space-y-4 overflow-y-auto p-4">
@@ -240,7 +248,11 @@ export const ChangesWalkthroughView = memo(function ChangesWalkthroughView() {
       {generating ? (
         <div className="flex items-center gap-2 rounded-md border border-border bg-muted/20 px-3 py-2 text-sm text-muted-foreground">
           <Loader2 className="h-4 w-4 shrink-0 animate-spin" />
-          <span>Generating walkthrough… this can take a minute or two.</span>
+          <span>
+            {walkthrough && stops.length > 0
+              ? `Generating walkthrough… ${readyStopCount} of ${stops.length} stops explained`
+              : 'Generating walkthrough… this can take a minute or two.'}
+          </span>
         </div>
       ) : null}
 
@@ -264,9 +276,18 @@ export const ChangesWalkthroughView = memo(function ChangesWalkthroughView() {
               <p className="text-sm text-warning">
                 Changes have been updated since this walkthrough was generated
               </p>
-              <Button variant="outline" size="sm" onClick={regenerate}>
+              <Button variant="outline" size="sm" onClick={generate}>
                 <RefreshCw className="mr-2 h-3.5 w-3.5" />
-                Regenerate
+                Update walkthrough
+              </Button>
+            </div>
+          ) : null}
+
+          {failedStopCount > 0 && !generating ? (
+            <div className="flex flex-wrap items-center justify-between gap-2 rounded-md border border-border bg-muted/20 px-3 py-2">
+              <p className="text-sm text-muted-foreground">Some stops could not be explained</p>
+              <Button variant="outline" size="sm" onClick={generate}>
+                Retry unexplained stops
               </Button>
             </div>
           ) : null}
@@ -288,7 +309,16 @@ export const ChangesWalkthroughView = memo(function ChangesWalkthroughView() {
                         : 'text-muted-foreground hover:bg-accent/20',
                     )}
                   >
-                    {index + 1}. {stop.title}
+                    <span className="flex items-center gap-2">
+                      <span className="min-w-0 flex-1 truncate">
+                        {index + 1}. {stop.title}
+                      </span>
+                      {stop.status === 'pending' && generating ? (
+                        <Loader2 className="h-3.5 w-3.5 shrink-0 animate-spin" aria-label="Explaining" />
+                      ) : stop.status === 'failed' || stop.status === 'pending' ? (
+                        <span className="shrink-0 text-xs text-muted-foreground">not explained</span>
+                      ) : null}
+                    </span>
                   </button>
                 </li>
               ))}
@@ -300,7 +330,13 @@ export const ChangesWalkthroughView = memo(function ChangesWalkthroughView() {
               <h3 className="text-sm font-semibold text-foreground">
                 {stopIndex + 1}. {selectedStop.title}
               </h3>
-              <ScheduleRunMarkdown content={selectedStop.explanation} />
+              {selectedStop.status === 'ready' ? (
+                <ScheduleRunMarkdown content={selectedStop.explanation} />
+              ) : (
+                <p className="text-sm text-muted-foreground">
+                  {generating ? 'Explaining this stop…' : 'This stop could not be explained.'}
+                </p>
+              )}
               {selectedHunks.map((hunk) => (
                 <div key={hunk.id} className="overflow-hidden rounded-md border border-border">
                   <div className="flex items-center gap-2 border-b border-border bg-muted/30 px-3 py-1.5">
