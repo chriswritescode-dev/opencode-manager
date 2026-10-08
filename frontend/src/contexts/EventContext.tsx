@@ -29,6 +29,12 @@ import {
 
 const STATUS_POLL_INTERVAL_MS = 5000
 
+const LOCATION_CATALOG_QUERY_KEYS = [
+  ['opencode', 'commands'],
+  ['opencode', 'agents'],
+  ['opencode', 'skills'],
+] as const
+
 type PermissionsBySession = Record<string, PermissionRequest[]>
 type FormsBySession = Record<string, FormInfo[]>
 type SSEHealthState = Pick<EventStreamHealthState, 'isConnected' | 'isHealthy' | 'isStalled'>
@@ -568,6 +574,9 @@ export function EventProvider({ children }: { children: React.ReactNode }) {
         case 'command.updated':
           invalidateQueryKeysDebounced(queryClient, [['opencode', 'commands']])
           break
+        case 'skill.updated':
+          invalidateQueryKeysDebounced(queryClient, [['opencode', 'skills']])
+          break
         case 'config.updated':
           invalidateQueryKeysDebounced(queryClient, [['opencode', 'config'], ['opencode-config']])
           break
@@ -599,6 +608,7 @@ export function EventProvider({ children }: { children: React.ReactNode }) {
         fetchInitialPendingData()
         fetchInitialSessionStatuses()
         invalidateChildSessionCaches(queryClient)
+        invalidateQueryKeysDebounced(queryClient, LOCATION_CATALOG_QUERY_KEYS)
         startStatusPoll()
       } else {
         statusSyncVersionRef.current += 1
@@ -610,6 +620,7 @@ export function EventProvider({ children }: { children: React.ReactNode }) {
       void reconcilePendingActionsForDirectories(collectTrackedDirectories())
       void fetchInitialSessionStatuses()
       invalidateChildSessionCaches(queryClient)
+      invalidateQueryKeysDebounced(queryClient, LOCATION_CATALOG_QUERY_KEYS)
     }
 
     const initialDirectories = [...new Set((reposRef.current ?? []).map(r => r.fullPath))]

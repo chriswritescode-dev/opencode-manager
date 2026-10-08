@@ -814,6 +814,7 @@ describe('EventProvider permissions and forms', () => {
   it.each<[string, string[]]>([
     ['agent.updated', ['opencode', 'agents']],
     ['command.updated', ['opencode', 'commands']],
+    ['skill.updated', ['opencode', 'skills']],
   ])('invalidates the %s cache', async (type, queryKey) => {
     const queryClient = createTestQueryClient()
     const invalidateQueries = vi.spyOn(queryClient, 'invalidateQueries')
@@ -832,6 +833,53 @@ describe('EventProvider permissions and forms', () => {
 
     await waitFor(() => {
       expect(invalidateQueries).toHaveBeenCalledWith({ queryKey })
+    })
+  })
+
+  it('invalidates the location catalog caches on an upstream resync', async () => {
+    const queryClient = createTestQueryClient()
+    const invalidateQueries = vi.spyOn(queryClient, 'invalidateQueries')
+
+    render(<Harness />, { wrapper: createWrapper(queryClient) })
+
+    await waitFor(() => expect(mocks.subscribeGlobalMonitor).toHaveBeenCalled())
+    invalidateQueries.mockClear()
+
+    const lastSubscribeCall = mocks.subscribeGlobalMonitor.mock.calls[mocks.subscribeGlobalMonitor.mock.calls.length - 1]
+    const onResync = lastSubscribeCall[0].onResync as (() => void) | undefined
+
+    act(() => {
+      onResync?.()
+    })
+
+    await waitFor(() => {
+      expect(invalidateQueries).toHaveBeenCalledWith({ queryKey: ['opencode', 'commands'] })
+      expect(invalidateQueries).toHaveBeenCalledWith({ queryKey: ['opencode', 'agents'] })
+      expect(invalidateQueries).toHaveBeenCalledWith({ queryKey: ['opencode', 'skills'] })
+    })
+  })
+
+  it('invalidates the location catalog caches when the browser stream reconnects', async () => {
+    const queryClient = createTestQueryClient()
+    const invalidateQueries = vi.spyOn(queryClient, 'invalidateQueries')
+
+    render(<Harness />, { wrapper: createWrapper(queryClient) })
+
+    await waitFor(() => expect(mocks.subscribeGlobalMonitor).toHaveBeenCalled())
+    invalidateQueries.mockClear()
+
+    const lastSubscribeCall = mocks.subscribeGlobalMonitor.mock.calls[mocks.subscribeGlobalMonitor.mock.calls.length - 1]
+    const handleStatusChange = lastSubscribeCall[0].onStatusChange as (connected: boolean) => void
+
+    act(() => {
+      handleStatusChange(false)
+      handleStatusChange(true)
+    })
+
+    await waitFor(() => {
+      expect(invalidateQueries).toHaveBeenCalledWith({ queryKey: ['opencode', 'commands'] })
+      expect(invalidateQueries).toHaveBeenCalledWith({ queryKey: ['opencode', 'agents'] })
+      expect(invalidateQueries).toHaveBeenCalledWith({ queryKey: ['opencode', 'skills'] })
     })
   })
 
