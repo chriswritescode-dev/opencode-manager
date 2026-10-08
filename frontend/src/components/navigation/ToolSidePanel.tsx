@@ -1,3 +1,4 @@
+import { useEffect, useRef } from 'react'
 import { X } from 'lucide-react'
 import { useLocation } from 'react-router-dom'
 import { FileBrowser } from '@/components/file-browser/FileBrowser'
@@ -15,10 +16,11 @@ import { RepoActionsContent } from '@/components/repo/RepoActionsDialog'
 import { RepoSkillsContent } from '@/components/repo/RepoSkillsDialog'
 import { RepoSchedulesContent } from '@/components/schedules/RepoSchedulesContent'
 import type { SkillFileInfo } from '@opencode-manager/shared'
-import { buildToolItems, type MoreDrawerItem } from '@/components/navigation/moreDrawerItems'
+import { buildToolItems, toolKeyOf, type MoreDrawerItem } from '@/components/navigation/moreDrawerItems'
 import { isPanelTool, type ToolPanelState, type PanelTool } from '@/hooks/useToolPanel'
 import { useOpenNavItem } from '@/hooks/useOpenNavItem'
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from '@/components/ui/tooltip'
+import { restoreOverlayFocus } from '@/lib/overlayFocus'
 import { cn } from '@/lib/utils'
 
 interface ToolSidePanelProps {
@@ -90,10 +92,23 @@ export function ToolSidePanel({
   const { activeTool, toggleTool, closePanel } = panel
   const location = useLocation()
   const openNavItem = useOpenNavItem()
+  const railRef = useRef<HTMLElement>(null)
+  const previousActiveToolRef = useRef(activeTool)
+
+  useEffect(() => {
+    const previousTool = previousActiveToolRef.current
+    previousActiveToolRef.current = activeTool
+    if (previousTool === null || activeTool !== null) return
+    const active = document.activeElement
+    if (active === null || active === document.body || railRef.current?.contains(active)) {
+      restoreOverlayFocus(null)
+    }
+  }, [activeTool])
+
   const panelTools: Array<{ item: MoreDrawerItem; tool: PanelTool }> = []
   const actionItems: MoreDrawerItem[] = []
   for (const item of buildToolItems(location.pathname)) {
-    const tool = item.panelTool ?? item.dialog ?? null
+    const tool = toolKeyOf(item)
     if (isPanelTool(tool)) panelTools.push({ item, tool })
     else actionItems.push(item)
   }
@@ -182,7 +197,7 @@ export function ToolSidePanel({
       ) : null}
 
       <TooltipProvider>
-        <nav aria-label="Tools" className="flex w-11 shrink-0 flex-col items-center gap-1 overflow-y-auto border-l border-border bg-background py-2">
+        <nav ref={railRef} aria-label="Tools" className="flex w-11 shrink-0 flex-col items-center gap-1 overflow-y-auto border-l border-border bg-background py-2">
           {panelTools.map(({ item, tool }) => (
             <RailButton key={item.key} item={item} active={tool === activeTool} onClick={() => toggleTool(tool)} />
           ))}

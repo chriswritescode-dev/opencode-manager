@@ -34,6 +34,7 @@ const {
   getSessionMock,
   sessionPinsData,
   sessionsHasNextPage,
+  searchError,
 } = vi.hoisted(() => ({
   listReposMock: vi.fn(),
   sessionsData: [] as SessionFixture[],
@@ -45,6 +46,7 @@ const {
   getSessionMock: vi.fn(),
   sessionPinsData: { current: [] as SessionPinFixture[] },
   sessionsHasNextPage: { current: false },
+  searchError: { current: false },
 }))
 
 vi.mock('@/api/repos', async (importOriginal) => {
@@ -62,12 +64,17 @@ vi.mock('@/hooks/useOpenCode', async (importOriginal) => {
   return {
     ...actual,
     useSessionsAcrossDirectories: (directories: string[], options?: { search?: string; limit?: number }) => {
-      sessionsHookCalls.push({ directories, options })
+      if (directories.length > 0) sessionsHookCalls.push({ directories, options })
       const data =
         options?.search && emptyOnSearch.current
           ? []
           : sessionsData.filter((session) => directories.includes(session.location.directory))
-      return { data, isLoading: false, isError: false, hasNextPage: sessionsHasNextPage.current }
+      return {
+        data,
+        isLoading: false,
+        isError: Boolean(options?.search) && searchError.current,
+        hasNextPage: sessionsHasNextPage.current,
+      }
     },
     useCreateSession: (directory?: string) => ({
       mutate: (vars?: unknown) => {
@@ -161,6 +168,7 @@ describe('DesktopSessionTree', () => {
     getSessionMock.mockResolvedValue(undefined)
     sessionPinsData.current = []
     sessionsHasNextPage.current = false
+    searchError.current = false
   })
 
   it('lists every repo by last access, even inside a repo, with no Recent section', async () => {
@@ -302,6 +310,9 @@ describe('DesktopSessionTree', () => {
     await user.type(input, 'Session')
 
     expect(await screen.findByRole('button', { name: /^Session a1/ })).toBeTruthy()
+    await waitFor(() =>
+      expect(sessionsHookCalls.some((call) => call.options?.search === 'Session')).toBe(true),
+    )
     const searchCall = sessionsHookCalls.find((call) => call.options?.search === 'Session')
     expect(searchCall?.directories).toEqual(['/repos/a', '/repos/b'])
     expect(sessionsHookCalls.some((call) => call.options?.search === 'Sess')).toBe(false)
@@ -313,6 +324,19 @@ describe('DesktopSessionTree', () => {
     expect(input).toHaveValue('')
     await waitFor(() => expect(screen.queryByRole('button', { name: /^Session / })).toBeNull())
     expect(toggleFor('Alpha')).toBeTruthy()
+  })
+
+  it('filters loaded sessions by title immediately', async () => {
+    const user = userEvent.setup()
+    render(<DesktopSessionTree />, { wrapper: createWrapper(['/']) })
+
+    const input = await screen.findByLabelText('Search sessions')
+    await screen.findByText('Alpha')
+    await user.type(input, 'a1')
+
+    expect(await screen.findByRole('button', { name: /^Session a1/ })).toBeTruthy()
+    expect(screen.queryByRole('button', { name: /^Session b1/ })).toBeNull()
+    expect(screen.queryByRole('button', { name: /^Session c1/ })).toBeNull()
   })
 
   it('clears an active search with the clear button', async () => {
@@ -340,6 +364,7 @@ describe('DesktopSessionTree', () => {
 
     expect(await screen.findByRole('button', { name: /^Session b1/ })).toBeTruthy()
     expect(screen.queryByRole('button', { name: /^Session a1/ })).toBeNull()
+    await waitFor(() => expect(sessionsHookCalls.some((call) => call.options?.search === 'bet')).toBe(true))
     const searchCall = sessionsHookCalls.find((call) => call.options?.search === 'bet')
     expect(searchCall?.directories).toEqual(['/repos/c', '/repos/a'])
   })
@@ -367,6 +392,17 @@ describe('DesktopSessionTree', () => {
     await user.type(input, 'nothing')
 
     expect(await screen.findByText('No sessions found')).toBeTruthy()
+  })
+
+  it('shows the error state when the session search fails', async () => {
+    const user = userEvent.setup()
+    searchError.current = true
+    render(<DesktopSessionTree />, { wrapper: createWrapper(['/']) })
+
+    const input = await screen.findByLabelText('Search sessions')
+    await user.type(input, 'Session')
+
+    expect(await screen.findByText('Failed to load sessions')).toBeTruthy()
   })
 
   it('creates a session in the repo full path', async () => {

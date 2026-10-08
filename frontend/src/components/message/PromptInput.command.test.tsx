@@ -422,6 +422,47 @@ describe('PromptInput command submission', () => {
     expect(screen.getByTestId('model-quick-select')).toHaveAttribute('data-open', 'true')
   })
 
+  it('resets bash mode through the imperative clearPrompt', async () => {
+    const queryClient = createTestQueryClient()
+    queryClient.setQueryData(['opencode', 'session', 'test-session', '/test'], sessionInfo())
+    const ref = createRef<PromptInputHandle>()
+
+    render(
+      <QueryClientProvider client={queryClient}>
+        <PromptInput {...defaultProps} ref={ref} />
+      </QueryClientProvider>
+    )
+
+    const input = await screen.findByPlaceholderText('Send a message...')
+    fireEvent.change(input, { target: { value: '!' } })
+    expect(input).toHaveValue('!')
+    expect(screen.getByTestId('composer-mode-badge')).toHaveTextContent('BASH')
+
+    act(() => {
+      ref.current?.clearPrompt()
+    })
+
+    expect(input).toHaveValue('')
+    expect(screen.queryByTestId('composer-mode-badge')).not.toBeInTheDocument()
+  })
+
+  it('clears attachments and exits bash mode on Escape while idle', async () => {
+    const { container } = renderComponent()
+
+    const input = await screen.findByPlaceholderText('Send a message...')
+    fireEvent.change(input, { target: { value: '!' } })
+    expect(screen.getByTestId('composer-mode-badge')).toHaveTextContent('BASH')
+
+    await attachImage(container)
+    expect(screen.getByText('pic.png')).toBeInTheDocument()
+
+    fireEvent.keyDown(input, { key: 'Escape' })
+
+    expect(input).toHaveValue('')
+    expect(screen.queryByTestId('composer-mode-badge')).not.toBeInTheDocument()
+    expect(screen.queryByText('pic.png')).not.toBeInTheDocument()
+  })
+
   it('keeps attachments and clears only the text when a built-in command is submitted', async () => {
     const { container } = renderComponent()
 

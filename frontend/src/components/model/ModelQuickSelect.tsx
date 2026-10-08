@@ -1,6 +1,7 @@
 import { useCallback, useDeferredValue, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react'
 import { Check, ChevronDown, ChevronLeft, ChevronRight, Search, Star, Trash2, X, type LucideIcon } from 'lucide-react'
 import { useModelSelection, type ModelSelectionSession } from '@/hooks/useModelSelection'
+import { useMobile } from '@/hooks/useMobile'
 import { useModelSections } from '@/hooks/useModelSections'
 import { useVariants } from '@/hooks/useVariants'
 import { modelSelectionRef, type Model } from '@/api/providers'
@@ -14,6 +15,7 @@ import {
 } from '@/components/ui/dropdown-menu'
 import { Input } from '@/components/ui/input'
 import { buildModelSections, filterModelSections, type ModelOption } from '@/lib/modelSections'
+import { isTextEntryElement } from '@/lib/domTargets'
 
 interface ModelQuickSelectProps {
   directory?: string
@@ -48,12 +50,13 @@ interface ProviderListItem {
 interface VirtualizedListProps<T> {
   items: T[]
   itemHeight: number
-  renderItem: (item: T) => React.ReactNode
+  renderItem: (item: T, index: number) => React.ReactNode
   getKey: (item: T) => string
   emptyLabel: string
   className?: string
   resetKey?: string
   overscan?: number
+  activeIndex?: number
 }
 
 const MODEL_OPTION_ROW_HEIGHT = 60
@@ -76,6 +79,7 @@ function VirtualizedList<T>({
   className,
   resetKey,
   overscan = VIRTUAL_LIST_OVERSCAN,
+  activeIndex,
 }: VirtualizedListProps<T>) {
   const scrollRef = useRef<HTMLDivElement>(null)
   const [scrollTop, setScrollTop] = useState(0)
@@ -103,6 +107,21 @@ function VirtualizedList<T>({
     if (element) element.scrollTop = 0
     setScrollTop(0)
   }, [resetKey])
+
+  useEffect(() => {
+    if (activeIndex === undefined) return
+    const element = scrollRef.current
+    if (!element) return
+
+    const rowTop = activeIndex * itemHeight
+    const rowBottom = rowTop + itemHeight
+    if (rowTop < element.scrollTop) {
+      element.scrollTop = rowTop
+    } else if (rowBottom > element.scrollTop + element.clientHeight) {
+      element.scrollTop = rowBottom - element.clientHeight
+    }
+    setScrollTop(element.scrollTop)
+  }, [activeIndex, itemHeight])
 
   const visibleRange = useMemo(() => {
     if (items.length === 0 || viewportHeight === 0) {
@@ -141,7 +160,7 @@ function VirtualizedList<T>({
                 height: itemHeight,
               }}
             >
-              {renderItem(item)}
+              {renderItem(item, visibleRange.start + index)}
             </div>
           ))}
         </div>
@@ -164,6 +183,9 @@ export function ModelQuickSelect({
   const [searchQuery, setSearchQuery] = useState('')
   const deferredSearchQuery = useDeferredValue(searchQuery)
   const [selectedProviderId, setSelectedProviderId] = useState<string | null>(null)
+  const [activeIndex, setActiveIndex] = useState(0)
+  const quickListRef = useRef<HTMLDivElement>(null)
+  const isMobile = useMobile()
   const { model, modelString, info, recentModels, favoriteModels, setModel, toggleFavorite, removeRecentModel } = useModelSelection(directory, session)
   const { availableVariants, currentVariant, setVariant, clearVariant, hasVariants } = useVariants(directory, session)
 
@@ -265,12 +287,111 @@ export function ModelQuickSelect({
 
   const browseModels = selectedProviderId ? selectedProviderModels : browseData?.allModels ?? EMPTY_MODELS
 
-  const handleModelSelect = (providerID: string, modelID: string) => {
+  const navigableItems = useMemo((): ModelListItem[] => {
+    if (showAllModels) {
+      if (isSearching) return searchResults
+      if (isMobile && !selectedProviderId) return EMPTY_MODELS
+      return browseModels
+    }
+    return quickSections.flatMap((section) => section.models)
+  }, [showAllModels, isSearching, isMobile, selectedProviderId, searchResults, browseModels, quickSections])
+
+  const quickSectionOffsets = useMemo(() => {
+    const offsets = new Map<string, number>()
+    let running = 0
+    for (const section of quickSections) {
+      offsets.set(section.title, running)
+      running += section.models.length
+    }
+    return offsets
+  }, [quickSections])
+
+  const activeResetKey = `${isOpen}|${showAllModels}|${isSearching ? deferredSearchQuery : ''}|${selectedProviderId ?? ''}`
+  const navigableItemsRef = useRef(navigableItems)
+  navigableItemsRef.current = navigableItems
+  const modelStringRef = useRef(modelString)
+  modelStringRef.current = modelString
+  const searchQueryRef = useRef(searchQuery)
+  searchQueryRef.current = searchQuery
+  const deferredSearchQueryRef = useRef(deferredSearchQuery)
+  deferredSearchQueryRef.current = deferredSearchQuery
+
+  useEffect(() => {
+    const selectedIndex = navigableItemsRef.current.findIndex((item) => item.key === modelStringRef.current)
+    setActiveIndex(selectedIndex >= 0 ? selectedIndex : 0)
+  }, [activeResetKey])
+
+  useEffect(() => {
+    setActiveIndex((current) => {
+      if (navigableItems.length === 0) return 0
+      return Math.min(current, navigableItems.length - 1)
+    })
+  }, [navigableItems.length])
+
+  useEffect(() => {
+    if (showAllModels) return
+    const container = quickListRef.current
+    if (!container) return
+    const element = container.querySelector<HTMLElement>(`[data-model-index="${activeIndex}"]`)
+    if (element && typeof element.scrollIntoView === 'function') {
+      element.scrollIntoView({ block: 'nearest' })
+    }
+  }, [activeIndex, showAllModels])
+
+  const handleModelSelect = useCallback((providerID: string, modelID: string) => {
     setModel({ providerID, modelID })
     setShowAllModels(false)
     setSearchQuery('')
     setSelectedProviderId(null)
-  }
+  }, [setModel])
+
+  useEffect(() => {
+    if (!isOpen) return
+
+    const handleKeyDown = (event: KeyboardEvent) => {
+      if (event.ctrlKey || event.metaKey || event.altKey) return
+      if (event.isComposing) return
+
+      const target = event.target
+      if (target instanceof HTMLElement && target.closest('[role="menu"]')) return
+
+      const isTextInput = target instanceof Element && isTextEntryElement(target)
+
+      if (event.key === 'Enter') {
+        if (target instanceof HTMLElement && target.closest('button')) return
+        if (searchQueryRef.current !== deferredSearchQueryRef.current) {
+          event.preventDefault()
+          event.stopPropagation()
+          return
+        }
+        const item = navigableItems[activeIndex]
+        if (!item) return
+        event.preventDefault()
+        event.stopPropagation()
+        handleModelSelect(item.providerID, item.modelID)
+        return
+      }
+
+      let nextIndex: number | null = null
+      if (event.key === 'ArrowDown') {
+        nextIndex = Math.min(activeIndex + 1, navigableItems.length - 1)
+      } else if (event.key === 'ArrowUp') {
+        nextIndex = Math.max(activeIndex - 1, 0)
+      } else if (event.key === 'Home' && !isTextInput) {
+        nextIndex = 0
+      } else if (event.key === 'End' && !isTextInput) {
+        nextIndex = navigableItems.length - 1
+      }
+
+      if (nextIndex === null || navigableItems.length === 0) return
+      event.preventDefault()
+      event.stopPropagation()
+      setActiveIndex(nextIndex)
+    }
+
+    document.addEventListener('keydown', handleKeyDown, true)
+    return () => document.removeEventListener('keydown', handleKeyDown, true)
+  }, [isOpen, activeIndex, navigableItems, handleModelSelect])
 
   const handleOpenChange = (nextOpen: boolean) => {
     if (open === undefined) {
@@ -301,15 +422,19 @@ export function ModelQuickSelect({
 
   const getPrimaryLabel = (item: ModelListItem) => item.displayName || item.modelID
 
-  const renderModelOption = (item: ModelListItem) => {
+  const renderModelOption = (item: ModelListItem, index: number) => {
     const isSelected = modelString === item.key
     const isFavorite = favoriteKeySet.has(item.key)
     const isRecent = recentKeySet.has(item.key)
+    const isActive = index === activeIndex
 
     return (
       <div
         key={item.key}
-        className={`group flex w-full items-center gap-2 rounded-xl py-2 text-left transition-colors hover:bg-accent ${isSelected ? 'bg-highlight/10' : ''}`}
+        data-model-index={index}
+        data-active={isActive ? 'true' : undefined}
+        onMouseMove={() => setActiveIndex(index)}
+        className={`group flex w-full items-center gap-2 rounded-xl py-2 text-left transition-colors hover:bg-accent ${isSelected ? 'bg-highlight/10' : ''} ${isActive ? 'bg-accent ring-1 ring-border' : ''}`}
       >
         <button
           type="button"
@@ -521,11 +646,12 @@ export function ModelQuickSelect({
               <VirtualizedList
                 items={searchResults}
                 itemHeight={MODEL_OPTION_ROW_HEIGHT}
-                renderItem={(item) => renderModelOption(item)}
+                renderItem={(item, index) => renderModelOption(item, index)}
                 getKey={(item) => item.key}
                 emptyLabel="No models found"
                 className="px-4 pb-4 pt-2"
                 resetKey={`${selectedProviderId ?? 'all'}:${deferredSearchQuery}`}
+                activeIndex={activeIndex}
               />
             </div>
           ) : (
@@ -544,11 +670,12 @@ export function ModelQuickSelect({
                   <VirtualizedList
                     items={browseModels}
                     itemHeight={MODEL_OPTION_ROW_HEIGHT}
-                    renderItem={(item) => renderModelOption(item)}
+                    renderItem={(item, index) => renderModelOption(item, index)}
                     getKey={(item) => item.key}
                     emptyLabel="No models found"
                     className="px-4 pb-4 pt-2"
                     resetKey={selectedProviderId ?? 'all'}
+                    activeIndex={activeIndex}
                   />
                 </div>
 
@@ -558,11 +685,12 @@ export function ModelQuickSelect({
                     <VirtualizedList
                       items={selectedProviderModels}
                       itemHeight={MODEL_OPTION_ROW_HEIGHT}
-                      renderItem={(item) => renderModelOption(item)}
+                      renderItem={(item, index) => renderModelOption(item, index)}
                       getKey={(item) => item.key}
                       emptyLabel="No models found"
                       className="px-4 pb-4"
                       resetKey={selectedProviderId}
+                      activeIndex={activeIndex}
                     />
                   ) : (
                     <div className="h-full overflow-y-auto px-4 pb-4">
@@ -580,7 +708,7 @@ export function ModelQuickSelect({
           )
         ) : (
           <div className="flex min-h-0 flex-1 flex-col overflow-hidden pb-safe pt-0">
-            <div className="min-h-0 flex-1 space-y-4 overflow-y-auto px-4 pb-3">
+            <div ref={quickListRef} className="min-h-0 flex-1 space-y-4 overflow-y-auto px-4 pb-3">
               {quickSections.map(section => (
                 <section key={section.title}>
                   <h3 className="mb-1.5 flex items-center gap-1.5 text-xs font-medium text-muted-foreground">
@@ -588,7 +716,7 @@ export function ModelQuickSelect({
                     {section.title}
                   </h3>
                   <div className="space-y-1">
-                    {section.models.map(item => renderModelOption(item))}
+                    {section.models.map((item, index) => renderModelOption(item, (quickSectionOffsets.get(section.title) ?? 0) + index))}
                   </div>
                 </section>
               ))}

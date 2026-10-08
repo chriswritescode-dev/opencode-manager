@@ -17,7 +17,7 @@ const mocks = vi.hoisted(() => ({
   useSettingsDialog: vi.fn(),
   useMobile: vi.fn(),
   useVisualViewport: vi.fn(),
-  useKeyboardShortcuts: vi.fn(),
+  useShortcutActions: vi.fn(),
   useAutoScroll: vi.fn(),
   useDialogParam: vi.fn(),
   useSessionStatusForSession: vi.fn(),
@@ -65,8 +65,8 @@ vi.mock('@/hooks/useVisualViewport', () => ({
   useVisualViewport: vi.fn(() => ({ keyboardHeight: 0 })),
 }))
 
-vi.mock('@/hooks/useKeyboardShortcuts', () => ({
-  useKeyboardShortcuts: vi.fn(() => ({ leaderActive: false })),
+vi.mock('@/contexts/KeyboardShortcutsContext', () => ({
+  useShortcutActions: mocks.useShortcutActions,
 }))
 
 vi.mock('@/hooks/useAutoScroll', () => ({
@@ -137,7 +137,7 @@ vi.mock('@/hooks/useSessionGoals', () => ({
 vi.mock('@/hooks/useSessionPermissionMode', () => ({
   useSessionPermissionMode: vi.fn(() => ({ data: undefined })),
 }))
-vi.mock('@/components/session/SessionList', () => ({ SessionList: vi.fn(() => null) }))
+vi.mock('@/components/session/SessionPickerDialog', () => ({ SessionPickerDialog: vi.fn(() => null) }))
 vi.mock('@/components/session/PermissionModeToggle', () => ({ PermissionModeToggle: vi.fn(() => null) }))
 vi.mock('@/components/file-browser/FileBrowserSheet', () => ({ FileBrowserSheet: vi.fn(() => null) }))
 vi.mock('@/components/repo/RepoMcpDialog', () => ({ RepoMcpDialog: vi.fn(() => null) }))
@@ -185,7 +185,6 @@ describe('SessionDetail pending-actions polling gating', () => {
     mocks.useSettingsDialog.mockReturnValue({ open: vi.fn() })
     mocks.useMobile.mockReturnValue(false)
     mocks.useVisualViewport.mockReturnValue({ keyboardHeight: 0 })
-    mocks.useKeyboardShortcuts.mockReturnValue({ leaderActive: false })
     mocks.useAutoScroll.mockReturnValue({ scrollToBottom: vi.fn() })
     mocks.useDialogParam.mockReturnValue([false, vi.fn()])
     mocks.useSessionStatusForSession.mockReturnValue({ type: 'idle' })

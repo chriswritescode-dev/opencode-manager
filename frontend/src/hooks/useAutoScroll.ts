@@ -16,6 +16,7 @@ interface UseAutoScrollOptions {
 
 interface UseAutoScrollReturn {
   scrollToBottom: () => void
+  scrollByUser: (delta: number) => void
 }
 
 export function useAutoScroll({
@@ -62,6 +63,28 @@ export function useAutoScroll({
     onScrollStateChangeRef.current?.(false)
   }, [containerRef])
 
+  const markDisengaged = useCallback(() => {
+    const container = containerRef?.current
+    if (!container) return
+    const distanceFromBottom = container.scrollHeight - container.scrollTop - container.clientHeight
+    userScrolledAtRef.current = Date.now()
+    scrollRequestIdRef.current += 1
+    if (!isScrollButtonVisibleRef.current && distanceFromBottom > SHOW_SCROLL_BUTTON_THRESHOLD_PX) {
+      isScrollButtonVisibleRef.current = true
+      onScrollStateChangeRef.current?.(true)
+    }
+    userDisengagedRef.current = true
+  }, [containerRef])
+
+  const scrollByUser = useCallback((delta: number) => {
+    const container = containerRef?.current
+    if (!container) return
+    if (delta < 0) {
+      markDisengaged()
+    }
+    container.scrollBy({ top: delta })
+  }, [containerRef, markDisengaged])
+
   useEffect(() => {
     lastMessageCountRef.current = 0
     lastMessageIdRef.current = undefined
@@ -76,19 +99,6 @@ export function useAutoScroll({
     const container = containerRef?.current
     if (!container) return
     
-    const markDisengaged = () => {
-      const container = containerRef?.current
-      if (!container) return
-      const distanceFromBottom = container.scrollHeight - container.scrollTop - container.clientHeight
-      userScrolledAtRef.current = Date.now()
-      scrollRequestIdRef.current += 1
-      if (!isScrollButtonVisibleRef.current && distanceFromBottom > SHOW_SCROLL_BUTTON_THRESHOLD_PX) {
-        isScrollButtonVisibleRef.current = true
-        onScrollStateChangeRef.current?.(true)
-      }
-      userDisengagedRef.current = true
-    }
-
     const updateScrollButtonVisibility = () => {
       const container = containerRef?.current
       if (!container || !userDisengagedRef.current || isScrollButtonVisibleRef.current) return
@@ -196,7 +206,7 @@ export function useAutoScroll({
       container.removeEventListener('keydown', handleKeyDown)
       container.removeEventListener('scroll', handleScroll)
     }
-  }, [containerRef, sessionId, messages])
+  }, [containerRef, sessionId, messages, markDisengaged])
 
   useEffect(() => {
     if (!containerRef?.current || !messages) return
@@ -243,5 +253,5 @@ export function useAutoScroll({
     scrollToBottom()
   }, [messages, containerRef, scrollToBottom, contentVersion])
 
-  return { scrollToBottom }
+  return { scrollToBottom, scrollByUser }
 }

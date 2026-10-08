@@ -126,8 +126,8 @@ vi.mock('@/hooks/useVisualViewport', () => ({
   useVisualViewport: vi.fn(() => ({ keyboardHeight: 0 })),
 }))
 
-vi.mock('@/hooks/useKeyboardShortcuts', () => ({
-  useKeyboardShortcuts: vi.fn(() => ({ leaderActive: false })),
+vi.mock('@/contexts/KeyboardShortcutsContext', () => ({
+  useShortcutActions: vi.fn(),
 }))
 
 vi.mock('@/hooks/useAutoScroll', () => ({
@@ -207,7 +207,7 @@ vi.mock('@/components/navigation/ToolSidePanel', () => ({ ToolSidePanel: vi.fn((
 vi.mock('@/hooks/useToolPanel', () => ({
   useToolPanel: vi.fn(() => ({ activeTool: null, toggleTool: vi.fn(), closePanel: vi.fn() })),
 }))
-vi.mock('@/components/session/SessionList', () => ({ SessionList: vi.fn(() => null) }))
+vi.mock('@/components/session/SessionPickerDialog', () => ({ SessionPickerDialog: vi.fn(() => null) }))
 vi.mock('@/components/file-browser/FileBrowserSheet', () => ({ FileBrowserSheet: vi.fn(() => null) }))
 vi.mock('@/components/repo/RepoMcpDialog', () => ({ RepoMcpDialog: vi.fn(() => null) }))
 vi.mock('@/components/repo/RepoActionsDialog', () => ({ RepoActionsDialog: vi.fn(() => null) }))

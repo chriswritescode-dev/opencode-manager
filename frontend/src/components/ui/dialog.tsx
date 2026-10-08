@@ -5,22 +5,10 @@ import { X } from "lucide-react"
 import { cn } from "@/lib/utils"
 import { useSwipeBack } from '@/hooks/useMobile'
 import { useVisualViewport } from '@/hooks/useVisualViewport'
-import { FINE_POINTER_MEDIA_QUERY } from '@/hooks/useMediaQuery'
+import { getFocusedElement, restoreOverlayFocus } from '@/lib/overlayFocus'
 
 const DialogOpenContext = React.createContext<boolean>(true)
 const DialogReturnFocusContext = React.createContext<HTMLElement | null>(null)
-
-function getFocusedElement(): HTMLElement | null {
-  return typeof document !== 'undefined' && document.activeElement instanceof HTMLElement
-    ? document.activeElement
-    : null
-}
-
-function canRestoreFocus(element: HTMLElement): boolean {
-  if (!element.isConnected || element === document.body) return false
-  if (!element.matches('input, textarea, [contenteditable="true"]')) return true
-  return typeof window.matchMedia === 'function' && window.matchMedia(FINE_POINTER_MEDIA_QUERY).matches
-}
 
 function Dialog({ open, ...props }: React.ComponentProps<typeof DialogPrimitive.Root>) {
   const [openState, setOpenState] = React.useState(() => ({
@@ -83,9 +71,10 @@ const DialogContent = React.forwardRef<
   const returnFocus = React.useContext(DialogReturnFocusContext)
   const handleCloseAutoFocus = (event: Event) => {
     onCloseAutoFocus?.(event)
-    if (event.defaultPrevented || !returnFocus || !canRestoreFocus(returnFocus)) return
-    event.preventDefault()
-    returnFocus.focus()
+    if (event.defaultPrevented) return
+    if (restoreOverlayFocus(returnFocus, event.currentTarget as Element | null)) {
+      event.preventDefault()
+    }
   }
   const handleEscapeKeyDown = (event: KeyboardEvent) => {
     onEscapeKeyDown?.(event)

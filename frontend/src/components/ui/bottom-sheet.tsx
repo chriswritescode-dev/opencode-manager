@@ -3,6 +3,7 @@ import { createPortal } from 'react-dom'
 import { cn } from '@/lib/utils'
 import { MODAL_TRANSITION_MS } from '@/lib/utils'
 import { useSwipeDismiss } from '@/hooks/useMobile'
+import { useRestoreFocusOnClose } from '@/hooks/useRestoreFocusOnClose'
 
 export interface BottomSheetProps {
   isOpen: boolean
@@ -23,6 +24,8 @@ export function BottomSheet({
 }: BottomSheetProps) {
   const [shouldRender, setShouldRender] = useState(false)
   const panelRef = useRef<HTMLDivElement>(null)
+
+  useRestoreFocusOnClose(isOpen, panelRef)
 
   const { bind, swipeStyles } = useSwipeDismiss(onClose, {
     enabled: isOpen,
@@ -86,6 +89,7 @@ export function BottomSheet({
         role="dialog"
         aria-modal="true"
         aria-label={ariaLabel}
+        data-state={isOpen ? 'open' : 'closed'}
         style={swipeStyles}
       >
         <div className="w-full flex justify-center pt-3 pb-2">

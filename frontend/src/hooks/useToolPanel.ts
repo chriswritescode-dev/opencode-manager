@@ -1,4 +1,5 @@
 import { useCallback, useEffect } from 'react'
+import { openDialogParams } from './useDialogParam'
 import { useUrlParams } from './useUrlParams'
 
 const PANEL_PARAM = 'panel'
@@ -24,6 +25,26 @@ function clearToolParams(params: URLSearchParams, keep?: PanelTool): void {
     if (tool === keep) continue
     for (const param of owned) params.delete(param)
   }
+}
+
+export function toggleToolPanelParams(params: URLSearchParams, tool: PanelTool): void {
+  if (params.get(PANEL_PARAM) === tool) {
+    params.delete(PANEL_PARAM)
+    clearToolParams(params)
+    return
+  }
+  params.set(PANEL_PARAM, tool)
+  clearToolParams(params, tool)
+}
+
+export function toggleToolDialogParams(params: URLSearchParams, tool: PanelTool): void {
+  if (params.get('dialog') === tool) {
+    params.delete('dialog')
+    clearToolParams(params)
+    return
+  }
+  openDialogParams(params, tool)
+  clearToolParams(params, tool)
 }
 
 export interface ToolPanelState {
@@ -65,15 +86,7 @@ export function useToolPanel(docked: boolean): ToolPanelState {
   }, [docked, dialogParam, panelParam, updateParams])
 
   const toggleTool = useCallback((tool: PanelTool) => {
-    updateParams((params) => {
-      if (params.get(PANEL_PARAM) === tool) {
-        params.delete(PANEL_PARAM)
-        clearToolParams(params)
-        return
-      }
-      params.set(PANEL_PARAM, tool)
-      clearToolParams(params, tool)
-    }, 'push')
+    updateParams((params) => toggleToolPanelParams(params, tool), 'push')
   }, [updateParams])
 
   const closePanel = useCallback(() => {

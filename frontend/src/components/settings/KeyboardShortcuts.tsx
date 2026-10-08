@@ -2,19 +2,13 @@ import { useState, useEffect, useMemo, useRef, useCallback } from 'react'
 import { useSettings } from '@/hooks/useSettings'
 import { useMobile } from '@/hooks/useMobile'
 import { Loader2, X } from 'lucide-react'
-import { DEFAULT_KEYBOARD_SHORTCUTS, DEFAULT_LEADER_KEY } from '@/api/types/settings'
+import { Button } from '@/components/ui/button'
+import { formatEventModifiers, formatShortcutEvent, isModifierOnlyEvent, normalizeShortcut, resolveShortcutBindings } from '@/lib/keyboardShortcuts'
+import { applyTuiKeybindImport, parseTuiKeybindConfig } from '@/lib/tuiKeybindImport'
+import { showToast } from '@/lib/toast'
 
-const isMac = navigator.platform.toUpperCase().indexOf('MAC') >= 0
-const CMD_KEY = isMac ? 'Cmd' : 'Ctrl'
-
-const normalizeShortcut = (shortcut: string): string => {
-  return shortcut.replace(/Cmd/g, CMD_KEY)
-}
-
-const DEFAULT_DIRECT_SHORTCUTS = ['submit', 'abort']
-
-const CONVERSATION_ACTIONS = ['submit', 'abort', 'toggleMode', 'undo', 'redo', 'compact', 'fork', 'selectModel', 'variantCycle']
-const NAVIGATION_ACTIONS = ['settings', 'sessions', 'newSession', 'closeSession', 'toggleSidebar']
+const CONVERSATION_ACTIONS = ['submit', 'abort', 'clearPrompt', 'toggleMode', 'undo', 'redo', 'compact', 'fork', 'timeline', 'exportSession', 'selectModel', 'variantCycle', 'favoriteCycle', 'halfPageUp', 'halfPageDown']
+const NAVIGATION_ACTIONS = ['settings', 'sessions', 'newSession', 'closeSession', 'toggleSidebar', 'toggleTerminal', 'toggleSourceControl']
 
 const formatShortcutLabel = (action: string): string => {
   return action.replace(/([A-Z])/g, ' $1').trim()
@@ -23,6 +17,15 @@ const formatShortcutLabel = (action: string): string => {
 interface ShortcutGroup {
   title: string
   actions: string[]
+}
+
+const MAX_SKIPPED_IN_TOAST = 5
+
+const buildSkippedDescription = (skipped: Array<{ name: string; reason: string }>): string | undefined => {
+  if (skipped.length === 0) return undefined
+  const shown = skipped.slice(0, MAX_SKIPPED_IN_TOAST).map((entry) => `${entry.name} (${entry.reason})`).join(', ')
+  const remaining = skipped.length - MAX_SKIPPED_IN_TOAST
+  return remaining > 0 ? `${shown} and ${remaining} more` : shown
 }
 
 const buildShortcutGroups = (shortcuts: Record<string, string>): ShortcutGroup[] => {
@@ -127,22 +130,30 @@ export function KeyboardShortcuts() {
   const [tempLeaderKey, setTempLeaderKey] = useState<string | null>(null)
   const [currentKeys, setCurrentKeys] = useState<string>('')
 
-  const leaderKey = tempLeaderKey ?? preferences?.leaderKey ?? DEFAULT_LEADER_KEY
-  const directShortcuts = preferences?.directShortcuts ?? DEFAULT_DIRECT_SHORTCUTS
+  const bindings = useMemo(() => resolveShortcutBindings(preferences), [preferences])
+  const leaderKey = tempLeaderKey ?? bindings.leaderKey
+  const directShortcuts = bindings.directShortcuts
 
-  const shortcuts = useMemo(() => ({
-    ...DEFAULT_KEYBOARD_SHORTCUTS,
-    ...preferences?.keyboardShortcuts,
+  const shortcuts = useMemo<Record<string, string>>(() => ({
+    ...bindings.shortcuts,
     ...tempShortcuts
-  }), [preferences?.keyboardShortcuts, tempShortcuts])
+  }), [bindings.shortcuts, tempShortcuts])
 
   const shortcutGroups = useMemo(() => buildShortcutGroups(shortcuts), [shortcuts])
 
   const shortcutsRef = useRef(shortcuts)
   shortcutsRef.current = shortcuts
 
+  const leaderKeyRef = useRef(leaderKey)
+  leaderKeyRef.current = leaderKey
+
+  const directShortcutsRef = useRef(directShortcuts)
+  directShortcutsRef.current = directShortcuts
+
   const updateSettingsRef = useRef(updateSettings)
   updateSettingsRef.current = updateSettings
+
+  const fileInputRef = useRef<HTMLInputElement>(null)
 
   const startRecording = (action: string) => {
     setRecordingKey(action)
@@ -172,64 +183,55 @@ export function KeyboardShortcuts() {
   useEffect(() => {
     if (!recordingKey && !recordingLeader) return
 
+    let leaderPressed = false
+    const leaderPrefix = () => (leaderPressed ? `${normalizeShortcut(leaderKeyRef.current)} → ` : '')
+
     const handleKeyDown = (e: KeyboardEvent) => {
       e.preventDefault()
+      e.stopPropagation()
 
-      const keys = []
-      if (e.ctrlKey) keys.push('Ctrl')
-      if (e.metaKey) keys.push('Cmd')
-      if (e.altKey) keys.push('Alt')
-      if (e.shiftKey) keys.push('Shift')
-
-      const mainKey = e.key
-      if (!['Control', 'Meta', 'Alt', 'Shift'].includes(mainKey)) {
-        let displayKey = mainKey
-        if (mainKey === ' ') displayKey = 'Space'
-        else if (mainKey === 'ArrowUp') displayKey = 'Up'
-        else if (mainKey === 'ArrowDown') displayKey = 'Down'
-        else if (mainKey === 'ArrowLeft') displayKey = 'Left'
-        else if (mainKey === 'ArrowRight') displayKey = 'Right'
-        else if (mainKey === 'Enter') displayKey = 'Return'
-        else if (mainKey === 'Escape') displayKey = 'Esc'
-        else if (mainKey === 'Tab') displayKey = 'Tab'
-        else if (mainKey === 'Backspace') displayKey = 'Backspace'
-        else if (mainKey === 'Delete') displayKey = 'Delete'
-        else if (mainKey.length === 1) displayKey = mainKey.toUpperCase()
-
-        keys.push(displayKey)
-
-        if (keys.length > 0) {
-          const shortcut = keys.join('+')
-
-          if (recordingLeader) {
-            setTempLeaderKey(shortcut)
-            setRecordingLeader(false)
-            setCurrentKeys('')
-            updateSettingsRef.current({ leaderKey: shortcut })
-          } else if (recordingKey) {
-            setTempShortcuts(prev => ({ ...prev, [recordingKey]: shortcut }))
-            setRecordingKey(null)
-            setCurrentKeys('')
-            updateSettingsRef.current({
-              keyboardShortcuts: { ...shortcutsRef.current, [recordingKey]: shortcut }
-            })
-          }
-        }
-      } else {
-        setCurrentKeys(keys.join('+'))
+      const shortcut = formatShortcutEvent(e)
+      if (!shortcut) {
+        setCurrentKeys(leaderPrefix() + formatEventModifiers(e))
+        return
       }
+
+      if (recordingLeader) {
+        setTempLeaderKey(shortcut)
+        setRecordingLeader(false)
+        setCurrentKeys('')
+        updateSettingsRef.current({ leaderKey: shortcut })
+        return
+      }
+
+      if (!recordingKey) return
+
+      if (!leaderPressed && shortcut === normalizeShortcut(leaderKeyRef.current)) {
+        leaderPressed = true
+        setCurrentKeys(leaderPrefix())
+        return
+      }
+
+      const otherDirectShortcuts = directShortcutsRef.current.filter((action) => action !== recordingKey)
+      setTempShortcuts(prev => ({ ...prev, [recordingKey]: shortcut }))
+      setRecordingKey(null)
+      setCurrentKeys('')
+      updateSettingsRef.current({
+        keyboardShortcuts: { ...shortcutsRef.current, [recordingKey]: shortcut },
+        directShortcuts: leaderPressed ? otherDirectShortcuts : [...otherDirectShortcuts, recordingKey],
+      })
     }
 
     const handleKeyUp = (e: KeyboardEvent) => {
-      if (['Control', 'Meta', 'Alt', 'Shift'].includes(e.key)) {
-        setCurrentKeys('')
+      if (isModifierOnlyEvent(e)) {
+        setCurrentKeys(leaderPrefix())
       }
     }
 
-    document.addEventListener('keydown', handleKeyDown)
+    document.addEventListener('keydown', handleKeyDown, true)
     document.addEventListener('keyup', handleKeyUp)
     return () => {
-      document.removeEventListener('keydown', handleKeyDown)
+      document.removeEventListener('keydown', handleKeyDown, true)
       document.removeEventListener('keyup', handleKeyUp)
     }
   }, [recordingKey, recordingLeader])
@@ -257,6 +259,54 @@ export function KeyboardShortcuts() {
     updateSettings({ directShortcuts: newDirectShortcuts })
   }
 
+  const importFromTui = async (event: React.ChangeEvent<HTMLInputElement>) => {
+    const file = event.target.files?.[0]
+    event.target.value = ''
+    if (!file) return
+
+    try {
+      const imported = parseTuiKeybindConfig(await file.text())
+      stopRecording()
+      const applied = applyTuiKeybindImport(imported, {
+        keyboardShortcuts: shortcutsRef.current,
+        directShortcuts: directShortcutsRef.current,
+      })
+      const importedCount = Object.keys(imported.shortcuts).length + (applied.leaderKey ? 1 : 0)
+      const skippedDescription = buildSkippedDescription(imported.skipped)
+
+      if (importedCount === 0) {
+        showToast.info(
+          `No matching shortcuts found in ${file.name}`,
+          skippedDescription ? { description: skippedDescription } : undefined,
+        )
+        return
+      }
+
+      updateSettingsRef.current({
+        keyboardShortcuts: applied.keyboardShortcuts,
+        directShortcuts: applied.directShortcuts,
+        ...(applied.leaderKey ? { leaderKey: applied.leaderKey } : {}),
+      })
+      setTempShortcuts(applied.keyboardShortcuts)
+      if (applied.leaderKey !== undefined) {
+        setTempLeaderKey(applied.leaderKey)
+      }
+
+      const description = [
+        applied.cleared.length > 0 ? `Unbound to avoid conflicts: ${applied.cleared.map((action) => formatShortcutLabel(action).toLowerCase()).join(', ')}` : undefined,
+        skippedDescription ? `Skipped: ${skippedDescription}` : undefined,
+      ].filter(Boolean).join('. ')
+      showToast.success(
+        `Imported ${importedCount} shortcut${importedCount === 1 ? '' : 's'} from ${file.name}`,
+        description ? { description } : undefined,
+      )
+    } catch (error) {
+      showToast.error('Could not import shortcuts', {
+        description: error instanceof Error ? error.message : 'Unknown error',
+      })
+    }
+  }
+
   if (isMobile) {
     return (
       <div className="bg-card border border-border rounded-lg p-6">
@@ -270,7 +320,25 @@ export function KeyboardShortcuts() {
 
   return (
     <div className="bg-card border border-border rounded-lg p-6">
-      <h2 className="text-lg font-semibold text-foreground mb-6">Keyboard Shortcuts</h2>
+      <div className="mb-6 flex flex-wrap items-start justify-between gap-3">
+        <h2 className="text-lg font-semibold text-foreground">Keyboard Shortcuts</h2>
+
+        <div className="flex flex-col items-end gap-1">
+          <Button variant="outline" size="sm" onClick={() => fileInputRef.current?.click()}>
+            Import from OpenCode TUI
+          </Button>
+          <input
+            ref={fileInputRef}
+            type="file"
+            accept=".json,.jsonc,application/json"
+            className="hidden"
+            onChange={importFromTui}
+          />
+          <p className="text-xs text-muted-foreground text-right">
+            Select your OpenCode cli.json (or legacy tui.json), usually in ~/.config/opencode.
+          </p>
+        </div>
+      </div>
 
       <div className="flex flex-wrap items-center justify-between gap-2 py-3 border-b border-border">
         <div className="flex min-w-0 flex-wrap items-baseline gap-x-2">
@@ -316,7 +384,7 @@ export function KeyboardShortcuts() {
       </div>
 
       <p className="mt-6 text-sm text-muted-foreground">
-        Click on any shortcut to record a new key combination. Click on the status text below each action to toggle whether it requires the leader key.
+        Click on any shortcut to record a new key combination. Press the leader key first to record a leader shortcut, or press a combination directly to record a direct one. Click on the status text below each action to toggle whether it requires the leader key.
       </p>
     </div>
   )

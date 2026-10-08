@@ -1,22 +1,22 @@
 import { useCallback, useState, useMemo, useEffect, useRef, type ReactNode } from "react";
-import { useSessionsAcrossDirectories, useDeleteSession, useCreateSession } from "@/hooks/useOpenCode";
+import { useDeleteSession, useCreateSession } from "@/hooks/useOpenCode";
 import type { DeleteSessionTarget } from "@/hooks/useOpenCode";
 import type { Session } from "@/api/types";
 import { useSessionPins, useToggleSessionPin } from '@/hooks/useSessionPins';
-import { buildSessionKey, buildPinnedSessionKeys } from '@/lib/sessionKey';
-import { partitionSessions, selectRootSessions } from './session-partition';
+import { getSessionKey, buildPinnedSessionKeys } from '@/lib/sessionKey';
+import { partitionSessions } from './session-partition';
 import { DeleteSessionDialog } from "./DeleteSessionDialog";
 import { SessionCard } from "./SessionCard";
 import { Card } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Search, Trash2, Pencil, X } from "lucide-react";
+import { useSessionSearch } from "@/hooks/useSessionSearch";
 
 interface SessionListProps {
   directory?: string;
   directories?: string[];
   createDirectory?: string;
-  activeSessionID?: string;
   onSelectSession: (sessionID: string) => void;
   renderSessions?: (args: SessionListRenderArgs) => ReactNode;
 }
@@ -35,7 +35,6 @@ export const SessionList = ({
   directory,
   directories,
   createDirectory,
-  activeSessionID,
   onSelectSession,
   renderSessions,
 }: SessionListProps) => {
@@ -43,14 +42,23 @@ export const SessionList = ({
     const source = directories && directories.length > 0 ? directories : directory ? [directory] : [];
     return Array.from(new Set(source.filter(Boolean)));
   }, [directory, directories]);
-  const directorySet = useMemo(() => new Set(directoriesList), [directoriesList]);
   const primaryDirectory = directoriesList[0];
   const sessionCreateDirectory = createDirectory ?? primaryDirectory;
-  const getSessionSelectionKey = useCallback((session: Session) =>
-    buildSessionKey(session.location.directory, session.id),
-  []);
-  const [searchQuery, setSearchQuery] = useState("");
-  const { data: sessions, isLoading, fetchNextPage, hasNextPage, isFetchingNextPage, isFetchNextPageError } = useSessionsAcrossDirectories(directoriesList, { search: searchQuery, limit: 25 });
+  const {
+    query,
+    setQuery,
+    trimmedQuery,
+    sessions,
+    filteredSessions,
+    isSearchPending,
+    isLoading,
+    isPlaceholderData,
+    fetchNextPage,
+    hasNextPage,
+    isFetchingNextPage,
+    isFetchNextPageError,
+    canFetchNextPage,
+  } = useSessionSearch(directoriesList);
   const deleteSession = useDeleteSession(directoriesList);
   const createSession = useCreateSession(sessionCreateDirectory, (newSession) => {
     onSelectSession(newSession.id);
@@ -67,19 +75,14 @@ export const SessionList = ({
   const [manageMode, setManageMode] = useState(false);
   const sessionListRef = useRef<HTMLDivElement>(null);
 
-  const filteredSessions = useMemo(
-    () => selectRootSessions(sessions ?? [], { directories: directorySet, keyFn: getSessionSelectionKey }),
-    [sessions, directorySet, getSessionSelectionKey],
-  );
-
   const { pinned: pinnedSessions, today: todaySessions, older: olderSessions } = useMemo(
-    () => partitionSessions(filteredSessions, pinnedKeys, getSessionSelectionKey),
-    [filteredSessions, pinnedKeys, getSessionSelectionKey],
+    () => partitionSessions(filteredSessions, pinnedKeys, getSessionKey),
+    [filteredSessions, pinnedKeys],
   );
 
   const handleTogglePin = (session: Session) => {
     const directory = session.location.directory;
-    const key = getSessionSelectionKey(session);
+    const key = getSessionKey(session);
     togglePin.mutate({ sessionId: session.id, directory, pinned: !pinnedKeys.has(key) });
   };
 
@@ -89,63 +92,20 @@ export const SessionList = ({
 
   const handleSessionsScroll = useCallback((event: React.UIEvent<HTMLDivElement>) => {
     const { scrollTop, scrollHeight, clientHeight } = event.currentTarget;
-    if (scrollHeight - scrollTop - clientHeight <= 240 && hasNextPage && !isFetchingNextPage && !isFetchNextPageError) {
+    if (scrollHeight - scrollTop - clientHeight <= 240 && canFetchNextPage) {
       void fetchNextPage();
     }
-  }, [hasNextPage, isFetchingNextPage, isFetchNextPageError, fetchNextPage]);
+  }, [canFetchNextPage, fetchNextPage]);
 
   useEffect(() => {
     const sessionList = sessionListRef.current;
     const isNearBottom = sessionList
       ? sessionList.scrollHeight - sessionList.scrollTop - sessionList.clientHeight <= 240
       : filteredSessions.length === 0;
-    if (
-      !isLoading
-      && isNearBottom
-      && hasNextPage
-      && !isFetchingNextPage
-      && !isFetchNextPageError
-    ) {
+    if (!isLoading && isNearBottom && canFetchNextPage) {
       void fetchNextPage();
     }
-  }, [isLoading, filteredSessions, hasNextPage, isFetchingNextPage, isFetchNextPageError, fetchNextPage]);
-
-  if (isLoading && !renderSessions) {
-    return <div className="p-4 text-sm text-muted-foreground">Loading sessions...</div>;
-  }
-
-  if (!sessions || sessions.length === 0) {
-    if (isFetchNextPageError) {
-      return (
-        <div className="flex flex-col items-center justify-center gap-2 p-4 text-sm text-muted-foreground">
-          <p>Failed to load sessions.</p>
-          <Button variant="outline" size="sm" onClick={handleRetryNextPage} disabled={isFetchingNextPage}>
-            Retry
-          </Button>
-        </div>
-      );
-    }
-    if ((hasNextPage || isFetchingNextPage) && !renderSessions) {
-      return <div className="p-4 text-sm text-muted-foreground">Loading sessions...</div>;
-    }
-    if (!searchQuery.trim() && !renderSessions) {
-      return (
-        <div className="flex-1 overflow-y-auto overflow-x-hidden px-4 pt-4 pb-4 min-h-0 [mask-image:linear-gradient(to_bottom,transparent,black_16px,black)]">
-          <Card
-            className="p-6 cursor-pointer hover:bg-accent hover:border-border transition-all border-dashed"
-            onClick={() => createSession.mutate({ agent: undefined })}
-          >
-            <div className="flex flex-col items-center justify-center gap-2 text-center">
-              <p className="font-medium">No sessions yet</p>
-              <p className="text-sm text-muted-foreground">
-                Click here to start a new session
-              </p>
-            </div>
-          </Card>
-        </div>
-      );
-    }
-  }
+  }, [isLoading, filteredSessions, canFetchNextPage, fetchNextPage]);
 
   const getDeleteTarget = (session: Session): DeleteSessionTarget => ({
     id: session.id,
@@ -176,7 +136,7 @@ export const SessionList = ({
   };
 
   const toggleSessionSelection = (session: Session, selected: boolean) => {
-    const selectionKey = getSessionSelectionKey(session);
+    const selectionKey = getSessionKey(session);
     const newSelected = new Set(selectedSessions);
     if (selected) {
       newSelected.add(selectionKey);
@@ -188,20 +148,20 @@ export const SessionList = ({
 
   const allVisibleSelected =
     filteredSessions.length > 0 &&
-    filteredSessions.every((session) => selectedSessions.has(getSessionSelectionKey(session)));
+    filteredSessions.every((session) => selectedSessions.has(getSessionKey(session)));
 
   const toggleSelectAll = () => {
     if (allVisibleSelected) {
       setSelectedSessions(new Set());
     } else {
-      setSelectedSessions(new Set(filteredSessions.map(getSessionSelectionKey)));
+      setSelectedSessions(new Set(filteredSessions.map(getSessionKey)));
     }
   };
 
   const handleBulkDelete = () => {
     if (selectedSessions.size > 0) {
       const selectedTargets = filteredSessions
-        .filter((session) => selectedSessions.has(getSessionSelectionKey(session)))
+        .filter((session) => selectedSessions.has(getSessionKey(session)))
         .map(getDeleteTarget);
       if (selectedTargets.length === 0) return;
       setSessionToDelete(selectedTargets);
@@ -210,13 +170,12 @@ export const SessionList = ({
   };
 
   const renderSessionCard = (session: (typeof filteredSessions)[number], isPinned: boolean) => {
-    const key = getSessionSelectionKey(session);
+    const key = getSessionKey(session);
     return (
       <SessionCard
         key={key}
         session={session}
         isSelected={selectedSessions.has(key)}
-        isActive={activeSessionID === session.id}
         manageMode={manageMode}
         isPinned={isPinned}
         onSelect={onSelectSession}
@@ -226,6 +185,39 @@ export const SessionList = ({
       />
     );
   };
+
+  if (!isLoading && !isPlaceholderData && (!sessions || sessions.length === 0)) {
+    if (isFetchNextPageError) {
+      return (
+        <div className="flex flex-col items-center justify-center gap-2 p-4 text-sm text-muted-foreground">
+          <p>Failed to load sessions.</p>
+          <Button variant="outline" size="sm" onClick={handleRetryNextPage} disabled={isFetchingNextPage}>
+            Retry
+          </Button>
+        </div>
+      );
+    }
+    if ((hasNextPage || isFetchingNextPage) && !renderSessions) {
+      return <div className="p-4 text-sm text-muted-foreground">Loading sessions...</div>;
+    }
+    if (!trimmedQuery && !renderSessions) {
+      return (
+        <div className="flex-1 overflow-y-auto overflow-x-hidden px-4 pt-4 pb-4 min-h-0 [mask-image:linear-gradient(to_bottom,transparent,black_16px,black)]">
+          <Card
+            className="p-6 cursor-pointer hover:bg-accent hover:border-border transition-all border-dashed"
+            onClick={() => createSession.mutate({ agent: undefined })}
+          >
+            <div className="flex flex-col items-center justify-center gap-2 text-center">
+              <p className="font-medium">No sessions yet</p>
+              <p className="text-sm text-muted-foreground">
+                Click here to start a new session
+              </p>
+            </div>
+          </Card>
+        </div>
+      );
+    }
+  }
 
   return (
     <div className="flex flex-col h-full min-h-0">
@@ -264,8 +256,8 @@ export const SessionList = ({
               <Input
                 type="text"
                 placeholder="Search sessions..."
-                value={searchQuery}
-                onChange={(e) => setSearchQuery(e.target.value)}
+                value={query}
+                onChange={(e) => setQuery(e.target.value)}
                 className="pl-9 h-9"
                 autoComplete="off"
                 name="session-search"
@@ -294,15 +286,17 @@ export const SessionList = ({
         onScroll={handleSessionsScroll}
       >
         <div className="flex flex-col gap-4">
-          {renderSessions ? (
+          {isLoading && !renderSessions ? (
+            <div className="text-sm text-muted-foreground text-center py-4">Loading sessions...</div>
+          ) : renderSessions ? (
             renderSessions({
               sessions: filteredSessions,
-              searchQuery,
-              renderSessionCard: (session) => renderSessionCard(session, pinnedKeys.has(getSessionSelectionKey(session))),
+              searchQuery: query,
+              renderSessionCard: (session) => renderSessionCard(session, pinnedKeys.has(getSessionKey(session))),
             })
           ) : filteredSessions.length === 0 && !isFetchingNextPage ? (
             <div className="text-sm text-muted-foreground text-center py-4">
-              No sessions found
+              {isSearchPending ? 'Searching sessions...' : 'No sessions found'}
             </div>
           ) : (
             <>
@@ -331,7 +325,7 @@ export const SessionList = ({
               {olderSessions.map((session) => renderSessionCard(session, false))}
             </>
           )}
-          {isFetchNextPageError && (
+          {isFetchNextPageError && (sessions?.length ?? 0) > 0 && (
             <div className="flex flex-col items-center gap-2 py-4">
               <p className="text-sm text-muted-foreground">Failed to load more sessions.</p>
               <Button variant="outline" size="sm" onClick={handleRetryNextPage} disabled={isFetchingNextPage}>
@@ -339,7 +333,7 @@ export const SessionList = ({
               </Button>
             </div>
           )}
-          {isFetchingNextPage && (
+          {isFetchingNextPage && (sessions?.length ?? 0) > 0 && (
             <div className="text-sm text-muted-foreground text-center py-4">
               Loading more sessions...
             </div>

@@ -1,7 +1,7 @@
 import type { Repo, Session } from '@/api/types'
 import { ASSISTANT_REPO_ID } from '@opencode-manager/shared/utils'
 import { getRepoBranchLabel, getRepoDisplayName } from '@/lib/utils'
-import { buildSessionKey } from '@/lib/sessionKey'
+import { getSessionKey } from '@/lib/sessionKey'
 import { getSessionPath, isAssistantPath, parseRepoRoute } from '@/lib/navigation'
 import { partitionSessions, selectRootSessions } from '@/components/session/session-partition'
 
@@ -46,6 +46,10 @@ export function selectNavigableRepos(repos: Repo[]): Repo[] {
   )
 }
 
+export function buildRepoByDirectory(repos: Repo[]): Map<string, Repo> {
+  return new Map(repos.map((repo) => [repo.fullPath, repo]))
+}
+
 export function buildSidebarRepoGroups(input: {
   repos: Repo[]
   sessions: Session[]
@@ -53,8 +57,8 @@ export function buildSidebarRepoGroups(input: {
   now: number
 }): SidebarRepoGroup[] {
   const { repos, sessions, pinnedKeys, now } = input
-  const keyFn = (session: Session) => buildSessionKey(session.location.directory, session.id)
-  const repoByDirectory = new Map(repos.map((repo) => [repo.fullPath, repo]))
+  const keyFn = getSessionKey
+  const repoByDirectory = buildRepoByDirectory(repos)
 
   const roots = selectRootSessions(sessions, {
     directories: new Set(repos.map((repo) => repo.fullPath)),

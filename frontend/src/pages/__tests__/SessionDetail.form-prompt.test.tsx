@@ -86,8 +86,8 @@ vi.mock('@/hooks/useVisualViewport', () => ({
   useVisualViewport: vi.fn(() => ({ keyboardHeight: 0 })),
 }))
 
-vi.mock('@/hooks/useKeyboardShortcuts', () => ({
-  useKeyboardShortcuts: vi.fn(() => ({ leaderActive: false })),
+vi.mock('@/contexts/KeyboardShortcutsContext', () => ({
+  useShortcutActions: vi.fn(),
 }))
 
 vi.mock('@/hooks/useAutoScroll', () => ({
@@ -159,8 +159,8 @@ vi.mock('@/hooks/useSessionGoals', () => ({
   useResumeSessionGoal: vi.fn(() => ({ mutate: vi.fn(), isPending: false })),
   useCancelSessionGoal: vi.fn(() => ({ mutate: vi.fn(), isPending: false })),
 }))
-vi.mock('@/components/session/SessionList', () => ({
-  SessionList: vi.fn(() => null),
+vi.mock('@/components/session/SessionPickerDialog', () => ({
+  SessionPickerDialog: vi.fn(() => null),
 }))
 
 vi.mock('@/components/file-browser/FileBrowserSheet', () => ({

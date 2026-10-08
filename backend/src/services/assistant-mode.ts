@@ -12,7 +12,7 @@ import {
   fileExists,
   ensureDirectoryExists,
 } from './file-operations'
-import { ASSISTANT_NOTIFICATION_LIMITS, OpenCodeConfigSchema } from '@opencode-manager/shared/schemas'
+import { ASSISTANT_NOTIFICATION_LIMITS, OpenCodeConfigSchema, DEFAULT_KEYBOARD_SHORTCUTS, DEFAULT_LEADER_KEY } from '@opencode-manager/shared/schemas'
 import { MANAGER_COLOR_THEME_ID, OPENCODE_THEMES } from '@opencode-manager/shared/themes'
 import { ASSISTANT_REPO_ID, ASSISTANT_REPO_PATH, ASSISTANT_OPENCODE_DIR_NAME } from '@opencode-manager/shared/utils'
 import { getAssistantModePath, getReposPath } from '@opencode-manager/shared/config/env'
@@ -698,6 +698,18 @@ Partial object with any of the allowed keys.
 
 **Response:**
 Returns the updated settings object with the same structure as GET.
+
+### Keyboard Shortcut Preferences
+
+\`keyboardShortcuts\`, \`leaderKey\`, and \`directShortcuts\` control keyboard bindings.
+
+**Actions:** ${Object.keys(DEFAULT_KEYBOARD_SHORTCUTS).join(', ')}
+
+**Key format:** modifiers joined with \`+\`, using \`Ctrl\`, \`Cmd\`, \`Alt\`, and \`Shift\` (for example \`Ctrl+Alt+U\` or \`Shift+Tab\`). \`Cmd\` is the Command key on macOS and Ctrl on other platforms. An empty string unbinds the action.
+
+**Leader vs direct:** by default a binding is a leader binding, pressed after the \`leaderKey\` (default \`${DEFAULT_LEADER_KEY}\`). List an action in \`directShortcuts\` to fire it without the leader key.
+
+**Sending changes:** \`keyboardShortcuts\` and \`directShortcuts\` are replaced wholesale. Read the current \`keyboardShortcuts\` (and \`directShortcuts\` when changing binding kinds) from GET /settings, modify only the actions you need, and send the complete map or list back; actions absent from the stored map use their built-in defaults.
 
 ### POST /assistant/reload
 

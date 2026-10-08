@@ -1,8 +1,23 @@
-import { render, screen, waitFor, within } from '@testing-library/react'
+import { render as renderRaw, screen, waitFor, within } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { describe, expect, it, vi } from 'vitest'
+import type { ReactElement } from 'react'
 import type { FormInfo } from '@opencode-manager/shared/opencode'
+import { KeyboardShortcutsProvider, useShortcutActions } from '@/contexts/KeyboardShortcutsContext'
 import { FormPrompt } from './FormPrompt'
+
+vi.mock('@/hooks/useSettings', () => ({
+  useSettings: () => ({ preferences: undefined }),
+}))
+
+function render(ui: ReactElement) {
+  return renderRaw(ui, { wrapper: KeyboardShortcutsProvider })
+}
+
+function AbortLayer({ onAbort }: { onAbort: () => void }) {
+  useShortcutActions({ abort: onAbort })
+  return null
+}
 
 const selectForm: FormInfo = {
   id: 'form-1',
@@ -610,6 +625,24 @@ describe('FormPrompt', () => {
       render(<FormPrompt form={form} onReply={vi.fn()} onCancel={vi.fn()} />)
 
       expect(screen.queryByRole('link', { name: /Approve access/ })).not.toBeInTheDocument()
+    })
+  })
+
+  describe('keyboard shortcuts', () => {
+    it('minimizes once on Escape while expanded without triggering a registered session abort', async () => {
+      const sessionAbort = vi.fn()
+      const onMinimize = vi.fn()
+      render(
+        <>
+          <AbortLayer onAbort={sessionAbort} />
+          <FormPrompt form={selectForm} onReply={vi.fn()} onCancel={vi.fn()} onMinimize={onMinimize} />
+        </>
+      )
+
+      await userEvent.keyboard('{Escape}')
+
+      expect(onMinimize).toHaveBeenCalledTimes(1)
+      expect(sessionAbort).not.toHaveBeenCalled()
     })
   })
 })

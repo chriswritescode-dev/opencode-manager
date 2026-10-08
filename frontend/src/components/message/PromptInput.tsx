@@ -34,9 +34,10 @@ import { useSessionPermissionMode } from '@/hooks/useSessionPermissionMode'
 import { detectMentionTrigger, parsePromptToInput, getFilename, getDirectory, type MentionItem } from '@/lib/promptParser'
 import { matchText, rankByMatch, type MatchRange } from '@/lib/fuzzyMatch'
 import { getNextPrimaryAgentId } from '@/lib/primaryAgents'
+import { getNextFavoriteModel } from '@/lib/favoriteModels'
 import { randomId } from '@/lib/utils'
 import { showToast } from '@/lib/toast'
-import { findModelInfo } from '@opencode-manager/shared/opencode'
+import { findModelInfo, isSameModelSelection } from '@opencode-manager/shared/opencode'
 import { isOpenSessionGoal } from '@opencode-manager/shared/schemas'
 import { useProviders } from '@/hooks/useProviders'
 
@@ -110,6 +111,9 @@ export interface PromptInputHandle {
   clearPrompt: () => void
   triggerFileUpload: () => void
   openModelPicker: () => void
+  cycleAgent: () => void
+  cycleVariant: () => void
+  cycleFavoriteModel: () => void
 }
 
 interface PromptInputProps {
@@ -243,29 +247,6 @@ export const PromptInput = memo(forwardRef<PromptInputHandle, PromptInputProps>(
     fileInputRef.current?.click()
   }, [])
 
-  useImperativeHandle(ref, () => ({
-    setPromptValue: (value: string) => {
-      setPrompt(value)
-      textareaRef.current?.focus()
-    },
-    clearPrompt: () => {
-      setPrompt('')
-      setAttachedFiles(new Map())
-      revokeBlobUrls(imageAttachments)
-      setImageAttachments([])
-      resetVoiceGestureState()
-      if (isRecording) {
-        abortRecording()
-      } else {
-        clearSTT()
-      }
-      textareaRef.current?.focus()
-    },
-    triggerFileUpload: openFilePicker,
-    openModelPicker: () => {
-      setIsModelPickerOpen(true)
-    }
-  }), [imageAttachments, clearSTT, isRecording, abortRecording, resetVoiceGestureState, openFilePicker])
   const sessionAgent = useSessionAgent(sessionID, directory)
   const currentMode = localMode ?? sessionAgent.agent
   const setStoredAgent = useSessionAgentStore((s) => s.setAgent)
@@ -1009,8 +990,7 @@ if (isIOS && isSecureContext && navigator.clipboard && navigator.clipboard.read)
   const handleKeyDown = (e: KeyboardEvent<HTMLTextAreaElement>) => {
     if (isBashMode && e.key === 'Escape') {
       e.preventDefault()
-      setIsBashMode(false)
-      setPrompt('')
+      resetPrompt()
       return
     }
 
@@ -1090,16 +1070,8 @@ if (isIOS && isSecureContext && navigator.clipboard && navigator.clipboard.read)
         textareaRef.current?.blur()
       }
       handleSubmit()
-    } else if (e.key === 'Escape') {
-      closeSuggestions()
-      setPrompt('')
-      revokeBlobUrls(imageAttachments)
-      setImageAttachments([])
-      resetVoiceGestureState()
-      clearSTT()
-    } else if ((e.metaKey || e.ctrlKey) && e.key.toLowerCase() === 't') {
-      e.preventDefault()
-      handleCycleVariant()
+    } else if (e.key === 'Escape' && !isSessionActive) {
+      resetPrompt()
     }
   }
 
@@ -1125,13 +1097,28 @@ if (isIOS && isSecureContext && navigator.clipboard && navigator.clipboard.read)
     updateSuggestionTriggers(value, e.target.selectionStart)
   }
 
-  const closeSuggestions = () => {
+  const closeSuggestions = useCallback(() => {
     setShowSuggestions(false)
     setSuggestionQuery('')
     setShowMentionSuggestions(false)
     setMentionQuery('')
     setMentionRange(null)
-  }
+  }, [])
+
+  const resetPrompt = useCallback(() => {
+    setPrompt('')
+    setAttachedFiles(new Map())
+    revokeBlobUrls(imageAttachments)
+    setImageAttachments([])
+    closeSuggestions()
+    setIsBashMode(false)
+    resetVoiceGestureState()
+    if (isRecording) {
+      abortRecording()
+    } else {
+      clearSTT()
+    }
+  }, [imageAttachments, clearSTT, isRecording, abortRecording, resetVoiceGestureState, closeSuggestions])
 
   const updateSuggestionTriggers = (value: string, cursorPosition: number) => {
     const mentionTrigger = detectMentionTrigger(value, cursorPosition)
@@ -1244,7 +1231,7 @@ if (isIOS && isSecureContext && navigator.clipboard && navigator.clipboard.read)
     [sessionID, sessionAgent.sessionAgentId, sessionAgent.modelRef],
   )
 
-  const { model, modelString, modelRef, setActiveAgent, isModelReady } = useModelSelection(directory, modelSelectionSession)
+  const { model, modelString, modelRef, favoriteModels, setModel, setActiveAgent, isModelReady } = useModelSelection(directory, modelSelectionSession)
 
   useEffect(() => {
     setActiveAgent({
@@ -1281,6 +1268,18 @@ if (isIOS && isSecureContext && navigator.clipboard && navigator.clipboard.read)
     cycleVariant()
   }, [hasVariants, cycleVariant])
 
+  const handleCycleFavoriteModel = useCallback(() => {
+    const next = getNextFavoriteModel(favoriteModels, model)
+    if (!next) {
+      showToast.info('No favorite models')
+      return
+    }
+    if (model && isSameModelSelection(model, next)) {
+      return
+    }
+    setModel(next)
+  }, [favoriteModels, model, setModel])
+
   const handleCycleAgent = useCallback(() => {
     const next = getNextPrimaryAgentId(agents, currentMode)
     if (!next) {
@@ -1289,6 +1288,24 @@ if (isIOS && isSecureContext && navigator.clipboard && navigator.clipboard.read)
     }
     handleAgentChange(next)
   }, [agents, currentMode, handleAgentChange])
+
+  useImperativeHandle(ref, () => ({
+    setPromptValue: (value: string) => {
+      setPrompt(value)
+      textareaRef.current?.focus()
+    },
+    clearPrompt: () => {
+      resetPrompt()
+      textareaRef.current?.focus()
+    },
+    triggerFileUpload: openFilePicker,
+    openModelPicker: () => {
+      setIsModelPickerOpen(true)
+    },
+    cycleAgent: handleCycleAgent,
+    cycleVariant: handleCycleVariant,
+    cycleFavoriteModel: handleCycleFavoriteModel,
+  }), [resetPrompt, openFilePicker, handleCycleAgent, handleCycleVariant, handleCycleFavoriteModel])
 
   const commandActionsWithPrompt = useMemo<CommandActions>(
     () => ({
@@ -1466,6 +1483,7 @@ return (
       )}
       <textarea
         ref={textareaRef}
+        data-prompt-input
         value={prompt}
         onChange={handleInput}
         onFocus={handlePromptFocus}

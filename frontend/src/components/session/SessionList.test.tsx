@@ -5,7 +5,7 @@ import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
 import type { ReactNode } from 'react'
 import { SessionList } from './SessionList'
 
-const { createSessionMock, deleteSessionMock, sessionsData, createSessionState, fetchNextPageMock, hasNextPageRef, isFetchingNextPageRef, isFetchNextPageErrorRef, useRealSessionsHookRef, lastSessionsHookArgs, sessionPinsData, togglePinMock } = vi.hoisted(() => ({
+const { createSessionMock, deleteSessionMock, sessionsData, createSessionState, fetchNextPageMock, hasNextPageRef, isFetchingNextPageRef, isFetchNextPageErrorRef, isLoadingRef, isPlaceholderDataRef, useRealSessionsHookRef, lastSessionsHookArgs, sessionPinsData, togglePinMock } = vi.hoisted(() => ({
   createSessionMock: vi.fn(),
   deleteSessionMock: vi.fn(),
   sessionsData: [] as Array<{ id: string; title: string; location: { directory: string }; parentID?: string; time: { updated: number } }>,
@@ -14,8 +14,10 @@ const { createSessionMock, deleteSessionMock, sessionsData, createSessionState, 
   hasNextPageRef: { current: false },
   isFetchingNextPageRef: { current: false },
   isFetchNextPageErrorRef: { current: false },
+  isLoadingRef: { current: false },
+  isPlaceholderDataRef: { current: false },
   useRealSessionsHookRef: { current: false },
-  lastSessionsHookArgs: { current: undefined as { directories: string[]; options?: { search?: string; limit?: number } } | undefined },
+  lastSessionsHookArgs: { current: undefined as { directories: string[]; options?: { search?: string; limit?: number; keepPreviousResults?: boolean } } | undefined },
   sessionPinsData: [] as Array<{ sessionId: string; directory: string; pinnedAt: number }>,
   togglePinMock: vi.fn(),
 }))
@@ -24,15 +26,19 @@ vi.mock('@/hooks/useOpenCode', async (importOriginal) => {
   const actual = await importOriginal<typeof import('@/hooks/useOpenCode')>()
   return {
     ...actual,
-    useSessionsAcrossDirectories: (directories: string[], options?: { search?: string; limit?: number }) => {
+    useSessionsAcrossDirectories: (directories: string[], options?: { search?: string; limit?: number; keepPreviousResults?: boolean }) => {
       if (useRealSessionsHookRef.current) {
         return actual.useSessionsAcrossDirectories(directories, options)
       }
       lastSessionsHookArgs.current = { directories, options }
-      const data = options?.search ? [] : sessionsData
+      const search = options?.search?.toLowerCase() ?? ''
+      const data = search
+        ? sessionsData.filter((session) => session.title.toLowerCase().includes(search))
+        : sessionsData
       return {
         data,
-        isLoading: false,
+        isLoading: isLoadingRef.current,
+        isPlaceholderData: isPlaceholderDataRef.current,
         fetchNextPage: fetchNextPageMock,
         hasNextPage: hasNextPageRef.current,
         isFetchingNextPage: isFetchingNextPageRef.current,
@@ -67,6 +73,8 @@ describe('SessionList', () => {
     hasNextPageRef.current = false
     isFetchingNextPageRef.current = false
     isFetchNextPageErrorRef.current = false
+    isLoadingRef.current = false
+    isPlaceholderDataRef.current = false
     useRealSessionsHookRef.current = false
     lastSessionsHookArgs.current = undefined
     sessionPinsData.splice(0, sessionPinsData.length)
@@ -550,5 +558,162 @@ describe('SessionList', () => {
       queryClient.clear()
       vi.unstubAllGlobals()
     }
+  })
+
+  it('filters rows by title immediately and keeps the search input focused', async () => {
+    const user = userEvent.setup()
+    sessionsData.splice(0, sessionsData.length,
+      { id: 'ses_alpha', title: 'alpha task', location: { directory: '/w/a' }, time: { updated: 2 } },
+      { id: 'ses_beta', title: 'beta task', location: { directory: '/w/a' }, time: { updated: 1 } },
+    )
+
+    render(
+      <SessionList
+        directories={['/w/a']}
+        onSelectSession={vi.fn()}
+      />,
+    )
+
+    const searchInput = screen.getByPlaceholderText('Search sessions...')
+    await user.click(searchInput)
+    await user.type(searchInput, 'alpha')
+
+    expect(screen.getByText('alpha task')).toBeTruthy()
+    expect(screen.queryByText('beta task')).toBeNull()
+    expect(searchInput).toHaveFocus()
+  })
+
+  it('keeps the search input rendered while the first page is loading', () => {
+    isLoadingRef.current = true
+
+    render(
+      <SessionList
+        directories={['/w/a']}
+        onSelectSession={vi.fn()}
+      />,
+    )
+
+    expect(screen.getByPlaceholderText('Search sessions...')).toBeTruthy()
+    expect(screen.getByText('Loading sessions...')).toBeTruthy()
+  })
+
+  it('keeps previous rows and the search input mounted while a new search query is fetching', async () => {
+    const fetchMock = vi.fn()
+    vi.stubGlobal('fetch', fetchMock)
+
+    const initialItems = [
+      { id: 'ses_a', projectID: 'proj_1', title: 'alpha session', time: { created: 1, updated: 1 }, location: { directory: '/w/a' } },
+      { id: 'ses_b', projectID: 'proj_1', title: 'beta session', time: { created: 2, updated: 2 }, location: { directory: '/w/a' } },
+    ]
+
+    let resolveSearch: ((response: Response) => void) | undefined
+    fetchMock.mockImplementation((input: RequestInfo | URL) => {
+      const url = String(input)
+      if (url.includes('search=beta')) {
+        return new Promise<Response>((resolve) => {
+          resolveSearch = resolve
+        })
+      }
+      return Promise.resolve(new Response(JSON.stringify({ data: initialItems, cursor: {} }), {
+        status: 200,
+        headers: { 'Content-Type': 'application/json' },
+      }))
+    })
+
+    useRealSessionsHookRef.current = true
+    const queryClient = new QueryClient({ defaultOptions: { queries: { retry: false }, mutations: { retry: false } } })
+    const wrapper = ({ children }: { children: ReactNode }) => (
+      <QueryClientProvider client={queryClient}>{children}</QueryClientProvider>
+    )
+
+    try {
+      render(
+        <SessionList
+          directories={['/w/a']}
+          onSelectSession={vi.fn()}
+        />,
+        { wrapper },
+      )
+
+      await waitFor(() => {
+        expect(screen.getByText('beta session')).toBeTruthy()
+      })
+
+      await userEvent.setup().type(screen.getByPlaceholderText('Search sessions...'), 'beta')
+
+      await waitFor(() => {
+        expect(resolveSearch).toBeDefined()
+      })
+
+      expect(screen.getByText('beta session')).toBeTruthy()
+      expect(screen.getByPlaceholderText('Search sessions...')).toBeTruthy()
+      expect(screen.queryByText('Loading sessions...')).toBeNull()
+
+      resolveSearch?.(new Response(JSON.stringify({
+        data: [{ id: 'ses_b', projectID: 'proj_1', title: 'beta session', time: { created: 2, updated: 2 }, location: { directory: '/w/a' } }],
+        cursor: {},
+      }), { status: 200, headers: { 'Content-Type': 'application/json' } }))
+
+      await waitFor(() => {
+        expect(screen.queryByText('alpha session')).toBeNull()
+      })
+      expect(screen.getByText('beta session')).toBeTruthy()
+    } finally {
+      queryClient.clear()
+      vi.unstubAllGlobals()
+    }
+  })
+
+  it('shows the searching state while a search is pending and the empty state once it settles', async () => {
+    const user = userEvent.setup()
+    sessionsData.splice(0, sessionsData.length,
+      { id: 'ses_a', title: 'alpha task', location: { directory: '/w/a' }, time: { updated: 1 } },
+    )
+
+    render(
+      <SessionList
+        directories={['/w/a']}
+        onSelectSession={vi.fn()}
+      />,
+    )
+
+    await user.type(screen.getByPlaceholderText('Search sessions...'), 'zzz')
+
+    expect(screen.getByText('Searching sessions...')).toBeTruthy()
+    expect(screen.queryByText('No sessions found')).toBeNull()
+
+    await waitFor(() => {
+      expect(screen.getByText('No sessions found')).toBeTruthy()
+    })
+    expect(screen.queryByText('Searching sessions...')).toBeNull()
+  })
+
+  it('does not paginate while placeholder data is shown', async () => {
+    const user = userEvent.setup()
+    isPlaceholderDataRef.current = true
+    hasNextPageRef.current = true
+    sessionsData.splice(0, sessionsData.length,
+      { id: 'ses_a', title: 'alpha task', location: { directory: '/w/a' }, time: { updated: 1 } },
+    )
+
+    render(
+      <SessionList
+        directories={['/w/a']}
+        onSelectSession={vi.fn()}
+      />,
+    )
+
+    const scrollContainer = screen.getByRole('region', { name: 'Sessions' })
+    Object.defineProperty(scrollContainer, 'scrollHeight', { value: 1000, configurable: true })
+    Object.defineProperty(scrollContainer, 'clientHeight', { value: 500, configurable: true })
+    Object.defineProperty(scrollContainer, 'scrollTop', { value: 300, configurable: true })
+
+    await user.type(screen.getByPlaceholderText('Search sessions...'), 'zzz')
+    fireEvent.scroll(scrollContainer)
+
+    expect(screen.getByText('Searching sessions...')).toBeTruthy()
+
+    await new Promise((resolve) => setTimeout(resolve, 20))
+    expect(fetchNextPageMock).not.toHaveBeenCalled()
   })
 })

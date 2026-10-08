@@ -134,12 +134,58 @@ describe('useSessionsAcrossDirectories', () => {
     })
   })
 
-  it('deletes each session through the facade and invalidates the session list cache', async () => {
+  it('issues one call per page across all directories and paginates by cursor', async () => {
+    mocks.listSessionPage.mockImplementation(async ({ cursor }: { cursor?: string }) => {
+      if (cursor === 'cursor_all') {
+        return { items: [sessionInfo('ses_all2', '/w/b', 2000)] }
+      }
+      return { items: [sessionInfo('ses_all1', '/w/a')], nextCursor: 'cursor_all' }
+    })
+
+    const queryClient = createQueryClient()
+    const { result } = renderHook(
+      () => useSessionsAcrossDirectories(['/w/a', '/w/b'], { allDirectories: true }),
+      { wrapper: createWrapper(queryClient) },
+    )
+
+    await waitFor(() => {
+      expect(result.current.isLoading).toBe(false)
+    })
+
+    expect(mocks.listSessionPage).toHaveBeenCalledTimes(1)
+    expect(mocks.listSessionPage).toHaveBeenCalledWith({
+      limit: 25,
+      order: 'desc',
+      search: undefined,
+    })
+    expect(result.current.data.map((session) => session.id)).toEqual(['ses_all1'])
+    expect(result.current.hasNextPage).toBe(true)
+
+    await act(async () => {
+      await result.current.fetchNextPage()
+    })
+
+    await waitFor(() => {
+      expect(result.current.data).toHaveLength(2)
+    })
+
+    expect(mocks.listSessionPage).toHaveBeenCalledTimes(2)
+    expect(mocks.listSessionPage).toHaveBeenLastCalledWith({ cursor: 'cursor_all' })
+    expect(result.current.data.map((session) => session.id)).toEqual(['ses_all1', 'ses_all2'])
+  })
+
+  it('deletes each session through the facade and removes it from cached lists without invalidating', async () => {
     mocks.deleteSession.mockResolvedValue(undefined)
 
     const queryClient = createQueryClient()
-    const listKey = ['opencode', 'sessions', '/w/a', { search: undefined, limit: 25 }]
-    queryClient.setQueryData(listKey, { pages: [{ items: [], cursors: {} }], pageParams: [undefined] })
+    const listKey = ['opencode', 'sessions', '/w/a', { search: undefined, limit: 25, allDirectories: false }]
+    queryClient.setQueryData(listKey, {
+      pages: [{
+        items: [sessionInfo('ses_a1', '/w/a'), sessionInfo('ses_a2', '/w/a')],
+        nextParam: undefined,
+      }],
+      pageParams: [undefined],
+    })
 
     const { result } = renderHook(() => useDeleteSession(['/w/a']), {
       wrapper: createWrapper(queryClient),
@@ -150,9 +196,111 @@ describe('useSessionsAcrossDirectories', () => {
     })
 
     expect(mocks.deleteSession).toHaveBeenCalledWith('ses_a1')
+    const cached = queryClient.getQueryData<{ pages: Array<{ items: SessionInfo[] }> }>(listKey)
+    expect(cached?.pages[0].items.map((session) => session.id)).toEqual(['ses_a2'])
+    expect(queryClient.getQueryState(listKey)?.isInvalidated).toBe(false)
+  })
+
+  it('invalidates the session list cache when a delete fails', async () => {
+    mocks.deleteSession.mockRejectedValue(new Error('nope'))
+
+    const queryClient = createQueryClient()
+    const listKey = ['opencode', 'sessions', '/w/a', { search: undefined, limit: 25, allDirectories: false }]
+    queryClient.setQueryData(listKey, {
+      pages: [{ items: [sessionInfo('ses_a1', '/w/a')], nextParam: undefined }],
+      pageParams: [undefined],
+    })
+
+    const { result } = renderHook(() => useDeleteSession(['/w/a']), {
+      wrapper: createWrapper(queryClient),
+    })
+
+    await act(async () => {
+      await expect(
+        result.current.mutateAsync({ id: 'ses_a1', directory: '/w/a' }),
+      ).rejects.toThrow('Failed to delete 1 session(s)')
+    })
+
     await waitFor(() => {
       expect(queryClient.getQueryState(listKey)?.isInvalidated).toBe(true)
     })
+  })
+
+  it('does not keep previous results across a search change unless requested', async () => {
+    let resolveSearch: ((value: { items: SessionInfo[] }) => void) | undefined
+    mocks.listSessionPage.mockImplementation(({ search }: { search?: string }) => {
+      if (search === 'deploy') {
+        return new Promise<{ items: SessionInfo[] }>((resolve) => { resolveSearch = resolve })
+      }
+      return Promise.resolve({ items: [sessionInfo('ses_a1', '/w/a')] })
+    })
+
+    const queryClient = createQueryClient()
+    const { result, rerender } = renderHook(
+      (props: { search?: string }) => useSessionsAcrossDirectories(['/w/a'], { search: props.search }),
+      { wrapper: createWrapper(queryClient), initialProps: { search: undefined as string | undefined } },
+    )
+
+    await waitFor(() => {
+      expect(result.current.data.map((session) => session.id)).toEqual(['ses_a1'])
+    })
+
+    rerender({ search: 'deploy' })
+
+    await waitFor(() => expect(resolveSearch).toBeDefined())
+
+    expect(result.current.isPlaceholderData).toBe(false)
+    expect(result.current.isLoading).toBe(true)
+    expect(result.current.data).toHaveLength(0)
+
+    await act(async () => {
+      resolveSearch?.({ items: [sessionInfo('ses_b1', '/w/a')] })
+    })
+
+    await waitFor(() => {
+      expect(result.current.data.map((session) => session.id)).toEqual(['ses_b1'])
+    })
+  })
+
+  it('keeps previous results across a search change when requested', async () => {
+    let resolveSearch: ((value: { items: SessionInfo[] }) => void) | undefined
+    mocks.listSessionPage.mockImplementation(({ search }: { search?: string }) => {
+      if (search === 'deploy') {
+        return new Promise<{ items: SessionInfo[] }>((resolve) => { resolveSearch = resolve })
+      }
+      return Promise.resolve({ items: [sessionInfo('ses_a1', '/w/a')] })
+    })
+
+    const queryClient = createQueryClient()
+    const { result, rerender } = renderHook(
+      (props: { search?: string; keepPreviousResults?: boolean }) =>
+        useSessionsAcrossDirectories(['/w/a'], {
+          search: props.search,
+          keepPreviousResults: props.keepPreviousResults,
+        }),
+      {
+        wrapper: createWrapper(queryClient),
+        initialProps: { search: undefined as string | undefined, keepPreviousResults: true },
+      },
+    )
+
+    await waitFor(() => {
+      expect(result.current.data.map((session) => session.id)).toEqual(['ses_a1'])
+    })
+
+    rerender({ search: 'deploy', keepPreviousResults: true })
+
+    await waitFor(() => expect(result.current.isPlaceholderData).toBe(true))
+    expect(result.current.data.map((session) => session.id)).toEqual(['ses_a1'])
+
+    await act(async () => {
+      resolveSearch?.({ items: [sessionInfo('ses_b1', '/w/a')] })
+    })
+
+    await waitFor(() => {
+      expect(result.current.data.map((session) => session.id)).toEqual(['ses_b1'])
+    })
+    expect(result.current.isPlaceholderData).toBe(false)
   })
 })
 
