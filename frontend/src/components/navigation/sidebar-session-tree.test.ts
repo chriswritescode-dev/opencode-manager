@@ -1,6 +1,7 @@
 import { describe, it, expect } from 'vitest'
 import type { Repo, Session } from '@/api/types'
 import {
+  buildRepoByDirectory,
   buildSidebarRepoGroups,
   getActiveRepoId,
   isCurrentSessionItem,
@@ -109,6 +110,19 @@ describe('selectNavigableRepos', () => {
     selectNavigableRepos(repos)
 
     expect(repos.map((repo) => repo.id)).toEqual([1, 2])
+  })
+})
+
+describe('buildRepoByDirectory', () => {
+  it('indexes each repo by full path', () => {
+    const repoA = createRepo({ id: 1, fullPath: '/repos/a' })
+    const repoB = createRepo({ id: 2, fullPath: '/repos/b' })
+
+    const byDirectory = buildRepoByDirectory([repoA, repoB])
+
+    expect(byDirectory.get('/repos/a')).toBe(repoA)
+    expect(byDirectory.get('/repos/b')).toBe(repoB)
+    expect(byDirectory.size).toBe(2)
   })
 })
 

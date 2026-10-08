@@ -1,13 +1,16 @@
-import { beforeEach, describe, expect, it, vi } from 'vitest'
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { useState } from 'react'
 import { render, screen, fireEvent, waitFor } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import type { Repo, Session } from '@/api/types'
+import { stubMatchMedia } from '@/test/test-utils'
 import { SessionPickerDialog } from './SessionPickerDialog'
 
 const mocks = vi.hoisted(() => ({
   sessionsData: [] as Session[],
   lastDirectories: [] as string[],
+  lastAllDirectories: false,
+  sessionsHook: vi.fn(),
   fetchNextPage: vi.fn(),
   deleteSessionMock: vi.fn(),
   togglePinMock: vi.fn(),
@@ -19,8 +22,13 @@ vi.mock('@/hooks/useOpenCode', async (importOriginal) => {
   const actual = await importOriginal<typeof import('@/hooks/useOpenCode')>()
   return {
     ...actual,
-    useSessionsAcrossDirectories: (directories: string[], options?: { search?: string }) => {
+    useSessionsAcrossDirectories: (
+      directories: string[],
+      options?: { search?: string; allDirectories?: boolean },
+    ) => {
+      mocks.sessionsHook()
       mocks.lastDirectories = directories
+      mocks.lastAllDirectories = options?.allDirectories ?? false
       const search = options?.search?.toLowerCase() ?? ''
       const data = search
         ? mocks.sessionsData.filter((session) => (session.title ?? '').toLowerCase().includes(search))
@@ -47,11 +55,6 @@ vi.mock('@/hooks/useSessionPins', () => ({
 vi.mock('@/hooks/useSidebarRepoGroups', () => ({
   useNavigableRepos: () => ({ repos: mocks.repos, isLoading: false, refetch: vi.fn() }),
 }))
-
-vi.mock('@/lib/overlayFocus', async (importOriginal) => {
-  const actual = await importOriginal<typeof import('@/lib/overlayFocus')>()
-  return { ...actual, isFinePointer: () => true }
-})
 
 vi.mock('@/stores/sessionStatusStore', async (importOriginal) => {
   const actual = await importOriginal<typeof import('@/stores/sessionStatusStore')>()
@@ -104,11 +107,16 @@ const combobox = () => screen.getByRole('combobox')
 describe('SessionPickerDialog', () => {
   beforeEach(() => {
     vi.clearAllMocks()
+    stubMatchMedia(true)
     localStorage.clear()
     mocks.deleteSessionMock.mockResolvedValue(undefined)
     mocks.sessionPins = []
     mocks.repos = [repo(1, 'alpha', '/w/a'), repo(2, 'beta', '/w/b')]
     mocks.sessionsData = []
+  })
+
+  afterEach(() => {
+    Reflect.deleteProperty(window, 'matchMedia')
   })
 
   it('opens with the active session as the cursor and marks it with a dot', () => {
@@ -185,12 +193,14 @@ describe('SessionPickerDialog', () => {
     renderPicker()
 
     expect(mocks.lastDirectories).toEqual(['/w/a'])
+    expect(mocks.lastAllDirectories).toBe(false)
     expect(screen.getByText('Alpha session')).toBeInTheDocument()
     expect(screen.queryByText('Beta session')).not.toBeInTheDocument()
 
     fireEvent.keyDown(combobox(), { key: 'a', ctrlKey: true })
 
     expect(mocks.lastDirectories).toEqual(['/w/a', '/w/b'])
+    expect(mocks.lastAllDirectories).toBe(true)
     expect(localStorage.getItem('oc:session-picker:all-projects')).toBe('true')
     expect(screen.getByText('Beta session')).toBeInTheDocument()
     expect(screen.getByText('alpha')).toBeInTheDocument()
@@ -198,7 +208,36 @@ describe('SessionPickerDialog', () => {
 
     fireEvent.keyDown(combobox(), { key: 'a', ctrlKey: true })
     expect(mocks.lastDirectories).toEqual(['/w/a'])
+    expect(mocks.lastAllDirectories).toBe(false)
     expect(localStorage.getItem('oc:session-picker:all-projects')).toBe('false')
+  })
+
+  it('does not query sessions while closed and queries after opening', async () => {
+    mocks.sessionsData = [session('ses_1', 'First', '/w/a', 3000)]
+
+    function Host() {
+      const [open, setOpen] = useState(false)
+      return (
+        <>
+          <button type="button" onClick={() => setOpen(true)}>open-picker</button>
+          <SessionPickerDialog
+            open={open}
+            onOpenChange={setOpen}
+            currentRepo={mocks.repos[0]}
+            onSelectSession={vi.fn()}
+            onActiveSessionDeleted={vi.fn()}
+          />
+        </>
+      )
+    }
+
+    render(<Host />)
+
+    expect(mocks.sessionsHook).not.toHaveBeenCalled()
+
+    fireEvent.click(screen.getByText('open-picker'))
+
+    await waitFor(() => expect(mocks.sessionsHook).toHaveBeenCalled())
   })
 
   it('deletes on a second Ctrl+D and clears the pending state on a move', async () => {

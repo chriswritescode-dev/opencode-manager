@@ -1,9 +1,11 @@
 import { useMemo, useState } from 'react'
 import { useLocation, useNavigate } from 'react-router-dom'
 import { Search } from 'lucide-react'
-import type { Repo } from '@/api/types'
+import type { Repo, Session } from '@/api/types'
 import { Input } from '@/components/ui/input'
 import { useNavigableRepos, useSidebarRepoGroups } from '@/hooks/useSidebarRepoGroups'
+import { useSessionSearch } from '@/hooks/useSessionSearch'
+import { useSessionPins } from '@/hooks/useSessionPins'
 import {
   NewSessionButton,
   RepoNavGroup,
@@ -12,12 +14,16 @@ import {
   SessionNavRow,
   SessionNavStatus,
 } from '@/components/navigation/RepoSessionNav'
-import { getActiveRepoId, isCurrentSessionItem, isRepoReady } from '@/components/navigation/sidebar-session-tree'
+import {
+  SIDEBAR_SESSIONS_PER_REPO,
+  buildSidebarRepoGroups,
+  getActiveRepoId,
+  isCurrentSessionItem,
+  isRepoReady,
+} from '@/components/navigation/sidebar-session-tree'
 import { getRepoPath } from '@/lib/navigation'
 import { getRepoDisplayName } from '@/lib/utils'
-import { useDebouncedValue } from '@/hooks/useDebouncedValue'
-
-const SESSION_SEARCH_DEBOUNCE_MS = 300
+import { buildPinnedSessionKeys } from '@/lib/sessionKey'
 
 function SessionSearchInput({ value, onChange }: { value: string; onChange: (value: string) => void }) {
   const clear = () => onChange('')
@@ -46,29 +52,37 @@ function SessionSearchInput({ value, onChange }: { value: string; onChange: (val
   )
 }
 
-function SessionSearchResults({ repos, search }: { repos: Repo[]; search: string }) {
+interface SessionSearchResultsProps {
+  nameMatchedRepos: Repo[]
+  otherRepos: Repo[]
+  sessions: Session[]
+  isSearchLoading: boolean
+  isSearchError: boolean
+}
+
+function SessionSearchResults({
+  nameMatchedRepos,
+  otherRepos,
+  sessions,
+  isSearchLoading,
+  isSearchError,
+}: SessionSearchResultsProps) {
   const navigate = useNavigate()
   const location = useLocation()
-  const { nameMatchedRepos, otherRepos } = useMemo(() => {
-    const query = search.toLowerCase()
-    const readyRepos = repos.filter(isRepoReady)
-    const isNameMatch = (repo: Repo) => getRepoDisplayName(repo).toLowerCase().includes(query)
-    return {
-      nameMatchedRepos: readyRepos.filter(isNameMatch),
-      otherRepos: readyRepos.filter((repo) => !isNameMatch(repo)),
-    }
-  }, [repos, search])
   const nameMatches = useSidebarRepoGroups({ repos: nameMatchedRepos })
-  const sessionMatches = useSidebarRepoGroups({ repos: otherRepos, search })
-  const isLoading = nameMatches.isLoading || sessionMatches.isLoading
-  const isError = nameMatches.isError || sessionMatches.isError
+  const { data: sessionPins } = useSessionPins()
+  const pinnedKeys = useMemo(() => buildPinnedSessionKeys(sessionPins ?? []), [sessionPins])
+  const sessionGroups = useMemo(
+    () => buildSidebarRepoGroups({ repos: otherRepos, sessions, pinnedKeys, now: Date.now() }),
+    [otherRepos, sessions, pinnedKeys],
+  )
   const matchingGroups = [
     ...nameMatches.groups,
-    ...sessionMatches.groups.filter((group) => group.items.length > 0),
+    ...sessionGroups.filter((group) => group.items.length > 0),
   ]
 
-  if (isLoading) return <SessionNavStatus>Loading sessions...</SessionNavStatus>
-  if (isError) return <SessionNavStatus>Failed to load sessions</SessionNavStatus>
+  if (nameMatches.isLoading || isSearchLoading) return <SessionNavStatus>Loading sessions...</SessionNavStatus>
+  if (nameMatches.isError || isSearchError) return <SessionNavStatus>Failed to load sessions</SessionNavStatus>
   if (matchingGroups.length === 0) return <SessionNavStatus>No sessions found</SessionNavStatus>
 
   return (
@@ -101,23 +115,53 @@ function SessionSearchResults({ repos, search }: { repos: Repo[]; search: string
 export function DesktopSessionTree() {
   const navigate = useNavigate()
   const location = useLocation()
+  const { repos, isLoading } = useNavigableRepos()
+  const readyRepos = useMemo(() => repos.filter(isRepoReady), [repos])
+
   const [draft, setDraft] = useState('')
   const trimmedDraft = draft.trim()
-  const debouncedSearch = useDebouncedValue(trimmedDraft, SESSION_SEARCH_DEBOUNCE_MS)
-  const search = trimmedDraft ? debouncedSearch : ''
-  const { repos, isLoading } = useNavigableRepos()
+
+  const { nameMatchedRepos, otherRepos } = useMemo(() => {
+    const query = trimmedDraft.toLowerCase()
+    const isNameMatch = (repo: Repo) => getRepoDisplayName(repo).toLowerCase().includes(query)
+    return {
+      nameMatchedRepos: readyRepos.filter(isNameMatch),
+      otherRepos: readyRepos.filter((repo) => !isNameMatch(repo)),
+    }
+  }, [readyRepos, trimmedDraft])
+
+  const otherDirectories = useMemo(() => otherRepos.map((repo) => repo.fullPath), [otherRepos])
+  const searchDirectories = useMemo(
+    () => (trimmedDraft ? otherDirectories : []),
+    [trimmedDraft, otherDirectories],
+  )
+  const { setQuery, filteredSessions, isLoading: isSearchLoading, isError: isSearchError } = useSessionSearch(
+    searchDirectories,
+    { limit: SIDEBAR_SESSIONS_PER_REPO },
+  )
+
+  const handleSearchChange = (value: string) => {
+    setDraft(value)
+    setQuery(value)
+  }
 
   return (
     <div className="flex min-h-0 flex-1 flex-col">
       <div className="px-2 pb-2">
-        <SessionSearchInput value={draft} onChange={setDraft} />
+        <SessionSearchInput value={draft} onChange={handleSearchChange} />
       </div>
 
       <div role="region" aria-label="Session navigator" className="min-h-0 flex-1 overflow-y-auto pb-2">
         {isLoading ? (
           <SessionNavStatus>Loading repos...</SessionNavStatus>
-        ) : search ? (
-          <SessionSearchResults repos={repos} search={search} />
+        ) : trimmedDraft ? (
+          <SessionSearchResults
+            nameMatchedRepos={nameMatchedRepos}
+            otherRepos={otherRepos}
+            sessions={filteredSessions}
+            isSearchLoading={isSearchLoading}
+            isSearchError={isSearchError}
+          />
         ) : (
           <RepoSessionNavList
             repos={repos}

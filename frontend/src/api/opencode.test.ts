@@ -98,6 +98,32 @@ describe('OpenCode facade', () => {
     expect(page.nextCursor).toBeUndefined()
   })
 
+  it('omits the directory when listing sessions across all directories', async () => {
+    fetchMock.mockResolvedValue(
+      jsonResponse({ data: [sessionInfo('ses_1', '/repo')], cursor: { next: 'cursor_next' } }),
+    )
+
+    const page = await listSessionPage({ limit: 25, order: 'desc' })
+
+    expect(lastRequest().url).toBe(
+      'http://localhost/api/opencode/api/session?limit=25&order=desc&parentID=null',
+    )
+    expect(lastRequest().init.method).toBe('GET')
+    expect(page.items).toEqual([sessionInfo('ses_1', '/repo')])
+    expect(page.nextCursor).toBe('cursor_next')
+  })
+
+  it('omits the directory on an all-directories continuation page', async () => {
+    fetchMock.mockResolvedValue(jsonResponse({ data: [], cursor: {} }))
+
+    await listSessionPage({ cursor: 'cursor_1' })
+
+    expect(lastRequest().url).toBe(
+      'http://localhost/api/opencode/api/session?parentID=null&cursor=cursor_1',
+    )
+    expect(lastRequest().init.method).toBe('GET')
+  })
+
   it('reads a single session from the V2 session route', async () => {
     fetchMock.mockResolvedValue(jsonResponse({ data: sessionInfo('ses_1', '/repo') }))
 

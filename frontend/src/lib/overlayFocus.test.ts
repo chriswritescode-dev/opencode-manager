@@ -1,6 +1,6 @@
 import { describe, it, expect, afterEach } from 'vitest'
 import { stubMatchMedia } from '@/test/test-utils'
-import { getFocusedElement, hasOpenOverlay, isFinePointer, restoreOverlayFocus } from './overlayFocus'
+import { getFocusedElement, hasOpenOverlay, restoreOverlayFocus } from './overlayFocus'
 import { PROMPT_INPUT_SELECTOR, isPromptInput, isTextEntryElement } from './domTargets'
 
 function createElement<K extends keyof HTMLElementTagNameMap>(
@@ -23,16 +23,6 @@ describe('getFocusedElement', () => {
     const button = createElement('button')
     button.focus()
     expect(getFocusedElement()).toBe(button)
-  })
-})
-
-describe('isFinePointer', () => {
-  it('reflects the fine pointer media query', () => {
-    stubMatchMedia(true)
-    expect(isFinePointer()).toBe(true)
-
-    stubMatchMedia(false)
-    expect(isFinePointer()).toBe(false)
   })
 })
 

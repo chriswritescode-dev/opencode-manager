@@ -37,7 +37,7 @@ export interface SessionPage {
 }
 
 export interface SessionPageInput {
-  directory: string
+  directory?: string
   limit?: number
   order?: 'asc' | 'desc'
   search?: string
@@ -93,7 +93,7 @@ function buildPromptFields(input: PromptFields) {
 export async function listSessionPage(input: SessionPageInput): Promise<SessionPage> {
   const { data, cursor } = await callOpenCode((api) =>
     api.session.list({
-      directory: input.directory,
+      ...(input.directory === undefined ? {} : { directory: input.directory }),
       parentID: 'null',
       limit: input.limit,
       order: input.order,

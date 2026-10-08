@@ -12,7 +12,6 @@ import { Button } from "@/components/ui/button";
 interface SessionCardProps {
   session: Session;
   isSelected: boolean;
-  isActive: boolean;
   manageMode: boolean;
   isPinned?: boolean;
   onTogglePin?: () => void;
@@ -24,7 +23,6 @@ interface SessionCardProps {
 export const SessionCard = ({
   session,
   isSelected,
-  isActive,
   manageMode,
   isPinned,
   onTogglePin,
@@ -71,9 +69,7 @@ export const SessionCard = ({
           } ${
             isSelected
               ? "border-primary shadow-lg shadow-primary/30 bg-accent"
-              : isActive
-                ? "bg-accent border-border"
-                : "bg-card border-border hover:bg-accent hover:border-border"
+              : "bg-card border-border hover:bg-accent hover:border-border"
           } hover:shadow-lg`}
           onClick={() => {
             if (!isOpen) {

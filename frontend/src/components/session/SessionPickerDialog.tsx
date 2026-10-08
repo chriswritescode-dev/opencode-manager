@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useId, useMemo, useRef, useState } from 'react'
+import { memo, useCallback, useEffect, useId, useMemo, useRef, useState } from 'react'
 import { format, startOfDay } from 'date-fns'
 import { MoreHorizontal, Pin, PinOff, Search } from 'lucide-react'
 import type { Repo, Session } from '@/api/types'
@@ -14,15 +14,16 @@ import { Input } from '@/components/ui/input'
 import { SessionStatusIndicator } from '@/components/ui/session-status-indicator'
 import { DeleteSessionDialog } from '@/components/session/DeleteSessionDialog'
 import { partitionSessions } from '@/components/session/session-partition'
+import { buildRepoByDirectory } from '@/components/navigation/sidebar-session-tree'
 import { useDeleteSession } from '@/hooks/useOpenCode'
 import { useSessionSearch } from '@/hooks/useSessionSearch'
 import { useSessionPins, useToggleSessionPin } from '@/hooks/useSessionPins'
-import { usePersistentBoolean } from '@/hooks/useSidebarCollapsed'
+import { usePersistentBoolean } from '@/hooks/usePersistentBoolean'
 import { useNavigableRepos } from '@/hooks/useSidebarRepoGroups'
 import { useSessionStatusForSession } from '@/stores/sessionStatusStore'
-import { buildPinnedSessionKeys, buildSessionKey } from '@/lib/sessionKey'
+import { buildPinnedSessionKeys, getSessionKey } from '@/lib/sessionKey'
 import { cn, formatShortRelativeTime, getRepoDisplayName } from '@/lib/utils'
-import { isFinePointer } from '@/lib/overlayFocus'
+import { FINE_POINTER_MEDIA_QUERY, useMediaQuery } from '@/hooks/useMediaQuery'
 
 const ALL_PROJECTS_STORAGE_KEY = 'oc:session-picker:all-projects'
 const UNTITLED_SESSION_TITLE = 'Untitled Session'
@@ -109,21 +110,23 @@ function SessionPickerGutter({ sessionID, isActive }: { sessionID: string; isAct
 
 interface SessionPickerRowItemProps {
   row: SessionPickerRow
+  index: number
   optionId: string
   isCursor: boolean
   isActive: boolean
   isPinned: boolean
   isPendingDelete: boolean
   showRepo: boolean
-  onOpen: () => void
-  onHover: () => void
-  onTogglePin: () => void
-  onRequestDelete: () => void
-  registerRef: (node: HTMLDivElement | null) => void
+  onOpen: (row: SessionPickerRow) => void
+  onHover: (index: number) => void
+  onTogglePin: (row: SessionPickerRow) => void
+  onRequestDelete: (session: Session) => void
+  registerRef: (key: string, node: HTMLDivElement | null) => void
 }
 
-function SessionPickerRowItem({
+const SessionPickerRowItem = memo(function SessionPickerRowItem({
   row,
+  index,
   optionId,
   isCursor,
   isActive,
@@ -138,10 +141,10 @@ function SessionPickerRowItem({
 }: SessionPickerRowItemProps) {
   return (
     <div
-      ref={registerRef}
+      ref={(node) => registerRef(row.key, node)}
       role="presentation"
       onPointerMove={(event) => {
-        if (event.pointerType === 'mouse') onHover()
+        if (event.pointerType === 'mouse') onHover(index)
       }}
       className={cn(
         'group flex items-center rounded-md text-sm min-h-8 pointer-coarse:min-h-11',
@@ -156,7 +159,7 @@ function SessionPickerRowItem({
         role="option"
         id={optionId}
         aria-selected={isCursor}
-        onClick={onOpen}
+        onClick={() => onOpen(row)}
         className="flex min-w-0 flex-1 cursor-pointer items-center gap-2 px-2"
       >
         <span className="flex w-4 shrink-0 items-center justify-center">
@@ -207,37 +210,46 @@ function SessionPickerRowItem({
             </Button>
           </DropdownMenuTrigger>
           <DropdownMenuContent align="end" className="z-[200]" onClick={(event) => event.stopPropagation()}>
-            <DropdownMenuItem onClick={onTogglePin}>
+            <DropdownMenuItem onClick={() => onTogglePin(row)}>
               {isPinned ? <PinOff className="h-4 w-4 mr-2" /> : <Pin className="h-4 w-4 mr-2" />}
               {isPinned ? 'Unpin' : 'Pin'}
             </DropdownMenuItem>
-            <DropdownMenuItem onClick={onRequestDelete}>Delete</DropdownMenuItem>
+            <DropdownMenuItem onClick={() => onRequestDelete(row.session)}>Delete</DropdownMenuItem>
           </DropdownMenuContent>
         </DropdownMenu>
       </div>
     </div>
   )
+})
+
+interface SessionPickerContentProps {
+  open: boolean
+  currentRepo: Repo | undefined
+  activeSessionID?: string
+  onSelectSession: (session: Session, repo: Repo) => void
+  onActiveSessionDeleted: () => void
+  searchInputRef: React.RefObject<HTMLInputElement | null>
+  hasFinePointer: boolean
 }
 
-export function SessionPickerDialog({
+function SessionPickerContent({
   open,
-  onOpenChange,
   currentRepo,
   activeSessionID,
   onSelectSession,
   onActiveSessionDeleted,
-}: SessionPickerDialogProps) {
+  searchInputRef,
+  hasFinePointer,
+}: SessionPickerContentProps) {
   const [allProjects, toggleAllProjects] = usePersistentBoolean(ALL_PROJECTS_STORAGE_KEY, false)
-  const { repos } = useNavigableRepos(open)
-  const searchInputRef = useRef<HTMLInputElement>(null)
+  const { repos } = useNavigableRepos()
   const listRef = useRef<HTMLDivElement>(null)
   const rowRefs = useRef(new Map<string, HTMLDivElement>())
   const listId = useId()
   const optionBaseId = useId()
 
   const repoByDirectory = useMemo(() => {
-    const map = new Map<string, Repo>()
-    for (const repo of repos) map.set(repo.fullPath, repo)
+    const map = buildRepoByDirectory(repos)
     if (currentRepo) map.set(currentRepo.fullPath, currentRepo)
     return map
   }, [repos, currentRepo])
@@ -260,12 +272,8 @@ export function SessionPickerDialog({
     isFetchingNextPage,
     isFetchNextPageError,
     canFetchNextPage,
-  } = useSessionSearch(directories)
+  } = useSessionSearch(directories, { allDirectories: allProjects })
 
-  const keyFn = useCallback(
-    (session: Session) => buildSessionKey(session.location.directory, session.id),
-    [],
-  )
   const resolveRepo = useCallback(
     (session: Session) => repoByDirectory.get(session.location.directory) ?? currentRepo,
     [repoByDirectory, currentRepo],
@@ -281,8 +289,8 @@ export function SessionPickerDialog({
   const [sessionToDelete, setSessionToDelete] = useState<Session | null>(null)
 
   const sections = useMemo(
-    () => buildSections(filteredSessions, pinnedKeys, keyFn, resolveRepo),
-    [filteredSessions, pinnedKeys, keyFn, resolveRepo],
+    () => buildSections(filteredSessions, pinnedKeys, getSessionKey, resolveRepo),
+    [filteredSessions, pinnedKeys, resolveRepo],
   )
   const rows = useMemo(() => sections.flatMap((section) => section.rows), [sections])
   const rowIndexByKey = useMemo(
@@ -308,14 +316,6 @@ export function SessionPickerDialog({
     setCursorKey(null)
     setPendingDeleteKey(null)
   }, [trimmedQuery, allProjects])
-
-  useEffect(() => {
-    if (!open) return
-    setQuery('')
-    setCursorKey(null)
-    setPendingDeleteKey(null)
-    setSessionToDelete(null)
-  }, [open, setQuery])
 
   const setRowRef = useCallback((key: string, node: HTMLDivElement | null) => {
     if (node) rowRefs.current.set(key, node)
@@ -348,6 +348,17 @@ export function SessionPickerDialog({
     [onSelectSession],
   )
 
+  const performDelete = useCallback(
+    (session: Session) =>
+      deleteSession
+        .mutateAsync({ id: session.id, directory: session.location.directory })
+        .then(() => {
+          if (session.id === activeSessionID) onActiveSessionDeleted()
+        })
+        .catch(() => undefined),
+    [deleteSession, activeSessionID, onActiveSessionDeleted],
+  )
+
   const deleteRow = useCallback(
     (row: SessionPickerRow | undefined) => {
       if (!row) return
@@ -355,17 +366,11 @@ export function SessionPickerDialog({
         setPendingDeleteKey(row.key)
         return
       }
-      void deleteSession
-        .mutateAsync({ id: row.session.id, directory: row.session.location.directory })
-        .then(() => {
-          if (row.session.id === activeSessionID) onActiveSessionDeleted()
-        })
-        .catch(() => undefined)
-        .finally(() => {
-          setPendingDeleteKey(null)
-        })
+      void performDelete(row.session).finally(() => {
+        setPendingDeleteKey(null)
+      })
     },
-    [pendingDeleteKey, deleteSession, activeSessionID, onActiveSessionDeleted],
+    [pendingDeleteKey, performDelete],
   )
 
   const handleSearchKeyDown = useCallback(
@@ -456,42 +461,170 @@ export function SessionPickerDialog({
     [togglePin, pinnedKeys],
   )
 
+  const handleRequestDelete = useCallback((session: Session) => {
+    setSessionToDelete(session)
+  }, [])
+
   const confirmDelete = useCallback(() => {
     if (!sessionToDelete) return
-    void deleteSession
-      .mutateAsync({
-        id: sessionToDelete.id,
-        directory: sessionToDelete.location.directory,
-      })
-      .then(() => {
-        if (sessionToDelete.id === activeSessionID) onActiveSessionDeleted()
-      })
-      .catch(() => undefined)
-      .finally(() => {
-        setSessionToDelete(null)
-      })
-  }, [sessionToDelete, deleteSession, activeSessionID, onActiveSessionDeleted])
+    void performDelete(sessionToDelete).finally(() => {
+      setSessionToDelete(null)
+    })
+  }, [sessionToDelete, performDelete])
 
-  const renderRow = (row: SessionPickerRow) => {
-    const index = rowIndexByKey.get(row.key) ?? -1
-    return (
-      <SessionPickerRowItem
-        key={row.key}
-        row={row}
-        optionId={optionId(optionBaseId, index)}
-        isCursor={index === cursorIndex}
-        isActive={row.session.id === activeSessionID}
-        isPinned={pinnedKeys.has(row.key)}
-        isPendingDelete={pendingDeleteKey === row.key}
-        showRepo={allProjects}
-        onOpen={() => openRow(row)}
-        onHover={() => moveCursor(index)}
-        onTogglePin={() => handleTogglePin(row)}
-        onRequestDelete={() => setSessionToDelete(row.session)}
-        registerRef={(node) => setRowRef(row.key, node)}
+  return (
+    <>
+      <DialogTitle className="shrink-0 px-4 pt-4 sm:px-0 sm:pt-6">
+        Sessions
+        {!allProjects && currentRepo && (
+          <span className="font-normal text-muted-foreground"> for {getRepoDisplayName(currentRepo)}</span>
+        )}
+      </DialogTitle>
+
+      <div className="mt-4 flex min-h-0 flex-1 flex-col">
+        <div className="flex shrink-0 items-center gap-2 px-4 sm:px-0">
+          <div className="relative flex-1">
+            <Search className="absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
+            <Input
+              ref={searchInputRef}
+              role="combobox"
+              aria-expanded={open}
+              aria-controls={listId}
+              aria-autocomplete="list"
+              aria-activedescendant={cursorIndex >= 0 ? optionId(optionBaseId, cursorIndex) : undefined}
+              value={query}
+              onChange={(event) => setQuery(event.target.value)}
+              onKeyDown={handleSearchKeyDown}
+              placeholder="Search sessions..."
+              className="h-9 pl-9"
+              autoComplete="off"
+              name="session-picker-search"
+            />
+          </div>
+          <Button
+            type="button"
+            variant="outline"
+            size="sm"
+            aria-pressed={allProjects}
+            onClick={toggleAllProjects}
+            className="h-9 shrink-0"
+          >
+            {allProjects ? 'All projects' : 'This project'}
+            {hasFinePointer && (
+              <kbd className="ml-1 rounded border border-border bg-muted px-1 text-[10px] text-muted-foreground">
+                Ctrl+A
+              </kbd>
+            )}
+          </Button>
+        </div>
+
+        <div
+          ref={listRef}
+          role="listbox"
+          id={listId}
+          aria-label="Sessions"
+          onScroll={handleListScroll}
+          className="mt-3 min-h-0 flex-1 overflow-y-auto rounded-md"
+        >
+          {rows.length === 0 ? (
+            <div className="p-4 text-sm text-muted-foreground">
+              {isLoading
+                ? 'Loading sessions...'
+                : isSearchPending
+                  ? 'Searching sessions...'
+                  : trimmedQuery
+                    ? 'No sessions found'
+                    : 'No sessions yet'}
+            </div>
+          ) : (
+            <>
+              {sections.map((section) => (
+                <div
+                  key={section.id}
+                  role="group"
+                  aria-labelledby={`${optionBaseId}-heading-${section.id}`}
+                >
+                  <div
+                    id={`${optionBaseId}-heading-${section.id}`}
+                    className="pl-8 pr-2 pt-2 pb-1 text-xs font-semibold text-muted-foreground"
+                  >
+                    {section.heading}
+                  </div>
+                  {section.rows.map((row) => {
+                    const index = rowIndexByKey.get(row.key) ?? -1
+                    return (
+                      <SessionPickerRowItem
+                        key={row.key}
+                        row={row}
+                        index={index}
+                        optionId={optionId(optionBaseId, index)}
+                        isCursor={index === cursorIndex}
+                        isActive={row.session.id === activeSessionID}
+                        isPinned={pinnedKeys.has(row.key)}
+                        isPendingDelete={pendingDeleteKey === row.key}
+                        showRepo={allProjects}
+                        onOpen={openRow}
+                        onHover={moveCursor}
+                        onTogglePin={handleTogglePin}
+                        onRequestDelete={handleRequestDelete}
+                        registerRef={setRowRef}
+                      />
+                    )
+                  })}
+                </div>
+              ))}
+              {isFetchNextPageError && (
+                <div className="flex flex-col items-center gap-2 py-4">
+                  <p className="text-sm text-muted-foreground">Failed to load more sessions</p>
+                  <Button
+                    variant="outline"
+                    size="sm"
+                    onClick={() => {
+                      void fetchNextPage()
+                    }}
+                    disabled={isFetchingNextPage}
+                  >
+                    Retry
+                  </Button>
+                </div>
+              )}
+              {isFetchingNextPage && rows.length > 0 && (
+                <div className="py-4 text-center text-sm text-muted-foreground">Loading more sessions...</div>
+              )}
+            </>
+          )}
+        </div>
+
+        <div className="mt-2 shrink-0 px-4 text-xs text-muted-foreground pointer-coarse:hidden sm:px-0">
+          ↑↓ move · Enter open · Ctrl+D delete · Ctrl+A {allProjects ? 'this project' : 'all projects'}
+        </div>
+      </div>
+
+      <DeleteSessionDialog
+        open={sessionToDelete !== null}
+        onOpenChange={(nextOpen) => {
+          if (!nextOpen) setSessionToDelete(null)
+        }}
+        onConfirm={() => {
+          void confirmDelete()
+        }}
+        onCancel={() => setSessionToDelete(null)}
+        isDeleting={deleteSession.isPending}
       />
-    )
-  }
+    </>
+  )
+}
+
+export function SessionPickerDialog({
+  open,
+  onOpenChange,
+  currentRepo,
+  activeSessionID,
+  onSelectSession,
+  onActiveSessionDeleted,
+}: SessionPickerDialogProps) {
+  const searchInputRef = useRef<HTMLInputElement>(null)
+  const hasFinePointer = useMediaQuery(FINE_POINTER_MEDIA_QUERY)
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
@@ -501,129 +634,21 @@ export function SessionPickerDialog({
         onEscapeKeyDown={() => onOpenChange(false)}
         onOpenAutoFocus={(event) => {
           event.preventDefault()
-          if (isFinePointer()) {
+          if (hasFinePointer) {
             searchInputRef.current?.focus()
           } else {
             ;(event.currentTarget as HTMLElement).focus()
           }
         }}
       >
-        <DialogTitle className="shrink-0 px-4 pt-4 sm:px-0 sm:pt-6">
-          Sessions
-          {!allProjects && currentRepo && (
-            <span className="font-normal text-muted-foreground"> for {getRepoDisplayName(currentRepo)}</span>
-          )}
-        </DialogTitle>
-
-        <div className="mt-4 flex min-h-0 flex-1 flex-col">
-          <div className="flex shrink-0 items-center gap-2 px-4 sm:px-0">
-            <div className="relative flex-1">
-              <Search className="absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
-              <Input
-                ref={searchInputRef}
-                role="combobox"
-                aria-expanded={open}
-                aria-controls={listId}
-                aria-autocomplete="list"
-                aria-activedescendant={cursorIndex >= 0 ? optionId(optionBaseId, cursorIndex) : undefined}
-                value={query}
-                onChange={(event) => setQuery(event.target.value)}
-                onKeyDown={handleSearchKeyDown}
-                placeholder="Search sessions..."
-                className="h-9 pl-9"
-                autoComplete="off"
-                name="session-picker-search"
-              />
-            </div>
-            <Button
-              type="button"
-              variant="outline"
-              size="sm"
-              aria-pressed={allProjects}
-              onClick={toggleAllProjects}
-              className="h-9 shrink-0"
-            >
-              {allProjects ? 'All projects' : 'This project'}
-              {isFinePointer() && (
-                <kbd className="ml-1 rounded border border-border bg-muted px-1 text-[10px] text-muted-foreground">
-                  Ctrl+A
-                </kbd>
-              )}
-            </Button>
-          </div>
-
-          <div
-            ref={listRef}
-            role="listbox"
-            id={listId}
-            aria-label="Sessions"
-            onScroll={handleListScroll}
-            className="mt-3 min-h-0 flex-1 overflow-y-auto rounded-md"
-          >
-            {rows.length === 0 ? (
-              <div className="p-4 text-sm text-muted-foreground">
-                {isLoading
-                  ? 'Loading sessions...'
-                  : isSearchPending
-                    ? 'Searching sessions...'
-                    : trimmedQuery
-                      ? 'No sessions found'
-                      : 'No sessions yet'}
-              </div>
-            ) : (
-              <>
-                {sections.map((section) => (
-                  <div
-                    key={section.id}
-                    role="group"
-                    aria-labelledby={`${optionBaseId}-heading-${section.id}`}
-                  >
-                    <div
-                      id={`${optionBaseId}-heading-${section.id}`}
-                      className="pl-8 pr-2 pt-2 pb-1 text-xs font-semibold text-muted-foreground"
-                    >
-                      {section.heading}
-                    </div>
-                    {section.rows.map(renderRow)}
-                  </div>
-                ))}
-                {isFetchNextPageError && (
-                  <div className="flex flex-col items-center gap-2 py-4">
-                    <p className="text-sm text-muted-foreground">Failed to load more sessions</p>
-                    <Button
-                      variant="outline"
-                      size="sm"
-                      onClick={() => {
-                        void fetchNextPage()
-                      }}
-                      disabled={isFetchingNextPage}
-                    >
-                      Retry
-                    </Button>
-                  </div>
-                )}
-                {isFetchingNextPage && rows.length > 0 && (
-                  <div className="py-4 text-center text-sm text-muted-foreground">Loading more sessions...</div>
-                )}
-              </>
-            )}
-          </div>
-
-          <div className="mt-2 shrink-0 px-4 text-xs text-muted-foreground pointer-coarse:hidden sm:px-0">
-            ↑↓ move · Enter open · Ctrl+D delete · Ctrl+A {allProjects ? 'this project' : 'all projects'}
-          </div>
-        </div>
-
-        <DeleteSessionDialog
-          open={sessionToDelete !== null}
-          onOpenChange={(nextOpen) => {
-            if (!nextOpen) setSessionToDelete(null)
-          }}
-          onConfirm={() => {
-            void confirmDelete()
-          }}
-          onCancel={() => setSessionToDelete(null)}
-          isDeleting={deleteSession.isPending}
+        <SessionPickerContent
+          open={open}
+          currentRepo={currentRepo}
+          activeSessionID={activeSessionID}
+          onSelectSession={onSelectSession}
+          onActiveSessionDeleted={onActiveSessionDeleted}
+          searchInputRef={searchInputRef}
+          hasFinePointer={hasFinePointer}
         />
       </DialogContent>
     </Dialog>

@@ -1,14 +1,14 @@
-import { useCallback, useMemo, useState } from 'react'
+import { useMemo, useState } from 'react'
 import { useSessionsAcrossDirectories } from '@/hooks/useOpenCode'
 import { useDebouncedValue } from '@/hooks/useDebouncedValue'
 import { selectRootSessions } from '@/components/session/session-partition'
-import { buildSessionKey } from '@/lib/sessionKey'
-import type { Session } from '@/api/types'
+import { getSessionKey } from '@/lib/sessionKey'
 
 const DEFAULT_LIMIT = 25
 
 export interface UseSessionSearchOptions {
   limit?: number
+  allDirectories?: boolean
 }
 
 /**
@@ -17,6 +17,7 @@ export interface UseSessionSearchOptions {
  */
 export function useSessionSearch(directories: string[], options: UseSessionSearchOptions = {}) {
   const limit = options.limit ?? DEFAULT_LIMIT
+  const allDirectories = options.allDirectories ?? false
   const [query, setQuery] = useState('')
   const trimmedQuery = query.trim()
   const debouncedQuery = useDebouncedValue(trimmedQuery, 150)
@@ -24,22 +25,19 @@ export function useSessionSearch(directories: string[], options: UseSessionSearc
   const {
     data: sessions,
     isLoading,
+    isError,
     isPlaceholderData,
     fetchNextPage,
     hasNextPage,
     isFetchingNextPage,
     isFetchNextPageError,
-  } = useSessionsAcrossDirectories(directories, { search, limit, keepPreviousResults: true })
+  } = useSessionsAcrossDirectories(directories, { search, limit, keepPreviousResults: true, allDirectories })
 
   const directorySet = useMemo(() => new Set(directories), [directories])
-  const getSessionSelectionKey = useCallback(
-    (session: Session) => buildSessionKey(session.location.directory, session.id),
-    [],
-  )
 
   const rootSessions = useMemo(
-    () => selectRootSessions(sessions ?? [], { directories: directorySet, keyFn: getSessionSelectionKey }),
-    [sessions, directorySet, getSessionSelectionKey],
+    () => selectRootSessions(sessions ?? [], { directories: directorySet, keyFn: getSessionKey }),
+    [sessions, directorySet],
   )
 
   const filteredSessions = useMemo(() => {
@@ -50,7 +48,7 @@ export function useSessionSearch(directories: string[], options: UseSessionSearc
 
   const isSearchPending = trimmedQuery !== search || isPlaceholderData
   const canFetchNextPage = Boolean(
-    hasNextPage && !isFetchingNextPage && !isFetchNextPageError && !isPlaceholderData,
+    hasNextPage && !isFetchingNextPage && !isFetchNextPageError && !isSearchPending,
   )
 
   return {
@@ -61,6 +59,7 @@ export function useSessionSearch(directories: string[], options: UseSessionSearc
     filteredSessions,
     isSearchPending,
     isLoading,
+    isError,
     isPlaceholderData,
     fetchNextPage,
     hasNextPage,

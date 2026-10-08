@@ -1,4 +1,4 @@
-import { useQuery, useMutation, useQueryClient, useInfiniteQuery } from "@tanstack/react-query";
+import { useQuery, useMutation, useQueryClient, useInfiniteQuery, type InfiniteData } from "@tanstack/react-query";
 import { useMemo, useRef, useEffect, useCallback } from "react";
 import {
   createSession,
@@ -42,9 +42,19 @@ interface UseSessionsAcrossDirectoriesOptions {
   search?: string
   limit?: number
   keepPreviousResults?: boolean
+  allDirectories?: boolean
 }
 
-type SessionPageParam = Record<string, string>
+type SessionDirectoryCursors = Record<string, string>
+
+type SessionListPageParam =
+  | { mode: 'directories'; cursors: SessionDirectoryCursors }
+  | { mode: 'all'; cursor: string }
+
+interface SessionListPage {
+  items: SessionInfo[]
+  nextParam?: SessionListPageParam
+}
 
 export const useSessionsAcrossDirectories = (
   directories: string[],
@@ -57,12 +67,32 @@ export const useSessionsAcrossDirectories = (
   const normalizedSearch = options?.search?.trim() || undefined;
   const limit = options?.limit ?? SESSION_LIST_PAGE_SIZE;
   const keepPreviousResults = options?.keepPreviousResults ?? false;
+  const allDirectories = options?.allDirectories ?? false;
   const directoryKey = uniqueDirectories.join('|');
 
-  const query = useInfiniteQuery({
-    queryKey: ['opencode', 'sessions', directoryKey, { search: normalizedSearch, limit }],
+  const query = useInfiniteQuery<
+    SessionListPage,
+    Error,
+    InfiniteData<SessionListPage, SessionListPageParam | undefined>,
+    readonly unknown[],
+    SessionListPageParam | undefined
+  >({
+    queryKey: ['opencode', 'sessions', directoryKey, { search: normalizedSearch, limit, allDirectories }],
     queryFn: async ({ pageParam }) => {
-      if (!pageParam) {
+      if (allDirectories) {
+        const cursor = pageParam?.mode === 'all' ? pageParam.cursor : undefined;
+        const page = await listSessionPage(
+          cursor === undefined
+            ? { limit, order: 'desc', search: normalizedSearch }
+            : { cursor },
+        );
+        return {
+          items: page.items,
+          nextParam: page.nextCursor ? { mode: 'all', cursor: page.nextCursor } : undefined,
+        };
+      }
+
+      if (!pageParam || pageParam.mode !== 'directories') {
         const pages = await Promise.all(
           uniqueDirectories.map((directory) =>
             listSessionPage({
@@ -73,7 +103,7 @@ export const useSessionsAcrossDirectories = (
             }),
           ),
         );
-        const cursors: SessionPageParam = {};
+        const cursors: SessionDirectoryCursors = {};
         const items: SessionInfo[] = [];
         for (let i = 0; i < pages.length; i++) {
           items.push(...pages[i].items);
@@ -81,14 +111,17 @@ export const useSessionsAcrossDirectories = (
             cursors[uniqueDirectories[i]] = pages[i].nextCursor!;
           }
         }
-        return { items, cursors };
+        return {
+          items,
+          nextParam: Object.keys(cursors).length > 0 ? { mode: 'directories', cursors } : undefined,
+        };
       }
 
-      const entries = Object.entries(pageParam);
+      const entries = Object.entries(pageParam.cursors);
       const pages = await Promise.all(
         entries.map(([directory, cursor]) => listSessionPage({ directory, cursor })),
       );
-      const cursors: SessionPageParam = {};
+      const cursors: SessionDirectoryCursors = {};
       const items: SessionInfo[] = [];
       for (let i = 0; i < pages.length; i++) {
         items.push(...pages[i].items);
@@ -96,19 +129,17 @@ export const useSessionsAcrossDirectories = (
           cursors[entries[i][0]] = pages[i].nextCursor!;
         }
       }
-      return { items, cursors };
+      return {
+        items,
+        nextParam: Object.keys(cursors).length > 0 ? { mode: 'directories', cursors } : undefined,
+      };
     },
-    initialPageParam: undefined as SessionPageParam | undefined,
+    initialPageParam: undefined as SessionListPageParam | undefined,
     placeholderData: keepPreviousResults
       ? (previousData, previousQuery) =>
           previousQuery?.queryKey[2] === directoryKey ? previousData : undefined
       : undefined,
-    getNextPageParam: (lastPage) => {
-      if (Object.keys(lastPage.cursors).length > 0) {
-        return lastPage.cursors;
-      }
-      return undefined;
-    },
+    getNextPageParam: (lastPage) => lastPage.nextParam,
     enabled: uniqueDirectories.length > 0,
     staleTime: 10000,
     refetchOnWindowFocus: true,
@@ -252,17 +283,41 @@ export const useDeleteSession = (directory?: string | string[]) => {
 
       return { deleted: targets.length, results }
     },
-    onSuccess: ({ deleted }) => {
+    onSuccess: ({ deleted }, variables) => {
+      removeDeletedSessionsFromListCaches(queryClient, variables);
+      cleanupSessionPins(queryClient, variables, primaryDirectory);
       showToast.success(deleted === 1 ? 'Session deleted' : `${deleted} sessions deleted`);
     },
-    onError: () => {
-      showToast.error('Failed to delete sessions');
-    },
-    onSettled: (_data, _error, variables) => {
+    onError: (_error, variables) => {
       invalidateSessionListCaches(queryClient);
       cleanupSessionPins(queryClient, variables, primaryDirectory);
+      showToast.error('Failed to delete sessions');
     },
   });
+};
+
+const removeDeletedSessionsFromListCaches = (
+  queryClient: ReturnType<typeof useQueryClient>,
+  variables: DeleteSessionTarget | DeleteSessionTarget[],
+) => {
+  const deletedIDs = new Set(
+    (Array.isArray(variables) ? variables : [variables]).map(getDeleteSessionTargetId),
+  );
+  if (deletedIDs.size === 0) return;
+  queryClient.setQueriesData<InfiniteData<SessionListPage, SessionListPageParam | undefined>>(
+    { queryKey: ['opencode', 'sessions'] },
+    (current) => {
+      if (!current) return current;
+      let changed = false;
+      const pages = current.pages.map((page) => {
+        const items = page.items.filter((item) => !deletedIDs.has(item.id));
+        if (items.length === page.items.length) return page;
+        changed = true;
+        return { ...page, items };
+      });
+      return changed ? { ...current, pages } : current;
+    },
+  );
 };
 
 const cleanupSessionPins = (

@@ -3,7 +3,7 @@ import { useDeleteSession, useCreateSession } from "@/hooks/useOpenCode";
 import type { DeleteSessionTarget } from "@/hooks/useOpenCode";
 import type { Session } from "@/api/types";
 import { useSessionPins, useToggleSessionPin } from '@/hooks/useSessionPins';
-import { buildSessionKey, buildPinnedSessionKeys } from '@/lib/sessionKey';
+import { getSessionKey, buildPinnedSessionKeys } from '@/lib/sessionKey';
 import { partitionSessions } from './session-partition';
 import { DeleteSessionDialog } from "./DeleteSessionDialog";
 import { SessionCard } from "./SessionCard";
@@ -17,7 +17,6 @@ interface SessionListProps {
   directory?: string;
   directories?: string[];
   createDirectory?: string;
-  activeSessionID?: string;
   onSelectSession: (sessionID: string) => void;
   renderSessions?: (args: SessionListRenderArgs) => ReactNode;
 }
@@ -36,7 +35,6 @@ export const SessionList = ({
   directory,
   directories,
   createDirectory,
-  activeSessionID,
   onSelectSession,
   renderSessions,
 }: SessionListProps) => {
@@ -46,9 +44,6 @@ export const SessionList = ({
   }, [directory, directories]);
   const primaryDirectory = directoriesList[0];
   const sessionCreateDirectory = createDirectory ?? primaryDirectory;
-  const getSessionSelectionKey = useCallback((session: Session) =>
-    buildSessionKey(session.location.directory, session.id),
-  []);
   const {
     query,
     setQuery,
@@ -81,13 +76,13 @@ export const SessionList = ({
   const sessionListRef = useRef<HTMLDivElement>(null);
 
   const { pinned: pinnedSessions, today: todaySessions, older: olderSessions } = useMemo(
-    () => partitionSessions(filteredSessions, pinnedKeys, getSessionSelectionKey),
-    [filteredSessions, pinnedKeys, getSessionSelectionKey],
+    () => partitionSessions(filteredSessions, pinnedKeys, getSessionKey),
+    [filteredSessions, pinnedKeys],
   );
 
   const handleTogglePin = (session: Session) => {
     const directory = session.location.directory;
-    const key = getSessionSelectionKey(session);
+    const key = getSessionKey(session);
     togglePin.mutate({ sessionId: session.id, directory, pinned: !pinnedKeys.has(key) });
   };
 
@@ -141,7 +136,7 @@ export const SessionList = ({
   };
 
   const toggleSessionSelection = (session: Session, selected: boolean) => {
-    const selectionKey = getSessionSelectionKey(session);
+    const selectionKey = getSessionKey(session);
     const newSelected = new Set(selectedSessions);
     if (selected) {
       newSelected.add(selectionKey);
@@ -153,20 +148,20 @@ export const SessionList = ({
 
   const allVisibleSelected =
     filteredSessions.length > 0 &&
-    filteredSessions.every((session) => selectedSessions.has(getSessionSelectionKey(session)));
+    filteredSessions.every((session) => selectedSessions.has(getSessionKey(session)));
 
   const toggleSelectAll = () => {
     if (allVisibleSelected) {
       setSelectedSessions(new Set());
     } else {
-      setSelectedSessions(new Set(filteredSessions.map(getSessionSelectionKey)));
+      setSelectedSessions(new Set(filteredSessions.map(getSessionKey)));
     }
   };
 
   const handleBulkDelete = () => {
     if (selectedSessions.size > 0) {
       const selectedTargets = filteredSessions
-        .filter((session) => selectedSessions.has(getSessionSelectionKey(session)))
+        .filter((session) => selectedSessions.has(getSessionKey(session)))
         .map(getDeleteTarget);
       if (selectedTargets.length === 0) return;
       setSessionToDelete(selectedTargets);
@@ -175,13 +170,12 @@ export const SessionList = ({
   };
 
   const renderSessionCard = (session: (typeof filteredSessions)[number], isPinned: boolean) => {
-    const key = getSessionSelectionKey(session);
+    const key = getSessionKey(session);
     return (
       <SessionCard
         key={key}
         session={session}
         isSelected={selectedSessions.has(key)}
-        isActive={activeSessionID === session.id}
         manageMode={manageMode}
         isPinned={isPinned}
         onSelect={onSelectSession}
@@ -298,7 +292,7 @@ export const SessionList = ({
             renderSessions({
               sessions: filteredSessions,
               searchQuery: query,
-              renderSessionCard: (session) => renderSessionCard(session, pinnedKeys.has(getSessionSelectionKey(session))),
+              renderSessionCard: (session) => renderSessionCard(session, pinnedKeys.has(getSessionKey(session))),
             })
           ) : filteredSessions.length === 0 && !isFetchingNextPage ? (
             <div className="text-sm text-muted-foreground text-center py-4">

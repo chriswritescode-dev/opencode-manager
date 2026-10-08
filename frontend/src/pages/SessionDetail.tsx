@@ -842,7 +842,7 @@ export function SessionDetail() {
         }}
         onActiveSessionDeleted={() => {
           setSessionsDialogOpen(false)
-          navigate(getSessionListPath(repoId, isAssistantSession))
+          handleCloseSession()
         }}
       />
 

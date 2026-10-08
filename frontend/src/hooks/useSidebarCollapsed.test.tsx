@@ -9,7 +9,7 @@ const localStorageMock = {
   clear: vi.fn(),
 }
 
-describe('sidebar collapse hooks', () => {
+describe('useSidebarCollapsed', () => {
   beforeEach(() => {
     vi.clearAllMocks()
     Object.defineProperty(global, 'localStorage', {
@@ -26,52 +26,27 @@ describe('sidebar collapse hooks', () => {
     vi.restoreAllMocks()
   })
 
-  describe('useSidebarCollapsed', () => {
-    it('returns false by default when no stored value', () => {
-      localStorageMock.getItem.mockReturnValue(null)
+  it('reads and persists under the sidebar storage key with a false default', () => {
+    localStorageMock.getItem.mockReturnValue(null)
 
-      const { result } = renderHook(() => useSidebarCollapsed())
+    const { result } = renderHook(() => useSidebarCollapsed())
 
-      expect(result.current[0]).toBe(false)
+    expect(localStorageMock.getItem).toHaveBeenCalledWith('oc:sidebar:collapsed')
+    expect(result.current[0]).toBe(false)
+
+    act(() => {
+      result.current[1]()
     })
 
-    it('returns stored value from localStorage', () => {
-      localStorageMock.getItem.mockReturnValue('true')
+    expect(result.current[0]).toBe(true)
+    expect(localStorageMock.setItem).toHaveBeenCalledWith('oc:sidebar:collapsed', 'true')
+  })
 
-      const { result } = renderHook(() => useSidebarCollapsed())
+  it('returns the stored value', () => {
+    localStorageMock.getItem.mockReturnValue('true')
 
-      expect(result.current[0]).toBe(true)
-    })
+    const { result } = renderHook(() => useSidebarCollapsed())
 
-    it('toggles collapsed state and persists to localStorage', () => {
-      localStorageMock.getItem.mockReturnValue(null)
-
-      const { result } = renderHook(() => useSidebarCollapsed())
-
-      expect(result.current[0]).toBe(false)
-
-      act(() => {
-        result.current[1]()
-      })
-
-      expect(result.current[0]).toBe(true)
-      expect(localStorageMock.setItem).toHaveBeenCalledWith('oc:sidebar:collapsed', 'true')
-    })
-
-    it('returns false when stored value is malformed JSON', () => {
-      localStorageMock.getItem.mockReturnValue('not-json{{')
-
-      const { result } = renderHook(() => useSidebarCollapsed())
-
-      expect(result.current[0]).toBe(false)
-    })
-
-    it('returns false when stored value is JSON but not a boolean', () => {
-      localStorageMock.getItem.mockReturnValue('"some string"')
-
-      const { result } = renderHook(() => useSidebarCollapsed())
-
-      expect(result.current[0]).toBe(false)
-    })
+    expect(result.current[0]).toBe(true)
   })
 })

@@ -3,7 +3,7 @@ import { useQueries, useQuery } from '@tanstack/react-query'
 import { listRepos } from '@/api/repos'
 import { sessionQueryOptions, useSessionsAcrossDirectories } from '@/hooks/useOpenCode'
 import { useSessionPins } from '@/hooks/useSessionPins'
-import { buildPinnedSessionKeys, buildSessionKey } from '@/lib/sessionKey'
+import { buildPinnedSessionKeys, buildSessionKey, getSessionKey } from '@/lib/sessionKey'
 import type { Repo, Session } from '@/api/types'
 import {
   SIDEBAR_SESSIONS_PER_REPO,
@@ -46,9 +46,7 @@ export function useSidebarRepoGroups(input: {
   const missingPins = useMemo(() => {
     if (search) return []
     const repoDirectories = new Set(directories)
-    const fetchedKeys = new Set(
-      sessions.map((session) => buildSessionKey(session.location.directory, session.id)),
-    )
+    const fetchedKeys = new Set(sessions.map(getSessionKey))
     return (sessionPins ?? []).filter(
       (pin) =>
         repoDirectories.has(pin.directory) &&
