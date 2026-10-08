@@ -4,6 +4,7 @@ import { z } from 'zod'
 import {
   formatOpenCodeModelRef,
   isSessionNotFoundError,
+  parseOpenCodeModelRef,
   type FileDiffInfo,
   type ModelRef,
   type SessionInfo,
@@ -34,6 +35,7 @@ import { logger } from '../utils/logger'
 import { GenerateTextTimeoutError, generateTextWithTimeout } from './opencode/generate-text'
 import type { OpenCodeClient } from './opencode/client'
 import { readSessionChanges } from './session-changes'
+import type { SettingsService } from './settings'
 import type { SSEEvent } from './sse-aggregator'
 
 const DEFAULT_TIMEOUT_MS = 120_000
@@ -614,6 +616,7 @@ export class ChangeWalkthroughService {
   constructor(
     private readonly db: Database,
     private readonly openCodeClient: OpenCodeClient,
+    private readonly settingsService: SettingsService,
     options: ChangeWalkthroughServiceOptions = {},
   ) {
     this.timeoutMs = options.timeoutMs ?? DEFAULT_TIMEOUT_MS
@@ -759,8 +762,9 @@ export class ChangeWalkthroughService {
 
     const previous = getChangeWalkthrough(this.db, sessionId)
     const title = session.title ?? sessionId
-    const modelKey = computeModelKey(session.model)
-    const storedModel = session.model ? formatOpenCodeModelRef(session.model) : null
+    const model = this.resolveWalkthroughModel(session)
+    const modelKey = computeModelKey(model)
+    const storedModel = model ? formatOpenCodeModelRef(model) : null
 
     if (previous && previous.diffHash === diffHash && !request.regenerate) {
       if (previous.stops.every((stop) => stop.status === 'ready')) {
@@ -769,7 +773,7 @@ export class ChangeWalkthroughService {
 
       const unfinished = previous.stops.filter((stop) => stop.status !== 'ready')
       const resumed = await this.explainStops(
-        session,
+        model,
         title,
         previous.summary,
         unfinished,
@@ -824,7 +828,7 @@ export class ChangeWalkthroughService {
       const prompt = buildWalkthroughPrompt({ title, hunks })
       onModelStart()
 
-      const parsed = await this.callModelParsed(prompt, session.model, (text) =>
+      const parsed = await this.callModelParsed(prompt, model, (text) =>
         parseWalkthroughResponse(text, hunks),
       )
 
@@ -883,7 +887,7 @@ export class ChangeWalkthroughService {
     const planPrompt = buildWalkthroughPlanPrompt({ title, outline: outline.outline, previousStops })
     onModelStart()
 
-    const planned = await this.callModelParsed(planPrompt, session.model, (text) =>
+    const planned = await this.callModelParsed(planPrompt, model, (text) =>
       parseWalkthroughPlan(text, outline.hunks),
     )
 
@@ -906,7 +910,7 @@ export class ChangeWalkthroughService {
     const pending = stops.filter((stop) => stop.status !== 'ready')
     if (pending.length > 0) {
       walkthrough = await this.explainStops(
-        session,
+        model,
         title,
         planned.summary,
         pending,
@@ -924,7 +928,7 @@ export class ChangeWalkthroughService {
   }
 
   private async explainStops(
-    session: SessionInfo,
+    model: ModelRef | undefined,
     title: string,
     summary: string,
     stops: WalkthroughStop[],
@@ -932,7 +936,7 @@ export class ChangeWalkthroughService {
     walkthrough: ChangeWalkthrough,
     onModelStart: () => void,
   ): Promise<ChangeWalkthrough> {
-    const modelKey = computeModelKey(session.model)
+    const modelKey = computeModelKey(model)
     let current = walkthrough
 
     await mapWithConcurrency(stops, WALKTHROUGH_EXPLAIN_CONCURRENCY, async (stop) => {
@@ -941,7 +945,7 @@ export class ChangeWalkthroughService {
 
       let explained: WalkthroughStop
       try {
-        const explanation = await this.callModelParsed(explainPrompt, session.model, parseWalkthroughExplanation)
+        const explanation = await this.callModelParsed(explainPrompt, model, parseWalkthroughExplanation)
         explained = {
           ...stop,
           explanation,
@@ -1021,5 +1025,11 @@ export class ChangeWalkthroughService {
       }
       throw new ChangeWalkthroughError(getErrorMessage(error) || 'Failed to read session', 502)
     }
+  }
+
+  private resolveWalkthroughModel(session: SessionInfo): ModelRef | undefined {
+    const configured = this.settingsService.getSettings().preferences.walkthroughModel?.trim()
+    const parsed = configured ? parseOpenCodeModelRef(configured) : undefined
+    return parsed ?? session.model
   }
 }

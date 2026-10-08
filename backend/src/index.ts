@@ -272,7 +272,7 @@ const sessionGoalService = new SessionGoalService(db, openCodeClient, sessionSet
 sessionGoalService.loadOpenGoals()
 
 const multiRunService = new MultiRunService(db, openCodeClient, repoWorkspaces, sessionPermissionModeService)
-const changeWalkthroughService = new ChangeWalkthroughService(db, openCodeClient)
+const changeWalkthroughService = new ChangeWalkthroughService(db, openCodeClient, sessionSettingsService)
 
 sseAggregator.onEvent((directory, event) => {
   sessionPermissionModeService.handleEvent(directory, event).catch((err) => {

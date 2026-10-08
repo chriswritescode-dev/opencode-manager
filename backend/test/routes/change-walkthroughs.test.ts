@@ -5,6 +5,7 @@ import type { FileDiffInfo, SessionInfo } from '@opencode-manager/shared/opencod
 import { migrate } from '../../src/db/migration-runner'
 import { allMigrations } from '../../src/db/migrations'
 import { ChangeWalkthroughService, computeHunkId } from '../../src/services/change-walkthroughs'
+import { SettingsService } from '../../src/services/settings'
 import { createChangeWalkthroughRoutes } from '../../src/routes/change-walkthroughs'
 import type { OpenCodeClient } from '../../src/services/opencode/client'
 import { stubLoadedModelCatalog } from '../helpers/stub-opencode-client'
@@ -93,7 +94,7 @@ describe('change walkthrough routes', () => {
     migrate(db, allMigrations)
     sessions = { [SESSION_ID]: { changes: CHANGES } }
     fake = createFakeClient(sessions)
-    const service = new ChangeWalkthroughService(db, fake.client)
+    const service = new ChangeWalkthroughService(db, fake.client, new SettingsService(db))
     app = new Hono()
     app.route('/change-walkthroughs', createChangeWalkthroughRoutes(service))
   })

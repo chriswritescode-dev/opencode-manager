@@ -14,6 +14,7 @@ import { getChangeWalkthrough } from '../../src/db/change-walkthroughs'
 import { migrate } from '../../src/db/migration-runner'
 import { allMigrations } from '../../src/db/migrations'
 import type { OpenCodeClient } from '../../src/services/opencode/client'
+import { SettingsService } from '../../src/services/settings'
 import type { SSEEvent } from '../../src/services/sse-aggregator'
 import { stubLoadedModelCatalog } from '../helpers/stub-opencode-client'
 import {
@@ -783,7 +784,7 @@ describe('ChangeWalkthroughService', () => {
     db = createTestDb()
     sessions = { [SESSION_ID]: { changes: threeHunks } }
     fake = createFakeClient(sessions)
-    service = new ChangeWalkthroughService(db, fake.client)
+    service = new ChangeWalkthroughService(db, fake.client, new SettingsService(db))
   })
 
   afterEach(() => {
@@ -964,6 +965,31 @@ describe('ChangeWalkthroughService', () => {
     expect(fake.generateModels[0]).toEqual({ providerID: 'openai', id: 'gpt-5-mini' })
   })
 
+  it('uses the walkthrough model preference', async () => {
+    new SettingsService(db).updateSettings({ walkthroughModel: 'openai/gpt-5-mini' })
+    fake.setGenerateImpl(async () => modelReply([{ title: 'A', explanation: 'x', hunkIds: THREE_HUNK_IDS }]))
+
+    const { walkthrough } = await service.generate(SESSION_ID, {})
+
+    expect(fake.generateModels.every((model) => model?.providerID === 'openai' && model.id === 'gpt-5-mini')).toBe(true)
+    expect(fake.generateModels.length).toBeGreaterThan(0)
+    expect(walkthrough.model).toBe('openai/gpt-5-mini')
+  })
+
+  it('ignores an invalid walkthrough model preference', async () => {
+    new SettingsService(db).updateSettings({ walkthroughModel: 'not-a-ref' })
+    sessions[SESSION_ID]!.info = {
+      id: SESSION_ID,
+      title: 'Title',
+      model: { providerID: 'anthropic', id: 'claude-sonnet-4' },
+    } as SessionInfo
+    fake.setGenerateImpl(async () => modelReply([{ title: 'A', explanation: 'x', hunkIds: THREE_HUNK_IDS }]))
+
+    await service.generate(SESSION_ID, {})
+
+    expect(fake.generateModels[0]).toEqual({ providerID: 'anthropic', id: 'claude-sonnet-4' })
+  })
+
   it('coalesces concurrent generation into one model call', async () => {
     let resolveGenerate: (text: string) => void = () => {}
     const gate = new Promise<string>((resolve) => {
@@ -1027,7 +1053,7 @@ describe('ChangeWalkthroughService', () => {
   })
 
   it('rejects with 504 when generation times out', async () => {
-    const timingOut = new ChangeWalkthroughService(db, fake.client, { timeoutMs: 5 })
+    const timingOut = new ChangeWalkthroughService(db, fake.client, new SettingsService(db), { timeoutMs: 5 })
     fake.setGenerateImpl(() => new Promise<string>(() => {}))
 
     await expect(timingOut.generate(SESSION_ID, {})).rejects.toMatchObject({
