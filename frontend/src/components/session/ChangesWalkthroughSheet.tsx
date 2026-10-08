@@ -1,14 +1,21 @@
 import { createContext, memo, useCallback, useContext, useEffect, useRef, useState } from 'react'
 import type { ReactNode, RefObject } from 'react'
-import { ChevronLeft, ChevronRight, Loader2, RefreshCw } from 'lucide-react'
+import { ChevronDown, ChevronLeft, ChevronRight, Loader2, RefreshCw } from 'lucide-react'
 import { SideDrawer, SideDrawerHeader } from '@/components/ui/side-drawer'
 import { Button } from '@/components/ui/button'
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuRadioGroup,
+  DropdownMenuRadioItem,
+  DropdownMenuSeparator,
+  DropdownMenuTrigger,
+} from '@/components/ui/dropdown-menu'
 import { Badge } from '@/components/ui/badge'
 import { DiffLines } from '@/components/file-browser/DiffLines'
 import { ScheduleRunMarkdown } from '@/components/schedules/ScheduleRunMarkdown'
 import { useChangeWalkthrough, useGenerateChangeWalkthrough } from '@/hooks/useChangeWalkthrough'
 import { GIT_STATUS_COLORS, GIT_STATUS_LABELS } from '@/lib/git-status-styles'
-import { cn } from '@/lib/utils'
 import { WalkthroughOmittedFileSchema } from '@opencode-manager/shared/schemas'
 import type {
   ChangeWalkthrough,
@@ -80,11 +87,11 @@ interface ChangesWalkthroughContextValue {
   generate: () => void
   regenerate: () => void
   stops: WalkthroughStop[]
-  stopIndex: number
+  stopIndex: number | null
   selectedStop: WalkthroughStop | null
   selectedHunks: WalkthroughHunk[]
-  selectStop: (index: number) => void
-  detailRef: RefObject<HTMLDivElement | null>
+  selectStop: (index: number | null) => void
+  scrollRef: RefObject<HTMLDivElement | null>
 }
 
 const ChangesWalkthroughContext = createContext<ChangesWalkthroughContextValue | null>(null)
@@ -106,8 +113,8 @@ export function ChangesWalkthroughProvider({ sessionId, active, children }: Chan
   const stateQuery = useChangeWalkthrough(sessionId, active)
   const generate = useGenerateChangeWalkthrough(sessionId)
   const resetGenerate = generate.reset
-  const [stopIndex, setStopIndex] = useState(0)
-  const detailRef = useRef<HTMLDivElement>(null)
+  const [stopIndex, setStopIndex] = useState<number | null>(null)
+  const scrollRef = useRef<HTMLDivElement>(null)
 
   const state = stateQuery.data
   const walkthrough = state?.walkthrough ?? null
@@ -121,20 +128,20 @@ export function ChangesWalkthroughProvider({ sessionId, active, children }: Chan
   }, [active, sessionId, resetGenerate])
 
   useEffect(() => {
-    setStopIndex(0)
+    setStopIndex(null)
   }, [active, sessionId, walkthrough?.createdAt])
 
   const hunksById = new Map(walkthrough?.hunks.map((hunk) => [hunk.id, hunk]) ?? [])
   const stops = walkthrough?.stops ?? []
-  const clampedIndex = stops.length > 0 ? Math.min(stopIndex, stops.length - 1) : 0
-  const selectedStop = stops[clampedIndex] ?? null
+  const clampedIndex = stopIndex === null || stops.length === 0 ? null : Math.min(stopIndex, stops.length - 1)
+  const selectedStop = clampedIndex === null ? null : stops[clampedIndex] ?? null
   const selectedHunks = (selectedStop?.hunkIds ?? [])
     .map((id) => hunksById.get(id))
     .filter((hunk): hunk is WalkthroughHunk => hunk !== undefined)
 
-  const selectStop = useCallback((index: number) => {
+  const selectStop = useCallback((index: number | null) => {
     setStopIndex(index)
-    detailRef.current?.scrollIntoView?.({ block: 'start', behavior: 'smooth' })
+    scrollRef.current?.scrollTo?.({ top: 0 })
   }, [])
 
   const value: ChangesWalkthroughContextValue = {
@@ -151,13 +158,13 @@ export function ChangesWalkthroughProvider({ sessionId, active, children }: Chan
     selectedStop,
     selectedHunks,
     selectStop,
-    detailRef,
+    scrollRef,
   }
 
   return <ChangesWalkthroughContext.Provider value={value}>{children}</ChangesWalkthroughContext.Provider>
 }
 
-/** Previous/next stop controls for the walkthrough chrome; renders nothing until a walkthrough has stops. */
+/** Previous/next page controls (overview, then each stop) for the walkthrough chrome; renders nothing until a walkthrough has stops. */
 export const ChangesWalkthroughNav = memo(function ChangesWalkthroughNav() {
   const { stops, stopIndex, selectStop } = useChangesWalkthrough()
 
@@ -169,20 +176,39 @@ export const ChangesWalkthroughNav = memo(function ChangesWalkthroughNav() {
         variant="outline"
         size="icon-sm"
         aria-label="Previous stop"
-        onClick={() => selectStop(stopIndex - 1)}
-        disabled={stopIndex === 0}
+        onClick={() => selectStop(stopIndex === null || stopIndex === 0 ? null : stopIndex - 1)}
+        disabled={stopIndex === null}
       >
         <ChevronLeft />
       </Button>
-      <span className="whitespace-nowrap text-xs text-muted-foreground">
-        Stop {stopIndex + 1} of {stops.length}
-      </span>
+      <DropdownMenu>
+        <DropdownMenuTrigger asChild>
+          <Button variant="ghost" size="sm" aria-label="Jump to page" className="h-7 gap-1 px-2 text-xs text-muted-foreground">
+            {stopIndex === null ? 'Overview' : `${stopIndex + 1} of ${stops.length}`}
+            <ChevronDown className="h-3 w-3" />
+          </Button>
+        </DropdownMenuTrigger>
+        <DropdownMenuContent align="end" className="max-h-[60vh] w-72 overflow-y-auto">
+          <DropdownMenuRadioGroup
+            value={stopIndex === null ? 'overview' : String(stopIndex)}
+            onValueChange={(value) => selectStop(value === 'overview' ? null : Number(value))}
+          >
+            <DropdownMenuRadioItem value="overview">Overview</DropdownMenuRadioItem>
+            <DropdownMenuSeparator />
+            {stops.map((stop, index) => (
+              <DropdownMenuRadioItem key={index} value={String(index)}>
+                {index + 1}. {stop.title}
+              </DropdownMenuRadioItem>
+            ))}
+          </DropdownMenuRadioGroup>
+        </DropdownMenuContent>
+      </DropdownMenu>
       <Button
         variant="outline"
         size="icon-sm"
         aria-label="Next stop"
-        onClick={() => selectStop(stopIndex + 1)}
-        disabled={stopIndex >= stops.length - 1}
+        onClick={() => selectStop(stopIndex === null ? 0 : stopIndex + 1)}
+        disabled={stopIndex !== null && stopIndex >= stops.length - 1}
       >
         <ChevronRight />
       </Button>
@@ -221,15 +247,14 @@ export const ChangesWalkthroughView = memo(function ChangesWalkthroughView() {
     generate,
     regenerate,
     stops,
-    stopIndex,
     selectedStop,
     selectedHunks,
     selectStop,
-    detailRef,
+    scrollRef,
   } = useChangesWalkthrough()
 
   return (
-    <div className="min-h-0 flex-1 space-y-4 overflow-y-auto p-4">
+    <div ref={scrollRef} className="min-h-0 flex-1 space-y-4 overflow-y-auto p-4">
       {error ? (
         <div className="space-y-2">
           <p className="text-sm text-destructive">{walkthroughErrorMessage(error)}</p>
@@ -271,35 +296,9 @@ export const ChangesWalkthroughView = memo(function ChangesWalkthroughView() {
             </div>
           ) : null}
 
-          <ScheduleRunMarkdown content={walkthrough.summary} />
-
-          {stops.length > 0 ? (
-            <ol className="space-y-0.5">
-              {stops.map((stop, index) => (
-                <li key={index}>
-                  <button
-                    type="button"
-                    onClick={() => selectStop(index)}
-                    aria-current={index === stopIndex}
-                    className={cn(
-                      'w-full rounded-md px-2 py-1 text-left text-sm',
-                      index === stopIndex
-                        ? 'bg-accent/40 font-medium text-foreground'
-                        : 'text-muted-foreground hover:bg-accent/20',
-                    )}
-                  >
-                    {index + 1}. {stop.title}
-                  </button>
-                </li>
-              ))}
-            </ol>
-          ) : null}
-
           {selectedStop ? (
-            <div ref={detailRef} className="scroll-mt-4 space-y-3 border-t border-border pt-4">
-              <h3 className="text-sm font-semibold text-foreground">
-                {stopIndex + 1}. {selectedStop.title}
-              </h3>
+            <div className="space-y-3">
+              <h3 className="text-sm font-semibold text-foreground">{selectedStop.title}</h3>
               <ScheduleRunMarkdown content={selectedStop.explanation} />
               {selectedHunks.map((hunk) => (
                 <div key={hunk.id} className="overflow-hidden rounded-md border border-border">
@@ -318,9 +317,29 @@ export const ChangesWalkthroughView = memo(function ChangesWalkthroughView() {
                 </div>
               ))}
             </div>
-          ) : null}
+          ) : (
+            <>
+              <ScheduleRunMarkdown content={walkthrough.summary} />
 
-          {walkthrough.omittedFiles.length > 0 ? <OmittedFiles files={walkthrough.omittedFiles} /> : null}
+              {stops.length > 0 ? (
+                <ol className="space-y-0.5">
+                  {stops.map((stop, index) => (
+                    <li key={index}>
+                      <button
+                        type="button"
+                        onClick={() => selectStop(index)}
+                        className="w-full rounded-md px-2 py-1 text-left text-sm text-muted-foreground hover:bg-accent/20 hover:text-foreground"
+                      >
+                        {index + 1}. {stop.title}
+                      </button>
+                    </li>
+                  ))}
+                </ol>
+              ) : null}
+
+              {walkthrough.omittedFiles.length > 0 ? <OmittedFiles files={walkthrough.omittedFiles} /> : null}
+            </>
+          )}
         </div>
       )}
     </div>
