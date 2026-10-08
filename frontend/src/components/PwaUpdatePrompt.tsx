@@ -19,7 +19,7 @@ export function PwaUpdatePrompt() {
       aria-live="polite"
       className="w-full shrink-0 bg-primary pt-safe text-primary-foreground"
     >
-      <div className="flex items-center justify-center gap-3 px-4 py-2">
+      <div className="flex flex-wrap items-center justify-center gap-3 px-4 py-2">
         <RefreshCw className="h-4 w-4 shrink-0" aria-hidden="true" />
         <span className="text-sm font-medium">
           A new version of OpenCode Manager is available.
