@@ -162,22 +162,9 @@ const WALKTHROUGH_SOURCE_OPTIONS: { value: WalkthroughSource['kind']; label: str
   { value: 'pullRequest', label: 'Pull request' },
 ]
 
-/** Chooses which set of changes the walkthrough covers; git sources commit as soon as they are valid. */
-const WalkthroughSourcePicker = memo(function WalkthroughSourcePicker() {
-  const {
-    sourceKind,
-    setSourceKind,
-    baseInput,
-    setBaseInput,
-    numberInput,
-    setNumberInput,
-    setSource,
-  } = useChangesWalkthrough()
-
-  const commitInputs = useCallback(() => {
-    const next = toWalkthroughSource({ kind: sourceKind, base: baseInput, number: Number(numberInput) })
-    if (next) setSource(next)
-  }, [sourceKind, baseInput, numberInput, setSource])
+/** Chooses which set of changes the walkthrough covers from the surrounding chrome; git sources commit as soon as they are valid. */
+export const ChangesWalkthroughSourcePicker = memo(function ChangesWalkthroughSourcePicker() {
+  const { sourceKind, setSourceKind, baseInput, setSource } = useChangesWalkthrough()
 
   const handleKindChange = useCallback(
     (next: WalkthroughSource['kind']) => {
@@ -190,35 +177,48 @@ const WalkthroughSourcePicker = memo(function WalkthroughSourcePicker() {
   )
 
   return (
-    <div className="space-y-2">
-      <Select
-        value={sourceKind}
-        onValueChange={(value) => handleKindChange(value as WalkthroughSource['kind'])}
+    <Select value={sourceKind} onValueChange={(value) => handleKindChange(value as WalkthroughSource['kind'])}>
+      <SelectTrigger
+        aria-label="Changes to walk through"
+        className="h-7 w-auto gap-1 px-2 text-xs md:text-xs"
       >
-        <SelectTrigger aria-label="Changes to walk through">
-          <SelectValue />
-        </SelectTrigger>
-        <SelectContent>
-          {WALKTHROUGH_SOURCE_OPTIONS.map((option) => (
-            <SelectItem key={option.value} value={option.value}>
-              {option.label}
-            </SelectItem>
-          ))}
-        </SelectContent>
-      </Select>
+        <SelectValue />
+      </SelectTrigger>
+      <SelectContent>
+        {WALKTHROUGH_SOURCE_OPTIONS.map((option) => (
+          <SelectItem key={option.value} value={option.value}>
+            {option.label}
+          </SelectItem>
+        ))}
+      </SelectContent>
+    </Select>
+  )
+})
 
-      {sourceKind === 'branch' || sourceKind === 'pullRequest' ? (
-        <Input
-          aria-label="Base branch"
-          placeholder="Default branch"
-          value={baseInput}
-          onChange={(event) => setBaseInput(event.target.value)}
-          onBlur={commitInputs}
-          onKeyDown={(event) => {
-            if (event.key === 'Enter') commitInputs()
-          }}
-        />
-      ) : null}
+/** Collects the base branch or pull request number for git-backed walkthrough sources. */
+const WalkthroughSourceInputs = memo(function WalkthroughSourceInputs() {
+  const { sourceKind, baseInput, setBaseInput, numberInput, setNumberInput, setSource } =
+    useChangesWalkthrough()
+
+  const commitInputs = useCallback(() => {
+    const next = toWalkthroughSource({ kind: sourceKind, base: baseInput, number: Number(numberInput) })
+    if (next) setSource(next)
+  }, [sourceKind, baseInput, numberInput, setSource])
+
+  if (sourceKind !== 'branch' && sourceKind !== 'pullRequest') return null
+
+  return (
+    <div className="space-y-2">
+      <Input
+        aria-label="Base branch"
+        placeholder="Default branch"
+        value={baseInput}
+        onChange={(event) => setBaseInput(event.target.value)}
+        onBlur={commitInputs}
+        onKeyDown={(event) => {
+          if (event.key === 'Enter') commitInputs()
+        }}
+      />
 
       {sourceKind === 'pullRequest' ? (
         <Input
@@ -421,7 +421,7 @@ export const ChangesWalkthroughView = memo(function ChangesWalkthroughView() {
   if (sourcePending) {
     return (
       <div className="min-h-0 flex-1 space-y-4 overflow-y-auto p-4">
-        <WalkthroughSourcePicker />
+        <WalkthroughSourceInputs />
         <p className="text-sm text-muted-foreground">Enter a pull request number</p>
       </div>
     )
@@ -429,7 +429,7 @@ export const ChangesWalkthroughView = memo(function ChangesWalkthroughView() {
 
   return (
     <div ref={scrollRef} className="min-h-0 flex-1 space-y-4 overflow-y-auto p-4">
-      <WalkthroughSourcePicker />
+      <WalkthroughSourceInputs />
 
       {error ? (
         <div className="space-y-2">
@@ -569,6 +569,7 @@ export function ChangesWalkthroughSheet({ sessionId, open, onOpenChange }: Chang
           onClose={close}
           actions={
             <>
+              <ChangesWalkthroughSourcePicker />
               <ChangesWalkthroughRegenerate />
               <ChangesWalkthroughNav />
             </>

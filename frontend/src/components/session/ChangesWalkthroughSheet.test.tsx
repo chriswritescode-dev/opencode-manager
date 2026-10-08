@@ -1,5 +1,5 @@
 import { describe, it, expect, vi, beforeAll, beforeEach } from 'vitest'
-import { render, screen, waitFor } from '@testing-library/react'
+import { render, screen, waitFor, within } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
 import type { ReactNode } from 'react'
@@ -283,6 +283,17 @@ describe('ChangesWalkthroughSheet', () => {
     await waitFor(() => {
       expect(mocks.generateChangeWalkthrough).toHaveBeenCalledWith('ses_1', { source: { kind: 'staged' } })
     })
+  })
+
+  it('renders the source picker in the drawer header before any walkthrough exists', async () => {
+    mocks.getChangeWalkthrough.mockResolvedValue(state({ walkthrough: null }))
+    renderSheet()
+
+    const header = screen.getByRole('button', { name: 'Close' }).parentElement
+    expect(header).not.toBeNull()
+    expect(
+      within(header as HTMLElement).getByRole('combobox', { name: 'Changes to walk through' }),
+    ).toBeInTheDocument()
   })
 
   it('sends the branch base', async () => {
