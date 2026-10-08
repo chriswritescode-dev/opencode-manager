@@ -73,6 +73,7 @@ describe('ChangesWalkthroughSheet', () => {
     Element.prototype.setPointerCapture ??= () => {}
     Element.prototype.releasePointerCapture ??= () => {}
     Element.prototype.scrollIntoView ??= () => {}
+    Element.prototype.scrollTo ??= () => {}
   })
 
   beforeEach(() => {
@@ -196,6 +197,27 @@ describe('ChangesWalkthroughSheet', () => {
     await waitFor(() => {
       expect(mocks.generateChangeWalkthrough).toHaveBeenCalledWith('ses_1', { regenerate: true })
     })
+  })
+
+  it('scrolls back to the top of the overview when a walkthrough is regenerated', async () => {
+    const user = userEvent.setup()
+    const scrollTo = vi.spyOn(Element.prototype, 'scrollTo')
+    let createdAt = 1
+    mocks.getChangeWalkthrough.mockImplementation(async () => state({ walkthrough: { ...walkthrough, createdAt } }))
+    mocks.generateChangeWalkthrough.mockImplementation(async () => {
+      createdAt = 2
+      return state({ walkthrough: { ...walkthrough, createdAt } })
+    })
+    renderSheet()
+
+    await user.click(await screen.findByRole('button', { name: '1. Add the greeting' }))
+    expect(await screen.findByText('1 of 2')).toBeInTheDocument()
+
+    scrollTo.mockClear()
+    await user.click(screen.getByRole('button', { name: 'Regenerate walkthrough' }))
+
+    await waitFor(() => expect(scrollTo).toHaveBeenCalledWith({ top: 0 }))
+    expect(await screen.findByText('Overview')).toBeInTheDocument()
   })
 
   it('shows progress while the server is generating instead of the generate button', async () => {

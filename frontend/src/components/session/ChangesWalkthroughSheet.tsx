@@ -129,6 +129,7 @@ export function ChangesWalkthroughProvider({ sessionId, active, children }: Chan
 
   useEffect(() => {
     setStopIndex(null)
+    scrollRef.current?.scrollTo?.({ top: 0 })
   }, [active, sessionId, walkthrough?.createdAt])
 
   const hunksById = new Map(walkthrough?.hunks.map((hunk) => [hunk.id, hunk]) ?? [])
