@@ -22,6 +22,7 @@ import {
   computeChangesHash,
   computeHunkId,
   computeStopId,
+  isMechanicalChangePath,
   parseWalkthroughResponse,
 } from '../../src/services/change-walkthroughs'
 
@@ -171,6 +172,44 @@ describe('computeChangesHash', () => {
   })
 })
 
+describe('isMechanicalChangePath', () => {
+  it('matches lockfiles by basename', () => {
+    const lockfiles = [
+      'pnpm-lock.yaml',
+      'package-lock.json',
+      'npm-shrinkwrap.json',
+      'yarn.lock',
+      'bun.lock',
+      'bun.lockb',
+      'Cargo.lock',
+      'Gemfile.lock',
+      'composer.lock',
+      'poetry.lock',
+      'uv.lock',
+      'Pipfile.lock',
+      'go.sum',
+      'flake.lock',
+      'deep/nested/pnpm-lock.yaml',
+    ]
+    expect(lockfiles.every(isMechanicalChangePath)).toBe(true)
+  })
+
+  it('matches generated suffixes and snapshot directories', () => {
+    expect(isMechanicalChangePath('src/__snapshots__/a.ts.snap')).toBe(true)
+    expect(isMechanicalChangePath('src/__snapshots__/a.ts')).toBe(true)
+    expect(isMechanicalChangePath('dist/bundle.min.js')).toBe(true)
+    expect(isMechanicalChangePath('dist/app.min.css')).toBe(true)
+    expect(isMechanicalChangePath('dist/bundle.js.map')).toBe(true)
+  })
+
+  it('does not match ordinary source and config files', () => {
+    expect(isMechanicalChangePath('src/lock.ts')).toBe(false)
+    expect(isMechanicalChangePath('package.json')).toBe(false)
+    expect(isMechanicalChangePath('src/snapshots/a.ts')).toBe(false)
+    expect(isMechanicalChangePath('src/map.ts')).toBe(false)
+  })
+})
+
 describe('buildWalkthroughInput', () => {
   it('assigns a distinct content id and the file to each hunk', () => {
     const { hunks, omittedFiles } = buildWalkthroughInput(
@@ -291,6 +330,40 @@ describe('buildWalkthroughInput', () => {
     expect(
       buildWalkthroughPrompt({ title: longTitle, hunks: withLongTitle.hunks }).length,
     ).toBeLessThanOrEqual(WALKTHROUGH_DIFF_MAX_CHARS)
+  })
+
+  it('separates mechanical hunks from the prompt hunks', () => {
+    const { hunks, mechanicalHunks, omittedFiles } = buildWalkthroughInput(
+      [change('src/a.ts', hunkPatch(1)), change('pnpm-lock.yaml', hunkPatch(2))],
+      'My session',
+    )
+
+    expect(hunks.map((hunk) => hunk.file)).toEqual(['src/a.ts'])
+    expect(mechanicalHunks.map((hunk) => hunk.file)).toEqual(['pnpm-lock.yaml'])
+    expect(omittedFiles).toEqual([])
+  })
+
+  it('keeps mechanical hunks out of the prompt budget', () => {
+    const changes = [
+      ...Array.from({ length: 10 }, (_, index) => change(`src/f${index}.ts`, bigHunk(index))),
+      change('pnpm-lock.yaml', hunkPatch(1)),
+    ]
+
+    const { hunks, mechanicalHunks, omittedFiles } = buildWalkthroughInput(changes, 'My session')
+
+    expect(hunks.length).toBeLessThan(changes.length - 1)
+    expect(mechanicalHunks.map((hunk) => hunk.file)).toEqual(['pnpm-lock.yaml'])
+    expect(omittedFiles.some((file) => file.file === 'pnpm-lock.yaml')).toBe(false)
+  })
+
+  it('omits a binary mechanical file as binary', () => {
+    const { mechanicalHunks, omittedFiles } = buildWalkthroughInput(
+      [change('pnpm-lock.yaml', 'diff --git a/pnpm-lock.yaml b/pnpm-lock.yaml\nBinary files differ')],
+      'My session',
+    )
+
+    expect(mechanicalHunks).toEqual([])
+    expect(omittedFiles).toEqual([{ file: 'pnpm-lock.yaml', reason: 'binary' }])
   })
 })
 
@@ -519,6 +592,45 @@ describe('ChangeWalkthroughService', () => {
     expect(walkthrough.stops.at(-1)!.title).toBe('Remaining changes')
   })
 
+  it('keeps mechanical hunks out of the prompt and appends a mechanical stop', async () => {
+    const lockText = hunkPatch(7)
+    sessions[SESSION_ID]!.changes = [change('src/a.ts', hunkPatch(1)), change('pnpm-lock.yaml', lockText)]
+    fake.setGenerateImpl(async () =>
+      modelReply([{ title: 'A', explanation: 'x', hunkIds: [computeHunkId('src/a.ts', 'modified', hunkPatch(1))] }]),
+    )
+
+    const { walkthrough } = await service.generate(SESSION_ID, {})
+
+    expect(fake.generateCalls).toHaveLength(1)
+    expect(fake.generateCalls[0]).not.toContain('pnpm-lock.yaml')
+    const mechanical = walkthrough.stops.at(-1)!
+    expect(mechanical.title).toBe('Mechanical changes')
+    expect(mechanical.hunkIds).toEqual([computeHunkId('pnpm-lock.yaml', 'modified', lockText)])
+
+    const referenced = walkthrough.stops.flatMap((stop) => stop.hunkIds)
+    expect(new Set(referenced).size).toBe(referenced.length)
+    expect(new Set(referenced)).toEqual(new Set(walkthrough.hunks.map((hunk) => hunk.id)))
+  })
+
+  it('stores only a mechanical stop without a model call', async () => {
+    sessions[SESSION_ID]!.changes = [
+      change('pnpm-lock.yaml', hunkPatch(1)),
+      change('src/__snapshots__/a.ts.snap', hunkPatch(2)),
+    ]
+
+    const { walkthrough, created } = await service.generate(SESSION_ID, {})
+
+    expect(created).toBe(true)
+    expect(fake.generateCalls).toHaveLength(0)
+    expect(walkthrough.summary).toBe('Only lock files, snapshots or generated files changed.')
+    expect(walkthrough.stops).toHaveLength(1)
+    expect(walkthrough.stops[0]!.title).toBe('Mechanical changes')
+    expect(walkthrough.stops[0]!.hunkIds).toHaveLength(2)
+    expect(new Set(walkthrough.stops[0]!.hunkIds)).toEqual(
+      new Set(walkthrough.hunks.map((hunk) => hunk.id)),
+    )
+  })
+
   it('returns the stored walkthrough without a model call when changes are unchanged', async () => {
     fake.setGenerateImpl(async () => modelReply([{ title: 'A', explanation: 'x', hunkIds: THREE_HUNK_IDS }]))
     const first = await service.generate(SESSION_ID, {})
@@ -672,6 +784,17 @@ describe('ChangeWalkthroughService', () => {
         expect(settled.generating).toBe(false)
         expect(settled.walkthrough).not.toBeNull()
       })
+    })
+
+    it('stores a mechanical-only walkthrough without a model call', async () => {
+      sessions[SESSION_ID]!.changes = [change('pnpm-lock.yaml', hunkPatch(1))]
+
+      const state = await service.startGeneration(SESSION_ID, {})
+
+      expect(fake.generateCalls).toHaveLength(0)
+      expect(state.generating).toBe(false)
+      expect(state.walkthrough?.stops).toHaveLength(1)
+      expect(state.walkthrough?.stops[0]!.title).toBe('Mechanical changes')
     })
 
     it('rejects with 409 when the session has no changes', async () => {

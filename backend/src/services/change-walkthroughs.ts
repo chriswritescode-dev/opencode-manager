@@ -19,7 +19,7 @@ import {
   type WalkthroughOmittedFile,
   type WalkthroughStop,
 } from '@opencode-manager/shared/schemas'
-import { splitDiffHunks } from '@opencode-manager/shared/utils'
+import { splitDiffHunks, type DiffHunk } from '@opencode-manager/shared/utils'
 import { deleteChangeWalkthrough, getChangeWalkthrough, saveChangeWalkthrough } from '../db/change-walkthroughs'
 import { getErrorMessage } from '../utils/error-utils'
 import { ServiceError } from '../utils/service-error'
@@ -35,6 +35,41 @@ const HUNK_TRUNCATION_MARKER = '\n[hunk truncated]'
 const TEXT_TRUNCATION_MARKER = ''
 const REMAINING_STOP_TITLE = 'Remaining changes'
 const REMAINING_STOP_EXPLANATION = 'These changes were not covered by the generated walkthrough.'
+const MECHANICAL_STOP_TITLE = 'Mechanical changes'
+const MECHANICAL_STOP_EXPLANATION =
+  'Lock files, snapshots and generated files. Their contents were not sent to the model.'
+const MECHANICAL_ONLY_SUMMARY = 'Only lock files, snapshots or generated files changed.'
+
+const MECHANICAL_LOCKFILE_NAMES = new Set([
+  'pnpm-lock.yaml',
+  'package-lock.json',
+  'npm-shrinkwrap.json',
+  'yarn.lock',
+  'bun.lock',
+  'bun.lockb',
+  'Cargo.lock',
+  'Gemfile.lock',
+  'composer.lock',
+  'poetry.lock',
+  'uv.lock',
+  'Pipfile.lock',
+  'go.sum',
+  'flake.lock',
+])
+
+const MECHANICAL_SUFFIXES = ['.snap', '.min.js', '.min.css', '.map']
+
+export function isMechanicalChangePath(file: string): boolean {
+  const segments = file.split('/')
+  const basename = segments.at(-1) ?? file
+  if (MECHANICAL_LOCKFILE_NAMES.has(basename)) {
+    return true
+  }
+  if (MECHANICAL_SUFFIXES.some((suffix) => file.endsWith(suffix))) {
+    return true
+  }
+  return segments.includes('__snapshots__')
+}
 
 const modelStopSchema = z.object({
   title: z.string().catch(''),
@@ -49,6 +84,7 @@ const modelResponseSchema = z.object({
 
 export interface WalkthroughInput {
   hunks: WalkthroughHunk[]
+  mechanicalHunks: WalkthroughHunk[]
   omittedFiles: WalkthroughOmittedFile[]
 }
 
@@ -109,24 +145,14 @@ export function formatHunkBlock(hunk: WalkthroughHunk): string {
 
 export function buildWalkthroughInput(changes: FileDiffInfo[], title: string): WalkthroughInput {
   const hunks: WalkthroughHunk[] = []
+  const mechanicalHunks: WalkthroughHunk[] = []
   const omittedFiles: WalkthroughOmittedFile[] = []
   const hunkIdCounts = new Map<string, number>()
   let total = buildWalkthroughInstructions(title).length
   let budgetExhausted = false
 
-  changes.forEach((change) => {
-    if (budgetExhausted) {
-      omittedFiles.push({ file: change.file, reason: 'budget' })
-      return
-    }
-
-    const fileHunks = splitDiffHunks(change.patch)
-    if (fileHunks.length === 0) {
-      omittedFiles.push({ file: change.file, reason: 'binary' })
-      return
-    }
-
-    const prepared = fileHunks.map((hunk) => {
+  const prepareHunks = (change: FileDiffInfo, fileHunks: DiffHunk[]): WalkthroughHunk[] =>
+    fileHunks.map((hunk) => {
       const truncated = truncateText(hunk.text, WALKTHROUGH_HUNK_MAX_CHARS, HUNK_TRUNCATION_MARKER)
       const baseId = computeHunkId(change.file, change.status, hunk.text)
       const count = (hunkIdCounts.get(baseId) ?? 0) + 1
@@ -141,6 +167,26 @@ export function buildWalkthroughInput(changes: FileDiffInfo[], title: string): W
       } satisfies WalkthroughHunk
     })
 
+  changes.forEach((change) => {
+    const mechanical = isMechanicalChangePath(change.file)
+
+    if (!mechanical && budgetExhausted) {
+      omittedFiles.push({ file: change.file, reason: 'budget' })
+      return
+    }
+
+    const fileHunks = splitDiffHunks(change.patch)
+    if (fileHunks.length === 0) {
+      omittedFiles.push({ file: change.file, reason: 'binary' })
+      return
+    }
+
+    if (mechanical) {
+      mechanicalHunks.push(...prepareHunks(change, fileHunks))
+      return
+    }
+
+    const prepared = prepareHunks(change, fileHunks)
     const fileTotal = prepared.reduce((sum, hunk) => sum + formatHunkBlock(hunk).length + 2, 0)
     if (total + fileTotal > WALKTHROUGH_DIFF_MAX_CHARS) {
       budgetExhausted = true
@@ -152,7 +198,19 @@ export function buildWalkthroughInput(changes: FileDiffInfo[], title: string): W
     hunks.push(...prepared)
   })
 
-  return { hunks, omittedFiles }
+  return { hunks, mechanicalHunks, omittedFiles }
+}
+
+export function buildMechanicalStop(hunks: WalkthroughHunk[]): WalkthroughStop {
+  const hunkIds = hunks.map((hunk) => hunk.id)
+  return {
+    id: computeStopId(hunkIds),
+    title: MECHANICAL_STOP_TITLE,
+    explanation: MECHANICAL_STOP_EXPLANATION,
+    hunkIds,
+    status: 'ready',
+    explanationKey: null,
+  }
 }
 
 export function buildWalkthroughPrompt({ title, hunks }: { title: string; hunks: WalkthroughHunk[] }): string {
@@ -401,8 +459,8 @@ export class ChangeWalkthroughService {
     }
 
     const title = session.title ?? sessionId
-    const { hunks, omittedFiles } = buildWalkthroughInput(changes, title)
-    if (hunks.length === 0) {
+    const { hunks, mechanicalHunks, omittedFiles } = buildWalkthroughInput(changes, title)
+    if (hunks.length === 0 && mechanicalHunks.length === 0) {
       if (omittedFiles.some((file) => file.reason === 'budget')) {
         throw new ChangeWalkthroughError('These changes are too large to walk through', 413, {
           code: 'WALKTHROUGH_CONTEXT_LIMIT',
@@ -412,6 +470,27 @@ export class ChangeWalkthroughService {
       throw new ChangeWalkthroughError('This session has no text changes to walk through', 409, {
         code: 'WALKTHROUGH_NO_TEXT_CHANGES',
       })
+    }
+
+    const mechanicalStop = mechanicalHunks.length > 0 ? buildMechanicalStop(mechanicalHunks) : null
+
+    if (hunks.length === 0) {
+      const walkthrough: ChangeWalkthrough = {
+        sessionId,
+        diffHash,
+        summary: MECHANICAL_ONLY_SUMMARY,
+        stops: [mechanicalStop!],
+        hunks: mechanicalHunks,
+        omittedFiles,
+        createdAt: Date.now(),
+      }
+
+      if (this.deletedDuringGeneration.has(sessionId)) {
+        throw new ChangeWalkthroughError('Session not found', 404)
+      }
+
+      saveChangeWalkthrough(this.db, walkthrough)
+      return { walkthrough, created: true }
     }
 
     const prompt = buildWalkthroughPrompt({ title, hunks })
@@ -445,8 +524,8 @@ export class ChangeWalkthroughService {
       sessionId,
       diffHash,
       summary: parsed.summary,
-      stops: parsed.stops,
-      hunks,
+      stops: mechanicalStop ? [...parsed.stops, mechanicalStop] : parsed.stops,
+      hunks: [...hunks, ...mechanicalHunks],
       omittedFiles,
       createdAt: Date.now(),
     }
