@@ -34,6 +34,7 @@ import { mapWithConcurrency } from '../utils/concurrency'
 import { logger } from '../utils/logger'
 import { GenerateTextTimeoutError, generateTextWithTimeout } from './opencode/generate-text'
 import type { OpenCodeClient } from './opencode/client'
+import { ChangeWalkthroughError } from './change-walkthrough-error'
 import { readSessionChanges } from './session-changes'
 import type { SettingsService } from './settings'
 import type { SSEEvent } from './sse-aggregator'
@@ -108,12 +109,7 @@ export interface ChangeWalkthroughServiceOptions {
   timeoutMs?: number
 }
 
-export class ChangeWalkthroughError extends ServiceError {
-  constructor(message: string, status: number, options?: { code?: string; details?: unknown }) {
-    super(message, status, options)
-    this.name = 'ChangeWalkthroughError'
-  }
-}
+export { ChangeWalkthroughError } from './change-walkthrough-error'
 
 export function computeChangesHash(changes: FileDiffInfo[]): string {
   const hash = createHash('sha256')
