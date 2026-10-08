@@ -234,6 +234,7 @@ export class ChangeWalkthroughService {
   private readonly inFlight = new Map<string, InFlightGeneration>()
   private readonly failures = new Map<string, WalkthroughGenerationError>()
   private readonly deletedDuringGeneration = new Set<string>()
+  private readonly currentHashes = new Map<string, string>()
   private readonly timeoutMs: number
 
   constructor(
@@ -247,13 +248,9 @@ export class ChangeWalkthroughService {
   async getState(sessionId: string): Promise<ChangeWalkthroughState> {
     await this.readSession(sessionId)
 
-    let currentDiffHash: string | null = null
-    try {
-      const changes = await readSessionChanges(this.openCodeClient, sessionId)
-      currentDiffHash = computeChangesHash(changes)
-    } catch {
-      currentDiffHash = null
-    }
+    const currentDiffHash = this.inFlight.has(sessionId)
+      ? this.currentHashes.get(sessionId) ?? null
+      : await this.readCurrentDiffHash(sessionId)
 
     const walkthrough = getChangeWalkthrough(this.db, sessionId)
     return {
@@ -262,6 +259,22 @@ export class ChangeWalkthroughService {
       stale: walkthrough !== null && currentDiffHash !== null && walkthrough.diffHash !== currentDiffHash,
       generating: this.inFlight.has(sessionId),
       error: this.failures.get(sessionId) ?? null,
+    }
+  }
+
+  private async readCurrentDiffHash(sessionId: string): Promise<string | null> {
+    const cached = this.currentHashes.get(sessionId)
+    if (cached !== undefined) {
+      return cached
+    }
+
+    try {
+      const changes = await readSessionChanges(this.openCodeClient, sessionId)
+      const hash = computeChangesHash(changes)
+      this.currentHashes.set(sessionId, hash)
+      return hash
+    } catch {
+      return null
     }
   }
 
@@ -277,16 +290,26 @@ export class ChangeWalkthroughService {
 
   /** Removes the stored walkthrough of a deleted session, including one still being generated. */
   handleEvent(event: SSEEvent): void {
-    if (event.type !== 'session.deleted') {
-      return
+    switch (event.type) {
+      case 'session.deleted': {
+        const { sessionID } = event.data
+        if (this.inFlight.has(sessionID)) {
+          this.deletedDuringGeneration.add(sessionID)
+        }
+        this.failures.delete(sessionID)
+        this.currentHashes.delete(sessionID)
+        deleteChangeWalkthrough(this.db, sessionID)
+        return
+      }
+      case 'session.execution.started':
+      case 'session.execution.succeeded':
+      case 'session.execution.failed':
+      case 'session.execution.interrupted':
+        this.currentHashes.delete(event.data.sessionID)
+        return
+      default:
+        return
     }
-
-    const { sessionID } = event.data
-    if (this.inFlight.has(sessionID)) {
-      this.deletedDuringGeneration.add(sessionID)
-    }
-    this.failures.delete(sessionID)
-    deleteChangeWalkthrough(this.db, sessionID)
   }
 
   private begin(sessionId: string, request: GenerateChangeWalkthroughRequest): InFlightGeneration {
@@ -317,6 +340,7 @@ export class ChangeWalkthroughService {
       .finally(() => {
         this.inFlight.delete(sessionId)
         this.deletedDuringGeneration.delete(sessionId)
+        this.currentHashes.delete(sessionId)
       })
 
     result.catch(() => {})
@@ -349,6 +373,7 @@ export class ChangeWalkthroughService {
     }
 
     const diffHash = computeChangesHash(changes)
+    this.currentHashes.set(sessionId, diffHash)
     const stored = getChangeWalkthrough(this.db, sessionId)
     if (stored && stored.diffHash === diffHash && !request.regenerate) {
       return { walkthrough: stored, created: false }

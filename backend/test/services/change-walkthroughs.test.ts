@@ -411,6 +411,55 @@ describe('ChangeWalkthroughService', () => {
     expect(state.stale).toBe(false)
   })
 
+  it('does not read changes while generating', async () => {
+    let resolveGenerate: (text: string) => void = () => {}
+    fake.setGenerateImpl(() => new Promise<string>((resolve) => {
+      resolveGenerate = resolve
+    }))
+
+    const pending = service.generate(SESSION_ID, {})
+    await vi.waitFor(() => expect(fake.generateCalls).toHaveLength(1))
+
+    const diff = vi.mocked(fake.client.api.session.diff)
+    const messages = vi.mocked(fake.client.api.message.list)
+    const diffCalls = diff.mock.calls.length
+    const messageCalls = messages.mock.calls.length
+
+    await service.getState(SESSION_ID)
+    await service.getState(SESSION_ID)
+
+    expect(diff.mock.calls.length).toBe(diffCalls)
+    expect(messages.mock.calls.length).toBe(messageCalls)
+
+    resolveGenerate(modelReply([{ title: 'A', explanation: 'x', hunkIds: ['f0h0', 'f0h1', 'f1h0'] }]))
+    await pending
+  })
+
+  it('caches the current hash until a session execution event', async () => {
+    await service.getState(SESSION_ID)
+    await service.getState(SESSION_ID)
+
+    expect(vi.mocked(fake.client.api.session.diff)).toHaveBeenCalledTimes(1)
+    expect(vi.mocked(fake.client.api.message.list)).toHaveBeenCalledTimes(2)
+  })
+
+  it('recomputes the hash after session.execution.succeeded', async () => {
+    fake.setGenerateImpl(async () => modelReply([{ title: 'A', explanation: 'x', hunkIds: ['f0h0', 'f0h1', 'f1h0'] }]))
+    await service.generate(SESSION_ID, {})
+
+    await service.getState(SESSION_ID)
+    sessions[SESSION_ID]!.changes = [change('src/a.ts', hunkPatch(99))]
+
+    const cached = await service.getState(SESSION_ID)
+    expect(cached.stale).toBe(false)
+
+    service.handleEvent(sessionEvent('session.execution.succeeded', SESSION_ID))
+
+    const refreshed = await service.getState(SESSION_ID)
+    expect(refreshed.stale).toBe(true)
+    expect(refreshed.currentDiffHash).toBe(computeChangesHash([change('src/a.ts', hunkPatch(99))]))
+  })
+
   it('stores stops covering every hunk exactly once', async () => {
     fake.setGenerateImpl(async () => modelReply([{ title: 'A', explanation: 'x', hunkIds: ['f0h0', 'f1h0'] }]))
 
@@ -568,6 +617,7 @@ describe('ChangeWalkthroughService', () => {
       expect(state.walkthrough).toBeNull()
       expect(state.error).toBeNull()
 
+      await vi.waitFor(() => expect(fake.generateCalls).toHaveLength(1))
       resolveGenerate(coveringReply)
 
       await vi.waitFor(async () => {
