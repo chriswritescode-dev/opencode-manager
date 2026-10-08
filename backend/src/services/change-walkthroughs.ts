@@ -2,6 +2,7 @@ import type { Database } from 'bun:sqlite'
 import { createHash } from 'node:crypto'
 import { z } from 'zod'
 import {
+  formatOpenCodeModelRef,
   isSessionNotFoundError,
   type FileDiffInfo,
   type ModelRef,
@@ -38,6 +39,7 @@ import type { SSEEvent } from './sse-aggregator'
 const DEFAULT_TIMEOUT_MS = 120_000
 const WALKTHROUGH_CALL_ATTEMPTS = 2
 const WALKTHROUGH_EXPLAIN_CONCURRENCY = 4
+const WALKTHROUGH_PROMPT_VERSION = '2'
 const HUNK_TRUNCATION_MARKER = '\n[hunk truncated]'
 const TEXT_TRUNCATION_MARKER = ''
 const REMAINING_STOP_TITLE = 'Remaining changes'
@@ -128,6 +130,26 @@ export function computeHunkId(file: string, status: FileDiffInfo['status'], hunk
 export function computeStopId(hunkIds: string[]): string {
   const digest = createHash('sha256').update([...hunkIds].sort().join('\n')).digest('hex')
   return `s_${digest.slice(0, 12)}`
+}
+
+export function computeExplanationKey(modelKey: string, hunkIds: string[]): string {
+  const digest = createHash('sha256')
+    .update(`${WALKTHROUGH_PROMPT_VERSION}\0${modelKey}\0${[...hunkIds].sort().join('\n')}`)
+    .digest('hex')
+  return digest
+}
+
+function computeModelKey(model: ModelRef | undefined): string {
+  return model ? formatOpenCodeModelRef(model) : 'default'
+}
+
+function applyReuse(stop: WalkthroughStop, reusable: Map<string, string>, modelKey: string): WalkthroughStop {
+  const key = computeExplanationKey(modelKey, stop.hunkIds)
+  const explanation = reusable.get(key)
+  if (explanation !== undefined) {
+    return { ...stop, explanation, status: 'ready', explanationKey: key }
+  }
+  return stop.status === 'ready' ? { ...stop, explanationKey: key } : stop
 }
 
 export function buildWalkthroughPreamble(title: string): string {
@@ -293,6 +315,18 @@ export function buildWalkthroughPlanPrompt({
   outline: string
   previousStops: Array<{ title: string; hunkIds: string[] }>
 }): string {
+  const prompt = buildWalkthroughPlanSections(title, outline, previousStops).join('\n\n')
+  if (previousStops.length > 0 && prompt.length > WALKTHROUGH_DIFF_MAX_CHARS) {
+    return buildWalkthroughPlanSections(title, outline, []).join('\n\n')
+  }
+  return prompt
+}
+
+function buildWalkthroughPlanSections(
+  title: string,
+  outline: string,
+  previousStops: Array<{ title: string; hunkIds: string[] }>,
+): string[] {
   const sections = [buildWalkthroughPlanRules(title)]
   if (previousStops.length > 0) {
     sections.push(
@@ -303,7 +337,7 @@ export function buildWalkthroughPlanPrompt({
     )
   }
   sections.push(`## Outline\n${outline}`)
-  return sections.join('\n\n')
+  return sections
 }
 
 export function buildWalkthroughOutline(input: WalkthroughInput, title: string): WalkthroughOutline {
@@ -722,12 +756,33 @@ export class ChangeWalkthroughService {
 
     const diffHash = computeChangesHash(changes)
     this.currentHashes.set(sessionId, diffHash)
-    const stored = getChangeWalkthrough(this.db, sessionId)
-    if (stored && stored.diffHash === diffHash && !request.regenerate) {
-      return { walkthrough: stored, created: false }
+
+    const previous = getChangeWalkthrough(this.db, sessionId)
+    const title = session.title ?? sessionId
+    const modelKey = computeModelKey(session.model)
+    const storedModel = session.model ? formatOpenCodeModelRef(session.model) : null
+
+    if (previous && previous.diffHash === diffHash && !request.regenerate) {
+      if (previous.stops.every((stop) => stop.status === 'ready')) {
+        return { walkthrough: previous, created: false }
+      }
+
+      const unfinished = previous.stops.filter((stop) => stop.status !== 'ready')
+      const resumed = await this.explainStops(
+        session,
+        title,
+        previous.summary,
+        unfinished,
+        previous.hunks,
+        { ...previous, model: storedModel },
+        onModelStart,
+      )
+      if (this.deletedDuringGeneration.has(sessionId)) {
+        throw new ChangeWalkthroughError('Session not found', 404)
+      }
+      return { walkthrough: resumed, created: true }
     }
 
-    const title = session.title ?? sessionId
     const input = buildWalkthroughInput(changes)
     const { hunks, mechanicalHunks, omittedFiles } = input
     if (hunks.length === 0 && mechanicalHunks.length === 0) {
@@ -742,6 +797,7 @@ export class ChangeWalkthroughService {
       const walkthrough: ChangeWalkthrough = {
         sessionId,
         diffHash,
+        model: storedModel,
         summary: MECHANICAL_ONLY_SUMMARY,
         stops: [mechanicalStop!],
         hunks: mechanicalHunks,
@@ -755,6 +811,15 @@ export class ChangeWalkthroughService {
       return { walkthrough, created: true }
     }
 
+    const reusable = new Map<string, string>()
+    if (!request.regenerate && previous) {
+      for (const stop of previous.stops) {
+        if (stop.status === 'ready' && stop.explanationKey) {
+          reusable.set(stop.explanationKey, stop.explanation)
+        }
+      }
+    }
+
     if (fitsSingleCall(input, title)) {
       const prompt = buildWalkthroughPrompt({ title, hunks })
       onModelStart()
@@ -763,11 +828,13 @@ export class ChangeWalkthroughService {
         parseWalkthroughResponse(text, hunks),
       )
 
+      const stops = parsed.stops.map((stop) => applyReuse(stop, reusable, modelKey))
       const walkthrough: ChangeWalkthrough = {
         sessionId,
         diffHash,
+        model: storedModel,
         summary: parsed.summary,
-        stops: mechanicalStop ? [...parsed.stops, mechanicalStop] : parsed.stops,
+        stops: mechanicalStop ? [...stops, mechanicalStop] : stops,
         hunks: [...hunks, ...mechanicalHunks],
         omittedFiles,
         createdAt: Date.now(),
@@ -791,6 +858,7 @@ export class ChangeWalkthroughService {
       const walkthrough: ChangeWalkthrough = {
         sessionId,
         diffHash,
+        model: storedModel,
         summary: MECHANICAL_ONLY_SUMMARY,
         stops: [mechanicalStop],
         hunks: mechanicalHunks,
@@ -804,18 +872,28 @@ export class ChangeWalkthroughService {
       return { walkthrough, created: true }
     }
 
-    const planPrompt = buildWalkthroughPlanPrompt({ title, outline: outline.outline, previousStops: [] })
+    const outlineIds = new Set(outline.hunks.map((hunk) => hunk.id))
+    const previousStops =
+      !request.regenerate && previous
+        ? previous.stops
+            .filter((stop) => stop.hunkIds.length > 0 && stop.hunkIds.every((id) => outlineIds.has(id)))
+            .map((stop) => ({ title: stop.title, hunkIds: stop.hunkIds }))
+        : []
+
+    const planPrompt = buildWalkthroughPlanPrompt({ title, outline: outline.outline, previousStops })
     onModelStart()
 
     const planned = await this.callModelParsed(planPrompt, session.model, (text) =>
       parseWalkthroughPlan(text, outline.hunks),
     )
 
+    const stops = planned.stops.map((stop) => applyReuse(stop, reusable, modelKey))
     let walkthrough: ChangeWalkthrough = {
       sessionId,
       diffHash,
+      model: storedModel,
       summary: planned.summary,
-      stops: mechanicalStop ? [...planned.stops, mechanicalStop] : planned.stops,
+      stops: mechanicalStop ? [...stops, mechanicalStop] : stops,
       hunks: [...outline.hunks, ...mechanicalHunks],
       omittedFiles: outline.omittedFiles,
       createdAt: Date.now(),
@@ -825,32 +903,61 @@ export class ChangeWalkthroughService {
       throw new ChangeWalkthroughError('Session not found', 404)
     }
 
-    await mapWithConcurrency(planned.stops, WALKTHROUGH_EXPLAIN_CONCURRENCY, async (stop) => {
-      const explainPrompt = buildWalkthroughExplainPrompt({
+    const pending = stops.filter((stop) => stop.status !== 'ready')
+    if (pending.length > 0) {
+      walkthrough = await this.explainStops(
+        session,
         title,
-        summary: planned.summary,
-        stop,
-        hunks: outline.hunks,
-      })
-
-      let explained: WalkthroughStop
-      try {
-        const explanation = await this.callModelParsed(explainPrompt, session.model, parseWalkthroughExplanation)
-        explained = { ...stop, explanation, status: 'ready' }
-      } catch (error) {
-        logger.warn('Failed to explain a change walkthrough stop', getErrorMessage(error))
-        explained = { ...stop, status: 'failed' }
-      }
-
-      walkthrough = this.replaceStop(walkthrough, explained)
-      this.saveIfSessionLive(walkthrough)
-    })
+        planned.summary,
+        pending,
+        outline.hunks,
+        walkthrough,
+        onModelStart,
+      )
+    }
 
     if (this.deletedDuringGeneration.has(sessionId)) {
       throw new ChangeWalkthroughError('Session not found', 404)
     }
 
     return { walkthrough, created: true }
+  }
+
+  private async explainStops(
+    session: SessionInfo,
+    title: string,
+    summary: string,
+    stops: WalkthroughStop[],
+    hunks: WalkthroughHunk[],
+    walkthrough: ChangeWalkthrough,
+    onModelStart: () => void,
+  ): Promise<ChangeWalkthrough> {
+    const modelKey = computeModelKey(session.model)
+    let current = walkthrough
+
+    await mapWithConcurrency(stops, WALKTHROUGH_EXPLAIN_CONCURRENCY, async (stop) => {
+      const explainPrompt = buildWalkthroughExplainPrompt({ title, summary, stop, hunks })
+      onModelStart()
+
+      let explained: WalkthroughStop
+      try {
+        const explanation = await this.callModelParsed(explainPrompt, session.model, parseWalkthroughExplanation)
+        explained = {
+          ...stop,
+          explanation,
+          status: 'ready',
+          explanationKey: computeExplanationKey(modelKey, stop.hunkIds),
+        }
+      } catch (error) {
+        logger.warn('Failed to explain a change walkthrough stop', getErrorMessage(error))
+        explained = { ...stop, status: 'failed' }
+      }
+
+      current = this.replaceStop(current, explained)
+      this.saveIfSessionLive(current)
+    })
+
+    return current
   }
 
   private async callModelParsed<T>(

@@ -18,6 +18,7 @@ vi.mock('@/api/changeWalkthroughs', () => ({
 const walkthroughForA: ChangeWalkthrough = {
   sessionId: 'ses_A',
   diffHash: 'hash-a',
+  model: null,
   summary: 'A summary',
   stops: [],
   hunks: [],

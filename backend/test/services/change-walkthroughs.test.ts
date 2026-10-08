@@ -114,6 +114,25 @@ const LARGE_PLAN_REPLY = planReply([
   { title: 'C', hunkIds: [20, 21, 22, 23].map((index) => computeHunkId('src/c.ts', 'modified', bigHunk(index))) },
 ])
 
+const EDITED_A_HUNKS = [0, 1, 2, 3].map((index) => bigHunk(index, WALKTHROUGH_HUNK_MAX_CHARS - 10))
+
+const EDITED_LARGE_CHANGES: FileDiffInfo[] = [
+  change('src/a.ts', EDITED_A_HUNKS.join('\n')),
+  change('src/b.ts', [10, 11, 12, 13].map((index) => bigHunk(index)).join('\n')),
+  change('src/c.ts', [20, 21, 22, 23].map((index) => bigHunk(index)).join('\n')),
+]
+
+const EDITED_LARGE_PLAN_REPLY = planReply([
+  { title: 'A', hunkIds: EDITED_A_HUNKS.map((hunk) => computeHunkId('src/a.ts', 'modified', hunk)) },
+  { title: 'B', hunkIds: [10, 11, 12, 13].map((index) => computeHunkId('src/b.ts', 'modified', bigHunk(index))) },
+  { title: 'C', hunkIds: [20, 21, 22, 23].map((index) => computeHunkId('src/c.ts', 'modified', bigHunk(index))) },
+])
+
+function explanationFor(prompt: string): string {
+  const title = prompt.match(/## Stop: (.+)/)?.[1] ?? ''
+  return JSON.stringify({ explanation: `explained-${title}` })
+}
+
 interface FakeSession {
   info?: SessionInfo | Error
   changes?: FileDiffInfo[] | Error
@@ -528,6 +547,18 @@ describe('buildWalkthroughPlanPrompt', () => {
 
     expect(prompt).toContain('Previous stops')
     expect(prompt).toContain('A: h_1')
+  })
+
+  it('drops previous stops when they would push the prompt over the diff budget', () => {
+    const prompt = buildWalkthroughPlanPrompt({
+      title: 'My session',
+      outline,
+      previousStops: [{ title: 'T'.repeat(WALKTHROUGH_DIFF_MAX_CHARS), hunkIds: ['h_1'] }],
+    })
+
+    expect(prompt).not.toContain('Previous stops')
+    expect(prompt).toContain(outline)
+    expect(prompt.length).toBeLessThanOrEqual(WALKTHROUGH_DIFF_MAX_CHARS)
   })
 })
 
@@ -1126,6 +1157,141 @@ describe('ChangeWalkthroughService', () => {
     expect(byTitle.get('A')?.status).toBe('ready')
     expect(byTitle.get('C')?.status).toBe('ready')
     expect(fake.generateCalls.filter((prompt) => prompt.includes('## Stop: B'))).toHaveLength(2)
+  })
+
+  it('reuses explanations for unchanged stops after an edit', async () => {
+    sessions[SESSION_ID]!.changes = LARGE_CHANGES
+    fake.setGenerateImpl((prompt) =>
+      Promise.resolve(prompt.includes(PLAN_MARKER) ? LARGE_PLAN_REPLY : explanationFor(prompt)),
+    )
+
+    const first = await service.generate(SESSION_ID, {})
+    expect(first.walkthrough.stops.every((stop) => stop.status === 'ready')).toBe(true)
+    const callsAfterFirst = fake.generateCalls.length
+    expect(callsAfterFirst).toBe(4)
+
+    sessions[SESSION_ID]!.changes = EDITED_LARGE_CHANGES
+    fake.setGenerateImpl((prompt) =>
+      Promise.resolve(prompt.includes(PLAN_MARKER) ? EDITED_LARGE_PLAN_REPLY : explanationFor(prompt)),
+    )
+
+    const second = await service.generate(SESSION_ID, {})
+
+    expect(second.created).toBe(true)
+    const secondCalls = fake.generateCalls.slice(callsAfterFirst)
+    expect(secondCalls).toHaveLength(2)
+    expect(secondCalls.filter((prompt) => prompt.includes(PLAN_MARKER))).toHaveLength(1)
+    expect(secondCalls.filter((prompt) => prompt.includes('## Stop: A'))).toHaveLength(1)
+    expect(secondCalls.filter((prompt) => prompt.includes('## Stop: B'))).toHaveLength(0)
+    expect(secondCalls.filter((prompt) => prompt.includes('## Stop: C'))).toHaveLength(0)
+
+    const byTitle = new Map(second.walkthrough.stops.map((stop) => [stop.title, stop]))
+    expect(byTitle.get('A')!.explanation).toBe('explained-A')
+    expect(byTitle.get('B')!.explanation).toBe('explained-B')
+    expect(byTitle.get('C')!.explanation).toBe('explained-C')
+    expect(second.walkthrough.stops.every((stop) => stop.status === 'ready')).toBe(true)
+  })
+
+  it('retries only failed stops on an unchanged diff', async () => {
+    sessions[SESSION_ID]!.changes = LARGE_CHANGES
+    fake.setGenerateImpl((prompt) => {
+      if (prompt.includes(PLAN_MARKER)) {
+        return Promise.resolve(LARGE_PLAN_REPLY)
+      }
+      if (prompt.includes('## Stop: B')) {
+        return Promise.resolve('not json')
+      }
+      return Promise.resolve(explanationFor(prompt))
+    })
+
+    const first = await service.generate(SESSION_ID, {})
+    const firstByTitle = new Map(first.walkthrough.stops.map((stop) => [stop.title, stop]))
+    expect(firstByTitle.get('B')!.status).toBe('failed')
+    const callsAfterFirst = fake.generateCalls.length
+
+    fake.setGenerateImpl((prompt) =>
+      Promise.resolve(prompt.includes(PLAN_MARKER) ? LARGE_PLAN_REPLY : explanationFor(prompt)),
+    )
+
+    const second = await service.generate(SESSION_ID, {})
+
+    expect(second.created).toBe(true)
+    const secondCalls = fake.generateCalls.slice(callsAfterFirst)
+    expect(secondCalls).toHaveLength(1)
+    expect(secondCalls[0]).toContain('## Stop: B')
+    expect(secondCalls.filter((prompt) => prompt.includes(PLAN_MARKER))).toHaveLength(0)
+
+    const secondByTitle = new Map(second.walkthrough.stops.map((stop) => [stop.title, stop]))
+    expect(secondByTitle.get('B')!.status).toBe('ready')
+    expect(secondByTitle.get('A')!.explanation).toBe('explained-A')
+    expect(secondByTitle.get('C')!.explanation).toBe('explained-C')
+  })
+
+  it('regenerate ignores previous explanations', async () => {
+    sessions[SESSION_ID]!.changes = LARGE_CHANGES
+    fake.setGenerateImpl((prompt) =>
+      Promise.resolve(prompt.includes(PLAN_MARKER) ? LARGE_PLAN_REPLY : explanationFor(prompt)),
+    )
+
+    await service.generate(SESSION_ID, {})
+    const callsAfterFirst = fake.generateCalls.length
+
+    await service.generate(SESSION_ID, { regenerate: true })
+
+    expect(fake.generateCalls.length - callsAfterFirst).toBe(4)
+  })
+
+  it('does not reuse explanations across models', async () => {
+    sessions[SESSION_ID]!.info = {
+      id: SESSION_ID,
+      title: 'Title',
+      model: { providerID: 'anthropic', id: 'claude-sonnet-4' },
+    } as SessionInfo
+    sessions[SESSION_ID]!.changes = LARGE_CHANGES
+    fake.setGenerateImpl((prompt) =>
+      Promise.resolve(prompt.includes(PLAN_MARKER) ? LARGE_PLAN_REPLY : explanationFor(prompt)),
+    )
+
+    await service.generate(SESSION_ID, {})
+    const callsAfterFirst = fake.generateCalls.length
+
+    sessions[SESSION_ID]!.info = {
+      id: SESSION_ID,
+      title: 'Title',
+      model: { providerID: 'openai', id: 'gpt-5' },
+    } as SessionInfo
+    sessions[SESSION_ID]!.changes = EDITED_LARGE_CHANGES
+    fake.setGenerateImpl((prompt) =>
+      Promise.resolve(prompt.includes(PLAN_MARKER) ? EDITED_LARGE_PLAN_REPLY : explanationFor(prompt)),
+    )
+
+    await service.generate(SESSION_ID, {})
+
+    expect(fake.generateCalls.length - callsAfterFirst).toBe(4)
+  })
+
+  it('lists surviving previous stops in the plan prompt', async () => {
+    sessions[SESSION_ID]!.changes = LARGE_CHANGES
+    fake.setGenerateImpl((prompt) =>
+      Promise.resolve(prompt.includes(PLAN_MARKER) ? LARGE_PLAN_REPLY : explanationFor(prompt)),
+    )
+
+    await service.generate(SESSION_ID, {})
+    const callsAfterFirst = fake.generateCalls.length
+
+    sessions[SESSION_ID]!.changes = EDITED_LARGE_CHANGES
+    fake.setGenerateImpl((prompt) =>
+      Promise.resolve(prompt.includes(PLAN_MARKER) ? EDITED_LARGE_PLAN_REPLY : explanationFor(prompt)),
+    )
+
+    await service.generate(SESSION_ID, {})
+
+    const planPrompt = fake.generateCalls.slice(callsAfterFirst).find((prompt) => prompt.includes(PLAN_MARKER))
+    expect(planPrompt).toBeDefined()
+    expect(planPrompt).toContain('Previous stops')
+    expect(planPrompt).toContain('- B:')
+    expect(planPrompt).toContain('- C:')
+    expect(planPrompt).not.toContain('- A:')
   })
 
   it('keeps a single call for small diffs', async () => {

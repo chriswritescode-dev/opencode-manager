@@ -16,6 +16,7 @@ function walkthrough(overrides: Partial<ChangeWalkthrough> = {}): ChangeWalkthro
   return {
     sessionId: SESSION_ID,
     diffHash: 'hash-1',
+    model: null,
     summary: 'A short summary',
     stops: [
       { id: 's_1', title: 'First stop', explanation: 'Why it matters', hunkIds: ['h_1'], status: 'ready', explanationKey: null },

@@ -41,6 +41,7 @@ export type WalkthroughOmittedFile = z.infer<typeof WalkthroughOmittedFileSchema
 export const ChangeWalkthroughSchema = z.object({
   sessionId: z.string(),
   diffHash: z.string(),
+  model: z.string().nullable(),
   summary: z.string(),
   stops: z.array(WalkthroughStopSchema),
   hunks: z.array(WalkthroughHunkSchema),

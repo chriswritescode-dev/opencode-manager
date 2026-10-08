@@ -20,6 +20,7 @@ vi.mock('@/api/changeWalkthroughs', () => ({
 const walkthrough: ChangeWalkthrough = {
   sessionId: 'ses_1',
   diffHash: 'hash-1',
+  model: null,
   summary: 'This change adds a greeting.',
   stops: [
     {
