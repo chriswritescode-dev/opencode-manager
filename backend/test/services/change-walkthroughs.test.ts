@@ -728,6 +728,7 @@ describe('ChangeWalkthroughService', () => {
       status: 502,
       code: 'WALKTHROUGH_UNPARSEABLE',
     })
+    expect(fake.generateCalls).toHaveLength(2)
   })
 
   it('rejects with 504 when generation times out', async () => {
@@ -738,6 +739,7 @@ describe('ChangeWalkthroughService', () => {
       status: 504,
       code: 'WALKTHROUGH_TIMEOUT',
     })
+    expect(fake.generateCalls).toHaveLength(2)
   })
 
   it('rejects with 502 when the model call fails', async () => {
@@ -746,6 +748,38 @@ describe('ChangeWalkthroughService', () => {
     })
 
     await expect(service.generate(SESSION_ID, {})).rejects.toMatchObject({ status: 502 })
+    expect(fake.generateCalls).toHaveLength(2)
+  })
+
+  it('retries an unparseable reply once', async () => {
+    let calls = 0
+    fake.setGenerateImpl(async () => {
+      calls += 1
+      return calls === 1 ? 'not json' : modelReply([{ title: 'A', explanation: 'x', hunkIds: THREE_HUNK_IDS }])
+    })
+
+    const { walkthrough, created } = await service.generate(SESSION_ID, {})
+
+    expect(created).toBe(true)
+    expect(fake.generateCalls).toHaveLength(2)
+    expect(walkthrough.stops).toHaveLength(1)
+  })
+
+  it('retries a failed call once', async () => {
+    let calls = 0
+    fake.setGenerateImpl(async () => {
+      calls += 1
+      if (calls === 1) {
+        throw new Error('model unavailable')
+      }
+      return modelReply([{ title: 'A', explanation: 'x', hunkIds: THREE_HUNK_IDS }])
+    })
+
+    const { walkthrough, created } = await service.generate(SESSION_ID, {})
+
+    expect(created).toBe(true)
+    expect(fake.generateCalls).toHaveLength(2)
+    expect(walkthrough.stops).toHaveLength(1)
   })
 
   it('rejects with 502 when reading changes fails', async () => {

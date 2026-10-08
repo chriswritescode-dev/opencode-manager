@@ -4,6 +4,7 @@ import { z } from 'zod'
 import {
   isSessionNotFoundError,
   type FileDiffInfo,
+  type ModelRef,
   type SessionInfo,
 } from '@opencode-manager/shared/opencode'
 import {
@@ -31,6 +32,7 @@ import { readSessionChanges } from './session-changes'
 import type { SSEEvent } from './sse-aggregator'
 
 const DEFAULT_TIMEOUT_MS = 120_000
+const WALKTHROUGH_CALL_ATTEMPTS = 2
 const HUNK_TRUNCATION_MARKER = '\n[hunk truncated]'
 const TEXT_TRUNCATION_MARKER = ''
 const REMAINING_STOP_TITLE = 'Remaining changes'
@@ -497,28 +499,9 @@ export class ChangeWalkthroughService {
 
     onModelStart()
 
-    let responseText: string
-    try {
-      responseText = await generateTextWithTimeout(
-        this.openCodeClient,
-        { prompt, model: session.model },
-        this.timeoutMs,
-      )
-    } catch (error) {
-      if (error instanceof GenerateTextTimeoutError) {
-        throw new ChangeWalkthroughError('Generating the change walkthrough timed out', 504, {
-          code: 'WALKTHROUGH_TIMEOUT',
-        })
-      }
-      throw new ChangeWalkthroughError(getErrorMessage(error) || 'Failed to generate the change walkthrough', 502)
-    }
-
-    const parsed = parseWalkthroughResponse(responseText, hunks)
-    if (!parsed) {
-      throw new ChangeWalkthroughError('The model did not return a usable change walkthrough', 502, {
-        code: 'WALKTHROUGH_UNPARSEABLE',
-      })
-    }
+    const parsed = await this.callModelParsed(prompt, session.model, (text) =>
+      parseWalkthroughResponse(text, hunks),
+    )
 
     const walkthrough: ChangeWalkthrough = {
       sessionId,
@@ -536,6 +519,43 @@ export class ChangeWalkthroughService {
 
     saveChangeWalkthrough(this.db, walkthrough)
     return { walkthrough, created: true }
+  }
+
+  private async callModelParsed<T>(
+    prompt: string,
+    model: ModelRef | undefined,
+    parse: (text: string) => T | null,
+  ): Promise<T> {
+    let lastError = new ChangeWalkthroughError('Failed to generate the change walkthrough', 502)
+
+    for (let attempt = 0; attempt < WALKTHROUGH_CALL_ATTEMPTS; attempt += 1) {
+      let text: string
+      try {
+        text = await generateTextWithTimeout(this.openCodeClient, { prompt, model }, this.timeoutMs)
+      } catch (error) {
+        lastError =
+          error instanceof GenerateTextTimeoutError
+            ? new ChangeWalkthroughError('Generating the change walkthrough timed out', 504, {
+                code: 'WALKTHROUGH_TIMEOUT',
+              })
+            : new ChangeWalkthroughError(
+                getErrorMessage(error) || 'Failed to generate the change walkthrough',
+                502,
+              )
+        continue
+      }
+
+      const parsed = parse(text)
+      if (parsed !== null) {
+        return parsed
+      }
+
+      lastError = new ChangeWalkthroughError('The model did not return a usable change walkthrough', 502, {
+        code: 'WALKTHROUGH_UNPARSEABLE',
+      })
+    }
+
+    throw lastError
   }
 
   private async readSession(sessionId: string): Promise<SessionInfo> {
