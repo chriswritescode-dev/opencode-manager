@@ -1,6 +1,6 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { Database } from 'bun:sqlite'
-import type { FileDiffInfo, SessionInfo, SessionMessageInfo } from '@opencode-manager/shared/opencode'
+import type { FileDiffInfo, ModelRef, SessionInfo, SessionMessageInfo } from '@opencode-manager/shared/opencode'
 import {
   WALKTHROUGH_DIFF_MAX_CHARS,
   WALKTHROUGH_HUNK_MAX_CHARS,
@@ -55,6 +55,7 @@ interface FakeSession {
 
 function createFakeClient(sessions: Record<string, FakeSession>) {
   const generateCalls: string[] = []
+  const generateModels: Array<ModelRef | undefined> = []
   let generateImpl: () => Promise<string> = async () => modelReply([])
 
   const client = {
@@ -88,8 +89,9 @@ function createFakeClient(sessions: Record<string, FakeSession>) {
         }),
       },
       generate: {
-        text: vi.fn(async (input: { prompt: string }) => {
+        text: vi.fn(async (input: { prompt: string; model?: ModelRef }) => {
           generateCalls.push(input.prompt)
+          generateModels.push(input.model)
           return { text: await generateImpl() }
         }),
       },
@@ -100,6 +102,7 @@ function createFakeClient(sessions: Record<string, FakeSession>) {
   return {
     client,
     generateCalls,
+    generateModels,
     setGenerateImpl: (impl: () => Promise<string>) => {
       generateImpl = impl
     },
@@ -438,6 +441,27 @@ describe('ChangeWalkthroughService', () => {
     await service.generate(SESSION_ID, { regenerate: true })
 
     expect(fake.generateCalls).toHaveLength(2)
+  })
+
+  it('generates with the session selected model', async () => {
+    sessions[SESSION_ID]!.info = {
+      id: SESSION_ID,
+      title: 'Title',
+      model: { providerID: 'anthropic', id: 'claude-sonnet-4' },
+    } as SessionInfo
+    fake.setGenerateImpl(async () => modelReply([{ title: 'A', explanation: 'x', hunkIds: ['f0h0', 'f0h1', 'f1h0'] }]))
+
+    await service.generate(SESSION_ID, {})
+
+    expect(fake.generateModels[0]).toEqual({ providerID: 'anthropic', id: 'claude-sonnet-4' })
+  })
+
+  it('falls back to the resolved default when the session has no model', async () => {
+    fake.setGenerateImpl(async () => modelReply([{ title: 'A', explanation: 'x', hunkIds: ['f0h0', 'f0h1', 'f1h0'] }]))
+
+    await service.generate(SESSION_ID, {})
+
+    expect(fake.generateModels[0]).toEqual({ providerID: 'openai', id: 'gpt-5-mini' })
   })
 
   it('coalesces concurrent generation into one model call', async () => {

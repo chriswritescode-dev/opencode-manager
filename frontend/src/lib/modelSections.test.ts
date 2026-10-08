@@ -97,6 +97,26 @@ describe('buildModelSections', () => {
     expect(valuesOf(sections, 'provider:openai')).toContain('openai/gpt-5')
   })
 
+  it('keeps a favorite in the favorites section when it is also the default model', () => {
+    const sections = buildModelSections(
+      providers,
+      {
+        favorite: [
+          { providerID: 'openai', modelID: 'gpt-5' },
+          { providerID: 'anthropic', modelID: 'claude-sonnet' },
+        ],
+        recent: [{ providerID: 'openai', modelID: 'gpt-5' }],
+        variant: {},
+      },
+      'openai/gpt-5',
+    )
+
+    expect(valuesOf(sections, 'favorites')).toEqual(['openai/gpt-5', 'anthropic/claude-sonnet'])
+    expect(valuesOf(sections, 'default')).toEqual(['openai/gpt-5'])
+    expect(sections.some((section) => section.key === 'recent')).toBe(false)
+    expect(valuesOf(sections, 'provider:openai')).not.toContain('openai/gpt-5')
+  })
+
   it('lists each favorite once and excludes it from the recent section', () => {
     const sections = buildModelSections(providers, {
       favorite: [{ providerID: 'anthropic', modelID: 'claude-sonnet' }],
@@ -196,7 +216,22 @@ describe('filterModelSections', () => {
   it('returns the sections unchanged for an empty query', () => {
     const sections = buildModelSections(providers, undefined)
 
-    expect(filterModelSections(sections, '   ')).toBe(sections)
+    expect(filterModelSections(sections, '   ')).toEqual(sections)
+  })
+
+  it('lists a favorite that is also the default only once', () => {
+    const sections = buildModelSections(
+      providers,
+      { favorite: [{ providerID: 'openai', modelID: 'gpt-5' }], recent: [], variant: {} },
+      'openai/gpt-5',
+    )
+
+    const unfiltered = filterModelSections(sections, '')
+    expect(unfiltered.some((section) => section.key === 'favorites')).toBe(false)
+    expect(valuesOf(unfiltered, 'default')).toEqual(['openai/gpt-5'])
+
+    const searched = filterModelSections(sections, 'gpt-5')
+    expect(searched[0].options.map((option) => option.value)).toEqual(['openai/gpt-5'])
   })
 })
 
@@ -227,6 +262,28 @@ describe('toModelComboboxOptions', () => {
       description: 'openai/gpt-4o-mini',
       group: 'OpenAI',
     })
+  })
+
+  it('hides the favorite copy of the default model behind the Default entry', () => {
+    const sections = buildModelSections(
+      providers,
+      {
+        favorite: [
+          { providerID: 'openai', modelID: 'gpt-5' },
+          { providerID: 'anthropic', modelID: 'claude-sonnet' },
+        ],
+        recent: [],
+        variant: {},
+      },
+      'openai/gpt-5',
+    )
+
+    const options = toModelComboboxOptions(sections, 'openai/gpt-5')
+
+    expect(options.filter((option) => option.label.includes('GPT-5'))).toEqual([
+      { value: '', label: 'Default: GPT-5', description: undefined, group: 'Default' },
+    ])
+    expect(options[1]?.value).toBe('anthropic/claude-sonnet')
   })
 
   it('leaves the default ref untouched when no default is resolved', () => {

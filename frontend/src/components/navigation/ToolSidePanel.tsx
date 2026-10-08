@@ -3,7 +3,12 @@ import { useLocation } from 'react-router-dom'
 import { FileBrowser } from '@/components/file-browser/FileBrowser'
 import { SourceControlContent } from '@/components/source-control'
 import { TerminalWorkspace } from '@/components/terminal/TerminalPanel'
-import { ChangesWalkthroughView } from '@/components/session/ChangesWalkthroughSheet'
+import {
+  ChangesWalkthroughNav,
+  ChangesWalkthroughProvider,
+  ChangesWalkthroughRegenerate,
+  ChangesWalkthroughView,
+} from '@/components/session/ChangesWalkthroughSheet'
 import { PreviewWorkspace } from '@/components/preview/PreviewPanel'
 import { RepoMcpContent } from '@/components/repo/RepoMcpDialog'
 import { RepoActionsContent } from '@/components/repo/RepoActionsDialog'
@@ -110,7 +115,7 @@ export function ToolSidePanel({
     }
     if (tool === 'preview') return <PreviewWorkspace isOpen directory={directory} compact />
     if (tool === 'mcp') return repoDirectory ? <RepoMcpContent open directory={repoDirectory} /> : null
-    if (tool === 'walkthrough') return sessionId ? <ChangesWalkthroughView sessionId={sessionId} active /> : null
+    if (tool === 'walkthrough') return sessionId ? <ChangesWalkthroughView /> : null
     if (repoId === undefined) return null
     switch (tool) {
       case 'sourceControl':
@@ -137,26 +142,43 @@ export function ToolSidePanel({
     }
   }
 
+  const panelContent =
+    activeTool && activeLabel ? (
+      <aside
+        aria-label={activeLabel}
+        className="flex w-[min(600px,45vw)] shrink-0 flex-col border-l border-border bg-background"
+      >
+        <div className="flex shrink-0 items-center gap-2 border-b border-border px-3 py-2">
+          <h2 className="min-w-0 flex-1 truncate text-sm font-semibold text-foreground">{activeLabel}</h2>
+          {activeTool === 'walkthrough' ? (
+            <>
+              <ChangesWalkthroughRegenerate />
+              <ChangesWalkthroughNav />
+            </>
+          ) : null}
+          <button
+            type="button"
+            onClick={closePanel}
+            aria-label="Close panel"
+            className="rounded-sm p-1 text-muted-foreground transition-colors hover:bg-muted hover:text-foreground"
+          >
+            <X className="h-4 w-4" />
+          </button>
+        </div>
+        <div className="flex min-h-0 flex-1 flex-col">{renderTool(activeTool)}</div>
+      </aside>
+    ) : null
+
   return (
     <>
-      {activeTool && activeLabel ? (
-        <aside
-          aria-label={activeLabel}
-          className="flex w-[min(600px,45vw)] shrink-0 flex-col border-l border-border bg-background"
-        >
-          <div className="flex shrink-0 items-center justify-between gap-2 border-b border-border px-3 py-2">
-            <h2 className="text-sm font-semibold text-foreground">{activeLabel}</h2>
-            <button
-              type="button"
-              onClick={closePanel}
-              aria-label="Close panel"
-              className="rounded-sm p-1 text-muted-foreground transition-colors hover:bg-muted hover:text-foreground"
-            >
-              <X className="h-4 w-4" />
-            </button>
-          </div>
-          <div className="flex min-h-0 flex-1 flex-col">{renderTool(activeTool)}</div>
-        </aside>
+      {panelContent ? (
+        activeTool === 'walkthrough' && sessionId ? (
+          <ChangesWalkthroughProvider sessionId={sessionId} active>
+            {panelContent}
+          </ChangesWalkthroughProvider>
+        ) : (
+          panelContent
+        )
       ) : null}
 
       <TooltipProvider>

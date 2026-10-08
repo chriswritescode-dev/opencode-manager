@@ -374,7 +374,11 @@ export class ChangeWalkthroughService {
 
     let responseText: string
     try {
-      responseText = await generateTextWithTimeout(this.openCodeClient, { prompt }, this.timeoutMs)
+      responseText = await generateTextWithTimeout(
+        this.openCodeClient,
+        { prompt, model: session.model },
+        this.timeoutMs,
+      )
     } catch (error) {
       if (error instanceof GenerateTextTimeoutError) {
         throw new ChangeWalkthroughError('Generating the change walkthrough timed out', 504, {

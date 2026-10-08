@@ -137,7 +137,21 @@ describe('ChangesWalkthroughSheet', () => {
       await screen.findByText('Changes have been updated since this walkthrough was generated'),
     ).toBeInTheDocument()
 
-    await user.click(screen.getByRole('button', { name: /regenerate/i }))
+    await user.click(screen.getByRole('button', { name: 'Regenerate' }))
+
+    await waitFor(() => {
+      expect(mocks.generateChangeWalkthrough).toHaveBeenCalledWith('ses_1', { regenerate: true })
+    })
+  })
+
+  it('regenerates from the header without a stale walkthrough', async () => {
+    const user = userEvent.setup()
+    mocks.getChangeWalkthrough.mockResolvedValue(state())
+    mocks.generateChangeWalkthrough.mockResolvedValue(state())
+    renderSheet()
+
+    await screen.findByText('Stop 1 of 2')
+    await user.click(screen.getByRole('button', { name: 'Regenerate walkthrough' }))
 
     await waitFor(() => {
       expect(mocks.generateChangeWalkthrough).toHaveBeenCalledWith('ses_1', { regenerate: true })

@@ -1,6 +1,7 @@
 import { describe, expect, it, vi } from 'vitest'
 import { render, screen, waitFor } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
+import type { ReactNode } from 'react'
 import { MemoryRouter, useLocation } from 'react-router-dom'
 import { ToolSidePanel } from './ToolSidePanel'
 import { useToolPanel } from '@/hooks/useToolPanel'
@@ -22,7 +23,10 @@ vi.mock('@/components/repo/RepoMcpDialog', () => ({ RepoMcpContent: () => <div>m
 vi.mock('@/components/repo/RepoActionsDialog', () => ({ RepoActionsContent: () => <div>actions-tool</div> }))
 vi.mock('@/components/repo/RepoSkillsDialog', () => ({ RepoSkillsContent: () => <div>skills-tool</div> }))
 vi.mock('@/components/session/ChangesWalkthroughSheet', () => ({
-  ChangesWalkthroughView: ({ sessionId }: { sessionId: string }) => <div>walkthrough-tool {sessionId}</div>,
+  ChangesWalkthroughProvider: ({ children }: { children: ReactNode }) => <>{children}</>,
+  ChangesWalkthroughNav: () => null,
+  ChangesWalkthroughRegenerate: () => null,
+  ChangesWalkthroughView: () => <div>walkthrough-tool</div>,
 }))
 
 function LocationProbe() {
@@ -108,7 +112,7 @@ describe('ToolSidePanel', () => {
   it('moves a panel tool opened as a dialog into the docked panel', async () => {
     renderAt('?dialog=walkthrough')
 
-    expect(await screen.findByText('walkthrough-tool ses_1')).toBeInTheDocument()
+    expect(await screen.findByText('walkthrough-tool')).toBeInTheDocument()
     expect(search().get('panel')).toBe('walkthrough')
     expect(search().has('dialog')).toBe(false)
   })
