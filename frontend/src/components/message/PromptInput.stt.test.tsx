@@ -2,7 +2,6 @@ import { describe, it, expect, vi, beforeEach } from 'vitest'
 import { render, screen, fireEvent, act, waitFor } from '@testing-library/react'
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
 import { PromptInput } from './PromptInput'
-import { useUIState } from '@/stores/uiStateStore'
 import { createCommandActionsMock } from '@/test/test-utils'
 
 const createTestQueryClient = () => new QueryClient({
@@ -211,8 +210,6 @@ describe('PromptInput STT Gesture Tests', () => {
     mocks.useUserBash.mockImplementation((selector) => selector({ addUserBashCommand: vi.fn() }))
     mocks.useSessionAgentStore.mockImplementation((selector) => selector({ setAgent: mockSetAgent }))
     mocks.useSendErrorStore.mockImplementation((selector) => selector({ errors: {} }))
-    useUIState.getState().clearPendingPromptCommand()
-    useUIState.getState().clearPendingPromptFile()
   })
 
   const renderComponent = (sttOverrides: Partial<MockSTTReturn> = {}) => {
@@ -419,33 +416,6 @@ describe('PromptInput STT Gesture Tests', () => {
       fireEvent.change(input, { target: { value: 'draft while active' } })
 
       expect(screen.getAllByTitle('Stop').length).toBeGreaterThan(0)
-    })
-
-    it('inserts a command selected from the mobile drawer', async () => {
-      renderComponent()
-
-      act(() => {
-        useUIState.getState().selectPromptCommand({
-          name: 'help',
-          description: 'Show help',
-        })
-      })
-
-      await waitFor(() => {
-        expect(screen.getByPlaceholderText('Send a message...')).toHaveValue('/help ')
-      })
-    })
-
-    it('inserts a file selected from the mobile drawer', async () => {
-      renderComponent()
-
-      act(() => {
-        useUIState.getState().selectPromptFile('src/App.tsx')
-      })
-
-      await waitFor(() => {
-        expect(screen.getByPlaceholderText('Send a message...')).toHaveValue('@App.tsx ')
-      })
     })
 
     it('quick tap starts recording through click only', async () => {

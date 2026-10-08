@@ -2,7 +2,6 @@ import { describe, it, expect, vi, beforeEach } from 'vitest'
 import { render, screen, fireEvent, waitFor } from '@testing-library/react'
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
 import { PromptInput } from './PromptInput'
-import { useUIState } from '@/stores/uiStateStore'
 import { createCommandActionsMock } from '@/test/test-utils'
 
 const mocks = vi.hoisted(() => ({
@@ -194,8 +193,6 @@ describe('PromptInput agent mention submission', () => {
     mocks.useSessionAgentStore.mockImplementation((selector: (state: unknown) => unknown) => selector({ setAgent: vi.fn() }))
     suggestionProps.isOpen = false
     suggestionProps.selectedIndex = 0
-    useUIState.getState().clearPendingPromptCommand()
-    useUIState.getState().clearPendingPromptFile()
   })
 
   it('sends an @agent mention as an attachment without switching the session agent', async () => {

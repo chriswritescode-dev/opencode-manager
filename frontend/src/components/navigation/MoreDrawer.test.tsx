@@ -1,28 +1,16 @@
-import { render, screen, fireEvent } from '@testing-library/react'
+import { render, screen, fireEvent, within } from '@testing-library/react'
 import { beforeEach, describe, it, expect, vi } from 'vitest'
 import { MemoryRouter, Route, Routes, useNavigate } from 'react-router-dom'
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
 import { MoreDrawer } from './MoreDrawer'
 import { useAuth } from '@/hooks/useAuth'
 import { useServerHealth } from '@/hooks/useServerHealth'
-import { useCommands } from '@/hooks/useCommands'
-import { useUIState } from '@/stores/uiStateStore'
 import { getRepo } from '@/api/repos'
 
 vi.mock('@/hooks/useAuth')
 vi.mock('@/hooks/useServerHealth')
-vi.mock('@/hooks/useCommands')
 vi.mock('@/api/repos', () => ({
   getRepo: vi.fn(),
-}))
-vi.mock('@/components/file-browser/FileBrowserSheet', () => ({
-  FileBrowserSheet: ({ isOpen, basePath, onFileSelect }: { isOpen: boolean; basePath: string; onFileSelect: (file: { path: string }) => void }) => (
-    isOpen ? (
-      <div data-testid="mention-file-browser" data-base-path={basePath}>
-        <button type="button" onClick={() => onFileSelect({ path: 'repo/src/App.tsx' })}>App.tsx</button>
-      </div>
-    ) : null
-  ),
 }))
 vi.mock('react-router-dom', async () => {
   const actual = await vi.importActual<typeof import('react-router-dom')>('react-router-dom')
@@ -102,17 +90,6 @@ describe('MoreDrawer', () => {
   beforeEach(() => {
     vi.clearAllMocks()
     vi.mocked(useNavigate).mockReturnValue(vi.fn())
-    vi.mocked(useCommands).mockReturnValue({
-      commands: [{ name: 'help', description: 'Show help' }],
-      recentNames: [],
-      loading: false,
-      error: null,
-      searchCommands: vi.fn(),
-      findCommand: vi.fn(),
-    })
-    useUIState.getState().clearPendingPromptCommand()
-    useUIState.getState().clearPendingPromptFile()
-    useUIState.getState().setActivePromptFileBasePath(null)
     vi.mocked(getRepo).mockResolvedValue({
       id: 1,
       localPath: 'wrong-repo',
@@ -192,33 +169,27 @@ describe('MoreDrawer', () => {
     expect(screen.queryByText('OpenCode')).not.toBeInTheDocument()
   })
 
-  it('shows session commands and selects a command', () => {
+  it('leaves commands and file mentions to the prompt input', () => {
     mockAuth()
     mockServerHealth()
-    const handleClose = vi.fn()
-    renderMoreDrawer({ initialEntry: '/repos/1/sessions/session-1', routePath: '/repos/:id/sessions/:sessionId', onClose: handleClose })
+    renderMoreDrawer({ initialEntry: '/repos/1/sessions/session-1', routePath: '/repos/:id/sessions/:sessionId' })
 
-    fireEvent.click(screen.getByText('Commands'))
-    expect(screen.queryByText('/help')).not.toBeInTheDocument()
-    fireEvent.click(screen.getByText('help'))
-
-    expect(useUIState.getState().pendingPromptCommand?.command.name).toBe('help')
-    expect(handleClose).toHaveBeenCalled()
+    expect(screen.queryByText('Commands')).not.toBeInTheDocument()
+    expect(screen.queryByText('Mention File')).not.toBeInTheDocument()
   })
 
-  it('opens file browser and selects a file mention', () => {
+  it('groups session items into workspace and project sections', () => {
     mockAuth()
     mockServerHealth()
-    const handleClose = vi.fn()
-    useUIState.getState().setActivePromptFileBasePath('repo')
-    renderMoreDrawer({ initialEntry: '/repos/1/sessions/session-1', routePath: '/repos/:id/sessions/:sessionId', onClose: handleClose })
+    renderMoreDrawer({ initialEntry: '/repos/1/sessions/session-1', routePath: '/repos/:id/sessions/:sessionId' })
 
-    fireEvent.click(screen.getByText('Mention File'))
-    expect(screen.getByTestId('mention-file-browser')).toHaveAttribute('data-base-path', 'repo')
-    fireEvent.click(screen.getByText('App.tsx'))
+    const sectionLabels = (name: string) =>
+      within(screen.getByRole('region', { name })).getAllByRole('button').map((button) => button.textContent)
 
-    expect(useUIState.getState().pendingPromptFile?.path).toBe('src/App.tsx')
-    expect(handleClose).toHaveBeenCalled()
+    expect(sectionLabels('Workspace')).toEqual(['Files', 'Source Control', 'Terminal', 'Walkthrough', 'Preview'])
+    expect(sectionLabels('Project')).toEqual(['MCP', 'Skills', 'Reset Permissions', 'Schedules', 'Actions'])
+    expect(screen.getAllByText('Settings')).toHaveLength(1)
+    expect(screen.getAllByText('Logout')).toHaveLength(1)
   })
 
   it('shows Assistant instead of the source repo on assistant routes', () => {

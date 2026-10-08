@@ -272,7 +272,6 @@ export function SessionDetail() {
   const { modelRef } = useModelSelection(sessionDirectory, modelSelectionSession);
   const setSessionStatus = useSessionStatus((state) => state.setStatus);
   const isEditingMessage = useUIState((state) => state.isEditingMessage);
-  const setActivePromptFileBasePath = useUIState((state) => state.setActivePromptFileBasePath);
   const { isEnabled: ttsEnabled } = useTTS();
   const { syncForSession: syncPermissionsForSession } = usePermissions();
   const { getForSession: getFormForSession, reply: replyToForm, cancel: cancelForm, syncForSession: syncFormsForSession } = useForms();
@@ -291,14 +290,6 @@ export function SessionDetail() {
   const hasIncompleteMessages = lastAssistantMessage ? lastAssistantMessage.time.completed === undefined : false;
   const isStreamingResponse = hasIncompleteMessages && isSessionActive;
   const workspaceBasePath = repo?.localPath;
-
-  useEffect(() => {
-    setActivePromptFileBasePath(sessionDirectory ? workspaceBasePath ?? null : null)
-
-    return () => {
-      setActivePromptFileBasePath(null)
-    }
-  }, [sessionDirectory, setActivePromptFileBasePath, workspaceBasePath])
 
   useAutoPlayLastResponse({
     sessionId: sessionId ?? '',

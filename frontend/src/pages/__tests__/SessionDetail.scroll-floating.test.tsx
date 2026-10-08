@@ -102,7 +102,7 @@ vi.mock('@/hooks/useAutoPlayLastResponse', () => ({
 vi.mock('@/stores/uiStateStore', () => ({
   useUIState: vi.fn((selector?: (state: Record<string, unknown>) => unknown) =>
     typeof selector === 'function'
-      ? selector({ isEditingMessage: mocks.uiState.isEditingMessage, setActivePromptFileBasePath: vi.fn() })
+      ? selector({ isEditingMessage: mocks.uiState.isEditingMessage })
       : false
   ),
 }))

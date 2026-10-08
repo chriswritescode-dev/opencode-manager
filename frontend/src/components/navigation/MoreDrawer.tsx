@@ -1,21 +1,17 @@
 import { useNavigate, useLocation, useParams } from 'react-router-dom'
-import { useState, useRef, useEffect } from 'react'
-import { ChevronDown, ChevronRight, Command as CommandIcon, FileText, FolderGit2, X, GitBranch } from 'lucide-react'
+import { useRef, useEffect, type ReactNode } from 'react'
+import { ChevronRight, FolderGit2, X, GitBranch, type LucideIcon } from 'lucide-react'
 import { useAuth } from '@/hooks/useAuth'
 import { useServerHealth } from '@/hooks/useServerHealth'
-import { useCommands } from '@/hooks/useCommands'
 import { useUrlParams } from '@/hooks/useUrlParams'
-import { useUIState } from '@/stores/uiStateStore'
 import { useQuery } from '@tanstack/react-query'
 import { getRepo } from '@/api/repos'
 import { useRefreshOnOpen } from '@/hooks/useRefreshOnOpen'
 import { SideDrawer, SideDrawerContent } from '@/components/ui/side-drawer'
-import { FileBrowserSheet } from '@/components/file-browser/FileBrowserSheet'
-import { buildMoreItems, buildNavModel, isSessionDetailPath } from './moreDrawerItems'
+import { buildMoreItems, buildNavModel, isSessionDetailPath, type MoreDrawerItem } from './moreDrawerItems'
 import { useSwipeBack } from '@/hooks/useMobile'
-import { getRepoDisplayName } from '@/lib/utils'
+import { cn, getRepoDisplayName } from '@/lib/utils'
 import { getPathWithReturnTo, isAssistantPath } from '@/lib/navigation'
-import type { CommandInfo } from '@opencode-manager/shared/opencode'
 import { useMobileTabBar } from '@/hooks/useMobileTabBar'
 
 interface MoreDrawerProps {
@@ -23,13 +19,54 @@ interface MoreDrawerProps {
   onClose: () => void
 }
 
+const ACCOUNT_ITEM_KEYS: ReadonlySet<string> = new Set(['settings', 'logout'])
+
+const ITEM_GROUPS: ReadonlyArray<{ label: string; keys: ReadonlySet<string> }> = [
+  { label: 'Workspace', keys: new Set(['files', 'source-control', 'terminal', 'preview', 'walkthrough']) },
+  { label: 'Project', keys: new Set(['mcp', 'skills', 'actions', 'schedules', 'all-schedules', 'reset-permissions']) },
+]
+
+function MenuSection({ label, children }: { label?: string; children: ReactNode }) {
+  return (
+    <section aria-label={label} className="flex flex-col gap-0.5">
+      {label && (
+        <h3 className="px-3 pb-1 text-xs font-medium uppercase tracking-wider text-muted-foreground">{label}</h3>
+      )}
+      {children}
+    </section>
+  )
+}
+
+interface MenuRowProps {
+  icon: LucideIcon
+  label: string
+  onClick: () => void
+  danger?: boolean
+  trailing?: boolean
+}
+
+function MenuRow({ icon: Icon, label, onClick, danger, trailing }: MenuRowProps) {
+  return (
+    <button
+      type="button"
+      onClick={onClick}
+      className={cn(
+        'flex w-full items-center gap-3 rounded-lg px-3 py-2.5 text-left transition-colors',
+        danger ? 'hover:bg-destructive/10' : 'hover:bg-accent',
+      )}
+    >
+      <Icon className={cn('h-5 w-5', danger ? 'text-destructive' : 'text-muted-foreground')} />
+      <span className={cn('flex-1 font-medium', danger ? 'text-destructive' : 'text-foreground')}>{label}</span>
+      {trailing && <ChevronRight className="h-4 w-4 text-muted-foreground" />}
+    </button>
+  )
+}
+
 export function MoreDrawer({ isOpen, onClose }: MoreDrawerProps) {
   const navigate = useNavigate()
   const location = useLocation()
   const { id } = useParams<{ id: string }>()
   const repoId = id ? Number(id) : null
-  const [commandsOpen, setCommandsOpen] = useState(false)
-  const [mentionFileBrowserOpen, setMentionFileBrowserOpen] = useState(false)
   const swipeRef = useRef<HTMLDivElement>(null)
   const { bind } = useSwipeBack(onClose, { enabled: isOpen, suspendsRouteSwipe: true })
   const { searchParams, updateParams } = useUrlParams()
@@ -38,10 +75,6 @@ export function MoreDrawer({ isOpen, onClose }: MoreDrawerProps) {
   const isSessionDetail = isSessionDetailPath(location.pathname)
   const isAssistantRoute = isAssistantPath(location.pathname)
   const isAssistantSession = isSessionDetail && searchParams.get('assistant') === '1'
-  const { commands } = useCommands({ enabled: isSessionDetail })
-  const activePromptFileBasePath = useUIState((state) => state.activePromptFileBasePath)
-  const selectPromptCommand = useUIState((state) => state.selectPromptCommand)
-  const selectPromptFile = useUIState((state) => state.selectPromptFile)
   const { open: openMobileSheet } = useMobileTabBar()
 
   useEffect(() => {
@@ -80,7 +113,15 @@ export function MoreDrawer({ isOpen, onClose }: MoreDrawerProps) {
     }
   }
 
-  const handleItemClick = (item: ReturnType<typeof buildMoreItems>[0]) => {
+  const handleItemClick = (item: MoreDrawerItem) => {
+    if (item.key === 'settings') {
+      handleSettingsClick()
+      return
+    }
+    if (item.key === 'logout') {
+      void handleLogoutClick()
+      return
+    }
     if (item.to) {
       const to = item.key === 'schedules'
         ? getPathWithReturnTo(item.to, `${location.pathname}${location.search}`)
@@ -94,30 +135,10 @@ export function MoreDrawer({ isOpen, onClose }: MoreDrawerProps) {
     }
   }
 
-  const handleCommandClick = (command: CommandInfo) => {
-    selectPromptCommand(command)
-    onClose()
-  }
-
-  const getPromptFilePath = (path: string) => {
-    if (!activePromptFileBasePath) return path
-
-    const normalizedPath = path.replace(/^\.\//, '')
-    const normalizedBasePath = activePromptFileBasePath.replace(/^\.\//, '').replace(/\/+$/, '')
-    const basePrefix = `${normalizedBasePath}/`
-
-    return normalizedPath.startsWith(basePrefix)
-      ? normalizedPath.slice(basePrefix.length)
-      : normalizedPath
-  }
-
-  const handleFileClick = (path: string) => {
-    selectPromptFile(getPromptFilePath(path))
-    setMentionFileBrowserOpen(false)
-    onClose()
-  }
-
   const items = buildMoreItems(location.pathname)
+  const itemsInGroup = (keys: ReadonlySet<string>) => items.filter((item) => keys.has(item.key))
+  const groupedKeys = new Set([...ACCOUNT_ITEM_KEYS, ...ITEM_GROUPS.flatMap(({ keys }) => [...keys])])
+  const navigationItems = items.filter((item) => !groupedKeys.has(item.key))
   const assistantCta = isSessionDetail && !isAssistantSession
     ? buildNavModel(location.pathname).primary.find((cta) => cta.key === 'assistant')
     : undefined
@@ -161,97 +182,44 @@ export function MoreDrawer({ isOpen, onClose }: MoreDrawerProps) {
             </div>
           )}
         </div>
-        <SideDrawerContent className="flex flex-col gap-1">
-          {isSessionDetail && (
-            <div className="flex flex-col gap-1">
-              <button
-                type="button"
-                onClick={() => openMobileSheet('repos')}
-                className="flex items-center gap-3 p-3 rounded-lg hover:bg-accent transition-colors text-left w-full"
-              >
-                <FolderGit2 className="w-5 h-5 text-muted-foreground" />
-                <span className="font-medium text-foreground flex-1">Repos</span>
-                <ChevronRight className="w-4 h-4 text-muted-foreground" />
-              </button>
-              {assistantCta?.to && (
-                <button
-                  type="button"
-                  onClick={() => navigate(assistantCta.to!)}
-                  className="flex items-center gap-3 p-3 rounded-lg hover:bg-accent transition-colors text-left w-full"
-                >
-                  <assistantCta.icon className="w-5 h-5 text-muted-foreground" />
-                  <span className="font-medium text-foreground flex-1">{assistantCta.label}</span>
-                </button>
-              )}
-              <button
-                type="button"
-                onClick={() => setCommandsOpen((open) => !open)}
-                className="flex items-center gap-3 p-3 rounded-lg hover:bg-accent transition-colors text-left w-full"
-                aria-expanded={commandsOpen}
-              >
-                <CommandIcon className="w-5 h-5 text-muted-foreground" />
-                <span className="font-medium text-foreground flex-1">Commands</span>
-                {commandsOpen ? (
-                  <ChevronDown className="w-4 h-4 text-muted-foreground" />
-                ) : (
-                  <ChevronRight className="w-4 h-4 text-muted-foreground" />
-                )}
-              </button>
-              {commandsOpen && (
-                <div className="-mx-4 max-h-64 overflow-y-auto border-y border-border bg-muted/30 p-1 sm:mx-0 sm:rounded-lg sm:border">
-                  {commands.map((command) => (
-                    <button
-                      key={command.name}
-                      type="button"
-                      onClick={() => handleCommandClick(command)}
-                      className="flex w-full min-w-0 items-start gap-3 rounded-md px-3 py-2 text-left transition-colors hover:bg-accent"
-                    >
-                      <span className="font-mono text-sm font-medium text-primary">{command.name}</span>
-                      {command.description && (
-                        <span className="min-w-0 flex-1 truncate text-xs text-muted-foreground">{command.description}</span>
-                      )}
-                    </button>
-                  ))}
-                </div>
-              )}
-              <button
-                type="button"
-                onClick={() => setMentionFileBrowserOpen(true)}
-                className="flex items-center gap-3 p-3 rounded-lg hover:bg-accent transition-colors text-left w-full"
-              >
-                <FileText className="w-5 h-5 text-muted-foreground" />
-                <span className="font-medium text-foreground flex-1">Mention File</span>
-                <ChevronRight className="w-4 h-4 text-muted-foreground" />
-              </button>
-            </div>
-          )}
-          {items.map((item) => (
+        <SideDrawerContent className="flex flex-col gap-4 pb-3">
+          <MenuSection>
+            {isSessionDetail && (
+              <MenuRow icon={FolderGit2} label="Repos" onClick={() => openMobileSheet('repos')} trailing />
+            )}
+            {assistantCta?.to && (
+              <MenuRow icon={assistantCta.icon} label={assistantCta.label} onClick={() => navigate(assistantCta.to!)} />
+            )}
+            {navigationItems.map((item) => (
+              <MenuRow key={item.key} icon={item.icon} label={item.label} danger={item.danger} onClick={() => handleItemClick(item)} />
+            ))}
+          </MenuSection>
+          {ITEM_GROUPS.map(({ label, keys }) => {
+            const groupItems = itemsInGroup(keys)
+            if (groupItems.length === 0) return null
+            return (
+              <MenuSection key={label} label={label}>
+                {groupItems.map((item) => (
+                  <MenuRow key={item.key} icon={item.icon} label={item.label} danger={item.danger} onClick={() => handleItemClick(item)} />
+                ))}
+              </MenuSection>
+            )
+          })}
+        </SideDrawerContent>
+        <div className="flex flex-shrink-0 gap-2 border-t border-border bg-background px-4 py-3 pb-[calc(env(safe-area-inset-bottom)+0.75rem)]">
+          {itemsInGroup(ACCOUNT_ITEM_KEYS).map((item) => (
             <button
               key={item.key}
               type="button"
-              onClick={() => {
-                if (item.key === 'settings') {
-                  handleSettingsClick()
-                } else if (item.key === 'logout') {
-                  handleLogoutClick()
-                } else {
-                  handleItemClick(item)
-                }
-              }}
-              className="flex items-center gap-3 p-3 rounded-lg hover:bg-accent transition-colors text-left w-full"
+              onClick={() => handleItemClick(item)}
+              className="flex flex-1 items-center justify-center gap-2 rounded-lg border border-border p-2.5 text-sm font-medium text-foreground transition-colors hover:bg-accent"
             >
-              <item.icon className="w-5 h-5 text-muted-foreground" />
-              <span className="font-medium text-foreground">{item.label}</span>
+              <item.icon className="h-4 w-4 text-muted-foreground" />
+              {item.label}
             </button>
           ))}
-        </SideDrawerContent>
+        </div>
       </div>
-      <FileBrowserSheet
-        isOpen={mentionFileBrowserOpen}
-        onClose={() => setMentionFileBrowserOpen(false)}
-        basePath={activePromptFileBasePath ?? ''}
-        onFileSelect={(file) => handleFileClick(file.path)}
-      />
     </SideDrawer>
   )
 }
