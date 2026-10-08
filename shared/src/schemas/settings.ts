@@ -89,11 +89,13 @@ export const DEFAULT_KEYBOARD_SHORTCUTS = {
   toggleSourceControl: 'D',
   timeline: 'G',
   exportSession: 'X',
+  halfPageUp: 'Ctrl+U',
+  halfPageDown: 'Ctrl+D',
 } satisfies Record<string, string>;
 
 export type KeyboardShortcutAction = keyof typeof DEFAULT_KEYBOARD_SHORTCUTS;
 
-export const DEFAULT_DIRECT_SHORTCUTS = ['submit', 'abort', 'clearPrompt', 'variantCycle', 'toggleTerminal'];
+export const DEFAULT_DIRECT_SHORTCUTS = ['submit', 'abort', 'clearPrompt', 'variantCycle', 'toggleTerminal', 'halfPageUp', 'halfPageDown'];
 
 export const GitCredentialSchema = z.object({
   id: z.string().optional(),

@@ -48,6 +48,8 @@ const ACTION_BY_TUI_NAME = new Map<string, KeyboardShortcutAction>([
   ['diff.open', 'toggleSourceControl'],
   ['session.timeline', 'timeline'],
   ['session.export', 'exportSession'],
+  ['session.half.page.up', 'halfPageUp'],
+  ['session.half.page.down', 'halfPageDown'],
 ])
 
 const ACTION_BY_LEGACY_NAME = new Map<string, KeyboardShortcutAction>([
@@ -67,6 +69,8 @@ const ACTION_BY_LEGACY_NAME = new Map<string, KeyboardShortcutAction>([
   ['diff_open', 'toggleSourceControl'],
   ['session_timeline', 'timeline'],
   ['session_export', 'exportSession'],
+  ['messages_half_page_up', 'halfPageUp'],
+  ['messages_half_page_down', 'halfPageDown'],
 ])
 
 const MODIFIER_LABELS = new Map<string, string | null>([

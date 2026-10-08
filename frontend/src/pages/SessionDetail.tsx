@@ -587,6 +587,12 @@ export function SessionDetail() {
     promptInputRef.current?.clearPrompt()
   }, []);
 
+  const scrollMessagesByHalfPage = useCallback((direction: 1 | -1) => {
+    const container = messageContainerRef.current;
+    if (!container) return;
+    container.scrollBy({ top: direction * container.clientHeight / 2 });
+  }, []);
+
   useShortcutActions({
     selectModel: handleOpenModelDialog,
     sessions: handleShowSessionsDialog,
@@ -603,6 +609,8 @@ export function SessionDetail() {
     submit: () => document.querySelector<HTMLButtonElement>("[data-submit-prompt]")?.click(),
     abort: isSessionActive ? handleInterruptSession : undefined,
     clearPrompt: handleClearPrompt,
+    halfPageUp: () => scrollMessagesByHalfPage(-1),
+    halfPageDown: () => scrollMessagesByHalfPage(1),
   });
 
   const handleUndoMessage = useCallback((restoredPrompt: string) => {

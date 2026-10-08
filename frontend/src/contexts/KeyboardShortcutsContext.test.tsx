@@ -186,6 +186,18 @@ describe('KeyboardShortcutsProvider', () => {
     }
   })
 
+  it('runs a direct half-page-down shortcut with Ctrl+D from the body and the prompt', () => {
+    const halfPageDown = vi.fn()
+    renderProvider(<ActionLayer actions={{ halfPageDown }} />)
+    const prompt = mountElement('textarea', { 'data-prompt-input': '' })
+
+    expect(pressKey(document.body, { key: 'd', ctrlKey: true }).defaultPrevented).toBe(true)
+    expect(halfPageDown).toHaveBeenCalledTimes(1)
+
+    expect(pressKey(prompt, { key: 'd', ctrlKey: true }).defaultPrevented).toBe(true)
+    expect(halfPageDown).toHaveBeenCalledTimes(2)
+  })
+
   it('runs leader and direct shortcuts from a terminal before it consumes the keys, passing other keys through', () => {
     const newSession = vi.fn()
     const toggleTerminal = vi.fn()
