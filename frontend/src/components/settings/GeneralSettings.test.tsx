@@ -70,6 +70,9 @@ describe('GeneralSettings', () => {
     expect(screen.getByRole('switch', { name: 'Show reasoning' })).not.toBeChecked()
     expect(screen.getByRole('switch', { name: 'Expand tool calls' })).not.toBeChecked()
     expect(screen.getByRole('switch', { name: 'Expand diffs' })).toBeChecked()
+
+    expect(screen.getByRole('heading', { name: 'Change walkthrough' })).toBeInTheDocument()
+    expect(screen.getByText('Walkthrough model')).toBeInTheDocument()
   })
 
   it('writes the theme and toggle preferences', async () => {

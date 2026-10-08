@@ -6,6 +6,7 @@ import { Label } from '@/components/ui/label'
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
 import { Switch } from '@/components/ui/switch'
 import { SessionAutomationSettings } from './SessionAutomationSettings'
+import { WalkthroughSettings } from './WalkthroughSettings'
 
 export function GeneralSettings() {
   const { preferences, isLoading, updateSettings, isUpdating } = useSettings()
@@ -196,6 +197,8 @@ export function GeneralSettings() {
       )}
 
       <SessionAutomationSettings />
+
+      <WalkthroughSettings />
     </div>
   )
 }
