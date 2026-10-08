@@ -48,7 +48,7 @@ function hunkPatch(line: number): string {
 }
 
 function bigHunk(index: number, size = WALKTHROUGH_HUNK_MAX_CHARS): string {
-  return `@@ -${index},1 +${index},1 @@\n+${'x'.repeat(size)}`
+  return `@@ -${index},1 +${index},1 @@\n+${'x'.repeat(size)}_${index}`
 }
 
 function longHunk(index: number): string {
@@ -99,6 +99,21 @@ const THREE_HUNK_IDS = [
   computeHunkId('src/b.ts', 'modified', hunkPatch(1)),
 ]
 
+const PLAN_MARKER = 'Assign every hunk id'
+const EXPLANATION_REPLY = JSON.stringify({ explanation: 'Why' })
+
+const LARGE_CHANGES: FileDiffInfo[] = [
+  change('src/a.ts', [0, 1, 2, 3].map((index) => bigHunk(index)).join('\n')),
+  change('src/b.ts', [10, 11, 12, 13].map((index) => bigHunk(index)).join('\n')),
+  change('src/c.ts', [20, 21, 22, 23].map((index) => bigHunk(index)).join('\n')),
+]
+
+const LARGE_PLAN_REPLY = planReply([
+  { title: 'A', hunkIds: [0, 1, 2, 3].map((index) => computeHunkId('src/a.ts', 'modified', bigHunk(index))) },
+  { title: 'B', hunkIds: [10, 11, 12, 13].map((index) => computeHunkId('src/b.ts', 'modified', bigHunk(index))) },
+  { title: 'C', hunkIds: [20, 21, 22, 23].map((index) => computeHunkId('src/c.ts', 'modified', bigHunk(index))) },
+])
+
 interface FakeSession {
   info?: SessionInfo | Error
   changes?: FileDiffInfo[] | Error
@@ -107,7 +122,7 @@ interface FakeSession {
 function createFakeClient(sessions: Record<string, FakeSession>) {
   const generateCalls: string[] = []
   const generateModels: Array<ModelRef | undefined> = []
-  let generateImpl: () => Promise<string> = async () => modelReply([])
+  let generateImpl: (prompt: string) => Promise<string> = async () => modelReply([])
 
   const client = {
     api: {
@@ -143,7 +158,7 @@ function createFakeClient(sessions: Record<string, FakeSession>) {
         text: vi.fn(async (input: { prompt: string; model?: ModelRef }) => {
           generateCalls.push(input.prompt)
           generateModels.push(input.model)
-          return { text: await generateImpl() }
+          return { text: await generateImpl(input.prompt) }
         }),
       },
     },
@@ -154,7 +169,7 @@ function createFakeClient(sessions: Record<string, FakeSession>) {
     client,
     generateCalls,
     generateModels,
-    setGenerateImpl: (impl: () => Promise<string>) => {
+    setGenerateImpl: (impl: (prompt: string) => Promise<string>) => {
       generateImpl = impl
     },
   }
@@ -954,9 +969,12 @@ describe('ChangeWalkthroughService', () => {
     })
   })
 
-  it('rejects with 413 and the omitted files when a text file exceeds the context budget', async () => {
+  it('rejects with 413 and the omitted files when the outline admits no hunk', async () => {
     const file = 'src/huge.ts'
-    const patch = Array.from({ length: 10 }, (_, index) => bigHunk(index)).join('\n')
+    const patch = Array.from(
+      { length: 2000 },
+      (_, index) => `@@ -${index + 1},1 +${index + 1},1 @@\n+line${index}`,
+    ).join('\n')
     sessions[SESSION_ID]!.changes = [change(file, patch)]
 
     await expect(service.generate(SESSION_ID, {})).rejects.toMatchObject({
@@ -1040,6 +1058,105 @@ describe('ChangeWalkthroughService', () => {
   it('rejects with 404 when generating for a missing session', async () => {
     await expect(service.generate('ses_missing', {})).rejects.toBeInstanceOf(ChangeWalkthroughError)
     await expect(service.generate('ses_missing', {})).rejects.toMatchObject({ status: 404 })
+  })
+
+  it('plans then explains each stop', async () => {
+    sessions[SESSION_ID]!.changes = LARGE_CHANGES
+    fake.setGenerateImpl((prompt) =>
+      Promise.resolve(prompt.includes(PLAN_MARKER) ? LARGE_PLAN_REPLY : EXPLANATION_REPLY),
+    )
+
+    const { walkthrough, created } = await service.generate(SESSION_ID, {})
+
+    expect(created).toBe(true)
+    expect(walkthrough.stops.map((stop) => stop.title)).toEqual(['A', 'B', 'C'])
+    expect(walkthrough.stops.every((stop) => stop.status === 'ready')).toBe(true)
+    expect(walkthrough.stops.every((stop) => stop.explanation === 'Why')).toBe(true)
+    expect(fake.generateCalls).toHaveLength(4)
+    expect(fake.generateCalls.filter((prompt) => prompt.includes(PLAN_MARKER))).toHaveLength(1)
+  })
+
+  it('exposes pending stops while explaining', async () => {
+    sessions[SESSION_ID]!.changes = LARGE_CHANGES
+    const explainResolvers: Array<(text: string) => void> = []
+    fake.setGenerateImpl((prompt) => {
+      if (prompt.includes(PLAN_MARKER)) {
+        return Promise.resolve(LARGE_PLAN_REPLY)
+      }
+      return new Promise<string>((resolve) => {
+        explainResolvers.push(resolve)
+      })
+    })
+
+    const pending = service.generate(SESSION_ID, {})
+
+    await vi.waitFor(async () => {
+      const state = await service.getState(SESSION_ID)
+      expect(state.generating).toBe(true)
+      expect(state.walkthrough?.stops).toHaveLength(3)
+      expect(state.walkthrough?.stops.every((stop) => stop.status === 'pending')).toBe(true)
+    })
+
+    await vi.waitFor(() => expect(explainResolvers).toHaveLength(3))
+    for (const resolve of explainResolvers) {
+      resolve(EXPLANATION_REPLY)
+    }
+
+    const { walkthrough } = await pending
+    expect(walkthrough.stops.every((stop) => stop.status === 'ready')).toBe(true)
+  })
+
+  it('marks a stop failed when its explanation fails twice', async () => {
+    sessions[SESSION_ID]!.changes = LARGE_CHANGES
+    fake.setGenerateImpl((prompt) => {
+      if (prompt.includes(PLAN_MARKER)) {
+        return Promise.resolve(LARGE_PLAN_REPLY)
+      }
+      if (prompt.includes('## Stop: B')) {
+        return Promise.resolve('not json')
+      }
+      return Promise.resolve(EXPLANATION_REPLY)
+    })
+
+    const { walkthrough, created } = await service.generate(SESSION_ID, {})
+
+    expect(created).toBe(true)
+    const byTitle = new Map(walkthrough.stops.map((stop) => [stop.title, stop]))
+    expect(byTitle.get('B')?.status).toBe('failed')
+    expect(byTitle.get('A')?.status).toBe('ready')
+    expect(byTitle.get('C')?.status).toBe('ready')
+    expect(fake.generateCalls.filter((prompt) => prompt.includes('## Stop: B'))).toHaveLength(2)
+  })
+
+  it('keeps a single call for small diffs', async () => {
+    fake.setGenerateImpl(async () =>
+      modelReply([{ title: 'A', explanation: 'x', hunkIds: THREE_HUNK_IDS }]),
+    )
+
+    const { walkthrough } = await service.generate(SESSION_ID, {})
+
+    expect(fake.generateCalls).toHaveLength(1)
+    expect(walkthrough.stops).toHaveLength(1)
+    expect(walkthrough.stops[0]!.status).toBe('ready')
+  })
+
+  it('does not cache a diff read that an execution event invalidated', async () => {
+    const diffMock = vi.mocked(fake.client.api.session.diff)
+    let resolveDiff: (changes: FileDiffInfo[]) => void = () => {}
+    diffMock.mockImplementationOnce(
+      () => new Promise<FileDiffInfo[]>((resolve) => {
+        resolveDiff = resolve
+      }),
+    )
+
+    const pending = service.getState(SESSION_ID)
+    await vi.waitFor(() => expect(diffMock).toHaveBeenCalledTimes(1))
+    service.handleEvent(sessionEvent('session.execution.succeeded', SESSION_ID))
+    resolveDiff(threeHunks)
+    await pending
+
+    await service.getState(SESSION_ID)
+    expect(diffMock).toHaveBeenCalledTimes(2)
   })
 
   describe('startGeneration', () => {

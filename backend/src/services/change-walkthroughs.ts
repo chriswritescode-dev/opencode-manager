@@ -28,6 +28,8 @@ import { getErrorMessage } from '../utils/error-utils'
 import { ServiceError } from '../utils/service-error'
 import { truncateText } from '../utils/text-truncate'
 import { extractFirstJsonObject } from '../utils/json-extract'
+import { mapWithConcurrency } from '../utils/concurrency'
+import { logger } from '../utils/logger'
 import { GenerateTextTimeoutError, generateTextWithTimeout } from './opencode/generate-text'
 import type { OpenCodeClient } from './opencode/client'
 import { readSessionChanges } from './session-changes'
@@ -35,6 +37,7 @@ import type { SSEEvent } from './sse-aggregator'
 
 const DEFAULT_TIMEOUT_MS = 120_000
 const WALKTHROUGH_CALL_ATTEMPTS = 2
+const WALKTHROUGH_EXPLAIN_CONCURRENCY = 4
 const HUNK_TRUNCATION_MARKER = '\n[hunk truncated]'
 const TEXT_TRUNCATION_MARKER = ''
 const REMAINING_STOP_TITLE = 'Remaining changes'
@@ -476,6 +479,79 @@ export function parseWalkthroughPlan(text: string, hunks: WalkthroughHunk[]): Pa
   }
 }
 
+const explanationSchema = z.object({
+  explanation: z.string().catch(''),
+})
+
+export function parseWalkthroughExplanation(text: string): string | null {
+  const extracted = extractFirstJsonObject(text)
+  if (!extracted) {
+    return null
+  }
+
+  let raw: unknown
+  try {
+    raw = JSON.parse(extracted)
+  } catch {
+    return null
+  }
+
+  const parsed = explanationSchema.safeParse(raw)
+  if (!parsed.success) {
+    return null
+  }
+
+  const explanation = parsed.data.explanation.trim()
+  if (explanation.length === 0) {
+    return null
+  }
+
+  return truncateText(explanation, WALKTHROUGH_TEXT_MAX_CHARS, TEXT_TRUNCATION_MARKER).text
+}
+
+export function buildWalkthroughExplainPrompt({
+  title,
+  summary,
+  stop,
+  hunks,
+}: {
+  title: string
+  summary: string
+  stop: WalkthroughStop
+  hunks: WalkthroughHunk[]
+}): string {
+  const rule = 'Respond with only the JSON {"explanation": string}.'
+  const stopHunks = hunks.filter((hunk) => stop.hunkIds.includes(hunk.id))
+  const context = [
+    buildWalkthroughPreamble(title),
+    `## Walkthrough summary\n${summary}`,
+    `## Stop: ${stop.title}`,
+  ].join('\n\n')
+
+  const sections = [context]
+  let shown = 0
+
+  for (const hunk of stopHunks) {
+    const block = formatHunkBlock(hunk)
+    const omittedCount = stopHunks.length - shown - 1
+    const candidate = [...sections, block, rule]
+    if (omittedCount > 0) {
+      candidate.push(`${omittedCount} more hunks in this stop are not shown.`)
+    }
+    if (candidate.join('\n\n').length > WALKTHROUGH_DIFF_MAX_CHARS) {
+      break
+    }
+    sections.push(block)
+    shown += 1
+  }
+
+  if (shown < stopHunks.length) {
+    sections.push(`${stopHunks.length - shown} more hunks in this stop are not shown.`)
+  }
+  sections.push(rule)
+  return sections.join('\n\n')
+}
+
 interface InFlightGeneration {
   modelStarted: Promise<void>
   result: Promise<{ walkthrough: ChangeWalkthrough; created: boolean }>
@@ -498,6 +574,7 @@ export class ChangeWalkthroughService {
   private readonly failures = new Map<string, WalkthroughGenerationError>()
   private readonly deletedDuringGeneration = new Set<string>()
   private readonly currentHashes = new Map<string, string>()
+  private readonly hashEpochs = new Map<string, number>()
   private readonly timeoutMs: number
 
   constructor(
@@ -531,14 +608,22 @@ export class ChangeWalkthroughService {
       return cached
     }
 
+    const epoch = this.hashEpochs.get(sessionId) ?? 0
     try {
       const changes = await readSessionChanges(this.openCodeClient, sessionId)
       const hash = computeChangesHash(changes)
-      this.currentHashes.set(sessionId, hash)
+      if ((this.hashEpochs.get(sessionId) ?? 0) === epoch) {
+        this.currentHashes.set(sessionId, hash)
+      }
       return hash
     } catch {
       return null
     }
+  }
+
+  private invalidateCurrentHash(sessionId: string): void {
+    this.currentHashes.delete(sessionId)
+    this.hashEpochs.set(sessionId, (this.hashEpochs.get(sessionId) ?? 0) + 1)
   }
 
   generate(sessionId: string, request: GenerateChangeWalkthroughRequest): Promise<{ walkthrough: ChangeWalkthrough; created: boolean }> {
@@ -560,7 +645,7 @@ export class ChangeWalkthroughService {
           this.deletedDuringGeneration.add(sessionID)
         }
         this.failures.delete(sessionID)
-        this.currentHashes.delete(sessionID)
+        this.invalidateCurrentHash(sessionID)
         deleteChangeWalkthrough(this.db, sessionID)
         return
       }
@@ -568,7 +653,7 @@ export class ChangeWalkthroughService {
       case 'session.execution.succeeded':
       case 'session.execution.failed':
       case 'session.execution.interrupted':
-        this.currentHashes.delete(event.data.sessionID)
+        this.invalidateCurrentHash(event.data.sessionID)
         return
       default:
         return
@@ -603,7 +688,7 @@ export class ChangeWalkthroughService {
       .finally(() => {
         this.inFlight.delete(sessionId)
         this.deletedDuringGeneration.delete(sessionId)
-        this.currentHashes.delete(sessionId)
+        this.invalidateCurrentHash(sessionId)
       })
 
     result.catch(() => {})
@@ -664,48 +749,107 @@ export class ChangeWalkthroughService {
         createdAt: Date.now(),
       }
 
-      if (this.deletedDuringGeneration.has(sessionId)) {
+      if (!this.saveIfSessionLive(walkthrough)) {
         throw new ChangeWalkthroughError('Session not found', 404)
       }
-
-      saveChangeWalkthrough(this.db, walkthrough)
       return { walkthrough, created: true }
     }
 
-    if (!fitsSingleCall(input, title)) {
-      const budgetFiles = [...new Set(hunks.map((hunk) => hunk.file))].map((file) => ({
-        file,
-        reason: 'budget' as const,
-      }))
-      throw new ChangeWalkthroughError('These changes are too large to walk through', 413, {
-        code: 'WALKTHROUGH_CONTEXT_LIMIT',
-        details: { omittedFiles: [...omittedFiles, ...budgetFiles] },
-      })
+    if (fitsSingleCall(input, title)) {
+      const prompt = buildWalkthroughPrompt({ title, hunks })
+      onModelStart()
+
+      const parsed = await this.callModelParsed(prompt, session.model, (text) =>
+        parseWalkthroughResponse(text, hunks),
+      )
+
+      const walkthrough: ChangeWalkthrough = {
+        sessionId,
+        diffHash,
+        summary: parsed.summary,
+        stops: mechanicalStop ? [...parsed.stops, mechanicalStop] : parsed.stops,
+        hunks: [...hunks, ...mechanicalHunks],
+        omittedFiles,
+        createdAt: Date.now(),
+      }
+
+      if (!this.saveIfSessionLive(walkthrough)) {
+        throw new ChangeWalkthroughError('Session not found', 404)
+      }
+      return { walkthrough, created: true }
     }
 
-    const prompt = buildWalkthroughPrompt({ title, hunks })
+    const outline = buildWalkthroughOutline(input, title)
+    if (outline.hunks.length === 0) {
+      if (!mechanicalStop) {
+        throw new ChangeWalkthroughError('These changes are too large to walk through', 413, {
+          code: 'WALKTHROUGH_CONTEXT_LIMIT',
+          details: { omittedFiles: outline.omittedFiles },
+        })
+      }
 
+      const walkthrough: ChangeWalkthrough = {
+        sessionId,
+        diffHash,
+        summary: MECHANICAL_ONLY_SUMMARY,
+        stops: [mechanicalStop],
+        hunks: mechanicalHunks,
+        omittedFiles: outline.omittedFiles,
+        createdAt: Date.now(),
+      }
+
+      if (!this.saveIfSessionLive(walkthrough)) {
+        throw new ChangeWalkthroughError('Session not found', 404)
+      }
+      return { walkthrough, created: true }
+    }
+
+    const planPrompt = buildWalkthroughPlanPrompt({ title, outline: outline.outline, previousStops: [] })
     onModelStart()
 
-    const parsed = await this.callModelParsed(prompt, session.model, (text) =>
-      parseWalkthroughResponse(text, hunks),
+    const planned = await this.callModelParsed(planPrompt, session.model, (text) =>
+      parseWalkthroughPlan(text, outline.hunks),
     )
 
-    const walkthrough: ChangeWalkthrough = {
+    let walkthrough: ChangeWalkthrough = {
       sessionId,
       diffHash,
-      summary: parsed.summary,
-      stops: mechanicalStop ? [...parsed.stops, mechanicalStop] : parsed.stops,
-      hunks: [...hunks, ...mechanicalHunks],
-      omittedFiles,
+      summary: planned.summary,
+      stops: mechanicalStop ? [...planned.stops, mechanicalStop] : planned.stops,
+      hunks: [...outline.hunks, ...mechanicalHunks],
+      omittedFiles: outline.omittedFiles,
       createdAt: Date.now(),
     }
+
+    if (!this.saveIfSessionLive(walkthrough)) {
+      throw new ChangeWalkthroughError('Session not found', 404)
+    }
+
+    await mapWithConcurrency(planned.stops, WALKTHROUGH_EXPLAIN_CONCURRENCY, async (stop) => {
+      const explainPrompt = buildWalkthroughExplainPrompt({
+        title,
+        summary: planned.summary,
+        stop,
+        hunks: outline.hunks,
+      })
+
+      let explained: WalkthroughStop
+      try {
+        const explanation = await this.callModelParsed(explainPrompt, session.model, parseWalkthroughExplanation)
+        explained = { ...stop, explanation, status: 'ready' }
+      } catch (error) {
+        logger.warn('Failed to explain a change walkthrough stop', getErrorMessage(error))
+        explained = { ...stop, status: 'failed' }
+      }
+
+      walkthrough = this.replaceStop(walkthrough, explained)
+      this.saveIfSessionLive(walkthrough)
+    })
 
     if (this.deletedDuringGeneration.has(sessionId)) {
       throw new ChangeWalkthroughError('Session not found', 404)
     }
 
-    saveChangeWalkthrough(this.db, walkthrough)
     return { walkthrough, created: true }
   }
 
@@ -744,6 +888,21 @@ export class ChangeWalkthroughService {
     }
 
     throw lastError
+  }
+
+  private replaceStop(walkthrough: ChangeWalkthrough, stop: WalkthroughStop): ChangeWalkthrough {
+    return {
+      ...walkthrough,
+      stops: walkthrough.stops.map((existing) => (existing.id === stop.id ? stop : existing)),
+    }
+  }
+
+  private saveIfSessionLive(walkthrough: ChangeWalkthrough): boolean {
+    if (this.deletedDuringGeneration.has(walkthrough.sessionId)) {
+      return false
+    }
+    saveChangeWalkthrough(this.db, walkthrough)
+    return true
   }
 
   private async readSession(sessionId: string): Promise<SessionInfo> {
