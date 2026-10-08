@@ -130,6 +130,27 @@ describe('useCommands', () => {
     })
   })
 
+  it('loads commands for a newly selected directory even when queries have a stale time', async () => {
+    vi.mocked(listCommands).mockImplementation(async (directory) => [
+      { name: directory === '/repo-b' ? 'from-b' : 'from-a', description: '' },
+    ])
+    const queryClient = new QueryClient({ defaultOptions: { queries: { retry: false, staleTime: 60_000 } } })
+    const wrapper = ({ children }: { children: React.ReactNode }) => (
+      <QueryClientProvider client={queryClient}>{children}</QueryClientProvider>
+    )
+
+    const { result, rerender } = renderHook(({ directory }) => useCommands({ directory }), {
+      wrapper,
+      initialProps: { directory: '/repo-a' },
+    })
+    await waitFor(() => expect(result.current.findCommand('from-a')).toBeDefined())
+
+    rerender({ directory: '/repo-b' })
+
+    await waitFor(() => expect(result.current.findCommand('from-b')).toBeDefined())
+    expect(listCommands).toHaveBeenCalledWith('/repo-b')
+  })
+
   it('finds only exact command names, ignoring case', () => {
     const { result } = renderHook(() => useCommands({ enabled: false }), { wrapper: createWrapper() })
 

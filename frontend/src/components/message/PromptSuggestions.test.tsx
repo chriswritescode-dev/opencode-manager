@@ -70,6 +70,18 @@ describe('PromptSuggestions', () => {
     expect(handlers.onSelect).not.toHaveBeenCalled()
   })
 
+  it('omits the icon for commands but keeps it for other kinds', () => {
+    renderList({
+      items: [
+        { key: 'review', value: 'review', kind: 'command', label: '/review', ranges: [] },
+        { key: 'build', value: 'build', kind: 'agent', label: '@build', ranges: [] },
+      ],
+    })
+
+    expect(rowButton('/review').querySelector('svg')).toBeNull()
+    expect(rowButton('@build').querySelector('svg')).not.toBeNull()
+  })
+
   it('renders nothing without items', () => {
     renderList({ items: [] })
 

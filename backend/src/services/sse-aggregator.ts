@@ -34,6 +34,7 @@ type ReplayEventType = 'permission.asked' | 'form.created' | 'session.status'
 
 const { RECONNECT_DELAY_MS, MAX_RECONNECT_DELAY_MS } = DEFAULTS.SSE
 const MULTILINE_PATTERN = /[\r\n]/
+const LOCATION_CATALOG_EVENT_TYPES = new Set(['command.updated', 'agent.updated', 'skill.updated'])
 
 function serializeEnvelope(directory: string | null, payloadJson: string): string {
   return '{"directory":' + JSON.stringify(directory) + ',"payload":' + payloadJson + '}'
@@ -434,7 +435,11 @@ class SSEAggregator {
       }
 
       if (directory) {
-        this.deliverEvent(directory, event, payloadJson)
+        if (LOCATION_CATALOG_EVENT_TYPES.has(event.type)) {
+          this.deliverResolvedEvent(directory, event, payloadJson)
+        } else {
+          this.deliverEvent(directory, event, payloadJson)
+        }
         return
       }
 

@@ -33,6 +33,7 @@ export function useCommands(options: UseCommandsOptions = {}) {
     },
     enabled,
     initialData: SORTED_BUILTIN_COMMANDS,
+    initialDataUpdatedAt: 0,
   })
 
   const searchCommands = useCallback((query: string) => rankByMatch(commands, query, {

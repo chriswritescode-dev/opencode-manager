@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useLayoutEffect, useRef, useState, type ReactNode, type RefObject } from 'react'
-import { Bot, Command, FileText, Sparkles, Play } from 'lucide-react'
+import { Bot, FileText, Sparkles, Play, type LucideIcon } from 'lucide-react'
 import { SWIPE_COMMIT_DISTANCE, useTouchTapSelect } from '@/hooks/useTouchTapSelect'
 import type { MatchRange } from '@/lib/fuzzyMatch'
 
@@ -28,8 +28,7 @@ interface PromptSuggestionsProps<T> {
 const TAKEOVER_TOP_GAP_PX = 8
 const TAKEOVER_MIN_HEIGHT_PX = 160
 
-const KIND_ICONS: Record<SuggestionKind, typeof Command> = {
-  command: Command,
+const KIND_ICONS: Partial<Record<SuggestionKind, LucideIcon>> = {
   agent: Bot,
   skill: Sparkles,
   file: FileText,
@@ -111,12 +110,14 @@ export function PromptSuggestions<T>({
               : takeover ? 'bg-background border-transparent hover:bg-muted text-foreground' : 'hover:bg-muted text-foreground'
           }`}
         >
-          <span className={takeover
-            ? `grid place-items-center w-8 h-8 flex-shrink-0 rounded-lg border ${isSelected ? 'bg-primary text-primary-foreground border-primary' : 'bg-muted border-border text-muted-foreground'}`
-            : 'mt-0.5 flex-shrink-0 opacity-80'}
-          >
-            <Icon className="w-4 h-4" />
-          </span>
+          {Icon && (
+            <span className={takeover
+              ? `grid place-items-center w-8 h-8 flex-shrink-0 rounded-lg border ${isSelected ? 'bg-primary text-primary-foreground border-primary' : 'bg-muted border-border text-muted-foreground'}`
+              : 'mt-0.5 flex-shrink-0 opacity-80'}
+            >
+              <Icon className="w-4 h-4" />
+            </span>
+          )}
           <span className="flex-1 min-w-0">
             <span className={`block font-mono font-medium truncate ${takeover ? 'text-base' : 'text-sm'}`}>
               {renderHighlighted(item.label, item.ranges)}
