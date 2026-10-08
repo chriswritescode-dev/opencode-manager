@@ -1,6 +1,9 @@
-import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
+import { afterAll, afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { Hono } from 'hono'
 import { Database } from 'bun:sqlite'
+import { mkdtempSync, rmSync, writeFileSync } from 'node:fs'
+import { tmpdir } from 'node:os'
+import path from 'node:path'
 import type { FileDiffInfo, SessionInfo } from '@opencode-manager/shared/opencode'
 import { migrate } from '../../src/db/migration-runner'
 import { allMigrations } from '../../src/db/migrations'
@@ -9,6 +12,7 @@ import { SettingsService } from '../../src/services/settings'
 import { createChangeWalkthroughRoutes } from '../../src/routes/change-walkthroughs'
 import type { OpenCodeClient } from '../../src/services/opencode/client'
 import { stubLoadedModelCatalog } from '../helpers/stub-opencode-client'
+import { createCommittedRepo, createGitAuthService, git, uniqueName } from '../helpers/git-fixtures'
 
 const SESSION_ID = 'ses_walkthrough'
 
@@ -32,7 +36,7 @@ interface FakeSession {
 
 function createFakeClient(sessions: Record<string, FakeSession>) {
   const generateCalls: string[] = []
-  let generateImpl: () => Promise<string> = async () => MODEL_REPLY
+  let generateImpl: (prompt: string) => Promise<string> = async () => MODEL_REPLY
 
   const client = {
     api: {
@@ -67,7 +71,7 @@ function createFakeClient(sessions: Record<string, FakeSession>) {
       generate: {
         text: vi.fn(async (input: { prompt: string }) => {
           generateCalls.push(input.prompt)
-          return { text: await generateImpl() }
+          return { text: await generateImpl(input.prompt) }
         }),
       },
     },
@@ -77,10 +81,32 @@ function createFakeClient(sessions: Record<string, FakeSession>) {
   return {
     client,
     generateCalls,
-    setGenerateImpl: (impl: () => Promise<string>) => {
+    setGenerateImpl: (impl: (prompt: string) => Promise<string>) => {
       generateImpl = impl
     },
   }
+}
+
+const routeRepoRoot = mkdtempSync(path.join(tmpdir(), 'walkthrough-routes-'))
+
+afterAll(() => {
+  rmSync(routeRepoRoot, { recursive: true, force: true })
+})
+
+function createRepoWithStagedChange(): string {
+  const repo = path.join(routeRepoRoot, uniqueName('repo'))
+  createCommittedRepo(repo)
+  writeFileSync(path.join(repo, 'a.txt'), 'one\n')
+  git(['add', 'a.txt'], repo)
+  git(['commit', '-m', 'add a'], repo)
+  writeFileSync(path.join(repo, 'a.txt'), 'two\n')
+  git(['add', 'a.txt'], repo)
+  return repo
+}
+
+function replyForPrompt(prompt: string, summary = 'A summary'): string {
+  const ids = [...prompt.matchAll(/^### (h_\S+) /gm)].map((match) => match[1]!)
+  return JSON.stringify({ summary, stops: [{ title: 'A', explanation: 'Why', hunkIds: ids }] })
 }
 
 describe('change walkthrough routes', () => {
@@ -94,7 +120,7 @@ describe('change walkthrough routes', () => {
     migrate(db, allMigrations)
     sessions = { [SESSION_ID]: { changes: CHANGES } }
     fake = createFakeClient(sessions)
-    const service = new ChangeWalkthroughService(db, fake.client, new SettingsService(db))
+    const service = new ChangeWalkthroughService(db, fake.client, new SettingsService(db), createGitAuthService())
     app = new Hono()
     app.route('/change-walkthroughs', createChangeWalkthroughRoutes(service))
   })
@@ -126,6 +152,47 @@ describe('change walkthrough routes', () => {
 
     expect(res.status).toBe(404)
     await expect(res.json()).resolves.toMatchObject({ error: 'Session not found' })
+  })
+
+  it('GET reads the diff of the requested source', async () => {
+    const repo = createRepoWithStagedChange()
+    sessions[SESSION_ID]!.info = { id: SESSION_ID, title: 'Title', location: { directory: repo } } as SessionInfo
+
+    const sessionRes = await app.request(`/change-walkthroughs/${SESSION_ID}`)
+    const sessionBody = (await sessionRes.json()) as { currentDiffHash: string | null }
+    const stagedRes = await app.request(`/change-walkthroughs/${SESSION_ID}?source=staged`)
+    const stagedBody = (await stagedRes.json()) as { currentDiffHash: string | null }
+
+    expect(stagedRes.status).toBe(200)
+    expect(typeof stagedBody.currentDiffHash).toBe('string')
+    expect(stagedBody.currentDiffHash).not.toBe(sessionBody.currentDiffHash)
+  })
+
+  it('GET rejects an invalid source with 400', async () => {
+    const res = await app.request(`/change-walkthroughs/${SESSION_ID}?source=branch:-x`)
+
+    expect(res.status).toBe(400)
+    await expect(res.json()).resolves.toMatchObject({ error: 'Invalid walkthrough source' })
+  })
+
+  it('POST stores the walkthrough under the requested source', async () => {
+    const repo = createRepoWithStagedChange()
+    sessions[SESSION_ID]!.info = { id: SESSION_ID, title: 'Title', location: { directory: repo } } as SessionInfo
+    fake.setGenerateImpl(async (prompt) => replyForPrompt(prompt, 'Staged summary'))
+
+    const res = await app.request(`/change-walkthroughs/${SESSION_ID}`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ source: { kind: 'staged' } }),
+    })
+
+    expect(res.status).toBe(202)
+
+    await vi.waitFor(async () => {
+      const getRes = await app.request(`/change-walkthroughs/${SESSION_ID}?source=staged`)
+      const state = (await getRes.json()) as { walkthrough: { summary: string } | null }
+      expect(state.walkthrough?.summary).toBe('Staged summary')
+    })
   })
 
   it('POST returns 202 while generating, then GET reads the walkthrough back', async () => {

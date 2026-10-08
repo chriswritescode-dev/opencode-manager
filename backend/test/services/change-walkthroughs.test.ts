@@ -1,4 +1,7 @@
-import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
+import { afterAll, afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
+import { mkdtempSync, rmSync, writeFileSync } from 'node:fs'
+import { tmpdir } from 'node:os'
+import path from 'node:path'
 import { Database } from 'bun:sqlite'
 import type { FileDiffInfo, ModelRef, SessionInfo, SessionMessageInfo } from '@opencode-manager/shared/opencode'
 import {
@@ -17,6 +20,7 @@ import type { OpenCodeClient } from '../../src/services/opencode/client'
 import { SettingsService } from '../../src/services/settings'
 import type { SSEEvent } from '../../src/services/sse-aggregator'
 import { stubLoadedModelCatalog } from '../helpers/stub-opencode-client'
+import { createCommittedRepo, createGitAuthService, git, uniqueName } from '../helpers/git-fixtures'
 import {
   ChangeWalkthroughError,
   ChangeWalkthroughService,
@@ -209,6 +213,31 @@ function sessionEvent(type: string, sessionID: string): SSEEvent {
     location: { directory: '/abs/repo' },
     data: { sessionID },
   } as unknown as SSEEvent
+}
+
+const walkthroughRepoRoot = mkdtempSync(path.join(tmpdir(), 'walkthrough-service-'))
+
+afterAll(() => {
+  rmSync(walkthroughRepoRoot, { recursive: true, force: true })
+})
+
+function createChangedRepo(): string {
+  const repo = path.join(walkthroughRepoRoot, uniqueName('repo'))
+  createCommittedRepo(repo)
+  writeFileSync(path.join(repo, 'a.txt'), 'one\n')
+  git(['add', 'a.txt'], repo)
+  git(['commit', '-m', 'add a'], repo)
+  writeFileSync(path.join(repo, 'a.txt'), 'two\n')
+  return repo
+}
+
+function sessionAt(directory: string): SessionInfo {
+  return { id: SESSION_ID, title: 'Title', location: { directory } } as SessionInfo
+}
+
+function replyForPrompt(prompt: string): string {
+  const ids = [...prompt.matchAll(/^### (h_\S+) /gm)].map((match) => match[1]!)
+  return modelReply([{ title: 'A', explanation: 'x', hunkIds: ids }])
 }
 
 describe('computeChangesHash', () => {
@@ -784,7 +813,7 @@ describe('ChangeWalkthroughService', () => {
     db = createTestDb()
     sessions = { [SESSION_ID]: { changes: threeHunks } }
     fake = createFakeClient(sessions)
-    service = new ChangeWalkthroughService(db, fake.client, new SettingsService(db))
+    service = new ChangeWalkthroughService(db, fake.client, new SettingsService(db), createGitAuthService())
   })
 
   afterEach(() => {
@@ -1053,7 +1082,7 @@ describe('ChangeWalkthroughService', () => {
   })
 
   it('rejects with 504 when generation times out', async () => {
-    const timingOut = new ChangeWalkthroughService(db, fake.client, new SettingsService(db), { timeoutMs: 5 })
+    const timingOut = new ChangeWalkthroughService(db, fake.client, new SettingsService(db), createGitAuthService(), { timeoutMs: 5 })
     fake.setGenerateImpl(() => new Promise<string>(() => {}))
 
     await expect(timingOut.generate(SESSION_ID, {})).rejects.toMatchObject({
@@ -1445,7 +1474,7 @@ describe('ChangeWalkthroughService', () => {
 
       service.handleEvent(sessionEvent('session.deleted', SESSION_ID))
 
-      expect(getChangeWalkthrough(db, SESSION_ID)).toBeNull()
+      expect(getChangeWalkthrough(db, SESSION_ID, 'session')).toBeNull()
     })
 
     it('keeps the stored walkthrough for other session events', async () => {
@@ -1455,7 +1484,7 @@ describe('ChangeWalkthroughService', () => {
       service.handleEvent(sessionEvent('session.execution.succeeded', SESSION_ID))
       service.handleEvent(sessionEvent('session.deleted', 'ses_other'))
 
-      expect(getChangeWalkthrough(db, SESSION_ID)).not.toBeNull()
+      expect(getChangeWalkthrough(db, SESSION_ID, 'session')).not.toBeNull()
     })
 
     it('does not store a walkthrough whose session was deleted during generation', async () => {
@@ -1470,7 +1499,7 @@ describe('ChangeWalkthroughService', () => {
       resolveGenerate(coveringReply)
 
       await expect(pending).rejects.toMatchObject({ status: 404 })
-      expect(getChangeWalkthrough(db, SESSION_ID)).toBeNull()
+      expect(getChangeWalkthrough(db, SESSION_ID, 'session')).toBeNull()
     })
 
     it('stores walkthroughs again after an earlier deletion of the same session id', async () => {
@@ -1479,7 +1508,39 @@ describe('ChangeWalkthroughService', () => {
 
       await service.generate(SESSION_ID, {})
 
-      expect(getChangeWalkthrough(db, SESSION_ID)).not.toBeNull()
+      expect(getChangeWalkthrough(db, SESSION_ID, 'session')).not.toBeNull()
+    })
+  })
+
+  describe('per-source storage', () => {
+    it('stores walkthroughs per source', async () => {
+      const repo = createChangedRepo()
+      sessions[SESSION_ID] = { changes: threeHunks, info: sessionAt(repo) }
+      fake.setGenerateImpl(async (prompt) => replyForPrompt(prompt))
+
+      await service.generate(SESSION_ID, {})
+      await service.generate(SESSION_ID, { source: { kind: 'uncommitted' } })
+
+      const sessionStored = getChangeWalkthrough(db, SESSION_ID, 'session')
+      const uncommittedStored = getChangeWalkthrough(db, SESSION_ID, 'uncommitted')
+      expect(sessionStored).not.toBeNull()
+      expect(uncommittedStored).not.toBeNull()
+      expect(sessionStored!.diffHash).not.toBe(uncommittedStored!.diffHash)
+      expect(uncommittedStored!.source).toEqual({ kind: 'uncommitted' })
+    })
+
+    it('deletes every source when the session is deleted', async () => {
+      const repo = createChangedRepo()
+      sessions[SESSION_ID] = { changes: threeHunks, info: sessionAt(repo) }
+      fake.setGenerateImpl(async (prompt) => replyForPrompt(prompt))
+
+      await service.generate(SESSION_ID, {})
+      await service.generate(SESSION_ID, { source: { kind: 'uncommitted' } })
+
+      service.handleEvent(sessionEvent('session.deleted', SESSION_ID))
+
+      expect(getChangeWalkthrough(db, SESSION_ID, 'session')).toBeNull()
+      expect(getChangeWalkthrough(db, SESSION_ID, 'uncommitted')).toBeNull()
     })
   })
 })

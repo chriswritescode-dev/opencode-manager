@@ -1,8 +1,13 @@
 import type { Database } from 'bun:sqlite'
-import { ChangeWalkthroughSchema, type ChangeWalkthrough } from '@opencode-manager/shared/schemas'
+import {
+  ChangeWalkthroughSchema,
+  walkthroughSourceKey,
+  type ChangeWalkthrough,
+} from '@opencode-manager/shared/schemas'
 
 interface ChangeWalkthroughRow {
   session_id: string
+  source_key: string
   diff_hash: string
   payload: string
   created_at: number
@@ -19,10 +24,16 @@ export function ensureChangeWalkthroughTable(db: Database): void {
   `)
 }
 
-export function getChangeWalkthrough(db: Database, sessionId: string): ChangeWalkthrough | null {
+export function getChangeWalkthrough(
+  db: Database,
+  sessionId: string,
+  sourceKey: string,
+): ChangeWalkthrough | null {
   const row = db
-    .prepare('SELECT session_id, diff_hash, payload, created_at FROM change_walkthroughs WHERE session_id = ?')
-    .get(sessionId) as ChangeWalkthroughRow | undefined
+    .prepare(
+      'SELECT session_id, source_key, diff_hash, payload, created_at FROM change_walkthroughs WHERE session_id = ? AND source_key = ?',
+    )
+    .get(sessionId, sourceKey) as ChangeWalkthroughRow | undefined
   if (!row) {
     return null
   }
@@ -33,17 +44,24 @@ export function getChangeWalkthrough(db: Database, sessionId: string): ChangeWal
   }
 }
 
-export function deleteChangeWalkthrough(db: Database, sessionId: string): void {
+export function deleteChangeWalkthroughs(db: Database, sessionId: string): void {
   db.prepare('DELETE FROM change_walkthroughs WHERE session_id = ?').run(sessionId)
 }
 
 export function saveChangeWalkthrough(db: Database, walkthrough: ChangeWalkthrough): void {
+  const sourceKey = walkthroughSourceKey(walkthrough.source)
   db.prepare(`
-    INSERT INTO change_walkthroughs(session_id, diff_hash, payload, created_at)
-    VALUES(?,?,?,?)
-    ON CONFLICT(session_id) DO UPDATE SET
+    INSERT INTO change_walkthroughs(session_id, source_key, diff_hash, payload, created_at)
+    VALUES(?,?,?,?,?)
+    ON CONFLICT(session_id, source_key) DO UPDATE SET
       diff_hash = excluded.diff_hash,
       payload = excluded.payload,
       created_at = excluded.created_at
-  `).run(walkthrough.sessionId, walkthrough.diffHash, JSON.stringify(walkthrough), walkthrough.createdAt)
+  `).run(
+    walkthrough.sessionId,
+    sourceKey,
+    walkthrough.diffHash,
+    JSON.stringify(walkthrough),
+    walkthrough.createdAt,
+  )
 }

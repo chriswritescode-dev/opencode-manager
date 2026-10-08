@@ -10,22 +10,26 @@ import {
   type SessionInfo,
 } from '@opencode-manager/shared/opencode'
 import {
+  DEFAULT_WALKTHROUGH_SOURCE,
   WALKTHROUGH_DIFF_MAX_CHARS,
   WALKTHROUGH_HUNK_MAX_CHARS,
   WALKTHROUGH_MAX_STOPS,
   WALKTHROUGH_OUTLINE_LINE_MAX_CHARS,
   WALKTHROUGH_OUTLINE_PREVIEW_LINES,
   WALKTHROUGH_TEXT_MAX_CHARS,
+  describeWalkthroughSource,
+  walkthroughSourceKey,
   type ChangeWalkthrough,
   type ChangeWalkthroughState,
   type GenerateChangeWalkthroughRequest,
   type WalkthroughGenerationError,
   type WalkthroughHunk,
   type WalkthroughOmittedFile,
+  type WalkthroughSource,
   type WalkthroughStop,
 } from '@opencode-manager/shared/schemas'
 import { splitDiffHunks, type DiffHunk } from '@opencode-manager/shared/utils'
-import { deleteChangeWalkthrough, getChangeWalkthrough, saveChangeWalkthrough } from '../db/change-walkthroughs'
+import { deleteChangeWalkthroughs, getChangeWalkthrough, saveChangeWalkthrough } from '../db/change-walkthroughs'
 import { getErrorMessage } from '../utils/error-utils'
 import { ServiceError } from '../utils/service-error'
 import { truncateText } from '../utils/text-truncate'
@@ -35,7 +39,8 @@ import { logger } from '../utils/logger'
 import { GenerateTextTimeoutError, generateTextWithTimeout } from './opencode/generate-text'
 import type { OpenCodeClient } from './opencode/client'
 import { ChangeWalkthroughError } from './change-walkthrough-error'
-import { readSessionChanges } from './session-changes'
+import { readWalkthroughChanges } from './walkthrough-sources'
+import type { GitAuthService } from './git-auth'
 import type { SettingsService } from './settings'
 import type { SSEEvent } from './sse-aggregator'
 
@@ -139,6 +144,15 @@ export function computeExplanationKey(modelKey: string, hunkIds: string[]): stri
 
 function computeModelKey(model: ModelRef | undefined): string {
   return model ? formatOpenCodeModelRef(model) : 'default'
+}
+
+function entryKey(sessionId: string, source: WalkthroughSource): string {
+  return `${sessionId}\0${walkthroughSourceKey(source)}`
+}
+
+function walkthroughTitle(session: SessionInfo, source: WalkthroughSource): string {
+  const base = session.title ?? session.id
+  return source.kind === 'session' ? base : `${base} — ${describeWalkthroughSource(source)}`
 }
 
 function applyReuse(stop: WalkthroughStop, reusable: Map<string, string>, modelKey: string): WalkthroughStop {
@@ -613,40 +627,56 @@ export class ChangeWalkthroughService {
     private readonly db: Database,
     private readonly openCodeClient: OpenCodeClient,
     private readonly settingsService: SettingsService,
+    private readonly gitAuthService: GitAuthService,
     options: ChangeWalkthroughServiceOptions = {},
   ) {
     this.timeoutMs = options.timeoutMs ?? DEFAULT_TIMEOUT_MS
   }
 
-  async getState(sessionId: string): Promise<ChangeWalkthroughState> {
-    await this.readSession(sessionId)
+  async getState(
+    sessionId: string,
+    source: WalkthroughSource = DEFAULT_WALKTHROUGH_SOURCE,
+  ): Promise<ChangeWalkthroughState> {
+    const session = await this.readSession(sessionId)
+    const key = entryKey(sessionId, source)
 
-    const currentDiffHash = this.inFlight.has(sessionId)
-      ? this.currentHashes.get(sessionId) ?? null
-      : await this.readCurrentDiffHash(sessionId)
+    const currentDiffHash = this.inFlight.has(key)
+      ? this.currentHashes.get(key) ?? null
+      : await this.readCurrentDiffHash(session, source, key)
 
-    const walkthrough = getChangeWalkthrough(this.db, sessionId)
+    const walkthrough = getChangeWalkthrough(this.db, sessionId, walkthroughSourceKey(source))
     return {
       walkthrough,
       currentDiffHash,
       stale: walkthrough !== null && currentDiffHash !== null && walkthrough.diffHash !== currentDiffHash,
-      generating: this.inFlight.has(sessionId),
-      error: this.failures.get(sessionId) ?? null,
+      generating: this.inFlight.has(key),
+      error: this.failures.get(key) ?? null,
     }
   }
 
-  private async readCurrentDiffHash(sessionId: string): Promise<string | null> {
-    const cached = this.currentHashes.get(sessionId)
-    if (cached !== undefined) {
-      return cached
+  private async readCurrentDiffHash(
+    session: SessionInfo,
+    source: WalkthroughSource,
+    key: string,
+  ): Promise<string | null> {
+    if (source.kind === 'session') {
+      const cached = this.currentHashes.get(key)
+      if (cached !== undefined) {
+        return cached
+      }
     }
 
-    const epoch = this.hashEpochs.get(sessionId) ?? 0
+    const epoch = this.hashEpochs.get(key) ?? 0
     try {
-      const changes = await readSessionChanges(this.openCodeClient, sessionId)
+      const changes = await readWalkthroughChanges({
+        client: this.openCodeClient,
+        session,
+        source,
+        gitEnv: this.gitAuthService.getGitEnvironment(true),
+      })
       const hash = computeChangesHash(changes)
-      if ((this.hashEpochs.get(sessionId) ?? 0) === epoch) {
-        this.currentHashes.set(sessionId, hash)
+      if ((this.hashEpochs.get(key) ?? 0) === epoch) {
+        this.currentHashes.set(key, hash)
       }
       return hash
     } catch {
@@ -654,52 +684,77 @@ export class ChangeWalkthroughService {
     }
   }
 
-  private invalidateCurrentHash(sessionId: string): void {
-    this.currentHashes.delete(sessionId)
-    this.hashEpochs.set(sessionId, (this.hashEpochs.get(sessionId) ?? 0) + 1)
+  private invalidateCurrentHash(key: string): void {
+    this.currentHashes.delete(key)
+    this.hashEpochs.set(key, (this.hashEpochs.get(key) ?? 0) + 1)
   }
 
-  generate(sessionId: string, request: GenerateChangeWalkthroughRequest): Promise<{ walkthrough: ChangeWalkthrough; created: boolean }> {
+  generate(
+    sessionId: string,
+    request: GenerateChangeWalkthroughRequest,
+  ): Promise<{ walkthrough: ChangeWalkthrough; created: boolean }> {
     return this.begin(sessionId, request).result
   }
 
   async startGeneration(sessionId: string, request: GenerateChangeWalkthroughRequest): Promise<ChangeWalkthroughState> {
     const entry = this.begin(sessionId, request)
     await Promise.race([entry.modelStarted, entry.result])
-    return this.getState(sessionId)
+    return this.getState(sessionId, request.source ?? DEFAULT_WALKTHROUGH_SOURCE)
   }
 
-  /** Removes the stored walkthrough of a deleted session, including one still being generated. */
+  /** Removes the stored walkthroughs of a deleted session, including one still being generated. */
   handleEvent(event: SSEEvent): void {
     switch (event.type) {
       case 'session.deleted': {
         const { sessionID } = event.data
-        if (this.inFlight.has(sessionID)) {
-          this.deletedDuringGeneration.add(sessionID)
+        const prefix = `${sessionID}\0`
+        for (const key of this.inFlight.keys()) {
+          if (key.startsWith(prefix)) {
+            this.deletedDuringGeneration.add(key)
+          }
         }
-        this.failures.delete(sessionID)
-        this.invalidateCurrentHash(sessionID)
-        deleteChangeWalkthrough(this.db, sessionID)
+        this.clearSessionState(sessionID)
+        deleteChangeWalkthroughs(this.db, sessionID)
         return
       }
       case 'session.execution.started':
       case 'session.execution.succeeded':
       case 'session.execution.failed':
       case 'session.execution.interrupted':
-        this.invalidateCurrentHash(event.data.sessionID)
+        this.invalidateCurrentHash(entryKey(event.data.sessionID, DEFAULT_WALKTHROUGH_SOURCE))
         return
       default:
         return
     }
   }
 
+  private clearSessionState(sessionId: string): void {
+    const prefix = `${sessionId}\0`
+    const keys = new Set([
+      ...this.inFlight.keys(),
+      ...this.failures.keys(),
+      ...this.currentHashes.keys(),
+      ...this.hashEpochs.keys(),
+    ])
+    for (const key of keys) {
+      if (!key.startsWith(prefix)) {
+        continue
+      }
+      this.inFlight.delete(key)
+      this.failures.delete(key)
+      this.invalidateCurrentHash(key)
+    }
+  }
+
   private begin(sessionId: string, request: GenerateChangeWalkthroughRequest): InFlightGeneration {
-    const existing = this.inFlight.get(sessionId)
+    const source = request.source ?? DEFAULT_WALKTHROUGH_SOURCE
+    const key = entryKey(sessionId, source)
+    const existing = this.inFlight.get(key)
     if (existing) {
       return existing
     }
 
-    this.failures.delete(sessionId)
+    this.failures.delete(key)
 
     let resolveModelStarted: () => void = () => {}
     const modelStarted = new Promise<void>((resolve) => {
@@ -711,37 +766,47 @@ export class ChangeWalkthroughService {
       resolveModelStarted()
     }
 
-    const result = this.runGenerate(sessionId, request, markModelStarted)
+    const result = this.runGenerate(sessionId, source, request, markModelStarted)
       .catch((error) => {
         if (modelCalled) {
-          this.failures.set(sessionId, toGenerationError(error))
+          this.failures.set(key, toGenerationError(error))
         }
         throw error
       })
       .finally(() => {
-        this.inFlight.delete(sessionId)
-        this.deletedDuringGeneration.delete(sessionId)
-        this.invalidateCurrentHash(sessionId)
+        this.inFlight.delete(key)
+        this.deletedDuringGeneration.delete(key)
+        this.invalidateCurrentHash(key)
       })
 
     result.catch(() => {})
 
     const entry: InFlightGeneration = { modelStarted, result }
-    this.inFlight.set(sessionId, entry)
+    this.inFlight.set(key, entry)
     return entry
   }
 
   private async runGenerate(
     sessionId: string,
+    source: WalkthroughSource,
     request: GenerateChangeWalkthroughRequest,
     onModelStart: () => void,
   ): Promise<{ walkthrough: ChangeWalkthrough; created: boolean }> {
     const session = await this.readSession(sessionId)
+    const key = entryKey(sessionId, source)
 
     let changes: FileDiffInfo[]
     try {
-      changes = await readSessionChanges(this.openCodeClient, sessionId)
+      changes = await readWalkthroughChanges({
+        client: this.openCodeClient,
+        session,
+        source,
+        gitEnv: this.gitAuthService.getGitEnvironment(true),
+      })
     } catch (error) {
+      if (error instanceof ChangeWalkthroughError) {
+        throw error
+      }
       throw new ChangeWalkthroughError(getErrorMessage(error) || 'Failed to read session changes', 502, {
         code: 'WALKTHROUGH_CHANGES_UNAVAILABLE',
       })
@@ -754,10 +819,10 @@ export class ChangeWalkthroughService {
     }
 
     const diffHash = computeChangesHash(changes)
-    this.currentHashes.set(sessionId, diffHash)
+    this.currentHashes.set(key, diffHash)
 
-    const previous = getChangeWalkthrough(this.db, sessionId)
-    const title = session.title ?? sessionId
+    const previous = getChangeWalkthrough(this.db, sessionId, walkthroughSourceKey(source))
+    const title = walkthroughTitle(session, source)
     const model = this.resolveWalkthroughModel(session)
     const modelKey = computeModelKey(model)
     const storedModel = model ? formatOpenCodeModelRef(model) : null
@@ -777,7 +842,7 @@ export class ChangeWalkthroughService {
         { ...previous, model: storedModel },
         onModelStart,
       )
-      if (this.deletedDuringGeneration.has(sessionId)) {
+      if (this.deletedDuringGeneration.has(key)) {
         throw new ChangeWalkthroughError('Session not found', 404)
       }
       return { walkthrough: resumed, created: true }
@@ -796,6 +861,7 @@ export class ChangeWalkthroughService {
     if (hunks.length === 0) {
       const walkthrough: ChangeWalkthrough = {
         sessionId,
+        source,
         diffHash,
         model: storedModel,
         summary: MECHANICAL_ONLY_SUMMARY,
@@ -831,6 +897,7 @@ export class ChangeWalkthroughService {
       const stops = parsed.stops.map((stop) => applyReuse(stop, reusable, modelKey))
       const walkthrough: ChangeWalkthrough = {
         sessionId,
+        source,
         diffHash,
         model: storedModel,
         summary: parsed.summary,
@@ -857,6 +924,7 @@ export class ChangeWalkthroughService {
 
       const walkthrough: ChangeWalkthrough = {
         sessionId,
+        source,
         diffHash,
         model: storedModel,
         summary: MECHANICAL_ONLY_SUMMARY,
@@ -890,6 +958,7 @@ export class ChangeWalkthroughService {
     const stops = planned.stops.map((stop) => applyReuse(stop, reusable, modelKey))
     let walkthrough: ChangeWalkthrough = {
       sessionId,
+      source,
       diffHash,
       model: storedModel,
       summary: planned.summary,
@@ -916,7 +985,7 @@ export class ChangeWalkthroughService {
       )
     }
 
-    if (this.deletedDuringGeneration.has(sessionId)) {
+    if (this.deletedDuringGeneration.has(key)) {
       throw new ChangeWalkthroughError('Session not found', 404)
     }
 
@@ -1005,7 +1074,7 @@ export class ChangeWalkthroughService {
   }
 
   private saveIfSessionLive(walkthrough: ChangeWalkthrough): boolean {
-    if (this.deletedDuringGeneration.has(walkthrough.sessionId)) {
+    if (this.deletedDuringGeneration.has(entryKey(walkthrough.sessionId, walkthrough.source))) {
       return false
     }
     saveChangeWalkthrough(this.db, walkthrough)
