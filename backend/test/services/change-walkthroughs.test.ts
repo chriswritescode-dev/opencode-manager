@@ -255,8 +255,8 @@ function refExists(repo: string, ref: string): boolean {
   }
 }
 
-function sessionAt(directory: string): SessionInfo {
-  return { id: SESSION_ID, title: 'Title', location: { directory } } as SessionInfo
+function sessionAt(directory: string, id: string = SESSION_ID): SessionInfo {
+  return { id, title: 'Title', location: { directory } } as SessionInfo
 }
 
 function replyForPrompt(prompt: string): string {
@@ -1982,15 +1982,19 @@ describe('ChangeWalkthroughService', () => {
     it('fetches once during generation, reads the ref on GET, and deletes it with the session', async () => {
       const repo = createPullRequestRepo()
       sessions[SESSION_ID] = { changes: threeHunks, info: sessionAt(repo) }
-      fetchRemoteRef.mockImplementation(async (target: { fullPath: string }, remote: string, refspec: string) => {
-        git(['fetch', remote, refspec], target.fullPath)
+      fetchRemoteRef.mockImplementation(async (target: { fullPath: string }, remote: string, refspecs: string[]) => {
+        git(['fetch', remote, ...refspecs], target.fullPath)
       })
       fake.setGenerateImpl(async (prompt) => replyForPrompt(prompt))
+
+      const headRef = `refs/ocm-walkthrough/${SESSION_ID}/pr/1/head`
+      const baseRef = `refs/ocm-walkthrough/${SESSION_ID}/pr/1/base/main`
 
       await service.generate(SESSION_ID, { source: { kind: 'pullRequest', number: 1, base: 'main' } })
 
       expect(fetchRemoteRef).toHaveBeenCalledTimes(1)
-      expect(refExists(repo, 'refs/ocm-walkthrough/pr/1')).toBe(true)
+      expect(refExists(repo, headRef)).toBe(true)
+      expect(refExists(repo, baseRef)).toBe(true)
 
       fetchRemoteRef.mockClear()
       const state = await service.getState(SESSION_ID, { kind: 'pullRequest', number: 1, base: 'main' })
@@ -2002,8 +2006,41 @@ describe('ChangeWalkthroughService', () => {
       service.handleEvent(sessionEvent('session.deleted', SESSION_ID))
 
       await vi.waitFor(() => {
-        expect(refExists(repo, 'refs/ocm-walkthrough/pr/1')).toBe(false)
+        expect(refExists(repo, headRef)).toBe(false)
+        expect(refExists(repo, baseRef)).toBe(false)
       })
+    })
+
+    it('keeps another session refs when one session is deleted', async () => {
+      const repo = createPullRequestRepo()
+      const secondSessionId = 'ses_walkthrough_2'
+      sessions[SESSION_ID] = { changes: threeHunks, info: sessionAt(repo) }
+      sessions[secondSessionId] = { changes: threeHunks, info: sessionAt(repo, secondSessionId) }
+      fetchRemoteRef.mockImplementation(async (target: { fullPath: string }, remote: string, refspecs: string[]) => {
+        git(['fetch', remote, ...refspecs], target.fullPath)
+      })
+      fake.setGenerateImpl(async (prompt) => replyForPrompt(prompt))
+
+      await service.generate(SESSION_ID, { source: { kind: 'pullRequest', number: 1, base: 'main' } })
+      await service.generate(secondSessionId, { source: { kind: 'pullRequest', number: 1, base: 'main' } })
+
+      const firstHead = `refs/ocm-walkthrough/${SESSION_ID}/pr/1/head`
+      const firstBase = `refs/ocm-walkthrough/${SESSION_ID}/pr/1/base/main`
+      const secondHead = `refs/ocm-walkthrough/${secondSessionId}/pr/1/head`
+      const secondBase = `refs/ocm-walkthrough/${secondSessionId}/pr/1/base/main`
+
+      expect(firstHead).not.toBe(secondHead)
+      expect(refExists(repo, firstHead)).toBe(true)
+      expect(refExists(repo, secondHead)).toBe(true)
+
+      service.handleEvent(sessionEvent('session.deleted', SESSION_ID))
+
+      await vi.waitFor(() => {
+        expect(refExists(repo, firstHead)).toBe(false)
+        expect(refExists(repo, firstBase)).toBe(false)
+      })
+      expect(refExists(repo, secondHead)).toBe(true)
+      expect(refExists(repo, secondBase)).toBe(true)
     })
 
     it('prefers the upstream remote when generating', async () => {

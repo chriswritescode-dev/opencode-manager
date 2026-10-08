@@ -29,45 +29,87 @@ const PULL_REQUEST_REMOTE_PREFERENCE = ['upstream', 'origin']
 
 type PullRequestSource = Extract<GitWalkthroughSource, { kind: 'pullRequest' }>
 
+export interface PullRequestRefs {
+  remote: string
+  baseBranch: string
+  headRef: string
+  baseRef: string
+}
+
 export interface PullRequestFetchPlan {
   remote: string
-  refspec: string
-  ref: string
+  refspecs: string[]
+  headRef: string
+  baseRef: string
 }
 
 export type PullRequestFetchRunner = (
   remote: string,
-  refspec: string,
+  refspecs: string[],
   timeoutMs: number,
 ) => Promise<void>
 
-export function walkthroughPullRequestRef(number: number): string {
-  return `refs/ocm-walkthrough/pr/${number}`
+export async function resolvePullRequestRefs(
+  directory: string,
+  sessionId: string,
+  source: PullRequestSource,
+  gitEnv?: Record<string, string>,
+): Promise<PullRequestRefs> {
+  const remotes = (await tryGit(directory, ['remote'], gitEnv))?.split('\n').map((line) => line.trim()) ?? []
+  const remote = PULL_REQUEST_REMOTE_PREFERENCE.find((candidate) => remotes.includes(candidate)) ?? 'origin'
+  const baseBranch = source.base ?? await resolveRemoteDefaultBranch(directory, remote, gitEnv)
+  return {
+    remote,
+    baseBranch,
+    headRef: `refs/ocm-walkthrough/${sessionId}/pr/${source.number}/head`,
+    baseRef: `refs/ocm-walkthrough/${sessionId}/pr/${source.number}/base/${baseBranch}`,
+  }
 }
 
 export async function planPullRequestFetch(
   directory: string,
+  sessionId: string,
   source: PullRequestSource,
   gitEnv?: Record<string, string>,
 ): Promise<PullRequestFetchPlan> {
-  const remotes = (await tryGit(directory, ['remote'], gitEnv))?.split('\n').map((line) => line.trim()) ?? []
-  const remote = PULL_REQUEST_REMOTE_PREFERENCE.find((candidate) => remotes.includes(candidate)) ?? 'origin'
-  const ref = walkthroughPullRequestRef(source.number)
-  return { remote, refspec: `+refs/pull/${source.number}/head:${ref}`, ref }
+  const { remote, baseBranch, headRef, baseRef } = await resolvePullRequestRefs(directory, sessionId, source, gitEnv)
+  return {
+    remote,
+    refspecs: [
+      `+refs/pull/${source.number}/head:${headRef}`,
+      `+refs/heads/${baseBranch}:${baseRef}`,
+    ],
+    headRef,
+    baseRef,
+  }
 }
 
 export async function fetchPullRequestRef(
   directory: string,
+  sessionId: string,
   source: PullRequestSource,
   gitEnv: Record<string, string> | undefined,
   runFetch: PullRequestFetchRunner,
-): Promise<string> {
-  const plan = await planPullRequestFetch(directory, source, gitEnv)
+): Promise<string[]> {
+  const plan = await planPullRequestFetch(directory, sessionId, source, gitEnv)
   await mapGitError(
-    () => runFetch(plan.remote, plan.refspec, GIT_FETCH_TIMEOUT_MS),
+    () => runFetch(plan.remote, plan.refspecs, GIT_FETCH_TIMEOUT_MS),
     'Failed to fetch the pull request',
   )
-  return plan.ref
+  return [plan.headRef, plan.baseRef]
+}
+
+async function resolveRemoteDefaultBranch(
+  directory: string,
+  remote: string,
+  gitEnv?: Record<string, string>,
+): Promise<string> {
+  const prefix = `${remote}/`
+  const ref = (await tryGit(directory, ['rev-parse', '--abbrev-ref', `${remote}/HEAD`], gitEnv))?.trim()
+  if (ref && ref.startsWith(prefix)) {
+    return ref.slice(prefix.length)
+  }
+  return resolveDefaultBranch(directory, gitEnv ?? {})
 }
 
 export async function deletePullRequestRef(
@@ -96,11 +138,12 @@ export async function readWalkthroughChanges({
   if (source.kind === 'session') {
     return readSessionChanges(client, session.id)
   }
-  return readGitChanges(session.location.directory, source, gitEnv)
+  return readGitChanges(session.location.directory, session.id, source, gitEnv)
 }
 
 async function readGitChanges(
   directory: string,
+  sessionId: string,
   source: GitWalkthroughSource,
   gitEnv?: Record<string, string>,
 ): Promise<FileDiffInfo[]> {
@@ -119,9 +162,8 @@ async function readGitChanges(
       return collectChanges(repoRoot, [`${base}...HEAD`], false, gitEnv)
     }
     case 'pullRequest': {
-      const base = await resolveBase(repoRoot, source.base, gitEnv)
-      const ref = walkthroughPullRequestRef(source.number)
-      return collectChanges(repoRoot, [`${base}...${ref}`], false, gitEnv)
+      const { headRef, baseRef } = await resolvePullRequestRefs(repoRoot, sessionId, source, gitEnv)
+      return collectChanges(repoRoot, [`${baseRef}...${headRef}`], false, gitEnv)
     }
   }
 }

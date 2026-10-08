@@ -940,14 +940,17 @@ export class ChangeWalkthroughService {
     const target = repo
       ? { id: repo.id, repoUrl: repo.repoUrl, fullPath: repo.fullPath }
       : { fullPath: directory }
-    const ref = await fetchPullRequestRef(
+    const refs = await fetchPullRequestRef(
       directory,
+      session.id,
       source,
       this.gitAuthService.getGitEnvironment(true),
-      (remote, refspec, timeoutMs) =>
-        this.gitService.fetchRemoteRef(target, remote, refspec, this.db, timeoutMs),
+      (remote, refspecs, timeoutMs) =>
+        this.gitService.fetchRemoteRef(target, remote, refspecs, this.db, timeoutMs),
     )
-    this.recordPullRequestRef(session.id, directory, ref)
+    for (const ref of refs) {
+      this.recordPullRequestRef(session.id, directory, ref)
+    }
   }
 
   private async runGenerate(

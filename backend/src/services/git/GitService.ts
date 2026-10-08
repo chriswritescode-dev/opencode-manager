@@ -741,14 +741,14 @@ export class GitService {
   async fetchRemoteRef(
     repo: { id?: number; repoUrl?: string; fullPath: string },
     remote: string,
-    refspec: string,
+    refspecs: string[],
     database: Database,
     timeoutMs?: number,
   ): Promise<void> {
     await this.withRemoteAuth(
       repo,
       async (env) => {
-        await executeCommand(['git', '-C', repo.fullPath, 'fetch', '--no-tags', remote, refspec], {
+        await executeCommand(['git', '-C', repo.fullPath, 'fetch', '--no-tags', remote, ...refspecs], {
           env,
           silent: true,
           timeout: timeoutMs,

@@ -13,11 +13,11 @@ import { ChangeWalkthroughError } from '../../src/services/change-walkthrough-er
 import {
   planPullRequestFetch,
   readWalkthroughChanges,
-  walkthroughPullRequestRef,
 } from '../../src/services/walkthrough-sources'
 import type { OpenCodeClient } from '../../src/services/opencode/client'
 import { cloneOrigin, createCommittedRepo, createOrigin, git, uniqueName } from '../helpers/git-fixtures'
 
+const TEST_SESSION_ID = 'ses_test'
 const workspaceRoot = mkdtempSync(path.join(tmpdir(), 'walkthrough-sources-'))
 process.env.GIT_CONFIG_NOSYSTEM = '1'
 process.env.GIT_CONFIG_GLOBAL = '/dev/null'
@@ -33,7 +33,7 @@ function repoPath(prefix: string): string {
 }
 
 function sessionAt(directory: string): SessionInfo {
-  return { id: 'ses_test', title: 'Test', location: { directory } } as SessionInfo
+  return { id: TEST_SESSION_ID, title: 'Test', location: { directory } } as SessionInfo
 }
 
 function readAt(directory: string, source: WalkthroughSource): Promise<FileDiffInfo[]> {
@@ -139,12 +139,49 @@ describe('readWalkthroughChanges', () => {
     git(['add', 'pr.txt'], clone)
     git(['commit', '-m', 'pr'], clone)
     git(['push', 'origin', 'HEAD:refs/pull/1/head'], clone)
-    git(['fetch', 'origin', `+refs/pull/1/head:${walkthroughPullRequestRef(1)}`], clone)
 
-    const changes = await readAt(clone, { kind: 'pullRequest', number: 1, base: 'main' })
+    const source = { kind: 'pullRequest', number: 1, base: 'main' } as const
+    const plan = await planPullRequestFetch(clone, TEST_SESSION_ID, source)
+    git(['fetch', 'origin', ...plan.refspecs], clone)
+
+    const changes = await readAt(clone, source)
 
     expect(changes.map((entry) => entry.file)).toEqual(['pr.txt'])
     expect(changes[0]?.status).toBe('added')
+  })
+
+  it('diffs a pull request against the base from the remote that supplies the head', async () => {
+    const upstream = repoPath('pr-fork-upstream')
+    const upstreamWork = repoPath('pr-fork-upstream-work')
+    createOrigin(upstream, upstreamWork)
+    writeFileSync(path.join(upstreamWork, 'upstream.txt'), 'upstream\n')
+    git(['add', 'upstream.txt'], upstreamWork)
+    git(['commit', '-m', 'upstream advance'], upstreamWork)
+    git(['push', 'origin', 'main'], upstreamWork)
+
+    const origin = repoPath('pr-fork-origin')
+    const originWork = repoPath('pr-fork-origin-work')
+    createOrigin(origin, originWork)
+
+    const clone = repoPath('pr-fork-clone')
+    cloneOrigin(origin, clone)
+    git(['remote', 'add', 'upstream', upstream], clone)
+    git(['fetch', 'upstream'], clone)
+
+    git(['checkout', '-b', 'feature', 'upstream/main'], clone)
+    writeFileSync(path.join(clone, 'pr.txt'), 'pr\n')
+    git(['add', 'pr.txt'], clone)
+    git(['commit', '-m', 'pr'], clone)
+    git(['push', 'upstream', 'HEAD:refs/pull/1/head'], clone)
+
+    const source = { kind: 'pullRequest', number: 1, base: 'main' } as const
+    const plan = await planPullRequestFetch(clone, TEST_SESSION_ID, source)
+    expect(plan.remote).toBe('upstream')
+    git(['fetch', 'upstream', ...plan.refspecs], clone)
+
+    const changes = await readAt(clone, source)
+
+    expect(changes.map((entry) => entry.file)).toEqual(['pr.txt'])
   })
 
   it('does not fetch the pull request ref when reading changes', async () => {
@@ -172,11 +209,15 @@ describe('readWalkthroughChanges', () => {
     git(['remote', 'add', 'origin', 'https://example.com/base.git'], repo)
     git(['remote', 'add', 'upstream', 'https://example.com/fork.git'], repo)
 
-    const plan = await planPullRequestFetch(repo, { kind: 'pullRequest', number: 7, base: 'main' })
+    const plan = await planPullRequestFetch(repo, TEST_SESSION_ID, { kind: 'pullRequest', number: 7, base: 'main' })
 
     expect(plan.remote).toBe('upstream')
-    expect(plan.refspec).toBe('+refs/pull/7/head:refs/ocm-walkthrough/pr/7')
-    expect(plan.ref).toBe('refs/ocm-walkthrough/pr/7')
+    expect(plan.refspecs).toEqual([
+      `+refs/pull/7/head:refs/ocm-walkthrough/${TEST_SESSION_ID}/pr/7/head`,
+      `+refs/heads/main:refs/ocm-walkthrough/${TEST_SESSION_ID}/pr/7/base/main`,
+    ])
+    expect(plan.headRef).toBe(`refs/ocm-walkthrough/${TEST_SESSION_ID}/pr/7/head`)
+    expect(plan.baseRef).toBe(`refs/ocm-walkthrough/${TEST_SESSION_ID}/pr/7/base/main`)
   })
 
   it('falls back to the origin remote when no upstream exists', async () => {
@@ -184,10 +225,30 @@ describe('readWalkthroughChanges', () => {
     createCommittedRepo(repo)
     git(['remote', 'add', 'origin', 'https://example.com/base.git'], repo)
 
-    const plan = await planPullRequestFetch(repo, { kind: 'pullRequest', number: 3, base: 'main' })
+    const plan = await planPullRequestFetch(repo, TEST_SESSION_ID, { kind: 'pullRequest', number: 3, base: 'main' })
 
     expect(plan.remote).toBe('origin')
-    expect(plan.refspec).toBe('+refs/pull/3/head:refs/ocm-walkthrough/pr/3')
+    expect(plan.refspecs).toEqual([
+      `+refs/pull/3/head:refs/ocm-walkthrough/${TEST_SESSION_ID}/pr/3/head`,
+      `+refs/heads/main:refs/ocm-walkthrough/${TEST_SESSION_ID}/pr/3/base/main`,
+    ])
+  })
+
+  it('resolves the default base from the selected remote HEAD when no base is given', async () => {
+    const repo = repoPath('pr-default-base')
+    createCommittedRepo(repo)
+    git(['remote', 'add', 'origin', 'https://example.com/base.git'], repo)
+    git(['remote', 'add', 'upstream', 'https://example.com/fork.git'], repo)
+    git(['update-ref', 'refs/remotes/upstream/trunk', 'HEAD'], repo)
+    git(['symbolic-ref', 'refs/remotes/upstream/HEAD', 'refs/remotes/upstream/trunk'], repo)
+
+    const plan = await planPullRequestFetch(repo, TEST_SESSION_ID, { kind: 'pullRequest', number: 9 })
+
+    expect(plan.remote).toBe('upstream')
+    expect(plan.refspecs).toEqual([
+      `+refs/pull/9/head:refs/ocm-walkthrough/${TEST_SESSION_ID}/pr/9/head`,
+      `+refs/heads/trunk:refs/ocm-walkthrough/${TEST_SESSION_ID}/pr/9/base/trunk`,
+    ])
   })
 
   it('excludes untracked files from staged and branch sources', async () => {
