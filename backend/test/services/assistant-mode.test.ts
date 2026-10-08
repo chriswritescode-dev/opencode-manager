@@ -1,22 +1,15 @@
 import { describe, expect, it, beforeEach, afterEach } from 'bun:test'
-import type { SessionPermissionModeService } from '../../src/services/session-permission-modes'
-import type { RepoWorkspaceService } from '../../src/services/repo-workspace'
-import type { GitAuthService } from '../../src/services/git-auth'
-import type { SessionGoalService } from '../../src/services/session-goals'
-import type { MultiRunService } from '../../src/services/multi-runs'
 import path from 'path'
 import { access, readFile, writeFile } from 'fs/promises'
 import { Hono } from 'hono'
 import { ensureAssistantMode, getAssistantModeStatus, buildSchedulesSkill, buildReposSkill, buildSettingsSkill, buildSessionsSkill, buildAssistantDefaultAgentMd, buildAssistantOpenCodeConfig, buildAssistantRepo, installAssistantWorkspace } from '../../src/services/assistant-mode'
 import { createTempAssistantWorkspace, createTestDb, mockRepo } from '../helpers/assistant-workspace'
-import { createInternalRoutes } from '../../src/routes/internal'
 import { ScheduleService } from '../../src/services/schedules'
-import { NotificationService } from '../../src/services/notification'
-import { SettingsService } from '../../src/services/settings'
 import { getOrCreateInternalToken } from '../../src/services/internal-token'
 import { createOpenCodeClient } from '../../src/services/opencode/client'
 import { getRepoById } from '../../src/db/queries'
 import type { ScheduleWorktreeManager } from '../../src/services/schedule-worktree'
+import { createInternalTestApp } from '../helpers/internal-test-app'
 
 describe('buildSchedulesSkill', () => {
   it('instructs the agent to use the ocm tool request action', () => {
@@ -687,10 +680,8 @@ describe('assistant-mode end-to-end', () => {
 
     const stubWorktreeManager = { prepare: () => Promise.resolve(null), finalize: () => Promise.resolve({ commitHash: null }), listWorktrees: () => [] } as unknown as ScheduleWorktreeManager
     const scheduleService = new ScheduleService(db, createOpenCodeClient(), stubWorktreeManager)
-    const notificationService = new NotificationService(db)
-    const settingsService = new SettingsService(db)
     const app = new Hono()
-    app.route('/api/internal', createInternalRoutes(db, scheduleService, notificationService, settingsService, createOpenCodeClient(), {} as SessionPermissionModeService, {} as unknown as RepoWorkspaceService, {} as unknown as GitAuthService, {} as unknown as SessionGoalService, {} as unknown as MultiRunService))
+    app.route('/api/internal', createInternalTestApp(db, { scheduleService }))
 
     const unauth = await app.request('/api/internal/schedules/all')
     expect(unauth.status).toBe(401)

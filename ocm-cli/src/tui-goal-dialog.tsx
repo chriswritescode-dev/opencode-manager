@@ -3,10 +3,8 @@ import { TextAttributes } from '@opentui/core'
 import { useKeyboard } from '@opentui/solid'
 import { createEffect, createSignal, on, onCleanup, Show } from 'solid-js'
 import type { Context } from '@opencode/plugin/tui/context'
-import type { SessionGoal } from '@opencode-manager/shared/schemas'
-import { getGoalOutcomeTitle, getGoalTokenLabel, getGoalTurnLabel } from '@opencode-manager/shared/notifications'
-import { isOpenGoal } from './goal-store.js'
-import { goalReason } from './tui-goal.js'
+import { isOpenSessionGoal, type SessionGoal } from '@opencode-manager/shared/schemas'
+import { getGoalOutcomeReason, getGoalOutcomeTitle, getGoalTokenLabel, getGoalTurnLabel } from '@opencode-manager/shared/notifications'
 import type { GoalDialogProps } from './tui-goal.js'
 import { DialogShell, TextAreaField, TextField, isSubmitKey, useFieldFocus } from './tui-form.js'
 import type { DialogTheme } from './tui-form.js'
@@ -33,7 +31,7 @@ function GoalDialog(props: GoalDialogProps & { context: Context }) {
 
   const openGoal = () => {
     const current = goal()
-    return isOpenGoal(current) ? current : null
+    return isOpenSessionGoal(current) ? current : null
   }
   const [field, setField] = useFieldFocus(() => FORM_FIELDS, () => openGoal() === null)
 
@@ -96,6 +94,7 @@ function GoalDialog(props: GoalDialogProps & { context: Context }) {
             ['ctrl+s', 'start goal'],
           ]}
         >
+          <text fg={theme.text.muted}>Sends with this session's current agent and model; send a message first to switch.</text>
           <Show when={goal()}>{(last) => <LastGoal theme={theme} goal={last()} />}</Show>
           <TextAreaField
             theme={theme}
@@ -167,7 +166,7 @@ function GoalStatus(props: { theme: DialogTheme; goal: SessionGoal }) {
         <text fg={props.theme.text.muted}>{props.goal.turnState === 'running' ? 'working' : 'waiting'}</text>
       </box>
       <text fg={props.theme.text.base}>{props.goal.objective}</text>
-      <Show when={goalReason(props.goal)}>
+      <Show when={getGoalOutcomeReason(props.goal)}>
         {(reason) => (
           <text fg={props.theme.text.muted}>
             {props.goal.lastVerdict ? `Last verdict: ${props.goal.lastVerdict} · ` : ''}
@@ -183,7 +182,7 @@ function LastGoal(props: { theme: DialogTheme; goal: SessionGoal }) {
   return (
     <text fg={props.theme.text.muted} wrapMode="none" truncate>
       Last goal: {getGoalOutcomeTitle(props.goal.status)}
-      {goalReason(props.goal) ? ` · ${goalReason(props.goal)}` : ''} · {props.goal.objective}
+      {getGoalOutcomeReason(props.goal) ? ` · ${getGoalOutcomeReason(props.goal)}` : ''} · {props.goal.objective}
     </text>
   )
 }

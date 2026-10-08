@@ -6,12 +6,12 @@ import type { Context } from '@opencode/plugin/tui/context'
 import {
   MULTI_RUN_FUSION_MIN_SOURCES,
   MULTI_RUN_MAX_MODELS,
+  canDiscardMultiRunEntry,
   type MultiRun,
   type MultiRunEntry,
   type MultiRunFusion,
 } from '@opencode-manager/shared/schemas'
 import {
-  canDiscard,
   defaultMultiRunName,
   formatEntryStatus,
   runSummary,
@@ -32,7 +32,7 @@ import {
 import type { DialogTheme } from './tui-form.js'
 
 const ISOLATION_OPTIONS = [
-  { title: 'Isolated worktrees (recommended)', value: true },
+  { title: 'Isolated workspaces (recommended)', value: true },
   { title: 'Shared repo directory', value: false },
 ] as const
 
@@ -323,7 +323,7 @@ function MultiRunsDialog(props: MultiRunsDialogProps & { context: Context }) {
       setFusionIds((ids) => toggleFusionSource(current, ids, row.entry.id))
       return
     }
-    if (name === 'd' && canDiscard(row.entry)) {
+    if (name === 'd' && canDiscardMultiRunEntry(row.entry)) {
       event.preventDefault()
       void discard(row.entry)
     }
@@ -441,7 +441,7 @@ function RunDetails(props: {
       <Show when={props.pendingDiscard !== null}>
         <text fg={props.theme.text.feedback.warning.base}>
           Press d again to discard this run
-          {props.run.entries.find((entry) => entry.id === props.pendingDiscard)?.isolated ? ' and remove its worktree' : ''}. This cannot be
+          {props.run.entries.find((entry) => entry.id === props.pendingDiscard)?.isolated ? ' and remove its workspace' : ''}. This cannot be
           undone.
         </text>
       </Show>
@@ -539,7 +539,7 @@ function FusionForm(props: {
       <text fg={props.theme.text.base}>
         Fuse {props.entryIds.length} results: <span style={{ fg: props.theme.text.muted }}>{sources().join(', ')}</span>
       </text>
-      <text fg={props.theme.text.muted}>The synthesis always runs in a new worktree.</text>
+      <text fg={props.theme.text.muted}>The synthesis always runs in a new isolated workspace.</text>
       <ModelPicker
         theme={props.theme}
         label="Synthesis model"

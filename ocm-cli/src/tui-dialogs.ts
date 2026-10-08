@@ -12,6 +12,26 @@ export function selectDialog<Value>(
   return context.ui.dialog.select({ title, options })
 }
 
+type SessionInfo = NonNullable<ReturnType<Context['data']['session']['get']>>
+
+export type SessionTarget = { sessionID: string; directory: string; session: SessionInfo }
+
+/** Resolves the routed session and its directory, or shows an error toast and returns undefined. */
+export function requireSessionTarget(context: Context): SessionTarget | undefined {
+  const route = context.ui.router.current()
+  if (route.type !== 'session') {
+    context.ui.toast.show({ variant: 'error', message: 'Not in a session' })
+    return undefined
+  }
+  const session = context.data.session.get(route.sessionID)
+  const directory = session?.location.directory
+  if (!session || !directory) {
+    context.ui.toast.show({ variant: 'error', message: 'Session has no directory' })
+    return undefined
+  }
+  return { sessionID: route.sessionID, directory, session }
+}
+
 export function slashArgument(input: string | undefined, name: string): string {
   const trimmed = (input ?? '').trim()
   const prefix = `/${name}`

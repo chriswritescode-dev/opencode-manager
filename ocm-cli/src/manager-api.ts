@@ -76,6 +76,8 @@ function createByteCounter(onProgress: (bytesSent: number) => void): TransformSt
   })
 }
 
+export const MANAGER_FEATURE_MISSING = 'MANAGER_FEATURE_MISSING'
+
 export class ManagerApiError extends Error {
   constructor(
     message: string,
@@ -83,6 +85,7 @@ export class ManagerApiError extends Error {
     public readonly code: string | null,
     public readonly operation: string,
     public readonly details: unknown = null,
+    public readonly jsonBody: boolean = false,
   ) {
     super(message)
     this.name = 'ManagerApiError'
@@ -90,7 +93,9 @@ export class ManagerApiError extends Error {
 }
 
 export function isManagerRouteMissing(error: unknown): boolean {
-  return error instanceof ManagerApiError && error.status === 404 && error.code === null
+  if (!(error instanceof ManagerApiError)) return false
+  if (error.code === MANAGER_FEATURE_MISSING) return true
+  return error.status === 404 && !error.jsonBody
 }
 
 async function formatErrorResponse(res: Response, operation: string): Promise<ManagerApiError> {
@@ -98,14 +103,20 @@ async function formatErrorResponse(res: Response, operation: string): Promise<Ma
   let code: string | null = null
   let detail = text
   let details: unknown = null
+  let jsonBody = false
   if (text) {
     try {
-      const parsed = JSON.parse(text) as { error?: unknown; message?: unknown; details?: unknown }
-      const errField = typeof parsed.error === 'string' ? parsed.error : null
-      const msgField = typeof parsed.message === 'string' ? parsed.message : null
-      code = errField
-      detail = msgField ?? errField ?? text
-      details = parsed.details ?? null
+      const parsed = JSON.parse(text) as unknown
+      if (typeof parsed === 'object' && parsed !== null && !Array.isArray(parsed)) {
+        jsonBody = true
+        const body = parsed as { error?: unknown; message?: unknown; code?: unknown; details?: unknown }
+        const codeField = typeof body.code === 'string' ? body.code : null
+        const errField = typeof body.error === 'string' ? body.error : null
+        const msgField = typeof body.message === 'string' ? body.message : null
+        code = codeField
+        detail = msgField ?? errField ?? text
+        details = body.details ?? null
+      }
     } catch {
       /* not JSON, keep raw text */
     }
@@ -113,7 +124,7 @@ async function formatErrorResponse(res: Response, operation: string): Promise<Ma
   const message = detail
     ? `${operation} failed (${res.status}): ${detail}`
     : `${operation} failed (${res.status})`
-  return new ManagerApiError(message, res.status, code, operation, details)
+  return new ManagerApiError(message, res.status, code, operation, details, jsonBody)
 }
 
 export class ManagerApi {
@@ -124,6 +135,58 @@ export class ManagerApi {
 
   private headers(extra: Record<string, string> = {}): Record<string, string> {
     return { Authorization: `Bearer ${this.token}`, ...extra }
+  }
+
+  private async requestJson<T>(
+    path: string,
+    operation: string,
+    parse: (body: unknown) => T,
+    init?: RequestInit & { feature?: boolean },
+  ): Promise<T> {
+    const { feature, ...requestInit } = init ?? {}
+    const baseHeaders = this.headers(
+      typeof requestInit.body === 'string' ? { 'Content-Type': 'application/json' } : {},
+    )
+    const res = await fetch(`${this.baseUrl}${path}`, {
+      ...requestInit,
+      headers: { ...baseHeaders, ...(requestInit.headers as Record<string, string> | undefined) },
+    })
+    if (!res.ok) throw await this.handleErrorResponse(res, operation, feature === true, requestInit.signal ?? undefined)
+    return parse(await res.json())
+  }
+
+  private async handleErrorResponse(
+    res: Response,
+    operation: string,
+    feature: boolean,
+    signal?: AbortSignal,
+  ): Promise<ManagerApiError> {
+    const error = await formatErrorResponse(res, operation)
+    if (feature && error.status === 401) {
+      return this.probeFeatureSupport(operation, error, signal)
+    }
+    return error
+  }
+
+  private async probeFeatureSupport(
+    operation: string,
+    fallback: ManagerApiError,
+    signal?: AbortSignal,
+  ): Promise<ManagerApiError> {
+    try {
+      const res = await fetch(`${this.baseUrl}/api/internal/opencode-workspaces`, { headers: this.headers(), signal })
+      if (res.ok) {
+        return new ManagerApiError(
+          `${operation} failed: this OpenCode Manager is too old for ocm goals and multi-runs; upgrade the Manager.`,
+          401,
+          MANAGER_FEATURE_MISSING,
+          operation,
+        )
+      }
+    } catch {
+      return fallback
+    }
+    return fallback
   }
 
   async mirrorBegin(repoId: number, opts: MirrorBeginOpts): Promise<MirrorBeginResult> {
@@ -270,37 +333,31 @@ export class ManagerApi {
     return (await res.json()) as MirrorPatchSnapshot
   }
 
-  async getLatestSessionGoal(sessionId: string): Promise<SessionGoal | null> {
-    const res = await fetch(`${this.baseUrl}/api/internal/session-goals?sessionId=${encodeURIComponent(sessionId)}`, {
-      headers: this.headers(),
-    })
-
-    if (!res.ok) throw await formatErrorResponse(res, 'read session goal')
-    const body = (await res.json()) as { goal: unknown }
-    return SessionGoalSchema.nullable().parse(body.goal)
+  getLatestSessionGoal(sessionId: string, signal?: AbortSignal): Promise<SessionGoal | null> {
+    return this.requestJson(
+      `/api/internal/session-goals?sessionId=${encodeURIComponent(sessionId)}`,
+      'read session goal',
+      (body) => SessionGoalSchema.nullable().parse((body as { goal: unknown }).goal),
+      { signal, feature: true },
+    )
   }
 
-  async startSessionGoal(input: StartSessionGoalRequest): Promise<SessionGoal> {
-    const res = await fetch(`${this.baseUrl}/api/internal/session-goals`, {
-      method: 'POST',
-      headers: { ...this.headers(), 'Content-Type': 'application/json' },
-      body: JSON.stringify(input),
-    })
-
-    if (!res.ok) throw await formatErrorResponse(res, 'start session goal')
-    const body = (await res.json()) as { goal: unknown }
-    return SessionGoalSchema.parse(body.goal)
+  startSessionGoal(input: StartSessionGoalRequest): Promise<SessionGoal> {
+    return this.requestJson(
+      '/api/internal/session-goals',
+      'start session goal',
+      (body) => SessionGoalSchema.parse((body as { goal: unknown }).goal),
+      { method: 'POST', body: JSON.stringify(input), feature: true },
+    )
   }
 
-  private async runSessionGoalAction(id: number, action: 'pause' | 'resume' | 'cancel'): Promise<SessionGoal> {
-    const res = await fetch(`${this.baseUrl}/api/internal/session-goals/${encodeURIComponent(id)}/${action}`, {
-      method: 'POST',
-      headers: this.headers(),
-    })
-
-    if (!res.ok) throw await formatErrorResponse(res, `${action} session goal`)
-    const body = (await res.json()) as { goal: unknown }
-    return SessionGoalSchema.parse(body.goal)
+  private runSessionGoalAction(id: number, action: 'pause' | 'resume' | 'cancel'): Promise<SessionGoal> {
+    return this.requestJson(
+      `/api/internal/session-goals/${encodeURIComponent(id)}/${action}`,
+      `${action} session goal`,
+      (body) => SessionGoalSchema.parse((body as { goal: unknown }).goal),
+      { method: 'POST', feature: true },
+    )
   }
 
   pauseSessionGoal(id: number): Promise<SessionGoal> {
@@ -315,48 +372,39 @@ export class ManagerApi {
     return this.runSessionGoalAction(id, 'cancel')
   }
 
-  async listMultiRuns(repoId: number): Promise<MultiRun[]> {
-    const res = await fetch(`${this.baseUrl}/api/internal/multi-runs?repoId=${encodeURIComponent(repoId)}`, {
-      headers: this.headers(),
-    })
-
-    if (!res.ok) throw await formatErrorResponse(res, 'list multi-runs')
-    const body = (await res.json()) as { runs: unknown }
-    return MultiRunSchema.array().parse(body.runs)
+  listMultiRuns(repoId: number): Promise<MultiRun[]> {
+    return this.requestJson(
+      `/api/internal/multi-runs?repoId=${encodeURIComponent(repoId)}`,
+      'list multi-runs',
+      (body) => MultiRunSchema.array().parse((body as { runs: unknown }).runs),
+      { feature: true },
+    )
   }
 
-  async launchMultiRun(request: LaunchMultiRunRequest): Promise<MultiRun> {
-    const res = await fetch(`${this.baseUrl}/api/internal/multi-runs`, {
-      method: 'POST',
-      headers: { ...this.headers(), 'Content-Type': 'application/json' },
-      body: JSON.stringify(request),
-    })
-
-    if (!res.ok) throw await formatErrorResponse(res, 'launch multi-run')
-    const body = (await res.json()) as { run: unknown }
-    return MultiRunSchema.parse(body.run)
+  launchMultiRun(request: LaunchMultiRunRequest): Promise<MultiRun> {
+    return this.requestJson(
+      '/api/internal/multi-runs',
+      'launch multi-run',
+      (body) => MultiRunSchema.parse((body as { run: unknown }).run),
+      { method: 'POST', body: JSON.stringify(request), feature: true },
+    )
   }
 
-  async fuseMultiRun(runId: number, request: FuseMultiRunRequest): Promise<MultiRun> {
-    const res = await fetch(`${this.baseUrl}/api/internal/multi-runs/${encodeURIComponent(runId)}/fusions`, {
-      method: 'POST',
-      headers: { ...this.headers(), 'Content-Type': 'application/json' },
-      body: JSON.stringify(request),
-    })
-
-    if (!res.ok) throw await formatErrorResponse(res, 'fuse multi-run')
-    const body = (await res.json()) as { run: unknown }
-    return MultiRunSchema.parse(body.run)
+  fuseMultiRun(runId: number, request: FuseMultiRunRequest): Promise<MultiRun> {
+    return this.requestJson(
+      `/api/internal/multi-runs/${encodeURIComponent(runId)}/fusions`,
+      'fuse multi-run',
+      (body) => MultiRunSchema.parse((body as { run: unknown }).run),
+      { method: 'POST', body: JSON.stringify(request), feature: true },
+    )
   }
 
-  async discardMultiRunEntry(runId: number, entryId: number): Promise<MultiRun> {
-    const res = await fetch(`${this.baseUrl}/api/internal/multi-runs/${encodeURIComponent(runId)}/entries/${encodeURIComponent(entryId)}/discard`, {
-      method: 'POST',
-      headers: this.headers(),
-    })
-
-    if (!res.ok) throw await formatErrorResponse(res, 'discard multi-run entry')
-    const body = (await res.json()) as { run: unknown }
-    return MultiRunSchema.parse(body.run)
+  discardMultiRunEntry(runId: number, entryId: number): Promise<MultiRun> {
+    return this.requestJson(
+      `/api/internal/multi-runs/${encodeURIComponent(runId)}/entries/${encodeURIComponent(entryId)}/discard`,
+      'discard multi-run entry',
+      (body) => MultiRunSchema.parse((body as { run: unknown }).run),
+      { method: 'POST', feature: true },
+    )
   }
 }

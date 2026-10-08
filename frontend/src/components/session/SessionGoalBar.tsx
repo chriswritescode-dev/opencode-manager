@@ -8,8 +8,8 @@ import {
   useResumeSessionGoal,
   useSessionGoal,
 } from '@/hooks/useSessionGoals'
-import { getGoalOutcomeTitle, getGoalStopReasonLabel, getGoalTokenLabel, getGoalTurnLabel } from '@opencode-manager/shared/notifications'
-import type { SessionGoalStatus } from '@opencode-manager/shared/schemas'
+import { getGoalOutcomeTitle, getGoalTokenLabel, getGoalTurnLabel, getGoalOutcomeReason } from '@opencode-manager/shared/notifications'
+import { isTerminalSessionGoal, type SessionGoalStatus } from '@opencode-manager/shared/schemas'
 
 const STATUS_CHIP_CLASSES: Record<SessionGoalStatus, string> = {
   active: 'bg-highlight text-highlight-foreground border-highlight',
@@ -17,12 +17,6 @@ const STATUS_CHIP_CLASSES: Record<SessionGoalStatus, string> = {
   completed: 'bg-success/15 text-success border-success/40',
   blocked: 'bg-destructive/15 text-destructive border-destructive/40',
   stopped: 'bg-muted text-muted-foreground border-border',
-}
-
-const TERMINAL_STATUSES: SessionGoalStatus[] = ['completed', 'blocked', 'stopped']
-
-function isTerminal(status: SessionGoalStatus): boolean {
-  return TERMINAL_STATUSES.includes(status)
 }
 
 export function SessionGoalBar({ sessionID }: { sessionID: string }) {
@@ -34,10 +28,10 @@ export function SessionGoalBar({ sessionID }: { sessionID: string }) {
   const [dismissedGoalId, setDismissedGoalId] = useState<number | null>(null)
 
   if (!goal) return null
-  if (isTerminal(goal.status) && dismissedGoalId === goal.id) return null
+  const terminal = isTerminalSessionGoal(goal)
+  if (terminal && dismissedGoalId === goal.id) return null
 
-  const terminal = isTerminal(goal.status)
-  const reason = goal.stopReason ? getGoalStopReasonLabel(goal.stopReason) : goal.lastReason
+  const reason = getGoalOutcomeReason(goal)
   const tokenLabel = getGoalTokenLabel(goal)
 
   return (

@@ -3,22 +3,25 @@ import {
   GOAL_MAX_CONTINUATIONS_MAX,
   GOAL_MAX_CONTINUATIONS_MIN,
   StartSessionGoalRequestSchema,
+  isOpenSessionGoal,
   type SessionGoal,
   type StartSessionGoalRequest,
 } from '@opencode-manager/shared/schemas'
 import {
+  getGoalOutcomeReason,
   getGoalOutcomeTitle,
-  getGoalStopReasonLabel,
   getGoalTokenLabel,
   getGoalTurnLabel,
 } from '@opencode-manager/shared/notifications'
-import { ManagerApi, isManagerRouteMissing } from './manager-api.js'
-import { resolveManagerAuth } from './manager-auth.js'
-import type { ManagerAuthOk } from './manager-auth.js'
-import { slashArgument } from './tui-dialogs.js'
-import { isOpenGoal } from './goal-store.js'
+import { isManagerRouteMissing } from './manager-api.js'
+import type { ManagerApi } from './manager-api.js'
+import { resolveManagerApi } from './manager-auth.js'
+import { describeCause } from './token-store.js'
+import { requireSessionTarget, slashArgument } from './tui-dialogs.js'
 import type { GoalStore } from './goal-store.js'
 import type { RemoteContext } from './remote-context.js'
+
+export const GOAL_COMMAND = 'ocm-goal'
 
 export const GOALS_ATTACH_REQUIRED =
   'Goals run on OpenCode Manager. Attach with `ocm` (or move this session with /ocm-move) first.'
@@ -52,11 +55,19 @@ export type GoalCommandDeps = {
   remote: RemoteContext | undefined
   store: GoalStore | undefined
   showDialog: (props: GoalDialogProps) => void
-  createApi?: (auth: ManagerAuthOk) => ManagerApi
+}
+
+const GOAL_OBJECTIVE_MAX_LENGTH = 60
+
+/** The objective's first line, cut to a single-line summary with a trailing ellipsis when long. */
+export function goalObjectiveSummary(objective: string): string {
+  const newline = objective.indexOf('\n')
+  const firstLine = (newline === -1 ? objective : objective.slice(0, newline)).trim()
+  return firstLine.length > GOAL_OBJECTIVE_MAX_LENGTH ? `${firstLine.slice(0, GOAL_OBJECTIVE_MAX_LENGTH)}…` : firstLine
 }
 
 export function formatGoalStatus(goal: SessionGoal): string {
-  return [getGoalOutcomeTitle(goal.status), getGoalTurnLabel(goal), getGoalTokenLabel(goal), goal.objective]
+  return [getGoalOutcomeTitle(goal.status), getGoalTurnLabel(goal), getGoalTokenLabel(goal), goalObjectiveSummary(goal.objective)]
     .filter((part): part is string => part !== null)
     .join(' · ')
 }
@@ -66,13 +77,8 @@ export function goalOutcomeToast(goal: SessionGoal): ToastOptions {
   return {
     variant,
     title: getGoalOutcomeTitle(goal.status),
-    message: goalReason(goal) ?? goal.objective,
+    message: getGoalOutcomeReason(goal) ?? goalObjectiveSummary(goal.objective),
   }
-}
-
-/** The stop-reason label, else the auditor's last reason, else null. */
-export function goalReason(goal: SessionGoal): string | null {
-  return goal.stopReason ? getGoalStopReasonLabel(goal.stopReason) : goal.lastReason
 }
 
 /** Validates the goal dialog fields into a start request; blank limits fall back to the Manager defaults. */
@@ -107,7 +113,7 @@ export function parseGoalForm(form: GoalFormInput, sessionId: string, directory:
 
 export function describeGoalError(error: unknown): string {
   if (isManagerRouteMissing(error)) return GOALS_ROUTE_MISSING
-  return error instanceof Error ? error.message : String(error)
+  return describeCause(error)
 }
 
 export async function runGoalCommand(context: Context, deps: GoalCommandDeps, input?: string): Promise<void> {
@@ -117,30 +123,22 @@ export async function runGoalCommand(context: Context, deps: GoalCommandDeps, in
       return
     }
 
-    const route = context.ui.router.current()
-    if (route.type !== 'session') {
-      context.ui.toast.show({ variant: 'error', message: 'Not in a session' })
-      return
-    }
-    const sessionID = route.sessionID
-    const directory = context.data.session.get(sessionID)?.location.directory
-    if (!directory) {
-      context.ui.toast.show({ variant: 'error', message: 'Session has no directory' })
-      return
-    }
+    const target = requireSessionTarget(context)
+    if (!target) return
+    const { sessionID, directory } = target
 
-    const auth = await resolveManagerAuth(deps.remote.managerUrl)
-    if (!auth.ok) {
-      context.ui.toast.show({ variant: 'error', message: auth.message })
+    const resolved = await resolveManagerApi(deps.remote.managerUrl)
+    if (!resolved.ok) {
+      context.ui.toast.show({ variant: 'error', message: resolved.message })
       return
     }
-    const api = deps.createApi ? deps.createApi(auth) : new ManagerApi(auth.managerUrl, auth.token)
+    const api = resolved.api
     const store = deps.store
     const actions = createGoalActions(context, api, store, sessionID, directory)
 
-    const objective = slashArgument(input, 'goal')
+    const objective = slashArgument(input, GOAL_COMMAND)
     const existing = await api.getLatestSessionGoal(sessionID)
-    if (objective && !isOpenGoal(existing)) {
+    if (objective && !isOpenSessionGoal(existing)) {
       const error = await actions.start({ objective, maxTurns: '', tokenBudget: '' })
       if (error) context.ui.toast.show({ variant: 'error', message: error })
       return
@@ -193,7 +191,7 @@ async function startGoal(context: Context, api: ManagerApi, store: GoalStore, re
   } catch (error) {
     const cancelled = await api.cancelSessionGoal(goal.id).catch(() => undefined)
     if (cancelled) store.set(cancelled)
-    return `The goal was cancelled because the objective could not be sent: ${error instanceof Error ? error.message : String(error)}`
+    return `The goal was cancelled because the objective could not be sent: ${describeCause(error)}`
   }
 }
 

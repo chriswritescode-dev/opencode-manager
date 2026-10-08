@@ -4,7 +4,9 @@ import { callOpenCode } from "./opencodeApi";
 import {
   compareCatalogModels,
   formatOpenCodeModelRef,
+  isActiveCatalogProvider,
   isModelFree,
+  isSelectableCatalogModel,
   modelPreferenceKey,
   openCodeLocation,
   selectConfiguredModelRef,
@@ -64,11 +66,11 @@ export async function getProviders(directory?: string): Promise<ProviderCatalog>
       Promise.all([api.provider.list(location), api.model.list(location)]),
     );
 
-    const activeProviders = providerResult.data.filter((provider) => provider.activation !== "disabled");
+    const activeProviders = providerResult.data.filter(isActiveCatalogProvider);
 
     const providers = activeProviders.map((provider): Provider => {
       const models = modelResult.data
-        .filter((model) => model.providerID === provider.id && model.status !== "deprecated" && model.enabled)
+        .filter((model) => model.providerID === provider.id && isSelectableCatalogModel(model))
         .map(mapModelInfo);
 
       models.sort((a, b) =>

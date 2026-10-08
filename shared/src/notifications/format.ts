@@ -1,4 +1,5 @@
 import type { SessionGoal, SessionGoalStatus, SessionGoalStopReason } from '../schemas/session-goals'
+import type { MultiRunEntryStatus } from '../schemas/multi-runs'
 
 const GOAL_OUTCOME_TITLES: Record<SessionGoalStatus, string> = {
   active: 'Goal active',
@@ -25,6 +26,21 @@ export function getGoalOutcomeTitle(status: SessionGoalStatus): string {
 
 export function getGoalStopReasonLabel(stopReason: SessionGoalStopReason): string {
   return GOAL_STOP_REASON_LABELS[stopReason]
+}
+
+export function getGoalOutcomeReason(goal: Pick<SessionGoal, 'stopReason' | 'lastReason'>): string | null {
+  return goal.stopReason ? getGoalStopReasonLabel(goal.stopReason) : goal.lastReason
+}
+
+const MULTI_RUN_ENTRY_STATUS_LABELS: Record<MultiRunEntryStatus, string> = {
+  starting: 'Starting',
+  started: 'Started',
+  failed: 'Failed',
+  discarded: 'Discarded',
+}
+
+export function getMultiRunEntryStatusLabel(status: MultiRunEntryStatus): string {
+  return MULTI_RUN_ENTRY_STATUS_LABELS[status]
 }
 
 export function getGoalTurnLabel(goal: Pick<SessionGoal, 'continuationCount' | 'maxContinuations'>): string {

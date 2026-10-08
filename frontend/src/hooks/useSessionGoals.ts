@@ -7,7 +7,7 @@ import {
   startSessionGoal,
 } from '@/api/sessionGoals'
 import { showToast } from '@/lib/toast'
-import type { SessionGoal, StartSessionGoalRequest } from '@opencode-manager/shared/schemas'
+import { SESSION_GOAL_POLL_INTERVAL_MS, type SessionGoal, type StartSessionGoalRequest } from '@opencode-manager/shared/schemas'
 
 function sessionGoalQueryKey(sessionId: string) {
   return ['session-goal', sessionId] as const
@@ -17,7 +17,7 @@ export function useSessionGoal(sessionId: string) {
   return useQuery({
     queryKey: sessionGoalQueryKey(sessionId),
     queryFn: () => getLatestSessionGoal(sessionId),
-    refetchInterval: (query) => (query.state.data?.status === 'active' ? 3000 : false),
+    refetchInterval: (query) => (query.state.data?.status === 'active' ? SESSION_GOAL_POLL_INTERVAL_MS : false),
   })
 }
 

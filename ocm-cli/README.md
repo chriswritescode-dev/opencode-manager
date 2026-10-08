@@ -155,27 +155,34 @@ where it is (use `/ocm-move` to bring a local session along).
 The plugin also registers two Manager-backed commands, both of which need an
 attached Manager repo through `ocm`:
 
-- `/goal [objective]` starts a Manager-driven goal on the current top-level
+- `/ocm-goal [objective]` starts a Manager-driven goal on the current top-level
   session and sends the objective as the next message. With no objective, a
   dialog asks for it, plus optional max turns and token budget (blank uses the
-  Manager defaults). Scheduled runs and subagent sessions are rejected by the
-  Manager. While a goal is open, a status line above the composer shows its
-  turn and token usage, and a toast reports the outcome. Running `/goal` while
-  a goal is open shows its live status with `p` to pause or resume and `x`
-  (twice) to cancel.
-- `/multirun [prompt]` opens a launch dialog: prompt, name, a filterable model
-  checklist (up to 5), isolated worktrees or the shared repo directory, and an
-  optional base ref. `ctrl+s` launches, and the started sessions open in tabs.
-  With no prompt, `/multirun` opens the runs browser for the attached repo:
-  pick a run, open entry or fusion sessions, discard entries (`d` twice), select
-  results with `space`, and press `f` to fuse them with a synthesis model. On
-  the run list, `f` fuses every started result of the highlighted run. A fusion
-  always runs in a new worktree.
+  Manager defaults). The objective is sent as plain text with the session's
+  current agent and model: the plugin cannot read the composer's selection, so
+  send a message first if you switched agent or model, and `@file` mentions are
+  not attached. Scheduled runs and subagent sessions are rejected by the
+  Manager. While a goal is open, a one-line status above the composer shows its
+  turn (and token usage when the goal has a token budget). The TUI keeps
+  following the goal after you leave the session, and a toast reports the
+  outcome with an option to open the session. Running `/ocm-goal` while a goal
+  is open shows its live status with `p` to pause or resume and `x` (twice) to
+  cancel.
+- `/ocm-multirun [prompt]` opens a launch dialog: prompt, name, a filterable
+  model checklist (up to 5), isolated workspaces or the shared repo directory,
+  and an optional base ref. `ctrl+s` launches; the started sessions open in
+  tabs, or the first one opens when tabs are off. With no prompt,
+  `/ocm-multirun` opens the runs browser for the attached repo: pick a run, open
+  entry or fusion sessions, discard entries (`d` twice), select results with
+  `space`, and press `f` to fuse them with a synthesis model. On the run list,
+  `f` fuses every started result of the highlighted run. A fusion always runs in
+  a new isolated workspace.
 
 Both commands need an OpenCode Manager release that exposes
 `/api/internal/session-goals` and `/api/internal/multi-runs`. An older Manager
-answers these requests with `404 Not Found`, and the TUI reports that the
-Manager must be upgraded.
+rejects these routes with `401 Unauthorized` even for a valid token; the TUI
+checks the token against another Manager route and then reports that the
+Manager must be upgraded instead of asking you to log in again.
 
 Enable it in `~/.config/opencode/cli.json`:
 

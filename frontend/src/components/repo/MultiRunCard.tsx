@@ -14,11 +14,14 @@ import { useSessionStatusForSession, type SessionStatusType } from '@/stores/ses
 import {
   MULTI_RUN_FUSION_MIN_SOURCES,
   MULTI_RUN_MAX_MODELS,
+  canDiscardMultiRunEntry,
+  isFusionSourceEntry,
   type MultiRun,
   type MultiRunEntry,
   type MultiRunFusion,
   type MultiRunFusionStatus,
 } from '@opencode-manager/shared/schemas'
+import { getMultiRunEntryStatusLabel } from '@opencode-manager/shared/notifications'
 
 type StatusTone = 'success' | 'warning' | 'destructive' | 'info' | 'muted'
 
@@ -70,14 +73,14 @@ const HEADER_BUTTON_CLASS = 'h-7 px-2 text-xs'
 function describeEntryReadiness(entry: MultiRunEntry, live: SessionStatusType): EntryReadiness {
   switch (entry.status) {
     case 'discarded':
-      return { ready: false, label: 'Discarded', tone: 'muted', reason: 'discarded' }
+      return { ready: false, label: getMultiRunEntryStatusLabel('discarded'), tone: 'muted', reason: 'discarded' }
     case 'failed':
-      return { ready: false, label: 'Failed', tone: 'destructive', reason: entry.error ?? 'no final reply' }
+      return { ready: false, label: getMultiRunEntryStatusLabel('failed'), tone: 'destructive', reason: entry.error ?? 'no final reply' }
     case 'starting':
-      return { ready: false, label: 'Starting', tone: 'info', reason: 'still starting' }
+      return { ready: false, label: getMultiRunEntryStatusLabel('starting'), tone: 'info', reason: 'still starting' }
     case 'started':
       if (!entry.sessionId) {
-        return { ready: false, label: 'Started', tone: 'muted', reason: 'no session recorded' }
+        return { ready: false, label: getMultiRunEntryStatusLabel('started'), tone: 'muted', reason: 'no session recorded' }
       }
       if (live.type !== 'idle') {
         return { ready: false, label: 'Running', tone: 'warning', reason: 'still running — wait for a final reply' }
@@ -148,7 +151,7 @@ export function MultiRunCard({
   const [promptExpanded, setPromptExpanded] = useState(false)
   const selecting = selectedEntryIds !== null
   const isOpen = expanded || selecting
-  const launchedEntries = run.entries.filter((entry) => entry.status === 'started' && entry.sessionId).length
+  const launchedEntries = run.entries.filter(isFusionSourceEntry).length
   const selectionFull = (selectedEntryIds?.length ?? 0) >= MULTI_RUN_MAX_MODELS
   const promptIsLong = run.prompt.length > PROMPT_PREVIEW_LENGTH
 
@@ -295,7 +298,7 @@ function EntryRow({
   const reason = unavailableReason ?? readiness.reason
   const unavailable = unavailableReason !== null || !readiness.ready
   const sessionId = entry.sessionId
-  const canDiscard = entry.status === 'started' || entry.status === 'failed'
+  const canDiscard = canDiscardMultiRunEntry(entry)
   const isolationLabel = entry.isolated ? 'Isolated' : 'Repository checkout'
 
   const detail = selecting && unavailable

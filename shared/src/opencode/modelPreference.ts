@@ -225,6 +225,14 @@ export function compareCatalogModels(a: CatalogSortEntry, b: CatalogSortEntry): 
   return (a.name ?? '').localeCompare(b.name ?? '')
 }
 
+export function isActiveCatalogProvider(provider: { activation?: string }): boolean {
+  return provider.activation !== 'disabled'
+}
+
+export function isSelectableCatalogModel(model: { enabled: boolean; status: string }): boolean {
+  return model.enabled && model.status !== 'deprecated'
+}
+
 interface SelectEffectiveModelRefOptions {
   models: ModelInfo[]
   defaultModel?: ModelRef | null

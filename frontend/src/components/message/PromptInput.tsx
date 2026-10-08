@@ -38,6 +38,7 @@ import { getNextPrimaryAgentId } from '@/lib/primaryAgents'
 import { randomId } from '@/lib/utils'
 import { showToast } from '@/lib/toast'
 import { findModelInfo } from '@opencode-manager/shared/opencode'
+import { isOpenSessionGoal } from '@opencode-manager/shared/schemas'
 import { useProviders } from '@/hooks/useProviders'
 
 
@@ -1336,7 +1337,7 @@ if (isIOS && isSecureContext && navigator.clipboard && navigator.clipboard.read)
   const showStopButton = isSessionActive
   const hideSecondaryButtons = isMobile && isSessionActive
   const showMobileScrollButton = isMobile && showScrollButton
-  const hasOpenGoal = sessionGoal?.status === 'active' || sessionGoal?.status === 'paused'
+  const hasOpenGoal = isOpenSessionGoal(sessionGoal)
   const lockedReason = permissionMode?.lockedReason ?? null
   const goalButtonLabel = lockedReason === 'schedule'
     ? 'Scheduled runs cannot run goals'

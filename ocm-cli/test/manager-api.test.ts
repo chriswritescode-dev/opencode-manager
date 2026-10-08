@@ -1,5 +1,5 @@
 import { describe, it, expect, vi, afterEach } from 'vitest'
-import { ManagerApi, ManagerApiError, isManagerRouteMissing } from '../src/manager-api.js'
+import { ManagerApi, ManagerApiError, isManagerRouteMissing, MANAGER_FEATURE_MISSING } from '../src/manager-api.js'
 import type { MultiRun, SessionGoal } from '@opencode-manager/shared/schemas'
 
 const BASE_URL = 'http://localhost:5003'
@@ -105,6 +105,18 @@ describe('ManagerApi session goals', () => {
     })
   })
 
+  it('forwards the abort signal to fetch', async () => {
+    const fetchMock = stubFetch(okResponse({ goal }))
+    const controller = new AbortController()
+
+    await api.getLatestSessionGoal('ses_1', controller.signal)
+
+    expect(fetchMock).toHaveBeenCalledWith(`${BASE_URL}/api/internal/session-goals?sessionId=ses_1`, {
+      headers: { Authorization: 'Bearer tok' },
+      signal: controller.signal,
+    })
+  })
+
   it('rejects a goal response that fails schema validation', async () => {
     stubFetch(okResponse({ goal: { ...goal, status: 'bogus' } }))
 
@@ -162,16 +174,26 @@ describe('ManagerApi multi-runs', () => {
 describe('ManagerApiError', () => {
   const api = new ManagerApi(BASE_URL, 'tok')
 
-  it('carries a JSON error code and details', async () => {
+  it('reads the machine code from the JSON code field, not the human error text', async () => {
     const details = { unavailableSources: [{ entryId: 1, model: 'a/b', reason: 'running', message: 'still running' }] }
-    stubFetch(errorResponse(409, JSON.stringify({ error: 'Fusion unavailable', details })))
+    stubFetch(errorResponse(409, JSON.stringify({ error: 'Fusion unavailable', code: 'FUSION_UNAVAILABLE', details })))
 
     const error = await api.fuseMultiRun(3, { requestId: '11111111-1111-4111-8111-111111111111', entryIds: [1, 2], model: 'a/b' }).catch((err) => err)
 
     expect(error).toBeInstanceOf(ManagerApiError)
     expect((error as ManagerApiError).status).toBe(409)
-    expect((error as ManagerApiError).code).toBe('Fusion unavailable')
+    expect((error as ManagerApiError).code).toBe('FUSION_UNAVAILABLE')
+    expect((error as ManagerApiError).message).toContain('Fusion unavailable')
     expect((error as ManagerApiError).details).toEqual(details)
+    expect((error as ManagerApiError).jsonBody).toBe(true)
+  })
+
+  it('leaves the code null when the body only carries human error text', async () => {
+    stubFetch(errorResponse(409, JSON.stringify({ error: 'Fusion unavailable' })))
+
+    const error = await api.fuseMultiRun(3, { requestId: '11111111-1111-4111-8111-111111111111', entryIds: [1, 2], model: 'a/b' }).catch((err) => err)
+
+    expect((error as ManagerApiError).code).toBeNull()
   })
 
   it('leaves details null when the error body has none', async () => {
@@ -180,6 +202,79 @@ describe('ManagerApiError', () => {
     const error = await api.listMultiRuns(1).catch((err) => err)
 
     expect((error as ManagerApiError).details).toBeNull()
+  })
+
+  it('marks a plain-text error body as non-JSON', async () => {
+    stubFetch(errorResponse(500, 'boom'))
+
+    const error = await api.listMultiRuns(1).catch((err) => err)
+
+    expect((error as ManagerApiError).jsonBody).toBe(false)
+    expect((error as ManagerApiError).code).toBeNull()
+  })
+})
+
+describe('ManagerApi feature support', () => {
+  const api = new ManagerApi(BASE_URL, 'tok')
+
+  it('maps a 401 to MANAGER_FEATURE_MISSING when the token probe succeeds', async () => {
+    const fetchMock = vi.fn()
+      .mockResolvedValueOnce(errorResponse(401, JSON.stringify({ error: 'Unauthorized' })))
+      .mockResolvedValueOnce(okResponse({ workspaces: [] }))
+    vi.stubGlobal('fetch', fetchMock)
+
+    const error = await api.listMultiRuns(1).catch((err) => err)
+
+    expect(error).toBeInstanceOf(ManagerApiError)
+    expect((error as ManagerApiError).status).toBe(401)
+    expect((error as ManagerApiError).code).toBe(MANAGER_FEATURE_MISSING)
+    expect(isManagerRouteMissing(error)).toBe(true)
+    expect(fetchMock).toHaveBeenNthCalledWith(2, `${BASE_URL}/api/internal/opencode-workspaces`, {
+      headers: { Authorization: 'Bearer tok' },
+    })
+  })
+
+  it('keeps the plain 401 when the token probe is also rejected', async () => {
+    const fetchMock = vi.fn()
+      .mockResolvedValueOnce(errorResponse(401, JSON.stringify({ error: 'Unauthorized' })))
+      .mockResolvedValueOnce(errorResponse(401, JSON.stringify({ error: 'Unauthorized' })))
+    vi.stubGlobal('fetch', fetchMock)
+
+    const error = await api.listMultiRuns(1).catch((err) => err)
+
+    expect(error).toBeInstanceOf(ManagerApiError)
+    expect((error as ManagerApiError).status).toBe(401)
+    expect((error as ManagerApiError).code).toBeNull()
+    expect(isManagerRouteMissing(error)).toBe(false)
+  })
+
+  it('keeps the plain 401 when the token probe throws', async () => {
+    const fetchMock = vi.fn()
+      .mockResolvedValueOnce(errorResponse(401, JSON.stringify({ error: 'Unauthorized' })))
+      .mockRejectedValueOnce(new Error('network down'))
+    vi.stubGlobal('fetch', fetchMock)
+
+    const error = await api.listMultiRuns(1).catch((err) => err)
+
+    expect(error).toBeInstanceOf(ManagerApiError)
+    expect((error as ManagerApiError).status).toBe(401)
+    expect((error as ManagerApiError).code).toBeNull()
+    expect(isManagerRouteMissing(error)).toBe(false)
+  })
+
+  it('forwards the caller abort signal to the token probe', async () => {
+    const fetchMock = vi.fn()
+      .mockResolvedValueOnce(errorResponse(401, JSON.stringify({ error: 'Unauthorized' })))
+      .mockResolvedValueOnce(okResponse({ workspaces: [] }))
+    vi.stubGlobal('fetch', fetchMock)
+    const controller = new AbortController()
+
+    await api.getLatestSessionGoal('ses_1', controller.signal).catch(() => undefined)
+
+    expect(fetchMock).toHaveBeenNthCalledWith(2, `${BASE_URL}/api/internal/opencode-workspaces`, {
+      headers: { Authorization: 'Bearer tok' },
+      signal: controller.signal,
+    })
   })
 })
 

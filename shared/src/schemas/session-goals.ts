@@ -48,6 +48,22 @@ export const SessionGoalSchema = z.object({
 
 export type SessionGoal = z.infer<typeof SessionGoalSchema>;
 
+export const SESSION_GOAL_POLL_INTERVAL_MS = 3000;
+
+export type OpenSessionGoal = SessionGoal & { status: "active" | "paused" };
+
+export type TerminalSessionGoal = SessionGoal & { status: "completed" | "blocked" | "stopped" };
+
+/** True while the goal still drives its session: active or paused. */
+export function isOpenSessionGoal(goal: SessionGoal | null | undefined): goal is OpenSessionGoal {
+  return goal?.status === "active" || goal?.status === "paused";
+}
+
+/** True once the goal has finished: completed, blocked or stopped. */
+export function isTerminalSessionGoal(goal: SessionGoal | null | undefined): goal is TerminalSessionGoal {
+  return goal?.status === "completed" || goal?.status === "blocked" || goal?.status === "stopped";
+}
+
 export const StartSessionGoalRequestSchema = z.object({
   sessionId: z.string().min(1),
   directory: z.string().min(1),
