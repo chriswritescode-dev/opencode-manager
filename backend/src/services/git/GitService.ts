@@ -738,6 +738,26 @@ export class GitService {
     )
   }
 
+  async fetchRemoteRef(
+    repo: { id?: number; repoUrl?: string; fullPath: string },
+    remote: string,
+    refspec: string,
+    database: Database,
+    timeoutMs?: number,
+  ): Promise<void> {
+    await this.withRemoteAuth(
+      repo,
+      async (env) => {
+        await executeCommand(['git', '-C', repo.fullPath, 'fetch', '--no-tags', remote, refspec], {
+          env,
+          silent: true,
+          timeout: timeoutMs,
+        })
+      },
+      { database, silent: true }
+    )
+  }
+
   async pull(repoId: number, database: Database): Promise<string> {
     const repo = getRepoById(database, repoId)
     if (!repo) {

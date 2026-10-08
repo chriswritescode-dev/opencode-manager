@@ -1,5 +1,6 @@
 import { describe, it, expect } from 'vitest'
-import { extractFirstJsonObject } from '../../src/utils/json-extract'
+import { z } from 'zod'
+import { extractFirstJsonObject, parseFirstJsonObject } from '../../src/utils/json-extract'
 
 describe('extractFirstJsonObject', () => {
   it('returns a plain JSON object', () => {
@@ -36,5 +37,25 @@ describe('extractFirstJsonObject', () => {
 
   it('returns null when a string is left open', () => {
     expect(extractFirstJsonObject('{"a":"unterminated}')).toBeNull()
+  })
+})
+
+describe('parseFirstJsonObject', () => {
+  const schema = z.object({ a: z.number() })
+
+  it('parses and validates the first object', () => {
+    expect(parseFirstJsonObject('prefix {"a":1} suffix', schema)).toEqual({ a: 1 })
+  })
+
+  it('returns null when there is no object', () => {
+    expect(parseFirstJsonObject('no object', schema)).toBeNull()
+  })
+
+  it('returns null for invalid JSON', () => {
+    expect(parseFirstJsonObject('{not json', schema)).toBeNull()
+  })
+
+  it('returns null when the object fails the schema', () => {
+    expect(parseFirstJsonObject('{"a":"nope"}', schema)).toBeNull()
   })
 })

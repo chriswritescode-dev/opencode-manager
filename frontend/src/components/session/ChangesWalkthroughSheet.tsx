@@ -14,9 +14,9 @@ import { cn } from '@/lib/utils'
 import {
   DEFAULT_WALKTHROUGH_SOURCE,
   describeWalkthroughSource,
+  toWalkthroughSource,
   walkthroughSourceKey,
   WalkthroughOmittedFileSchema,
-  WalkthroughSourceSchema,
 } from '@opencode-manager/shared/schemas'
 import type {
   ChangeWalkthrough,
@@ -64,6 +64,8 @@ function walkthroughErrorMessage(error: unknown): string {
 const OMITTED_REASON_LABELS: Record<WalkthroughOmittedFile['reason'], string> = {
   binary: 'binary file',
   budget: 'over the diff budget',
+  renamed: 'renamed',
+  modeChange: 'mode change',
 }
 
 function OmittedFiles({ files }: { files: WalkthroughOmittedFile[] }) {
@@ -76,6 +78,36 @@ function OmittedFiles({ files }: { files: WalkthroughOmittedFile[] }) {
         </p>
       ))}
     </div>
+  )
+}
+
+function isMechanicalHunk(hunk: WalkthroughHunk): boolean {
+  return hunk.additions !== undefined || hunk.deletions !== undefined
+}
+
+function MechanicalHunks({ hunks }: { hunks: WalkthroughHunk[] }) {
+  return (
+    <ul aria-label="Mechanical file summaries" className="space-y-3">
+      {hunks.map((hunk) => (
+        <li key={hunk.id} className="overflow-hidden rounded-md border border-border">
+          <div className="flex items-center gap-2 px-3 py-1.5">
+            <span className="min-w-0 flex-1 truncate text-xs font-medium text-foreground" title={hunk.file}>
+              {hunk.file}
+            </span>
+            <span className={`text-xs ${GIT_STATUS_COLORS[hunk.status]}`}>
+              {GIT_STATUS_LABELS[hunk.status]}
+            </span>
+            <span className="text-xs text-diff-add">+{hunk.additions ?? 0}</span>
+            <span className="text-xs text-diff-delete">-{hunk.deletions ?? 0}</span>
+          </div>
+          {hunk.text.length > 0 ? (
+            <div className="overflow-x-auto border-t border-border">
+              <DiffLines diff={hunk.text} />
+            </div>
+          ) : null}
+        </li>
+      ))}
+    </ul>
   )
 }
 
@@ -97,6 +129,13 @@ interface ChangesWalkthroughContextValue {
   failedStopCount: number
   source: WalkthroughSource
   setSource: (source: WalkthroughSource) => void
+  sourceKind: WalkthroughSource['kind']
+  setSourceKind: (kind: WalkthroughSource['kind']) => void
+  baseInput: string
+  setBaseInput: (base: string) => void
+  numberInput: string
+  setNumberInput: (number: string) => void
+  sourcePending: boolean
 }
 
 const ChangesWalkthroughContext = createContext<ChangesWalkthroughContextValue | null>(null)
@@ -116,76 +155,37 @@ const WALKTHROUGH_SOURCE_OPTIONS: { value: WalkthroughSource['kind']; label: str
   { value: 'pullRequest', label: 'Pull request' },
 ]
 
-function walkthroughSourceLabel(source: WalkthroughSource): string {
-  return source.kind === 'session' ? 'the changes in this session' : describeWalkthroughSource(source)
-}
-
-function sourceBase(source: WalkthroughSource): string {
-  return source.kind === 'branch' || source.kind === 'pullRequest' ? source.base ?? '' : ''
-}
-
-function sourceNumber(source: WalkthroughSource): string {
-  return source.kind === 'pullRequest' ? String(source.number) : ''
-}
-
 /** Chooses which set of changes the walkthrough covers; git sources commit as soon as they are valid. */
 const WalkthroughSourcePicker = memo(function WalkthroughSourcePicker() {
-  const { source, setSource } = useChangesWalkthrough()
-  const [kind, setKind] = useState<WalkthroughSource['kind']>(source.kind)
-  const [baseInput, setBaseInput] = useState(sourceBase(source))
-  const [numberInput, setNumberInput] = useState(sourceNumber(source))
+  const {
+    sourceKind,
+    setSourceKind,
+    baseInput,
+    setBaseInput,
+    numberInput,
+    setNumberInput,
+    setSource,
+  } = useChangesWalkthrough()
 
-  useEffect(() => {
-    setKind(source.kind)
-    setBaseInput(sourceBase(source))
-    setNumberInput(sourceNumber(source))
-  }, [source])
-
-  const commit = useCallback(
-    (candidate: unknown) => {
-      const parsed = WalkthroughSourceSchema.safeParse(candidate)
-      if (parsed.success) setSource(parsed.data)
-    },
-    [setSource],
-  )
-
-  const branchSource = useCallback((): WalkthroughSource => {
-    const base = baseInput.trim()
-    return base ? { kind: 'branch', base } : { kind: 'branch' }
-  }, [baseInput])
-
-  const pullRequestSource = useCallback((): WalkthroughSource => {
-    const base = baseInput.trim()
-    return base
-      ? { kind: 'pullRequest', number: Number(numberInput), base }
-      : { kind: 'pullRequest', number: Number(numberInput) }
-  }, [baseInput, numberInput])
-
-  const commitBase = useCallback(() => {
-    if (kind === 'branch') {
-      commit(branchSource())
-    } else if (kind === 'pullRequest') {
-      commit(pullRequestSource())
-    }
-  }, [kind, commit, branchSource, pullRequestSource])
-
-  const commitNumber = useCallback(() => {
-    commit(pullRequestSource())
-  }, [commit, pullRequestSource])
+  const commitInputs = useCallback(() => {
+    const next = toWalkthroughSource({ kind: sourceKind, base: baseInput, number: Number(numberInput) })
+    if (next) setSource(next)
+  }, [sourceKind, baseInput, numberInput, setSource])
 
   const handleKindChange = useCallback(
     (next: WalkthroughSource['kind']) => {
-      setKind(next)
+      setSourceKind(next)
       if (next === 'pullRequest') return
-      commit(next === 'branch' ? branchSource() : { kind: next })
+      const nextSource = toWalkthroughSource({ kind: next, base: baseInput })
+      if (nextSource) setSource(nextSource)
     },
-    [commit, branchSource],
+    [baseInput, setSourceKind, setSource],
   )
 
   return (
     <div className="space-y-2">
       <Select
-        value={kind}
+        value={sourceKind}
         onValueChange={(value) => handleKindChange(value as WalkthroughSource['kind'])}
       >
         <SelectTrigger aria-label="Changes to walk through">
@@ -200,28 +200,28 @@ const WalkthroughSourcePicker = memo(function WalkthroughSourcePicker() {
         </SelectContent>
       </Select>
 
-      {kind === 'branch' || kind === 'pullRequest' ? (
+      {sourceKind === 'branch' || sourceKind === 'pullRequest' ? (
         <Input
           aria-label="Base branch"
           placeholder="Default branch"
           value={baseInput}
           onChange={(event) => setBaseInput(event.target.value)}
-          onBlur={commitBase}
+          onBlur={commitInputs}
           onKeyDown={(event) => {
-            if (event.key === 'Enter') commitBase()
+            if (event.key === 'Enter') commitInputs()
           }}
         />
       ) : null}
 
-      {kind === 'pullRequest' ? (
+      {sourceKind === 'pullRequest' ? (
         <Input
           type="number"
           aria-label="Pull request number"
           value={numberInput}
           onChange={(event) => setNumberInput(event.target.value)}
-          onBlur={commitNumber}
+          onBlur={commitInputs}
           onKeyDown={(event) => {
-            if (event.key === 'Enter') commitNumber()
+            if (event.key === 'Enter') commitInputs()
           }}
         />
       ) : null}
@@ -238,6 +238,9 @@ interface ChangesWalkthroughProviderProps {
 /** Loads a session's change walkthrough and shares its state with the surrounding chrome and body. */
 export function ChangesWalkthroughProvider({ sessionId, active, children }: ChangesWalkthroughProviderProps) {
   const [source, setSource] = useState<WalkthroughSource>(DEFAULT_WALKTHROUGH_SOURCE)
+  const [sourceKind, setSourceKind] = useState<WalkthroughSource['kind']>(DEFAULT_WALKTHROUGH_SOURCE.kind)
+  const [baseInput, setBaseInput] = useState('')
+  const [numberInput, setNumberInput] = useState('')
   const sourceKey = walkthroughSourceKey(source)
   const stateQuery = useChangeWalkthrough(sessionId, active, source)
   const generate = useGenerateChangeWalkthrough(sessionId, source)
@@ -252,13 +255,14 @@ export function ChangesWalkthroughProvider({ sessionId, active, children }: Chan
   const error = generate.error ?? stateQuery.error ?? (generating ? null : state?.error ?? null)
   const contextLimitFiles = isContextLimitError(error) ? omittedFilesFromError(error) : []
 
+  const selectedSource = toWalkthroughSource({ kind: sourceKind, base: baseInput, number: Number(numberInput) })
+  const sourcePending =
+    sourceKind === 'pullRequest' &&
+    (selectedSource === null || walkthroughSourceKey(selectedSource) !== sourceKey)
+
   useEffect(() => {
     resetGenerate()
   }, [active, sessionId, sourceKey, resetGenerate])
-
-  useEffect(() => {
-    setSource(DEFAULT_WALKTHROUGH_SOURCE)
-  }, [sessionId])
 
   useEffect(() => {
     setStopIndex(0)
@@ -299,6 +303,13 @@ export function ChangesWalkthroughProvider({ sessionId, active, children }: Chan
     failedStopCount,
     source,
     setSource,
+    sourceKind,
+    setSourceKind,
+    baseInput,
+    setBaseInput,
+    numberInput,
+    setNumberInput,
+    sourcePending,
   }
 
   return <ChangesWalkthroughContext.Provider value={value}>{children}</ChangesWalkthroughContext.Provider>
@@ -339,7 +350,7 @@ export const ChangesWalkthroughNav = memo(function ChangesWalkthroughNav() {
 
 /** Regenerates the current walkthrough from the chrome; renders nothing until one exists. */
 export const ChangesWalkthroughRegenerate = memo(function ChangesWalkthroughRegenerate() {
-  const { walkthrough, generating, regenerate } = useChangesWalkthrough()
+  const { walkthrough, generating, regenerate, sourcePending } = useChangesWalkthrough()
 
   if (!walkthrough) return null
 
@@ -349,7 +360,7 @@ export const ChangesWalkthroughRegenerate = memo(function ChangesWalkthroughRege
       size="icon-sm"
       aria-label="Regenerate walkthrough"
       onClick={regenerate}
-      disabled={generating}
+      disabled={generating || sourcePending}
     >
       <RefreshCw className={generating ? 'animate-spin' : undefined} />
     </Button>
@@ -374,9 +385,21 @@ export const ChangesWalkthroughView = memo(function ChangesWalkthroughView() {
     detailRef,
     failedStopCount,
     source,
+    sourcePending,
   } = useChangesWalkthrough()
 
   const readyStopCount = stops.filter((stop) => stop.status === 'ready').length
+  const mechanicalHunks = selectedHunks.filter(isMechanicalHunk)
+  const diffHunks = selectedHunks.filter((hunk) => !isMechanicalHunk(hunk))
+
+  if (sourcePending) {
+    return (
+      <div className="min-h-0 flex-1 space-y-4 overflow-y-auto p-4">
+        <WalkthroughSourcePicker />
+        <p className="text-sm text-muted-foreground">Enter a pull request number</p>
+      </div>
+    )
+  }
 
   return (
     <div className="min-h-0 flex-1 space-y-4 overflow-y-auto p-4">
@@ -408,7 +431,7 @@ export const ChangesWalkthroughView = memo(function ChangesWalkthroughView() {
         generating ? null : (
           <div className="space-y-4">
             <p className="text-sm text-muted-foreground">
-              Generate a step-by-step walkthrough of {walkthroughSourceLabel(source)}.
+              Generate a step-by-step walkthrough of {describeWalkthroughSource(source)}.
             </p>
             <Button onClick={generate}>Generate walkthrough</Button>
           </div>
@@ -481,7 +504,8 @@ export const ChangesWalkthroughView = memo(function ChangesWalkthroughView() {
                   {generating ? 'Explaining this stop…' : 'This stop could not be explained.'}
                 </p>
               )}
-              {selectedHunks.map((hunk) => (
+              {mechanicalHunks.length > 0 ? <MechanicalHunks hunks={mechanicalHunks} /> : null}
+              {diffHunks.map((hunk) => (
                 <div key={hunk.id} className="overflow-hidden rounded-md border border-border">
                   <div className="flex items-center gap-2 border-b border-border bg-muted/30 px-3 py-1.5">
                     <span className="min-w-0 flex-1 truncate text-xs font-medium text-foreground" title={hunk.file}>
@@ -519,7 +543,7 @@ export function ChangesWalkthroughSheet({ sessionId, open, onOpenChange }: Chang
 
   return (
     <SideDrawer isOpen={open} onClose={close} side="right" widthClass="w-full sm:w-[min(640px,92vw)]" ariaLabel="Change walkthrough">
-      <ChangesWalkthroughProvider sessionId={sessionId} active={open}>
+      <ChangesWalkthroughProvider key={sessionId} sessionId={sessionId} active={open}>
         <SideDrawerHeader
           title="Change walkthrough"
           onClose={close}

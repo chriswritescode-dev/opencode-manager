@@ -1,5 +1,6 @@
-import { useCallback, useEffect, useRef, useState } from 'react'
+import { useCallback } from 'react'
 import { useSettings } from '@/hooks/useSettings'
+import { useAutosavedSetting } from '@/hooks/useAutosavedSetting'
 import { Label } from '@/components/ui/label'
 import { Input } from '@/components/ui/input'
 import { ModelCombobox } from '@/components/model/ModelCombobox'
@@ -12,41 +13,36 @@ import {
   type SessionPermissionMode,
 } from '@opencode-manager/shared/schemas'
 
-const AUTOSAVE_DELAY_MS = 800
+interface GoalDraft {
+  goalAuditorModel: string
+  goalMaxContinuations: string
+  goalTokenBudget: string
+}
+
+interface GoalCommitted {
+  goalAuditorModel: string | undefined
+  goalMaxContinuations: number
+  goalTokenBudget: number | undefined
+}
+
+function maxContinuationsFromInput(value: string): number | null {
+  const parsed = Number(value)
+  if (!Number.isInteger(parsed)) return null
+  if (parsed < GOAL_MAX_CONTINUATIONS_MIN || parsed > GOAL_MAX_CONTINUATIONS_MAX) return null
+  return parsed
+}
+
+function tokenBudgetFromInput(value: string): { valid: boolean; value: number | undefined } {
+  const trimmed = value.trim()
+  if (trimmed === '') return { valid: true, value: undefined }
+  const parsed = Number(trimmed)
+  return Number.isInteger(parsed) && parsed > 0 ? { valid: true, value: parsed } : { valid: false, value: undefined }
+}
 
 export function SessionAutomationSettings() {
   const { preferences, updateSettings } = useSettings()
   const sessionDefaults = preferences?.sessionDefaults
   const permissionMode = sessionDefaults?.permissionMode ?? DEFAULT_SESSION_DEFAULTS.permissionMode
-
-  const [goalAuditorModel, setGoalAuditorModel] = useState(sessionDefaults?.goalAuditorModel ?? '')
-  const [goalMaxContinuations, setGoalMaxContinuations] = useState(
-    String(sessionDefaults?.goalMaxContinuations ?? DEFAULT_SESSION_DEFAULTS.goalMaxContinuations),
-  )
-  const [goalTokenBudget, setGoalTokenBudget] = useState(
-    sessionDefaults?.goalTokenBudget !== undefined ? String(sessionDefaults.goalTokenBudget) : '',
-  )
-
-  const committed = useRef({
-    goalAuditorModel: sessionDefaults?.goalAuditorModel,
-    goalMaxContinuations: sessionDefaults?.goalMaxContinuations ?? DEFAULT_SESSION_DEFAULTS.goalMaxContinuations,
-    goalTokenBudget: sessionDefaults?.goalTokenBudget,
-  })
-
-  useEffect(() => {
-    setGoalAuditorModel(sessionDefaults?.goalAuditorModel ?? '')
-    setGoalMaxContinuations(
-      String(sessionDefaults?.goalMaxContinuations ?? DEFAULT_SESSION_DEFAULTS.goalMaxContinuations),
-    )
-    setGoalTokenBudget(
-      sessionDefaults?.goalTokenBudget !== undefined ? String(sessionDefaults.goalTokenBudget) : '',
-    )
-    committed.current = {
-      goalAuditorModel: sessionDefaults?.goalAuditorModel,
-      goalMaxContinuations: sessionDefaults?.goalMaxContinuations ?? DEFAULT_SESSION_DEFAULTS.goalMaxContinuations,
-      goalTokenBudget: sessionDefaults?.goalTokenBudget,
-    }
-  }, [sessionDefaults])
 
   const updateSessionDefaults = useCallback(
     (patch: Partial<SessionDefaults>) => {
@@ -61,44 +57,46 @@ export function SessionAutomationSettings() {
     [sessionDefaults, permissionMode, updateSettings],
   )
 
-  const commitGoalFields = useCallback(() => {
-    const patch: Partial<SessionDefaults> = {}
+  const { draft, setDraft, commit: commitGoalFields } = useAutosavedSetting<SessionDefaults | undefined, GoalDraft, GoalCommitted>({
+    stored: sessionDefaults,
+    toDraft: (stored) => ({
+      goalAuditorModel: stored?.goalAuditorModel ?? '',
+      goalMaxContinuations: String(stored?.goalMaxContinuations ?? DEFAULT_SESSION_DEFAULTS.goalMaxContinuations),
+      goalTokenBudget: stored?.goalTokenBudget !== undefined ? String(stored.goalTokenBudget) : '',
+    }),
+    toCommitted: (current, previous) => {
+      const budget = tokenBudgetFromInput(current.goalTokenBudget)
+      return {
+        goalAuditorModel: current.goalAuditorModel.trim() || undefined,
+        goalMaxContinuations:
+          maxContinuationsFromInput(current.goalMaxContinuations) ??
+          previous?.goalMaxContinuations ??
+          DEFAULT_SESSION_DEFAULTS.goalMaxContinuations,
+        goalTokenBudget: budget.valid ? budget.value : previous?.goalTokenBudget,
+      }
+    },
+    isEqual: (a, b) =>
+      a.goalAuditorModel === b.goalAuditorModel &&
+      a.goalMaxContinuations === b.goalMaxContinuations &&
+      a.goalTokenBudget === b.goalTokenBudget,
+    save: (next, previous) => {
+      const patch: Partial<SessionDefaults> = {}
+      if (next.goalAuditorModel !== previous?.goalAuditorModel) patch.goalAuditorModel = next.goalAuditorModel
+      if (next.goalMaxContinuations !== previous?.goalMaxContinuations) {
+        patch.goalMaxContinuations = next.goalMaxContinuations
+      }
+      if (next.goalTokenBudget !== previous?.goalTokenBudget) patch.goalTokenBudget = next.goalTokenBudget
+      if (Object.keys(patch).length === 0) return
+      updateSessionDefaults(patch)
+    },
+  })
 
-    const nextAuditorModel = goalAuditorModel.trim() || undefined
-    if (nextAuditorModel !== committed.current.goalAuditorModel) {
-      committed.current.goalAuditorModel = nextAuditorModel
-      patch.goalAuditorModel = nextAuditorModel
-    }
-
-    const nextMaxContinuations = Number(goalMaxContinuations)
-    if (
-      Number.isInteger(nextMaxContinuations) &&
-      nextMaxContinuations >= GOAL_MAX_CONTINUATIONS_MIN &&
-      nextMaxContinuations <= GOAL_MAX_CONTINUATIONS_MAX &&
-      nextMaxContinuations !== committed.current.goalMaxContinuations
-    ) {
-      committed.current.goalMaxContinuations = nextMaxContinuations
-      patch.goalMaxContinuations = nextMaxContinuations
-    }
-
-    const nextTokenBudget = goalTokenBudget.trim() === '' ? undefined : Number(goalTokenBudget)
-    const tokenBudgetValid = nextTokenBudget === undefined || (Number.isInteger(nextTokenBudget) && nextTokenBudget > 0)
-    if (tokenBudgetValid && nextTokenBudget !== committed.current.goalTokenBudget) {
-      committed.current.goalTokenBudget = nextTokenBudget
-      patch.goalTokenBudget = nextTokenBudget
-    }
-
-    if (Object.keys(patch).length === 0) return
-    updateSessionDefaults(patch)
-  }, [goalAuditorModel, goalMaxContinuations, goalTokenBudget, updateSessionDefaults])
-
-  useEffect(() => {
-    const timer = setTimeout(() => {
-      commitGoalFields()
-    }, AUTOSAVE_DELAY_MS)
-
-    return () => clearTimeout(timer)
-  }, [commitGoalFields])
+  const updateGoalDraft = useCallback(
+    (patch: Partial<GoalDraft>) => {
+      setDraft((current) => ({ ...current, ...patch }))
+    },
+    [setDraft],
+  )
 
   return (
     <div className="space-y-6">
@@ -135,8 +133,8 @@ export function SessionAutomationSettings() {
         <ModelCombobox
           id="goalAuditorModel"
           ariaLabel="Goal auditor model"
-          value={goalAuditorModel}
-          onChange={setGoalAuditorModel}
+          value={draft.goalAuditorModel}
+          onChange={(value) => updateGoalDraft({ goalAuditorModel: value })}
           placeholder="OpenCode default"
           allowCustomValue
           showClear
@@ -156,9 +154,9 @@ export function SessionAutomationSettings() {
           type="number"
           min={GOAL_MAX_CONTINUATIONS_MIN}
           max={GOAL_MAX_CONTINUATIONS_MAX}
-          value={goalMaxContinuations}
+          value={draft.goalMaxContinuations}
           className="w-full shrink-0 sm:w-40"
-          onChange={(event) => setGoalMaxContinuations(event.target.value)}
+          onChange={(event) => updateGoalDraft({ goalMaxContinuations: event.target.value })}
           onBlur={commitGoalFields}
         />
       </div>
@@ -174,10 +172,10 @@ export function SessionAutomationSettings() {
           id="goalTokenBudget"
           type="number"
           min={1}
-          value={goalTokenBudget}
+          value={draft.goalTokenBudget}
           placeholder="No limit"
           className="w-full shrink-0 sm:w-40"
-          onChange={(event) => setGoalTokenBudget(event.target.value)}
+          onChange={(event) => updateGoalDraft({ goalTokenBudget: event.target.value })}
           onBlur={commitGoalFields}
         />
       </div>

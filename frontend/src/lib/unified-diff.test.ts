@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { parseDiffLines, splitDiffHunks, splitUnifiedDiffByFile } from '@opencode-manager/shared/utils';
+import { countDiffLineChanges, parseDiffLines, splitDiffHunks, splitUnifiedDiffByFile } from '@opencode-manager/shared/utils';
 
 const DIFF = [
   'diff --git a/src/app.ts b/src/app.ts',
@@ -88,6 +88,31 @@ describe('parseDiffLines', () => {
   });
 });
 
+describe('countDiffLineChanges', () => {
+  it('counts additions and removals across hunks', () => {
+    expect(countDiffLineChanges(DIFF)).toEqual({ added: 3, removed: 2 });
+  });
+
+  it('counts changed lines whose content starts with -- or ++', () => {
+    const diff = '@@ -1,3 +1,3 @@\n--- old comment\n+++ heading\n const a = 1;';
+
+    expect(countDiffLineChanges(diff)).toEqual({ added: 1, removed: 1 });
+  });
+
+  it('ignores file headers before a hunk', () => {
+    const diff = '--- a/x\n+++ b/x\n@@ -1 +1 @@\n-a\n+b';
+
+    expect(countDiffLineChanges(diff)).toEqual({ added: 1, removed: 1 });
+  });
+
+  it('returns zero for a patch with no changed lines', () => {
+    expect(countDiffLineChanges('diff --git a/x b/x\nold mode 100644\nnew mode 100755')).toEqual({
+      added: 0,
+      removed: 0,
+    });
+  });
+});
+
 describe('splitDiffHunks', () => {
   it('returns one entry per hunk with the header line and body', () => {
     const hunks = splitDiffHunks(DIFF);
@@ -125,6 +150,21 @@ describe('splitUnifiedDiffByFile', () => {
     expect(result).toHaveLength(1);
     expect(result[0]).toMatchObject({ file: 'src/app.ts', status: 'modified', additions: 3, deletions: 2 });
     expect(result[0]!.patch.startsWith('diff --git a/src/app.ts b/src/app.ts')).toBe(true);
+  });
+
+  it('counts changed lines whose content starts with -- or ++', () => {
+    const diff = [
+      'diff --git a/src/a.sql b/src/a.sql',
+      '--- a/src/a.sql',
+      '+++ b/src/a.sql',
+      '@@ -1,2 +1,2 @@',
+      '--- old comment',
+      '+++ heading',
+    ].join('\n');
+
+    const [file] = splitUnifiedDiffByFile(diff);
+
+    expect(file).toMatchObject({ file: 'src/a.sql', status: 'modified', additions: 1, deletions: 1 });
   });
 
   it('reads an added file from the new side', () => {
@@ -172,6 +212,52 @@ describe('splitUnifiedDiffByFile', () => {
     const [file] = splitUnifiedDiffByFile(diff);
 
     expect(file).toMatchObject({ file: 'src/new.ts', status: 'modified', additions: 0, deletions: 0 });
+  });
+
+  it('reads a mode-only change path from a mnemonic diff header', () => {
+    const diff = [
+      'diff --git i/script.sh w/script.sh',
+      'old mode 100644',
+      'new mode 100755',
+    ].join('\n');
+
+    const [file] = splitUnifiedDiffByFile(diff);
+
+    expect(file).toMatchObject({ file: 'script.sh', status: 'modified', additions: 0, deletions: 0 });
+  });
+
+  it('reads a mode-only change path from a prefix-less diff header', () => {
+    const diff = [
+      'diff --git script.sh script.sh',
+      'old mode 100644',
+      'new mode 100755',
+    ].join('\n');
+
+    const [file] = splitUnifiedDiffByFile(diff);
+
+    expect(file).toMatchObject({ file: 'script.sh', status: 'modified' });
+  });
+
+  it('keeps a combined merge-conflict block instead of dropping it', () => {
+    const diff = [
+      'diff --cc f.txt',
+      'index d791e9b,00dbdcf..0000000',
+      '--- a/f.txt',
+      '+++ b/f.txt',
+      '@@@ -1,3 -1,3 +1,7 @@@',
+      '  line1',
+      '++<<<<<<< HEAD',
+      ' +MAIN',
+      '++=======',
+      '+ FEATURE',
+      '++>>>>>>> feat',
+      '  line3',
+    ].join('\n');
+
+    const [file] = splitUnifiedDiffByFile(diff);
+
+    expect(file).toMatchObject({ file: 'f.txt', status: 'modified' });
+    expect(file!.patch.startsWith('diff --cc f.txt')).toBe(true);
   });
 
   it('keeps a binary block with no hunks', () => {

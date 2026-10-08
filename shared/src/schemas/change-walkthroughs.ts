@@ -1,21 +1,21 @@
 import { z } from "zod";
+import { gitRefSchema } from './git'
 
 export const WALKTHROUGH_DIFF_MAX_CHARS = 60000;
 export const WALKTHROUGH_HUNK_MAX_CHARS = 8000;
+export const MECHANICAL_TEXT_BUDGET = 20000;
 export const WALKTHROUGH_MAX_STOPS = 20;
 export const WALKTHROUGH_TEXT_MAX_CHARS = 2000;
 export const WALKTHROUGH_OUTLINE_PREVIEW_LINES = 6;
 export const WALKTHROUGH_OUTLINE_LINE_MAX_CHARS = 160;
-
-export const GitRefSchema = z.string().trim().min(1).max(200).regex(/^[^-\s][^\s]*$/)
 
 export const WalkthroughSourceSchema = z.discriminatedUnion('kind', [
   z.object({ kind: z.literal('session') }),
   z.object({ kind: z.literal('uncommitted') }),
   z.object({ kind: z.literal('staged') }),
   z.object({ kind: z.literal('unstaged') }),
-  z.object({ kind: z.literal('branch'), base: GitRefSchema.optional() }),
-  z.object({ kind: z.literal('pullRequest'), number: z.number().int().positive(), base: GitRefSchema.optional() }),
+  z.object({ kind: z.literal('branch'), base: gitRefSchema.optional() }),
+  z.object({ kind: z.literal('pullRequest'), number: z.number().int().positive(), base: gitRefSchema.optional() }),
 ])
 
 export type WalkthroughSource = z.infer<typeof WalkthroughSourceSchema>
@@ -39,7 +39,7 @@ export function walkthroughSourceKey(source: WalkthroughSource): string {
 export function describeWalkthroughSource(source: WalkthroughSource): string {
   switch (source.kind) {
     case 'session':
-      return 'session changes'
+      return 'the changes in this session'
     case 'uncommitted':
       return 'uncommitted changes'
     case 'staged':
@@ -53,13 +53,35 @@ export function describeWalkthroughSource(source: WalkthroughSource): string {
   }
 }
 
+export function toWalkthroughSource(candidate: {
+  kind: WalkthroughSource['kind']
+  base?: string
+  number?: number
+}): WalkthroughSource | null {
+  const base = candidate.base?.trim()
+  switch (candidate.kind) {
+    case 'session':
+    case 'uncommitted':
+    case 'staged':
+    case 'unstaged':
+      return { kind: candidate.kind }
+    case 'branch':
+      return parseWalkthroughSourceCandidate(base ? { kind: 'branch', base } : { kind: 'branch' })
+    case 'pullRequest':
+      return parseWalkthroughSourceCandidate(
+        base
+          ? { kind: 'pullRequest', number: candidate.number, base }
+          : { kind: 'pullRequest', number: candidate.number },
+      )
+  }
+}
+
 export function parseWalkthroughSourceKey(key: string): WalkthroughSource | null {
   if (key === 'session' || key === 'uncommitted' || key === 'staged' || key === 'unstaged') {
     return { kind: key }
   }
   if (key.startsWith('branch:')) {
-    const base = key.slice('branch:'.length)
-    return parseWalkthroughSourceCandidate(base ? { kind: 'branch', base } : { kind: 'branch' })
+    return toWalkthroughSource({ kind: 'branch', base: key.slice('branch:'.length) })
   }
   if (key.startsWith('pr:')) {
     const rest = key.slice('pr:'.length)
@@ -67,11 +89,11 @@ export function parseWalkthroughSourceKey(key: string): WalkthroughSource | null
     if (separator < 0) {
       return null
     }
-    const number = Number(rest.slice(0, separator))
-    const base = rest.slice(separator + 1)
-    return parseWalkthroughSourceCandidate(
-      base ? { kind: 'pullRequest', number, base } : { kind: 'pullRequest', number },
-    )
+    return toWalkthroughSource({
+      kind: 'pullRequest',
+      number: Number(rest.slice(0, separator)),
+      base: rest.slice(separator + 1),
+    })
   }
   return null
 }
@@ -88,6 +110,8 @@ export const WalkthroughHunkSchema = z.object({
   header: z.string(),
   text: z.string(),
   truncated: z.boolean(),
+  additions: z.number().int().nonnegative().optional(),
+  deletions: z.number().int().nonnegative().optional(),
 });
 
 export type WalkthroughHunk = z.infer<typeof WalkthroughHunkSchema>;
@@ -103,11 +127,9 @@ export const WalkthroughStopSchema = z.object({
 
 export type WalkthroughStop = z.infer<typeof WalkthroughStopSchema>;
 
-export type WalkthroughStopStatus = WalkthroughStop["status"];
-
 export const WalkthroughOmittedFileSchema = z.object({
   file: z.string(),
-  reason: z.enum(["binary", "budget"]),
+  reason: z.enum(["binary", "budget", "renamed", "modeChange"]),
 });
 
 export type WalkthroughOmittedFile = z.infer<typeof WalkthroughOmittedFileSchema>;
@@ -143,6 +165,24 @@ export const ChangeWalkthroughStateSchema = z.object({
 });
 
 export type ChangeWalkthroughState = z.infer<typeof ChangeWalkthroughStateSchema>;
+
+export const ChangeWalkthroughWireSchema = ChangeWalkthroughSchema.extend({
+  hunks: z.array(WalkthroughHunkSchema).optional(),
+});
+
+export type ChangeWalkthroughWire = z.infer<typeof ChangeWalkthroughWireSchema>;
+
+export const ChangeWalkthroughStateWireSchema = ChangeWalkthroughStateSchema.extend({
+  walkthrough: ChangeWalkthroughWireSchema.nullable(),
+});
+
+export type ChangeWalkthroughStateWire = z.infer<typeof ChangeWalkthroughStateWireSchema>;
+
+export function walkthroughHunksIdentity(
+  walkthrough: Pick<ChangeWalkthrough, 'diffHash' | 'createdAt'>,
+): string {
+  return `${walkthrough.diffHash}:${walkthrough.createdAt}`
+}
 
 export const GenerateChangeWalkthroughRequestSchema = z.object({
   regenerate: z.boolean().optional(),

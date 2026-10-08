@@ -63,6 +63,53 @@ const walkthrough: ChangeWalkthrough = {
   createdAt: 1,
 }
 
+const mechanicalWalkthrough: ChangeWalkthrough = {
+  ...walkthrough,
+  stops: [
+    {
+      id: 's_mech',
+      title: 'Mechanical changes',
+      explanation: 'Lock files, snapshots and generated files.',
+      hunkIds: ['m_lock', 'm_snap', 'm_map'],
+      status: 'ready',
+      explanationKey: null,
+    },
+  ],
+  hunks: [
+    {
+      id: 'm_lock',
+      file: 'pnpm-lock.yaml',
+      status: 'modified',
+      header: '@@ -1 +1 @@',
+      text: '@@ -1 +1 @@\n-old-lock\n+new-lock',
+      truncated: false,
+      additions: 120,
+      deletions: 80,
+    },
+    {
+      id: 'm_snap',
+      file: 'src/__snapshots__/a.ts.snap',
+      status: 'added',
+      header: '',
+      text: '',
+      truncated: true,
+      additions: 5,
+      deletions: 0,
+    },
+    {
+      id: 'm_map',
+      file: 'dist/app.js.map',
+      status: 'deleted',
+      header: '',
+      text: '',
+      truncated: true,
+      additions: 0,
+      deletions: 7,
+    },
+  ],
+  omittedFiles: [],
+}
+
 function state(overrides: Partial<ChangeWalkthroughState> = {}): ChangeWalkthroughState {
   return { walkthrough, currentDiffHash: 'hash-1', stale: false, generating: false, error: null, ...overrides }
 }
@@ -223,7 +270,7 @@ describe('ChangesWalkthroughSheet', () => {
     })
   })
 
-  it('ignores an invalid pull request number', async () => {
+  it('prompts for a pull request number and withholds the actions until it is valid', async () => {
     const user = userEvent.setup()
     mocks.getChangeWalkthrough.mockResolvedValue(state({ walkthrough: null }))
     mocks.generateChangeWalkthrough.mockResolvedValue(state())
@@ -236,15 +283,52 @@ describe('ChangesWalkthroughSheet', () => {
     await user.type(number, '0')
     await user.tab()
 
-    await user.click(screen.getByRole('button', { name: 'Generate walkthrough' }))
-
-    await waitFor(() => {
-      expect(mocks.generateChangeWalkthrough).toHaveBeenCalledWith('ses_1', { source: { kind: 'session' } })
-    })
+    expect(await screen.findByText('Enter a pull request number')).toBeInTheDocument()
+    expect(screen.queryByRole('button', { name: 'Generate walkthrough' })).not.toBeInTheDocument()
+    expect(mocks.generateChangeWalkthrough).not.toHaveBeenCalled()
     expect(mocks.getChangeWalkthrough).not.toHaveBeenCalledWith(
       'ses_1',
       expect.objectContaining({ kind: 'pullRequest' }),
     )
+  })
+
+  it('commits a valid pull request number and restores the generate action', async () => {
+    const user = userEvent.setup()
+    mocks.getChangeWalkthrough.mockResolvedValue(state({ walkthrough: null }))
+    mocks.generateChangeWalkthrough.mockResolvedValue(state())
+    renderSheet()
+
+    await user.click(screen.getByRole('combobox', { name: 'Changes to walk through' }))
+    await user.click(await screen.findByRole('option', { name: 'Pull request' }))
+
+    const number = await screen.findByLabelText('Pull request number')
+    await user.type(number, '12')
+    await user.tab()
+
+    await waitFor(() => {
+      expect(mocks.getChangeWalkthrough).toHaveBeenCalledWith('ses_1', { kind: 'pullRequest', number: 12 })
+    })
+    expect(screen.queryByText('Enter a pull request number')).not.toBeInTheDocument()
+    expect(await screen.findByRole('button', { name: 'Generate walkthrough' })).toBeEnabled()
+  })
+
+  it('resets the source before querying a new session', async () => {
+    const user = userEvent.setup()
+    mocks.getChangeWalkthrough.mockResolvedValue(state({ walkthrough: null }))
+    const { rerender, onOpenChange } = renderSheet()
+
+    await user.click(screen.getByRole('combobox', { name: 'Changes to walk through' }))
+    await user.click(await screen.findByRole('option', { name: 'Staged' }))
+    await waitFor(() => {
+      expect(mocks.getChangeWalkthrough).toHaveBeenCalledWith('ses_1', { kind: 'staged' })
+    })
+
+    rerender(<ChangesWalkthroughSheet sessionId="ses_2" open onOpenChange={onOpenChange} />)
+
+    await waitFor(() => {
+      expect(mocks.getChangeWalkthrough).toHaveBeenCalledWith('ses_2', { kind: 'session' })
+    })
+    expect(mocks.getChangeWalkthrough).not.toHaveBeenCalledWith('ses_2', { kind: 'staged' })
   })
 
   it('clears a generation error when the source changes', async () => {
@@ -379,6 +463,77 @@ describe('ChangesWalkthroughSheet', () => {
     expect(await screen.findByText('These changes are too large to walk through')).toBeInTheDocument()
     expect(screen.getByText('src/big.ts — over the diff budget')).toBeInTheDocument()
     expect(screen.getByText('assets/logo.png — binary file')).toBeInTheDocument()
+  })
+
+  it('labels renamed and mode-change omitted files', async () => {
+    mocks.getChangeWalkthrough.mockResolvedValue(
+      state({
+        walkthrough: {
+          ...walkthrough,
+          omittedFiles: [
+            { file: 'src/old.ts', reason: 'renamed' },
+            { file: 'script.sh', reason: 'modeChange' },
+          ],
+        },
+      }),
+    )
+    renderSheet()
+
+    expect(await screen.findByText('src/old.ts — renamed')).toBeInTheDocument()
+    expect(screen.getByText('script.sh — mode change')).toBeInTheDocument()
+  })
+
+  it('renders mechanical files as a compact summary list with counts and diff text for budgeted hunks', async () => {
+    mocks.getChangeWalkthrough.mockResolvedValue(state({ walkthrough: mechanicalWalkthrough }))
+    renderSheet()
+
+    expect(
+      await screen.findByRole('list', { name: 'Mechanical file summaries' }),
+    ).toBeInTheDocument()
+    expect(screen.getByText('pnpm-lock.yaml')).toBeInTheDocument()
+    expect(screen.getByText('src/__snapshots__/a.ts.snap')).toBeInTheDocument()
+    expect(screen.getByText('dist/app.js.map')).toBeInTheDocument()
+    expect(screen.getByText('+120')).toBeInTheDocument()
+    expect(screen.getByText('-80')).toBeInTheDocument()
+    expect(screen.getByText('+5')).toBeInTheDocument()
+    expect(screen.getByText('-7')).toBeInTheDocument()
+    expect(screen.getByText('new-lock')).toBeInTheDocument()
+  })
+
+  it('renders a stored mechanical stop whose hunks predate hunk counts', async () => {
+    mocks.getChangeWalkthrough.mockResolvedValue(
+      state({
+        walkthrough: {
+          ...walkthrough,
+          stops: [
+            {
+              id: 's_mech',
+              title: 'Mechanical changes',
+              explanation: 'Lock files',
+              hunkIds: ['m_lock'],
+              status: 'ready',
+              explanationKey: null,
+            },
+          ],
+          hunks: [
+            {
+              id: 'm_lock',
+              file: 'pnpm-lock.yaml',
+              status: 'modified',
+              header: '@@ -1 +1 @@',
+              text: '@@ -1 +1 @@\n-old-lock\n+new-lock',
+              truncated: false,
+            },
+          ],
+          omittedFiles: [],
+        },
+      }),
+    )
+    renderSheet()
+
+    expect(await screen.findByText('pnpm-lock.yaml')).toBeInTheDocument()
+    expect(screen.getByText('new-lock')).toBeInTheDocument()
+    expect(screen.queryByRole('list', { name: 'Mechanical file summaries' })).not.toBeInTheDocument()
   })
 
   it('renders raw HTML in the summary and stop explanation as inert text', async () => {

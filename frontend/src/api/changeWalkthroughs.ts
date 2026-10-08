@@ -3,6 +3,7 @@ import { API_BASE_URL } from '@/config'
 import { walkthroughSourceKey } from '@opencode-manager/shared/schemas'
 import type {
   ChangeWalkthroughState,
+  ChangeWalkthroughStateWire,
   GenerateChangeWalkthroughRequest,
   WalkthroughSource,
 } from '@opencode-manager/shared/schemas'
@@ -14,9 +15,14 @@ function walkthroughUrl(sessionId: string): string {
 export async function getChangeWalkthrough(
   sessionId: string,
   source: WalkthroughSource,
-): Promise<ChangeWalkthroughState> {
-  const query = `?source=${encodeURIComponent(walkthroughSourceKey(source))}`
-  return fetchWrapper<ChangeWalkthroughState>(`${walkthroughUrl(sessionId)}${query}`)
+  hunksFor?: string,
+): Promise<ChangeWalkthroughStateWire> {
+  return fetchWrapper<ChangeWalkthroughStateWire>(walkthroughUrl(sessionId), {
+    params: {
+      source: walkthroughSourceKey(source),
+      ...(hunksFor === undefined ? {} : { hunksFor }),
+    },
+  })
 }
 
 export async function generateChangeWalkthrough(

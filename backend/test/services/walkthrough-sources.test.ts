@@ -10,7 +10,11 @@ import {
   walkthroughSourceKey,
 } from '@opencode-manager/shared/schemas'
 import { ChangeWalkthroughError } from '../../src/services/change-walkthrough-error'
-import { readWalkthroughChanges } from '../../src/services/walkthrough-sources'
+import {
+  planPullRequestFetch,
+  readWalkthroughChanges,
+  walkthroughPullRequestRef,
+} from '../../src/services/walkthrough-sources'
 import type { OpenCodeClient } from '../../src/services/opencode/client'
 import { cloneOrigin, createCommittedRepo, createOrigin, git, uniqueName } from '../helpers/git-fixtures'
 
@@ -135,11 +139,55 @@ describe('readWalkthroughChanges', () => {
     git(['add', 'pr.txt'], clone)
     git(['commit', '-m', 'pr'], clone)
     git(['push', 'origin', 'HEAD:refs/pull/1/head'], clone)
+    git(['fetch', 'origin', `+refs/pull/1/head:${walkthroughPullRequestRef(1)}`], clone)
 
     const changes = await readAt(clone, { kind: 'pullRequest', number: 1, base: 'main' })
 
     expect(changes.map((entry) => entry.file)).toEqual(['pr.txt'])
     expect(changes[0]?.status).toBe('added')
+  })
+
+  it('does not fetch the pull request ref when reading changes', async () => {
+    const origin = repoPath('pr-no-fetch-origin')
+    const work = repoPath('pr-no-fetch-work')
+    const clone = repoPath('pr-no-fetch-clone')
+    createOrigin(origin, work)
+    cloneOrigin(origin, clone)
+
+    git(['checkout', '-b', 'feature'], clone)
+    writeFileSync(path.join(clone, 'pr.txt'), 'pr\n')
+    git(['add', 'pr.txt'], clone)
+    git(['commit', '-m', 'pr'], clone)
+    git(['push', 'origin', 'HEAD:refs/pull/1/head'], clone)
+
+    const error = await readAt(clone, { kind: 'pullRequest', number: 1, base: 'main' }).catch((thrown) => thrown)
+
+    expect(error).toBeInstanceOf(ChangeWalkthroughError)
+    expect(error).toMatchObject({ status: 502, code: 'WALKTHROUGH_SOURCE_UNAVAILABLE' })
+  })
+
+  it('prefers the upstream remote when it exists', async () => {
+    const repo = repoPath('pr-upstream')
+    createCommittedRepo(repo)
+    git(['remote', 'add', 'origin', 'https://example.com/base.git'], repo)
+    git(['remote', 'add', 'upstream', 'https://example.com/fork.git'], repo)
+
+    const plan = await planPullRequestFetch(repo, { kind: 'pullRequest', number: 7, base: 'main' })
+
+    expect(plan.remote).toBe('upstream')
+    expect(plan.refspec).toBe('+refs/pull/7/head:refs/ocm-walkthrough/pr/7')
+    expect(plan.ref).toBe('refs/ocm-walkthrough/pr/7')
+  })
+
+  it('falls back to the origin remote when no upstream exists', async () => {
+    const repo = repoPath('pr-origin')
+    createCommittedRepo(repo)
+    git(['remote', 'add', 'origin', 'https://example.com/base.git'], repo)
+
+    const plan = await planPullRequestFetch(repo, { kind: 'pullRequest', number: 3, base: 'main' })
+
+    expect(plan.remote).toBe('origin')
+    expect(plan.refspec).toBe('+refs/pull/3/head:refs/ocm-walkthrough/pr/3')
   })
 
   it('excludes untracked files from staged and branch sources', async () => {
@@ -176,6 +224,127 @@ describe('readWalkthroughChanges', () => {
 
     expect(error).toBeInstanceOf(ChangeWalkthroughError)
     expect(error).toMatchObject({ status: 409, code: 'WALKTHROUGH_SOURCE_UNAVAILABLE' })
+  })
+
+  it('resolves a base branch that only exists as a remote-tracking ref', async () => {
+    const origin = repoPath('base-origin')
+    const work = repoPath('base-work')
+    const clone = repoPath('base-clone')
+    createOrigin(origin, work, ['develop'])
+    cloneOrigin(origin, clone)
+
+    git(['checkout', '-b', 'feature'], clone)
+    writeFileSync(path.join(clone, 'feature.txt'), 'feature\n')
+    git(['add', 'feature.txt'], clone)
+    git(['commit', '-m', 'feature'], clone)
+
+    const changes = await readAt(clone, { kind: 'branch', base: 'develop' })
+
+    expect(changes.map((entry) => entry.file)).toEqual(['feature.txt'])
+  })
+
+  it('rejects a branch source when the diff fails after the base resolves', async () => {
+    const repo = repoPath('diff-failure')
+    mkdirSync(repo, { recursive: true })
+    git(['init', '-b', 'main'], repo)
+    git(['config', 'user.email', 'test@test.com'], repo)
+    git(['config', 'user.name', 'Test'], repo)
+    writeFileSync(path.join(repo, 'base.txt'), 'base\n')
+    git(['add', 'base.txt'], repo)
+    git(['commit', '-m', 'base'], repo)
+    git(['checkout', '-b', 'feature'], repo)
+    writeFileSync(path.join(repo, 'feature.txt'), 'feature\n')
+    git(['add', 'feature.txt'], repo)
+    git(['commit', '-m', 'feature'], repo)
+
+    const tree = git(['rev-parse', 'main^{tree}'], repo)
+    rmSync(path.join(repo, '.git', 'objects', tree.slice(0, 2), tree.slice(2)), { force: true })
+
+    const error = await readAt(repo, { kind: 'branch', base: 'main' }).catch((thrown) => thrown)
+
+    expect(error).toBeInstanceOf(ChangeWalkthroughError)
+    expect(error).toMatchObject({ status: 502, code: 'WALKTHROUGH_SOURCE_UNAVAILABLE' })
+    expect((error as Error).message).toContain('unable to read tree')
+  })
+
+  it('reads root-relative paths when diff prefix config changes the header', async () => {
+    for (const [key, value] of [['diff.mnemonicPrefix', 'true'], ['diff.noprefix', 'true']]) {
+      const repo = repoPath(`prefix-${key}`)
+      createCommittedRepo(repo)
+      writeFileSync(path.join(repo, 'tracked.txt'), 'one\n')
+      git(['add', 'tracked.txt'], repo)
+      git(['commit', '-m', 'add tracked'], repo)
+      writeFileSync(path.join(repo, 'tracked.txt'), 'two\n')
+      writeFileSync(path.join(repo, 'untracked.txt'), 'new\n')
+      git(['config', key!, value!], repo)
+
+      const unstaged = await readAt(repo, { kind: 'unstaged' })
+
+      expect(unstaged.map((entry) => entry.file).sort()).toEqual(['tracked.txt', 'untracked.txt'])
+      expect(unstaged.find((entry) => entry.file === 'tracked.txt')?.patch).toContain('-one')
+      expect(unstaged.find((entry) => entry.file === 'untracked.txt')?.status).toBe('added')
+    }
+  })
+
+  it('ignores an external diff driver for tracked and untracked files', async () => {
+    const repo = repoPath('external-diff')
+    createCommittedRepo(repo)
+    writeFileSync(path.join(repo, 'tracked.txt'), 'one\n')
+    git(['add', 'tracked.txt'], repo)
+    git(['commit', '-m', 'add tracked'], repo)
+    writeFileSync(path.join(repo, 'tracked.txt'), 'two\n')
+    writeFileSync(path.join(repo, 'untracked.txt'), 'new\n')
+    git(['config', 'diff.external', 'false'], repo)
+
+    const unstaged = await readAt(repo, { kind: 'unstaged' })
+
+    expect(unstaged.map((entry) => entry.file).sort()).toEqual(['tracked.txt', 'untracked.txt'])
+  })
+
+  it('reads unstaged worktree edits and uncommitted content without a HEAD commit', async () => {
+    const repo = repoPath('no-head')
+    mkdirSync(repo, { recursive: true })
+    git(['init', '-b', 'main'], repo)
+    git(['config', 'user.email', 'test@test.com'], repo)
+    git(['config', 'user.name', 'Test'], repo)
+    writeFileSync(path.join(repo, 'a.txt'), 'one\n')
+    git(['add', 'a.txt'], repo)
+    writeFileSync(path.join(repo, 'a.txt'), 'two\n')
+
+    const unstaged = await readAt(repo, { kind: 'unstaged' })
+    const uncommitted = await readAt(repo, { kind: 'uncommitted' })
+
+    expect(unstaged.map((entry) => entry.file)).toEqual(['a.txt'])
+    expect(unstaged[0]?.patch).toContain('-one')
+    expect(unstaged[0]?.patch).toContain('+two')
+    expect(uncommitted.map((entry) => entry.file)).toEqual(['a.txt'])
+    expect(uncommitted[0]?.patch).toContain('+two')
+    expect(uncommitted[0]?.patch).not.toContain('+one')
+  })
+
+  it('includes every untracked file in a single uncommitted read', async () => {
+    const repo = repoPath('many-untracked')
+    createCommittedRepo(repo)
+    mkdirSync(path.join(repo, 'nested'), { recursive: true })
+    writeFileSync(path.join(repo, 'b.txt'), 'b\n')
+    writeFileSync(path.join(repo, 'a.txt'), 'a\n')
+    writeFileSync(path.join(repo, 'nested', 'c.txt'), 'c\n')
+
+    const uncommitted = await readAt(repo, { kind: 'uncommitted' })
+
+    expect(uncommitted.map((entry) => entry.file).sort()).toEqual(['a.txt', 'b.txt', 'nested/c.txt'])
+    expect(uncommitted.every((entry) => entry.status === 'added')).toBe(true)
+  })
+
+  it('rejects a diff larger than the output cap with a 413 error', async () => {
+    const repo = repoPath('too-large')
+    createCommittedRepo(repo)
+    writeFileSync(path.join(repo, 'huge.txt'), 'x'.repeat(6_000_000))
+
+    const error = await readAt(repo, { kind: 'unstaged' }).catch((thrown) => thrown)
+
+    expect(error).toBeInstanceOf(ChangeWalkthroughError)
+    expect(error).toMatchObject({ status: 413, code: 'WALKTHROUGH_DIFF_TOO_LARGE' })
   })
 })
 

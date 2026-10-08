@@ -5,12 +5,16 @@ import { mkdtempSync, rmSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import path from 'node:path'
 import type { FileDiffInfo, SessionInfo } from '@opencode-manager/shared/opencode'
+import { walkthroughHunksIdentity } from '@opencode-manager/shared/schemas'
+import type { ChangeWalkthrough } from '@opencode-manager/shared/schemas'
 import { migrate } from '../../src/db/migration-runner'
 import { allMigrations } from '../../src/db/migrations'
-import { ChangeWalkthroughService, computeHunkId } from '../../src/services/change-walkthroughs'
+import { saveChangeWalkthrough } from '../../src/db/change-walkthroughs'
+import { ChangeWalkthroughService, computeChangesHash, computeHunkId } from '../../src/services/change-walkthroughs'
 import { SettingsService } from '../../src/services/settings'
 import { createChangeWalkthroughRoutes } from '../../src/routes/change-walkthroughs'
 import type { OpenCodeClient } from '../../src/services/opencode/client'
+import type { GitService } from '../../src/services/git/GitService'
 import { stubLoadedModelCatalog } from '../helpers/stub-opencode-client'
 import { createCommittedRepo, createGitAuthService, git, uniqueName } from '../helpers/git-fixtures'
 
@@ -120,7 +124,13 @@ describe('change walkthrough routes', () => {
     migrate(db, allMigrations)
     sessions = { [SESSION_ID]: { changes: CHANGES } }
     fake = createFakeClient(sessions)
-    const service = new ChangeWalkthroughService(db, fake.client, new SettingsService(db), createGitAuthService())
+    const service = new ChangeWalkthroughService(
+      db,
+      fake.client,
+      new SettingsService(db),
+      createGitAuthService(),
+      { fetchRemoteRef: vi.fn(async () => {}) } as unknown as GitService,
+    )
     app = new Hono()
     app.route('/change-walkthroughs', createChangeWalkthroughRoutes(service))
   })
@@ -173,6 +183,47 @@ describe('change walkthrough routes', () => {
 
     expect(res.status).toBe(400)
     await expect(res.json()).resolves.toMatchObject({ error: 'Invalid walkthrough source' })
+  })
+
+  it('GET omits hunks when hunksFor matches the stored identity and returns them otherwise', async () => {
+    const stored: ChangeWalkthrough = {
+      sessionId: SESSION_ID,
+      source: { kind: 'session' },
+      diffHash: computeChangesHash(CHANGES),
+      model: null,
+      summary: 'A summary',
+      stops: [
+        { id: 's_1', title: 'First', explanation: 'Why', hunkIds: [HUNK_ID], status: 'ready', explanationKey: null },
+      ],
+      hunks: [
+        {
+          id: HUNK_ID,
+          file: CHANGES[0]!.file,
+          status: CHANGES[0]!.status,
+          header: '@@ -1,2 +1,2 @@',
+          text: CHANGES[0]!.patch,
+          truncated: false,
+        },
+      ],
+      omittedFiles: [],
+      createdAt: 42,
+    }
+    saveChangeWalkthrough(db, stored)
+    const identity = walkthroughHunksIdentity(stored)
+
+    const fullRes = await app.request(`/change-walkthroughs/${SESSION_ID}`)
+    const compactRes = await app.request(
+      `/change-walkthroughs/${SESSION_ID}?hunksFor=${encodeURIComponent(identity)}`,
+    )
+    const mismatchRes = await app.request(`/change-walkthroughs/${SESSION_ID}?hunksFor=other`)
+
+    const full = (await fullRes.json()) as { walkthrough: { hunks?: unknown[] } }
+    const compact = (await compactRes.json()) as { walkthrough: { hunks?: unknown[] } }
+    const mismatch = (await mismatchRes.json()) as { walkthrough: { hunks?: unknown[] } }
+
+    expect(full.walkthrough.hunks).toHaveLength(1)
+    expect(compact.walkthrough.hunks).toBeUndefined()
+    expect(mismatch.walkthrough.hunks).toHaveLength(1)
   })
 
   it('POST stores the walkthrough under the requested source', async () => {

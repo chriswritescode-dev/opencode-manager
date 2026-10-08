@@ -19,7 +19,8 @@ export function createChangeWalkthroughRoutes(service: ChangeWalkthroughService)
     }
 
     try {
-      const state = await service.getState(c.req.param('sessionId'), source)
+      const hunksFor = c.req.query('hunksFor')
+      const state = await service.getState(c.req.param('sessionId'), source, hunksFor)
       return c.json(state)
     } catch (error) {
       return handleServiceError(c, error, 'Failed to read change walkthrough', ServiceError)

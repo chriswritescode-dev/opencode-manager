@@ -188,7 +188,7 @@ export function ToolSidePanel({
     <>
       {panelContent ? (
         activeTool === 'walkthrough' && sessionId ? (
-          <ChangesWalkthroughProvider sessionId={sessionId} active>
+          <ChangesWalkthroughProvider key={sessionId} sessionId={sessionId} active>
             {panelContent}
           </ChangesWalkthroughProvider>
         ) : (

@@ -35,6 +35,16 @@ describe('executeCommand signal handling', () => {
     expect(result).toHaveLength(100)
   })
 
+  it('flags truncated output on the structured result when exit codes are ignored', async () => {
+    const result = await executeCommand(
+      ['sh', '-c', 'i=0; while [ $i -lt 1000 ]; do printf "0123456789"; i=$((i+1)); done'],
+      { maxOutputChars: 100, silent: true, ignoreExitCode: true },
+    )
+
+    expect(result.truncated).toBe(true)
+    expect(result.stdout).toHaveLength(100)
+  })
+
   it('returns the full stdout when it stays within maxOutputChars', async () => {
     const result = await executeCommand(['sh', '-c', 'printf "hello"'], { maxOutputChars: 100, silent: true })
 

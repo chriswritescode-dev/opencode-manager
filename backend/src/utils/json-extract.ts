@@ -1,3 +1,5 @@
+import type { ZodType } from 'zod'
+
 export function extractFirstJsonObject(text: string): string | null {
   const start = text.indexOf('{')
   if (start === -1) {
@@ -38,4 +40,25 @@ export function extractFirstJsonObject(text: string): string | null {
   }
 
   return null
+}
+
+export function parseFirstJsonObject<T>(text: string, schema: ZodType<T>): T | null {
+  const extracted = extractFirstJsonObject(text)
+  if (!extracted) {
+    return null
+  }
+
+  let raw: unknown
+  try {
+    raw = JSON.parse(extracted)
+  } catch {
+    return null
+  }
+
+  const parsed = schema.safeParse(raw)
+  if (!parsed.success) {
+    return null
+  }
+
+  return parsed.data
 }

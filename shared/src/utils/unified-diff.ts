@@ -1,3 +1,5 @@
+import type { FileDiffInfo } from '../opencode'
+
 export interface DiffLine {
   type: "add" | "remove" | "context" | "header" | "hunk";
   content: string;
@@ -90,6 +92,19 @@ export function parseDiffLines(diff: string): DiffLine[] {
   return result;
 }
 
+export function countDiffLineChanges(text: string): { added: number; removed: number } {
+  let added = 0;
+  let removed = 0;
+  for (const line of parseDiffLines(text)) {
+    if (line.type === "add") {
+      added += 1;
+    } else if (line.type === "remove") {
+      removed += 1;
+    }
+  }
+  return { added, removed };
+}
+
 export function splitDiffHunks(patch: string): DiffHunk[] {
   const hunks: DiffHunk[] = [];
   let current: string[] | null = null;
@@ -116,19 +131,11 @@ function toHunk(lines: string[]): DiffHunk {
   return { header: lines[0]!, text: lines.join("\n") };
 }
 
-export interface UnifiedFileDiff {
-  file: string;
-  status: "added" | "deleted" | "modified";
-  patch: string;
-  additions: number;
-  deletions: number;
-}
-
-export function splitUnifiedDiffByFile(diff: string): UnifiedFileDiff[] {
+export function splitUnifiedDiffByFile(diff: string): FileDiffInfo[] {
   const blocks: string[][] = [];
 
   for (const line of diff.split("\n")) {
-    if (line.startsWith("diff --git ")) {
+    if (line.startsWith("diff --git ") || line.startsWith("diff --cc ") || line.startsWith("diff --combined ")) {
       blocks.push([line]);
     } else if (blocks.length > 0) {
       blocks[blocks.length - 1]!.push(line);
@@ -138,15 +145,13 @@ export function splitUnifiedDiffByFile(diff: string): UnifiedFileDiff[] {
   return blocks.map((lines) => toUnifiedFileDiff(lines));
 }
 
-function toUnifiedFileDiff(lines: string[]): UnifiedFileDiff {
+function toUnifiedFileDiff(lines: string[]): FileDiffInfo {
   const header = lines[0]!;
   const newPath = lines.find((line) => line.startsWith("+++ "));
   const oldPath = lines.find((line) => line.startsWith("--- "));
   const renameTo = lines.find((line) => line.startsWith("rename to "));
   let file = "";
-  let status: UnifiedFileDiff["status"] = "modified";
-  let additions = 0;
-  let deletions = 0;
+  let status: FileDiffInfo["status"] = "modified";
 
   if (newPath && newPath.slice(4) !== "/dev/null") {
     file = parseDiffPathToken(newPath.slice(4), "b/");
@@ -164,19 +169,12 @@ function toUnifiedFileDiff(lines: string[]): UnifiedFileDiff {
     } else if (line.startsWith("deleted file mode")) {
       status = "deleted";
     }
-
-    if (line.startsWith("+++") || line.startsWith("---")) {
-      continue;
-    }
-
-    if (line.startsWith("+")) {
-      additions++;
-    } else if (line.startsWith("-")) {
-      deletions++;
-    }
   }
 
-  return { file, status, patch: lines.join("\n"), additions, deletions };
+  const patch = lines.join("\n");
+  const { added: additions, removed: deletions } = countDiffLineChanges(patch);
+
+  return { file, status, patch, additions, deletions };
 }
 
 function stripDiffPathPrefix(path: string, prefix: string): string {
@@ -234,30 +232,50 @@ function decodeGitQuotedPath(raw: string): string {
 }
 
 function newPathFromDiffHeader(header: string): string {
-  const rest = header.slice("diff --git ".length);
+  const match = /^diff --(?:git|cc|combined) (.*)$/.exec(header);
+  const rest = match ? match[1]! : "";
 
   if (rest.startsWith('"')) {
-    const end = findClosingQuote(rest);
+    const end = findClosingQuoteFrom(rest, 0);
     if (end >= 0) {
       let index = end + 1;
       while (rest[index] === " ") {
         index += 1;
       }
-      return parseDiffPathToken(rest.slice(index), "b/");
+      return stripKnownDiffPrefix(parseDiffPathToken(rest.slice(index), ""));
     }
   }
 
   const quoted = rest.indexOf(' "');
   if (quoted >= 0) {
-    return parseDiffPathToken(rest.slice(quoted + 1), "b/");
+    return stripKnownDiffPrefix(parseDiffPathToken(rest.slice(quoted + 1), ""));
   }
 
-  const index = rest.lastIndexOf(" b/");
-  return index >= 0 ? parseDiffPathToken(rest.slice(index + 1), "b/") : "";
+  for (const prefix of GIT_DIFF_DEST_PREFIXES) {
+    const index = rest.lastIndexOf(prefix);
+    if (index >= 0) {
+      return parseDiffPathToken(rest.slice(index + 1), prefix.trim());
+    }
+  }
+
+  const lastSpace = rest.lastIndexOf(" ");
+  return lastSpace >= 0 ? rest.slice(lastSpace + 1) : rest;
 }
 
-function findClosingQuote(raw: string): number {
-  for (let index = 1; index < raw.length; index += 1) {
+const GIT_DIFF_DEST_PREFIXES = [" b/", " w/", " 2/", " 3/", " i/", " c/", " o/", " 1/", " a/"];
+const GIT_DIFF_PREFIXES = ["a/", "b/", "i/", "w/", "c/", "o/", "1/", "2/", "3/"];
+
+function stripKnownDiffPrefix(path: string): string {
+  for (const prefix of GIT_DIFF_PREFIXES) {
+    if (path.startsWith(prefix)) {
+      return path.slice(prefix.length);
+    }
+  }
+  return path;
+}
+
+function findClosingQuoteFrom(raw: string, start: number): number {
+  for (let index = start + 1; index < raw.length; index += 1) {
     if (raw[index] === "\\") {
       index += 1;
       continue;

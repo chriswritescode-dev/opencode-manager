@@ -1,36 +1,19 @@
-import { useCallback, useEffect, useRef, useState } from 'react'
 import { useSettings } from '@/hooks/useSettings'
+import { useAutosavedSetting } from '@/hooks/useAutosavedSetting'
 import { Label } from '@/components/ui/label'
 import { ModelCombobox } from '@/components/model/ModelCombobox'
-
-const AUTOSAVE_DELAY_MS = 800
 
 export function WalkthroughSettings() {
   const { preferences, updateSettings } = useSettings()
   const storedWalkthroughModel = preferences?.walkthroughModel
 
-  const [walkthroughModel, setWalkthroughModel] = useState(storedWalkthroughModel ?? '')
-  const committed = useRef(storedWalkthroughModel)
-
-  useEffect(() => {
-    setWalkthroughModel(storedWalkthroughModel ?? '')
-    committed.current = storedWalkthroughModel
-  }, [storedWalkthroughModel])
-
-  const commitWalkthroughModel = useCallback(() => {
-    const next = walkthroughModel.trim()
-    if (next === (committed.current ?? '')) return
-    committed.current = next
-    updateSettings({ walkthroughModel: next })
-  }, [walkthroughModel, updateSettings])
-
-  useEffect(() => {
-    const timer = setTimeout(() => {
-      commitWalkthroughModel()
-    }, AUTOSAVE_DELAY_MS)
-
-    return () => clearTimeout(timer)
-  }, [commitWalkthroughModel])
+  const { draft: walkthroughModel, setDraft: setWalkthroughModel } = useAutosavedSetting({
+    stored: storedWalkthroughModel,
+    toDraft: (stored) => stored ?? '',
+    toCommitted: (draft) => draft.trim(),
+    isEqual: (a, b) => a === b,
+    save: (next) => updateSettings({ walkthroughModel: next }),
+  })
 
   return (
     <div className="space-y-6">
@@ -51,6 +34,7 @@ export function WalkthroughSettings() {
           placeholder="Session model"
           allowCustomValue
           showClear
+          emptyMeansDefault={false}
           className="w-full shrink-0 sm:w-64"
         />
       </div>

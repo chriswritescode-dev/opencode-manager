@@ -12,7 +12,7 @@ import {
   fileExists,
   ensureDirectoryExists,
 } from './file-operations'
-import { ASSISTANT_NOTIFICATION_LIMITS, OpenCodeConfigSchema, DEFAULT_KEYBOARD_SHORTCUTS, DEFAULT_LEADER_KEY } from '@opencode-manager/shared/schemas'
+import { ASSISTANT_NOTIFICATION_LIMITS, AssistantSettingsPatchSchema, OpenCodeConfigSchema, DEFAULT_KEYBOARD_SHORTCUTS, DEFAULT_LEADER_KEY } from '@opencode-manager/shared/schemas'
 import { MANAGER_COLOR_THEME_ID, OPENCODE_THEMES } from '@opencode-manager/shared/themes'
 import { ASSISTANT_REPO_ID, ASSISTANT_REPO_PATH, ASSISTANT_OPENCODE_DIR_NAME } from '@opencode-manager/shared/utils'
 import { getAssistantModePath, getReposPath } from '@opencode-manager/shared/config/env'
@@ -581,6 +581,23 @@ Sending is rate limited to **10 notifications per minute**. Beyond that the tool
 `
 }
 
+type AssistantSettingsKey = keyof typeof AssistantSettingsPatchSchema.shape
+
+const ASSISTANT_SETTINGS_KEY_NOTES: Partial<Record<AssistantSettingsKey, string>> = {
+  tts: 'Non-secret TTS preferences (`enabled`, `provider`, `autoPlay`, `voice`, `model`, `speed`). TTS must already be configured in the UI (the endpoint returns 400 otherwise).',
+  stt: 'Non-secret STT preferences (`enabled`, `provider`, `model`, `language`). STT must already be configured in the UI (the endpoint returns 400 otherwise).',
+}
+
+function buildAllowedSettingsKeysList(): string {
+  const keys = Object.keys(AssistantSettingsPatchSchema.shape) as AssistantSettingsKey[]
+  return keys
+    .map((key) => {
+      const note = ASSISTANT_SETTINGS_KEY_NOTES[key]
+      return note === undefined ? `- \`${key}\`` : `- \`${key}\` — ${note}`
+    })
+    .join('\n')
+}
+
 export function buildSettingsSkill(): string {
   return `---
 name: manager-settings
@@ -660,13 +677,7 @@ Update a subset of safe user preferences.
 
 **Allowed Keys:**
 The following preference keys can be modified:
-- \`theme\`, \`colorTheme\`, \`mode\`, \`defaultModel\`, \`defaultAgent\`
-- \`autoScroll\`, \`expandDiffs\`, \`expandToolCalls\`, \`showReasoning\`
-- \`simpleChatMode\`, \`leaderKey\`, \`directShortcuts\`
-- \`keyboardShortcuts\`, \`customCommands\`, \`notifications\`
-- \`repoOrder\`, \`repoSortMode\`
-- \`tts\` — Non-secret TTS preferences (\`enabled\`, \`provider\`, \`autoPlay\`, \`voice\`, \`model\`, \`speed\`). TTS must already be configured in the UI (the endpoint returns 400 otherwise).
-- \`stt\` — Non-secret STT preferences (\`enabled\`, \`provider\`, \`model\`, \`language\`). STT must already be configured in the UI (the endpoint returns 400 otherwise).
+${buildAllowedSettingsKeysList()}
 
 **DO NOT attempt to set:**
 - \`gitCredentials\` - Git credentials must be managed via the full UI

@@ -138,4 +138,17 @@ describe('WalkthroughSettings', () => {
       vi.useRealTimers()
     }
   })
+
+  it('keeps the OpenCode default as a selectable model when the field is unset', () => {
+    mocks.useOpenCodeDefaultModel.mockReturnValue({ data: 'anthropic/claude-sonnet-4' })
+    mockUseSettings()
+    render(<WalkthroughSettings />)
+
+    const input = screen.getByLabelText('Walkthrough model')
+    expect(input).toHaveValue('')
+
+    fireEvent.focus(input)
+    expect(screen.getByRole('option', { name: /Claude Sonnet 4/ })).toBeInTheDocument()
+    expect(screen.queryByRole('option', { name: /^Default:/ })).not.toBeInTheDocument()
+  })
 })

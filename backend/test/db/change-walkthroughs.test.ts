@@ -102,6 +102,36 @@ describe('change walkthroughs', () => {
     expect(getChangeWalkthrough(db, SESSION_ID, SESSION_SOURCE)).toEqual(stored)
   })
 
+  it('reads a walkthrough whose mechanical hunks predate hunk counts', () => {
+    const legacy = walkthrough({
+      stops: [
+        {
+          id: 's_mech',
+          title: 'Mechanical changes',
+          explanation: 'Lock files',
+          hunkIds: ['h_lock'],
+          status: 'ready',
+          explanationKey: null,
+        },
+      ],
+      hunks: [
+        {
+          id: 'h_lock',
+          file: 'pnpm-lock.yaml',
+          status: 'modified',
+          header: '@@ -1 +1 @@',
+          text: '@@ -1 +1 @@\n-old-lock\n+new-lock',
+          truncated: false,
+        },
+      ],
+    })
+    saveChangeWalkthrough(db, legacy)
+
+    const stored = getChangeWalkthrough(db, SESSION_ID, SESSION_SOURCE)
+    expect(stored).toEqual(legacy)
+    expect(stored!.hunks[0]!.additions).toBeUndefined()
+  })
+
   it('stores walkthroughs for two sources of one session side by side', () => {
     saveChangeWalkthrough(db, walkthrough({ diffHash: 'hash-session' }))
     saveChangeWalkthrough(db, walkthrough({ source: { kind: 'staged' }, diffHash: 'hash-staged', summary: 'Staged' }))
