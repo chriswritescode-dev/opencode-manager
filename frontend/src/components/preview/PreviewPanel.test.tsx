@@ -4,7 +4,7 @@ import userEvent from '@testing-library/user-event'
 import { MemoryRouter } from 'react-router-dom'
 import type { CreatePreviewSessionResponse } from '@opencode-manager/shared/types'
 import { createPreviewSession, usePreviewPorts } from '@/api/preview'
-import { PreviewPanel } from './PreviewPanel'
+import { PreviewPanel, PreviewWorkspace } from './PreviewPanel'
 
 vi.mock('@/api/preview', () => ({
   usePreviewPorts: vi.fn(),
@@ -37,6 +37,14 @@ function panelElement(initialEntry: string) {
   return (
     <MemoryRouter initialEntries={[initialEntry]}>
       <PreviewPanel isOpen onClose={vi.fn()} directory="/repo" />
+    </MemoryRouter>
+  )
+}
+
+function workspaceElement(compact: boolean, initialEntry = DEFAULT_ENTRY) {
+  return (
+    <MemoryRouter initialEntries={[initialEntry]}>
+      <PreviewWorkspace isOpen directory="/repo" compact={compact} />
     </MemoryRouter>
   )
 }
@@ -313,5 +321,23 @@ describe('PreviewPanel', () => {
     panel.refresh()
 
     expect(createPreviewSession).toHaveBeenCalledTimes(1)
+  })
+
+  it('keeps the port menu but hides the viewport presets in compact mode', async () => {
+    render(workspaceElement(true))
+    await screen.findByTitle('Preview')
+
+    expect(screen.getByRole('combobox', { name: 'Preview port' })).toBeInTheDocument()
+    expect(screen.queryByLabelText('Mobile viewport')).not.toBeInTheDocument()
+    expect(screen.queryByLabelText('Tablet viewport')).not.toBeInTheDocument()
+    expect(screen.queryByLabelText('Full width viewport')).not.toBeInTheDocument()
+  })
+
+  it('shows the viewport presets when not compact', async () => {
+    render(workspaceElement(false))
+    await screen.findByTitle('Preview')
+
+    expect(screen.getByRole('combobox', { name: 'Preview port' })).toBeInTheDocument()
+    expect(screen.getByLabelText('Mobile viewport')).toBeInTheDocument()
   })
 })

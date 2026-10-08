@@ -11,7 +11,7 @@ import { getRepo } from '@/api/repos'
 import { useRefreshOnOpen } from '@/hooks/useRefreshOnOpen'
 import { SideDrawer, SideDrawerContent } from '@/components/ui/side-drawer'
 import { FileBrowserSheet } from '@/components/file-browser/FileBrowserSheet'
-import { buildMoreItems, buildNavModel } from './moreDrawerItems'
+import { buildMoreItems, buildNavModel, isSessionDetailPath } from './moreDrawerItems'
 import { useSwipeBack } from '@/hooks/useMobile'
 import { getRepoDisplayName } from '@/lib/utils'
 import { getPathWithReturnTo, isAssistantPath } from '@/lib/navigation'
@@ -35,7 +35,7 @@ export function MoreDrawer({ isOpen, onClose }: MoreDrawerProps) {
   const { searchParams, updateParams } = useUrlParams()
   const { logout } = useAuth()
   const { data: health } = useServerHealth()
-  const isSessionDetail = /^\/repos\/\d+\/sessions\/[^/]+$/.test(location.pathname)
+  const isSessionDetail = isSessionDetailPath(location.pathname)
   const isAssistantRoute = isAssistantPath(location.pathname)
   const isAssistantSession = isSessionDetail && searchParams.get('assistant') === '1'
   const { commands } = useCommands({ enabled: isSessionDetail })

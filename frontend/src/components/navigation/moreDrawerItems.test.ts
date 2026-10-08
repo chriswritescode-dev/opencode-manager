@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest'
-import { buildMoreItems, buildNavModel } from './moreDrawerItems'
+import { buildMoreItems, buildNavModel, buildToolItems } from './moreDrawerItems'
 
 describe('buildMoreItems', () => {
   it('returns Home + All Schedules + Files + Settings + Logout for root path', () => {
@@ -41,7 +41,7 @@ describe('buildMoreItems', () => {
 
   it('returns session-specific items for /repos/:id/sessions/:sid', () => {
     const items = buildMoreItems('/repos/42/sessions/abc')
-    expect(items).toHaveLength(12)
+    expect(items).toHaveLength(13)
     expect(items[0].key).toBe('home')
     expect(items[1].key).toBe('files')
     expect(items[2].key).toBe('mcp')
@@ -52,23 +52,26 @@ describe('buildMoreItems', () => {
     expect(items[6].key).toBe('source-control')
     expect(items[7].key).toBe('terminal')
     expect(items[7].dialog).toBe('terminal')
-    expect(items[8].key).toBe('actions')
-    expect(items[8].dialog).toBe('actions')
-    expect(items[9].key).toBe('preview')
-    expect(items[9].dialog).toBe('preview')
-    expect(items[10].key).toBe('settings')
-    expect(items[11].key).toBe('logout')
+    expect(items[8].key).toBe('walkthrough')
+    expect(items[8].dialog).toBe('walkthrough')
+    expect(items[9].key).toBe('actions')
+    expect(items[9].dialog).toBe('actions')
+    expect(items[10].key).toBe('preview')
+    expect(items[10].dialog).toBe('preview')
+    expect(items[11].key).toBe('settings')
+    expect(items[12].key).toBe('logout')
   })
 
   it('omits the Actions item for an Assistant session', () => {
     const items = buildMoreItems('/repos/0/sessions/abc')
-    expect(items).toHaveLength(11)
+    expect(items).toHaveLength(12)
     expect(items.map((item) => item.key)).not.toContain('actions')
     expect(items[7].key).toBe('terminal')
-    expect(items[8].key).toBe('preview')
-    expect(items[8].dialog).toBe('preview')
-    expect(items[9].key).toBe('settings')
-    expect(items[10].key).toBe('logout')
+    expect(items[8].key).toBe('walkthrough')
+    expect(items[9].key).toBe('preview')
+    expect(items[9].dialog).toBe('preview')
+    expect(items[10].key).toBe('settings')
+    expect(items[11].key).toBe('logout')
   })
 
   it('returns assistant workspace items for /repos/:id/assistant', () => {
@@ -132,6 +135,35 @@ describe('buildMoreItems', () => {
       expect(first.label).toBe('Home')
       expect(first.to).toBe('/')
     }
+  })
+})
+
+describe('buildToolItems', () => {
+  it('returns the session route items without home and account entries', () => {
+    expect(buildToolItems('/repos/42/sessions/abc').map((item) => item.key)).toEqual([
+      'files',
+      'mcp',
+      'skills',
+      'reset-permissions',
+      'schedules',
+      'source-control',
+      'terminal',
+      'walkthrough',
+      'actions',
+      'preview',
+    ])
+  })
+
+  it('returns the home route tools', () => {
+    expect(buildToolItems('/').map((item) => item.key)).toEqual(['all-schedules', 'files'])
+  })
+
+  it.each(['/repos/42', '/assistant'])('opens schedules in the panel on %s', (path) => {
+    expect(buildToolItems(path).find((item) => item.key === 'schedules')?.panelTool).toBe('schedules')
+  })
+
+  it.each(['/schedules', '/repos/42/schedules'])('returns nothing on %s', (path) => {
+    expect(buildToolItems(path)).toEqual([])
   })
 })
 

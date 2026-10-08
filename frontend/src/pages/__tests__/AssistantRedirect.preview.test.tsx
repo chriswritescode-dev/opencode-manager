@@ -1,5 +1,5 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest'
-import { render, screen } from '@testing-library/react'
+import { render, screen, waitFor } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { MemoryRouter, useLocation } from 'react-router-dom'
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
@@ -129,20 +129,24 @@ describe('AssistantRedirect preview routing', () => {
     mocks.createPreviewSession.mockResolvedValue({ token: 'tok', previewPort: 5004, publicUrl: null })
   })
 
-  it('opens the preview panel when a terminal localhost link is followed', async () => {
+  it('opens preview in the docked panel when a terminal localhost link is followed', async () => {
     const user = userEvent.setup()
     renderAssistantRedirect()
 
     await user.click(await screen.findByRole('button', { name: 'local-link' }))
 
-    const iframe = await screen.findByTitle('Preview')
+    const iframe = await waitFor(() => {
+      const element = document.querySelector('iframe[title="Preview"]')
+      expect(element).not.toBeNull()
+      return element as HTMLIFrameElement
+    })
     expect(iframe.getAttribute('src')).toContain('token=tok')
     expect(iframe.getAttribute('src')).toContain('path=%2Fdashboard')
     expect(mocks.createPreviewSession).toHaveBeenCalledWith(5173)
 
     expect(screen.queryByTestId('terminal-view')).not.toBeInTheDocument()
     const location = screen.getByTestId('location').textContent ?? ''
-    expect(location).toContain('dialog=preview')
+    expect(location).toContain('panel=preview')
     expect(location).toContain('previewPort=5173')
     expect(location).toContain('previewPath=%2Fdashboard')
   })
@@ -156,8 +160,8 @@ describe('AssistantRedirect preview routing', () => {
 
     expect(openSpy).toHaveBeenCalledWith('https://example.com/docs', '_blank', 'noopener,noreferrer')
     expect(mocks.createPreviewSession).not.toHaveBeenCalled()
-    expect(screen.queryByTitle('Preview')).not.toBeInTheDocument()
+    expect(document.querySelector('iframe[title="Preview"]')).toBeNull()
     expect(screen.getByTestId('terminal-view')).toBeInTheDocument()
-    expect(screen.getByTestId('location').textContent).toContain('dialog=terminal')
+    expect(screen.getByTestId('location').textContent).toContain('panel=terminal')
   })
 })

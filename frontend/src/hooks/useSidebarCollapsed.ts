@@ -1,7 +1,6 @@
 import { useState, useCallback } from 'react'
 
 const STORAGE_KEY = 'oc:sidebar:collapsed'
-const CLOSED_SECTIONS_STORAGE_KEY = `${STORAGE_KEY}:closed-sections`
 
 function readStorage(key: string): string | null {
   try {
@@ -46,46 +45,6 @@ function usePersistentBoolean(key: string, fallback: boolean): [boolean, () => v
   return [value, toggle]
 }
 
-function readStoredClosedSections<T extends string>(sections: readonly T[]): T[] {
-  const stored = readStorage(CLOSED_SECTIONS_STORAGE_KEY)
-  if (stored === null) {
-    return []
-  }
-  try {
-    const parsed = JSON.parse(stored)
-    if (!Array.isArray(parsed)) {
-      return []
-    }
-    const known = new Set<string>(sections)
-    return parsed.filter((value): value is T => typeof value === 'string' && known.has(value))
-  } catch {
-    return []
-  }
-}
-
 export function useSidebarCollapsed(): [boolean, () => void] {
   return usePersistentBoolean(STORAGE_KEY, false)
-}
-
-export function useSidebarSections<T extends string>(
-  sections: readonly T[],
-): { isSectionOpen: (section: T) => boolean; toggleSection: (section: T) => void } {
-  const [closedSections, setClosedSections] = useState<T[]>(() => readStoredClosedSections(sections))
-
-  const toggleSection = useCallback((section: T) => {
-    setClosedSections((prev) => {
-      const next = prev.includes(section)
-        ? prev.filter((item) => item !== section)
-        : [...prev, section]
-      writeStorage(CLOSED_SECTIONS_STORAGE_KEY, next)
-      return next
-    })
-  }, [])
-
-  const isSectionOpen = useCallback(
-    (section: T) => !closedSections.includes(section),
-    [closedSections],
-  )
-
-  return { isSectionOpen, toggleSection }
 }

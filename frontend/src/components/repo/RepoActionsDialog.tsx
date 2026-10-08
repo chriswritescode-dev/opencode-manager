@@ -191,14 +191,13 @@ function TabCount({ count }: { count: number }) {
   return <span className="ml-1.5 text-xs tabular-nums text-muted-foreground">{count}</span>
 }
 
-interface RepoActionsDialogProps {
+interface RepoActionsContentProps {
   repoId: number
   directory: string | undefined
   open: boolean
-  onOpenChange: (open: boolean) => void
 }
 
-export function RepoActionsDialog({ repoId, directory, open, onOpenChange }: RepoActionsDialogProps) {
+export function RepoActionsContent({ repoId, directory, open }: RepoActionsContentProps) {
   const configQuery = useProjectConfig(repoId, directory, open && !!directory)
   const updateActions = useUpdateProjectActions(repoId, directory)
   const updateSetup = useUpdateWorktreeSetup(repoId, directory)
@@ -329,263 +328,251 @@ export function RepoActionsDialog({ repoId, directory, open, onOpenChange }: Rep
   )
 
   return (
-    <>
-      <Dialog open={open} onOpenChange={onOpenChange}>
-        <DialogContent
-          mobileFullscreen
-          className="flex flex-col gap-0 overflow-hidden p-0 pb-safe sm:h-auto sm:max-h-[85vh] sm:max-w-[560px] sm:p-0"
-        >
-          <DialogHeader className="shrink-0 border-b border-border px-4 py-4 sm:px-6">
-            <DialogTitle>Project Actions</DialogTitle>
-            <DialogDescription>Commands and setup steps for this location.</DialogDescription>
-          </DialogHeader>
-
-          {configQuery.isLoading ? (
-            <div className="flex items-center justify-center py-8">
-              <Loader2 className="h-4 w-4 animate-spin text-primary" />
-            </div>
-          ) : !config ? (
-            <p className="px-4 py-4 text-sm text-destructive sm:px-6">
-              {configQuery.error instanceof Error ? configQuery.error.message : 'No configuration available.'}
-            </p>
-          ) : (
-            <>
-              {hasRepoFileStatus && (
-                <div className="shrink-0 space-y-2 px-4 pt-3 sm:px-6">
-                  {config.repoFile.error && (
-                    <p role="alert" className="text-sm text-destructive">
-                      {config.repoFile.error}
-                    </p>
-                  )}
-                  {config.repoFile.warnings.map((warning) => (
-                    <p key={warning} className="text-xs text-warning">
-                      {warning}
-                    </p>
-                  ))}
-                  {needsTrust && (
-                    <div className="flex items-center gap-3 rounded-lg border border-warning/50 bg-warning/10 p-3">
-                      <ShieldAlert className="h-4 w-4 shrink-0 text-warning" />
-                      <div className="min-w-0 flex-1">
-                        <p className="text-sm font-medium">Repository commands are not trusted</p>
-                        <p className="text-xs text-muted-foreground">They won't run until you review and trust them.</p>
-                      </div>
-                      <Button type="button" size="sm" variant="outline" className="shrink-0" onClick={openTrustReview}>
-                        Review
-                      </Button>
-                    </div>
-                  )}
+    <div className="flex min-h-0 flex-1 flex-col">
+      {configQuery.isLoading ? (
+        <div className="flex items-center justify-center py-8">
+          <Loader2 className="h-4 w-4 animate-spin text-primary" />
+        </div>
+      ) : !config ? (
+        <p className="px-4 py-4 text-sm text-destructive sm:px-6">
+          {configQuery.error instanceof Error ? configQuery.error.message : 'No configuration available.'}
+        </p>
+      ) : (
+        <>
+          {hasRepoFileStatus && (
+            <div className="shrink-0 space-y-2 px-4 pt-3 sm:px-6">
+              {config.repoFile.error && (
+                <p role="alert" className="text-sm text-destructive">
+                  {config.repoFile.error}
+                </p>
+              )}
+              {config.repoFile.warnings.map((warning) => (
+                <p key={warning} className="text-xs text-warning">
+                  {warning}
+                </p>
+              ))}
+              {needsTrust && (
+                <div className="flex items-center gap-3 rounded-lg border border-warning/50 bg-warning/10 p-3">
+                  <ShieldAlert className="h-4 w-4 shrink-0 text-warning" />
+                  <div className="min-w-0 flex-1">
+                    <p className="text-sm font-medium">Repository commands are not trusted</p>
+                    <p className="text-xs text-muted-foreground">They won't run until you review and trust them.</p>
+                  </div>
+                  <Button type="button" size="sm" variant="outline" className="shrink-0" onClick={openTrustReview}>
+                    Review
+                  </Button>
                 </div>
               )}
-
-              <Tabs defaultValue="actions" className="flex min-h-0 flex-1 flex-col">
-                <div className="shrink-0 px-4 pt-3 sm:px-6">
-                  <TabsList className="w-full justify-start">
-                    <TabsTrigger value="actions">
-                      Actions
-                      <TabCount count={personalActions.length + repoActions.length} />
-                    </TabsTrigger>
-                    <TabsTrigger value="setup">
-                      Worktree setup
-                      <TabCount count={setupCommands.length + repoSetup.length} />
-                    </TabsTrigger>
-                  </TabsList>
-                </div>
-
-                <TabsContent value="actions" className="mt-0 flex min-h-0 flex-1 flex-col px-0">
-                  <div className="flex shrink-0 items-center justify-between gap-3 px-4 py-3 sm:px-6">
-                    <p className="text-xs text-muted-foreground">Start these from the actions menu in the header.</p>
-                    <Button
-                      type="button"
-                      size="sm"
-                      variant="outline"
-                      className="shrink-0"
-                      onClick={() => setDraft(emptyActionDraft())}
-                    >
-                      <Plus className="h-4 w-4 mr-1" />
-                      Add action
-                    </Button>
-                  </div>
-                  <div className="min-h-0 flex-1 overflow-y-auto px-4 pb-4 sm:px-6 sm:pb-6">
-                    <SettingsList
-                      isEmpty={personalActions.length === 0 && repoActions.length === 0 && !isAddingAction}
-                      emptyTitle="No actions configured"
-                      emptyHint="Add a command you run often, like a dev server or test watcher."
-                      maxHeightClassName="max-h-none"
-                    >
-                      {personalActions.map((action) =>
-                        draft?.id === action.id ? (
-                          renderActionForm(draft)
-                        ) : (
-                          <SettingsListRow
-                            key={action.id}
-                            className={COMPACT_ROW_CLASS}
-                            title={<ActionTitle action={action} />}
-                            description={<span className="font-mono" title={action.command}>{action.command}</span>}
-                            belowDescription={<ActionUrl url={action.url} />}
-                            onClick={() => setDraft(actionToDraft(action))}
-                            trailing={
-                              <Button
-                                type="button"
-                                size="icon"
-                                variant="ghost"
-                                className="h-8 w-8"
-                                aria-label={`Edit ${action.name}`}
-                                onClick={() => setDraft(actionToDraft(action))}
-                              >
-                                <Pencil className="h-4 w-4" />
-                              </Button>
-                            }
-                            actions={[
-                              {
-                                label: 'Move to repository',
-                                onClick: () => moveAction(action, 'repo'),
-                                disabled: moveItem.isPending,
-                              },
-                              {
-                                label: 'Delete',
-                                destructive: true,
-                                separatorBefore: true,
-                                onClick: () => handleDeleteAction(action.id),
-                                disabled: updateActions.isPending,
-                              },
-                            ]}
-                            actionsLabel={`Actions for ${action.name}`}
-                          />
-                        ),
-                      )}
-                      {isAddingAction && draft && renderActionForm(draft)}
-                      {repoActions.map((action) => (
-                        <SettingsListRow
-                          key={`repo:${action.id}`}
-                          className={COMPACT_ROW_CLASS}
-                          title={<ActionTitle action={action} />}
-                          badges={<Badge variant="secondary" className="shrink-0">In repo</Badge>}
-                          description={<span className="font-mono" title={action.command}>{action.command}</span>}
-                          belowDescription={<ActionUrl url={action.url} />}
-                          actions={[
-                            {
-                              label: 'Move to my settings',
-                              onClick: () => moveAction(action, 'personal'),
-                              disabled: moveItem.isPending,
-                            },
-                          ]}
-                          actionsLabel={`Actions for ${action.name}`}
-                        />
-                      ))}
-                    </SettingsList>
-                  </div>
-                </TabsContent>
-
-                <TabsContent value="setup" className="mt-0 flex min-h-0 flex-1 flex-col px-0">
-                  <div className="flex shrink-0 items-center justify-between gap-3 px-4 py-3 sm:px-6">
-                    <p className="text-xs text-muted-foreground">
-                      Run in order after a new worktree is created.{' '}
-                      <code className="font-mono">$ROOT_PROJECT_PATH</code> points to the main checkout.
-                    </p>
-                    <Button type="button" size="sm" variant="outline" className="shrink-0" onClick={addSetupCommand}>
-                      <Plus className="h-4 w-4 mr-1" />
-                      Add command
-                    </Button>
-                  </div>
-                  <div className="min-h-0 flex-1 overflow-y-auto px-4 pb-4 sm:px-6">
-                    <SettingsList
-                      isEmpty={setupCommands.length === 0 && repoSetup.length === 0}
-                      emptyTitle="No setup commands"
-                      emptyHint="Add commands such as pnpm install to prepare new worktrees."
-                      maxHeightClassName="max-h-none"
-                    >
-                      {setupCommands.map((command, index) => (
-                        <div key={index} className="flex items-center gap-1 bg-card px-3 py-2">
-                          <Input
-                            aria-label={`Setup command ${index + 1}`}
-                            autoFocus={index === focusSetupIndex}
-                            value={command}
-                            className="mr-1 h-9 min-w-0 flex-1 font-mono md:text-xs"
-                            onChange={(event) =>
-                              setSetupCommands((current) =>
-                                current.map((item, itemIndex) => (itemIndex === index ? event.target.value : item)),
-                              )
-                            }
-                          />
-                          <Button
-                            type="button"
-                            size="icon"
-                            variant="ghost"
-                            className="h-8 w-8 shrink-0"
-                            aria-label="Move up"
-                            disabled={index === 0}
-                            onClick={() => setSetupCommands((current) => arrayMove(current, index, index - 1))}
-                          >
-                            <ArrowUp className="h-4 w-4" />
-                          </Button>
-                          <Button
-                            type="button"
-                            size="icon"
-                            variant="ghost"
-                            className="h-8 w-8 shrink-0"
-                            aria-label="Move down"
-                            disabled={index === setupCommands.length - 1}
-                            onClick={() => setSetupCommands((current) => arrayMove(current, index, index + 1))}
-                          >
-                            <ArrowDown className="h-4 w-4" />
-                          </Button>
-                          <SettingsListRowActionsMenu
-                            label={`Actions for setup command ${index + 1}`}
-                            actions={[
-                              {
-                                label: 'Move to repository',
-                                onClick: () => moveSetup(command, 'repo'),
-                                disabled: setupDirty || moveItem.isPending,
-                              },
-                              {
-                                label: 'Remove',
-                                destructive: true,
-                                separatorBefore: true,
-                                onClick: () =>
-                                  setSetupCommands((current) => current.filter((_, itemIndex) => itemIndex !== index)),
-                              },
-                            ]}
-                          />
-                        </div>
-                      ))}
-                      {repoSetup.map((item) => (
-                        <SettingsListRow
-                          key={`repo:${item.command}`}
-                          className={COMPACT_ROW_CLASS}
-                          title={<span title={item.command}>{item.command}</span>}
-                          titleClassName="font-mono text-xs font-normal"
-                          badges={<Badge variant="secondary" className="shrink-0">In repo</Badge>}
-                          actions={[
-                            {
-                              label: 'Move to my settings',
-                              onClick: () => moveSetup(item.command, 'personal'),
-                              disabled: moveItem.isPending,
-                            },
-                          ]}
-                          actionsLabel={`Actions for ${item.command}`}
-                        />
-                      ))}
-                    </SettingsList>
-                  </div>
-                  <div className="flex shrink-0 items-center justify-between gap-3 border-t border-border px-4 py-3 sm:px-6">
-                    <p className="text-xs text-muted-foreground" aria-live="polite">
-                      {setupDirty ? 'Unsaved changes' : ''}
-                    </p>
-                    <Button
-                      type="button"
-                      size="sm"
-                      onClick={handleSaveSetup}
-                      disabled={!setupDirty || !setupValid || updateSetup.isPending}
-                    >
-                      Save setup
-                    </Button>
-                  </div>
-                </TabsContent>
-              </Tabs>
-            </>
+            </div>
           )}
-        </DialogContent>
-      </Dialog>
+
+          <Tabs defaultValue="actions" className="flex min-h-0 flex-1 flex-col">
+            <div className="shrink-0 px-4 pt-3 sm:px-6">
+              <TabsList className="w-full justify-start">
+                <TabsTrigger value="actions">
+                  Actions
+                  <TabCount count={personalActions.length + repoActions.length} />
+                </TabsTrigger>
+                <TabsTrigger value="setup">
+                  Worktree setup
+                  <TabCount count={setupCommands.length + repoSetup.length} />
+                </TabsTrigger>
+              </TabsList>
+            </div>
+
+            <TabsContent value="actions" className="mt-0 flex min-h-0 flex-1 flex-col px-0">
+              <div className="flex shrink-0 items-center justify-between gap-3 px-4 py-3 sm:px-6">
+                <p className="text-xs text-muted-foreground">Start these from the actions menu in the header.</p>
+                <Button
+                  type="button"
+                  size="sm"
+                  variant="outline"
+                  className="shrink-0"
+                  onClick={() => setDraft(emptyActionDraft())}
+                >
+                  <Plus className="h-4 w-4 mr-1" />
+                  Add action
+                </Button>
+              </div>
+              <div className="min-h-0 flex-1 overflow-y-auto px-4 pb-4 sm:px-6 sm:pb-6">
+                <SettingsList
+                  isEmpty={personalActions.length === 0 && repoActions.length === 0 && !isAddingAction}
+                  emptyTitle="No actions configured"
+                  emptyHint="Add a command you run often, like a dev server or test watcher."
+                  maxHeightClassName="max-h-none"
+                >
+                  {personalActions.map((action) =>
+                    draft?.id === action.id ? (
+                      renderActionForm(draft)
+                    ) : (
+                      <SettingsListRow
+                        key={action.id}
+                        className={COMPACT_ROW_CLASS}
+                        title={<ActionTitle action={action} />}
+                        description={<span className="font-mono" title={action.command}>{action.command}</span>}
+                        belowDescription={<ActionUrl url={action.url} />}
+                        onClick={() => setDraft(actionToDraft(action))}
+                        trailing={
+                          <Button
+                            type="button"
+                            size="icon"
+                            variant="ghost"
+                            className="h-8 w-8"
+                            aria-label={`Edit ${action.name}`}
+                            onClick={() => setDraft(actionToDraft(action))}
+                          >
+                            <Pencil className="h-4 w-4" />
+                          </Button>
+                        }
+                        actions={[
+                          {
+                            label: 'Move to repository',
+                            onClick: () => moveAction(action, 'repo'),
+                            disabled: moveItem.isPending,
+                          },
+                          {
+                            label: 'Delete',
+                            destructive: true,
+                            separatorBefore: true,
+                            onClick: () => handleDeleteAction(action.id),
+                            disabled: updateActions.isPending,
+                          },
+                        ]}
+                        actionsLabel={`Actions for ${action.name}`}
+                      />
+                    ),
+                  )}
+                  {isAddingAction && draft && renderActionForm(draft)}
+                  {repoActions.map((action) => (
+                    <SettingsListRow
+                      key={`repo:${action.id}`}
+                      className={COMPACT_ROW_CLASS}
+                      title={<ActionTitle action={action} />}
+                      badges={<Badge variant="secondary" className="shrink-0">In repo</Badge>}
+                      description={<span className="font-mono" title={action.command}>{action.command}</span>}
+                      belowDescription={<ActionUrl url={action.url} />}
+                      actions={[
+                        {
+                          label: 'Move to my settings',
+                          onClick: () => moveAction(action, 'personal'),
+                          disabled: moveItem.isPending,
+                        },
+                      ]}
+                      actionsLabel={`Actions for ${action.name}`}
+                    />
+                  ))}
+                </SettingsList>
+              </div>
+            </TabsContent>
+
+            <TabsContent value="setup" className="mt-0 flex min-h-0 flex-1 flex-col px-0">
+              <div className="flex shrink-0 items-center justify-between gap-3 px-4 py-3 sm:px-6">
+                <p className="text-xs text-muted-foreground">
+                  Run in order after a new worktree is created.{' '}
+                  <code className="font-mono">$ROOT_PROJECT_PATH</code> points to the main checkout.
+                </p>
+                <Button type="button" size="sm" variant="outline" className="shrink-0" onClick={addSetupCommand}>
+                  <Plus className="h-4 w-4 mr-1" />
+                  Add command
+                </Button>
+              </div>
+              <div className="min-h-0 flex-1 overflow-y-auto px-4 pb-4 sm:px-6">
+                <SettingsList
+                  isEmpty={setupCommands.length === 0 && repoSetup.length === 0}
+                  emptyTitle="No setup commands"
+                  emptyHint="Add commands such as pnpm install to prepare new worktrees."
+                  maxHeightClassName="max-h-none"
+                >
+                  {setupCommands.map((command, index) => (
+                    <div key={index} className="flex items-center gap-1 bg-card px-3 py-2">
+                      <Input
+                        aria-label={`Setup command ${index + 1}`}
+                        autoFocus={index === focusSetupIndex}
+                        value={command}
+                        className="mr-1 h-9 min-w-0 flex-1 font-mono md:text-xs"
+                        onChange={(event) =>
+                          setSetupCommands((current) =>
+                            current.map((item, itemIndex) => (itemIndex === index ? event.target.value : item)),
+                          )
+                        }
+                      />
+                      <Button
+                        type="button"
+                        size="icon"
+                        variant="ghost"
+                        className="h-8 w-8 shrink-0"
+                        aria-label="Move up"
+                        disabled={index === 0}
+                        onClick={() => setSetupCommands((current) => arrayMove(current, index, index - 1))}
+                      >
+                        <ArrowUp className="h-4 w-4" />
+                      </Button>
+                      <Button
+                        type="button"
+                        size="icon"
+                        variant="ghost"
+                        className="h-8 w-8 shrink-0"
+                        aria-label="Move down"
+                        disabled={index === setupCommands.length - 1}
+                        onClick={() => setSetupCommands((current) => arrayMove(current, index, index + 1))}
+                      >
+                        <ArrowDown className="h-4 w-4" />
+                      </Button>
+                      <SettingsListRowActionsMenu
+                        label={`Actions for setup command ${index + 1}`}
+                        actions={[
+                          {
+                            label: 'Move to repository',
+                            onClick: () => moveSetup(command, 'repo'),
+                            disabled: setupDirty || moveItem.isPending,
+                          },
+                          {
+                            label: 'Remove',
+                            destructive: true,
+                            separatorBefore: true,
+                            onClick: () =>
+                              setSetupCommands((current) => current.filter((_, itemIndex) => itemIndex !== index)),
+                          },
+                        ]}
+                      />
+                    </div>
+                  ))}
+                  {repoSetup.map((item) => (
+                    <SettingsListRow
+                      key={`repo:${item.command}`}
+                      className={COMPACT_ROW_CLASS}
+                      title={<span title={item.command}>{item.command}</span>}
+                      titleClassName="font-mono text-xs font-normal"
+                      badges={<Badge variant="secondary" className="shrink-0">In repo</Badge>}
+                      actions={[
+                        {
+                          label: 'Move to my settings',
+                          onClick: () => moveSetup(item.command, 'personal'),
+                          disabled: moveItem.isPending,
+                        },
+                      ]}
+                      actionsLabel={`Actions for ${item.command}`}
+                    />
+                  ))}
+                </SettingsList>
+              </div>
+              <div className="flex shrink-0 items-center justify-between gap-3 border-t border-border px-4 py-3 sm:px-6">
+                <p className="text-xs text-muted-foreground" aria-live="polite">
+                  {setupDirty ? 'Unsaved changes' : ''}
+                </p>
+                <Button
+                  type="button"
+                  size="sm"
+                  onClick={handleSaveSetup}
+                  disabled={!setupDirty || !setupValid || updateSetup.isPending}
+                >
+                  Save setup
+                </Button>
+              </div>
+            </TabsContent>
+          </Tabs>
+        </>
+      )}
 
       <ConfirmDestructiveDialog
         open={open && trustReview !== null}
@@ -599,6 +586,31 @@ export function RepoActionsDialog({ repoId, directory, open, onOpenChange }: Rep
         pendingLabel="Trusting…"
         isPending={trustConfig.isPending}
       />
-    </>
+    </div>
+  )
+}
+
+interface RepoActionsDialogProps {
+  repoId: number
+  directory: string | undefined
+  open: boolean
+  onOpenChange: (open: boolean) => void
+}
+
+export function RepoActionsDialog({ repoId, directory, open, onOpenChange }: RepoActionsDialogProps) {
+  return (
+    <Dialog open={open} onOpenChange={onOpenChange}>
+      <DialogContent
+        mobileFullscreen
+        className="flex flex-col gap-0 overflow-hidden p-0 pb-safe sm:h-auto sm:max-h-[85vh] sm:max-w-[560px] sm:p-0"
+      >
+        <DialogHeader className="shrink-0 border-b border-border px-4 py-4 sm:px-6">
+          <DialogTitle>Project Actions</DialogTitle>
+          <DialogDescription>Commands and setup steps for this location.</DialogDescription>
+        </DialogHeader>
+
+        <RepoActionsContent repoId={repoId} directory={directory} open={open} />
+      </DialogContent>
+    </Dialog>
   )
 }

@@ -62,6 +62,23 @@ describe('SideDrawer', () => {
     expect(handleClose).not.toHaveBeenCalled()
   })
 
+  it('closes only the topmost drawer on Escape when drawers are stacked', () => {
+    const closeOuter = vi.fn()
+    const closeInner = vi.fn()
+    render(
+      <>
+        <SideDrawer isOpen onClose={closeOuter} ariaLabel="Outer">
+          <div>Outer</div>
+        </SideDrawer>
+        <SideDrawer isOpen onClose={closeInner} ariaLabel="Inner">
+          <div>Inner</div>
+        </SideDrawer>
+      </>,
+    )
+    fireEvent.keyDown(document, { key: 'Escape' })
+    expect(closeInner).toHaveBeenCalledTimes(1)
+    expect(closeOuter).not.toHaveBeenCalled()
+  })
 })
 
 describe('SideDrawerHeader', () => {

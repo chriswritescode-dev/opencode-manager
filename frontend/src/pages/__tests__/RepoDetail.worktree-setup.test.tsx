@@ -55,6 +55,9 @@ vi.mock('@/components/terminal/TerminalPanel', () => ({
   TerminalPanel: ({ directory, isOpen }: { directory?: string; isOpen: boolean }) => (
     <div data-testid="terminal-panel" data-directory={directory ?? ''} data-open={String(isOpen)} />
   ),
+  TerminalWorkspace: ({ directory }: { directory?: string }) => (
+    <div data-testid="terminal-workspace" data-directory={directory ?? ''} />
+  ),
 }))
 
 vi.mock('@/components/session/SessionList', () => ({ SessionList: () => null }))
@@ -147,9 +150,9 @@ describe('RepoDetail worktree setup', () => {
       expect(screen.getByTestId('location')).toHaveTextContent('repoTab=workspaces'),
     )
     const location = screen.getByTestId('location').textContent ?? ''
-    expect(location).toContain('dialog=terminal')
+    expect(location).toContain('panel=terminal')
     expect(location).toContain('terminal=pty-new')
-    expect(screen.getByTestId('terminal-panel')).toHaveAttribute(
+    expect(await screen.findByTestId('terminal-workspace')).toHaveAttribute(
       'data-directory',
       newWorkspaceDirectory,
     )
@@ -170,7 +173,8 @@ describe('RepoDetail worktree setup', () => {
     await waitFor(() =>
       expect(screen.getByTestId('location')).toHaveTextContent('repoTab=workspaces'),
     )
-    expect(screen.getByTestId('location')).not.toHaveTextContent('dialog=terminal')
+    expect(screen.getByTestId('location')).not.toHaveTextContent('terminal')
+    expect(screen.queryByTestId('terminal-workspace')).not.toBeInTheDocument()
     expect(screen.getByTestId('terminal-panel')).toHaveAttribute('data-open', 'false')
   })
 

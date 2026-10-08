@@ -27,6 +27,7 @@ interface FileBrowserProps {
   onDirectoryLoad?: (info: { workspaceRoot?: string; currentPath: string }) => void
   onPreviewStateChange?: (isOpen: boolean) => void
   allowNavigateAboveBase?: boolean
+  compact?: boolean
 }
 
 interface UploadItem {
@@ -131,7 +132,7 @@ function getUploadItemsFromFileList(fileList: FileList): UploadItem[] {
   return items
 }
 
-export const FileBrowser = forwardRef<FileBrowserHandle, FileBrowserProps>(function FileBrowser({ basePath = '', onFileSelect, embedded = false, initialSelectedFile, onDirectoryLoad, onPreviewStateChange, allowNavigateAboveBase = false }, ref) {
+export const FileBrowser = forwardRef<FileBrowserHandle, FileBrowserProps>(function FileBrowser({ basePath = '', onFileSelect, embedded = false, initialSelectedFile, onDirectoryLoad, onPreviewStateChange, allowNavigateAboveBase = false, compact = false }, ref) {
   const [currentPath, setCurrentPath] = useState(basePath)
   const [files, setFiles] = useState<FileInfo | null>(null)
   const [selectedFile, setSelectedFile] = useState<FileInfo | null>(null)
@@ -146,6 +147,7 @@ export const FileBrowser = forwardRef<FileBrowserHandle, FileBrowserProps>(funct
   const uploadCancelledRef = useRef(false)
   const loadRequestRef = useRef(0)
   const isMobile = useMobile()
+  const stacked = isMobile || compact
 
   const { data: initialFileData, error: initialFileError } = useFile(initialSelectedFile)
 
@@ -257,7 +259,7 @@ useEffect(() => {
       onFileSelect?.(fullFileData)
       
       // On mobile, open preview in modal
-      if (isMobile) {
+      if (stacked) {
         setIsPreviewModalOpen(true)
         onPreviewStateChange?.(true)
       }
@@ -267,7 +269,7 @@ useEffect(() => {
     } finally {
       setLoading(false)
     }
-  }, [onFileSelect, isMobile, onPreviewStateChange, loadFiles])
+  }, [onFileSelect, stacked, onPreviewStateChange, loadFiles])
 
   const handleFileSelect = useCallback(async (file: FileInfo) => {
     if (file.isDirectory) {
@@ -465,10 +467,10 @@ useEffect(() => {
   }, [initialFileData, loadFiles])
 
   useEffect(() => {
-    if (!initialFileData || initialFileData.isDirectory || !isMobile) return
+    if (!initialFileData || initialFileData.isDirectory || !stacked) return
     setIsPreviewModalOpen(true)
     onPreviewStateChange?.(true)
-  }, [initialFileData, isMobile, onPreviewStateChange])
+  }, [initialFileData, stacked, onPreviewStateChange])
 
   useEffect(() => {
     const handleFileSaved = (event: CustomEvent<{ path: string; content?: string }>) => {
@@ -600,7 +602,12 @@ useEffect(() => {
         
         {/* Mobile: Full width file listing, Desktop: Split view */}
         <div className="flex-1 flex overflow-hidden min-h-0 h-full">
-          <div className={`${isMobile ? 'w-full' : 'w-[30%]'} border-r border-border px-1 md:px-4 flex flex-col min-h-0 h-full`}>
+          {compact && !isMobile && isPreviewModalOpen && selectedFile && !selectedFile.isDirectory ? (
+            <div className="flex-1 min-h-0 overflow-hidden">
+              <FilePreview key={selectedFile.path} file={selectedFile} isMobileModal onCloseModal={handleCloseModal} onOpenFile={openFilePath} />
+            </div>
+          ) : (
+          <div className={`${stacked ? 'w-full' : 'w-[30%]'} border-r border-border px-1 md:px-4 flex flex-col min-h-0 h-full`}>
             <div className="flex items-center gap-2 mb-4 mt-4 flex-shrink-0">
               <Input
                 placeholder="Search"
@@ -645,9 +652,10 @@ useEffect(() => {
               )}
             </div>
           </div>
+          )}
           
           {/* Desktop only: Preview panel */}
-          {!isMobile && (
+          {!stacked && (
             <div className="flex-1 overflow-y-auto min-h-0 h-full">
               {selectedFile && !selectedFile.isDirectory ? (
                 <FilePreview key={selectedFile.path} file={selectedFile} onOpenFile={openFilePath} />
@@ -711,7 +719,7 @@ useEffect(() => {
         
         <CardContent className="flex-1 flex overflow-hidden min-h-0">
           {/* Mobile: Full width file listing, Desktop: Split view */}
-          <div className={`${isMobile ? 'w-full' : 'w-1/3'} border-r pr-4 flex flex-col min-h-0`}>
+          <div className={`${stacked ? 'w-full' : 'w-1/3'} border-r pr-4 flex flex-col min-h-0`}>
             <div className="flex items-center gap-2 mb-4 flex-shrink-0">
               <Input
                 placeholder="Search"
@@ -749,7 +757,7 @@ useEffect(() => {
           </div>
           
           {/* Desktop only: Preview panel */}
-          {!isMobile && (
+          {!stacked && (
             <div className="flex-1 overflow-y-auto min-h-0 ">
               {selectedFile && !selectedFile.isDirectory ? (
                 <FilePreview key={selectedFile.path} file={selectedFile} onOpenFile={openFilePath} />

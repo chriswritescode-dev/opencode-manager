@@ -2,7 +2,7 @@ import { describe, it, expect, vi, beforeEach } from 'vitest'
 import { render, screen, waitFor, within } from '@testing-library/react'
 import userEvent, { type UserEvent } from '@testing-library/user-event'
 import { FetchError } from '@opencode-manager/shared'
-import { RepoActionsDialog } from './RepoActionsDialog'
+import { RepoActionsContent, RepoActionsDialog } from './RepoActionsDialog'
 import type { ProjectConfigResponse } from '@opencode-manager/shared/types'
 
 const mocks = vi.hoisted(() => ({
@@ -76,6 +76,27 @@ async function openTrustReview(user: UserEvent) {
 describe('RepoActionsDialog', () => {
   beforeEach(() => {
     vi.clearAllMocks()
+  })
+
+  it('renders the actions content standalone without the dialog shell', () => {
+    mockConfig(baseConfig())
+    const view = render(<RepoActionsContent repoId={1} directory="/repo" open />)
+
+    expect(screen.getByText('No actions configured')).toBeInTheDocument()
+    expect(screen.queryByText('Project Actions')).not.toBeInTheDocument()
+
+    mockConfig(
+      baseConfig({
+        actions: [
+          { id: 'personal-1', name: 'Dev server', command: 'pnpm dev', autoOpenUrl: false, source: 'personal' },
+        ],
+      }),
+    )
+    view.rerender(<RepoActionsContent repoId={1} directory="/repo" open />)
+
+    expect(screen.getByText('Dev server')).toBeInTheDocument()
+    expect(screen.getByRole('tab', { name: /actions/i })).toBeInTheDocument()
+    expect(screen.queryByText('Project Actions')).not.toBeInTheDocument()
   })
 
   it('sends the full personal list when adding an action', async () => {

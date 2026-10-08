@@ -17,6 +17,9 @@ import { TerminalPanel } from "@/components/terminal/TerminalPanel"
 import { PreviewPanel } from "@/components/preview/PreviewPanel"
 import { ResetPermissionsDialog } from "@/components/repo/ResetPermissionsDialog"
 import { PendingActionsGroup } from "@/components/notifications/PendingActionsGroup"
+import { ToolSidePanel } from "@/components/navigation/ToolSidePanel"
+import { useMobile } from "@/hooks/useMobile"
+import { useToolPanel } from "@/hooks/useToolPanel"
 import { Plus } from "lucide-react"
 
 export function AssistantRedirect() {
@@ -29,6 +32,8 @@ export function AssistantRedirect() {
   const [terminalOpen, setTerminalOpen] = useTerminalDialogParam()
   const [previewOpen, setPreviewOpen] = useDialogParam('preview')
   const [resetPermissionsOpen, setResetPermissionsOpen] = useDialogParam('resetPermissions')
+  const docked = !useMobile()
+  const toolPanel = useToolPanel(docked)
 
   const { data: repo, isLoading: repoLoading, error: repoError } = useQuery({
     queryKey: ["repo", repoId],
@@ -48,7 +53,8 @@ export function AssistantRedirect() {
   }
 
   return (
-    <div className="h-dvh max-h-dvh overflow-hidden bg-gradient-to-br from-background via-background to-background flex flex-col pb-[calc(env(safe-area-inset-bottom)+56px)] sm:pb-0">
+    <div className="flex h-dvh max-h-dvh min-w-0">
+    <div className="flex-1 min-w-0 h-dvh max-h-dvh overflow-hidden bg-gradient-to-br from-background via-background to-background flex flex-col pb-[calc(env(safe-area-inset-bottom)+56px)] sm:pb-0">
       <Header>
         <Header.BackButton to="/" />
         <Header.Title>Assistant</Header.Title>
@@ -79,11 +85,11 @@ export function AssistantRedirect() {
       </div>
       {assistantDirectory && (
         <>
-          <FileBrowserSheet isOpen={fileBrowserOpen} onClose={() => setFileBrowserOpen(false)} basePath={repo?.localPath} repoName="Assistant" repoId={repoId} />
-          <RepoMcpDialog open={mcpDialogOpen} onOpenChange={setMcpDialogOpen} directory={assistantDirectory} />
+          <FileBrowserSheet isOpen={!docked && fileBrowserOpen} onClose={() => setFileBrowserOpen(false)} basePath={repo?.localPath} repoName="Assistant" repoId={repoId} />
+          <RepoMcpDialog open={!docked && mcpDialogOpen} onOpenChange={setMcpDialogOpen} directory={assistantDirectory} />
           {assistantDirectory ? (
             <RepoSkillsDialog
-              open={skillsDialogOpen}
+              open={!docked && skillsDialogOpen}
               onOpenChange={setSkillsDialogOpen}
               repoId={repoId}
               sessionId="assistant-session"
@@ -91,16 +97,28 @@ export function AssistantRedirect() {
             />
           ) : (
             <RepoSkillsDialog
-              open={skillsDialogOpen}
+              open={!docked && skillsDialogOpen}
               onOpenChange={setSkillsDialogOpen}
               repoId={repoId}
             />
           )}
-          <SourceControlPanel repoId={repoId} isOpen={sourceControlOpen} onClose={() => setSourceControlOpen(false)} currentBranch={repo?.currentBranch || repo?.branch || "main"} repoName="Assistant" />
-          <TerminalPanel repoId={0} directory={assistantDirectory} isOpen={terminalOpen} onClose={() => setTerminalOpen(false)} />
-          <PreviewPanel isOpen={previewOpen} onClose={() => setPreviewOpen(false)} directory={assistantDirectory} />
+          <SourceControlPanel repoId={repoId} isOpen={!docked && sourceControlOpen} onClose={() => setSourceControlOpen(false)} currentBranch={repo?.currentBranch || repo?.branch || "main"} repoName="Assistant" />
+          <TerminalPanel repoId={0} directory={assistantDirectory} isOpen={!docked && terminalOpen} onClose={() => setTerminalOpen(false)} />
+          <PreviewPanel isOpen={!docked && previewOpen} onClose={() => setPreviewOpen(false)} directory={assistantDirectory} />
           <ResetPermissionsDialog open={resetPermissionsOpen} onOpenChange={setResetPermissionsOpen} repoId={repoId} />
         </>
+      )}
+    </div>
+      {docked && (
+        <ToolSidePanel
+          panel={toolPanel}
+          repoId={repoId}
+          sessionId="assistant-session"
+          directory={assistantDirectory}
+          repoDirectory={assistantDirectory}
+          filesBasePath={repo?.localPath}
+          currentBranch={repo?.currentBranch || repo?.branch || "main"}
+        />
       )}
     </div>
   )

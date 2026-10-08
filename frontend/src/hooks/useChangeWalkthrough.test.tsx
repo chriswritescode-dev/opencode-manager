@@ -3,7 +3,7 @@ import { act, renderHook, waitFor } from '@testing-library/react'
 import type { ReactNode } from 'react'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 import { changeWalkthroughQueryKey, useChangeWalkthrough, useGenerateChangeWalkthrough } from './useChangeWalkthrough'
-import type { ChangeWalkthrough } from '@opencode-manager/shared/schemas'
+import type { ChangeWalkthrough, ChangeWalkthroughState } from '@opencode-manager/shared/schemas'
 
 const mocks = vi.hoisted(() => ({
   getChangeWalkthrough: vi.fn(),
@@ -25,6 +25,10 @@ const walkthroughForA: ChangeWalkthrough = {
   createdAt: 1,
 }
 
+function state(overrides: Partial<ChangeWalkthroughState> = {}): ChangeWalkthroughState {
+  return { walkthrough: null, currentDiffHash: 'hash-a', stale: false, generating: false, error: null, ...overrides }
+}
+
 function deferred<T>() {
   let resolve!: (value: T) => void
   const promise = new Promise<T>((res) => {
@@ -43,9 +47,9 @@ describe('useGenerateChangeWalkthrough', () => {
     vi.clearAllMocks()
   })
 
-  it('caches a completed generation under the originating session when the session changes mid-flight', async () => {
+  it('caches the returned state under the originating session when the session changes mid-flight', async () => {
     const queryClient = new QueryClient({ defaultOptions: { queries: { retry: false } } })
-    const pending = deferred<ChangeWalkthrough>()
+    const pending = deferred<ChangeWalkthroughState>()
     mocks.generateChangeWalkthrough.mockReturnValue(pending.promise)
 
     const { result, rerender } = renderHook(
@@ -63,51 +67,45 @@ describe('useGenerateChangeWalkthrough', () => {
     rerender({ sessionId: 'ses_B' })
 
     await act(async () => {
-      pending.resolve(walkthroughForA)
+      pending.resolve(state({ generating: true }))
     })
 
     await waitFor(() => {
-      expect(queryClient.getQueryData(changeWalkthroughQueryKey('ses_A'))).toEqual({
-        walkthrough: walkthroughForA,
-        currentDiffHash: 'hash-a',
-        stale: false,
-      })
+      expect(queryClient.getQueryData(changeWalkthroughQueryKey('ses_A'))).toEqual(state({ generating: true }))
     })
     expect(queryClient.getQueryData(changeWalkthroughQueryKey('ses_B'))).toBeUndefined()
   })
+})
 
-  it('refetches the state query after generation so server-computed staleness wins', async () => {
-    const queryClient = new QueryClient({ defaultOptions: { queries: { retry: false } } })
-    mocks.getChangeWalkthrough
-      .mockResolvedValueOnce({ walkthrough: null, currentDiffHash: null, stale: false })
-      .mockResolvedValueOnce({ walkthrough: walkthroughForA, currentDiffHash: 'hash-a', stale: true })
-    mocks.generateChangeWalkthrough.mockResolvedValue(walkthroughForA)
+describe('useChangeWalkthrough', () => {
+  beforeEach(() => {
+    vi.clearAllMocks()
+  })
 
-    const { result } = renderHook(
-      () => ({
-        state: useChangeWalkthrough('ses_A', true),
-        generate: useGenerateChangeWalkthrough('ses_A'),
-      }),
-      { wrapper: createWrapper(queryClient) },
-    )
+  it('polls while a generation is running and stops once it finishes', async () => {
+    vi.useFakeTimers({ shouldAdvanceTime: true })
+    try {
+      const queryClient = new QueryClient({ defaultOptions: { queries: { retry: false } } })
+      mocks.getChangeWalkthrough
+        .mockResolvedValueOnce(state({ generating: true }))
+        .mockResolvedValueOnce(state({ walkthrough: walkthroughForA }))
 
-    await waitFor(() => {
-      expect(mocks.getChangeWalkthrough).toHaveBeenCalledTimes(1)
-    })
+      const { result } = renderHook(() => useChangeWalkthrough('ses_A', true), { wrapper: createWrapper(queryClient) })
 
-    act(() => {
-      result.current.generate.mutate({})
-    })
+      await waitFor(() => expect(result.current.data?.generating).toBe(true))
 
-    await waitFor(() => {
-      expect(mocks.getChangeWalkthrough).toHaveBeenCalledTimes(2)
-    })
-    await waitFor(() => {
-      expect(result.current.state.data).toEqual({
-        walkthrough: walkthroughForA,
-        currentDiffHash: 'hash-a',
-        stale: true,
+      await act(async () => {
+        await vi.advanceTimersByTimeAsync(2_000)
       })
-    })
+
+      await waitFor(() => expect(result.current.data?.walkthrough).toEqual(walkthroughForA))
+
+      await act(async () => {
+        await vi.advanceTimersByTimeAsync(10_000)
+      })
+      expect(mocks.getChangeWalkthrough).toHaveBeenCalledTimes(2)
+    } finally {
+      vi.useRealTimers()
+    }
   })
 })

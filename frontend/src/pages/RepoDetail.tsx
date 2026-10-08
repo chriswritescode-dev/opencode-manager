@@ -20,6 +20,9 @@ import { useSSE } from "@/hooks/useSSE";
 import { useDialogParam } from "@/hooks/useDialogParam";
 import { useOpenTerminal, useTerminalDialogParam, useTerminalDirectoryParam } from "@/hooks/useOpenTerminal";
 import { useWorktreeTab } from "@/hooks/useWorktreeTab";
+import { useMobile } from "@/hooks/useMobile";
+import { useToolPanel } from "@/hooks/useToolPanel";
+import { ToolSidePanel } from "@/components/navigation/ToolSidePanel";
 import { WorktreeTabs } from "@/components/repo/WorktreeTabs";
 import { WorktreeSessionGroups } from "@/components/repo/WorktreeSessionGroups";
 import { Button } from "@/components/ui/button";
@@ -51,6 +54,8 @@ export function RepoDetail() {
   const { activeTab, setActiveTab } = useWorktreeTab();
   const openTerminal = useOpenTerminal();
   const terminalDirectory = useTerminalDirectoryParam();
+  const docked = !useMobile();
+  const toolPanel = useToolPanel(docked);
 
   const { data: repo, isLoading: repoLoading } = useQuery({
     queryKey: ["repo", repoId],
@@ -211,8 +216,9 @@ export function RepoDetail() {
   const isWorktree = repo.isWorktree || false;
 
   return (
+    <div className="flex h-dvh max-h-dvh min-w-0">
     <div
-      className="h-dvh max-h-dvh overflow-hidden bg-gradient-to-br from-background via-background to-background flex flex-col pb-[calc(env(safe-area-inset-bottom)+56px)] sm:pb-0"
+      className="flex-1 min-w-0 h-dvh max-h-dvh overflow-hidden bg-gradient-to-br from-background via-background to-background flex flex-col pb-[calc(env(safe-area-inset-bottom)+56px)] sm:pb-0"
     >
       <Header>
         <div className="flex items-center gap-2 sm:gap-3 min-w-0 flex-1">
@@ -297,7 +303,7 @@ export function RepoDetail() {
       />
 
       <FileBrowserSheet
-        isOpen={fileBrowserOpen}
+        isOpen={!docked && fileBrowserOpen}
         onClose={() => setFileBrowserOpen(false)}
         basePath={repo.localPath}
         repoName={displayName}
@@ -306,7 +312,7 @@ export function RepoDetail() {
       />
 
       <RepoMcpDialog
-        open={mcpDialogOpen}
+        open={!docked && mcpDialogOpen}
         onOpenChange={setMcpDialogOpen}
         directory={baseDirectory}
       />
@@ -314,19 +320,19 @@ export function RepoDetail() {
       <RepoActionsDialog
         repoId={repoId}
         directory={baseDirectory}
-        open={actionsDialogOpen}
+        open={!docked && actionsDialogOpen}
         onOpenChange={setActionsDialogOpen}
       />
 
       <RepoSkillsDialog
-        open={skillsDialogOpen}
+        open={!docked && skillsDialogOpen}
         onOpenChange={setSkillsDialogOpen}
         repoId={repoId}
       />
 
       <SourceControlPanel
         repoId={repoId}
-        isOpen={sourceControlOpen}
+        isOpen={!docked && sourceControlOpen}
         onClose={() => setSourceControlOpen(false)}
         currentBranch={currentBranch}
         repoName={repoName}
@@ -335,12 +341,12 @@ export function RepoDetail() {
       <TerminalPanel
         repoId={repoId}
         directory={terminalDirectory ?? baseDirectory}
-        isOpen={terminalOpen}
+        isOpen={!docked && terminalOpen}
         onClose={() => setTerminalOpen(false)}
       />
 
       <PreviewPanel
-        isOpen={previewOpen}
+        isOpen={!docked && previewOpen}
         onClose={() => setPreviewOpen(false)}
         directory={baseDirectory}
       />
@@ -358,6 +364,19 @@ export function RepoDetail() {
         open={multiRunOpen}
         onOpenChange={setMultiRunOpen}
       />
+    </div>
+      {docked && (
+        <ToolSidePanel
+          panel={toolPanel}
+          repoId={repoId}
+          directory={baseDirectory}
+          terminalDirectory={terminalDirectory ?? baseDirectory}
+          repoDirectory={baseDirectory}
+          filesBasePath={repo.localPath}
+          allowNavigateAboveBase
+          currentBranch={currentBranch}
+        />
+      )}
     </div>
   );
 }

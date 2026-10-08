@@ -24,7 +24,13 @@ interface TerminalPanelProps {
   onClose: () => void
 }
 
-export function TerminalPanel({ repoId, directory, isOpen, onClose }: TerminalPanelProps) {
+interface TerminalWorkspaceProps {
+  repoId: number
+  directory: string | undefined
+  isOpen: boolean
+}
+
+export function TerminalWorkspace({ repoId, directory, isOpen }: TerminalWorkspaceProps) {
   const isMobile = useMobile()
   const { searchParams, updateParams } = useUrlParams()
   const openPreview = useOpenPreview()
@@ -110,6 +116,112 @@ export function TerminalPanel({ repoId, directory, isOpen, onClose }: TerminalPa
   }, [openPreview])
 
   return (
+    <div className="flex flex-1 min-h-0 flex-col">
+      <div className="flex items-center gap-1 border-b border-border flex-shrink-0 overflow-x-auto px-1">
+        {terminals.map((terminal) => (
+          <div
+            key={terminal.id}
+            className={cn(
+              'flex items-center gap-1 rounded-t-md border-b-2 px-2 py-1.5 text-sm transition-colors flex-shrink-0',
+              terminal.id === activeTerminalId
+                ? 'border-primary text-foreground'
+                : 'border-transparent text-muted-foreground hover:text-foreground',
+            )}
+          >
+            <button
+              type="button"
+              onClick={() => selectTerminal(terminal.id)}
+              className="flex max-w-[12rem] items-center gap-1.5"
+            >
+              <span className="truncate">{terminal.title}</span>
+              {terminal.status === 'exited' && (
+                <span className="rounded bg-muted px-1.5 py-0.5 text-[10px] text-muted-foreground">
+                  {terminal.exitCode !== undefined ? `exited (${terminal.exitCode})` : 'exited'}
+                </span>
+              )}
+            </button>
+            <button
+              type="button"
+              onClick={() => handleCloseTab(terminal)}
+              aria-label={`Close ${terminal.title}`}
+              className="rounded p-0.5 text-muted-foreground hover:bg-accent hover:text-foreground"
+            >
+              <X className="h-3.5 w-3.5" />
+            </button>
+          </div>
+        ))}
+        <Button
+          variant="ghost"
+          size="sm"
+          onClick={handleCreate}
+          disabled={!directory || isCreating}
+          aria-label="New terminal"
+          className="h-7 w-7 p-0 flex-shrink-0"
+        >
+          <Plus className="h-4 w-4" />
+        </Button>
+      </div>
+
+      <div className="relative flex-1 min-h-0 bg-background">
+        {terminals.length === 0 ? (
+          <div className="flex h-full items-center justify-center text-sm text-muted-foreground">
+            {error && !isCreating ? `Could not load terminals: ${error.message}` : isLoading || isCreating ? 'Starting terminal...' : 'No terminals'}
+          </div>
+        ) : (
+          <Suspense
+            fallback={
+              <div className="flex h-full items-center justify-center text-sm text-muted-foreground">
+                Loading terminal...
+              </div>
+            }
+          >
+            {terminals.map((terminal) => (
+              <TerminalView
+                key={terminal.id}
+                ref={(handle) => {
+                  if (handle) viewHandlesRef.current.set(terminal.id, handle)
+                  else viewHandlesRef.current.delete(terminal.id)
+                }}
+                repoId={repoId}
+                directory={directory}
+                ptyID={terminal.id}
+                active={terminal.id === activeTerminalId}
+                ctrlArmed={ctrlArmed}
+                onCtrlConsumed={handleCtrlConsumed}
+                onOpenLink={handleOpenLink}
+                onExited={() => { void refetch() }}
+              />
+            ))}
+          </Suspense>
+        )}
+      </div>
+
+      {isMobile && terminals.length > 0 && (
+        <TerminalKeyBar onSend={handleKeySend} ctrlArmed={ctrlArmed} onToggleCtrl={handleToggleCtrl} />
+      )}
+
+      <ConfirmDestructiveDialog
+        open={pendingClose !== null}
+        onOpenChange={(open) => { if (!open) setPendingClose(null) }}
+        onConfirm={() => {
+          if (pendingClose) performRemove(pendingClose)
+          setPendingClose(null)
+        }}
+        onCancel={() => setPendingClose(null)}
+        title="Close Terminal"
+        description="Stop the running process?"
+        confirmLabel="Stop"
+        pendingLabel="Stopping..."
+        isPending={isRemoving}
+      />
+    </div>
+  )
+}
+
+export function TerminalPanel({ repoId, directory, isOpen, onClose }: TerminalPanelProps) {
+  const isMobile = useMobile()
+
+  return (
     <Dialog open={isOpen} onOpenChange={(open) => { if (!open) onClose() }}>
       <DialogContent
         mobileFullscreen
@@ -138,103 +250,7 @@ export function TerminalPanel({ repoId, directory, isOpen, onClose }: TerminalPa
           )}
         </DialogHeader>
 
-        <div className="flex items-center gap-1 border-b border-border flex-shrink-0 overflow-x-auto px-1">
-          {terminals.map((terminal) => (
-            <div
-              key={terminal.id}
-              className={cn(
-                'flex items-center gap-1 rounded-t-md border-b-2 px-2 py-1.5 text-sm transition-colors flex-shrink-0',
-                terminal.id === activeTerminalId
-                  ? 'border-primary text-foreground'
-                  : 'border-transparent text-muted-foreground hover:text-foreground',
-              )}
-            >
-              <button
-                type="button"
-                onClick={() => selectTerminal(terminal.id)}
-                className="flex max-w-[12rem] items-center gap-1.5"
-              >
-                <span className="truncate">{terminal.title}</span>
-                {terminal.status === 'exited' && (
-                  <span className="rounded bg-muted px-1.5 py-0.5 text-[10px] text-muted-foreground">
-                    {terminal.exitCode !== undefined ? `exited (${terminal.exitCode})` : 'exited'}
-                  </span>
-                )}
-              </button>
-              <button
-                type="button"
-                onClick={() => handleCloseTab(terminal)}
-                aria-label={`Close ${terminal.title}`}
-                className="rounded p-0.5 text-muted-foreground hover:bg-accent hover:text-foreground"
-              >
-                <X className="h-3.5 w-3.5" />
-              </button>
-            </div>
-          ))}
-          <Button
-            variant="ghost"
-            size="sm"
-            onClick={handleCreate}
-            disabled={!directory || isCreating}
-            aria-label="New terminal"
-            className="h-7 w-7 p-0 flex-shrink-0"
-          >
-            <Plus className="h-4 w-4" />
-          </Button>
-        </div>
-
-        <div className="relative flex-1 min-h-0 bg-background">
-          {terminals.length === 0 ? (
-            <div className="flex h-full items-center justify-center text-sm text-muted-foreground">
-              {error && !isCreating ? `Could not load terminals: ${error.message}` : isLoading || isCreating ? 'Starting terminal...' : 'No terminals'}
-            </div>
-          ) : (
-            <Suspense
-              fallback={
-                <div className="flex h-full items-center justify-center text-sm text-muted-foreground">
-                  Loading terminal...
-                </div>
-              }
-            >
-              {terminals.map((terminal) => (
-                <TerminalView
-                  key={terminal.id}
-                  ref={(handle) => {
-                    if (handle) viewHandlesRef.current.set(terminal.id, handle)
-                    else viewHandlesRef.current.delete(terminal.id)
-                  }}
-                  repoId={repoId}
-                  directory={directory}
-                  ptyID={terminal.id}
-                  active={terminal.id === activeTerminalId}
-                  ctrlArmed={ctrlArmed}
-                  onCtrlConsumed={handleCtrlConsumed}
-                  onOpenLink={handleOpenLink}
-                  onExited={() => { void refetch() }}
-                />
-              ))}
-            </Suspense>
-          )}
-        </div>
-
-        {isMobile && terminals.length > 0 && (
-          <TerminalKeyBar onSend={handleKeySend} ctrlArmed={ctrlArmed} onToggleCtrl={handleToggleCtrl} />
-        )}
-
-        <ConfirmDestructiveDialog
-          open={pendingClose !== null}
-          onOpenChange={(open) => { if (!open) setPendingClose(null) }}
-          onConfirm={() => {
-            if (pendingClose) performRemove(pendingClose)
-            setPendingClose(null)
-          }}
-          onCancel={() => setPendingClose(null)}
-          title="Close Terminal"
-          description="Stop the running process?"
-          confirmLabel="Stop"
-          pendingLabel="Stopping..."
-          isPending={isRemoving}
-        />
+        <TerminalWorkspace repoId={repoId} directory={directory} isOpen={isOpen} />
       </DialogContent>
     </Dialog>
   )

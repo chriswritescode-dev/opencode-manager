@@ -15,7 +15,12 @@ interface RepoMcpDialogProps {
   directory: string | undefined
 }
 
-export function RepoMcpDialog({ open, onOpenChange, directory }: RepoMcpDialogProps) {
+interface RepoMcpContentProps {
+  open: boolean
+  directory: string
+}
+
+export function RepoMcpContent({ open, directory }: RepoMcpContentProps) {
   const queryClient = useQueryClient()
   const [localStatus, setLocalStatus] = useState<Record<string, McpStatus>>({})
   const [isLoadingStatus, setIsLoadingStatus] = useState(false)
@@ -26,8 +31,6 @@ export function RepoMcpDialog({ open, onOpenChange, directory }: RepoMcpDialogPr
   const serverIds = Object.keys(localStatus)
 
   const fetchStatus = useCallback(async () => {
-    if (!directory) return
-
     setIsLoadingStatus(true)
     try {
       setLocalStatus(await mcpApi.getStatus(directory))
@@ -39,8 +42,6 @@ export function RepoMcpDialog({ open, onOpenChange, directory }: RepoMcpDialogPr
 
   const toggleMutation = useMutation({
     mutationFn: async ({ serverId, enable }: { serverId: string; enable: boolean }) => {
-      if (!directory) throw new Error('No directory provided')
-
       if (enable) {
         await mcpApi.connect(serverId, directory)
       } else {
@@ -59,7 +60,6 @@ export function RepoMcpDialog({ open, onOpenChange, directory }: RepoMcpDialogPr
 
   const removeAuthMutation = useMutation({
     mutationFn: async (serverId: string) => {
-      if (!directory) throw new Error('No directory provided')
       await mcpApi.removeAuth(serverId, directory)
     },
     onSuccess: async () => {
@@ -79,7 +79,7 @@ export function RepoMcpDialog({ open, onOpenChange, directory }: RepoMcpDialogPr
   }
 
   const handleOAuthCheckStatus = async (): Promise<boolean> => {
-    if (!authDialogServerId || !directory) return false
+    if (!authDialogServerId) return false
     const status = await mcpApi.getStatus(directory)
     if (status[authDialogServerId]?.status === 'connected') {
       setLocalStatus(status)
@@ -94,16 +94,58 @@ export function RepoMcpDialog({ open, onOpenChange, directory }: RepoMcpDialogPr
   }
 
   useEffect(() => {
-    if (open && directory) {
+    if (open) {
       fetchStatus()
     }
-  }, [open, directory, fetchStatus])
+  }, [open, fetchStatus])
 
+  return (
+    <div className="flex min-h-0 flex-1 flex-col">
+      <RepoMcpServerList
+        hasFetchedStatus={hasFetchedStatus}
+        serverIds={serverIds}
+        isLoadingStatus={isLoadingStatus}
+        localStatus={localStatus}
+        toggleMutation={toggleMutation}
+        removeAuthMutation={removeAuthMutation}
+        onAuthClick={setAuthDialogServerId}
+        onRemoveAuthClick={setRemoveAuthConfirmServer}
+      />
+
+      <DeleteDialog
+        open={!!removeAuthConfirmServer}
+        onOpenChange={() => setRemoveAuthConfirmServer(null)}
+        onConfirm={() => {
+          if (removeAuthConfirmServer) {
+            removeAuthMutation.mutate(removeAuthConfirmServer)
+          }
+        }}
+        onCancel={() => setRemoveAuthConfirmServer(null)}
+        title="Remove Authentication"
+        description="This will remove the OAuth credentials for this MCP server at this location. You will need to re-authenticate to use this server here again."
+        itemName={removeAuthConfirmServer ? formatMcpServerName(removeAuthConfirmServer) : ''}
+        isDeleting={removeAuthMutation.isPending}
+      />
+
+      <McpOAuthDialog
+        open={!!authDialogServerId}
+        onOpenChange={(o) => !o && setAuthDialogServerId(null)}
+        serverName={authDialogServerId || ''}
+        onStartAuth={handleOAuthStartAuth}
+        onCheckStatus={handleOAuthCheckStatus}
+        onSuccess={handleOAuthSuccess}
+        directory={directory}
+      />
+    </div>
+  )
+}
+
+export function RepoMcpDialog({ open, onOpenChange, directory }: RepoMcpDialogProps) {
   if (!directory) return null
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
-         <DialogContent mobileFullscreen className="sm:fixed sm:left-1/2 sm:top-1/2 sm:-translate-x-1/2 sm:-translate-y-1/2 sm:w-[400px] sm:max-w-[400px] sm:h-auto sm:max-h-[80vh] flex flex-col gap-0 pb-safe">
+      <DialogContent mobileFullscreen className="sm:fixed sm:left-1/2 sm:top-1/2 sm:-translate-x-1/2 sm:-translate-y-1/2 sm:w-[400px] sm:max-w-[400px] sm:h-auto sm:max-h-[80vh] flex flex-col gap-0 pb-safe">
         <DialogHeader className="px-4 sm:px-6 pt-4 sm:pt-6 pb-2 sm:pb-3 shrink-0 ">
           <DialogTitle>MCP for This Location</DialogTitle>
           <DialogDescription>
@@ -111,41 +153,7 @@ export function RepoMcpDialog({ open, onOpenChange, directory }: RepoMcpDialogPr
           </DialogDescription>
         </DialogHeader>
 
-        <RepoMcpServerList
-          hasFetchedStatus={hasFetchedStatus}
-          serverIds={serverIds}
-          isLoadingStatus={isLoadingStatus}
-          localStatus={localStatus}
-          toggleMutation={toggleMutation}
-          removeAuthMutation={removeAuthMutation}
-          onAuthClick={setAuthDialogServerId}
-          onRemoveAuthClick={setRemoveAuthConfirmServer}
-        />
-
-        <DeleteDialog
-          open={!!removeAuthConfirmServer}
-          onOpenChange={() => setRemoveAuthConfirmServer(null)}
-          onConfirm={() => {
-            if (removeAuthConfirmServer) {
-              removeAuthMutation.mutate(removeAuthConfirmServer)
-            }
-          }}
-          onCancel={() => setRemoveAuthConfirmServer(null)}
-          title="Remove Authentication"
-          description="This will remove the OAuth credentials for this MCP server at this location. You will need to re-authenticate to use this server here again."
-          itemName={removeAuthConfirmServer ? formatMcpServerName(removeAuthConfirmServer) : ''}
-          isDeleting={removeAuthMutation.isPending}
-        />
-
-        <McpOAuthDialog
-          open={!!authDialogServerId}
-          onOpenChange={(o) => !o && setAuthDialogServerId(null)}
-          serverName={authDialogServerId || ''}
-          onStartAuth={handleOAuthStartAuth}
-          onCheckStatus={handleOAuthCheckStatus}
-          onSuccess={handleOAuthSuccess}
-          directory={directory}
-        />
+        <RepoMcpContent open={open} directory={directory} />
       </DialogContent>
     </Dialog>
   )

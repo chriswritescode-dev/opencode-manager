@@ -1,5 +1,5 @@
 import type { LucideIcon } from 'lucide-react'
-import { Plug, Sparkles, ShieldOff, CalendarClock, GitCommitHorizontal, SquareTerminal, Settings, LogOut, Bot, Folder, Home, Play, Globe } from 'lucide-react'
+import { BookOpen, Plug, Sparkles, ShieldOff, CalendarClock, GitCommitHorizontal, SquareTerminal, Settings, LogOut, Bot, Folder, Home, Play, Globe } from 'lucide-react'
 import { ASSISTANT_REPO_ID } from '@opencode-manager/shared/utils'
 import { getAssistantPath, isAssistantPath } from '@/lib/navigation'
 
@@ -9,6 +9,7 @@ export interface MoreDrawerItem {
   icon: LucideIcon
   to?: string
   dialog?: string
+  panelTool?: string
   danger?: boolean
 }
 
@@ -46,6 +47,19 @@ function getBaseItems(): MoreDrawerItem[] {
   ]
 }
 
+const SESSION_DETAIL_PATH = /^\/repos\/(\d+)\/sessions\/[^/]+$/
+
+export function isSessionDetailPath(pathname: string): boolean {
+  return SESSION_DETAIL_PATH.test(pathname)
+}
+
+const NON_TOOL_ITEM_KEYS = new Set(['home', 'settings', 'logout'])
+
+/** Route-scoped tool items, shown in the desktop tool rail instead of the sidebar. */
+export function buildToolItems(pathname: string): MoreDrawerItem[] {
+  return buildNavModel(pathname).items.filter((item) => !NON_TOOL_ITEM_KEYS.has(item.key))
+}
+
 function buildRouteNavModel(pathname: string): NavModel {
   const baseItems = getBaseItems()
 
@@ -57,7 +71,7 @@ function buildRouteNavModel(pathname: string): NavModel {
       { key: 'mcp', label: 'MCP', icon: Plug, dialog: 'mcp' },
       { key: 'skills', label: 'Skills', icon: Sparkles, dialog: 'skills' },
       { key: 'reset-permissions', label: 'Reset Permissions', icon: ShieldOff, dialog: 'resetPermissions', danger: true },
-      { key: 'schedules', label: 'Schedules', icon: CalendarClock, to: `/repos/${id}/schedules` },
+      { key: 'schedules', label: 'Schedules', icon: CalendarClock, to: `/repos/${id}/schedules`, panelTool: 'schedules' },
       { key: 'source-control', label: 'Source Control', icon: GitCommitHorizontal, dialog: 'sourceControl' },
       { key: 'terminal', label: 'Terminal', icon: SquareTerminal, dialog: 'terminal' },
       { key: 'actions', label: 'Actions', icon: Play, dialog: 'actions' },
@@ -71,7 +85,7 @@ function buildRouteNavModel(pathname: string): NavModel {
     }
   }
 
-  const sessionDetailMatch = /^\/repos\/(\d+)\/sessions\/[^/]+$/.exec(pathname)
+  const sessionDetailMatch = SESSION_DETAIL_PATH.exec(pathname)
   if (sessionDetailMatch) {
     const repoId = sessionDetailMatch[1]
     const isAssistantRepo = repoId === String(ASSISTANT_REPO_ID)
@@ -80,9 +94,10 @@ function buildRouteNavModel(pathname: string): NavModel {
       { key: 'mcp', label: 'MCP', icon: Plug, dialog: 'mcp' },
       { key: 'skills', label: 'Skills', icon: Sparkles, dialog: 'skills' },
       { key: 'reset-permissions', label: 'Reset Permissions', icon: ShieldOff, dialog: 'resetPermissions', danger: true },
-      { key: 'schedules', label: 'Schedules', icon: CalendarClock, to: `/repos/${repoId}/schedules` },
+      { key: 'schedules', label: 'Schedules', icon: CalendarClock, to: `/repos/${repoId}/schedules`, panelTool: 'schedules' },
       { key: 'source-control', label: 'Source Control', icon: GitCommitHorizontal, dialog: 'sourceControl' },
       { key: 'terminal', label: 'Terminal', icon: SquareTerminal, dialog: 'terminal' },
+      { key: 'walkthrough', label: 'Walkthrough', icon: BookOpen, dialog: 'walkthrough' },
       ...(isAssistantRepo
         ? []
         : [{ key: 'actions', label: 'Actions', icon: Play, dialog: 'actions' }]),
@@ -102,7 +117,7 @@ function buildRouteNavModel(pathname: string): NavModel {
       { key: 'mcp', label: 'MCP', icon: Plug, dialog: 'mcp' },
       { key: 'skills', label: 'Skills', icon: Sparkles, dialog: 'skills' },
       { key: 'reset-permissions', label: 'Reset Permissions', icon: ShieldOff, dialog: 'resetPermissions', danger: true },
-      { key: 'schedules', label: 'Schedules', icon: CalendarClock, to: '/repos/0/schedules' },
+      { key: 'schedules', label: 'Schedules', icon: CalendarClock, to: '/repos/0/schedules', panelTool: 'schedules' },
       { key: 'source-control', label: 'Source Control', icon: GitCommitHorizontal, dialog: 'sourceControl' },
       { key: 'terminal', label: 'Terminal', icon: SquareTerminal, dialog: 'terminal' },
       { key: 'preview', label: 'Preview', icon: Globe, dialog: 'preview' },

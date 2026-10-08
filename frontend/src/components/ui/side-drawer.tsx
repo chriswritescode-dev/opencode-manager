@@ -1,7 +1,9 @@
-import { useEffect, useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import { cn } from '@/lib/utils'
 import { MODAL_TRANSITION_MS } from '@/lib/utils'
 import { X } from 'lucide-react'
+
+const openDrawerStack: symbol[] = []
 
 export interface SideDrawerProps {
   isOpen: boolean
@@ -33,23 +35,34 @@ export function SideDrawer({
     }
   }, [isOpen])
 
+  const onCloseRef = useRef(onClose)
   useEffect(() => {
+    onCloseRef.current = onClose
+  }, [onClose])
+
+  useEffect(() => {
+    if (!isOpen) return
+
+    const token = Symbol('side-drawer')
+    openDrawerStack.push(token)
+
     const handleEscape = (e: KeyboardEvent) => {
-      if (e.key === 'Escape' && isOpen && !e.defaultPrevented) {
-        onClose()
-      }
+      if (e.key !== 'Escape' || e.defaultPrevented || openDrawerStack.at(-1) !== token) return
+      e.preventDefault()
+      onCloseRef.current()
     }
 
-    if (isOpen) {
-      document.addEventListener('keydown', handleEscape)
-      document.body.style.overflow = 'hidden'
-    }
+    document.addEventListener('keydown', handleEscape)
+    document.body.style.overflow = 'hidden'
 
     return () => {
       document.removeEventListener('keydown', handleEscape)
-      document.body.style.overflow = 'unset'
+      openDrawerStack.splice(openDrawerStack.indexOf(token), 1)
+      if (openDrawerStack.length === 0) {
+        document.body.style.overflow = 'unset'
+      }
     }
-  }, [isOpen, onClose])
+  }, [isOpen])
 
   if (!isOpen && !shouldRender) return null
 
