@@ -8,13 +8,11 @@ import { FloatingTTSButton } from '@/components/message/FloatingTTSButton'
 import { X, CornerUpLeft } from "lucide-react";
 import { SquareFill } from "@/components/ui/square-fill";
 import { Header } from "@/components/ui/header";
-import { SessionList } from "@/components/session/SessionList";
-import { getSessionListPath } from '@/lib/navigation'
-import { isFinePointer } from '@/lib/overlayFocus'
+import { SessionPickerDialog } from "@/components/session/SessionPickerDialog";
+import { getSessionListPath, getSessionPath } from '@/lib/navigation'
 import { FetchError } from '@/api/fetchWrapper'
 
 import { FileBrowserSheet } from "@/components/file-browser/FileBrowserSheet";
-import { Dialog, DialogContent, DialogTitle } from "@/components/ui/dialog";
 import { Button } from "@/components/ui/button";
 import { ContextUsageIndicator } from "@/components/session/ContextUsageIndicator";
 import { useSession, useInterruptSession, useUpdateSession, useCreateSession } from "@/hooks/useOpenCode";
@@ -828,32 +826,25 @@ export function SessionDetail() {
       )}
       </div>
 
-      {/* Sessions Dialog */}
-      <Dialog open={sessionsDialogOpen} onOpenChange={setSessionsDialogOpen}>
-        <DialogContent
-          className="max-w-4xl max-h-[80vh]"
-          onOpenAutoFocus={(event) => {
-            if (!isFinePointer()) {
-              event.preventDefault();
-              (event.currentTarget as HTMLElement).focus();
-            }
-          }}
-        >
-          <DialogTitle>Sessions</DialogTitle>
-          <div className="mt-4 flex h-[60vh] min-h-0 flex-col">
-            {sessionDirectory && (
-              <SessionList
-                directory={repoDirectory}
-                activeSessionID={sessionId || undefined}
-                onSelectSession={(sessionID) => {
-                  navigate(`/repos/${repoId}/sessions/${sessionID}${sessionRouteSuffix}`)
-                  setSessionsDialogOpen(false)
-                }}
-              />
-            )}
-          </div>
-        </DialogContent>
-      </Dialog>
+      {/* Sessions Picker */}
+      <SessionPickerDialog
+        open={sessionsDialogOpen}
+        onOpenChange={setSessionsDialogOpen}
+        currentRepo={repo}
+        activeSessionID={sessionId || undefined}
+        onSelectSession={(session, sessionRepo) => {
+          if (sessionRepo.id === repoId) {
+            navigate(`/repos/${repoId}/sessions/${session.id}${sessionRouteSuffix}`)
+          } else {
+            navigate(getSessionPath(sessionRepo.id, session.id))
+          }
+          setSessionsDialogOpen(false)
+        }}
+        onActiveSessionDeleted={() => {
+          setSessionsDialogOpen(false)
+          navigate(getSessionListPath(repoId, isAssistantSession))
+        }}
+      />
 
       {sideQuestion && sessionId && (
         <SideQuestionDialog

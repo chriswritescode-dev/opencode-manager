@@ -159,8 +159,8 @@ vi.mock('@/hooks/useSessionGoals', () => ({
   useResumeSessionGoal: vi.fn(() => ({ mutate: vi.fn(), isPending: false })),
   useCancelSessionGoal: vi.fn(() => ({ mutate: vi.fn(), isPending: false })),
 }))
-vi.mock('@/components/session/SessionList', () => ({
-  SessionList: vi.fn(() => null),
+vi.mock('@/components/session/SessionPickerDialog', () => ({
+  SessionPickerDialog: vi.fn(() => null),
 }))
 
 vi.mock('@/components/file-browser/FileBrowserSheet', () => ({

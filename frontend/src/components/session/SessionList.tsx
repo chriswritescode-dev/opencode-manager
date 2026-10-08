@@ -1,17 +1,17 @@
-import { useCallback, useState, useMemo, useEffect, useRef, useId, type ReactNode } from "react";
-import { useSessionsAcrossDirectories, useDeleteSession, useCreateSession } from "@/hooks/useOpenCode";
+import { useCallback, useState, useMemo, useEffect, useRef, type ReactNode } from "react";
+import { useDeleteSession, useCreateSession } from "@/hooks/useOpenCode";
 import type { DeleteSessionTarget } from "@/hooks/useOpenCode";
 import type { Session } from "@/api/types";
 import { useSessionPins, useToggleSessionPin } from '@/hooks/useSessionPins';
 import { buildSessionKey, buildPinnedSessionKeys } from '@/lib/sessionKey';
-import { partitionSessions, selectRootSessions } from './session-partition';
+import { partitionSessions } from './session-partition';
 import { DeleteSessionDialog } from "./DeleteSessionDialog";
 import { SessionCard } from "./SessionCard";
 import { Card } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Search, Trash2, Pencil, X } from "lucide-react";
-import { useDebouncedValue } from "@/hooks/useDebouncedValue";
+import { useSessionSearch } from "@/hooks/useSessionSearch";
 
 interface SessionListProps {
   directory?: string;
@@ -44,17 +44,26 @@ export const SessionList = ({
     const source = directories && directories.length > 0 ? directories : directory ? [directory] : [];
     return Array.from(new Set(source.filter(Boolean)));
   }, [directory, directories]);
-  const directorySet = useMemo(() => new Set(directoriesList), [directoriesList]);
   const primaryDirectory = directoriesList[0];
   const sessionCreateDirectory = createDirectory ?? primaryDirectory;
   const getSessionSelectionKey = useCallback((session: Session) =>
     buildSessionKey(session.location.directory, session.id),
   []);
-  const [searchQuery, setSearchQuery] = useState("");
-  const trimmedSearchQuery = searchQuery.trim();
-  const debouncedSearchQuery = useDebouncedValue(trimmedSearchQuery, 150);
-  const search = trimmedSearchQuery ? debouncedSearchQuery : '';
-  const { data: sessions, isLoading, isPlaceholderData, fetchNextPage, hasNextPage, isFetchingNextPage, isFetchNextPageError } = useSessionsAcrossDirectories(directoriesList, { search, limit: 25, keepPreviousResults: true });
+  const {
+    query,
+    setQuery,
+    trimmedQuery,
+    sessions,
+    filteredSessions,
+    isSearchPending,
+    isLoading,
+    isPlaceholderData,
+    fetchNextPage,
+    hasNextPage,
+    isFetchingNextPage,
+    isFetchNextPageError,
+    canFetchNextPage,
+  } = useSessionSearch(directoriesList);
   const deleteSession = useDeleteSession(directoriesList);
   const createSession = useCreateSession(sessionCreateDirectory, (newSession) => {
     onSelectSession(newSession.id);
@@ -71,51 +80,10 @@ export const SessionList = ({
   const [manageMode, setManageMode] = useState(false);
   const sessionListRef = useRef<HTMLDivElement>(null);
 
-  const rootSessions = useMemo(
-    () => selectRootSessions(sessions ?? [], { directories: directorySet, keyFn: getSessionSelectionKey }),
-    [sessions, directorySet, getSessionSelectionKey],
-  );
-
-  const filteredSessions = useMemo(() => {
-    if (!trimmedSearchQuery) return rootSessions;
-    const needle = trimmedSearchQuery.toLowerCase();
-    return rootSessions.filter((session) => (session.title ?? '').toLowerCase().includes(needle));
-  }, [rootSessions, trimmedSearchQuery]);
-
   const { pinned: pinnedSessions, today: todaySessions, older: olderSessions } = useMemo(
     () => partitionSessions(filteredSessions, pinnedKeys, getSessionSelectionKey),
     [filteredSessions, pinnedKeys, getSessionSelectionKey],
   );
-
-  const navSessions = useMemo(
-    () => [...pinnedSessions, ...todaySessions, ...olderSessions],
-    [pinnedSessions, todaySessions, olderSessions],
-  );
-
-  const [highlightedKey, setHighlightedKey] = useState<string | null>(null);
-
-  useEffect(() => {
-    setHighlightedKey(null);
-  }, [trimmedSearchQuery]);
-
-  const highlightedSession = useMemo(() => {
-    if (navSessions.length === 0) return undefined;
-    if (highlightedKey) {
-      const stored = navSessions.find((session) => getSessionSelectionKey(session) === highlightedKey);
-      if (stored) return stored;
-    }
-    if (!trimmedSearchQuery && activeSessionID) {
-      const active = navSessions.find((session) => session.id === activeSessionID);
-      if (active) return active;
-    }
-    return navSessions[0];
-  }, [navSessions, highlightedKey, trimmedSearchQuery, activeSessionID, getSessionSelectionKey]);
-
-  const highlightedSessionKey = highlightedSession ? getSessionSelectionKey(highlightedSession) : null;
-  const highlightedIndex = highlightedSession ? navSessions.indexOf(highlightedSession) : -1;
-  const listboxId = useId();
-  const keyboardNavigationEnabled = !renderSessions && !manageMode;
-  const isSearchPending = trimmedSearchQuery !== search || isPlaceholderData;
 
   const handleTogglePin = (session: Session) => {
     const directory = session.location.directory;
@@ -129,92 +97,20 @@ export const SessionList = ({
 
   const handleSessionsScroll = useCallback((event: React.UIEvent<HTMLDivElement>) => {
     const { scrollTop, scrollHeight, clientHeight } = event.currentTarget;
-    if (scrollHeight - scrollTop - clientHeight <= 240 && hasNextPage && !isFetchingNextPage && !isFetchNextPageError && !isPlaceholderData) {
+    if (scrollHeight - scrollTop - clientHeight <= 240 && canFetchNextPage) {
       void fetchNextPage();
     }
-  }, [hasNextPage, isFetchingNextPage, isFetchNextPageError, isPlaceholderData, fetchNextPage]);
+  }, [canFetchNextPage, fetchNextPage]);
 
   useEffect(() => {
     const sessionList = sessionListRef.current;
     const isNearBottom = sessionList
       ? sessionList.scrollHeight - sessionList.scrollTop - sessionList.clientHeight <= 240
       : filteredSessions.length === 0;
-    if (
-      !isLoading
-      && !isPlaceholderData
-      && isNearBottom
-      && hasNextPage
-      && !isFetchingNextPage
-      && !isFetchNextPageError
-    ) {
+    if (!isLoading && isNearBottom && canFetchNextPage) {
       void fetchNextPage();
     }
-  }, [isLoading, isPlaceholderData, filteredSessions, hasNextPage, isFetchingNextPage, isFetchNextPageError, fetchNextPage]);
-
-  useEffect(() => {
-    if (!highlightedSessionKey) return;
-    const list = sessionListRef.current;
-    if (!list) return;
-    const highlighted = list.querySelector<HTMLElement>('[data-highlighted="true"]');
-    if (highlighted && typeof highlighted.scrollIntoView === 'function') {
-      highlighted.scrollIntoView({ block: 'nearest' });
-    }
-  }, [highlightedSessionKey]);
-
-  const handleSearchKeyDown = (event: React.KeyboardEvent<HTMLInputElement>) => {
-    if (!keyboardNavigationEnabled) return;
-    if (event.nativeEvent.isComposing) return;
-    if (event.altKey || event.metaKey) return;
-
-    const selectIndex = (index: number) => {
-      const session = navSessions[index];
-      if (!session) return false;
-      setHighlightedKey(getSessionSelectionKey(session));
-      return true;
-    };
-    const moveBy = (delta: number) => {
-      const count = navSessions.length;
-      if (count === 0) return false;
-      return selectIndex(((highlightedIndex + delta) % count + count) % count);
-    };
-    const moveClamped = (delta: number) => {
-      const count = navSessions.length;
-      if (count === 0) return false;
-      return selectIndex(Math.min(Math.max(highlightedIndex + delta, 0), count - 1));
-    };
-
-    if (event.ctrlKey) {
-      if (event.key.toLowerCase() === 'n') {
-        if (moveBy(1)) event.preventDefault();
-      } else if (event.key.toLowerCase() === 'p') {
-        if (moveBy(-1)) event.preventDefault();
-      }
-      return;
-    }
-
-    switch (event.key) {
-      case 'ArrowDown':
-        if (moveBy(1)) event.preventDefault();
-        break;
-      case 'ArrowUp':
-        if (moveBy(-1)) event.preventDefault();
-        break;
-      case 'PageDown':
-        if (moveClamped(10)) event.preventDefault();
-        break;
-      case 'PageUp':
-        if (moveClamped(-10)) event.preventDefault();
-        break;
-      case 'Enter':
-        if (highlightedSession) {
-          event.preventDefault();
-          onSelectSession(highlightedSession.id);
-        }
-        break;
-      default:
-        break;
-    }
-  };
+  }, [isLoading, filteredSessions, canFetchNextPage, fetchNextPage]);
 
   const getDeleteTarget = (session: Session): DeleteSessionTarget => ({
     id: session.id,
@@ -280,7 +176,7 @@ export const SessionList = ({
 
   const renderSessionCard = (session: (typeof filteredSessions)[number], isPinned: boolean) => {
     const key = getSessionSelectionKey(session);
-    const card = (
+    return (
       <SessionCard
         key={key}
         session={session}
@@ -293,21 +189,6 @@ export const SessionList = ({
         onTogglePin={() => handleTogglePin(session)}
         onDelete={(e) => handleDelete(session, e)}
       />
-    );
-    if (!keyboardNavigationEnabled) return card;
-    const index = navSessions.indexOf(session);
-    const isHighlighted = highlightedSession === session;
-    return (
-      <div
-        key={key}
-        id={`${listboxId}-option-${index}`}
-        role="option"
-        aria-selected={isHighlighted}
-        data-highlighted={isHighlighted ? 'true' : undefined}
-        className={isHighlighted ? 'rounded-lg ring-2 ring-primary/60' : undefined}
-      >
-        {card}
-      </div>
     );
   };
 
@@ -325,7 +206,7 @@ export const SessionList = ({
     if ((hasNextPage || isFetchingNextPage) && !renderSessions) {
       return <div className="p-4 text-sm text-muted-foreground">Loading sessions...</div>;
     }
-    if (!searchQuery.trim() && !renderSessions) {
+    if (!trimmedQuery && !renderSessions) {
       return (
         <div className="flex-1 overflow-y-auto overflow-x-hidden px-4 pt-4 pb-4 min-h-0 [mask-image:linear-gradient(to_bottom,transparent,black_16px,black)]">
           <Card
@@ -381,16 +262,11 @@ export const SessionList = ({
               <Input
                 type="text"
                 placeholder="Search sessions..."
-                value={searchQuery}
-                onChange={(e) => setSearchQuery(e.target.value)}
-                onKeyDown={handleSearchKeyDown}
+                value={query}
+                onChange={(e) => setQuery(e.target.value)}
                 className="pl-9 h-9"
                 autoComplete="off"
                 name="session-search"
-                role={keyboardNavigationEnabled ? 'combobox' : undefined}
-                aria-expanded={keyboardNavigationEnabled ? true : undefined}
-                aria-controls={keyboardNavigationEnabled ? listboxId : undefined}
-                aria-activedescendant={keyboardNavigationEnabled && highlightedIndex >= 0 ? `${listboxId}-option-${highlightedIndex}` : undefined}
               />
             </div>
             <Button
@@ -415,17 +291,13 @@ export const SessionList = ({
         aria-label="Sessions"
         onScroll={handleSessionsScroll}
       >
-        <div
-          id={keyboardNavigationEnabled ? listboxId : undefined}
-          role={keyboardNavigationEnabled ? 'listbox' : undefined}
-          className="flex flex-col gap-4"
-        >
+        <div className="flex flex-col gap-4">
           {isLoading && !renderSessions ? (
             <div className="text-sm text-muted-foreground text-center py-4">Loading sessions...</div>
           ) : renderSessions ? (
             renderSessions({
               sessions: filteredSessions,
-              searchQuery,
+              searchQuery: query,
               renderSessionCard: (session) => renderSessionCard(session, pinnedKeys.has(getSessionSelectionKey(session))),
             })
           ) : filteredSessions.length === 0 && !isFetchingNextPage ? (

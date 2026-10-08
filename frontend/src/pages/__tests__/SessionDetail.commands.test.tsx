@@ -207,7 +207,7 @@ vi.mock('@/components/navigation/ToolSidePanel', () => ({ ToolSidePanel: vi.fn((
 vi.mock('@/hooks/useToolPanel', () => ({
   useToolPanel: vi.fn(() => ({ activeTool: null, toggleTool: vi.fn(), closePanel: vi.fn() })),
 }))
-vi.mock('@/components/session/SessionList', () => ({ SessionList: vi.fn(() => null) }))
+vi.mock('@/components/session/SessionPickerDialog', () => ({ SessionPickerDialog: vi.fn(() => null) }))
 vi.mock('@/components/file-browser/FileBrowserSheet', () => ({ FileBrowserSheet: vi.fn(() => null) }))
 vi.mock('@/components/repo/RepoMcpDialog', () => ({ RepoMcpDialog: vi.fn(() => null) }))
 vi.mock('@/components/repo/RepoActionsDialog', () => ({ RepoActionsDialog: vi.fn(() => null) }))

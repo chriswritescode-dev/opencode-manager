@@ -31,7 +31,11 @@ function readStoredBoolean(key: string, fallback: boolean): boolean {
   }
 }
 
-function usePersistentBoolean(key: string, fallback: boolean): [boolean, () => void] {
+/**
+ * Persists a boolean preference under `key` in localStorage and returns it with a toggler.
+ * Falls back to `fallback` when the stored value is missing or malformed.
+ */
+export function usePersistentBoolean(key: string, fallback: boolean): [boolean, () => void] {
   const [value, setValue] = useState(() => readStoredBoolean(key, fallback))
 
   const toggle = useCallback(() => {

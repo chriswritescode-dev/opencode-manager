@@ -137,7 +137,7 @@ vi.mock('@/hooks/useSessionGoals', () => ({
 vi.mock('@/hooks/useSessionPermissionMode', () => ({
   useSessionPermissionMode: vi.fn(() => ({ data: undefined })),
 }))
-vi.mock('@/components/session/SessionList', () => ({ SessionList: vi.fn(() => null) }))
+vi.mock('@/components/session/SessionPickerDialog', () => ({ SessionPickerDialog: vi.fn(() => null) }))
 vi.mock('@/components/session/PermissionModeToggle', () => ({ PermissionModeToggle: vi.fn(() => null) }))
 vi.mock('@/components/file-browser/FileBrowserSheet', () => ({ FileBrowserSheet: vi.fn(() => null) }))
 vi.mock('@/components/repo/RepoMcpDialog', () => ({ RepoMcpDialog: vi.fn(() => null) }))
