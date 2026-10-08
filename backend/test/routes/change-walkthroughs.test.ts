@@ -7,6 +7,7 @@ import { allMigrations } from '../../src/db/migrations'
 import { ChangeWalkthroughService } from '../../src/services/change-walkthroughs'
 import { createChangeWalkthroughRoutes } from '../../src/routes/change-walkthroughs'
 import type { OpenCodeClient } from '../../src/services/opencode/client'
+import { stubLoadedModelCatalog } from '../helpers/stub-opencode-client'
 
 const SESSION_ID = 'ses_walkthrough'
 
@@ -32,6 +33,7 @@ function createFakeClient(sessions: Record<string, FakeSession>) {
 
   const client = {
     api: {
+      ...stubLoadedModelCatalog(),
       session: {
         get: vi.fn(async ({ sessionID }: { sessionID: string }) => {
           const config = sessions[sessionID]

@@ -13,6 +13,7 @@ import { migrate } from '../../src/db/migration-runner'
 import { allMigrations } from '../../src/db/migrations'
 import type { OpenCodeClient } from '../../src/services/opencode/client'
 import type { SSEEvent } from '../../src/services/sse-aggregator'
+import { stubLoadedModelCatalog } from '../helpers/stub-opencode-client'
 import {
   ChangeWalkthroughError,
   ChangeWalkthroughService,
@@ -58,6 +59,7 @@ function createFakeClient(sessions: Record<string, FakeSession>) {
 
   const client = {
     api: {
+      ...stubLoadedModelCatalog(),
       session: {
         get: vi.fn(async ({ sessionID }: { sessionID: string }) => {
           const config = sessions[sessionID]
