@@ -215,8 +215,8 @@ export function RepoDetail() {
       className="h-dvh max-h-dvh overflow-hidden bg-gradient-to-br from-background via-background to-background flex flex-col pb-[calc(env(safe-area-inset-bottom)+56px)] sm:pb-0"
     >
       <Header>
-        <Header.BackButton to="/" />
-        <div className="flex items-center gap-2 min-w-0">
+        <div className="flex items-center gap-2 sm:gap-3 min-w-0 flex-1">
+          <Header.BackButton to="/" />
           <Header.Title>{repoName}</Header.Title>
           {isWorktree ? (
             <Badge className="text-xs px-1.5 sm:px-2.5 py-0.5 bg-primary/20 text-primary border-primary/40" title="Worktree">
@@ -225,20 +225,28 @@ export function RepoDetail() {
             </Badge>
           ) : null}
         </div>
-        <Header.Actions>
-          <div className="flex items-center gap-1">
+        <Header.Actions className="shrink-0 gap-1 sm:gap-2 pl-2">
+          <div className="flex items-center gap-0.5 sm:gap-1">
             <ProjectActionsMenu repoId={repoId} directory={baseDirectory} />
             <PendingActionsGroup />
+            <Button
+              onClick={() => setMultiRunOpen(true)}
+              aria-label="Multi-run"
+              variant="ghost"
+              size="icon"
+              className="sm:hidden h-10 w-10 text-muted-foreground hover:text-foreground"
+            >
+              <Columns3 className="w-5 h-5" />
+            </Button>
           </div>
           <Button
             onClick={() => setMultiRunOpen(true)}
-            aria-label="Multi-run"
             variant="outline"
             size="sm"
-            className="h-10 sm:h-9"
+            className="hidden sm:inline-flex h-9"
           >
-            <Columns3 className="w-4 h-4 sm:mr-2" />
-            <span className="hidden sm:inline">Multi-run</span>
+            <Columns3 className="w-4 h-4 mr-2" />
+            <span>Multi-run</span>
           </Button>
           <Button
             onClick={() => handleCreateSession()}

@@ -44,7 +44,7 @@ export function PendingActionBadge({
       size="icon"
       onClick={onClick}
       className={cn(
-        'relative h-8 w-8 transition-all duration-200',
+        'relative h-10 w-10 transition-all duration-200 sm:h-8 sm:w-8',
         styles.bg,
         styles.hover,
         styles.text,
@@ -52,7 +52,7 @@ export function PendingActionBadge({
       )}
       title={`${count} pending ${label}${count > 1 ? 's' : ''}`}
     >
-      <Icon className="w-4 h-4" />
+      <Icon className="w-5 h-5 sm:w-4 sm:h-4" />
       <span
         className={cn(
           'absolute -top-0.5 -right-0.5 w-2 h-2 rounded-full animate-pulse',

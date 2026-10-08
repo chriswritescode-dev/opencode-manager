@@ -40,7 +40,7 @@ function HeaderTitle({ children, logo, className }: HeaderTitleProps) {
   const theme = useTheme();
 
   return (
-    <div className={cn("flex items-center gap-2", className)}>
+    <div className={cn("flex min-w-0 items-center gap-2", className)}>
       {logo && typeof children === "string" && children === "OpenCode" ? (
         <img 
           src={theme === 'light' ? "/opencode-wordmark-light.svg" : "/opencode-wordmark-dark.svg"} 

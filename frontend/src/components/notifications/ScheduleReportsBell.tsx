@@ -130,6 +130,8 @@ export function ScheduleReportsBell() {
     markAllViewed.mutate()
   }
 
+  if (total === 0 && !open) return null
+
   const trigger = (
     <Button
       variant="ghost"
