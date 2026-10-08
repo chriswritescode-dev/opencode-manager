@@ -69,9 +69,10 @@ const CMD_KEY = isMac ? 'Cmd' : 'Ctrl';
 
 export const DEFAULT_LEADER_KEY = `${CMD_KEY}+O`;
 
-export const DEFAULT_KEYBOARD_SHORTCUTS: Record<string, string> = {
+export const DEFAULT_KEYBOARD_SHORTCUTS = {
   submit: `${CMD_KEY}+Enter`,
   abort: 'Escape',
+  clearPrompt: isMac ? 'Ctrl+C' : '',
   toggleMode: 'T',
   undo: 'Z',
   redo: 'Shift+Z',
@@ -83,8 +84,16 @@ export const DEFAULT_KEYBOARD_SHORTCUTS: Record<string, string> = {
   closeSession: 'W',
   toggleSidebar: 'B',
   selectModel: 'M',
-  variantCycle: `${CMD_KEY}+T`,
-};
+  variantCycle: 'Ctrl+T',
+  toggleTerminal: 'Ctrl+`',
+  toggleSourceControl: 'D',
+  timeline: 'G',
+  exportSession: 'X',
+} satisfies Record<string, string>;
+
+export type KeyboardShortcutAction = keyof typeof DEFAULT_KEYBOARD_SHORTCUTS;
+
+export const DEFAULT_DIRECT_SHORTCUTS = ['submit', 'abort', 'clearPrompt', 'variantCycle', 'toggleTerminal'];
 
 export const GitCredentialSchema = z.object({
   id: z.string().optional(),
@@ -233,7 +242,7 @@ export const DEFAULT_USER_PREFERENCES = {
   showReasoning: false,
   simpleChatMode: false,
   leaderKey: DEFAULT_LEADER_KEY,
-  directShortcuts: ['submit', 'abort'],
+  directShortcuts: DEFAULT_DIRECT_SHORTCUTS,
   keyboardShortcuts: DEFAULT_KEYBOARD_SHORTCUTS,
   customCommands: [],
   customAgents: [],

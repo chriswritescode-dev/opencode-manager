@@ -1,5 +1,6 @@
 import { render, screen, fireEvent, waitFor } from '@testing-library/react'
-import { describe, it, expect, vi, beforeEach } from 'vitest'
+import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest'
+import { stubMatchMedia } from '@/test/test-utils'
 import { BottomSheet, BottomSheetHeader, BottomSheetContent } from './bottom-sheet'
 import { useSwipeDismiss } from '@/hooks/useMobile'
 
@@ -10,6 +11,21 @@ vi.mock('@/hooks/useMobile', () => ({
     swipeStyles: {},
   })),
 }))
+
+function renderSheet(isOpen: boolean) {
+  return render(
+    <>
+      <textarea data-prompt-input aria-label="prompt" />
+      <BottomSheet isOpen={isOpen} onClose={() => {}} ariaLabel="Test sheet">
+        <button type="button">inside</button>
+      </BottomSheet>
+    </>,
+  )
+}
+
+afterEach(() => {
+  Reflect.deleteProperty(window, 'matchMedia')
+})
 
 describe('BottomSheet', () => {
   beforeEach(() => {
@@ -131,6 +147,58 @@ describe('BottomSheet', () => {
     expect(panelElement).toBeInTheDocument()
 
     expect(mockBind).toHaveBeenCalled()
+  })
+
+  it('moves focus to the chat prompt on desktop when it closes', () => {
+    stubMatchMedia(true)
+    const { rerender } = renderSheet(false)
+
+    rerender(
+      <>
+        <textarea data-prompt-input aria-label="prompt" />
+        <BottomSheet isOpen onClose={() => {}} ariaLabel="Test sheet">
+          <button type="button">inside</button>
+        </BottomSheet>
+      </>,
+    )
+    screen.getByRole('button', { name: 'inside' }).focus()
+
+    rerender(
+      <>
+        <textarea data-prompt-input aria-label="prompt" />
+        <BottomSheet isOpen={false} onClose={() => {}} ariaLabel="Test sheet">
+          <button type="button">inside</button>
+        </BottomSheet>
+      </>,
+    )
+
+    expect(screen.getByLabelText('prompt')).toHaveFocus()
+  })
+
+  it('does not refocus the chat prompt on touch when it closes', () => {
+    stubMatchMedia(false)
+    const { rerender } = renderSheet(false)
+
+    rerender(
+      <>
+        <textarea data-prompt-input aria-label="prompt" />
+        <BottomSheet isOpen onClose={() => {}} ariaLabel="Test sheet">
+          <button type="button">inside</button>
+        </BottomSheet>
+      </>,
+    )
+    screen.getByRole('button', { name: 'inside' }).focus()
+
+    rerender(
+      <>
+        <textarea data-prompt-input aria-label="prompt" />
+        <BottomSheet isOpen={false} onClose={() => {}} ariaLabel="Test sheet">
+          <button type="button">inside</button>
+        </BottomSheet>
+      </>,
+    )
+
+    expect(screen.getByLabelText('prompt')).not.toHaveFocus()
   })
 })
 

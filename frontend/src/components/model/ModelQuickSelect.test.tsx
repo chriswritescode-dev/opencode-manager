@@ -1,5 +1,5 @@
-import { describe, it, expect, vi, beforeAll, beforeEach } from 'vitest'
-import { render, screen, within } from '@testing-library/react'
+import { describe, it, expect, vi, beforeAll, beforeEach, afterEach } from 'vitest'
+import { fireEvent, render, screen, within } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { ModelQuickSelect } from './ModelQuickSelect'
 import { buildModelSections } from '@/lib/modelSections'
@@ -143,6 +143,17 @@ async function openSelector(user: ReturnType<typeof userEvent.setup>) {
 
   return screen.findByRole('dialog', { name: 'Select model' })
 }
+
+function focusDetachedTextarea() {
+  const textarea = document.createElement('textarea')
+  document.body.appendChild(textarea)
+  textarea.focus()
+  return textarea
+}
+
+afterEach(() => {
+  document.querySelectorAll('textarea').forEach((element) => element.remove())
+})
 
 beforeAll(() => {
   Object.defineProperty(HTMLElement.prototype, 'clientHeight', {
@@ -369,5 +380,77 @@ describe('ModelQuickSelect more models', () => {
     await user.click(within(section).getByRole('button', { name: /Claude Sonnet 4/ }))
 
     expect(setModel).toHaveBeenCalledWith(selection('anthropic', 'claude-sonnet-4'))
+  })
+})
+
+describe('ModelQuickSelect keyboard navigation', () => {
+  it('moves the active quick row with ArrowDown and selects it with Enter', () => {
+    const { setModel } = setModelSelection({ model: selection('opencode-go', 'go-1') })
+
+    render(<ModelQuickSelect open />)
+
+    const textarea = focusDetachedTextarea()
+
+    expect(fireEvent.keyDown(textarea, { key: 'ArrowDown' })).toBe(false)
+    expect(fireEvent.keyDown(textarea, { key: 'Enter' })).toBe(false)
+
+    expect(setModel).toHaveBeenCalledWith(selection('opencode', 'zen-1'))
+  })
+
+  it('clamps at the first quick row and jumps to the last with End', () => {
+    const { setModel } = setModelSelection({ model: selection('opencode-go', 'go-1') })
+
+    render(<ModelQuickSelect open />)
+
+    const dialog = screen.getByRole('dialog', { name: 'Select model' })
+
+    fireEvent.keyDown(dialog, { key: 'ArrowUp' })
+    fireEvent.keyDown(dialog, { key: 'Enter' })
+    expect(setModel).toHaveBeenLastCalledWith(selection('opencode-go', 'go-1'))
+
+    setModel.mockClear()
+
+    fireEvent.keyDown(dialog, { key: 'End' })
+    fireEvent.keyDown(dialog, { key: 'Enter' })
+    expect(setModel).toHaveBeenCalledWith(selection('anthropic', 'claude-sonnet-4'))
+  })
+
+  it('navigates the search results with the arrow keys and Enter', async () => {
+    const user = userEvent.setup()
+    const { setModel } = setModelSelection()
+
+    render(<ModelQuickSelect open />)
+
+    await user.click(screen.getByRole('button', { name: /More models/ }))
+    const searchInput = screen.getByPlaceholderText('Search models...')
+    await user.type(searchInput, '5')
+
+    await screen.findAllByText('Claude Opus 5.5')
+
+    expect(fireEvent.keyDown(searchInput, { key: 'ArrowDown' })).toBe(false)
+    expect(fireEvent.keyDown(searchInput, { key: 'Enter' })).toBe(false)
+
+    expect(setModel).toHaveBeenCalledWith(selection('openai', 'gpt-5'))
+  })
+
+  it('does not select a model when Enter is pressed on a row button', () => {
+    const { setModel } = setModelSelection({ favorite: [selection('anthropic', 'claude-sonnet-4')] })
+
+    render(<ModelQuickSelect open />)
+
+    const star = screen.getByRole('button', { name: /favorites/ })
+    star.focus()
+
+    fireEvent.keyDown(star, { key: 'Enter' })
+
+    expect(setModel).not.toHaveBeenCalled()
+  })
+
+  it('does not intercept arrow keys when the sheet is closed', () => {
+    render(<ModelQuickSelect />)
+
+    const textarea = focusDetachedTextarea()
+
+    expect(fireEvent.keyDown(textarea, { key: 'ArrowDown' })).toBe(true)
   })
 })

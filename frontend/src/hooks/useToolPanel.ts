@@ -26,6 +26,27 @@ function clearToolParams(params: URLSearchParams, keep?: PanelTool): void {
   }
 }
 
+export function toggleToolPanelParams(params: URLSearchParams, tool: PanelTool): void {
+  if (params.get(PANEL_PARAM) === tool) {
+    params.delete(PANEL_PARAM)
+    clearToolParams(params)
+    return
+  }
+  params.set(PANEL_PARAM, tool)
+  clearToolParams(params, tool)
+}
+
+export function toggleToolDialogParams(params: URLSearchParams, tool: PanelTool): void {
+  if (params.get('dialog') === tool) {
+    params.delete('dialog')
+    clearToolParams(params)
+    return
+  }
+  params.set('dialog', tool)
+  params.delete('mobileTab')
+  clearToolParams(params, tool)
+}
+
 export interface ToolPanelState {
   activeTool: PanelTool | null
   toggleTool: (tool: PanelTool) => void
@@ -65,15 +86,7 @@ export function useToolPanel(docked: boolean): ToolPanelState {
   }, [docked, dialogParam, panelParam, updateParams])
 
   const toggleTool = useCallback((tool: PanelTool) => {
-    updateParams((params) => {
-      if (params.get(PANEL_PARAM) === tool) {
-        params.delete(PANEL_PARAM)
-        clearToolParams(params)
-        return
-      }
-      params.set(PANEL_PARAM, tool)
-      clearToolParams(params, tool)
-    }, 'push')
+    updateParams((params) => toggleToolPanelParams(params, tool), 'push')
   }, [updateParams])
 
   const closePanel = useCallback(() => {

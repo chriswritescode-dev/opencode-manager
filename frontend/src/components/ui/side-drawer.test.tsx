@@ -1,6 +1,22 @@
 import { render, screen, fireEvent, waitFor } from '@testing-library/react'
-import { describe, it, expect, vi } from 'vitest'
+import { describe, it, expect, vi, afterEach } from 'vitest'
+import { stubMatchMedia } from '@/test/test-utils'
 import { SideDrawer, SideDrawerHeader, SideDrawerContent } from './side-drawer'
+
+function renderDrawer(isOpen: boolean) {
+  return render(
+    <>
+      <textarea data-prompt-input aria-label="prompt" />
+      <SideDrawer isOpen={isOpen} onClose={() => {}} ariaLabel="Test drawer">
+        <button type="button">inside</button>
+      </SideDrawer>
+    </>,
+  )
+}
+
+afterEach(() => {
+  Reflect.deleteProperty(window, 'matchMedia')
+})
 
 describe('SideDrawer', () => {
   it('renders when isOpen is true', () => {
@@ -78,6 +94,32 @@ describe('SideDrawer', () => {
     fireEvent.keyDown(document, { key: 'Escape' })
     expect(closeInner).toHaveBeenCalledTimes(1)
     expect(closeOuter).not.toHaveBeenCalled()
+  })
+
+  it('moves focus to the chat prompt on desktop when it closes', () => {
+    stubMatchMedia(true)
+    const { rerender } = renderDrawer(false)
+
+    rerender(
+      <>
+        <textarea data-prompt-input aria-label="prompt" />
+        <SideDrawer isOpen onClose={() => {}} ariaLabel="Test drawer">
+          <button type="button">inside</button>
+        </SideDrawer>
+      </>,
+    )
+    screen.getByRole('button', { name: 'inside' }).focus()
+
+    rerender(
+      <>
+        <textarea data-prompt-input aria-label="prompt" />
+        <SideDrawer isOpen={false} onClose={() => {}} ariaLabel="Test drawer">
+          <button type="button">inside</button>
+        </SideDrawer>
+      </>,
+    )
+
+    expect(screen.getByLabelText('prompt')).toHaveFocus()
   })
 })
 

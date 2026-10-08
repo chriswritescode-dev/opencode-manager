@@ -441,6 +441,22 @@ function ReturnFocusHost({ onCloseAutoFocus }: { onCloseAutoFocus?: (event: Even
   )
 }
 
+function PromptReturnFocusHost() {
+  const [open, setOpen] = useState(false)
+  return (
+    <>
+      <textarea data-prompt-input aria-label="chat prompt" />
+      <button type="button" onClick={() => setOpen(true)}>open prompt dialog</button>
+      <Dialog open={open} onOpenChange={setOpen}>
+        <DialogContent>
+          <DialogTitle>Prompt Focus Dialog</DialogTitle>
+          <input aria-label="prompt dialog input" autoFocus />
+        </DialogContent>
+      </Dialog>
+    </>
+  )
+}
+
 async function openAndEscape(returnTarget: HTMLElement) {
   returnTarget.focus()
   fireEvent.click(screen.getByText('open'))
@@ -494,6 +510,22 @@ describe('Dialog return focus', () => {
     await openAndEscape(prompt)
 
     expect(prompt).not.toHaveFocus()
+  })
+
+  it('moves focus to the chat prompt when the dialog closes on desktop', async () => {
+    stubMatchMedia(true)
+    render(<PromptReturnFocusHost />)
+    const opener = screen.getByText('open prompt dialog')
+    opener.focus()
+
+    fireEvent.click(opener)
+    const input = await screen.findByLabelText('prompt dialog input')
+    await waitFor(() => expect(input).toHaveFocus())
+    fireEvent.keyDown(input, { key: 'Escape' })
+    await waitFor(() => expect(screen.queryByLabelText('prompt dialog input')).not.toBeInTheDocument())
+    await act(() => new Promise((resolve) => setTimeout(resolve, 0)))
+
+    expect(screen.getByLabelText('chat prompt')).toHaveFocus()
   })
 })
 

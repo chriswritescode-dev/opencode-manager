@@ -54,7 +54,6 @@ export function AgentQuickSelect({
 
   const buttonContent = (
     <button
-      data-toggle-mode
       style={styleVars as React.CSSProperties}
       className="px-2 md:px-3.5 py-1 h-[36px] rounded-lg text-sm font-medium border min-w-[56px] max-w-[80px] md:max-w-[100px] flex-shrink-0 flex items-center justify-center transition-all duration-200 active:scale-95 hover:scale-105 shadow-md text-[var(--agent-color)] bg-[var(--agent-bg)] border-[var(--agent-border)] hover:bg-[var(--agent-bg-hover)] hover:border-[var(--agent-border-hover)] shadow-[var(--agent-shadow)] hover:shadow-[var(--agent-shadow-hover)]"
     >

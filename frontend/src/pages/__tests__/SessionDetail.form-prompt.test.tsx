@@ -86,8 +86,8 @@ vi.mock('@/hooks/useVisualViewport', () => ({
   useVisualViewport: vi.fn(() => ({ keyboardHeight: 0 })),
 }))
 
-vi.mock('@/hooks/useKeyboardShortcuts', () => ({
-  useKeyboardShortcuts: vi.fn(() => ({ leaderActive: false })),
+vi.mock('@/contexts/KeyboardShortcutsContext', () => ({
+  useShortcutActions: vi.fn(),
 }))
 
 vi.mock('@/hooks/useAutoScroll', () => ({

@@ -2,6 +2,7 @@ import { useEffect, useRef, useState } from 'react'
 import { cn } from '@/lib/utils'
 import { MODAL_TRANSITION_MS } from '@/lib/utils'
 import { X } from 'lucide-react'
+import { getFocusedElement, restoreOverlayFocus } from '@/lib/overlayFocus'
 
 const openDrawerStack: symbol[] = []
 
@@ -25,6 +26,9 @@ export function SideDrawer({
   ariaLabel,
 }: SideDrawerProps) {
   const [shouldRender, setShouldRender] = useState(false)
+  const panelRef = useRef<HTMLDivElement>(null)
+  const returnFocusRef = useRef<HTMLElement | null>(null)
+  const wasOpenRef = useRef(isOpen)
 
   useEffect(() => {
     if (isOpen) {
@@ -33,6 +37,15 @@ export function SideDrawer({
       const timer = setTimeout(() => setShouldRender(false), MODAL_TRANSITION_MS)
       return () => clearTimeout(timer)
     }
+  }, [isOpen])
+
+  useEffect(() => {
+    if (isOpen) {
+      returnFocusRef.current = getFocusedElement()
+    } else if (wasOpenRef.current) {
+      restoreOverlayFocus(returnFocusRef.current, panelRef.current)
+    }
+    wasOpenRef.current = isOpen
   }, [isOpen])
 
   const onCloseRef = useRef(onClose)
@@ -81,6 +94,7 @@ export function SideDrawer({
         aria-hidden="true"
       />
       <div
+        ref={panelRef}
         className={cn(
           'fixed top-0 bottom-0 bg-background border-l border-border pt-safe flex flex-col z-50',
           side === 'right' ? 'right-0' : 'left-0',
@@ -90,6 +104,7 @@ export function SideDrawer({
         role="dialog"
         aria-modal="true"
         aria-label={ariaLabel}
+        data-state={isOpen ? 'open' : 'closed'}
       >
         {children}
       </div>

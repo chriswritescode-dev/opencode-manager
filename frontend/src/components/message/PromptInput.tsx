@@ -110,6 +110,8 @@ export interface PromptInputHandle {
   clearPrompt: () => void
   triggerFileUpload: () => void
   openModelPicker: () => void
+  cycleAgent: () => void
+  cycleVariant: () => void
 }
 
 interface PromptInputProps {
@@ -243,29 +245,6 @@ export const PromptInput = memo(forwardRef<PromptInputHandle, PromptInputProps>(
     fileInputRef.current?.click()
   }, [])
 
-  useImperativeHandle(ref, () => ({
-    setPromptValue: (value: string) => {
-      setPrompt(value)
-      textareaRef.current?.focus()
-    },
-    clearPrompt: () => {
-      setPrompt('')
-      setAttachedFiles(new Map())
-      revokeBlobUrls(imageAttachments)
-      setImageAttachments([])
-      resetVoiceGestureState()
-      if (isRecording) {
-        abortRecording()
-      } else {
-        clearSTT()
-      }
-      textareaRef.current?.focus()
-    },
-    triggerFileUpload: openFilePicker,
-    openModelPicker: () => {
-      setIsModelPickerOpen(true)
-    }
-  }), [imageAttachments, clearSTT, isRecording, abortRecording, resetVoiceGestureState, openFilePicker])
   const sessionAgent = useSessionAgent(sessionID, directory)
   const currentMode = localMode ?? sessionAgent.agent
   const setStoredAgent = useSessionAgentStore((s) => s.setAgent)
@@ -1090,16 +1069,13 @@ if (isIOS && isSecureContext && navigator.clipboard && navigator.clipboard.read)
         textareaRef.current?.blur()
       }
       handleSubmit()
-    } else if (e.key === 'Escape') {
+    } else if (e.key === 'Escape' && !isSessionActive) {
       closeSuggestions()
       setPrompt('')
       revokeBlobUrls(imageAttachments)
       setImageAttachments([])
       resetVoiceGestureState()
       clearSTT()
-    } else if ((e.metaKey || e.ctrlKey) && e.key.toLowerCase() === 't') {
-      e.preventDefault()
-      handleCycleVariant()
     }
   }
 
@@ -1125,13 +1101,13 @@ if (isIOS && isSecureContext && navigator.clipboard && navigator.clipboard.read)
     updateSuggestionTriggers(value, e.target.selectionStart)
   }
 
-  const closeSuggestions = () => {
+  const closeSuggestions = useCallback(() => {
     setShowSuggestions(false)
     setSuggestionQuery('')
     setShowMentionSuggestions(false)
     setMentionQuery('')
     setMentionRange(null)
-  }
+  }, [])
 
   const updateSuggestionTriggers = (value: string, cursorPosition: number) => {
     const mentionTrigger = detectMentionTrigger(value, cursorPosition)
@@ -1289,6 +1265,34 @@ if (isIOS && isSecureContext && navigator.clipboard && navigator.clipboard.read)
     }
     handleAgentChange(next)
   }, [agents, currentMode, handleAgentChange])
+
+  useImperativeHandle(ref, () => ({
+    setPromptValue: (value: string) => {
+      setPrompt(value)
+      textareaRef.current?.focus()
+    },
+    clearPrompt: () => {
+      setPrompt('')
+      setAttachedFiles(new Map())
+      revokeBlobUrls(imageAttachments)
+      setImageAttachments([])
+      closeSuggestions()
+      setIsBashMode(false)
+      resetVoiceGestureState()
+      if (isRecording) {
+        abortRecording()
+      } else {
+        clearSTT()
+      }
+      textareaRef.current?.focus()
+    },
+    triggerFileUpload: openFilePicker,
+    openModelPicker: () => {
+      setIsModelPickerOpen(true)
+    },
+    cycleAgent: handleCycleAgent,
+    cycleVariant: handleCycleVariant,
+  }), [imageAttachments, clearSTT, isRecording, abortRecording, resetVoiceGestureState, closeSuggestions, openFilePicker, handleCycleAgent, handleCycleVariant])
 
   const commandActionsWithPrompt = useMemo<CommandActions>(
     () => ({
@@ -1466,6 +1470,7 @@ return (
       )}
       <textarea
         ref={textareaRef}
+        data-prompt-input
         value={prompt}
         onChange={handleInput}
         onFocus={handlePromptFocus}

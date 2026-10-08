@@ -1,8 +1,9 @@
-import { describe, expect, it, vi } from 'vitest'
+import { describe, expect, it, vi, afterEach } from 'vitest'
 import { render, screen, waitFor } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import type { ReactNode } from 'react'
 import { MemoryRouter, useLocation } from 'react-router-dom'
+import { stubMatchMedia } from '@/test/test-utils'
 import { ToolSidePanel } from './ToolSidePanel'
 import { useToolPanel } from '@/hooks/useToolPanel'
 
@@ -43,6 +44,7 @@ function Harness({ docked }: { docked: boolean }) {
   const panel = useToolPanel(docked)
   return (
     <>
+      <textarea data-prompt-input aria-label="prompt" />
       {docked ? (
         <ToolSidePanel
           panel={panel}
@@ -82,6 +84,10 @@ function HomeHarness() {
     </>
   )
 }
+
+afterEach(() => {
+  Reflect.deleteProperty(window, 'matchMedia')
+})
 
 describe('ToolSidePanel', () => {
   it('shows the tool name in a tooltip when hovering a rail icon', async () => {
@@ -228,5 +234,20 @@ describe('ToolSidePanel', () => {
 
     await waitFor(() => expect(search().get('dialog')).toBe('sourceControl'))
     expect(search().has('panel')).toBe(false)
+  })
+
+  it('moves focus to the chat prompt when the docked panel closes on desktop', async () => {
+    stubMatchMedia(true)
+    const user = userEvent.setup()
+    renderAt('')
+
+    await user.click(screen.getByRole('button', { name: 'Files' }))
+    const closeButton = await screen.findByRole('button', { name: 'Close panel' })
+    closeButton.focus()
+
+    await user.click(closeButton)
+
+    await waitFor(() => expect(search().has('panel')).toBe(false))
+    expect(screen.getByLabelText('prompt')).toHaveFocus()
   })
 })

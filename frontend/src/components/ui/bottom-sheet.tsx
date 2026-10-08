@@ -3,6 +3,7 @@ import { createPortal } from 'react-dom'
 import { cn } from '@/lib/utils'
 import { MODAL_TRANSITION_MS } from '@/lib/utils'
 import { useSwipeDismiss } from '@/hooks/useMobile'
+import { getFocusedElement, restoreOverlayFocus } from '@/lib/overlayFocus'
 
 export interface BottomSheetProps {
   isOpen: boolean
@@ -23,6 +24,8 @@ export function BottomSheet({
 }: BottomSheetProps) {
   const [shouldRender, setShouldRender] = useState(false)
   const panelRef = useRef<HTMLDivElement>(null)
+  const returnFocusRef = useRef<HTMLElement | null>(null)
+  const wasOpenRef = useRef(isOpen)
 
   const { bind, swipeStyles } = useSwipeDismiss(onClose, {
     enabled: isOpen,
@@ -40,6 +43,15 @@ export function BottomSheet({
       const timer = setTimeout(() => setShouldRender(false), MODAL_TRANSITION_MS)
       return () => clearTimeout(timer)
     }
+  }, [isOpen])
+
+  useEffect(() => {
+    if (isOpen) {
+      returnFocusRef.current = getFocusedElement()
+    } else if (wasOpenRef.current) {
+      restoreOverlayFocus(returnFocusRef.current, panelRef.current)
+    }
+    wasOpenRef.current = isOpen
   }, [isOpen])
 
   useEffect(() => {
@@ -86,6 +98,7 @@ export function BottomSheet({
         role="dialog"
         aria-modal="true"
         aria-label={ariaLabel}
+        data-state={isOpen ? 'open' : 'closed'}
         style={swipeStyles}
       >
         <div className="w-full flex justify-center pt-3 pb-2">

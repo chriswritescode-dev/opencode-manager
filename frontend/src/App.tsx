@@ -24,6 +24,7 @@ import { useMobileTabBar } from '@/hooks/useMobileTabBar'
 import { TTSProvider } from './contexts/TTSContext'
 import { ThemeProvider, useThemeMode } from './contexts/ThemeContext'
 import { AuthProvider } from './contexts/AuthContext'
+import { KeyboardShortcutsProvider } from './contexts/KeyboardShortcutsContext'
 import { EventProvider, usePermissions, useEventContext } from '@/contexts/EventContext'
 import { SwipeNavigationProvider, useSwipeNavigation } from '@/contexts/SwipeNavigationContext'
 import { PermissionRequestDialog } from './components/session/PermissionRequestDialog'
@@ -34,6 +35,7 @@ import { onNotificationClick } from '@/lib/serviceWorker'
 import { useAuth } from '@/hooks/useAuth'
 import { useOpenCodeFailureToast } from '@/hooks/useOpenCodeFailureToast'
 import { useOpenCodeServerActions } from '@/hooks/useOpenCodeServerActions'
+import { useGlobalShortcutActions } from '@/hooks/useGlobalShortcutActions'
 import { RestartServerDialog } from '@/components/settings/RestartServerDialog'
 
 const queryClient = new QueryClient({
@@ -116,6 +118,11 @@ function PermissionDialogWrapper() {
   )
 }
 
+function GlobalShortcuts() {
+  useGlobalShortcutActions()
+  return null
+}
+
 function AppShell() {
   const navigate = useNavigate()
   const location = useLocation()
@@ -188,21 +195,24 @@ function AppShell() {
     <ThemeProvider>
       <AuthProvider>
         <EventProvider>
-          <div ref={rootRef} className="flex h-dvh w-full min-w-0">
-            <DesktopSidebar />
-            <main className="flex-1 min-w-0 min-h-0 flex flex-col">
-              <Outlet />
-            </main>
-          </div>
-          <MobileTabBar />
-          <MobileSheetHost />
-          <PermissionDialogWrapper />
-          <SSHHostKeyDialogWrapper />
-          <SettingsDialog />
-          <HealthMonitor />
-          <VersionNotifier />
-          <PwaUpdatePrompt />
-          <ThemedToaster />
+          <KeyboardShortcutsProvider>
+            <GlobalShortcuts />
+            <div ref={rootRef} className="flex h-dvh w-full min-w-0">
+              <DesktopSidebar />
+              <main className="flex-1 min-w-0 min-h-0 flex flex-col">
+                <Outlet />
+              </main>
+            </div>
+            <MobileTabBar />
+            <MobileSheetHost />
+            <PermissionDialogWrapper />
+            <SSHHostKeyDialogWrapper />
+            <SettingsDialog />
+            <HealthMonitor />
+            <VersionNotifier />
+            <PwaUpdatePrompt />
+            <ThemedToaster />
+          </KeyboardShortcutsProvider>
         </EventProvider>
       </AuthProvider>
     </ThemeProvider>

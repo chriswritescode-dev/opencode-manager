@@ -23,7 +23,7 @@ import { useSSE } from "@/hooks/useSSE";
 import { useUIState } from "@/stores/uiStateStore";
 import { useSettings } from "@/hooks/useSettings";
 import { useModelSelection } from "@/hooks/useModelSelection";
-import { useKeyboardShortcuts } from "@/hooks/useKeyboardShortcuts";
+import { useShortcutActions } from "@/contexts/KeyboardShortcutsContext";
 import { useSettingsDialog } from "@/hooks/useSettingsDialog";
 import { useAutoScroll } from "@/hooks/useAutoScroll";
 import { useMobile } from "@/hooks/useMobile";
@@ -455,34 +455,6 @@ export function SessionDetail() {
     }
   };
 
-  const { leaderActive } = useKeyboardShortcuts({
-    openModelDialog: handleOpenModelDialog,
-    openSessions: handleShowSessionsDialog,
-    openSettings,
-    newSession: handleNewSession,
-    closeSession: handleCloseSession,
-    compact: handleCompact,
-    undo: handleUndo,
-    redo: handleRedo,
-    fork: openForkPicker,
-    toggleSidebar: () => (docked ? sidePanel.toggleTool('files') : setFileBrowserOpen(!fileBrowserOpen)),
-    toggleMode: () => {
-      const modeButton = document.querySelector(
-        "[data-toggle-mode]",
-      ) as HTMLButtonElement;
-      modeButton?.click();
-    },
-    submitPrompt: () => {
-      const submitButton = document.querySelector(
-        "[data-submit-prompt]",
-      ) as HTMLButtonElement;
-      submitButton?.click();
-    },
-    interruptSession: handleInterruptSession,
-  });
-
-  
-
   const handleFileClick = useCallback((filePath: string) => {
     setSelectedFilePath(getWorkspaceFilePath(filePath, {
       directory: sessionDirectory,
@@ -611,12 +583,30 @@ export function SessionDetail() {
     handleConnectProvider,
   ]);
 
-  const handleUndoMessage = useCallback((restoredPrompt: string) => {
-    promptInputRef.current?.setPromptValue(restoredPrompt)
-  }, []);
-
   const handleClearPrompt = useCallback(() => {
     promptInputRef.current?.clearPrompt()
+  }, []);
+
+  useShortcutActions({
+    selectModel: handleOpenModelDialog,
+    sessions: handleShowSessionsDialog,
+    newSession: handleNewSession,
+    closeSession: handleCloseSession,
+    compact: handleCompact,
+    undo: handleUndo,
+    redo: handleRedo,
+    fork: openForkPicker,
+    timeline: openTimelinePicker,
+    exportSession: handleExportSession,
+    toggleMode: () => promptInputRef.current?.cycleAgent(),
+    variantCycle: () => promptInputRef.current?.cycleVariant(),
+    submit: () => document.querySelector<HTMLButtonElement>("[data-submit-prompt]")?.click(),
+    abort: isSessionActive ? handleInterruptSession : undefined,
+    clearPrompt: handleClearPrompt,
+  });
+
+  const handleUndoMessage = useCallback((restoredPrompt: string) => {
+    promptInputRef.current?.setPromptValue(restoredPrompt)
   }, []);
 
   
@@ -773,11 +763,6 @@ export function SessionDetail() {
                   </button>
                 )}
               </div>
-              {leaderActive && (
-                <div className="absolute -top-12 left-1/2 -translate-x-1/2 z-50 px-4 py-2 rounded-xl bg-primary/90 text-primary-foreground border border-primary shadow-lg backdrop-blur-md animate-pulse">
-                  <span className="text-sm font-medium">Waiting for shortcut key...</span>
-                </div>
-              )}
               {minimizedForm && (
                 <MinimizedFormIndicator
                   form={minimizedForm}
