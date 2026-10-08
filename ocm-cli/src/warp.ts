@@ -1,5 +1,5 @@
 import { spawnSync } from 'node:child_process'
-import { buildRemoteAttachEnv } from './remote-context.js'
+import { buildRemoteAttachEnv, REMOTE_MANAGER_URL_ENV, REMOTE_REPO_ID_ENV, REMOTE_REPO_NAME_ENV } from './remote-context.js'
 import { repoProxyUrl } from './repo-proxy.js'
 
 export type AttachTarget = {
@@ -10,9 +10,7 @@ export type AttachTarget = {
   sessionID?: string
 }
 
-export type WarpTarget = AttachTarget & {
-  sessionID: string
-}
+export type PendingWarp = { kind: 'attach'; target: AttachTarget } | { kind: 'local' }
 
 export type AttachInvocation = {
   args: string[]
@@ -25,16 +23,18 @@ export type WarpSpawn = (
   options: { stdio: 'inherit'; env: NodeJS.ProcessEnv },
 ) => unknown
 
-let pending: WarpTarget | undefined
+const ATTACH_ENV_KEYS = ['OPENCODE_PASSWORD', REMOTE_MANAGER_URL_ENV, REMOTE_REPO_NAME_ENV, REMOTE_REPO_ID_ENV]
 
-export function setPendingWarp(target: WarpTarget): void {
-  pending = target
+let pending: PendingWarp | undefined
+
+export function setPendingWarp(warp: PendingWarp): void {
+  pending = warp
 }
 
-export function takePendingWarp(): WarpTarget | undefined {
-  const t = pending
+export function takePendingWarp(): PendingWarp | undefined {
+  const warp = pending
   pending = undefined
-  return t
+  return warp
 }
 
 export function buildAttachInvocation(target: AttachTarget): AttachInvocation {
@@ -42,15 +42,23 @@ export function buildAttachInvocation(target: AttachTarget): AttachInvocation {
   if (target.sessionID) args.push('--session', target.sessionID)
   return {
     args,
-    env: { ...process.env, OPENCODE_PASSWORD: target.token, ...buildRemoteAttachEnv(target.managerUrl, target.repoName) },
+    env: { ...process.env, OPENCODE_PASSWORD: target.token, ...buildRemoteAttachEnv(target.managerUrl, target.repoName, target.repoId) },
+  }
+}
+
+/** Builds a plain local `opencode` launch with every Manager attach variable removed. */
+export function buildLocalInvocation(env: NodeJS.ProcessEnv = process.env): AttachInvocation {
+  return {
+    args: [],
+    env: Object.fromEntries(Object.entries(env).filter(([key]) => !ATTACH_ENV_KEYS.includes(key))),
   }
 }
 
 export function runPendingWarp(spawn: WarpSpawn = spawnSync): void {
-  const target = takePendingWarp()
-  if (!target) return
+  const warp = takePendingWarp()
+  if (!warp) return
   try {
-    const { args, env } = buildAttachInvocation(target)
+    const { args, env } = warp.kind === 'attach' ? buildAttachInvocation(warp.target) : buildLocalInvocation()
     spawn('opencode', args, { stdio: 'inherit', env })
   } catch {
     void 0

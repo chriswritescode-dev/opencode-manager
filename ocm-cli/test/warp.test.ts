@@ -1,15 +1,17 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest'
-import type { WarpTarget } from '../src/warp.js'
-import { setPendingWarp, takePendingWarp, buildAttachInvocation, runPendingWarp } from '../src/warp.js'
-import { REMOTE_MANAGER_URL_ENV, REMOTE_REPO_NAME_ENV } from '../src/remote-context.js'
+import type { AttachTarget, PendingWarp } from '../src/warp.js'
+import { setPendingWarp, takePendingWarp, buildAttachInvocation, buildLocalInvocation, runPendingWarp } from '../src/warp.js'
+import { REMOTE_MANAGER_URL_ENV, REMOTE_REPO_ID_ENV, REMOTE_REPO_NAME_ENV } from '../src/remote-context.js'
 
-const sampleTarget: WarpTarget = {
+const sampleTarget: AttachTarget = {
   managerUrl: 'https://manager.example.com',
   token: 'tok_abc123',
   repoId: 42,
   sessionID: 'sess_42',
   repoName: 'my-repo',
 }
+
+const sampleWarp: PendingWarp = { kind: 'attach', target: sampleTarget }
 
 describe('buildAttachInvocation', () => {
   it('produces the server args and attach env for a target without a session', () => {
@@ -24,6 +26,7 @@ describe('buildAttachInvocation', () => {
       OPENCODE_PASSWORD: 'tok_abc123',
       [REMOTE_MANAGER_URL_ENV]: 'https://manager.example.com',
       [REMOTE_REPO_NAME_ENV]: 'my-repo',
+      [REMOTE_REPO_ID_ENV]: '42',
     })
   })
 
@@ -39,18 +42,32 @@ describe('buildAttachInvocation', () => {
   })
 })
 
+describe('buildLocalInvocation', () => {
+  it('launches plain opencode without any Manager attach variables', () => {
+    const invocation = buildLocalInvocation({
+      PATH: '/usr/bin',
+      OPENCODE_PASSWORD: 'tok',
+      [REMOTE_MANAGER_URL_ENV]: 'https://manager.example.com',
+      [REMOTE_REPO_NAME_ENV]: 'my-repo',
+      [REMOTE_REPO_ID_ENV]: '42',
+    })
+
+    expect(invocation).toEqual({ args: [], env: { PATH: '/usr/bin' } })
+  })
+})
+
 describe('setPendingWarp / takePendingWarp', () => {
   beforeEach(() => {
     takePendingWarp()
   })
 
   it('round-trips the target', () => {
-    setPendingWarp(sampleTarget)
-    expect(takePendingWarp()).toEqual(sampleTarget)
+    setPendingWarp(sampleWarp)
+    expect(takePendingWarp()).toEqual(sampleWarp)
   })
 
   it('returns undefined on second take', () => {
-    setPendingWarp(sampleTarget)
+    setPendingWarp(sampleWarp)
     takePendingWarp()
     expect(takePendingWarp()).toBeUndefined()
   })
@@ -69,7 +86,7 @@ describe('runPendingWarp', () => {
 
   it('calls spawn once with the correct args and env', () => {
     const spawn = vi.fn()
-    setPendingWarp(sampleTarget)
+    setPendingWarp(sampleWarp)
     const invocation = buildAttachInvocation(sampleTarget)
 
     runPendingWarp(spawn)
@@ -85,9 +102,18 @@ describe('runPendingWarp', () => {
     )
   })
 
+  it('spawns a local opencode for a local warp', () => {
+    const spawn = vi.fn()
+    setPendingWarp({ kind: 'local' })
+
+    runPendingWarp(spawn)
+
+    expect(spawn).toHaveBeenCalledWith('opencode', [], { stdio: 'inherit', env: buildLocalInvocation().env })
+  })
+
   it('does not spawn again on a second invocation', () => {
     const spawn = vi.fn()
-    setPendingWarp(sampleTarget)
+    setPendingWarp(sampleWarp)
 
     runPendingWarp(spawn)
     runPendingWarp(spawn)
@@ -97,7 +123,7 @@ describe('runPendingWarp', () => {
 
   it('swallows a throwing spawn without propagating', () => {
     const spawn = vi.fn(() => { throw new Error('spawn failed') })
-    setPendingWarp(sampleTarget)
+    setPendingWarp(sampleWarp)
 
     expect(() => runPendingWarp(spawn)).not.toThrow()
     expect(spawn).toHaveBeenCalledOnce()

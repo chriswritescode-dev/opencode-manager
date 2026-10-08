@@ -1,7 +1,6 @@
 import type { Context } from '@opencode/plugin/tui/context'
-import { readInstallNotice, readState } from './state.js'
-import { getToken } from './internal-token-store.js'
-import { TokenStoreError } from './token-store.js'
+import { readInstallNotice } from './state.js'
+import { resolveManagerAuth } from './manager-auth.js'
 import { fetchRepos, toRemoteRepoSummaries } from './manager-repos.js'
 import { ManagerApi, ManagerApiError } from './manager-api.js'
 import type { MirrorTargetPlanResponse } from '@opencode-manager/shared/schemas'
@@ -16,10 +15,29 @@ import { setPendingWarp, runPendingWarp } from './warp.js'
 import { pushPhaseProgress, importProgress } from './move-progress.js'
 import { warmRepoProxy } from './repo-proxy.js'
 import type { MoveProgress } from './move-progress.js'
+import { runGoalCommand } from './tui-goal.js'
+import type { GoalDialogProps } from './tui-goal.js'
+import { runMultiRunCommand } from './tui-multi-run.js'
+import type { MultiRunLaunchDialogProps, MultiRunsDialogProps } from './tui-multi-run.js'
+import { runOcmSwitch } from './tui-ocm.js'
+import type { GoalStore } from './goal-store.js'
+import type { RemoteContext } from './remote-context.js'
 
 export type MoveProgressSetter = (progress: MoveProgress | null) => void
 
-export async function setupOcm(context: Context, setMoveProgress: MoveProgressSetter): Promise<() => void> {
+export type OcmDialogs = {
+  goal: (props: GoalDialogProps) => void
+  multiRunLaunch: (props: MultiRunLaunchDialogProps) => void
+  multiRuns: (props: MultiRunsDialogProps) => void
+}
+
+export type OcmFeatures = {
+  remote: RemoteContext | undefined
+  goals: GoalStore | undefined
+  dialogs: OcmDialogs
+}
+
+export async function setupOcm(context: Context, setMoveProgress: MoveProgressSetter, features: OcmFeatures): Promise<() => void> {
   showInstallNotice(context)
   context.ui.slot({
     append: 'app',
@@ -35,6 +53,43 @@ export async function setupOcm(context: Context, setMoveProgress: MoveProgressSe
             palette: true,
             slash: { name: 'ocm-move' },
             run: () => runSessionMove(context, setMoveProgress),
+          },
+          {
+            id: 'ocm.switch',
+            title: 'Switch server',
+            description: 'Attach this TUI to an OpenCode Manager repo, or go back to local opencode',
+            group: 'OpenCode Manager',
+            palette: true,
+            slash: { name: 'ocm' },
+            run: () => runOcmSwitch(context, { remote: features.remote }),
+          },
+          {
+            id: 'ocm.goal',
+            title: 'Goal',
+            description: 'Start, pause, resume, or cancel a Manager goal for this session',
+            group: 'OpenCode Manager',
+            palette: true,
+            slash: { name: 'goal', arguments: true },
+            run: (input) =>
+              runGoalCommand(context, { remote: features.remote, store: features.goals, showDialog: features.dialogs.goal }, input),
+          },
+          {
+            id: 'ocm.multirun',
+            title: 'Multi-run',
+            description: 'Run one prompt across several models on OpenCode Manager',
+            group: 'OpenCode Manager',
+            palette: true,
+            slash: { name: 'multirun', arguments: true },
+            run: (input) =>
+              runMultiRunCommand(
+                context,
+                {
+                  remote: features.remote,
+                  showLaunchDialog: features.dialogs.multiRunLaunch,
+                  showRunsDialog: features.dialogs.multiRuns,
+                },
+                input,
+              ),
           },
         ],
       }))
@@ -116,26 +171,13 @@ async function runSessionMove(context: Context, setMoveProgress: MoveProgressSet
       return
     }
 
-    const state = readState()
-    if (!state?.managerUrl) {
-      context.ui.toast.show({ variant: 'error', message: 'No manager configured. Run `ocm login <url>` first.' })
+    const auth = await resolveManagerAuth()
+    if (!auth.ok) {
+      context.ui.toast.show({ variant: 'error', message: auth.message })
       return
     }
 
-    let token: string | null
-    try {
-      token = await getToken(state.managerUrl)
-    } catch (err) {
-      const reason = err instanceof TokenStoreError ? err.message : String(err)
-      context.ui.toast.show({ variant: 'error', message: `Token store unavailable: ${reason}` })
-      return
-    }
-    if (!token) {
-      context.ui.toast.show({ variant: 'error', message: `No token stored. Run \`ocm login ${state.managerUrl}\`.` })
-      return
-    }
-
-    const repos = await fetchRepos(state.managerUrl, token)
+    const repos = await fetchRepos(auth.managerUrl, auth.token)
     const plan = await prepareMirror(session.location.directory, toRemoteRepoSummaries(repos))
 
     if (plan.matched.length === 0) {
@@ -150,16 +192,16 @@ async function runSessionMove(context: Context, setMoveProgress: MoveProgressSet
     const matchedRepoId = matched.repoId
     const remoteRepo = repos.find((r) => r.repoId === matchedRepoId)!
 
-    await warmRepoProxy(state.managerUrl, token, matchedRepoId)
+    await warmRepoProxy(auth.managerUrl, auth.token, matchedRepoId)
 
-    const transfer = createManagerSessionTransfer(state.managerUrl, token)
+    const transfer = createManagerSessionTransfer(auth.managerUrl, auth.token)
     const blocker = await describeMoveBlocker(transfer, sessionID, session.parentID)
     if (blocker) {
       context.ui.toast.show({ variant: 'error', message: blocker })
       return
     }
 
-    const managerApi = new ManagerApi(state.managerUrl, token)
+    const managerApi = new ManagerApi(auth.managerUrl, auth.token)
     const target = await resolveMoveTarget(managerApi, matched, remoteRepo.directory, localBranch)
     const discardReasons = target.repoId === null ? [] : await describeRemoteDiscard(plan.repoRoot, managerApi, target.repoId)
 
@@ -199,8 +241,11 @@ async function runSessionMove(context: Context, setMoveProgress: MoveProgressSet
         setMoveProgress(null)
         const warp = await confirmDialog(context, { title: 'Attach to moved session?', message: 'Exit this TUI and attach to the moved session on the Manager now?' })
         if (warp) {
-          await warmRepoProxy(state.managerUrl, token, pushed.repoId)
-          setPendingWarp({ managerUrl: state.managerUrl, token, repoId: pushed.repoId, sessionID: result.sessionID, repoName: matched.name })
+          await warmRepoProxy(auth.managerUrl, auth.token, pushed.repoId)
+          setPendingWarp({
+            kind: 'attach',
+            target: { managerUrl: auth.managerUrl, token: auth.token, repoId: pushed.repoId, sessionID: result.sessionID, repoName: matched.name },
+          })
           context.keymap.dispatch('app.exit')
           return
         }

@@ -2,6 +2,8 @@ import { describe, expect, it, beforeEach, afterEach } from 'bun:test'
 import type { SessionPermissionModeService } from '../../src/services/session-permission-modes'
 import type { RepoWorkspaceService } from '../../src/services/repo-workspace'
 import type { GitAuthService } from '../../src/services/git-auth'
+import type { SessionGoalService } from '../../src/services/session-goals'
+import type { MultiRunService } from '../../src/services/multi-runs'
 import path from 'path'
 import { access, readFile, writeFile } from 'fs/promises'
 import { Hono } from 'hono'
@@ -688,7 +690,7 @@ describe('assistant-mode end-to-end', () => {
     const notificationService = new NotificationService(db)
     const settingsService = new SettingsService(db)
     const app = new Hono()
-    app.route('/api/internal', createInternalRoutes(db, scheduleService, notificationService, settingsService, createOpenCodeClient(), {} as SessionPermissionModeService, {} as unknown as RepoWorkspaceService, {} as unknown as GitAuthService))
+    app.route('/api/internal', createInternalRoutes(db, scheduleService, notificationService, settingsService, createOpenCodeClient(), {} as SessionPermissionModeService, {} as unknown as RepoWorkspaceService, {} as unknown as GitAuthService, {} as unknown as SessionGoalService, {} as unknown as MultiRunService))
 
     const unauth = await app.request('/api/internal/schedules/all')
     expect(unauth.status).toBe(401)

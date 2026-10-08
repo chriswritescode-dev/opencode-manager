@@ -9,6 +9,8 @@ import type { OpenCodeClient } from '../../src/services/opencode/client'
 import type { SessionPermissionModeService } from '../../src/services/session-permission-modes'
 import type { RepoWorkspaceService } from '../../src/services/repo-workspace'
 import type { GitAuthService } from '../../src/services/git-auth'
+import type { SessionGoalService } from '../../src/services/session-goals'
+import type { MultiRunService } from '../../src/services/multi-runs'
 import type { Repo } from '../../src/types/repo'
 
 const mockDb = {
@@ -158,7 +160,7 @@ describe('internal-sessions routes', () => {
     app = new Hono()
     app.route(
       '/api/internal',
-      createInternalRoutes(mockDb, scheduleService, notificationService, settingsService, openCodeClient, permissionModes, {} as unknown as RepoWorkspaceService, {} as unknown as GitAuthService),
+      createInternalRoutes(mockDb, scheduleService, notificationService, settingsService, openCodeClient, permissionModes, {} as unknown as RepoWorkspaceService, {} as unknown as GitAuthService, {} as unknown as SessionGoalService, {} as unknown as MultiRunService),
     )
     token = 'test-internal-token'
   })

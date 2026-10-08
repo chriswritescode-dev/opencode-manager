@@ -1,6 +1,6 @@
 import { describe, it, expect, vi } from 'vitest'
 import type { Context } from '@opencode/plugin/tui/context'
-import { confirmDialog, selectDialog } from '../src/tui-dialogs.js'
+import { confirmDialog, selectDialog, slashArgument } from '../src/tui-dialogs.js'
 
 function createFakeContext() {
   const confirm = vi.fn()
@@ -53,5 +53,27 @@ describe('selectDialog', () => {
     select.mockResolvedValue(undefined)
 
     expect(await selectDialog(context, 'Pick', [{ title: 'X', value: 42 }])).toBeUndefined()
+  })
+})
+
+describe('slashArgument', () => {
+  it('resolves an empty string for undefined input', () => {
+    expect(slashArgument(undefined, 'goal')).toBe('')
+  })
+
+  it('strips a leading slash token and trims the rest', () => {
+    expect(slashArgument('/goal  fix it ', 'goal')).toBe('fix it')
+  })
+
+  it('returns the trimmed argument when no slash token is present', () => {
+    expect(slashArgument('  fix it  ', 'goal')).toBe('fix it')
+  })
+
+  it('only strips a whole-token match', () => {
+    expect(slashArgument('/goalie x', 'goal')).toBe('/goalie x')
+  })
+
+  it('resolves an empty string when only the slash token is present', () => {
+    expect(slashArgument('/goal', 'goal')).toBe('')
   })
 })

@@ -1,4 +1,4 @@
-import type { SessionGoalStatus, SessionGoalStopReason } from '../schemas/session-goals'
+import type { SessionGoal, SessionGoalStatus, SessionGoalStopReason } from '../schemas/session-goals'
 
 const GOAL_OUTCOME_TITLES: Record<SessionGoalStatus, string> = {
   active: 'Goal active',
@@ -25,6 +25,15 @@ export function getGoalOutcomeTitle(status: SessionGoalStatus): string {
 
 export function getGoalStopReasonLabel(stopReason: SessionGoalStopReason): string {
   return GOAL_STOP_REASON_LABELS[stopReason]
+}
+
+export function getGoalTurnLabel(goal: Pick<SessionGoal, 'continuationCount' | 'maxContinuations'>): string {
+  return `Turn ${goal.continuationCount}/${goal.maxContinuations}`
+}
+
+export function getGoalTokenLabel(goal: Pick<SessionGoal, 'tokensUsed' | 'tokenBudget'>): string | null {
+  if (goal.tokenBudget === null) return null
+  return `${goal.tokensUsed.toLocaleString()}/${goal.tokenBudget.toLocaleString()} tokens`
 }
 
 const PERMISSION_LABELS: Record<string, string> = {

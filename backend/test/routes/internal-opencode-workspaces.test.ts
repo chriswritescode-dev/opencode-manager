@@ -2,6 +2,8 @@ import { describe, it, expect, beforeEach, vi } from 'vitest'
 import type { SessionPermissionModeService } from '../../src/services/session-permission-modes'
 import type { RepoWorkspaceService } from '../../src/services/repo-workspace'
 import type { GitAuthService } from '../../src/services/git-auth'
+import type { SessionGoalService } from '../../src/services/session-goals'
+import type { MultiRunService } from '../../src/services/multi-runs'
 import { Hono } from 'hono'
 import type { Database } from 'bun:sqlite'
 import { createInternalRoutes } from '../../src/routes/internal'
@@ -85,7 +87,7 @@ describe('internal-opencode-workspaces routes', () => {
       forwardRaw: vi.fn(),
     } as unknown as OpenCodeClient
     app = new Hono()
-    app.route('/api/internal', createInternalRoutes(mockDb, scheduleService, notificationService, settingsService, openCodeClient, {} as SessionPermissionModeService, {} as unknown as RepoWorkspaceService, {} as unknown as GitAuthService))
+    app.route('/api/internal', createInternalRoutes(mockDb, scheduleService, notificationService, settingsService, openCodeClient, {} as SessionPermissionModeService, {} as unknown as RepoWorkspaceService, {} as unknown as GitAuthService, {} as unknown as SessionGoalService, {} as unknown as MultiRunService))
     token = 'test-internal-token'
   })
 

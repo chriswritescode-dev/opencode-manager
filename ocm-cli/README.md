@@ -144,6 +144,39 @@ on the Manager immediately. Use it from inside an OpenCode session after
 `ocm login` and after the repo already exists on the Manager
 (`ocm push --create` if needed).
 
+`/ocm` switches this TUI to another server, the same way the `ocm` CLI picks
+one. In a local TUI it finds the Manager repo that matches the current
+directory (by git origin) and asks to attach to it; when no repo or several
+repos match, it shows a picker of the Manager's ready repos. In a TUI that is
+already attached, the picker offers the other Manager repos and **Local
+opencode**. Switching exits the TUI and reattaches; the current session stays
+where it is (use `/ocm-move` to bring a local session along).
+
+The plugin also registers two Manager-backed commands, both of which need an
+attached Manager repo through `ocm`:
+
+- `/goal [objective]` starts a Manager-driven goal on the current top-level
+  session and sends the objective as the next message. With no objective, a
+  dialog asks for it, plus optional max turns and token budget (blank uses the
+  Manager defaults). Scheduled runs and subagent sessions are rejected by the
+  Manager. While a goal is open, a status line above the composer shows its
+  turn and token usage, and a toast reports the outcome. Running `/goal` while
+  a goal is open shows its live status with `p` to pause or resume and `x`
+  (twice) to cancel.
+- `/multirun [prompt]` opens a launch dialog: prompt, name, a filterable model
+  checklist (up to 5), isolated worktrees or the shared repo directory, and an
+  optional base ref. `ctrl+s` launches, and the started sessions open in tabs.
+  With no prompt, `/multirun` opens the runs browser for the attached repo:
+  pick a run, open entry or fusion sessions, discard entries (`d` twice), select
+  results with `space`, and press `f` to fuse them with a synthesis model. On
+  the run list, `f` fuses every started result of the highlighted run. A fusion
+  always runs in a new worktree.
+
+Both commands need an OpenCode Manager release that exposes
+`/api/internal/session-goals` and `/api/internal/multi-runs`. An older Manager
+answers these requests with `404 Not Found`, and the TUI reports that the
+Manager must be upgraded.
+
 Enable it in `~/.config/opencode/cli.json`:
 
 ```jsonc

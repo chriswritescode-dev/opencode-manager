@@ -289,6 +289,14 @@ describe('ocm-manager plugin', () => {
       ['DELETE', '/settings'],
       ['PUT', '/opencode-config'],
       ['DELETE', '/sessions/abc'],
+      ['GET', '/session-goals'],
+      ['POST', '/session-goals'],
+      ['POST', '/session-goals/1/pause'],
+      ['POST', '/session-goals/1/cancel'],
+      ['GET', '/multi-runs'],
+      ['POST', '/multi-runs'],
+      ['POST', '/multi-runs/1/fusions'],
+      ['POST', '/multi-runs/1/entries/2/discard'],
     ] as const
 
     for (const [method, path] of deniedRoutes) {
