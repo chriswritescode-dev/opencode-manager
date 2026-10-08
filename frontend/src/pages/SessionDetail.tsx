@@ -249,7 +249,7 @@ export function SessionDetail() {
 
   const messagesContentVersion = useMemo(() => getMessagesContentVersion(messages), [messages]);
 
-  const { scrollToBottom } = useAutoScroll({
+  const { scrollToBottom, scrollByUser } = useAutoScroll({
     containerRef: messageContainerRef,
     messages,
     sessionId,
@@ -590,8 +590,8 @@ export function SessionDetail() {
   const scrollMessagesByHalfPage = useCallback((direction: 1 | -1) => {
     const container = messageContainerRef.current;
     if (!container) return;
-    container.scrollBy({ top: direction * container.clientHeight / 2 });
-  }, []);
+    scrollByUser((direction * container.clientHeight) / 2);
+  }, [scrollByUser]);
 
   useShortcutActions({
     selectModel: handleOpenModelDialog,

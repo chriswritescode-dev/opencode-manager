@@ -988,8 +988,7 @@ if (isIOS && isSecureContext && navigator.clipboard && navigator.clipboard.read)
   const handleKeyDown = (e: KeyboardEvent<HTMLTextAreaElement>) => {
     if (isBashMode && e.key === 'Escape') {
       e.preventDefault()
-      setIsBashMode(false)
-      setPrompt('')
+      resetPrompt()
       return
     }
 
@@ -1070,12 +1069,7 @@ if (isIOS && isSecureContext && navigator.clipboard && navigator.clipboard.read)
       }
       handleSubmit()
     } else if (e.key === 'Escape' && !isSessionActive) {
-      closeSuggestions()
-      setPrompt('')
-      revokeBlobUrls(imageAttachments)
-      setImageAttachments([])
-      resetVoiceGestureState()
-      clearSTT()
+      resetPrompt()
     }
   }
 
@@ -1108,6 +1102,21 @@ if (isIOS && isSecureContext && navigator.clipboard && navigator.clipboard.read)
     setMentionQuery('')
     setMentionRange(null)
   }, [])
+
+  const resetPrompt = useCallback(() => {
+    setPrompt('')
+    setAttachedFiles(new Map())
+    revokeBlobUrls(imageAttachments)
+    setImageAttachments([])
+    closeSuggestions()
+    setIsBashMode(false)
+    resetVoiceGestureState()
+    if (isRecording) {
+      abortRecording()
+    } else {
+      clearSTT()
+    }
+  }, [imageAttachments, clearSTT, isRecording, abortRecording, resetVoiceGestureState, closeSuggestions])
 
   const updateSuggestionTriggers = (value: string, cursorPosition: number) => {
     const mentionTrigger = detectMentionTrigger(value, cursorPosition)
@@ -1272,18 +1281,7 @@ if (isIOS && isSecureContext && navigator.clipboard && navigator.clipboard.read)
       textareaRef.current?.focus()
     },
     clearPrompt: () => {
-      setPrompt('')
-      setAttachedFiles(new Map())
-      revokeBlobUrls(imageAttachments)
-      setImageAttachments([])
-      closeSuggestions()
-      setIsBashMode(false)
-      resetVoiceGestureState()
-      if (isRecording) {
-        abortRecording()
-      } else {
-        clearSTT()
-      }
+      resetPrompt()
       textareaRef.current?.focus()
     },
     triggerFileUpload: openFilePicker,
@@ -1292,7 +1290,7 @@ if (isIOS && isSecureContext && navigator.clipboard && navigator.clipboard.read)
     },
     cycleAgent: handleCycleAgent,
     cycleVariant: handleCycleVariant,
-  }), [imageAttachments, clearSTT, isRecording, abortRecording, resetVoiceGestureState, closeSuggestions, openFilePicker, handleCycleAgent, handleCycleVariant])
+  }), [resetPrompt, openFilePicker, handleCycleAgent, handleCycleVariant])
 
   const commandActionsWithPrompt = useMemo<CommandActions>(
     () => ({

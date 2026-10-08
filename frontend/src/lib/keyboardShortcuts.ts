@@ -18,8 +18,6 @@ const KEY_ALIASES: Record<string, string> = {
   Escape: 'Esc',
 }
 
-const LEGACY_DEFAULT_DIRECT_SHORTCUTS = ['submit', 'abort']
-
 interface ShortcutPreferences {
   leaderKey?: string
   directShortcuts?: string[]
@@ -82,27 +80,61 @@ export function hasCommandModifier(shortcut: string): boolean {
 }
 
 /**
- * The direct-shortcut list, upgrading the untouched legacy default and adding any default direct action that the stored
- * shortcut map does not yet know about, so newly added direct defaults reach users who customized their list. When
- * `storedShortcuts` is omitted the list is returned unchanged apart from the legacy upgrade.
+ * The built-in shortcut defaults for the current platform: the shared table plus the macOS-only clear-prompt binding,
+ * which shared cannot express because it must contain no platform detection.
+ */
+export function getDefaultKeyboardShortcuts(): Record<string, string> {
+  return {
+    ...DEFAULT_KEYBOARD_SHORTCUTS,
+    clearPrompt: isMac ? 'Ctrl+C' : '',
+  }
+}
+
+/**
+ * The direct-shortcut list, adding any default direct action that the stored shortcut map does not yet know about, so
+ * newly added direct defaults reach users who customized their list. A default direct action that is already a key of
+ * the stored map is treated as stored, never re-added. When `storedShortcuts` is omitted the list is returned unchanged.
  */
 export function resolveDirectShortcuts(directShortcuts: string[] | undefined, storedShortcuts?: Record<string, string>): string[] {
   if (!directShortcuts) return DEFAULT_DIRECT_SHORTCUTS
-  const isLegacyDefault = directShortcuts.length === LEGACY_DEFAULT_DIRECT_SHORTCUTS.length
-    && LEGACY_DEFAULT_DIRECT_SHORTCUTS.every((action) => directShortcuts.includes(action))
-  const resolved = isLegacyDefault ? DEFAULT_DIRECT_SHORTCUTS : directShortcuts
-  if (!storedShortcuts) return resolved
+  if (!storedShortcuts) return directShortcuts
   const additions = DEFAULT_DIRECT_SHORTCUTS.filter(
-    (action) => !(action in storedShortcuts) && !resolved.includes(action),
+    (action) => !(action in storedShortcuts) && !directShortcuts.includes(action),
   )
-  return additions.length > 0 ? [...resolved, ...additions] : resolved
+  return additions.length > 0 ? [...directShortcuts, ...additions] : directShortcuts
+}
+
+function bindingSignature(action: string, keys: string, directShortcuts: string[]): string {
+  const kind = directShortcuts.includes(action) ? 'direct' : 'leader'
+  return `${kind}:${normalizeShortcut(keys)}`
+}
+
+/**
+ * The effective shortcut map: stored bindings always win, defaults fill the actions the user never stored, and a default
+ * for an action outside the stored map is dropped to unbound when its normalized key and leader/direct kind would
+ * collide with a binding that is stored.
+ */
+function resolveShortcutMap(stored: Record<string, string>, directShortcuts: string[]): Record<string, string> {
+  const resolved: Record<string, string> = { ...stored }
+  const storedBindings = new Set(
+    Object.entries(stored)
+      .filter(([, keys]) => Boolean(keys))
+      .map(([action, keys]) => bindingSignature(action, keys, directShortcuts)),
+  )
+  for (const [action, defaultKeys] of Object.entries(getDefaultKeyboardShortcuts())) {
+    if (action in stored) continue
+    const collides = Boolean(defaultKeys) && storedBindings.has(bindingSignature(action, defaultKeys, directShortcuts))
+    resolved[action] = collides ? '' : defaultKeys
+  }
+  return resolved
 }
 
 export function resolveShortcutBindings(preferences: ShortcutPreferences | undefined): ShortcutBindings {
+  const directShortcuts = resolveDirectShortcuts(preferences?.directShortcuts, preferences?.keyboardShortcuts)
   return {
     leaderKey: normalizeShortcut(preferences?.leaderKey || DEFAULT_LEADER_KEY),
-    shortcuts: { ...DEFAULT_KEYBOARD_SHORTCUTS, ...preferences?.keyboardShortcuts },
-    directShortcuts: resolveDirectShortcuts(preferences?.directShortcuts, preferences?.keyboardShortcuts),
+    shortcuts: resolveShortcutMap(preferences?.keyboardShortcuts ?? {}, directShortcuts),
+    directShortcuts,
   }
 }
 

@@ -3,8 +3,7 @@ import { useSettings } from '@/hooks/useSettings'
 import { useMobile } from '@/hooks/useMobile'
 import { Loader2, X } from 'lucide-react'
 import { Button } from '@/components/ui/button'
-import { DEFAULT_KEYBOARD_SHORTCUTS, DEFAULT_LEADER_KEY } from '@/api/types/settings'
-import { formatEventModifiers, formatShortcutEvent, isModifierOnlyEvent, normalizeShortcut, resolveDirectShortcuts } from '@/lib/keyboardShortcuts'
+import { formatEventModifiers, formatShortcutEvent, isModifierOnlyEvent, normalizeShortcut, resolveShortcutBindings } from '@/lib/keyboardShortcuts'
 import { applyTuiKeybindImport, parseTuiKeybindConfig } from '@/lib/tuiKeybindImport'
 import { showToast } from '@/lib/toast'
 
@@ -131,14 +130,14 @@ export function KeyboardShortcuts() {
   const [tempLeaderKey, setTempLeaderKey] = useState<string | null>(null)
   const [currentKeys, setCurrentKeys] = useState<string>('')
 
-  const leaderKey = tempLeaderKey ?? preferences?.leaderKey ?? DEFAULT_LEADER_KEY
-  const directShortcuts = resolveDirectShortcuts(preferences?.directShortcuts, preferences?.keyboardShortcuts)
+  const bindings = useMemo(() => resolveShortcutBindings(preferences), [preferences])
+  const leaderKey = tempLeaderKey ?? bindings.leaderKey
+  const directShortcuts = bindings.directShortcuts
 
   const shortcuts = useMemo<Record<string, string>>(() => ({
-    ...DEFAULT_KEYBOARD_SHORTCUTS,
-    ...preferences?.keyboardShortcuts,
+    ...bindings.shortcuts,
     ...tempShortcuts
-  }), [preferences?.keyboardShortcuts, tempShortcuts])
+  }), [bindings.shortcuts, tempShortcuts])
 
   const shortcutGroups = useMemo(() => buildShortcutGroups(shortcuts), [shortcuts])
 

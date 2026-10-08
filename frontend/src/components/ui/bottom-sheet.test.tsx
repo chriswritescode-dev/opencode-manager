@@ -1,4 +1,5 @@
 import { render, screen, fireEvent, waitFor } from '@testing-library/react'
+import { useState } from 'react'
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest'
 import { stubMatchMedia } from '@/test/test-utils'
 import { BottomSheet, BottomSheetHeader, BottomSheetContent } from './bottom-sheet'
@@ -20,6 +21,18 @@ function renderSheet(isOpen: boolean) {
         <button type="button">inside</button>
       </BottomSheet>
     </>,
+  )
+}
+
+function AutoFocusSheetHost() {
+  const [open, setOpen] = useState(false)
+  return (
+    <>
+      <button type="button" onClick={() => setOpen(true)}>open sheet</button>
+      <BottomSheet isOpen={open} onClose={() => setOpen(false)} ariaLabel="Auto focus sheet">
+        <input aria-label="sheet input" autoFocus />
+      </BottomSheet>
+    </>
   )
 }
 
@@ -199,6 +212,49 @@ describe('BottomSheet', () => {
     )
 
     expect(screen.getByLabelText('prompt')).not.toHaveFocus()
+  })
+
+  it('restores focus to the opener when an autoFocus child takes focus on open', async () => {
+    stubMatchMedia(true)
+    render(<AutoFocusSheetHost />)
+    const opener = screen.getByRole('button', { name: 'open sheet' })
+    opener.focus()
+
+    fireEvent.click(opener)
+    expect(screen.getByLabelText('sheet input')).toHaveFocus()
+
+    fireEvent.keyDown(document, { key: 'Escape' })
+
+    await waitFor(() => expect(opener).toHaveFocus())
+  })
+
+  it('captures the opener when mounted already open and restores it on close', () => {
+    stubMatchMedia(true)
+    const { rerender } = render(
+      <button type="button">opener</button>,
+    )
+    const opener = screen.getByRole('button', { name: 'opener' })
+    opener.focus()
+
+    rerender(
+      <>
+        <button type="button">opener</button>
+        <BottomSheet isOpen onClose={() => {}} ariaLabel="Mounted open sheet">
+          <button type="button">inside</button>
+        </BottomSheet>
+      </>,
+    )
+
+    rerender(
+      <>
+        <button type="button">opener</button>
+        <BottomSheet isOpen={false} onClose={() => {}} ariaLabel="Mounted open sheet">
+          <button type="button">inside</button>
+        </BottomSheet>
+      </>,
+    )
+
+    expect(opener).toHaveFocus()
   })
 })
 

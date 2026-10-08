@@ -7,6 +7,7 @@ import type { FormAnswer, FormField, FormInfo } from '@opencode-manager/shared/o
 import { buildAnswer, hasMissingAnswers, visibleFields } from '@/lib/formFields'
 import { cn } from '@/lib/utils'
 import { showToast } from '@/lib/toast'
+import { useShortcutActions } from '@/contexts/KeyboardShortcutsContext'
 
 type AnswerableFormField = Exclude<FormField, { type: 'external' }>
 
@@ -136,6 +137,10 @@ export function FormPrompt({ form, onReply, onCancel, onMinimize }: FormPromptPr
     onMinimize?.()
   }
 
+  useShortcutActions({
+    abort: !isMinimized && !expandedCustom ? handleMinimize : undefined,
+  })
+
   const handleSubmit = async () => {
     if (!canSubmit) return
     setIsSubmitting(true)
@@ -161,6 +166,7 @@ export function FormPrompt({ form, onReply, onCancel, onMinimize }: FormPromptPr
 
   useEffect(() => {
     const handleKeyDown = (e: KeyboardEvent) => {
+      if (e.defaultPrevented) return
       if (e.key === 'Escape' && !isMinimized && !expandedCustom) {
         setIsMinimized(true)
         onMinimize?.()

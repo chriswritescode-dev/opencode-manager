@@ -30,6 +30,13 @@ function createScrollContainer() {
     },
   })
 
+  Object.defineProperty(div, 'scrollBy', {
+    configurable: true,
+    value: (options?: ScrollToOptions) => {
+      div.scrollTop = scrollTopValue + (options?.top ?? 0)
+    },
+  })
+
   return {
     div,
     setScrollHeight: (value: number) => {
@@ -365,6 +372,45 @@ describe('useAutoScroll', () => {
     })
 
     expect(containerHarness.getScrollTop()).toBe(100)
+  })
+
+  it('does not scroll to bottom on content update after a half-page scroll up', () => {
+    const messages = [createMessage('1', 'user'), createMessage('2', 'assistant')]
+    const { renderResult, containerHarness, onScrollStateChange } = setupHook(messages)
+
+    act(() => {
+      vi.advanceTimersByTime(100)
+    })
+
+    const bottomPosition = containerHarness.div.scrollHeight - containerHarness.div.clientHeight
+    expect(containerHarness.getScrollTop()).toBe(bottomPosition)
+
+    act(() => {
+      renderResult.result.current.scrollByUser(-containerHarness.div.clientHeight / 2)
+    })
+
+    const halfPagePosition = containerHarness.getScrollTop()
+    expect(halfPagePosition).toBe(bottomPosition - containerHarness.div.clientHeight / 2)
+    expect(onScrollStateChange).toHaveBeenCalledWith(true)
+
+    act(() => {
+      vi.advanceTimersByTime(400)
+    })
+
+    containerHarness.setScrollHeight(containerHarness.div.scrollHeight + 200)
+
+    act(() => {
+      renderResult.rerender({
+        containerRef: { current: containerHarness.div },
+        messages,
+        sessionId: 'session-1',
+        contentVersion: messages.length + 1,
+        onScrollStateChange,
+      })
+      vi.advanceTimersByTime(100)
+    })
+
+    expect(containerHarness.getScrollTop()).toBe(halfPagePosition)
   })
 
   it('shows scroll button when streaming growth carries disengaged user past threshold', () => {

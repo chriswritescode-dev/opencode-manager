@@ -1,4 +1,5 @@
 import { render, screen, fireEvent, waitFor } from '@testing-library/react'
+import { useState } from 'react'
 import { describe, it, expect, vi, afterEach } from 'vitest'
 import { stubMatchMedia } from '@/test/test-utils'
 import { SideDrawer, SideDrawerHeader, SideDrawerContent } from './side-drawer'
@@ -11,6 +12,18 @@ function renderDrawer(isOpen: boolean) {
         <button type="button">inside</button>
       </SideDrawer>
     </>,
+  )
+}
+
+function AutoFocusDrawerHost() {
+  const [open, setOpen] = useState(false)
+  return (
+    <>
+      <button type="button" onClick={() => setOpen(true)}>open drawer</button>
+      <SideDrawer isOpen={open} onClose={() => setOpen(false)} ariaLabel="Auto focus drawer">
+        <input aria-label="drawer input" autoFocus />
+      </SideDrawer>
+    </>
   )
 }
 
@@ -120,6 +133,20 @@ describe('SideDrawer', () => {
     )
 
     expect(screen.getByLabelText('prompt')).toHaveFocus()
+  })
+
+  it('restores focus to the opener when an autoFocus child takes focus on open', async () => {
+    stubMatchMedia(true)
+    render(<AutoFocusDrawerHost />)
+    const opener = screen.getByRole('button', { name: 'open drawer' })
+    opener.focus()
+
+    fireEvent.click(opener)
+    expect(screen.getByLabelText('drawer input')).toHaveFocus()
+
+    fireEvent.keyDown(document, { key: 'Escape' })
+
+    await waitFor(() => expect(opener).toHaveFocus())
   })
 })
 

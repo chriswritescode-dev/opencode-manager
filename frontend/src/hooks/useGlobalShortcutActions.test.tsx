@@ -47,6 +47,11 @@ function pressKey(init: KeyboardEventInit) {
   return event
 }
 
+function pressLeaderFollowUp(key: string) {
+  pressKey({ key: 'o', ctrlKey: true })
+  pressKey({ key })
+}
+
 describe('useGlobalShortcutActions', () => {
   let queryClient: QueryClient
 
@@ -81,7 +86,7 @@ describe('useGlobalShortcutActions', () => {
   it('opens the terminal dialog on the assistant host from the root route', async () => {
     const { location } = renderHarness('/')
 
-    pressKey({ key: '`', ctrlKey: true })
+    pressLeaderFollowUp('t')
 
     await waitFor(() => expect(location()).toBe('/assistant?dialog=terminal'))
   })
@@ -89,7 +94,7 @@ describe('useGlobalShortcutActions', () => {
   it('navigates to the nearest repo host from a repo sub-route without the tool', async () => {
     const { location } = renderHarness('/repos/5/schedules')
 
-    pressKey({ key: '`', ctrlKey: true })
+    pressLeaderFollowUp('t')
 
     await waitFor(() => expect(location()).toBe('/repos/5?dialog=terminal'))
   })
@@ -97,10 +102,10 @@ describe('useGlobalShortcutActions', () => {
   it('toggles the docked panel on and off when the route hosts the tool', async () => {
     const { location } = renderHarness('/repos/5')
 
-    pressKey({ key: '`', ctrlKey: true })
+    pressLeaderFollowUp('t')
     await waitFor(() => expect(location()).toBe('/repos/5?panel=terminal'))
 
-    pressKey({ key: '`', ctrlKey: true })
+    pressLeaderFollowUp('t')
     await waitFor(() => expect(location()).toBe('/repos/5'))
   })
 
@@ -108,7 +113,7 @@ describe('useGlobalShortcutActions', () => {
     mocks.useMobile.mockReturnValue(true)
     const { location } = renderHarness('/repos/5')
 
-    pressKey({ key: '`', ctrlKey: true })
+    pressLeaderFollowUp('t')
 
     await waitFor(() => expect(location()).toBe('/repos/5?dialog=terminal'))
   })

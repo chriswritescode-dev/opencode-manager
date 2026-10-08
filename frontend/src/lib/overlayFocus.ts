@@ -1,7 +1,6 @@
 import { FINE_POINTER_MEDIA_QUERY } from '@/hooks/useMediaQuery'
+import { PROMPT_INPUT_SELECTOR, isPromptInput, isTextEntryElement } from '@/lib/domTargets'
 
-const TEXT_FIELD_SELECTOR = 'input, textarea, [contenteditable="true"]'
-const PROMPT_INPUT_SELECTOR = 'textarea[data-prompt-input]'
 const OPEN_OVERLAY_SELECTOR = '[role="dialog"][data-state="open"], [role="alertdialog"][data-state="open"]'
 
 /**
@@ -21,12 +20,9 @@ function isFinePointer(): boolean {
   )
 }
 
-function isTextField(element: Element): boolean {
-  return element.matches(TEXT_FIELD_SELECTOR)
-}
-
-function isDisabledTextField(element: HTMLElement): boolean {
-  return (element instanceof HTMLInputElement || element instanceof HTMLTextAreaElement) && element.disabled
+function focusElement(el: HTMLElement): boolean {
+  el.focus({ preventScroll: true })
+  return document.activeElement === el
 }
 
 function isInside(element: Element, container: Element | null): boolean {
@@ -47,6 +43,14 @@ function findPromptInput(): HTMLTextAreaElement | null {
 }
 
 /**
+ * Returns whether any dialog or alertdialog overlay is currently open.
+ */
+export function hasOpenOverlay(): boolean {
+  if (typeof document === 'undefined') return false
+  return document.querySelector(OPEN_OVERLAY_SELECTOR) !== null
+}
+
+/**
  * Moves focus after an overlay closes, preferring the chat prompt on desktop while leaving
  * touch devices untouched so the on-screen keyboard stays closed.
  *
@@ -59,40 +63,38 @@ export function restoreOverlayFocus(returnFocus: HTMLElement | null, closing: El
   const openOverlays = findOpenOverlays(closing)
 
   if (openOverlays.length > 0) {
-    if (!returnFocus?.isConnected) return false
-    if (!openOverlays.some((overlay) => overlay.contains(returnFocus))) return false
-    if (isTextField(returnFocus) && !isDesktop) return false
-    returnFocus.focus({ preventScroll: true })
-    return true
+    const target = returnFocus
+    return Boolean(
+      target?.isConnected &&
+        openOverlays.some((overlay) => overlay.contains(target)) &&
+        (isDesktop || !isTextEntryElement(target)) &&
+        focusElement(target),
+    )
   }
 
   if (
     isDesktop &&
     returnFocus?.isConnected &&
-    isTextField(returnFocus) &&
-    !returnFocus.matches(PROMPT_INPUT_SELECTOR) &&
-    !isDisabledTextField(returnFocus) &&
-    !isInside(returnFocus, closing)
+    isTextEntryElement(returnFocus) &&
+    !isPromptInput(returnFocus) &&
+    !isInside(returnFocus, closing) &&
+    focusElement(returnFocus)
   ) {
-    returnFocus.focus({ preventScroll: true })
     return true
   }
 
   if (isDesktop) {
     const prompt = findPromptInput()
-    if (prompt) {
-      prompt.focus({ preventScroll: true })
-      return true
-    }
+    if (prompt && focusElement(prompt)) return true
   }
 
   if (
     returnFocus?.isConnected &&
     returnFocus !== document.body &&
     !isInside(returnFocus, closing) &&
-    !(isTextField(returnFocus) && !isDesktop)
+    !(isTextEntryElement(returnFocus) && !isDesktop) &&
+    focusElement(returnFocus)
   ) {
-    returnFocus.focus({ preventScroll: true })
     return true
   }
 

@@ -3,6 +3,8 @@ import { createContext, useCallback, useContext, useEffect, useRef, useState, ty
 import { useSettings } from '@/hooks/useSettings'
 import type { KeyboardShortcutAction } from '@/api/types/settings'
 import { findShortcutAction, formatShortcutEvent, hasCommandModifier, resolveShortcutBindings } from '@/lib/keyboardShortcuts'
+import { isPromptInput, isTextEntryElement } from '@/lib/domTargets'
+import { hasOpenOverlay } from '@/lib/overlayFocus'
 
 const LEADER_TIMEOUT = 2000
 
@@ -19,15 +21,9 @@ interface ShortcutRegistry {
 
 const KeyboardShortcutsRegistryContext = createContext<ShortcutRegistry | null>(null)
 
-function isTextInput(target: HTMLElement): boolean {
-  return target.tagName === 'INPUT' || target.tagName === 'TEXTAREA' || target.isContentEditable
-}
-
 const PROMPT_ONLY_DIRECT_ACTIONS: ReadonlySet<string> = new Set(['toggleMode', 'clearPrompt'])
 
-function isPromptInput(target: HTMLElement): boolean {
-  return target.hasAttribute('data-prompt-input')
-}
+const HALF_PAGE_DIRECT_ACTIONS: ReadonlySet<string> = new Set(['halfPageUp', 'halfPageDown'])
 
 function typesCharacter(shortcut: string): boolean {
   return !hasCommandModifier(shortcut) && /(^|\+).$/.test(shortcut)
@@ -36,13 +32,15 @@ function typesCharacter(shortcut: string): boolean {
 /**
  * Whether a direct shortcut may run for this focus target. Prompt-only actions (agent cycling, prompt clearing) run only
  * from the prompt and never on a key that types a character. `submit` runs only from the prompt, so a submit bound to
- * plain Enter sends the prompt without hijacking Enter on buttons or other fields; `abort` runs from the prompt or with
- * no text field focused; other text inputs only accept modified shortcuts.
+ * plain Enter sends the prompt without hijacking Enter on buttons or other fields. Half-page scrolling runs only from the
+ * prompt or a non-text target, so it never hijacks Ctrl+U/Ctrl+D inside another text field. `abort` runs from the prompt
+ * or with no text field focused; other text inputs only accept modified shortcuts.
  */
 function isDirectActionAllowed(action: string, shortcut: string, target: HTMLElement): boolean {
   if (PROMPT_ONLY_DIRECT_ACTIONS.has(action)) return isPromptInput(target) && !typesCharacter(shortcut)
   if (action === 'submit') return isPromptInput(target)
-  if (!isTextInput(target)) return true
+  if (HALF_PAGE_DIRECT_ACTIONS.has(action)) return isPromptInput(target) || !isTextEntryElement(target)
+  if (!isTextEntryElement(target)) return true
   if (action === 'abort') return isPromptInput(target)
   return hasCommandModifier(shortcut)
 }
@@ -89,6 +87,7 @@ export function KeyboardShortcutsProvider({ children }: { children: ReactNode })
 
   const runAction = useCallback((action: string | undefined, e: KeyboardEvent): boolean => {
     if (!action) return false
+    if (action === 'abort' && hasOpenOverlay()) return false
     const handler = findHandler(registryRef.current, action)
     if (!handler) return false
     e.preventDefault()
@@ -112,7 +111,7 @@ export function KeyboardShortcutsProvider({ children }: { children: ReactNode })
         return runAction(findShortcutAction(bindings, shortcut, false), e)
       }
 
-      if (shortcut === bindings.leaderKey && (!isTextInput(target) || hasCommandModifier(shortcut))) {
+      if (shortcut === bindings.leaderKey && (!isTextEntryElement(target) || hasCommandModifier(shortcut))) {
         e.preventDefault()
         setLeader(true)
         return true
@@ -120,6 +119,7 @@ export function KeyboardShortcutsProvider({ children }: { children: ReactNode })
 
       const directAction = findShortcutAction(bindings, shortcut, true)
       if (!directAction) return false
+      if (isTerminalTarget(e.target) && directAction !== 'toggleTerminal') return false
       if (!isDirectActionAllowed(directAction, shortcut, target)) return false
       return runAction(directAction, e)
     }

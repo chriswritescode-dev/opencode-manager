@@ -5,7 +5,7 @@ import { KeyboardShortcutsProvider, useShortcutActions, type ShortcutActions } f
 
 const { preferences } = vi.hoisted(() => ({
   preferences: {
-    leaderKey: 'Ctrl+O',
+    leaderKey: 'Ctrl+X',
     keyboardShortcuts: { submit: 'Ctrl+Enter', abort: 'Escape', newSession: 'N' } as Record<string, string>,
     directShortcuts: ['submit', 'abort'],
   },
@@ -66,21 +66,21 @@ describe('KeyboardShortcutsProvider', () => {
     renderProvider(<ActionLayer actions={{ newSession }} />)
     const prompt = mountElement('textarea', { 'data-prompt-input': '' })
 
-    expect(pressKey(prompt, { key: 'o', ctrlKey: true }).defaultPrevented).toBe(true)
+    expect(pressKey(prompt, { key: 'x', ctrlKey: true }).defaultPrevented).toBe(true)
     const followUp = pressKey(prompt, { key: 'n' })
 
     expect(newSession).toHaveBeenCalledTimes(1)
     expect(followUp.defaultPrevented).toBe(true)
   })
 
-  it('applies new default actions as direct shortcuts for users with legacy stored preferences', () => {
-    const toggleTerminal = vi.fn()
-    renderProvider(<ActionLayer actions={{ toggleTerminal }} />)
+  it('applies new default direct actions for users with stored preferences that predate them', () => {
+    const variantCycle = vi.fn()
+    renderProvider(<ActionLayer actions={{ variantCycle }} />)
     const input = mountElement('textarea')
 
-    pressKey(input, { key: '`', ctrlKey: true })
+    pressKey(input, { key: 't', ctrlKey: true })
 
-    expect(toggleTerminal).toHaveBeenCalledTimes(1)
+    expect(variantCycle).toHaveBeenCalledTimes(1)
   })
 
   it('leaves submit to the focused input and only interrupts from the prompt', () => {
@@ -198,6 +198,38 @@ describe('KeyboardShortcutsProvider', () => {
     expect(halfPageDown).toHaveBeenCalledTimes(2)
   })
 
+  it('runs a direct half-page-up shortcut with Ctrl+U from the body and the prompt, never from another text field', () => {
+    const halfPageUp = vi.fn()
+    renderProvider(<ActionLayer actions={{ halfPageUp }} />)
+    const prompt = mountElement('textarea', { 'data-prompt-input': '' })
+    const otherInput = mountElement('input')
+
+    expect(pressKey(otherInput, { key: 'u', ctrlKey: true }).defaultPrevented).toBe(false)
+    expect(halfPageUp).not.toHaveBeenCalled()
+
+    expect(pressKey(document.body, { key: 'u', ctrlKey: true }).defaultPrevented).toBe(true)
+    expect(pressKey(prompt, { key: 'u', ctrlKey: true }).defaultPrevented).toBe(true)
+    expect(halfPageUp).toHaveBeenCalledTimes(2)
+  })
+
+  it('does not abort while a dialog overlay is open, leaving Escape to the overlay', () => {
+    const abort = vi.fn()
+    renderProvider(<ActionLayer actions={{ abort }} />)
+    mountElement('div', { role: 'dialog', 'data-state': 'open' })
+
+    expect(pressKey(document.body, { key: 'Escape' }).defaultPrevented).toBe(false)
+    expect(abort).not.toHaveBeenCalled()
+  })
+
+  it('aborts with Escape when no dialog overlay is open', () => {
+    const abort = vi.fn()
+    renderProvider(<ActionLayer actions={{ abort }} />)
+    mountElement('div', { role: 'dialog', 'data-state': 'closed' })
+
+    expect(pressKey(document.body, { key: 'Escape' }).defaultPrevented).toBe(true)
+    expect(abort).toHaveBeenCalledTimes(1)
+  })
+
   it('runs leader and direct shortcuts from a terminal before it consumes the keys, passing other keys through', () => {
     const newSession = vi.fn()
     const toggleTerminal = vi.fn()
@@ -210,14 +242,33 @@ describe('KeyboardShortcutsProvider', () => {
       event.preventDefault()
     })
 
-    pressKey(terminalInput, { key: 'o', ctrlKey: true })
+    pressKey(terminalInput, { key: 'x', ctrlKey: true })
     pressKey(terminalInput, { key: 'n' })
-    pressKey(terminalInput, { key: '`', ctrlKey: true })
+    pressKey(terminalInput, { key: 'x', ctrlKey: true })
+    pressKey(terminalInput, { key: 't' })
     pressKey(terminalInput, { key: 'l' })
 
     expect(newSession).toHaveBeenCalledTimes(1)
     expect(toggleTerminal).toHaveBeenCalledTimes(1)
     expect(shellInput.mock.calls).toEqual([['l']])
+  })
+
+  it('passes direct shortcuts through in a terminal while keeping the leader and toggleTerminal', () => {
+    const variantCycle = vi.fn()
+    const halfPageUp = vi.fn()
+    const toggleTerminal = vi.fn()
+    renderProvider(<ActionLayer actions={{ variantCycle, halfPageUp, toggleTerminal }} />)
+    const terminal = mountElement('div', { 'data-terminal-id': 'pty-2' })
+    const terminalInput = terminal.appendChild(document.createElement('textarea'))
+
+    expect(pressKey(terminalInput, { key: 't', ctrlKey: true }).defaultPrevented).toBe(false)
+    expect(pressKey(terminalInput, { key: 'u', ctrlKey: true }).defaultPrevented).toBe(false)
+    expect(variantCycle).not.toHaveBeenCalled()
+    expect(halfPageUp).not.toHaveBeenCalled()
+
+    pressKey(terminalInput, { key: 'x', ctrlKey: true })
+    expect(pressKey(terminalInput, { key: 't' }).defaultPrevented).toBe(true)
+    expect(toggleTerminal).toHaveBeenCalledTimes(1)
   })
 
   it('ignores key events a component already handled', () => {
@@ -296,7 +347,7 @@ describe('KeyboardShortcutsProvider', () => {
     const newSession = vi.fn()
     renderProvider(<ActionLayer actions={{ newSession }} />)
 
-    pressKey(document.body, { key: 'o', ctrlKey: true })
+    pressKey(document.body, { key: 'x', ctrlKey: true })
     expect(screen.getByText('Waiting for shortcut key...')).toBeInTheDocument()
 
     pressKey(document.body, { key: 'n' })

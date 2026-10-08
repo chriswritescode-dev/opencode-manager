@@ -2,7 +2,7 @@ import { useEffect, useRef, useState } from 'react'
 import { cn } from '@/lib/utils'
 import { MODAL_TRANSITION_MS } from '@/lib/utils'
 import { X } from 'lucide-react'
-import { getFocusedElement, restoreOverlayFocus } from '@/lib/overlayFocus'
+import { useRestoreFocusOnClose } from '@/hooks/useRestoreFocusOnClose'
 
 const openDrawerStack: symbol[] = []
 
@@ -27,8 +27,8 @@ export function SideDrawer({
 }: SideDrawerProps) {
   const [shouldRender, setShouldRender] = useState(false)
   const panelRef = useRef<HTMLDivElement>(null)
-  const returnFocusRef = useRef<HTMLElement | null>(null)
-  const wasOpenRef = useRef(isOpen)
+
+  useRestoreFocusOnClose(isOpen, panelRef)
 
   useEffect(() => {
     if (isOpen) {
@@ -37,15 +37,6 @@ export function SideDrawer({
       const timer = setTimeout(() => setShouldRender(false), MODAL_TRANSITION_MS)
       return () => clearTimeout(timer)
     }
-  }, [isOpen])
-
-  useEffect(() => {
-    if (isOpen) {
-      returnFocusRef.current = getFocusedElement()
-    } else if (wasOpenRef.current) {
-      restoreOverlayFocus(returnFocusRef.current, panelRef.current)
-    }
-    wasOpenRef.current = isOpen
   }, [isOpen])
 
   const onCloseRef = useRef(onClose)

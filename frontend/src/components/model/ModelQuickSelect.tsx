@@ -1,6 +1,7 @@
 import { useCallback, useDeferredValue, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react'
 import { Check, ChevronDown, ChevronLeft, ChevronRight, Search, Star, Trash2, X, type LucideIcon } from 'lucide-react'
 import { useModelSelection, type ModelSelectionSession } from '@/hooks/useModelSelection'
+import { useMobile } from '@/hooks/useMobile'
 import { useModelSections } from '@/hooks/useModelSections'
 import { useVariants } from '@/hooks/useVariants'
 import { modelSelectionRef, type Model } from '@/api/providers'
@@ -14,6 +15,7 @@ import {
 } from '@/components/ui/dropdown-menu'
 import { Input } from '@/components/ui/input'
 import { buildModelSections, filterModelSections, type ModelOption } from '@/lib/modelSections'
+import { isTextEntryElement } from '@/lib/domTargets'
 
 interface ModelQuickSelectProps {
   directory?: string
@@ -183,6 +185,7 @@ export function ModelQuickSelect({
   const [selectedProviderId, setSelectedProviderId] = useState<string | null>(null)
   const [activeIndex, setActiveIndex] = useState(0)
   const quickListRef = useRef<HTMLDivElement>(null)
+  const isMobile = useMobile()
   const { model, modelString, info, recentModels, favoriteModels, setModel, toggleFavorite, removeRecentModel } = useModelSelection(directory, session)
   const { availableVariants, currentVariant, setVariant, clearVariant, hasVariants } = useVariants(directory, session)
 
@@ -286,10 +289,12 @@ export function ModelQuickSelect({
 
   const navigableItems = useMemo((): ModelListItem[] => {
     if (showAllModels) {
-      return isSearching ? searchResults : browseModels
+      if (isSearching) return searchResults
+      if (isMobile && !selectedProviderId) return EMPTY_MODELS
+      return browseModels
     }
     return quickSections.flatMap((section) => section.models)
-  }, [showAllModels, isSearching, searchResults, browseModels, quickSections])
+  }, [showAllModels, isSearching, isMobile, selectedProviderId, searchResults, browseModels, quickSections])
 
   const quickSectionOffsets = useMemo(() => {
     const offsets = new Map<string, number>()
@@ -306,6 +311,10 @@ export function ModelQuickSelect({
   navigableItemsRef.current = navigableItems
   const modelStringRef = useRef(modelString)
   modelStringRef.current = modelString
+  const searchQueryRef = useRef(searchQuery)
+  searchQueryRef.current = searchQuery
+  const deferredSearchQueryRef = useRef(deferredSearchQuery)
+  deferredSearchQueryRef.current = deferredSearchQuery
 
   useEffect(() => {
     const selectedIndex = navigableItemsRef.current.findIndex((item) => item.key === modelStringRef.current)
@@ -341,15 +350,20 @@ export function ModelQuickSelect({
 
     const handleKeyDown = (event: KeyboardEvent) => {
       if (event.ctrlKey || event.metaKey || event.altKey) return
+      if (event.isComposing) return
 
       const target = event.target
       if (target instanceof HTMLElement && target.closest('[role="menu"]')) return
 
-      const isTextInput =
-        target instanceof HTMLElement && (target.tagName === 'INPUT' || target.tagName === 'TEXTAREA')
+      const isTextInput = target instanceof Element && isTextEntryElement(target)
 
       if (event.key === 'Enter') {
         if (target instanceof HTMLElement && target.closest('button')) return
+        if (searchQueryRef.current !== deferredSearchQueryRef.current) {
+          event.preventDefault()
+          event.stopPropagation()
+          return
+        }
         const item = navigableItems[activeIndex]
         if (!item) return
         event.preventDefault()
@@ -676,6 +690,7 @@ export function ModelQuickSelect({
                       emptyLabel="No models found"
                       className="px-4 pb-4"
                       resetKey={selectedProviderId}
+                      activeIndex={activeIndex}
                     />
                   ) : (
                     <div className="h-full overflow-y-auto px-4 pb-4">

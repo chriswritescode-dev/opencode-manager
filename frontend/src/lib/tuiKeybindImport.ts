@@ -1,3 +1,4 @@
+import { isRecord } from '@opencode-manager/shared/utils'
 import type { KeyboardShortcutAction } from '@/api/types/settings'
 import { parseJsonc } from '@/lib/jsonc'
 import { normalizeShortcut } from '@/lib/keyboardShortcuts'
@@ -103,10 +104,6 @@ const KEY_LABELS = new Map<string, string>([
   ['backspace', 'Backspace'],
   ['insert', 'Insert'],
 ])
-
-function isRecord(value: unknown): value is Record<string, unknown> {
-  return typeof value === 'object' && value !== null && !Array.isArray(value)
-}
 
 function isKeyStroke(value: unknown): value is KeyStroke {
   return isRecord(value) && typeof value.name === 'string'

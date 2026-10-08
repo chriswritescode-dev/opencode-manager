@@ -16,7 +16,7 @@ import { RepoActionsContent } from '@/components/repo/RepoActionsDialog'
 import { RepoSkillsContent } from '@/components/repo/RepoSkillsDialog'
 import { RepoSchedulesContent } from '@/components/schedules/RepoSchedulesContent'
 import type { SkillFileInfo } from '@opencode-manager/shared'
-import { buildToolItems, type MoreDrawerItem } from '@/components/navigation/moreDrawerItems'
+import { buildToolItems, toolKeyOf, type MoreDrawerItem } from '@/components/navigation/moreDrawerItems'
 import { isPanelTool, type ToolPanelState, type PanelTool } from '@/hooks/useToolPanel'
 import { useOpenNavItem } from '@/hooks/useOpenNavItem'
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from '@/components/ui/tooltip'
@@ -108,7 +108,7 @@ export function ToolSidePanel({
   const panelTools: Array<{ item: MoreDrawerItem; tool: PanelTool }> = []
   const actionItems: MoreDrawerItem[] = []
   for (const item of buildToolItems(location.pathname)) {
-    const tool = item.panelTool ?? item.dialog ?? null
+    const tool = toolKeyOf(item)
     if (isPanelTool(tool)) panelTools.push({ item, tool })
     else actionItems.push(item)
   }

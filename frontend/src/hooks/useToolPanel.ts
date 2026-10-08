@@ -1,4 +1,5 @@
 import { useCallback, useEffect } from 'react'
+import { openDialogParams } from './useDialogParam'
 import { useUrlParams } from './useUrlParams'
 
 const PANEL_PARAM = 'panel'
@@ -42,8 +43,7 @@ export function toggleToolDialogParams(params: URLSearchParams, tool: PanelTool)
     clearToolParams(params)
     return
   }
-  params.set('dialog', tool)
-  params.delete('mobileTab')
+  openDialogParams(params, tool)
   clearToolParams(params, tool)
 }
 

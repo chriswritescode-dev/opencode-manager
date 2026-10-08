@@ -60,6 +60,11 @@ export function buildToolItems(pathname: string): MoreDrawerItem[] {
   return buildNavModel(pathname).items.filter((item) => !NON_TOOL_ITEM_KEYS.has(item.key))
 }
 
+/** The `?panel=`/`?dialog=` tool identifier an item targets, preferring its panel tool. */
+export function toolKeyOf(item: MoreDrawerItem): string | null {
+  return item.panelTool ?? item.dialog ?? null
+}
+
 function buildRouteNavModel(pathname: string): NavModel {
   const baseItems = getBaseItems()
 

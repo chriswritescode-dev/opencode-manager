@@ -75,7 +75,7 @@ describe('KeyboardShortcuts layout', () => {
     fireEvent.click(screen.getByRole('button', { name: /Ctrl\+T/ }))
     const input = screen.getByPlaceholderText('Press keys...')
 
-    fireEvent.keyDown(input, { key: 'o', ctrlKey: true })
+    fireEvent.keyDown(input, { key: 'x', ctrlKey: true })
     expect(updateSettings).not.toHaveBeenCalled()
     expect(input).toHaveValue(`${DEFAULT_LEADER_KEY} → `)
 

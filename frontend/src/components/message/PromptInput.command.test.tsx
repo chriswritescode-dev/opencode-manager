@@ -446,6 +446,23 @@ describe('PromptInput command submission', () => {
     expect(screen.queryByTestId('composer-mode-badge')).not.toBeInTheDocument()
   })
 
+  it('clears attachments and exits bash mode on Escape while idle', async () => {
+    const { container } = renderComponent()
+
+    const input = await screen.findByPlaceholderText('Send a message...')
+    fireEvent.change(input, { target: { value: '!' } })
+    expect(screen.getByTestId('composer-mode-badge')).toHaveTextContent('BASH')
+
+    await attachImage(container)
+    expect(screen.getByText('pic.png')).toBeInTheDocument()
+
+    fireEvent.keyDown(input, { key: 'Escape' })
+
+    expect(input).toHaveValue('')
+    expect(screen.queryByTestId('composer-mode-badge')).not.toBeInTheDocument()
+    expect(screen.queryByText('pic.png')).not.toBeInTheDocument()
+  })
+
   it('keeps attachments and clears only the text when a built-in command is submitted', async () => {
     const { container } = renderComponent()
 

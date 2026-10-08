@@ -1,9 +1,9 @@
-import { useCallback } from 'react'
+import { useCallback, useMemo } from 'react'
 import { useLocation, useNavigate } from 'react-router-dom'
 import { useQuery } from '@tanstack/react-query'
 import { ASSISTANT_REPO_ID } from '@opencode-manager/shared/utils'
 import { getRepo } from '@/api/repos'
-import { buildToolItems } from '@/components/navigation/moreDrawerItems'
+import { buildToolItems, toolKeyOf } from '@/components/navigation/moreDrawerItems'
 import { useShortcutActions } from '@/contexts/KeyboardShortcutsContext'
 import { dialogSearch } from '@/hooks/useDialogParam'
 import { useCreateSession } from '@/hooks/useOpenCode'
@@ -37,10 +37,11 @@ export function useGlobalShortcutActions(): void {
     navigate(getSessionPath(repoId, session.id))
   })
 
-  const hasFilesTool = buildToolItems(pathname).some((item) => (item.panelTool ?? item.dialog) === 'files')
+  const toolItems = useMemo(() => buildToolItems(pathname), [pathname])
+  const hasFilesTool = toolItems.some((item) => toolKeyOf(item) === 'files')
 
   const toggleRouteTool = useCallback((tool: PanelTool) => {
-    if (buildToolItems(pathname).some((item) => (item.panelTool ?? item.dialog) === tool)) {
+    if (toolItems.some((item) => toolKeyOf(item) === tool)) {
       updateParams((params) => {
         if (isMobile) toggleToolDialogParams(params, tool)
         else toggleToolPanelParams(params, tool)
@@ -50,7 +51,7 @@ export function useGlobalShortcutActions(): void {
     if (tool === 'files') return
     const host = repoId !== null ? getRepoPath(repoId) : getAssistantPath()
     navigate(`${host}${dialogSearch(tool)}`)
-  }, [pathname, isMobile, updateParams, navigate, repoId])
+  }, [toolItems, isMobile, updateParams, navigate, repoId])
 
   const newSession = repoId !== null && repo?.fullPath && !createSession.isPending
     ? () => createSession.mutate({})

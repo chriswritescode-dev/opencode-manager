@@ -63,30 +63,26 @@ export type STTConfig = {
   lastModelsFetch?: number;
 };
 
-const isBrowser = typeof navigator !== 'undefined';
-const isMac = isBrowser && navigator.platform.toUpperCase().indexOf('MAC') >= 0;
-const CMD_KEY = isMac ? 'Cmd' : 'Ctrl';
-
-export const DEFAULT_LEADER_KEY = `${CMD_KEY}+O`;
+export const DEFAULT_LEADER_KEY = 'Ctrl+X';
 
 export const DEFAULT_KEYBOARD_SHORTCUTS = {
-  submit: `${CMD_KEY}+Enter`,
+  submit: 'Cmd+Enter',
   abort: 'Escape',
-  clearPrompt: isMac ? 'Ctrl+C' : '',
-  toggleMode: 'T',
-  undo: 'Z',
-  redo: 'Shift+Z',
-  compact: 'K',
-  fork: 'F',
-  settings: ',',
-  sessions: 'S',
+  clearPrompt: '',
+  toggleMode: 'Shift+Tab',
+  undo: 'U',
+  redo: 'R',
+  compact: 'C',
+  fork: '',
+  settings: '',
+  sessions: 'L',
   newSession: 'N',
   closeSession: 'W',
   toggleSidebar: 'B',
   selectModel: 'M',
   variantCycle: 'Ctrl+T',
-  toggleTerminal: 'Ctrl+`',
-  toggleSourceControl: 'D',
+  toggleTerminal: 'T',
+  toggleSourceControl: '',
   timeline: 'G',
   exportSession: 'X',
   halfPageUp: 'Ctrl+U',
@@ -95,7 +91,7 @@ export const DEFAULT_KEYBOARD_SHORTCUTS = {
 
 export type KeyboardShortcutAction = keyof typeof DEFAULT_KEYBOARD_SHORTCUTS;
 
-export const DEFAULT_DIRECT_SHORTCUTS = ['submit', 'abort', 'clearPrompt', 'variantCycle', 'toggleTerminal', 'halfPageUp', 'halfPageDown'];
+export const DEFAULT_DIRECT_SHORTCUTS = ['submit', 'abort', 'clearPrompt', 'toggleMode', 'variantCycle', 'halfPageUp', 'halfPageDown'];
 
 export const GitCredentialSchema = z.object({
   id: z.string().optional(),
@@ -243,9 +239,7 @@ export const DEFAULT_USER_PREFERENCES = {
   groupToolCalls: true,
   showReasoning: false,
   simpleChatMode: false,
-  leaderKey: DEFAULT_LEADER_KEY,
-  directShortcuts: DEFAULT_DIRECT_SHORTCUTS,
-  keyboardShortcuts: DEFAULT_KEYBOARD_SHORTCUTS,
+  keyboardShortcuts: {} as Record<string, string>,
   customCommands: [],
   customAgents: [],
   gitCredentials: [] as GitCredential[],
