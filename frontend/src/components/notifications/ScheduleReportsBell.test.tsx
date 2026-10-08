@@ -53,12 +53,25 @@ describe('ScheduleReportsBell', () => {
     expect(screen.getByTestId('schedule-reports-count')).toHaveClass('bg-destructive')
   })
 
-  it('shows the all-caught-up empty state when there are no unread runs', async () => {
-    const user = userEvent.setup()
+  it('renders nothing when there are no unread runs', () => {
     mocks.useUnreadScheduleRuns.mockReturnValue({ data: { runs: [], total: 0, failed: 0 } })
     renderBell()
 
-    await user.click(screen.getByRole('button', { name: 'Reports, 0 unread' }))
+    expect(screen.queryByRole('button', { name: /Reports/ })).not.toBeInTheDocument()
+  })
+
+  it('stays open with the all-caught-up state after the last unread run is cleared', async () => {
+    const user = userEvent.setup()
+    mocks.useUnreadScheduleRuns.mockReturnValue({ data: { runs: [], total: 1, failed: 0 } })
+    const { rerender } = renderBell()
+
+    await user.click(screen.getByRole('button', { name: 'Reports, 1 unread' }))
+    mocks.useUnreadScheduleRuns.mockReturnValue({ data: { runs: [], total: 0, failed: 0 } })
+    rerender(
+      <MemoryRouter>
+        <ScheduleReportsBell />
+      </MemoryRouter>,
+    )
 
     expect(await screen.findByText('All caught up')).toBeInTheDocument()
   })

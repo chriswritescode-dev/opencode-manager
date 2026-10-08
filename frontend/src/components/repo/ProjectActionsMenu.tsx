@@ -170,9 +170,9 @@ export function ProjectActionsMenu({ repoId, directory }: ProjectActionsMenuProp
             variant="ghost"
             size="icon"
             aria-label="Project actions"
-            className="h-8 w-8 text-muted-foreground hover:text-foreground"
+            className="h-10 w-10 text-muted-foreground hover:text-foreground sm:h-8 sm:w-8"
           >
-            <Play className="h-4 w-4" />
+            <Play className="h-5 w-5 sm:h-4 sm:w-4" />
           </Button>
         </DropdownMenuTrigger>
         <DropdownMenuContent align="end" className="w-56">
