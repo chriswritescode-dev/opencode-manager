@@ -1,5 +1,6 @@
 import { Hono } from 'hono'
 import type { Context } from 'hono'
+import type { UpgradeWebSocket } from 'hono/ws'
 import type { Database } from 'bun:sqlite'
 import { buildOpenCodeBasicAuth } from '@opencode-manager/shared/opencode'
 import { createInternalTokenMiddleware } from '../auth/internal-token-middleware'
@@ -14,6 +15,10 @@ import { getRepoById } from '../db/queries'
 import { getWorkspacePath } from '@opencode-manager/shared/config/env'
 import { isPathWithinRoot } from '../services/sandbox/command'
 import { buildProxyResponseHeaders, filterProxyHeaders } from '../utils/proxy-headers'
+import { bridgeWebSocket, forwardPeerMessage, peerBufferedAmount, type WebSocketBridge } from '../utils/websocket-bridge'
+
+const PROXY_PREFIX = /^\/api\/opencode-proxy(?:\/repos\/[^/]+)?/
+const PTY_CONNECT_PATH = /^\/api\/(?:pty|experimental\/persistent-pty)\/[^/]+\/connect$/
 
 interface ProxyRequestParts {
   method: string
@@ -30,6 +35,20 @@ type RepoDirectoryResolver = (directory: string | null | undefined) => string
 
 function isJsonContentType(contentType: string | undefined): boolean {
   return (contentType ?? '').toLowerCase().includes('application/json')
+}
+
+function isWebSocketUpgrade(c: Context): boolean {
+  return (c.req.header('connection')?.toLowerCase() ?? '').includes('upgrade')
+    && c.req.header('upgrade')?.toLowerCase() === 'websocket'
+}
+
+/**
+ * Matches OpenCode's ticketed PTY socket connects. WebSocket clients cannot send an
+ * Authorization header, so these rely on the single-use ticket minted through the
+ * authenticated proxy and validated by the upstream server.
+ */
+function isTicketedPtyConnect(pathSuffix: string, searchParams: URLSearchParams): boolean {
+  return PTY_CONNECT_PATH.test(pathSuffix) && !!searchParams.get('ticket')
 }
 
 function decodeDirectoryHeader(value: string | undefined): string | undefined {
@@ -81,10 +100,39 @@ function rewriteRepoLocationBody(bodyText: string, resolveDirectory: RepoDirecto
   return JSON.stringify(parsed)
 }
 
-export function createOpenCodeProxyRoutes(db: Database, settingsService: SettingsService) {
+export function createOpenCodeProxyRoutes(db: Database, settingsService: SettingsService, upgradeWebSocket: UpgradeWebSocket) {
   const app = new Hono()
+  const requireInternalToken = createInternalTokenMiddleware(db)
 
-  app.use('/*', createInternalTokenMiddleware(db))
+  app.use('/*', (c, next) => {
+    const isTicketedSocket = isWebSocketUpgrade(c)
+      && isTicketedPtyConnect(c.req.path.replace(PROXY_PREFIX, ''), new URL(c.req.url).searchParams)
+    return isTicketedSocket ? next() : requireInternalToken(c, next)
+  })
+
+  async function proxyPtySocket(c: Context, pathSuffix: string, search: string): Promise<Response> {
+    const upstreamUrl = `${getOpenCodeUpstreamBaseUrl().replace(/^http/, 'ws')}${pathSuffix}${search}`
+    let bridge: WebSocketBridge | undefined
+
+    const upgrade = upgradeWebSocket(() => ({
+      onOpen(_event, ws) {
+        bridge = bridgeWebSocket(new WebSocket(upstreamUrl), {
+          send: (data) => ws.send(data),
+          close: (code, reason) => ws.close(code, reason),
+          bufferedAmount: () => peerBufferedAmount(ws),
+        })
+      },
+      async onMessage(event) {
+        if (!bridge) return
+        await forwardPeerMessage(bridge, event.data)
+      },
+      onClose() {
+        bridge?.close()
+      },
+    }))
+
+    return (await upgrade(c, async () => {})) ?? c.body(null)
+  }
 
   async function forwardToOpenCode(
     c: Context,
@@ -96,25 +144,18 @@ export function createOpenCodeProxyRoutes(db: Database, settingsService: Setting
       return c.json({ error: 'OpenCode lifecycle initialization is incomplete; refusing to proxy to an unmanaged server' }, 503)
     }
 
-    const connectionHeader = c.req.header('connection')?.toLowerCase() ?? ''
-    const upgradeHeader = c.req.header('upgrade')?.toLowerCase() ?? ''
-    if (connectionHeader.includes('upgrade') && upgradeHeader === 'websocket') {
-      return c.json({ error: 'WebSocket proxying is not supported' }, 501)
+    const url = new URL(c.req.url)
+    const isUpgrade = isWebSocketUpgrade(c)
+    if (isUpgrade && !isTicketedPtyConnect(pathSuffix, url.searchParams)) {
+      return c.json({ error: 'WebSocket proxying is only supported for ticketed PTY connects' }, 501)
     }
 
-    const url = new URL(c.req.url)
     const hasBody = c.req.method !== 'GET' && c.req.method !== 'HEAD'
 
     const forwardedHeaders = filterProxyHeaders(c.req.raw.headers)
     const headers = withDefaultOpenCodeDirectory(forwardedHeaders)
 
     headers['Authorization'] = buildOpenCodeBasicAuth(settingsService.getOpenCodeServerPassword())
-
-    const isJson = isJsonContentType(headers['content-type'] ?? headers['Content-Type'])
-    const shouldBufferBody = rewriteBody !== undefined && hasBody && isJson
-    const rawBody = shouldBufferBody ? await c.req.arrayBuffer() : undefined
-
-    let requestBody: RequestInit['body'] = hasBody ? c.req.raw.body : undefined
 
     if (rewrite) {
       const parts: ProxyRequestParts = {
@@ -126,6 +167,19 @@ export function createOpenCodeProxyRoutes(db: Database, settingsService: Setting
       rewrite(parts)
       url.search = parts.searchParams.toString()
     }
+
+    if (isUpgrade) {
+      if (!url.searchParams.has('location[directory]')) {
+        url.searchParams.set('location[directory]', decodeDirectoryHeader(headers[OPENCODE_DIRECTORY_HEADER]) ?? getWorkspacePath())
+      }
+      return proxyPtySocket(c, pathSuffix, url.search)
+    }
+
+    const isJson = isJsonContentType(headers['content-type'] ?? headers['Content-Type'])
+    const shouldBufferBody = rewriteBody !== undefined && hasBody && isJson
+    const rawBody = shouldBufferBody ? await c.req.arrayBuffer() : undefined
+
+    let requestBody: RequestInit['body'] = hasBody ? c.req.raw.body : undefined
 
     if (rewriteBody && rawBody !== undefined) {
       const bodyText = rawBody.byteLength > 0 ? new TextDecoder().decode(rawBody) : undefined

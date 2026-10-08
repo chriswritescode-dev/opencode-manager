@@ -7,6 +7,7 @@ import { tmpdir } from 'os'
 import { join } from 'path'
 import { Hono } from 'hono'
 import { serve } from '@hono/node-server'
+import { createNodeWebSocket } from '@hono/node-ws'
 import type { Database } from 'bun:sqlite'
 import { buildOpenCodeBasicAuth } from '@opencode-manager/shared/opencode'
 import { getWorkspacePath } from '@opencode-manager/shared/config/env'
@@ -69,7 +70,7 @@ describe('opencode-proxy routes', () => {
     isLifecycleInitializedMock.mockReturnValue(true)
     originalFetch = globalThis.fetch
     app = new Hono()
-    app.route('/api/opencode-proxy', createOpenCodeProxyRoutes(mockDb, mockSettingsService))
+    app.route('/api/opencode-proxy', createOpenCodeProxyRoutes(mockDb, mockSettingsService, createNodeWebSocket({ app }).upgradeWebSocket))
   })
 
   afterEach(() => {
@@ -228,6 +229,13 @@ describe('opencode-proxy routes', () => {
     expect(res.status).toBe(501)
     const body = await res.json() as { error: string }
     expect(body.error).toContain('WebSocket')
+  })
+
+  it('still requires authorization for WebSocket upgrades without a PTY ticket', async () => {
+    const res = await app.request('/api/opencode-proxy/api/experimental/persistent-pty/pty_1/connect', {
+      headers: { Connection: 'Upgrade', Upgrade: 'websocket' },
+    })
+    expect(res.status).toBe(401)
   })
 
   it('preserves SSE content-type header from upstream', async () => {
@@ -771,7 +779,7 @@ describe('opencode-proxy repo-scoped mount', () => {
     isLifecycleInitializedMock.mockReturnValue(true)
     originalFetch = globalThis.fetch
     app = new Hono()
-    app.route('/api/opencode-proxy', createOpenCodeProxyRoutes(mockDb, mockSettingsService))
+    app.route('/api/opencode-proxy', createOpenCodeProxyRoutes(mockDb, mockSettingsService, createNodeWebSocket({ app }).upgradeWebSocket))
   })
 
   afterEach(() => {
@@ -1114,12 +1122,7 @@ describe.skipIf(SHIPPED_OPENCODE_BIN === null)('opencode-proxy repo-scoped mount
     getOpenCodeServerPasswordMock.mockReturnValue(instance.password)
     getRepoByIdMock.mockReturnValue({ id: 1, fullPath: repoPath, cloneStatus: 'ready' })
 
-    const proxyApp = new Hono()
-    proxyApp.route('/api/opencode-proxy', createOpenCodeProxyRoutes(mockDb, mockSettingsService))
-    const proxyServer = await new Promise<ReturnType<typeof serve>>((resolve) => {
-      const server = serve({ fetch: proxyApp.fetch, port: 0, hostname: '127.0.0.1' }, () => resolve(server))
-    })
-    const proxyPort = (proxyServer.address() as AddressInfo).port
+    const { proxyServer, proxyPort } = await startProxyServer()
 
     try {
       const result = await runOpenCodeAgainstProxy(
@@ -1144,4 +1147,75 @@ describe.skipIf(SHIPPED_OPENCODE_BIN === null)('opencode-proxy repo-scoped mount
       rmSync(root, { recursive: true, force: true })
     }
   }, 120000)
+
+  it('bridges a ticketed PTY WebSocket for a remote client without an Authorization header', async () => {
+    const root = mkdtempSync(join(tmpdir(), 'ocm-proxy-pty-'))
+    const repoPath = join(root, 'repo')
+    mkdirSync(repoPath, { recursive: true })
+
+    const instance = await startOpenCodeServe({ env: { HOME: join(root, 'home') } })
+    upstreamBaseUrl.value = instance.baseUrl
+    getOpenCodeServerPasswordMock.mockReturnValue(instance.password)
+    getRepoByIdMock.mockReturnValue({ id: 1, fullPath: repoPath, cloneStatus: 'ready' })
+
+    const { proxyServer, proxyPort } = await startProxyServer()
+    const repoProxy = `127.0.0.1:${proxyPort}/api/opencode-proxy/repos/1`
+    const clientAuth = 'Basic ' + Buffer.from('opencode:test-internal-token').toString('base64')
+
+    try {
+      const created = await fetch(`http://${repoProxy}/api/pty`, {
+        method: 'POST',
+        headers: { Authorization: clientAuth, 'content-type': 'application/json' },
+        body: JSON.stringify({ command: '/bin/sh' }),
+      })
+      expect(created.status, await created.clone().text()).toBe(200)
+      const ptyID = ((await created.json()) as { data: { id: string } }).data.id
+
+      const token = await fetch(`http://${repoProxy}/api/pty/${ptyID}/connect-token`, {
+        method: 'POST',
+        headers: { Authorization: clientAuth, 'x-opencode-ticket': '1' },
+      })
+      expect(token.status, await token.clone().text()).toBe(200)
+      const ticket = ((await token.json()) as { data: { ticket: string } }).data.ticket
+
+      const socket = new WebSocket(`ws://${repoProxy}/api/pty/${ptyID}/connect?ticket=${encodeURIComponent(ticket)}`)
+      socket.binaryType = 'arraybuffer'
+      const output = await new Promise<string>((resolve, reject) => {
+        let received = ''
+        const timer = setTimeout(() => reject(new Error(`timed out; received: ${received}`)), 20000)
+        socket.addEventListener('open', () => socket.send('echo proxied-$((40+2))\n'))
+        socket.addEventListener('message', (event) => {
+          received += typeof event.data === 'string' ? event.data : new TextDecoder().decode(event.data as ArrayBuffer)
+          if (received.includes('proxied-42')) {
+            clearTimeout(timer)
+            resolve(received)
+          }
+        })
+        socket.addEventListener('close', (event) => {
+          clearTimeout(timer)
+          reject(new Error(`socket closed ${event.code}; received: ${received}`))
+        })
+      })
+      socket.close()
+
+      expect(output).toContain('proxied-42')
+    } finally {
+      await new Promise<void>((resolve) => proxyServer.close(() => resolve()))
+      await instance.stop()
+      getOpenCodeServerPasswordMock.mockReturnValue('test-password')
+      upstreamBaseUrl.value = 'http://127.0.0.1:5551'
+      rmSync(root, { recursive: true, force: true })
+    }
+  }, 120000)
 })
+
+async function startProxyServer(): Promise<{ proxyServer: ReturnType<typeof serve>; proxyPort: number }> {
+  const proxyApp = new Hono()
+  const nodeWebSocket = createNodeWebSocket({ app: proxyApp })
+  proxyApp.route('/api/opencode-proxy', createOpenCodeProxyRoutes(mockDb, mockSettingsService, nodeWebSocket.upgradeWebSocket))
+  const proxyServer = await new Promise<ReturnType<typeof serve>>((resolve) => {
+    const server = serve({ fetch: proxyApp.fetch, port: 0, hostname: '127.0.0.1' }, () => resolve(server))
+  })
+  nodeWebSocket.injectWebSocket(proxyServer)
+  return { proxyServer, proxyPort: (proxyServer.address() as AddressInfo).port }
+}
