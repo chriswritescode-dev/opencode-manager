@@ -4,6 +4,7 @@ import type { SessionGoal } from '@opencode-manager/shared/schemas'
 import {
   runGoalCommand,
   formatGoalStatus,
+  goalObjectiveSummary,
   goalOutcomeToast,
   parseGoalForm,
   GOALS_ATTACH_REQUIRED,
@@ -12,12 +13,13 @@ import {
 import type { GoalActions } from '../src/tui-goal.js'
 import { ManagerApiError } from '../src/manager-api.js'
 import type { ManagerApi } from '../src/manager-api.js'
-import { resolveManagerAuth } from '../src/manager-auth.js'
+import { resolveManagerApi } from '../src/manager-auth.js'
 import type { GoalStore } from '../src/goal-store.js'
 import type { RemoteContext } from '../src/remote-context.js'
+import { goal } from './helpers/goal-fixture.js'
 
 vi.mock('../src/manager-auth.js', () => ({
-  resolveManagerAuth: vi.fn(),
+  resolveManagerApi: vi.fn(),
 }))
 
 const remote: RemoteContext = {
@@ -27,30 +29,10 @@ const remote: RemoteContext = {
   repoId: 1,
 }
 
-function goal(overrides: Partial<SessionGoal> = {}): SessionGoal {
-  return {
-    id: 7,
-    sessionId: 'ses_a',
-    directory: '/repo',
-    objective: 'fix it',
-    status: 'active',
-    stopReason: null,
-    turnState: 'waiting',
-    continuationCount: 0,
-    maxContinuations: 5,
-    tokenBudget: null,
-    tokensUsed: 0,
-    consecutiveBlocked: 0,
-    lastVerdict: null,
-    lastReason: null,
-    createdAt: 1,
-    updatedAt: 1,
-    finishedAt: null,
-    ...overrides,
-  }
-}
-
-function createFakeContext(route: { type: string; sessionID?: string } = { type: 'session', sessionID: 'ses_a' }) {
+function createFakeContext(
+  route: { type: string; sessionID?: string } = { type: 'session', sessionID: 'ses_a' },
+  session: unknown = { location: { directory: '/repo' } },
+) {
   const toast = vi.fn()
   const select = vi.fn()
   const dialogPrompt = vi.fn()
@@ -64,7 +46,7 @@ function createFakeContext(route: { type: string; sessionID?: string } = { type:
     },
     data: {
       session: {
-        get: () => ({ location: { directory: '/repo' } }),
+        get: () => session,
         status,
       },
     },
@@ -88,26 +70,43 @@ function makeStore() {
   const store: GoalStore = {
     watch: vi.fn(() => () => undefined),
     set,
-    refresh: vi.fn(async () => undefined),
   }
   return { store, set }
 }
 
-function depsFor(api: ReturnType<typeof makeApi>, store: GoalStore, createApi = vi.fn(() => api as unknown as ManagerApi)) {
-  return { remote, store, createApi, showDialog: vi.fn() }
+function depsFor(api: ReturnType<typeof makeApi>, store: GoalStore) {
+  vi.mocked(resolveManagerApi).mockResolvedValue({
+    ok: true,
+    auth: { ok: true, managerUrl: remote.managerUrl, token: 'tok' },
+    api: api as unknown as ManagerApi,
+  })
+  return { remote, store, showDialog: vi.fn() }
 }
 
 async function dialogActions(fake: ReturnType<typeof createFakeContext>, api: ReturnType<typeof makeApi>, store: GoalStore): Promise<GoalActions> {
   const deps = depsFor(api, store)
-  await runGoalCommand(fake.context, deps, '/goal')
+  await runGoalCommand(fake.context, deps, '/ocm-goal')
   return deps.showDialog.mock.calls[0]![0].actions
 }
 
 const blankLimits = { maxTurns: '', tokenBudget: '' }
 
 beforeEach(() => {
-  vi.mocked(resolveManagerAuth).mockReset()
-  vi.mocked(resolveManagerAuth).mockResolvedValue({ ok: true, managerUrl: remote.managerUrl, token: 'tok' })
+  vi.mocked(resolveManagerApi).mockReset()
+})
+
+describe('goalObjectiveSummary', () => {
+  it('keeps the first line of a multi-line objective', () => {
+    expect(goalObjectiveSummary('fix it\nand more')).toBe('fix it')
+  })
+
+  it('leaves a short single line unchanged', () => {
+    expect(goalObjectiveSummary('fix it')).toBe('fix it')
+  })
+
+  it('cuts a long first line and appends an ellipsis', () => {
+    expect(goalObjectiveSummary('x'.repeat(70))).toBe(`${'x'.repeat(60)}…`)
+  })
 })
 
 describe('formatGoalStatus', () => {
@@ -119,6 +118,10 @@ describe('formatGoalStatus', () => {
 
   it('omits the token budget when there is none', () => {
     expect(formatGoalStatus(goal({ status: 'paused', tokenBudget: null }))).toBe('Goal paused · Turn 0/5 · fix it')
+  })
+
+  it('renders one line using only the objective first line', () => {
+    expect(formatGoalStatus(goal({ status: 'active', objective: 'fix it\nsecond line' }))).toBe('Goal active · Turn 0/5 · fix it')
   })
 })
 
@@ -145,6 +148,10 @@ describe('goalOutcomeToast', () => {
       title: 'Goal stopped',
       message: 'Cancelled',
     })
+  })
+
+  it('summarizes a long objective fallback', () => {
+    expect(goalOutcomeToast(goal({ status: 'blocked', lastReason: null, objective: 'x'.repeat(70) })).message).toBe(`${'x'.repeat(60)}…`)
   })
 })
 
@@ -191,12 +198,12 @@ describe('runGoalCommand', () => {
     const detached = { ...depsFor(api, store), remote: undefined }
     const storeless = { ...depsFor(api, store), store: undefined }
 
-    await runGoalCommand(fake.context, detached, '/goal fix it')
-    await runGoalCommand(fake.context, storeless, '/goal fix it')
+    await runGoalCommand(fake.context, detached, '/ocm-goal fix it')
+    await runGoalCommand(fake.context, storeless, '/ocm-goal fix it')
 
     expect(fake.toast).toHaveBeenCalledTimes(2)
     expect(fake.toast).toHaveBeenCalledWith({ variant: 'error', message: GOALS_ATTACH_REQUIRED })
-    expect(detached.createApi).not.toHaveBeenCalled()
+    expect(vi.mocked(resolveManagerApi)).not.toHaveBeenCalled()
   })
 
   it('refuses outside a session', async () => {
@@ -204,19 +211,31 @@ describe('runGoalCommand', () => {
     const { store } = makeStore()
     const deps = depsFor(makeApi(), store)
 
-    await runGoalCommand(fake.context, deps, '/goal fix it')
+    await runGoalCommand(fake.context, deps, '/ocm-goal fix it')
 
     expect(fake.toast).toHaveBeenCalledWith({ variant: 'error', message: 'Not in a session' })
-    expect(deps.createApi).not.toHaveBeenCalled()
+    expect(vi.mocked(resolveManagerApi)).not.toHaveBeenCalled()
+  })
+
+  it('refuses when the session has no directory', async () => {
+    const fake = createFakeContext({ type: 'session', sessionID: 'ses_a' }, { location: {} })
+    const { store } = makeStore()
+    const deps = depsFor(makeApi(), store)
+
+    await runGoalCommand(fake.context, deps, '/ocm-goal fix it')
+
+    expect(fake.toast).toHaveBeenCalledWith({ variant: 'error', message: 'Session has no directory' })
+    expect(vi.mocked(resolveManagerApi)).not.toHaveBeenCalled()
   })
 
   it('reports an auth failure without calling the API', async () => {
     const fake = createFakeContext()
     const api = makeApi()
     const { store } = makeStore()
-    vi.mocked(resolveManagerAuth).mockResolvedValue({ ok: false, message: 'No token stored. Run `ocm login https://manager.example`.' })
+    const deps = depsFor(api, store)
+    vi.mocked(resolveManagerApi).mockResolvedValue({ ok: false, message: 'No token stored. Run `ocm login https://manager.example`.' })
 
-    await runGoalCommand(fake.context, depsFor(api, store), '/goal fix it')
+    await runGoalCommand(fake.context, deps, '/ocm-goal fix it')
 
     expect(fake.toast).toHaveBeenCalledWith({
       variant: 'error',
@@ -234,8 +253,9 @@ describe('runGoalCommand', () => {
     const deps = depsFor(api, store)
     fake.sessionPrompt.mockResolvedValue(undefined)
 
-    await runGoalCommand(fake.context, deps, '/goal Fix the flaky test')
+    await runGoalCommand(fake.context, deps, '/ocm-goal Fix the flaky test')
 
+    expect(vi.mocked(resolveManagerApi)).toHaveBeenCalledWith(remote.managerUrl)
     expect(api.startSessionGoal).toHaveBeenCalledWith({ sessionId: 'ses_a', directory: '/repo', objective: 'Fix the flaky test' })
     expect(set).toHaveBeenCalledWith(started)
     expect(fake.sessionPrompt).toHaveBeenCalledWith({ sessionID: 'ses_a', text: 'Fix the flaky test', delivery: undefined })
@@ -251,7 +271,7 @@ describe('runGoalCommand', () => {
     fake.status.mockReturnValue('running')
     fake.sessionPrompt.mockResolvedValue(undefined)
 
-    await runGoalCommand(fake.context, depsFor(api, store), '/goal Fix it')
+    await runGoalCommand(fake.context, depsFor(api, store), '/ocm-goal Fix it')
 
     expect(fake.sessionPrompt).toHaveBeenCalledWith(expect.objectContaining({ delivery: 'queue' }))
   })
@@ -264,7 +284,7 @@ describe('runGoalCommand', () => {
     const { store } = makeStore()
     const deps = depsFor(api, store)
 
-    await runGoalCommand(fake.context, deps, '/goal')
+    await runGoalCommand(fake.context, deps, '/ocm-goal')
 
     expect(deps.showDialog).toHaveBeenCalledWith({
       sessionID: 'ses_a',
@@ -284,7 +304,7 @@ describe('runGoalCommand', () => {
     const { store } = makeStore()
     const deps = depsFor(api, store)
 
-    await runGoalCommand(fake.context, deps, '/goal something else')
+    await runGoalCommand(fake.context, deps, '/ocm-goal something else')
 
     expect(deps.showDialog).toHaveBeenCalledWith(expect.objectContaining({ initialGoal: active, initialObjective: 'something else' }))
     expect(api.startSessionGoal).not.toHaveBeenCalled()
@@ -297,8 +317,8 @@ describe('runGoalCommand', () => {
     api.getLatestSessionGoal.mockRejectedValueOnce(new ManagerApiError('read failed', 500, 'boom', 'read session goal'))
     api.getLatestSessionGoal.mockRejectedValueOnce(new ManagerApiError('not found', 404, null, 'read session goal'))
 
-    await runGoalCommand(fake.context, depsFor(api, store), '/goal fix it')
-    await runGoalCommand(fake.context, depsFor(api, store), '/goal fix it')
+    await runGoalCommand(fake.context, depsFor(api, store), '/ocm-goal fix it')
+    await runGoalCommand(fake.context, depsFor(api, store), '/ocm-goal fix it')
 
     expect(fake.toast).toHaveBeenNthCalledWith(1, { variant: 'error', message: 'read failed' })
     expect(fake.toast).toHaveBeenNthCalledWith(2, { variant: 'error', message: GOALS_ROUTE_MISSING })

@@ -1,17 +1,8 @@
 import { describe, it, expect, beforeEach, vi } from 'vitest'
-import type { SessionPermissionModeService } from '../../src/services/session-permission-modes'
-import type { RepoWorkspaceService } from '../../src/services/repo-workspace'
-import type { GitAuthService } from '../../src/services/git-auth'
-import type { SessionGoalService } from '../../src/services/session-goals'
-import type { MultiRunService } from '../../src/services/multi-runs'
 import { Hono } from 'hono'
 import type { Database } from 'bun:sqlite'
-import { createInternalRoutes } from '../../src/routes/internal'
-import type { ScheduleService } from '../../src/services/schedules'
-import type { NotificationService } from '../../src/services/notification'
-import type { SettingsService } from '../../src/services/settings'
-import type { OpenCodeClient } from '../../src/services/opencode/client'
 import type { Repo } from '../../src/types/repo'
+import { createInternalTestApp } from '../helpers/internal-test-app'
 
 const mockDb = {
   prepare: vi.fn().mockReturnValue({
@@ -80,14 +71,8 @@ describe('internal-opencode-workspaces routes', () => {
   beforeEach(() => {
     vi.clearAllMocks()
     mockListRepos.mockReturnValue([])
-    const scheduleService = {} as ScheduleService
-    const notificationService = {} as NotificationService
-    const settingsService = {} as SettingsService
-    const openCodeClient = {
-      forwardRaw: vi.fn(),
-    } as unknown as OpenCodeClient
     app = new Hono()
-    app.route('/api/internal', createInternalRoutes(mockDb, scheduleService, notificationService, settingsService, openCodeClient, {} as SessionPermissionModeService, {} as unknown as RepoWorkspaceService, {} as unknown as GitAuthService, {} as unknown as SessionGoalService, {} as unknown as MultiRunService))
+    app.route('/api/internal', createInternalTestApp(mockDb))
     token = 'test-internal-token'
   })
 

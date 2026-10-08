@@ -10,14 +10,14 @@ import { getBranchName } from './local-repo.js'
 import { transferSession, moveReminderText } from './session-move.js'
 import { createManagerSessionTransfer } from './remote-session.js'
 import type { ManagerSessionTransfer } from './remote-session.js'
-import { confirmDialog, selectDialog } from './tui-dialogs.js'
+import { confirmDialog, requireSessionTarget, selectDialog } from './tui-dialogs.js'
 import { setPendingWarp, runPendingWarp } from './warp.js'
 import { pushPhaseProgress, importProgress } from './move-progress.js'
 import { warmRepoProxy } from './repo-proxy.js'
 import type { MoveProgress } from './move-progress.js'
-import { runGoalCommand } from './tui-goal.js'
+import { GOAL_COMMAND, runGoalCommand } from './tui-goal.js'
 import type { GoalDialogProps } from './tui-goal.js'
-import { runMultiRunCommand } from './tui-multi-run.js'
+import { MULTI_RUN_COMMAND, runMultiRunCommand } from './tui-multi-run.js'
 import type { MultiRunLaunchDialogProps, MultiRunsDialogProps } from './tui-multi-run.js'
 import { runOcmSwitch } from './tui-ocm.js'
 import type { GoalStore } from './goal-store.js'
@@ -69,7 +69,7 @@ export async function setupOcm(context: Context, setMoveProgress: MoveProgressSe
             description: 'Start, pause, resume, or cancel a Manager goal for this session',
             group: 'OpenCode Manager',
             palette: true,
-            slash: { name: 'goal', arguments: true },
+            slash: { name: GOAL_COMMAND, arguments: true },
             run: (input) =>
               runGoalCommand(context, { remote: features.remote, store: features.goals, showDialog: features.dialogs.goal }, input),
           },
@@ -79,7 +79,7 @@ export async function setupOcm(context: Context, setMoveProgress: MoveProgressSe
             description: 'Run one prompt across several models on OpenCode Manager',
             group: 'OpenCode Manager',
             palette: true,
-            slash: { name: 'multirun', arguments: true },
+            slash: { name: MULTI_RUN_COMMAND, arguments: true },
             run: (input) =>
               runMultiRunCommand(
                 context,
@@ -158,18 +158,9 @@ async function resolveMoveTarget(managerApi: ManagerApi, matched: RemoteRepoSumm
 
 async function runSessionMove(context: Context, setMoveProgress: MoveProgressSetter): Promise<void> {
   try {
-    const current = context.ui.router.current()
-    if (current.type !== 'session') {
-      context.ui.toast.show({ variant: 'error', message: 'Not in a session' })
-      return
-    }
-    const sessionID = current.sessionID
-
-    const session = context.data.session.get(sessionID)
-    if (!session?.location.directory) {
-      context.ui.toast.show({ variant: 'error', message: 'Session has no directory' })
-      return
-    }
+    const sessionTarget = requireSessionTarget(context)
+    if (!sessionTarget) return
+    const { sessionID, directory, session } = sessionTarget
 
     const auth = await resolveManagerAuth()
     if (!auth.ok) {
@@ -178,7 +169,7 @@ async function runSessionMove(context: Context, setMoveProgress: MoveProgressSet
     }
 
     const repos = await fetchRepos(auth.managerUrl, auth.token)
-    const plan = await prepareMirror(session.location.directory, toRemoteRepoSummaries(repos))
+    const plan = await prepareMirror(directory, toRemoteRepoSummaries(repos))
 
     if (plan.matched.length === 0) {
       context.ui.toast.show({ variant: 'error', message: 'No matching Manager repo; run `ocm push --create` first' })

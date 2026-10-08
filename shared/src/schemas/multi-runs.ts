@@ -3,6 +3,7 @@ import { FUSION_INSTRUCTIONS_MAX_LENGTH, SESSION_PROMPT_MAX_LENGTH } from "./lim
 
 export const MULTI_RUN_MAX_MODELS = 5;
 export const MULTI_RUN_FUSION_MIN_SOURCES = 2;
+export const MULTI_RUN_NAME_MAX_LENGTH = 80;
 
 export const MultiRunEntryStatusSchema = z.enum(["starting", "started", "failed", "discarded"]);
 
@@ -21,6 +22,14 @@ export const MultiRunEntrySchema = z.object({
 });
 
 export type MultiRunEntry = z.infer<typeof MultiRunEntrySchema>;
+
+export function isFusionSourceEntry(entry: MultiRunEntry): entry is MultiRunEntry & { sessionId: string } {
+  return entry.status === "started" && entry.sessionId !== null;
+}
+
+export function canDiscardMultiRunEntry(entry: Pick<MultiRunEntry, "status">): boolean {
+  return entry.status === "started" || entry.status === "failed";
+}
 
 export const MultiRunFusionStatusSchema = z.enum(["starting", "started", "failed"]);
 
@@ -69,7 +78,7 @@ export type MultiRun = z.infer<typeof MultiRunSchema>;
 
 export const LaunchMultiRunRequestSchema = z.object({
   repoId: z.number().int(),
-  name: z.string().trim().min(1).max(80),
+  name: z.string().trim().min(1).max(MULTI_RUN_NAME_MAX_LENGTH),
   prompt: z.string().trim().min(1).max(SESSION_PROMPT_MAX_LENGTH),
   models: z
     .array(z.string().min(3))

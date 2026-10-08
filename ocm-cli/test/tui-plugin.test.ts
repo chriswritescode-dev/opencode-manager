@@ -228,7 +228,7 @@ describe('setupOcm', () => {
       commands: { id: string; slash?: { name: string; arguments?: true } }[]
     }
     const goal = factory().commands.find((entry) => entry.id === 'ocm.goal')
-    expect(goal?.slash).toEqual({ name: 'goal', arguments: true })
+    expect(goal?.slash).toEqual({ name: 'ocm-goal', arguments: true })
   })
 
   it('exposes the multi-run slash command', async () => {
@@ -241,7 +241,7 @@ describe('setupOcm', () => {
       commands: { id: string; slash?: { name: string; arguments?: true } }[]
     }
     const multiRun = factory().commands.find((entry) => entry.id === 'ocm.multirun')
-    expect(multiRun?.slash).toEqual({ name: 'multirun', arguments: true })
+    expect(multiRun?.slash).toEqual({ name: 'ocm-multirun', arguments: true })
   })
 
   it('exposes the server switch slash command', async () => {

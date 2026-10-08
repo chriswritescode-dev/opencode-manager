@@ -3,7 +3,7 @@ import { basename, dirname, resolve } from 'path'
 import { fileURLToPath } from 'url'
 import { readState, writeState, clearState, getStatePath, writeInstallNotice, type OcmState } from '../src/state.js'
 import { installVendoredOcm, resolveOpenCodeConfigDir, InstallError, OCM_PLUGIN_SPEC } from '../src/vendor-install.js'
-import { getToken, setToken, deleteToken, hasStoredToken, describeTokenStore, describeTokenWriteTarget, envToken, TOKEN_ENV, TokenStoreError } from '../src/internal-token-store.js'
+import { setToken, deleteToken, hasStoredToken, describeTokenStore, describeTokenWriteTarget, envToken, TOKEN_ENV, TokenStoreError } from '../src/internal-token-store.js'
 import { ManagerApi, ManagerApiError } from '../src/manager-api.js'
 import { mirrorUp, mirrorDown, mirrorUpFast, mirrorDownFast, prepareMirror, MirrorAbort, checkPushDivergence, checkPullDivergence, describePushDivergence } from '../src/mirror.js'
 import type { RemoteRepoSummary, MirrorProgress, PushDivergence, PullDivergence } from '../src/mirror.js'
@@ -14,7 +14,8 @@ import { resolveTarget, formatRepoIdentities, parseRepoIdPositional, restrictMat
 import { buildAttachInvocation } from '../src/warp.js'
 import { type ManagerRepo, fetchRepos, toRemoteRepoSummaries } from '../src/manager-repos.js'
 import { OCM_VERSION as VERSION, warmRepoProxy } from '../src/repo-proxy.js'
-import { normalizeManagerUrl } from '../src/manager-auth.js'
+import { normalizeManagerUrl, resolveManagerAuth } from '../src/manager-auth.js'
+import type { ManagerAuthOk } from '../src/manager-auth.js'
 
 const USAGE = `ocm v${VERSION} - OpenCode Manager workspace launcher
 
@@ -97,27 +98,10 @@ function guardDivergentPull(repoName: string, div: PullDivergence): boolean {
   )
 }
 
-function requireState(): OcmState {
-  const state = readState()
-  if (!state || !state.managerUrl) {
-    die(`no manager configured. Run \`ocm login <url>\` first.`)
-  }
-  return state
-}
-
-async function requireToken(state: OcmState): Promise<string> {
-  const store = describeTokenStore()
-  let token: string | null
-  try {
-    token = await getToken(state.managerUrl)
-  } catch (err) {
-    if (!(err instanceof TokenStoreError)) throw err
-    die(`token store error (${store.kind}: ${store.location}): ${err.message}. Run \`ocm login ${state.managerUrl}\` after fixing the store.`)
-  }
-  if (!token) {
-    die(`no token stored for ${state.managerUrl} (${store.kind}: ${store.location}). Run \`ocm login ${state.managerUrl}\`.`)
-  }
-  return token
+async function requireAuth(): Promise<{ auth: ManagerAuthOk; state: OcmState }> {
+  const auth = await resolveManagerAuth()
+  if (!auth.ok) die(auth.message)
+  return { auth, state: readState()! }
 }
 
 async function attach(managerUrl: string, token: string, repo: ManagerRepo, cwd: string): Promise<never> {
@@ -256,9 +240,8 @@ export async function cmdStatus(): Promise<void> {
 }
 
 async function cmdList(): Promise<void> {
-  const state = requireState()
-  const token = await requireToken(state)
-  const repos = await fetchRepos(state.managerUrl, token)
+  const { auth } = await requireAuth()
+  const repos = await fetchRepos(auth.managerUrl, auth.token)
   if (repos.length === 0) {
     info('No ready repos.')
     return
@@ -276,9 +259,8 @@ async function cmdList(): Promise<void> {
 async function cmdUse(args: string[]): Promise<void> {
   const needle = args[0]
   if (!needle) die('usage: ocm use <repoId|name>')
-  const state = requireState()
-  const token = await requireToken(state)
-  const repos = await fetchRepos(state.managerUrl, token)
+  const { auth, state } = await requireAuth()
+  const repos = await fetchRepos(auth.managerUrl, auth.token)
   const repo = findRepo(repos, needle)
   if (!repo) die(`repo not found: ${needle}`)
 
@@ -290,13 +272,12 @@ async function cmdUse(args: string[]): Promise<void> {
     lastRepoBranch: repo.branch,
   })
 
-  await attach(state.managerUrl, token, repo, process.cwd())
+  await attach(auth.managerUrl, auth.token, repo, process.cwd())
 }
 
 async function cmdDefault(): Promise<void> {
   info(`ocm v${VERSION}`)
-  const state = requireState()
-  const token = await requireToken(state)
+  const { auth, state } = await requireAuth()
 
   const last = state.lastRepoId !== undefined && state.lastRepoDir
     ? {
@@ -308,7 +289,7 @@ async function cmdDefault(): Promise<void> {
     : undefined
 
   info('connecting...')
-  const repos = await fetchRepos(state.managerUrl, token)
+  const repos = await fetchRepos(auth.managerUrl, auth.token)
   const localProjectId = await resolveOpenCodeProjectId(process.cwd())
   const result = resolveTarget({ cwd: process.cwd(), repos, localProjectId, last })
 
@@ -323,13 +304,13 @@ async function cmdDefault(): Promise<void> {
         lastRepoDir: repo.directory,
         lastRepoBranch: repo.branch,
       })
-      await attach(state.managerUrl, token, toManagerRepo(repo), result.repoRoot)
+      await attach(auth.managerUrl, auth.token, toManagerRepo(repo), result.repoRoot)
       return
     }
     case 'last': {
       const repo = result.repo
       info(`attaching to ${repo.name} (last used)`)
-      await attach(state.managerUrl, token, toManagerRepo(repo), process.cwd())
+      await attach(auth.managerUrl, auth.token, toManagerRepo(repo), process.cwd())
       return
     }
     case 'cwd-ambiguous': {
@@ -387,10 +368,9 @@ export async function cmdPush(args: string[]): Promise<void> {
     else if (arg === '--full') full = true
   }
 
-  const state = requireState()
-  const token = await requireToken(state)
-  const api = new ManagerApi(state.managerUrl, token)
-  const repos = await fetchRepos(state.managerUrl, token)
+  const { auth } = await requireAuth()
+  const api = new ManagerApi(auth.managerUrl, auth.token)
+  const repos = await fetchRepos(auth.managerUrl, auth.token)
 
   const remotes: RemoteRepoSummary[] = toRemoteRepoSummaries(repos)
 
@@ -469,10 +449,9 @@ async function cmdPull(args: string[]): Promise<void> {
     else if (arg === '--full') full = true
   }
 
-  const state = requireState()
-  const token = await requireToken(state)
-  const api = new ManagerApi(state.managerUrl, token)
-  const repos = await fetchRepos(state.managerUrl, token)
+  const { auth } = await requireAuth()
+  const api = new ManagerApi(auth.managerUrl, auth.token)
+  const repos = await fetchRepos(auth.managerUrl, auth.token)
 
   const remotes: RemoteRepoSummary[] = toRemoteRepoSummaries(repos)
 

@@ -7,18 +7,27 @@ import {
   LaunchMultiRunRequestSchema,
   MULTI_RUN_FUSION_MIN_SOURCES,
   MULTI_RUN_MAX_MODELS,
+  MULTI_RUN_NAME_MAX_LENGTH,
+  isFusionSourceEntry,
   type FuseMultiRunRequest,
   type LaunchMultiRunRequest,
   type MultiRun,
   type MultiRunEntry,
-  type MultiRunEntryStatus,
 } from '@opencode-manager/shared/schemas'
-import { formatOpenCodeModelRef } from '@opencode-manager/shared/opencode'
+import { getMultiRunEntryStatusLabel } from '@opencode-manager/shared/notifications'
+import {
+  compareCatalogModels,
+  formatOpenCodeModelRef,
+  isActiveCatalogProvider,
+  isSelectableCatalogModel,
+} from '@opencode-manager/shared/opencode'
 import { ManagerApi, ManagerApiError, isManagerRouteMissing } from './manager-api.js'
-import { resolveManagerAuth } from './manager-auth.js'
-import type { ManagerAuthOk } from './manager-auth.js'
+import { resolveManagerApi } from './manager-auth.js'
+import { describeCause } from './token-store.js'
 import { slashArgument } from './tui-dialogs.js'
 import type { RemoteContext } from './remote-context.js'
+
+export const MULTI_RUN_COMMAND = 'ocm-multirun'
 
 export const MULTI_RUN_ATTACH_REQUIRED =
   'Multi-runs run on OpenCode Manager. Attach to a Manager repo with `ocm` first.'
@@ -71,14 +80,24 @@ export type MultiRunCommandDeps = {
   remote: RemoteContext | undefined
   showLaunchDialog: (props: MultiRunLaunchDialogProps) => void
   showRunsDialog: (props: MultiRunsDialogProps) => void
-  createApi?: (auth: ManagerAuthOk) => ManagerApi
 }
 
 export async function listModelOptions(context: Context): Promise<ModelOption[]> {
-  await context.data.location.model.sync()
+  await Promise.all([context.data.location.model.sync(), context.data.location.provider.sync()])
+  const providerNames = new Map(
+    (context.data.location.provider.list() ?? [])
+      .filter(isActiveCatalogProvider)
+      .map((provider) => [provider.id, provider.name]),
+  )
   const models = context.data.location.model.list() ?? []
   return models
-    .filter((model) => model.enabled && model.status !== 'deprecated')
+    .filter((model) => isSelectableCatalogModel(model) && providerNames.has(model.providerID))
+    .sort((a, b) =>
+      compareCatalogModels(
+        { ...a, providerName: providerNames.get(a.providerID) },
+        { ...b, providerName: providerNames.get(b.providerID) },
+      ),
+    )
     .map((model) => {
       const ref = formatOpenCodeModelRef({ providerID: model.providerID, id: model.id })
       return { title: model.name, description: ref, value: ref }
@@ -109,18 +128,11 @@ export function openManagerSessions(context: Context, sessionIDs: string[]): voi
 }
 
 export function defaultMultiRunName(prompt: string): string {
-  return prompt.trim().split('\n')[0]!.slice(0, 80).trim()
-}
-
-const ENTRY_STATUS_LABELS: Record<MultiRunEntryStatus, string> = {
-  starting: 'Starting',
-  started: 'Started',
-  failed: 'Failed',
-  discarded: 'Discarded',
+  return prompt.trim().split('\n')[0]!.slice(0, MULTI_RUN_NAME_MAX_LENGTH).trim()
 }
 
 export function formatEntryStatus(entry: MultiRunEntry): string {
-  const parts = [ENTRY_STATUS_LABELS[entry.status], entry.isolated ? 'isolated' : 'shared directory']
+  const parts = [getMultiRunEntryStatusLabel(entry.status), entry.isolated ? 'isolated' : 'shared directory']
   if (entry.error) parts.push(entry.error)
   return parts.join(' · ')
 }
@@ -132,13 +144,7 @@ export function runSummary(run: MultiRun): string {
 
 /** Started entries backed by a session: the sessions to open and the valid fusion sources. */
 export function startedEntries(run: MultiRun): (MultiRunEntry & { sessionId: string })[] {
-  return run.entries.filter(
-    (entry): entry is MultiRunEntry & { sessionId: string } => entry.status === 'started' && entry.sessionId !== null,
-  )
-}
-
-export function canDiscard(entry: MultiRunEntry): boolean {
-  return entry.status === 'started' || entry.status === 'failed'
+  return run.entries.filter(isFusionSourceEntry)
 }
 
 /** Toggles an entry in the fusion selection, keeping run order and ignoring non-sources and selections past the model limit. */
@@ -191,15 +197,16 @@ export function parseFusionForm(form: FusionFormInput, requestId: string): Actio
 /** Maps a Manager error to a message, plus the session of an earlier fusion attempt the Manager recovered instead. */
 export function describeMultiRunError(error: unknown): { message: string; recoveredSessionId?: string } {
   if (isManagerRouteMissing(error)) return { message: MULTI_RUN_ROUTE_MISSING }
-  if (!(error instanceof ManagerApiError)) return { message: error instanceof Error ? error.message : String(error) }
+  if (!(error instanceof ManagerApiError)) return { message: describeCause(error) }
 
   const unavailable = FusionUnavailableDetailsSchema.safeParse(error.details)
   if (unavailable.success && unavailable.data.unavailableSources.length > 0) {
     return { message: unavailable.data.unavailableSources.map((source) => `${source.model}: ${source.message}`).join('\n') }
   }
 
-  const recovered = FusionRecoveredDetailsSchema.safeParse(error.details)
-  const recoveredSessionId = recovered.success ? recovered.data.fusions[0]?.sessionId : undefined
+  const recovered =
+    error.code === null || error.code === 'FUSION_ATTEMPT_RECOVERED' ? FusionRecoveredDetailsSchema.safeParse(error.details) : undefined
+  const recoveredSessionId = recovered?.success ? recovered.data.fusions[0]?.sessionId : undefined
   if (recoveredSessionId) return { message: 'An earlier fusion attempt is already running.', recoveredSessionId }
 
   return { message: error.message }
@@ -210,7 +217,8 @@ export function multiRunLaunchToast(run: MultiRun): ToastOptions {
   const failed = run.entries.filter((entry) => entry.status === 'failed')
   const lines = [`Launched ${run.name}: ${started}/${run.entries.length} started`]
   for (const entry of failed) lines.push(`${entry.model}: ${entry.error ?? 'failed'}`)
-  return { variant: failed.length > 0 ? 'warning' : 'success', message: lines.join('\n') }
+  const variant = started === 0 ? 'error' : failed.length > 0 ? 'warning' : 'success'
+  return { variant, message: lines.join('\n') }
 }
 
 export async function runMultiRunCommand(context: Context, deps: MultiRunCommandDeps, input?: string): Promise<void> {
@@ -221,17 +229,21 @@ export async function runMultiRunCommand(context: Context, deps: MultiRunCommand
       return
     }
 
-    const auth = await resolveManagerAuth(deps.remote.managerUrl)
-    if (!auth.ok) {
-      context.ui.toast.show({ variant: 'error', message: auth.message })
+    const resolved = await resolveManagerApi(deps.remote.managerUrl)
+    if (!resolved.ok) {
+      context.ui.toast.show({ variant: 'error', message: resolved.message })
       return
     }
 
-    const api = deps.createApi ? deps.createApi(auth) : new ManagerApi(auth.managerUrl, auth.token)
-    const actions = createMultiRunActions(context, api, repoId)
-    const prompt = slashArgument(input, 'multirun')
+    const actions = createMultiRunActions(context, resolved.api, repoId)
+    const prompt = slashArgument(input, MULTI_RUN_COMMAND)
 
     if (prompt) {
+      const probe = await actions.list()
+      if (!probe.ok) {
+        context.ui.toast.show({ variant: 'error', message: probe.error })
+        return
+      }
       deps.showLaunchDialog({ actions, initialPrompt: prompt })
       return
     }
@@ -242,7 +254,13 @@ export async function runMultiRunCommand(context: Context, deps: MultiRunCommand
   }
 }
 
+function fusionRequestKey(runId: number, form: FusionFormInput): string {
+  return JSON.stringify([runId, [...form.entryIds].sort((a, b) => a - b), form.model, form.baseRef.trim(), form.instructions.trim()])
+}
+
 function createMultiRunActions(context: Context, api: ManagerApi, repoId: number): MultiRunActions {
+  const pendingFusions = new Map<string, string>()
+
   const attempt = async <Value>(operation: () => Promise<Value>): Promise<ActionResult<Value>> => {
     try {
       return { ok: true, value: await operation() }
@@ -269,17 +287,21 @@ function createMultiRunActions(context: Context, api: ManagerApi, repoId: number
       return result
     },
     async fuse(run, form) {
-      const requestId = randomUUID()
+      const key = fusionRequestKey(run.id, form)
+      const requestId = pendingFusions.get(key) ?? randomUUID()
       const parsed = parseFusionForm(form, requestId)
       if (!parsed.ok) return parsed.error
+      pendingFusions.set(key, requestId)
       try {
         const updated = await api.fuseMultiRun(run.id, parsed.value)
+        pendingFusions.delete(key)
         const fusion = updated.fusions.find((candidate) => candidate.requestId === requestId)
         if (fusion?.status === 'failed') return fusion.error ?? `Fusion with ${fusion.model} failed`
         context.ui.toast.show({ variant: 'success', message: `Fusing with ${form.model}` })
         if (fusion?.sessionId) openManagerSessions(context, [fusion.sessionId])
         return null
       } catch (error) {
+        if (error instanceof ManagerApiError) pendingFusions.delete(key)
         const described = describeMultiRunError(error)
         if (!described.recoveredSessionId) return described.message
         context.ui.toast.show({ variant: 'info', message: `${described.message} Opened it instead.` })

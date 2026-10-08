@@ -7,12 +7,11 @@ import { showMultiRunLaunchDialog, showMultiRunsDialog } from './tui-multi-run-d
 import { formatMoveProgress } from './move-progress.js'
 import type { MoveProgress } from './move-progress.js'
 import { readRemoteContext } from './remote-context.js'
-import { createGoalStore, isOpenGoal } from './goal-store.js'
+import { createGoalStore } from './goal-store.js'
 import type { GoalStore } from './goal-store.js'
 import { formatGoalStatus, goalOutcomeToast } from './tui-goal.js'
-import { ManagerApi } from './manager-api.js'
-import { resolveManagerAuth } from './manager-auth.js'
-import type { SessionGoal } from '@opencode-manager/shared/schemas'
+import { resolveManagerApi } from './manager-auth.js'
+import { isOpenSessionGoal, type SessionGoal } from '@opencode-manager/shared/schemas'
 
 const SPINNER_INTERVAL_MS = 80
 
@@ -54,10 +53,10 @@ export default Plugin.define({
 
     const goals = remote
       ? createGoalStore({
-          load: async (sessionID) => {
-            const auth = await resolveManagerAuth(remote.managerUrl)
-            if (!auth.ok) throw new Error(auth.message)
-            return new ManagerApi(auth.managerUrl, auth.token).getLatestSessionGoal(sessionID)
+          load: async (sessionID, signal) => {
+            const resolved = await resolveManagerApi(remote.managerUrl)
+            if (!resolved.ok) throw new Error(resolved.message)
+            return resolved.api.getLatestSessionGoal(sessionID, signal)
           },
           onOutcome: (goal) => {
             context.ui.toast.show({ ...goalOutcomeToast(goal), sessionID: goal.sessionId })
@@ -73,13 +72,13 @@ export default Plugin.define({
       })
       const openGoal = () => {
         const current = goal()
-        return current && isOpenGoal(current) ? current : null
+        return isOpenSessionGoal(current) ? current : null
       }
       return (
         <Show when={openGoal()}>
           {(current) => (
             <box flexDirection="row" flexShrink={0}>
-              <text fg={current().status === 'active' ? context.theme.hue.accent[200] : context.theme.text.muted}>
+              <text wrapMode="none" fg={current().status === 'active' ? context.theme.hue.accent[200] : context.theme.text.muted}>
                 {formatGoalStatus(current())}
               </text>
             </box>

@@ -1,17 +1,9 @@
 import { describe, it, expect, beforeEach, vi } from 'vitest'
-import type { SessionPermissionModeService } from '../../src/services/session-permission-modes'
-import type { RepoWorkspaceService } from '../../src/services/repo-workspace'
-import type { GitAuthService } from '../../src/services/git-auth'
-import type { SessionGoalService } from '../../src/services/session-goals'
 import type { MultiRunService } from '../../src/services/multi-runs'
 import { Hono } from 'hono'
 import { Database } from 'bun:sqlite'
-import { createInternalRoutes } from '../../src/routes/internal'
-import type { ScheduleService } from '../../src/services/schedules'
-import type { NotificationService } from '../../src/services/notification'
-import type { SettingsService } from '../../src/services/settings'
-import type { OpenCodeClient } from '../../src/services/opencode/client'
 import { allMigrations } from '../../src/db/migrations'
+import { createInternalTestApp } from '../helpers/internal-test-app'
 import { getOrCreateInternalToken } from '../../src/services/internal-token'
 import { migrate } from '../../src/db/migration-runner'
 
@@ -59,21 +51,7 @@ describe('internal-multi-runs routes', () => {
     migrate(db, allMigrations)
     multiRuns = createMultiRunStub()
     app = new Hono()
-    app.route(
-      '/api/internal',
-      createInternalRoutes(
-        db,
-        {} as ScheduleService,
-        {} as NotificationService,
-        {} as SettingsService,
-        {} as OpenCodeClient,
-        {} as SessionPermissionModeService,
-        {} as unknown as RepoWorkspaceService,
-        {} as unknown as GitAuthService,
-        {} as unknown as SessionGoalService,
-        multiRuns as unknown as MultiRunService,
-      ),
-    )
+    app.route('/api/internal', createInternalTestApp(db, { multiRuns: multiRuns as unknown as MultiRunService }))
     token = getOrCreateInternalToken(db)
   })
 

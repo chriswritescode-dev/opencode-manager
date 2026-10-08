@@ -16,7 +16,7 @@ import {
   getPermissionDetail,
   getFormText,
   getGoalOutcomeTitle,
-  getGoalStopReasonLabel,
+  getGoalOutcomeReason,
 } from "@opencode-manager/shared/notifications";
 import { SettingsService } from "./settings";
 import { sseAggregator, type SSEEvent } from "./sse-aggregator";
@@ -84,9 +84,7 @@ function truncateWithEllipsis(text: string, maxLength: number): string {
 }
 
 function buildGoalOutcomeBody(goal: SessionGoal, repoName: string | undefined): string {
-  const reason = goal.stopReason
-    ? getGoalStopReasonLabel(goal.stopReason)
-    : goal.lastReason?.trim() || undefined;
+  const reason = getGoalOutcomeReason(goal)?.trim() || undefined;
   const prefix = repoName ? `${repoName} · ` : "";
   const separator = " — ";
 

@@ -1,20 +1,11 @@
 import { describe, it, expect, beforeEach, vi } from 'vitest'
-import type { SessionPermissionModeService } from '../../src/services/session-permission-modes'
-import type { RepoWorkspaceService } from '../../src/services/repo-workspace'
-import type { GitAuthService } from '../../src/services/git-auth'
-import type { SessionGoalService } from '../../src/services/session-goals'
-import type { MultiRunService } from '../../src/services/multi-runs'
 import { Hono } from 'hono'
 import { Database } from 'bun:sqlite'
-import { createInternalRoutes } from '../../src/routes/internal'
-import { ScheduleService } from '../../src/services/schedules'
-import { NotificationService } from '../../src/services/notification'
-import { SettingsService } from '../../src/services/settings'
 import { allMigrations } from '../../src/db/migrations'
 import { getOrCreateInternalToken } from '../../src/services/internal-token'
 import { migrate } from '../../src/db/migration-runner'
 import type { OpenCodeClient } from '../../src/services/opencode/client'
-import type { ScheduleWorktreeManager } from '../../src/services/schedule-worktree'
+import { createInternalTestApp } from '../helpers/internal-test-app'
 
 const readOpenCodeConfigFileMock = vi.hoisted(() => vi.fn())
 
@@ -25,9 +16,6 @@ vi.mock('../../src/services/opencode-config-file', async (importOriginal) => ({
 
 describe('internal/assistant routes', () => {
   let db: Database
-  let scheduleService: ScheduleService
-  let notificationService: NotificationService
-  let settingsService: SettingsService
   let app: Hono
   let token: string
   let reloadMock: ReturnType<typeof vi.fn>
@@ -43,12 +31,8 @@ describe('internal/assistant routes', () => {
       forwardRaw: vi.fn(),
     } as unknown as OpenCodeClient
 
-    const stubWorktreeManager = { prepare: () => Promise.resolve(null), finalize: () => Promise.resolve({ commitHash: null }) } as unknown as ScheduleWorktreeManager
-    scheduleService = new ScheduleService(db, openCodeClient, stubWorktreeManager)
-    notificationService = new NotificationService(db)
-    settingsService = new SettingsService(db)
     app = new Hono()
-    app.route('/api/internal', createInternalRoutes(db, scheduleService, notificationService, settingsService, openCodeClient, {} as SessionPermissionModeService, {} as unknown as RepoWorkspaceService, {} as unknown as GitAuthService, {} as unknown as SessionGoalService, {} as unknown as MultiRunService))
+    app.route('/api/internal', createInternalTestApp(db, { openCodeClient }))
     token = getOrCreateInternalToken(db)
   })
 
