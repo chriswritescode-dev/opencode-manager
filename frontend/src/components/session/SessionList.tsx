@@ -1,4 +1,4 @@
-import { useCallback, useState, useMemo, useEffect, useRef, type ReactNode } from "react";
+import { useCallback, useState, useMemo, useEffect, useRef, useId, type ReactNode } from "react";
 import { useSessionsAcrossDirectories, useDeleteSession, useCreateSession } from "@/hooks/useOpenCode";
 import type { DeleteSessionTarget } from "@/hooks/useOpenCode";
 import type { Session } from "@/api/types";
@@ -11,6 +11,7 @@ import { Card } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Search, Trash2, Pencil, X } from "lucide-react";
+import { useDebouncedValue } from "@/hooks/useDebouncedValue";
 
 interface SessionListProps {
   directory?: string;
@@ -50,7 +51,10 @@ export const SessionList = ({
     buildSessionKey(session.location.directory, session.id),
   []);
   const [searchQuery, setSearchQuery] = useState("");
-  const { data: sessions, isLoading, fetchNextPage, hasNextPage, isFetchingNextPage, isFetchNextPageError } = useSessionsAcrossDirectories(directoriesList, { search: searchQuery, limit: 25 });
+  const trimmedSearchQuery = searchQuery.trim();
+  const debouncedSearchQuery = useDebouncedValue(trimmedSearchQuery, 150);
+  const search = trimmedSearchQuery ? debouncedSearchQuery : '';
+  const { data: sessions, isLoading, isPlaceholderData, fetchNextPage, hasNextPage, isFetchingNextPage, isFetchNextPageError } = useSessionsAcrossDirectories(directoriesList, { search, limit: 25, keepPreviousResults: true });
   const deleteSession = useDeleteSession(directoriesList);
   const createSession = useCreateSession(sessionCreateDirectory, (newSession) => {
     onSelectSession(newSession.id);
@@ -67,15 +71,51 @@ export const SessionList = ({
   const [manageMode, setManageMode] = useState(false);
   const sessionListRef = useRef<HTMLDivElement>(null);
 
-  const filteredSessions = useMemo(
+  const rootSessions = useMemo(
     () => selectRootSessions(sessions ?? [], { directories: directorySet, keyFn: getSessionSelectionKey }),
     [sessions, directorySet, getSessionSelectionKey],
   );
+
+  const filteredSessions = useMemo(() => {
+    if (!trimmedSearchQuery) return rootSessions;
+    const needle = trimmedSearchQuery.toLowerCase();
+    return rootSessions.filter((session) => (session.title ?? '').toLowerCase().includes(needle));
+  }, [rootSessions, trimmedSearchQuery]);
 
   const { pinned: pinnedSessions, today: todaySessions, older: olderSessions } = useMemo(
     () => partitionSessions(filteredSessions, pinnedKeys, getSessionSelectionKey),
     [filteredSessions, pinnedKeys, getSessionSelectionKey],
   );
+
+  const navSessions = useMemo(
+    () => [...pinnedSessions, ...todaySessions, ...olderSessions],
+    [pinnedSessions, todaySessions, olderSessions],
+  );
+
+  const [highlightedKey, setHighlightedKey] = useState<string | null>(null);
+
+  useEffect(() => {
+    setHighlightedKey(null);
+  }, [trimmedSearchQuery]);
+
+  const highlightedSession = useMemo(() => {
+    if (navSessions.length === 0) return undefined;
+    if (highlightedKey) {
+      const stored = navSessions.find((session) => getSessionSelectionKey(session) === highlightedKey);
+      if (stored) return stored;
+    }
+    if (!trimmedSearchQuery && activeSessionID) {
+      const active = navSessions.find((session) => session.id === activeSessionID);
+      if (active) return active;
+    }
+    return navSessions[0];
+  }, [navSessions, highlightedKey, trimmedSearchQuery, activeSessionID, getSessionSelectionKey]);
+
+  const highlightedSessionKey = highlightedSession ? getSessionSelectionKey(highlightedSession) : null;
+  const highlightedIndex = highlightedSession ? navSessions.indexOf(highlightedSession) : -1;
+  const listboxId = useId();
+  const keyboardNavigationEnabled = !renderSessions && !manageMode;
+  const isSearchPending = trimmedSearchQuery !== search || isPlaceholderData;
 
   const handleTogglePin = (session: Session) => {
     const directory = session.location.directory;
@@ -89,10 +129,10 @@ export const SessionList = ({
 
   const handleSessionsScroll = useCallback((event: React.UIEvent<HTMLDivElement>) => {
     const { scrollTop, scrollHeight, clientHeight } = event.currentTarget;
-    if (scrollHeight - scrollTop - clientHeight <= 240 && hasNextPage && !isFetchingNextPage && !isFetchNextPageError) {
+    if (scrollHeight - scrollTop - clientHeight <= 240 && hasNextPage && !isFetchingNextPage && !isFetchNextPageError && !isPlaceholderData) {
       void fetchNextPage();
     }
-  }, [hasNextPage, isFetchingNextPage, isFetchNextPageError, fetchNextPage]);
+  }, [hasNextPage, isFetchingNextPage, isFetchNextPageError, isPlaceholderData, fetchNextPage]);
 
   useEffect(() => {
     const sessionList = sessionListRef.current;
@@ -101,6 +141,7 @@ export const SessionList = ({
       : filteredSessions.length === 0;
     if (
       !isLoading
+      && !isPlaceholderData
       && isNearBottom
       && hasNextPage
       && !isFetchingNextPage
@@ -108,44 +149,72 @@ export const SessionList = ({
     ) {
       void fetchNextPage();
     }
-  }, [isLoading, filteredSessions, hasNextPage, isFetchingNextPage, isFetchNextPageError, fetchNextPage]);
+  }, [isLoading, isPlaceholderData, filteredSessions, hasNextPage, isFetchingNextPage, isFetchNextPageError, fetchNextPage]);
 
-  if (isLoading && !renderSessions) {
-    return <div className="p-4 text-sm text-muted-foreground">Loading sessions...</div>;
-  }
+  useEffect(() => {
+    if (!highlightedSessionKey) return;
+    const list = sessionListRef.current;
+    if (!list) return;
+    const highlighted = list.querySelector<HTMLElement>('[data-highlighted="true"]');
+    if (highlighted && typeof highlighted.scrollIntoView === 'function') {
+      highlighted.scrollIntoView({ block: 'nearest' });
+    }
+  }, [highlightedSessionKey]);
 
-  if (!sessions || sessions.length === 0) {
-    if (isFetchNextPageError) {
-      return (
-        <div className="flex flex-col items-center justify-center gap-2 p-4 text-sm text-muted-foreground">
-          <p>Failed to load sessions.</p>
-          <Button variant="outline" size="sm" onClick={handleRetryNextPage} disabled={isFetchingNextPage}>
-            Retry
-          </Button>
-        </div>
-      );
+  const handleSearchKeyDown = (event: React.KeyboardEvent<HTMLInputElement>) => {
+    if (!keyboardNavigationEnabled) return;
+    if (event.nativeEvent.isComposing) return;
+    if (event.altKey || event.metaKey) return;
+
+    const selectIndex = (index: number) => {
+      const session = navSessions[index];
+      if (!session) return false;
+      setHighlightedKey(getSessionSelectionKey(session));
+      return true;
+    };
+    const moveBy = (delta: number) => {
+      const count = navSessions.length;
+      if (count === 0) return false;
+      return selectIndex(((highlightedIndex + delta) % count + count) % count);
+    };
+    const moveClamped = (delta: number) => {
+      const count = navSessions.length;
+      if (count === 0) return false;
+      return selectIndex(Math.min(Math.max(highlightedIndex + delta, 0), count - 1));
+    };
+
+    if (event.ctrlKey) {
+      if (event.key.toLowerCase() === 'n') {
+        if (moveBy(1)) event.preventDefault();
+      } else if (event.key.toLowerCase() === 'p') {
+        if (moveBy(-1)) event.preventDefault();
+      }
+      return;
     }
-    if ((hasNextPage || isFetchingNextPage) && !renderSessions) {
-      return <div className="p-4 text-sm text-muted-foreground">Loading sessions...</div>;
+
+    switch (event.key) {
+      case 'ArrowDown':
+        if (moveBy(1)) event.preventDefault();
+        break;
+      case 'ArrowUp':
+        if (moveBy(-1)) event.preventDefault();
+        break;
+      case 'PageDown':
+        if (moveClamped(10)) event.preventDefault();
+        break;
+      case 'PageUp':
+        if (moveClamped(-10)) event.preventDefault();
+        break;
+      case 'Enter':
+        if (highlightedSession) {
+          event.preventDefault();
+          onSelectSession(highlightedSession.id);
+        }
+        break;
+      default:
+        break;
     }
-    if (!searchQuery.trim() && !renderSessions) {
-      return (
-        <div className="flex-1 overflow-y-auto overflow-x-hidden px-4 pt-4 pb-4 min-h-0 [mask-image:linear-gradient(to_bottom,transparent,black_16px,black)]">
-          <Card
-            className="p-6 cursor-pointer hover:bg-accent hover:border-border transition-all border-dashed"
-            onClick={() => createSession.mutate({ agent: undefined })}
-          >
-            <div className="flex flex-col items-center justify-center gap-2 text-center">
-              <p className="font-medium">No sessions yet</p>
-              <p className="text-sm text-muted-foreground">
-                Click here to start a new session
-              </p>
-            </div>
-          </Card>
-        </div>
-      );
-    }
-  }
+  };
 
   const getDeleteTarget = (session: Session): DeleteSessionTarget => ({
     id: session.id,
@@ -211,7 +280,7 @@ export const SessionList = ({
 
   const renderSessionCard = (session: (typeof filteredSessions)[number], isPinned: boolean) => {
     const key = getSessionSelectionKey(session);
-    return (
+    const card = (
       <SessionCard
         key={key}
         session={session}
@@ -225,7 +294,55 @@ export const SessionList = ({
         onDelete={(e) => handleDelete(session, e)}
       />
     );
+    if (!keyboardNavigationEnabled) return card;
+    const index = navSessions.indexOf(session);
+    const isHighlighted = highlightedSession === session;
+    return (
+      <div
+        key={key}
+        id={`${listboxId}-option-${index}`}
+        role="option"
+        aria-selected={isHighlighted}
+        data-highlighted={isHighlighted ? 'true' : undefined}
+        className={isHighlighted ? 'rounded-lg ring-2 ring-primary/60' : undefined}
+      >
+        {card}
+      </div>
+    );
   };
+
+  if (!isLoading && !isPlaceholderData && (!sessions || sessions.length === 0)) {
+    if (isFetchNextPageError) {
+      return (
+        <div className="flex flex-col items-center justify-center gap-2 p-4 text-sm text-muted-foreground">
+          <p>Failed to load sessions.</p>
+          <Button variant="outline" size="sm" onClick={handleRetryNextPage} disabled={isFetchingNextPage}>
+            Retry
+          </Button>
+        </div>
+      );
+    }
+    if ((hasNextPage || isFetchingNextPage) && !renderSessions) {
+      return <div className="p-4 text-sm text-muted-foreground">Loading sessions...</div>;
+    }
+    if (!searchQuery.trim() && !renderSessions) {
+      return (
+        <div className="flex-1 overflow-y-auto overflow-x-hidden px-4 pt-4 pb-4 min-h-0 [mask-image:linear-gradient(to_bottom,transparent,black_16px,black)]">
+          <Card
+            className="p-6 cursor-pointer hover:bg-accent hover:border-border transition-all border-dashed"
+            onClick={() => createSession.mutate({ agent: undefined })}
+          >
+            <div className="flex flex-col items-center justify-center gap-2 text-center">
+              <p className="font-medium">No sessions yet</p>
+              <p className="text-sm text-muted-foreground">
+                Click here to start a new session
+              </p>
+            </div>
+          </Card>
+        </div>
+      );
+    }
+  }
 
   return (
     <div className="flex flex-col h-full min-h-0">
@@ -266,9 +383,14 @@ export const SessionList = ({
                 placeholder="Search sessions..."
                 value={searchQuery}
                 onChange={(e) => setSearchQuery(e.target.value)}
+                onKeyDown={handleSearchKeyDown}
                 className="pl-9 h-9"
                 autoComplete="off"
                 name="session-search"
+                role={keyboardNavigationEnabled ? 'combobox' : undefined}
+                aria-expanded={keyboardNavigationEnabled ? true : undefined}
+                aria-controls={keyboardNavigationEnabled ? listboxId : undefined}
+                aria-activedescendant={keyboardNavigationEnabled && highlightedIndex >= 0 ? `${listboxId}-option-${highlightedIndex}` : undefined}
               />
             </div>
             <Button
@@ -293,8 +415,14 @@ export const SessionList = ({
         aria-label="Sessions"
         onScroll={handleSessionsScroll}
       >
-        <div className="flex flex-col gap-4">
-          {renderSessions ? (
+        <div
+          id={keyboardNavigationEnabled ? listboxId : undefined}
+          role={keyboardNavigationEnabled ? 'listbox' : undefined}
+          className="flex flex-col gap-4"
+        >
+          {isLoading && !renderSessions ? (
+            <div className="text-sm text-muted-foreground text-center py-4">Loading sessions...</div>
+          ) : renderSessions ? (
             renderSessions({
               sessions: filteredSessions,
               searchQuery,
@@ -302,7 +430,7 @@ export const SessionList = ({
             })
           ) : filteredSessions.length === 0 && !isFetchingNextPage ? (
             <div className="text-sm text-muted-foreground text-center py-4">
-              No sessions found
+              {isSearchPending ? 'Searching sessions...' : 'No sessions found'}
             </div>
           ) : (
             <>
@@ -331,7 +459,7 @@ export const SessionList = ({
               {olderSessions.map((session) => renderSessionCard(session, false))}
             </>
           )}
-          {isFetchNextPageError && (
+          {isFetchNextPageError && (sessions?.length ?? 0) > 0 && (
             <div className="flex flex-col items-center gap-2 py-4">
               <p className="text-sm text-muted-foreground">Failed to load more sessions.</p>
               <Button variant="outline" size="sm" onClick={handleRetryNextPage} disabled={isFetchingNextPage}>
@@ -339,7 +467,7 @@ export const SessionList = ({
               </Button>
             </div>
           )}
-          {isFetchingNextPage && (
+          {isFetchingNextPage && (sessions?.length ?? 0) > 0 && (
             <div className="text-sm text-muted-foreground text-center py-4">
               Loading more sessions...
             </div>

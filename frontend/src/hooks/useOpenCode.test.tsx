@@ -154,6 +154,83 @@ describe('useSessionsAcrossDirectories', () => {
       expect(queryClient.getQueryState(listKey)?.isInvalidated).toBe(true)
     })
   })
+
+  it('does not keep previous results across a search change unless requested', async () => {
+    let resolveSearch: ((value: { items: SessionInfo[] }) => void) | undefined
+    mocks.listSessionPage.mockImplementation(({ search }: { search?: string }) => {
+      if (search === 'deploy') {
+        return new Promise<{ items: SessionInfo[] }>((resolve) => { resolveSearch = resolve })
+      }
+      return Promise.resolve({ items: [sessionInfo('ses_a1', '/w/a')] })
+    })
+
+    const queryClient = createQueryClient()
+    const { result, rerender } = renderHook(
+      (props: { search?: string }) => useSessionsAcrossDirectories(['/w/a'], { search: props.search }),
+      { wrapper: createWrapper(queryClient), initialProps: { search: undefined as string | undefined } },
+    )
+
+    await waitFor(() => {
+      expect(result.current.data.map((session) => session.id)).toEqual(['ses_a1'])
+    })
+
+    rerender({ search: 'deploy' })
+
+    await waitFor(() => expect(resolveSearch).toBeDefined())
+
+    expect(result.current.isPlaceholderData).toBe(false)
+    expect(result.current.isLoading).toBe(true)
+    expect(result.current.data).toHaveLength(0)
+
+    await act(async () => {
+      resolveSearch?.({ items: [sessionInfo('ses_b1', '/w/a')] })
+    })
+
+    await waitFor(() => {
+      expect(result.current.data.map((session) => session.id)).toEqual(['ses_b1'])
+    })
+  })
+
+  it('keeps previous results across a search change when requested', async () => {
+    let resolveSearch: ((value: { items: SessionInfo[] }) => void) | undefined
+    mocks.listSessionPage.mockImplementation(({ search }: { search?: string }) => {
+      if (search === 'deploy') {
+        return new Promise<{ items: SessionInfo[] }>((resolve) => { resolveSearch = resolve })
+      }
+      return Promise.resolve({ items: [sessionInfo('ses_a1', '/w/a')] })
+    })
+
+    const queryClient = createQueryClient()
+    const { result, rerender } = renderHook(
+      (props: { search?: string; keepPreviousResults?: boolean }) =>
+        useSessionsAcrossDirectories(['/w/a'], {
+          search: props.search,
+          keepPreviousResults: props.keepPreviousResults,
+        }),
+      {
+        wrapper: createWrapper(queryClient),
+        initialProps: { search: undefined as string | undefined, keepPreviousResults: true },
+      },
+    )
+
+    await waitFor(() => {
+      expect(result.current.data.map((session) => session.id)).toEqual(['ses_a1'])
+    })
+
+    rerender({ search: 'deploy', keepPreviousResults: true })
+
+    await waitFor(() => expect(result.current.isPlaceholderData).toBe(true))
+    expect(result.current.data.map((session) => session.id)).toEqual(['ses_a1'])
+
+    await act(async () => {
+      resolveSearch?.({ items: [sessionInfo('ses_b1', '/w/a')] })
+    })
+
+    await waitFor(() => {
+      expect(result.current.data.map((session) => session.id)).toEqual(['ses_b1'])
+    })
+    expect(result.current.isPlaceholderData).toBe(false)
+  })
 })
 
 describe('useSession', () => {

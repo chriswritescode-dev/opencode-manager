@@ -12,7 +12,10 @@ export function getFocusedElement(): HTMLElement | null {
     : null
 }
 
-function isFinePointer(): boolean {
+/**
+ * Reports whether the current device uses a fine pointer, such as a mouse or trackpad.
+ */
+export function isFinePointer(): boolean {
   return (
     typeof window !== 'undefined' &&
     typeof window.matchMedia === 'function' &&

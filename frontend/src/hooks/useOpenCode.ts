@@ -41,6 +41,7 @@ const EMPTY_SESSIONS: SessionInfo[] = []
 interface UseSessionsAcrossDirectoriesOptions {
   search?: string
   limit?: number
+  keepPreviousResults?: boolean
 }
 
 type SessionPageParam = Record<string, string>
@@ -55,6 +56,7 @@ export const useSessionsAcrossDirectories = (
   );
   const normalizedSearch = options?.search?.trim() || undefined;
   const limit = options?.limit ?? SESSION_LIST_PAGE_SIZE;
+  const keepPreviousResults = options?.keepPreviousResults ?? false;
   const directoryKey = uniqueDirectories.join('|');
 
   const query = useInfiniteQuery({
@@ -97,6 +99,10 @@ export const useSessionsAcrossDirectories = (
       return { items, cursors };
     },
     initialPageParam: undefined as SessionPageParam | undefined,
+    placeholderData: keepPreviousResults
+      ? (previousData, previousQuery) =>
+          previousQuery?.queryKey[2] === directoryKey ? previousData : undefined
+      : undefined,
     getNextPageParam: (lastPage) => {
       if (Object.keys(lastPage.cursors).length > 0) {
         return lastPage.cursors;
@@ -117,6 +123,7 @@ export const useSessionsAcrossDirectories = (
   return {
     data,
     isLoading: query.isLoading,
+    isPlaceholderData: query.isPlaceholderData,
     isError: query.isError,
     fetchNextPage: query.fetchNextPage,
     hasNextPage: query.hasNextPage,

@@ -10,6 +10,7 @@ import { SquareFill } from "@/components/ui/square-fill";
 import { Header } from "@/components/ui/header";
 import { SessionList } from "@/components/session/SessionList";
 import { getSessionListPath } from '@/lib/navigation'
+import { isFinePointer } from '@/lib/overlayFocus'
 import { FetchError } from '@/api/fetchWrapper'
 
 import { FileBrowserSheet } from "@/components/file-browser/FileBrowserSheet";
@@ -829,9 +830,17 @@ export function SessionDetail() {
 
       {/* Sessions Dialog */}
       <Dialog open={sessionsDialogOpen} onOpenChange={setSessionsDialogOpen}>
-        <DialogContent className="max-w-4xl max-h-[80vh]">
+        <DialogContent
+          className="max-w-4xl max-h-[80vh]"
+          onOpenAutoFocus={(event) => {
+            if (!isFinePointer()) {
+              event.preventDefault();
+              (event.currentTarget as HTMLElement).focus();
+            }
+          }}
+        >
           <DialogTitle>Sessions</DialogTitle>
-          <div className="overflow-y-auto max-h-[60vh] mt-4">
+          <div className="mt-4 flex h-[60vh] min-h-0 flex-col">
             {sessionDirectory && (
               <SessionList
                 directory={repoDirectory}
