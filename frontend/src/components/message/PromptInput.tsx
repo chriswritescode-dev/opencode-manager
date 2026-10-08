@@ -1472,7 +1472,7 @@ if (isIOS && isSecureContext && navigator.clipboard && navigator.clipboard.read)
   
 
 return (
-    <div className={`relative backdrop-blur-md bg-background opacity-95 border border-border dark:border-border/30 rounded-xl p-2 md:p-3 mb-4 md:mb-1 w-full ${hasPendingPermissionForSession ? 'border-highlight/50 ring-1 ring-highlight/30' : composerModeStyle?.frame ?? ''} ${isTakeoverOpen ? 'z-[60]' : ''}`}>
+    <div className={`relative isolate border border-border dark:border-border/30 rounded-xl p-2 md:p-3 mb-4 md:mb-1 w-full before:pointer-events-none before:absolute before:-inset-px before:-z-10 before:rounded-xl before:bg-background/95 before:backdrop-blur-md before:content-[''] ${hasPendingPermissionForSession ? 'border-highlight/50 ring-1 ring-highlight/30' : composerModeStyle?.frame ?? ''} ${isTakeoverOpen ? 'z-[60]' : ''}`}>
       {composerModeStyle && (
         <span
           data-testid="composer-mode-badge"

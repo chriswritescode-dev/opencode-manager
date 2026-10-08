@@ -495,6 +495,19 @@ describe('PromptInput command submission', () => {
     await waitFor(() => expect(suggestionProps.selectedIndex).toBe(0))
   })
 
+  it('keeps the composer frame out of a compositing layer so the iOS caret stays aligned', async () => {
+    renderComponent()
+
+    const input = await screen.findByPlaceholderText('Send a message...')
+    const frame = input.parentElement as HTMLElement
+    const tokens = frame.className.split(/\s+/)
+
+    expect(tokens).not.toContain('transition-all')
+    expect(tokens.some((token) => token.startsWith('backdrop-blur'))).toBe(false)
+    expect(tokens.some((token) => token.startsWith('opacity-'))).toBe(false)
+    expect(tokens).toContain('before:backdrop-blur-md')
+  })
+
   describe('mobile keybar', () => {
     beforeEach(() => {
       mocks.useMobile.mockReturnValue(true)
