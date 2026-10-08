@@ -386,7 +386,7 @@ export function GlobalSchedules() {
   const selectedRunLookupError = selectedRunMissing && selectedRunError && selectedRun === null
 
   return (
-    <div className="h-dvh max-h-dvh overflow-hidden bg-background flex flex-col">
+    <div className="h-full max-h-full overflow-hidden bg-background flex flex-col">
       <Header>
         <Header.BackButton to="/" />
         <div className="min-w-0 flex-1 px-3">

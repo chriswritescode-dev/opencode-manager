@@ -659,7 +659,7 @@ export function SessionDetail() {
 
   return (
     <div
-      className="h-dvh max-h-dvh overflow-hidden bg-gradient-to-br from-background via-background to-background flex flex-col"
+      className="h-full max-h-full overflow-hidden bg-gradient-to-br from-background via-background to-background flex flex-col"
     >
       <div
         data-testid="session-header-region"

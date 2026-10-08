@@ -24,8 +24,8 @@ export function Repos() {
   };
 
   return (
-    <div className="flex h-dvh max-h-dvh min-w-0">
-    <div className="flex-1 min-w-0 h-dvh max-h-dvh overflow-hidden bg-gradient-to-br from-background via-background to-background flex flex-col">
+    <div className="flex h-full max-h-full min-w-0">
+    <div className="flex-1 min-w-0 h-full max-h-full overflow-hidden bg-gradient-to-br from-background via-background to-background flex flex-col">
       <Header>
         <div className="flex items-center gap-3">
           <Header.Title logo>OpenCode</Header.Title>

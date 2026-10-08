@@ -136,13 +136,14 @@ describe('ChangesWalkthroughSheet', () => {
     Element.prototype.setPointerCapture ??= () => {}
     Element.prototype.releasePointerCapture ??= () => {}
     Element.prototype.scrollIntoView ??= () => {}
+    Element.prototype.scrollTo ??= () => {}
   })
 
   beforeEach(() => {
     vi.clearAllMocks()
   })
 
-  it('generates a walkthrough and renders the summary and first stop', async () => {
+  it('generates a walkthrough and opens on the overview page', async () => {
     const user = userEvent.setup()
     let generated = false
     mocks.getChangeWalkthrough.mockImplementation(async () =>
@@ -161,33 +162,73 @@ describe('ChangesWalkthroughSheet', () => {
       expect(mocks.generateChangeWalkthrough).toHaveBeenCalledWith('ses_1', { source: { kind: 'session' } })
     })
     expect(await screen.findByText('This change adds a greeting.')).toBeInTheDocument()
-    expect(screen.getByText('Stop 1 of 2')).toBeInTheDocument()
-    expect(screen.getByText('src/greet.ts')).toBeInTheDocument()
-    expect(screen.getByText('const a = 2')).toBeInTheDocument()
-    expect(screen.queryByText('src/main.ts')).not.toBeInTheDocument()
+    expect(screen.getByText('Overview')).toBeInTheDocument()
+    expect(screen.getByRole('button', { name: '1. Add the greeting' })).toBeInTheDocument()
+    expect(screen.getByRole('button', { name: '2. Wire it up' })).toBeInTheDocument()
+    expect(screen.queryByText('src/greet.ts')).not.toBeInTheDocument()
     expect(screen.getByText('assets/logo.png — binary file')).toBeInTheDocument()
   })
 
-  it('moves through the stops with the navigator in order', async () => {
+  it('opens a stop from the overview list without the summary or list', async () => {
     const user = userEvent.setup()
     mocks.getChangeWalkthrough.mockResolvedValue(state())
     renderSheet()
 
-    expect(await screen.findByText('Stop 1 of 2')).toBeInTheDocument()
-    expect(screen.getByText('src/greet.ts')).toBeInTheDocument()
+    await user.click(await screen.findByRole('button', { name: '2. Wire it up' }))
+
+    expect(await screen.findByText('2 of 2')).toBeInTheDocument()
+    expect(screen.getByText('src/main.ts')).toBeInTheDocument()
+    expect(screen.queryByText('This change adds a greeting.')).not.toBeInTheDocument()
+    expect(screen.queryByRole('button', { name: '1. Add the greeting' })).not.toBeInTheDocument()
+  })
+
+  it('jumps between pages from the header dropdown', async () => {
+    const user = userEvent.setup()
+    mocks.getChangeWalkthrough.mockResolvedValue(state())
+    renderSheet()
+
+    await user.click(await screen.findByRole('button', { name: '1. Add the greeting' }))
+    expect(await screen.findByText('1 of 2')).toBeInTheDocument()
+
+    await user.click(screen.getByRole('button', { name: 'Jump to page' }))
+    await user.click(await screen.findByRole('menuitemradio', { name: '2. Wire it up' }))
+    expect(await screen.findByText('2 of 2')).toBeInTheDocument()
+    expect(screen.getByText('src/main.ts')).toBeInTheDocument()
+
+    await user.click(screen.getByRole('button', { name: 'Jump to page' }))
+    await user.click(await screen.findByRole('menuitemradio', { name: 'Overview' }))
+    expect(await screen.findByText('This change adds a greeting.')).toBeInTheDocument()
+  })
+
+  it('moves through the overview and stops with the navigator in order', async () => {
+    const user = userEvent.setup()
+    mocks.getChangeWalkthrough.mockResolvedValue(state())
+    renderSheet()
+
+    expect(await screen.findByText('Overview')).toBeInTheDocument()
     expect(screen.getByRole('button', { name: /previous/i })).toBeDisabled()
 
     await user.click(screen.getByRole('button', { name: /next/i }))
 
-    expect(await screen.findByText('Stop 2 of 2')).toBeInTheDocument()
+    expect(await screen.findByText('1 of 2')).toBeInTheDocument()
+    expect(screen.getByText('src/greet.ts')).toBeInTheDocument()
+    expect(screen.getByText('const a = 2')).toBeInTheDocument()
+    expect(screen.queryByText('This change adds a greeting.')).not.toBeInTheDocument()
+
+    await user.click(screen.getByRole('button', { name: /next/i }))
+
+    expect(await screen.findByText('2 of 2')).toBeInTheDocument()
     expect(screen.getByText('src/main.ts')).toBeInTheDocument()
     expect(screen.queryByText('src/greet.ts')).not.toBeInTheDocument()
     expect(screen.getByText('truncated')).toBeInTheDocument()
     expect(screen.getByRole('button', { name: /next/i })).toBeDisabled()
 
     await user.click(screen.getByRole('button', { name: /previous/i }))
+    expect(await screen.findByText('1 of 2')).toBeInTheDocument()
 
-    expect(await screen.findByText('Stop 1 of 2')).toBeInTheDocument()
+    await user.click(screen.getByRole('button', { name: /previous/i }))
+    expect(await screen.findByText('Overview')).toBeInTheDocument()
+    expect(screen.getByText('This change adds a greeting.')).toBeInTheDocument()
   })
 
   it('updates a stale walkthrough incrementally', async () => {
@@ -213,7 +254,7 @@ describe('ChangesWalkthroughSheet', () => {
     mocks.generateChangeWalkthrough.mockResolvedValue(state())
     renderSheet()
 
-    await screen.findByText('Stop 1 of 2')
+    await screen.findByText('Overview')
     await user.click(screen.getByRole('button', { name: 'Regenerate walkthrough' }))
 
     await waitFor(() => {
@@ -354,6 +395,27 @@ describe('ChangesWalkthroughSheet', () => {
     expect(await screen.findByRole('button', { name: 'Generate walkthrough' })).toBeVisible()
   })
 
+  it('scrolls back to the top of the overview when a walkthrough is regenerated', async () => {
+    const user = userEvent.setup()
+    const scrollTo = vi.spyOn(Element.prototype, 'scrollTo')
+    let createdAt = 1
+    mocks.getChangeWalkthrough.mockImplementation(async () => state({ walkthrough: { ...walkthrough, createdAt } }))
+    mocks.generateChangeWalkthrough.mockImplementation(async () => {
+      createdAt = 2
+      return state({ walkthrough: { ...walkthrough, createdAt } })
+    })
+    renderSheet()
+
+    await user.click(await screen.findByRole('button', { name: '1. Add the greeting' }))
+    expect(await screen.findByText('1 of 2')).toBeInTheDocument()
+
+    scrollTo.mockClear()
+    await user.click(screen.getByRole('button', { name: 'Regenerate walkthrough' }))
+
+    await waitFor(() => expect(scrollTo).toHaveBeenCalledWith({ top: 0 }))
+    expect(await screen.findByText('Overview')).toBeInTheDocument()
+  })
+
   it('shows progress while the server is generating instead of the generate button', async () => {
     mocks.getChangeWalkthrough.mockResolvedValue(state({ walkthrough: null, generating: true }))
     renderSheet()
@@ -363,6 +425,7 @@ describe('ChangesWalkthroughSheet', () => {
   })
 
   it('renders ready and pending stops while generating', async () => {
+    const user = userEvent.setup()
     mocks.getChangeWalkthrough.mockResolvedValue(
       state({
         generating: true,
@@ -377,9 +440,12 @@ describe('ChangesWalkthroughSheet', () => {
     )
     renderSheet()
 
-    expect(await screen.findByText('Introduces the greeting helper.')).toBeInTheDocument()
-    expect(screen.getByText(/1 of 2 stops explained/)).toBeInTheDocument()
+    expect(await screen.findByText(/1 of 2 stops explained/)).toBeInTheDocument()
+    expect(screen.getByRole('button', { name: '1. Add the greeting' })).toBeInTheDocument()
     expect(screen.getByLabelText('Explaining')).toBeInTheDocument()
+
+    await user.click(screen.getByRole('button', { name: '1. Add the greeting' }))
+    expect(await screen.findByText('Introduces the greeting helper.')).toBeInTheDocument()
   })
 
   it('retries unexplained stops', async () => {
@@ -398,6 +464,7 @@ describe('ChangesWalkthroughSheet', () => {
     mocks.generateChangeWalkthrough.mockResolvedValue(state({ generating: true }))
     renderSheet()
 
+    await user.click(await screen.findByRole('button', { name: /1\. Add the greeting/ }))
     expect(await screen.findByText('This stop could not be explained.')).toBeInTheDocument()
     await user.click(screen.getByRole('button', { name: 'Retry unexplained stops' }))
 
@@ -484,9 +551,11 @@ describe('ChangesWalkthroughSheet', () => {
   })
 
   it('renders mechanical files as a compact summary list with counts and diff text for budgeted hunks', async () => {
+    const user = userEvent.setup()
     mocks.getChangeWalkthrough.mockResolvedValue(state({ walkthrough: mechanicalWalkthrough }))
     renderSheet()
 
+    await user.click(await screen.findByRole('button', { name: '1. Mechanical changes' }))
     expect(
       await screen.findByRole('list', { name: 'Mechanical file summaries' }),
     ).toBeInTheDocument()
@@ -501,6 +570,7 @@ describe('ChangesWalkthroughSheet', () => {
   })
 
   it('renders a stored mechanical stop whose hunks predate hunk counts', async () => {
+    const user = userEvent.setup()
     mocks.getChangeWalkthrough.mockResolvedValue(
       state({
         walkthrough: {
@@ -531,6 +601,7 @@ describe('ChangesWalkthroughSheet', () => {
     )
     renderSheet()
 
+    await user.click(await screen.findByRole('button', { name: '1. Mechanical changes' }))
     expect(await screen.findByText('pnpm-lock.yaml')).toBeInTheDocument()
     expect(screen.getByText('new-lock')).toBeInTheDocument()
     expect(screen.queryByRole('list', { name: 'Mechanical file summaries' })).not.toBeInTheDocument()
@@ -550,9 +621,12 @@ describe('ChangesWalkthroughSheet', () => {
         },
       }),
     )
+    const user = userEvent.setup()
     const { container } = renderSheet()
 
     expect(await screen.findByText(/Summary/)).toBeInTheDocument()
+    expect(container.querySelector('iframe')).toBeNull()
+    await user.click(screen.getByRole('button', { name: /next/i }))
     expect(await screen.findByText(/Explanation/)).toBeInTheDocument()
     expect(container.querySelector('iframe')).toBeNull()
     expect(container.querySelector('script')).toBeNull()
