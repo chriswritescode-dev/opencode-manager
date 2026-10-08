@@ -62,7 +62,7 @@ describe('warmRepoProxy', () => {
 
     expect(error).toBeInstanceOf(ManagerTooOldError)
     expect((error as Error).message).toBe(
-      `OpenCode Manager at ${managerUrl} is too old for ocm 0.3.0; upgrade the Manager to >= ${MIN_MANAGER_VERSION}`,
+      `OpenCode Manager at ${managerUrl} is too old for ocm ${packageJson.version}; upgrade the Manager to >= ${MIN_MANAGER_VERSION}`,
     )
     expect(MIN_MANAGER_VERSION).toBe('0.19.0')
     expect(fetchMock).toHaveBeenCalledTimes(1)
