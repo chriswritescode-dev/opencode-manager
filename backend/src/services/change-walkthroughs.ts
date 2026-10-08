@@ -76,6 +76,17 @@ export function computeChangesHash(changes: FileDiffInfo[]): string {
   return hash.digest('hex')
 }
 
+export function computeHunkId(file: string, status: FileDiffInfo['status'], hunkText: string): string {
+  const body = hunkText.split('\n').slice(1).join('\n')
+  const digest = createHash('sha256').update(`${file}\0${status}\0${body}`).digest('hex')
+  return `h_${digest.slice(0, 12)}`
+}
+
+export function computeStopId(hunkIds: string[]): string {
+  const digest = createHash('sha256').update([...hunkIds].sort().join('\n')).digest('hex')
+  return `s_${digest.slice(0, 12)}`
+}
+
 export function buildWalkthroughInstructions(title: string): string {
   return [
     `You are writing a change walkthrough for a reviewer who reads it top to bottom to understand the change to "${title}".`,
@@ -99,10 +110,11 @@ export function formatHunkBlock(hunk: WalkthroughHunk): string {
 export function buildWalkthroughInput(changes: FileDiffInfo[], title: string): WalkthroughInput {
   const hunks: WalkthroughHunk[] = []
   const omittedFiles: WalkthroughOmittedFile[] = []
+  const hunkIdCounts = new Map<string, number>()
   let total = buildWalkthroughInstructions(title).length
   let budgetExhausted = false
 
-  changes.forEach((change, fileIndex) => {
+  changes.forEach((change) => {
     if (budgetExhausted) {
       omittedFiles.push({ file: change.file, reason: 'budget' })
       return
@@ -114,10 +126,13 @@ export function buildWalkthroughInput(changes: FileDiffInfo[], title: string): W
       return
     }
 
-    const prepared = fileHunks.map((hunk, hunkIndex) => {
+    const prepared = fileHunks.map((hunk) => {
       const truncated = truncateText(hunk.text, WALKTHROUGH_HUNK_MAX_CHARS, HUNK_TRUNCATION_MARKER)
+      const baseId = computeHunkId(change.file, change.status, hunk.text)
+      const count = (hunkIdCounts.get(baseId) ?? 0) + 1
+      hunkIdCounts.set(baseId, count)
       return {
-        id: `f${fileIndex}h${hunkIndex}`,
+        id: count === 1 ? baseId : `${baseId}_${count}`,
         file: change.file,
         status: change.status,
         header: hunk.header,
@@ -188,9 +203,12 @@ export function parseWalkthroughResponse(text: string, hunks: WalkthroughHunk[])
     }
 
     stops.push({
+      id: computeStopId(hunkIds),
       title: truncateText(modelStop.title, WALKTHROUGH_TEXT_MAX_CHARS, TEXT_TRUNCATION_MARKER).text,
       explanation: truncateText(modelStop.explanation, WALKTHROUGH_TEXT_MAX_CHARS, TEXT_TRUNCATION_MARKER).text,
       hunkIds,
+      status: 'ready',
+      explanationKey: null,
     })
   }
 
@@ -201,9 +219,12 @@ export function parseWalkthroughResponse(text: string, hunks: WalkthroughHunk[])
   const unreferenced = hunks.filter((hunk) => !referenced.has(hunk.id)).map((hunk) => hunk.id)
   if (unreferenced.length > 0) {
     stops.push({
+      id: computeStopId(unreferenced),
       title: REMAINING_STOP_TITLE,
       explanation: REMAINING_STOP_EXPLANATION,
       hunkIds: unreferenced,
+      status: 'ready',
+      explanationKey: null,
     })
   }
 

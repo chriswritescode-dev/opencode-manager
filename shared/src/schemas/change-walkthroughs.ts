@@ -17,12 +17,17 @@ export const WalkthroughHunkSchema = z.object({
 export type WalkthroughHunk = z.infer<typeof WalkthroughHunkSchema>;
 
 export const WalkthroughStopSchema = z.object({
+  id: z.string(),
   title: z.string(),
   explanation: z.string(),
   hunkIds: z.array(z.string()),
+  status: z.enum(["pending", "ready", "failed"]),
+  explanationKey: z.string().nullable(),
 });
 
 export type WalkthroughStop = z.infer<typeof WalkthroughStopSchema>;
+
+export type WalkthroughStopStatus = WalkthroughStop["status"];
 
 export const WalkthroughOmittedFileSchema = z.object({
   file: z.string(),

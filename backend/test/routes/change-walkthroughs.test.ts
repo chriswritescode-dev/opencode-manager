@@ -4,7 +4,7 @@ import { Database } from 'bun:sqlite'
 import type { FileDiffInfo, SessionInfo } from '@opencode-manager/shared/opencode'
 import { migrate } from '../../src/db/migration-runner'
 import { allMigrations } from '../../src/db/migrations'
-import { ChangeWalkthroughService } from '../../src/services/change-walkthroughs'
+import { ChangeWalkthroughService, computeHunkId } from '../../src/services/change-walkthroughs'
 import { createChangeWalkthroughRoutes } from '../../src/routes/change-walkthroughs'
 import type { OpenCodeClient } from '../../src/services/opencode/client'
 import { stubLoadedModelCatalog } from '../helpers/stub-opencode-client'
@@ -17,9 +17,11 @@ function change(file: string, patch: string, status: FileDiffInfo['status'] = 'm
 
 const CHANGES: FileDiffInfo[] = [change('src/a.ts', '@@ -1,2 +1,2 @@\n-const a = 1;\n+const a = 2;')]
 
+const HUNK_ID = computeHunkId(CHANGES[0]!.file, CHANGES[0]!.status, CHANGES[0]!.patch)
+
 const MODEL_REPLY = JSON.stringify({
   summary: 'A summary',
-  stops: [{ title: 'First', explanation: 'Why', hunkIds: ['f0h0'] }],
+  stops: [{ title: 'First', explanation: 'Why', hunkIds: [HUNK_ID] }],
 })
 
 interface FakeSession {

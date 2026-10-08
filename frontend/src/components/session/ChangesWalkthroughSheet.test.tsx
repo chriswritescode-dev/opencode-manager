@@ -22,8 +22,22 @@ const walkthrough: ChangeWalkthrough = {
   diffHash: 'hash-1',
   summary: 'This change adds a greeting.',
   stops: [
-    { title: 'Add the greeting', explanation: 'Introduces the greeting helper.', hunkIds: ['f0h0'] },
-    { title: 'Wire it up', explanation: 'Calls the helper from the entry point.', hunkIds: ['f1h0'] },
+    {
+      id: 's_greet',
+      title: 'Add the greeting',
+      explanation: 'Introduces the greeting helper.',
+      hunkIds: ['f0h0'],
+      status: 'ready',
+      explanationKey: null,
+    },
+    {
+      id: 's_wire',
+      title: 'Wire it up',
+      explanation: 'Calls the helper from the entry point.',
+      hunkIds: ['f1h0'],
+      status: 'ready',
+      explanationKey: null,
+    },
   ],
   hunks: [
     {
@@ -233,7 +247,9 @@ describe('ChangesWalkthroughSheet', () => {
         walkthrough: {
           ...walkthrough,
           summary: `Summary ${payload}`,
-          stops: [{ title: 'Stop', explanation: `Explanation ${payload}`, hunkIds: ['f0h0'] }],
+          stops: [
+            { id: 's_x', title: 'Stop', explanation: `Explanation ${payload}`, hunkIds: ['f0h0'], status: 'ready', explanationKey: null },
+          ],
         },
       }),
     )

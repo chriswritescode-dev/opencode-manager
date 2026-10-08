@@ -20,6 +20,8 @@ import {
   buildWalkthroughInput,
   buildWalkthroughPrompt,
   computeChangesHash,
+  computeHunkId,
+  computeStopId,
   parseWalkthroughResponse,
 } from '../../src/services/change-walkthroughs'
 
@@ -47,6 +49,28 @@ function modelReply(
 ): string {
   return JSON.stringify({ summary, stops })
 }
+
+function hunkFixture(file: string, text: string, status: FileDiffInfo['status'] = 'modified'): WalkthroughHunk {
+  return {
+    id: computeHunkId(file, status, text),
+    file,
+    status,
+    header: text.split('\n')[0] ?? '',
+    text,
+    truncated: false,
+  }
+}
+
+const THREE_HUNKS: FileDiffInfo[] = [
+  change('src/a.ts', `${hunkPatch(1)}\n${hunkPatch(10)}`),
+  change('src/b.ts', hunkPatch(1)),
+]
+
+const THREE_HUNK_IDS = [
+  computeHunkId('src/a.ts', 'modified', hunkPatch(1)),
+  computeHunkId('src/a.ts', 'modified', hunkPatch(10)),
+  computeHunkId('src/b.ts', 'modified', hunkPatch(1)),
+]
 
 interface FakeSession {
   info?: SessionInfo | Error
@@ -148,7 +172,7 @@ describe('computeChangesHash', () => {
 })
 
 describe('buildWalkthroughInput', () => {
-  it('assigns file and hunk ordered ids', () => {
+  it('assigns a distinct content id and the file to each hunk', () => {
     const { hunks, omittedFiles } = buildWalkthroughInput(
       [
         change('src/a.ts', `${hunkPatch(1)}\n${hunkPatch(10)}`),
@@ -158,8 +182,47 @@ describe('buildWalkthroughInput', () => {
     )
 
     expect(omittedFiles).toEqual([])
-    expect(hunks.map((hunk) => hunk.id)).toEqual(['f0h0', 'f0h1', 'f1h0'])
     expect(hunks.map((hunk) => hunk.file)).toEqual(['src/a.ts', 'src/a.ts', 'src/b.ts'])
+    const ids = hunks.map((hunk) => hunk.id)
+    expect(ids.every((id) => id.startsWith('h_'))).toBe(true)
+    expect(new Set(ids).size).toBe(3)
+  })
+
+  it('keeps a hunk id when an earlier hunk in the file changes', () => {
+    const before = buildWalkthroughInput(
+      [
+        change(
+          'src/a.ts',
+          '@@ -1,2 +1,2 @@\n-const a = 1;\n+const a = 2;\n@@ -10,2 +10,2 @@\n-const b = 1;\n+const b = 2;',
+        ),
+      ],
+      'My session',
+    )
+    const after = buildWalkthroughInput(
+      [
+        change(
+          'src/a.ts',
+          '@@ -1,3 +1,3 @@\n-const a = 1;\n+const a = 2;\n+const extra = 3;\n@@ -11,2 +11,2 @@\n-const b = 1;\n+const b = 2;',
+        ),
+      ],
+      'My session',
+    )
+
+    expect(before.hunks).toHaveLength(2)
+    expect(after.hunks).toHaveLength(2)
+    expect(after.hunks[0]!.id).not.toBe(before.hunks[0]!.id)
+    expect(after.hunks[1]!.id).toBe(before.hunks[1]!.id)
+  })
+
+  it('suffixes duplicate hunk content', () => {
+    const { hunks } = buildWalkthroughInput(
+      [change('src/a.ts', `${hunkPatch(1)}\n${hunkPatch(1)}`)],
+      'My session',
+    )
+
+    expect(hunks).toHaveLength(2)
+    expect(hunks[0]!.id).not.toBe(hunks[1]!.id)
+    expect(hunks[1]!.id).toBe(`${hunks[0]!.id}_2`)
   })
 
   it('omits files with no hunks as binary', () => {
@@ -232,21 +295,12 @@ describe('buildWalkthroughInput', () => {
 })
 
 describe('buildWalkthroughPrompt', () => {
-  const hunks: WalkthroughHunk[] = [
-    {
-      id: 'f0h0',
-      file: 'src/a.ts',
-      status: 'modified',
-      header: '@@ -1,2 +1,2 @@',
-      text: hunkPatch(1),
-      truncated: false,
-    },
-  ]
+  const hunks: WalkthroughHunk[] = [hunkFixture('src/a.ts', hunkPatch(1))]
 
   it('lists every hunk with its id, file and status in a diff block', () => {
     const prompt = buildWalkthroughPrompt({ title: 'My session', hunks })
 
-    expect(prompt).toContain('### f0h0 src/a.ts (modified)')
+    expect(prompt).toContain(`### ${hunks[0]!.id} src/a.ts (modified)`)
     expect(prompt).toContain('```diff')
     expect(prompt).toContain(hunkPatch(1))
     expect(prompt).toContain('My session')
@@ -261,32 +315,32 @@ describe('buildWalkthroughPrompt', () => {
 })
 
 describe('parseWalkthroughResponse', () => {
-  const hunks: WalkthroughHunk[] = ['f0h0', 'f0h1', 'f1h0'].map((id, index) => ({
-    id,
-    file: index === 2 ? 'src/b.ts' : 'src/a.ts',
-    status: 'modified',
-    header: '@@ -1,2 +1,2 @@',
-    text: hunkPatch(index + 1),
-    truncated: false,
-  }))
+  const hunks: WalkthroughHunk[] = [
+    hunkFixture('src/a.ts', hunkPatch(1)),
+    hunkFixture('src/a.ts', hunkPatch(2)),
+    hunkFixture('src/b.ts', hunkPatch(3)),
+  ]
+  const idA0 = hunks[0]!.id
+  const idA1 = hunks[1]!.id
+  const idB0 = hunks[2]!.id
 
   it('drops unknown ids and repeat references, first occurrence wins', () => {
     const parsed = parseWalkthroughResponse(
       modelReply([
-        { title: 'A', explanation: 'first', hunkIds: ['f0h0', 'nope'] },
-        { title: 'B', explanation: 'second', hunkIds: ['f0h0', 'f0h1'] },
+        { title: 'A', explanation: 'first', hunkIds: [idA0, 'nope'] },
+        { title: 'B', explanation: 'second', hunkIds: [idA0, idA1] },
       ]),
       hunks,
     )
 
-    expect(parsed?.stops.map((stop) => stop.hunkIds)).toEqual([['f0h0'], ['f0h1'], ['f1h0']])
+    expect(parsed?.stops.map((stop) => stop.hunkIds)).toEqual([[idA0], [idA1], [idB0]])
   })
 
   it('drops stops left empty', () => {
     const parsed = parseWalkthroughResponse(
       modelReply([
         { title: 'A', explanation: 'first', hunkIds: ['nope'] },
-        { title: 'B', explanation: 'second', hunkIds: ['f0h0', 'f0h1', 'f1h0'] },
+        { title: 'B', explanation: 'second', hunkIds: [idA0, idA1, idB0] },
       ]),
       hunks,
     )
@@ -296,20 +350,23 @@ describe('parseWalkthroughResponse', () => {
 
   it('appends unreferenced hunks as a final remaining stop', () => {
     const parsed = parseWalkthroughResponse(
-      modelReply([{ title: 'A', explanation: 'first', hunkIds: ['f0h0'] }]),
+      modelReply([{ title: 'A', explanation: 'first', hunkIds: [idA0] }]),
       hunks,
     )
 
     expect(parsed?.stops.at(-1)).toEqual({
+      id: computeStopId([idA1, idB0]),
       title: 'Remaining changes',
       explanation: 'These changes were not covered by the generated walkthrough.',
-      hunkIds: ['f0h1', 'f1h0'],
+      hunkIds: [idA1, idB0],
+      status: 'ready',
+      explanationKey: null,
     })
   })
 
   it('does not append a remaining stop when every hunk is covered', () => {
     const parsed = parseWalkthroughResponse(
-      modelReply([{ title: 'A', explanation: 'first', hunkIds: ['f0h0', 'f0h1', 'f1h0'] }]),
+      modelReply([{ title: 'A', explanation: 'first', hunkIds: [idA0, idA1, idB0] }]),
       hunks,
     )
 
@@ -320,14 +377,7 @@ describe('parseWalkthroughResponse', () => {
   it('caps model stops and text lengths', () => {
     const manyHunks: WalkthroughHunk[] = Array.from(
       { length: WALKTHROUGH_MAX_STOPS + 5 },
-      (_, index) => ({
-        id: `f0h${index}`,
-        file: 'src/a.ts',
-        status: 'modified',
-        header: '@@ -1 +1 @@',
-        text: hunkPatch(index),
-        truncated: false,
-      }),
+      (_, index) => hunkFixture('src/a.ts', hunkPatch(index)),
     )
     const stops = manyHunks.map((hunk, index) => ({
       title: `Stop ${index}`,
@@ -362,10 +412,7 @@ describe('ChangeWalkthroughService', () => {
   let fake: ReturnType<typeof createFakeClient>
   let service: ChangeWalkthroughService
 
-  const threeHunks: FileDiffInfo[] = [
-    change('src/a.ts', `${hunkPatch(1)}\n${hunkPatch(10)}`),
-    change('src/b.ts', hunkPatch(1)),
-  ]
+  const threeHunks: FileDiffInfo[] = THREE_HUNKS
 
   beforeEach(() => {
     db = createTestDb()
@@ -393,7 +440,7 @@ describe('ChangeWalkthroughService', () => {
   })
 
   it('reports stale when the changes differ from the stored hash', async () => {
-    fake.setGenerateImpl(async () => modelReply([{ title: 'A', explanation: 'x', hunkIds: ['f0h0', 'f0h1', 'f1h0'] }]))
+    fake.setGenerateImpl(async () => modelReply([{ title: 'A', explanation: 'x', hunkIds: THREE_HUNK_IDS }]))
     await service.generate(SESSION_ID, {})
 
     sessions[SESSION_ID]!.changes = [change('src/a.ts', hunkPatch(99))]
@@ -431,7 +478,7 @@ describe('ChangeWalkthroughService', () => {
     expect(diff.mock.calls.length).toBe(diffCalls)
     expect(messages.mock.calls.length).toBe(messageCalls)
 
-    resolveGenerate(modelReply([{ title: 'A', explanation: 'x', hunkIds: ['f0h0', 'f0h1', 'f1h0'] }]))
+    resolveGenerate(modelReply([{ title: 'A', explanation: 'x', hunkIds: THREE_HUNK_IDS }]))
     await pending
   })
 
@@ -444,7 +491,7 @@ describe('ChangeWalkthroughService', () => {
   })
 
   it('recomputes the hash after session.execution.succeeded', async () => {
-    fake.setGenerateImpl(async () => modelReply([{ title: 'A', explanation: 'x', hunkIds: ['f0h0', 'f0h1', 'f1h0'] }]))
+    fake.setGenerateImpl(async () => modelReply([{ title: 'A', explanation: 'x', hunkIds: THREE_HUNK_IDS }]))
     await service.generate(SESSION_ID, {})
 
     await service.getState(SESSION_ID)
@@ -461,19 +508,19 @@ describe('ChangeWalkthroughService', () => {
   })
 
   it('stores stops covering every hunk exactly once', async () => {
-    fake.setGenerateImpl(async () => modelReply([{ title: 'A', explanation: 'x', hunkIds: ['f0h0', 'f1h0'] }]))
+    fake.setGenerateImpl(async () => modelReply([{ title: 'A', explanation: 'x', hunkIds: [THREE_HUNK_IDS[0]!, THREE_HUNK_IDS[2]!] }]))
 
     const { walkthrough, created } = await service.generate(SESSION_ID, {})
 
     expect(created).toBe(true)
     const ids = walkthrough.stops.flatMap((stop) => stop.hunkIds)
     expect(new Set(ids).size).toBe(ids.length)
-    expect(new Set(ids)).toEqual(new Set(['f0h0', 'f0h1', 'f1h0']))
+    expect(new Set(ids)).toEqual(new Set(THREE_HUNK_IDS))
     expect(walkthrough.stops.at(-1)!.title).toBe('Remaining changes')
   })
 
   it('returns the stored walkthrough without a model call when changes are unchanged', async () => {
-    fake.setGenerateImpl(async () => modelReply([{ title: 'A', explanation: 'x', hunkIds: ['f0h0', 'f0h1', 'f1h0'] }]))
+    fake.setGenerateImpl(async () => modelReply([{ title: 'A', explanation: 'x', hunkIds: THREE_HUNK_IDS }]))
     const first = await service.generate(SESSION_ID, {})
 
     const second = await service.generate(SESSION_ID, {})
@@ -484,7 +531,7 @@ describe('ChangeWalkthroughService', () => {
   })
 
   it('calls the model again when regenerate is set', async () => {
-    fake.setGenerateImpl(async () => modelReply([{ title: 'A', explanation: 'x', hunkIds: ['f0h0', 'f0h1', 'f1h0'] }]))
+    fake.setGenerateImpl(async () => modelReply([{ title: 'A', explanation: 'x', hunkIds: THREE_HUNK_IDS }]))
     await service.generate(SESSION_ID, {})
 
     await service.generate(SESSION_ID, { regenerate: true })
@@ -498,7 +545,7 @@ describe('ChangeWalkthroughService', () => {
       title: 'Title',
       model: { providerID: 'anthropic', id: 'claude-sonnet-4' },
     } as SessionInfo
-    fake.setGenerateImpl(async () => modelReply([{ title: 'A', explanation: 'x', hunkIds: ['f0h0', 'f0h1', 'f1h0'] }]))
+    fake.setGenerateImpl(async () => modelReply([{ title: 'A', explanation: 'x', hunkIds: THREE_HUNK_IDS }]))
 
     await service.generate(SESSION_ID, {})
 
@@ -506,7 +553,7 @@ describe('ChangeWalkthroughService', () => {
   })
 
   it('falls back to the resolved default when the session has no model', async () => {
-    fake.setGenerateImpl(async () => modelReply([{ title: 'A', explanation: 'x', hunkIds: ['f0h0', 'f0h1', 'f1h0'] }]))
+    fake.setGenerateImpl(async () => modelReply([{ title: 'A', explanation: 'x', hunkIds: THREE_HUNK_IDS }]))
 
     await service.generate(SESSION_ID, {})
 
@@ -522,7 +569,7 @@ describe('ChangeWalkthroughService', () => {
 
     const first = service.generate(SESSION_ID, {})
     const second = service.generate(SESSION_ID, {})
-    resolveGenerate(modelReply([{ title: 'A', explanation: 'x', hunkIds: ['f0h0', 'f0h1', 'f1h0'] }]))
+    resolveGenerate(modelReply([{ title: 'A', explanation: 'x', hunkIds: THREE_HUNK_IDS }]))
 
     const [firstResult, secondResult] = await Promise.all([first, second])
     expect(firstResult).toBe(secondResult)
@@ -604,7 +651,7 @@ describe('ChangeWalkthroughService', () => {
   })
 
   describe('startGeneration', () => {
-    const coveringReply = modelReply([{ title: 'A', explanation: 'x', hunkIds: ['f0h0', 'f0h1', 'f1h0'] }])
+    const coveringReply = modelReply([{ title: 'A', explanation: 'x', hunkIds: THREE_HUNK_IDS }])
 
     it('reports generating while the model call is pending, then the stored walkthrough', async () => {
       let resolveGenerate: (text: string) => void = () => {}
@@ -678,7 +725,7 @@ describe('ChangeWalkthroughService', () => {
   })
 
   describe('handleEvent', () => {
-    const coveringReply = modelReply([{ title: 'A', explanation: 'x', hunkIds: ['f0h0', 'f0h1', 'f1h0'] }])
+    const coveringReply = modelReply([{ title: 'A', explanation: 'x', hunkIds: THREE_HUNK_IDS }])
 
     it('deletes the stored walkthrough when its session is deleted', async () => {
       fake.setGenerateImpl(async () => coveringReply)

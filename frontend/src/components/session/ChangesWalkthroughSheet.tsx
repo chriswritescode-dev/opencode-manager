@@ -276,7 +276,7 @@ export const ChangesWalkthroughView = memo(function ChangesWalkthroughView() {
           {stops.length > 0 ? (
             <ol className="space-y-0.5">
               {stops.map((stop, index) => (
-                <li key={index}>
+                <li key={stop.id}>
                   <button
                     type="button"
                     onClick={() => selectStop(index)}

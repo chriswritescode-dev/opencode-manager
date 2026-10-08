@@ -17,10 +17,12 @@ function walkthrough(overrides: Partial<ChangeWalkthrough> = {}): ChangeWalkthro
     sessionId: SESSION_ID,
     diffHash: 'hash-1',
     summary: 'A short summary',
-    stops: [{ title: 'First stop', explanation: 'Why it matters', hunkIds: ['f0h0'] }],
+    stops: [
+      { id: 's_1', title: 'First stop', explanation: 'Why it matters', hunkIds: ['h_1'], status: 'ready', explanationKey: null },
+    ],
     hunks: [
       {
-        id: 'f0h0',
+        id: 'h_1',
         file: 'src/app.ts',
         status: 'modified',
         header: '@@ -1,2 +1,2 @@',
