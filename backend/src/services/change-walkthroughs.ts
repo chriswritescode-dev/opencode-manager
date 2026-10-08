@@ -11,6 +11,8 @@ import {
   WALKTHROUGH_DIFF_MAX_CHARS,
   WALKTHROUGH_HUNK_MAX_CHARS,
   WALKTHROUGH_MAX_STOPS,
+  WALKTHROUGH_OUTLINE_LINE_MAX_CHARS,
+  WALKTHROUGH_OUTLINE_PREVIEW_LINES,
   WALKTHROUGH_TEXT_MAX_CHARS,
   type ChangeWalkthrough,
   type ChangeWalkthroughState,
@@ -125,13 +127,21 @@ export function computeStopId(hunkIds: string[]): string {
   return `s_${digest.slice(0, 12)}`
 }
 
-export function buildWalkthroughInstructions(title: string): string {
+export function buildWalkthroughPreamble(title: string): string {
   return [
     `You are writing a change walkthrough for a reviewer who reads it top to bottom to understand the change to "${title}".`,
     '## How to write the walkthrough',
     [
       '- Order the stops by the reading order that best explains the change: contracts and data model first, then core logic, then callers and UI, then tests and config.',
       '- Group related hunks, possibly across files.',
+    ].join('\n'),
+  ].join('\n')
+}
+
+export function buildWalkthroughInstructions(title: string): string {
+  return [
+    buildWalkthroughPreamble(title),
+    [
       '- Reference only the hunk ids given below, each at most once.',
       `- Use at most ${WALKTHROUGH_MAX_STOPS} stops.`,
       '- Explain intent and impact rather than restating the code.',
@@ -141,17 +151,50 @@ export function buildWalkthroughInstructions(title: string): string {
   ].join('\n')
 }
 
+function countOutlineChanges(text: string): { added: number; removed: number } {
+  let added = 0
+  let removed = 0
+  for (const line of text.split('\n')) {
+    if (line.startsWith('+++') || line.startsWith('---')) {
+      continue
+    }
+    if (line.startsWith('+')) {
+      added += 1
+    } else if (line.startsWith('-')) {
+      removed += 1
+    }
+  }
+  return { added, removed }
+}
+
+export function formatHunkOutline(
+  hunk: WalkthroughHunk,
+  previewLines = WALKTHROUGH_OUTLINE_PREVIEW_LINES,
+): string {
+  const { added, removed } = countOutlineChanges(hunk.text)
+  const head = `### ${hunk.id} ${hunk.file} (${hunk.status}) ${hunk.header} +${added} -${removed}`
+  const preview = hunk.text
+    .split('\n')
+    .filter(
+      (line) =>
+        (line.startsWith('+') || line.startsWith('-')) &&
+        !line.startsWith('+++') &&
+        !line.startsWith('---'),
+    )
+    .slice(0, previewLines)
+    .map((line) => truncateText(line, WALKTHROUGH_OUTLINE_LINE_MAX_CHARS, TEXT_TRUNCATION_MARKER).text)
+  return [head, ...preview].join('\n')
+}
+
 export function formatHunkBlock(hunk: WalkthroughHunk): string {
   return `### ${hunk.id} ${hunk.file} (${hunk.status})\n\n\`\`\`diff\n${hunk.text}\n\`\`\``
 }
 
-export function buildWalkthroughInput(changes: FileDiffInfo[], title: string): WalkthroughInput {
+export function buildWalkthroughInput(changes: FileDiffInfo[]): WalkthroughInput {
   const hunks: WalkthroughHunk[] = []
   const mechanicalHunks: WalkthroughHunk[] = []
   const omittedFiles: WalkthroughOmittedFile[] = []
   const hunkIdCounts = new Map<string, number>()
-  let total = buildWalkthroughInstructions(title).length
-  let budgetExhausted = false
 
   const prepareHunks = (change: FileDiffInfo, fileHunks: DiffHunk[]): WalkthroughHunk[] =>
     fileHunks.map((hunk) => {
@@ -171,12 +214,6 @@ export function buildWalkthroughInput(changes: FileDiffInfo[], title: string): W
 
   changes.forEach((change) => {
     const mechanical = isMechanicalChangePath(change.file)
-
-    if (!mechanical && budgetExhausted) {
-      omittedFiles.push({ file: change.file, reason: 'budget' })
-      return
-    }
-
     const fileHunks = splitDiffHunks(change.patch)
     if (fileHunks.length === 0) {
       omittedFiles.push({ file: change.file, reason: 'binary' })
@@ -188,16 +225,7 @@ export function buildWalkthroughInput(changes: FileDiffInfo[], title: string): W
       return
     }
 
-    const prepared = prepareHunks(change, fileHunks)
-    const fileTotal = prepared.reduce((sum, hunk) => sum + formatHunkBlock(hunk).length + 2, 0)
-    if (total + fileTotal > WALKTHROUGH_DIFF_MAX_CHARS) {
-      budgetExhausted = true
-      omittedFiles.push({ file: change.file, reason: 'budget' })
-      return
-    }
-
-    total += fileTotal
-    hunks.push(...prepared)
+    hunks.push(...prepareHunks(change, fileHunks))
   })
 
   return { hunks, mechanicalHunks, omittedFiles }
@@ -222,7 +250,109 @@ export function buildWalkthroughPrompt({ title, hunks }: { title: string; hunks:
   return [instructions, ...blocks].join('\n\n')
 }
 
-export function parseWalkthroughResponse(text: string, hunks: WalkthroughHunk[]): ParsedWalkthrough | null {
+export interface WalkthroughOutline {
+  hunks: WalkthroughHunk[]
+  omittedFiles: WalkthroughOmittedFile[]
+  outline: string
+}
+
+function groupHunksByFile(hunks: WalkthroughHunk[]): WalkthroughHunk[][] {
+  const groups: WalkthroughHunk[][] = []
+  for (const hunk of hunks) {
+    const last = groups.at(-1)
+    if (last && last[0]!.file === hunk.file) {
+      last.push(hunk)
+    } else {
+      groups.push([hunk])
+    }
+  }
+  return groups
+}
+
+function buildWalkthroughPlanRules(title: string): string {
+  return [
+    buildWalkthroughPreamble(title),
+    [
+      '- Assign every hunk id to exactly one stop.',
+      '- Reference each hunk id at most once.',
+      `- Use at most ${WALKTHROUGH_MAX_STOPS} stops.`,
+      '- Respond with only the JSON {"summary": string, "stops": [{"title": string, "hunkIds": string[]}]}.',
+    ].join('\n'),
+  ].join('\n')
+}
+
+export function buildWalkthroughPlanPrompt({
+  title,
+  outline,
+  previousStops,
+}: {
+  title: string
+  outline: string
+  previousStops: Array<{ title: string; hunkIds: string[] }>
+}): string {
+  const sections = [buildWalkthroughPlanRules(title)]
+  if (previousStops.length > 0) {
+    sections.push(
+      [
+        '## Previous stops (keep a grouping when it still explains the change)',
+        ...previousStops.map((stop) => `- ${stop.title}: ${stop.hunkIds.join(', ')}`),
+      ].join('\n'),
+    )
+  }
+  sections.push(`## Outline\n${outline}`)
+  return sections.join('\n\n')
+}
+
+export function buildWalkthroughOutline(input: WalkthroughInput, title: string): WalkthroughOutline {
+  const groups = groupHunksByFile(input.hunks)
+  const prefixLength = buildWalkthroughPlanRules(title).length + '\n\n## Outline\n'.length
+
+  const pack = (previewLines: number) => {
+    let outline = ''
+    const hunks: WalkthroughHunk[] = []
+    const omittedFiles: WalkthroughOmittedFile[] = []
+    let exhausted = false
+    for (const fileHunks of groups) {
+      if (exhausted) {
+        omittedFiles.push({ file: fileHunks[0]!.file, reason: 'budget' })
+        continue
+      }
+      const block = fileHunks.map((hunk) => formatHunkOutline(hunk, previewLines)).join('\n')
+      const next = outline.length === 0 ? block : `${outline}\n\n${block}`
+      if (prefixLength + next.length > WALKTHROUGH_DIFF_MAX_CHARS) {
+        exhausted = true
+        omittedFiles.push({ file: fileHunks[0]!.file, reason: 'budget' })
+        continue
+      }
+      outline = next
+      hunks.push(...fileHunks)
+    }
+    return { hunks, omittedFiles, outline }
+  }
+
+  let packed = pack(WALKTHROUGH_OUTLINE_PREVIEW_LINES)
+  if (packed.hunks.length === 0 && groups.length > 0) {
+    packed = pack(0)
+  }
+
+  return {
+    hunks: packed.hunks,
+    omittedFiles: [...input.omittedFiles, ...packed.omittedFiles],
+    outline: packed.outline,
+  }
+}
+
+export function fitsSingleCall(input: WalkthroughInput, title: string): boolean {
+  return buildWalkthroughPrompt({ title, hunks: input.hunks }).length <= WALKTHROUGH_DIFF_MAX_CHARS
+}
+
+interface ModelStop {
+  title: string
+  explanation: string
+  hunkIds: string[]
+}
+
+function parseModelResponse(text: string): { summary: string; stops: ModelStop[] } | null {
   const extracted = extractFirstJsonObject(text)
   if (!extracted) {
     return null
@@ -240,11 +370,19 @@ export function parseWalkthroughResponse(text: string, hunks: WalkthroughHunk[])
     return null
   }
 
+  return parsed.data
+}
+
+function collectModelStops(
+  modelStops: ModelStop[],
+  hunks: WalkthroughHunk[],
+  buildStop: (modelStop: ModelStop | null, hunkIds: string[]) => WalkthroughStop,
+): WalkthroughStop[] {
   const validIds = new Set(hunks.map((hunk) => hunk.id))
   const referenced = new Set<string>()
   const stops: WalkthroughStop[] = []
 
-  for (const modelStop of parsed.data.stops) {
+  for (const modelStop of modelStops) {
     if (stops.length >= WALKTHROUGH_MAX_STOPS) {
       break
     }
@@ -258,38 +396,82 @@ export function parseWalkthroughResponse(text: string, hunks: WalkthroughHunk[])
       hunkIds.push(id)
     }
 
-    if (hunkIds.length === 0) {
-      continue
+    if (hunkIds.length > 0) {
+      stops.push(buildStop(modelStop, hunkIds))
     }
-
-    stops.push({
-      id: computeStopId(hunkIds),
-      title: truncateText(modelStop.title, WALKTHROUGH_TEXT_MAX_CHARS, TEXT_TRUNCATION_MARKER).text,
-      explanation: truncateText(modelStop.explanation, WALKTHROUGH_TEXT_MAX_CHARS, TEXT_TRUNCATION_MARKER).text,
-      hunkIds,
-      status: 'ready',
-      explanationKey: null,
-    })
   }
+
+  if (stops.length === 0) {
+    return stops
+  }
+
+  const unreferenced = hunks.filter((hunk) => !referenced.has(hunk.id)).map((hunk) => hunk.id)
+  if (unreferenced.length > 0) {
+    stops.push(buildStop(null, unreferenced))
+  }
+
+  return stops
+}
+
+export function parseWalkthroughResponse(text: string, hunks: WalkthroughHunk[]): ParsedWalkthrough | null {
+  const parsed = parseModelResponse(text)
+  if (!parsed) {
+    return null
+  }
+
+  const stops = collectModelStops(parsed.stops, hunks, (modelStop, hunkIds) =>
+    modelStop
+      ? {
+          id: computeStopId(hunkIds),
+          title: truncateText(modelStop.title, WALKTHROUGH_TEXT_MAX_CHARS, TEXT_TRUNCATION_MARKER).text,
+          explanation: truncateText(modelStop.explanation, WALKTHROUGH_TEXT_MAX_CHARS, TEXT_TRUNCATION_MARKER).text,
+          hunkIds,
+          status: 'ready',
+          explanationKey: null,
+        }
+      : {
+          id: computeStopId(hunkIds),
+          title: REMAINING_STOP_TITLE,
+          explanation: REMAINING_STOP_EXPLANATION,
+          hunkIds,
+          status: 'ready',
+          explanationKey: null,
+        },
+  )
 
   if (stops.length === 0) {
     return null
   }
 
-  const unreferenced = hunks.filter((hunk) => !referenced.has(hunk.id)).map((hunk) => hunk.id)
-  if (unreferenced.length > 0) {
-    stops.push({
-      id: computeStopId(unreferenced),
-      title: REMAINING_STOP_TITLE,
-      explanation: REMAINING_STOP_EXPLANATION,
-      hunkIds: unreferenced,
-      status: 'ready',
-      explanationKey: null,
-    })
+  return {
+    summary: truncateText(parsed.summary, WALKTHROUGH_TEXT_MAX_CHARS, TEXT_TRUNCATION_MARKER).text,
+    stops,
+  }
+}
+
+export function parseWalkthroughPlan(text: string, hunks: WalkthroughHunk[]): ParsedWalkthrough | null {
+  const parsed = parseModelResponse(text)
+  if (!parsed) {
+    return null
+  }
+
+  const stops = collectModelStops(parsed.stops, hunks, (modelStop, hunkIds) => ({
+    id: computeStopId(hunkIds),
+    title: modelStop
+      ? truncateText(modelStop.title, WALKTHROUGH_TEXT_MAX_CHARS, TEXT_TRUNCATION_MARKER).text
+      : REMAINING_STOP_TITLE,
+    explanation: '',
+    hunkIds,
+    status: 'pending',
+    explanationKey: null,
+  }))
+
+  if (stops.length === 0) {
+    return null
   }
 
   return {
-    summary: truncateText(parsed.data.summary, WALKTHROUGH_TEXT_MAX_CHARS, TEXT_TRUNCATION_MARKER).text,
+    summary: truncateText(parsed.summary, WALKTHROUGH_TEXT_MAX_CHARS, TEXT_TRUNCATION_MARKER).text,
     stops,
   }
 }
@@ -461,14 +643,9 @@ export class ChangeWalkthroughService {
     }
 
     const title = session.title ?? sessionId
-    const { hunks, mechanicalHunks, omittedFiles } = buildWalkthroughInput(changes, title)
+    const input = buildWalkthroughInput(changes)
+    const { hunks, mechanicalHunks, omittedFiles } = input
     if (hunks.length === 0 && mechanicalHunks.length === 0) {
-      if (omittedFiles.some((file) => file.reason === 'budget')) {
-        throw new ChangeWalkthroughError('These changes are too large to walk through', 413, {
-          code: 'WALKTHROUGH_CONTEXT_LIMIT',
-          details: { omittedFiles },
-        })
-      }
       throw new ChangeWalkthroughError('This session has no text changes to walk through', 409, {
         code: 'WALKTHROUGH_NO_TEXT_CHANGES',
       })
@@ -493,6 +670,17 @@ export class ChangeWalkthroughService {
 
       saveChangeWalkthrough(this.db, walkthrough)
       return { walkthrough, created: true }
+    }
+
+    if (!fitsSingleCall(input, title)) {
+      const budgetFiles = [...new Set(hunks.map((hunk) => hunk.file))].map((file) => ({
+        file,
+        reason: 'budget' as const,
+      }))
+      throw new ChangeWalkthroughError('These changes are too large to walk through', 413, {
+        code: 'WALKTHROUGH_CONTEXT_LIMIT',
+        details: { omittedFiles: [...omittedFiles, ...budgetFiles] },
+      })
     }
 
     const prompt = buildWalkthroughPrompt({ title, hunks })

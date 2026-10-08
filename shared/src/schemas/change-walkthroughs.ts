@@ -4,6 +4,8 @@ export const WALKTHROUGH_DIFF_MAX_CHARS = 60000;
 export const WALKTHROUGH_HUNK_MAX_CHARS = 8000;
 export const WALKTHROUGH_MAX_STOPS = 20;
 export const WALKTHROUGH_TEXT_MAX_CHARS = 2000;
+export const WALKTHROUGH_OUTLINE_PREVIEW_LINES = 6;
+export const WALKTHROUGH_OUTLINE_LINE_MAX_CHARS = 160;
 
 export const WalkthroughHunkSchema = z.object({
   id: z.string(),

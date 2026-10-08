@@ -5,6 +5,8 @@ import {
   WALKTHROUGH_DIFF_MAX_CHARS,
   WALKTHROUGH_HUNK_MAX_CHARS,
   WALKTHROUGH_MAX_STOPS,
+  WALKTHROUGH_OUTLINE_LINE_MAX_CHARS,
+  WALKTHROUGH_OUTLINE_PREVIEW_LINES,
   WALKTHROUGH_TEXT_MAX_CHARS,
   type WalkthroughHunk,
 } from '@opencode-manager/shared/schemas'
@@ -18,11 +20,16 @@ import {
   ChangeWalkthroughError,
   ChangeWalkthroughService,
   buildWalkthroughInput,
+  buildWalkthroughOutline,
+  buildWalkthroughPlanPrompt,
   buildWalkthroughPrompt,
   computeChangesHash,
   computeHunkId,
   computeStopId,
+  fitsSingleCall,
+  formatHunkOutline,
   isMechanicalChangePath,
+  parseWalkthroughPlan,
   parseWalkthroughResponse,
 } from '../../src/services/change-walkthroughs'
 
@@ -44,8 +51,27 @@ function bigHunk(index: number, size = WALKTHROUGH_HUNK_MAX_CHARS): string {
   return `@@ -${index},1 +${index},1 @@\n+${'x'.repeat(size)}`
 }
 
+function longHunk(index: number): string {
+  const lines = Array.from(
+    { length: 6 },
+    (_, line) => `+${'x'.repeat(200)}_${index}_${line}`,
+  )
+  return `@@ -${index + 1},6 +${index + 1},6 @@\n${lines.join('\n')}`
+}
+
+function longPatch(count: number, offset = 0): string {
+  return Array.from({ length: count }, (_, index) => longHunk(offset + index)).join('\n')
+}
+
 function modelReply(
   stops: Array<{ title: string; explanation: string; hunkIds: string[] }>,
+  summary = 'Summary',
+): string {
+  return JSON.stringify({ summary, stops })
+}
+
+function planReply(
+  stops: Array<{ title: string; hunkIds: string[] }>,
   summary = 'Summary',
 ): string {
   return JSON.stringify({ summary, stops })
@@ -212,13 +238,10 @@ describe('isMechanicalChangePath', () => {
 
 describe('buildWalkthroughInput', () => {
   it('assigns a distinct content id and the file to each hunk', () => {
-    const { hunks, omittedFiles } = buildWalkthroughInput(
-      [
-        change('src/a.ts', `${hunkPatch(1)}\n${hunkPatch(10)}`),
-        change('src/b.ts', hunkPatch(1)),
-      ],
-      'My session',
-    )
+    const { hunks, omittedFiles } = buildWalkthroughInput([
+      change('src/a.ts', `${hunkPatch(1)}\n${hunkPatch(10)}`),
+      change('src/b.ts', hunkPatch(1)),
+    ])
 
     expect(omittedFiles).toEqual([])
     expect(hunks.map((hunk) => hunk.file)).toEqual(['src/a.ts', 'src/a.ts', 'src/b.ts'])
@@ -228,24 +251,18 @@ describe('buildWalkthroughInput', () => {
   })
 
   it('keeps a hunk id when an earlier hunk in the file changes', () => {
-    const before = buildWalkthroughInput(
-      [
-        change(
-          'src/a.ts',
-          '@@ -1,2 +1,2 @@\n-const a = 1;\n+const a = 2;\n@@ -10,2 +10,2 @@\n-const b = 1;\n+const b = 2;',
-        ),
-      ],
-      'My session',
-    )
-    const after = buildWalkthroughInput(
-      [
-        change(
-          'src/a.ts',
-          '@@ -1,3 +1,3 @@\n-const a = 1;\n+const a = 2;\n+const extra = 3;\n@@ -11,2 +11,2 @@\n-const b = 1;\n+const b = 2;',
-        ),
-      ],
-      'My session',
-    )
+    const before = buildWalkthroughInput([
+      change(
+        'src/a.ts',
+        '@@ -1,2 +1,2 @@\n-const a = 1;\n+const a = 2;\n@@ -10,2 +10,2 @@\n-const b = 1;\n+const b = 2;',
+      ),
+    ])
+    const after = buildWalkthroughInput([
+      change(
+        'src/a.ts',
+        '@@ -1,3 +1,3 @@\n-const a = 1;\n+const a = 2;\n+const extra = 3;\n@@ -11,2 +11,2 @@\n-const b = 1;\n+const b = 2;',
+      ),
+    ])
 
     expect(before.hunks).toHaveLength(2)
     expect(after.hunks).toHaveLength(2)
@@ -254,10 +271,7 @@ describe('buildWalkthroughInput', () => {
   })
 
   it('suffixes duplicate hunk content', () => {
-    const { hunks } = buildWalkthroughInput(
-      [change('src/a.ts', `${hunkPatch(1)}\n${hunkPatch(1)}`)],
-      'My session',
-    )
+    const { hunks } = buildWalkthroughInput([change('src/a.ts', `${hunkPatch(1)}\n${hunkPatch(1)}`)])
 
     expect(hunks).toHaveLength(2)
     expect(hunks[0]!.id).not.toBe(hunks[1]!.id)
@@ -265,13 +279,10 @@ describe('buildWalkthroughInput', () => {
   })
 
   it('omits files with no hunks as binary', () => {
-    const { hunks, omittedFiles } = buildWalkthroughInput(
-      [
-        change('assets/logo.png', 'diff --git a/assets/logo.png b/assets/logo.png\nBinary files differ'),
-        change('src/a.ts', hunkPatch(1)),
-      ],
-      'My session',
-    )
+    const { hunks, omittedFiles } = buildWalkthroughInput([
+      change('assets/logo.png', 'diff --git a/assets/logo.png b/assets/logo.png\nBinary files differ'),
+      change('src/a.ts', hunkPatch(1)),
+    ])
 
     expect(hunks).toHaveLength(1)
     expect(omittedFiles).toEqual([{ file: 'assets/logo.png', reason: 'binary' }])
@@ -279,91 +290,326 @@ describe('buildWalkthroughInput', () => {
 
   it('truncates an oversized hunk and marks it', () => {
     const longLine = `+${'x'.repeat(WALKTHROUGH_HUNK_MAX_CHARS + 100)}`
-    const { hunks } = buildWalkthroughInput([change('src/a.ts', `@@ -1 +1 @@\n${longLine}`)], 'My session')
+    const { hunks } = buildWalkthroughInput([change('src/a.ts', `@@ -1 +1 @@\n${longLine}`)])
 
     expect(hunks[0]!.truncated).toBe(true)
     expect(hunks[0]!.text).toContain('[hunk truncated]')
   })
 
-  it('bounds the included hunks and omits the remaining files as budget', () => {
-    const changes = Array.from({ length: 10 }, (_, index) => change(`src/f${index}.ts`, bigHunk(index)))
-    const { hunks, omittedFiles } = buildWalkthroughInput(changes, 'My session')
-
-    const included = hunks.reduce((sum, hunk) => sum + hunk.text.length, 0)
-    expect(included).toBeLessThanOrEqual(WALKTHROUGH_DIFF_MAX_CHARS)
-    expect(omittedFiles.filter((file) => file.reason === 'budget').length).toBeGreaterThan(0)
-    expect(omittedFiles.every((file) => file.reason === 'budget')).toBe(true)
-  })
-
-  it('never half-includes a file', () => {
-    const patch = Array.from({ length: 9 }, (_, index) => bigHunk(index)).join('\n')
-    const { hunks, omittedFiles } = buildWalkthroughInput([change('src/a.ts', patch)], 'My session')
-
-    expect(hunks).toEqual([])
-    expect(omittedFiles).toEqual([{ file: 'src/a.ts', reason: 'budget' }])
-  })
-
-  it('keeps the prompt within budget for many small hunks behind a very long path', () => {
-    const longPath = `src/${'p'.repeat(996)}.ts`
-    const manyHunks = Array.from(
-      { length: 300 },
-      (_, index) => `@@ -${index + 1} +${index + 1} @@\n+line${index}`,
-    ).join('\n')
-    const changes = [change('src/small.ts', hunkPatch(1)), change(longPath, manyHunks)]
-
-    const { hunks, omittedFiles } = buildWalkthroughInput(changes, 'My session')
-    const prompt = buildWalkthroughPrompt({ title: 'My session', hunks })
-
-    expect(hunks.length).toBeGreaterThan(0)
-    expect(prompt.length).toBeLessThanOrEqual(WALKTHROUGH_DIFF_MAX_CHARS)
-    expect(omittedFiles).toEqual([{ file: longPath, reason: 'budget' }])
-  })
-
-  it('reserves the title in the budget so a long title admits less content', () => {
-    const changes = Array.from({ length: 20 }, (_, index) => change(`src/f${index}.ts`, bigHunk(index)))
-    const longTitle = 'T'.repeat(20_000)
-
-    const withLongTitle = buildWalkthroughInput(changes, longTitle)
-    const withShortTitle = buildWalkthroughInput(changes, 'short')
-
-    expect(withLongTitle.hunks.length).toBeLessThan(withShortTitle.hunks.length)
-    expect(
-      buildWalkthroughPrompt({ title: longTitle, hunks: withLongTitle.hunks }).length,
-    ).toBeLessThanOrEqual(WALKTHROUGH_DIFF_MAX_CHARS)
-  })
-
   it('separates mechanical hunks from the prompt hunks', () => {
-    const { hunks, mechanicalHunks, omittedFiles } = buildWalkthroughInput(
-      [change('src/a.ts', hunkPatch(1)), change('pnpm-lock.yaml', hunkPatch(2))],
-      'My session',
-    )
+    const { hunks, mechanicalHunks, omittedFiles } = buildWalkthroughInput([
+      change('src/a.ts', hunkPatch(1)),
+      change('pnpm-lock.yaml', hunkPatch(2)),
+    ])
 
     expect(hunks.map((hunk) => hunk.file)).toEqual(['src/a.ts'])
     expect(mechanicalHunks.map((hunk) => hunk.file)).toEqual(['pnpm-lock.yaml'])
     expect(omittedFiles).toEqual([])
   })
 
-  it('keeps mechanical hunks out of the prompt budget', () => {
-    const changes = [
-      ...Array.from({ length: 10 }, (_, index) => change(`src/f${index}.ts`, bigHunk(index))),
-      change('pnpm-lock.yaml', hunkPatch(1)),
-    ]
-
-    const { hunks, mechanicalHunks, omittedFiles } = buildWalkthroughInput(changes, 'My session')
-
-    expect(hunks.length).toBeLessThan(changes.length - 1)
-    expect(mechanicalHunks.map((hunk) => hunk.file)).toEqual(['pnpm-lock.yaml'])
-    expect(omittedFiles.some((file) => file.file === 'pnpm-lock.yaml')).toBe(false)
-  })
-
   it('omits a binary mechanical file as binary', () => {
-    const { mechanicalHunks, omittedFiles } = buildWalkthroughInput(
-      [change('pnpm-lock.yaml', 'diff --git a/pnpm-lock.yaml b/pnpm-lock.yaml\nBinary files differ')],
-      'My session',
-    )
+    const { mechanicalHunks, omittedFiles } = buildWalkthroughInput([
+      change('pnpm-lock.yaml', 'diff --git a/pnpm-lock.yaml b/pnpm-lock.yaml\nBinary files differ'),
+    ])
 
     expect(mechanicalHunks).toEqual([])
     expect(omittedFiles).toEqual([{ file: 'pnpm-lock.yaml', reason: 'binary' }])
+  })
+})
+
+describe('buildWalkthroughOutline', () => {
+  const smallChange = (index: number) => change(`src/f${index}.ts`, hunkPatch(index))
+
+  it('fits 300 small files and lists every hunk id', () => {
+    const input = buildWalkthroughInput(Array.from({ length: 300 }, (_, index) => smallChange(index)))
+    const { hunks, omittedFiles, outline } = buildWalkthroughOutline(input, 'My session')
+
+    expect(omittedFiles).toEqual([])
+    expect(hunks).toHaveLength(300)
+    for (const hunk of input.hunks) {
+      expect(outline).toContain(hunk.id)
+    }
+    expect(fitsSingleCall(input, 'My session')).toBe(true)
+    expect(
+      buildWalkthroughPlanPrompt({ title: 'My session', outline, previousStops: [] }).length,
+    ).toBeLessThanOrEqual(WALKTHROUGH_DIFF_MAX_CHARS)
+  })
+
+  it('omits trailing files as budget and never half-includes a file', () => {
+    const input = buildWalkthroughInput(
+      Array.from({ length: 120 }, (_, index) => change(`src/f${index}.ts`, longPatch(3, index * 3))),
+    )
+    const { omittedFiles, outline } = buildWalkthroughOutline(input, 'My session')
+
+    expect(omittedFiles.some((file) => file.reason === 'budget')).toBe(true)
+
+    const idsByFile = new Map<string, string[]>()
+    for (const hunk of input.hunks) {
+      const ids = idsByFile.get(hunk.file) ?? []
+      ids.push(hunk.id)
+      idsByFile.set(hunk.file, ids)
+    }
+
+    const includedFiles = new Set<string>()
+    for (const [file, ids] of idsByFile) {
+      const present = ids.filter((id) => outline.includes(id)).length
+      expect(present === 0 || present === ids.length).toBe(true)
+      if (present > 0) {
+        includedFiles.add(file)
+      }
+    }
+
+    expect(omittedFiles.map((file) => file.file)).toEqual(
+      [...idsByFile.keys()].filter((file) => !includedFiles.has(file)),
+    )
+  })
+
+  it('falls back to header-only outlines when a single file does not fit at the default preview depth', () => {
+    const input = buildWalkthroughInput([change('src/huge.ts', longPatch(100))])
+    const { hunks, omittedFiles, outline } = buildWalkthroughOutline(input, 'My session')
+
+    expect(hunks).toHaveLength(100)
+    expect(omittedFiles).toEqual([])
+    for (const hunk of input.hunks) {
+      expect(outline).toContain(hunk.id)
+    }
+  })
+
+  it('keeps mechanical hunks out of the outline', () => {
+    const input = buildWalkthroughInput([
+      change('src/a.ts', hunkPatch(1)),
+      change('pnpm-lock.yaml', hunkPatch(2)),
+    ])
+    const { omittedFiles, outline } = buildWalkthroughOutline(input, 'My session')
+
+    expect(input.mechanicalHunks).toHaveLength(1)
+    expect(outline).not.toContain(input.mechanicalHunks[0]!.id)
+    expect(outline).not.toContain('pnpm-lock.yaml')
+    expect(omittedFiles).toEqual([])
+  })
+
+  it('reserves the title in the budget so a long title admits less content', () => {
+    const input = buildWalkthroughInput(Array.from({ length: 500 }, (_, index) => smallChange(index)))
+    const longTitle = 'T'.repeat(20_000)
+
+    const withLongTitle = buildWalkthroughOutline(input, longTitle)
+    const withShortTitle = buildWalkthroughOutline(input, 'short')
+
+    expect(withShortTitle.omittedFiles).toEqual([])
+    expect(withLongTitle.hunks.length).toBeLessThan(withShortTitle.hunks.length)
+    expect(
+      buildWalkthroughPlanPrompt({
+        title: longTitle,
+        outline: withLongTitle.outline,
+        previousStops: [],
+      }).length,
+    ).toBeLessThanOrEqual(WALKTHROUGH_DIFF_MAX_CHARS)
+  })
+
+  it('bounds the included hunks and omits the remaining files as budget', () => {
+    const input = buildWalkthroughInput(
+      Array.from({ length: 40 }, (_, index) => change(`src/f${index}.ts`, longPatch(6, index * 6))),
+    )
+    const { hunks, omittedFiles, outline } = buildWalkthroughOutline(input, 'My session')
+
+    expect(hunks.length).toBeLessThan(input.hunks.length)
+    expect(omittedFiles.filter((file) => file.reason === 'budget').length).toBeGreaterThan(0)
+    expect(omittedFiles.every((file) => file.reason === 'budget')).toBe(true)
+    expect(outline.length).toBeLessThanOrEqual(WALKTHROUGH_DIFF_MAX_CHARS)
+  })
+
+  it('never half-includes a file', () => {
+    const input = buildWalkthroughInput([
+      change('src/small.ts', hunkPatch(1)),
+      change('src/huge.ts', longPatch(100)),
+    ])
+    const { outline } = buildWalkthroughOutline(input, 'My session')
+
+    const hugeIds = input.hunks.filter((hunk) => hunk.file === 'src/huge.ts').map((hunk) => hunk.id)
+    expect(hugeIds.length).toBeGreaterThan(0)
+    expect(hugeIds.every((id) => !outline.includes(id))).toBe(true)
+  })
+
+  it('keeps the outline within budget for many small hunks behind a very long path', () => {
+    const longPath = `src/${'p'.repeat(996)}.ts`
+    const manyHunks = Array.from(
+      { length: 300 },
+      (_, index) => `@@ -${index + 1} +${index + 1} @@\n+line${index}`,
+    ).join('\n')
+    const input = buildWalkthroughInput([
+      change('src/small.ts', hunkPatch(1)),
+      change(longPath, manyHunks),
+    ])
+    const { hunks, omittedFiles, outline } = buildWalkthroughOutline(input, 'My session')
+
+    expect(hunks.length).toBeGreaterThan(0)
+    expect(omittedFiles).toEqual([{ file: longPath, reason: 'budget' }])
+    expect(
+      buildWalkthroughPlanPrompt({ title: 'My session', outline, previousStops: [] }).length,
+    ).toBeLessThanOrEqual(WALKTHROUGH_DIFF_MAX_CHARS)
+  })
+})
+
+describe('formatHunkOutline', () => {
+  it('renders the id, file, status, header and change counts', () => {
+    const hunk = hunkFixture('src/a.ts', '@@ -1,2 +1,2 @@\n-const a = 1;\n+const a = 2;')
+    const [first] = formatHunkOutline(hunk).split('\n')
+
+    expect(first).toBe(`### ${hunk.id} src/a.ts (modified) @@ -1,2 +1,2 @@ +1 -1`)
+  })
+
+  it('lists at most the preview line count of changed lines, skipping file headers', () => {
+    const hunk = hunkFixture(
+      'src/a.ts',
+      '@@ -1,4 +1,4 @@\n--- a/x\n+++ b/x\n-const a = 1;\n+const a = 2;\n-const b = 1;\n+const b = 2;',
+    )
+
+    const single = formatHunkOutline(hunk, 1).split('\n')
+    expect(single).toHaveLength(2)
+    expect(single[1]!.startsWith('---')).toBe(false)
+    expect(single[1]!.startsWith('+++')).toBe(false)
+    expect(single[1]).toBe('-const a = 1;')
+
+    const full = formatHunkOutline(hunk).split('\n')
+    expect(full).toContain('-const a = 1;')
+    expect(full).toContain('+const a = 2;')
+    expect(full).toContain('-const b = 1;')
+    expect(full).toContain('+const b = 2;')
+  })
+
+  it('defaults to the shared preview line count', () => {
+    const text = `@@ -1,8 +1,8 @@\n${Array.from({ length: 8 }, (_, index) => `+line${index}`).join('\n')}`
+    const hunk = hunkFixture('src/a.ts', text)
+
+    expect(formatHunkOutline(hunk).split('\n')).toHaveLength(1 + WALKTHROUGH_OUTLINE_PREVIEW_LINES)
+  })
+
+  it('truncates a long changed line to the line max', () => {
+    const hunk = hunkFixture('src/a.ts', `@@ -1 +1 @@\n+${'x'.repeat(200)}`)
+    const line = formatHunkOutline(hunk).split('\n')[1]!
+
+    expect(line).toHaveLength(WALKTHROUGH_OUTLINE_LINE_MAX_CHARS)
+  })
+})
+
+describe('buildWalkthroughPlanPrompt', () => {
+  const outline = '### h_1 src/a.ts (modified) @@ -1 +1 @@ +1 -1\n+const a = 2;'
+
+  it('contains the preamble, the plan rules and the outline', () => {
+    const prompt = buildWalkthroughPlanPrompt({ title: 'My session', outline, previousStops: [] })
+
+    expect(prompt).toContain('My session')
+    expect(prompt).toContain('Assign every hunk id')
+    expect(prompt).toContain(`at most ${WALKTHROUGH_MAX_STOPS} stops`)
+    expect(prompt).toContain(outline)
+  })
+
+  it('lists previous stops when given', () => {
+    const prompt = buildWalkthroughPlanPrompt({
+      title: 'My session',
+      outline,
+      previousStops: [{ title: 'A', hunkIds: ['h_1'] }],
+    })
+
+    expect(prompt).toContain('Previous stops')
+    expect(prompt).toContain('A: h_1')
+  })
+})
+
+describe('parseWalkthroughPlan', () => {
+  const hunks: WalkthroughHunk[] = [
+    hunkFixture('src/a.ts', hunkPatch(1)),
+    hunkFixture('src/a.ts', hunkPatch(2)),
+    hunkFixture('src/b.ts', hunkPatch(3)),
+  ]
+  const idA0 = hunks[0]!.id
+  const idA1 = hunks[1]!.id
+  const idB0 = hunks[2]!.id
+
+  it('drops unknown ids and repeat references, first occurrence wins', () => {
+    const parsed = parseWalkthroughPlan(
+      planReply([
+        { title: 'A', hunkIds: [idA0, 'nope'] },
+        { title: 'B', hunkIds: [idA0, idA1] },
+      ]),
+      hunks,
+    )
+
+    expect(parsed?.stops.map((stop) => stop.hunkIds)).toEqual([[idA0], [idA1], [idB0]])
+  })
+
+  it('drops stops left empty', () => {
+    const parsed = parseWalkthroughPlan(
+      planReply([
+        { title: 'A', hunkIds: ['nope'] },
+        { title: 'B', hunkIds: [idA0, idA1, idB0] },
+      ]),
+      hunks,
+    )
+
+    expect(parsed?.stops.map((stop) => stop.title)).toEqual(['B'])
+  })
+
+  it('appends unreferenced hunks as a pending remaining stop', () => {
+    const parsed = parseWalkthroughPlan(planReply([{ title: 'A', hunkIds: [idA0] }]), hunks)
+
+    expect(parsed?.stops.at(-1)).toEqual({
+      id: computeStopId([idA1, idB0]),
+      title: 'Remaining changes',
+      explanation: '',
+      hunkIds: [idA1, idB0],
+      status: 'pending',
+      explanationKey: null,
+    })
+  })
+
+  it('does not append a remaining stop when every hunk is covered', () => {
+    const parsed = parseWalkthroughPlan(
+      planReply([{ title: 'A', hunkIds: [idA0, idA1, idB0] }]),
+      hunks,
+    )
+
+    expect(parsed?.stops).toHaveLength(1)
+    expect(parsed?.stops[0]!.title).toBe('A')
+  })
+
+  it('caps model stops at 20 and truncates titles', () => {
+    const manyHunks: WalkthroughHunk[] = Array.from(
+      { length: WALKTHROUGH_MAX_STOPS + 5 },
+      (_, index) => hunkFixture('src/a.ts', hunkPatch(index)),
+    )
+    const stops = manyHunks.map((hunk) => ({
+      title: 't'.repeat(WALKTHROUGH_TEXT_MAX_CHARS + 50),
+      hunkIds: [hunk.id],
+    }))
+    const parsed = parseWalkthroughPlan(planReply(stops), manyHunks)
+
+    const modelStops = parsed!.stops.filter((stop) => stop.title !== 'Remaining changes')
+    expect(modelStops).toHaveLength(WALKTHROUGH_MAX_STOPS)
+    expect(modelStops[0]!.title.length).toBeLessThanOrEqual(WALKTHROUGH_TEXT_MAX_CHARS)
+  })
+
+  it('marks model stops pending with an empty explanation', () => {
+    const parsed = parseWalkthroughPlan(
+      planReply([
+        { title: 'A', hunkIds: [idA0] },
+        { title: 'B', hunkIds: [idA1] },
+      ]),
+      hunks,
+    )
+
+    expect(parsed!.stops.every((stop) => stop.status === 'pending')).toBe(true)
+    expect(parsed!.stops.every((stop) => stop.explanation === '')).toBe(true)
+  })
+
+  it('returns null when the response is unparseable', () => {
+    expect(parseWalkthroughPlan('not json at all', hunks)).toBeNull()
+    expect(parseWalkthroughPlan('{not json', hunks)).toBeNull()
+    expect(parseWalkthroughPlan('{"summary":"x"}', hunks)).toBeNull()
+  })
+
+  it('returns null when no model stop survives', () => {
+    expect(parseWalkthroughPlan(planReply([{ title: 'A', hunkIds: ['nope'] }]), hunks)).toBeNull()
   })
 })
 

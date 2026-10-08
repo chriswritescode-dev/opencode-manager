@@ -250,15 +250,10 @@ describe('change walkthrough routes', () => {
   })
 
   it('POST records an unparseable model reply that GET surfaces', async () => {
-    let resolveGenerate: (text: string) => void = () => {}
-    fake.setGenerateImpl(() => new Promise<string>((resolve) => {
-      resolveGenerate = resolve
-    }))
+    fake.setGenerateImpl(async () => 'not json')
 
     const res = await app.request(`/change-walkthroughs/${SESSION_ID}`, { method: 'POST' })
     expect(res.status).toBe(202)
-
-    resolveGenerate('not json')
 
     await vi.waitFor(async () => {
       const getRes = await app.request(`/change-walkthroughs/${SESSION_ID}`)
