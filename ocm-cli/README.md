@@ -33,9 +33,12 @@ installs link the binary through the package manager. Local workspace installs
 also create a best-effort `~/.local/bin/ocm` symlink.
 
 The package is also self-contained for a vendored install with no package
-manager. `ocm install` copies the package into
-`~/.config/opencode/plugin/ocm-cli`, registers `./plugin/ocm-cli/dist` in
-`cli.json`, and links `ocm` at `~/.local/bin/ocm`. Run it without an existing
+manager. `ocm install` copies the package into `<config>/plugin/ocm-cli`,
+registers `./plugin/ocm-cli/dist` in `<config>/cli.json`, and links `ocm` at
+`~/.local/bin/ocm`. `<config>` is `$OPENCODE_CONFIG_DIR`, else
+`$XDG_CONFIG_HOME/opencode`, else `~/.config/opencode`; `--dir <path>`
+overrides it. `--no-link` skips the symlink, and `--force` replaces a
+non-symlink `ocm` already at the link path. Run it without an existing
 `ocm` via `pnpm dlx @opencode-manager/ocm-cli install`, or from a local build
 via `./scripts/install.sh`. The command is idempotent, so re-run it to upgrade.
 Use the `dist` directory, not `dist/tui.js`: OpenCode 2 loads `tui.js` from
@@ -75,6 +78,7 @@ If `[token]` is omitted, `ocm login` reads it from hidden TTY input (requires
 
 ```bash
 ocm
+ocm login <manager-url> [token]
 ocm status
 ocm list
 ocm use <repoId|name>
@@ -82,7 +86,12 @@ ocm push [repoId] [--force] [--create] [--yes] [--full]
 ocm pull [repoId] [--force] [--full]
 ocm install [--dir <path>] [--force] [--no-link]
 ocm logout
+ocm --version
+ocm --help
 ```
+
+`ls` is an alias for `list`, `attach` for `use`, `help`/`-h` for `--help`, and
+`version`/`-v` for `--version`.
 
 Running `ocm` with no command computes the current git repo's OpenCode project
 id (the same identity OpenCode uses: normalized origin remote hash, else the
@@ -96,19 +105,26 @@ selected repo, then to local `opencode`.
 and attaches OpenCode to it.
 
 `ocm push` syncs the current git repo to the matching Manager repo using a fast
-git bundle + working-tree patch by default. The CLI reports granular progress
-phases during push: bundling, uploading (with byte counts), server processing,
-and patching. Pass `--full` to use the legacy tarball mirror. If the fast path
-fails, `ocm` prompts before reverting to the tarball mirror (and proceeds
-automatically when there is no TTY to prompt). Use `--create` to create a Manager
-repo when no project match exists, and `--yes` to confirm creation in
-non-interactive shells.
+git bundle + working-tree patch by default; the fast path prints a single result
+line. Pass `--full` to use the legacy tarball mirror, which shows byte-count
+upload progress. If the fast path fails, `ocm` prompts before reverting to the
+tarball mirror (and proceeds automatically when there is no TTY to prompt). Use
+`--create` to create a Manager repo when no project match exists, and `--yes` to
+confirm creation in non-interactive shells. Creating a repo always uploads a
+tarball.
 
 `ocm pull` syncs the matching Manager repo over the current working tree using a
 fast git bundle + working-tree patch by default. Pass `--full` to use the legacy
 tarball mirror. If the fast path fails, `ocm` prompts before reverting to the
 tarball mirror (and proceeds automatically when there is no TTY to prompt). It
 refuses to overwrite uncommitted local changes unless `--force` is passed.
+
+Safety aborts, such as uncommitted local changes on `pull` or a branch checked
+out in another worktree, stop the command instead of falling back to the
+tarball mirror. Without `--force`, `push` asks before discarding server-side
+work (commits not present locally, or uncommitted changes on the Manager), and
+`pull` asks before discarding local commits the Manager does not have. Without a
+TTY both refuse; pass `--force` to override.
 
 A base repo and one of its worktrees can both be registered as ready Manager
 repos sharing the same OpenCode project id. When that happens, `ocm push` and
@@ -123,7 +139,7 @@ branch, and path. The default attach reports the same details.
 The package exposes an OpenCode 2 TUI plugin (`{ id, setup }`) through its `./tui`
 package export. Configure the package name and OpenCode resolves that TUI
 entrypoint automatically. When attached to a Manager via `ocm`, the plugin shows a
-`REMOTE <host> · <repo>` indicator at the bottom of the TUI; local launches
+`<host> · <repo>` indicator in the prompt and home footers; local launches
 show nothing. It registers `/ocm-move`, which keeps the local session and
 copies the active session to the Manager after replacing the Manager repo's
 working tree with your local one (commits, staged, unstaged, and untracked
@@ -142,47 +158,67 @@ progress bar is shown next to the prompt. On success
 you can optionally warp — exit the local TUI and attach to the moved session
 on the Manager immediately. Use it from inside an OpenCode session after
 `ocm login` and after the repo already exists on the Manager
-(`ocm push --create` if needed).
+(`ocm push --create` if needed). It refuses, before pushing anything, a session
+that is already on the Manager and a subagent session whose parent is not.
 
 `/ocm` switches this TUI to another server, the same way the `ocm` CLI picks
 one. In a local TUI it finds the Manager repo that matches the current
-directory (by git origin) and asks to attach to it; when no repo or several
-repos match, it shows a picker of the Manager's ready repos. In a TUI that is
-already attached, the picker offers the other Manager repos and **Local
-opencode**. Switching exits the TUI and reattaches; the current session stays
-where it is (use `/ocm-move` to bring a local session along).
+directory (by OpenCode project id) and asks to attach to it; when no repo or
+several repos match, it shows a picker of the Manager's ready repos. In a TUI
+that is already attached, the picker offers the other Manager repos (the
+current one is listed as disabled) and **Local opencode**, which stays
+available even when the Manager cannot be reached. Switching exits the TUI and
+reattaches; switching to a repo also remembers it as the last repo. The current
+session stays where it is (use `/ocm-move` to bring a local session along).
 
 The plugin also registers two Manager-backed commands, both of which need an
 attached Manager repo through `ocm`:
 
 - `/ocm-goal [objective]` starts a Manager-driven goal on the current top-level
-  session and sends the objective as the next message. With no objective, a
-  dialog asks for it, plus optional max turns and token budget (blank uses the
-  Manager defaults). The objective is sent as plain text with the session's
-  current agent and model: the plugin cannot read the composer's selection, so
-  send a message first if you switched agent or model, and `@file` mentions are
-  not attached. Scheduled runs and subagent sessions are rejected by the
-  Manager. While a goal is open, a one-line status above the composer shows its
-  turn (and token usage when the goal has a token budget). The TUI keeps
+  session and sends the objective as the next message (queued if the session
+  is busy). With no objective, a dialog asks for it, plus optional max turns
+  (1-200) and token budget (a positive whole number); blank uses the Manager
+  defaults. `tab` moves between fields and `ctrl+s` starts the goal. The
+  objective is sent as plain text with the session's current agent and model:
+  the plugin cannot read the composer's selection, so send a message first if
+  you switched agent or model, and `@file` mentions are not attached. If the
+  objective cannot be sent, the goal is cancelled. Scheduled runs and subagent
+  sessions are rejected by the Manager. While a goal is open, a one-line status
+  above the composer shows `<status> · Turn n/max`, token usage when the goal
+  has a token budget, and the first line of the objective. The TUI keeps
   following the goal after you leave the session, and a toast reports the
   outcome with an option to open the session. Running `/ocm-goal` while a goal
   is open shows its live status with `p` to pause or resume and `x` (twice) to
   cancel.
-- `/ocm-multirun [prompt]` opens a launch dialog: prompt, name, a filterable
-  model checklist (up to 5), isolated workspaces or the shared repo directory,
-  and an optional base ref. `ctrl+s` launches; the started sessions open in
-  tabs, or the first one opens when tabs are off. With no prompt,
-  `/ocm-multirun` opens the runs browser for the attached repo: pick a run, open
-  entry or fusion sessions, discard entries (`d` twice), select results with
-  `space`, and press `f` to fuse them with a synthesis model. On the run list,
-  `f` fuses every started result of the highlighted run. A fusion always runs in
-  a new isolated workspace.
+- `/ocm-multirun [prompt]` opens a launch dialog: prompt, name (defaults to the
+  prompt's first line), a filterable model checklist (up to 5, `enter`
+  toggles), isolated workspaces or the shared repo directory, and, for isolated
+  workspaces, an optional ref to start from (default: current HEAD). `ctrl+s`
+  launches; the started sessions open in tabs, or the first one opens when tabs
+  are off. With no prompt, `/ocm-multirun` opens the runs browser for the
+  attached repo. On the run list, `↑`/`↓` select a run, `enter` or `→` opens
+  it, `n` starts a new multi-run, and `r` refreshes. In a run, `enter` or `o`
+  opens an entry or fusion session, `space` selects results for fusion, `d`
+  (twice) discards an entry (and removes its workspace when isolated), and `←`
+  goes back. `f`, on the run list or in a run with nothing selected, opens the
+  fusion form with the run's started results preselected (2-5 needed). The
+  fusion form takes a synthesis model, an optional ref to start from, and
+  optional instructions; `ctrl+s` fuses and `ctrl+b` goes back. A fusion always
+  runs in a new isolated workspace.
 
 Both commands need an OpenCode Manager release that exposes
 `/api/internal/session-goals` and `/api/internal/multi-runs`. An older Manager
-rejects these routes with `401 Unauthorized` even for a valid token; the TUI
-checks the token against another Manager route and then reports that the
-Manager must be upgraded instead of asking you to log in again.
+rejects these routes with `401 Unauthorized` even for a valid token, or with a
+non-JSON `404`; on a `401` the TUI checks the token against another Manager
+route and then reports that the Manager must be upgraded instead of asking you
+to log in again.
+
+The attached `opencode` process carries `OCM_REMOTE_MANAGER_URL`,
+`OCM_REMOTE_REPO_NAME`, and `OCM_REMOTE_REPO_ID`. They drive the indicator and
+tell `/ocm`, `/ocm-goal`, and `/ocm-multirun` which Manager and repo they act
+on; `/ocm-multirun` requires `OCM_REMOTE_REPO_ID`. These commands authenticate
+with the stored token (or `OCM_TOKEN`) for that Manager URL, not with
+`OPENCODE_PASSWORD`.
 
 Enable it in `~/.config/opencode/cli.json`:
 

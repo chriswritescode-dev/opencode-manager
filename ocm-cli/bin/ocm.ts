@@ -20,9 +20,10 @@ import type { ManagerAuthOk } from '../src/manager-auth.js'
 const USAGE = `ocm v${VERSION} - OpenCode Manager workspace launcher
 
 Usage:
-  ocm                       Attach to the Manager repo matching $PWD's git origin,
-                            fall back to the last selected repo, or launch local
-                            opencode when no Manager target applies
+  ocm                       Attach to the Manager repo matching $PWD's OpenCode
+                            project id; inside a git repo with no match, launch
+                            local opencode; outside a git repo, use the last
+                            selected repo, else launch local opencode
   ocm login <url> [token]   Save manager URL + token (token via stdin if omitted)
   ocm logout                Forget saved token and state
   ocm status                Show current manager URL, repo, and whether token is set

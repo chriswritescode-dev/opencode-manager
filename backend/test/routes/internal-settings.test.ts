@@ -209,7 +209,8 @@ describe('internal/settings routes', () => {
     const body = await patchRes.json() as { preferences: { tts: { voice: string; speed: number; apiKey: string; endpoint: string } } }
     expect(body.preferences.tts.voice).toBe('nova')
     expect(body.preferences.tts.speed).toBe(1.5)
-    expect(body.preferences.tts.apiKey).toBe('sk-secret-123')
+    expect(body.preferences.tts.apiKey).toBe('<redacted>')
+    expect(settingsService.getSettings().preferences.tts?.apiKey).toBe('sk-secret-123')
     expect(body.preferences.tts.endpoint).toBe('https://custom.endpoint')
   })
 
@@ -311,6 +312,31 @@ describe('internal/settings routes', () => {
     expect(res.status).toBe(400)
     const body = await res.json() as { error: string }
     expect(body.error).toContain('STT is not configured')
+  })
+
+  it('GET /api/internal/settings redacts stored credentials and keeps empty ones empty', async () => {
+    settingsService.updateSettings({
+      gitCredentials: [
+        { name: 'GitHub', host: 'github.com', type: 'pat', token: 'ghp_secret', username: 'octo' },
+        { name: 'Empty', host: 'example.com', type: 'pat', token: '' },
+      ],
+      stt: { enabled: true, provider: 'external', endpoint: 'https://stt', apiKey: 'sk-stt', model: 'whisper-1', language: 'en-US' },
+      serverEnvVars: [{ key: 'API_TOKEN', value: 'shh' }],
+      lastKnownGoodConfig: '{"provider":{"x":{"apiKey":"sk"}}}',
+    } as Partial<UserPreferences>)
+
+    const res = await app.request('/api/internal/settings', {
+      headers: { authorization: `Bearer ${token}` },
+    })
+    expect(res.status).toBe(200)
+    const body = await res.json() as { preferences: UserPreferences }
+    expect(body.preferences.gitCredentials?.[0]).toMatchObject({ token: '<redacted>', username: 'octo', host: 'github.com' })
+    expect(body.preferences.gitCredentials?.[1]?.token).toBe('')
+    expect(body.preferences.stt?.apiKey).toBe('<redacted>')
+    expect(body.preferences.stt?.endpoint).toBe('https://stt')
+    expect(body.preferences.serverEnvVars).toEqual([{ key: 'API_TOKEN', value: '<redacted>' }])
+    expect(body.preferences.lastKnownGoodConfig).toBe('<redacted>')
+    expect(JSON.stringify(body)).not.toMatch(/ghp_secret|sk-stt|shh/)
   })
 
   it('PATCH /api/internal/settings with existing keys (theme) still works after tts/stt additions', async () => {

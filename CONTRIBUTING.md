@@ -76,19 +76,24 @@ pnpm test              # Run CLI, backend, and frontend tests
 cd backend && vitest <filename>   # Run single test file
 ```
 
-### Linting
+### Linting and Type Checking
 
 ```bash
 pnpm lint              # Lint CLI, frontend, and backend
+pnpm typecheck         # Type-check CLI, frontend, and backend
 ```
 
-Run linting before submitting a PR.
+Run linting and type checking before submitting a PR.
+
+### Commit Messages
+
+Use `type(scope): brief description`, where the scope is optional, for example `feat(schedules): add workspace modes` or `fix(proxy): harden remote terminal WebSocket bridging`.
 
 ## Submitting Changes
 
 1. Create a feature branch from `main`
 2. Make your changes with clear, focused commits
-3. Run tests and linting
+3. Run tests, linting, and type checking
 4. Open a PR and link it to your issue (use "Closes #123" in the PR description)
 5. A maintainer will move the item to **In Review**
 6. Address review feedback

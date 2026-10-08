@@ -611,7 +611,7 @@ Use the \`${MANAGER_TOOL_NAME}\` tool with the \`request\` action. The tool runs
 
 ### GET /settings
 
-Retrieve the user's full settings, including all preferences.
+Retrieve the user's full settings, including all preferences. Stored credentials (git credential tokens, SSH keys and passphrases, TTS and STT API keys, server environment variable values, and the last known good config) are replaced with \`<redacted>\`; an empty value means none is set. PATCH responses are redacted the same way.
 
 **Query Parameters:**
 - \`userId\` (optional): User ID. Defaults to \`"default"\`.
