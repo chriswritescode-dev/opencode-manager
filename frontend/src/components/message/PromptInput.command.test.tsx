@@ -3,7 +3,6 @@ import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest'
 import { render, screen, fireEvent, act, waitFor } from '@testing-library/react'
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
 import { PromptInput, type PromptInputHandle } from './PromptInput'
-import { useUIState } from '@/stores/uiStateStore'
 import { BUILTIN_COMMANDS } from '@/lib/builtinCommands'
 import { createCommandActionsMock, stubMatchMedia } from '@/test/test-utils'
 
@@ -209,8 +208,6 @@ describe('PromptInput command submission', () => {
     mocks.useSendErrorStore.mockImplementation((selector: (state: unknown) => unknown) => selector({ errors: {} }))
     suggestionProps.isOpen = false
     suggestionProps.selectedIndex = 0
-    useUIState.getState().clearPendingPromptCommand()
-    useUIState.getState().clearPendingPromptFile()
   })
 
   afterEach(() => {
@@ -269,13 +266,13 @@ describe('PromptInput command submission', () => {
   })
 
   it('sends parsed command attachments and offsets to runCommand without injecting the selected agent', async () => {
+    mocks.useFileSearch.mockReturnValue({ files: ['src/App.tsx'] })
     const { container } = renderComponent()
 
-    act(() => {
-      useUIState.getState().selectPromptFile('src/App.tsx')
-    })
-
     const input = await screen.findByPlaceholderText('Send a message...')
+    fireEvent.change(input, { target: { value: '@App' } })
+    await waitFor(() => expect(suggestionProps.isOpen).toBe(true))
+    fireEvent.keyDown(input, { key: 'Enter' })
     await waitFor(() => expect(input).toHaveValue('@App.tsx '))
 
     await attachImage(container)

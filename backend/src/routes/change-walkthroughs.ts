@@ -23,8 +23,8 @@ export function createChangeWalkthroughRoutes(service: ChangeWalkthroughService)
     }
 
     try {
-      const { walkthrough, created } = await service.generate(c.req.param('sessionId'), parsed.data)
-      return c.json({ walkthrough }, created ? 201 : 200)
+      const state = await service.startGeneration(c.req.param('sessionId'), parsed.data)
+      return c.json(state, state.generating ? 202 : 200)
     } catch (error) {
       return handleServiceError(c, error, 'Failed to generate change walkthrough', ServiceError)
     }

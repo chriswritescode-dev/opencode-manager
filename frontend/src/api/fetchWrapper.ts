@@ -36,7 +36,7 @@ async function handleResponse(response: Response): Promise<never> {
     try {
       return JSON.parse(text) as ApiErrorResponse
     } catch {
-      return { error: text }
+      return { error: /^\s*</.test(text) ? `Request failed with status ${response.status}` : text }
     }
   })()
   const errorData = data as ApiErrorResponse & { message?: string; data?: { message?: unknown } }

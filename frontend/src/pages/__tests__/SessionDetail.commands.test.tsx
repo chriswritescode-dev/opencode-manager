@@ -147,7 +147,7 @@ vi.mock('@/hooks/useAutoPlayLastResponse', () => ({
 vi.mock('@/stores/uiStateStore', () => ({
   useUIState: vi.fn((selector?: (state: Record<string, unknown>) => unknown) =>
     typeof selector === 'function'
-      ? selector({ isEditingMessage: false, setActivePromptFileBasePath: vi.fn() })
+      ? selector({ isEditingMessage: false })
       : false
   ),
 }))
@@ -202,7 +202,11 @@ vi.mock('@/hooks/useSessionGoals', () => ({
   useCancelSessionGoal: vi.fn(() => ({ mutate: vi.fn(), isPending: false })),
 }))
 vi.mock('@/components/session/SideQuestionDialog', () => ({ SideQuestionDialog: vi.fn(() => null) }))
-vi.mock('@/components/session/ChangesWalkthroughDialog', () => ({ ChangesWalkthroughDialog: vi.fn(() => null) }))
+vi.mock('@/components/session/ChangesWalkthroughSheet', () => ({ ChangesWalkthroughSheet: vi.fn(() => null) }))
+vi.mock('@/components/navigation/ToolSidePanel', () => ({ ToolSidePanel: vi.fn(() => null) }))
+vi.mock('@/hooks/useToolPanel', () => ({
+  useToolPanel: vi.fn(() => ({ activeTool: null, toggleTool: vi.fn(), closePanel: vi.fn() })),
+}))
 vi.mock('@/components/session/SessionList', () => ({ SessionList: vi.fn(() => null) }))
 vi.mock('@/components/file-browser/FileBrowserSheet', () => ({ FileBrowserSheet: vi.fn(() => null) }))
 vi.mock('@/components/repo/RepoMcpDialog', () => ({ RepoMcpDialog: vi.fn(() => null) }))

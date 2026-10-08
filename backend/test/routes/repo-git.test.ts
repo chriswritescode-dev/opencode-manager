@@ -4,6 +4,7 @@ import type { Database } from 'bun:sqlite'
 import type { GitAuthService } from '../../src/services/git-auth'
 import type { OpenCodeClient } from '../../src/services/opencode/client'
 import { createRepoGitRoutes } from '../../src/routes/repo-git'
+import { stubLoadedModelCatalog } from '../helpers/stub-opencode-client'
 import { createGitService, GitService } from '../../src/services/git/GitService'
 import * as db from '../../src/db/queries'
 
@@ -33,6 +34,7 @@ vi.mock('../../src/utils/process', () => ({
 vi.mock('@opencode-manager/shared/config/env', () => ({
   getReposPath: vi.fn(() => '/repos'),
   getWorkspacePath: vi.fn(() => '/tmp/test-workspace'),
+  getOpenCodeGlobalConfigPath: vi.fn(() => '/tmp/test-workspace/.config/opencode'),
   ENV: {
     OPENCODE: { PORT: 5551, HOST: '127.0.0.1' },
     SERVER: { PORT: 5001, HOST: '0.0.0.0', CORS_ORIGIN: '*', NODE_ENV: 'test' },
@@ -89,7 +91,7 @@ describe('Repo Git Routes', () => {
     } as unknown as GitAuthService
     generateTextMock = vi.fn()
     mockOpenCodeClient = {
-      api: { generate: { text: generateTextMock } },
+      api: { ...stubLoadedModelCatalog(), generate: { text: generateTextMock } },
     } as unknown as OpenCodeClient
     app = createRepoGitRoutes(
       mockDatabase,

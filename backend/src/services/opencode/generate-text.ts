@@ -1,5 +1,7 @@
 import type { ModelRef } from '@opencode-manager/shared/opencode'
+import { getOpenCodeGlobalConfigPath } from '@opencode-manager/shared/config/env'
 import type { OpenCodeClient } from './client'
+import { resolveOpenCodeModel } from '../opencode-models'
 
 export class GenerateTextTimeoutError extends Error {
   constructor() {
@@ -23,12 +25,24 @@ export async function generateTextWithTimeout(
   })
 
   try {
-    const { text } = await Promise.race([
-      client.api.generate.text(input, { signal: controller.signal }),
-      timeout,
-    ])
+    const { text } = await Promise.race([generateText(client, input, controller.signal), timeout])
     return text
   } finally {
     if (timer) clearTimeout(timer)
   }
+}
+
+async function generateText(
+  client: OpenCodeClient,
+  input: { prompt: string; model?: ModelRef },
+  signal: AbortSignal,
+): Promise<{ text: string }> {
+  const model = input.model ?? await resolveGenerateModel(client, signal)
+  return client.api.generate.text({ prompt: input.prompt, model }, { signal })
+}
+
+/** OpenCode serves generation from its global config location, so the model must be resolved there once its catalog has loaded. */
+async function resolveGenerateModel(client: OpenCodeClient, signal: AbortSignal): Promise<ModelRef> {
+  const { providerID, id, variant } = await resolveOpenCodeModel(client, getOpenCodeGlobalConfigPath(), { signal })
+  return variant ? { providerID, id, variant } : { providerID, id }
 }

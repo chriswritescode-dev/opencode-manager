@@ -43,10 +43,20 @@ export const ChangeWalkthroughSchema = z.object({
 
 export type ChangeWalkthrough = z.infer<typeof ChangeWalkthroughSchema>;
 
+export const WalkthroughGenerationErrorSchema = z.object({
+  message: z.string(),
+  code: z.string().optional(),
+  details: z.unknown().optional(),
+});
+
+export type WalkthroughGenerationError = z.infer<typeof WalkthroughGenerationErrorSchema>;
+
 export const ChangeWalkthroughStateSchema = z.object({
   walkthrough: ChangeWalkthroughSchema.nullable(),
   currentDiffHash: z.string().nullable(),
   stale: z.boolean(),
+  generating: z.boolean(),
+  error: WalkthroughGenerationErrorSchema.nullable(),
 });
 
 export type ChangeWalkthroughState = z.infer<typeof ChangeWalkthroughStateSchema>;

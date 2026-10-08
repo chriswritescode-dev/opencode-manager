@@ -60,6 +60,16 @@ export function buildModelSections(
 
   const pinnedValues = new Set<string>()
 
+  const pinOptions = (selections: ModelSelection[] = []) =>
+    selections.flatMap((selection) => {
+      const option = optionsByValue.get(providerModelRef({ id: selection.providerID }, { id: selection.modelID }))
+      if (!option || pinnedValues.has(option.value)) return []
+      pinnedValues.add(option.value)
+      return [option]
+    })
+
+  const favoriteOptions = pinOptions(modelState?.favorite)
+
   const defaultOption = (() => {
     if (!defaultModel) return undefined
     const parsed = parseOpenCodeModelRef(defaultModel)
@@ -71,15 +81,6 @@ export function buildModelSections(
     return createOption(provider, model, defaultModel)
   })()
 
-  const pinOptions = (selections: ModelSelection[] = []) =>
-    selections.flatMap((selection) => {
-      const option = optionsByValue.get(providerModelRef({ id: selection.providerID }, { id: selection.modelID }))
-      if (!option || pinnedValues.has(option.value)) return []
-      pinnedValues.add(option.value)
-      return [option]
-    })
-
-  const favoriteOptions = pinOptions(modelState?.favorite)
   const recentOptions = pinOptions(modelState?.recent)
   const sections: ModelSection[] = [
     ...(defaultOption ? [{ key: 'default', title: 'Default', options: [defaultOption] }] : []),
@@ -93,6 +94,21 @@ export function buildModelSections(
   return sections.filter((section) => section.options.length > 0)
 }
 
+/** Keeps the first option for each value, so a favorite that is also the default lists once under Default. */
+function uniqueModelSections(sections: ModelSection[]): ModelSection[] {
+  const seen = new Set<string>()
+  return sections
+    .map((section) => ({
+      ...section,
+      options: section.options.filter((option) => {
+        if (seen.has(option.value)) return false
+        seen.add(option.value)
+        return true
+      }),
+    }))
+    .filter((section) => section.options.length > 0)
+}
+
 function compareSearchMatches(a: ModelOption, b: ModelOption): number {
   return compareCatalogModels(
     { name: a.label, free: a.model.free, released: a.model.released },
@@ -101,13 +117,14 @@ function compareSearchMatches(a: ModelOption, b: ModelOption): number {
 }
 
 export function filterModelSections(sections: ModelSection[], query: string): ModelSection[] {
+  const unique = uniqueModelSections(sections)
   const terms = query.toLowerCase().split(/\s+/).filter(Boolean)
-  if (terms.length === 0) return sections
+  if (terms.length === 0) return unique
 
   const favoriteValues = new Set(
     sections.find((section) => section.key === 'favorites')?.options.map((option) => option.value) ?? [],
   )
-  const matches = sections
+  const matches = unique
     .flatMap((section) => section.options)
     .filter((option) => terms.every((term) => option.searchText.includes(term)))
     .sort(compareSearchMatches)
@@ -120,7 +137,7 @@ export function filterModelSections(sections: ModelSection[], query: string): Mo
 }
 
 export function toModelComboboxOptions(sections: ModelSection[], defaultRef?: string | null): ComboboxOption[] {
-  return sections.flatMap((section) =>
+  return uniqueModelSections(sections).flatMap((section) =>
     section.options.map((option) => {
       const isDefault = defaultRef != null && option.value === defaultRef
       return {

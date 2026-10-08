@@ -42,16 +42,22 @@ interface SourceControlPanelProps {
   repoName?: string
 }
 
+interface SourceControlContentProps {
+  repoId: number
+  isOpen: boolean
+  currentBranch: string
+  compact: boolean
+}
+
 type Tab = 'changes' | 'commits' | 'branches' | 'stash'
 type View = 'default' | 'commit-detail'
 
-export function SourceControlPanel({
+export function SourceControlContent({
   repoId,
   isOpen,
-  onClose,
   currentBranch,
-  repoName,
-}: SourceControlPanelProps) {
+  compact,
+}: SourceControlContentProps) {
   const [activeTab, setActiveTab] = useState<Tab>('changes')
   const [selectedFile, setSelectedFile] = useState<{path: string, staged: boolean} | undefined>()
   const [currentView, setCurrentView] = useState<View>('default')
@@ -65,7 +71,6 @@ export function SourceControlPanel({
     queryFn: () => getRepo(repoId),
     enabled: isOpen,
   })
-  const isMobile = useMobile()
   const displayBranch = repo?.currentBranch || repo?.branch || currentBranch
 
   useRefreshOnOpen(isOpen, () => { invalidateRepoGitCaches(queryClient, repoId) })
@@ -111,8 +116,8 @@ export function SourceControlPanel({
   const changesCount = status?.files.length || 0
   const stagedCount = status?.files.filter(f => f.staged).length || 0
 
-  const content = (
-    <div className="flex flex-col h-full gap-0">
+  return (
+    <div className="flex flex-col h-full min-h-0 gap-0">
       <div className="flex items-center justify-between px-3 py-2 border-b border-border flex-shrink-0">
         <div className="flex items-center gap-2">
           <div className="flex items-center gap-2">
@@ -188,7 +193,7 @@ export function SourceControlPanel({
         <GitErrorBanner error={gitError} onDismiss={() => setGitError(null)} />
       )}
 
-      {!((currentView === 'commit-detail' && selectedCommitFile) || (isMobile && selectedFile && activeTab === 'changes')) && (
+      {!((currentView === 'commit-detail' && selectedCommitFile) || (compact && selectedFile && activeTab === 'changes')) && (
         <div className="flex border-b border-border flex-shrink-0">
           {tabs.map((tab) => {
             const Icon = tab.icon
@@ -197,14 +202,14 @@ export function SourceControlPanel({
                 key={tab.id}
                 className={cn(
                   'flex items-center gap-1.5 py-2 text-sm whitespace-nowrap transition-colors border-b-2 -mb-px',
-                  isMobile ? 'flex-1 justify-center px-2' : 'px-3',
+                  compact ? 'flex-1 justify-center px-2' : 'px-3',
                   activeTab === tab.id
                     ? 'border-primary text-foreground'
                     : 'border-transparent text-muted-foreground hover:text-foreground hover:bg-accent'
                 )}
                 onClick={() => setActiveTab(tab.id)}
               >
-                {!isMobile && <Icon className="w-4 h-4" />}
+                {!compact && <Icon className="w-4 h-4" />}
                 <span>{tab.label}</span>
                 {tab.id === 'changes' && changesCount > 0 && (
                   <span className="text-xs px-1.5 py-0.5 rounded-full bg-accent">
@@ -217,15 +222,15 @@ export function SourceControlPanel({
         </div>
       )}
 
-      <div className={cn('flex-1 min-h-0', isMobile ? 'flex flex-col gap-0' : 'flex')}>
+      <div className={cn('flex-1 min-h-0', compact ? 'flex flex-col gap-0' : 'flex')}>
         <div className={cn(
           'overflow-hidden min-h-0 h-full flex flex-col',
-          isMobile 
-            ? 'flex-1' 
-            : currentView === 'commit-detail' 
-              ? 'flex-1' 
-              : selectedFile 
-                ? 'w-[35%] border-r border-border' 
+          compact
+            ? 'flex-1'
+            : currentView === 'commit-detail'
+              ? 'flex-1'
+              : selectedFile
+                ? 'w-[35%] border-r border-border'
                 : 'flex-1'
         )}>
           {activeTab === 'changes' && (
@@ -234,7 +239,7 @@ export function SourceControlPanel({
               onFileSelect={(path, staged) => setSelectedFile({ path, staged })}
               onClearFileSelection={() => setSelectedFile(undefined)}
               selectedFile={selectedFile}
-              isMobile={isMobile}
+              isMobile={compact}
               onError={handleGitError}
             />
           )}
@@ -261,7 +266,7 @@ export function SourceControlPanel({
           )}
         </div>
 
-        {selectedFile && !isMobile && currentView === 'default' && (
+        {selectedFile && !compact && currentView === 'default' && (
           <div className="flex-1 overflow-hidden flex flex-col">
             <div className="flex-1 overflow-auto">
               <FileDiffView repoId={repoId} filePath={selectedFile.path} includeStaged={selectedFile.staged} onClose={() => setSelectedFile(undefined)} />
@@ -271,6 +276,16 @@ export function SourceControlPanel({
       </div>
     </div>
   )
+}
+
+export function SourceControlPanel({
+  repoId,
+  isOpen,
+  onClose,
+  currentBranch,
+  repoName,
+}: SourceControlPanelProps) {
+  const isMobile = useMobile()
 
   return (
     <Dialog open={isOpen} onOpenChange={(open) => !open && onClose()}>
@@ -302,7 +317,12 @@ export function SourceControlPanel({
           )}
         </DialogHeader>
         <div className="flex-1 overflow-hidden pb-0">
-          {content}
+          <SourceControlContent
+            repoId={repoId}
+            isOpen={isOpen}
+            currentBranch={currentBranch}
+            compact={isMobile}
+          />
         </div>
       </DialogContent>
     </Dialog>

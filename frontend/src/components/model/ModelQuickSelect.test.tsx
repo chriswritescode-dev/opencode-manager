@@ -70,6 +70,7 @@ interface SelectionOptions {
   recent?: Selection[]
   model?: Selection | null
   info?: ModelInfo
+  defaultModel?: string
 }
 
 function setModelSelection(options: SelectionOptions = {}) {
@@ -99,8 +100,8 @@ function setModelSelection(options: SelectionOptions = {}) {
 
   mocks.useModelSections.mockReturnValue({
     providers,
-    sections: buildModelSections(providers, modelState),
-    defaultModel: null,
+    sections: buildModelSections(providers, modelState, options.defaultModel),
+    defaultModel: options.defaultModel ?? null,
     modelState,
     isLoading: false,
   })
@@ -222,6 +223,19 @@ describe('ModelQuickSelect quick view', () => {
     expect(section.textContent).toContain('Claude Sonnet 4')
     expect(section.textContent).toContain('GPT-5')
     expect(section.textContent!.indexOf('Claude Sonnet 4')).toBeLessThan(section.textContent!.indexOf('GPT-5'))
+  })
+
+  it('keeps a favorite listed when it is also the default model', () => {
+    setModelSelection({
+      favorite: [selection('anthropic', 'claude-sonnet-4'), selection('openai', 'gpt-5')],
+      defaultModel: 'openai/gpt-5',
+    })
+
+    render(<ModelQuickSelect open />)
+
+    const section = sectionFor('Favorites')
+    expect(section.textContent).toContain('Claude Sonnet 4')
+    expect(section.textContent).toContain('GPT-5')
   })
 
   it('lists the valid recents that are not favorites', () => {

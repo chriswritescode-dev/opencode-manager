@@ -13,7 +13,7 @@ import { BranchCombobox } from '@/components/repo/BranchCombobox'
 import { ModelCheckboxList } from '@/components/repo/ModelCheckboxList'
 import { MultiRunCard } from '@/components/repo/MultiRunCard'
 import { FusionComposer, type FusionComposerSubmission } from '@/components/repo/FusionComposer'
-import { ChangesWalkthroughDialog } from '@/components/session/ChangesWalkthroughDialog'
+import { ChangesWalkthroughSheet } from '@/components/session/ChangesWalkthroughSheet'
 import { useModelSections } from '@/hooks/useModelSections'
 import { useDiscardMultiRunEntry, useFuseMultiRun, useLaunchMultiRun, useMultiRuns } from '@/hooks/useMultiRuns'
 import { filterModelSections } from '@/lib/modelSections'
@@ -252,7 +252,7 @@ export function MultiRunSheet({ repoId, directory, defaultBaseRef, open, onOpenC
       />
 
       {walkthroughSessionId ? (
-        <ChangesWalkthroughDialog
+        <ChangesWalkthroughSheet
           sessionId={walkthroughSessionId}
           open
           onOpenChange={(next) => {

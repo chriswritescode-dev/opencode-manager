@@ -49,6 +49,7 @@ import type { PageCommandActions } from "@/lib/builtinCommands";
 import { useRedoMessage, useUndoMessage } from "@/hooks/useUndoMessage";
 import { usePermissions, useForms } from "@/contexts/EventContext";
 import type { FormInfo, SessionMessageInfo } from "@opencode-manager/shared/opencode";
+import type { SkillFileInfo } from "@opencode-manager/shared";
 import { formatOpenCodeModelRef } from "@opencode-manager/shared/opencode";
 import { FormPrompt } from "@/components/session/FormPrompt";
 import { MinimizedFormIndicator } from "@/components/session/MinimizedFormIndicator";
@@ -64,7 +65,9 @@ import { useTerminalDialogParam } from "@/hooks/useOpenTerminal";
 import { SessionMoreButton } from "@/components/navigation/SessionMoreButton";
 import { SideQuestionDialog } from "@/components/session/SideQuestionDialog";
 import { SessionMessagePickerDialog } from "@/components/session/SessionMessagePickerDialog";
-import { ChangesWalkthroughDialog } from "@/components/session/ChangesWalkthroughDialog";
+import { ChangesWalkthroughSheet } from "@/components/session/ChangesWalkthroughSheet";
+import { ToolSidePanel } from "@/components/navigation/ToolSidePanel";
+import { useToolPanel } from "@/hooks/useToolPanel";
 
 const OLDER_HISTORY_SCROLL_THRESHOLD_PX = 200
 
@@ -141,6 +144,8 @@ export function SessionDetail() {
   const [forkPickerLoading, setForkPickerLoading] = useState(false);
 
   const isMobile = useMobile();
+  const docked = !isMobile;
+  const sidePanel = useToolPanel(docked);
   const { keyboardHeight } = useVisualViewport();
   const inputBottomOffset = isMobile ? keyboardHeight : 0;
   const promptOverlayObserverRef = useRef<ResizeObserver | null>(null);
@@ -267,7 +272,6 @@ export function SessionDetail() {
   const { modelRef } = useModelSelection(sessionDirectory, modelSelectionSession);
   const setSessionStatus = useSessionStatus((state) => state.setStatus);
   const isEditingMessage = useUIState((state) => state.isEditingMessage);
-  const setActivePromptFileBasePath = useUIState((state) => state.setActivePromptFileBasePath);
   const { isEnabled: ttsEnabled } = useTTS();
   const { syncForSession: syncPermissionsForSession } = usePermissions();
   const { getForSession: getFormForSession, reply: replyToForm, cancel: cancelForm, syncForSession: syncFormsForSession } = useForms();
@@ -287,14 +291,6 @@ export function SessionDetail() {
   const isStreamingResponse = hasIncompleteMessages && isSessionActive;
   const workspaceBasePath = repo?.localPath;
 
-  useEffect(() => {
-    setActivePromptFileBasePath(sessionDirectory ? workspaceBasePath ?? null : null)
-
-    return () => {
-      setActivePromptFileBasePath(null)
-    }
-  }, [sessionDirectory, setActivePromptFileBasePath, workspaceBasePath])
-
   useAutoPlayLastResponse({
     sessionId: sessionId ?? '',
     lastAssistantMessage,
@@ -306,6 +302,7 @@ export function SessionDetail() {
   const handleShowMcpDialog = useCallback(() => setMcpDialogOpen(true), [setMcpDialogOpen]);
   const handleShowSkillsDialog = useCallback(() => setSkillsDialogOpen(true), [setSkillsDialogOpen]);
   const handleShowWalkthrough = useCallback(() => setWalkthroughOpen(true), [setWalkthroughOpen]);
+  const handleSkillLoaded = useCallback((skill: SkillFileInfo) => showToast.success(`Loaded skill: ${skill.name}`), []);
   const handleConnectProvider = useCallback(() => setSettingsTab('providers'), [setSettingsTab]);
 
   const handleMinimizeForm = useCallback((form: FormInfo) => {
@@ -468,7 +465,7 @@ export function SessionDetail() {
     undo: handleUndo,
     redo: handleRedo,
     fork: openForkPicker,
-    toggleSidebar: () => setFileBrowserOpen(!fileBrowserOpen),
+    toggleSidebar: () => (docked ? sidePanel.toggleTool('files') : setFileBrowserOpen(!fileBrowserOpen)),
     toggleMode: () => {
       const modeButton = document.querySelector(
         "[data-toggle-mode]",
@@ -508,10 +505,12 @@ export function SessionDetail() {
     }
   }, [sessionId, updateSessionAsync]);
 
-  const handleFileBrowserClose = useCallback(() => {
-    setFileBrowserOpen(false)
-    setSelectedFilePath(undefined)
-  }, [setFileBrowserOpen]);
+  const handleFileBrowserClose = useCallback(() => setFileBrowserOpen(false), [setFileBrowserOpen]);
+
+  const filesVisible = fileBrowserOpen || sidePanel.activeTool === 'files';
+  useEffect(() => {
+    if (!filesVisible) setSelectedFilePath(undefined);
+  }, [filesVisible]);
 
   const handleChildSessionClick = useCallback((childSessionId: string) => {
     navigate(`/repos/${repoId}/sessions/${childSessionId}${sessionRouteSuffix}`)
@@ -714,7 +713,8 @@ export function SessionDetail() {
 
       </div>
 
-      <div className="relative flex-1 overflow-hidden flex flex-col">
+      <div className="flex flex-1 min-h-0">
+      <div className="relative flex-1 min-w-0 overflow-hidden flex flex-col">
         <div key={sessionId} data-testid="session-message-scroll" ref={messageContainerRef} onScroll={handleMessageScroll} className="flex-1 overflow-y-auto overflow-x-hidden overscroll-contain [mask-image:linear-gradient(to_bottom,transparent,black_16px,black)]" style={{ paddingBottom: promptOverlayHeight + inputBottomOffset + PROMPT_OVERLAY_CLEARANCE_PX }}>
           {repoLoading || sessionLoading || messagesLoading ? (
             <MessageSkeleton />
@@ -818,6 +818,20 @@ export function SessionDetail() {
           </div>
         )}
       </div>
+      {docked && (
+        <ToolSidePanel
+          panel={sidePanel}
+          repoId={repoId}
+          sessionId={sessionId}
+          directory={sessionDirectory}
+          filesBasePath={workspaceBasePath}
+          currentBranch={repo?.currentBranch || repo?.branch || "main"}
+          selectedFilePath={selectedFilePath}
+          repoDirectory={repoDirectory}
+          onSkillLoaded={handleSkillLoaded}
+        />
+      )}
+      </div>
 
       {/* Sessions Dialog */}
       <Dialog open={sessionsDialogOpen} onOpenChange={setSessionsDialogOpen}>
@@ -865,7 +879,7 @@ export function SessionDetail() {
       )}
 
       <FileBrowserSheet
-        isOpen={fileBrowserOpen}
+        isOpen={!docked && fileBrowserOpen}
         onClose={handleFileBrowserClose}
         basePath={workspaceBasePath}
         repoName={workspaceDisplayName}
@@ -875,25 +889,25 @@ export function SessionDetail() {
 
       {sessionId && (
         <RepoSkillsDialog
-          open={skillsDialogOpen}
+          open={!docked && skillsDialogOpen}
           onOpenChange={setSkillsDialogOpen}
           repoId={repoId}
           sessionId={sessionId}
           directory={repoDirectory}
-          onSkillLoaded={(skill) => showToast.success(`Loaded skill: ${skill.name}`)}
+          onSkillLoaded={handleSkillLoaded}
         />
       )}
 
       {sessionId && (
-        <ChangesWalkthroughDialog
+        <ChangesWalkthroughSheet
           sessionId={sessionId}
-          open={walkthroughOpen}
+          open={!docked && walkthroughOpen}
           onOpenChange={setWalkthroughOpen}
         />
       )}
 
       <RepoMcpDialog
-        open={mcpDialogOpen}
+        open={!docked && mcpDialogOpen}
         onOpenChange={setMcpDialogOpen}
         directory={repoDirectory}
       />
@@ -902,14 +916,14 @@ export function SessionDetail() {
         <RepoActionsDialog
           repoId={repoId}
           directory={sessionDirectory}
-          open={actionsDialogOpen}
+          open={!docked && actionsDialogOpen}
           onOpenChange={setActionsDialogOpen}
         />
       )}
 
       <SourceControlPanel
         repoId={repoId}
-        isOpen={sourceControlOpen}
+        isOpen={!docked && sourceControlOpen}
         onClose={() => setSourceControlOpen(false)}
         currentBranch={repo?.currentBranch || repo?.branch || "main"}
         repoName={workspaceDisplayName}
@@ -918,12 +932,12 @@ export function SessionDetail() {
       <TerminalPanel
         repoId={repoId}
         directory={sessionDirectory}
-        isOpen={terminalOpen}
+        isOpen={!docked && terminalOpen}
         onClose={() => setTerminalOpen(false)}
       />
 
       <PreviewPanel
-        isOpen={previewOpen}
+        isOpen={!docked && previewOpen}
         onClose={() => setPreviewOpen(false)}
         directory={sessionDirectory}
       />

@@ -14,6 +14,7 @@ import {
   type ChangeWalkthrough,
   type ChangeWalkthroughState,
   type GenerateChangeWalkthroughRequest,
+  type WalkthroughGenerationError,
   type WalkthroughHunk,
   type WalkthroughOmittedFile,
   type WalkthroughStop,
@@ -212,8 +213,26 @@ export function parseWalkthroughResponse(text: string, hunks: WalkthroughHunk[])
   }
 }
 
+interface InFlightGeneration {
+  modelStarted: Promise<void>
+  result: Promise<{ walkthrough: ChangeWalkthrough; created: boolean }>
+}
+
+function toGenerationError(error: unknown): WalkthroughGenerationError {
+  if (error instanceof ServiceError) {
+    return {
+      message: error.message,
+      ...(error.code ? { code: error.code } : {}),
+      ...(error.details !== undefined ? { details: error.details } : {}),
+    }
+  }
+
+  return { message: getErrorMessage(error) || 'Failed to generate the change walkthrough' }
+}
+
 export class ChangeWalkthroughService {
-  private readonly inFlight = new Map<string, Promise<{ walkthrough: ChangeWalkthrough; created: boolean }>>()
+  private readonly inFlight = new Map<string, InFlightGeneration>()
+  private readonly failures = new Map<string, WalkthroughGenerationError>()
   private readonly deletedDuringGeneration = new Set<string>()
   private readonly timeoutMs: number
 
@@ -241,21 +260,19 @@ export class ChangeWalkthroughService {
       walkthrough,
       currentDiffHash,
       stale: walkthrough !== null && currentDiffHash !== null && walkthrough.diffHash !== currentDiffHash,
+      generating: this.inFlight.has(sessionId),
+      error: this.failures.get(sessionId) ?? null,
     }
   }
 
   generate(sessionId: string, request: GenerateChangeWalkthroughRequest): Promise<{ walkthrough: ChangeWalkthrough; created: boolean }> {
-    const existing = this.inFlight.get(sessionId)
-    if (existing) {
-      return existing
-    }
+    return this.begin(sessionId, request).result
+  }
 
-    const pending = this.runGenerate(sessionId, request).finally(() => {
-      this.inFlight.delete(sessionId)
-      this.deletedDuringGeneration.delete(sessionId)
-    })
-    this.inFlight.set(sessionId, pending)
-    return pending
+  async startGeneration(sessionId: string, request: GenerateChangeWalkthroughRequest): Promise<ChangeWalkthroughState> {
+    const entry = this.begin(sessionId, request)
+    await Promise.race([entry.modelStarted, entry.result])
+    return this.getState(sessionId)
   }
 
   /** Removes the stored walkthrough of a deleted session, including one still being generated. */
@@ -268,12 +285,51 @@ export class ChangeWalkthroughService {
     if (this.inFlight.has(sessionID)) {
       this.deletedDuringGeneration.add(sessionID)
     }
+    this.failures.delete(sessionID)
     deleteChangeWalkthrough(this.db, sessionID)
+  }
+
+  private begin(sessionId: string, request: GenerateChangeWalkthroughRequest): InFlightGeneration {
+    const existing = this.inFlight.get(sessionId)
+    if (existing) {
+      return existing
+    }
+
+    this.failures.delete(sessionId)
+
+    let resolveModelStarted: () => void = () => {}
+    const modelStarted = new Promise<void>((resolve) => {
+      resolveModelStarted = resolve
+    })
+    let modelCalled = false
+    const markModelStarted = () => {
+      modelCalled = true
+      resolveModelStarted()
+    }
+
+    const result = this.runGenerate(sessionId, request, markModelStarted)
+      .catch((error) => {
+        if (modelCalled) {
+          this.failures.set(sessionId, toGenerationError(error))
+        }
+        throw error
+      })
+      .finally(() => {
+        this.inFlight.delete(sessionId)
+        this.deletedDuringGeneration.delete(sessionId)
+      })
+
+    result.catch(() => {})
+
+    const entry: InFlightGeneration = { modelStarted, result }
+    this.inFlight.set(sessionId, entry)
+    return entry
   }
 
   private async runGenerate(
     sessionId: string,
     request: GenerateChangeWalkthroughRequest,
+    onModelStart: () => void,
   ): Promise<{ walkthrough: ChangeWalkthrough; created: boolean }> {
     const session = await this.readSession(sessionId)
 
@@ -314,9 +370,15 @@ export class ChangeWalkthroughService {
 
     const prompt = buildWalkthroughPrompt({ title, hunks })
 
+    onModelStart()
+
     let responseText: string
     try {
-      responseText = await generateTextWithTimeout(this.openCodeClient, { prompt }, this.timeoutMs)
+      responseText = await generateTextWithTimeout(
+        this.openCodeClient,
+        { prompt, model: session.model },
+        this.timeoutMs,
+      )
     } catch (error) {
       if (error instanceof GenerateTextTimeoutError) {
         throw new ChangeWalkthroughError('Generating the change walkthrough timed out', 504, {

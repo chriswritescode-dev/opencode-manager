@@ -2,7 +2,6 @@ import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest'
 import { render, screen, fireEvent, waitFor, act } from '@testing-library/react'
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
 import { PromptInput } from './PromptInput'
-import { useUIState } from '@/stores/uiStateStore'
 import { createCommandActionsMock, stubMatchMedia } from '@/test/test-utils'
 
 const mocks = vi.hoisted(() => ({
@@ -194,8 +193,6 @@ describe('PromptInput goal mode', () => {
     mocks.useUserBash.mockImplementation((selector: (state: unknown) => unknown) => selector({ addUserBashCommand: vi.fn() }))
     mocks.useSessionAgentStore.mockImplementation((selector: (state: unknown) => unknown) => selector({ setAgent: mocks.setAgent }))
     mocks.useSendErrorStore.mockImplementation((selector: (state: unknown) => unknown) => selector({ errors: {} }))
-    useUIState.getState().clearPendingPromptCommand()
-    useUIState.getState().clearPendingPromptFile()
   })
 
   afterEach(() => {

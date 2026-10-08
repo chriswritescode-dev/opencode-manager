@@ -1,4 +1,4 @@
-export { SourceControlPanel } from './SourceControlPanel'
+export { SourceControlPanel, SourceControlContent } from './SourceControlPanel'
 export { ChangesTab } from './ChangesTab'
 export { CommitsTab } from './CommitsTab'
 export { BranchesTab } from './BranchesTab'

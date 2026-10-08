@@ -8,18 +8,24 @@ import { Button } from "@/components/ui/button";
 import { Plus, FolderOpen, CalendarClock } from "lucide-react";
 import { PendingActionsGroup } from "@/components/notifications/PendingActionsGroup";
 import { useDialogParam } from "@/hooks/useDialogParam";
+import { useMobile } from "@/hooks/useMobile";
+import { useToolPanel } from "@/hooks/useToolPanel";
+import { ToolSidePanel } from "@/components/navigation/ToolSidePanel";
 
 export function Repos() {
   const navigate = useNavigate();
   const [addRepoOpen, setAddRepoOpen] = useState(false);
   const [fileBrowserOpen, setFileBrowserOpen] = useDialogParam('files');
+  const docked = !useMobile();
+  const toolPanel = useToolPanel(docked);
 
   const handleCloseFileBrowser = () => {
     setFileBrowserOpen(false);
   };
 
   return (
-    <div className="h-dvh max-h-dvh overflow-hidden bg-gradient-to-br from-background via-background to-background flex flex-col">
+    <div className="flex h-dvh max-h-dvh min-w-0">
+    <div className="flex-1 min-w-0 h-dvh max-h-dvh overflow-hidden bg-gradient-to-br from-background via-background to-background flex flex-col">
       <Header>
         <div className="flex items-center gap-3">
           <Header.Title logo>OpenCode</Header.Title>
@@ -61,12 +67,14 @@ export function Repos() {
       </div>
       <AddRepoDialog open={addRepoOpen} onOpenChange={setAddRepoOpen} />
       <FileBrowserSheet
-        isOpen={fileBrowserOpen}
+        isOpen={!docked && fileBrowserOpen}
         onClose={handleCloseFileBrowser}
         basePath=""
         repoName="Workspace Root"
         allowNavigateAboveBase={true}
       />
+    </div>
+      {docked && <ToolSidePanel panel={toolPanel} filesBasePath="" allowNavigateAboveBase />}
     </div>
   );
 }

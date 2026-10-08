@@ -18,6 +18,12 @@ interface PreviewPanelProps {
   directory: string | undefined
 }
 
+interface PreviewWorkspaceProps {
+  isOpen: boolean
+  directory: string | undefined
+  compact: boolean
+}
+
 type ViewportPreset = 'mobile' | 'tablet' | 'full'
 
 const VIEWPORT_WIDTHS: Record<ViewportPreset, number | null> = {
@@ -59,8 +65,7 @@ interface ActiveSession {
   data: CreatePreviewSessionResponse
 }
 
-export function PreviewPanel({ isOpen, onClose, directory }: PreviewPanelProps) {
-  const isMobile = useMobile()
+export function PreviewWorkspace({ isOpen, directory, compact }: PreviewWorkspaceProps) {
   const { searchParams, updateParams } = useUrlParams()
 
   const requestedPort = useMemo(() => {
@@ -78,7 +83,6 @@ export function PreviewPanel({ isOpen, onClose, directory }: PreviewPanelProps) 
   const sessionPortRef = useRef<number | null>(null)
   const activePathRef = useRef<string | null>(null)
   const requestIdRef = useRef(0)
-  const contentRef = useRef<HTMLDivElement>(null)
 
   const activeSession = session && session.targetPort === requestedPort ? session : null
 
@@ -314,6 +318,86 @@ export function PreviewPanel({ isOpen, onClose, directory }: PreviewPanelProps) 
   }
 
   return (
+    <div className="flex flex-1 min-h-0 flex-col">
+      <div
+        className={cn(
+          'flex flex-col gap-2 border-b border-border px-3 py-2 flex-shrink-0',
+          !compact && 'sm:flex-row sm:items-center',
+        )}
+      >
+        <Combobox
+          value={requestedPort ? String(requestedPort) : ''}
+          onChange={handlePortChange}
+          options={portOptions}
+          placeholder="Select port"
+          disabled={!enabled}
+          allowCustomValue={false}
+          ariaLabel="Preview port"
+          onOpen={() => { void portsQuery.refetch() }}
+          className={compact ? 'w-full' : 'sm:w-72 sm:flex-shrink-0'}
+        />
+        <div className="flex min-w-0 flex-1 items-center gap-2">
+          <Input
+            aria-label="Preview path"
+            value={pathDraft}
+            onChange={(event) => setPathDraft(event.target.value)}
+            onKeyDown={(event) => { if (event.key === 'Enter') handleGo() }}
+            className="h-9 min-w-0 flex-1 bg-transparent px-3 py-1"
+            placeholder="/"
+          />
+          <Button size="sm" variant="outline" onClick={handleGo} disabled={!requestedPort} className="h-9">
+            Go
+          </Button>
+          <Button
+            size="sm"
+            variant="ghost"
+            onClick={reload}
+            disabled={!requestedPort}
+            aria-label="Reload preview"
+            className="h-9 w-9 p-0"
+          >
+            <RefreshCw className="h-4 w-4" />
+          </Button>
+          <Button
+            size="sm"
+            variant="ghost"
+            onClick={handleOpenInNewTab}
+            disabled={!requestedPort}
+            aria-label="Open preview in new tab"
+            className="h-9 w-9 p-0"
+          >
+            <ExternalLink className="h-4 w-4" />
+          </Button>
+          {!compact && (
+            <div className="ml-auto hidden items-center gap-1 sm:flex">
+              {VIEWPORT_PRESETS.map(({ preset, label, icon: Icon }) => (
+                <Button
+                  key={preset}
+                  size="sm"
+                  variant={viewport === preset ? 'secondary' : 'ghost'}
+                  onClick={() => setViewport(preset)}
+                  aria-label={label}
+                  aria-pressed={viewport === preset}
+                  className="h-9 w-9 p-0"
+                >
+                  <Icon className="h-4 w-4" />
+                </Button>
+              ))}
+            </div>
+          )}
+        </div>
+      </div>
+
+      <div className="relative flex-1 min-h-0">{body()}</div>
+    </div>
+  )
+}
+
+export function PreviewPanel({ isOpen, onClose, directory }: PreviewPanelProps) {
+  const isMobile = useMobile()
+  const contentRef = useRef<HTMLDivElement>(null)
+
+  return (
     <Dialog open={isOpen} onOpenChange={(open) => { if (!open) onClose() }}>
       <DialogContent
         ref={contentRef}
@@ -346,69 +430,7 @@ export function PreviewPanel({ isOpen, onClose, directory }: PreviewPanelProps) 
           )}
         </DialogHeader>
 
-        <div className="flex flex-col gap-2 border-b border-border px-3 py-2 flex-shrink-0 sm:flex-row sm:items-center">
-          <Combobox
-            value={requestedPort ? String(requestedPort) : ''}
-            onChange={handlePortChange}
-            options={portOptions}
-            placeholder="Select port"
-            disabled={!enabled}
-            allowCustomValue={false}
-            ariaLabel="Preview port"
-            onOpen={() => { void portsQuery.refetch() }}
-            className="sm:w-72 sm:flex-shrink-0"
-          />
-          <div className="flex min-w-0 flex-1 items-center gap-2">
-            <Input
-              aria-label="Preview path"
-              value={pathDraft}
-              onChange={(event) => setPathDraft(event.target.value)}
-              onKeyDown={(event) => { if (event.key === 'Enter') handleGo() }}
-              className="h-9 min-w-0 flex-1 bg-transparent px-3 py-1"
-              placeholder="/"
-            />
-            <Button size="sm" variant="outline" onClick={handleGo} disabled={!requestedPort} className="h-9">
-              Go
-            </Button>
-            <Button
-              size="sm"
-              variant="ghost"
-              onClick={reload}
-              disabled={!requestedPort}
-              aria-label="Reload preview"
-              className="h-9 w-9 p-0"
-            >
-              <RefreshCw className="h-4 w-4" />
-            </Button>
-            <Button
-              size="sm"
-              variant="ghost"
-              onClick={handleOpenInNewTab}
-              disabled={!requestedPort}
-              aria-label="Open preview in new tab"
-              className="h-9 w-9 p-0"
-            >
-              <ExternalLink className="h-4 w-4" />
-            </Button>
-            <div className="ml-auto hidden items-center gap-1 sm:flex">
-              {VIEWPORT_PRESETS.map(({ preset, label, icon: Icon }) => (
-                <Button
-                  key={preset}
-                  size="sm"
-                  variant={viewport === preset ? 'secondary' : 'ghost'}
-                  onClick={() => setViewport(preset)}
-                  aria-label={label}
-                  aria-pressed={viewport === preset}
-                  className="h-9 w-9 p-0"
-                >
-                  <Icon className="h-4 w-4" />
-                </Button>
-              ))}
-            </div>
-          </div>
-        </div>
-
-        <div className="relative flex-1 min-h-0">{body()}</div>
+        <PreviewWorkspace isOpen={isOpen} directory={directory} compact={isMobile} />
       </DialogContent>
     </Dialog>
   )

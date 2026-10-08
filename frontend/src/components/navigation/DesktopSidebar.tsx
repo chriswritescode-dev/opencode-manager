@@ -1,30 +1,28 @@
 import { useState } from 'react'
 import { useLocation, useNavigate } from 'react-router-dom'
 import { useDesktop } from '@/hooks/useDesktop'
-import { useSidebarCollapsed, useSidebarSections } from '@/hooks/useSidebarCollapsed'
+import { useSidebarCollapsed } from '@/hooks/useSidebarCollapsed'
 import { useAuth } from '@/hooks/useAuth'
 import { useUrlParams } from '@/hooks/useUrlParams'
+import { useOpenNavItem } from '@/hooks/useOpenNavItem'
 import { buildNavModel, type MoreDrawerItem, type NavPrimaryCta } from '@/components/navigation/moreDrawerItems'
-import { getPathWithReturnTo } from '@/lib/navigation'
 import { RepoQuickSwitchSheet } from '@/components/navigation/RepoQuickSwitchSheet'
 import { DesktopSessionTree } from '@/components/navigation/DesktopSessionTree'
 import {
   Sidebar,
-  SidebarCollapsibleSection,
   SidebarSection,
   SidebarItem,
 } from '@/components/ui/sidebar'
 import { FolderGit2 } from 'lucide-react'
-import { cn } from '@/lib/utils'
 
-const ACCOUNT_ITEM_KEYS = new Set(['settings', 'logout'])
+const FOOTER_ITEM_KEYS = new Set(['home', 'settings', 'logout'])
 
 export function DesktopSidebar() {
   const location = useLocation()
   const navigate = useNavigate()
   const { updateParams } = useUrlParams()
+  const openNavItem = useOpenNavItem()
   const [collapsed, toggle] = useSidebarCollapsed()
-  const { isSectionOpen, toggleSection } = useSidebarSections(['sessions', 'menu'] as const)
   const [repoSwitcherOpen, setRepoSwitcherOpen] = useState(false)
   const { isAuthenticated, isLoading, logout } = useAuth()
 
@@ -41,17 +39,8 @@ export function DesktopSidebar() {
   const { primary, items } = buildNavModel(location.pathname)
 
   const handleItemClick = (item: MoreDrawerItem) => {
-    if (item.to) {
-      const to = item.key === 'schedules'
-        ? getPathWithReturnTo(item.to, `${location.pathname}${location.search}`)
-        : item.to
-      navigate(to)
-    } else if (item.dialog) {
-      updateParams((p) => {
-        p.set('dialog', item.dialog!)
-        p.delete('mobileTab')
-      }, 'push')
-    } else if (item.key === 'logout') {
+    if (openNavItem(item)) return
+    if (item.key === 'logout') {
       logout()
     } else if (item.key === 'settings') {
       updateParams((p) => {
@@ -64,18 +53,16 @@ export function DesktopSidebar() {
     }
   }
 
-  const [homeItem, ...routeItems] = items
-  const navItems: MoreDrawerItem[] = [
-    homeItem,
+  const footerItems = items.filter((item) => FOOTER_ITEM_KEYS.has(item.key))
+  const collapsedItems: MoreDrawerItem[] = [
+    footerItems[0],
     { key: 'repos', label: 'Repos', icon: FolderGit2 },
-    ...routeItems,
+    ...footerItems.slice(1),
   ]
-  const toolItems = navItems.filter((item) => !ACCOUNT_ITEM_KEYS.has(item.key))
-  const accountItems = navItems.filter((item) => ACCOUNT_ITEM_KEYS.has(item.key))
 
   return (
     <>
-      <Sidebar collapsed={collapsed} onToggle={toggle} widthClass='w-72' className='mt-2'>
+      <Sidebar collapsed={collapsed} onToggle={toggle} className='mt-2'>
         {primary.length > 0 && (
           <SidebarSection collapsed={collapsed}>
             {primary.map((item: NavPrimaryCta) => (
@@ -94,7 +81,7 @@ export function DesktopSidebar() {
 
         {collapsed ? (
           <div className="flex flex-col gap-1 p-2 pt-0">
-            {navItems.map((item: MoreDrawerItem) => (
+            {collapsedItems.map((item: MoreDrawerItem) => (
               <SidebarItem
                 key={item.key}
                 icon={item.icon}
@@ -107,39 +94,13 @@ export function DesktopSidebar() {
           </div>
         ) : (
           <>
-            <SidebarCollapsibleSection
-              label="Sessions"
-              collapsed={!isSectionOpen('sessions')}
-              onToggle={() => toggleSection('sessions')}
-              className={cn('border-t border-border', isSectionOpen('sessions') && 'flex-1')}
-            >
+            <section aria-label="Sessions" className="flex min-h-0 flex-1 flex-col border-t border-border">
+              <h2 className="px-3 py-1.5 text-xs font-medium uppercase tracking-wider text-muted-foreground">Sessions</h2>
               <DesktopSessionTree />
-            </SidebarCollapsibleSection>
-
-            <SidebarCollapsibleSection
-              label="Menu"
-              collapsed={!isSectionOpen('menu')}
-              onToggle={() => toggleSection('menu')}
-              className={cn('border-t border-border', isSectionOpen('sessions') ? 'shrink-0 max-h-[40%]' : 'flex-1')}
-              contentClassName="overflow-y-auto"
-            >
-              <div className="flex flex-col gap-0.5 p-2 pt-0">
-                {toolItems.map((item: MoreDrawerItem) => (
-                  <SidebarItem
-                    key={item.key}
-                    icon={item.icon}
-                    label={item.label}
-                    collapsed={false}
-                    dense
-                    onClick={() => handleItemClick(item)}
-                    danger={item.danger}
-                  />
-                ))}
-              </div>
-            </SidebarCollapsibleSection>
+            </section>
 
             <div className="flex gap-1 border-t border-border p-2">
-              {accountItems.map((item: MoreDrawerItem) => (
+              {footerItems.map((item: MoreDrawerItem) => (
                 <SidebarItem
                   key={item.key}
                   icon={item.icon}

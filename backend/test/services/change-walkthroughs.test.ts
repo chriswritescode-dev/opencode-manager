@@ -1,6 +1,6 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { Database } from 'bun:sqlite'
-import type { FileDiffInfo, SessionInfo, SessionMessageInfo } from '@opencode-manager/shared/opencode'
+import type { FileDiffInfo, ModelRef, SessionInfo, SessionMessageInfo } from '@opencode-manager/shared/opencode'
 import {
   WALKTHROUGH_DIFF_MAX_CHARS,
   WALKTHROUGH_HUNK_MAX_CHARS,
@@ -13,6 +13,7 @@ import { migrate } from '../../src/db/migration-runner'
 import { allMigrations } from '../../src/db/migrations'
 import type { OpenCodeClient } from '../../src/services/opencode/client'
 import type { SSEEvent } from '../../src/services/sse-aggregator'
+import { stubLoadedModelCatalog } from '../helpers/stub-opencode-client'
 import {
   ChangeWalkthroughError,
   ChangeWalkthroughService,
@@ -54,10 +55,12 @@ interface FakeSession {
 
 function createFakeClient(sessions: Record<string, FakeSession>) {
   const generateCalls: string[] = []
+  const generateModels: Array<ModelRef | undefined> = []
   let generateImpl: () => Promise<string> = async () => modelReply([])
 
   const client = {
     api: {
+      ...stubLoadedModelCatalog(),
       session: {
         get: vi.fn(async ({ sessionID }: { sessionID: string }) => {
           const config = sessions[sessionID]
@@ -86,8 +89,9 @@ function createFakeClient(sessions: Record<string, FakeSession>) {
         }),
       },
       generate: {
-        text: vi.fn(async (input: { prompt: string }) => {
+        text: vi.fn(async (input: { prompt: string; model?: ModelRef }) => {
           generateCalls.push(input.prompt)
+          generateModels.push(input.model)
           return { text: await generateImpl() }
         }),
       },
@@ -98,6 +102,7 @@ function createFakeClient(sessions: Record<string, FakeSession>) {
   return {
     client,
     generateCalls,
+    generateModels,
     setGenerateImpl: (impl: () => Promise<string>) => {
       generateImpl = impl
     },
@@ -383,6 +388,8 @@ describe('ChangeWalkthroughService', () => {
     expect(state.walkthrough).toBeNull()
     expect(state.stale).toBe(false)
     expect(state.currentDiffHash).toBe(computeChangesHash(threeHunks))
+    expect(state.generating).toBe(false)
+    expect(state.error).toBeNull()
   })
 
   it('reports stale when the changes differ from the stored hash', async () => {
@@ -434,6 +441,27 @@ describe('ChangeWalkthroughService', () => {
     await service.generate(SESSION_ID, { regenerate: true })
 
     expect(fake.generateCalls).toHaveLength(2)
+  })
+
+  it('generates with the session selected model', async () => {
+    sessions[SESSION_ID]!.info = {
+      id: SESSION_ID,
+      title: 'Title',
+      model: { providerID: 'anthropic', id: 'claude-sonnet-4' },
+    } as SessionInfo
+    fake.setGenerateImpl(async () => modelReply([{ title: 'A', explanation: 'x', hunkIds: ['f0h0', 'f0h1', 'f1h0'] }]))
+
+    await service.generate(SESSION_ID, {})
+
+    expect(fake.generateModels[0]).toEqual({ providerID: 'anthropic', id: 'claude-sonnet-4' })
+  })
+
+  it('falls back to the resolved default when the session has no model', async () => {
+    fake.setGenerateImpl(async () => modelReply([{ title: 'A', explanation: 'x', hunkIds: ['f0h0', 'f0h1', 'f1h0'] }]))
+
+    await service.generate(SESSION_ID, {})
+
+    expect(fake.generateModels[0]).toEqual({ providerID: 'openai', id: 'gpt-5-mini' })
   })
 
   it('coalesces concurrent generation into one model call', async () => {
@@ -524,6 +552,79 @@ describe('ChangeWalkthroughService', () => {
   it('rejects with 404 when generating for a missing session', async () => {
     await expect(service.generate('ses_missing', {})).rejects.toBeInstanceOf(ChangeWalkthroughError)
     await expect(service.generate('ses_missing', {})).rejects.toMatchObject({ status: 404 })
+  })
+
+  describe('startGeneration', () => {
+    const coveringReply = modelReply([{ title: 'A', explanation: 'x', hunkIds: ['f0h0', 'f0h1', 'f1h0'] }])
+
+    it('reports generating while the model call is pending, then the stored walkthrough', async () => {
+      let resolveGenerate: (text: string) => void = () => {}
+      fake.setGenerateImpl(() => new Promise<string>((resolve) => {
+        resolveGenerate = resolve
+      }))
+
+      const state = await service.startGeneration(SESSION_ID, {})
+      expect(state.generating).toBe(true)
+      expect(state.walkthrough).toBeNull()
+      expect(state.error).toBeNull()
+
+      resolveGenerate(coveringReply)
+
+      await vi.waitFor(async () => {
+        const settled = await service.getState(SESSION_ID)
+        expect(settled.generating).toBe(false)
+        expect(settled.walkthrough).not.toBeNull()
+      })
+    })
+
+    it('rejects with 409 when the session has no changes', async () => {
+      sessions[SESSION_ID]!.changes = []
+
+      await expect(service.startGeneration(SESSION_ID, {})).rejects.toMatchObject({
+        status: 409,
+        code: 'WALKTHROUGH_NO_CHANGES',
+      })
+      sessions[SESSION_ID]!.changes = threeHunks
+      expect((await service.getState(SESSION_ID)).error).toBeNull()
+    })
+
+    it('records an unparseable model failure on the state', async () => {
+      fake.setGenerateImpl(async () => 'not json')
+
+      await service.startGeneration(SESSION_ID, {})
+
+      await vi.waitFor(async () => {
+        const settled = await service.getState(SESSION_ID)
+        expect(settled.generating).toBe(false)
+        expect(settled.error).toMatchObject({ code: 'WALKTHROUGH_UNPARSEABLE' })
+      })
+    })
+
+    it('clears a previous error when a new generation starts', async () => {
+      fake.setGenerateImpl(async () => 'not json')
+      await service.startGeneration(SESSION_ID, {})
+      await vi.waitFor(async () => {
+        expect((await service.getState(SESSION_ID)).error).not.toBeNull()
+      })
+
+      fake.setGenerateImpl(() => new Promise<string>(() => {}))
+      const state = await service.startGeneration(SESSION_ID, { regenerate: true })
+
+      expect(state.generating).toBe(true)
+      expect(state.error).toBeNull()
+    })
+
+    it('clears the recorded error when the session is deleted', async () => {
+      fake.setGenerateImpl(async () => 'not json')
+      await service.startGeneration(SESSION_ID, {})
+      await vi.waitFor(async () => {
+        expect((await service.getState(SESSION_ID)).error).not.toBeNull()
+      })
+
+      service.handleEvent(sessionEvent('session.deleted', SESSION_ID))
+
+      expect((await service.getState(SESSION_ID)).error).toBeNull()
+    })
   })
 
   describe('handleEvent', () => {

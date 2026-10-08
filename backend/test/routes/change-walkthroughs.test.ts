@@ -7,6 +7,7 @@ import { allMigrations } from '../../src/db/migrations'
 import { ChangeWalkthroughService } from '../../src/services/change-walkthroughs'
 import { createChangeWalkthroughRoutes } from '../../src/routes/change-walkthroughs'
 import type { OpenCodeClient } from '../../src/services/opencode/client'
+import { stubLoadedModelCatalog } from '../helpers/stub-opencode-client'
 
 const SESSION_ID = 'ses_walkthrough'
 
@@ -28,10 +29,11 @@ interface FakeSession {
 
 function createFakeClient(sessions: Record<string, FakeSession>) {
   const generateCalls: string[] = []
-  let reply = MODEL_REPLY
+  let generateImpl: () => Promise<string> = async () => MODEL_REPLY
 
   const client = {
     api: {
+      ...stubLoadedModelCatalog(),
       session: {
         get: vi.fn(async ({ sessionID }: { sessionID: string }) => {
           const config = sessions[sessionID]
@@ -62,7 +64,7 @@ function createFakeClient(sessions: Record<string, FakeSession>) {
       generate: {
         text: vi.fn(async (input: { prompt: string }) => {
           generateCalls.push(input.prompt)
-          return { text: reply }
+          return { text: await generateImpl() }
         }),
       },
     },
@@ -72,8 +74,8 @@ function createFakeClient(sessions: Record<string, FakeSession>) {
   return {
     client,
     generateCalls,
-    setReply: (next: string) => {
-      reply = next
+    setGenerateImpl: (impl: () => Promise<string>) => {
+      generateImpl = impl
     },
   }
 }
@@ -102,10 +104,18 @@ describe('change walkthrough routes', () => {
     const res = await app.request(`/change-walkthroughs/${SESSION_ID}`)
 
     expect(res.status).toBe(200)
-    const body = (await res.json()) as { walkthrough: unknown; currentDiffHash: string | null; stale: boolean }
+    const body = (await res.json()) as {
+      walkthrough: unknown
+      currentDiffHash: string | null
+      stale: boolean
+      generating: boolean
+      error: unknown
+    }
     expect(body.walkthrough).toBeNull()
     expect(body.stale).toBe(false)
     expect(body.currentDiffHash).toEqual(expect.any(String))
+    expect(body.generating).toBe(false)
+    expect(body.error).toBeNull()
   })
 
   it('GET returns 404 for a missing session', async () => {
@@ -115,30 +125,59 @@ describe('change walkthrough routes', () => {
     await expect(res.json()).resolves.toMatchObject({ error: 'Session not found' })
   })
 
-  it('POST creates a walkthrough and GET reads it back', async () => {
+  it('POST returns 202 while generating, then GET reads the walkthrough back', async () => {
+    let resolveGenerate: (text: string) => void = () => {}
+    fake.setGenerateImpl(() => new Promise<string>((resolve) => {
+      resolveGenerate = resolve
+    }))
+
     const postRes = await app.request(`/change-walkthroughs/${SESSION_ID}`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({}),
     })
 
-    expect(postRes.status).toBe(201)
-    const created = (await postRes.json()) as { walkthrough: { summary: string; sessionId: string } }
-    expect(created.walkthrough.summary).toBe('A summary')
+    expect(postRes.status).toBe(202)
+    const body = (await postRes.json()) as { generating: boolean; walkthrough: unknown }
+    expect(body.generating).toBe(true)
+    expect(body.walkthrough).toBeNull()
 
-    const getRes = await app.request(`/change-walkthroughs/${SESSION_ID}`)
-    const state = (await getRes.json()) as { walkthrough: { summary: string } }
-    expect(state.walkthrough.summary).toBe('A summary')
+    resolveGenerate(MODEL_REPLY)
+
+    await vi.waitFor(async () => {
+      const getRes = await app.request(`/change-walkthroughs/${SESSION_ID}`)
+      const state = (await getRes.json()) as { walkthrough: { summary: string } | null; generating: boolean }
+      expect(state.generating).toBe(false)
+      expect(state.walkthrough?.summary).toBe('A summary')
+    })
   })
 
   it('POST accepts an empty body', async () => {
+    let resolveGenerate: (text: string) => void = () => {}
+    fake.setGenerateImpl(() => new Promise<string>((resolve) => {
+      resolveGenerate = resolve
+    }))
+
     const res = await app.request(`/change-walkthroughs/${SESSION_ID}`, { method: 'POST' })
 
-    expect(res.status).toBe(201)
+    expect(res.status).toBe(202)
+
+    resolveGenerate(MODEL_REPLY)
+    await vi.waitFor(async () => {
+      const getRes = await app.request(`/change-walkthroughs/${SESSION_ID}`)
+      const state = (await getRes.json()) as { walkthrough: unknown }
+      expect(state.walkthrough).not.toBeNull()
+    })
   })
 
-  it('POST returns 200 without a second model call when changes are unchanged', async () => {
+  it('POST returns 200 with the stored walkthrough without a second model call', async () => {
     await app.request(`/change-walkthroughs/${SESSION_ID}`, { method: 'POST' })
+    await vi.waitFor(async () => {
+      const getRes = await app.request(`/change-walkthroughs/${SESSION_ID}`)
+      const state = (await getRes.json()) as { walkthrough: unknown }
+      expect(state.walkthrough).not.toBeNull()
+    })
+
     const second = await app.request(`/change-walkthroughs/${SESSION_ID}`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
@@ -146,19 +185,35 @@ describe('change walkthrough routes', () => {
     })
 
     expect(second.status).toBe(200)
+    const body = (await second.json()) as { walkthrough: { summary: string }; generating: boolean }
+    expect(body.walkthrough.summary).toBe('A summary')
+    expect(body.generating).toBe(false)
     expect(fake.generateCalls).toHaveLength(1)
   })
 
   it('POST regenerates when asked', async () => {
     await app.request(`/change-walkthroughs/${SESSION_ID}`, { method: 'POST' })
+    await vi.waitFor(async () => {
+      const getRes = await app.request(`/change-walkthroughs/${SESSION_ID}`)
+      const state = (await getRes.json()) as { walkthrough: unknown }
+      expect(state.walkthrough).not.toBeNull()
+    })
+
+    let resolveGenerate: (text: string) => void = () => {}
+    fake.setGenerateImpl(() => new Promise<string>((resolve) => {
+      resolveGenerate = resolve
+    }))
+
     const res = await app.request(`/change-walkthroughs/${SESSION_ID}`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ regenerate: true }),
     })
 
-    expect(res.status).toBe(201)
-    expect(fake.generateCalls).toHaveLength(2)
+    expect(res.status).toBe(202)
+
+    resolveGenerate(MODEL_REPLY)
+    await vi.waitFor(() => expect(fake.generateCalls).toHaveLength(2))
   })
 
   it('POST rejects an invalid body with 400', async () => {
@@ -192,13 +247,23 @@ describe('change walkthrough routes', () => {
     await expect(res.json()).resolves.toMatchObject({ code: 'WALKTHROUGH_NO_TEXT_CHANGES' })
   })
 
-  it('POST returns 502 with a code when the model response is unparseable', async () => {
-    fake.setReply('not json')
+  it('POST records an unparseable model reply that GET surfaces', async () => {
+    let resolveGenerate: (text: string) => void = () => {}
+    fake.setGenerateImpl(() => new Promise<string>((resolve) => {
+      resolveGenerate = resolve
+    }))
 
     const res = await app.request(`/change-walkthroughs/${SESSION_ID}`, { method: 'POST' })
+    expect(res.status).toBe(202)
 
-    expect(res.status).toBe(502)
-    await expect(res.json()).resolves.toMatchObject({ code: 'WALKTHROUGH_UNPARSEABLE' })
+    resolveGenerate('not json')
+
+    await vi.waitFor(async () => {
+      const getRes = await app.request(`/change-walkthroughs/${SESSION_ID}`)
+      const state = (await getRes.json()) as { generating: boolean; error: { code?: string } | null }
+      expect(state.generating).toBe(false)
+      expect(state.error?.code).toBe('WALKTHROUGH_UNPARSEABLE')
+    })
   })
 
   it('POST returns 404 for a missing session', async () => {

@@ -3,7 +3,7 @@ import { render, screen, waitFor } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
 import type { ReactNode } from 'react'
-import { ChangesWalkthroughDialog } from './ChangesWalkthroughDialog'
+import { ChangesWalkthroughSheet } from './ChangesWalkthroughSheet'
 import { FetchError } from '@/api/fetchWrapper'
 import type { ChangeWalkthrough, ChangeWalkthroughState } from '@opencode-manager/shared/schemas'
 
@@ -48,7 +48,7 @@ const walkthrough: ChangeWalkthrough = {
 }
 
 function state(overrides: Partial<ChangeWalkthroughState> = {}): ChangeWalkthroughState {
-  return { walkthrough, currentDiffHash: 'hash-1', stale: false, ...overrides }
+  return { walkthrough, currentDiffHash: 'hash-1', stale: false, generating: false, error: null, ...overrides }
 }
 
 function createWrapper() {
@@ -58,16 +58,16 @@ function createWrapper() {
   )
 }
 
-function renderDialog(overrides: Partial<React.ComponentProps<typeof ChangesWalkthroughDialog>> = {}) {
+function renderSheet(overrides: Partial<React.ComponentProps<typeof ChangesWalkthroughSheet>> = {}) {
   const onOpenChange = vi.fn()
   const view = render(
-    <ChangesWalkthroughDialog sessionId="ses_1" open onOpenChange={onOpenChange} {...overrides} />,
+    <ChangesWalkthroughSheet sessionId="ses_1" open onOpenChange={onOpenChange} {...overrides} />,
     { wrapper: createWrapper() },
   )
   return { ...view, onOpenChange }
 }
 
-describe('ChangesWalkthroughDialog', () => {
+describe('ChangesWalkthroughSheet', () => {
   beforeAll(() => {
     Element.prototype.hasPointerCapture ??= () => false
     Element.prototype.setPointerCapture ??= () => {}
@@ -83,13 +83,13 @@ describe('ChangesWalkthroughDialog', () => {
     const user = userEvent.setup()
     let generated = false
     mocks.getChangeWalkthrough.mockImplementation(async () =>
-      generated ? state() : { walkthrough: null, currentDiffHash: 'hash-1', stale: false },
+      generated ? state() : state({ walkthrough: null }),
     )
     mocks.generateChangeWalkthrough.mockImplementation(async () => {
       generated = true
-      return walkthrough
+      return state()
     })
-    renderDialog()
+    renderSheet()
 
     const generate = await screen.findByRole('button', { name: 'Generate walkthrough' })
     await user.click(generate)
@@ -108,7 +108,7 @@ describe('ChangesWalkthroughDialog', () => {
   it('moves through the stops with the navigator in order', async () => {
     const user = userEvent.setup()
     mocks.getChangeWalkthrough.mockResolvedValue(state())
-    renderDialog()
+    renderSheet()
 
     expect(await screen.findByText('Stop 1 of 2')).toBeInTheDocument()
     expect(screen.getByText('src/greet.ts')).toBeInTheDocument()
@@ -130,27 +130,62 @@ describe('ChangesWalkthroughDialog', () => {
   it('shows the stale warning and regenerates', async () => {
     const user = userEvent.setup()
     mocks.getChangeWalkthrough.mockResolvedValue(state({ stale: true, currentDiffHash: 'hash-2' }))
-    mocks.generateChangeWalkthrough.mockResolvedValue(walkthrough)
-    renderDialog()
+    mocks.generateChangeWalkthrough.mockResolvedValue(state({ generating: true }))
+    renderSheet()
 
     expect(
       await screen.findByText('Changes have been updated since this walkthrough was generated'),
     ).toBeInTheDocument()
 
-    await user.click(screen.getByRole('button', { name: /regenerate/i }))
+    await user.click(screen.getByRole('button', { name: 'Regenerate' }))
 
     await waitFor(() => {
       expect(mocks.generateChangeWalkthrough).toHaveBeenCalledWith('ses_1', { regenerate: true })
     })
   })
 
+  it('regenerates from the header without a stale walkthrough', async () => {
+    const user = userEvent.setup()
+    mocks.getChangeWalkthrough.mockResolvedValue(state())
+    mocks.generateChangeWalkthrough.mockResolvedValue(state())
+    renderSheet()
+
+    await screen.findByText('Stop 1 of 2')
+    await user.click(screen.getByRole('button', { name: 'Regenerate walkthrough' }))
+
+    await waitFor(() => {
+      expect(mocks.generateChangeWalkthrough).toHaveBeenCalledWith('ses_1', { regenerate: true })
+    })
+  })
+
+  it('shows progress while the server is generating instead of the generate button', async () => {
+    mocks.getChangeWalkthrough.mockResolvedValue(state({ walkthrough: null, generating: true }))
+    renderSheet()
+
+    expect(await screen.findByText(/Generating walkthrough/)).toBeInTheDocument()
+    expect(screen.queryByRole('button', { name: 'Generate walkthrough' })).not.toBeInTheDocument()
+  })
+
+  it('renders a generation failure recorded by the server', async () => {
+    mocks.getChangeWalkthrough.mockResolvedValue(
+      state({
+        walkthrough: null,
+        error: { message: 'The model did not return a usable change walkthrough', code: 'WALKTHROUGH_UNPARSEABLE' },
+      }),
+    )
+    renderSheet()
+
+    expect(await screen.findByText('The model did not return a usable change walkthrough')).toBeInTheDocument()
+    expect(screen.getByRole('button', { name: 'Generate walkthrough' })).toBeEnabled()
+  })
+
   it('renders the no-changes message inline', async () => {
     const user = userEvent.setup()
-    mocks.getChangeWalkthrough.mockResolvedValue({ walkthrough: null, currentDiffHash: null, stale: false })
+    mocks.getChangeWalkthrough.mockResolvedValue(state({ walkthrough: null, currentDiffHash: null }))
     mocks.generateChangeWalkthrough.mockRejectedValue(
       new FetchError('This session has no changes to walk through', 409, 'WALKTHROUGH_NO_CHANGES'),
     )
-    renderDialog()
+    renderSheet()
 
     await user.click(await screen.findByRole('button', { name: 'Generate walkthrough' }))
 
@@ -159,9 +194,9 @@ describe('ChangesWalkthroughDialog', () => {
 
   it('renders other generation errors inline', async () => {
     const user = userEvent.setup()
-    mocks.getChangeWalkthrough.mockResolvedValue({ walkthrough: null, currentDiffHash: null, stale: false })
+    mocks.getChangeWalkthrough.mockResolvedValue(state({ walkthrough: null, currentDiffHash: null }))
     mocks.generateChangeWalkthrough.mockRejectedValue(new Error('model exploded'))
-    renderDialog()
+    renderSheet()
 
     await user.click(await screen.findByRole('button', { name: 'Generate walkthrough' }))
 
@@ -170,7 +205,7 @@ describe('ChangesWalkthroughDialog', () => {
 
   it('lists the omitted files when the diff is too large to walk through', async () => {
     const user = userEvent.setup()
-    mocks.getChangeWalkthrough.mockResolvedValue({ walkthrough: null, currentDiffHash: null, stale: false })
+    mocks.getChangeWalkthrough.mockResolvedValue(state({ walkthrough: null, currentDiffHash: null }))
     mocks.generateChangeWalkthrough.mockRejectedValue(
       new FetchError('These changes are too large to walk through', 413, 'WALKTHROUGH_CONTEXT_LIMIT', undefined, {
         details: {
@@ -181,7 +216,7 @@ describe('ChangesWalkthroughDialog', () => {
         },
       }),
     )
-    renderDialog()
+    renderSheet()
 
     await user.click(await screen.findByRole('button', { name: 'Generate walkthrough' }))
 
@@ -202,7 +237,7 @@ describe('ChangesWalkthroughDialog', () => {
         },
       }),
     )
-    const { container } = renderDialog()
+    const { container } = renderSheet()
 
     expect(await screen.findByText(/Summary/)).toBeInTheDocument()
     expect(await screen.findByText(/Explanation/)).toBeInTheDocument()
@@ -218,22 +253,22 @@ describe('ChangesWalkthroughDialog', () => {
     const user = userEvent.setup()
     let generated = false
     mocks.getChangeWalkthrough.mockImplementation(async () =>
-      generated ? state() : { walkthrough: null, currentDiffHash: null, stale: false },
+      generated ? state() : state({ walkthrough: null, currentDiffHash: null }),
     )
     mocks.generateChangeWalkthrough
       .mockRejectedValueOnce(new FetchError(serverMessage, 409, code))
       .mockImplementationOnce(async () => {
         generated = true
-        return walkthrough
+        return state()
       })
 
-    const { rerender, onOpenChange } = renderDialog()
+    const { rerender, onOpenChange } = renderSheet()
 
     await user.click(await screen.findByRole('button', { name: 'Generate walkthrough' }))
     expect(await screen.findByText('This session has no text changes to walk through')).toBeInTheDocument()
 
-    rerender(<ChangesWalkthroughDialog sessionId="ses_1" open={false} onOpenChange={onOpenChange} />)
-    rerender(<ChangesWalkthroughDialog sessionId="ses_1" open onOpenChange={onOpenChange} />)
+    rerender(<ChangesWalkthroughSheet sessionId="ses_1" open={false} onOpenChange={onOpenChange} />)
+    rerender(<ChangesWalkthroughSheet sessionId="ses_1" open onOpenChange={onOpenChange} />)
 
     const generate = await screen.findByRole('button', { name: 'Generate walkthrough' })
     expect(generate).toBeEnabled()

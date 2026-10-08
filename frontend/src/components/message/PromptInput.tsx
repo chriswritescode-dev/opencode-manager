@@ -10,7 +10,6 @@ import { useSTT } from '@/hooks/useSTT'
 
 import { useUserBash } from '@/stores/userBashStore'
 import { useSessionAgentStore } from '@/stores/sessionAgentStore'
-import { useUIState } from '@/stores/uiStateStore'
 import { useSendErrorStore } from '@/stores/sendErrorStore'
 import { useRecentCommandsStore } from '@/stores/recentCommandsStore'
 import { useTouchTapSelect } from '@/hooks/useTouchTapSelect'
@@ -166,10 +165,6 @@ export const PromptInput = memo(forwardRef<PromptInputHandle, PromptInputProps>(
   const promptRef = useRef(prompt)
   const attachedFilesRef = useRef(attachedFiles)
   const imageAttachmentsRef = useRef(imageAttachments)
-  const pendingPromptCommand = useUIState((state) => state.pendingPromptCommand)
-  const pendingPromptFile = useUIState((state) => state.pendingPromptFile)
-  const clearPendingPromptCommand = useUIState((state) => state.clearPendingPromptCommand)
-  const clearPendingPromptFile = useUIState((state) => state.clearPendingPromptFile)
 
   const {
     isRecording,
@@ -582,16 +577,10 @@ export const PromptInput = memo(forwardRef<PromptInputHandle, PromptInputProps>(
     handleSubmitRef.current()
   }, [prompt])
 
-  useEffect(() => {
-    if (!pendingPromptCommand) return
-    handleCommandSelect(pendingPromptCommand.command)
-    clearPendingPromptCommand()
-  }, [pendingPromptCommand, handleCommandSelect, clearPendingPromptCommand])
-
-  const insertFileMention = useCallback((filePath: string, range: { start: number, end: number } | null = mentionRange) => {
+  const insertFileMention = useCallback((filePath: string, range: { start: number, end: number }) => {
     const filename = getFilename(filePath)
-    const beforeMention = range ? prompt.slice(0, range.start) : `${prompt}${prompt.trim() ? ' ' : ''}`
-    const afterMention = range ? prompt.slice(range.end) : ''
+    const beforeMention = prompt.slice(0, range.start)
+    const afterMention = prompt.slice(range.end)
     const newPrompt = beforeMention + '@' + filename + ' ' + afterMention
 
     setPrompt(newPrompt)
@@ -612,13 +601,7 @@ export const PromptInput = memo(forwardRef<PromptInputHandle, PromptInputProps>(
     })
 
     focusPromptAt(beforeMention.length + filename.length + 2)
-  }, [directory, mentionRange, prompt, focusPromptAt])
-
-  useEffect(() => {
-    if (!pendingPromptFile) return
-    insertFileMention(pendingPromptFile.path, null)
-    clearPendingPromptFile()
-  }, [pendingPromptFile, insertFileMention, clearPendingPromptFile])
+  }, [directory, prompt, focusPromptAt])
 
   const handleMentionSelect = (item: MentionItem) => {
     if (!mentionRange || !textareaRef.current) return
