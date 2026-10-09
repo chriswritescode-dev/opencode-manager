@@ -326,15 +326,23 @@ export class ManagerApi {
   async mirrorCreateWorktree(
     repoId: number,
     bundlePath: string,
-    opts: { branch: string; targetBranch: string; onProgress?: (bytesSent: number) => void },
+    opts: { branch: string; targetBranch: string; patch: string; onProgress?: (bytesSent: number) => void },
   ): Promise<MirrorWorktreeCreateResponse> {
+    const patchBuf = Buffer.from(opts.patch, 'utf-8')
     const headers: Record<string, string> = {
       ...this.headers(),
       'Content-Type': 'application/octet-stream',
       'X-OCM-Branch': opts.branch,
       'X-OCM-Target-Branch': opts.targetBranch,
+      'X-OCM-Patch-Bytes': String(patchBuf.length),
     }
-    const fileStream = Readable.toWeb(createReadStream(bundlePath)) as unknown as ReadableStream<Uint8Array>
+    const source = Readable.from(
+      (async function* () {
+        if (patchBuf.length > 0) yield patchBuf
+        yield* createReadStream(bundlePath)
+      })(),
+    )
+    const fileStream = Readable.toWeb(source) as unknown as ReadableStream<Uint8Array>
     const body = opts.onProgress ? fileStream.pipeThrough(createByteCounter(opts.onProgress)) : fileStream
     const res = await fetch(`${this.baseUrl}/api/internal/repos/${repoId}/mirror/worktree`, {
       method: 'POST',

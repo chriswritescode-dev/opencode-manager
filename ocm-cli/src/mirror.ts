@@ -680,21 +680,25 @@ export async function mirrorUpFast(
   const bundlePath = await createLocalBundle(plan.repoRoot)
   try {
     const { size } = await fsp.stat(bundlePath)
-    onPhase?.({ kind: 'uploading', bytesSent: 0, totalBytes: size })
-    const onProgress = onPhase
-      ? (bytesSent: number) => {
-          onPhase({ kind: 'uploading', bytesSent, totalBytes: size })
-          if (bytesSent >= size) onPhase({ kind: 'processing' })
-        }
-      : undefined
+    const progressFor = (totalBytes: number) =>
+      onPhase
+        ? (bytesSent: number) => {
+            onPhase({ kind: 'uploading', bytesSent, totalBytes })
+            if (bytesSent >= totalBytes) onPhase({ kind: 'processing' })
+          }
+        : undefined
 
     if (opts.createWorktree) {
       const branch = getBranchName(plan.repoRoot)
       if (!branch) throw new MirrorAbort('cannot create a worktree from a detached HEAD')
+      const patch = getMirrorPatch(plan.repoRoot)
+      const totalBytes = size + Buffer.byteLength(patch)
+      onPhase?.({ kind: 'uploading', bytesSent: 0, totalBytes })
       const created = await opts.api.mirrorCreateWorktree(repoId, bundlePath, {
         branch,
         targetBranch: opts.createWorktree.targetBranch,
-        onProgress,
+        patch,
+        onProgress: progressFor(totalBytes),
       })
       return {
         repoId: created.repoId,
@@ -705,6 +709,9 @@ export async function mirrorUpFast(
         worktreeSetup: created.worktreeSetup,
       }
     }
+
+    onPhase?.({ kind: 'uploading', bytesSent: 0, totalBytes: size })
+    const onProgress = progressFor(size)
 
     await opts.api.mirrorUploadBundle(repoId, bundlePath, {
       branch: getBranchName(plan.repoRoot),

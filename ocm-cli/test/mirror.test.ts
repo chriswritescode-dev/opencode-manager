@@ -1515,9 +1515,10 @@ describe('ManagerApi mirror checkouts and worktree', () => {
     expect((error as ManagerApiError).message).toContain('too old for /ocm-move worktrees')
   })
 
-  it('uploads a bundle to the worktree route with branch headers', async () => {
+  it('uploads a bundle prefixed with the patch to the worktree route with branch headers', async () => {
     const bundlePath = join(tmpDir, 'repo.bundle')
     writeFileSync(bundlePath, 'bundle bytes')
+    const patch = 'diff --git a/a.txt b/a.txt\n+patched\n'
     const fetchMock = vi.fn().mockResolvedValue({
       ok: true,
       json: () => Promise.resolve({
@@ -1531,15 +1532,21 @@ describe('ManagerApi mirror checkouts and worktree', () => {
     })
     vi.stubGlobal('fetch', fetchMock)
 
-    const created = await api.mirrorCreateWorktree(1, bundlePath, { branch: 'feature', targetBranch: 'feature-ocm' })
+    const created = await api.mirrorCreateWorktree(1, bundlePath, { branch: 'feature', targetBranch: 'feature-ocm', patch })
 
     expect(created.fullPath).toBe('/repos/repo-feature-ocm')
     expect(created.created).toBe(true)
     expect(created.worktreeSetup).toEqual({ status: 'none' })
     const init = fetchMock.mock.calls[0]![1] as RequestInit
     expect(init.method).toBe('POST')
-    expect(init.headers).toMatchObject({ 'X-OCM-Branch': 'feature', 'X-OCM-Target-Branch': 'feature-ocm' })
+    expect(init.headers).toMatchObject({
+      'X-OCM-Branch': 'feature',
+      'X-OCM-Target-Branch': 'feature-ocm',
+      'X-OCM-Patch-Bytes': String(Buffer.byteLength(patch, 'utf-8')),
+    })
     expect(init.duplex).toBe('half')
+    const body = await new Response(init.body as ReadableStream<Uint8Array>).text()
+    expect(body).toBe(patch + 'bundle bytes')
   })
 
   it('maps an old Manager 401 to MANAGER_FEATURE_MISSING for worktree creation', async () => {
@@ -1550,7 +1557,7 @@ describe('ManagerApi mirror checkouts and worktree', () => {
       .mockResolvedValueOnce({ ok: true, status: 200, json: () => Promise.resolve({ workspaces: [] }) })
     vi.stubGlobal('fetch', fetchMock)
 
-    const error = await api.mirrorCreateWorktree(1, bundlePath, { branch: 'feature', targetBranch: 'feature-ocm' }).catch((err) => err)
+    const error = await api.mirrorCreateWorktree(1, bundlePath, { branch: 'feature', targetBranch: 'feature-ocm', patch: '' }).catch((err) => err)
 
     expect(error).toBeInstanceOf(ManagerApiError)
     expect((error as ManagerApiError).code).toBe(MANAGER_FEATURE_MISSING)
@@ -1769,7 +1776,7 @@ describe('mirrorUpFast worktree creation', () => {
     rmSync(tmpDir, { recursive: true, force: true })
   })
 
-  it('creates the worktree through the worktree route and skips the patch shortcut', async () => {
+  it('sends the working-tree patch with the worktree create request and skips the patch shortcut', async () => {
     const repoRoot = join(tmpDir, 'repo')
     mkdirSync(repoRoot)
     spawnSync('git', ['init'], { cwd: repoRoot, stdio: 'ignore' })
@@ -1778,6 +1785,8 @@ describe('mirrorUpFast worktree creation', () => {
     writeFileSync(join(repoRoot, 'a.txt'), 'a\n')
     spawnSync('git', ['add', '.'], { cwd: repoRoot, stdio: 'ignore' })
     spawnSync('git', ['commit', '-m', 'init'], { cwd: repoRoot, stdio: 'ignore' })
+    writeFileSync(join(repoRoot, 'a.txt'), 'a changed\n')
+    writeFileSync(join(repoRoot, 'b.txt'), 'untracked\n')
 
     const api = {
       mirrorCreateWorktree: vi.fn().mockResolvedValue({
@@ -1812,6 +1821,8 @@ describe('mirrorUpFast worktree creation', () => {
     const opts = api.mirrorCreateWorktree.mock.calls[0]![2]
     expect(opts.branch).toBe(getBranchName(repoRoot))
     expect(opts.targetBranch).toBe('feature-ocm')
+    expect(opts.patch).toContain('a.txt')
+    expect(opts.patch).toContain('b.txt')
     expect(result.created).toBe(true)
     expect(result.fullPath).toBe('/repos/repo-feature-ocm')
     expect(result.worktreeSetup).toEqual({ status: 'none' })

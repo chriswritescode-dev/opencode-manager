@@ -3,7 +3,7 @@ import type { Database } from 'bun:sqlite'
 import { spawn } from 'child_process'
 import { copyFileSync, createReadStream, createWriteStream, existsSync } from 'fs'
 import { mkdtempSync, writeFileSync } from 'fs'
-import { Readable } from 'stream'
+import { Readable, Transform } from 'stream'
 import { pipeline } from 'stream/promises'
 import { join, resolve } from 'path'
 import * as fsp from 'fs/promises'
@@ -288,15 +288,38 @@ async function createBundle(fullPath: string): Promise<string> {
   return bundlePath
 }
 
-async function stageBundleFromBody(body: ReadableStream, dirPrefix: string): Promise<{ bundleDir: string; bundlePath: string }> {
+async function stageBundleFromBody(body: ReadableStream, dirPrefix: string, patchBytes = 0): Promise<{ bundleDir: string; bundlePath: string; patch: string }> {
   const stagingRoot = getStagingRoot()
   mkdirSyncSafe(stagingRoot)
   const bundleDir = mkdtempSync(join(stagingRoot, dirPrefix))
   try {
     const bundlePath = join(bundleDir, 'repo.bundle')
     const readable = Readable.fromWeb(body as unknown as Parameters<typeof Readable.fromWeb>[0])
-    await pipeline(readable, createWriteStream(bundlePath))
-    return { bundleDir, bundlePath }
+    const patchChunks: Buffer[] = []
+    let patchRead = 0
+    const splitPatch = new Transform({
+      transform(chunk, _encoding, callback) {
+        if (patchRead >= patchBytes) {
+          this.push(chunk)
+          callback()
+          return
+        }
+        const buffer = Buffer.isBuffer(chunk) ? chunk : Buffer.from(chunk)
+        const remaining = patchBytes - patchRead
+        if (buffer.length <= remaining) {
+          patchChunks.push(buffer)
+          patchRead += buffer.length
+        } else {
+          patchChunks.push(buffer.subarray(0, remaining))
+          patchRead += remaining
+          this.push(buffer.subarray(remaining))
+        }
+        callback()
+      },
+    })
+    await pipeline(readable, splitPatch, createWriteStream(bundlePath))
+    if (patchRead < patchBytes) throw new Error('request body ended before the declared patch length')
+    return { bundleDir, bundlePath, patch: Buffer.concat(patchChunks).toString('utf-8') }
   } catch (error) {
     await fsp.rm(bundleDir, { recursive: true, force: true }).catch(() => {})
     throw error
@@ -631,6 +654,13 @@ export function createInternalRepoMirrorRoutes(
       return c.json({ error: 'invalid branch name' }, 400)
     }
 
+    const patchBytesHeader = c.req.header('x-ocm-patch-bytes')
+    let patchBytes = 0
+    if (patchBytesHeader !== undefined) {
+      if (!/^\d+$/.test(patchBytesHeader.trim())) return c.json({ error: 'invalid patch length' }, 400)
+      patchBytes = Number(patchBytesHeader.trim())
+    }
+
     const gitWorktrees = await listGitWorktrees(repo.fullPath, gitAuthService.getGitEnvironment())
     if (gitWorktrees.some((worktree) => worktree.branch === targetBranch)) {
       return c.json({ error: 'branch_in_use', message: `branch '${targetBranch}' is checked out in a worktree of this repository` }, 409)
@@ -641,11 +671,14 @@ export function createInternalRepoMirrorRoutes(
 
     let bundleDir: string | undefined
     try {
-      const staged = await stageBundleFromBody(rawBody, 'bundle-upload-')
+      const staged = await stageBundleFromBody(rawBody, 'bundle-upload-', patchBytes)
       bundleDir = staged.bundleDir
       const worktree = await repoWorkspaces.create(repo, {
         name: sanitizeRepoDirectoryName(targetBranch, 'move'),
-        initialize: (directory) => importBundle(directory, staged.bundlePath, branch, false, true, targetBranch),
+        initialize: async (directory) => {
+          await importBundle(directory, staged.bundlePath, branch, false, true, targetBranch)
+          await applyMirrorPatch(directory, staged.patch)
+        },
       })
       const state = await checkoutState(worktree.directory)
       const response: MirrorWorktreeCreateResponse = {

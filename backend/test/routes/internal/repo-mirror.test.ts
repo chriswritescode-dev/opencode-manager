@@ -1499,6 +1499,73 @@ describe('internal-repo-mirror routes', () => {
       expect(readFileSync(join(worktreeDir, 'feature.txt'), 'utf-8')).toBe('source feature\n')
     })
 
+    it('applies the leading working-tree patch inside initialize before the worktree is reported', async () => {
+      const sourceDir = initRepoAt(join(getTmpRoot(), 'wt-patch-source'))
+      commitFileAt(sourceDir, 'main.txt', 'source main\n')
+      runGit(sourceDir, ['checkout', '-b', 'feature'])
+      commitFileAt(sourceDir, 'feature.txt', 'source feature\n')
+      const bundle = bundleOf(sourceDir, 'wt-patch-source')
+
+      writeFileSync(join(sourceDir, 'main.txt'), 'patched main\n')
+      writeFileSync(join(sourceDir, 'untracked.txt'), 'patched untracked\n')
+      runGit(sourceDir, ['add', '-N', 'untracked.txt'])
+      const patchBuf = Buffer.from(runGit(sourceDir, ['diff', '--binary', 'HEAD']).stdout, 'utf-8')
+
+      const worktreeDir = join(getTmpRoot(), 'wt-patch-created')
+      runGit(baseDir, ['worktree', 'add', '-b', 'feature-ocm', worktreeDir])
+
+      mockListGitWorktrees.mockResolvedValue([{ path: baseDir, branch: 'main' }])
+      let mainDuringInitialize: string | undefined
+      let untrackedDuringInitialize: string | undefined
+      mockRepoWorkspaces.create.mockImplementation(async (_repo: unknown, options: { initialize: (directory: string) => Promise<void> }) => {
+        await options.initialize(worktreeDir)
+        mainDuringInitialize = readFileSync(join(worktreeDir, 'main.txt'), 'utf-8')
+        untrackedDuringInitialize = readFileSync(join(worktreeDir, 'untracked.txt'), 'utf-8')
+        return { directory: worktreeDir, worktreeSetup: { status: 'none' } }
+      })
+
+      const res = await request(Buffer.concat([patchBuf, bundle]), {
+        'x-ocm-branch': 'feature',
+        'x-ocm-target-branch': 'feature-ocm',
+        'x-ocm-patch-bytes': String(patchBuf.length),
+      })
+
+      expect(res.status).toBe(200)
+      expect(mainDuringInitialize).toBe('patched main\n')
+      expect(untrackedDuringInitialize).toBe('patched untracked\n')
+      expect(readFileSync(join(worktreeDir, 'main.txt'), 'utf-8')).toBe('patched main\n')
+      expect(readFileSync(join(worktreeDir, 'untracked.txt'), 'utf-8')).toBe('patched untracked\n')
+    })
+
+    it.each(['abc', '-1', '1.5'])('returns 400 for an invalid x-ocm-patch-bytes value %s', async (value) => {
+      const res = await request(Buffer.from('bundle'), {
+        'x-ocm-branch': 'feature',
+        'x-ocm-target-branch': 'feature-ocm',
+        'x-ocm-patch-bytes': value,
+      })
+
+      expect(res.status).toBe(400)
+      const json = (await res.json()) as { error: string }
+      expect(json.error).toBe('invalid patch length')
+      expect(mockListGitWorktrees).not.toHaveBeenCalled()
+      expect(mockRepoWorkspaces.create).not.toHaveBeenCalled()
+    })
+
+    it('returns 409 when the declared patch length exceeds the body', async () => {
+      mockListGitWorktrees.mockResolvedValue([{ path: baseDir, branch: 'main' }])
+
+      const res = await request(Buffer.from('bundle-bytes'), {
+        'x-ocm-branch': 'feature',
+        'x-ocm-target-branch': 'feature-ocm',
+        'x-ocm-patch-bytes': '999999',
+      })
+
+      expect(res.status).toBe(409)
+      const json = (await res.json()) as { error: string }
+      expect(json.error).toContain('patch length')
+      expect(mockRepoWorkspaces.create).not.toHaveBeenCalled()
+    })
+
     it('returns 409 when the target branch is already checked out', async () => {
       mockListGitWorktrees.mockResolvedValue([{ path: baseDir, branch: 'feature-ocm' }])
 
