@@ -1,5 +1,6 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { useState } from 'react'
+import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
 import { render, screen, fireEvent, waitFor, act } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import type { Repo, Session } from '@/api/types'
@@ -10,14 +11,23 @@ const mocks = vi.hoisted(() => ({
   sessionsData: [] as Session[],
   lastDirectories: [] as string[],
   lastAllDirectories: false,
+  lastProject: undefined as { id: string; subpath: string } | undefined,
+  locationData: undefined as
+    | { directory: string; project: { id: string; directory: string; canonical: string } }
+    | undefined,
   sessionsHook: vi.fn(),
   fetchNextPage: vi.fn(),
   deleteSessionMock: vi.fn(),
   togglePinMock: vi.fn(),
-  siblings: [] as Array<Repo & { worktreeSource?: 'opencode' | 'schedule' | 'git' }>,
+  getOpenCodeLocation: vi.fn(),
   sessionPins: [] as Array<{ sessionId: string; directory: string; pinnedAt: number }>,
   repos: [] as Repo[],
 }))
+
+vi.mock('@/api/opencode', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('@/api/opencode')>()
+  return { ...actual, getOpenCodeLocation: mocks.getOpenCodeLocation }
+})
 
 vi.mock('@/hooks/useOpenCode', async (importOriginal) => {
   const actual = await importOriginal<typeof import('@/hooks/useOpenCode')>()
@@ -25,15 +35,17 @@ vi.mock('@/hooks/useOpenCode', async (importOriginal) => {
     ...actual,
     useSessionsAcrossDirectories: (
       directories: string[],
-      options?: { search?: string; allDirectories?: boolean },
+      options?: { search?: string; allDirectories?: boolean; project?: { id: string; subpath: string } },
     ) => {
       mocks.sessionsHook()
       mocks.lastDirectories = directories
       mocks.lastAllDirectories = options?.allDirectories ?? false
+      mocks.lastProject = options?.project
       const search = options?.search?.toLowerCase() ?? ''
+      const base = directories.length === 0 ? [] : mocks.sessionsData
       const data = search
-        ? mocks.sessionsData.filter((session) => (session.title ?? '').toLowerCase().includes(search))
-        : mocks.sessionsData
+        ? base.filter((session) => (session.title ?? '').toLowerCase().includes(search))
+        : base
       return {
         data,
         isLoading: false,
@@ -47,10 +59,6 @@ vi.mock('@/hooks/useOpenCode', async (importOriginal) => {
     useDeleteSession: () => ({ mutateAsync: mocks.deleteSessionMock, isPending: false }),
   }
 })
-
-vi.mock('@/hooks/useRepoSiblings', () => ({
-  useRepoSiblings: () => ({ data: mocks.siblings }),
-}))
 
 vi.mock('@/hooks/useSessionPins', () => ({
   useSessionPins: () => ({ data: mocks.sessionPins }),
@@ -90,15 +98,20 @@ function repo(id: number, name: string, fullPath: string): Repo {
   }
 }
 
-function worktreeSibling(id: number, name: string, fullPath: string): Repo & { worktreeSource: 'opencode' } {
-  return { ...repo(id, name, fullPath), isWorktree: true, worktreeSource: 'opencode' }
+function renderWithClient(ui: React.ReactElement) {
+  const queryClient = new QueryClient({ defaultOptions: { queries: { retry: false } } })
+  const directory = mocks.repos[0]?.fullPath
+  if (mocks.locationData && directory) {
+    queryClient.setQueryData(['opencode', 'location', directory], mocks.locationData)
+  }
+  return render(<QueryClientProvider client={queryClient}>{ui}</QueryClientProvider>)
 }
 
 function renderPicker(overrides: Partial<React.ComponentProps<typeof SessionPickerDialog>> = {}) {
   const onOpenChange = vi.fn()
   const onSelectSession = vi.fn()
   const onDeleteActiveSession = vi.fn()
-  render(
+  renderWithClient(
     <SessionPickerDialog
       open
       onOpenChange={onOpenChange}
@@ -119,7 +132,12 @@ describe('SessionPickerDialog', () => {
     stubMatchMedia(true)
     localStorage.clear()
     mocks.deleteSessionMock.mockResolvedValue(undefined)
-    mocks.siblings = []
+    mocks.locationData = {
+      directory: '/w/a',
+      project: { id: 'global', directory: '/w/a', canonical: '/w/a' },
+    }
+    mocks.getOpenCodeLocation.mockResolvedValue(mocks.locationData)
+    mocks.lastProject = undefined
     mocks.sessionPins = []
     mocks.repos = [repo(1, 'alpha', '/w/a'), repo(2, 'beta', '/w/b')]
     mocks.sessionsData = []
@@ -222,24 +240,86 @@ describe('SessionPickerDialog', () => {
     expect(localStorage.getItem('oc:session-picker:all-projects')).toBe('false')
   })
 
-  it('includes the repo worktrees and labels worktree sessions with the folder name', () => {
+  it('lists project sessions across worktrees and labels them with the folder name', async () => {
     mocks.repos = [repo(1, 'alpha', '/w/a')]
-    mocks.siblings = [
-      repo(1, 'alpha', '/w/a'),
-      worktreeSibling(2, 'alpha', '/w/worktrees/alpha-feature'),
-    ]
+    mocks.locationData = {
+      directory: '/w/a',
+      project: { id: 'proj_x', directory: '/w/a', canonical: '/w/a' },
+    }
     mocks.sessionsData = [
-      session('ses_root', 'Root session', '/w/a', 2000),
-      session('ses_wt', 'Worktree session', '/w/worktrees/alpha-feature', 1000),
+      session('ses_root', 'Root session', '/w/a', 3000),
+      session('ses_wt', 'Worktree session', '/w/.opencode/state/opencode/worktree/proj_x/test', 2000),
+      session('ses_schedule', 'Schedule session', '/w/schedule-worktrees/job-11-run-361', 1000),
     ]
 
     renderPicker()
 
-    expect(mocks.lastDirectories).toEqual(['/w/a', '/w/worktrees/alpha-feature'])
-    expect(screen.getByText('Worktree session')).toBeInTheDocument()
+    expect(await screen.findByText('Worktree session')).toBeInTheDocument()
+    expect(screen.getByText('Schedule session')).toBeInTheDocument()
     expect(screen.getByText('Root session')).toBeInTheDocument()
-    expect(screen.getByText('alpha-feature')).toBeInTheDocument()
-    expect(screen.getByRole('option', { name: /Root session/ }).textContent).not.toContain('alpha-feature')
+    const rootRow = screen.getByRole('option', { name: /Root session/ })
+    const worktreeRow = screen.getByRole('option', { name: /Worktree session/ })
+    const scheduleRow = screen.getByRole('option', { name: /Schedule session/ })
+    expect(worktreeRow.textContent).toContain('test')
+    expect(scheduleRow.textContent).toContain('job-11-run-361')
+    expect(rootRow.textContent).not.toContain('test')
+    expect(rootRow.textContent).not.toContain('job-11-run-361')
+    expect(mocks.lastProject).toEqual({ id: 'proj_x', subpath: '' })
+  })
+
+  it('falls back to the repo directory listing when the location project is global', async () => {
+    mocks.repos = [repo(1, 'alpha', '/w/a'), repo(2, 'beta', '/w/b')]
+    mocks.sessionsData = [
+      session('ses_a', 'Alpha session', '/w/a', 2000),
+      session('ses_b', 'Beta session', '/w/b', 1000),
+    ]
+
+    renderPicker()
+
+    expect(await screen.findByText('Alpha session')).toBeInTheDocument()
+    expect(screen.queryByText('Beta session')).not.toBeInTheDocument()
+    expect(mocks.lastDirectories).toEqual(['/w/a'])
+    expect(mocks.lastProject).toBeUndefined()
+  })
+
+  it('falls back to the repo directory listing when the location lookup fails', async () => {
+    mocks.repos = [repo(1, 'alpha', '/w/a'), repo(2, 'beta', '/w/b')]
+    mocks.locationData = undefined
+    mocks.getOpenCodeLocation.mockRejectedValue(new Error('location unavailable'))
+    mocks.sessionsData = [
+      session('ses_a', 'Alpha session', '/w/a', 2000),
+      session('ses_b', 'Beta session', '/w/b', 1000),
+    ]
+
+    renderPicker()
+
+    expect(await screen.findByText('Alpha session')).toBeInTheDocument()
+    expect(screen.queryByText('Beta session')).not.toBeInTheDocument()
+    expect(mocks.lastProject).toBeUndefined()
+  })
+
+  it('does not issue a directory listing while the location is pending', async () => {
+    let resolveLocation:
+      | ((value: { directory: string; project: { id: string; directory: string; canonical: string } }) => void)
+      | undefined
+    mocks.locationData = undefined
+    mocks.getOpenCodeLocation.mockReturnValue(new Promise((resolve) => { resolveLocation = resolve }))
+    mocks.sessionsData = [session('ses_a', 'Alpha session', '/w/a', 2000)]
+
+    renderPicker()
+
+    expect(screen.getByText('Loading sessions...')).toBeInTheDocument()
+    expect(mocks.lastDirectories).toEqual([])
+    expect(screen.queryByText('Alpha session')).not.toBeInTheDocument()
+
+    await act(async () => {
+      resolveLocation?.({
+        directory: '/w/a',
+        project: { id: 'global', directory: '/w/a', canonical: '/w/a' },
+      })
+    })
+
+    expect(await screen.findByText('Alpha session')).toBeInTheDocument()
   })
 
   it('does not query sessions while closed and queries after opening', async () => {
@@ -261,7 +341,7 @@ describe('SessionPickerDialog', () => {
       )
     }
 
-    render(<Host />)
+    renderWithClient(<Host />)
 
     expect(mocks.sessionsHook).not.toHaveBeenCalled()
 
@@ -379,7 +459,7 @@ describe('SessionPickerDialog', () => {
       )
     }
 
-    render(<Host />)
+    renderWithClient(<Host />)
 
     fireEvent.change(screen.getByRole('combobox'), { target: { value: 'Other' } })
     expect(screen.queryByText('Active session')).not.toBeInTheDocument()

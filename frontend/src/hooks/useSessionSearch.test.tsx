@@ -4,7 +4,7 @@ import { useSessionSearch } from './useSessionSearch'
 
 const { sessionsData, lastArgsRef, flagsRef } = vi.hoisted(() => ({
   sessionsData: [] as Array<{ id: string; title: string; location: { directory: string }; parentID?: string; time: { updated: number } }>,
-  lastArgsRef: { current: undefined as { directories: string[]; options?: { search?: string; limit?: number; keepPreviousResults?: boolean; allDirectories?: boolean } } | undefined },
+  lastArgsRef: { current: undefined as { directories: string[]; options?: { search?: string; limit?: number; keepPreviousResults?: boolean; allDirectories?: boolean; project?: { id: string; subpath: string } } } | undefined },
   flagsRef: { current: { hasNextPage: false, isFetchingNextPage: false, isFetchNextPageError: false, isPlaceholderData: false, isError: false } },
 }))
 
@@ -12,7 +12,7 @@ vi.mock('@/hooks/useOpenCode', async (importOriginal) => {
   const actual = await importOriginal<typeof import('@/hooks/useOpenCode')>()
   return {
     ...actual,
-    useSessionsAcrossDirectories: (directories: string[], options?: { search?: string; limit?: number; keepPreviousResults?: boolean; allDirectories?: boolean }) => {
+    useSessionsAcrossDirectories: (directories: string[], options?: { search?: string; limit?: number; keepPreviousResults?: boolean; allDirectories?: boolean; project?: { id: string; subpath: string } }) => {
       lastArgsRef.current = { directories, options }
       const search = options?.search?.toLowerCase() ?? ''
       const data = search
@@ -94,6 +94,22 @@ describe('useSessionSearch', () => {
     renderHook(() => useSessionSearch(['/w/a'], { allDirectories: true }))
 
     expect(lastArgsRef.current?.options?.allDirectories).toBe(true)
+  })
+
+  it('forwards a project scope and skips directory filtering', () => {
+    sessionsData.splice(
+      0,
+      sessionsData.length,
+      { id: 'ses_root', title: 'root', location: { directory: '/w/a' }, time: { updated: 2 } },
+      { id: 'ses_wt', title: 'worktree', location: { directory: '/w/other' }, time: { updated: 1 } },
+    )
+
+    const { result } = renderHook(() =>
+      useSessionSearch(['/w/a'], { project: { id: 'proj_x', subpath: '' } }),
+    )
+
+    expect(lastArgsRef.current?.options?.project).toEqual({ id: 'proj_x', subpath: '' })
+    expect(result.current.filteredSessions.map((session) => session.id)).toEqual(['ses_root', 'ses_wt'])
   })
 
   it('passes isError through from useSessionsAcrossDirectories', () => {
