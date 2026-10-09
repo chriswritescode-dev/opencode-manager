@@ -5,8 +5,8 @@ import http from 'http'
 import type { AddressInfo } from 'net'
 import path from 'path'
 import os from 'os'
-import { ASSISTANT_NOTIFICATION_LIMITS, AssistantNotificationRequestSchema } from '@opencode-manager/shared/schemas'
-import { MANAGER_TOOL_NAME, MANAGER_TOOL_ALLOWED_ROUTES, parseAllowedRoute } from '../../src/services/opencode-manager-tool-plugin'
+import { ASSISTANT_NOTIFICATION_LIMITS, AssistantNotificationRequestSchema, MANAGER_TOOL_NAME } from '@opencode-manager/shared/schemas'
+import { MANAGER_TOOL_ALLOWED_ROUTES, parseAllowedRoute } from '../../src/services/opencode-manager-tool-plugin'
 import { installManagedPlugins, getOpenCodePluginDir } from '../../src/services/opencode/plugin-registry'
 import { loadGeneratedPlugin, type GeneratedTool } from '../helpers/opencode-plugin-context'
 import { resolveOpenCode2Binary, runOpenCodeStandalone } from '../helpers/opencode-binary'
@@ -132,7 +132,8 @@ describe('ocm-manager plugin', () => {
     const tool = await loadTool(configHome)
 
     expect(tool.description).toContain('open_walkthrough')
-    expect(tool.description).toContain("open the change Walkthrough panel for the current session in the user's Manager window")
+    expect(tool.description).toContain('request the change Walkthrough for the current session')
+    expect(tool.description).toContain('when this session is open on desktop')
   })
 
   it('enforces the notification limits the internal API enforces', async () => {
@@ -242,8 +243,10 @@ describe('ocm-manager plugin', () => {
     expect(init.headers.Authorization).toBe('Bearer secret-token')
     expect(init.headers['content-type']).toBe('application/json')
     expect(JSON.parse(init.body)).toEqual({ source: { kind: 'staged' } })
-    expect(result.content).toBe('Opened the walkthrough (2 stops).')
-    expect(result.metadata).toEqual({ openPanel: 'walkthrough', source: { kind: 'staged' } })
+    expect(result.content).toBe(
+      'Requested the walkthrough (2 stops). It opens in the Manager window when this session is open on desktop; otherwise the user can open it from this tool call.',
+    )
+    expect(result.metadata).toBeUndefined()
   })
 
   it('reports that the walkthrough is generating', async () => {
@@ -252,8 +255,10 @@ describe('ocm-manager plugin', () => {
 
     const result = await runToolResult(tool, { action: 'open_walkthrough', params: {} }, { sessionID: 'ses_abc' })
 
-    expect(result.content).toBe('Opened the walkthrough. It is generating; the user can page through it as stops are explained.')
-    expect(result.metadata).toEqual({ openPanel: 'walkthrough' })
+    expect(result.content).toBe(
+      'Requested the walkthrough; it is generating. It opens in the Manager window when this session is open on desktop; otherwise the user can open it from this tool call.',
+    )
+    expect(result.metadata).toBeUndefined()
   })
 
   it('opens the walkthrough without a body when no source is given', async () => {
@@ -376,6 +381,8 @@ describe('ocm-manager plugin', () => {
       ['POST', '/multi-runs'],
       ['POST', '/multi-runs/1/fusions'],
       ['POST', '/multi-runs/1/entries/2/discard'],
+      ['GET', '/change-walkthroughs/x'],
+      ['POST', '/change-walkthroughs/x'],
     ] as const
 
     for (const [method, path] of deniedRoutes) {

@@ -27,6 +27,7 @@ export function useAutoOpenWalkthrough({
 }: UseAutoOpenWalkthroughOptions): void {
   const seenRef = useRef<Set<string> | null>(null)
   const frontierRef = useRef<string | null>(null)
+  const lastScannedRef = useRef<string | null>(null)
   const sessionRef = useRef<string | undefined>(undefined)
   const onOpenRef = useRef(onOpen)
   onOpenRef.current = onOpen
@@ -36,16 +37,33 @@ export function useAutoOpenWalkthrough({
       sessionRef.current = sessionId
       seenRef.current = null
       frontierRef.current = null
+      lastScannedRef.current = null
     }
     if (loading) return
     if (seenRef.current === null) {
       seenRef.current = new Set(collectOpenWalkthroughCalls(messages).map((call) => call.id))
       frontierRef.current = messages[0]?.id ?? null
+      lastScannedRef.current = messages[messages.length - 1]?.id ?? null
       return
     }
-    const frontier = frontierRef.current
-    const liveMessages =
-      frontier === null ? messages : messages.filter((message) => message.id >= frontier)
+    const lastScannedId = lastScannedRef.current
+    let scanFrom = -1
+    if (lastScannedId !== null) {
+      for (let index = messages.length - 1; index >= 0; index -= 1) {
+        if (messages[index]?.id === lastScannedId) {
+          scanFrom = index
+          break
+        }
+      }
+    }
+    let liveMessages: SessionMessageInfo[]
+    if (scanFrom >= 0) {
+      liveMessages = messages.slice(scanFrom)
+    } else {
+      const frontier = frontierRef.current
+      liveMessages = frontier === null ? messages : messages.filter((message) => message.id >= frontier)
+    }
+    lastScannedRef.current = messages[messages.length - 1]?.id ?? null
     let opened = false
     for (const call of collectOpenWalkthroughCalls(liveMessages)) {
       if (seenRef.current.has(call.id)) continue

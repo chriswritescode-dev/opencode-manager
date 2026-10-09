@@ -385,7 +385,7 @@ describe('ChangesWalkthroughSheet', () => {
 
   it('applies an external source request to the walkthrough source', async () => {
     mocks.getChangeWalkthrough.mockResolvedValue(state({ walkthrough: null }))
-    renderSheet({ sourceRequest: { sessionId: 'ses_1', source: { kind: 'staged' }, nonce: 1 } })
+    renderSheet({ sourceRequest: { sessionId: 'ses_1', source: { kind: 'staged' } } })
 
     await waitFor(() => {
       expect(mocks.getChangeWalkthrough).toHaveBeenCalledWith('ses_1', { kind: 'staged' })
@@ -396,7 +396,7 @@ describe('ChangesWalkthroughSheet', () => {
   it('applies a pull request request with its number and base', async () => {
     mocks.getChangeWalkthrough.mockResolvedValue(state({ walkthrough: null }))
     renderSheet({
-      sourceRequest: { sessionId: 'ses_1', source: { kind: 'pullRequest', number: 12 }, nonce: 1 },
+      sourceRequest: { sessionId: 'ses_1', source: { kind: 'pullRequest', number: 12 } },
     })
 
     await waitFor(() => {
@@ -409,7 +409,7 @@ describe('ChangesWalkthroughSheet', () => {
     const user = userEvent.setup()
     mocks.getChangeWalkthrough.mockResolvedValue(state({ walkthrough: null }))
     const { rerender, onOpenChange } = renderSheet({
-      sourceRequest: { sessionId: 'ses_1', source: { kind: 'staged' }, nonce: 1 },
+      sourceRequest: { sessionId: 'ses_1', source: { kind: 'staged' } },
     })
     await waitFor(() => {
       expect(mocks.getChangeWalkthrough).toHaveBeenCalledWith('ses_1', { kind: 'staged' })
@@ -426,7 +426,7 @@ describe('ChangesWalkthroughSheet', () => {
         sessionId="ses_1"
         open
         onOpenChange={onOpenChange}
-        sourceRequest={{ sessionId: 'ses_1', source: { kind: 'staged' }, nonce: 2 }}
+        sourceRequest={{ sessionId: 'ses_1', source: { kind: 'staged' } }}
       />,
     )
 
@@ -440,7 +440,7 @@ describe('ChangesWalkthroughSheet', () => {
     const user = userEvent.setup()
     mocks.getChangeWalkthrough.mockResolvedValue(state({ walkthrough: null }))
     const { rerender, onOpenChange } = renderSheet({
-      sourceRequest: { sessionId: 'ses_1', source: { kind: 'staged' }, nonce: 1 },
+      sourceRequest: { sessionId: 'ses_1', source: { kind: 'staged' } },
     })
     await waitFor(() => {
       expect(mocks.getChangeWalkthrough).toHaveBeenCalledWith('ses_1', { kind: 'staged' })
@@ -458,22 +458,12 @@ describe('ChangesWalkthroughSheet', () => {
         sessionId="ses_1"
         open
         onOpenChange={onOpenChange}
-        sourceRequest={{ sessionId: 'ses_1', source: undefined, nonce: 2 }}
+        sourceRequest={{ sessionId: 'ses_1', source: undefined }}
       />,
     )
 
     expect(screen.getByRole('combobox', { name: 'Changes to walk through' })).toHaveTextContent('Unstaged')
     expect(mocks.getChangeWalkthrough).not.toHaveBeenCalledWith('ses_1', { kind: 'session' })
-    expect(mocks.getChangeWalkthrough).not.toHaveBeenCalledWith('ses_1', { kind: 'staged' })
-  })
-
-  it('ignores a request from another session', async () => {
-    mocks.getChangeWalkthrough.mockResolvedValue(state({ walkthrough: null }))
-    renderSheet({ sourceRequest: { sessionId: 'ses_other', source: { kind: 'staged' }, nonce: 1 } })
-
-    await waitFor(() => {
-      expect(mocks.getChangeWalkthrough).toHaveBeenCalledWith('ses_1', { kind: 'session' })
-    })
     expect(mocks.getChangeWalkthrough).not.toHaveBeenCalledWith('ses_1', { kind: 'staged' })
   })
 

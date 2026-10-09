@@ -1,7 +1,5 @@
 import { z } from 'zod'
-import { ASSISTANT_NOTIFICATION_LIMITS, WalkthroughSourceSchema } from '@opencode-manager/shared/schemas'
-
-export const MANAGER_TOOL_NAME = 'ocm'
+import { ASSISTANT_NOTIFICATION_LIMITS, MANAGER_TOOL_ACTIONS, MANAGER_TOOL_NAME, WalkthroughSourceSchema } from '@opencode-manager/shared/schemas'
 
 const MANAGER_TOOL_REQUEST_TIMEOUT_MS = 60000
 
@@ -40,8 +38,6 @@ export const MANAGER_TOOL_ALLOWED_ROUTES = [
 
 const MANAGER_TOOL_ALLOWED_METHODS = ['GET', 'POST', 'PUT', 'PATCH', 'DELETE'] as const
 
-const MANAGER_TOOL_ACTION_NAMES = ['send_notification', 'request', 'open_walkthrough'] as const
-
 const ManagerToolNotificationParamsSchema = z
   .object({
     title: z.string().min(1).max(ASSISTANT_NOTIFICATION_LIMITS.TITLE_MAX).describe('The notification title.'),
@@ -67,9 +63,9 @@ const ManagerToolWalkthroughParamsSchema = z
     source: WalkthroughSourceSchema.optional().describe('The change source to walk through. Defaults to the changes in this session.'),
   })
   .strict()
-  .describe("Open the change Walkthrough for this session in the user's Manager window and start generating it if needed.")
+  .describe("Request the change Walkthrough for this session, generating it if needed. It opens in the user's Manager window when this session is open on desktop; otherwise the user can open it from this tool call.")
 
-const MANAGER_TOOL_ACTION_PARAMS_SCHEMAS: Record<(typeof MANAGER_TOOL_ACTION_NAMES)[number], z.ZodType> = {
+const MANAGER_TOOL_ACTION_PARAMS_SCHEMAS: Record<(typeof MANAGER_TOOL_ACTIONS)[number], z.ZodType> = {
   send_notification: ManagerToolNotificationParamsSchema,
   request: ManagerToolRequestParamsSchema,
   open_walkthrough: ManagerToolWalkthroughParamsSchema,
@@ -100,7 +96,7 @@ function buildManagerToolInputJsonSchema(): Record<string, unknown> {
   const jsonSchema: Record<string, unknown> = z.toJSONSchema(
     z
       .object({
-        action: z.enum(MANAGER_TOOL_ACTION_NAMES).describe('The OpenCode Manager action to perform.'),
+        action: z.enum(MANAGER_TOOL_ACTIONS).describe('The OpenCode Manager action to perform.'),
         params: z
           .union([
             MANAGER_TOOL_ACTION_PARAMS_SCHEMAS.send_notification,
@@ -116,7 +112,7 @@ function buildManagerToolInputJsonSchema(): Record<string, unknown> {
 }
 
 function buildManagerToolActionRequiredKeys(): Record<string, string[]> {
-  return Object.fromEntries(MANAGER_TOOL_ACTION_NAMES.map((name) => [name, requiredKeysOf(MANAGER_TOOL_ACTION_PARAMS_SCHEMAS[name])]))
+  return Object.fromEntries(MANAGER_TOOL_ACTIONS.map((name) => [name, requiredKeysOf(MANAGER_TOOL_ACTION_PARAMS_SCHEMAS[name])]))
 }
 
 function buildManagerToolDescription(): string {
@@ -126,7 +122,7 @@ function buildManagerToolDescription(): string {
     'Actions:',
     '- send_notification: send a push notification to every device the user has registered.',
     '- request: call an allow-listed internal API route to read and manage settings, the OpenCode configuration file, repos (list, inspect, clone from a git URL with POST /repos and body { repoUrl, branch?, directoryName? }), OpenCode workspaces, sessions (list, create, follow up, read the latest reply, fork), and schedules.',
-    "- open_walkthrough: open the change Walkthrough panel for the current session in the user's Manager window, generating it if needed; use when the user asks to walk through, review or explain the changes.",
+    "- open_walkthrough: request the change Walkthrough for the current session, generating it if needed. It opens in the user's Manager window when this session is open on desktop; otherwise the user opens it from this tool call. Use when the user asks to walk through, review or explain the changes.",
     'Allowed request routes:',
   ]
     .concat(MANAGER_TOOL_ALLOWED_ROUTES.map((route) => `- ${route}`))
@@ -142,7 +138,7 @@ var ALLOWED_MATCHERS = ${JSON.stringify(buildRouteMatchers())}.map(function (mat
   return { method: matcher.method, pattern: new RegExp(matcher.source) }
 })
 
-var ACTION_NAMES = ${JSON.stringify(MANAGER_TOOL_ACTION_NAMES)}
+var ACTION_NAMES = ${JSON.stringify(MANAGER_TOOL_ACTIONS)}
 
 var ACTION_REQUIRED_KEYS = ${JSON.stringify(buildManagerToolActionRequiredKeys())}
 
@@ -238,21 +234,15 @@ var ACTIONS = {
     run: async function (params, context) {
       var body = params.source === undefined ? undefined : { source: params.source }
       var state = await postInternalApi('/change-walkthroughs/' + encodeURIComponent(context.sessionID), body, context.signal)
-      var metadata = { openPanel: 'walkthrough' }
-      if (params.source !== undefined) {
-        metadata.source = params.source
-      }
+      var hint = ' It opens in the Manager window when this session is open on desktop; otherwise the user can open it from this tool call.'
       if (state.generating === true) {
-        return {
-          content: 'Opened the walkthrough. It is generating; the user can page through it as stops are explained.',
-          metadata: metadata,
-        }
+        return 'Requested the walkthrough; it is generating.' + hint
       }
       var stops = state.walkthrough && Array.isArray(state.walkthrough.stops) ? state.walkthrough.stops.length : 0
       if (state.walkthrough) {
-        return { content: 'Opened the walkthrough (' + stops + ' stops).', metadata: metadata }
+        return 'Requested the walkthrough (' + stops + ' stops).' + hint
       }
-      return { content: 'Opened the walkthrough.', metadata: metadata }
+      return 'Requested the walkthrough.' + hint
     },
   },
 }
@@ -291,11 +281,7 @@ export default {
         input: INPUT_SCHEMA,
         options: { codemode: false },
         execute: async function (input, context) {
-          var result = await runAction(input, context)
-          if (result !== null && typeof result === 'object' && typeof result.content === 'string') {
-            return result
-          }
-          return { content: result }
+          return { content: await runAction(input, context) }
         },
       })
     })

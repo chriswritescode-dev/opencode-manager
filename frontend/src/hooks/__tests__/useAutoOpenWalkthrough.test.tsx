@@ -111,6 +111,44 @@ describe('useAutoOpenWalkthrough', () => {
     expect(onOpen).toHaveBeenCalledTimes(1)
   })
 
+  it('opens once when a call completes in the last message across streaming updates', () => {
+    const onOpen = vi.fn()
+    const { rerender } = renderAutoOpen({
+      sessionId: 's1',
+      messages: [assistantMessage('m1', otherToolPart('t1'))],
+      enabled: true,
+      loading: false,
+      onOpen,
+    })
+
+    rerender({
+      sessionId: 's1',
+      messages: [
+        assistantMessage('m1', otherToolPart('t1')),
+        assistantMessage('m2', openWalkthroughPart('t2', 'running')),
+      ],
+      enabled: true,
+      loading: false,
+      onOpen,
+    })
+
+    expect(onOpen).not.toHaveBeenCalled()
+
+    rerender({
+      sessionId: 's1',
+      messages: [
+        assistantMessage('m1', otherToolPart('t1')),
+        assistantMessage('m2', openWalkthroughPart('t2', 'completed')),
+      ],
+      enabled: true,
+      loading: false,
+      onOpen,
+    })
+
+    expect(onOpen).toHaveBeenCalledTimes(1)
+    expect(onOpen).toHaveBeenCalledWith(undefined)
+  })
+
   it('passes the requested source to the opener', () => {
     const onOpen = vi.fn()
     const part: SessionMessageAssistantTool = {

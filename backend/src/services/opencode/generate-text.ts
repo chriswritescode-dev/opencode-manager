@@ -1,5 +1,4 @@
 import type { ModelRef } from '@opencode-manager/shared/opencode'
-import { formatOpenCodeModelRef } from '@opencode-manager/shared/opencode'
 import { getOpenCodeGlobalConfigPath } from '@opencode-manager/shared/config/env'
 import type { OpenCodeClient } from './client'
 import { resolveOpenCodeModel } from '../opencode-models'
@@ -38,32 +37,8 @@ async function generateText(
   input: { prompt: string; model?: ModelRef },
   signal: AbortSignal,
 ): Promise<{ text: string }> {
-  if (input.model) {
-    await waitForGenerateModel(client, input.model, signal)
-    return client.api.generate.text({ prompt: input.prompt, model: input.model }, { signal })
-  }
-
-  const model = await resolveGenerateModel(client, signal)
+  const model = input.model ?? await resolveGenerateModel(client, signal)
   return client.api.generate.text({ prompt: input.prompt, model }, { signal })
-}
-
-/**
- * Waits for an explicitly requested model to appear in OpenCode's global config-location catalog, which loads lazily after OpenCode starts.
- * Generation proceeds even if the wait times out or the model stays unconfigured, so OpenCode can surface its own error; an abort still propagates.
- */
-async function waitForGenerateModel(
-  client: OpenCodeClient,
-  model: ModelRef,
-  signal: AbortSignal,
-): Promise<void> {
-  try {
-    await resolveOpenCodeModel(client, getOpenCodeGlobalConfigPath(), {
-      signal,
-      preferredModel: formatOpenCodeModelRef(model),
-    })
-  } catch {
-    signal.throwIfAborted()
-  }
 }
 
 /** OpenCode serves generation from its global config location, so the model must be resolved there once its catalog has loaded. */

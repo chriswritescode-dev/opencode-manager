@@ -304,11 +304,10 @@ export function SessionDetail() {
   const handleShowMcpDialog = useCallback(() => setMcpDialogOpen(true), [setMcpDialogOpen]);
   const handleShowSkillsDialog = useCallback(() => setSkillsDialogOpen(true), [setSkillsDialogOpen]);
   const handleShowWalkthrough = useCallback((source?: WalkthroughSource) => {
-    setRequestedWalkthroughSource((current) => ({
+    setRequestedWalkthroughSource({
       sessionId: sessionId ?? '',
       source,
-      nonce: (current?.nonce ?? 0) + 1,
-    }));
+    });
     setWalkthroughOpen(true);
   }, [sessionId, setWalkthroughOpen]);
   const handleShowWalkthroughCommand = useCallback(() => handleShowWalkthrough(), [handleShowWalkthrough]);

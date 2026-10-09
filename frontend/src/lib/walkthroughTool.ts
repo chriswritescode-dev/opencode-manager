@@ -1,11 +1,8 @@
 import type { SessionMessageAssistantTool, SessionMessageInfo } from '@opencode-manager/shared/opencode'
-import { WalkthroughSourceSchema } from '@opencode-manager/shared/schemas'
+import { MANAGER_TOOL_NAME, MANAGER_TOOL_OPEN_WALKTHROUGH_ACTION, WalkthroughSourceSchema } from '@opencode-manager/shared/schemas'
 import type { WalkthroughSource } from '@opencode-manager/shared/schemas'
 
-export const OCM_TOOL_NAME = 'ocm'
-export const OPEN_WALKTHROUGH_ACTION = 'open_walkthrough'
-
-export interface OpenWalkthroughCall {
+interface OpenWalkthroughCall {
   id: string
   source?: WalkthroughSource
 }
@@ -28,8 +25,8 @@ function readOpenWalkthroughSource(params: unknown): WalkthroughSource | undefin
 export function readOpenWalkthroughCall(
   part: SessionMessageAssistantTool,
 ): OpenWalkthroughCall | undefined {
-  if (part.name !== OCM_TOOL_NAME || part.state.status !== 'completed') return undefined
-  if (part.state.input.action !== OPEN_WALKTHROUGH_ACTION) return undefined
+  if (part.name !== MANAGER_TOOL_NAME || part.state.status !== 'completed') return undefined
+  if (part.state.input.action !== MANAGER_TOOL_OPEN_WALKTHROUGH_ACTION) return undefined
   return { id: part.id, source: readOpenWalkthroughSource(part.state.input.params) }
 }
 

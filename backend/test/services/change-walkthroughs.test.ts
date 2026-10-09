@@ -1252,6 +1252,26 @@ describe('ChangeWalkthroughService', () => {
     ).toBe(true)
   })
 
+  it('waits for an explicit model once per generation, not per stop', async () => {
+    sessions[SESSION_ID]!.changes = LARGE_CHANGES
+    sessions[SESSION_ID]!.info = {
+      id: SESSION_ID,
+      title: 'Title',
+      model: { providerID: 'openai', id: 'gpt-5-mini' },
+    } as SessionInfo
+    fake.setGenerateImpl((prompt) =>
+      Promise.resolve(prompt.includes(PLAN_MARKER) ? LARGE_PLAN_REPLY : EXPLANATION_REPLY),
+    )
+
+    await service.generate(SESSION_ID, {})
+
+    expect(fake.generateModels).toHaveLength(4)
+    expect(
+      fake.generateModels.every((model) => model?.providerID === 'openai' && model.id === 'gpt-5-mini'),
+    ).toBe(true)
+    expect(vi.mocked(fake.client.api.model.list)).toHaveBeenCalledTimes(1)
+  })
+
   it('includes the resolved default model in the explanation key', async () => {
     fake.setGenerateImpl(async () => modelReply([{ title: 'A', explanation: 'x', hunkIds: THREE_HUNK_IDS }]))
 

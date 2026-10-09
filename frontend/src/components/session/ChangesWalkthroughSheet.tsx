@@ -239,13 +239,12 @@ const WalkthroughSourceInputs = memo(function WalkthroughSourceInputs() {
 })
 
 /**
- * A one-shot request to open the walkthrough on a given source. `nonce` makes a repeated request for
- * the same source a distinct value, so it re-applies; `source` undefined leaves the selection alone.
+ * A one-shot request to open the walkthrough on a given source. A new request object re-applies, so a
+ * repeated request for the same source takes effect; `source` undefined leaves the selection alone.
  */
 export interface WalkthroughSourceRequest {
   sessionId: string
   source?: WalkthroughSource
-  nonce: number
 }
 
 interface ChangesWalkthroughProviderProps {
@@ -295,7 +294,7 @@ export function ChangesWalkthroughProvider({
   }, [active, sessionId, sourceKey, walkthrough?.createdAt])
 
   useEffect(() => {
-    if (!sourceRequest || sourceRequest.sessionId !== sessionId) return
+    if (!sourceRequest) return
     const requested = sourceRequest.source
     if (!requested) return
     setSource(requested)
@@ -306,7 +305,7 @@ export function ChangesWalkthroughProvider({
     if (requested.kind === 'pullRequest') {
       setNumberInput(String(requested.number))
     }
-  }, [sourceRequest, sessionId])
+  }, [sourceRequest])
 
   const hunksById = new Map(walkthrough?.hunks.map((hunk) => [hunk.id, hunk]) ?? [])
   const stops = walkthrough?.stops ?? []

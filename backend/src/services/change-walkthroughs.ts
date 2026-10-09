@@ -1297,14 +1297,25 @@ export class ChangeWalkthroughService {
     }
   }
 
+  /**
+   * Resolves the model for one generation, waiting once for OpenCode's lazily-loaded global catalog so an explicit
+   * walkthrough model is registered before the first call. A failed wait is swallowed because generation proceeds and
+   * lets OpenCode surface its own error; the wait is per generation, never per stop.
+   */
   private async resolveWalkthroughModel(session: SessionInfo): Promise<ModelRef> {
     const configured = this.settingsService.getSettings().preferences.walkthroughModel?.trim()
     const parsed = configured ? parseOpenCodeModelRef(configured) : undefined
     const preferred = parsed ?? session.model
     if (preferred) {
+      try {
+        await resolveOpenCodeModel(this.openCodeClient, getOpenCodeGlobalConfigPath(), {
+          preferredModel: formatOpenCodeModelRef(preferred),
+        })
+      } catch {
+        return preferred
+      }
       return preferred
     }
-
     let resolved
     try {
       resolved = await resolveOpenCodeModel(this.openCodeClient, getOpenCodeGlobalConfigPath())
