@@ -4,7 +4,7 @@ import { join } from 'path'
 import { tmpdir } from 'os'
 import { randomBytes } from 'crypto'
 import { spawnSync, execSync } from 'child_process'
-import { prepareMirror, MirrorAbort, mirrorDown, mirrorDownFast, mirrorUp, mirrorUpPatch, mirrorUpFast, checkPushDivergence, checkPullDivergence, describePushDivergence, pickMatchedRepo, type MirrorUpFastPhase } from '../src/mirror'
+import { prepareMirror, MirrorAbort, mirrorDown, mirrorDownFast, mirrorUp, mirrorUpPatch, mirrorUpFast, checkPushDivergence, checkPullDivergence, describePushDivergence, pickMatchedRepo, chooseMoveDestination, assessPushDivergence, type MirrorUpFastPhase } from '../src/mirror'
 import { getBranchName } from '../src/local-repo'
 import { ManagerApi } from '../src/manager-api'
 import { gitRemoteProjectId } from '@opencode-manager/shared/project-id'
@@ -685,6 +685,158 @@ describe('describePushDivergence', () => {
   })
 })
 
+describe('assessPushDivergence', () => {
+  let tmpDir: string
+
+  beforeEach(() => {
+    tmpDir = mkdtempSync(join(tmpdir(), 'assess-divergence-test-'))
+  })
+
+  afterEach(() => {
+    rmSync(tmpDir, { recursive: true, force: true })
+  })
+
+  function initRepo(name: string): string {
+    const repoRoot = join(tmpDir, name)
+    mkdirSync(repoRoot)
+    spawnSync('git', ['init'], { cwd: repoRoot, stdio: 'ignore' })
+    spawnSync('git', ['config', 'user.email', 'test@test.com'], { cwd: repoRoot, stdio: 'ignore' })
+    spawnSync('git', ['config', 'user.name', 'Test'], { cwd: repoRoot, stdio: 'ignore' })
+    return repoRoot
+  }
+
+  function commit(repoRoot: string, file: string, content: string): string {
+    writeFileSync(join(repoRoot, file), content)
+    spawnSync('git', ['add', '.'], { cwd: repoRoot, stdio: 'ignore' })
+    spawnSync('git', ['commit', '-m', `add ${file}`], { cwd: repoRoot, stdio: 'ignore' })
+    return execSync('git rev-parse HEAD', { cwd: repoRoot, encoding: 'utf-8' }).trim()
+  }
+
+  it('reports no divergence from server state alone when heads match', () => {
+    const repoRoot = initRepo('assess-equal')
+    const head = commit(repoRoot, 'a.txt', 'a')
+
+    const result = assessPushDivergence(repoRoot, { head, branch: 'main', dirty: false })
+
+    expect(result.diverged).toBe(false)
+    expect(result.serverBranch).toBe('main')
+  })
+
+  it('surfaces the dirty flag from the server state', () => {
+    const repoRoot = initRepo('assess-dirty')
+    const head = commit(repoRoot, 'a.txt', 'a')
+
+    const result = assessPushDivergence(repoRoot, { head, branch: 'main', dirty: true })
+
+    expect(result.serverDirty).toBe(true)
+    expect(result.diverged).toBe(false)
+  })
+})
+
+describe('chooseMoveDestination', () => {
+  let tmpDir: string
+
+  beforeEach(() => {
+    tmpDir = mkdtempSync(join(tmpdir(), 'move-destination-test-'))
+  })
+
+  afterEach(() => {
+    rmSync(tmpDir, { recursive: true, force: true })
+  })
+
+  function initRepo(name: string): string {
+    const repoRoot = join(tmpDir, name)
+    mkdirSync(repoRoot)
+    spawnSync('git', ['init'], { cwd: repoRoot, stdio: 'ignore' })
+    spawnSync('git', ['config', 'user.email', 'test@test.com'], { cwd: repoRoot, stdio: 'ignore' })
+    spawnSync('git', ['config', 'user.name', 'Test'], { cwd: repoRoot, stdio: 'ignore' })
+    return repoRoot
+  }
+
+  function commit(repoRoot: string, file: string, content: string): string {
+    writeFileSync(join(repoRoot, file), content)
+    spawnSync('git', ['add', '.'], { cwd: repoRoot, stdio: 'ignore' })
+    spawnSync('git', ['commit', '-m', `add ${file}`], { cwd: repoRoot, stdio: 'ignore' })
+    return execSync('git rev-parse HEAD', { cwd: repoRoot, encoding: 'utf-8' }).trim()
+  }
+
+  const checkout = (directory: string, branch: string | null, head: string | null, dirty = false) => ({ directory, branch, head, dirty })
+
+  it('replaces the main checkout in place when it is on the local branch, clean, and not ahead', () => {
+    const repoRoot = initRepo('in-place')
+    const head = commit(repoRoot, 'a.txt', 'a')
+
+    const destination = chooseMoveDestination(repoRoot, 'main', {
+      main: checkout('/repos/repo', 'main', head),
+      branchWorktree: null,
+      newWorktreeBranch: 'main',
+    })
+
+    expect(destination).toEqual({ kind: 'in-place', directory: '/repos/repo', branch: 'main', reasons: [] })
+  })
+
+  it('reuses a safe branch worktree when the main checkout is on another branch', () => {
+    const repoRoot = initRepo('reuse-worktree')
+    const head = commit(repoRoot, 'a.txt', 'a')
+
+    const destination = chooseMoveDestination(repoRoot, 'feature', {
+      main: checkout('/repos/repo', 'main', head),
+      branchWorktree: checkout('/repos/repo-feature', 'feature', head),
+      newWorktreeBranch: 'feature',
+    })
+
+    expect(destination).toEqual({ kind: 'existing-worktree', directory: '/repos/repo-feature', branch: 'feature', reasons: [] })
+  })
+
+  it('creates a suffixed worktree and reports only the branch when the main checkout is on another branch', () => {
+    const repoRoot = initRepo('new-worktree')
+    const head = commit(repoRoot, 'a.txt', 'a')
+
+    const destination = chooseMoveDestination(repoRoot, 'feature', {
+      main: checkout('/repos/repo', 'main', head, true),
+      branchWorktree: null,
+      newWorktreeBranch: 'feature-ocm',
+    })
+
+    expect(destination.kind).toBe('new-worktree')
+    expect(destination.directory).toBeNull()
+    expect(destination.branch).toBe('feature-ocm')
+    expect(destination.reasons).toEqual(['the server checkout is on main'])
+  })
+
+  it('explains why an unusable branch worktree was skipped', () => {
+    const repoRoot = initRepo('unusable-worktree')
+    const head = commit(repoRoot, 'a.txt', 'a')
+
+    const destination = chooseMoveDestination(repoRoot, 'feature', {
+      main: checkout('/repos/repo', 'main', head),
+      branchWorktree: checkout('/repos/repo-feature', 'feature', head, true),
+      newWorktreeBranch: 'feature-ocm',
+    })
+
+    expect(destination.kind).toBe('new-worktree')
+    expect(destination.reasons).toContain('the worktree on feature has uncommitted changes')
+  })
+
+  it('reports a diverged main checkout as commits not in the local branch', () => {
+    const repoRoot = initRepo('diverged-main')
+    commit(repoRoot, 'a.txt', 'a')
+    spawnSync('git', ['checkout', '-b', 'server'], { cwd: repoRoot, stdio: 'ignore' })
+    const serverHead = commit(repoRoot, 'server.txt', 'server-work')
+    spawnSync('git', ['checkout', '-'], { cwd: repoRoot, stdio: 'ignore' })
+    commit(repoRoot, 'local.txt', 'local-work')
+
+    const destination = chooseMoveDestination(repoRoot, 'feature', {
+      main: checkout('/repos/repo', 'feature', serverHead),
+      branchWorktree: null,
+      newWorktreeBranch: 'feature',
+    })
+
+    expect(destination.kind).toBe('new-worktree')
+    expect(destination.reasons).toContain('the server checkout has commits not in your local branch')
+  })
+})
+
 describe('checkPullDivergence', () => {
   let tmpDir: string
 
@@ -1006,6 +1158,37 @@ describe('mirrorUpFast targets the selected repo', () => {
     expect(uploadCalls).toEqual([3])
     expect(patchCalls).toEqual([3])
   })
+
+  it('forwards the worktree directory and target branch to the bundle upload and patch', async () => {
+    const repoRoot = join(tmpDir, 'repo-worktree-target')
+    mkdirSync(repoRoot)
+    spawnSync('git', ['init'], { cwd: repoRoot, stdio: 'ignore' })
+    spawnSync('git', ['config', 'user.email', 'test@test.com'], { cwd: repoRoot, stdio: 'ignore' })
+    spawnSync('git', ['config', 'user.name', 'Test'], { cwd: repoRoot, stdio: 'ignore' })
+    writeFileSync(join(repoRoot, 'a.txt'), 'a\n')
+    spawnSync('git', ['add', '.'], { cwd: repoRoot, stdio: 'ignore' })
+    spawnSync('git', ['commit', '-m', 'init'], { cwd: repoRoot, stdio: 'ignore' })
+    writeFileSync(join(repoRoot, 'a.txt'), 'a-updated\n')
+
+    const api = {
+      mirrorUploadBundle: vi.fn().mockResolvedValue(undefined),
+      mirrorPatch: vi.fn().mockResolvedValue({ repoId: 1, fullPath: '/repos/repo-feature-ocm', branch: 'feature-ocm', head: 'abc', created: false, applied: true }),
+    }
+
+    const plan = {
+      repoRoot,
+      localProjectId: 'proj',
+      matched: [{ repoId: 1, name: 'repo-A', projectId: 'proj', branch: 'main' }],
+    }
+
+    await mirrorUpFast(plan, { api: api as any, force: true, directory: '/repos/repo-feature-ocm', targetBranch: 'feature-ocm' })
+
+    const bundleOpts = api.mirrorUploadBundle.mock.calls[0]![2]
+    expect(bundleOpts.directory).toBe('/repos/repo-feature-ocm')
+    expect(bundleOpts.targetBranch).toBe('feature-ocm')
+    expect(bundleOpts.requireCurrentBranch).toBeUndefined()
+    expect(api.mirrorPatch.mock.calls[0]![1].directory).toBe('/repos/repo-feature-ocm')
+  })
 })
 
 describe('mirrorDownFast preflight', () => {
@@ -1187,84 +1370,72 @@ describe('mirrorDownFast preflight', () => {
   })
 })
 
-describe('ManagerApi target response validation', () => {
+describe('ManagerApi move target and worktree validation', () => {
   afterEach(() => {
     vi.unstubAllGlobals()
   })
 
   const api = new ManagerApi('http://localhost:5003', 'test-token')
 
-  it('parses a valid new-worktree target plan response', async () => {
+  const checkout = (directory: string, branch: string | null, head: string | null, dirty = false) => ({ directory, branch, head, dirty })
+
+  it('parses a valid move target response with a branch worktree', async () => {
     vi.stubGlobal('fetch', vi.fn().mockResolvedValue({
       ok: true,
-      json: () => Promise.resolve({ kind: 'new', repoId: null, fullPath: '/repos/repo-feature', localPath: 'repo-feature', branch: 'feature', currentBranch: 'main' }),
+      json: () => Promise.resolve({
+        main: checkout('/repos/repo', 'main', 'abc'),
+        branchWorktree: checkout('/repos/repo-feature', 'feature', 'def'),
+        newWorktreeBranch: 'feature',
+      }),
     }))
 
-    const plan = await api.mirrorTargetPlan(1, 'feature')
+    const target = await api.mirrorMoveTarget(1, 'feature')
 
-    expect(plan.kind).toBe('new')
-    expect(plan.repoId).toBeNull()
-    expect(plan.branch).toBe('feature')
+    expect(target.main.branch).toBe('main')
+    expect(target.branchWorktree?.directory).toBe('/repos/repo-feature')
+    expect(target.newWorktreeBranch).toBe('feature')
   })
 
-  it('parses a valid existing-worktree target plan response', async () => {
+  it('parses a move target response with no branch worktree and a suffixed branch', async () => {
     vi.stubGlobal('fetch', vi.fn().mockResolvedValue({
       ok: true,
-      json: () => Promise.resolve({ kind: 'existing', repoId: 5, fullPath: '/repos/repo-feature', localPath: 'repo-feature', branch: 'feature', currentBranch: null }),
+      json: () => Promise.resolve({ main: checkout('/repos/repo', 'main', 'abc'), branchWorktree: null, newWorktreeBranch: 'feature-ocm' }),
     }))
 
-    const plan = await api.mirrorTargetPlan(1, 'feature')
+    const target = await api.mirrorMoveTarget(1, 'feature')
 
-    expect(plan.kind).toBe('existing')
-    expect(plan.repoId).toBe(5)
+    expect(target.branchWorktree).toBeNull()
+    expect(target.newWorktreeBranch).toBe('feature-ocm')
   })
 
-  it('rejects a target plan response whose repoId contradicts its kind', async () => {
+  it('rejects a move target response missing the main checkout', async () => {
     vi.stubGlobal('fetch', vi.fn().mockResolvedValue({
       ok: true,
-      json: () => Promise.resolve({ kind: 'new', repoId: 7, fullPath: '/repos/repo-feature', localPath: 'repo-feature', branch: 'feature', currentBranch: 'main' }),
+      json: () => Promise.resolve({ branchWorktree: null, newWorktreeBranch: 'feature' }),
     }))
 
-    await expect(api.mirrorTargetPlan(1, 'feature')).rejects.toThrow()
+    await expect(api.mirrorMoveTarget(1, 'feature')).rejects.toThrow()
   })
 
-  it('rejects a target plan response with an unknown kind', async () => {
+  it('parses a valid worktree create response', async () => {
     vi.stubGlobal('fetch', vi.fn().mockResolvedValue({
       ok: true,
-      json: () => Promise.resolve({ kind: 'bogus', repoId: 1, fullPath: '/x', localPath: 'x', branch: 'main', currentBranch: null }),
+      json: () => Promise.resolve({ directory: '/repos/repo-feature-ocm', branch: 'feature-ocm' }),
     }))
 
-    await expect(api.mirrorTargetPlan(1, 'main')).rejects.toThrow()
+    const created = await api.mirrorCreateWorktree(1, 'feature-ocm')
+
+    expect(created.directory).toBe('/repos/repo-feature-ocm')
+    expect(created.branch).toBe('feature-ocm')
   })
 
-  it('parses a valid ensure target response', async () => {
+  it('rejects a worktree create response missing the branch', async () => {
     vi.stubGlobal('fetch', vi.fn().mockResolvedValue({
       ok: true,
-      json: () => Promise.resolve({ repoId: 9, fullPath: '/repos/repo-feature', localPath: 'repo-feature', branch: 'feature', created: true }),
+      json: () => Promise.resolve({ directory: '/repos/repo-feature-ocm' }),
     }))
 
-    const target = await api.mirrorEnsureTarget(1, 'feature')
-
-    expect(target.repoId).toBe(9)
-    expect(target.created).toBe(true)
-  })
-
-  it('rejects an ensure target response missing fields', async () => {
-    vi.stubGlobal('fetch', vi.fn().mockResolvedValue({
-      ok: true,
-      json: () => Promise.resolve({ repoId: 9, fullPath: '/repos/repo-feature' }),
-    }))
-
-    await expect(api.mirrorEnsureTarget(1, 'feature')).rejects.toThrow()
-  })
-
-  it('rejects an ensure target response with a non-positive repoId', async () => {
-    vi.stubGlobal('fetch', vi.fn().mockResolvedValue({
-      ok: true,
-      json: () => Promise.resolve({ repoId: 0, fullPath: '/x', localPath: 'x', branch: 'main', created: false }),
-    }))
-
-    await expect(api.mirrorEnsureTarget(1, 'main')).rejects.toThrow()
+    await expect(api.mirrorCreateWorktree(1, 'feature-ocm')).rejects.toThrow()
   })
 })
 
@@ -1305,5 +1476,30 @@ describe('ManagerApi mirrorUploadBundle strict branch header', () => {
     const headers = await captureUpload({ branch: 'main' })
     expect(headers['X-OCM-Require-Current-Branch']).toBeUndefined()
     expect(headers['X-OCM-Branch']).toBe('main')
+  })
+
+  it('sends the target branch header and URL-encoded directory query', async () => {
+    const bundlePath = join(tmpDir, 'repo.bundle')
+    writeFileSync(bundlePath, 'bundle bytes')
+    let capturedUrl: string | undefined
+    let capturedHeaders: Record<string, string> | undefined
+    vi.stubGlobal('fetch', vi.fn().mockImplementation(async (url: unknown, init?: RequestInit) => {
+      capturedUrl = String(url)
+      capturedHeaders = init!.headers as Record<string, string>
+      return { ok: true, json: () => Promise.resolve({ repoId: 1, fullPath: '/repos/x', branch: 'feature-ocm', head: 'abc', created: false }) }
+    }))
+
+    await api.mirrorUploadBundle(1, bundlePath, {
+      branch: 'feature',
+      force: true,
+      directory: '/repos/work trees/repo',
+      targetBranch: 'feature-ocm',
+    })
+
+    const parsed = new URL(capturedUrl!)
+    expect(parsed.searchParams.get('force')).toBe('1')
+    expect(parsed.searchParams.get('directory')).toBe('/repos/work trees/repo')
+    expect(capturedHeaders!['X-OCM-Target-Branch']).toBe('feature-ocm')
+    expect(capturedHeaders!['X-OCM-Branch']).toBe('feature')
   })
 })

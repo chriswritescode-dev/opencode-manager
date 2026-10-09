@@ -141,23 +141,24 @@ package export. Configure the package name and OpenCode resolves that TUI
 entrypoint automatically. When attached to a Manager via `ocm`, the plugin shows a
 `<host> · <repo>` indicator in the prompt and home footers; local launches
 show nothing. It registers `/ocm-move`, which keeps the local session and
-copies the active session to the Manager after replacing the Manager repo's
-working tree with your local one (commits, staged, unstaged, and untracked
-files; gitignored files on the Manager are preserved). The Manager's current
-checkout is never switched: if it is on your branch the repo is replaced in
-place; otherwise your branch goes into a sibling worktree (`<repo>-<branch>`,
-registered as its own Manager repo), created on demand if it does not exist
-yet. When multiple Manager repos match, the one already on your branch is
-chosen; otherwise a picker dialog lets you choose. A confirmation dialog gates
-the move before any push, states where the state will land, and lists any
-server-side work (uncommitted changes or commits not present locally) that will
-be discarded there. The session moves by exporting it from the local OpenCode 2
-server and importing it through the Manager proxy, followed by a synthetic
-reminder. While the move runs, a spinner with the current phase and a
-progress bar is shown next to the prompt. On success
-you can optionally warp — exit the local TUI and attach to the moved session
-on the Manager immediately. Use it from inside an OpenCode session after
-`ocm login` and after the repo already exists on the Manager
+copies the active session to the Manager after pushing your local working tree
+(commits, staged, unstaged, and untracked files; gitignored files on the Manager
+are preserved). Server-side work is never discarded. The Manager checkout is
+replaced in place only when it is already on your branch, clean, and has nothing
+your local branch lacks; otherwise the push lands in an OpenCode worktree of the
+same Manager repo — reusing an existing clean OpenCode worktree on your branch
+when one exists, or creating a new OpenCode worktree. When your branch is already
+checked out on the server, the new worktree uses a suffixed `<branch>-ocm`
+branch, and the server checkout is left untouched. A detached HEAD is refused
+before anything is pushed. When multiple Manager repos match, the one already on
+your branch is chosen; otherwise a picker dialog lets you choose. A confirmation
+dialog gates the move before any push and states the destination path and branch.
+The session moves by exporting it from the local OpenCode 2 server and importing
+it through the Manager proxy, followed by a synthetic reminder. While the move
+runs, a spinner with the current phase and a progress bar is shown next to the
+prompt. On success you can optionally warp — exit the local TUI and attach to
+the moved session on the Manager immediately. Use it from inside an OpenCode
+session after `ocm login` and after the repo already exists on the Manager
 (`ocm push --create` if needed). It refuses, before pushing anything, a session
 that is already on the Manager and a subagent session whose parent is not.
 
@@ -169,7 +170,8 @@ that is already attached, the picker offers the other Manager repos (the
 current one is listed as disabled) and **Local opencode**, which stays
 available even when the Manager cannot be reached. Switching exits the TUI and
 reattaches; switching to a repo also remembers it as the last repo. The current
-session stays where it is (use `/ocm-move` to bring a local session along).
+session stays where it is (use `/ocm-move` to push your local state and bring a
+local session along).
 
 The plugin also registers two Manager-backed commands, both of which need an
 attached Manager repo through `ocm`:

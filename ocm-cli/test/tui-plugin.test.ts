@@ -12,15 +12,15 @@ const mocks = vi.hoisted(() => ({
   fetchRepos: vi.fn(),
   toRemoteRepoSummaries: vi.fn((repos: unknown) => repos),
   prepareMirror: vi.fn(),
-  checkPushDivergence: vi.fn(),
-  describePushDivergence: vi.fn(() => []),
+  chooseMoveDestination: vi.fn(),
   mirrorUpFast: vi.fn(),
   pickMatchedRepo: vi.fn(),
   getBranchName: vi.fn(),
   createManagerSessionTransfer: vi.fn(),
   setPendingWarp: vi.fn(),
   runPendingWarp: vi.fn(),
-  mirrorTargetPlan: vi.fn(),
+  mirrorMoveTarget: vi.fn(),
+  mirrorCreateWorktree: vi.fn(),
   warmRepoProxy: vi.fn(),
 }))
 
@@ -38,8 +38,7 @@ vi.mock('../src/manager-repos.js', () => ({
 
 vi.mock('../src/mirror.js', () => ({
   prepareMirror: mocks.prepareMirror,
-  checkPushDivergence: mocks.checkPushDivergence,
-  describePushDivergence: mocks.describePushDivergence,
+  chooseMoveDestination: mocks.chooseMoveDestination,
   mirrorUpFast: mocks.mirrorUpFast,
   pickMatchedRepo: mocks.pickMatchedRepo,
 }))
@@ -63,8 +62,8 @@ vi.mock('../src/manager-api.js', () => ({
       public readonly managerUrl: string,
       public readonly token: string,
     ) {}
-    mirrorTargetPlan = mocks.mirrorTargetPlan
-    mirrorEnsureTarget = vi.fn()
+    mirrorMoveTarget = mocks.mirrorMoveTarget
+    mirrorCreateWorktree = mocks.mirrorCreateWorktree
   },
   ManagerApiError: class ManagerApiError extends Error {
     constructor(
@@ -163,22 +162,17 @@ function configureMove(fake: ReturnType<typeof createFakeContext>) {
   mocks.prepareMirror.mockResolvedValue({ repoRoot: '/Users/x/repo', localProjectId: 'proj_1', matched: [matched] })
   mocks.getBranchName.mockReturnValue('main')
   mocks.pickMatchedRepo.mockReturnValue(matched)
-  mocks.mirrorTargetPlan.mockResolvedValue({
+  mocks.mirrorMoveTarget.mockResolvedValue({
+    main: { directory: '/workspace/repos/repo', branch: 'main', head: null, dirty: false },
+    branchWorktree: null,
+    newWorktreeBranch: 'main',
+  })
+  mocks.chooseMoveDestination.mockReturnValue({
     kind: 'in-place',
-    repoId: 1,
-    fullPath: '/workspace/repos/repo',
-    localPath: '/workspace/repos/repo',
+    directory: '/workspace/repos/repo',
     branch: 'main',
-    currentBranch: null,
+    reasons: [],
   })
-  mocks.checkPushDivergence.mockResolvedValue({
-    serverHead: null,
-    serverBranch: 'main',
-    serverDirty: false,
-    diverged: false,
-    lostCommits: 0,
-  })
-  mocks.describePushDivergence.mockReturnValue([])
   mocks.mirrorUpFast.mockResolvedValue({
     repoId: 1,
     fullPath: '/workspace/repos/repo',
@@ -331,7 +325,7 @@ describe('ocm.session.move command', () => {
   })
 
   function expectNothingPushed(fake: ReturnType<typeof createFakeContext>, importSession: ReturnType<typeof vi.fn>) {
-    expect(mocks.mirrorTargetPlan).not.toHaveBeenCalled()
+    expect(mocks.mirrorMoveTarget).not.toHaveBeenCalled()
     expect(fake.confirm).not.toHaveBeenCalled()
     expect(mocks.mirrorUpFast).not.toHaveBeenCalled()
     expect(fake.exportMock).not.toHaveBeenCalled()
@@ -400,5 +394,101 @@ describe('ocm.session.move command', () => {
     expect(fake.exportMock).not.toHaveBeenCalled()
     expect(importSession).not.toHaveBeenCalled()
     expect(fake.toast).toHaveBeenCalledWith({ variant: 'error', message: tooOld })
+  })
+
+  it('refuses to move from a detached HEAD before pushing anything', async () => {
+    const fake = createFakeContext()
+    configureMove(fake)
+    const { importSession } = stubTransfer()
+    mocks.getBranchName.mockReturnValue(null)
+
+    await invokeMove(fake)
+
+    expect(mocks.mirrorMoveTarget).not.toHaveBeenCalled()
+    expect(mocks.mirrorUpFast).not.toHaveBeenCalled()
+    expect(fake.exportMock).not.toHaveBeenCalled()
+    expect(importSession).not.toHaveBeenCalled()
+    expect(fake.toast).toHaveBeenCalledWith(expect.objectContaining({ variant: 'error', message: expect.stringContaining('detached HEAD') }))
+  })
+
+  it('pushes in place with the strict current-branch guard when the main checkout is safe', async () => {
+    const fake = createFakeContext()
+    configureMove(fake)
+    const { importSession } = stubTransfer()
+    fake.exportMock.mockResolvedValue(makeTransfer())
+
+    await invokeMove(fake)
+
+    expect(mocks.mirrorMoveTarget).toHaveBeenCalledWith(1, 'main')
+    expect(mocks.mirrorCreateWorktree).not.toHaveBeenCalled()
+    expect(mocks.mirrorUpFast).toHaveBeenCalledWith(
+      expect.anything(),
+      expect.objectContaining({ force: true, requireCurrentBranch: true, directory: undefined, targetBranch: undefined }),
+    )
+    expect(importSession).toHaveBeenCalledWith('/workspace/repos/repo', expect.anything())
+  })
+
+  it('pushes into an existing worktree directory with the strict current-branch guard', async () => {
+    const fake = createFakeContext()
+    configureMove(fake)
+    const { importSession } = stubTransfer()
+    fake.exportMock.mockResolvedValue(makeTransfer())
+    mocks.chooseMoveDestination.mockReturnValue({
+      kind: 'existing-worktree',
+      directory: '/workspace/repos/repo-feature',
+      branch: 'feature',
+      reasons: [],
+    })
+    mocks.mirrorUpFast.mockResolvedValue({
+      repoId: 1,
+      fullPath: '/workspace/repos/repo-feature',
+      branch: 'feature',
+      head: null,
+      created: false,
+    })
+
+    await invokeMove(fake)
+
+    expect(mocks.mirrorCreateWorktree).not.toHaveBeenCalled()
+    expect(mocks.mirrorUpFast).toHaveBeenCalledWith(
+      expect.anything(),
+      expect.objectContaining({ force: true, requireCurrentBranch: true, directory: '/workspace/repos/repo-feature' }),
+    )
+    expect(importSession).toHaveBeenCalledWith('/workspace/repos/repo-feature', expect.anything())
+  })
+
+  it('creates a new worktree and pushes with a target branch when no safe checkout exists', async () => {
+    const fake = createFakeContext()
+    configureMove(fake)
+    const { importSession } = stubTransfer()
+    fake.exportMock.mockResolvedValue(makeTransfer())
+    mocks.chooseMoveDestination.mockReturnValue({
+      kind: 'new-worktree',
+      directory: null,
+      branch: 'feature-ocm',
+      reasons: ['the server checkout is on main'],
+    })
+    mocks.mirrorCreateWorktree.mockResolvedValue({ directory: '/workspace/repos/repo-feature-ocm', branch: 'feature-ocm' })
+    mocks.mirrorUpFast.mockResolvedValue({
+      repoId: 1,
+      fullPath: '/workspace/repos/repo-feature-ocm',
+      branch: 'feature-ocm',
+      head: null,
+      created: false,
+    })
+
+    await invokeMove(fake)
+
+    expect(mocks.mirrorCreateWorktree).toHaveBeenCalledWith(1, 'feature-ocm')
+    expect(mocks.mirrorUpFast).toHaveBeenCalledWith(
+      expect.anything(),
+      expect.objectContaining({
+        force: true,
+        requireCurrentBranch: false,
+        directory: '/workspace/repos/repo-feature-ocm',
+        targetBranch: 'feature-ocm',
+      }),
+    )
+    expect(importSession).toHaveBeenCalledWith('/workspace/repos/repo-feature-ocm', expect.anything())
   })
 })

@@ -774,41 +774,6 @@ describe('repo service real git', () => {
   })
 
   describe('mirror helpers', () => {
-    it('plans and ensures a mirror worktree', async () => {
-      const { ensureMirrorTarget, planMirrorTarget } = await import('../../src/services/repo')
-      const baseName = uniqueName('mirror-base')
-      const basePath = path.join(reposPath, baseName)
-      createCommittedRepo(basePath)
-      const base = registerLocalRepo(baseName)
-
-      const inPlace = await planMirrorTarget(db, base, 'main')
-      expect(inPlace.kind).toBe('in-place')
-
-      const planned = await planMirrorTarget(db, base, 'feature/x')
-      expect(planned.kind).toBe('new')
-
-      const created = await ensureMirrorTarget(db, base, 'feature/x')
-      expect(created.created).toBe(true)
-      expect(existsSync(created.repo.fullPath)).toBe(true)
-
-      const existing = await ensureMirrorTarget(db, base, 'feature/x')
-      expect(existing.created).toBe(false)
-      expect(existing.repo.id).toBe(created.repo.id)
-    })
-
-    it('resolves the base directory name from a worktree repo row', async () => {
-      const { ensureMirrorTarget, planMirrorTarget } = await import('../../src/services/repo')
-      const baseName = uniqueName('mirror-name-base')
-      const basePath = path.join(reposPath, baseName)
-      createCommittedRepo(basePath)
-      const base = registerLocalRepo(baseName)
-      const created = await ensureMirrorTarget(db, base, 'feature/x')
-
-      const planned = await planMirrorTarget(db, created.repo, 'other')
-
-      expect(planned).toMatchObject({ kind: 'new', localPath: `${baseName}-other` })
-    })
-
     it('creates a unique mirror target path', async () => {
       const { ensureMirrorTargetPath } = await import('../../src/services/repo')
       const name = uniqueName('Mirror Name')

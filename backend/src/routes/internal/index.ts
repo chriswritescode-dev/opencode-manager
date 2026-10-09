@@ -49,7 +49,7 @@ export function createInternalRoutes(
   repos.route('/', createInternalRepoRoutes(db, settingsService, gitAuthService))
   repos.route('/:id/schedules', createScheduleRoutes(scheduleService))
   repos.route('/', createInternalRepoSyncRoutes(db))
-  repos.route('/', mirrorRoutes(db))
+  repos.route('/', mirrorRoutes(db, openCodeClient, gitAuthService, repoWorkspaces))
   app.route('/repos', repos)
   app.route('/opencode-workspaces', createInternalOpenCodeWorkspacesRoutes(db))
   app.route('/sessions', createInternalSessionRoutes(db, openCodeClient, permissionModes, repoWorkspaces))

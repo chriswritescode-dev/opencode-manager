@@ -1,14 +1,14 @@
 import { createReadStream } from 'fs'
 import { Readable } from 'stream'
 import {
-  MirrorTargetEnsureResponseSchema,
-  MirrorTargetPlanResponseSchema,
+  MirrorMoveTargetResponseSchema,
+  MirrorWorktreeCreateResponseSchema,
   MultiRunSchema,
   SessionGoalSchema,
   type FuseMultiRunRequest,
   type LaunchMultiRunRequest,
-  type MirrorTargetEnsureResponse,
-  type MirrorTargetPlanResponse,
+  type MirrorMoveTargetResponse,
+  type MirrorWorktreeCreateResponse,
   type MultiRun,
   type SessionGoal,
   type StartSessionGoalRequest,
@@ -244,11 +244,16 @@ export class ManagerApi {
     return res.body!
   }
 
-  async mirrorPatch(repoId: number, body: { baseHead: string | null; patch: string; force?: boolean }): Promise<MirrorPatchResult> {
+  async mirrorPatch(
+    repoId: number,
+    body: { baseHead: string | null; patch: string; force?: boolean; directory?: string },
+  ): Promise<MirrorPatchResult> {
+    const payload: Record<string, unknown> = { baseHead: body.baseHead, patch: body.patch, force: body.force === true }
+    if (body.directory) payload.directory = body.directory
     const res = await fetch(`${this.baseUrl}/api/internal/repos/${repoId}/mirror/patch`, {
       method: 'POST',
       headers: { ...this.headers(), 'Content-Type': 'application/json' },
-      body: JSON.stringify({ baseHead: body.baseHead, patch: body.patch, force: body.force === true }),
+      body: JSON.stringify(payload),
     })
 
     if (!res.ok) throw await formatErrorResponse(res, 'mirror patch')
@@ -258,12 +263,23 @@ export class ManagerApi {
   async mirrorUploadBundle(
     repoId: number,
     bundlePath: string,
-    opts: { branch: string | null; force?: boolean; requireCurrentBranch?: boolean; onProgress?: (bytesSent: number) => void },
+    opts: {
+      branch: string | null
+      force?: boolean
+      requireCurrentBranch?: boolean
+      directory?: string
+      targetBranch?: string
+      onProgress?: (bytesSent: number) => void
+    },
   ): Promise<MirrorBundleResult> {
-    const query = opts.force === true ? '?force=1' : ''
+    const params = new URLSearchParams()
+    if (opts.force === true) params.set('force', '1')
+    if (opts.directory) params.set('directory', opts.directory)
+    const query = params.size > 0 ? `?${params.toString()}` : ''
     const headers: Record<string, string> = { ...this.headers(), 'Content-Type': 'application/octet-stream' }
     if (opts.branch) headers['X-OCM-Branch'] = opts.branch
     if (opts.requireCurrentBranch === true) headers['X-OCM-Require-Current-Branch'] = '1'
+    if (opts.targetBranch) headers['X-OCM-Target-Branch'] = opts.targetBranch
     const fileStream = Readable.toWeb(createReadStream(bundlePath)) as unknown as ReadableStream<Uint8Array>
     const body = opts.onProgress ? fileStream.pipeThrough(createByteCounter(opts.onProgress)) : fileStream
     const res = await fetch(`${this.baseUrl}/api/internal/repos/${repoId}/mirror/bundle${query}`, {
@@ -286,24 +302,24 @@ export class ManagerApi {
     return (await res.json()) as MirrorHead
   }
 
-  async mirrorTargetPlan(repoId: number, branch: string): Promise<MirrorTargetPlanResponse> {
+  async mirrorMoveTarget(repoId: number, branch: string): Promise<MirrorMoveTargetResponse> {
     const res = await fetch(`${this.baseUrl}/api/internal/repos/${repoId}/mirror/target?branch=${encodeURIComponent(branch)}`, {
       headers: this.headers(),
     })
 
-    if (!res.ok) throw await formatErrorResponse(res, 'mirror target plan')
-    return MirrorTargetPlanResponseSchema.parse(await res.json())
+    if (!res.ok) throw await formatErrorResponse(res, 'mirror move target')
+    return MirrorMoveTargetResponseSchema.parse(await res.json())
   }
 
-  async mirrorEnsureTarget(repoId: number, branch: string): Promise<MirrorTargetEnsureResponse> {
-    const res = await fetch(`${this.baseUrl}/api/internal/repos/${repoId}/mirror/target`, {
+  async mirrorCreateWorktree(repoId: number, branch: string): Promise<MirrorWorktreeCreateResponse> {
+    const res = await fetch(`${this.baseUrl}/api/internal/repos/${repoId}/mirror/worktree`, {
       method: 'POST',
       headers: { ...this.headers(), 'Content-Type': 'application/json' },
       body: JSON.stringify({ branch }),
     })
 
-    if (!res.ok) throw await formatErrorResponse(res, 'mirror target')
-    return MirrorTargetEnsureResponseSchema.parse(await res.json())
+    if (!res.ok) throw await formatErrorResponse(res, 'mirror create worktree')
+    return MirrorWorktreeCreateResponseSchema.parse(await res.json())
   }
 
   async mirrorContains(repoId: number, sha: string): Promise<{ contained: boolean }> {

@@ -7,6 +7,7 @@ import { join, dirname } from 'path'
 import { tmpdir } from 'os'
 import { getRepoRoot, getDirtyPaths, getHeadSha, getBranchName, getMirrorPatch, runGit, hasCommit, isAncestor, countCommitsAhead } from './local-repo.js'
 import { resolveOpenCodeProjectId } from '@opencode-manager/shared/project-id'
+import type { MirrorCheckoutState, MirrorMoveTargetResponse } from '@opencode-manager/shared/schemas'
 import type { ManagerApi } from './manager-api.js'
 import { ManagerApiError } from './manager-api.js'
 import { delay } from './delay.js'
@@ -86,7 +87,14 @@ export interface PushDivergence {
 
 export async function checkPushDivergence(repoRoot: string, api: ManagerApi, repoId: number): Promise<PushDivergence> {
   const info = await api.mirrorHead(repoId)
-  const { head: serverHead, branch: serverBranch, dirty: serverDirty } = info
+  return assessPushDivergence(repoRoot, info)
+}
+
+export function assessPushDivergence(
+  repoRoot: string,
+  state: { head: string | null; branch: string | null; dirty: boolean },
+): PushDivergence {
+  const { head: serverHead, branch: serverBranch, dirty: serverDirty } = state
   const localHead = getHeadSha(repoRoot)
 
   if (!serverHead || serverHead === localHead) {
@@ -100,6 +108,59 @@ export async function checkPushDivergence(repoRoot: string, api: ManagerApi, rep
   }
   const lostCommits = localHead ? countCommitsAhead(repoRoot, localHead, serverHead) : -1
   return { serverHead, serverBranch, serverDirty, diverged: true, lostCommits }
+}
+
+export type MoveDestinationKind = 'in-place' | 'existing-worktree' | 'new-worktree'
+
+export interface MoveDestination {
+  kind: MoveDestinationKind
+  directory: string | null
+  branch: string
+  reasons: string[]
+}
+
+function isCheckoutSafe(repoRoot: string, state: MirrorCheckoutState): boolean {
+  return !state.dirty && !assessPushDivergence(repoRoot, state).diverged
+}
+
+function checkoutUnusableReasons(
+  repoRoot: string,
+  label: string,
+  state: MirrorCheckoutState,
+  localBranch: string,
+): string[] {
+  if (state.branch !== localBranch) return [`${label} is on ${state.branch ?? 'a detached HEAD'}`]
+  const reasons: string[] = []
+  if (state.dirty) reasons.push(`${label} has uncommitted changes`)
+  if (assessPushDivergence(repoRoot, state).diverged) reasons.push(`${label} has commits not in your local branch`)
+  return reasons
+}
+
+export function chooseMoveDestination(
+  repoRoot: string,
+  localBranch: string,
+  target: MirrorMoveTargetResponse,
+): MoveDestination {
+  if (target.main.branch === localBranch && isCheckoutSafe(repoRoot, target.main)) {
+    return { kind: 'in-place', directory: target.main.directory, branch: localBranch, reasons: [] }
+  }
+
+  if (target.branchWorktree && isCheckoutSafe(repoRoot, target.branchWorktree)) {
+    return { kind: 'existing-worktree', directory: target.branchWorktree.directory, branch: localBranch, reasons: [] }
+  }
+
+  const reasons = checkoutUnusableReasons(repoRoot, 'the server checkout', target.main, localBranch)
+  if (target.branchWorktree) {
+    reasons.push(
+      ...checkoutUnusableReasons(
+        repoRoot,
+        `the worktree on ${target.branchWorktree.branch ?? 'another branch'}`,
+        target.branchWorktree,
+        localBranch,
+      ),
+    )
+  }
+  return { kind: 'new-worktree', directory: null, branch: target.newWorktreeBranch, reasons }
 }
 
 export function describePushDivergence(div: PushDivergence): string[] {
@@ -371,11 +432,11 @@ export async function mirrorDown(
 
 export async function mirrorUpPatch(
   plan: MirrorPlan,
-  opts: Pick<MirrorUpOpts, 'api' | 'force'>,
+  opts: Pick<MirrorUpOpts, 'api' | 'force'> & { directory?: string },
 ): Promise<{ repoId: number; fullPath: string; branch: string | null; head: string | null; created: false; applied: true }> {
   const repoId = plan.matched[0]!.repoId
   const patch = getMirrorPatch(plan.repoRoot)
-  return opts.api.mirrorPatch(repoId, { baseHead: getHeadSha(plan.repoRoot), patch, force: opts.force })
+  return opts.api.mirrorPatch(repoId, { baseHead: getHeadSha(plan.repoRoot), patch, force: opts.force, directory: opts.directory })
 }
 
 function applyPatch(repoRoot: string, patch: string): void {
@@ -532,6 +593,8 @@ export type MirrorUpFastPhase =
 
 type MirrorUpFastOpts = Pick<MirrorUpOpts, 'api' | 'force'> & {
   requireCurrentBranch?: boolean
+  directory?: string
+  targetBranch?: string
   onPhase?: (phase: MirrorUpFastPhase) => void
 }
 
@@ -550,6 +613,8 @@ export async function mirrorUpFast(
       branch: getBranchName(plan.repoRoot),
       force: opts.force,
       requireCurrentBranch: opts.requireCurrentBranch,
+      directory: opts.directory,
+      targetBranch: opts.targetBranch,
       onProgress: onPhase
         ? (bytesSent) => {
             onPhase({ kind: 'uploading', bytesSent, totalBytes: size })

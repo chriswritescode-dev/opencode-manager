@@ -2,10 +2,9 @@ import type { Context } from '@opencode/plugin/tui/context'
 import { readInstallNotice } from './state.js'
 import { resolveManagerAuth } from './manager-auth.js'
 import { fetchRepos, toRemoteRepoSummaries } from './manager-repos.js'
-import { ManagerApi, ManagerApiError } from './manager-api.js'
-import type { MirrorTargetPlanResponse } from '@opencode-manager/shared/schemas'
-import { prepareMirror, checkPushDivergence, describePushDivergence, mirrorUpFast, pickMatchedRepo } from './mirror.js'
-import type { MirrorPlan, RemoteRepoSummary } from './mirror.js'
+import { ManagerApi } from './manager-api.js'
+import { prepareMirror, mirrorUpFast, pickMatchedRepo, chooseMoveDestination } from './mirror.js'
+import type { MirrorPlan, MoveDestination } from './mirror.js'
 import { getBranchName } from './local-repo.js'
 import { transferSession, moveReminderText } from './session-move.js'
 import { createManagerSessionTransfer } from './remote-session.js'
@@ -123,37 +122,22 @@ async function describeMoveBlocker(transfer: ManagerSessionTransfer, sessionID: 
   return null
 }
 
-async function describeRemoteDiscard(repoRoot: string, managerApi: ManagerApi, repoId: number): Promise<string[]> {
-  try {
-    return describePushDivergence(await checkPushDivergence(repoRoot, managerApi, repoId))
-  } catch (error) {
-    if (error instanceof ManagerApiError && error.status === 404) return []
-    throw error
-  }
-}
-
-function describeMoveTarget(repoName: string, target: MirrorTargetPlanResponse): string {
-  switch (target.kind) {
+function moveConfirmMessage(repoName: string, destination: MoveDestination, localBranch: string): string {
+  switch (destination.kind) {
     case 'in-place':
-      return `Replace the repo state of ${repoName} (${target.fullPath}) with your local working tree and move this session there?`
-    case 'existing':
-      return `${repoName} is checked out on ${target.currentBranch ?? 'another branch'}; branch ${target.branch} lives in worktree ${target.localPath} (${target.fullPath}).\n\nReplace that worktree with your local working tree and move this session there?`
-    case 'new':
-      return `${repoName} is checked out on ${target.currentBranch ?? 'another branch'}; it will not be touched.\n\nCreate worktree ${target.localPath} (${target.fullPath}) for branch ${target.branch}, push your local working tree there, and move this session?`
+      return `Replace the repo state of ${repoName} (${destination.directory}) with your local working tree and move this session there?`
+    case 'existing-worktree':
+      return `${repoName} is checked out on another branch; branch ${destination.branch} lives in worktree ${destination.directory}.\n\nReplace that worktree with your local working tree and move this session there?`
+    case 'new-worktree': {
+      const reasons = destination.reasons.length > 0
+        ? `\n\nThe server checkout was not used because:\n${destination.reasons.map((r) => `  - ${r}`).join('\n')}`
+        : ''
+      const suffix = destination.branch !== localBranch
+        ? `\n\n${localBranch} is checked out on the server, so ${destination.branch} is used instead.`
+        : ''
+      return `The ${repoName} server checkout will not be touched.${reasons}\n\nCreate a new OpenCode worktree for branch ${destination.branch}, push your local working tree there, and move this session?${suffix}`
+    }
   }
-}
-
-function moveConfirmMessage(repoName: string, target: MirrorTargetPlanResponse, discardReasons: string[]): string {
-  const base = describeMoveTarget(repoName, target)
-  if (discardReasons.length === 0) return base
-  return `${base}\n\nThis discards server-side work:\n${discardReasons.map((r) => `  - ${r}`).join('\n')}`
-}
-
-async function resolveMoveTarget(managerApi: ManagerApi, matched: RemoteRepoSummary, remoteDirectory: string, localBranch: string | null): Promise<MirrorTargetPlanResponse> {
-  if (!localBranch) {
-    return { kind: 'in-place', repoId: matched.repoId, fullPath: remoteDirectory, localPath: remoteDirectory, branch: '', currentBranch: null }
-  }
-  return managerApi.mirrorTargetPlan(matched.repoId, localBranch)
 }
 
 async function runSessionMove(context: Context, setMoveProgress: MoveProgressSetter): Promise<void> {
@@ -177,11 +161,14 @@ async function runSessionMove(context: Context, setMoveProgress: MoveProgressSet
     }
 
     const localBranch = getBranchName(plan.repoRoot)
+    if (!localBranch) {
+      context.ui.toast.show({ variant: 'error', message: 'Check out a branch before moving; a detached HEAD cannot be moved.' })
+      return
+    }
     const matched = pickMatchedRepo(plan.matched, localBranch)
       ?? await selectDialog(context, 'Move session to Manager repo', plan.matched.map((r) => ({ title: r.name, description: `id=${r.repoId} branch=${r.branch ?? '-'}`, value: r })))
     if (!matched) return
     const matchedRepoId = matched.repoId
-    const remoteRepo = repos.find((r) => r.repoId === matchedRepoId)!
 
     await warmRepoProxy(auth.managerUrl, auth.token, matchedRepoId)
 
@@ -193,25 +180,33 @@ async function runSessionMove(context: Context, setMoveProgress: MoveProgressSet
     }
 
     const managerApi = new ManagerApi(auth.managerUrl, auth.token)
-    const target = await resolveMoveTarget(managerApi, matched, remoteRepo.directory, localBranch)
-    const discardReasons = target.repoId === null ? [] : await describeRemoteDiscard(plan.repoRoot, managerApi, target.repoId)
+    const target = await managerApi.mirrorMoveTarget(matched.repoId, localBranch)
+    const destination = chooseMoveDestination(plan.repoRoot, localBranch, target)
 
     const proceed = await confirmDialog(context, {
       title: 'Move session to Manager',
-      message: moveConfirmMessage(matched.name, target, discardReasons),
+      message: moveConfirmMessage(matched.name, destination, localBranch),
     })
     if (!proceed) return
 
-    let targetRepoId = target.repoId
-    if (targetRepoId === null) {
-      setMoveProgress({ label: `creating worktree ${target.localPath}`, fraction: null })
-      targetRepoId = (await managerApi.mirrorEnsureTarget(matched.repoId, target.branch)).repoId
+    let pushDirectory: string | undefined
+    let pushTargetBranch: string | undefined
+    if (destination.kind === 'new-worktree') {
+      setMoveProgress({ label: `creating worktree ${destination.branch}`, fraction: null })
+      const worktree = await managerApi.mirrorCreateWorktree(matched.repoId, destination.branch)
+      pushDirectory = worktree.directory
+      pushTargetBranch = destination.branch
+    } else if (destination.kind === 'existing-worktree') {
+      pushDirectory = destination.directory ?? undefined
     }
-    const selectedPlan: MirrorPlan = { ...plan, matched: [{ ...matched, repoId: targetRepoId }] }
+
+    const selectedPlan: MirrorPlan = { ...plan, matched: [matched] }
     const pushed = await mirrorUpFast(selectedPlan, {
       api: managerApi,
       force: true,
-      requireCurrentBranch: true,
+      requireCurrentBranch: destination.kind !== 'new-worktree',
+      directory: pushDirectory,
+      targetBranch: pushTargetBranch,
       onPhase: (phase) => setMoveProgress(pushPhaseProgress(phase)),
     })
     const remoteDirectory = pushed.fullPath
@@ -232,10 +227,10 @@ async function runSessionMove(context: Context, setMoveProgress: MoveProgressSet
         setMoveProgress(null)
         const warp = await confirmDialog(context, { title: 'Attach to moved session?', message: 'Exit this TUI and attach to the moved session on the Manager now?' })
         if (warp) {
-          await warmRepoProxy(auth.managerUrl, auth.token, pushed.repoId)
+          await warmRepoProxy(auth.managerUrl, auth.token, matched.repoId)
           setPendingWarp({
             kind: 'attach',
-            target: { managerUrl: auth.managerUrl, token: auth.token, repoId: pushed.repoId, sessionID: result.sessionID, repoName: matched.name },
+            target: { managerUrl: auth.managerUrl, token: auth.token, repoId: matched.repoId, sessionID: result.sessionID, repoName: matched.name },
           })
           context.keymap.dispatch('app.exit')
           return
