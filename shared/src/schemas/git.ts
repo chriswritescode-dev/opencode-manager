@@ -1,12 +1,22 @@
 import { z } from 'zod'
 import { getBranchNameError } from '../utils/repo'
 
-const branchNameSchema = z.string().trim().superRefine((value, ctx) => {
+function addBranchNameIssue(value: string, ctx: z.RefinementCtx) {
   const error = getBranchNameError(value)
   if (error) {
     ctx.addIssue({ code: 'custom', message: error })
   }
-})
+}
+
+const branchNameSchema = z.string().trim().superRefine(addBranchNameIssue)
+
+export const gitRefSchema = z
+  .string()
+  .trim()
+  .min(1)
+  .max(200)
+  .regex(/^\S+$/)
+  .superRefine(addBranchNameIssue)
 
 export const RenameBranchRequestSchema = z.object({
   from: branchNameSchema,

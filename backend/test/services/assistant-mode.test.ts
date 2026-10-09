@@ -2,6 +2,7 @@ import { describe, expect, it, beforeEach, afterEach } from 'bun:test'
 import path from 'path'
 import { access, readFile, writeFile } from 'fs/promises'
 import { Hono } from 'hono'
+import { AssistantSettingsPatchSchema } from '@opencode-manager/shared/schemas'
 import { ensureAssistantMode, getAssistantModeStatus, buildSchedulesSkill, buildReposSkill, buildSettingsSkill, buildSessionsSkill, buildAssistantDefaultAgentMd, buildAssistantOpenCodeConfig, buildAssistantRepo, installAssistantWorkspace } from '../../src/services/assistant-mode'
 import { createTempAssistantWorkspace, createTestDb, mockRepo } from '../helpers/assistant-workspace'
 import { ScheduleService } from '../../src/services/schedules'
@@ -161,6 +162,15 @@ describe('buildSettingsSkill', () => {
     expect(skill).toContain('stt.apiKey')
     expect(skill).toContain('stt.endpoint')
     expect(skill).toContain('DO NOT attempt to set')
+  })
+
+  it('lists every AssistantSettingsPatchSchema key in the allowed keys section', () => {
+    const skill = buildSettingsSkill()
+    const allowedSection = skill.split('**Allowed Keys:**')[1]?.split('**DO NOT attempt to set:**')[0]
+    if (allowedSection === undefined) throw new Error('Allowed Keys section is missing')
+    for (const key of Object.keys(AssistantSettingsPatchSchema.shape)) {
+      expect(allowedSection).toContain(`\`${key}\``)
+    }
   })
 })
 

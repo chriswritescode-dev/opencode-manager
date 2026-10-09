@@ -353,4 +353,19 @@ describe('internal/settings routes', () => {
     expect(body.preferences.theme).toBe('light')
     expect(body.preferences.mode).toBe('plan')
   })
+
+  it('PATCH /api/internal/settings with { walkthroughModel } persists it', async () => {
+    const res = await app.request('/api/internal/settings', {
+      method: 'PATCH',
+      body: JSON.stringify({ walkthroughModel: 'openai/gpt-5-mini' }),
+      headers: {
+        'content-type': 'application/json',
+        authorization: `Bearer ${token}`,
+      },
+    })
+    expect(res.status).toBe(200)
+    const body = await res.json() as { preferences: { walkthroughModel?: string } }
+    expect(body.preferences.walkthroughModel).toBe('openai/gpt-5-mini')
+    expect(settingsService.getSettings().preferences.walkthroughModel).toBe('openai/gpt-5-mini')
+  })
 })

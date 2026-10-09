@@ -2,25 +2,32 @@ import { afterEach, beforeEach, describe, expect, it } from 'vitest'
 import { Database } from 'bun:sqlite'
 import type { ChangeWalkthrough } from '@opencode-manager/shared/schemas'
 import {
-  deleteChangeWalkthrough,
+  deleteChangeWalkthroughs,
   ensureChangeWalkthroughTable,
   getChangeWalkthrough,
   saveChangeWalkthrough,
 } from '../../src/db/change-walkthroughs'
 import { migrate } from '../../src/db/migration-runner'
 import { allMigrations } from '../../src/db/migrations'
+import migration202610081200 from '../../src/db/migrations/202610081200-change-walkthrough-sources'
 
 const SESSION_ID = 'ses_walkthrough'
+const SESSION_SOURCE = 'session'
+const STAGED_SOURCE = 'staged'
 
 function walkthrough(overrides: Partial<ChangeWalkthrough> = {}): ChangeWalkthrough {
   return {
     sessionId: SESSION_ID,
+    source: { kind: 'session' },
     diffHash: 'hash-1',
+    model: null,
     summary: 'A short summary',
-    stops: [{ title: 'First stop', explanation: 'Why it matters', hunkIds: ['f0h0'] }],
+    stops: [
+      { id: 's_1', title: 'First stop', explanation: 'Why it matters', hunkIds: ['h_1'], status: 'ready', explanationKey: null },
+    ],
     hunks: [
       {
-        id: 'f0h0',
+        id: 'h_1',
         file: 'src/app.ts',
         status: 'modified',
         header: '@@ -1,2 +1,2 @@',
@@ -40,6 +47,12 @@ function walkthroughTableExists(db: Database): boolean {
   )
 }
 
+function tableColumns(db: Database): string[] {
+  return (db.prepare('PRAGMA table_info(change_walkthroughs)').all() as Array<{ name: string }>).map(
+    (column) => column.name,
+  )
+}
+
 describe('change walkthroughs', () => {
   let db: Database
 
@@ -52,27 +65,82 @@ describe('change walkthroughs', () => {
     db.close()
   })
 
-  it('creates the change_walkthroughs table in migration 29', () => {
+  it('creates the change_walkthroughs table with per-source storage', () => {
     expect(walkthroughTableExists(db)).toBe(true)
+    expect(tableColumns(db)).toContain('source_key')
   })
 
-  it('creates the table idempotently', () => {
+  it('upgrades an existing single-source table and stays idempotent', () => {
+    const legacy = new Database(':memory:')
+    try {
+      ensureChangeWalkthroughTable(legacy)
+
+      migrate(legacy, allMigrations)
+      expect(tableColumns(legacy)).toContain('source_key')
+
+      expect(() => migrate(legacy, allMigrations)).not.toThrow()
+      expect(() => migration202610081200.up(legacy)).not.toThrow()
+      expect(tableColumns(legacy)).toContain('source_key')
+    } finally {
+      legacy.close()
+    }
+  })
+
+  it('creates the old table idempotently', () => {
     expect(() => ensureChangeWalkthroughTable(db)).not.toThrow()
     expect(walkthroughTableExists(db)).toBe(true)
   })
 
   it('returns null for a session without a stored walkthrough', () => {
-    expect(getChangeWalkthrough(db, 'ses_missing')).toBeNull()
+    expect(getChangeWalkthrough(db, 'ses_missing', SESSION_SOURCE)).toBeNull()
   })
 
   it('round-trips a stored walkthrough', () => {
     const stored = walkthrough()
     saveChangeWalkthrough(db, stored)
 
-    expect(getChangeWalkthrough(db, SESSION_ID)).toEqual(stored)
+    expect(getChangeWalkthrough(db, SESSION_ID, SESSION_SOURCE)).toEqual(stored)
   })
 
-  it('keeps a single row holding the latest payload on repeated saves', () => {
+  it('reads a walkthrough whose mechanical hunks predate hunk counts', () => {
+    const legacy = walkthrough({
+      stops: [
+        {
+          id: 's_mech',
+          title: 'Mechanical changes',
+          explanation: 'Lock files',
+          hunkIds: ['h_lock'],
+          status: 'ready',
+          explanationKey: null,
+        },
+      ],
+      hunks: [
+        {
+          id: 'h_lock',
+          file: 'pnpm-lock.yaml',
+          status: 'modified',
+          header: '@@ -1 +1 @@',
+          text: '@@ -1 +1 @@\n-old-lock\n+new-lock',
+          truncated: false,
+        },
+      ],
+    })
+    saveChangeWalkthrough(db, legacy)
+
+    const stored = getChangeWalkthrough(db, SESSION_ID, SESSION_SOURCE)
+    expect(stored).toEqual(legacy)
+    expect(stored!.hunks[0]!.additions).toBeUndefined()
+  })
+
+  it('stores walkthroughs for two sources of one session side by side', () => {
+    saveChangeWalkthrough(db, walkthrough({ diffHash: 'hash-session' }))
+    saveChangeWalkthrough(db, walkthrough({ source: { kind: 'staged' }, diffHash: 'hash-staged', summary: 'Staged' }))
+
+    expect(getChangeWalkthrough(db, SESSION_ID, SESSION_SOURCE)?.diffHash).toBe('hash-session')
+    expect(getChangeWalkthrough(db, SESSION_ID, STAGED_SOURCE)?.diffHash).toBe('hash-staged')
+  })
+
+  it('keeps a single row holding the latest payload on repeated saves of one source', () => {
     saveChangeWalkthrough(db, walkthrough())
     saveChangeWalkthrough(db, walkthrough({ diffHash: 'hash-2', summary: 'Updated', createdAt: 2_000 }))
 
@@ -81,43 +149,39 @@ describe('change walkthroughs', () => {
       .get(SESSION_ID) as { count: number }
     expect(count.count).toBe(1)
 
-    const stored = getChangeWalkthrough(db, SESSION_ID)
+    const stored = getChangeWalkthrough(db, SESSION_ID, SESSION_SOURCE)
     expect(stored).toMatchObject({ diffHash: 'hash-2', summary: 'Updated', createdAt: 2_000 })
   })
 
-  it('deletes only the walkthrough of the given session', () => {
+  it('deletes every source of the given session', () => {
     saveChangeWalkthrough(db, walkthrough())
+    saveChangeWalkthrough(db, walkthrough({ source: { kind: 'staged' } }))
     saveChangeWalkthrough(db, walkthrough({ sessionId: 'ses_other' }))
 
-    deleteChangeWalkthrough(db, SESSION_ID)
+    deleteChangeWalkthroughs(db, SESSION_ID)
 
-    expect(getChangeWalkthrough(db, SESSION_ID)).toBeNull()
-    expect(getChangeWalkthrough(db, 'ses_other')).not.toBeNull()
+    expect(getChangeWalkthrough(db, SESSION_ID, SESSION_SOURCE)).toBeNull()
+    expect(getChangeWalkthrough(db, SESSION_ID, STAGED_SOURCE)).toBeNull()
+    expect(getChangeWalkthrough(db, 'ses_other', SESSION_SOURCE)).not.toBeNull()
   })
 
   it('ignores deleting a session without a stored walkthrough', () => {
-    expect(() => deleteChangeWalkthrough(db, 'ses_missing')).not.toThrow()
+    expect(() => deleteChangeWalkthroughs(db, 'ses_missing')).not.toThrow()
   })
 
   it('treats a corrupt payload as missing', () => {
-    db.prepare('INSERT INTO change_walkthroughs(session_id, diff_hash, payload, created_at) VALUES(?,?,?,?)').run(
-      SESSION_ID,
-      'hash-1',
-      '{not json',
-      1_000,
-    )
+    db.prepare(
+      'INSERT INTO change_walkthroughs(session_id, source_key, diff_hash, payload, created_at) VALUES(?,?,?,?,?)',
+    ).run(SESSION_ID, SESSION_SOURCE, 'hash-1', '{not json', 1_000)
 
-    expect(getChangeWalkthrough(db, SESSION_ID)).toBeNull()
+    expect(getChangeWalkthrough(db, SESSION_ID, SESSION_SOURCE)).toBeNull()
   })
 
   it('treats a payload that fails schema validation as missing', () => {
-    db.prepare('INSERT INTO change_walkthroughs(session_id, diff_hash, payload, created_at) VALUES(?,?,?,?)').run(
-      SESSION_ID,
-      'hash-1',
-      JSON.stringify({ sessionId: SESSION_ID }),
-      1_000,
-    )
+    db.prepare(
+      'INSERT INTO change_walkthroughs(session_id, source_key, diff_hash, payload, created_at) VALUES(?,?,?,?,?)',
+    ).run(SESSION_ID, SESSION_SOURCE, 'hash-1', JSON.stringify({ sessionId: SESSION_ID }), 1_000)
 
-    expect(getChangeWalkthrough(db, SESSION_ID)).toBeNull()
+    expect(getChangeWalkthrough(db, SESSION_ID, SESSION_SOURCE)).toBeNull()
   })
 })

@@ -51,6 +51,7 @@ export const AssistantSettingsPatchSchema = UserPreferencesSchema.pick({
   colorTheme: true,
   mode: true,
   defaultModel: true,
+  walkthroughModel: true,
   defaultAgent: true,
   autoScroll: true,
   expandDiffs: true,

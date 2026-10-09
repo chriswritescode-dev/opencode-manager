@@ -244,7 +244,8 @@ const terminalService = new TerminalService(
   new CredentialProvider(db),
   () => getOpenCodeUpstreamBaseUrl(opencodeServerManager.getEffectiveServerHost()),
 )
-const projectConfigService = new ProjectConfigService(db, createGitService(gitAuthService), gitAuthService)
+const gitService = createGitService(gitAuthService)
+const projectConfigService = new ProjectConfigService(db, gitService, gitAuthService)
 const scheduleWorktreeManager = new ScheduleWorktreeManager(gitAuthService, db)
 const scheduleService = new ScheduleService(db, openCodeClient, scheduleWorktreeManager)
 scheduleService.setWorktreeRemovedHandler(async (directory) => {
@@ -272,7 +273,7 @@ const sessionGoalService = new SessionGoalService(db, openCodeClient, sessionSet
 sessionGoalService.loadOpenGoals()
 
 const multiRunService = new MultiRunService(db, openCodeClient, repoWorkspaces, sessionPermissionModeService)
-const changeWalkthroughService = new ChangeWalkthroughService(db, openCodeClient)
+const changeWalkthroughService = new ChangeWalkthroughService(db, openCodeClient, sessionSettingsService, gitAuthService, gitService)
 
 sseAggregator.onEvent((directory, event) => {
   sessionPermissionModeService.handleEvent(directory, event).catch((err) => {

@@ -12,15 +12,24 @@ import {
   DropdownMenuTrigger,
 } from '@/components/ui/dropdown-menu'
 import { Badge } from '@/components/ui/badge'
+import { Input } from '@/components/ui/input'
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
 import { DiffLines } from '@/components/file-browser/DiffLines'
 import { ScheduleRunMarkdown } from '@/components/schedules/ScheduleRunMarkdown'
 import { useChangeWalkthrough, useGenerateChangeWalkthrough } from '@/hooks/useChangeWalkthrough'
 import { GIT_STATUS_COLORS, GIT_STATUS_LABELS } from '@/lib/git-status-styles'
-import { WalkthroughOmittedFileSchema } from '@opencode-manager/shared/schemas'
+import {
+  DEFAULT_WALKTHROUGH_SOURCE,
+  describeWalkthroughSource,
+  toWalkthroughSource,
+  walkthroughSourceKey,
+  WalkthroughOmittedFileSchema,
+} from '@opencode-manager/shared/schemas'
 import type {
   ChangeWalkthrough,
   WalkthroughHunk,
   WalkthroughOmittedFile,
+  WalkthroughSource,
   WalkthroughStop,
 } from '@opencode-manager/shared/schemas'
 
@@ -62,6 +71,8 @@ function walkthroughErrorMessage(error: unknown): string {
 const OMITTED_REASON_LABELS: Record<WalkthroughOmittedFile['reason'], string> = {
   binary: 'binary file',
   budget: 'over the diff budget',
+  renamed: 'renamed',
+  modeChange: 'mode change',
 }
 
 function OmittedFiles({ files }: { files: WalkthroughOmittedFile[] }) {
@@ -74,6 +85,36 @@ function OmittedFiles({ files }: { files: WalkthroughOmittedFile[] }) {
         </p>
       ))}
     </div>
+  )
+}
+
+function isMechanicalHunk(hunk: WalkthroughHunk): boolean {
+  return hunk.additions !== undefined || hunk.deletions !== undefined
+}
+
+function MechanicalHunks({ hunks }: { hunks: WalkthroughHunk[] }) {
+  return (
+    <ul aria-label="Mechanical file summaries" className="space-y-3">
+      {hunks.map((hunk) => (
+        <li key={hunk.id} className="overflow-hidden rounded-md border border-border">
+          <div className="flex items-center gap-2 px-3 py-1.5">
+            <span className="min-w-0 flex-1 truncate text-xs font-medium text-foreground" title={hunk.file}>
+              {hunk.file}
+            </span>
+            <span className={`text-xs ${GIT_STATUS_COLORS[hunk.status]}`}>
+              {GIT_STATUS_LABELS[hunk.status]}
+            </span>
+            <span className="text-xs text-diff-add">+{hunk.additions ?? 0}</span>
+            <span className="text-xs text-diff-delete">-{hunk.deletions ?? 0}</span>
+          </div>
+          {hunk.text.length > 0 ? (
+            <div className="overflow-x-auto border-t border-border">
+              <DiffLines diff={hunk.text} />
+            </div>
+          ) : null}
+        </li>
+      ))}
+    </ul>
   )
 }
 
@@ -92,6 +133,16 @@ interface ChangesWalkthroughContextValue {
   selectedHunks: WalkthroughHunk[]
   selectStop: (index: number | null) => void
   scrollRef: RefObject<HTMLDivElement | null>
+  failedStopCount: number
+  source: WalkthroughSource
+  setSource: (source: WalkthroughSource) => void
+  sourceKind: WalkthroughSource['kind']
+  setSourceKind: (kind: WalkthroughSource['kind']) => void
+  baseInput: string
+  setBaseInput: (base: string) => void
+  numberInput: string
+  setNumberInput: (number: string) => void
+  sourcePending: boolean
 }
 
 const ChangesWalkthroughContext = createContext<ChangesWalkthroughContextValue | null>(null)
@@ -102,6 +153,89 @@ function useChangesWalkthrough(): ChangesWalkthroughContextValue {
   return value
 }
 
+const WALKTHROUGH_SOURCE_OPTIONS: { value: WalkthroughSource['kind']; label: string }[] = [
+  { value: 'session', label: 'This session' },
+  { value: 'uncommitted', label: 'Uncommitted' },
+  { value: 'staged', label: 'Staged' },
+  { value: 'unstaged', label: 'Unstaged' },
+  { value: 'branch', label: 'Branch vs base' },
+  { value: 'pullRequest', label: 'Pull request' },
+]
+
+/** Chooses which set of changes the walkthrough covers from the surrounding chrome; git sources commit as soon as they are valid. */
+export const ChangesWalkthroughSourcePicker = memo(function ChangesWalkthroughSourcePicker() {
+  const { sourceKind, setSourceKind, baseInput, setSource } = useChangesWalkthrough()
+
+  const handleKindChange = useCallback(
+    (next: WalkthroughSource['kind']) => {
+      setSourceKind(next)
+      if (next === 'pullRequest') return
+      const nextSource = toWalkthroughSource({ kind: next, base: baseInput })
+      if (nextSource) setSource(nextSource)
+    },
+    [baseInput, setSourceKind, setSource],
+  )
+
+  return (
+    <Select value={sourceKind} onValueChange={(value) => handleKindChange(value as WalkthroughSource['kind'])}>
+      <SelectTrigger
+        aria-label="Changes to walk through"
+        className="h-7 w-auto gap-1 px-2 text-xs md:text-xs"
+      >
+        <SelectValue />
+      </SelectTrigger>
+      <SelectContent>
+        {WALKTHROUGH_SOURCE_OPTIONS.map((option) => (
+          <SelectItem key={option.value} value={option.value}>
+            {option.label}
+          </SelectItem>
+        ))}
+      </SelectContent>
+    </Select>
+  )
+})
+
+/** Collects the base branch or pull request number for git-backed walkthrough sources. */
+const WalkthroughSourceInputs = memo(function WalkthroughSourceInputs() {
+  const { sourceKind, baseInput, setBaseInput, numberInput, setNumberInput, setSource } =
+    useChangesWalkthrough()
+
+  const commitInputs = useCallback(() => {
+    const next = toWalkthroughSource({ kind: sourceKind, base: baseInput, number: Number(numberInput) })
+    if (next) setSource(next)
+  }, [sourceKind, baseInput, numberInput, setSource])
+
+  if (sourceKind !== 'branch' && sourceKind !== 'pullRequest') return null
+
+  return (
+    <div className="space-y-2">
+      <Input
+        aria-label="Base branch"
+        placeholder="Default branch"
+        value={baseInput}
+        onChange={(event) => setBaseInput(event.target.value)}
+        onBlur={commitInputs}
+        onKeyDown={(event) => {
+          if (event.key === 'Enter') commitInputs()
+        }}
+      />
+
+      {sourceKind === 'pullRequest' ? (
+        <Input
+          type="number"
+          aria-label="Pull request number"
+          value={numberInput}
+          onChange={(event) => setNumberInput(event.target.value)}
+          onBlur={commitInputs}
+          onKeyDown={(event) => {
+            if (event.key === 'Enter') commitInputs()
+          }}
+        />
+      ) : null}
+    </div>
+  )
+})
+
 interface ChangesWalkthroughProviderProps {
   sessionId: string
   active: boolean
@@ -110,8 +244,13 @@ interface ChangesWalkthroughProviderProps {
 
 /** Loads a session's change walkthrough and shares its state with the surrounding chrome and body. */
 export function ChangesWalkthroughProvider({ sessionId, active, children }: ChangesWalkthroughProviderProps) {
-  const stateQuery = useChangeWalkthrough(sessionId, active)
-  const generate = useGenerateChangeWalkthrough(sessionId)
+  const [source, setSource] = useState<WalkthroughSource>(DEFAULT_WALKTHROUGH_SOURCE)
+  const [sourceKind, setSourceKind] = useState<WalkthroughSource['kind']>(DEFAULT_WALKTHROUGH_SOURCE.kind)
+  const [baseInput, setBaseInput] = useState('')
+  const [numberInput, setNumberInput] = useState('')
+  const sourceKey = walkthroughSourceKey(source)
+  const stateQuery = useChangeWalkthrough(sessionId, active, source)
+  const generate = useGenerateChangeWalkthrough(sessionId, source)
   const resetGenerate = generate.reset
   const [stopIndex, setStopIndex] = useState<number | null>(null)
   const scrollRef = useRef<HTMLDivElement>(null)
@@ -123,14 +262,19 @@ export function ChangesWalkthroughProvider({ sessionId, active, children }: Chan
   const error = generate.error ?? stateQuery.error ?? (generating ? null : state?.error ?? null)
   const contextLimitFiles = isContextLimitError(error) ? omittedFilesFromError(error) : []
 
+  const selectedSource = toWalkthroughSource({ kind: sourceKind, base: baseInput, number: Number(numberInput) })
+  const sourcePending =
+    sourceKind === 'pullRequest' &&
+    (selectedSource === null || walkthroughSourceKey(selectedSource) !== sourceKey)
+
   useEffect(() => {
     resetGenerate()
-  }, [active, sessionId, resetGenerate])
+  }, [active, sessionId, sourceKey, resetGenerate])
 
   useEffect(() => {
     setStopIndex(null)
     scrollRef.current?.scrollTo?.({ top: 0 })
-  }, [active, sessionId, walkthrough?.createdAt])
+  }, [active, sessionId, sourceKey, walkthrough?.createdAt])
 
   const hunksById = new Map(walkthrough?.hunks.map((hunk) => [hunk.id, hunk]) ?? [])
   const stops = walkthrough?.stops ?? []
@@ -139,6 +283,10 @@ export function ChangesWalkthroughProvider({ sessionId, active, children }: Chan
   const selectedHunks = (selectedStop?.hunkIds ?? [])
     .map((id) => hunksById.get(id))
     .filter((hunk): hunk is WalkthroughHunk => hunk !== undefined)
+
+  const failedStopCount = stops.filter(
+    (stop) => stop.status === 'failed' || (stop.status === 'pending' && !generating),
+  ).length
 
   const selectStop = useCallback((index: number | null) => {
     setStopIndex(index)
@@ -160,6 +308,16 @@ export function ChangesWalkthroughProvider({ sessionId, active, children }: Chan
     selectedHunks,
     selectStop,
     scrollRef,
+    failedStopCount,
+    source,
+    setSource,
+    sourceKind,
+    setSourceKind,
+    baseInput,
+    setBaseInput,
+    numberInput,
+    setNumberInput,
+    sourcePending,
   }
 
   return <ChangesWalkthroughContext.Provider value={value}>{children}</ChangesWalkthroughContext.Provider>
@@ -219,7 +377,7 @@ export const ChangesWalkthroughNav = memo(function ChangesWalkthroughNav() {
 
 /** Regenerates the current walkthrough from the chrome; renders nothing until one exists. */
 export const ChangesWalkthroughRegenerate = memo(function ChangesWalkthroughRegenerate() {
-  const { walkthrough, generating, regenerate } = useChangesWalkthrough()
+  const { walkthrough, generating, regenerate, sourcePending } = useChangesWalkthrough()
 
   if (!walkthrough) return null
 
@@ -229,7 +387,7 @@ export const ChangesWalkthroughRegenerate = memo(function ChangesWalkthroughRege
       size="icon-sm"
       aria-label="Regenerate walkthrough"
       onClick={regenerate}
-      disabled={generating}
+      disabled={generating || sourcePending}
     >
       <RefreshCw className={generating ? 'animate-spin' : undefined} />
     </Button>
@@ -246,16 +404,33 @@ export const ChangesWalkthroughView = memo(function ChangesWalkthroughView() {
     error,
     contextLimitFiles,
     generate,
-    regenerate,
     stops,
     selectedStop,
     selectedHunks,
     selectStop,
     scrollRef,
+    failedStopCount,
+    source,
+    sourcePending,
   } = useChangesWalkthrough()
+
+  const readyStopCount = stops.filter((stop) => stop.status === 'ready').length
+  const mechanicalHunks = selectedHunks.filter(isMechanicalHunk)
+  const diffHunks = selectedHunks.filter((hunk) => !isMechanicalHunk(hunk))
+
+  if (sourcePending) {
+    return (
+      <div className="min-h-0 flex-1 space-y-4 overflow-y-auto p-4">
+        <WalkthroughSourceInputs />
+        <p className="text-sm text-muted-foreground">Enter a pull request number</p>
+      </div>
+    )
+  }
 
   return (
     <div ref={scrollRef} className="min-h-0 flex-1 space-y-4 overflow-y-auto p-4">
+      <WalkthroughSourceInputs />
+
       {error ? (
         <div className="space-y-2">
           <p className="text-sm text-destructive">{walkthroughErrorMessage(error)}</p>
@@ -266,7 +441,11 @@ export const ChangesWalkthroughView = memo(function ChangesWalkthroughView() {
       {generating ? (
         <div className="flex items-center gap-2 rounded-md border border-border bg-muted/20 px-3 py-2 text-sm text-muted-foreground">
           <Loader2 className="h-4 w-4 shrink-0 animate-spin" />
-          <span>Generating walkthrough… this can take a minute or two.</span>
+          <span>
+            {walkthrough && stops.length > 0
+              ? `Generating walkthrough… ${readyStopCount} of ${stops.length} stops explained`
+              : 'Generating walkthrough… this can take a minute or two.'}
+          </span>
         </div>
       ) : null}
 
@@ -278,7 +457,7 @@ export const ChangesWalkthroughView = memo(function ChangesWalkthroughView() {
         generating ? null : (
           <div className="space-y-4">
             <p className="text-sm text-muted-foreground">
-              Generate a step-by-step walkthrough of the changes in this session.
+              Generate a step-by-step walkthrough of {describeWalkthroughSource(source)}.
             </p>
             <Button onClick={generate}>Generate walkthrough</Button>
           </div>
@@ -290,9 +469,18 @@ export const ChangesWalkthroughView = memo(function ChangesWalkthroughView() {
               <p className="text-sm text-warning">
                 Changes have been updated since this walkthrough was generated
               </p>
-              <Button variant="outline" size="sm" onClick={regenerate}>
+              <Button variant="outline" size="sm" onClick={generate}>
                 <RefreshCw className="mr-2 h-3.5 w-3.5" />
-                Regenerate
+                Update walkthrough
+              </Button>
+            </div>
+          ) : null}
+
+          {failedStopCount > 0 && !generating ? (
+            <div className="flex flex-wrap items-center justify-between gap-2 rounded-md border border-border bg-muted/20 px-3 py-2">
+              <p className="text-sm text-muted-foreground">Some stops could not be explained</p>
+              <Button variant="outline" size="sm" onClick={generate}>
+                Retry unexplained stops
               </Button>
             </div>
           ) : null}
@@ -300,8 +488,15 @@ export const ChangesWalkthroughView = memo(function ChangesWalkthroughView() {
           {selectedStop ? (
             <div className="space-y-3">
               <h3 className="text-sm font-semibold text-foreground">{selectedStop.title}</h3>
-              <ScheduleRunMarkdown content={selectedStop.explanation} />
-              {selectedHunks.map((hunk) => (
+              {selectedStop.status === 'ready' ? (
+                <ScheduleRunMarkdown content={selectedStop.explanation} />
+              ) : (
+                <p className="text-sm text-muted-foreground">
+                  {generating ? 'Explaining this stop…' : 'This stop could not be explained.'}
+                </p>
+              )}
+              {mechanicalHunks.length > 0 ? <MechanicalHunks hunks={mechanicalHunks} /> : null}
+              {diffHunks.map((hunk) => (
                 <div key={hunk.id} className="overflow-hidden rounded-md border border-border">
                   <div className="flex items-center gap-2 border-b border-border bg-muted/30 px-3 py-1.5">
                     <span className="min-w-0 flex-1 truncate text-xs font-medium text-foreground" title={hunk.file}>
@@ -325,13 +520,22 @@ export const ChangesWalkthroughView = memo(function ChangesWalkthroughView() {
               {stops.length > 0 ? (
                 <ol className="space-y-0.5">
                   {stops.map((stop, index) => (
-                    <li key={index}>
+                    <li key={stop.id}>
                       <button
                         type="button"
                         onClick={() => selectStop(index)}
                         className="w-full rounded-md px-2 py-1 text-left text-sm text-muted-foreground hover:bg-accent/20 hover:text-foreground"
                       >
-                        {index + 1}. {stop.title}
+                        <span className="flex items-center gap-2">
+                          <span className="min-w-0 flex-1 truncate">
+                            {index + 1}. {stop.title}
+                          </span>
+                          {stop.status === 'pending' && generating ? (
+                            <Loader2 className="h-3.5 w-3.5 shrink-0 animate-spin" aria-label="Explaining" />
+                          ) : stop.status === 'failed' || stop.status === 'pending' ? (
+                            <span className="shrink-0 text-xs text-muted-foreground">not explained</span>
+                          ) : null}
+                        </span>
                       </button>
                     </li>
                   ))}
@@ -359,12 +563,13 @@ export function ChangesWalkthroughSheet({ sessionId, open, onOpenChange }: Chang
 
   return (
     <SideDrawer isOpen={open} onClose={close} side="right" widthClass="w-full sm:w-[min(640px,92vw)]" ariaLabel="Change walkthrough">
-      <ChangesWalkthroughProvider sessionId={sessionId} active={open}>
+      <ChangesWalkthroughProvider key={sessionId} sessionId={sessionId} active={open}>
         <SideDrawerHeader
           title="Change walkthrough"
           onClose={close}
           actions={
             <>
+              <ChangesWalkthroughSourcePicker />
               <ChangesWalkthroughRegenerate />
               <ChangesWalkthroughNav />
             </>

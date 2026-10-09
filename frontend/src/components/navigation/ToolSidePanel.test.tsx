@@ -27,6 +27,7 @@ vi.mock('@/components/session/ChangesWalkthroughSheet', () => ({
   ChangesWalkthroughProvider: ({ children }: { children: ReactNode }) => <>{children}</>,
   ChangesWalkthroughNav: () => null,
   ChangesWalkthroughRegenerate: () => null,
+  ChangesWalkthroughSourcePicker: () => null,
   ChangesWalkthroughView: () => <div>walkthrough-tool</div>,
 }))
 

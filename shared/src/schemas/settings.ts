@@ -177,6 +177,7 @@ export const UserPreferencesSchema = z.object({
   colorTheme: ColorThemeIdSchema.optional(),
   mode: z.enum(["plan", "build"]),
   defaultModel: z.string().optional(),
+  walkthroughModel: z.string().optional(),
   defaultAgent: z.string().optional(),
   autoScroll: z.boolean(),
   expandDiffs: z.boolean(),

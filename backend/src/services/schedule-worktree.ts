@@ -8,7 +8,7 @@ import type { Repo } from '../types/repo'
 import type { GitAuthService } from './git-auth'
 import { isSSHUrl } from '@opencode-manager/shared/utils'
 import { executeCommand } from '../utils/process'
-import { resolveDefaultBranch, createWorktreeSafely, listGitWorktrees, removeWorktree } from './repo'
+import { resolveDefaultBranch, resolveBaseRef, createWorktreeSafely, listGitWorktrees, removeWorktree } from './repo'
 import { logger } from '../utils/logger'
 import { canonicalPathSync, mkdirSyncSafe } from '../utils/fs-safe'
 import {
@@ -95,7 +95,7 @@ export class ScheduleWorktreeManager {
       await executeCommand(['git', '-C', repo.fullPath, 'fetch', '--prune', 'origin'], { env }).catch(() => {})
 
       const base = job.branch?.trim() || (await resolveDefaultBranch(repo.fullPath, env))
-      const baseRef = await this.resolveBaseRef(repo.fullPath, base, env)
+      const baseRef = await resolveBaseRef(repo.fullPath, base, env)
       if (!baseRef) {
         throw new Error(`Base branch "${base}" was not found in this repository. Choose an existing branch in the schedule settings.`)
       }
@@ -317,24 +317,6 @@ export class ScheduleWorktreeManager {
     if (conflicting) {
       throw new Error(`Branch ${runBranch} is checked out in ${conflicting.path}. Switch that checkout to another branch so the schedule can run.`)
     }
-  }
-
-  /**
-   * Resolves a user-supplied base branch name to a verified git ref, preferring
-   * the remote-tracking branch for freshness. Returns null when neither the
-   * remote nor local ref exists, allowing the caller to fail with a clear error
-   * instead of a cryptic git "not a valid object name" failure.
-   */
-  private async resolveBaseRef(repoPath: string, base: string, env: Record<string, string>): Promise<string | null> {
-    for (const candidate of [`refs/remotes/origin/${base}`, `refs/heads/${base}`]) {
-      try {
-        await executeCommand(['git', '-C', repoPath, 'rev-parse', '--verify', candidate], { env, silent: true })
-        return candidate.startsWith('refs/remotes/') ? `origin/${base}` : base
-      } catch {
-        continue
-      }
-    }
-    return null
   }
 
   private async buildGitEnv(repo: Repo, sshSetup: boolean, silent: boolean): Promise<Record<string, string>> {

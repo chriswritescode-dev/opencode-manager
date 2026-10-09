@@ -500,7 +500,9 @@ describe('MultiRunSheet', () => {
       await user.click(within(card).getByRole('button', { name: /walkthrough/i }))
 
       expect(await screen.findByText('Change walkthrough')).toBeInTheDocument()
-      await waitFor(() => expect(mocks.getChangeWalkthrough).toHaveBeenCalledWith('ses_11'))
+      await waitFor(() =>
+        expect(mocks.getChangeWalkthrough).toHaveBeenCalledWith('ses_11', { kind: 'session' }),
+      )
     })
 
     it('lists fusions with truncation and opens the fusion session', async () => {

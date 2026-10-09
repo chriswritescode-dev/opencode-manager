@@ -1019,6 +1019,18 @@ export async function resolveDefaultBranch(repoPath: string, env: Record<string,
     .catch(() => 'main')
 }
 
+export async function resolveBaseRef(repoPath: string, base: string, env: Record<string, string>): Promise<string | null> {
+  for (const candidate of [`refs/remotes/origin/${base}`, `refs/heads/${base}`]) {
+    try {
+      await executeCommand(['git', '-C', repoPath, 'rev-parse', '--verify', candidate], { env, silent: true })
+      return candidate.startsWith('refs/remotes/') ? `origin/${base}` : base
+    } catch {
+      continue
+    }
+  }
+  return null
+}
+
 export async function removeWorktree(
   baseRepoPath: string,
   worktreePath: string,

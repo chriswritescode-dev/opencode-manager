@@ -10,23 +10,24 @@ interface ExecuteCommandOptions {
   maxOutputChars?: number
 }
 
-export async function executeCommand(
+export interface ExecuteCommandResult {
+  exitCode: number
+  stdout: string
+  stderr: string
+  truncated?: boolean
+}
+
+type ExecuteCommandReturn<O> = O extends { ignoreExitCode: true } ? ExecuteCommandResult : string
+
+export async function executeCommand<O extends ExecuteCommandOptions = ExecuteCommandOptions>(
   args: string[],
-  cwdOrOptions?: string | ExecuteCommandOptions
-): Promise<string>
-export async function executeCommand(
-  args: string[],
-  cwdOrOptions: string | (ExecuteCommandOptions & { ignoreExitCode: true })
-): Promise<string | { exitCode: number; stdout: string; stderr: string }>
-export async function executeCommand(
-  args: string[],
-  cwdOrOptions?: string | ExecuteCommandOptions
-): Promise<string | { exitCode: number; stdout: string; stderr: string }> {
+  cwdOrOptions?: string | O
+): Promise<ExecuteCommandReturn<O>> {
   const options: ExecuteCommandOptions = typeof cwdOrOptions === 'string' 
     ? { cwd: cwdOrOptions } 
     : cwdOrOptions || {}
   
-  return new Promise((resolve, reject) => {
+  return new Promise<string | ExecuteCommandResult>((resolve, reject) => {
     const [command, ...cmdArgs] = args
     
     const effectiveEnv = { ...process.env, ...options.env }
@@ -103,6 +104,7 @@ export async function executeCommand(
             exitCode,
             stdout,
             stderr: terminatedBySignal ? `${stderr}Command terminated by signal ${signal}` : stderr,
+            truncated: true,
           }
           : stdout)
       } else if (options.ignoreExitCode) {
@@ -121,5 +123,5 @@ export async function executeCommand(
         reject(error)
       }
     })
-  })
+  }) as Promise<ExecuteCommandReturn<O>>
 }

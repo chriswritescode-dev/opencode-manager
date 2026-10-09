@@ -8,6 +8,7 @@ import {
   ChangesWalkthroughNav,
   ChangesWalkthroughProvider,
   ChangesWalkthroughRegenerate,
+  ChangesWalkthroughSourcePicker,
   ChangesWalkthroughView,
 } from '@/components/session/ChangesWalkthroughSheet'
 import { PreviewWorkspace } from '@/components/preview/PreviewPanel'
@@ -167,6 +168,7 @@ export function ToolSidePanel({
           <h2 className="min-w-0 flex-1 truncate text-sm font-semibold text-foreground">{activeLabel}</h2>
           {activeTool === 'walkthrough' ? (
             <>
+              <ChangesWalkthroughSourcePicker />
               <ChangesWalkthroughRegenerate />
               <ChangesWalkthroughNav />
             </>
@@ -188,7 +190,7 @@ export function ToolSidePanel({
     <>
       {panelContent ? (
         activeTool === 'walkthrough' && sessionId ? (
-          <ChangesWalkthroughProvider sessionId={sessionId} active>
+          <ChangesWalkthroughProvider key={sessionId} sessionId={sessionId} active>
             {panelContent}
           </ChangesWalkthroughProvider>
         ) : (

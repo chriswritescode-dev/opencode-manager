@@ -1,5 +1,6 @@
+import { z } from 'zod'
 import { SessionGoalVerdictSchema, type SessionGoalVerdict } from '@opencode-manager/shared/schemas'
-import { extractFirstJsonObject } from '../utils/json-extract'
+import { parseFirstJsonObject } from '../utils/json-extract'
 import { truncateSessionReply } from './session-reply'
 
 export const GOAL_AUDIT_REASON_MAX_CHARS = 500
@@ -51,39 +52,23 @@ export function buildGoalContinuationPrompt({ objective, reason }: GoalContinuat
   ].join('\n')
 }
 
+const goalVerdictSchema = z.object({
+  verdict: SessionGoalVerdictSchema,
+  reason: z.string(),
+})
+
 export function parseGoalVerdict(text: string): GoalVerdict | null {
-  const block = extractFirstJsonObject(text)
-  if (!block) {
+  const parsed = parseFirstJsonObject(text, goalVerdictSchema)
+  if (!parsed) {
     return null
   }
 
-  let parsed: unknown
-  try {
-    parsed = JSON.parse(block)
-  } catch {
-    return null
-  }
-
-  if (typeof parsed !== 'object' || parsed === null) {
-    return null
-  }
-
-  const candidate = parsed as { verdict?: unknown; reason?: unknown }
-  const verdict = SessionGoalVerdictSchema.safeParse(candidate.verdict)
-  if (!verdict.success) {
-    return null
-  }
-
-  if (typeof candidate.reason !== 'string') {
-    return null
-  }
-
-  const reason = candidate.reason.trim()
+  const reason = parsed.reason.trim()
   if (!reason) {
     return null
   }
 
-  return { verdict: verdict.data, reason: reason.slice(0, GOAL_AUDIT_REASON_MAX_CHARS) }
+  return { verdict: parsed.verdict, reason: reason.slice(0, GOAL_AUDIT_REASON_MAX_CHARS) }
 }
 
 function truncateReply(reply: string | null): string {
