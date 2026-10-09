@@ -7,7 +7,7 @@ import { Button } from '@/components/ui/button'
 import { Textarea } from '@/components/ui/textarea'
 import { FileDiffView } from '@/components/file-browser/FileDiffView'
 import { DiscardDialog } from '@/components/ui/discard-dialog'
-import { Loader2, GitCommit, FileText, AlertCircle, Sparkles } from 'lucide-react'
+import { Loader2, GitCommit, FileText, AlertCircle, Bot } from 'lucide-react'
 
 interface ChangesTabProps {
   repoId: number
@@ -166,7 +166,7 @@ export function ChangesTab({ repoId, onFileSelect, onClearFileSelection, selecte
                 {git.generateCommitMessage.isPending ? (
                   <Loader2 className="w-4 h-4 animate-spin" />
                 ) : (
-                  <Sparkles className="w-4 h-4" />
+                  <Bot className="w-4 h-4" />
                 )}
               </Button>
             </div>
