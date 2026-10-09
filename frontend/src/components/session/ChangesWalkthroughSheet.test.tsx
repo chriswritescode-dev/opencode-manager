@@ -497,17 +497,19 @@ describe('ChangesWalkthroughSheet', () => {
     expect(screen.getByRole('button', { name: 'Generate walkthrough' })).toBeEnabled()
   })
 
-  it('renders the no-changes message inline', async () => {
+  it.each([
+    ['WALKTHROUGH_NO_CHANGES', 'This session has no changes to walk through', 'This session has no changes to walk through'],
+    ['WALKTHROUGH_NO_CHANGES', 'The staged changes contain no changes to walk through', 'The staged changes contain no changes to walk through'],
+    ['WALKTHROUGH_NO_TEXT_CHANGES', '', 'This session has no text changes to walk through'],
+  ])('renders the %s message for the selected source inline', async (code, serverMessage, shown) => {
     const user = userEvent.setup()
     mocks.getChangeWalkthrough.mockResolvedValue(state({ walkthrough: null, currentDiffHash: null }))
-    mocks.generateChangeWalkthrough.mockRejectedValue(
-      new FetchError('This session has no changes to walk through', 409, 'WALKTHROUGH_NO_CHANGES'),
-    )
+    mocks.generateChangeWalkthrough.mockRejectedValue(new FetchError(serverMessage, 409, code))
     renderSheet()
 
     await user.click(await screen.findByRole('button', { name: 'Generate walkthrough' }))
 
-    expect(await screen.findByText('This session has no text changes to walk through')).toBeInTheDocument()
+    expect(await screen.findByText(shown)).toBeInTheDocument()
   })
 
   it('renders other generation errors inline', async () => {
@@ -663,18 +665,18 @@ describe('ChangesWalkthroughSheet', () => {
     const { rerender, onOpenChange } = renderSheet()
 
     await user.click(await screen.findByRole('button', { name: 'Generate walkthrough' }))
-    expect(await screen.findByText('This session has no text changes to walk through')).toBeInTheDocument()
+    expect(await screen.findByText(serverMessage)).toBeInTheDocument()
 
     rerender(<ChangesWalkthroughSheet sessionId="ses_1" open={false} onOpenChange={onOpenChange} />)
     rerender(<ChangesWalkthroughSheet sessionId="ses_1" open onOpenChange={onOpenChange} />)
 
     const generate = await screen.findByRole('button', { name: 'Generate walkthrough' })
     expect(generate).toBeEnabled()
-    expect(screen.queryByText('This session has no text changes to walk through')).not.toBeInTheDocument()
+    expect(screen.queryByText(serverMessage)).not.toBeInTheDocument()
 
     await user.click(generate)
 
     expect(await screen.findByText('This change adds a greeting.')).toBeInTheDocument()
-    expect(screen.queryByText('This session has no text changes to walk through')).not.toBeInTheDocument()
+    expect(screen.queryByText(serverMessage)).not.toBeInTheDocument()
   })
 })

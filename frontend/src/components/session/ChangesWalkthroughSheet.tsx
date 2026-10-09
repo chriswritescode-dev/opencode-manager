@@ -59,13 +59,14 @@ function omittedFilesFromError(error: unknown): WalkthroughOmittedFile[] {
 }
 
 function walkthroughErrorMessage(error: unknown): string {
-  if (isNoChangesError(error)) {
-    return 'This session has no text changes to walk through'
-  }
   if (isContextLimitError(error)) {
     return 'These changes are too large to walk through'
   }
-  return (error as WalkthroughErrorLike | null)?.message || 'Failed to load the walkthrough'
+  const message = (error as WalkthroughErrorLike | null)?.message
+  if (isNoChangesError(error)) {
+    return message || 'This session has no text changes to walk through'
+  }
+  return message || 'Failed to load the walkthrough'
 }
 
 const OMITTED_REASON_LABELS: Record<WalkthroughOmittedFile['reason'], string> = {
