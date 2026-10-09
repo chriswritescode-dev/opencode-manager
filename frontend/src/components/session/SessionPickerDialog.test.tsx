@@ -14,6 +14,7 @@ const mocks = vi.hoisted(() => ({
   fetchNextPage: vi.fn(),
   deleteSessionMock: vi.fn(),
   togglePinMock: vi.fn(),
+  siblings: [] as Array<Repo & { worktreeSource?: 'opencode' | 'schedule' | 'git' }>,
   sessionPins: [] as Array<{ sessionId: string; directory: string; pinnedAt: number }>,
   repos: [] as Repo[],
 }))
@@ -46,6 +47,10 @@ vi.mock('@/hooks/useOpenCode', async (importOriginal) => {
     useDeleteSession: () => ({ mutateAsync: mocks.deleteSessionMock, isPending: false }),
   }
 })
+
+vi.mock('@/hooks/useRepoSiblings', () => ({
+  useRepoSiblings: () => ({ data: mocks.siblings }),
+}))
 
 vi.mock('@/hooks/useSessionPins', () => ({
   useSessionPins: () => ({ data: mocks.sessionPins }),
@@ -85,6 +90,10 @@ function repo(id: number, name: string, fullPath: string): Repo {
   }
 }
 
+function worktreeSibling(id: number, name: string, fullPath: string): Repo & { worktreeSource: 'opencode' } {
+  return { ...repo(id, name, fullPath), isWorktree: true, worktreeSource: 'opencode' }
+}
+
 function renderPicker(overrides: Partial<React.ComponentProps<typeof SessionPickerDialog>> = {}) {
   const onOpenChange = vi.fn()
   const onSelectSession = vi.fn()
@@ -110,6 +119,7 @@ describe('SessionPickerDialog', () => {
     stubMatchMedia(true)
     localStorage.clear()
     mocks.deleteSessionMock.mockResolvedValue(undefined)
+    mocks.siblings = []
     mocks.sessionPins = []
     mocks.repos = [repo(1, 'alpha', '/w/a'), repo(2, 'beta', '/w/b')]
     mocks.sessionsData = []
@@ -210,6 +220,26 @@ describe('SessionPickerDialog', () => {
     expect(mocks.lastDirectories).toEqual(['/w/a'])
     expect(mocks.lastAllDirectories).toBe(false)
     expect(localStorage.getItem('oc:session-picker:all-projects')).toBe('false')
+  })
+
+  it('includes the repo worktrees and labels worktree sessions with the folder name', () => {
+    mocks.repos = [repo(1, 'alpha', '/w/a')]
+    mocks.siblings = [
+      repo(1, 'alpha', '/w/a'),
+      worktreeSibling(2, 'alpha', '/w/worktrees/alpha-feature'),
+    ]
+    mocks.sessionsData = [
+      session('ses_root', 'Root session', '/w/a', 2000),
+      session('ses_wt', 'Worktree session', '/w/worktrees/alpha-feature', 1000),
+    ]
+
+    renderPicker()
+
+    expect(mocks.lastDirectories).toEqual(['/w/a', '/w/worktrees/alpha-feature'])
+    expect(screen.getByText('Worktree session')).toBeInTheDocument()
+    expect(screen.getByText('Root session')).toBeInTheDocument()
+    expect(screen.getByText('alpha-feature')).toBeInTheDocument()
+    expect(screen.getByRole('option', { name: /Root session/ }).textContent).not.toContain('alpha-feature')
   })
 
   it('does not query sessions while closed and queries after opening', async () => {
