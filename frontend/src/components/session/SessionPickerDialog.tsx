@@ -1,6 +1,7 @@
 import { memo, useCallback, useEffect, useId, useMemo, useRef, useState } from 'react'
 import { format, startOfDay } from 'date-fns'
 import { MoreHorizontal, Pin, PinOff, Search } from 'lucide-react'
+import { isWorktreeSibling } from '@opencode-manager/shared/utils'
 import type { Repo, Session } from '@/api/types'
 import { Button } from '@/components/ui/button'
 import { Dialog, DialogContent, DialogTitle } from '@/components/ui/dialog'
@@ -19,6 +20,7 @@ import { useDeleteSession } from '@/hooks/useOpenCode'
 import { useSessionSearch } from '@/hooks/useSessionSearch'
 import { useSessionPins, useToggleSessionPin } from '@/hooks/useSessionPins'
 import { usePersistentBoolean } from '@/hooks/usePersistentBoolean'
+import { useRepoSiblings } from '@/hooks/useRepoSiblings'
 import { useNavigableRepos } from '@/hooks/useSidebarRepoGroups'
 import { useSessionStatusForSession } from '@/stores/sessionStatusStore'
 import { buildPinnedSessionKeys, getSessionKey } from '@/lib/sessionKey'
@@ -91,6 +93,13 @@ function optionId(baseId: string, index: number): string {
   return `${baseId}-option-${index}`
 }
 
+function worktreeDirectoryLabel(session: Session, repoPath: string | undefined): string | undefined {
+  const directory = session.location.directory
+  if (!repoPath || directory === repoPath) return undefined
+  const segments = directory.replace(/\/+$/, '').split('/').filter(Boolean)
+  return segments[segments.length - 1]
+}
+
 function SessionPickerGutter({ sessionID, isActive }: { sessionID: string; isActive: boolean }) {
   const status = useSessionStatusForSession(sessionID)
   if (status.type !== 'idle') {
@@ -117,6 +126,7 @@ interface SessionPickerRowItemProps {
   isPinned: boolean
   isPendingDelete: boolean
   showRepo: boolean
+  label?: string
   onOpen: (row: SessionPickerRow) => void
   onHover: (index: number) => void
   onTogglePin: (row: SessionPickerRow) => void
@@ -133,6 +143,7 @@ const SessionPickerRowItem = memo(function SessionPickerRowItem({
   isPinned,
   isPendingDelete,
   showRepo,
+  label,
   onOpen,
   onHover,
   onTogglePin,
@@ -190,6 +201,7 @@ const SessionPickerRowItem = memo(function SessionPickerRowItem({
           )}
         >
           {showRepo && <span className="max-w-32 truncate">{getRepoDisplayName(row.repo)}</span>}
+          {!showRepo && label && <span className="max-w-32 truncate">{label}</span>}
           <span>{formatShortRelativeTime(new Date(row.session.time.updated))}</span>
         </span>
       </div>
@@ -254,12 +266,25 @@ function SessionPickerContent({
     return map
   }, [repos, currentRepo])
 
+  const { data: siblings } = useRepoSiblings(currentRepo?.id)
+
+  const worktreeDirectories = useMemo(
+    () =>
+      (siblings ?? [])
+        .filter((sibling) => isWorktreeSibling(sibling) && !!sibling.fullPath)
+        .map((sibling) => sibling.fullPath),
+    [siblings],
+  )
+
   const directories = useMemo(() => {
-    if (!allProjects) return currentRepo ? [currentRepo.fullPath] : []
+    if (!allProjects) {
+      if (!currentRepo) return []
+      return Array.from(new Set([currentRepo.fullPath, ...worktreeDirectories]))
+    }
     const paths = repos.map((repo) => repo.fullPath)
     if (currentRepo) paths.push(currentRepo.fullPath)
     return Array.from(new Set(paths))
-  }, [allProjects, repos, currentRepo])
+  }, [allProjects, repos, currentRepo, worktreeDirectories])
 
   const {
     query,
@@ -562,6 +587,7 @@ function SessionPickerContent({
                         isPinned={pinnedKeys.has(row.key)}
                         isPendingDelete={pendingDeleteKey === row.key}
                         showRepo={allProjects}
+                        label={allProjects ? undefined : worktreeDirectoryLabel(row.session, currentRepo?.fullPath)}
                         onOpen={openRow}
                         onHover={moveCursor}
                         onTogglePin={handleTogglePin}
