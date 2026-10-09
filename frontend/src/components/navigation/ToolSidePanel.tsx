@@ -10,6 +10,7 @@ import {
   ChangesWalkthroughRegenerate,
   ChangesWalkthroughSourcePicker,
   ChangesWalkthroughView,
+  type WalkthroughSourceRequest,
 } from '@/components/session/ChangesWalkthroughSheet'
 import { PreviewWorkspace } from '@/components/preview/PreviewPanel'
 import { RepoMcpContent } from '@/components/repo/RepoMcpDialog'
@@ -36,6 +37,7 @@ interface ToolSidePanelProps {
   currentBranch?: string
   selectedFilePath?: string
   onSkillLoaded?: (skill: SkillFileInfo) => void
+  walkthroughSourceRequest?: WalkthroughSourceRequest
 }
 
 interface RailButtonProps {
@@ -89,6 +91,7 @@ export function ToolSidePanel({
   currentBranch = 'main',
   selectedFilePath,
   onSkillLoaded,
+  walkthroughSourceRequest,
 }: ToolSidePanelProps) {
   const { activeTool, toggleTool, closePanel } = panel
   const location = useLocation()
@@ -190,7 +193,12 @@ export function ToolSidePanel({
     <>
       {panelContent ? (
         activeTool === 'walkthrough' && sessionId ? (
-          <ChangesWalkthroughProvider key={sessionId} sessionId={sessionId} active>
+          <ChangesWalkthroughProvider
+            key={sessionId}
+            sessionId={sessionId}
+            active
+            sourceRequest={walkthroughSourceRequest}
+          >
             {panelContent}
           </ChangesWalkthroughProvider>
         ) : (

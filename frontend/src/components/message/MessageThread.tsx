@@ -24,6 +24,7 @@ import { CopyButton } from '@/components/ui/copy-button'
 import { TTSButton } from '@/components/ui/tts-button'
 import { backgroundShellID, collectBackgroundParts, type ShellNoticeOutcome } from '@/lib/backgroundWork'
 import { groupExplorationParts, type AssistantContentItem } from '@/lib/explorationGroups'
+import type { WalkthroughSource } from '@opencode-manager/shared/schemas'
 import { ExplorationGroup } from './ExplorationGroup'
 
 function getMessageText(message: SessionMessageInfo): string {
@@ -324,6 +325,7 @@ interface MessageRowProps {
   directory?: string
   onFileClick?: (filePath: string, lineNumber?: number) => void
   onChildSessionClick?: (sessionId: string) => void
+  onOpenWalkthrough?: (source?: WalkthroughSource) => void
   model?: string
   simpleChatMode: boolean
   showReasoning: boolean
@@ -344,6 +346,7 @@ const MessageRow = memo(function MessageRow({
   directory,
   onFileClick,
   onChildSessionClick,
+  onOpenWalkthrough,
   model,
   simpleChatMode,
   showReasoning,
@@ -452,6 +455,7 @@ const MessageRow = memo(function MessageRow({
                   shellOutcome={shellOutcomeFor(part)}
                   onFileClick={onFileClick}
                   onChildSessionClick={onChildSessionClick}
+                  onOpenWalkthrough={onOpenWalkthrough}
                 />
               </div>
             ))}
@@ -494,6 +498,7 @@ const MessageRow = memo(function MessageRow({
                     directory={directory}
                     onFileClick={onFileClick}
                     onChildSessionClick={onChildSessionClick}
+                    onOpenWalkthrough={onOpenWalkthrough}
                   />
                 ) : (
                   <MessagePart
@@ -503,6 +508,7 @@ const MessageRow = memo(function MessageRow({
                     shellOutcome={shellOutcomeFor(item.part)}
                     onFileClick={onFileClick}
                     onChildSessionClick={onChildSessionClick}
+                    onOpenWalkthrough={onOpenWalkthrough}
                   />
                 )}
               </div>
@@ -570,6 +576,7 @@ interface MessageThreadProps {
   pending: SessionInboxInfo[]
   onFileClick?: (filePath: string, lineNumber?: number) => void
   onChildSessionClick?: (sessionId: string) => void
+  onOpenWalkthrough?: (source?: WalkthroughSource) => void
   onUndoMessage?: (restoredPrompt: string) => void
   model?: string
   isSessionBusy?: boolean
@@ -582,6 +589,7 @@ export const MessageThread = memo(function MessageThread({
   pending,
   onFileClick,
   onChildSessionClick,
+  onOpenWalkthrough,
   onUndoMessage,
   model,
   isSessionBusy = false,
@@ -649,6 +657,7 @@ export const MessageThread = memo(function MessageThread({
           directory={directory}
           onFileClick={onFileClick}
           onChildSessionClick={onChildSessionClick}
+          onOpenWalkthrough={onOpenWalkthrough}
           model={model}
           simpleChatMode={simpleChatMode}
           showReasoning={showReasoning}

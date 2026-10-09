@@ -10,6 +10,7 @@ import { useShell } from '@/hooks/useSessionShells'
 import { detectFileReferences } from '@/lib/fileReferences'
 import { ExternalLink, Loader2, Shield } from 'lucide-react'
 import { Badge } from '@/components/ui/badge'
+import { Button } from '@/components/ui/button'
 import { CopyButton } from '@/components/ui/copy-button'
 import { BackgroundTaskStatusIcon } from '@/components/session/BackgroundTaskStatusIcon'
 import {
@@ -26,6 +27,8 @@ import {
   type ShellNoticeOutcome,
 } from '@/lib/backgroundWork'
 import { getToolInputPath, getToolSpecificRender } from './FileToolRender'
+import { readOpenWalkthroughCall } from '@/lib/walkthroughTool'
+import type { WalkthroughSource } from '@opencode-manager/shared/schemas'
 
 const DISPLAY_LIMIT = 30_000
 const DISPLAY_HEAD_LENGTH = 20_000
@@ -61,6 +64,7 @@ interface ToolCallPartProps {
   shellOutcome?: ShellNoticeOutcome
   onFileClick?: (filePath: string, lineNumber?: number) => void
   onChildSessionClick?: (sessionId: string) => void
+  onOpenWalkthrough?: (source?: WalkthroughSource) => void
 }
 
 function toolInput(part: SessionMessageAssistantTool): Record<string, unknown> | undefined {
@@ -113,7 +117,7 @@ function ClickableJson({ json, onFileClick }: { json: unknown; onFileClick?: (fi
   return <pre className="bg-accent p-2 rounded text-xs overflow-x-auto whitespace-pre-wrap break-words">{parts}</pre>
 }
 
-export const ToolCallPart = memo(function ToolCallPart({ part, messageID, directory, shellOutcome, onFileClick, onChildSessionClick }: ToolCallPartProps) {
+export const ToolCallPart = memo(function ToolCallPart({ part, messageID, directory, shellOutcome, onFileClick, onChildSessionClick, onOpenWalkthrough }: ToolCallPartProps) {
   const { preferences } = useSettings()
   const { userBashCommands } = useUserBash()
   const isSubagent = part.name === 'subagent'
@@ -139,6 +143,7 @@ export const ToolCallPart = memo(function ToolCallPart({ part, messageID, direct
   const isWaitingPermission = part.state.status === 'running' && pendingPermission !== null
   const outputRef = useRef<HTMLDivElement>(null)
   const input = toolInput(part)
+  const openWalkthrough = readOpenWalkthroughCall(part)
   const rawCommand = part.name === 'shell' && typeof input?.command === 'string'
     ? input.command
     : undefined
@@ -349,36 +354,49 @@ export const ToolCallPart = memo(function ToolCallPart({ part, messageID, direct
 
   return (
     <div ref={outputRef} className={`border rounded-lg overflow-hidden my-2 transition-all ${getBorderStyle()}`}>
-      <button
-        onClick={() => setExpanded(!expanded)}
-        className="w-full px-4 py-2 bg-card hover:bg-card-hover text-left flex items-center gap-2 text-sm min-w-0"
-      >
-        <span className={getStatusColor()}>{getStatusIcon()}</span>
-        <span className="font-medium">{part.name}</span>
-        {sandboxIndicator}
-        {backgroundIndicator}
+      <div className="flex items-center bg-card">
+        <button
+          onClick={() => setExpanded(!expanded)}
+          className="min-w-0 flex-1 px-4 py-2 hover:bg-card-hover text-left flex items-center gap-2 text-sm"
+        >
+          <span className={getStatusColor()}>{getStatusIcon()}</span>
+          <span className="font-medium">{part.name}</span>
+          {sandboxIndicator}
+          {backgroundIndicator}
 
-        {previewText && isFileTool ? (
-          <span
-            onClick={(e) => {
-              e.stopPropagation()
-              if (onFileClick && previewText) {
-                onFileClick(previewText)
-              }
-            }}
-            className="text-primary text-xs truncate hover:text-primary-hover cursor-pointer underline decoration-dotted"
-            title={`Click to open ${previewText}`}
-          >
-            {previewText}
+          {previewText && isFileTool ? (
+            <span
+              onClick={(e) => {
+                e.stopPropagation()
+                if (onFileClick && previewText) {
+                  onFileClick(previewText)
+                }
+              }}
+              className="text-primary text-xs truncate hover:text-primary-hover cursor-pointer underline decoration-dotted"
+              title={`Click to open ${previewText}`}
+            >
+              {previewText}
+            </span>
+          ) : previewText ? (
+            <span className="text-muted-foreground text-xs truncate">{previewText}</span>
+          ) : null}
+
+          <span className="text-muted-foreground text-xs ml-auto">
+            {isWaitingPermission ? 'awaiting permission' : isBackgroundShell ? lifecycleLabel(shellStatus) : part.state.status}
           </span>
-        ) : previewText ? (
-          <span className="text-muted-foreground text-xs truncate">{previewText}</span>
-        ) : null}
+        </button>
 
-        <span className="text-muted-foreground text-xs ml-auto">
-          {isWaitingPermission ? 'awaiting permission' : isBackgroundShell ? lifecycleLabel(shellStatus) : part.state.status}
-        </span>
-      </button>
+        {openWalkthrough ? (
+          <Button
+            variant="outline"
+            size="sm"
+            className="mr-2 h-7 shrink-0"
+            onClick={() => onOpenWalkthrough?.(openWalkthrough.source)}
+          >
+            Open walkthrough
+          </Button>
+        ) : null}
+      </div>
 
       {expanded && (
         <div className="bg-card space-y-2 p-3">

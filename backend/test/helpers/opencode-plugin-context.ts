@@ -25,7 +25,7 @@ export type GeneratedTool = {
   name: string
   description?: string
   input?: unknown
-  execute?: (input: unknown, context: { signal: AbortSignal }) => Promise<unknown>
+  execute?: (input: unknown, context: { signal: AbortSignal; sessionID?: string }) => Promise<unknown>
   [key: string]: unknown
 }
 

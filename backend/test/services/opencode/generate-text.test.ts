@@ -3,7 +3,7 @@ import { getOpenCodeGlobalConfigPath } from '@opencode-manager/shared/config/env
 import type { ModelInfo, ModelRef } from '@opencode-manager/shared/opencode'
 import type { OpenCodeClient } from '../../../src/services/opencode/client'
 import { GenerateTextTimeoutError, generateTextWithTimeout } from '../../../src/services/opencode/generate-text'
-import { MODEL_LOAD_POLL_MS } from '../../../src/services/opencode-models'
+import { MODEL_LOAD_POLL_MS, MODEL_LOAD_TIMEOUT_MS } from '../../../src/services/opencode-models'
 
 interface GenerateCall {
   input: { prompt: string; model?: ModelRef }
@@ -77,14 +77,35 @@ describe('generateTextWithTimeout', () => {
     expect(calls[0]?.input.model).toEqual({ providerID: 'openai', id: 'gpt-5-mini' })
   })
 
-  it('forwards the model when provided without reading the catalog', async () => {
-    const { client, calls, modelList } = makeClient(async () => ({ text: 'hello' }))
-    const model: ModelRef = { providerID: 'anthropic', id: 'claude-sonnet-4' }
+  it('waits for the provided model to load before generating', async () => {
+    vi.useFakeTimers()
+    const model: ModelRef = { providerID: 'anthropic', id: 'claude-sonnet-4', variant: 'high' }
+    const { client, calls } = makeClient(async () => ({ text: 'hello' }), [
+      [],
+      [{ providerID: 'anthropic', id: 'claude-sonnet-4', enabled: true } as ModelInfo],
+    ])
 
-    await generateTextWithTimeout(client, { prompt: 'write', model }, 1000)
+    const promise = generateTextWithTimeout(client, { prompt: 'write', model }, 10_000)
+    await vi.advanceTimersByTimeAsync(0)
+    expect(calls).toHaveLength(0)
 
+    await vi.advanceTimersByTimeAsync(MODEL_LOAD_POLL_MS)
+    await expect(promise).resolves.toBe('hello')
+    expect(calls).toHaveLength(1)
     expect(calls[0]?.input).toEqual({ prompt: 'write', model })
-    expect(modelList).not.toHaveBeenCalled()
+  })
+
+  it('generates with the provided model when its catalog never loads', async () => {
+    vi.useFakeTimers()
+    const model: ModelRef = { providerID: 'anthropic', id: 'claude-sonnet-4' }
+    const { client, calls } = makeClient(async () => ({ text: 'hello' }), [[]])
+
+    const promise = generateTextWithTimeout(client, { prompt: 'write', model }, 100_000)
+    await vi.advanceTimersByTimeAsync(MODEL_LOAD_TIMEOUT_MS)
+    await expect(promise).resolves.toBe('hello')
+
+    expect(calls).toHaveLength(1)
+    expect(calls[0]?.input).toEqual({ prompt: 'write', model })
   })
 
   it('rejects with GenerateTextTimeoutError and aborts the request after the timeout', async () => {

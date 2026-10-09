@@ -1,5 +1,5 @@
 import { z } from 'zod'
-import { ASSISTANT_NOTIFICATION_LIMITS } from '@opencode-manager/shared/schemas'
+import { ASSISTANT_NOTIFICATION_LIMITS, WalkthroughSourceSchema } from '@opencode-manager/shared/schemas'
 
 export const MANAGER_TOOL_NAME = 'ocm'
 
@@ -40,7 +40,7 @@ export const MANAGER_TOOL_ALLOWED_ROUTES = [
 
 const MANAGER_TOOL_ALLOWED_METHODS = ['GET', 'POST', 'PUT', 'PATCH', 'DELETE'] as const
 
-const MANAGER_TOOL_ACTION_NAMES = ['send_notification', 'request'] as const
+const MANAGER_TOOL_ACTION_NAMES = ['send_notification', 'request', 'open_walkthrough'] as const
 
 const ManagerToolNotificationParamsSchema = z
   .object({
@@ -62,9 +62,17 @@ const ManagerToolRequestParamsSchema = z
   .strict()
   .describe('Call an allow-listed OpenCode Manager internal API route.')
 
+const ManagerToolWalkthroughParamsSchema = z
+  .object({
+    source: WalkthroughSourceSchema.optional().describe('The change source to walk through. Defaults to the changes in this session.'),
+  })
+  .strict()
+  .describe("Open the change Walkthrough for this session in the user's Manager window and start generating it if needed.")
+
 const MANAGER_TOOL_ACTION_PARAMS_SCHEMAS: Record<(typeof MANAGER_TOOL_ACTION_NAMES)[number], z.ZodType> = {
   send_notification: ManagerToolNotificationParamsSchema,
   request: ManagerToolRequestParamsSchema,
+  open_walkthrough: ManagerToolWalkthroughParamsSchema,
 }
 
 export function parseAllowedRoute(route: string): { method: string; path: string } {
@@ -94,7 +102,11 @@ function buildManagerToolInputJsonSchema(): Record<string, unknown> {
       .object({
         action: z.enum(MANAGER_TOOL_ACTION_NAMES).describe('The OpenCode Manager action to perform.'),
         params: z
-          .union([MANAGER_TOOL_ACTION_PARAMS_SCHEMAS.send_notification, MANAGER_TOOL_ACTION_PARAMS_SCHEMAS.request])
+          .union([
+            MANAGER_TOOL_ACTION_PARAMS_SCHEMAS.send_notification,
+            MANAGER_TOOL_ACTION_PARAMS_SCHEMAS.request,
+            MANAGER_TOOL_ACTION_PARAMS_SCHEMAS.open_walkthrough,
+          ])
           .describe('The parameters for the chosen action.'),
       })
       .strict(),
@@ -114,6 +126,7 @@ function buildManagerToolDescription(): string {
     'Actions:',
     '- send_notification: send a push notification to every device the user has registered.',
     '- request: call an allow-listed internal API route to read and manage settings, the OpenCode configuration file, repos (list, inspect, clone from a git URL with POST /repos and body { repoUrl, branch?, directoryName? }), OpenCode workspaces, sessions (list, create, follow up, read the latest reply, fork), and schedules.',
+    "- open_walkthrough: open the change Walkthrough panel for the current session in the user's Manager window, generating it if needed; use when the user asks to walk through, review or explain the changes.",
     'Allowed request routes:',
   ]
     .concat(MANAGER_TOOL_ALLOWED_ROUTES.map((route) => `- ${route}`))
@@ -221,6 +234,27 @@ var ACTIONS = {
       return text || 'The request succeeded with an empty response body.'
     },
   },
+  open_walkthrough: {
+    run: async function (params, context) {
+      var body = params.source === undefined ? undefined : { source: params.source }
+      var state = await postInternalApi('/change-walkthroughs/' + encodeURIComponent(context.sessionID), body, context.signal)
+      var metadata = { openPanel: 'walkthrough' }
+      if (params.source !== undefined) {
+        metadata.source = params.source
+      }
+      if (state.generating === true) {
+        return {
+          content: 'Opened the walkthrough. It is generating; the user can page through it as stops are explained.',
+          metadata: metadata,
+        }
+      }
+      var stops = state.walkthrough && Array.isArray(state.walkthrough.stops) ? state.walkthrough.stops.length : 0
+      if (state.walkthrough) {
+        return { content: 'Opened the walkthrough (' + stops + ' stops).', metadata: metadata }
+      }
+      return { content: 'Opened the walkthrough.', metadata: metadata }
+    },
+  },
 }
 
 function assertParams(actionName, params) {
@@ -257,7 +291,11 @@ export default {
         input: INPUT_SCHEMA,
         options: { codemode: false },
         execute: async function (input, context) {
-          return { content: await runAction(input, context) }
+          var result = await runAction(input, context)
+          if (result !== null && typeof result === 'object' && typeof result.content === 'string') {
+            return result
+          }
+          return { content: result }
         },
       })
     })

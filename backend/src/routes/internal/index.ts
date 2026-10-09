@@ -19,11 +19,13 @@ import { createInternalGitCredentialsRoutes } from './git-credentials'
 import { createInternalSandboxRoutes } from './sandbox'
 import { createSessionGoalRoutes } from '../session-goals'
 import { createMultiRunRoutes } from '../multi-runs'
+import { createChangeWalkthroughRoutes } from '../change-walkthroughs'
 import type { SessionPermissionModeService } from '../../services/session-permission-modes'
 import type { RepoWorkspaceService } from '../../services/repo-workspace'
 import type { GitAuthService } from '../../services/git-auth'
 import type { SessionGoalService } from '../../services/session-goals'
 import type { MultiRunService } from '../../services/multi-runs'
+import type { ChangeWalkthroughService } from '../../services/change-walkthroughs'
 
 export function createInternalRoutes(
   db: Database,
@@ -36,6 +38,7 @@ export function createInternalRoutes(
   gitAuthService: GitAuthService,
   sessionGoals: SessionGoalService,
   multiRuns: MultiRunService,
+  changeWalkthroughService: ChangeWalkthroughService,
 ) {
   const app = new Hono()
   app.use('/*', createInternalTokenMiddleware(db))
@@ -54,6 +57,7 @@ export function createInternalRoutes(
   app.route('/opencode-workspaces', createInternalOpenCodeWorkspacesRoutes(db))
   app.route('/sessions', createInternalSessionRoutes(db, openCodeClient, permissionModes, repoWorkspaces))
   app.route('/assistant', createInternalAssistantRoutes(openCodeClient))
+  app.route('/change-walkthroughs', createChangeWalkthroughRoutes(changeWalkthroughService))
   app.route('/git-credentials', createInternalGitCredentialsRoutes(db))
   app.route('/sandbox', createInternalSandboxRoutes(db))
   return app
