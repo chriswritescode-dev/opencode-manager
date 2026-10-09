@@ -278,6 +278,50 @@ describe('ManagerApi feature support', () => {
   })
 })
 
+describe('ManagerApi mirror routes', () => {
+  const api = new ManagerApi(BASE_URL, 'tok')
+
+  it('maps a 401 from mirrorCheckouts to MANAGER_FEATURE_MISSING with the move message', async () => {
+    const fetchMock = vi.fn()
+      .mockResolvedValueOnce(errorResponse(401, JSON.stringify({ error: 'Unauthorized' })))
+      .mockResolvedValueOnce(okResponse({ workspaces: [] }))
+    vi.stubGlobal('fetch', fetchMock)
+
+    const error = await api.mirrorCheckouts(1, 'feature').catch((err) => err)
+
+    expect(error).toBeInstanceOf(ManagerApiError)
+    expect((error as ManagerApiError).code).toBe(MANAGER_FEATURE_MISSING)
+    expect((error as ManagerApiError).message).toContain('too old for /ocm-move worktrees')
+    expect(isManagerRouteMissing(error)).toBe(true)
+    expect(fetchMock).toHaveBeenNthCalledWith(2, `${BASE_URL}/api/internal/opencode-workspaces`, {
+      headers: { Authorization: 'Bearer tok' },
+    })
+  })
+
+  it('keeps the goal and multi-run feature message unchanged', async () => {
+    const fetchMock = vi.fn()
+      .mockResolvedValueOnce(errorResponse(401, JSON.stringify({ error: 'Unauthorized' })))
+      .mockResolvedValueOnce(okResponse({ workspaces: [] }))
+    vi.stubGlobal('fetch', fetchMock)
+
+    const error = await api.listMultiRuns(1).catch((err) => err)
+
+    expect((error as ManagerApiError).code).toBe(MANAGER_FEATURE_MISSING)
+    expect((error as ManagerApiError).message).toContain('too old for ocm goals and multi-runs')
+  })
+
+  it('sends the directory query on mirrorHead and mirrorContains', async () => {
+    const fetchMock = vi.fn().mockResolvedValue(okResponse({}))
+    vi.stubGlobal('fetch', fetchMock)
+
+    await api.mirrorHead(1, '/repos/work trees/repo')
+    await api.mirrorContains(1, 'abc1234', '/repos/work trees/repo')
+
+    expect(new URL(String(fetchMock.mock.calls[0]![0])).searchParams.get('directory')).toBe('/repos/work trees/repo')
+    expect(new URL(String(fetchMock.mock.calls[1]![0])).searchParams.get('directory')).toBe('/repos/work trees/repo')
+  })
+})
+
 describe('isManagerRouteMissing', () => {
   const api = new ManagerApi(BASE_URL, 'tok')
 

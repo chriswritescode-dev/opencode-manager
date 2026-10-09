@@ -12,10 +12,10 @@ import { createStubOpenCodeClient } from '../helpers/stub-opencode-client'
 vi.mock('../../src/services/repo', () => ({
   resolveRepoOrAssistant: vi.fn(),
   resolveRepoWorkingDirectory: vi.fn(),
-  getSiblingRepos: vi.fn(),
+  listRepoSiblings: vi.fn(),
 }))
 
-import { resolveRepoOrAssistant, resolveRepoWorkingDirectory, getSiblingRepos } from '../../src/services/repo'
+import { resolveRepoOrAssistant, resolveRepoWorkingDirectory, listRepoSiblings } from '../../src/services/repo'
 
 const database = {} as Database
 const gitAuthService = { getGitEnvironment: vi.fn(() => ({})) } as unknown as GitAuthService
@@ -62,7 +62,7 @@ describe('Repo Terminal Routes', () => {
       if (directory === undefined || directory === '/tmp/repo') return '/tmp/repo'
       return null
     })
-    vi.mocked(getSiblingRepos).mockResolvedValue([])
+    vi.mocked(listRepoSiblings).mockResolvedValue([])
   })
 
   describe('GET /:id/terminals', () => {

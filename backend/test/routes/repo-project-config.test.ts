@@ -18,10 +18,10 @@ import type { TerminalInfo } from '@opencode-manager/shared/types'
 
 vi.mock('../../src/services/repo', () => ({
   resolveRepoWorkingDirectory: vi.fn(),
-  getSiblingRepos: vi.fn(),
+  listRepoSiblings: vi.fn(),
 }))
 
-import { resolveRepoWorkingDirectory, getSiblingRepos } from '../../src/services/repo'
+import { resolveRepoWorkingDirectory, listRepoSiblings } from '../../src/services/repo'
 
 const gitAuthService = { getGitEnvironment: () => ({}) } as unknown as GitAuthService
 const openCodeClient = createStubOpenCodeClient()
@@ -62,7 +62,7 @@ describe('Repo Project Config Routes', () => {
 
   beforeEach(() => {
     vi.clearAllMocks()
-    vi.mocked(getSiblingRepos).mockResolvedValue([])
+    vi.mocked(listRepoSiblings).mockResolvedValue([])
     vi.mocked(resolveRepoWorkingDirectory).mockImplementation(async (repo, directory) => {
       if (directory === undefined || directory === repo.fullPath) return repo.fullPath
       return null

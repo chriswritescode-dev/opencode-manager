@@ -4,6 +4,7 @@ import { spawnSync } from 'child_process'
 import { mkdirSync, writeFileSync, readFileSync, existsSync, rmSync } from 'fs'
 import { join } from 'path'
 import { tmpdir } from 'os'
+import { sanitizeRepoDirectoryName } from '@opencode-manager/shared/utils'
 
 const { mockGetActiveDirectories, mockGitOut, mockSafeGitOut, getTmpRoot, setTmpRoot } = vi.hoisted(() => {
   const mockGetActiveDirectories = vi.fn().mockReturnValue([])
@@ -55,20 +56,60 @@ vi.mock('../../../src/db/queries', () => ({
 const mockEnsureMirrorTargetPath = vi.fn()
 const mockCreateRepoRow = vi.fn()
 const mockIsRepoInUse = vi.fn()
-const mockPlanMirrorTarget = vi.fn()
-const mockEnsureMirrorTarget = vi.fn()
+const mockIsDirectoryInUse = vi.fn()
+const mockResolveRepoWorkingDirectory = vi.fn()
+const mockListRepoSiblings = vi.fn()
+const mockListGitWorktrees = vi.fn()
 
 vi.mock('../../../src/services/repo', () => ({
   ensureMirrorTargetPath: (...args: unknown[]) => mockEnsureMirrorTargetPath(...args),
   createRepoRow: (...args: unknown[]) => mockCreateRepoRow(...args),
   isRepoInUse: (...args: unknown[]) => mockIsRepoInUse(...args),
-  planMirrorTarget: (...args: unknown[]) => mockPlanMirrorTarget(...args),
-  ensureMirrorTarget: (...args: unknown[]) => mockEnsureMirrorTarget(...args),
+  isDirectoryInUse: (...args: unknown[]) => mockIsDirectoryInUse(...args),
+  resolveRepoWorkingDirectory: (...args: unknown[]) => mockResolveRepoWorkingDirectory(...args),
+  listRepoSiblings: (...args: unknown[]) => mockListRepoSiblings(...args),
+  listGitWorktrees: (...args: unknown[]) => mockListGitWorktrees(...args),
 }))
+
+const mockGetGitEnvironment = vi.fn().mockReturnValue({})
+const mockGitAuthService = { getGitEnvironment: mockGetGitEnvironment }
+const mockRepoWorkspaces = { create: vi.fn() }
+const mockOpenCodeClient = {}
 
 import { createInternalRepoMirrorRoutes } from '../../../src/routes/internal/repo-mirror'
 
 const CHUNK_SIZE = 8 * 1024 * 1024
+
+let mockSiblingRows: Array<Record<string, unknown>> = []
+
+function runGit(cwd: string, args: string[], input?: string) {
+  return spawnSync('git', args, { cwd, encoding: 'utf-8', input })
+}
+
+function initRepoAt(dir: string): string {
+  mkdirSync(dir, { recursive: true })
+  runGit(dir, ['init', '-b', 'main'], '')
+  runGit(dir, ['config', 'user.email', 'test@test.com'])
+  runGit(dir, ['config', 'user.name', 'Test'])
+  return dir
+}
+
+function commitFileAt(dir: string, file: string, content: string): string {
+  writeFileSync(join(dir, file), content)
+  runGit(dir, ['add', file])
+  runGit(dir, ['commit', '-m', `add ${file}`])
+  return runGit(dir, ['rev-parse', 'HEAD']).stdout.trim()
+}
+
+function revOf(dir: string, ref: string): string {
+  return runGit(dir, ['rev-parse', '--verify', ref], '').stdout.trim()
+}
+
+function bundleOf(dir: string, name: string): Buffer {
+  const bundlePath = join(getTmpRoot(), `${name}.bundle`)
+  runGit(dir, ['bundle', 'create', bundlePath, '--all'])
+  return readFileSync(bundlePath)
+}
 
 interface BeginResponse {
   uploadId: string
@@ -148,11 +189,30 @@ describe('internal-repo-mirror routes', () => {
     setTmpRoot(tmpRootValue)
     mkdirSync(tmpRootValue, { recursive: true })
     app = new Hono()
-    app.route('/api/internal/repos', createInternalRepoMirrorRoutes({} as any))
+    app.route('/api/internal/repos', createInternalRepoMirrorRoutes({} as any, mockOpenCodeClient as any, mockGitAuthService as any, mockRepoWorkspaces as any))
     mockGetActiveDirectories.mockReturnValue([])
+    mockSafeGitOut.mockImplementation(async (dir: string, args: string[]) => {
+      const result = runGit(dir, args, '')
+      return result.status === 0 ? result.stdout : null
+    })
     mockEnsureMirrorTargetPath.mockReturnValue({ localPath: 'test-repo', fullPath: join(getTmpRoot(), 'test-repo') })
     mockCreateRepoRow.mockImplementation((_db: any, input: any) => ({ repo: { id: 1, fullPath: input.fullPath, localPath: input.localPath }, created: true }))
     mockIsRepoInUse.mockReturnValue(false)
+    mockIsDirectoryInUse.mockReturnValue(false)
+    mockResolveRepoWorkingDirectory.mockImplementation(async (repo: any, directory: string | undefined) => {
+      if (directory === undefined || directory === repo.fullPath) return repo.fullPath
+      return null
+    })
+    mockSiblingRows = []
+    mockListRepoSiblings.mockImplementation(async (...args: unknown[]) => {
+      const filter = args[4]
+      return typeof filter === 'function'
+        ? mockSiblingRows.filter(filter as (sibling: Record<string, unknown>) => boolean)
+        : mockSiblingRows
+    })
+    mockListGitWorktrees.mockResolvedValue([])
+    mockGetGitEnvironment.mockReturnValue({})
+    mockRepoWorkspaces.create.mockReset()
     mockGetRepoById.mockReturnValue(null)
   })
 
@@ -244,32 +304,66 @@ describe('internal-repo-mirror routes', () => {
 
   describe('GET /:repoId/mirror/head', () => {
     it('returns head, branch and dirty state for the manager repo', async () => {
-      mockGetRepoById.mockReturnValue({ id: 7, fullPath: join(getTmpRoot(), 'repo7') })
-      mockSafeGitOut.mockImplementation((_path: string, args: string[]) => {
-        if (args[0] === 'rev-parse' && args[1] === '--abbrev-ref') return Promise.resolve('feature\n')
-        if (args[0] === 'rev-parse') return Promise.resolve('abc123\n')
-        if (args[0] === 'status') return Promise.resolve(' M file.txt\n')
-        return Promise.resolve(null)
-      })
+      const repoDir = initRepoAt(join(getTmpRoot(), 'head-repo'))
+      const head = commitFileAt(repoDir, 'tracked.txt', 'first\n')
+      runGit(repoDir, ['checkout', '-b', 'feature'])
+      writeFileSync(join(repoDir, 'tracked.txt'), 'dirty\n')
+      mockGetRepoById.mockReturnValue({ id: 7, fullPath: repoDir })
 
       const res = await app.request('/api/internal/repos/7/mirror/head')
       expect(res.status).toBe(200)
       const json = (await res.json()) as { head: string; branch: string; dirty: boolean }
-      expect(json.head).toBe('abc123')
+      expect(json.head).toBe(head)
       expect(json.branch).toBe('feature')
       expect(json.dirty).toBe(true)
     })
 
+    it('reports a detached HEAD as a null branch', async () => {
+      const repoDir = initRepoAt(join(getTmpRoot(), 'head-detached'))
+      const head = commitFileAt(repoDir, 'tracked.txt', 'first\n')
+      runGit(repoDir, ['checkout', head])
+      mockGetRepoById.mockReturnValue({ id: 9, fullPath: repoDir })
+
+      const res = await app.request('/api/internal/repos/9/mirror/head')
+      expect(res.status).toBe(200)
+      const json = (await res.json()) as { branch: string | null }
+      expect(json.branch).toBeNull()
+    })
+
     it('reports a clean repo as not dirty', async () => {
-      mockGetRepoById.mockReturnValue({ id: 8, fullPath: join(getTmpRoot(), 'repo8') })
-      mockSafeGitOut.mockImplementation((_path: string, args: string[]) => {
-        if (args[0] === 'status') return Promise.resolve('')
-        return Promise.resolve('abc123\n')
-      })
+      const repoDir = initRepoAt(join(getTmpRoot(), 'head-clean'))
+      commitFileAt(repoDir, 'tracked.txt', 'first\n')
+      mockGetRepoById.mockReturnValue({ id: 8, fullPath: repoDir })
 
       const res = await app.request('/api/internal/repos/8/mirror/head')
       const json = (await res.json()) as { dirty: boolean }
       expect(json.dirty).toBe(false)
+    })
+
+    it('reads the checkout state of a directory inside the repository', async () => {
+      const repoDir = initRepoAt(join(getTmpRoot(), 'head-base'))
+      commitFileAt(repoDir, 'main.txt', 'base\n')
+      const worktreeDir = join(getTmpRoot(), 'head-worktree')
+      runGit(repoDir, ['worktree', 'add', '-b', 'side', worktreeDir])
+      const sideHead = revOf(worktreeDir, 'HEAD')
+      mockGetRepoById.mockReturnValue({ id: 7, fullPath: repoDir })
+      mockResolveRepoWorkingDirectory.mockResolvedValue(worktreeDir)
+
+      const res = await app.request(`/api/internal/repos/7/mirror/head?directory=${encodeURIComponent(worktreeDir)}`)
+      expect(res.status).toBe(200)
+      const json = (await res.json()) as { head: string; branch: string }
+      expect(json.branch).toBe('side')
+      expect(json.head).toBe(sideHead)
+    })
+
+    it('returns 400 when the directory is not part of the repository', async () => {
+      mockGetRepoById.mockReturnValue({ id: 7, fullPath: join(getTmpRoot(), 'head-repo') })
+      mockResolveRepoWorkingDirectory.mockResolvedValue(null)
+
+      const res = await app.request('/api/internal/repos/7/mirror/head?directory=/elsewhere')
+      expect(res.status).toBe(400)
+      const json = (await res.json()) as { error: string }
+      expect(json.error).toBe('Directory is not part of this repository')
     })
 
     it('returns 404 for a non-existent repo', async () => {
@@ -303,6 +397,29 @@ describe('internal-repo-mirror routes', () => {
       mockGetRepoById.mockReturnValue({ id: 7, fullPath: join(getTmpRoot(), 'repo7') })
       const res = await app.request('/api/internal/repos/7/mirror/contains/not-a-sha')
       expect(res.status).toBe(400)
+    })
+
+    it('checks containment against a directory inside the repository', async () => {
+      const worktreeDir = join(getTmpRoot(), 'contains-worktree')
+      mockGetRepoById.mockReturnValue({ id: 7, fullPath: join(getTmpRoot(), 'repo7') })
+      mockResolveRepoWorkingDirectory.mockResolvedValue(worktreeDir)
+      mockSafeGitOut.mockResolvedValue('')
+
+      const res = await app.request(`/api/internal/repos/7/mirror/contains/abc1234?directory=${encodeURIComponent(worktreeDir)}`)
+      expect(res.status).toBe(200)
+      const json = (await res.json()) as { contained: boolean }
+      expect(json.contained).toBe(true)
+      expect(mockSafeGitOut).toHaveBeenCalledWith(worktreeDir, ['merge-base', '--is-ancestor', 'abc1234', 'HEAD'])
+    })
+
+    it('returns 400 when the directory is not part of the repository', async () => {
+      mockGetRepoById.mockReturnValue({ id: 7, fullPath: join(getTmpRoot(), 'repo7') })
+      mockResolveRepoWorkingDirectory.mockResolvedValue(null)
+
+      const res = await app.request('/api/internal/repos/7/mirror/contains/abc1234?directory=/elsewhere')
+      expect(res.status).toBe(400)
+      const json = (await res.json()) as { error: string }
+      expect(json.error).toBe('Directory is not part of this repository')
     })
   })
 
@@ -445,6 +562,46 @@ describe('internal-repo-mirror routes', () => {
       expect(readFileSync(join(baseDir, 'tracked.txt'), 'utf-8')).toBe('server main\n')
       expect(spawnSync('git', ['rev-parse', 'refs/heads/main'], { cwd: baseDir, encoding: 'utf-8' }).stdout.trim()).toBe(serverMainHead)
       expect(spawnSync('git', ['status', '--porcelain'], { cwd: baseDir, encoding: 'utf-8' }).stdout.trim()).toBe('')
+    })
+
+    it('checks out the target branch on a detached worktree while the main checkout keeps the source branch', async () => {
+      const sourceDir = initGitRepo('target-branch-source')
+      gitCommitFile(sourceDir, 'main.txt', 'source main\n')
+      gitCmd(sourceDir, ['checkout', '-b', 'feature'])
+      const incomingFeatureSha = gitCommitFile(sourceDir, 'feature.txt', 'source feature\n')
+      gitCmd(sourceDir, ['checkout', 'main'])
+      const bundle = makeBundle(sourceDir, 'target-branch')
+
+      const baseDir = initGitRepo('target-branch-base')
+      gitCommitFile(baseDir, 'main.txt', 'base main\n')
+      gitCmd(baseDir, ['checkout', '-b', 'feature'])
+      const baseFeatureSha = gitCommitFile(baseDir, 'base-feature.txt', 'base feature\n')
+
+      const worktreeDir = join(getTmpRoot(), 'target-branch-wt')
+      gitCmd(baseDir, ['worktree', 'add', '--detach', worktreeDir, baseFeatureSha])
+      expect(currentBranchOf(worktreeDir)).toBe('HEAD')
+
+      mockGetRepoById.mockReturnValue({ id: 1, fullPath: baseDir })
+      mockResolveRepoWorkingDirectory.mockResolvedValue(worktreeDir)
+
+      const res = await app.request(`/api/internal/repos/1/mirror/bundle?directory=${encodeURIComponent(worktreeDir)}`, {
+        method: 'POST',
+        body: bundle,
+        headers: {
+          'content-type': 'application/octet-stream',
+          'x-ocm-branch': 'feature',
+          'x-ocm-target-branch': 'feature-ocm',
+        },
+      })
+
+      expect(res.status).toBe(200)
+      expect(currentBranchOf(worktreeDir)).toBe('feature-ocm')
+      expect(revRef(worktreeDir, 'HEAD')).toBe(incomingFeatureSha)
+      expect(revRef(worktreeDir, 'refs/heads/feature-ocm')).toBe(incomingFeatureSha)
+      expect(currentBranchOf(baseDir)).toBe('feature')
+      expect(revRef(baseDir, 'refs/heads/feature')).toBe(baseFeatureSha)
+      expect(mockUpdateLastPulled).not.toHaveBeenCalled()
+      expect(mockUpdateRepoBranch).not.toHaveBeenCalled()
     })
 
     function gitCmd(cwd: string, args: string[], input?: string) {
@@ -821,7 +978,7 @@ describe('internal-repo-mirror routes', () => {
     it('returns a patch snapshot for pull fast path', async () => {
       const repoDir = join(getTmpRoot(), 'snapshot-repo')
       mkdirSync(repoDir, { recursive: true })
-      spawnSync('git', ['init'], { cwd: repoDir, stdio: 'ignore' })
+      spawnSync('git', ['init', '-b', 'main'], { cwd: repoDir, stdio: 'ignore' })
       spawnSync('git', ['config', 'user.email', 'test@test.com'], { cwd: repoDir, stdio: 'ignore' })
       spawnSync('git', ['config', 'user.name', 'Test'], { cwd: repoDir, stdio: 'ignore' })
       writeFileSync(join(repoDir, 'tracked.txt'), 'before\n')
@@ -1137,246 +1294,438 @@ describe('internal-repo-mirror routes', () => {
     })
   })
 
-  describe('GET /:repoId/mirror/target', () => {
-    let repo: { id: number; fullPath: string; localPath: string }
-
-    beforeEach(() => {
-      repo = { id: 1, fullPath: join(getTmpRoot(), 'test-repo'), localPath: 'test-repo' }
-    })
-
-    it('returns a new-worktree plan with repoId null when no worktree exists', async () => {
-      mockGetRepoById.mockReturnValue(repo)
-      mockPlanMirrorTarget.mockResolvedValue({ kind: 'new', localPath: 'test-repo-feature', fullPath: join(getTmpRoot(), 'test-repo-feature'), currentBranch: 'main' })
-
+  describe('legacy mirror target routes', () => {
+    it('returns 410 for the old GET contract', async () => {
       const res = await app.request('/api/internal/repos/1/mirror/target?branch=feature')
-
-      expect(res.status).toBe(200)
-      expect(await res.json()).toEqual({
-        kind: 'new',
-        repoId: null,
-        fullPath: join(getTmpRoot(), 'test-repo-feature'),
-        localPath: 'test-repo-feature',
-        branch: 'feature',
-        currentBranch: 'main',
-      })
-      expect(mockPlanMirrorTarget).toHaveBeenCalledWith({}, repo, 'feature')
+      expect(res.status).toBe(410)
+      const json = (await res.json()) as { error: string; message: string }
+      expect(json.error).toBe('cli_too_old')
+      expect(json.message).toMatch(/upgrade to ocm-cli/i)
     })
 
-    it('returns an in-place plan with the repo id', async () => {
-      mockGetRepoById.mockReturnValue(repo)
-      mockPlanMirrorTarget.mockResolvedValue({ kind: 'in-place', repo, currentBranch: 'feature' })
-
-      const res = await app.request('/api/internal/repos/1/mirror/target?branch=feature')
-
-      expect(res.status).toBe(200)
-      expect(await res.json()).toEqual({
-        kind: 'in-place',
-        repoId: 1,
-        fullPath: repo.fullPath,
-        localPath: 'test-repo',
-        branch: 'feature',
-        currentBranch: 'feature',
-      })
-    })
-
-    it('returns an existing-worktree plan with the worktree repo id', async () => {
-      mockGetRepoById.mockReturnValue(repo)
-      const worktreeRepo = { id: 5, fullPath: join(getTmpRoot(), 'test-repo-wt'), localPath: 'test-repo-wt' }
-      mockPlanMirrorTarget.mockResolvedValue({ kind: 'existing', repo: worktreeRepo, currentBranch: 'main' })
-
-      const res = await app.request('/api/internal/repos/1/mirror/target?branch=feature')
-
-      expect(res.status).toBe(200)
-      expect(await res.json()).toEqual({
-        kind: 'existing',
-        repoId: 5,
-        fullPath: worktreeRepo.fullPath,
-        localPath: 'test-repo-wt',
-        branch: 'feature',
-        currentBranch: 'main',
-      })
-    })
-
-    it('returns 400 for a missing branch without calling the plan service', async () => {
-      const res = await app.request('/api/internal/repos/1/mirror/target')
-
-      expect(res.status).toBe(400)
-      const json = (await res.json()) as { error: string }
-      expect(json.error).toBe('branch required')
-      expect(mockPlanMirrorTarget).not.toHaveBeenCalled()
-      expect(mockGetRepoById).not.toHaveBeenCalled()
-    })
-
-    it('returns 400 for a whitespace-only branch without calling the plan service', async () => {
-      const res = await app.request('/api/internal/repos/1/mirror/target?branch=%20%20%20')
-
-      expect(res.status).toBe(400)
-      const json = (await res.json()) as { error: string }
-      expect(json.error).toBe('branch required')
-      expect(mockPlanMirrorTarget).not.toHaveBeenCalled()
-    })
-
-    it('trims the branch before calling the plan service', async () => {
-      mockGetRepoById.mockReturnValue(repo)
-      mockPlanMirrorTarget.mockResolvedValue({ kind: 'in-place', repo, currentBranch: 'feature' })
-
-      await app.request('/api/internal/repos/1/mirror/target?branch=%20feature%20')
-
-      expect(mockPlanMirrorTarget).toHaveBeenCalledWith({}, repo, 'feature')
-    })
-
-    it('returns 400 for an invalid repoId', async () => {
-      const res = await app.request('/api/internal/repos/abc/mirror/target?branch=feature')
-
-      expect(res.status).toBe(400)
-      expect(mockPlanMirrorTarget).not.toHaveBeenCalled()
-    })
-
-    it('returns 404 for a non-existent repo', async () => {
-      mockGetRepoById.mockReturnValue(null)
-
-      const res = await app.request('/api/internal/repos/99999/mirror/target?branch=feature')
-
-      expect(res.status).toBe(404)
-      expect(mockPlanMirrorTarget).not.toHaveBeenCalled()
-    })
-
-    it('returns 500 when planning fails', async () => {
-      mockGetRepoById.mockReturnValue(repo)
-      mockPlanMirrorTarget.mockRejectedValue(new Error('worktree occupied'))
-
-      const res = await app.request('/api/internal/repos/1/mirror/target?branch=feature')
-
-      expect(res.status).toBe(500)
-      const json = (await res.json()) as { error: string }
-      expect(json.error).toContain('worktree occupied')
-    })
-  })
-
-  describe('POST /:repoId/mirror/target', () => {
-    let repo: { id: number; fullPath: string; localPath: string }
-
-    beforeEach(() => {
-      repo = { id: 1, fullPath: join(getTmpRoot(), 'test-repo'), localPath: 'test-repo' }
-    })
-
-    async function request(branchBody: unknown): Promise<Response> {
+    it('returns 410 for the old POST contract', async () => {
       const res = await app.request('/api/internal/repos/1/mirror/target', {
-        method: 'POST',
-        body: JSON.stringify(branchBody),
-        headers: { 'content-type': 'application/json' },
-      })
-      return res
-    }
-
-    it('ensures the target and returns the target repo contract', async () => {
-      mockGetRepoById.mockReturnValue(repo)
-      const targetRepo = { id: 5, fullPath: join(getTmpRoot(), 'test-repo-wt'), localPath: 'test-repo-wt' }
-      mockEnsureMirrorTarget.mockResolvedValue({ repo: targetRepo, created: true })
-
-      const res = await request({ branch: 'feature' })
-
-      expect(res.status).toBe(200)
-      expect(await res.json()).toEqual({
-        repoId: 5,
-        fullPath: targetRepo.fullPath,
-        localPath: 'test-repo-wt',
-        branch: 'feature',
-        created: true,
-      })
-      expect(mockEnsureMirrorTarget).toHaveBeenCalledWith({}, repo, 'feature')
-    })
-
-    it('reports created=false when the target already exists', async () => {
-      mockGetRepoById.mockReturnValue(repo)
-      mockEnsureMirrorTarget.mockResolvedValue({ repo, created: false })
-
-      const res = await request({ branch: 'feature' })
-
-      expect(res.status).toBe(200)
-      const json = (await res.json()) as { created: boolean; repoId: number }
-      expect(json.created).toBe(false)
-      expect(json.repoId).toBe(1)
-    })
-
-    it('returns 400 for malformed JSON body without calling services', async () => {
-      const res = await app.request('/api/internal/repos/1/mirror/target', {
-        method: 'POST',
-        body: 'not json{',
-        headers: { 'content-type': 'application/json' },
-      })
-
-      expect(res.status).toBe(400)
-      expect(mockEnsureMirrorTarget).not.toHaveBeenCalled()
-      expect(mockGetRepoById).not.toHaveBeenCalled()
-    })
-
-    it('returns 400 for a missing branch without calling services', async () => {
-      const res = await request({})
-
-      expect(res.status).toBe(400)
-      const json = (await res.json()) as { error: string }
-      expect(json.error).toBe('branch required')
-      expect(mockEnsureMirrorTarget).not.toHaveBeenCalled()
-      expect(mockGetRepoById).not.toHaveBeenCalled()
-    })
-
-    it.each([
-      ['null branch', null],
-      ['numeric branch', 123],
-      ['object branch', { branch: 'feature' }],
-    ])('returns 400 for %s without calling services', async (_label, branchValue) => {
-      const res = await request({ branch: branchValue })
-
-      expect(res.status).toBe(400)
-      expect(mockEnsureMirrorTarget).not.toHaveBeenCalled()
-    })
-
-    it('returns 400 for a whitespace-only branch without calling services', async () => {
-      const res = await request({ branch: '   ' })
-
-      expect(res.status).toBe(400)
-      expect(mockEnsureMirrorTarget).not.toHaveBeenCalled()
-    })
-
-    it('trims the branch before calling the ensure service', async () => {
-      mockGetRepoById.mockReturnValue(repo)
-      mockEnsureMirrorTarget.mockResolvedValue({ repo, created: false })
-
-      await request({ branch: '  feature  ' })
-
-      expect(mockEnsureMirrorTarget).toHaveBeenCalledWith({}, repo, 'feature')
-    })
-
-    it('returns 400 for an invalid repoId', async () => {
-      const res = await app.request('/api/internal/repos/abc/mirror/target', {
         method: 'POST',
         body: JSON.stringify({ branch: 'feature' }),
         headers: { 'content-type': 'application/json' },
       })
+      expect(res.status).toBe(410)
+      const json = (await res.json()) as { error: string }
+      expect(json.error).toBe('cli_too_old')
+    })
+  })
+
+  describe('GET /:repoId/mirror/checkouts', () => {
+    let baseDir: string
+
+    beforeEach(() => {
+      baseDir = initRepoAt(join(getTmpRoot(), 'checkouts-base'))
+      commitFileAt(baseDir, 'main.txt', 'base\n')
+      runGit(baseDir, ['checkout', '-b', 'feature'])
+      commitFileAt(baseDir, 'feature.txt', 'feature\n')
+      runGit(baseDir, ['checkout', 'main'])
+      mockGetRepoById.mockReturnValue({ id: 1, fullPath: baseDir, localPath: 'checkouts-base' })
+    })
+
+    function addWorktree(branch: string, dirName: string): string {
+      const dir = join(getTmpRoot(), dirName)
+      runGit(baseDir, ['worktree', 'add', '-b', branch, dir])
+      return dir
+    }
+
+    it('orders matching worktrees, includes legacy repo rows and excludes schedule worktrees', async () => {
+      const featureHead = revOf(baseDir, 'refs/heads/feature')
+      const wtFeature = join(getTmpRoot(), 'checkouts-wt-feature')
+      runGit(baseDir, ['worktree', 'add', wtFeature, 'feature'])
+      const wtFeatureOcm = addWorktree('feature-ocm', 'checkouts-wt-ocm')
+      const legacyDir = addWorktree('feature-ocm-2', 'checkouts-legacy')
+      const wtFeatureOcm3 = addWorktree('feature-ocm-3', 'checkouts-wt-ocm-3')
+      const scheduleDir = join(getTmpRoot(), 'checkouts-schedule')
+
+      mockSiblingRows = [
+        { id: -1, fullPath: wtFeature, worktreeSource: 'opencode', isWorktree: true },
+        { id: -1, fullPath: wtFeatureOcm, worktreeSource: 'opencode', isWorktree: true },
+        { id: 5, fullPath: legacyDir, isWorktree: true },
+        { id: -1, fullPath: scheduleDir, worktreeSource: 'schedule', isWorktree: true },
+        { id: -1, fullPath: wtFeatureOcm3, worktreeSource: 'git', isWorktree: true },
+      ]
+      mockListGitWorktrees.mockResolvedValue([
+        { path: baseDir, branch: 'main' },
+        { path: wtFeature, branch: 'feature' },
+        { path: wtFeatureOcm, branch: 'feature-ocm' },
+        { path: legacyDir, branch: 'feature-ocm-2' },
+        { path: wtFeatureOcm3, branch: 'feature-ocm-3' },
+      ])
+
+      const res = await app.request('/api/internal/repos/1/mirror/checkouts?branch=feature')
+
+      expect(res.status).toBe(200)
+      const mainHead = revOf(baseDir, 'HEAD')
+      expect(await res.json()).toEqual({
+        main: { directory: baseDir, branch: 'main', head: mainHead, dirty: false },
+        worktrees: [
+          { directory: wtFeature, branch: 'feature', head: featureHead, dirty: false },
+          { directory: wtFeatureOcm, branch: 'feature-ocm', head: mainHead, dirty: false },
+          { directory: legacyDir, branch: 'feature-ocm-2', head: mainHead, dirty: false },
+          { directory: wtFeatureOcm3, branch: 'feature-ocm-3', head: mainHead, dirty: false },
+        ],
+        branchHead: featureHead,
+        branchCheckedOut: true,
+        suffixedWorktreeBranch: 'feature-ocm-4',
+      })
+    })
+
+    it('reports an absent branch with no worktrees and a free suffixed name', async () => {
+      mockListGitWorktrees.mockResolvedValue([{ path: baseDir, branch: 'main' }])
+
+      const res = await app.request('/api/internal/repos/1/mirror/checkouts?branch=ghost')
+
+      expect(res.status).toBe(200)
+      expect(await res.json()).toEqual({
+        main: { directory: baseDir, branch: 'main', head: revOf(baseDir, 'HEAD'), dirty: false },
+        worktrees: [],
+        branchHead: null,
+        branchCheckedOut: false,
+        suffixedWorktreeBranch: 'ghost-ocm',
+      })
+    })
+
+    it('skips suffixed names that already exist as local branches', async () => {
+      runGit(baseDir, ['branch', 'feature-ocm'])
+      runGit(baseDir, ['branch', 'feature-ocm-2'])
+      mockListGitWorktrees.mockResolvedValue([{ path: baseDir, branch: 'main' }])
+
+      const res = await app.request('/api/internal/repos/1/mirror/checkouts?branch=feature')
+
+      expect(res.status).toBe(200)
+      const json = (await res.json()) as { suffixedWorktreeBranch: string; branchCheckedOut: boolean; worktrees: unknown[] }
+      expect(json.suffixedWorktreeBranch).toBe('feature-ocm-3')
+      expect(json.branchCheckedOut).toBe(false)
+      expect(json.worktrees).toEqual([])
+    })
+
+    it('returns 400 for a missing branch', async () => {
+      const res = await app.request('/api/internal/repos/1/mirror/checkouts')
 
       expect(res.status).toBe(400)
-      expect(mockEnsureMirrorTarget).not.toHaveBeenCalled()
+      const json = (await res.json()) as { error: string }
+      expect(json.error).toBe('branch required')
+      expect(mockGetRepoById).not.toHaveBeenCalled()
+    })
+
+    it.each(['-x', 'a..b'])('returns 400 for the invalid branch name %s', async (branch) => {
+      const res = await app.request(`/api/internal/repos/1/mirror/checkouts?branch=${encodeURIComponent(branch)}`)
+
+      expect(res.status).toBe(400)
+      const json = (await res.json()) as { error: string }
+      expect(json.error).toBe('invalid branch name')
+      expect(mockListGitWorktrees).not.toHaveBeenCalled()
+    })
+
+    it('accepts a valid branch name', async () => {
+      mockListGitWorktrees.mockResolvedValue([{ path: baseDir, branch: 'main' }])
+
+      const res = await app.request('/api/internal/repos/1/mirror/checkouts?branch=feature')
+
+      expect(res.status).toBe(200)
+    })
+
+    it('returns 400 for an invalid repoId', async () => {
+      const res = await app.request('/api/internal/repos/abc/mirror/checkouts?branch=feature')
+
+      expect(res.status).toBe(400)
     })
 
     it('returns 404 for a non-existent repo', async () => {
       mockGetRepoById.mockReturnValue(null)
 
-      const res = await request({ branch: 'feature' })
+      const res = await app.request('/api/internal/repos/99999/mirror/checkouts?branch=feature')
 
       expect(res.status).toBe(404)
-      expect(mockEnsureMirrorTarget).not.toHaveBeenCalled()
+    })
+  })
+
+  describe('POST /:repoId/mirror/worktree', () => {
+    let baseDir: string
+    let repo: { id: number; fullPath: string; localPath: string }
+
+    beforeEach(() => {
+      baseDir = initRepoAt(join(getTmpRoot(), 'wt-base'))
+      commitFileAt(baseDir, 'main.txt', 'base\n')
+      repo = { id: 1, fullPath: baseDir, localPath: 'wt-base' }
+      mockGetRepoById.mockReturnValue(repo)
     })
 
-    it('returns 409 when ensure fails', async () => {
-      mockGetRepoById.mockReturnValue(repo)
-      mockEnsureMirrorTarget.mockRejectedValue(new Error('git worktree add failed'))
+    async function request(body: Buffer, headers: Record<string, string>): Promise<Response> {
+      return app.request('/api/internal/repos/1/mirror/worktree', {
+        method: 'POST',
+        body,
+        headers: { 'content-type': 'application/octet-stream', ...headers },
+      })
+    }
 
-      const res = await request({ branch: 'feature' })
+    it('streams a bundle into a new worktree and reports its checkout state', async () => {
+      const sourceDir = initRepoAt(join(getTmpRoot(), 'wt-source'))
+      commitFileAt(sourceDir, 'main.txt', 'source main\n')
+      runGit(sourceDir, ['checkout', '-b', 'feature'])
+      const incomingFeatureSha = commitFileAt(sourceDir, 'feature.txt', 'source feature\n')
+      runGit(sourceDir, ['checkout', 'main'])
+      const bundle = bundleOf(sourceDir, 'wt-source')
+
+      const worktreeDir = join(getTmpRoot(), 'wt-created')
+      runGit(baseDir, ['worktree', 'add', '-b', 'feature-ocm', worktreeDir])
+
+      mockListGitWorktrees.mockResolvedValue([{ path: baseDir, branch: 'main' }])
+      mockRepoWorkspaces.create.mockImplementation(async (_repo: unknown, options: { initialize: (directory: string) => Promise<void> }) => {
+        await options.initialize(worktreeDir)
+        return { directory: worktreeDir, worktreeSetup: { status: 'none' } }
+      })
+
+      const res = await request(bundle, { 'x-ocm-branch': 'feature', 'x-ocm-target-branch': 'feature-ocm' })
+
+      expect(res.status).toBe(200)
+      expect(await res.json()).toEqual({
+        repoId: 1,
+        fullPath: worktreeDir,
+        branch: 'feature-ocm',
+        head: incomingFeatureSha,
+        created: true,
+        worktreeSetup: { status: 'none' },
+      })
+      expect(mockRepoWorkspaces.create).toHaveBeenCalledWith(
+        expect.objectContaining({ id: 1, fullPath: baseDir }),
+        expect.objectContaining({ name: sanitizeRepoDirectoryName('feature-ocm', 'move') }),
+      )
+      expect(readFileSync(join(worktreeDir, 'feature.txt'), 'utf-8')).toBe('source feature\n')
+    })
+
+    it('applies the leading working-tree patch inside initialize before the worktree is reported', async () => {
+      const sourceDir = initRepoAt(join(getTmpRoot(), 'wt-patch-source'))
+      commitFileAt(sourceDir, 'main.txt', 'source main\n')
+      runGit(sourceDir, ['checkout', '-b', 'feature'])
+      commitFileAt(sourceDir, 'feature.txt', 'source feature\n')
+      const bundle = bundleOf(sourceDir, 'wt-patch-source')
+
+      writeFileSync(join(sourceDir, 'main.txt'), 'patched main\n')
+      writeFileSync(join(sourceDir, 'untracked.txt'), 'patched untracked\n')
+      runGit(sourceDir, ['add', '-N', 'untracked.txt'])
+      const patchBuf = Buffer.from(runGit(sourceDir, ['diff', '--binary', 'HEAD']).stdout, 'utf-8')
+
+      const worktreeDir = join(getTmpRoot(), 'wt-patch-created')
+      runGit(baseDir, ['worktree', 'add', '-b', 'feature-ocm', worktreeDir])
+
+      mockListGitWorktrees.mockResolvedValue([{ path: baseDir, branch: 'main' }])
+      let mainDuringInitialize: string | undefined
+      let untrackedDuringInitialize: string | undefined
+      mockRepoWorkspaces.create.mockImplementation(async (_repo: unknown, options: { initialize: (directory: string) => Promise<void> }) => {
+        await options.initialize(worktreeDir)
+        mainDuringInitialize = readFileSync(join(worktreeDir, 'main.txt'), 'utf-8')
+        untrackedDuringInitialize = readFileSync(join(worktreeDir, 'untracked.txt'), 'utf-8')
+        return { directory: worktreeDir, worktreeSetup: { status: 'none' } }
+      })
+
+      const res = await request(Buffer.concat([patchBuf, bundle]), {
+        'x-ocm-branch': 'feature',
+        'x-ocm-target-branch': 'feature-ocm',
+        'x-ocm-patch-bytes': String(patchBuf.length),
+      })
+
+      expect(res.status).toBe(200)
+      expect(mainDuringInitialize).toBe('patched main\n')
+      expect(untrackedDuringInitialize).toBe('patched untracked\n')
+      expect(readFileSync(join(worktreeDir, 'main.txt'), 'utf-8')).toBe('patched main\n')
+      expect(readFileSync(join(worktreeDir, 'untracked.txt'), 'utf-8')).toBe('patched untracked\n')
+    })
+
+    it.each(['abc', '-1', '1.5'])('returns 400 for an invalid x-ocm-patch-bytes value %s', async (value) => {
+      const res = await request(Buffer.from('bundle'), {
+        'x-ocm-branch': 'feature',
+        'x-ocm-target-branch': 'feature-ocm',
+        'x-ocm-patch-bytes': value,
+      })
+
+      expect(res.status).toBe(400)
+      const json = (await res.json()) as { error: string }
+      expect(json.error).toBe('invalid patch length')
+      expect(mockListGitWorktrees).not.toHaveBeenCalled()
+      expect(mockRepoWorkspaces.create).not.toHaveBeenCalled()
+    })
+
+    it('returns 409 when the declared patch length exceeds the body', async () => {
+      mockListGitWorktrees.mockResolvedValue([{ path: baseDir, branch: 'main' }])
+
+      const res = await request(Buffer.from('bundle-bytes'), {
+        'x-ocm-branch': 'feature',
+        'x-ocm-target-branch': 'feature-ocm',
+        'x-ocm-patch-bytes': '999999',
+      })
 
       expect(res.status).toBe(409)
       const json = (await res.json()) as { error: string }
-      expect(json.error).toContain('git worktree add failed')
+      expect(json.error).toContain('patch length')
+      expect(mockRepoWorkspaces.create).not.toHaveBeenCalled()
+    })
+
+    it('returns 409 when the target branch is already checked out', async () => {
+      mockListGitWorktrees.mockResolvedValue([{ path: baseDir, branch: 'feature-ocm' }])
+
+      const res = await request(Buffer.from('bundle'), { 'x-ocm-branch': 'feature', 'x-ocm-target-branch': 'feature-ocm' })
+
+      expect(res.status).toBe(409)
+      const json = (await res.json()) as { error: string }
+      expect(json.error).toBe('branch_in_use')
+      expect(mockRepoWorkspaces.create).not.toHaveBeenCalled()
+    })
+
+    it('returns 400 when the branch header is missing', async () => {
+      const res = await request(Buffer.from('bundle'), { 'x-ocm-target-branch': 'feature-ocm' })
+
+      expect(res.status).toBe(400)
+      expect(mockRepoWorkspaces.create).not.toHaveBeenCalled()
+    })
+
+    it('returns 400 when the target branch header is missing', async () => {
+      const res = await request(Buffer.from('bundle'), { 'x-ocm-branch': 'feature' })
+
+      expect(res.status).toBe(400)
+      expect(mockRepoWorkspaces.create).not.toHaveBeenCalled()
+    })
+
+    it.each(['-x', 'a..b'])('returns 400 when the branch header is %s', async (branch) => {
+      const res = await request(Buffer.from('bundle'), { 'x-ocm-branch': branch, 'x-ocm-target-branch': 'feature-ocm' })
+
+      expect(res.status).toBe(400)
+      const json = (await res.json()) as { error: string }
+      expect(json.error).toBe('invalid branch name')
+      expect(mockListGitWorktrees).not.toHaveBeenCalled()
+      expect(mockRepoWorkspaces.create).not.toHaveBeenCalled()
+    })
+
+    it.each(['-x', 'a..b'])('returns 400 when the target branch header is %s', async (targetBranch) => {
+      const res = await request(Buffer.from('bundle'), { 'x-ocm-branch': 'feature', 'x-ocm-target-branch': targetBranch })
+
+      expect(res.status).toBe(400)
+      const json = (await res.json()) as { error: string }
+      expect(json.error).toBe('invalid branch name')
+      expect(mockListGitWorktrees).not.toHaveBeenCalled()
+      expect(mockRepoWorkspaces.create).not.toHaveBeenCalled()
+    })
+
+    it('returns 400 for an invalid repoId', async () => {
+      const res = await app.request('/api/internal/repos/abc/mirror/worktree', {
+        method: 'POST',
+        body: Buffer.from('bundle'),
+        headers: { 'content-type': 'application/octet-stream', 'x-ocm-branch': 'feature', 'x-ocm-target-branch': 'feature-ocm' },
+      })
+
+      expect(res.status).toBe(400)
+      expect(mockRepoWorkspaces.create).not.toHaveBeenCalled()
+    })
+
+    it('returns 404 for a non-existent repo', async () => {
+      mockGetRepoById.mockReturnValue(null)
+
+      const res = await request(Buffer.from('bundle'), { 'x-ocm-branch': 'feature', 'x-ocm-target-branch': 'feature-ocm' })
+
+      expect(res.status).toBe(404)
+      expect(mockRepoWorkspaces.create).not.toHaveBeenCalled()
+    })
+
+    it('returns 409 when worktree creation fails', async () => {
+      mockListGitWorktrees.mockResolvedValue([{ path: baseDir, branch: 'main' }])
+      mockRepoWorkspaces.create.mockRejectedValue(new Error('worktree create failed'))
+
+      const res = await request(Buffer.from('bundle'), { 'x-ocm-branch': 'feature', 'x-ocm-target-branch': 'feature-ocm' })
+
+      expect(res.status).toBe(409)
+      const json = (await res.json()) as { error: string }
+      expect(json.error).toContain('worktree create failed')
+    })
+  })
+
+  describe('mirror directory scoping', () => {
+    it('serves a bundle for a directory inside the repository', async () => {
+      const repoDir = initRepoAt(join(getTmpRoot(), 'dir-bundle-base'))
+      commitFileAt(repoDir, 'main.txt', 'base\n')
+      const worktreeDir = join(getTmpRoot(), 'dir-bundle-wt')
+      runGit(repoDir, ['worktree', 'add', '-b', 'side', worktreeDir])
+      mockGetRepoById.mockReturnValue({ id: 1, fullPath: repoDir })
+      mockResolveRepoWorkingDirectory.mockResolvedValue(worktreeDir)
+
+      const res = await app.request(`/api/internal/repos/1/mirror/bundle?directory=${encodeURIComponent(worktreeDir)}`)
+
+      expect(res.status).toBe(200)
+      const body = Buffer.from(await res.arrayBuffer())
+      expect(body.length).toBeGreaterThan(0)
+    })
+
+    it('returns 400 when the bundle download directory is not part of the repository', async () => {
+      mockGetRepoById.mockReturnValue({ id: 1, fullPath: join(getTmpRoot(), 'repo') })
+      mockResolveRepoWorkingDirectory.mockResolvedValue(null)
+
+      const res = await app.request('/api/internal/repos/1/mirror/bundle?directory=/elsewhere')
+
+      expect(res.status).toBe(400)
+      const json = (await res.json()) as { error: string }
+      expect(json.error).toBe('Directory is not part of this repository')
+    })
+
+    it('serves a patch snapshot for a directory inside the repository', async () => {
+      const repoDir = initRepoAt(join(getTmpRoot(), 'dir-patch-base'))
+      commitFileAt(repoDir, 'main.txt', 'base\n')
+      const worktreeDir = join(getTmpRoot(), 'dir-patch-wt')
+      runGit(repoDir, ['worktree', 'add', '-b', 'side', worktreeDir])
+      writeFileSync(join(worktreeDir, 'main.txt'), 'changed\n')
+      mockGetRepoById.mockReturnValue({ id: 1, fullPath: repoDir })
+      mockResolveRepoWorkingDirectory.mockResolvedValue(worktreeDir)
+
+      const res = await app.request(`/api/internal/repos/1/mirror/patch?directory=${encodeURIComponent(worktreeDir)}`)
+
+      expect(res.status).toBe(200)
+      const json = (await res.json()) as { branch: string; patch: string }
+      expect(json.branch).toBe('side')
+      expect(json.patch).toContain('main.txt')
+    })
+
+    it('returns 400 when the patch download directory is not part of the repository', async () => {
+      mockGetRepoById.mockReturnValue({ id: 1, fullPath: join(getTmpRoot(), 'repo') })
+      mockResolveRepoWorkingDirectory.mockResolvedValue(null)
+
+      const res = await app.request('/api/internal/repos/1/mirror/patch?directory=/elsewhere')
+
+      expect(res.status).toBe(400)
+      const json = (await res.json()) as { error: string }
+      expect(json.error).toBe('Directory is not part of this repository')
+    })
+
+    it('returns 400 when the bundle directory is not part of the repository', async () => {
+      mockGetRepoById.mockReturnValue({ id: 1, fullPath: join(getTmpRoot(), 'repo') })
+      mockResolveRepoWorkingDirectory.mockResolvedValue(null)
+
+      const res = await app.request('/api/internal/repos/1/mirror/bundle?directory=/elsewhere', {
+        method: 'POST',
+        body: Buffer.from('bundle'),
+        headers: { 'content-type': 'application/octet-stream' },
+      })
+
+      expect(res.status).toBe(400)
+      const json = (await res.json()) as { error: string }
+      expect(json.error).toBe('Directory is not part of this repository')
+    })
+
+    it('returns 400 when the patch directory is not part of the repository', async () => {
+      mockGetRepoById.mockReturnValue({ id: 1, fullPath: join(getTmpRoot(), 'repo') })
+      mockResolveRepoWorkingDirectory.mockResolvedValue(null)
+
+      const res = await app.request('/api/internal/repos/1/mirror/patch', {
+        method: 'POST',
+        body: JSON.stringify({ patch: '', directory: '/elsewhere' }),
+        headers: { 'content-type': 'application/json' },
+      })
+
+      expect(res.status).toBe(400)
+      const json = (await res.json()) as { error: string }
+      expect(json.error).toBe('Directory is not part of this repository')
     })
   })
 })

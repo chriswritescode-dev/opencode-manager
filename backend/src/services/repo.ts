@@ -7,7 +7,7 @@ import type { Database } from 'bun:sqlite'
 import type { Repo, CreateRepoInput } from '../types/repo'
 import { logger } from '../utils/logger'
 import { getReposPath } from '@opencode-manager/shared/config/env'
-import { normalizeRepoDirectoryName, sanitizeRepoDirectoryName, sanitizeBranchForDirectory, getRepoBaseDirectoryName, normalizeRepoUrlForCompare, isSSHUrl, normalizeSSHUrl, SCP_STYLE_URL_PATTERN, ASSISTANT_REPO_ID, type RepoSibling, type RepoWorktreeSource } from '@opencode-manager/shared/utils'
+import { normalizeRepoDirectoryName, sanitizeRepoDirectoryName, sanitizeBranchForDirectory, normalizeRepoUrlForCompare, isSSHUrl, normalizeSSHUrl, SCP_STYLE_URL_PATTERN, ASSISTANT_REPO_ID, type RepoSibling, type RepoWorktreeSource } from '@opencode-manager/shared/utils'
 import type { GitAuthService } from './git-auth'
 import { isGitHubHttpsUrl } from '../utils/git-auth'
 import path from 'path'
@@ -1088,61 +1088,6 @@ export async function createWorktreeSafely(baseRepoPath: string, worktreePath: s
   }
 }
 
-export type MirrorTargetPlan =
-  | { kind: 'in-place'; repo: Repo; currentBranch: string | null }
-  | { kind: 'existing'; repo: Repo; currentBranch: string | null }
-  | { kind: 'new'; localPath: string; fullPath: string; currentBranch: string | null }
-
-export async function planMirrorTarget(database: Database, repo: Repo, branch: string): Promise<MirrorTargetPlan> {
-  const currentBranch = await safeGetCurrentBranch(repo.fullPath, {})
-  if (currentBranch === branch) return { kind: 'in-place', repo, currentBranch }
-
-  const localPath = `${getRepoBaseDirectoryName(repo)}-${sanitizeBranchForDirectory(branch)}`
-  const fullPath = path.join(getReposPath(), localPath)
-  const existing = getRepoByLocalPath(database, localPath)
-
-  if (existing) {
-    if (existing.branch !== branch) {
-      throw new Error(`Mirror target '${localPath}' is occupied by repo ${existing.id} registered for branch '${existing.branch ?? 'none'}' instead of '${branch}'`)
-    }
-
-    if (!existsSync(existing.fullPath)) {
-      throw new Error(`Repo ${existing.id} for branch '${branch}' is missing its worktree directory at '${existing.fullPath}'`)
-    }
-
-    const checkedOutBranch = await safeGetCurrentBranch(existing.fullPath, {})
-    if (checkedOutBranch !== branch) {
-      throw new Error(`Repo ${existing.id} for branch '${branch}' has branch '${checkedOutBranch ?? 'none'}' checked out at '${existing.fullPath}'`)
-    }
-
-    return { kind: 'existing', repo: existing, currentBranch }
-  }
-
-  return { kind: 'new', localPath, fullPath, currentBranch }
-}
-
-export async function ensureMirrorTarget(database: Database, repo: Repo, branch: string): Promise<{ repo: Repo; created: boolean }> {
-  const plan = await planMirrorTarget(database, repo, branch)
-  if (plan.kind !== 'new') return { repo: plan.repo, created: false }
-
-  await createWorktreeSafely(repo.fullPath, plan.fullPath, branch, {})
-
-  try {
-    const worktreeRepo = createRepo(database, repo.repoUrl
-      ? { repoUrl: repo.repoUrl, localPath: plan.localPath, branch, defaultBranch: branch, cloneStatus: 'ready', clonedAt: Date.now(), isWorktree: true }
-      : { isLocal: true, localPath: plan.localPath, branch, defaultBranch: branch, cloneStatus: 'ready', clonedAt: Date.now(), isWorktree: true })
-
-    if (worktreeRepo.localPath !== plan.localPath) {
-      throw new Error(`branch ${branch} is already registered as repo ${worktreeRepo.id} at ${worktreeRepo.fullPath}`)
-    }
-
-    return { repo: worktreeRepo, created: true }
-  } catch (error: unknown) {
-    await removeWorktree(repo.fullPath, plan.fullPath)
-    throw error
-  }
-}
-
 export function ensureMirrorTargetPath(name: string): { fullPath: string; localPath: string } {
   const slugified = name
     .toLowerCase()
@@ -1193,13 +1138,20 @@ export function createRepoRow(
   return { repo, created: true }
 }
 
+export function isDirectoryInUse(directory: string): boolean {
+  const target = canonicalPathSync(path.resolve(directory))
+  return sseAggregator.getActiveDirectories().some(
+    (activeDirectory) => canonicalPathSync(path.resolve(activeDirectory)) === target,
+  )
+}
+
 export function isRepoInUse(db: Database, repoId: number): boolean {
   const repo = getRepoById(db, repoId)
   if (!repo) {
     return false
   }
 
-  return sseAggregator.getActiveDirectories().includes(repo.fullPath)
+  return isDirectoryInUse(repo.fullPath)
 }
 
 export async function resolveRepoProjectId(openCodeClient: OpenCodeClient, directory: string): Promise<string> {
@@ -1350,6 +1302,21 @@ export async function getSiblingRepos(
     })
 
   return [...repoSiblings, ...worktreeSiblings]
+}
+
+/**
+ * Lists a repository's siblings in its OpenCode project without resolving their branches,
+ * optionally narrowed by a caller-supplied filter (for example worktree-only siblings).
+ */
+export async function listRepoSiblings(
+  database: Database,
+  repoId: number,
+  gitEnv: Record<string, string>,
+  openCodeClient: OpenCodeClient,
+  filter?: (sibling: RepoSibling) => boolean,
+): Promise<RepoSibling[]> {
+  const siblings = await getSiblingRepos(database, repoId, gitEnv, openCodeClient, { includeBranch: false })
+  return filter ? siblings.filter(filter) : siblings
 }
 
 async function listOpenCodeWorktrees(openCodeClient: OpenCodeClient | undefined, directory: string) {

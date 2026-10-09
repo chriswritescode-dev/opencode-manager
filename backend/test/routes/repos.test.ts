@@ -37,6 +37,7 @@ vi.mock('../../src/services/repo', () => ({
   createBranch: vi.fn(),
   deleteRepoFiles: vi.fn(),
   getSiblingRepos: vi.fn(),
+  listRepoSiblings: vi.fn(),
   resolveRepoOrAssistant: vi.fn(),
   findSiblingByDirectory: vi.fn(),
   resolveRepoWorkingDirectory: vi.fn(),
@@ -145,6 +146,7 @@ describe('Repo Routes', () => {
     vi.mocked(db.getRepoGitCredentialId).mockReturnValue(null)
     vi.mocked(db.getRepoSetting).mockReturnValue(null)
     vi.mocked(repoService.resolveRepoProjectId).mockResolvedValue('commit-A')
+    vi.mocked(repoService.listRepoSiblings).mockResolvedValue([])
     vi.mocked(repoService.resolveRepoOrAssistant).mockImplementation(
       (_database, id) => vi.mocked(db.getRepoById)(_database, id) ?? (id === ASSISTANT_REPO_ID ? buildAssistantRepo() : null),
     )
@@ -911,10 +913,13 @@ describe('Repo Routes', () => {
     it('removes terminals for OpenCode workspace siblings but not manager worktree repos', async () => {
       vi.mocked(db.getRepoById).mockReturnValue(createMockRepo({ id: 1, fullPath: '/tmp/repos/test-repo' }))
       vi.mocked(repoService.deleteRepoFiles).mockResolvedValue(undefined)
-      vi.mocked(repoService.getSiblingRepos).mockResolvedValue([
-        { ...createMockRepo({ id: 2, fullPath: '/tmp/repos/manager-worktree', isWorktree: true }), currentBranch: undefined },
-        { ...createMockRepo({ id: -1, fullPath: '/tmp/plugin-workspace' }), currentBranch: undefined, worktreeSource: 'opencode' },
-      ])
+      vi.mocked(repoService.listRepoSiblings).mockImplementation(async (_database, _repoId, _gitEnv, _client, filter) => {
+        const siblings = [
+          { ...createMockRepo({ id: 2, fullPath: '/tmp/repos/manager-worktree', isWorktree: true }), currentBranch: undefined },
+          { ...createMockRepo({ id: -1, fullPath: '/tmp/plugin-workspace' }), currentBranch: undefined, worktreeSource: 'opencode' as const },
+        ]
+        return filter ? siblings.filter(filter) : siblings
+      })
 
       const app = createTestRoutes()
       const res = await app.request('/1', { method: 'DELETE' })
@@ -923,14 +928,14 @@ describe('Repo Routes', () => {
       expect(mockTerminalService.removeAll).toHaveBeenCalledWith('/tmp/repos/test-repo')
       expect(mockTerminalService.removeAll).toHaveBeenCalledWith('/tmp/plugin-workspace')
       expect(mockTerminalService.removeAll).not.toHaveBeenCalledWith('/tmp/repos/manager-worktree')
-      expect(repoService.getSiblingRepos).toHaveBeenCalledWith(mockDb, 1, {}, expect.anything(), { includeBranch: false })
+      expect(repoService.listRepoSiblings).toHaveBeenCalledWith(mockDb, 1, {}, expect.anything(), expect.any(Function))
       expect(repoService.deleteRepoFiles).toHaveBeenCalledWith(mockDb, 1)
     })
 
     it('still deletes the repo when listing workspace siblings throws', async () => {
       vi.mocked(db.getRepoById).mockReturnValue(createMockRepo({ id: 1 }))
       vi.mocked(repoService.deleteRepoFiles).mockResolvedValue(undefined)
-      vi.mocked(repoService.getSiblingRepos).mockRejectedValue(new Error('siblings failed'))
+      vi.mocked(repoService.listRepoSiblings).mockRejectedValue(new Error('siblings failed'))
 
       const app = createTestRoutes()
       const res = await app.request('/1', { method: 'DELETE' })

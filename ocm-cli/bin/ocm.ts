@@ -5,7 +5,7 @@ import { readState, writeState, clearState, getStatePath, writeInstallNotice, ty
 import { installVendoredOcm, resolveOpenCodeConfigDir, InstallError, OCM_PLUGIN_SPEC } from '../src/vendor-install.js'
 import { setToken, deleteToken, hasStoredToken, describeTokenStore, describeTokenWriteTarget, envToken, TOKEN_ENV, TokenStoreError } from '../src/internal-token-store.js'
 import { ManagerApi, ManagerApiError } from '../src/manager-api.js'
-import { mirrorUp, mirrorDown, mirrorUpFast, mirrorDownFast, prepareMirror, MirrorAbort, checkPushDivergence, checkPullDivergence, describePushDivergence } from '../src/mirror.js'
+import { mirrorUp, mirrorDown, mirrorUpFast, mirrorDownFast, prepareMirror, MirrorAbort, checkPushDivergence, checkPullDivergence, describePushDivergence, resolveBranchCheckout } from '../src/mirror.js'
 import type { RemoteRepoSummary, MirrorProgress, PushDivergence, PullDivergence } from '../src/mirror.js'
 import { createProgressReporter } from '../src/progress.js'
 import { getBranchName, getOriginUrl } from '../src/local-repo.js'
@@ -408,9 +408,10 @@ export async function cmdPush(args: string[]): Promise<void> {
     progress.done()
     info(`pushed ${plan.repoRoot} -> ${result.created ? 'created' : 'updated'} (repoId=${result.repoId}, branch=${result.branch})`)
   } else if (plan.matched.length === 1) {
+    const selection = await resolveBranchCheckout(api, plan.matched[0]!.repoId, plan.repoRoot)
     if (!force) {
       try {
-        const divergence = await checkPushDivergence(plan.repoRoot, api, plan.matched[0]!.repoId)
+        const divergence = await checkPushDivergence(plan.repoRoot, api, plan.matched[0]!.repoId, selection.directory)
         if (divergence.diverged || divergence.serverDirty) {
           force = guardDivergentPush(plan.matched[0]!.name, divergence)
         }
@@ -418,12 +419,25 @@ export async function cmdPush(args: string[]): Promise<void> {
         if (!(error instanceof ManagerApiError && error.status === 404)) throw error
       }
     }
+    if (selection.directory && full) {
+      die(`a Manager worktree is checked out for branch ${selection.targetBranch ?? 'this branch'}; --full would overwrite the main checkout. Run without --full.`)
+    }
     if (!full) {
       try {
-        const result = await mirrorUpFast(plan, { api, force })
-        info(`pushed ${plan.repoRoot} -> ${plan.matched[0]!.name} via bundle (repoId=${result.repoId}, branch=${result.branch})`)
+        const result = await mirrorUpFast(plan, {
+          api,
+          force,
+          directory: selection.directory,
+          targetBranch: selection.targetBranch,
+          requireCurrentBranch: selection.directory !== undefined,
+        })
+        const via = selection.directory ? ` into Manager worktree ${selection.directory}` : ''
+        info(`pushed ${plan.repoRoot} -> ${plan.matched[0]!.name}${via} via bundle (repoId=${result.repoId}, branch=${result.branch})`)
         return
       } catch (error) {
+        if (selection.directory) {
+          die(`patch push to Manager worktree ${selection.directory} failed: ${error instanceof Error ? error.message : String(error)}. Not falling back to a full mirror because it would overwrite the main checkout.`)
+        }
         if (error instanceof MirrorAbort) throw error
         process.stderr.write(`ocm: patch push failed: ${error instanceof Error ? error.message : String(error)}\n`)
         confirmFullFallback()
@@ -439,7 +453,7 @@ export async function cmdPush(args: string[]): Promise<void> {
   }
 }
 
-async function cmdPull(args: string[]): Promise<void> {
+export async function cmdPull(args: string[]): Promise<void> {
   const parsed = parseRepoIdPositional(args, PULL_FLAGS)
   if (parsed.error) die(parsed.error)
   let force = false
@@ -469,9 +483,12 @@ async function cmdPull(args: string[]): Promise<void> {
     dieAmbiguousProjectMatch('pull', plan.localProjectId, repos, plan.matched)
   }
 
+  const localBranch = getBranchName(plan.repoRoot)
+  const selection = await resolveBranchCheckout(api, plan.matched[0]!.repoId, plan.repoRoot)
+
   if (!force) {
     try {
-      const divergence = await checkPullDivergence(plan.repoRoot, api, plan.matched[0]!.repoId)
+      const divergence = await checkPullDivergence(plan.repoRoot, api, plan.matched[0]!.repoId, selection.directory)
       if (divergence.diverged) {
         force = guardDivergentPull(plan.matched[0]!.name, divergence)
       }
@@ -480,12 +497,25 @@ async function cmdPull(args: string[]): Promise<void> {
     }
   }
 
+  if (selection.directory && full) {
+    die(`a Manager worktree is checked out for branch ${selection.targetBranch ?? 'this branch'}; --full cannot target it. Run without --full.`)
+  }
+
   if (!full) {
     try {
-      await mirrorDownFast(plan.matched[0]!.repoId, plan.repoRoot, api, { force })
-      info(`pulled ${plan.matched[0]!.name} -> ${plan.repoRoot} via bundle`)
+      await mirrorDownFast(plan.matched[0]!.repoId, plan.repoRoot, api, {
+        force,
+        directory: selection.directory,
+        sourceBranch: selection.targetBranch,
+        targetBranch: selection.targetBranch ? (localBranch ?? undefined) : undefined,
+      })
+      const from = selection.directory ? ` from Manager worktree ${selection.directory}` : ''
+      info(`pulled ${plan.matched[0]!.name}${from} -> ${plan.repoRoot} via bundle`)
       return
     } catch (error) {
+      if (selection.directory) {
+        die(`patch pull from Manager worktree ${selection.directory} failed: ${error instanceof Error ? error.message : String(error)}. Not falling back to a full mirror because it would overwrite the main checkout.`)
+      }
       if (error instanceof MirrorAbort && !error.message.includes('falling back')) throw error
       process.stderr.write(`ocm: patch pull failed: ${error instanceof Error ? error.message : String(error)}\n`)
       confirmFullFallback()

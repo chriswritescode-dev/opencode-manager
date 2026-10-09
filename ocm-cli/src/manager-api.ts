@@ -1,14 +1,14 @@
 import { createReadStream } from 'fs'
 import { Readable } from 'stream'
 import {
-  MirrorTargetEnsureResponseSchema,
-  MirrorTargetPlanResponseSchema,
+  MirrorCheckoutsResponseSchema,
+  MirrorWorktreeCreateResponseSchema,
   MultiRunSchema,
   SessionGoalSchema,
   type FuseMultiRunRequest,
   type LaunchMultiRunRequest,
-  type MirrorTargetEnsureResponse,
-  type MirrorTargetPlanResponse,
+  type MirrorCheckoutsResponse,
+  type MirrorWorktreeCreateResponse,
   type MultiRun,
   type SessionGoal,
   type StartSessionGoalRequest,
@@ -78,6 +78,13 @@ function createByteCounter(onProgress: (bytesSent: number) => void): TransformSt
 
 export const MANAGER_FEATURE_MISSING = 'MANAGER_FEATURE_MISSING'
 
+const DEFAULT_FEATURE_NAME = 'ocm goals and multi-runs'
+const MOVE_FEATURE_NAME = '/ocm-move worktrees'
+
+function directoryQuery(directory: string | undefined): string {
+  return directory ? `?${new URLSearchParams({ directory }).toString()}` : ''
+}
+
 export class ManagerApiError extends Error {
   constructor(
     message: string,
@@ -141,9 +148,9 @@ export class ManagerApi {
     path: string,
     operation: string,
     parse: (body: unknown) => T,
-    init?: RequestInit & { feature?: boolean },
+    init?: RequestInit & { feature?: boolean; featureName?: string },
   ): Promise<T> {
-    const { feature, ...requestInit } = init ?? {}
+    const { feature, featureName, ...requestInit } = init ?? {}
     const baseHeaders = this.headers(
       typeof requestInit.body === 'string' ? { 'Content-Type': 'application/json' } : {},
     )
@@ -151,25 +158,29 @@ export class ManagerApi {
       ...requestInit,
       headers: { ...baseHeaders, ...(requestInit.headers as Record<string, string> | undefined) },
     })
-    if (!res.ok) throw await this.handleErrorResponse(res, operation, feature === true, requestInit.signal ?? undefined)
+    if (!res.ok) {
+      const featureLabel = feature === true ? (featureName ?? DEFAULT_FEATURE_NAME) : null
+      throw await this.handleErrorResponse(res, operation, featureLabel, requestInit.signal ?? undefined)
+    }
     return parse(await res.json())
   }
 
   private async handleErrorResponse(
     res: Response,
     operation: string,
-    feature: boolean,
+    featureName: string | null,
     signal?: AbortSignal,
   ): Promise<ManagerApiError> {
     const error = await formatErrorResponse(res, operation)
-    if (feature && error.status === 401) {
-      return this.probeFeatureSupport(operation, error, signal)
+    if (featureName !== null && error.status === 401) {
+      return this.probeFeatureSupport(operation, featureName, error, signal)
     }
     return error
   }
 
   private async probeFeatureSupport(
     operation: string,
+    featureName: string,
     fallback: ManagerApiError,
     signal?: AbortSignal,
   ): Promise<ManagerApiError> {
@@ -177,7 +188,7 @@ export class ManagerApi {
       const res = await fetch(`${this.baseUrl}/api/internal/opencode-workspaces`, { headers: this.headers(), signal })
       if (res.ok) {
         return new ManagerApiError(
-          `${operation} failed: this OpenCode Manager is too old for ocm goals and multi-runs; upgrade the Manager.`,
+          `${operation} failed: this OpenCode Manager is too old for ${featureName}; upgrade the Manager.`,
           401,
           MANAGER_FEATURE_MISSING,
           operation,
@@ -244,11 +255,16 @@ export class ManagerApi {
     return res.body!
   }
 
-  async mirrorPatch(repoId: number, body: { baseHead: string | null; patch: string; force?: boolean }): Promise<MirrorPatchResult> {
+  async mirrorPatch(
+    repoId: number,
+    body: { baseHead: string | null; patch: string; force?: boolean; directory?: string },
+  ): Promise<MirrorPatchResult> {
+    const payload: Record<string, unknown> = { baseHead: body.baseHead, patch: body.patch, force: body.force === true }
+    if (body.directory) payload.directory = body.directory
     const res = await fetch(`${this.baseUrl}/api/internal/repos/${repoId}/mirror/patch`, {
       method: 'POST',
       headers: { ...this.headers(), 'Content-Type': 'application/json' },
-      body: JSON.stringify({ baseHead: body.baseHead, patch: body.patch, force: body.force === true }),
+      body: JSON.stringify(payload),
     })
 
     if (!res.ok) throw await formatErrorResponse(res, 'mirror patch')
@@ -258,12 +274,23 @@ export class ManagerApi {
   async mirrorUploadBundle(
     repoId: number,
     bundlePath: string,
-    opts: { branch: string | null; force?: boolean; requireCurrentBranch?: boolean; onProgress?: (bytesSent: number) => void },
+    opts: {
+      branch: string | null
+      force?: boolean
+      requireCurrentBranch?: boolean
+      directory?: string
+      targetBranch?: string
+      onProgress?: (bytesSent: number) => void
+    },
   ): Promise<MirrorBundleResult> {
-    const query = opts.force === true ? '?force=1' : ''
+    const params = new URLSearchParams()
+    if (opts.force === true) params.set('force', '1')
+    if (opts.directory) params.set('directory', opts.directory)
+    const query = params.size > 0 ? `?${params.toString()}` : ''
     const headers: Record<string, string> = { ...this.headers(), 'Content-Type': 'application/octet-stream' }
     if (opts.branch) headers['X-OCM-Branch'] = opts.branch
     if (opts.requireCurrentBranch === true) headers['X-OCM-Require-Current-Branch'] = '1'
+    if (opts.targetBranch) headers['X-OCM-Target-Branch'] = opts.targetBranch
     const fileStream = Readable.toWeb(createReadStream(bundlePath)) as unknown as ReadableStream<Uint8Array>
     const body = opts.onProgress ? fileStream.pipeThrough(createByteCounter(opts.onProgress)) : fileStream
     const res = await fetch(`${this.baseUrl}/api/internal/repos/${repoId}/mirror/bundle${query}`, {
@@ -277,8 +304,8 @@ export class ManagerApi {
     return (await res.json()) as MirrorBundleResult
   }
 
-  async mirrorHead(repoId: number): Promise<MirrorHead> {
-    const res = await fetch(`${this.baseUrl}/api/internal/repos/${repoId}/mirror/head`, {
+  async mirrorHead(repoId: number, directory?: string): Promise<MirrorHead> {
+    const res = await fetch(`${this.baseUrl}/api/internal/repos/${repoId}/mirror/head${directoryQuery(directory)}`, {
       headers: this.headers(),
     })
 
@@ -286,28 +313,50 @@ export class ManagerApi {
     return (await res.json()) as MirrorHead
   }
 
-  async mirrorTargetPlan(repoId: number, branch: string): Promise<MirrorTargetPlanResponse> {
-    const res = await fetch(`${this.baseUrl}/api/internal/repos/${repoId}/mirror/target?branch=${encodeURIComponent(branch)}`, {
+  async mirrorCheckouts(repoId: number, branch: string): Promise<MirrorCheckoutsResponse> {
+    const params = new URLSearchParams({ branch })
+    const res = await fetch(`${this.baseUrl}/api/internal/repos/${repoId}/mirror/checkouts?${params.toString()}`, {
       headers: this.headers(),
     })
 
-    if (!res.ok) throw await formatErrorResponse(res, 'mirror target plan')
-    return MirrorTargetPlanResponseSchema.parse(await res.json())
+    if (!res.ok) throw await this.handleErrorResponse(res, 'mirror checkouts', MOVE_FEATURE_NAME)
+    return MirrorCheckoutsResponseSchema.parse(await res.json())
   }
 
-  async mirrorEnsureTarget(repoId: number, branch: string): Promise<MirrorTargetEnsureResponse> {
-    const res = await fetch(`${this.baseUrl}/api/internal/repos/${repoId}/mirror/target`, {
+  async mirrorCreateWorktree(
+    repoId: number,
+    bundlePath: string,
+    opts: { branch: string; targetBranch: string; patch: string; onProgress?: (bytesSent: number) => void },
+  ): Promise<MirrorWorktreeCreateResponse> {
+    const patchBuf = Buffer.from(opts.patch, 'utf-8')
+    const headers: Record<string, string> = {
+      ...this.headers(),
+      'Content-Type': 'application/octet-stream',
+      'X-OCM-Branch': opts.branch,
+      'X-OCM-Target-Branch': opts.targetBranch,
+      'X-OCM-Patch-Bytes': String(patchBuf.length),
+    }
+    const source = Readable.from(
+      (async function* () {
+        if (patchBuf.length > 0) yield patchBuf
+        yield* createReadStream(bundlePath)
+      })(),
+    )
+    const fileStream = Readable.toWeb(source) as unknown as ReadableStream<Uint8Array>
+    const body = opts.onProgress ? fileStream.pipeThrough(createByteCounter(opts.onProgress)) : fileStream
+    const res = await fetch(`${this.baseUrl}/api/internal/repos/${repoId}/mirror/worktree`, {
       method: 'POST',
-      headers: { ...this.headers(), 'Content-Type': 'application/json' },
-      body: JSON.stringify({ branch }),
-    })
+      headers,
+      body: body as BodyInit,
+      duplex: 'half',
+    } as RequestInit & { duplex: 'half' })
 
-    if (!res.ok) throw await formatErrorResponse(res, 'mirror target')
-    return MirrorTargetEnsureResponseSchema.parse(await res.json())
+    if (!res.ok) throw await this.handleErrorResponse(res, 'mirror create worktree', MOVE_FEATURE_NAME)
+    return MirrorWorktreeCreateResponseSchema.parse(await res.json())
   }
 
-  async mirrorContains(repoId: number, sha: string): Promise<{ contained: boolean }> {
-    const res = await fetch(`${this.baseUrl}/api/internal/repos/${repoId}/mirror/contains/${sha}`, {
+  async mirrorContains(repoId: number, sha: string, directory?: string): Promise<{ contained: boolean }> {
+    const res = await fetch(`${this.baseUrl}/api/internal/repos/${repoId}/mirror/contains/${sha}${directoryQuery(directory)}`, {
       headers: this.headers(),
     })
 
@@ -315,8 +364,8 @@ export class ManagerApi {
     return (await res.json()) as { repoId: number; contained: boolean }
   }
 
-  async mirrorDownloadBundle(repoId: number): Promise<ReadableStream<Uint8Array>> {
-    const res = await fetch(`${this.baseUrl}/api/internal/repos/${repoId}/mirror/bundle`, {
+  async mirrorDownloadBundle(repoId: number, directory?: string): Promise<ReadableStream<Uint8Array>> {
+    const res = await fetch(`${this.baseUrl}/api/internal/repos/${repoId}/mirror/bundle${directoryQuery(directory)}`, {
       headers: this.headers(),
     })
 
@@ -324,8 +373,8 @@ export class ManagerApi {
     return res.body!
   }
 
-  async mirrorPatchSnapshot(repoId: number): Promise<MirrorPatchSnapshot> {
-    const res = await fetch(`${this.baseUrl}/api/internal/repos/${repoId}/mirror/patch`, {
+  async mirrorPatchSnapshot(repoId: number, directory?: string): Promise<MirrorPatchSnapshot> {
+    const res = await fetch(`${this.baseUrl}/api/internal/repos/${repoId}/mirror/patch${directoryQuery(directory)}`, {
       headers: this.headers(),
     })
 

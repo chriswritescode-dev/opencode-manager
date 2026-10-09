@@ -1,5 +1,6 @@
 import { z } from 'zod'
 import { getRepoDirectoryNameError } from '../utils/repo'
+import { WorktreeSetupResultSchema } from './project-config'
 
 export const RepoStatusSchema = z.enum(['cloning', 'ready', 'error'])
 
@@ -147,27 +148,32 @@ export const MirrorTargetBranchRequestSchema = z.object({
 
 export type MirrorTargetBranchRequest = z.infer<typeof MirrorTargetBranchRequestSchema>
 
-const MirrorTargetPlanBaseSchema = z.object({
-  fullPath: z.string().min(1),
-  localPath: z.string().min(1),
-  branch: z.string().min(1),
-  currentBranch: z.string().min(1).nullable(),
+export const MirrorCheckoutStateSchema = z.object({
+  directory: z.string().min(1),
+  branch: z.string().min(1).nullable(),
+  head: z.string().min(1).nullable(),
+  dirty: z.boolean(),
 })
 
-export const MirrorTargetPlanResponseSchema = z.discriminatedUnion('kind', [
-  MirrorTargetPlanBaseSchema.extend({ kind: z.literal('new'), repoId: z.literal(null) }),
-  MirrorTargetPlanBaseSchema.extend({ kind: z.literal('in-place'), repoId: z.number().int().positive() }),
-  MirrorTargetPlanBaseSchema.extend({ kind: z.literal('existing'), repoId: z.number().int().positive() }),
-])
+export type MirrorCheckoutState = z.infer<typeof MirrorCheckoutStateSchema>
 
-export type MirrorTargetPlanResponse = z.infer<typeof MirrorTargetPlanResponseSchema>
-
-export const MirrorTargetEnsureResponseSchema = z.object({
-  repoId: z.number().int().positive(),
-  fullPath: z.string().min(1),
-  localPath: z.string().min(1),
-  branch: z.string().min(1),
-  created: z.boolean(),
+export const MirrorCheckoutsResponseSchema = z.object({
+  main: MirrorCheckoutStateSchema,
+  worktrees: z.array(MirrorCheckoutStateSchema),
+  branchHead: z.string().min(1).nullable(),
+  branchCheckedOut: z.boolean(),
+  suffixedWorktreeBranch: z.string().min(1),
 })
 
-export type MirrorTargetEnsureResponse = z.infer<typeof MirrorTargetEnsureResponseSchema>
+export type MirrorCheckoutsResponse = z.infer<typeof MirrorCheckoutsResponseSchema>
+
+export const MirrorWorktreeCreateResponseSchema = z.object({
+  repoId: z.number(),
+  fullPath: z.string().min(1),
+  branch: z.string().min(1).nullable(),
+  head: z.string().min(1).nullable(),
+  created: z.literal(true),
+  worktreeSetup: WorktreeSetupResultSchema,
+})
+
+export type MirrorWorktreeCreateResponse = z.infer<typeof MirrorWorktreeCreateResponseSchema>
