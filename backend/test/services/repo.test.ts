@@ -5,7 +5,7 @@ import { getReposPath } from '@opencode-manager/shared/config/env'
 import type { GitAuthService } from '../../src/services/git-auth'
 import type { OpenCodeClient } from '../../src/services/opencode/client'
 import type { Repo } from '../../src/types/repo'
-import type { RepoSibling } from '@opencode-manager/shared/utils'
+import { isWorktreeSibling, type RepoSibling } from '@opencode-manager/shared/utils'
 import { migrate } from '../../src/db/migration-runner'
 import { allMigrations } from '../../src/db/migrations'
 
@@ -605,6 +605,35 @@ describe('getSiblingRepos worktree API', () => {
 
     expect(siblings).toHaveLength(1)
     expect(siblings[0]?.id).toBe(1)
+  })
+
+  describe('listRepoSiblings', () => {
+    it('returns every sibling without branch resolution when no filter is given', async () => {
+      const { listRepoSiblings } = await import('../../src/services/repo')
+      executeCommand.mockClear()
+      const client = createClient([{ directory: '/worktrees/feature-x', strategy: 'git' }])
+
+      const siblings = await listRepoSiblings(db, 1, {}, client)
+
+      expect(siblings.map((sibling) => sibling.fullPath)).toEqual([
+        path.join(getReposPath(), 'repo-a'),
+        '/worktrees/feature-x',
+      ])
+      expect(siblings.every((sibling) => sibling.currentBranch === undefined)).toBe(true)
+      expect(executeCommand.mock.calls.some(([args]) => (args as string[]).includes('--abbrev-ref'))).toBe(false)
+    })
+
+    it('applies the filter to the listed siblings', async () => {
+      const { listRepoSiblings } = await import('../../src/services/repo')
+      const client = createClient([
+        { directory: '/worktrees/feature-x', strategy: 'git' },
+        { directory: '/worktrees/feature-y', strategy: 'git' },
+      ])
+
+      const siblings = await listRepoSiblings(db, 1, {}, client, isWorktreeSibling)
+
+      expect(siblings.map((sibling) => sibling.fullPath)).toEqual(['/worktrees/feature-x', '/worktrees/feature-y'])
+    })
   })
 })
 

@@ -9,7 +9,7 @@ import { RepoWorkspaceError } from '../../src/services/repo'
 import { RepoWorkspaceService } from '../../src/services/repo-workspace'
 
 const mocks = vi.hoisted(() => ({
-  getSiblingRepos: vi.fn(),
+  listRepoSiblings: vi.fn(),
   resolveRepoProjectId: vi.fn(),
   loggerWarn: vi.fn(),
 }))
@@ -33,7 +33,16 @@ vi.mock('../../src/services/repo', () => {
   }
 
   return {
-    getSiblingRepos: mocks.getSiblingRepos,
+    listRepoSiblings: async (
+      _database: unknown,
+      _repoId: unknown,
+      _gitEnv: unknown,
+      _client: unknown,
+      filter?: (sibling: { worktreeSource?: string }) => boolean,
+    ) => {
+      const siblings = await mocks.listRepoSiblings() as Array<{ worktreeSource?: string }>
+      return filter ? siblings.filter(filter) : siblings
+    },
     resolveRepoProjectId: mocks.resolveRepoProjectId,
     findSiblingByDirectory: <T extends { fullPath: string }>(siblings: T[], directory: string): T | undefined =>
       siblings.find((sibling) => sibling.fullPath === directory),
@@ -93,7 +102,7 @@ describe('RepoWorkspaceService', () => {
   beforeEach(() => {
     vi.clearAllMocks()
     mocks.resolveRepoProjectId.mockResolvedValue('project-1')
-    mocks.getSiblingRepos.mockResolvedValue([])
+    mocks.listRepoSiblings.mockResolvedValue([])
   })
 
   describe('create', () => {
@@ -125,13 +134,70 @@ describe('RepoWorkspaceService', () => {
 
       expect(worktreeCreate).toHaveBeenCalledWith({ projectID: 'project-1' })
     })
+
+    it('runs the initializer before the worktree setup', async () => {
+      const order: string[] = []
+      const worktreeCreate = vi.fn(async () => {
+        order.push('create')
+        return { directory: '/worktrees/feature-x' }
+      })
+      const initialize = vi.fn(async () => {
+        order.push('initialize')
+      })
+      const runWorktreeSetupForRepo = vi.fn(async () => {
+        order.push('setup')
+        return { status: 'started' as const }
+      })
+      const { service } = createService({ worktreeCreate, runWorktreeSetupForRepo })
+
+      await service.create(REPO, { initialize })
+
+      expect(initialize).toHaveBeenCalledWith('/worktrees/feature-x')
+      expect(order).toEqual(['create', 'initialize', 'setup'])
+    })
+
+    it('removes the worktree and rethrows when the initializer fails, without running the setup', async () => {
+      const initializeError = new Error('seed failed')
+      const worktreeCreate = vi.fn(async () => ({ directory: '/worktrees/feature-x' }))
+      const worktreeRemove = vi.fn(async () => undefined)
+      const initialize = vi.fn(async () => {
+        throw initializeError
+      })
+      const runWorktreeSetupForRepo = vi.fn(async () => ({ status: 'started' as const }))
+      const { service } = createService({ worktreeCreate, worktreeRemove, runWorktreeSetupForRepo })
+
+      await expect(service.create(REPO, { initialize })).rejects.toThrow(initializeError)
+
+      expect(worktreeRemove).toHaveBeenCalledWith({
+        projectID: 'project-1',
+        directory: '/worktrees/feature-x',
+        force: true,
+      })
+      expect(runWorktreeSetupForRepo).not.toHaveBeenCalled()
+    })
+
+    it('logs and rethrows the initializer error when removing the worktree also fails', async () => {
+      const initializeError = new Error('seed failed')
+      const worktreeCreate = vi.fn(async () => ({ directory: '/worktrees/feature-x' }))
+      const worktreeRemove = vi.fn(async () => {
+        throw new Error('remove failed')
+      })
+      const initialize = vi.fn(async () => {
+        throw initializeError
+      })
+      const { service } = createService({ worktreeCreate, worktreeRemove })
+
+      await expect(service.create(REPO, { initialize })).rejects.toThrow(initializeError)
+
+      expect(mocks.loggerWarn).toHaveBeenCalled()
+    })
   })
 
   describe('remove', () => {
     it('throws a 400 when the directory is not a worktree sibling and touches nothing', async () => {
       const worktreeRemove = vi.fn(async () => undefined)
       const removeAll = vi.fn(async () => undefined)
-      mocks.getSiblingRepos.mockResolvedValue([{ fullPath: '/worktrees/other', worktreeSource: 'opencode' }])
+      mocks.listRepoSiblings.mockResolvedValue([{ fullPath: '/worktrees/other', worktreeSource: 'opencode' }])
       const { service } = createService({ worktreeRemove, removeAll })
 
       const error = await service.remove(REPO, '/worktrees/unknown').catch((caught: unknown) => caught)
@@ -145,7 +211,7 @@ describe('RepoWorkspaceService', () => {
     it('removes terminals for the matched sibling before removing the worktree', async () => {
       const worktreeRemove = vi.fn(async () => undefined)
       const removeAll = vi.fn(async () => undefined)
-      mocks.getSiblingRepos.mockResolvedValue([{ fullPath: '/worktrees/feature-x', worktreeSource: 'opencode' }])
+      mocks.listRepoSiblings.mockResolvedValue([{ fullPath: '/worktrees/feature-x', worktreeSource: 'opencode' }])
       const { service } = createService({ worktreeRemove, removeAll })
 
       await service.remove(REPO, '/worktrees/feature-x')
@@ -164,7 +230,7 @@ describe('RepoWorkspaceService', () => {
       const removeAll = vi.fn(async () => {
         throw new Error('pty cleanup failed')
       })
-      mocks.getSiblingRepos.mockResolvedValue([{ fullPath: '/worktrees/feature-x', worktreeSource: 'opencode' }])
+      mocks.listRepoSiblings.mockResolvedValue([{ fullPath: '/worktrees/feature-x', worktreeSource: 'opencode' }])
       const { service } = createService({ worktreeRemove, removeAll })
 
       await expect(service.remove(REPO, '/worktrees/feature-x')).resolves.toBeUndefined()
@@ -179,7 +245,7 @@ describe('RepoWorkspaceService', () => {
     it('removes a schedule worktree through its schedule without touching terminals', async () => {
       const worktreeRemove = vi.fn(async () => undefined)
       const removeAll = vi.fn(async () => undefined)
-      mocks.getSiblingRepos.mockResolvedValue([{
+      mocks.listRepoSiblings.mockResolvedValue([{
         fullPath: '/schedule-worktrees/job-7-shared',
         worktreeSource: 'schedule',
         schedule: { repoId: 3, jobId: 7, runId: null, inUse: false, name: 'Shared job' },
@@ -195,7 +261,7 @@ describe('RepoWorkspaceService', () => {
 
     it('refuses to remove a schedule worktree a running run is using', async () => {
       const removeAll = vi.fn(async () => undefined)
-      mocks.getSiblingRepos.mockResolvedValue([{
+      mocks.listRepoSiblings.mockResolvedValue([{
         fullPath: '/schedule-worktrees/job-7-run-2',
         worktreeSource: 'schedule',
         schedule: { repoId: 1, jobId: 7, runId: 2, inUse: true, name: 'Run job' },
@@ -209,7 +275,7 @@ describe('RepoWorkspaceService', () => {
 
     it('reports a plain git worktree that git refuses to remove', async () => {
       const worktreeRemove = vi.fn(async () => undefined)
-      mocks.getSiblingRepos.mockResolvedValue([{ fullPath: '/worktrees/manual', worktreeSource: 'git' }])
+      mocks.listRepoSiblings.mockResolvedValue([{ fullPath: '/worktrees/manual', worktreeSource: 'git' }])
       const { service } = createService({ worktreeRemove })
 
       const error = await service.remove(REPO, '/worktrees/manual').catch((caught: unknown) => caught)
@@ -223,7 +289,7 @@ describe('RepoWorkspaceService', () => {
   describe('removeRepoTerminals', () => {
     it('removes terminals for the repo directory and each worktree sibling', async () => {
       const removeAll = vi.fn(async () => undefined)
-      mocks.getSiblingRepos.mockResolvedValue([
+      mocks.listRepoSiblings.mockResolvedValue([
         { fullPath: '/worktrees/a', worktreeSource: 'opencode' },
         { fullPath: '/worktrees/b', worktreeSource: 'opencode' },
         { fullPath: '/repos/manager-worktree', isWorktree: true },
@@ -240,7 +306,7 @@ describe('RepoWorkspaceService', () => {
 
     it('still removes the repo terminals when listing siblings fails', async () => {
       const removeAll = vi.fn(async () => undefined)
-      mocks.getSiblingRepos.mockRejectedValue(new Error('siblings failed'))
+      mocks.listRepoSiblings.mockRejectedValue(new Error('siblings failed'))
       const { service } = createService({ removeAll })
 
       await expect(service.removeRepoTerminals(REPO)).resolves.toBeUndefined()

@@ -1,7 +1,7 @@
 import type { Context } from 'hono'
 import type { Database } from 'bun:sqlite'
 import type { Repo } from '@opencode-manager/shared/types'
-import { getSiblingRepos, resolveRepoOrAssistant, resolveRepoWorkingDirectory } from '../services/repo'
+import { listRepoSiblings, resolveRepoOrAssistant, resolveRepoWorkingDirectory } from '../services/repo'
 import { getRepoById } from '../db/queries'
 import type { GitAuthService } from '../services/git-auth'
 import type { OpenCodeClient } from '../services/opencode/client'
@@ -36,12 +36,11 @@ export async function resolveRepoRequestDirectory(
   }
 
   const resolved = await resolveRepoWorkingDirectory(repo, directory, () =>
-    getSiblingRepos(
+    listRepoSiblings(
       deps.database,
       repo.id,
       deps.gitAuthService.getGitEnvironment(),
       deps.openCodeClient,
-      { includeBranch: false },
     ),
   )
 

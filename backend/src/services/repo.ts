@@ -1127,7 +1127,10 @@ export function createRepoRow(
 }
 
 export function isDirectoryInUse(directory: string): boolean {
-  return sseAggregator.getActiveDirectories().includes(directory)
+  const target = canonicalPathSync(path.resolve(directory))
+  return sseAggregator.getActiveDirectories().some(
+    (activeDirectory) => canonicalPathSync(path.resolve(activeDirectory)) === target,
+  )
 }
 
 export function isRepoInUse(db: Database, repoId: number): boolean {
@@ -1287,6 +1290,21 @@ export async function getSiblingRepos(
     })
 
   return [...repoSiblings, ...worktreeSiblings]
+}
+
+/**
+ * Lists a repository's siblings in its OpenCode project without resolving their branches,
+ * optionally narrowed by a caller-supplied filter (for example worktree-only siblings).
+ */
+export async function listRepoSiblings(
+  database: Database,
+  repoId: number,
+  gitEnv: Record<string, string>,
+  openCodeClient: OpenCodeClient,
+  filter?: (sibling: RepoSibling) => boolean,
+): Promise<RepoSibling[]> {
+  const siblings = await getSiblingRepos(database, repoId, gitEnv, openCodeClient, { includeBranch: false })
+  return filter ? siblings.filter(filter) : siblings
 }
 
 async function listOpenCodeWorktrees(openCodeClient: OpenCodeClient | undefined, directory: string) {

@@ -127,13 +127,13 @@ function moveConfirmMessage(repoName: string, destination: MoveDestination, loca
     case 'in-place':
       return `Replace the repo state of ${repoName} (${destination.directory}) with your local working tree and move this session there?`
     case 'existing-worktree':
-      return `${repoName} is checked out on another branch; branch ${destination.branch} lives in worktree ${destination.directory}.\n\nReplace that worktree with your local working tree and move this session there?`
+      return `${repoName}'s main checkout is on another branch, but branch ${destination.branch} already lives in worktree ${destination.directory}.\n\nReplace that worktree with your local working tree and move this session there?`
     case 'new-worktree': {
       const reasons = destination.reasons.length > 0
         ? `\n\nThe server checkout was not used because:\n${destination.reasons.map((r) => `  - ${r}`).join('\n')}`
         : ''
       const suffix = destination.branch !== localBranch
-        ? `\n\n${localBranch} is checked out on the server, so ${destination.branch} is used instead.`
+        ? `\n\nYour local branch ${localBranch} cannot be pushed directly, so a new worktree on ${destination.branch} is created instead.`
         : ''
       return `The ${repoName} server checkout will not be touched.${reasons}\n\nCreate a new OpenCode worktree for branch ${destination.branch}, push your local working tree there, and move this session?${suffix}`
     }
@@ -180,8 +180,8 @@ async function runSessionMove(context: Context, setMoveProgress: MoveProgressSet
     }
 
     const managerApi = new ManagerApi(auth.managerUrl, auth.token)
-    const target = await managerApi.mirrorMoveTarget(matched.repoId, localBranch)
-    const destination = chooseMoveDestination(plan.repoRoot, localBranch, target)
+    const checkouts = await managerApi.mirrorCheckouts(matched.repoId, localBranch)
+    const destination = chooseMoveDestination(plan.repoRoot, localBranch, checkouts)
 
     const proceed = await confirmDialog(context, {
       title: 'Move session to Manager',
@@ -189,27 +189,29 @@ async function runSessionMove(context: Context, setMoveProgress: MoveProgressSet
     })
     if (!proceed) return
 
-    let pushDirectory: string | undefined
-    let pushTargetBranch: string | undefined
-    if (destination.kind === 'new-worktree') {
-      setMoveProgress({ label: `creating worktree ${destination.branch}`, fraction: null })
-      const worktree = await managerApi.mirrorCreateWorktree(matched.repoId, destination.branch)
-      pushDirectory = worktree.directory
-      pushTargetBranch = destination.branch
-    } else if (destination.kind === 'existing-worktree') {
-      pushDirectory = destination.directory ?? undefined
-    }
-
     const selectedPlan: MirrorPlan = { ...plan, matched: [matched] }
     const pushed = await mirrorUpFast(selectedPlan, {
       api: managerApi,
       force: true,
-      requireCurrentBranch: destination.kind !== 'new-worktree',
-      directory: pushDirectory,
-      targetBranch: pushTargetBranch,
+      ...(destination.kind === 'new-worktree'
+        ? { createWorktree: { targetBranch: destination.branch } }
+        : destination.kind === 'existing-worktree'
+          ? {
+              requireCurrentBranch: true,
+              directory: destination.directory ?? undefined,
+              targetBranch: destination.branch !== localBranch ? destination.branch : undefined,
+            }
+          : { requireCurrentBranch: true }),
       onPhase: (phase) => setMoveProgress(pushPhaseProgress(phase)),
     })
     const remoteDirectory = pushed.fullPath
+
+    if (pushed.worktreeSetup?.status === 'failed') {
+      context.ui.toast.show({
+        variant: 'warning',
+        message: `Worktree setup failed: ${pushed.worktreeSetup.error}. The session was still moved.`,
+      })
+    }
 
     const result = await transferSession(
       { sessionID, localRoot: plan.repoRoot, remoteDirectory },

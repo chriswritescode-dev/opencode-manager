@@ -1,5 +1,6 @@
 import { z } from 'zod'
 import { getRepoDirectoryNameError } from '../utils/repo'
+import { WorktreeSetupResultSchema } from './project-config'
 
 export const RepoStatusSchema = z.enum(['cloning', 'ready', 'error'])
 
@@ -156,17 +157,23 @@ export const MirrorCheckoutStateSchema = z.object({
 
 export type MirrorCheckoutState = z.infer<typeof MirrorCheckoutStateSchema>
 
-export const MirrorMoveTargetResponseSchema = z.object({
+export const MirrorCheckoutsResponseSchema = z.object({
   main: MirrorCheckoutStateSchema,
-  branchWorktree: MirrorCheckoutStateSchema.nullable(),
-  newWorktreeBranch: z.string().min(1),
+  worktrees: z.array(MirrorCheckoutStateSchema),
+  branchHead: z.string().min(1).nullable(),
+  branchCheckedOut: z.boolean(),
+  suffixedWorktreeBranch: z.string().min(1),
 })
 
-export type MirrorMoveTargetResponse = z.infer<typeof MirrorMoveTargetResponseSchema>
+export type MirrorCheckoutsResponse = z.infer<typeof MirrorCheckoutsResponseSchema>
 
 export const MirrorWorktreeCreateResponseSchema = z.object({
-  directory: z.string().min(1),
-  branch: z.string().min(1),
+  repoId: z.number(),
+  fullPath: z.string().min(1),
+  branch: z.string().min(1).nullable(),
+  head: z.string().min(1).nullable(),
+  created: z.literal(true),
+  worktreeSetup: WorktreeSetupResultSchema,
 })
 
 export type MirrorWorktreeCreateResponse = z.infer<typeof MirrorWorktreeCreateResponseSchema>

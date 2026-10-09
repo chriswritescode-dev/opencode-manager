@@ -4,9 +4,10 @@ import { join } from 'path'
 import { tmpdir } from 'os'
 import { randomBytes } from 'crypto'
 import { spawnSync, execSync } from 'child_process'
-import { prepareMirror, MirrorAbort, mirrorDown, mirrorDownFast, mirrorUp, mirrorUpPatch, mirrorUpFast, checkPushDivergence, checkPullDivergence, describePushDivergence, pickMatchedRepo, chooseMoveDestination, assessPushDivergence, type MirrorUpFastPhase } from '../src/mirror'
+import { prepareMirror, MirrorAbort, mirrorDown, mirrorDownFast, mirrorUp, mirrorUpPatch, mirrorUpFast, checkPushDivergence, checkPullDivergence, describePushDivergence, pickMatchedRepo, chooseMoveDestination, assessPushDivergence, resolveBranchCheckout, type MirrorUpFastPhase } from '../src/mirror'
 import { getBranchName } from '../src/local-repo'
-import { ManagerApi } from '../src/manager-api'
+import { ManagerApi, ManagerApiError, MANAGER_FEATURE_MISSING, isManagerRouteMissing } from '../src/manager-api'
+import type { MirrorCheckoutState, MirrorCheckoutsResponse } from '@opencode-manager/shared/schemas'
 import { gitRemoteProjectId } from '@opencode-manager/shared/project-id'
 import { mockStateModule, mockTokenStoreModule } from './helpers/token-store-mocks.js'
 
@@ -760,65 +761,128 @@ describe('chooseMoveDestination', () => {
     return execSync('git rev-parse HEAD', { cwd: repoRoot, encoding: 'utf-8' }).trim()
   }
 
-  const checkout = (directory: string, branch: string | null, head: string | null, dirty = false) => ({ directory, branch, head, dirty })
+  const checkout = (directory: string, branch: string | null, head: string | null, dirty = false): MirrorCheckoutState => ({ directory, branch, head, dirty })
+
+  const checkouts = (
+    main: MirrorCheckoutState,
+    worktrees: MirrorCheckoutState[] = [],
+    overrides: Partial<MirrorCheckoutsResponse> = {},
+  ): MirrorCheckoutsResponse => ({
+    main,
+    worktrees,
+    branchHead: null,
+    branchCheckedOut: false,
+    suffixedWorktreeBranch: 'feature-ocm',
+    ...overrides,
+  })
 
   it('replaces the main checkout in place when it is on the local branch, clean, and not ahead', () => {
     const repoRoot = initRepo('in-place')
     const head = commit(repoRoot, 'a.txt', 'a')
 
-    const destination = chooseMoveDestination(repoRoot, 'main', {
-      main: checkout('/repos/repo', 'main', head),
-      branchWorktree: null,
-      newWorktreeBranch: 'main',
-    })
+    const destination = chooseMoveDestination(repoRoot, 'main', checkouts(checkout('/repos/repo', 'main', head)))
 
     expect(destination).toEqual({ kind: 'in-place', directory: '/repos/repo', branch: 'main', reasons: [] })
   })
 
-  it('reuses a safe branch worktree when the main checkout is on another branch', () => {
-    const repoRoot = initRepo('reuse-worktree')
+  it('reuses an exact-branch worktree when the main checkout is on another branch', () => {
+    const repoRoot = initRepo('reuse-exact-worktree')
     const head = commit(repoRoot, 'a.txt', 'a')
 
-    const destination = chooseMoveDestination(repoRoot, 'feature', {
-      main: checkout('/repos/repo', 'main', head),
-      branchWorktree: checkout('/repos/repo-feature', 'feature', head),
-      newWorktreeBranch: 'feature',
-    })
+    const destination = chooseMoveDestination(repoRoot, 'feature', checkouts(
+      checkout('/repos/repo', 'main', head),
+      [checkout('/repos/repo-feature', 'feature', head)],
+    ))
 
     expect(destination).toEqual({ kind: 'existing-worktree', directory: '/repos/repo-feature', branch: 'feature', reasons: [] })
   })
 
-  it('creates a suffixed worktree and reports only the branch when the main checkout is on another branch', () => {
-    const repoRoot = initRepo('new-worktree')
+  it('reuses a suffixed worktree branch that the server already checked out', () => {
+    const repoRoot = initRepo('reuse-suffixed-worktree')
     const head = commit(repoRoot, 'a.txt', 'a')
 
-    const destination = chooseMoveDestination(repoRoot, 'feature', {
-      main: checkout('/repos/repo', 'main', head, true),
-      branchWorktree: null,
-      newWorktreeBranch: 'feature-ocm',
-    })
+    const destination = chooseMoveDestination(repoRoot, 'feature', checkouts(
+      checkout('/repos/repo', 'main', head),
+      [checkout('/repos/repo-feature-ocm', 'feature-ocm', head)],
+    ))
+
+    expect(destination).toEqual({ kind: 'existing-worktree', directory: '/repos/repo-feature-ocm', branch: 'feature-ocm', reasons: [] })
+  })
+
+  it('skips dirty or diverged worktrees and reuses the first safe one', () => {
+    const repoRoot = initRepo('skip-worktrees')
+    const head = commit(repoRoot, 'a.txt', 'a')
+
+    const destination = chooseMoveDestination(repoRoot, 'feature', checkouts(
+      checkout('/repos/repo', 'main', head),
+      [
+        checkout('/repos/repo-dirty', 'feature', head, true),
+        checkout('/repos/repo-feature', 'feature', head),
+      ],
+    ))
+
+    expect(destination).toEqual({ kind: 'existing-worktree', directory: '/repos/repo-feature', branch: 'feature', reasons: [] })
+  })
+
+  it('creates a new worktree on the local branch when it is free and its server head is local', () => {
+    const repoRoot = initRepo('new-worktree-plain')
+    const head = commit(repoRoot, 'a.txt', 'a')
+
+    const destination = chooseMoveDestination(repoRoot, 'feature', checkouts(
+      checkout('/repos/repo', 'main', head),
+      [],
+      { branchHead: head, branchCheckedOut: false },
+    ))
 
     expect(destination.kind).toBe('new-worktree')
     expect(destination.directory).toBeNull()
-    expect(destination.branch).toBe('feature-ocm')
+    expect(destination.branch).toBe('feature')
     expect(destination.reasons).toEqual(['the server checkout is on main'])
+  })
+
+  it('uses the suffixed branch when the local branch is checked out on the server', () => {
+    const repoRoot = initRepo('new-worktree-suffix-checked-out')
+    const head = commit(repoRoot, 'a.txt', 'a')
+
+    const destination = chooseMoveDestination(repoRoot, 'feature', checkouts(
+      checkout('/repos/repo', 'main', head),
+      [],
+      { branchCheckedOut: true, suffixedWorktreeBranch: 'feature-ocm' },
+    ))
+
+    expect(destination.kind).toBe('new-worktree')
+    expect(destination.branch).toBe('feature-ocm')
+  })
+
+  it('uses the suffixed branch and explains when the server branch head is not local', () => {
+    const repoRoot = initRepo('new-worktree-suffix-head')
+    const head = commit(repoRoot, 'a.txt', 'a')
+
+    const destination = chooseMoveDestination(repoRoot, 'feature', checkouts(
+      checkout('/repos/repo', 'main', head),
+      [],
+      { branchHead: '0000000000000000000000000000000000000000', branchCheckedOut: false, suffixedWorktreeBranch: 'feature-ocm' },
+    ))
+
+    expect(destination.kind).toBe('new-worktree')
+    expect(destination.branch).toBe('feature-ocm')
+    expect(destination.reasons).toContain('the server branch feature has commits not in your local branch')
   })
 
   it('explains why an unusable branch worktree was skipped', () => {
     const repoRoot = initRepo('unusable-worktree')
     const head = commit(repoRoot, 'a.txt', 'a')
 
-    const destination = chooseMoveDestination(repoRoot, 'feature', {
-      main: checkout('/repos/repo', 'main', head),
-      branchWorktree: checkout('/repos/repo-feature', 'feature', head, true),
-      newWorktreeBranch: 'feature-ocm',
-    })
+    const destination = chooseMoveDestination(repoRoot, 'feature', checkouts(
+      checkout('/repos/repo', 'main', head),
+      [checkout('/repos/repo-feature', 'feature', head, true)],
+    ))
 
     expect(destination.kind).toBe('new-worktree')
     expect(destination.reasons).toContain('the worktree on feature has uncommitted changes')
   })
 
-  it('reports a diverged main checkout as commits not in the local branch', () => {
+  it('reports a diverged main checkout with the commit count', () => {
     const repoRoot = initRepo('diverged-main')
     commit(repoRoot, 'a.txt', 'a')
     spawnSync('git', ['checkout', '-b', 'server'], { cwd: repoRoot, stdio: 'ignore' })
@@ -826,14 +890,10 @@ describe('chooseMoveDestination', () => {
     spawnSync('git', ['checkout', '-'], { cwd: repoRoot, stdio: 'ignore' })
     commit(repoRoot, 'local.txt', 'local-work')
 
-    const destination = chooseMoveDestination(repoRoot, 'feature', {
-      main: checkout('/repos/repo', 'feature', serverHead),
-      branchWorktree: null,
-      newWorktreeBranch: 'feature',
-    })
+    const destination = chooseMoveDestination(repoRoot, 'feature', checkouts(checkout('/repos/repo', 'feature', serverHead)))
 
     expect(destination.kind).toBe('new-worktree')
-    expect(destination.reasons).toContain('the server checkout has commits not in your local branch')
+    expect(destination.reasons).toContain('the server checkout is 1 commit(s) ahead of your local branch')
   })
 })
 
@@ -1368,74 +1428,151 @@ describe('mirrorDownFast preflight', () => {
     expect(existsSync(join(local, 'untracked.txt'))).toBe(true)
     expect(syncRefCount(local)).toBe(0)
   })
+
+  it('updates the local branch from a suffixed worktree branch without creating it locally', async () => {
+    const server = initRepo('server-suffixed')
+    commitFile(server, 'main.txt', 'server-main\n')
+    execSync('git checkout -b feature-ocm', { cwd: server, stdio: 'ignore' })
+    const serverFeatureOcmSha = commitFile(server, 'feature.txt', 'server-feature\n')
+    execSync('git checkout main', { cwd: server, stdio: 'ignore' })
+    commitFile(server, 'main.txt', 'server-main-2\n')
+    const bundle = createBundle(server, 'server-suffixed')
+
+    const local = initRepo('local-suffixed')
+    commitFile(local, 'main.txt', 'local-main\n')
+    execSync('git checkout -b feature', { cwd: local, stdio: 'ignore' })
+    commitFile(local, 'feature.txt', 'local-feature\n')
+
+    await mirrorDownFast(1, local, fastApi('feature-ocm', bundle) as any, {
+      force: true,
+      directory: '/repos/repo-feature-ocm',
+      sourceBranch: 'feature-ocm',
+      targetBranch: 'feature',
+    })
+
+    expect(getBranchName(local)).toBe('feature')
+    expect(revRef(local, 'HEAD')).toBe(serverFeatureOcmSha)
+    expect(revRef(local, 'feature')).toBe(serverFeatureOcmSha)
+    const localBranches = spawnSync('git', ['for-each-ref', '--format=%(refname:short)', 'refs/heads'], { cwd: local, encoding: 'utf-8' }).stdout.trim().split('\n')
+    expect(localBranches).not.toContain('feature-ocm')
+    expect(syncRefCount(local)).toBe(0)
+  })
 })
 
-describe('ManagerApi move target and worktree validation', () => {
+describe('ManagerApi mirror checkouts and worktree', () => {
+  let tmpDir: string
+
+  beforeEach(() => {
+    tmpDir = mkdtempSync(join(tmpdir(), 'mirror-checkouts-test-'))
+  })
+
   afterEach(() => {
     vi.unstubAllGlobals()
+    rmSync(tmpDir, { recursive: true, force: true })
   })
 
   const api = new ManagerApi('http://localhost:5003', 'test-token')
 
   const checkout = (directory: string, branch: string | null, head: string | null, dirty = false) => ({ directory, branch, head, dirty })
 
-  it('parses a valid move target response with a branch worktree', async () => {
-    vi.stubGlobal('fetch', vi.fn().mockResolvedValue({
+  const checkoutsBody = {
+    main: checkout('/repos/repo', 'main', 'abc'),
+    worktrees: [checkout('/repos/repo-feature', 'feature', 'def')],
+    branchHead: 'def',
+    branchCheckedOut: true,
+    suffixedWorktreeBranch: 'feature-ocm',
+  }
+
+  it('parses a checkouts response and requests the branch', async () => {
+    const fetchMock = vi.fn().mockResolvedValue({ ok: true, json: () => Promise.resolve(checkoutsBody) })
+    vi.stubGlobal('fetch', fetchMock)
+
+    const result = await api.mirrorCheckouts(1, 'feature')
+
+    expect(result.main.branch).toBe('main')
+    expect(result.worktrees[0]!.directory).toBe('/repos/repo-feature')
+    expect(result.suffixedWorktreeBranch).toBe('feature-ocm')
+    expect(String(fetchMock.mock.calls[0]![0])).toContain('/mirror/checkouts?branch=feature')
+  })
+
+  it('rejects a checkouts response that fails schema validation', async () => {
+    vi.stubGlobal('fetch', vi.fn().mockResolvedValue({ ok: true, json: () => Promise.resolve({ main: checkout('/repos/repo', 'main', 'abc') }) }))
+
+    await expect(api.mirrorCheckouts(1, 'feature')).rejects.toThrow()
+  })
+
+  it('maps an old Manager 401 to MANAGER_FEATURE_MISSING for checkouts', async () => {
+    const fetchMock = vi.fn()
+      .mockResolvedValueOnce({ ok: false, status: 401, text: () => Promise.resolve(JSON.stringify({ error: 'Unauthorized' })) })
+      .mockResolvedValueOnce({ ok: true, status: 200, json: () => Promise.resolve({ workspaces: [] }) })
+    vi.stubGlobal('fetch', fetchMock)
+
+    const error = await api.mirrorCheckouts(1, 'feature').catch((err) => err)
+
+    expect(error).toBeInstanceOf(ManagerApiError)
+    expect((error as ManagerApiError).code).toBe(MANAGER_FEATURE_MISSING)
+    expect(isManagerRouteMissing(error)).toBe(true)
+    expect((error as ManagerApiError).message).toContain('too old for /ocm-move worktrees')
+  })
+
+  it('uploads a bundle to the worktree route with branch headers', async () => {
+    const bundlePath = join(tmpDir, 'repo.bundle')
+    writeFileSync(bundlePath, 'bundle bytes')
+    const fetchMock = vi.fn().mockResolvedValue({
       ok: true,
       json: () => Promise.resolve({
-        main: checkout('/repos/repo', 'main', 'abc'),
-        branchWorktree: checkout('/repos/repo-feature', 'feature', 'def'),
-        newWorktreeBranch: 'feature',
+        repoId: 1,
+        fullPath: '/repos/repo-feature-ocm',
+        branch: 'feature-ocm',
+        head: 'abc',
+        created: true,
+        worktreeSetup: { status: 'none' },
       }),
-    }))
+    })
+    vi.stubGlobal('fetch', fetchMock)
 
-    const target = await api.mirrorMoveTarget(1, 'feature')
+    const created = await api.mirrorCreateWorktree(1, bundlePath, { branch: 'feature', targetBranch: 'feature-ocm' })
 
-    expect(target.main.branch).toBe('main')
-    expect(target.branchWorktree?.directory).toBe('/repos/repo-feature')
-    expect(target.newWorktreeBranch).toBe('feature')
+    expect(created.fullPath).toBe('/repos/repo-feature-ocm')
+    expect(created.created).toBe(true)
+    expect(created.worktreeSetup).toEqual({ status: 'none' })
+    const init = fetchMock.mock.calls[0]![1] as RequestInit
+    expect(init.method).toBe('POST')
+    expect(init.headers).toMatchObject({ 'X-OCM-Branch': 'feature', 'X-OCM-Target-Branch': 'feature-ocm' })
+    expect(init.duplex).toBe('half')
   })
 
-  it('parses a move target response with no branch worktree and a suffixed branch', async () => {
-    vi.stubGlobal('fetch', vi.fn().mockResolvedValue({
-      ok: true,
-      json: () => Promise.resolve({ main: checkout('/repos/repo', 'main', 'abc'), branchWorktree: null, newWorktreeBranch: 'feature-ocm' }),
-    }))
+  it('maps an old Manager 401 to MANAGER_FEATURE_MISSING for worktree creation', async () => {
+    const bundlePath = join(tmpDir, 'repo.bundle')
+    writeFileSync(bundlePath, 'bundle bytes')
+    const fetchMock = vi.fn()
+      .mockResolvedValueOnce({ ok: false, status: 401, text: () => Promise.resolve(JSON.stringify({ error: 'Unauthorized' })) })
+      .mockResolvedValueOnce({ ok: true, status: 200, json: () => Promise.resolve({ workspaces: [] }) })
+    vi.stubGlobal('fetch', fetchMock)
 
-    const target = await api.mirrorMoveTarget(1, 'feature')
+    const error = await api.mirrorCreateWorktree(1, bundlePath, { branch: 'feature', targetBranch: 'feature-ocm' }).catch((err) => err)
 
-    expect(target.branchWorktree).toBeNull()
-    expect(target.newWorktreeBranch).toBe('feature-ocm')
+    expect(error).toBeInstanceOf(ManagerApiError)
+    expect((error as ManagerApiError).code).toBe(MANAGER_FEATURE_MISSING)
+    expect((error as ManagerApiError).message).toContain('too old for /ocm-move worktrees')
   })
 
-  it('rejects a move target response missing the main checkout', async () => {
-    vi.stubGlobal('fetch', vi.fn().mockResolvedValue({
-      ok: true,
-      json: () => Promise.resolve({ branchWorktree: null, newWorktreeBranch: 'feature' }),
+  it('sends the directory query on head, contains, bundle, and patch requests', async () => {
+    const calls: string[] = []
+    vi.stubGlobal('fetch', vi.fn().mockImplementation(async (url: unknown) => {
+      calls.push(String(url))
+      return { ok: true, json: () => Promise.resolve({}), body: null }
     }))
 
-    await expect(api.mirrorMoveTarget(1, 'feature')).rejects.toThrow()
-  })
+    await api.mirrorHead(1, '/repos/work trees/repo')
+    await api.mirrorContains(1, 'abc1234', '/repos/work trees/repo')
+    await api.mirrorDownloadBundle(1, '/repos/work trees/repo')
+    await api.mirrorPatchSnapshot(1, '/repos/work trees/repo')
 
-  it('parses a valid worktree create response', async () => {
-    vi.stubGlobal('fetch', vi.fn().mockResolvedValue({
-      ok: true,
-      json: () => Promise.resolve({ directory: '/repos/repo-feature-ocm', branch: 'feature-ocm' }),
-    }))
-
-    const created = await api.mirrorCreateWorktree(1, 'feature-ocm')
-
-    expect(created.directory).toBe('/repos/repo-feature-ocm')
-    expect(created.branch).toBe('feature-ocm')
-  })
-
-  it('rejects a worktree create response missing the branch', async () => {
-    vi.stubGlobal('fetch', vi.fn().mockResolvedValue({
-      ok: true,
-      json: () => Promise.resolve({ directory: '/repos/repo-feature-ocm' }),
-    }))
-
-    await expect(api.mirrorCreateWorktree(1, 'feature-ocm')).rejects.toThrow()
+    expect(calls).toHaveLength(4)
+    for (const url of calls) {
+      expect(new URL(url).searchParams.get('directory')).toBe('/repos/work trees/repo')
+    }
   })
 })
 
@@ -1501,5 +1638,407 @@ describe('ManagerApi mirrorUploadBundle strict branch header', () => {
     expect(parsed.searchParams.get('directory')).toBe('/repos/work trees/repo')
     expect(capturedHeaders!['X-OCM-Target-Branch']).toBe('feature-ocm')
     expect(capturedHeaders!['X-OCM-Branch']).toBe('feature')
+  })
+})
+
+describe('resolveBranchCheckout', () => {
+  let tmpDir: string
+
+  beforeEach(() => {
+    tmpDir = mkdtempSync(join(tmpdir(), 'branch-checkout-test-'))
+  })
+
+  afterEach(() => {
+    rmSync(tmpDir, { recursive: true, force: true })
+  })
+
+  function initRepo(name: string): string {
+    const repoRoot = join(tmpDir, name)
+    mkdirSync(repoRoot)
+    spawnSync('git', ['init', '-b', 'main'], { cwd: repoRoot, stdio: 'ignore' })
+    spawnSync('git', ['config', 'user.email', 'test@test.com'], { cwd: repoRoot, stdio: 'ignore' })
+    spawnSync('git', ['config', 'user.name', 'Test'], { cwd: repoRoot, stdio: 'ignore' })
+    writeFileSync(join(repoRoot, 'a.txt'), 'a\n')
+    spawnSync('git', ['add', '.'], { cwd: repoRoot, stdio: 'ignore' })
+    spawnSync('git', ['commit', '-m', 'init'], { cwd: repoRoot, stdio: 'ignore' })
+    return repoRoot
+  }
+
+  const checkout = (directory: string, branch: string | null, head: string | null, dirty = false): MirrorCheckoutState => ({ directory, branch, head, dirty })
+
+  const body = (overrides: Partial<MirrorCheckoutsResponse> = {}): MirrorCheckoutsResponse => ({
+    main: checkout('/repos/repo', 'main', 'abc'),
+    worktrees: [],
+    branchHead: null,
+    branchCheckedOut: false,
+    suffixedWorktreeBranch: 'feature-ocm',
+    ...overrides,
+  })
+
+  it('returns nothing when the local HEAD is detached', async () => {
+    const repoRoot = initRepo('detached')
+    execSync('git checkout --detach', { cwd: repoRoot, stdio: 'ignore' })
+    const api = { mirrorCheckouts: vi.fn() } as any
+
+    await expect(resolveBranchCheckout(api, 1, repoRoot)).resolves.toEqual({})
+    expect(api.mirrorCheckouts).not.toHaveBeenCalled()
+  })
+
+  it('returns nothing when the main checkout is already on the local branch', async () => {
+    const repoRoot = initRepo('main-branch')
+    const api = { mirrorCheckouts: vi.fn().mockResolvedValue(body()) } as any
+
+    await expect(resolveBranchCheckout(api, 1, repoRoot)).resolves.toEqual({})
+  })
+
+  it('selects the first worktree and its branch when main is elsewhere', async () => {
+    const repoRoot = initRepo('worktree')
+    execSync('git checkout -b feature', { cwd: repoRoot, stdio: 'ignore' })
+    const api = {
+      mirrorCheckouts: vi.fn().mockResolvedValue(body({
+        worktrees: [checkout('/repos/repo-feature-ocm', 'feature-ocm', 'def')],
+      })),
+    } as any
+
+    await expect(resolveBranchCheckout(api, 1, repoRoot)).resolves.toEqual({
+      directory: '/repos/repo-feature-ocm',
+      targetBranch: 'feature-ocm',
+    })
+  })
+
+  it('omits the target branch when the worktree is on the local branch', async () => {
+    const repoRoot = initRepo('worktree-exact')
+    execSync('git checkout -b feature', { cwd: repoRoot, stdio: 'ignore' })
+    const api = {
+      mirrorCheckouts: vi.fn().mockResolvedValue(body({
+        worktrees: [checkout('/repos/repo-feature', 'feature', 'def')],
+      })),
+    } as any
+
+    await expect(resolveBranchCheckout(api, 1, repoRoot)).resolves.toEqual({
+      directory: '/repos/repo-feature',
+      targetBranch: undefined,
+    })
+  })
+
+  it('returns nothing when no worktree matches', async () => {
+    const repoRoot = initRepo('no-worktree')
+    execSync('git checkout -b feature', { cwd: repoRoot, stdio: 'ignore' })
+    const api = { mirrorCheckouts: vi.fn().mockResolvedValue(body()) } as any
+
+    await expect(resolveBranchCheckout(api, 1, repoRoot)).resolves.toEqual({})
+  })
+
+  it('falls back silently when the route is missing on an older Manager', async () => {
+    const repoRoot = initRepo('route-missing')
+    execSync('git checkout -b feature', { cwd: repoRoot, stdio: 'ignore' })
+    const api = {
+      mirrorCheckouts: vi.fn().mockRejectedValue(new ManagerApiError('missing', 401, MANAGER_FEATURE_MISSING, 'op')),
+    } as any
+
+    await expect(resolveBranchCheckout(api, 1, repoRoot)).resolves.toEqual({})
+  })
+
+  it('falls back silently on the old target protocol 410', async () => {
+    const repoRoot = initRepo('gone')
+    execSync('git checkout -b feature', { cwd: repoRoot, stdio: 'ignore' })
+    const api = {
+      mirrorCheckouts: vi.fn().mockRejectedValue(new ManagerApiError('gone', 410, 'cli_too_old', 'op')),
+    } as any
+
+    await expect(resolveBranchCheckout(api, 1, repoRoot)).resolves.toEqual({})
+  })
+
+  it('rethrows unrelated failures', async () => {
+    const repoRoot = initRepo('boom')
+    execSync('git checkout -b feature', { cwd: repoRoot, stdio: 'ignore' })
+    const api = { mirrorCheckouts: vi.fn().mockRejectedValue(new Error('boom')) } as any
+
+    await expect(resolveBranchCheckout(api, 1, repoRoot)).rejects.toThrow('boom')
+  })
+})
+
+describe('mirrorUpFast worktree creation', () => {
+  let tmpDir: string
+
+  beforeEach(() => {
+    tmpDir = mkdtempSync(join(tmpdir(), 'mirror-upfast-worktree-test-'))
+  })
+
+  afterEach(() => {
+    rmSync(tmpDir, { recursive: true, force: true })
+  })
+
+  it('creates the worktree through the worktree route and skips the patch shortcut', async () => {
+    const repoRoot = join(tmpDir, 'repo')
+    mkdirSync(repoRoot)
+    spawnSync('git', ['init'], { cwd: repoRoot, stdio: 'ignore' })
+    spawnSync('git', ['config', 'user.email', 'test@test.com'], { cwd: repoRoot, stdio: 'ignore' })
+    spawnSync('git', ['config', 'user.name', 'Test'], { cwd: repoRoot, stdio: 'ignore' })
+    writeFileSync(join(repoRoot, 'a.txt'), 'a\n')
+    spawnSync('git', ['add', '.'], { cwd: repoRoot, stdio: 'ignore' })
+    spawnSync('git', ['commit', '-m', 'init'], { cwd: repoRoot, stdio: 'ignore' })
+
+    const api = {
+      mirrorCreateWorktree: vi.fn().mockResolvedValue({
+        repoId: 1,
+        fullPath: '/repos/repo-feature-ocm',
+        branch: 'feature-ocm',
+        head: 'abc',
+        created: true,
+        worktreeSetup: { status: 'none' },
+      }),
+      mirrorUploadBundle: vi.fn(),
+      mirrorPatch: vi.fn(),
+    }
+
+    const plan = {
+      repoRoot,
+      localProjectId: 'proj',
+      matched: [{ repoId: 1, name: 'repo', projectId: 'proj', branch: 'main' }],
+    }
+
+    const phases: MirrorUpFastPhase[] = []
+    const result = await mirrorUpFast(plan, {
+      api: api as any,
+      force: true,
+      createWorktree: { targetBranch: 'feature-ocm' },
+      onPhase: (p) => phases.push(p),
+    })
+
+    expect(api.mirrorUploadBundle).not.toHaveBeenCalled()
+    expect(api.mirrorPatch).not.toHaveBeenCalled()
+    expect(api.mirrorCreateWorktree).toHaveBeenCalledTimes(1)
+    const opts = api.mirrorCreateWorktree.mock.calls[0]![2]
+    expect(opts.branch).toBe(getBranchName(repoRoot))
+    expect(opts.targetBranch).toBe('feature-ocm')
+    expect(result.created).toBe(true)
+    expect(result.fullPath).toBe('/repos/repo-feature-ocm')
+    expect(result.worktreeSetup).toEqual({ status: 'none' })
+    expect(phases.map((p) => p.kind)).toEqual(['bundling', 'uploading'])
+  })
+})
+
+describe('divergence checks target the selected directory', () => {
+  let tmpDir: string
+
+  beforeEach(() => {
+    tmpDir = mkdtempSync(join(tmpdir(), 'divergence-directory-test-'))
+  })
+
+  afterEach(() => {
+    rmSync(tmpDir, { recursive: true, force: true })
+  })
+
+  it('passes the directory to mirrorHead for push divergence', async () => {
+    const api = { mirrorHead: vi.fn().mockResolvedValue({ repoId: 1, branch: 'feature-ocm', head: null, dirty: false }) } as any
+
+    await checkPushDivergence('/repo', api, 1, '/repos/repo-feature-ocm')
+
+    expect(api.mirrorHead).toHaveBeenCalledWith(1, '/repos/repo-feature-ocm')
+  })
+
+  it('passes the directory to mirrorContains and mirrorHead for pull divergence', async () => {
+    const repoRoot = join(tmpDir, 'repo')
+    mkdirSync(repoRoot)
+    spawnSync('git', ['init'], { cwd: repoRoot, stdio: 'ignore' })
+    spawnSync('git', ['config', 'user.email', 'test@test.com'], { cwd: repoRoot, stdio: 'ignore' })
+    spawnSync('git', ['config', 'user.name', 'Test'], { cwd: repoRoot, stdio: 'ignore' })
+    writeFileSync(join(repoRoot, 'a.txt'), 'a\n')
+    spawnSync('git', ['add', '.'], { cwd: repoRoot, stdio: 'ignore' })
+    spawnSync('git', ['commit', '-m', 'init'], { cwd: repoRoot, stdio: 'ignore' })
+
+    const api = {
+      mirrorContains: vi.fn().mockResolvedValue({ contained: false }),
+      mirrorHead: vi.fn().mockResolvedValue({ repoId: 1, branch: 'feature-ocm', head: null, dirty: false }),
+    } as any
+
+    await checkPullDivergence(repoRoot, api, 1, '/repos/repo-feature-ocm')
+
+    expect(api.mirrorContains).toHaveBeenCalledWith(1, expect.any(String), '/repos/repo-feature-ocm')
+    expect(api.mirrorHead).toHaveBeenCalledWith(1, '/repos/repo-feature-ocm')
+  })
+})
+
+describe('cmdPush and cmdPull checkout selection', () => {
+  let tmpDir: string
+  let repoRoot: string
+  let originalCwd: string
+
+  const REPO = {
+    repoId: 1,
+    name: 'repo',
+    branch: 'feature',
+    cloneStatus: 'ready',
+    directory: '/repos/repo',
+    projectId: ME_REPO_ID,
+    extra: { repoId: 1, localPath: 'repo', fullPath: '/repos/repo' },
+  }
+
+  const suffixedCheckouts = {
+    main: { directory: '/repos/repo', branch: 'main', head: 'abc', dirty: false },
+    worktrees: [{ directory: '/repos/repo-feature-ocm', branch: 'feature-ocm', head: 'abc', dirty: false }],
+    branchHead: 'abc',
+    branchCheckedOut: true,
+    suffixedWorktreeBranch: 'feature-ocm',
+  }
+
+  const exactCheckouts = {
+    main: { directory: '/repos/repo', branch: 'main', head: 'abc', dirty: false },
+    worktrees: [{ directory: '/repos/repo-feature', branch: 'feature', head: 'abc', dirty: false }],
+    branchHead: 'abc',
+    branchCheckedOut: true,
+    suffixedWorktreeBranch: 'feature-ocm',
+  }
+
+  const streamOf = (buf: Buffer): ReadableStream<Uint8Array> =>
+    new ReadableStream({
+      start(controller) {
+        controller.enqueue(new Uint8Array(buf))
+        controller.close()
+      },
+    })
+
+  beforeEach(() => {
+    originalCwd = process.cwd()
+    tmpDir = mkdtempSync(join(tmpdir(), 'ocm-push-pull-test-'))
+    repoRoot = join(tmpDir, 'repo')
+    mkdirSync(repoRoot)
+    spawnSync('git', ['init', '-b', 'feature'], { cwd: repoRoot, stdio: 'ignore' })
+    spawnSync('git', ['config', 'user.email', 'test@test.com'], { cwd: repoRoot, stdio: 'ignore' })
+    spawnSync('git', ['config', 'user.name', 'Test'], { cwd: repoRoot, stdio: 'ignore' })
+    spawnSync('git', ['remote', 'add', 'origin', 'https://github.com/me/repo.git'], { cwd: repoRoot, stdio: 'ignore' })
+    writeFileSync(join(repoRoot, 'a.txt'), 'a\n')
+    spawnSync('git', ['add', '.'], { cwd: repoRoot, stdio: 'ignore' })
+    spawnSync('git', ['commit', '-m', 'init'], { cwd: repoRoot, stdio: 'ignore' })
+    process.chdir(repoRoot)
+  })
+
+  afterEach(() => {
+    process.chdir(originalCwd)
+    rmSync(tmpDir, { recursive: true, force: true })
+    vi.unstubAllGlobals()
+    vi.restoreAllMocks()
+  })
+
+  async function loadCli() {
+    vi.resetModules()
+    mockStateModule({ managerUrl: 'http://localhost:5003' })
+    mockTokenStoreModule({ token: 'tok' })
+    return import('../bin/ocm')
+  }
+
+  it('threads the selected worktree directory into a fast push', async () => {
+    const calls: { url: string; init?: RequestInit }[] = []
+    const localHead = execSync('git rev-parse HEAD', { cwd: repoRoot, encoding: 'utf-8' }).trim()
+    vi.stubGlobal('fetch', vi.fn().mockImplementation(async (url: unknown, init?: RequestInit) => {
+      const u = String(url)
+      calls.push({ url: u, init })
+      if (u.includes('/opencode-workspaces')) return { ok: true, status: 200, json: () => Promise.resolve({ workspaces: [REPO] }) }
+      if (u.includes('/mirror/checkouts')) return { ok: true, status: 200, json: () => Promise.resolve(suffixedCheckouts) }
+      if (u.includes('/mirror/head')) return { ok: true, status: 200, json: () => Promise.resolve({ repoId: 1, branch: 'feature-ocm', head: localHead, dirty: false }) }
+      if (u.includes('/mirror/bundle')) return { ok: true, status: 200, json: () => Promise.resolve({ repoId: 1, fullPath: '/repos/repo-feature-ocm', branch: 'feature-ocm', head: 'abc', created: false }) }
+      if (u.includes('/mirror/patch')) return { ok: true, status: 200, json: () => Promise.resolve({ repoId: 1, fullPath: '/repos/repo-feature-ocm', branch: 'feature-ocm', head: 'abc', created: false, applied: true }) }
+      throw new Error(`unexpected fetch: ${u}`)
+    }))
+
+    const { cmdPush } = await loadCli()
+    await cmdPush([])
+
+    const headCall = calls.find((c) => c.url.includes('/mirror/head'))
+    expect(new URL(headCall!.url).searchParams.get('directory')).toBe('/repos/repo-feature-ocm')
+    const bundleCall = calls.find((c) => c.url.includes('/mirror/bundle'))
+    expect(new URL(bundleCall!.url).searchParams.get('directory')).toBe('/repos/repo-feature-ocm')
+    expect((bundleCall!.init!.headers as Record<string, string>)['X-OCM-Target-Branch']).toBe('feature-ocm')
+    expect(calls.some((c) => c.url.includes('/mirror/begin'))).toBe(false)
+  })
+
+  it('dies without falling back to a full push when the worktree push fails', async () => {
+    const calls: { url: string }[] = []
+    const stderr: string[] = []
+    const localHead = execSync('git rev-parse HEAD', { cwd: repoRoot, encoding: 'utf-8' }).trim()
+    vi.stubGlobal('fetch', vi.fn().mockImplementation(async (url: unknown) => {
+      const u = String(url)
+      calls.push({ url: u })
+      if (u.includes('/opencode-workspaces')) return { ok: true, status: 200, json: () => Promise.resolve({ workspaces: [REPO] }) }
+      if (u.includes('/mirror/checkouts')) return { ok: true, status: 200, json: () => Promise.resolve(suffixedCheckouts) }
+      if (u.includes('/mirror/head')) return { ok: true, status: 200, json: () => Promise.resolve({ repoId: 1, branch: 'feature-ocm', head: localHead, dirty: false }) }
+      if (u.includes('/mirror/bundle')) return { ok: false, status: 409, text: () => Promise.resolve(JSON.stringify({ error: 'branch_in_use' })) }
+      throw new Error(`unexpected fetch: ${u}`)
+    }))
+    vi.spyOn(process.stderr, 'write').mockImplementation((chunk) => {
+      stderr.push(String(chunk))
+      return true
+    })
+    vi.spyOn(process, 'exit').mockImplementation((() => { throw new Error('exit') }) as never)
+
+    const { cmdPush } = await loadCli()
+    await expect(cmdPush([])).rejects.toThrow('exit')
+
+    expect(stderr.join('')).toContain('Not falling back to a full mirror')
+    expect(calls.some((c) => c.url.includes('/mirror/begin'))).toBe(false)
+  })
+
+  it('threads the selected worktree directory into a fast pull', async () => {
+    const server = join(tmpDir, 'server')
+    mkdirSync(server)
+    spawnSync('git', ['init', '-b', 'feature'], { cwd: server, stdio: 'ignore' })
+    spawnSync('git', ['config', 'user.email', 'test@test.com'], { cwd: server, stdio: 'ignore' })
+    spawnSync('git', ['config', 'user.name', 'Test'], { cwd: server, stdio: 'ignore' })
+    writeFileSync(join(server, 'a.txt'), 'server\n')
+    spawnSync('git', ['add', '.'], { cwd: server, stdio: 'ignore' })
+    spawnSync('git', ['commit', '-m', 'server'], { cwd: server, stdio: 'ignore' })
+    const serverSha = execSync('git rev-parse HEAD', { cwd: server, encoding: 'utf-8' }).trim()
+    const bundleFile = join(tmpDir, 'server.bundle')
+    execSync(`git bundle create "${bundleFile}" --all`, { cwd: server })
+    const bundleBytes = readFileSync(bundleFile)
+
+    const calls: { url: string }[] = []
+    vi.stubGlobal('fetch', vi.fn().mockImplementation(async (url: unknown) => {
+      const u = String(url)
+      calls.push({ url: u })
+      if (u.includes('/opencode-workspaces')) return { ok: true, status: 200, json: () => Promise.resolve({ workspaces: [REPO] }) }
+      if (u.includes('/mirror/checkouts')) return { ok: true, status: 200, json: () => Promise.resolve(exactCheckouts) }
+      if (u.includes('/mirror/contains')) return { ok: true, status: 200, json: () => Promise.resolve({ repoId: 1, contained: true }) }
+      if (u.includes('/mirror/head')) return { ok: true, status: 200, json: () => Promise.resolve({ repoId: 1, branch: 'feature', head: serverSha, dirty: false }) }
+      if (u.includes('/mirror/patch')) return { ok: true, status: 200, json: () => Promise.resolve({ repoId: 1, branch: 'feature', head: serverSha, patch: '' }) }
+      if (u.includes('/mirror/bundle')) return { ok: true, status: 200, body: streamOf(bundleBytes) }
+      throw new Error(`unexpected fetch: ${u}`)
+    }))
+
+    const { cmdPull } = await loadCli()
+    await cmdPull([])
+
+    expect(getBranchName(repoRoot)).toBe('feature')
+    expect(execSync('git rev-parse HEAD', { cwd: repoRoot, encoding: 'utf-8' }).trim()).toBe(serverSha)
+    for (const path of ['/mirror/contains', '/mirror/bundle', '/mirror/patch']) {
+      const call = calls.find((c) => c.url.includes(path))
+      expect(new URL(call!.url).searchParams.get('directory')).toBe('/repos/repo-feature')
+    }
+    expect(calls.some((c) => c.url.includes('/mirror?'))).toBe(false)
+  })
+
+  it('dies without falling back to a full pull when the worktree pull fails', async () => {
+    const calls: { url: string }[] = []
+    const stderr: string[] = []
+    vi.stubGlobal('fetch', vi.fn().mockImplementation(async (url: unknown) => {
+      const u = String(url)
+      calls.push({ url: u })
+      if (u.includes('/opencode-workspaces')) return { ok: true, status: 200, json: () => Promise.resolve({ workspaces: [REPO] }) }
+      if (u.includes('/mirror/checkouts')) return { ok: true, status: 200, json: () => Promise.resolve(exactCheckouts) }
+      if (u.includes('/mirror/patch')) return { ok: false, status: 500, text: () => Promise.resolve('boom') }
+      throw new Error(`unexpected fetch: ${u}`)
+    }))
+    vi.spyOn(process.stderr, 'write').mockImplementation((chunk) => {
+      stderr.push(String(chunk))
+      return true
+    })
+    vi.spyOn(process, 'exit').mockImplementation((() => { throw new Error('exit') }) as never)
+
+    const { cmdPull } = await loadCli()
+    await expect(cmdPull(['--force'])).rejects.toThrow('exit')
+
+    expect(stderr.join('')).toContain('Not falling back to a full mirror')
+    expect(calls.some((c) => c.url.includes('/mirror?'))).toBe(false)
   })
 })

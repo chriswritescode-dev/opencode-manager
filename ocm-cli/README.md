@@ -22,6 +22,10 @@ Use ocm 0.2.x with OpenCode Manager < 0.19.0 and OpenCode 1.x, installed pinned
 `@opencode-manager/ocm-cli@0.2`. ocm is published together with each OpenCode Manager
 release.
 
+`/ocm-move` requires ocm 0.4.0+ and a Manager that supports worktree moves; an
+older CLI is told to upgrade, and an older Manager is reported as needing an
+upgrade.
+
 ## Install
 
 ```bash
@@ -126,6 +130,15 @@ work (commits not present locally, or uncommitted changes on the Manager), and
 `pull` asks before discarding local commits the Manager does not have. Without a
 TTY both refuse; pass `--force` to override.
 
+When the Manager's main checkout is not on your local branch but a worktree of
+that repo is (including a `<branch>-ocm` / `<branch>-ocm-N` worktree created by
+`/ocm-move`), `push` and `pull` target that worktree instead. Pulling from a
+suffixed worktree updates your local branch, so no `-ocm` branch is created
+locally. A targeted worktree has no tarball fallback, and `--full` is refused
+because it would overwrite the main checkout. Against an older Manager that does
+not expose the checkout routes, both commands keep the previous behavior and
+target the main checkout.
+
 A base repo and one of its worktrees can both be registered as ready Manager
 repos sharing the same OpenCode project id. When that happens, `ocm push` and
 `ocm pull` accept an optional positional repo id to pick the target:
@@ -143,16 +156,26 @@ entrypoint automatically. When attached to a Manager via `ocm`, the plugin shows
 show nothing. It registers `/ocm-move`, which keeps the local session and
 copies the active session to the Manager after pushing your local working tree
 (commits, staged, unstaged, and untracked files; gitignored files on the Manager
-are preserved). Server-side work is never discarded. The Manager checkout is
-replaced in place only when it is already on your branch, clean, and has nothing
-your local branch lacks; otherwise the push lands in an OpenCode worktree of the
-same Manager repo — reusing an existing clean OpenCode worktree on your branch
-when one exists, or creating a new OpenCode worktree. When your branch is already
-checked out on the server, the new worktree uses a suffixed `<branch>-ocm`
-branch, and the server checkout is left untouched. A detached HEAD is refused
+are preserved). Server checkouts and branches on your branch are never
+overwritten when they hold work your local branch lacks; other server branches
+present in your local repo are still updated to your local refs by the push,
+unless checked out in another worktree. The Manager checkout is replaced in
+place only when it is already on your branch, clean, and has nothing your local
+branch lacks; otherwise the push lands in an OpenCode worktree of the same
+Manager repo — reusing the first clean worktree on your branch or on a
+`<branch>-ocm` / `<branch>-ocm-N` branch whose commits are all in your local
+branch (including worktrees registered as Manager repos by older versions), or
+creating a new OpenCode worktree in one step (bundle upload, import, then the
+worktree setup commands; the worktree is removed if the import fails). A new
+worktree uses your branch name unless that branch is already checked out on the
+server or the server's branch has commits your local branch lacks; it then uses
+the next free `<branch>-ocm[-N]` branch, so the server branch is never rewound,
+and the existing server checkout is left untouched. A failed worktree setup is
+reported as a warning and the session still moves. A detached HEAD is refused
 before anything is pushed. When multiple Manager repos match, the one already on
 your branch is chosen; otherwise a picker dialog lets you choose. A confirmation
-dialog gates the move before any push and states the destination path and branch.
+dialog gates the move before any push and states the destination path and branch,
+and why the server checkout was not used.
 The session moves by exporting it from the local OpenCode 2 server and importing
 it through the Manager proxy, followed by a synthetic reminder. While the move
 runs, a spinner with the current phase and a progress bar is shown next to the

@@ -7,10 +7,13 @@ import type { OpenCodeClient } from './opencode/client'
 import type { ProjectConfigService } from './project-config'
 import type { TerminalService } from './terminal'
 import type { ScheduleService } from './schedules'
-import { findSiblingByDirectory, getSiblingRepos, removeWorktree, RepoWorkspaceError, resolveRepoProjectId } from './repo'
+import { findSiblingByDirectory, listRepoSiblings, removeWorktree, RepoWorkspaceError, resolveRepoProjectId } from './repo'
 import { getErrorMessage } from '../utils/error-utils'
 
-/** Single owner of repo worktree lifecycle side effects: worktree setup on create, and terminal cleanup plus owner-specific removal on remove. */
+/**
+ * Single owner of repo worktree lifecycle side effects: worktree setup on create (after an
+ * optional caller-provided initializer), and terminal cleanup plus owner-specific removal on remove.
+ */
 export class RepoWorkspaceService {
   constructor(
     private readonly database: Database,
@@ -21,13 +24,30 @@ export class RepoWorkspaceService {
     private readonly scheduleWorktrees: Pick<ScheduleService, 'removeWorktrees'>,
   ) {}
 
-  async create(repo: Repo, options: { name?: string; ref?: string } = {}) {
+  async create(
+    repo: Repo,
+    options: { name?: string; ref?: string; initialize?: (directory: string) => Promise<void> } = {},
+  ) {
     const projectID = await resolveRepoProjectId(this.openCodeClient, repo.fullPath)
     const worktree = await this.openCodeClient.api.worktree.create({
       projectID,
       ...(options.name ? { name: options.name } : {}),
       ...(options.ref ? { branch: options.ref } : {}),
     })
+
+    if (options.initialize) {
+      try {
+        await options.initialize(worktree.directory)
+      } catch (error: unknown) {
+        try {
+          await this.openCodeClient.api.worktree.remove({ projectID, directory: worktree.directory, force: true })
+        } catch (removeError: unknown) {
+          logger.warn(`Failed to remove worktree ${worktree.directory} after initialization failed:`, removeError)
+        }
+        throw error
+      }
+    }
+
     const worktreeSetup = await this.projectConfigService.runWorktreeSetupForRepo(repo, worktree.directory, this.terminalService)
     return { ...worktree, worktreeSetup }
   }
@@ -77,14 +97,13 @@ export class RepoWorkspaceService {
   }
 
   private async listWorktreeSiblings(repoId: number) {
-    const siblings = await getSiblingRepos(
+    return listRepoSiblings(
       this.database,
       repoId,
       this.gitAuthService.getGitEnvironment(),
       this.openCodeClient,
-      { includeBranch: false },
+      isWorktreeSibling,
     )
-    return siblings.filter(isWorktreeSibling)
   }
 
   private async removeTerminals(directory: string): Promise<void> {

@@ -7,9 +7,9 @@ import { join, dirname } from 'path'
 import { tmpdir } from 'os'
 import { getRepoRoot, getDirtyPaths, getHeadSha, getBranchName, getMirrorPatch, runGit, hasCommit, isAncestor, countCommitsAhead } from './local-repo.js'
 import { resolveOpenCodeProjectId } from '@opencode-manager/shared/project-id'
-import type { MirrorCheckoutState, MirrorMoveTargetResponse } from '@opencode-manager/shared/schemas'
+import type { MirrorCheckoutState, MirrorCheckoutsResponse, WorktreeSetupResult } from '@opencode-manager/shared/schemas'
 import type { ManagerApi } from './manager-api.js'
-import { ManagerApiError } from './manager-api.js'
+import { ManagerApiError, isManagerRouteMissing } from './manager-api.js'
 import { delay } from './delay.js'
 
 const HARDCODED_EXCLUDES = ['node_modules', 'dist', '.next', '.venv', '__pycache__', '.turbo', '.DS_Store', '._*']
@@ -85,8 +85,13 @@ export interface PushDivergence {
   lostCommits: number
 }
 
-export async function checkPushDivergence(repoRoot: string, api: ManagerApi, repoId: number): Promise<PushDivergence> {
-  const info = await api.mirrorHead(repoId)
+export async function checkPushDivergence(
+  repoRoot: string,
+  api: ManagerApi,
+  repoId: number,
+  directory?: string,
+): Promise<PushDivergence> {
+  const info = await api.mirrorHead(repoId, directory)
   return assessPushDivergence(repoRoot, info)
 }
 
@@ -110,17 +115,11 @@ export function assessPushDivergence(
   return { serverHead, serverBranch, serverDirty, diverged: true, lostCommits }
 }
 
-export type MoveDestinationKind = 'in-place' | 'existing-worktree' | 'new-worktree'
-
 export interface MoveDestination {
-  kind: MoveDestinationKind
+  kind: 'in-place' | 'existing-worktree' | 'new-worktree'
   directory: string | null
   branch: string
   reasons: string[]
-}
-
-function isCheckoutSafe(repoRoot: string, state: MirrorCheckoutState): boolean {
-  return !state.dirty && !assessPushDivergence(repoRoot, state).diverged
 }
 
 function checkoutUnusableReasons(
@@ -130,47 +129,64 @@ function checkoutUnusableReasons(
   localBranch: string,
 ): string[] {
   if (state.branch !== localBranch) return [`${label} is on ${state.branch ?? 'a detached HEAD'}`]
-  const reasons: string[] = []
-  if (state.dirty) reasons.push(`${label} has uncommitted changes`)
-  if (assessPushDivergence(repoRoot, state).diverged) reasons.push(`${label} has commits not in your local branch`)
-  return reasons
+  return describePushDivergence(assessPushDivergence(repoRoot, state), label)
+}
+
+function worktreeUnusableReasons(
+  repoRoot: string,
+  state: MirrorCheckoutState,
+): string[] {
+  return describePushDivergence(assessPushDivergence(repoRoot, state), `the worktree on ${state.branch ?? 'another branch'}`)
+}
+
+function localContainsCommit(repoRoot: string, sha: string): boolean {
+  const localHead = getHeadSha(repoRoot)
+  if (!localHead) return false
+  return hasCommit(repoRoot, sha) && isAncestor(repoRoot, sha, localHead)
 }
 
 export function chooseMoveDestination(
   repoRoot: string,
   localBranch: string,
-  target: MirrorMoveTargetResponse,
+  checkouts: MirrorCheckoutsResponse,
 ): MoveDestination {
-  if (target.main.branch === localBranch && isCheckoutSafe(repoRoot, target.main)) {
-    return { kind: 'in-place', directory: target.main.directory, branch: localBranch, reasons: [] }
+  const mainReasons = checkoutUnusableReasons(repoRoot, 'the server checkout', checkouts.main, localBranch)
+  if (mainReasons.length === 0) {
+    return { kind: 'in-place', directory: checkouts.main.directory, branch: localBranch, reasons: [] }
   }
 
-  if (target.branchWorktree && isCheckoutSafe(repoRoot, target.branchWorktree)) {
-    return { kind: 'existing-worktree', directory: target.branchWorktree.directory, branch: localBranch, reasons: [] }
+  const worktreeReasons: string[] = []
+  for (const worktree of checkouts.worktrees) {
+    const reasons = worktreeUnusableReasons(repoRoot, worktree)
+    if (reasons.length === 0) {
+      return { kind: 'existing-worktree', directory: worktree.directory, branch: worktree.branch ?? localBranch, reasons: [] }
+    }
+    worktreeReasons.push(...reasons)
   }
 
-  const reasons = checkoutUnusableReasons(repoRoot, 'the server checkout', target.main, localBranch)
-  if (target.branchWorktree) {
-    reasons.push(
-      ...checkoutUnusableReasons(
-        repoRoot,
-        `the worktree on ${target.branchWorktree.branch ?? 'another branch'}`,
-        target.branchWorktree,
-        localBranch,
-      ),
-    )
+  const branchHeadMissing = checkouts.branchHead !== null && !localContainsCommit(repoRoot, checkouts.branchHead)
+  const useSuffix = checkouts.branchCheckedOut || branchHeadMissing
+  const reasons = [
+    ...mainReasons,
+    ...worktreeReasons,
+    ...(branchHeadMissing ? [`the server branch ${localBranch} has commits not in your local branch`] : []),
+  ]
+  return {
+    kind: 'new-worktree',
+    directory: null,
+    branch: useSuffix ? checkouts.suffixedWorktreeBranch : localBranch,
+    reasons,
   }
-  return { kind: 'new-worktree', directory: null, branch: target.newWorktreeBranch, reasons }
 }
 
-export function describePushDivergence(div: PushDivergence): string[] {
+export function describePushDivergence(div: PushDivergence, subject = 'the server'): string[] {
   const reasons: string[] = []
   if (div.diverged) {
     reasons.push(div.lostCommits >= 0
-      ? `the server is ${div.lostCommits} commit(s) ahead of your local branch`
-      : 'the server has commit(s) not present in your local branch')
+      ? `${subject} is ${div.lostCommits} commit(s) ahead of your local branch`
+      : `${subject} has commit(s) not present in your local branch`)
   }
-  if (div.serverDirty) reasons.push('the server has uncommitted changes')
+  if (div.serverDirty) reasons.push(`${subject} has uncommitted changes`)
   return reasons
 }
 
@@ -180,22 +196,57 @@ export interface PullDivergence {
   serverHead: string | null
 }
 
-export async function checkPullDivergence(repoRoot: string, api: ManagerApi, repoId: number): Promise<PullDivergence> {
+export async function checkPullDivergence(
+  repoRoot: string,
+  api: ManagerApi,
+  repoId: number,
+  directory?: string,
+): Promise<PullDivergence> {
   const localHead = getHeadSha(repoRoot)
   if (!localHead) return { diverged: false, lostCommits: 0, serverHead: null }
 
-  const { contained } = await api.mirrorContains(repoId, localHead)
+  const { contained } = await api.mirrorContains(repoId, localHead, directory)
   if (contained) return { diverged: false, lostCommits: 0, serverHead: null }
 
   let serverHead: string | null = null
   let lostCommits = -1
   try {
-    serverHead = (await api.mirrorHead(repoId)).head
+    serverHead = (await api.mirrorHead(repoId, directory)).head
     if (serverHead) lostCommits = countCommitsAhead(repoRoot, serverHead, localHead)
   } catch {
     // best-effort: count is informational only
   }
   return { diverged: true, lostCommits, serverHead }
+}
+
+export interface BranchCheckoutSelection {
+  directory?: string
+  targetBranch?: string
+}
+
+export async function resolveBranchCheckout(
+  api: ManagerApi,
+  repoId: number,
+  repoRoot: string,
+): Promise<BranchCheckoutSelection> {
+  const localBranch = getBranchName(repoRoot)
+  if (!localBranch) return {}
+
+  let checkouts: MirrorCheckoutsResponse
+  try {
+    checkouts = await api.mirrorCheckouts(repoId, localBranch)
+  } catch (error) {
+    if (isManagerRouteMissing(error) || (error instanceof ManagerApiError && error.status === 410)) return {}
+    throw error
+  }
+
+  if (checkouts.main.branch === localBranch) return {}
+  const worktree = checkouts.worktrees[0]
+  if (!worktree) return {}
+  return {
+    directory: worktree.directory,
+    targetBranch: worktree.branch !== null && worktree.branch !== localBranch ? worktree.branch : undefined,
+  }
 }
 
 export interface MirrorProgress {
@@ -520,7 +571,13 @@ function deleteSyncRefs(repoRoot: string): void {
   }
 }
 
-function importLocalBundle(repoRoot: string, bundlePath: string, branch: string | null, force: boolean): void {
+function importLocalBundle(
+  repoRoot: string,
+  bundlePath: string,
+  branch: string | null,
+  force: boolean,
+  sourceBranch?: string,
+): void {
   runGit(repoRoot, ['fetch', bundlePath, '+refs/heads/*:refs/remotes/ocm-sync/*', '+refs/tags/*:refs/tags/*'])
   try {
     const refs = runGit(repoRoot, ['for-each-ref', '--format=%(refname:strip=3) %(objectname)', 'refs/remotes/ocm-sync'])
@@ -537,10 +594,11 @@ function importLocalBundle(repoRoot: string, bundlePath: string, branch: string 
 
     const lockedElsewhere = branchOwnedElsewhere(listWorktreeBranches(repoRoot), repoRoot)
     const currentBranch = getBranchName(repoRoot)
+    const source = sourceBranch ?? branch
 
-    if (branch) {
-      const incomingSha = incoming.get(branch)
-      if (!incomingSha) throw new MirrorAbort(`no incoming branch '${branch}' in the server bundle`)
+    if (branch && source) {
+      const incomingSha = incoming.get(source)
+      if (!incomingSha) throw new MirrorAbort(`no incoming branch '${source}' in the server bundle`)
       if (lockedElsewhere.has(branch)) {
         throw new MirrorAbort(`branch '${branch}' is checked out in another worktree; release it there before pulling`)
       }
@@ -554,9 +612,13 @@ function importLocalBundle(repoRoot: string, bundlePath: string, branch: string 
       }
     }
 
+    const skipRefs = new Set<string>()
+    if (branch) skipRefs.add(branch)
+    if (source) skipRefs.add(source)
+
     const updates: string[] = []
     for (const [name, sha] of incoming) {
-      if (branch === name) continue
+      if (skipRefs.has(name)) continue
       if (lockedElsewhere.has(name)) continue
       if (branch === null && name === currentBranch) continue
       updates.push(`update refs/heads/${name} ${sha}\n`)
@@ -565,8 +627,8 @@ function importLocalBundle(repoRoot: string, bundlePath: string, branch: string 
       runGit(repoRoot, ['update-ref', '--stdin'], updates.join(''))
     }
 
-    if (branch) {
-      const targetSha = incoming.get(branch)!
+    if (branch && source) {
+      const targetSha = incoming.get(source)!
       runGit(repoRoot, ['reset', '--hard', targetSha])
       runGit(repoRoot, ['clean', '-fd'])
     }
@@ -575,9 +637,9 @@ function importLocalBundle(repoRoot: string, bundlePath: string, branch: string 
   }
 }
 
-async function writeBundleStream(repoId: number, api: ManagerApi): Promise<string> {
+async function writeBundleStream(repoId: number, api: ManagerApi, directory?: string): Promise<string> {
   const bundlePath = join(tmpdir(), `ocm-bundle-down-${Date.now()}-${Math.random().toString(36).slice(2)}.bundle`)
-  const stream = await api.mirrorDownloadBundle(repoId)
+  const stream = await api.mirrorDownloadBundle(repoId, directory)
   await pipeline(
     Readable.fromWeb(stream as unknown as Parameters<typeof Readable.fromWeb>[0]),
     createWriteStream(bundlePath),
@@ -595,13 +657,23 @@ type MirrorUpFastOpts = Pick<MirrorUpOpts, 'api' | 'force'> & {
   requireCurrentBranch?: boolean
   directory?: string
   targetBranch?: string
+  createWorktree?: { targetBranch: string }
   onPhase?: (phase: MirrorUpFastPhase) => void
+}
+
+export interface MirrorUpFastResult {
+  repoId: number
+  fullPath: string
+  branch: string | null
+  head: string | null
+  created: boolean
+  worktreeSetup?: WorktreeSetupResult
 }
 
 export async function mirrorUpFast(
   plan: MirrorPlan,
   opts: MirrorUpFastOpts,
-): Promise<{ repoId: number; fullPath: string; branch: string | null; head: string | null; created: false }> {
+): Promise<MirrorUpFastResult> {
   const repoId = plan.matched[0]!.repoId
   const onPhase = opts.onPhase
   onPhase?.({ kind: 'bundling' })
@@ -609,18 +681,38 @@ export async function mirrorUpFast(
   try {
     const { size } = await fsp.stat(bundlePath)
     onPhase?.({ kind: 'uploading', bytesSent: 0, totalBytes: size })
+    const onProgress = onPhase
+      ? (bytesSent: number) => {
+          onPhase({ kind: 'uploading', bytesSent, totalBytes: size })
+          if (bytesSent >= size) onPhase({ kind: 'processing' })
+        }
+      : undefined
+
+    if (opts.createWorktree) {
+      const branch = getBranchName(plan.repoRoot)
+      if (!branch) throw new MirrorAbort('cannot create a worktree from a detached HEAD')
+      const created = await opts.api.mirrorCreateWorktree(repoId, bundlePath, {
+        branch,
+        targetBranch: opts.createWorktree.targetBranch,
+        onProgress,
+      })
+      return {
+        repoId: created.repoId,
+        fullPath: created.fullPath,
+        branch: created.branch,
+        head: created.head,
+        created: true,
+        worktreeSetup: created.worktreeSetup,
+      }
+    }
+
     await opts.api.mirrorUploadBundle(repoId, bundlePath, {
       branch: getBranchName(plan.repoRoot),
       force: opts.force,
       requireCurrentBranch: opts.requireCurrentBranch,
       directory: opts.directory,
       targetBranch: opts.targetBranch,
-      onProgress: onPhase
-        ? (bytesSent) => {
-            onPhase({ kind: 'uploading', bytesSent, totalBytes: size })
-            if (bytesSent >= size) onPhase({ kind: 'processing' })
-          }
-        : undefined,
+      onProgress,
     })
     onPhase?.({ kind: 'patching' })
     const patchResult = await mirrorUpPatch(plan, opts)
@@ -634,16 +726,18 @@ export async function mirrorDownFast(
   repoId: number,
   repoRoot: string,
   api: ManagerApi,
-  opts: { force: boolean } = { force: false },
+  opts: { force: boolean; directory?: string; sourceBranch?: string; targetBranch?: string } = { force: false },
 ): Promise<void> {
   if (!opts.force && getDirtyPaths(repoRoot).size > 0) {
     throw new MirrorAbort('working tree has uncommitted changes; rerun with --force')
   }
 
-  const snapshot = await api.mirrorPatchSnapshot(repoId)
-  const bundlePath = await writeBundleStream(repoId, api)
+  const snapshot = await api.mirrorPatchSnapshot(repoId, opts.directory)
+  const bundlePath = await writeBundleStream(repoId, api, opts.directory)
   try {
-    importLocalBundle(repoRoot, bundlePath, snapshot.branch, opts.force)
+    const branch = opts.targetBranch ?? snapshot.branch
+    const sourceBranch = opts.sourceBranch ?? branch ?? undefined
+    importLocalBundle(repoRoot, bundlePath, branch, opts.force, sourceBranch)
     applyPatch(repoRoot, snapshot.patch)
   } finally {
     await fsp.rm(bundlePath, { force: true }).catch(() => {})

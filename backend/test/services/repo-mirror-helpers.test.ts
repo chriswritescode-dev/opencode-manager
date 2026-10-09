@@ -243,6 +243,45 @@ describe('createRepoRow', () => {
   })
 })
 
+describe('isDirectoryInUse', () => {
+  beforeEach(() => {
+    vi.clearAllMocks()
+    tmpRoot = path.join(os.tmpdir(), `mirror-test-${Date.now()}-${Math.random().toString(36).slice(2)}`)
+    fs.mkdirSync(tmpRoot, { recursive: true })
+  })
+
+  afterEach(() => {
+    fs.rmSync(tmpRoot, { recursive: true, force: true })
+  })
+
+  it('returns true when the active directory differs only by a trailing slash', async () => {
+    const active = path.join(tmpRoot, 'demo')
+    fs.mkdirSync(active, { recursive: true })
+    mockGetActiveDirectories.mockReturnValue([`${active}${path.sep}`])
+
+    const { isDirectoryInUse } = await import('../../src/services/repo')
+    expect(isDirectoryInUse(active)).toBe(true)
+  })
+
+  it('returns true when the active directory is a symlink to the queried directory', async () => {
+    const real = path.join(tmpRoot, 'real')
+    const link = path.join(tmpRoot, 'link')
+    fs.mkdirSync(real, { recursive: true })
+    fs.symlinkSync(real, link)
+    mockGetActiveDirectories.mockReturnValue([link])
+
+    const { isDirectoryInUse } = await import('../../src/services/repo')
+    expect(isDirectoryInUse(real)).toBe(true)
+  })
+
+  it('returns false when no active directory matches', async () => {
+    mockGetActiveDirectories.mockReturnValue([path.join(tmpRoot, 'other')])
+
+    const { isDirectoryInUse } = await import('../../src/services/repo')
+    expect(isDirectoryInUse(path.join(tmpRoot, 'demo'))).toBe(false)
+  })
+})
+
 describe('isRepoInUse', () => {
   beforeEach(() => {
     vi.clearAllMocks()

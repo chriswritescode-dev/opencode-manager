@@ -5,16 +5,16 @@ import { copyFileSync, createReadStream, createWriteStream, existsSync } from 'f
 import { mkdtempSync, writeFileSync } from 'fs'
 import { Readable } from 'stream'
 import { pipeline } from 'stream/promises'
-import { join } from 'path'
+import { join, resolve } from 'path'
 import * as fsp from 'fs/promises'
 import { getReposPath } from '@opencode-manager/shared/config/env'
 import {
   MirrorTargetBranchRequestSchema,
   type MirrorCheckoutState,
-  type MirrorMoveTargetResponse,
+  type MirrorCheckoutsResponse,
   type MirrorWorktreeCreateResponse,
 } from '@opencode-manager/shared/schemas'
-import { isWorktreeSibling, sanitizeRepoDirectoryName } from '@opencode-manager/shared/utils'
+import { isWorktreeSibling, sanitizeRepoDirectoryName, type RepoSibling } from '@opencode-manager/shared/utils'
 import type { Repo } from '@opencode-manager/shared/types'
 import { getRepoById, updateLastPulled, updateRepoBranch, deleteRepo } from '../../db/queries'
 import {
@@ -22,7 +22,7 @@ import {
   createRepoRow,
   isDirectoryInUse,
   isRepoInUse,
-  getSiblingRepos,
+  listRepoSiblings,
   listGitWorktrees,
   resolveRepoWorkingDirectory,
 } from '../../services/repo'
@@ -31,7 +31,7 @@ import type { GitAuthService } from '../../services/git-auth'
 import type { OpenCodeClient } from '../../services/opencode/client'
 import { logger } from '../../utils/logger'
 import { getErrorMessage } from '../../utils/error-utils'
-import { mkdirSyncSafe } from '../../utils/fs-safe'
+import { canonicalPathSync, mkdirSyncSafe } from '../../utils/fs-safe'
 import { safeGitOut, gitOut } from './repo-sync-helpers'
 import {
   MIRROR_CHUNK_SIZE,
@@ -73,6 +73,7 @@ interface PatchBody {
 }
 
 const LEGACY_UPGRADE_MESSAGE = 'this ocm CLI is too old for this server; upgrade to ocm-cli >= 0.1.2 (the mirror upload protocol changed to chunked uploads)'
+const LEGACY_MOVE_UPGRADE_MESSAGE = 'this ocm CLI is too old for this server; upgrade to ocm-cli >= 0.4.0 (/ocm-move now moves sessions into OpenCode worktrees)'
 
 function gitRaw(repoPath: string, args: string[], env: NodeJS.ProcessEnv = process.env, input?: string): Promise<string> {
   return new Promise((resolve, reject) => {
@@ -142,26 +143,39 @@ async function listLocalBranchNames(fullPath: string): Promise<Set<string>> {
   return new Set(out.split('\n').map((l) => l.trim()).filter(Boolean))
 }
 
+async function isValidBranchName(repoPath: string, name: string): Promise<boolean> {
+  if (name.startsWith('-')) return false
+  return (await safeGitOut(repoPath, ['check-ref-format', '--branch', name])) !== null
+}
+
 async function checkoutState(directory: string): Promise<MirrorCheckoutState> {
-  const branch = await safeGitOut(directory, ['symbolic-ref', '--quiet', '--short', 'HEAD'])
-  const head = await safeGitOut(directory, ['rev-parse', 'HEAD'])
-  const status = await safeGitOut(directory, ['status', '--porcelain', '--untracked-files=all'])
+  const [branch, head, status] = await Promise.all([
+    currentBranchName(directory),
+    safeGitOut(directory, ['rev-parse', 'HEAD']),
+    safeGitOut(directory, ['status', '--porcelain', '--untracked-files=all']),
+  ])
   return {
     directory,
-    branch: branch?.trim() || null,
+    branch,
     head: head?.trim() || null,
     dirty: (status?.trim().length ?? 0) > 0,
   }
 }
 
-async function listMirrorWorktreeSiblings(
+function isMirrorCheckoutSibling(repo: Repo): (sibling: RepoSibling) => boolean {
+  return (sibling) => {
+    if (isWorktreeSibling(sibling)) return sibling.worktreeSource !== 'schedule'
+    return sibling.isWorktree === true && sibling.id > 0 && sibling.id !== repo.id
+  }
+}
+
+async function listMirrorCheckoutSiblings(
   db: Database,
   repo: Repo,
   gitAuthService: GitAuthService,
   openCodeClient: OpenCodeClient,
-): Promise<Array<{ fullPath: string }>> {
-  const siblings = await getSiblingRepos(db, repo.id, gitAuthService.getGitEnvironment(), openCodeClient, { includeBranch: false })
-  return siblings.filter((sibling) => isWorktreeSibling(sibling) && sibling.worktreeSource !== 'schedule')
+): Promise<RepoSibling[]> {
+  return listRepoSiblings(db, repo.id, gitAuthService.getGitEnvironment(), openCodeClient, isMirrorCheckoutSibling(repo))
 }
 
 async function resolveMirrorDirectory(
@@ -172,19 +186,31 @@ async function resolveMirrorDirectory(
   openCodeClient: OpenCodeClient,
 ): Promise<string | null> {
   return resolveRepoWorkingDirectory(repo, directory, () =>
-    listMirrorWorktreeSiblings(db, repo, gitAuthService, openCodeClient),
+    listMirrorCheckoutSiblings(db, repo, gitAuthService, openCodeClient),
   )
 }
 
-function nextWorktreeBranch(branch: string, localBranches: Set<string>, checkedOut: Set<string>): string {
-  if (!checkedOut.has(branch)) return branch
-  let candidate = `${branch}-ocm`
-  let suffix = 2
-  while (localBranches.has(candidate) || checkedOut.has(candidate)) {
-    candidate = `${branch}-ocm-${suffix}`
+function mirrorWorktreeBranchRank(worktreeBranch: string | null, branch: string): number | null {
+  if (worktreeBranch === branch) return 0
+  const prefix = `${branch}-ocm`
+  if (worktreeBranch === prefix) return 1
+  if (!worktreeBranch || !worktreeBranch.startsWith(`${prefix}-`)) return null
+  const suffix = Number(worktreeBranch.slice(prefix.length + 1))
+  return Number.isInteger(suffix) && suffix >= 2 ? suffix : null
+}
+
+function nextSuffixedWorktreeBranch(branch: string, localBranches: Set<string>, checkedOut: Set<string>): string {
+  let suffix = 1
+  while (true) {
+    const candidate = suffix === 1 ? `${branch}-ocm` : `${branch}-ocm-${suffix}`
+    if (!localBranches.has(candidate) && !checkedOut.has(candidate)) return candidate
     suffix += 1
   }
-  return candidate
+}
+
+async function branchHeadSha(fullPath: string, branch: string): Promise<string | null> {
+  const sha = await safeGitOut(fullPath, ['rev-parse', '--verify', '--quiet', `refs/heads/${branch}`])
+  return sha?.trim() || null
 }
 
 async function importBundle(fullPath: string, bundlePath: string, branch: string | null, requireCurrentBranch: boolean, force: boolean, targetBranch: string | null = branch): Promise<void> {
@@ -227,10 +253,12 @@ async function importBundle(fullPath: string, bundlePath: string, branch: string
       }
     }
 
-    const skipRef = targetBranch ?? branch
+    const skipRefs = new Set<string>()
+    if (branch !== null) skipRefs.add(branch)
+    if (targetBranch !== null) skipRefs.add(targetBranch)
     const updates: string[] = []
     for (const [name, sha] of incoming) {
-      if (skipRef !== null && name === skipRef) continue
+      if (skipRefs.has(name)) continue
       if (locked.has(name)) continue
       updates.push(`update refs/heads/${name} ${sha}\n`)
     }
@@ -258,6 +286,21 @@ async function createBundle(fullPath: string): Promise<string> {
   const bundlePath = join(bundleDir, 'repo.bundle')
   await gitRaw(fullPath, ['bundle', 'create', bundlePath, '--all'])
   return bundlePath
+}
+
+async function stageBundleFromBody(body: ReadableStream, dirPrefix: string): Promise<{ bundleDir: string; bundlePath: string }> {
+  const stagingRoot = getStagingRoot()
+  mkdirSyncSafe(stagingRoot)
+  const bundleDir = mkdtempSync(join(stagingRoot, dirPrefix))
+  try {
+    const bundlePath = join(bundleDir, 'repo.bundle')
+    const readable = Readable.fromWeb(body as unknown as Parameters<typeof Readable.fromWeb>[0])
+    await pipeline(readable, createWriteStream(bundlePath))
+    return { bundleDir, bundlePath }
+  } catch (error) {
+    await fsp.rm(bundleDir, { recursive: true, force: true }).catch(() => {})
+    throw error
+  }
 }
 
 export function createInternalRepoMirrorRoutes(
@@ -442,9 +485,12 @@ export function createInternalRepoMirrorRoutes(
     const repo = getRepoById(db, repoId)
     if (!repo) return c.json({ error: 'repo not found' }, 404)
 
+    const directory = await resolveMirrorDirectory(db, repo, c.req.query('directory'), gitAuthService, openCodeClient)
+    if (!directory) return c.json({ error: 'Directory is not part of this repository' }, 400)
+
     let bundlePath: string | undefined
     try {
-      bundlePath = await createBundle(repo.fullPath)
+      bundlePath = await createBundle(directory)
       const stream = createReadStream(bundlePath)
       stream.on('close', () => {
         if (bundlePath) fsp.rm(join(bundlePath, '..'), { recursive: true, force: true }).catch(() => {})
@@ -477,42 +523,46 @@ export function createInternalRepoMirrorRoutes(
     const rawBody = c.req.raw.body
     if (!rawBody) return c.json({ error: 'no body provided' }, 400)
 
-    const stagingRoot = getStagingRoot()
-    mkdirSyncSafe(stagingRoot)
-    const bundleDir = mkdtempSync(join(stagingRoot, 'bundle-upload-'))
-    const bundlePath = join(bundleDir, 'repo.bundle')
     const branch = c.req.header('x-ocm-branch')?.trim() || null
     const targetBranch = c.req.header('x-ocm-target-branch')?.trim() || branch
     const requireCurrentBranch = c.req.header('x-ocm-require-current-branch')?.trim() === '1'
 
+    let bundleDir: string | undefined
     try {
-      const body = Readable.fromWeb(rawBody as unknown as Parameters<typeof Readable.fromWeb>[0])
-      await pipeline(body, createWriteStream(bundlePath))
-      await importBundle(directory, bundlePath, branch, requireCurrentBranch, force, targetBranch)
+      const staged = await stageBundleFromBody(rawBody, 'bundle-upload-')
+      bundleDir = staged.bundleDir
+      await importBundle(directory, staged.bundlePath, branch, requireCurrentBranch, force, targetBranch)
 
-      const branchName = await safeGitOut(directory, ['rev-parse', '--abbrev-ref', 'HEAD'])
-      const head = await safeGitOut(directory, ['rev-parse', 'HEAD'])
+      const state = await checkoutState(directory)
       if (directory === repo.fullPath) {
-        if (branchName) updateRepoBranch(db, repoId, branchName.trim())
+        if (state.branch) updateRepoBranch(db, repoId, state.branch)
         updateLastPulled(db, repoId)
       }
 
       return c.json({
         repoId,
         fullPath: directory,
-        branch: branchName?.trim() || null,
-        head: head?.trim() || null,
+        branch: state.branch,
+        head: state.head,
         created: false,
       })
     } catch (error) {
       logger.error('mirror bundle upload failed:', error)
       return c.json({ error: getErrorMessage(error) }, 409)
     } finally {
-      await fsp.rm(bundleDir, { recursive: true, force: true }).catch(() => {})
+      if (bundleDir) await fsp.rm(bundleDir, { recursive: true, force: true }).catch(() => {})
     }
   })
 
-  app.get('/:repoId/mirror/target', async (c) => {
+  app.get('/:repoId/mirror/target', (c) => {
+    return c.json({ error: 'cli_too_old', message: LEGACY_MOVE_UPGRADE_MESSAGE }, 410)
+  })
+
+  app.post('/:repoId/mirror/target', (c) => {
+    return c.json({ error: 'cli_too_old', message: LEGACY_MOVE_UPGRADE_MESSAGE }, 410)
+  })
+
+  app.get('/:repoId/mirror/checkouts', async (c) => {
     const repoId = Number(c.req.param('repoId'))
     if (!Number.isFinite(repoId)) return c.json({ error: 'invalid repoId' }, 400)
     const branchParsed = MirrorTargetBranchRequestSchema.safeParse({ branch: c.req.query('branch') })
@@ -520,32 +570,48 @@ export function createInternalRepoMirrorRoutes(
     const { branch } = branchParsed.data
     const repo = getRepoById(db, repoId)
     if (!repo) return c.json({ error: 'repo not found' }, 404)
+    if (!(await isValidBranchName(repo.fullPath, branch))) return c.json({ error: 'invalid branch name' }, 400)
 
     try {
-      const main = await checkoutState(repo.fullPath)
-      const siblings = await listMirrorWorktreeSiblings(db, repo, gitAuthService, openCodeClient)
-      let branchWorktree: MirrorCheckoutState | null = null
-      for (const sibling of siblings) {
-        const state = await checkoutState(sibling.fullPath)
-        if (state.branch === branch) {
-          branchWorktree = state
-          break
-        }
+      const env = gitAuthService.getGitEnvironment()
+      const [main, siblings, gitWorktrees, localBranches, branchHead] = await Promise.all([
+        checkoutState(repo.fullPath),
+        listMirrorCheckoutSiblings(db, repo, gitAuthService, openCodeClient),
+        listGitWorktrees(repo.fullPath, env),
+        listLocalBranchNames(repo.fullPath),
+        branchHeadSha(repo.fullPath, branch),
+      ])
+
+      const branchByCanonicalPath = new Map<string, string | null>()
+      const checkedOut = new Set<string>()
+      for (const worktree of gitWorktrees) {
+        branchByCanonicalPath.set(canonicalPathSync(resolve(worktree.path)), worktree.branch)
+        if (worktree.branch) checkedOut.add(worktree.branch)
       }
 
-      const gitWorktrees = await listGitWorktrees(repo.fullPath, gitAuthService.getGitEnvironment())
-      const checkedOut = new Set(
-        gitWorktrees.map((worktree) => worktree.branch).filter((name): name is string => name !== null),
-      )
-      const localBranches = await listLocalBranchNames(repo.fullPath)
-      const response: MirrorMoveTargetResponse = {
+      const candidates = siblings
+        .map((sibling) => ({
+          sibling,
+          rank: mirrorWorktreeBranchRank(
+            branchByCanonicalPath.get(canonicalPathSync(resolve(sibling.fullPath))) ?? null,
+            branch,
+          ),
+        }))
+        .filter((candidate): candidate is { sibling: RepoSibling; rank: number } => candidate.rank !== null)
+        .sort((left, right) => left.rank - right.rank)
+
+      const worktrees = await Promise.all(candidates.map((candidate) => checkoutState(candidate.sibling.fullPath)))
+
+      const response: MirrorCheckoutsResponse = {
         main,
-        branchWorktree,
-        newWorktreeBranch: nextWorktreeBranch(branch, localBranches, checkedOut),
+        worktrees,
+        branchHead,
+        branchCheckedOut: checkedOut.has(branch),
+        suffixedWorktreeBranch: nextSuffixedWorktreeBranch(branch, localBranches, checkedOut),
       }
       return c.json(response)
     } catch (error) {
-      logger.error('mirror target resolution failed:', error)
+      logger.error('mirror checkouts resolution failed:', error)
       return c.json({ error: getErrorMessage(error) }, 500)
     }
   })
@@ -553,30 +619,49 @@ export function createInternalRepoMirrorRoutes(
   app.post('/:repoId/mirror/worktree', async (c) => {
     const repoId = Number(c.req.param('repoId'))
     if (!Number.isFinite(repoId)) return c.json({ error: 'invalid repoId' }, 400)
-    let json: unknown
-    try {
-      json = await c.req.json()
-    } catch {
-      return c.json({ error: 'invalid json body' }, 400)
-    }
-    const branchParsed = MirrorTargetBranchRequestSchema.safeParse(json)
-    if (!branchParsed.success) return c.json({ error: 'branch required' }, 400)
-    const { branch } = branchParsed.data
+
+    const branch = c.req.header('x-ocm-branch')?.trim()
+    const targetBranch = c.req.header('x-ocm-target-branch')?.trim()
+    if (!branch || !targetBranch) return c.json({ error: 'branch and target branch required' }, 400)
+
     const repo = getRepoById(db, repoId)
     if (!repo) return c.json({ error: 'repo not found' }, 404)
 
-    const gitWorktrees = await listGitWorktrees(repo.fullPath, gitAuthService.getGitEnvironment())
-    if (gitWorktrees.some((worktree) => worktree.branch === branch)) {
-      return c.json({ error: 'branch_in_use', message: `branch '${branch}' is checked out in a worktree of this repository` }, 409)
+    if (!(await isValidBranchName(repo.fullPath, branch)) || !(await isValidBranchName(repo.fullPath, targetBranch))) {
+      return c.json({ error: 'invalid branch name' }, 400)
     }
 
+    const gitWorktrees = await listGitWorktrees(repo.fullPath, gitAuthService.getGitEnvironment())
+    if (gitWorktrees.some((worktree) => worktree.branch === targetBranch)) {
+      return c.json({ error: 'branch_in_use', message: `branch '${targetBranch}' is checked out in a worktree of this repository` }, 409)
+    }
+
+    const rawBody = c.req.raw.body
+    if (!rawBody) return c.json({ error: 'no body provided' }, 400)
+
+    let bundleDir: string | undefined
     try {
-      const worktree = await repoWorkspaces.create(repo, { name: sanitizeRepoDirectoryName(branch, 'move') })
-      const response: MirrorWorktreeCreateResponse = { directory: worktree.directory, branch }
+      const staged = await stageBundleFromBody(rawBody, 'bundle-upload-')
+      bundleDir = staged.bundleDir
+      const worktree = await repoWorkspaces.create(repo, {
+        name: sanitizeRepoDirectoryName(targetBranch, 'move'),
+        initialize: (directory) => importBundle(directory, staged.bundlePath, branch, false, true, targetBranch),
+      })
+      const state = await checkoutState(worktree.directory)
+      const response: MirrorWorktreeCreateResponse = {
+        repoId: repo.id,
+        fullPath: worktree.directory,
+        branch: state.branch,
+        head: state.head,
+        created: true,
+        worktreeSetup: worktree.worktreeSetup,
+      }
       return c.json(response)
     } catch (error) {
       logger.error('mirror worktree create failed:', error)
       return c.json({ error: getErrorMessage(error) }, 409)
+    } finally {
+      if (bundleDir) await fsp.rm(bundleDir, { recursive: true, force: true }).catch(() => {})
     }
   })
 
@@ -587,7 +672,10 @@ export function createInternalRepoMirrorRoutes(
     const repo = getRepoById(db, repoId)
     if (!repo) return c.json({ error: 'repo not found' }, 404)
 
-    const state = await checkoutState(repo.fullPath)
+    const directory = await resolveMirrorDirectory(db, repo, c.req.query('directory'), gitAuthService, openCodeClient)
+    if (!directory) return c.json({ error: 'Directory is not part of this repository' }, 400)
+
+    const state = await checkoutState(directory)
     return c.json({
       repoId: repo.id,
       branch: state.branch,
@@ -605,7 +693,10 @@ export function createInternalRepoMirrorRoutes(
     const repo = getRepoById(db, repoId)
     if (!repo) return c.json({ error: 'repo not found' }, 404)
 
-    const ancestry = await safeGitOut(repo.fullPath, ['merge-base', '--is-ancestor', sha, 'HEAD'])
+    const directory = await resolveMirrorDirectory(db, repo, c.req.query('directory'), gitAuthService, openCodeClient)
+    if (!directory) return c.json({ error: 'Directory is not part of this repository' }, 400)
+
+    const ancestry = await safeGitOut(directory, ['merge-base', '--is-ancestor', sha, 'HEAD'])
     return c.json({ repoId: repo.id, contained: ancestry !== null })
   })
 
@@ -616,14 +707,16 @@ export function createInternalRepoMirrorRoutes(
     const repo = getRepoById(db, repoId)
     if (!repo) return c.json({ error: 'repo not found' }, 404)
 
+    const directory = await resolveMirrorDirectory(db, repo, c.req.query('directory'), gitAuthService, openCodeClient)
+    if (!directory) return c.json({ error: 'Directory is not part of this repository' }, 400)
+
     try {
-      const branchName = await safeGitOut(repo.fullPath, ['rev-parse', '--abbrev-ref', 'HEAD'])
-      const head = await safeGitOut(repo.fullPath, ['rev-parse', 'HEAD'])
-      const patch = await createMirrorPatch(repo.fullPath)
+      const state = await checkoutState(directory)
+      const patch = await createMirrorPatch(directory)
       return c.json({
         repoId: repo.id,
-        branch: branchName?.trim() || null,
-        head: head?.trim() || null,
+        branch: state.branch,
+        head: state.head,
         patch,
       })
     } catch (error) {
@@ -659,28 +752,24 @@ export function createInternalRepoMirrorRoutes(
     }
 
     try {
-      const currentHead = await safeGitOut(directory, ['rev-parse', 'HEAD'])
-      const currentHeadTrimmed = currentHead?.trim() || null
+      const state = await checkoutState(directory)
       const baseHead = body.baseHead?.trim() || null
-      if (baseHead && currentHeadTrimmed && baseHead !== currentHeadTrimmed) {
+      if (baseHead && state.head && baseHead !== state.head) {
         return c.json({ error: 'head_mismatch', message: 'Manager repo HEAD differs from patch base' }, 409)
       }
 
       await applyMirrorPatch(directory, body.patch)
 
-      const branchName = await safeGitOut(directory, ['rev-parse', '--abbrev-ref', 'HEAD'])
-      const head = await safeGitOut(directory, ['rev-parse', 'HEAD'])
-
       if (directory === repo.fullPath) {
-        if (branchName) updateRepoBranch(db, repoId, branchName.trim())
+        if (state.branch) updateRepoBranch(db, repoId, state.branch)
         updateLastPulled(db, repoId)
       }
 
       return c.json({
         repoId,
         fullPath: directory,
-        branch: branchName?.trim() || null,
-        head: head?.trim() || null,
+        branch: state.branch,
+        head: state.head,
         created: false,
         applied: true,
       })

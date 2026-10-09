@@ -16,10 +16,10 @@ import { startWebSocketServer, type WebSocketTestServer } from '../helpers/webso
 vi.mock('../../src/services/repo', () => ({
   resolveRepoOrAssistant: vi.fn(),
   resolveRepoWorkingDirectory: vi.fn(),
-  getSiblingRepos: vi.fn(),
+  listRepoSiblings: vi.fn(),
 }))
 
-import { resolveRepoOrAssistant, resolveRepoWorkingDirectory, getSiblingRepos } from '../../src/services/repo'
+import { resolveRepoOrAssistant, resolveRepoWorkingDirectory, listRepoSiblings } from '../../src/services/repo'
 
 const readyRepo = { id: 1, fullPath: '/tmp/repo', cloneStatus: 'ready' } as Repo
 const database = {} as Database
@@ -202,7 +202,7 @@ beforeAll(async () => {
     if (directory === undefined || directory === '/tmp/repo') return '/tmp/repo'
     return null
   })
-  vi.mocked(getSiblingRepos).mockResolvedValue([])
+  vi.mocked(listRepoSiblings).mockResolvedValue([])
 })
 
 afterAll(async () => {
