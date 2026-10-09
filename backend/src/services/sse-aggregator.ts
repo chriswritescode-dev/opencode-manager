@@ -34,7 +34,7 @@ type ReplayEventType = 'permission.asked' | 'form.created' | 'session.status'
 
 const { RECONNECT_DELAY_MS, MAX_RECONNECT_DELAY_MS } = DEFAULTS.SSE
 const MULTILINE_PATTERN = /[\r\n]/
-const LOCATION_CATALOG_EVENT_TYPES = new Set(['command.updated', 'agent.updated', 'skill.updated'])
+const LOCATION_CATALOG_EVENT_TYPES = new Set(['command.updated', 'agent.updated', 'skill.updated', 'model.updated', 'provider.updated', 'integration.updated'])
 
 function serializeEnvelope(directory: string | null, payloadJson: string): string {
   return '{"directory":' + JSON.stringify(directory) + ',"payload":' + payloadJson + '}'
