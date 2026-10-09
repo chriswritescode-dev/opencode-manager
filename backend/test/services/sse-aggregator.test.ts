@@ -805,7 +805,7 @@ describe('SSEAggregator location-scoped catalog event broadcast', () => {
     sseAggregator.setScheduledSessionsResolver(() => [])
   })
 
-  it.each(['command.updated', 'agent.updated', 'skill.updated'])(
+  it.each(['command.updated', 'agent.updated', 'skill.updated', 'model.updated', 'provider.updated', 'integration.updated'])(
     'broadcasts a location-scoped %s catalog event to every client without leaking other location-scoped events',
     (type) => {
       const subscribed = createCapturingClient()

@@ -856,6 +856,7 @@ describe('EventProvider permissions and forms', () => {
       expect(invalidateQueries).toHaveBeenCalledWith({ queryKey: ['opencode', 'commands'] })
       expect(invalidateQueries).toHaveBeenCalledWith({ queryKey: ['opencode', 'agents'] })
       expect(invalidateQueries).toHaveBeenCalledWith({ queryKey: ['opencode', 'skills'] })
+      expect(invalidateQueries).toHaveBeenCalledWith({ queryKey: ['opencode', 'providers'] })
     })
   })
 
@@ -880,6 +881,7 @@ describe('EventProvider permissions and forms', () => {
       expect(invalidateQueries).toHaveBeenCalledWith({ queryKey: ['opencode', 'commands'] })
       expect(invalidateQueries).toHaveBeenCalledWith({ queryKey: ['opencode', 'agents'] })
       expect(invalidateQueries).toHaveBeenCalledWith({ queryKey: ['opencode', 'skills'] })
+      expect(invalidateQueries).toHaveBeenCalledWith({ queryKey: ['opencode', 'providers'] })
     })
   })
 

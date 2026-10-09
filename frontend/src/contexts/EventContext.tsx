@@ -33,6 +33,7 @@ const LOCATION_CATALOG_QUERY_KEYS = [
   ['opencode', 'commands'],
   ['opencode', 'agents'],
   ['opencode', 'skills'],
+  ['opencode', 'providers'],
 ] as const
 
 type PermissionsBySession = Record<string, PermissionRequest[]>
