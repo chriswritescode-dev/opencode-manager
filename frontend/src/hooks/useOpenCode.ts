@@ -43,6 +43,7 @@ interface UseSessionsAcrossDirectoriesOptions {
   limit?: number
   keepPreviousResults?: boolean
   allDirectories?: boolean
+  project?: { id: string; subpath: string }
 }
 
 type SessionDirectoryCursors = Record<string, string>
@@ -68,6 +69,10 @@ export const useSessionsAcrossDirectories = (
   const limit = options?.limit ?? SESSION_LIST_PAGE_SIZE;
   const keepPreviousResults = options?.keepPreviousResults ?? false;
   const allDirectories = options?.allDirectories ?? false;
+  const projectId = options?.project?.id;
+  const projectSubpath = options?.project?.subpath;
+  const projectScoped = !allDirectories && projectId !== undefined;
+  const singleCursor = allDirectories || projectScoped;
   const directoryKey = uniqueDirectories.join('|');
 
   const query = useInfiniteQuery<
@@ -77,13 +82,23 @@ export const useSessionsAcrossDirectories = (
     readonly unknown[],
     SessionListPageParam | undefined
   >({
-    queryKey: ['opencode', 'sessions', directoryKey, { search: normalizedSearch, limit, allDirectories }],
+    queryKey: [
+      'opencode',
+      'sessions',
+      directoryKey,
+      { search: normalizedSearch, limit, allDirectories, project: projectId, subpath: projectSubpath },
+    ],
     queryFn: async ({ pageParam }) => {
-      if (allDirectories) {
+      if (singleCursor) {
         const cursor = pageParam?.mode === 'all' ? pageParam.cursor : undefined;
         const page = await listSessionPage(
           cursor === undefined
-            ? { limit, order: 'desc', search: normalizedSearch }
+            ? {
+                limit,
+                order: 'desc',
+                search: normalizedSearch,
+                ...(projectScoped ? { project: projectId, subpath: projectSubpath } : {}),
+              }
             : { cursor },
         );
         return {
@@ -136,8 +151,12 @@ export const useSessionsAcrossDirectories = (
     },
     initialPageParam: undefined as SessionListPageParam | undefined,
     placeholderData: keepPreviousResults
-      ? (previousData, previousQuery) =>
-          previousQuery?.queryKey[2] === directoryKey ? previousData : undefined
+      ? (previousData, previousQuery) => {
+          if (!previousQuery) return undefined
+          const sameDirectory = previousQuery.queryKey[2] === directoryKey
+          const previousProject = (previousQuery.queryKey[3] as { project?: string } | undefined)?.project
+          return sameDirectory && previousProject === projectId ? previousData : undefined
+        }
       : undefined,
     getNextPageParam: (lastPage) => lastPage.nextParam,
     enabled: uniqueDirectories.length > 0,

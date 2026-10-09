@@ -1,7 +1,8 @@
 import { memo, useCallback, useEffect, useId, useMemo, useRef, useState } from 'react'
+import { useQuery } from '@tanstack/react-query'
 import { format, startOfDay } from 'date-fns'
 import { MoreHorizontal, Pin, PinOff, Search } from 'lucide-react'
-import { isWorktreeSibling } from '@opencode-manager/shared/utils'
+import { getOpenCodeLocation } from '@/api/opencode'
 import type { Repo, Session } from '@/api/types'
 import { Button } from '@/components/ui/button'
 import { Dialog, DialogContent, DialogTitle } from '@/components/ui/dialog'
@@ -20,7 +21,6 @@ import { useDeleteSession } from '@/hooks/useOpenCode'
 import { useSessionSearch } from '@/hooks/useSessionSearch'
 import { useSessionPins, useToggleSessionPin } from '@/hooks/useSessionPins'
 import { usePersistentBoolean } from '@/hooks/usePersistentBoolean'
-import { useRepoSiblings } from '@/hooks/useRepoSiblings'
 import { useNavigableRepos } from '@/hooks/useSidebarRepoGroups'
 import { useSessionStatusForSession } from '@/stores/sessionStatusStore'
 import { buildPinnedSessionKeys, getSessionKey } from '@/lib/sessionKey'
@@ -93,10 +93,51 @@ function optionId(baseId: string, index: number): string {
   return `${baseId}-option-${index}`
 }
 
-function worktreeDirectoryLabel(session: Session, repoPath: string | undefined): string | undefined {
-  const directory = session.location.directory
-  if (!repoPath || directory === repoPath) return undefined
-  const segments = directory.replace(/\/+$/, '').split('/').filter(Boolean)
+function stripTrailingSlashes(value: string): string {
+  return value.replace(/\/+$/, '')
+}
+
+function relativeSubpath(base: string, target: string): string {
+  const baseSegments = stripTrailingSlashes(base).split('/').filter(Boolean)
+  const targetSegments = stripTrailingSlashes(target).split('/').filter(Boolean)
+  let common = 0
+  while (
+    common < baseSegments.length &&
+    common < targetSegments.length &&
+    baseSegments[common] === targetSegments[common]
+  ) {
+    common += 1
+  }
+  const upward = baseSegments.length - common
+  const downward = targetSegments.slice(common)
+  return [...Array.from({ length: upward }, () => '..'), ...downward].join('/')
+}
+
+function sessionRootDirectory(session: Session): string {
+  const directory = stripTrailingSlashes(session.location.directory)
+  const subpath = session.subpath
+  if (!subpath) return directory
+  const depth = subpath.split('/').filter(Boolean).length
+  let root = directory
+  for (let index = 0; index < depth; index += 1) {
+    const separator = root.lastIndexOf('/')
+    if (separator <= 0) break
+    root = root.slice(0, separator)
+  }
+  return root
+}
+
+function isPathInside(base: string, target: string): boolean {
+  const normalizedBase = stripTrailingSlashes(base)
+  if (target === normalizedBase) return true
+  return target.startsWith(`${normalizedBase}/`)
+}
+
+function sessionWorktreeLabel(session: Session, canonical: string | undefined): string | undefined {
+  if (!canonical) return undefined
+  const root = sessionRootDirectory(session)
+  if (isPathInside(canonical, root)) return undefined
+  const segments = root.split('/').filter(Boolean)
   return segments[segments.length - 1]
 }
 
@@ -266,25 +307,32 @@ function SessionPickerContent({
     return map
   }, [repos, currentRepo])
 
-  const { data: siblings } = useRepoSiblings(currentRepo?.id)
+  const locationQuery = useQuery({
+    queryKey: ['opencode', 'location', currentRepo?.fullPath],
+    queryFn: () => getOpenCodeLocation(currentRepo!.fullPath),
+    enabled: !allProjects && Boolean(currentRepo?.fullPath),
+    staleTime: 5 * 60 * 1000,
+  })
 
-  const worktreeDirectories = useMemo(
-    () =>
-      (siblings ?? [])
-        .filter((sibling) => isWorktreeSibling(sibling) && !!sibling.fullPath)
-        .map((sibling) => sibling.fullPath),
-    [siblings],
-  )
+  const location = locationQuery.data
+  const locationPending = !allProjects && Boolean(currentRepo?.fullPath) && locationQuery.isPending
+  const projectOption = useMemo(() => {
+    if (allProjects || !location || location.project.id === 'global') return undefined
+    return {
+      id: location.project.id,
+      subpath: relativeSubpath(location.project.directory, location.directory),
+    }
+  }, [allProjects, location])
 
   const directories = useMemo(() => {
-    if (!allProjects) {
-      if (!currentRepo) return []
-      return Array.from(new Set([currentRepo.fullPath, ...worktreeDirectories]))
+    if (allProjects) {
+      const paths = repos.map((repo) => repo.fullPath)
+      if (currentRepo) paths.push(currentRepo.fullPath)
+      return Array.from(new Set(paths))
     }
-    const paths = repos.map((repo) => repo.fullPath)
-    if (currentRepo) paths.push(currentRepo.fullPath)
-    return Array.from(new Set(paths))
-  }, [allProjects, repos, currentRepo, worktreeDirectories])
+    if (locationPending) return []
+    return currentRepo ? [currentRepo.fullPath] : []
+  }, [allProjects, repos, currentRepo, locationPending])
 
   const {
     query,
@@ -297,7 +345,9 @@ function SessionPickerContent({
     isFetchingNextPage,
     isFetchNextPageError,
     canFetchNextPage,
-  } = useSessionSearch(directories, { allDirectories: allProjects })
+  } = useSessionSearch(directories, { allDirectories: allProjects, project: projectOption })
+
+  const isPickerLoading = isLoading || locationPending
 
   const resolveRepo = useCallback(
     (session: Session) => repoByDirectory.get(session.location.directory) ?? currentRepo,
@@ -552,7 +602,7 @@ function SessionPickerContent({
         >
           {rows.length === 0 ? (
             <div className="p-4 text-sm text-muted-foreground">
-              {isLoading
+              {isPickerLoading
                 ? 'Loading sessions...'
                 : isSearchPending
                   ? 'Searching sessions...'
@@ -587,7 +637,7 @@ function SessionPickerContent({
                         isPinned={pinnedKeys.has(row.key)}
                         isPendingDelete={pendingDeleteKey === row.key}
                         showRepo={allProjects}
-                        label={allProjects ? undefined : worktreeDirectoryLabel(row.session, currentRepo?.fullPath)}
+                        label={allProjects ? undefined : sessionWorktreeLabel(row.session, location?.project.canonical)}
                         onOpen={openRow}
                         onHover={moveCursor}
                         onTogglePin={handleTogglePin}

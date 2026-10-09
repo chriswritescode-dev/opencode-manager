@@ -31,6 +31,8 @@ export type ShellInfo = Awaited<ReturnType<OpenCodeApi['shell']['list']>>['data'
 
 export type ShellOutputChunk = Awaited<ReturnType<OpenCodeApi['shell']['output']>>['data']
 
+export type OpenCodeLocationInfo = Awaited<ReturnType<OpenCodeApi['location']['get']>>
+
 export interface SessionPage {
   items: SessionInfo[]
   nextCursor?: string
@@ -38,6 +40,8 @@ export interface SessionPage {
 
 export interface SessionPageInput {
   directory?: string
+  project?: string
+  subpath?: string
   limit?: number
   order?: 'asc' | 'desc'
   search?: string
@@ -94,6 +98,8 @@ export async function listSessionPage(input: SessionPageInput): Promise<SessionP
   const { data, cursor } = await callOpenCode((api) =>
     api.session.list({
       ...(input.directory === undefined ? {} : { directory: input.directory }),
+      ...(input.project === undefined ? {} : { project: input.project }),
+      ...(input.subpath === undefined ? {} : { subpath: input.subpath }),
       parentID: 'null',
       limit: input.limit,
       order: input.order,
@@ -102,6 +108,10 @@ export async function listSessionPage(input: SessionPageInput): Promise<SessionP
     }),
   )
   return { items: data, nextCursor: cursor.next ?? undefined }
+}
+
+export async function getOpenCodeLocation(directory: string): Promise<OpenCodeLocationInfo> {
+  return callOpenCode((api) => api.location.get(openCodeLocation(directory)))
 }
 
 export async function getSession(sessionID: string): Promise<SessionInfo> {

@@ -174,6 +174,48 @@ describe('useSessionsAcrossDirectories', () => {
     expect(result.current.data.map((session) => session.id)).toEqual(['ses_all1', 'ses_all2'])
   })
 
+  it('pages a project scope through one cursor query with project and subpath', async () => {
+    mocks.listSessionPage.mockImplementation(async ({ cursor }: { cursor?: string }) => {
+      if (cursor === 'cursor_project') {
+        return { items: [sessionInfo('ses_wt', '/w/worktrees/alpha-feature', 2000)] }
+      }
+      return { items: [sessionInfo('ses_root', '/w/a')], nextCursor: 'cursor_project' }
+    })
+
+    const queryClient = createQueryClient()
+    const { result } = renderHook(
+      () => useSessionsAcrossDirectories(['/w/a'], { project: { id: 'proj_x', subpath: '' } }),
+      { wrapper: createWrapper(queryClient) },
+    )
+
+    await waitFor(() => {
+      expect(result.current.isLoading).toBe(false)
+    })
+
+    expect(mocks.listSessionPage).toHaveBeenCalledTimes(1)
+    expect(mocks.listSessionPage).toHaveBeenCalledWith({
+      limit: 25,
+      order: 'desc',
+      search: undefined,
+      project: 'proj_x',
+      subpath: '',
+    })
+    expect(result.current.data.map((session) => session.id)).toEqual(['ses_root'])
+    expect(result.current.hasNextPage).toBe(true)
+
+    await act(async () => {
+      await result.current.fetchNextPage()
+    })
+
+    await waitFor(() => {
+      expect(result.current.data).toHaveLength(2)
+    })
+
+    expect(mocks.listSessionPage).toHaveBeenCalledTimes(2)
+    expect(mocks.listSessionPage).toHaveBeenLastCalledWith({ cursor: 'cursor_project' })
+    expect(result.current.data.map((session) => session.id)).toEqual(['ses_root', 'ses_wt'])
+  })
+
   it('deletes each session through the facade and removes it from cached lists without invalidating', async () => {
     mocks.deleteSession.mockResolvedValue(undefined)
 

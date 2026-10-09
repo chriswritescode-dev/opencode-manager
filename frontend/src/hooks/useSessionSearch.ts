@@ -9,6 +9,7 @@ const DEFAULT_LIMIT = 25
 export interface UseSessionSearchOptions {
   limit?: number
   allDirectories?: boolean
+  project?: { id: string; subpath: string }
 }
 
 /**
@@ -18,6 +19,7 @@ export interface UseSessionSearchOptions {
 export function useSessionSearch(directories: string[], options: UseSessionSearchOptions = {}) {
   const limit = options.limit ?? DEFAULT_LIMIT
   const allDirectories = options.allDirectories ?? false
+  const project = options.project
   const [query, setQuery] = useState('')
   const trimmedQuery = query.trim()
   const debouncedQuery = useDebouncedValue(trimmedQuery, 150)
@@ -31,13 +33,23 @@ export function useSessionSearch(directories: string[], options: UseSessionSearc
     hasNextPage,
     isFetchingNextPage,
     isFetchNextPageError,
-  } = useSessionsAcrossDirectories(directories, { search, limit, keepPreviousResults: true, allDirectories })
+  } = useSessionsAcrossDirectories(directories, {
+    search,
+    limit,
+    keepPreviousResults: true,
+    allDirectories,
+    project,
+  })
 
   const directorySet = useMemo(() => new Set(directories), [directories])
 
   const rootSessions = useMemo(
-    () => selectRootSessions(sessions ?? [], { directories: directorySet, keyFn: getSessionKey }),
-    [sessions, directorySet],
+    () =>
+      selectRootSessions(sessions ?? [], {
+        directories: project ? undefined : directorySet,
+        keyFn: getSessionKey,
+      }),
+    [sessions, directorySet, project],
   )
 
   const filteredSessions = useMemo(() => {
