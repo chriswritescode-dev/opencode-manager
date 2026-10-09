@@ -1,9 +1,10 @@
 import { useEffect, useMemo, useState, type ReactNode } from 'react'
-import { CalendarClock, ChevronRight, Layers, Plus, SquareTerminal, Trash2 } from 'lucide-react'
+import { CalendarClock, ChevronRight, Columns3, Layers, Plus, SquareTerminal, Trash2 } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import { DeleteDialog } from '@/components/ui/delete-dialog'
 import { workspaceLabel, worktreeSourceLabel, type RepoSibling } from '@/api/repos'
 import type { Session } from '@/api/types'
+import type { MultiRun } from '@opencode-manager/shared/schemas'
 import type { RepoWorktreeSource } from '@opencode-manager/shared/utils'
 
 type OwnerFilter = 'all' | RepoWorktreeSource
@@ -12,6 +13,7 @@ interface WorktreeSessionGroupsProps {
   repoId: number
   worktrees: RepoSibling[]
   sessions: Session[]
+  multiRuns?: MultiRun[]
   searchQuery: string
   renderSessionCard: (session: Session) => ReactNode
   onExpandedScheduleDirectoriesChange?: (directories: string[]) => void
@@ -32,6 +34,7 @@ interface WorktreeGroup {
 type GroupEntry =
   | { kind: 'worktree'; key: string; group: WorktreeGroup; lastActive: number }
   | { kind: 'schedule'; key: string; jobId: number; name: string; groups: WorktreeGroup[]; lastActive: number }
+  | { kind: 'multiRun'; key: string; runId: number; name: string; groups: WorktreeGroup[]; lastActive: number }
 
 const OWNER_FILTERS: Array<{ value: OwnerFilter; label: string }> = [
   { value: 'all', label: 'All' },
@@ -50,12 +53,14 @@ const WORKTREE_REMOVAL_NOTE = 'OpenCode worktrees are removed with their session
 
 /**
  * The Worktrees tab body: every worktree of the repo as a collapsible section of its sessions,
- * with a schedule's worktrees nested under that schedule so kept runs stay visible as they pile up.
+ * with a schedule's worktrees nested under that schedule and a multi-run's worktrees nested under
+ * that multi-run, so kept runs stay visible as they pile up.
  */
 export function WorktreeSessionGroups({
   repoId,
   worktrees,
   sessions,
+  multiRuns,
   searchQuery,
   renderSessionCard,
   onExpandedScheduleDirectoriesChange,
@@ -91,8 +96,8 @@ export function WorktreeSessionGroups({
   }, [worktrees])
 
   const entries = useMemo(
-    () => buildGroupEntries(worktrees, sessions, ownerFilter, isSearching),
-    [worktrees, sessions, ownerFilter, isSearching],
+    () => buildGroupEntries(worktrees, sessions, ownerFilter, isSearching, multiRuns ?? []),
+    [worktrees, sessions, ownerFilter, isSearching, multiRuns],
   )
 
   const toggle = (key: string) => {
@@ -158,6 +163,57 @@ export function WorktreeSessionGroups({
     )
   }
 
+  const renderWorktreeActions = (group: WorktreeGroup, label: string, compact: boolean) => {
+    const isInUse = group.worktree.schedule?.inUse === true
+    const buttonSize = compact ? 'size-7' : 'size-8'
+    const iconSize = compact ? 'h-3.5 w-3.5' : 'h-4 w-4'
+    return (
+      <>
+        <Button
+          variant="ghost"
+          size="icon"
+          className={`${buttonSize} shrink-0`}
+          aria-label={`New session in ${label}`}
+          onClick={() => onNewSession(group.directory)}
+        >
+          <Plus className={iconSize} />
+        </Button>
+        <Button
+          variant="ghost"
+          size="icon"
+          className={`${buttonSize} shrink-0`}
+          aria-label={`Open terminal in ${label}`}
+          onClick={() => onOpenTerminal(group.directory)}
+        >
+          <SquareTerminal className={iconSize} />
+        </Button>
+        <Button
+          variant="ghost"
+          size="icon"
+          className={`${buttonSize} shrink-0 text-muted-foreground hover:text-destructive`}
+          aria-label={`Delete worktree ${label}`}
+          title={isInUse ? 'In use by a running scheduled run' : undefined}
+          disabled={isInUse || isDeleting}
+          onClick={() => setPendingDelete({ directories: [group.directory], label })}
+        >
+          <Trash2 className={iconSize} />
+        </Button>
+      </>
+    )
+  }
+
+  const renderSessions = (group: WorktreeGroup, label: string) => (
+    group.sessions.length > 0 ? group.sessions.map(renderSessionCard) : (
+      <button
+        type="button"
+        onClick={() => onNewSession(group.directory)}
+        className="rounded-md border border-dashed border-border px-3 py-3 text-sm text-muted-foreground hover:bg-accent/50 hover:text-foreground"
+      >
+        No sessions in {label} · Start one
+      </button>
+    )
+  )
+
   const renderWorktree = (group: WorktreeGroup, nested: boolean) => {
     const key = groupKey(group.directory)
     const isOpen = isGroupOpen(group)
@@ -194,49 +250,107 @@ export function WorktreeSessionGroups({
               <div className="truncate font-mono text-[11px] text-muted-foreground" title={group.directory}>{group.directory}</div>
             </div>
           </button>
-          <Button
-            variant="ghost"
-            size="icon"
-            className="size-8 shrink-0"
-            aria-label={`New session in ${label}`}
-            onClick={() => onNewSession(group.directory)}
-          >
-            <Plus className="h-4 w-4" />
-          </Button>
-          <Button
-            variant="ghost"
-            size="icon"
-            className="size-8 shrink-0"
-            aria-label={`Open terminal in ${label}`}
-            onClick={() => onOpenTerminal(group.directory)}
-          >
-            <SquareTerminal className="h-4 w-4" />
-          </Button>
-          <Button
-            variant="ghost"
-            size="icon"
-            className="size-8 shrink-0 text-muted-foreground hover:text-destructive"
-            aria-label={`Delete worktree ${label}`}
-            title={isInUse ? 'In use by a running scheduled run' : undefined}
-            disabled={isInUse || isDeleting}
-            onClick={() => setPendingDelete({ directories: [group.directory], label })}
-          >
-            <Trash2 className="h-4 w-4" />
-          </Button>
+          {renderWorktreeActions(group, label, false)}
         </div>
         {isOpen && (
           <div className="flex flex-col gap-2 px-3 pb-3">
-            {group.sessions.length > 0 ? group.sessions.map(renderSessionCard) : (
-              <button
-                type="button"
-                onClick={() => onNewSession(group.directory)}
-                className="rounded-md border border-dashed border-border px-3 py-3 text-sm text-muted-foreground hover:bg-accent/50 hover:text-foreground"
-              >
-                No sessions in {label} · Start one
-              </button>
-            )}
+            {renderSessions(group, label)}
           </div>
         )}
+      </div>
+    )
+  }
+
+  const renderMultiRunWorktree = (group: WorktreeGroup) => {
+    const label = workspaceLabel(group.worktree)
+    return (
+      <div key={groupKey(group.directory)} className="py-2">
+        <div className="flex items-center gap-2">
+          <span className="truncate font-mono text-xs text-muted-foreground" title={group.directory}>{label}</span>
+          {group.sessions.length > 1 && (
+            <span className="shrink-0 text-xs text-muted-foreground">· {group.sessions.length} sessions</span>
+          )}
+          <div className="ml-auto flex shrink-0 items-center gap-1">
+            {renderWorktreeActions(group, label, true)}
+          </div>
+        </div>
+        <div className="mt-1.5 flex flex-col gap-2">
+          {renderSessions(group, label)}
+        </div>
+      </div>
+    )
+  }
+
+  const renderMultiRunEntry = (entry: Extract<GroupEntry, { kind: 'multiRun' }>) => {
+    const isOpen = !collapsed.has(entry.key)
+    const removable = entry.groups.map((group) => group.directory)
+    return (
+      <div key={entry.key} className="rounded-md border border-border bg-card/40">
+        <div className="flex items-center gap-1 px-2 py-1.5">
+          <button
+            type="button"
+            onClick={() => toggle(entry.key)}
+            aria-expanded={isOpen}
+            className="flex min-w-0 flex-1 items-center gap-2 rounded px-1 py-1 text-left hover:bg-accent/50"
+          >
+            <ChevronRight className={`h-4 w-4 shrink-0 text-muted-foreground transition-transform ${isOpen ? 'rotate-90' : ''}`} />
+            <Columns3 className="h-4 w-4 shrink-0 text-primary" />
+            <span className="truncate text-sm font-medium">{entry.name}</span>
+            <span className="shrink-0 text-xs text-muted-foreground">
+              {entry.groups.length} {entry.groups.length === 1 ? 'worktree' : 'worktrees'}
+            </span>
+          </button>
+          <Button
+            variant="ghost"
+            size="sm"
+            className="h-8 shrink-0 text-xs text-muted-foreground hover:text-destructive"
+            disabled={removable.length === 0 || isDeleting}
+            onClick={() => setPendingDelete({ directories: removable, label: `${entry.name} worktrees` })}
+          >
+            Clean up
+          </Button>
+        </div>
+        {isOpen && (
+          <div className="divide-y divide-border px-3 pb-3">
+            {entry.groups.map(renderMultiRunWorktree)}
+          </div>
+        )}
+      </div>
+    )
+  }
+
+  const renderScheduleEntry = (entry: Extract<GroupEntry, { kind: 'schedule' }>) => {
+    const isOpen = !collapsed.has(entry.key)
+    const removable = worktrees
+      .filter((worktree) => worktree.schedule?.jobId === entry.jobId && !worktree.schedule.inUse)
+      .map((worktree) => worktree.fullPath)
+    return (
+      <div key={entry.key} className="flex flex-col gap-2">
+        <div className="flex items-center gap-1">
+          <button
+            type="button"
+            onClick={() => toggle(entry.key)}
+            aria-expanded={isOpen}
+            className="flex min-w-0 flex-1 items-center gap-2 rounded px-1 py-1 text-left text-sm hover:bg-accent/50"
+          >
+            <ChevronRight className={`h-4 w-4 shrink-0 text-muted-foreground transition-transform ${isOpen ? 'rotate-90' : ''}`} />
+            <CalendarClock className="h-4 w-4 shrink-0 text-highlight" />
+            <span className="truncate font-medium">{entry.name}</span>
+            <span className="shrink-0 text-xs text-muted-foreground">
+              · {entry.groups.length} {entry.groups.length === 1 ? 'worktree' : 'worktrees'}
+            </span>
+          </button>
+          <Button
+            variant="ghost"
+            size="sm"
+            className="h-8 shrink-0 text-xs text-muted-foreground hover:text-destructive"
+            disabled={removable.length === 0 || isDeleting}
+            onClick={() => setPendingDelete({ directories: removable, label: `${entry.name} worktrees` })}
+          >
+            Clean up
+          </Button>
+        </div>
+        {isOpen && entry.groups.map((group) => renderWorktree(group, true))}
       </div>
     )
   }
@@ -274,40 +388,8 @@ export function WorktreeSessionGroups({
         </div>
       ) : entries.map((entry) => {
         if (entry.kind === 'worktree') return renderWorktree(entry.group, false)
-        const isOpen = !collapsed.has(entry.key)
-        const name = entry.name
-        const removable = worktrees
-          .filter((worktree) => worktree.schedule?.jobId === entry.jobId && !worktree.schedule.inUse)
-          .map((worktree) => worktree.fullPath)
-        return (
-          <div key={entry.key} className="flex flex-col gap-2">
-            <div className="flex items-center gap-1">
-              <button
-                type="button"
-                onClick={() => toggle(entry.key)}
-                aria-expanded={isOpen}
-                className="flex min-w-0 flex-1 items-center gap-2 rounded px-1 py-1 text-left text-sm hover:bg-accent/50"
-              >
-                <ChevronRight className={`h-4 w-4 shrink-0 text-muted-foreground transition-transform ${isOpen ? 'rotate-90' : ''}`} />
-                <CalendarClock className="h-4 w-4 shrink-0 text-highlight" />
-                <span className="truncate font-medium">{name}</span>
-                <span className="shrink-0 text-xs text-muted-foreground">
-                  · {entry.groups.length} {entry.groups.length === 1 ? 'worktree' : 'worktrees'}
-                </span>
-              </button>
-              <Button
-                variant="ghost"
-                size="sm"
-                className="h-8 shrink-0 text-xs text-muted-foreground hover:text-destructive"
-                disabled={removable.length === 0 || isDeleting}
-                onClick={() => setPendingDelete({ directories: removable, label: `${name} worktrees` })}
-              >
-                Clean up
-              </Button>
-            </div>
-            {isOpen && entry.groups.map((group) => renderWorktree(group, true))}
-          </div>
-        )
+        if (entry.kind === 'multiRun') return renderMultiRunEntry(entry)
+        return renderScheduleEntry(entry)
       })}
 
       <DeleteDialog
@@ -342,12 +424,23 @@ function buildGroupEntries(
   sessions: Session[],
   ownerFilter: OwnerFilter,
   hideEmpty: boolean,
+  multiRuns: MultiRun[],
 ): GroupEntry[] {
   const sessionsByDirectory = new Map<string, Session[]>()
   sessions.forEach((session) => {
     const list = sessionsByDirectory.get(session.location.directory) ?? []
     list.push(session)
     sessionsByDirectory.set(session.location.directory, list)
+  })
+
+  const multiRunByDirectory = new Map<string, { id: number; name: string }>()
+  multiRuns.forEach((run) => {
+    run.entries.forEach((entry) => {
+      if (entry.directory) multiRunByDirectory.set(entry.directory, { id: run.id, name: run.name })
+    })
+    run.fusions.forEach((fusion) => {
+      if (fusion.directory) multiRunByDirectory.set(fusion.directory, { id: run.id, name: run.name })
+    })
   })
 
   const groups = worktrees
@@ -364,32 +457,54 @@ function buildGroupEntries(
     .filter((group) => !hideEmpty || group.sessions.length > 0)
 
   const scheduleEntries = new Map<number, Extract<GroupEntry, { kind: 'schedule' }>>()
+  const multiRunEntries = new Map<number, Extract<GroupEntry, { kind: 'multiRun' }>>()
   const entries: GroupEntry[] = []
   groups.forEach((group) => {
     const schedule = group.worktree.schedule
-    if (!schedule) {
-      entries.push({ kind: 'worktree', key: groupKey(group.directory), group, lastActive: group.lastActive })
+    if (schedule) {
+      const existing = scheduleEntries.get(schedule.jobId)
+      if (existing) {
+        existing.groups.push(group)
+        existing.lastActive = Math.max(existing.lastActive, group.lastActive)
+        return
+      }
+      const entry: Extract<GroupEntry, { kind: 'schedule' }> = {
+        kind: 'schedule',
+        key: `schedule:${schedule.jobId}`,
+        jobId: schedule.jobId,
+        name: schedule.name,
+        groups: [group],
+        lastActive: group.lastActive,
+      }
+      scheduleEntries.set(schedule.jobId, entry)
+      entries.push(entry)
       return
     }
-    const existing = scheduleEntries.get(schedule.jobId)
-    if (existing) {
-      existing.groups.push(group)
-      existing.lastActive = Math.max(existing.lastActive, group.lastActive)
+    const multiRun = multiRunByDirectory.get(group.directory)
+    if (multiRun) {
+      const existing = multiRunEntries.get(multiRun.id)
+      if (existing) {
+        existing.groups.push(group)
+        existing.lastActive = Math.max(existing.lastActive, group.lastActive)
+        return
+      }
+      const entry: Extract<GroupEntry, { kind: 'multiRun' }> = {
+        kind: 'multiRun',
+        key: `multi-run:${multiRun.id}`,
+        runId: multiRun.id,
+        name: multiRun.name,
+        groups: [group],
+        lastActive: group.lastActive,
+      }
+      multiRunEntries.set(multiRun.id, entry)
+      entries.push(entry)
       return
     }
-    const entry: Extract<GroupEntry, { kind: 'schedule' }> = {
-      kind: 'schedule',
-      key: `schedule:${schedule.jobId}`,
-      jobId: schedule.jobId,
-      name: schedule.name,
-      groups: [group],
-      lastActive: group.lastActive,
-    }
-    scheduleEntries.set(schedule.jobId, entry)
-    entries.push(entry)
+    entries.push({ kind: 'worktree', key: groupKey(group.directory), group, lastActive: group.lastActive })
   })
 
   scheduleEntries.forEach((entry) => entry.groups.sort((a, b) => b.lastActive - a.lastActive))
+  multiRunEntries.forEach((entry) => entry.groups.sort((a, b) => b.lastActive - a.lastActive))
   return entries.sort((a, b) => b.lastActive - a.lastActive)
 }
 

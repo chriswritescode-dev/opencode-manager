@@ -25,6 +25,7 @@ const mocks = vi.hoisted(() => ({
   useRepoActivity: vi.fn(),
   useSSE: vi.fn(),
   useCreateSession: vi.fn(),
+  useMultiRuns: vi.fn(),
   lastSessionListProps: { current: undefined as SessionListCapture | undefined },
 }))
 
@@ -59,6 +60,12 @@ vi.mock('@/hooks/useRepoSiblings', () => ({
 vi.mock('@/hooks/useRepoActivity', () => ({ useRepoActivity: mocks.useRepoActivity }))
 vi.mock('@/hooks/useSSE', () => ({ useSSE: mocks.useSSE }))
 vi.mock('@/hooks/useOpenCode', () => ({ useCreateSession: mocks.useCreateSession }))
+vi.mock('@/hooks/useMultiRuns', () => ({
+  useMultiRuns: mocks.useMultiRuns,
+  useLaunchMultiRun: () => ({ mutate: vi.fn(), isPending: false }),
+  useFuseMultiRun: () => ({ mutate: vi.fn(), isPending: false, reset: vi.fn(), error: null }),
+  useDiscardMultiRunEntry: () => ({ mutate: vi.fn(), isPending: false }),
+}))
 
 vi.mock('@/components/session/SessionList', () => ({
   SessionList: (props: SessionListCapture) => {
@@ -147,6 +154,7 @@ describe('RepoDetail schedule session fetching', () => {
     mocks.useCreateRepoWorkspace.mockReturnValue({ mutate: vi.fn(), isPending: false })
     mocks.useDeleteRepoWorkspaces.mockReturnValue({ mutate: vi.fn(), isPending: false })
     mocks.useCreateSession.mockReturnValue({ mutate: vi.fn(), isPending: false })
+    mocks.useMultiRuns.mockReturnValue({ data: [] })
   })
 
   it('fetches a schedule worktree directory only after its group is expanded', async () => {
