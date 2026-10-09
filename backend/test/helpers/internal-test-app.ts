@@ -13,6 +13,7 @@ type InternalTestAppOverrides = Partial<{
   gitAuthService: CreateInternalRoutesParams[7]
   sessionGoals: CreateInternalRoutesParams[8]
   multiRuns: CreateInternalRoutesParams[9]
+  changeWalkthroughService: CreateInternalRoutesParams[10]
 }>
 
 export function createInternalTestApp(
@@ -30,5 +31,6 @@ export function createInternalTestApp(
     overrides.gitAuthService ?? ({} as CreateInternalRoutesParams[7]),
     overrides.sessionGoals ?? ({} as CreateInternalRoutesParams[8]),
     overrides.multiRuns ?? ({} as CreateInternalRoutesParams[9]),
+    overrides.changeWalkthroughService ?? ({} as CreateInternalRoutesParams[10]),
   )
 }

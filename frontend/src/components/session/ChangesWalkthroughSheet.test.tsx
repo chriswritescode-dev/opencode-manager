@@ -383,6 +383,90 @@ describe('ChangesWalkthroughSheet', () => {
     expect(mocks.getChangeWalkthrough).not.toHaveBeenCalledWith('ses_2', { kind: 'staged' })
   })
 
+  it('applies an external source request to the walkthrough source', async () => {
+    mocks.getChangeWalkthrough.mockResolvedValue(state({ walkthrough: null }))
+    renderSheet({ sourceRequest: { sessionId: 'ses_1', source: { kind: 'staged' } } })
+
+    await waitFor(() => {
+      expect(mocks.getChangeWalkthrough).toHaveBeenCalledWith('ses_1', { kind: 'staged' })
+    })
+    expect(screen.getByRole('combobox', { name: 'Changes to walk through' })).toHaveTextContent('Staged')
+  })
+
+  it('applies a pull request request with its number and base', async () => {
+    mocks.getChangeWalkthrough.mockResolvedValue(state({ walkthrough: null }))
+    renderSheet({
+      sourceRequest: { sessionId: 'ses_1', source: { kind: 'pullRequest', number: 12 } },
+    })
+
+    await waitFor(() => {
+      expect(mocks.getChangeWalkthrough).toHaveBeenCalledWith('ses_1', { kind: 'pullRequest', number: 12 })
+    })
+    expect(screen.getByLabelText('Pull request number')).toHaveValue(12)
+  })
+
+  it('re-applies a repeated request for the same source', async () => {
+    const user = userEvent.setup()
+    mocks.getChangeWalkthrough.mockResolvedValue(state({ walkthrough: null }))
+    const { rerender, onOpenChange } = renderSheet({
+      sourceRequest: { sessionId: 'ses_1', source: { kind: 'staged' } },
+    })
+    await waitFor(() => {
+      expect(mocks.getChangeWalkthrough).toHaveBeenCalledWith('ses_1', { kind: 'staged' })
+    })
+
+    await user.click(screen.getByRole('combobox', { name: 'Changes to walk through' }))
+    await user.click(await screen.findByRole('option', { name: 'Unstaged' }))
+    await waitFor(() => {
+      expect(mocks.getChangeWalkthrough).toHaveBeenCalledWith('ses_1', { kind: 'unstaged' })
+    })
+
+    rerender(
+      <ChangesWalkthroughSheet
+        sessionId="ses_1"
+        open
+        onOpenChange={onOpenChange}
+        sourceRequest={{ sessionId: 'ses_1', source: { kind: 'staged' } }}
+      />,
+    )
+
+    await waitFor(() => {
+      expect(mocks.getChangeWalkthrough).toHaveBeenCalledWith('ses_1', { kind: 'staged' })
+    })
+    expect(screen.getByRole('combobox', { name: 'Changes to walk through' })).toHaveTextContent('Staged')
+  })
+
+  it('leaves the current selection when a request carries no source', async () => {
+    const user = userEvent.setup()
+    mocks.getChangeWalkthrough.mockResolvedValue(state({ walkthrough: null }))
+    const { rerender, onOpenChange } = renderSheet({
+      sourceRequest: { sessionId: 'ses_1', source: { kind: 'staged' } },
+    })
+    await waitFor(() => {
+      expect(mocks.getChangeWalkthrough).toHaveBeenCalledWith('ses_1', { kind: 'staged' })
+    })
+
+    await user.click(screen.getByRole('combobox', { name: 'Changes to walk through' }))
+    await user.click(await screen.findByRole('option', { name: 'Unstaged' }))
+    await waitFor(() => {
+      expect(mocks.getChangeWalkthrough).toHaveBeenCalledWith('ses_1', { kind: 'unstaged' })
+    })
+    mocks.getChangeWalkthrough.mockClear()
+
+    rerender(
+      <ChangesWalkthroughSheet
+        sessionId="ses_1"
+        open
+        onOpenChange={onOpenChange}
+        sourceRequest={{ sessionId: 'ses_1', source: undefined }}
+      />,
+    )
+
+    expect(screen.getByRole('combobox', { name: 'Changes to walk through' })).toHaveTextContent('Unstaged')
+    expect(mocks.getChangeWalkthrough).not.toHaveBeenCalledWith('ses_1', { kind: 'session' })
+    expect(mocks.getChangeWalkthrough).not.toHaveBeenCalledWith('ses_1', { kind: 'staged' })
+  })
+
   it('clears a generation error when the source changes', async () => {
     const user = userEvent.setup()
     mocks.getChangeWalkthrough.mockResolvedValue(state({ walkthrough: null }))
@@ -427,12 +511,44 @@ describe('ChangesWalkthroughSheet', () => {
     expect(await screen.findByText('Overview')).toBeInTheDocument()
   })
 
-  it('shows progress while the server is generating instead of the generate button', async () => {
+  it('shows a skeleton and planning status while the server is generating without stops', async () => {
     mocks.getChangeWalkthrough.mockResolvedValue(state({ walkthrough: null, generating: true }))
     renderSheet()
 
-    expect(await screen.findByText(/Generating walkthrough/)).toBeInTheDocument()
+    expect(await screen.findByText('Planning the walkthrough…')).toBeInTheDocument()
+    expect(screen.getByTestId('walkthrough-skeleton')).toHaveAttribute('aria-hidden', 'true')
     expect(screen.queryByRole('button', { name: 'Generate walkthrough' })).not.toBeInTheDocument()
+    expect(screen.queryByText(/Generating walkthrough/)).not.toBeInTheDocument()
+  })
+
+  it('shows a skeleton while the walkthrough state is loading', async () => {
+    mocks.getChangeWalkthrough.mockImplementation(() => new Promise(() => {}))
+    renderSheet()
+
+    expect(await screen.findByText('Loading the walkthrough…')).toBeInTheDocument()
+    expect(screen.getByTestId('walkthrough-skeleton')).toBeInTheDocument()
+  })
+
+  it('shows a stop body skeleton while its explanation is pending', async () => {
+    const user = userEvent.setup()
+    mocks.getChangeWalkthrough.mockResolvedValue(
+      state({
+        generating: true,
+        walkthrough: {
+          ...walkthrough,
+          stops: [
+            { ...walkthrough.stops[0], status: 'ready' },
+            { ...walkthrough.stops[1], status: 'pending', explanation: '' },
+          ],
+        },
+      }),
+    )
+    renderSheet()
+
+    await user.click(await screen.findByRole('button', { name: /2\. Wire it up/ }))
+
+    expect(await screen.findByText('Explaining this stop…')).toBeInTheDocument()
+    expect(screen.getByTestId('walkthrough-skeleton')).toBeInTheDocument()
   })
 
   it('renders ready and pending stops while generating', async () => {

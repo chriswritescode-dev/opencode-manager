@@ -1,15 +1,17 @@
 import { vi } from 'vitest'
-import type { OpenCodeApi } from '@opencode-manager/shared/opencode'
+import type { ModelInfo, OpenCodeApi } from '@opencode-manager/shared/opencode'
 import type { OpenCodeClient } from '../../src/services/opencode/client'
 
 /** OpenCode API stubs for a catalog that has finished loading, so model resolution succeeds on the first poll. */
-export function stubLoadedModelCatalog() {
-  const model = { providerID: 'openai', id: 'gpt-5-mini', enabled: true }
+export function stubLoadedModelCatalog(models: ModelInfo[] = [
+  { providerID: 'openai', id: 'gpt-5-mini', enabled: true } as ModelInfo,
+]) {
+  const defaultModel = models[0] ?? null
   return {
     config: { get: vi.fn(async () => []) },
     model: {
-      list: vi.fn(async () => ({ data: [model] })),
-      default: vi.fn(async () => ({ data: model })),
+      list: vi.fn(async () => ({ data: models })),
+      default: vi.fn(async () => ({ data: defaultModel })),
     },
   }
 }

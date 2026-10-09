@@ -17,6 +17,7 @@ import { Button } from "@/components/ui/button";
 import { ContextUsageIndicator } from "@/components/session/ContextUsageIndicator";
 import { useSession, useInterruptSession, useUpdateSession, useCreateSession } from "@/hooks/useOpenCode";
 import { useSessionTranscript } from "@/hooks/useSessionTranscript";
+import { useAutoOpenWalkthrough } from "@/hooks/useAutoOpenWalkthrough";
 import { useRepoActivity } from "@/hooks/useRepoActivity";
 import { useSSE } from "@/hooks/useSSE";
 import { useUIState } from "@/stores/uiStateStore";
@@ -64,8 +65,9 @@ import { useTerminalDialogParam } from "@/hooks/useOpenTerminal";
 import { SessionMoreButton } from "@/components/navigation/SessionMoreButton";
 import { SideQuestionDialog } from "@/components/session/SideQuestionDialog";
 import { SessionMessagePickerDialog } from "@/components/session/SessionMessagePickerDialog";
-import { ChangesWalkthroughSheet } from "@/components/session/ChangesWalkthroughSheet";
+import { ChangesWalkthroughSheet, type WalkthroughSourceRequest } from "@/components/session/ChangesWalkthroughSheet";
 import { ToolSidePanel } from "@/components/navigation/ToolSidePanel";
+import type { WalkthroughSource } from "@opencode-manager/shared/schemas";
 import { useToolPanel } from "@/hooks/useToolPanel";
 
 const OLDER_HISTORY_SCROLL_THRESHOLD_PX = 200
@@ -133,6 +135,7 @@ export function SessionDetail() {
   const [previewOpen, setPreviewOpen] = useDialogParam('preview');
   const [resetPermissionsOpen, setResetPermissionsOpen] = useDialogParam('resetPermissions');
   const [walkthroughOpen, setWalkthroughOpen] = useDialogParam('walkthrough');
+  const [requestedWalkthroughSource, setRequestedWalkthroughSource] = useState<WalkthroughSourceRequest | null>(null);
   const [selectedFilePath, setSelectedFilePath] = useState<string | undefined>();
   const [showScrollButton, setShowScrollButton] = useState(false);
   const [hasPromptContent, setHasPromptContent] = useState(false);
@@ -300,9 +303,28 @@ export function SessionDetail() {
   const handleShowSessionsDialog = useCallback(() => setSessionsDialogOpen(true), []);
   const handleShowMcpDialog = useCallback(() => setMcpDialogOpen(true), [setMcpDialogOpen]);
   const handleShowSkillsDialog = useCallback(() => setSkillsDialogOpen(true), [setSkillsDialogOpen]);
-  const handleShowWalkthrough = useCallback(() => setWalkthroughOpen(true), [setWalkthroughOpen]);
+  const handleShowWalkthrough = useCallback((source?: WalkthroughSource) => {
+    setRequestedWalkthroughSource({
+      sessionId: sessionId ?? '',
+      source,
+    });
+    setWalkthroughOpen(true);
+  }, [sessionId, setWalkthroughOpen]);
+  const handleShowWalkthroughCommand = useCallback(() => handleShowWalkthrough(), [handleShowWalkthrough]);
+  const walkthroughSourceRequest =
+    requestedWalkthroughSource && requestedWalkthroughSource.sessionId === (sessionId ?? '')
+      ? requestedWalkthroughSource
+      : undefined;
   const handleSkillLoaded = useCallback((skill: SkillFileInfo) => showToast.success(`Loaded skill: ${skill.name}`), []);
   const handleConnectProvider = useCallback(() => setSettingsTab('providers'), [setSettingsTab]);
+
+  useAutoOpenWalkthrough({
+    sessionId,
+    messages,
+    enabled: docked,
+    loading: messagesLoading,
+    onOpen: handleShowWalkthrough,
+  });
 
   const handleMinimizeForm = useCallback((form: FormInfo) => {
     setMinimizedFormId(form.id)
@@ -558,7 +580,7 @@ export function SessionDetail() {
     redo: handleRedo,
     showMcp: handleShowMcpDialog,
     showSkills: handleShowSkillsDialog,
-    showWalkthrough: handleShowWalkthrough,
+    showWalkthrough: handleShowWalkthroughCommand,
     showSettings: openSettings,
     connectProvider: handleConnectProvider,
   }), [
@@ -577,7 +599,7 @@ export function SessionDetail() {
     handleRedo,
     handleShowMcpDialog,
     handleShowSkillsDialog,
-    handleShowWalkthrough,
+    handleShowWalkthroughCommand,
     openSettings,
     handleConnectProvider,
   ]);
@@ -725,6 +747,7 @@ export function SessionDetail() {
               isSessionBusy={isSessionActive}
               onFileClick={handleFileClick}
               onChildSessionClick={handleChildSessionClick}
+              onOpenWalkthrough={handleShowWalkthrough}
               onUndoMessage={handleUndoMessage}
               model={modelRef ? formatOpenCodeModelRef(modelRef) : undefined}
             />
@@ -822,6 +845,7 @@ export function SessionDetail() {
           selectedFilePath={selectedFilePath}
           repoDirectory={repoDirectory}
           onSkillLoaded={handleSkillLoaded}
+          walkthroughSourceRequest={walkthroughSourceRequest}
         />
       )}
       </div>
@@ -897,6 +921,7 @@ export function SessionDetail() {
           sessionId={sessionId}
           open={!docked && walkthroughOpen}
           onOpenChange={setWalkthroughOpen}
+          sourceRequest={walkthroughSourceRequest}
         />
       )}
 

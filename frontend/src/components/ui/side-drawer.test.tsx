@@ -168,6 +168,23 @@ describe('SideDrawerHeader', () => {
     fireEvent.click(screen.getByRole('button', { name: /close/i }))
     expect(handleClose).toHaveBeenCalled()
   })
+
+  it('truncates the title and wraps actions below it on narrow widths', () => {
+    render(
+      <SideDrawerHeader
+        title="Change walkthrough"
+        onClose={() => {}}
+        actions={<button type="button">Regenerate</button>}
+      />,
+    )
+
+    expect(screen.getByText('Change walkthrough')).toHaveClass('truncate')
+
+    const actions = screen.getByRole('button', { name: 'Regenerate' }).parentElement
+    expect(actions).toHaveClass('order-3', 'basis-full', 'sm:order-2', 'sm:basis-auto')
+
+    expect(screen.getByRole('button', { name: /close/i })).toHaveClass('order-2', 'sm:order-3')
+  })
 })
 
 describe('SideDrawerContent', () => {

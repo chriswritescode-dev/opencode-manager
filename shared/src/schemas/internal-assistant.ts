@@ -1,6 +1,12 @@
 import { z } from 'zod'
 import { UserPreferencesSchema } from './settings'
 
+export const MANAGER_TOOL_NAME = 'ocm'
+
+export const MANAGER_TOOL_OPEN_WALKTHROUGH_ACTION = 'open_walkthrough'
+
+export const MANAGER_TOOL_ACTIONS = ['send_notification', 'request', MANAGER_TOOL_OPEN_WALKTHROUGH_ACTION] as const
+
 export const AssistantNotificationPrioritySchema = z.enum(['normal', 'high'])
 
 export const ASSISTANT_NOTIFICATION_LIMITS = {

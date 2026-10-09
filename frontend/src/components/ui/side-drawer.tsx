@@ -112,20 +112,24 @@ export interface SideDrawerHeaderProps {
 
 export function SideDrawerHeader({ title, onClose, meta, actions }: SideDrawerHeaderProps) {
   return (
-    <div className="flex-shrink-0 border-b border-border bg-background px-4 py-2 flex items-center justify-between gap-3">
-      <div className="min-w-0 flex-1">
-        <h2 className="text-lg font-semibold text-foreground leading-none">{title}</h2>
+    <div className="flex-shrink-0 border-b border-border bg-background px-4 py-2 flex flex-wrap items-center justify-between gap-3">
+      <div className="order-1 min-w-0 flex-1">
+        <h2 className="truncate text-lg font-semibold text-foreground leading-none">{title}</h2>
         {meta ? <div className="mt-1 min-w-0">{meta}</div> : null}
       </div>
-      {actions ? <div className="flex shrink-0 items-center gap-1">{actions}</div> : null}
       <button
         type="button"
         onClick={onClose}
-        className="text-muted-foreground hover:text-foreground hover:bg-muted transition-colors rounded-sm p-1 shrink-0"
+        className="order-2 shrink-0 text-muted-foreground hover:text-foreground hover:bg-muted transition-colors rounded-sm p-1 sm:order-3"
         aria-label="Close"
       >
         <X className="w-5 h-5" />
       </button>
+      {actions ? (
+        <div className="order-3 flex shrink-0 basis-full items-center justify-end gap-1 sm:order-2 sm:basis-auto sm:justify-start">
+          {actions}
+        </div>
+      ) : null}
     </div>
   )
 }

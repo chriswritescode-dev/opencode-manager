@@ -5,8 +5,8 @@ import http from 'http'
 import type { AddressInfo } from 'net'
 import path from 'path'
 import os from 'os'
-import { ASSISTANT_NOTIFICATION_LIMITS, AssistantNotificationRequestSchema } from '@opencode-manager/shared/schemas'
-import { MANAGER_TOOL_NAME, MANAGER_TOOL_ALLOWED_ROUTES, parseAllowedRoute } from '../../src/services/opencode-manager-tool-plugin'
+import { ASSISTANT_NOTIFICATION_LIMITS, AssistantNotificationRequestSchema, MANAGER_TOOL_NAME } from '@opencode-manager/shared/schemas'
+import { MANAGER_TOOL_ALLOWED_ROUTES, parseAllowedRoute } from '../../src/services/opencode-manager-tool-plugin'
 import { installManagedPlugins, getOpenCodePluginDir } from '../../src/services/opencode/plugin-registry'
 import { loadGeneratedPlugin, type GeneratedTool } from '../helpers/opencode-plugin-context'
 import { resolveOpenCode2Binary, runOpenCodeStandalone } from '../helpers/opencode-binary'
@@ -17,7 +17,9 @@ type JsonSchema = {
   required?: string[]
   additionalProperties?: boolean
   anyOf?: JsonSchema[]
+  oneOf?: JsonSchema[]
   enum?: string[]
+  const?: string
   maxLength?: number
   minLength?: number
 }
@@ -41,9 +43,23 @@ function requestParamsSchema(tool: GeneratedTool): JsonSchema {
   return toolInputSchema(tool).properties?.params?.anyOf?.[1] ?? {}
 }
 
-async function runTool(tool: GeneratedTool, input: unknown): Promise<string> {
-  const result = (await tool.execute!(input, { signal: new AbortController().signal })) as { content: string }
-  return result.content
+function walkthroughParamsSchema(tool: GeneratedTool): JsonSchema {
+  return toolInputSchema(tool).properties?.params?.anyOf?.[2] ?? {}
+}
+
+async function runToolResult(
+  tool: GeneratedTool,
+  input: unknown,
+  context: { sessionID?: string } = {},
+): Promise<{ content: string; metadata?: Record<string, unknown> }> {
+  return (await tool.execute!(input, { signal: new AbortController().signal, sessionID: context.sessionID })) as {
+    content: string
+    metadata?: Record<string, unknown>
+  }
+}
+
+async function runTool(tool: GeneratedTool, input: unknown, context: { sessionID?: string } = {}): Promise<string> {
+  return (await runToolResult(tool, input, context)).content
 }
 
 function jsonResponse(body: unknown, { ok = true, status = 200 } = {}) {
@@ -92,14 +108,32 @@ describe('ocm-manager plugin', () => {
     expect(schema.type).toBe('object')
     expect(schema.required).toEqual(['action', 'params'])
     expect(schema.additionalProperties).toBe(false)
-    expect(schema.properties?.action?.enum).toEqual(['send_notification', 'request'])
-    expect(schema.properties?.params?.anyOf).toHaveLength(2)
+    expect(schema.properties?.action?.enum).toEqual(['send_notification', 'request', 'open_walkthrough'])
+    expect(schema.properties?.params?.anyOf).toHaveLength(3)
     expect(notificationParamsSchema(tool).required).toEqual(['title', 'body'])
     expect(requestParamsSchema(tool).required).toEqual(['method', 'path'])
+    expect(walkthroughParamsSchema(tool).required).toBeUndefined()
     expect(notificationParamsSchema(tool).additionalProperties).toBe(false)
     expect(requestParamsSchema(tool).additionalProperties).toBe(false)
+    expect(walkthroughParamsSchema(tool).additionalProperties).toBe(false)
     expect(notificationParamsSchema(tool).properties?.priority?.enum).toEqual(['normal', 'high'])
     expect(requestParamsSchema(tool).properties?.method?.enum).toEqual(['GET', 'POST', 'PUT', 'PATCH', 'DELETE'])
+    expect(walkthroughParamsSchema(tool).properties?.source?.oneOf?.map((variant) => variant.properties?.kind?.const)).toEqual([
+      'session',
+      'uncommitted',
+      'staged',
+      'unstaged',
+      'branch',
+      'pullRequest',
+    ])
+  })
+
+  it('lists the open_walkthrough action in the description', async () => {
+    const tool = await loadTool(configHome)
+
+    expect(tool.description).toContain('open_walkthrough')
+    expect(tool.description).toContain('request the change Walkthrough for the current session')
+    expect(tool.description).toContain('when this session is open on desktop')
   })
 
   it('enforces the notification limits the internal API enforces', async () => {
@@ -189,6 +223,56 @@ describe('ocm-manager plugin', () => {
     await expect(runTool(tool, { action: 'send_notification', params: { method: 'GET', path: '/settings' } }))
       .rejects.toThrow(/Invalid parameters for OpenCode Manager action: send_notification/)
     expect(fetchMock).not.toHaveBeenCalled()
+  })
+
+  it('opens the walkthrough for the current session with the requested source', async () => {
+    const fetchMock = jsonResponse({ walkthrough: { stops: [{}, {}] }, currentDiffHash: 'h', stale: false, generating: false, error: null })
+    vi.stubGlobal('fetch', fetchMock)
+    const tool = await loadTool(configHome)
+
+    const result = await runToolResult(
+      tool,
+      { action: 'open_walkthrough', params: { source: { kind: 'staged' } } },
+      { sessionID: 'ses_abc' },
+    )
+
+    expect(fetchMock).toHaveBeenCalledTimes(1)
+    const [url, init] = fetchMock.mock.calls[0] ?? []
+    expect(url).toBe('http://localhost:5003/api/internal/change-walkthroughs/ses_abc')
+    expect(init.method).toBe('POST')
+    expect(init.headers.Authorization).toBe('Bearer secret-token')
+    expect(init.headers['content-type']).toBe('application/json')
+    expect(JSON.parse(init.body)).toEqual({ source: { kind: 'staged' } })
+    expect(result.content).toBe(
+      'Requested the walkthrough (2 stops). It opens in the Manager window when this session is open on desktop; otherwise the user can open it from this tool call.',
+    )
+    expect(result.metadata).toBeUndefined()
+  })
+
+  it('reports that the walkthrough is generating', async () => {
+    vi.stubGlobal('fetch', jsonResponse({ walkthrough: null, currentDiffHash: 'h', stale: false, generating: true, error: null }))
+    const tool = await loadTool(configHome)
+
+    const result = await runToolResult(tool, { action: 'open_walkthrough', params: {} }, { sessionID: 'ses_abc' })
+
+    expect(result.content).toBe(
+      'Requested the walkthrough; it is generating. It opens in the Manager window when this session is open on desktop; otherwise the user can open it from this tool call.',
+    )
+    expect(result.metadata).toBeUndefined()
+  })
+
+  it('opens the walkthrough without a body when no source is given', async () => {
+    const fetchMock = jsonResponse({ walkthrough: null, currentDiffHash: 'h', stale: false, generating: true, error: null })
+    vi.stubGlobal('fetch', fetchMock)
+    const tool = await loadTool(configHome)
+
+    await runTool(tool, { action: 'open_walkthrough', params: {} }, { sessionID: 'ses_abc' })
+
+    expect(fetchMock).toHaveBeenCalledTimes(1)
+    const [url, init] = fetchMock.mock.calls[0] ?? []
+    expect(url).toBe('http://localhost:5003/api/internal/change-walkthroughs/ses_abc')
+    expect(init.headers['content-type']).toBeUndefined()
+    expect(init.body).toBeUndefined()
   })
 
   it('sends an allow-listed GET request with a query string and no body', async () => {
@@ -297,6 +381,8 @@ describe('ocm-manager plugin', () => {
       ['POST', '/multi-runs'],
       ['POST', '/multi-runs/1/fusions'],
       ['POST', '/multi-runs/1/entries/2/discard'],
+      ['GET', '/change-walkthroughs/x'],
+      ['POST', '/change-walkthroughs/x'],
     ] as const
 
     for (const [method, path] of deniedRoutes) {
@@ -522,7 +608,7 @@ describe.skipIf(SHIPPED_OPENCODE_BIN === null)('ocm-manager plugin against the s
       expect(managerTool?.function?.parameters).toMatchObject({
         type: 'object',
         properties: {
-          action: { type: 'string', enum: ['send_notification', 'request'] },
+          action: { type: 'string', enum: ['send_notification', 'request', 'open_walkthrough'] },
           params: {
             anyOf: [
               {
@@ -543,6 +629,13 @@ describe.skipIf(SHIPPED_OPENCODE_BIN === null)('ocm-manager plugin against the s
                   method: { type: 'string', enum: ['GET', 'POST', 'PUT', 'PATCH', 'DELETE'] },
                   path: { type: 'string', minLength: 1, maxLength: 500 },
                   body: { type: 'object' },
+                },
+              },
+              {
+                type: 'object',
+                additionalProperties: false,
+                properties: {
+                  source: expect.anything(),
                 },
               },
             ],

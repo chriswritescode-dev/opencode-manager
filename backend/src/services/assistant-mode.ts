@@ -12,12 +12,11 @@ import {
   fileExists,
   ensureDirectoryExists,
 } from './file-operations'
-import { ASSISTANT_NOTIFICATION_LIMITS, AssistantSettingsPatchSchema, OpenCodeConfigSchema, DEFAULT_KEYBOARD_SHORTCUTS, DEFAULT_LEADER_KEY } from '@opencode-manager/shared/schemas'
+import { ASSISTANT_NOTIFICATION_LIMITS, AssistantSettingsPatchSchema, OpenCodeConfigSchema, DEFAULT_KEYBOARD_SHORTCUTS, DEFAULT_LEADER_KEY, MANAGER_TOOL_NAME } from '@opencode-manager/shared/schemas'
 import { MANAGER_COLOR_THEME_ID, OPENCODE_THEMES } from '@opencode-manager/shared/themes'
 import { ASSISTANT_REPO_ID, ASSISTANT_REPO_PATH, ASSISTANT_OPENCODE_DIR_NAME } from '@opencode-manager/shared/utils'
 import { getAssistantModePath, getReposPath } from '@opencode-manager/shared/config/env'
 import type { Database } from 'bun:sqlite'
-import { MANAGER_TOOL_NAME } from './opencode-manager-tool-plugin'
 import { ensureAssistantRepo } from '../db/queries'
 
 

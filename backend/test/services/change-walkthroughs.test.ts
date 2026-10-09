@@ -3,7 +3,7 @@ import { mkdtempSync, rmSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import path from 'node:path'
 import { Database } from 'bun:sqlite'
-import type { FileDiffInfo, ModelRef, SessionInfo, SessionMessageInfo } from '@opencode-manager/shared/opencode'
+import type { FileDiffInfo, ModelInfo, ModelRef, SessionInfo, SessionMessageInfo } from '@opencode-manager/shared/opencode'
 import {
   MECHANICAL_TEXT_BUDGET,
   WALKTHROUGH_DIFF_MAX_CHARS,
@@ -152,7 +152,11 @@ function createFakeClient(sessions: Record<string, FakeSession>) {
 
   const client = {
     api: {
-      ...stubLoadedModelCatalog(),
+      ...stubLoadedModelCatalog([
+        { providerID: 'openai', id: 'gpt-5-mini', enabled: true },
+        { providerID: 'anthropic', id: 'claude-sonnet-4', enabled: true },
+        { providerID: 'openai', id: 'gpt-5', enabled: true },
+      ] as ModelInfo[]),
       session: {
         get: vi.fn(async ({ sessionID }: { sessionID: string }) => {
           const config = sessions[sessionID]
@@ -1169,13 +1173,14 @@ describe('ChangeWalkthroughService', () => {
   it('returns the stored walkthrough without a model call when changes are unchanged', async () => {
     fake.setGenerateImpl(async () => modelReply([{ title: 'A', explanation: 'x', hunkIds: THREE_HUNK_IDS }]))
     const first = await service.generate(SESSION_ID, {})
+    const modelListCallsAfterFirst = vi.mocked(fake.client.api.model.list).mock.calls.length
 
     const second = await service.generate(SESSION_ID, {})
 
     expect(second.created).toBe(false)
     expect(second.walkthrough).toEqual(first.walkthrough)
     expect(fake.generateCalls).toHaveLength(1)
-    expect(vi.mocked(fake.client.api.model.list)).toHaveBeenCalledTimes(1)
+    expect(vi.mocked(fake.client.api.model.list)).toHaveBeenCalledTimes(modelListCallsAfterFirst)
   })
 
   it('calls the model again when regenerate is set', async () => {
@@ -1233,7 +1238,7 @@ describe('ChangeWalkthroughService', () => {
     expect(fake.generateModels[0]).toEqual({ providerID: 'anthropic', id: 'claude-sonnet-4' })
   })
 
-  it('resolves the default model once per generation', async () => {
+  it('reuses the resolved default model for every stop', async () => {
     sessions[SESSION_ID]!.changes = LARGE_CHANGES
     fake.setGenerateImpl((prompt) =>
       Promise.resolve(prompt.includes(PLAN_MARKER) ? LARGE_PLAN_REPLY : EXPLANATION_REPLY),
@@ -1241,6 +1246,29 @@ describe('ChangeWalkthroughService', () => {
 
     await service.generate(SESSION_ID, {})
 
+    expect(fake.generateModels).toHaveLength(4)
+    expect(
+      fake.generateModels.every((model) => model?.providerID === 'openai' && model.id === 'gpt-5-mini'),
+    ).toBe(true)
+  })
+
+  it('waits for an explicit model once per generation, not per stop', async () => {
+    sessions[SESSION_ID]!.changes = LARGE_CHANGES
+    sessions[SESSION_ID]!.info = {
+      id: SESSION_ID,
+      title: 'Title',
+      model: { providerID: 'openai', id: 'gpt-5-mini' },
+    } as SessionInfo
+    fake.setGenerateImpl((prompt) =>
+      Promise.resolve(prompt.includes(PLAN_MARKER) ? LARGE_PLAN_REPLY : EXPLANATION_REPLY),
+    )
+
+    await service.generate(SESSION_ID, {})
+
+    expect(fake.generateModels).toHaveLength(4)
+    expect(
+      fake.generateModels.every((model) => model?.providerID === 'openai' && model.id === 'gpt-5-mini'),
+    ).toBe(true)
     expect(vi.mocked(fake.client.api.model.list)).toHaveBeenCalledTimes(1)
   })
 
@@ -1762,6 +1790,7 @@ describe('ChangeWalkthroughService', () => {
       expect(state.generating).toBe(true)
       expect(state.error).toBeNull()
 
+      await vi.waitFor(() => expect(fake.generateCalls.length).toBeGreaterThan(2))
       resolveGenerate(coveringReply)
       await vi.waitFor(async () => {
         expect((await service.getState(SESSION_ID)).generating).toBe(false)

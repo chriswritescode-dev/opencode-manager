@@ -4,6 +4,7 @@ import { TextPart } from './TextPart'
 import { ToolCallPart } from './ToolCallPart'
 import { useSettings } from '@/hooks/useSettings'
 import type { ShellNoticeOutcome } from '@/lib/backgroundWork'
+import type { WalkthroughSource } from '@opencode-manager/shared/schemas'
 
 type AssistantContentPart = SessionMessageAssistant['content'][number]
 
@@ -14,9 +15,10 @@ interface MessagePartProps {
   shellOutcome?: ShellNoticeOutcome
   onFileClick?: (filePath: string, lineNumber?: number) => void
   onChildSessionClick?: (sessionId: string) => void
+  onOpenWalkthrough?: (source?: WalkthroughSource) => void
 }
 
-export const MessagePart = memo(function MessagePart({ part, messageID, directory, shellOutcome, onFileClick, onChildSessionClick }: MessagePartProps) {
+export const MessagePart = memo(function MessagePart({ part, messageID, directory, shellOutcome, onFileClick, onChildSessionClick, onOpenWalkthrough }: MessagePartProps) {
   const { preferences } = useSettings()
   const simpleChatMode = preferences?.simpleChatMode ?? false
   const showReasoning = preferences?.showReasoning ?? false
@@ -47,6 +49,7 @@ export const MessagePart = memo(function MessagePart({ part, messageID, director
           shellOutcome={shellOutcome}
           onFileClick={onFileClick}
           onChildSessionClick={onChildSessionClick}
+          onOpenWalkthrough={onOpenWalkthrough}
         />
       )
     default:
