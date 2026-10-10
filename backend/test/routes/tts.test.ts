@@ -341,6 +341,7 @@ describe('TTS route handlers', () => {
       expect.objectContaining({
         method: 'POST',
         headers: expect.objectContaining({ Authorization: 'Bearer test-api-key' }),
+        signal: expect.any(AbortSignal),
       }),
     )
     expect(mockWriteFile).toHaveBeenCalledWith(
@@ -351,6 +352,28 @@ describe('TTS route handlers', () => {
       expect.stringMatching(/\.tmp$/),
       expect.stringContaining('.mp3'),
     )
+  })
+
+  it('returns synthesized audio when the cache write fails', async () => {
+    mockStat.mockRejectedValue(new Error('not found'))
+    mockReaddir.mockResolvedValue([] as any)
+    mockWriteFile.mockRejectedValue(new Error('disk full'))
+    mockUnlink.mockResolvedValue(undefined)
+    const fetchMock = vi.fn().mockResolvedValue({
+      ok: true,
+      arrayBuffer: async () => Buffer.from('fresh-audio'),
+    })
+    vi.stubGlobal('fetch', fetchMock)
+
+    const res = await app.request('/synthesize', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ text: 'Hello' }),
+    })
+
+    expect(res.status).toBe(200)
+    expect(res.headers.get('X-Cache')).toBe('MISS')
+    expect(Buffer.from(await res.arrayBuffer()).toString()).toBe('fresh-audio')
   })
 
   it('deduplicates concurrent synthesis requests for the same text', async () => {
@@ -411,6 +434,25 @@ describe('TTS route handlers', () => {
     expect(await res.json()).toEqual({
       error: 'TTS API request failed',
       details: 'Voice not supported',
+      voice: 'alloy',
+      availableVoices: [],
+    })
+  })
+
+  it('returns an upstream error when synthesis times out', async () => {
+    mockStat.mockRejectedValue(new Error('not found'))
+    vi.stubGlobal('fetch', vi.fn().mockRejectedValue(new DOMException('The operation timed out.', 'TimeoutError')))
+
+    const res = await app.request('/synthesize', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ text: 'Hello' }),
+    })
+
+    expect(res.status).toBe(500)
+    expect(await res.json()).toEqual({
+      error: 'TTS API request failed',
+      details: 'TTS upstream request timed out',
       voice: 'alloy',
       availableVoices: [],
     })

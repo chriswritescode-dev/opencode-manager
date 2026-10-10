@@ -18,6 +18,7 @@ const TTS_CACHE_DIR = join(getWorkspacePath(), 'cache', 'tts')
 const CACHE_TTL_MS = 24 * 60 * 60 * 1000
 const MAX_CACHE_SIZE_MB = 200
 const MAX_CACHE_SIZE_BYTES = MAX_CACHE_SIZE_MB * 1024 * 1024
+const TTS_SYNTHESIS_TIMEOUT_MS = 60_000
 
 const TTSRequestSchema = z.object({
   text: z.string().min(1).max(4096),
@@ -158,29 +159,37 @@ async function fetchSynthesizedAudio(params: SynthesisParams): Promise<Buffer> {
   const baseUrl = normalizeToBaseUrl(endpoint)
   const speechEndpoint = `${baseUrl}/v1/audio/speech`
   
-  const response = await fetch(speechEndpoint, {
-    method: 'POST',
-    headers: {
-      'Authorization': `Bearer ${apiKey}`,
-      'Content-Type': 'application/json',
-    },
-    body: JSON.stringify({
-      model,
-      voice,
-      input: text,
-      speed,
-      response_format: 'mp3',
-    }),
-  })
-  
-  if (!response.ok) {
-    const errorText = await response.text()
-    logger.error(`TTS API error: ${response.status} - ${errorText}`)
-    const status = response.status >= 400 && response.status < 600 ? response.status as 400 | 500 : 500
-    throw new TTSUpstreamError(status, parseErrorDetails(errorText))
+  try {
+    const response = await fetch(speechEndpoint, {
+      method: 'POST',
+      headers: {
+        'Authorization': `Bearer ${apiKey}`,
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify({
+        model,
+        voice,
+        input: text,
+        speed,
+        response_format: 'mp3',
+      }),
+      signal: AbortSignal.timeout(TTS_SYNTHESIS_TIMEOUT_MS),
+    })
+    
+    if (!response.ok) {
+      const errorText = await response.text()
+      logger.error(`TTS API error: ${response.status} - ${errorText}`)
+      const status = response.status >= 400 && response.status < 600 ? response.status as 400 | 500 : 500
+      throw new TTSUpstreamError(status, parseErrorDetails(errorText))
+    }
+    
+    return Buffer.from(await response.arrayBuffer())
+  } catch (error) {
+    if (error instanceof Error && error.name === 'TimeoutError') {
+      throw new TTSUpstreamError(500, 'TTS upstream request timed out')
+    }
+    throw error
   }
-  
-  return Buffer.from(await response.arrayBuffer())
 }
 
 function getOrStartSynthesis(cacheKey: string, params: SynthesisParams): Promise<Buffer> {
@@ -189,7 +198,11 @@ function getOrStartSynthesis(cacheKey: string, params: SynthesisParams): Promise
   
   const promise = (async () => {
     const audioBuffer = await fetchSynthesizedAudio(params)
-    await cacheAudio(cacheKey, audioBuffer)
+    try {
+      await cacheAudio(cacheKey, audioBuffer)
+    } catch (error) {
+      logger.error('TTS cache write failed:', error)
+    }
     return audioBuffer
   })()
   
