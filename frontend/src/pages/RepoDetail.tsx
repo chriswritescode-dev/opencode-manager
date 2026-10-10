@@ -16,6 +16,7 @@ import { PreviewPanel } from "@/components/preview/PreviewPanel";
 import { useCreateSession } from "@/hooks/useOpenCode";
 import { useRepoActivity } from "@/hooks/useRepoActivity";
 import { useCreateRepoWorkspace, useDeleteRepoWorkspaces, useRepoSiblings } from "@/hooks/useRepoSiblings";
+import { useMultiRuns } from "@/hooks/useMultiRuns";
 import { useSSE } from "@/hooks/useSSE";
 import { useDialogParam } from "@/hooks/useDialogParam";
 import { useOpenTerminal, useTerminalDialogParam, useTerminalDirectoryParam } from "@/hooks/useOpenTerminal";
@@ -116,6 +117,7 @@ export function RepoDetail() {
   }, [baseDirectory, nonScheduleWorkspaceDirectories, activeScheduleDirectories]);
 
   const showWorktrees = activeTab === 'workspaces';
+  const { data: multiRuns } = useMultiRuns(repoId, showWorktrees);
   const sessionListDirectories = useMemo(() => {
     if (!showWorktrees) return baseDirectory ? [baseDirectory] : [];
     return Array.from(new Set([...nonScheduleWorkspaceDirectories, ...activeScheduleDirectories]));
@@ -167,6 +169,7 @@ export function RepoDetail() {
       repoId={repoId}
       worktrees={workspaceSiblings}
       sessions={sessions}
+      multiRuns={multiRuns}
       searchQuery={searchQuery}
       renderSessionCard={renderSessionCard}
       onExpandedScheduleDirectoriesChange={handleExpandedScheduleDirectoriesChange}
