@@ -37,11 +37,11 @@ export function TTSProvider({ children }: TTSProviderProps) {
   
   const abortControllerRef = useRef<AbortController | null>(null)
   const audioRef = useRef<HTMLAudioElement | null>(null)
-  const stoppedRef = useRef(false)
+  const playbackIdRef = useRef(0)
+  const currentObjectUrlRef = useRef<string | null>(null)
   const chunksRef = useRef<string[]>([])
   const chunkIndexRef = useRef(0)
-  const prefetchedBlobsRef = useRef<Map<number, Blob>>(new Map())
-  const fetchingIndexRef = useRef<number>(-1)
+  const chunkAudioRef = useRef<Map<number, Promise<Blob | null>>>(new Map())
   
   // Web Speech API reference
   const webSpeechSynthRef = useRef<ReturnType<typeof getWebSpeechSynthesizer> | null>(null)
@@ -66,34 +66,36 @@ export function TTSProvider({ children }: TTSProviderProps) {
   }, []);
 
   const cleanup = useCallback(() => {
-    // Stop external audio
     if (audioRef.current) {
+      audioRef.current.onended = null
+      audioRef.current.onerror = null
       audioRef.current.pause()
-      audioRef.current.src = ''
+      audioRef.current.removeAttribute('src')
+      audioRef.current.load()
       audioRef.current = null
     }
-    
-    // Stop Web Speech API
-    if (webSpeechSynthRef.current && isBuiltin) {
+
+    if (currentObjectUrlRef.current) {
+      URL.revokeObjectURL(currentObjectUrlRef.current)
+      currentObjectUrlRef.current = null
+    }
+
+    if (webSpeechSynthRef.current) {
       webSpeechSynthRef.current.stop()
       webSpeechSynthRef.current.clearCallbacks()
     }
-    
+
     if (abortControllerRef.current) {
       abortControllerRef.current.abort()
       abortControllerRef.current = null
     }
-    prefetchedBlobsRef.current.forEach((_, key) => {
-      prefetchedBlobsRef.current.delete(key)
-    })
-    prefetchedBlobsRef.current.clear()
+    chunkAudioRef.current.clear()
     chunksRef.current = []
     chunkIndexRef.current = 0
-    fetchingIndexRef.current = -1
-  }, [isBuiltin])
+  }, [])
 
   const stop = useCallback(() => {
-    stoppedRef.current = true
+    playbackIdRef.current += 1
     cleanup()
     setState('idle')
     setCurrentText(null)
@@ -104,14 +106,14 @@ export function TTSProvider({ children }: TTSProviderProps) {
 
   useEffect(() => {
     return () => {
-      stoppedRef.current = true
+      playbackIdRef.current += 1
       cleanup()
     }
   }, [cleanup])
 
   // External API synthesis
-  const synthesizeExternal = useCallback(async (text: string, signal?: AbortSignal): Promise<Blob | null> => {
-    if (stoppedRef.current) return null
+  const synthesizeExternal = useCallback(async (text: string, signal: AbortSignal | undefined, playbackId: number): Promise<Blob | null> => {
+    if (playbackIdRef.current !== playbackId) return null
 
     try {
       const response = await fetch(`${API_BASE_URL}/api/tts/synthesize`, {
@@ -121,7 +123,7 @@ export function TTSProvider({ children }: TTSProviderProps) {
         signal,
       })
 
-      if (stoppedRef.current) return null
+      if (playbackIdRef.current !== playbackId) return null
 
       if (!response.ok) {
         let errorMessage = 'TTS request failed'
@@ -155,32 +157,31 @@ export function TTSProvider({ children }: TTSProviderProps) {
     }
   }, [])
 
-  const fetchNextChunk = useCallback(async (index: number) => {
-    if (stoppedRef.current) return
-    if (index >= chunksRef.current.length) return
-    if (prefetchedBlobsRef.current.has(index)) {
-      fetchNextChunk(index + 1)
-      return
-    }
-    
-    fetchingIndexRef.current = index
-    
-    try {
-      const blob = await synthesizeExternal(chunksRef.current[index], abortControllerRef.current?.signal)
-      if (blob && !stoppedRef.current) {
-        prefetchedBlobsRef.current.set(index, blob)
-        fetchNextChunk(index + 1)
-      }
-    } catch {
-      if (stoppedRef.current) return
-    }
-    
-    fetchingIndexRef.current = -1
+  const getChunkAudio = useCallback((index: number, playbackId: number): Promise<Blob | null> => {
+    const existing = chunkAudioRef.current.get(index)
+    if (existing) return existing
+
+    const promise = synthesizeExternal(chunksRef.current[index], abortControllerRef.current?.signal, playbackId)
+    chunkAudioRef.current.set(index, promise)
+    return promise
   }, [synthesizeExternal])
 
-  const playChunk = useCallback(async (index: number) => {
-    if (stoppedRef.current || index >= chunksRef.current.length) {
-      if (!stoppedRef.current) {
+  const prefetchChunk = useCallback((index: number, playbackId: number) => {
+    if (playbackIdRef.current !== playbackId) return
+    if (index >= chunksRef.current.length) return
+    if (chunkAudioRef.current.has(index)) return
+
+    getChunkAudio(index, playbackId)
+      .then((blob) => {
+        if (!blob || playbackIdRef.current !== playbackId) return
+        prefetchChunk(index + 1, playbackId)
+      })
+      .catch(() => {})
+  }, [getChunkAudio])
+
+  const playChunk = useCallback(async (index: number, playbackId: number) => {
+    if (playbackIdRef.current !== playbackId || index >= chunksRef.current.length) {
+      if (playbackIdRef.current === playbackId) {
         setState('idle')
         setCurrentText(null)
         setActiveMessageId(null)
@@ -191,50 +192,54 @@ export function TTSProvider({ children }: TTSProviderProps) {
     chunkIndexRef.current = index
 
     try {
-      let blob: Blob | undefined = prefetchedBlobsRef.current.get(index)
-      
-      if (!blob) {
+      if (!chunkAudioRef.current.has(index)) {
         setState('loading')
-        const fetched = await synthesizeExternal(chunksRef.current[index], abortControllerRef.current?.signal)
-        if (fetched && !stoppedRef.current) {
-          blob = fetched
-        }
-        fetchNextChunk(index + 1)
       }
-      
-      if (!blob || stoppedRef.current) return
 
-      prefetchedBlobsRef.current.delete(index)
-      
+      const blob = await getChunkAudio(index, playbackId)
+      if (!blob || playbackIdRef.current !== playbackId) return
+
+      chunkAudioRef.current.delete(index)
+      prefetchChunk(index + 1, playbackId)
+
       const url = URL.createObjectURL(blob)
+      currentObjectUrlRef.current = url
       const audio = new Audio(url)
       audioRef.current = audio
 
       audio.onended = () => {
-        URL.revokeObjectURL(url)
-        audioRef.current = null
-        if (!stoppedRef.current) {
-          playChunk(index + 1)
+        if (playbackIdRef.current !== playbackId) return
+        if (currentObjectUrlRef.current === url) {
+          URL.revokeObjectURL(url)
+          currentObjectUrlRef.current = null
         }
+        if (audioRef.current === audio) {
+          audioRef.current = null
+        }
+        playChunk(index + 1, playbackId)
       }
 
       audio.onerror = () => {
-        URL.revokeObjectURL(url)
-        audioRef.current = null
-        if (!stoppedRef.current) {
-          setError('Audio playback failed')
-          setState('error')
+        if (playbackIdRef.current !== playbackId) return
+        if (currentObjectUrlRef.current === url) {
+          URL.revokeObjectURL(url)
+          currentObjectUrlRef.current = null
         }
+        if (audioRef.current === audio) {
+          audioRef.current = null
+        }
+        setError('Audio playback failed')
+        setState('error')
       }
 
       setState('playing')
       await audio.play()
     } catch (err) {
-      if (stoppedRef.current) return
+      if (playbackIdRef.current !== playbackId) return
       setError(err instanceof Error ? err.message : 'TTS failed')
       setState('error')
     }
-  }, [synthesizeExternal, fetchNextChunk])
+  }, [getChunkAudio, prefetchChunk])
 
   // Builtin Web Speech synthesis - takes explicit config and optional messageId
   const speakBuiltinWithConfig = useCallback(async (text: string, config: TTSConfig, messageId: string | null = null): Promise<boolean> => {
@@ -259,7 +264,7 @@ export function TTSProvider({ children }: TTSProviderProps) {
     }
 
     stop()
-    stoppedRef.current = false
+    const playbackId = playbackIdRef.current
     setError(null)
 
     setOriginalText(text)
@@ -274,38 +279,38 @@ export function TTSProvider({ children }: TTSProviderProps) {
     const synth = getSynthesizer()
     await synth.waitForVoices()
 
+    if (playbackIdRef.current !== playbackId) return false
+
     const voiceName = config.voice || ''
-    
+
     synth.clearCallbacks()
-    
+
     synth.onEnd(() => {
-      if (!stoppedRef.current) {
-        setState('idle')
-        setCurrentText(null)
-        setActiveMessageId(null)
-      }
+      if (playbackIdRef.current !== playbackId) return
+      setState('idle')
+      setCurrentText(null)
+      setActiveMessageId(null)
     })
 
     synth.onError((err) => {
-      if (!stoppedRef.current) {
-        setError(err)
-        setState('error')
-      }
+      if (playbackIdRef.current !== playbackId) return
+      setError(err)
+      setState('error')
     })
 
     try {
       setState('playing')
-      
+
       const rate = config.speed || 1.0
-      
+
       await synth.speakChunked(sanitizedText, 200, {
         voice: voiceName || undefined,
         rate: rate,
       })
-      
+
       return true
     } catch (err) {
-      if (stoppedRef.current) return false
+      if (playbackIdRef.current !== playbackId) return false
       setError(err instanceof Error ? err.message : 'TTS failed')
       setState('error')
       return false
@@ -315,7 +320,7 @@ export function TTSProvider({ children }: TTSProviderProps) {
   // Internal helper to start external TTS playback
   const startExternalPlayback = useCallback((sanitizedText: string, original: string, messageId: string | null): boolean => {
     stop()
-    stoppedRef.current = false
+    const playbackId = playbackIdRef.current
     setError(null)
 
     setOriginalText(original)
@@ -328,9 +333,9 @@ export function TTSProvider({ children }: TTSProviderProps) {
 
     abortControllerRef.current = new AbortController()
     chunksRef.current = splitIntoChunks(sanitizedText)
-    
-    playChunk(0)
-    
+
+    playChunk(0, playbackId)
+
     return true
   }, [stop, playChunk])
 
