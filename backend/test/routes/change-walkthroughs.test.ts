@@ -387,4 +387,31 @@ describe('change walkthrough routes', () => {
 
     expect(res.status).toBe(404)
   })
+
+  it('DELETE stops an in-flight generation', async () => {
+    fake.setGenerateImpl(() => new Promise<string>(() => {}))
+
+    const postRes = await app.request(`/change-walkthroughs/${SESSION_ID}`, { method: 'POST' })
+    expect(postRes.status).toBe(202)
+
+    const res = await app.request(`/change-walkthroughs/${SESSION_ID}`, { method: 'DELETE' })
+    expect(res.status).toBe(204)
+
+    const getRes = await app.request(`/change-walkthroughs/${SESSION_ID}`)
+    const state = (await getRes.json()) as { generating: boolean; error: unknown }
+    expect(state.generating).toBe(false)
+    expect(state.error).toBeNull()
+  })
+
+  it('DELETE is a no-op when nothing is generating', async () => {
+    const res = await app.request(`/change-walkthroughs/${SESSION_ID}`, { method: 'DELETE' })
+
+    expect(res.status).toBe(204)
+  })
+
+  it('DELETE rejects an invalid source with 400', async () => {
+    const res = await app.request(`/change-walkthroughs/${SESSION_ID}?source=branch:-x`, { method: 'DELETE' })
+
+    expect(res.status).toBe(400)
+  })
 })

@@ -14,9 +14,18 @@ export async function generateTextWithTimeout(
   client: OpenCodeClient,
   input: { prompt: string; model?: ModelRef },
   timeoutMs: number,
+  signal?: AbortSignal,
 ): Promise<string> {
   const controller = new AbortController()
   let timer: ReturnType<typeof setTimeout> | undefined
+  const abortFromSignal = () => controller.abort(signal?.reason)
+  if (signal) {
+    if (signal.aborted) {
+      controller.abort(signal.reason)
+    } else {
+      signal.addEventListener('abort', abortFromSignal, { once: true })
+    }
+  }
   const timeout = new Promise<never>((_resolve, reject) => {
     timer = setTimeout(() => {
       controller.abort()
@@ -29,6 +38,7 @@ export async function generateTextWithTimeout(
     return text
   } finally {
     if (timer) clearTimeout(timer)
+    signal?.removeEventListener('abort', abortFromSignal)
   }
 }
 

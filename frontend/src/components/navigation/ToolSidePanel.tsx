@@ -9,6 +9,7 @@ import {
   ChangesWalkthroughProvider,
   ChangesWalkthroughRegenerate,
   ChangesWalkthroughSourcePicker,
+  ChangesWalkthroughStop,
   ChangesWalkthroughView,
   type WalkthroughSourceRequest,
 } from '@/components/session/ChangesWalkthroughSheet'
@@ -172,6 +173,7 @@ export function ToolSidePanel({
           {activeTool === 'walkthrough' ? (
             <>
               <ChangesWalkthroughSourcePicker />
+              <ChangesWalkthroughStop />
               <ChangesWalkthroughRegenerate />
               <ChangesWalkthroughNav />
             </>

@@ -1,4 +1,4 @@
-import { fetchWrapper } from './fetchWrapper'
+import { fetchWrapper, fetchWrapperVoid } from './fetchWrapper'
 import { API_BASE_URL } from '@/config'
 import { walkthroughSourceKey } from '@opencode-manager/shared/schemas'
 import type {
@@ -33,5 +33,15 @@ export async function generateChangeWalkthrough(
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify(request),
+  })
+}
+
+export async function cancelChangeWalkthrough(
+  sessionId: string,
+  source: WalkthroughSource,
+): Promise<void> {
+  await fetchWrapperVoid(walkthroughUrl(sessionId), {
+    method: 'DELETE',
+    params: { source: walkthroughSourceKey(source) },
   })
 }

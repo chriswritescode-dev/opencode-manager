@@ -28,6 +28,7 @@ vi.mock('@/components/session/ChangesWalkthroughSheet', () => ({
   ChangesWalkthroughNav: () => null,
   ChangesWalkthroughRegenerate: () => null,
   ChangesWalkthroughSourcePicker: () => null,
+  ChangesWalkthroughStop: () => null,
   ChangesWalkthroughView: () => <div>walkthrough-tool</div>,
 }))
 

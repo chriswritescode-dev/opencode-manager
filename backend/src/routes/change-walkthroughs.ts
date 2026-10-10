@@ -41,5 +41,16 @@ export function createChangeWalkthroughRoutes(service: ChangeWalkthroughService)
     }
   })
 
+  app.delete('/:sessionId', (c) => {
+    const sourceParam = c.req.query('source')
+    const source = sourceParam === undefined ? DEFAULT_WALKTHROUGH_SOURCE : parseWalkthroughSourceKey(sourceParam)
+    if (!source) {
+      return c.json({ error: 'Invalid walkthrough source' }, 400)
+    }
+
+    service.cancelGeneration(c.req.param('sessionId'), source)
+    return c.body(null, 204)
+  })
+
   return app
 }

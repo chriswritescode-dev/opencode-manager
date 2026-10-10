@@ -1,6 +1,6 @@
 import { createContext, memo, useCallback, useContext, useEffect, useRef, useState } from 'react'
 import type { ReactNode, RefObject } from 'react'
-import { ChevronDown, ChevronLeft, ChevronRight, Loader2, RefreshCw } from 'lucide-react'
+import { ChevronDown, ChevronLeft, ChevronRight, Loader2, RefreshCw, Square } from 'lucide-react'
 import { SideDrawer, SideDrawerHeader } from '@/components/ui/side-drawer'
 import { Button } from '@/components/ui/button'
 import {
@@ -16,7 +16,11 @@ import { Input } from '@/components/ui/input'
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
 import { DiffLines } from '@/components/file-browser/DiffLines'
 import { ScheduleRunMarkdown } from '@/components/schedules/ScheduleRunMarkdown'
-import { useChangeWalkthrough, useGenerateChangeWalkthrough } from '@/hooks/useChangeWalkthrough'
+import {
+  useCancelChangeWalkthrough,
+  useChangeWalkthrough,
+  useGenerateChangeWalkthrough,
+} from '@/hooks/useChangeWalkthrough'
 import { GIT_STATUS_COLORS, GIT_STATUS_LABELS } from '@/lib/git-status-styles'
 import { cn } from '@/lib/utils'
 import {
@@ -129,6 +133,8 @@ interface ChangesWalkthroughContextValue {
   contextLimitFiles: WalkthroughOmittedFile[]
   generate: () => void
   regenerate: () => void
+  stop: () => void
+  stopping: boolean
   stops: WalkthroughStop[]
   stopIndex: number | null
   selectedStop: WalkthroughStop | null
@@ -268,6 +274,8 @@ export function ChangesWalkthroughProvider({
   const sourceKey = walkthroughSourceKey(source)
   const stateQuery = useChangeWalkthrough(sessionId, active, source)
   const generate = useGenerateChangeWalkthrough(sessionId, source)
+  const cancel = useCancelChangeWalkthrough(sessionId, source)
+  const stop = useCallback(() => cancel.mutate(), [cancel])
   const resetGenerate = generate.reset
   const [stopIndex, setStopIndex] = useState<number | null>(null)
   const scrollRef = useRef<HTMLDivElement>(null)
@@ -333,6 +341,8 @@ export function ChangesWalkthroughProvider({
     contextLimitFiles,
     generate: () => generate.mutate({}),
     regenerate: () => generate.mutate({ regenerate: true }),
+    stop,
+    stopping: cancel.isPending,
     stops,
     stopIndex: clampedIndex,
     selectedStop,
@@ -403,6 +413,26 @@ export const ChangesWalkthroughNav = memo(function ChangesWalkthroughNav() {
         <ChevronRight />
       </Button>
     </div>
+  )
+})
+
+export const ChangesWalkthroughStop = memo(function ChangesWalkthroughStop() {
+  const { generating, stopping, stop } = useChangesWalkthrough()
+
+  if (!generating) return null
+
+  return (
+    <Button
+      variant="outline"
+      size="sm"
+      aria-label="Stop generating walkthrough"
+      onClick={stop}
+      disabled={stopping}
+      className="h-7 gap-1 px-2 text-xs"
+    >
+      <Square className="h-3.5 w-3.5" />
+      {stopping ? 'Stopping…' : 'Stop'}
+    </Button>
   )
 })
 
@@ -677,6 +707,7 @@ export function ChangesWalkthroughSheet({
           actions={
             <>
               <ChangesWalkthroughSourcePicker />
+              <ChangesWalkthroughStop />
               <ChangesWalkthroughRegenerate />
               <ChangesWalkthroughNav />
             </>

@@ -10,11 +10,13 @@ import type { ChangeWalkthrough, ChangeWalkthroughState } from '@opencode-manage
 const mocks = vi.hoisted(() => ({
   getChangeWalkthrough: vi.fn(),
   generateChangeWalkthrough: vi.fn(),
+  cancelChangeWalkthrough: vi.fn(),
 }))
 
 vi.mock('@/api/changeWalkthroughs', () => ({
   getChangeWalkthrough: mocks.getChangeWalkthrough,
   generateChangeWalkthrough: mocks.generateChangeWalkthrough,
+  cancelChangeWalkthrough: mocks.cancelChangeWalkthrough,
 }))
 
 const walkthrough: ChangeWalkthrough = {
@@ -263,6 +265,28 @@ describe('ChangesWalkthroughSheet', () => {
         source: { kind: 'session' },
       })
     })
+  })
+
+  it('stops an in-flight generation from the header', async () => {
+    const user = userEvent.setup()
+    mocks.getChangeWalkthrough.mockResolvedValue(state({ generating: true }))
+    mocks.cancelChangeWalkthrough.mockResolvedValue(undefined)
+    renderSheet()
+
+    const stop = await screen.findByRole('button', { name: 'Stop generating walkthrough' })
+    await user.click(stop)
+
+    await waitFor(() => {
+      expect(mocks.cancelChangeWalkthrough).toHaveBeenCalledWith('ses_1', { kind: 'session' })
+    })
+  })
+
+  it('does not show a stop button when idle', async () => {
+    mocks.getChangeWalkthrough.mockResolvedValue(state())
+    renderSheet()
+
+    await screen.findByText('Overview')
+    expect(screen.queryByRole('button', { name: 'Stop generating walkthrough' })).not.toBeInTheDocument()
   })
 
   it('switches to staged changes', async () => {

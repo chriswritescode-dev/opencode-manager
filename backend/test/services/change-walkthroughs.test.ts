@@ -25,6 +25,7 @@ import { stubLoadedModelCatalog } from '../helpers/stub-opencode-client'
 import { createCommittedRepo, createGitAuthService, createOrigin, cloneOrigin, git, uniqueName } from '../helpers/git-fixtures'
 import {
   ChangeWalkthroughService,
+  WalkthroughCancelledError,
   buildWalkthroughInput,
   buildWalkthroughOutline,
   buildWalkthroughPlanPrompt,
@@ -41,6 +42,25 @@ import {
 import { ChangeWalkthroughError } from '../../src/services/change-walkthrough-error'
 
 const SESSION_ID = 'ses_walkthrough'
+
+function abortable<T>(promise: Promise<T>, signal?: AbortSignal): Promise<T> {
+  if (!signal) return promise
+  if (signal.aborted) return Promise.reject(new DOMException('Aborted', 'AbortError'))
+  return new Promise<T>((resolve, reject) => {
+    const onAbort = () => reject(new DOMException('Aborted', 'AbortError'))
+    signal.addEventListener('abort', onAbort, { once: true })
+    promise.then(
+      (value) => {
+        signal.removeEventListener('abort', onAbort)
+        resolve(value)
+      },
+      (error) => {
+        signal.removeEventListener('abort', onAbort)
+        reject(error)
+      },
+    )
+  })
+}
 
 function userMessage(id: string): SessionMessageInfo {
   return { id, type: 'user', time: { created: 0 }, text: id } as SessionMessageInfo
@@ -185,10 +205,10 @@ function createFakeClient(sessions: Record<string, FakeSession>) {
         }),
       },
       generate: {
-        text: vi.fn(async (input: { prompt: string; model?: ModelRef }) => {
+        text: vi.fn(async (input: { prompt: string; model?: ModelRef }, options?: { signal?: AbortSignal }) => {
           generateCalls.push(input.prompt)
           generateModels.push(input.model)
-          return { text: await generateImpl(input.prompt) }
+          return { text: await abortable(generateImpl(input.prompt), options?.signal) }
         }),
       },
     },
@@ -2278,6 +2298,72 @@ describe('ChangeWalkthroughService', () => {
       await saturator
       await expect(victimRun).rejects.toMatchObject({ status: 404 })
       expect(victimExplainStarted).toBe(1)
+    })
+  })
+
+  describe('cancelGeneration', () => {
+    it('stops a pending generation without recording an error', async () => {
+      fake.setGenerateImpl(() => new Promise<string>(() => {}))
+
+      const pending = service.generate(SESSION_ID, {})
+      await vi.waitFor(() => expect(fake.generateCalls).toHaveLength(1))
+
+      expect(service.cancelGeneration(SESSION_ID)).toBe(true)
+      await expect(pending).rejects.toBeInstanceOf(WalkthroughCancelledError)
+
+      const state = await service.getState(SESSION_ID)
+      expect(state.generating).toBe(false)
+      expect(state.error).toBeNull()
+    })
+
+    it('returns false when nothing is generating', () => {
+      expect(service.cancelGeneration(SESSION_ID)).toBe(false)
+    })
+
+    it('keeps explained stops and persists the partial walkthrough', async () => {
+      sessions[SESSION_ID]!.changes = LARGE_CHANGES
+      fake.setGenerateImpl((prompt) => {
+        if (prompt.includes(PLAN_MARKER)) {
+          return Promise.resolve(LARGE_PLAN_REPLY)
+        }
+        return new Promise<string>(() => {})
+      })
+
+      const pending = service.generate(SESSION_ID, {})
+
+      await vi.waitFor(async () => {
+        const state = await service.getState(SESSION_ID)
+        expect(state.generating).toBe(true)
+        expect(state.walkthrough?.stops).toHaveLength(3)
+        expect(state.walkthrough?.stops.every((stop) => stop.status === 'pending')).toBe(true)
+      })
+
+      expect(service.cancelGeneration(SESSION_ID)).toBe(true)
+
+      await vi.waitFor(async () => {
+        expect((await service.getState(SESSION_ID)).generating).toBe(false)
+      })
+
+      const state = await service.getState(SESSION_ID)
+      expect(state.error).toBeNull()
+      const stored = getChangeWalkthrough(db, SESSION_ID, 'session')
+      expect(stored).not.toBeNull()
+      expect(stored!.stops.every((stop) => stop.status === 'pending')).toBe(true)
+
+      await pending
+    })
+
+    it('aborts only the requested source', async () => {
+      fake.setGenerateImpl(() => new Promise<string>(() => {}))
+
+      const pending = service.generate(SESSION_ID, {})
+      await vi.waitFor(() => expect(fake.generateCalls).toHaveLength(1))
+
+      expect(service.cancelGeneration(SESSION_ID, { kind: 'staged' })).toBe(false)
+      expect((await service.getState(SESSION_ID)).generating).toBe(true)
+
+      expect(service.cancelGeneration(SESSION_ID)).toBe(true)
+      await expect(pending).rejects.toBeInstanceOf(WalkthroughCancelledError)
     })
   })
 })
