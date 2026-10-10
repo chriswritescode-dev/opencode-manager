@@ -62,6 +62,14 @@ function abortable<T>(promise: Promise<T>, signal?: AbortSignal): Promise<T> {
   })
 }
 
+function createDeferred<T>(): { promise: Promise<T>; resolve: (value: T) => void } {
+  let resolve!: (value: T) => void
+  const promise = new Promise<T>((res) => {
+    resolve = res
+  })
+  return { promise, resolve }
+}
+
 function userMessage(id: string): SessionMessageInfo {
   return { id, type: 'user', time: { created: 0 }, text: id } as SessionMessageInfo
 }
@@ -2364,6 +2372,75 @@ describe('ChangeWalkthroughService', () => {
 
       expect(service.cancelGeneration(SESSION_ID)).toBe(true)
       await expect(pending).rejects.toBeInstanceOf(WalkthroughCancelledError)
+    })
+  })
+
+  describe('cancellation before the model call', () => {
+    it('does not persist a mechanical-only walkthrough cancelled during the changes read', async () => {
+      sessions[SESSION_ID]!.info = {
+        id: SESSION_ID,
+        title: 'Title',
+        model: { providerID: 'anthropic', id: 'claude-sonnet-4' },
+      } as SessionInfo
+      fake.setGenerateImpl(async () => modelReply([{ title: 'A', explanation: 'x', hunkIds: THREE_HUNK_IDS }]))
+      const previous = await service.generate(SESSION_ID, {})
+      expect(previous.created).toBe(true)
+
+      const mechanical = [change('pnpm-lock.yaml', hunkPatch(1))]
+      sessions[SESSION_ID]!.changes = mechanical
+      const diff = createDeferred<FileDiffInfo[]>()
+      const diffMock = vi.mocked(fake.client.api.session.diff)
+      diffMock.mockImplementationOnce(() => diff.promise)
+
+      const pending = service.generate(SESSION_ID, {})
+      await vi.waitFor(() => expect(diffMock).toHaveBeenCalledTimes(2))
+
+      expect(service.cancelGeneration(SESSION_ID)).toBe(true)
+      diff.resolve(mechanical)
+
+      await expect(pending).rejects.toBeInstanceOf(WalkthroughCancelledError)
+      expect(fake.generateCalls).toHaveLength(1)
+      expect(getChangeWalkthrough(db, SESSION_ID, 'session')).toEqual(previous.walkthrough)
+    })
+
+    it('cancels while resolving the preferred model without persisting the mechanical-only changes', async () => {
+      sessions[SESSION_ID]!.info = {
+        id: SESSION_ID,
+        title: 'Title',
+        model: { providerID: 'anthropic', id: 'claude-sonnet-4' },
+      } as SessionInfo
+      sessions[SESSION_ID]!.changes = [change('pnpm-lock.yaml', hunkPatch(1))]
+
+      const config = createDeferred<Awaited<ReturnType<typeof fake.client.api.config.get>>>()
+      const configMock = vi.mocked(fake.client.api.config.get)
+      configMock.mockImplementationOnce(() => config.promise)
+
+      const pending = service.generate(SESSION_ID, {})
+      await vi.waitFor(() => expect(configMock).toHaveBeenCalledTimes(1))
+
+      expect(service.cancelGeneration(SESSION_ID)).toBe(true)
+      config.resolve([])
+
+      await expect(pending).rejects.toBeInstanceOf(WalkthroughCancelledError)
+      expect(fake.generateCalls).toHaveLength(0)
+      expect(getChangeWalkthrough(db, SESSION_ID, 'session')).toBeNull()
+      expect((await service.getState(SESSION_ID)).error).toBeNull()
+    })
+
+    it('cancels while resolving the default model without a 502 failure', async () => {
+      const config = createDeferred<Awaited<ReturnType<typeof fake.client.api.config.get>>>()
+      const configMock = vi.mocked(fake.client.api.config.get)
+      configMock.mockImplementationOnce(() => config.promise)
+
+      const pending = service.generate(SESSION_ID, {})
+      await vi.waitFor(() => expect(configMock).toHaveBeenCalledTimes(1))
+
+      expect(service.cancelGeneration(SESSION_ID)).toBe(true)
+      config.resolve([])
+
+      await expect(pending).rejects.toBeInstanceOf(WalkthroughCancelledError)
+      expect(fake.generateCalls).toHaveLength(0)
+      expect((await service.getState(SESSION_ID)).error).toBeNull()
     })
   })
 })

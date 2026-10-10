@@ -820,7 +820,13 @@ export class ChangeWalkthroughService {
 
   async startGeneration(sessionId: string, request: GenerateChangeWalkthroughRequest): Promise<ChangeWalkthroughStateWire> {
     const entry = this.begin(sessionId, request)
-    await Promise.race([entry.modelStarted, entry.result])
+    try {
+      await Promise.race([entry.modelStarted, entry.result])
+    } catch (error) {
+      if (!(error instanceof WalkthroughCancelledError)) {
+        throw error
+      }
+    }
     return this.getState(sessionId, request.source ?? DEFAULT_WALKTHROUGH_SOURCE)
   }
 
@@ -982,6 +988,12 @@ export class ChangeWalkthroughService {
     }
   }
 
+  private throwIfCancelled(signal: AbortSignal): void {
+    if (signal.aborted) {
+      throw new WalkthroughCancelledError()
+    }
+  }
+
   private async runGenerate(
     sessionId: string,
     source: WalkthroughSource,
@@ -991,10 +1003,12 @@ export class ChangeWalkthroughService {
     signal: AbortSignal,
   ): Promise<{ walkthrough: ChangeWalkthrough; created: boolean }> {
     const session = await this.readSession(sessionId)
+    this.throwIfCancelled(signal)
     const key = entryKey(sessionId, source)
 
     if (source.kind === 'pullRequest') {
       await this.fetchPullRequestChanges(session, source)
+      this.throwIfCancelled(signal)
     }
 
     let changes: FileDiffInfo[]
@@ -1013,6 +1027,7 @@ export class ChangeWalkthroughService {
         code: 'WALKTHROUGH_CHANGES_UNAVAILABLE',
       })
     }
+    this.throwIfCancelled(signal)
 
     if (changes.length === 0) {
       throw new ChangeWalkthroughError(noChangesMessage(source), 409, {
@@ -1079,6 +1094,7 @@ export class ChangeWalkthroughService {
       hunks: WalkthroughHunk[]
       omittedFiles: WalkthroughOmittedFile[]
     }): ChangeWalkthrough => {
+      this.throwIfCancelled(signal)
       const walkthrough: ChangeWalkthrough = {
         sessionId,
         source,
@@ -1370,7 +1386,13 @@ export class ChangeWalkthroughService {
           ...(signal ? { signal } : {}),
         })
       } catch {
+        if (signal?.aborted) {
+          throw new WalkthroughCancelledError()
+        }
         return preferred
+      }
+      if (signal?.aborted) {
+        throw new WalkthroughCancelledError()
       }
       return preferred
     }
@@ -1382,11 +1404,17 @@ export class ChangeWalkthroughService {
         signal ? { signal } : undefined,
       )
     } catch (error) {
+      if (signal?.aborted) {
+        throw new WalkthroughCancelledError()
+      }
       throw new ChangeWalkthroughError(
         getErrorMessage(error) || 'Failed to resolve the walkthrough model',
         502,
         { code: 'WALKTHROUGH_MODEL_UNAVAILABLE' },
       )
+    }
+    if (signal?.aborted) {
+      throw new WalkthroughCancelledError()
     }
 
     return resolved.variant

@@ -113,6 +113,14 @@ function replyForPrompt(prompt: string, summary = 'A summary'): string {
   return JSON.stringify({ summary, stops: [{ title: 'A', explanation: 'Why', hunkIds: ids }] })
 }
 
+function createDeferred<T>(): { promise: Promise<T>; resolve: (value: T) => void } {
+  let resolve!: (value: T) => void
+  const promise = new Promise<T>((res) => {
+    resolve = res
+  })
+  return { promise, resolve }
+}
+
 describe('change walkthrough routes', () => {
   let db: Database
   let sessions: Record<string, FakeSession>
@@ -401,6 +409,32 @@ describe('change walkthrough routes', () => {
     const state = (await getRes.json()) as { generating: boolean; error: unknown }
     expect(state.generating).toBe(false)
     expect(state.error).toBeNull()
+  })
+
+  it('resolves a pending POST with the stopped state after DELETE cancels it', async () => {
+    const diff = createDeferred<FileDiffInfo[]>()
+    const diffMock = vi.mocked(fake.client.api.session.diff)
+    diffMock.mockImplementationOnce(() => diff.promise)
+
+    const postPromise = app.request(`/change-walkthroughs/${SESSION_ID}`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({}),
+    })
+
+    await vi.waitFor(() => expect(diffMock).toHaveBeenCalledTimes(1))
+
+    const deleteRes = await app.request(`/change-walkthroughs/${SESSION_ID}`, { method: 'DELETE' })
+    expect(deleteRes.status).toBe(204)
+
+    diff.resolve(CHANGES)
+
+    const postRes = await postPromise
+    expect(postRes.status).toBe(200)
+    const body = (await postRes.json()) as { generating: boolean; walkthrough: unknown; error: unknown }
+    expect(body.generating).toBe(false)
+    expect(body.walkthrough).toBeNull()
+    expect(body.error).toBeNull()
   })
 
   it('DELETE is a no-op when nothing is generating', async () => {
