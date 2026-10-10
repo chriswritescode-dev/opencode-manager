@@ -1,8 +1,8 @@
 import { Hono } from 'hono'
 import { z } from 'zod'
 import { Database } from 'bun:sqlite'
-import { createHash } from 'crypto'
-import { readFile, writeFile, readdir, stat, unlink } from 'fs/promises'
+import { createHash, randomUUID } from 'crypto'
+import { readFile, writeFile, readdir, stat, unlink, rename } from 'fs/promises'
 import { join } from 'path'
 import { SettingsService } from '../services/settings'
 import { logger } from '../utils/logger'
@@ -107,7 +107,96 @@ async function cacheAudio(cacheKey: string, audioData: Buffer): Promise<void> {
     await cleanupOldestFiles(audioData.length)
   }
   
-  await writeFile(filePath, audioData)
+  const tempPath = join(TTS_CACHE_DIR, `${cacheKey}.${process.pid}.${randomUUID()}.tmp`)
+  
+  try {
+    await writeFile(tempPath, audioData)
+    await rename(tempPath, filePath)
+  } catch (error) {
+    await unlink(tempPath).catch(() => undefined)
+    throw error
+  }
+}
+
+interface SynthesisParams {
+  text: string
+  endpoint: string
+  apiKey: string
+  voice: string
+  model: string
+  speed: number
+}
+
+class TTSUpstreamError extends Error {
+  readonly status: 400 | 500
+  readonly details: string
+
+  constructor(status: 400 | 500, details: string) {
+    super('TTS API request failed')
+    this.name = 'TTSUpstreamError'
+    this.status = status
+    this.details = details
+  }
+}
+
+const inFlightSynthesis = new Map<string, Promise<Buffer>>()
+
+function parseErrorDetails(errorText: string): string {
+  try {
+    const errorJson = JSON.parse(errorText)
+    if (errorJson.detail?.error?.message) return errorJson.detail.error.message
+    if (errorJson.detail?.message) return errorJson.detail.message
+    if (errorJson.message) return errorJson.message
+  } catch {
+    return errorText
+  }
+  return errorText
+}
+
+async function fetchSynthesizedAudio(params: SynthesisParams): Promise<Buffer> {
+  const { text, endpoint, apiKey, voice, model, speed } = params
+  const baseUrl = normalizeToBaseUrl(endpoint)
+  const speechEndpoint = `${baseUrl}/v1/audio/speech`
+  
+  const response = await fetch(speechEndpoint, {
+    method: 'POST',
+    headers: {
+      'Authorization': `Bearer ${apiKey}`,
+      'Content-Type': 'application/json',
+    },
+    body: JSON.stringify({
+      model,
+      voice,
+      input: text,
+      speed,
+      response_format: 'mp3',
+    }),
+  })
+  
+  if (!response.ok) {
+    const errorText = await response.text()
+    logger.error(`TTS API error: ${response.status} - ${errorText}`)
+    const status = response.status >= 400 && response.status < 600 ? response.status as 400 | 500 : 500
+    throw new TTSUpstreamError(status, parseErrorDetails(errorText))
+  }
+  
+  return Buffer.from(await response.arrayBuffer())
+}
+
+function getOrStartSynthesis(cacheKey: string, params: SynthesisParams): Promise<Buffer> {
+  const existing = inFlightSynthesis.get(cacheKey)
+  if (existing) return existing
+  
+  const promise = (async () => {
+    const audioBuffer = await fetchSynthesizedAudio(params)
+    await cacheAudio(cacheKey, audioBuffer)
+    return audioBuffer
+  })()
+  
+  inFlightSynthesis.set(cacheKey, promise)
+  const cleanup = () => inFlightSynthesis.delete(cacheKey)
+  promise.finally(cleanup).catch(() => undefined)
+  return promise
 }
 
 
@@ -272,56 +361,28 @@ export function createTTSRoutes(db: Database) {
       
       logger.info(`TTS cache miss, calling API: ${cacheKey.substring(0, 8)}...`)
       
-      const baseUrl = normalizeToBaseUrl(endpoint)
-      const speechEndpoint = `${baseUrl}/v1/audio/speech`
-      
-      const response = await fetch(speechEndpoint, {
-        method: 'POST',
-        headers: {
-          'Authorization': `Bearer ${apiKey}`,
-          'Content-Type': 'application/json',
-        },
-        body: JSON.stringify({
-          model,
+      let audioBuffer: Buffer
+      try {
+        audioBuffer = await getOrStartSynthesis(cacheKey, {
+          text,
+          endpoint,
+          apiKey,
           voice,
-          input: text,
+          model,
           speed,
-          response_format: 'mp3',
-        }),
-        signal: abortController.signal,
-      })
-      
-      if (!response.ok) {
-        const errorText = await response.text()
-        logger.error(`TTS API error: ${response.status} - ${errorText}`)
-        const status = response.status >= 400 && response.status < 600 ? response.status as 400 | 500 : 500
-        
-        // Try to parse error details for better frontend display
-        let errorDetails = errorText
-        try {
-          const errorJson = JSON.parse(errorText)
-          if (errorJson.detail?.error?.message) {
-            errorDetails = errorJson.detail.error.message
-          } else if (errorJson.detail?.message) {
-            errorDetails = errorJson.detail.message
-          } else if (errorJson.message) {
-            errorDetails = errorJson.message
-          }
-        } catch {
-          // Use raw error text if parsing fails
+        })
+      } catch (error) {
+        if (error instanceof TTSUpstreamError) {
+          return c.json({ 
+            error: 'TTS API request failed', 
+            details: error.details,
+            voice: voice,
+            availableVoices: ttsConfig?.availableVoices || []
+          }, error.status)
         }
-        
-        return c.json({ 
-          error: 'TTS API request failed', 
-          details: errorDetails,
-          voice: voice,
-          availableVoices: ttsConfig?.availableVoices || []
-        }, status)
+        throw error
       }
       
-      const audioBuffer = Buffer.from(await response.arrayBuffer())
-      
-      await cacheAudio(cacheKey, audioBuffer)
       logger.info(`TTS audio cached: ${cacheKey.substring(0, 8)}...`)
       
       return new Response(audioBuffer, {

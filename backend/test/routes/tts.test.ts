@@ -7,6 +7,7 @@ vi.mock('fs/promises', () => ({
   readdir: vi.fn(),
   stat: vi.fn(),
   unlink: vi.fn(),
+  rename: vi.fn(),
 }))
 
 vi.mock('../../src/utils/fs-safe', () => ({
@@ -57,6 +58,7 @@ const mockUnlink = fs.unlink as any
 import { createTTSRoutes, cleanupExpiredCache, getCacheStats, generateCacheKey, ensureCacheDir, getCachedAudio, getCacheSize, cleanupOldestFiles, cacheAudio } from '../../src/routes/tts'
 
 const mockWriteFile = fs.writeFile as any
+const mockRename = (fs as any).rename as any
 
 function createTtsConfig(overrides: Record<string, unknown> = {}) {
   return {
@@ -316,6 +318,9 @@ describe('TTS route handlers', () => {
 
   it('synthesizes and caches audio on a cache miss', async () => {
     mockStat.mockRejectedValue(new Error('not found'))
+    mockReaddir.mockResolvedValue([] as any)
+    mockWriteFile.mockResolvedValue(undefined)
+    mockRename.mockResolvedValue(undefined)
     const fetchMock = vi.fn().mockResolvedValue({
       ok: true,
       arrayBuffer: async () => Buffer.from('fresh-audio'),
@@ -339,9 +344,53 @@ describe('TTS route handlers', () => {
       }),
     )
     expect(mockWriteFile).toHaveBeenCalledWith(
-      expect.stringContaining('.mp3'),
+      expect.stringMatching(/\.tmp$/),
       expect.any(Buffer),
     )
+    expect(mockRename).toHaveBeenCalledWith(
+      expect.stringMatching(/\.tmp$/),
+      expect.stringContaining('.mp3'),
+    )
+  })
+
+  it('deduplicates concurrent synthesis requests for the same text', async () => {
+    mockStat.mockRejectedValue(new Error('not found'))
+    mockReaddir.mockResolvedValue([] as any)
+    mockWriteFile.mockResolvedValue(undefined)
+    mockRename.mockResolvedValue(undefined)
+
+    let resolveFetch: ((value: { ok: boolean; arrayBuffer: () => Promise<Buffer> }) => void) | undefined
+    const fetchMock = vi.fn().mockImplementation(
+      () => new Promise((resolve) => {
+        resolveFetch = resolve
+      }),
+    )
+    vi.stubGlobal('fetch', fetchMock)
+
+    const request = () => app.request('/synthesize', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ text: 'Hello' }),
+    })
+
+    const first = request()
+    const second = request()
+
+    await new Promise((resolve) => setTimeout(resolve, 0))
+    expect(fetchMock).toHaveBeenCalledTimes(1)
+
+    resolveFetch!({
+      ok: true,
+      arrayBuffer: async () => Buffer.from('shared-audio'),
+    })
+
+    const [firstRes, secondRes] = await Promise.all([first, second])
+
+    expect(fetchMock).toHaveBeenCalledTimes(1)
+    expect(firstRes.status).toBe(200)
+    expect(secondRes.status).toBe(200)
+    expect(Buffer.from(await firstRes.arrayBuffer()).toString()).toBe('shared-audio')
+    expect(Buffer.from(await secondRes.arrayBuffer()).toString()).toBe('shared-audio')
   })
 
   it('returns the upstream error details when synthesis fails', async () => {
@@ -463,13 +512,18 @@ describe('cacheAudio', () => {
     mockStat.mockResolvedValue({ size: 200 * 1024 * 1024, mtimeMs: 1000 } as any)
     mockUnlink.mockResolvedValue(undefined)
     mockWriteFile.mockResolvedValue(undefined)
+    mockRename.mockResolvedValue(undefined)
 
     await cacheAudio('cache-key', Buffer.from('audio'))
 
     expect(mockUnlink).toHaveBeenCalledWith(expect.stringContaining('big.mp3'))
     expect(mockWriteFile).toHaveBeenCalledWith(
-      expect.stringContaining('cache-key.mp3'),
+      expect.stringMatching(/\.tmp$/),
       expect.any(Buffer),
+    )
+    expect(mockRename).toHaveBeenCalledWith(
+      expect.stringMatching(/\.tmp$/),
+      expect.stringContaining('cache-key.mp3'),
     )
   })
 
@@ -477,13 +531,46 @@ describe('cacheAudio', () => {
     mockReaddir.mockResolvedValue(['small.mp3'] as any)
     mockStat.mockResolvedValue({ size: 1024, mtimeMs: 1000 } as any)
     mockWriteFile.mockResolvedValue(undefined)
+    mockRename.mockResolvedValue(undefined)
 
     await cacheAudio('cache-key', Buffer.from('audio'))
 
     expect(mockUnlink).not.toHaveBeenCalled()
     expect(mockWriteFile).toHaveBeenCalledWith(
-      expect.stringContaining('cache-key.mp3'),
+      expect.stringMatching(/\.tmp$/),
       expect.any(Buffer),
     )
+    expect(mockRename).toHaveBeenCalledWith(
+      expect.stringMatching(/\.tmp$/),
+      expect.stringContaining('cache-key.mp3'),
+    )
+  })
+
+  it('writes to a unique temp path and renames it to the final .mp3 path', async () => {
+    mockReaddir.mockResolvedValue([] as any)
+    mockWriteFile.mockResolvedValue(undefined)
+    mockRename.mockResolvedValue(undefined)
+
+    await cacheAudio('cache-key', Buffer.from('audio'))
+
+    const [writtenPath] = mockWriteFile.mock.calls[0]
+    const [renamedFrom, renamedTo] = mockRename.mock.calls[0]
+
+    expect(writtenPath).toContain('cache-key.')
+    expect(writtenPath).toMatch(/\.tmp$/)
+    expect(writtenPath).not.toContain('.mp3')
+    expect(renamedFrom).toBe(writtenPath)
+    expect(renamedTo).toContain('cache-key.mp3')
+  })
+
+  it('removes the temp file and rethrows when the rename fails', async () => {
+    mockReaddir.mockResolvedValue([] as any)
+    mockWriteFile.mockResolvedValue(undefined)
+    mockRename.mockRejectedValue(new Error('rename failed'))
+    mockUnlink.mockResolvedValue(undefined)
+
+    await expect(cacheAudio('cache-key', Buffer.from('audio'))).rejects.toThrow('rename failed')
+
+    expect(mockUnlink).toHaveBeenCalledWith(expect.stringMatching(/\.tmp$/))
   })
 })
