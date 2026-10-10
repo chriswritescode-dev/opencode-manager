@@ -55,7 +55,7 @@ const mockReaddir = fs.readdir as any
 const mockStat = fs.stat as any
 const mockUnlink = fs.unlink as any
 
-import { createTTSRoutes, cleanupExpiredCache, getCacheStats, generateCacheKey, ensureCacheDir, getCachedAudio, getCacheSize, cleanupOldestFiles, cacheAudio } from '../../src/routes/tts'
+import { createTTSRoutes, cleanupExpiredCache, getCacheStats, generateCacheKey, ensureCacheDir, getCachedAudio, getCacheSize, cleanupOldestFiles, cacheAudio, clearCache } from '../../src/routes/tts'
 
 const mockWriteFile = fs.writeFile as any
 const mockRename = (fs as any).rename as any
@@ -91,24 +91,109 @@ describe('TTS Routes', () => {
   })
 
   describe('generateCacheKey', () => {
+    const params = {
+      text: 'Hello world',
+      endpoint: 'https://tts.example.com',
+      apiKey: 'test-api-key',
+      voice: 'alloy',
+      model: 'tts-1',
+      speed: 1.0,
+    }
+
     it('should generate consistent cache keys for identical inputs', () => {
-      const text = 'Hello world'
-      const voice = 'alloy'
-      const model = 'tts-1'
-      const speed = 1.0
-      
-      const key1 = generateCacheKey(text, voice, model, speed)
-      const key2 = generateCacheKey(text, voice, model, speed)
-      
+      const key1 = generateCacheKey(params)
+      const key2 = generateCacheKey({ ...params })
+
       expect(key1).toBe(key2)
       expect(key1).toMatch(/^[a-f0-9]{64}$/)
     })
 
-    it('should generate different cache keys for different inputs', () => {
-      const key1 = generateCacheKey('Hello', 'alloy', 'tts-1', 1.0)
-      const key2 = generateCacheKey('World', 'alloy', 'tts-1', 1.0)
-      
+    it('should generate different cache keys for different text', () => {
+      expect(generateCacheKey(params)).not.toBe(generateCacheKey({ ...params, text: 'Other' }))
+    })
+
+    it('should generate different cache keys for different voices', () => {
+      expect(generateCacheKey(params)).not.toBe(generateCacheKey({ ...params, voice: 'echo' }))
+    })
+
+    it('should generate different cache keys for different models', () => {
+      expect(generateCacheKey(params)).not.toBe(generateCacheKey({ ...params, model: 'tts-1-hd' }))
+    })
+
+    it('should generate different cache keys for different speeds', () => {
+      expect(generateCacheKey(params)).not.toBe(generateCacheKey({ ...params, speed: 1.5 }))
+    })
+
+    it('should generate different cache keys for different api keys', () => {
+      expect(generateCacheKey(params)).not.toBe(generateCacheKey({ ...params, apiKey: 'other-api-key' }))
+    })
+
+    it('should generate different cache keys for different endpoints', () => {
+      expect(generateCacheKey(params)).not.toBe(generateCacheKey({ ...params, endpoint: 'https://other.example.com' }))
+    })
+
+    it('should normalize endpoints so trailing slashes share a key', () => {
+      expect(generateCacheKey(params)).toBe(generateCacheKey({ ...params, endpoint: 'https://tts.example.com/' }))
+    })
+
+    it('should avoid delimiter ambiguity between concatenated fields', () => {
+      const key1 = generateCacheKey({ ...params, text: 'a', voice: 'b|c' })
+      const key2 = generateCacheKey({ ...params, text: 'a|b', voice: 'c' })
+
       expect(key1).not.toBe(key2)
+    })
+  })
+
+  describe('clearCache', () => {
+    it('should delete every .mp3 file and count them', async () => {
+      mockReaddir.mockResolvedValue(['a.mp3', 'b.mp3'] as any)
+      mockUnlink.mockResolvedValue(undefined)
+
+      const cleared = await clearCache()
+
+      expect(cleared).toBe(2)
+      expect(mockUnlink).toHaveBeenCalledTimes(2)
+      expect(mockUnlink).toHaveBeenCalledWith(expect.stringContaining('a.mp3'))
+      expect(mockUnlink).toHaveBeenCalledWith(expect.stringContaining('b.mp3'))
+    })
+
+    it('should tolerate a missing cache directory', async () => {
+      mockReaddir.mockRejectedValue(Object.assign(new Error('missing'), { code: 'ENOENT' }))
+
+      const cleared = await clearCache()
+
+      expect(cleared).toBe(0)
+      expect(mockUnlink).not.toHaveBeenCalled()
+    })
+
+    it('should tolerate a file removed by a race and keep clearing the rest', async () => {
+      mockReaddir.mockResolvedValue(['gone.mp3', 'present.mp3'] as any)
+      mockUnlink
+        .mockRejectedValueOnce(Object.assign(new Error('gone'), { code: 'ENOENT' }))
+        .mockResolvedValueOnce(undefined)
+
+      const cleared = await clearCache()
+
+      expect(cleared).toBe(1)
+      expect(mockUnlink).toHaveBeenCalledTimes(2)
+    })
+
+    it('should throw unexpected filesystem errors', async () => {
+      mockReaddir.mockResolvedValue(['a.mp3'] as any)
+      mockUnlink.mockRejectedValue(Object.assign(new Error('denied'), { code: 'EACCES' }))
+
+      await expect(clearCache()).rejects.toThrow('denied')
+    })
+
+    it('should leave .tmp and unrelated files untouched', async () => {
+      mockReaddir.mockResolvedValue(['a.mp3', 'pending.tmp', 'notes.txt'] as any)
+      mockUnlink.mockResolvedValue(undefined)
+
+      const cleared = await clearCache()
+
+      expect(cleared).toBe(1)
+      expect(mockUnlink).toHaveBeenCalledTimes(1)
+      expect(mockUnlink).toHaveBeenCalledWith(expect.stringContaining('a.mp3'))
     })
   })
 
@@ -416,6 +501,85 @@ describe('TTS route handlers', () => {
     expect(Buffer.from(await secondRes.arrayBuffer()).toString()).toBe('shared-audio')
   })
 
+  it('does not share an in-flight synthesis across different endpoints or API keys', async () => {
+    mockStat.mockRejectedValue(new Error('not found'))
+    mockReaddir.mockResolvedValue([] as any)
+    mockWriteFile.mockResolvedValue(undefined)
+    mockRename.mockResolvedValue(undefined)
+    mockGetSettings.mockImplementation((userId: string) => ({
+      preferences: {
+        tts: createTtsConfig(
+          userId === 'first'
+            ? { endpoint: 'https://first.example.com', apiKey: 'first-key' }
+            : { endpoint: 'https://second.example.com', apiKey: 'second-key' },
+        ),
+      },
+    }))
+
+    const resolvers: Array<(value: { ok: boolean; arrayBuffer: () => Promise<Buffer> }) => void> = []
+    const fetchMock = vi.fn().mockImplementation(
+      () => new Promise((resolve) => {
+        resolvers.push(resolve)
+      }),
+    )
+    vi.stubGlobal('fetch', fetchMock)
+
+    const request = (userId: string) => app.request('/synthesize?userId=' + userId, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ text: 'Isolated text' }),
+    })
+
+    const first = request('first')
+    const second = request('second')
+
+    await new Promise((resolve) => setTimeout(resolve, 0))
+    expect(fetchMock).toHaveBeenCalledTimes(2)
+
+    resolvers[0]!({ ok: true, arrayBuffer: async () => Buffer.from('first-audio') })
+    resolvers[1]!({ ok: true, arrayBuffer: async () => Buffer.from('second-audio') })
+
+    const [firstRes, secondRes] = await Promise.all([first, second])
+
+    expect(firstRes.status).toBe(200)
+    expect(secondRes.status).toBe(200)
+    expect(Buffer.from(await firstRes.arrayBuffer()).toString()).toBe('first-audio')
+    expect(Buffer.from(await secondRes.arrayBuffer()).toString()).toBe('second-audio')
+  })
+
+  it('isolates the disk cache across providers for identical text', async () => {
+    mockStat.mockRejectedValue(new Error('not found'))
+    mockReaddir.mockResolvedValue([] as any)
+    mockWriteFile.mockResolvedValue(undefined)
+    mockRename.mockResolvedValue(undefined)
+    mockGetSettings.mockImplementation((userId: string) => ({
+      preferences: {
+        tts: createTtsConfig(
+          userId === 'first'
+            ? { endpoint: 'https://first.example.com', apiKey: 'first-key' }
+            : { endpoint: 'https://second.example.com', apiKey: 'second-key' },
+        ),
+      },
+    }))
+    vi.stubGlobal('fetch', vi.fn().mockResolvedValue({
+      ok: true,
+      arrayBuffer: async () => Buffer.from('audio'),
+    }))
+
+    const request = (userId: string) => app.request('/synthesize?userId=' + userId, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ text: 'Shared text' }),
+    })
+
+    await request('first')
+    await request('second')
+
+    const statPaths = mockStat.mock.calls.map((call: unknown[]) => call[0] as string)
+    expect(statPaths).toHaveLength(2)
+    expect(statPaths[0]).not.toBe(statPaths[1])
+  })
+
   it('returns the upstream error details when synthesis fails', async () => {
     mockStat.mockRejectedValue(new Error('not found'))
     vi.stubGlobal('fetch', vi.fn().mockResolvedValue({
@@ -541,6 +705,36 @@ describe('TTS route handlers', () => {
       configured: true,
       cache: { count: 1, sizeBytes: 1024, sizeMB: 0, maxSizeMB: 200, ttlHours: 24 },
     })
+  })
+
+  it('clears the cache through the DELETE /cache route', async () => {
+    mockReaddir.mockResolvedValue(['a.mp3', 'b.mp3', 'pending.tmp'] as any)
+    mockUnlink.mockResolvedValue(undefined)
+
+    const res = await app.request('/cache', { method: 'DELETE' })
+
+    expect(res.status).toBe(200)
+    expect(await res.json()).toEqual({ cleared: 2 })
+    expect(mockUnlink).toHaveBeenCalledTimes(2)
+  })
+
+  it('returns zero when the cache directory is missing', async () => {
+    mockReaddir.mockRejectedValue(Object.assign(new Error('missing'), { code: 'ENOENT' }))
+
+    const res = await app.request('/cache', { method: 'DELETE' })
+
+    expect(res.status).toBe(200)
+    expect(await res.json()).toEqual({ cleared: 0 })
+  })
+
+  it('returns 500 when clearing the cache fails unexpectedly', async () => {
+    mockReaddir.mockResolvedValue(['a.mp3'] as any)
+    mockUnlink.mockRejectedValue(Object.assign(new Error('denied'), { code: 'EACCES' }))
+
+    const res = await app.request('/cache', { method: 'DELETE' })
+
+    expect(res.status).toBe(500)
+    expect(await res.json()).toEqual({ error: 'Failed to clear TTS cache' })
   })
 })
 

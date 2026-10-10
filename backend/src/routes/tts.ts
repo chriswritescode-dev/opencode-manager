@@ -24,9 +24,25 @@ const TTSRequestSchema = z.object({
   text: z.string().min(1).max(4096),
 })
 
-function generateCacheKey(text: string, voice: string, model: string, speed: number): string {
+interface SynthesisParams {
+  text: string
+  endpoint: string
+  apiKey: string
+  voice: string
+  model: string
+  speed: number
+}
+
+function generateCacheKey(params: SynthesisParams): string {
   const hash = createHash('sha256')
-  hash.update(`${text}|${voice}|${model}|${speed}`)
+  hash.update(JSON.stringify([
+    params.text,
+    params.voice,
+    params.model,
+    params.speed,
+    normalizeToBaseUrl(params.endpoint),
+    params.apiKey,
+  ]))
   return hash.digest('hex')
 }
 
@@ -117,15 +133,6 @@ async function cacheAudio(cacheKey: string, audioData: Buffer): Promise<void> {
     await unlink(tempPath).catch(() => undefined)
     throw error
   }
-}
-
-interface SynthesisParams {
-  text: string
-  endpoint: string
-  apiKey: string
-  voice: string
-  model: string
-  speed: number
 }
 
 class TTSUpstreamError extends Error {
@@ -322,7 +329,32 @@ export async function getCacheStats(): Promise<{ count: number; sizeBytes: numbe
   }
 }
 
-export { generateCacheKey, ensureCacheDir, getCachedAudio, cacheAudio, getCacheSize, cleanupOldestFiles }
+async function clearCache(): Promise<number> {
+  let files: string[]
+  try {
+    files = await readdir(TTS_CACHE_DIR)
+  } catch (error) {
+    if ((error as NodeJS.ErrnoException).code === 'ENOENT') return 0
+    throw error
+  }
+
+  let cleared = 0
+  for (const file of files) {
+    if (!file.endsWith('.mp3')) continue
+
+    try {
+      await unlink(join(TTS_CACHE_DIR, file))
+      cleared++
+    } catch (error) {
+      if ((error as NodeJS.ErrnoException).code === 'ENOENT') continue
+      throw error
+    }
+  }
+
+  return cleared
+}
+
+export { generateCacheKey, ensureCacheDir, getCachedAudio, cacheAudio, getCacheSize, cleanupOldestFiles, clearCache }
 
 export function createTTSRoutes(db: Database) {
   const app = new Hono()
@@ -353,7 +385,8 @@ export function createTTSRoutes(db: Database) {
       }
       
       const { endpoint, apiKey, voice, model, speed } = ttsConfig
-      const cacheKey = generateCacheKey(text, voice, model, speed)
+      const synthesisParams: SynthesisParams = { text, endpoint, apiKey, voice, model, speed }
+      const cacheKey = generateCacheKey(synthesisParams)
       
       await ensureCacheDir()
       
@@ -376,14 +409,7 @@ export function createTTSRoutes(db: Database) {
       
       let audioBuffer: Buffer
       try {
-        audioBuffer = await getOrStartSynthesis(cacheKey, {
-          text,
-          endpoint,
-          apiKey,
-          voice,
-          model,
-          speed,
-        })
+        audioBuffer = await getOrStartSynthesis(cacheKey, synthesisParams)
       } catch (error) {
         if (error instanceof TTSUpstreamError) {
           return c.json({ 
@@ -509,6 +535,16 @@ export function createTTSRoutes(db: Database) {
         ttlHours: CACHE_TTL_MS / (60 * 60 * 1000)
       }
     })
+  })
+
+  app.delete('/cache', async (c) => {
+    try {
+      const cleared = await clearCache()
+      return c.json({ cleared })
+    } catch (error) {
+      logger.error('TTS cache clear failed:', error)
+      return c.json({ error: 'Failed to clear TTS cache' }, 500)
+    }
   })
 
   return app

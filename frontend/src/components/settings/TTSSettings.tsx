@@ -1,12 +1,13 @@
 import { useEffect, useState, useRef } from 'react'
 import { useForm } from 'react-hook-form'
+import { useMutation } from '@tanstack/react-query'
 import { zodResolver } from '@hookform/resolvers/zod'
 import { z } from 'zod'
 import { useSettings } from '@/hooks/useSettings'
 import { useTTS } from '@/hooks/useTTS'
 import { useTTSModels, useTTSVoices, useTTSDiscovery } from '@/hooks/useTTSDiscovery'
 import { getAvailableVoiceNames, isWebSpeechSupported } from '@/lib/webSpeechSynthesizer'
-import { Loader2, Volume2, XCircle, RefreshCw, MonitorSpeaker, Globe, CheckCircle2 } from 'lucide-react'
+import { Loader2, Volume2, XCircle, RefreshCw, MonitorSpeaker, Globe, CheckCircle2, Trash2 } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import { SquareFill } from '@/components/ui/square-fill'
 import { Input } from '@/components/ui/input'
@@ -14,6 +15,7 @@ import { Switch } from '@/components/ui/switch'
 import { Slider } from '@/components/ui/slider'
 import { Form, FormControl, FormDescription, FormField, FormItem, FormLabel, FormMessage } from '@/components/ui/form'
 import { Combobox } from '@/components/ui/combobox'
+import { ttsApi } from '@/api/tts'
 import { DEFAULT_TTS_CONFIG } from '@/api/types/settings'
 
 const TEST_PHRASE = 'Text to speech is working correctly.'
@@ -240,6 +242,15 @@ export function TTSSettings() {
     stop()
   }
   
+  const clearCacheMutation = useMutation({
+    mutationFn: () => ttsApi.clearCache(),
+  })
+
+  const clearCacheError =
+    clearCacheMutation.error instanceof Error
+      ? clearCacheMutation.error.message
+      : 'Unable to clear the audio cache'
+
   return (
     <div className="bg-card border border-border rounded-lg p-6">
       <div className="flex items-center justify-between mb-6">
@@ -681,6 +692,50 @@ export function TTSSettings() {
               </div>
             </>
           )}
+
+          <div className="flex flex-col gap-3 rounded-lg border border-border p-4 sm:flex-row sm:items-center sm:justify-between">
+            <div className="space-y-0.5">
+              <div className="text-base font-medium">Clear audio cache</div>
+              <p className="text-sm text-muted-foreground">
+                Removes all cached server TTS audio. Audio is regenerated on next use, and active playback or synthesis may repopulate the cache.
+              </p>
+              <p className="text-xs text-muted-foreground">
+                Does not affect model or voice discovery.
+              </p>
+              {clearCacheMutation.isSuccess && (
+                <p role="status" className="text-sm text-success flex items-center gap-1">
+                  <CheckCircle2 className="h-4 w-4" />
+                  Cleared {clearCacheMutation.data?.cleared ?? 0} cached audio file(s).
+                </p>
+              )}
+              {clearCacheMutation.isError && (
+                <p role="alert" className="text-sm text-destructive flex items-center gap-1">
+                  <XCircle className="h-4 w-4" />
+                  Could not clear cached audio: {clearCacheError}. Try again.
+                </p>
+              )}
+            </div>
+            <Button
+              type="button"
+              variant="outline"
+              size="sm"
+              className="self-start sm:self-auto"
+              onClick={() => clearCacheMutation.mutate()}
+              disabled={clearCacheMutation.isPending}
+            >
+              {clearCacheMutation.isPending ? (
+                <>
+                  <Loader2 className="h-4 w-4 animate-spin mr-2" />
+                  Clearing...
+                </>
+              ) : (
+                <>
+                  <Trash2 className="h-4 w-4 mr-2" />
+                  Clear audio cache
+                </>
+              )}
+            </Button>
+          </div>
         </form>
       </Form>
     </div>
