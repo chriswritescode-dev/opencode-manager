@@ -2,7 +2,7 @@ import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
 import { act, renderHook, waitFor } from '@testing-library/react'
 import type { ReactNode } from 'react'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
-import { changeWalkthroughQueryKey, useChangeWalkthrough, useGenerateChangeWalkthrough } from './useChangeWalkthrough'
+import { changeWalkthroughQueryKey, useCancelChangeWalkthrough, useChangeWalkthrough, useGenerateChangeWalkthrough } from './useChangeWalkthrough'
 import { DEFAULT_WALKTHROUGH_SOURCE, walkthroughHunksIdentity } from '@opencode-manager/shared/schemas'
 import type {
   ChangeWalkthrough,
@@ -13,11 +13,13 @@ import type {
 const mocks = vi.hoisted(() => ({
   getChangeWalkthrough: vi.fn(),
   generateChangeWalkthrough: vi.fn(),
+  cancelChangeWalkthrough: vi.fn(),
 }))
 
 vi.mock('@/api/changeWalkthroughs', () => ({
   getChangeWalkthrough: mocks.getChangeWalkthrough,
   generateChangeWalkthrough: mocks.generateChangeWalkthrough,
+  cancelChangeWalkthrough: mocks.cancelChangeWalkthrough,
 }))
 
 const walkthroughForA: ChangeWalkthrough = {
@@ -185,5 +187,32 @@ describe('useChangeWalkthrough', () => {
     })
 
     await waitFor(() => expect(mocks.getChangeWalkthrough).toHaveBeenCalledTimes(4))
+  })
+})
+
+describe('useCancelChangeWalkthrough', () => {
+  beforeEach(() => {
+    vi.clearAllMocks()
+  })
+
+  it('cancels the walkthrough and optimistically clears the generating state', async () => {
+    const queryClient = new QueryClient({ defaultOptions: { queries: { retry: false } } })
+    const queryKey = changeWalkthroughQueryKey('ses_A', 'session')
+    queryClient.setQueryData(queryKey, state({ generating: true }))
+    mocks.cancelChangeWalkthrough.mockResolvedValue(undefined)
+    mocks.getChangeWalkthrough.mockResolvedValue(state({ generating: false }))
+
+    const { result } = renderHook(() => useCancelChangeWalkthrough('ses_A', DEFAULT_WALKTHROUGH_SOURCE), {
+      wrapper: createWrapper(queryClient),
+    })
+
+    await act(async () => {
+      result.current.mutate()
+    })
+
+    expect(mocks.cancelChangeWalkthrough).toHaveBeenCalledWith('ses_A', { kind: 'session' })
+    await waitFor(() => {
+      expect(queryClient.getQueryData<ChangeWalkthroughState>(queryKey)?.generating).toBe(false)
+    })
   })
 })

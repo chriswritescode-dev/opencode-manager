@@ -1,6 +1,6 @@
 import { createContext, memo, useCallback, useContext, useEffect, useRef, useState } from 'react'
 import type { ReactNode, RefObject } from 'react'
-import { ChevronDown, ChevronLeft, ChevronRight, Loader2, RefreshCw } from 'lucide-react'
+import { ChevronDown, ChevronLeft, ChevronRight, Loader2, RefreshCw, Square } from 'lucide-react'
 import { SideDrawer, SideDrawerHeader } from '@/components/ui/side-drawer'
 import { Button } from '@/components/ui/button'
 import {
@@ -16,7 +16,11 @@ import { Input } from '@/components/ui/input'
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
 import { DiffLines } from '@/components/file-browser/DiffLines'
 import { ScheduleRunMarkdown } from '@/components/schedules/ScheduleRunMarkdown'
-import { useChangeWalkthrough, useGenerateChangeWalkthrough } from '@/hooks/useChangeWalkthrough'
+import {
+  useCancelChangeWalkthrough,
+  useChangeWalkthrough,
+  useGenerateChangeWalkthrough,
+} from '@/hooks/useChangeWalkthrough'
 import { GIT_STATUS_COLORS, GIT_STATUS_LABELS } from '@/lib/git-status-styles'
 import { cn } from '@/lib/utils'
 import {
@@ -33,6 +37,7 @@ import type {
   WalkthroughSource,
   WalkthroughStop,
 } from '@opencode-manager/shared/schemas'
+import { formatOpenCodeModelRef, type ModelRef } from '@opencode-manager/shared/opencode'
 
 interface WalkthroughErrorLike {
   message?: string
@@ -129,6 +134,8 @@ interface ChangesWalkthroughContextValue {
   contextLimitFiles: WalkthroughOmittedFile[]
   generate: () => void
   regenerate: () => void
+  stop: () => void
+  stopping: boolean
   stops: WalkthroughStop[]
   stopIndex: number | null
   selectedStop: WalkthroughStop | null
@@ -251,6 +258,7 @@ interface ChangesWalkthroughProviderProps {
   sessionId: string
   active: boolean
   sourceRequest?: WalkthroughSourceRequest
+  model?: ModelRef | null
   children: ReactNode
 }
 
@@ -259,6 +267,7 @@ export function ChangesWalkthroughProvider({
   sessionId,
   active,
   sourceRequest,
+  model,
   children,
 }: ChangesWalkthroughProviderProps) {
   const [source, setSource] = useState<WalkthroughSource>(DEFAULT_WALKTHROUGH_SOURCE)
@@ -268,6 +277,8 @@ export function ChangesWalkthroughProvider({
   const sourceKey = walkthroughSourceKey(source)
   const stateQuery = useChangeWalkthrough(sessionId, active, source)
   const generate = useGenerateChangeWalkthrough(sessionId, source)
+  const cancel = useCancelChangeWalkthrough(sessionId, source)
+  const stop = useCallback(() => cancel.mutate(), [cancel])
   const resetGenerate = generate.reset
   const [stopIndex, setStopIndex] = useState<number | null>(null)
   const scrollRef = useRef<HTMLDivElement>(null)
@@ -319,6 +330,8 @@ export function ChangesWalkthroughProvider({
     (stop) => stop.status === 'failed' || (stop.status === 'pending' && !generating),
   ).length
 
+  const modelRequest = model ? { model: formatOpenCodeModelRef(model) } : {}
+
   const selectStop = useCallback((index: number | null) => {
     setStopIndex(index)
     scrollRef.current?.scrollTo?.({ top: 0 })
@@ -331,8 +344,10 @@ export function ChangesWalkthroughProvider({
     generating,
     error,
     contextLimitFiles,
-    generate: () => generate.mutate({}),
-    regenerate: () => generate.mutate({ regenerate: true }),
+    generate: () => generate.mutate(modelRequest),
+    regenerate: () => generate.mutate({ ...modelRequest, regenerate: true }),
+    stop,
+    stopping: cancel.isPending,
     stops,
     stopIndex: clampedIndex,
     selectedStop,
@@ -403,6 +418,26 @@ export const ChangesWalkthroughNav = memo(function ChangesWalkthroughNav() {
         <ChevronRight />
       </Button>
     </div>
+  )
+})
+
+export const ChangesWalkthroughStop = memo(function ChangesWalkthroughStop() {
+  const { generating, stopping, stop } = useChangesWalkthrough()
+
+  if (!generating) return null
+
+  return (
+    <Button
+      variant="outline"
+      size="sm"
+      aria-label="Stop generating walkthrough"
+      onClick={stop}
+      disabled={stopping}
+      className="h-7 gap-1 px-2 text-xs"
+    >
+      <Square className="h-3.5 w-3.5" />
+      {stopping ? 'Stopping…' : 'Stop'}
+    </Button>
   )
 })
 
@@ -657,6 +692,7 @@ interface ChangesWalkthroughSheetProps {
   open: boolean
   onOpenChange: (open: boolean) => void
   sourceRequest?: WalkthroughSourceRequest
+  model?: ModelRef | null
 }
 
 /** The walkthrough as a right-side sheet: full screen on mobile, a drawer over the page on desktop. */
@@ -665,18 +701,20 @@ export function ChangesWalkthroughSheet({
   open,
   onOpenChange,
   sourceRequest,
+  model,
 }: ChangesWalkthroughSheetProps) {
   const close = useCallback(() => onOpenChange(false), [onOpenChange])
 
   return (
     <SideDrawer isOpen={open} onClose={close} side="right" widthClass="w-full sm:w-[min(640px,92vw)]" ariaLabel="Change walkthrough">
-      <ChangesWalkthroughProvider key={sessionId} sessionId={sessionId} active={open} sourceRequest={sourceRequest}>
+      <ChangesWalkthroughProvider key={sessionId} sessionId={sessionId} active={open} sourceRequest={sourceRequest} model={model}>
         <SideDrawerHeader
           title="Change walkthrough"
           onClose={close}
           actions={
             <>
               <ChangesWalkthroughSourcePicker />
+              <ChangesWalkthroughStop />
               <ChangesWalkthroughRegenerate />
               <ChangesWalkthroughNav />
             </>

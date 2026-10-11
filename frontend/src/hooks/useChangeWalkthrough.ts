@@ -1,5 +1,5 @@
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
-import { generateChangeWalkthrough, getChangeWalkthrough } from '@/api/changeWalkthroughs'
+import { cancelChangeWalkthrough, generateChangeWalkthrough, getChangeWalkthrough } from '@/api/changeWalkthroughs'
 import { walkthroughHunksIdentity, walkthroughSourceKey } from '@opencode-manager/shared/schemas'
 import type {
   ChangeWalkthrough,
@@ -78,6 +78,26 @@ export function useGenerateChangeWalkthrough(sessionId: string | undefined, sour
     },
     onSuccess: ({ sessionId: targetSessionId, sourceKey: targetSourceKey, state }) => {
       queryClient.setQueryData(changeWalkthroughQueryKey(targetSessionId, targetSourceKey), state)
+    },
+  })
+}
+
+export function useCancelChangeWalkthrough(sessionId: string | undefined, source: WalkthroughSource) {
+  const queryClient = useQueryClient()
+  const sourceKey = walkthroughSourceKey(source)
+
+  return useMutation({
+    mutationFn: async () => {
+      const targetSessionId = sessionId!
+      await cancelChangeWalkthrough(targetSessionId, source)
+      return { sessionId: targetSessionId, sourceKey }
+    },
+    onSuccess: ({ sessionId: targetSessionId, sourceKey: targetSourceKey }) => {
+      const queryKey = changeWalkthroughQueryKey(targetSessionId, targetSourceKey)
+      queryClient.setQueryData<ChangeWalkthroughState>(queryKey, (cached) =>
+        cached ? { ...cached, generating: false, error: null } : cached,
+      )
+      queryClient.invalidateQueries({ queryKey })
     },
   })
 }

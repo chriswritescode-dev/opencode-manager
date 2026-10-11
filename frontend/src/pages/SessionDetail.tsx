@@ -846,6 +846,7 @@ export function SessionDetail() {
           repoDirectory={repoDirectory}
           onSkillLoaded={handleSkillLoaded}
           walkthroughSourceRequest={walkthroughSourceRequest}
+          walkthroughModel={modelRef}
         />
       )}
       </div>
@@ -922,6 +923,7 @@ export function SessionDetail() {
           open={!docked && walkthroughOpen}
           onOpenChange={setWalkthroughOpen}
           sourceRequest={walkthroughSourceRequest}
+          model={modelRef}
         />
       )}
 

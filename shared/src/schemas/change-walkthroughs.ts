@@ -187,6 +187,7 @@ export function walkthroughHunksIdentity(
 export const GenerateChangeWalkthroughRequestSchema = z.object({
   regenerate: z.boolean().optional(),
   source: WalkthroughSourceSchema.optional(),
+  model: z.string().trim().min(1).max(512).optional(),
 });
 
 export type GenerateChangeWalkthroughRequest = z.infer<typeof GenerateChangeWalkthroughRequestSchema>;

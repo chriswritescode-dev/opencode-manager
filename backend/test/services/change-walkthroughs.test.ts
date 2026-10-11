@@ -25,6 +25,7 @@ import { stubLoadedModelCatalog } from '../helpers/stub-opencode-client'
 import { createCommittedRepo, createGitAuthService, createOrigin, cloneOrigin, git, uniqueName } from '../helpers/git-fixtures'
 import {
   ChangeWalkthroughService,
+  WalkthroughCancelledError,
   buildWalkthroughInput,
   buildWalkthroughOutline,
   buildWalkthroughPlanPrompt,
@@ -41,6 +42,33 @@ import {
 import { ChangeWalkthroughError } from '../../src/services/change-walkthrough-error'
 
 const SESSION_ID = 'ses_walkthrough'
+
+function abortable<T>(promise: Promise<T>, signal?: AbortSignal): Promise<T> {
+  if (!signal) return promise
+  if (signal.aborted) return Promise.reject(new DOMException('Aborted', 'AbortError'))
+  return new Promise<T>((resolve, reject) => {
+    const onAbort = () => reject(new DOMException('Aborted', 'AbortError'))
+    signal.addEventListener('abort', onAbort, { once: true })
+    promise.then(
+      (value) => {
+        signal.removeEventListener('abort', onAbort)
+        resolve(value)
+      },
+      (error) => {
+        signal.removeEventListener('abort', onAbort)
+        reject(error)
+      },
+    )
+  })
+}
+
+function createDeferred<T>(): { promise: Promise<T>; resolve: (value: T) => void } {
+  let resolve!: (value: T) => void
+  const promise = new Promise<T>((res) => {
+    resolve = res
+  })
+  return { promise, resolve }
+}
 
 function userMessage(id: string): SessionMessageInfo {
   return { id, type: 'user', time: { created: 0 }, text: id } as SessionMessageInfo
@@ -185,10 +213,10 @@ function createFakeClient(sessions: Record<string, FakeSession>) {
         }),
       },
       generate: {
-        text: vi.fn(async (input: { prompt: string; model?: ModelRef }) => {
+        text: vi.fn(async (input: { prompt: string; model?: ModelRef }, options?: { signal?: AbortSignal }) => {
           generateCalls.push(input.prompt)
           generateModels.push(input.model)
-          return { text: await generateImpl(input.prompt) }
+          return { text: await abortable(generateImpl(input.prompt), options?.signal) }
         }),
       },
     },
@@ -1238,6 +1266,28 @@ describe('ChangeWalkthroughService', () => {
     expect(fake.generateModels[0]).toEqual({ providerID: 'anthropic', id: 'claude-sonnet-4' })
   })
 
+  it('uses the request model over the session model', async () => {
+    sessions[SESSION_ID]!.info = {
+      id: SESSION_ID,
+      title: 'Title',
+      model: { providerID: 'anthropic', id: 'claude-sonnet-4' },
+    } as SessionInfo
+    fake.setGenerateImpl(async () => modelReply([{ title: 'A', explanation: 'x', hunkIds: THREE_HUNK_IDS }]))
+
+    await service.generate(SESSION_ID, { model: 'openai/gpt-5-mini' })
+
+    expect(fake.generateModels[0]).toEqual({ providerID: 'openai', id: 'gpt-5-mini' })
+  })
+
+  it('prefers the walkthrough model preference over the request model', async () => {
+    new SettingsService(db).updateSettings({ walkthroughModel: 'openai/gpt-5' })
+    fake.setGenerateImpl(async () => modelReply([{ title: 'A', explanation: 'x', hunkIds: THREE_HUNK_IDS }]))
+
+    await service.generate(SESSION_ID, { model: 'anthropic/claude-sonnet-4' })
+
+    expect(fake.generateModels[0]).toEqual({ providerID: 'openai', id: 'gpt-5' })
+  })
+
   it('reuses the resolved default model for every stop', async () => {
     sessions[SESSION_ID]!.changes = LARGE_CHANGES
     fake.setGenerateImpl((prompt) =>
@@ -2278,6 +2328,141 @@ describe('ChangeWalkthroughService', () => {
       await saturator
       await expect(victimRun).rejects.toMatchObject({ status: 404 })
       expect(victimExplainStarted).toBe(1)
+    })
+  })
+
+  describe('cancelGeneration', () => {
+    it('stops a pending generation without recording an error', async () => {
+      fake.setGenerateImpl(() => new Promise<string>(() => {}))
+
+      const pending = service.generate(SESSION_ID, {})
+      await vi.waitFor(() => expect(fake.generateCalls).toHaveLength(1))
+
+      expect(service.cancelGeneration(SESSION_ID)).toBe(true)
+      await expect(pending).rejects.toBeInstanceOf(WalkthroughCancelledError)
+
+      const state = await service.getState(SESSION_ID)
+      expect(state.generating).toBe(false)
+      expect(state.error).toBeNull()
+    })
+
+    it('returns false when nothing is generating', () => {
+      expect(service.cancelGeneration(SESSION_ID)).toBe(false)
+    })
+
+    it('keeps explained stops and persists the partial walkthrough', async () => {
+      sessions[SESSION_ID]!.changes = LARGE_CHANGES
+      fake.setGenerateImpl((prompt) => {
+        if (prompt.includes(PLAN_MARKER)) {
+          return Promise.resolve(LARGE_PLAN_REPLY)
+        }
+        return new Promise<string>(() => {})
+      })
+
+      const pending = service.generate(SESSION_ID, {})
+
+      await vi.waitFor(async () => {
+        const state = await service.getState(SESSION_ID)
+        expect(state.generating).toBe(true)
+        expect(state.walkthrough?.stops).toHaveLength(3)
+        expect(state.walkthrough?.stops.every((stop) => stop.status === 'pending')).toBe(true)
+      })
+
+      expect(service.cancelGeneration(SESSION_ID)).toBe(true)
+
+      await vi.waitFor(async () => {
+        expect((await service.getState(SESSION_ID)).generating).toBe(false)
+      })
+
+      const state = await service.getState(SESSION_ID)
+      expect(state.error).toBeNull()
+      const stored = getChangeWalkthrough(db, SESSION_ID, 'session')
+      expect(stored).not.toBeNull()
+      expect(stored!.stops.every((stop) => stop.status === 'pending')).toBe(true)
+
+      await pending
+    })
+
+    it('aborts only the requested source', async () => {
+      fake.setGenerateImpl(() => new Promise<string>(() => {}))
+
+      const pending = service.generate(SESSION_ID, {})
+      await vi.waitFor(() => expect(fake.generateCalls).toHaveLength(1))
+
+      expect(service.cancelGeneration(SESSION_ID, { kind: 'staged' })).toBe(false)
+      expect((await service.getState(SESSION_ID)).generating).toBe(true)
+
+      expect(service.cancelGeneration(SESSION_ID)).toBe(true)
+      await expect(pending).rejects.toBeInstanceOf(WalkthroughCancelledError)
+    })
+  })
+
+  describe('cancellation before the model call', () => {
+    it('does not persist a mechanical-only walkthrough cancelled during the changes read', async () => {
+      sessions[SESSION_ID]!.info = {
+        id: SESSION_ID,
+        title: 'Title',
+        model: { providerID: 'anthropic', id: 'claude-sonnet-4' },
+      } as SessionInfo
+      fake.setGenerateImpl(async () => modelReply([{ title: 'A', explanation: 'x', hunkIds: THREE_HUNK_IDS }]))
+      const previous = await service.generate(SESSION_ID, {})
+      expect(previous.created).toBe(true)
+
+      const mechanical = [change('pnpm-lock.yaml', hunkPatch(1))]
+      sessions[SESSION_ID]!.changes = mechanical
+      const diff = createDeferred<FileDiffInfo[]>()
+      const diffMock = vi.mocked(fake.client.api.session.diff)
+      diffMock.mockImplementationOnce(() => diff.promise)
+
+      const pending = service.generate(SESSION_ID, {})
+      await vi.waitFor(() => expect(diffMock).toHaveBeenCalledTimes(2))
+
+      expect(service.cancelGeneration(SESSION_ID)).toBe(true)
+      diff.resolve(mechanical)
+
+      await expect(pending).rejects.toBeInstanceOf(WalkthroughCancelledError)
+      expect(fake.generateCalls).toHaveLength(1)
+      expect(getChangeWalkthrough(db, SESSION_ID, 'session')).toEqual(previous.walkthrough)
+    })
+
+    it('cancels while resolving the preferred model without persisting the mechanical-only changes', async () => {
+      sessions[SESSION_ID]!.info = {
+        id: SESSION_ID,
+        title: 'Title',
+        model: { providerID: 'anthropic', id: 'claude-sonnet-4' },
+      } as SessionInfo
+      sessions[SESSION_ID]!.changes = [change('pnpm-lock.yaml', hunkPatch(1))]
+
+      const config = createDeferred<Awaited<ReturnType<typeof fake.client.api.config.get>>>()
+      const configMock = vi.mocked(fake.client.api.config.get)
+      configMock.mockImplementationOnce(() => config.promise)
+
+      const pending = service.generate(SESSION_ID, {})
+      await vi.waitFor(() => expect(configMock).toHaveBeenCalledTimes(1))
+
+      expect(service.cancelGeneration(SESSION_ID)).toBe(true)
+      config.resolve([])
+
+      await expect(pending).rejects.toBeInstanceOf(WalkthroughCancelledError)
+      expect(fake.generateCalls).toHaveLength(0)
+      expect(getChangeWalkthrough(db, SESSION_ID, 'session')).toBeNull()
+      expect((await service.getState(SESSION_ID)).error).toBeNull()
+    })
+
+    it('cancels while resolving the default model without a 502 failure', async () => {
+      const config = createDeferred<Awaited<ReturnType<typeof fake.client.api.config.get>>>()
+      const configMock = vi.mocked(fake.client.api.config.get)
+      configMock.mockImplementationOnce(() => config.promise)
+
+      const pending = service.generate(SESSION_ID, {})
+      await vi.waitFor(() => expect(configMock).toHaveBeenCalledTimes(1))
+
+      expect(service.cancelGeneration(SESSION_ID)).toBe(true)
+      config.resolve([])
+
+      await expect(pending).rejects.toBeInstanceOf(WalkthroughCancelledError)
+      expect(fake.generateCalls).toHaveLength(0)
+      expect((await service.getState(SESSION_ID)).error).toBeNull()
     })
   })
 })

@@ -673,12 +673,20 @@ interface InFlightGeneration {
   modelStarted: Promise<void>
   result: Promise<{ walkthrough: ChangeWalkthrough; created: boolean }>
   walkthrough: ChangeWalkthrough | null
+  controller: AbortController
 }
 
 class WalkthroughCallSkippedError extends Error {
   constructor() {
     super('Walkthrough model call skipped')
     this.name = 'WalkthroughCallSkippedError'
+  }
+}
+
+export class WalkthroughCancelledError extends Error {
+  constructor() {
+    super('Walkthrough generation stopped')
+    this.name = 'WalkthroughCancelledError'
   }
 }
 
@@ -812,8 +820,33 @@ export class ChangeWalkthroughService {
 
   async startGeneration(sessionId: string, request: GenerateChangeWalkthroughRequest): Promise<ChangeWalkthroughStateWire> {
     const entry = this.begin(sessionId, request)
-    await Promise.race([entry.modelStarted, entry.result])
+    try {
+      await Promise.race([entry.modelStarted, entry.result])
+    } catch (error) {
+      if (!(error instanceof WalkthroughCancelledError)) {
+        throw error
+      }
+    }
     return this.getState(sessionId, request.source ?? DEFAULT_WALKTHROUGH_SOURCE)
+  }
+
+  /**
+   * Stops an in-flight generation for a session and source. The in-flight entry is removed
+   * synchronously so the next read reports `generating: false`, the partial walkthrough is
+   * persisted, and the abort signal stops the model calls that are still running.
+   */
+  cancelGeneration(sessionId: string, source: WalkthroughSource = DEFAULT_WALKTHROUGH_SOURCE): boolean {
+    const key = entryKey(sessionId, source)
+    const entry = this.inFlight.get(key)
+    if (!entry) {
+      return false
+    }
+    this.inFlight.delete(key)
+    if (entry.walkthrough) {
+      this.saveIfSessionLive(entry.walkthrough)
+    }
+    entry.controller.abort()
+    return true
   }
 
   /** Removes the stored walkthroughs of a deleted session, including one still being generated. */
@@ -910,18 +943,20 @@ export class ChangeWalkthroughService {
       resolveModelStarted()
     }
 
-    const entry = { modelStarted, walkthrough: null } as InFlightGeneration
+    const entry = { modelStarted, walkthrough: null, controller: new AbortController() } as InFlightGeneration
     this.inFlight.set(key, entry)
 
-    entry.result = this.runGenerate(sessionId, source, request, markModelStarted, entry)
+    entry.result = this.runGenerate(sessionId, source, request, markModelStarted, entry, entry.controller.signal)
       .catch((error) => {
-        if (modelCalled) {
+        if (modelCalled && !(error instanceof WalkthroughCancelledError)) {
           this.failures.set(key, toGenerationError(error))
         }
         throw error
       })
       .finally(() => {
-        this.inFlight.delete(key)
+        if (this.inFlight.get(key) === entry) {
+          this.inFlight.delete(key)
+        }
         this.deletedDuringGeneration.delete(key)
         this.invalidateCurrentHash(key)
       })
@@ -953,18 +988,27 @@ export class ChangeWalkthroughService {
     }
   }
 
+  private throwIfCancelled(signal: AbortSignal): void {
+    if (signal.aborted) {
+      throw new WalkthroughCancelledError()
+    }
+  }
+
   private async runGenerate(
     sessionId: string,
     source: WalkthroughSource,
     request: GenerateChangeWalkthroughRequest,
     onModelStart: () => void,
     entry: InFlightGeneration,
+    signal: AbortSignal,
   ): Promise<{ walkthrough: ChangeWalkthrough; created: boolean }> {
     const session = await this.readSession(sessionId)
+    this.throwIfCancelled(signal)
     const key = entryKey(sessionId, source)
 
     if (source.kind === 'pullRequest') {
       await this.fetchPullRequestChanges(session, source)
+      this.throwIfCancelled(signal)
     }
 
     let changes: FileDiffInfo[]
@@ -983,6 +1027,7 @@ export class ChangeWalkthroughService {
         code: 'WALKTHROUGH_CHANGES_UNAVAILABLE',
       })
     }
+    this.throwIfCancelled(signal)
 
     if (changes.length === 0) {
       throw new ChangeWalkthroughError(noChangesMessage(source), 409, {
@@ -1001,7 +1046,7 @@ export class ChangeWalkthroughService {
         return { walkthrough: previous, created: false }
       }
 
-      const model = await this.resolveWalkthroughModel(session)
+      const model = await this.resolveWalkthroughModel(session, request.model, signal)
       const storedModel = formatOpenCodeModelRef(model)
       const resumingStops = previous.stops.map((stop) =>
         stop.status === 'ready' ? stop : { ...stop, status: 'pending' as const },
@@ -1021,6 +1066,7 @@ export class ChangeWalkthroughService {
         resuming,
         onModelStart,
         entry,
+        signal,
       )
       if (this.deletedDuringGeneration.has(key)) {
         throw new ChangeWalkthroughError('Session not found', 404)
@@ -1028,7 +1074,7 @@ export class ChangeWalkthroughService {
       return { walkthrough: resumed, created: true }
     }
 
-    const model = await this.resolveWalkthroughModel(session)
+    const model = await this.resolveWalkthroughModel(session, request.model, signal)
     const modelKey = computeModelKey(model)
     const storedModel = formatOpenCodeModelRef(model)
 
@@ -1048,6 +1094,7 @@ export class ChangeWalkthroughService {
       hunks: WalkthroughHunk[]
       omittedFiles: WalkthroughOmittedFile[]
     }): ChangeWalkthrough => {
+      this.throwIfCancelled(signal)
       const walkthrough: ChangeWalkthrough = {
         sessionId,
         source,
@@ -1110,8 +1157,11 @@ export class ChangeWalkthroughService {
       const prompt = buildWalkthroughPrompt({ title, hunks })
       onModelStart()
 
-      const parsed = await this.callModelParsed(prompt, model, (text) =>
-        parseWalkthroughResponse(text, hunks),
+      const parsed = await this.callModelParsed(
+        prompt,
+        model,
+        (text) => parseWalkthroughResponse(text, hunks),
+        signal,
       )
 
       const stops = parsed.stops.map((stop) => applySingleCallKeys(stop, modelKey))
@@ -1138,8 +1188,11 @@ export class ChangeWalkthroughService {
     })
     onModelStart()
 
-    const planned = await this.callModelParsed(planPrompt, model, (text) =>
-      parseWalkthroughPlan(text, outline.hunks),
+    const planned = await this.callModelParsed(
+      planPrompt,
+      model,
+      (text) => parseWalkthroughPlan(text, outline.hunks),
+      signal,
     )
 
     const stops = planned.stops.map((stop) => applyReuse(stop, reusable, modelKey))
@@ -1162,6 +1215,7 @@ export class ChangeWalkthroughService {
         walkthrough,
         onModelStart,
         entry,
+        signal,
       )
     }
 
@@ -1181,6 +1235,7 @@ export class ChangeWalkthroughService {
     walkthrough: ChangeWalkthrough,
     onModelStart: () => void,
     entry: InFlightGeneration,
+    signal: AbortSignal,
   ): Promise<ChangeWalkthrough> {
     const modelKey = computeModelKey(model)
     const key = entryKey(walkthrough.sessionId, walkthrough.source)
@@ -1189,6 +1244,9 @@ export class ChangeWalkthroughService {
     let current = walkthrough
 
     await mapWithConcurrency(stops, WALKTHROUGH_EXPLAIN_CONCURRENCY, async (stop) => {
+      if (signal.aborted) {
+        return
+      }
       const explainPrompt = buildWalkthroughExplainPrompt({ title, summary, stop, hunks })
       onModelStart()
 
@@ -1198,6 +1256,7 @@ export class ChangeWalkthroughService {
           explainPrompt,
           model,
           parseWalkthroughExplanation,
+          signal,
           () => this.deletedDuringGeneration.has(key),
         )
         explained = {
@@ -1207,13 +1266,16 @@ export class ChangeWalkthroughService {
           explanationKey: computeExplanationKey(modelKey, stop.hunkIds),
         }
       } catch (error) {
-        if (error instanceof WalkthroughCallSkippedError) {
+        if (error instanceof WalkthroughCallSkippedError || error instanceof WalkthroughCancelledError) {
           return
         }
         logger.warn('Failed to explain a change walkthrough stop', getErrorMessage(error))
         explained = { ...stop, status: 'failed' }
       }
 
+      if (signal.aborted) {
+        return
+      }
       current = this.replaceStop(current, explained)
       entry.walkthrough = current
       completed += 1
@@ -1229,22 +1291,32 @@ export class ChangeWalkthroughService {
     prompt: string,
     model: ModelRef,
     parse: (text: string) => T | null,
+    signal: AbortSignal,
     shouldSkip?: () => boolean,
   ): Promise<T> {
     let lastError = new ChangeWalkthroughError('Failed to generate the change walkthrough', 502)
 
     for (let attempt = 0; attempt < WALKTHROUGH_CALL_ATTEMPTS; attempt += 1) {
+      if (signal.aborted) {
+        throw new WalkthroughCancelledError()
+      }
       let text: string
       try {
         text = await WALKTHROUGH_MODEL_LIMITER.run(() => {
           if (shouldSkip?.()) {
             throw new WalkthroughCallSkippedError()
           }
-          return generateTextWithTimeout(this.openCodeClient, { prompt, model }, this.timeoutMs)
+          if (signal.aborted) {
+            throw new WalkthroughCancelledError()
+          }
+          return generateTextWithTimeout(this.openCodeClient, { prompt, model }, this.timeoutMs, signal)
         })
       } catch (error) {
         if (error instanceof WalkthroughCallSkippedError) {
           throw error
+        }
+        if (error instanceof WalkthroughCancelledError || signal.aborted) {
+          throw new WalkthroughCancelledError()
         }
         lastError =
           error instanceof GenerateTextTimeoutError
@@ -1298,33 +1370,56 @@ export class ChangeWalkthroughService {
   }
 
   /**
-   * Resolves the model for one generation, waiting once for OpenCode's lazily-loaded global catalog so an explicit
-   * walkthrough model is registered before the first call. A failed wait is swallowed because generation proceeds and
-   * lets OpenCode surface its own error; the wait is per generation, never per stop.
+   * Resolves the model for one generation, preferring the configured walkthrough model, then the request model, then
+   * the session model. Waits once for OpenCode's lazily-loaded global catalog so an explicit model is registered before
+   * the first call. A failed wait is swallowed because generation proceeds and lets OpenCode surface its own error; the
+   * wait is per generation, never per stop.
    */
-  private async resolveWalkthroughModel(session: SessionInfo): Promise<ModelRef> {
+  private async resolveWalkthroughModel(
+    session: SessionInfo,
+    requestModel?: string,
+    signal?: AbortSignal,
+  ): Promise<ModelRef> {
     const configured = this.settingsService.getSettings().preferences.walkthroughModel?.trim()
-    const parsed = configured ? parseOpenCodeModelRef(configured) : undefined
-    const preferred = parsed ?? session.model
+    const parsedConfigured = configured ? parseOpenCodeModelRef(configured) : undefined
+    const parsedRequest = requestModel ? parseOpenCodeModelRef(requestModel) : undefined
+    const preferred = parsedConfigured ?? parsedRequest ?? session.model
     if (preferred) {
       try {
         await resolveOpenCodeModel(this.openCodeClient, getOpenCodeGlobalConfigPath(), {
           preferredModel: formatOpenCodeModelRef(preferred),
+          ...(signal ? { signal } : {}),
         })
       } catch {
+        if (signal?.aborted) {
+          throw new WalkthroughCancelledError()
+        }
         return preferred
+      }
+      if (signal?.aborted) {
+        throw new WalkthroughCancelledError()
       }
       return preferred
     }
     let resolved
     try {
-      resolved = await resolveOpenCodeModel(this.openCodeClient, getOpenCodeGlobalConfigPath())
+      resolved = await resolveOpenCodeModel(
+        this.openCodeClient,
+        getOpenCodeGlobalConfigPath(),
+        signal ? { signal } : undefined,
+      )
     } catch (error) {
+      if (signal?.aborted) {
+        throw new WalkthroughCancelledError()
+      }
       throw new ChangeWalkthroughError(
         getErrorMessage(error) || 'Failed to resolve the walkthrough model',
         502,
         { code: 'WALKTHROUGH_MODEL_UNAVAILABLE' },
       )
+    }
+    if (signal?.aborted) {
+      throw new WalkthroughCancelledError()
     }
 
     return resolved.variant
