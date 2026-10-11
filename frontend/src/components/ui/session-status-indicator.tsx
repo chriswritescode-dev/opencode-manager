@@ -1,5 +1,5 @@
 import { memo, useEffect, useState } from 'react'
-import { useSessionStatusForSession, type SessionStatusType } from '@/stores/sessionStatusStore'
+import { useHasBackgroundActivity, useSessionStatusForSession, type SessionStatusType } from '@/stores/sessionStatusStore'
 
 interface SessionStatusIndicatorProps {
   sessionID: string
@@ -18,12 +18,14 @@ export const SessionStatusIndicator = memo(function SessionStatusIndicator({
   showLabel = false
 }: SessionStatusIndicatorProps) {
   const status = useSessionStatusForSession(sessionID)
+  const hasBackground = useHasBackgroundActivity(sessionID)
   const [position, setPosition] = useState(0)
   const [direction, setDirection] = useState(1)
   const [retryCountdown, setRetryCountdown] = useState(0)
+  const backgroundOnly = status.type === 'idle' && hasBackground
   
   useEffect(() => {
-    if (status.type !== 'busy' && status.type !== 'retry' && status.type !== 'compact') {
+    if (status.type === 'idle' && !hasBackground) {
       return
     }
     
@@ -43,7 +45,7 @@ export const SessionStatusIndicator = memo(function SessionStatusIndicator({
     }, 60)
     
     return () => clearInterval(interval)
-  }, [status.type, direction])
+  }, [status.type, hasBackground, direction])
   
   useEffect(() => {
     if (!showLabel || status.type !== 'retry') {
@@ -62,11 +64,11 @@ export const SessionStatusIndicator = memo(function SessionStatusIndicator({
     return () => clearInterval(interval)
   }, [status, showLabel])
   
-  if (status.type === 'idle') {
+  if (status.type === 'idle' && !hasBackground) {
     return null
   }
   
-  const getSegmentColor = (index: number, statusType: SessionStatusType['type']) => {
+  const getSegmentColor = (index: number, statusType: SessionStatusType['type'], background: boolean) => {
     const distance = Math.abs(index - (position + SCANNER_WIDTH / 2))
     const maxDistance = SCANNER_WIDTH / 2
     
@@ -76,6 +78,13 @@ export const SessionStatusIndicator = memo(function SessionStatusIndicator({
     
     const intensity = Math.max(0, 1 - distance / (maxDistance + 2))
     
+    if (background) {
+      if (intensity > 0.8) return 'bg-muted-foreground'
+      if (intensity > 0.5) return 'bg-muted-foreground/70'
+      if (intensity > 0.2) return 'bg-muted-foreground/40'
+      return 'bg-muted-foreground/20'
+    }
+
     if (statusType === 'retry') {
       if (intensity > 0.8) return 'bg-warning'
       if (intensity > 0.5) return 'bg-warning/70'
@@ -100,12 +109,16 @@ export const SessionStatusIndicator = memo(function SessionStatusIndicator({
   const containerGap = showLabel ? 'gap-2' : ''
   
   return (
-    <div className={`flex items-center ${containerGap} ${className}`}>
+    <div
+      className={`flex items-center ${containerGap} ${className}`}
+      title={backgroundOnly ? 'Background tasks running' : undefined}
+      aria-label={backgroundOnly ? 'Background tasks running' : undefined}
+    >
       <div className="flex gap-0.5">
         {Array.from({ length: SCANNER_SEGMENTS }).map((_, i) => (
           <div
             key={i}
-            className={`${segmentClass} rounded-sm transition-colors duration-75 ${getSegmentColor(i, status.type)}`}
+            className={`${segmentClass} rounded-sm transition-colors duration-75 ${getSegmentColor(i, status.type, backgroundOnly)}`}
           />
         ))}
       </div>

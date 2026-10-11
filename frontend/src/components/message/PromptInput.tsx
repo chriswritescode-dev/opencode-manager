@@ -12,6 +12,7 @@ import { useUserBash } from '@/stores/userBashStore'
 import { useSessionAgentStore } from '@/stores/sessionAgentStore'
 import { useSendErrorStore } from '@/stores/sendErrorStore'
 import { useRecentCommandsStore } from '@/stores/recentCommandsStore'
+import { useHasBackgroundActivity } from '@/stores/sessionStatusStore'
 import { useTouchTapSelect } from '@/hooks/useTouchTapSelect'
 import { useMobile } from '@/hooks/useMobile'
 import { FINE_POINTER_MEDIA_QUERY, useMediaQuery } from '@/hooks/useMediaQuery'
@@ -248,6 +249,7 @@ export const PromptInput = memo(forwardRef<PromptInputHandle, PromptInputProps>(
   }, [])
 
   const sessionAgent = useSessionAgent(sessionID, directory)
+  const hasBackgroundActivity = useHasBackgroundActivity(sessionID)
   const currentMode = localMode ?? sessionAgent.agent
   const setStoredAgent = useSessionAgentStore((s) => s.setAgent)
   const sendPrompt = useSendPrompt(directory)
@@ -1540,7 +1542,7 @@ return (
                 <ArrowDown className="w-4 h-4" />
                 <span>Latest</span>
               </button>
-              {isSessionActive && (
+              {(isSessionActive || hasBackgroundActivity) && (
                 <div className="px-2.5 py-1.5 rounded-lg text-xs font-medium text-muted-foreground max-w-[120px]">
                   <SessionStatusIndicator sessionID={sessionID} showLabel />
                 </div>
@@ -1573,7 +1575,7 @@ return (
                   </IconToggleButton>
                 </>
               )}
-              {isSessionActive && (
+              {(isSessionActive || hasBackgroundActivity) && (
                 <div className="px-2.5 py-1.5 md:px-3 md:py-2 rounded-lg text-xs md:text-sm font-medium text-muted-foreground max-w-[120px] md:max-w-[180px]">
                   <SessionStatusIndicator sessionID={sessionID} showLabel />
                 </div>

@@ -1,5 +1,5 @@
 import { beforeEach, describe, expect, it } from 'vitest'
-import { busyStatusesFromActiveSessions, useSessionStatus } from './sessionStatusStore'
+import { busyStatusesFromActiveSessions, hasBackgroundActivity, useSessionStatus } from './sessionStatusStore'
 
 const resetStore = () => {
   useSessionStatus.setState({
@@ -8,6 +8,8 @@ const resetStore = () => {
     statusRevisions: new Map(),
     knownSessions: new Set(),
     outcomes: new Map(),
+    parents: new Map(),
+    runningShells: new Map(),
     revision: 0,
   })
 }
@@ -445,5 +447,63 @@ describe('sessionStatusStore', () => {
     expect(after.statuses.has('child-a')).toBe(false)
     expect(after.knownSessions.has('child-a')).toBe(false)
     expect(after.outcomes.has('child-a')).toBe(false)
+  })
+
+  it('reports background activity when the session owns a running shell', () => {
+    const store = useSessionStatus.getState()
+    store.setShellRunning('shell-1', 'session-a', '/repo')
+
+    expect(hasBackgroundActivity(useSessionStatus.getState(), 'session-a')).toBe(true)
+  })
+
+  it('reports background activity up the parent chain through a busy descendant', () => {
+    const store = useSessionStatus.getState()
+    store.setSessionParent('child', 'parent')
+    store.setSessionParent('parent', 'grandparent')
+    store.setStatus('child', { type: 'busy' })
+
+    expect(hasBackgroundActivity(useSessionStatus.getState(), 'parent')).toBe(true)
+    expect(hasBackgroundActivity(useSessionStatus.getState(), 'grandparent')).toBe(true)
+  })
+
+  it('reports no background activity when children are idle', () => {
+    const store = useSessionStatus.getState()
+    store.setSessionParent('child', 'parent')
+    store.setStatus('child', { type: 'idle' })
+
+    expect(hasBackgroundActivity(useSessionStatus.getState(), 'parent')).toBe(false)
+  })
+
+  it('does not hang on a parent cycle', () => {
+    const store = useSessionStatus.getState()
+    store.setSessionParent('a', 'b')
+    store.setSessionParent('b', 'a')
+
+    expect(hasBackgroundActivity(useSessionStatus.getState(), 'a')).toBe(false)
+  })
+
+  it('replaces running shells only for the given directory', () => {
+    const store = useSessionStatus.getState()
+    store.setShellRunning('shell-a', 'session-a', '/repo-a')
+    store.setShellRunning('shell-b', 'session-b', '/repo-b')
+
+    store.replaceRunningShells('/repo-a', [{ id: 'shell-c', sessionID: 'session-c' }])
+
+    const shells = useSessionStatus.getState().runningShells
+    expect(shells.has('shell-a')).toBe(false)
+    expect(shells.get('shell-c')).toEqual({ sessionID: 'session-c', directory: '/repo-a' })
+    expect(shells.get('shell-b')).toEqual({ sessionID: 'session-b', directory: '/repo-b' })
+  })
+
+  it('forgets a session parent and its running shells', () => {
+    const store = useSessionStatus.getState()
+    store.setSessionParent('child-a', 'parent')
+    store.setShellRunning('shell-1', 'child-a', '/repo')
+
+    store.forgetSession('child-a')
+
+    const after = useSessionStatus.getState()
+    expect(after.parents.has('child-a')).toBe(false)
+    expect(after.runningShells.has('shell-1')).toBe(false)
   })
 })
