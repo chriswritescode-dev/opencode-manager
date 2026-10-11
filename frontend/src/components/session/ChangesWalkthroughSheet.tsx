@@ -37,6 +37,7 @@ import type {
   WalkthroughSource,
   WalkthroughStop,
 } from '@opencode-manager/shared/schemas'
+import { formatOpenCodeModelRef, type ModelRef } from '@opencode-manager/shared/opencode'
 
 interface WalkthroughErrorLike {
   message?: string
@@ -257,6 +258,7 @@ interface ChangesWalkthroughProviderProps {
   sessionId: string
   active: boolean
   sourceRequest?: WalkthroughSourceRequest
+  model?: ModelRef | null
   children: ReactNode
 }
 
@@ -265,6 +267,7 @@ export function ChangesWalkthroughProvider({
   sessionId,
   active,
   sourceRequest,
+  model,
   children,
 }: ChangesWalkthroughProviderProps) {
   const [source, setSource] = useState<WalkthroughSource>(DEFAULT_WALKTHROUGH_SOURCE)
@@ -327,6 +330,8 @@ export function ChangesWalkthroughProvider({
     (stop) => stop.status === 'failed' || (stop.status === 'pending' && !generating),
   ).length
 
+  const modelRequest = model ? { model: formatOpenCodeModelRef(model) } : {}
+
   const selectStop = useCallback((index: number | null) => {
     setStopIndex(index)
     scrollRef.current?.scrollTo?.({ top: 0 })
@@ -339,8 +344,8 @@ export function ChangesWalkthroughProvider({
     generating,
     error,
     contextLimitFiles,
-    generate: () => generate.mutate({}),
-    regenerate: () => generate.mutate({ regenerate: true }),
+    generate: () => generate.mutate(modelRequest),
+    regenerate: () => generate.mutate({ ...modelRequest, regenerate: true }),
     stop,
     stopping: cancel.isPending,
     stops,
@@ -687,6 +692,7 @@ interface ChangesWalkthroughSheetProps {
   open: boolean
   onOpenChange: (open: boolean) => void
   sourceRequest?: WalkthroughSourceRequest
+  model?: ModelRef | null
 }
 
 /** The walkthrough as a right-side sheet: full screen on mobile, a drawer over the page on desktop. */
@@ -695,12 +701,13 @@ export function ChangesWalkthroughSheet({
   open,
   onOpenChange,
   sourceRequest,
+  model,
 }: ChangesWalkthroughSheetProps) {
   const close = useCallback(() => onOpenChange(false), [onOpenChange])
 
   return (
     <SideDrawer isOpen={open} onClose={close} side="right" widthClass="w-full sm:w-[min(640px,92vw)]" ariaLabel="Change walkthrough">
-      <ChangesWalkthroughProvider key={sessionId} sessionId={sessionId} active={open} sourceRequest={sourceRequest}>
+      <ChangesWalkthroughProvider key={sessionId} sessionId={sessionId} active={open} sourceRequest={sourceRequest} model={model}>
         <SideDrawerHeader
           title="Change walkthrough"
           onClose={close}

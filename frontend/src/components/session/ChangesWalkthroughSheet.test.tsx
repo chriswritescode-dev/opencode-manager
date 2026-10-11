@@ -171,6 +171,22 @@ describe('ChangesWalkthroughSheet', () => {
     expect(screen.getByText('assets/logo.png — binary file')).toBeInTheDocument()
   })
 
+  it('generates with the selected model', async () => {
+    const user = userEvent.setup()
+    mocks.getChangeWalkthrough.mockResolvedValue(state({ walkthrough: null }))
+    mocks.generateChangeWalkthrough.mockResolvedValue(state())
+    renderSheet({ model: { providerID: 'anthropic', id: 'claude', variant: 'high' } })
+
+    await user.click(await screen.findByRole('button', { name: 'Generate walkthrough' }))
+
+    await waitFor(() => {
+      expect(mocks.generateChangeWalkthrough).toHaveBeenCalledWith('ses_1', {
+        source: { kind: 'session' },
+        model: 'anthropic/claude#high',
+      })
+    })
+  })
+
   it('opens a stop from the overview list without the summary or list', async () => {
     const user = userEvent.setup()
     mocks.getChangeWalkthrough.mockResolvedValue(state())

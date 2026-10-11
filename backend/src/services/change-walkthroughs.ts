@@ -1046,7 +1046,7 @@ export class ChangeWalkthroughService {
         return { walkthrough: previous, created: false }
       }
 
-      const model = await this.resolveWalkthroughModel(session, signal)
+      const model = await this.resolveWalkthroughModel(session, request.model, signal)
       const storedModel = formatOpenCodeModelRef(model)
       const resumingStops = previous.stops.map((stop) =>
         stop.status === 'ready' ? stop : { ...stop, status: 'pending' as const },
@@ -1074,7 +1074,7 @@ export class ChangeWalkthroughService {
       return { walkthrough: resumed, created: true }
     }
 
-    const model = await this.resolveWalkthroughModel(session, signal)
+    const model = await this.resolveWalkthroughModel(session, request.model, signal)
     const modelKey = computeModelKey(model)
     const storedModel = formatOpenCodeModelRef(model)
 
@@ -1370,14 +1370,20 @@ export class ChangeWalkthroughService {
   }
 
   /**
-   * Resolves the model for one generation, waiting once for OpenCode's lazily-loaded global catalog so an explicit
-   * walkthrough model is registered before the first call. A failed wait is swallowed because generation proceeds and
-   * lets OpenCode surface its own error; the wait is per generation, never per stop.
+   * Resolves the model for one generation, preferring the configured walkthrough model, then the request model, then
+   * the session model. Waits once for OpenCode's lazily-loaded global catalog so an explicit model is registered before
+   * the first call. A failed wait is swallowed because generation proceeds and lets OpenCode surface its own error; the
+   * wait is per generation, never per stop.
    */
-  private async resolveWalkthroughModel(session: SessionInfo, signal?: AbortSignal): Promise<ModelRef> {
+  private async resolveWalkthroughModel(
+    session: SessionInfo,
+    requestModel?: string,
+    signal?: AbortSignal,
+  ): Promise<ModelRef> {
     const configured = this.settingsService.getSettings().preferences.walkthroughModel?.trim()
-    const parsed = configured ? parseOpenCodeModelRef(configured) : undefined
-    const preferred = parsed ?? session.model
+    const parsedConfigured = configured ? parseOpenCodeModelRef(configured) : undefined
+    const parsedRequest = requestModel ? parseOpenCodeModelRef(requestModel) : undefined
+    const preferred = parsedConfigured ?? parsedRequest ?? session.model
     if (preferred) {
       try {
         await resolveOpenCodeModel(this.openCodeClient, getOpenCodeGlobalConfigPath(), {

@@ -19,6 +19,7 @@ import { RepoActionsContent } from '@/components/repo/RepoActionsDialog'
 import { RepoSkillsContent } from '@/components/repo/RepoSkillsDialog'
 import { RepoSchedulesContent } from '@/components/schedules/RepoSchedulesContent'
 import type { SkillFileInfo } from '@opencode-manager/shared'
+import type { ModelRef } from '@opencode-manager/shared/opencode'
 import { buildToolItems, toolKeyOf, type MoreDrawerItem } from '@/components/navigation/moreDrawerItems'
 import { isPanelTool, type ToolPanelState, type PanelTool } from '@/hooks/useToolPanel'
 import { useOpenNavItem } from '@/hooks/useOpenNavItem'
@@ -39,6 +40,7 @@ interface ToolSidePanelProps {
   selectedFilePath?: string
   onSkillLoaded?: (skill: SkillFileInfo) => void
   walkthroughSourceRequest?: WalkthroughSourceRequest
+  walkthroughModel?: ModelRef | null
 }
 
 interface RailButtonProps {
@@ -93,6 +95,7 @@ export function ToolSidePanel({
   selectedFilePath,
   onSkillLoaded,
   walkthroughSourceRequest,
+  walkthroughModel,
 }: ToolSidePanelProps) {
   const { activeTool, toggleTool, closePanel } = panel
   const location = useLocation()
@@ -200,6 +203,7 @@ export function ToolSidePanel({
             sessionId={sessionId}
             active
             sourceRequest={walkthroughSourceRequest}
+            model={walkthroughModel}
           >
             {panelContent}
           </ChangesWalkthroughProvider>

@@ -1266,6 +1266,28 @@ describe('ChangeWalkthroughService', () => {
     expect(fake.generateModels[0]).toEqual({ providerID: 'anthropic', id: 'claude-sonnet-4' })
   })
 
+  it('uses the request model over the session model', async () => {
+    sessions[SESSION_ID]!.info = {
+      id: SESSION_ID,
+      title: 'Title',
+      model: { providerID: 'anthropic', id: 'claude-sonnet-4' },
+    } as SessionInfo
+    fake.setGenerateImpl(async () => modelReply([{ title: 'A', explanation: 'x', hunkIds: THREE_HUNK_IDS }]))
+
+    await service.generate(SESSION_ID, { model: 'openai/gpt-5-mini' })
+
+    expect(fake.generateModels[0]).toEqual({ providerID: 'openai', id: 'gpt-5-mini' })
+  })
+
+  it('prefers the walkthrough model preference over the request model', async () => {
+    new SettingsService(db).updateSettings({ walkthroughModel: 'openai/gpt-5' })
+    fake.setGenerateImpl(async () => modelReply([{ title: 'A', explanation: 'x', hunkIds: THREE_HUNK_IDS }]))
+
+    await service.generate(SESSION_ID, { model: 'anthropic/claude-sonnet-4' })
+
+    expect(fake.generateModels[0]).toEqual({ providerID: 'openai', id: 'gpt-5' })
+  })
+
   it('reuses the resolved default model for every stop', async () => {
     sessions[SESSION_ID]!.changes = LARGE_CHANGES
     fake.setGenerateImpl((prompt) =>
