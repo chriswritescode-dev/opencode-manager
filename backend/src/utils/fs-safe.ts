@@ -26,7 +26,7 @@ export function canonicalPathSync(target: string): string {
   }
 }
 
-export async function writeFileAtomic(filePath: string, content: string, options: { mode?: number } = {}): Promise<void> {
+export async function writeFileAtomic(filePath: string, content: string | Buffer, options: { mode?: number } = {}): Promise<void> {
   const dir = path.dirname(filePath)
   await mkdirSafe(dir)
   const tempPath = path.join(dir, `.${path.basename(filePath)}.ocm-tmp-${process.pid}-${Date.now()}`)

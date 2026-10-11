@@ -1,12 +1,12 @@
 import { Hono } from 'hono'
 import { z } from 'zod'
 import { Database } from 'bun:sqlite'
-import { createHash, randomUUID } from 'crypto'
-import { readFile, writeFile, readdir, stat, unlink, rename } from 'fs/promises'
+import { createHash } from 'crypto'
+import { readFile, readdir, stat, unlink } from 'fs/promises'
 import { join } from 'path'
 import { SettingsService } from '../services/settings'
 import { logger } from '../utils/logger'
-import { mkdirSafe } from '../utils/fs-safe'
+import { mkdirSafe, writeFileAtomic } from '../utils/fs-safe'
 import { getWorkspacePath } from '@opencode-manager/shared/config/env'
 import {
   normalizeToBaseUrl,
@@ -124,15 +124,7 @@ async function cacheAudio(cacheKey: string, audioData: Buffer): Promise<void> {
     await cleanupOldestFiles(audioData.length)
   }
   
-  const tempPath = join(TTS_CACHE_DIR, `${cacheKey}.${process.pid}.${randomUUID()}.tmp`)
-  
-  try {
-    await writeFile(tempPath, audioData)
-    await rename(tempPath, filePath)
-  } catch (error) {
-    await unlink(tempPath).catch(() => undefined)
-    throw error
-  }
+  await writeFileAtomic(filePath, audioData)
 }
 
 class TTSUpstreamError extends Error {

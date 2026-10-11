@@ -3,16 +3,19 @@ import * as fs from 'fs/promises'
 
 vi.mock('fs/promises', () => ({
   readFile: vi.fn(),
-  writeFile: vi.fn(),
   readdir: vi.fn(),
   stat: vi.fn(),
   unlink: vi.fn(),
-  rename: vi.fn(),
+}))
+
+const { mockWriteFileAtomic } = vi.hoisted(() => ({
+  mockWriteFileAtomic: vi.fn(),
 }))
 
 vi.mock('../../src/utils/fs-safe', () => ({
   mkdirSafe: vi.fn().mockResolvedValue(undefined),
   mkdirSyncSafe: vi.fn(),
+  writeFileAtomic: mockWriteFileAtomic,
 }))
 
 vi.mock('bun:sqlite', () => ({
@@ -56,9 +59,6 @@ const mockStat = fs.stat as any
 const mockUnlink = fs.unlink as any
 
 import { createTTSRoutes, cleanupExpiredCache, getCacheStats, generateCacheKey, ensureCacheDir, getCachedAudio, getCacheSize, cleanupOldestFiles, cacheAudio, clearCache } from '../../src/routes/tts'
-
-const mockWriteFile = fs.writeFile as any
-const mockRename = (fs as any).rename as any
 
 function createTtsConfig(overrides: Record<string, unknown> = {}) {
   return {
@@ -185,8 +185,8 @@ describe('TTS Routes', () => {
       await expect(clearCache()).rejects.toThrow('denied')
     })
 
-    it('should leave .tmp and unrelated files untouched', async () => {
-      mockReaddir.mockResolvedValue(['a.mp3', 'pending.tmp', 'notes.txt'] as any)
+    it('should leave .tmp, atomic temp and unrelated files untouched', async () => {
+      mockReaddir.mockResolvedValue(['a.mp3', 'pending.tmp', '.a.mp3.ocm-tmp-1-2', 'notes.txt'] as any)
       mockUnlink.mockResolvedValue(undefined)
 
       const cleared = await clearCache()
@@ -404,8 +404,7 @@ describe('TTS route handlers', () => {
   it('synthesizes and caches audio on a cache miss', async () => {
     mockStat.mockRejectedValue(new Error('not found'))
     mockReaddir.mockResolvedValue([] as any)
-    mockWriteFile.mockResolvedValue(undefined)
-    mockRename.mockResolvedValue(undefined)
+    mockWriteFileAtomic.mockResolvedValue(undefined)
     const fetchMock = vi.fn().mockResolvedValue({
       ok: true,
       arrayBuffer: async () => Buffer.from('fresh-audio'),
@@ -429,21 +428,16 @@ describe('TTS route handlers', () => {
         signal: expect.any(AbortSignal),
       }),
     )
-    expect(mockWriteFile).toHaveBeenCalledWith(
-      expect.stringMatching(/\.tmp$/),
+    expect(mockWriteFileAtomic).toHaveBeenCalledWith(
+      expect.stringMatching(/\.mp3$/),
       expect.any(Buffer),
-    )
-    expect(mockRename).toHaveBeenCalledWith(
-      expect.stringMatching(/\.tmp$/),
-      expect.stringContaining('.mp3'),
     )
   })
 
   it('returns synthesized audio when the cache write fails', async () => {
     mockStat.mockRejectedValue(new Error('not found'))
     mockReaddir.mockResolvedValue([] as any)
-    mockWriteFile.mockRejectedValue(new Error('disk full'))
-    mockUnlink.mockResolvedValue(undefined)
+    mockWriteFileAtomic.mockRejectedValue(new Error('disk full'))
     const fetchMock = vi.fn().mockResolvedValue({
       ok: true,
       arrayBuffer: async () => Buffer.from('fresh-audio'),
@@ -464,8 +458,7 @@ describe('TTS route handlers', () => {
   it('deduplicates concurrent synthesis requests for the same text', async () => {
     mockStat.mockRejectedValue(new Error('not found'))
     mockReaddir.mockResolvedValue([] as any)
-    mockWriteFile.mockResolvedValue(undefined)
-    mockRename.mockResolvedValue(undefined)
+    mockWriteFileAtomic.mockResolvedValue(undefined)
 
     let resolveFetch: ((value: { ok: boolean; arrayBuffer: () => Promise<Buffer> }) => void) | undefined
     const fetchMock = vi.fn().mockImplementation(
@@ -504,8 +497,7 @@ describe('TTS route handlers', () => {
   it('does not share an in-flight synthesis across different endpoints or API keys', async () => {
     mockStat.mockRejectedValue(new Error('not found'))
     mockReaddir.mockResolvedValue([] as any)
-    mockWriteFile.mockResolvedValue(undefined)
-    mockRename.mockResolvedValue(undefined)
+    mockWriteFileAtomic.mockResolvedValue(undefined)
     mockGetSettings.mockImplementation((userId: string) => ({
       preferences: {
         tts: createTtsConfig(
@@ -550,8 +542,7 @@ describe('TTS route handlers', () => {
   it('isolates the disk cache across providers for identical text', async () => {
     mockStat.mockRejectedValue(new Error('not found'))
     mockReaddir.mockResolvedValue([] as any)
-    mockWriteFile.mockResolvedValue(undefined)
-    mockRename.mockResolvedValue(undefined)
+    mockWriteFileAtomic.mockResolvedValue(undefined)
     mockGetSettings.mockImplementation((userId: string) => ({
       preferences: {
         tts: createTtsConfig(
@@ -708,7 +699,7 @@ describe('TTS route handlers', () => {
   })
 
   it('clears the cache through the DELETE /cache route', async () => {
-    mockReaddir.mockResolvedValue(['a.mp3', 'b.mp3', 'pending.tmp'] as any)
+    mockReaddir.mockResolvedValue(['a.mp3', 'b.mp3', 'pending.tmp', '.a.mp3.ocm-tmp-1-2'] as any)
     mockUnlink.mockResolvedValue(undefined)
 
     const res = await app.request('/cache', { method: 'DELETE' })
@@ -747,66 +738,48 @@ describe('cacheAudio', () => {
     mockReaddir.mockResolvedValue(['big.mp3'] as any)
     mockStat.mockResolvedValue({ size: 200 * 1024 * 1024, mtimeMs: 1000 } as any)
     mockUnlink.mockResolvedValue(undefined)
-    mockWriteFile.mockResolvedValue(undefined)
-    mockRename.mockResolvedValue(undefined)
+    mockWriteFileAtomic.mockResolvedValue(undefined)
 
     await cacheAudio('cache-key', Buffer.from('audio'))
 
     expect(mockUnlink).toHaveBeenCalledWith(expect.stringContaining('big.mp3'))
-    expect(mockWriteFile).toHaveBeenCalledWith(
-      expect.stringMatching(/\.tmp$/),
-      expect.any(Buffer),
-    )
-    expect(mockRename).toHaveBeenCalledWith(
-      expect.stringMatching(/\.tmp$/),
+    expect(mockWriteFileAtomic).toHaveBeenCalledWith(
       expect.stringContaining('cache-key.mp3'),
+      expect.any(Buffer),
     )
   })
 
   it('writes audio without cleanup when the cache has room', async () => {
     mockReaddir.mockResolvedValue(['small.mp3'] as any)
     mockStat.mockResolvedValue({ size: 1024, mtimeMs: 1000 } as any)
-    mockWriteFile.mockResolvedValue(undefined)
-    mockRename.mockResolvedValue(undefined)
+    mockWriteFileAtomic.mockResolvedValue(undefined)
 
     await cacheAudio('cache-key', Buffer.from('audio'))
 
     expect(mockUnlink).not.toHaveBeenCalled()
-    expect(mockWriteFile).toHaveBeenCalledWith(
-      expect.stringMatching(/\.tmp$/),
-      expect.any(Buffer),
-    )
-    expect(mockRename).toHaveBeenCalledWith(
-      expect.stringMatching(/\.tmp$/),
+    expect(mockWriteFileAtomic).toHaveBeenCalledWith(
       expect.stringContaining('cache-key.mp3'),
+      expect.any(Buffer),
     )
   })
 
-  it('writes to a unique temp path and renames it to the final .mp3 path', async () => {
+  it('writes the audio buffer atomically to the final .mp3 path', async () => {
     mockReaddir.mockResolvedValue([] as any)
-    mockWriteFile.mockResolvedValue(undefined)
-    mockRename.mockResolvedValue(undefined)
+    mockWriteFileAtomic.mockResolvedValue(undefined)
 
     await cacheAudio('cache-key', Buffer.from('audio'))
 
-    const [writtenPath] = mockWriteFile.mock.calls[0]
-    const [renamedFrom, renamedTo] = mockRename.mock.calls[0]
+    expect(mockWriteFileAtomic).toHaveBeenCalledTimes(1)
+    const [writtenPath, writtenData] = mockWriteFileAtomic.mock.calls[0]!
 
-    expect(writtenPath).toContain('cache-key.')
-    expect(writtenPath).toMatch(/\.tmp$/)
-    expect(writtenPath).not.toContain('.mp3')
-    expect(renamedFrom).toBe(writtenPath)
-    expect(renamedTo).toContain('cache-key.mp3')
+    expect(writtenPath).toContain('cache-key.mp3')
+    expect(writtenData).toEqual(Buffer.from('audio'))
   })
 
-  it('removes the temp file and rethrows when the rename fails', async () => {
+  it('propagates an atomic write failure', async () => {
     mockReaddir.mockResolvedValue([] as any)
-    mockWriteFile.mockResolvedValue(undefined)
-    mockRename.mockRejectedValue(new Error('rename failed'))
-    mockUnlink.mockResolvedValue(undefined)
+    mockWriteFileAtomic.mockRejectedValue(new Error('rename failed'))
 
     await expect(cacheAudio('cache-key', Buffer.from('audio'))).rejects.toThrow('rename failed')
-
-    expect(mockUnlink).toHaveBeenCalledWith(expect.stringMatching(/\.tmp$/))
   })
 })
