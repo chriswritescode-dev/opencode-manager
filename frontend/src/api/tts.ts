@@ -11,6 +11,10 @@ export interface TTSVoicesResponse {
   cached: boolean
 }
 
+export interface TTSClearCacheResponse {
+  cleared: number
+}
+
 export interface TTSStatusResponse {
   enabled: boolean
   configured: boolean
@@ -39,6 +43,12 @@ export const ttsApi = {
   getStatus: async (userId = 'default'): Promise<TTSStatusResponse> => {
     return fetchWrapper(`${API_BASE_URL}/api/tts/status`, {
       params: { userId },
+    })
+  },
+
+  clearCache: async (): Promise<TTSClearCacheResponse> => {
+    return fetchWrapper(`${API_BASE_URL}/api/tts/cache`, {
+      method: 'DELETE',
     })
   },
 

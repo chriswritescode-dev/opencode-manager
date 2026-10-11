@@ -1,8 +1,8 @@
-import { mkdtemp, readdir, readFile, realpath, rm, stat, writeFile } from 'node:fs/promises'
+import { mkdir, mkdtemp, readdir, readFile, realpath, rm, stat, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import path from 'node:path'
 import { afterEach, beforeEach, describe, expect, it } from 'vitest'
-import { canonicalPath, canonicalPathSync, writeFileAtomicSync } from '../../src/utils/fs-safe'
+import { canonicalPath, canonicalPathSync, writeFileAtomic, writeFileAtomicSync } from '../../src/utils/fs-safe'
 
 describe('canonicalPath', () => {
   let workDir = ''
@@ -65,5 +65,38 @@ describe('writeFileAtomicSync', () => {
     writeFileAtomicSync(target, 'content')
 
     await expect(readdir(workDir)).resolves.toEqual(['file.txt'])
+  })
+})
+
+describe('writeFileAtomic', () => {
+  let workDir = ''
+
+  beforeEach(async () => {
+    workDir = await mkdtemp(path.join(tmpdir(), 'fs-safe-atomic-async-'))
+  })
+
+  afterEach(async () => {
+    await rm(workDir, { recursive: true, force: true })
+  })
+
+  it('writes Buffer bytes unchanged and leaves no temp file behind', async () => {
+    const target = path.join(workDir, 'audio.mp3')
+    const bytes = Buffer.from([0xff, 0x00, 0xfe, 0x80])
+
+    await writeFileAtomic(target, bytes)
+
+    expect(await readFile(target)).toEqual(bytes)
+    expect((await stat(target)).mode & 0o777).toBe(0o600)
+    await expect(readdir(workDir)).resolves.toEqual(['audio.mp3'])
+  })
+
+  it('removes the temp file and rethrows when the rename fails', async () => {
+    const target = path.join(workDir, 'target')
+    await mkdir(target)
+    await writeFile(path.join(target, 'blocker'), 'x')
+
+    await expect(writeFileAtomic(target, 'content')).rejects.toThrow()
+
+    await expect(readdir(workDir)).resolves.toEqual(['target'])
   })
 })
