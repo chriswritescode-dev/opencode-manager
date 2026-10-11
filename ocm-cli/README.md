@@ -10,21 +10,24 @@ to the local working tree.
 
 | ocm | OpenCode Manager | Local OpenCode |
 |---|---|---|
+| 0.4.x | >= 0.19.0 | >= 2.0.15, < 3 |
 | 0.3.x | >= 0.19.0 | >= 2.0.15, < 3 |
 
-ocm 0.3.0 attaches through the repo-scoped Manager proxy
-(`/api/opencode-proxy/repos/:repoId`), loads its plugin from the OpenCode 2
-`cli.json` `plugins` list, and moves sessions with OpenCode 2 session
+ocm 0.4.x and 0.3.x attach through the repo-scoped Manager proxy
+(`/api/opencode-proxy/repos/:repoId`), load the plugin from the OpenCode 2
+`cli.json` `plugins` list, and move sessions with OpenCode 2 session
 export/import. Older Managers lack that route; `ocm` then fails with
-`OpenCode Manager at <url> is too old for ocm 0.3.0; upgrade the Manager to >= 0.19.0`.
+`OpenCode Manager at <url> is too old for ocm <version>; upgrade the Manager to >= 0.19.0`.
 Use ocm 0.2.x with OpenCode Manager < 0.19.0 and OpenCode 1.x, installed pinned
 (`pnpm add -g @opencode-manager/ocm-cli@0.2`) with the OpenCode 1.x plugin entry pinned to
 `@opencode-manager/ocm-cli@0.2`. ocm is published together with each OpenCode Manager
 release.
 
-`/ocm-move` requires ocm 0.4.0+ and a Manager that supports worktree moves; an
-older CLI is told to upgrade, and an older Manager is reported as needing an
-upgrade.
+Attachment works with OpenCode Manager >= 0.19.0. The sync worktree targeting of
+`ocm push` / `ocm pull` and `/ocm-move` worktree moves need ocm 0.4.0+ and
+OpenCode Manager 1.0.0+; an older CLI is told to upgrade, and an older Manager is
+reported as needing an upgrade (push and pull fall back to the main checkout
+instead).
 
 ## Install
 
@@ -39,7 +42,8 @@ also create a best-effort `~/.local/bin/ocm` symlink.
 The package is also self-contained for a vendored install with no package
 manager. `ocm install` copies the package into `<config>/plugin/ocm-cli`,
 registers `./plugin/ocm-cli/dist` in `<config>/cli.json`, and links `ocm` at
-`~/.local/bin/ocm`. `<config>` is `$OPENCODE_CONFIG_DIR`, else
+`~/.local/bin/ocm`. The vendored `ocm` binary runs under Node, so Node must be
+on `PATH`. `<config>` is `$OPENCODE_CONFIG_DIR`, else
 `$XDG_CONFIG_HOME/opencode`, else `~/.config/opencode`; `--dir <path>`
 overrides it. `--no-link` skips the symlink, and `--force` replaces a
 non-symlink `ocm` already at the link path. Run it without an existing
@@ -261,6 +265,7 @@ global installs); the plugin surface is TUI-only.
 
 - macOS or Linux (Windows is unsupported)
 - OpenCode >= 2.0.15 (same major, 2.x) available on `PATH`
+- Node available on `PATH` (runs the `ocm` binary)
 - OpenCode Manager >= 0.19.0
 - `git` and `tar` (with gzip support, i.e. the `-z` flag) available on `PATH`
 - `bash`, used for hidden token entry and interactive confirmations

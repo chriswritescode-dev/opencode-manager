@@ -7,9 +7,10 @@
 - `pnpm dev:frontend` - Frontend only: `pnpm --filter frontend dev`
 - `pnpm build` - Build CLI, backend, and frontend
 - `pnpm test` - Run CLI, backend, and frontend tests
-- `cd backend && vitest <filename>` - Run single test file
-- `cd backend && vitest --ui` - Test UI with coverage
-- `cd backend && vitest --coverage` - Coverage report (80% threshold)
+- `cd backend && pnpm exec vitest run <filename>` - Run single test file
+- `cd backend && pnpm exec vitest --ui` - Interactive test UI
+- `cd backend && pnpm exec vitest run --coverage` - Coverage report (80% threshold)
+- `cd backend && bun test <filename>` - Run a Bun-only suite, excluded from Vitest (`test/routes/internal-sandbox.test.ts`, `src/routes/repos.test.ts`)
 - `pnpm lint` - Lint CLI, frontend, and backend
 - `pnpm lint:backend` - Backend linting
 - `pnpm lint:frontend` - Frontend linting
