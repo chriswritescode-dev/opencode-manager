@@ -1273,6 +1273,9 @@ export class ChangeWalkthroughService {
         explained = { ...stop, status: 'failed' }
       }
 
+      if (signal.aborted) {
+        return
+      }
       current = this.replaceStop(current, explained)
       entry.walkthrough = current
       completed += 1
@@ -1280,10 +1283,6 @@ export class ChangeWalkthroughService {
         this.saveIfSessionLive(current)
       }
     })
-
-    if (signal.aborted) {
-      this.saveIfSessionLive(current)
-    }
 
     return current
   }
