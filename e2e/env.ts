@@ -7,6 +7,8 @@ export const E2E_ROOT = path.dirname(fileURLToPath(import.meta.url))
 export const REPO_ROOT = path.resolve(E2E_ROOT, '..')
 export const E2E_TMP = path.join(E2E_ROOT, '.tmp')
 export const STORAGE_STATE = path.join(E2E_TMP, 'storage-state.json')
+export const TEST_RESULTS_DIR = path.join(REPO_ROOT, 'test-results')
+export const REPORT_DIR = path.join(REPO_ROOT, 'playwright-report')
 
 export const BASE_URL = 'http://127.0.0.1:5013'
 export const SERVER_PORT = 5013

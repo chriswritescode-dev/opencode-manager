@@ -1,10 +1,9 @@
-import path from 'node:path'
 import { defineConfig, devices } from '@playwright/test'
-import { BASE_URL, E2E_ROOT, REPO_ROOT, STORAGE_STATE, createServerEnv } from './env'
+import { BASE_URL, E2E_ROOT, REPORT_DIR, REPO_ROOT, STORAGE_STATE, TEST_RESULTS_DIR, createServerEnv } from './env'
 
 export default defineConfig({
   testDir: E2E_ROOT,
-  outputDir: path.join(REPO_ROOT, 'test-results'),
+  outputDir: TEST_RESULTS_DIR,
   fullyParallel: false,
   forbidOnly: Boolean(process.env.CI),
   retries: process.env.CI ? 2 : 0,
@@ -13,7 +12,8 @@ export default defineConfig({
   expect: { timeout: 15_000 },
   reporter: [
     ['list'],
-    ['html', { open: 'never', outputFolder: path.join(REPO_ROOT, 'playwright-report') }],
+    ['html', { open: 'never', outputFolder: REPORT_DIR }],
+    ['./cleanup-reporter.ts'],
   ],
   use: {
     baseURL: BASE_URL,
