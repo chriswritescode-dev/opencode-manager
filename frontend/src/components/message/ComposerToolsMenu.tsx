@@ -41,7 +41,7 @@ export function ComposerToolsMenu({
           type="button"
           aria-label="Composer options"
           title="Composer options"
-          className={getIconToggleButtonClassName(permission.isAuto || goalArmed)}
+          className={`${getIconToggleButtonClassName(permission.isAuto || goalArmed)} flex items-center justify-center min-h-[44px] min-w-[44px]`}
         >
           <Plus className="w-5 h-5" />
         </button>

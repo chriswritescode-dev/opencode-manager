@@ -1397,7 +1397,8 @@ if (isIOS && isSecureContext && navigator.clipboard && navigator.clipboard.read)
   const renderVoiceButton = (variant: VoiceButtonVariant) => {
     const isDesktop = variant === 'desktop'
     const isBusy = isRecording || isTogglingRecording || (isProcessing && !isRecording)
-    const spinnerClassName = `w-5 h-5 animate-spin rounded-full border-2 ${isDesktop ? 'border-muted-foreground' : 'border-foreground'} border-t-transparent`
+    const iconSizeClassName = isDesktop ? 'w-5 h-5' : 'w-6 h-6'
+    const spinnerClassName = `${iconSizeClassName} animate-spin rounded-full border-2 ${isDesktop ? 'border-muted-foreground' : 'border-foreground'} border-t-transparent`
     const voiceGestureHandlers = isDesktop ? {} : {
       onPointerDown: handleVoicePointerDown,
       onPointerMove: handleVoicePointerMove,
@@ -1410,13 +1411,13 @@ if (isIOS && isSecureContext && navigator.clipboard && navigator.clipboard.read)
           ? 'bg-destructive hover:bg-destructive/90 text-destructive-foreground border-destructive/60 animate-pulse'
           : 'bg-muted hover:bg-muted-foreground/20 text-muted-foreground hover:text-foreground border-border'
       }`
-      : `px-4 py-2 rounded-lg transition-all duration-150 flex items-center justify-center min-w-[52px] border touch-none select-none ${
+      : `px-4 min-h-[44px] min-w-[56px] rounded-lg transition-all duration-150 flex items-center justify-center border touch-none select-none ${
         isBusy
           ? 'bg-success text-success-foreground border-success/70 shadow-lg shadow-success/40'
           : 'bg-muted hover:bg-muted-foreground/20 text-muted-foreground hover:text-foreground border-border active:bg-muted-foreground/30 active:scale-95'
       }`
 
-    const containerClassName = isDesktop ? 'relative hidden md:block' : 'relative flex w-full touch-none select-none'
+    const containerClassName = isDesktop ? 'relative hidden md:block' : 'relative flex w-full justify-end touch-none select-none'
 
     return (
       <div
@@ -1430,6 +1431,7 @@ if (isIOS && isSecureContext && navigator.clipboard && navigator.clipboard.read)
         <VoiceStatusOverlay show={!isDesktop && showVoiceFeedback} label={voiceFeedbackLabel} state={voiceFeedbackState} />
         <button
           type="button"
+          data-voice-variant={variant}
           onClick={handleVoiceClick}
           disabled={isProcessing}
           className={buttonClassName}
@@ -1440,9 +1442,9 @@ if (isIOS && isSecureContext && navigator.clipboard && navigator.clipboard.read)
           ) : isProcessing && !isRecording ? (
             <div className={spinnerClassName} />
           ) : isRecording ? (
-            <MicOff className="w-5 h-5" />
+            <MicOff className={iconSizeClassName} />
           ) : (
-            <Mic className="w-5 h-5" />
+            <Mic className={iconSizeClassName} />
           )}
         </button>
       </div>
@@ -1541,13 +1543,13 @@ return (
       )}
 
       <div className="flex gap-1.5 md:gap-2 items-center justify-between">
-        <div className="flex gap-1.5 md:gap-2 items-center min-w-0">
+        <div className="flex flex-1 md:flex-initial gap-1.5 md:gap-2 items-center min-w-0">
           {showMobileScrollButton ? (
             <>
               <button
                 type="button"
                 onClick={onScrollToBottom}
-                className="flex items-center gap-1.5 px-3 min-h-[36px] rounded-lg text-xs font-medium border bg-background/80 hover:bg-accent/90 text-primary hover:text-primary-hover border-primary/20 shadow-md backdrop-blur-md transition-all duration-200 active:scale-95 ring-1 ring-primary/15"
+                className="flex items-center gap-1.5 px-3 min-h-[44px] rounded-lg text-xs font-medium border bg-background/80 hover:bg-accent/90 text-primary hover:text-primary-hover border-primary/20 shadow-md backdrop-blur-md transition-all duration-200 active:scale-95 ring-1 ring-primary/15"
                 title="Scroll to bottom"
                 aria-label="Scroll to bottom"
               >
@@ -1600,7 +1602,7 @@ return (
               >
                 {!isSessionActive && !hideSecondaryButtons && (
                   <button
-                    className="px-2.5 py-0.5 md:px-3 min-h-[36px] min-w-0 rounded-lg text-xs md:text-sm font-medium border bg-muted border-border text-muted-foreground hover:bg-muted-foreground/10 hover:border-foreground/30 transition-colors cursor-pointer flex-1 md:flex-initial md:w-auto md:max-w-[220px] dark:border-border/30 flex flex-col items-start justify-center overflow-hidden"
+                    className="px-2.5 py-0.5 md:px-3 min-h-[44px] md:min-h-[36px] min-w-0 rounded-lg text-xs md:text-sm font-medium border bg-muted border-border text-muted-foreground hover:bg-muted-foreground/10 hover:border-foreground/30 transition-colors cursor-pointer flex-1 md:flex-initial md:w-auto md:max-w-[220px] dark:border-border/30 flex flex-col items-start justify-center overflow-hidden"
                   >
                     <span className="truncate w-full text-left">{displayModelName || 'Select model'}</span>
                     {hasVariants && currentVariant && (
@@ -1669,7 +1671,7 @@ return (
               data-submit-prompt
               onClick={hasPendingPermissionForSession ? () => setShowDialog(true) : handleSubmit}
               disabled={hasPendingPermissionForSession ? false : (!isModelReady || !hasPromptContent || (isPromptSubmitPending && !isStreamingResponse))}
-              className={`px-4 md:px-5 py-1.5 md:py-2 rounded-lg text-sm font-medium transition-colors dark:border flex-shrink-0 min-w-[52px] ${
+              className={`px-4 md:px-5 py-1.5 md:py-2 rounded-lg text-sm font-medium transition-colors dark:border flex-shrink-0 min-w-[52px] flex items-center justify-center min-h-[44px] md:min-h-0 ${
                 hasPendingPermissionForSession
                   ? 'bg-highlight hover:bg-highlight/90 border-highlight text-highlight-foreground ring-highlight/20'
                   : 'bg-primary hover:bg-primary/90 disabled:bg-muted disabled:text-muted-foreground disabled:cursor-not-allowed text-primary-foreground border-border/30'
@@ -1703,7 +1705,7 @@ return (
                 onTouchMove={keybarTouch.onTouchMove}
                 onTouchEnd={(e) => keybarTouch.onTouchEnd(e, key.id)}
                 onClick={() => keybarTouch.onClick(key.id)}
-                className={`flex items-center gap-1 min-h-[32px] px-3 rounded-lg border font-mono text-base font-bold transition-colors disabled:opacity-30 ${
+                className={`flex items-center gap-1 min-h-[44px] px-3 rounded-lg border font-mono text-base font-bold transition-colors disabled:opacity-30 ${
                   isActive ? COMPOSER_MODE_STYLES[key.id].key : 'bg-muted border-border text-foreground active:bg-muted-foreground/20'
                 }`}
               >

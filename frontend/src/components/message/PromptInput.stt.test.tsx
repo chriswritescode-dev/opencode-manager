@@ -244,7 +244,7 @@ describe('PromptInput STT Gesture Tests', () => {
     if (voiceButtons.length === 0) {
       throw new Error('No voice button found. Available buttons: ' + allButtons.map(b => b.getAttribute('title')).join(', '))
     }
-    const mobileButton = voiceButtons.find((btn) => btn.className.includes('px-4') && btn.className.includes('py-2'))
+    const mobileButton = voiceButtons.find((btn) => btn.getAttribute('data-voice-variant') === 'mobile')
     return mobileButton || voiceButtons[0]
   }
 
@@ -561,7 +561,7 @@ describe('PromptInput STT Gesture Tests', () => {
         const title = (btn.getAttribute('title') || '').toLowerCase()
         return title.includes('tap to speak') || title.includes('tap to transcribe') || title.includes('hold to speak') || title.includes('release')
       })
-      return voiceButtons.find((btn) => btn.className.includes('px-4') && btn.className.includes('py-2')) ?? null
+      return voiceButtons.find((btn) => btn.getAttribute('data-voice-variant') === 'mobile') ?? null
     }
 
     it('shows the mobile mic and no submit button when the prompt is empty', () => {
