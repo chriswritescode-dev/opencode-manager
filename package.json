@@ -25,6 +25,8 @@
     "test:cli": "pnpm --filter @opencode-manager/ocm-cli test",
     "test:frontend": "pnpm --filter frontend exec vitest run",
     "test:backend": "pnpm --filter backend run test",
+    "test:e2e": "pnpm build && pnpm test:e2e:run",
+    "test:e2e:run": "playwright test -c e2e/playwright.config.ts",
     "lint": "pnpm run lint:cli && pnpm run lint:frontend && pnpm run lint:backend",
     "lint:cli": "pnpm --filter @opencode-manager/ocm-cli lint",
     "lint:frontend": "pnpm --filter frontend lint",
@@ -38,6 +40,7 @@
     "docker:restart": "docker-compose restart"
   },
   "devDependencies": {
+    "@playwright/test": "^1.64.0",
     "concurrently": "^9.1.0"
   },
   "dependencies": {

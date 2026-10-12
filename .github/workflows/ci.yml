@@ -98,3 +98,51 @@ jobs:
 
       - name: Run tests
         run: pnpm test
+
+  e2e:
+    name: E2E
+    needs: check-ready
+    if: needs.check-ready.outputs.should-run == 'true'
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: oven-sh/setup-bun@v2
+
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 10.28.1
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "24"
+          cache: "pnpm"
+
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+
+      - name: Install OpenCode CLI
+        run: |
+          source scripts/lib/opencode-release.sh
+          download_opencode_to 2.0.24 "$RUNNER_TEMP/opencode/bin/opencode"
+          echo "$RUNNER_TEMP/opencode/bin" >> "$GITHUB_PATH"
+
+      - name: Verify OpenCode CLI
+        run: opencode --version
+
+      - name: Install Playwright browsers
+        run: pnpm exec playwright install --with-deps chromium
+
+      - name: Run end-to-end tests
+        run: pnpm test:e2e
+
+      - name: Upload Playwright artifacts
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: playwright-artifacts
+          path: |
+            playwright-report/
+            test-results/
+          retention-days: 7
