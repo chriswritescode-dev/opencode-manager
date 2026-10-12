@@ -57,7 +57,9 @@ const createdShells: Array<{ directory: string; id: string }> = []
 
 test.afterEach(async ({ request }) => {
   const shells = createdShells.splice(0)
-  await Promise.allSettled(shells.map(({ directory, id }) => removeShell(request, directory, id)))
+  const results = await Promise.allSettled(shells.map(({ directory, id }) => removeShell(request, directory, id)))
+  const failures = results.flatMap((result) => (result.status === 'rejected' ? [String(result.reason)] : []))
+  expect(failures, 'background shell cleanup failed').toEqual([])
 })
 
 test.describe('session background activity', () => {
