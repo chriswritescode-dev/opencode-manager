@@ -13,12 +13,26 @@ interface StatusSnapshotToken {
   order: number
 }
 
+interface ShellSnapshotToken {
+  revision: number
+  order: number
+}
+
+interface RunningShell {
+  sessionID: string
+  directory: string
+}
+
 interface SessionStatusStore {
   statuses: Map<string, SessionStatusType>
   statusCache: Map<string, string>
   statusRevisions: Map<string, number>
   knownSessions: Set<string>
   outcomes: Map<string, ChildOutcome>
+  parents: Map<string, string | null>
+  runningShells: Map<string, RunningShell>
+  shellRevisions: Map<string, number>
+  shellRevision: number
   revision: number
   setStatus: (sessionID: string, status: SessionStatusType) => void
   setOutcome: (sessionID: string, outcome: ChildOutcome) => void
@@ -30,6 +44,12 @@ interface SessionStatusStore {
   endStatusSnapshot: (token: StatusSnapshotToken) => void
   getStatus: (sessionID: string) => SessionStatusType
   clearStatus: (sessionID: string) => void
+  setSessionParent: (sessionID: string, parentID: string | null) => void
+  setShellRunning: (shellID: string, sessionID: string, directory: string) => void
+  clearShell: (shellID: string) => void
+  replaceRunningShells: (directory: string, shells: Array<{ id: string; sessionID: string }>, token: ShellSnapshotToken) => void
+  beginShellSnapshot: () => ShellSnapshotToken
+  endShellSnapshot: (token: ShellSnapshotToken) => void
   forgetSession: (sessionID: string) => void
 }
 
@@ -39,6 +59,8 @@ const optimisticActiveTimers = new Map<string, ReturnType<typeof setTimeout>>()
 const inFlightSnapshots = new Map<number, number>()
 let snapshotOrderCounter = 0
 let lastAppliedSnapshotOrder = 0
+const inFlightShellSnapshots = new Map<number, number>()
+let shellSnapshotOrderCounter = 0
 
 const clearOptimisticActiveTimer = (sessionID: string): void => {
   const timer = optimisticActiveTimers.get(sessionID)
@@ -68,6 +90,55 @@ const sameSets = (left: Set<string>, right: Set<string>): boolean => {
     if (!left.has(value)) return false
   }
   return true
+}
+
+const sameRunningShells = (left: Map<string, RunningShell>, right: Map<string, RunningShell>): boolean => {
+  if (left.size !== right.size) return false
+  for (const [shellID, shell] of right.entries()) {
+    const existing = left.get(shellID)
+    if (!existing || existing.sessionID !== shell.sessionID || existing.directory !== shell.directory) return false
+  }
+  return true
+}
+
+const registerShellSnapshot = (token: ShellSnapshotToken): void => {
+  inFlightShellSnapshots.set(token.order, token.revision)
+}
+
+const releaseShellSnapshot = (token: ShellSnapshotToken): void => {
+  inFlightShellSnapshots.delete(token.order)
+}
+
+const oldestInFlightShellSnapshotRevision = (): number | null => {
+  let oldest: number | null = null
+  for (const revision of inFlightShellSnapshots.values()) {
+    if (oldest === null || revision < oldest) oldest = revision
+  }
+  return oldest
+}
+
+const prunedShellRevisions = (currentRevisions: Map<string, number>): Map<string, number> => {
+  const oldestSnapshotRevision = oldestInFlightShellSnapshotRevision()
+  const nextRevisions = new Map<string, number>()
+  if (oldestSnapshotRevision === null) return nextRevisions
+  for (const [shellID, revision] of currentRevisions.entries()) {
+    if (revision > oldestSnapshotRevision) nextRevisions.set(shellID, revision)
+  }
+  return nextRevisions
+}
+
+const shellTouchPatch = (
+  state: Pick<SessionStatusStore, 'shellRevisions' | 'shellRevision'>,
+  shellIDs: string[],
+): Pick<SessionStatusStore, 'shellRevisions' | 'shellRevision'> | null => {
+  if (inFlightShellSnapshots.size === 0 || shellIDs.length === 0) return null
+  let shellRevision = state.shellRevision
+  const shellRevisions = new Map(state.shellRevisions)
+  for (const shellID of shellIDs) {
+    shellRevision += 1
+    shellRevisions.set(shellID, shellRevision)
+  }
+  return { shellRevisions, shellRevision }
 }
 
 const markSessionKnown = (knownSessions: Set<string>, sessionID: string): Set<string> | null => {
@@ -107,6 +178,28 @@ export function busyStatusesFromActiveSessions(active: Record<string, unknown>):
   return Object.fromEntries(
     Object.keys(active).map((sessionID) => [sessionID, { type: 'busy' as const }]),
   )
+}
+
+export function hasBackgroundActivity(
+  state: Pick<SessionStatusStore, 'statuses' | 'parents' | 'runningShells'>,
+  sessionID: string,
+): boolean {
+  const visited = new Set<string>()
+  const visit = (id: string): boolean => {
+    if (visited.has(id)) return false
+    visited.add(id)
+    for (const shell of state.runningShells.values()) {
+      if (shell.sessionID === id) return true
+    }
+    for (const [childID, parentID] of state.parents.entries()) {
+      if (parentID !== id) continue
+      const childStatus = state.statuses.get(childID)
+      if (childStatus && childStatus.type !== 'idle') return true
+      if (visit(childID)) return true
+    }
+    return false
+  }
+  return visit(sessionID)
 }
 
 export const useSessionStatus = create<SessionStatusStore>((set, get) => {
@@ -151,6 +244,10 @@ export const useSessionStatus = create<SessionStatusStore>((set, get) => {
     statusRevisions: new Map(),
     knownSessions: new Set(),
     outcomes: new Map(),
+    parents: new Map(),
+    runningShells: new Map(),
+    shellRevisions: new Map(),
+    shellRevision: 0,
     revision: 0,
 
     setStatus: (sessionID: string, status: SessionStatusType) => {
@@ -341,14 +438,102 @@ export const useSessionStatus = create<SessionStatusStore>((set, get) => {
       })
     },
 
+    setSessionParent: (sessionID: string, parentID: string | null) => {
+      const current = get().parents
+      if (current.has(sessionID) && current.get(sessionID) === parentID) return
+      set((state) => {
+        const parents = new Map(state.parents)
+        parents.set(sessionID, parentID)
+        return { parents }
+      })
+    },
+
+    setShellRunning: (shellID: string, sessionID: string, directory: string) => {
+      const current = get().runningShells.get(shellID)
+      if (current && current.sessionID === sessionID && current.directory === directory) {
+        const touch = shellTouchPatch(get(), [shellID])
+        if (touch) set(touch)
+        return
+      }
+      set((state) => {
+        const runningShells = new Map(state.runningShells)
+        runningShells.set(shellID, { sessionID, directory })
+        return { runningShells, ...(shellTouchPatch(state, [shellID]) ?? {}) }
+      })
+    },
+
+    clearShell: (shellID: string) => {
+      if (!get().runningShells.has(shellID)) {
+        const touch = shellTouchPatch(get(), [shellID])
+        if (touch) set(touch)
+        return
+      }
+      set((state) => {
+        const runningShells = new Map(state.runningShells)
+        runningShells.delete(shellID)
+        return { runningShells, ...(shellTouchPatch(state, [shellID]) ?? {}) }
+      })
+    },
+
+    replaceRunningShells: (directory: string, shells: Array<{ id: string; sessionID: string }>, token: ShellSnapshotToken) => {
+      releaseShellSnapshot(token)
+
+      const current = get().runningShells
+      const currentRevisions = get().shellRevisions
+      const runningShells = new Map(current)
+      const isTouched = (shellID: string): boolean => {
+        const revision = currentRevisions.get(shellID)
+        return revision !== undefined && revision > token.revision
+      }
+
+      for (const [shellID, shell] of runningShells.entries()) {
+        if (shell.directory !== directory) continue
+        if (isTouched(shellID)) continue
+        runningShells.delete(shellID)
+      }
+      for (const shell of shells) {
+        if (isTouched(shell.id)) continue
+        runningShells.set(shell.id, { sessionID: shell.sessionID, directory })
+      }
+
+      const nextRevisions = prunedShellRevisions(currentRevisions)
+      const shellsChanged = !sameRunningShells(current, runningShells)
+      const revisionsChanged = !sameEntries(currentRevisions, nextRevisions)
+      if (!shellsChanged && !revisionsChanged) return
+
+      set({
+        ...(shellsChanged ? { runningShells } : {}),
+        ...(revisionsChanged ? { shellRevisions: nextRevisions } : {}),
+      })
+    },
+
+    beginShellSnapshot: () => {
+      const token: ShellSnapshotToken = {
+        revision: get().shellRevision,
+        order: ++shellSnapshotOrderCounter,
+      }
+      registerShellSnapshot(token)
+      return token
+    },
+
+    endShellSnapshot: (token: ShellSnapshotToken) => {
+      releaseShellSnapshot(token)
+      if (inFlightShellSnapshots.size > 0) return
+      if (get().shellRevisions.size === 0) return
+      set({ shellRevisions: new Map() })
+    },
+
     forgetSession: (sessionID: string) => {
       clearOptimisticActiveTimer(sessionID)
       const current = get()
+      const ownsShell = Array.from(current.runningShells.values()).some((shell) => shell.sessionID === sessionID)
       const hasSession =
         current.statuses.has(sessionID) ||
         current.statusCache.has(sessionID) ||
         current.knownSessions.has(sessionID) ||
-        current.outcomes.has(sessionID)
+        current.outcomes.has(sessionID) ||
+        current.parents.has(sessionID) ||
+        ownsShell
       if (!hasSession && inFlightSnapshots.size === 0) return
 
       set((state) => {
@@ -356,15 +541,27 @@ export const useSessionStatus = create<SessionStatusStore>((set, get) => {
         const statusCache = new Map(state.statusCache)
         const knownSessions = new Set(state.knownSessions)
         const outcomes = new Map(state.outcomes)
+        const parents = new Map(state.parents)
+        const runningShells = new Map(state.runningShells)
         statuses.delete(sessionID)
         statusCache.delete(sessionID)
         knownSessions.delete(sessionID)
         outcomes.delete(sessionID)
+        parents.delete(sessionID)
+        const removedShellIDs: string[] = []
+        for (const [shellID, shell] of runningShells.entries()) {
+          if (shell.sessionID !== sessionID) continue
+          runningShells.delete(shellID)
+          removedShellIDs.push(shellID)
+        }
         return {
           statuses,
           statusCache,
           knownSessions,
           outcomes,
+          parents,
+          runningShells,
+          ...(shellTouchPatch(state, removedShellIDs) ?? {}),
           ...(recordRevisionPatch(state, sessionID) ?? {}),
         }
       })
@@ -384,4 +581,8 @@ export const useChildLifecycleForSession = (sessionID: string | undefined): Back
     const status = state.statuses.get(sessionID) ?? DEFAULT_STATUS
     return childLifecycle(status, state.knownSessions.has(sessionID), state.outcomes.get(sessionID))
   })
+}
+
+export const useHasBackgroundActivity = (sessionID: string | undefined): boolean => {
+  return useSessionStatus((state) => (sessionID ? hasBackgroundActivity(state, sessionID) : false))
 }

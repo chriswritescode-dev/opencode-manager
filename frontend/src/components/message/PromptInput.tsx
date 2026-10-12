@@ -12,6 +12,7 @@ import { useUserBash } from '@/stores/userBashStore'
 import { useSessionAgentStore } from '@/stores/sessionAgentStore'
 import { useSendErrorStore } from '@/stores/sendErrorStore'
 import { useRecentCommandsStore } from '@/stores/recentCommandsStore'
+import { useHasBackgroundActivity } from '@/stores/sessionStatusStore'
 import { useTouchTapSelect } from '@/hooks/useTouchTapSelect'
 import { useMobile } from '@/hooks/useMobile'
 import { FINE_POINTER_MEDIA_QUERY, useMediaQuery } from '@/hooks/useMediaQuery'
@@ -248,6 +249,7 @@ export const PromptInput = memo(forwardRef<PromptInputHandle, PromptInputProps>(
   }, [])
 
   const sessionAgent = useSessionAgent(sessionID, directory)
+  const hasBackgroundActivity = useHasBackgroundActivity(sessionID)
   const currentMode = localMode ?? sessionAgent.agent
   const setStoredAgent = useSessionAgentStore((s) => s.setAgent)
   const sendPrompt = useSendPrompt(directory)
@@ -1471,8 +1473,17 @@ if (isIOS && isSecureContext && navigator.clipboard && navigator.clipboard.read)
 
   
 
+  const sessionActivityAnnouncement = isSessionActive
+    ? 'Session working'
+    : hasBackgroundActivity
+      ? 'Background tasks running'
+      : ''
+
 return (
     <div className={`relative isolate border border-border dark:border-border/30 rounded-xl p-2 md:p-3 mb-4 md:mb-1 w-full before:pointer-events-none before:absolute before:-inset-px before:-z-10 before:rounded-xl before:bg-background/95 before:backdrop-blur-md before:content-[''] ${hasPendingPermissionForSession ? 'border-highlight/50 ring-1 ring-highlight/30' : composerModeStyle?.frame ?? ''} ${isTakeoverOpen ? 'z-[60]' : ''}`}>
+      <div role="status" aria-live="polite" className="sr-only">
+        {sessionActivityAnnouncement}
+      </div>
       {composerModeStyle && (
         <span
           data-testid="composer-mode-badge"
@@ -1540,7 +1551,7 @@ return (
                 <ArrowDown className="w-4 h-4" />
                 <span>Latest</span>
               </button>
-              {isSessionActive && (
+              {(isSessionActive || hasBackgroundActivity) && (
                 <div className="px-2.5 py-1.5 rounded-lg text-xs font-medium text-muted-foreground max-w-[120px]">
                   <SessionStatusIndicator sessionID={sessionID} showLabel />
                 </div>
@@ -1573,7 +1584,7 @@ return (
                   </IconToggleButton>
                 </>
               )}
-              {isSessionActive && (
+              {(isSessionActive || hasBackgroundActivity) && (
                 <div className="px-2.5 py-1.5 md:px-3 md:py-2 rounded-lg text-xs md:text-sm font-medium text-muted-foreground max-w-[120px] md:max-w-[180px]">
                   <SessionStatusIndicator sessionID={sessionID} showLabel />
                 </div>

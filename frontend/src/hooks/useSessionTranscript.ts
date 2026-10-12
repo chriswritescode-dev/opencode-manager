@@ -83,7 +83,6 @@ export function useSessionTranscript(sessionID: string, directory: string) {
     enabled: Boolean(sessionID && directory),
     staleTime: Infinity,
     refetchOnWindowFocus: false,
-    refetchOnMount: 'always',
     refetchInterval: isStreamConnected ? false : TRANSCRIPT_FALLBACK_POLL_INTERVAL_MS,
   })
 
@@ -154,6 +153,10 @@ export function useSessionTranscript(sessionID: string, directory: string) {
       },
       onResync: refreshNewestPage,
     })
+
+    if (queryClient.getQueryData<TranscriptCache>(queryKey)) {
+      refreshNewestPage()
+    }
 
     return () => {
       if (frameRef.current !== null) {

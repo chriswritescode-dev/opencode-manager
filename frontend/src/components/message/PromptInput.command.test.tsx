@@ -33,6 +33,7 @@ const mocks = vi.hoisted(() => ({
   useUserBash: vi.fn(),
   useSessionAgentStore: vi.fn(),
   useSendErrorStore: vi.fn(),
+  useHasBackgroundActivity: vi.fn(),
 }))
 
 const suggestionProps = vi.hoisted(() => ({ isOpen: false, selectedIndex: 0 }))
@@ -66,6 +67,10 @@ vi.mock('@/hooks/useSessionAgent', () => ({ useSessionAgent: mocks.useSessionAge
 vi.mock('@/stores/userBashStore', () => ({ useUserBash: mocks.useUserBash }))
 vi.mock('@/stores/sessionAgentStore', () => ({ useSessionAgentStore: mocks.useSessionAgentStore }))
 vi.mock('@/stores/sendErrorStore', () => ({ useSendErrorStore: mocks.useSendErrorStore }))
+vi.mock('@/stores/sessionStatusStore', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('@/stores/sessionStatusStore')>()
+  return { ...actual, useHasBackgroundActivity: mocks.useHasBackgroundActivity }
+})
 vi.mock('@/lib/toast', () => ({ showToast: mocks.showToast }))
 
 vi.mock('@/contexts/EventContext', () => ({
@@ -206,6 +211,7 @@ describe('PromptInput command submission', () => {
     mocks.useUserBash.mockImplementation((selector: (state: unknown) => unknown) => selector({ addUserBashCommand: vi.fn() }))
     mocks.useSessionAgentStore.mockImplementation((selector: (state: unknown) => unknown) => selector({ setAgent: mocks.setAgent }))
     mocks.useSendErrorStore.mockImplementation((selector: (state: unknown) => unknown) => selector({ errors: {} }))
+    mocks.useHasBackgroundActivity.mockReturnValue(false)
     suggestionProps.isOpen = false
     suggestionProps.selectedIndex = 0
   })
@@ -241,6 +247,27 @@ describe('PromptInput command submission', () => {
     await screen.findByPlaceholderText('Send a message...')
     expect(other).toHaveFocus()
     other.remove()
+  })
+
+  it('announces session activity changes to screen readers', async () => {
+    const queryClient = createTestQueryClient()
+    queryClient.setQueryData(['opencode', 'session', 'test-session', '/test'], sessionInfo())
+    const buildPrompt = (props: { isSessionActive?: boolean }) => (
+      <QueryClientProvider client={queryClient}>
+        <PromptInput {...defaultProps} {...props} />
+      </QueryClientProvider>
+    )
+
+    const { rerender } = render(buildPrompt({}))
+    await screen.findByPlaceholderText('Send a message...')
+    expect(screen.getByRole('status').textContent).toBe('')
+
+    rerender(buildPrompt({ isSessionActive: true }))
+    expect(screen.getByRole('status')).toHaveTextContent('Session working')
+
+    mocks.useHasBackgroundActivity.mockReturnValue(true)
+    rerender(buildPrompt({}))
+    expect(screen.getByRole('status')).toHaveTextContent('Background tasks running')
   })
 
   it('disables submit and does not run a command while the model is not ready', async () => {

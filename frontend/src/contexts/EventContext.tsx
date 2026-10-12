@@ -4,9 +4,11 @@ import { useNavigate } from 'react-router-dom'
 import { useQueryClient, useQuery } from '@tanstack/react-query'
 import {
   cancelForm,
+  getSession,
   listActiveSessions,
   listPendingForms,
   listPendingPermissions,
+  listShells,
   replyForm,
   replyPermission,
 } from '@/api/opencode'
@@ -204,6 +206,8 @@ export function EventProvider({ children }: { children: React.ReactNode }) {
   const statusPollIntervalRef = useRef<ReturnType<typeof setInterval> | null>(null)
   const subscriptionRef = useRef<ReturnType<typeof openCodeEventStream.subscribeGlobalMonitor> | null>(null)
   const reposRef = useRef<typeof repos>(null)
+  const trackedRepoDirectoriesRef = useRef<Set<string>>(new Set())
+  const ancestryInFlightRef = useRef<Set<string>>(new Set())
 
   const { data: repos } = useQuery({
     queryKey: ['repos'],
@@ -420,6 +424,62 @@ export function EventProvider({ children }: { children: React.ReactNode }) {
     return [...directories]
   }, [])
 
+  const resolveSessionAncestry = useCallback(async (sessionIDs: string[]) => {
+    const resolveUp = async (startID: string): Promise<void> => {
+      let currentID: string | null = startID
+      const visited = new Set<string>()
+      while (currentID !== null) {
+        if (visited.has(currentID)) return
+        visited.add(currentID)
+
+        const parents = useSessionStatus.getState().parents
+        if (parents.has(currentID)) {
+          currentID = parents.get(currentID) ?? null
+          continue
+        }
+        if (ancestryInFlightRef.current.has(currentID)) return
+
+        const lookupID = currentID
+        ancestryInFlightRef.current.add(lookupID)
+        try {
+          const session = await getSession(lookupID)
+          useSessionStatus.getState().setSessionParent(lookupID, session.parentID ?? null)
+          currentID = session.parentID ?? null
+        } catch (error) {
+          if (import.meta.env.DEV) {
+            console.warn(`Failed to resolve session ancestry for ${lookupID}:`, error)
+          }
+          return
+        } finally {
+          ancestryInFlightRef.current.delete(lookupID)
+        }
+      }
+    }
+
+    await Promise.allSettled(sessionIDs.map((sessionID) => resolveUp(sessionID)))
+  }, [])
+
+  const syncRunningShells = useCallback(async (directories: string[]) => {
+    await Promise.all(directories.map(async (directory) => {
+      const token = useSessionStatus.getState().beginShellSnapshot()
+      try {
+        const shells = await listShells(directory)
+        const runningShells = shells.flatMap((shell) => {
+          const sessionID = shell.metadata.sessionID
+          if (shell.status !== 'running' || typeof sessionID !== 'string') return []
+          return [{ id: shell.id, sessionID }]
+        })
+        useSessionStatus.getState().replaceRunningShells(directory, runningShells, token)
+        await resolveSessionAncestry(runningShells.map((shell) => shell.sessionID))
+      } catch (error) {
+        useSessionStatus.getState().endShellSnapshot(token)
+        if (import.meta.env.DEV) {
+          console.warn(`Failed to fetch running shells for ${directory}:`, error)
+        }
+      }
+    }))
+  }, [resolveSessionAncestry])
+
   const fetchInitialPendingData = useCallback(async () => {
     const reposToUse = reposRef.current
     if (!reposToUse || reposToUse.length === 0) return
@@ -452,13 +512,14 @@ export function EventProvider({ children }: { children: React.ReactNode }) {
       if (becameUnknown.length > 0) {
         invalidateChildSessionCaches(queryClient, becameUnknown)
       }
+      await resolveSessionAncestry(Object.keys(active))
     } catch (error) {
       useSessionStatus.getState().endStatusSnapshot(snapshotToken)
       if (import.meta.env.DEV) {
         console.warn('Failed to fetch active sessions:', error)
       }
     }
-  }, [queryClient])
+  }, [queryClient, resolveSessionAncestry])
 
   const stopStatusPoll = useCallback(() => {
     if (statusPollIntervalRef.current === null) return
@@ -555,13 +616,44 @@ export function EventProvider({ children }: { children: React.ReactNode }) {
           invalidateSessionListCachesDebounced(queryClient, event.directory)
           break
         }
-        case 'session.created':
+        case 'session.created': {
+          invalidateSessionListCachesDebounced(queryClient, event.directory)
+          if (typeof event.data.parentID === 'string') {
+            useSessionStatus.getState().setSessionParent(event.data.sessionID, event.data.parentID)
+          }
+          break
+        }
         case 'session.forked':
         case 'session.renamed':
         case 'session.moved':
         case 'session.metadata.updated':
           invalidateSessionListCachesDebounced(queryClient, event.directory)
           break
+        case 'shell.created': {
+          const info = event.data.info
+          if (
+            info.status === 'running' &&
+            typeof info.metadata.sessionID === 'string' &&
+            event.directory
+          ) {
+            const sessionID = info.metadata.sessionID
+            useSessionStatus.getState().setShellRunning(info.id, sessionID, event.directory)
+            if (!useSessionStatus.getState().parents.has(sessionID)) {
+              void resolveSessionAncestry([sessionID])
+            }
+          }
+          break
+        }
+        case 'shell.exited': {
+          if (event.data.status !== 'running') {
+            useSessionStatus.getState().clearShell(event.data.id)
+          }
+          break
+        }
+        case 'shell.deleted': {
+          useSessionStatus.getState().clearShell(event.data.id)
+          break
+        }
         case 'credential.updated':
         case 'credential.switched':
         case 'integration.updated':
@@ -608,6 +700,7 @@ export function EventProvider({ children }: { children: React.ReactNode }) {
         initialFetchDoneRef.current = false
         fetchInitialPendingData()
         fetchInitialSessionStatuses()
+        void syncRunningShells(collectTrackedDirectories())
         invalidateChildSessionCaches(queryClient)
         invalidateQueryKeysDebounced(queryClient, LOCATION_CATALOG_QUERY_KEYS)
         startStatusPoll()
@@ -620,6 +713,7 @@ export function EventProvider({ children }: { children: React.ReactNode }) {
     const handleResync = () => {
       void reconcilePendingActionsForDirectories(collectTrackedDirectories())
       void fetchInitialSessionStatuses()
+      void syncRunningShells(collectTrackedDirectories())
       invalidateChildSessionCaches(queryClient)
       invalidateQueryKeysDebounced(queryClient, LOCATION_CATALOG_QUERY_KEYS)
     }
@@ -640,15 +734,21 @@ export function EventProvider({ children }: { children: React.ReactNode }) {
       subscription.dispose()
       subscriptionRef.current = null
     }
-  }, [addPermission, removePermission, addForm, removeForm, rememberSessionDirectory, fetchInitialPendingData, fetchInitialSessionStatuses, startStatusPoll, stopStatusPoll, queryClient, handleHealthChange, reconcilePendingActionsForDirectories, collectTrackedDirectories])
+  }, [addPermission, removePermission, addForm, removeForm, rememberSessionDirectory, fetchInitialPendingData, fetchInitialSessionStatuses, startStatusPoll, stopStatusPoll, queryClient, handleHealthChange, reconcilePendingActionsForDirectories, collectTrackedDirectories, syncRunningShells, resolveSessionAncestry])
 
   useEffect(() => {
     reposRef.current = repos
+    const directories = [...new Set((repos ?? []).map(r => r.fullPath))]
+    const previousDirectories = trackedRepoDirectoriesRef.current
+    const addedDirectories = directories.filter((directory) => !previousDirectories.has(directory))
+    trackedRepoDirectoriesRef.current = new Set(directories)
     const sub = subscriptionRef.current
     if (!sub) return
-    const directories = [...new Set((repos ?? []).map(r => r.fullPath))]
     sub.updateDirectories(directories)
-  }, [repos])
+    if (addedDirectories.length > 0) {
+      void syncRunningShells(addedDirectories)
+    }
+  }, [repos, syncRunningShells])
 
   useEffect(() => {
     if (!repos || repos.length === 0) return

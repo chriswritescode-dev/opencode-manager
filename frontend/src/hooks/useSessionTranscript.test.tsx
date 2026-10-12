@@ -10,6 +10,7 @@ import type {
 import { useSessionTranscript } from './useSessionTranscript'
 import { ContextUsageIndicator } from '@/components/session/ContextUsageIndicator'
 import { applySessionEvent, emptySessionTranscript } from '@/lib/session-projection'
+import type { TranscriptCache } from '@/lib/session-projection'
 import { sessionTranscriptQueryKey } from '@/lib/queryInvalidation'
 import {
   ASSISTANT_MESSAGE_ID,
@@ -44,6 +45,7 @@ vi.mock('@/lib/opencode-event-stream', async () => {
 })
 
 const DIRECTORY = '/repo'
+const SECOND_SESSION_ID = 'ses_2'
 
 interface SnapshotValue {
   messages: SessionMessageInfo[]
@@ -212,6 +214,113 @@ describe('useSessionTranscript', () => {
       expect(mocks.readSessionSnapshot).toHaveBeenCalledTimes(2)
       expect(result.current.messages).toEqual(recovered)
     })
+  })
+
+  it('reads the newest page once on a fresh mount with no cached transcript', async () => {
+    const queryClient = createQueryClient()
+    const { result } = renderHook(() => useSessionTranscript(SESSION_ID, DIRECTORY), {
+      wrapper: createWrapper(queryClient),
+    })
+
+    await waitFor(() => expect(result.current.messages).toHaveLength(2))
+
+    await act(async () => {})
+    expect(mocks.readSessionSnapshot).toHaveBeenCalledTimes(1)
+  })
+
+  it('refreshes a cached transcript when switching to another session', async () => {
+    const queryClient = createQueryClient()
+    const { result, rerender } = renderHook(
+      ({ sessionID }: { sessionID: string }) => useSessionTranscript(sessionID, DIRECTORY),
+      {
+        wrapper: createWrapper(queryClient),
+        initialProps: { sessionID: SESSION_ID },
+      },
+    )
+
+    await waitFor(() => expect(result.current.messages).toHaveLength(2))
+    expect(mocks.readSessionSnapshot).toHaveBeenCalledTimes(1)
+
+    const staleBusy: TranscriptCache = {
+      transcript: { messages: seededMessages, pending: [], status: 'busy' },
+    }
+    queryClient.setQueryData(sessionTranscriptQueryKey(SECOND_SESSION_ID), staleBusy)
+
+    rerender({ sessionID: SECOND_SESSION_ID })
+
+    await waitFor(() => expect(result.current.status).toBe('idle'))
+    expect(mocks.readSessionSnapshot).toHaveBeenCalledTimes(2)
+    expect(mocks.readSessionSnapshot).toHaveBeenLastCalledWith(SECOND_SESSION_ID)
+  })
+
+  it('refreshes a stale cached transcript when the hook remounts', async () => {
+    const queryClient = createQueryClient()
+    mocks.readSessionSnapshot.mockResolvedValue({
+      messages: seededMessages,
+      pending: [],
+      status: 'busy',
+    })
+    const first = renderHook(() => useSessionTranscript(SESSION_ID, DIRECTORY), {
+      wrapper: createWrapper(queryClient),
+    })
+
+    await waitFor(() => expect(first.result.current.status).toBe('busy'))
+    first.unmount()
+
+    mocks.readSessionSnapshot.mockResolvedValue({
+      messages: seededMessages,
+      pending: [],
+      status: 'idle',
+    })
+    const second = renderHook(() => useSessionTranscript(SESSION_ID, DIRECTORY), {
+      wrapper: createWrapper(queryClient),
+    })
+
+    await waitFor(() => expect(second.result.current.status).toBe('idle'))
+    expect(mocks.readSessionSnapshot).toHaveBeenCalledTimes(2)
+  })
+
+  it('applies events buffered during the refresh read triggered by an existing cache', async () => {
+    const queryClient = createQueryClient()
+    const settledAssistant: SessionMessageInfo = {
+      id: ASSISTANT_MESSAGE_ID,
+      type: 'assistant',
+      agent: 'build',
+      model: { id: 'claude-sonnet-4-5', providerID: 'anthropic' },
+      content: [],
+      time: { created: 1020, completed: 1030 },
+    }
+    queryClient.setQueryData<TranscriptCache>(sessionTranscriptQueryKey(SESSION_ID), {
+      transcript: {
+        messages: [seededMessages[0], settledAssistant],
+        pending: [],
+        status: 'busy',
+      },
+    })
+
+    const refreshRead = deferred<SnapshotValue>()
+    mocks.readSessionSnapshot.mockReturnValueOnce(refreshRead.promise)
+
+    const { result } = renderHook(() => useSessionTranscript(SESSION_ID, DIRECTORY), {
+      wrapper: createWrapper(queryClient),
+    })
+
+    await waitFor(() => expect(mocks.readSessionSnapshot).toHaveBeenCalledTimes(1))
+
+    act(() => {
+      testTransport().message(executionSequence[1])
+    })
+
+    await act(async () => {
+      refreshRead.resolve({
+        messages: [seededMessages[0], settledAssistant],
+        pending: [],
+        status: 'busy',
+      })
+    })
+
+    await waitFor(() => expect(result.current.status).toBe('idle'))
+    expect(mocks.readSessionSnapshot).toHaveBeenCalledTimes(1)
   })
 
   it('seeds a queued prompt and a busy session from the snapshot on mount', async () => {
