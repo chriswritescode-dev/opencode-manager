@@ -1366,6 +1366,9 @@ if (isIOS && isSecureContext && navigator.clipboard && navigator.clipboard.read)
           ? 'sending'
           : null
   const showVoiceFeedback = voiceFeedbackState !== null
+  const hasPromptContent = prompt.trim().length > 0 || imageAttachments.length > 0
+  const canUseMobileVoice = isMobile && sttEnabled && sttSupported && !hasPendingPermissionForSession
+  const showMobileVoiceButton = canUseMobileVoice && (!hasPromptContent || showVoiceFeedback)
   const voiceFeedbackLabel = voiceFeedbackState === 'starting'
     ? 'Starting microphone...'
     : voiceFeedbackState === 'sending'
@@ -1652,18 +1655,20 @@ return (
               goalLabel={goalButtonLabel}
               onToggleGoal={toggleGoalArmed}
               onAttachFile={openFilePicker}
+              onDictate={canUseMobileVoice && hasPromptContent && !showVoiceFeedback ? () => void startVoiceRecording() : undefined}
             />
           )}
           {sttEnabled && sttSupported && (
             renderVoiceButton('desktop')
           )}
-          {isMobile && sttEnabled && sttSupported && !hasPendingPermissionForSession && (
+          {showMobileVoiceButton && (
             renderVoiceButton('mobile')
           )}
+          {!showMobileVoiceButton && (
             <button
               data-submit-prompt
               onClick={hasPendingPermissionForSession ? () => setShowDialog(true) : handleSubmit}
-              disabled={hasPendingPermissionForSession ? false : (!isModelReady || (!prompt.trim() && imageAttachments.length === 0) || (isPromptSubmitPending && !isStreamingResponse))}
+              disabled={hasPendingPermissionForSession ? false : (!isModelReady || !hasPromptContent || (isPromptSubmitPending && !isStreamingResponse))}
               className={`px-4 md:px-5 py-1.5 md:py-2 rounded-lg text-sm font-medium transition-colors dark:border flex-shrink-0 min-w-[52px] ${
                 hasPendingPermissionForSession
                   ? 'bg-highlight hover:bg-highlight/90 border-highlight text-highlight-foreground ring-highlight/20'
@@ -1673,6 +1678,7 @@ return (
             >
               <span className="whitespace-nowrap">{hasPendingPermissionForSession ? 'View' : (isStreamingResponse ? 'Queue' : 'Send')}</span>
             </button>
+          )}
         </div>
       </div>
 

@@ -1,5 +1,5 @@
 import type { ReactNode } from 'react'
-import { Paperclip, Plus, Shield, ShieldCheck, Target } from 'lucide-react'
+import { Mic, Paperclip, Plus, Shield, ShieldCheck, Target } from 'lucide-react'
 import {
   DropdownMenu,
   DropdownMenuCheckboxItem,
@@ -19,6 +19,7 @@ interface ComposerToolsMenuProps {
   goalLabel: string
   onToggleGoal: () => void
   onAttachFile: () => void
+  onDictate?: () => void
 }
 
 export function ComposerToolsMenu({
@@ -29,6 +30,7 @@ export function ComposerToolsMenu({
   goalLabel,
   onToggleGoal,
   onAttachFile,
+  onDictate,
 }: ComposerToolsMenuProps) {
   const permission = usePermissionModeToggle(sessionID, directory)
 
@@ -67,6 +69,11 @@ export function ComposerToolsMenu({
         <DropdownMenuItem onSelect={onAttachFile} className="pl-8">
           <ToolMenuItemContent icon={<Paperclip className="h-4 w-4" />} title="Attach image or PDF" />
         </DropdownMenuItem>
+        {onDictate ? (
+          <DropdownMenuItem onSelect={onDictate} className="pl-8">
+            <ToolMenuItemContent icon={<Mic className="h-4 w-4" />} title="Dictate" />
+          </DropdownMenuItem>
+        ) : null}
       </DropdownMenuContent>
     </DropdownMenu>
   )
