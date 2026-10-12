@@ -58,6 +58,12 @@ describe('getWorkspaceFilePath', () => {
     expect(getWorkspaceFilePath('out.md', worktree)).toBe('/workspace/worktrees/job-1-run-2/out.md')
     expect(getWorkspaceFilePath('/etc/hosts', workspace)).toBe('/etc/hosts')
   })
+
+  it('normalizes a trailing slash on the working directory', () => {
+    expect(getWorkspaceFilePath('recaps/daily.html', { ...workspace, directory: '/workspace/repos/assistant/' })).toBe(
+      'assistant/recaps/daily.html',
+    )
+  })
 })
 
 describe('isExternalLink', () => {

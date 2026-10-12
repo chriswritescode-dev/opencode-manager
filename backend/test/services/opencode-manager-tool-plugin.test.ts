@@ -310,7 +310,7 @@ describe('ocm-manager plugin', () => {
     expect(result.content).toBe(
       'Showing the artifact "Formation odds" from /workspace/repos/app/report.html in the Manager chat. It renders the current file contents, so after editing the file the user can reload the view; call show_artifact again only to show a different file.',
     )
-    expect(result.metadata).toBeUndefined()
+    expect(result.metadata).toEqual({ path: '/workspace/repos/app/report.html' })
   })
 
   it('surfaces the resolve error when the artifact path is rejected', async () => {

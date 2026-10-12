@@ -1,6 +1,6 @@
 import { memo, useCallback, useMemo, useState } from 'react'
 import { Pencil, Loader2 } from 'lucide-react'
-import { assistantText, formatOpenCodeModelRef, readShowArtifactCall } from '@opencode-manager/shared/opencode'
+import { assistantText, formatOpenCodeModelRef } from '@opencode-manager/shared/opencode'
 import type {
   PromptAgentAttachment,
   PromptFileAttachment,
@@ -23,6 +23,7 @@ import { useSettings } from '@/hooks/useSettings'
 import { CopyButton } from '@/components/ui/copy-button'
 import { TTSButton } from '@/components/ui/tts-button'
 import { backgroundShellID, collectBackgroundParts, type ShellNoticeOutcome } from '@/lib/backgroundWork'
+import { readShowArtifactCall } from '@/lib/artifactTool'
 import { groupExplorationParts, type AssistantContentItem } from '@/lib/explorationGroups'
 import type { WalkthroughSource } from '@opencode-manager/shared/schemas'
 import { ExplorationGroup } from './ExplorationGroup'
@@ -329,6 +330,8 @@ interface MessageRowProps {
   handleCancelEdit: () => void
   sessionID: string
   directory?: string
+  repoFullPath?: string
+  repoLocalPath?: string
   onFileClick?: (filePath: string, lineNumber?: number) => void
   onChildSessionClick?: (sessionId: string) => void
   onOpenWalkthrough?: (source?: WalkthroughSource) => void
@@ -350,6 +353,8 @@ const MessageRow = memo(function MessageRow({
   handleCancelEdit,
   sessionID,
   directory,
+  repoFullPath,
+  repoLocalPath,
   onFileClick,
   onChildSessionClick,
   onOpenWalkthrough,
@@ -458,6 +463,8 @@ const MessageRow = memo(function MessageRow({
                   part={part}
                   messageID={message.id}
                   directory={directory}
+                  repoFullPath={repoFullPath}
+                  repoLocalPath={repoLocalPath}
                   shellOutcome={shellOutcomeFor(part)}
                   onFileClick={onFileClick}
                   onChildSessionClick={onChildSessionClick}
@@ -502,6 +509,8 @@ const MessageRow = memo(function MessageRow({
                     parts={item.parts}
                     messageID={message.id}
                     directory={directory}
+                    repoFullPath={repoFullPath}
+                    repoLocalPath={repoLocalPath}
                     onFileClick={onFileClick}
                     onChildSessionClick={onChildSessionClick}
                     onOpenWalkthrough={onOpenWalkthrough}
@@ -511,6 +520,8 @@ const MessageRow = memo(function MessageRow({
                     part={item.part}
                     messageID={message.id}
                     directory={directory}
+                    repoFullPath={repoFullPath}
+                    repoLocalPath={repoLocalPath}
                     shellOutcome={shellOutcomeFor(item.part)}
                     onFileClick={onFileClick}
                     onChildSessionClick={onChildSessionClick}
@@ -578,6 +589,8 @@ const MessageRow = memo(function MessageRow({
 interface MessageThreadProps {
   sessionID: string
   directory?: string
+  repoFullPath?: string
+  repoLocalPath?: string
   messages: SessionMessageInfo[]
   pending: SessionInboxInfo[]
   onFileClick?: (filePath: string, lineNumber?: number) => void
@@ -591,6 +604,8 @@ interface MessageThreadProps {
 export const MessageThread = memo(function MessageThread({
   sessionID,
   directory,
+  repoFullPath,
+  repoLocalPath,
   messages,
   pending,
   onFileClick,
@@ -661,6 +676,8 @@ export const MessageThread = memo(function MessageThread({
           handleCancelEdit={handleCancelEdit}
           sessionID={sessionID}
           directory={directory}
+          repoFullPath={repoFullPath}
+          repoLocalPath={repoLocalPath}
           onFileClick={onFileClick}
           onChildSessionClick={onChildSessionClick}
           onOpenWalkthrough={onOpenWalkthrough}

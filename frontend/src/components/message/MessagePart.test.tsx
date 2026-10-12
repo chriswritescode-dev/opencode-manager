@@ -326,6 +326,34 @@ describe('MessagePart', () => {
       expect(iframe.tagName).toBe('IFRAME')
       expect(iframe).toHaveAttribute('src', getFileApiUrl('/tmp/artifacts/report.html', { params: { raw: true } }))
     })
+
+    it('passes the resolved metadata path and repo mapping through to the artifact frame', () => {
+      setupSettings({
+        simpleChatMode: true,
+        showReasoning: false,
+        expandToolCalls: false,
+        expandDiffs: true,
+      })
+
+      renderWithProviders(
+        <MessagePart
+          part={toolPart('ocm', {
+            status: 'completed',
+            input: { action: 'show_artifact', params: { title: 'Report', path: 'reports/summary.html' } },
+            content: [{ type: 'text', text: 'Artifact shown' }],
+            metadata: { path: '/workspace/repos/assistant/reports/summary.html' },
+          })}
+          messageID="msg_1"
+          directory="/workspace/repos/assistant"
+          repoFullPath="/workspace/repos/assistant"
+          repoLocalPath="assistant"
+        />,
+      )
+
+      const iframe = screen.getByTitle('Report')
+      expect(iframe.tagName).toBe('IFRAME')
+      expect(iframe).toHaveAttribute('src', getFileApiUrl('assistant/reports/summary.html', { params: { raw: true } }))
+    })
   })
 
   describe('sandbox indicator', () => {

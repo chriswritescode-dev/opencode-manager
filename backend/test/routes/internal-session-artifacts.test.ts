@@ -1,7 +1,7 @@
 import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest'
 import { Hono } from 'hono'
 import { Database } from 'bun:sqlite'
-import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'fs'
+import { mkdirSync, mkdtempSync, rmSync, symlinkSync, writeFileSync } from 'fs'
 import os from 'os'
 import path from 'path'
 import { allMigrations } from '../../src/db/migrations'
@@ -73,6 +73,44 @@ describe('internal/session-artifacts routes', () => {
 
     expect(res.status).toBe(200)
     await expect(res.json()).resolves.toEqual({ path: filePath })
+  })
+
+  it('keeps the symlinked session directory prefix in the returned path', async () => {
+    const realRoot = path.join(root, 'real')
+    const realSessionDirectory = path.join(realRoot, 'session')
+    mkdirSync(realSessionDirectory, { recursive: true })
+    writeFileSync(path.join(realSessionDirectory, 'report.html'), '<h1>Report</h1>')
+    const linkedRoot = path.join(root, 'linked')
+    symlinkSync(realRoot, linkedRoot, 'dir')
+    const linkedSessionDirectory = path.join(linkedRoot, 'session')
+
+    const client = {
+      api: { session: { get: vi.fn(async () => ({ location: { directory: linkedSessionDirectory } })) } },
+    } as unknown as OpenCodeClient
+    const linkedApp = new Hono()
+    linkedApp.route('/api/internal', createInternalTestApp(db, { openCodeClient: client }))
+
+    const res = await linkedApp.request(`/api/internal/session-artifacts/${SESSION_ID}/resolve`, {
+      method: 'POST',
+      headers: { authorization: `Bearer ${token}`, 'content-type': 'application/json' },
+      body: JSON.stringify({ path: 'report.html' }),
+    })
+
+    expect(res.status).toBe(200)
+    await expect(res.json()).resolves.toEqual({ path: path.join(linkedSessionDirectory, 'report.html') })
+  })
+
+  it('rejects a symlink that escapes the session directory', async () => {
+    const outside = path.join(root, 'outside.html')
+    writeFileSync(outside, '<h1>Outside</h1>')
+    symlinkSync(outside, path.join(sessionDirectory, 'link.html'))
+
+    const res = await resolve({ path: 'link.html' })
+
+    expect(res.status).toBe(400)
+    await expect(res.json()).resolves.toEqual({
+      error: `Artifact path must be inside the session directory ${sessionDirectory}`,
+    })
   })
 
   it('returns 404 when the file does not exist', async () => {

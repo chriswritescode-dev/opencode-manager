@@ -3,6 +3,7 @@ import path from 'node:path'
 import { ARTIFACT_LIMITS } from '@opencode-manager/shared/schemas'
 import type { OpenCodeClient } from './opencode/client'
 import { ServiceError } from '../utils/service-error'
+import { isPathWithinRoot } from '../utils/fs-safe'
 
 const ARTIFACT_EXTENSIONS = new Set(['.html', '.htm'])
 
@@ -13,14 +14,11 @@ export class SessionArtifactError extends ServiceError {
   }
 }
 
-function isInsideDirectory(directory: string, candidate: string): boolean {
-  const relative = path.relative(directory, candidate)
-  return relative !== '' && relative !== '..' && !relative.startsWith(`..${path.sep}`) && !path.isAbsolute(relative)
-}
-
 /**
- * Resolves an `ocm` `show_artifact` path to the real, absolute path of a self-contained HTML file inside the
- * session directory, rejecting paths that escape it (including through symlinks), non-HTML files and oversized files.
+ * Resolves an `ocm` `show_artifact` path to the absolute path of a self-contained HTML file inside the session
+ * directory, rejecting paths that escape it (including through symlinks), non-HTML files and oversized files.
+ * Symlinks are resolved for validation only; the returned path stays lexical so callers can map it by the
+ * session directory or repo prefix they were given.
  */
 export async function resolveSessionArtifactFile(
   openCodeClient: OpenCodeClient,
@@ -46,7 +44,7 @@ export async function resolveSessionArtifactFile(
     throw new SessionArtifactError(`Artifact file not found: ${artifactPath}`, 404)
   }
 
-  if (!isInsideDirectory(realSessionDirectory, realFile)) {
+  if (!isPathWithinRoot(realSessionDirectory, realFile)) {
     throw new SessionArtifactError(`Artifact path must be inside the session directory ${sessionDirectory}`, 400)
   }
 
@@ -65,5 +63,5 @@ export async function resolveSessionArtifactFile(
     throw new SessionArtifactError('Artifact file exceeds 5 MB', 413)
   }
 
-  return realFile
+  return resolved
 }

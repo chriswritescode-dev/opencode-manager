@@ -1,6 +1,6 @@
 import { useState, useRef, useEffect, useMemo, memo } from 'react'
 import { unwrapSandboxExecCommand } from '@opencode-manager/shared/utils'
-import { readShowArtifactCall, toolContentText, type SessionMessageAssistantTool } from '@opencode-manager/shared/opencode'
+import { toolContentText, type SessionMessageAssistantTool } from '@opencode-manager/shared/opencode'
 import { useSettings } from '@/hooks/useSettings'
 import { useUserBash } from '@/stores/userBashStore'
 import { useChildLifecycleForSession } from '@/stores/sessionStatusStore'
@@ -28,6 +28,8 @@ import {
 } from '@/lib/backgroundWork'
 import { getToolInputPath, getToolSpecificRender } from './FileToolRender'
 import { readOpenWalkthroughCall } from '@/lib/walkthroughTool'
+import { readShowArtifactCall } from '@/lib/artifactTool'
+import { getWorkspaceFilePath } from '@/lib/markdownLinks'
 import { getFileApiUrl } from '@/api/files'
 import { ArtifactPart } from './ArtifactPart'
 import type { WalkthroughSource } from '@opencode-manager/shared/schemas'
@@ -63,6 +65,8 @@ interface ToolCallPartProps {
   part: SessionMessageAssistantTool
   messageID?: string
   directory?: string
+  repoFullPath?: string
+  repoLocalPath?: string
   shellOutcome?: ShellNoticeOutcome
   onFileClick?: (filePath: string, lineNumber?: number) => void
   onChildSessionClick?: (sessionId: string) => void
@@ -119,7 +123,7 @@ function ClickableJson({ json, onFileClick }: { json: unknown; onFileClick?: (fi
   return <pre className="bg-accent p-2 rounded text-xs overflow-x-auto whitespace-pre-wrap break-words">{parts}</pre>
 }
 
-export const ToolCallPart = memo(function ToolCallPart({ part, messageID, directory, shellOutcome, onFileClick, onChildSessionClick, onOpenWalkthrough }: ToolCallPartProps) {
+export const ToolCallPart = memo(function ToolCallPart({ part, messageID, directory, repoFullPath, repoLocalPath, shellOutcome, onFileClick, onChildSessionClick, onOpenWalkthrough }: ToolCallPartProps) {
   const { preferences } = useSettings()
   const { userBashCommands } = useUserBash()
   const isSubagent = part.name === 'subagent'
@@ -254,11 +258,13 @@ export const ToolCallPart = memo(function ToolCallPart({ part, messageID, direct
   ) : null
 
   const artifact = readShowArtifactCall(part)
-  if (artifact && (artifact.path.startsWith('/') || directory)) {
-    const fullPath = artifact.path.startsWith('/')
-      ? artifact.path
-      : `${directory?.replace(/\/+$/, '')}/${artifact.path}`
-    return <ArtifactPart title={artifact.title} path={artifact.path} src={getFileApiUrl(fullPath, { params: { raw: true } })} />
+  if (artifact && (artifact.resolvedPath || artifact.path.startsWith('/') || directory)) {
+    const servedPath = getWorkspaceFilePath(artifact.resolvedPath ?? artifact.path, {
+      directory,
+      repoFullPath,
+      repoLocalPath,
+    })
+    return <ArtifactPart title={artifact.title} path={artifact.path} src={getFileApiUrl(servedPath, { params: { raw: true } })} />
   }
 
   if (isSubagent) {

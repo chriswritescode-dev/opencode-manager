@@ -31,6 +31,7 @@ vi.mock('@opencode-manager/shared/config/env', () => ({
 vi.mock('../../src/services/files', () => ({
   getFile: vi.fn(),
   getRawFileContent: vi.fn(),
+  getRawFileMetadata: vi.fn(),
   getFileRange: vi.fn(),
   uploadFile: vi.fn(),
   createFileOrFolder: vi.fn(),
@@ -47,6 +48,8 @@ vi.mock('../../src/services/archive', () => ({
 }))
 
 const getFile = fileService.getFile as MockedFunction<typeof fileService.getFile>
+const getRawFileContent = fileService.getRawFileContent as MockedFunction<typeof fileService.getRawFileContent>
+const getRawFileMetadata = fileService.getRawFileMetadata as MockedFunction<typeof fileService.getRawFileMetadata>
 const getFileRange = fileService.getFileRange as MockedFunction<typeof fileService.getFileRange>
 const uploadFile = fileService.uploadFile as MockedFunction<typeof fileService.uploadFile>
 const createFileOrFolder = fileService.createFileOrFolder as MockedFunction<typeof fileService.createFileOrFolder>
@@ -141,6 +144,9 @@ describe('File Routes', () => {
       lastModified: new Date(),
     }
 
+    const rawLastModified = new Date('2024-01-02T03:04:05.000Z')
+    const rawEtag = `W/"13-${rawLastModified.getTime()}"`
+
     it('should return directory listing when path is directory', async () => {
       getFile.mockResolvedValue(mockDirInfo)
 
@@ -167,8 +173,8 @@ describe('File Routes', () => {
     })
 
     it('should serve raw content inside a CSP sandbox', async () => {
-      getFile.mockResolvedValue({ ...mockFileInfo, name: 'report.html', mimeType: 'text/html', size: 13 })
-      vi.mocked(fileService.getRawFileContent).mockResolvedValue(Buffer.from('<h1>hi</h1>\n\n'))
+      getRawFileMetadata.mockResolvedValue({ size: 13, mimeType: 'text/html', lastModified: rawLastModified })
+      getRawFileContent.mockResolvedValue(Buffer.from('<h1>hi</h1>\n\n'))
 
       const response = await app.request('/api/files?path=test-repo/report.html&raw=true')
 
@@ -177,6 +183,90 @@ describe('File Routes', () => {
       expect(response.headers.get('Content-Security-Policy')).toBe('sandbox allow-scripts')
       expect(response.headers.get('Cache-Control')).toBe('no-cache')
       expect(response.headers.get('X-Content-Type-Options')).toBe('nosniff')
+      expect(getFile).not.toHaveBeenCalled()
+    })
+
+    it('should serve .htm raw content as text/html', async () => {
+      getRawFileMetadata.mockResolvedValue({ size: 13, mimeType: 'text/html', lastModified: rawLastModified })
+      getRawFileContent.mockResolvedValue(Buffer.from('<h1>hi</h1>\n\n'))
+
+      const response = await app.request('/api/files?path=test-repo/report.htm&raw=true')
+
+      expect(response.status).toBe(200)
+      expect(response.headers.get('Content-Type')).toBe('text/html')
+    })
+
+    it('should include ETag and Last-Modified on raw responses', async () => {
+      getRawFileMetadata.mockResolvedValue({ size: 13, mimeType: 'text/html', lastModified: rawLastModified })
+      getRawFileContent.mockResolvedValue(Buffer.from('<h1>hi</h1>\n\n'))
+
+      const response = await app.request('/api/files?path=test-repo/report.html&raw=true')
+
+      expect(response.headers.get('ETag')).toBe(rawEtag)
+      expect(response.headers.get('Last-Modified')).toBe(rawLastModified.toUTCString())
+    })
+
+    it('should return 304 without a body when If-None-Match matches the ETag', async () => {
+      getRawFileMetadata.mockResolvedValue({ size: 13, mimeType: 'text/html', lastModified: rawLastModified })
+
+      const response = await app.request('/api/files?path=test-repo/report.html&raw=true', {
+        headers: { 'If-None-Match': rawEtag },
+      })
+
+      expect(response.status).toBe(304)
+      expect(response.headers.get('ETag')).toBe(rawEtag)
+      expect(response.headers.get('Cache-Control')).toBe('no-cache')
+      expect(response.headers.get('Content-Security-Policy')).toBe('sandbox allow-scripts')
+      expect(response.headers.get('X-Content-Type-Options')).toBe('nosniff')
+      expect(await response.text()).toBe('')
+      expect(getRawFileContent).not.toHaveBeenCalled()
+    })
+
+    it('should match If-None-Match within a comma-separated list', async () => {
+      getRawFileMetadata.mockResolvedValue({ size: 13, mimeType: 'text/html', lastModified: rawLastModified })
+
+      const response = await app.request('/api/files?path=test-repo/report.html&raw=true', {
+        headers: { 'If-None-Match': `"other", ${rawEtag}` },
+      })
+
+      expect(response.status).toBe(304)
+      expect(getRawFileContent).not.toHaveBeenCalled()
+    })
+
+    it('should match the If-None-Match wildcard', async () => {
+      getRawFileMetadata.mockResolvedValue({ size: 13, mimeType: 'text/html', lastModified: rawLastModified })
+
+      const response = await app.request('/api/files?path=test-repo/report.html&raw=true', {
+        headers: { 'If-None-Match': '*' },
+      })
+
+      expect(response.status).toBe(304)
+      expect(getRawFileContent).not.toHaveBeenCalled()
+    })
+
+    it('should return 200 when If-None-Match does not match', async () => {
+      getRawFileMetadata.mockResolvedValue({ size: 13, mimeType: 'text/html', lastModified: rawLastModified })
+      getRawFileContent.mockResolvedValue(Buffer.from('<h1>hi</h1>\n\n'))
+
+      const response = await app.request('/api/files?path=test-repo/report.html&raw=true', {
+        headers: { 'If-None-Match': 'W/"different"' },
+      })
+
+      expect(response.status).toBe(200)
+      expect(getRawFileContent).toHaveBeenCalled()
+    })
+
+    it('should fall through to the directory listing when raw is requested for a directory', async () => {
+      getRawFileMetadata.mockResolvedValue(null)
+      getFile.mockResolvedValue(mockDirInfo)
+
+      const response = await app.request('/api/files?path=test-repo/src&raw=true')
+      const body = await response.json() as FileInfo
+
+      expect(response.status).toBe(200)
+      expect(body).toHaveProperty('isDirectory', true)
+      expect(getFile).toHaveBeenCalledWith('test-repo/src')
+      expect(getRawFileContent).not.toHaveBeenCalled()
     })
 
     it('should return 404 when path does not exist', async () => {

@@ -395,7 +395,7 @@ describe('ToolCallPart show artifact action', () => {
     mocks.useToolCallPermission.mockReturnValue(null)
   })
 
-  const showArtifact = (params: unknown): SessionMessageAssistantTool => ({
+  const showArtifact = (params: unknown, metadata?: Record<string, string>): SessionMessageAssistantTool => ({
     type: 'tool',
     id: 'call_artifact',
     name: 'ocm',
@@ -404,6 +404,7 @@ describe('ToolCallPart show artifact action', () => {
       status: 'completed',
       input: { action: 'show_artifact', params },
       content: [{ type: 'text', text: 'Artifact shown' }],
+      metadata,
     },
   })
 
@@ -431,6 +432,40 @@ describe('ToolCallPart show artifact action', () => {
     expect(link).toHaveAttribute('href', src)
     expect(link).toHaveAttribute('target', '_blank')
     expect(link).toHaveAttribute('rel', 'noopener noreferrer')
+  })
+
+  it('prefers the backend-resolved metadata path over the directory join', () => {
+    const src = getFileApiUrl('/workspace/sessions/ses_1/report.html', { params: { raw: true } })
+
+    renderWithProviders(
+      <ToolCallPart
+        part={showArtifact(
+          { title: 'Report', path: 'reports/summary.html' },
+          { path: '/workspace/sessions/ses_1/report.html' },
+        )}
+        messageID="msg_1"
+        directory="/repo"
+      />,
+    )
+
+    expect(screen.getByTitle('Report')).toHaveAttribute('src', src)
+    expect(screen.getByText('reports/summary.html')).toHaveAttribute('title', 'reports/summary.html')
+  })
+
+  it('maps a repo path outside the workspace to the repo-local path', () => {
+    const src = getFileApiUrl('assistant/reports/summary.html', { params: { raw: true } })
+
+    renderWithProviders(
+      <ToolCallPart
+        part={showArtifact({ title: 'Report', path: 'reports/summary.html' })}
+        messageID="msg_1"
+        directory="/workspace/repos/assistant"
+        repoFullPath="/workspace/repos/assistant"
+        repoLocalPath="assistant"
+      />,
+    )
+
+    expect(screen.getByTitle('Report')).toHaveAttribute('src', src)
   })
 
   it('resolves an absolute artifact path without a session directory', () => {

@@ -11,6 +11,7 @@ import {
   getReposPath,
   getScheduleWorktreesPath,
 } from '@opencode-manager/shared/config/env'
+import { isPathWithinRoot } from '../../utils/fs-safe'
 
 export const WORKSPACE_SANDBOX_NAME = 'ocm-workspace'
 
@@ -34,11 +35,6 @@ let executableTrustValidator: ((candidate: string) => boolean) | null = null
 export function overrideSandboxExecutableTrustValidator(validator: ((candidate: string) => boolean) | null): void {
   executableTrustValidator = validator
   resetSandboxExecutableCache()
-}
-
-export function isPathWithinRoot(root: string, target: string): boolean {
-  const relative = path.relative(path.resolve(root), path.resolve(target))
-  return relative === '' || (!relative.startsWith('..') && !path.isAbsolute(relative))
 }
 
 function isWritableByManager(stat: { uid: number; gid: number; mode: number }): boolean {

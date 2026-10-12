@@ -255,7 +255,10 @@ var ACTIONS = {
         { path: params.path },
         context.signal,
       )
-      return 'Showing the artifact "' + params.title + '" from ' + result.path + ' in the Manager chat. It renders the current file contents, so after editing the file the user can reload the view; call show_artifact again only to show a different file.'
+      return {
+        content: 'Showing the artifact "' + params.title + '" from ' + result.path + ' in the Manager chat. It renders the current file contents, so after editing the file the user can reload the view; call show_artifact again only to show a different file.',
+        metadata: { path: result.path },
+      }
     },
   },
 }
@@ -294,7 +297,11 @@ export default {
         input: INPUT_SCHEMA,
         options: { codemode: false },
         execute: async function (input, context) {
-          return { content: await runAction(input, context) }
+          var result = await runAction(input, context)
+          if (result !== null && typeof result === 'object') {
+            return result
+          }
+          return { content: result }
         },
       })
     })

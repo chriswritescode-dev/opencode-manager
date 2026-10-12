@@ -743,6 +743,8 @@ export function SessionDetail() {
             <MessageThread 
               sessionID={sessionId} 
               directory={sessionDirectory}
+              repoFullPath={repo?.fullPath}
+              repoLocalPath={repo?.localPath}
               messages={messages}
               pending={pendingPrompts}
               isSessionBusy={isSessionActive}

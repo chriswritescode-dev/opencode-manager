@@ -48,8 +48,6 @@ export { ClientError, isIntegrationNotFoundError, isMcpServerNotFoundError, isSe
 
 export { assistantText, sessionIDFromEvent, toolContentText } from './content'
 
-export { readShowArtifactCall } from './artifact'
-
 export { configModelRef, formatOpenCodeModelRef, parseOpenCodeModelRef, selectConfiguredModelRef } from './modelRef'
 
 export {

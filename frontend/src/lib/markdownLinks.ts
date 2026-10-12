@@ -48,9 +48,10 @@ export function getWorkspaceFilePath(
   workspace: { directory?: string; repoFullPath?: string; repoLocalPath?: string },
 ): string {
   const { directory, repoFullPath, repoLocalPath } = workspace
+  const baseDirectory = directory?.replace(/\/+$/, '')
   const absolutePath = filePath.startsWith('/') || !directory
     ? filePath
-    : `${directory}/${filePath.replace(/^\.\//, '')}`
+    : `${baseDirectory}/${filePath.replace(/^\.\//, '')}`
   return repoFullPath && repoLocalPath && absolutePath.startsWith(`${repoFullPath}/`)
     ? `${repoLocalPath}/${absolutePath.slice(repoFullPath.length + 1)}`
     : absolutePath

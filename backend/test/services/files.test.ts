@@ -9,6 +9,7 @@ import {
   getFile,
   getFileRange,
   getRawFileContent,
+  getRawFileMetadata,
   renameOrMoveFile,
   uploadFile,
 } from '../../src/services/files'
@@ -74,6 +75,32 @@ describe('files service', () => {
     })
   })
 
+  describe('getRawFileMetadata', () => {
+    it('returns size, mime type and last modified for an existing file', async () => {
+      await writeLines(`${relativeRoot}/meta.htm`, '<h1>hi</h1>')
+
+      const metadata = await getRawFileMetadata(`${relativeRoot}/meta.htm`)
+
+      expect(metadata).not.toBeNull()
+      expect(metadata?.size).toBe(11)
+      expect(metadata?.mimeType).toBe('text/html')
+      expect(metadata?.lastModified).toBeInstanceOf(Date)
+    })
+
+    it('returns null for a directory', async () => {
+      await mkdir(resolveTempPath(`${relativeRoot}/meta-dir`))
+
+      expect(await getRawFileMetadata(`${relativeRoot}/meta-dir`)).toBeNull()
+    })
+
+    it('rejects with 404 when the file is missing', async () => {
+      await expect(getRawFileMetadata(`${relativeRoot}/missing.htm`)).rejects.toEqual({
+        message: 'File or directory not found',
+        statusCode: 404,
+      })
+    })
+  })
+
   describe('getFile', () => {
     it('returns base64 content for a text file', async () => {
       await writeLines(`${relativeRoot}/note.txt`, 'hello world')
@@ -105,6 +132,14 @@ describe('files service', () => {
 
       expect(result.mimeType).toBe('text/plain')
       expect(Buffer.from(result.content ?? '', 'base64').toString('utf8')).toBe('mystery')
+    })
+
+    it('maps .htm files to text/html', async () => {
+      await writeLines(`${relativeRoot}/page.htm`, '<h1>hi</h1>')
+
+      const result = await getFile(`${relativeRoot}/page.htm`)
+
+      expect(result.mimeType).toBe('text/html')
     })
 
     it('omits content for files at the size limit', async () => {
