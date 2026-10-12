@@ -1,5 +1,5 @@
 import { memo } from 'react'
-import type { SessionMessageAssistant } from '@opencode-manager/shared/opencode'
+import { readShowArtifactCall, type SessionMessageAssistant } from '@opencode-manager/shared/opencode'
 import { TextPart } from './TextPart'
 import { ToolCallPart } from './ToolCallPart'
 import { useSettings } from '@/hooks/useSettings'
@@ -40,7 +40,7 @@ export const MessagePart = memo(function MessagePart({ part, messageID, director
         </details>
       )
     case 'tool':
-      if (simpleChatMode && part.name !== 'subagent') return null
+      if (simpleChatMode && part.name !== 'subagent' && !readShowArtifactCall(part)) return null
       return (
         <ToolCallPart
           part={part}

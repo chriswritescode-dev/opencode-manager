@@ -3,6 +3,7 @@ import { render, screen, fireEvent } from '@testing-library/react'
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
 import { MemoryRouter } from 'react-router-dom'
 import { MessagePart } from './MessagePart'
+import { getFileApiUrl } from '@/api/files'
 import { applySessionEvent, emptySessionTranscript } from '@/lib/session-projection'
 import { promptSequence } from '@/test/fixtures/session-projection'
 import type {
@@ -275,6 +276,55 @@ describe('MessagePart', () => {
 
       fireEvent.click(screen.getByRole('button'))
       expect(onChildSessionClick).toHaveBeenCalledWith('child-session')
+    })
+
+    it('renders an ocm show_artifact tool in simpleChatMode', () => {
+      setupSettings({
+        simpleChatMode: true,
+        showReasoning: false,
+        expandToolCalls: false,
+        expandDiffs: true,
+      })
+
+      renderWithProviders(
+        <MessagePart
+          part={toolPart('ocm', {
+            status: 'completed',
+            input: { action: 'show_artifact', params: { title: 'Report', path: 'reports/summary.html' } },
+            content: [{ type: 'text', text: 'Artifact shown' }],
+          })}
+          messageID="msg_1"
+          directory="/repo"
+        />,
+      )
+
+      const iframe = screen.getByTitle('Report')
+      expect(iframe.tagName).toBe('IFRAME')
+      expect(iframe).toHaveAttribute('src', getFileApiUrl('/repo/reports/summary.html', { params: { raw: true } }))
+    })
+
+    it('renders an ocm show_artifact tool with an absolute path', () => {
+      setupSettings({
+        simpleChatMode: true,
+        showReasoning: false,
+        expandToolCalls: false,
+        expandDiffs: true,
+      })
+
+      renderWithProviders(
+        <MessagePart
+          part={toolPart('ocm', {
+            status: 'completed',
+            input: { action: 'show_artifact', params: { title: 'Report', path: '/tmp/artifacts/report.html' } },
+            content: [{ type: 'text', text: 'Artifact shown' }],
+          })}
+          messageID="msg_1"
+        />,
+      )
+
+      const iframe = screen.getByTitle('Report')
+      expect(iframe.tagName).toBe('IFRAME')
+      expect(iframe).toHaveAttribute('src', getFileApiUrl('/tmp/artifacts/report.html', { params: { raw: true } }))
     })
   })
 

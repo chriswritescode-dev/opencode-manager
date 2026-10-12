@@ -1,6 +1,6 @@
 import { useState, useRef, useEffect, useMemo, memo } from 'react'
 import { unwrapSandboxExecCommand } from '@opencode-manager/shared/utils'
-import { toolContentText, type SessionMessageAssistantTool } from '@opencode-manager/shared/opencode'
+import { readShowArtifactCall, toolContentText, type SessionMessageAssistantTool } from '@opencode-manager/shared/opencode'
 import { useSettings } from '@/hooks/useSettings'
 import { useUserBash } from '@/stores/userBashStore'
 import { useChildLifecycleForSession } from '@/stores/sessionStatusStore'
@@ -28,6 +28,8 @@ import {
 } from '@/lib/backgroundWork'
 import { getToolInputPath, getToolSpecificRender } from './FileToolRender'
 import { readOpenWalkthroughCall } from '@/lib/walkthroughTool'
+import { getFileApiUrl } from '@/api/files'
+import { ArtifactPart } from './ArtifactPart'
 import type { WalkthroughSource } from '@opencode-manager/shared/schemas'
 
 const DISPLAY_LIMIT = 30_000
@@ -250,6 +252,14 @@ export const ToolCallPart = memo(function ToolCallPart({ part, messageID, direct
       sandbox
     </Badge>
   ) : null
+
+  const artifact = readShowArtifactCall(part)
+  if (artifact && (artifact.path.startsWith('/') || directory)) {
+    const fullPath = artifact.path.startsWith('/')
+      ? artifact.path
+      : `${directory?.replace(/\/+$/, '')}/${artifact.path}`
+    return <ArtifactPart title={artifact.title} path={artifact.path} src={getFileApiUrl(fullPath, { params: { raw: true } })} />
+  }
 
   if (isSubagent) {
     const status = part.state.status

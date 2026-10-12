@@ -175,6 +175,8 @@ describe('File Routes', () => {
       expect(response.status).toBe(200)
       expect(response.headers.get('Content-Type')).toBe('text/html')
       expect(response.headers.get('Content-Security-Policy')).toBe('sandbox allow-scripts')
+      expect(response.headers.get('Cache-Control')).toBe('no-cache')
+      expect(response.headers.get('X-Content-Type-Options')).toBe('nosniff')
     })
 
     it('should return 404 when path does not exist', async () => {

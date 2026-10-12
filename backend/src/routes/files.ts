@@ -121,6 +121,8 @@ export function createFileRoutes() {
             'Content-Type': result.mimeType || 'application/octet-stream',
             'Content-Length': result.size.toString(),
             'Content-Security-Policy': 'sandbox allow-scripts',
+            'Cache-Control': 'no-cache',
+            'X-Content-Type-Options': 'nosniff',
           }
         })
       }

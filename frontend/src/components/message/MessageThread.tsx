@@ -1,6 +1,6 @@
 import { memo, useCallback, useMemo, useState } from 'react'
 import { Pencil, Loader2 } from 'lucide-react'
-import { assistantText, formatOpenCodeModelRef } from '@opencode-manager/shared/opencode'
+import { assistantText, formatOpenCodeModelRef, readShowArtifactCall } from '@opencode-manager/shared/opencode'
 import type {
   PromptAgentAttachment,
   PromptFileAttachment,
@@ -50,6 +50,12 @@ function isSubagentTool(
   return part.type === 'tool' && part.name === 'subagent'
 }
 
+function isArtifactTool(
+  part: SessionMessageAssistant['content'][number],
+): part is SessionMessageAssistantTool {
+  return part.type === 'tool' && readShowArtifactCall(part) !== undefined
+}
+
 function hasRenderableContent(
   message: SessionMessageInfo,
   simpleChatMode: boolean,
@@ -63,7 +69,7 @@ function hasRenderableContent(
       return message.content.some((part) => {
         if (part.type === 'text') return part.text.trim().length > 0
         if (part.type === 'reasoning') return !simpleChatMode && showReasoning && part.text.trim().length > 0
-        if (part.type === 'tool') return !simpleChatMode || isSubagentTool(part)
+        if (part.type === 'tool') return !simpleChatMode || isSubagentTool(part) || isArtifactTool(part)
         return false
       })
     case 'synthetic':
