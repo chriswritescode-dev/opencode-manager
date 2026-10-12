@@ -1,19 +1,42 @@
 import { useMemo } from 'react'
 import { skipToken, useQuery } from '@tanstack/react-query'
-import { formatOpenCodeModelRef, findModelInfo } from '@opencode-manager/shared/opencode'
+import { findModelInfo } from '@opencode-manager/shared/opencode'
+import type { SessionMessageInfo } from '@opencode-manager/shared/opencode'
 import { useProviders } from '@/hooks/useProviders'
 import { sessionTranscriptQueryKey } from '@/lib/queryInvalidation'
 import type { TranscriptCache } from '@/lib/session-projection'
 
-interface ContextUsage {
+export interface ContextUsage {
   totalTokens: number
-  contextLimit: number | null
   usagePercentage: number | null
-  currentModel: string | null
+}
+
+interface ContextUsageResult {
+  usage: ContextUsage | null
   isLoading: boolean
 }
 
-export const useContextUsage = (sessionID: string | undefined, directory?: string): ContextUsage => {
+function lastCompletedCompactionIndex(messages: SessionMessageInfo[], end: number): number {
+  for (let index = end - 1; index >= 0; index -= 1) {
+    const message = messages[index]
+    if (message?.type === 'compaction' && message.status === 'completed') return index
+  }
+  return -1
+}
+
+function lastAssistantWithUsageIndex(messages: SessionMessageInfo[], start: number, end: number): number {
+  for (let index = end - 1; index > start; index -= 1) {
+    const message = messages[index]
+    if (message?.type === 'assistant' && message.tokens !== undefined) return index
+  }
+  return -1
+}
+
+export const useContextUsage = (
+  sessionID: string | undefined,
+  directory?: string,
+  revertMessageID?: string,
+): ContextUsageResult => {
   const transcriptQuery = useQuery<TranscriptCache>({
     queryKey: sessionTranscriptQueryKey(sessionID ?? ''),
     queryFn: skipToken,
@@ -26,52 +49,34 @@ export const useContextUsage = (sessionID: string | undefined, directory?: strin
 
   return useMemo(() => {
     const messages = transcriptData?.transcript.messages ?? []
-    const assistantMessages = messages.filter(msg => msg.type === 'assistant') || []
-    let latestAssistantMessage = assistantMessages[assistantMessages.length - 1]
 
-    const sumTokens = (msg: typeof latestAssistantMessage) => {
-      if (msg?.type !== 'assistant' || !msg.tokens) return 0
-      return msg.tokens.input + msg.tokens.output + msg.tokens.reasoning + msg.tokens.cache.read
+    const boundaryIndex = revertMessageID
+      ? messages.findIndex((message) => message.id === revertMessageID)
+      : -1
+    if (revertMessageID && boundaryIndex === -1) {
+      return { usage: null, isLoading: messagesLoading }
     }
 
-    if (sumTokens(latestAssistantMessage) === 0 && assistantMessages.length > 1) {
-      latestAssistantMessage = assistantMessages[assistantMessages.length - 2]
+    const end = boundaryIndex === -1 ? messages.length : boundaryIndex
+    const compactionIndex = lastCompletedCompactionIndex(messages, end)
+    const assistantIndex = lastAssistantWithUsageIndex(messages, compactionIndex, end)
+    const assistant = assistantIndex === -1 ? undefined : messages[assistantIndex]
+    if (assistant?.type !== 'assistant' || assistant.tokens === undefined) {
+      return { usage: null, isLoading: messagesLoading }
     }
 
-    const activeModel = latestAssistantMessage?.type === 'assistant' ? latestAssistantMessage.model : undefined
-
-    const currentModel = activeModel
-      ? formatOpenCodeModelRef(activeModel)
-      : null
-
-    let contextLimit: number | null = null
-    if (activeModel && models) {
-      const model = findModelInfo(models, { providerID: activeModel.providerID, modelID: activeModel.id })
-      if (model?.limit) {
-        contextLimit = model.limit.context
-      }
+    const { input, output, reasoning, cache } = assistant.tokens
+    const totalTokens = input + output + reasoning + cache.read + cache.write
+    if (totalTokens <= 0) {
+      return { usage: null, isLoading: messagesLoading }
     }
 
-    if (messages.length === 0) {
-      return {
-        totalTokens: 0,
-        contextLimit,
-        usagePercentage: contextLimit ? 0 : null,
-        currentModel,
-        isLoading: messagesLoading
-      }
-    }
+    const model = models
+      ? findModelInfo(models, { providerID: assistant.model.providerID, modelID: assistant.model.id })
+      : undefined
+    const contextLimit = model?.limit.context
+    const usagePercentage = contextLimit ? Math.round((totalTokens / contextLimit) * 100) : null
 
-    const totalTokens = sumTokens(latestAssistantMessage)
-
-    const usagePercentage = contextLimit ? (totalTokens / contextLimit) * 100 : null
-
-    return {
-      totalTokens,
-      contextLimit,
-      usagePercentage,
-      currentModel,
-      isLoading: false
-    }
-  }, [transcriptData, messagesLoading, models])
+    return { usage: { totalTokens, usagePercentage }, isLoading: messagesLoading }
+  }, [transcriptData, messagesLoading, models, revertMessageID])
 }

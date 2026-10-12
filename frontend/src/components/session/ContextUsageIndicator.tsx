@@ -5,6 +5,7 @@ interface ContextUsageIndicatorProps {
   sessionID: string | undefined
   isConnected: boolean
   isReconnecting?: boolean
+  revertMessageID?: string
 }
 
 const getUsageTextColor = (percentage: number) => {
@@ -13,8 +14,14 @@ const getUsageTextColor = (percentage: number) => {
   return 'text-destructive'
 }
 
-export function ContextUsageIndicator({ directory, sessionID, isConnected, isReconnecting }: ContextUsageIndicatorProps) {
-  const { totalTokens, contextLimit, usagePercentage, isLoading } = useContextUsage(sessionID, directory)
+export function ContextUsageIndicator({
+  directory,
+  sessionID,
+  isConnected,
+  isReconnecting,
+  revertMessageID,
+}: ContextUsageIndicatorProps) {
+  const { usage, isLoading } = useContextUsage(sessionID, directory, revertMessageID)
 
   if (isLoading) {
     return (
@@ -32,13 +39,17 @@ export function ContextUsageIndicator({ directory, sessionID, isConnected, isRec
     return <span className="text-xs text-muted-foreground font-medium">Disconnected</span>
   }
 
-  const tokenText = contextLimit
-    ? `${totalTokens.toLocaleString()} (${Math.round(usagePercentage || 0)}%)`
-    : totalTokens.toLocaleString()
+  if (!usage) {
+    return null
+  }
+
+  const tokenText = usage.usagePercentage === null
+    ? usage.totalTokens.toLocaleString()
+    : `${usage.totalTokens.toLocaleString()} (${usage.usagePercentage}%)`
 
   return (
     <div className="flex items-center gap-2">
-      <span className={`text-xs font-medium whitespace-nowrap ${getUsageTextColor(usagePercentage || 0)}`}>
+      <span className={`text-xs font-medium whitespace-nowrap ${getUsageTextColor(usage.usagePercentage ?? 0)}`}>
         {tokenText}
       </span>
     </div>

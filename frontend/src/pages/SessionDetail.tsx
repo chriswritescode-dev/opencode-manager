@@ -726,6 +726,7 @@ export function SessionDetail() {
               sessionID={sessionId}
               isConnected={isConnected}
               isReconnecting={isReconnecting}
+              revertMessageID={revertMessageID}
             />
             <SessionMoreButton />
           </Header.Actions>
