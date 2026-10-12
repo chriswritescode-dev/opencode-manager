@@ -224,7 +224,7 @@ describe('useSessionTranscript', () => {
 
     await waitFor(() => expect(result.current.messages).toHaveLength(2))
 
-    await new Promise((resolve) => setTimeout(resolve, 20))
+    await act(async () => {})
     expect(mocks.readSessionSnapshot).toHaveBeenCalledTimes(1)
   })
 
