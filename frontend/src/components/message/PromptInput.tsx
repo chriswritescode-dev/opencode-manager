@@ -1648,6 +1648,9 @@ return (
           >
             <Upload className="w-5 h-5" />
           </button>
+          {showMobileVoiceButton && (
+            renderVoiceButton('mobile')
+          )}
           {isMobile && directory && (
             <ComposerToolsMenu
               sessionID={sessionID}
@@ -1660,11 +1663,8 @@ return (
               onDictate={canUseMobileVoice && hasPromptContent && !showVoiceFeedback ? () => void startVoiceRecording() : undefined}
             />
           )}
-          {sttEnabled && sttSupported && (
+          {!isMobile && sttEnabled && sttSupported && (
             renderVoiceButton('desktop')
-          )}
-          {showMobileVoiceButton && (
-            renderVoiceButton('mobile')
           )}
           {!showMobileVoiceButton && (
             <button
