@@ -73,7 +73,8 @@ Each item is tagged with a theme to help you find work in your area of interest:
 
 ```bash
 pnpm test              # Run CLI, backend, and frontend tests
-cd backend && vitest <filename>   # Run single test file
+cd backend && pnpm exec vitest run <filename>   # Run single test file
+cd backend && bun test <filename>               # Run a Bun-only suite (test/routes/internal-sandbox.test.ts, src/routes/repos.test.ts)
 ```
 
 ### Linting and Type Checking
