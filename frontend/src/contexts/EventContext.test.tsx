@@ -7,7 +7,7 @@ import { beforeEach, describe, expect, it, vi } from 'vitest'
 import type { FormInfo, PermissionRequest } from '@opencode-manager/shared/opencode'
 import { FetchError } from '@opencode-manager/shared'
 import { showToast } from '@/lib/toast'
-import { useSessionStatus } from '@/stores/sessionStatusStore'
+import { useSessionStatus, hasBackgroundActivity } from '@/stores/sessionStatusStore'
 import { changeWalkthroughQueryKey } from '@/hooks/useChangeWalkthrough'
 import { EventProvider, useEventContext, useForms, usePermissions, useSSEHealth } from './EventContext'
 
@@ -183,7 +183,7 @@ describe('EventProvider permissions and forms', () => {
     mocks.replyForm.mockResolvedValue(undefined)
     mocks.cancelForm.mockResolvedValue(undefined)
     mocks.getHealth.mockReturnValue({ isConnected: false, isHealthy: false, lastEventAt: null, isStalled: false })
-    useSessionStatus.setState({ statuses: new Map(), statusCache: new Map(), statusRevisions: new Map(), knownSessions: new Set(), outcomes: new Map(), parents: new Map(), runningShells: new Map(), revision: 0 })
+    useSessionStatus.setState({ statuses: new Map(), statusCache: new Map(), statusRevisions: new Map(), knownSessions: new Set(), outcomes: new Map(), parents: new Map(), runningShells: new Map(), shellRevisions: new Map(), shellRevision: 0, revision: 0 })
     mocks.subscribeGlobalMonitor.mockReturnValue({
       dispose: vi.fn(),
       updateDirectories: vi.fn(),
@@ -1856,5 +1856,136 @@ describe('EventProvider permissions and forms', () => {
       })
       expect(useSessionStatus.getState().runningShells.has('shell-2')).toBe(false)
     })
+  })
+
+  it('does not let a directory shell snapshot resurrect a shell that exited while it was in flight', async () => {
+    mocks.listRepos.mockResolvedValue([{ id: 123, fullPath: '/repo' }])
+    const deferred = createDeferred<Array<{ id: string; status: string; metadata: { sessionID: string } }>>()
+    mocks.listShells.mockReturnValue(deferred.promise)
+
+    render(<Harness />, { wrapper: createWrapper() })
+
+    await waitFor(() => expect(mocks.listShells).toHaveBeenCalledWith('/repo'))
+
+    const lastSubscribeCall = mocks.subscribeGlobalMonitor.mock.calls[mocks.subscribeGlobalMonitor.mock.calls.length - 1]
+    const onEvent = lastSubscribeCall[0].onEvent as (data: unknown) => void
+
+    act(() => {
+      onEvent({ type: 'shell.exited', data: { id: 'shell-1', status: 'exited' }, directory: '/repo' })
+    })
+
+    await act(async () => {
+      deferred.resolve([{ id: 'shell-1', status: 'running', metadata: { sessionID: 'session-1' } }])
+      await deferred.promise
+    })
+
+    expect(useSessionStatus.getState().runningShells.has('shell-1')).toBe(false)
+  })
+
+  it('does not let a directory shell snapshot drop a shell created while it was in flight', async () => {
+    mocks.listRepos.mockResolvedValue([{ id: 123, fullPath: '/repo' }])
+    const deferred = createDeferred<Array<{ id: string; status: string; metadata: { sessionID: string } }>>()
+    mocks.listShells.mockReturnValue(deferred.promise)
+
+    render(<Harness />, { wrapper: createWrapper() })
+
+    await waitFor(() => expect(mocks.listShells).toHaveBeenCalledWith('/repo'))
+
+    const lastSubscribeCall = mocks.subscribeGlobalMonitor.mock.calls[mocks.subscribeGlobalMonitor.mock.calls.length - 1]
+    const onEvent = lastSubscribeCall[0].onEvent as (data: unknown) => void
+
+    act(() => {
+      onEvent({
+        type: 'shell.created',
+        data: { info: { id: 'shell-2', status: 'running', metadata: { sessionID: 'session-2' } } },
+        directory: '/repo',
+      })
+    })
+
+    await act(async () => {
+      deferred.resolve([])
+      await deferred.promise
+    })
+
+    expect(useSessionStatus.getState().runningShells.get('shell-2')).toEqual({
+      sessionID: 'session-2',
+      directory: '/repo',
+    })
+  })
+
+  it('resolves ancestry for a shell owner from the directory snapshot', async () => {
+    mocks.listRepos.mockResolvedValue([{ id: 123, fullPath: '/repo' }])
+    mocks.listShells.mockResolvedValue([
+      { id: 'shell-1', status: 'running', metadata: { sessionID: 'child-1' } },
+    ])
+    mocks.getSession.mockImplementation((sessionID: string) => {
+      if (sessionID === 'child-1') return Promise.resolve({ id: 'child-1', parentID: 'parent-1' })
+      if (sessionID === 'parent-1') return Promise.resolve({ id: 'parent-1' })
+      return Promise.reject(new Error('Session not found'))
+    })
+
+    render(<Harness />, { wrapper: createWrapper() })
+
+    await waitFor(() => {
+      expect(useSessionStatus.getState().parents.get('child-1')).toBe('parent-1')
+    })
+
+    expect(hasBackgroundActivity(useSessionStatus.getState(), 'parent-1')).toBe(true)
+  })
+
+  it('continues a known child to parent link up to the grandparent', async () => {
+    mocks.listRepos.mockResolvedValue([{ id: 123, fullPath: '/repo' }])
+    mocks.listActiveSessions.mockResolvedValue({ 'child-1': { type: 'running' } })
+    mocks.getSession.mockImplementation((sessionID: string) => {
+      if (sessionID === 'parent-1') return Promise.resolve({ id: 'parent-1', parentID: 'grandparent-1' })
+      if (sessionID === 'grandparent-1') return Promise.resolve({ id: 'grandparent-1' })
+      return Promise.reject(new Error('Session not found'))
+    })
+
+    act(() => {
+      useSessionStatus.getState().setSessionParent('child-1', 'parent-1')
+    })
+
+    render(<Harness />, { wrapper: createWrapper() })
+
+    await waitFor(() => expect(mocks.subscribeGlobalMonitor).toHaveBeenCalled())
+
+    const lastSubscribeCall = mocks.subscribeGlobalMonitor.mock.calls[mocks.subscribeGlobalMonitor.mock.calls.length - 1]
+    const handleStatusChange = lastSubscribeCall[0].onStatusChange as (connected: boolean) => void
+
+    act(() => {
+      handleStatusChange(true)
+    })
+
+    await waitFor(() => {
+      expect(useSessionStatus.getState().parents.get('parent-1')).toBe('grandparent-1')
+      expect(useSessionStatus.getState().parents.get('grandparent-1')).toBeNull()
+    })
+    expect(mocks.getSession).toHaveBeenCalledWith('parent-1')
+  })
+
+  it('syncs running shells for a directory whose repo arrives after connect', async () => {
+    const reposDeferred = createDeferred<Array<{ id: number; fullPath: string }>>()
+    mocks.listRepos.mockReturnValueOnce(reposDeferred.promise)
+
+    render(<Harness />, { wrapper: createWrapper() })
+
+    await waitFor(() => expect(mocks.subscribeGlobalMonitor).toHaveBeenCalled())
+
+    const lastSubscribeCall = mocks.subscribeGlobalMonitor.mock.calls[mocks.subscribeGlobalMonitor.mock.calls.length - 1]
+    const handleStatusChange = lastSubscribeCall[0].onStatusChange as (connected: boolean) => void
+
+    act(() => {
+      handleStatusChange(true)
+    })
+
+    expect(mocks.listShells).not.toHaveBeenCalled()
+
+    await act(async () => {
+      reposDeferred.resolve([{ id: 123, fullPath: '/repo' }])
+      await reposDeferred.promise
+    })
+
+    await waitFor(() => expect(mocks.listShells).toHaveBeenCalledWith('/repo'))
   })
 })

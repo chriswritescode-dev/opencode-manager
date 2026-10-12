@@ -1473,8 +1473,17 @@ if (isIOS && isSecureContext && navigator.clipboard && navigator.clipboard.read)
 
   
 
+  const sessionActivityAnnouncement = isSessionActive
+    ? 'Session working'
+    : hasBackgroundActivity
+      ? 'Background tasks running'
+      : ''
+
 return (
     <div className={`relative isolate border border-border dark:border-border/30 rounded-xl p-2 md:p-3 mb-4 md:mb-1 w-full before:pointer-events-none before:absolute before:-inset-px before:-z-10 before:rounded-xl before:bg-background/95 before:backdrop-blur-md before:content-[''] ${hasPendingPermissionForSession ? 'border-highlight/50 ring-1 ring-highlight/30' : composerModeStyle?.frame ?? ''} ${isTakeoverOpen ? 'z-[60]' : ''}`}>
+      <div role="status" aria-live="polite" className="sr-only">
+        {sessionActivityAnnouncement}
+      </div>
       {composerModeStyle && (
         <span
           data-testid="composer-mode-badge"

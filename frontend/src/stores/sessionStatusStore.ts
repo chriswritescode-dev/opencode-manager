@@ -13,6 +13,11 @@ interface StatusSnapshotToken {
   order: number
 }
 
+interface ShellSnapshotToken {
+  revision: number
+  order: number
+}
+
 interface RunningShell {
   sessionID: string
   directory: string
@@ -26,6 +31,8 @@ interface SessionStatusStore {
   outcomes: Map<string, ChildOutcome>
   parents: Map<string, string | null>
   runningShells: Map<string, RunningShell>
+  shellRevisions: Map<string, number>
+  shellRevision: number
   revision: number
   setStatus: (sessionID: string, status: SessionStatusType) => void
   setOutcome: (sessionID: string, outcome: ChildOutcome) => void
@@ -40,7 +47,9 @@ interface SessionStatusStore {
   setSessionParent: (sessionID: string, parentID: string | null) => void
   setShellRunning: (shellID: string, sessionID: string, directory: string) => void
   clearShell: (shellID: string) => void
-  replaceRunningShells: (directory: string, shells: Array<{ id: string; sessionID: string }>) => void
+  replaceRunningShells: (directory: string, shells: Array<{ id: string; sessionID: string }>, token: ShellSnapshotToken) => void
+  beginShellSnapshot: () => ShellSnapshotToken
+  endShellSnapshot: (token: ShellSnapshotToken) => void
   forgetSession: (sessionID: string) => void
 }
 
@@ -50,6 +59,8 @@ const optimisticActiveTimers = new Map<string, ReturnType<typeof setTimeout>>()
 const inFlightSnapshots = new Map<number, number>()
 let snapshotOrderCounter = 0
 let lastAppliedSnapshotOrder = 0
+const inFlightShellSnapshots = new Map<number, number>()
+let shellSnapshotOrderCounter = 0
 
 const clearOptimisticActiveTimer = (sessionID: string): void => {
   const timer = optimisticActiveTimers.get(sessionID)
@@ -88,6 +99,46 @@ const sameRunningShells = (left: Map<string, RunningShell>, right: Map<string, R
     if (!existing || existing.sessionID !== shell.sessionID || existing.directory !== shell.directory) return false
   }
   return true
+}
+
+const registerShellSnapshot = (token: ShellSnapshotToken): void => {
+  inFlightShellSnapshots.set(token.order, token.revision)
+}
+
+const releaseShellSnapshot = (token: ShellSnapshotToken): void => {
+  inFlightShellSnapshots.delete(token.order)
+}
+
+const oldestInFlightShellSnapshotRevision = (): number | null => {
+  let oldest: number | null = null
+  for (const revision of inFlightShellSnapshots.values()) {
+    if (oldest === null || revision < oldest) oldest = revision
+  }
+  return oldest
+}
+
+const prunedShellRevisions = (currentRevisions: Map<string, number>): Map<string, number> => {
+  const oldestSnapshotRevision = oldestInFlightShellSnapshotRevision()
+  const nextRevisions = new Map<string, number>()
+  if (oldestSnapshotRevision === null) return nextRevisions
+  for (const [shellID, revision] of currentRevisions.entries()) {
+    if (revision > oldestSnapshotRevision) nextRevisions.set(shellID, revision)
+  }
+  return nextRevisions
+}
+
+const shellTouchPatch = (
+  state: Pick<SessionStatusStore, 'shellRevisions' | 'shellRevision'>,
+  shellIDs: string[],
+): Pick<SessionStatusStore, 'shellRevisions' | 'shellRevision'> | null => {
+  if (inFlightShellSnapshots.size === 0 || shellIDs.length === 0) return null
+  let shellRevision = state.shellRevision
+  const shellRevisions = new Map(state.shellRevisions)
+  for (const shellID of shellIDs) {
+    shellRevision += 1
+    shellRevisions.set(shellID, shellRevision)
+  }
+  return { shellRevisions, shellRevision }
 }
 
 const markSessionKnown = (knownSessions: Set<string>, sessionID: string): Set<string> | null => {
@@ -195,6 +246,8 @@ export const useSessionStatus = create<SessionStatusStore>((set, get) => {
     outcomes: new Map(),
     parents: new Map(),
     runningShells: new Map(),
+    shellRevisions: new Map(),
+    shellRevision: 0,
     revision: 0,
 
     setStatus: (sessionID: string, status: SessionStatusType) => {
@@ -397,34 +450,77 @@ export const useSessionStatus = create<SessionStatusStore>((set, get) => {
 
     setShellRunning: (shellID: string, sessionID: string, directory: string) => {
       const current = get().runningShells.get(shellID)
-      if (current && current.sessionID === sessionID && current.directory === directory) return
+      if (current && current.sessionID === sessionID && current.directory === directory) {
+        const touch = shellTouchPatch(get(), [shellID])
+        if (touch) set(touch)
+        return
+      }
       set((state) => {
         const runningShells = new Map(state.runningShells)
         runningShells.set(shellID, { sessionID, directory })
-        return { runningShells }
+        return { runningShells, ...(shellTouchPatch(state, [shellID]) ?? {}) }
       })
     },
 
     clearShell: (shellID: string) => {
-      if (!get().runningShells.has(shellID)) return
+      if (!get().runningShells.has(shellID)) {
+        const touch = shellTouchPatch(get(), [shellID])
+        if (touch) set(touch)
+        return
+      }
       set((state) => {
         const runningShells = new Map(state.runningShells)
         runningShells.delete(shellID)
-        return { runningShells }
+        return { runningShells, ...(shellTouchPatch(state, [shellID]) ?? {}) }
       })
     },
 
-    replaceRunningShells: (directory: string, shells: Array<{ id: string; sessionID: string }>) => {
+    replaceRunningShells: (directory: string, shells: Array<{ id: string; sessionID: string }>, token: ShellSnapshotToken) => {
+      releaseShellSnapshot(token)
+
       const current = get().runningShells
+      const currentRevisions = get().shellRevisions
       const runningShells = new Map(current)
+      const isTouched = (shellID: string): boolean => {
+        const revision = currentRevisions.get(shellID)
+        return revision !== undefined && revision > token.revision
+      }
+
       for (const [shellID, shell] of runningShells.entries()) {
-        if (shell.directory === directory) runningShells.delete(shellID)
+        if (shell.directory !== directory) continue
+        if (isTouched(shellID)) continue
+        runningShells.delete(shellID)
       }
       for (const shell of shells) {
+        if (isTouched(shell.id)) continue
         runningShells.set(shell.id, { sessionID: shell.sessionID, directory })
       }
-      if (sameRunningShells(current, runningShells)) return
-      set({ runningShells })
+
+      const nextRevisions = prunedShellRevisions(currentRevisions)
+      const shellsChanged = !sameRunningShells(current, runningShells)
+      const revisionsChanged = !sameEntries(currentRevisions, nextRevisions)
+      if (!shellsChanged && !revisionsChanged) return
+
+      set({
+        ...(shellsChanged ? { runningShells } : {}),
+        ...(revisionsChanged ? { shellRevisions: nextRevisions } : {}),
+      })
+    },
+
+    beginShellSnapshot: () => {
+      const token: ShellSnapshotToken = {
+        revision: get().shellRevision,
+        order: ++shellSnapshotOrderCounter,
+      }
+      registerShellSnapshot(token)
+      return token
+    },
+
+    endShellSnapshot: (token: ShellSnapshotToken) => {
+      releaseShellSnapshot(token)
+      if (inFlightShellSnapshots.size > 0) return
+      if (get().shellRevisions.size === 0) return
+      set({ shellRevisions: new Map() })
     },
 
     forgetSession: (sessionID: string) => {
@@ -452,8 +548,11 @@ export const useSessionStatus = create<SessionStatusStore>((set, get) => {
         knownSessions.delete(sessionID)
         outcomes.delete(sessionID)
         parents.delete(sessionID)
+        const removedShellIDs: string[] = []
         for (const [shellID, shell] of runningShells.entries()) {
-          if (shell.sessionID === sessionID) runningShells.delete(shellID)
+          if (shell.sessionID !== sessionID) continue
+          runningShells.delete(shellID)
+          removedShellIDs.push(shellID)
         }
         return {
           statuses,
@@ -462,6 +561,7 @@ export const useSessionStatus = create<SessionStatusStore>((set, get) => {
           outcomes,
           parents,
           runningShells,
+          ...(shellTouchPatch(state, removedShellIDs) ?? {}),
           ...(recordRevisionPatch(state, sessionID) ?? {}),
         }
       })
