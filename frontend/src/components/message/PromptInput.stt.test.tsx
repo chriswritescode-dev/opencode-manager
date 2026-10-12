@@ -554,4 +554,38 @@ describe('PromptInput STT Gesture Tests', () => {
       expect(screen.getByText('Latest')).toBeInTheDocument()
     })
   })
+
+  describe('mobile voice vs submit button', () => {
+    const queryMobileVoiceButton = () => {
+      const voiceButtons = screen.getAllByRole('button').filter((btn) => {
+        const title = (btn.getAttribute('title') || '').toLowerCase()
+        return title.includes('tap to speak') || title.includes('tap to transcribe') || title.includes('hold to speak') || title.includes('release')
+      })
+      return voiceButtons.find((btn) => btn.className.includes('px-4') && btn.className.includes('py-2')) ?? null
+    }
+
+    it('shows the mobile mic and no submit button when the prompt is empty', () => {
+      renderComponent()
+
+      expect(queryMobileVoiceButton()).not.toBeNull()
+      expect(screen.queryByTitle('Send')).not.toBeInTheDocument()
+    })
+
+    it('shows the submit button and hides the mobile mic once the prompt has content', () => {
+      renderComponent()
+
+      fireEvent.change(screen.getByPlaceholderText('Send a message...'), { target: { value: 'hello' } })
+
+      expect(screen.getByTitle('Send')).toBeInTheDocument()
+      expect(queryMobileVoiceButton()).toBeNull()
+    })
+
+    it('keeps the mobile mic visible while recording even with prompt content', () => {
+      renderComponent({ isRecording: true })
+
+      fireEvent.change(screen.getByPlaceholderText('Send a message...'), { target: { value: 'hello' } })
+
+      expect(queryMobileVoiceButton()).not.toBeNull()
+    })
+  })
 })
