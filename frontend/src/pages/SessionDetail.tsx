@@ -35,6 +35,7 @@ import { MessageSkeleton } from "@/components/message/MessageSkeleton";
 import { exportSession, downloadMarkdown } from "@/lib/exportSession";
 import { copyTextToClipboard } from "@/lib/clipboard";
 import { getMessagesContentVersion } from "./sessionContentVersion";
+import { collectVisibleAssistantTexts } from '@/lib/visibleMessageTexts';
 import { showToast } from "@/lib/toast";
 import { getWorkspaceFilePath } from "@/lib/markdownLinks";
 import { getRepoDisplayName } from "@/lib/utils";
@@ -274,7 +275,7 @@ export function SessionDetail() {
   const { modelRef } = useModelSelection(sessionDirectory, modelSelectionSession);
   const setSessionStatus = useSessionStatus((state) => state.setStatus);
   const isEditingMessage = useUIState((state) => state.isEditingMessage);
-  const { isEnabled: ttsEnabled } = useTTS();
+  const { isEnabled: ttsEnabled, speak, stop, isPlaying: isTTSPlaying, isLoading: isTTSLoading } = useTTS();
   const { syncForSession: syncPermissionsForSession } = usePermissions();
   const { getForSession: getFormForSession, reply: replyToForm, cancel: cancelForm, syncForSession: syncFormsForSession } = useForms();
   const currentForm = sessionId ? getFormForSession(sessionId) : null;
@@ -614,6 +615,19 @@ export function SessionDetail() {
     scrollByUser((direction * container.clientHeight) / 2);
   }, [scrollByUser]);
 
+  const handleSpeakVisibleMessages = useCallback(() => {
+    if (!ttsEnabled) return;
+    if (isTTSPlaying || isTTSLoading) {
+      stop();
+      return;
+    }
+    const container = messageContainerRef.current;
+    if (!container) return;
+    const texts = collectVisibleAssistantTexts(container, messages);
+    if (texts.length === 0) return;
+    speak(texts.join('\n\n'));
+  }, [ttsEnabled, isTTSPlaying, isTTSLoading, stop, speak, messages]);
+
   useShortcutActions({
     selectModel: handleOpenModelDialog,
     sessions: handleShowSessionsDialog,
@@ -633,6 +647,7 @@ export function SessionDetail() {
     clearPrompt: handleClearPrompt,
     halfPageUp: () => scrollMessagesByHalfPage(-1),
     halfPageDown: () => scrollMessagesByHalfPage(1),
+    speakVisible: handleSpeakVisibleMessages,
   });
 
   const handleUndoMessage = useCallback((restoredPrompt: string) => {
