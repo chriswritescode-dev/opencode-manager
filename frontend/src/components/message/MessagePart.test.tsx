@@ -1,8 +1,9 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest'
-import { render, screen, fireEvent } from '@testing-library/react'
+import { render, screen, fireEvent, within } from '@testing-library/react'
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
 import { MemoryRouter } from 'react-router-dom'
 import { MessagePart } from './MessagePart'
+import { getFileApiUrl } from '@/api/files'
 import { applySessionEvent, emptySessionTranscript } from '@/lib/session-projection'
 import { promptSequence } from '@/test/fixtures/session-projection'
 import type {
@@ -127,6 +128,69 @@ describe('MessagePart', () => {
     const { container } = renderWithProviders(<MessagePart part={textPart('   ')} />)
 
     expect(container.firstChild).toBeNull()
+  })
+
+  describe('markdown images', () => {
+    it('loads a relative image through the raw file API resolved against the directory', () => {
+      renderWithProviders(
+        <MessagePart part={textPart('![shot](docs/shot.png)')} directory="/workspace/repos/app" />,
+      )
+
+      expect(screen.getByAltText('shot')).toHaveAttribute(
+        'src',
+        getFileApiUrl('/workspace/repos/app/docs/shot.png', { params: { raw: true } }),
+      )
+    })
+
+    it('loads an absolute image through the raw file API without a directory', () => {
+      renderWithProviders(<MessagePart part={textPart('![a](/workspace/x/a.png)')} />)
+
+      expect(screen.getByAltText('a')).toHaveAttribute(
+        'src',
+        getFileApiUrl('/workspace/x/a.png', { params: { raw: true } }),
+      )
+    })
+
+    it('keeps data image sources from markdown and raw HTML', () => {
+      renderWithProviders(
+        <MessagePart
+          part={textPart('![d](data:image/png;base64,aGVsbG8=)\n\n<img src="data:image/png;base64,aGVsbG8=" alt="raw">')}
+        />,
+      )
+
+      expect(screen.getByAltText('d')).toHaveAttribute('src', 'data:image/png;base64,aGVsbG8=')
+      expect(screen.getByAltText('raw')).toHaveAttribute('src', 'data:image/png;base64,aGVsbG8=')
+    })
+
+    it('keeps an external image source', () => {
+      renderWithProviders(<MessagePart part={textPart('![h](https://example.com/a.png)')} />)
+
+      expect(screen.getByAltText('h')).toHaveAttribute('src', 'https://example.com/a.png')
+    })
+
+    it('does not render a non-image data source', () => {
+      const { container } = renderWithProviders(
+        <MessagePart part={textPart('![x](data:text/html,hello)')} />,
+      )
+
+      expect(container.querySelector('img')).toBeNull()
+    })
+
+    it('renders a linked image without a nested expand button', () => {
+      renderWithProviders(
+        <MessagePart part={textPart('[![logo](https://example.com/a.png)](https://example.com)')} />,
+      )
+
+      const link = screen.getByRole('link')
+      expect(within(link).getByAltText('logo')).toHaveAttribute('src', 'https://example.com/a.png')
+      expect(within(link).queryByRole('button')).toBeNull()
+    })
+
+    it('renders an expand button for an unlinked image', () => {
+      renderWithProviders(<MessagePart part={textPart('![logo](https://example.com/a.png)')} />)
+
+      expect(screen.getByRole('button', { name: 'Expand image: logo' })).toBeInTheDocument()
+    })
   })
 
   describe('reasoning', () => {

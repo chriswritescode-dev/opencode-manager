@@ -2,8 +2,9 @@ import { memo, useMemo, useCallback } from 'react'
 import ReactMarkdown from 'react-markdown'
 import remarkGfm from 'remark-gfm'
 import { markdownComponents } from './MarkdownComponents'
-import { markdownRehypePlugins } from '@/lib/markdownRehypePlugins'
+import { markdownRehypePlugins, markdownUrlTransform } from '@/lib/markdownRehypePlugins'
 import { MarkdownLink } from '@/components/ui/markdown-link'
+import { MarkdownImage } from '@/components/ui/markdown-image'
 import { resolvePathFromFile } from '@/lib/markdownLinks'
 import type { Components } from 'react-markdown'
 
@@ -65,6 +66,11 @@ export const MarkdownRenderer = memo(function MarkdownRenderer({ content, classN
     }
   }, [filePath, onOpenFile])
 
+  const resolveLocalPath = useMemo(
+    () => (filePath ? (path: string) => resolvePathFromFile(filePath, path) : undefined),
+    [filePath],
+  )
+
   const components: Components = {
     ...markdownComponents,
     input(props) {
@@ -88,6 +94,9 @@ export const MarkdownRenderer = memo(function MarkdownRenderer({ content, classN
     a(props) {
       return <MarkdownLink {...props} onOpenLocalPath={handleOpenLocalPath} />
     },
+    img(props) {
+      return <MarkdownImage {...props} resolveLocalPath={resolveLocalPath} />
+    },
   }
 
   return (
@@ -95,6 +104,7 @@ export const MarkdownRenderer = memo(function MarkdownRenderer({ content, classN
       <ReactMarkdown
         remarkPlugins={[remarkGfm]}
         rehypePlugins={markdownRehypePlugins}
+        urlTransform={markdownUrlTransform}
         components={components}
       >
         {content}

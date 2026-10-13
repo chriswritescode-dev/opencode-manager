@@ -42,6 +42,18 @@ describe('resolvePathFromFile', () => {
   it('returns absolute paths unchanged', () => {
     expect(resolvePathFromFile(FROM, '/workspace/repos/app/report.html')).toBe('/workspace/repos/app/report.html')
   })
+
+  it('resolves relative links against an absolute base file keeping the leading slash', () => {
+    expect(resolvePathFromFile('/workspace/docs/README.md', 'img.png')).toBe('/workspace/docs/img.png')
+    expect(resolvePathFromFile('/workspace/docs/README.md', './img.png')).toBe('/workspace/docs/img.png')
+    expect(resolvePathFromFile('/workspace/docs/README.md', 'sub/img.png')).toBe('/workspace/docs/sub/img.png')
+  })
+
+  it('applies parent segments against an absolute base without climbing above root', () => {
+    expect(resolvePathFromFile('/workspace/docs/README.md', '../img.png')).toBe('/workspace/img.png')
+    expect(resolvePathFromFile('/a/index.md', '../../x.md')).toBe('/x.md')
+    expect(resolvePathFromFile('/a/index.md', '..')).toBe('/')
+  })
 })
 
 describe('getWorkspaceFilePath', () => {

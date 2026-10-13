@@ -491,6 +491,30 @@ describe('MessageThread', () => {
     expect(container.querySelector('[data-message-id="user-42"]')).not.toBeNull()
   })
 
+  it('renders image attachments as thumbnails and other files as chips', () => {
+    setupSettings({ simpleChatMode: false, showReasoning: false })
+
+    const messages: SessionMessageInfo[] = [
+      {
+        id: 'user-attachments',
+        type: 'user',
+        text: 'Look at these',
+        files: [
+          { data: 'aGVsbG8=', mime: 'image/png', source: { type: 'inline' }, name: 'shot.png' },
+          { data: 'dGV4dA==', mime: 'text/plain', source: { type: 'inline' }, name: 'notes.txt' },
+        ],
+        time: { created: Date.now() },
+      },
+    ]
+
+    render(<MessageThread sessionID="test-session" messages={messages} pending={[]} />)
+
+    const image = screen.getByAltText('shot.png')
+    expect(image).toHaveAttribute('src', 'data:image/png;base64,aGVsbG8=')
+    expect(screen.getByText('@')).toBeInTheDocument()
+    expect(screen.getByText('notes.txt')).toBeInTheDocument()
+  })
+
   it('renders a projected shell message from the fixtures', () => {
     setupSettings({ simpleChatMode: false, showReasoning: false })
 

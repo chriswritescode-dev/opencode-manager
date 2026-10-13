@@ -1,16 +1,19 @@
-import React, { useEffect, useState, useId, useCallback } from 'react'
+import React, { useEffect, useState, useId, useCallback, useMemo } from 'react'
 import ReactMarkdown from 'react-markdown'
 import remarkGfm from 'remark-gfm'
 import mermaid from 'mermaid'
 import { Maximize2, X, AlertCircle } from 'lucide-react'
 import { CopyButton } from '@/components/ui/copy-button'
 import { MarkdownLink } from '@/components/ui/markdown-link'
+import { MarkdownImage } from '@/components/ui/markdown-image'
 import { useTheme } from '@/hooks/useTheme'
-import { markdownRehypePlugins } from '@/lib/markdownRehypePlugins'
+import { getWorkspaceFilePath } from '@/lib/markdownLinks'
+import { markdownRehypePlugins, markdownUrlTransform } from '@/lib/markdownRehypePlugins'
 
 interface TextPartProps {
   text: string
   onFileClick?: (filePath: string) => void
+  directory?: string
 }
 
 interface MermaidBlockProps {
@@ -181,10 +184,15 @@ function isMermaidBlockComplete(text: string): boolean {
   return false
 }
 
-export function TextPart({ text, onFileClick }: TextPartProps) {
+export function TextPart({ text, onFileClick, directory }: TextPartProps) {
   const mermaidComplete = React.useMemo(() => {
     return text ? isMermaidBlockComplete(text) : false
   }, [text])
+
+  const resolveLocalPath = useMemo(
+    () => (directory ? (path: string) => getWorkspaceFilePath(path, { directory }) : undefined),
+    [directory],
+  )
 
   if (!text || text.trim() === '') {
     return null  
@@ -195,6 +203,7 @@ export function TextPart({ text, onFileClick }: TextPartProps) {
       <ReactMarkdown
         remarkPlugins={[remarkGfm]}
         rehypePlugins={markdownRehypePlugins}
+        urlTransform={markdownUrlTransform}
         components={{
           code({ className, children, ...props }) {
             const isInline = !className || !className.includes('language-')
@@ -260,6 +269,9 @@ export function TextPart({ text, onFileClick }: TextPartProps) {
           },
           a(props) {
             return <MarkdownLink {...props} onOpenLocalPath={onFileClick} />
+          },
+          img(props) {
+            return <MarkdownImage {...props} resolveLocalPath={resolveLocalPath} />
           },
         }}
       >

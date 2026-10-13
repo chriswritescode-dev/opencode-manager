@@ -90,6 +90,7 @@ export const ALLOWED_MIME_TYPES = [
   'image/png',
   'image/jpeg',
   'image/gif',
+  'image/webp',
   'image/svg+xml',
   'application/pdf',
   'application/zip',
