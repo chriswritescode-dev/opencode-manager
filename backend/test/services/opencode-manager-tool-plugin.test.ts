@@ -47,6 +47,10 @@ function walkthroughParamsSchema(tool: GeneratedTool): JsonSchema {
   return toolInputSchema(tool).properties?.params?.anyOf?.[2] ?? {}
 }
 
+function artifactParamsSchema(tool: GeneratedTool): JsonSchema {
+  return toolInputSchema(tool).properties?.params?.anyOf?.[3] ?? {}
+}
+
 async function runToolResult(
   tool: GeneratedTool,
   input: unknown,
@@ -108,14 +112,16 @@ describe('ocm-manager plugin', () => {
     expect(schema.type).toBe('object')
     expect(schema.required).toEqual(['action', 'params'])
     expect(schema.additionalProperties).toBe(false)
-    expect(schema.properties?.action?.enum).toEqual(['send_notification', 'request', 'open_walkthrough'])
-    expect(schema.properties?.params?.anyOf).toHaveLength(3)
+    expect(schema.properties?.action?.enum).toEqual(['send_notification', 'request', 'open_walkthrough', 'show_artifact'])
+    expect(schema.properties?.params?.anyOf).toHaveLength(4)
     expect(notificationParamsSchema(tool).required).toEqual(['title', 'body'])
     expect(requestParamsSchema(tool).required).toEqual(['method', 'path'])
     expect(walkthroughParamsSchema(tool).required).toBeUndefined()
+    expect(artifactParamsSchema(tool).required).toEqual(['title', 'path'])
     expect(notificationParamsSchema(tool).additionalProperties).toBe(false)
     expect(requestParamsSchema(tool).additionalProperties).toBe(false)
     expect(walkthroughParamsSchema(tool).additionalProperties).toBe(false)
+    expect(artifactParamsSchema(tool).additionalProperties).toBe(false)
     expect(notificationParamsSchema(tool).properties?.priority?.enum).toEqual(['normal', 'high'])
     expect(requestParamsSchema(tool).properties?.method?.enum).toEqual(['GET', 'POST', 'PUT', 'PATCH', 'DELETE'])
     expect(walkthroughParamsSchema(tool).properties?.source?.oneOf?.map((variant) => variant.properties?.kind?.const)).toEqual([
@@ -134,6 +140,14 @@ describe('ocm-manager plugin', () => {
     expect(tool.description).toContain('open_walkthrough')
     expect(tool.description).toContain('request the change Walkthrough for the current session')
     expect(tool.description).toContain('when this session is open on desktop')
+  })
+
+  it('lists the show_artifact action in the description', async () => {
+    const tool = await loadTool(configHome)
+
+    expect(tool.description).toContain('show_artifact')
+    expect(tool.description).toContain('write a self-contained .html file with your file tools')
+    expect(tool.description).toContain('rendered inline in this session')
   })
 
   it('enforces the notification limits the internal API enforces', async () => {
@@ -273,6 +287,49 @@ describe('ocm-manager plugin', () => {
     expect(url).toBe('http://localhost:5003/api/internal/change-walkthroughs/ses_abc')
     expect(init.headers['content-type']).toBeUndefined()
     expect(init.body).toBeUndefined()
+  })
+
+  it('resolves the artifact file through the internal API and reports the resolved path', async () => {
+    const fetchMock = jsonResponse({ path: '/workspace/repos/app/report.html' })
+    vi.stubGlobal('fetch', fetchMock)
+    const tool = await loadTool(configHome)
+
+    const result = await runToolResult(
+      tool,
+      { action: 'show_artifact', params: { title: 'Formation odds', path: 'reports/report.html' } },
+      { sessionID: 'ses_abc' },
+    )
+
+    expect(fetchMock).toHaveBeenCalledTimes(1)
+    const [url, init] = fetchMock.mock.calls[0] ?? []
+    expect(url).toBe('http://localhost:5003/api/internal/session-artifacts/ses_abc/resolve')
+    expect(init.method).toBe('POST')
+    expect(init.headers.Authorization).toBe('Bearer secret-token')
+    expect(init.headers['content-type']).toBe('application/json')
+    expect(JSON.parse(init.body)).toEqual({ path: 'reports/report.html' })
+    expect(result.content).toBe(
+      'Showing the artifact "Formation odds" from /workspace/repos/app/report.html in the Manager chat. It renders the current file contents, so after editing the file the user can reload the view; call show_artifact again only to show a different file.',
+    )
+    expect(result.metadata).toEqual({ path: '/workspace/repos/app/report.html' })
+  })
+
+  it('surfaces the resolve error when the artifact path is rejected', async () => {
+    vi.stubGlobal('fetch', jsonResponse({ error: 'Artifact file not found: reports/report.html' }, { ok: false, status: 404 }))
+    const tool = await loadTool(configHome)
+
+    await expect(
+      runTool(tool, { action: 'show_artifact', params: { title: 'Formation odds', path: 'reports/report.html' } }, { sessionID: 'ses_abc' }),
+    ).rejects.toThrow(/404.*Artifact file not found: reports\/report\.html/)
+  })
+
+  it('rejects a show_artifact call missing path without calling the API', async () => {
+    const fetchMock = jsonResponse({})
+    vi.stubGlobal('fetch', fetchMock)
+    const tool = await loadTool(configHome)
+
+    await expect(runTool(tool, { action: 'show_artifact', params: { title: 'Formation odds' } }, { sessionID: 'ses_abc' }))
+      .rejects.toThrow('Invalid parameters for OpenCode Manager action: show_artifact. Missing required parameter: path.')
+    expect(fetchMock).not.toHaveBeenCalled()
   })
 
   it('sends an allow-listed GET request with a query string and no body', async () => {
@@ -608,7 +665,7 @@ describe.skipIf(SHIPPED_OPENCODE_BIN === null)('ocm-manager plugin against the s
       expect(managerTool?.function?.parameters).toMatchObject({
         type: 'object',
         properties: {
-          action: { type: 'string', enum: ['send_notification', 'request', 'open_walkthrough'] },
+          action: { type: 'string', enum: ['send_notification', 'request', 'open_walkthrough', 'show_artifact'] },
           params: {
             anyOf: [
               {
@@ -636,6 +693,14 @@ describe.skipIf(SHIPPED_OPENCODE_BIN === null)('ocm-manager plugin against the s
                 additionalProperties: false,
                 properties: {
                   source: expect.anything(),
+                },
+              },
+              {
+                type: 'object',
+                required: ['title', 'path'],
+                properties: {
+                  title: { type: 'string', minLength: 1, maxLength: 120 },
+                  path: { type: 'string', minLength: 1, maxLength: 1000 },
                 },
               },
             ],

@@ -340,6 +340,83 @@ describe('MessagePart', () => {
       fireEvent.click(screen.getByRole('button'))
       expect(onChildSessionClick).toHaveBeenCalledWith('child-session')
     })
+
+    it('renders an ocm show_artifact tool in simpleChatMode', () => {
+      setupSettings({
+        simpleChatMode: true,
+        showReasoning: false,
+        expandToolCalls: false,
+        expandDiffs: true,
+      })
+
+      renderWithProviders(
+        <MessagePart
+          part={toolPart('ocm', {
+            status: 'completed',
+            input: { action: 'show_artifact', params: { title: 'Report', path: 'reports/summary.html' } },
+            content: [{ type: 'text', text: 'Artifact shown' }],
+          })}
+          messageID="msg_1"
+          directory="/repo"
+        />,
+      )
+
+      const iframe = screen.getByTitle('Report')
+      expect(iframe.tagName).toBe('IFRAME')
+      expect(iframe).toHaveAttribute('src', getFileApiUrl('/repo/reports/summary.html', { params: { raw: true } }))
+    })
+
+    it('renders an ocm show_artifact tool with an absolute path', () => {
+      setupSettings({
+        simpleChatMode: true,
+        showReasoning: false,
+        expandToolCalls: false,
+        expandDiffs: true,
+      })
+
+      renderWithProviders(
+        <MessagePart
+          part={toolPart('ocm', {
+            status: 'completed',
+            input: { action: 'show_artifact', params: { title: 'Report', path: '/tmp/artifacts/report.html' } },
+            content: [{ type: 'text', text: 'Artifact shown' }],
+          })}
+          messageID="msg_1"
+        />,
+      )
+
+      const iframe = screen.getByTitle('Report')
+      expect(iframe.tagName).toBe('IFRAME')
+      expect(iframe).toHaveAttribute('src', getFileApiUrl('/tmp/artifacts/report.html', { params: { raw: true } }))
+    })
+
+    it('passes the resolved metadata path and repo mapping through to the artifact frame', () => {
+      setupSettings({
+        simpleChatMode: true,
+        showReasoning: false,
+        expandToolCalls: false,
+        expandDiffs: true,
+      })
+
+      renderWithProviders(
+        <MessagePart
+          part={toolPart('ocm', {
+            status: 'completed',
+            input: { action: 'show_artifact', params: { title: 'Report', path: 'reports/summary.html' } },
+            content: [{ type: 'text', text: 'Artifact shown' }],
+            metadata: { path: '/workspace/repos/assistant/reports/summary.html' },
+          })}
+          messageID="msg_1"
+          directory="/workspace/repos/assistant"
+          repoFullPath="/workspace/repos/assistant"
+          repoLocalPath="assistant"
+        />,
+      )
+
+      const iframe = screen.getByTitle('Report')
+      expect(iframe.tagName).toBe('IFRAME')
+      expect(iframe).toHaveAttribute('src', getFileApiUrl('assistant/reports/summary.html', { params: { raw: true } }))
+    })
   })
 
   describe('sandbox indicator', () => {

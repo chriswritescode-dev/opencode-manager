@@ -23,6 +23,19 @@ function getSpecialRoutePathFromRequest(c: Context, routeName: string): string |
   return match?.[1] ? decodeFilePath(match[1]) : undefined
 }
 
+function buildWeakEtag(size: number, lastModified: Date): string {
+  return `W/"${size}-${lastModified.getTime()}"`
+}
+
+function matchesIfNoneMatch(ifNoneMatch: string | undefined, etag: string): boolean {
+  if (!ifNoneMatch) {
+    return false
+  }
+
+  const values = ifNoneMatch.split(',').map((value) => value.trim())
+  return values.includes('*') || values.includes(etag)
+}
+
 export function createFileRoutes() {
   const app = new Hono()
 
@@ -112,19 +125,46 @@ export function createFileRoutes() {
         return c.json(result)
       }
       
-      const result = await fileService.getFile(userPath)
-      
-      if (raw && !result.isDirectory) {
+      if (raw) {
+        const metadata = await fileService.getRawFileMetadata(userPath)
+
+        if (!metadata) {
+          const result = await fileService.getFile(userPath)
+          return c.json(result)
+        }
+
+        const etag = buildWeakEtag(metadata.size, metadata.lastModified)
+        const lastModified = metadata.lastModified.toUTCString()
+
+        if (matchesIfNoneMatch(c.req.header('if-none-match'), etag)) {
+          return new Response(null, {
+            status: 304,
+            headers: {
+              'ETag': etag,
+              'Last-Modified': lastModified,
+              'Cache-Control': 'no-cache',
+              'Content-Security-Policy': 'sandbox allow-scripts',
+              'X-Content-Type-Options': 'nosniff',
+            },
+          })
+        }
+
         const content = await fileService.getRawFileContent(userPath)
         return new Response(content, {
           headers: {
-            'Content-Type': result.mimeType || 'application/octet-stream',
-            'Content-Length': result.size.toString(),
+            'Content-Type': metadata.mimeType,
+            'Content-Length': content.byteLength.toString(),
             'Content-Security-Policy': 'sandbox allow-scripts',
+            'Cache-Control': 'no-cache',
+            'X-Content-Type-Options': 'nosniff',
+            'ETag': etag,
+            'Last-Modified': lastModified,
           }
         })
       }
-      
+
+      const result = await fileService.getFile(userPath)
+
       if (download && !result.isDirectory) {
         const content = result.content ? Buffer.from(result.content, 'base64') : Buffer.alloc(0)
         return new Response(content, {

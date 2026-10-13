@@ -21,7 +21,6 @@ import {
   buildSandboxStartArgs,
   buildSandboxStopManagedArgs,
   buildSandboxVersionArgs,
-  isPathWithinRoot,
   quoteForShell,
   resolveExpectedSandboxNetworkPolicy,
   resolveSandboxExecUser,
@@ -31,6 +30,7 @@ import {
   sandboxMountRoots,
   sandboxNetworkPolicyMismatch,
 } from '../../../src/services/sandbox/command'
+import { isPathWithinRoot } from '../../../src/utils/fs-safe'
 
 afterEach(() => {
   vi.restoreAllMocks()

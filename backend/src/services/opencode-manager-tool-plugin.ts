@@ -1,5 +1,5 @@
 import { z } from 'zod'
-import { ASSISTANT_NOTIFICATION_LIMITS, MANAGER_TOOL_ACTIONS, MANAGER_TOOL_NAME, WalkthroughSourceSchema } from '@opencode-manager/shared/schemas'
+import { ASSISTANT_NOTIFICATION_LIMITS, MANAGER_TOOL_ACTIONS, MANAGER_TOOL_NAME, ShowArtifactParamsSchema, WalkthroughSourceSchema } from '@opencode-manager/shared/schemas'
 
 const MANAGER_TOOL_REQUEST_TIMEOUT_MS = 60000
 
@@ -69,6 +69,7 @@ const MANAGER_TOOL_ACTION_PARAMS_SCHEMAS: Record<(typeof MANAGER_TOOL_ACTIONS)[n
   send_notification: ManagerToolNotificationParamsSchema,
   request: ManagerToolRequestParamsSchema,
   open_walkthrough: ManagerToolWalkthroughParamsSchema,
+  show_artifact: ShowArtifactParamsSchema.describe('Show a self-contained HTML file the agent wrote to the user, rendered inline in the Manager chat in a sandboxed frame.'),
 }
 
 export function parseAllowedRoute(route: string): { method: string; path: string } {
@@ -102,6 +103,7 @@ function buildManagerToolInputJsonSchema(): Record<string, unknown> {
             MANAGER_TOOL_ACTION_PARAMS_SCHEMAS.send_notification,
             MANAGER_TOOL_ACTION_PARAMS_SCHEMAS.request,
             MANAGER_TOOL_ACTION_PARAMS_SCHEMAS.open_walkthrough,
+            MANAGER_TOOL_ACTION_PARAMS_SCHEMAS.show_artifact,
           ])
           .describe('The parameters for the chosen action.'),
       })
@@ -123,6 +125,7 @@ function buildManagerToolDescription(): string {
     '- send_notification: send a push notification to every device the user has registered.',
     '- request: call an allow-listed internal API route to read and manage settings, the OpenCode configuration file, repos (list, inspect, clone from a git URL with POST /repos and body { repoUrl, branch?, directoryName? }), OpenCode workspaces, sessions (list, create, follow up, read the latest reply, fork), and schedules.',
     "- open_walkthrough: request the change Walkthrough for the current session, generating it if needed. It opens in the user's Manager window when this session is open on desktop; otherwise the user opens it from this tool call. Use when the user asks to walk through, review or explain the changes.",
+    '- show_artifact: write a self-contained .html file with your file tools, then call show_artifact with its path to show it to the user, rendered inline in this session\'s Manager chat inside a sandboxed frame. Edit the file to fix or change it (no need to resend content). Inline your own CSS and JavaScript; libraries may load from public CDNs. Forms, popups, cookies and local storage are blocked. Single file only: sibling .js and .css files will not load.',
     'Allowed request routes:',
   ]
     .concat(MANAGER_TOOL_ALLOWED_ROUTES.map((route) => `- ${route}`))
@@ -245,6 +248,19 @@ var ACTIONS = {
       return 'Requested the walkthrough.' + hint
     },
   },
+  show_artifact: {
+    run: async function (params, context) {
+      var result = await postInternalApi(
+        '/session-artifacts/' + encodeURIComponent(context.sessionID) + '/resolve',
+        { path: params.path },
+        context.signal,
+      )
+      return {
+        content: 'Showing the artifact "' + params.title + '" from ' + result.path + ' in the Manager chat. It renders the current file contents, so after editing the file the user can reload the view; call show_artifact again only to show a different file.',
+        metadata: { path: result.path },
+      }
+    },
+  },
 }
 
 function assertParams(actionName, params) {
@@ -281,7 +297,11 @@ export default {
         input: INPUT_SCHEMA,
         options: { codemode: false },
         execute: async function (input, context) {
-          return { content: await runAction(input, context) }
+          var result = await runAction(input, context)
+          if (result !== null && typeof result === 'object') {
+            return result
+          }
+          return { content: result }
         },
       })
     })

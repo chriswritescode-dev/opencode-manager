@@ -4,6 +4,7 @@ import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
 import { MemoryRouter } from 'react-router-dom'
 import type { PermissionRequest, SessionMessageAssistantTool } from '@opencode-manager/shared/opencode'
 import { ToolCallPart } from './ToolCallPart'
+import { getFileApiUrl } from '@/api/files'
 import { useUserBash } from '@/stores/userBashStore'
 import { useSessionStatus } from '@/stores/sessionStatusStore'
 
@@ -379,5 +380,145 @@ describe('ToolCallPart open walkthrough action', () => {
     renderWithProviders(<ToolCallPart part={otherAction} messageID="msg_1" onOpenWalkthrough={vi.fn()} />)
 
     expect(screen.queryByRole('button', { name: 'Open walkthrough' })).not.toBeInTheDocument()
+  })
+})
+
+describe('ToolCallPart show artifact action', () => {
+  beforeEach(() => {
+    vi.clearAllMocks()
+    mocks.useSettings.mockReturnValue({
+      preferences: { expandToolCalls: false },
+      isLoading: false,
+      updateSettings: vi.fn(),
+      isUpdating: false,
+    })
+    mocks.useToolCallPermission.mockReturnValue(null)
+  })
+
+  const showArtifact = (params: unknown, metadata?: Record<string, string>): SessionMessageAssistantTool => ({
+    type: 'tool',
+    id: 'call_artifact',
+    name: 'ocm',
+    time: { created: 1, ran: 2, completed: 3 },
+    state: {
+      status: 'completed',
+      input: { action: 'show_artifact', params },
+      content: [{ type: 'text', text: 'Artifact shown' }],
+      metadata,
+    },
+  })
+
+  it('renders the sandboxed iframe, path label, and open-in-new-tab link', () => {
+    const src = getFileApiUrl('/repo/reports/summary.html', { params: { raw: true } })
+
+    renderWithProviders(
+      <ToolCallPart
+        part={showArtifact({ title: 'Report', path: 'reports/summary.html' })}
+        messageID="msg_1"
+        directory="/repo"
+      />,
+    )
+
+    const iframe = screen.getByTitle('Report')
+    expect(iframe.tagName).toBe('IFRAME')
+    expect(iframe).toHaveAttribute('sandbox', 'allow-scripts')
+    expect(iframe.getAttribute('sandbox')).not.toContain('allow-same-origin')
+    expect(iframe).toHaveAttribute('src', src)
+
+    const pathLabel = screen.getByText('reports/summary.html')
+    expect(pathLabel).toHaveAttribute('title', 'reports/summary.html')
+
+    const link = screen.getByRole('link', { name: 'Open in new tab' })
+    expect(link).toHaveAttribute('href', src)
+    expect(link).toHaveAttribute('target', '_blank')
+    expect(link).toHaveAttribute('rel', 'noopener noreferrer')
+  })
+
+  it('prefers the backend-resolved metadata path over the directory join', () => {
+    const src = getFileApiUrl('/workspace/sessions/ses_1/report.html', { params: { raw: true } })
+
+    renderWithProviders(
+      <ToolCallPart
+        part={showArtifact(
+          { title: 'Report', path: 'reports/summary.html' },
+          { path: '/workspace/sessions/ses_1/report.html' },
+        )}
+        messageID="msg_1"
+        directory="/repo"
+      />,
+    )
+
+    expect(screen.getByTitle('Report')).toHaveAttribute('src', src)
+    expect(screen.getByText('reports/summary.html')).toHaveAttribute('title', 'reports/summary.html')
+  })
+
+  it('maps a repo path outside the workspace to the repo-local path', () => {
+    const src = getFileApiUrl('assistant/reports/summary.html', { params: { raw: true } })
+
+    renderWithProviders(
+      <ToolCallPart
+        part={showArtifact({ title: 'Report', path: 'reports/summary.html' })}
+        messageID="msg_1"
+        directory="/workspace/repos/assistant"
+        repoFullPath="/workspace/repos/assistant"
+        repoLocalPath="assistant"
+      />,
+    )
+
+    expect(screen.getByTitle('Report')).toHaveAttribute('src', src)
+  })
+
+  it('resolves an absolute artifact path without a session directory', () => {
+    const src = getFileApiUrl('/tmp/artifacts/report.html', { params: { raw: true } })
+
+    renderWithProviders(
+      <ToolCallPart
+        part={showArtifact({ title: 'Report', path: '/tmp/artifacts/report.html' })}
+        messageID="msg_1"
+      />,
+    )
+
+    const iframe = screen.getByTitle('Report')
+    expect(iframe).toHaveAttribute('src', src)
+    expect(screen.getByText('/tmp/artifacts/report.html')).toHaveAttribute('title', '/tmp/artifacts/report.html')
+  })
+
+  it('remounts the iframe with an unchanged src when Reload is clicked', () => {
+    const src = getFileApiUrl('/repo/reports/summary.html', { params: { raw: true } })
+
+    const { container } = renderWithProviders(
+      <ToolCallPart
+        part={showArtifact({ title: 'Report', path: 'reports/summary.html' })}
+        messageID="msg_1"
+        directory="/repo"
+      />,
+    )
+
+    const before = container.querySelector('iframe')
+    expect(before).not.toBeNull()
+
+    fireEvent.click(screen.getByRole('button', { name: 'Reload artifact' }))
+
+    const after = container.querySelector('iframe')
+    expect(after).not.toBe(before)
+    expect(after).toHaveAttribute('src', src)
+  })
+
+  it('falls back to the generic tool card for invalid params', () => {
+    const { container } = renderWithProviders(
+      <ToolCallPart part={showArtifact({ title: 'No path' })} messageID="msg_1" directory="/repo" />,
+    )
+
+    expect(container.querySelector('iframe')).toBeNull()
+    expect(screen.getByText('ocm')).toBeInTheDocument()
+  })
+
+  it('falls back to the generic tool card for a relative path without a directory', () => {
+    const { container } = renderWithProviders(
+      <ToolCallPart part={showArtifact({ title: 'Report', path: 'reports/summary.html' })} messageID="msg_1" />,
+    )
+
+    expect(container.querySelector('iframe')).toBeNull()
+    expect(screen.getByText('ocm')).toBeInTheDocument()
   })
 })

@@ -1,8 +1,7 @@
 import path from 'path'
 import { ENV } from '@opencode-manager/shared/config/env'
-import { writeFileAtomic } from '../../utils/fs-safe'
+import { isPathWithinRoot, writeFileAtomic } from '../../utils/fs-safe'
 import {
-  isPathWithinRoot,
   quoteForShell,
   resolveSandboxExecUser,
   sandboxExecutablePath,

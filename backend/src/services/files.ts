@@ -40,6 +40,12 @@ interface FileUploadResult {
   mimeType: string
 }
 
+export interface RawFileMetadata {
+  size: number
+  mimeType: AllowedMimeType
+  lastModified: Date
+}
+
 export async function getRawFileContent(userPath: string): Promise<Buffer> {
   const validatedPath = validatePath(userPath)
   logger.info(`Getting raw file content for path: ${userPath} -> ${validatedPath}`)
@@ -59,6 +65,32 @@ export async function getRawFileContent(userPath: string): Promise<Buffer> {
   } catch (error) {
     logger.error(`Failed to read raw file content ${validatedPath}:`, error)
     throw { message: 'File not found or cannot be read', statusCode: 404 }
+  }
+}
+
+export async function getRawFileMetadata(userPath: string): Promise<RawFileMetadata | null> {
+  const validatedPath = validatePath(userPath)
+  logger.info(`Getting raw file metadata for path: ${userPath} -> ${validatedPath}`)
+
+  try {
+    const exists = await fileExists(validatedPath)
+    if (!exists) {
+      throw new Error('Path does not exist')
+    }
+
+    const stats = await getFileStats(validatedPath)
+    if (stats.isDirectory) {
+      return null
+    }
+
+    return {
+      size: stats.size,
+      mimeType: getMimeType(validatedPath),
+      lastModified: stats.lastModified,
+    }
+  } catch (error) {
+    logger.error(`Failed to read raw file metadata ${validatedPath}:`, error)
+    throw { message: 'File or directory not found', statusCode: 404 }
   }
 }
 
@@ -262,6 +294,7 @@ function getMimeType(filePath: string): AllowedMimeType {
   const mimeTypes: Record<string, AllowedMimeType> = {
     '.txt': 'text/plain',
     '.html': 'text/html',
+    '.htm': 'text/html',
     '.css': 'text/css',
     '.js': 'text/javascript',
     '.ts': 'text/typescript',

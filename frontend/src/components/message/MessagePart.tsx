@@ -2,6 +2,7 @@ import { memo } from 'react'
 import type { SessionMessageAssistant } from '@opencode-manager/shared/opencode'
 import { TextPart } from './TextPart'
 import { ToolCallPart } from './ToolCallPart'
+import { readShowArtifactCall } from '@/lib/artifactTool'
 import { useSettings } from '@/hooks/useSettings'
 import type { ShellNoticeOutcome } from '@/lib/backgroundWork'
 import type { WalkthroughSource } from '@opencode-manager/shared/schemas'
@@ -12,13 +13,15 @@ interface MessagePartProps {
   part: AssistantContentPart
   messageID?: string
   directory?: string
+  repoFullPath?: string
+  repoLocalPath?: string
   shellOutcome?: ShellNoticeOutcome
   onFileClick?: (filePath: string, lineNumber?: number) => void
   onChildSessionClick?: (sessionId: string) => void
   onOpenWalkthrough?: (source?: WalkthroughSource) => void
 }
 
-export const MessagePart = memo(function MessagePart({ part, messageID, directory, shellOutcome, onFileClick, onChildSessionClick, onOpenWalkthrough }: MessagePartProps) {
+export const MessagePart = memo(function MessagePart({ part, messageID, directory, repoFullPath, repoLocalPath, shellOutcome, onFileClick, onChildSessionClick, onOpenWalkthrough }: MessagePartProps) {
   const { preferences } = useSettings()
   const simpleChatMode = preferences?.simpleChatMode ?? false
   const showReasoning = preferences?.showReasoning ?? false
@@ -40,12 +43,14 @@ export const MessagePart = memo(function MessagePart({ part, messageID, director
         </details>
       )
     case 'tool':
-      if (simpleChatMode && part.name !== 'subagent') return null
+      if (simpleChatMode && part.name !== 'subagent' && !readShowArtifactCall(part)) return null
       return (
         <ToolCallPart
           part={part}
           messageID={messageID}
           directory={directory}
+          repoFullPath={repoFullPath}
+          repoLocalPath={repoLocalPath}
           shellOutcome={shellOutcome}
           onFileClick={onFileClick}
           onChildSessionClick={onChildSessionClick}

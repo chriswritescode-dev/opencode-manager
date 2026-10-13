@@ -5,7 +5,34 @@ export const MANAGER_TOOL_NAME = 'ocm'
 
 export const MANAGER_TOOL_OPEN_WALKTHROUGH_ACTION = 'open_walkthrough'
 
-export const MANAGER_TOOL_ACTIONS = ['send_notification', 'request', MANAGER_TOOL_OPEN_WALKTHROUGH_ACTION] as const
+export const MANAGER_TOOL_SHOW_ARTIFACT_ACTION = 'show_artifact'
+
+export const MANAGER_TOOL_ACTIONS = [
+  'send_notification',
+  'request',
+  MANAGER_TOOL_OPEN_WALKTHROUGH_ACTION,
+  MANAGER_TOOL_SHOW_ARTIFACT_ACTION,
+] as const
+
+export const ARTIFACT_LIMITS = {
+  TITLE_MAX: 120,
+  FILE_MAX_BYTES: 5 * 1024 * 1024,
+} as const
+
+export const ShowArtifactParamsSchema = z
+  .object({
+    title: z.string().min(1).max(ARTIFACT_LIMITS.TITLE_MAX).describe('A short title shown above the artifact.'),
+    path: z
+      .string()
+      .min(1)
+      .max(1000)
+      .describe(
+        'Path of a self-contained .html file the agent wrote, relative to the session directory or absolute inside it. Inline your own CSS and JavaScript; libraries may load from public CDNs.',
+      ),
+  })
+  .strict()
+
+export type ShowArtifactParams = z.infer<typeof ShowArtifactParamsSchema>
 
 export const AssistantNotificationPrioritySchema = z.enum(['normal', 'high'])
 

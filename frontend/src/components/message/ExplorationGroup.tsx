@@ -11,6 +11,8 @@ interface ExplorationGroupProps {
   parts: SessionMessageAssistantTool[]
   messageID: string
   directory?: string
+  repoFullPath?: string
+  repoLocalPath?: string
   onFileClick?: (filePath: string, lineNumber?: number) => void
   onChildSessionClick?: (sessionId: string) => void
   onOpenWalkthrough?: (source?: WalkthroughSource) => void

@@ -14,7 +14,7 @@ import {
 } from '../services/opencode/upstream'
 import { getRepoById } from '../db/queries'
 import { getTrustedOrigins, getWorkspacePath } from '@opencode-manager/shared/config/env'
-import { isPathWithinRoot } from '../services/sandbox/command'
+import { isPathWithinRoot } from '../utils/fs-safe'
 import { buildProxyResponseHeaders, filterProxyHeaders } from '../utils/proxy-headers'
 import {
   connectUpstreamWebSocket,
