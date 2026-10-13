@@ -25,7 +25,7 @@ export const MessagePart = memo(function MessagePart({ part, messageID, director
 
   switch (part.type) {
     case 'text':
-      return <TextPart text={part.text} onFileClick={onFileClick} />
+      return <TextPart text={part.text} onFileClick={onFileClick} directory={directory} />
     case 'reasoning':
       if (simpleChatMode || !showReasoning) return null
       if (!part.text.trim()) return null

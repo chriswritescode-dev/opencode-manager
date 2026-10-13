@@ -274,6 +274,7 @@ function getMimeType(filePath: string): AllowedMimeType {
     '.jpg': 'image/jpeg',
     '.jpeg': 'image/jpeg',
     '.gif': 'image/gif',
+    '.webp': 'image/webp',
     '.svg': 'image/svg+xml',
     '.pdf': 'application/pdf',
     '.zip': 'application/zip',

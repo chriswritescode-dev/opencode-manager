@@ -21,6 +21,7 @@ import { UserMessageActionButtons } from './UserMessageActionButtons'
 import { EditableUserMessage, ClickableUserMessage } from './EditableUserMessage'
 import { useSettings } from '@/hooks/useSettings'
 import { CopyButton } from '@/components/ui/copy-button'
+import { InlineImage } from '@/components/ui/inline-image'
 import { TTSButton } from '@/components/ui/tts-button'
 import { backgroundShellID, collectBackgroundParts, type ShellNoticeOutcome } from '@/lib/backgroundWork'
 import { groupExplorationParts, type AssistantContentItem } from '@/lib/explorationGroups'
@@ -121,15 +122,24 @@ function UserAttachments({ files: attachedFiles, agents: attachedAgents, skills:
 
   return (
     <div className="flex flex-wrap items-center gap-1 mt-1">
-      {files.map((file, index) => (
-        <span
-          key={`file-${index}`}
-          className="inline-flex items-center gap-1 px-2 py-1 rounded bg-muted border border-border text-sm text-foreground"
-        >
-          <span className="text-primary">@</span>
-          <span className="font-medium">{attachmentLabel(file)}</span>
-        </span>
-      ))}
+      {files.map((file, index) =>
+        file.mime.startsWith('image/') ? (
+          <InlineImage
+            key={`file-${index}`}
+            src={`data:${file.mime};base64,${file.data}`}
+            alt={attachmentLabel(file)}
+            className="max-h-40"
+          />
+        ) : (
+          <span
+            key={`file-${index}`}
+            className="inline-flex items-center gap-1 px-2 py-1 rounded bg-muted border border-border text-sm text-foreground"
+          >
+            <span className="text-primary">@</span>
+            <span className="font-medium">{attachmentLabel(file)}</span>
+          </span>
+        ),
+      )}
       {agents.map((agent, index) => (
         <span
           key={`agent-${index}`}
