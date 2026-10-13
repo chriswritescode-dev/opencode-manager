@@ -19,24 +19,31 @@ export function getLocalLinkPath(href: string | undefined): string | null {
 
 /**
  * Resolves a local link path against the workspace path of the file that contains it.
- * Absolute paths are returned unchanged for the files API to validate; leading parent segments are kept.
+ * Absolute link paths are returned unchanged for the files API to validate. Leading parent segments
+ * are kept for relative bases, while an absolute base keeps its leading slash and never climbs above root.
  */
 export function resolvePathFromFile(fromFilePath: string, linkPath: string): string | null {
   if (linkPath.startsWith('/')) {
     return linkPath
   }
 
+  const isAbsolute = fromFilePath.startsWith('/')
   const segments = fromFilePath.split('/').filter(Boolean).slice(0, -1)
   for (const segment of linkPath.split('/')) {
     if (segment === '' || segment === '.') continue
-    if (segment === '..' && segments.length > 0 && segments[segments.length - 1] !== '..') {
+    if (segment !== '..') {
+      segments.push(segment)
+    } else if (segments.length === 0) {
+      if (!isAbsolute) segments.push(segment)
+    } else if (isAbsolute || segments[segments.length - 1] !== '..') {
       segments.pop()
     } else {
       segments.push(segment)
     }
   }
 
-  return segments.join('/') || null
+  const resolved = segments.join('/')
+  return isAbsolute ? `/${resolved}` : resolved || null
 }
 
 /**
