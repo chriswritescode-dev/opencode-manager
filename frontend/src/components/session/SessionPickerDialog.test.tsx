@@ -5,6 +5,7 @@ import { render, screen, fireEvent, waitFor, act } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import type { Repo, Session } from '@/api/types'
 import { stubMatchMedia } from '@/test/test-utils'
+import { KeyboardShortcutsProvider } from '@/contexts/KeyboardShortcutsContext'
 import { SessionPickerDialog } from './SessionPickerDialog'
 
 const mocks = vi.hoisted(() => ({
@@ -22,6 +23,13 @@ const mocks = vi.hoisted(() => ({
   getOpenCodeLocation: vi.fn(),
   sessionPins: [] as Array<{ sessionId: string; directory: string; pinnedAt: number }>,
   repos: [] as Repo[],
+  preferences: undefined as
+    | { leaderKey?: string; keyboardShortcuts?: Record<string, string>; directShortcuts?: string[] }
+    | undefined,
+}))
+
+vi.mock('@/hooks/useSettings', () => ({
+  useSettings: () => ({ preferences: mocks.preferences }),
 }))
 
 vi.mock('@/api/opencode', async (importOriginal) => {
@@ -104,13 +112,18 @@ function renderWithClient(ui: React.ReactElement) {
   if (mocks.locationData && directory) {
     queryClient.setQueryData(['opencode', 'location', directory], mocks.locationData)
   }
-  return render(<QueryClientProvider client={queryClient}>{ui}</QueryClientProvider>)
+  return render(
+    <QueryClientProvider client={queryClient}>
+      <KeyboardShortcutsProvider>{ui}</KeyboardShortcutsProvider>
+    </QueryClientProvider>,
+  )
 }
 
 function renderPicker(overrides: Partial<React.ComponentProps<typeof SessionPickerDialog>> = {}) {
   const onOpenChange = vi.fn()
   const onSelectSession = vi.fn()
   const onDeleteActiveSession = vi.fn()
+  const onSelectRepo = vi.fn()
   renderWithClient(
     <SessionPickerDialog
       open
@@ -118,13 +131,18 @@ function renderPicker(overrides: Partial<React.ComponentProps<typeof SessionPick
       currentRepo={mocks.repos[0]}
       onSelectSession={onSelectSession}
       onDeleteActiveSession={onDeleteActiveSession}
+      onSelectRepo={onSelectRepo}
       {...overrides}
     />,
   )
-  return { onOpenChange, onSelectSession, onDeleteActiveSession }
+  return { onOpenChange, onSelectSession, onDeleteActiveSession, onSelectRepo }
 }
 
 const combobox = () => screen.getByRole('combobox')
+
+const openProjectsTab = () => {
+  fireEvent.mouseDown(screen.getByRole('tab', { name: 'Projects' }))
+}
 
 describe('SessionPickerDialog', () => {
   beforeEach(() => {
@@ -141,6 +159,7 @@ describe('SessionPickerDialog', () => {
     mocks.sessionPins = []
     mocks.repos = [repo(1, 'alpha', '/w/a'), repo(2, 'beta', '/w/b')]
     mocks.sessionsData = []
+    mocks.preferences = undefined
   })
 
   afterEach(() => {
@@ -336,6 +355,7 @@ describe('SessionPickerDialog', () => {
             currentRepo={mocks.repos[0]}
             onSelectSession={vi.fn()}
             onDeleteActiveSession={vi.fn()}
+            onSelectRepo={vi.fn()}
           />
         </>
       )
@@ -454,6 +474,7 @@ describe('SessionPickerDialog', () => {
             activeSessionID="ses_active"
             onSelectSession={vi.fn()}
             onDeleteActiveSession={vi.fn()}
+            onSelectRepo={vi.fn()}
           />
         </>
       )
@@ -469,5 +490,131 @@ describe('SessionPickerDialog', () => {
 
     await waitFor(() => expect(screen.getByRole('combobox')).toHaveValue(''))
     expect(screen.getByRole('option', { name: /Active session/ })).toHaveAttribute('aria-selected', 'true')
+  })
+
+  it('renders a Sessions/Projects tab switcher and defaults to the sessions tab', () => {
+    renderPicker()
+
+    expect(screen.getByRole('tab', { name: 'Sessions' })).toHaveAttribute('aria-selected', 'true')
+    expect(screen.getByRole('tab', { name: 'Projects' })).toHaveAttribute('aria-selected', 'false')
+    expect(combobox()).toHaveAttribute('placeholder', 'Search sessions...')
+  })
+
+  it('lists repos in the projects tab and opens the cursor repo on Enter', async () => {
+    mocks.repos = [repo(1, 'alpha', '/w/a'), repo(2, 'beta', '/w/b')]
+    const { onSelectRepo } = renderPicker()
+
+    openProjectsTab()
+
+    const alpha = await screen.findByRole('option', { name: /alpha/ })
+    expect(alpha).toHaveAttribute('aria-selected', 'true')
+    expect(screen.getByRole('option', { name: /beta/ })).toBeInTheDocument()
+
+    fireEvent.keyDown(combobox(), { key: 'Enter' })
+
+    expect(onSelectRepo).toHaveBeenCalledWith(mocks.repos[0])
+  })
+
+  it('opens a repo on click in the projects tab', async () => {
+    mocks.repos = [repo(1, 'alpha', '/w/a'), repo(2, 'beta', '/w/b')]
+    const { onSelectRepo } = renderPicker()
+
+    openProjectsTab()
+
+    fireEvent.click(await screen.findByRole('option', { name: /beta/ }))
+
+    expect(onSelectRepo).toHaveBeenCalledWith(mocks.repos[1])
+  })
+
+  it('filters projects by name and branch', async () => {
+    mocks.repos = [
+      { ...repo(1, 'alpha', '/w/a'), currentBranch: 'feature/x' },
+      repo(2, 'beta', '/w/b'),
+    ]
+    renderPicker()
+
+    openProjectsTab()
+    await screen.findByRole('option', { name: /alpha/ })
+
+    fireEvent.change(combobox(), { target: { value: 'beta' } })
+    expect(screen.queryByRole('option', { name: /alpha/ })).not.toBeInTheDocument()
+    expect(screen.getByRole('option', { name: /beta/ })).toBeInTheDocument()
+
+    fireEvent.change(combobox(), { target: { value: 'feature/x' } })
+    expect(screen.getByRole('option', { name: /alpha/ })).toBeInTheDocument()
+    expect(screen.queryByRole('option', { name: /beta/ })).not.toBeInTheDocument()
+  })
+
+  it('shows the empty projects state when nothing matches', async () => {
+    renderPicker()
+
+    openProjectsTab()
+    await screen.findByRole('option', { name: /alpha/ })
+
+    fireEvent.change(combobox(), { target: { value: 'zzz' } })
+
+    expect(screen.getByText('No projects found')).toBeInTheDocument()
+  })
+
+  it('toggles between tabs with the default Ctrl+S binding in either search input', async () => {
+    renderPicker()
+
+    fireEvent.keyDown(combobox(), { key: 's', ctrlKey: true })
+    expect(await screen.findByRole('tab', { name: 'Projects', selected: true })).toBeInTheDocument()
+
+    fireEvent.keyDown(combobox(), { key: 's', ctrlKey: true })
+    expect(screen.getByRole('tab', { name: 'Sessions', selected: true })).toBeInTheDocument()
+  })
+
+  it('honors a configured switch binding and shows it in the footer', async () => {
+    mocks.preferences = { keyboardShortcuts: { switchPickerTab: 'Ctrl+G' } }
+    renderPicker()
+
+    expect(screen.getByText(/Ctrl\+G projects/)).toBeInTheDocument()
+
+    fireEvent.keyDown(combobox(), { key: 'g', ctrlKey: true })
+    expect(await screen.findByRole('tab', { name: 'Projects', selected: true })).toBeInTheDocument()
+
+    expect(screen.getByText(/Ctrl\+G sessions/)).toBeInTheDocument()
+  })
+
+  it('no longer switches tabs on Ctrl+O', () => {
+    renderPicker()
+
+    fireEvent.keyDown(combobox(), { key: 'o', ctrlKey: true })
+
+    expect(screen.getByRole('tab', { name: 'Sessions', selected: true })).toBeInTheDocument()
+  })
+
+  it('resets to the sessions tab when the dialog reopens', async () => {
+    function Host() {
+      const [open, setOpen] = useState(true)
+      return (
+        <>
+          <button type="button" onClick={() => setOpen(false)}>close-picker</button>
+          <button type="button" onClick={() => setOpen(true)}>open-picker</button>
+          <SessionPickerDialog
+            open={open}
+            onOpenChange={setOpen}
+            currentRepo={mocks.repos[0]}
+            onSelectSession={vi.fn()}
+            onDeleteActiveSession={vi.fn()}
+            onSelectRepo={vi.fn()}
+          />
+        </>
+      )
+    }
+
+    renderWithClient(<Host />)
+
+    openProjectsTab()
+    expect(screen.getByRole('tab', { name: 'Projects' })).toHaveAttribute('aria-selected', 'true')
+
+    fireEvent.click(screen.getByText('close-picker'))
+    fireEvent.click(screen.getByText('open-picker'))
+
+    await waitFor(() =>
+      expect(screen.getByRole('tab', { name: 'Sessions' })).toHaveAttribute('aria-selected', 'true'),
+    )
   })
 })

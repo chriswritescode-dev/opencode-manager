@@ -8,7 +8,7 @@ import { applyTuiKeybindImport, parseTuiKeybindConfig } from '@/lib/tuiKeybindIm
 import { showToast } from '@/lib/toast'
 
 const CONVERSATION_ACTIONS = ['submit', 'abort', 'clearPrompt', 'toggleMode', 'undo', 'redo', 'compact', 'fork', 'timeline', 'exportSession', 'selectModel', 'variantCycle', 'favoriteCycle', 'halfPageUp', 'halfPageDown']
-const NAVIGATION_ACTIONS = ['settings', 'sessions', 'newSession', 'closeSession', 'toggleSidebar', 'toggleTerminal', 'toggleSourceControl']
+const NAVIGATION_ACTIONS = ['settings', 'sessions', 'switchPickerTab', 'newSession', 'closeSession', 'toggleSidebar', 'toggleTerminal', 'toggleSourceControl']
 
 const formatShortcutLabel = (action: string): string => {
   return action.replace(/([A-Z])/g, ' $1').trim()

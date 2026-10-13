@@ -14,7 +14,9 @@ import {
 } from '@/components/ui/dropdown-menu'
 import { Input } from '@/components/ui/input'
 import { SessionStatusIndicator } from '@/components/ui/session-status-indicator'
+import { Tabs, TabsList, TabsTrigger } from '@/components/ui/tabs'
 import { DeleteSessionDialog } from '@/components/session/DeleteSessionDialog'
+import { ProjectPickerContent } from '@/components/session/ProjectPickerContent'
 import { partitionSessions } from '@/components/session/session-partition'
 import { buildRepoByDirectory } from '@/components/navigation/sidebar-session-tree'
 import { useDeleteSession } from '@/hooks/useOpenCode'
@@ -23,7 +25,10 @@ import { useSessionPins, useToggleSessionPin } from '@/hooks/useSessionPins'
 import { usePersistentBoolean } from '@/hooks/usePersistentBoolean'
 import { useNavigableRepos } from '@/hooks/useSidebarRepoGroups'
 import { useSessionStatusForSession } from '@/stores/sessionStatusStore'
+import { useShortcutActions } from '@/contexts/KeyboardShortcutsContext'
+import { useSettings } from '@/hooks/useSettings'
 import { buildPinnedSessionKeys, getSessionKey } from '@/lib/sessionKey'
+import { normalizeShortcut, resolveShortcutBindings, type ShortcutBindings } from '@/lib/keyboardShortcuts'
 import { cn, formatShortRelativeTime, getRepoDisplayName } from '@/lib/utils'
 import { FINE_POINTER_MEDIA_QUERY, useMediaQuery } from '@/hooks/useMediaQuery'
 
@@ -32,6 +37,16 @@ const UNTITLED_SESSION_TITLE = 'Untitled Session'
 const PAGE_STEP = 10
 const NEAR_BOTTOM_PX = 240
 
+type SessionPickerTab = 'sessions' | 'projects'
+
+function switchTabShortcutLabel(bindings: ShortcutBindings): string {
+  const keys = bindings.shortcuts.switchPickerTab
+  if (!keys) return ''
+  const normalized = normalizeShortcut(keys)
+  if (bindings.directShortcuts.includes('switchPickerTab')) return normalized
+  return `${bindings.leaderKey} ${normalized}`
+}
+
 interface SessionPickerDialogProps {
   open: boolean
   onOpenChange: (open: boolean) => void
@@ -39,6 +54,7 @@ interface SessionPickerDialogProps {
   activeSessionID?: string
   onSelectSession: (session: Session, repo: Repo) => void
   onDeleteActiveSession: () => void
+  onSelectRepo: (repo: Repo) => void
 }
 
 interface SessionPickerRow {
@@ -281,6 +297,7 @@ interface SessionPickerContentProps {
   activeSessionID?: string
   onSelectSession: (session: Session, repo: Repo) => void
   onDeleteActiveSession: () => void
+  switchHint: string
   searchInputRef: React.RefObject<HTMLInputElement | null>
   hasFinePointer: boolean
 }
@@ -291,6 +308,7 @@ function SessionPickerContent({
   activeSessionID,
   onSelectSession,
   onDeleteActiveSession,
+  switchHint,
   searchInputRef,
   hasFinePointer,
 }: SessionPickerContentProps) {
@@ -548,13 +566,6 @@ function SessionPickerContent({
 
   return (
     <>
-      <DialogTitle className="shrink-0 px-4 pt-4 sm:px-0 sm:pt-6">
-        Sessions
-        {!allProjects && currentRepo && (
-          <span className="font-normal text-muted-foreground"> for {getRepoDisplayName(currentRepo)}</span>
-        )}
-      </DialogTitle>
-
       <div className="mt-4 flex min-h-0 flex-1 flex-col">
         <div className="flex shrink-0 items-center gap-2 px-4 sm:px-0">
           <div className="relative flex-1">
@@ -672,6 +683,7 @@ function SessionPickerContent({
 
         <div className="mt-2 shrink-0 px-4 text-xs text-muted-foreground pointer-coarse:hidden sm:px-0">
           ↑↓ move · Enter open · Ctrl+D delete · Ctrl+A {allProjects ? 'this project' : 'all projects'}
+          {switchHint ? ` · ${switchHint} projects` : ''}
         </div>
       </div>
 
@@ -697,9 +709,35 @@ export function SessionPickerDialog({
   activeSessionID,
   onSelectSession,
   onDeleteActiveSession,
+  onSelectRepo,
 }: SessionPickerDialogProps) {
   const searchInputRef = useRef<HTMLInputElement>(null)
+  const projectSearchInputRef = useRef<HTMLInputElement>(null)
   const hasFinePointer = useMediaQuery(FINE_POINTER_MEDIA_QUERY)
+  const { preferences } = useSettings()
+  const switchHint = useMemo(
+    () => switchTabShortcutLabel(resolveShortcutBindings(preferences)),
+    [preferences],
+  )
+  const [tab, setTab] = useState<SessionPickerTab>('sessions')
+  const [prevOpen, setPrevOpen] = useState(open)
+
+  if (prevOpen !== open) {
+    setPrevOpen(open)
+    if (open) setTab('sessions')
+  }
+
+  const toggleTab = useCallback(() => {
+    setTab((current) => (current === 'sessions' ? 'projects' : 'sessions'))
+  }, [])
+
+  useShortcutActions({ switchPickerTab: open ? toggleTab : undefined })
+
+  useEffect(() => {
+    if (!open || !hasFinePointer) return
+    if (tab === 'projects') projectSearchInputRef.current?.focus()
+    else searchInputRef.current?.focus()
+  }, [open, tab, hasFinePointer])
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
@@ -716,15 +754,39 @@ export function SessionPickerDialog({
           }
         }}
       >
-        <SessionPickerContent
-          open={open}
-          currentRepo={currentRepo}
-          activeSessionID={activeSessionID}
-          onSelectSession={onSelectSession}
-          onDeleteActiveSession={onDeleteActiveSession}
-          searchInputRef={searchInputRef}
-          hasFinePointer={hasFinePointer}
-        />
+        <Tabs
+          value={tab}
+          onValueChange={(value) => setTab(value as SessionPickerTab)}
+          className="flex min-h-0 w-full min-w-0 flex-1 flex-col gap-0"
+        >
+          <div className="shrink-0 px-4 pt-4 sm:px-0 sm:pt-6">
+            <DialogTitle className="sr-only">{tab === 'sessions' ? 'Sessions' : 'Projects'}</DialogTitle>
+            <TabsList>
+              <TabsTrigger value="sessions">Sessions</TabsTrigger>
+              <TabsTrigger value="projects">Projects</TabsTrigger>
+            </TabsList>
+          </div>
+          {tab === 'sessions' ? (
+            <SessionPickerContent
+              open={open}
+              currentRepo={currentRepo}
+              activeSessionID={activeSessionID}
+              onSelectSession={onSelectSession}
+              onDeleteActiveSession={onDeleteActiveSession}
+              switchHint={switchHint}
+              searchInputRef={searchInputRef}
+              hasFinePointer={hasFinePointer}
+            />
+          ) : (
+            <ProjectPickerContent
+              open={open}
+              currentRepo={currentRepo}
+              onSelectRepo={onSelectRepo}
+              switchHint={switchHint}
+              searchInputRef={projectSearchInputRef}
+            />
+          )}
+        </Tabs>
       </DialogContent>
     </Dialog>
   )

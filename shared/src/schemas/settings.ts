@@ -76,6 +76,7 @@ export const DEFAULT_KEYBOARD_SHORTCUTS = {
   fork: '',
   settings: '',
   sessions: 'L',
+  switchPickerTab: 'Ctrl+S',
   newSession: 'N',
   closeSession: 'W',
   toggleSidebar: 'B',
@@ -92,7 +93,7 @@ export const DEFAULT_KEYBOARD_SHORTCUTS = {
 
 export type KeyboardShortcutAction = keyof typeof DEFAULT_KEYBOARD_SHORTCUTS;
 
-export const DEFAULT_DIRECT_SHORTCUTS = ['submit', 'abort', 'clearPrompt', 'toggleMode', 'variantCycle', 'favoriteCycle', 'halfPageUp', 'halfPageDown'];
+export const DEFAULT_DIRECT_SHORTCUTS = ['submit', 'abort', 'clearPrompt', 'toggleMode', 'variantCycle', 'favoriteCycle', 'halfPageUp', 'halfPageDown', 'switchPickerTab'];
 
 export const GitCredentialSchema = z.object({
   id: z.string().optional(),
