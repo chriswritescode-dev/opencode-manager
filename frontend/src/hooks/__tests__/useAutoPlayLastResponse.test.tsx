@@ -111,6 +111,8 @@ describe('useAutoPlayLastResponse', () => {
       },
       updateSettings: mockUpdateSettings,
     })
+
+    return mockTTS
   }
 
   it('does NOT call speakMessage when tts.enabled is false', () => {
@@ -178,6 +180,77 @@ describe('useAutoPlayLastResponse', () => {
     )
 
     expect(mockSpeakMessage).not.toHaveBeenCalled()
+
+    const completedMessage = createMessage('1', Date.now())
+    rerender({
+      sessionId: 'test-session',
+      lastAssistantMessage: completedMessage,
+      lastAssistantText: 'Test text',
+      isStreamingResponse: false,
+    })
+
+    expect(mockSpeakMessage).toHaveBeenCalledTimes(1)
+    expect(mockSpeakMessage).toHaveBeenCalledWith('1', 'Test text')
+  })
+
+  it('does NOT call speakMessage when unattributed playback is active, and does not speak it after playback ends', () => {
+    const mockTTS = setup()
+
+    const incompleteMessage = createMessage('1')
+    const { rerender } = renderHook(
+      (props) => useAutoPlayLastResponse(props),
+      {
+        initialProps: {
+          sessionId: 'test-session',
+          lastAssistantMessage: incompleteMessage,
+          lastAssistantText: 'Test text',
+          isStreamingResponse: false,
+        },
+      }
+    )
+
+    mockTTS.isPlaying = true
+    mockTTS.activeMessageId = null
+
+    const completedMessage = createMessage('1', Date.now())
+    rerender({
+      sessionId: 'test-session',
+      lastAssistantMessage: completedMessage,
+      lastAssistantText: 'Test text',
+      isStreamingResponse: false,
+    })
+
+    expect(mockSpeakMessage).not.toHaveBeenCalled()
+
+    mockTTS.isPlaying = false
+    rerender({
+      sessionId: 'test-session',
+      lastAssistantMessage: completedMessage,
+      lastAssistantText: 'Test text',
+      isStreamingResponse: false,
+    })
+
+    expect(mockSpeakMessage).not.toHaveBeenCalled()
+  })
+
+  it('CALLS speakMessage when a message-attributed playback is active', () => {
+    const mockTTS = setup()
+
+    const incompleteMessage = createMessage('1')
+    const { rerender } = renderHook(
+      (props) => useAutoPlayLastResponse(props),
+      {
+        initialProps: {
+          sessionId: 'test-session',
+          lastAssistantMessage: incompleteMessage,
+          lastAssistantText: 'Test text',
+          isStreamingResponse: false,
+        },
+      }
+    )
+
+    mockTTS.isPlaying = true
+    mockTTS.activeMessageId = 'other-message'
 
     const completedMessage = createMessage('1', Date.now())
     rerender({

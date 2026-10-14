@@ -74,7 +74,7 @@ describe('collectVisibleAssistantTexts', () => {
       assistantMessage('a5', ['five']),
     ]
 
-    expect(collectVisibleAssistantTexts(container, messages)).toEqual(['one', 'five'])
+    expect(collectVisibleAssistantTexts(container, messages, 0)).toEqual(['one', 'five'])
   })
 
   it('ignores user and system messages and assistant messages with no text parts', () => {
@@ -91,7 +91,7 @@ describe('collectVisibleAssistantTexts', () => {
       assistantMessage('a-valid', ['kept']),
     ]
 
-    expect(collectVisibleAssistantTexts(container, messages)).toEqual(['kept'])
+    expect(collectVisibleAssistantTexts(container, messages, 0)).toEqual(['kept'])
   })
 
   it('returns an empty list when nothing intersects', () => {
@@ -100,6 +100,19 @@ describe('collectVisibleAssistantTexts', () => {
 
     const messages: SessionMessageInfo[] = [assistantMessage('a1', ['hidden'])]
 
-    expect(collectVisibleAssistantTexts(container, messages)).toEqual([])
+    expect(collectVisibleAssistantTexts(container, messages, 0)).toEqual([])
+  })
+
+  it('excludes messages hidden within the bottom inset and includes messages straddling it', () => {
+    const container = buildContainer()
+    appendMessageElement(container, 'hidden', 85, 95)
+    appendMessageElement(container, 'straddling', 75, 95)
+
+    const messages: SessionMessageInfo[] = [
+      assistantMessage('hidden', ['hidden']),
+      assistantMessage('straddling', ['straddling']),
+    ]
+
+    expect(collectVisibleAssistantTexts(container, messages, 20)).toEqual(['straddling'])
   })
 })
