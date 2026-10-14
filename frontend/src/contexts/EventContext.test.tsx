@@ -97,6 +97,57 @@ const sourcedPermission: PermissionRequest = {
   source: { type: 'tool', messageID: 'msg_1', id: 'call_1' },
 }
 
+const viewedSessionPermission: PermissionRequest = {
+  id: 'permission-view',
+  sessionID: 'session-view',
+  action: 'shell',
+  resources: ['echo view'],
+  metadata: {},
+}
+
+const otherSessionPermission: PermissionRequest = {
+  id: 'permission-other',
+  sessionID: 'session-other',
+  action: 'shell',
+  resources: ['echo other'],
+  metadata: {},
+}
+
+const childSessionPermission: PermissionRequest = {
+  id: 'permission-child',
+  sessionID: 'child-1',
+  action: 'shell',
+  resources: ['echo child'],
+  metadata: {},
+}
+
+const viewedSessionForm: FormInfo = {
+  id: 'form-view',
+  sessionID: 'session-view',
+  title: 'Continue view',
+  fields: [
+    { key: 'q0', title: 'Confirm', type: 'string', options: [{ value: 'Yes', label: 'Yes' }] },
+  ],
+}
+
+const otherSessionForm: FormInfo = {
+  id: 'form-other',
+  sessionID: 'session-other',
+  title: 'Continue other',
+  fields: [
+    { key: 'q0', title: 'Confirm', type: 'string', options: [{ value: 'Yes', label: 'Yes' }] },
+  ],
+}
+
+const childSessionForm: FormInfo = {
+  id: 'form-child',
+  sessionID: 'child-1',
+  title: 'Continue child',
+  fields: [
+    { key: 'q0', title: 'Confirm', type: 'string', options: [{ value: 'Yes', label: 'Yes' }] },
+  ],
+}
+
 function Harness() {
   const { current, pendingCount, syncForSession, navigateToCurrent, cancel, reply, getForSession } = useForms()
   const permissions = usePermissions()
@@ -116,6 +167,8 @@ function Harness() {
       <div data-testid="for-session-unknown">{getForSession('session-unknown')?.id ?? 'none'}</div>
       <div data-testid="permission-count">{permissions.pendingCount}</div>
       <div data-testid="permission-current">{permissions.current?.id ?? 'none'}</div>
+      <div data-testid="permission-directory">{permissions.currentDirectory ?? 'none'}</div>
+      <div data-testid="permission-different">{String(permissions.currentIsFromDifferentSession)}</div>
       <div data-testid="permission-tool-call">{permissions.getForToolCall('call_1', 'msg_1')?.id ?? 'none'}</div>
       <div data-testid="permission-tool-call-other-message">
         {permissions.getForToolCall('call_1', 'msg_other')?.id ?? 'none'}
@@ -124,9 +177,12 @@ function Harness() {
         {permissions.getForToolCall('call_other', 'msg_1')?.id ?? 'none'}
       </div>
       <div data-testid="path">{location.pathname}</div>
+      <div data-testid="search">{location.search}</div>
+      <div data-testid="location-key">{location.key}</div>
       <button onClick={() => syncForSession('/repo', 'session-1')}>Sync</button>
       <button onClick={() => permissions.syncForSession('/repo', 'session-1')}>Sync Permissions</button>
       <button onClick={navigateToCurrent}>Navigate</button>
+      <button onClick={permissions.navigateToCurrent}>Navigate Permission</button>
       <button onClick={() => current && recordRejection(cancel(current.id))}>Dismiss</button>
       <button onClick={() => current && recordRejection(reply(current.id, { q0: 'Yes' }))}>Reply</button>
       <button onClick={() => permissions.current && recordRejection(permissions.respond(permissions.current.id, permissions.current.sessionID, 'reject'))}>Reject Permission</button>
@@ -149,9 +205,9 @@ function createDeferred<T>() {
   return { promise, resolve }
 }
 
-function createWrapper(queryClient = createTestQueryClient()) {
+function createWrapper(queryClient = createTestQueryClient(), initialPath = '/') {
   return ({ children }: { children: ReactNode }) => (
-    <MemoryRouter>
+    <MemoryRouter initialEntries={[initialPath]}>
       <QueryClientProvider client={queryClient}>
         <EventProvider>{children}</EventProvider>
       </QueryClientProvider>
@@ -173,6 +229,7 @@ function CacheResolutionHarness({ sessionID }: { sessionID: string }) {
 describe('EventProvider permissions and forms', () => {
   beforeEach(() => {
     vi.clearAllMocks()
+    window.history.pushState({}, '', '/')
     mocks.listRepos.mockResolvedValue([])
     mocks.listPendingPermissions.mockResolvedValue([])
     mocks.listPendingForms.mockResolvedValue([])
@@ -567,6 +624,107 @@ describe('EventProvider permissions and forms', () => {
 
     await waitFor(() => {
       expect(screen.getByTestId('path')).toHaveTextContent('/repos/123/sessions/session-1')
+    })
+  })
+
+  it('navigates an assistant-session permission to the assistant session path', async () => {
+    mocks.listRepos.mockResolvedValue([{ id: 0, fullPath: '/assistant' }])
+
+    render(<Harness />, { wrapper: createWrapper() })
+
+    await waitFor(() => expect(mocks.listPendingPermissions).toHaveBeenCalledWith('/assistant'))
+
+    const lastSubscribeCall = mocks.subscribeGlobalMonitor.mock.calls[mocks.subscribeGlobalMonitor.mock.calls.length - 1]
+    const onEvent = lastSubscribeCall[0].onEvent as (data: unknown) => void
+
+    act(() => {
+      onEvent({ type: 'permission.asked', data: pendingPermission, directory: '/assistant' })
+    })
+
+    await waitFor(() => {
+      expect(screen.getByTestId('permission-current')).toHaveTextContent('permission-1')
+    })
+
+    await userEvent.click(screen.getByRole('button', { name: 'Navigate Permission' }))
+
+    await waitFor(() => {
+      expect(screen.getByTestId('path')).toHaveTextContent('/repos/0/sessions/session-1')
+      expect(screen.getByTestId('search')).toHaveTextContent('?assistant=1')
+    })
+  })
+
+  it('navigates a normal-repo permission without the assistant query', async () => {
+    mocks.listRepos.mockResolvedValue([{ id: 123, fullPath: '/repo' }])
+
+    render(<Harness />, { wrapper: createWrapper() })
+
+    await waitFor(() => expect(mocks.listPendingPermissions).toHaveBeenCalledWith('/repo'))
+
+    const lastSubscribeCall = mocks.subscribeGlobalMonitor.mock.calls[mocks.subscribeGlobalMonitor.mock.calls.length - 1]
+    const onEvent = lastSubscribeCall[0].onEvent as (data: unknown) => void
+
+    act(() => {
+      onEvent({ type: 'permission.asked', data: pendingPermission, directory: '/repo' })
+    })
+
+    await waitFor(() => {
+      expect(screen.getByTestId('permission-current')).toHaveTextContent('permission-1')
+    })
+
+    await userEvent.click(screen.getByRole('button', { name: 'Navigate Permission' }))
+
+    await waitFor(() => {
+      expect(screen.getByTestId('path')).toHaveTextContent('/repos/123/sessions/session-1')
+    })
+    expect(screen.getByTestId('search').textContent).toBe('')
+  })
+
+  it('does not navigate when already on the target session path', async () => {
+    mocks.listRepos.mockResolvedValue([{ id: 123, fullPath: '/repo' }])
+    window.history.pushState({}, '', '/repos/123/sessions/session-1')
+
+    render(<Harness />, {
+      wrapper: createWrapper(createTestQueryClient(), '/repos/123/sessions/session-1'),
+    })
+
+    await waitFor(() => expect(mocks.listPendingPermissions).toHaveBeenCalledWith('/repo'))
+
+    const lastSubscribeCall = mocks.subscribeGlobalMonitor.mock.calls[mocks.subscribeGlobalMonitor.mock.calls.length - 1]
+    const onEvent = lastSubscribeCall[0].onEvent as (data: unknown) => void
+
+    act(() => {
+      onEvent({ type: 'permission.asked', data: pendingPermission, directory: '/repo' })
+    })
+
+    await waitFor(() => {
+      expect(screen.getByTestId('permission-current')).toHaveTextContent('permission-1')
+    })
+
+    const keyBefore = screen.getByTestId('location-key').textContent
+
+    await userEvent.click(screen.getByRole('button', { name: 'Navigate Permission' }))
+
+    expect(screen.getByTestId('location-key')).toHaveTextContent(keyBefore ?? '')
+    expect(screen.getByTestId('path')).toHaveTextContent('/repos/123/sessions/session-1')
+  })
+
+  it('navigates an assistant-session form to the assistant session path', async () => {
+    mocks.listRepos.mockResolvedValue([{ id: 0, fullPath: '/repo' }])
+    mocks.listPendingForms.mockResolvedValue([pendingForm])
+
+    render(<Harness />, { wrapper: createWrapper() })
+
+    await userEvent.click(screen.getByRole('button', { name: 'Sync' }))
+
+    await waitFor(() => {
+      expect(screen.getByTestId('current')).toHaveTextContent('form-1')
+    })
+
+    await userEvent.click(screen.getByRole('button', { name: 'Navigate' }))
+
+    await waitFor(() => {
+      expect(screen.getByTestId('path')).toHaveTextContent('/repos/0/sessions/session-1')
+      expect(screen.getByTestId('search')).toHaveTextContent('?assistant=1')
     })
   })
 
@@ -1037,6 +1195,309 @@ describe('EventProvider permissions and forms', () => {
     await waitFor(() => {
       expect(screen.getByTestId('repo-id')).toHaveTextContent('456')
     })
+  })
+
+  it('prioritizes the viewed session permission over an earlier unrelated one', async () => {
+    render(<Harness />, {
+      wrapper: createWrapper(createTestQueryClient(), '/repos/123/sessions/session-view'),
+    })
+
+    await waitFor(() => expect(mocks.subscribeGlobalMonitor).toHaveBeenCalled())
+
+    const lastSubscribeCall = mocks.subscribeGlobalMonitor.mock.calls[mocks.subscribeGlobalMonitor.mock.calls.length - 1]
+    const onEvent = lastSubscribeCall[0].onEvent as (data: unknown) => void
+
+    act(() => {
+      onEvent({ type: 'permission.asked', data: otherSessionPermission, directory: '/repo' })
+      onEvent({ type: 'permission.asked', data: viewedSessionPermission, directory: '/repo' })
+    })
+
+    await waitFor(() => {
+      expect(screen.getByTestId('permission-count')).toHaveTextContent('2')
+      expect(screen.getByTestId('permission-current')).toHaveTextContent('permission-view')
+    })
+    expect(screen.getByTestId('permission-different')).toHaveTextContent('false')
+  })
+
+  it('prefers a descendant session permission when viewing its parent', async () => {
+    act(() => {
+      useSessionStatus.getState().setSessionParent('child-1', 'parent-1')
+    })
+
+    render(<Harness />, {
+      wrapper: createWrapper(createTestQueryClient(), '/repos/123/sessions/parent-1'),
+    })
+
+    await waitFor(() => expect(mocks.subscribeGlobalMonitor).toHaveBeenCalled())
+
+    const lastSubscribeCall = mocks.subscribeGlobalMonitor.mock.calls[mocks.subscribeGlobalMonitor.mock.calls.length - 1]
+    const onEvent = lastSubscribeCall[0].onEvent as (data: unknown) => void
+
+    act(() => {
+      onEvent({ type: 'permission.asked', data: otherSessionPermission, directory: '/repo' })
+      onEvent({ type: 'permission.asked', data: childSessionPermission, directory: '/repo' })
+    })
+
+    await waitFor(() => {
+      expect(screen.getByTestId('permission-current')).toHaveTextContent('permission-child')
+    })
+    expect(screen.getByTestId('permission-different')).toHaveTextContent('false')
+  })
+
+  it('falls back to the first pending permission when the viewed session has none', async () => {
+    render(<Harness />, {
+      wrapper: createWrapper(createTestQueryClient(), '/repos/123/sessions/session-view'),
+    })
+
+    await waitFor(() => expect(mocks.subscribeGlobalMonitor).toHaveBeenCalled())
+
+    const lastSubscribeCall = mocks.subscribeGlobalMonitor.mock.calls[mocks.subscribeGlobalMonitor.mock.calls.length - 1]
+    const onEvent = lastSubscribeCall[0].onEvent as (data: unknown) => void
+
+    act(() => {
+      onEvent({ type: 'permission.asked', data: otherSessionPermission, directory: '/repo' })
+      onEvent({ type: 'permission.asked', data: pendingPermission, directory: '/repo' })
+    })
+
+    await waitFor(() => {
+      expect(screen.getByTestId('permission-count')).toHaveTextContent('2')
+      expect(screen.getByTestId('permission-current')).toHaveTextContent('permission-other')
+    })
+    expect(screen.getByTestId('permission-different')).toHaveTextContent('true')
+  })
+
+  it('resolves the current permission directory from the query cache', async () => {
+    mocks.listRepos.mockResolvedValue([{ id: 123, fullPath: '/repo' }])
+    const queryClient = createTestQueryClient()
+    queryClient.setQueryData(
+      ['opencode', 'session', 'session-1', '/repo'],
+      {
+        id: 'session-1',
+        projectID: 'proj-1',
+        title: 'Fix permission dialog',
+        location: { directory: '/repo' },
+        time: { created: 1000, updated: 1000 },
+      },
+    )
+
+    render(<Harness />, { wrapper: createWrapper(queryClient) })
+
+    await waitFor(() => expect(mocks.subscribeGlobalMonitor).toHaveBeenCalled())
+
+    const lastSubscribeCall = mocks.subscribeGlobalMonitor.mock.calls[mocks.subscribeGlobalMonitor.mock.calls.length - 1]
+    const onEvent = lastSubscribeCall[0].onEvent as (data: unknown) => void
+
+    act(() => {
+      onEvent({ type: 'permission.asked', data: pendingPermission, directory: '/repo' })
+    })
+
+    await waitFor(() => {
+      expect(screen.getByTestId('permission-current')).toHaveTextContent('permission-1')
+      expect(screen.getByTestId('permission-directory')).toHaveTextContent('/repo')
+    })
+  })
+
+  it('keeps the shown permission when a viewed-session permission arrives, then advances once it is answered', async () => {
+    render(<Harness />, {
+      wrapper: createWrapper(createTestQueryClient(), '/repos/123/sessions/session-view'),
+    })
+
+    await waitFor(() => expect(mocks.subscribeGlobalMonitor).toHaveBeenCalled())
+
+    const lastSubscribeCall = mocks.subscribeGlobalMonitor.mock.calls[mocks.subscribeGlobalMonitor.mock.calls.length - 1]
+    const onEvent = lastSubscribeCall[0].onEvent as (data: unknown) => void
+
+    act(() => {
+      onEvent({ type: 'permission.asked', data: otherSessionPermission, directory: '/repo' })
+    })
+
+    await waitFor(() => {
+      expect(screen.getByTestId('permission-current')).toHaveTextContent('permission-other')
+    })
+
+    act(() => {
+      onEvent({ type: 'permission.asked', data: viewedSessionPermission, directory: '/repo' })
+    })
+
+    await waitFor(() => {
+      expect(screen.getByTestId('permission-count')).toHaveTextContent('2')
+    })
+    expect(screen.getByTestId('permission-current')).toHaveTextContent('permission-other')
+
+    act(() => {
+      onEvent({
+        type: 'permission.replied',
+        data: { sessionID: 'session-other', requestID: 'permission-other', reply: 'reject' },
+        directory: '/repo',
+      })
+    })
+
+    await waitFor(() => {
+      expect(screen.getByTestId('permission-count')).toHaveTextContent('1')
+      expect(screen.getByTestId('permission-current')).toHaveTextContent('permission-view')
+    })
+  })
+
+  it('prioritizes the viewed session form over an earlier unrelated one', async () => {
+    render(<Harness />, {
+      wrapper: createWrapper(createTestQueryClient(), '/repos/123/sessions/session-view'),
+    })
+
+    await waitFor(() => expect(mocks.subscribeGlobalMonitor).toHaveBeenCalled())
+
+    const lastSubscribeCall = mocks.subscribeGlobalMonitor.mock.calls[mocks.subscribeGlobalMonitor.mock.calls.length - 1]
+    const onEvent = lastSubscribeCall[0].onEvent as (data: unknown) => void
+
+    act(() => {
+      onEvent({ type: 'form.created', data: { form: otherSessionForm }, directory: '/repo' })
+      onEvent({ type: 'form.created', data: { form: viewedSessionForm }, directory: '/repo' })
+    })
+
+    await waitFor(() => {
+      expect(screen.getByTestId('count')).toHaveTextContent('2')
+      expect(screen.getByTestId('current')).toHaveTextContent('form-view')
+    })
+  })
+
+  it('prefers a descendant session form when viewing its parent', async () => {
+    act(() => {
+      useSessionStatus.getState().setSessionParent('child-1', 'parent-1')
+    })
+
+    render(<Harness />, {
+      wrapper: createWrapper(createTestQueryClient(), '/repos/123/sessions/parent-1'),
+    })
+
+    await waitFor(() => expect(mocks.subscribeGlobalMonitor).toHaveBeenCalled())
+
+    const lastSubscribeCall = mocks.subscribeGlobalMonitor.mock.calls[mocks.subscribeGlobalMonitor.mock.calls.length - 1]
+    const onEvent = lastSubscribeCall[0].onEvent as (data: unknown) => void
+
+    act(() => {
+      onEvent({ type: 'form.created', data: { form: otherSessionForm }, directory: '/repo' })
+      onEvent({ type: 'form.created', data: { form: childSessionForm }, directory: '/repo' })
+    })
+
+    await waitFor(() => {
+      expect(screen.getByTestId('current')).toHaveTextContent('form-child')
+    })
+  })
+
+  it('falls back to the first pending form when the viewed session has none', async () => {
+    render(<Harness />, {
+      wrapper: createWrapper(createTestQueryClient(), '/repos/123/sessions/session-view'),
+    })
+
+    await waitFor(() => expect(mocks.subscribeGlobalMonitor).toHaveBeenCalled())
+
+    const lastSubscribeCall = mocks.subscribeGlobalMonitor.mock.calls[mocks.subscribeGlobalMonitor.mock.calls.length - 1]
+    const onEvent = lastSubscribeCall[0].onEvent as (data: unknown) => void
+
+    act(() => {
+      onEvent({ type: 'form.created', data: { form: otherSessionForm }, directory: '/repo' })
+      onEvent({ type: 'form.created', data: { form: pendingForm }, directory: '/repo' })
+    })
+
+    await waitFor(() => {
+      expect(screen.getByTestId('count')).toHaveTextContent('2')
+      expect(screen.getByTestId('current')).toHaveTextContent('form-other')
+    })
+  })
+
+  it('keeps the shown form when a viewed-session form arrives, then advances once it is answered', async () => {
+    render(<Harness />, {
+      wrapper: createWrapper(createTestQueryClient(), '/repos/123/sessions/session-view'),
+    })
+
+    await waitFor(() => expect(mocks.subscribeGlobalMonitor).toHaveBeenCalled())
+
+    const lastSubscribeCall = mocks.subscribeGlobalMonitor.mock.calls[mocks.subscribeGlobalMonitor.mock.calls.length - 1]
+    const onEvent = lastSubscribeCall[0].onEvent as (data: unknown) => void
+
+    act(() => {
+      onEvent({ type: 'form.created', data: { form: otherSessionForm }, directory: '/repo' })
+    })
+
+    await waitFor(() => {
+      expect(screen.getByTestId('current')).toHaveTextContent('form-other')
+    })
+
+    act(() => {
+      onEvent({ type: 'form.created', data: { form: viewedSessionForm }, directory: '/repo' })
+    })
+
+    await waitFor(() => {
+      expect(screen.getByTestId('count')).toHaveTextContent('2')
+    })
+    expect(screen.getByTestId('current')).toHaveTextContent('form-other')
+
+    act(() => {
+      onEvent({
+        type: 'form.cancelled',
+        data: { id: 'form-other', sessionID: 'session-other' },
+        directory: '/repo',
+      })
+    })
+
+    await waitFor(() => {
+      expect(screen.getByTestId('count')).toHaveTextContent('1')
+      expect(screen.getByTestId('current')).toHaveTextContent('form-view')
+    })
+  })
+
+  it('resolves ancestry when a permission arrives for an unknown session', async () => {
+    mocks.getSession.mockImplementation((sessionID: string) => {
+      if (sessionID === 'child-1') return Promise.resolve({ id: 'child-1', parentID: 'parent-1' })
+      if (sessionID === 'parent-1') return Promise.resolve({ id: 'parent-1' })
+      return Promise.reject(new Error('Session not found'))
+    })
+
+    render(<Harness />, {
+      wrapper: createWrapper(createTestQueryClient(), '/repos/123/sessions/parent-1'),
+    })
+
+    await waitFor(() => expect(mocks.subscribeGlobalMonitor).toHaveBeenCalled())
+
+    const lastSubscribeCall = mocks.subscribeGlobalMonitor.mock.calls[mocks.subscribeGlobalMonitor.mock.calls.length - 1]
+    const onEvent = lastSubscribeCall[0].onEvent as (data: unknown) => void
+
+    act(() => {
+      onEvent({ type: 'permission.asked', data: childSessionPermission, directory: '/repo' })
+    })
+
+    await waitFor(() => {
+      expect(mocks.getSession).toHaveBeenCalledWith('child-1')
+      expect(useSessionStatus.getState().parents.get('child-1')).toBe('parent-1')
+    })
+    expect(screen.getByTestId('permission-current')).toHaveTextContent('permission-child')
+    expect(screen.getByTestId('permission-different')).toHaveTextContent('false')
+  })
+
+  it('resolves ancestry when a form arrives for an unknown session', async () => {
+    mocks.getSession.mockImplementation((sessionID: string) => {
+      if (sessionID === 'child-1') return Promise.resolve({ id: 'child-1', parentID: 'parent-1' })
+      if (sessionID === 'parent-1') return Promise.resolve({ id: 'parent-1' })
+      return Promise.reject(new Error('Session not found'))
+    })
+
+    render(<Harness />, {
+      wrapper: createWrapper(createTestQueryClient(), '/repos/123/sessions/parent-1'),
+    })
+
+    await waitFor(() => expect(mocks.subscribeGlobalMonitor).toHaveBeenCalled())
+
+    const lastSubscribeCall = mocks.subscribeGlobalMonitor.mock.calls[mocks.subscribeGlobalMonitor.mock.calls.length - 1]
+    const onEvent = lastSubscribeCall[0].onEvent as (data: unknown) => void
+
+    act(() => {
+      onEvent({ type: 'form.created', data: { form: childSessionForm }, directory: '/repo' })
+    })
+
+    await waitFor(() => {
+      expect(mocks.getSession).toHaveBeenCalledWith('child-1')
+      expect(useSessionStatus.getState().parents.get('child-1')).toBe('parent-1')
+    })
+    expect(screen.getByTestId('current')).toHaveTextContent('form-child')
   })
 
   it('exposes sseHealth through context', async () => {

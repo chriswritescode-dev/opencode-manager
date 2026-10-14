@@ -1,6 +1,6 @@
 /* eslint-disable react-refresh/only-export-components */
 import { createContext, useContext, useEffect, useState, useCallback, useMemo, useRef } from 'react'
-import { useNavigate } from 'react-router-dom'
+import { useLocation, useNavigate } from 'react-router-dom'
 import { useQueryClient, useQuery } from '@tanstack/react-query'
 import {
   cancelForm,
@@ -19,6 +19,7 @@ import type { PermissionResponse, SSHHostKeyRequest, Repo } from '@/api/types'
 import { showToast } from '@/lib/toast'
 import { openCodeEventStream, type EventStreamHealthState } from '@/lib/opencode-event-stream'
 import { addToSessionKeyedState, removeFromSessionKeyedState } from '@/lib/sessionKeyedState'
+import { getSessionPath, parseRepoRoute } from '@/lib/navigation'
 import { changeWalkthroughQueryKey } from '@/hooks/useChangeWalkthrough'
 import { busyStatusesFromActiveSessions, useSessionStatus } from '@/stores/sessionStatusStore'
 import {
@@ -71,6 +72,53 @@ function repoMatchesDirectory(repo: Repo, directory?: string | null) {
     .some((path) => normalizeDirectory(path) === normalizedDirectory)
 }
 
+function isSessionWithinView(
+  sessionID: string,
+  viewedSessionID: string,
+  parents: Map<string, string | null>,
+): boolean {
+  const visited = new Set<string>()
+  let currentID: string | null = sessionID
+
+  while (currentID !== null && !visited.has(currentID)) {
+    if (currentID === viewedSessionID) return true
+    visited.add(currentID)
+    currentID = parents.get(currentID) ?? null
+  }
+
+  return false
+}
+
+/**
+ * Pins the item currently on screen until it leaves `items`, then advances to the first item whose
+ * session is the viewed session or one of its descendants, falling back to the first item.
+ * The selection is derived during render so a newly arriving item never displaces the shown one.
+ */
+function usePinnedViewedItem<T extends SessionScopedItem>(
+  items: T[],
+  viewedSessionId: string | null,
+  parents: Map<string, string | null>,
+): T | null {
+  const [pinnedId, setPinnedId] = useState<string | null>(null)
+
+  const selected = useMemo(() => {
+    if (pinnedId) {
+      const pinned = items.find((item) => item.id === pinnedId)
+      if (pinned) return pinned
+    }
+
+    const forViewedSession = viewedSessionId
+      ? items.find((item) => isSessionWithinView(item.sessionID, viewedSessionId, parents)) ?? null
+      : null
+    return forViewedSession ?? items[0] ?? null
+  }, [items, viewedSessionId, parents, pinnedId])
+
+  const selectedId = selected?.id ?? null
+  if (selectedId !== pinnedId) setPinnedId(selectedId)
+
+  return selected
+}
+
 function reconcileBySessionForDirectory<T extends SessionScopedItem>(
   prev: Record<string, T[]>,
   directory: string,
@@ -104,6 +152,19 @@ interface EventContextValue {
   permissions: {
     current: PermissionRequest | null
     pendingCount: number
+    /**
+     * Session currently being viewed from the route, or null when no session route is active.
+     */
+    viewedSessionId: string | null
+    /**
+     * Directory of the current permission's session, resolved from tracked events and the query cache.
+     */
+    currentDirectory: string | null
+    /**
+     * True when a session is being viewed and the current permission belongs to neither that session
+     * nor one of its descendants.
+     */
+    currentIsFromDifferentSession: boolean
     /**
      * Replies to a permission request and removes it from the queue. Resolves, after showing an
      * "expired" toast, when the server no longer knows the request (`PermissionNotFoundError`);
@@ -169,6 +230,8 @@ const EventContext = createContext<EventContextValue | null>(null)
 export function EventProvider({ children }: { children: React.ReactNode }) {
   const queryClient = useQueryClient()
   const navigate = useNavigate()
+  const location = useLocation()
+  const sessionParents = useSessionStatus((state) => state.parents)
 
   const [sshHostKeyRequest, setSSHHostKeyRequest] = useState<SSHHostKeyRequest | null>(null)
   const [sseHealth, setSseHealth] = useState<SSEHealthState>(() => {
@@ -217,51 +280,71 @@ export function EventProvider({ children }: { children: React.ReactNode }) {
   const allPermissions = useMemo(() => Object.values(permissionsBySession).flat(), [permissionsBySession])
   const allForms = useMemo(() => Object.values(formsBySession).flat(), [formsBySession])
 
-  const currentPermission = allPermissions[0] ?? null
-  const currentForm = allForms[0] ?? null
+  const viewedSessionId = useMemo(
+    () => parseRepoRoute(location.pathname).sessionId,
+    [location.pathname],
+  )
+
+  const currentPermission = usePinnedViewedItem(allPermissions, viewedSessionId, sessionParents)
+
+  const currentForm = usePinnedViewedItem(allForms, viewedSessionId, sessionParents)
 
   const rememberSessionDirectory = useCallback((sessionID: string, directory?: string) => {
     if (!directory) return
     sessionDirectoriesRef.current.set(sessionID, directory)
   }, [])
 
-  const findSessionDirectory = useCallback((sessionID: string): string | null => {
-    const remembered = sessionDirectoriesRef.current.get(sessionID)
-    if (remembered) return remembered
-
+  const findCachedSessionDirectory = useCallback((sessionID: string): string | null => {
     const cache = queryClient.getQueryCache()
     const queries = cache.getAll()
+
+    let directory: string | undefined
 
     for (const query of queries) {
       const key = query.queryKey
       if (key[0] !== 'opencode' || key[1] !== 'session' || key[2] !== sessionID) continue
 
       const sessionData = query.state.data as { location?: { directory?: string } } | undefined
-      const directory = sessionData?.location?.directory ?? (typeof key[3] === 'string' ? key[3] : null)
-      if (directory) return directory
-    }
-
-    for (const query of queries) {
-      const key = query.queryKey
-      if (key[0] !== 'opencode' || key[1] !== 'sessions') continue
-
-      const sessionsData = query.state.data
-      if (!sessionsData || typeof sessionsData !== 'object' || !('pages' in sessionsData)) continue
-
-      const pages = (sessionsData as {
-        pages?: Array<{ items?: Array<{ id: string; location?: { directory?: string } }> }>
-      }).pages
-      if (!Array.isArray(pages)) continue
-
-      for (const page of pages) {
-        const found = page.items?.find(s => s.id === sessionID)
-        const directory = found?.location?.directory
-        if (directory) return directory
+      const resolvedDirectory = sessionData?.location?.directory
+        ?? (typeof key[3] === 'string' ? key[3] : undefined)
+      if (resolvedDirectory) {
+        directory = resolvedDirectory
+        break
       }
     }
 
-    return null
+    if (!directory) {
+      for (const query of queries) {
+        const key = query.queryKey
+        if (key[0] !== 'opencode' || key[1] !== 'sessions') continue
+
+        const sessionsData = query.state.data
+        if (!sessionsData || typeof sessionsData !== 'object' || !('pages' in sessionsData)) continue
+
+        const pages = (sessionsData as {
+          pages?: Array<{ items?: Array<{ id: string; location?: { directory?: string } }> }>
+        }).pages
+        if (!Array.isArray(pages)) continue
+
+        for (const page of pages) {
+          const found = page.items?.find(s => s.id === sessionID)
+          if (found?.location?.directory) {
+            directory = found.location.directory
+            break
+          }
+        }
+        if (directory) break
+      }
+    }
+
+    return directory ?? null
   }, [queryClient])
+
+  const findSessionDirectory = useCallback((sessionID: string): string | null => {
+    const remembered = sessionDirectoriesRef.current.get(sessionID)
+    if (remembered) return remembered
+    return findCachedSessionDirectory(sessionID)
+  }, [findCachedSessionDirectory])
 
   const getRepoIdForSession = useCallback((sessionID: string): number | null => {
     if (!repos) return null
@@ -270,6 +353,15 @@ export function EventProvider({ children }: { children: React.ReactNode }) {
     const repo = repos.find(r => repoMatchesDirectory(r, directory))
     return repo?.id ?? null
   }, [repos, findSessionDirectory])
+
+  const currentPermissionDirectory = useMemo(
+    () => (currentPermission ? findSessionDirectory(currentPermission.sessionID) : null),
+    [currentPermission, findSessionDirectory],
+  )
+
+  const currentIsFromDifferentSession = viewedSessionId !== null
+    && currentPermission !== null
+    && !isSessionWithinView(currentPermission.sessionID, viewedSessionId, sessionParents)
 
   const addPermission = useCallback((permission: PermissionRequest) => {
     addToSessionKeyedState(setPermissionsBySession, permission)
@@ -374,27 +466,24 @@ export function EventProvider({ children }: { children: React.ReactNode }) {
     return (formsBySession[sessionID]?.length ?? 0) > 0
   }, [formsBySession])
 
+  const navigateToSession = useCallback((sessionID: string) => {
+    const repoId = getRepoIdForSession(sessionID)
+    if (repoId === null) return
+    const targetPath = getSessionPath(repoId, sessionID)
+    if (`${window.location.pathname}${window.location.search}` !== targetPath) {
+      navigate(targetPath)
+    }
+  }, [getRepoIdForSession, navigate])
+
   const navigateToCurrentForm = useCallback(() => {
     if (!currentForm) return
-    const repoId = getRepoIdForSession(currentForm.sessionID)
-    if (repoId) {
-      const targetPath = `/repos/${repoId}/sessions/${currentForm.sessionID}`
-      if (window.location.pathname !== targetPath) {
-        navigate(targetPath)
-      }
-    }
-  }, [currentForm, getRepoIdForSession, navigate])
+    navigateToSession(currentForm.sessionID)
+  }, [currentForm, navigateToSession])
 
   const navigateToCurrentPermission = useCallback(() => {
     if (!currentPermission) return
-    const repoId = getRepoIdForSession(currentPermission.sessionID)
-    if (repoId) {
-      const targetPath = `/repos/${repoId}/sessions/${currentPermission.sessionID}`
-      if (window.location.pathname !== targetPath) {
-        navigate(targetPath)
-      }
-    }
-  }, [currentPermission, getRepoIdForSession, navigate])
+    navigateToSession(currentPermission.sessionID)
+  }, [currentPermission, navigateToSession])
 
   const reconcilePendingActionsForDirectories = useCallback(async (directories: string[]) => {
     await Promise.all(directories.map(async (directory) => {
@@ -557,6 +646,9 @@ export function EventProvider({ children }: { children: React.ReactNode }) {
           const request = event.data
           rememberSessionDirectory(request.sessionID, event.directory)
           addPermission(request)
+          if (!useSessionStatus.getState().parents.has(request.sessionID)) {
+            void resolveSessionAncestry([request.sessionID])
+          }
           break
         }
         case 'permission.replied': {
@@ -568,6 +660,9 @@ export function EventProvider({ children }: { children: React.ReactNode }) {
           const form = event.data.form
           rememberSessionDirectory(form.sessionID, event.directory)
           addForm(form)
+          if (!useSessionStatus.getState().parents.has(form.sessionID)) {
+            void resolveSessionAncestry([form.sessionID])
+          }
           break
         }
         case 'form.replied':
@@ -766,6 +861,9 @@ export function EventProvider({ children }: { children: React.ReactNode }) {
     permissions: {
       current: currentPermission,
       pendingCount: allPermissions.length,
+      viewedSessionId,
+      currentDirectory: currentPermissionDirectory,
+      currentIsFromDifferentSession,
       respond: replyToPermission,
       dismiss: removePermission,
       getForToolCall: getPermissionForToolCall,
@@ -793,6 +891,9 @@ export function EventProvider({ children }: { children: React.ReactNode }) {
     respondToSSHHostKey,
     currentPermission,
     allPermissions.length,
+    viewedSessionId,
+    currentPermissionDirectory,
+    currentIsFromDifferentSession,
     replyToPermission,
     removePermission,
     hasPermissionsForSession,
