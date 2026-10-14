@@ -776,6 +776,8 @@ export function SessionDetail() {
                   <FloatingTTSButton
                     messageId={latestPlayableAssistant.messageId}
                     content={latestPlayableAssistant.text}
+                    isScrolledUp={showScrollButton}
+                    onSpeakVisible={handleSpeakVisibleMessages}
                   />
                 )}
                 {hasPromptContent && !isSessionActive && (
