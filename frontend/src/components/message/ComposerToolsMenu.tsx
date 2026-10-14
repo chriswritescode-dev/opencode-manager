@@ -1,5 +1,5 @@
-import { useState, type ReactNode } from 'react'
-import { Box, Cpu, Mic, Paperclip, Plus, Shield, ShieldCheck, Target } from 'lucide-react'
+import { useState } from 'react'
+import { Mic, Paperclip, Plus, Shield, ShieldCheck, Target } from 'lucide-react'
 import {
   DropdownMenu,
   DropdownMenuCheckboxItem,
@@ -11,7 +11,9 @@ import {
 import { getIconToggleButtonClassName } from '@/components/ui/icon-toggle-button'
 import { usePermissionModeToggle } from '@/hooks/usePermissionModeToggle'
 import { useSandboxToggle } from '@/hooks/useSandboxToggle'
-import { formatSandboxResources } from '@/lib/sandboxResources'
+import { shouldShowSandboxResources } from '@/lib/sandboxResources'
+import { SandboxMenuItems } from './SandboxMenuItems'
+import { ToolMenuItemContent } from './ToolMenuItemContent'
 import { SessionSandboxResourcesDialog } from './SessionSandboxResourcesDialog'
 
 interface ComposerToolsMenuProps {
@@ -39,9 +41,6 @@ export function ComposerToolsMenu({
   const sandbox = useSandboxToggle(sessionID)
   const [resourcesOpen, setResourcesOpen] = useState(false)
 
-  const showSandboxResources =
-    sandbox.available && sandbox.isSandboxed && sandbox.lockedReason !== 'child' && sandbox.effectiveResources !== undefined
-
   return (
     <>
       <DropdownMenu>
@@ -67,32 +66,7 @@ export function ComposerToolsMenu({
               detail={permission.disabled ? permission.label : undefined}
             />
           </DropdownMenuCheckboxItem>
-          {sandbox.available ? (
-            <DropdownMenuCheckboxItem
-              checked={sandbox.isSandboxed}
-              disabled={sandbox.disabled}
-              onCheckedChange={sandbox.toggle}
-            >
-              <ToolMenuItemContent
-                icon={<Box className="h-4 w-4" />}
-                title="Sandbox commands"
-                detail={sandbox.disabled ? sandbox.label : undefined}
-              />
-            </DropdownMenuCheckboxItem>
-          ) : null}
-          {showSandboxResources ? (
-            <DropdownMenuItem
-              className="pl-8"
-              aria-haspopup="dialog"
-              onSelect={() => setTimeout(() => setResourcesOpen(true), 0)}
-            >
-              <ToolMenuItemContent
-                icon={<Cpu className="h-4 w-4" />}
-                title="Sandbox resources…"
-                detail={`${formatSandboxResources(sandbox.effectiveResources!)}${sandbox.resources ? ' · custom' : ''}`}
-              />
-            </DropdownMenuItem>
-          ) : null}
+          <SandboxMenuItems sandbox={sandbox} onOpenResources={() => setResourcesOpen(true)} />
           <DropdownMenuCheckboxItem checked={goalArmed} disabled={goalDisabled} onCheckedChange={onToggleGoal}>
             <ToolMenuItemContent
               icon={<Target className="h-4 w-4" />}
@@ -111,7 +85,7 @@ export function ComposerToolsMenu({
           ) : null}
         </DropdownMenuContent>
       </DropdownMenu>
-      {showSandboxResources ? (
+      {shouldShowSandboxResources(sandbox) ? (
         <SessionSandboxResourcesDialog
           sessionID={sessionID}
           open={resourcesOpen}
@@ -121,17 +95,5 @@ export function ComposerToolsMenu({
         />
       ) : null}
     </>
-  )
-}
-
-function ToolMenuItemContent({ icon, title, detail }: { icon: ReactNode; title: string; detail?: string }) {
-  return (
-    <span className="flex items-start gap-2">
-      <span className="mt-0.5 shrink-0">{icon}</span>
-      <span className="flex min-w-0 flex-col">
-        <span>{title}</span>
-        {detail ? <span className="text-xs text-muted-foreground">{detail}</span> : null}
-      </span>
-    </span>
   )
 }

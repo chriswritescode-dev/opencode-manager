@@ -1,4 +1,16 @@
 import type { SessionSandboxResources } from '@opencode-manager/shared/schemas'
+import type { useSandboxToggle } from '@/hooks/useSandboxToggle'
+
+export type SandboxToggleState = ReturnType<typeof useSandboxToggle>
+
+export function shouldShowSandboxResources(sandbox: SandboxToggleState): boolean {
+  return (
+    sandbox.available &&
+    sandbox.isSandboxed &&
+    sandbox.lockedReason !== 'child' &&
+    sandbox.effectiveResources !== undefined
+  )
+}
 
 export function formatSandboxMemory(memoryMib: number): string {
   const gib = memoryMib / 1024

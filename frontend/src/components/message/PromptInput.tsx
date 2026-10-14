@@ -29,6 +29,7 @@ import { ModelQuickSelect } from '@/components/model/ModelQuickSelect'
 import { AgentQuickSelect } from '@/components/agent/AgentQuickSelect'
 import { VoiceStatusOverlay, type VoiceStatusOverlayState } from './VoiceStatusOverlay'
 import { PermissionModeToggle } from '@/components/session/PermissionModeToggle'
+import { SessionSandboxMenu } from '@/components/session/SessionSandboxMenu'
 import { ComposerToolsMenu } from './ComposerToolsMenu'
 import { useSessionGoal, useStartSessionGoal } from '@/hooks/useSessionGoals'
 import { useSessionPermissionMode } from '@/hooks/useSessionPermissionMode'
@@ -1579,6 +1580,7 @@ return (
               {directory && !isMobile && (
                 <>
                   <PermissionModeToggle sessionID={sessionID} directory={directory} />
+                  <SessionSandboxMenu sessionID={sessionID} />
                   <IconToggleButton
                     active={isGoalArmed}
                     label={goalButtonLabel}

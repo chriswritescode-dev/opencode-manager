@@ -107,6 +107,10 @@ vi.mock('./ComposerToolsMenu', () => ({
   ComposerToolsMenu: () => null,
 }))
 
+vi.mock('@/components/session/SessionSandboxMenu', () => ({
+  SessionSandboxMenu: () => null,
+}))
+
 const createTestQueryClient = () => new QueryClient({
   defaultOptions: {
     queries: { retry: false },

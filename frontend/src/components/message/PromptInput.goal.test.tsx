@@ -118,6 +118,10 @@ vi.mock('./ComposerToolsMenu', () => ({
   ),
 }))
 
+vi.mock('@/components/session/SessionSandboxMenu', () => ({
+  SessionSandboxMenu: () => null,
+}))
+
 vi.mock('@/components/ui/session-status-indicator', () => ({
   SessionStatusIndicator: () => <div>SessionStatus</div>,
 }))
