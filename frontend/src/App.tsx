@@ -36,6 +36,7 @@ import { useAuth } from '@/hooks/useAuth'
 import { useOpenCodeFailureToast } from '@/hooks/useOpenCodeFailureToast'
 import { useOpenCodeServerActions } from '@/hooks/useOpenCodeServerActions'
 import { useGlobalShortcutActions } from '@/hooks/useGlobalShortcutActions'
+import { useSession } from '@/hooks/useOpenCode'
 import { RestartServerDialog } from '@/components/settings/RestartServerDialog'
 
 const queryClient = new QueryClient({
@@ -103,17 +104,29 @@ function PermissionDialogWrapper() {
     respond: replyToPermission,
     showDialog,
     setShowDialog,
+    navigateToCurrent,
+    viewedSessionId,
+    currentDirectory,
+    currentIsFromDifferentSession,
   } = usePermissions()
+  const { getRepoIdForSession } = useEventContext()
+  const { data: session } = useSession(currentPermission?.sessionID, currentDirectory ?? undefined)
+
+  const canOpenCurrentSession = currentPermission !== null
+    && getRepoIdForSession(currentPermission.sessionID) !== null
+    && (currentIsFromDifferentSession || viewedSessionId === null)
 
   return (
     <PermissionRequestDialog
       permission={currentPermission}
       pendingCount={pendingCount}
-      isFromDifferentSession={false}
+      isFromDifferentSession={currentIsFromDifferentSession}
+      sessionTitle={session?.title ?? undefined}
+      repoDirectory={currentDirectory}
+      onOpenSession={canOpenCurrentSession ? navigateToCurrent : undefined}
       onRespond={replyToPermission}
       open={showDialog}
       onOpenChange={setShowDialog}
-      repoDirectory={null}
     />
   )
 }

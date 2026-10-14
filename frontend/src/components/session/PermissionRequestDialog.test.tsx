@@ -15,6 +15,7 @@ const permission: PermissionRequest = {
   sessionID: 'session-1',
   action: 'shell',
   resources: ['rm -rf node_modules'],
+  save: ['rm *'],
   metadata: {},
 }
 
@@ -29,7 +30,97 @@ describe('PermissionRequestDialog', () => {
     render(<PermissionRequestDialog permission={permission} pendingCount={1} onRespond={vi.fn()} />)
 
     expect(screen.getByText('Run Command')).toBeInTheDocument()
+    expect(screen.getByText('Command')).toBeInTheDocument()
     expect(screen.getByText('rm -rf node_modules')).toBeInTheDocument()
+  })
+
+  it('labels multiple shell resources as commands', () => {
+    render(
+      <PermissionRequestDialog
+        permission={{ ...permission, resources: ['git status', 'git push origin main'] }}
+        pendingCount={1}
+        onRespond={vi.fn()}
+      />,
+    )
+
+    expect(screen.getByText('Commands')).toBeInTheDocument()
+    expect(screen.getByText(/git status/)).toBeInTheDocument()
+    expect(screen.getByText(/git push origin main/)).toBeInTheDocument()
+  })
+
+  it('shows the request message when present', () => {
+    render(
+      <PermissionRequestDialog
+        permission={{ ...permission, message: 'This command modifies tracked files.' }}
+        pendingCount={1}
+        onRespond={vi.fn()}
+      />,
+    )
+
+    expect(screen.getByText('This command modifies tracked files.')).toBeInTheDocument()
+  })
+
+  it('describes a wildcard always scope', () => {
+    render(
+      <PermissionRequestDialog
+        permission={{ ...permission, save: ['*'] }}
+        pendingCount={1}
+        onRespond={vi.fn()}
+      />,
+    )
+
+    expect(screen.getByText('This will always allow shell for this project.')).toBeInTheDocument()
+  })
+
+  it('lists the patterns an always decision approves', () => {
+    render(
+      <PermissionRequestDialog
+        permission={{ ...permission, save: ['printf *', 'echo *'] }}
+        pendingCount={1}
+        onRespond={vi.fn()}
+      />,
+    )
+
+    expect(
+      screen.getByText('This will always allow the following patterns for this project.'),
+    ).toBeInTheDocument()
+    expect(screen.getByText('printf *')).toBeInTheDocument()
+    expect(screen.getByText('echo *')).toBeInTheDocument()
+  })
+
+  it('omits the always option when no save patterns are provided', () => {
+    render(
+      <PermissionRequestDialog
+        permission={{ ...permission, save: undefined }}
+        pendingCount={1}
+        onRespond={vi.fn()}
+      />,
+    )
+
+    expect(screen.queryByRole('button', { name: 'Allow Always' })).not.toBeInTheDocument()
+    expect(screen.queryByText(/This will always allow/)).not.toBeInTheDocument()
+  })
+
+  it('renders an open session control that triggers the handler', async () => {
+    const onOpenSession = vi.fn()
+    render(
+      <PermissionRequestDialog
+        permission={permission}
+        pendingCount={1}
+        onRespond={vi.fn()}
+        onOpenSession={onOpenSession}
+      />,
+    )
+
+    await userEvent.click(screen.getByRole('button', { name: 'Open session' }))
+
+    expect(onOpenSession).toHaveBeenCalledTimes(1)
+  })
+
+  it('omits the open session control without a handler', () => {
+    render(<PermissionRequestDialog permission={permission} pendingCount={1} onRespond={vi.fn()} />)
+
+    expect(screen.queryByRole('button', { name: 'Open session' })).not.toBeInTheDocument()
   })
 
   it('replies with the selected decision for the permission request', async () => {

@@ -75,11 +75,29 @@ interface PermissionLike {
   action?: unknown
   metadata?: unknown
   resources?: unknown
+  save?: unknown
 }
 
 export interface PermissionDetail {
   primary: string
   secondary?: string
+  label?: string
+}
+
+const PERMISSION_RESOURCE_LABELS: Record<string, { one: string; many: string }> = {
+  shell: { one: 'Command', many: 'Commands' },
+  glob: { one: 'Pattern', many: 'Patterns' },
+  grep: { one: 'Pattern', many: 'Patterns' },
+  read: { one: 'Path', many: 'Paths' },
+  list: { one: 'Path', many: 'Paths' },
+  edit: { one: 'File', many: 'Files' },
+  external_directory: { one: 'Path', many: 'Paths' },
+  webfetch: { one: 'URL', many: 'URLs' },
+}
+
+function getPermissionResourceLabel(action: string, count: number): string {
+  const labels = PERMISSION_RESOURCE_LABELS[action] ?? { one: 'Resource', many: 'Resources' }
+  return count > 1 ? labels.many : labels.one
 }
 
 export function getPermissionDetail(input: PermissionLike): PermissionDetail {
@@ -95,18 +113,37 @@ export function getPermissionDetail(input: PermissionLike): PermissionDetail {
       const filePath = str(first.file) ?? str(metadata.filepath)
       if (filePath) {
         const diff = str(first.patch) ?? str(metadata.diff)
-        return { primary: filePath, secondary: diff ? diff.slice(0, 500) + (diff.length > 500 ? '\n...' : '') : undefined }
+        return {
+          primary: filePath,
+          secondary: diff ? diff.slice(0, 500) + (diff.length > 500 ? '\n...' : '') : undefined,
+          label: getPermissionResourceLabel('edit', 1),
+        }
       }
       break
     }
     case 'webfetch': {
       const url = str(metadata.url)
-      if (url) return { primary: url }
+      if (url) return { primary: url, label: getPermissionResourceLabel('webfetch', 1) }
       break
     }
   }
 
-  return { primary: resources.join('\n') }
+  return { primary: resources.join('\n'), label: getPermissionResourceLabel(action, resources.length) }
+}
+
+export interface PermissionAlwaysScope {
+  summary: string
+  patterns: string[]
+}
+
+export function getPermissionAlwaysScope(input: PermissionLike): PermissionAlwaysScope | null {
+  const action = typeof input.action === 'string' ? input.action : ''
+  const save = Array.isArray(input.save) ? input.save.filter((item): item is string => typeof item === 'string') : []
+  if (save.length === 0) return null
+  if (save.length === 1 && save[0] === '*') {
+    return { summary: `This will always allow ${action} for this project.`, patterns: [] }
+  }
+  return { summary: 'This will always allow the following patterns for this project.', patterns: save }
 }
 
 interface FormLike {

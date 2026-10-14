@@ -2,6 +2,7 @@ import { describe, it, expect } from 'vitest'
 import {
   getPermissionLabel,
   getPermissionDetail,
+  getPermissionAlwaysScope,
   getFormText,
   getGoalOutcomeTitle,
   getGoalStopReasonLabel,
@@ -93,6 +94,42 @@ describe('getPermissionDetail', () => {
   })
   it('returns empty primary when no detail is available', () => {
     expect(getPermissionDetail({ action: 'shell' }).primary).toBe('')
+  })
+  it('labels shell resources as commands', () => {
+    expect(getPermissionDetail({ action: 'shell', resources: ['ls'] }).label).toBe('Command')
+    expect(getPermissionDetail({ action: 'shell', resources: ['ls', 'pwd'] }).label).toBe('Commands')
+  })
+  it('labels search patterns', () => {
+    expect(getPermissionDetail({ action: 'grep', resources: ['TODO'] }).label).toBe('Pattern')
+  })
+  it('labels paths for read actions', () => {
+    expect(getPermissionDetail({ action: 'read', resources: ['/a', '/b'] }).label).toBe('Paths')
+  })
+  it('labels edit and webfetch details', () => {
+    expect(getPermissionDetail({ action: 'edit', metadata: { filepath: 'a.ts' } }).label).toBe('File')
+    expect(getPermissionDetail({ action: 'webfetch', metadata: { url: 'https://example.com' } }).label).toBe('URL')
+  })
+  it('falls back to a generic resource label for unknown actions', () => {
+    expect(getPermissionDetail({ action: 'frobnicate', resources: ['a'] }).label).toBe('Resource')
+  })
+})
+
+describe('getPermissionAlwaysScope', () => {
+  it('returns null when no save patterns are present', () => {
+    expect(getPermissionAlwaysScope({ action: 'shell' })).toBeNull()
+    expect(getPermissionAlwaysScope({ action: 'shell', save: [] })).toBeNull()
+  })
+  it('describes a wildcard scope', () => {
+    expect(getPermissionAlwaysScope({ action: 'shell', save: ['*'] })).toEqual({
+      summary: 'This will always allow shell for this project.',
+      patterns: [],
+    })
+  })
+  it('lists the saved patterns', () => {
+    expect(getPermissionAlwaysScope({ action: 'shell', save: ['printf *', 'echo *'] })).toEqual({
+      summary: 'This will always allow the following patterns for this project.',
+      patterns: ['printf *', 'echo *'],
+    })
   })
 })
 
