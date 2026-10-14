@@ -28,7 +28,7 @@ import { useSessionStatusForSession } from '@/stores/sessionStatusStore'
 import { useShortcutActions } from '@/contexts/KeyboardShortcutsContext'
 import { useSettings } from '@/hooks/useSettings'
 import { buildPinnedSessionKeys, getSessionKey } from '@/lib/sessionKey'
-import { normalizeShortcut, resolveShortcutBindings, type ShortcutBindings } from '@/lib/keyboardShortcuts'
+import { formatShortcutLabel, resolveShortcutBindings } from '@/lib/keyboardShortcuts'
 import { cn, formatShortRelativeTime, getRepoDisplayName } from '@/lib/utils'
 import { FINE_POINTER_MEDIA_QUERY, useMediaQuery } from '@/hooks/useMediaQuery'
 
@@ -38,14 +38,6 @@ const PAGE_STEP = 10
 const NEAR_BOTTOM_PX = 240
 
 type SessionPickerTab = 'sessions' | 'projects'
-
-function switchTabShortcutLabel(bindings: ShortcutBindings): string {
-  const keys = bindings.shortcuts.switchPickerTab
-  if (!keys) return ''
-  const normalized = normalizeShortcut(keys)
-  if (bindings.directShortcuts.includes('switchPickerTab')) return normalized
-  return `${bindings.leaderKey} ${normalized}`
-}
 
 interface SessionPickerDialogProps {
   open: boolean
@@ -716,7 +708,14 @@ export function SessionPickerDialog({
   const hasFinePointer = useMediaQuery(FINE_POINTER_MEDIA_QUERY)
   const { preferences } = useSettings()
   const switchHint = useMemo(
-    () => switchTabShortcutLabel(resolveShortcutBindings(preferences)),
+    () => {
+      const bindings = resolveShortcutBindings(preferences)
+      return formatShortcutLabel(
+        bindings.shortcuts.switchPickerTab,
+        bindings.directShortcuts.includes('switchPickerTab'),
+        bindings.leaderKey,
+      )
+    },
     [preferences],
   )
   const [tab, setTab] = useState<SessionPickerTab>('sessions')

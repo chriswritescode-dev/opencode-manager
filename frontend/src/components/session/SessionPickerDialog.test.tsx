@@ -578,6 +578,17 @@ describe('SessionPickerDialog', () => {
     expect(screen.getByText(/Ctrl\+G sessions/)).toBeInTheDocument()
   })
 
+  it('shows the normalized leader, arrow and key in the footer for a leader switch binding', () => {
+    mocks.preferences = {
+      keyboardShortcuts: { switchPickerTab: 'G' },
+      directShortcuts: [],
+      leaderKey: 'Ctrl+X',
+    }
+    renderPicker()
+
+    expect(screen.getByText(/Ctrl\+X → G projects/)).toBeInTheDocument()
+  })
+
   it('no longer switches tabs on Ctrl+O', () => {
     renderPicker()
 

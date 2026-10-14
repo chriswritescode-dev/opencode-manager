@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest'
 import { DEFAULT_DIRECT_SHORTCUTS, DEFAULT_KEYBOARD_SHORTCUTS, DEFAULT_LEADER_KEY } from '@/api/types/settings'
-import { formatShortcutEvent, getDefaultKeyboardShortcuts, normalizeShortcut, resolveDirectShortcuts, resolveShortcutBindings } from './keyboardShortcuts'
+import { formatShortcutEvent, formatShortcutLabel, getDefaultKeyboardShortcuts, normalizeShortcut, resolveDirectShortcuts, resolveShortcutBindings } from './keyboardShortcuts'
 
 describe('keyboardShortcuts', () => {
   it('normalizes key aliases, modifier order and bare symbol keys', () => {
@@ -9,6 +9,13 @@ describe('keyboardShortcuts', () => {
     expect(normalizeShortcut('Shift+Ctrl+z')).toBe('Ctrl+Shift+Z')
     expect(normalizeShortcut('Ctrl++')).toBe('Ctrl++')
     expect(normalizeShortcut('+')).toBe('+')
+  })
+
+  it('formats empty, direct and leader bindings as labels', () => {
+    expect(formatShortcutLabel('', true, 'Ctrl+X')).toBe('')
+    expect(formatShortcutLabel('', false, 'Ctrl+X')).toBe('')
+    expect(formatShortcutLabel('Shift+Ctrl+z', true, 'Ctrl+X')).toBe('Ctrl+Shift+Z')
+    expect(formatShortcutLabel('G', false, 'Ctrl+Enter')).toBe('Ctrl+Return → G')
   })
 
   it('reads letters from the physical key when Alt rewrites the character', () => {

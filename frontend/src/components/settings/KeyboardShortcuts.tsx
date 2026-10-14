@@ -3,14 +3,14 @@ import { useSettings } from '@/hooks/useSettings'
 import { useMobile } from '@/hooks/useMobile'
 import { Loader2, X } from 'lucide-react'
 import { Button } from '@/components/ui/button'
-import { formatEventModifiers, formatShortcutEvent, isModifierOnlyEvent, normalizeShortcut, resolveShortcutBindings } from '@/lib/keyboardShortcuts'
+import { formatEventModifiers, formatShortcutEvent, formatShortcutLabel, isModifierOnlyEvent, normalizeShortcut, resolveShortcutBindings } from '@/lib/keyboardShortcuts'
 import { applyTuiKeybindImport, parseTuiKeybindConfig } from '@/lib/tuiKeybindImport'
 import { showToast } from '@/lib/toast'
 
 const CONVERSATION_ACTIONS = ['submit', 'abort', 'clearPrompt', 'toggleMode', 'undo', 'redo', 'compact', 'fork', 'timeline', 'exportSession', 'selectModel', 'variantCycle', 'favoriteCycle', 'halfPageUp', 'halfPageDown']
 const NAVIGATION_ACTIONS = ['settings', 'sessions', 'switchPickerTab', 'newSession', 'closeSession', 'toggleSidebar', 'toggleTerminal', 'toggleSourceControl']
 
-const formatShortcutLabel = (action: string): string => {
+const formatActionLabel = (action: string): string => {
   return action.replace(/([A-Z])/g, ' $1').trim()
 }
 
@@ -87,7 +87,7 @@ function ShortcutRow({ action, keys, isDirect, display, isRecording, currentKeys
   return (
     <div className="flex flex-wrap items-center justify-between gap-2 py-2.5 border-b border-border last:border-0">
       <div className="min-w-0 flex-1 basis-48 space-y-0.5">
-        <p className="truncate text-sm font-medium capitalize text-foreground">{formatShortcutLabel(action)}</p>
+        <p className="truncate text-sm font-medium capitalize text-foreground">{formatActionLabel(action)}</p>
         <button
           onClick={() => onToggleDirect(action)}
           className="text-xs text-muted-foreground hover:text-foreground transition-colors text-left"
@@ -246,10 +246,7 @@ export function KeyboardShortcuts() {
 
   const formatShortcutDisplay = (action: string, keys: string) => {
     if (!keys) return 'Not set'
-    if (directShortcuts.includes(action)) {
-      return normalizeShortcut(keys)
-    }
-    return `${normalizeShortcut(leaderKey)} → ${normalizeShortcut(keys)}`
+    return formatShortcutLabel(keys, directShortcuts.includes(action), leaderKey)
   }
 
   const toggleDirectShortcut = (action: string) => {
@@ -293,7 +290,7 @@ export function KeyboardShortcuts() {
       }
 
       const description = [
-        applied.cleared.length > 0 ? `Unbound to avoid conflicts: ${applied.cleared.map((action) => formatShortcutLabel(action).toLowerCase()).join(', ')}` : undefined,
+        applied.cleared.length > 0 ? `Unbound to avoid conflicts: ${applied.cleared.map((action) => formatActionLabel(action).toLowerCase()).join(', ')}` : undefined,
         skippedDescription ? `Skipped: ${skippedDescription}` : undefined,
       ].filter(Boolean).join('. ')
       showToast.success(
