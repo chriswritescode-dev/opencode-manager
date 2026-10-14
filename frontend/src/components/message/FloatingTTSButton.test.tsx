@@ -35,12 +35,14 @@ interface MockTTSReturn {
 describe('FloatingTTSButton', () => {
   const mockSpeakMessage = vi.fn()
   const mockStop = vi.fn()
+  const mockSpeakVisible = vi.fn()
   const mockUpdateSettings = vi.fn()
 
   beforeEach(() => {
     vi.clearAllMocks()
     mockSpeakMessage.mockClear()
     mockStop.mockClear()
+    mockSpeakVisible.mockClear()
     mockUpdateSettings.mockClear()
     mocks.showToastInfo.mockClear()
   })
@@ -84,19 +86,19 @@ describe('FloatingTTSButton', () => {
 
   it('renders pill when content is empty but autoplay is enabled', () => {
     setup({ autoPlay: true })
-    render(<FloatingTTSButton messageId={TEST_MESSAGE_ID} content="" />)
+    render(<FloatingTTSButton messageId={TEST_MESSAGE_ID} content="" isScrolledUp={false} onSpeakVisible={mockSpeakVisible} />)
     expect(screen.getByRole('button', { name: /hold to toggle auto-play/i })).toBeInTheDocument()
   })
 
   it('renders pill when content is whitespace but autoplay is enabled', () => {
     setup({ autoPlay: true })
-    render(<FloatingTTSButton messageId={TEST_MESSAGE_ID} content="   " />)
+    render(<FloatingTTSButton messageId={TEST_MESSAGE_ID} content="   " isScrolledUp={false} onSpeakVisible={mockSpeakVisible} />)
     expect(screen.getByRole('button', { name: /hold to toggle auto-play/i })).toBeInTheDocument()
   })
 
   it('calls speakMessage on tap when idle', () => {
     setup()
-    render(<FloatingTTSButton messageId={TEST_MESSAGE_ID} content={TEST_CONTENT} />)
+    render(<FloatingTTSButton messageId={TEST_MESSAGE_ID} content={TEST_CONTENT} isScrolledUp={false} onSpeakVisible={mockSpeakVisible} />)
 
     const button = screen.getByRole('button', { name: /play latest reply/i })
     fireEvent.pointerDown(button)
@@ -110,7 +112,7 @@ describe('FloatingTTSButton', () => {
 
   it('calls stop on tap when this message is active', () => {
     setup({ activeMessageId: TEST_MESSAGE_ID, isPlaying: true })
-    render(<FloatingTTSButton messageId={TEST_MESSAGE_ID} content={TEST_CONTENT} />)
+    render(<FloatingTTSButton messageId={TEST_MESSAGE_ID} content={TEST_CONTENT} isScrolledUp={false} onSpeakVisible={mockSpeakVisible} />)
 
     const button = screen.getByRole('button', { name: /stop playback/i })
     fireEvent.pointerDown(button)
@@ -124,7 +126,7 @@ describe('FloatingTTSButton', () => {
 
   it('calls stop when any playback is active, even for a different messageId (stream conflict fix)', () => {
     setup({ activeMessageId: 'other-message-id', isPlaying: true })
-    render(<FloatingTTSButton messageId={TEST_MESSAGE_ID} content={TEST_CONTENT} />)
+    render(<FloatingTTSButton messageId={TEST_MESSAGE_ID} content={TEST_CONTENT} isScrolledUp={false} onSpeakVisible={mockSpeakVisible} />)
 
     const button = screen.getByRole('button', { name: /stop playback/i })
     fireEvent.pointerDown(button)
@@ -139,7 +141,7 @@ describe('FloatingTTSButton', () => {
   it('toggles autoplay on long press', async () => {
     vi.useFakeTimers()
     setup({ autoPlay: false })
-    render(<FloatingTTSButton messageId={TEST_MESSAGE_ID} content={TEST_CONTENT} />)
+    render(<FloatingTTSButton messageId={TEST_MESSAGE_ID} content={TEST_CONTENT} isScrolledUp={false} onSpeakVisible={mockSpeakVisible} />)
 
     const button = screen.getByRole('button', { name: /play latest reply/i })
     await act(async () => {
@@ -172,7 +174,7 @@ describe('FloatingTTSButton', () => {
   it('shows a toast when long press disables autoplay', async () => {
     vi.useFakeTimers()
     setup({ autoPlay: true })
-    render(<FloatingTTSButton messageId={TEST_MESSAGE_ID} content={TEST_CONTENT} />)
+    render(<FloatingTTSButton messageId={TEST_MESSAGE_ID} content={TEST_CONTENT} isScrolledUp={false} onSpeakVisible={mockSpeakVisible} />)
 
     const button = screen.getByRole('button', { name: /auto-play enabled/i })
     await act(async () => {
@@ -195,7 +197,7 @@ describe('FloatingTTSButton', () => {
   it('does not call speakMessage after long press (race guard)', async () => {
     vi.useFakeTimers()
     setup()
-    render(<FloatingTTSButton messageId={TEST_MESSAGE_ID} content={TEST_CONTENT} />)
+    render(<FloatingTTSButton messageId={TEST_MESSAGE_ID} content={TEST_CONTENT} isScrolledUp={false} onSpeakVisible={mockSpeakVisible} />)
 
     const button = screen.getByRole('button', { name: /play latest reply/i })
     await act(async () => {
@@ -212,7 +214,7 @@ describe('FloatingTTSButton', () => {
   it('does not call speakMessage if pointer leaves before release after long press fires', async () => {
     vi.useFakeTimers()
     setup()
-    render(<FloatingTTSButton messageId={TEST_MESSAGE_ID} content={TEST_CONTENT} />)
+    render(<FloatingTTSButton messageId={TEST_MESSAGE_ID} content={TEST_CONTENT} isScrolledUp={false} onSpeakVisible={mockSpeakVisible} />)
 
     const button = screen.getByRole('button', { name: /play latest reply/i })
     await act(async () => {
@@ -227,7 +229,7 @@ describe('FloatingTTSButton', () => {
 
   it('exposes the gesture hint in the aria-label for accessibility', () => {
     setup()
-    render(<FloatingTTSButton messageId={TEST_MESSAGE_ID} content={TEST_CONTENT} />)
+    render(<FloatingTTSButton messageId={TEST_MESSAGE_ID} content={TEST_CONTENT} isScrolledUp={false} onSpeakVisible={mockSpeakVisible} />)
 
     const button = screen.getByRole('button', { name: /hold to toggle auto-play/i })
     expect(button).toBeInTheDocument()
@@ -235,7 +237,7 @@ describe('FloatingTTSButton', () => {
 
   it('shows stop icon when this message is playing', () => {
     setup({ autoPlay: true, activeMessageId: TEST_MESSAGE_ID, isPlaying: true })
-    render(<FloatingTTSButton messageId={TEST_MESSAGE_ID} content={TEST_CONTENT} />)
+    render(<FloatingTTSButton messageId={TEST_MESSAGE_ID} content={TEST_CONTENT} isScrolledUp={false} onSpeakVisible={mockSpeakVisible} />)
 
     const button = screen.getByRole('button', { name: /stop playback/i })
 
@@ -249,14 +251,14 @@ describe('FloatingTTSButton', () => {
 
   it('shows the same stop icon while this message is loading', () => {
     setup({ activeMessageId: TEST_MESSAGE_ID, isLoading: true })
-    render(<FloatingTTSButton messageId={TEST_MESSAGE_ID} content={TEST_CONTENT} />)
+    render(<FloatingTTSButton messageId={TEST_MESSAGE_ID} content={TEST_CONTENT} isScrolledUp={false} onSpeakVisible={mockSpeakVisible} />)
 
     expect(screen.getByRole('button', { name: /stop playback/i })).toHaveClass('bg-destructive')
   })
 
   it('shows autoplay state with button color when autoPlay is enabled', () => {
     setup({ autoPlay: true })
-    render(<FloatingTTSButton messageId={TEST_MESSAGE_ID} content={TEST_CONTENT} />)
+    render(<FloatingTTSButton messageId={TEST_MESSAGE_ID} content={TEST_CONTENT} isScrolledUp={false} onSpeakVisible={mockSpeakVisible} />)
 
     const button = screen.getByRole('button', { name: /auto-play enabled/i })
 
@@ -269,12 +271,76 @@ describe('FloatingTTSButton', () => {
 
   it('uses the default play color when autoPlay is disabled', () => {
     setup({ autoPlay: false })
-    render(<FloatingTTSButton messageId={TEST_MESSAGE_ID} content={TEST_CONTENT} />)
+    render(<FloatingTTSButton messageId={TEST_MESSAGE_ID} content={TEST_CONTENT} isScrolledUp={false} onSpeakVisible={mockSpeakVisible} />)
 
     const button = screen.getByRole('button', { name: /play latest reply/i })
 
     expect(button).toHaveClass('from-warning')
     expect(button).not.toHaveClass('bg-primary')
     expect(screen.queryByText('Play')).not.toBeInTheDocument()
+  })
+
+  it('reads visible replies on tap when scrolled up and idle', () => {
+    setup()
+    render(
+      <FloatingTTSButton
+        messageId={TEST_MESSAGE_ID}
+        content={TEST_CONTENT}
+        isScrolledUp
+        onSpeakVisible={mockSpeakVisible}
+      />
+    )
+
+    const button = screen.getByRole('button', { name: /read visible replies/i })
+    fireEvent.pointerDown(button)
+    act(() => {
+      fireEvent.pointerUp(button)
+    })
+
+    expect(mockSpeakVisible).toHaveBeenCalledTimes(1)
+    expect(mockSpeakMessage).not.toHaveBeenCalled()
+  })
+
+  it('stops playback on tap when scrolled up and playing', () => {
+    setup({ activeMessageId: TEST_MESSAGE_ID, isPlaying: true })
+    render(
+      <FloatingTTSButton
+        messageId={TEST_MESSAGE_ID}
+        content={TEST_CONTENT}
+        isScrolledUp
+        onSpeakVisible={mockSpeakVisible}
+      />
+    )
+
+    const button = screen.getByRole('button', { name: /stop playback/i })
+    fireEvent.pointerDown(button)
+    act(() => {
+      fireEvent.pointerUp(button)
+    })
+
+    expect(mockStop).toHaveBeenCalledTimes(1)
+    expect(mockSpeakVisible).not.toHaveBeenCalled()
+  })
+
+  it('speaks the latest reply on tap when not scrolled up and idle', () => {
+    setup()
+    render(
+      <FloatingTTSButton
+        messageId={TEST_MESSAGE_ID}
+        content={TEST_CONTENT}
+        isScrolledUp={false}
+        onSpeakVisible={mockSpeakVisible}
+      />
+    )
+
+    const button = screen.getByRole('button', { name: /play latest reply/i })
+    fireEvent.pointerDown(button)
+    act(() => {
+      fireEvent.pointerUp(button)
+    })
+
+    expect(mockSpeakMessage).toHaveBeenCalledTimes(1)
+    expect(mockSpeakMessage).toHaveBeenCalledWith(TEST_MESSAGE_ID, TEST_CONTENT)
+    expect(mockSpeakVisible).not.toHaveBeenCalled()
   })
 })
