@@ -99,10 +99,9 @@ function usePinnedViewedItem<T extends SessionScopedItem>(
   viewedSessionId: string | null,
   parents: Map<string, string | null>,
 ): T | null {
-  const pinnedIdRef = useRef<string | null>(null)
+  const [pinnedId, setPinnedId] = useState<string | null>(null)
 
-  return useMemo(() => {
-    const pinnedId = pinnedIdRef.current
+  const selected = useMemo(() => {
     if (pinnedId) {
       const pinned = items.find((item) => item.id === pinnedId)
       if (pinned) return pinned
@@ -111,11 +110,13 @@ function usePinnedViewedItem<T extends SessionScopedItem>(
     const forViewedSession = viewedSessionId
       ? items.find((item) => isSessionWithinView(item.sessionID, viewedSessionId, parents)) ?? null
       : null
-    const next = forViewedSession ?? items[0] ?? null
+    return forViewedSession ?? items[0] ?? null
+  }, [items, viewedSessionId, parents, pinnedId])
 
-    pinnedIdRef.current = next?.id ?? null
-    return next
-  }, [items, viewedSessionId, parents])
+  const selectedId = selected?.id ?? null
+  if (selectedId !== pinnedId) setPinnedId(selectedId)
+
+  return selected
 }
 
 function reconcileBySessionForDirectory<T extends SessionScopedItem>(
