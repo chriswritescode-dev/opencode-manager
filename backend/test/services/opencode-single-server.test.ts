@@ -120,15 +120,15 @@ vi.mock('../../src/services/opencode-home', () => ({
 const sandboxRuntimeServiceMock = vi.hoisted(() => ({
   SandboxRuntimeService: vi.fn<() => {
     isEnabled: () => boolean
-    stopWorkspaceSandboxForToggle?: () => Promise<void>
-    prepareWorkspaceSandboxOnBoot?: () => Promise<void>
+    stopAllSandboxesForToggle?: () => Promise<void>
+    prepareSandboxOnBoot?: () => Promise<void>
   }>(() => ({ isEnabled: () => false })),
 }))
 
 vi.mock('../../src/services/sandbox/runtime', () => ({
   SandboxRuntimeService: function SandboxRuntimeServiceStub() {
     return {
-      prepareWorkspaceSandboxOnBoot: async () => undefined,
+      prepareSandboxOnBoot: async () => undefined,
       ...sandboxRuntimeServiceMock.SandboxRuntimeService(),
     }
   },
@@ -1097,10 +1097,10 @@ describe('OpenCodeServerManager - server auth', () => {
   }, 15000)
 
   it('stops the workspace sandbox when a restart disables enforcement', async () => {
-    const stopWorkspaceSandboxForToggle = vi.fn().mockResolvedValue(undefined)
+    const stopAllSandboxesForToggle = vi.fn().mockResolvedValue(undefined)
     sandboxRuntimeServiceMock.SandboxRuntimeService.mockImplementation(() => ({
       isEnabled: () => false,
-      stopWorkspaceSandboxForToggle,
+      stopAllSandboxesForToggle,
     }))
     const { OpenCodeServerManager } = await import('../../src/services/opencode-single-server')
     const manager = OpenCodeServerManager.getInstance()
@@ -1109,7 +1109,7 @@ describe('OpenCodeServerManager - server auth', () => {
 
     await manager.start()
 
-    expect(stopWorkspaceSandboxForToggle).toHaveBeenCalledTimes(1)
+    expect(stopAllSandboxesForToggle).toHaveBeenCalledTimes(1)
     expect(spawnMock).toHaveBeenCalledWith(
       'opencode',
       expect.any(Array),
@@ -1122,10 +1122,10 @@ describe('OpenCodeServerManager - server auth', () => {
   })
 
   it('does not stop the workspace sandbox when the restarted server stays enforced', async () => {
-    const stopWorkspaceSandboxForToggle = vi.fn().mockResolvedValue(undefined)
+    const stopAllSandboxesForToggle = vi.fn().mockResolvedValue(undefined)
     sandboxRuntimeServiceMock.SandboxRuntimeService.mockImplementation(() => ({
       isEnabled: () => true,
-      stopWorkspaceSandboxForToggle,
+      stopAllSandboxesForToggle,
     }))
     execSyncMock.mockImplementation((cmd: string) => {
       if (cmd.includes('lsof')) return spawnMock.mock.calls.length > 0 ? '1234\n' : ''
@@ -1139,7 +1139,7 @@ describe('OpenCodeServerManager - server auth', () => {
 
     await manager.start()
 
-    expect(stopWorkspaceSandboxForToggle).not.toHaveBeenCalled()
+    expect(stopAllSandboxesForToggle).not.toHaveBeenCalled()
     expect(spawnMock).toHaveBeenCalledWith(
       'opencode',
       expect.any(Array),
@@ -1154,7 +1154,7 @@ describe('OpenCodeServerManager - server auth', () => {
   it('aborts the disabled restart when the workspace sandbox cannot be stopped', async () => {
     sandboxRuntimeServiceMock.SandboxRuntimeService.mockImplementation(() => ({
       isEnabled: () => false,
-      stopWorkspaceSandboxForToggle: vi.fn().mockRejectedValue(new Error('msb stop failed; the managed microVM is still running')),
+      stopAllSandboxesForToggle: vi.fn().mockRejectedValue(new Error('msb stop failed; the managed microVM is still running')),
     }))
     const { OpenCodeServerManager } = await import('../../src/services/opencode-single-server')
     const manager = OpenCodeServerManager.getInstance()

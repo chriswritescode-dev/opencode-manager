@@ -84,8 +84,14 @@ describe('SandboxSettings', () => {
 
     await user.click(screen.getByRole('switch', { name: 'Toggle sandbox' }))
 
-    expect(updateSettingsAsync).toHaveBeenCalledWith({ sandbox: { enabled: true, gitCredentials: false } })
-    expect(screen.getByText('Restart the OpenCode server to apply sandbox changes.')).toBeInTheDocument()
+    expect(updateSettingsAsync).toHaveBeenCalledWith({
+      sandbox: { enabled: true, gitCredentials: false, defaultForNewSessions: true },
+    })
+    expect(
+      screen.getByText(
+        'Restart the OpenCode server to apply changes to sandbox support or git credentials. Per-session sandbox toggles apply immediately.',
+      ),
+    ).toBeInTheDocument()
   })
 
   it('disables the switch with a visible reason when microVMs are unavailable', async () => {
@@ -111,7 +117,9 @@ describe('SandboxSettings', () => {
 
     await user.click(toggle)
 
-    expect(updateSettingsAsync).toHaveBeenCalledWith({ sandbox: { enabled: false, gitCredentials: false } })
+    expect(updateSettingsAsync).toHaveBeenCalledWith({
+      sandbox: { enabled: false, gitCredentials: false, defaultForNewSessions: true },
+    })
   })
 
   it('disables the switch while sandbox availability has not been reported', async () => {
@@ -176,7 +184,9 @@ describe('SandboxSettings', () => {
 
     await user.click(screen.getByRole('switch', { name: 'Toggle sandbox' }))
 
-    expect(updateSettingsAsync).toHaveBeenCalledWith({ sandbox: { enabled: true, gitCredentials: true } })
+    expect(updateSettingsAsync).toHaveBeenCalledWith({
+      sandbox: { enabled: true, gitCredentials: true, defaultForNewSessions: true },
+    })
   })
 
   it('enables git credential forwarding without changing the sandbox preference', async () => {
@@ -187,7 +197,9 @@ describe('SandboxSettings', () => {
 
     await user.click(screen.getByRole('switch', { name: 'Toggle git credentials in sandbox' }))
 
-    expect(updateSettingsAsync).toHaveBeenCalledWith({ sandbox: { enabled: true, gitCredentials: true } })
+    expect(updateSettingsAsync).toHaveBeenCalledWith({
+      sandbox: { enabled: true, gitCredentials: true, defaultForNewSessions: true },
+    })
   })
 
   it('disables the git credential switch while sandboxing is off', async () => {
@@ -197,5 +209,175 @@ describe('SandboxSettings', () => {
     await renderSandbox()
 
     expect(screen.getByRole('switch', { name: 'Toggle git credentials in sandbox' })).toBeDisabled()
+  })
+
+  it('hides the default-for-new-sessions switch while sandboxing is off', async () => {
+    mockUseSettings()
+    mockHealth({ available: true, enforced: false })
+
+    await renderSandbox()
+
+    expect(screen.queryByRole('switch', { name: 'Toggle sandbox for new sessions' })).not.toBeInTheDocument()
+  })
+
+  it('saves the default-for-new-sessions preference preserving other fields', async () => {
+    const { updateSettingsAsync } = mockUseSettings({
+      preferences: { sandbox: { enabled: true, gitCredentials: true, defaultForNewSessions: true } },
+    })
+    mockHealth({ available: true, enforced: false })
+
+    const user = await renderSandbox()
+
+    await user.click(screen.getByRole('switch', { name: 'Toggle sandbox for new sessions' }))
+
+    expect(updateSettingsAsync).toHaveBeenCalledWith({
+      sandbox: { enabled: true, gitCredentials: true, defaultForNewSessions: false },
+    })
+  })
+
+  it('reflects the persisted default-for-new-sessions preference', async () => {
+    mockUseSettings({
+      preferences: { sandbox: { enabled: true, gitCredentials: false, defaultForNewSessions: false } },
+    })
+    mockHealth({ available: true, enforced: false })
+
+    await renderSandbox()
+
+    expect(screen.getByRole('switch', { name: 'Toggle sandbox for new sessions' })).not.toBeChecked()
+  })
+
+  it('renders the resource inputs when sandboxing is enabled', async () => {
+    mockUseSettings({ preferences: { sandbox: { enabled: true } } })
+    mockHealth({ available: true, enforced: false })
+
+    await renderSandbox()
+
+    expect(screen.getByLabelText('Default CPUs')).toBeInTheDocument()
+    expect(screen.getByLabelText('Default memory (GiB)')).toBeInTheDocument()
+    expect(screen.getByLabelText('Stop idle sandbox VMs after (minutes)')).toBeInTheDocument()
+    expect(screen.getByLabelText('Max running sandbox VMs')).toBeInTheDocument()
+  })
+
+  it('hides the resource inputs while sandboxing is off', async () => {
+    mockUseSettings()
+    mockHealth({ available: true, enforced: false })
+
+    await renderSandbox()
+
+    expect(screen.queryByLabelText('Default CPUs')).not.toBeInTheDocument()
+    expect(screen.queryByLabelText('Max running sandbox VMs')).not.toBeInTheDocument()
+  })
+
+  it('saves CPUs while preserving the other sandbox fields', async () => {
+    const { updateSettingsAsync } = mockUseSettings({
+      preferences: {
+        sandbox: {
+          enabled: true,
+          gitCredentials: true,
+          defaultForNewSessions: false,
+          idleStopMinutes: 45,
+          maxRunningVms: 6,
+        },
+      },
+    })
+    mockHealth({ available: true, enforced: false })
+
+    const user = await renderSandbox()
+    const cpus = screen.getByLabelText('Default CPUs')
+    await user.clear(cpus)
+    await user.type(cpus, '8')
+    await user.tab()
+
+    expect(updateSettingsAsync).toHaveBeenCalledWith({
+      sandbox: {
+        enabled: true,
+        gitCredentials: true,
+        defaultForNewSessions: false,
+        idleStopMinutes: 45,
+        maxRunningVms: 6,
+        cpus: 8,
+      },
+    })
+  })
+
+  it('saves memory in MiB from the GiB input', async () => {
+    const { updateSettingsAsync } = mockUseSettings({ preferences: { sandbox: { enabled: true } } })
+    mockHealth({ available: true, enforced: false })
+
+    const user = await renderSandbox()
+    const memory = screen.getByLabelText('Default memory (GiB)')
+    await user.type(memory, '2.5')
+    await user.tab()
+
+    expect(updateSettingsAsync).toHaveBeenCalledWith({ sandbox: { enabled: true, memoryMib: 2560 } })
+  })
+
+  it('omits CPUs when cleared to use the server default', async () => {
+    const { updateSettingsAsync } = mockUseSettings({
+      preferences: { sandbox: { enabled: true, cpus: 4, memoryMib: 4096 } },
+    })
+    mockHealth({ available: true, enforced: false })
+
+    const user = await renderSandbox()
+    await user.clear(screen.getByLabelText('Default CPUs'))
+    await user.tab()
+
+    expect(updateSettingsAsync).toHaveBeenCalledWith({ sandbox: { enabled: true, memoryMib: 4096 } })
+  })
+
+  it('omits memory when cleared to use the server default', async () => {
+    const { updateSettingsAsync } = mockUseSettings({
+      preferences: { sandbox: { enabled: true, cpus: 4, memoryMib: 4096 } },
+    })
+    mockHealth({ available: true, enforced: false })
+
+    const user = await renderSandbox()
+    await user.clear(screen.getByLabelText('Default memory (GiB)'))
+    await user.tab()
+
+    expect(updateSettingsAsync).toHaveBeenCalledWith({ sandbox: { enabled: true, cpus: 4 } })
+  })
+
+  it('rejects out-of-range CPUs, keeps the stored value, and warns', async () => {
+    const { updateSettingsAsync } = mockUseSettings({ preferences: { sandbox: { enabled: true, cpus: 4 } } })
+    mockHealth({ available: true, enforced: false })
+
+    const user = await renderSandbox()
+    const cpus = screen.getByLabelText('Default CPUs')
+    await user.clear(cpus)
+    await user.type(cpus, '999')
+    await user.tab()
+
+    expect(updateSettingsAsync).not.toHaveBeenCalled()
+    expect(vi.mocked(showToast.error)).toHaveBeenCalledWith('Default CPUs must be a whole number from 1 to 64')
+    expect(screen.getByLabelText('Default CPUs')).toHaveValue(4)
+  })
+
+  it('rejects out-of-range memory and warns', async () => {
+    const { updateSettingsAsync } = mockUseSettings({ preferences: { sandbox: { enabled: true } } })
+    mockHealth({ available: true, enforced: false })
+
+    const user = await renderSandbox()
+    const memory = screen.getByLabelText('Default memory (GiB)')
+    await user.type(memory, '0.5')
+    await user.tab()
+
+    expect(updateSettingsAsync).not.toHaveBeenCalled()
+    expect(vi.mocked(showToast.error)).toHaveBeenCalledWith('Default memory must be between 1 and 1024 GiB')
+  })
+
+  it('shows the backend error when the resource preference is rejected', async () => {
+    mockUseSettings({
+      preferences: { sandbox: { enabled: true } },
+      updateSettingsAsync: vi.fn().mockRejectedValue(new FetchError('Default memory exceeds the host memory', 400)),
+    })
+    mockHealth({ available: true, enforced: false })
+
+    const user = await renderSandbox()
+    const memory = screen.getByLabelText('Default memory (GiB)')
+    await user.type(memory, '64')
+    await user.tab()
+
+    expect(vi.mocked(showToast.error)).toHaveBeenCalledWith('Default memory exceeds the host memory')
   })
 })

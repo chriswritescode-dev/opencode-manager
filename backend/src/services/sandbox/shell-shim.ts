@@ -6,12 +6,13 @@ import {
   resolveSandboxExecUser,
   sandboxExecutablePath,
   sandboxMountRoots,
-  WORKSPACE_SANDBOX_NAME,
 } from './command'
 
 export const SANDBOX_SHELL_FILENAME = 'ocm-sandbox-shell'
 
 export const SANDBOX_SHELL_ENV_WORKDIR = 'OCM_SANDBOX_WORKDIR'
+
+export const SANDBOX_SHELL_ENV_NAME = 'OCM_SANDBOX_NAME'
 
 /**
  * Upper bound on `http.<host>.extraheader` pairs forwarded into the microVM.
@@ -74,7 +75,7 @@ export function buildSandboxShellShimScript(): string {
   const execArgs = [
     quoteForShell(sandboxExecutablePath()),
     'exec',
-    WORKSPACE_SANDBOX_NAME,
+    `"$${SANDBOX_SHELL_ENV_NAME}"`,
     '--no-tty',
     '-q',
     '-u',
@@ -92,6 +93,13 @@ if [ -z "\${${SANDBOX_SHELL_ENV_WORKDIR}:-}" ]; then
   echo 'ocm-sandbox-shell: sandbox working directory missing; refusing to run on the host' >&2
   exit 126
 fi
+case "\${${SANDBOX_SHELL_ENV_NAME}:-}" in
+  ocm-session-[0-9abcdef][0-9abcdef][0-9abcdef][0-9abcdef][0-9abcdef][0-9abcdef][0-9abcdef][0-9abcdef][0-9abcdef][0-9abcdef][0-9abcdef][0-9abcdef]) ;;
+  *)
+    echo 'ocm-sandbox-shell: sandbox name missing or invalid; refusing to run on the host' >&2
+    exit 126
+    ;;
+esac
 ocm_argc=$#
 set -- "$@" ${execArgs}
 ${forwardEnv}

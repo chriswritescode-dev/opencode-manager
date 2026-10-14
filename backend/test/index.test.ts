@@ -70,9 +70,9 @@ vi.mock('../src/services/schedules', () => ({
 
 vi.mock('../src/services/sandbox/runtime', () => ({
   SandboxRuntimeService: vi.fn().mockImplementation(() => ({
-    prepareWorkspaceSandboxOnBoot: vi.fn().mockResolvedValue(undefined),
+    prepareSandboxOnBoot: vi.fn().mockResolvedValue(undefined),
   })),
-  stopWorkspaceSandboxOnShutdown: vi.fn().mockResolvedValue(undefined),
+  stopSandboxesOnShutdown: vi.fn().mockResolvedValue(undefined),
 }))
 
 const ipcServerMock = vi.hoisted(() => ({

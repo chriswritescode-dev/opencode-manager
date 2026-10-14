@@ -283,6 +283,14 @@ vi.mock('../../src/services/sandbox/capability', () => ({
   resetSandboxCapabilityCache: vi.fn(),
 }))
 
+const resourcesMock = vi.hoisted(() => ({
+  sandboxResourceLimitError: vi.fn(),
+}))
+
+vi.mock('../../src/services/sandbox/resources', () => ({
+  sandboxResourceLimitError: resourcesMock.sandboxResourceLimitError,
+}))
+
 vi.mock('@opencode-manager/shared/config/env', () => ({
   getWorkspacePath: vi.fn(() => '/tmp/test-workspace'),
   getReposPath: vi.fn(() => '/tmp/test-repos'),
@@ -363,6 +371,8 @@ describe('Settings Routes - OpenCode Upgrade', () => {
     mockSyncManagerGitIdentityConfig.mockResolvedValue({ identity: null, error: null })
     mockDetectSandboxCapability.mockReset()
     mockDetectSandboxCapability.mockReturnValue({ available: true, msbVersion: 'msb 1.0.0' })
+    resourcesMock.sandboxResourceLimitError.mockReset()
+    resourcesMock.sandboxResourceLimitError.mockReturnValue(null)
     mockInstallOpenCodeVersion.mockReset()
     mockInstallOpenCodeVersion.mockResolvedValue('/home/node/.opencode/bin/opencode')
     clearOpenCodeVersionCache()
@@ -1378,6 +1388,27 @@ describe('Settings Routes - OpenCode Upgrade', () => {
       expect(opencodeServerManager.markRestartPending).not.toHaveBeenCalled()
     })
 
+    it('does not mark the OpenCode server restart pending when only sandbox.defaultForNewSessions changes', async () => {
+      mockGetSettings.mockReturnValue({
+        preferences: { sandbox: { enabled: true, defaultForNewSessions: true } },
+        updatedAt: 1,
+      })
+      mockUpdateSettings.mockReturnValue({
+        preferences: { sandbox: { enabled: true, defaultForNewSessions: false } },
+        updatedAt: 2,
+      })
+
+      const req = new Request('http://localhost/', {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ preferences: { sandbox: { enabled: true, defaultForNewSessions: false } } }),
+      })
+      const res = await settingsApp.fetch(req)
+
+      expect(res.status).toBe(200)
+      expect(opencodeServerManager.markRestartPending).not.toHaveBeenCalled()
+    })
+
     it('does not mark the OpenCode server restart pending when sandbox is absent from the patch', async () => {
       mockGetSettings.mockReturnValue({
         preferences: { sandbox: { enabled: true } },
@@ -1585,6 +1616,52 @@ describe('Settings Routes - OpenCode Upgrade', () => {
       expect(res.status).toBe(200)
       expect(mockUpdateSettings).toHaveBeenCalledWith({ sandbox: { enabled: false } }, 'default')
       expect(opencodeServerManager.markRestartPending).toHaveBeenCalledTimes(1)
+    })
+  })
+
+  describe('PATCH / - sandbox resource host limits', () => {
+    it('rejects sandbox resources above the host limit with 400 and does not persist settings', async () => {
+      resourcesMock.sandboxResourceLimitError.mockReturnValue('Requested 8 CPUs exceeds the host limit of 4')
+      mockGetSettings.mockReturnValue({
+        preferences: { sandbox: { enabled: true } },
+        updatedAt: 1,
+      })
+
+      const req = new Request('http://localhost/', {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ preferences: { sandbox: { enabled: true, cpus: 8, memoryMib: 4096 } } }),
+      })
+      const res = await settingsApp.fetch(req)
+      const json = await res.json() as { error: string }
+
+      expect(res.status).toBe(400)
+      expect(json.error).toBe('Requested 8 CPUs exceeds the host limit of 4')
+      expect(resourcesMock.sandboxResourceLimitError).toHaveBeenCalledWith(
+        expect.objectContaining({ cpus: 8, memoryMib: 4096 }),
+      )
+      expect(mockUpdateSettings).not.toHaveBeenCalled()
+    })
+
+    it('accepts sandbox resources within the host limit', async () => {
+      mockGetSettings.mockReturnValue({
+        preferences: { sandbox: { enabled: true } },
+        updatedAt: 1,
+      })
+      mockUpdateSettings.mockReturnValue({
+        preferences: { sandbox: { enabled: true, cpus: 4, memoryMib: 8192 } },
+        updatedAt: 2,
+      })
+
+      const req = new Request('http://localhost/', {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ preferences: { sandbox: { enabled: true, cpus: 4, memoryMib: 8192 } } }),
+      })
+      const res = await settingsApp.fetch(req)
+
+      expect(res.status).toBe(200)
+      expect(mockUpdateSettings).toHaveBeenCalledWith({ sandbox: { enabled: true, cpus: 4, memoryMib: 8192 } }, 'default')
     })
   })
 

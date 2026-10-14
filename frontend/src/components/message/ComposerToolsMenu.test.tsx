@@ -3,15 +3,29 @@ import { render, screen } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { ComposerToolsMenu } from './ComposerToolsMenu'
 import { useSessionPermissionMode, useSetSessionPermissionMode } from '@/hooks/useSessionPermissionMode'
-import type { SessionPermissionModeState } from '@opencode-manager/shared/schemas'
+import { useSessionSandbox, useSetSessionSandbox } from '@/hooks/useSessionSandbox'
+import { FetchError } from '@/api/fetchWrapper'
+import type { SessionPermissionModeState, SessionSandboxState } from '@opencode-manager/shared/schemas'
 
 vi.mock('@/hooks/useSessionPermissionMode')
+vi.mock('@/hooks/useSessionSandbox')
 
 const baseState: SessionPermissionModeState = {
   sessionId: 'ses_1',
   rootSessionId: 'ses_1',
   mode: 'ask',
   lockedReason: null,
+}
+
+const baseSandboxState: SessionSandboxState = {
+  sessionId: 'ses_1',
+  rootSessionId: 'ses_1',
+  sandboxed: false,
+  source: 'default',
+  resources: null,
+  effectiveResources: { cpus: 2, memoryMib: 4096 },
+  lockedReason: null,
+  available: true,
 }
 
 function mockPermissionMode(state: Partial<SessionPermissionModeState> = {}, mutate = vi.fn()) {
@@ -24,6 +38,23 @@ function mockPermissionMode(state: Partial<SessionPermissionModeState> = {}, mut
     isPending: false,
   } as unknown as ReturnType<typeof useSetSessionPermissionMode>)
   return mutate
+}
+
+function mockSandbox(
+  state: Partial<SessionSandboxState> = {},
+  mutateAsync = vi.fn().mockResolvedValue(undefined),
+) {
+  const mutate = vi.fn()
+  vi.mocked(useSessionSandbox).mockReturnValue({
+    data: { ...baseSandboxState, ...state },
+    isError: false,
+  } as ReturnType<typeof useSessionSandbox>)
+  vi.mocked(useSetSessionSandbox).mockReturnValue({
+    mutate,
+    mutateAsync,
+    isPending: false,
+  } as unknown as ReturnType<typeof useSetSessionSandbox>)
+  return { mutate, mutateAsync }
 }
 
 function renderMenu(overrides: Partial<React.ComponentProps<typeof ComposerToolsMenu>> = {}) {
@@ -44,6 +75,7 @@ function renderMenu(overrides: Partial<React.ComponentProps<typeof ComposerTools
 describe('ComposerToolsMenu', () => {
   beforeEach(() => {
     vi.clearAllMocks()
+    mockSandbox()
   })
 
   it('does not highlight the trigger when no tool is active', () => {
@@ -87,6 +119,65 @@ describe('ComposerToolsMenu', () => {
 
     await user.click(screen.getByRole('button', { name: 'Composer options' }))
     const item = await screen.findByRole('menuitemcheckbox', { name: /Accept all permissions/ })
+
+    expect(item).toHaveAttribute('aria-disabled', 'true')
+    expect(item).toHaveTextContent('Inherited from parent session')
+  })
+
+  it('highlights the trigger while commands are sandboxed', () => {
+    mockPermissionMode()
+    mockSandbox({ sandboxed: true })
+    renderMenu()
+
+    expect(screen.getByRole('button', { name: 'Composer options' })).toHaveClass('bg-highlight')
+  })
+
+  it('shows the sandbox item checked while commands are sandboxed', async () => {
+    const user = userEvent.setup()
+    mockPermissionMode()
+    mockSandbox({ sandboxed: true })
+    renderMenu()
+
+    await user.click(screen.getByRole('button', { name: 'Composer options' }))
+    const item = await screen.findByRole('menuitemcheckbox', { name: /Sandbox commands/ })
+
+    expect(item).toHaveAttribute('aria-checked', 'true')
+  })
+
+  it('toggles sandboxing via the sandbox endpoint', async () => {
+    const user = userEvent.setup()
+    mockPermissionMode()
+    const { mutate } = mockSandbox()
+    renderMenu()
+
+    await user.click(screen.getByRole('button', { name: 'Composer options' }))
+    const item = await screen.findByRole('menuitemcheckbox', { name: /Sandbox commands/ })
+    expect(item).toHaveAttribute('aria-checked', 'false')
+    await user.click(item)
+
+    expect(mutate).toHaveBeenCalledWith({ sandboxed: true })
+  })
+
+  it('hides the sandbox item when sandboxing is unavailable', async () => {
+    const user = userEvent.setup()
+    mockPermissionMode()
+    mockSandbox({ available: false })
+    renderMenu()
+
+    await user.click(screen.getByRole('button', { name: 'Composer options' }))
+    await screen.findByRole('menuitemcheckbox', { name: /Accept all permissions/ })
+
+    expect(screen.queryByRole('menuitemcheckbox', { name: /Sandbox commands/ })).not.toBeInTheDocument()
+  })
+
+  it('shows why sandboxing cannot be changed', async () => {
+    const user = userEvent.setup()
+    mockPermissionMode()
+    mockSandbox({ lockedReason: 'child' })
+    renderMenu()
+
+    await user.click(screen.getByRole('button', { name: 'Composer options' }))
+    const item = await screen.findByRole('menuitemcheckbox', { name: /Sandbox commands/ })
 
     expect(item).toHaveAttribute('aria-disabled', 'true')
     expect(item).toHaveTextContent('Inherited from parent session')
@@ -147,5 +238,144 @@ describe('ComposerToolsMenu', () => {
     await user.click(await screen.findByRole('menuitem', { name: 'Dictate' }))
 
     expect(onDictate).toHaveBeenCalledTimes(1)
+  })
+})
+
+describe('ComposerToolsMenu sandbox resources', () => {
+  beforeEach(() => {
+    vi.clearAllMocks()
+    mockPermissionMode()
+    mockSandbox()
+  })
+
+  async function openResources(user: ReturnType<typeof userEvent.setup>) {
+    await user.click(screen.getByRole('button', { name: 'Composer options' }))
+    const item = await screen.findByRole('menuitem', { name: /Sandbox resources/ })
+    await user.click(item)
+    await screen.findByRole('dialog')
+  }
+
+  it('hides the resources item when the session is not sandboxed', async () => {
+    const user = userEvent.setup()
+    mockSandbox({ sandboxed: false })
+    renderMenu()
+
+    await user.click(screen.getByRole('button', { name: 'Composer options' }))
+    await screen.findByRole('menuitemcheckbox', { name: /Sandbox commands/ })
+
+    expect(screen.queryByRole('menuitem', { name: /Sandbox resources/ })).not.toBeInTheDocument()
+  })
+
+  it('hides the resources item for a child session', async () => {
+    const user = userEvent.setup()
+    mockSandbox({ sandboxed: true, lockedReason: 'child' })
+    renderMenu()
+
+    await user.click(screen.getByRole('button', { name: 'Composer options' }))
+    await screen.findByRole('menuitemcheckbox', { name: /Sandbox commands/ })
+
+    expect(screen.queryByRole('menuitem', { name: /Sandbox resources/ })).not.toBeInTheDocument()
+  })
+
+  it('hides the resources item when sandboxing is unavailable', async () => {
+    const user = userEvent.setup()
+    mockSandbox({ sandboxed: true, available: false })
+    renderMenu()
+
+    await user.click(screen.getByRole('button', { name: 'Composer options' }))
+    await screen.findByRole('menuitemcheckbox', { name: /Accept all permissions/ })
+
+    expect(screen.queryByRole('menuitem', { name: /Sandbox resources/ })).not.toBeInTheDocument()
+  })
+
+  it('shows the effective values with a custom marker when an override exists', async () => {
+    const user = userEvent.setup()
+    mockSandbox({
+      sandboxed: true,
+      resources: { cpus: 8, memoryMib: 2048 },
+      effectiveResources: { cpus: 8, memoryMib: 2048 },
+    })
+    renderMenu()
+
+    await user.click(screen.getByRole('button', { name: 'Composer options' }))
+    const item = await screen.findByRole('menuitem', { name: /Sandbox resources/ })
+
+    expect(item).toHaveTextContent('8 CPUs · 2 GiB · custom')
+  })
+
+  it('prefills the dialog from the override', async () => {
+    const user = userEvent.setup()
+    mockSandbox({
+      sandboxed: true,
+      resources: { cpus: 8, memoryMib: 2048 },
+      effectiveResources: { cpus: 8, memoryMib: 2048 },
+    })
+    renderMenu()
+
+    await openResources(user)
+
+    expect(screen.getByLabelText('CPUs')).toHaveValue(8)
+    expect(screen.getByLabelText('Memory (GiB)')).toHaveValue(2)
+  })
+
+  it('prefills the dialog from the effective values without an override', async () => {
+    const user = userEvent.setup()
+    mockSandbox({ sandboxed: true, resources: null, effectiveResources: { cpus: 2, memoryMib: 4096 } })
+    renderMenu()
+
+    await openResources(user)
+
+    expect(screen.getByLabelText('CPUs')).toHaveValue(2)
+    expect(screen.getByLabelText('Memory (GiB)')).toHaveValue(4)
+  })
+
+  it('saves the entered resources', async () => {
+    const user = userEvent.setup()
+    const { mutateAsync } = mockSandbox({
+      sandboxed: true,
+      resources: null,
+      effectiveResources: { cpus: 2, memoryMib: 4096 },
+    })
+    renderMenu()
+
+    await openResources(user)
+    const cpus = screen.getByLabelText('CPUs')
+    await user.clear(cpus)
+    await user.type(cpus, '4')
+    const memory = screen.getByLabelText('Memory (GiB)')
+    await user.clear(memory)
+    await user.type(memory, '3')
+    await user.click(screen.getByRole('button', { name: 'Save' }))
+
+    expect(mutateAsync).toHaveBeenCalledWith({ resources: { cpus: 4, memoryMib: 3072 } })
+  })
+
+  it('clears the override with Use defaults', async () => {
+    const user = userEvent.setup()
+    const { mutateAsync } = mockSandbox({
+      sandboxed: true,
+      resources: { cpus: 8, memoryMib: 2048 },
+      effectiveResources: { cpus: 8, memoryMib: 2048 },
+    })
+    renderMenu()
+
+    await openResources(user)
+    await user.click(screen.getByRole('button', { name: 'Use defaults' }))
+
+    expect(mutateAsync).toHaveBeenCalledWith({ resources: null })
+  })
+
+  it('shows the server error when saving resources fails', async () => {
+    const user = userEvent.setup()
+    mockSandbox(
+      { sandboxed: true, resources: null, effectiveResources: { cpus: 2, memoryMib: 4096 } },
+      vi.fn().mockRejectedValue(new FetchError('Requested resources exceed the host', 400)),
+    )
+    renderMenu()
+
+    await openResources(user)
+    await user.click(screen.getByRole('button', { name: 'Save' }))
+
+    expect(await screen.findByRole('alert')).toHaveTextContent('Requested resources exceed the host')
   })
 })
