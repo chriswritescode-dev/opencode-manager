@@ -256,7 +256,7 @@ export class SessionGoalService {
     })
   }
 
-  async handleEvent(directory: string, event: SSEEvent): Promise<void> {
+  async handleEvent(directory: string | null, event: SSEEvent): Promise<void> {
     const sessionId = sessionIDFromEvent(event)
     if (!sessionId) {
       return

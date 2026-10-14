@@ -35,7 +35,7 @@ export class SessionPermissionModeService {
     private readonly ancestry: SessionAncestry,
   ) {}
 
-  async handleEvent(directory: string, event: SSEEvent): Promise<void> {
+  async handleEvent(directory: string | null, event: SSEEvent): Promise<void> {
     switch (event.type) {
       case 'session.created': {
         const { sessionID, parentID, permissions } = event.data

@@ -36,7 +36,7 @@ export class SessionSandboxService {
     private readonly sandboxes: { removeSessionSandbox(rootSessionId: string): Promise<void> },
   ) {}
 
-  async handleEvent(directory: string, event: SSEEvent): Promise<void> {
+  async handleEvent(directory: string | null, event: SSEEvent): Promise<void> {
     switch (event.type) {
       case 'session.created': {
         const { sessionID, parentID } = event.data

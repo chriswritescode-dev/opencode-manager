@@ -444,6 +444,39 @@ describe('SessionPermissionModeService', () => {
     expect(getSessionPermissionMode(db, 'ses_root')).toBeNull()
   })
 
+  it('clears the stored mode when the session is deleted with a null directory', async () => {
+    setSessionPermissionMode(db, 'ses_root', 'auto')
+    const service = createPermissionModeService(db, createFakeSessionPermissionClient(), new SettingsService(db))
+
+    await service.handleEvent(null, sessionDeletedEvent('ses_root'))
+
+    expect(getSessionPermissionMode(db, 'ses_root')).toBeNull()
+  })
+
+  it('handles a null directory on permission.asked without listing or accepting anything in a guessed location', async () => {
+    const listed: string[] = []
+    const client = createFakeSessionPermissionClient({
+      parents: { ses_root: null },
+      listRequests: async (directory) => {
+        listed.push(directory)
+        return [{ id: 'perm-guess', sessionID: 'ses_root' }]
+      },
+    })
+    const service = createPermissionModeService(db, client, new SettingsService(db))
+
+    const event = {
+      id: 'evt_perm_null',
+      created: Date.now(),
+      type: 'permission.asked',
+      data: { id: 'perm-1', sessionID: 'ses_root', action: 'shell', resources: ['ls'] },
+    } as unknown as SSEEvent
+
+    await expect(service.handleEvent(null, event)).resolves.toBeUndefined()
+
+    expect(listed).toEqual([])
+    expect(client.replyPermission).not.toHaveBeenCalled()
+  })
+
   it('replies to pending requests for the switched root only', async () => {
     const client = createFakeSessionPermissionClient({
       parents: { ses_root: null, ses_other: null },

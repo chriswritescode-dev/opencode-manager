@@ -8,7 +8,7 @@ import { encodeSSEFrame } from '../utils/sse-frame'
 
 type SSEClientCallback = (event: string, data: string) => void
 type SSEClientFrameWriter = (frame: Uint8Array) => void
-type SSEEventListener = (directory: string, event: SSEEvent) => void
+type SSEEventListener = (directory: string | null, event: SSEEvent) => void
 
 interface SSEClient {
   id: string
@@ -448,6 +448,7 @@ class SSEAggregator {
         return
       }
 
+      this.notifyListeners(null, event)
       this.writeEnvelopeToClients(this.clients.keys(), null, payloadJson)
     } catch (error) {
       logger.error(`SSE failed to handle ${event.type} event:`, error)
@@ -470,7 +471,10 @@ class SSEAggregator {
 
   private notifyEvent(directory: string, event: SSEEvent): void {
     this.handleEvent(directory, event)
+    this.notifyListeners(directory, event)
+  }
 
+  private notifyListeners(directory: string | null, event: SSEEvent): void {
     this.eventListeners.forEach(listener => {
       try { listener(directory, event) } catch { /* ignore listener errors */ }
     })

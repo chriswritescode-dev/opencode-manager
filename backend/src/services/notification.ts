@@ -334,7 +334,7 @@ export class NotificationService {
   }
 
   async handleSSEEvent(
-    directory: string,
+    directory: string | null,
     event: SSEEvent
   ): Promise<void> {
     const config = EVENT_CONFIG[event.type];
@@ -358,7 +358,7 @@ export class NotificationService {
       repoName,
       repoId,
       sessionId,
-      directory,
+      directory: directory ?? undefined,
       url,
     });
     if (!payload) return;

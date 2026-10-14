@@ -300,6 +300,23 @@ describe('SessionSandboxService', () => {
     expect(getSessionSandboxMode(db, 'ses_root')).toBeNull()
   })
 
+  it('removes the sandbox microVM when a root session is deleted with a null directory', async () => {
+    const settingsService = new SettingsService(db)
+    settingsService.updateSettings({ sandbox: { enabled: true } })
+    setSessionSandboxed(db, 'ses_root', true)
+    const removed: string[] = []
+    const service = createService(db, createFakeSessionPermissionClient(), settingsService, {
+      removeSessionSandbox: async (rootSessionId) => {
+        removed.push(rootSessionId)
+      },
+    })
+
+    await service.handleEvent(null, sessionDeletedEvent('ses_root'))
+
+    expect(removed).toEqual(['ses_root'])
+    expect(getSessionSandboxMode(db, 'ses_root')).toBeNull()
+  })
+
   it('does not remove a sandbox microVM when a child session is deleted', async () => {
     const settingsService = new SettingsService(db)
     settingsService.updateSettings({ sandbox: { enabled: true } })
