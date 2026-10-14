@@ -126,6 +126,21 @@ async function recordSynthesis(page: Page, synthTexts: string[]): Promise<void> 
   })
 }
 
+async function waitForSynthesisSettled(synthTexts: string[], lastExpectedText: string): Promise<void> {
+  await expect.poll(() => synthTexts.join('\n')).toContain(lastExpectedText)
+  let previousCount = -1
+  await expect
+    .poll(
+      () => {
+        const isSettled = synthTexts.length === previousCount
+        previousCount = synthTexts.length
+        return isSettled
+      },
+      { intervals: [500] },
+    )
+    .toBe(true)
+}
+
 test('plays the latest reply at the bottom and stops on the next tap', async ({ page }) => {
   const synthTexts: string[] = []
   await recordSynthesis(page, synthTexts)
@@ -136,7 +151,7 @@ test('plays the latest reply at the bottom and stops on the next tap', async ({ 
   await expect(playButton).toBeVisible()
   await playButton.tap()
 
-  await expect.poll(() => synthTexts.join('\n')).toContain('CHARLIEMARKER')
+  await waitForSynthesisSettled(synthTexts, 'CHARLIEMARKER paragraph 30')
   expect(synthTexts.join('\n')).not.toContain('ALPHAMARKER')
   expect(synthTexts.join('\n')).not.toContain('BRAVOMARKER')
 
@@ -162,7 +177,7 @@ test('reads the visible replies when scrolled up and stops on the next tap', asy
   await expect(readButton).toBeVisible()
   await readButton.tap()
 
-  await expect.poll(() => synthTexts.join('\n')).toContain('ALPHAMARKER')
+  await waitForSynthesisSettled(synthTexts, 'ALPHAMARKER paragraph 30')
   expect(synthTexts.join('\n')).not.toContain('CHARLIEMARKER')
 
   await expect(page.getByRole('button', { name: /stop playback\. auto-play disabled/i })).toBeVisible()
