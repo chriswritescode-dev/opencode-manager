@@ -197,6 +197,34 @@ describe('sandbox command builders', () => {
     expect(() => buildSandboxCreateArgs(vmSpec({ projectMounts: [] }))).toThrow('at least one project mount')
   })
 
+  it('inserts --replace immediately after -d before the image and never after --', () => {
+    const plain = buildSandboxCreateArgs(vmSpec())
+    const replace = buildSandboxCreateArgs(vmSpec(), { replace: true })
+
+    expect(plain).not.toContain('--replace')
+    expect(plain.slice(0, 3)).toEqual(['run', '-d', '--name'])
+    expect(replace.slice(0, 4)).toEqual(['run', '-d', '--replace', '--name'])
+    expect(replace.filter((token) => token === '--replace')).toHaveLength(1)
+
+    const imageIndex = replace.indexOf(ENV.SANDBOX.IMAGE)
+    const separatorIndex = replace.indexOf('--')
+    const replaceIndex = replace.indexOf('--replace')
+    expect(replaceIndex).toBeLessThan(imageIndex)
+    expect(replaceIndex).toBeLessThan(separatorIndex)
+    expect(replace.slice(replaceIndex + 1)).toEqual(plain.slice(2))
+  })
+
+  it('keeps the canonical spec free of the --replace flag', () => {
+    const canonical = buildCanonicalSandboxSpec(vmSpec())
+
+    expect(JSON.stringify(canonical)).not.toContain('--replace')
+    expect(canonical.name).toBe(VM_NAME)
+    expect((canonical.image as { Oci: { reference: string } }).Oci.reference).toBe(ENV.SANDBOX.IMAGE)
+    expect((canonical.runtime as { cmd: string[] }).cmd).toEqual(['sleep', 'infinity'])
+    expect((canonical.runtime as { workdir: string }).workdir).toBe(getReposPath())
+    expect(canonical.labels).toEqual({ 'ocm.managed': 'true', 'ocm.net': ENV.SANDBOX.NET, 'ocm.session': ROOT_SESSION_ID })
+  })
+
   it('never masks the assistant .opencode directory with a tmpfs overlay', () => {
     const args = buildSandboxCreateArgs(vmSpec())
 

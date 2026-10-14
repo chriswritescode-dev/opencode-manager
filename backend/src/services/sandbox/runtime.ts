@@ -56,6 +56,7 @@ const SANDBOX_IDLE_SWEEP_INTERVAL_MS = 60000
 const SANDBOX_RUNTIME_TMPFS_GUEST = path.resolve('/tmp')
 const SANDBOX_REMOVAL_MISSING_PATTERN = /not found|no such sandbox|unknown sandbox|does not exist/i
 const SANDBOX_VOLUME_REMOVAL_MISSING_PATTERN = /not found|no such volume|unknown volume|does not exist/i
+const SANDBOX_CREATE_EXISTS_PATTERN = /already exists/i
 
 export type SandboxShellTarget = {
   rootSessionId: string
@@ -798,16 +799,35 @@ function scheduleBackgroundProvisionRetry(name: string): void {
 }
 
 async function createSessionSandbox(spec: SandboxVmSpec, maxRunningVms: number): Promise<void> {
-  await withStartAdmission(spec.name, maxRunningVms, async () => {
-    await executeCommand([sandboxExecutablePath(), ...buildSandboxCreateArgs(spec)], {
-      timeout: ENV.SANDBOX.START_TIMEOUT_MS,
-    })
-  })
+  await withStartAdmission(spec.name, maxRunningVms, () => runSandboxCreate(spec))
   await provisionSandboxExecUser(spec.name)
   const attestation = await attestSessionSandbox(spec, true)
   if (!attestation.trusted) {
     throw new Error(`newly created sandbox ${spec.name} failed attestation: ${attestation.reason}`)
   }
+}
+
+async function runSandboxCreate(spec: SandboxVmSpec): Promise<void> {
+  const first = await executeSandboxCreate(buildSandboxCreateArgs(spec))
+  if (first.exitCode === 0) return
+  if (!SANDBOX_CREATE_EXISTS_PATTERN.test(`${first.stdout}\n${first.stderr}`)) {
+    throw new Error(`Command failed with code ${first.exitCode}: ${first.stderr || first.stdout}`)
+  }
+  logger.warn(
+    `Sandbox ${spec.name} already exists as an orphaned msb sandbox; recreating it with --replace: ${first.stderr || first.stdout}`,
+  )
+  const replaced = await executeSandboxCreate(buildSandboxCreateArgs(spec, { replace: true }))
+  if (replaced.exitCode !== 0) {
+    throw new Error(`Command failed with code ${replaced.exitCode}: ${replaced.stderr || replaced.stdout}`)
+  }
+}
+
+async function executeSandboxCreate(args: string[]): Promise<{ exitCode: number; stdout: string; stderr: string }> {
+  const result = (await executeCommand([sandboxExecutablePath(), ...args], {
+    ignoreExitCode: true,
+    timeout: ENV.SANDBOX.START_TIMEOUT_MS,
+  })) as string | { exitCode: number; stdout: string; stderr: string }
+  return typeof result === 'string' ? { exitCode: 0, stdout: result, stderr: '' } : result
 }
 
 async function removeSessionSandboxVm(name: string): Promise<void> {

@@ -852,6 +852,74 @@ describe('SandboxRuntimeService', () => {
     expect(msbCalls('run')).toHaveLength(2)
   })
 
+  it('retries the create with --replace when msb reports the sandbox already exists', async () => {
+    enableEnforcement()
+    const vms = new Map<string, FakeVm>()
+    installFakeMsb(vms)
+    const baseHandler = execHandler
+    let firstRun = true
+    execHandler = (args) => {
+      if (args[1] === 'run') {
+        if (firstRun) {
+          firstRun = false
+          return { exitCode: 1, stdout: '', stderr: `error: sandbox already exists: sandbox '${VM_NAME}' already exists` }
+        }
+        if (!args.includes('--replace')) {
+          return { exitCode: 1, stdout: '', stderr: 'retried without --replace' }
+        }
+      }
+      return baseHandler(args)
+    }
+
+    const plan = await service.planShell(repoADir, shellTarget(repoADir))
+
+    expect(plan).toEqual({ mode: 'sandbox', name: VM_NAME, workdir: repoADir })
+    const runs = msbCalls('run')
+    expect(runs).toHaveLength(2)
+    expect(runs[0]).not.toContain('--replace')
+    expect(runs[1]).toContain('--replace')
+    expect(vms.has(VM_NAME)).toBe(true)
+    expect(logger.warn).toHaveBeenCalledWith(expect.stringContaining('already exists as an orphaned msb sandbox'))
+  })
+
+  it('does not retry a create that fails for another reason', async () => {
+    enableEnforcement()
+    installFakeMsb(new Map())
+    const baseHandler = execHandler
+    execHandler = (args) => {
+      if (args[1] === 'run') return { exitCode: 1, stdout: '', stderr: 'no KVM acceleration available' }
+      return baseHandler(args)
+    }
+
+    const plan = await service.planShell(repoADir, shellTarget(repoADir))
+
+    expect(plan).toEqual({ mode: 'blocked', reason: 'Command failed with code 1: no KVM acceleration available' })
+    const runs = msbCalls('run')
+    expect(runs).toHaveLength(1)
+    expect(runs[0]).not.toContain('--replace')
+    expect(logger.warn).not.toHaveBeenCalledWith(expect.stringContaining('orphaned msb sandbox'))
+  })
+
+  it('surfaces a failing replace create as a blocked plan', async () => {
+    enableEnforcement()
+    installFakeMsb(new Map())
+    const baseHandler = execHandler
+    execHandler = (args) => {
+      if (args[1] === 'run') {
+        if (!args.includes('--replace')) {
+          return { exitCode: 1, stdout: '', stderr: `error: sandbox already exists: sandbox '${VM_NAME}' already exists` }
+        }
+        return { exitCode: 1, stdout: '', stderr: 'replace failed: sandbox busy' }
+      }
+      return baseHandler(args)
+    }
+
+    const plan = await service.planShell(repoADir, shellTarget(repoADir))
+
+    expect(plan).toEqual({ mode: 'blocked', reason: 'Command failed with code 1: replace failed: sandbox busy' })
+    expect(msbCalls('run')).toHaveLength(2)
+  })
+
   it('stops the least recently used idle VM when the running cap is reached', async () => {
     vi.useFakeTimers()
     try {

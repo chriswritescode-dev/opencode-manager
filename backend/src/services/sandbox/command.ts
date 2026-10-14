@@ -214,7 +214,7 @@ function parseSandboxNamedMountSpec(spec: string): { name: string; guest: string
   return { name, guest }
 }
 
-export function buildSandboxCreateArgs(spec: SandboxVmSpec): string[] {
+export function buildSandboxCreateArgs(spec: SandboxVmSpec, options: { replace?: boolean } = {}): string[] {
   const tmpfsSizeMib = resolveSandboxRuntimeTmpfsSizeMib(spec.memoryMib)
   if (tmpfsSizeMib === null) throw new Error('sandbox memory must be positive to size the runtime tmpfs')
   const workdir = spec.projectMounts[0]
@@ -222,6 +222,7 @@ export function buildSandboxCreateArgs(spec: SandboxVmSpec): string[] {
   return [
     'run',
     '-d',
+    ...(options.replace === true ? ['--replace'] : []),
     '--name',
     spec.name,
     '--label',
