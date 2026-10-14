@@ -1,12 +1,16 @@
 import { useState, useEffect, useCallback, useRef, type CSSProperties } from 'react'
 import { useSwipeNavigation } from '@/contexts/SwipeNavigationContext'
 
+export function isMobileViewport(): boolean {
+  return typeof window !== 'undefined' ? window.innerWidth < 768 : false
+}
+
 export function useMobile() {
-  const [isMobile, setIsMobile] = useState(() => (typeof window !== 'undefined' ? window.innerWidth < 768 : false))
+  const [isMobile, setIsMobile] = useState(isMobileViewport)
 
   useEffect(() => {
     const checkMobile = () => {
-      setIsMobile(window.innerWidth < 768)
+      setIsMobile(isMobileViewport())
     }
 
     checkMobile()

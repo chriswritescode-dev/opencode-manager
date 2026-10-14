@@ -1,4 +1,6 @@
 import { openCodeLocation, parseOpenCodeModelRef } from '@opencode-manager/shared/opencode'
+import { MANAGER_PROMPT_CLIENT_METADATA_KEY } from '@opencode-manager/shared/schemas'
+import { isMobileViewport } from '@/hooks/useMobile'
 import { callOpenCode } from './opencodeApi'
 import type {
   AgentInfo,
@@ -186,6 +188,7 @@ export async function sendPrompt(input: SendPromptInput): Promise<SessionInboxUs
     api.session.prompt({
       sessionID: input.sessionID,
       ...buildPromptFields(input),
+      metadata: { [MANAGER_PROMPT_CLIENT_METADATA_KEY]: isMobileViewport() ? 'mobile' : 'desktop' },
     }),
   )
 }

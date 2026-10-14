@@ -1,7 +1,22 @@
 import { z } from 'zod'
-import { ASSISTANT_NOTIFICATION_LIMITS, MANAGER_TOOL_ACTIONS, MANAGER_TOOL_NAME, ShowArtifactParamsSchema, WalkthroughSourceSchema } from '@opencode-manager/shared/schemas'
+import {
+  ASSISTANT_NOTIFICATION_LIMITS,
+  MANAGER_PROMPT_CLIENT_METADATA_KEY,
+  MANAGER_PROMPT_CLIENTS,
+  MANAGER_TOOL_ACTIONS,
+  MANAGER_TOOL_NAME,
+  ShowArtifactParamsSchema,
+  WalkthroughSourceSchema,
+} from '@opencode-manager/shared/schemas'
 
 const MANAGER_TOOL_REQUEST_TIMEOUT_MS = 60000
+
+const MOBILE_PROMPT_CLIENT = MANAGER_PROMPT_CLIENTS[0]
+
+const DESKTOP_PROMPT_CLIENT = MANAGER_PROMPT_CLIENTS[1]
+
+export const MANAGER_MOBILE_OUTPUT_INSTRUCTIONS =
+  'The user is on a mobile device and may listen to your replies with text-to-speech. Write replies as short, plain, conversational sentences that read well aloud. Avoid tables, headings, code blocks, long or nested lists, file paths, URLs, and raw symbols unless the user explicitly asks for them; describe technical details in words instead. Lead with the outcome and keep it brief. This only changes how you write replies, not how thoroughly you work or use tools.'
 
 export const MANAGER_TOOL_ALLOWED_ROUTES = [
   'GET /settings',
@@ -149,6 +164,31 @@ var INPUT_SCHEMA = ${JSON.stringify(buildManagerToolInputJsonSchema(), null, 2)}
 
 var DESCRIPTION = ${JSON.stringify(buildManagerToolDescription())}
 
+var CLIENT_METADATA_KEY = ${JSON.stringify(MANAGER_PROMPT_CLIENT_METADATA_KEY)}
+
+var MOBILE_CLIENT = ${JSON.stringify(MOBILE_PROMPT_CLIENT)}
+
+var DESKTOP_CLIENT = ${JSON.stringify(DESKTOP_PROMPT_CLIENT)}
+
+var MOBILE_OUTPUT_INSTRUCTIONS = ${JSON.stringify(MANAGER_MOBILE_OUTPUT_INSTRUCTIONS)}
+
+var MOBILE_SESSIONS = new Set()
+
+function trackMobileSession(event) {
+  var client = event.metadata && event.metadata[CLIENT_METADATA_KEY]
+  if (client === MOBILE_CLIENT) {
+    MOBILE_SESSIONS.add(event.sessionID)
+  } else if (client === DESKTOP_CLIENT) {
+    MOBILE_SESSIONS.delete(event.sessionID)
+  }
+}
+
+function addMobileOutputInstructions(event) {
+  if (MOBILE_SESSIONS.has(event.sessionID)) {
+    event.system.push({ type: 'text', text: MOBILE_OUTPUT_INSTRUCTIONS })
+  }
+}
+
 function resolveRoute(path) {
   var baseUrl = process.env.OCM_INTERNAL_API_URL
   var token = process.env.OCM_INTERNAL_TOKEN
@@ -290,6 +330,8 @@ async function runAction(input, context) {
 export default {
   id: '${id}',
   async setup(ctx) {
+    await ctx.session.hook('prompt', trackMobileSession)
+    await ctx.session.hook('context', addMobileOutputInstructions)
     await ctx.tool.transform(function (editor) {
       editor.add({
         name: ${JSON.stringify(MANAGER_TOOL_NAME)},

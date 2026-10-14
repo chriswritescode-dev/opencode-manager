@@ -5,10 +5,19 @@ import http from 'http'
 import type { AddressInfo } from 'net'
 import path from 'path'
 import os from 'os'
-import { ASSISTANT_NOTIFICATION_LIMITS, AssistantNotificationRequestSchema, MANAGER_TOOL_NAME } from '@opencode-manager/shared/schemas'
-import { MANAGER_TOOL_ALLOWED_ROUTES, parseAllowedRoute } from '../../src/services/opencode-manager-tool-plugin'
+import {
+  ASSISTANT_NOTIFICATION_LIMITS,
+  AssistantNotificationRequestSchema,
+  MANAGER_PROMPT_CLIENT_METADATA_KEY,
+  MANAGER_TOOL_NAME,
+} from '@opencode-manager/shared/schemas'
+import {
+  MANAGER_MOBILE_OUTPUT_INSTRUCTIONS,
+  MANAGER_TOOL_ALLOWED_ROUTES,
+  parseAllowedRoute,
+} from '../../src/services/opencode-manager-tool-plugin'
 import { installManagedPlugins, getOpenCodePluginDir } from '../../src/services/opencode/plugin-registry'
-import { loadGeneratedPlugin, type GeneratedTool } from '../helpers/opencode-plugin-context'
+import { loadGeneratedPlugin, type GeneratedPlugin, type GeneratedTool, type SessionContextEvent } from '../helpers/opencode-plugin-context'
 import { resolveOpenCode2Binary, runOpenCodeStandalone } from '../helpers/opencode-binary'
 
 type JsonSchema = {
@@ -22,6 +31,10 @@ type JsonSchema = {
   const?: string
   maxLength?: number
   minLength?: number
+}
+
+async function loadManagerPlugin(configHome: string): Promise<GeneratedPlugin> {
+  return loadGeneratedPlugin(path.join(getOpenCodePluginDir(configHome), 'ocm-manager.js'))
 }
 
 async function loadTool(configHome: string): Promise<GeneratedTool> {
@@ -95,6 +108,50 @@ describe('ocm-manager plugin', () => {
     const plugin = await loadGeneratedPlugin(path.join(getOpenCodePluginDir(configHome), 'ocm-manager.js'))
 
     expect(plugin.id).toBe('ocm.manager')
+  })
+
+  describe('mobile output instructions', () => {
+    it('adds the mobile output instructions to a session prompted from the mobile client', async () => {
+      const plugin = await loadManagerPlugin(configHome)
+      await plugin.triggerSessionPrompt({ sessionID: 'ses_mobile', metadata: { [MANAGER_PROMPT_CLIENT_METADATA_KEY]: 'mobile' } })
+      const event: SessionContextEvent = { sessionID: 'ses_mobile', system: [] }
+
+      await plugin.triggerSessionContext(event)
+
+      expect(event.system).toEqual([{ type: 'text', text: MANAGER_MOBILE_OUTPUT_INSTRUCTIONS }])
+    })
+
+    it('removes the mobile output instructions when the latest prompt is from the desktop client', async () => {
+      const plugin = await loadManagerPlugin(configHome)
+      await plugin.triggerSessionPrompt({ sessionID: 'ses_switch', metadata: { [MANAGER_PROMPT_CLIENT_METADATA_KEY]: 'mobile' } })
+      await plugin.triggerSessionPrompt({ sessionID: 'ses_switch', metadata: { [MANAGER_PROMPT_CLIENT_METADATA_KEY]: 'desktop' } })
+      const event: SessionContextEvent = { sessionID: 'ses_switch', system: [] }
+
+      await plugin.triggerSessionContext(event)
+
+      expect(event.system).toEqual([])
+    })
+
+    it('keeps the mobile output instructions when a later prompt carries no client metadata', async () => {
+      const plugin = await loadManagerPlugin(configHome)
+      await plugin.triggerSessionPrompt({ sessionID: 'ses_nometa', metadata: { [MANAGER_PROMPT_CLIENT_METADATA_KEY]: 'mobile' } })
+      await plugin.triggerSessionPrompt({ sessionID: 'ses_nometa' })
+      const event: SessionContextEvent = { sessionID: 'ses_nometa', system: [] }
+
+      await plugin.triggerSessionContext(event)
+
+      expect(event.system).toEqual([{ type: 'text', text: MANAGER_MOBILE_OUTPUT_INSTRUCTIONS }])
+    })
+
+    it('leaves sessions prompted from another client without the mobile output instructions', async () => {
+      const plugin = await loadManagerPlugin(configHome)
+      await plugin.triggerSessionPrompt({ sessionID: 'ses_mobile', metadata: { [MANAGER_PROMPT_CLIENT_METADATA_KEY]: 'mobile' } })
+      const event: SessionContextEvent = { sessionID: 'ses_other', system: [] }
+
+      await plugin.triggerSessionContext(event)
+
+      expect(event.system).toEqual([])
+    })
   })
 
   it('writes a plugin file with no zod import and no import statement', async () => {
