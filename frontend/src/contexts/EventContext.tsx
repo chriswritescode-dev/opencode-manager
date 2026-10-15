@@ -269,7 +269,6 @@ export function EventProvider({ children }: { children: React.ReactNode }) {
   const statusPollIntervalRef = useRef<ReturnType<typeof setInterval> | null>(null)
   const subscriptionRef = useRef<ReturnType<typeof openCodeEventStream.subscribeGlobalMonitor> | null>(null)
   const reposRef = useRef<typeof repos>(null)
-  const trackedRepoDirectoriesRef = useRef<Set<string>>(new Set())
   const ancestryInFlightRef = useRef<Set<string>>(new Set())
 
   const { data: repos } = useQuery({
@@ -805,10 +804,11 @@ export function EventProvider({ children }: { children: React.ReactNode }) {
       }
     }
 
-    const handleResync = () => {
-      void reconcilePendingActionsForDirectories(collectTrackedDirectories())
+    const handleResync = (subscribedDirectories: string[]) => {
+      const directories = [...new Set([...collectTrackedDirectories(), ...subscribedDirectories])]
+      void reconcilePendingActionsForDirectories(directories)
       void fetchInitialSessionStatuses()
-      void syncRunningShells(collectTrackedDirectories())
+      void syncRunningShells(directories)
       invalidateChildSessionCaches(queryClient)
       invalidateQueryKeysDebounced(queryClient, LOCATION_CATALOG_QUERY_KEYS)
     }
@@ -820,6 +820,10 @@ export function EventProvider({ children }: { children: React.ReactNode }) {
       onStatusChange: handleStatusChange,
       onHealthChange: handleHealthChange,
       onResync: handleResync,
+      onDirectoriesSubscribed: (directories) => {
+        void reconcilePendingActionsForDirectories(directories)
+        void syncRunningShells(directories)
+      },
     })
     subscriptionRef.current = subscription
     
@@ -834,16 +838,8 @@ export function EventProvider({ children }: { children: React.ReactNode }) {
   useEffect(() => {
     reposRef.current = repos
     const directories = [...new Set((repos ?? []).map(r => r.fullPath))]
-    const previousDirectories = trackedRepoDirectoriesRef.current
-    const addedDirectories = directories.filter((directory) => !previousDirectories.has(directory))
-    trackedRepoDirectoriesRef.current = new Set(directories)
-    const sub = subscriptionRef.current
-    if (!sub) return
-    sub.updateDirectories(directories)
-    if (addedDirectories.length > 0) {
-      void syncRunningShells(addedDirectories)
-    }
-  }, [repos, syncRunningShells])
+    subscriptionRef.current?.updateDirectories(directories)
+  }, [repos])
 
   useEffect(() => {
     if (!repos || repos.length === 0) return

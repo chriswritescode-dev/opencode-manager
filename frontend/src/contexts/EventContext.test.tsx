@@ -514,7 +514,7 @@ describe('EventProvider permissions and forms', () => {
 
     const lastSubscribeCall = mocks.subscribeGlobalMonitor.mock.calls[mocks.subscribeGlobalMonitor.mock.calls.length - 1]
     const onEvent = lastSubscribeCall[0].onEvent as (data: unknown) => void
-    const onResync = lastSubscribeCall[0].onResync as (() => void) | undefined
+    const onResync = lastSubscribeCall[0].onResync as ((directories: string[]) => void) | undefined
 
     act(() => {
       onEvent({ type: 'permission.asked', data: pendingPermission, directory: '/repo' })
@@ -527,7 +527,7 @@ describe('EventProvider permissions and forms', () => {
     })
 
     act(() => {
-      onResync?.()
+      onResync?.([])
     })
 
     await waitFor(() => {
@@ -549,7 +549,7 @@ describe('EventProvider permissions and forms', () => {
 
     const lastSubscribeCall = mocks.subscribeGlobalMonitor.mock.calls[mocks.subscribeGlobalMonitor.mock.calls.length - 1]
     const onEvent = lastSubscribeCall[0].onEvent as (data: unknown) => void
-    const onResync = lastSubscribeCall[0].onResync as (() => void) | undefined
+    const onResync = lastSubscribeCall[0].onResync as ((directories: string[]) => void) | undefined
 
     act(() => {
       onEvent({ type: 'permission.asked', data: pendingPermission, directory: '/repo' })
@@ -562,7 +562,7 @@ describe('EventProvider permissions and forms', () => {
     })
 
     act(() => {
-      onResync?.()
+      onResync?.([])
     })
 
     await waitFor(() => {
@@ -588,7 +588,7 @@ describe('EventProvider permissions and forms', () => {
 
     const lastSubscribeCall = mocks.subscribeGlobalMonitor.mock.calls[mocks.subscribeGlobalMonitor.mock.calls.length - 1]
     const onEvent = lastSubscribeCall[0].onEvent as (data: unknown) => void
-    const onResync = lastSubscribeCall[0].onResync as (() => void) | undefined
+    const onResync = lastSubscribeCall[0].onResync as ((directories: string[]) => void) | undefined
 
     act(() => {
       onEvent({ type: 'permission.asked', data: pendingPermission, directory: '/worktrees/wt-1' })
@@ -599,7 +599,7 @@ describe('EventProvider permissions and forms', () => {
     })
 
     act(() => {
-      onResync?.()
+      onResync?.([])
     })
 
     await waitFor(() => {
@@ -1010,10 +1010,10 @@ describe('EventProvider permissions and forms', () => {
     invalidateQueries.mockClear()
 
     const lastSubscribeCall = mocks.subscribeGlobalMonitor.mock.calls[mocks.subscribeGlobalMonitor.mock.calls.length - 1]
-    const onResync = lastSubscribeCall[0].onResync as (() => void) | undefined
+    const onResync = lastSubscribeCall[0].onResync as ((directories: string[]) => void) | undefined
 
     act(() => {
-      onResync?.()
+      onResync?.([])
     })
 
     await waitFor(() => {
@@ -1097,10 +1097,10 @@ describe('EventProvider permissions and forms', () => {
     mocks.listPendingForms.mockClear()
 
     const lastSubscribeCall = mocks.subscribeGlobalMonitor.mock.calls[mocks.subscribeGlobalMonitor.mock.calls.length - 1]
-    const onResync = lastSubscribeCall[0].onResync as (() => void) | undefined
+    const onResync = lastSubscribeCall[0].onResync as ((directories: string[]) => void) | undefined
 
     act(() => {
-      onResync?.()
+      onResync?.([])
     })
 
     expect(mocks.listPendingPermissions).toHaveBeenCalledWith('/repo-a')
@@ -1671,7 +1671,7 @@ describe('EventProvider permissions and forms', () => {
 
     const lastSubscribeCall = mocks.subscribeGlobalMonitor.mock.calls[mocks.subscribeGlobalMonitor.mock.calls.length - 1]
     const onEvent = lastSubscribeCall[0].onEvent as (data: unknown) => void
-    const onResync = lastSubscribeCall[0].onResync as (() => void) | undefined
+    const onResync = lastSubscribeCall[0].onResync as ((directories: string[]) => void) | undefined
 
     act(() => {
       onEvent({ type: 'session.execution.started', data: { sessionID: 'child-1' }, directory: '/repo' })
@@ -1679,7 +1679,7 @@ describe('EventProvider permissions and forms', () => {
     expect(useSessionStatus.getState().getStatus('child-1')).toEqual({ type: 'busy' })
 
     act(() => {
-      onResync?.()
+      onResync?.([])
     })
 
     await waitFor(() => {
@@ -2326,10 +2326,17 @@ describe('EventProvider permissions and forms', () => {
 
     render(<Harness />, { wrapper: createWrapper() })
 
-    await waitFor(() => expect(mocks.listShells).toHaveBeenCalledWith('/repo'))
+    await waitFor(() => expect(mocks.subscribeGlobalMonitor).toHaveBeenCalled())
 
     const lastSubscribeCall = mocks.subscribeGlobalMonitor.mock.calls[mocks.subscribeGlobalMonitor.mock.calls.length - 1]
+    const onDirectoriesSubscribed = lastSubscribeCall[0].onDirectoriesSubscribed as (directories: string[]) => void
     const onEvent = lastSubscribeCall[0].onEvent as (data: unknown) => void
+
+    act(() => {
+      onDirectoriesSubscribed(['/repo'])
+    })
+
+    await waitFor(() => expect(mocks.listShells).toHaveBeenCalledWith('/repo'))
 
     act(() => {
       onEvent({ type: 'shell.exited', data: { id: 'shell-1', status: 'exited' }, directory: '/repo' })
@@ -2350,10 +2357,17 @@ describe('EventProvider permissions and forms', () => {
 
     render(<Harness />, { wrapper: createWrapper() })
 
-    await waitFor(() => expect(mocks.listShells).toHaveBeenCalledWith('/repo'))
+    await waitFor(() => expect(mocks.subscribeGlobalMonitor).toHaveBeenCalled())
 
     const lastSubscribeCall = mocks.subscribeGlobalMonitor.mock.calls[mocks.subscribeGlobalMonitor.mock.calls.length - 1]
+    const onDirectoriesSubscribed = lastSubscribeCall[0].onDirectoriesSubscribed as (directories: string[]) => void
     const onEvent = lastSubscribeCall[0].onEvent as (data: unknown) => void
+
+    act(() => {
+      onDirectoriesSubscribed(['/repo'])
+    })
+
+    await waitFor(() => expect(mocks.listShells).toHaveBeenCalledWith('/repo'))
 
     act(() => {
       onEvent({
@@ -2374,7 +2388,7 @@ describe('EventProvider permissions and forms', () => {
     })
   })
 
-  it('resolves ancestry for a shell owner from the directory snapshot', async () => {
+  it('resolves ancestry for a shell owner from a newly subscribed directory snapshot', async () => {
     mocks.listRepos.mockResolvedValue([{ id: 123, fullPath: '/repo' }])
     mocks.listShells.mockResolvedValue([
       { id: 'shell-1', status: 'running', metadata: { sessionID: 'child-1' } },
@@ -2386,6 +2400,15 @@ describe('EventProvider permissions and forms', () => {
     })
 
     render(<Harness />, { wrapper: createWrapper() })
+
+    await waitFor(() => expect(mocks.subscribeGlobalMonitor).toHaveBeenCalled())
+
+    const lastSubscribeCall = mocks.subscribeGlobalMonitor.mock.calls[mocks.subscribeGlobalMonitor.mock.calls.length - 1]
+    const onDirectoriesSubscribed = lastSubscribeCall[0].onDirectoriesSubscribed as (directories: string[]) => void
+
+    act(() => {
+      onDirectoriesSubscribed(['/repo'])
+    })
 
     await waitFor(() => {
       expect(useSessionStatus.getState().parents.get('child-1')).toBe('parent-1')
@@ -2428,6 +2451,12 @@ describe('EventProvider permissions and forms', () => {
   it('syncs running shells for a directory whose repo arrives after connect', async () => {
     const reposDeferred = createDeferred<Array<{ id: number; fullPath: string }>>()
     mocks.listRepos.mockReturnValueOnce(reposDeferred.promise)
+    mocks.subscribeGlobalMonitor.mockImplementation((input: { onDirectoriesSubscribed?: (directories: string[]) => void }) => ({
+      dispose: vi.fn(),
+      updateDirectories: (directories: string[]) => input.onDirectoriesSubscribed?.(directories),
+      reconnect: vi.fn(),
+      reportVisibility: vi.fn(),
+    }))
 
     render(<Harness />, { wrapper: createWrapper() })
 
@@ -2448,5 +2477,65 @@ describe('EventProvider permissions and forms', () => {
     })
 
     await waitFor(() => expect(mocks.listShells).toHaveBeenCalledWith('/repo'))
+  })
+
+  it('reconciles newly subscribed directories reported by the stream', async () => {
+    mocks.listPendingPermissions.mockResolvedValue([pendingPermission])
+    mocks.listPendingForms.mockResolvedValue([pendingForm])
+
+    render(<Harness />, { wrapper: createWrapper() })
+
+    await waitFor(() => expect(mocks.subscribeGlobalMonitor).toHaveBeenCalled())
+
+    const lastSubscribeCall = mocks.subscribeGlobalMonitor.mock.calls[mocks.subscribeGlobalMonitor.mock.calls.length - 1]
+    const onDirectoriesSubscribed = lastSubscribeCall[0].onDirectoriesSubscribed as (directories: string[]) => void
+
+    act(() => {
+      useSessionStatus.getState().setShellRunning('shell-stale', 'session-1', '/session-dir')
+    })
+    expect(useSessionStatus.getState().runningShells.has('shell-stale')).toBe(true)
+
+    await act(async () => {
+      onDirectoriesSubscribed(['/session-dir'])
+    })
+
+    await waitFor(() => {
+      expect(mocks.listShells).toHaveBeenCalledWith('/session-dir')
+      expect(mocks.listPendingPermissions).toHaveBeenCalledWith('/session-dir')
+      expect(mocks.listPendingForms).toHaveBeenCalledWith('/session-dir')
+    })
+    expect(useSessionStatus.getState().runningShells.has('shell-stale')).toBe(false)
+    expect(screen.getByTestId('permission-count').textContent).toBe('1')
+    expect(screen.getByTestId('count').textContent).toBe('1')
+  })
+
+  it('reconciles subscribed directories reported by a resync even when they are not tracked', async () => {
+    mocks.listPendingPermissions.mockResolvedValue([pendingPermission])
+    mocks.listPendingForms.mockResolvedValue([pendingForm])
+
+    render(<Harness />, { wrapper: createWrapper() })
+
+    await waitFor(() => expect(mocks.subscribeGlobalMonitor).toHaveBeenCalled())
+
+    const lastSubscribeCall = mocks.subscribeGlobalMonitor.mock.calls[mocks.subscribeGlobalMonitor.mock.calls.length - 1]
+    const onResync = lastSubscribeCall[0].onResync as ((directories: string[]) => void) | undefined
+
+    act(() => {
+      useSessionStatus.getState().setShellRunning('shell-stale', 'session-1', '/unregistered-dir')
+    })
+    expect(useSessionStatus.getState().runningShells.has('shell-stale')).toBe(true)
+
+    await act(async () => {
+      onResync?.(['/unregistered-dir'])
+    })
+
+    await waitFor(() => {
+      expect(mocks.listShells).toHaveBeenCalledWith('/unregistered-dir')
+      expect(mocks.listPendingPermissions).toHaveBeenCalledWith('/unregistered-dir')
+      expect(mocks.listPendingForms).toHaveBeenCalledWith('/unregistered-dir')
+    })
+    expect(useSessionStatus.getState().runningShells.has('shell-stale')).toBe(false)
+    expect(screen.getByTestId('permission-count').textContent).toBe('1')
+    expect(screen.getByTestId('count').textContent).toBe('1')
   })
 })

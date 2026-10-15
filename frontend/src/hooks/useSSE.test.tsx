@@ -174,6 +174,40 @@ describe('useSSE', () => {
     unmount()
   })
 
+  it('invalidates the cached session query on session.moved so the page follows the new directory', async () => {
+    const queryClient = new QueryClient({
+      defaultOptions: {
+        queries: { retry: false },
+      },
+    })
+    const invalidateQueries = vi.spyOn(queryClient, 'invalidateQueries')
+    queryClient.setQueryData(['opencode', 'session', 'session-1', '/repo'], { id: 'session-1' })
+
+    const { result, unmount } = renderHook(
+      () => useSSE('/repo', 'session-1'),
+      { wrapper: createWrapper(queryClient) }
+    )
+
+    await waitFor(() => expect(MockEventSource.instances).toHaveLength(1))
+    await connect(0, 'client-1')
+    await waitFor(() => expect(result.current.isConnected).toBe(true))
+    invalidateQueries.mockClear()
+
+    act(() => {
+      MockEventSource.instances[0].emit('message', {
+        type: 'session.moved',
+        directory: '/repo',
+        data: { sessionID: 'session-1', projectID: 'proj-1', subpath: '', location: { directory: '/elsewhere' } },
+      })
+    })
+
+    await waitFor(() => {
+      expect(invalidateQueries).toHaveBeenCalledWith({ queryKey: ['opencode', 'session', 'session-1'] })
+    })
+
+    unmount()
+  })
+
   it('invalidates the cached session query on session.renamed', async () => {
     const queryClient = new QueryClient({
       defaultOptions: {
