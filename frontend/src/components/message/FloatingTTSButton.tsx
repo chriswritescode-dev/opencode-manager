@@ -8,11 +8,13 @@ import { DEFAULT_TTS_CONFIG } from '@opencode-manager/shared'
 interface FloatingTTSButtonProps {
   messageId: string
   content: string
+  isScrolledUp: boolean
+  onSpeakVisible: () => void
 }
 
 const LONG_PRESS_DURATION = 500
 
-export function FloatingTTSButton({ messageId, content }: FloatingTTSButtonProps) {
+export function FloatingTTSButton({ messageId, content, isScrolledUp, onSpeakVisible }: FloatingTTSButtonProps) {
   const { speakMessage, stop, isPlaying, isLoading } = useTTS()
   const { preferences, updateSettings } = useSettings()
 
@@ -63,10 +65,15 @@ export function FloatingTTSButton({ messageId, content }: FloatingTTSButtonProps
       return
     }
 
+    if (isScrolledUp) {
+      onSpeakVisible()
+      return
+    }
+
     if (hasContent) {
       speakMessage(messageId, content)
     }
-  }, [clearLongPressTimer, isAnyPlaybackActive, stop, speakMessage, messageId, content, hasContent])
+  }, [clearLongPressTimer, isAnyPlaybackActive, stop, isScrolledUp, onSpeakVisible, speakMessage, messageId, content, hasContent])
 
   const handlePointerLeave = useCallback(() => {
     clearLongPressTimer()
@@ -77,9 +84,11 @@ export function FloatingTTSButton({ messageId, content }: FloatingTTSButtonProps
   const showStop = isAnyPlaybackActive
   const pillTitle = showStop
     ? 'Stop playback'
-    : hasContent
-      ? 'Play latest reply'
-      : 'TTS controls'
+    : isScrolledUp
+      ? 'Read visible replies'
+      : hasContent
+        ? 'Play latest reply'
+        : 'TTS controls'
   const pillAriaLabel = `${pillTitle}. ${autoPlay ? 'Auto-play enabled.' : 'Auto-play disabled.'} hold to toggle auto-play`
   const buttonToneClasses = showStop
     ? 'justify-center px-3 py-1.5 rounded-lg bg-destructive border border-destructive/60 shadow-destructive/30 ring-destructive/20 hover:ring-destructive/40 text-destructive-foreground'

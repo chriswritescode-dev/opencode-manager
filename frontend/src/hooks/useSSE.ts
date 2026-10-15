@@ -80,6 +80,7 @@ export const useSSE = (directory?: string | string[], currentSessionId?: string)
         break
 
       case 'session.renamed':
+      case 'session.moved':
         invalidateSessionQueryIfCached(queryClient, event.data.sessionID)
         break
 

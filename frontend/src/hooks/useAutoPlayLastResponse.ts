@@ -37,7 +37,7 @@ export function useAutoPlayLastResponse({
   lastAssistantText,
   isStreamingResponse,
 }: UseAutoPlayLastResponseParams): void {
-  const { speakMessage, isEnabled: ttsEnabled } = useTTS()
+  const { speakMessage, isEnabled: ttsEnabled, isPlaying, isLoading, activeMessageId } = useTTS()
   const { preferences } = useSettings()
   
   const autoPlayEnabled = preferences?.tts?.autoPlay ?? false
@@ -47,6 +47,13 @@ export function useAutoPlayLastResponse({
   const lastKnownCompletedRef = useRef<Record<string, boolean>>({})
   const hasSeenIncompleteRef = useRef<boolean>(false)
   const previousSessionIdRef = useRef<string | null>(null)
+  const isUnattributedPlaybackActiveRef = useRef<boolean>(false)
+  
+  const isUnattributedPlaybackActive = (isPlaying || isLoading) && activeMessageId === null
+  
+  useEffect(() => {
+    isUnattributedPlaybackActiveRef.current = isUnattributedPlaybackActive
+  }, [isUnattributedPlaybackActive])
   
   useEffect(() => {
     const isSessionChange = previousSessionIdRef.current !== null && previousSessionIdRef.current !== sessionId
@@ -76,6 +83,7 @@ export function useAutoPlayLastResponse({
     const messageId = lastAssistantMessage.id
     const isCompleted = isMessageCompleted(lastAssistantMessage)
     const wasCompleted = lastKnownCompletedRef.current[messageId] ?? false
+    const shouldAutoSpeak = !isUnattributedPlaybackActiveRef.current
     
     if (!isCompleted) {
       lastKnownCompletedRef.current[messageId] = false
@@ -91,7 +99,7 @@ export function useAutoPlayLastResponse({
       hasInitializedRef.current = true
       lastSpokenIdRef.current = messageId
       lastKnownCompletedRef.current[messageId] = true
-      if (hasSeenIncompleteRef.current) {
+      if (hasSeenIncompleteRef.current && shouldAutoSpeak) {
         speakMessage(messageId, lastAssistantText)
       }
       return
@@ -99,14 +107,18 @@ export function useAutoPlayLastResponse({
     
     if (!wasCompleted && messageId === lastSpokenIdRef.current) {
       lastKnownCompletedRef.current[messageId] = true
-      speakMessage(messageId, lastAssistantText)
+      if (shouldAutoSpeak) {
+        speakMessage(messageId, lastAssistantText)
+      }
       return
     }
     
     if (messageId !== lastSpokenIdRef.current) {
       lastSpokenIdRef.current = messageId
       lastKnownCompletedRef.current[messageId] = true
-      speakMessage(messageId, lastAssistantText)
+      if (shouldAutoSpeak) {
+        speakMessage(messageId, lastAssistantText)
+      }
     }
   }, [
     ttsEnabled,

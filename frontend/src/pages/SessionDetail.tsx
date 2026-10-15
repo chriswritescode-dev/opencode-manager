@@ -35,6 +35,7 @@ import { MessageSkeleton } from "@/components/message/MessageSkeleton";
 import { exportSession, downloadMarkdown } from "@/lib/exportSession";
 import { copyTextToClipboard } from "@/lib/clipboard";
 import { getMessagesContentVersion } from "./sessionContentVersion";
+import { useSpeakVisibleMessages } from "@/hooks/useSpeakVisibleMessages";
 import { showToast } from "@/lib/toast";
 import { getWorkspaceFilePath } from "@/lib/markdownLinks";
 import { getRepoDisplayName } from "@/lib/utils";
@@ -614,6 +615,12 @@ export function SessionDetail() {
     scrollByUser((direction * container.clientHeight) / 2);
   }, [scrollByUser]);
 
+  const handleSpeakVisibleMessages = useSpeakVisibleMessages(
+    messageContainerRef,
+    messages,
+    promptOverlayHeight + inputBottomOffset,
+  );
+
   useShortcutActions({
     selectModel: handleOpenModelDialog,
     sessions: handleShowSessionsDialog,
@@ -633,6 +640,7 @@ export function SessionDetail() {
     clearPrompt: handleClearPrompt,
     halfPageUp: () => scrollMessagesByHalfPage(-1),
     halfPageDown: () => scrollMessagesByHalfPage(1),
+    speakVisible: handleSpeakVisibleMessages,
   });
 
   const handleUndoMessage = useCallback((restoredPrompt: string) => {
@@ -768,6 +776,8 @@ export function SessionDetail() {
                   <FloatingTTSButton
                     messageId={latestPlayableAssistant.messageId}
                     content={latestPlayableAssistant.text}
+                    isScrolledUp={showScrollButton}
+                    onSpeakVisible={handleSpeakVisibleMessages}
                   />
                 )}
                 {hasPromptContent && !isSessionActive && (

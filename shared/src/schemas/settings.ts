@@ -89,6 +89,7 @@ export const DEFAULT_KEYBOARD_SHORTCUTS = {
   exportSession: 'X',
   halfPageUp: 'Ctrl+U',
   halfPageDown: 'Ctrl+D',
+  speakVisible: 'S',
 } satisfies Record<string, string>;
 
 export type KeyboardShortcutAction = keyof typeof DEFAULT_KEYBOARD_SHORTCUTS;

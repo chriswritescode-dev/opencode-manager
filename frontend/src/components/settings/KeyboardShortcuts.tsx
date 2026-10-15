@@ -7,7 +7,7 @@ import { formatEventModifiers, formatShortcutEvent, formatShortcutLabel, isModif
 import { applyTuiKeybindImport, parseTuiKeybindConfig } from '@/lib/tuiKeybindImport'
 import { showToast } from '@/lib/toast'
 
-const CONVERSATION_ACTIONS = ['submit', 'abort', 'clearPrompt', 'toggleMode', 'undo', 'redo', 'compact', 'fork', 'timeline', 'exportSession', 'selectModel', 'variantCycle', 'favoriteCycle', 'halfPageUp', 'halfPageDown']
+const CONVERSATION_ACTIONS = ['submit', 'abort', 'clearPrompt', 'toggleMode', 'undo', 'redo', 'compact', 'fork', 'timeline', 'exportSession', 'selectModel', 'variantCycle', 'favoriteCycle', 'halfPageUp', 'halfPageDown', 'speakVisible']
 const NAVIGATION_ACTIONS = ['settings', 'sessions', 'switchPickerTab', 'newSession', 'closeSession', 'toggleSidebar', 'toggleTerminal', 'toggleSourceControl']
 
 const formatActionLabel = (action: string): string => {
