@@ -14,7 +14,7 @@ import {
 } from '@/components/ui/dropdown-menu'
 import { Input } from '@/components/ui/input'
 import { SessionStatusIndicator } from '@/components/ui/session-status-indicator'
-import { Tabs, TabsList, TabsTrigger } from '@/components/ui/tabs'
+import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs'
 import { DeleteSessionDialog } from '@/components/session/DeleteSessionDialog'
 import { ProjectPickerContent } from '@/components/session/ProjectPickerContent'
 import { partitionSessions } from '@/components/session/session-partition'
@@ -765,7 +765,10 @@ export function SessionPickerDialog({
               <TabsTrigger value="projects">Projects</TabsTrigger>
             </TabsList>
           </div>
-          {tab === 'sessions' ? (
+          <TabsContent
+            value="sessions"
+            className="mt-0 flex min-h-0 w-full min-w-0 flex-1 flex-col px-0"
+          >
             <SessionPickerContent
               open={open}
               currentRepo={currentRepo}
@@ -776,7 +779,11 @@ export function SessionPickerDialog({
               searchInputRef={searchInputRef}
               hasFinePointer={hasFinePointer}
             />
-          ) : (
+          </TabsContent>
+          <TabsContent
+            value="projects"
+            className="mt-0 flex min-h-0 w-full min-w-0 flex-1 flex-col px-0"
+          >
             <ProjectPickerContent
               open={open}
               currentRepo={currentRepo}
@@ -784,7 +791,7 @@ export function SessionPickerDialog({
               switchHint={switchHint}
               searchInputRef={projectSearchInputRef}
             />
-          )}
+          </TabsContent>
         </Tabs>
       </DialogContent>
     </Dialog>

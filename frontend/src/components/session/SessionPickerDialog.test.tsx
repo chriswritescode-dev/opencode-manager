@@ -500,6 +500,20 @@ describe('SessionPickerDialog', () => {
     expect(combobox()).toHaveAttribute('placeholder', 'Search sessions...')
   })
 
+  it('exposes a tabpanel labelled by the active tab and swaps panels on tab switch', async () => {
+    renderPicker()
+
+    const sessionsPanel = screen.getByRole('tabpanel', { name: 'Sessions' })
+    expect(sessionsPanel).toHaveAttribute('data-state', 'active')
+    expect(screen.queryByRole('tabpanel', { name: 'Projects' })).not.toBeInTheDocument()
+
+    openProjectsTab()
+
+    const projectsPanel = await screen.findByRole('tabpanel', { name: 'Projects' })
+    expect(projectsPanel).toHaveAttribute('data-state', 'active')
+    expect(screen.queryByRole('tabpanel', { name: 'Sessions' })).not.toBeInTheDocument()
+  })
+
   it('lists repos in the projects tab and opens the cursor repo on Enter', async () => {
     mocks.repos = [repo(1, 'alpha', '/w/a'), repo(2, 'beta', '/w/b')]
     const { onSelectRepo } = renderPicker()
