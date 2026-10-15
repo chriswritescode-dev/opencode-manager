@@ -307,4 +307,58 @@ describe('OpenCodeEventStream', () => {
 
     expect(onDirectoriesSubscribed).not.toHaveBeenCalled()
   })
+
+  it('closes the connection on pagehide without scheduling a reconnect', async () => {
+    const transport = new TestEventStreamTransport()
+    const stream = new OpenCodeEventStream({ transport })
+
+    stream.subscribeGlobalMonitor({ directories: ['/repo'], onEvent: vi.fn() })
+    transport.openConnection()
+    transport.connected()
+    expect(transport.openedUrls).toHaveLength(1)
+
+    window.dispatchEvent(new Event('pagehide'))
+
+    expect(transport.closeCount).toBe(1)
+
+    await vi.advanceTimersByTimeAsync(60_000)
+    expect(transport.openedUrls).toHaveLength(1)
+  })
+
+  it('reconnects with the subscribed directories when restored from bfcache', () => {
+    const transport = new TestEventStreamTransport()
+    const stream = new OpenCodeEventStream({ transport })
+
+    stream.subscribeGlobalMonitor({ directories: ['/repo-a', '/repo-b'], onEvent: vi.fn() })
+    transport.openConnection()
+    transport.connected()
+
+    window.dispatchEvent(new Event('pagehide'))
+
+    const pageshow = new Event('pageshow')
+    Object.defineProperty(pageshow, 'persisted', { value: true })
+    window.dispatchEvent(pageshow)
+
+    expect(transport.openedUrls).toHaveLength(2)
+    const url = transport.openedUrls[1]
+    expect(url).toContain('/api/sse/stream')
+    expect(url).toContain(encodeURIComponent('/repo-a'))
+    expect(url).toContain(encodeURIComponent('/repo-b'))
+  })
+
+  it('does not reconnect on a pageshow that is not from bfcache', () => {
+    const transport = new TestEventStreamTransport()
+    const stream = new OpenCodeEventStream({ transport })
+
+    stream.subscribeGlobalMonitor({ directories: ['/repo'], onEvent: vi.fn() })
+    transport.openConnection()
+    transport.connected()
+    expect(transport.openedUrls).toHaveLength(1)
+
+    const pageshow = new Event('pageshow')
+    Object.defineProperty(pageshow, 'persisted', { value: false })
+    window.dispatchEvent(pageshow)
+
+    expect(transport.openedUrls).toHaveLength(1)
+  })
 })
