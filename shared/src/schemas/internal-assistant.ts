@@ -3,6 +3,12 @@ import { UserPreferencesSchema } from './settings'
 
 export const MANAGER_TOOL_NAME = 'ocm'
 
+export const MANAGER_PROMPT_CLIENT_METADATA_KEY = 'ocmClient'
+
+export const MANAGER_PROMPT_CLIENTS = ['mobile', 'desktop'] as const
+
+export type ManagerPromptClient = (typeof MANAGER_PROMPT_CLIENTS)[number]
+
 export const MANAGER_TOOL_OPEN_WALKTHROUGH_ACTION = 'open_walkthrough'
 
 export const MANAGER_TOOL_SHOW_ARTIFACT_ACTION = 'show_artifact'

@@ -58,6 +58,7 @@ describe('OpenCode facade', () => {
 
   afterEach(() => {
     vi.unstubAllGlobals()
+    vi.restoreAllMocks()
   })
 
   const lastRequest = () => {
@@ -268,7 +269,7 @@ describe('OpenCode facade', () => {
     const [promptUrl, promptInit] = fetchMock.mock.calls[1] ?? []
     expect(String(promptUrl)).toBe('http://localhost/api/opencode/api/session/ses_new/prompt')
     expect((promptInit as RequestInit).method).toBe('POST')
-    expect((promptInit as RequestInit).body).toBe(JSON.stringify({ text: 'Fix conflicts' }))
+    expect((promptInit as RequestInit).body).toBe(JSON.stringify({ text: 'Fix conflicts', metadata: { ocmClient: 'desktop' } }))
   })
 
   it('deletes the new session when sending the prompt fails', async () => {
@@ -477,9 +478,54 @@ describe('OpenCode facade', () => {
       files: [{ uri: 'file:///repo/src/a.ts', name: 'a.ts', mention: { start: 6, end: 15, text: '@src/a.ts' } }],
       agents: [{ name: 'build', mention: { start: 6, end: 12, text: '@build' } }],
       skills: [{ id: 'review' }],
+      metadata: { ocmClient: 'desktop' },
       delivery: 'queue',
     }))
     expect(inbox.id).toBe('msg_1')
+  })
+
+  it('marks a prompt as mobile when the viewport is narrow', async () => {
+    vi.spyOn(window, 'innerWidth', 'get').mockReturnValue(375)
+    fetchMock.mockResolvedValue(
+      jsonResponse({
+        data: {
+          id: 'msg_1',
+          sessionID: 'ses_1',
+          time: { created: 1000 },
+          type: 'user',
+          payload: { text: 'Hi' },
+        },
+      }),
+    )
+
+    await sendPrompt({ sessionID: 'ses_1', text: 'Hi' })
+
+    expect(lastRequest().init.body).toBe(JSON.stringify({
+      text: 'Hi',
+      metadata: { ocmClient: 'mobile' },
+    }))
+  })
+
+  it('marks a prompt as desktop when the viewport is wide', async () => {
+    vi.spyOn(window, 'innerWidth', 'get').mockReturnValue(1280)
+    fetchMock.mockResolvedValue(
+      jsonResponse({
+        data: {
+          id: 'msg_1',
+          sessionID: 'ses_1',
+          time: { created: 1000 },
+          type: 'user',
+          payload: { text: 'Hi' },
+        },
+      }),
+    )
+
+    await sendPrompt({ sessionID: 'ses_1', text: 'Hi' })
+
+    expect(lastRequest().init.body).toBe(JSON.stringify({
+      text: 'Hi',
+      metadata: { ocmClient: 'desktop' },
+    }))
   })
 
   it('switches the session model through the V2 model route', async () => {

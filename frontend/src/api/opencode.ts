@@ -1,4 +1,6 @@
 import { openCodeLocation, parseOpenCodeModelRef } from '@opencode-manager/shared/opencode'
+import { MANAGER_PROMPT_CLIENT_METADATA_KEY } from '@opencode-manager/shared/schemas'
+import { isMobileViewport } from '@/hooks/useMobile'
 import { callOpenCode } from './opencodeApi'
 import type {
   AgentInfo,
@@ -181,11 +183,13 @@ export async function switchSessionAgent(sessionID: string, agent: string): Prom
   await callOpenCode((api) => api.session.switchAgent({ sessionID, agent }))
 }
 
+/** Sends a session prompt with client metadata derived from the current viewport. */
 export async function sendPrompt(input: SendPromptInput): Promise<SessionInboxUser> {
   return callOpenCode((api) =>
     api.session.prompt({
       sessionID: input.sessionID,
       ...buildPromptFields(input),
+      metadata: { [MANAGER_PROMPT_CLIENT_METADATA_KEY]: isMobileViewport() ? 'mobile' : 'desktop' },
     }),
   )
 }
