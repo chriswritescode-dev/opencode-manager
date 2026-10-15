@@ -9,7 +9,7 @@ import { X, CornerUpLeft } from "lucide-react";
 import { SquareFill } from "@/components/ui/square-fill";
 import { Header } from "@/components/ui/header";
 import { SessionPickerDialog } from "@/components/session/SessionPickerDialog";
-import { getSessionListPath, getSessionPath } from '@/lib/navigation'
+import { getRepoPath, getSessionListPath, getSessionPath } from '@/lib/navigation'
 import { FetchError } from '@/api/fetchWrapper'
 
 import { FileBrowserSheet } from "@/components/file-browser/FileBrowserSheet";
@@ -881,6 +881,10 @@ export function SessionDetail() {
         onDeleteActiveSession={() => {
           setSessionsDialogOpen(false)
           handleCloseSession()
+        }}
+        onSelectRepo={(selectedRepo) => {
+          navigate(getRepoPath(selectedRepo.id))
+          setSessionsDialogOpen(false)
         }}
       />
 

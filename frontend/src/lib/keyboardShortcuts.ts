@@ -75,6 +75,16 @@ export function normalizeShortcut(shortcut: string): string {
   return [...orderedModifiers, mainKey].join('+')
 }
 
+/**
+ * Formats a stored binding for display: empty keys render as an empty string, a direct binding as its normalized keys,
+ * and a leader binding as `leader → keys`, with both the leader and the keys normalized.
+ */
+export function formatShortcutLabel(keys: string, isDirect: boolean, leaderKey: string): string {
+  if (!keys) return ''
+  if (isDirect) return normalizeShortcut(keys)
+  return `${normalizeShortcut(leaderKey)} → ${normalizeShortcut(keys)}`
+}
+
 export function hasCommandModifier(shortcut: string): boolean {
   return /(^|\+)(Ctrl|Cmd|Alt)\+./.test(shortcut)
 }
