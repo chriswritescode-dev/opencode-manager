@@ -13,7 +13,8 @@ const VERSION_TIMEOUT_MS = 5000
 const SERVE_READY_TIMEOUT_MS = 60000
 const SERVE_POLL_INTERVAL_MS = 250
 const RUN_TIMEOUT_MS = 90000
-const STOP_TIMEOUT_MS = 10000
+const STOP_TIMEOUT_MS = 5000
+const KILL_CONFIRM_MS = 2000
 
 const OPENCODE_BINARY_CANDIDATES = ['opencode', '/usr/local/bin/opencode', '/opt/opencode/bin/opencode']
 
@@ -205,7 +206,10 @@ export async function startOpenCodeServe(options: OpenCodeServeOptions = {}): Pr
     if (child.exitCode === null && child.signalCode === null) {
       child.kill('SIGTERM')
       await Promise.race([once(child, 'close'), delay(STOP_TIMEOUT_MS)])
-      if (child.exitCode === null && child.signalCode === null) child.kill('SIGKILL')
+      if (child.exitCode === null && child.signalCode === null) {
+        child.kill('SIGKILL')
+        await Promise.race([once(child, 'close'), delay(KILL_CONFIRM_MS)])
+      }
     }
   }
 
@@ -219,8 +223,11 @@ export async function startOpenCodeServe(options: OpenCodeServeOptions = {}): Pr
     readOutput: () => output,
     terminate,
     stop: async () => {
-      await terminate()
-      await removeOwnedDirectories()
+      try {
+        await terminate()
+      } finally {
+        await removeOwnedDirectories()
+      }
     },
   }
 }

@@ -1,5 +1,9 @@
 import { beforeAll, afterAll } from 'vitest'
 
+for (const key of Object.keys(process.env)) {
+  if (key !== 'MSB_PATH' && /^(SANDBOX|MSB)_/.test(key)) delete process.env[key]
+}
+
 const originalEnv: Record<string, string | undefined> = {}
 
 beforeAll(() => {
