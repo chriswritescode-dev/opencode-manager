@@ -30,6 +30,7 @@ import migration202610061345 from './202610061345-schedule-workspace-mode'
 import migration202610061700 from './202610061700-multi-run-fusions'
 import migration202610061701 from './202610061701-change-walkthroughs'
 import migration202610081200 from './202610081200-change-walkthrough-sources'
+import migration202610141200 from './202610141200-secrets'
 
 export const allMigrations: Migration[] = [
   migration001,
@@ -63,4 +64,5 @@ export const allMigrations: Migration[] = [
   migration202610061700,
   migration202610061701,
   migration202610081200,
+  migration202610141200,
 ]

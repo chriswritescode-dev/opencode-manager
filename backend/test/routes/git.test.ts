@@ -8,6 +8,7 @@ import type { GitAuthService } from '../../src/services/git-auth'
 import type { ScheduleService } from '../../src/services/schedules'
 import type { TerminalService } from '../../src/services/terminal'
 import type { ProjectConfigService } from '../../src/services/project-config'
+import type { SecretsService } from '../../src/services/secrets'
 import type { RepoWorkspaceService } from '../../src/services/repo-workspace'
 import { createStubOpenCodeClient } from '../helpers/stub-opencode-client'
 
@@ -63,7 +64,7 @@ describe('Git Routes', () => {
     mockGitAuthService = {
       getGitEnvironment: vi.fn().mockReturnValue({}),
     } as unknown as GitAuthService
-    app = createRepoRoutes(mockDatabase, mockGitAuthService, {} as unknown as ScheduleService, createStubOpenCodeClient(), {} as unknown as TerminalService, {} as unknown as ProjectConfigService, {} as unknown as RepoWorkspaceService)
+    app = createRepoRoutes(mockDatabase, mockGitAuthService, {} as unknown as ScheduleService, createStubOpenCodeClient(), {} as unknown as TerminalService, {} as unknown as ProjectConfigService, {} as unknown as RepoWorkspaceService, {} as unknown as SecretsService)
   })
 
   describe('GET /:id/git/status', () => {

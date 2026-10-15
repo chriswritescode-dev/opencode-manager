@@ -3,6 +3,7 @@ import { formatTerminalTitle, parseTerminalTitle } from '@opencode-manager/share
 import type { TerminalInfo, TerminalKind } from '@opencode-manager/shared/types'
 import type { OpenCodeClient } from './opencode/client'
 import type { CredentialProvider } from './credential-provider'
+import type { RepoEnvService } from './repo-env'
 import { toWebSocketUrl } from './opencode/upstream'
 import { bridgeWebSocket, type WebSocketBridge, type WebSocketPeer } from '../utils/websocket-bridge'
 
@@ -34,6 +35,7 @@ export class TerminalService {
   constructor(
     private readonly openCodeClient: OpenCodeClient,
     private readonly credentialProvider: CredentialProvider,
+    private readonly repoEnvService: RepoEnvService,
     private readonly upstreamBaseUrl: () => string,
     private readonly openSocket: (url: string) => WebSocket = (url) => new WebSocket(url),
   ) {}
@@ -44,12 +46,13 @@ export class TerminalService {
   }
 
   async create(directory: string, input: CreateTerminalInput): Promise<TerminalInfo> {
+    const repoEnv = (await this.repoEnvService.resolveForDirectory(directory)).env
     const result = await this.openCodeClient.api.pty.create({
       location: { directory },
       title: formatTerminalTitle({ kind: input.kind, name: input.name, actionId: input.actionId }),
       ...(input.command !== undefined ? { command: input.command } : {}),
       ...(input.args !== undefined ? { args: input.args } : {}),
-      env: { ...this.credentialProvider.getGhCliEnv({ cwd: directory }), ...input.env },
+      env: { ...this.credentialProvider.getGhCliEnv({ cwd: directory }), ...repoEnv, ...input.env },
     })
     return this.toTerminalInfo(result.data)
   }

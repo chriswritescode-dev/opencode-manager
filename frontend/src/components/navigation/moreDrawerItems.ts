@@ -1,5 +1,5 @@
 import type { LucideIcon } from 'lucide-react'
-import { BookOpen, Plug, Sparkles, ShieldOff, CalendarClock, GitCommitHorizontal, SquareTerminal, Settings, LogOut, Bot, Folder, Home, Play, Globe } from 'lucide-react'
+import { BookOpen, Plug, Sparkles, ShieldOff, CalendarClock, GitCommitHorizontal, SquareTerminal, Settings, LogOut, Bot, Folder, Home, Play, Globe, KeyRound } from 'lucide-react'
 import { ASSISTANT_REPO_ID } from '@opencode-manager/shared/utils'
 import { getAssistantPath, isAssistantPath } from '@/lib/navigation'
 
@@ -75,6 +75,7 @@ function buildRouteNavModel(pathname: string): NavModel {
       { key: 'files', label: 'Files', icon: Folder, dialog: 'files' },
       { key: 'mcp', label: 'MCP', icon: Plug, dialog: 'mcp' },
       { key: 'skills', label: 'Skills', icon: Sparkles, dialog: 'skills' },
+      { key: 'secrets', label: 'Secrets', icon: KeyRound, dialog: 'secrets' },
       { key: 'reset-permissions', label: 'Reset Permissions', icon: ShieldOff, dialog: 'resetPermissions', danger: true },
       { key: 'schedules', label: 'Schedules', icon: CalendarClock, to: `/repos/${id}/schedules`, panelTool: 'schedules' },
       { key: 'source-control', label: 'Source Control', icon: GitCommitHorizontal, dialog: 'sourceControl' },

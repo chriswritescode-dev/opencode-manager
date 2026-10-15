@@ -13,6 +13,7 @@ import { executeCommand } from '../../../src/utils/process'
 import { detectSandboxCapability } from '../../../src/services/sandbox/capability'
 import { logger } from '../../../src/utils/logger'
 import { forceProcessAttestation } from '../../../src/services/opencode/process-identity'
+import type { RepoEnvService } from '../../../src/services/repo-env'
 
 vi.mock('../../../src/utils/process', () => ({
   executeCommand: vi.fn(),
@@ -341,6 +342,42 @@ describe('SandboxRuntimeService', () => {
         GIT_AUTHOR_EMAIL: 'local@example.com',
         GIT_COMMITTER_NAME: 'Local User',
         GIT_COMMITTER_EMAIL: 'local@example.com',
+      },
+    })
+  })
+
+  it('includes the repository env in the sandbox plan env after the git env', async () => {
+    enableEnforcement()
+    mockExecuteCommand.mockImplementation(async (args: string[]) => {
+      if (args.includes('inspect')) return { exitCode: 0, stdout: runningInspectOutput(realInspectConfig()), stderr: '' }
+      if (args.includes('config') && args.includes('user.name')) {
+        return { exitCode: 0, stdout: 'local\tfile:/repo/.git/config\tLocal User\n', stderr: '' }
+      }
+      if (args.includes('config') && args.includes('user.email')) {
+        return { exitCode: 0, stdout: 'local\tfile:/repo/.git/config\tlocal@example.com\n', stderr: '' }
+      }
+      return { exitCode: 0, stdout: '[]', stderr: '' }
+    })
+    const repoEnvService = {
+      resolveForDirectory: vi.fn(async () => ({
+        env: { REPO_SECRET: 's3cret', GIT_AUTHOR_NAME: 'Repo User' },
+        maskValues: ['s3cret'],
+        missing: [],
+      })),
+    } as unknown as RepoEnvService
+    const withRepoEnv = new SandboxRuntimeService(db, repoEnvService)
+
+    const plan = await withRepoEnv.planShell(repoADir)
+
+    expect(plan).toEqual({
+      mode: 'sandbox',
+      workdir: repoADir,
+      env: {
+        GIT_AUTHOR_NAME: 'Repo User',
+        GIT_AUTHOR_EMAIL: 'local@example.com',
+        GIT_COMMITTER_NAME: 'Local User',
+        GIT_COMMITTER_EMAIL: 'local@example.com',
+        REPO_SECRET: 's3cret',
       },
     })
   })

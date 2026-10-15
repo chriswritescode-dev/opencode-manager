@@ -18,10 +18,12 @@ import { isWorktreeError, openCodeLocation } from '@opencode-manager/shared/open
 import { createRepoGitRoutes } from './repo-git'
 import { createRepoTerminalRoutes } from './repo-terminals'
 import { createRepoProjectConfigRoutes } from './repo-project-config'
+import { createRepoSecretRoutes } from './secrets'
 import { createScheduleRoutes } from './schedules'
 import type { GitAuthService } from '../services/git-auth'
 import type { TerminalService } from '../services/terminal'
 import type { ProjectConfigService } from '../services/project-config'
+import type { SecretsService } from '../services/secrets'
 import type { RepoWorkspaceService } from '../services/repo-workspace'
 import { createGitService } from '../services/git/GitService'
 import { ScheduleService } from '../services/schedules'
@@ -47,6 +49,7 @@ export function createRepoRoutes(
   terminalService: TerminalService,
   projectConfigService: ProjectConfigService,
   repoWorkspaces: RepoWorkspaceService,
+  secretsService: SecretsService,
 ) {
   const app = new Hono()
   const git = createGitService(gitAuthService)
@@ -55,6 +58,8 @@ export function createRepoRoutes(
   app.route('/', createRepoTerminalRoutes(database, gitAuthService, openCodeClient, terminalService))
   app.route('/', createRepoProjectConfigRoutes(database, gitAuthService, openCodeClient, projectConfigService, terminalService))
   app.route('/:id/schedules', createScheduleRoutes(scheduleService))
+  app.route('/', createRepoSecretRoutes({ database, projectConfigService, secretsService }, 'secret'))
+  app.route('/', createRepoSecretRoutes({ database, projectConfigService, secretsService }, 'variable'))
 
   app.post('/', async (c) => {
     try {
