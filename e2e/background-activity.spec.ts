@@ -1,5 +1,9 @@
+import { execFileSync } from 'node:child_process'
+import fs from 'node:fs'
+import path from 'node:path'
 import type { APIRequestContext, Page } from '@playwright/test'
 import { test, expect } from './fixtures'
+import { E2E_TMP } from './env'
 
 const SHELL_COMMAND = 'sleep 300'
 
@@ -54,12 +58,38 @@ async function removeShell(request: APIRequestContext, directory: string, shellI
 }
 
 const createdShells: Array<{ directory: string; id: string }> = []
+const createdDirectories: string[] = []
+let directoryCounter = 0
+
+function createUnregisteredDirectory(name: string): string {
+  directoryCounter += 1
+  const directory = path.join(E2E_TMP, `background-${name}-${process.pid}-${directoryCounter}`)
+  fs.mkdirSync(directory, { recursive: true })
+  fs.writeFileSync(path.join(directory, 'README.md'), '# background activity fixture\n')
+
+  const git = (...args: string[]) => execFileSync('git', args, { cwd: directory, stdio: 'pipe' })
+  git('-c', 'init.defaultBranch=main', 'init', '-q')
+  git('-c', 'user.name=e2e', '-c', 'user.email=e2e@example.com', 'add', '-A')
+  git('-c', 'user.name=e2e', '-c', 'user.email=e2e@example.com', 'commit', '-q', '-m', 'init')
+
+  createdDirectories.push(directory)
+  return directory
+}
+
+async function navigateWithinApp(page: Page, url: string): Promise<void> {
+  await page.evaluate((target) => {
+    window.history.pushState({}, '', target)
+    window.dispatchEvent(new PopStateEvent('popstate'))
+  }, url)
+}
 
 test.afterEach(async ({ request }) => {
   const shells = createdShells.splice(0)
   const results = await Promise.allSettled(shells.map(({ directory, id }) => removeShell(request, directory, id)))
   const failures = results.flatMap((result) => (result.status === 'rejected' ? [String(result.reason)] : []))
   expect(failures, 'background shell cleanup failed').toEqual([])
+
+  createdDirectories.splice(0).forEach((directory) => fs.rmSync(directory, { recursive: true, force: true }))
 })
 
 test.describe('session background activity', () => {
@@ -137,5 +167,55 @@ test.describe('session background activity', () => {
 
     await expect(backgroundIndicator(page)).toHaveCount(0)
     await expect(backgroundStatus(page)).toHaveCount(0)
+  })
+
+  test('shows the indicator for a shell started in an unregistered session directory before page load', async ({
+    page,
+    request,
+    repo,
+  }) => {
+    const directory = createUnregisteredDirectory('preload')
+    const sessionId = await createSession(request, directory)
+    const shellId = await startBackgroundShell(request, directory, sessionId)
+    createdShells.push({ directory, id: shellId })
+
+    await page.goto(`/repos/${repo.id}/sessions/${sessionId}`)
+    await expect(page.getByPlaceholder('Send a message...')).toBeVisible()
+
+    await expect(backgroundIndicator(page)).toBeVisible()
+
+    await removeShell(request, directory, shellId)
+
+    await expect(backgroundIndicator(page)).toBeHidden()
+  })
+
+  test('clears the indicator for a shell that exits while an unregistered session directory is unsubscribed', async ({
+    page,
+    request,
+    repo,
+  }) => {
+    const directory = createUnregisteredDirectory('stale')
+    const sessionId = await createSession(request, directory)
+    const subscribed = page.waitForResponse((response) =>
+      response.url().includes('/api/sse/subscribe') && (response.request().postData() ?? '').includes(directory),
+    )
+
+    await page.goto(`/repos/${repo.id}/sessions/${sessionId}`)
+    await expect(page.getByPlaceholder('Send a message...')).toBeVisible()
+    await subscribed
+
+    const shellId = await startBackgroundShell(request, directory, sessionId)
+    createdShells.push({ directory, id: shellId })
+
+    await expect(backgroundIndicator(page)).toBeVisible()
+
+    await navigateWithinApp(page, '/')
+    await page.waitForTimeout(3_000)
+    await removeShell(request, directory, shellId)
+    await page.waitForTimeout(3_000)
+    await navigateWithinApp(page, `/repos/${repo.id}/sessions/${sessionId}`)
+
+    await expect(page.getByPlaceholder('Send a message...')).toBeVisible()
+    await expect(backgroundIndicator(page)).toBeHidden({ timeout: 20_000 })
   })
 })
