@@ -514,6 +514,32 @@ describe('SessionPickerDialog', () => {
     expect(screen.queryByRole('tabpanel', { name: 'Sessions' })).not.toBeInTheDocument()
   })
 
+  it('focuses the projects search input after clicking the Projects tab and filters on typing', async () => {
+    mocks.repos = [repo(1, 'alpha', '/w/a'), repo(2, 'beta', '/w/b')]
+    const user = userEvent.setup()
+    renderPicker()
+
+    await user.click(screen.getByRole('tab', { name: 'Projects' }))
+
+    await waitFor(() => expect(screen.getByPlaceholderText('Search projects...')).toHaveFocus())
+
+    await user.keyboard('beta')
+
+    expect(screen.getByRole('option', { name: /beta/ })).toBeInTheDocument()
+    expect(screen.queryByRole('option', { name: /alpha/ })).not.toBeInTheDocument()
+  })
+
+  it('focuses the projects search input after switching tabs with the shortcut', async () => {
+    mocks.repos = [repo(1, 'alpha', '/w/a'), repo(2, 'beta', '/w/b')]
+    const user = userEvent.setup()
+    renderPicker()
+
+    await user.click(screen.getByPlaceholderText('Search sessions...'))
+    await user.keyboard('{Control>}s{/Control}')
+
+    await waitFor(() => expect(screen.getByPlaceholderText('Search projects...')).toHaveFocus())
+  })
+
   it('lists repos in the projects tab and opens the cursor repo on Enter', async () => {
     mocks.repos = [repo(1, 'alpha', '/w/a'), repo(2, 'beta', '/w/b')]
     const { onSelectRepo } = renderPicker()

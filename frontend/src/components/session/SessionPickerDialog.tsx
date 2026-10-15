@@ -734,8 +734,11 @@ export function SessionPickerDialog({
 
   useEffect(() => {
     if (!open || !hasFinePointer) return
-    if (tab === 'projects') projectSearchInputRef.current?.focus()
-    else searchInputRef.current?.focus()
+    const frame = requestAnimationFrame(() => {
+      if (tab === 'projects') projectSearchInputRef.current?.focus()
+      else searchInputRef.current?.focus()
+    })
+    return () => cancelAnimationFrame(frame)
   }, [open, tab, hasFinePointer])
 
   return (
