@@ -6,9 +6,15 @@ import { request as playwrightRequest, type APIRequestContext } from '@playwrigh
 import { BASE_URL, E2E_TMP, STORAGE_STATE } from './env'
 
 const MOCK_MODEL_ID = 'mock-model'
+const TITLE_SYSTEM_PREFIX = 'You are a title generator.'
+const MOCK_TITLE = 'Mock Session Title'
+
+export const TOOL_FOLLOW_UP_TEXT = 'The requested command has finished.'
 
 export interface MockProvider {
   setReply(text: string): void
+  setStreamReply(trigger: string, chunks: string[], delayMs: number): void
+  setToolCallReply(trigger: string, toolName: string, input: Record<string, unknown>): void
   close(): Promise<void>
 }
 
@@ -20,85 +26,243 @@ export interface MockRepo {
 
 export interface CreateMockRepoOptions {
   beforeCommit?: (directory: string) => void
+  config?: Record<string, unknown>
 }
 
-function handleMockRequest(
-  request: http.IncomingMessage,
-  response: http.ServerResponse,
-  getReply: () => string,
-): void {
-  const chunks: Buffer[] = []
-  request.on('data', (chunk: Buffer) => chunks.push(chunk))
-  request.on('end', () => {
-    const url = request.url ?? ''
-    if (request.method === 'GET' && url.startsWith('/v1/models')) {
-      response.writeHead(200, { 'Content-Type': 'application/json' })
-      response.end(
-        JSON.stringify({
-          object: 'list',
-          data: [{ id: MOCK_MODEL_ID, object: 'model', created: 0, owned_by: 'mock' }],
-        }),
-      )
-      return
-    }
+interface ChatMessage {
+  role?: string
+  content?: unknown
+}
 
-    if (request.method === 'POST' && url.startsWith('/v1/chat/completions')) {
-      let body: { stream?: boolean } = {}
-      try {
-        body = JSON.parse(Buffer.concat(chunks).toString('utf8') || '{}')
-      } catch {
-        body = {}
-      }
+interface StreamReply {
+  chunks: string[]
+  delayMs: number
+}
 
-      const mockReply = getReply()
-      const id = 'chatcmpl-mock'
-      const created = Math.floor(Date.now() / 1000)
-      const usage = { prompt_tokens: 1, completion_tokens: 1, total_tokens: 2 }
+interface ToolCallReply {
+  toolName: string
+  input: Record<string, unknown>
+}
 
-      if (body.stream) {
-        response.writeHead(200, {
-          'Content-Type': 'text/event-stream',
-          'Cache-Control': 'no-cache',
-          Connection: 'keep-alive',
-        })
-        const base = { id, object: 'chat.completion.chunk', created, model: MOCK_MODEL_ID }
-        response.write(
-          `data: ${JSON.stringify({ ...base, choices: [{ index: 0, delta: { role: 'assistant', content: '' }, finish_reason: null }] })}\n\n`,
-        )
-        response.write(
-          `data: ${JSON.stringify({ ...base, choices: [{ index: 0, delta: { content: mockReply }, finish_reason: null }] })}\n\n`,
-        )
-        response.write(
-          `data: ${JSON.stringify({ ...base, choices: [{ index: 0, delta: {}, finish_reason: 'stop' }], usage })}\n\n`,
-        )
-        response.write('data: [DONE]\n\n')
-        response.end()
-        return
-      }
+type ResolvedReply =
+  | { kind: 'text'; text: string }
+  | { kind: 'stream'; chunks: string[]; delayMs: number }
+  | { kind: 'tool'; toolName: string; input: Record<string, unknown> }
 
-      response.writeHead(200, { 'Content-Type': 'application/json' })
-      response.end(
-        JSON.stringify({
-          id,
-          object: 'chat.completion',
-          created,
-          model: MOCK_MODEL_ID,
-          choices: [{ index: 0, message: { role: 'assistant', content: mockReply }, finish_reason: 'stop' }],
-          usage,
-        }),
-      )
-      return
-    }
+interface ReplyState {
+  defaultReply: string
+  streamReplies: Map<string, StreamReply>
+  toolCallReplies: Map<string, ToolCallReply>
+}
 
-    response.writeHead(404, { 'Content-Type': 'application/json' })
-    response.end(JSON.stringify({ error: { message: `unhandled ${request.method} ${url}` } }))
+const USAGE = { prompt_tokens: 1, completion_tokens: 1, total_tokens: 2 }
+
+function delay(ms: number): Promise<void> {
+  return new Promise((resolve) => setTimeout(resolve, ms))
+}
+
+function messageText(message: ChatMessage | undefined): string {
+  if (!message) return ''
+  if (typeof message.content === 'string') return message.content
+  if (!Array.isArray(message.content)) return ''
+  return message.content
+    .map((part) =>
+      part && typeof part === 'object' && 'text' in part && typeof part.text === 'string' ? part.text : '',
+    )
+    .join('')
+}
+
+function resolveReply(body: { messages?: ChatMessage[] }, state: ReplyState): ResolvedReply {
+  const messages = Array.isArray(body.messages) ? body.messages : []
+  const system = messages.find((message) => message.role === 'system')
+  if (messageText(system).startsWith(TITLE_SYSTEM_PREFIX)) {
+    return { kind: 'text', text: MOCK_TITLE }
+  }
+  const last = messages[messages.length - 1]
+  if (last?.role === 'tool') {
+    return { kind: 'text', text: TOOL_FOLLOW_UP_TEXT }
+  }
+  const userText = messageText([...messages].reverse().find((message) => message.role === 'user'))
+  const stream = [...state.streamReplies.entries()].find(([trigger]) => userText.includes(trigger))
+  if (stream) return { kind: 'stream', ...stream[1] }
+  const toolCall = [...state.toolCallReplies.entries()].find(([trigger]) => userText.includes(trigger))
+  if (toolCall) return { kind: 'tool', ...toolCall[1] }
+  return { kind: 'text', text: state.defaultReply }
+}
+
+function readBody(request: http.IncomingMessage): Promise<string> {
+  return new Promise((resolve) => {
+    const chunks: Buffer[] = []
+    request.on('data', (chunk: Buffer) => chunks.push(chunk))
+    request.on('end', () => resolve(Buffer.concat(chunks).toString('utf8')))
+    request.on('error', () => resolve(''))
   })
 }
 
+function openStream(response: http.ServerResponse): {
+  event: (payload: unknown) => boolean
+  raw: (data: string) => boolean
+} {
+  response.writeHead(200, {
+    'Content-Type': 'text/event-stream',
+    'Cache-Control': 'no-cache',
+    Connection: 'keep-alive',
+  })
+  const alive = () => !response.destroyed && !response.writableEnded
+  return {
+    event: (payload) => {
+      if (!alive()) return false
+      response.write(`data: ${JSON.stringify(payload)}\n\n`)
+      return true
+    },
+    raw: (data) => {
+      if (!alive()) return false
+      response.write(`data: ${data}\n\n`)
+      return true
+    },
+  }
+}
+
+function sendJson(response: http.ServerResponse, payload: unknown, status = 200): void {
+  response.writeHead(status, { 'Content-Type': 'application/json' })
+  response.end(JSON.stringify(payload))
+}
+
+function completionChunk(delta: Record<string, unknown>, finishReason: string | null, withUsage = false) {
+  return {
+    id: 'chatcmpl-mock',
+    object: 'chat.completion.chunk',
+    created: Math.floor(Date.now() / 1000),
+    model: MOCK_MODEL_ID,
+    choices: [{ index: 0, delta, finish_reason: finishReason }],
+    ...(withUsage ? { usage: USAGE } : {}),
+  }
+}
+
+async function sendReply(
+  response: http.ServerResponse,
+  reply: ResolvedReply,
+  stream: boolean,
+): Promise<void> {
+  if (reply.kind === 'text') {
+    if (!stream) {
+      sendJson(response, {
+        id: 'chatcmpl-mock',
+        object: 'chat.completion',
+        created: Math.floor(Date.now() / 1000),
+        model: MOCK_MODEL_ID,
+        choices: [{ index: 0, message: { role: 'assistant', content: reply.text }, finish_reason: 'stop' }],
+        usage: USAGE,
+      })
+      return
+    }
+    const sse = openStream(response)
+    sse.event(completionChunk({ role: 'assistant', content: '' }, null))
+    sse.event(completionChunk({ content: reply.text }, null))
+    sse.event(completionChunk({}, 'stop', true))
+    sse.raw('[DONE]')
+    response.end()
+    return
+  }
+
+  if (reply.kind === 'stream') {
+    if (!stream) {
+      sendJson(response, {
+        id: 'chatcmpl-mock',
+        object: 'chat.completion',
+        created: Math.floor(Date.now() / 1000),
+        model: MOCK_MODEL_ID,
+        choices: [
+          { index: 0, message: { role: 'assistant', content: reply.chunks.join('') }, finish_reason: 'stop' },
+        ],
+        usage: USAGE,
+      })
+      return
+    }
+    const sse = openStream(response)
+    sse.event(completionChunk({ role: 'assistant', content: '' }, null))
+    for (const [index, chunk] of reply.chunks.entries()) {
+      if (index > 0) await delay(reply.delayMs)
+      if (!sse.event(completionChunk({ content: chunk }, null))) return
+    }
+    if (!sse.event(completionChunk({}, 'stop', true))) return
+    sse.raw('[DONE]')
+    response.end()
+    return
+  }
+
+  const toolCall = {
+    id: 'call_mock_1',
+    type: 'function',
+    function: { name: reply.toolName, arguments: JSON.stringify(reply.input) },
+  }
+  if (!stream) {
+    sendJson(response, {
+      id: 'chatcmpl-mock',
+      object: 'chat.completion',
+      created: Math.floor(Date.now() / 1000),
+      model: MOCK_MODEL_ID,
+      choices: [
+        {
+          index: 0,
+          message: { role: 'assistant', content: null, tool_calls: [toolCall] },
+          finish_reason: 'tool_calls',
+        },
+      ],
+      usage: USAGE,
+    })
+    return
+  }
+  const sse = openStream(response)
+  sse.event(completionChunk({ role: 'assistant', content: null, tool_calls: [{ index: 0, ...toolCall }] }, null))
+  sse.event(completionChunk({}, 'tool_calls', true))
+  sse.raw('[DONE]')
+  response.end()
+}
+
+async function handleMockRequest(
+  request: http.IncomingMessage,
+  response: http.ServerResponse,
+  state: ReplyState,
+): Promise<void> {
+  const url = request.url ?? ''
+  if (request.method === 'GET' && url.startsWith('/v1/models')) {
+    sendJson(response, {
+      object: 'list',
+      data: [{ id: MOCK_MODEL_ID, object: 'model', created: 0, owned_by: 'mock' }],
+    })
+    return
+  }
+
+  if (request.method === 'POST' && url.startsWith('/v1/chat/completions')) {
+    const raw = await readBody(request)
+    let body: { stream?: boolean; messages?: ChatMessage[] } = {}
+    try {
+      body = JSON.parse(raw || '{}')
+    } catch {
+      body = {}
+    }
+    await sendReply(response, resolveReply(body, state), body.stream === true)
+    return
+  }
+
+  sendJson(response, { error: { message: `unhandled ${request.method} ${url}` } }, 404)
+}
+
 export async function startMockProvider(port: number): Promise<MockProvider> {
-  let mockReply = ''
+  const state: ReplyState = {
+    defaultReply: '',
+    streamReplies: new Map(),
+    toolCallReplies: new Map(),
+  }
   const server = http.createServer((request, response) => {
-    handleMockRequest(request, response, () => mockReply)
+    response.on('error', () => {})
+    void handleMockRequest(request, response, state).catch(() => {
+      if (!response.headersSent) {
+        response.writeHead(500, { 'Content-Type': 'application/json' })
+      }
+      response.end()
+    })
   })
   await new Promise<void>((resolve, reject) => {
     server.once('error', reject)
@@ -106,7 +270,13 @@ export async function startMockProvider(port: number): Promise<MockProvider> {
   })
   return {
     setReply: (text) => {
-      mockReply = text
+      state.defaultReply = text
+    },
+    setStreamReply: (trigger, chunks, delayMs) => {
+      state.streamReplies.set(trigger, { chunks, delayMs })
+    },
+    setToolCallReply: (trigger, toolName, input) => {
+      state.toolCallReplies.set(trigger, { toolName, input })
     },
     close: () =>
       new Promise<void>((resolve) => {
@@ -127,6 +297,17 @@ export async function createSession(api: APIRequestContext, directory: string): 
   }
   const body = (await response.json()) as { data: { id: string } }
   return body.data.id
+}
+
+async function waitForConfiguredModel(api: APIRequestContext, directory: string): Promise<void> {
+  const query = new URLSearchParams({ 'location[directory]': directory })
+  const deadline = Date.now() + 30_000
+  while (Date.now() < deadline) {
+    const response = await api.get(`/api/opencode/api/config?${query.toString()}`)
+    if (response.ok() && (await response.text()).includes(MOCK_MODEL_ID)) return
+    await new Promise((resolve) => setTimeout(resolve, 250))
+  }
+  throw new Error(`mock model was not configured for ${directory}`)
 }
 
 export async function createMockRepo(
@@ -152,6 +333,7 @@ export async function createMockRepo(
         },
         model: `mock/${MOCK_MODEL_ID}`,
         small_model: `mock/${MOCK_MODEL_ID}`,
+        ...options.config,
       },
       null,
       2,
@@ -170,6 +352,7 @@ export async function createMockRepo(
       throw new Error(`register mock repo failed: ${repoResponse.status()} ${await repoResponse.text()}`)
     }
     const repo = (await repoResponse.json()) as { id: number; fullPath: string }
+    await waitForConfiguredModel(api, repo.fullPath)
     const sessionId = await createSession(api, repo.fullPath)
     return { id: repo.id, fullPath: repo.fullPath, sessionId }
   } finally {
