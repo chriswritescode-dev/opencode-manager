@@ -51,8 +51,23 @@ export class OpenCodeEventStream {
   private upstreamConnectedCount: number | null = null
   private upstreamTotalCount: number | null = null
 
+  private readonly handlePageHide = (): void => {
+    this.disconnectConnectionOnly()
+  }
+
+  private readonly handlePageShow = (event: PageTransitionEvent): void => {
+    if (event.persisted) {
+      this.reconnect()
+    }
+  }
+
   constructor(options: OpenCodeEventStreamOptions = {}) {
     this.transport = options.transport ?? createBrowserEventStreamTransport()
+
+    if (typeof window !== 'undefined') {
+      window.addEventListener('pagehide', this.handlePageHide)
+      window.addEventListener('pageshow', this.handlePageShow)
+    }
   }
 
   subscribeGlobalMonitor(input: SubscriberInput): GlobalMonitorSubscription {
