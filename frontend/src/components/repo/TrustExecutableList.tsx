@@ -1,8 +1,7 @@
-import type { ProjectConfigResponse } from '@opencode-manager/shared/types'
-
-type RepoFileExecutable = NonNullable<ProjectConfigResponse['repoFile']['executable']>
+import type { RepoFileExecutable } from './trustExecutable'
 
 export function TrustExecutableList({ executable }: { executable: RepoFileExecutable }) {
+  const envEntries = Object.entries(executable.env ?? {})
   return (
     <div className="max-h-64 space-y-3 overflow-y-auto">
       {executable.actions.length > 0 && (
@@ -18,6 +17,25 @@ export function TrustExecutableList({ executable }: { executable: RepoFileExecut
               </li>
             ))}
           </ul>
+        </div>
+      )}
+      {(executable.environment !== undefined || envEntries.length > 0) && (
+        <div className="space-y-1">
+          <p className="text-xs font-medium">Environment variables</p>
+          {executable.environment !== undefined && (
+            <p className="text-xs">
+              Environment: <span className="font-mono">{executable.environment}</span>
+            </p>
+          )}
+          {envEntries.length > 0 && (
+            <ul className="space-y-1">
+              {envEntries.map(([key, value]) => (
+                <li key={key} className="font-mono text-xs">
+                  {key} = {value}
+                </li>
+              ))}
+            </ul>
+          )}
         </div>
       )}
       {executable.setup.length > 0 && (

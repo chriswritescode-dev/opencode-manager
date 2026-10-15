@@ -4,7 +4,7 @@ import { useUrlParams } from './useUrlParams'
 
 const PANEL_PARAM = 'panel'
 
-const PANEL_TOOLS = ['sourceControl', 'files', 'terminal', 'walkthrough', 'preview', 'mcp', 'actions', 'skills', 'schedules'] as const
+const PANEL_TOOLS = ['sourceControl', 'files', 'terminal', 'walkthrough', 'preview', 'mcp', 'actions', 'skills', 'schedules', 'secrets'] as const
 
 export type PanelTool = (typeof PANEL_TOOLS)[number]
 
