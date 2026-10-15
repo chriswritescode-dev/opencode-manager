@@ -223,8 +223,11 @@ export async function startOpenCodeServe(options: OpenCodeServeOptions = {}): Pr
     readOutput: () => output,
     terminate,
     stop: async () => {
-      await terminate()
-      await removeOwnedDirectories()
+      try {
+        await terminate()
+      } finally {
+        await removeOwnedDirectories()
+      }
     },
   }
 }
