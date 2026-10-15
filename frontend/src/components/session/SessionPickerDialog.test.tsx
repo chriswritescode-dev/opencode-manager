@@ -540,6 +540,29 @@ describe('SessionPickerDialog', () => {
     await waitFor(() => expect(screen.getByPlaceholderText('Search projects...')).toHaveFocus())
   })
 
+  it('focuses the projects search input after the switch shortcut on a coarse pointer device', async () => {
+    stubMatchMedia(false)
+    mocks.repos = [repo(1, 'alpha', '/w/a'), repo(2, 'beta', '/w/b')]
+    const user = userEvent.setup()
+    renderPicker()
+
+    await user.click(screen.getByPlaceholderText('Search sessions...'))
+    await user.keyboard('{Control>}s{/Control}')
+
+    await waitFor(() => expect(screen.getByPlaceholderText('Search projects...')).toHaveFocus())
+  })
+
+  it('does not focus the projects search input when switching tabs by pointer on a coarse pointer device', async () => {
+    stubMatchMedia(false)
+    mocks.repos = [repo(1, 'alpha', '/w/a'), repo(2, 'beta', '/w/b')]
+    const user = userEvent.setup()
+    renderPicker()
+
+    await user.click(screen.getByRole('tab', { name: 'Projects' }))
+
+    expect(await screen.findByPlaceholderText('Search projects...')).not.toHaveFocus()
+  })
+
   it('lists repos in the projects tab and opens the cursor repo on Enter', async () => {
     mocks.repos = [repo(1, 'alpha', '/w/a'), repo(2, 'beta', '/w/b')]
     const { onSelectRepo } = renderPicker()

@@ -705,6 +705,7 @@ export function SessionPickerDialog({
 }: SessionPickerDialogProps) {
   const searchInputRef = useRef<HTMLInputElement>(null)
   const projectSearchInputRef = useRef<HTMLInputElement>(null)
+  const focusSearchAfterSwitchRef = useRef(false)
   const hasFinePointer = useMediaQuery(FINE_POINTER_MEDIA_QUERY)
   const { preferences } = useSettings()
   const switchHint = useMemo(
@@ -727,14 +728,20 @@ export function SessionPickerDialog({
   }
 
   const toggleTab = useCallback(() => {
+    focusSearchAfterSwitchRef.current = true
     setTab((current) => (current === 'sessions' ? 'projects' : 'sessions'))
   }, [])
 
   useShortcutActions({ switchPickerTab: open ? toggleTab : undefined })
 
   useEffect(() => {
-    if (!open || !hasFinePointer) return
+    if (!open) {
+      focusSearchAfterSwitchRef.current = false
+      return
+    }
+    if (!hasFinePointer && !focusSearchAfterSwitchRef.current) return
     const frame = requestAnimationFrame(() => {
+      focusSearchAfterSwitchRef.current = false
       if (tab === 'projects') projectSearchInputRef.current?.focus()
       else searchInputRef.current?.focus()
     })
