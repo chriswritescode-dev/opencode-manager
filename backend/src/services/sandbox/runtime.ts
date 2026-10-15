@@ -13,6 +13,7 @@ import { isPathWithinRoot, mkdirSafe } from '../../utils/fs-safe'
 import { logger } from '../../utils/logger'
 import { SettingsService } from '../settings'
 import { CredentialProvider } from '../credential-provider'
+import type { RepoEnvService } from '../repo-env'
 import { getGitIdentityEnvForDirectory } from '../git-identity'
 import { getProcessIdentityAttestationError } from '../opencode/process-identity'
 import { detectSandboxCapability } from './capability'
@@ -1049,7 +1050,10 @@ function sandboxMaxRunningVms(db: Database): number {
 }
 
 export class SandboxRuntimeService {
-  constructor(private readonly db: Database) {}
+  constructor(
+    private readonly db: Database,
+    private readonly repoEnvService?: RepoEnvService,
+  ) {}
 
   async prepareSandboxOnBoot(): Promise<void> {
     if (!this.isSandboxEnabled()) return
@@ -1118,6 +1122,10 @@ export class SandboxRuntimeService {
       const env = {
         ...new CredentialProvider(this.db).getSandboxGitEnv({ cwd: directory }),
         ...await getGitIdentityEnvForDirectory(directory, this.db),
+      }
+      if (this.repoEnvService) {
+        const repoEnv = await this.repoEnvService.resolveForDirectory(directory)
+        Object.assign(env, repoEnv.env)
       }
       return Object.keys(env).length > 0
         ? { mode: 'sandbox', name: spec.name, workdir: workDirectory, env }

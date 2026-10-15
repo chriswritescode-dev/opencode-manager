@@ -3,7 +3,7 @@ import { promises as fs } from 'fs'
 import path from 'path'
 import os from 'os'
 import { installManagedPlugins, getOpenCodePluginDir } from '../../src/services/opencode/plugin-registry'
-import { loadGeneratedPlugin } from '../helpers/opencode-plugin-context'
+import { loadGeneratedPlugin, type ToolExecuteAfterEvent } from '../helpers/opencode-plugin-context'
 
 const INTERNAL_API_URL = 'http://localhost:5003/api/internal'
 
@@ -22,10 +22,10 @@ describe('ocm-gh-env plugin', () => {
     return loadGeneratedPlugin(pluginPath())
   }
 
-  function stubGhEnvFetch(env: Record<string, string>) {
+  function stubShellEnvFetch(body: { env?: Record<string, string>; mask?: string[] }) {
     const fetchMock = vi.fn().mockResolvedValue({
       ok: true,
-      json: async () => env,
+      json: async () => body,
     })
     vi.stubGlobal('fetch', fetchMock)
     return fetchMock
@@ -97,8 +97,8 @@ describe('ocm-gh-env plugin', () => {
     await expect(fs.access(pluginPath())).resolves.toBeUndefined()
   })
 
-  it('merges the fetched GH env into the create.before event env', async () => {
-    const fetchMock = stubGhEnvFetch({ GH_TOKEN: 'ghp', GITHUB_TOKEN: 'ghp' })
+  it('merges the fetched shell env into the create.before event env', async () => {
+    const fetchMock = stubShellEnvFetch({ env: { GH_TOKEN: 'ghp', GITHUB_TOKEN: 'ghp' }, mask: [] })
     const plugin = await loadPlugin()
     const event = { command: 'git push', cwd: '/repo', env: { PATH: '/usr/bin' } }
 
@@ -106,7 +106,7 @@ describe('ocm-gh-env plugin', () => {
 
     expect(event.env).toEqual({ PATH: '/usr/bin', GH_TOKEN: 'ghp', GITHUB_TOKEN: 'ghp' })
     const [url, options] = fetchMock.mock.calls[0]!
-    expect(url.toString()).toBe('http://localhost:5003/api/internal/git-credentials/gh-env?cwd=%2Frepo')
+    expect(url.toString()).toBe('http://localhost:5003/api/internal/shell-env?cwd=%2Frepo')
     expect(options).toEqual({ headers: { Authorization: 'Bearer secret-token' } })
   })
 
@@ -135,7 +135,7 @@ describe('ocm-gh-env plugin', () => {
   })
 
   it('caches results within the TTL so rapid calls fetch once', async () => {
-    const fetchMock = stubGhEnvFetch({ GH_TOKEN: 'ghp' })
+    const fetchMock = stubShellEnvFetch({ env: { GH_TOKEN: 'ghp' } })
     const plugin = await loadPlugin()
     const first = { command: 'git push', cwd: '/repo', env: {} }
     const second = { command: 'git push', cwd: '/repo', env: {} }
@@ -148,7 +148,7 @@ describe('ocm-gh-env plugin', () => {
   })
 
   it('caches results per cwd', async () => {
-    const fetchMock = stubGhEnvFetch({ GH_TOKEN: 'ghp' })
+    const fetchMock = stubShellEnvFetch({ env: { GH_TOKEN: 'ghp' } })
     const plugin = await loadPlugin()
 
     await plugin.triggerShellCreateBefore({ command: 'git push', cwd: '/repo-a', env: {} })
@@ -161,7 +161,7 @@ describe('ocm-gh-env plugin', () => {
 
   it('keeps the cached env when a later fetch fails', async () => {
     const realNow = Date.now
-    const fetchMock = stubGhEnvFetch({ GH_TOKEN: 'ghp' })
+    const fetchMock = stubShellEnvFetch({ env: { GH_TOKEN: 'ghp' } })
     const plugin = await loadPlugin()
     const first = { command: 'git push', cwd: '/repo', env: {} }
     await plugin.triggerShellCreateBefore(first)
@@ -173,6 +173,101 @@ describe('ocm-gh-env plugin', () => {
 
     await expect(plugin.triggerShellCreateBefore(second)).resolves.toBeUndefined()
     expect(second.env).toEqual({ GH_TOKEN: 'ghp' })
+  })
+
+  it('masks learned secret values in output, content text and nested metadata for every tool', async () => {
+    stubShellEnvFetch({ env: {}, mask: ['s3cret-value'] })
+    const plugin = await loadPlugin()
+    await plugin.triggerShellCreateBefore({ command: 'ls', cwd: '/repo', env: {} })
+
+    const event: ToolExecuteAfterEvent = {
+      tool: 'read',
+      status: 'completed',
+      result: {
+        output: 'token s3cret-value here',
+        content: [{ type: 'text', text: 'also s3cret-value' }],
+        metadata: { output: 'nested s3cret-value' },
+      },
+    }
+
+    await plugin.triggerToolExecuteAfter(event)
+
+    expect(event.result).toEqual({
+      output: 'token *** here',
+      content: [{ type: 'text', text: 'also ***' }],
+      metadata: { output: 'nested ***' },
+    })
+  })
+
+  it('masks a completed result that is not a plain object', async () => {
+    stubShellEnvFetch({ env: {}, mask: ['s3cret-value'] })
+    const plugin = await loadPlugin()
+    await plugin.triggerShellCreateBefore({ command: 'ls', cwd: '/repo', env: {} })
+
+    class ToolResult {
+      [key: string]: unknown
+      output = 'token s3cret-value'
+    }
+    const event: ToolExecuteAfterEvent = { tool: 'shell', status: 'completed', result: new ToolResult() }
+
+    await plugin.triggerToolExecuteAfter(event)
+
+    expect(event.result).toEqual({ output: 'token ***' })
+  })
+
+  it('replaces overlapping mask values longest first', async () => {
+    stubShellEnvFetch({ env: {}, mask: ['abc', 'abcdef'] })
+    const plugin = await loadPlugin()
+    await plugin.triggerShellCreateBefore({ command: 'ls', cwd: '/repo', env: {} })
+
+    const event: ToolExecuteAfterEvent = { tool: 'shell', status: 'completed', result: { output: 'abcdef' } }
+
+    await plugin.triggerToolExecuteAfter(event)
+
+    expect(event.result).toEqual({ output: '***' })
+  })
+
+  it('leaves error results untouched', async () => {
+    stubShellEnvFetch({ env: {}, mask: ['s3cret-value'] })
+    const plugin = await loadPlugin()
+    await plugin.triggerShellCreateBefore({ command: 'ls', cwd: '/repo', env: {} })
+
+    const result = { output: 's3cret-value' }
+    const event: ToolExecuteAfterEvent = { tool: 'shell', status: 'error', result }
+
+    await plugin.triggerToolExecuteAfter(event)
+
+    expect(event.result).toBe(result)
+  })
+
+  it('does not reallocate the result when no mask value occurs', async () => {
+    stubShellEnvFetch({ env: {}, mask: ['s3cret-value'] })
+    const plugin = await loadPlugin()
+    await plugin.triggerShellCreateBefore({ command: 'ls', cwd: '/repo', env: {} })
+
+    const result = { output: 'nothing sensitive', content: [{ type: 'text', text: 'plain' }] }
+    const event: ToolExecuteAfterEvent = { tool: 'shell', status: 'completed', result }
+
+    await plugin.triggerToolExecuteAfter(event)
+
+    expect(event.result).toBe(result)
+  })
+
+  it('keeps masking values learned earlier even after they rotate out of the response', async () => {
+    const realNow = Date.now
+    const fetchMock = stubShellEnvFetch({ env: {}, mask: ['first-secret'] })
+    const plugin = await loadPlugin()
+    await plugin.triggerShellCreateBefore({ command: 'ls', cwd: '/repo', env: {} })
+
+    fetchMock.mockResolvedValue({ ok: true, json: async () => ({ env: {}, mask: ['second-secret'] }) })
+    vi.spyOn(Date, 'now').mockReturnValue(realNow() + 6000)
+    await plugin.triggerShellCreateBefore({ command: 'ls', cwd: '/repo', env: {} })
+
+    const event: ToolExecuteAfterEvent = { tool: 'shell', status: 'completed', result: { output: 'first-secret and second-secret' } }
+
+    await plugin.triggerToolExecuteAfter(event)
+
+    expect(event.result).toEqual({ output: '*** and ***' })
   })
 
   it('fails loudly when the generated module does not match the V2 plugin contract', async () => {

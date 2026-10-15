@@ -9,6 +9,7 @@ import { TerminalService } from '../../src/services/terminal'
 import { OpenCodeServerNotFoundError } from '../../src/services/opencode-server-registry'
 import type { OpenCodeClient } from '../../src/services/opencode/client'
 import type { CredentialProvider } from '../../src/services/credential-provider'
+import type { RepoEnvService } from '../../src/services/repo-env'
 
 const DIRECTORY = '/home/me/app'
 const SERVER_ID = 'srv_kitchen'
@@ -43,6 +44,10 @@ function createRemoteClient(terminals: Array<Record<string, unknown>> = [createP
   return { client, list, create, update, remove }
 }
 
+function stubRepoEnvService(): RepoEnvService {
+  return { resolveForDirectory: async () => ({ env: {}, maskValues: [], missing: [] }) } as unknown as RepoEnvService
+}
+
 function createService(includeLocalCredentials = false, terminals?: Array<Record<string, unknown>>) {
   const remote = createRemoteClient(terminals)
   const credentialProvider = {
@@ -51,6 +56,7 @@ function createService(includeLocalCredentials = false, terminals?: Array<Record
   const service = new TerminalService(
     { client: remote.client, baseUrl: () => 'https://remote.internal', includeLocalCredentials },
     credentialProvider,
+    stubRepoEnvService(),
   )
   return { service, credentialProvider, ...remote }
 }

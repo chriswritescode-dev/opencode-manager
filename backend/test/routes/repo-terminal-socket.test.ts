@@ -9,6 +9,7 @@ import { TerminalService } from '../../src/services/terminal'
 import type { GitAuthService } from '../../src/services/git-auth'
 import type { OpenCodeClient } from '../../src/services/opencode/client'
 import type { CredentialProvider } from '../../src/services/credential-provider'
+import type { RepoEnvService } from '../../src/services/repo-env'
 import { startWebSocketServer, type WebSocketTestServer } from '../helpers/websocket-server'
 import { rawWebSocketHandshake } from '../helpers/raw-websocket-handshake'
 
@@ -81,6 +82,7 @@ upstreamApp.get(
 const terminalService = new TerminalService(
   { client: openCodeClient, baseUrl: () => upstreamBase, includeLocalCredentials: true },
   credentialProvider,
+  { resolveForDirectory: async () => ({ env: {}, maskValues: [], missing: [] }) } as unknown as RepoEnvService,
 )
 
 const managerApp = new Hono()

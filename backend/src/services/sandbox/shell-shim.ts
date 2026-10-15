@@ -15,18 +15,25 @@ export const SANDBOX_SHELL_ENV_WORKDIR = 'OCM_SANDBOX_WORKDIR'
 export const SANDBOX_SHELL_ENV_NAME = 'OCM_SANDBOX_NAME'
 
 /**
- * Upper bound on `http.<host>.extraheader` pairs forwarded into the microVM.
- * The shim enumerates a fixed set of variable names rather than expanding
- * `GIT_CONFIG_KEY_$i` indirectly, which would require `eval` on values holding
- * credentials. Credentials are configured per host, so this bounds the number
- * of distinct git hosts a sandboxed command can authenticate against.
+ * Space-separated allow-list of variable names the shim forwards from its own
+ * environment into the microVM with `msb exec -e`. The plugin pins it from the
+ * sandbox plan, so only names the plan approved reach a sandboxed command; the
+ * guest environment is otherwise empty.
+ */
+export const SANDBOX_SHELL_ENV_FORWARD = 'OCM_SANDBOX_FORWARD_ENV'
+
+/**
+ * Upper bound on `http.<host>.extraheader` pairs the planner forwards into the
+ * microVM. Credentials are configured per host, so this bounds the number of
+ * distinct git hosts a sandboxed command can authenticate against.
  */
 export const SANDBOX_MAX_FORWARDED_GIT_CONFIGS = 16
 
 /**
- * Variables the shim copies from its own environment into the microVM with
- * `msb exec -e`. The guest environment is otherwise empty, so anything absent
- * from this list never reaches a sandboxed command.
+ * Variables the shim always copies from its own environment into the microVM
+ * with `msb exec -e`, independent of the plan-approved allow-list. The guest
+ * environment is otherwise empty, so anything absent from this list and from
+ * the allow-list never reaches a sandboxed command.
  */
 export const SANDBOX_FORWARDED_ENV_NAMES: readonly string[] = [
   'GIT_TERMINAL_PROMPT',
@@ -44,9 +51,10 @@ export const SANDBOX_FORWARDED_ENV_NAMES: readonly string[] = [
 ]
 
 /**
- * Drops `http.<host>.extraheader` pairs the shim cannot forward, so the guest
- * never sees a `GIT_CONFIG_COUNT` that overstates the pairs actually present.
- * A count larger than the pairs in the environment makes git fail outright.
+ * Drops `http.<host>.extraheader` pairs beyond the forwarding cap, so the
+ * guest never sees a `GIT_CONFIG_COUNT` that overstates the pairs actually
+ * present. A count larger than the pairs in the environment makes git fail
+ * outright.
  */
 export function limitForwardedGitConfigs(env: Record<string, string>): {
   env: Record<string, string>
@@ -85,9 +93,22 @@ export function buildSandboxShellShimScript(): string {
     '--timeout',
     `${timeoutSeconds}s`,
   ].join(' ')
-  const forwardEnv = SANDBOX_FORWARDED_ENV_NAMES.map(
-    (name) => `  if [ -n "\${${name}+x}" ]; then set -- "$@" -e "${name}=$${name}"; fi`,
-  ).join('\n')
+  const forwardEnv = [
+    ...SANDBOX_FORWARDED_ENV_NAMES.map(
+      (name) => `if [ -n "\${${name}+x}" ]; then set -- "$@" -e "${name}=$${name}"; fi`,
+    ),
+    'set -f',
+    `for OCM_SHIM_NAME in \${${SANDBOX_SHELL_ENV_FORWARD}}; do`,
+    `  case "$OCM_SHIM_NAME" in`,
+    `    ''|[0-9]*|*[!A-Za-z0-9_]*|OCM_*|MSB_*|${SANDBOX_FORWARDED_ENV_NAMES.join('|')}) continue ;;`,
+    '  esac',
+    `  eval "OCM_SHIM_SET=\\\${$OCM_SHIM_NAME+x}"`,
+    `  [ -n "$OCM_SHIM_SET" ] || continue`,
+    `  eval "OCM_SHIM_VALUE=\\\${$OCM_SHIM_NAME}"`,
+    `  set -- "$@" -e "$OCM_SHIM_NAME=$OCM_SHIM_VALUE"`,
+    'done',
+    'set +f',
+  ].join('\n')
   return `#!/bin/sh
 if [ -z "\${${SANDBOX_SHELL_ENV_WORKDIR}:-}" ]; then
   echo 'ocm-sandbox-shell: sandbox working directory missing; refusing to run on the host' >&2
@@ -100,16 +121,16 @@ case "\${${SANDBOX_SHELL_ENV_NAME}:-}" in
     exit 126
     ;;
 esac
-ocm_argc=$#
+OCM_SHIM_ARGC=$#
 set -- "$@" ${execArgs}
 ${forwardEnv}
 set -- "$@" -- sh
-ocm_i=0
-while [ "$ocm_i" -lt "$ocm_argc" ]; do
-  ocm_arg=$1
+OCM_SHIM_I=0
+while [ "$OCM_SHIM_I" -lt "$OCM_SHIM_ARGC" ]; do
+  OCM_SHIM_ARG=$1
   shift
-  set -- "$@" "$ocm_arg"
-  ocm_i=$((ocm_i + 1))
+  set -- "$@" "$OCM_SHIM_ARG"
+  OCM_SHIM_I=$((OCM_SHIM_I + 1))
 done
 exec "$@"
 `

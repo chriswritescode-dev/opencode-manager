@@ -13,7 +13,7 @@ import {
 } from '../../src/services/opencode-sandbox-plugin'
 import { installManagedPlugins, getOpenCodePluginDir } from '../../src/services/opencode/plugin-registry'
 import {
-  SANDBOX_FORWARDED_ENV_NAMES,
+  SANDBOX_SHELL_ENV_FORWARD,
   SANDBOX_SHELL_ENV_NAME,
   SANDBOX_SHELL_ENV_WORKDIR,
   sandboxShellShimPath,
@@ -284,6 +284,8 @@ describe('ocm-sandbox plugin', () => {
     expect(statSync(shimPath).mode & 0o100).not.toBe(0)
     expect(shim.startsWith('#!/bin/sh')).toBe(true)
     expect(shim).toContain(`$${SANDBOX_SHELL_ENV_WORKDIR}`)
+    expect(shim).toContain(`\${${SANDBOX_SHELL_ENV_FORWARD}}`)
+    expect(pluginSource).toContain(`var ENV_FORWARD = ${JSON.stringify(SANDBOX_SHELL_ENV_FORWARD)}`)
     expect(pluginSource).toContain(`var SHELL_SHIM_PATH = ${JSON.stringify(shimPath)}`)
   })
 
@@ -374,6 +376,7 @@ describe('ocm-sandbox plugin', () => {
       expect(createEvent.shell).toBe(sandboxShellShimPath(configHome))
       expect(createEvent.env[SANDBOX_SHELL_ENV_WORKDIR]).toBe(WORKDIR)
       expect(createEvent.env[SANDBOX_SHELL_ENV_NAME]).toBe(PLAN_NAME)
+      expect(createEvent.env[SANDBOX_SHELL_ENV_FORWARD]).toBe('')
       const planCall = fetchMock.mock.calls.find(([url]) => String(url).endsWith('/sandbox/shell'))
       expect(planCall).toBeDefined()
       const [url, init] = planCall as [string, { body: string; headers: Record<string, string> }]
@@ -403,6 +406,9 @@ describe('ocm-sandbox plugin', () => {
       expect(() => {
         createEvent.env[SANDBOX_SHELL_ENV_NAME] = 'other'
       }).toThrow(message)
+      expect(() => {
+        createEvent.env[SANDBOX_SHELL_ENV_FORWARD] = 'EVIL'
+      }).toThrow(message)
 
       expect(createEvent.shell).toBe(sandboxShellShimPath(configHome))
       expect(createEvent.env[SANDBOX_SHELL_ENV_WORKDIR]).toBe(WORKDIR)
@@ -410,9 +416,10 @@ describe('ocm-sandbox plugin', () => {
       expect(Object.getOwnPropertyDescriptor(createEvent, 'shell')?.configurable).toBe(false)
       expect(Object.getOwnPropertyDescriptor(createEvent.env, SANDBOX_SHELL_ENV_WORKDIR)?.configurable).toBe(false)
       expect(Object.getOwnPropertyDescriptor(createEvent.env, SANDBOX_SHELL_ENV_NAME)?.configurable).toBe(false)
+      expect(Object.getOwnPropertyDescriptor(createEvent.env, SANDBOX_SHELL_ENV_FORWARD)?.configurable).toBe(false)
     })
 
-    it('forwards only the allow-listed plan env values into the spawn environment', async () => {
+    it('forwards the plan env names it can represent and pins the forward list', async () => {
       const plugin = await loadPlugin(configHome)
       const fetchMock = managerFetch({
         session: { sandboxed: true },
@@ -421,7 +428,16 @@ describe('ocm-sandbox plugin', () => {
             mode: 'sandbox',
             workdir: WORKDIR,
             name: PLAN_NAME,
-            env: { GH_TOKEN: 'gh-secret', OCM_INTERNAL_TOKEN: 'must-not-be-forwarded', GIT_CONFIG_COUNT: '1' },
+            env: {
+              GH_TOKEN: 'gh-secret',
+              GIT_CONFIG_COUNT: '1',
+              OPENAI_API_KEY: 'sk-secret',
+              OCM_INTERNAL_TOKEN: 'must-not-be-forwarded',
+              MSB_SECRET: 'must-not-be-forwarded',
+              '1BAD': 'invalid',
+              'A-B': 'invalid',
+              NUMERIC: 5,
+            },
           },
         },
       })
@@ -431,12 +447,14 @@ describe('ocm-sandbox plugin', () => {
 
       expect(createEvent.env.GH_TOKEN).toBe('gh-secret')
       expect(createEvent.env.GIT_CONFIG_COUNT).toBe('1')
+      expect(createEvent.env.OPENAI_API_KEY).toBe('sk-secret')
       expect(createEvent.env.OCM_INTERNAL_TOKEN).toBeUndefined()
-      for (const name of Object.keys(createEvent.env)) {
-        if (createEvent.env[name] === undefined) continue
-        if (name === SANDBOX_SHELL_ENV_WORKDIR || name === SANDBOX_SHELL_ENV_NAME || name === 'TERM' || name === 'OPENCODE_TERMINAL') continue
-        expect(SANDBOX_FORWARDED_ENV_NAMES).toContain(name)
-      }
+      expect(createEvent.env.MSB_SECRET).toBeUndefined()
+      expect(createEvent.env['1BAD']).toBeUndefined()
+      expect(createEvent.env['A-B']).toBeUndefined()
+      expect(createEvent.env.NUMERIC).toBeUndefined()
+      expect(createEvent.env[SANDBOX_SHELL_ENV_FORWARD]).toBe('GH_TOKEN GIT_CONFIG_COUNT OPENAI_API_KEY')
+      expect(Object.getOwnPropertyDescriptor(createEvent.env, SANDBOX_SHELL_ENV_FORWARD)?.configurable).toBe(false)
     })
 
     it('leaves an unmarked spawn on the host without planning', async () => {

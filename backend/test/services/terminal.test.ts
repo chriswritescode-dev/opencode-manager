@@ -2,6 +2,7 @@ import { describe, it, expect, vi } from 'vitest'
 import { TerminalService, TerminalNotFoundError } from '../../src/services/terminal'
 import type { OpenCodeClient } from '../../src/services/opencode/client'
 import type { CredentialProvider } from '../../src/services/credential-provider'
+import type { RepoEnvService } from '../../src/services/repo-env'
 
 interface PtyRecord {
   id: string
@@ -45,6 +46,12 @@ function createCredentialProvider(shellEnv: Record<string, string> = {}): Creden
   return { getGhCliEnv: vi.fn(() => shellEnv) } as unknown as CredentialProvider
 }
 
+function createRepoEnvService(env: Record<string, string> = {}): RepoEnvService {
+  return {
+    resolveForDirectory: vi.fn(async () => ({ env, maskValues: [], missing: [] })),
+  } as unknown as RepoEnvService
+}
+
 function createTerminalService(
   client: OpenCodeClient,
   provider: CredentialProvider,
@@ -55,6 +62,7 @@ function createTerminalService(
   return new TerminalService(
     { client, baseUrl: () => baseUrl, includeLocalCredentials },
     provider,
+    createRepoEnvService(),
     openSocket,
   )
 }
@@ -223,6 +231,27 @@ describe('TerminalService', () => {
       await service.create('/repo', { kind: 'shell', name: 'Terminal', command: '/bin/zsh', args: ['-l'] })
 
       expect(captured).toMatchObject({ command: '/bin/zsh', args: ['-l'] })
+    })
+
+    it('merges the repository env between the GitHub env and the input env', async () => {
+      const create = vi.fn(async () => ({
+        location: { directory: '/repo' },
+        data: createPty({ id: 'pty-new', title: 'Terminal' }),
+      }))
+      const credentialProvider = createCredentialProvider({ GH_TOKEN: 'gh', SHARED: 'gh' })
+      const repoEnvService = createRepoEnvService({ REPO_VAR: 'repo', SHARED: 'repo' })
+      const service = new TerminalService(
+        { client: createClient({ create }), baseUrl: () => 'http://127.0.0.1:5551', includeLocalCredentials: true },
+        credentialProvider,
+        repoEnvService,
+      )
+
+      await service.create('/repo', { kind: 'shell', name: 'Terminal', env: { FOO: 'bar', SHARED: 'input' } })
+
+      expect(repoEnvService.resolveForDirectory).toHaveBeenCalledWith('/repo')
+      expect(create).toHaveBeenCalledWith(
+        expect.objectContaining({ env: { GH_TOKEN: 'gh', REPO_VAR: 'repo', FOO: 'bar', SHARED: 'input' } }),
+      )
     })
   })
 

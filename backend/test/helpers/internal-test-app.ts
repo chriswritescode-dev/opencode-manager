@@ -15,7 +15,14 @@ type InternalTestAppOverrides = Partial<{
   multiRuns: CreateInternalRoutesParams[9]
   changeWalkthroughService: CreateInternalRoutesParams[10]
   sessionSandbox: CreateInternalRoutesParams[11]
+  repoEnvService: CreateInternalRoutesParams[12]
 }>
+
+function createStubRepoEnvService(): CreateInternalRoutesParams[12] {
+  return {
+    resolveForDirectory: async () => ({ env: {}, maskValues: [], missing: [] }),
+  } as unknown as CreateInternalRoutesParams[12]
+}
 
 export function createInternalTestApp(
   db: CreateInternalRoutesParams[0],
@@ -34,5 +41,6 @@ export function createInternalTestApp(
     overrides.multiRuns ?? ({} as CreateInternalRoutesParams[9]),
     overrides.changeWalkthroughService ?? ({} as CreateInternalRoutesParams[10]),
     overrides.sessionSandbox ?? ({} as CreateInternalRoutesParams[11]),
+    overrides.repoEnvService ?? createStubRepoEnvService(),
   )
 }

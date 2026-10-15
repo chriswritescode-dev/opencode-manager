@@ -1,6 +1,7 @@
 import { sandboxPlanTimeoutMs, SANDBOX_UNAVAILABLE_PREFIX } from './sandbox/command'
 import {
   SANDBOX_FORWARDED_ENV_NAMES,
+  SANDBOX_SHELL_ENV_FORWARD,
   SANDBOX_SHELL_ENV_NAME,
   SANDBOX_SHELL_ENV_WORKDIR,
 } from './sandbox/shell-shim'
@@ -25,6 +26,7 @@ var SHELL_SHIM_PATH = ${JSON.stringify(shellShimPath)}
 var ENV_WORKDIR = ${JSON.stringify(SANDBOX_SHELL_ENV_WORKDIR)}
 var ENV_SANDBOX_NAME = ${JSON.stringify(SANDBOX_SHELL_ENV_NAME)}
 var FORWARDED_ENV_NAMES = ${JSON.stringify(SANDBOX_FORWARDED_ENV_NAMES)}
+var ENV_FORWARD = ${JSON.stringify(SANDBOX_SHELL_ENV_FORWARD)}
 var SERVICE_SETTINGS_PATH = path.resolve(${JSON.stringify(serviceSettingsPath)})
 var SERVICE_SETTINGS_DIRECTORY = path.dirname(SERVICE_SETTINGS_PATH)
 var SERVICE_SETTINGS_DENIED = 'OpenCode Manager denies access to its service settings file (service.json), which holds the OpenCode server password.'
@@ -312,11 +314,15 @@ async function pinSandboxShell(event, sessionID, locationDirectory) {
     throw unavailable('the sandbox shell shim is missing at ' + SHELL_SHIM_PATH)
   }
   var plan = await planSandboxShell(event.cwd, sessionID, locationDirectory)
+  var forwardNames = []
   if (plan.env !== null && typeof plan.env === 'object') {
-    for (var name of FORWARDED_ENV_NAMES) {
-      if (typeof plan.env[name] === 'string') {
-        event.env[name] = plan.env[name]
-      }
+    for (var name of Object.keys(plan.env)) {
+      var value = plan.env[name]
+      if (typeof value !== 'string') continue
+      if (!/^[A-Za-z_][A-Za-z0-9_]*$/.test(name)) continue
+      if (name.startsWith('OCM_') || name.startsWith('MSB_')) continue
+      event.env[name] = value
+      forwardNames.push(name)
     }
   }
   if (!lockAccessor(event, 'shell', SHELL_SHIM_PATH)) {
@@ -327,6 +333,9 @@ async function pinSandboxShell(event, sessionID, locationDirectory) {
   }
   if (!lockAccessor(event.env, ENV_SANDBOX_NAME, plan.name)) {
     throw unavailable('sandbox enforcement could not pin the sandbox session name; aborting before the command runs on the host')
+  }
+  if (!lockAccessor(event.env, ENV_FORWARD, forwardNames.join(' '))) {
+    throw unavailable('sandbox enforcement could not pin the forwarded environment list; aborting before the command runs on the host')
   }
 }
 
