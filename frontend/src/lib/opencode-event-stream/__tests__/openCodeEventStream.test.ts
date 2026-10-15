@@ -9,6 +9,23 @@ class RejectingSubscribeTransport extends TestEventStreamTransport {
   }
 }
 
+class DeferredSubscribeTransport extends TestEventStreamTransport {
+  private resolvers: Array<(value: boolean) => void> = []
+
+  override post(path: string, body: unknown): Promise<boolean> {
+    this.posts.push({ path, body })
+    return new Promise<boolean>((resolve) => {
+      this.resolvers.push(resolve)
+    })
+  }
+
+  resolvePosts(success = true): void {
+    const resolvers = this.resolvers
+    this.resolvers = []
+    resolvers.forEach((resolve) => resolve(success))
+  }
+}
+
 describe('OpenCodeEventStream', () => {
   beforeEach(() => {
     vi.useFakeTimers()
@@ -176,6 +193,7 @@ describe('OpenCodeEventStream', () => {
     transport.resync()
 
     expect(onResync).toHaveBeenCalledTimes(1)
+    expect(onResync).toHaveBeenCalledWith(['/repo'])
   })
 
   it('reports visibility through the transport adapter', async () => {
@@ -238,6 +256,53 @@ describe('OpenCodeEventStream', () => {
     stream.subscribeGlobalMonitor({ directories: ['/repo'], onEvent: vi.fn(), onDirectoriesSubscribed })
     transport.openConnection()
     transport.connected('client-1')
+    await vi.advanceTimersByTimeAsync(0)
+
+    expect(onDirectoriesSubscribed).not.toHaveBeenCalled()
+  })
+
+  it('ignores a subscribe response that resolves after the stream reconnected', async () => {
+    const transport = new DeferredSubscribeTransport()
+    const stream = new OpenCodeEventStream({ transport })
+    const onDirectoriesSubscribed = vi.fn()
+
+    stream.subscribeGlobalMonitor({ directories: ['/repo'], onEvent: vi.fn(), onDirectoriesSubscribed })
+    transport.openConnection()
+    transport.connected('client-1')
+    await vi.advanceTimersByTimeAsync(0)
+
+    expect(transport.posts).toContainEqual({
+      path: '/api/sse/subscribe',
+      body: { clientId: 'client-1', directories: ['/repo'] },
+    })
+
+    transport.fail()
+    transport.openConnection()
+    transport.connected('client-2')
+
+    transport.resolvePosts()
+    await vi.advanceTimersByTimeAsync(0)
+
+    expect(onDirectoriesSubscribed).not.toHaveBeenCalled()
+  })
+
+  it('does not notify a directory removed while its subscribe request is in flight', async () => {
+    const transport = new DeferredSubscribeTransport()
+    const stream = new OpenCodeEventStream({ transport })
+    const onDirectoriesSubscribed = vi.fn()
+
+    const subscription = stream.subscribeGlobalMonitor({
+      directories: ['/repo'],
+      onEvent: vi.fn(),
+      onDirectoriesSubscribed,
+    })
+    transport.openConnection()
+    transport.connected('client-1')
+    await vi.advanceTimersByTimeAsync(0)
+
+    subscription.updateDirectories([])
+
+    transport.resolvePosts()
     await vi.advanceTimersByTimeAsync(0)
 
     expect(onDirectoriesSubscribed).not.toHaveBeenCalled()

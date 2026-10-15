@@ -14,7 +14,7 @@ interface Subscriber {
   onEvent: OpenCodeEventHandler
   onStatusChange?: EventStreamStatusHandler
   onHealthChange?: (state: EventStreamHealthState) => void
-  onResync?: () => void
+  onResync?: (subscribedDirectories: string[]) => void
   onDirectoriesSubscribed?: (directories: string[]) => void
   directories: Set<string>
 }
@@ -24,7 +24,7 @@ interface SubscriberInput {
   onStatusChange?: EventStreamStatusHandler
   onHealthChange?: (state: EventStreamHealthState) => void
   directories: string[]
-  onResync?: () => void
+  onResync?: (subscribedDirectories: string[]) => void
   onDirectoriesSubscribed?: (directories: string[]) => void
 }
 
@@ -400,9 +400,10 @@ export class OpenCodeEventStream {
 
   private handleResync(): void {
     this.markActivity()
+    const directories = Array.from(this.directoryRefCounts.keys())
     this.subscribers.forEach((subscriber) => {
       try {
-        subscriber.onResync?.()
+        subscriber.onResync?.(directories)
       } catch {
         void 0
       }
@@ -422,10 +423,14 @@ export class OpenCodeEventStream {
   private async subscribeToRemoteDirectories(directories: string[]): Promise<void> {
     if (!this.clientId || directories.length === 0) return
 
+    const clientId = this.clientId
+
     const success = await this.transport.post('/api/sse/subscribe', {
-      clientId: this.clientId,
+      clientId,
       directories,
     })
+
+    if (this.clientId !== clientId) return
 
     if (!success) {
       directories.forEach((directory) => this.pendingDirectories.add(directory))
@@ -433,7 +438,10 @@ export class OpenCodeEventStream {
       return
     }
 
-    this.notifyDirectoriesSubscribed(directories)
+    const subscribedDirectories = directories.filter((directory) => this.directoryRefCounts.has(directory))
+    if (subscribedDirectories.length === 0) return
+
+    this.notifyDirectoriesSubscribed(subscribedDirectories)
   }
 
   private notifyDirectoriesSubscribed(directories: string[]): void {

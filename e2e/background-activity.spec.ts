@@ -76,9 +76,9 @@ function createUnregisteredDirectory(name: string): string {
   return directory
 }
 
-function waitForDirectorySubscription(page: Page, directory: string) {
+function waitForDirectorySubscription(page: Page, directory: string, endpoint = '/api/sse/subscribe') {
   return page.waitForResponse((response) =>
-    response.url().includes('/api/sse/subscribe') && (response.request().postData() ?? '').includes(directory),
+    response.url().includes(endpoint) && (response.request().postData() ?? '').includes(directory),
   )
 }
 
@@ -206,15 +206,16 @@ test.describe('session background activity', () => {
 
     await page.goto(`/repos/${repo.id}/sessions/${sessionId}`)
     await expect(page.getByPlaceholder('Send a message...')).toBeVisible()
-    await subscribed
+    expect((await subscribed).ok()).toBe(true)
 
     const shellId = await startBackgroundShell(request, directory, sessionId)
     createdShells.push({ directory, id: shellId })
 
     await expect(backgroundIndicator(page)).toBeVisible()
 
+    const unsubscribed = waitForDirectorySubscription(page, directory, '/api/sse/unsubscribe')
     await navigateWithinApp(page, '/')
-    await page.waitForTimeout(3_000)
+    expect((await unsubscribed).ok()).toBe(true)
     await removeShell(request, directory, shellId)
     await page.waitForTimeout(3_000)
     await navigateWithinApp(page, `/repos/${repo.id}/sessions/${sessionId}`)
@@ -231,14 +232,14 @@ test.describe('session background activity', () => {
 
     await page.goto(`/repos/${repo.id}/sessions/${sessionId}`)
     await expect(page.getByPlaceholder('Send a message...')).toBeVisible()
-    await subscribedToSource
+    expect((await subscribedToSource).ok()).toBe(true)
 
     const subscribedToTarget = waitForDirectorySubscription(page, target)
     await requireOk(
       await request.post(`/api/opencode/api/session/${sessionId}/move`, { data: { directory: target } }),
       'move session',
     )
-    await subscribedToTarget
+    expect((await subscribedToTarget).ok()).toBe(true)
 
     const shellId = await startBackgroundShell(request, target, sessionId)
     createdShells.push({ directory: target, id: shellId })

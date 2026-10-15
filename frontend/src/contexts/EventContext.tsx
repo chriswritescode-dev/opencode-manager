@@ -709,10 +709,11 @@ export function EventProvider({ children }: { children: React.ReactNode }) {
       }
     }
 
-    const handleResync = () => {
-      void reconcilePendingActionsForDirectories(collectTrackedDirectories())
+    const handleResync = (subscribedDirectories: string[]) => {
+      const directories = [...new Set([...collectTrackedDirectories(), ...subscribedDirectories])]
+      void reconcilePendingActionsForDirectories(directories)
       void fetchInitialSessionStatuses()
-      void syncRunningShells(collectTrackedDirectories())
+      void syncRunningShells(directories)
       invalidateChildSessionCaches(queryClient)
       invalidateQueryKeysDebounced(queryClient, LOCATION_CATALOG_QUERY_KEYS)
     }
