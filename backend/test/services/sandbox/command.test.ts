@@ -918,4 +918,150 @@ describe('resolveSessionSandboxMounts', () => {
       rmSync(tmp, { recursive: true, force: true })
     }
   })
+
+  it('rejects a main repository whose core.worktree points at the repos root', async () => {
+    const tmp = mkdtempSync(path.join(tmpdir(), 'ocm-session-core-worktree-'))
+    const originalWorkspacePath = process.env.WORKSPACE_PATH
+    try {
+      const repos = path.join(tmp, 'repos')
+      const repo = path.join(repos, 'repo')
+      mkdirSync(repo, { recursive: true })
+      runGit(['init', '-q'], repo)
+      runGit(['config', 'core.worktree', repos], repo)
+
+      process.env.WORKSPACE_PATH = tmp
+
+      await expect(resolveSessionSandboxMounts(repo)).resolves.toBeNull()
+    } finally {
+      restoreWorkspacePath(originalWorkspacePath)
+      rmSync(tmp, { recursive: true, force: true })
+    }
+  })
+
+  it('rejects a core.worktree escape that plants a matching worktree back-link', async () => {
+    const tmp = mkdtempSync(path.join(tmpdir(), 'ocm-session-core-worktree-link-'))
+    const originalWorkspacePath = process.env.WORKSPACE_PATH
+    try {
+      const repos = path.join(tmp, 'repos')
+      const mine = path.join(repos, 'mine')
+      const other = path.join(repos, 'other')
+      mkdirSync(mine, { recursive: true })
+      mkdirSync(other, { recursive: true })
+      runGit(['init', '-q'], mine)
+      runGit(['init', '-q'], other)
+      runGit(['config', 'core.worktree', other], mine)
+      const planted = path.join(mine, '.git', 'worktrees', 'x')
+      mkdirSync(planted, { recursive: true })
+      writeFileSync(path.join(planted, 'gitdir'), `${path.join(other, '.git')}\n`)
+
+      process.env.WORKSPACE_PATH = tmp
+
+      await expect(resolveSessionSandboxMounts(mine)).resolves.toBeNull()
+    } finally {
+      restoreWorkspacePath(originalWorkspacePath)
+      rmSync(tmp, { recursive: true, force: true })
+    }
+  })
+
+  it('rejects a main repository whose git dir is a symlink to another repository git dir', async () => {
+    const tmp = mkdtempSync(path.join(tmpdir(), 'ocm-session-symlink-main-'))
+    const originalWorkspacePath = process.env.WORKSPACE_PATH
+    try {
+      const repos = path.join(tmp, 'repos')
+      const repo = path.join(repos, 'repo')
+      const other = path.join(repos, 'other')
+      mkdirSync(repo, { recursive: true })
+      mkdirSync(other, { recursive: true })
+      runGit(['init', '-q'], repo)
+      runGit(['init', '-q'], other)
+      runGit(
+        ['-c', 'user.email=ocm@example.com', '-c', 'user.name=OCM', 'commit', '--allow-empty', '-q', '-m', 'init'],
+        repo,
+      )
+
+      rmSync(path.join(repo, '.git'), { recursive: true, force: true })
+      symlinkSync(path.join(other, '.git'), path.join(repo, '.git'), 'dir')
+
+      process.env.WORKSPACE_PATH = tmp
+
+      await expect(resolveSessionSandboxMounts(repo)).resolves.toBeNull()
+    } finally {
+      restoreWorkspacePath(originalWorkspacePath)
+      rmSync(tmp, { recursive: true, force: true })
+    }
+  })
+
+  it('rejects a worktree whose git file is a symlink to another repository linked worktree git file', async () => {
+    const tmp = mkdtempSync(path.join(tmpdir(), 'ocm-session-symlink-worktree-'))
+    const originalWorkspacePath = process.env.WORKSPACE_PATH
+    try {
+      const repos = path.join(tmp, 'repos')
+      const main = path.join(repos, 'main')
+      const other = path.join(repos, 'other')
+      const otherWorktree = path.join(repos, 'other-linked')
+      const worktree = path.join(tmp, 'schedule-worktrees', 'job-1-run-2')
+      mkdirSync(main, { recursive: true })
+      mkdirSync(other, { recursive: true })
+      mkdirSync(path.dirname(worktree), { recursive: true })
+      runGit(['init', '-q'], main)
+      runGit(['init', '-q'], other)
+      runGit(
+        ['-c', 'user.email=ocm@example.com', '-c', 'user.name=OCM', 'commit', '--allow-empty', '-q', '-m', 'init'],
+        main,
+      )
+      runGit(
+        ['-c', 'user.email=ocm@example.com', '-c', 'user.name=OCM', 'commit', '--allow-empty', '-q', '-m', 'init'],
+        other,
+      )
+      runGit(['worktree', 'add', '-q', '-b', 'feature', worktree], main)
+      runGit(['worktree', 'add', '-q', '-b', 'linked', otherWorktree], other)
+
+      rmSync(path.join(worktree, '.git'), { force: true })
+      symlinkSync(path.join(otherWorktree, '.git'), path.join(worktree, '.git'))
+
+      process.env.WORKSPACE_PATH = tmp
+
+      await expect(resolveSessionSandboxMounts(worktree)).resolves.toBeNull()
+    } finally {
+      restoreWorkspacePath(originalWorkspacePath)
+      rmSync(tmp, { recursive: true, force: true })
+    }
+  })
+
+  it('rejects a worktree whose git file points at another repository linked worktree', async () => {
+    const tmp = mkdtempSync(path.join(tmpdir(), 'ocm-session-cross-linked-'))
+    const originalWorkspacePath = process.env.WORKSPACE_PATH
+    try {
+      const repos = path.join(tmp, 'repos')
+      const main = path.join(repos, 'main')
+      const other = path.join(repos, 'other')
+      const otherWorktree = path.join(repos, 'other-linked')
+      const worktree = path.join(tmp, 'schedule-worktrees', 'job-1-run-2')
+      mkdirSync(main, { recursive: true })
+      mkdirSync(other, { recursive: true })
+      mkdirSync(path.dirname(worktree), { recursive: true })
+      runGit(['init', '-q'], main)
+      runGit(['init', '-q'], other)
+      runGit(
+        ['-c', 'user.email=ocm@example.com', '-c', 'user.name=OCM', 'commit', '--allow-empty', '-q', '-m', 'init'],
+        main,
+      )
+      runGit(
+        ['-c', 'user.email=ocm@example.com', '-c', 'user.name=OCM', 'commit', '--allow-empty', '-q', '-m', 'init'],
+        other,
+      )
+      runGit(['worktree', 'add', '-q', '-b', 'feature', worktree], main)
+      runGit(['worktree', 'add', '-q', '-b', 'linked', otherWorktree], other)
+
+      const otherGitDir = path.join(other, '.git', 'worktrees', path.basename(otherWorktree))
+      writeFileSync(path.join(worktree, '.git'), `gitdir: ${otherGitDir}\n`)
+
+      process.env.WORKSPACE_PATH = tmp
+
+      await expect(resolveSessionSandboxMounts(worktree)).resolves.toBeNull()
+    } finally {
+      restoreWorkspacePath(originalWorkspacePath)
+      rmSync(tmp, { recursive: true, force: true })
+    }
+  })
 })

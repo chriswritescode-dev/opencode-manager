@@ -1,7 +1,7 @@
 import path from 'path'
 import { createHash } from 'crypto'
 import { accessSync, constants, realpathSync, statSync } from 'fs'
-import { readFile, readdir, realpath } from 'fs/promises'
+import { lstat, readFile, realpath } from 'fs/promises'
 import {
   ENV,
   getForgeWorktreesPath,
@@ -558,44 +558,12 @@ export async function resolveSandboxWorkDirectory(directory: string): Promise<st
   return null
 }
 
-async function worktreeLinksBackToCommonDir(top: string, common: string): Promise<boolean> {
-  const worktreesDirectory = path.join(common, 'worktrees')
-
-  let entries: string[]
+async function safeRealpath(target: string): Promise<string | null> {
   try {
-    entries = await readdir(worktreesDirectory)
+    return await realpath(target)
   } catch {
-    return false
+    return null
   }
-
-  let expectedTarget: string
-  try {
-    expectedTarget = path.join(await realpath(top), '.git')
-  } catch {
-    return false
-  }
-
-  for (const entry of entries) {
-    const entryDirectory = path.join(worktreesDirectory, entry)
-    let contents: string
-    try {
-      contents = (await readFile(path.join(entryDirectory, 'gitdir'), 'utf8')).trim()
-    } catch {
-      continue
-    }
-    if (contents === '') continue
-
-    const candidate = path.isAbsolute(contents) ? contents : path.resolve(entryDirectory, contents)
-    let resolvedCandidate: string
-    try {
-      resolvedCandidate = await realpath(candidate)
-    } catch {
-      continue
-    }
-    if (resolvedCandidate === expectedTarget) return true
-  }
-
-  return false
 }
 
 export async function resolveSessionSandboxMounts(locationDirectory: string): Promise<string[] | null> {
@@ -605,7 +573,7 @@ export async function resolveSessionSandboxMounts(locationDirectory: string): Pr
   let result: string | { exitCode: number; stdout: string; stderr: string }
   try {
     result = (await executeCommand(
-      ['git', '-C', work, 'rev-parse', '--path-format=absolute', '--show-toplevel', '--git-common-dir'],
+      ['git', '-C', work, 'rev-parse', '--path-format=absolute', '--show-toplevel', '--git-dir', '--git-common-dir'],
       { ignoreExitCode: true, silent: true, timeout: SANDBOX_GIT_RESOLVE_TIMEOUT_MS },
     )) as string | { exitCode: number; stdout: string; stderr: string }
   } catch {
@@ -615,12 +583,39 @@ export async function resolveSessionSandboxMounts(locationDirectory: string): Pr
   if (listing.exitCode !== 0) return [work]
 
   const lines = listing.stdout.split('\n').map((line) => line.trim()).filter((line) => line !== '')
-  if (lines.length < 2) return [work]
+  if (lines.length < 3) return [work]
   const top = await resolveSandboxWorkDirectory(lines[0]!)
-  const common = await resolveSandboxWorkDirectory(lines[1]!)
+  const gitDir = lines[1]!
+  const common = await resolveSandboxWorkDirectory(lines[2]!)
   if (top === null || common === null) return null
-  if (isPathWithinRoot(top, common)) return [top]
-  return (await worktreeLinksBackToCommonDir(top, common)) ? [top, common] : null
+
+  const resolvedTop = await safeRealpath(top)
+  const resolvedWork = await safeRealpath(work)
+  const resolvedGitDir = await safeRealpath(gitDir)
+  const resolvedCommon = await safeRealpath(common)
+  if (resolvedTop === null || resolvedWork === null || resolvedGitDir === null || resolvedCommon === null) return null
+  if (!isPathWithinRoot(resolvedTop, resolvedWork)) return null
+
+  const topGitPath = path.join(resolvedTop, '.git')
+  const topGitStat = await lstat(topGitPath).catch(() => null)
+  if (topGitStat === null || topGitStat.isSymbolicLink()) return null
+
+  if (resolvedGitDir === resolvedCommon) {
+    if (!topGitStat.isDirectory() || resolvedCommon !== topGitPath) return null
+  } else {
+    if (!topGitStat.isFile()) return null
+    if (path.dirname(resolvedGitDir) !== path.join(resolvedCommon, 'worktrees')) return null
+    let pointer: string
+    try {
+      pointer = (await readFile(path.join(resolvedGitDir, 'gitdir'), 'utf8')).trim()
+    } catch {
+      return null
+    }
+    const resolvedPointer = await safeRealpath(path.isAbsolute(pointer) ? pointer : path.join(resolvedGitDir, pointer))
+    if (resolvedPointer === null || resolvedPointer !== topGitPath) return null
+  }
+
+  return isPathWithinRoot(top, common) ? [top] : [top, common]
 }
 
 export function resolveSandboxExecUser(): string {
