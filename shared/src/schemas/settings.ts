@@ -4,6 +4,7 @@ import { OPENCODE_CONFIG_SOURCE_NAMES } from "../config/defaults";
 import { ColorThemeIdSchema, MANAGER_COLOR_THEME_ID } from "../themes";
 import { SessionPermissionModeSchema } from "./session-permissions";
 import { GOAL_MAX_CONTINUATIONS_MIN, GOAL_MAX_CONTINUATIONS_MAX } from "./limits";
+import { SessionSandboxResourcesSchema } from "./session-sandbox";
 
 export const CustomCommandSchema = z.object({
   name: z.string(),
@@ -148,9 +149,17 @@ export const DEFAULT_GIT_IDENTITY: GitIdentity = {
   email: '',
 };
 
+export const DEFAULT_SANDBOX_IDLE_STOP_MINUTES = 30;
+export const DEFAULT_SANDBOX_MAX_RUNNING_VMS = 4;
+
 export const SandboxPreferencesSchema = z.object({
   enabled: z.boolean(),
   gitCredentials: z.boolean().optional(),
+  defaultForNewSessions: z.boolean().optional(),
+  cpus: SessionSandboxResourcesSchema.shape.cpus.optional(),
+  memoryMib: SessionSandboxResourcesSchema.shape.memoryMib.optional(),
+  idleStopMinutes: z.number().int().min(1).max(1440).optional(),
+  maxRunningVms: z.number().int().min(1).max(32).optional(),
 });
 
 export type SandboxPreferences = z.infer<typeof SandboxPreferencesSchema>;
@@ -158,6 +167,9 @@ export type SandboxPreferences = z.infer<typeof SandboxPreferencesSchema>;
 export const DEFAULT_SANDBOX_PREFERENCES: SandboxPreferences = {
   enabled: false,
   gitCredentials: false,
+  defaultForNewSessions: true,
+  idleStopMinutes: DEFAULT_SANDBOX_IDLE_STOP_MINUTES,
+  maxRunningVms: DEFAULT_SANDBOX_MAX_RUNNING_VMS,
 };
 
 export const SessionDefaultsSchema = z.object({

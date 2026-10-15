@@ -18,6 +18,14 @@ export type ToolExecuteAfterEvent = {
   status: 'completed' | 'error'
   result?: ToolResult
   error?: unknown
+  id?: string
+  [key: string]: unknown
+}
+
+export type GeneratedToolExecuteContext = {
+  signal: AbortSignal
+  sessionID?: string
+  id?: string
   [key: string]: unknown
 }
 
@@ -25,7 +33,7 @@ export type GeneratedTool = {
   name: string
   description?: string
   input?: unknown
-  execute?: (input: unknown, context: { signal: AbortSignal; sessionID?: string }) => Promise<unknown>
+  execute?: (input: unknown, context: GeneratedToolExecuteContext) => Promise<unknown>
   [key: string]: unknown
 }
 
@@ -49,9 +57,9 @@ export type SessionContextEvent = {
   sessionID: string
   agent?: unknown
   model?: unknown
-  system: Array<{ type: string; text: string; [key: string]: unknown }>
+  system?: Array<{ type: string; text: string; [key: string]: unknown }>
   messages?: unknown
-  tools?: unknown
+  tools?: Record<string, { description: string; input?: unknown }>
   options?: unknown
   [key: string]: unknown
 }
@@ -63,7 +71,13 @@ export type GeneratedPlugin = {
   triggerPermissionEvaluate: (event: PermissionEvaluateEvent) => Promise<void>
   triggerSessionPrompt: (event: SessionPromptEvent) => Promise<void>
   triggerSessionContext: (event: SessionContextEvent) => Promise<void>
+  applyToolTransforms: (seed: GeneratedTool[]) => GeneratedTool[]
   registeredTools: () => GeneratedTool[]
+  dispose: () => Promise<void>
+}
+
+export type LoadGeneratedPluginOptions = {
+  location?: { directory: string }
 }
 
 type ShellHookCallback = (event: ShellCreateBeforeEvent) => Promise<void> | void
@@ -72,11 +86,22 @@ type PermissionHookCallback = (event: PermissionEvaluateEvent) => Promise<void> 
 type SessionPromptHookCallback = (event: SessionPromptEvent) => Promise<void> | void
 type SessionContextHookCallback = (event: SessionContextEvent) => Promise<void> | void
 type SessionHookCallback = SessionPromptHookCallback | SessionContextHookCallback
-type ToolTransformCallback = (editor: { add: (tool: GeneratedTool) => void }) => void
+
+type ToolEditor = {
+  list: () => GeneratedTool[]
+  get: (id: string) => GeneratedTool | undefined
+  add: (tool: GeneratedTool) => void
+  update: (id: string, update: (tool: GeneratedTool) => void) => void
+  remove: (id: string) => void
+  namespace: () => void
+}
+
+type ToolTransformCallback = (editor: ToolEditor) => void
 
 type Registration = { dispose: () => Promise<void> }
 
 type PluginContext = {
+  location: { directory: string }
   shell: {
     hook: (name: string, callback: ShellHookCallback) => Promise<Registration>
   }
@@ -91,6 +116,8 @@ type PluginContext = {
     hook: (name: string, callback: SessionHookCallback) => Promise<Registration>
   }
 }
+
+type PluginCleanup = () => Promise<void> | void
 
 function createRegistry<Event>(name: string) {
   const callbacks: Array<(event: Event) => Promise<void> | void> = []
@@ -107,7 +134,7 @@ function createRegistry<Event>(name: string) {
 }
 
 /** Creates a test plugin context with hook registries, event triggers, and tool transforms. */
-function createPluginContext() {
+function createPluginContext(location: { directory: string }) {
   const shellCreateBefore = createRegistry<ShellCreateBeforeEvent>('create.before')
   const toolExecuteAfter = createRegistry<ToolExecuteAfterEvent>('execute.after')
   const permissionEvaluate = createRegistry<PermissionEvaluateEvent>('evaluate')
@@ -116,6 +143,7 @@ function createPluginContext() {
   const transforms: ToolTransformCallback[] = []
 
   const context: PluginContext = {
+    location,
     shell: {
       hook: async (name, callback) => {
         if (name !== 'create.before') throw new Error(`unexpected shell hook ${name}`)
@@ -148,6 +176,28 @@ function createPluginContext() {
     },
   }
 
+  const applyToolTransforms = (seed: GeneratedTool[]): GeneratedTool[] => {
+    const byName = new Map<string, GeneratedTool>()
+    for (const tool of seed) byName.set(tool.name, tool)
+    const editor: ToolEditor = {
+      list: () => [...byName.values()],
+      get: (id) => byName.get(id),
+      add: (tool) => {
+        byName.set(tool.name, tool)
+      },
+      update: (id, update) => {
+        const tool = byName.get(id)
+        if (tool) update(tool)
+      },
+      remove: (id) => {
+        byName.delete(id)
+      },
+      namespace: () => undefined,
+    }
+    for (const transform of transforms) transform(editor)
+    return [...byName.values()]
+  }
+
   return {
     context,
     triggerShellCreateBefore: (event: ShellCreateBeforeEvent) => shellCreateBefore.trigger(event),
@@ -157,19 +207,15 @@ function createPluginContext() {
     triggerSessionPrompt: (event: SessionPromptEvent) => sessionPrompt.trigger(event),
     /** Dispatches a context event so registered callbacks can update it. */
     triggerSessionContext: (event: SessionContextEvent) => sessionContext.trigger(event),
-    registeredTools: () => {
-      const tools: GeneratedTool[] = []
-      const editor = { add: (tool: GeneratedTool) => tools.push(tool) }
-      for (const transform of transforms) transform(editor)
-      return tools
-    },
+    applyToolTransforms,
+    registeredTools: () => applyToolTransforms([]),
   }
 }
 
 let importCount = 0
 
 /** Imports a fresh plugin instance, validates its definition, and runs setup in the test context. */
-export async function loadGeneratedPlugin(file: string): Promise<GeneratedPlugin> {
+export async function loadGeneratedPlugin(file: string, options: LoadGeneratedPluginOptions = {}): Promise<GeneratedPlugin> {
   importCount += 1
   const imported = (await import(`${pathToFileURL(file).href}?ocm-test=${importCount}`)) as { default?: unknown }
   const definition = imported.default
@@ -185,8 +231,8 @@ export async function loadGeneratedPlugin(file: string): Promise<GeneratedPlugin
     throw new Error(`${file} must default-export a setup function`)
   }
 
-  const registrations = createPluginContext()
-  await (setup as (context: PluginContext) => Promise<void> | void)(registrations.context)
+  const registrations = createPluginContext({ directory: options.location?.directory ?? process.cwd() })
+  const cleanup = (await (setup as (context: PluginContext) => Promise<PluginCleanup | void> | PluginCleanup | void)(registrations.context)) as PluginCleanup | void
   return {
     id,
     triggerShellCreateBefore: registrations.triggerShellCreateBefore,
@@ -194,6 +240,10 @@ export async function loadGeneratedPlugin(file: string): Promise<GeneratedPlugin
     triggerPermissionEvaluate: registrations.triggerPermissionEvaluate,
     triggerSessionPrompt: registrations.triggerSessionPrompt,
     triggerSessionContext: registrations.triggerSessionContext,
+    applyToolTransforms: registrations.applyToolTransforms,
     registeredTools: registrations.registeredTools,
+    dispose: async () => {
+      if (typeof cleanup === 'function') await cleanup()
+    },
   }
 }

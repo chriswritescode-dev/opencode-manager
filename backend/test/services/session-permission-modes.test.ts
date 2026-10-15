@@ -7,6 +7,8 @@ import { createScheduleRun, updateScheduleRunMetadata } from '../../src/db/sched
 import { getSessionPermissionMode, setSessionPermissionMode } from '../../src/db/session-permission-modes'
 import { SettingsService } from '../../src/services/settings'
 import { SessionPermissionModeService } from '../../src/services/session-permission-modes'
+import { SessionAncestry } from '../../src/services/session-ancestry'
+import type { OpenCodeClient } from '../../src/services/opencode/client'
 import type { SSEEvent } from '../../src/services/sse-aggregator'
 import {
   createFakeSessionPermissionClient,
@@ -30,6 +32,14 @@ function createTestDb(): Database {
   const db = new Database(':memory:')
   migrate(db, allMigrations)
   return db
+}
+
+function createPermissionModeService(
+  db: Database,
+  client: OpenCodeClient,
+  settingsService: SettingsService,
+): SessionPermissionModeService {
+  return new SessionPermissionModeService(db, client, settingsService, new SessionAncestry(client))
 }
 
 function permissionAskedEvent(sessionID: string, id: string): SSEEvent {
@@ -94,7 +104,7 @@ describe('SessionPermissionModeService', () => {
   })
 
   it('treats a root session with no stored row as ask', async () => {
-    const service = new SessionPermissionModeService(db, createFakeSessionPermissionClient(), new SettingsService(db))
+    const service = createPermissionModeService(db, createFakeSessionPermissionClient(), new SettingsService(db))
 
     await expect(service.getEffectiveMode('ses_root')).resolves.toEqual({
       sessionId: 'ses_root',
@@ -107,7 +117,7 @@ describe('SessionPermissionModeService', () => {
   it('applies a stored auto root mode to its child and marks it locked to the child', async () => {
     setSessionPermissionMode(db, 'ses_root', 'auto')
     const client = createFakeSessionPermissionClient({ parents: { ses_child: 'ses_root', ses_root: null } })
-    const service = new SessionPermissionModeService(db, client, new SettingsService(db))
+    const service = createPermissionModeService(db, client, new SettingsService(db))
 
     await expect(service.getEffectiveMode('ses_child')).resolves.toEqual({
       sessionId: 'ses_child',
@@ -137,7 +147,7 @@ describe('SessionPermissionModeService', () => {
     updateScheduleRunMetadata(db, 1, 1, run.id, { sessionId: 'ses_scheduled' })
     setSessionPermissionMode(db, 'ses_scheduled', 'auto')
 
-    const service = new SessionPermissionModeService(db, createFakeSessionPermissionClient(), new SettingsService(db))
+    const service = createPermissionModeService(db, createFakeSessionPermissionClient(), new SettingsService(db))
 
     await expect(service.getEffectiveMode('ses_scheduled')).resolves.toEqual({
       sessionId: 'ses_scheduled',
@@ -149,7 +159,7 @@ describe('SessionPermissionModeService', () => {
 
   it('rejects setMode for a child session', async () => {
     const client = createFakeSessionPermissionClient({ parents: { ses_child: 'ses_root', ses_root: null } })
-    const service = new SessionPermissionModeService(db, client, new SettingsService(db))
+    const service = createPermissionModeService(db, client, new SettingsService(db))
 
     await expect(service.setMode('ses_child', 'auto', '/abs/repo')).rejects.toMatchObject({ status: 400 })
     expect(getSessionPermissionMode(db, 'ses_child')).toBeNull()
@@ -157,7 +167,7 @@ describe('SessionPermissionModeService', () => {
   })
 
   it('fails closed to ask when parent resolution fails', async () => {
-    const service = new SessionPermissionModeService(db, createFakeSessionPermissionClient({ failSessionGet: true }), new SettingsService(db))
+    const service = createPermissionModeService(db, createFakeSessionPermissionClient({ failSessionGet: true }), new SettingsService(db))
 
     await expect(service.getEffectiveMode('ses_root')).resolves.toEqual({
       sessionId: 'ses_root',
@@ -169,7 +179,7 @@ describe('SessionPermissionModeService', () => {
 
   it('reads the default mode from session settings', () => {
     const settingsService = new SettingsService(db)
-    const service = new SessionPermissionModeService(db, createFakeSessionPermissionClient(), settingsService)
+    const service = createPermissionModeService(db, createFakeSessionPermissionClient(), settingsService)
 
     expect(service.defaultMode()).toBe('ask')
 
@@ -180,7 +190,7 @@ describe('SessionPermissionModeService', () => {
   it('stores the default auto mode for a launched session', async () => {
     const settingsService = new SettingsService(db)
     settingsService.updateSettings({ sessionDefaults: { permissionMode: 'auto' } })
-    const service = new SessionPermissionModeService(db, createFakeSessionPermissionClient(), settingsService)
+    const service = createPermissionModeService(db, createFakeSessionPermissionClient(), settingsService)
 
     await service.applyDefaultMode('ses_launched', DIRECTORY)
 
@@ -188,7 +198,7 @@ describe('SessionPermissionModeService', () => {
   })
 
   it('stores no mode for a launched session when the default is ask', async () => {
-    const service = new SessionPermissionModeService(db, createFakeSessionPermissionClient(), new SettingsService(db))
+    const service = createPermissionModeService(db, createFakeSessionPermissionClient(), new SettingsService(db))
 
     await service.applyDefaultMode('ses_launched', DIRECTORY)
 
@@ -199,7 +209,7 @@ describe('SessionPermissionModeService', () => {
     const settingsService = new SettingsService(db)
     settingsService.updateSettings({ sessionDefaults: { permissionMode: 'auto' } })
     setSessionPermissionMode(db, 'ses_launched', 'ask')
-    const service = new SessionPermissionModeService(db, createFakeSessionPermissionClient(), settingsService)
+    const service = createPermissionModeService(db, createFakeSessionPermissionClient(), settingsService)
 
     await service.applyDefaultMode('ses_launched', DIRECTORY)
 
@@ -213,7 +223,7 @@ describe('SessionPermissionModeService', () => {
       parents: { ses_launched: null },
       pendingRequests: { [DIRECTORY]: [{ id: 'perm-launched', sessionID: 'ses_launched' }] },
     })
-    const service = new SessionPermissionModeService(db, client, settingsService)
+    const service = createPermissionModeService(db, client, settingsService)
 
     await service.applyDefaultMode('ses_launched', DIRECTORY)
 
@@ -228,7 +238,7 @@ describe('SessionPermissionModeService', () => {
   it('auto-accepts a permission request for an auto root session', async () => {
     setSessionPermissionMode(db, 'ses_root', 'auto')
     const client = createFakeSessionPermissionClient({ parents: { ses_root: null } })
-    const service = new SessionPermissionModeService(db, client, new SettingsService(db))
+    const service = createPermissionModeService(db, client, new SettingsService(db))
 
     await service.handleEvent(DIRECTORY, permissionAskedEvent('ses_root', 'perm-1'))
 
@@ -243,7 +253,7 @@ describe('SessionPermissionModeService', () => {
   it('auto-accepts a permission request for a child of an auto root session', async () => {
     setSessionPermissionMode(db, 'ses_root', 'auto')
     const client = createFakeSessionPermissionClient({ parents: { ses_child: 'ses_root', ses_root: null } })
-    const service = new SessionPermissionModeService(db, client, new SettingsService(db))
+    const service = createPermissionModeService(db, client, new SettingsService(db))
 
     await service.handleEvent(DIRECTORY, permissionAskedEvent('ses_child', 'perm-2'))
 
@@ -257,7 +267,7 @@ describe('SessionPermissionModeService', () => {
 
   it('leaves an ask session permission request unanswered', async () => {
     const client = createFakeSessionPermissionClient({ parents: { ses_root: null } })
-    const service = new SessionPermissionModeService(db, client, new SettingsService(db))
+    const service = createPermissionModeService(db, client, new SettingsService(db))
 
     await service.handleEvent(DIRECTORY, permissionAskedEvent('ses_root', 'perm-3'))
 
@@ -267,7 +277,7 @@ describe('SessionPermissionModeService', () => {
   it('stamps the default auto mode on a new root session but not on a child', async () => {
     const settingsService = new SettingsService(db)
     settingsService.updateSettings({ sessionDefaults: { permissionMode: 'auto' } })
-    const service = new SessionPermissionModeService(db, createFakeSessionPermissionClient(), settingsService)
+    const service = createPermissionModeService(db, createFakeSessionPermissionClient(), settingsService)
 
     await service.handleEvent(DIRECTORY, sessionCreatedEvent('ses_root'))
     await service.handleEvent(DIRECTORY, sessionCreatedEvent('ses_child', 'ses_root'))
@@ -277,7 +287,7 @@ describe('SessionPermissionModeService', () => {
   })
 
   it('does not stamp a new root session when the default mode is ask', async () => {
-    const service = new SessionPermissionModeService(db, createFakeSessionPermissionClient(), new SettingsService(db))
+    const service = createPermissionModeService(db, createFakeSessionPermissionClient(), new SettingsService(db))
 
     await service.handleEvent(DIRECTORY, sessionCreatedEvent('ses_root'))
 
@@ -287,7 +297,7 @@ describe('SessionPermissionModeService', () => {
   it('does not stamp the default auto mode when the created event carries an explicit permissions ruleset', async () => {
     const settingsService = new SettingsService(db)
     settingsService.updateSettings({ sessionDefaults: { permissionMode: 'auto' } })
-    const service = new SessionPermissionModeService(db, createFakeSessionPermissionClient(), settingsService)
+    const service = createPermissionModeService(db, createFakeSessionPermissionClient(), settingsService)
 
     await service.handleEvent(
       DIRECTORY,
@@ -299,7 +309,7 @@ describe('SessionPermissionModeService', () => {
 
   it('copies an auto source mode onto a forked root session', async () => {
     setSessionPermissionMode(db, 'ses_source', 'auto')
-    const service = new SessionPermissionModeService(
+    const service = createPermissionModeService(
       db,
       createFakeSessionPermissionClient({ parents: { ses_source: null } }),
       new SettingsService(db),
@@ -311,7 +321,7 @@ describe('SessionPermissionModeService', () => {
   })
 
   it('leaves a forked session unstamped when the source is ask', async () => {
-    const service = new SessionPermissionModeService(
+    const service = createPermissionModeService(
       db,
       createFakeSessionPermissionClient({ parents: { ses_source: null } }),
       new SettingsService(db),
@@ -325,7 +335,7 @@ describe('SessionPermissionModeService', () => {
   it('does not overwrite an explicit pin when copying the source mode onto a fork', async () => {
     setSessionPermissionMode(db, 'ses_source', 'auto')
     setSessionPermissionMode(db, 'ses_fork', 'ask')
-    const service = new SessionPermissionModeService(
+    const service = createPermissionModeService(
       db,
       createFakeSessionPermissionClient({ parents: { ses_source: null } }),
       new SettingsService(db),
@@ -339,7 +349,7 @@ describe('SessionPermissionModeService', () => {
   it('pinAsk overrides a default auto stamp and survives later insert-if-absent events', async () => {
     const settingsService = new SettingsService(db)
     settingsService.updateSettings({ sessionDefaults: { permissionMode: 'auto' } })
-    const service = new SessionPermissionModeService(
+    const service = createPermissionModeService(
       db,
       createFakeSessionPermissionClient({ parents: { ses_root: null } }),
       settingsService,
@@ -374,7 +384,7 @@ describe('SessionPermissionModeService', () => {
     })
     updateScheduleRunMetadata(db, 1, 1, run.id, { sessionId: 'ses_scheduled' })
 
-    const service = new SessionPermissionModeService(db, createFakeSessionPermissionClient(), new SettingsService(db))
+    const service = createPermissionModeService(db, createFakeSessionPermissionClient(), new SettingsService(db))
 
     await expect(service.setMode('ses_scheduled', 'auto', DIRECTORY)).rejects.toMatchObject({ status: 409 })
     expect(getSessionPermissionMode(db, 'ses_scheduled')).toBeNull()
@@ -393,7 +403,7 @@ describe('SessionPermissionModeService', () => {
         ],
       },
     })
-    const service = new SessionPermissionModeService(db, client, new SettingsService(db))
+    const service = createPermissionModeService(db, client, new SettingsService(db))
 
     await service.acceptPendingRequestsForActiveSessions()
 
@@ -413,7 +423,7 @@ describe('SessionPermissionModeService', () => {
       activeSessions: ['ses_child'],
       pendingRequests: { [DIRECTORY]: [{ id: 'perm-child', sessionID: 'ses_child' }] },
     })
-    const service = new SessionPermissionModeService(db, client, new SettingsService(db))
+    const service = createPermissionModeService(db, client, new SettingsService(db))
 
     await service.acceptPendingRequestsForActiveSessions()
 
@@ -427,11 +437,44 @@ describe('SessionPermissionModeService', () => {
 
   it('clears the stored mode when the session is deleted', async () => {
     setSessionPermissionMode(db, 'ses_root', 'auto')
-    const service = new SessionPermissionModeService(db, createFakeSessionPermissionClient(), new SettingsService(db))
+    const service = createPermissionModeService(db, createFakeSessionPermissionClient(), new SettingsService(db))
 
     await service.handleEvent(DIRECTORY, sessionDeletedEvent('ses_root'))
 
     expect(getSessionPermissionMode(db, 'ses_root')).toBeNull()
+  })
+
+  it('clears the stored mode when the session is deleted with a null directory', async () => {
+    setSessionPermissionMode(db, 'ses_root', 'auto')
+    const service = createPermissionModeService(db, createFakeSessionPermissionClient(), new SettingsService(db))
+
+    await service.handleEvent(null, sessionDeletedEvent('ses_root'))
+
+    expect(getSessionPermissionMode(db, 'ses_root')).toBeNull()
+  })
+
+  it('handles a null directory on permission.asked without listing or accepting anything in a guessed location', async () => {
+    const listed: string[] = []
+    const client = createFakeSessionPermissionClient({
+      parents: { ses_root: null },
+      listRequests: async (directory) => {
+        listed.push(directory)
+        return [{ id: 'perm-guess', sessionID: 'ses_root' }]
+      },
+    })
+    const service = createPermissionModeService(db, client, new SettingsService(db))
+
+    const event = {
+      id: 'evt_perm_null',
+      created: Date.now(),
+      type: 'permission.asked',
+      data: { id: 'perm-1', sessionID: 'ses_root', action: 'shell', resources: ['ls'] },
+    } as unknown as SSEEvent
+
+    await expect(service.handleEvent(null, event)).resolves.toBeUndefined()
+
+    expect(listed).toEqual([])
+    expect(client.replyPermission).not.toHaveBeenCalled()
   })
 
   it('replies to pending requests for the switched root only', async () => {
@@ -444,7 +487,7 @@ describe('SessionPermissionModeService', () => {
         ],
       },
     })
-    const service = new SessionPermissionModeService(db, client, new SettingsService(db))
+    const service = createPermissionModeService(db, client, new SettingsService(db))
 
     await service.setMode('ses_root', 'auto', DIRECTORY)
 
@@ -466,7 +509,7 @@ describe('SessionPermissionModeService', () => {
         return listDeferred.promise
       },
     })
-    const service = new SessionPermissionModeService(db, client, new SettingsService(db))
+    const service = createPermissionModeService(db, client, new SettingsService(db))
 
     const autoSwitch = service.setMode('ses_root', 'auto', DIRECTORY)
     await listStarted.promise
@@ -492,7 +535,7 @@ describe('SessionPermissionModeService', () => {
         return Promise.resolve({ parentID: null })
       },
     })
-    const service = new SessionPermissionModeService(db, client, new SettingsService(db))
+    const service = createPermissionModeService(db, client, new SettingsService(db))
 
     const autoSwitch = service.setMode('ses_root', 'auto', DIRECTORY)
     await childResolutionStarted.promise
@@ -506,7 +549,7 @@ describe('SessionPermissionModeService', () => {
 
   it('does not list pending requests when switching to ask', async () => {
     const client = createFakeSessionPermissionClient({ parents: { ses_root: null } })
-    const service = new SessionPermissionModeService(db, client, new SettingsService(db))
+    const service = createPermissionModeService(db, client, new SettingsService(db))
 
     await service.setMode('ses_root', 'ask', DIRECTORY)
 

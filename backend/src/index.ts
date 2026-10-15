@@ -39,6 +39,7 @@ import { createAuthMiddleware } from './auth/middleware'
 import { createPromptTemplateRoutes } from './routes/prompt-templates'
 import { createSessionPinRoutes } from './routes/session-pins'
 import { createSessionPermissionModeRoutes } from './routes/session-permission-modes'
+import { createSessionSandboxRoutes } from './routes/session-sandbox'
 import { createSessionGoalRoutes } from './routes/session-goals'
 import { createMultiRunRoutes } from './routes/multi-runs'
 import { createChangeWalkthroughRoutes } from './routes/change-walkthroughs'
@@ -53,6 +54,8 @@ import { sseAggregator } from './services/sse-aggregator'
 import { ensureDirectoryExists, writeFileContent, fileExists } from './services/file-operations'
 import { SettingsService } from './services/settings'
 import { SessionPermissionModeService } from './services/session-permission-modes'
+import { SessionSandboxService } from './services/session-sandbox'
+import { SessionAncestry } from './services/session-ancestry'
 import { SessionGoalService } from './services/session-goals'
 import { MultiRunService } from './services/multi-runs'
 import { ChangeWalkthroughService } from './services/change-walkthroughs'
@@ -70,7 +73,7 @@ import { ScheduleWorktreeManager } from './services/schedule-worktree'
 import { migrateGlobalSkills } from './services/skills'
 import { installAssistantWorkspace } from './services/assistant-mode'
 import { detectSandboxCapability } from './services/sandbox/capability'
-import { SandboxRuntimeService, stopWorkspaceSandboxOnShutdown } from './services/sandbox/runtime'
+import { SandboxRuntimeService, stopSandboxesOnShutdown } from './services/sandbox/runtime'
 import { getOpenCodeImportStatus, syncOpenCodeImport } from './services/opencode-import'
 import { readOpenCodeConfigFile, foldLegacyConfigJsonSource, withOpenCodeConfigLock } from './services/opencode-config-file'
 import { seedOpenCodeConfigFile } from './services/opencode-config-apply'
@@ -225,8 +228,8 @@ try {
 
   opencodeServerManager.setDatabase(db)
   detectSandboxCapability()
-  void new SandboxRuntimeService(db).prepareWorkspaceSandboxOnBoot().catch((error) => {
-    logger.warn('Workspace sandbox preparation failed:', error)
+  void new SandboxRuntimeService(db).prepareSandboxOnBoot().catch((error) => {
+    logger.warn('Sandbox preparation failed:', error)
   })
   const openCodeStatus = await openCodeSupervisor.start()
   if (openCodeStatus.healthy) {
@@ -260,7 +263,11 @@ const scheduleRunnerInstance = new ScheduleRunner(scheduleService)
 
 const notificationService = new NotificationService(db)
 const sessionSettingsService = new SettingsService(db)
-const sessionPermissionModeService = new SessionPermissionModeService(db, openCodeClient, sessionSettingsService)
+const sessionAncestry = new SessionAncestry(openCodeClient)
+const sessionPermissionModeService = new SessionPermissionModeService(db, openCodeClient, sessionSettingsService, sessionAncestry)
+const sessionSandboxService = new SessionSandboxService(db, sessionAncestry, sessionSettingsService, {
+  removeSessionSandbox: (rootSessionId) => new SandboxRuntimeService(db).removeSessionSandbox(rootSessionId),
+})
 const sessionGoalService = new SessionGoalService(db, openCodeClient, sessionSettingsService, {
   onOutcome: (goal) => {
     void notificationService.notifyGoalOutcome(goal).catch((error) => {
@@ -278,6 +285,9 @@ const changeWalkthroughService = new ChangeWalkthroughService(db, openCodeClient
 sseAggregator.onEvent((directory, event) => {
   sessionPermissionModeService.handleEvent(directory, event).catch((err) => {
     logger.error('Session permission mode event handling error:', err)
+  })
+  sessionSandboxService.handleEvent(directory, event).catch((err) => {
+    logger.error('Session sandbox event handling error:', err)
   })
   sessionGoalService.handleEvent(directory, event).catch((err) => {
     logger.error('Session goal event handling error:', err)
@@ -341,7 +351,7 @@ app.route('/api/auth-info', createAuthInfoRoutes(auth, db))
 app.route('/api/health', createHealthRoutes(db, openCodeSupervisor))
 
 app.route('/api/mcp-oauth-proxy', createMcpOauthProxyRoutes(openCodeClient, requireAuth))
-app.route('/api/internal', createInternalRoutes(db, scheduleService, notificationService, settingsService, openCodeClient, sessionPermissionModeService, repoWorkspaces, gitAuthService, sessionGoalService, multiRunService, changeWalkthroughService))
+app.route('/api/internal', createInternalRoutes(db, scheduleService, notificationService, settingsService, openCodeClient, sessionPermissionModeService, repoWorkspaces, gitAuthService, sessionGoalService, multiRunService, changeWalkthroughService, sessionSandboxService))
 app.route('/api/opencode-proxy', createOpenCodeProxyRoutes(db, settingsService, upgradeWebSocket))
 
 const protectedApi = new Hono()
@@ -362,6 +372,7 @@ protectedApi.route('/notifications', createNotificationRoutes(notificationServic
 protectedApi.route('/prompt-templates', createPromptTemplateRoutes(db))
 protectedApi.route('/session-pins', createSessionPinRoutes(db))
 protectedApi.route('/session-permission-modes', createSessionPermissionModeRoutes(sessionPermissionModeService))
+protectedApi.route('/session-sandbox', createSessionSandboxRoutes(sessionSandboxService))
 protectedApi.route('/session-goals', createSessionGoalRoutes(sessionGoalService))
 protectedApi.route('/multi-runs', createMultiRunRoutes(multiRunService))
 protectedApi.route('/change-walkthroughs', createChangeWalkthroughRoutes(changeWalkthroughService))
@@ -468,10 +479,10 @@ const shutdown = async (signal: string) => {
     logger.error('Error during shutdown:', error)
   }
   try {
-    await stopWorkspaceSandboxOnShutdown(db)
-    logger.info('Workspace sandbox stopped')
+    await stopSandboxesOnShutdown(db)
+    logger.info('Sandbox microVMs stopped')
   } catch (error) {
-    logger.error('Error stopping workspace sandbox:', error)
+    logger.error('Error stopping sandbox microVMs:', error)
   }
   process.exit(0)
 }

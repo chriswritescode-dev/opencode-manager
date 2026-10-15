@@ -1,6 +1,7 @@
 import path from 'path'
+import { createHash } from 'crypto'
 import { accessSync, constants, realpathSync, statSync } from 'fs'
-import { realpath } from 'fs/promises'
+import { lstat, readFile, realpath } from 'fs/promises'
 import {
   ENV,
   getForgeWorktreesPath,
@@ -12,12 +13,30 @@ import {
   getScheduleWorktreesPath,
 } from '@opencode-manager/shared/config/env'
 import { isPathWithinRoot } from '../../utils/fs-safe'
+import { executeCommand } from '../../utils/process'
 
-export const WORKSPACE_SANDBOX_NAME = 'ocm-workspace'
+export const SESSION_SANDBOX_NAME_PATTERN = /^ocm-session-[0-9a-f]{12}$/
 
-export const SANDBOX_DOCKER_DATA_VOLUME_NAME = 'ocm-workspace-docker-data'
 export const SANDBOX_DOCKER_DATA_GUEST_PATH = '/var/lib/docker'
 export const SANDBOX_DOCKER_DATA_SIZE = '20G'
+
+const SANDBOX_GIT_RESOLVE_TIMEOUT_MS = 10000
+
+export function sessionSandboxName(rootSessionId: string): string {
+  return `ocm-session-${createHash('sha256').update(rootSessionId).digest('hex').slice(0, 12)}`
+}
+
+export function sandboxDockerDataVolumeName(name: string): string {
+  return `${name}-docker-data`
+}
+
+export type SandboxVmSpec = {
+  name: string
+  rootSessionId: string
+  projectMounts: string[]
+  cpus: number
+  memoryMib: number
+}
 
 export const SANDBOX_UNAVAILABLE_PREFIX = 'Sandbox enforcement is on but the sandbox is unavailable: '
 
@@ -133,16 +152,16 @@ export function buildSandboxPullArgs(): string[] {
   return ['pull', ENV.SANDBOX.IMAGE]
 }
 
-export function buildSandboxPingArgs(): string[] {
-  return ['ping', WORKSPACE_SANDBOX_NAME, '-q']
+export function buildSandboxPingArgs(name: string): string[] {
+  return ['ping', name, '-q']
 }
 
-export function buildSandboxVerifyProvisionArgs(): string[] {
+export function buildSandboxVerifyProvisionArgs(name: string): string[] {
   const uid = resolveSandboxExecUserUid()
   if (uid === null) return []
   return [
     'exec',
-    WORKSPACE_SANDBOX_NAME,
+    name,
     '--no-tty',
     '-q',
     '-u',
@@ -167,12 +186,27 @@ export function sandboxMountRoots(): string[] {
   ]
 }
 
+export function sandboxVmMountRoots(spec: SandboxVmSpec): string[] {
+  const roots: string[] = []
+  for (const root of [
+    ...spec.projectMounts,
+    getOpenCodeToolOutputPath(),
+    getOpenCodeGlobalSkillsPath(),
+    getOpenCodeAgentTmpPath(),
+  ]) {
+    if (!roots.includes(root)) {
+      roots.push(root)
+    }
+  }
+  return roots
+}
+
 export function quoteForShell(value: string): string {
   return `'${value.replace(/'/g, `'\\''`)}'`
 }
 
-function buildSandboxDockerDataMountArg(): string {
-  return `${SANDBOX_DOCKER_DATA_VOLUME_NAME}:${SANDBOX_DOCKER_DATA_GUEST_PATH}:kind=disk,size=${SANDBOX_DOCKER_DATA_SIZE}`
+function buildSandboxDockerDataMountArg(name: string): string {
+  return `${sandboxDockerDataVolumeName(name)}:${SANDBOX_DOCKER_DATA_GUEST_PATH}:kind=disk,size=${SANDBOX_DOCKER_DATA_SIZE}`
 }
 
 function parseSandboxNamedMountSpec(spec: string): { name: string; guest: string } {
@@ -180,33 +214,38 @@ function parseSandboxNamedMountSpec(spec: string): { name: string; guest: string
   return { name, guest }
 }
 
-export function buildSandboxCreateArgs(): string[] {
-  const tmpfsSizeMib = resolveSandboxRuntimeTmpfsSizeMib(parseMemoryMib(ENV.SANDBOX.MEMORY))
+export function buildSandboxCreateArgs(spec: SandboxVmSpec, options: { replace?: boolean } = {}): string[] {
+  const tmpfsSizeMib = resolveSandboxRuntimeTmpfsSizeMib(spec.memoryMib)
   if (tmpfsSizeMib === null) throw new Error('sandbox memory must be positive to size the runtime tmpfs')
+  const workdir = spec.projectMounts[0]
+  if (workdir === undefined) throw new Error('sandbox VM spec must include at least one project mount')
   return [
     'run',
     '-d',
+    ...(options.replace === true ? ['--replace'] : []),
     '--name',
-    WORKSPACE_SANDBOX_NAME,
+    spec.name,
     '--label',
     'ocm.managed=true',
     '--label',
     `ocm.net=${ENV.SANDBOX.NET}`,
+    '--label',
+    `ocm.session=${spec.rootSessionId}`,
     '-m',
-    ENV.SANDBOX.MEMORY,
+    `${spec.memoryMib}M`,
     '-c',
-    String(ENV.SANDBOX.CPUS),
+    String(spec.cpus),
     '--net',
     ENV.SANDBOX.NET,
     '-u',
     resolveSandboxExecUser(),
-    ...sandboxMountRoots().flatMap((root) => ['--mount-dir', `${root}:${root}`]),
+    ...sandboxVmMountRoots(spec).flatMap((root) => ['--mount-dir', `${root}:${root}`]),
     '--mount-named',
-    buildSandboxDockerDataMountArg(),
+    buildSandboxDockerDataMountArg(spec.name),
     '--tmpfs',
     `/tmp:${tmpfsSizeMib}M`,
     '-w',
-    getReposPath(),
+    workdir,
     '--entrypoint',
     '/usr/bin/env',
     '--shell',
@@ -218,20 +257,28 @@ export function buildSandboxCreateArgs(): string[] {
   ]
 }
 
-export function buildSandboxInspectArgs(): string[] {
-  return ['inspect', WORKSPACE_SANDBOX_NAME, '--format', 'json']
+export function buildSandboxInspectArgs(name: string): string[] {
+  return ['inspect', name, '--format', 'json']
 }
 
-export function buildSandboxRemoveArgs(): string[] {
-  return ['rm', '--force', WORKSPACE_SANDBOX_NAME]
+export function buildSandboxRemoveArgs(name: string): string[] {
+  return ['rm', '--force', name]
 }
 
 export function buildSandboxListArgs(): string[] {
   return ['ls', '--format', 'json']
 }
 
-export function buildSandboxStartArgs(): string[] {
-  return ['start', WORKSPACE_SANDBOX_NAME]
+export function buildSandboxStartArgs(name: string): string[] {
+  return ['start', name]
+}
+
+export function buildSandboxStopArgs(name: string): string[] {
+  return ['stop', name]
+}
+
+export function buildSandboxVolumeRemoveArgs(volume: string): string[] {
+  return ['volume', 'rm', volume]
 }
 
 export function buildSandboxStopManagedArgs(): string[] {
@@ -346,7 +393,7 @@ export function sandboxNetworkPolicyMismatch(inspected: unknown, expected: Sandb
   return null
 }
 
-function parseMemoryMib(value: string): number | null {
+export function parseMemoryMib(value: string): number | null {
   const match = /^(\d+(?:\.\d+)?)([gGmM])?$/.exec(value.trim())
   if (match === null) return null
   const number = Number(match[1])
@@ -422,8 +469,8 @@ function parseSandboxCreateArgs(args: string[]): {
   return { name, labels, memory, cpus, user, mountDirs, namedMounts, workdir, entrypoint, shell, image, cmd }
 }
 
-export function buildCanonicalSandboxSpec(): Record<string, unknown> {
-  const args = parseSandboxCreateArgs(buildSandboxCreateArgs())
+export function buildCanonicalSandboxSpec(spec: SandboxVmSpec): Record<string, unknown> {
+  const args = parseSandboxCreateArgs(buildSandboxCreateArgs(spec))
   const memoryMib = parseMemoryMib(args.memory)
   const bindMounts = args.mountDirs.map((spec) => {
     const separator = spec.indexOf(':')
@@ -511,6 +558,66 @@ export async function resolveSandboxWorkDirectory(directory: string): Promise<st
   return null
 }
 
+async function safeRealpath(target: string): Promise<string | null> {
+  try {
+    return await realpath(target)
+  } catch {
+    return null
+  }
+}
+
+export async function resolveSessionSandboxMounts(locationDirectory: string): Promise<string[] | null> {
+  const work = await resolveSandboxWorkDirectory(locationDirectory)
+  if (work === null) return null
+
+  let result: string | { exitCode: number; stdout: string; stderr: string }
+  try {
+    result = (await executeCommand(
+      ['git', '-C', work, 'rev-parse', '--path-format=absolute', '--show-toplevel', '--git-dir', '--git-common-dir'],
+      { ignoreExitCode: true, silent: true, timeout: SANDBOX_GIT_RESOLVE_TIMEOUT_MS },
+    )) as string | { exitCode: number; stdout: string; stderr: string }
+  } catch {
+    return [work]
+  }
+  const listing = typeof result === 'string' ? { exitCode: 0, stdout: result, stderr: '' } : result
+  if (listing.exitCode !== 0) return [work]
+
+  const lines = listing.stdout.split('\n').map((line) => line.trim()).filter((line) => line !== '')
+  if (lines.length < 3) return [work]
+  const top = await resolveSandboxWorkDirectory(lines[0]!)
+  const gitDir = lines[1]!
+  const common = await resolveSandboxWorkDirectory(lines[2]!)
+  if (top === null || common === null) return null
+
+  const resolvedTop = await safeRealpath(top)
+  const resolvedWork = await safeRealpath(work)
+  const resolvedGitDir = await safeRealpath(gitDir)
+  const resolvedCommon = await safeRealpath(common)
+  if (resolvedTop === null || resolvedWork === null || resolvedGitDir === null || resolvedCommon === null) return null
+  if (!isPathWithinRoot(resolvedTop, resolvedWork)) return null
+
+  const topGitPath = path.join(resolvedTop, '.git')
+  const topGitStat = await lstat(topGitPath).catch(() => null)
+  if (topGitStat === null || topGitStat.isSymbolicLink()) return null
+
+  if (resolvedGitDir === resolvedCommon) {
+    if (!topGitStat.isDirectory() || resolvedCommon !== topGitPath) return null
+  } else {
+    if (!topGitStat.isFile()) return null
+    if (path.dirname(resolvedGitDir) !== path.join(resolvedCommon, 'worktrees')) return null
+    let pointer: string
+    try {
+      pointer = (await readFile(path.join(resolvedGitDir, 'gitdir'), 'utf8')).trim()
+    } catch {
+      return null
+    }
+    const resolvedPointer = await safeRealpath(path.isAbsolute(pointer) ? pointer : path.join(resolvedGitDir, pointer))
+    if (resolvedPointer === null || resolvedPointer !== topGitPath) return null
+  }
+
+  return isPathWithinRoot(top, common) ? [top] : [top, common]
+}
+
 export function resolveSandboxExecUser(): string {
   const configured = ENV.SANDBOX.EXEC_USER.trim()
   if (/^\d+$/.test(configured)) {
@@ -537,13 +644,13 @@ export function resolveSandboxExecUserGid(): number | null {
   return Number(gid)
 }
 
-export function buildSandboxProvisionArgs(): string[] {
+export function buildSandboxProvisionArgs(name: string): string[] {
   const uid = resolveSandboxExecUserUid()
   const gid = resolveSandboxExecUserGid()
   if (uid === null || gid === null) return []
   return [
     'exec',
-    WORKSPACE_SANDBOX_NAME,
+    name,
     '--no-tty',
     '-q',
     '-u',

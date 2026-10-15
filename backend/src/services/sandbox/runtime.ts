@@ -1,9 +1,15 @@
 import type { Database } from 'bun:sqlite'
 import path from 'path'
 import { lstat, realpath } from 'fs/promises'
-import { ENV } from '@opencode-manager/shared/config/env'
+import {
+  ENV,
+  getOpenCodeAgentTmpPath,
+  getOpenCodeGlobalSkillsPath,
+  getOpenCodeToolOutputPath,
+} from '@opencode-manager/shared/config/env'
+import { DEFAULT_SANDBOX_IDLE_STOP_MINUTES, DEFAULT_SANDBOX_MAX_RUNNING_VMS } from '@opencode-manager/shared/schemas'
 import { executeCommand } from '../../utils/process'
-import { mkdirSafe } from '../../utils/fs-safe'
+import { isPathWithinRoot, mkdirSafe } from '../../utils/fs-safe'
 import { logger } from '../../utils/logger'
 import { SettingsService } from '../settings'
 import { CredentialProvider } from '../credential-provider'
@@ -11,7 +17,7 @@ import { getGitIdentityEnvForDirectory } from '../git-identity'
 import { getProcessIdentityAttestationError } from '../opencode/process-identity'
 import { detectSandboxCapability } from './capability'
 import {
-  WORKSPACE_SANDBOX_NAME,
+  SESSION_SANDBOX_NAME_PATTERN,
   buildCanonicalSandboxSpec,
   buildSandboxCreateArgs,
   buildSandboxInspectArgs,
@@ -21,15 +27,21 @@ import {
   buildSandboxPullArgs,
   buildSandboxRemoveArgs,
   buildSandboxStartArgs,
+  buildSandboxStopArgs,
   buildSandboxStopManagedArgs,
   buildSandboxVerifyProvisionArgs,
+  buildSandboxVolumeRemoveArgs,
   resolveExpectedSandboxNetworkPolicy,
   resolveSandboxRuntimeTmpfsSizeMib,
   resolveSandboxWorkDirectory,
+  resolveSessionSandboxMounts,
+  sandboxDockerDataVolumeName,
   sandboxExecutablePath,
-  sandboxMountRoots,
   sandboxNetworkPolicyMismatch,
   sandboxProjectRoots,
+  sandboxVmMountRoots,
+  sessionSandboxName,
+  type SandboxVmSpec,
 } from './command'
 
 const SANDBOX_LS_CACHE_MS = 5000
@@ -40,11 +52,21 @@ const SANDBOX_PROVISION_RETRY_DELAY_MS = 2000
 const SANDBOX_PROVISION_RETRY_ATTEMPTS = 5
 const SANDBOX_AGENT_PING_TIMEOUT_MS = 10000
 const SANDBOX_AGENT_POLL_DELAY_MS = 1000
+const SANDBOX_IDLE_SWEEP_INTERVAL_MS = 60000
 const SANDBOX_RUNTIME_TMPFS_GUEST = path.resolve('/tmp')
+const SANDBOX_REMOVAL_MISSING_PATTERN = /not found|no such sandbox|unknown sandbox|does not exist/i
+const SANDBOX_VOLUME_REMOVAL_MISSING_PATTERN = /not found|no such volume|unknown volume|does not exist/i
+const SANDBOX_CREATE_EXISTS_PATTERN = /already exists/i
+
+export type SandboxShellTarget = {
+  rootSessionId: string
+  locationDirectory: string
+  resources: { cpus: number; memoryMib: number }
+}
 
 export type SandboxShellPlan =
   | { mode: 'host' }
-  | { mode: 'sandbox'; workdir: string; env?: Record<string, string> }
+  | { mode: 'sandbox'; name: string; workdir: string; env?: Record<string, string> }
   | { mode: 'blocked'; reason: string }
 
 export type SandboxStatus = {
@@ -54,32 +76,62 @@ export type SandboxStatus = {
   msbVersion?: string
 }
 
-let inFlightBoot: Promise<void> | null = null
-let lastKnownRunningAt: number | null = null
+type VmState = {
+  inFlightBoot: Promise<void> | null
+  inFlightRemoval: Promise<void> | null
+  lastKnownRunningAt: number | null
+  lastUsedAt: number
+  inFlightProvision: Promise<void> | null
+  backgroundProvisionRetry: Promise<void> | null
+  provisionRetryGeneration: number
+}
+
+const vmStates = new Map<string, VmState>()
+
 let shutdownRequested = false
 let stopInProgress = false
-let canonicalSandboxSpecMemo: Record<string, unknown> | null = null
+let idleSweepTimer: ReturnType<typeof setInterval> | null = null
+let idleSweepStartedAt = 0
+let startAdmission: Promise<void> = Promise.resolve()
+
+function vmState(name: string): VmState {
+  const existing = vmStates.get(name)
+  if (existing !== undefined) return existing
+  const created: VmState = {
+    inFlightBoot: null,
+    inFlightRemoval: null,
+    lastKnownRunningAt: null,
+    lastUsedAt: 0,
+    inFlightProvision: null,
+    backgroundProvisionRetry: null,
+    provisionRetryGeneration: 0,
+  }
+  vmStates.set(name, created)
+  return created
+}
 
 export function resetSandboxRuntimeState(): void {
-  inFlightBoot = null
-  lastKnownRunningAt = null
+  for (const state of vmStates.values()) {
+    state.provisionRetryGeneration += 1
+    state.backgroundProvisionRetry = null
+    state.inFlightProvision = null
+    state.inFlightBoot = null
+    state.inFlightRemoval = null
+  }
+  vmStates.clear()
   shutdownRequested = false
   stopInProgress = false
-  canonicalSandboxSpecMemo = null
-  provisionRetryGeneration += 1
-  backgroundProvisionRetry = null
-  inFlightProvision = null
-}
-
-function memoizedCanonicalSandboxSpec(): Record<string, unknown> {
-  if (canonicalSandboxSpecMemo === null) {
-    canonicalSandboxSpecMemo = buildCanonicalSandboxSpec()
+  idleSweepStartedAt = 0
+  if (idleSweepTimer !== null) {
+    clearInterval(idleSweepTimer)
+    idleSweepTimer = null
   }
-  return canonicalSandboxSpecMemo
+  startAdmission = Promise.resolve()
 }
 
-async function validateSandboxMountRoots(): Promise<void> {
-  for (const root of sandboxMountRoots()) {
+async function validateSandboxVmMountRoots(spec: SandboxVmSpec): Promise<void> {
+  const creatableRoots = new Set([getOpenCodeToolOutputPath(), getOpenCodeGlobalSkillsPath(), getOpenCodeAgentTmpPath()])
+  for (const root of sandboxVmMountRoots(spec)) {
     const resolvedRoot = path.resolve(root)
     let stat
     try {
@@ -88,6 +140,9 @@ async function validateSandboxMountRoots(): Promise<void> {
       const errorCode = error && typeof error === 'object' && 'code' in error ? (error as { code: string }).code : ''
       if (errorCode !== 'ENOENT') {
         throw new Error(`cannot inspect sandbox mount root ${root}: ${error instanceof Error ? error.message : String(error)}`)
+      }
+      if (!creatableRoots.has(root)) {
+        throw new Error(`sandbox mount root ${root} does not exist`)
       }
       await mkdirSafe(root)
       stat = await lstat(root)
@@ -102,88 +157,94 @@ async function validateSandboxMountRoots(): Promise<void> {
   }
 }
 
-function ensureWorkspaceSandbox(): Promise<void> {
-  if (inFlightBoot) {
-    return inFlightBoot
+function ensureSessionSandbox(spec: SandboxVmSpec, maxRunningVms: number): Promise<void> {
+  const state = vmState(spec.name)
+  if (state.inFlightBoot) {
+    return state.inFlightBoot
   }
-  inFlightBoot = (async () => {
+  state.inFlightBoot = (async () => {
     if (shutdownRequested || stopInProgress) {
-      throw new Error('sandbox shutdown is in progress; refusing to boot the workspace sandbox')
+      throw new Error('sandbox shutdown is in progress; refusing to boot the session sandbox')
     }
-    if (lastKnownRunningAt !== null && Date.now() - lastKnownRunningAt < SANDBOX_LS_CACHE_MS) {
+    const inFlightRemoval = state.inFlightRemoval
+    if (inFlightRemoval !== null) {
+      await inFlightRemoval.catch(() => undefined)
+    }
+    if (state.lastKnownRunningAt !== null && Date.now() - state.lastKnownRunningAt < SANDBOX_LS_CACHE_MS) {
       return
     }
-    await validateSandboxMountRoots()
-    await bootWorkspaceSandbox()
+    await validateSandboxVmMountRoots(spec)
+    await bootSessionSandbox(spec, maxRunningVms)
   })().finally(() => {
-    inFlightBoot = null
+    state.inFlightBoot = null
   })
-  return inFlightBoot
+  return state.inFlightBoot
 }
 
-async function bootWorkspaceSandbox(): Promise<void> {
+async function bootSessionSandbox(spec: SandboxVmSpec, maxRunningVms: number): Promise<void> {
+  const state = vmState(spec.name)
   try {
-    const outcome = await inspectSandbox()
+    const outcome = await inspectSandbox(spec.name)
     if (outcome.kind === 'failed' || (outcome.record.config === undefined && outcome.record.active_config === undefined)) {
-      await bootWorkspaceSandboxFromListing()
+      await bootSessionSandboxFromListing(spec, maxRunningVms)
     } else {
       const inspected = outcome.record
       if (inspected.active_config !== undefined && inspected.active_config !== null) {
-        const attestation = await attestWorkspaceSandboxConfig(inspected.active_config)
+        const attestation = await attestSandboxConfig(spec, inspected.active_config)
         if (!attestation.trusted) {
-          logger.warn(`Recreating unverifiable sandbox ${WORKSPACE_SANDBOX_NAME}: ${attestation.reason}`)
-          await removeWorkspaceSandbox()
-          await createWorkspaceSandbox()
+          logger.warn(`Recreating unverifiable sandbox ${spec.name}: ${attestation.reason}`)
+          await removeSessionSandboxVm(spec.name)
+          await createSessionSandbox(spec, maxRunningVms)
         }
       } else {
-        const attestation = await attestWorkspaceSandboxConfig(inspected.config)
+        const attestation = await attestSandboxConfig(spec, inspected.config)
         if (!attestation.trusted) {
-          logger.warn(`Recreating unverifiable sandbox ${WORKSPACE_SANDBOX_NAME}: ${attestation.reason}`)
-          await removeWorkspaceSandbox()
-          await createWorkspaceSandbox()
+          logger.warn(`Recreating unverifiable sandbox ${spec.name}: ${attestation.reason}`)
+          await removeSessionSandboxVm(spec.name)
+          await createSessionSandbox(spec, maxRunningVms)
         } else {
-          await startWorkspaceSandbox()
-          await provisionSandboxExecUser()
-          const runningAttestation = await attestWorkspaceSandbox(true)
+          await withStartAdmission(spec.name, maxRunningVms, () => startSessionSandbox(spec.name))
+          await provisionSandboxExecUser(spec.name)
+          const runningAttestation = await attestSessionSandbox(spec, true)
           if (!runningAttestation.trusted) {
             logger.warn(
-              `Recreating sandbox ${WORKSPACE_SANDBOX_NAME} that failed running attestation: ${runningAttestation.reason}`,
+              `Recreating sandbox ${spec.name} that failed running attestation: ${runningAttestation.reason}`,
             )
-            await removeWorkspaceSandbox()
-            await createWorkspaceSandbox()
+            await removeSessionSandboxVm(spec.name)
+            await createSessionSandbox(spec, maxRunningVms)
           }
         }
       }
     }
 
-    lastKnownRunningAt = Date.now()
+    state.lastKnownRunningAt = Date.now()
   } catch (error) {
-    lastKnownRunningAt = null
+    state.lastKnownRunningAt = null
     throw error
   }
 }
 
-async function bootWorkspaceSandboxFromListing(): Promise<void> {
-  const entry = findWorkspaceSandboxEntry(await listSandboxes())
+async function bootSessionSandboxFromListing(spec: SandboxVmSpec, maxRunningVms: number): Promise<void> {
+  const entry = findSessionSandboxEntry(await listSandboxes(), spec.name)
 
   if (!entry) {
-    await createWorkspaceSandbox()
+    await createSessionSandbox(spec, maxRunningVms)
   } else {
-    const attestation = await attestWorkspaceSandbox(entry.running)
+    const attestation = await attestSessionSandbox(spec, entry.running)
     if (!attestation.trusted) {
-      logger.warn(`Recreating unverifiable sandbox ${WORKSPACE_SANDBOX_NAME}: ${attestation.reason}`)
-      await removeWorkspaceSandbox()
-      await createWorkspaceSandbox()
+      logger.warn(`Recreating unverifiable sandbox ${spec.name}: ${attestation.reason}`)
+      await removeSessionSandboxVm(spec.name)
+      await createSessionSandbox(spec, maxRunningVms)
     } else if (!entry.running) {
-      await startWorkspaceSandbox()
-      await provisionSandboxExecUser()
-      const runningAttestation = await attestWorkspaceSandbox(true)
+      await withStartAdmission(spec.name, maxRunningVms, () => startSessionSandbox(spec.name))
+      await provisionSandboxExecUser(spec.name)
+      const runningAttestation = await attestSessionSandbox(spec, true)
       if (!runningAttestation.trusted) {
         logger.warn(
-          `Recreating sandbox ${WORKSPACE_SANDBOX_NAME} that failed running attestation: ${runningAttestation.reason}`,
+          `Recreating sandbox ${spec.name} that failed running attestation: ${runningAttestation.reason}`,
         )
-        await removeWorkspaceSandbox()
-        await createWorkspaceSandbox()
+        await removeSessionSandboxVm(spec.name)
+        await createSessionSandbox(spec, maxRunningVms)
       }
     }
   }
@@ -250,15 +311,15 @@ function parseInspectMount(mount: unknown): ParsedSandboxMount | null {
   return { kind: 'other' }
 }
 
-async function attestWorkspaceSandboxConfig(config: unknown): Promise<SandboxAttestation> {
-  const spec = resolveInspectSpec(config)
-  if (spec === null) {
+async function attestSandboxConfig(spec: SandboxVmSpec, config: unknown): Promise<SandboxAttestation> {
+  const inspectedSpec = resolveInspectSpec(config)
+  if (inspectedSpec === null) {
     return { trusted: false, reason: 'msb inspect returned an unexpected config shape' }
   }
 
-  const canonical = memoizedCanonicalSandboxSpec()
+  const canonical = buildCanonicalSandboxSpec(spec)
 
-  const labels = isRecord(spec.labels) ? spec.labels : {}
+  const labels = isRecord(inspectedSpec.labels) ? inspectedSpec.labels : {}
   const canonicalLabels = isRecord(canonical.labels) ? canonical.labels : {}
   if (labels['ocm.managed'] !== 'true') {
     return { trusted: false, reason: 'sandbox is not labelled ocm.managed=true' }
@@ -269,8 +330,14 @@ async function attestWorkspaceSandboxConfig(config: unknown): Promise<SandboxAtt
       reason: `sandbox network profile ${String(labels['ocm.net'])} does not match ${canonicalLabels['ocm.net']}`,
     }
   }
+  if (labels['ocm.session'] !== canonicalLabels['ocm.session']) {
+    return {
+      trusted: false,
+      reason: `sandbox session label ${String(labels['ocm.session'])} does not match ${String(canonicalLabels['ocm.session'])}`,
+    }
+  }
 
-  const imageReference = inspectImageReference(spec.image)
+  const imageReference = inspectImageReference(inspectedSpec.image)
   const canonicalImageReference = inspectImageReference(canonical.image)
   if (imageReference === null) {
     return { trusted: false, reason: 'sandbox image is not an OCI reference' }
@@ -278,7 +345,7 @@ async function attestWorkspaceSandboxConfig(config: unknown): Promise<SandboxAtt
   if (canonicalImageReference !== null && imageReference !== canonicalImageReference) {
     return { trusted: false, reason: `sandbox image ${imageReference} does not match ${canonicalImageReference}` }
   }
-  const image = isRecord(spec.image) ? spec.image : {}
+  const image = isRecord(inspectedSpec.image) ? inspectedSpec.image : {}
   const oci = isRecord(image.Oci) ? image.Oci : null
   const rootDisk = oci !== null && isRecord(oci.root_disk) ? oci.root_disk : null
   if (rootDisk !== null && rootDisk.kind === 'disk-image') {
@@ -310,7 +377,7 @@ async function attestWorkspaceSandboxConfig(config: unknown): Promise<SandboxAtt
     return { trusted: false, reason: 'sandbox memory is not a positive finite number; cannot derive the runtime tmpfs size' }
   }
 
-  const mounts = Array.isArray(spec.mounts) ? spec.mounts : []
+  const mounts = Array.isArray(inspectedSpec.mounts) ? inspectedSpec.mounts : []
   const bindRoots = new Set<string>()
   let runtimeTmpfsSeen = false
   let dockerDataVolumeSeen = false
@@ -450,7 +517,7 @@ async function attestWorkspaceSandboxConfig(config: unknown): Promise<SandboxAtt
     return { trusted: false, reason: 'sandbox is missing the Docker data volume mount' }
   }
 
-  const resources = isRecord(spec.resources) ? spec.resources : {}
+  const resources = isRecord(inspectedSpec.resources) ? inspectedSpec.resources : {}
   if (resources.cpus !== canonicalResources.cpus) {
     return { trusted: false, reason: `sandbox cpus ${String(resources.cpus)} does not match ${String(canonicalResources.cpus)}` }
   }
@@ -464,7 +531,7 @@ async function attestWorkspaceSandboxConfig(config: unknown): Promise<SandboxAtt
     return { trusted: false, reason: `sandbox max memory does not match ${String(canonicalResources.max_memory_mib)}` }
   }
 
-  const runtime = isRecord(spec.runtime) ? spec.runtime : {}
+  const runtime = isRecord(inspectedSpec.runtime) ? inspectedSpec.runtime : {}
   const canonicalRuntime = isRecord(canonical.runtime) ? canonical.runtime : {}
   if (runtime.workdir !== canonicalRuntime.workdir) {
     return { trusted: false, reason: `sandbox workdir ${String(runtime.workdir)} does not match ${String(canonicalRuntime.workdir)}` }
@@ -494,7 +561,7 @@ async function attestWorkspaceSandboxConfig(config: unknown): Promise<SandboxAtt
     return { trusted: false, reason: 'sandbox configuration runtime.disable_metrics_sample does not match the canonical specification' }
   }
 
-  const network = isRecord(spec.network) ? spec.network : {}
+  const network = isRecord(inspectedSpec.network) ? inspectedSpec.network : {}
   if (network.enabled !== true) {
     return { trusted: false, reason: 'sandbox networking is disabled' }
   }
@@ -523,21 +590,21 @@ async function attestWorkspaceSandboxConfig(config: unknown): Promise<SandboxAtt
     }
   }
 
-  const emptyMismatch = emptyArrayMismatch(spec.patches, 'patches')
+  const emptyMismatch = emptyArrayMismatch(inspectedSpec.patches, 'patches')
   if (emptyMismatch !== null) return { trusted: false, reason: emptyMismatch }
-  const rlimitsMismatch = emptyArrayMismatch(spec.rlimits, 'rlimits')
+  const rlimitsMismatch = emptyArrayMismatch(inspectedSpec.rlimits, 'rlimits')
   if (rlimitsMismatch !== null) return { trusted: false, reason: rlimitsMismatch }
 
-  if (spec.init !== null) {
+  if (inspectedSpec.init !== null) {
     return { trusted: false, reason: 'sandbox configuration init must be empty' }
   }
-  if (spec.pull_policy !== 'IfMissing') {
-    return { trusted: false, reason: `sandbox pull policy ${String(spec.pull_policy)} must be IfMissing` }
+  if (inspectedSpec.pull_policy !== 'IfMissing') {
+    return { trusted: false, reason: `sandbox pull policy ${String(inspectedSpec.pull_policy)} must be IfMissing` }
   }
-  if (spec.security_profile !== 'default') {
+  if (inspectedSpec.security_profile !== 'default') {
     return { trusted: false, reason: 'sandbox configuration security_profile must be default' }
   }
-  const lifecycle = isRecord(spec.lifecycle) ? spec.lifecycle : {}
+  const lifecycle = isRecord(inspectedSpec.lifecycle) ? inspectedSpec.lifecycle : {}
   if (lifecycle.ephemeral !== false) {
     return { trusted: false, reason: 'sandbox configuration lifecycle.ephemeral must be false' }
   }
@@ -547,8 +614,8 @@ async function attestWorkspaceSandboxConfig(config: unknown): Promise<SandboxAtt
   if (lifecycle.idle_timeout_secs !== null) {
     return { trusted: false, reason: 'sandbox configuration lifecycle.idle_timeout_secs must be empty' }
   }
-  if (spec.manifest_digest !== undefined && spec.manifest_digest !== null) {
-    if (typeof spec.manifest_digest !== 'string' || spec.manifest_digest === '') {
+  if (inspectedSpec.manifest_digest !== undefined && inspectedSpec.manifest_digest !== null) {
+    if (typeof inspectedSpec.manifest_digest !== 'string' || inspectedSpec.manifest_digest === '') {
       return { trusted: false, reason: 'sandbox manifest digest is malformed' }
     }
   }
@@ -560,10 +627,10 @@ type SandboxInspectOutcome =
   | { kind: 'parsed'; record: Record<string, unknown> }
   | { kind: 'failed'; reason: string }
 
-async function inspectSandbox(): Promise<SandboxInspectOutcome> {
+async function inspectSandbox(name: string): Promise<SandboxInspectOutcome> {
   let result: string | { exitCode: number; stdout: string; stderr: string }
   try {
-    result = (await executeCommand([sandboxExecutablePath(), ...buildSandboxInspectArgs()], {
+    result = (await executeCommand([sandboxExecutablePath(), ...buildSandboxInspectArgs(name)], {
       ignoreExitCode: true,
       silent: true,
       timeout: SANDBOX_LS_TIMEOUT_MS,
@@ -592,8 +659,8 @@ async function inspectSandbox(): Promise<SandboxInspectOutcome> {
   return { kind: 'parsed', record: parsed }
 }
 
-async function attestWorkspaceSandbox(running: boolean): Promise<SandboxAttestation> {
-  const outcome = await inspectSandbox()
+async function attestSessionSandbox(spec: SandboxVmSpec, running: boolean): Promise<SandboxAttestation> {
+  const outcome = await inspectSandbox(spec.name)
   if (outcome.kind === 'failed') {
     return { trusted: false, reason: outcome.reason }
   }
@@ -601,9 +668,9 @@ async function attestWorkspaceSandbox(running: boolean): Promise<SandboxAttestat
     if (outcome.record.active_config === undefined || outcome.record.active_config === null) {
       return { trusted: false, reason: 'msb inspect returned no active configuration for the running sandbox' }
     }
-    return await attestWorkspaceSandboxConfig(outcome.record.active_config)
+    return await attestSandboxConfig(spec, outcome.record.active_config)
   }
-  return await attestWorkspaceSandboxConfig(outcome.record.config)
+  return await attestSandboxConfig(spec, outcome.record.config)
 }
 
 async function cacheSandboxImage(): Promise<void> {
@@ -614,9 +681,9 @@ async function cacheSandboxImage(): Promise<void> {
   logger.info(`Sandbox guest image ${ENV.SANDBOX.IMAGE} is cached`)
 }
 
-async function pingSandboxAgent(): Promise<boolean> {
+async function pingSandboxAgent(name: string): Promise<boolean> {
   try {
-    const result = (await executeCommand([sandboxExecutablePath(), ...buildSandboxPingArgs()], {
+    const result = (await executeCommand([sandboxExecutablePath(), ...buildSandboxPingArgs(name)], {
       ignoreExitCode: true,
       silent: true,
       timeout: SANDBOX_AGENT_PING_TIMEOUT_MS,
@@ -627,33 +694,33 @@ async function pingSandboxAgent(): Promise<boolean> {
   }
 }
 
-async function waitForSandboxAgent(): Promise<boolean> {
+async function waitForSandboxAgent(name: string): Promise<boolean> {
   const deadline = Date.now() + ENV.SANDBOX.START_TIMEOUT_MS
   for (;;) {
-    if (await pingSandboxAgent()) return true
+    if (await pingSandboxAgent(name)) return true
     if (Date.now() >= deadline) return false
     await new Promise((resolve) => setTimeout(resolve, SANDBOX_AGENT_POLL_DELAY_MS))
   }
 }
 
-async function provisionSandboxExecUser(): Promise<void> {
+async function provisionSandboxExecUser(name: string): Promise<void> {
   try {
-    await ensureSandboxExecUserProvisioned()
+    await ensureSandboxExecUserProvisioned(name)
     return
   } catch (error) {
     logger.warn(
-      `Sandbox exec user provisioning failed, so sudo will not work inside the guest yet; retrying in the background: ${error instanceof Error ? error.message : String(error)}`,
+      `Sandbox exec user provisioning failed for ${name}, so sudo will not work inside the guest yet; retrying in the background: ${error instanceof Error ? error.message : String(error)}`,
     )
   }
-  scheduleBackgroundProvisionRetry()
+  scheduleBackgroundProvisionRetry(name)
 }
 
-async function provisionSandboxExecUserPasswd(): Promise<void> {
-  const provisionArgs = buildSandboxProvisionArgs()
+async function provisionSandboxExecUserPasswd(name: string): Promise<void> {
+  const provisionArgs = buildSandboxProvisionArgs(name)
   if (provisionArgs.length === 0) {
     return
   }
-  if (!(await waitForSandboxAgent())) {
+  if (!(await waitForSandboxAgent(name))) {
     throw new Error('the sandbox agent did not become reachable before the exec user could be provisioned')
   }
   let lastError: unknown = null
@@ -667,7 +734,7 @@ async function provisionSandboxExecUserPasswd(): Promise<void> {
       await executeCommand([sandboxExecutablePath(), ...provisionArgs], {
         timeout: ENV.SANDBOX.START_TIMEOUT_MS,
       })
-      const verifyArgs = buildSandboxVerifyProvisionArgs()
+      const verifyArgs = buildSandboxVerifyProvisionArgs(name)
       if (verifyArgs.length > 0) {
         await executeCommand([sandboxExecutablePath(), ...verifyArgs], {
           timeout: SANDBOX_LS_TIMEOUT_MS,
@@ -684,36 +751,34 @@ async function provisionSandboxExecUserPasswd(): Promise<void> {
   )
 }
 
-let backgroundProvisionRetry: Promise<void> | null = null
-let provisionRetryGeneration = 0
-let inFlightProvision: Promise<void> | null = null
-
-function ensureSandboxExecUserProvisioned(): Promise<void> {
-  if (inFlightProvision) {
-    return inFlightProvision
+function ensureSandboxExecUserProvisioned(name: string): Promise<void> {
+  const state = vmState(name)
+  if (state.inFlightProvision) {
+    return state.inFlightProvision
   }
-  inFlightProvision = provisionSandboxExecUserPasswd().finally(() => {
-    inFlightProvision = null
+  state.inFlightProvision = provisionSandboxExecUserPasswd(name).finally(() => {
+    state.inFlightProvision = null
   })
-  return inFlightProvision
+  return state.inFlightProvision
 }
 
-export function backgroundProvisionRetryForTests(): Promise<void> | null {
-  return backgroundProvisionRetry
+export function backgroundProvisionRetryForTests(name: string): Promise<void> | null {
+  return vmStates.get(name)?.backgroundProvisionRetry ?? null
 }
 
-export function provisionSandboxExecUserForTests(): Promise<void> {
-  return ensureSandboxExecUserProvisioned()
+export function provisionSandboxExecUserForTests(name: string): Promise<void> {
+  return ensureSandboxExecUserProvisioned(name)
 }
 
-function scheduleBackgroundProvisionRetry(): void {
-  const generation = provisionRetryGeneration
-  if (backgroundProvisionRetry !== null) return
-  logger.info('Sandbox exec user provisioning background retry scheduled')
-  backgroundProvisionRetry = (async () => {
+function scheduleBackgroundProvisionRetry(name: string): void {
+  const state = vmState(name)
+  const generation = state.provisionRetryGeneration
+  if (state.backgroundProvisionRetry !== null) return
+  logger.info(`Sandbox exec user provisioning background retry scheduled for ${name}`)
+  state.backgroundProvisionRetry = (async () => {
     for (let attempt = 1; attempt <= SANDBOX_PROVISION_RETRY_ATTEMPTS; attempt++) {
       await new Promise((resolve) => setTimeout(resolve, SANDBOX_PROVISION_RETRY_DELAY_MS))
-      if (generation !== provisionRetryGeneration) {
+      if (generation !== state.provisionRetryGeneration) {
         logger.info('Sandbox exec user provisioning background retry cancelled by a runtime state reset')
         return
       }
@@ -722,46 +787,94 @@ function scheduleBackgroundProvisionRetry(): void {
         return
       }
       try {
-        await ensureSandboxExecUserProvisioned()
+        await ensureSandboxExecUserProvisioned(name)
         logger.info(`Sandbox exec user provisioned by the background retry (attempt ${attempt})`)
         return
       } catch (error) {
         logger.warn(
           `Sandbox exec user provisioning background retry attempt ${attempt} failed: ${error instanceof Error ? error.message : String(error)}`,
         )
-        if (generation !== provisionRetryGeneration || shutdownRequested) return
+        if (generation !== state.provisionRetryGeneration || shutdownRequested) return
       }
     }
     logger.warn(
       'Sandbox exec user provisioning retries were exhausted; sudo will not work inside the guest until the next boot cycle',
     )
   })().finally(() => {
-    if (generation === provisionRetryGeneration) {
-      backgroundProvisionRetry = null
+    if (generation === state.provisionRetryGeneration) {
+      state.backgroundProvisionRetry = null
     }
   })
 }
 
-async function createWorkspaceSandbox(): Promise<void> {
-  await executeCommand([sandboxExecutablePath(), ...buildSandboxCreateArgs()], {
-    timeout: ENV.SANDBOX.START_TIMEOUT_MS,
-  })
-  await provisionSandboxExecUser()
-  const attestation = await attestWorkspaceSandbox(true)
+async function createSessionSandbox(spec: SandboxVmSpec, maxRunningVms: number): Promise<void> {
+  await withStartAdmission(spec.name, maxRunningVms, () => runSandboxCreate(spec))
+  await provisionSandboxExecUser(spec.name)
+  const attestation = await attestSessionSandbox(spec, true)
   if (!attestation.trusted) {
-    throw new Error(`newly created sandbox ${WORKSPACE_SANDBOX_NAME} failed attestation: ${attestation.reason}`)
+    throw new Error(`newly created sandbox ${spec.name} failed attestation: ${attestation.reason}`)
   }
 }
 
-async function removeWorkspaceSandbox(): Promise<void> {
-  const result = (await executeCommand([sandboxExecutablePath(), ...buildSandboxRemoveArgs()], {
+async function runSandboxCreate(spec: SandboxVmSpec): Promise<void> {
+  const first = await executeSandboxCreate(buildSandboxCreateArgs(spec))
+  if (first.exitCode === 0) return
+  if (!SANDBOX_CREATE_EXISTS_PATTERN.test(`${first.stdout}\n${first.stderr}`)) {
+    throw new Error(`Command failed with code ${first.exitCode}: ${first.stderr || first.stdout}`)
+  }
+  logger.warn(
+    `Sandbox ${spec.name} already exists as an orphaned msb sandbox; recreating it with --replace: ${first.stderr || first.stdout}`,
+  )
+  const replaced = await executeSandboxCreate(buildSandboxCreateArgs(spec, { replace: true }))
+  if (replaced.exitCode !== 0) {
+    throw new Error(`Command failed with code ${replaced.exitCode}: ${replaced.stderr || replaced.stdout}`)
+  }
+}
+
+async function executeSandboxCreate(args: string[]): Promise<{ exitCode: number; stdout: string; stderr: string }> {
+  const result = (await executeCommand([sandboxExecutablePath(), ...args], {
+    ignoreExitCode: true,
+    timeout: ENV.SANDBOX.START_TIMEOUT_MS,
+  })) as string | { exitCode: number; stdout: string; stderr: string }
+  return typeof result === 'string' ? { exitCode: 0, stdout: result, stderr: '' } : result
+}
+
+async function removeSessionSandboxVm(name: string): Promise<void> {
+  await runSandboxRemoval(buildSandboxRemoveArgs(name), SANDBOX_REMOVAL_MISSING_PATTERN, 'msb rm')
+}
+
+function removeSandboxVmAndVolume(name: string): Promise<void> {
+  const state = vmState(name)
+  if (state.inFlightRemoval !== null) {
+    return state.inFlightRemoval
+  }
+  const inFlightBoot = state.inFlightBoot
+  state.inFlightRemoval = (async () => {
+    if (inFlightBoot !== null) {
+      await inFlightBoot.catch(() => undefined)
+    }
+    await removeSessionSandboxVm(name)
+    await runSandboxRemoval(
+      buildSandboxVolumeRemoveArgs(sandboxDockerDataVolumeName(name)),
+      SANDBOX_VOLUME_REMOVAL_MISSING_PATTERN,
+      'msb volume rm',
+    )
+    state.lastKnownRunningAt = null
+  })().finally(() => {
+    state.inFlightRemoval = null
+  })
+  return state.inFlightRemoval
+}
+
+async function runSandboxRemoval(args: string[], missingPattern: RegExp, label: string): Promise<void> {
+  const result = (await executeCommand([sandboxExecutablePath(), ...args], {
     ignoreExitCode: true,
     timeout: SANDBOX_LS_TIMEOUT_MS,
   })) as string | { exitCode: number; stdout: string; stderr: string }
   const removal = typeof result === 'string' ? { exitCode: 0, stdout: result, stderr: '' } : result
-  if (removal.exitCode !== 0) {
-    throw new Error(`msb rm failed with code ${removal.exitCode}: ${removal.stderr || removal.stdout}`)
-  }
+  if (removal.exitCode === 0) return
+  if (missingPattern.test(removal.stderr)) return
+  throw new Error(`${label} failed with code ${removal.exitCode}: ${removal.stderr || removal.stdout}`)
 }
 
 type SandboxLsEntry = {
@@ -794,20 +907,24 @@ async function listSandboxes(): Promise<SandboxLsEntry[]> {
   return parsed as SandboxLsEntry[]
 }
 
-function findWorkspaceSandboxEntry(entries: SandboxLsEntry[]): { running: boolean } | null {
+function sandboxEntryRunning(entry: SandboxLsEntry): boolean {
+  const status = entry.status ?? entry.state
+  return String(status).toLowerCase() === 'running'
+}
+
+function findSessionSandboxEntry(entries: SandboxLsEntry[], name: string): { running: boolean } | null {
   for (const value of entries) {
     if (!value || typeof value !== 'object' || Array.isArray(value)) continue
     const entry = value as SandboxLsEntry
-    if (entry.name !== WORKSPACE_SANDBOX_NAME) continue
-    const status = entry.status ?? entry.state
-    return { running: String(status).toLowerCase() === 'running' }
+    if (entry.name !== name) continue
+    return { running: sandboxEntryRunning(entry) }
   }
 
   return null
 }
 
-async function startWorkspaceSandbox(): Promise<void> {
-  const result = (await executeCommand([sandboxExecutablePath(), ...buildSandboxStartArgs()], {
+async function startSessionSandbox(name: string): Promise<void> {
+  const result = (await executeCommand([sandboxExecutablePath(), ...buildSandboxStartArgs(name)], {
     ignoreExitCode: true,
     timeout: ENV.SANDBOX.START_TIMEOUT_MS,
   })) as string | { exitCode: number; stdout: string; stderr: string }
@@ -815,32 +932,132 @@ async function startWorkspaceSandbox(): Promise<void> {
     return
   }
 
-  const entry = findWorkspaceSandboxEntry(await listSandboxes())
+  const entry = findSessionSandboxEntry(await listSandboxes(), name)
   if (entry?.running) {
     return
   }
   throw new Error(`msb start failed with code ${result.exitCode}: ${result.stderr || result.stdout}`)
 }
 
+async function withStartAdmission<T>(name: string, maxRunningVms: number, run: () => Promise<T>): Promise<T> {
+  const previous = startAdmission
+  let release: () => void = () => {}
+  startAdmission = new Promise<void>((resolve) => {
+    release = resolve
+  })
+  await previous
+  try {
+    await admitVmStart(name, maxRunningVms)
+    return await run()
+  } finally {
+    release()
+  }
+}
+
+async function admitVmStart(name: string, maxRunningVms: number): Promise<void> {
+  const entries = await listSandboxes()
+  const running: string[] = []
+  for (const value of entries) {
+    if (!value || typeof value !== 'object' || Array.isArray(value)) continue
+    const entry = value as SandboxLsEntry
+    if (typeof entry.name !== 'string' || entry.name === name) continue
+    if (!SESSION_SANDBOX_NAME_PATTERN.test(entry.name)) continue
+    if (sandboxEntryRunning(entry)) running.push(entry.name)
+  }
+  if (running.length < maxRunningVms) return
+
+  const execTimeoutMs = ENV.SANDBOX.EXEC_TIMEOUT_MS
+  const candidates = running
+    .map((vmName) => ({ vmName, lastUsedAt: vmStates.get(vmName)?.lastUsedAt ?? 0 }))
+    .filter((candidate) => Date.now() - candidate.lastUsedAt >= execTimeoutMs)
+  if (candidates.length === 0) {
+    throw new Error(
+      `${running.length} sandbox VMs are already running (the limit in Settings → Sandbox is ${maxRunningVms}) and none has been idle for ${execTimeoutMs / 60000} minutes; retry when a sandboxed command finishes or raise the limit`,
+    )
+  }
+  candidates.sort((left, right) => left.lastUsedAt - right.lastUsedAt)
+  const victim = candidates[0]!
+  let stopResult: { exitCode: number; stdout: string; stderr: string }
+  try {
+    const result = (await executeCommand([sandboxExecutablePath(), ...buildSandboxStopArgs(victim.vmName)], {
+      ignoreExitCode: true,
+      timeout: SANDBOX_STOP_TIMEOUT_MS,
+    })) as string | { exitCode: number; stdout: string; stderr: string }
+    stopResult = typeof result === 'string' ? { exitCode: 0, stdout: result, stderr: '' } : result
+  } catch (error) {
+    throw new Error(
+      `could not stop idle sandbox VM ${victim.vmName} to stay within the limit of ${maxRunningVms} running sandbox VMs: ${error instanceof Error ? error.message : String(error)}`,
+    )
+  }
+  if (stopResult.exitCode !== 0) {
+    throw new Error(
+      `could not stop idle sandbox VM ${victim.vmName} to stay within the limit of ${maxRunningVms} running sandbox VMs: ${stopResult.stderr || stopResult.stdout}`,
+    )
+  }
+  const victimState = vmStates.get(victim.vmName)
+  if (victimState !== undefined) {
+    victimState.lastKnownRunningAt = null
+  }
+}
+
+function ensureIdleSweepStarted(db: Database): void {
+  if (idleSweepTimer !== null) return
+  idleSweepStartedAt = Date.now()
+  idleSweepTimer = setInterval(() => {
+    void sweepIdleSandboxes(db)
+  }, SANDBOX_IDLE_SWEEP_INTERVAL_MS)
+  const timer = idleSweepTimer as { unref?: () => void }
+  timer.unref?.()
+}
+
+async function sweepIdleSandboxes(db: Database): Promise<void> {
+  if (shutdownRequested || stopInProgress) return
+  const idleStopMinutes = sandboxIdleStopMinutes(db)
+  const threshold = Math.max(idleStopMinutes * 60000, ENV.SANDBOX.EXEC_TIMEOUT_MS)
+  let entries: SandboxLsEntry[]
+  try {
+    entries = await listSandboxes()
+  } catch (error) {
+    logger.warn(`Failed to list sandboxes for the idle sweep: ${error instanceof Error ? error.message : String(error)}`)
+    return
+  }
+  for (const value of entries) {
+    if (shutdownRequested || stopInProgress) return
+    if (!value || typeof value !== 'object' || Array.isArray(value)) continue
+    const entry = value as SandboxLsEntry
+    const name = entry.name
+    if (typeof name !== 'string' || !SESSION_SANDBOX_NAME_PATTERN.test(name)) continue
+    const state = vmStates.get(name)
+    if (state !== undefined && (state.inFlightBoot !== null || state.inFlightRemoval !== null)) continue
+    const lastActivity = Math.max(state?.lastUsedAt ?? 0, idleSweepStartedAt)
+    if (Date.now() - lastActivity < threshold) continue
+    try {
+      await removeSandboxVmAndVolume(name)
+      logger.info(`Removed idle sandbox ${name} and its Docker data volume`)
+    } catch (error) {
+      logger.warn(`Failed to remove idle sandbox ${name}: ${error instanceof Error ? error.message : String(error)}`)
+    }
+  }
+}
+
+function sandboxIdleStopMinutes(db: Database): number {
+  return new SettingsService(db).getSettings('default').preferences.sandbox?.idleStopMinutes ?? DEFAULT_SANDBOX_IDLE_STOP_MINUTES
+}
+
+function sandboxMaxRunningVms(db: Database): number {
+  return new SettingsService(db).getSettings('default').preferences.sandbox?.maxRunningVms ?? DEFAULT_SANDBOX_MAX_RUNNING_VMS
+}
+
 export class SandboxRuntimeService {
   constructor(private readonly db: Database) {}
 
-  async prepareWorkspaceSandboxOnBoot(): Promise<void> {
+  async prepareSandboxOnBoot(): Promise<void> {
     if (!this.isSandboxEnabled()) return
     const capability = detectSandboxCapability()
     if (!capability.available) return
     if (getProcessIdentityAttestationError() !== null) return
+    ensureIdleSweepStarted(this.db)
     await cacheSandboxImage()
-    await ensureWorkspaceSandbox()
-    try {
-      await ensureSandboxExecUserProvisioned()
-      logger.info('Workspace sandbox is running and its exec user is provisioned')
-    } catch (error) {
-      logger.warn(
-        `Workspace sandbox is running but its exec user is not provisioned yet; retrying in the background: ${error instanceof Error ? error.message : String(error)}`,
-      )
-      scheduleBackgroundProvisionRetry()
-    }
   }
 
   isEnabled(): boolean {
@@ -859,7 +1076,7 @@ export class SandboxRuntimeService {
     }
   }
 
-  async planShell(directory: string, enforced = false): Promise<SandboxShellPlan> {
+  async planShell(directory: string, target: SandboxShellTarget, enforced = false): Promise<SandboxShellPlan> {
     if (!enforced && !this.isEnabled()) {
       return { mode: 'host' }
     }
@@ -871,41 +1088,66 @@ export class SandboxRuntimeService {
     if (attestationError !== null) {
       return { mode: 'blocked', reason: attestationError }
     }
-    const workDirectory = await resolveSandboxWorkDirectory(directory)
-    if (workDirectory === null) {
+    const projectMounts = await resolveSessionSandboxMounts(target.locationDirectory)
+    if (projectMounts === null) {
       return {
         mode: 'blocked',
-        reason: `working directory is outside the sandboxed project roots (${sandboxProjectRoots().join(', ')})`,
+        reason: `session directory ${target.locationDirectory} is outside the sandboxed project roots (${sandboxProjectRoots().join(', ')})`,
       }
     }
+    const workDirectory = await resolveSandboxWorkDirectory(directory)
+    if (workDirectory === null || !projectMounts.some((mount) => isPathWithinRoot(mount, workDirectory))) {
+      return {
+        mode: 'blocked',
+        reason: `working directory ${directory} is outside this session's sandbox (mounted: ${projectMounts.join(', ')})`,
+      }
+    }
+    const spec: SandboxVmSpec = {
+      name: sessionSandboxName(target.rootSessionId),
+      rootSessionId: target.rootSessionId,
+      projectMounts,
+      cpus: target.resources.cpus,
+      memoryMib: target.resources.memoryMib,
+    }
+    const state = vmState(spec.name)
+    state.lastUsedAt = Date.now()
     try {
-      await ensureWorkspaceSandbox()
+      await ensureSessionSandbox(spec, sandboxMaxRunningVms(this.db))
+      ensureIdleSweepStarted(this.db)
+      state.lastUsedAt = Date.now()
       const env = {
         ...new CredentialProvider(this.db).getSandboxGitEnv({ cwd: directory }),
         ...await getGitIdentityEnvForDirectory(directory, this.db),
       }
       return Object.keys(env).length > 0
-        ? { mode: 'sandbox', workdir: workDirectory, env }
-        : { mode: 'sandbox', workdir: workDirectory }
+        ? { mode: 'sandbox', name: spec.name, workdir: workDirectory, env }
+        : { mode: 'sandbox', name: spec.name, workdir: workDirectory }
     } catch (error) {
-      logger.error('Failed to prepare the workspace sandbox', error)
+      logger.error('Failed to prepare the session sandbox', error)
       return { mode: 'blocked', reason: error instanceof Error ? error.message : String(error) }
     }
   }
 
-  async stopWorkspaceSandbox(): Promise<void> {
+  async removeSessionSandbox(rootSessionId: string): Promise<void> {
+    if (!detectSandboxCapability().available) return
+    await removeSandboxVmAndVolume(sessionSandboxName(rootSessionId))
+  }
+
+  async stopAllSandboxes(): Promise<void> {
     shutdownRequested = true
-    await this.stopManagedSandbox()
+    await this.stopManagedSandboxes()
   }
 
-  async stopWorkspaceSandboxForToggle(): Promise<void> {
-    await this.stopManagedSandbox()
+  async stopAllSandboxesForToggle(): Promise<void> {
+    await this.stopManagedSandboxes()
   }
 
-  private async stopManagedSandbox(): Promise<void> {
+  private async stopManagedSandboxes(): Promise<void> {
     stopInProgress = true
-    provisionRetryGeneration += 1
-    backgroundProvisionRetry = null
+    for (const state of vmStates.values()) {
+      state.provisionRetryGeneration += 1
+      state.backgroundProvisionRetry = null
+    }
     try {
       await this.runManagedSandboxStop()
     } finally {
@@ -914,14 +1156,16 @@ export class SandboxRuntimeService {
   }
 
   private async runManagedSandboxStop(): Promise<void> {
-    while (inFlightBoot) {
-      try {
-        await inFlightBoot
-      } catch {
-        // a settled boot is done; keep waiting for any other admitted boot
-      }
+    for (;;) {
+      const inFlight = [...vmStates.values()]
+        .map((state) => state.inFlightBoot)
+        .filter((boot): boot is Promise<void> => boot !== null)
+      if (inFlight.length === 0) break
+      await Promise.all(inFlight.map((boot) => boot.catch(() => undefined)))
     }
-    lastKnownRunningAt = null
+    for (const state of vmStates.values()) {
+      state.lastKnownRunningAt = null
+    }
     const result = (await executeCommand([sandboxExecutablePath(), ...buildSandboxStopManagedArgs()], {
       ignoreExitCode: true,
       timeout: SANDBOX_STOP_TIMEOUT_MS,
@@ -929,10 +1173,10 @@ export class SandboxRuntimeService {
     const stopResult = typeof result === 'string' ? { exitCode: 0, stdout: result, stderr: '' } : result
     if (stopResult.exitCode !== 0) {
       try {
-        await confirmManagedSandboxStopped()
-        logger.warn(`msb stop failed with code ${stopResult.exitCode} but the workspace sandbox is confirmed stopped: ${stopResult.stderr || stopResult.stdout}`)
+        await confirmManagedSandboxesStopped()
+        logger.warn(`msb stop failed with code ${stopResult.exitCode} but the managed sandbox VMs are confirmed stopped: ${stopResult.stderr || stopResult.stdout}`)
       } catch (error) {
-        logger.error('Failed to confirm the workspace sandbox stopped:', error)
+        logger.error('Failed to confirm the managed sandbox VMs stopped:', error)
         throw error
       }
     }
@@ -943,13 +1187,17 @@ export class SandboxRuntimeService {
   }
 }
 
-async function confirmManagedSandboxStopped(): Promise<void> {
-  const entry = findWorkspaceSandboxEntry(await listSandboxes())
-  if (entry !== null && entry.running) {
-    throw new Error('msb stop failed to stop the workspace sandbox; the managed microVM is still running')
+async function confirmManagedSandboxesStopped(): Promise<void> {
+  for (const value of await listSandboxes()) {
+    if (!value || typeof value !== 'object' || Array.isArray(value)) continue
+    const entry = value as SandboxLsEntry
+    if (typeof entry.name !== 'string' || !SESSION_SANDBOX_NAME_PATTERN.test(entry.name)) continue
+    if (sandboxEntryRunning(entry)) {
+      throw new Error('msb stop failed to stop the sandbox microVMs; a managed microVM is still running')
+    }
   }
 }
 
-export async function stopWorkspaceSandboxOnShutdown(db: Database): Promise<void> {
-  await new SandboxRuntimeService(db).stopWorkspaceSandbox()
+export async function stopSandboxesOnShutdown(db: Database): Promise<void> {
+  await new SandboxRuntimeService(db).stopAllSandboxes()
 }

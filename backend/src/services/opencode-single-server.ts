@@ -417,14 +417,14 @@ class OpenCodeServerManager {
       }
       if (!sandboxEnforced && this.sandboxEnforced) {
         try {
-          await new SandboxRuntimeService(this.db).stopWorkspaceSandboxForToggle()
-          logger.info('Sandbox enforcement disabled: stopped the shared workspace microVM')
+          await new SandboxRuntimeService(this.db).stopAllSandboxesForToggle()
+          logger.info('Sandbox enforcement disabled: stopped all sandbox microVMs')
         } catch (error) {
           this.failNonRecoverable(`Failed to stop the workspace sandbox while disabling enforcement: ${error instanceof Error ? error.message : String(error)}`)
         }
       }
       if (sandboxEnforced && !this.sandboxEnforced) {
-        void new SandboxRuntimeService(this.db).prepareWorkspaceSandboxOnBoot().catch((error) => {
+        void new SandboxRuntimeService(this.db).prepareSandboxOnBoot().catch((error) => {
           logger.warn('Sandbox enforcement enabled but preparing the guest image failed:', error)
         })
       }

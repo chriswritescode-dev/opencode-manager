@@ -14,10 +14,9 @@ import {
 } from '../db/session-permission-modes'
 import { logger } from '../utils/logger'
 import type { OpenCodeClient } from './opencode/client'
+import type { SessionAncestry } from './session-ancestry'
 import type { SSEEvent } from './sse-aggregator'
 import type { SettingsService } from './settings'
-
-const MAX_PARENT_HOPS = 10
 
 export class SessionPermissionModeError extends Error {
   status: number
@@ -29,37 +28,18 @@ export class SessionPermissionModeError extends Error {
 }
 
 export class SessionPermissionModeService {
-  private readonly parentBySession = new Map<string, string | null>()
-
   constructor(
     private readonly db: Database,
     private readonly openCodeClient: OpenCodeClient,
     private readonly settingsService: SettingsService,
+    private readonly ancestry: SessionAncestry,
   ) {}
 
-  private rememberParent(sessionId: string, parentId: string | null | undefined): void {
-    this.parentBySession.set(sessionId, parentId ?? null)
-  }
-
-  private async resolveRootSessionId(sessionId: string): Promise<string> {
-    let current = sessionId
-
-    for (let hops = 0; hops < MAX_PARENT_HOPS; hops += 1) {
-      const parentId = await this.getParentId(current)
-      if (!parentId) {
-        return current
-      }
-      current = parentId
-    }
-
-    return current
-  }
-
-  async handleEvent(directory: string, event: SSEEvent): Promise<void> {
+  async handleEvent(directory: string | null, event: SSEEvent): Promise<void> {
     switch (event.type) {
       case 'session.created': {
         const { sessionID, parentID, permissions } = event.data
-        this.rememberParent(sessionID, parentID)
+        this.ancestry.rememberParent(sessionID, parentID)
         const hasExplicitPermissions = Array.isArray(permissions) && permissions.length > 0
         if (!parentID && !hasExplicitPermissions && this.defaultMode() === 'auto') {
           insertSessionPermissionModeIfAbsent(this.db, sessionID, 'auto')
@@ -68,7 +48,7 @@ export class SessionPermissionModeService {
       }
       case 'session.forked': {
         const { sessionID, parentID } = event.data
-        this.rememberParent(sessionID, null)
+        this.ancestry.rememberParent(sessionID, null)
         const sourceMode = await this.getEffectiveMode(parentID)
         if (sourceMode.mode === 'auto') {
           insertSessionPermissionModeIfAbsent(this.db, sessionID, 'auto')
@@ -82,7 +62,7 @@ export class SessionPermissionModeService {
       }
       case 'session.deleted': {
         const { sessionID } = event.data
-        this.parentBySession.delete(sessionID)
+        this.ancestry.forget(sessionID)
         deleteSessionPermissionMode(this.db, sessionID)
         return
       }
@@ -95,7 +75,7 @@ export class SessionPermissionModeService {
   }
 
   async setMode(sessionId: string, mode: SessionPermissionMode, directory: string): Promise<SessionPermissionModeState> {
-    const rootSessionId = await this.resolveRootSessionId(sessionId)
+    const rootSessionId = await this.ancestry.resolveRootSessionId(sessionId)
     const lockedReason = this.lockReasonForRoot(sessionId, rootSessionId)
     if (lockedReason === 'schedule') {
       throw new SessionPermissionModeError(
@@ -245,20 +225,9 @@ export class SessionPermissionModeService {
 
   private async resolveRootSessionIdOrNull(sessionId: string): Promise<string | null> {
     try {
-      return await this.resolveRootSessionId(sessionId)
+      return await this.ancestry.resolveRootSessionId(sessionId)
     } catch {
       return null
     }
-  }
-
-  private async getParentId(sessionId: string): Promise<string | null> {
-    if (this.parentBySession.has(sessionId)) {
-      return this.parentBySession.get(sessionId) ?? null
-    }
-
-    const session = await this.openCodeClient.api.session.get({ sessionID: sessionId })
-    const parentId = session.parentID ?? null
-    this.parentBySession.set(sessionId, parentId)
-    return parentId
   }
 }

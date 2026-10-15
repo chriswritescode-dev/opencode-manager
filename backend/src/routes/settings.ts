@@ -33,6 +33,7 @@ import { getOrCreateInternalToken, rotateInternalToken } from '../services/inter
 import { sseAggregator } from '../services/sse-aggregator'
 import type { OpenCodeSupervisor } from '../services/opencode-supervisor'
 import { detectSandboxCapability } from '../services/sandbox/capability'
+import { sandboxResourceLimitError } from '../services/sandbox/resources'
 import { getProcessIdentityAttestationError } from '../services/opencode/process-identity'
 import { restartOpenCode, assertValidOpenCodeConfig, listActiveUserSessions } from '../services/opencode-restart'
 import type { GitAuthService } from '../services/git-auth'
@@ -376,6 +377,17 @@ export function createSettingsRoutes(db: Database, gitAuthService: GitAuthServic
       }
 
       const currentSettings = settingsService.getSettings(userId)
+
+      const requestedSandboxResources = validated.preferences.sandbox
+      if (
+        requestedSandboxResources !== undefined
+        && (requestedSandboxResources.cpus !== undefined || requestedSandboxResources.memoryMib !== undefined)
+      ) {
+        const limitError = sandboxResourceLimitError(requestedSandboxResources)
+        if (limitError !== null) {
+          return c.json({ error: limitError }, 400)
+        }
+      }
 
       if (currentSettings.preferences.sandbox?.enabled !== true && validated.preferences.sandbox?.enabled === true) {
         const capability = detectSandboxCapability()

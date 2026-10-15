@@ -22,6 +22,7 @@ import { createSessionGoalRoutes } from '../session-goals'
 import { createMultiRunRoutes } from '../multi-runs'
 import { createChangeWalkthroughRoutes } from '../change-walkthroughs'
 import type { SessionPermissionModeService } from '../../services/session-permission-modes'
+import type { SessionSandboxService } from '../../services/session-sandbox'
 import type { RepoWorkspaceService } from '../../services/repo-workspace'
 import type { GitAuthService } from '../../services/git-auth'
 import type { SessionGoalService } from '../../services/session-goals'
@@ -40,6 +41,7 @@ export function createInternalRoutes(
   sessionGoals: SessionGoalService,
   multiRuns: MultiRunService,
   changeWalkthroughService: ChangeWalkthroughService,
+  sessionSandbox: SessionSandboxService,
 ) {
   const app = new Hono()
   app.use('/*', createInternalTokenMiddleware(db))
@@ -61,6 +63,6 @@ export function createInternalRoutes(
   app.route('/change-walkthroughs', createChangeWalkthroughRoutes(changeWalkthroughService))
   app.route('/session-artifacts', createInternalSessionArtifactRoutes(openCodeClient))
   app.route('/git-credentials', createInternalGitCredentialsRoutes(db))
-  app.route('/sandbox', createInternalSandboxRoutes(db))
+  app.route('/sandbox', createInternalSandboxRoutes(db, sessionSandbox))
   return app
 }

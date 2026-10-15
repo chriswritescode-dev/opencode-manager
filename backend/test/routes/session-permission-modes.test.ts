@@ -5,12 +5,14 @@ import { migrate } from '../../src/db/migration-runner'
 import { allMigrations } from '../../src/db/migrations'
 import { SettingsService } from '../../src/services/settings'
 import { SessionPermissionModeService } from '../../src/services/session-permission-modes'
+import { SessionAncestry } from '../../src/services/session-ancestry'
 import { createSessionPermissionModeRoutes } from '../../src/routes/session-permission-modes'
 import { createFakeSessionPermissionClient } from '../helpers/fake-session-permission-client'
 
 function createTestApp(db: Database, parents: Record<string, string | null> = {}): Hono {
   const app = new Hono()
-  const service = new SessionPermissionModeService(db, createFakeSessionPermissionClient({ parents }), new SettingsService(db))
+  const client = createFakeSessionPermissionClient({ parents })
+  const service = new SessionPermissionModeService(db, client, new SettingsService(db), new SessionAncestry(client))
   app.route('/session-permission-modes', createSessionPermissionModeRoutes(service))
   return app
 }

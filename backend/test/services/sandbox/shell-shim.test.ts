@@ -4,11 +4,14 @@ import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, statSync, wri
 import { tmpdir } from 'node:os'
 import path from 'node:path'
 import { getReposPath } from '@opencode-manager/shared/config/env'
-import { WORKSPACE_SANDBOX_NAME } from '../../../src/services/sandbox/command'
+import { sessionSandboxName } from '../../../src/services/sandbox/command'
 import {
   SANDBOX_FORWARDED_ENV_NAMES,
+  SANDBOX_SHELL_ENV_NAME,
   SANDBOX_SHELL_ENV_WORKDIR,
 } from '../../../src/services/sandbox/shell-shim'
+
+const SANDBOX_NAME = sessionSandboxName('ses_shim_test')
 
 afterEach(() => {
   vi.restoreAllMocks()
@@ -59,7 +62,7 @@ describe('sandbox shell shim', () => {
       const command = 'echo "it\'s a test" && echo line2 | tr a-z A-Z\necho after-newline'
       const result = spawnSync(shimPath, ['-c', command], {
         encoding: 'utf8',
-        env: sandboxShellEnv({ [SANDBOX_SHELL_ENV_WORKDIR]: directory }),
+        env: sandboxShellEnv({ [SANDBOX_SHELL_ENV_WORKDIR]: directory, [SANDBOX_SHELL_ENV_NAME]: SANDBOX_NAME }),
       })
       expect(result.status).toBe(0)
       expect(result.stdout).toBe("it's a test\nLINE2\nafter-newline\n")
@@ -68,7 +71,7 @@ describe('sandbox shell shim', () => {
       expect(argv).toEqual([
         msbPath,
         'exec',
-        WORKSPACE_SANDBOX_NAME,
+        SANDBOX_NAME,
         '--no-tty',
         '-q',
         '-u',
@@ -114,6 +117,7 @@ describe('sandbox shell shim', () => {
         encoding: 'utf8',
         env: sandboxShellEnv({
           [SANDBOX_SHELL_ENV_WORKDIR]: directory,
+          [SANDBOX_SHELL_ENV_NAME]: SANDBOX_NAME,
           GIT_CONFIG_COUNT: '1',
           GIT_CONFIG_KEY_0: 'http.https://github.com/.extraheader',
           GIT_CONFIG_VALUE_0: extraheaderValue,
@@ -172,7 +176,7 @@ describe('sandbox shell shim', () => {
       const command = 'echo hostile-ok'
       const result = spawnSync(shimPath, ['-c', command], {
         encoding: 'utf8',
-        env: sandboxShellEnv({ [SANDBOX_SHELL_ENV_WORKDIR]: directory }),
+        env: sandboxShellEnv({ [SANDBOX_SHELL_ENV_WORKDIR]: directory, [SANDBOX_SHELL_ENV_NAME]: SANDBOX_NAME }),
       })
       expect(result.status).toBe(0)
       expect(result.stdout).toBe('hostile-ok\n')
@@ -225,6 +229,96 @@ describe('sandbox shell shim', () => {
       expect(result.stderr).toContain('ocm-sandbox-shell: sandbox working directory missing; refusing to run on the host')
       expect(existsSync(payloadFile)).toBe(false)
       expect(existsSync(msbCaptureFile)).toBe(false)
+    } finally {
+      if (originalMsbPath === undefined) {
+        delete process.env.MSB_PATH
+      } else {
+        process.env.MSB_PATH = originalMsbPath
+      }
+      rmSync(fakeBin, { recursive: true, force: true })
+      rmSync(configHome, { recursive: true, force: true })
+    }
+  })
+
+  it('refuses to run the payload and never invokes msb when the sandbox name env is unset or invalid', async () => {
+    const fakeBin = mkdtempSync(path.join(tmpdir(), 'ocm-shim-name-'))
+    const configHome = mkdtempSync(path.join(tmpdir(), 'ocm-shim-config-'))
+    const msbCaptureFile = path.join(fakeBin, 'msb-invoked.txt')
+    const payloadFile = path.join(fakeBin, 'payload-ran.txt')
+    const msbPath = path.join(fakeBin, 'msb')
+    writeFileSync(msbPath, ['#!/bin/sh', `printf 'invoked' > "${msbCaptureFile}"`].join('\n'), { mode: 0o755 })
+    const originalMsbPath = process.env.MSB_PATH
+    process.env.MSB_PATH = msbPath
+    try {
+      vi.resetModules()
+      const shimMod = await import('../../../src/services/sandbox/shell-shim')
+      const commandMod = await import('../../../src/services/sandbox/command')
+      commandMod.overrideSandboxExecutableTrustValidator(() => true)
+      const shimPath = await shimMod.ensureSandboxShellShim(configHome)
+
+      const directory = path.join(getReposPath(), 'foo')
+      for (const name of [
+        undefined,
+        '',
+        'ocm-workspace',
+        'ocm-session-short',
+        `ocm-session-${'a'.repeat(11)}`,
+        `ocm-session-${'a'.repeat(13)}`,
+        `ocm-session-${'g'.repeat(12)}`,
+        `ocm-session-${'A'.repeat(12)}`,
+        `ocm-session-${'a'.repeat(12)}extra`,
+      ]) {
+        const env: Record<string, string | undefined> = {
+          ...process.env,
+          [SANDBOX_SHELL_ENV_WORKDIR]: directory,
+        }
+        if (name === undefined) {
+          delete env[SANDBOX_SHELL_ENV_NAME]
+        } else {
+          env[SANDBOX_SHELL_ENV_NAME] = name
+        }
+        const result = spawnSync(shimPath, ['-c', `touch ${payloadFile}`], { encoding: 'utf8', env })
+        expect(result.status).toBe(126)
+        expect(result.stderr).toContain('ocm-sandbox-shell: sandbox name missing or invalid; refusing to run on the host')
+        expect(existsSync(payloadFile)).toBe(false)
+        expect(existsSync(msbCaptureFile)).toBe(false)
+      }
+    } finally {
+      if (originalMsbPath === undefined) {
+        delete process.env.MSB_PATH
+      } else {
+        process.env.MSB_PATH = originalMsbPath
+      }
+      rmSync(fakeBin, { recursive: true, force: true })
+      rmSync(configHome, { recursive: true, force: true })
+    }
+  })
+
+  it('execs the sandbox named by OCM_SANDBOX_NAME', async () => {
+    const fakeBin = mkdtempSync(path.join(tmpdir(), 'ocm-shim-name-'))
+    const configHome = mkdtempSync(path.join(tmpdir(), 'ocm-shim-config-'))
+    const msbPath = path.join(fakeBin, 'msb')
+    const captureFile = path.join(fakeBin, 'argv.txt')
+    writeArgvCapturingFakeMsb(msbPath, captureFile)
+    const originalMsbPath = process.env.MSB_PATH
+    process.env.MSB_PATH = msbPath
+    try {
+      vi.resetModules()
+      const shimMod = await import('../../../src/services/sandbox/shell-shim')
+      const commandMod = await import('../../../src/services/sandbox/command')
+      commandMod.overrideSandboxExecutableTrustValidator(() => true)
+      const shimPath = await shimMod.ensureSandboxShellShim(configHome)
+
+      const directory = path.join(getReposPath(), 'foo')
+      const otherName = commandMod.sessionSandboxName('ses_other')
+      const result = spawnSync(shimPath, ['-c', 'echo ok'], {
+        encoding: 'utf8',
+        env: sandboxShellEnv({ [SANDBOX_SHELL_ENV_WORKDIR]: directory, [SANDBOX_SHELL_ENV_NAME]: otherName }),
+      })
+      expect(result.status).toBe(0)
+
+      const argv = readFileSync(captureFile, 'utf8').split('\0').filter((element) => element !== '')
+      expect(argv[argv.indexOf('exec') + 1]).toBe(otherName)
     } finally {
       if (originalMsbPath === undefined) {
         delete process.env.MSB_PATH

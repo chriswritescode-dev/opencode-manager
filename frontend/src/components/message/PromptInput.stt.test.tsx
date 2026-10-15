@@ -108,6 +108,10 @@ vi.mock('./ComposerToolsMenu', () => ({
   ComposerToolsMenu: () => null,
 }))
 
+vi.mock('@/components/session/SessionSandboxMenu', () => ({
+  SessionSandboxMenu: () => null,
+}))
+
 vi.mock('@/hooks/useSessionGoals', () => ({
   useSessionGoal: () => ({ data: undefined }),
   useStartSessionGoal: () => ({ mutateAsync: vi.fn(), isPending: false }),

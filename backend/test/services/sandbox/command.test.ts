@@ -6,31 +6,55 @@ import path from 'node:path'
 import { ENV, getAssistantOpenCodeDir, getForgeWorktreesPath, getOpenCodeAgentTmpPath, getOpenCodeGlobalSkillsPath, getOpenCodeToolOutputPath, getOpenCodeWorktreesPath, getReposPath, getScheduleWorktreesPath } from '@opencode-manager/shared/config/env'
 import { unwrapSandboxExecCommand } from '@opencode-manager/shared/utils'
 import {
-  WORKSPACE_SANDBOX_NAME,
+  SESSION_SANDBOX_NAME_PATTERN,
   SANDBOX_UNAVAILABLE_PREFIX,
-  SANDBOX_DOCKER_DATA_VOLUME_NAME,
   SANDBOX_DOCKER_DATA_GUEST_PATH,
   SANDBOX_DOCKER_DATA_SIZE,
   buildCanonicalSandboxSpec,
   buildSandboxCreateArgs,
   buildSandboxInspectArgs,
   buildSandboxListArgs,
+  buildSandboxPingArgs,
   buildSandboxProvisionArgs,
   buildSandboxPullArgs,
   buildSandboxRemoveArgs,
   buildSandboxStartArgs,
+  buildSandboxStopArgs,
   buildSandboxStopManagedArgs,
+  buildSandboxVerifyProvisionArgs,
   buildSandboxVersionArgs,
+  buildSandboxVolumeRemoveArgs,
+  parseMemoryMib,
   quoteForShell,
   resolveExpectedSandboxNetworkPolicy,
   resolveSandboxExecUser,
   resolveSandboxExecUserGid,
   resolveSandboxExecUserUid,
   resolveSandboxRuntimeTmpfsSizeMib,
+  resolveSessionSandboxMounts,
+  sandboxDockerDataVolumeName,
   sandboxMountRoots,
   sandboxNetworkPolicyMismatch,
+  sandboxVmMountRoots,
+  sessionSandboxName,
+  type SandboxVmSpec,
 } from '../../../src/services/sandbox/command'
 import { isPathWithinRoot } from '../../../src/utils/fs-safe'
+
+const ROOT_SESSION_ID = 'ses_root'
+const VM_NAME = sessionSandboxName(ROOT_SESSION_ID)
+const DOCKER_DATA_VOLUME = sandboxDockerDataVolumeName(VM_NAME)
+
+function vmSpec(overrides: Partial<SandboxVmSpec> = {}): SandboxVmSpec {
+  return {
+    name: VM_NAME,
+    rootSessionId: ROOT_SESSION_ID,
+    projectMounts: [getReposPath()],
+    cpus: ENV.SANDBOX.CPUS,
+    memoryMib: parseMemoryMib(ENV.SANDBOX.MEMORY) ?? 0,
+    ...overrides,
+  }
+}
 
 afterEach(() => {
   vi.restoreAllMocks()
@@ -45,20 +69,44 @@ describe('sandbox command builders', () => {
     expect(buildSandboxPullArgs()).toEqual(['pull', ENV.SANDBOX.IMAGE])
   })
 
-  it('builds inspect args targeting the shared workspace sandbox with JSON output', () => {
-    expect(buildSandboxInspectArgs()).toEqual(['inspect', WORKSPACE_SANDBOX_NAME, '--format', 'json'])
+  it('derives a stable, pattern-matching sandbox name from a root session id', () => {
+    expect(VM_NAME).toMatch(SESSION_SANDBOX_NAME_PATTERN)
+    expect(sessionSandboxName(ROOT_SESSION_ID)).toBe(VM_NAME)
+    expect(sessionSandboxName('ses_other')).not.toBe(VM_NAME)
+    expect(sessionSandboxName('ses_other')).toMatch(SESSION_SANDBOX_NAME_PATTERN)
+    expect(SESSION_SANDBOX_NAME_PATTERN.test('ocm-workspace')).toBe(false)
+    expect(SESSION_SANDBOX_NAME_PATTERN.test(`ocm-session-${'a'.repeat(11)}`)).toBe(false)
+    expect(SESSION_SANDBOX_NAME_PATTERN.test(`ocm-session-${'a'.repeat(13)}`)).toBe(false)
+    expect(SESSION_SANDBOX_NAME_PATTERN.test(`ocm-session-${'g'.repeat(12)}`)).toBe(false)
+    expect(sandboxDockerDataVolumeName(VM_NAME)).toBe(`${VM_NAME}-docker-data`)
   })
 
-  it('builds remove args that force-remove the shared workspace sandbox', () => {
-    expect(buildSandboxRemoveArgs()).toEqual(['rm', '--force', WORKSPACE_SANDBOX_NAME])
+  it('builds ping args targeting the named sandbox with quiet output', () => {
+    expect(buildSandboxPingArgs(VM_NAME)).toEqual(['ping', VM_NAME, '-q'])
+  })
+
+  it('builds inspect args targeting the named sandbox with JSON output', () => {
+    expect(buildSandboxInspectArgs(VM_NAME)).toEqual(['inspect', VM_NAME, '--format', 'json'])
+  })
+
+  it('builds remove args that force-remove the named sandbox', () => {
+    expect(buildSandboxRemoveArgs(VM_NAME)).toEqual(['rm', '--force', VM_NAME])
   })
 
   it('builds list args that emit machine-readable JSON for all sandboxes', () => {
     expect(buildSandboxListArgs()).toEqual(['ls', '--format', 'json'])
   })
 
-  it('builds start args targeting the shared workspace sandbox', () => {
-    expect(buildSandboxStartArgs()).toEqual(['start', WORKSPACE_SANDBOX_NAME])
+  it('builds start args targeting the named sandbox', () => {
+    expect(buildSandboxStartArgs(VM_NAME)).toEqual(['start', VM_NAME])
+  })
+
+  it('builds stop args targeting the named sandbox', () => {
+    expect(buildSandboxStopArgs(VM_NAME)).toEqual(['stop', VM_NAME])
+  })
+
+  it('builds volume removal args for the named Docker data volume', () => {
+    expect(buildSandboxVolumeRemoveArgs(DOCKER_DATA_VOLUME)).toEqual(['volume', 'rm', DOCKER_DATA_VOLUME])
   })
 
   it('builds managed-stop args that filter by the ocm.managed label', () => {
@@ -74,15 +122,17 @@ describe('sandbox command builders', () => {
     expect(result.stdout).toBe(value)
   })
 
-  it('builds create args with exactly five identical-path bind mounts and the detached flag', () => {
-    const args = buildSandboxCreateArgs()
+  it('builds create args for the VM spec with named mounts, resources, labels, and the project workdir', () => {
+    const args = buildSandboxCreateArgs(vmSpec())
 
     expect(args[0]).toBe('run')
     expect(args).toContain('-d')
     expect(args).toContain('--name')
-    expect(args[args.indexOf('--name') + 1]).toBe(WORKSPACE_SANDBOX_NAME)
+    expect(args[args.indexOf('--name') + 1]).toBe(VM_NAME)
     expect(args[args.indexOf('-w') + 1]).toBe(getReposPath())
     expect(args[args.indexOf('-u') + 1]).toBe(resolveSandboxExecUser())
+    expect(args[args.indexOf('-m') + 1]).toBe(`${parseMemoryMib(ENV.SANDBOX.MEMORY)}M`)
+    expect(args[args.indexOf('-c') + 1]).toBe(String(ENV.SANDBOX.CPUS))
 
     const labelArgs: string[] = []
     for (let i = 0; i < args.length; i++) {
@@ -93,6 +143,7 @@ describe('sandbox command builders', () => {
     }
     expect(labelArgs).toContain('ocm.managed=true')
     expect(labelArgs).toContain(`ocm.net=${ENV.SANDBOX.NET}`)
+    expect(labelArgs).toContain(`ocm.session=${ROOT_SESSION_ID}`)
 
     const mountArgs: string[] = []
     for (let i = 0; i < args.length; i++) {
@@ -101,35 +152,81 @@ describe('sandbox command builders', () => {
         mountArgs.push(value)
       }
     }
-    expect(mountArgs).toEqual(sandboxMountRoots().map((root) => `${root}:${root}`))
+    expect(mountArgs).toEqual(sandboxVmMountRoots(vmSpec()).map((root) => `${root}:${root}`))
     expect(mountArgs[0]).toBe(`${getReposPath()}:${getReposPath()}`)
-    expect(mountArgs[1]).toBe(`${getScheduleWorktreesPath()}:${getScheduleWorktreesPath()}`)
-    expect(mountArgs[2]).toBe(`${getOpenCodeWorktreesPath()}:${getOpenCodeWorktreesPath()}`)
-    expect(mountArgs[3]).toBe(`${getForgeWorktreesPath()}:${getForgeWorktreesPath()}`)
-    expect(mountArgs[4]).toBe(`${getOpenCodeToolOutputPath()}:${getOpenCodeToolOutputPath()}`)
-    expect(mountArgs[5]).toBe(`${getOpenCodeGlobalSkillsPath()}:${getOpenCodeGlobalSkillsPath()}`)
-    expect(mountArgs[6]).toBe(`${getOpenCodeAgentTmpPath()}:${getOpenCodeAgentTmpPath()}`)
+    expect(mountArgs).toEqual([
+      `${getReposPath()}:${getReposPath()}`,
+      `${getOpenCodeToolOutputPath()}:${getOpenCodeToolOutputPath()}`,
+      `${getOpenCodeGlobalSkillsPath()}:${getOpenCodeGlobalSkillsPath()}`,
+      `${getOpenCodeAgentTmpPath()}:${getOpenCodeAgentTmpPath()}`,
+    ])
   })
 
-  it('explicitly creates the runtime tmpfs required by attestation', () => {
-    const args = buildSandboxCreateArgs()
-    const spec = buildCanonicalSandboxSpec()
-    const resources = spec.resources as { memory_mib: number }
+  it('mounts an explicit project mount list without duplicating the shared directories', () => {
+    const spec = vmSpec({ projectMounts: [getScheduleWorktreesPath(), getOpenCodeToolOutputPath()] })
+
+    expect(sandboxVmMountRoots(spec)).toEqual([
+      getScheduleWorktreesPath(),
+      getOpenCodeToolOutputPath(),
+      getOpenCodeGlobalSkillsPath(),
+      getOpenCodeAgentTmpPath(),
+    ])
+    expect(buildSandboxCreateArgs(spec)[buildSandboxCreateArgs(spec).indexOf('-w') + 1]).toBe(getScheduleWorktreesPath())
+  })
+
+  it('sizes the runtime tmpfs from the spec memory and creates the Docker data disk for the VM', () => {
+    const spec = vmSpec()
+    const args = buildSandboxCreateArgs(spec)
+    const canonical = buildCanonicalSandboxSpec(spec)
+    const resources = canonical.resources as { memory_mib: number }
     expect(args[args.indexOf('--tmpfs') + 1]).toBe(`/tmp:${resolveSandboxRuntimeTmpfsSizeMib(resources.memory_mib)}M`)
-  })
-
-  it('attaches the persistent Docker data disk with the tested mount-named specification', () => {
-    const args = buildSandboxCreateArgs()
 
     const mountNamedIndex = args.indexOf('--mount-named')
     expect(mountNamedIndex).toBeGreaterThan(-1)
     expect(args[mountNamedIndex + 1]).toBe(
-      `${SANDBOX_DOCKER_DATA_VOLUME_NAME}:${SANDBOX_DOCKER_DATA_GUEST_PATH}:kind=disk,size=${SANDBOX_DOCKER_DATA_SIZE}`,
+      `${DOCKER_DATA_VOLUME}:${SANDBOX_DOCKER_DATA_GUEST_PATH}:kind=disk,size=${SANDBOX_DOCKER_DATA_SIZE}`,
     )
   })
 
+  it('sizes the runtime tmpfs from the VM memory rather than the environment default', () => {
+    const args = buildSandboxCreateArgs(vmSpec({ memoryMib: 2048 }))
+    expect(args[args.indexOf('--tmpfs') + 1]).toBe('/tmp:512M')
+  })
+
+  it('rejects a VM spec without a project mount', () => {
+    expect(() => buildSandboxCreateArgs(vmSpec({ projectMounts: [] }))).toThrow('at least one project mount')
+  })
+
+  it('inserts --replace immediately after -d before the image and never after --', () => {
+    const plain = buildSandboxCreateArgs(vmSpec())
+    const replace = buildSandboxCreateArgs(vmSpec(), { replace: true })
+
+    expect(plain).not.toContain('--replace')
+    expect(plain.slice(0, 3)).toEqual(['run', '-d', '--name'])
+    expect(replace.slice(0, 4)).toEqual(['run', '-d', '--replace', '--name'])
+    expect(replace.filter((token) => token === '--replace')).toHaveLength(1)
+
+    const imageIndex = replace.indexOf(ENV.SANDBOX.IMAGE)
+    const separatorIndex = replace.indexOf('--')
+    const replaceIndex = replace.indexOf('--replace')
+    expect(replaceIndex).toBeLessThan(imageIndex)
+    expect(replaceIndex).toBeLessThan(separatorIndex)
+    expect(replace.slice(replaceIndex + 1)).toEqual(plain.slice(2))
+  })
+
+  it('keeps the canonical spec free of the --replace flag', () => {
+    const canonical = buildCanonicalSandboxSpec(vmSpec())
+
+    expect(JSON.stringify(canonical)).not.toContain('--replace')
+    expect(canonical.name).toBe(VM_NAME)
+    expect((canonical.image as { Oci: { reference: string } }).Oci.reference).toBe(ENV.SANDBOX.IMAGE)
+    expect((canonical.runtime as { cmd: string[] }).cmd).toEqual(['sleep', 'infinity'])
+    expect((canonical.runtime as { workdir: string }).workdir).toBe(getReposPath())
+    expect(canonical.labels).toEqual({ 'ocm.managed': 'true', 'ocm.net': ENV.SANDBOX.NET, 'ocm.session': ROOT_SESSION_ID })
+  })
+
   it('never masks the assistant .opencode directory with a tmpfs overlay', () => {
-    const args = buildSandboxCreateArgs()
+    const args = buildSandboxCreateArgs(vmSpec())
 
     const tmpfsMounts = args.flatMap((arg, index) => arg === '--tmpfs' ? [args[index + 1]] : [])
     expect(tmpfsMounts).toHaveLength(1)
@@ -138,7 +235,7 @@ describe('sandbox command builders', () => {
   })
 
   it('pins --entrypoint to /usr/bin/env before the image so msb never inherits the OCI entrypoint', () => {
-    const args = buildSandboxCreateArgs()
+    const args = buildSandboxCreateArgs(vmSpec())
 
     const entrypointIndex = args.indexOf('--entrypoint')
     expect(entrypointIndex).toBeGreaterThan(-1)
@@ -173,7 +270,7 @@ describe('sandbox command builders', () => {
   })
 
   it('derives a canonical spec from the create args matching the security configuration', () => {
-    const spec = buildCanonicalSandboxSpec()
+    const spec = buildCanonicalSandboxSpec(vmSpec())
     const labels = spec.labels as Record<string, string>
     const resources = spec.resources as Record<string, number>
     const runtime = spec.runtime as Record<string, unknown>
@@ -181,11 +278,12 @@ describe('sandbox command builders', () => {
     const network = spec.network as Record<string, unknown>
     const lifecycle = spec.lifecycle as Record<string, unknown>
 
-    expect(spec.name).toBe(WORKSPACE_SANDBOX_NAME)
+    expect(spec.name).toBe(VM_NAME)
     const canonicalImage = spec.image as Record<string, { reference: string } | undefined>
     expect(canonicalImage.Oci?.reference).toBe(ENV.SANDBOX.IMAGE)
     expect(labels['ocm.managed']).toBe('true')
     expect(labels['ocm.net']).toBe(ENV.SANDBOX.NET)
+    expect(labels['ocm.session']).toBe(ROOT_SESSION_ID)
     expect(resources.cpus).toBe(ENV.SANDBOX.CPUS)
     expect(typeof resources.memory_mib).toBe('number')
     expect(runtime.workdir).toBe(getReposPath())
@@ -201,12 +299,9 @@ describe('sandbox command builders', () => {
     expect(lifecycle.idle_timeout_secs).toBeNull()
 
     const binds = mounts.filter((mount) => mount.type === 'Bind')
-    expect(binds).toHaveLength(7)
+    expect(binds).toHaveLength(4)
     expect(binds.map((mount) => mount.host)).toEqual([
       getReposPath(),
-      getScheduleWorktreesPath(),
-      getOpenCodeWorktreesPath(),
-      getForgeWorktreesPath(),
       getOpenCodeToolOutputPath(),
       getOpenCodeGlobalSkillsPath(),
       getOpenCodeAgentTmpPath(),
@@ -228,7 +323,7 @@ describe('sandbox command builders', () => {
     expect(named).toHaveLength(1)
     expect(named[0]).toEqual({
       type: 'Named',
-      name: SANDBOX_DOCKER_DATA_VOLUME_NAME,
+      name: DOCKER_DATA_VOLUME,
       guest: SANDBOX_DOCKER_DATA_GUEST_PATH,
       options: { readonly: false, noexec: false, nosuid: false, nodev: false },
       stat_virtualization: 'strict',
@@ -342,10 +437,10 @@ describe('sandbox command builders', () => {
     vi.spyOn(proc, 'getuid').mockReturnValue(1001)
     vi.spyOn(proc, 'getgid').mockReturnValue(1002)
 
-    const args = buildSandboxProvisionArgs()
+    const args = buildSandboxProvisionArgs(VM_NAME)
 
     expect(args[0]).toBe('exec')
-    expect(args).toContain(WORKSPACE_SANDBOX_NAME)
+    expect(args).toContain(VM_NAME)
     expect(args[args.indexOf('-u') + 1]).toBe('0:0')
     const script = args[args.indexOf('-c') + 1]
     expect(script).toContain("getent group 1002 >/dev/null 2>&1 || echo 'ocm-exec:x:1002:' >> /etc/group")
@@ -362,7 +457,27 @@ describe('sandbox command builders', () => {
     vi.spyOn(proc, 'getuid').mockReturnValue(undefined)
     vi.spyOn(proc, 'getgid').mockReturnValue(undefined)
 
-    expect(buildSandboxProvisionArgs()).toEqual([])
+    expect(buildSandboxProvisionArgs(VM_NAME)).toEqual([])
+    expect(buildSandboxVerifyProvisionArgs(VM_NAME)).toEqual([])
+  })
+
+  it('builds verify-provision args that assert the exec user passwd entry as root', () => {
+    const proc = process as unknown as { getuid: () => number; getgid: () => number }
+    vi.spyOn(proc, 'getuid').mockReturnValue(1001)
+    vi.spyOn(proc, 'getgid').mockReturnValue(1002)
+
+    expect(buildSandboxVerifyProvisionArgs(VM_NAME)).toEqual([
+      'exec',
+      VM_NAME,
+      '--no-tty',
+      '-q',
+      '-u',
+      '0:0',
+      '--',
+      '/bin/sh',
+      '-c',
+      'getent passwd 1001 >/dev/null',
+    ])
   })
 
   it('aligns a numeric exec user with the manager gid', async () => {
@@ -681,5 +796,272 @@ describe('sandbox network policy attestation helpers', () => {
       { ...publicPolicy, rules: [{ direction: 'egress', destination: { group: 'host' }, action: 'allow' }] },
       expected,
     )).toContain('network policy')
+  })
+})
+
+describe('resolveSessionSandboxMounts', () => {
+  function runGit(args: string[], cwd?: string): void {
+    const result = spawnSync('git', args, { cwd, encoding: 'utf8' })
+    if (result.status !== 0) {
+      throw new Error(`git ${args.join(' ')} failed: ${result.stderr}`)
+    }
+  }
+
+  function restoreWorkspacePath(original: string | undefined): void {
+    if (original === undefined) {
+      delete process.env.WORKSPACE_PATH
+    } else {
+      process.env.WORKSPACE_PATH = original
+    }
+  }
+
+  it('returns the single project mount for a plain repository and a non-repository directory, and null outside the roots', async () => {
+    const tmp = mkdtempSync(path.join(tmpdir(), 'ocm-session-mounts-'))
+    const originalWorkspacePath = process.env.WORKSPACE_PATH
+    try {
+      const repos = path.join(tmp, 'repos')
+      const repo = path.join(repos, 'repo')
+      const plain = path.join(repos, 'plain')
+      mkdirSync(repo, { recursive: true })
+      mkdirSync(plain, { recursive: true })
+      runGit(['init', '-q'], repo)
+
+      process.env.WORKSPACE_PATH = tmp
+
+      await expect(resolveSessionSandboxMounts(repo)).resolves.toEqual([repo])
+      await expect(resolveSessionSandboxMounts(plain)).resolves.toEqual([plain])
+      await expect(resolveSessionSandboxMounts('/etc')).resolves.toBeNull()
+      await expect(resolveSessionSandboxMounts(path.join(repos, 'missing'))).resolves.toBeNull()
+    } finally {
+      restoreWorkspacePath(originalWorkspacePath)
+      rmSync(tmp, { recursive: true, force: true })
+    }
+  })
+
+  it('adds the main repository git common dir for a linked worktree', async () => {
+    const tmp = mkdtempSync(path.join(tmpdir(), 'ocm-session-worktree-'))
+    const originalWorkspacePath = process.env.WORKSPACE_PATH
+    try {
+      const repos = path.join(tmp, 'repos')
+      const main = path.join(repos, 'main')
+      const worktree = path.join(tmp, 'schedule-worktrees', 'job-1-run-2')
+      mkdirSync(main, { recursive: true })
+      mkdirSync(path.dirname(worktree), { recursive: true })
+      runGit(['init', '-q'], main)
+      runGit(
+        ['-c', 'user.email=ocm@example.com', '-c', 'user.name=OCM', 'commit', '--allow-empty', '-q', '-m', 'init'],
+        main,
+      )
+      runGit(['worktree', 'add', '-q', '-b', 'feature', worktree], main)
+
+      process.env.WORKSPACE_PATH = tmp
+
+      await expect(resolveSessionSandboxMounts(worktree)).resolves.toEqual([worktree, path.join(main, '.git')])
+    } finally {
+      restoreWorkspacePath(originalWorkspacePath)
+      rmSync(tmp, { recursive: true, force: true })
+    }
+  })
+
+  it('blocks a forged git dir that has no worktree back-link to the sandbox worktree', async () => {
+    const tmp = mkdtempSync(path.join(tmpdir(), 'ocm-session-forged-'))
+    const originalWorkspacePath = process.env.WORKSPACE_PATH
+    try {
+      const repos = path.join(tmp, 'repos')
+      const main = path.join(repos, 'main')
+      const unrelatedWorktree = path.join(tmp, 'schedule-worktrees', 'job-9-run-1')
+      const victim = path.join(repos, 'victim')
+      mkdirSync(main, { recursive: true })
+      mkdirSync(path.dirname(unrelatedWorktree), { recursive: true })
+      mkdirSync(victim, { recursive: true })
+      runGit(['init', '-q'], main)
+      runGit(
+        ['-c', 'user.email=ocm@example.com', '-c', 'user.name=OCM', 'commit', '--allow-empty', '-q', '-m', 'init'],
+        main,
+      )
+      runGit(['worktree', 'add', '-q', '-b', 'feature', unrelatedWorktree], main)
+      writeFileSync(path.join(victim, '.git'), `gitdir: ${path.join(main, '.git')}\n`)
+
+      process.env.WORKSPACE_PATH = tmp
+
+      await expect(resolveSessionSandboxMounts(victim)).resolves.toBeNull()
+    } finally {
+      restoreWorkspacePath(originalWorkspacePath)
+      rmSync(tmp, { recursive: true, force: true })
+    }
+  })
+
+  it('blocks a symlinked git dir that points at another repo worktree back-link', async () => {
+    const tmp = mkdtempSync(path.join(tmpdir(), 'ocm-session-gitsym-'))
+    const originalWorkspacePath = process.env.WORKSPACE_PATH
+    try {
+      const repos = path.join(tmp, 'repos')
+      const other = path.join(repos, 'other')
+      const otherWorktree = path.join(tmp, 'schedule-worktrees', 'other-wt')
+      const victim = path.join(repos, 'victim')
+      mkdirSync(other, { recursive: true })
+      mkdirSync(path.dirname(otherWorktree), { recursive: true })
+      mkdirSync(victim, { recursive: true })
+      runGit(['init', '-q'], other)
+      runGit(
+        ['-c', 'user.email=ocm@example.com', '-c', 'user.name=OCM', 'commit', '--allow-empty', '-q', '-m', 'init'],
+        other,
+      )
+      runGit(['worktree', 'add', '-q', '-b', 'feature', otherWorktree], other)
+      symlinkSync(path.join(otherWorktree, '.git'), path.join(victim, '.git'))
+
+      process.env.WORKSPACE_PATH = tmp
+
+      await expect(resolveSessionSandboxMounts(victim)).resolves.toBeNull()
+    } finally {
+      restoreWorkspacePath(originalWorkspacePath)
+      rmSync(tmp, { recursive: true, force: true })
+    }
+  })
+
+  it('rejects a main repository whose core.worktree points at the repos root', async () => {
+    const tmp = mkdtempSync(path.join(tmpdir(), 'ocm-session-core-worktree-'))
+    const originalWorkspacePath = process.env.WORKSPACE_PATH
+    try {
+      const repos = path.join(tmp, 'repos')
+      const repo = path.join(repos, 'repo')
+      mkdirSync(repo, { recursive: true })
+      runGit(['init', '-q'], repo)
+      runGit(['config', 'core.worktree', repos], repo)
+
+      process.env.WORKSPACE_PATH = tmp
+
+      await expect(resolveSessionSandboxMounts(repo)).resolves.toBeNull()
+    } finally {
+      restoreWorkspacePath(originalWorkspacePath)
+      rmSync(tmp, { recursive: true, force: true })
+    }
+  })
+
+  it('rejects a core.worktree escape that plants a matching worktree back-link', async () => {
+    const tmp = mkdtempSync(path.join(tmpdir(), 'ocm-session-core-worktree-link-'))
+    const originalWorkspacePath = process.env.WORKSPACE_PATH
+    try {
+      const repos = path.join(tmp, 'repos')
+      const mine = path.join(repos, 'mine')
+      const other = path.join(repos, 'other')
+      mkdirSync(mine, { recursive: true })
+      mkdirSync(other, { recursive: true })
+      runGit(['init', '-q'], mine)
+      runGit(['init', '-q'], other)
+      runGit(['config', 'core.worktree', other], mine)
+      const planted = path.join(mine, '.git', 'worktrees', 'x')
+      mkdirSync(planted, { recursive: true })
+      writeFileSync(path.join(planted, 'gitdir'), `${path.join(other, '.git')}\n`)
+
+      process.env.WORKSPACE_PATH = tmp
+
+      await expect(resolveSessionSandboxMounts(mine)).resolves.toBeNull()
+    } finally {
+      restoreWorkspacePath(originalWorkspacePath)
+      rmSync(tmp, { recursive: true, force: true })
+    }
+  })
+
+  it('rejects a main repository whose git dir is a symlink to another repository git dir', async () => {
+    const tmp = mkdtempSync(path.join(tmpdir(), 'ocm-session-symlink-main-'))
+    const originalWorkspacePath = process.env.WORKSPACE_PATH
+    try {
+      const repos = path.join(tmp, 'repos')
+      const repo = path.join(repos, 'repo')
+      const other = path.join(repos, 'other')
+      mkdirSync(repo, { recursive: true })
+      mkdirSync(other, { recursive: true })
+      runGit(['init', '-q'], repo)
+      runGit(['init', '-q'], other)
+      runGit(
+        ['-c', 'user.email=ocm@example.com', '-c', 'user.name=OCM', 'commit', '--allow-empty', '-q', '-m', 'init'],
+        repo,
+      )
+
+      rmSync(path.join(repo, '.git'), { recursive: true, force: true })
+      symlinkSync(path.join(other, '.git'), path.join(repo, '.git'), 'dir')
+
+      process.env.WORKSPACE_PATH = tmp
+
+      await expect(resolveSessionSandboxMounts(repo)).resolves.toBeNull()
+    } finally {
+      restoreWorkspacePath(originalWorkspacePath)
+      rmSync(tmp, { recursive: true, force: true })
+    }
+  })
+
+  it('rejects a worktree whose git file is a symlink to another repository linked worktree git file', async () => {
+    const tmp = mkdtempSync(path.join(tmpdir(), 'ocm-session-symlink-worktree-'))
+    const originalWorkspacePath = process.env.WORKSPACE_PATH
+    try {
+      const repos = path.join(tmp, 'repos')
+      const main = path.join(repos, 'main')
+      const other = path.join(repos, 'other')
+      const otherWorktree = path.join(repos, 'other-linked')
+      const worktree = path.join(tmp, 'schedule-worktrees', 'job-1-run-2')
+      mkdirSync(main, { recursive: true })
+      mkdirSync(other, { recursive: true })
+      mkdirSync(path.dirname(worktree), { recursive: true })
+      runGit(['init', '-q'], main)
+      runGit(['init', '-q'], other)
+      runGit(
+        ['-c', 'user.email=ocm@example.com', '-c', 'user.name=OCM', 'commit', '--allow-empty', '-q', '-m', 'init'],
+        main,
+      )
+      runGit(
+        ['-c', 'user.email=ocm@example.com', '-c', 'user.name=OCM', 'commit', '--allow-empty', '-q', '-m', 'init'],
+        other,
+      )
+      runGit(['worktree', 'add', '-q', '-b', 'feature', worktree], main)
+      runGit(['worktree', 'add', '-q', '-b', 'linked', otherWorktree], other)
+
+      rmSync(path.join(worktree, '.git'), { force: true })
+      symlinkSync(path.join(otherWorktree, '.git'), path.join(worktree, '.git'))
+
+      process.env.WORKSPACE_PATH = tmp
+
+      await expect(resolveSessionSandboxMounts(worktree)).resolves.toBeNull()
+    } finally {
+      restoreWorkspacePath(originalWorkspacePath)
+      rmSync(tmp, { recursive: true, force: true })
+    }
+  })
+
+  it('rejects a worktree whose git file points at another repository linked worktree', async () => {
+    const tmp = mkdtempSync(path.join(tmpdir(), 'ocm-session-cross-linked-'))
+    const originalWorkspacePath = process.env.WORKSPACE_PATH
+    try {
+      const repos = path.join(tmp, 'repos')
+      const main = path.join(repos, 'main')
+      const other = path.join(repos, 'other')
+      const otherWorktree = path.join(repos, 'other-linked')
+      const worktree = path.join(tmp, 'schedule-worktrees', 'job-1-run-2')
+      mkdirSync(main, { recursive: true })
+      mkdirSync(other, { recursive: true })
+      mkdirSync(path.dirname(worktree), { recursive: true })
+      runGit(['init', '-q'], main)
+      runGit(['init', '-q'], other)
+      runGit(
+        ['-c', 'user.email=ocm@example.com', '-c', 'user.name=OCM', 'commit', '--allow-empty', '-q', '-m', 'init'],
+        main,
+      )
+      runGit(
+        ['-c', 'user.email=ocm@example.com', '-c', 'user.name=OCM', 'commit', '--allow-empty', '-q', '-m', 'init'],
+        other,
+      )
+      runGit(['worktree', 'add', '-q', '-b', 'feature', worktree], main)
+      runGit(['worktree', 'add', '-q', '-b', 'linked', otherWorktree], other)
+
+      const otherGitDir = path.join(other, '.git', 'worktrees', path.basename(otherWorktree))
+      writeFileSync(path.join(worktree, '.git'), `gitdir: ${otherGitDir}\n`)
+
+      process.env.WORKSPACE_PATH = tmp
+
+      await expect(resolveSessionSandboxMounts(worktree)).resolves.toBeNull()
+    } finally {
+      restoreWorkspacePath(originalWorkspacePath)
+      rmSync(tmp, { recursive: true, force: true })
+    }
   })
 })

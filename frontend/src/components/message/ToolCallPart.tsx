@@ -161,6 +161,11 @@ export const ToolCallPart = memo(function ToolCallPart({ part, messageID, direct
     part.state.status === 'completed' &&
     (toolMetadata(part).sandbox === true ||
       (rawCommand !== undefined && displayCommand !== rawCommand))
+  const sandboxProvider = (() => {
+    const provider = toolMetadata(part).sandboxProvider
+    return typeof provider === 'string' ? provider : undefined
+  })()
+  const sandboxProviderLabel = sandboxProvider !== undefined && sandboxProvider !== 'ocm' ? sandboxProvider : undefined
   const isUserBashCommand = part.state.status === 'completed' &&
     typeof displayCommand === 'string' &&
     userBashCommands.has(displayCommand)
@@ -250,10 +255,14 @@ export const ToolCallPart = memo(function ToolCallPart({ part, messageID, direct
     <Badge
       variant="outline"
       className="shrink-0 gap-1 border-success/40 bg-success/15 text-success"
-      title="Executed inside the sandbox microVM"
+      title={
+        sandboxProviderLabel !== undefined
+          ? `Executed inside the ${sandboxProviderLabel} sandbox`
+          : 'Executed inside the sandbox microVM'
+      }
     >
       <Shield className="w-3 h-3" />
-      sandbox
+      {sandboxProviderLabel !== undefined ? `sandbox · ${sandboxProviderLabel}` : 'sandbox'}
     </Badge>
   ) : null
 

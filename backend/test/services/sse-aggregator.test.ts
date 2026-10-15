@@ -515,7 +515,7 @@ describe('SSEAggregator scheduled session replay without a connected client', ()
       { sessionID: 'ses-sched', directory: '/worktrees/run-1' },
     ])
 
-    const seen: Array<{ directory: string; type: string; sessionID: string; status: string }> = []
+    const seen: Array<{ directory: string | null; type: string; sessionID: string; status: string }> = []
     sseAggregator.onEvent((directory, event) => {
       if (event.type !== 'session.status') return
       seen.push({
@@ -690,7 +690,7 @@ describe('SSEAggregator directory-less session event routing', () => {
     sseAggregator.addClient('resolved-a', subscribed.callback, subscribed.writeFrame, ['/r'])
     sseAggregator.addClient('resolved-b', global.callback, global.writeFrame, [])
 
-    const seen: Array<{ directory: string; type: string; sessionID: string }> = []
+    const seen: Array<{ directory: string | null; type: string; sessionID: string }> = []
     sseAggregator.onEvent((directory, event) => {
       seen.push({ directory, type: event.type, sessionID: sessionIDFromEvent(event) ?? '' })
     })
@@ -724,16 +724,16 @@ describe('SSEAggregator directory-less session event routing', () => {
     ])
   })
 
-  it('broadcasts a directory-less event from an unknown session without notifying listeners', () => {
+  it('notifies listeners with a null directory for a directory-less event from an unknown session and still broadcasts it', () => {
     const client = createCapturingClient()
     sseAggregator.addClient('unknown-a', client.callback, client.writeFrame, ['/r'])
 
-    const seen: string[] = []
-    sseAggregator.onEvent((_directory, event) => { seen.push(event.type) })
+    const seen: Array<{ directory: string | null; type: string }> = []
+    sseAggregator.onEvent((directory, event) => { seen.push({ directory, type: event.type }) })
 
     emitRawEvent({ type: 'session.execution.succeeded', data: { sessionID: 'ses_unknown' } })
 
-    expect(seen).toEqual([])
+    expect(seen).toEqual([{ directory: null, type: 'session.execution.succeeded' }])
     expect(sseAggregator.getActiveSessions()).toEqual({})
     expect(client.frames.map(parseFrame)).toEqual([
       {
@@ -743,12 +743,50 @@ describe('SSEAggregator directory-less session event routing', () => {
     ])
   })
 
+  it('notifies listeners with a null directory for a session.deleted with no location and no remembered directory', () => {
+    const client = createCapturingClient()
+    sseAggregator.addClient('deleted-unknown', client.callback, client.writeFrame, ['/r'])
+
+    const seen: Array<{ directory: string | null; type: string; sessionID: string }> = []
+    sseAggregator.onEvent((directory, event) => {
+      seen.push({ directory, type: event.type, sessionID: sessionIDFromEvent(event) ?? '' })
+    })
+
+    emitRawEvent({ type: 'session.deleted', data: { sessionID: 'ses_unknown' } })
+
+    expect(seen).toEqual([{ directory: null, type: 'session.deleted', sessionID: 'ses_unknown' }])
+    expect(client.frames.map(parseFrame)).toEqual([
+      {
+        directory: null,
+        payload: { id: 'evt_1', created: 1, type: 'session.deleted', data: { sessionID: 'ses_unknown' } },
+      },
+    ])
+  })
+
+  it('passes the resolved directory to listeners for a located session.deleted', () => {
+    const client = createCapturingClient()
+    sseAggregator.addClient('deleted-located', client.callback, client.writeFrame, ['/r'])
+
+    const seen: Array<{ directory: string | null; type: string }> = []
+    sseAggregator.onEvent((directory, event) => { seen.push({ directory, type: event.type }) })
+
+    emitRawEvent({ type: 'session.deleted', location: { directory: '/r' }, data: { sessionID: 'ses_located' } })
+
+    expect(seen).toEqual([{ directory: '/r', type: 'session.deleted' }])
+    expect(client.frames.map(parseFrame)).toEqual([
+      {
+        directory: '/r',
+        payload: { id: 'evt_1', created: 1, type: 'session.deleted', location: { directory: '/r' }, data: { sessionID: 'ses_located' } },
+      },
+    ])
+  })
+
   it('forgets the remembered directory when session.deleted arrives', () => {
     const client = createCapturingClient()
     sseAggregator.addClient('deleted-a', client.callback, client.writeFrame, ['/r'])
 
-    const seen: string[] = []
-    sseAggregator.onEvent((_directory, event) => { seen.push(event.type) })
+    const seen: Array<string | null> = []
+    sseAggregator.onEvent((directory) => { seen.push(directory) })
 
     emitRawEvent({ type: 'session.created', location: { directory: '/r' }, data: { sessionID: 'ses_del' } })
     emitRawEvent({ type: 'session.deleted', data: { sessionID: 'ses_del' } })
@@ -756,7 +794,7 @@ describe('SSEAggregator directory-less session event routing', () => {
     seen.length = 0
     emitRawEvent({ type: 'session.execution.succeeded', data: { sessionID: 'ses_del' } })
 
-    expect(seen).toEqual([])
+    expect(seen).toEqual([null])
     expect(sseAggregator.getActiveSessions()).toEqual({})
     expect(client.frames.map(parseFrame).at(-1)).toEqual({
       directory: null,
@@ -770,7 +808,7 @@ describe('SSEAggregator directory-less session event routing', () => {
     sseAggregator.addClient('fork-a', subscribed.callback, subscribed.writeFrame, ['/r'])
     sseAggregator.addClient('fork-b', global.callback, global.writeFrame, [])
 
-    const seen: Array<{ directory: string; type: string; sessionID: string }> = []
+    const seen: Array<{ directory: string | null; type: string; sessionID: string }> = []
     sseAggregator.onEvent((directory, event) => {
       seen.push({ directory, type: event.type, sessionID: sessionIDFromEvent(event) ?? '' })
     })
@@ -813,7 +851,7 @@ describe('SSEAggregator location-scoped catalog event broadcast', () => {
       sseAggregator.addClient('catalog-a', subscribed.callback, subscribed.writeFrame, ['/repo-a'])
       sseAggregator.addClient('catalog-b', unsubscribed.callback, unsubscribed.writeFrame, [])
 
-      const seen: Array<{ directory: string; type: string }> = []
+      const seen: Array<{ directory: string | null; type: string }> = []
       sseAggregator.onEvent((directory, event) => {
         seen.push({ directory, type: event.type })
       })

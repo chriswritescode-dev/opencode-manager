@@ -12,6 +12,7 @@ import { MultiRunError, MultiRunService } from '../../src/services/multi-runs'
 import { RepoWorkspaceError } from '../../src/services/repo'
 import type { RepoWorkspaceService } from '../../src/services/repo-workspace'
 import { SessionPermissionModeService } from '../../src/services/session-permission-modes'
+import { SessionAncestry } from '../../src/services/session-ancestry'
 import { SettingsService } from '../../src/services/settings'
 import type { Repo } from '../../src/types/repo'
 import type { OpenCodeClient } from '../../src/services/opencode/client'
@@ -222,6 +223,7 @@ describe('MultiRunService', () => {
       db,
       client,
       new SettingsService(db),
+      new SessionAncestry(client),
     ),
   ): MultiRunService {
     return new MultiRunService(db, client, repoWorkspaces, permissionModes)
@@ -706,7 +708,7 @@ describe('MultiRunService', () => {
     const repoWorkspaces = createRepoWorkspaces()
     const settingsService = new SettingsService(db)
     settingsService.updateSettings({ sessionDefaults: { permissionMode: 'auto' } })
-    const permissionModes = new SessionPermissionModeService(db, client, settingsService)
+    const permissionModes = new SessionPermissionModeService(db, client, settingsService, new SessionAncestry(client))
     const service = createService(client, repoWorkspaces.service, permissionModes)
 
     const run = await service.launch({

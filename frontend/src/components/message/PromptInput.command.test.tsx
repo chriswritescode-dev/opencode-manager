@@ -111,6 +111,10 @@ vi.mock('./ComposerToolsMenu', () => ({
   ComposerToolsMenu: () => null,
 }))
 
+vi.mock('@/components/session/SessionSandboxMenu', () => ({
+  SessionSandboxMenu: () => null,
+}))
+
 vi.mock('./PromptSuggestions', () => ({
   PromptSuggestions: (props: { isOpen: boolean; selectedIndex: number }) => {
     if (props.isOpen) {
