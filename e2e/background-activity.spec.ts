@@ -23,7 +23,7 @@ async function requireOk(response: Awaited<ReturnType<APIRequestContext['post']>
   if (!response.ok()) {
     throw new Error(`${label} failed: ${response.status()} ${await response.text()}`)
   }
-  return response.json()
+  return response.status() === 204 ? null : response.json()
 }
 
 async function createSession(request: APIRequestContext, directory: string, parentID?: string): Promise<string> {
@@ -74,6 +74,12 @@ function createUnregisteredDirectory(name: string): string {
 
   createdDirectories.push(directory)
   return directory
+}
+
+function waitForDirectorySubscription(page: Page, directory: string) {
+  return page.waitForResponse((response) =>
+    response.url().includes('/api/sse/subscribe') && (response.request().postData() ?? '').includes(directory),
+  )
 }
 
 async function navigateWithinApp(page: Page, url: string): Promise<void> {
@@ -196,9 +202,7 @@ test.describe('session background activity', () => {
   }) => {
     const directory = createUnregisteredDirectory('stale')
     const sessionId = await createSession(request, directory)
-    const subscribed = page.waitForResponse((response) =>
-      response.url().includes('/api/sse/subscribe') && (response.request().postData() ?? '').includes(directory),
-    )
+    const subscribed = waitForDirectorySubscription(page, directory)
 
     await page.goto(`/repos/${repo.id}/sessions/${sessionId}`)
     await expect(page.getByPlaceholder('Send a message...')).toBeVisible()
@@ -217,5 +221,32 @@ test.describe('session background activity', () => {
 
     await expect(page.getByPlaceholder('Send a message...')).toBeVisible()
     await expect(backgroundIndicator(page)).toBeHidden({ timeout: 20_000 })
+  })
+
+  test('follows a session moved to another directory without a reload', async ({ page, request, repo }) => {
+    const source = createUnregisteredDirectory('move-source')
+    const target = createUnregisteredDirectory('move-target')
+    const sessionId = await createSession(request, source)
+    const subscribedToSource = waitForDirectorySubscription(page, source)
+
+    await page.goto(`/repos/${repo.id}/sessions/${sessionId}`)
+    await expect(page.getByPlaceholder('Send a message...')).toBeVisible()
+    await subscribedToSource
+
+    const subscribedToTarget = waitForDirectorySubscription(page, target)
+    await requireOk(
+      await request.post(`/api/opencode/api/session/${sessionId}/move`, { data: { directory: target } }),
+      'move session',
+    )
+    await subscribedToTarget
+
+    const shellId = await startBackgroundShell(request, target, sessionId)
+    createdShells.push({ directory: target, id: shellId })
+
+    await expect(backgroundIndicator(page)).toBeVisible()
+
+    await removeShell(request, target, shellId)
+
+    await expect(backgroundIndicator(page)).toBeHidden()
   })
 })
