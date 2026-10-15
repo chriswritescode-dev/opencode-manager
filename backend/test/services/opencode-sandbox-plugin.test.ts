@@ -8,7 +8,7 @@ import os from 'os'
 import { SANDBOX_PLAN_TIMEOUT_MS } from '../../src/services/opencode-sandbox-plugin'
 import { installManagedPlugins, getOpenCodePluginDir } from '../../src/services/opencode/plugin-registry'
 import {
-  SANDBOX_FORWARDED_ENV_NAMES,
+  SANDBOX_SHELL_ENV_FORWARD,
   SANDBOX_SHELL_ENV_WORKDIR,
   sandboxShellShimPath,
 } from '../../src/services/sandbox/shell-shim'
@@ -88,6 +88,8 @@ describe('ocm-sandbox plugin', () => {
     expect(statSync(shimPath).mode & 0o100).not.toBe(0)
     expect(shim.startsWith('#!/bin/sh')).toBe(true)
     expect(shim).toContain(`$${SANDBOX_SHELL_ENV_WORKDIR}`)
+    expect(shim).toContain(`\${${SANDBOX_SHELL_ENV_FORWARD}}`)
+    expect(pluginSource).toContain(`var ENV_FORWARD = ${JSON.stringify(SANDBOX_SHELL_ENV_FORWARD)}`)
     expect(pluginSource).toContain(`var SHELL_SHIM_PATH = ${JSON.stringify(shimPath)}`)
   })
 
@@ -158,42 +160,57 @@ describe('ocm-sandbox plugin', () => {
 
       expect(event.shell).toBe(sandboxShellShimPath(configHome))
       expect(event.env[SANDBOX_SHELL_ENV_WORKDIR]).toBe(WORKDIR)
+      expect(event.env[SANDBOX_SHELL_ENV_FORWARD]).toBe('')
       const [url, init] = fetchMock.mock.calls[0] as [string, { body: string; headers: Record<string, string> }]
       expect(url).toBe('http://localhost:5003/api/internal/sandbox/shell')
       expect(JSON.parse(init.body)).toEqual({ directory: WORKDIR, enforced: true })
       expect(init.headers.Authorization).toBe('Bearer secret-token')
     })
 
-    it('ignores a later hook that tries to redirect the pinned shell or working directory', async () => {
+    it('ignores a later hook that tries to redirect the pinned shell, working directory, or forward list', async () => {
       vi.stubGlobal('fetch', planResponse({ mode: 'sandbox', workdir: WORKDIR }))
 
       const event = await triggerShellCreate(configHome)
       event.shell = '/bin/sh'
       event.env[SANDBOX_SHELL_ENV_WORKDIR] = '/tmp'
+      event.env[SANDBOX_SHELL_ENV_FORWARD] = 'EVIL'
 
       expect(event.shell).toBe(sandboxShellShimPath(configHome))
       expect(event.env[SANDBOX_SHELL_ENV_WORKDIR]).toBe(WORKDIR)
+      expect(event.env[SANDBOX_SHELL_ENV_FORWARD]).toBe('')
       expect(Object.getOwnPropertyDescriptor(event, 'shell')?.configurable).toBe(false)
       expect(Object.getOwnPropertyDescriptor(event.env, SANDBOX_SHELL_ENV_WORKDIR)?.configurable).toBe(false)
+      expect(Object.getOwnPropertyDescriptor(event.env, SANDBOX_SHELL_ENV_FORWARD)?.configurable).toBe(false)
     })
 
-    it('forwards only the allow-listed plan env values into the spawn environment', async () => {
+    it('forwards arbitrary plan env names and pins the forward list', async () => {
       vi.stubGlobal('fetch', planResponse({
         mode: 'sandbox',
         workdir: WORKDIR,
-        env: { GH_TOKEN: 'gh-secret', OCM_INTERNAL_TOKEN: 'must-not-be-forwarded', GIT_CONFIG_COUNT: '1' },
+        env: {
+          GH_TOKEN: 'gh-secret',
+          GIT_CONFIG_COUNT: '1',
+          OPENAI_API_KEY: 'sk-secret',
+          OCM_INTERNAL_TOKEN: 'must-not-be-forwarded',
+          MSB_SECRET: 'must-not-be-forwarded',
+          '1BAD': 'invalid',
+          'A-B': 'invalid',
+          NUMERIC: 5,
+        },
       }))
 
       const event = await triggerShellCreate(configHome)
 
       expect(event.env.GH_TOKEN).toBe('gh-secret')
       expect(event.env.GIT_CONFIG_COUNT).toBe('1')
+      expect(event.env.OPENAI_API_KEY).toBe('sk-secret')
       expect(event.env.OCM_INTERNAL_TOKEN).toBeUndefined()
-      for (const name of Object.keys(event.env)) {
-        if (event.env[name] === undefined) continue
-        if (name === SANDBOX_SHELL_ENV_WORKDIR || name === 'TERM' || name === 'OPENCODE_TERMINAL') continue
-        expect(SANDBOX_FORWARDED_ENV_NAMES).toContain(name)
-      }
+      expect(event.env.MSB_SECRET).toBeUndefined()
+      expect(event.env['1BAD']).toBeUndefined()
+      expect(event.env['A-B']).toBeUndefined()
+      expect(event.env.NUMERIC).toBeUndefined()
+      expect(event.env[SANDBOX_SHELL_ENV_FORWARD]).toBe('GH_TOKEN GIT_CONFIG_COUNT OPENAI_API_KEY')
+      expect(Object.getOwnPropertyDescriptor(event.env, SANDBOX_SHELL_ENV_FORWARD)?.configurable).toBe(false)
     })
 
     it('does not plan and leaves the event untouched when enforcement is off', async () => {

@@ -1,5 +1,7 @@
 import { z } from 'zod'
 import { TerminalInfoSchema } from './terminal'
+import { EnvironmentNameSchema, isReservedEnvName } from './secrets'
+import { parseEnvExpressionReferences } from '../utils/env-expressions'
 
 export const ProjectActionIconSchema = z.enum([
   'play',
@@ -30,10 +32,42 @@ export const WorktreeSetupCommandsSchema = z.array(z.string().trim().min(1).max(
 
 export const ProjectItemSourceSchema = z.enum(['personal', 'repo'])
 
+export const REPO_PROJECT_ENV_MAX_ENTRIES = 100
+
+export const REPO_PROJECT_ENV_NAME_PATTERN = /^[A-Za-z_][A-Za-z0-9_]*$/
+
+export const RepoProjectEnvValueSchema = z
+  .string()
+  .max(4000, 'Environment value must be at most 4000 characters')
+  .superRefine((value, ctx) => {
+    const parsed = parseEnvExpressionReferences(value)
+    if (!parsed.ok) {
+      ctx.addIssue({ code: 'custom', message: parsed.error })
+    }
+  })
+
+export const RepoProjectEnvSchema = z
+  .record(z.string(), RepoProjectEnvValueSchema)
+  .superRefine((env, ctx) => {
+    for (const key of Object.keys(env)) {
+      if (!REPO_PROJECT_ENV_NAME_PATTERN.test(key)) {
+        ctx.addIssue({ code: 'custom', message: `${key} is not a valid environment variable name`, path: [key] })
+      } else if (isReservedEnvName(key)) {
+        ctx.addIssue({ code: 'custom', message: `${key} is reserved for Manager or the runtime`, path: [key] })
+      }
+    }
+  })
+  .refine(
+    (env) => Object.keys(env).length <= REPO_PROJECT_ENV_MAX_ENTRIES,
+    `At most ${REPO_PROJECT_ENV_MAX_ENTRIES} environment entries are allowed`,
+  )
+
 export const RepoProjectFileSchema = z.looseObject({
   version: z.literal(1),
   projectActions: z.array(ProjectActionSchema).optional(),
   setupWorktree: WorktreeSetupCommandsSchema.optional(),
+  environment: EnvironmentNameSchema.optional(),
+  env: RepoProjectEnvSchema.optional(),
 })
 
 export const ProjectConfigResponseSchema = z.object({
@@ -66,6 +100,8 @@ export const ProjectConfigResponseSchema = z.object({
           }),
         ),
         setup: z.array(z.string()),
+        environment: z.string().optional(),
+        env: z.record(z.string(), z.string()).optional(),
       })
       .nullable(),
     error: z.string().optional(),
@@ -128,6 +164,7 @@ export type ProjectAction = z.infer<typeof ProjectActionSchema>
 export type WorktreeSetupCommands = z.infer<typeof WorktreeSetupCommandsSchema>
 export type ProjectItemSource = z.infer<typeof ProjectItemSourceSchema>
 export type RepoProjectFile = z.infer<typeof RepoProjectFileSchema>
+export type RepoProjectEnv = z.infer<typeof RepoProjectEnvSchema>
 export type ProjectConfigResponse = z.infer<typeof ProjectConfigResponseSchema>
 export type UpdateProjectActionsRequest = z.infer<typeof UpdateProjectActionsRequestSchema>
 export type UpdateWorktreeSetupRequest = z.infer<typeof UpdateWorktreeSetupRequestSchema>

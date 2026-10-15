@@ -84,6 +84,7 @@ import * as archiveService from '../../src/services/archive'
 import { createRepoRoutes } from '../../src/routes/repos'
 import { opencodeServerManager } from '../../src/services/opencode-single-server'
 import { ProjectConfigService } from '../../src/services/project-config'
+import type { SecretsService } from '../../src/services/secrets'
 import { RepoWorkspaceService } from '../../src/services/repo-workspace'
 import { createGitService } from '../../src/services/git/GitService'
 import type { GitAuthService } from '../../src/services/git-auth'
@@ -112,7 +113,7 @@ const mockTerminalService = {
 function createTestRoutes(openCodeClient: ReturnType<typeof createStubOpenCodeClient> = createStubOpenCodeClient()): ReturnType<typeof createRepoRoutes> {
   const projectConfigService = new ProjectConfigService(mockDb, createGitService(mockGitAuthService), mockGitAuthService)
   const repoWorkspaces = new RepoWorkspaceService(mockDb, openCodeClient, mockGitAuthService, projectConfigService, mockTerminalService, mockScheduleService)
-  return createRepoRoutes(mockDb, mockGitAuthService, mockScheduleService, openCodeClient, mockTerminalService, projectConfigService, repoWorkspaces)
+  return createRepoRoutes(mockDb, mockGitAuthService, mockScheduleService, openCodeClient, mockTerminalService, projectConfigService, repoWorkspaces, {} as unknown as SecretsService)
 }
 
 function createMockRepo(overrides: Partial<Repo> = {}): Repo {

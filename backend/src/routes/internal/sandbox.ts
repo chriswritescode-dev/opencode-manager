@@ -2,6 +2,7 @@ import { Hono } from 'hono'
 import { z } from 'zod'
 import type { Database } from 'bun:sqlite'
 import { SandboxRuntimeService } from '../../services/sandbox/runtime'
+import type { RepoEnvService } from '../../services/repo-env'
 import { logger } from '../../utils/logger'
 
 const SandboxShellRequestSchema = z.object({
@@ -9,7 +10,7 @@ const SandboxShellRequestSchema = z.object({
   enforced: z.boolean().optional(),
 })
 
-export function createInternalSandboxRoutes(db: Database) {
+export function createInternalSandboxRoutes(db: Database, repoEnvService: RepoEnvService) {
   const app = new Hono()
 
   app.post('/shell', async (c) => {
@@ -27,7 +28,7 @@ export function createInternalSandboxRoutes(db: Database) {
 
     try {
       return c.json(
-        await new SandboxRuntimeService(db).planShell(parsed.data.directory, parsed.data.enforced === true),
+        await new SandboxRuntimeService(db, repoEnvService).planShell(parsed.data.directory, parsed.data.enforced === true),
       )
     } catch (error) {
       logger.error('Failed to plan the sandbox shell', error)

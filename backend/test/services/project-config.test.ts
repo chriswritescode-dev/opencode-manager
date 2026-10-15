@@ -1,5 +1,6 @@
 import { describe, it, expect, beforeEach, afterEach, beforeAll, afterAll, vi } from 'vitest'
 import { Database } from 'bun:sqlite'
+import { createHash } from 'node:crypto'
 import { execSync } from 'node:child_process'
 import fs from 'node:fs'
 import os from 'node:os'
@@ -340,7 +341,7 @@ describe('ProjectConfigService repository file', () => {
 
     const config = await service.getConfig(repo, directory)
 
-    expect(config.repoFile.error).toBe('Does not match the project file schema')
+    expect(config.repoFile.error).toContain('Does not match the project file schema')
     expect(config.actions).toEqual([])
   })
 
@@ -352,7 +353,7 @@ describe('ProjectConfigService repository file', () => {
 
     const config = await service.getConfig(repo, directory)
 
-    expect(config.repoFile.error).toBe('Does not match the project file schema')
+    expect(config.repoFile.error).toContain('Does not match the project file schema')
     expect(config.repoFile.executable).toBeNull()
   })
 
@@ -527,6 +528,93 @@ describe('ProjectConfigService repository file', () => {
       { id: 'serve', name: 'Personal Serve', command: 'pnpm personal', autoOpenUrl: false, source: 'personal' },
       { id: 'other', name: 'Other', command: 'pnpm other', autoOpenUrl: false, source: 'repo' },
     ])
+  })
+
+  it('hashes a file without env exactly like the legacy executable shape', async () => {
+    writeRepoFile({ version: 1, projectActions: [{ id: 'serve', name: 'Serve', command: 'pnpm dev' }] })
+
+    const config = await service.getConfig(repo, directory)
+    const legacyHash = createHash('sha256')
+      .update(
+        JSON.stringify({
+          actions: [{ id: 'serve', name: 'Serve', command: 'pnpm dev', url: null, autoOpenUrl: false }],
+          setup: [],
+        }),
+      )
+      .digest('hex')
+
+    expect(config.repoFile.hash).toBe(legacyHash)
+  })
+
+  it('changes the hash and drops trust when env is added or edited', async () => {
+    writeRepoFile({ version: 1, projectActions: [{ id: 'serve', name: 'Serve', command: 'pnpm dev' }] })
+    const base = await service.getConfig(repo, directory)
+    await service.trustRepoFile(repo, directory, base.repoFile.hash ?? '')
+    expect((await service.getConfig(repo, directory)).repoFile.trusted).toBe(true)
+
+    writeRepoFile({
+      version: 1,
+      projectActions: [{ id: 'serve', name: 'Serve', command: 'pnpm dev' }],
+      env: { TOKEN: '${{ secrets.TOKEN }}' },
+    })
+    const withEnv = await service.getConfig(repo, directory)
+    expect(withEnv.repoFile.hash).not.toBe(base.repoFile.hash)
+    expect(withEnv.repoFile.trusted).toBe(false)
+
+    await service.trustRepoFile(repo, directory, withEnv.repoFile.hash ?? '')
+    expect((await service.getConfig(repo, directory)).repoFile.trusted).toBe(true)
+
+    writeRepoFile({
+      version: 1,
+      projectActions: [{ id: 'serve', name: 'Serve', command: 'pnpm dev' }],
+      env: { TOKEN: '${{ secrets.OTHER }}' },
+    })
+    const edited = await service.getConfig(repo, directory)
+    expect(edited.repoFile.hash).not.toBe(withEnv.repoFile.hash)
+    expect(edited.repoFile.trusted).toBe(false)
+  })
+
+  it('includes environment and env in the executable snapshot only when present', async () => {
+    writeRepoFile({ version: 1, projectActions: [{ id: 'serve', name: 'Serve', command: 'pnpm dev' }] })
+    expect((await service.getConfig(repo, directory)).repoFile.executable).not.toHaveProperty('env')
+
+    writeRepoFile({
+      version: 1,
+      projectActions: [{ id: 'serve', name: 'Serve', command: 'pnpm dev' }],
+      environment: 'Prod',
+      env: { TOKEN: '${{ secrets.TOKEN }}' },
+    })
+    const config = await service.getConfig(repo, directory)
+    expect(config.repoFile.executable?.environment).toBe('prod')
+    expect(config.repoFile.executable?.env).toEqual({ TOKEN: '${{ secrets.TOKEN }}' })
+  })
+
+  it('counts an untrusted env mapping as executable content when moving an action', async () => {
+    service.setPersonalActions(repo, [createAction()])
+    writeRepoFile({ version: 1, env: { TOKEN: '${{ secrets.TOKEN }}' } })
+
+    await service.moveItem(repo, directory, { kind: 'action', id: 'serve', to: 'repo' })
+
+    expect((await service.getConfig(repo, directory)).repoFile.trusted).toBe(false)
+  })
+
+  it('counts an untrusted environment selector as executable content when moving an action', async () => {
+    service.setPersonalActions(repo, [createAction()])
+    writeRepoFile({ version: 1, environment: 'prod' })
+
+    await service.moveItem(repo, directory, { kind: 'action', id: 'serve', to: 'repo' })
+
+    expect((await service.getConfig(repo, directory)).repoFile.trusted).toBe(false)
+  })
+
+  it('reports the first schema issue with its path and message', async () => {
+    writeRepoFile({ version: 1, env: { TOKEN: '${{ github.sha }}' } })
+
+    const config = await service.getConfig(repo, directory)
+
+    expect(config.repoFile.error).toContain('Does not match the project file schema')
+    expect(config.repoFile.error).toContain('env.TOKEN')
+    expect(config.repoFile.error).toContain('Unsupported expression')
   })
 
   it('rejects moving an unknown personal action', async () => {

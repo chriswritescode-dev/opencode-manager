@@ -15,7 +15,7 @@ import { createInternalRepoMirrorRoutes as mirrorRoutes } from './repo-mirror'
 import { createInternalOpenCodeWorkspacesRoutes } from './opencode-workspaces'
 import { createInternalSessionRoutes } from './sessions'
 import { createInternalAssistantRoutes } from './assistant'
-import { createInternalGitCredentialsRoutes } from './git-credentials'
+import { createInternalShellEnvRoutes } from './shell-env'
 import { createInternalSandboxRoutes } from './sandbox'
 import { createInternalSessionArtifactRoutes } from './session-artifacts'
 import { createSessionGoalRoutes } from '../session-goals'
@@ -27,6 +27,7 @@ import type { GitAuthService } from '../../services/git-auth'
 import type { SessionGoalService } from '../../services/session-goals'
 import type { MultiRunService } from '../../services/multi-runs'
 import type { ChangeWalkthroughService } from '../../services/change-walkthroughs'
+import type { RepoEnvService } from '../../services/repo-env'
 
 export function createInternalRoutes(
   db: Database,
@@ -40,6 +41,7 @@ export function createInternalRoutes(
   sessionGoals: SessionGoalService,
   multiRuns: MultiRunService,
   changeWalkthroughService: ChangeWalkthroughService,
+  repoEnvService: RepoEnvService,
 ) {
   const app = new Hono()
   app.use('/*', createInternalTokenMiddleware(db))
@@ -60,7 +62,7 @@ export function createInternalRoutes(
   app.route('/assistant', createInternalAssistantRoutes(openCodeClient))
   app.route('/change-walkthroughs', createChangeWalkthroughRoutes(changeWalkthroughService))
   app.route('/session-artifacts', createInternalSessionArtifactRoutes(openCodeClient))
-  app.route('/git-credentials', createInternalGitCredentialsRoutes(db))
-  app.route('/sandbox', createInternalSandboxRoutes(db))
+  app.route('/shell-env', createInternalShellEnvRoutes(db, repoEnvService))
+  app.route('/sandbox', createInternalSandboxRoutes(db, repoEnvService))
   return app
 }

@@ -11,6 +11,7 @@ import { TerminalService } from '../../src/services/terminal'
 import type { GitAuthService } from '../../src/services/git-auth'
 import type { OpenCodeClient } from '../../src/services/opencode/client'
 import type { CredentialProvider } from '../../src/services/credential-provider'
+import type { RepoEnvService } from '../../src/services/repo-env'
 import { startWebSocketServer, type WebSocketTestServer } from '../helpers/websocket-server'
 
 vi.mock('../../src/services/repo', () => ({
@@ -79,7 +80,12 @@ upstreamApp.get(
   }),
 )
 
-const terminalService = new TerminalService(openCodeClient, credentialProvider, () => upstreamBase)
+const terminalService = new TerminalService(
+  openCodeClient,
+  credentialProvider,
+  { resolveForDirectory: async () => ({ env: {}, maskValues: [], missing: [] }) } as unknown as RepoEnvService,
+  () => upstreamBase,
+)
 
 const managerApp = new Hono()
 const managerWs = createNodeWebSocket({ app: managerApp })

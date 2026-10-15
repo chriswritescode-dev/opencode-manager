@@ -44,6 +44,7 @@ import { createMultiRunRoutes } from './routes/multi-runs'
 import { createChangeWalkthroughRoutes } from './routes/change-walkthroughs'
 import { createLogRoutes } from './routes/logs'
 import { createPreviewRoutes, createPreviewAvailability } from './routes/preview'
+import { createGlobalSecretRoutes } from './routes/secrets'
 import { createPreviewGatewayApp, PreviewSessionStore } from './services/preview/gateway'
 import { createInternalRoutes } from './routes/internal'
 import { sweepStaleUploadSessions } from './routes/internal/repo-mirror-helpers'
@@ -64,6 +65,8 @@ import { ScheduleRunner, ScheduleService } from './services/schedules'
 import { CredentialProvider } from './services/credential-provider'
 import { TerminalService } from './services/terminal'
 import { ProjectConfigService } from './services/project-config'
+import { SecretsService } from './services/secrets'
+import { RepoEnvService } from './services/repo-env'
 import { RepoWorkspaceService } from './services/repo-workspace'
 import { createGitService } from './services/git/GitService'
 import { ScheduleWorktreeManager } from './services/schedule-worktree'
@@ -127,6 +130,10 @@ import { DEFAULT_AGENTS_MD } from './constants'
 
 let ipcServer: IPCServer | undefined
 const gitAuthService = new GitAuthService()
+const gitService = createGitService(gitAuthService)
+const projectConfigService = new ProjectConfigService(db, gitService, gitAuthService)
+const secretsService = new SecretsService(db)
+const repoEnvService = new RepoEnvService(db, projectConfigService, secretsService)
 let openCodeSupervisor: OpenCodeSupervisor | undefined
 async function ensureOpenCodeConfigFileExists(): Promise<void> {
   await withOpenCodeConfigLock(foldLegacyConfigJsonSource)
@@ -225,7 +232,7 @@ try {
 
   opencodeServerManager.setDatabase(db)
   detectSandboxCapability()
-  void new SandboxRuntimeService(db).prepareWorkspaceSandboxOnBoot().catch((error) => {
+  void new SandboxRuntimeService(db, repoEnvService).prepareWorkspaceSandboxOnBoot().catch((error) => {
     logger.warn('Workspace sandbox preparation failed:', error)
   })
   const openCodeStatus = await openCodeSupervisor.start()
@@ -242,10 +249,9 @@ try {
 const terminalService = new TerminalService(
   openCodeClient,
   new CredentialProvider(db),
+  repoEnvService,
   () => getOpenCodeUpstreamBaseUrl(opencodeServerManager.getEffectiveServerHost()),
 )
-const gitService = createGitService(gitAuthService)
-const projectConfigService = new ProjectConfigService(db, gitService, gitAuthService)
 const scheduleWorktreeManager = new ScheduleWorktreeManager(gitAuthService, db)
 const scheduleService = new ScheduleService(db, openCodeClient, scheduleWorktreeManager)
 scheduleService.setWorktreeRemovedHandler(async (directory) => {
@@ -341,14 +347,14 @@ app.route('/api/auth-info', createAuthInfoRoutes(auth, db))
 app.route('/api/health', createHealthRoutes(db, openCodeSupervisor))
 
 app.route('/api/mcp-oauth-proxy', createMcpOauthProxyRoutes(openCodeClient, requireAuth))
-app.route('/api/internal', createInternalRoutes(db, scheduleService, notificationService, settingsService, openCodeClient, sessionPermissionModeService, repoWorkspaces, gitAuthService, sessionGoalService, multiRunService, changeWalkthroughService))
+app.route('/api/internal', createInternalRoutes(db, scheduleService, notificationService, settingsService, openCodeClient, sessionPermissionModeService, repoWorkspaces, gitAuthService, sessionGoalService, multiRunService, changeWalkthroughService, repoEnvService))
 app.route('/api/opencode-proxy', createOpenCodeProxyRoutes(db, settingsService, upgradeWebSocket))
 
 const protectedApi = new Hono()
 protectedApi.use('/*', requireAuth)
 
 protectedApi.route('/repos', createRepoTerminalSocketRoutes(db, gitAuthService, openCodeClient, terminalService, upgradeWebSocket))
-protectedApi.route('/repos', createRepoRoutes(db, gitAuthService, scheduleService, openCodeClient, terminalService, projectConfigService, repoWorkspaces))
+protectedApi.route('/repos', createRepoRoutes(db, gitAuthService, scheduleService, openCodeClient, terminalService, projectConfigService, repoWorkspaces, secretsService))
 protectedApi.route('/settings', createSettingsRoutes(db, gitAuthService, openCodeClient, openCodeSupervisor))
   protectedApi.route('/files', createFileRoutes())
   protectedApi.route('/filesystem', createFilesystemRoutes())
@@ -360,6 +366,8 @@ protectedApi.route('/sse', createSSERoutes())
 protectedApi.route('/ssh', createSSHRoutes(gitAuthService))
 protectedApi.route('/notifications', createNotificationRoutes(notificationService))
 protectedApi.route('/prompt-templates', createPromptTemplateRoutes(db))
+protectedApi.route('/secrets', createGlobalSecretRoutes(secretsService, 'secret'))
+protectedApi.route('/variables', createGlobalSecretRoutes(secretsService, 'variable'))
 protectedApi.route('/session-pins', createSessionPinRoutes(db))
 protectedApi.route('/session-permission-modes', createSessionPermissionModeRoutes(sessionPermissionModeService))
 protectedApi.route('/session-goals', createSessionGoalRoutes(sessionGoalService))

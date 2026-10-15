@@ -19,6 +19,7 @@ import type { GitAuthService } from '../../../src/services/git-auth'
 import type { Repo } from '../../../src/types/repo'
 import type { TerminalService } from '../../../src/services/terminal'
 import type { ProjectConfigService } from '../../../src/services/project-config'
+import type { SecretsService } from '../../../src/services/secrets'
 import type { RepoWorkspaceService } from '../../../src/services/repo-workspace'
 
 const workspaceRoot = mkdtempSync(path.join(tmpdir(), 'git-service-real-'))
@@ -1082,7 +1083,7 @@ describe('GitService real git', () => {
         remove: async () => undefined,
         removeRepoTerminals: async () => undefined,
       } as unknown as RepoWorkspaceService
-      app.route('/repos', createRepoRoutes(db, gitAuth, scheduleService, createStubOpenCodeClient(), {} as unknown as TerminalService, {} as unknown as ProjectConfigService, repoWorkspaces))
+      app.route('/repos', createRepoRoutes(db, gitAuth, scheduleService, createStubOpenCodeClient(), {} as unknown as TerminalService, {} as unknown as ProjectConfigService, repoWorkspaces, {} as unknown as SecretsService))
       return app
     }
 
