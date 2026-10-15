@@ -235,6 +235,8 @@ describe('RepoActionsDialog', () => {
               { id: 'shared', name: 'Repo action', command: 'echo repo', url: 'https://example.com', autoOpenUrl: true },
             ],
             setup: ['pnpm install'],
+            environment: 'e2e',
+            env: { OPENAI_API_KEY: '${{ secrets.OPENAI_API_KEY }}' },
           },
         },
       }),
@@ -248,8 +250,74 @@ describe('RepoActionsDialog', () => {
     expect(within(review).getByText('echo repo')).toBeInTheDocument()
     expect(within(review).getByText('https://example.com')).toBeInTheDocument()
     expect(within(review).getByText('Opens URL automatically')).toBeInTheDocument()
+    expect(within(review).getByText('Environment variables')).toBeInTheDocument()
+    expect(within(review).getByText('e2e')).toBeInTheDocument()
+    expect(within(review).getByText('OPENAI_API_KEY = ${{ secrets.OPENAI_API_KEY }}')).toBeInTheDocument()
     expect(within(review).getByText('Worktree setup commands')).toBeInTheDocument()
     expect(within(review).getByText('pnpm install')).toBeInTheDocument()
+  })
+
+  it('offers trust when the only executable content is an environment mapping', async () => {
+    mockConfig(
+      baseConfig({
+        repoFile: {
+          path: '.ocm/project.json',
+          exists: true,
+          trusted: false,
+          hash: HASH,
+          warnings: [],
+          executable: { actions: [], setup: [], env: { OPENAI_API_KEY: '${{ secrets.OPENAI_API_KEY }}' } },
+        },
+      }),
+    )
+    const user = userEvent.setup()
+    renderDialog()
+
+    expect(screen.getByText(/not trusted/i)).toBeInTheDocument()
+    const review = await openTrustReview(user)
+    expect(within(review).getByText('Environment variables')).toBeInTheDocument()
+    expect(within(review).getByText('OPENAI_API_KEY = ${{ secrets.OPENAI_API_KEY }}')).toBeInTheDocument()
+  })
+
+  it('offers trust when the only executable content is an environment name', async () => {
+    mockConfig(
+      baseConfig({
+        repoFile: {
+          path: '.ocm/project.json',
+          exists: true,
+          trusted: false,
+          hash: HASH,
+          warnings: [],
+          executable: { actions: [], setup: [], environment: 'e2e' },
+        },
+      }),
+    )
+    const user = userEvent.setup()
+    renderDialog()
+
+    expect(screen.getByText(/not trusted/i)).toBeInTheDocument()
+    const review = await openTrustReview(user)
+    expect(within(review).getByText('Environment variables')).toBeInTheDocument()
+    expect(within(review).getByText('e2e')).toBeInTheDocument()
+  })
+
+  it('does not offer trust when the executable snapshot has no content', () => {
+    mockConfig(
+      baseConfig({
+        repoFile: {
+          path: '.ocm/project.json',
+          exists: true,
+          trusted: false,
+          hash: HASH,
+          warnings: [],
+          executable: { actions: [], setup: [] },
+        },
+      }),
+    )
+    renderDialog()
+
+    expect(screen.queryByText(/not trusted/i)).not.toBeInTheDocument()
+    expect(screen.queryByRole('button', { name: /^review$/i })).not.toBeInTheDocument()
   })
 
   it('does not offer trust when the repo file has no executable commands', () => {

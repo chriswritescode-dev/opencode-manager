@@ -9,6 +9,7 @@ import { OpenCodeServerAuthSettings } from '@/components/settings/OpenCodeServer
 import { ManagerTokenSettings } from '@/components/settings/ManagerTokenSettings'
 import { ServerEnvVarsSettings } from '@/components/settings/ServerEnvVarsSettings'
 import { SandboxSettings } from '@/components/settings/SandboxSettings'
+import { GlobalSecretsSettings } from '@/components/secrets/GlobalSecretsSettings'
 import { ServerHealthStatus } from '@/components/settings/ServerHealthStatus'
 import { ProviderSettings } from '@/components/settings/ProviderSettings'
 import { AccountSettings } from '@/components/settings/AccountSettings'
@@ -50,6 +51,7 @@ function OpenCodeSettings({ onOpenVersionDialog }: { onOpenVersionDialog: () => 
           </div>
           <ServerEnvVarsSettings />
           <SandboxSettings />
+          <GlobalSecretsSettings />
         </section>
       </div>
     </RowActionsMenuContext.Provider>

@@ -50,6 +50,9 @@ vi.mock('@/components/schedules/RepoSchedulesContent', () => ({
 vi.mock('@/components/repo/RepoMcpDialog', () => ({ RepoMcpContent: () => <div>mcp-tool</div> }))
 vi.mock('@/components/repo/RepoActionsDialog', () => ({ RepoActionsContent: () => <div>actions-tool</div> }))
 vi.mock('@/components/repo/RepoSkillsDialog', () => ({ RepoSkillsContent: () => <div>skills-tool</div> }))
+vi.mock('@/components/secrets/RepoSecretsDialog', () => ({
+  RepoSecretsContent: () => <div>secrets-tool</div>,
+}))
 vi.mock('@/components/session/ChangesWalkthroughSheet', () => ({
   ChangesWalkthroughProvider: ({ children }: { children: ReactNode }) => <>{children}</>,
   ChangesWalkthroughRegenerate: () => null,
@@ -181,6 +184,23 @@ function RemoteHarness() {
         directory="/home/me/app"
         repoDirectory="/home/me/app"
         filesBasePath={undefined}
+      />
+      <LocationProbe />
+    </>
+  )
+}
+
+function RepoHarness() {
+  const panel = useToolPanel(true)
+  return (
+    <>
+      <ToolSidePanel
+        panel={panel}
+        repoId={1}
+        directory="/repo"
+        repoDirectory="/repo"
+        filesBasePath="repo"
+        currentBranch="main"
       />
       <LocationProbe />
     </>
@@ -416,6 +436,21 @@ describe('ToolSidePanel', () => {
 
     expect(Number(handle.getAttribute('aria-valuenow'))).toBe(320)
     expect(panel).toHaveStyle({ width: '320px' })
+  })
+
+  it('opens Secrets inside the docked repo panel', async () => {
+    const user = userEvent.setup()
+    render(
+      <MemoryRouter initialEntries={['/repos/1']}>
+        <RepoHarness />
+      </MemoryRouter>,
+    )
+
+    await user.click(screen.getByRole('button', { name: 'Secrets' }))
+
+    expect(await screen.findByText('secrets-tool')).toBeInTheDocument()
+    expect(screen.getByRole('heading', { name: 'Secrets' })).toBeInTheDocument()
+    expect(search().has('dialog')).toBe(false)
   })
 
   it('opens non-panel session items from the rail as dialogs', async () => {
