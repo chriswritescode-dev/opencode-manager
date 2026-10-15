@@ -1,7 +1,7 @@
 import path from 'path'
 import { createHash } from 'crypto'
 import { accessSync, constants, realpathSync, statSync } from 'fs'
-import { realpath } from 'fs/promises'
+import { readFile, readdir, realpath } from 'fs/promises'
 import {
   ENV,
   getForgeWorktreesPath,
@@ -558,6 +558,46 @@ export async function resolveSandboxWorkDirectory(directory: string): Promise<st
   return null
 }
 
+async function worktreeLinksBackToCommonDir(top: string, common: string): Promise<boolean> {
+  const worktreesDirectory = path.join(common, 'worktrees')
+
+  let entries: string[]
+  try {
+    entries = await readdir(worktreesDirectory)
+  } catch {
+    return false
+  }
+
+  let expectedTarget: string
+  try {
+    expectedTarget = path.join(await realpath(top), '.git')
+  } catch {
+    return false
+  }
+
+  for (const entry of entries) {
+    const entryDirectory = path.join(worktreesDirectory, entry)
+    let contents: string
+    try {
+      contents = (await readFile(path.join(entryDirectory, 'gitdir'), 'utf8')).trim()
+    } catch {
+      continue
+    }
+    if (contents === '') continue
+
+    const candidate = path.isAbsolute(contents) ? contents : path.resolve(entryDirectory, contents)
+    let resolvedCandidate: string
+    try {
+      resolvedCandidate = await realpath(candidate)
+    } catch {
+      continue
+    }
+    if (resolvedCandidate === expectedTarget) return true
+  }
+
+  return false
+}
+
 export async function resolveSessionSandboxMounts(locationDirectory: string): Promise<string[] | null> {
   const work = await resolveSandboxWorkDirectory(locationDirectory)
   if (work === null) return null
@@ -579,7 +619,8 @@ export async function resolveSessionSandboxMounts(locationDirectory: string): Pr
   const top = await resolveSandboxWorkDirectory(lines[0]!)
   const common = await resolveSandboxWorkDirectory(lines[1]!)
   if (top === null || common === null) return null
-  return isPathWithinRoot(top, common) ? [top] : [top, common]
+  if (isPathWithinRoot(top, common)) return [top]
+  return (await worktreeLinksBackToCommonDir(top, common)) ? [top, common] : null
 }
 
 export function resolveSandboxExecUser(): string {

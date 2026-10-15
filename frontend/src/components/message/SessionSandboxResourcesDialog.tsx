@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import { Button } from '@/components/ui/button'
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from '@/components/ui/dialog'
 import { Input } from '@/components/ui/input'
@@ -27,13 +27,16 @@ export function SessionSandboxResourcesDialog({
   const [cpus, setCpus] = useState('')
   const [memoryGib, setMemoryGib] = useState('')
   const [error, setError] = useState<string | null>(null)
+  const wasOpen = useRef(false)
 
   useEffect(() => {
-    if (!open) return
-    const source = override ?? effective
-    setCpus(String(source.cpus))
-    setMemoryGib(formatSandboxMemory(source.memoryMib))
-    setError(null)
+    if (open && !wasOpen.current) {
+      const source = override ?? effective
+      setCpus(String(source.cpus))
+      setMemoryGib(formatSandboxMemory(source.memoryMib))
+      setError(null)
+    }
+    wasOpen.current = open
   }, [open, override, effective])
 
   const submit = async (resources: SessionSandboxResources | null) => {

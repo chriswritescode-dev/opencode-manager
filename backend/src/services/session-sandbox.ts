@@ -64,7 +64,7 @@ export class SessionSandboxService {
       case 'session.deleted': {
         const { sessionID } = event.data
         this.ancestry.forget(sessionID)
-        if (getSessionSandboxMode(this.db, sessionID) !== null && this.sandboxSupported()) {
+        if (getSessionSandboxMode(this.db, sessionID) !== null) {
           this.removeSandboxInBackground(sessionID, `deleted session ${sessionID}`)
         }
         deleteSessionSandboxMode(this.db, sessionID)
@@ -75,13 +75,7 @@ export class SessionSandboxService {
 
   async getState(sessionId: string): Promise<SessionSandboxState> {
     const available = this.sandboxSupported()
-
-    let rootSessionId: string
-    try {
-      rootSessionId = await this.ancestry.resolveRootSessionId(sessionId)
-    } catch {
-      return this.buildState(sessionId, sessionId, available, null, null, available)
-    }
+    const rootSessionId = await this.ancestry.resolveRootSessionId(sessionId)
 
     const lockedReason = rootSessionId !== sessionId ? 'child' : null
     const stored = getSessionSandboxMode(this.db, rootSessionId)
@@ -95,13 +89,7 @@ export class SessionSandboxService {
 
   async getClaim(sessionId: string): Promise<SessionSandboxClaim> {
     const available = this.sandboxSupported()
-
-    let rootSessionId: string
-    try {
-      rootSessionId = await this.ancestry.resolveRootSessionId(sessionId)
-    } catch {
-      return { sandboxed: available, source: 'default', since: 0 }
-    }
+    const rootSessionId = await this.ancestry.resolveRootSessionId(sessionId)
 
     if (!available) {
       return { sandboxed: false, source: 'default', since: 0 }

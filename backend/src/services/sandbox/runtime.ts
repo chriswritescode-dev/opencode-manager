@@ -1129,6 +1129,7 @@ export class SandboxRuntimeService {
   }
 
   async removeSessionSandbox(rootSessionId: string): Promise<void> {
+    if (!detectSandboxCapability().available) return
     await removeSandboxVmAndVolume(sessionSandboxName(rootSessionId))
   }
 

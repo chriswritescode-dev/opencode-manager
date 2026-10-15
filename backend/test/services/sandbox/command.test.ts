@@ -862,4 +862,60 @@ describe('resolveSessionSandboxMounts', () => {
       rmSync(tmp, { recursive: true, force: true })
     }
   })
+
+  it('blocks a forged git dir that has no worktree back-link to the sandbox worktree', async () => {
+    const tmp = mkdtempSync(path.join(tmpdir(), 'ocm-session-forged-'))
+    const originalWorkspacePath = process.env.WORKSPACE_PATH
+    try {
+      const repos = path.join(tmp, 'repos')
+      const main = path.join(repos, 'main')
+      const unrelatedWorktree = path.join(tmp, 'schedule-worktrees', 'job-9-run-1')
+      const victim = path.join(repos, 'victim')
+      mkdirSync(main, { recursive: true })
+      mkdirSync(path.dirname(unrelatedWorktree), { recursive: true })
+      mkdirSync(victim, { recursive: true })
+      runGit(['init', '-q'], main)
+      runGit(
+        ['-c', 'user.email=ocm@example.com', '-c', 'user.name=OCM', 'commit', '--allow-empty', '-q', '-m', 'init'],
+        main,
+      )
+      runGit(['worktree', 'add', '-q', '-b', 'feature', unrelatedWorktree], main)
+      writeFileSync(path.join(victim, '.git'), `gitdir: ${path.join(main, '.git')}\n`)
+
+      process.env.WORKSPACE_PATH = tmp
+
+      await expect(resolveSessionSandboxMounts(victim)).resolves.toBeNull()
+    } finally {
+      restoreWorkspacePath(originalWorkspacePath)
+      rmSync(tmp, { recursive: true, force: true })
+    }
+  })
+
+  it('blocks a symlinked git dir that points at another repo worktree back-link', async () => {
+    const tmp = mkdtempSync(path.join(tmpdir(), 'ocm-session-gitsym-'))
+    const originalWorkspacePath = process.env.WORKSPACE_PATH
+    try {
+      const repos = path.join(tmp, 'repos')
+      const other = path.join(repos, 'other')
+      const otherWorktree = path.join(tmp, 'schedule-worktrees', 'other-wt')
+      const victim = path.join(repos, 'victim')
+      mkdirSync(other, { recursive: true })
+      mkdirSync(path.dirname(otherWorktree), { recursive: true })
+      mkdirSync(victim, { recursive: true })
+      runGit(['init', '-q'], other)
+      runGit(
+        ['-c', 'user.email=ocm@example.com', '-c', 'user.name=OCM', 'commit', '--allow-empty', '-q', '-m', 'init'],
+        other,
+      )
+      runGit(['worktree', 'add', '-q', '-b', 'feature', otherWorktree], other)
+      symlinkSync(path.join(otherWorktree, '.git'), path.join(victim, '.git'))
+
+      process.env.WORKSPACE_PATH = tmp
+
+      await expect(resolveSessionSandboxMounts(victim)).resolves.toBeNull()
+    } finally {
+      restoreWorkspacePath(originalWorkspacePath)
+      rmSync(tmp, { recursive: true, force: true })
+    }
+  })
 })

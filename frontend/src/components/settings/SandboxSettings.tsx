@@ -96,6 +96,7 @@ export function SandboxSettings() {
   const commitCpus = () => {
     const trimmed = draft.cpus.trim()
     if (trimmed === '') {
+      if (sandboxPreferences?.cpus === undefined) return
       void saveSandbox({ cpus: undefined }, 'Default CPUs reset to the server default')
       return
     }
@@ -108,12 +109,14 @@ export function SandboxSettings() {
       }))
       return
     }
+    if (value === sandboxPreferences?.cpus) return
     void saveSandbox({ cpus: value }, 'Default CPUs saved')
   }
 
   const commitMemory = () => {
     const trimmed = draft.memoryGib.trim()
     if (trimmed === '') {
+      if (sandboxPreferences?.memoryMib === undefined) return
       void saveSandbox({ memoryMib: undefined }, 'Default memory reset to the server default')
       return
     }
@@ -129,6 +132,7 @@ export function SandboxSettings() {
       }))
       return
     }
+    if (memoryMib === sandboxPreferences?.memoryMib) return
     void saveSandbox({ memoryMib }, 'Default memory saved')
   }
 
@@ -144,6 +148,7 @@ export function SandboxSettings() {
       }))
       return
     }
+    if (value === (sandboxPreferences?.idleStopMinutes ?? DEFAULT_SANDBOX_IDLE_STOP_MINUTES)) return
     void saveSandbox({ idleStopMinutes: value }, 'Idle removal timeout saved')
   }
 
@@ -159,6 +164,7 @@ export function SandboxSettings() {
       }))
       return
     }
+    if (value === (sandboxPreferences?.maxRunningVms ?? DEFAULT_SANDBOX_MAX_RUNNING_VMS)) return
     void saveSandbox({ maxRunningVms: value }, 'Max running sandbox VMs saved')
   }
 

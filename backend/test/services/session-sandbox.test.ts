@@ -188,34 +188,18 @@ describe('SessionSandboxService', () => {
     })
   })
 
-  it('fails closed to sandboxed when parent resolution fails and support is enabled', async () => {
+  it('rejects getState when parent resolution fails and support is enabled', async () => {
     const settingsService = new SettingsService(db)
     settingsService.updateSettings({ sandbox: { enabled: true } })
     const service = createService(db, createFakeSessionPermissionClient({ failSessionGet: true }), settingsService)
 
-    await expect(service.getState('ses_root')).resolves.toEqual({
-      sessionId: 'ses_root',
-      rootSessionId: 'ses_root',
-      sandboxed: true,
-      source: 'default',
-      resources: null,
-      effectiveResources: ENV_RESOURCES,
-      lockedReason: null,
-      available: true,
-    })
+    await expect(service.getState('ses_root')).rejects.toThrow('upstream unavailable')
   })
 
-  it('fails closed to unsandboxed when parent resolution fails and support is disabled', async () => {
+  it('rejects getState when parent resolution fails and support is disabled', async () => {
     const service = createService(db, createFakeSessionPermissionClient({ failSessionGet: true }), new SettingsService(db))
 
-    await expect(service.getState('ses_root')).resolves.toMatchObject({
-      sessionId: 'ses_root',
-      rootSessionId: 'ses_root',
-      sandboxed: false,
-      source: 'default',
-      resources: null,
-      available: false,
-    })
+    await expect(service.getState('ses_root')).rejects.toThrow('upstream unavailable')
   })
 
   it('copies the parent root sandbox flag, source, and resources onto a forked session', async () => {
@@ -333,7 +317,7 @@ describe('SessionSandboxService', () => {
     expect(removed).toEqual([])
   })
 
-  it('does not remove a sandbox microVM when server sandbox support is disabled', async () => {
+  it('removes the sandbox microVM when a session with a mode row is deleted even when support is disabled', async () => {
     setSessionSandboxed(db, 'ses_root', true)
     const removed: string[] = []
     const service = createService(db, createFakeSessionPermissionClient(), new SettingsService(db), {
@@ -344,7 +328,7 @@ describe('SessionSandboxService', () => {
 
     await service.handleEvent(DIRECTORY, sessionDeletedEvent('ses_root'))
 
-    expect(removed).toEqual([])
+    expect(removed).toEqual(['ses_root'])
     expect(getSessionSandboxMode(db, 'ses_root')).toBeNull()
   })
 
@@ -569,16 +553,12 @@ describe('SessionSandboxService', () => {
     })
   })
 
-  it('fails closed on an ancestry error when reporting a claim', async () => {
+  it('rejects getClaim on an ancestry error', async () => {
     const settingsService = new SettingsService(db)
     settingsService.updateSettings({ sandbox: { enabled: true } })
     const service = createService(db, createFakeSessionPermissionClient({ failSessionGet: true }), settingsService)
 
-    await expect(service.getClaim('ses_root')).resolves.toEqual({
-      sandboxed: true,
-      source: 'default',
-      since: 0,
-    })
+    await expect(service.getClaim('ses_root')).rejects.toThrow('upstream unavailable')
   })
 
   it('resolves the shell target to the root session and effective resources', async () => {

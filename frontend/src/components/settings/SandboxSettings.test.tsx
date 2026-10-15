@@ -380,4 +380,60 @@ describe('SandboxSettings', () => {
 
     expect(vi.mocked(showToast.error)).toHaveBeenCalledWith('Default memory exceeds the host memory')
   })
+
+  it('does not save CPUs when blurred without a change', async () => {
+    const { updateSettingsAsync } = mockUseSettings({ preferences: { sandbox: { enabled: true, cpus: 4 } } })
+    mockHealth({ available: true, enforced: false })
+
+    const user = await renderSandbox()
+    const cpus = screen.getByLabelText('Default CPUs')
+    await user.click(cpus)
+    await user.tab()
+
+    expect(updateSettingsAsync).not.toHaveBeenCalled()
+    expect(vi.mocked(showToast.success)).not.toHaveBeenCalled()
+    expect(vi.mocked(showToast.error)).not.toHaveBeenCalled()
+  })
+
+  it('does not save CPUs when a blank value already uses the server default', async () => {
+    const { updateSettingsAsync } = mockUseSettings({ preferences: { sandbox: { enabled: true } } })
+    mockHealth({ available: true, enforced: false })
+
+    const user = await renderSandbox()
+    const cpus = screen.getByLabelText('Default CPUs')
+    await user.click(cpus)
+    await user.tab()
+
+    expect(updateSettingsAsync).not.toHaveBeenCalled()
+    expect(vi.mocked(showToast.success)).not.toHaveBeenCalled()
+  })
+
+  it('does not save memory when blurred without a change', async () => {
+    const { updateSettingsAsync } = mockUseSettings({
+      preferences: { sandbox: { enabled: true, memoryMib: 4096 } },
+    })
+    mockHealth({ available: true, enforced: false })
+
+    const user = await renderSandbox()
+    const memory = screen.getByLabelText('Default memory (GiB)')
+    await user.click(memory)
+    await user.tab()
+
+    expect(updateSettingsAsync).not.toHaveBeenCalled()
+    expect(vi.mocked(showToast.success)).not.toHaveBeenCalled()
+  })
+
+  it('does not save idle stop or max running VMs when blurred at the defaults', async () => {
+    const { updateSettingsAsync } = mockUseSettings({ preferences: { sandbox: { enabled: true } } })
+    mockHealth({ available: true, enforced: false })
+
+    const user = await renderSandbox()
+    await user.click(screen.getByLabelText('Remove idle sandbox VMs after (minutes)'))
+    await user.tab()
+    await user.click(screen.getByLabelText('Max running sandbox VMs'))
+    await user.tab()
+
+    expect(updateSettingsAsync).not.toHaveBeenCalled()
+    expect(vi.mocked(showToast.success)).not.toHaveBeenCalled()
+  })
 })

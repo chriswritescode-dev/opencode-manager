@@ -1260,6 +1260,7 @@ describe('SandboxRuntimeService', () => {
   })
 
   it('runs a single removal when the same VM is removed concurrently', async () => {
+    mockDetectSandboxCapability.mockReturnValue({ available: true, msbVersion: 'msb 0.6.15' })
     installFakeMsb(new Map<string, FakeVm>([[VM_NAME, vm()]]))
 
     const first = service.removeSessionSandbox(ROOT_SESSION)
@@ -1305,6 +1306,7 @@ describe('SandboxRuntimeService', () => {
   })
 
   it('tolerates a missing VM and volume when removing a session sandbox', async () => {
+    mockDetectSandboxCapability.mockReturnValue({ available: true, msbVersion: 'msb 0.6.15' })
     installFakeMsb(new Map())
     const baseHandler = execHandler
     execHandler = (args) => {
@@ -1317,6 +1319,7 @@ describe('SandboxRuntimeService', () => {
   })
 
   it('throws when removing a session sandbox fails for another reason', async () => {
+    mockDetectSandboxCapability.mockReturnValue({ available: true, msbVersion: 'msb 0.6.15' })
     installFakeMsb(new Map())
     const baseHandler = execHandler
     execHandler = (args) => {
@@ -1325,6 +1328,17 @@ describe('SandboxRuntimeService', () => {
     }
 
     await expect(service.removeSessionSandbox(ROOT_SESSION)).rejects.toThrow('operation not permitted')
+  })
+
+  it('does not touch msb when removing a session sandbox while the capability is unavailable', async () => {
+    mockDetectSandboxCapability.mockReturnValue({ available: false, reason: '/dev/kvm is not available' })
+    const vms = new Map<string, FakeVm>([[VM_NAME, vm()]])
+    installFakeMsb(vms)
+
+    await expect(service.removeSessionSandbox(ROOT_SESSION)).resolves.toBeUndefined()
+
+    expect(mockExecuteCommand).not.toHaveBeenCalled()
+    expect(vms.has(VM_NAME)).toBe(true)
   })
 
   it('caches only the guest image on boot and never touches a VM', async () => {
