@@ -370,6 +370,97 @@ describe('SessionSandboxService', () => {
     }
   })
 
+  it('removes the sandbox microVM when sandboxing is turned off and returns the updated state', async () => {
+    const settingsService = new SettingsService(db)
+    settingsService.updateSettings({ sandbox: { enabled: true } })
+    setSessionSandboxed(db, 'ses_root', true)
+    const removed: string[] = []
+    const service = createService(db, createFakeSessionPermissionClient(), settingsService, {
+      removeSessionSandbox: async (rootSessionId) => {
+        removed.push(rootSessionId)
+      },
+    })
+
+    await expect(service.update('ses_root', { sandboxed: false })).resolves.toMatchObject({
+      sessionId: 'ses_root',
+      rootSessionId: 'ses_root',
+      sandboxed: false,
+      source: 'user',
+      available: true,
+    })
+    await vi.waitFor(() => {
+      expect(removed).toEqual(['ses_root'])
+    })
+  })
+
+  it('does not remove the sandbox microVM when sandboxing is turned on', async () => {
+    const settingsService = new SettingsService(db)
+    settingsService.updateSettings({ sandbox: { enabled: true } })
+    const removed: string[] = []
+    const service = createService(db, createFakeSessionPermissionClient(), settingsService, {
+      removeSessionSandbox: async (rootSessionId) => {
+        removed.push(rootSessionId)
+      },
+    })
+
+    await service.update('ses_root', { sandboxed: true })
+
+    expect(removed).toEqual([])
+  })
+
+  it('does not remove the sandbox microVM for a resources-only update', async () => {
+    const settingsService = new SettingsService(db)
+    settingsService.updateSettings({ sandbox: { enabled: true } })
+    const removed: string[] = []
+    const service = createService(db, createFakeSessionPermissionClient(), settingsService, {
+      removeSessionSandbox: async (rootSessionId) => {
+        removed.push(rootSessionId)
+      },
+    })
+
+    await service.update('ses_root', { resources: { cpus: 4, memoryMib: 8192 } })
+
+    expect(removed).toEqual([])
+  })
+
+  it('logs and swallows a failure while removing the sandbox after it is turned off', async () => {
+    const settingsService = new SettingsService(db)
+    settingsService.updateSettings({ sandbox: { enabled: true } })
+    setSessionSandboxed(db, 'ses_root', true)
+    const warn = vi.spyOn(logger, 'warn').mockImplementation(() => undefined)
+    try {
+      const service = createService(db, createFakeSessionPermissionClient(), settingsService, {
+        removeSessionSandbox: async () => {
+          throw new Error('msb rm failed')
+        },
+      })
+
+      await expect(service.update('ses_root', { sandboxed: false })).resolves.toMatchObject({ sandboxed: false })
+      await vi.waitFor(() => {
+        expect(warn).toHaveBeenCalledWith(expect.stringContaining('msb rm failed'))
+      })
+      expect(warn).toHaveBeenCalledWith(expect.stringContaining('ses_root'))
+      expect(warn).toHaveBeenCalledWith(expect.stringContaining('turned off'))
+    } finally {
+      warn.mockRestore()
+    }
+  })
+
+  it('does not remove the sandbox microVM when sandboxing is turned off and support is disabled', async () => {
+    const removed: string[] = []
+    const service = createService(db, createFakeSessionPermissionClient(), new SettingsService(db), {
+      removeSessionSandbox: async (rootSessionId) => {
+        removed.push(rootSessionId)
+      },
+    })
+
+    await expect(service.update('ses_root', { sandboxed: false })).resolves.toMatchObject({
+      sandboxed: false,
+      available: false,
+    })
+    expect(removed).toEqual([])
+  })
+
   it('rejects updating a child session with 400', async () => {
     const settingsService = new SettingsService(db)
     settingsService.updateSettings({ sandbox: { enabled: true } })

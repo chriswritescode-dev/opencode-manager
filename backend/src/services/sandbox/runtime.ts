@@ -78,6 +78,7 @@ export type SandboxStatus = {
 
 type VmState = {
   inFlightBoot: Promise<void> | null
+  inFlightRemoval: Promise<void> | null
   lastKnownRunningAt: number | null
   lastUsedAt: number
   inFlightProvision: Promise<void> | null
@@ -90,6 +91,7 @@ const vmStates = new Map<string, VmState>()
 let shutdownRequested = false
 let stopInProgress = false
 let idleSweepTimer: ReturnType<typeof setInterval> | null = null
+let idleSweepStartedAt = 0
 let startAdmission: Promise<void> = Promise.resolve()
 
 function vmState(name: string): VmState {
@@ -97,6 +99,7 @@ function vmState(name: string): VmState {
   if (existing !== undefined) return existing
   const created: VmState = {
     inFlightBoot: null,
+    inFlightRemoval: null,
     lastKnownRunningAt: null,
     lastUsedAt: 0,
     inFlightProvision: null,
@@ -113,10 +116,12 @@ export function resetSandboxRuntimeState(): void {
     state.backgroundProvisionRetry = null
     state.inFlightProvision = null
     state.inFlightBoot = null
+    state.inFlightRemoval = null
   }
   vmStates.clear()
   shutdownRequested = false
   stopInProgress = false
+  idleSweepStartedAt = 0
   if (idleSweepTimer !== null) {
     clearInterval(idleSweepTimer)
     idleSweepTimer = null
@@ -160,6 +165,10 @@ function ensureSessionSandbox(spec: SandboxVmSpec, maxRunningVms: number): Promi
   state.inFlightBoot = (async () => {
     if (shutdownRequested || stopInProgress) {
       throw new Error('sandbox shutdown is in progress; refusing to boot the session sandbox')
+    }
+    const inFlightRemoval = state.inFlightRemoval
+    if (inFlightRemoval !== null) {
+      await inFlightRemoval.catch(() => undefined)
     }
     if (state.lastKnownRunningAt !== null && Date.now() - state.lastKnownRunningAt < SANDBOX_LS_CACHE_MS) {
       return
@@ -834,6 +843,29 @@ async function removeSessionSandboxVm(name: string): Promise<void> {
   await runSandboxRemoval(buildSandboxRemoveArgs(name), SANDBOX_REMOVAL_MISSING_PATTERN, 'msb rm')
 }
 
+function removeSandboxVmAndVolume(name: string): Promise<void> {
+  const state = vmState(name)
+  if (state.inFlightRemoval !== null) {
+    return state.inFlightRemoval
+  }
+  const inFlightBoot = state.inFlightBoot
+  state.inFlightRemoval = (async () => {
+    if (inFlightBoot !== null) {
+      await inFlightBoot.catch(() => undefined)
+    }
+    await removeSessionSandboxVm(name)
+    await runSandboxRemoval(
+      buildSandboxVolumeRemoveArgs(sandboxDockerDataVolumeName(name)),
+      SANDBOX_VOLUME_REMOVAL_MISSING_PATTERN,
+      'msb volume rm',
+    )
+    state.lastKnownRunningAt = null
+  })().finally(() => {
+    state.inFlightRemoval = null
+  })
+  return state.inFlightRemoval
+}
+
 async function runSandboxRemoval(args: string[], missingPattern: RegExp, label: string): Promise<void> {
   const result = (await executeCommand([sandboxExecutablePath(), ...args], {
     ignoreExitCode: true,
@@ -970,6 +1002,7 @@ async function admitVmStart(name: string, maxRunningVms: number): Promise<void> 
 
 function ensureIdleSweepStarted(db: Database): void {
   if (idleSweepTimer !== null) return
+  idleSweepStartedAt = Date.now()
   idleSweepTimer = setInterval(() => {
     void sweepIdleSandboxes(db)
   }, SANDBOX_IDLE_SWEEP_INTERVAL_MS)
@@ -981,23 +1014,28 @@ async function sweepIdleSandboxes(db: Database): Promise<void> {
   if (shutdownRequested || stopInProgress) return
   const idleStopMinutes = sandboxIdleStopMinutes(db)
   const threshold = Math.max(idleStopMinutes * 60000, ENV.SANDBOX.EXEC_TIMEOUT_MS)
-  for (const [name, state] of vmStates) {
-    if (state.inFlightBoot !== null) continue
-    if (state.lastKnownRunningAt === null) continue
-    if (Date.now() - state.lastUsedAt < threshold) continue
+  let entries: SandboxLsEntry[]
+  try {
+    entries = await listSandboxes()
+  } catch (error) {
+    logger.warn(`Failed to list sandboxes for the idle sweep: ${error instanceof Error ? error.message : String(error)}`)
+    return
+  }
+  for (const value of entries) {
+    if (shutdownRequested || stopInProgress) return
+    if (!value || typeof value !== 'object' || Array.isArray(value)) continue
+    const entry = value as SandboxLsEntry
+    const name = entry.name
+    if (typeof name !== 'string' || !SESSION_SANDBOX_NAME_PATTERN.test(name)) continue
+    const state = vmStates.get(name)
+    if (state !== undefined && (state.inFlightBoot !== null || state.inFlightRemoval !== null)) continue
+    const lastActivity = Math.max(state?.lastUsedAt ?? 0, idleSweepStartedAt)
+    if (Date.now() - lastActivity < threshold) continue
     try {
-      const result = (await executeCommand([sandboxExecutablePath(), ...buildSandboxStopArgs(name)], {
-        ignoreExitCode: true,
-        timeout: SANDBOX_STOP_TIMEOUT_MS,
-      })) as string | { exitCode: number; stdout: string; stderr: string }
-      const stopResult = typeof result === 'string' ? { exitCode: 0, stdout: result, stderr: '' } : result
-      if (stopResult.exitCode !== 0) {
-        logger.warn(`Failed to stop idle sandbox ${name} with code ${stopResult.exitCode}: ${stopResult.stderr || stopResult.stdout}`)
-        continue
-      }
-      state.lastKnownRunningAt = null
+      await removeSandboxVmAndVolume(name)
+      logger.info(`Removed idle sandbox ${name} and its Docker data volume`)
     } catch (error) {
-      logger.warn(`Failed to stop idle sandbox ${name}: ${error instanceof Error ? error.message : String(error)}`)
+      logger.warn(`Failed to remove idle sandbox ${name}: ${error instanceof Error ? error.message : String(error)}`)
     }
   }
 }
@@ -1018,6 +1056,7 @@ export class SandboxRuntimeService {
     const capability = detectSandboxCapability()
     if (!capability.available) return
     if (getProcessIdentityAttestationError() !== null) return
+    ensureIdleSweepStarted(this.db)
     await cacheSandboxImage()
   }
 
@@ -1090,18 +1129,7 @@ export class SandboxRuntimeService {
   }
 
   async removeSessionSandbox(rootSessionId: string): Promise<void> {
-    const name = sessionSandboxName(rootSessionId)
-    const state = vmStates.get(name)
-    if (state?.inFlightBoot) {
-      await state.inFlightBoot.catch(() => undefined)
-    }
-    await removeSessionSandboxVm(name)
-    await runSandboxRemoval(
-      buildSandboxVolumeRemoveArgs(sandboxDockerDataVolumeName(name)),
-      SANDBOX_VOLUME_REMOVAL_MISSING_PATTERN,
-      'msb volume rm',
-    )
-    vmStates.delete(name)
+    await removeSandboxVmAndVolume(sessionSandboxName(rootSessionId))
   }
 
   async stopAllSandboxes(): Promise<void> {

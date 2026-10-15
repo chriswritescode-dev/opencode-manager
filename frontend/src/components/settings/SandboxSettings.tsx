@@ -144,7 +144,7 @@ export function SandboxSettings() {
       }))
       return
     }
-    void saveSandbox({ idleStopMinutes: value }, 'Idle stop timeout saved')
+    void saveSandbox({ idleStopMinutes: value }, 'Idle removal timeout saved')
   }
 
   const commitMaxRunningVms = () => {
@@ -278,7 +278,7 @@ export function SandboxSettings() {
 
             <div className="flex items-center justify-between gap-3 border-t pt-3">
               <Label htmlFor="sandboxIdleStopMinutes" className="min-w-0 text-sm font-semibold">
-                Stop idle sandbox VMs after (minutes)
+                Remove idle sandbox VMs after (minutes)
               </Label>
               <Input
                 id="sandboxIdleStopMinutes"
@@ -315,10 +315,11 @@ export function SandboxSettings() {
             </div>
 
             <p className="text-xs text-muted-foreground @min-[1000px]:col-span-2">
-              Each sandboxed session gets its own microVM that mounts only that session's repository. Idle VMs stop
-              automatically and restart on the next command; at most {helperMaxRunningVms} run at once. CPU and
-              memory changes apply on the session's next sandboxed command and recreate its VM (the Docker data
-              volume is kept).
+              Each sandboxed session gets its own microVM that mounts only that session's repository. A VM unused
+              for this long, or whose session's sandbox is turned off, is removed together with its Docker data, so
+              installed packages and Docker images are lost; the next sandboxed command creates a fresh VM. At most{' '}
+              {helperMaxRunningVms} run at once. CPU and memory changes apply on the session's next sandboxed command
+              and recreate its VM (the Docker data volume is kept).
             </p>
           </>
         )}

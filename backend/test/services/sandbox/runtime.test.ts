@@ -1030,48 +1030,258 @@ describe('SandboxRuntimeService', () => {
     expect(vms.has(OTHER_VM_NAME)).toBe(false)
   })
 
-  it('stops an idle VM from the sweep and restarts it on the next plan', async () => {
+  it('removes an idle running VM and its Docker data volume from the sweep and boots a fresh VM on the next plan', async () => {
     vi.useFakeTimers()
     try {
       enableEnforcement()
-      installFakeMsb(new Map([[VM_NAME, vm()]]))
+      const vms = new Map<string, FakeVm>([[VM_NAME, vm()]])
+      installFakeMsb(vms)
 
       const first = await service.planShell(repoADir, shellTarget(repoADir))
       expect(first).toEqual({ mode: 'sandbox', name: VM_NAME, workdir: repoADir })
 
       await vi.advanceTimersByTimeAsync(31 * 60 * 1000)
 
+      expect(msbCalls('rm')).toHaveLength(1)
       expect(mockExecuteCommand).toHaveBeenCalledWith(
-        [sandboxExecutablePath(), ...buildSandboxStopArgs(VM_NAME)],
+        [sandboxExecutablePath(), 'volume', 'rm', sandboxDockerDataVolumeName(VM_NAME)],
         expect.objectContaining({ ignoreExitCode: true }),
       )
+      expect(vms.has(VM_NAME)).toBe(false)
+      expect(logger.info).toHaveBeenCalledWith(`Removed idle sandbox ${VM_NAME} and its Docker data volume`)
 
-      const stopsBefore = msbCalls('stop').length
-      const restarted = await service.planShell(repoADir, shellTarget(repoADir))
-      expect(restarted).toEqual({ mode: 'sandbox', name: VM_NAME, workdir: repoADir })
-      expect(msbCalls('stop').length).toBe(stopsBefore)
-      expect(msbCalls('start').length).toBeGreaterThan(0)
+      const recreated = await service.planShell(repoADir, shellTarget(repoADir))
+      expect(recreated).toEqual({ mode: 'sandbox', name: VM_NAME, workdir: repoADir })
+      expect(msbCalls('run')).toHaveLength(1)
     } finally {
       vi.useRealTimers()
     }
   })
 
-  it('logs a warning when the idle sweep stop fails', async () => {
+  it('removes a session VM that the running cap stopped once it is idle', async () => {
+    vi.useFakeTimers()
+    try {
+      settingsService.updateSettings({ sandbox: { enabled: true, maxRunningVms: 1 } })
+      mockDetectSandboxCapability.mockReturnValue({ available: true, msbVersion: 'msb 0.6.15' })
+      const vms = new Map<string, FakeVm>([
+        [VM_NAME, vm({ projectMounts: [repoADir] })],
+        [OTHER_VM_NAME, vm({ projectMounts: [repoBDir], rootSessionId: OTHER_ROOT_SESSION, running: false })],
+      ])
+      installFakeMsb(vms)
+
+      await service.planShell(repoADir, shellTarget(repoADir))
+      await vi.advanceTimersByTimeAsync(ENV.SANDBOX.EXEC_TIMEOUT_MS)
+      const second = await service.planShell(repoBDir, {
+        rootSessionId: OTHER_ROOT_SESSION,
+        locationDirectory: repoBDir,
+        resources: defaultResources(),
+      })
+      expect(second).toEqual({ mode: 'sandbox', name: OTHER_VM_NAME, workdir: repoBDir })
+      expect(vms.get(VM_NAME)?.running).toBe(false)
+
+      await vi.advanceTimersByTimeAsync(21 * 60 * 1000)
+
+      expect(vms.has(VM_NAME)).toBe(false)
+      expect(vms.has(OTHER_VM_NAME)).toBe(true)
+    } finally {
+      vi.useRealTimers()
+    }
+  })
+
+  it('removes an untracked session VM only after the threshold from the sweep start and never a non-session VM', async () => {
     vi.useFakeTimers()
     try {
       enableEnforcement()
-      installFakeMsb(new Map([[VM_NAME, vm()]]))
+      const vms = new Map<string, FakeVm>([
+        [VM_NAME, vm()],
+        ['ocm-workspace', vm()],
+      ])
+      installFakeMsb(vms)
+
+      await service.prepareSandboxOnBoot()
+
+      await vi.advanceTimersByTimeAsync(20 * 60 * 1000)
+      expect(vms.has(VM_NAME)).toBe(true)
+      expect(vms.has('ocm-workspace')).toBe(true)
+      expect(msbCalls('rm')).toHaveLength(0)
+
+      await vi.advanceTimersByTimeAsync(11 * 60 * 1000)
+      expect(vms.has(VM_NAME)).toBe(false)
+      expect(vms.has('ocm-workspace')).toBe(true)
+    } finally {
+      vi.useRealTimers()
+    }
+  })
+
+  it('does not remove a VM used within the idle threshold', async () => {
+    vi.useFakeTimers()
+    try {
+      enableEnforcement()
+      const vms = new Map<string, FakeVm>([[VM_NAME, vm()]])
+      installFakeMsb(vms)
       await service.planShell(repoADir, shellTarget(repoADir))
 
+      await vi.advanceTimersByTimeAsync(29 * 60 * 1000)
+
+      expect(vms.has(VM_NAME)).toBe(true)
+      expect(msbCalls('rm')).toHaveLength(0)
+    } finally {
+      vi.useRealTimers()
+    }
+  })
+
+  it('skips a VM with an in-flight boot during the idle sweep', async () => {
+    vi.useFakeTimers()
+    try {
+      enableEnforcement()
+      const vms = new Map<string, FakeVm>([[VM_NAME, vm()]])
+      installFakeMsb(vms)
+      await service.prepareSandboxOnBoot()
+
+      let releaseInspect: () => void = () => {}
+      const inspectGate = new Promise<void>((resolve) => {
+        releaseInspect = resolve
+      })
+      let notifyInspect: () => void = () => {}
+      const inspectEntered = new Promise<void>((resolve) => {
+        notifyInspect = resolve
+      })
       const baseHandler = execHandler
-      execHandler = (args) => {
-        if (args[1] === 'stop') return { exitCode: 1, stdout: '', stderr: 'failed to stop vm' }
+      execHandler = async (args) => {
+        if (args[1] === 'inspect') {
+          notifyInspect()
+          await inspectGate
+        }
         return baseHandler(args)
       }
 
+      const planning = service.planShell(repoADir, shellTarget(repoADir))
+      await inspectEntered
+
+      await vi.advanceTimersByTimeAsync(31 * 60 * 1000)
+      expect(vms.has(VM_NAME)).toBe(true)
+      expect(msbCalls('rm')).toHaveLength(0)
+
+      releaseInspect()
+      const plan = await planning
+      expect(plan).toEqual({ mode: 'sandbox', name: VM_NAME, workdir: repoADir })
+    } finally {
+      vi.useRealTimers()
+    }
+  })
+
+  it('logs a warning and continues the sweep when a removal fails', async () => {
+    vi.useFakeTimers()
+    try {
+      enableEnforcement()
+      const vms = new Map<string, FakeVm>([
+        [VM_NAME, vm()],
+        [OTHER_VM_NAME, vm({ projectMounts: [repoBDir], rootSessionId: OTHER_ROOT_SESSION })],
+      ])
+      installFakeMsb(vms)
+      const baseHandler = execHandler
+      execHandler = (args) => {
+        if (args[1] === 'rm' && args[args.length - 1] === VM_NAME) {
+          return { exitCode: 1, stdout: '', stderr: 'operation not permitted' }
+        }
+        return baseHandler(args)
+      }
+
+      await service.prepareSandboxOnBoot()
       await vi.advanceTimersByTimeAsync(31 * 60 * 1000)
 
-      expect(logger.warn).toHaveBeenCalledWith(expect.stringContaining('Failed to stop idle sandbox'))
+      expect(logger.warn).toHaveBeenCalledWith(
+        `Failed to remove idle sandbox ${VM_NAME}: msb rm failed with code 1: operation not permitted`,
+      )
+      expect(vms.has(OTHER_VM_NAME)).toBe(false)
+      expect(vms.has(VM_NAME)).toBe(true)
+    } finally {
+      vi.useRealTimers()
+    }
+  })
+
+  it('logs a warning when the idle sweep cannot list sandboxes', async () => {
+    vi.useFakeTimers()
+    try {
+      enableEnforcement()
+      installFakeMsb(new Map(), { lsError: 'failed to connect to supervisor' })
+
+      await service.prepareSandboxOnBoot()
+      await vi.advanceTimersByTimeAsync(31 * 60 * 1000)
+
+      expect(logger.warn).toHaveBeenCalledWith(
+        'Failed to list sandboxes for the idle sweep: msb ls failed with code 1: failed to connect to supervisor',
+      )
+      expect(msbCalls('rm')).toHaveLength(0)
+    } finally {
+      vi.useRealTimers()
+    }
+  })
+
+  it('waits for an in-flight removal before booting a fresh VM on the next plan', async () => {
+    enableEnforcement()
+    const vms = new Map<string, FakeVm>([[VM_NAME, vm()]])
+    installFakeMsb(vms)
+
+    const first = await service.planShell(repoADir, shellTarget(repoADir))
+    expect(first).toEqual({ mode: 'sandbox', name: VM_NAME, workdir: repoADir })
+
+    let releaseRm: () => void = () => {}
+    const rmGate = new Promise<void>((resolve) => {
+      releaseRm = resolve
+    })
+    let notifyRm: () => void = () => {}
+    const rmEntered = new Promise<void>((resolve) => {
+      notifyRm = resolve
+    })
+    const baseHandler = execHandler
+    execHandler = async (args) => {
+      if (args[1] === 'rm') {
+        notifyRm()
+        await rmGate
+      }
+      return baseHandler(args)
+    }
+
+    const removal = service.removeSessionSandbox(ROOT_SESSION)
+    await rmEntered
+
+    const planning = service.planShell(repoADir, shellTarget(repoADir))
+    await new Promise((resolve) => setTimeout(resolve, 0))
+
+    releaseRm()
+    const plan = await planning
+    await removal
+
+    expect(plan).toEqual({ mode: 'sandbox', name: VM_NAME, workdir: repoADir })
+    expect(vms.has(VM_NAME)).toBe(true)
+    expect(msbCalls('rm')).toHaveLength(1)
+    expect(msbCalls('run')).toHaveLength(1)
+  })
+
+  it('runs a single removal when the same VM is removed concurrently', async () => {
+    installFakeMsb(new Map<string, FakeVm>([[VM_NAME, vm()]]))
+
+    const first = service.removeSessionSandbox(ROOT_SESSION)
+    const second = service.removeSessionSandbox(ROOT_SESSION)
+    await Promise.all([first, second])
+
+    expect(msbCalls('rm')).toHaveLength(1)
+    expect(msbCalls('volume')).toHaveLength(1)
+  })
+
+  it('starts the idle sweep at boot so a stale sandbox is removed without a plan', async () => {
+    vi.useFakeTimers()
+    try {
+      enableEnforcement()
+      const vms = new Map<string, FakeVm>([[VM_NAME, vm()]])
+      installFakeMsb(vms)
+
+      await service.prepareSandboxOnBoot()
+      await vi.advanceTimersByTimeAsync(31 * 60 * 1000)
+
+      expect(vms.has(VM_NAME)).toBe(false)
+      expect(logger.info).toHaveBeenCalledWith(`Removed idle sandbox ${VM_NAME} and its Docker data volume`)
     } finally {
       vi.useRealTimers()
     }

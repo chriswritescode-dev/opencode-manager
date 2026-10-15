@@ -65,11 +65,7 @@ export class SessionSandboxService {
         const { sessionID } = event.data
         this.ancestry.forget(sessionID)
         if (getSessionSandboxMode(this.db, sessionID) !== null && this.sandboxSupported()) {
-          void this.sandboxes.removeSessionSandbox(sessionID).catch((error) => {
-            logger.warn(
-              `Failed to remove the sandbox microVM for deleted session ${sessionID}: ${error instanceof Error ? error.message : String(error)}`,
-            )
-          })
+          this.removeSandboxInBackground(sessionID, `deleted session ${sessionID}`)
         }
         deleteSessionSandboxMode(this.db, sessionID)
         return
@@ -147,6 +143,10 @@ export class SessionSandboxService {
       }
     })()
 
+    if (request.sandboxed === false && available) {
+      this.removeSandboxInBackground(sessionId, `session ${sessionId} after its sandbox was turned off`)
+    }
+
     return this.getState(sessionId)
   }
 
@@ -157,6 +157,14 @@ export class SessionSandboxService {
       rootSessionId,
       resources: resolveSandboxResources(this.preferences().sandbox, stored?.resources ?? null),
     }
+  }
+
+  private removeSandboxInBackground(rootSessionId: string, reason: string): void {
+    void this.sandboxes.removeSessionSandbox(rootSessionId).catch((error) => {
+      logger.warn(
+        `Failed to remove the sandbox microVM for ${reason}: ${error instanceof Error ? error.message : String(error)}`,
+      )
+    })
   }
 
   private async resolveParentRootRow(parentId: string): Promise<SessionSandboxModeRow | null> {

@@ -254,7 +254,7 @@ describe('SandboxSettings', () => {
 
     expect(screen.getByLabelText('Default CPUs')).toBeInTheDocument()
     expect(screen.getByLabelText('Default memory (GiB)')).toBeInTheDocument()
-    expect(screen.getByLabelText('Stop idle sandbox VMs after (minutes)')).toBeInTheDocument()
+    expect(screen.getByLabelText('Remove idle sandbox VMs after (minutes)')).toBeInTheDocument()
     expect(screen.getByLabelText('Max running sandbox VMs')).toBeInTheDocument()
   })
 
