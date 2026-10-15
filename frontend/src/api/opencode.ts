@@ -183,6 +183,7 @@ export async function switchSessionAgent(sessionID: string, agent: string): Prom
   await callOpenCode((api) => api.session.switchAgent({ sessionID, agent }))
 }
 
+/** Sends a session prompt with client metadata derived from the current viewport. */
 export async function sendPrompt(input: SendPromptInput): Promise<SessionInboxUser> {
   return callOpenCode((api) =>
     api.session.prompt({

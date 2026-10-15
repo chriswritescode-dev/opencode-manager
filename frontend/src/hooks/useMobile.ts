@@ -1,14 +1,17 @@
 import { useState, useEffect, useCallback, useRef, type CSSProperties } from 'react'
 import { useSwipeNavigation } from '@/contexts/SwipeNavigationContext'
 
+/** Returns whether the viewport is narrower than 768 pixels, or false without a browser window. */
 export function isMobileViewport(): boolean {
   return typeof window !== 'undefined' ? window.innerWidth < 768 : false
 }
 
+/** Tracks whether the current viewport is mobile, updating the value on window resize. */
 export function useMobile() {
   const [isMobile, setIsMobile] = useState(isMobileViewport)
 
   useEffect(() => {
+    /** Refreshes the mobile state from the current viewport width. */
     const checkMobile = () => {
       setIsMobile(isMobileViewport())
     }

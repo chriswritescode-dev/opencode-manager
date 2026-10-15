@@ -33,6 +33,7 @@ type JsonSchema = {
   minLength?: number
 }
 
+/** Loads the installed manager plugin from the supplied configuration home for hook tests. */
 async function loadManagerPlugin(configHome: string): Promise<GeneratedPlugin> {
   return loadGeneratedPlugin(path.join(getOpenCodePluginDir(configHome), 'ocm-manager.js'))
 }

@@ -106,6 +106,7 @@ function createRegistry<Event>(name: string) {
   }
 }
 
+/** Creates a test plugin context with hook registries, event triggers, and tool transforms. */
 function createPluginContext() {
   const shellCreateBefore = createRegistry<ShellCreateBeforeEvent>('create.before')
   const toolExecuteAfter = createRegistry<ToolExecuteAfterEvent>('execute.after')
@@ -138,6 +139,7 @@ function createPluginContext() {
       },
     },
     session: {
+      /** Registers prompt or context callbacks, rejecting unsupported session hook names. */
       hook: async (name, callback) => {
         if (name === 'prompt') return sessionPrompt.register(callback as SessionPromptHookCallback)
         if (name === 'context') return sessionContext.register(callback as SessionContextHookCallback)
@@ -151,7 +153,9 @@ function createPluginContext() {
     triggerShellCreateBefore: (event: ShellCreateBeforeEvent) => shellCreateBefore.trigger(event),
     triggerToolExecuteAfter: (event: ToolExecuteAfterEvent) => toolExecuteAfter.trigger(event),
     triggerPermissionEvaluate: (event: PermissionEvaluateEvent) => permissionEvaluate.trigger(event),
+    /** Dispatches a prompt event to the registered session callbacks. */
     triggerSessionPrompt: (event: SessionPromptEvent) => sessionPrompt.trigger(event),
+    /** Dispatches a context event so registered callbacks can update it. */
     triggerSessionContext: (event: SessionContextEvent) => sessionContext.trigger(event),
     registeredTools: () => {
       const tools: GeneratedTool[] = []
@@ -164,6 +168,7 @@ function createPluginContext() {
 
 let importCount = 0
 
+/** Imports a fresh plugin instance, validates its definition, and runs setup in the test context. */
 export async function loadGeneratedPlugin(file: string): Promise<GeneratedPlugin> {
   importCount += 1
   const imported = (await import(`${pathToFileURL(file).href}?ocm-test=${importCount}`)) as { default?: unknown }

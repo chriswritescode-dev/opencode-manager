@@ -147,6 +147,7 @@ function buildManagerToolDescription(): string {
     .join('\n')
 }
 
+/** Builds the standalone manager plugin with API actions and mobile session hooks. */
 export function buildManagerToolPluginSource(id: string): string {
   return `var REQUEST_TIMEOUT_MS = ${MANAGER_TOOL_REQUEST_TIMEOUT_MS}
 
@@ -174,6 +175,7 @@ var MOBILE_OUTPUT_INSTRUCTIONS = ${JSON.stringify(MANAGER_MOBILE_OUTPUT_INSTRUCT
 
 var MOBILE_SESSIONS = new Set()
 
+/** Updates mobile mode from explicit client metadata, preserving it when metadata is absent. */
 function trackMobileSession(event) {
   var client = event.metadata && event.metadata[CLIENT_METADATA_KEY]
   if (client === MOBILE_CLIENT) {
@@ -183,6 +185,7 @@ function trackMobileSession(event) {
   }
 }
 
+/** Appends mobile reply guidance to the context of a tracked mobile session. */
 function addMobileOutputInstructions(event) {
   if (MOBILE_SESSIONS.has(event.sessionID)) {
     event.system.push({ type: 'text', text: MOBILE_OUTPUT_INSTRUCTIONS })
@@ -329,6 +332,7 @@ async function runAction(input, context) {
 
 export default {
   id: '${id}',
+  /** Registers session hooks and exposes the manager tool through the plugin context. */
   async setup(ctx) {
     await ctx.session.hook('prompt', trackMobileSession)
     await ctx.session.hook('context', addMobileOutputInstructions)
