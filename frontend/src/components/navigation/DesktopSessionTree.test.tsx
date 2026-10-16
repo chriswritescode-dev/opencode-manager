@@ -425,6 +425,14 @@ describe('DesktopSessionTree', () => {
     expect(await screen.findByText('Failed to load sessions')).toBeTruthy()
   })
 
+  it('shows the error state when the worktree siblings lookup fails', async () => {
+    getRepoSiblingsMock.mockRejectedValue(new Error('siblings failed'))
+
+    render(<DesktopSessionTree />, { wrapper: createWrapper(['/repos/1']) })
+
+    expect(await screen.findByText('Failed to load sessions')).toBeTruthy()
+  })
+
   it('creates a session in the repo full path', async () => {
     const user = userEvent.setup()
     render(<DesktopSessionTree />, { wrapper: createWrapper(['/']) })

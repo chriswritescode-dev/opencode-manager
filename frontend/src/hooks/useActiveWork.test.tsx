@@ -241,6 +241,20 @@ describe('useActiveWork', () => {
     expect(result.current.groups.recent[0].path).toBe('/repos/1/sessions/wt?repoTab=workspaces')
   })
 
+  it('reports an error when the worktree siblings lookup fails with no cached data', async () => {
+    const now = Date.now()
+    mocks.listSessionPage.mockResolvedValue({
+      items: [session('wt', now - 500, undefined, '/repo/.worktrees/feature')],
+    })
+    mocks.getRepoSiblings.mockRejectedValue(new Error('siblings failed'))
+
+    const { result } = renderHook(() => useActiveWork(WINDOW_MS), {
+      wrapper: createWrapper(createQueryClient()),
+    })
+
+    await waitFor(() => expect(result.current.isError).toBe(true))
+  })
+
   it('never fetches siblings for an orphan session updated outside the window', async () => {
     const now = Date.now()
     mocks.listSessionPage.mockResolvedValue({

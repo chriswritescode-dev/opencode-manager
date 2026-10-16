@@ -259,7 +259,11 @@ export function useActiveWork(windowMs: number): {
     [now, windowMs, repos, mergedSessions, resolvedParents, resolvedRoots],
   )
 
-  const { worktrees, isLoading: isWorktreesLoading } = useRepoWorktrees(repos, needsLookup)
+  const {
+    worktrees,
+    isLoading: isWorktreesLoading,
+    isError: isWorktreesError,
+  } = useRepoWorktrees(repos, needsLookup)
 
   const groups = useMemo(
     () =>
@@ -279,6 +283,6 @@ export function useActiveWork(windowMs: number): {
   return {
     groups,
     isLoading: isReposLoading || isSessionsLoading || isWorktreesLoading,
-    isError: isSessionsError,
+    isError: isSessionsError || isWorktreesError,
   }
 }

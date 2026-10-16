@@ -206,6 +206,8 @@ function RepoSessionList({ repo, onSelectSession }: RepoSessionListProps) {
   )
 
   if (siblings.isLoading) return <SessionNavStatus>Loading sessions...</SessionNavStatus>
+  if (siblings.isError && siblings.data === undefined)
+    return <SessionNavStatus>Failed to load sessions</SessionNavStatus>
 
   return <RepoSessionListItems repo={repo} worktrees={worktrees} onSelectSession={onSelectSession} />
 }
