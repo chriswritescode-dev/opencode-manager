@@ -185,12 +185,7 @@ export function MoreDrawer({ isOpen, onClose }: MoreDrawerProps) {
         </div>
         <SideDrawerContent className="flex flex-col gap-4 pb-3">
           {isOpen && (
-            <CompactActivityList
-              onNavigate={(path) => {
-                navigate(path)
-                onClose()
-              }}
-            />
+            <CompactActivityList onNavigate={(path) => navigate(path)} />
           )}
           <MenuSection>
             {isSessionDetail && (

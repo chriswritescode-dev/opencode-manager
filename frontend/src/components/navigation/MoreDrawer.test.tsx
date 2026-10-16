@@ -346,7 +346,7 @@ describe('MoreDrawer', () => {
     expect(screen.queryByText('Session s1')).not.toBeInTheDocument()
   })
 
-  it('navigates to the activity item and closes the drawer when a row is clicked', () => {
+  it('navigates to the activity item without a close that would replace the new route', () => {
     const navigateMock = vi.fn()
     vi.mocked(useNavigate).mockReturnValue(navigateMock)
     mockAuth()
@@ -358,6 +358,6 @@ describe('MoreDrawer', () => {
     fireEvent.click(screen.getByRole('button', { name: /Session s1/ }))
 
     expect(navigateMock).toHaveBeenCalledWith('/repos/1/sessions/s1')
-    expect(handleClose).toHaveBeenCalled()
+    expect(handleClose).not.toHaveBeenCalled()
   })
 })
