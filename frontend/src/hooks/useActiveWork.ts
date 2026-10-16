@@ -1,5 +1,6 @@
-import { useMemo } from 'react'
-import { useQueries } from '@tanstack/react-query'
+import { useEffect, useMemo, useState } from 'react'
+import { useQueries, useQueryClient, type QueryClient } from '@tanstack/react-query'
+import type { SessionInfo } from '@opencode-manager/shared/opencode'
 import { sessionQueryOptions, useSessionsAcrossDirectories } from '@/hooks/useOpenCode'
 import { useNavigableRepos } from '@/hooks/useSidebarRepoGroups'
 import { useForms, usePermissions } from '@/contexts/EventContext'
@@ -7,6 +8,7 @@ import { useSessionStatus } from '@/stores/sessionStatusStore'
 import { useSettings } from '@/hooks/useSettings'
 import { DEFAULT_ACTIVITY_WINDOW_MINUTES } from '@/api/types/settings'
 import {
+  MS_PER_MINUTE,
   buildActiveWork,
   buildRepoActivityIndex,
   collectActiveRoots,
@@ -86,6 +88,38 @@ export function useRepoActivityState(repo: Repo): 'needs-input' | 'running' | nu
 }
 
 /**
+ * Walks a session's ancestor chain through the shared session cache, returning each link as
+ * `[sessionID, parentID]` from the session down to its root. Stops at a root, a missing session,
+ * or a cycle. Reusing `sessionQueryOptions` keeps these reads on the shared session cache.
+ */
+async function fetchAncestorLinks(
+  queryClient: QueryClient,
+  sessionID: string,
+  directories: ReadonlyMap<string, string>,
+): Promise<Array<[string, string | null]>> {
+  const links: Array<[string, string | null]> = []
+  const visited = new Set<string>()
+  let currentID: string | null | undefined = sessionID
+
+  while (currentID && !visited.has(currentID)) {
+    visited.add(currentID)
+    const session: SessionInfo = await queryClient.fetchQuery(
+      sessionQueryOptions(currentID, directories.get(currentID)),
+    )
+    const parentID: string | null = session.parentID ?? null
+    links.push([session.id, parentID])
+    currentID = parentID
+  }
+
+  return links
+}
+
+/** Flattens the resolved ancestor links from each query result, dropping unresolved queries. */
+const combineAncestorLinks = (
+  results: Array<{ data?: Array<[string, string | null]> }>,
+): Array<[string, string | null]> => results.flatMap((result) => result.data ?? [])
+
+/**
  * The full active-work list. Performs network reads, so it must only be used by components that
  * are mounted while visible (the session picker fetches only while open).
  */
@@ -94,6 +128,8 @@ export function useActiveWork(windowMs: number): {
   isLoading: boolean
   isError: boolean
 } {
+  const queryClient = useQueryClient()
+  const [now, setNow] = useState(() => Date.now())
   const { repos, isLoading: isReposLoading } = useNavigableRepos()
   const repoDirectories = useMemo(() => repos.map((repo) => repo.fullPath), [repos])
 
@@ -101,11 +137,36 @@ export function useActiveWork(windowMs: number): {
     data: sessions,
     isLoading: isSessionsLoading,
     isError: isSessionsError,
+    fetchNextPage,
+    hasNextPage,
+    isFetchingNextPage,
+    isFetchNextPageError,
   } = useSessionsAcrossDirectories(repoDirectories, {
     allDirectories: true,
     limit: ACTIVE_WORK_SESSION_LIMIT,
     includeChildren: true,
   })
+
+  useEffect(() => {
+    const interval = setInterval(() => setNow(Date.now()), MS_PER_MINUTE)
+    return () => clearInterval(interval)
+  }, [])
+
+  const oldestLoadedUpdatedAt = sessions.at(-1)?.time.updated
+
+  useEffect(() => {
+    if (!hasNextPage || isFetchingNextPage || isFetchNextPageError) return
+    if (oldestLoadedUpdatedAt === undefined || oldestLoadedUpdatedAt < now - windowMs) return
+    void fetchNextPage()
+  }, [
+    hasNextPage,
+    isFetchingNextPage,
+    isFetchNextPageError,
+    oldestLoadedUpdatedAt,
+    now,
+    windowMs,
+    fetchNextPage,
+  ])
 
   const statuses = useSessionStatus((state) => state.statuses)
   const storeParents = useSessionStatus((state) => state.parents)
@@ -137,7 +198,7 @@ export function useActiveWork(windowMs: number): {
 
   const missingRootIDs = useMemo(() => {
     const ids = new Set<string>()
-    const windowStart = Date.now() - windowMs
+    const windowStart = now - windowMs
     for (const session of sessions) {
       if (session.time.updated < windowStart) continue
       const rootID = rootSessionID(session.id, parents)
@@ -150,10 +211,41 @@ export function useActiveWork(windowMs: number): {
       if (!listedSessionIDs.has(sessionID)) ids.add(sessionID)
     }
     return [...ids]
-  }, [sessions, parents, listedSessionIDs, roots, windowMs])
+  }, [sessions, parents, listedSessionIDs, roots, windowMs, now])
+
+  const ancestorLinks = useQueries({
+    queries: missingRootIDs.map((sessionID) => ({
+      queryKey: ['opencode', 'session-ancestry', sessionID] as const,
+      queryFn: () => fetchAncestorLinks(queryClient, sessionID, sessionDirectories),
+      staleTime: Infinity,
+    })),
+    combine: combineAncestorLinks,
+  })
+
+  const resolvedParents = useMemo(() => {
+    const merged = new Map(parents)
+    for (const [sessionID, parentID] of ancestorLinks) {
+      merged.set(sessionID, parentID)
+    }
+    return merged
+  }, [parents, ancestorLinks])
+
+  const resolvedRoots = useMemo(
+    () => collectActiveRoots({ statuses, parents: resolvedParents, runningShells, pendingInputSessionIDs }),
+    [statuses, resolvedParents, runningShells, pendingInputSessionIDs],
+  )
+
+  const backfillRootIDs = useMemo(() => {
+    const ids = new Set<string>()
+    for (const sessionID of missingRootIDs) {
+      const rootID = rootSessionID(sessionID, resolvedParents)
+      if (!listedSessionIDs.has(rootID)) ids.add(rootID)
+    }
+    return [...ids]
+  }, [missingRootIDs, resolvedParents, listedSessionIDs])
 
   const fetchedSessions = useQueries({
-    queries: missingRootIDs.map((sessionID) =>
+    queries: backfillRootIDs.map((sessionID) =>
       sessionQueryOptions(sessionID, sessionDirectories.get(sessionID)),
     ),
     combine: combineQuerySessions,
@@ -167,15 +259,15 @@ export function useActiveWork(windowMs: number): {
   const groups = useMemo(
     () =>
       buildActiveWork({
-        now: Date.now(),
+        now,
         windowMs,
         repos,
         sessions: mergedSessions,
-        parents,
-        roots,
+        parents: resolvedParents,
+        roots: resolvedRoots,
         outcomes,
       }),
-    [windowMs, repos, mergedSessions, parents, roots, outcomes],
+    [now, windowMs, repos, mergedSessions, resolvedParents, resolvedRoots, outcomes],
   )
 
   return {
