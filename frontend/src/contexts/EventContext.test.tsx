@@ -1447,8 +1447,8 @@ describe('EventProvider permissions and forms', () => {
 
   it('resolves ancestry when a permission arrives for an unknown session', async () => {
     mocks.getSession.mockImplementation((sessionID: string) => {
-      if (sessionID === 'child-1') return Promise.resolve({ id: 'child-1', parentID: 'parent-1' })
-      if (sessionID === 'parent-1') return Promise.resolve({ id: 'parent-1' })
+      if (sessionID === 'child-1') return Promise.resolve({ id: 'child-1', parentID: 'parent-1', location: { directory: '/repo' } })
+      if (sessionID === 'parent-1') return Promise.resolve({ id: 'parent-1', location: { directory: '/repo' } })
       return Promise.reject(new Error('Session not found'))
     })
 
@@ -1475,8 +1475,8 @@ describe('EventProvider permissions and forms', () => {
 
   it('resolves ancestry when a form arrives for an unknown session', async () => {
     mocks.getSession.mockImplementation((sessionID: string) => {
-      if (sessionID === 'child-1') return Promise.resolve({ id: 'child-1', parentID: 'parent-1' })
-      if (sessionID === 'parent-1') return Promise.resolve({ id: 'parent-1' })
+      if (sessionID === 'child-1') return Promise.resolve({ id: 'child-1', parentID: 'parent-1', location: { directory: '/repo' } })
+      if (sessionID === 'parent-1') return Promise.resolve({ id: 'parent-1', location: { directory: '/repo' } })
       return Promise.reject(new Error('Session not found'))
     })
 
@@ -2269,8 +2269,8 @@ describe('EventProvider permissions and forms', () => {
     mocks.listRepos.mockResolvedValue([{ id: 123, fullPath: '/repo' }])
     mocks.listActiveSessions.mockResolvedValue({ 'child-1': { type: 'running' } })
     mocks.getSession.mockImplementation((sessionID: string) => {
-      if (sessionID === 'child-1') return Promise.resolve({ id: 'child-1', parentID: 'parent-1' })
-      if (sessionID === 'parent-1') return Promise.resolve({ id: 'parent-1' })
+      if (sessionID === 'child-1') return Promise.resolve({ id: 'child-1', parentID: 'parent-1', location: { directory: '/repo' } })
+      if (sessionID === 'parent-1') return Promise.resolve({ id: 'parent-1', location: { directory: '/repo' } })
       return Promise.reject(new Error('Session not found'))
     })
 
@@ -2394,8 +2394,8 @@ describe('EventProvider permissions and forms', () => {
       { id: 'shell-1', status: 'running', metadata: { sessionID: 'child-1' } },
     ])
     mocks.getSession.mockImplementation((sessionID: string) => {
-      if (sessionID === 'child-1') return Promise.resolve({ id: 'child-1', parentID: 'parent-1' })
-      if (sessionID === 'parent-1') return Promise.resolve({ id: 'parent-1' })
+      if (sessionID === 'child-1') return Promise.resolve({ id: 'child-1', parentID: 'parent-1', location: { directory: '/repo' } })
+      if (sessionID === 'parent-1') return Promise.resolve({ id: 'parent-1', location: { directory: '/repo' } })
       return Promise.reject(new Error('Session not found'))
     })
 
@@ -2421,8 +2421,8 @@ describe('EventProvider permissions and forms', () => {
     mocks.listRepos.mockResolvedValue([{ id: 123, fullPath: '/repo' }])
     mocks.listActiveSessions.mockResolvedValue({ 'child-1': { type: 'running' } })
     mocks.getSession.mockImplementation((sessionID: string) => {
-      if (sessionID === 'parent-1') return Promise.resolve({ id: 'parent-1', parentID: 'grandparent-1' })
-      if (sessionID === 'grandparent-1') return Promise.resolve({ id: 'grandparent-1' })
+      if (sessionID === 'parent-1') return Promise.resolve({ id: 'parent-1', parentID: 'grandparent-1', location: { directory: '/repo' } })
+      if (sessionID === 'grandparent-1') return Promise.resolve({ id: 'grandparent-1', location: { directory: '/repo' } })
       return Promise.reject(new Error('Session not found'))
     })
 

@@ -42,6 +42,10 @@ vi.mock('@/hooks/useRepoSiblings', () => ({
 }))
 
 vi.mock('@/hooks/useRepoActivity', () => ({ useRepoActivity: mocks.useRepoActivity }))
+vi.mock('@/hooks/useActiveWork', () => ({
+  useActiveWorkCounts: () => ({ needsInput: 0, running: 0 }),
+  useRepoActivityState: () => null,
+}))
 vi.mock('@/hooks/useSSE', () => ({ useSSE: mocks.useSSE }))
 vi.mock('@/hooks/useOpenCode', () => ({ useCreateSession: mocks.useCreateSession }))
 

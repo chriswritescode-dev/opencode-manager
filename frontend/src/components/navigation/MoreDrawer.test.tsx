@@ -6,6 +6,7 @@ import { MoreDrawer } from './MoreDrawer'
 import { useAuth } from '@/hooks/useAuth'
 import { useServerHealth } from '@/hooks/useServerHealth'
 import { getRepo } from '@/api/repos'
+import type { ActiveWorkItem } from '@/lib/activeWork'
 
 vi.mock('@/hooks/useAuth')
 vi.mock('@/hooks/useServerHealth')
@@ -19,6 +20,61 @@ vi.mock('react-router-dom', async () => {
     useNavigate: vi.fn(),
   }
 })
+
+const activityMocks = vi.hoisted(() => ({
+  useActiveWork: vi.fn(),
+  useActivityWindowMs: vi.fn(),
+}))
+
+vi.mock('@/hooks/useActiveWork', () => ({
+  useActiveWork: activityMocks.useActiveWork,
+  useActivityWindowMs: activityMocks.useActivityWindowMs,
+  useRepoActivityState: () => null,
+}))
+
+function createActiveWorkItem(): ActiveWorkItem {
+  const now = Date.now()
+  return {
+    key: '1:s1',
+    state: 'recent',
+    path: '/repos/1/sessions/s1',
+    session: {
+      id: 's1',
+      projectID: 'proj-1',
+      title: 'Session s1',
+      time: { created: now - 10_000, updated: now },
+      location: { directory: '/path/to/repo1' },
+      cost: 0,
+      tokens: { input: 0, output: 0, reasoning: 0, cache: { read: 0, write: 0 } },
+    },
+    repo: {
+      id: 1,
+      name: 'repo1',
+      fullPath: '/path/to/repo1',
+      localPath: '/path/to/repo1',
+      defaultBranch: 'main',
+      currentBranch: 'main',
+      cloneStatus: 'ready',
+      clonedAt: 0,
+    },
+  }
+}
+
+function setActivityGroups(groups: {
+  needsInput?: ActiveWorkItem[]
+  running?: ActiveWorkItem[]
+  recent?: ActiveWorkItem[]
+}) {
+  activityMocks.useActiveWork.mockReturnValue({
+    groups: {
+      needsInput: groups.needsInput ?? [],
+      running: groups.running ?? [],
+      recent: groups.recent ?? [],
+    },
+    isLoading: false,
+    isError: false,
+  })
+}
 
 const mockAuth = (logout = vi.fn()) => {
   vi.mocked(useAuth).mockReturnValue({
@@ -99,6 +155,8 @@ describe('MoreDrawer', () => {
       cloneStatus: 'ready',
       clonedAt: 0,
     })
+    activityMocks.useActivityWindowMs.mockReturnValue(30 * 60_000)
+    setActivityGroups({})
   })
 
   it('renders Settings and Logout menu items', () => {
@@ -263,5 +321,42 @@ describe('MoreDrawer', () => {
     renderMoreDrawer({ initialEntry: '/repos/1/sessions/session-1?assistant=1', routePath: '/repos/:id/sessions/:sessionId' })
 
     expect(screen.queryByRole('button', { name: 'Assistant' })).not.toBeInTheDocument()
+  })
+
+  it('shows the Activity section above the menu when there are items', () => {
+    mockAuth()
+    mockServerHealth()
+    setActivityGroups({ recent: [createActiveWorkItem()] })
+    renderMoreDrawer({ initialEntry: '/repos/1/sessions/session-1', routePath: '/repos/:id/sessions/:sessionId' })
+
+    const heading = screen.getByRole('heading', { name: 'Activity' })
+    const firstMenuRow = screen.getByText('Files')
+    expect(screen.getByText('Session s1')).toBeInTheDocument()
+    expect(heading.compareDocumentPosition(firstMenuRow) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy()
+  })
+
+  it('hides the Activity section when there are no items', () => {
+    mockAuth()
+    mockServerHealth()
+    setActivityGroups({})
+    renderMoreDrawer({ initialEntry: '/repos/1/sessions/session-1', routePath: '/repos/:id/sessions/:sessionId' })
+
+    expect(screen.queryByRole('heading', { name: 'Activity' })).not.toBeInTheDocument()
+    expect(screen.queryByText('Session s1')).not.toBeInTheDocument()
+  })
+
+  it('navigates to the activity item and closes the drawer when a row is clicked', () => {
+    const navigateMock = vi.fn()
+    vi.mocked(useNavigate).mockReturnValue(navigateMock)
+    mockAuth()
+    mockServerHealth()
+    setActivityGroups({ recent: [createActiveWorkItem()] })
+    const handleClose = vi.fn()
+    renderMoreDrawer({ initialEntry: '/repos/1/sessions/session-1', routePath: '/repos/:id/sessions/:sessionId', onClose: handleClose })
+
+    fireEvent.click(screen.getByRole('button', { name: /Session s1/ }))
+
+    expect(navigateMock).toHaveBeenCalledWith('/repos/1/sessions/s1')
+    expect(handleClose).toHaveBeenCalled()
   })
 })

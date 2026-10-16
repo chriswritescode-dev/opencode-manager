@@ -2,24 +2,13 @@ import { useState } from "react";
 import { useNavigate } from "react-router-dom";
 import { Loader2, GitBranch, FolderOpen, AlertCircle } from "lucide-react";
 import { getRepoDisplayName } from "@/lib/utils";
+import type { Repo } from "@/api/types";
 import type { GitStatusResponse } from "@/types/git"
+import { RepoActivityIndicator } from "@/components/activity/RepoActivityIndicator"
 import { RepoRowActions } from "./RepoRowActions"
 
 interface RepoCardProps {
-  repo: {
-    id: number;
-    name?: string | null;
-    repoUrl?: string | null;
-    localPath?: string;
-    sourcePath?: string;
-    branch?: string;
-    currentBranch?: string;
-    cloneStatus: string;
-    isWorktree?: boolean;
-    isLocal?: boolean;
-    fullPath?: string;
-    lastAccessedAt?: number;
-  };
+  repo: Repo;
   onDelete: (id: number) => void;
   isDeleting: boolean;
   isSelected?: boolean;
@@ -90,6 +79,7 @@ export function RepoCard({
               {isReady && (
                 <div className={`w-2 h-2 rounded-full shrink-0 ${isDirty ? 'bg-highlight' : 'bg-success'}`} />
               )}
+              <RepoActivityIndicator repo={repo} />
             </div>
 
             {!manageMode && !isSelected && !hasSelectedRepos && (

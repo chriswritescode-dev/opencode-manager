@@ -1,6 +1,7 @@
 import { useEffect, useRef } from 'react'
+import type { ReactNode } from 'react'
 import { X } from 'lucide-react'
-import { useLocation } from 'react-router-dom'
+import { useLocation, useNavigate } from 'react-router-dom'
 import { FileBrowser } from '@/components/file-browser/FileBrowser'
 import { SourceControlContent } from '@/components/source-control'
 import { TerminalWorkspace } from '@/components/terminal/TerminalPanel'
@@ -23,9 +24,42 @@ import type { ModelRef } from '@opencode-manager/shared/opencode'
 import { buildToolItems, toolKeyOf, type MoreDrawerItem } from '@/components/navigation/moreDrawerItems'
 import { isPanelTool, type ToolPanelState, type PanelTool } from '@/hooks/useToolPanel'
 import { useOpenNavItem } from '@/hooks/useOpenNavItem'
+import { ActivityList } from '@/components/activity/ActivityList'
+import { ActivityCountPill } from '@/components/activity/ActivityCountPill'
+import { useActiveWorkCounts, useActivityWindowMs } from '@/hooks/useActiveWork'
+import { formatActivityWindow } from '@/lib/activeWork'
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from '@/components/ui/tooltip'
 import { restoreOverlayFocus } from '@/lib/overlayFocus'
 import { cn } from '@/lib/utils'
+
+const MS_PER_MINUTE = 60_000
+
+const PANEL_WIDTH_CLASSES: Partial<Record<PanelTool, string>> = {
+  activity: 'w-80',
+}
+
+function ActivityWindowLabel() {
+  const windowMs = useActivityWindowMs()
+  return (
+    <span className="shrink-0 text-xs text-muted-foreground">
+      Last {formatActivityWindow(Math.round(windowMs / MS_PER_MINUTE))}
+    </span>
+  )
+}
+
+function ActivityPanelBody() {
+  const navigate = useNavigate()
+  const windowMs = useActivityWindowMs()
+
+  return (
+    <div className="min-h-0 flex-1 overflow-y-auto">
+      <ActivityList
+        windowMs={windowMs}
+        onNavigate={(item) => navigate({ pathname: item.path, search: '?panel=activity' })}
+      />
+    </div>
+  )
+}
 
 interface ToolSidePanelProps {
   panel: ToolPanelState
@@ -47,9 +81,11 @@ interface RailButtonProps {
   item: MoreDrawerItem
   active: boolean
   onClick: () => void
+  ariaLabel?: string
+  indicator?: ReactNode
 }
 
-function RailButton({ item, active, onClick }: RailButtonProps) {
+function RailButton({ item, active, onClick, ariaLabel, indicator }: RailButtonProps) {
   const Icon = item.icon
   return (
     <Tooltip delayDuration={0}>
@@ -57,10 +93,10 @@ function RailButton({ item, active, onClick }: RailButtonProps) {
         <button
           type="button"
           onClick={onClick}
-          aria-label={item.label}
+          aria-label={ariaLabel ?? item.label}
           aria-pressed={active}
           className={cn(
-            'rounded-md p-2 transition-colors',
+            'relative rounded-md p-2 transition-colors',
             active
               ? 'bg-accent text-foreground'
               : item.danger
@@ -69,6 +105,7 @@ function RailButton({ item, active, onClick }: RailButtonProps) {
           )}
         >
           <Icon className="h-4 w-4" />
+          {indicator}
         </button>
       </TooltipTrigger>
       <TooltipContent side="left" align="center">
@@ -100,6 +137,7 @@ export function ToolSidePanel({
   const { activeTool, toggleTool, closePanel } = panel
   const location = useLocation()
   const openNavItem = useOpenNavItem()
+  const { needsInput, running } = useActiveWorkCounts()
   const railRef = useRef<HTMLElement>(null)
   const previousActiveToolRef = useRef(activeTool)
 
@@ -122,6 +160,18 @@ export function ToolSidePanel({
   }
   const activeLabel = panelTools.find(({ tool }) => tool === activeTool)?.item.label
 
+  const activityTotal = needsInput + running
+  const activityAriaLabel =
+    activityTotal > 0 ? `Activity, ${needsInput} needs input, ${running} running` : undefined
+  const activityIndicator =
+    activityTotal > 0 ? (
+      <ActivityCountPill
+        needsInput={needsInput}
+        running={running}
+        className="absolute -right-0.5 -top-0.5"
+      />
+    ) : undefined
+
   if (panelTools.length === 0 && actionItems.length === 0) return null
 
   const renderTool = (tool: PanelTool) => {
@@ -139,6 +189,7 @@ export function ToolSidePanel({
     if (tool === 'preview') return <PreviewWorkspace isOpen directory={directory} compact />
     if (tool === 'mcp') return repoDirectory ? <RepoMcpContent open directory={repoDirectory} /> : null
     if (tool === 'walkthrough') return sessionId ? <ChangesWalkthroughView /> : null
+    if (tool === 'activity') return <ActivityPanelBody />
     if (repoId === undefined) return null
     switch (tool) {
       case 'sourceControl':
@@ -169,10 +220,16 @@ export function ToolSidePanel({
     activeTool && activeLabel ? (
       <aside
         aria-label={activeLabel}
-        className="flex w-[min(600px,45vw)] shrink-0 flex-col border-l border-border bg-background"
+        className={cn(
+          'flex shrink-0 flex-col border-l border-border bg-background',
+          PANEL_WIDTH_CLASSES[activeTool] ?? 'w-[min(600px,45vw)]',
+        )}
       >
         <div className="flex shrink-0 items-center gap-2 border-b border-border px-3 py-2">
-          <h2 className="min-w-0 flex-1 truncate text-sm font-semibold text-foreground">{activeLabel}</h2>
+          <div className="flex min-w-0 flex-1 items-baseline gap-2">
+            <h2 className="min-w-0 truncate text-sm font-semibold text-foreground">{activeLabel}</h2>
+            {activeTool === 'activity' ? <ActivityWindowLabel /> : null}
+          </div>
           {activeTool === 'walkthrough' ? (
             <>
               <ChangesWalkthroughSourcePicker />
@@ -215,7 +272,14 @@ export function ToolSidePanel({
       <TooltipProvider>
         <nav ref={railRef} aria-label="Tools" className="flex w-11 shrink-0 flex-col items-center gap-1 overflow-y-auto border-l border-border bg-background py-2">
           {panelTools.map(({ item, tool }) => (
-            <RailButton key={item.key} item={item} active={tool === activeTool} onClick={() => toggleTool(tool)} />
+            <RailButton
+              key={item.key}
+              item={item}
+              active={tool === activeTool}
+              onClick={() => toggleTool(tool)}
+              ariaLabel={tool === 'activity' ? activityAriaLabel : undefined}
+              indicator={tool === 'activity' ? activityIndicator : undefined}
+            />
           ))}
           {actionItems.length > 0 ? <div className="my-1 h-px w-6 shrink-0 bg-border" role="separator" /> : null}
           {actionItems.map((item) => (

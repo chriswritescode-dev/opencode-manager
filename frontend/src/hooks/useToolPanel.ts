@@ -4,7 +4,7 @@ import { useUrlParams } from './useUrlParams'
 
 const PANEL_PARAM = 'panel'
 
-const PANEL_TOOLS = ['sourceControl', 'files', 'terminal', 'walkthrough', 'preview', 'mcp', 'actions', 'skills', 'schedules'] as const
+const PANEL_TOOLS = ['sourceControl', 'files', 'terminal', 'walkthrough', 'preview', 'mcp', 'actions', 'skills', 'schedules', 'activity'] as const
 
 export type PanelTool = (typeof PANEL_TOOLS)[number]
 
@@ -14,7 +14,7 @@ const TOOL_OWNED_PARAMS: Partial<Record<PanelTool, readonly string[]>> = {
   schedules: ['scheduleTab', 'scheduleDialog', 'jobId', 'runId'],
 }
 
-const PANEL_ONLY_TOOLS: ReadonlySet<PanelTool> = new Set(['schedules'])
+const PANEL_ONLY_TOOLS: ReadonlySet<PanelTool> = new Set(['schedules', 'activity'])
 
 export function isPanelTool(value: string | null): value is PanelTool {
   return value !== null && (PANEL_TOOLS as readonly string[]).includes(value)

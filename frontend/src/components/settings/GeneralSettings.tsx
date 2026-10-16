@@ -7,6 +7,7 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@
 import { Switch } from '@/components/ui/switch'
 import { SessionAutomationSettings } from './SessionAutomationSettings'
 import { WalkthroughSettings } from './WalkthroughSettings'
+import { ActivitySettings } from './ActivitySettings'
 
 export function GeneralSettings() {
   const { preferences, isLoading, updateSettings, isUpdating } = useSettings()
@@ -199,6 +200,8 @@ export function GeneralSettings() {
       <SessionAutomationSettings />
 
       <WalkthroughSettings />
+
+      <ActivitySettings />
     </div>
   )
 }

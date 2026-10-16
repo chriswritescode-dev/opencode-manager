@@ -4,6 +4,7 @@ import { format, startOfDay } from 'date-fns'
 import { MoreHorizontal, Pin, PinOff, Search } from 'lucide-react'
 import { getOpenCodeLocation } from '@/api/opencode'
 import type { Repo, Session } from '@/api/types'
+import type { ActiveWorkItem } from '@/lib/activeWork'
 import { Button } from '@/components/ui/button'
 import { Dialog, DialogContent, DialogTitle } from '@/components/ui/dialog'
 import {
@@ -20,6 +21,7 @@ import { ProjectPickerContent } from '@/components/session/ProjectPickerContent'
 import { partitionSessions } from '@/components/session/session-partition'
 import { buildRepoByDirectory } from '@/components/navigation/sidebar-session-tree'
 import { useDeleteSession } from '@/hooks/useOpenCode'
+import { useActiveWork, useActivityWindowMs } from '@/hooks/useActiveWork'
 import { useSessionSearch } from '@/hooks/useSessionSearch'
 import { useSessionPins, useToggleSessionPin } from '@/hooks/useSessionPins'
 import { usePersistentBoolean } from '@/hooks/usePersistentBoolean'
@@ -36,8 +38,22 @@ const ALL_PROJECTS_STORAGE_KEY = 'oc:session-picker:all-projects'
 const UNTITLED_SESSION_TITLE = 'Untitled Session'
 const PAGE_STEP = 10
 const NEAR_BOTTOM_PX = 240
+const MS_PER_MINUTE = 60_000
 
-type SessionPickerTab = 'sessions' | 'projects'
+type SessionPickerTab = 'active' | 'sessions' | 'projects'
+
+const SESSION_PICKER_TABS: SessionPickerTab[] = ['active', 'sessions', 'projects']
+
+const SESSION_PICKER_TAB_LABELS: Record<SessionPickerTab, string> = {
+  active: 'Active',
+  sessions: 'Sessions',
+  projects: 'Projects',
+}
+
+function nextSessionPickerTab(tab: SessionPickerTab): SessionPickerTab {
+  const index = SESSION_PICKER_TABS.indexOf(tab)
+  return SESSION_PICKER_TABS[(index + 1) % SESSION_PICKER_TABS.length]
+}
 
 interface SessionPickerDialogProps {
   open: boolean
@@ -153,11 +169,7 @@ function SessionPickerGutter({ sessionID, isActive }: { sessionID: string; isAct
   const status = useSessionStatusForSession(sessionID)
   if (status.type !== 'idle') {
     return (
-      <SessionStatusIndicator
-        sessionID={sessionID}
-        size="sm"
-        className="[&>div]:gap-0 [&>div>div]:h-1.5 [&>div>div]:w-px"
-      />
+      <SessionStatusIndicator sessionID={sessionID} size="sm" />
     )
   }
   if (isActive) {
@@ -283,6 +295,311 @@ const SessionPickerRowItem = memo(function SessionPickerRowItem({
   )
 })
 
+interface SessionPickerCursorState {
+  rowIndexByKey: Map<string, number>
+  cursorIndex: number
+  cursorRow: SessionPickerRow | undefined
+  pendingDeleteKey: string | null
+  setPendingDeleteKey: React.Dispatch<React.SetStateAction<string | null>>
+  registerRef: (key: string, node: HTMLDivElement | null) => void
+  moveCursor: (index: number) => void
+  resetCursor: () => void
+}
+
+function useSessionPickerCursor(
+  rows: SessionPickerRow[],
+  defaultCursorKey: string | null,
+): SessionPickerCursorState {
+  const rowRefs = useRef(new Map<string, HTMLDivElement>())
+  const [cursorKey, setCursorKey] = useState<string | null>(null)
+  const [pendingDeleteKey, setPendingDeleteKey] = useState<string | null>(null)
+
+  const rowIndexByKey = useMemo(
+    () => new Map(rows.map((row, index) => [row.key, index])),
+    [rows],
+  )
+
+  const cursorIndex = useMemo(() => {
+    if (cursorKey) {
+      const index = rowIndexByKey.get(cursorKey)
+      if (index !== undefined) return index
+    }
+    return defaultCursorKey ? rowIndexByKey.get(defaultCursorKey) ?? -1 : -1
+  }, [cursorKey, rowIndexByKey, defaultCursorKey])
+
+  const cursorRow = cursorIndex >= 0 ? rows[cursorIndex] : undefined
+
+  const registerRef = useCallback((key: string, node: HTMLDivElement | null) => {
+    if (node) rowRefs.current.set(key, node)
+    else rowRefs.current.delete(key)
+  }, [])
+
+  useEffect(() => {
+    if (!cursorRow) return
+    const node = rowRefs.current.get(cursorRow.key)
+    if (node && typeof node.scrollIntoView === 'function') {
+      node.scrollIntoView({ block: 'nearest' })
+    }
+  }, [cursorRow])
+
+  const moveCursor = useCallback(
+    (index: number) => {
+      const row = rows[index]
+      if (!row) return
+      setCursorKey(row.key)
+      setPendingDeleteKey(null)
+    },
+    [rows],
+  )
+
+  const resetCursor = useCallback(() => {
+    setCursorKey(null)
+    setPendingDeleteKey(null)
+  }, [])
+
+  return {
+    rowIndexByKey,
+    cursorIndex,
+    cursorRow,
+    pendingDeleteKey,
+    setPendingDeleteKey,
+    registerRef,
+    moveCursor,
+    resetCursor,
+  }
+}
+
+interface SessionPickerKeyNavOptions {
+  rows: SessionPickerRow[]
+  cursorIndex: number
+  cursorRow: SessionPickerRow | undefined
+  moveCursor: (index: number) => void
+  onOpenRow: (row: SessionPickerRow) => void
+  onDeleteRow: (row: SessionPickerRow) => void
+  onToggleAllProjects?: () => void
+}
+
+function useSessionPickerKeyNav({
+  rows,
+  cursorIndex,
+  cursorRow,
+  moveCursor,
+  onOpenRow,
+  onDeleteRow,
+  onToggleAllProjects,
+}: SessionPickerKeyNavOptions): (event: React.KeyboardEvent<HTMLInputElement>) => void {
+  return useCallback(
+    (event: React.KeyboardEvent<HTMLInputElement>) => {
+      if (event.nativeEvent.isComposing) return
+      if (event.metaKey || event.altKey) return
+
+      const moveBy = (delta: number, wrap: boolean) => {
+        if (rows.length === 0) return
+        const base = cursorIndex < 0 ? (delta > 0 ? -1 : 0) : cursorIndex
+        const raw = base + delta
+        const next = wrap
+          ? ((raw % rows.length) + rows.length) % rows.length
+          : Math.max(0, Math.min(rows.length - 1, raw))
+        moveCursor(next)
+      }
+
+      const key = event.key
+      const ctrlKey = event.key.toLowerCase()
+
+      if (key === 'ArrowDown' || (event.ctrlKey && ctrlKey === 'n')) {
+        event.preventDefault()
+        moveBy(1, true)
+        return
+      }
+      if (key === 'ArrowUp' || (event.ctrlKey && ctrlKey === 'p')) {
+        event.preventDefault()
+        moveBy(-1, true)
+        return
+      }
+      if (key === 'PageDown') {
+        event.preventDefault()
+        moveBy(PAGE_STEP, false)
+        return
+      }
+      if (key === 'PageUp') {
+        event.preventDefault()
+        moveBy(-PAGE_STEP, false)
+        return
+      }
+      if (key === 'Enter') {
+        if (!cursorRow) return
+        event.preventDefault()
+        onOpenRow(cursorRow)
+        return
+      }
+      if (onToggleAllProjects && event.ctrlKey && ctrlKey === 'a') {
+        event.preventDefault()
+        onToggleAllProjects()
+        return
+      }
+      if (event.ctrlKey && ctrlKey === 'd') {
+        if (!cursorRow) return
+        event.preventDefault()
+        onDeleteRow(cursorRow)
+      }
+    },
+    [rows, cursorIndex, cursorRow, moveCursor, onOpenRow, onDeleteRow, onToggleAllProjects],
+  )
+}
+
+interface SessionPickerSearchBarProps {
+  inputRef: React.RefObject<HTMLInputElement | null>
+  listId: string
+  open: boolean
+  activeDescendantId: string | undefined
+  value: string
+  onChange: (value: string) => void
+  onKeyDown: (event: React.KeyboardEvent<HTMLInputElement>) => void
+  placeholder: string
+  name: string
+  trailing?: React.ReactNode
+}
+
+function SessionPickerSearchBar({
+  inputRef,
+  listId,
+  open,
+  activeDescendantId,
+  value,
+  onChange,
+  onKeyDown,
+  placeholder,
+  name,
+  trailing,
+}: SessionPickerSearchBarProps) {
+  return (
+    <div className="flex shrink-0 items-center gap-2 px-4 sm:px-0">
+      <div className="relative flex-1">
+        <Search className="absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
+        <Input
+          ref={inputRef}
+          role="combobox"
+          aria-expanded={open}
+          aria-controls={listId}
+          aria-autocomplete="list"
+          aria-activedescendant={activeDescendantId}
+          value={value}
+          onChange={(event) => onChange(event.target.value)}
+          onKeyDown={onKeyDown}
+          placeholder={placeholder}
+          className="h-9 pl-9"
+          autoComplete="off"
+          name={name}
+        />
+      </div>
+      {trailing}
+    </div>
+  )
+}
+
+interface SessionPickerListProps {
+  listId: string
+  optionBaseId: string
+  ariaLabel: string
+  sections: SessionPickerSection[]
+  rows: SessionPickerRow[]
+  rowIndexByKey: ReadonlyMap<string, number>
+  cursorIndex: number
+  activeSessionID?: string
+  pinnedKeys: ReadonlySet<string>
+  pendingDeleteKey: string | null
+  showRepo: boolean
+  labelFor?: (row: SessionPickerRow) => string | undefined
+  emptyState: React.ReactNode
+  onOpenRow: (row: SessionPickerRow) => void
+  onHoverRow: (index: number) => void
+  onTogglePin: (row: SessionPickerRow) => void
+  onRequestDelete: (session: Session) => void
+  registerRef: (key: string, node: HTMLDivElement | null) => void
+  listRef?: React.RefObject<HTMLDivElement | null>
+  onScroll?: (event: React.UIEvent<HTMLDivElement>) => void
+  children?: React.ReactNode
+}
+
+function SessionPickerList({
+  listId,
+  optionBaseId,
+  ariaLabel,
+  sections,
+  rows,
+  rowIndexByKey,
+  cursorIndex,
+  activeSessionID,
+  pinnedKeys,
+  pendingDeleteKey,
+  showRepo,
+  labelFor,
+  emptyState,
+  onOpenRow,
+  onHoverRow,
+  onTogglePin,
+  onRequestDelete,
+  registerRef,
+  listRef,
+  onScroll,
+  children,
+}: SessionPickerListProps) {
+  return (
+    <div
+      ref={listRef}
+      role="listbox"
+      id={listId}
+      aria-label={ariaLabel}
+      onScroll={onScroll}
+      className="mt-3 min-h-0 flex-1 overflow-y-auto rounded-md"
+    >
+      {rows.length === 0 ? (
+        <div className="p-4 text-sm text-muted-foreground">{emptyState}</div>
+      ) : (
+        <>
+          {sections.map((section) => (
+            <div
+              key={section.id}
+              role="group"
+              aria-labelledby={`${optionBaseId}-heading-${section.id}`}
+            >
+              <div
+                id={`${optionBaseId}-heading-${section.id}`}
+                className="pl-8 pr-2 pt-2 pb-1 text-xs font-semibold text-muted-foreground"
+              >
+                {section.heading}
+              </div>
+              {section.rows.map((row) => {
+                const index = rowIndexByKey.get(row.key) ?? -1
+                return (
+                  <SessionPickerRowItem
+                    key={row.key}
+                    row={row}
+                    index={index}
+                    optionId={optionId(optionBaseId, index)}
+                    isCursor={index === cursorIndex}
+                    isActive={row.session.id === activeSessionID}
+                    isPinned={pinnedKeys.has(row.key)}
+                    isPendingDelete={pendingDeleteKey === row.key}
+                    showRepo={showRepo}
+                    label={labelFor?.(row)}
+                    onOpen={onOpenRow}
+                    onHover={onHoverRow}
+                    onTogglePin={onTogglePin}
+                    onRequestDelete={onRequestDelete}
+                    registerRef={registerRef}
+                  />
+                )
+              })}
+            </div>
+          ))}
+          {children}
+        </>
+      )}
+    </div>
+  )
+}
+
 interface SessionPickerContentProps {
   open: boolean
   currentRepo: Repo | undefined
@@ -307,7 +624,6 @@ function SessionPickerContent({
   const [allProjects, toggleAllProjects] = usePersistentBoolean(ALL_PROJECTS_STORAGE_KEY, false)
   const { repos } = useNavigableRepos()
   const listRef = useRef<HTMLDivElement>(null)
-  const rowRefs = useRef(new Map<string, HTMLDivElement>())
   const listId = useId()
   const optionBaseId = useId()
 
@@ -369,8 +685,6 @@ function SessionPickerContent({
   const pinnedKeys = useMemo(() => buildPinnedSessionKeys(sessionPins ?? []), [sessionPins])
   const deleteSession = useDeleteSession(directories)
 
-  const [cursorKey, setCursorKey] = useState<string | null>(null)
-  const [pendingDeleteKey, setPendingDeleteKey] = useState<string | null>(null)
   const [sessionToDelete, setSessionToDelete] = useState<Session | null>(null)
 
   const sections = useMemo(
@@ -378,52 +692,27 @@ function SessionPickerContent({
     [filteredSessions, pinnedKeys, resolveRepo],
   )
   const rows = useMemo(() => sections.flatMap((section) => section.rows), [sections])
-  const rowIndexByKey = useMemo(
-    () => new Map(rows.map((row, index) => [row.key, index])),
-    [rows],
-  )
 
   const activeRow = useMemo(
     () => rows.find((row) => row.session.id === activeSessionID),
     [rows, activeSessionID],
   )
   const defaultCursorKey = !trimmedQuery && activeRow ? activeRow.key : rows[0]?.key ?? null
-  const cursorIndex = useMemo(() => {
-    if (cursorKey) {
-      const index = rowIndexByKey.get(cursorKey)
-      if (index !== undefined) return index
-    }
-    return defaultCursorKey ? rowIndexByKey.get(defaultCursorKey) ?? -1 : -1
-  }, [cursorKey, rowIndexByKey, defaultCursorKey])
-  const cursorRow = cursorIndex >= 0 ? rows[cursorIndex] : undefined
+
+  const {
+    rowIndexByKey,
+    cursorIndex,
+    cursorRow,
+    pendingDeleteKey,
+    setPendingDeleteKey,
+    registerRef,
+    moveCursor,
+    resetCursor,
+  } = useSessionPickerCursor(rows, defaultCursorKey)
 
   useEffect(() => {
-    setCursorKey(null)
-    setPendingDeleteKey(null)
-  }, [trimmedQuery, allProjects])
-
-  const setRowRef = useCallback((key: string, node: HTMLDivElement | null) => {
-    if (node) rowRefs.current.set(key, node)
-    else rowRefs.current.delete(key)
-  }, [])
-
-  useEffect(() => {
-    if (!cursorRow) return
-    const node = rowRefs.current.get(cursorRow.key)
-    if (node && typeof node.scrollIntoView === 'function') {
-      node.scrollIntoView({ block: 'nearest' })
-    }
-  }, [cursorRow])
-
-  const moveCursor = useCallback(
-    (index: number) => {
-      const row = rows[index]
-      if (!row) return
-      setCursorKey(row.key)
-      setPendingDeleteKey(null)
-    },
-    [rows],
-  )
+    resetCursor()
+  }, [trimmedQuery, allProjects, resetCursor])
 
   const openRow = useCallback(
     (row: SessionPickerRow | undefined) => {
@@ -454,64 +743,18 @@ function SessionPickerContent({
         setPendingDeleteKey(null)
       })
     },
-    [pendingDeleteKey, performDelete],
+    [pendingDeleteKey, performDelete, setPendingDeleteKey],
   )
 
-  const handleSearchKeyDown = useCallback(
-    (event: React.KeyboardEvent<HTMLInputElement>) => {
-      if (event.nativeEvent.isComposing) return
-      if (event.metaKey || event.altKey) return
-
-      const moveBy = (delta: number, wrap: boolean) => {
-        if (rows.length === 0) return
-        const base = cursorIndex < 0 ? (delta > 0 ? -1 : 0) : cursorIndex
-        const raw = base + delta
-        const next = wrap ? ((raw % rows.length) + rows.length) % rows.length : Math.max(0, Math.min(rows.length - 1, raw))
-        moveCursor(next)
-      }
-
-      const key = event.key
-      const ctrlKey = event.key.toLowerCase()
-
-      if (key === 'ArrowDown' || (event.ctrlKey && ctrlKey === 'n')) {
-        event.preventDefault()
-        moveBy(1, true)
-        return
-      }
-      if (key === 'ArrowUp' || (event.ctrlKey && ctrlKey === 'p')) {
-        event.preventDefault()
-        moveBy(-1, true)
-        return
-      }
-      if (key === 'PageDown') {
-        event.preventDefault()
-        moveBy(PAGE_STEP, false)
-        return
-      }
-      if (key === 'PageUp') {
-        event.preventDefault()
-        moveBy(-PAGE_STEP, false)
-        return
-      }
-      if (key === 'Enter') {
-        if (!cursorRow) return
-        event.preventDefault()
-        openRow(cursorRow)
-        return
-      }
-      if (event.ctrlKey && ctrlKey === 'a') {
-        event.preventDefault()
-        toggleAllProjects()
-        return
-      }
-      if (event.ctrlKey && ctrlKey === 'd') {
-        if (!cursorRow) return
-        event.preventDefault()
-        deleteRow(cursorRow)
-      }
-    },
-    [cursorIndex, rows, moveCursor, cursorRow, openRow, toggleAllProjects, deleteRow],
-  )
+  const handleSearchKeyDown = useSessionPickerKeyNav({
+    rows,
+    cursorIndex,
+    cursorRow,
+    moveCursor,
+    onOpenRow: openRow,
+    onDeleteRow: deleteRow,
+    onToggleAllProjects: toggleAllProjects,
+  })
 
   const handleListScroll = useCallback(
     (event: React.UIEvent<HTMLDivElement>) => {
@@ -556,126 +799,302 @@ function SessionPickerContent({
     })
   }, [sessionToDelete, performDelete])
 
+  const labelFor = useCallback(
+    (row: SessionPickerRow) =>
+      allProjects ? undefined : sessionWorktreeLabel(row.session, location?.project.canonical),
+    [allProjects, location?.project.canonical],
+  )
+
   return (
     <>
       <div className="mt-4 flex min-h-0 flex-1 flex-col">
-        <div className="flex shrink-0 items-center gap-2 px-4 sm:px-0">
-          <div className="relative flex-1">
-            <Search className="absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
-            <Input
-              ref={searchInputRef}
-              role="combobox"
-              aria-expanded={open}
-              aria-controls={listId}
-              aria-autocomplete="list"
-              aria-activedescendant={cursorIndex >= 0 ? optionId(optionBaseId, cursorIndex) : undefined}
-              value={query}
-              onChange={(event) => setQuery(event.target.value)}
-              onKeyDown={handleSearchKeyDown}
-              placeholder="Search sessions..."
-              className="h-9 pl-9"
-              autoComplete="off"
-              name="session-picker-search"
-            />
-          </div>
-          <Button
-            type="button"
-            variant="outline"
-            size="sm"
-            aria-pressed={allProjects}
-            onClick={toggleAllProjects}
-            className="h-9 shrink-0"
-          >
-            {allProjects ? 'All projects' : 'This project'}
-            {hasFinePointer && (
-              <kbd className="ml-1 rounded border border-border bg-muted px-1 text-[10px] text-muted-foreground">
-                Ctrl+A
-              </kbd>
-            )}
-          </Button>
-        </div>
+        <SessionPickerSearchBar
+          inputRef={searchInputRef}
+          listId={listId}
+          open={open}
+          activeDescendantId={cursorIndex >= 0 ? optionId(optionBaseId, cursorIndex) : undefined}
+          value={query}
+          onChange={setQuery}
+          onKeyDown={handleSearchKeyDown}
+          placeholder="Search sessions..."
+          name="session-picker-search"
+          trailing={
+            <Button
+              type="button"
+              variant="outline"
+              size="sm"
+              aria-pressed={allProjects}
+              onClick={toggleAllProjects}
+              className="h-9 shrink-0"
+            >
+              {allProjects ? 'All projects' : 'This project'}
+              {hasFinePointer && (
+                <kbd className="ml-1 rounded border border-border bg-muted px-1 text-[10px] text-muted-foreground">
+                  Ctrl+A
+                </kbd>
+              )}
+            </Button>
+          }
+        />
 
-        <div
-          ref={listRef}
-          role="listbox"
-          id={listId}
-          aria-label="Sessions"
+        <SessionPickerList
+          listRef={listRef}
+          listId={listId}
+          optionBaseId={optionBaseId}
+          ariaLabel="Sessions"
+          sections={sections}
+          rows={rows}
+          rowIndexByKey={rowIndexByKey}
+          cursorIndex={cursorIndex}
+          activeSessionID={activeSessionID}
+          pinnedKeys={pinnedKeys}
+          pendingDeleteKey={pendingDeleteKey}
+          showRepo={allProjects}
+          labelFor={labelFor}
+          emptyState={
+            isPickerLoading
+              ? 'Loading sessions...'
+              : isSearchPending
+                ? 'Searching sessions...'
+                : trimmedQuery
+                  ? 'No sessions found'
+                  : 'No sessions yet'
+          }
+          onOpenRow={openRow}
+          onHoverRow={moveCursor}
+          onTogglePin={handleTogglePin}
+          onRequestDelete={handleRequestDelete}
+          registerRef={registerRef}
           onScroll={handleListScroll}
-          className="mt-3 min-h-0 flex-1 overflow-y-auto rounded-md"
         >
-          {rows.length === 0 ? (
-            <div className="p-4 text-sm text-muted-foreground">
-              {isPickerLoading
-                ? 'Loading sessions...'
-                : isSearchPending
-                  ? 'Searching sessions...'
-                  : trimmedQuery
-                    ? 'No sessions found'
-                    : 'No sessions yet'}
+          {isFetchNextPageError && (
+            <div className="flex flex-col items-center gap-2 py-4">
+              <p className="text-sm text-muted-foreground">Failed to load more sessions</p>
+              <Button
+                variant="outline"
+                size="sm"
+                onClick={() => {
+                  void fetchNextPage()
+                }}
+                disabled={isFetchingNextPage}
+              >
+                Retry
+              </Button>
             </div>
-          ) : (
-            <>
-              {sections.map((section) => (
-                <div
-                  key={section.id}
-                  role="group"
-                  aria-labelledby={`${optionBaseId}-heading-${section.id}`}
-                >
-                  <div
-                    id={`${optionBaseId}-heading-${section.id}`}
-                    className="pl-8 pr-2 pt-2 pb-1 text-xs font-semibold text-muted-foreground"
-                  >
-                    {section.heading}
-                  </div>
-                  {section.rows.map((row) => {
-                    const index = rowIndexByKey.get(row.key) ?? -1
-                    return (
-                      <SessionPickerRowItem
-                        key={row.key}
-                        row={row}
-                        index={index}
-                        optionId={optionId(optionBaseId, index)}
-                        isCursor={index === cursorIndex}
-                        isActive={row.session.id === activeSessionID}
-                        isPinned={pinnedKeys.has(row.key)}
-                        isPendingDelete={pendingDeleteKey === row.key}
-                        showRepo={allProjects}
-                        label={allProjects ? undefined : sessionWorktreeLabel(row.session, location?.project.canonical)}
-                        onOpen={openRow}
-                        onHover={moveCursor}
-                        onTogglePin={handleTogglePin}
-                        onRequestDelete={handleRequestDelete}
-                        registerRef={setRowRef}
-                      />
-                    )
-                  })}
-                </div>
-              ))}
-              {isFetchNextPageError && (
-                <div className="flex flex-col items-center gap-2 py-4">
-                  <p className="text-sm text-muted-foreground">Failed to load more sessions</p>
-                  <Button
-                    variant="outline"
-                    size="sm"
-                    onClick={() => {
-                      void fetchNextPage()
-                    }}
-                    disabled={isFetchingNextPage}
-                  >
-                    Retry
-                  </Button>
-                </div>
-              )}
-              {isFetchingNextPage && rows.length > 0 && (
-                <div className="py-4 text-center text-sm text-muted-foreground">Loading more sessions...</div>
-              )}
-            </>
           )}
-        </div>
+          {isFetchingNextPage && rows.length > 0 && (
+            <div className="py-4 text-center text-sm text-muted-foreground">Loading more sessions...</div>
+          )}
+        </SessionPickerList>
 
         <div className="mt-2 shrink-0 px-4 text-xs text-muted-foreground pointer-coarse:hidden sm:px-0">
           ↑↓ move · Enter open · Ctrl+D delete · Ctrl+A {allProjects ? 'this project' : 'all projects'}
           {switchHint ? ` · ${switchHint} projects` : ''}
+        </div>
+      </div>
+
+      <DeleteSessionDialog
+        open={sessionToDelete !== null}
+        onOpenChange={(nextOpen) => {
+          if (!nextOpen) setSessionToDelete(null)
+        }}
+        onConfirm={() => {
+          void confirmDelete()
+        }}
+        onCancel={() => setSessionToDelete(null)}
+        isDeleting={deleteSession.isPending}
+      />
+    </>
+  )
+}
+
+interface ActivePickerContentProps {
+  open: boolean
+  activeSessionID?: string
+  onSelectSession: (session: Session, repo: Repo) => void
+  onDeleteActiveSession: () => void
+  switchHint: string
+  searchInputRef: React.RefObject<HTMLInputElement | null>
+}
+
+function ActivePickerContent({
+  open,
+  activeSessionID,
+  onSelectSession,
+  onDeleteActiveSession,
+  switchHint,
+  searchInputRef,
+}: ActivePickerContentProps) {
+  const windowMs = useActivityWindowMs()
+  const windowMinutes = Math.round(windowMs / MS_PER_MINUTE)
+  const { groups, isLoading, isError } = useActiveWork(windowMs)
+
+  const listId = useId()
+  const optionBaseId = useId()
+
+  const [query, setQuery] = useState('')
+  const trimmedQuery = query.trim()
+
+  const sections = useMemo(() => {
+    const definitions: Array<{ id: string; heading: string; items: ActiveWorkItem[] }> = [
+      { id: 'needs-input', heading: 'Needs input', items: groups.needsInput },
+      { id: 'running', heading: 'Running', items: groups.running },
+      { id: 'recent', heading: 'Recent', items: groups.recent },
+    ]
+    const needle = trimmedQuery.toLowerCase()
+    return definitions.flatMap((definition) => {
+      const rows: SessionPickerRow[] = []
+      for (const item of definition.items) {
+        if (needle && !(item.session.title ?? '').toLowerCase().includes(needle)) continue
+        rows.push({ key: item.key, session: item.session, repo: item.repo })
+      }
+      return rows.length > 0 ? [{ id: definition.id, heading: definition.heading, rows }] : []
+    })
+  }, [groups, trimmedQuery])
+
+  const rows = useMemo(() => sections.flatMap((section) => section.rows), [sections])
+  const activeRow = useMemo(
+    () => rows.find((row) => row.session.id === activeSessionID),
+    [rows, activeSessionID],
+  )
+  const defaultCursorKey = !trimmedQuery && activeRow ? activeRow.key : rows[0]?.key ?? null
+
+  const {
+    rowIndexByKey,
+    cursorIndex,
+    cursorRow,
+    pendingDeleteKey,
+    setPendingDeleteKey,
+    registerRef,
+    moveCursor,
+    resetCursor,
+  } = useSessionPickerCursor(rows, defaultCursorKey)
+
+  useEffect(() => {
+    resetCursor()
+  }, [trimmedQuery, resetCursor])
+
+  const { data: sessionPins } = useSessionPins()
+  const togglePin = useToggleSessionPin()
+  const pinnedKeys = useMemo(() => buildPinnedSessionKeys(sessionPins ?? []), [sessionPins])
+
+  const directories = useMemo(
+    () => Array.from(new Set(rows.map((row) => row.session.location.directory))),
+    [rows],
+  )
+  const deleteSession = useDeleteSession(directories)
+
+  const [sessionToDelete, setSessionToDelete] = useState<Session | null>(null)
+
+  const openRow = useCallback(
+    (row: SessionPickerRow | undefined) => {
+      if (!row) return
+      onSelectSession(row.session, row.repo)
+    },
+    [onSelectSession],
+  )
+
+  const performDelete = useCallback(
+    (session: Session) => {
+      if (session.id === activeSessionID) onDeleteActiveSession()
+      return deleteSession
+        .mutateAsync({ id: session.id, directory: session.location.directory })
+        .catch(() => undefined)
+    },
+    [deleteSession, activeSessionID, onDeleteActiveSession],
+  )
+
+  const deleteRow = useCallback(
+    (row: SessionPickerRow | undefined) => {
+      if (!row) return
+      if (pendingDeleteKey !== row.key) {
+        setPendingDeleteKey(row.key)
+        return
+      }
+      void performDelete(row.session).finally(() => {
+        setPendingDeleteKey(null)
+      })
+    },
+    [pendingDeleteKey, performDelete, setPendingDeleteKey],
+  )
+
+  const handleSearchKeyDown = useSessionPickerKeyNav({
+    rows,
+    cursorIndex,
+    cursorRow,
+    moveCursor,
+    onOpenRow: openRow,
+    onDeleteRow: deleteRow,
+  })
+
+  const handleTogglePin = useCallback(
+    (row: SessionPickerRow) => {
+      togglePin.mutate({
+        sessionId: row.session.id,
+        directory: row.session.location.directory,
+        pinned: !pinnedKeys.has(row.key),
+      })
+    },
+    [togglePin, pinnedKeys],
+  )
+
+  const handleRequestDelete = useCallback((session: Session) => {
+    setSessionToDelete(session)
+  }, [])
+
+  const confirmDelete = useCallback(() => {
+    if (!sessionToDelete) return
+    void performDelete(sessionToDelete).finally(() => {
+      setSessionToDelete(null)
+    })
+  }, [sessionToDelete, performDelete])
+
+  const emptyState = isLoading
+    ? 'Loading sessions...'
+    : isError
+      ? 'Failed to load active sessions'
+      : trimmedQuery
+        ? 'No sessions found'
+        : `No active or recent sessions in the last ${windowMinutes} minutes`
+
+  return (
+    <>
+      <div className="mt-4 flex min-h-0 flex-1 flex-col">
+        <SessionPickerSearchBar
+          inputRef={searchInputRef}
+          listId={listId}
+          open={open}
+          activeDescendantId={cursorIndex >= 0 ? optionId(optionBaseId, cursorIndex) : undefined}
+          value={query}
+          onChange={setQuery}
+          onKeyDown={handleSearchKeyDown}
+          placeholder="Search sessions..."
+          name="active-picker-search"
+        />
+
+        <SessionPickerList
+          listId={listId}
+          optionBaseId={optionBaseId}
+          ariaLabel="Active sessions"
+          sections={sections}
+          rows={rows}
+          rowIndexByKey={rowIndexByKey}
+          cursorIndex={cursorIndex}
+          activeSessionID={activeSessionID}
+          pinnedKeys={pinnedKeys}
+          pendingDeleteKey={pendingDeleteKey}
+          showRepo
+          emptyState={emptyState}
+          onOpenRow={openRow}
+          onHoverRow={moveCursor}
+          onTogglePin={handleTogglePin}
+          onRequestDelete={handleRequestDelete}
+          registerRef={registerRef}
+        />
+
+        <div className="mt-2 shrink-0 px-4 text-xs text-muted-foreground pointer-coarse:hidden sm:px-0">
+          ↑↓ move · Enter open · Ctrl+D delete
+          {switchHint ? ` · ${switchHint} sessions` : ''}
         </div>
       </div>
 
@@ -704,6 +1123,7 @@ export function SessionPickerDialog({
   onSelectRepo,
 }: SessionPickerDialogProps) {
   const searchInputRef = useRef<HTMLInputElement>(null)
+  const activeSearchInputRef = useRef<HTMLInputElement>(null)
   const projectSearchInputRef = useRef<HTMLInputElement>(null)
   const focusSearchAfterSwitchRef = useRef(false)
   const hasFinePointer = useMediaQuery(FINE_POINTER_MEDIA_QUERY)
@@ -729,7 +1149,7 @@ export function SessionPickerDialog({
 
   const toggleTab = useCallback(() => {
     focusSearchAfterSwitchRef.current = true
-    setTab((current) => (current === 'sessions' ? 'projects' : 'sessions'))
+    setTab((current) => nextSessionPickerTab(current))
   }, [])
 
   useShortcutActions({ switchPickerTab: open ? toggleTab : undefined })
@@ -743,6 +1163,7 @@ export function SessionPickerDialog({
     const frame = requestAnimationFrame(() => {
       focusSearchAfterSwitchRef.current = false
       if (tab === 'projects') projectSearchInputRef.current?.focus()
+      else if (tab === 'active') activeSearchInputRef.current?.focus()
       else searchInputRef.current?.focus()
     })
     return () => cancelAnimationFrame(frame)
@@ -769,12 +1190,26 @@ export function SessionPickerDialog({
           className="flex min-h-0 w-full min-w-0 flex-1 flex-col gap-0"
         >
           <div className="shrink-0 px-4 pt-4 sm:px-0 sm:pt-6">
-            <DialogTitle className="sr-only">{tab === 'sessions' ? 'Sessions' : 'Projects'}</DialogTitle>
+            <DialogTitle className="sr-only">{SESSION_PICKER_TAB_LABELS[tab]}</DialogTitle>
             <TabsList>
+              <TabsTrigger value="active">Active</TabsTrigger>
               <TabsTrigger value="sessions">Sessions</TabsTrigger>
               <TabsTrigger value="projects">Projects</TabsTrigger>
             </TabsList>
           </div>
+          <TabsContent
+            value="active"
+            className="mt-0 flex min-h-0 w-full min-w-0 flex-1 flex-col px-0"
+          >
+            <ActivePickerContent
+              open={open}
+              activeSessionID={activeSessionID}
+              onSelectSession={onSelectSession}
+              onDeleteActiveSession={onDeleteActiveSession}
+              switchHint={switchHint}
+              searchInputRef={activeSearchInputRef}
+            />
+          </TabsContent>
           <TabsContent
             value="sessions"
             className="mt-0 flex min-h-0 w-full min-w-0 flex-1 flex-col px-0"

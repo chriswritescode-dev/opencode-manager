@@ -13,12 +13,22 @@ vi.mock('react-router-dom', async () => {
   }
 })
 
+const activityMocks = vi.hoisted(() => ({
+  useRepoActivityState: vi.fn(),
+}))
+
+vi.mock('@/hooks/useActiveWork', () => ({
+  useRepoActivityState: activityMocks.useRepoActivityState,
+}))
+
 const defaultProps = {
   repo: {
     id: 1,
     repoUrl: 'https://github.com/test/test-repo',
     localPath: 'repos/test-repo',
     fullPath: '/Users/test/repos/test-repo',
+    defaultBranch: 'main',
+    clonedAt: 0,
     branch: 'main',
     currentBranch: 'main',
     cloneStatus: 'ready' as const,
@@ -45,6 +55,7 @@ const renderWithRouter = (ui: React.ReactElement) => {
 describe('RepoCard', () => {
   beforeEach(() => {
     vi.clearAllMocks()
+    activityMocks.useRepoActivityState.mockReturnValue(null)
   })
 
   it('should not navigate when cloneStatus is not ready', () => {
@@ -155,5 +166,30 @@ describe('RepoCard', () => {
     renderWithRouter(<RepoCard {...props} />)
 
     expect(screen.getByText('Cloning...')).toBeInTheDocument()
+  })
+
+  it('should show the running indicator when a session in the repo is running', () => {
+    activityMocks.useRepoActivityState.mockReturnValue('running')
+
+    renderWithRouter(<RepoCard {...defaultProps} />)
+
+    expect(screen.getByLabelText('Sessions running')).toBeInTheDocument()
+  })
+
+  it('should show the needs-input indicator when a session in the repo needs input', () => {
+    activityMocks.useRepoActivityState.mockReturnValue('needs-input')
+
+    renderWithRouter(<RepoCard {...defaultProps} />)
+
+    expect(screen.getByLabelText('Session needs input')).toBeInTheDocument()
+  })
+
+  it('should not show an activity indicator when the repo is idle', () => {
+    activityMocks.useRepoActivityState.mockReturnValue(null)
+
+    renderWithRouter(<RepoCard {...defaultProps} />)
+
+    expect(screen.queryByLabelText('Sessions running')).not.toBeInTheDocument()
+    expect(screen.queryByLabelText('Session needs input')).not.toBeInTheDocument()
   })
 })

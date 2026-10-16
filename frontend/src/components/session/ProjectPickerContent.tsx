@@ -217,7 +217,7 @@ export function ProjectPickerContent({
 
       <div className="mt-2 shrink-0 px-4 text-xs text-muted-foreground pointer-coarse:hidden sm:px-0">
         ↑↓ move · Enter open
-        {switchHint ? ` · ${switchHint} sessions` : ''}
+        {switchHint ? ` · ${switchHint} active` : ''}
       </div>
     </div>
   )

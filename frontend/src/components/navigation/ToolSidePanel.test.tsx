@@ -1,11 +1,25 @@
-import { describe, expect, it, vi, afterEach } from 'vitest'
-import { render, screen, waitFor } from '@testing-library/react'
+import { describe, expect, it, vi, afterEach, beforeEach } from 'vitest'
+import { render, screen, waitFor, within } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import type { ReactNode } from 'react'
 import { MemoryRouter, useLocation } from 'react-router-dom'
+import type { Repo, Session } from '@/api/types'
+import type { ActiveWorkItem } from '@/lib/activeWork'
 import { stubMatchMedia } from '@/test/test-utils'
 import { ToolSidePanel } from './ToolSidePanel'
 import { useToolPanel } from '@/hooks/useToolPanel'
+
+const activityMocks = vi.hoisted(() => ({
+  useActiveWork: vi.fn(),
+  useActiveWorkCounts: vi.fn(),
+  useActivityWindowMs: vi.fn(),
+}))
+
+vi.mock('@/hooks/useActiveWork', () => ({
+  useActiveWork: activityMocks.useActiveWork,
+  useActiveWorkCounts: activityMocks.useActiveWorkCounts,
+  useActivityWindowMs: activityMocks.useActivityWindowMs,
+}))
 
 vi.mock('@/components/file-browser/FileBrowser', () => ({
   FileBrowser: ({ initialSelectedFile }: { initialSelectedFile?: string }) => <div>files-tool {initialSelectedFile}</div>,
@@ -77,6 +91,54 @@ function search(): URLSearchParams {
   return new URLSearchParams(screen.getByTestId('search').textContent ?? '')
 }
 
+const WINDOW_MS = 30 * 60_000
+const NOW = Date.now()
+
+function createSession(id: string, title: string, updated = NOW - 60_000): Session {
+  return {
+    id,
+    projectID: 'proj-1',
+    title,
+    time: { created: updated - 10000, updated },
+    location: { directory: `/repos/${id}` },
+    cost: 0,
+    tokens: { input: 0, output: 0, reasoning: 0, cache: { read: 0, write: 0 } },
+  }
+}
+
+function createRepo(id: number, name: string): Repo {
+  return {
+    id,
+    name,
+    fullPath: `/repos/${id}`,
+    localPath: `/repos/${id}`,
+    defaultBranch: 'main',
+    currentBranch: 'feature/x',
+    cloneStatus: 'ready',
+    clonedAt: 0,
+  }
+}
+
+function createActivityItem(id: string, title: string, repoId: number, repoName: string): ActiveWorkItem {
+  const session = createSession(id, title)
+  const repo = createRepo(repoId, repoName)
+  return {
+    key: `${repoId}:${id}`,
+    session,
+    repo,
+    state: 'recent',
+    path: `/repos/${repoId}/sessions/${id}`,
+  }
+}
+
+function setActivityGroups(items: ActiveWorkItem[] = []) {
+  activityMocks.useActiveWork.mockReturnValue({
+    groups: { needsInput: [], running: [], recent: items },
+    isLoading: false,
+    isError: false,
+  })
+}
+
 function HomeHarness() {
   const panel = useToolPanel(true)
   return (
@@ -86,6 +148,13 @@ function HomeHarness() {
     </>
   )
 }
+
+beforeEach(() => {
+  vi.clearAllMocks()
+  activityMocks.useActiveWorkCounts.mockReturnValue({ needsInput: 0, running: 0 })
+  activityMocks.useActivityWindowMs.mockReturnValue(WINDOW_MS)
+  setActivityGroups()
+})
 
 afterEach(() => {
   Reflect.deleteProperty(window, 'matchMedia')
@@ -251,5 +320,47 @@ describe('ToolSidePanel', () => {
 
     await waitFor(() => expect(search().has('panel')).toBe(false))
     expect(screen.getByLabelText('prompt')).toHaveFocus()
+  })
+
+  it('lists the Activity tool first in the rail', () => {
+    renderAt('')
+
+    const rail = screen.getByRole('navigation', { name: 'Tools' })
+    const buttons = within(rail).getAllByRole('button')
+    expect(buttons[0]).toHaveAccessibleName('Activity')
+  })
+
+  it('opens the Activity panel with rows and the window label when clicked', async () => {
+    const user = userEvent.setup()
+    setActivityGroups([createActivityItem('other', 'Other Session', 2, 'Beta')])
+    renderAt('')
+
+    await user.click(screen.getByRole('button', { name: 'Activity' }))
+
+    expect(await screen.findByText('Other Session')).toBeInTheDocument()
+    expect(search().get('panel')).toBe('activity')
+    expect(screen.getByRole('complementary', { name: 'Activity' })).toHaveClass('w-80')
+    expect(screen.getByText('Last 30 minutes')).toBeInTheDocument()
+  })
+
+  it('keeps the Activity panel open when a row navigates to a session', async () => {
+    const user = userEvent.setup()
+    setActivityGroups([createActivityItem('other', 'Other Session', 2, 'Beta')])
+    renderAt('')
+
+    await user.click(screen.getByRole('button', { name: 'Activity' }))
+    await user.click(await screen.findByRole('button', { name: /Other Session/ }))
+
+    await waitFor(() => expect(screen.getByTestId('pathname').textContent).toBe('/repos/2/sessions/other'))
+    expect(search().get('panel')).toBe('activity')
+  })
+
+  it('shows an Activity count pill and extends the accessible name', () => {
+    activityMocks.useActiveWorkCounts.mockReturnValue({ needsInput: 1, running: 2 })
+    renderAt('')
+
+    const button = screen.getByRole('button', { name: 'Activity, 1 needs input, 2 running' })
+    const pill = within(button).getByText('3')
+    expect(pill.className).toContain('bg-warning')
   })
 })

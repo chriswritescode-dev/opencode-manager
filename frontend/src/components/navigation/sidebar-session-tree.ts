@@ -50,6 +50,22 @@ export function buildRepoByDirectory(repos: Repo[]): Map<string, Repo> {
   return new Map(repos.map((repo) => [repo.fullPath, repo]))
 }
 
+function normalizeDirectory(directory?: string | null): string | null {
+  return directory?.replace(/\/+$/, '') ?? null
+}
+
+export function repoMatchesDirectory(repo: Repo, directory?: string | null): boolean {
+  const normalizedDirectory = normalizeDirectory(directory)
+  if (!normalizedDirectory) return false
+
+  return [repo.fullPath, repo.localPath, repo.sourcePath]
+    .some((path) => normalizeDirectory(path) === normalizedDirectory)
+}
+
+export function findRepoForDirectory(repos: Repo[], directory?: string | null): Repo | undefined {
+  return repos.find((repo) => repoMatchesDirectory(repo, directory))
+}
+
 export function buildSidebarRepoGroups(input: {
   repos: Repo[]
   sessions: Session[]

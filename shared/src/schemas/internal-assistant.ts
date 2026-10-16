@@ -91,6 +91,7 @@ export const AssistantSettingsPatchSchema = UserPreferencesSchema.pick({
   mode: true,
   defaultModel: true,
   walkthroughModel: true,
+  activityWindowMinutes: true,
   defaultAgent: true,
   autoScroll: true,
   expandDiffs: true,

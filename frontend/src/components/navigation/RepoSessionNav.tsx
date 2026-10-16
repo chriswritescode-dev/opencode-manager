@@ -2,6 +2,7 @@ import { useEffect, useMemo, useState, type CSSProperties, type ReactNode } from
 import { useLocation } from 'react-router-dom'
 import { Bell, ChevronDown, ChevronRight, HelpCircle, Loader2, Pin, Plus, X } from 'lucide-react'
 import { SessionStatusIndicator } from '@/components/ui/session-status-indicator'
+import { RepoActivityIndicator } from '@/components/activity/RepoActivityIndicator'
 import { useForms, usePermissions } from '@/contexts/EventContext'
 import { useCreateSession } from '@/hooks/useOpenCode'
 import { useSidebarRepoGroups } from '@/hooks/useSidebarRepoGroups'
@@ -23,6 +24,7 @@ function OpenRepoRail() {
 }
 
 interface RepoNavGroupProps {
+  repo: Repo
   name: string
   branch?: string | null
   isWorktree?: boolean
@@ -35,6 +37,7 @@ interface RepoNavGroupProps {
 }
 
 export function RepoNavGroup({
+  repo,
   name,
   branch,
   isWorktree,
@@ -76,8 +79,11 @@ export function RepoNavGroup({
             onToggle ? 'pl-0' : 'pl-4',
           )}
         >
-          <span className="truncate text-[15px] font-bold tracking-tight text-highlight">
-            {name}
+          <span className="flex min-w-0 items-center gap-1.5">
+            <span className="truncate text-[15px] font-bold tracking-tight text-highlight">
+              {name}
+            </span>
+            <RepoActivityIndicator repo={repo} />
           </span>
           {branch && (
             <span
@@ -237,6 +243,7 @@ export function RepoSessionNavList({
         return (
           <RepoNavGroup
             key={repo.id}
+            repo={repo}
             name={getRepoDisplayName(repo)}
             branch={getRepoBranchLabel(repo)}
             isWorktree={repo.isWorktree}

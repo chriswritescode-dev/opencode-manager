@@ -1,4 +1,5 @@
 import { memo, useEffect, useState } from 'react'
+import { ActivitySpinner } from '@/components/ui/activity-spinner'
 import { useHasBackgroundActivity, useSessionStatusForSession, type SessionStatusType } from '@/stores/sessionStatusStore'
 
 interface SessionStatusIndicatorProps {
@@ -11,6 +12,10 @@ interface SessionStatusIndicatorProps {
 const SCANNER_WIDTH = 6
 const SCANNER_SEGMENTS = 12
 
+/**
+ * Shows a session's activity. `sm` renders the braille spinner sized for list rows;
+ * `md` renders the animated scanner used by the session composer.
+ */
 export const SessionStatusIndicator = memo(function SessionStatusIndicator({ 
   sessionID, 
   className = '',
@@ -25,6 +30,9 @@ export const SessionStatusIndicator = memo(function SessionStatusIndicator({
   const backgroundOnly = status.type === 'idle' && hasBackground
   
   useEffect(() => {
+    if (size !== 'md') {
+      return
+    }
     if (status.type === 'idle' && !hasBackground) {
       return
     }
@@ -45,7 +53,7 @@ export const SessionStatusIndicator = memo(function SessionStatusIndicator({
     }, 60)
     
     return () => clearInterval(interval)
-  }, [status.type, hasBackground, direction])
+  }, [size, status.type, hasBackground, direction])
   
   useEffect(() => {
     if (!showLabel || status.type !== 'retry') {
@@ -66,6 +74,34 @@ export const SessionStatusIndicator = memo(function SessionStatusIndicator({
   
   if (status.type === 'idle' && !hasBackground) {
     return null
+  }
+  
+  if (size === 'sm') {
+    const colorClass = backgroundOnly
+      ? 'text-muted-foreground'
+      : status.type === 'retry'
+        ? 'text-warning'
+        : status.type === 'compact'
+          ? 'text-primary'
+          : 'text-info'
+    const label = backgroundOnly
+      ? 'Background tasks running'
+      : status.type === 'retry'
+        ? 'Retrying'
+        : status.type === 'compact'
+          ? 'Compacting'
+          : 'Running'
+
+    return (
+      <span
+        role="img"
+        aria-label={label}
+        title={backgroundOnly ? label : undefined}
+        className={`inline-flex items-center ${colorClass} ${className}`}
+      >
+        <ActivitySpinner />
+      </span>
+    )
   }
   
   const getSegmentColor = (index: number, statusType: SessionStatusType['type'], background: boolean) => {
@@ -105,7 +141,7 @@ export const SessionStatusIndicator = memo(function SessionStatusIndicator({
     return 'bg-info/20'
   }
   
-  const segmentClass = size === 'sm' ? 'w-0.5 h-2' : 'w-1 h-4'
+  const segmentClass = 'w-1 h-4'
   const containerGap = showLabel ? 'gap-2' : ''
   
   return (

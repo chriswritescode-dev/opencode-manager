@@ -8,6 +8,7 @@ import { useQuery } from '@tanstack/react-query'
 import { getRepo } from '@/api/repos'
 import { useRefreshOnOpen } from '@/hooks/useRefreshOnOpen'
 import { SideDrawer, SideDrawerContent } from '@/components/ui/side-drawer'
+import { CompactActivityList } from '@/components/activity/CompactActivityList'
 import { buildMoreItems, buildNavModel, isSessionDetailPath, type MoreDrawerItem } from './moreDrawerItems'
 import { useSwipeBack } from '@/hooks/useMobile'
 import { cn, getRepoDisplayName } from '@/lib/utils'
@@ -183,6 +184,14 @@ export function MoreDrawer({ isOpen, onClose }: MoreDrawerProps) {
           )}
         </div>
         <SideDrawerContent className="flex flex-col gap-4 pb-3">
+          {isOpen && (
+            <CompactActivityList
+              onNavigate={(path) => {
+                navigate(path)
+                onClose()
+              }}
+            />
+          )}
           <MenuSection>
             {isSessionDetail && (
               <MenuRow icon={FolderGit2} label="Repos" onClick={() => openMobileSheet('repos')} trailing />

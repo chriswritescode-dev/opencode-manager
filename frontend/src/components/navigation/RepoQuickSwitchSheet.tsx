@@ -4,6 +4,7 @@ import { useRefreshOnOpen } from '@/hooks/useRefreshOnOpen'
 import { Input } from '@/components/ui/input'
 import { BottomSheet, BottomSheetHeader, BottomSheetContent } from '@/components/ui/bottom-sheet'
 import { Button } from '@/components/ui/button'
+import { CompactActivityList } from '@/components/activity/CompactActivityList'
 import { getRepoDisplayName } from '@/lib/utils'
 import { AddRepoDialog } from '@/components/repo/AddRepoDialog'
 import { FolderGit2, Plus } from 'lucide-react'
@@ -95,6 +96,9 @@ export function RepoQuickSwitchSheet({ isOpen, onClose }: RepoQuickSwitchSheetPr
           </div>
         </BottomSheetHeader>
       <BottomSheetContent className="flex flex-col px-0 pt-0 gap-0">
+        {isOpen && !searchQuery.trim() && (
+          <CompactActivityList onNavigate={(path) => navigateAndClose(path)} />
+        )}
         {isLoading ? (
           <div className="flex flex-col gap-2 px-4 pt-3">
             {Array.from({ length: 5 }).map((_, i) => (

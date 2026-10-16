@@ -6,6 +6,7 @@ import { RepoQuickSwitchSheet } from './RepoQuickSwitchSheet'
 import { listRepos } from '@/api/repos'
 import { useMobileTabBar } from '@/hooks/useMobileTabBar'
 import { ASSISTANT_REPO_ID } from '@opencode-manager/shared/utils'
+import type { ActiveWorkItem } from '@/lib/activeWork'
 
 type SessionFixture = {
   id: string
@@ -30,6 +31,17 @@ const { sessionsData, sessionsHookCalls, permissionSessions, createSessionDirect
   sessionsHookCalls: [] as string[][],
   permissionSessions: { current: new Set<string>() },
   createSessionDirectories: [] as string[],
+}))
+
+const activityMocks = vi.hoisted(() => ({
+  useActiveWork: vi.fn(),
+  useActivityWindowMs: vi.fn(),
+}))
+
+vi.mock('@/hooks/useActiveWork', () => ({
+  useActiveWork: activityMocks.useActiveWork,
+  useActivityWindowMs: activityMocks.useActivityWindowMs,
+  useRepoActivityState: () => null,
 }))
 
 vi.mock('@/api/repos')
@@ -92,6 +104,32 @@ function createRepo(id: number, name: string, fullPath: string) {
   }
 }
 
+function createActiveWorkItem(): ActiveWorkItem {
+  return {
+    key: '1:s1',
+    state: 'recent',
+    path: '/repos/1/sessions/s1',
+    session: createSession('s1', Date.now(), '/path/to/repo1'),
+    repo: createRepo(1, 'repo1', '/path/to/repo1'),
+  }
+}
+
+function setActivityGroups(groups: {
+  needsInput?: ActiveWorkItem[]
+  running?: ActiveWorkItem[]
+  recent?: ActiveWorkItem[]
+}) {
+  activityMocks.useActiveWork.mockReturnValue({
+    groups: {
+      needsInput: groups.needsInput ?? [],
+      running: groups.running ?? [],
+      recent: groups.recent ?? [],
+    },
+    isLoading: false,
+    isError: false,
+  })
+}
+
 function createWrapper() {
   const queryClient = new QueryClient({
     defaultOptions: {
@@ -130,6 +168,8 @@ describe('RepoQuickSwitchSheet', () => {
     sessionsData.splice(0, sessionsData.length)
     sessionsHookCalls.splice(0, sessionsHookCalls.length)
     permissionSessions.current.clear()
+    activityMocks.useActivityWindowMs.mockReturnValue(30 * 60_000)
+    setActivityGroups({})
   })
 
   it('renders with loading state', async () => {
@@ -781,6 +821,79 @@ describe('RepoQuickSwitchSheet', () => {
     })
 
     expect(document.body.querySelector('[aria-hidden="true"].h-16')).not.toBeNull()
+  })
+
+  it('renders the Activity section above the repo list when there are items', async () => {
+    vi.mocked(listRepos).mockResolvedValue([createRepo(1, 'repo1', '/path/to/repo1')])
+    setActivityGroups({ recent: [createActiveWorkItem()] })
+
+    render(<RepoQuickSwitchSheet isOpen onClose={vi.fn()} />, { wrapper: createWrapper() })
+
+    await waitFor(() => {
+      expect(screen.getByText('repo1')).toBeInTheDocument()
+    })
+
+    const heading = screen.getByRole('heading', { name: 'Activity' })
+    const repo = screen.getByText('repo1')
+    expect(screen.getByText('Session s1')).toBeInTheDocument()
+    expect(heading.compareDocumentPosition(repo) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy()
+  })
+
+  it('hides the Activity section when there are no items', async () => {
+    vi.mocked(listRepos).mockResolvedValue([createRepo(1, 'repo1', '/path/to/repo1')])
+    setActivityGroups({})
+
+    render(<RepoQuickSwitchSheet isOpen onClose={vi.fn()} />, { wrapper: createWrapper() })
+
+    await waitFor(() => {
+      expect(screen.getByText('repo1')).toBeInTheDocument()
+    })
+
+    expect(screen.queryByRole('heading', { name: 'Activity' })).toBeNull()
+    expect(screen.queryByText('Session s1')).toBeNull()
+  })
+
+  it('hides the Activity section while a search query is entered', async () => {
+    vi.mocked(listRepos).mockResolvedValue([createRepo(1, 'repo1', '/path/to/repo1')])
+    setActivityGroups({ recent: [createActiveWorkItem()] })
+
+    render(<RepoQuickSwitchSheet isOpen onClose={vi.fn()} />, { wrapper: createWrapper() })
+
+    expect(await screen.findByRole('heading', { name: 'Activity' })).toBeInTheDocument()
+
+    fireEvent.change(screen.getByPlaceholderText('Search projects...'), { target: { value: 'repo' } })
+
+    expect(screen.queryByRole('heading', { name: 'Activity' })).toBeNull()
+    expect(screen.queryByText('Session s1')).toBeNull()
+  })
+
+  it('navigates to the item path and closes the sheet when an activity row is clicked', async () => {
+    vi.mocked(listRepos).mockResolvedValue([createRepo(1, 'repo1', '/path/to/repo1')])
+    setActivityGroups({ recent: [createActiveWorkItem()] })
+    const handleClose = vi.fn()
+
+    render(
+      <QueryClientProvider client={new QueryClient()}>
+        <MemoryRouter initialEntries={['/repos/1']}>
+          <Routes>
+            <Route
+              path="*"
+              element={
+                <>
+                  <RepoQuickSwitchSheet isOpen onClose={handleClose} />
+                  <LocationSpy />
+                </>
+              }
+            />
+          </Routes>
+        </MemoryRouter>
+      </QueryClientProvider>,
+    )
+
+    fireEvent.click(await screen.findByRole('button', { name: /Session s1/ }))
+
+    expect(screen.getByTestId('location')).toHaveTextContent('/repos/1/sessions/s1')
+    expect(handleClose).toHaveBeenCalled()
   })
 
   it('starts a new session in a repo, opens it and closes the sheet', async () => {

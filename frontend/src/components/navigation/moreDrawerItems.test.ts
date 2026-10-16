@@ -139,8 +139,18 @@ describe('buildMoreItems', () => {
 })
 
 describe('buildToolItems', () => {
+  it('leads every route with the Activity tool', () => {
+    for (const path of ['/', '/repos/42', '/repos/42/sessions/abc', '/assistant', '/schedules']) {
+      const [first] = buildToolItems(path)
+      expect(first.key).toBe('activity')
+      expect(first.label).toBe('Activity')
+      expect(first.panelTool).toBe('activity')
+    }
+  })
+
   it('returns the session route items without home and account entries', () => {
     expect(buildToolItems('/repos/42/sessions/abc').map((item) => item.key)).toEqual([
+      'activity',
       'files',
       'mcp',
       'skills',
@@ -155,15 +165,15 @@ describe('buildToolItems', () => {
   })
 
   it('returns the home route tools', () => {
-    expect(buildToolItems('/').map((item) => item.key)).toEqual(['all-schedules', 'files'])
+    expect(buildToolItems('/').map((item) => item.key)).toEqual(['activity', 'all-schedules', 'files'])
   })
 
   it.each(['/repos/42', '/assistant'])('opens schedules in the panel on %s', (path) => {
     expect(buildToolItems(path).find((item) => item.key === 'schedules')?.panelTool).toBe('schedules')
   })
 
-  it.each(['/schedules', '/repos/42/schedules'])('returns nothing on %s', (path) => {
-    expect(buildToolItems(path)).toEqual([])
+  it.each(['/schedules', '/repos/42/schedules'])('returns only the Activity tool on %s', (path) => {
+    expect(buildToolItems(path).map((item) => item.key)).toEqual(['activity'])
   })
 })
 
