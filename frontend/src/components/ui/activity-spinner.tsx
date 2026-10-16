@@ -13,19 +13,17 @@ const DOT_GRID: ReadonlyArray<readonly [number, number]> = [
   [1, 0],
   [1, 1],
   [1, 2],
-  [0, 3],
-  [1, 3],
 ]
 const COLUMN_X = [2.25, 6.75] as const
-const ROW_Y = [2.25, 6, 9.75, 13.5] as const
+const ROW_Y = [4.25, 8, 11.75] as const
 const DOT_RADIUS = 1.6
 const LIT_DOT_OPACITY = 1
 const UNLIT_DOT_OPACITY = 0.25
 
 /**
- * Decodes one braille frame into its eight dot positions, ordered by braille dot numbering:
+ * Decodes one braille frame into its six dot positions, ordered by braille dot numbering:
  * dot1, dot2 and dot3 are the left column top-to-bottom, dot4, dot5 and dot6 the right column
- * top-to-bottom, and dot7 and dot8 the bottom-left and bottom-right cells.
+ * top-to-bottom.
  */
 export function brailleDots(frame: string): boolean[] {
   const bits = (frame.codePointAt(0) ?? BRAILLE_BASE) - BRAILLE_BASE

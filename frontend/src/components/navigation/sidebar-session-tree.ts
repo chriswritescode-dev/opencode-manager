@@ -4,6 +4,7 @@ import { getRepoBranchLabel, getRepoDisplayName } from '@/lib/utils'
 import { getSessionKey } from '@/lib/sessionKey'
 import { getSessionPath, isAssistantPath, parseRepoRoute } from '@/lib/navigation'
 import { partitionSessions, selectRootSessions } from '@/components/session/session-partition'
+import type { ActiveWorktree } from '@/lib/activeWork'
 
 export const SIDEBAR_SESSIONS_PER_REPO = 10
 
@@ -30,6 +31,8 @@ export interface SidebarSessionItem {
   repoId: number
   repoLabel: string
   branchLabel: string | null
+  /** Branch of the worktree the session runs in, when it runs in a worktree of the group's repo. */
+  worktreeBranch?: string | null
   isWorktree: boolean
   isPinned: boolean
   path: string
@@ -88,16 +91,33 @@ export function buildSidebarRepoGroups(input: {
   sessions: Session[]
   pinnedKeys: ReadonlySet<string>
   now: number
+  worktrees?: ReadonlyArray<ActiveWorktree>
 }): SidebarRepoGroup[] {
-  const { repos, sessions, pinnedKeys, now } = input
+  const { repos, sessions, pinnedKeys, now, worktrees } = input
   const keyFn = getSessionKey
   const repoByDirectory = buildRepoByDirectory(repos)
 
-  const roots = selectRootSessions(sessions, {
-    directories: new Set(repos.map((repo) => repo.fullPath)),
-    keyFn,
-  }).flatMap((session) => {
+  const worktreeByDirectory = new Map<string, ActiveWorktree>()
+  for (const worktree of worktrees ?? []) {
+    worktreeByDirectory.set(worktree.directory, worktree)
+  }
+
+  const directories = new Set(repos.map((repo) => repo.fullPath))
+  for (const worktree of worktrees ?? []) {
+    directories.add(worktree.directory)
+  }
+  for (const session of sessions) {
+    const directory = normalizeDirectory(session.location.directory)
+    if (directory && worktreeByDirectory.has(directory)) {
+      directories.add(session.location.directory)
+    }
+  }
+
+  const roots = selectRootSessions(sessions, { directories, keyFn }).flatMap((session) => {
     if (session.time.archived) return []
+    const directory = normalizeDirectory(session.location.directory)
+    const worktree = directory ? worktreeByDirectory.get(directory) : undefined
+    if (worktree) return [{ session, repo: worktree.ownerRepo }]
     const repo = repoByDirectory.get(session.location.directory)
     if (!repo) return []
     return [{ session, repo }]
@@ -115,15 +135,20 @@ export function buildSidebarRepoGroups(input: {
 
   const createItem = (session: Session, repo: Repo): SidebarSessionItem => {
     const key = keyFn(session)
+    const directory = normalizeDirectory(session.location.directory)
+    const worktree = directory ? worktreeByDirectory.get(directory) : undefined
     return {
       key,
       session,
       repoId: repo.id,
       repoLabel: getRepoDisplayName(repo),
       branchLabel: getRepoBranchLabel(repo),
+      worktreeBranch: worktree ? worktree.branch : null,
       isWorktree: Boolean(repo.isWorktree),
       isPinned: pinnedKeys.has(key),
-      path: getSessionPath(repo.id, session.id),
+      path: worktree
+        ? getSessionPath(repo.id, session.id, { repoTab: 'workspaces' })
+        : getSessionPath(repo.id, session.id),
     }
   }
 

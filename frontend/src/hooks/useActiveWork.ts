@@ -3,23 +3,22 @@ import { useQueries, useQueryClient, type QueryClient } from '@tanstack/react-qu
 import type { SessionInfo } from '@opencode-manager/shared/opencode'
 import { sessionQueryOptions, useSessionsAcrossDirectories } from '@/hooks/useOpenCode'
 import { useNavigableRepos } from '@/hooks/useSidebarRepoGroups'
-import { useForms, usePermissions } from '@/contexts/EventContext'
+import { usePendingInputSessionIDs, useRepoWorktreeList } from '@/contexts/RepoWorktreesContext'
 import { useSessionStatus } from '@/stores/sessionStatusStore'
 import { useSettings } from '@/hooks/useSettings'
 import { DEFAULT_ACTIVITY_WINDOW_MINUTES } from '@/api/types/settings'
+import { useRepoWorktrees } from '@/hooks/useRepoWorktrees'
 import {
   MS_PER_MINUTE,
   buildActiveWork,
   buildRepoActivityIndex,
   collectActiveRoots,
+  needsWorktreeLookup,
   repoActivityFromIndex,
   rootSessionID,
   type ActiveWorkGroups,
 } from '@/lib/activeWork'
-import {
-  combineQuerySessions,
-  mergeExtraSessions,
-} from '@/components/navigation/sidebar-session-tree'
+import { combineQuerySessions, mergeExtraSessions } from '@/components/navigation/sidebar-session-tree'
 import type { Repo } from '@/api/types'
 
 const ACTIVE_WORK_SESSION_LIMIT = 50
@@ -31,17 +30,6 @@ const ACTIVE_WORK_SESSION_LIMIT = 50
 export function useActivityWindowMinutes(): number {
   const { preferences } = useSettings()
   return preferences?.activityWindowMinutes ?? DEFAULT_ACTIVITY_WINDOW_MINUTES
-}
-
-/** Pending permission and form session ids, merged once per snapshot into a referentially stable list. */
-function usePendingInputSessionIDs(): string[] {
-  const pendingPermissionSessionIDs = usePermissions().pendingSessionIDs
-  const pendingFormSessionIDs = useForms().pendingSessionIDs
-
-  return useMemo(
-    () => [...pendingPermissionSessionIDs, ...pendingFormSessionIDs],
-    [pendingPermissionSessionIDs, pendingFormSessionIDs],
-  )
 }
 
 /**
@@ -72,6 +60,7 @@ export function useActiveWorkCounts(): { needsInput: number; running: number } {
  */
 export function useRepoActivityState(repo: Repo): 'needs-input' | 'running' | null {
   const pendingInputSessionIDs = usePendingInputSessionIDs()
+  const worktrees = useRepoWorktreeList()
 
   return useSessionStatus((state) =>
     repoActivityFromIndex(
@@ -83,6 +72,7 @@ export function useRepoActivityState(repo: Repo): 'needs-input' | 'running' | nu
         directories: state.directories,
         pendingInputSessionIDs,
       }),
+      worktrees,
     ),
   )
 }
@@ -256,6 +246,21 @@ export function useActiveWork(windowMs: number): {
     [sessions, fetchedSessions],
   )
 
+  const needsLookup = useMemo(
+    () =>
+      needsWorktreeLookup({
+        now,
+        windowMs,
+        repos,
+        sessions: mergedSessions,
+        parents: resolvedParents,
+        roots: resolvedRoots,
+      }),
+    [now, windowMs, repos, mergedSessions, resolvedParents, resolvedRoots],
+  )
+
+  const { worktrees, isLoading: isWorktreesLoading } = useRepoWorktrees(repos, needsLookup)
+
   const groups = useMemo(
     () =>
       buildActiveWork({
@@ -266,13 +271,14 @@ export function useActiveWork(windowMs: number): {
         parents: resolvedParents,
         roots: resolvedRoots,
         outcomes,
+        worktrees,
       }),
-    [now, windowMs, repos, mergedSessions, resolvedParents, resolvedRoots, outcomes],
+    [now, windowMs, repos, mergedSessions, resolvedParents, resolvedRoots, outcomes, worktrees],
   )
 
   return {
     groups,
-    isLoading: isReposLoading || isSessionsLoading,
+    isLoading: isReposLoading || isSessionsLoading || isWorktreesLoading,
     isError: isSessionsError,
   }
 }

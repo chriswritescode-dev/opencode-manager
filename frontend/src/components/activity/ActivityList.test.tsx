@@ -144,6 +144,23 @@ describe('ActivityList', () => {
     expect(onNavigate).toHaveBeenCalledWith(item)
   })
 
+  it('labels a worktree session with its worktree branch', () => {
+    setGroups({
+      recent: [
+        createItem({
+          state: 'recent',
+          session: createSession('c1', 'Worktree'),
+          repo: createRepo(3, 'Gamma'),
+          worktreeBranch: 'feature/wt',
+        }),
+      ],
+    })
+
+    renderList()
+
+    expect(screen.getByRole('button', { name: /Worktree/ })).toHaveTextContent('Gamma · feature/wt')
+  })
+
   it('marks the currently open session with aria-current', () => {
     setGroups({
       recent: [

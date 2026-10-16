@@ -191,6 +191,60 @@ describe('buildSidebarRepoGroups', () => {
     expect(item.path).toBe('/repos/3/sessions/w1')
   })
 
+  it('groups a session in a worktree of a repo under that repo with the worktree branch', () => {
+    const worktree = {
+      directory: '/repos/a/.worktrees/feat',
+      ownerRepo: repoA,
+      branch: 'feat/x',
+      isSchedule: false,
+    }
+    const sessions = [createSession('w1', atStartOfDay(2000), '/repos/a/.worktrees/feat')]
+
+    const groups = buildSidebarRepoGroups({
+      repos: [repoA],
+      sessions,
+      pinnedKeys: new Set(),
+      now: NOW,
+      worktrees: [worktree],
+    })
+
+    expect(groups).toHaveLength(1)
+    const item = groups[0].items[0]
+    expect(item.session.id).toBe('w1')
+    expect(item.repoId).toBe(1)
+    expect(item.worktreeBranch).toBe('feat/x')
+    expect(item.path).toBe('/repos/1/sessions/w1?repoTab=workspaces')
+  })
+
+  it('matches a worktree session directory with a trailing slash', () => {
+    const worktree = {
+      directory: '/repos/a/.worktrees/feat',
+      ownerRepo: repoA,
+      branch: 'feat/x',
+      isSchedule: false,
+    }
+    const sessions = [createSession('w1', atStartOfDay(2000), '/repos/a/.worktrees/feat/')]
+
+    const groups = buildSidebarRepoGroups({
+      repos: [repoA],
+      sessions,
+      pinnedKeys: new Set(),
+      now: NOW,
+      worktrees: [worktree],
+    })
+
+    expect(groups[0].items.map((item) => item.session.id)).toEqual(['w1'])
+    expect(groups[0].items[0].worktreeBranch).toBe('feat/x')
+  })
+
+  it('excludes a worktree session when no worktrees are provided', () => {
+    const sessions = [createSession('w1', atStartOfDay(2000), '/repos/a/.worktrees/feat')]
+
+    const groups = buildSidebarRepoGroups({ repos: [repoA], sessions, pinnedKeys: new Set(), now: NOW })
+
+    expect(groups[0].items).toEqual([])
+  })
+
   it('labels assistant sessions and links them in assistant mode', () => {
     const assistant = createRepo({ id: 0, fullPath: '/assistant', localPath: 'assistant' })
     const sessions = [createSession('s1', atStartOfDay(1000), '/assistant')]

@@ -25,6 +25,7 @@ type SessionPinFixture = { sessionId: string; directory: string; pinnedAt: numbe
 
 const {
   listReposMock,
+  getRepoSiblingsMock,
   sessionsData,
   sessionsHookCalls,
   createSessionCalls,
@@ -37,6 +38,7 @@ const {
   searchError,
 } = vi.hoisted(() => ({
   listReposMock: vi.fn(),
+  getRepoSiblingsMock: vi.fn(),
   sessionsData: [] as SessionFixture[],
   sessionsHookCalls: [] as SessionsHookCall[],
   createSessionCalls: [] as Array<{ directory?: string; vars?: unknown }>,
@@ -51,7 +53,7 @@ const {
 
 vi.mock('@/api/repos', async (importOriginal) => {
   const actual = await importOriginal<typeof import('@/api/repos')>()
-  return { ...actual, listRepos: listReposMock }
+  return { ...actual, listRepos: listReposMock, getRepoSiblings: getRepoSiblingsMock }
 })
 
 vi.mock('@/api/opencode', async (importOriginal) => {
@@ -156,6 +158,8 @@ describe('DesktopSessionTree', () => {
   beforeEach(() => {
     listReposMock.mockReset()
     listReposMock.mockResolvedValue([repoA, repoB, repoC])
+    getRepoSiblingsMock.mockReset()
+    getRepoSiblingsMock.mockResolvedValue([])
     sessionsData.splice(
       0,
       sessionsData.length,
@@ -195,6 +199,18 @@ describe('DesktopSessionTree', () => {
     expect(toggleFor('Beta')).toHaveAttribute('aria-expanded', 'false')
     expect(screen.queryByRole('button', { name: /^Session b1/ })).toBeNull()
     expect(fetchedDirectories()).toEqual(new Set(['/repos/a']))
+  })
+
+  it('shows a worktree session under its repo with the worktree branch tag', async () => {
+    getRepoSiblingsMock.mockResolvedValue([
+      { fullPath: '/repos/a/.worktrees/feat', currentBranch: 'feat/x', worktreeSource: 'git' },
+    ])
+    sessionsData.push(createSession('w1', '/repos/a/.worktrees/feat', Date.now() - 1000))
+
+    render(<DesktopSessionTree />, { wrapper: createWrapper(['/repos/1']) })
+
+    const row = await screen.findByRole('button', { name: /^Session w1/ })
+    expect(row).toHaveTextContent('feat/x')
   })
 
   it('opens nothing outside a repo', async () => {

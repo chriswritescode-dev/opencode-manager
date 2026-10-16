@@ -25,6 +25,7 @@ import { isPanelTool, type ToolPanelState, type PanelTool } from '@/hooks/useToo
 import { useOpenNavItem } from '@/hooks/useOpenNavItem'
 import { ActivityList } from '@/components/activity/ActivityList'
 import { ActivityCountPill } from '@/components/activity/ActivityCountPill'
+import { withQueryParam } from '@/lib/navigation'
 import { useActiveWorkCounts, useActivityWindowMinutes } from '@/hooks/useActiveWork'
 import { formatActivityWindow } from '@/lib/activeWork'
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from '@/components/ui/tooltip'
@@ -52,7 +53,7 @@ function ActivityPanelBody() {
     <div className="min-h-0 flex-1 overflow-y-auto">
       <ActivityList
         minutes={minutes}
-        onNavigate={(item) => navigate({ pathname: item.path, search: '?panel=activity' })}
+        onNavigate={(item) => navigate(withQueryParam(item.path, 'panel', 'activity'))}
       />
     </div>
   )

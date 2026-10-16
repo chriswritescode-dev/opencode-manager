@@ -3,7 +3,7 @@ import { beforeEach, describe, it, expect, vi } from 'vitest'
 import { MemoryRouter, Route, Routes, useLocation } from 'react-router-dom'
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
 import { RepoQuickSwitchSheet } from './RepoQuickSwitchSheet'
-import { listRepos } from '@/api/repos'
+import { getRepoSiblings, listRepos } from '@/api/repos'
 import { useMobileTabBar } from '@/hooks/useMobileTabBar'
 import { ASSISTANT_REPO_ID } from '@opencode-manager/shared/utils'
 import type { ActiveWorkItem } from '@/lib/activeWork'
@@ -167,6 +167,7 @@ function MobileSheetHarness() {
 describe('RepoQuickSwitchSheet', () => {
   beforeEach(() => {
     vi.clearAllMocks()
+    vi.mocked(getRepoSiblings).mockResolvedValue([])
     sessionsData.splice(0, sessionsData.length)
     sessionsHookCalls.splice(0, sessionsHookCalls.length)
     permissionSessions.current.clear()

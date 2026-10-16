@@ -2550,4 +2550,43 @@ describe('EventProvider permissions and forms', () => {
     expect(screen.getByTestId('permission-count').textContent).toBe('1')
     expect(screen.getByTestId('count').textContent).toBe('1')
   })
+
+  it('subscribes the directories of active sessions outside the repo directories', async () => {
+    mocks.listRepos.mockResolvedValue([{ id: 123, fullPath: '/repo' }])
+    const updateDirectories = vi.fn()
+    mocks.subscribeGlobalMonitor.mockReturnValue({
+      dispose: vi.fn(),
+      updateDirectories,
+      reconnect: vi.fn(),
+      reportVisibility: vi.fn(),
+    })
+
+    render(<Harness />, { wrapper: createWrapper() })
+
+    await waitFor(() => {
+      expect(updateDirectories).toHaveBeenCalledWith(['/repo'])
+    })
+
+    act(() => {
+      useSessionStatus.getState().setSessionDirectory('session-worktree', '/repo/.worktrees/feature')
+      useSessionStatus.getState().setStatus('session-worktree', { type: 'busy' })
+    })
+
+    await waitFor(() => {
+      expect(updateDirectories).toHaveBeenCalledWith(
+        expect.arrayContaining(['/repo', '/repo/.worktrees/feature']),
+      )
+    })
+
+    act(() => {
+      useSessionStatus.getState().setStatus('session-worktree', { type: 'idle' })
+    })
+
+    await waitFor(() => {
+      const calls = updateDirectories.mock.calls
+      const lastDirectories = calls[calls.length - 1][0] as string[]
+      expect(lastDirectories).toContain('/repo')
+      expect(lastDirectories).not.toContain('/repo/.worktrees/feature')
+    })
+  })
 })

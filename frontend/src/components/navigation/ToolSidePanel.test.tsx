@@ -355,6 +355,24 @@ describe('ToolSidePanel', () => {
     expect(search().get('panel')).toBe('activity')
   })
 
+  it('keeps a worktree session tab when navigating from the Activity panel', async () => {
+    const user = userEvent.setup()
+    setActivityGroups([
+      {
+        ...createActivityItem('wt', 'Worktree Session', 2, 'Beta'),
+        path: '/repos/2/sessions/wt?repoTab=workspaces',
+      },
+    ])
+    renderAt('')
+
+    await user.click(screen.getByRole('button', { name: 'Activity' }))
+    await user.click(await screen.findByRole('button', { name: /Worktree Session/ }))
+
+    await waitFor(() => expect(screen.getByTestId('pathname').textContent).toBe('/repos/2/sessions/wt'))
+    expect(search().get('repoTab')).toBe('workspaces')
+    expect(search().get('panel')).toBe('activity')
+  })
+
   it('shows an Activity count pill and extends the accessible name', () => {
     activityMocks.useActiveWorkCounts.mockReturnValue({ needsInput: 1, running: 2 })
     renderAt('')

@@ -5,6 +5,7 @@ import { sessionQueryOptions, useSessionsAcrossDirectories } from '@/hooks/useOp
 import { useSessionPins } from '@/hooks/useSessionPins'
 import { buildPinnedSessionKeys, buildSessionKey, getSessionKey } from '@/lib/sessionKey'
 import type { Repo } from '@/api/types'
+import type { ActiveWorktree } from '@/lib/activeWork'
 import {
   SIDEBAR_SESSIONS_PER_REPO,
   buildSidebarRepoGroups,
@@ -17,10 +18,17 @@ import {
 export function useSidebarRepoGroups(input: {
   repos: Repo[]
   search?: string
+  worktrees?: ReadonlyArray<ActiveWorktree>
 }): { groups: SidebarRepoGroup[]; isLoading: boolean; isError: boolean; hasMore: boolean } {
-  const { repos, search } = input
+  const { repos, search, worktrees } = input
 
-  const directories = useMemo(() => repos.map((repo) => repo.fullPath), [repos])
+  const directories = useMemo(
+    () => [
+      ...repos.map((repo) => repo.fullPath),
+      ...(worktrees ?? []).map((worktree) => worktree.directory),
+    ],
+    [repos, worktrees],
+  )
 
   const { data: sessions, isLoading, isError, hasNextPage } = useSessionsAcrossDirectories(directories, {
     search,
@@ -52,8 +60,15 @@ export function useSidebarRepoGroups(input: {
   )
 
   const groups = useMemo(
-    () => buildSidebarRepoGroups({ repos, sessions: mergedSessions, pinnedKeys, now: Date.now() }),
-    [repos, mergedSessions, pinnedKeys],
+    () =>
+      buildSidebarRepoGroups({
+        repos,
+        sessions: mergedSessions,
+        pinnedKeys,
+        now: Date.now(),
+        worktrees,
+      }),
+    [repos, mergedSessions, pinnedKeys, worktrees],
   )
 
   return { groups, isLoading, isError, hasMore: Boolean(hasNextPage) }

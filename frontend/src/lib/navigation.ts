@@ -53,13 +53,17 @@ function isSafeInternalPath(path: string): boolean {
   return path.startsWith('/') && !path.startsWith('//');
 }
 
-export function getPathWithReturnTo(path: string, returnTo: string): string {
-  if (!isSafeInternalPath(returnTo)) return path;
+export function withQueryParam(path: string, key: string, value: string): string {
   const [base, query = ''] = path.split('?');
   const params = new URLSearchParams(query);
-  params.set('returnTo', returnTo);
+  params.set(key, value);
   const search = params.toString();
   return search ? `${base}?${search}` : base;
+}
+
+export function getPathWithReturnTo(path: string, returnTo: string): string {
+  if (!isSafeInternalPath(returnTo)) return path;
+  return withQueryParam(path, 'returnTo', returnTo);
 }
 
 export function getReturnToPath(search: string, fallback: string): string {
