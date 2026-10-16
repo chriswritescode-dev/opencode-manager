@@ -66,6 +66,18 @@ export type STTConfig = {
 
 export const DEFAULT_LEADER_KEY = 'Ctrl+X';
 
+export const ACTIVITY_WINDOW_MINUTE_OPTIONS = [15, 30, 60, 120, 240, 480, 1440] as const;
+
+export const ActivityWindowMinutesSchema = z.literal(ACTIVITY_WINDOW_MINUTE_OPTIONS);
+
+export type ActivityWindowMinutes = z.infer<typeof ActivityWindowMinutesSchema>;
+
+export const DEFAULT_ACTIVITY_WINDOW_MINUTES: ActivityWindowMinutes = 30;
+
+export function isActivityWindowMinutes(value: unknown): value is ActivityWindowMinutes {
+  return ActivityWindowMinutesSchema.safeParse(value).success;
+}
+
 export const DEFAULT_KEYBOARD_SHORTCUTS = {
   submit: 'Cmd+Enter',
   abort: 'Escape',
@@ -192,6 +204,7 @@ export const UserPreferencesSchema = z.object({
   mode: z.enum(["plan", "build"]),
   defaultModel: z.string().optional(),
   walkthroughModel: z.string().optional(),
+  activityWindowMinutes: ActivityWindowMinutesSchema.optional(),
   defaultAgent: z.string().optional(),
   autoScroll: z.boolean(),
   expandDiffs: z.boolean(),
@@ -249,6 +262,7 @@ export const DEFAULT_USER_PREFERENCES = {
   theme: "dark" as const,
   colorTheme: MANAGER_COLOR_THEME_ID,
   mode: "build" as const,
+  activityWindowMinutes: DEFAULT_ACTIVITY_WINDOW_MINUTES,
   autoScroll: true,
   expandDiffs: true,
   expandToolCalls: false,

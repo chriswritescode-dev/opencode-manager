@@ -181,6 +181,39 @@ describe('internal/settings routes', () => {
     expect(body.error).toBe('Invalid request body')
   })
 
+  it('PATCH /api/internal/settings with { activityWindowMinutes: 45 } returns 400 (non-option reject)', async () => {
+    const res = await app.request('/api/internal/settings', {
+      method: 'PATCH',
+      body: JSON.stringify({ activityWindowMinutes: 45 }),
+      headers: {
+        'content-type': 'application/json',
+        authorization: `Bearer ${token}`,
+      },
+    })
+    expect(res.status).toBe(400)
+    const body = await res.json() as { error: string }
+    expect(body.error).toBe('Invalid request body')
+  })
+
+  it('PATCH /api/internal/settings with { activityWindowMinutes: 60 } persists an allowed option', async () => {
+    const patchRes = await app.request('/api/internal/settings', {
+      method: 'PATCH',
+      body: JSON.stringify({ activityWindowMinutes: 60 }),
+      headers: {
+        'content-type': 'application/json',
+        authorization: `Bearer ${token}`,
+      },
+    })
+    expect(patchRes.status).toBe(200)
+
+    const getRes = await app.request('/api/internal/settings', {
+      headers: { authorization: `Bearer ${token}` },
+    })
+    expect(getRes.status).toBe(200)
+    const body = await getRes.json() as { preferences: { activityWindowMinutes: number } }
+    expect(body.preferences.activityWindowMinutes).toBe(60)
+  })
+
   it('PATCH /api/internal/settings with { tts: { voice: "x", speed: 1.5 } } merges and preserves apiKey/endpoint', async () => {
     // Seed a full TTS config (including secrets) directly via settingsService
     settingsService.updateSettings({

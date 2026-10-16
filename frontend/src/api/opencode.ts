@@ -48,6 +48,7 @@ export interface SessionPageInput {
   order?: 'asc' | 'desc'
   search?: string
   cursor?: string
+  includeChildren?: boolean
 }
 
 export interface CreateSessionInput {
@@ -102,7 +103,7 @@ export async function listSessionPage(input: SessionPageInput): Promise<SessionP
       ...(input.directory === undefined ? {} : { directory: input.directory }),
       ...(input.project === undefined ? {} : { project: input.project }),
       ...(input.subpath === undefined ? {} : { subpath: input.subpath }),
-      parentID: 'null',
+      ...(input.includeChildren ? {} : { parentID: 'null' }),
       limit: input.limit,
       order: input.order,
       search: input.search,

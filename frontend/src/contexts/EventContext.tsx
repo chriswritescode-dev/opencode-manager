@@ -20,6 +20,7 @@ import { showToast } from '@/lib/toast'
 import { openCodeEventStream, type EventStreamHealthState } from '@/lib/opencode-event-stream'
 import { addToSessionKeyedState, removeFromSessionKeyedState } from '@/lib/sessionKeyedState'
 import { getSessionPath, parseRepoRoute } from '@/lib/navigation'
+import { repoMatchesDirectory } from '@/components/navigation/sidebar-session-tree'
 import { changeWalkthroughQueryKey } from '@/hooks/useChangeWalkthrough'
 import { busyStatusesFromActiveSessions, useSessionStatus } from '@/stores/sessionStatusStore'
 import {
@@ -46,6 +47,20 @@ type StreamEvent = (V2Event & { directory?: string }) | { type: 'ssh.host-key-re
 
 type SessionScopedItem = { id: string; sessionID: string }
 
+const EMPTY_SESSION_IDS: string[] = []
+
+/**
+ * Session ids whose queued item list is non-empty. The array reference is stable across renders
+ * while the set of ids is unchanged, even when the backing record is replaced.
+ */
+function usePendingSessionIDs(bySession: Record<string, unknown[]>): string[] {
+  const idsKey = useMemo(
+    () => Object.keys(bySession).filter((sessionID) => (bySession[sessionID]?.length ?? 0) > 0).join('\u0000'),
+    [bySession],
+  )
+  return useMemo(() => (idsKey ? idsKey.split('\u0000') : EMPTY_SESSION_IDS), [idsKey])
+}
+
 function groupBySession<T extends SessionScopedItem>(items: T[]): Record<string, T[]> {
   return items.reduce<Record<string, T[]>>((grouped, item) => {
     const existing = grouped[item.sessionID] ?? []
@@ -58,18 +73,6 @@ function groupBySession<T extends SessionScopedItem>(items: T[]): Record<string,
 
 function sortById<T extends SessionScopedItem>(items: T[]): T[] {
   return [...items].sort((a, b) => a.id.localeCompare(b.id))
-}
-
-function normalizeDirectory(directory?: string | null) {
-  return directory?.replace(/\/+$/, '') ?? null
-}
-
-function repoMatchesDirectory(repo: Repo, directory?: string | null) {
-  const normalizedDirectory = normalizeDirectory(directory)
-  if (!normalizedDirectory) return false
-
-  return [repo.fullPath, repo.localPath, repo.sourcePath]
-    .some((path) => normalizeDirectory(path) === normalizedDirectory)
 }
 
 function isSessionWithinView(
@@ -123,7 +126,7 @@ function reconcileBySessionForDirectory<T extends SessionScopedItem>(
   prev: Record<string, T[]>,
   directory: string,
   items: T[],
-  sessionDirectories: Map<string, string>,
+  sessionDirectories: ReadonlyMap<string, string>,
 ): Record<string, T[]> {
   const grouped = groupBySession(items)
   const next = { ...prev }
@@ -152,6 +155,10 @@ interface EventContextValue {
   permissions: {
     current: PermissionRequest | null
     pendingCount: number
+    /**
+     * Ids of sessions with at least one pending permission request, stable while the queue is unchanged.
+     */
+    pendingSessionIDs: string[]
     /**
      * Session currently being viewed from the route, or null when no session route is active.
      */
@@ -187,6 +194,10 @@ interface EventContextValue {
   forms: {
     current: FormInfo | null
     pendingCount: number
+    /**
+     * Ids of sessions with at least one pending form, stable while the queue is unchanged.
+     */
+    pendingSessionIDs: string[]
     /**
      * Answers a form and removes it from the queue. Resolves, after showing an "expired" toast,
      * when the server no longer knows the form (`FormNotFoundError`); rejects on any other failure.
@@ -262,7 +273,6 @@ export function EventProvider({ children }: { children: React.ReactNode }) {
   const [formsBySession, setFormsBySession] = useState<FormsBySession>({})
   const [showPermissionDialog, setShowPermissionDialog] = useState(true)
 
-  const sessionDirectoriesRef = useRef<Map<string, string>>(new Map())
   const prevPermissionCountRef = useRef(0)
   const initialFetchDoneRef = useRef(false)
   const statusSyncVersionRef = useRef(0)
@@ -279,6 +289,9 @@ export function EventProvider({ children }: { children: React.ReactNode }) {
   const allPermissions = useMemo(() => Object.values(permissionsBySession).flat(), [permissionsBySession])
   const allForms = useMemo(() => Object.values(formsBySession).flat(), [formsBySession])
 
+  const pendingPermissionSessionIDs = usePendingSessionIDs(permissionsBySession)
+  const pendingFormSessionIDs = usePendingSessionIDs(formsBySession)
+
   const viewedSessionId = useMemo(
     () => parseRepoRoute(location.pathname).sessionId,
     [location.pathname],
@@ -290,7 +303,7 @@ export function EventProvider({ children }: { children: React.ReactNode }) {
 
   const rememberSessionDirectory = useCallback((sessionID: string, directory?: string) => {
     if (!directory) return
-    sessionDirectoriesRef.current.set(sessionID, directory)
+    useSessionStatus.getState().setSessionDirectory(sessionID, directory)
   }, [])
 
   const findCachedSessionDirectory = useCallback((sessionID: string): string | null => {
@@ -340,7 +353,7 @@ export function EventProvider({ children }: { children: React.ReactNode }) {
   }, [queryClient])
 
   const findSessionDirectory = useCallback((sessionID: string): string | null => {
-    const remembered = sessionDirectoriesRef.current.get(sessionID)
+    const remembered = useSessionStatus.getState().directories.get(sessionID)
     if (remembered) return remembered
     return findCachedSessionDirectory(sessionID)
   }, [findCachedSessionDirectory])
@@ -384,7 +397,7 @@ export function EventProvider({ children }: { children: React.ReactNode }) {
     })
 
     setPermissionsBySession(prev =>
-      reconcileBySessionForDirectory(prev, directory, permissions, sessionDirectoriesRef.current),
+      reconcileBySessionForDirectory(prev, directory, permissions, useSessionStatus.getState().directories),
     )
   }, [rememberSessionDirectory])
 
@@ -394,7 +407,7 @@ export function EventProvider({ children }: { children: React.ReactNode }) {
     })
 
     setFormsBySession(prev =>
-      reconcileBySessionForDirectory(prev, directory, forms, sessionDirectoriesRef.current),
+      reconcileBySessionForDirectory(prev, directory, forms, useSessionStatus.getState().directories),
     )
   }, [rememberSessionDirectory])
 
@@ -506,7 +519,7 @@ export function EventProvider({ children }: { children: React.ReactNode }) {
     for (const repo of reposRef.current ?? []) {
       if (repo.fullPath) directories.add(repo.fullPath)
     }
-    for (const directory of sessionDirectoriesRef.current.values()) {
+    for (const directory of useSessionStatus.getState().directories.values()) {
       if (directory) directories.add(directory)
     }
     return [...directories]
@@ -532,6 +545,7 @@ export function EventProvider({ children }: { children: React.ReactNode }) {
         try {
           const session = await getSession(lookupID)
           useSessionStatus.getState().setSessionParent(lookupID, session.parentID ?? null)
+          useSessionStatus.getState().setSessionDirectory(lookupID, session.location.directory)
           currentID = session.parentID ?? null
         } catch (error) {
           if (import.meta.env.DEV) {
@@ -672,6 +686,9 @@ export function EventProvider({ children }: { children: React.ReactNode }) {
         }
         case 'session.status': {
           const { sessionID, status } = event.data
+          if (event.directory) {
+            useSessionStatus.getState().setSessionDirectory(sessionID, event.directory)
+          }
           useSessionStatus.getState().setStatus(sessionID, status)
           break
         }
@@ -680,6 +697,9 @@ export function EventProvider({ children }: { children: React.ReactNode }) {
           break
         }
         case 'session.execution.started': {
+          if (event.directory) {
+            useSessionStatus.getState().setSessionDirectory(event.data.sessionID, event.directory)
+          }
           useSessionStatus.getState().clearOutcome(event.data.sessionID)
           useSessionStatus.getState().setStatus(event.data.sessionID, { type: 'busy' })
           break
@@ -732,6 +752,7 @@ export function EventProvider({ children }: { children: React.ReactNode }) {
           ) {
             const sessionID = info.metadata.sessionID
             useSessionStatus.getState().setShellRunning(info.id, sessionID, event.directory)
+            useSessionStatus.getState().setSessionDirectory(sessionID, event.directory)
             if (!useSessionStatus.getState().parents.has(sessionID)) {
               void resolveSessionAncestry([sessionID])
             }
@@ -857,6 +878,7 @@ export function EventProvider({ children }: { children: React.ReactNode }) {
     permissions: {
       current: currentPermission,
       pendingCount: allPermissions.length,
+      pendingSessionIDs: pendingPermissionSessionIDs,
       viewedSessionId,
       currentDirectory: currentPermissionDirectory,
       currentIsFromDifferentSession,
@@ -872,6 +894,7 @@ export function EventProvider({ children }: { children: React.ReactNode }) {
     forms: {
       current: currentForm,
       pendingCount: allForms.length,
+      pendingSessionIDs: pendingFormSessionIDs,
       reply: replyToForm,
       cancel: cancelPendingForm,
       dismiss: removeForm,
@@ -887,6 +910,7 @@ export function EventProvider({ children }: { children: React.ReactNode }) {
     respondToSSHHostKey,
     currentPermission,
     allPermissions.length,
+    pendingPermissionSessionIDs,
     viewedSessionId,
     currentPermissionDirectory,
     currentIsFromDifferentSession,
@@ -899,6 +923,7 @@ export function EventProvider({ children }: { children: React.ReactNode }) {
     syncPermissionsForSession,
     currentForm,
     allForms.length,
+    pendingFormSessionIDs,
     replyToForm,
     cancelPendingForm,
     removeForm,

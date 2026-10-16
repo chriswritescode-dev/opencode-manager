@@ -9,6 +9,7 @@ const resetStore = () => {
     knownSessions: new Set(),
     outcomes: new Map(),
     parents: new Map(),
+    directories: new Map(),
     runningShells: new Map(),
     shellRevisions: new Map(),
     shellRevision: 0,

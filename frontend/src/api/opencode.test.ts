@@ -125,6 +125,19 @@ describe('OpenCode facade', () => {
     expect(lastRequest().init.method).toBe('GET')
   })
 
+  it('omits the parentID filter when including child sessions', async () => {
+    fetchMock.mockResolvedValue(
+      jsonResponse({ data: [sessionInfo('ses_child', '/repo')], cursor: {} }),
+    )
+
+    await listSessionPage({ directory: '/repo', limit: 25, order: 'desc', includeChildren: true })
+
+    expect(lastRequest().url).toBe(
+      'http://localhost/api/opencode/api/session?limit=25&order=desc&directory=%2Frepo',
+    )
+    expect(lastRequest().init.method).toBe('GET')
+  })
+
   it('reads a single session from the V2 session route', async () => {
     fetchMock.mockResolvedValue(jsonResponse({ data: sessionInfo('ses_1', '/repo') }))
 

@@ -4,7 +4,9 @@ import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
 import { render, screen, fireEvent, waitFor, act } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import type { Repo, Session } from '@/api/types'
+import type { ActiveWorkGroups, ActiveWorkItem, ActiveWorkState } from '@/lib/activeWork'
 import { stubMatchMedia } from '@/test/test-utils'
+import { DEFAULT_ACTIVITY_WINDOW_MINUTES } from '@/api/types/settings'
 import { KeyboardShortcutsProvider } from '@/contexts/KeyboardShortcutsContext'
 import { SessionPickerDialog } from './SessionPickerDialog'
 
@@ -23,8 +25,15 @@ const mocks = vi.hoisted(() => ({
   getOpenCodeLocation: vi.fn(),
   sessionPins: [] as Array<{ sessionId: string; directory: string; pinnedAt: number }>,
   repos: [] as Repo[],
+  activeWorkGroups: { needsInput: [], running: [], recent: [] } as ActiveWorkGroups,
+  activeWorkWindowMs: 0,
   preferences: undefined as
-    | { leaderKey?: string; keyboardShortcuts?: Record<string, string>; directShortcuts?: string[] }
+    | {
+        leaderKey?: string
+        keyboardShortcuts?: Record<string, string>
+        directShortcuts?: string[]
+        activityWindowMinutes?: number
+      }
     | undefined,
 }))
 
@@ -77,6 +86,15 @@ vi.mock('@/hooks/useSidebarRepoGroups', () => ({
   useNavigableRepos: () => ({ repos: mocks.repos, isLoading: false, refetch: vi.fn() }),
 }))
 
+vi.mock('@/hooks/useActiveWork', () => ({
+  useActiveWork: (windowMs: number) => {
+    mocks.activeWorkWindowMs = windowMs
+    return { groups: mocks.activeWorkGroups, isLoading: false, isError: false }
+  },
+  useActivityWindowMinutes: () =>
+    mocks.preferences?.activityWindowMinutes ?? DEFAULT_ACTIVITY_WINDOW_MINUTES,
+}))
+
 vi.mock('@/stores/sessionStatusStore', async (importOriginal) => {
   const actual = await importOriginal<typeof import('@/stores/sessionStatusStore')>()
   return { ...actual, useSessionStatusForSession: () => ({ type: 'idle' }) }
@@ -103,6 +121,24 @@ function repo(id: number, name: string, fullPath: string): Repo {
     defaultBranch: 'main',
     cloneStatus: 'ready',
     clonedAt: 0,
+  }
+}
+
+function activeWorkItem(
+  id: string,
+  title: string,
+  directory: string,
+  state: ActiveWorkState = 'recent',
+): ActiveWorkItem {
+  const itemRepo = mocks.repos.find((candidate) => candidate.fullPath === directory) ?? mocks.repos[0]
+  const itemSession = session(id, title, directory)
+  return {
+    key: `${directory}:${id}`,
+    session: itemSession,
+    repo: itemRepo,
+    state,
+    updatedAt: itemSession.time.updated,
+    path: `/repos/${itemRepo.id}/sessions/${id}`,
   }
 }
 
@@ -144,6 +180,10 @@ const openProjectsTab = () => {
   fireEvent.mouseDown(screen.getByRole('tab', { name: 'Projects' }))
 }
 
+const openActiveTab = () => {
+  fireEvent.mouseDown(screen.getByRole('tab', { name: 'Active' }))
+}
+
 describe('SessionPickerDialog', () => {
   beforeEach(() => {
     vi.clearAllMocks()
@@ -159,6 +199,8 @@ describe('SessionPickerDialog', () => {
     mocks.sessionPins = []
     mocks.repos = [repo(1, 'alpha', '/w/a'), repo(2, 'beta', '/w/b')]
     mocks.sessionsData = []
+    mocks.activeWorkGroups = { needsInput: [], running: [], recent: [] }
+    mocks.activeWorkWindowMs = 0
     mocks.preferences = undefined
   })
 
@@ -492,10 +534,11 @@ describe('SessionPickerDialog', () => {
     expect(screen.getByRole('option', { name: /Active session/ })).toHaveAttribute('aria-selected', 'true')
   })
 
-  it('renders a Sessions/Projects tab switcher and defaults to the sessions tab', () => {
+  it('renders an Active/Sessions/Projects tab switcher and defaults to the sessions tab', () => {
     renderPicker()
 
     expect(screen.getByRole('tab', { name: 'Sessions' })).toHaveAttribute('aria-selected', 'true')
+    expect(screen.getByRole('tab', { name: 'Active' })).toHaveAttribute('aria-selected', 'false')
     expect(screen.getByRole('tab', { name: 'Projects' })).toHaveAttribute('aria-selected', 'false')
     expect(combobox()).toHaveAttribute('placeholder', 'Search sessions...')
   })
@@ -578,6 +621,35 @@ describe('SessionPickerDialog', () => {
     expect(onSelectRepo).toHaveBeenCalledWith(mocks.repos[0])
   })
 
+  it('navigates the projects tab with wrapping arrows, PageUp/PageDown and Enter', async () => {
+    mocks.repos = Array.from({ length: 12 }, (_, index) =>
+      repo(index + 1, `repo-${index + 1}`, `/w/r${index + 1}`),
+    )
+    const { onSelectRepo } = renderPicker()
+
+    openProjectsTab()
+
+    expect(await screen.findByRole('option', { name: 'repo-1' })).toHaveAttribute(
+      'aria-selected',
+      'true',
+    )
+
+    fireEvent.keyDown(combobox(), { key: 'ArrowUp' })
+    expect(screen.getByRole('option', { name: 'repo-12' })).toHaveAttribute('aria-selected', 'true')
+
+    fireEvent.keyDown(combobox(), { key: 'ArrowDown' })
+    expect(screen.getByRole('option', { name: 'repo-1' })).toHaveAttribute('aria-selected', 'true')
+
+    fireEvent.keyDown(combobox(), { key: 'PageDown' })
+    expect(screen.getByRole('option', { name: 'repo-11' })).toHaveAttribute('aria-selected', 'true')
+
+    fireEvent.keyDown(combobox(), { key: 'Enter' })
+    expect(onSelectRepo).toHaveBeenCalledWith(mocks.repos[10])
+
+    fireEvent.keyDown(combobox(), { key: 'PageUp' })
+    expect(screen.getByRole('option', { name: 'repo-1' })).toHaveAttribute('aria-selected', 'true')
+  })
+
   it('opens a repo on click in the projects tab', async () => {
     mocks.repos = [repo(1, 'alpha', '/w/a'), repo(2, 'beta', '/w/b')]
     const { onSelectRepo } = renderPicker()
@@ -619,14 +691,19 @@ describe('SessionPickerDialog', () => {
     expect(screen.getByText('No projects found')).toBeInTheDocument()
   })
 
-  it('toggles between tabs with the default Ctrl+S binding in either search input', async () => {
+  it('cycles Active, Sessions and Projects with the default Ctrl+S binding', async () => {
     renderPicker()
+
+    expect(screen.getByRole('tab', { name: 'Sessions', selected: true })).toBeInTheDocument()
 
     fireEvent.keyDown(combobox(), { key: 's', ctrlKey: true })
     expect(await screen.findByRole('tab', { name: 'Projects', selected: true })).toBeInTheDocument()
 
     fireEvent.keyDown(combobox(), { key: 's', ctrlKey: true })
-    expect(screen.getByRole('tab', { name: 'Sessions', selected: true })).toBeInTheDocument()
+    expect(await screen.findByRole('tab', { name: 'Active', selected: true })).toBeInTheDocument()
+
+    fireEvent.keyDown(combobox(), { key: 's', ctrlKey: true })
+    expect(await screen.findByRole('tab', { name: 'Sessions', selected: true })).toBeInTheDocument()
   })
 
   it('honors a configured switch binding and shows it in the footer', async () => {
@@ -638,7 +715,7 @@ describe('SessionPickerDialog', () => {
     fireEvent.keyDown(combobox(), { key: 'g', ctrlKey: true })
     expect(await screen.findByRole('tab', { name: 'Projects', selected: true })).toBeInTheDocument()
 
-    expect(screen.getByText(/Ctrl\+G sessions/)).toBeInTheDocument()
+    expect(screen.getByText(/Ctrl\+G active/)).toBeInTheDocument()
   })
 
   it('shows the normalized leader, arrow and key in the footer for a leader switch binding', () => {
@@ -690,5 +767,114 @@ describe('SessionPickerDialog', () => {
     await waitFor(() =>
       expect(screen.getByRole('tab', { name: 'Sessions' })).toHaveAttribute('aria-selected', 'true'),
     )
+  })
+
+  it('groups active work into needs input, running and recent sections with repo labels', async () => {
+    mocks.repos = [repo(1, 'alpha', '/w/a'), repo(2, 'beta', '/w/b')]
+    mocks.activeWorkGroups = {
+      needsInput: [activeWorkItem('ses_ni', 'Needs input task', '/w/a', 'needs-input')],
+      running: [activeWorkItem('ses_run', 'Running task', '/w/b', 'running')],
+      recent: [activeWorkItem('ses_recent', 'Recent task', '/w/a', 'recent')],
+    }
+
+    renderPicker()
+    openActiveTab()
+
+    expect(await screen.findByText('Needs input')).toBeInTheDocument()
+    expect(screen.getByText('Running')).toBeInTheDocument()
+    expect(screen.getByText('Recent')).toBeInTheDocument()
+    expect(screen.getByRole('option', { name: /Needs input task/ }).textContent).toContain('alpha')
+    expect(screen.getByRole('option', { name: /Running task/ }).textContent).toContain('beta')
+    expect(screen.getByRole('option', { name: /Recent task/ }).textContent).toContain('alpha')
+    expect(mocks.activeWorkWindowMs).toBe(30 * 60 * 1000)
+  })
+
+  it('skips empty active work sections and shows the empty state for the configured window', async () => {
+    mocks.preferences = { activityWindowMinutes: 120 }
+
+    renderPicker()
+    openActiveTab()
+
+    expect(
+      await screen.findByText('No active or recent sessions in the last 2 hours'),
+    ).toBeInTheDocument()
+    expect(screen.queryByText('Needs input')).not.toBeInTheDocument()
+    expect(screen.queryByText('Running')).not.toBeInTheDocument()
+    expect(screen.queryByText('Recent')).not.toBeInTheDocument()
+  })
+
+  it('formats a full-day active work window as hours in the empty state', async () => {
+    mocks.preferences = { activityWindowMinutes: 1440 }
+
+    renderPicker()
+    openActiveTab()
+
+    expect(
+      await screen.findByText('No active or recent sessions in the last 24 hours'),
+    ).toBeInTheDocument()
+    expect(mocks.activeWorkWindowMs).toBe(1440 * 60 * 1000)
+  })
+
+  it('opens the cursor active row with Enter and selects its session and repo', async () => {
+    mocks.repos = [repo(1, 'alpha', '/w/a'), repo(2, 'beta', '/w/b')]
+    mocks.activeWorkGroups = {
+      needsInput: [],
+      running: [activeWorkItem('ses_run', 'Running task', '/w/b', 'running')],
+      recent: [activeWorkItem('ses_recent', 'Recent task', '/w/a', 'recent')],
+    }
+    const { onSelectSession } = renderPicker()
+    openActiveTab()
+
+    const running = await screen.findByRole('option', { name: /Running task/ })
+    expect(running).toHaveAttribute('aria-selected', 'true')
+
+    fireEvent.keyDown(combobox(), { key: 'ArrowDown' })
+    expect(screen.getByRole('option', { name: /Recent task/ })).toHaveAttribute('aria-selected', 'true')
+
+    fireEvent.keyDown(combobox(), { key: 'Enter' })
+
+    expect(onSelectSession).toHaveBeenCalledWith(expect.objectContaining({ id: 'ses_recent' }), mocks.repos[0])
+  })
+
+  it('filters active work rows by title and drops sections left empty', async () => {
+    mocks.repos = [repo(1, 'alpha', '/w/a'), repo(2, 'beta', '/w/b')]
+    mocks.activeWorkGroups = {
+      needsInput: [activeWorkItem('ses_ni', 'Needs input task', '/w/a', 'needs-input')],
+      running: [],
+      recent: [activeWorkItem('ses_recent', 'Recent task', '/w/b', 'recent')],
+    }
+    renderPicker()
+    openActiveTab()
+
+    await screen.findByRole('option', { name: /Needs input task/ })
+
+    fireEvent.change(combobox(), { target: { value: 'recent' } })
+
+    expect(screen.queryByRole('option', { name: /Needs input task/ })).not.toBeInTheDocument()
+    expect(screen.getByRole('option', { name: /Recent task/ })).toBeInTheDocument()
+    expect(screen.queryByText('Needs input')).not.toBeInTheDocument()
+    expect(screen.getByText('Recent')).toBeInTheDocument()
+  })
+
+  it('pins an active work row from the shared row menu', async () => {
+    mocks.repos = [repo(1, 'alpha', '/w/a'), repo(2, 'beta', '/w/b')]
+    mocks.activeWorkGroups = {
+      needsInput: [],
+      running: [activeWorkItem('ses_run', 'Running task', '/w/b', 'running')],
+      recent: [],
+    }
+    renderPicker()
+    const user = userEvent.setup()
+    openActiveTab()
+
+    await screen.findByRole('option', { name: /Running task/ })
+    await user.click(screen.getByRole('button', { name: 'Session actions' }))
+    await user.click(await screen.findByText('Pin'))
+
+    expect(mocks.togglePinMock).toHaveBeenCalledWith({
+      sessionId: 'ses_run',
+      directory: '/w/b',
+      pinned: true,
+    })
   })
 })

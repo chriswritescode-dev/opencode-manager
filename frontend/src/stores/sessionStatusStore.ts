@@ -30,6 +30,7 @@ interface SessionStatusStore {
   knownSessions: Set<string>
   outcomes: Map<string, ChildOutcome>
   parents: Map<string, string | null>
+  directories: Map<string, string>
   runningShells: Map<string, RunningShell>
   shellRevisions: Map<string, number>
   shellRevision: number
@@ -45,6 +46,7 @@ interface SessionStatusStore {
   getStatus: (sessionID: string) => SessionStatusType
   clearStatus: (sessionID: string) => void
   setSessionParent: (sessionID: string, parentID: string | null) => void
+  setSessionDirectory: (sessionID: string, directory: string) => void
   setShellRunning: (shellID: string, sessionID: string, directory: string) => void
   clearShell: (shellID: string) => void
   replaceRunningShells: (directory: string, shells: Array<{ id: string; sessionID: string }>, token: ShellSnapshotToken) => void
@@ -245,6 +247,7 @@ export const useSessionStatus = create<SessionStatusStore>((set, get) => {
     knownSessions: new Set(),
     outcomes: new Map(),
     parents: new Map(),
+    directories: new Map(),
     runningShells: new Map(),
     shellRevisions: new Map(),
     shellRevision: 0,
@@ -448,6 +451,15 @@ export const useSessionStatus = create<SessionStatusStore>((set, get) => {
       })
     },
 
+    setSessionDirectory: (sessionID: string, directory: string) => {
+      if (get().directories.get(sessionID) === directory) return
+      set((state) => {
+        const directories = new Map(state.directories)
+        directories.set(sessionID, directory)
+        return { directories }
+      })
+    },
+
     setShellRunning: (shellID: string, sessionID: string, directory: string) => {
       const current = get().runningShells.get(shellID)
       if (current && current.sessionID === sessionID && current.directory === directory) {
@@ -533,6 +545,7 @@ export const useSessionStatus = create<SessionStatusStore>((set, get) => {
         current.knownSessions.has(sessionID) ||
         current.outcomes.has(sessionID) ||
         current.parents.has(sessionID) ||
+        current.directories.has(sessionID) ||
         ownsShell
       if (!hasSession && inFlightSnapshots.size === 0) return
 
@@ -542,12 +555,14 @@ export const useSessionStatus = create<SessionStatusStore>((set, get) => {
         const knownSessions = new Set(state.knownSessions)
         const outcomes = new Map(state.outcomes)
         const parents = new Map(state.parents)
+        const directories = new Map(state.directories)
         const runningShells = new Map(state.runningShells)
         statuses.delete(sessionID)
         statusCache.delete(sessionID)
         knownSessions.delete(sessionID)
         outcomes.delete(sessionID)
         parents.delete(sessionID)
+        directories.delete(sessionID)
         const removedShellIDs: string[] = []
         for (const [shellID, shell] of runningShells.entries()) {
           if (shell.sessionID !== sessionID) continue
@@ -560,6 +575,7 @@ export const useSessionStatus = create<SessionStatusStore>((set, get) => {
           knownSessions,
           outcomes,
           parents,
+          directories,
           runningShells,
           ...(shellTouchPatch(state, removedShellIDs) ?? {}),
           ...(recordRevisionPatch(state, sessionID) ?? {}),

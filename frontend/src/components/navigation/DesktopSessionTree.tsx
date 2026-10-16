@@ -90,6 +90,7 @@ function SessionSearchResults({
       {matchingGroups.map((group) => (
         <RepoNavGroup
           key={group.repo.id}
+          repo={group.repo}
           name={group.label}
           branch={group.branchLabel}
           isWorktree={group.repo.isWorktree}

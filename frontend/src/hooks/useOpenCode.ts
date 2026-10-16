@@ -44,6 +44,7 @@ interface UseSessionsAcrossDirectoriesOptions {
   keepPreviousResults?: boolean
   allDirectories?: boolean
   project?: { id: string; subpath: string }
+  includeChildren?: boolean
 }
 
 type SessionDirectoryCursors = Record<string, string>
@@ -73,7 +74,9 @@ export const useSessionsAcrossDirectories = (
   const projectSubpath = options?.project?.subpath;
   const projectScoped = !allDirectories && projectId !== undefined;
   const singleCursor = allDirectories || projectScoped;
+  const includeChildren = options?.includeChildren ?? false;
   const directoryKey = uniqueDirectories.join('|');
+  const childSessionsParam = includeChildren ? { includeChildren: true } : {};
 
   const query = useInfiniteQuery<
     SessionListPage,
@@ -86,7 +89,7 @@ export const useSessionsAcrossDirectories = (
       'opencode',
       'sessions',
       directoryKey,
-      { search: normalizedSearch, limit, allDirectories, project: projectId, subpath: projectSubpath },
+      { search: normalizedSearch, limit, allDirectories, project: projectId, subpath: projectSubpath, includeChildren },
     ],
     queryFn: async ({ pageParam }) => {
       if (singleCursor) {
@@ -98,8 +101,9 @@ export const useSessionsAcrossDirectories = (
                 order: 'desc',
                 search: normalizedSearch,
                 ...(projectScoped ? { project: projectId, subpath: projectSubpath } : {}),
+                ...childSessionsParam,
               }
-            : { cursor },
+            : { cursor, ...childSessionsParam },
         );
         return {
           items: page.items,
@@ -115,6 +119,7 @@ export const useSessionsAcrossDirectories = (
               limit,
               order: 'desc',
               search: normalizedSearch,
+              ...childSessionsParam,
             }),
           ),
         );
@@ -134,7 +139,9 @@ export const useSessionsAcrossDirectories = (
 
       const entries = Object.entries(pageParam.cursors);
       const pages = await Promise.all(
-        entries.map(([directory, cursor]) => listSessionPage({ directory, cursor })),
+        entries.map(([directory, cursor]) =>
+          listSessionPage({ directory, cursor, ...childSessionsParam }),
+        ),
       );
       const cursors: SessionDirectoryCursors = {};
       const items: SessionInfo[] = [];

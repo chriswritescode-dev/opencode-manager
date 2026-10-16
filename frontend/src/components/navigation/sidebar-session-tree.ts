@@ -7,6 +7,23 @@ import { partitionSessions, selectRootSessions } from '@/components/session/sess
 
 export const SIDEBAR_SESSIONS_PER_REPO = 10
 
+/** Collects the loaded session from each query result, dropping unresolved queries. */
+export const combineQuerySessions = (results: Array<{ data?: Session }>): Session[] =>
+  results.flatMap((result) => (result.data ? [result.data] : []))
+
+/** Appends extra sessions after the base list, deduplicating by id within both lists. */
+export function mergeExtraSessions(sessions: Session[], extraSessions: Session[]): Session[] {
+  if (extraSessions.length === 0) return sessions
+  const seen = new Set(sessions.map((session) => session.id))
+  const extras: Session[] = []
+  for (const session of extraSessions) {
+    if (seen.has(session.id)) continue
+    seen.add(session.id)
+    extras.push(session)
+  }
+  return extras.length === 0 ? sessions : [...sessions, ...extras]
+}
+
 export interface SidebarSessionItem {
   key: string
   session: Session
@@ -48,6 +65,22 @@ export function selectNavigableRepos(repos: Repo[]): Repo[] {
 
 export function buildRepoByDirectory(repos: Repo[]): Map<string, Repo> {
   return new Map(repos.map((repo) => [repo.fullPath, repo]))
+}
+
+export function normalizeDirectory(directory?: string | null): string | null {
+  return directory?.replace(/\/+$/, '') ?? null
+}
+
+export function repoMatchesDirectory(repo: Repo, directory?: string | null): boolean {
+  const normalizedDirectory = normalizeDirectory(directory)
+  if (!normalizedDirectory) return false
+
+  return [repo.fullPath, repo.localPath, repo.sourcePath]
+    .some((path) => normalizeDirectory(path) === normalizedDirectory)
+}
+
+export function findRepoForDirectory(repos: Repo[], directory?: string | null): Repo | undefined {
+  return repos.find((repo) => repoMatchesDirectory(repo, directory))
 }
 
 export function buildSidebarRepoGroups(input: {

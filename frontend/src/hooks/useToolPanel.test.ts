@@ -1,5 +1,33 @@
 import { describe, expect, it } from 'vitest'
-import { toggleToolDialogParams, toggleToolPanelParams } from './useToolPanel'
+import { createElement } from 'react'
+import { render, screen, waitFor } from '@testing-library/react'
+import { MemoryRouter, useLocation } from 'react-router-dom'
+import { isPanelTool, toggleToolDialogParams, toggleToolPanelParams, useToolPanel } from './useToolPanel'
+
+describe('activity tool', () => {
+  it('is a panel tool', () => {
+    expect(isPanelTool('activity')).toBe(true)
+  })
+
+  it('clears without opening a dialog when the panel is not docked', async () => {
+    function Probe() {
+      useToolPanel(false)
+      const location = useLocation()
+      return createElement('div', { 'data-testid': 'search' }, location.search)
+    }
+
+    render(
+      createElement(
+        MemoryRouter,
+        { initialEntries: ['/repos/1/sessions/abc?panel=activity'] },
+        createElement(Probe),
+      ),
+    )
+
+    await waitFor(() => expect(screen.getByTestId('search').textContent).not.toContain('panel=activity'))
+    expect(screen.getByTestId('search').textContent).not.toContain('dialog=activity')
+  })
+})
 
 describe('toggleToolPanelParams', () => {
   it('opens a tool, clears other tools owned params, and preserves unrelated params', () => {

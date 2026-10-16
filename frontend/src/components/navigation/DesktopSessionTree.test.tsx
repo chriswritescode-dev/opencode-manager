@@ -97,6 +97,10 @@ vi.mock('@/contexts/EventContext', () => ({
   }),
 }))
 
+vi.mock('@/hooks/useActiveWork', () => ({
+  useRepoActivityState: () => null,
+}))
+
 function createRepo(overrides: Partial<Repo> & { id: number; fullPath: string }): Repo {
   return {
     localPath: `repos/${overrides.id}`,

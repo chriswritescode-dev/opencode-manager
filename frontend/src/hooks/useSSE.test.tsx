@@ -67,14 +67,14 @@ describe('useSSE', () => {
     MockEventSource.instances = []
     shellApi.listShells.mockResolvedValue([])
     shellApi.removeShell.mockResolvedValue(undefined)
-    useSessionStatus.setState({ statuses: new Map(), statusCache: new Map(), statusRevisions: new Map(), knownSessions: new Set(), outcomes: new Map(), revision: 0 })
+    useSessionStatus.setState({ statuses: new Map(), statusCache: new Map(), statusRevisions: new Map(), knownSessions: new Set(), outcomes: new Map(), directories: new Map(), revision: 0 })
     useSendErrorStore.setState({ errors: {} })
     globalThis.EventSource = MockEventSource as unknown as typeof EventSource
     globalThis.fetch = vi.fn(() => Promise.resolve({ ok: true } as Response))
   })
 
   afterEach(() => {
-    useSessionStatus.setState({ statuses: new Map(), statusCache: new Map(), statusRevisions: new Map(), knownSessions: new Set(), outcomes: new Map(), revision: 0 })
+    useSessionStatus.setState({ statuses: new Map(), statusCache: new Map(), statusRevisions: new Map(), knownSessions: new Set(), outcomes: new Map(), directories: new Map(), revision: 0 })
     useSendErrorStore.setState({ errors: {} })
     globalThis.EventSource = originalEventSource
     globalThis.fetch = originalFetch

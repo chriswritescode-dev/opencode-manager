@@ -130,6 +130,11 @@ vi.mock('@/contexts/EventContext', async (importOriginal) => {
   }
 })
 
+vi.mock('@/hooks/useActiveWork', () => ({
+  useActiveWorkCounts: () => ({ needsInput: 0, running: 0 }),
+  useRepoActivityState: () => null,
+}))
+
 vi.mock('@/api/repos', () => ({
   getRepo: vi.fn(() => Promise.resolve({
     id: 1,

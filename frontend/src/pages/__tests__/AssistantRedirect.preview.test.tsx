@@ -39,6 +39,11 @@ vi.mock('@/components/repo/ResetPermissionsDialog', () => ({ ResetPermissionsDia
 vi.mock('@/components/source-control', () => ({ SourceControlPanel: () => null }))
 vi.mock('@/components/notifications/PendingActionsGroup', () => ({ PendingActionsGroup: () => null }))
 
+vi.mock('@/hooks/useActiveWork', () => ({
+  useActiveWorkCounts: () => ({ needsInput: 0, running: 0 }),
+  useRepoActivityState: () => null,
+}))
+
 vi.mock('@/components/terminal/TerminalView', async () => {
   const React = await import('react')
   return {

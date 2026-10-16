@@ -1519,6 +1519,41 @@ describe('Settings Routes - OpenCode Upgrade', () => {
     })
   })
 
+  describe('PATCH / - activity window validation', () => {
+    it.each([5, 45, 2000, 30.5])('rejects activityWindowMinutes %s with 400', async (minutes) => {
+      const res = await settingsApp.fetch(new Request('http://localhost/', {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ preferences: { activityWindowMinutes: minutes } }),
+      }))
+      const json = await res.json() as { error: string }
+
+      expect(res.status).toBe(400)
+      expect(json.error).toBe('Invalid settings data')
+      expect(mockUpdateSettings).not.toHaveBeenCalled()
+    })
+
+    it('accepts an allowed activityWindowMinutes value', async () => {
+      mockGetSettings.mockReturnValue({
+        preferences: { activityWindowMinutes: 30 },
+        updatedAt: 1,
+      })
+      mockUpdateSettings.mockReturnValue({
+        preferences: { activityWindowMinutes: 60 },
+        updatedAt: 2,
+      })
+
+      const res = await settingsApp.fetch(new Request('http://localhost/', {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ preferences: { activityWindowMinutes: 60 } }),
+      }))
+
+      expect(res.status).toBe(200)
+      expect(mockUpdateSettings).toHaveBeenCalledWith({ activityWindowMinutes: 60 }, 'default')
+    })
+  })
+
   describe('PATCH / - sandbox enable guard', () => {
     afterEach(() => {
       forceProcessAttestation(null)

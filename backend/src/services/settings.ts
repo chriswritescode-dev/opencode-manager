@@ -11,6 +11,8 @@ import type {
 import {
   UserPreferencesSchema,
   DEFAULT_USER_PREFERENCES,
+  DEFAULT_ACTIVITY_WINDOW_MINUTES,
+  isActivityWindowMinutes,
 } from '../types/settings'
 import { isColorThemeId, MANAGER_COLOR_THEME_ID } from '@opencode-manager/shared/themes'
 
@@ -67,6 +69,10 @@ export class SettingsService {
 
       if (!isColorThemeId(parsed.colorTheme)) {
         parsed.colorTheme = MANAGER_COLOR_THEME_ID
+      }
+
+      if (!isActivityWindowMinutes(parsed.activityWindowMinutes)) {
+        parsed.activityWindowMinutes = DEFAULT_ACTIVITY_WINDOW_MINUTES
       }
 
       const validated = UserPreferencesSchema.parse({
