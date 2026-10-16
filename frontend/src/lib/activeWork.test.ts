@@ -13,6 +13,7 @@ import {
   hasUnmatchedActiveDirectory,
   needsWorktreeLookup,
   repoActivityFromIndex,
+  resolveSessionBranch,
   rootSessionID,
   type ActiveWorktree,
 } from './activeWork'
@@ -609,5 +610,43 @@ describe('buildWorktreeActivity', () => {
     const main = createRepo({ id: 1, fullPath: '/repos/a' })
 
     expect(buildWorktreeActivity([main], [{ data: [main] }])).toEqual([])
+  })
+})
+
+describe('resolveSessionBranch', () => {
+  it('returns the matching worktree sibling branch, tolerating a trailing slash', () => {
+    const main = createRepo({ id: 1, fullPath: '/repos/a', currentBranch: 'main' })
+    const worktree = createWorktreeSibling(-1, '/repos/a/.worktrees/feature', 'feature', 'opencode')
+
+    expect(resolveSessionBranch(main, '/repos/a/.worktrees/feature', [main, worktree])).toBe('feature')
+    expect(resolveSessionBranch(main, '/repos/a/.worktrees/feature/', [main, worktree])).toBe('feature')
+  })
+
+  it('returns the branch of a registered worktree repo row without a worktree source', () => {
+    const main = createRepo({ id: 1, fullPath: '/repos/a', currentBranch: 'main' })
+    const registered = createRepo({ id: 2, fullPath: '/repos/a-feature', isWorktree: true, currentBranch: 'feature' })
+
+    expect(resolveSessionBranch(main, '/repos/a-feature', [main, registered])).toBe('feature')
+  })
+
+  it('returns null for a matching sibling with no branch instead of the repo branch', () => {
+    const main = createRepo({ id: 1, fullPath: '/repos/a', currentBranch: 'main' })
+    const detached = createRepo({ id: 2, fullPath: '/repos/a-detached', isWorktree: true })
+
+    expect(resolveSessionBranch(main, '/repos/a-detached', [main, detached])).toBeNull()
+  })
+
+  it('falls back to the repo branch when no sibling matches', () => {
+    const current = createRepo({ id: 1, fullPath: '/repos/a', currentBranch: 'main' })
+    const legacy = createRepo({ id: 1, fullPath: '/repos/a', branch: 'develop' })
+
+    expect(resolveSessionBranch(current, '/repos/other', [current])).toBe('main')
+    expect(resolveSessionBranch(legacy, '/repos/other', [legacy])).toBe('develop')
+  })
+
+  it('returns the repo branch when siblings are undefined', () => {
+    const main = createRepo({ id: 1, fullPath: '/repos/a', currentBranch: 'main' })
+
+    expect(resolveSessionBranch(main, '/repos/a', undefined)).toBe('main')
   })
 })

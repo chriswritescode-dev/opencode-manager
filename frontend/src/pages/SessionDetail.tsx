@@ -5,9 +5,10 @@ import { getRepo } from "@/api/repos";
 import { MessageThread } from "@/components/message/MessageThread";
 import { PromptInput, type PromptInputHandle } from "@/components/message/PromptInput";
 import { FloatingTTSButton } from '@/components/message/FloatingTTSButton'
-import { X, CornerUpLeft } from "lucide-react";
+import { X, CornerUpLeft, GitBranch } from "lucide-react";
 import { SquareFill } from "@/components/ui/square-fill";
 import { Header } from "@/components/ui/header";
+import { Badge } from "@/components/ui/badge";
 import { SessionPickerDialog } from "@/components/session/SessionPickerDialog";
 import { getRepoPath, getSessionListPath, getSessionPath } from '@/lib/navigation'
 import { FetchError } from '@/api/fetchWrapper'
@@ -19,6 +20,7 @@ import { useSession, useInterruptSession, useUpdateSession, useCreateSession } f
 import { useSessionTranscript } from "@/hooks/useSessionTranscript";
 import { useAutoOpenWalkthrough } from "@/hooks/useAutoOpenWalkthrough";
 import { useRepoActivity } from "@/hooks/useRepoActivity";
+import { useRepoSiblings } from "@/hooks/useRepoSiblings";
 import { useSSE } from "@/hooks/useSSE";
 import { useUIState } from "@/stores/uiStateStore";
 import { useSettings } from "@/hooks/useSettings";
@@ -39,6 +41,7 @@ import { useSpeakVisibleMessages } from "@/hooks/useSpeakVisibleMessages";
 import { showToast } from "@/lib/toast";
 import { getWorkspaceFilePath } from "@/lib/markdownLinks";
 import { getRepoDisplayName } from "@/lib/utils";
+import { resolveSessionBranch } from "@/lib/activeWork";
 import { RepoMcpDialog } from "@/components/repo/RepoMcpDialog";
 import { ProjectActionsMenu } from "@/components/repo/ProjectActionsMenu";
 import { RepoActionsDialog } from "@/components/repo/RepoActionsDialog";
@@ -189,6 +192,13 @@ export function SessionDetail() {
       ? resolvedSessionDirectory.directory
       : undefined
   ) ?? repoDirectory;
+
+  const { data: repoSiblings } = useRepoSiblings(!isAssistantSession && repo && !repo.isWorktree ? repoId : undefined);
+
+  const sessionBranch = useMemo(
+    () => (repo && !isAssistantSession ? resolveSessionBranch(repo, sessionDirectory, repoSiblings) : null),
+    [repo, isAssistantSession, sessionDirectory, repoSiblings],
+  );
 
   const { data: session, isLoading: sessionLoading, error: sessionQueryError } = useSession(
     sessionId,
@@ -719,8 +729,24 @@ export function SessionDetail() {
             <Header.EditableTitle
               value={session?.title || "Untitled Session"}
               onChange={handleRenameSession}
-              subtitle={<span className="text-highlight">{workspaceDisplayName}</span>}
+              subtitle={
+                <span className="text-highlight">
+                  {workspaceDisplayName}
+                  {sessionBranch && <span className="font-mono sm:hidden"> · {sessionBranch}</span>}
+                </span>
+              }
             />
+            {sessionBranch && (
+              <Badge
+                variant="outline"
+                data-testid="session-branch"
+                title={`Branch: ${sessionBranch}`}
+                className="hidden sm:inline-flex max-w-44 shrink-0 items-center gap-1 border-border bg-card px-2 font-mono text-[11px] font-normal text-muted-foreground"
+              >
+                <GitBranch className="h-3 w-3 shrink-0" />
+                <span className="truncate">{sessionBranch}</span>
+              </Badge>
+            )}
           </div>
           <Header.Actions className="gap-2 sm:gap-4">
             <div className="flex items-center gap-1">

@@ -58,6 +58,10 @@ vi.mock('@/hooks/useSessionTranscript', () => ({
   useSessionTranscript: mocks.useSessionTranscript,
 }))
 
+vi.mock('@/hooks/useRepoSiblings', () => ({
+  useRepoSiblings: vi.fn(() => ({ data: [] })),
+}))
+
 vi.mock('@/hooks/useModelSelection', () => ({
   useModelSelection: vi.fn(() => ({ model: null, modelString: null, modelRef: null })),
 }))

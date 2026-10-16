@@ -3,6 +3,7 @@ import type { ChildOutcome } from '@/lib/backgroundWork'
 import type { SessionStatusType } from '@/stores/sessionStatusStore'
 import { getSessionKey } from '@/lib/sessionKey'
 import { getSessionPath } from '@/lib/navigation'
+import { getRepoBranchLabel } from '@/lib/utils'
 import { findRepoForDirectory, normalizeDirectory } from '@/components/navigation/sidebar-session-tree'
 import { isWorktreeSibling, type RepoSibling } from '@opencode-manager/shared/utils'
 
@@ -257,6 +258,23 @@ export function buildWorktreeActivity(
   }
 
   return worktrees
+}
+
+/**
+ * The branch of the workspace a session runs in: the matching sibling's branch when the session
+ * directory is one of the repo's siblings (a worktree), otherwise the repo's own branch.
+ */
+export function resolveSessionBranch(
+  repo: Pick<Repo, 'currentBranch' | 'branch'>,
+  directory: string | null | undefined,
+  siblings?: ReadonlyArray<RepoSibling>,
+): string | null {
+  const normalized = normalizeDirectory(directory)
+  const sibling = normalized
+    ? siblings?.find((entry) => normalizeDirectory(entry.fullPath) === normalized)
+    : undefined
+  if (!sibling) return getRepoBranchLabel(repo)
+  return sibling.currentBranch ?? sibling.branch ?? null
 }
 
 /**
