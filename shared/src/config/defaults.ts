@@ -30,6 +30,7 @@ export const DEFAULTS = {
     BASE_PATH: './workspace',
     REPOS_DIR: 'repos',
     SCHEDULE_WORKTREES_DIR: 'schedule-worktrees',
+    WALKTHROUGHS_DIR: 'walkthroughs',
     CONFIG_DIR: '.config/opencode',
   },
 

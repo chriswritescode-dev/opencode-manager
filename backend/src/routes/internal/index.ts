@@ -21,6 +21,7 @@ import { createInternalSessionArtifactRoutes } from './session-artifacts'
 import { createSessionGoalRoutes } from '../session-goals'
 import { createMultiRunRoutes } from '../multi-runs'
 import { createChangeWalkthroughRoutes } from '../change-walkthroughs'
+import { createInternalWalkthroughSessionRoutes } from './walkthrough-sessions'
 import type { SessionPermissionModeService } from '../../services/session-permission-modes'
 import type { SessionSandboxService } from '../../services/session-sandbox'
 import type { RepoWorkspaceService } from '../../services/repo-workspace'
@@ -61,6 +62,7 @@ export function createInternalRoutes(
   app.route('/sessions', createInternalSessionRoutes(db, openCodeClient, permissionModes, repoWorkspaces))
   app.route('/assistant', createInternalAssistantRoutes(openCodeClient))
   app.route('/change-walkthroughs', createChangeWalkthroughRoutes(changeWalkthroughService))
+  app.route('/walkthrough-sessions', createInternalWalkthroughSessionRoutes(changeWalkthroughService))
   app.route('/session-artifacts', createInternalSessionArtifactRoutes(openCodeClient))
   app.route('/git-credentials', createInternalGitCredentialsRoutes(db))
   app.route('/sandbox', createInternalSandboxRoutes(db, sessionSandbox))

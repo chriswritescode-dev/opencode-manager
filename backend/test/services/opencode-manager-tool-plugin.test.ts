@@ -65,6 +65,14 @@ function artifactParamsSchema(tool: GeneratedTool): JsonSchema {
   return toolInputSchema(tool).properties?.params?.anyOf?.[3] ?? {}
 }
 
+function changesParamsSchema(tool: GeneratedTool): JsonSchema {
+  return toolInputSchema(tool).properties?.params?.anyOf?.[4] ?? {}
+}
+
+function publishParamsSchema(tool: GeneratedTool): JsonSchema {
+  return toolInputSchema(tool).properties?.params?.anyOf?.[5] ?? {}
+}
+
 async function runToolResult(
   tool: GeneratedTool,
   input: unknown,
@@ -170,8 +178,8 @@ describe('ocm-manager plugin', () => {
     expect(schema.type).toBe('object')
     expect(schema.required).toEqual(['action', 'params'])
     expect(schema.additionalProperties).toBe(false)
-    expect(schema.properties?.action?.enum).toEqual(['send_notification', 'request', 'open_walkthrough', 'show_artifact'])
-    expect(schema.properties?.params?.anyOf).toHaveLength(4)
+    expect(schema.properties?.action?.enum).toEqual(['send_notification', 'request', 'open_walkthrough', 'show_artifact', 'walkthrough_changes', 'publish_walkthrough'])
+    expect(schema.properties?.params?.anyOf).toHaveLength(6)
     expect(notificationParamsSchema(tool).required).toEqual(['title', 'body'])
     expect(requestParamsSchema(tool).required).toEqual(['method', 'path'])
     expect(walkthroughParamsSchema(tool).required).toBeUndefined()
@@ -190,14 +198,28 @@ describe('ocm-manager plugin', () => {
       'branch',
       'pullRequest',
     ])
+    expect(changesParamsSchema(tool).required).toBeUndefined()
+    expect(changesParamsSchema(tool).additionalProperties).toBe(false)
+    expect(changesParamsSchema(tool).properties?.file?.maxLength).toBe(1000)
+    expect(changesParamsSchema(tool).properties?.file?.minLength).toBe(1)
+    expect(publishParamsSchema(tool).required).toBeUndefined()
+    expect(publishParamsSchema(tool).additionalProperties).toBe(false)
   })
 
   it('lists the open_walkthrough action in the description', async () => {
     const tool = await loadTool(configHome)
 
     expect(tool.description).toContain('open_walkthrough')
-    expect(tool.description).toContain('request the change Walkthrough for the current session')
+    expect(tool.description).toContain('start a separate walkthrough session')
     expect(tool.description).toContain('when this session is open on desktop')
+  })
+
+  it('lists the walkthrough data actions in the description', async () => {
+    const tool = await loadTool(configHome)
+
+    expect(tool.description).toContain('walkthrough_changes')
+    expect(tool.description).toContain('publish_walkthrough')
+    expect(tool.description).toContain('only valid inside a walkthrough session')
   })
 
   it('lists the show_artifact action in the description', async () => {
@@ -316,7 +338,7 @@ describe('ocm-manager plugin', () => {
     expect(init.headers['content-type']).toBe('application/json')
     expect(JSON.parse(init.body)).toEqual({ source: { kind: 'staged' } })
     expect(result.content).toBe(
-      'Requested the walkthrough (2 stops). It opens in the Manager window when this session is open on desktop; otherwise the user can open it from this tool call.',
+      'The walkthrough is ready. It opens in the Manager window when this session is open on desktop; otherwise the user can open it from this tool call.',
     )
     expect(result.metadata).toBeUndefined()
   })
@@ -328,7 +350,7 @@ describe('ocm-manager plugin', () => {
     const result = await runToolResult(tool, { action: 'open_walkthrough', params: {} }, { sessionID: 'ses_abc' })
 
     expect(result.content).toBe(
-      'Requested the walkthrough; it is generating. It opens in the Manager window when this session is open on desktop; otherwise the user can open it from this tool call.',
+      'Started a walkthrough session that builds an interactive walkthrough. It opens in the Manager window when this session is open on desktop; otherwise the user can open it from this tool call.',
     )
     expect(result.metadata).toBeUndefined()
   })
@@ -345,6 +367,53 @@ describe('ocm-manager plugin', () => {
     expect(url).toBe('http://localhost:5003/api/internal/change-walkthroughs/ses_abc')
     expect(init.headers['content-type']).toBeUndefined()
     expect(init.body).toBeUndefined()
+  })
+
+  it('requests the outline through walkthrough_changes with no body', async () => {
+    const fetchMock = jsonResponse({ text: '## Outline' })
+    vi.stubGlobal('fetch', fetchMock)
+    const tool = await loadTool(configHome)
+
+    await expect(runTool(tool, { action: 'walkthrough_changes', params: {} }, { sessionID: 'ses_abc' })).resolves.toBe('## Outline')
+
+    expect(fetchMock).toHaveBeenCalledTimes(1)
+    const [url, init] = fetchMock.mock.calls[0] ?? []
+    expect(url).toBe('http://localhost:5003/api/internal/walkthrough-sessions/ses_abc/changes')
+    expect(init.method).toBe('POST')
+    expect(init.headers.Authorization).toBe('Bearer secret-token')
+    expect(init.headers['content-type']).toBeUndefined()
+    expect(init.body).toBeUndefined()
+  })
+
+  it('requests one file through walkthrough_changes', async () => {
+    const fetchMock = jsonResponse({ text: 'diff' })
+    vi.stubGlobal('fetch', fetchMock)
+    const tool = await loadTool(configHome)
+
+    await runTool(tool, { action: 'walkthrough_changes', params: { file: 'src/a.ts' } }, { sessionID: 'ses_abc' })
+
+    expect(fetchMock).toHaveBeenCalledTimes(1)
+    const [url, init] = fetchMock.mock.calls[0] ?? []
+    expect(url).toBe('http://localhost:5003/api/internal/walkthrough-sessions/ses_abc/changes')
+    expect(init.headers['content-type']).toBe('application/json')
+    expect(JSON.parse(init.body)).toEqual({ file: 'src/a.ts' })
+  })
+
+  it('publishes the walkthrough through the internal API and reports the path', async () => {
+    const fetchMock = jsonResponse({ path: '/workspace/walkthroughs/ses_abc/gen/index.html' })
+    vi.stubGlobal('fetch', fetchMock)
+    const tool = await loadTool(configHome)
+
+    const result = await runToolResult(tool, { action: 'publish_walkthrough', params: {} }, { sessionID: 'ses_abc' })
+
+    expect(fetchMock).toHaveBeenCalledTimes(1)
+    const [url, init] = fetchMock.mock.calls[0] ?? []
+    expect(url).toBe('http://localhost:5003/api/internal/walkthrough-sessions/ses_abc/publish')
+    expect(init.method).toBe('POST')
+    expect(result.content).toBe(
+      'Published the walkthrough from /workspace/walkthroughs/ses_abc/gen/index.html. The Manager walkthrough panel renders the current file; edit it and call publish_walkthrough again after significant changes.',
+    )
+    expect(result.metadata).toEqual({ path: '/workspace/walkthroughs/ses_abc/gen/index.html' })
   })
 
   it('resolves the artifact file through the internal API and reports the resolved path', async () => {
@@ -442,6 +511,8 @@ describe('ocm-manager plugin', () => {
   it('allows every route in the exported allow list', async () => {
     const tool = await loadTool(configHome)
 
+    expect(MANAGER_TOOL_ALLOWED_ROUTES.some((route) => route.includes('/walkthrough-sessions'))).toBe(false)
+
     for (const route of MANAGER_TOOL_ALLOWED_ROUTES) {
       const { method, path: pattern } = parseAllowedRoute(route)
       const path = pattern.split('/').map((segment) => (segment === '*' ? 'x' : segment)).join('/')
@@ -498,6 +569,8 @@ describe('ocm-manager plugin', () => {
       ['POST', '/multi-runs/1/entries/2/discard'],
       ['GET', '/change-walkthroughs/x'],
       ['POST', '/change-walkthroughs/x'],
+      ['POST', '/walkthrough-sessions/x/changes'],
+      ['POST', '/walkthrough-sessions/x/publish'],
     ] as const
 
     for (const [method, path] of deniedRoutes) {
@@ -723,7 +796,7 @@ describe.skipIf(SHIPPED_OPENCODE_BIN === null)('ocm-manager plugin against the s
       expect(managerTool?.function?.parameters).toMatchObject({
         type: 'object',
         properties: {
-          action: { type: 'string', enum: ['send_notification', 'request', 'open_walkthrough', 'show_artifact'] },
+          action: { type: 'string', enum: ['send_notification', 'request', 'open_walkthrough', 'show_artifact', 'walkthrough_changes', 'publish_walkthrough'] },
           params: {
             anyOf: [
               {
@@ -760,6 +833,17 @@ describe.skipIf(SHIPPED_OPENCODE_BIN === null)('ocm-manager plugin against the s
                   title: { type: 'string', minLength: 1, maxLength: 120 },
                   path: { type: 'string', minLength: 1, maxLength: 1000 },
                 },
+              },
+              {
+                type: 'object',
+                additionalProperties: false,
+                properties: {
+                  file: { type: 'string', minLength: 1, maxLength: 1000 },
+                },
+              },
+              {
+                type: 'object',
+                additionalProperties: false,
               },
             ],
           },

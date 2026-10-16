@@ -3,8 +3,8 @@ import { API_BASE_URL } from '@/config'
 import { walkthroughSourceKey } from '@opencode-manager/shared/schemas'
 import type {
   ChangeWalkthroughState,
-  ChangeWalkthroughStateWire,
   GenerateChangeWalkthroughRequest,
+  RefineChangeWalkthroughRequest,
   WalkthroughSource,
 } from '@opencode-manager/shared/schemas'
 
@@ -15,13 +15,9 @@ function walkthroughUrl(sessionId: string): string {
 export async function getChangeWalkthrough(
   sessionId: string,
   source: WalkthroughSource,
-  hunksFor?: string,
-): Promise<ChangeWalkthroughStateWire> {
-  return fetchWrapper<ChangeWalkthroughStateWire>(walkthroughUrl(sessionId), {
-    params: {
-      source: walkthroughSourceKey(source),
-      ...(hunksFor === undefined ? {} : { hunksFor }),
-    },
+): Promise<ChangeWalkthroughState> {
+  return fetchWrapper<ChangeWalkthroughState>(walkthroughUrl(sessionId), {
+    params: { source: walkthroughSourceKey(source) },
   })
 }
 
@@ -30,6 +26,17 @@ export async function generateChangeWalkthrough(
   request: GenerateChangeWalkthroughRequest,
 ): Promise<ChangeWalkthroughState> {
   return fetchWrapper<ChangeWalkthroughState>(walkthroughUrl(sessionId), {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(request),
+  })
+}
+
+export async function refineChangeWalkthrough(
+  sessionId: string,
+  request: RefineChangeWalkthroughRequest,
+): Promise<ChangeWalkthroughState> {
+  return fetchWrapper<ChangeWalkthroughState>(`${walkthroughUrl(sessionId)}/refine`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify(request),

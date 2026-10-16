@@ -1,189 +1,56 @@
-import { afterAll, afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
+import { beforeEach, describe, expect, it, vi } from 'vitest'
 import { Hono } from 'hono'
-import { Database } from 'bun:sqlite'
-import { mkdtempSync, rmSync, writeFileSync } from 'node:fs'
-import { tmpdir } from 'node:os'
-import path from 'node:path'
-import type { FileDiffInfo, SessionInfo } from '@opencode-manager/shared/opencode'
-import { walkthroughHunksIdentity } from '@opencode-manager/shared/schemas'
-import type { ChangeWalkthrough } from '@opencode-manager/shared/schemas'
-import { migrate } from '../../src/db/migration-runner'
-import { allMigrations } from '../../src/db/migrations'
-import { saveChangeWalkthrough } from '../../src/db/change-walkthroughs'
-import { ChangeWalkthroughService, computeChangesHash, computeHunkId } from '../../src/services/change-walkthroughs'
-import { SettingsService } from '../../src/services/settings'
+import type { ChangeWalkthroughState } from '@opencode-manager/shared/schemas'
 import { createChangeWalkthroughRoutes } from '../../src/routes/change-walkthroughs'
-import type { OpenCodeClient } from '../../src/services/opencode/client'
-import type { GitService } from '../../src/services/git/GitService'
-import { stubLoadedModelCatalog } from '../helpers/stub-opencode-client'
-import { createCommittedRepo, createGitAuthService, git, uniqueName } from '../helpers/git-fixtures'
+import { ChangeWalkthroughError } from '../../src/services/change-walkthrough-error'
+import type { ChangeWalkthroughService } from '../../src/services/change-walkthroughs'
 
 const SESSION_ID = 'ses_walkthrough'
 
-function change(file: string, patch: string, status: FileDiffInfo['status'] = 'modified'): FileDiffInfo {
-  return { file, patch, additions: 1, deletions: 1, status }
-}
-
-const CHANGES: FileDiffInfo[] = [change('src/a.ts', '@@ -1,2 +1,2 @@\n-const a = 1;\n+const a = 2;')]
-
-const HUNK_ID = computeHunkId(CHANGES[0]!.file, CHANGES[0]!.status, CHANGES[0]!.patch)
-
-const MODEL_REPLY = JSON.stringify({
-  summary: 'A summary',
-  stops: [{ title: 'First', explanation: 'Why', hunkIds: [HUNK_ID] }],
-})
-
-interface FakeSession {
-  info?: SessionInfo | Error
-  changes?: FileDiffInfo[] | Error
-}
-
-function createFakeClient(sessions: Record<string, FakeSession>) {
-  const generateCalls: string[] = []
-  let generateImpl: (prompt: string) => Promise<string> = async () => MODEL_REPLY
-
-  const client = {
-    api: {
-      ...stubLoadedModelCatalog(),
-      session: {
-        get: vi.fn(async ({ sessionID }: { sessionID: string }) => {
-          const config = sessions[sessionID]
-          if (!config) {
-            throw Object.assign(new Error('Session not found'), { _tag: 'SessionNotFoundError' })
-          }
-          if (config.info instanceof Error) {
-            throw config.info
-          }
-          return config.info ?? ({ id: sessionID, title: `Title ${sessionID}` } as SessionInfo)
-        }),
-        diff: vi.fn(async ({ sessionID }: { sessionID: string }) => {
-          const config = sessions[sessionID]
-          if (config?.changes instanceof Error) {
-            throw config.changes
-          }
-          return config?.changes ?? []
-        }),
-      },
-      message: {
-        list: vi.fn(async ({ sessionID }: { sessionID: string }) => {
-          if (!sessions[sessionID]) {
-            return { data: [], cursor: {} }
-          }
-          return { data: [{ id: 'msg-1', type: 'user', time: { created: 0 }, text: 'x' }], cursor: {} }
-        }),
-      },
-      generate: {
-        text: vi.fn(async (input: { prompt: string }) => {
-          generateCalls.push(input.prompt)
-          return { text: await generateImpl(input.prompt) }
-        }),
-      },
-    },
-    forwardRaw: vi.fn(),
-  } as unknown as OpenCodeClient
-
+function state(overrides: Partial<ChangeWalkthroughState> = {}): ChangeWalkthroughState {
   return {
-    client,
-    generateCalls,
-    setGenerateImpl: (impl: (prompt: string) => Promise<string>) => {
-      generateImpl = impl
-    },
+    walkthrough: null,
+    currentDiffHash: 'hash',
+    stale: false,
+    generating: false,
+    running: false,
+    error: null,
+    ...overrides,
   }
 }
 
-const routeRepoRoot = mkdtempSync(path.join(tmpdir(), 'walkthrough-routes-'))
-
-afterAll(() => {
-  rmSync(routeRepoRoot, { recursive: true, force: true })
-})
-
-function createRepoWithStagedChange(): string {
-  const repo = path.join(routeRepoRoot, uniqueName('repo'))
-  createCommittedRepo(repo)
-  writeFileSync(path.join(repo, 'a.txt'), 'one\n')
-  git(['add', 'a.txt'], repo)
-  git(['commit', '-m', 'add a'], repo)
-  writeFileSync(path.join(repo, 'a.txt'), 'two\n')
-  git(['add', 'a.txt'], repo)
-  return repo
-}
-
-function replyForPrompt(prompt: string, summary = 'A summary'): string {
-  const ids = [...prompt.matchAll(/^### (h_\S+) /gm)].map((match) => match[1]!)
-  return JSON.stringify({ summary, stops: [{ title: 'A', explanation: 'Why', hunkIds: ids }] })
-}
-
-function createDeferred<T>(): { promise: Promise<T>; resolve: (value: T) => void } {
-  let resolve!: (value: T) => void
-  const promise = new Promise<T>((res) => {
-    resolve = res
-  })
-  return { promise, resolve }
-}
-
 describe('change walkthrough routes', () => {
-  let db: Database
-  let sessions: Record<string, FakeSession>
-  let fake: ReturnType<typeof createFakeClient>
+  let getState: ReturnType<typeof vi.fn>
+  let startGeneration: ReturnType<typeof vi.fn>
+  let cancelGeneration: ReturnType<typeof vi.fn>
+  let refine: ReturnType<typeof vi.fn>
   let app: Hono
 
   beforeEach(() => {
-    db = new Database(':memory:')
-    migrate(db, allMigrations)
-    sessions = { [SESSION_ID]: { changes: CHANGES } }
-    fake = createFakeClient(sessions)
-    const service = new ChangeWalkthroughService(
-      db,
-      fake.client,
-      new SettingsService(db),
-      createGitAuthService(),
-      { fetchRemoteRef: vi.fn(async () => {}) } as unknown as GitService,
-    )
+    getState = vi.fn(async () => state())
+    startGeneration = vi.fn(async () => state({ generating: true }))
+    cancelGeneration = vi.fn(async () => true)
+    refine = vi.fn(async () => state({ generating: true }))
     app = new Hono()
-    app.route('/change-walkthroughs', createChangeWalkthroughRoutes(service))
+    app.route(
+      '/change-walkthroughs',
+      createChangeWalkthroughRoutes({ getState, startGeneration, cancelGeneration, refine } as unknown as ChangeWalkthroughService),
+    )
   })
 
-  afterEach(() => {
-    db.close()
-  })
-
-  it('GET returns the state for a session', async () => {
+  it('GET returns the state for the default source', async () => {
     const res = await app.request(`/change-walkthroughs/${SESSION_ID}`)
 
     expect(res.status).toBe(200)
-    const body = (await res.json()) as {
-      walkthrough: unknown
-      currentDiffHash: string | null
-      stale: boolean
-      generating: boolean
-      error: unknown
-    }
-    expect(body.walkthrough).toBeNull()
-    expect(body.stale).toBe(false)
-    expect(body.currentDiffHash).toEqual(expect.any(String))
-    expect(body.generating).toBe(false)
-    expect(body.error).toBeNull()
+    await expect(res.json()).resolves.toEqual(state())
+    expect(getState).toHaveBeenCalledWith(SESSION_ID, { kind: 'session' })
   })
 
-  it('GET returns 404 for a missing session', async () => {
-    const res = await app.request('/change-walkthroughs/ses_missing')
+  it('GET reads the requested source', async () => {
+    const res = await app.request(`/change-walkthroughs/${SESSION_ID}?source=staged`)
 
-    expect(res.status).toBe(404)
-    await expect(res.json()).resolves.toMatchObject({ error: 'Session not found' })
-  })
-
-  it('GET reads the diff of the requested source', async () => {
-    const repo = createRepoWithStagedChange()
-    sessions[SESSION_ID]!.info = { id: SESSION_ID, title: 'Title', location: { directory: repo } } as SessionInfo
-
-    const sessionRes = await app.request(`/change-walkthroughs/${SESSION_ID}`)
-    const sessionBody = (await sessionRes.json()) as { currentDiffHash: string | null }
-    const stagedRes = await app.request(`/change-walkthroughs/${SESSION_ID}?source=staged`)
-    const stagedBody = (await stagedRes.json()) as { currentDiffHash: string | null }
-
-    expect(stagedRes.status).toBe(200)
-    expect(typeof stagedBody.currentDiffHash).toBe('string')
-    expect(stagedBody.currentDiffHash).not.toBe(sessionBody.currentDiffHash)
+    expect(res.status).toBe(200)
+    expect(getState).toHaveBeenCalledWith(SESSION_ID, { kind: 'staged' })
   })
 
   it('GET rejects an invalid source with 400', async () => {
@@ -191,54 +58,19 @@ describe('change walkthrough routes', () => {
 
     expect(res.status).toBe(400)
     await expect(res.json()).resolves.toMatchObject({ error: 'Invalid walkthrough source' })
+    expect(getState).not.toHaveBeenCalled()
   })
 
-  it('GET omits hunks when hunksFor matches the stored identity and returns them otherwise', async () => {
-    const stored: ChangeWalkthrough = {
-      sessionId: SESSION_ID,
-      source: { kind: 'session' },
-      diffHash: computeChangesHash(CHANGES),
-      model: null,
-      summary: 'A summary',
-      stops: [
-        { id: 's_1', title: 'First', explanation: 'Why', hunkIds: [HUNK_ID], status: 'ready', explanationKey: null },
-      ],
-      hunks: [
-        {
-          id: HUNK_ID,
-          file: CHANGES[0]!.file,
-          status: CHANGES[0]!.status,
-          header: '@@ -1,2 +1,2 @@',
-          text: CHANGES[0]!.patch,
-          truncated: false,
-        },
-      ],
-      omittedFiles: [],
-      createdAt: 42,
-    }
-    saveChangeWalkthrough(db, stored)
-    const identity = walkthroughHunksIdentity(stored)
+  it('GET maps a service error', async () => {
+    getState.mockRejectedValueOnce(new ChangeWalkthroughError('Session not found', 404))
 
-    const fullRes = await app.request(`/change-walkthroughs/${SESSION_ID}`)
-    const compactRes = await app.request(
-      `/change-walkthroughs/${SESSION_ID}?hunksFor=${encodeURIComponent(identity)}`,
-    )
-    const mismatchRes = await app.request(`/change-walkthroughs/${SESSION_ID}?hunksFor=other`)
+    const res = await app.request('/change-walkthroughs/ses_missing')
 
-    const full = (await fullRes.json()) as { walkthrough: { hunks?: unknown[] } }
-    const compact = (await compactRes.json()) as { walkthrough: { hunks?: unknown[] } }
-    const mismatch = (await mismatchRes.json()) as { walkthrough: { hunks?: unknown[] } }
-
-    expect(full.walkthrough.hunks).toHaveLength(1)
-    expect(compact.walkthrough.hunks).toBeUndefined()
-    expect(mismatch.walkthrough.hunks).toHaveLength(1)
+    expect(res.status).toBe(404)
+    await expect(res.json()).resolves.toMatchObject({ error: 'Session not found' })
   })
 
-  it('POST stores the walkthrough under the requested source', async () => {
-    const repo = createRepoWithStagedChange()
-    sessions[SESSION_ID]!.info = { id: SESSION_ID, title: 'Title', location: { directory: repo } } as SessionInfo
-    fake.setGenerateImpl(async (prompt) => replyForPrompt(prompt, 'Staged summary'))
-
+  it('POST returns 202 while generating and forwards the body', async () => {
     const res = await app.request(`/change-walkthroughs/${SESSION_ID}`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
@@ -246,113 +78,33 @@ describe('change walkthrough routes', () => {
     })
 
     expect(res.status).toBe(202)
-
-    await vi.waitFor(async () => {
-      const getRes = await app.request(`/change-walkthroughs/${SESSION_ID}?source=staged`)
-      const state = (await getRes.json()) as { walkthrough: { summary: string } | null }
-      expect(state.walkthrough?.summary).toBe('Staged summary')
-    })
-  })
-
-  it('POST returns 202 while generating, then GET reads the walkthrough back', async () => {
-    let resolveGenerate: (text: string) => void = () => {}
-    fake.setGenerateImpl(() => new Promise<string>((resolve) => {
-      resolveGenerate = resolve
-    }))
-
-    const postRes = await app.request(`/change-walkthroughs/${SESSION_ID}`, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({}),
-    })
-
-    expect(postRes.status).toBe(202)
-    const body = (await postRes.json()) as { generating: boolean; walkthrough: unknown }
-    expect(body.generating).toBe(true)
-    expect(body.walkthrough).toBeNull()
-
-    resolveGenerate(MODEL_REPLY)
-
-    await vi.waitFor(async () => {
-      const getRes = await app.request(`/change-walkthroughs/${SESSION_ID}`)
-      const state = (await getRes.json()) as { walkthrough: { summary: string } | null; generating: boolean }
-      expect(state.generating).toBe(false)
-      expect(state.walkthrough?.summary).toBe('A summary')
-    })
+    expect(startGeneration).toHaveBeenCalledWith(SESSION_ID, { source: { kind: 'staged' } })
   })
 
   it('POST accepts an empty body', async () => {
-    let resolveGenerate: (text: string) => void = () => {}
-    fake.setGenerateImpl(() => new Promise<string>((resolve) => {
-      resolveGenerate = resolve
-    }))
-
     const res = await app.request(`/change-walkthroughs/${SESSION_ID}`, { method: 'POST' })
 
     expect(res.status).toBe(202)
-
-    resolveGenerate(MODEL_REPLY)
-    await vi.waitFor(async () => {
-      const getRes = await app.request(`/change-walkthroughs/${SESSION_ID}`)
-      const state = (await getRes.json()) as { walkthrough: unknown }
-      expect(state.walkthrough).not.toBeNull()
-    })
+    expect(startGeneration).toHaveBeenCalledWith(SESSION_ID, {})
   })
 
-  it('POST returns 200 with the stored walkthrough without a second model call', async () => {
-    await app.request(`/change-walkthroughs/${SESSION_ID}`, { method: 'POST' })
-    await vi.waitFor(async () => {
-      const getRes = await app.request(`/change-walkthroughs/${SESSION_ID}`)
-      const state = (await getRes.json()) as { walkthrough: unknown }
-      expect(state.walkthrough).not.toBeNull()
-    })
+  it('POST returns 200 when the walkthrough is ready', async () => {
+    startGeneration.mockResolvedValueOnce(state({ generating: false }))
 
-    const second = await app.request(`/change-walkthroughs/${SESSION_ID}`, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({}),
-    })
+    const res = await app.request(`/change-walkthroughs/${SESSION_ID}`, { method: 'POST' })
 
-    expect(second.status).toBe(200)
-    const body = (await second.json()) as { walkthrough: { summary: string }; generating: boolean }
-    expect(body.walkthrough.summary).toBe('A summary')
-    expect(body.generating).toBe(false)
-    expect(fake.generateCalls).toHaveLength(1)
+    expect(res.status).toBe(200)
   })
 
-  it('POST regenerates when asked', async () => {
-    await app.request(`/change-walkthroughs/${SESSION_ID}`, { method: 'POST' })
-    await vi.waitFor(async () => {
-      const getRes = await app.request(`/change-walkthroughs/${SESSION_ID}`)
-      const state = (await getRes.json()) as { walkthrough: unknown }
-      expect(state.walkthrough).not.toBeNull()
-    })
+  it('POST returns 409 with the service code', async () => {
+    startGeneration.mockRejectedValueOnce(
+      new ChangeWalkthroughError('No changes', 409, { code: 'WALKTHROUGH_NO_TEXT_CHANGES' }),
+    )
 
-    let resolveGenerate: (text: string) => void = () => {}
-    fake.setGenerateImpl(() => new Promise<string>((resolve) => {
-      resolveGenerate = resolve
-    }))
+    const res = await app.request(`/change-walkthroughs/${SESSION_ID}`, { method: 'POST' })
 
-    const res = await app.request(`/change-walkthroughs/${SESSION_ID}`, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ regenerate: true }),
-    })
-
-    expect(res.status).toBe(202)
-
-    resolveGenerate(MODEL_REPLY)
-    await vi.waitFor(() => expect(fake.generateCalls).toHaveLength(2))
-  })
-
-  it('POST rejects an invalid body with 400', async () => {
-    const res = await app.request(`/change-walkthroughs/${SESSION_ID}`, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ regenerate: 'yes' }),
-    })
-
-    expect(res.status).toBe(400)
+    expect(res.status).toBe(409)
+    await expect(res.json()).resolves.toMatchObject({ code: 'WALKTHROUGH_NO_TEXT_CHANGES' })
   })
 
   it('POST rejects malformed JSON with 400', async () => {
@@ -363,83 +115,49 @@ describe('change walkthrough routes', () => {
     })
 
     expect(res.status).toBe(400)
+    expect(startGeneration).not.toHaveBeenCalled()
   })
 
-  it('POST returns 409 with a code when there are no text changes', async () => {
-    sessions[SESSION_ID]!.changes = [
-      change('assets/logo.png', 'diff --git a/assets/logo.png b/assets/logo.png\nBinary files differ'),
-    ]
-
-    const res = await app.request(`/change-walkthroughs/${SESSION_ID}`, { method: 'POST' })
-
-    expect(res.status).toBe(409)
-    await expect(res.json()).resolves.toMatchObject({ code: 'WALKTHROUGH_NO_TEXT_CHANGES' })
-  })
-
-  it('POST records an unparseable model reply that GET surfaces', async () => {
-    fake.setGenerateImpl(async () => 'not json')
-
-    const res = await app.request(`/change-walkthroughs/${SESSION_ID}`, { method: 'POST' })
-    expect(res.status).toBe(202)
-
-    await vi.waitFor(async () => {
-      const getRes = await app.request(`/change-walkthroughs/${SESSION_ID}`)
-      const state = (await getRes.json()) as { generating: boolean; error: { code?: string } | null }
-      expect(state.generating).toBe(false)
-      expect(state.error?.code).toBe('WALKTHROUGH_UNPARSEABLE')
+  it('POST rejects an invalid body with 400', async () => {
+    const res = await app.request(`/change-walkthroughs/${SESSION_ID}`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ regenerate: 'yes' }),
     })
+
+    expect(res.status).toBe(400)
+    expect(startGeneration).not.toHaveBeenCalled()
   })
 
   it('POST returns 404 for a missing session', async () => {
+    startGeneration.mockRejectedValueOnce(new ChangeWalkthroughError('Session not found', 404))
+
     const res = await app.request('/change-walkthroughs/ses_missing', { method: 'POST' })
 
     expect(res.status).toBe(404)
   })
 
-  it('DELETE stops an in-flight generation', async () => {
-    fake.setGenerateImpl(() => new Promise<string>(() => {}))
+  it('DELETE awaits the cancel and returns 204', async () => {
+    let resolveCancel: (value: boolean) => void = () => {}
+    cancelGeneration.mockImplementationOnce(
+      () =>
+        new Promise<boolean>((resolve) => {
+          resolveCancel = resolve
+        }),
+    )
 
-    const postRes = await app.request(`/change-walkthroughs/${SESSION_ID}`, { method: 'POST' })
-    expect(postRes.status).toBe(202)
-
-    const res = await app.request(`/change-walkthroughs/${SESSION_ID}`, { method: 'DELETE' })
-    expect(res.status).toBe(204)
-
-    const getRes = await app.request(`/change-walkthroughs/${SESSION_ID}`)
-    const state = (await getRes.json()) as { generating: boolean; error: unknown }
-    expect(state.generating).toBe(false)
-    expect(state.error).toBeNull()
-  })
-
-  it('resolves a pending POST with the stopped state after DELETE cancels it', async () => {
-    const diff = createDeferred<FileDiffInfo[]>()
-    const diffMock = vi.mocked(fake.client.api.session.diff)
-    diffMock.mockImplementationOnce(() => diff.promise)
-
-    const postPromise = app.request(`/change-walkthroughs/${SESSION_ID}`, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({}),
+    let settled = false
+    const pending = Promise.resolve(app.request(`/change-walkthroughs/${SESSION_ID}`, { method: 'DELETE' })).then((res) => {
+      settled = true
+      return res
     })
 
-    await vi.waitFor(() => expect(diffMock).toHaveBeenCalledTimes(1))
+    await vi.waitFor(() => expect(cancelGeneration).toHaveBeenCalledWith(SESSION_ID, { kind: 'session' }))
+    await Promise.resolve()
+    expect(settled).toBe(false)
 
-    const deleteRes = await app.request(`/change-walkthroughs/${SESSION_ID}`, { method: 'DELETE' })
-    expect(deleteRes.status).toBe(204)
-
-    diff.resolve(CHANGES)
-
-    const postRes = await postPromise
-    expect(postRes.status).toBe(200)
-    const body = (await postRes.json()) as { generating: boolean; walkthrough: unknown; error: unknown }
-    expect(body.generating).toBe(false)
-    expect(body.walkthrough).toBeNull()
-    expect(body.error).toBeNull()
-  })
-
-  it('DELETE is a no-op when nothing is generating', async () => {
-    const res = await app.request(`/change-walkthroughs/${SESSION_ID}`, { method: 'DELETE' })
-
+    resolveCancel(true)
+    const res = await pending
     expect(res.status).toBe(204)
   })
 
@@ -447,5 +165,61 @@ describe('change walkthrough routes', () => {
     const res = await app.request(`/change-walkthroughs/${SESSION_ID}?source=branch:-x`, { method: 'DELETE' })
 
     expect(res.status).toBe(400)
+    expect(cancelGeneration).not.toHaveBeenCalled()
+  })
+
+  it('POST refine returns 202 and forwards the text', async () => {
+    const res = await app.request(`/change-walkthroughs/${SESSION_ID}/refine`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ text: 'Explain the risk section' }),
+    })
+
+    expect(res.status).toBe(202)
+    await expect(res.json()).resolves.toMatchObject({ generating: true })
+    expect(refine).toHaveBeenCalledWith(SESSION_ID, { text: 'Explain the risk section' })
+  })
+
+  it('POST refine forwards the requested source', async () => {
+    await app.request(`/change-walkthroughs/${SESSION_ID}/refine`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ source: { kind: 'staged' }, text: 'more' }),
+    })
+
+    expect(refine).toHaveBeenCalledWith(SESSION_ID, { source: { kind: 'staged' }, text: 'more' })
+  })
+
+  it('POST refine rejects empty text with 400', async () => {
+    const res = await app.request(`/change-walkthroughs/${SESSION_ID}/refine`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ text: '   ' }),
+    })
+
+    expect(res.status).toBe(400)
+    expect(refine).not.toHaveBeenCalled()
+  })
+
+  it('POST refine rejects an empty body with 400', async () => {
+    const res = await app.request(`/change-walkthroughs/${SESSION_ID}/refine`, { method: 'POST' })
+
+    expect(res.status).toBe(400)
+    expect(refine).not.toHaveBeenCalled()
+  })
+
+  it('POST refine maps a service error', async () => {
+    refine.mockRejectedValueOnce(
+      new ChangeWalkthroughError('The walkthrough is still being built', 409, { code: 'WALKTHROUGH_BUSY' }),
+    )
+
+    const res = await app.request(`/change-walkthroughs/${SESSION_ID}/refine`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ text: 'more' }),
+    })
+
+    expect(res.status).toBe(409)
+    await expect(res.json()).resolves.toMatchObject({ code: 'WALKTHROUGH_BUSY' })
   })
 })

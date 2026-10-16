@@ -15,6 +15,28 @@ export class SessionArtifactError extends ServiceError {
 }
 
 /**
+ * Validates that a resolved path is a regular `.html`/`.htm` file within the artifact size limit.
+ * This is the single owner of the HTML artifact file rules; callers that already know the path is
+ * contained pass the lexical display path for error messages.
+ */
+export async function assertHtmlArtifactFile(filePath: string, displayPath: string): Promise<void> {
+  const stats = await fs.stat(filePath).catch(() => {
+    throw new SessionArtifactError(`Artifact file not found: ${displayPath}`, 404)
+  })
+  if (!stats.isFile()) {
+    throw new SessionArtifactError(`Artifact file not found: ${displayPath}`, 404)
+  }
+
+  if (!ARTIFACT_EXTENSIONS.has(path.extname(filePath).toLowerCase())) {
+    throw new SessionArtifactError('Artifact must be an .html file', 400)
+  }
+
+  if (stats.size > ARTIFACT_LIMITS.FILE_MAX_BYTES) {
+    throw new SessionArtifactError('Artifact file exceeds 5 MB', 413)
+  }
+}
+
+/**
  * Resolves an `ocm` `show_artifact` path to the absolute path of a self-contained HTML file inside the session
  * directory, rejecting paths that escape it (including through symlinks), non-HTML files and oversized files.
  * Symlinks are resolved for validation only; the returned path stays lexical so callers can map it by the
@@ -48,20 +70,7 @@ export async function resolveSessionArtifactFile(
     throw new SessionArtifactError(`Artifact path must be inside the session directory ${sessionDirectory}`, 400)
   }
 
-  const stats = await fs.stat(realFile).catch(() => {
-    throw new SessionArtifactError(`Artifact file not found: ${artifactPath}`, 404)
-  })
-  if (!stats.isFile()) {
-    throw new SessionArtifactError(`Artifact file not found: ${artifactPath}`, 404)
-  }
-
-  if (!ARTIFACT_EXTENSIONS.has(path.extname(realFile).toLowerCase())) {
-    throw new SessionArtifactError('Artifact must be an .html file', 400)
-  }
-
-  if (stats.size > ARTIFACT_LIMITS.FILE_MAX_BYTES) {
-    throw new SessionArtifactError('Artifact file exceeds 5 MB', 413)
-  }
+  await assertHtmlArtifactFile(realFile, artifactPath)
 
   return resolved
 }

@@ -79,6 +79,6 @@ describe('internal/change-walkthroughs routes', () => {
     })
 
     expect(res.status).toBe(200)
-    expect(getState).toHaveBeenCalledWith(SESSION_ID, { kind: 'staged' }, undefined)
+    expect(getState).toHaveBeenCalledWith(SESSION_ID, { kind: 'staged' })
   })
 })

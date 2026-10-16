@@ -23,7 +23,7 @@ export function WalkthroughSettings() {
         <div className="min-w-0 space-y-0.5">
           <Label htmlFor="walkthroughModel">Walkthrough model</Label>
           <p className="text-sm text-muted-foreground">
-            Model that writes change walkthroughs. A small, fast model works well. Leave empty to use the session's model, or the OpenCode default.
+            Model of the walkthrough session that builds the walkthrough UI. Leave empty to use the session's model, or the OpenCode default.
           </p>
         </div>
         <ModelCombobox

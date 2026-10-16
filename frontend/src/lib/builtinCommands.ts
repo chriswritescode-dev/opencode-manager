@@ -59,7 +59,7 @@ export const BUILTIN_COMMANDS: readonly BuiltinCommand[] = [
   { name: 'details', description: 'Toggle tool execution details', action: 'toggleDetails' },
   { name: 'mcp', description: 'Manage MCP servers', action: 'showMcp' },
   { name: 'skills', description: 'Load a skill', action: 'showSkills' },
-  { name: 'walkthrough', description: 'Walk through the session changes, explained step by step', action: 'showWalkthrough' },
+  { name: 'walkthrough', description: 'Build an interactive walkthrough of the session changes', action: 'showWalkthrough' },
   { name: 'settings', description: 'Open settings', action: 'showSettings' },
   { name: 'connect', description: 'Connect a provider', action: 'connectProvider' },
 ]

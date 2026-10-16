@@ -2,23 +2,27 @@ import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
 import { act, renderHook, waitFor } from '@testing-library/react'
 import type { ReactNode } from 'react'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
-import { changeWalkthroughQueryKey, useCancelChangeWalkthrough, useChangeWalkthrough, useGenerateChangeWalkthrough } from './useChangeWalkthrough'
-import { DEFAULT_WALKTHROUGH_SOURCE, walkthroughHunksIdentity } from '@opencode-manager/shared/schemas'
-import type {
-  ChangeWalkthrough,
-  ChangeWalkthroughState,
-  ChangeWalkthroughStateWire,
-} from '@opencode-manager/shared/schemas'
+import {
+  changeWalkthroughQueryKey,
+  useCancelChangeWalkthrough,
+  useChangeWalkthrough,
+  useGenerateChangeWalkthrough,
+  useRefineChangeWalkthrough,
+} from './useChangeWalkthrough'
+import { DEFAULT_WALKTHROUGH_SOURCE } from '@opencode-manager/shared/schemas'
+import type { ChangeWalkthrough, ChangeWalkthroughState } from '@opencode-manager/shared/schemas'
 
 const mocks = vi.hoisted(() => ({
   getChangeWalkthrough: vi.fn(),
   generateChangeWalkthrough: vi.fn(),
+  refineChangeWalkthrough: vi.fn(),
   cancelChangeWalkthrough: vi.fn(),
 }))
 
 vi.mock('@/api/changeWalkthroughs', () => ({
   getChangeWalkthrough: mocks.getChangeWalkthrough,
   generateChangeWalkthrough: mocks.generateChangeWalkthrough,
+  refineChangeWalkthrough: mocks.refineChangeWalkthrough,
   cancelChangeWalkthrough: mocks.cancelChangeWalkthrough,
 }))
 
@@ -26,16 +30,19 @@ const walkthroughForA: ChangeWalkthrough = {
   sessionId: 'ses_A',
   source: { kind: 'session' },
   diffHash: 'hash-a',
+  walkthroughSessionId: 'ses_walk',
+  status: 'ready',
+  artifactPath: '/workspace/walkthroughs/ses_A/gen/index.html',
+  publishedAt: 1,
+  executionStartedAt: null,
+  error: null,
   model: null,
-  summary: 'A summary',
-  stops: [],
-  hunks: [],
-  omittedFiles: [],
   createdAt: 1,
+  updatedAt: 2,
 }
 
 function state(overrides: Partial<ChangeWalkthroughState> = {}): ChangeWalkthroughState {
-  return { walkthrough: null, currentDiffHash: 'hash-a', stale: false, generating: false, error: null, ...overrides }
+  return { walkthrough: null, currentDiffHash: 'hash-a', stale: false, generating: false, running: false, error: null, ...overrides }
 }
 
 function deferred<T>() {
@@ -122,51 +129,44 @@ describe('useChangeWalkthrough', () => {
     }
   })
 
-  it('merges cached hunks when the server omits them for a matching identity', async () => {
+  it('keeps polling while a published walkthrough is still running', async () => {
     vi.useFakeTimers({ shouldAdvanceTime: true })
     try {
       const queryClient = new QueryClient({ defaultOptions: { queries: { retry: false } } })
-      const walkthroughWithHunks: ChangeWalkthrough = {
-        ...walkthroughForA,
-        hunks: [
-          {
-            id: 'h_1',
-            file: 'src/a.ts',
-            status: 'modified',
-            header: '@@ -1 +1 @@',
-            text: '@@ -1 +1 @@\n-a\n+b',
-            truncated: false,
-          },
-        ],
-      }
-      const compact: ChangeWalkthroughStateWire = {
-        ...state({ generating: true }),
-        walkthrough: { ...walkthroughWithHunks, hunks: undefined },
-      }
       mocks.getChangeWalkthrough
-        .mockResolvedValueOnce(state({ walkthrough: walkthroughWithHunks, generating: true }))
-        .mockResolvedValueOnce(compact)
+        .mockResolvedValueOnce(state({ walkthrough: walkthroughForA, running: true }))
+        .mockResolvedValueOnce(state({ walkthrough: walkthroughForA }))
 
       const { result } = renderHook(() => useChangeWalkthrough('ses_A', true, DEFAULT_WALKTHROUGH_SOURCE), {
         wrapper: createWrapper(queryClient),
       })
 
-      await waitFor(() => expect(result.current.data?.walkthrough?.hunks).toHaveLength(1))
+      await waitFor(() => expect(result.current.data?.running).toBe(true))
 
       await act(async () => {
         await vi.advanceTimersByTimeAsync(2_000)
       })
 
-      await waitFor(() => expect(mocks.getChangeWalkthrough).toHaveBeenCalledTimes(2))
-      expect(mocks.getChangeWalkthrough).toHaveBeenLastCalledWith(
-        'ses_A',
-        DEFAULT_WALKTHROUGH_SOURCE,
-        walkthroughHunksIdentity(walkthroughWithHunks),
-      )
-      expect(result.current.data?.walkthrough).toEqual(walkthroughWithHunks)
+      await waitFor(() => expect(result.current.data?.running).toBe(false))
+
+      await act(async () => {
+        await vi.advanceTimersByTimeAsync(10_000)
+      })
+      expect(mocks.getChangeWalkthrough).toHaveBeenCalledTimes(2)
     } finally {
       vi.useRealTimers()
     }
+  })
+
+  it('requests the walkthrough state for the session and source only', async () => {
+    const queryClient = new QueryClient({ defaultOptions: { queries: { retry: false } } })
+    mocks.getChangeWalkthrough.mockResolvedValue(state())
+
+    renderHook(() => useChangeWalkthrough('ses_A', true, { kind: 'staged' }), {
+      wrapper: createWrapper(queryClient),
+    })
+
+    await waitFor(() => expect(mocks.getChangeWalkthrough).toHaveBeenCalledWith('ses_A', { kind: 'staged' }))
   })
 
   it('invalidating the session key refetches every source', async () => {
@@ -190,17 +190,46 @@ describe('useChangeWalkthrough', () => {
   })
 })
 
+describe('useRefineChangeWalkthrough', () => {
+  beforeEach(() => {
+    vi.clearAllMocks()
+  })
+
+  it('sends the refine text for the source and caches the returned state', async () => {
+    const queryClient = new QueryClient({ defaultOptions: { queries: { retry: false } } })
+    mocks.refineChangeWalkthrough.mockResolvedValue(state({ generating: true }))
+
+    const { result } = renderHook(() => useRefineChangeWalkthrough('ses_A', DEFAULT_WALKTHROUGH_SOURCE), {
+      wrapper: createWrapper(queryClient),
+    })
+
+    await act(async () => {
+      result.current.mutate('tighten the introduction')
+    })
+
+    expect(mocks.refineChangeWalkthrough).toHaveBeenCalledWith('ses_A', {
+      source: { kind: 'session' },
+      text: 'tighten the introduction',
+    })
+    await waitFor(() => {
+      expect(queryClient.getQueryData(changeWalkthroughQueryKey('ses_A', 'session'))).toEqual(
+        state({ generating: true }),
+      )
+    })
+  })
+})
+
 describe('useCancelChangeWalkthrough', () => {
   beforeEach(() => {
     vi.clearAllMocks()
   })
 
-  it('cancels the walkthrough and optimistically clears the generating state', async () => {
+  it('cancels the walkthrough and optimistically clears the generating and running state', async () => {
     const queryClient = new QueryClient({ defaultOptions: { queries: { retry: false } } })
     const queryKey = changeWalkthroughQueryKey('ses_A', 'session')
-    queryClient.setQueryData(queryKey, state({ generating: true }))
+    queryClient.setQueryData(queryKey, state({ generating: true, running: true }))
     mocks.cancelChangeWalkthrough.mockResolvedValue(undefined)
-    mocks.getChangeWalkthrough.mockResolvedValue(state({ generating: false }))
+    mocks.getChangeWalkthrough.mockResolvedValue(state())
 
     const { result } = renderHook(() => useCancelChangeWalkthrough('ses_A', DEFAULT_WALKTHROUGH_SOURCE), {
       wrapper: createWrapper(queryClient),
@@ -214,5 +243,6 @@ describe('useCancelChangeWalkthrough', () => {
     await waitFor(() => {
       expect(queryClient.getQueryData<ChangeWalkthroughState>(queryKey)?.generating).toBe(false)
     })
+    expect(queryClient.getQueryData<ChangeWalkthroughState>(queryKey)?.running).toBe(false)
   })
 })

@@ -5,6 +5,7 @@ import type { FileInfo } from '@/types/files'
 import { getFileApiUrl } from '@/api/files'
 import { saveFileFromUrl } from '@/lib/download'
 import { VirtualizedTextView, type VirtualizedTextViewHandle } from '@/components/ui/virtualized-text-view'
+import { SandboxedHtmlFrame } from '@/components/ui/sandboxed-html-frame'
 import { MarkdownRenderer } from './MarkdownRenderer'
 
 
@@ -234,14 +235,7 @@ export const FilePreview = memo(function FilePreview({ file, hideHeader = false,
     }
 
     if (showHtmlPreview) {
-      return (
-        <iframe
-          src={rawFileUrl}
-          title={file.name}
-          sandbox="allow-scripts"
-          className="w-full h-full border-0 bg-white"
-        />
-      )
+      return <SandboxedHtmlFrame src={rawFileUrl} title={file.name} className="h-full" />
     }
 
     if (shouldVirtualize && isTextFile) {

@@ -1,48 +1,32 @@
-import { createContext, memo, useCallback, useContext, useEffect, useRef, useState } from 'react'
-import type { ReactNode, RefObject } from 'react'
-import { ChevronDown, ChevronLeft, ChevronRight, Loader2, RefreshCw, Square } from 'lucide-react'
+import { createContext, memo, useCallback, useContext, useEffect, useState } from 'react'
+import type { ReactNode } from 'react'
+import { Loader2, RefreshCw, Square } from 'lucide-react'
 import { SideDrawer, SideDrawerHeader } from '@/components/ui/side-drawer'
 import { Button } from '@/components/ui/button'
-import {
-  DropdownMenu,
-  DropdownMenuContent,
-  DropdownMenuRadioGroup,
-  DropdownMenuRadioItem,
-  DropdownMenuSeparator,
-  DropdownMenuTrigger,
-} from '@/components/ui/dropdown-menu'
-import { Badge } from '@/components/ui/badge'
 import { Input } from '@/components/ui/input'
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
-import { DiffLines } from '@/components/file-browser/DiffLines'
-import { ScheduleRunMarkdown } from '@/components/schedules/ScheduleRunMarkdown'
+import { Textarea } from '@/components/ui/textarea'
+import { SandboxedHtmlFrame } from '@/components/ui/sandboxed-html-frame'
+import { getFileApiUrl } from '@/api/files'
 import {
   useCancelChangeWalkthrough,
   useChangeWalkthrough,
   useGenerateChangeWalkthrough,
+  useRefineChangeWalkthrough,
 } from '@/hooks/useChangeWalkthrough'
-import { GIT_STATUS_COLORS, GIT_STATUS_LABELS } from '@/lib/git-status-styles'
-import { cn } from '@/lib/utils'
 import {
   DEFAULT_WALKTHROUGH_SOURCE,
   describeWalkthroughSource,
   toWalkthroughSource,
   walkthroughSourceKey,
-  WalkthroughOmittedFileSchema,
+  WALKTHROUGH_REFINE_MAX_CHARS,
 } from '@opencode-manager/shared/schemas'
-import type {
-  ChangeWalkthrough,
-  WalkthroughHunk,
-  WalkthroughOmittedFile,
-  WalkthroughSource,
-  WalkthroughStop,
-} from '@opencode-manager/shared/schemas'
+import type { ChangeWalkthrough, WalkthroughSource } from '@opencode-manager/shared/schemas'
 import { formatOpenCodeModelRef, type ModelRef } from '@opencode-manager/shared/opencode'
 
 interface WalkthroughErrorLike {
   message?: string
   code?: string
-  details?: unknown
 }
 
 function errorCode(error: unknown): string | undefined {
@@ -54,20 +38,7 @@ function isNoChangesError(error: unknown): boolean {
   return code === 'WALKTHROUGH_NO_CHANGES' || code === 'WALKTHROUGH_NO_TEXT_CHANGES'
 }
 
-function isContextLimitError(error: unknown): boolean {
-  return errorCode(error) === 'WALKTHROUGH_CONTEXT_LIMIT'
-}
-
-function omittedFilesFromError(error: unknown): WalkthroughOmittedFile[] {
-  const details = (error as { details?: { omittedFiles?: unknown } } | null)?.details
-  const parsed = WalkthroughOmittedFileSchema.array().safeParse(details?.omittedFiles)
-  return parsed.success ? parsed.data : []
-}
-
 function walkthroughErrorMessage(error: unknown): string {
-  if (isContextLimitError(error)) {
-    return 'These changes are too large to walk through'
-  }
   const message = (error as WalkthroughErrorLike | null)?.message
   if (isNoChangesError(error)) {
     return message || 'This session has no text changes to walk through'
@@ -75,74 +46,20 @@ function walkthroughErrorMessage(error: unknown): string {
   return message || 'Failed to load the walkthrough'
 }
 
-const OMITTED_REASON_LABELS: Record<WalkthroughOmittedFile['reason'], string> = {
-  binary: 'binary file',
-  budget: 'over the diff budget',
-  renamed: 'renamed',
-  modeChange: 'mode change',
-}
-
-function OmittedFiles({ files }: { files: WalkthroughOmittedFile[] }) {
-  return (
-    <div className="space-y-1 rounded-md border border-border bg-muted/20 p-3">
-      <p className="text-xs font-medium text-muted-foreground">Omitted files</p>
-      {files.map((omitted) => (
-        <p key={omitted.file} className="break-all text-xs text-muted-foreground">
-          {omitted.file} — {OMITTED_REASON_LABELS[omitted.reason]}
-        </p>
-      ))}
-    </div>
-  )
-}
-
-function isMechanicalHunk(hunk: WalkthroughHunk): boolean {
-  return hunk.additions !== undefined || hunk.deletions !== undefined
-}
-
-function MechanicalHunks({ hunks }: { hunks: WalkthroughHunk[] }) {
-  return (
-    <ul aria-label="Mechanical file summaries" className="space-y-3">
-      {hunks.map((hunk) => (
-        <li key={hunk.id} className="overflow-hidden rounded-md border border-border">
-          <div className="flex items-center gap-2 px-3 py-1.5">
-            <span className="min-w-0 flex-1 truncate text-xs font-medium text-foreground" title={hunk.file}>
-              {hunk.file}
-            </span>
-            <span className={`text-xs ${GIT_STATUS_COLORS[hunk.status]}`}>
-              {GIT_STATUS_LABELS[hunk.status]}
-            </span>
-            <span className="text-xs text-diff-add">+{hunk.additions ?? 0}</span>
-            <span className="text-xs text-diff-delete">-{hunk.deletions ?? 0}</span>
-          </div>
-          {hunk.text.length > 0 ? (
-            <div className="overflow-x-auto border-t border-border">
-              <DiffLines diff={hunk.text} />
-            </div>
-          ) : null}
-        </li>
-      ))}
-    </ul>
-  )
-}
-
 interface ChangesWalkthroughContextValue {
   isLoading: boolean
   walkthrough: ChangeWalkthrough | null
   stale: boolean
   generating: boolean
+  running: boolean
   error: unknown
-  contextLimitFiles: WalkthroughOmittedFile[]
   generate: () => void
   regenerate: () => void
   stop: () => void
   stopping: boolean
-  stops: WalkthroughStop[]
-  stopIndex: number | null
-  selectedStop: WalkthroughStop | null
-  selectedHunks: WalkthroughHunk[]
-  selectStop: (index: number | null) => void
-  scrollRef: RefObject<HTMLDivElement | null>
-  failedStopCount: number
+  refine: (text: string) => void
+  refining: boolean
+  onOpenSession?: (walkthroughSessionId: string) => void
   source: WalkthroughSource
   setSource: (source: WalkthroughSource) => void
   sourceKind: WalkthroughSource['kind']
@@ -259,6 +176,7 @@ interface ChangesWalkthroughProviderProps {
   active: boolean
   sourceRequest?: WalkthroughSourceRequest
   model?: ModelRef | null
+  onOpenSession?: (walkthroughSessionId: string) => void
   children: ReactNode
 }
 
@@ -268,6 +186,7 @@ export function ChangesWalkthroughProvider({
   active,
   sourceRequest,
   model,
+  onOpenSession,
   children,
 }: ChangesWalkthroughProviderProps) {
   const [source, setSource] = useState<WalkthroughSource>(DEFAULT_WALKTHROUGH_SOURCE)
@@ -278,17 +197,18 @@ export function ChangesWalkthroughProvider({
   const stateQuery = useChangeWalkthrough(sessionId, active, source)
   const generate = useGenerateChangeWalkthrough(sessionId, source)
   const cancel = useCancelChangeWalkthrough(sessionId, source)
+  const refineMutation = useRefineChangeWalkthrough(sessionId, source)
   const stop = useCallback(() => cancel.mutate(), [cancel])
   const resetGenerate = generate.reset
-  const [stopIndex, setStopIndex] = useState<number | null>(null)
-  const scrollRef = useRef<HTMLDivElement>(null)
+  const resetRefine = refineMutation.reset
 
   const state = stateQuery.data
   const walkthrough = state?.walkthrough ?? null
   const stale = state?.stale ?? false
-  const generating = generate.isPending || (state?.generating ?? false)
-  const error = generate.error ?? stateQuery.error ?? (generating ? null : state?.error ?? null)
-  const contextLimitFiles = isContextLimitError(error) ? omittedFilesFromError(error) : []
+  const generating = generate.isPending || refineMutation.isPending || (state?.generating ?? false)
+  const running = refineMutation.isPending || (state?.running ?? false)
+  const error =
+    generate.error ?? refineMutation.error ?? stateQuery.error ?? (generating ? null : state?.error ?? null)
 
   const selectedSource = toWalkthroughSource({ kind: sourceKind, base: baseInput, number: Number(numberInput) })
   const sourcePending =
@@ -297,12 +217,8 @@ export function ChangesWalkthroughProvider({
 
   useEffect(() => {
     resetGenerate()
-  }, [active, sessionId, sourceKey, resetGenerate])
-
-  useEffect(() => {
-    setStopIndex(null)
-    scrollRef.current?.scrollTo?.({ top: 0 })
-  }, [active, sessionId, sourceKey, walkthrough?.createdAt])
+    resetRefine()
+  }, [active, sessionId, sourceKey, resetGenerate, resetRefine])
 
   useEffect(() => {
     if (!sourceRequest) return
@@ -318,43 +234,22 @@ export function ChangesWalkthroughProvider({
     }
   }, [sourceRequest])
 
-  const hunksById = new Map(walkthrough?.hunks.map((hunk) => [hunk.id, hunk]) ?? [])
-  const stops = walkthrough?.stops ?? []
-  const clampedIndex = stopIndex === null || stops.length === 0 ? null : Math.min(stopIndex, stops.length - 1)
-  const selectedStop = clampedIndex === null ? null : stops[clampedIndex] ?? null
-  const selectedHunks = (selectedStop?.hunkIds ?? [])
-    .map((id) => hunksById.get(id))
-    .filter((hunk): hunk is WalkthroughHunk => hunk !== undefined)
-
-  const failedStopCount = stops.filter(
-    (stop) => stop.status === 'failed' || (stop.status === 'pending' && !generating),
-  ).length
-
   const modelRequest = model ? { model: formatOpenCodeModelRef(model) } : {}
-
-  const selectStop = useCallback((index: number | null) => {
-    setStopIndex(index)
-    scrollRef.current?.scrollTo?.({ top: 0 })
-  }, [])
 
   const value: ChangesWalkthroughContextValue = {
     isLoading: stateQuery.isLoading,
     walkthrough,
     stale,
     generating,
+    running,
     error,
-    contextLimitFiles,
     generate: () => generate.mutate(modelRequest),
     regenerate: () => generate.mutate({ ...modelRequest, regenerate: true }),
     stop,
     stopping: cancel.isPending,
-    stops,
-    stopIndex: clampedIndex,
-    selectedStop,
-    selectedHunks,
-    selectStop,
-    scrollRef,
-    failedStopCount,
+    refine: (text: string) => refineMutation.mutate(text),
+    refining: refineMutation.isPending,
+    onOpenSession,
     source,
     setSource,
     sourceKind,
@@ -369,62 +264,11 @@ export function ChangesWalkthroughProvider({
   return <ChangesWalkthroughContext.Provider value={value}>{children}</ChangesWalkthroughContext.Provider>
 }
 
-/** Previous/next page controls (overview, then each stop) for the walkthrough chrome; renders nothing until a walkthrough has stops. */
-export const ChangesWalkthroughNav = memo(function ChangesWalkthroughNav() {
-  const { stops, stopIndex, selectStop } = useChangesWalkthrough()
+/** Stops the in-flight walkthrough session from the chrome; renders nothing when the walkthrough is neither generating nor running. */
+export const ChangesWalkthroughCancel = memo(function ChangesWalkthroughCancel() {
+  const { generating, running, stopping, stop } = useChangesWalkthrough()
 
-  if (stops.length === 0) return null
-
-  return (
-    <div className="flex shrink-0 items-center gap-1">
-      <Button
-        variant="outline"
-        size="icon-sm"
-        aria-label="Previous stop"
-        onClick={() => selectStop(stopIndex === null || stopIndex === 0 ? null : stopIndex - 1)}
-        disabled={stopIndex === null}
-      >
-        <ChevronLeft />
-      </Button>
-      <DropdownMenu>
-        <DropdownMenuTrigger asChild>
-          <Button variant="ghost" size="sm" aria-label="Jump to page" className="h-7 gap-1 px-2 text-xs text-muted-foreground">
-            {stopIndex === null ? 'Overview' : `${stopIndex + 1} of ${stops.length}`}
-            <ChevronDown className="h-3 w-3" />
-          </Button>
-        </DropdownMenuTrigger>
-        <DropdownMenuContent align="end" className="max-h-[60vh] w-72 overflow-y-auto">
-          <DropdownMenuRadioGroup
-            value={stopIndex === null ? 'overview' : String(stopIndex)}
-            onValueChange={(value) => selectStop(value === 'overview' ? null : Number(value))}
-          >
-            <DropdownMenuRadioItem value="overview">Overview</DropdownMenuRadioItem>
-            <DropdownMenuSeparator />
-            {stops.map((stop, index) => (
-              <DropdownMenuRadioItem key={index} value={String(index)}>
-                {index + 1}. {stop.title}
-              </DropdownMenuRadioItem>
-            ))}
-          </DropdownMenuRadioGroup>
-        </DropdownMenuContent>
-      </DropdownMenu>
-      <Button
-        variant="outline"
-        size="icon-sm"
-        aria-label="Next stop"
-        onClick={() => selectStop(stopIndex === null ? 0 : stopIndex + 1)}
-        disabled={stopIndex !== null && stopIndex >= stops.length - 1}
-      >
-        <ChevronRight />
-      </Button>
-    </div>
-  )
-})
-
-export const ChangesWalkthroughStop = memo(function ChangesWalkthroughStop() {
-  const { generating, stopping, stop } = useChangesWalkthrough()
-
-  if (!generating) return null
+  if (!generating && !running) return null
 
   return (
     <Button
@@ -460,67 +304,6 @@ export const ChangesWalkthroughRegenerate = memo(function ChangesWalkthroughRege
   )
 })
 
-const SKELETON_BAR = 'rounded bg-muted animate-pulse motion-reduce:animate-none'
-
-function WalkthroughSkeletonBar({ className }: { className?: string }) {
-  return <div className={cn(SKELETON_BAR, 'h-3.5', className)} />
-}
-
-function WalkthroughHunkSkeleton() {
-  const diffLineWidths = ['w-3/4', 'w-1/2', 'w-5/6', 'w-2/3', 'w-1/3', 'w-4/5']
-  return (
-    <div className="overflow-hidden rounded-md border border-border">
-      <div className="flex items-center gap-2 border-b border-border bg-muted/30 px-3 py-1.5">
-        <WalkthroughSkeletonBar className="h-3 w-2/5" />
-        <div className="ml-auto flex items-center gap-1.5">
-          <WalkthroughSkeletonBar className="h-3.5 w-10 rounded-full" />
-          <WalkthroughSkeletonBar className="h-3.5 w-6 rounded-full" />
-          <WalkthroughSkeletonBar className="h-3.5 w-6 rounded-full" />
-        </div>
-      </div>
-      <div className="space-y-1.5 p-3">
-        {diffLineWidths.map((width, row) => (
-          <div key={row} className="flex items-center gap-3">
-            <WalkthroughSkeletonBar className="h-3 w-6 shrink-0" />
-            <WalkthroughSkeletonBar className={cn('h-3', width)} />
-          </div>
-        ))}
-      </div>
-    </div>
-  )
-}
-
-/** Placeholder that mirrors the walkthrough layout while it loads or generates; the overview variant adds the title and stop list. */
-function WalkthroughSkeleton({ variant = 'overview' }: { variant?: 'overview' | 'body' }) {
-  return (
-    <div data-testid="walkthrough-skeleton" aria-hidden="true" className="space-y-4">
-      {variant === 'overview' ? <WalkthroughSkeletonBar className="h-4 w-1/3" /> : null}
-
-      <div className="space-y-2">
-        <WalkthroughSkeletonBar className="w-full" />
-        <WalkthroughSkeletonBar className="w-11/12" />
-        <WalkthroughSkeletonBar className="w-4/5" />
-      </div>
-
-      <div className="space-y-3">
-        <WalkthroughHunkSkeleton />
-        {variant === 'overview' ? <WalkthroughHunkSkeleton /> : null}
-      </div>
-
-      {variant === 'overview' ? (
-        <div className="space-y-1">
-          {['w-2/3', 'w-1/2', 'w-3/5'].map((width, row) => (
-            <div key={row} className="flex items-center gap-2 px-2 py-1">
-              <div className={cn(SKELETON_BAR, 'h-3 w-4 shrink-0 bg-muted/60')} />
-              <div className={cn(SKELETON_BAR, 'h-3 bg-muted/60', width)} />
-            </div>
-          ))}
-        </div>
-      ) : null}
-    </div>
-  )
-}
-
 /** Renders the walkthrough body; the provider and its chrome supply the surrounding panel. */
 export const ChangesWalkthroughView = memo(function ChangesWalkthroughView() {
   const {
@@ -528,27 +311,31 @@ export const ChangesWalkthroughView = memo(function ChangesWalkthroughView() {
     walkthrough,
     stale,
     generating,
+    running,
     error,
-    contextLimitFiles,
     generate,
-    stops,
-    selectedStop,
-    selectedHunks,
-    selectStop,
-    scrollRef,
-    failedStopCount,
+    refine,
+    refining,
+    onOpenSession,
     source,
     sourcePending,
   } = useChangesWalkthrough()
+  const [reload, setReload] = useState(0)
+  const [refineText, setRefineText] = useState('')
 
-  const readyStopCount = stops.filter((stop) => stop.status === 'ready').length
-  const mechanicalHunks = selectedHunks.filter(isMechanicalHunk)
-  const diffHunks = selectedHunks.filter((hunk) => !isMechanicalHunk(hunk))
-  const showInitialSkeleton = isLoading || (generating && (walkthrough === null || stops.length === 0))
+  const artifactPath = walkthrough?.artifactPath ?? null
+  const published = walkthrough?.publishedAt != null && artifactPath !== null
+  const artifactUrl = artifactPath === null ? null : getFileApiUrl(artifactPath, { params: { raw: true } })
+  const walkthroughSessionId = walkthrough?.walkthroughSessionId ?? null
+
+  const openSession =
+    walkthroughSessionId && onOpenSession
+      ? () => onOpenSession(walkthroughSessionId)
+      : null
 
   if (sourcePending) {
     return (
-      <div className="min-h-0 flex-1 space-y-4 overflow-y-auto p-4">
+      <div className="flex min-h-0 flex-1 flex-col gap-4 overflow-y-auto p-4">
         <WalkthroughSourceInputs />
         <p className="text-sm text-muted-foreground">Enter a pull request number</p>
       </div>
@@ -556,133 +343,114 @@ export const ChangesWalkthroughView = memo(function ChangesWalkthroughView() {
   }
 
   return (
-    <div ref={scrollRef} className="min-h-0 flex-1 space-y-4 overflow-y-auto p-4">
+    <div className="flex min-h-0 flex-1 flex-col gap-4 overflow-y-auto p-4">
       <WalkthroughSourceInputs />
 
-      {error ? (
-        <div className="space-y-2">
-          <p className="text-sm text-destructive">{walkthroughErrorMessage(error)}</p>
-          {contextLimitFiles.length > 0 ? <OmittedFiles files={contextLimitFiles} /> : null}
+      {error ? <p className="text-sm text-destructive">{walkthroughErrorMessage(error)}</p> : null}
+
+      {stale && !generating ? (
+        <div className="flex flex-wrap items-center justify-between gap-2 rounded-md border border-warning/40 bg-warning/10 px-3 py-2">
+          <p className="text-sm text-warning">
+            Changes have been updated since this walkthrough was generated
+          </p>
+          <Button variant="outline" size="sm" onClick={generate}>
+            <RefreshCw className="mr-2 h-3.5 w-3.5" />
+            Update walkthrough
+          </Button>
         </div>
       ) : null}
 
-      {showInitialSkeleton ? (
+      {isLoading && !walkthrough && !generating ? (
+        <p role="status" aria-live="polite" className="text-sm text-muted-foreground">
+          Loading the walkthrough…
+        </p>
+      ) : null}
+
+      {!isLoading && !walkthrough && !generating ? (
         <div className="space-y-4">
-          <p role="status" aria-live="polite" className="text-sm text-muted-foreground">
-            {generating ? 'Planning the walkthrough…' : 'Loading the walkthrough…'}
+          <p className="text-sm text-muted-foreground">
+            Build an interactive walkthrough of {describeWalkthroughSource(source)}.
           </p>
-          <WalkthroughSkeleton />
+          <Button onClick={generate}>Generate walkthrough</Button>
         </div>
-      ) : (
-        <>
-          {generating ? (
-            <div className="flex items-center gap-2 rounded-md border border-border bg-muted/20 px-3 py-2 text-sm text-muted-foreground">
-              <Loader2 className="h-4 w-4 shrink-0 animate-spin motion-reduce:animate-none" />
-              <span>{`Generating walkthrough… ${readyStopCount} of ${stops.length} stops explained`}</span>
-            </div>
+      ) : null}
+
+      {generating && !published ? (
+        <div className="flex flex-wrap items-center gap-2 rounded-md border border-border bg-muted/20 px-3 py-2 text-sm text-muted-foreground">
+          <Loader2 className="h-4 w-4 shrink-0 animate-spin motion-reduce:animate-none" />
+          <span role="status" aria-live="polite">
+            Building the walkthrough in a separate session…
+          </span>
+          {openSession ? (
+            <Button variant="outline" size="sm" className="ml-auto" onClick={openSession}>
+              Open walkthrough session
+            </Button>
           ) : null}
+        </div>
+      ) : null}
 
-          {!walkthrough ? (
-            <div className="space-y-4">
-              <p className="text-sm text-muted-foreground">
-                Generate a step-by-step walkthrough of {describeWalkthroughSource(source)}.
-              </p>
-              <Button onClick={generate}>Generate walkthrough</Button>
-            </div>
-          ) : (
-            <div className="space-y-4">
-              {stale && !generating ? (
-                <div className="flex flex-wrap items-center justify-between gap-2 rounded-md border border-warning/40 bg-warning/10 px-3 py-2">
-                  <p className="text-sm text-warning">
-                    Changes have been updated since this walkthrough was generated
-                  </p>
-                  <Button variant="outline" size="sm" onClick={generate}>
-                    <RefreshCw className="mr-2 h-3.5 w-3.5" />
-                    Update walkthrough
-                  </Button>
-                </div>
-              ) : null}
+      {published && artifactUrl !== null ? (
+        <div className="flex min-h-0 flex-1 flex-col gap-2">
+          <div className="flex flex-wrap items-center gap-2">
+            <Button
+              variant="outline"
+              size="sm"
+              aria-label="Reload walkthrough"
+              onClick={() => setReload((value) => value + 1)}
+            >
+              <RefreshCw className="h-3.5 w-3.5" />
+              Reload
+            </Button>
+            <Button asChild variant="outline" size="sm">
+              <a href={artifactUrl} target="_blank" rel="noreferrer">
+                Open in new tab
+              </a>
+            </Button>
+            {openSession ? (
+              <Button variant="outline" size="sm" onClick={openSession}>
+                Open walkthrough session
+              </Button>
+            ) : null}
+            {generating || running ? (
+              <span role="status" aria-live="polite" className="text-sm text-muted-foreground">
+                Refining…
+              </span>
+            ) : null}
+          </div>
+          <SandboxedHtmlFrame
+            src={artifactUrl}
+            title="Change walkthrough"
+            reloadKey={`${walkthrough?.publishedAt}:${reload}`}
+            className="min-h-0 flex-1"
+          />
+        </div>
+      ) : null}
 
-              {failedStopCount > 0 && !generating ? (
-                <div className="flex flex-wrap items-center justify-between gap-2 rounded-md border border-border bg-muted/20 px-3 py-2">
-                  <p className="text-sm text-muted-foreground">Some stops could not be explained</p>
-                  <Button variant="outline" size="sm" onClick={generate}>
-                    Retry unexplained stops
-                  </Button>
-                </div>
-              ) : null}
-
-              {selectedStop ? (
-                <div className="space-y-3">
-                  <h3 className="text-sm font-semibold text-foreground">{selectedStop.title}</h3>
-                  {selectedStop.status === 'ready' ? (
-                    <ScheduleRunMarkdown content={selectedStop.explanation} />
-                  ) : generating && selectedStop.status === 'pending' ? (
-                    <div className="space-y-3">
-                      <p role="status" aria-live="polite" className="text-sm text-muted-foreground">
-                        Explaining this stop…
-                      </p>
-                      <WalkthroughSkeleton variant="body" />
-                    </div>
-                  ) : (
-                    <p className="text-sm text-muted-foreground">
-                      {generating ? 'Explaining this stop…' : 'This stop could not be explained.'}
-                    </p>
-                  )}
-                  {mechanicalHunks.length > 0 ? <MechanicalHunks hunks={mechanicalHunks} /> : null}
-                  {diffHunks.map((hunk) => (
-                    <div key={hunk.id} className="overflow-hidden rounded-md border border-border">
-                      <div className="flex items-center gap-2 border-b border-border bg-muted/30 px-3 py-1.5">
-                        <span className="min-w-0 flex-1 truncate text-xs font-medium text-foreground" title={hunk.file}>
-                          {hunk.file}
-                        </span>
-                        {hunk.truncated ? <Badge variant="outline">truncated</Badge> : null}
-                        <span className={`text-xs ${GIT_STATUS_COLORS[hunk.status]}`}>
-                          {GIT_STATUS_LABELS[hunk.status]}
-                        </span>
-                      </div>
-                      <div className="overflow-x-auto">
-                        <DiffLines diff={hunk.text} />
-                      </div>
-                    </div>
-                  ))}
-                </div>
-              ) : (
-                <>
-                  <ScheduleRunMarkdown content={walkthrough.summary} />
-
-                  {stops.length > 0 ? (
-                    <ol className="space-y-0.5">
-                      {stops.map((stop, index) => (
-                        <li key={stop.id}>
-                          <button
-                            type="button"
-                            onClick={() => selectStop(index)}
-                            className="w-full rounded-md px-2 py-1 text-left text-sm text-muted-foreground hover:bg-accent/20 hover:text-foreground"
-                          >
-                            <span className="flex items-center gap-2">
-                              <span className="min-w-0 flex-1 truncate">
-                                {index + 1}. {stop.title}
-                              </span>
-                              {stop.status === 'pending' && generating ? (
-                                <Loader2 className="h-3.5 w-3.5 shrink-0 animate-spin" aria-label="Explaining" />
-                              ) : stop.status === 'failed' || stop.status === 'pending' ? (
-                                <span className="shrink-0 text-xs text-muted-foreground">not explained</span>
-                              ) : null}
-                            </span>
-                          </button>
-                        </li>
-                      ))}
-                    </ol>
-                  ) : null}
-
-                  {walkthrough.omittedFiles.length > 0 ? <OmittedFiles files={walkthrough.omittedFiles} /> : null}
-                </>
-              )}
-            </div>
-          )}
-        </>
-      )}
+      {walkthroughSessionId && !generating && !running ? (
+        <form
+          className="space-y-2"
+          onSubmit={(event) => {
+            event.preventDefault()
+            const text = refineText.trim()
+            if (text.length === 0 || refining) return
+            refine(text)
+            setRefineText('')
+          }}
+        >
+          <Textarea
+            aria-label="Refine walkthrough"
+            placeholder="Ask for a change to the walkthrough"
+            maxLength={WALKTHROUGH_REFINE_MAX_CHARS}
+            value={refineText}
+            onChange={(event) => setRefineText(event.target.value)}
+          />
+          <div className="flex justify-end">
+            <Button type="submit" size="sm" disabled={refineText.trim().length === 0 || refining}>
+              {refining ? 'Sending…' : 'Send'}
+            </Button>
+          </div>
+        </form>
+      ) : null}
     </div>
   )
 })
@@ -693,6 +461,7 @@ interface ChangesWalkthroughSheetProps {
   onOpenChange: (open: boolean) => void
   sourceRequest?: WalkthroughSourceRequest
   model?: ModelRef | null
+  onOpenSession?: (walkthroughSessionId: string) => void
 }
 
 /** The walkthrough as a right-side sheet: full screen on mobile, a drawer over the page on desktop. */
@@ -702,21 +471,28 @@ export function ChangesWalkthroughSheet({
   onOpenChange,
   sourceRequest,
   model,
+  onOpenSession,
 }: ChangesWalkthroughSheetProps) {
   const close = useCallback(() => onOpenChange(false), [onOpenChange])
 
   return (
     <SideDrawer isOpen={open} onClose={close} side="right" widthClass="w-full sm:w-[min(640px,92vw)]" ariaLabel="Change walkthrough">
-      <ChangesWalkthroughProvider key={sessionId} sessionId={sessionId} active={open} sourceRequest={sourceRequest} model={model}>
+      <ChangesWalkthroughProvider
+        key={sessionId}
+        sessionId={sessionId}
+        active={open}
+        sourceRequest={sourceRequest}
+        model={model}
+        onOpenSession={onOpenSession}
+      >
         <SideDrawerHeader
           title="Change walkthrough"
           onClose={close}
           actions={
             <>
               <ChangesWalkthroughSourcePicker />
-              <ChangesWalkthroughStop />
+              <ChangesWalkthroughCancel />
               <ChangesWalkthroughRegenerate />
-              <ChangesWalkthroughNav />
             </>
           }
         />
