@@ -127,6 +127,7 @@ function createActivityItem(id: string, title: string, repoId: number, repoName:
     session,
     repo,
     state: 'recent',
+    updatedAt: session.time.updated,
     path: `/repos/${repoId}/sessions/${id}`,
   }
 }

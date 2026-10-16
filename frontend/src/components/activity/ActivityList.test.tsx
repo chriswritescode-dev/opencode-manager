@@ -48,6 +48,7 @@ function createItem(
   return {
     key: `${overrides.repo.id}:${overrides.session.id}`,
     path: `/repos/${overrides.repo.id}/sessions/${overrides.session.id}`,
+    updatedAt: overrides.session.time.updated,
     ...overrides,
   }
 }

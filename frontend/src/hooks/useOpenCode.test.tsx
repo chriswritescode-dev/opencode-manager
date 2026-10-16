@@ -174,6 +174,61 @@ describe('useSessionsAcrossDirectories', () => {
     expect(result.current.data.map((session) => session.id)).toEqual(['ses_all1', 'ses_all2'])
   })
 
+  it('requests child sessions and records includeChildren in the query key', async () => {
+    mocks.listSessionPage.mockResolvedValue({ items: [sessionInfo('ses_child', '/w/a')] })
+
+    const queryClient = createQueryClient()
+    const { result } = renderHook(
+      () => useSessionsAcrossDirectories(['/w/a'], { includeChildren: true }),
+      { wrapper: createWrapper(queryClient) },
+    )
+
+    await waitFor(() => {
+      expect(result.current.isLoading).toBe(false)
+    })
+
+    expect(mocks.listSessionPage).toHaveBeenCalledWith({
+      directory: '/w/a',
+      limit: 25,
+      order: 'desc',
+      search: undefined,
+      includeChildren: true,
+    })
+    expect(queryClient.getQueryCache().getAll()[0]?.queryKey).toEqual([
+      'opencode',
+      'sessions',
+      '/w/a',
+      {
+        search: undefined,
+        limit: 25,
+        allDirectories: false,
+        project: undefined,
+        subpath: undefined,
+        includeChildren: true,
+      },
+    ])
+  })
+
+  it('keeps root-only and include-children lists in distinct cache entries', async () => {
+    mocks.listSessionPage.mockResolvedValue({ items: [] })
+
+    const queryClient = createQueryClient()
+    const wrapper = createWrapper(queryClient)
+    renderHook(() => useSessionsAcrossDirectories(['/w/a']), { wrapper })
+    renderHook(() => useSessionsAcrossDirectories(['/w/a'], { includeChildren: true }), { wrapper })
+
+    await waitFor(() => {
+      expect(mocks.listSessionPage).toHaveBeenCalledTimes(2)
+    })
+
+    const optionObjects = queryClient
+      .getQueryCache()
+      .getAll()
+      .map((query) => query.queryKey[3] as { includeChildren?: boolean })
+    expect(optionObjects.some((options) => options.includeChildren === true)).toBe(true)
+    expect(optionObjects.some((options) => options.includeChildren === false)).toBe(true)
+  })
+
   it('pages a project scope through one cursor query with project and subpath', async () => {
     mocks.listSessionPage.mockImplementation(async ({ cursor }: { cursor?: string }) => {
       if (cursor === 'cursor_project') {

@@ -1,4 +1,3 @@
-import { useMemo } from 'react'
 import { useSettings } from '@/hooks/useSettings'
 import { Label } from '@/components/ui/label'
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
@@ -8,15 +7,6 @@ import { formatActivityWindow } from '@/lib/activeWork'
 export function ActivitySettings() {
   const { preferences, updateSettings } = useSettings()
   const activityWindowMinutes = preferences?.activityWindowMinutes ?? DEFAULT_ACTIVITY_WINDOW_MINUTES
-
-  const windowOptions = useMemo(() => {
-    const options: number[] = [...ACTIVITY_WINDOW_MINUTE_OPTIONS]
-    if (!options.includes(activityWindowMinutes)) {
-      options.push(activityWindowMinutes)
-      options.sort((a, b) => a - b)
-    }
-    return options
-  }, [activityWindowMinutes])
 
   return (
     <div className="space-y-6">
@@ -31,13 +21,18 @@ export function ActivitySettings() {
         </div>
         <Select
           value={String(activityWindowMinutes)}
-          onValueChange={(value) => updateSettings({ activityWindowMinutes: Number(value) })}
+          onValueChange={(value) => {
+            const minutes = ACTIVITY_WINDOW_MINUTE_OPTIONS.find((option) => String(option) === value)
+            if (minutes !== undefined) {
+              updateSettings({ activityWindowMinutes: minutes })
+            }
+          }}
         >
           <SelectTrigger id="activityWindowMinutes" className="w-full shrink-0 sm:w-40">
             <SelectValue placeholder="Select a window" />
           </SelectTrigger>
           <SelectContent>
-            {windowOptions.map((minutes) => (
+            {ACTIVITY_WINDOW_MINUTE_OPTIONS.map((minutes) => (
               <SelectItem key={minutes} value={String(minutes)}>
                 {formatActivityWindow(minutes)}
               </SelectItem>

@@ -49,13 +49,6 @@ describe('ActivitySettings', () => {
     expect(screen.getByRole('combobox', { name: 'Recent activity window' })).toHaveTextContent('2 hours')
   })
 
-  it('shows a stored window that is not a preset option', () => {
-    mockUseSettings({ preferences: { ...basePreferences, activityWindowMinutes: 45 } })
-    render(<ActivitySettings />)
-
-    expect(screen.getByRole('combobox', { name: 'Recent activity window' })).toHaveTextContent('45 minutes')
-  })
-
   it('saves the chosen window in minutes', async () => {
     const user = userEvent.setup()
     const updateSettings = vi.fn()

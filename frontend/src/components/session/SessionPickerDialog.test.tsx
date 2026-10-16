@@ -131,11 +131,13 @@ function activeWorkItem(
   state: ActiveWorkState = 'recent',
 ): ActiveWorkItem {
   const itemRepo = mocks.repos.find((candidate) => candidate.fullPath === directory) ?? mocks.repos[0]
+  const itemSession = session(id, title, directory)
   return {
     key: `${directory}:${id}`,
-    session: session(id, title, directory),
+    session: itemSession,
     repo: itemRepo,
     state,
+    updatedAt: itemSession.time.updated,
     path: `/repos/${itemRepo.id}/sessions/${id}`,
   }
 }

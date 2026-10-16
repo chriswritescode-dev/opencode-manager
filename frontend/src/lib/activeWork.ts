@@ -32,6 +32,7 @@ export interface ActiveWorkItem {
   session: Session
   repo: Repo
   state: ActiveWorkState
+  updatedAt: number
   outcome?: ChildOutcome
   path: string
 }
@@ -186,17 +187,30 @@ export function repoActivityFromIndex(
 /**
  * Groups the given sessions into needs-input, running, and recent roots. A session appears in
  * exactly one group (needs-input over running over recent) and only when it resolves to a repo.
+ * The input may mix roots and children; children never become items, but their latest update time
+ * rolls up into the root's `updatedAt` and decides the recent window and ordering.
  */
 export function buildActiveWork(input: {
   now: number
   windowMs: number
   repos: Repo[]
   sessions: Session[]
+  parents: ReadonlyMap<string, string | null>
   roots: { needsInput: Set<string>; running: Set<string> }
   outcomes: ReadonlyMap<string, ChildOutcome>
 }): ActiveWorkGroups {
-  const { now, windowMs, repos, sessions, roots, outcomes } = input
+  const { now, windowMs, repos, sessions, parents, roots, outcomes } = input
   const windowStart = now - windowMs
+
+  const activityByRoot = new Map<string, number>()
+  for (const session of sessions) {
+    if (session.time.archived) continue
+    const rootID = rootSessionID(session.id, parents)
+    const current = activityByRoot.get(rootID)
+    if (current === undefined || session.time.updated > current) {
+      activityByRoot.set(rootID, session.time.updated)
+    }
+  }
 
   const needsInput: ActiveWorkItem[] = []
   const running: ActiveWorkItem[] = []
@@ -206,12 +220,14 @@ export function buildActiveWork(input: {
   for (const session of sessions) {
     if (seen.has(session.id)) continue
     if (session.time.archived) continue
+    if (rootSessionID(session.id, parents) !== session.id) continue
 
+    const updatedAt = activityByRoot.get(session.id) ?? session.time.updated
     const state: ActiveWorkState | null = roots.needsInput.has(session.id)
       ? 'needs-input'
       : roots.running.has(session.id)
         ? 'running'
-        : session.time.updated >= windowStart
+        : updatedAt >= windowStart
           ? 'recent'
           : null
     if (!state) continue
@@ -225,6 +241,7 @@ export function buildActiveWork(input: {
       session,
       repo,
       state,
+      updatedAt,
       outcome: outcomes.get(session.id),
       path: getSessionPath(repo.id, session.id),
     }
@@ -234,8 +251,7 @@ export function buildActiveWork(input: {
     else recent.push(item)
   }
 
-  const byUpdatedDesc = (a: ActiveWorkItem, b: ActiveWorkItem) =>
-    b.session.time.updated - a.session.time.updated
+  const byUpdatedDesc = (a: ActiveWorkItem, b: ActiveWorkItem) => b.updatedAt - a.updatedAt
   needsInput.sort(byUpdatedDesc)
   running.sort(byUpdatedDesc)
   recent.sort(byUpdatedDesc)

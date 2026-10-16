@@ -15,7 +15,7 @@ import {
 const NOW = 1_000_000_000_000
 const WINDOW_MS = 60_000
 
-function createSession(id: string, updated: number, directory: string): Session {
+function createSession(id: string, updated: number, directory: string, parentID?: string): Session {
   return {
     id,
     projectID: 'proj-1',
@@ -24,6 +24,7 @@ function createSession(id: string, updated: number, directory: string): Session 
     location: { directory },
     cost: 0,
     tokens: { input: 0, output: 0, reasoning: 0, cache: { read: 0, write: 0 } },
+    ...(parentID ? { parentID } : {}),
   }
 }
 
@@ -264,7 +265,7 @@ describe('buildActiveWork', () => {
     })
     const sessions = [createSession('root', NOW - 1000, '/repos/a')]
 
-    const groups = buildActiveWork({ now: NOW, windowMs: WINDOW_MS, repos: [repoA], sessions, roots, outcomes: new Map() })
+    const groups = buildActiveWork({ now: NOW, windowMs: WINDOW_MS, repos: [repoA], sessions, parents: new Map(), roots, outcomes: new Map() })
 
     expect(groups.needsInput.map((item) => item.session.id)).toEqual(['root'])
     expect(groups.running).toEqual([])
@@ -278,7 +279,7 @@ describe('buildActiveWork', () => {
       createSession('outside', NOW - WINDOW_MS - 1, '/repos/a'),
     ]
 
-    const groups = buildActiveWork({ now: NOW, windowMs: WINDOW_MS, repos: [repoA], sessions, roots: emptyRoots, outcomes: new Map() })
+    const groups = buildActiveWork({ now: NOW, windowMs: WINDOW_MS, repos: [repoA], sessions, parents: new Map(), roots: emptyRoots, outcomes: new Map() })
 
     expect(groups.recent.map((item) => item.session.id)).toEqual(['inside'])
   })
@@ -288,7 +289,7 @@ describe('buildActiveWork', () => {
     archived.time.archived = NOW - 500
     const sessions = [createSession('active', NOW - 1000, '/repos/a'), archived]
 
-    const groups = buildActiveWork({ now: NOW, windowMs: WINDOW_MS, repos: [repoA], sessions, roots: emptyRoots, outcomes: new Map() })
+    const groups = buildActiveWork({ now: NOW, windowMs: WINDOW_MS, repos: [repoA], sessions, parents: new Map(), roots: emptyRoots, outcomes: new Map() })
 
     expect(groups.recent.map((item) => item.session.id)).toEqual(['active'])
   })
@@ -296,7 +297,7 @@ describe('buildActiveWork', () => {
   it('excludes sessions whose directory matches no repo', () => {
     const sessions = [createSession('orphan', NOW - 1000, '/repos/other')]
 
-    const groups = buildActiveWork({ now: NOW, windowMs: WINDOW_MS, repos: [repoA], sessions, roots: emptyRoots, outcomes: new Map() })
+    const groups = buildActiveWork({ now: NOW, windowMs: WINDOW_MS, repos: [repoA], sessions, parents: new Map(), roots: emptyRoots, outcomes: new Map() })
 
     expect(groups.recent).toEqual([])
   })
@@ -305,7 +306,7 @@ describe('buildActiveWork', () => {
     const repo = createRepo({ id: 5, fullPath: '/repos/full', localPath: '/local/path' })
     const sessions = [createSession('local', NOW - 1000, '/local/path/')]
 
-    const groups = buildActiveWork({ now: NOW, windowMs: WINDOW_MS, repos: [repo], sessions, roots: emptyRoots, outcomes: new Map() })
+    const groups = buildActiveWork({ now: NOW, windowMs: WINDOW_MS, repos: [repo], sessions, parents: new Map(), roots: emptyRoots, outcomes: new Map() })
 
     expect(groups.recent).toHaveLength(1)
     expect(groups.recent[0].repo.id).toBe(5)
@@ -320,7 +321,7 @@ describe('buildActiveWork', () => {
       createSession('middle', NOW - 2000, '/repos/a'),
     ]
 
-    const groups = buildActiveWork({ now: NOW, windowMs: WINDOW_MS, repos: [repoA], sessions, roots: emptyRoots, outcomes: new Map() })
+    const groups = buildActiveWork({ now: NOW, windowMs: WINDOW_MS, repos: [repoA], sessions, parents: new Map(), roots: emptyRoots, outcomes: new Map() })
 
     expect(groups.recent.map((item) => item.session.id)).toEqual(['newest', 'middle', 'oldest'])
   })
@@ -329,8 +330,62 @@ describe('buildActiveWork', () => {
     const sessions = [createSession('root', NOW - 1000, '/repos/a')]
     const outcomes = new Map<string, ChildOutcome>([['root', 'failed']])
 
-    const groups = buildActiveWork({ now: NOW, windowMs: WINDOW_MS, repos: [repoA], sessions, roots: emptyRoots, outcomes })
+    const groups = buildActiveWork({ now: NOW, windowMs: WINDOW_MS, repos: [repoA], sessions, parents: new Map(), roots: emptyRoots, outcomes })
 
     expect(groups.recent[0].outcome).toBe('failed')
+  })
+
+  it('rolls a child updated inside the window up to its root for the recent test and updatedAt', () => {
+    const parents = new Map<string, string | null>([['child', 'root'], ['root', null]])
+    const sessions = [
+      createSession('root', NOW - WINDOW_MS - 1, '/repos/a'),
+      createSession('child', NOW - 1000, '/repos/a', 'root'),
+    ]
+
+    const groups = buildActiveWork({ now: NOW, windowMs: WINDOW_MS, repos: [repoA], sessions, parents, roots: emptyRoots, outcomes: new Map() })
+
+    expect(groups.recent.map((item) => item.session.id)).toEqual(['root'])
+    expect(groups.recent[0].updatedAt).toBe(NOW - 1000)
+  })
+
+  it('sorts by the rolled-up time and never emits children or grandchildren', () => {
+    const parents = new Map<string, string | null>([
+      ['child-of-a', 'root-a'],
+      ['grandchild-of-a', 'child-of-a'],
+      ['root-a', null],
+      ['root-b', null],
+    ])
+    const sessions = [
+      createSession('root-a', NOW - 5000, '/repos/a'),
+      createSession('child-of-a', NOW - 4000, '/repos/a', 'root-a'),
+      createSession('grandchild-of-a', NOW - 1000, '/repos/a', 'child-of-a'),
+      createSession('root-b', NOW - 2000, '/repos/a'),
+    ]
+
+    const groups = buildActiveWork({ now: NOW, windowMs: WINDOW_MS, repos: [repoA], sessions, parents, roots: emptyRoots, outcomes: new Map() })
+
+    expect(groups.recent.map((item) => item.session.id)).toEqual(['root-a', 'root-b'])
+    expect(groups.recent[0].updatedAt).toBe(NOW - 1000)
+  })
+
+  it('does not emit a child whose root is absent from the input', () => {
+    const parents = new Map<string, string | null>([['child', 'root']])
+    const sessions = [createSession('child', NOW - 1000, '/repos/a', 'root')]
+
+    const groups = buildActiveWork({ now: NOW, windowMs: WINDOW_MS, repos: [repoA], sessions, parents, roots: emptyRoots, outcomes: new Map() })
+
+    expect(groups.recent).toEqual([])
+  })
+
+  it('emits the root once it is supplied alongside its child', () => {
+    const parents = new Map<string, string | null>([['child', 'root'], ['root', null]])
+    const sessions = [
+      createSession('child', NOW - 1000, '/repos/a', 'root'),
+      createSession('root', NOW - WINDOW_MS - 1, '/repos/a'),
+    ]
+
+    const groups = buildActiveWork({ now: NOW, windowMs: WINDOW_MS, repos: [repoA], sessions, parents, roots: emptyRoots, outcomes: new Map() })
+
+    expect(groups.recent.map((item) => item.session.id)).toEqual(['root'])
   })
 })

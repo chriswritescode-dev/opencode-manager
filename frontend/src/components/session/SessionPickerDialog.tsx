@@ -72,6 +72,7 @@ interface SessionPickerRow {
   key: string
   session: Session
   repo: Repo
+  updatedAt?: number
 }
 
 interface SessionPickerSection {
@@ -262,7 +263,7 @@ const SessionPickerRowItem = memo(function SessionPickerRowItem({
         >
           {showRepo && <span className="max-w-32 truncate">{getRepoDisplayName(row.repo)}</span>}
           {!showRepo && label && <span className="max-w-32 truncate">{label}</span>}
-          <span>{formatShortRelativeTime(new Date(row.session.time.updated))}</span>
+          <span>{formatShortRelativeTime(new Date(row.updatedAt ?? row.session.time.updated))}</span>
         </span>
       </div>
       <div className="flex shrink-0 items-center pr-1">
@@ -811,7 +812,7 @@ function ActivePickerContent({
       const rows: SessionPickerRow[] = []
       for (const item of groups[definition.key]) {
         if (needle && !(item.session.title ?? '').toLowerCase().includes(needle)) continue
-        rows.push({ key: item.key, session: item.session, repo: item.repo })
+        rows.push({ key: item.key, session: item.session, repo: item.repo, updatedAt: item.updatedAt })
       }
       return rows.length > 0 ? [{ id: definition.key, heading: definition.heading, rows }] : []
     })

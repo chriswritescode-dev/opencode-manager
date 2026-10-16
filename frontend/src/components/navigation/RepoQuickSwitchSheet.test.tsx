@@ -105,12 +105,14 @@ function createRepo(id: number, name: string, fullPath: string) {
 }
 
 function createActiveWorkItem(): ActiveWorkItem {
+  const session = createSession('s1', Date.now(), '/path/to/repo1')
   return {
     key: '1:s1',
     state: 'recent',
-    path: '/repos/1/sessions/s1',
-    session: createSession('s1', Date.now(), '/path/to/repo1'),
+    session,
     repo: createRepo(1, 'repo1', '/path/to/repo1'),
+    updatedAt: session.time.updated,
+    path: '/repos/1/sessions/s1',
   }
 }
 

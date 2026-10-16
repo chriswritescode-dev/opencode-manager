@@ -85,7 +85,7 @@ function ActivityRow({ item, isCurrent, onSelect }: ActivityRowProps) {
         <span className="block truncate text-xs text-muted-foreground">{repoLine}</span>
       </span>
       <span className="shrink-0 text-xs text-muted-foreground">
-        {formatShortRelativeTime(new Date(item.session.time.updated))}
+        {formatShortRelativeTime(new Date(item.updatedAt))}
       </span>
     </button>
   )
@@ -109,7 +109,7 @@ function CompactActivityRow({ item, isCurrent, onSelect }: ActivityRowProps) {
         {getRepoDisplayName(item.repo)}
       </span>
       <span className="shrink-0 text-xs text-muted-foreground">
-        {formatShortRelativeTime(new Date(item.session.time.updated))}
+        {formatShortRelativeTime(new Date(item.updatedAt))}
       </span>
     </button>
   )

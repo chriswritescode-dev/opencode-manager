@@ -11,6 +11,7 @@ import {
   buildRepoActivityIndex,
   collectActiveRoots,
   repoActivityFromIndex,
+  rootSessionID,
   type ActiveWorkGroups,
 } from '@/lib/activeWork'
 import {
@@ -103,14 +104,26 @@ export function useActiveWork(windowMs: number): {
   } = useSessionsAcrossDirectories(repoDirectories, {
     allDirectories: true,
     limit: ACTIVE_WORK_SESSION_LIMIT,
+    includeChildren: true,
   })
 
   const statuses = useSessionStatus((state) => state.statuses)
-  const parents = useSessionStatus((state) => state.parents)
+  const storeParents = useSessionStatus((state) => state.parents)
   const runningShells = useSessionStatus((state) => state.runningShells)
   const outcomes = useSessionStatus((state) => state.outcomes)
   const sessionDirectories = useSessionStatus((state) => state.directories)
   const pendingInputSessionIDs = usePendingInputSessionIDs()
+
+  const parents = useMemo(() => {
+    const merged = new Map<string, string | null>()
+    for (const session of sessions) {
+      merged.set(session.id, session.parentID ?? null)
+    }
+    for (const [sessionID, parentID] of storeParents) {
+      if (!merged.has(sessionID)) merged.set(sessionID, parentID)
+    }
+    return merged
+  }, [sessions, storeParents])
 
   const roots = useMemo(
     () => collectActiveRoots({ statuses, parents, runningShells, pendingInputSessionIDs }),
@@ -124,6 +137,12 @@ export function useActiveWork(windowMs: number): {
 
   const missingRootIDs = useMemo(() => {
     const ids = new Set<string>()
+    const windowStart = Date.now() - windowMs
+    for (const session of sessions) {
+      if (session.time.updated < windowStart) continue
+      const rootID = rootSessionID(session.id, parents)
+      if (!listedSessionIDs.has(rootID)) ids.add(rootID)
+    }
     for (const sessionID of roots.needsInput) {
       if (!listedSessionIDs.has(sessionID)) ids.add(sessionID)
     }
@@ -131,7 +150,7 @@ export function useActiveWork(windowMs: number): {
       if (!listedSessionIDs.has(sessionID)) ids.add(sessionID)
     }
     return [...ids]
-  }, [roots, listedSessionIDs])
+  }, [sessions, parents, listedSessionIDs, roots, windowMs])
 
   const fetchedSessions = useQueries({
     queries: missingRootIDs.map((sessionID) =>
@@ -152,10 +171,11 @@ export function useActiveWork(windowMs: number): {
         windowMs,
         repos,
         sessions: mergedSessions,
+        parents,
         roots,
         outcomes,
       }),
-    [windowMs, repos, mergedSessions, roots, outcomes],
+    [windowMs, repos, mergedSessions, parents, roots, outcomes],
   )
 
   return {

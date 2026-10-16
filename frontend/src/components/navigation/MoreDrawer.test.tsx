@@ -37,6 +37,7 @@ function createActiveWorkItem(): ActiveWorkItem {
   return {
     key: '1:s1',
     state: 'recent',
+    updatedAt: now,
     path: '/repos/1/sessions/s1',
     session: {
       id: 's1',
