@@ -76,15 +76,15 @@ function publishParamsSchema(tool: GeneratedTool): JsonSchema {
 async function runToolResult(
   tool: GeneratedTool,
   input: unknown,
-  context: { sessionID?: string } = {},
+  context: { sessionID?: string; signal?: AbortSignal } = {},
 ): Promise<{ content: string; metadata?: Record<string, unknown> }> {
-  return (await tool.execute!(input, { signal: new AbortController().signal, sessionID: context.sessionID })) as {
+  return (await tool.execute!(input, { signal: context.signal ?? new AbortController().signal, sessionID: context.sessionID })) as {
     content: string
     metadata?: Record<string, unknown>
   }
 }
 
-async function runTool(tool: GeneratedTool, input: unknown, context: { sessionID?: string } = {}): Promise<string> {
+async function runTool(tool: GeneratedTool, input: unknown, context: { sessionID?: string; signal?: AbortSignal } = {}): Promise<string> {
   return (await runToolResult(tool, input, context)).content
 }
 
@@ -211,6 +211,7 @@ describe('ocm-manager plugin', () => {
 
     expect(tool.description).toContain('open_walkthrough')
     expect(tool.description).toContain('start a separate walkthrough session')
+    expect(tool.description).toContain('waits until it is ready')
     expect(tool.description).toContain('when this session is open on desktop')
   })
 
@@ -319,8 +320,8 @@ describe('ocm-manager plugin', () => {
     expect(fetchMock).not.toHaveBeenCalled()
   })
 
-  it('opens the walkthrough for the current session with the requested source', async () => {
-    const fetchMock = jsonResponse({ walkthrough: { stops: [{}, {}] }, currentDiffHash: 'h', stale: false, generating: false, error: null })
+  it('opens the walkthrough for the current session with the requested source and returns immediately when it is ready', async () => {
+    const fetchMock = jsonResponse({ walkthrough: { status: 'ready' }, currentDiffHash: 'h', stale: false, generating: false, error: null })
     vi.stubGlobal('fetch', fetchMock)
     const tool = await loadTool(configHome)
 
@@ -338,25 +339,127 @@ describe('ocm-manager plugin', () => {
     expect(init.headers['content-type']).toBe('application/json')
     expect(JSON.parse(init.body)).toEqual({ source: { kind: 'staged' } })
     expect(result.content).toBe(
-      'The walkthrough is ready. It opens in the Manager window when this session is open on desktop; otherwise the user can open it from this tool call.',
+      'The walkthrough is ready. It opens in the Manager walkthrough panel when this session is open on desktop; otherwise the user can open it from this tool call.',
     )
     expect(result.metadata).toBeUndefined()
   })
 
-  it('reports that the walkthrough is generating', async () => {
-    vi.stubGlobal('fetch', jsonResponse({ walkthrough: null, currentDiffHash: 'h', stale: false, generating: true, error: null }))
+  it('polls the walkthrough state until it is ready and encodes the staged source key', async () => {
+    const fetchMock = vi
+      .fn()
+      .mockResolvedValueOnce({
+        ok: true,
+        status: 200,
+        text: async () => JSON.stringify({ walkthrough: null, currentDiffHash: 'h', stale: false, generating: true, error: null }),
+      })
+      .mockResolvedValueOnce({
+        ok: true,
+        status: 200,
+        text: async () => JSON.stringify({ walkthrough: { status: 'ready' }, currentDiffHash: 'h', stale: false, generating: false, error: null }),
+      })
+    vi.stubGlobal('fetch', fetchMock)
     const tool = await loadTool(configHome)
 
-    const result = await runToolResult(tool, { action: 'open_walkthrough', params: {} }, { sessionID: 'ses_abc' })
+    vi.useFakeTimers()
+    try {
+      const pending = runToolResult(tool, { action: 'open_walkthrough', params: { source: { kind: 'staged' } } }, { sessionID: 'ses_abc' })
+      await vi.advanceTimersByTimeAsync(2000)
+      const result = await pending
 
-    expect(result.content).toBe(
-      'Started a walkthrough session that builds an interactive walkthrough. It opens in the Manager window when this session is open on desktop; otherwise the user can open it from this tool call.',
-    )
-    expect(result.metadata).toBeUndefined()
+      expect(fetchMock).toHaveBeenCalledTimes(2)
+      const [pollUrl, pollInit] = fetchMock.mock.calls[1] ?? []
+      expect(pollUrl).toBe('http://localhost:5003/api/internal/change-walkthroughs/ses_abc?source=staged')
+      expect(pollInit.method).toBe('GET')
+      expect(result.content).toBe(
+        'The walkthrough is ready. It opens in the Manager walkthrough panel when this session is open on desktop; otherwise the user can open it from this tool call.',
+      )
+    } finally {
+      vi.useRealTimers()
+    }
+  })
+
+  it('encodes a branch source key when polling', async () => {
+    const fetchMock = vi
+      .fn()
+      .mockResolvedValueOnce({
+        ok: true,
+        status: 200,
+        text: async () => JSON.stringify({ walkthrough: null, generating: true, error: null }),
+      })
+      .mockResolvedValueOnce({
+        ok: true,
+        status: 200,
+        text: async () => JSON.stringify({ walkthrough: { status: 'ready' }, generating: false, error: null }),
+      })
+    vi.stubGlobal('fetch', fetchMock)
+    const tool = await loadTool(configHome)
+
+    vi.useFakeTimers()
+    try {
+      const pending = runToolResult(
+        tool,
+        { action: 'open_walkthrough', params: { source: { kind: 'branch', base: 'main' } } },
+        { sessionID: 'ses_abc' },
+      )
+      await vi.advanceTimersByTimeAsync(2000)
+      await pending
+
+      expect(fetchMock.mock.calls[1]?.[0]).toBe('http://localhost:5003/api/internal/change-walkthroughs/ses_abc?source=branch%3Amain')
+    } finally {
+      vi.useRealTimers()
+    }
+  })
+
+  it('throws when the walkthrough fails', async () => {
+    const fetchMock = vi
+      .fn()
+      .mockResolvedValueOnce({
+        ok: true,
+        status: 200,
+        text: async () => JSON.stringify({ walkthrough: null, generating: true, error: null }),
+      })
+      .mockResolvedValueOnce({
+        ok: true,
+        status: 200,
+        text: async () => JSON.stringify({ walkthrough: { status: 'failed' }, generating: false, error: { message: 'the model crashed' } }),
+      })
+    vi.stubGlobal('fetch', fetchMock)
+    const tool = await loadTool(configHome)
+
+    vi.useFakeTimers()
+    try {
+      const pending = runTool(tool, { action: 'open_walkthrough', params: {} }, { sessionID: 'ses_abc' })
+      const assertion = expect(pending).rejects.toThrow('The walkthrough failed: the model crashed')
+      await vi.advanceTimersByTimeAsync(2000)
+      await assertion
+    } finally {
+      vi.useRealTimers()
+    }
+  })
+
+  it('throws when the walkthrough was cancelled before it was ready', async () => {
+    vi.stubGlobal('fetch', jsonResponse({ walkthrough: { status: 'cancelled' }, generating: false, error: null }))
+    const tool = await loadTool(configHome)
+
+    await expect(runTool(tool, { action: 'open_walkthrough', params: {} }, { sessionID: 'ses_abc' }))
+      .rejects.toThrow('The walkthrough was cancelled before it was ready.')
+  })
+
+  it('stops waiting when the signal is aborted', async () => {
+    const fetchMock = jsonResponse({ walkthrough: null, generating: true, error: null })
+    vi.stubGlobal('fetch', fetchMock)
+    const tool = await loadTool(configHome)
+    const controller = new AbortController()
+
+    const pending = runTool(tool, { action: 'open_walkthrough', params: {} }, { sessionID: 'ses_abc', signal: controller.signal })
+    controller.abort()
+
+    await expect(pending).rejects.toThrow(/aborted/)
+    expect(fetchMock).toHaveBeenCalledTimes(1)
   })
 
   it('opens the walkthrough without a body when no source is given', async () => {
-    const fetchMock = jsonResponse({ walkthrough: null, currentDiffHash: 'h', stale: false, generating: true, error: null })
+    const fetchMock = jsonResponse({ walkthrough: { status: 'ready' }, generating: false, error: null })
     vi.stubGlobal('fetch', fetchMock)
     const tool = await loadTool(configHome)
 
