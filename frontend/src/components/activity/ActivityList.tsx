@@ -63,7 +63,7 @@ interface ActivityRowProps {
 }
 
 function ActivityRow({ item, isCurrent, onSelect }: ActivityRowProps) {
-  const branch = getRepoBranchLabel(item.repo)
+  const branch = item.worktreeBranch ?? getRepoBranchLabel(item.repo)
   const repoLine = branch
     ? `${getRepoDisplayName(item.repo)} · ${branch}`
     : getRepoDisplayName(item.repo)

@@ -2,14 +2,19 @@ import { describe, it, expect } from 'vitest'
 import type { Repo, Session } from '@/api/types'
 import type { ChildOutcome } from '@/lib/backgroundWork'
 import type { SessionStatusType } from '@/stores/sessionStatusStore'
+import type { RepoSibling, RepoWorktreeSource } from '@opencode-manager/shared/utils'
 import {
   buildActiveWork,
   buildRepoActivityIndex,
+  buildWorktreeActivity,
   collectActiveRoots,
   formatActivityEmptyMessage,
   formatActivityWindow,
+  hasUnmatchedActiveDirectory,
+  needsWorktreeLookup,
   repoActivityFromIndex,
   rootSessionID,
+  type ActiveWorktree,
 } from './activeWork'
 
 const NOW = 1_000_000_000_000
@@ -35,6 +40,14 @@ function createRepo(overrides: Partial<Repo> & { id: number; fullPath: string })
     cloneStatus: 'ready',
     clonedAt: 0,
     ...overrides,
+  }
+}
+
+function createWorktreeSibling(id: number, fullPath: string, branch: string, source: RepoWorktreeSource): RepoSibling {
+  return {
+    ...createRepo({ id, fullPath }),
+    currentBranch: branch,
+    worktreeSource: source,
   }
 }
 
@@ -254,6 +267,82 @@ describe('buildRepoActivityIndex and repoActivityFromIndex', () => {
   })
 })
 
+describe('repoActivityFromIndex with worktrees', () => {
+  const noShells = new Map<string, { sessionID: string; directory: string }>()
+  const main = createRepo({ id: 1, fullPath: '/repos/a' })
+  const other = createRepo({ id: 2, fullPath: '/repos/b' })
+
+  const indexFor = (entries: Record<string, string>, pending: string[] = []) =>
+    buildRepoActivityIndex({
+      statuses: statuses(Object.fromEntries(Object.keys(entries).map((id) => [id, { type: 'busy' as const }]))),
+      parents: new Map(),
+      runningShells: noShells,
+      directories: new Map(Object.entries(entries)),
+      pendingInputSessionIDs: pending,
+    })
+
+  it('returns running for a repo whose owned worktree directory is running', () => {
+    const index = indexFor({ session: '/repos/a/.worktrees/feature' })
+    const worktrees: ActiveWorktree[] = [
+      { directory: '/repos/a/.worktrees/feature', ownerRepo: main, branch: 'feature', isSchedule: false },
+    ]
+
+    expect(repoActivityFromIndex(main, index, worktrees)).toBe('running')
+  })
+
+  it('ignores worktrees owned by another repo', () => {
+    const index = indexFor({ session: '/repos/b/.worktrees/feature' })
+    const worktrees: ActiveWorktree[] = [
+      { directory: '/repos/b/.worktrees/feature', ownerRepo: other, branch: 'feature', isSchedule: false },
+    ]
+
+    expect(repoActivityFromIndex(main, index, worktrees)).toBeNull()
+  })
+
+  it('prefers needs-input from a worktree over running on the repo path', () => {
+    const index = buildRepoActivityIndex({
+      statuses: statuses({ own: { type: 'busy' }, wt: { type: 'busy' } }),
+      parents: new Map(),
+      runningShells: noShells,
+      directories: new Map([
+        ['own', '/repos/a'],
+        ['wt', '/repos/a/.worktrees/feature'],
+      ]),
+      pendingInputSessionIDs: ['wt'],
+    })
+    const worktrees: ActiveWorktree[] = [
+      { directory: '/repos/a/.worktrees/feature', ownerRepo: main, branch: 'feature', isSchedule: false },
+    ]
+
+    expect(repoActivityFromIndex(main, index, worktrees)).toBe('needs-input')
+  })
+})
+
+describe('hasUnmatchedActiveDirectory', () => {
+  const noShells = new Map<string, { sessionID: string; directory: string }>()
+
+  const indexFor = (directory: string) =>
+    buildRepoActivityIndex({
+      statuses: statuses({ session: { type: 'busy' } }),
+      parents: new Map(),
+      runningShells: noShells,
+      directories: new Map([['session', directory]]),
+      pendingInputSessionIDs: [],
+    })
+
+  it('is true when an index key matches no repo', () => {
+    expect(hasUnmatchedActiveDirectory(indexFor('/repos/other'), [repoA])).toBe(true)
+  })
+
+  it('is false when every indexed directory belongs to a repo', () => {
+    expect(hasUnmatchedActiveDirectory(indexFor('/repos/a'), [repoA])).toBe(false)
+  })
+
+  it('is false for an empty index', () => {
+    expect(hasUnmatchedActiveDirectory(new Map(), [repoA])).toBe(false)
+  })
+})
+
 describe('buildActiveWork', () => {
   it('puts a root with both a pending permission and a busy status in needs-input only, once', () => {
     const parents = new Map<string, string | null>()
@@ -387,5 +476,138 @@ describe('buildActiveWork', () => {
     const groups = buildActiveWork({ now: NOW, windowMs: WINDOW_MS, repos: [repoA], sessions, parents, roots: emptyRoots, outcomes: new Map() })
 
     expect(groups.recent.map((item) => item.session.id)).toEqual(['root'])
+  })
+
+  it('resolves a session in a worktree to its owning repo and opens the workspaces tab', () => {
+    const main = createRepo({ id: 1, fullPath: '/repos/a' })
+    const sessions = [createSession('wt', NOW - 1000, '/repos/a/.worktrees/feature')]
+    const worktrees = [{ directory: '/repos/a/.worktrees/feature', ownerRepo: main, branch: 'feature', isSchedule: false }]
+
+    const groups = buildActiveWork({ now: NOW, windowMs: WINDOW_MS, repos: [main], sessions, parents: new Map(), roots: emptyRoots, outcomes: new Map(), worktrees })
+
+    expect(groups.recent).toHaveLength(1)
+    expect(groups.recent[0].repo.id).toBe(1)
+    expect(groups.recent[0].worktreeBranch).toBe('feature')
+    expect(groups.recent[0].path).toBe('/repos/1/sessions/wt?repoTab=workspaces')
+  })
+
+  it('drops a recent schedule worktree session but keeps it while its root is running', () => {
+    const main = createRepo({ id: 1, fullPath: '/repos/a' })
+    const worktrees = [
+      { directory: '/repos/a/.worktrees/nightly', ownerRepo: main, branch: 'nightly', isSchedule: true },
+    ]
+    const sessions = [createSession('sched', NOW - 1000, '/repos/a/.worktrees/nightly')]
+
+    const recentGroups = buildActiveWork({ now: NOW, windowMs: WINDOW_MS, repos: [main], sessions, parents: new Map(), roots: emptyRoots, outcomes: new Map(), worktrees })
+
+    expect(recentGroups.recent).toEqual([])
+
+    const runningGroups = buildActiveWork({ now: NOW, windowMs: WINDOW_MS, repos: [main], sessions, parents: new Map(), roots: { needsInput: new Set(), running: new Set(['sched']) }, outcomes: new Map(), worktrees })
+
+    expect(runningGroups.running.map((item) => item.session.id)).toEqual(['sched'])
+  })
+})
+
+describe('needsWorktreeLookup', () => {
+  const base = { now: NOW, windowMs: WINDOW_MS, repos: [repoA] }
+
+  it('returns true for an unmatched session updated inside the window', () => {
+    expect(
+      needsWorktreeLookup({
+        ...base,
+        sessions: [createSession('orphan', NOW - 1000, '/repos/other')],
+        parents: new Map(),
+        roots: emptyRoots,
+      }),
+    ).toBe(true)
+  })
+
+  it('returns false for an unmatched old idle session', () => {
+    expect(
+      needsWorktreeLookup({
+        ...base,
+        sessions: [createSession('orphan', NOW - WINDOW_MS - 1, '/repos/other')],
+        parents: new Map(),
+        roots: emptyRoots,
+      }),
+    ).toBe(false)
+  })
+
+  it('returns true for an unmatched old session whose root is running', () => {
+    const parents = new Map<string, string | null>([['orphan', 'root'], ['root', null]])
+
+    expect(
+      needsWorktreeLookup({
+        ...base,
+        sessions: [createSession('orphan', NOW - WINDOW_MS - 1, '/repos/other', 'root')],
+        parents,
+        roots: { needsInput: new Set(), running: new Set(['root']) },
+      }),
+    ).toBe(true)
+  })
+
+  it('returns false when every session matches a repo', () => {
+    expect(
+      needsWorktreeLookup({
+        ...base,
+        sessions: [createSession('matched', NOW - 1000, '/repos/a')],
+        parents: new Map(),
+        roots: emptyRoots,
+      }),
+    ).toBe(false)
+  })
+
+  it('returns false for an archived unmatched session', () => {
+    const archived = createSession('archived', NOW - 1000, '/repos/other')
+    archived.time.archived = NOW - 500
+
+    expect(
+      needsWorktreeLookup({
+        ...base,
+        sessions: [archived],
+        parents: new Map(),
+        roots: emptyRoots,
+      }),
+    ).toBe(false)
+  })
+})
+
+describe('buildWorktreeActivity', () => {
+  it('maps a worktree directory to its owning repo and branch', () => {
+    const main = createRepo({ id: 1, fullPath: '/repos/a' })
+    const worktree = createWorktreeSibling(-1, '/repos/a/.worktrees/feature', 'feature', 'opencode')
+
+    expect(buildWorktreeActivity([main], [{ data: [main, worktree] }])).toEqual([
+      { directory: '/repos/a/.worktrees/feature', ownerRepo: main, branch: 'feature', isSchedule: false },
+    ])
+  })
+
+  it('marks a schedule worktree as a schedule', () => {
+    const main = createRepo({ id: 1, fullPath: '/repos/a' })
+    const worktree = createWorktreeSibling(-1, '/repos/a/.worktrees/nightly', 'nightly', 'schedule')
+
+    expect(buildWorktreeActivity([main], [{ data: [worktree] }])).toEqual([
+      { directory: '/repos/a/.worktrees/nightly', ownerRepo: main, branch: 'nightly', isSchedule: true },
+    ])
+  })
+
+  it('prefers the non-worktree repo as owner and dedupes a worktree returned by several repos', () => {
+    const main = createRepo({ id: 1, fullPath: '/repos/a' })
+    const dbWorktree = createRepo({ id: 2, fullPath: '/repos/a-feature', isWorktree: true })
+    const worktree = createWorktreeSibling(-1, '/repos/a/.worktrees/feature', 'feature', 'git')
+
+    const entries = buildWorktreeActivity(
+      [dbWorktree, main],
+      [{ data: [worktree] }, { data: [worktree] }],
+    )
+
+    expect(entries).toHaveLength(1)
+    expect(entries[0].ownerRepo.id).toBe(1)
+  })
+
+  it('ignores siblings without a worktree source', () => {
+    const main = createRepo({ id: 1, fullPath: '/repos/a' })
+
+    expect(buildWorktreeActivity([main], [{ data: [main] }])).toEqual([])
   })
 })

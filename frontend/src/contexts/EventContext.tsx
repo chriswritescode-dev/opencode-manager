@@ -236,6 +236,26 @@ async function settlePendingReply(
   }
 }
 
+/**
+ * Primitive key of every directory that hosts an active session: the recorded directory of each
+ * session whose status is not `idle`, plus each running shell's directory, sorted and de-duplicated.
+ * A string keeps the zustand subscription stable across store updates that do not change the set.
+ */
+export function selectActiveSessionDirectoriesKey(
+  state: Pick<ReturnType<typeof useSessionStatus.getState>, 'statuses' | 'directories' | 'runningShells'>,
+): string {
+  const directories = new Set<string>()
+  for (const [sessionID, status] of state.statuses.entries()) {
+    if (status.type === 'idle') continue
+    const directory = state.directories.get(sessionID)
+    if (directory) directories.add(directory)
+  }
+  for (const shell of state.runningShells.values()) {
+    if (shell.directory) directories.add(shell.directory)
+  }
+  return [...directories].sort().join('\n')
+}
+
 const EventContext = createContext<EventContextValue | null>(null)
 
 export function EventProvider({ children }: { children: React.ReactNode }) {
@@ -243,6 +263,7 @@ export function EventProvider({ children }: { children: React.ReactNode }) {
   const navigate = useNavigate()
   const location = useLocation()
   const sessionParents = useSessionStatus((state) => state.parents)
+  const activeSessionDirectoriesKey = useSessionStatus(selectActiveSessionDirectoriesKey)
 
   const [sshHostKeyRequest, setSSHHostKeyRequest] = useState<SSHHostKeyRequest | null>(null)
   const [sseHealth, setSseHealth] = useState<SSEHealthState>(() => {
@@ -858,9 +879,12 @@ export function EventProvider({ children }: { children: React.ReactNode }) {
 
   useEffect(() => {
     reposRef.current = repos
-    const directories = [...new Set((repos ?? []).map(r => r.fullPath))]
-    subscriptionRef.current?.updateDirectories(directories)
-  }, [repos])
+    const directories = new Set((repos ?? []).map(r => r.fullPath))
+    for (const directory of activeSessionDirectoriesKey.split('\n')) {
+      if (directory) directories.add(directory)
+    }
+    subscriptionRef.current?.updateDirectories([...directories])
+  }, [repos, activeSessionDirectoriesKey])
 
   useEffect(() => {
     if (!repos || repos.length === 0) return

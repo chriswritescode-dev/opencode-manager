@@ -16,11 +16,11 @@ const litIndexesFor = (frame: string) =>
 
 describe('brailleDots', () => {
   it('lights dots 1, 2 and 4 for the first frame', () => {
-    expect(brailleDots('⠋')).toEqual([true, true, false, true, false, false, false, false])
+    expect(brailleDots('⠋')).toEqual([true, true, false, true, false, false])
   })
 
   it('lights dots 1 through 4 for the last frame', () => {
-    expect(brailleDots('⠏')).toEqual([true, true, true, true, false, false, false, false])
+    expect(brailleDots('⠏')).toEqual([true, true, true, true, false, false])
   })
 })
 
@@ -30,10 +30,10 @@ describe('ActivitySpinner', () => {
     vi.useRealTimers()
   })
 
-  it('renders eight dots with the first frame lit and hidden from assistive technology', () => {
+  it('renders six dots with the first frame lit and hidden from assistive technology', () => {
     const { container } = render(<ActivitySpinner />)
 
-    expect(circles(container)).toHaveLength(8)
+    expect(circles(container)).toHaveLength(6)
     expect(litIndexes(container)).toEqual(litIndexesFor(SPINNER_FRAMES[0]))
     expect(container.querySelector('svg')).toHaveAttribute('aria-hidden', 'true')
   })
@@ -79,7 +79,7 @@ describe('ActivitySpinner', () => {
       r: Number(circle.getAttribute('r')),
     }))
 
-    expect(dots).toHaveLength(8)
+    expect(dots).toHaveLength(6)
 
     for (const dot of dots) {
       expect(dot.cx - dot.r).toBeGreaterThan(0)

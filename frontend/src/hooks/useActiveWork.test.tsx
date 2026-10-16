@@ -14,6 +14,7 @@ const WINDOW_MS = 60 * MS_PER_MINUTE
 const mocks = vi.hoisted(() => ({
   listSessionPage: vi.fn(),
   getSession: vi.fn(),
+  getRepoSiblings: vi.fn(),
   useNavigableRepos: vi.fn(),
   pendingSessionIDs: [] as string[],
 }))
@@ -24,6 +25,14 @@ vi.mock('@/api/opencode', async (importOriginal) => {
     ...actual,
     listSessionPage: mocks.listSessionPage,
     getSession: mocks.getSession,
+  }
+})
+
+vi.mock('@/api/repos', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('@/api/repos')>()
+  return {
+    ...actual,
+    getRepoSiblings: mocks.getRepoSiblings,
   }
 })
 
@@ -48,12 +57,17 @@ vi.mock('@/lib/toast', () => ({
   },
 }))
 
-const session = (id: string, updated: number, parentID?: string | null): SessionInfo => ({
+const session = (
+  id: string,
+  updated: number,
+  parentID?: string | null,
+  directory = REPO_PATH,
+): SessionInfo => ({
   id,
   projectID: 'proj_1',
   title: `Session ${id}`,
   time: { created: updated, updated },
-  location: { directory: REPO_PATH },
+  location: { directory },
   cost: 0,
   tokens: { input: 0, output: 0, reasoning: 0, cache: { read: 0, write: 0 } },
   ...(parentID === undefined ? {} : { parentID }),
@@ -83,6 +97,8 @@ describe('useActiveWork', () => {
   beforeEach(() => {
     mocks.listSessionPage.mockReset()
     mocks.getSession.mockReset()
+    mocks.getRepoSiblings.mockReset()
+    mocks.getRepoSiblings.mockResolvedValue([])
     mocks.useNavigableRepos.mockReset()
     mocks.useNavigableRepos.mockReturnValue({ repos: [repo], isLoading: false, refetch: vi.fn() })
     useSessionStatus.setState({
@@ -196,5 +212,65 @@ describe('useActiveWork', () => {
     })
 
     expect(recentIDs(result.current.groups)).not.toContain('root')
+  })
+
+  it('resolves a session in a worktree to its owning repo and opens the workspaces tab', async () => {
+    const now = Date.now()
+    mocks.listSessionPage.mockResolvedValue({
+      items: [session('wt', now - 500, undefined, '/repo/.worktrees/feature')],
+    })
+    mocks.getRepoSiblings.mockResolvedValue([
+      {
+        ...repo,
+        id: -1,
+        fullPath: '/repo/.worktrees/feature',
+        localPath: 'feature',
+        sourcePath: '/repo/.worktrees/feature',
+        currentBranch: 'feature',
+        worktreeSource: 'opencode',
+      },
+    ])
+
+    const { result } = renderHook(() => useActiveWork(WINDOW_MS), {
+      wrapper: createWrapper(createQueryClient()),
+    })
+
+    await waitFor(() => expect(recentIDs(result.current.groups)).toContain('wt'))
+
+    expect(result.current.groups.recent[0].repo.id).toBe(1)
+    expect(result.current.groups.recent[0].path).toBe('/repos/1/sessions/wt?repoTab=workspaces')
+  })
+
+  it('reports an error when the worktree siblings lookup fails with no cached data', async () => {
+    const now = Date.now()
+    mocks.listSessionPage.mockResolvedValue({
+      items: [session('wt', now - 500, undefined, '/repo/.worktrees/feature')],
+    })
+    mocks.getRepoSiblings.mockRejectedValue(new Error('siblings failed'))
+
+    const { result } = renderHook(() => useActiveWork(WINDOW_MS), {
+      wrapper: createWrapper(createQueryClient()),
+    })
+
+    await waitFor(() => expect(result.current.isError).toBe(true))
+  })
+
+  it('never fetches siblings for an orphan session updated outside the window', async () => {
+    const now = Date.now()
+    mocks.listSessionPage.mockResolvedValue({
+      items: [session('orphan', now - 2 * WINDOW_MS, undefined, '/outside/repo')],
+    })
+
+    const { result } = renderHook(() => useActiveWork(WINDOW_MS), {
+      wrapper: createWrapper(createQueryClient()),
+    })
+
+    await waitFor(() => expect(result.current.isLoading).toBe(false))
+
+    await act(async () => {
+      await Promise.resolve()
+    })
+
+    expect(mocks.getRepoSiblings).not.toHaveBeenCalled()
   })
 })

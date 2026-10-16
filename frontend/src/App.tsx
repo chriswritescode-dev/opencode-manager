@@ -26,6 +26,7 @@ import { ThemeProvider, useThemeMode } from './contexts/ThemeContext'
 import { AuthProvider } from './contexts/AuthContext'
 import { KeyboardShortcutsProvider } from './contexts/KeyboardShortcutsContext'
 import { EventProvider, usePermissions, useEventContext } from '@/contexts/EventContext'
+import { RepoWorktreesProvider } from '@/contexts/RepoWorktreesContext'
 import { SwipeNavigationProvider, useSwipeNavigation } from '@/contexts/SwipeNavigationContext'
 import { PermissionRequestDialog } from './components/session/PermissionRequestDialog'
 import { SSHHostKeyDialog } from './components/ssh/SSHHostKeyDialog'
@@ -208,26 +209,28 @@ function AppShell() {
     <ThemeProvider>
       <AuthProvider>
         <EventProvider>
-          <KeyboardShortcutsProvider>
-            <GlobalShortcuts />
-            <div className="flex h-dvh w-full min-w-0 flex-col">
-              <PwaUpdatePrompt />
-              <div ref={rootRef} className="flex flex-1 min-h-0 w-full min-w-0">
-                <DesktopSidebar />
-                <main className="flex-1 min-w-0 min-h-0 flex flex-col">
-                  <Outlet />
-                </main>
+          <RepoWorktreesProvider>
+            <KeyboardShortcutsProvider>
+              <GlobalShortcuts />
+              <div className="flex h-dvh w-full min-w-0 flex-col">
+                <PwaUpdatePrompt />
+                <div ref={rootRef} className="flex flex-1 min-h-0 w-full min-w-0">
+                  <DesktopSidebar />
+                  <main className="flex-1 min-w-0 min-h-0 flex flex-col">
+                    <Outlet />
+                  </main>
+                </div>
               </div>
-            </div>
-            <MobileTabBar />
-            <MobileSheetHost />
-            <PermissionDialogWrapper />
-            <SSHHostKeyDialogWrapper />
-            <SettingsDialog />
-            <HealthMonitor />
-            <VersionNotifier />
-            <ThemedToaster />
-          </KeyboardShortcutsProvider>
+              <MobileTabBar />
+              <MobileSheetHost />
+              <PermissionDialogWrapper />
+              <SSHHostKeyDialogWrapper />
+              <SettingsDialog />
+              <HealthMonitor />
+              <VersionNotifier />
+              <ThemedToaster />
+            </KeyboardShortcutsProvider>
+          </RepoWorktreesProvider>
         </EventProvider>
       </AuthProvider>
     </ThemeProvider>

@@ -5,7 +5,9 @@ import { SessionStatusIndicator } from '@/components/ui/session-status-indicator
 import { RepoActivityIndicator } from '@/components/activity/RepoActivityIndicator'
 import { useForms, usePermissions } from '@/contexts/EventContext'
 import { useCreateSession } from '@/hooks/useOpenCode'
+import { useRepoSiblings } from '@/hooks/useRepoSiblings'
 import { useSidebarRepoGroups } from '@/hooks/useSidebarRepoGroups'
+import { buildWorktreeActivity, type ActiveWorktree } from '@/lib/activeWork'
 import { cn, formatShortRelativeTime, getRepoBranchLabel, getRepoDisplayName } from '@/lib/utils'
 import { getRepoPath, getSessionPath } from '@/lib/navigation'
 import {
@@ -118,13 +120,14 @@ interface SessionNavRowProps {
 export function SessionNavRow({ item, isCurrent, onSelect, repoLabel }: SessionNavRowProps) {
   const { hasForSession: hasPermission } = usePermissions()
   const { hasForSession: hasForm } = useForms()
+  const branchLabel = item.worktreeBranch ?? item.branchLabel
 
   return (
     <button
       type="button"
       onClick={() => onSelect(item.path)}
       aria-current={isCurrent ? 'page' : undefined}
-      title={item.branchLabel ? `${item.repoLabel} · ${item.branchLabel}` : item.repoLabel}
+      title={branchLabel ? `${item.repoLabel} · ${branchLabel}` : item.repoLabel}
       className={cn(
         'flex h-9 w-full items-center gap-2 pl-4 pr-3.5 text-left text-[13.5px] text-foreground hover:bg-accent/50',
         isCurrent && 'bg-primary/25 font-semibold',
@@ -136,6 +139,11 @@ export function SessionNavRow({ item, isCurrent, onSelect, repoLabel }: SessionN
       <span className="min-w-0 flex-1 truncate">{item.session.title || 'Untitled Session'}</span>
       {repoLabel && (
         <span className="max-w-24 shrink-0 truncate text-xs text-highlight">{repoLabel}</span>
+      )}
+      {item.worktreeBranch && (
+        <span className="max-w-24 shrink-0 truncate font-mono text-[11px] text-primary">
+          {item.worktreeBranch}
+        </span>
       )}
       <SessionStatusIndicator sessionID={item.session.id} size="sm" />
       {hasPermission(item.session.id) && (
@@ -186,9 +194,34 @@ interface RepoSessionListProps {
 }
 
 function RepoSessionList({ repo, onSelectSession }: RepoSessionListProps) {
+  const siblings = useRepoSiblings(repo.isWorktree ? undefined : repo.id)
+  const worktrees = useMemo(
+    () =>
+      repo.isWorktree
+        ? undefined
+        : buildWorktreeActivity([repo], [{ data: siblings.data }]).filter(
+            (worktree) => !worktree.isSchedule,
+          ),
+    [repo, siblings.data],
+  )
+
+  if (siblings.isLoading) return <SessionNavStatus>Loading sessions...</SessionNavStatus>
+  if (siblings.isError && siblings.data === undefined)
+    return <SessionNavStatus>Failed to load sessions</SessionNavStatus>
+
+  return <RepoSessionListItems repo={repo} worktrees={worktrees} onSelectSession={onSelectSession} />
+}
+
+interface RepoSessionListItemsProps {
+  repo: Repo
+  worktrees?: ActiveWorktree[]
+  onSelectSession: (path: string) => void
+}
+
+function RepoSessionListItems({ repo, worktrees, onSelectSession }: RepoSessionListItemsProps) {
   const location = useLocation()
   const repos = useMemo(() => [repo], [repo])
-  const { groups, isLoading, isError, hasMore } = useSidebarRepoGroups({ repos })
+  const { groups, isLoading, isError, hasMore } = useSidebarRepoGroups({ repos, worktrees })
   const items = groups[0]?.items ?? []
 
   if (isLoading) return <SessionNavStatus>Loading sessions...</SessionNavStatus>
