@@ -1,6 +1,7 @@
 import { z } from 'zod'
 import {
   ASSISTANT_NOTIFICATION_LIMITS,
+  DEFAULT_WALKTHROUGH_SOURCE,
   MANAGER_PROMPT_CLIENT_METADATA_KEY,
   MANAGER_PROMPT_CLIENTS,
   MANAGER_TOOL_ACTIONS,
@@ -9,6 +10,7 @@ import {
   ShowArtifactParamsSchema,
   WalkthroughChangesParamsSchema,
   WalkthroughSourceSchema,
+  walkthroughSourceKey,
 } from '@opencode-manager/shared/schemas'
 
 const MANAGER_TOOL_REQUEST_TIMEOUT_MS = 60000
@@ -80,7 +82,7 @@ const ManagerToolWalkthroughParamsSchema = z
     source: WalkthroughSourceSchema.optional().describe('The change source to walk through. Defaults to the changes in this session.'),
   })
   .strict()
-  .describe("Start a separate walkthrough session that builds an interactive walkthrough UI for this session's changes, generating it if needed. It opens in the user's Manager walkthrough panel when this session is open on desktop; otherwise the user can open it from this tool call.")
+  .describe("Start a separate walkthrough session that builds an interactive walkthrough UI for this session's changes and waits until it is ready, which can take several minutes. It opens in the user's Manager walkthrough panel when this session is open on desktop; otherwise the user can open it from this tool call.")
 
 const MANAGER_TOOL_ACTION_PARAMS_SCHEMAS: Record<(typeof MANAGER_TOOL_ACTIONS)[number], z.ZodType> = {
   send_notification: ManagerToolNotificationParamsSchema,
@@ -145,7 +147,7 @@ function buildManagerToolDescription(): string {
     'Actions:',
     '- send_notification: send a push notification to every device the user has registered.',
     '- request: call an allow-listed internal API route to read and manage settings, the OpenCode configuration file, repos (list, inspect, clone from a git URL with POST /repos and body { repoUrl, branch?, directoryName? }), OpenCode workspaces, sessions (list, create, follow up, read the latest reply, fork), and schedules.',
-    "- open_walkthrough: start a separate walkthrough session that builds an interactive walkthrough UI for the current session's changes, opened in the Manager walkthrough panel. It opens in the user's Manager window when this session is open on desktop; otherwise the user opens it from this tool call. Use when the user asks to walk through, review or explain the changes.",
+    "- open_walkthrough: start a separate walkthrough session that builds an interactive walkthrough UI for the current session's changes and waits until it is ready (this can take several minutes), then it opens in the Manager walkthrough panel when this session is open on desktop; otherwise the user opens it from this tool call. Use when the user asks to walk through, review or explain the changes.",
     "- walkthrough_changes: only valid inside a walkthrough session. Call it with no arguments for an outline of the changed files, or with { file } for one file's full hunks.",
     '- publish_walkthrough: only valid inside a walkthrough session. Call it after writing the walkthrough HTML to publish it to the Manager walkthrough panel.',
     '- show_artifact: write a self-contained .html file with your file tools, then call show_artifact with its path to show it to the user, rendered inline in this session\'s Manager chat inside a sandboxed frame. Edit the file to fix or change it (no need to resend content). Inline your own CSS and JavaScript; libraries may load from public CDNs. Forms, popups, cookies and local storage are blocked. Single file only: sibling .js and .css files will not load.',
@@ -158,6 +160,8 @@ function buildManagerToolDescription(): string {
 /** Builds the standalone manager plugin with API actions and mobile session hooks. */
 export function buildManagerToolPluginSource(id: string): string {
   return `var REQUEST_TIMEOUT_MS = ${MANAGER_TOOL_REQUEST_TIMEOUT_MS}
+
+var WALKTHROUGH_POLL_INTERVAL_MS = 2000
 
 var ALLOWED_ROUTES = ${JSON.stringify(MANAGER_TOOL_ALLOWED_ROUTES)}
 
@@ -180,6 +184,10 @@ var MOBILE_CLIENT = ${JSON.stringify(MOBILE_PROMPT_CLIENT)}
 var DESKTOP_CLIENT = ${JSON.stringify(DESKTOP_PROMPT_CLIENT)}
 
 var MOBILE_OUTPUT_INSTRUCTIONS = ${JSON.stringify(MANAGER_MOBILE_OUTPUT_INSTRUCTIONS)}
+
+var DEFAULT_WALKTHROUGH_SOURCE = ${JSON.stringify(DEFAULT_WALKTHROUGH_SOURCE)}
+
+var walkthroughSourceKey = ${walkthroughSourceKey.toString()}
 
 var MOBILE_SESSIONS = new Set()
 
@@ -258,12 +266,40 @@ async function requestInternalApi(method, path, body, signal) {
 }
 
 async function postInternalApi(routePath, body, signal) {
-  var text = await requestInternalApi('POST', routePath, body, signal)
+  return await requestInternalJson('POST', routePath, body, signal)
+}
+
+async function getInternalApi(routePath, signal) {
+  return await requestInternalJson('GET', routePath, undefined, signal)
+}
+
+async function requestInternalJson(method, routePath, body, signal) {
+  var text = await requestInternalApi(method, routePath, body, signal)
   try {
     return JSON.parse(text)
   } catch (error) {
     return {}
   }
+}
+
+/** Waits one walkthrough poll interval, rejecting promptly when the signal aborts. */
+function waitForWalkthroughPoll(signal) {
+  return new Promise(function (resolve, reject) {
+    var timer
+    function onAbort() {
+      clearTimeout(timer)
+      reject(new Error('The walkthrough wait was aborted before it was ready.'))
+    }
+    if (signal.aborted) {
+      reject(new Error('The walkthrough wait was aborted before it was ready.'))
+      return
+    }
+    timer = setTimeout(function () {
+      signal.removeEventListener('abort', onAbort)
+      resolve()
+    }, WALKTHROUGH_POLL_INTERVAL_MS)
+    signal.addEventListener('abort', onAbort)
+  })
 }
 
 var ACTIONS = {
@@ -286,13 +322,24 @@ var ACTIONS = {
   },
   open_walkthrough: {
     run: async function (params, context) {
+      var source = params.source === undefined ? DEFAULT_WALKTHROUGH_SOURCE : params.source
       var body = params.source === undefined ? undefined : { source: params.source }
-      var state = await postInternalApi('/change-walkthroughs/' + encodeURIComponent(context.sessionID), body, context.signal)
-      var hint = ' It opens in the Manager window when this session is open on desktop; otherwise the user can open it from this tool call.'
-      if (state.generating === true) {
-        return 'Started a walkthrough session that builds an interactive walkthrough.' + hint
+      var statePath = '/change-walkthroughs/' + encodeURIComponent(context.sessionID)
+      var state = await postInternalApi(statePath, body, context.signal)
+      var pollPath = statePath + '?source=' + encodeURIComponent(walkthroughSourceKey(source))
+      while (state.generating === true) {
+        await waitForWalkthroughPoll(context.signal)
+        state = await getInternalApi(pollPath, context.signal)
       }
-      return 'The walkthrough is ready.' + hint
+      var hint = ' It opens in the Manager walkthrough panel when this session is open on desktop; otherwise the user can open it from this tool call.'
+      if (state.walkthrough && state.walkthrough.status === 'ready') {
+        return 'The walkthrough is ready.' + hint
+      }
+      var failure = state.error || (state.walkthrough && state.walkthrough.error)
+      if (failure || (state.walkthrough && state.walkthrough.status === 'failed')) {
+        throw new Error('The walkthrough failed: ' + (failure && failure.message ? failure.message : 'unknown error'))
+      }
+      throw new Error('The walkthrough was cancelled before it was ready.')
     },
   },
   show_artifact: {
