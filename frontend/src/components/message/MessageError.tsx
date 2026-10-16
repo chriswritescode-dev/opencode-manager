@@ -13,7 +13,7 @@ const ERROR_LABELS: Record<string, string> = {
   'provider.timeout': 'Provider request timed out',
   'permission.rejected': 'Permission denied',
   'tool.execution': 'Tool execution failed',
-  aborted: 'Message aborted',
+  aborted: 'Stopped',
 }
 
 function getErrorIcon(errorType: string) {
@@ -33,14 +33,21 @@ function getErrorIcon(errorType: string) {
 export const MessageError = memo(function MessageError({ error }: MessageErrorProps) {
   const Icon = getErrorIcon(error.type)
   const label = ERROR_LABELS[error.type] ?? 'Error'
+  const isAborted = error.type === 'aborted'
+  const tone = isAborted
+    ? 'text-muted-foreground'
+    : 'rounded-md border border-destructive/30 bg-destructive/10 px-2 py-1 text-destructive'
 
   return (
-    <div className="flex items-start gap-2 p-3 rounded-md bg-destructive/10 border border-destructive/30 text-destructive">
-      <Icon className="h-4 w-4 mt-0.5 flex-shrink-0" />
-      <div className="flex-1 min-w-0">
-        <div className="font-medium text-sm">{label}</div>
-        <div className="text-xs text-destructive/80 mt-0.5">{error.message}</div>
-      </div>
+    <div role={isAborted ? 'status' : 'alert'} title={error.message} className={`my-1 flex min-w-0 items-start gap-1.5 text-xs ${tone}`}>
+      <Icon className="mt-px h-3.5 w-3.5 flex-shrink-0" />
+      <span className="flex-shrink-0 font-medium">{label}</span>
+      {error.message && (
+        <>
+          <span aria-hidden="true" className="opacity-60">·</span>
+          <span className={`min-w-0 opacity-80 ${isAborted ? 'truncate' : 'break-words'}`}>{error.message}</span>
+        </>
+      )}
     </div>
   )
 })
