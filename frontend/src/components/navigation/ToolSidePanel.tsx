@@ -5,11 +5,10 @@ import { FileBrowser } from '@/components/file-browser/FileBrowser'
 import { SourceControlContent } from '@/components/source-control'
 import { TerminalWorkspace } from '@/components/terminal/TerminalPanel'
 import {
-  ChangesWalkthroughNav,
+  ChangesWalkthroughCancel,
   ChangesWalkthroughProvider,
   ChangesWalkthroughRegenerate,
   ChangesWalkthroughSourcePicker,
-  ChangesWalkthroughStop,
   ChangesWalkthroughView,
   type WalkthroughSourceRequest,
 } from '@/components/session/ChangesWalkthroughSheet'
@@ -41,6 +40,7 @@ interface ToolSidePanelProps {
   onSkillLoaded?: (skill: SkillFileInfo) => void
   walkthroughSourceRequest?: WalkthroughSourceRequest
   walkthroughModel?: ModelRef | null
+  walkthroughOnOpenSession?: (id: string) => void
 }
 
 interface RailButtonProps {
@@ -96,6 +96,7 @@ export function ToolSidePanel({
   onSkillLoaded,
   walkthroughSourceRequest,
   walkthroughModel,
+  walkthroughOnOpenSession,
 }: ToolSidePanelProps) {
   const { activeTool, toggleTool, closePanel } = panel
   const location = useLocation()
@@ -176,9 +177,8 @@ export function ToolSidePanel({
           {activeTool === 'walkthrough' ? (
             <>
               <ChangesWalkthroughSourcePicker />
-              <ChangesWalkthroughStop />
+              <ChangesWalkthroughCancel />
               <ChangesWalkthroughRegenerate />
-              <ChangesWalkthroughNav />
             </>
           ) : null}
           <button
@@ -204,6 +204,7 @@ export function ToolSidePanel({
             active
             sourceRequest={walkthroughSourceRequest}
             model={walkthroughModel}
+            onOpenSession={walkthroughOnOpenSession}
           >
             {panelContent}
           </ChangesWalkthroughProvider>

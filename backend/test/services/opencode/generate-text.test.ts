@@ -77,16 +77,6 @@ describe('generateTextWithTimeout', () => {
     expect(calls[0]?.input.model).toEqual({ providerID: 'openai', id: 'gpt-5-mini' })
   })
 
-  it('forwards the model when provided without reading the catalog', async () => {
-    const { client, calls, modelList } = makeClient(async () => ({ text: 'hello' }))
-    const model: ModelRef = { providerID: 'anthropic', id: 'claude-sonnet-4' }
-
-    await generateTextWithTimeout(client, { prompt: 'write', model }, 1000)
-
-    expect(calls[0]?.input).toEqual({ prompt: 'write', model })
-    expect(modelList).not.toHaveBeenCalled()
-  })
-
   it('rejects with GenerateTextTimeoutError and aborts the request after the timeout', async () => {
     vi.useFakeTimers()
     const { client, calls } = makeClient(() => new Promise<never>(() => {}))

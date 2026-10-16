@@ -31,6 +31,8 @@ import migration202610061700 from './202610061700-multi-run-fusions'
 import migration202610061701 from './202610061701-change-walkthroughs'
 import migration202610081200 from './202610081200-change-walkthrough-sources'
 import migration202610141200 from './202610141200-session-sandbox-modes'
+import migration202610151200 from './202610151200-change-walkthrough-sessions'
+import migration202610161200 from './202610161200-change-walkthrough-execution'
 
 export const allMigrations: Migration[] = [
   migration001,
@@ -65,4 +67,6 @@ export const allMigrations: Migration[] = [
   migration202610061701,
   migration202610081200,
   migration202610141200,
+  migration202610151200,
+  migration202610161200,
 ]

@@ -4,8 +4,8 @@ import { gitRefSchema } from './git'
 export const WALKTHROUGH_DIFF_MAX_CHARS = 60000;
 export const WALKTHROUGH_HUNK_MAX_CHARS = 8000;
 export const MECHANICAL_TEXT_BUDGET = 20000;
-export const WALKTHROUGH_MAX_STOPS = 20;
-export const WALKTHROUGH_TEXT_MAX_CHARS = 2000;
+export const WALKTHROUGH_GENERATION_TIMEOUT_MS = 15 * 60 * 1000;
+export const WALKTHROUGH_REFINE_MAX_CHARS = 4000;
 export const WALKTHROUGH_OUTLINE_PREVIEW_LINES = 6;
 export const WALKTHROUGH_OUTLINE_LINE_MAX_CHARS = 160;
 
@@ -116,37 +116,12 @@ export const WalkthroughHunkSchema = z.object({
 
 export type WalkthroughHunk = z.infer<typeof WalkthroughHunkSchema>;
 
-export const WalkthroughStopSchema = z.object({
-  id: z.string(),
-  title: z.string(),
-  explanation: z.string(),
-  hunkIds: z.array(z.string()),
-  status: z.enum(["pending", "ready", "failed"]),
-  explanationKey: z.string().nullable(),
-});
-
-export type WalkthroughStop = z.infer<typeof WalkthroughStopSchema>;
-
 export const WalkthroughOmittedFileSchema = z.object({
   file: z.string(),
   reason: z.enum(["binary", "budget", "renamed", "modeChange"]),
 });
 
 export type WalkthroughOmittedFile = z.infer<typeof WalkthroughOmittedFileSchema>;
-
-export const ChangeWalkthroughSchema = z.object({
-  sessionId: z.string(),
-  source: WalkthroughSourceSchema,
-  diffHash: z.string(),
-  model: z.string().nullable(),
-  summary: z.string(),
-  stops: z.array(WalkthroughStopSchema),
-  hunks: z.array(WalkthroughHunkSchema),
-  omittedFiles: z.array(WalkthroughOmittedFileSchema),
-  createdAt: z.number(),
-});
-
-export type ChangeWalkthrough = z.infer<typeof ChangeWalkthroughSchema>;
 
 export const WalkthroughGenerationErrorSchema = z.object({
   message: z.string(),
@@ -156,33 +131,37 @@ export const WalkthroughGenerationErrorSchema = z.object({
 
 export type WalkthroughGenerationError = z.infer<typeof WalkthroughGenerationErrorSchema>;
 
+export const WalkthroughStatusSchema = z.enum(['generating', 'ready', 'failed', 'cancelled'])
+
+export type WalkthroughStatus = z.infer<typeof WalkthroughStatusSchema>
+
+export const ChangeWalkthroughSchema = z.object({
+  sessionId: z.string(),
+  source: WalkthroughSourceSchema,
+  diffHash: z.string(),
+  walkthroughSessionId: z.string().nullable(),
+  status: WalkthroughStatusSchema,
+  artifactPath: z.string().nullable(),
+  publishedAt: z.number().nullable(),
+  executionStartedAt: z.number().nullable(),
+  error: WalkthroughGenerationErrorSchema.nullable(),
+  model: z.string().nullable(),
+  createdAt: z.number(),
+  updatedAt: z.number(),
+})
+
+export type ChangeWalkthrough = z.infer<typeof ChangeWalkthroughSchema>;
+
 export const ChangeWalkthroughStateSchema = z.object({
   walkthrough: ChangeWalkthroughSchema.nullable(),
   currentDiffHash: z.string().nullable(),
   stale: z.boolean(),
   generating: z.boolean(),
+  running: z.boolean(),
   error: WalkthroughGenerationErrorSchema.nullable(),
 });
 
 export type ChangeWalkthroughState = z.infer<typeof ChangeWalkthroughStateSchema>;
-
-export const ChangeWalkthroughWireSchema = ChangeWalkthroughSchema.extend({
-  hunks: z.array(WalkthroughHunkSchema).optional(),
-});
-
-export type ChangeWalkthroughWire = z.infer<typeof ChangeWalkthroughWireSchema>;
-
-export const ChangeWalkthroughStateWireSchema = ChangeWalkthroughStateSchema.extend({
-  walkthrough: ChangeWalkthroughWireSchema.nullable(),
-});
-
-export type ChangeWalkthroughStateWire = z.infer<typeof ChangeWalkthroughStateWireSchema>;
-
-export function walkthroughHunksIdentity(
-  walkthrough: Pick<ChangeWalkthrough, 'diffHash' | 'createdAt'>,
-): string {
-  return `${walkthrough.diffHash}:${walkthrough.createdAt}`
-}
 
 export const GenerateChangeWalkthroughRequestSchema = z.object({
   regenerate: z.boolean().optional(),
@@ -191,3 +170,10 @@ export const GenerateChangeWalkthroughRequestSchema = z.object({
 });
 
 export type GenerateChangeWalkthroughRequest = z.infer<typeof GenerateChangeWalkthroughRequestSchema>;
+
+export const RefineChangeWalkthroughRequestSchema = z.object({
+  source: WalkthroughSourceSchema.optional(),
+  text: z.string().trim().min(1).max(WALKTHROUGH_REFINE_MAX_CHARS),
+})
+
+export type RefineChangeWalkthroughRequest = z.infer<typeof RefineChangeWalkthroughRequestSchema>

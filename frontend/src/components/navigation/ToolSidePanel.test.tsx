@@ -25,10 +25,9 @@ vi.mock('@/components/repo/RepoActionsDialog', () => ({ RepoActionsContent: () =
 vi.mock('@/components/repo/RepoSkillsDialog', () => ({ RepoSkillsContent: () => <div>skills-tool</div> }))
 vi.mock('@/components/session/ChangesWalkthroughSheet', () => ({
   ChangesWalkthroughProvider: ({ children }: { children: ReactNode }) => <>{children}</>,
-  ChangesWalkthroughNav: () => null,
   ChangesWalkthroughRegenerate: () => null,
   ChangesWalkthroughSourcePicker: () => null,
-  ChangesWalkthroughStop: () => null,
+  ChangesWalkthroughCancel: () => null,
   ChangesWalkthroughView: () => <div>walkthrough-tool</div>,
 }))
 

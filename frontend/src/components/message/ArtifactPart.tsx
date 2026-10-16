@@ -1,6 +1,7 @@
 import { memo, useState } from 'react'
 import { AppWindow, ExternalLink, RotateCw } from 'lucide-react'
 import { Button } from '@/components/ui/button'
+import { SandboxedHtmlFrame } from '@/components/ui/sandboxed-html-frame'
 
 interface ArtifactPartProps {
   title: string
@@ -46,15 +47,7 @@ export const ArtifactPart = memo(function ArtifactPart({ title, src, path }: Art
           </a>
         </Button>
       </div>
-      <iframe
-        key={reloadKey}
-        src={src}
-        title={title}
-        sandbox="allow-scripts"
-        loading="lazy"
-        referrerPolicy="no-referrer"
-        className="block w-full h-[480px] border-0 bg-white"
-      />
+      <SandboxedHtmlFrame src={src} title={title} reloadKey={reloadKey} className="h-[480px]" />
     </div>
   )
 })

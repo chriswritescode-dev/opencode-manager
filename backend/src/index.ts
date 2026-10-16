@@ -43,6 +43,7 @@ import { createSessionSandboxRoutes } from './routes/session-sandbox'
 import { createSessionGoalRoutes } from './routes/session-goals'
 import { createMultiRunRoutes } from './routes/multi-runs'
 import { createChangeWalkthroughRoutes } from './routes/change-walkthroughs'
+import { getChangeWalkthroughByWalkthroughSession } from './db/change-walkthroughs'
 import { createLogRoutes } from './routes/logs'
 import { createPreviewRoutes, createPreviewAvailability } from './routes/preview'
 import { createPreviewGatewayApp, PreviewSessionStore } from './services/preview/gateway'
@@ -88,6 +89,7 @@ import {
   getTrustedOrigins,
   ENV
 } from '@opencode-manager/shared/config/env'
+import { NotificationEventType } from '@opencode-manager/shared/schemas'
 
 
 const { PORT, HOST } = ENV.SERVER
@@ -302,6 +304,12 @@ sseAggregator.onEvent((directory, event) => {
 notificationService.addEventSuppressor(async (event, sessionId) => {
   if (event.type !== 'permission.asked' || !sessionId) return false
   return (await sessionPermissionModeService.getEffectiveMode(sessionId)).mode === 'auto'
+})
+
+notificationService.addEventSuppressor(async (event, sessionId) => {
+  if (!sessionId) return false
+  if (event.type !== NotificationEventType.SESSION_IDLE && event.type !== NotificationEventType.SESSION_FAILED) return false
+  return getChangeWalkthroughByWalkthroughSession(db, sessionId) !== null
 })
 
 if (ENV.VAPID.PUBLIC_KEY && ENV.VAPID.PRIVATE_KEY) {

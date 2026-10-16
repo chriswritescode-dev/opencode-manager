@@ -5,7 +5,9 @@ import {
   MANAGER_PROMPT_CLIENTS,
   MANAGER_TOOL_ACTIONS,
   MANAGER_TOOL_NAME,
+  PublishWalkthroughParamsSchema,
   ShowArtifactParamsSchema,
+  WalkthroughChangesParamsSchema,
   WalkthroughSourceSchema,
 } from '@opencode-manager/shared/schemas'
 
@@ -78,13 +80,15 @@ const ManagerToolWalkthroughParamsSchema = z
     source: WalkthroughSourceSchema.optional().describe('The change source to walk through. Defaults to the changes in this session.'),
   })
   .strict()
-  .describe("Request the change Walkthrough for this session, generating it if needed. It opens in the user's Manager window when this session is open on desktop; otherwise the user can open it from this tool call.")
+  .describe("Start a separate walkthrough session that builds an interactive walkthrough UI for this session's changes, generating it if needed. It opens in the user's Manager walkthrough panel when this session is open on desktop; otherwise the user can open it from this tool call.")
 
 const MANAGER_TOOL_ACTION_PARAMS_SCHEMAS: Record<(typeof MANAGER_TOOL_ACTIONS)[number], z.ZodType> = {
   send_notification: ManagerToolNotificationParamsSchema,
   request: ManagerToolRequestParamsSchema,
   open_walkthrough: ManagerToolWalkthroughParamsSchema,
   show_artifact: ShowArtifactParamsSchema.describe('Show a self-contained HTML file the agent wrote to the user, rendered inline in the Manager chat in a sandboxed frame.'),
+  walkthrough_changes: WalkthroughChangesParamsSchema.describe('Read the changed files of the walkthrough. Omit params.file for an outline of every changed file; pass params.file to get one file\'s full hunks.'),
+  publish_walkthrough: PublishWalkthroughParamsSchema.describe('Publish the walkthrough HTML file you wrote so the Manager walkthrough panel renders it.'),
 }
 
 export function parseAllowedRoute(route: string): { method: string; path: string } {
@@ -119,6 +123,8 @@ function buildManagerToolInputJsonSchema(): Record<string, unknown> {
             MANAGER_TOOL_ACTION_PARAMS_SCHEMAS.request,
             MANAGER_TOOL_ACTION_PARAMS_SCHEMAS.open_walkthrough,
             MANAGER_TOOL_ACTION_PARAMS_SCHEMAS.show_artifact,
+            MANAGER_TOOL_ACTION_PARAMS_SCHEMAS.walkthrough_changes,
+            MANAGER_TOOL_ACTION_PARAMS_SCHEMAS.publish_walkthrough,
           ])
           .describe('The parameters for the chosen action.'),
       })
@@ -139,7 +145,9 @@ function buildManagerToolDescription(): string {
     'Actions:',
     '- send_notification: send a push notification to every device the user has registered.',
     '- request: call an allow-listed internal API route to read and manage settings, the OpenCode configuration file, repos (list, inspect, clone from a git URL with POST /repos and body { repoUrl, branch?, directoryName? }), OpenCode workspaces, sessions (list, create, follow up, read the latest reply, fork), and schedules.',
-    "- open_walkthrough: request the change Walkthrough for the current session, generating it if needed. It opens in the user's Manager window when this session is open on desktop; otherwise the user opens it from this tool call. Use when the user asks to walk through, review or explain the changes.",
+    "- open_walkthrough: start a separate walkthrough session that builds an interactive walkthrough UI for the current session's changes, opened in the Manager walkthrough panel. It opens in the user's Manager window when this session is open on desktop; otherwise the user opens it from this tool call. Use when the user asks to walk through, review or explain the changes.",
+    "- walkthrough_changes: only valid inside a walkthrough session. Call it with no arguments for an outline of the changed files, or with { file } for one file's full hunks.",
+    '- publish_walkthrough: only valid inside a walkthrough session. Call it after writing the walkthrough HTML to publish it to the Manager walkthrough panel.',
     '- show_artifact: write a self-contained .html file with your file tools, then call show_artifact with its path to show it to the user, rendered inline in this session\'s Manager chat inside a sandboxed frame. Edit the file to fix or change it (no need to resend content). Inline your own CSS and JavaScript; libraries may load from public CDNs. Forms, popups, cookies and local storage are blocked. Single file only: sibling .js and .css files will not load.',
     'Allowed request routes:',
   ]
@@ -282,13 +290,9 @@ var ACTIONS = {
       var state = await postInternalApi('/change-walkthroughs/' + encodeURIComponent(context.sessionID), body, context.signal)
       var hint = ' It opens in the Manager window when this session is open on desktop; otherwise the user can open it from this tool call.'
       if (state.generating === true) {
-        return 'Requested the walkthrough; it is generating.' + hint
+        return 'Started a walkthrough session that builds an interactive walkthrough.' + hint
       }
-      var stops = state.walkthrough && Array.isArray(state.walkthrough.stops) ? state.walkthrough.stops.length : 0
-      if (state.walkthrough) {
-        return 'Requested the walkthrough (' + stops + ' stops).' + hint
-      }
-      return 'Requested the walkthrough.' + hint
+      return 'The walkthrough is ready.' + hint
     },
   },
   show_artifact: {
@@ -300,6 +304,22 @@ var ACTIONS = {
       )
       return {
         content: 'Showing the artifact "' + params.title + '" from ' + result.path + ' in the Manager chat. It renders the current file contents, so after editing the file the user can reload the view; call show_artifact again only to show a different file.',
+        metadata: { path: result.path },
+      }
+    },
+  },
+  walkthrough_changes: {
+    run: async function (params, context) {
+      var body = params.file === undefined ? undefined : { file: params.file }
+      var result = await postInternalApi('/walkthrough-sessions/' + encodeURIComponent(context.sessionID) + '/changes', body, context.signal)
+      return result.text
+    },
+  },
+  publish_walkthrough: {
+    run: async function (params, context) {
+      var result = await postInternalApi('/walkthrough-sessions/' + encodeURIComponent(context.sessionID) + '/publish', undefined, context.signal)
+      return {
+        content: 'Published the walkthrough from ' + result.path + '. The Manager walkthrough panel renders the current file; edit it and call publish_walkthrough again after significant changes.',
         metadata: { path: result.path },
       }
     },

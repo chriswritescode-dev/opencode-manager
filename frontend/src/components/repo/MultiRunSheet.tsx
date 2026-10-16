@@ -258,6 +258,7 @@ export function MultiRunSheet({ repoId, directory, defaultBaseRef, open, onOpenC
           onOpenChange={(next) => {
             if (!next) setWalkthroughSessionId(null)
           }}
+          onOpenSession={(id) => navigate(buildSessionPath(repoId, id))}
         />
       ) : null}
     </>

@@ -860,6 +860,7 @@ export function SessionDetail() {
           onSkillLoaded={handleSkillLoaded}
           walkthroughSourceRequest={walkthroughSourceRequest}
           walkthroughModel={modelRef}
+          walkthroughOnOpenSession={handleChildSessionClick}
         />
       )}
       </div>
@@ -941,6 +942,7 @@ export function SessionDetail() {
           onOpenChange={setWalkthroughOpen}
           sourceRequest={walkthroughSourceRequest}
           model={modelRef}
+          onOpenSession={handleChildSessionClick}
         />
       )}
 
