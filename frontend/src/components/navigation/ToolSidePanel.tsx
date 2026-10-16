@@ -26,38 +26,53 @@ import { isPanelTool, type ToolPanelState, type PanelTool } from '@/hooks/useToo
 import { useOpenNavItem } from '@/hooks/useOpenNavItem'
 import { ActivityList } from '@/components/activity/ActivityList'
 import { ActivityCountPill } from '@/components/activity/ActivityCountPill'
-import { useActiveWorkCounts, useActivityWindowMs } from '@/hooks/useActiveWork'
+import { useActiveWorkCounts, useActivityWindowMinutes } from '@/hooks/useActiveWork'
 import { formatActivityWindow } from '@/lib/activeWork'
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from '@/components/ui/tooltip'
 import { restoreOverlayFocus } from '@/lib/overlayFocus'
 import { cn } from '@/lib/utils'
-
-const MS_PER_MINUTE = 60_000
 
 const PANEL_WIDTH_CLASSES: Partial<Record<PanelTool, string>> = {
   activity: 'w-80',
 }
 
 function ActivityWindowLabel() {
-  const windowMs = useActivityWindowMs()
+  const minutes = useActivityWindowMinutes()
   return (
     <span className="shrink-0 text-xs text-muted-foreground">
-      Last {formatActivityWindow(Math.round(windowMs / MS_PER_MINUTE))}
+      Last {formatActivityWindow(minutes)}
     </span>
   )
 }
 
 function ActivityPanelBody() {
   const navigate = useNavigate()
-  const windowMs = useActivityWindowMs()
+  const minutes = useActivityWindowMinutes()
 
   return (
     <div className="min-h-0 flex-1 overflow-y-auto">
       <ActivityList
-        windowMs={windowMs}
+        minutes={minutes}
         onNavigate={(item) => navigate({ pathname: item.path, search: '?panel=activity' })}
       />
     </div>
+  )
+}
+
+function ActivityRailIndicator() {
+  const { needsInput, running } = useActiveWorkCounts()
+  const total = needsInput + running
+  const label = total > 0 ? `Activity, ${needsInput} needs input, ${running} running` : 'Activity'
+
+  return (
+    <>
+      <span className="sr-only">{label}</span>
+      <ActivityCountPill
+        needsInput={needsInput}
+        running={running}
+        className="absolute -right-0.5 -top-0.5"
+      />
+    </>
   )
 }
 
@@ -81,11 +96,14 @@ interface RailButtonProps {
   item: MoreDrawerItem
   active: boolean
   onClick: () => void
-  ariaLabel?: string
+  /**
+   * Rendered inside the button. When present, the indicator owns the button's accessible name,
+   * so the item label is not applied as an `aria-label`.
+   */
   indicator?: ReactNode
 }
 
-function RailButton({ item, active, onClick, ariaLabel, indicator }: RailButtonProps) {
+function RailButton({ item, active, onClick, indicator }: RailButtonProps) {
   const Icon = item.icon
   return (
     <Tooltip delayDuration={0}>
@@ -93,7 +111,7 @@ function RailButton({ item, active, onClick, ariaLabel, indicator }: RailButtonP
         <button
           type="button"
           onClick={onClick}
-          aria-label={ariaLabel ?? item.label}
+          aria-label={indicator ? undefined : item.label}
           aria-pressed={active}
           className={cn(
             'relative rounded-md p-2 transition-colors',
@@ -137,7 +155,6 @@ export function ToolSidePanel({
   const { activeTool, toggleTool, closePanel } = panel
   const location = useLocation()
   const openNavItem = useOpenNavItem()
-  const { needsInput, running } = useActiveWorkCounts()
   const railRef = useRef<HTMLElement>(null)
   const previousActiveToolRef = useRef(activeTool)
 
@@ -159,18 +176,6 @@ export function ToolSidePanel({
     else actionItems.push(item)
   }
   const activeLabel = panelTools.find(({ tool }) => tool === activeTool)?.item.label
-
-  const activityTotal = needsInput + running
-  const activityAriaLabel =
-    activityTotal > 0 ? `Activity, ${needsInput} needs input, ${running} running` : undefined
-  const activityIndicator =
-    activityTotal > 0 ? (
-      <ActivityCountPill
-        needsInput={needsInput}
-        running={running}
-        className="absolute -right-0.5 -top-0.5"
-      />
-    ) : undefined
 
   if (panelTools.length === 0 && actionItems.length === 0) return null
 
@@ -277,8 +282,7 @@ export function ToolSidePanel({
               item={item}
               active={tool === activeTool}
               onClick={() => toggleTool(tool)}
-              ariaLabel={tool === 'activity' ? activityAriaLabel : undefined}
-              indicator={tool === 'activity' ? activityIndicator : undefined}
+              indicator={tool === 'activity' ? <ActivityRailIndicator /> : undefined}
             />
           ))}
           {actionItems.length > 0 ? <div className="my-1 h-px w-6 shrink-0 bg-border" role="separator" /> : null}

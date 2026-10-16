@@ -91,8 +91,8 @@ vi.mock('@/hooks/useActiveWork', () => ({
     mocks.activeWorkWindowMs = windowMs
     return { groups: mocks.activeWorkGroups, isLoading: false, isError: false }
   },
-  useActivityWindowMs: () =>
-    (mocks.preferences?.activityWindowMinutes ?? DEFAULT_ACTIVITY_WINDOW_MINUTES) * 60 * 1000,
+  useActivityWindowMinutes: () =>
+    mocks.preferences?.activityWindowMinutes ?? DEFAULT_ACTIVITY_WINDOW_MINUTES,
 }))
 
 vi.mock('@/stores/sessionStatusStore', async (importOriginal) => {
@@ -619,6 +619,35 @@ describe('SessionPickerDialog', () => {
     expect(onSelectRepo).toHaveBeenCalledWith(mocks.repos[0])
   })
 
+  it('navigates the projects tab with wrapping arrows, PageUp/PageDown and Enter', async () => {
+    mocks.repos = Array.from({ length: 12 }, (_, index) =>
+      repo(index + 1, `repo-${index + 1}`, `/w/r${index + 1}`),
+    )
+    const { onSelectRepo } = renderPicker()
+
+    openProjectsTab()
+
+    expect(await screen.findByRole('option', { name: 'repo-1' })).toHaveAttribute(
+      'aria-selected',
+      'true',
+    )
+
+    fireEvent.keyDown(combobox(), { key: 'ArrowUp' })
+    expect(screen.getByRole('option', { name: 'repo-12' })).toHaveAttribute('aria-selected', 'true')
+
+    fireEvent.keyDown(combobox(), { key: 'ArrowDown' })
+    expect(screen.getByRole('option', { name: 'repo-1' })).toHaveAttribute('aria-selected', 'true')
+
+    fireEvent.keyDown(combobox(), { key: 'PageDown' })
+    expect(screen.getByRole('option', { name: 'repo-11' })).toHaveAttribute('aria-selected', 'true')
+
+    fireEvent.keyDown(combobox(), { key: 'Enter' })
+    expect(onSelectRepo).toHaveBeenCalledWith(mocks.repos[10])
+
+    fireEvent.keyDown(combobox(), { key: 'PageUp' })
+    expect(screen.getByRole('option', { name: 'repo-1' })).toHaveAttribute('aria-selected', 'true')
+  })
+
   it('opens a repo on click in the projects tab', async () => {
     mocks.repos = [repo(1, 'alpha', '/w/a'), repo(2, 'beta', '/w/b')]
     const { onSelectRepo } = renderPicker()
@@ -765,11 +794,23 @@ describe('SessionPickerDialog', () => {
     openActiveTab()
 
     expect(
-      await screen.findByText('No active or recent sessions in the last 120 minutes'),
+      await screen.findByText('No active or recent sessions in the last 2 hours'),
     ).toBeInTheDocument()
     expect(screen.queryByText('Needs input')).not.toBeInTheDocument()
     expect(screen.queryByText('Running')).not.toBeInTheDocument()
     expect(screen.queryByText('Recent')).not.toBeInTheDocument()
+  })
+
+  it('formats a full-day active work window as hours in the empty state', async () => {
+    mocks.preferences = { activityWindowMinutes: 1440 }
+
+    renderPicker()
+    openActiveTab()
+
+    expect(
+      await screen.findByText('No active or recent sessions in the last 24 hours'),
+    ).toBeInTheDocument()
+    expect(mocks.activeWorkWindowMs).toBe(1440 * 60 * 1000)
   })
 
   it('opens the cursor active row with Enter and selects its session and repo', async () => {

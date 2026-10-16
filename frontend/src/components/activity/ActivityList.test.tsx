@@ -14,7 +14,7 @@ vi.mock('@/hooks/useActiveWork', () => ({
   useActiveWork: mocks.useActiveWork,
 }))
 
-const WINDOW_MS = 30 * 60_000
+const WINDOW_MINUTES = 30
 const NOW = Date.now()
 
 function createSession(id: string, title: string, updated = NOW - 60_000): Session {
@@ -71,11 +71,16 @@ function setGroups(groups: {
 const renderList = (
   onNavigate = vi.fn(),
   path = '/',
-  props: { hideWhenEmpty?: boolean; title?: string; variant?: 'full' | 'compact' } = {},
+  props: {
+    hideWhenEmpty?: boolean
+    title?: string
+    variant?: 'full' | 'compact'
+    minutes?: number
+  } = {},
 ) =>
   render(
     <MemoryRouter initialEntries={[path]}>
-      <ActivityList windowMs={WINDOW_MS} onNavigate={onNavigate} {...props} />
+      <ActivityList minutes={WINDOW_MINUTES} onNavigate={onNavigate} {...props} />
     </MemoryRouter>,
   )
 
@@ -116,6 +121,14 @@ describe('ActivityList', () => {
     renderList()
 
     expect(screen.getByText('No active or recent sessions in the last 30 minutes')).toBeInTheDocument()
+  })
+
+  it('renders the empty state with an hour-scale window', () => {
+    setGroups({})
+
+    renderList(vi.fn(), '/', { minutes: 1440 })
+
+    expect(screen.getByText('No active or recent sessions in the last 24 hours')).toBeInTheDocument()
   })
 
   it('calls onNavigate with the item when a row is clicked', () => {

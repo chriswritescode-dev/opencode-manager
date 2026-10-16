@@ -1,4 +1,4 @@
-import { useActivityWindowMs } from '@/hooks/useActiveWork'
+import { useActivityWindowMinutes } from '@/hooks/useActiveWork'
 import { ActivityList } from '@/components/activity/ActivityList'
 
 /**
@@ -6,11 +6,11 @@ import { ActivityList } from '@/components/activity/ActivityList'
  * Reads the network through `useActiveWork`, so it must only be mounted while visible.
  */
 export function CompactActivityList({ onNavigate }: { onNavigate: (path: string) => void }) {
-  const windowMs = useActivityWindowMs()
+  const minutes = useActivityWindowMinutes()
 
   return (
     <ActivityList
-      windowMs={windowMs}
+      minutes={minutes}
       title="Activity"
       hideWhenEmpty
       variant="compact"

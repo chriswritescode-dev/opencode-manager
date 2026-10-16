@@ -3,32 +3,26 @@ import type { ChildOutcome } from '@/lib/backgroundWork'
 import type { SessionStatusType } from '@/stores/sessionStatusStore'
 import { getSessionKey } from '@/lib/sessionKey'
 import { getSessionPath } from '@/lib/navigation'
-import { findRepoForDirectory, repoMatchesDirectory } from '@/components/navigation/sidebar-session-tree'
+import { findRepoForDirectory, normalizeDirectory } from '@/components/navigation/sidebar-session-tree'
 
-const ACTIVITY_WINDOW_LABELS: Record<number, string> = {
-  15: '15 minutes',
-  30: '30 minutes',
-  60: '1 hour',
-  120: '2 hours',
-  240: '4 hours',
-  480: '8 hours',
-  1440: '24 hours',
-}
+export const MS_PER_MINUTE = 60_000
 
 /**
- * Human-readable label for an activity window in minutes. Known options map to their labels;
- * other values fall back to minutes, or to hours when the value divides evenly into hours.
+ * Human-readable label for an activity window in minutes: whole hours when the value divides
+ * evenly into hours, otherwise minutes.
  */
 export function formatActivityWindow(minutes: number): string {
-  const known = ACTIVITY_WINDOW_LABELS[minutes]
-  if (known) return known
-
   if (minutes % 60 === 0) {
     const hours = minutes / 60
     return `${hours} ${hours === 1 ? 'hour' : 'hours'}`
   }
 
   return `${minutes} minutes`
+}
+
+/** Empty-state copy for the activity list naming the window it searched. */
+export function formatActivityEmptyMessage(minutes: number): string {
+  return `No active or recent sessions in the last ${formatActivityWindow(minutes)}`
 }
 
 export type ActiveWorkState = 'needs-input' | 'running' | 'recent'
@@ -47,6 +41,12 @@ export interface ActiveWorkGroups {
   running: ActiveWorkItem[]
   recent: ActiveWorkItem[]
 }
+
+export const ACTIVE_WORK_GROUPS = [
+  { key: 'needsInput', heading: 'Needs input' },
+  { key: 'running', heading: 'Running' },
+  { key: 'recent', heading: 'Recent' },
+] as const satisfies ReadonlyArray<{ key: keyof ActiveWorkGroups; heading: string }>
 
 export function rootSessionID(
   sessionID: string,
@@ -94,40 +94,93 @@ export function collectActiveRoots(input: {
   return { needsInput, running }
 }
 
-/**
- * Whether a repo has any active session. A session counts when its own directory or its root's
- * directory matches the repo; running shells carry their own directory. Needs-input outranks running.
- */
-export function activeRepoState(input: {
-  repo: Repo
+interface RepoActivityIndexInput {
   statuses: ReadonlyMap<string, SessionStatusType>
   parents: ReadonlyMap<string, string | null>
   runningShells: ReadonlyMap<string, { sessionID: string; directory: string }>
   directories: ReadonlyMap<string, string>
   pendingInputSessionIDs: Iterable<string>
-}): 'needs-input' | 'running' | null {
-  const { repo, statuses, parents, runningShells, directories, pendingInputSessionIDs } = input
+}
 
-  const sessionMatches = (sessionID: string): boolean => {
-    if (repoMatchesDirectory(repo, directories.get(sessionID))) return true
-    const rootID = rootSessionID(sessionID, parents)
-    return rootID !== sessionID && repoMatchesDirectory(repo, directories.get(rootID))
+let cachedRepoActivityIndex: (RepoActivityIndexInput & {
+  index: Map<string, 'needs-input' | 'running'>
+}) | null = null
+
+function computeRepoActivityIndex(input: RepoActivityIndexInput): Map<string, 'needs-input' | 'running'> {
+  const { statuses, parents, runningShells, directories, pendingInputSessionIDs } = input
+  const index = new Map<string, 'needs-input' | 'running'>()
+
+  const markNeedsInput = (directory?: string | null): void => {
+    const normalized = normalizeDirectory(directory)
+    if (normalized) index.set(normalized, 'needs-input')
+  }
+
+  const markRunning = (directory?: string | null): void => {
+    const normalized = normalizeDirectory(directory)
+    if (!normalized || index.get(normalized) === 'needs-input') return
+    index.set(normalized, 'running')
   }
 
   for (const sessionID of pendingInputSessionIDs) {
-    if (sessionMatches(sessionID)) return 'needs-input'
+    markNeedsInput(directories.get(sessionID))
+    markNeedsInput(directories.get(rootSessionID(sessionID, parents)))
   }
 
   for (const [sessionID, status] of statuses) {
     if (status.type === 'idle') continue
-    if (sessionMatches(sessionID)) return 'running'
+    markRunning(directories.get(sessionID))
+    markRunning(directories.get(rootSessionID(sessionID, parents)))
   }
 
   for (const shell of runningShells.values()) {
-    if (repoMatchesDirectory(repo, shell.directory) || sessionMatches(shell.sessionID)) return 'running'
+    markRunning(shell.directory)
+    markRunning(directories.get(shell.sessionID))
+    markRunning(directories.get(rootSessionID(shell.sessionID, parents)))
   }
 
-  return null
+  return index
+}
+
+/**
+ * Indexes active sessions by normalized directory for repo badges. Pending input marks its own and
+ * its root's directory as needs-input; non-idle sessions and running shells mark running unless
+ * needs-input already claimed the directory. Shared across rows per store snapshot by reference.
+ */
+export function buildRepoActivityIndex(
+  input: RepoActivityIndexInput,
+): Map<string, 'needs-input' | 'running'> {
+  if (
+    cachedRepoActivityIndex &&
+    cachedRepoActivityIndex.statuses === input.statuses &&
+    cachedRepoActivityIndex.parents === input.parents &&
+    cachedRepoActivityIndex.runningShells === input.runningShells &&
+    cachedRepoActivityIndex.directories === input.directories &&
+    cachedRepoActivityIndex.pendingInputSessionIDs === input.pendingInputSessionIDs
+  ) {
+    return cachedRepoActivityIndex.index
+  }
+
+  const index = computeRepoActivityIndex(input)
+  cachedRepoActivityIndex = { ...input, index }
+  return index
+}
+
+/** The repo's activity from a prebuilt index, checking each of its paths. Needs-input outranks running. */
+export function repoActivityFromIndex(
+  repo: Repo,
+  index: ReadonlyMap<string, 'needs-input' | 'running'>,
+): 'needs-input' | 'running' | null {
+  let running = false
+
+  for (const path of [repo.fullPath, repo.localPath, repo.sourcePath]) {
+    const normalized = normalizeDirectory(path)
+    if (!normalized) continue
+    const state = index.get(normalized)
+    if (state === 'needs-input') return 'needs-input'
+    if (state === 'running') running = true
+  }
+
+  return running ? 'running' : null
 }
 
 /**

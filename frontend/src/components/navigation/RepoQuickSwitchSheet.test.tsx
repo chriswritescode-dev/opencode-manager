@@ -35,12 +35,12 @@ const { sessionsData, sessionsHookCalls, permissionSessions, createSessionDirect
 
 const activityMocks = vi.hoisted(() => ({
   useActiveWork: vi.fn(),
-  useActivityWindowMs: vi.fn(),
+  useActivityWindowMinutes: vi.fn(),
 }))
 
 vi.mock('@/hooks/useActiveWork', () => ({
   useActiveWork: activityMocks.useActiveWork,
-  useActivityWindowMs: activityMocks.useActivityWindowMs,
+  useActivityWindowMinutes: activityMocks.useActivityWindowMinutes,
   useRepoActivityState: () => null,
 }))
 
@@ -168,7 +168,7 @@ describe('RepoQuickSwitchSheet', () => {
     sessionsData.splice(0, sessionsData.length)
     sessionsHookCalls.splice(0, sessionsHookCalls.length)
     permissionSessions.current.clear()
-    activityMocks.useActivityWindowMs.mockReturnValue(30 * 60_000)
+    activityMocks.useActivityWindowMinutes.mockReturnValue(30)
     setActivityGroups({})
   })
 

@@ -1,11 +1,13 @@
-import { useCallback, useEffect, useId, useMemo, useRef, useState } from 'react'
-import { Search } from 'lucide-react'
+import { useEffect, useId, useMemo, useState } from 'react'
 import type { Repo } from '@/api/types'
-import { Input } from '@/components/ui/input'
 import { useNavigableRepos } from '@/hooks/useSidebarRepoGroups'
 import { cn, getRepoBranchLabel, getRepoDisplayName } from '@/lib/utils'
-
-const PAGE_STEP = 10
+import {
+  PickerSearchBar,
+  optionId,
+  usePickerCursor,
+  usePickerKeyNav,
+} from '@/components/session/usePickerKeyboardNav'
 
 interface ProjectPickerContentProps {
   open: boolean
@@ -15,8 +17,9 @@ interface ProjectPickerContentProps {
   searchInputRef: React.RefObject<HTMLInputElement | null>
 }
 
-function optionId(baseId: string, index: number): string {
-  return `${baseId}-option-${index}`
+interface ProjectPickerRow {
+  key: string
+  repo: Repo
 }
 
 export function ProjectPickerContent({
@@ -27,12 +30,10 @@ export function ProjectPickerContent({
   searchInputRef,
 }: ProjectPickerContentProps) {
   const { repos, isLoading } = useNavigableRepos()
-  const rowRefs = useRef(new Map<number, HTMLDivElement>())
   const listId = useId()
   const optionBaseId = useId()
 
   const [query, setQuery] = useState('')
-  const [cursorIndex, setCursorIndex] = useState<number | null>(null)
 
   const trimmedQuery = query.trim()
 
@@ -46,111 +47,49 @@ export function ProjectPickerContent({
     })
   }, [repos, trimmedQuery])
 
-  const defaultCursorIndex = useMemo(() => {
-    if (!trimmedQuery && currentRepo) {
-      const index = filteredRepos.findIndex((repo) => repo.id === currentRepo.id)
-      if (index >= 0) return index
-    }
-    return filteredRepos.length > 0 ? 0 : -1
-  }, [trimmedQuery, currentRepo, filteredRepos])
-
-  const effectiveCursorIndex = cursorIndex ?? defaultCursorIndex
-  const cursorRepo = effectiveCursorIndex >= 0 ? filteredRepos[effectiveCursorIndex] : undefined
-
-  useEffect(() => {
-    setCursorIndex(null)
-  }, [trimmedQuery])
-
-  const setRowRef = useCallback((key: number, node: HTMLDivElement | null) => {
-    if (node) rowRefs.current.set(key, node)
-    else rowRefs.current.delete(key)
-  }, [])
-
-  useEffect(() => {
-    if (!cursorRepo) return
-    const node = rowRefs.current.get(cursorRepo.id)
-    if (node && typeof node.scrollIntoView === 'function') {
-      node.scrollIntoView({ block: 'nearest' })
-    }
-  }, [cursorRepo])
-
-  const moveCursor = useCallback(
-    (index: number) => {
-      if (!filteredRepos[index]) return
-      setCursorIndex(index)
-    },
+  const rows = useMemo<ProjectPickerRow[]>(
+    () => filteredRepos.map((repo) => ({ key: String(repo.id), repo })),
     [filteredRepos],
   )
 
-  const handleSearchKeyDown = useCallback(
-    (event: React.KeyboardEvent<HTMLInputElement>) => {
-      if (event.nativeEvent.isComposing) return
-      if (event.metaKey || event.altKey) return
+  const defaultCursorKey = useMemo(() => {
+    if (!trimmedQuery && currentRepo) {
+      const current = rows.find((row) => row.repo.id === currentRepo.id)
+      if (current) return current.key
+    }
+    return rows[0]?.key ?? null
+  }, [trimmedQuery, currentRepo, rows])
 
-      const key = event.key
-      const ctrlKey = event.key.toLowerCase()
-
-      const moveBy = (delta: number, wrap: boolean) => {
-        if (filteredRepos.length === 0) return
-        const base = effectiveCursorIndex < 0 ? (delta > 0 ? -1 : 0) : effectiveCursorIndex
-        const raw = base + delta
-        const next = wrap
-          ? ((raw % filteredRepos.length) + filteredRepos.length) % filteredRepos.length
-          : Math.max(0, Math.min(filteredRepos.length - 1, raw))
-        moveCursor(next)
-      }
-
-      if (key === 'ArrowDown' || (event.ctrlKey && ctrlKey === 'n')) {
-        event.preventDefault()
-        moveBy(1, true)
-        return
-      }
-      if (key === 'ArrowUp' || (event.ctrlKey && ctrlKey === 'p')) {
-        event.preventDefault()
-        moveBy(-1, true)
-        return
-      }
-      if (key === 'PageDown') {
-        event.preventDefault()
-        moveBy(PAGE_STEP, false)
-        return
-      }
-      if (key === 'PageUp') {
-        event.preventDefault()
-        moveBy(-PAGE_STEP, false)
-        return
-      }
-      if (key === 'Enter') {
-        if (!cursorRepo) return
-        event.preventDefault()
-        onSelectRepo(cursorRepo)
-      }
-    },
-    [filteredRepos, effectiveCursorIndex, moveCursor, cursorRepo, onSelectRepo],
+  const { cursorIndex, cursorRow, registerRef, moveCursor, resetCursor } = usePickerCursor(
+    rows,
+    defaultCursorKey,
   )
+
+  useEffect(() => {
+    resetCursor()
+  }, [trimmedQuery, resetCursor])
+
+  const handleSearchKeyDown = usePickerKeyNav({
+    rows,
+    cursorIndex,
+    cursorRow,
+    moveCursor,
+    onOpenRow: (row) => onSelectRepo(row.repo),
+  })
 
   return (
     <div className="mt-4 flex min-h-0 flex-1 flex-col">
-      <div className="flex shrink-0 items-center gap-2 px-4 sm:px-0">
-        <div className="relative flex-1">
-          <Search className="absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
-          <Input
-            ref={searchInputRef}
-            role="combobox"
-            aria-expanded={open}
-            aria-controls={listId}
-            aria-autocomplete="list"
-            aria-activedescendant={effectiveCursorIndex >= 0 ? optionId(optionBaseId, effectiveCursorIndex) : undefined}
-            value={query}
-            onChange={(event) => setQuery(event.target.value)}
-            onKeyDown={handleSearchKeyDown}
-            placeholder="Search projects..."
-            className="h-9 pl-9"
-            autoComplete="off"
-            name="project-picker-search"
-          />
-        </div>
-      </div>
+      <PickerSearchBar
+        inputRef={searchInputRef}
+        listId={listId}
+        open={open}
+        activeDescendantId={cursorIndex >= 0 ? optionId(optionBaseId, cursorIndex) : undefined}
+        value={query}
+        onChange={setQuery}
+        onKeyDown={handleSearchKeyDown}
+        placeholder="Search projects..."
+        name="project-picker-search"
+      />
 
       <div
         role="listbox"
@@ -158,19 +97,20 @@ export function ProjectPickerContent({
         aria-label="Projects"
         className="mt-3 min-h-0 flex-1 overflow-y-auto rounded-md"
       >
-        {filteredRepos.length === 0 ? (
+        {rows.length === 0 ? (
           <div className="p-4 text-sm text-muted-foreground">
             {isLoading ? 'Loading projects...' : 'No projects found'}
           </div>
         ) : (
-          filteredRepos.map((repo, index) => {
-            const isCursor = index === effectiveCursorIndex
+          rows.map((row, index) => {
+            const { repo } = row
+            const isCursor = index === cursorIndex
             const isCurrent = repo.id === currentRepo?.id
             const branch = getRepoBranchLabel(repo)
             return (
               <div
-                key={repo.id}
-                ref={(node) => setRowRef(repo.id, node)}
+                key={row.key}
+                ref={(node) => registerRef(row.key, node)}
                 role="presentation"
                 onPointerMove={(event) => {
                   if (event.pointerType === 'mouse') moveCursor(index)

@@ -1,13 +1,6 @@
-import { act, cleanup, render } from '@testing-library/react'
-import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
-import { stubMatchMedia } from '@/test/test-utils'
+import { cleanup, render } from '@testing-library/react'
+import { afterEach, describe, expect, it, vi } from 'vitest'
 import { ActivitySpinner, SPINNER_FRAMES, brailleDots } from './activity-spinner'
-
-const advanceFrames = (count: number) => {
-  act(() => {
-    vi.advanceTimersByTime(80 * count)
-  })
-}
 
 const circles = (root: ParentNode) => Array.from(root.querySelectorAll('circle'))
 
@@ -21,24 +14,17 @@ const litIndexesFor = (frame: string) =>
     .map((lit, index) => (lit ? index : -1))
     .filter((index) => index >= 0)
 
-const pattern = (root: ParentNode) => circles(root).map((circle) => circle.getAttribute('fill-opacity'))
-
 describe('brailleDots', () => {
   it('lights dots 1, 2 and 4 for the first frame', () => {
     expect(brailleDots('⠋')).toEqual([true, true, false, true, false, false, false, false])
   })
 
-  it('lights dots 1 through 4 for the fourth frame', () => {
+  it('lights dots 1 through 4 for the last frame', () => {
     expect(brailleDots('⠏')).toEqual([true, true, true, true, false, false, false, false])
   })
 })
 
 describe('ActivitySpinner', () => {
-  beforeEach(() => {
-    vi.useFakeTimers()
-    stubMatchMedia(false)
-  })
-
   afterEach(() => {
     cleanup()
     vi.useRealTimers()
@@ -52,65 +38,33 @@ describe('ActivitySpinner', () => {
     expect(container.querySelector('svg')).toHaveAttribute('aria-hidden', 'true')
   })
 
-  it('advances one frame every 80ms and wraps after the last frame', () => {
+  it('steps every dot through all frames in order with a discrete, endless 80ms-per-frame animation', () => {
     const { container } = render(<ActivitySpinner />)
 
-    expect(litIndexes(container)).toEqual(litIndexesFor(SPINNER_FRAMES[0]))
+    circles(container).forEach((circle, dotIndex) => {
+      const animate = circle.querySelector('animate')
+      expect(animate).toHaveAttribute('attributeName', 'fill-opacity')
+      expect(animate).toHaveAttribute('calcMode', 'discrete')
+      expect(animate).toHaveAttribute('repeatCount', 'indefinite')
+      expect(animate).toHaveAttribute('dur', `${80 * SPINNER_FRAMES.length}ms`)
 
-    advanceFrames(1)
-    expect(litIndexes(container)).toEqual(litIndexesFor(SPINNER_FRAMES[1]))
-
-    advanceFrames(1)
-    expect(litIndexes(container)).toEqual(litIndexesFor(SPINNER_FRAMES[2]))
-
-    advanceFrames(SPINNER_FRAMES.length - 2)
-    expect(litIndexes(container)).toEqual(litIndexesFor(SPINNER_FRAMES[0]))
+      const values = animate?.getAttribute('values')?.split(';')
+      expect(values).toEqual(SPINNER_FRAMES.map((frame) => (brailleDots(frame)[dotIndex] ? '1' : '0.25')))
+    })
   })
 
-  it('drives every mounted spinner from a single shared ticker', () => {
-    const { container } = render(
+  it('schedules no JavaScript timers however many spinners are mounted', () => {
+    vi.useFakeTimers()
+
+    render(
       <>
+        <ActivitySpinner />
         <ActivitySpinner />
         <ActivitySpinner />
       </>,
     )
-
-    expect(vi.getTimerCount()).toBe(1)
-
-    const [first, second] = Array.from(container.querySelectorAll('svg'))
-    expect(pattern(first)).toEqual(pattern(second))
-
-    advanceFrames(1)
-
-    expect(litIndexes(first)).toEqual(litIndexesFor(SPINNER_FRAMES[1]))
-    expect(pattern(first)).toEqual(pattern(second))
-  })
-
-  it('clears the shared ticker when the last spinner unmounts', () => {
-    const { unmount } = render(
-      <>
-        <ActivitySpinner />
-        <ActivitySpinner />
-      </>,
-    )
-
-    expect(vi.getTimerCount()).toBe(1)
-
-    unmount()
 
     expect(vi.getTimerCount()).toBe(0)
-  })
-
-  it('keeps animating when the user prefers reduced motion', () => {
-    stubMatchMedia(true)
-
-    const { container } = render(<ActivitySpinner />)
-
-    expect(vi.getTimerCount()).toBe(1)
-
-    advanceFrames(1)
-
-    expect(litIndexes(container)).toEqual(litIndexesFor(SPINNER_FRAMES[1]))
   })
 
   it('keeps every dot inside the cell and clear of its neighbours', () => {

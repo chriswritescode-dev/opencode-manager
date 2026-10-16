@@ -126,7 +126,7 @@ function reconcileBySessionForDirectory<T extends SessionScopedItem>(
   prev: Record<string, T[]>,
   directory: string,
   items: T[],
-  sessionDirectories: Map<string, string>,
+  sessionDirectories: ReadonlyMap<string, string>,
 ): Record<string, T[]> {
   const grouped = groupBySession(items)
   const next = { ...prev }
@@ -273,7 +273,6 @@ export function EventProvider({ children }: { children: React.ReactNode }) {
   const [formsBySession, setFormsBySession] = useState<FormsBySession>({})
   const [showPermissionDialog, setShowPermissionDialog] = useState(true)
 
-  const sessionDirectoriesRef = useRef<Map<string, string>>(new Map())
   const prevPermissionCountRef = useRef(0)
   const initialFetchDoneRef = useRef(false)
   const statusSyncVersionRef = useRef(0)
@@ -304,7 +303,7 @@ export function EventProvider({ children }: { children: React.ReactNode }) {
 
   const rememberSessionDirectory = useCallback((sessionID: string, directory?: string) => {
     if (!directory) return
-    sessionDirectoriesRef.current.set(sessionID, directory)
+    useSessionStatus.getState().setSessionDirectory(sessionID, directory)
   }, [])
 
   const findCachedSessionDirectory = useCallback((sessionID: string): string | null => {
@@ -354,7 +353,7 @@ export function EventProvider({ children }: { children: React.ReactNode }) {
   }, [queryClient])
 
   const findSessionDirectory = useCallback((sessionID: string): string | null => {
-    const remembered = sessionDirectoriesRef.current.get(sessionID)
+    const remembered = useSessionStatus.getState().directories.get(sessionID)
     if (remembered) return remembered
     return findCachedSessionDirectory(sessionID)
   }, [findCachedSessionDirectory])
@@ -398,7 +397,7 @@ export function EventProvider({ children }: { children: React.ReactNode }) {
     })
 
     setPermissionsBySession(prev =>
-      reconcileBySessionForDirectory(prev, directory, permissions, sessionDirectoriesRef.current),
+      reconcileBySessionForDirectory(prev, directory, permissions, useSessionStatus.getState().directories),
     )
   }, [rememberSessionDirectory])
 
@@ -408,7 +407,7 @@ export function EventProvider({ children }: { children: React.ReactNode }) {
     })
 
     setFormsBySession(prev =>
-      reconcileBySessionForDirectory(prev, directory, forms, sessionDirectoriesRef.current),
+      reconcileBySessionForDirectory(prev, directory, forms, useSessionStatus.getState().directories),
     )
   }, [rememberSessionDirectory])
 
@@ -520,7 +519,7 @@ export function EventProvider({ children }: { children: React.ReactNode }) {
     for (const repo of reposRef.current ?? []) {
       if (repo.fullPath) directories.add(repo.fullPath)
     }
-    for (const directory of sessionDirectoriesRef.current.values()) {
+    for (const directory of useSessionStatus.getState().directories.values()) {
       if (directory) directories.add(directory)
     }
     return [...directories]
@@ -659,9 +658,6 @@ export function EventProvider({ children }: { children: React.ReactNode }) {
         case 'permission.asked': {
           const request = event.data
           rememberSessionDirectory(request.sessionID, event.directory)
-          if (event.directory) {
-            useSessionStatus.getState().setSessionDirectory(request.sessionID, event.directory)
-          }
           addPermission(request)
           if (!useSessionStatus.getState().parents.has(request.sessionID)) {
             void resolveSessionAncestry([request.sessionID])
@@ -676,9 +672,6 @@ export function EventProvider({ children }: { children: React.ReactNode }) {
         case 'form.created': {
           const form = event.data.form
           rememberSessionDirectory(form.sessionID, event.directory)
-          if (event.directory) {
-            useSessionStatus.getState().setSessionDirectory(form.sessionID, event.directory)
-          }
           addForm(form)
           if (!useSessionStatus.getState().parents.has(form.sessionID)) {
             void resolveSessionAncestry([form.sessionID])

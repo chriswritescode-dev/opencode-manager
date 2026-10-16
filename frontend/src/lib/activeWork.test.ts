@@ -2,7 +2,15 @@ import { describe, it, expect } from 'vitest'
 import type { Repo, Session } from '@/api/types'
 import type { ChildOutcome } from '@/lib/backgroundWork'
 import type { SessionStatusType } from '@/stores/sessionStatusStore'
-import { buildActiveWork, collectActiveRoots, activeRepoState, rootSessionID, formatActivityWindow } from './activeWork'
+import {
+  buildActiveWork,
+  buildRepoActivityIndex,
+  collectActiveRoots,
+  formatActivityEmptyMessage,
+  formatActivityWindow,
+  repoActivityFromIndex,
+  rootSessionID,
+} from './activeWork'
 
 const NOW = 1_000_000_000_000
 const WINDOW_MS = 60_000
@@ -54,6 +62,15 @@ describe('formatActivityWindow', () => {
 
   it('falls back to hours for unknown values divisible by sixty', () => {
     expect(formatActivityWindow(180)).toBe('3 hours')
+  })
+})
+
+describe('formatActivityEmptyMessage', () => {
+  it('names the window in the empty-state copy', () => {
+    expect(formatActivityEmptyMessage(30)).toBe('No active or recent sessions in the last 30 minutes')
+    expect(formatActivityEmptyMessage(1440)).toBe(
+      'No active or recent sessions in the last 24 hours',
+    )
   })
 })
 
@@ -129,13 +146,17 @@ describe('collectActiveRoots', () => {
   })
 })
 
-describe('activeRepoState', () => {
-  const repo = repoA
+describe('buildRepoActivityIndex and repoActivityFromIndex', () => {
   const noShells = new Map<string, { sessionID: string; directory: string }>()
 
+  const stateFor = (
+    repo: Repo,
+    input: Parameters<typeof buildRepoActivityIndex>[0],
+  ): 'needs-input' | 'running' | null =>
+    repoActivityFromIndex(repo, buildRepoActivityIndex(input))
+
   it('matches a busy session by its own directory', () => {
-    const state = activeRepoState({
-      repo,
+    const state = stateFor(repoA, {
       statuses: statuses({ child: { type: 'busy' } }),
       parents: new Map([['child', 'root'], ['root', null]]),
       runningShells: noShells,
@@ -147,8 +168,7 @@ describe('activeRepoState', () => {
   })
 
   it('matches a busy session by its root directory', () => {
-    const state = activeRepoState({
-      repo,
+    const state = stateFor(repoA, {
       statuses: statuses({ child: { type: 'busy' } }),
       parents: new Map([['child', 'root'], ['root', null]]),
       runningShells: noShells,
@@ -160,8 +180,7 @@ describe('activeRepoState', () => {
   })
 
   it('matches a running shell by its own directory', () => {
-    const state = activeRepoState({
-      repo,
+    const state = stateFor(repoA, {
       statuses: statuses({}),
       parents: new Map(),
       runningShells: new Map([['shell-1', { sessionID: 'orphan', directory: '/repos/a' }]]),
@@ -174,8 +193,7 @@ describe('activeRepoState', () => {
 
   it('matches a session directory against the repo local path', () => {
     const localRepo = createRepo({ id: 7, fullPath: '/repos/full', localPath: '/local/path' })
-    const state = activeRepoState({
-      repo: localRepo,
+    const state = stateFor(localRepo, {
       statuses: statuses({ session: { type: 'busy' } }),
       parents: new Map(),
       runningShells: noShells,
@@ -187,8 +205,7 @@ describe('activeRepoState', () => {
   })
 
   it('prefers needs-input over running', () => {
-    const state = activeRepoState({
-      repo,
+    const state = stateFor(repoA, {
       statuses: statuses({ session: { type: 'busy' } }),
       parents: new Map(),
       runningShells: noShells,
@@ -200,8 +217,7 @@ describe('activeRepoState', () => {
   })
 
   it('returns null when every matching session is idle', () => {
-    const state = activeRepoState({
-      repo,
+    const state = stateFor(repoA, {
       statuses: statuses({ session: { type: 'idle' } }),
       parents: new Map(),
       runningShells: noShells,
@@ -210,6 +226,30 @@ describe('activeRepoState', () => {
     })
 
     expect(state).toBeNull()
+  })
+
+  it('returns null when the repo matches no indexed directory', () => {
+    const state = stateFor(repoA, {
+      statuses: statuses({ session: { type: 'busy' } }),
+      parents: new Map(),
+      runningShells: noShells,
+      directories: new Map([['session', '/repos/other']]),
+      pendingInputSessionIDs: [],
+    })
+
+    expect(state).toBeNull()
+  })
+
+  it('reuses the index for the same snapshot references', () => {
+    const input: Parameters<typeof buildRepoActivityIndex>[0] = {
+      statuses: statuses({ session: { type: 'busy' } }),
+      parents: new Map(),
+      runningShells: noShells,
+      directories: new Map([['session', '/repos/a']]),
+      pendingInputSessionIDs: [],
+    }
+
+    expect(buildRepoActivityIndex(input)).toBe(buildRepoActivityIndex(input))
   })
 })
 

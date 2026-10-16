@@ -23,12 +23,12 @@ vi.mock('react-router-dom', async () => {
 
 const activityMocks = vi.hoisted(() => ({
   useActiveWork: vi.fn(),
-  useActivityWindowMs: vi.fn(),
+  useActivityWindowMinutes: vi.fn(),
 }))
 
 vi.mock('@/hooks/useActiveWork', () => ({
   useActiveWork: activityMocks.useActiveWork,
-  useActivityWindowMs: activityMocks.useActivityWindowMs,
+  useActivityWindowMinutes: activityMocks.useActivityWindowMinutes,
   useRepoActivityState: () => null,
 }))
 
@@ -155,7 +155,7 @@ describe('MoreDrawer', () => {
       cloneStatus: 'ready',
       clonedAt: 0,
     })
-    activityMocks.useActivityWindowMs.mockReturnValue(30 * 60_000)
+    activityMocks.useActivityWindowMinutes.mockReturnValue(30)
     setActivityGroups({})
   })
 

@@ -6,24 +6,40 @@ import { useForms, usePermissions } from '@/contexts/EventContext'
 import { useSessionStatus } from '@/stores/sessionStatusStore'
 import { useSettings } from '@/hooks/useSettings'
 import { DEFAULT_ACTIVITY_WINDOW_MINUTES } from '@/api/types/settings'
-import { buildActiveWork, collectActiveRoots, activeRepoState, type ActiveWorkGroups } from '@/lib/activeWork'
-import type { Repo, Session } from '@/api/types'
+import {
+  buildActiveWork,
+  buildRepoActivityIndex,
+  collectActiveRoots,
+  repoActivityFromIndex,
+  type ActiveWorkGroups,
+} from '@/lib/activeWork'
+import {
+  combineQuerySessions,
+  mergeExtraSessions,
+} from '@/components/navigation/sidebar-session-tree'
+import type { Repo } from '@/api/types'
 
 const ACTIVE_WORK_SESSION_LIMIT = 50
-const MS_PER_MINUTE = 60_000
 
 /**
- * The active-work time window in milliseconds, derived from the user's configured
+ * The active-work time window in minutes, derived from the user's configured
  * `activityWindowMinutes` with the shared default as a fallback.
  */
-export function useActivityWindowMs(): number {
+export function useActivityWindowMinutes(): number {
   const { preferences } = useSettings()
-  const minutes = preferences?.activityWindowMinutes ?? DEFAULT_ACTIVITY_WINDOW_MINUTES
-  return minutes * MS_PER_MINUTE
+  return preferences?.activityWindowMinutes ?? DEFAULT_ACTIVITY_WINDOW_MINUTES
 }
 
-const combineSessions = (results: Array<{ data?: Session }>): Session[] =>
-  results.flatMap((result) => (result.data ? [result.data] : []))
+/** Pending permission and form session ids, merged once per snapshot into a referentially stable list. */
+function usePendingInputSessionIDs(): string[] {
+  const pendingPermissionSessionIDs = usePermissions().pendingSessionIDs
+  const pendingFormSessionIDs = useForms().pendingSessionIDs
+
+  return useMemo(
+    () => [...pendingPermissionSessionIDs, ...pendingFormSessionIDs],
+    [pendingPermissionSessionIDs, pendingFormSessionIDs],
+  )
+}
 
 /**
  * Distinct active roots for a badge: needs-input roots and running roots that are not also
@@ -33,14 +49,9 @@ export function useActiveWorkCounts(): { needsInput: number; running: number } {
   const statuses = useSessionStatus((state) => state.statuses)
   const parents = useSessionStatus((state) => state.parents)
   const runningShells = useSessionStatus((state) => state.runningShells)
-  const pendingPermissionSessionIDs = usePermissions().pendingSessionIDs
-  const pendingFormSessionIDs = useForms().pendingSessionIDs
+  const pendingInputSessionIDs = usePendingInputSessionIDs()
 
   return useMemo(() => {
-    const pendingInputSessionIDs = new Set([
-      ...pendingPermissionSessionIDs,
-      ...pendingFormSessionIDs,
-    ])
     const roots = collectActiveRoots({ statuses, parents, runningShells, pendingInputSessionIDs })
 
     let running = 0
@@ -49,7 +60,7 @@ export function useActiveWorkCounts(): { needsInput: number; running: number } {
     }
 
     return { needsInput: roots.needsInput.size, running }
-  }, [statuses, parents, runningShells, pendingPermissionSessionIDs, pendingFormSessionIDs])
+  }, [statuses, parents, runningShells, pendingInputSessionIDs])
 }
 
 /**
@@ -57,22 +68,19 @@ export function useActiveWorkCounts(): { needsInput: number; running: number } {
  * changes. Reads only the session-status store and the pending queues, with no network.
  */
 export function useRepoActivityState(repo: Repo): 'needs-input' | 'running' | null {
-  const pendingPermissionSessionIDs = usePermissions().pendingSessionIDs
-  const pendingFormSessionIDs = useForms().pendingSessionIDs
-  const pendingInputSessionIDs = useMemo(
-    () => [...pendingPermissionSessionIDs, ...pendingFormSessionIDs],
-    [pendingPermissionSessionIDs, pendingFormSessionIDs],
-  )
+  const pendingInputSessionIDs = usePendingInputSessionIDs()
 
   return useSessionStatus((state) =>
-    activeRepoState({
+    repoActivityFromIndex(
       repo,
-      statuses: state.statuses,
-      parents: state.parents,
-      runningShells: state.runningShells,
-      directories: state.directories,
-      pendingInputSessionIDs,
-    }),
+      buildRepoActivityIndex({
+        statuses: state.statuses,
+        parents: state.parents,
+        runningShells: state.runningShells,
+        directories: state.directories,
+        pendingInputSessionIDs,
+      }),
+    ),
   )
 }
 
@@ -86,13 +94,13 @@ export function useActiveWork(windowMs: number): {
   isError: boolean
 } {
   const { repos, isLoading: isReposLoading } = useNavigableRepos()
-  const directories = useMemo(() => repos.map((repo) => repo.fullPath), [repos])
+  const repoDirectories = useMemo(() => repos.map((repo) => repo.fullPath), [repos])
 
   const {
     data: sessions,
     isLoading: isSessionsLoading,
     isError: isSessionsError,
-  } = useSessionsAcrossDirectories(directories, {
+  } = useSessionsAcrossDirectories(repoDirectories, {
     allDirectories: true,
     limit: ACTIVE_WORK_SESSION_LIMIT,
   })
@@ -101,18 +109,12 @@ export function useActiveWork(windowMs: number): {
   const parents = useSessionStatus((state) => state.parents)
   const runningShells = useSessionStatus((state) => state.runningShells)
   const outcomes = useSessionStatus((state) => state.outcomes)
-  const pendingPermissionSessionIDs = usePermissions().pendingSessionIDs
-  const pendingFormSessionIDs = useForms().pendingSessionIDs
+  const sessionDirectories = useSessionStatus((state) => state.directories)
+  const pendingInputSessionIDs = usePendingInputSessionIDs()
 
   const roots = useMemo(
-    () =>
-      collectActiveRoots({
-        statuses,
-        parents,
-        runningShells,
-        pendingInputSessionIDs: [...pendingPermissionSessionIDs, ...pendingFormSessionIDs],
-      }),
-    [statuses, parents, runningShells, pendingPermissionSessionIDs, pendingFormSessionIDs],
+    () => collectActiveRoots({ statuses, parents, runningShells, pendingInputSessionIDs }),
+    [statuses, parents, runningShells, pendingInputSessionIDs],
   )
 
   const listedSessionIDs = useMemo(
@@ -132,16 +134,16 @@ export function useActiveWork(windowMs: number): {
   }, [roots, listedSessionIDs])
 
   const fetchedSessions = useQueries({
-    queries: missingRootIDs.map((sessionID) => sessionQueryOptions(sessionID)),
-    combine: combineSessions,
+    queries: missingRootIDs.map((sessionID) =>
+      sessionQueryOptions(sessionID, sessionDirectories.get(sessionID)),
+    ),
+    combine: combineQuerySessions,
   })
 
-  const mergedSessions = useMemo(() => {
-    if (fetchedSessions.length === 0) return sessions
-    const seen = new Set(sessions.map((session) => session.id))
-    const extras = fetchedSessions.filter((session) => !seen.has(session.id))
-    return extras.length === 0 ? sessions : [...sessions, ...extras]
-  }, [sessions, fetchedSessions])
+  const mergedSessions = useMemo(
+    () => mergeExtraSessions(sessions, fetchedSessions),
+    [sessions, fetchedSessions],
+  )
 
   const groups = useMemo(
     () =>

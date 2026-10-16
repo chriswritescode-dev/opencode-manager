@@ -1,10 +1,10 @@
 import { memo, useCallback, useEffect, useId, useMemo, useRef, useState } from 'react'
 import { useQuery } from '@tanstack/react-query'
 import { format, startOfDay } from 'date-fns'
-import { MoreHorizontal, Pin, PinOff, Search } from 'lucide-react'
+import { MoreHorizontal, Pin, PinOff } from 'lucide-react'
 import { getOpenCodeLocation } from '@/api/opencode'
 import type { Repo, Session } from '@/api/types'
-import type { ActiveWorkItem } from '@/lib/activeWork'
+import { ACTIVE_WORK_GROUPS, MS_PER_MINUTE, formatActivityEmptyMessage } from '@/lib/activeWork'
 import { Button } from '@/components/ui/button'
 import { Dialog, DialogContent, DialogTitle } from '@/components/ui/dialog'
 import {
@@ -13,15 +13,20 @@ import {
   DropdownMenuItem,
   DropdownMenuTrigger,
 } from '@/components/ui/dropdown-menu'
-import { Input } from '@/components/ui/input'
 import { SessionStatusIndicator } from '@/components/ui/session-status-indicator'
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs'
 import { DeleteSessionDialog } from '@/components/session/DeleteSessionDialog'
 import { ProjectPickerContent } from '@/components/session/ProjectPickerContent'
+import {
+  PickerSearchBar,
+  optionId,
+  usePickerCursor,
+  usePickerKeyNav,
+} from '@/components/session/usePickerKeyboardNav'
 import { partitionSessions } from '@/components/session/session-partition'
 import { buildRepoByDirectory } from '@/components/navigation/sidebar-session-tree'
 import { useDeleteSession } from '@/hooks/useOpenCode'
-import { useActiveWork, useActivityWindowMs } from '@/hooks/useActiveWork'
+import { useActiveWork, useActivityWindowMinutes } from '@/hooks/useActiveWork'
 import { useSessionSearch } from '@/hooks/useSessionSearch'
 import { useSessionPins, useToggleSessionPin } from '@/hooks/useSessionPins'
 import { usePersistentBoolean } from '@/hooks/usePersistentBoolean'
@@ -36,9 +41,7 @@ import { FINE_POINTER_MEDIA_QUERY, useMediaQuery } from '@/hooks/useMediaQuery'
 
 const ALL_PROJECTS_STORAGE_KEY = 'oc:session-picker:all-projects'
 const UNTITLED_SESSION_TITLE = 'Untitled Session'
-const PAGE_STEP = 10
 const NEAR_BOTTOM_PX = 240
-const MS_PER_MINUTE = 60_000
 
 type SessionPickerTab = 'active' | 'sessions' | 'projects'
 
@@ -111,10 +114,6 @@ function buildSections(
     sections.push({ id: `day-${day}`, heading, rows })
   }
   return sections
-}
-
-function optionId(baseId: string, index: number): string {
-  return `${baseId}-option-${index}`
 }
 
 function stripTrailingSlashes(value: string): string {
@@ -295,206 +294,126 @@ const SessionPickerRowItem = memo(function SessionPickerRowItem({
   )
 })
 
-interface SessionPickerCursorState {
-  rowIndexByKey: Map<string, number>
-  cursorIndex: number
-  cursorRow: SessionPickerRow | undefined
-  pendingDeleteKey: string | null
-  setPendingDeleteKey: React.Dispatch<React.SetStateAction<string | null>>
-  registerRef: (key: string, node: HTMLDivElement | null) => void
-  moveCursor: (index: number) => void
-  resetCursor: () => void
+interface SessionPickerRowActionsOptions {
+  directories: string[]
+  activeSessionID?: string
+  onSelectSession: (session: Session, repo: Repo) => void
+  onDeleteActiveSession: () => void
 }
 
-function useSessionPickerCursor(
-  rows: SessionPickerRow[],
-  defaultCursorKey: string | null,
-): SessionPickerCursorState {
-  const rowRefs = useRef(new Map<string, HTMLDivElement>())
-  const [cursorKey, setCursorKey] = useState<string | null>(null)
-  const [pendingDeleteKey, setPendingDeleteKey] = useState<string | null>(null)
-
-  const rowIndexByKey = useMemo(
-    () => new Map(rows.map((row, index) => [row.key, index])),
-    [rows],
-  )
-
-  const cursorIndex = useMemo(() => {
-    if (cursorKey) {
-      const index = rowIndexByKey.get(cursorKey)
-      if (index !== undefined) return index
-    }
-    return defaultCursorKey ? rowIndexByKey.get(defaultCursorKey) ?? -1 : -1
-  }, [cursorKey, rowIndexByKey, defaultCursorKey])
-
-  const cursorRow = cursorIndex >= 0 ? rows[cursorIndex] : undefined
-
-  const registerRef = useCallback((key: string, node: HTMLDivElement | null) => {
-    if (node) rowRefs.current.set(key, node)
-    else rowRefs.current.delete(key)
-  }, [])
-
-  useEffect(() => {
-    if (!cursorRow) return
-    const node = rowRefs.current.get(cursorRow.key)
-    if (node && typeof node.scrollIntoView === 'function') {
-      node.scrollIntoView({ block: 'nearest' })
-    }
-  }, [cursorRow])
-
-  const moveCursor = useCallback(
-    (index: number) => {
-      const row = rows[index]
-      if (!row) return
-      setCursorKey(row.key)
-      setPendingDeleteKey(null)
-    },
-    [rows],
-  )
-
-  const resetCursor = useCallback(() => {
-    setCursorKey(null)
-    setPendingDeleteKey(null)
-  }, [])
-
-  return {
-    rowIndexByKey,
-    cursorIndex,
-    cursorRow,
-    pendingDeleteKey,
-    setPendingDeleteKey,
-    registerRef,
-    moveCursor,
-    resetCursor,
+interface SessionPickerRowActions {
+  pinnedKeys: ReadonlySet<string>
+  pendingDeleteKey: string | null
+  clearPendingDelete: () => void
+  openRow: (row: SessionPickerRow | undefined) => void
+  deleteRow: (row: SessionPickerRow | undefined) => void
+  handleTogglePin: (row: SessionPickerRow) => void
+  handleRequestDelete: (session: Session) => void
+  deleteDialogProps: {
+    open: boolean
+    onOpenChange: (open: boolean) => void
+    onConfirm: () => void
+    onCancel: () => void
+    isDeleting: boolean
   }
 }
 
-interface SessionPickerKeyNavOptions {
-  rows: SessionPickerRow[]
-  cursorIndex: number
-  cursorRow: SessionPickerRow | undefined
-  moveCursor: (index: number) => void
-  onOpenRow: (row: SessionPickerRow) => void
-  onDeleteRow: (row: SessionPickerRow) => void
-  onToggleAllProjects?: () => void
-}
+function useSessionPickerRowActions({
+  directories,
+  activeSessionID,
+  onSelectSession,
+  onDeleteActiveSession,
+}: SessionPickerRowActionsOptions): SessionPickerRowActions {
+  const { data: sessionPins } = useSessionPins()
+  const togglePin = useToggleSessionPin()
+  const pinnedKeys = useMemo(() => buildPinnedSessionKeys(sessionPins ?? []), [sessionPins])
+  const deleteSession = useDeleteSession(directories)
+  const [sessionToDelete, setSessionToDelete] = useState<Session | null>(null)
+  const [pendingDeleteKey, setPendingDeleteKey] = useState<string | null>(null)
 
-function useSessionPickerKeyNav({
-  rows,
-  cursorIndex,
-  cursorRow,
-  moveCursor,
-  onOpenRow,
-  onDeleteRow,
-  onToggleAllProjects,
-}: SessionPickerKeyNavOptions): (event: React.KeyboardEvent<HTMLInputElement>) => void {
-  return useCallback(
-    (event: React.KeyboardEvent<HTMLInputElement>) => {
-      if (event.nativeEvent.isComposing) return
-      if (event.metaKey || event.altKey) return
+  const clearPendingDelete = useCallback(() => {
+    setPendingDeleteKey(null)
+  }, [])
 
-      const moveBy = (delta: number, wrap: boolean) => {
-        if (rows.length === 0) return
-        const base = cursorIndex < 0 ? (delta > 0 ? -1 : 0) : cursorIndex
-        const raw = base + delta
-        const next = wrap
-          ? ((raw % rows.length) + rows.length) % rows.length
-          : Math.max(0, Math.min(rows.length - 1, raw))
-        moveCursor(next)
-      }
-
-      const key = event.key
-      const ctrlKey = event.key.toLowerCase()
-
-      if (key === 'ArrowDown' || (event.ctrlKey && ctrlKey === 'n')) {
-        event.preventDefault()
-        moveBy(1, true)
-        return
-      }
-      if (key === 'ArrowUp' || (event.ctrlKey && ctrlKey === 'p')) {
-        event.preventDefault()
-        moveBy(-1, true)
-        return
-      }
-      if (key === 'PageDown') {
-        event.preventDefault()
-        moveBy(PAGE_STEP, false)
-        return
-      }
-      if (key === 'PageUp') {
-        event.preventDefault()
-        moveBy(-PAGE_STEP, false)
-        return
-      }
-      if (key === 'Enter') {
-        if (!cursorRow) return
-        event.preventDefault()
-        onOpenRow(cursorRow)
-        return
-      }
-      if (onToggleAllProjects && event.ctrlKey && ctrlKey === 'a') {
-        event.preventDefault()
-        onToggleAllProjects()
-        return
-      }
-      if (event.ctrlKey && ctrlKey === 'd') {
-        if (!cursorRow) return
-        event.preventDefault()
-        onDeleteRow(cursorRow)
-      }
+  const openRow = useCallback(
+    (row: SessionPickerRow | undefined) => {
+      if (!row) return
+      onSelectSession(row.session, row.repo)
     },
-    [rows, cursorIndex, cursorRow, moveCursor, onOpenRow, onDeleteRow, onToggleAllProjects],
+    [onSelectSession],
   )
-}
 
-interface SessionPickerSearchBarProps {
-  inputRef: React.RefObject<HTMLInputElement | null>
-  listId: string
-  open: boolean
-  activeDescendantId: string | undefined
-  value: string
-  onChange: (value: string) => void
-  onKeyDown: (event: React.KeyboardEvent<HTMLInputElement>) => void
-  placeholder: string
-  name: string
-  trailing?: React.ReactNode
-}
-
-function SessionPickerSearchBar({
-  inputRef,
-  listId,
-  open,
-  activeDescendantId,
-  value,
-  onChange,
-  onKeyDown,
-  placeholder,
-  name,
-  trailing,
-}: SessionPickerSearchBarProps) {
-  return (
-    <div className="flex shrink-0 items-center gap-2 px-4 sm:px-0">
-      <div className="relative flex-1">
-        <Search className="absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
-        <Input
-          ref={inputRef}
-          role="combobox"
-          aria-expanded={open}
-          aria-controls={listId}
-          aria-autocomplete="list"
-          aria-activedescendant={activeDescendantId}
-          value={value}
-          onChange={(event) => onChange(event.target.value)}
-          onKeyDown={onKeyDown}
-          placeholder={placeholder}
-          className="h-9 pl-9"
-          autoComplete="off"
-          name={name}
-        />
-      </div>
-      {trailing}
-    </div>
+  const performDelete = useCallback(
+    (session: Session) => {
+      if (session.id === activeSessionID) onDeleteActiveSession()
+      return deleteSession
+        .mutateAsync({ id: session.id, directory: session.location.directory })
+        .catch(() => undefined)
+    },
+    [deleteSession, activeSessionID, onDeleteActiveSession],
   )
+
+  const deleteRow = useCallback(
+    (row: SessionPickerRow | undefined) => {
+      if (!row) return
+      if (pendingDeleteKey !== row.key) {
+        setPendingDeleteKey(row.key)
+        return
+      }
+      void performDelete(row.session).finally(() => {
+        setPendingDeleteKey(null)
+      })
+    },
+    [pendingDeleteKey, performDelete],
+  )
+
+  const handleTogglePin = useCallback(
+    (row: SessionPickerRow) => {
+      togglePin.mutate({
+        sessionId: row.session.id,
+        directory: row.session.location.directory,
+        pinned: !pinnedKeys.has(row.key),
+      })
+    },
+    [togglePin, pinnedKeys],
+  )
+
+  const handleRequestDelete = useCallback((session: Session) => {
+    setSessionToDelete(session)
+  }, [])
+
+  const confirmDelete = useCallback(() => {
+    if (!sessionToDelete) return
+    void performDelete(sessionToDelete).finally(() => {
+      setSessionToDelete(null)
+    })
+  }, [sessionToDelete, performDelete])
+
+  const deleteDialogProps = useMemo(
+    () => ({
+      open: sessionToDelete !== null,
+      onOpenChange: (nextOpen: boolean) => {
+        if (!nextOpen) setSessionToDelete(null)
+      },
+      onConfirm: () => {
+        void confirmDelete()
+      },
+      onCancel: () => setSessionToDelete(null),
+      isDeleting: deleteSession.isPending,
+    }),
+    [sessionToDelete, confirmDelete, deleteSession.isPending],
+  )
+
+  return {
+    pinnedKeys,
+    pendingDeleteKey,
+    clearPendingDelete,
+    openRow,
+    deleteRow,
+    handleTogglePin,
+    handleRequestDelete,
+    deleteDialogProps,
+  }
 }
 
 interface SessionPickerListProps {
@@ -680,12 +599,21 @@ function SessionPickerContent({
     [repoByDirectory, currentRepo],
   )
 
-  const { data: sessionPins } = useSessionPins()
-  const togglePin = useToggleSessionPin()
-  const pinnedKeys = useMemo(() => buildPinnedSessionKeys(sessionPins ?? []), [sessionPins])
-  const deleteSession = useDeleteSession(directories)
-
-  const [sessionToDelete, setSessionToDelete] = useState<Session | null>(null)
+  const {
+    pinnedKeys,
+    pendingDeleteKey,
+    clearPendingDelete,
+    openRow,
+    deleteRow,
+    handleTogglePin,
+    handleRequestDelete,
+    deleteDialogProps,
+  } = useSessionPickerRowActions({
+    directories,
+    activeSessionID,
+    onSelectSession,
+    onDeleteActiveSession,
+  })
 
   const sections = useMemo(
     () => buildSections(filteredSessions, pinnedKeys, getSessionKey, resolveRepo),
@@ -703,50 +631,25 @@ function SessionPickerContent({
     rowIndexByKey,
     cursorIndex,
     cursorRow,
-    pendingDeleteKey,
-    setPendingDeleteKey,
     registerRef,
-    moveCursor,
+    moveCursor: moveCursorRaw,
     resetCursor,
-  } = useSessionPickerCursor(rows, defaultCursorKey)
+  } = usePickerCursor(rows, defaultCursorKey)
+
+  const moveCursor = useCallback(
+    (index: number) => {
+      clearPendingDelete()
+      moveCursorRaw(index)
+    },
+    [clearPendingDelete, moveCursorRaw],
+  )
 
   useEffect(() => {
     resetCursor()
-  }, [trimmedQuery, allProjects, resetCursor])
+    clearPendingDelete()
+  }, [trimmedQuery, allProjects, resetCursor, clearPendingDelete])
 
-  const openRow = useCallback(
-    (row: SessionPickerRow | undefined) => {
-      if (!row) return
-      onSelectSession(row.session, row.repo)
-    },
-    [onSelectSession],
-  )
-
-  const performDelete = useCallback(
-    (session: Session) => {
-      if (session.id === activeSessionID) onDeleteActiveSession()
-      return deleteSession
-        .mutateAsync({ id: session.id, directory: session.location.directory })
-        .catch(() => undefined)
-    },
-    [deleteSession, activeSessionID, onDeleteActiveSession],
-  )
-
-  const deleteRow = useCallback(
-    (row: SessionPickerRow | undefined) => {
-      if (!row) return
-      if (pendingDeleteKey !== row.key) {
-        setPendingDeleteKey(row.key)
-        return
-      }
-      void performDelete(row.session).finally(() => {
-        setPendingDeleteKey(null)
-      })
-    },
-    [pendingDeleteKey, performDelete, setPendingDeleteKey],
-  )
-
-  const handleSearchKeyDown = useSessionPickerKeyNav({
+  const handleSearchKeyDown = usePickerKeyNav({
     rows,
     cursorIndex,
     cursorRow,
@@ -777,28 +680,6 @@ function SessionPickerContent({
     }
   }, [open, isLoading, rows, canFetchNextPage, fetchNextPage])
 
-  const handleTogglePin = useCallback(
-    (row: SessionPickerRow) => {
-      togglePin.mutate({
-        sessionId: row.session.id,
-        directory: row.session.location.directory,
-        pinned: !pinnedKeys.has(row.key),
-      })
-    },
-    [togglePin, pinnedKeys],
-  )
-
-  const handleRequestDelete = useCallback((session: Session) => {
-    setSessionToDelete(session)
-  }, [])
-
-  const confirmDelete = useCallback(() => {
-    if (!sessionToDelete) return
-    void performDelete(sessionToDelete).finally(() => {
-      setSessionToDelete(null)
-    })
-  }, [sessionToDelete, performDelete])
-
   const labelFor = useCallback(
     (row: SessionPickerRow) =>
       allProjects ? undefined : sessionWorktreeLabel(row.session, location?.project.canonical),
@@ -808,7 +689,7 @@ function SessionPickerContent({
   return (
     <>
       <div className="mt-4 flex min-h-0 flex-1 flex-col">
-        <SessionPickerSearchBar
+        <PickerSearchBar
           inputRef={searchInputRef}
           listId={listId}
           open={open}
@@ -893,17 +774,7 @@ function SessionPickerContent({
         </div>
       </div>
 
-      <DeleteSessionDialog
-        open={sessionToDelete !== null}
-        onOpenChange={(nextOpen) => {
-          if (!nextOpen) setSessionToDelete(null)
-        }}
-        onConfirm={() => {
-          void confirmDelete()
-        }}
-        onCancel={() => setSessionToDelete(null)}
-        isDeleting={deleteSession.isPending}
-      />
+      <DeleteSessionDialog {...deleteDialogProps} />
     </>
   )
 }
@@ -925,9 +796,8 @@ function ActivePickerContent({
   switchHint,
   searchInputRef,
 }: ActivePickerContentProps) {
-  const windowMs = useActivityWindowMs()
-  const windowMinutes = Math.round(windowMs / MS_PER_MINUTE)
-  const { groups, isLoading, isError } = useActiveWork(windowMs)
+  const windowMinutes = useActivityWindowMinutes()
+  const { groups, isLoading, isError } = useActiveWork(windowMinutes * MS_PER_MINUTE)
 
   const listId = useId()
   const optionBaseId = useId()
@@ -936,19 +806,14 @@ function ActivePickerContent({
   const trimmedQuery = query.trim()
 
   const sections = useMemo(() => {
-    const definitions: Array<{ id: string; heading: string; items: ActiveWorkItem[] }> = [
-      { id: 'needs-input', heading: 'Needs input', items: groups.needsInput },
-      { id: 'running', heading: 'Running', items: groups.running },
-      { id: 'recent', heading: 'Recent', items: groups.recent },
-    ]
     const needle = trimmedQuery.toLowerCase()
-    return definitions.flatMap((definition) => {
+    return ACTIVE_WORK_GROUPS.flatMap((definition) => {
       const rows: SessionPickerRow[] = []
-      for (const item of definition.items) {
+      for (const item of groups[definition.key]) {
         if (needle && !(item.session.title ?? '').toLowerCase().includes(needle)) continue
         rows.push({ key: item.key, session: item.session, repo: item.repo })
       }
-      return rows.length > 0 ? [{ id: definition.id, heading: definition.heading, rows }] : []
+      return rows.length > 0 ? [{ id: definition.key, heading: definition.heading, rows }] : []
     })
   }, [groups, trimmedQuery])
 
@@ -963,62 +828,46 @@ function ActivePickerContent({
     rowIndexByKey,
     cursorIndex,
     cursorRow,
-    pendingDeleteKey,
-    setPendingDeleteKey,
     registerRef,
-    moveCursor,
+    moveCursor: moveCursorRaw,
     resetCursor,
-  } = useSessionPickerCursor(rows, defaultCursorKey)
-
-  useEffect(() => {
-    resetCursor()
-  }, [trimmedQuery, resetCursor])
-
-  const { data: sessionPins } = useSessionPins()
-  const togglePin = useToggleSessionPin()
-  const pinnedKeys = useMemo(() => buildPinnedSessionKeys(sessionPins ?? []), [sessionPins])
+  } = usePickerCursor(rows, defaultCursorKey)
 
   const directories = useMemo(
     () => Array.from(new Set(rows.map((row) => row.session.location.directory))),
     [rows],
   )
-  const deleteSession = useDeleteSession(directories)
 
-  const [sessionToDelete, setSessionToDelete] = useState<Session | null>(null)
+  const {
+    pinnedKeys,
+    pendingDeleteKey,
+    clearPendingDelete,
+    openRow,
+    deleteRow,
+    handleTogglePin,
+    handleRequestDelete,
+    deleteDialogProps,
+  } = useSessionPickerRowActions({
+    directories,
+    activeSessionID,
+    onSelectSession,
+    onDeleteActiveSession,
+  })
 
-  const openRow = useCallback(
-    (row: SessionPickerRow | undefined) => {
-      if (!row) return
-      onSelectSession(row.session, row.repo)
+  const moveCursor = useCallback(
+    (index: number) => {
+      clearPendingDelete()
+      moveCursorRaw(index)
     },
-    [onSelectSession],
+    [clearPendingDelete, moveCursorRaw],
   )
 
-  const performDelete = useCallback(
-    (session: Session) => {
-      if (session.id === activeSessionID) onDeleteActiveSession()
-      return deleteSession
-        .mutateAsync({ id: session.id, directory: session.location.directory })
-        .catch(() => undefined)
-    },
-    [deleteSession, activeSessionID, onDeleteActiveSession],
-  )
+  useEffect(() => {
+    resetCursor()
+    clearPendingDelete()
+  }, [trimmedQuery, resetCursor, clearPendingDelete])
 
-  const deleteRow = useCallback(
-    (row: SessionPickerRow | undefined) => {
-      if (!row) return
-      if (pendingDeleteKey !== row.key) {
-        setPendingDeleteKey(row.key)
-        return
-      }
-      void performDelete(row.session).finally(() => {
-        setPendingDeleteKey(null)
-      })
-    },
-    [pendingDeleteKey, performDelete, setPendingDeleteKey],
-  )
-
-  const handleSearchKeyDown = useSessionPickerKeyNav({
+  const handleSearchKeyDown = usePickerKeyNav({
     rows,
     cursorIndex,
     cursorRow,
@@ -1027,40 +876,18 @@ function ActivePickerContent({
     onDeleteRow: deleteRow,
   })
 
-  const handleTogglePin = useCallback(
-    (row: SessionPickerRow) => {
-      togglePin.mutate({
-        sessionId: row.session.id,
-        directory: row.session.location.directory,
-        pinned: !pinnedKeys.has(row.key),
-      })
-    },
-    [togglePin, pinnedKeys],
-  )
-
-  const handleRequestDelete = useCallback((session: Session) => {
-    setSessionToDelete(session)
-  }, [])
-
-  const confirmDelete = useCallback(() => {
-    if (!sessionToDelete) return
-    void performDelete(sessionToDelete).finally(() => {
-      setSessionToDelete(null)
-    })
-  }, [sessionToDelete, performDelete])
-
   const emptyState = isLoading
     ? 'Loading sessions...'
     : isError
       ? 'Failed to load active sessions'
       : trimmedQuery
         ? 'No sessions found'
-        : `No active or recent sessions in the last ${windowMinutes} minutes`
+        : formatActivityEmptyMessage(windowMinutes)
 
   return (
     <>
       <div className="mt-4 flex min-h-0 flex-1 flex-col">
-        <SessionPickerSearchBar
+        <PickerSearchBar
           inputRef={searchInputRef}
           listId={listId}
           open={open}
@@ -1098,17 +925,7 @@ function ActivePickerContent({
         </div>
       </div>
 
-      <DeleteSessionDialog
-        open={sessionToDelete !== null}
-        onOpenChange={(nextOpen) => {
-          if (!nextOpen) setSessionToDelete(null)
-        }}
-        onConfirm={() => {
-          void confirmDelete()
-        }}
-        onCancel={() => setSessionToDelete(null)}
-        isDeleting={deleteSession.isPending}
-      />
+      <DeleteSessionDialog {...deleteDialogProps} />
     </>
   )
 }

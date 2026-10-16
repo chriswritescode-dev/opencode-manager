@@ -4,17 +4,22 @@ import { useActiveWork } from '@/hooks/useActiveWork'
 import { SessionStatusIndicator } from '@/components/ui/session-status-indicator'
 import { parseRepoRoute } from '@/lib/navigation'
 import { cn, formatShortRelativeTime, getRepoBranchLabel, getRepoDisplayName } from '@/lib/utils'
-import type { ActiveWorkItem } from '@/lib/activeWork'
+import {
+  ACTIVE_WORK_GROUPS,
+  MS_PER_MINUTE,
+  formatActivityEmptyMessage,
+  type ActiveWorkItem,
+} from '@/lib/activeWork'
 
 const UNTITLED_SESSION_TITLE = 'Untitled Session'
-const MS_PER_MINUTE = 60_000
 const COMPACT_MAX_ITEMS = 5
 
 const FULL_ICON_CLASS = 'h-4 w-4'
 const COMPACT_ICON_CLASS = 'h-3.5 w-3.5'
 
 interface ActivityListProps {
-  windowMs: number
+  /** Activity window in minutes. */
+  minutes: number
   /** Called when a row is chosen; the caller owns navigation so each surface can apply its own history and close rules. */
   onNavigate: (item: ActiveWorkItem) => void
   hideWhenEmpty?: boolean
@@ -137,14 +142,14 @@ function ActivityGroup({ heading, items, currentSessionID, currentRepoId, onSele
 }
 
 export function ActivityList({
-  windowMs,
+  minutes,
   onNavigate,
   hideWhenEmpty = false,
   title,
   variant = 'full',
 }: ActivityListProps) {
   const location = useLocation()
-  const { groups, isLoading, isError } = useActiveWork(windowMs)
+  const { groups, isLoading, isError } = useActiveWork(minutes * MS_PER_MINUTE)
 
   const route = parseRepoRoute(location.pathname)
 
@@ -163,11 +168,8 @@ export function ActivityList({
 
   if (isEmpty) {
     if (hideWhenEmpty) return null
-    const minutes = Math.round(windowMs / MS_PER_MINUTE)
     return (
-      <p className="p-4 text-sm text-muted-foreground">
-        No active or recent sessions in the last {minutes} minutes
-      </p>
+      <p className="p-4 text-sm text-muted-foreground">{formatActivityEmptyMessage(minutes)}</p>
     )
   }
 
@@ -203,27 +205,16 @@ export function ActivityList({
         ))
       ) : (
         <>
-          <ActivityGroup
-            heading="Needs input"
-            items={groups.needsInput}
-            currentSessionID={route.sessionId}
-            currentRepoId={route.repoId}
-            onSelect={onNavigate}
-          />
-          <ActivityGroup
-            heading="Running"
-            items={groups.running}
-            currentSessionID={route.sessionId}
-            currentRepoId={route.repoId}
-            onSelect={onNavigate}
-          />
-          <ActivityGroup
-            heading="Recent"
-            items={groups.recent}
-            currentSessionID={route.sessionId}
-            currentRepoId={route.repoId}
-            onSelect={onNavigate}
-          />
+          {ACTIVE_WORK_GROUPS.map((group) => (
+            <ActivityGroup
+              key={group.key}
+              heading={group.heading}
+              items={groups[group.key]}
+              currentSessionID={route.sessionId}
+              currentRepoId={route.repoId}
+              onSelect={onNavigate}
+            />
+          ))}
         </>
       )}
     </section>

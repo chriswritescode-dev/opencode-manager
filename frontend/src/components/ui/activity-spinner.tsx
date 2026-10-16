@@ -1,9 +1,9 @@
-import { useSyncExternalStore } from 'react'
 import { cn } from '@/lib/utils'
 
 export const SPINNER_FRAMES = ['⠋', '⠙', '⠹', '⠸', '⠼', '⠴', '⠦', '⠧', '⠇', '⠏'] as const
 
 const FRAME_INTERVAL_MS = 80
+const CYCLE_DURATION = `${FRAME_INTERVAL_MS * SPINNER_FRAMES.length}ms`
 
 const BRAILLE_BASE = 0x2800
 const DOT_GRID: ReadonlyArray<readonly [number, number]> = [
@@ -19,40 +19,8 @@ const DOT_GRID: ReadonlyArray<readonly [number, number]> = [
 const COLUMN_X = [2.25, 6.75] as const
 const ROW_Y = [2.25, 6, 9.75, 13.5] as const
 const DOT_RADIUS = 1.6
+const LIT_DOT_OPACITY = 1
 const UNLIT_DOT_OPACITY = 0.25
-
-let frameIndex = 0
-const listeners = new Set<() => void>()
-let ticker: ReturnType<typeof setInterval> | null = null
-
-function emit() {
-  for (const listener of listeners) {
-    listener()
-  }
-}
-
-function subscribe(listener: () => void) {
-  listeners.add(listener)
-  if (ticker === null) {
-    ticker = setInterval(() => {
-      frameIndex = (frameIndex + 1) % SPINNER_FRAMES.length
-      emit()
-    }, FRAME_INTERVAL_MS)
-  }
-
-  return () => {
-    listeners.delete(listener)
-    if (listeners.size === 0 && ticker !== null) {
-      clearInterval(ticker)
-      ticker = null
-      frameIndex = 0
-    }
-  }
-}
-
-function getSnapshot() {
-  return frameIndex
-}
 
 /**
  * Decodes one braille frame into its eight dot positions, ordered by braille dot numbering:
@@ -64,17 +32,21 @@ export function brailleDots(frame: string): boolean[] {
   return DOT_GRID.map((_, index) => (bits & (1 << index)) !== 0)
 }
 
+const FRAME_DOTS = SPINNER_FRAMES.map(brailleDots)
+
+const DOT_OPACITY_TIMELINES = DOT_GRID.map((_, index) =>
+  FRAME_DOTS.map((dots) => (dots[index] ? LIT_DOT_OPACITY : UNLIT_DOT_OPACITY)),
+)
+
 /**
  * Braille spinner mirroring the OpenCode TUI activity spinner as an inline SVG cell so the dots
- * stay visible at small text sizes. Every mounted instance shares one module-level 80 ms ticker,
- * which starts with the first subscriber and stops with the last. It animates regardless of
+ * stay visible at small text sizes. Each dot steps through its opacity for every frame with a
+ * declarative SVG `<animate>` derived from `SPINNER_FRAMES`, so frames advance in the browser
+ * with no JavaScript or React render per frame. It animates regardless of
  * `prefers-reduced-motion`: a still frame is indistinguishable from a stalled spinner, and the
  * motion is a small in-place status cue like the platform activity indicators.
  */
 export function ActivitySpinner({ className }: { className?: string }) {
-  const frame = useSyncExternalStore(subscribe, getSnapshot, getSnapshot)
-  const dots = brailleDots(SPINNER_FRAMES[frame])
-
   return (
     <svg
       aria-hidden="true"
@@ -88,8 +60,16 @@ export function ActivitySpinner({ className }: { className?: string }) {
           cy={ROW_Y[row]}
           r={DOT_RADIUS}
           fill="currentColor"
-          fillOpacity={dots[index] ? 1 : UNLIT_DOT_OPACITY}
-        />
+          fillOpacity={DOT_OPACITY_TIMELINES[index][0]}
+        >
+          <animate
+            attributeName="fill-opacity"
+            values={DOT_OPACITY_TIMELINES[index].join(';')}
+            dur={CYCLE_DURATION}
+            calcMode="discrete"
+            repeatCount="indefinite"
+          />
+        </circle>
       ))}
     </svg>
   )

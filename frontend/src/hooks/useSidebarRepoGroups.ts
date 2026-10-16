@@ -4,28 +4,15 @@ import { listRepos } from '@/api/repos'
 import { sessionQueryOptions, useSessionsAcrossDirectories } from '@/hooks/useOpenCode'
 import { useSessionPins } from '@/hooks/useSessionPins'
 import { buildPinnedSessionKeys, buildSessionKey, getSessionKey } from '@/lib/sessionKey'
-import type { Repo, Session } from '@/api/types'
+import type { Repo } from '@/api/types'
 import {
   SIDEBAR_SESSIONS_PER_REPO,
   buildSidebarRepoGroups,
+  combineQuerySessions,
+  mergeExtraSessions,
   selectNavigableRepos,
   type SidebarRepoGroup,
 } from '@/components/navigation/sidebar-session-tree'
-
-const combinePinnedSessions = (results: Array<{ data?: Session }>): Session[] =>
-  results.flatMap((result) => (result.data ? [result.data] : []))
-
-const mergeSessions = (sessions: Session[], pinnedSessions: Session[]): Session[] => {
-  if (pinnedSessions.length === 0) return sessions
-  const seen = new Set(sessions.map((session) => session.id))
-  const extras: Session[] = []
-  for (const session of pinnedSessions) {
-    if (seen.has(session.id)) continue
-    seen.add(session.id)
-    extras.push(session)
-  }
-  return extras.length === 0 ? sessions : [...sessions, ...extras]
-}
 
 export function useSidebarRepoGroups(input: {
   repos: Repo[]
@@ -56,11 +43,11 @@ export function useSidebarRepoGroups(input: {
 
   const pinnedSessions = useQueries({
     queries: missingPins.map((pin) => sessionQueryOptions(pin.sessionId, pin.directory)),
-    combine: combinePinnedSessions,
+    combine: combineQuerySessions,
   })
 
   const mergedSessions = useMemo(
-    () => mergeSessions(sessions, pinnedSessions),
+    () => mergeExtraSessions(sessions, pinnedSessions),
     [sessions, pinnedSessions],
   )
 

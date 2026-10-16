@@ -12,13 +12,13 @@ import { useToolPanel } from '@/hooks/useToolPanel'
 const activityMocks = vi.hoisted(() => ({
   useActiveWork: vi.fn(),
   useActiveWorkCounts: vi.fn(),
-  useActivityWindowMs: vi.fn(),
+  useActivityWindowMinutes: vi.fn(),
 }))
 
 vi.mock('@/hooks/useActiveWork', () => ({
   useActiveWork: activityMocks.useActiveWork,
   useActiveWorkCounts: activityMocks.useActiveWorkCounts,
-  useActivityWindowMs: activityMocks.useActivityWindowMs,
+  useActivityWindowMinutes: activityMocks.useActivityWindowMinutes,
 }))
 
 vi.mock('@/components/file-browser/FileBrowser', () => ({
@@ -91,7 +91,7 @@ function search(): URLSearchParams {
   return new URLSearchParams(screen.getByTestId('search').textContent ?? '')
 }
 
-const WINDOW_MS = 30 * 60_000
+const WINDOW_MINUTES = 30
 const NOW = Date.now()
 
 function createSession(id: string, title: string, updated = NOW - 60_000): Session {
@@ -152,7 +152,7 @@ function HomeHarness() {
 beforeEach(() => {
   vi.clearAllMocks()
   activityMocks.useActiveWorkCounts.mockReturnValue({ needsInput: 0, running: 0 })
-  activityMocks.useActivityWindowMs.mockReturnValue(WINDOW_MS)
+  activityMocks.useActivityWindowMinutes.mockReturnValue(WINDOW_MINUTES)
   setActivityGroups()
 })
 

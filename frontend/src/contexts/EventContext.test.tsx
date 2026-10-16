@@ -240,7 +240,7 @@ describe('EventProvider permissions and forms', () => {
     mocks.replyForm.mockResolvedValue(undefined)
     mocks.cancelForm.mockResolvedValue(undefined)
     mocks.getHealth.mockReturnValue({ isConnected: false, isHealthy: false, lastEventAt: null, isStalled: false })
-    useSessionStatus.setState({ statuses: new Map(), statusCache: new Map(), statusRevisions: new Map(), knownSessions: new Set(), outcomes: new Map(), parents: new Map(), runningShells: new Map(), shellRevisions: new Map(), shellRevision: 0, revision: 0 })
+    useSessionStatus.setState({ statuses: new Map(), statusCache: new Map(), statusRevisions: new Map(), knownSessions: new Set(), outcomes: new Map(), parents: new Map(), directories: new Map(), runningShells: new Map(), shellRevisions: new Map(), shellRevision: 0, revision: 0 })
     mocks.subscribeGlobalMonitor.mockReturnValue({
       dispose: vi.fn(),
       updateDirectories: vi.fn(),
@@ -273,6 +273,18 @@ describe('EventProvider permissions and forms', () => {
       expect(screen.getByTestId('permission-count')).toHaveTextContent('1')
       expect(screen.getByTestId('permission-current')).toHaveTextContent('permission-1')
     })
+  })
+
+  it('records the session directory for a pending permission loaded without an SSE status event', async () => {
+    mocks.listRepos.mockResolvedValue([{ id: 123, fullPath: '/repo' }])
+    mocks.listPendingPermissions.mockResolvedValue([pendingPermission])
+
+    render(<Harness />, { wrapper: createWrapper() })
+
+    await waitFor(() => {
+      expect(useSessionStatus.getState().directories.get('session-1')).toBe('/repo')
+    })
+    expect(useSessionStatus.getState().statuses.has('session-1')).toBe(false)
   })
 
   it('clears stale pending permissions for a session', async () => {
