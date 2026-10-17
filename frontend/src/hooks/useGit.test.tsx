@@ -530,6 +530,8 @@ describe('useGit', () => {
 
       expect(gitApi.gitContinueOperation).toHaveBeenCalledWith(1)
       expectTargetedStatusCacheUpdate()
+      expect(mockInvalidateQueries).toHaveBeenCalledWith({ queryKey: ['repo', 1] })
+      expect(mockInvalidateQueries).toHaveBeenCalledWith({ queryKey: ['repo', 'siblings'] })
       expect(toast.showToast.success).toHaveBeenCalledWith('Operation continued')
     })
 
@@ -585,6 +587,8 @@ describe('useGit', () => {
 
       expect(gitApi.gitAbortOperation).toHaveBeenCalledWith(1)
       expectTargetedStatusCacheUpdate()
+      expect(mockInvalidateQueries).toHaveBeenCalledWith({ queryKey: ['repo', 1] })
+      expect(mockInvalidateQueries).toHaveBeenCalledWith({ queryKey: ['repo', 'siblings'] })
       expect(toast.showToast.success).toHaveBeenCalledWith('Operation aborted')
     })
 

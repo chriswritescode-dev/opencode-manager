@@ -6,6 +6,7 @@ import {
   invalidateProviderCachesDebounced,
   invalidateQueryKeysDebounced,
   invalidateRepoGitCaches,
+  invalidateRepoGitCachesDebounced,
   invalidateSessionListCachesDebounced,
   refreshOpenCodeServerCaches,
 } from './queryInvalidation'
@@ -79,6 +80,45 @@ describe('invalidateRepoGitCaches', () => {
     expect(invalidateQueries).toHaveBeenCalledWith(
       expect.objectContaining({ queryKey: ['reposGitStatus'], predicate: expect.any(Function) }),
     )
+  })
+
+  it('invalidates every sibling cache so branches resolved from siblings refresh', () => {
+    const queryClient = new QueryClient()
+    queryClient.setQueryData(['repo', 'siblings', 1], [])
+    queryClient.setQueryData(['repo', 'siblings', 2], [])
+
+    invalidateRepoGitCaches(queryClient, 1)
+
+    expect(queryClient.getQueryState(['repo', 'siblings', 1])?.isInvalidated).toBe(true)
+    expect(queryClient.getQueryState(['repo', 'siblings', 2])?.isInvalidated).toBe(true)
+  })
+
+  it('keeps the sibling caches when repo metadata invalidation is skipped', () => {
+    const queryClient = new QueryClient()
+    queryClient.setQueryData(['repo', 'siblings', 1], [])
+
+    invalidateRepoGitCaches(queryClient, 1, { invalidateRepoMeta: false })
+
+    expect(queryClient.getQueryState(['repo', 'siblings', 1])?.isInvalidated).toBe(false)
+  })
+})
+
+describe('invalidateRepoGitCachesDebounced', () => {
+  afterEach(() => {
+    vi.useRealTimers()
+  })
+
+  it('refreshes the batched repo list status that holds the branch after the debounce window', () => {
+    vi.useFakeTimers()
+    const queryClient = new QueryClient()
+    queryClient.setQueryData(['reposGitStatus', [1, 2]], new Map())
+    queryClient.setQueryData(['reposGitStatus', [3]], new Map())
+
+    invalidateRepoGitCachesDebounced(queryClient, 1)
+    vi.advanceTimersByTime(200)
+
+    expect(queryClient.getQueryState(['reposGitStatus', [1, 2]])?.isInvalidated).toBe(true)
+    expect(queryClient.getQueryState(['reposGitStatus', [3]])?.isInvalidated).toBe(false)
   })
 })
 
