@@ -112,6 +112,7 @@ export function invalidateRepoGitCaches(
   if (options.invalidateRepoMeta ?? true) {
     queryClient.invalidateQueries({ queryKey: ['repos'] })
     queryClient.invalidateQueries({ queryKey: ['repo', repoId] })
+    queryClient.invalidateQueries({ queryKey: ['repo', 'siblings'] })
     queryClient.invalidateQueries({ queryKey: ['branches', repoId] })
   }
   if (options.invalidateStatus ?? true) {
@@ -166,7 +167,7 @@ export function invalidateRepoGitCachesDebounced(queryClient: QueryClient, repoI
     repoId,
     setTimeout(() => {
       timers.delete(repoId)
-      invalidateRepoGitCaches(queryClient, repoId)
+      invalidateRepoGitCaches(queryClient, repoId, { invalidateRepoListStatus: true })
     }, delayMs),
   )
 }

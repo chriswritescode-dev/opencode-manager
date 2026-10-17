@@ -278,7 +278,7 @@ export function useGit(repoId: number | undefined, onError?: (error: unknown) =>
     {
       mutationFn: (id) => gitContinueOperation(id),
       statusFromData: (data) => data,
-      invalidate: (client, id) => invalidateRepoGitCaches(client, id, { invalidateStatus: false, invalidateRepoMeta: false }),
+      invalidate: (client, id) => invalidateRepoGitCaches(client, id, { invalidateStatus: false }),
       successMessage: 'Operation continued',
       onError: (error) => {
         if (repoId) invalidateRepoGitCaches(queryClient, repoId, { invalidateRepoListStatus: true })
@@ -294,7 +294,7 @@ export function useGit(repoId: number | undefined, onError?: (error: unknown) =>
     {
       mutationFn: (id) => gitAbortOperation(id),
       statusFromData: (data) => data,
-      invalidate: (client, id) => invalidateRepoGitCaches(client, id, { invalidateStatus: false, invalidateRepoMeta: false }),
+      invalidate: (client, id) => invalidateRepoGitCaches(client, id, { invalidateStatus: false }),
       successMessage: 'Operation aborted',
     },
   )

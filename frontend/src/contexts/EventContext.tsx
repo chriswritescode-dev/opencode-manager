@@ -814,7 +814,10 @@ export function EventProvider({ children }: { children: React.ReactNode }) {
           break
         case 'vcs.branch.updated': {
           const repo = reposRef.current?.find((candidate) => repoMatchesDirectory(candidate, event.directory))
-          if (!repo) break
+          if (!repo) {
+            queryClient.invalidateQueries({ queryKey: ['repo', 'siblings'] })
+            break
+          }
 
           const branch = event.data.branch
           if (branch) {

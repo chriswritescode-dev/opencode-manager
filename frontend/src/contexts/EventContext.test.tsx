@@ -1083,6 +1083,61 @@ describe('EventProvider permissions and forms', () => {
     })
   })
 
+  it('invalidates the sibling caches when a branch changes outside a repo row', async () => {
+    mocks.listRepos.mockResolvedValue([])
+
+    const queryClient = createTestQueryClient()
+    const invalidateQueries = vi.spyOn(queryClient, 'invalidateQueries')
+
+    render(<Harness />, { wrapper: createWrapper(queryClient) })
+
+    await waitFor(() => expect(mocks.subscribeGlobalMonitor).toHaveBeenCalled())
+    invalidateQueries.mockClear()
+
+    const lastSubscribeCall = mocks.subscribeGlobalMonitor.mock.calls[mocks.subscribeGlobalMonitor.mock.calls.length - 1]
+    const onEvent = lastSubscribeCall[0].onEvent as (data: unknown) => void
+
+    act(() => {
+      onEvent({ type: 'vcs.branch.updated', data: { branch: 'feature' }, directory: '/repos/a/.worktrees/feat' })
+    })
+
+    expect(invalidateQueries).toHaveBeenCalledWith({ queryKey: ['repo', 'siblings'] })
+  })
+
+  it('updates the repo branch and refreshes the sibling caches on vcs.branch.updated', async () => {
+    mocks.listRepos.mockResolvedValue([{ id: 1, fullPath: '/repo-a' }])
+
+    const updateDirectories = vi.fn()
+    mocks.subscribeGlobalMonitor.mockReturnValue({
+      dispose: vi.fn(),
+      updateDirectories,
+      reconnect: vi.fn(),
+      reportVisibility: vi.fn(),
+    })
+
+    const queryClient = createTestQueryClient()
+    const invalidateQueries = vi.spyOn(queryClient, 'invalidateQueries')
+
+    render(<Harness />, { wrapper: createWrapper(queryClient) })
+
+    await waitFor(() => expect(queryClient.getQueryData(['repos'])).toBeDefined())
+    await waitFor(() => expect(updateDirectories).toHaveBeenCalledWith(expect.arrayContaining(['/repo-a'])))
+    invalidateQueries.mockClear()
+
+    const lastSubscribeCall = mocks.subscribeGlobalMonitor.mock.calls[mocks.subscribeGlobalMonitor.mock.calls.length - 1]
+    const onEvent = lastSubscribeCall[0].onEvent as (data: unknown) => void
+
+    act(() => {
+      onEvent({ type: 'vcs.branch.updated', data: { branch: 'feature' }, directory: '/repo-a' })
+    })
+
+    expect(queryClient.getQueryData<{ currentBranch?: string; branch?: string }>(['repo', 1]))
+      .toMatchObject({ currentBranch: 'feature', branch: 'feature' })
+    await waitFor(() => {
+      expect(invalidateQueries).toHaveBeenCalledWith({ queryKey: ['repo', 'siblings'] })
+    })
+  })
+
   it('reconciles every tracked directory concurrently on an upstream resync', async () => {
     mocks.listRepos.mockResolvedValue([
       { id: 1, fullPath: '/repo-a' },
