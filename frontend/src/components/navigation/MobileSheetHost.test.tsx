@@ -89,6 +89,20 @@ describe('MobileSheetHost', () => {
     expect(sheet.getAttribute('data-repo-name')).toBe('Workspace Root')
   })
 
+  it('hides the FileBrowserSheet on a linked-server route', () => {
+    vi.mocked(useMobileTabBar).mockReturnValue({
+      openSheet: 'files',
+      open: vi.fn(),
+      close: vi.fn(),
+    })
+    render(
+      <MemoryRouter initialEntries={['/servers/srv_kitchen/sessions/ses_remote?mobileTab=files']}>
+        <MobileSheetHost />
+      </MemoryRouter>,
+    )
+    expect(screen.queryByTestId('file-browser-sheet')).not.toBeInTheDocument()
+  })
+
   it('renders NotificationsSheet when mobileTab=notifications', () => {
     vi.mocked(useMobileTabBar).mockReturnValue({
       openSheet: 'notifications',

@@ -4,6 +4,7 @@ import type { ReactNode } from 'react'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { useSSE } from './useSSE'
 import { useKillShell } from './useSessionShells'
+import { OpenCodeServerProvider } from '@/contexts/OpenCodeServerContext'
 import { clearShellExitRecord } from '@/lib/backgroundWork'
 import { useSessionStatus } from '../stores/sessionStatusStore'
 import { useSendErrorStore } from '../stores/sendErrorStore'
@@ -840,6 +841,78 @@ describe('useSSE', () => {
     })
 
     expect(showToast.success).toHaveBeenCalled()
+
+    unmount()
+  })
+
+  it('ignores events belonging to another OpenCode server', async () => {
+    const queryClient = new QueryClient({
+      defaultOptions: {
+        queries: { retry: false },
+      },
+    })
+    const invalidateQueries = vi.spyOn(queryClient, 'invalidateQueries')
+    queryClient.setQueryData(['opencode', 'session', 'session-2', '/repo'], { id: 'session-2' })
+
+    const { result, unmount } = renderHook(
+      () => useSSE('/repo', 'session-1'),
+      { wrapper: createWrapper(queryClient) }
+    )
+
+    await waitFor(() => expect(MockEventSource.instances).toHaveLength(1))
+    await connect(0, 'client-1')
+    await waitFor(() => expect(result.current.isConnected).toBe(true))
+    invalidateQueries.mockClear()
+
+    act(() => {
+      MockEventSource.instances[0].emit('message', {
+        type: 'session.created',
+        serverId: 'srv_remote',
+        directory: '/repo',
+        data: { sessionID: 'session-2', projectID: 'proj-1', slug: 'slug', location: { directory: '/repo' } },
+      })
+    })
+
+    expect(invalidateQueries).not.toHaveBeenCalledWith({ queryKey: ['opencode', 'session', 'session-2'] })
+
+    act(() => {
+      MockEventSource.instances[0].emit('message', {
+        type: 'session.created',
+        directory: '/repo',
+        data: { sessionID: 'session-2', projectID: 'proj-1', slug: 'slug', location: { directory: '/repo' } },
+      })
+    })
+
+    await waitFor(() => {
+      expect(invalidateQueries).toHaveBeenCalledWith({ queryKey: ['opencode', 'session', 'session-2'] })
+    })
+
+    unmount()
+  })
+
+  it('subscribes with the server-scoped directory key for a remote server', async () => {
+    const queryClient = new QueryClient({
+      defaultOptions: {
+        queries: { retry: false },
+      },
+    })
+
+    const wrapper = ({ children }: { children: ReactNode }) => (
+      <QueryClientProvider client={queryClient}>
+        <OpenCodeServerProvider serverId="srv_remote">{children}</OpenCodeServerProvider>
+      </QueryClientProvider>
+    )
+
+    const { unmount } = renderHook(() => useSSE('/repo', 'session-1'), { wrapper })
+
+    await waitFor(() => expect(MockEventSource.instances).toHaveLength(1))
+    await connect(0, 'client-1')
+
+    await waitFor(() => {
+      expect(globalThis.fetch).toHaveBeenCalledWith('/api/sse/subscribe', expect.objectContaining({
+        body: JSON.stringify({ clientId: 'client-1', directories: ['srv_remote|/repo'] }),
+      }))
+    })
 
     unmount()
   })

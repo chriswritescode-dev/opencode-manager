@@ -1,5 +1,6 @@
 import { useEffect, useRef, useState, useCallback, useMemo } from 'react'
 import { useQueryClient } from '@tanstack/react-query'
+import { buildServerDirectoryKey, LOCAL_OPENCODE_SERVER_ID } from '@opencode-manager/shared/schemas'
 import type { SessionInfo, V2Event } from '@opencode-manager/shared/opencode'
 import { invalidateSessionListCaches, invalidateShellCaches, shellsQueryKey } from '@/lib/queryInvalidation'
 import {
@@ -14,8 +15,10 @@ import { showToast } from '@/lib/toast'
 import { useSendErrorStore } from '@/stores/sendErrorStore'
 import { openCodeEventStream } from '@/lib/opencode-event-stream'
 import type { EventStreamSubscription } from '@/lib/opencode-event-stream'
+import { serverScopedKey } from '@/lib/serverScope'
+import { useOpenCodeServerId } from '@/contexts/OpenCodeServerContext'
 
-type V2StreamEvent = V2Event & { directory?: string }
+type V2StreamEvent = V2Event & { directory?: string; serverId?: string }
 
 const getEventDirectory = (event: V2StreamEvent): string | undefined => {
   return typeof event.directory === 'string' ? event.directory : undefined
@@ -43,6 +46,7 @@ const patchSessionIfCached = (
 }
 
 export const useSSE = (directory?: string | string[], currentSessionId?: string) => {
+  const serverId = useOpenCodeServerId()
   const directoriesList = useMemo(() => {
     if (!directory) return [] as string[]
     if (Array.isArray(directory)) return directory.filter(Boolean)
@@ -70,6 +74,7 @@ export const useSSE = (directory?: string | string[], currentSessionId?: string)
   )
 
   const handleSSEEvent = useCallback((event: V2StreamEvent) => {
+    if ((event.serverId ?? LOCAL_OPENCODE_SERVER_ID) !== serverId) return
     const eventDirectory = getEventDirectory(event)
     const cacheDirectory = resolveCacheDirectory(eventDirectory)
     if (eventDirectory && directorySet.size > 0 && cacheDirectory !== eventDirectory) return
@@ -117,7 +122,7 @@ export const useSSE = (directory?: string | string[], currentSessionId?: string)
 
       case 'shell.created': {
         const info = event.data.info
-        const key = shellsQueryKey(cacheDirectory)
+        const key = serverScopedKey(shellsQueryKey(cacheDirectory), serverId)
         const current = queryClient.getQueryData<ShellRecord[]>(key)
         if (!current) {
           queryClient.invalidateQueries({ queryKey: key })
@@ -129,7 +134,7 @@ export const useSSE = (directory?: string | string[], currentSessionId?: string)
 
       case 'shell.exited': {
         recordShellExit(cacheDirectory ?? '', event.data)
-        const key = shellsQueryKey(cacheDirectory)
+        const key = serverScopedKey(shellsQueryKey(cacheDirectory), serverId)
         const current = queryClient.getQueryData<ShellRecord[]>(key)
         if (!current || !current.some((shell) => shell.id === event.data.id)) {
           queryClient.invalidateQueries({ queryKey: key })
@@ -141,7 +146,7 @@ export const useSSE = (directory?: string | string[], currentSessionId?: string)
 
       case 'shell.deleted': {
         recordShellDeleted(cacheDirectory ?? '', event.data.id)
-        const key = shellsQueryKey(cacheDirectory)
+        const key = serverScopedKey(shellsQueryKey(cacheDirectory), serverId)
         const current = queryClient.getQueryData<ShellRecord[]>(key)
         if (!current || !current.some((shell) => shell.id === event.data.id)) break
         queryClient.setQueryData<ShellRecord[]>(key, (shells) => markShellDeleted(shells ?? [], event.data.id))
@@ -158,7 +163,7 @@ export const useSSE = (directory?: string | string[], currentSessionId?: string)
       default:
         break
     }
-  }, [queryClient, directorySet, resolveCacheDirectory])
+  }, [queryClient, directorySet, resolveCacheDirectory, serverId])
 
   const refreshCurrentSession = useCallback(() => {
     const sessionId = sessionIdRef.current
@@ -217,7 +222,7 @@ export const useSSE = (directory?: string | string[], currentSessionId?: string)
     }
 
     const subscription = openCodeEventStream.subscribeGlobalMonitor({
-      directories: directoriesList,
+      directories: directoriesList.map((entry) => buildServerDirectoryKey(serverId, entry)),
       onEvent: handleMessage,
       onStatusChange: handleStatusChange,
       onResync: handleResync,
@@ -247,7 +252,7 @@ export const useSSE = (directory?: string | string[], currentSessionId?: string)
         eventStreamSubscriptionRef.current = null
       }
     }
-  }, [directoryKey, directoriesList, handleSSEEvent, syncCurrentSession, refreshCurrentSession, queryClient])
+  }, [directoryKey, directoriesList, handleSSEEvent, syncCurrentSession, refreshCurrentSession, queryClient, serverId])
 
   useEffect(() => {
     if (isConnected && document.visibilityState === 'visible') {

@@ -76,6 +76,7 @@ describe('useResolveConflictsWithAgent', () => {
         title: 'Resolve rebase conflicts',
       },
       expect.stringContaining('GIT_EDITOR=true git rebase --continue'),
+      'local',
     )
     await waitFor(() => expect(locationRef.current).toBe('/repos/1/sessions/ses_new'))
   })

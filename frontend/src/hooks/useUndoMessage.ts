@@ -1,5 +1,6 @@
 import { useMutation, useQueryClient } from '@tanstack/react-query'
 import { clearRevert, stageRevert } from '@/api/opencode'
+import { useOpenCodeServerId } from '@/contexts/OpenCodeServerContext'
 import { showToast } from '@/lib/toast'
 import { sessionTranscriptQueryKey } from '@/lib/queryInvalidation'
 
@@ -15,10 +16,11 @@ export function useUndoMessage({
   onSuccess
 }: UseUndoMessageOptions) {
   const queryClient = useQueryClient()
+  const serverId = useOpenCodeServerId()
 
   return useMutation<string, Error, { messageID: string; messageContent: string }>({
     mutationFn: async ({ messageID, messageContent }: { messageID: string, messageContent: string }) => {
-      await stageRevert(sessionId, messageID)
+      await stageRevert(sessionId, messageID, serverId)
       return messageContent
     },
     onError: () => {
@@ -41,9 +43,10 @@ interface UseRedoMessageOptions {
 
 export function useRedoMessage({ sessionId, directory }: UseRedoMessageOptions) {
   const queryClient = useQueryClient()
+  const serverId = useOpenCodeServerId()
 
   return useMutation({
-    mutationFn: async () => clearRevert(sessionId),
+    mutationFn: async () => clearRevert(sessionId, serverId),
     onError: () => {
       showToast.error('Failed to redo message')
     },

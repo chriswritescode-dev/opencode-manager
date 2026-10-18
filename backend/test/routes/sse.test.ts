@@ -121,6 +121,25 @@ describe('SSE Routes', () => {
       )
       expect(cleanup).toHaveBeenCalledTimes(1)
     })
+
+    it('registers remote server directory keys unchanged', async () => {
+      const directories = ['/local', 'srv_a|/remote', 'srv_b|/other']
+      const res = await app.fetch(new Request(`http://localhost/stream?directories=${encodeURIComponent(directories.join(','))}`))
+      const reader = res.body!.getReader()
+      try {
+        const first = await readChunk(reader)
+        expect(first).toContain(JSON.stringify(directories))
+      } finally {
+        await reader.cancel()
+      }
+
+      expect(sseMocks.addClient).toHaveBeenCalledWith(
+        expect.stringMatching(/^client_/),
+        expect.any(Function),
+        expect.any(Function),
+        directories,
+      )
+    })
   })
 
   describe('POST /subscribe', () => {

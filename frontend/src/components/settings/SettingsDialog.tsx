@@ -1,6 +1,7 @@
 import { useState, useEffect, useCallback } from 'react'
 import { GeneralSettings } from '@/components/settings/GeneralSettings'
 import { GitSettings } from '@/components/settings/GitSettings'
+import { OpenCodeServersSettings } from '@/components/settings/OpenCodeServersSettings'
 import { KeyboardShortcuts } from '@/components/settings/KeyboardShortcuts'
 import { OpenCodeConfigManager } from '@/components/settings/OpenCodeConfigManager'
 import { LogsViewer } from '@/components/settings/LogsViewer'
@@ -17,7 +18,7 @@ import { VersionSelectDialog } from '@/components/settings/VersionSelectDialog'
 import { Dialog, DialogContent, DialogTitle } from '@/components/ui/dialog'
 import { RowActionsMenuContext } from '@/components/ui/settings-list'
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs'
-import { Settings2, Keyboard, Code, ChevronLeft, Key, GitBranch, User, Volume2, Bell, X, ScrollText, type LucideIcon } from 'lucide-react'
+import { Settings2, Keyboard, Code, ChevronLeft, Key, GitBranch, Server, User, Volume2, Bell, X, ScrollText, type LucideIcon } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import { useSettingsDialog, isSettingsContentTab, type SettingsContentTab } from '@/hooks/useSettingsDialog'
 import { DESKTOP_MEDIA_QUERY, useMediaQuery } from '@/hooks/useMediaQuery'
@@ -114,6 +115,7 @@ export function SettingsDialog() {
     { id: 'voice', icon: Volume2, label: 'Voice', description: 'Text-to-speech and speech-to-text settings' },
     { id: 'git', icon: GitBranch, label: 'Git', description: 'Git identity and credentials for repositories' },
     { id: 'shortcuts', icon: Keyboard, label: 'Keyboard Shortcuts', description: 'Customize keyboard shortcuts' },
+    { id: 'servers', icon: Server, label: 'Servers', description: 'Link remote OpenCode servers' },
     { id: 'opencode', icon: Code, label: 'OpenCode Config', description: 'Manage OpenCode configurations, commands, and agents' },
     { id: 'logs', icon: ScrollText, label: 'Logs', description: 'Live manager and OpenCode server logs' },
     { id: 'providers', icon: Key, label: 'Providers', description: 'Manage AI provider API keys' },
@@ -185,6 +187,7 @@ export function SettingsDialog() {
               <TabsContent key="voice" value="voice" className="mt-0 px-0 max-w-7xl"><VoiceSettings /></TabsContent>
               <TabsContent key="git" value="git" className="mt-0 px-0 max-w-7xl"><GitSettings /></TabsContent>
               <TabsContent key="shortcuts" value="shortcuts" className="mt-0 px-0 max-w-7xl"><KeyboardShortcuts /></TabsContent>
+              <TabsContent key="servers" value="servers" className="mt-0 px-0 max-w-7xl"><OpenCodeServersSettings /></TabsContent>
               <TabsContent key="opencode" value="opencode" className="mt-0 px-0">
                 <OpenCodeSettings onOpenVersionDialog={() => setIsVersionDialogOpen(true)} />
               </TabsContent>
@@ -251,6 +254,7 @@ export function SettingsDialog() {
              {mobileView === 'voice' && <div key="voice"><VoiceSettings /></div>}
              {mobileView === 'git' && <div key="git"><GitSettings /></div>}
               {mobileView === 'shortcuts' && <div key="shortcuts"><KeyboardShortcuts /></div>}
+              {mobileView === 'servers' && <div key="servers"><OpenCodeServersSettings /></div>}
                 {mobileView === 'opencode' && (
                    <OpenCodeSettings key="opencode" onOpenVersionDialog={() => setIsVersionDialogOpen(true)} />
                 )}

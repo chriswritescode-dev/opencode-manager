@@ -129,7 +129,7 @@ describe('useSendPrompt', () => {
       agents: undefined,
       skills: undefined,
       delivery: undefined,
-    })
+    }, 'local')
   })
 
   it('switches the model before prompting when the selection changed', async () => {
@@ -151,7 +151,7 @@ describe('useSendPrompt', () => {
       providerID: 'openai',
       id: 'gpt-4',
       variant: 'v1',
-    })
+    }, 'local')
     expect(mocks.switchSessionModel.mock.invocationCallOrder[0]).toBeLessThan(
       mocks.sendPrompt.mock.invocationCallOrder[0],
     )
@@ -173,11 +173,11 @@ describe('useSendPrompt', () => {
       agent: 'plan',
     })
 
-    expect(mocks.switchSessionAgent).toHaveBeenCalledWith('test-session', 'plan')
+    expect(mocks.switchSessionAgent).toHaveBeenCalledWith('test-session', 'plan', 'local')
     expect(mocks.switchSessionModel).toHaveBeenCalledWith('test-session', {
       providerID: 'anthropic',
       id: 'claude-sonnet-4',
-    })
+    }, 'local')
     expect(mocks.switchSessionAgent.mock.invocationCallOrder[0]).toBeLessThan(
       mocks.switchSessionModel.mock.invocationCallOrder[0],
     )
@@ -198,8 +198,8 @@ describe('useSendPrompt', () => {
       agent: 'plan',
     })
 
-    expect(mocks.switchSessionAgent).toHaveBeenCalledWith('test-session', 'plan')
-    expect(mocks.switchSessionModel).toHaveBeenCalledWith('test-session', { providerID: 'openai', id: 'gpt-4' })
+    expect(mocks.switchSessionAgent).toHaveBeenCalledWith('test-session', 'plan', 'local')
+    expect(mocks.switchSessionModel).toHaveBeenCalledWith('test-session', { providerID: 'openai', id: 'gpt-4' }, 'local')
     expect(mocks.switchSessionAgent.mock.invocationCallOrder[0]).toBeLessThan(
       mocks.switchSessionModel.mock.invocationCallOrder[0],
     )
@@ -216,8 +216,8 @@ describe('useSendPrompt', () => {
     await result.current.mutateAsync({ sessionID: 'test-session', text: 'second', model: modelA })
 
     expect(mocks.switchSessionModel.mock.calls).toEqual([
-      ['test-session', modelB],
-      ['test-session', modelA],
+      ['test-session', modelB, 'local'],
+      ['test-session', modelA, 'local'],
     ])
   })
 
@@ -230,8 +230,8 @@ describe('useSendPrompt', () => {
     await result.current.mutateAsync({ sessionID: 'test-session', text: 'second', agent: 'build' })
 
     expect(mocks.switchSessionAgent.mock.calls).toEqual([
-      ['test-session', 'plan'],
-      ['test-session', 'build'],
+      ['test-session', 'plan', 'local'],
+      ['test-session', 'build', 'local'],
     ])
   })
 

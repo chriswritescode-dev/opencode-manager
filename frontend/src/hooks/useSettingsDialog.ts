@@ -1,7 +1,7 @@
 import { useCallback, useRef } from 'react'
 import { useUrlParams } from './useUrlParams'
 
-const SETTINGS_CONTENT_TABS = ['account', 'general', 'notifications', 'voice', 'git', 'shortcuts', 'opencode', 'providers', 'logs'] as const
+const SETTINGS_CONTENT_TABS = ['account', 'general', 'notifications', 'voice', 'git', 'shortcuts', 'servers', 'opencode', 'providers', 'logs'] as const
 
 export type SettingsContentTab = (typeof SETTINGS_CONTENT_TABS)[number]
 

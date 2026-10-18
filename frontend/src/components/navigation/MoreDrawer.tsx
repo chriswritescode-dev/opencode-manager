@@ -9,11 +9,12 @@ import { getRepo } from '@/api/repos'
 import { useRefreshOnOpen } from '@/hooks/useRefreshOnOpen'
 import { SideDrawer, SideDrawerContent } from '@/components/ui/side-drawer'
 import { CompactActivityList } from '@/components/activity/CompactActivityList'
-import { buildMoreItems, buildNavModel, isSessionDetailPath, type MoreDrawerItem } from './moreDrawerItems'
+import { buildMoreItems, buildNavModel, isManagerOnlyNavItem, isSessionDetailPath, type MoreDrawerItem } from './moreDrawerItems'
 import { useSwipeBack } from '@/hooks/useMobile'
 import { cn, getRepoDisplayName } from '@/lib/utils'
 import { getPathWithReturnTo, isAssistantPath } from '@/lib/navigation'
 import { useMobileTabBar } from '@/hooks/useMobileTabBar'
+import { isLocalOpenCodeServer, useRouteOpenCodeServerId } from '@/contexts/OpenCodeServerContext'
 
 interface MoreDrawerProps {
   isOpen: boolean
@@ -76,6 +77,7 @@ export function MoreDrawer({ isOpen, onClose }: MoreDrawerProps) {
   const isSessionDetail = isSessionDetailPath(location.pathname)
   const isAssistantRoute = isAssistantPath(location.pathname)
   const isAssistantSession = isSessionDetail && searchParams.get('assistant') === '1'
+  const isRemoteRoute = !isLocalOpenCodeServer(useRouteOpenCodeServerId())
   const { open: openMobileSheet } = useMobileTabBar()
 
   useEffect(() => {
@@ -136,11 +138,13 @@ export function MoreDrawer({ isOpen, onClose }: MoreDrawerProps) {
     }
   }
 
-  const items = buildMoreItems(location.pathname)
+  const items = buildMoreItems(location.pathname).filter(
+    (item) => !isRemoteRoute || !isManagerOnlyNavItem(item),
+  )
   const itemsInGroup = (keys: ReadonlySet<string>) => items.filter((item) => keys.has(item.key))
   const groupedKeys = new Set([...ACCOUNT_ITEM_KEYS, ...ITEM_GROUPS.flatMap(({ keys }) => [...keys])])
   const navigationItems = items.filter((item) => !groupedKeys.has(item.key))
-  const assistantCta = isSessionDetail && !isAssistantSession
+  const assistantCta = isSessionDetail && !isAssistantSession && !isRemoteRoute
     ? buildNavModel(location.pathname).primary.find((cta) => cta.key === 'assistant')
     : undefined
 
@@ -184,11 +188,11 @@ export function MoreDrawer({ isOpen, onClose }: MoreDrawerProps) {
           )}
         </div>
         <SideDrawerContent className="flex flex-col gap-4 pb-3">
-          {isOpen && (
+          {isOpen && !isRemoteRoute && (
             <CompactActivityList onNavigate={(path) => navigate(path)} />
           )}
           <MenuSection>
-            {isSessionDetail && (
+            {isSessionDetail && !isRemoteRoute && (
               <MenuRow icon={FolderGit2} label="Repos" onClick={() => openMobileSheet('repos')} trailing />
             )}
             {assistantCta?.to && (

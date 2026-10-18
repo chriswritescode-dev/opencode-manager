@@ -224,7 +224,7 @@ describe('RepoSkillsDialog', () => {
 
       expect(onOpenChange).toHaveBeenCalledWith(false)
       expect(onSkillLoaded).toHaveBeenCalledWith(mockSkills[0])
-      expect(mocks.activateSkill).toHaveBeenCalledWith('test-session', 'test-skill')
+      expect(mocks.activateSkill).toHaveBeenCalledWith('test-session', 'test-skill', 'local')
     })
 
     it('shows toast error on activateSkill failure', async () => {

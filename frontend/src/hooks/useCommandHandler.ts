@@ -1,6 +1,7 @@
 import { useCallback } from 'react'
 import { runCommand } from '@/api/opencode'
 import type { PromptAgentInput, PromptFileInput, PromptSkillInput } from '@/api/opencode'
+import { useOpenCodeServerId } from '@/contexts/OpenCodeServerContext'
 import { useSyncSessionSelection } from '@/hooks/useOpenCode'
 import { showToast } from '@/lib/toast'
 import type { CommandInfo, ModelRef } from '@opencode-manager/shared/opencode'
@@ -29,6 +30,7 @@ export function useCommandHandler({
   currentAgent,
   actions,
 }: CommandHandlerProps) {
+  const serverId = useOpenCodeServerId()
   const syncSelection = useSyncSessionSelection(directory)
   const setSessionStatus = useSessionStatus((state) => state.setStatus)
 
@@ -45,21 +47,24 @@ export function useCommandHandler({
 
     try {
       await syncSelection({ sessionID, model, agent: currentAgent })
-      await runCommand({
-        sessionID,
-        name: command.name,
-        text: submission.text,
-        ...(submission.files ? { files: submission.files } : {}),
-        ...(submission.agents ? { agents: submission.agents } : {}),
-        ...(submission.skills ? { skills: submission.skills } : {}),
-      })
+      await runCommand(
+        {
+          sessionID,
+          name: command.name,
+          text: submission.text,
+          ...(submission.files ? { files: submission.files } : {}),
+          ...(submission.agents ? { agents: submission.agents } : {}),
+          ...(submission.skills ? { skills: submission.skills } : {}),
+        },
+        serverId,
+      )
       return true
     } catch (error) {
       showToast.error(`Command failed: ${error instanceof Error ? error.message : 'Unknown error'}`)
       setSessionStatus(sessionID, { type: 'idle' })
       return false
     }
-  }, [actions, sessionID, model, syncSelection, currentAgent, setSessionStatus])
+  }, [actions, sessionID, model, syncSelection, currentAgent, setSessionStatus, serverId])
 
   return {
     executeCommand

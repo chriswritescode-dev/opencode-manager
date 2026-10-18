@@ -51,7 +51,10 @@ import { createInternalRoutes } from './routes/internal'
 import { sweepStaleUploadSessions } from './routes/internal/repo-mirror-helpers'
 import { createOpenCodeProxyRoutes } from './routes/opencode-proxy'
 import { createAuthenticatedOpenCodeProxyRoutes } from './routes/opencode-auth-proxy'
+import { createOpenCodeServerProxyRoutes } from './routes/opencode-server-proxy'
+import { createOpenCodeServerRoutes } from './routes/opencode-servers'
 import { sseAggregator } from './services/sse-aggregator'
+import { RemoteServerEventHub } from './services/remote-server-events'
 import { ensureDirectoryExists, writeFileContent, fileExists } from './services/file-operations'
 import { SettingsService } from './services/settings'
 import { SessionPermissionModeService } from './services/session-permission-modes'
@@ -62,6 +65,7 @@ import { MultiRunService } from './services/multi-runs'
 import { ChangeWalkthroughService } from './services/change-walkthroughs'
 import { opencodeServerManager } from './services/opencode-single-server'
 import { createOpenCodeClient } from './services/opencode/client'
+import { OpenCodeServerRegistry } from './services/opencode-server-registry'
 import { getOpenCodeUpstreamBaseUrl } from './services/opencode/upstream'
 import { NotificationService } from './services/notification'
 import { ScheduleRunner, ScheduleService } from './services/schedules'
@@ -127,6 +131,7 @@ const openCodeClient = createOpenCodeClient(
   () => new SettingsService(db).getOpenCodeServerPassword(),
   () => opencodeServerManager.getEffectiveServerHost(),
 )
+export const opencodeServerRegistry = new OpenCodeServerRegistry(db, openCodeClient)
 
 import { DEFAULT_AGENTS_MD } from './constants'
 
@@ -340,6 +345,9 @@ sseAggregator.onUpstreamConnected(() => {
 })
 sseAggregator.start()
 
+const remoteServerEvents = new RemoteServerEventHub(opencodeServerRegistry, sseAggregator)
+remoteServerEvents.start()
+
 void sessionGoalService.recoverOpenGoals().catch((error) => {
   logger.error('Session goal recovery error:', error)
 })
@@ -379,6 +387,7 @@ protectedApi.route('/ssh', createSSHRoutes(gitAuthService))
 protectedApi.route('/notifications', createNotificationRoutes(notificationService))
 protectedApi.route('/prompt-templates', createPromptTemplateRoutes(db))
 protectedApi.route('/session-pins', createSessionPinRoutes(db))
+protectedApi.route('/opencode-servers', createOpenCodeServerRoutes(opencodeServerRegistry, () => remoteServerEvents.getStatuses()))
 protectedApi.route('/session-permission-modes', createSessionPermissionModeRoutes(sessionPermissionModeService))
 protectedApi.route('/session-sandbox', createSessionSandboxRoutes(sessionSandboxService))
 protectedApi.route('/session-goals', createSessionGoalRoutes(sessionGoalService))
@@ -390,6 +399,7 @@ protectedApi.route('/preview', createPreviewRoutes({ store: previewSessionStore,
 
 app.route('/api', protectedApi)
 
+app.route('/api/opencode/servers', createOpenCodeServerProxyRoutes(opencodeServerRegistry, requireAuth))
 app.route('/api/opencode', createAuthenticatedOpenCodeProxyRoutes(openCodeClient, requireAuth))
 
 const isProduction = ENV.SERVER.NODE_ENV === 'production'
@@ -468,6 +478,8 @@ const shutdown = async (signal: string) => {
 
   logger.info(`${signal} received, shutting down gracefully...`)
   try {
+    remoteServerEvents.shutdown()
+    logger.info('Remote server event hub stopped')
     sseAggregator.shutdown()
     logger.info('SSE Aggregator stopped')
     if (ipcServer) {

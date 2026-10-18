@@ -1,10 +1,12 @@
 
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
-import { createBrowserRouter, RouterProvider, Outlet, useNavigate, useLocation } from 'react-router-dom'
-import { useEffect, useRef, useCallback } from 'react'
+import { createBrowserRouter, RouterProvider, Outlet, useNavigate, useLocation, useParams, Navigate } from 'react-router-dom'
+import { useEffect, useRef, useCallback, type ReactNode } from 'react'
+import { LOCAL_OPENCODE_SERVER_ID } from '@opencode-manager/shared/schemas'
 import { Toaster } from 'sonner'
 import { Repos } from './pages/Repos'
 import { RepoDetail } from './pages/RepoDetail'
+import { RemoteServer } from './pages/RemoteServer'
 import { SessionDetail } from './pages/SessionDetail'
 import { Schedules } from './pages/Schedules'
 import { GlobalSchedules } from './pages/GlobalSchedules'
@@ -26,6 +28,7 @@ import { ThemeProvider, useThemeMode } from './contexts/ThemeContext'
 import { AuthProvider } from './contexts/AuthContext'
 import { KeyboardShortcutsProvider } from './contexts/KeyboardShortcutsContext'
 import { EventProvider, usePermissions, useEventContext } from '@/contexts/EventContext'
+import { OpenCodeServerProvider, isLocalOpenCodeServer } from '@/contexts/OpenCodeServerContext'
 import { RepoWorktreesProvider } from '@/contexts/RepoWorktreesContext'
 import { SwipeNavigationProvider, useSwipeNavigation } from '@/contexts/SwipeNavigationContext'
 import { PermissionRequestDialog } from './components/session/PermissionRequestDialog'
@@ -98,7 +101,7 @@ function HealthMonitor() {
   )
 }
 
-function PermissionDialogWrapper() {
+export function PermissionDialogWrapper() {
   const {
     current: currentPermission,
     pendingCount,
@@ -111,10 +114,14 @@ function PermissionDialogWrapper() {
     currentIsFromDifferentSession,
   } = usePermissions()
   const { getRepoIdForSession } = useEventContext()
-  const { data: session } = useSession(currentPermission?.sessionID, currentDirectory ?? undefined)
+  const isRemotePermission = currentPermission !== null && !isLocalOpenCodeServer(currentPermission.serverId)
+  const { data: session } = useSession(
+    isRemotePermission ? undefined : currentPermission?.sessionID,
+    currentDirectory ?? undefined,
+  )
 
   const canOpenCurrentSession = currentPermission !== null
-    && getRepoIdForSession(currentPermission.sessionID) !== null
+    && (isRemotePermission || getRepoIdForSession(currentPermission.sessionID) !== null)
     && (currentIsFromDifferentSession || viewedSessionId === null)
 
   return (
@@ -135,6 +142,16 @@ function PermissionDialogWrapper() {
 function GlobalShortcuts() {
   useGlobalShortcutActions()
   return null
+}
+
+function ServerScope({ children }: { children: ReactNode }) {
+  const { serverId } = useParams<{ serverId: string }>()
+
+  if (!serverId || serverId === LOCAL_OPENCODE_SERVER_ID) {
+    return <Navigate to="/" replace />
+  }
+
+  return <OpenCodeServerProvider serverId={serverId}>{children}</OpenCodeServerProvider>
 }
 
 function AppShell() {
@@ -290,6 +307,24 @@ const router = createBrowserRouter([
       {
         path: '/schedules',
         element: <GlobalSchedules />,
+        loader: protectedLoader,
+      },
+      {
+        path: '/servers/:serverId',
+        element: (
+          <ServerScope>
+            <RemoteServer />
+          </ServerScope>
+        ),
+        loader: protectedLoader,
+      },
+      {
+        path: '/servers/:serverId/sessions/:sessionId',
+        element: (
+          <ServerScope>
+            <SessionDetail />
+          </ServerScope>
+        ),
         loader: protectedLoader,
       },
     ],

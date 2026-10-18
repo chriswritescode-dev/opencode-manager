@@ -310,8 +310,8 @@ describe('SettingsDialog', () => {
     expect(tablist).toHaveAttribute('aria-orientation', 'vertical')
 
     const triggers = screen.getAllByRole('tab')
-    expect(triggers).toHaveLength(9)
-    const expected = ['Account', 'General Settings', 'Notifications', 'Voice', 'Git', 'Keyboard Shortcuts', 'OpenCode Config', 'Logs', 'Providers']
+    expect(triggers).toHaveLength(10)
+    const expected = ['Account', 'General Settings', 'Notifications', 'Voice', 'Git', 'Keyboard Shortcuts', 'Servers', 'OpenCode Config', 'Logs', 'Providers']
     expect(triggers.map((trigger) => trigger.textContent)).toEqual(expected)
 
     const logsTrigger = screen.getByRole('tab', { name: 'Logs' })

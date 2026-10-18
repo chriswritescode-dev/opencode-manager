@@ -18,6 +18,7 @@ import { useMobile } from '@/hooks/useMobile'
 import { FINE_POINTER_MEDIA_QUERY, useMediaQuery } from '@/hooks/useMediaQuery'
 
 import { usePermissions } from '@/contexts/EventContext'
+import { isLocalOpenCodeServer, useOpenCodeServerId } from '@/contexts/OpenCodeServerContext'
 import { ArrowDown, Upload, X, Mic, MicOff, Target } from 'lucide-react'
 
 import { SquareFill } from '@/components/ui/square-fill'
@@ -251,6 +252,7 @@ export const PromptInput = memo(forwardRef<PromptInputHandle, PromptInputProps>(
 
   const sessionAgent = useSessionAgent(sessionID, directory)
   const hasBackgroundActivity = useHasBackgroundActivity(sessionID)
+  const allowManagerTools = isLocalOpenCodeServer(useOpenCodeServerId())
   const currentMode = localMode ?? sessionAgent.agent
   const setStoredAgent = useSessionAgentStore((s) => s.setAgent)
   const sendPrompt = useSendPrompt(directory)
@@ -258,8 +260,8 @@ export const PromptInput = memo(forwardRef<PromptInputHandle, PromptInputProps>(
   const startGoal = useStartSessionGoal()
   const isPromptSubmitPending = sendPrompt.isPending || sendShell.isPending || startGoal.isPending
   const interruptSession = useInterruptSession()
-  const { data: sessionGoal } = useSessionGoal(sessionID)
-  const { data: permissionMode } = useSessionPermissionMode(sessionID)
+  const { data: sessionGoal } = useSessionGoal(sessionID, { enabled: allowManagerTools })
+  const { data: permissionMode } = useSessionPermissionMode(sessionID, { enabled: allowManagerTools })
   const { searchCommands, findCommand, recentNames } = useCommands({ directory })
   const recordCommand = useRecentCommandsStore((state) => state.recordCommand)
   const isExactCommandPrompt = (value: string) => {
@@ -1577,7 +1579,7 @@ return (
                 onAgentChange={handleAgentChange}
                 isBashMode={isBashMode}
               />
-              {directory && !isMobile && (
+              {directory && !isMobile && allowManagerTools ? (
                 <>
                   <PermissionModeToggle sessionID={sessionID} directory={directory} />
                   <SessionSandboxMenu sessionID={sessionID} />
@@ -1590,7 +1592,7 @@ return (
                     <Target className="w-5 h-5" />
                   </IconToggleButton>
                 </>
-              )}
+              ) : null}
               {(isSessionActive || hasBackgroundActivity) && (
                 <div className="px-2.5 py-1.5 md:px-3 md:py-2 rounded-lg text-xs md:text-sm font-medium text-muted-foreground max-w-[120px] md:max-w-[180px]">
                   <SessionStatusIndicator sessionID={sessionID} showLabel />
@@ -1662,6 +1664,7 @@ return (
               goalLabel={goalButtonLabel}
               onToggleGoal={toggleGoalArmed}
               onAttachFile={openFilePicker}
+              allowManagerTools={allowManagerTools}
               onDictate={canUseMobileVoice && hasPromptContent && !showVoiceFeedback ? () => void startVoiceRecording() : undefined}
             />
           )}

@@ -1,20 +1,24 @@
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import { mcpApi } from '@/api/mcp'
+import { useOpenCodeServerId } from '@/contexts/OpenCodeServerContext'
 import { invalidateSessionCaches } from '@/lib/queryInvalidation'
+import { serverScopedKey } from '@/lib/serverScope'
 import { showToast as toast } from '@/lib/toast'
 
 export function useMcpServers() {
   const queryClient = useQueryClient()
+  const serverId = useOpenCodeServerId()
+  const statusQueryKey = serverScopedKey(['mcp-status'], serverId)
 
   const statusQuery = useQuery({
-    queryKey: ['mcp-status'],
-    queryFn: () => mcpApi.getStatus(),
+    queryKey: statusQueryKey,
+    queryFn: () => mcpApi.getStatus(undefined, serverId),
     refetchInterval: 5000,
     staleTime: 2000,
   })
 
   const connectMutation = useMutation({
-    mutationFn: (name: string) => mcpApi.connect(name),
+    mutationFn: (name: string) => mcpApi.connect(name, undefined, serverId),
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['mcp-status'] })
       invalidateSessionCaches(queryClient)
@@ -26,7 +30,7 @@ export function useMcpServers() {
   })
 
   const disconnectMutation = useMutation({
-    mutationFn: (name: string) => mcpApi.disconnect(name),
+    mutationFn: (name: string) => mcpApi.disconnect(name, undefined, serverId),
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['mcp-status'] })
       invalidateSessionCaches(queryClient)

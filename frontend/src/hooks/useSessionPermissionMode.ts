@@ -7,10 +7,11 @@ function sessionPermissionModeQueryKey(sessionId: string) {
   return ['session-permission-mode', sessionId] as const
 }
 
-export function useSessionPermissionMode(sessionId: string) {
+export function useSessionPermissionMode(sessionId: string, options: { enabled?: boolean } = {}) {
   return useQuery({
     queryKey: sessionPermissionModeQueryKey(sessionId),
     queryFn: () => getSessionPermissionMode(sessionId),
+    enabled: options.enabled ?? true,
     staleTime: 30000,
   })
 }

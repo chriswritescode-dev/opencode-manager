@@ -11,3 +11,11 @@ export function getOpenCodeBasicAuthHeader(source: string | OpenCodePasswordReso
 
   return buildOpenCodeBasicAuth(source)
 }
+
+/** Builds the Basic authorization header for a server that uses a username other than the default `opencode`. */
+export function getOpenCodeServerBasicAuthHeader(username: string, password: string): string {
+  const bytes = new TextEncoder().encode(`${username}:${password}`)
+  let binary = ''
+  for (const byte of bytes) binary += String.fromCharCode(byte)
+  return `Basic ${btoa(binary)}`
+}

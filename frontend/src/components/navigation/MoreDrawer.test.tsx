@@ -360,4 +360,26 @@ describe('MoreDrawer', () => {
     expect(navigateMock).toHaveBeenCalledWith('/repos/1/sessions/s1')
     expect(handleClose).not.toHaveBeenCalled()
   })
+
+  it('offers only account items on a linked-server route', () => {
+    mockAuth()
+    mockServerHealth()
+    setActivityGroups({ recent: [createActiveWorkItem()] })
+    renderMoreDrawer({
+      initialEntry: '/servers/srv_kitchen/sessions/ses_remote',
+      routePath: '/servers/:serverId/sessions/:sessionId',
+    })
+
+    expect(screen.getByText('Home')).toBeInTheDocument()
+    expect(screen.getByText('Settings')).toBeInTheDocument()
+    expect(screen.getByText('Logout')).toBeInTheDocument()
+    expect(screen.queryByText('Files')).not.toBeInTheDocument()
+    expect(screen.queryByText('Source Control')).not.toBeInTheDocument()
+    expect(screen.queryByText('Terminal')).not.toBeInTheDocument()
+    expect(screen.queryByText('MCP')).not.toBeInTheDocument()
+    expect(screen.queryByText('Schedules')).not.toBeInTheDocument()
+    expect(screen.queryByText('Repos')).not.toBeInTheDocument()
+    expect(screen.queryByRole('button', { name: 'Assistant' })).not.toBeInTheDocument()
+    expect(screen.queryByRole('heading', { name: 'Activity' })).not.toBeInTheDocument()
+  })
 })

@@ -299,7 +299,7 @@ describe('DesktopSessionTree', () => {
     const rows = screen.getAllByRole('button', { name: /Session / })
     expect(rows[0]).toHaveTextContent('Session old')
     expect(rows[0].querySelector('[aria-label="Pinned"]')).not.toBeNull()
-    expect(getSessionMock).toHaveBeenCalledWith('old')
+    expect(getSessionMock).toHaveBeenCalledWith('old', 'local')
   })
 
   it('keeps a non-ready repo navigable without actions or session requests', async () => {

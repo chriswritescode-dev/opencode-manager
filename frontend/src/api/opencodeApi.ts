@@ -1,11 +1,28 @@
 import { ClientError, createOpenCodeApi, openCodeErrorStatus, type OpenCodeApi } from '@opencode-manager/shared/opencode'
 import { FetchError } from '@opencode-manager/shared'
-import { OPENCODE_API_ENDPOINT } from '@/config'
+import { LOCAL_OPENCODE_SERVER_ID } from '@opencode-manager/shared/schemas'
+import { API_BASE_URL, OPENCODE_API_ENDPOINT } from '@/config'
 
-const openCodeApi = createOpenCodeApi({
-  baseUrl: new URL(OPENCODE_API_ENDPOINT, window.location.origin).toString(),
-  fetch: (input, init) => fetch(input, { ...init, credentials: 'include' }),
-})
+const openCodeApis = new Map<string, OpenCodeApi>()
+
+/** Base URL of the OpenCode API for a server: the direct local endpoint or the remote proxy. */
+export function openCodeApiBaseUrl(serverId: string = LOCAL_OPENCODE_SERVER_ID): string {
+  return serverId === LOCAL_OPENCODE_SERVER_ID
+    ? OPENCODE_API_ENDPOINT
+    : `${API_BASE_URL}/api/opencode/servers/${encodeURIComponent(serverId)}`
+}
+
+export function getOpenCodeApi(serverId: string = LOCAL_OPENCODE_SERVER_ID): OpenCodeApi {
+  const cached = openCodeApis.get(serverId)
+  if (cached) return cached
+
+  const api = createOpenCodeApi({
+    baseUrl: new URL(openCodeApiBaseUrl(serverId), window.location.origin).toString(),
+    fetch: (input, init) => fetch(input, { ...init, credentials: 'include' }),
+  })
+  openCodeApis.set(serverId, api)
+  return api
+}
 
 function toFetchError(error: unknown): FetchError {
   if (error instanceof FetchError) {
@@ -25,9 +42,12 @@ function toFetchError(error: unknown): FetchError {
   return new FetchError('Request failed', status ?? 0)
 }
 
-export async function callOpenCode<T>(operation: (api: OpenCodeApi) => Promise<T>): Promise<T> {
+export async function callOpenCode<T>(
+  operation: (api: OpenCodeApi) => Promise<T>,
+  serverId: string = LOCAL_OPENCODE_SERVER_ID,
+): Promise<T> {
   try {
-    return await operation(openCodeApi)
+    return await operation(getOpenCodeApi(serverId))
   } catch (error) {
     throw toFetchError(error)
   }

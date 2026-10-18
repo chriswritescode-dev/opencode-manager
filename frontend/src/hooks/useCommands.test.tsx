@@ -4,20 +4,23 @@ import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
 import { useCommands } from './useCommands'
 import { listCommands } from '../api/opencode'
 import { BUILTIN_COMMANDS } from '@/lib/builtinCommands'
+import { OpenCodeServerProvider } from '@/contexts/OpenCodeServerContext'
 import { useRecentCommandsStore } from '@/stores/recentCommandsStore'
 
 vi.mock('../api/opencode', () => ({
   listCommands: vi.fn(),
 }))
 
-const createWrapper = () => {
+const createWrapper = (serverId?: string) => {
   const queryClient = new QueryClient({
     defaultOptions: {
       queries: { retry: false },
     },
   })
   return ({ children }: { children: React.ReactNode }) => (
-    <QueryClientProvider client={queryClient}>{children}</QueryClientProvider>
+    <QueryClientProvider client={queryClient}>
+      {serverId ? <OpenCodeServerProvider serverId={serverId}>{children}</OpenCodeServerProvider> : children}
+    </QueryClientProvider>
   )
 }
 
@@ -74,7 +77,7 @@ describe('useCommands', () => {
       ])
     })
 
-    expect(listCommands).toHaveBeenCalledWith('/repo')
+    expect(listCommands).toHaveBeenCalledWith('/repo', 'local')
   })
 
   it('lets a loaded command override a built-in command with the same name', async () => {
@@ -148,7 +151,7 @@ describe('useCommands', () => {
     rerender({ directory: '/repo-b' })
 
     await waitFor(() => expect(result.current.findCommand('from-b')).toBeDefined())
-    expect(listCommands).toHaveBeenCalledWith('/repo-b')
+    expect(listCommands).toHaveBeenCalledWith('/repo-b', 'local')
   })
 
   it('finds only exact command names, ignoring case', () => {
@@ -156,5 +159,36 @@ describe('useCommands', () => {
 
     expect(result.current.findCommand('UNDO')?.name).toBe('undo')
     expect(result.current.findCommand('und')).toBeUndefined()
+  })
+
+  it('omits Manager-only built-ins for a linked server', () => {
+    const { result } = renderHook(() => useCommands({ enabled: false }), {
+      wrapper: createWrapper('srv_kitchen'),
+    })
+
+    const names = result.current.searchCommands('').map(({ item }) => item.name)
+
+    expect(names).not.toContain('sessions')
+    expect(names).not.toContain('resume')
+    expect(names).not.toContain('continue')
+    expect(names).not.toContain('mcp')
+    expect(names).not.toContain('skills')
+    expect(names).not.toContain('walkthrough')
+    expect(names).toContain('models')
+    expect(names).toContain('compact')
+    expect(result.current.findCommand('mcp')).toBeUndefined()
+  })
+
+  it('keeps Manager-only built-ins for the local server', () => {
+    const { result } = renderHook(() => useCommands({ enabled: false }), {
+      wrapper: createWrapper('local'),
+    })
+
+    const names = result.current.searchCommands('').map(({ item }) => item.name)
+
+    expect(names).toContain('sessions')
+    expect(names).toContain('mcp')
+    expect(names).toContain('skills')
+    expect(names).toContain('walkthrough')
   })
 })

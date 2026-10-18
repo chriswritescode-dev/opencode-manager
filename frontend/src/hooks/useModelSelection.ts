@@ -1,6 +1,8 @@
 import { useMemo } from 'react'
 import { keepPreviousData, useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { locationAgentKey, useModelStore, type ActiveAgent, type ModelPick, type ModelSelection } from '@/stores/modelStore'
+import { useOpenCodeServerId } from '@/contexts/OpenCodeServerContext'
+import { serverScopedKey } from '@/lib/serverScope'
 import { useProviders } from './useProviders'
 import { isModelAvailable } from '@/lib/modelCatalog'
 import {
@@ -69,20 +71,22 @@ export function useOpenCodeModelState(_directory?: string, enabled = true) {
 }
 
 function useOpenCodeConfiguredModel(directory?: string, enabled = true) {
+  const serverId = useOpenCodeServerId()
   return useQuery({
-    queryKey: ['opencode', 'config', 'model', directory],
-    queryFn: () => getOpenCodeConfiguredModel(directory),
+    queryKey: serverScopedKey(['opencode', 'config', 'model', directory], serverId),
+    queryFn: () => getOpenCodeConfiguredModel(directory, serverId),
     staleTime: 30000,
     enabled,
   })
 }
 
 export function useOpenCodeDefaultModel(directory?: string, enabled = true) {
+  const serverId = useOpenCodeServerId()
   const providersQuery = useProviders(directory, { enabled })
   const configuredQuery = useOpenCodeConfiguredModel(directory, enabled)
   const defaultQuery = useQuery({
-    queryKey: ['opencode', 'providers', 'default-model', directory],
-    queryFn: () => getOpenCodeServerDefaultModel(directory),
+    queryKey: serverScopedKey(['opencode', 'providers', 'default-model', directory], serverId),
+    queryFn: () => getOpenCodeServerDefaultModel(directory, serverId),
     staleTime: 30000,
     enabled,
   })

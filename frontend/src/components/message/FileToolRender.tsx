@@ -1,6 +1,7 @@
 import React, { useState } from 'react'
 import type { FileDiffInfo, SessionMessageAssistantTool } from '@opencode-manager/shared/opencode'
 import { useSettings } from '@/hooks/useSettings'
+import { isLocalOpenCodeServer, useOpenCodeServerId } from '@/contexts/OpenCodeServerContext'
 import { DiffStats } from './DiffStats'
 import { CodePreview } from './CodePreview'
 import { ToolContentFiles } from './ToolContentFiles'
@@ -73,10 +74,12 @@ interface FileToolRenderProps {
 
 function FileToolRender({ part, filediff, filePath, content, toolName, onFileClick }: FileToolRenderProps) {
   const { preferences } = useSettings()
+  const isRemoteServer = !isLocalOpenCodeServer(useOpenCodeServerId())
   const isReadTool = toolName === 'Read'
   const isEditTool = toolName === 'Edit'
   const isWriteTool = toolName === 'Write'
   const hasExpandableContent = !isReadTool && (filediff || content)
+  const isFileLink = Boolean(onFileClick) && !isRemoteServer
   
   const isFileMutatingTool = isEditTool || isWriteTool
   const defaultExpanded = isFileMutatingTool
@@ -106,12 +109,16 @@ function FileToolRender({ part, filediff, filePath, content, toolName, onFileCli
           <span className="text-success flex-shrink-0">✓</span>
           <span className="font-medium flex-shrink-0">{toolName}</span>
           {filePath && (
-            <span 
-              onClick={handleFileClick}
-              className="text-primary text-xs truncate hover:underline cursor-pointer"
-            >
-              {getRelativePath(filePath)}
-            </span>
+            isFileLink ? (
+              <span
+                onClick={handleFileClick}
+                className="text-primary text-xs truncate hover:underline cursor-pointer"
+              >
+                {getRelativePath(filePath)}
+              </span>
+            ) : (
+              <span className="text-muted-foreground text-xs truncate">{getRelativePath(filePath)}</span>
+            )
           )}
         </div>
         <div className="flex items-center gap-2 flex-shrink-0">

@@ -80,12 +80,12 @@ describe('useRefreshMessage', () => {
       agent: 'build',
     })
 
-    expect(mocks.stageRevert).toHaveBeenCalledWith('test-session', 'assistant-1')
-    expect(mocks.commitRevert).toHaveBeenCalledWith('test-session')
+    expect(mocks.stageRevert).toHaveBeenCalledWith('test-session', 'assistant-1', 'local')
+    expect(mocks.commitRevert).toHaveBeenCalledWith('test-session', 'local')
     expect(mocks.sendPrompt).toHaveBeenCalledWith({
       sessionID: 'test-session',
       text: 'edited text',
-    })
+    }, 'local')
     expect(mocks.switchSessionModel).not.toHaveBeenCalled()
     expect(mocks.switchSessionAgent).not.toHaveBeenCalled()
   })
@@ -123,7 +123,7 @@ describe('useRefreshMessage', () => {
     expect(mocks.switchSessionModel).toHaveBeenCalledWith('test-session', {
       providerID: 'openai',
       id: 'gpt-4',
-    })
+    }, 'local')
     expect(mocks.switchSessionAgent).not.toHaveBeenCalled()
     expect(mocks.switchSessionModel.mock.invocationCallOrder[0]).toBeLessThan(
       mocks.sendPrompt.mock.invocationCallOrder[0],
@@ -142,11 +142,11 @@ describe('useRefreshMessage', () => {
       agent: 'plan',
     })
 
-    expect(mocks.switchSessionAgent).toHaveBeenCalledWith('test-session', 'plan')
+    expect(mocks.switchSessionAgent).toHaveBeenCalledWith('test-session', 'plan', 'local')
     expect(mocks.switchSessionModel).toHaveBeenCalledWith('test-session', {
       providerID: 'anthropic',
       id: 'claude-sonnet-4',
-    })
+    }, 'local')
     expect(mocks.switchSessionAgent.mock.invocationCallOrder[0]).toBeLessThan(
       mocks.switchSessionModel.mock.invocationCallOrder[0],
     )

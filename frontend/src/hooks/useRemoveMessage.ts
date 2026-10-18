@@ -5,6 +5,7 @@ import {
   stageRevert,
 } from '@/api/opencode'
 import { parseOpenCodeModelRef } from '@opencode-manager/shared/opencode'
+import { useOpenCodeServerId } from '@/contexts/OpenCodeServerContext'
 import { useSyncSessionSelection } from '@/hooks/useOpenCode'
 import { showToast } from '@/lib/toast'
 import { sessionTranscriptQueryKey } from '@/lib/queryInvalidation'
@@ -16,11 +17,12 @@ interface UseRemoveMessageOptions {
 
 export function useRemoveMessage({ sessionId, directory }: UseRemoveMessageOptions) {
   const queryClient = useQueryClient()
+  const serverId = useOpenCodeServerId()
 
   return useMutation({
     mutationFn: async ({ messageID }: { messageID: string }) => {
-      await stageRevert(sessionId, messageID)
-      await commitRevert(sessionId)
+      await stageRevert(sessionId, messageID, serverId)
+      await commitRevert(sessionId, serverId)
     },
     onError: () => {
       showToast.error('Failed to remove message')
@@ -41,6 +43,7 @@ interface UseRefreshMessageOptions {
 
 export function useRefreshMessage({ sessionId, directory }: UseRefreshMessageOptions) {
   const queryClient = useQueryClient()
+  const serverId = useOpenCodeServerId()
   const removeMessage = useRemoveMessage({ sessionId, directory })
   const syncSelection = useSyncSessionSelection(directory)
 
@@ -61,10 +64,13 @@ export function useRefreshMessage({ sessionId, directory }: UseRefreshMessageOpt
       const modelRef = model ? parseOpenCodeModelRef(model) : undefined
       await syncSelection({ sessionID: sessionId, model: modelRef, agent })
 
-      await sendPrompt({
-        sessionID: sessionId,
-        text: userMessageContent,
-      })
+      await sendPrompt(
+        {
+          sessionID: sessionId,
+          text: userMessageContent,
+        },
+        serverId,
+      )
 
       return { userMessageContent }
     },

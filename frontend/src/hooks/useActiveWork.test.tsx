@@ -138,7 +138,7 @@ describe('useActiveWork', () => {
 
     await waitFor(() => expect(recentIDs(result.current.groups)).toContain('root2'))
 
-    expect(mocks.listSessionPage).toHaveBeenCalledWith({ cursor: 'page2', includeChildren: true })
+    expect(mocks.listSessionPage).toHaveBeenCalledWith({ cursor: 'page2', includeChildren: true }, 'local')
   })
 
   it('does not request another page when the oldest loaded session is outside the window', async () => {

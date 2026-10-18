@@ -125,7 +125,7 @@ describe('useGlobalShortcutActions', () => {
     pressKey({ key: 'o', ctrlKey: true })
     pressKey({ key: 'n' })
 
-    await waitFor(() => expect(mocks.createSession).toHaveBeenCalledWith({ directory: '/repo/five' }))
+    await waitFor(() => expect(mocks.createSession).toHaveBeenCalledWith({ directory: '/repo/five' }, 'local'))
     await waitFor(() => expect(location()).toBe('/repos/5/sessions/session-new'))
   })
 

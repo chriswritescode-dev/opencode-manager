@@ -97,6 +97,8 @@ ocm use <repoId|name>
 ocm push [repoId] [--force] [--create] [--yes] [--full]
 ocm pull [repoId] [--force] [--full]
 ocm install [--dir <path>] [--force] [--no-link]
+ocm link [--url <url>] [--password <pw>] [--username <name>] [--name <name>]
+         [--pair-host <host>] [--pair-port <port>] [--ttl <seconds>] [--no-qr]
 ocm logout
 ocm --version
 ocm --help
@@ -154,6 +156,38 @@ repos sharing the same OpenCode project id. When that happens, `ocm push` and
 repos matching the current project (the command fails clearly otherwise), and
 any ambiguity message lists each match with its id, kind (repo or worktree),
 branch, and path. The default attach reports the same details.
+
+## Link a raw OpenCode server
+
+Run `ocm link` on a machine that hosts a bare `opencode serve` to pair it with
+OpenCode Manager without copying the password by hand:
+
+```bash
+OPENCODE_SERVER_PASSWORD=... ocm link
+```
+
+It prints a terminal QR code and an `ocm://link` URL. Scanning or pasting that
+into the Manager adds the server with its name, base URL, username, and
+password.
+
+| Flag | Default |
+|---|---|
+| `--url <url>` | `$OPENCODE_SERVER_URL`, else `http://<first non-internal IPv4>:4096` |
+| `--password <pw>` | `$OPENCODE_SERVER_PASSWORD` (required) |
+| `--username <name>` | `$OPENCODE_SERVER_USERNAME`, else `opencode` |
+| `--name <name>` | the machine hostname |
+| `--pair-host <host>` | the host of `--url` |
+| `--pair-port <port>` | `0` (ephemeral) |
+| `--ttl <seconds>` | `300` |
+| `--no-qr` | off; print only the link |
+
+Before showing the code it calls `GET <url>/api/info` with Basic auth and warns
+when the server is unreachable; a `401` stops the command. The command then
+listens on `0.0.0.0` for one `POST /redeem` carrying the pairing code, answers
+it with the credentials, prints `Linked`, and exits. A wrong code returns `401`
+and the third failure ends the command; the TTL ends it with
+`Pairing code expired`. The pairing listener is plain HTTP, so run it only on a
+private network.
 
 ## OpenCode TUI plugin
 

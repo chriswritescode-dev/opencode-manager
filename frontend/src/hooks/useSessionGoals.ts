@@ -13,10 +13,11 @@ function sessionGoalQueryKey(sessionId: string) {
   return ['session-goal', sessionId] as const
 }
 
-export function useSessionGoal(sessionId: string) {
+export function useSessionGoal(sessionId: string, options: { enabled?: boolean } = {}) {
   return useQuery({
     queryKey: sessionGoalQueryKey(sessionId),
     queryFn: () => getLatestSessionGoal(sessionId),
+    enabled: options.enabled ?? true,
     refetchInterval: (query) => (query.state.data?.status === 'active' ? SESSION_GOAL_POLL_INTERVAL_MS : false),
   })
 }

@@ -126,6 +126,7 @@ const sseAggregatorMock = vi.hoisted(() => ({
   setPendingActionsFetcher: vi.fn(),
   setPasswordResolver: vi.fn(),
   setScheduledSessionsResolver: vi.fn(),
+  setRemoteReplayHandler: vi.fn(),
   start: vi.fn(),
   shutdown: vi.fn(),
   reconnect: vi.fn(),

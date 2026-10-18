@@ -3,7 +3,9 @@ import { skipToken, useQuery } from '@tanstack/react-query'
 import { findModelInfo } from '@opencode-manager/shared/opencode'
 import type { SessionMessageInfo } from '@opencode-manager/shared/opencode'
 import { useProviders } from '@/hooks/useProviders'
+import { useOpenCodeServerId } from '@/contexts/OpenCodeServerContext'
 import { sessionTranscriptQueryKey } from '@/lib/queryInvalidation'
+import { serverScopedKey } from '@/lib/serverScope'
 import type { TranscriptCache } from '@/lib/session-projection'
 
 export interface ContextUsage {
@@ -37,8 +39,9 @@ export const useContextUsage = (
   directory?: string,
   revertMessageID?: string,
 ): ContextUsageResult => {
+  const serverId = useOpenCodeServerId()
   const transcriptQuery = useQuery<TranscriptCache>({
-    queryKey: sessionTranscriptQueryKey(sessionID ?? ''),
+    queryKey: serverScopedKey(sessionTranscriptQueryKey(sessionID ?? ''), serverId),
     queryFn: skipToken,
   })
   const transcriptData = transcriptQuery.data

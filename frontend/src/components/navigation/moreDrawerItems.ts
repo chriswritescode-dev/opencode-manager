@@ -55,6 +55,25 @@ export function isSessionDetailPath(pathname: string): boolean {
 
 const NON_TOOL_ITEM_KEYS = new Set(['home', 'settings', 'logout'])
 
+const MANAGER_ONLY_ITEM_KEYS: ReadonlySet<string> = new Set([
+  'files',
+  'source-control',
+  'terminal',
+  'preview',
+  'walkthrough',
+  'actions',
+  'mcp',
+  'skills',
+  'reset-permissions',
+  'schedules',
+  'all-schedules',
+])
+
+/** True for an item that opens a Manager feature a linked OpenCode server cannot serve. */
+export function isManagerOnlyNavItem(item: MoreDrawerItem): boolean {
+  return MANAGER_ONLY_ITEM_KEYS.has(item.key)
+}
+
 /** Route-scoped tool items, shown in the desktop tool rail instead of the sidebar. */
 export function buildToolItems(pathname: string): MoreDrawerItem[] {
   const routeItems = buildNavModel(pathname).items.filter((item) => !NON_TOOL_ITEM_KEYS.has(item.key))

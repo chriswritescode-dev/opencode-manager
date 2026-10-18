@@ -67,6 +67,34 @@ describe('OpenCodeEventStream', () => {
     expect(onEvent).toHaveBeenNthCalledWith(2, { type: 'credential.updated', data: {} })
   })
 
+  it('copies the envelope server id onto remote events only', () => {
+    const transport = new TestEventStreamTransport()
+    const stream = new OpenCodeEventStream({ transport })
+    const onEvent = vi.fn()
+
+    stream.subscribeGlobalMonitor({ directories: ['/repo'], onEvent })
+    transport.openConnection()
+    transport.connected()
+    transport.message({
+      directory: '/repo',
+      serverId: 'srv_abc',
+      payload: { type: 'session.created', data: { sessionID: 'session-1' } },
+    })
+    transport.message({ directory: '/repo', payload: { type: 'session.idle', data: { sessionID: 'session-1' } } })
+
+    expect(onEvent).toHaveBeenNthCalledWith(1, {
+      type: 'session.created',
+      data: { sessionID: 'session-1' },
+      directory: '/repo',
+      serverId: 'srv_abc',
+    })
+    expect(onEvent).toHaveBeenNthCalledWith(2, {
+      type: 'session.idle',
+      data: { sessionID: 'session-1' },
+      directory: '/repo',
+    })
+  })
+
   it('publishes health through monitor output', () => {
     const transport = new TestEventStreamTransport()
     const stream = new OpenCodeEventStream({ transport })

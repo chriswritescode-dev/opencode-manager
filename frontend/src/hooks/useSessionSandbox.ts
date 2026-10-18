@@ -8,10 +8,11 @@ function sessionSandboxQueryKey(sessionId: string) {
   return ['session-sandbox', sessionId] as const
 }
 
-export function useSessionSandbox(sessionId: string) {
+export function useSessionSandbox(sessionId: string, options: { enabled?: boolean } = {}) {
   return useQuery({
     queryKey: sessionSandboxQueryKey(sessionId),
     queryFn: () => getSessionSandbox(sessionId),
+    enabled: options.enabled ?? true,
     staleTime: 30000,
   })
 }

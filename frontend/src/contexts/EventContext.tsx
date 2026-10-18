@@ -14,12 +14,14 @@ import {
 } from '@/api/opencode'
 import { listRepos } from '@/api/repos'
 import { FetchError } from '@opencode-manager/shared'
+import { LOCAL_OPENCODE_SERVER_ID, parseServerDirectoryKey } from '@opencode-manager/shared/schemas'
+import { isLocalOpenCodeServer } from '@/contexts/OpenCodeServerContext'
 import type { FormAnswer, FormInfo, PermissionRequest, V2Event } from '@opencode-manager/shared/opencode'
 import type { PermissionResponse, SSHHostKeyRequest, Repo } from '@/api/types'
 import { showToast } from '@/lib/toast'
 import { openCodeEventStream, type EventStreamHealthState } from '@/lib/opencode-event-stream'
 import { addToSessionKeyedState, removeFromSessionKeyedState } from '@/lib/sessionKeyedState'
-import { getSessionPath, parseRepoRoute } from '@/lib/navigation'
+import { getServerSessionPath, getSessionPath, parseRepoRoute, parseServerSessionRoute } from '@/lib/navigation'
 import { repoMatchesDirectory } from '@/components/navigation/sidebar-session-tree'
 import { changeWalkthroughQueryKey } from '@/hooks/useChangeWalkthrough'
 import { busyStatusesFromActiveSessions, useSessionStatus } from '@/stores/sessionStatusStore'
@@ -40,10 +42,15 @@ const LOCATION_CATALOG_QUERY_KEYS = [
   ['opencode', 'providers'],
 ] as const
 
-type PermissionsBySession = Record<string, PermissionRequest[]>
-type FormsBySession = Record<string, FormInfo[]>
+type ServerScoped<T> = T & { serverId: string }
+export type PendingPermission = ServerScoped<PermissionRequest>
+export type PendingForm = ServerScoped<FormInfo>
+type PermissionsBySession = Record<string, PendingPermission[]>
+type FormsBySession = Record<string, PendingForm[]>
 type SSEHealthState = Pick<EventStreamHealthState, 'isConnected' | 'isHealthy' | 'isStalled'>
-type StreamEvent = (V2Event & { directory?: string }) | { type: 'ssh.host-key-request'; properties: SSHHostKeyRequest }
+type StreamEvent =
+  | (V2Event & { directory?: string; serverId?: string })
+  | { type: 'ssh.host-key-request'; properties: SSHHostKeyRequest }
 
 type SessionScopedItem = { id: string; sessionID: string }
 
@@ -122,9 +129,10 @@ function usePinnedViewedItem<T extends SessionScopedItem>(
   return selected
 }
 
-function reconcileBySessionForDirectory<T extends SessionScopedItem>(
+function reconcileBySessionForDirectory<T extends SessionScopedItem & { serverId: string }>(
   prev: Record<string, T[]>,
   directory: string,
+  serverId: string,
   items: T[],
   sessionDirectories: ReadonlyMap<string, string>,
 ): Record<string, T[]> {
@@ -133,7 +141,8 @@ function reconcileBySessionForDirectory<T extends SessionScopedItem>(
 
   for (const sessionID of Object.keys(prev)) {
     if (grouped[sessionID]) continue
-    if (sessionDirectories.get(sessionID) === directory) {
+    if (sessionDirectories.get(sessionID) !== directory) continue
+    if ((prev[sessionID]?.[0]?.serverId ?? LOCAL_OPENCODE_SERVER_ID) === serverId) {
       delete next[sessionID]
     }
   }
@@ -153,7 +162,7 @@ interface SSHHostKeyState {
 interface EventContextValue {
   sshHostKey: SSHHostKeyState
   permissions: {
-    current: PermissionRequest | null
+    current: PendingPermission | null
     pendingCount: number
     /**
      * Ids of sessions with at least one pending permission request, stable while the queue is unchanged.
@@ -189,10 +198,10 @@ interface EventContextValue {
     showDialog: boolean
     setShowDialog: (show: boolean) => void
     navigateToCurrent: () => void
-    syncForSession: (directory: string, sessionID: string) => Promise<void>
+    syncForSession: (directory: string, sessionID: string, serverId?: string) => Promise<void>
   }
   forms: {
-    current: FormInfo | null
+    current: PendingForm | null
     pendingCount: number
     /**
      * Ids of sessions with at least one pending form, stable while the queue is unchanged.
@@ -212,7 +221,7 @@ interface EventContextValue {
     getForSession: (sessionID: string) => FormInfo | null
     hasForSession: (sessionID: string) => boolean
     navigateToCurrent: () => void
-    syncForSession: (directory: string, sessionID: string) => Promise<void>
+    syncForSession: (directory: string, sessionID: string, serverId?: string) => Promise<void>
   }
   sseHealth: SSEHealthState
   getRepoIdForSession: (sessionID: string) => number | null
@@ -314,7 +323,7 @@ export function EventProvider({ children }: { children: React.ReactNode }) {
   const pendingFormSessionIDs = usePendingSessionIDs(formsBySession)
 
   const viewedSessionId = useMemo(
-    () => parseRepoRoute(location.pathname).sessionId,
+    () => parseServerSessionRoute(location.pathname)?.sessionId ?? parseRepoRoute(location.pathname).sessionId,
     [location.pathname],
   )
 
@@ -396,39 +405,59 @@ export function EventProvider({ children }: { children: React.ReactNode }) {
     && currentPermission !== null
     && !isSessionWithinView(currentPermission.sessionID, viewedSessionId, sessionParents)
 
-  const addPermission = useCallback((permission: PermissionRequest) => {
-    addToSessionKeyedState(setPermissionsBySession, permission)
+  const addPermission = useCallback((permission: PermissionRequest, serverId: string) => {
+    addToSessionKeyedState(setPermissionsBySession, { ...permission, serverId })
   }, [])
 
   const removePermission = useCallback((permissionID: string, sessionID?: string) => {
     removeFromSessionKeyedState(setPermissionsBySession, permissionID, sessionID)
   }, [])
 
-  const addForm = useCallback((form: FormInfo) => {
-    addToSessionKeyedState(setFormsBySession, form)
+  const addForm = useCallback((form: FormInfo, serverId: string) => {
+    addToSessionKeyedState(setFormsBySession, { ...form, serverId })
   }, [])
 
   const removeForm = useCallback((formID: string, sessionID?: string) => {
     removeFromSessionKeyedState(setFormsBySession, formID, sessionID)
   }, [])
 
-  const reconcilePermissionsForDirectory = useCallback((directory: string, permissions: PermissionRequest[]) => {
+  const reconcilePermissionsForDirectory = useCallback((
+    directory: string,
+    permissions: PermissionRequest[],
+    serverId: string,
+  ) => {
     permissions.forEach(permission => {
       rememberSessionDirectory(permission.sessionID, directory)
     })
 
     setPermissionsBySession(prev =>
-      reconcileBySessionForDirectory(prev, directory, permissions, useSessionStatus.getState().directories),
+      reconcileBySessionForDirectory(
+        prev,
+        directory,
+        serverId,
+        permissions.map(permission => ({ ...permission, serverId })),
+        useSessionStatus.getState().directories,
+      ),
     )
   }, [rememberSessionDirectory])
 
-  const reconcileFormsForDirectory = useCallback((directory: string, forms: FormInfo[]) => {
+  const reconcileFormsForDirectory = useCallback((
+    directory: string,
+    forms: FormInfo[],
+    serverId: string,
+  ) => {
     forms.forEach(form => {
       rememberSessionDirectory(form.sessionID, directory)
     })
 
     setFormsBySession(prev =>
-      reconcileBySessionForDirectory(prev, directory, forms, useSessionStatus.getState().directories),
+      reconcileBySessionForDirectory(
+        prev,
+        directory,
+        serverId,
+        forms.map(form => ({ ...form, serverId })),
+        useSessionStatus.getState().directories,
+      ),
     )
   }, [rememberSessionDirectory])
 
@@ -452,25 +481,34 @@ export function EventProvider({ children }: { children: React.ReactNode }) {
     response: PermissionResponse,
     message?: string,
   ) => {
+    const permission = allPermissions.find(candidate => candidate.id === permissionID)
     await settlePendingReply(
-      () => replyPermission(sessionID, permissionID, response, message),
+      () => replyPermission(sessionID, permissionID, response, message, permission?.serverId),
       'PermissionNotFoundError',
       'Permission request expired',
     )
     removePermission(permissionID, sessionID)
-  }, [removePermission])
+  }, [allPermissions, removePermission])
 
   const replyToForm = useCallback(async (formID: string, answer: FormAnswer) => {
     const form = Object.values(formsBySession).flat().find(f => f.id === formID)
     if (!form) throw new Error('Form not found')
-    await settlePendingReply(() => replyForm(form.sessionID, formID, answer), 'FormNotFoundError', 'Form expired')
+    await settlePendingReply(
+      () => replyForm(form.sessionID, formID, answer, form.serverId),
+      'FormNotFoundError',
+      'Form expired',
+    )
     removeForm(formID, form.sessionID)
   }, [formsBySession, removeForm])
 
   const cancelPendingForm = useCallback(async (formID: string) => {
     const form = Object.values(formsBySession).flat().find(f => f.id === formID)
     if (!form) throw new Error('Form not found')
-    await settlePendingReply(() => cancelForm(form.sessionID, formID), 'FormNotFoundError', 'Form expired')
+    await settlePendingReply(
+      () => cancelForm(form.sessionID, formID, form.serverId),
+      'FormNotFoundError',
+      'Form expired',
+    )
     removeForm(formID, form.sessionID)
   }, [formsBySession, removeForm])
 
@@ -499,10 +537,15 @@ export function EventProvider({ children }: { children: React.ReactNode }) {
     return (formsBySession[sessionID]?.length ?? 0) > 0
   }, [formsBySession])
 
-  const navigateToSession = useCallback((sessionID: string) => {
-    const repoId = getRepoIdForSession(sessionID)
-    if (repoId === null) return
-    const targetPath = getSessionPath(repoId, sessionID)
+  const navigateToSession = useCallback((sessionID: string, serverId: string) => {
+    let targetPath: string
+    if (isLocalOpenCodeServer(serverId)) {
+      const repoId = getRepoIdForSession(sessionID)
+      if (repoId === null) return
+      targetPath = getSessionPath(repoId, sessionID)
+    } else {
+      targetPath = getServerSessionPath(serverId, sessionID)
+    }
     if (`${window.location.pathname}${window.location.search}` !== targetPath) {
       navigate(targetPath)
     }
@@ -510,23 +553,24 @@ export function EventProvider({ children }: { children: React.ReactNode }) {
 
   const navigateToCurrentForm = useCallback(() => {
     if (!currentForm) return
-    navigateToSession(currentForm.sessionID)
+    navigateToSession(currentForm.sessionID, currentForm.serverId)
   }, [currentForm, navigateToSession])
 
   const navigateToCurrentPermission = useCallback(() => {
     if (!currentPermission) return
-    navigateToSession(currentPermission.sessionID)
+    navigateToSession(currentPermission.sessionID, currentPermission.serverId)
   }, [currentPermission, navigateToSession])
 
   const reconcilePendingActionsForDirectories = useCallback(async (directories: string[]) => {
-    await Promise.all(directories.map(async (directory) => {
+    await Promise.all(directories.map(async (key) => {
+      const { serverId, directory } = parseServerDirectoryKey(key)
       try {
         const [pendingPermissions, pendingForms] = await Promise.all([
-          listPendingPermissions(directory),
-          listPendingForms(directory),
+          listPendingPermissions(directory, serverId),
+          listPendingForms(directory, serverId),
         ])
-        reconcilePermissionsForDirectory(directory, pendingPermissions)
-        reconcileFormsForDirectory(directory, pendingForms)
+        reconcilePermissionsForDirectory(directory, pendingPermissions, serverId)
+        reconcileFormsForDirectory(directory, pendingForms, serverId)
       } catch (error) {
         if (import.meta.env.DEV) {
           console.warn(`Failed to fetch pending actions for ${directory}:`, error)
@@ -546,7 +590,10 @@ export function EventProvider({ children }: { children: React.ReactNode }) {
     return [...directories]
   }, [])
 
-  const resolveSessionAncestry = useCallback(async (sessionIDs: string[]) => {
+  const resolveSessionAncestry = useCallback(async (
+    sessionIDs: string[],
+    serverId: string = LOCAL_OPENCODE_SERVER_ID,
+  ) => {
     const resolveUp = async (startID: string): Promise<void> => {
       let currentID: string | null = startID
       const visited = new Set<string>()
@@ -564,7 +611,7 @@ export function EventProvider({ children }: { children: React.ReactNode }) {
         const lookupID = currentID
         ancestryInFlightRef.current.add(lookupID)
         try {
-          const session = await getSession(lookupID)
+          const session = await getSession(lookupID, serverId)
           useSessionStatus.getState().setSessionParent(lookupID, session.parentID ?? null)
           useSessionStatus.getState().setSessionDirectory(lookupID, session.location.directory)
           currentID = session.parentID ?? null
@@ -583,17 +630,18 @@ export function EventProvider({ children }: { children: React.ReactNode }) {
   }, [])
 
   const syncRunningShells = useCallback(async (directories: string[]) => {
-    await Promise.all(directories.map(async (directory) => {
+    await Promise.all(directories.map(async (key) => {
+      const { serverId, directory } = parseServerDirectoryKey(key)
       const token = useSessionStatus.getState().beginShellSnapshot()
       try {
-        const shells = await listShells(directory)
+        const shells = await listShells(directory, serverId)
         const runningShells = shells.flatMap((shell) => {
           const sessionID = shell.metadata.sessionID
           if (shell.status !== 'running' || typeof sessionID !== 'string') return []
           return [{ id: shell.id, sessionID }]
         })
         useSessionStatus.getState().replaceRunningShells(directory, runningShells, token)
-        await resolveSessionAncestry(runningShells.map((shell) => shell.sessionID))
+        await resolveSessionAncestry(runningShells.map((shell) => shell.sessionID), serverId)
       } catch (error) {
         useSessionStatus.getState().endShellSnapshot(token)
         if (import.meta.env.DEV) {
@@ -657,16 +705,24 @@ export function EventProvider({ children }: { children: React.ReactNode }) {
     }, STATUS_POLL_INTERVAL_MS)
   }, [fetchInitialSessionStatuses, stopStatusPoll])
 
-  const syncPermissionsForSession = useCallback(async (directory: string, sessionID: string) => {
-    const pendingPermissions = await listPendingPermissions(directory)
+  const syncPermissionsForSession = useCallback(async (
+    directory: string,
+    sessionID: string,
+    serverId: string = LOCAL_OPENCODE_SERVER_ID,
+  ) => {
+    const pendingPermissions = await listPendingPermissions(directory, serverId)
     rememberSessionDirectory(sessionID, directory)
-    reconcilePermissionsForDirectory(directory, pendingPermissions)
+    reconcilePermissionsForDirectory(directory, pendingPermissions, serverId)
   }, [rememberSessionDirectory, reconcilePermissionsForDirectory])
 
-  const syncFormsForSession = useCallback(async (directory: string, sessionID: string) => {
-    const pendingForms = await listPendingForms(directory)
+  const syncFormsForSession = useCallback(async (
+    directory: string,
+    sessionID: string,
+    serverId: string = LOCAL_OPENCODE_SERVER_ID,
+  ) => {
+    const pendingForms = await listPendingForms(directory, serverId)
     rememberSessionDirectory(sessionID, directory)
-    reconcileFormsForDirectory(directory, pendingForms)
+    reconcileFormsForDirectory(directory, pendingForms, serverId)
   }, [rememberSessionDirectory, reconcileFormsForDirectory])
 
   useEffect(() => {
@@ -674,14 +730,15 @@ export function EventProvider({ children }: { children: React.ReactNode }) {
       if (!data || typeof data !== 'object' || !('type' in data)) return
       
       const event = data as StreamEvent
+      const serverId = (event as { serverId?: string }).serverId ?? LOCAL_OPENCODE_SERVER_ID
 
       switch (event.type) {
         case 'permission.asked': {
           const request = event.data
           rememberSessionDirectory(request.sessionID, event.directory)
-          addPermission(request)
+          addPermission(request, serverId)
           if (!useSessionStatus.getState().parents.has(request.sessionID)) {
-            void resolveSessionAncestry([request.sessionID])
+            void resolveSessionAncestry([request.sessionID], serverId)
           }
           break
         }
@@ -693,9 +750,9 @@ export function EventProvider({ children }: { children: React.ReactNode }) {
         case 'form.created': {
           const form = event.data.form
           rememberSessionDirectory(form.sessionID, event.directory)
-          addForm(form)
+          addForm(form, serverId)
           if (!useSessionStatus.getState().parents.has(form.sessionID)) {
-            void resolveSessionAncestry([form.sessionID])
+            void resolveSessionAncestry([form.sessionID], serverId)
           }
           break
         }
@@ -775,7 +832,7 @@ export function EventProvider({ children }: { children: React.ReactNode }) {
             useSessionStatus.getState().setShellRunning(info.id, sessionID, event.directory)
             useSessionStatus.getState().setSessionDirectory(sessionID, event.directory)
             if (!useSessionStatus.getState().parents.has(sessionID)) {
-              void resolveSessionAncestry([sessionID])
+              void resolveSessionAncestry([sessionID], serverId)
             }
           }
           break

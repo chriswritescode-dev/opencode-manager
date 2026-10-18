@@ -8,6 +8,7 @@ interface FileReferenceTextProps {
 
 export function FileReferenceText({ text, onFileClick }: FileReferenceTextProps) {
   const parts = useMemo(() => {
+    if (!onFileClick) return text
     const references = detectFileReferences(text)
     if (references.length === 0) return text
 

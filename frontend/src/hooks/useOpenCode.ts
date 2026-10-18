@@ -20,6 +20,9 @@ import {
   type PromptSkillInput,
 } from "../api/opencode";
 import { FetchError } from "../api/fetchWrapper";
+import { LOCAL_OPENCODE_SERVER_ID } from "@opencode-manager/shared/schemas";
+import { useOpenCodeServerId } from "@/contexts/OpenCodeServerContext";
+import { serverScopedKey } from "@/lib/serverScope";
 import type { ModelRef, SessionInfo } from "@opencode-manager/shared/opencode";
 import { isSameModelRef } from "@opencode-manager/shared/opencode";
 import { parseNetworkError, isGatewayTimeout } from "../lib/opencode-errors";
@@ -62,6 +65,7 @@ export const useSessionsAcrossDirectories = (
   directories: string[],
   options?: UseSessionsAcrossDirectoriesOptions,
 ) => {
+  const serverId = useOpenCodeServerId();
   const uniqueDirectories = useMemo(
     () => Array.from(new Set(directories.filter(Boolean))),
     [directories],
@@ -85,12 +89,12 @@ export const useSessionsAcrossDirectories = (
     readonly unknown[],
     SessionListPageParam | undefined
   >({
-    queryKey: [
+    queryKey: serverScopedKey([
       'opencode',
       'sessions',
       directoryKey,
       { search: normalizedSearch, limit, allDirectories, project: projectId, subpath: projectSubpath, includeChildren },
-    ],
+    ], serverId),
     queryFn: async ({ pageParam }) => {
       if (singleCursor) {
         const cursor = pageParam?.mode === 'all' ? pageParam.cursor : undefined;
@@ -104,6 +108,7 @@ export const useSessionsAcrossDirectories = (
                 ...childSessionsParam,
               }
             : { cursor, ...childSessionsParam },
+          serverId,
         );
         return {
           items: page.items,
@@ -114,13 +119,16 @@ export const useSessionsAcrossDirectories = (
       if (!pageParam || pageParam.mode !== 'directories') {
         const pages = await Promise.all(
           uniqueDirectories.map((directory) =>
-            listSessionPage({
-              directory,
-              limit,
-              order: 'desc',
-              search: normalizedSearch,
-              ...childSessionsParam,
-            }),
+            listSessionPage(
+              {
+                directory,
+                limit,
+                order: 'desc',
+                search: normalizedSearch,
+                ...childSessionsParam,
+              },
+              serverId,
+            ),
           ),
         );
         const cursors: SessionDirectoryCursors = {};
@@ -140,7 +148,7 @@ export const useSessionsAcrossDirectories = (
       const entries = Object.entries(pageParam.cursors);
       const pages = await Promise.all(
         entries.map(([directory, cursor]) =>
-          listSessionPage({ directory, cursor, ...childSessionsParam }),
+          listSessionPage({ directory, cursor, ...childSessionsParam }, serverId),
         ),
       );
       const cursors: SessionDirectoryCursors = {};
@@ -193,9 +201,13 @@ export const useSessionsAcrossDirectories = (
 const sessionQueryKey = (sessionID: string | undefined, directory?: string) =>
   ["opencode", "session", sessionID, directory] as const;
 
-export const sessionQueryOptions = (sessionID: string | undefined, directory?: string) => ({
-  queryKey: sessionQueryKey(sessionID, directory),
-  queryFn: () => getSession(sessionID!),
+export const sessionQueryOptions = (
+  sessionID: string | undefined,
+  directory?: string,
+  serverId: string = LOCAL_OPENCODE_SERVER_ID,
+) => ({
+  queryKey: serverScopedKey(sessionQueryKey(sessionID, directory), serverId),
+  queryFn: () => getSession(sessionID!, serverId),
   enabled: !!sessionID,
   refetchOnWindowFocus: true,
   refetchOnReconnect: true,
@@ -205,17 +217,19 @@ export const sessionQueryOptions = (sessionID: string | undefined, directory?: s
 });
 
 export const useSession = (sessionID: string | undefined, directory?: string) => {
-  return useQuery(sessionQueryOptions(sessionID, directory));
+  const serverId = useOpenCodeServerId();
+  return useQuery(sessionQueryOptions(sessionID, directory, serverId));
 };
 
 export const useChildSessionReconciliation = (sessionID: string | undefined) => {
+  const serverId = useOpenCodeServerId()
   const lifecycle = useChildLifecycleForSession(sessionID)
   useQuery({
-    queryKey: childSessionReconciliationQueryKey(sessionID),
+    queryKey: serverScopedKey(childSessionReconciliationQueryKey(sessionID), serverId),
     queryFn: async () => {
       const token = useSessionStatus.getState().beginStatusSnapshot();
       try {
-        const session = await getSession(sessionID!);
+        const session = await getSession(sessionID!, serverId);
         useSessionStatus.getState().applySessionSnapshot(sessionID!, session, token);
         return session;
       } finally {
@@ -233,6 +247,7 @@ export const useCreateSession = (
   directory?: string,
   onSuccess?: (session: { id: string }) => void,
 ) => {
+  const serverId = useOpenCodeServerId();
   const queryClient = useQueryClient();
 
   return useMutation({
@@ -246,7 +261,7 @@ export const useCreateSession = (
       if (!targetDirectory) {
         throw new Error('A directory is required to create a session');
       }
-      return createSession({ ...data, directory: targetDirectory });
+      return createSession({ ...data, directory: targetDirectory }, serverId);
     },
     onSuccess: (session) => {
       invalidateSessionListCaches(queryClient);
@@ -274,6 +289,7 @@ const getDeleteSessionTargetKey = (target: DeleteSessionTarget, fallbackDirector
   buildSessionKey(getDeleteSessionTargetDirectory(target, fallbackDirectory), getDeleteSessionTargetId(target));
 
 export const useDeleteSession = (directory?: string | string[]) => {
+  const serverId = useOpenCodeServerId();
   const queryClient = useQueryClient();
   const directories = useMemo(
     () => (Array.isArray(directory) ? directory : directory ? [directory] : []),
@@ -295,7 +311,7 @@ export const useDeleteSession = (directory?: string | string[]) => {
       const results: PromiseSettledResult<void>[] = []
       for (const target of targets) {
         try {
-          await deleteSession(getDeleteSessionTargetId(target))
+          await deleteSession(getDeleteSessionTargetId(target), serverId)
           results.push({ status: 'fulfilled', value: undefined })
         } catch (reason) {
           results.push({ status: 'rejected', reason })
@@ -369,15 +385,16 @@ const cleanupSessionPins = (
 };
 
 export const useUpdateSession = (directory?: string) => {
+  const serverId = useOpenCodeServerId();
   const queryClient = useQueryClient();
 
   return useMutation({
     mutationFn: async ({ sessionID, title }: { sessionID: string; title: string }) => {
-      return renameSession(sessionID, title);
+      return renameSession(sessionID, title, serverId);
     },
     onSuccess: (_, variables) => {
       const { sessionID } = variables;
-      queryClient.invalidateQueries({ queryKey: sessionQueryKey(sessionID, directory) });
+      queryClient.invalidateQueries({ queryKey: serverScopedKey(sessionQueryKey(sessionID, directory), serverId) });
       invalidateSessionListCaches(queryClient);
     },
   });
@@ -388,13 +405,15 @@ const patchCachedSessionSelection = (
   sessionID: string,
   directory: string | undefined,
   patch: Partial<Pick<SessionInfo, 'model' | 'agent'>>,
+  serverId?: string,
 ) => {
-  queryClient.setQueryData<SessionInfo>(sessionQueryKey(sessionID, directory), (current) =>
+  queryClient.setQueryData<SessionInfo>(serverScopedKey(sessionQueryKey(sessionID, directory), serverId), (current) =>
     current ? { ...current, ...patch } : current,
   );
 };
 
 export const useSyncSessionSelection = (directory?: string) => {
+  const serverId = useOpenCodeServerId();
   const queryClient = useQueryClient();
 
   return useCallback(
@@ -408,26 +427,27 @@ export const useSyncSessionSelection = (directory?: string) => {
       agent?: string;
     }) => {
       const session = queryClient.getQueryData<SessionInfo>(
-        sessionQueryKey(sessionID, directory),
+        serverScopedKey(sessionQueryKey(sessionID, directory), serverId),
       );
 
       let agentChanged = false;
       if (agent && agent !== session?.agent) {
-        await switchSessionAgent(sessionID, agent);
-        patchCachedSessionSelection(queryClient, sessionID, directory, { agent });
+        await switchSessionAgent(sessionID, agent, serverId);
+        patchCachedSessionSelection(queryClient, sessionID, directory, { agent }, serverId);
         agentChanged = true;
       }
 
       if (model && (agentChanged || !isSameModelRef(model, session?.model))) {
-        await switchSessionModel(sessionID, model);
-        patchCachedSessionSelection(queryClient, sessionID, directory, { model });
+        await switchSessionModel(sessionID, model, serverId);
+        patchCachedSessionSelection(queryClient, sessionID, directory, { model }, serverId);
       }
     },
-    [queryClient, directory],
+    [queryClient, directory, serverId],
   );
 };
 
 export const useSendPrompt = (directory?: string) => {
+  const serverId = useOpenCodeServerId();
   const queryClient = useQueryClient();
   const syncSelection = useSyncSessionSelection(directory);
 
@@ -455,10 +475,10 @@ export const useSendPrompt = (directory?: string) => {
 
       await syncSelection({ sessionID, model, agent });
 
-      const inbox = await sendPrompt({ sessionID, text, files, agents, skills, delivery });
+      const inbox = await sendPrompt({ sessionID, text, files, agents, skills, delivery }, serverId);
 
       queryClient.setQueryData<TranscriptCache>(
-        sessionTranscriptQueryKey(sessionID),
+        serverScopedKey(sessionTranscriptQueryKey(sessionID), serverId),
         (current) => {
           if (!current) return current;
           if (current.transcript.messages.some((message) => message.id === inbox.id)) {
@@ -497,8 +517,9 @@ export const useSendPrompt = (directory?: string) => {
 };
 
 export const useBackgroundSession = () => {
+  const serverId = useOpenCodeServerId();
   return useMutation({
-    mutationFn: (sessionID: string) => backgroundSession(sessionID),
+    mutationFn: (sessionID: string) => backgroundSession(sessionID, serverId),
     onError: (error) => {
       showToast.error(error instanceof Error ? error.message : "Failed to move work to the background");
     },
@@ -509,6 +530,7 @@ const ABORT_RETRY_INTERVAL_MS = 3000;
 const MAX_ABORT_RETRIES = 10;
 
 export const useInterruptSession = () => {
+  const serverId = useOpenCodeServerId();
   const retryIntervalRef = useRef<ReturnType<typeof setInterval> | null>(null);
   const retryCountRef = useRef(0);
 
@@ -530,7 +552,7 @@ export const useInterruptSession = () => {
 
       const attemptAbort = async () => {
         try {
-          await interruptSession(targetSessionID);
+          await interruptSession(targetSessionID, serverId);
           stopRetrying();
         } catch {
           // Will retry on next interval
@@ -563,6 +585,7 @@ export const useInterruptSession = () => {
 };
 
 export const useSendShell = (directory?: string) => {
+  const serverId = useOpenCodeServerId();
   const queryClient = useQueryClient();
 
   return useMutation({
@@ -573,40 +596,43 @@ export const useSendShell = (directory?: string) => {
       sessionID: string;
       command: string;
     }) => {
-      return runShell(sessionID, command);
+      return runShell(sessionID, command, serverId);
     },
     onSuccess: (_data, variables) => {
       const { sessionID } = variables;
 
       queryClient.invalidateQueries({
-        queryKey: sessionQueryKey(sessionID, directory),
+        queryKey: serverScopedKey(sessionQueryKey(sessionID, directory), serverId),
       });
     },
   });
 };
 
 export const useAgents = (directory?: string, options?: { enabled?: boolean }) => {
+  const serverId = useOpenCodeServerId();
   return useQuery({
-    queryKey: ["opencode", "agents", directory],
-    queryFn: () => listAgents(directory),
+    queryKey: serverScopedKey(["opencode", "agents", directory], serverId),
+    queryFn: () => listAgents(directory, serverId),
     enabled: options?.enabled ?? true,
   });
 };
 
 export const useSkills = (directory?: string, options?: { enabled?: boolean }) => {
+  const serverId = useOpenCodeServerId();
   return useQuery({
-    queryKey: ["opencode", "skills", directory],
-    queryFn: () => listSkills(directory),
+    queryKey: serverScopedKey(["opencode", "skills", directory], serverId),
+    queryFn: () => listSkills(directory, serverId),
     enabled: options?.enabled ?? true,
   });
 };
 
 export const useLoadSkill = (sessionID: string | undefined) => {
+  const serverId = useOpenCodeServerId();
   return useMutation<void, Error, { skillName: string }>({
     mutationFn: async ({ skillName }: { skillName: string }) => {
       if (!sessionID) throw new Error("No active session");
 
-      return activateSkill(sessionID, skillName);
+      return activateSkill(sessionID, skillName, serverId);
     },
     onError: (error) => {
       showToast.error(error instanceof Error ? error.message : "Failed to load skill");

@@ -11,6 +11,10 @@ import * as useAuthModule from '@/hooks/useAuth'
 vi.mock('@/hooks/useDesktop')
 vi.mock('@/hooks/useSidebarCollapsed')
 vi.mock('@/hooks/useAuth')
+vi.mock('@/hooks/useOpenCodeServers', () => ({
+  useOpenCodeServers: () => ({ servers: [], isLoading: false }),
+  useOpenCodeServerStatuses: () => ({ statuses: [], statusById: {}, isLoading: false }),
+}))
 vi.mock('@/components/navigation/DesktopSessionTree', () => ({
   DesktopSessionTree: () => <div data-testid="session-tree" />,
 }))
@@ -244,6 +248,20 @@ describe('DesktopSidebar', () => {
     expect(screen.getByText('Home')).toBeInTheDocument()
     expect(screen.getByText('Settings')).toBeInTheDocument()
     expect(screen.getByText('Logout')).toBeInTheDocument()
+  })
+
+  it('hides the Servers group when no linked servers exist', () => {
+    vi.spyOn(useDesktopModule, 'useDesktop').mockReturnValue(true)
+    vi.spyOn(useSidebarCollapsedModule, 'useSidebarCollapsed').mockReturnValue([false, vi.fn()])
+    vi.spyOn(useAuthModule, 'useAuth').mockReturnValue({
+      isAuthenticated: true,
+      isLoading: false,
+      logout: vi.fn(),
+    } as any)
+
+    render(<DesktopSidebar />, { wrapper: createWrapper(['/']) })
+
+    expect(screen.queryByText('Servers')).toBeNull()
   })
   it('renders home, repos and account items and no session tree when collapsed', () => {
     vi.spyOn(useDesktopModule, 'useDesktop').mockReturnValue(true)

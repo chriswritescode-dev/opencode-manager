@@ -4,17 +4,19 @@ import { FileBrowserSheet } from '@/components/file-browser/FileBrowserSheet'
 import { RepoQuickSwitchSheet } from '@/components/navigation/RepoQuickSwitchSheet'
 import { NotificationsSheet } from '@/components/navigation/NotificationsSheet'
 import { MoreDrawer } from '@/components/navigation/MoreDrawer'
+import { isLocalOpenCodeServer, useRouteOpenCodeServerId } from '@/contexts/OpenCodeServerContext'
 
 export function MobileSheetHost() {
   const isMobile = useMobile()
   const { openSheet, close } = useMobileTabBar()
+  const isRemoteRoute = !isLocalOpenCodeServer(useRouteOpenCodeServerId())
 
   if (!isMobile) return null
 
   return (
     <>
       <RepoQuickSwitchSheet isOpen={openSheet === 'repos'} onClose={close} />
-      {openSheet === 'files' && (
+      {openSheet === 'files' && !isRemoteRoute && (
         <FileBrowserSheet
           isOpen
           onClose={close}

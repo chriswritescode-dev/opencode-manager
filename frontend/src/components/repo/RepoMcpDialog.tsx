@@ -4,6 +4,7 @@ import { RepoMcpServerList } from './RepoMcpServerList'
 import { DeleteDialog } from '@/components/ui/delete-dialog'
 import { McpOAuthDialog } from '@/components/settings/McpOAuthDialog'
 import { mcpApi, type McpStatus, type McpAuthStartResponse } from '@/api/mcp'
+import { useOpenCodeServerId } from '@/contexts/OpenCodeServerContext'
 import { useMutation, useQueryClient } from '@tanstack/react-query'
 import { invalidateSessionCaches } from '@/lib/queryInvalidation'
 import { showToast } from '@/lib/toast'
@@ -21,6 +22,7 @@ interface RepoMcpContentProps {
 }
 
 export function RepoMcpContent({ open, directory }: RepoMcpContentProps) {
+  const openCodeServerId = useOpenCodeServerId()
   const queryClient = useQueryClient()
   const [localStatus, setLocalStatus] = useState<Record<string, McpStatus>>({})
   const [isLoadingStatus, setIsLoadingStatus] = useState(false)
@@ -33,19 +35,19 @@ export function RepoMcpContent({ open, directory }: RepoMcpContentProps) {
   const fetchStatus = useCallback(async () => {
     setIsLoadingStatus(true)
     try {
-      setLocalStatus(await mcpApi.getStatus(directory))
+      setLocalStatus(await mcpApi.getStatus(directory, openCodeServerId))
       setHasFetchedStatus(true)
     } finally {
       setIsLoadingStatus(false)
     }
-  }, [directory])
+  }, [directory, openCodeServerId])
 
   const toggleMutation = useMutation({
     mutationFn: async ({ serverId, enable }: { serverId: string; enable: boolean }) => {
       if (enable) {
-        await mcpApi.connect(serverId, directory)
+        await mcpApi.connect(serverId, directory, openCodeServerId)
       } else {
-        await mcpApi.disconnect(serverId, directory)
+        await mcpApi.disconnect(serverId, directory, openCodeServerId)
       }
     },
     onSuccess: async () => {
@@ -80,7 +82,7 @@ export function RepoMcpContent({ open, directory }: RepoMcpContentProps) {
 
   const handleOAuthCheckStatus = async (): Promise<boolean> => {
     if (!authDialogServerId) return false
-    const status = await mcpApi.getStatus(directory)
+    const status = await mcpApi.getStatus(directory, openCodeServerId)
     if (status[authDialogServerId]?.status === 'connected') {
       setLocalStatus(status)
       return true

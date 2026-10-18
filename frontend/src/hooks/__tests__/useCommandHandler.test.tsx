@@ -113,7 +113,7 @@ describe('useCommandHandler', () => {
       sessionID: 'test-session-id',
       name: 'export',
       text: '',
-    })
+    }, 'local')
     expect(actions.exportSession).not.toHaveBeenCalled()
   })
 
@@ -166,7 +166,7 @@ describe('useCommandHandler', () => {
       sessionID: 'test-session-id',
       name: 'review',
       text: '',
-    })
+    }, 'local')
   })
 
   it('unknown command runs the V2 command with the parsed payload', async () => {
@@ -186,7 +186,7 @@ describe('useCommandHandler', () => {
       files,
       agents,
       skills,
-    })
+    }, 'local')
   })
 
   it('switches model and agent before running the command when the selection changed', async () => {
@@ -203,8 +203,8 @@ describe('useCommandHandler', () => {
       providerID: 'openai',
       id: 'gpt-4',
       variant: 'v1',
-    })
-    expect(mocks.switchSessionAgent).toHaveBeenCalledWith('test-session-id', 'plan')
+    }, 'local')
+    expect(mocks.switchSessionAgent).toHaveBeenCalledWith('test-session-id', 'plan', 'local')
     expect(mocks.switchSessionModel.mock.invocationCallOrder[0]).toBeLessThan(
       mocks.runCommand.mock.invocationCallOrder[0],
     )

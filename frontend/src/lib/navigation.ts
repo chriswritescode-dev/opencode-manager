@@ -1,4 +1,5 @@
 import { ASSISTANT_REPO_ID, buildSessionPath } from '@opencode-manager/shared/utils';
+import { LOCAL_OPENCODE_SERVER_ID } from '@opencode-manager/shared/schemas';
 
 export function getAssistantPath(): string {
   return '/assistant';
@@ -20,8 +21,25 @@ export function getRepoPath(repoId: number | string): string {
   return isAssistantRepo(repoId) ? getAssistantPath() : `/repos/${repoId}`;
 }
 
-export function getSessionPath(repoId: number | string, sessionId: string, options?: { repoTab?: string }): string {
+export function getSessionPath(repoId: number | string, sessionId: string, options?: { repoTab?: string; serverId?: string }): string {
+  if (options?.serverId && options.serverId !== LOCAL_OPENCODE_SERVER_ID) {
+    return getServerSessionPath(options.serverId, sessionId);
+  }
   return buildSessionPath(repoId, sessionId, options);
+}
+
+export function getServerPath(serverId: string): string {
+  return `/servers/${encodeURIComponent(serverId)}`;
+}
+
+export function getServerSessionPath(serverId: string, sessionId: string): string {
+  return `${getServerPath(serverId)}/sessions/${encodeURIComponent(sessionId)}`;
+}
+
+export function parseServerSessionRoute(pathname: string): { serverId: string; sessionId: string } | null {
+  const match = /^\/servers\/([^/]+)\/sessions\/([^/]+)$/.exec(pathname);
+  if (!match) return null;
+  return { serverId: decodeURIComponent(match[1]), sessionId: decodeURIComponent(match[2]) };
 }
 
 export function parseRepoRoute(pathname: string): { repoId: number | null; section: string | null; sessionId: string | null } {
@@ -72,6 +90,15 @@ export function getReturnToPath(search: string, fallback: string): string {
 }
 
 export function getSwipeBackTarget(pathname: string, search = ''): string | null {
+  const serverSession = parseServerSessionRoute(pathname);
+  if (serverSession) {
+    return getServerPath(serverSession.serverId);
+  }
+
+  if (/^\/servers\/[^/]+$/.test(pathname)) {
+    return '/';
+  }
+
   const sessionDetailRegex = /^\/repos\/([^/]+)\/sessions\/[^/]+$/;
   const match = pathname.match(sessionDetailRegex);
 

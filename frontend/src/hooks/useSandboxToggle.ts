@@ -1,7 +1,7 @@
 import { useSessionSandbox, useSetSessionSandbox } from '@/hooks/useSessionSandbox'
 
-export function useSandboxToggle(sessionID: string) {
-  const { data, isError } = useSessionSandbox(sessionID)
+export function useSandboxToggle(sessionID: string, options: { enabled?: boolean } = {}) {
+  const { data, isError } = useSessionSandbox(sessionID, options)
   const setSandbox = useSetSessionSandbox(sessionID)
 
   const loaded = data !== undefined

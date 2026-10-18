@@ -3,6 +3,8 @@ import { useQuery } from '@tanstack/react-query'
 import { format, startOfDay } from 'date-fns'
 import { MoreHorizontal, Pin, PinOff } from 'lucide-react'
 import { getOpenCodeLocation } from '@/api/opencode'
+import { useOpenCodeServerId } from '@/contexts/OpenCodeServerContext'
+import { serverScopedKey } from '@/lib/serverScope'
 import type { Repo, Session } from '@/api/types'
 import { ACTIVE_WORK_GROUPS, MS_PER_MINUTE, formatActivityEmptyMessage } from '@/lib/activeWork'
 import { Button } from '@/components/ui/button'
@@ -553,9 +555,10 @@ function SessionPickerContent({
     return map
   }, [repos, currentRepo])
 
+  const serverId = useOpenCodeServerId()
   const locationQuery = useQuery({
-    queryKey: ['opencode', 'location', currentRepo?.fullPath],
-    queryFn: () => getOpenCodeLocation(currentRepo!.fullPath),
+    queryKey: serverScopedKey(['opencode', 'location', currentRepo?.fullPath], serverId),
+    queryFn: () => getOpenCodeLocation(currentRepo!.fullPath, serverId),
     enabled: !allProjects && Boolean(currentRepo?.fullPath),
     staleTime: 5 * 60 * 1000,
   })

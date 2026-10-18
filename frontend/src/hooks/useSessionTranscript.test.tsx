@@ -250,7 +250,7 @@ describe('useSessionTranscript', () => {
 
     await waitFor(() => expect(result.current.status).toBe('idle'))
     expect(mocks.readSessionSnapshot).toHaveBeenCalledTimes(2)
-    expect(mocks.readSessionSnapshot).toHaveBeenLastCalledWith(SECOND_SESSION_ID)
+    expect(mocks.readSessionSnapshot).toHaveBeenLastCalledWith(SECOND_SESSION_ID, 'local')
   })
 
   it('refreshes a stale cached transcript when the hook remounts', async () => {
@@ -814,7 +814,7 @@ describe('useSessionTranscript', () => {
     act(() => {
       older = result.current.fetchOlder()
     })
-    expect(mocks.listSessionMessages).toHaveBeenCalledWith(SESSION_ID, { cursor: 'cursor_1' })
+    expect(mocks.listSessionMessages).toHaveBeenCalledWith(SESSION_ID, { cursor: 'cursor_1' }, 'local')
 
     const gapPage: SessionMessageInfo = {
       id: messageID(300),
@@ -861,7 +861,7 @@ describe('useSessionTranscript', () => {
       await result.current.fetchOlder()
     })
 
-    expect(mocks.listSessionMessages).toHaveBeenLastCalledWith(SESSION_ID, { cursor: 'cursor_2' })
+    expect(mocks.listSessionMessages).toHaveBeenLastCalledWith(SESSION_ID, { cursor: 'cursor_2' }, 'local')
   })
 
   it('loads older pages with fetchOlder until the cursor is exhausted', async () => {
@@ -890,7 +890,7 @@ describe('useSessionTranscript', () => {
       await result.current.fetchOlder()
     })
 
-    expect(mocks.listSessionMessages).toHaveBeenLastCalledWith(SESSION_ID, { cursor: 'cursor_1' })
+    expect(mocks.listSessionMessages).toHaveBeenLastCalledWith(SESSION_ID, { cursor: 'cursor_1' }, 'local')
     await waitFor(() => {
       expect(result.current.messages.map((message) => message.id)).toEqual([
         olderMessage.id,
