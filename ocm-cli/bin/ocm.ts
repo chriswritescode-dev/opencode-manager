@@ -135,15 +135,34 @@ function findRepo(repos: ManagerRepo[], needle: string | number): ManagerRepo | 
   return repos.find((r) => r.name === needle) ?? repos.find((r) => r.name.toLowerCase() === needle.toLowerCase())
 }
 
-export async function cmdLogin(args: string[]): Promise<void> {
-  const nameFlag = args.indexOf('--name')
-  const managerName = nameFlag >= 0 ? args[nameFlag + 1] : undefined
-  const positional = nameFlag >= 0 ? [...args.slice(0, nameFlag), ...args.slice(nameFlag + 2)] : args
+const LOGIN_USAGE = 'usage: ocm login <url> [token] [--name <name>]'
+
+function parseLoginArgs(args: string[]): { url: string; token?: string; managerName?: string } {
+  const positional: string[] = []
+  const managerNames: string[] = []
+  for (let index = 0; index < args.length; index++) {
+    const arg = args[index]
+    if (arg === '--name') {
+      const value = args[index + 1]
+      if (!value || value.startsWith('-')) die(LOGIN_USAGE)
+      managerNames.push(value)
+      index++
+      continue
+    }
+    if (arg.startsWith('-')) die(LOGIN_USAGE)
+    positional.push(arg)
+  }
+  if (managerNames.length > 1) die(LOGIN_USAGE)
   const url = positional[0]
-  if (!url || (nameFlag >= 0 && !managerName)) die('usage: ocm login <url> [token] [--name <name>]')
+  if (!url) die(LOGIN_USAGE)
+  return { url, token: positional[1], managerName: managerNames[0] }
+}
+
+export async function cmdLogin(args: string[]): Promise<void> {
+  const { url, token: providedToken, managerName } = parseLoginArgs(args)
   const normalisedUrl = normalizeManagerUrl(url)
 
-  let token = positional[1]
+  let token = providedToken
   if (!token) {
     if (process.stdin.isTTY) {
       process.stderr.write('Paste token (input hidden): ')

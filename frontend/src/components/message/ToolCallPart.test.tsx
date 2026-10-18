@@ -1,5 +1,5 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest'
-import { act, fireEvent, render, screen, waitFor } from '@testing-library/react'
+import { act, fireEvent, render, screen, waitFor, within } from '@testing-library/react'
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
 import { MemoryRouter } from 'react-router-dom'
 import type { PermissionRequest, SessionMessageAssistantTool } from '@opencode-manager/shared/opencode'
@@ -332,7 +332,10 @@ describe('ToolCallPart execute renderer', () => {
 
     expect(screen.getByText('cua-driver.list_windows [app=TextEdit]')).toBeInTheDocument()
     expect(screen.getByText('cua-driver.click [x=10]')).toBeInTheDocument()
-    expect(screen.getByText('✗')).toBeInTheDocument()
+
+    const errorRow = screen.getByRole('button', { name: /cua-driver\.click/ })
+    expect(within(errorRow).getByText('✗')).toBeInTheDocument()
+    expect(screen.getByText(/Failed/)).toBeInTheDocument()
   })
 
   it('renders line-numbered code and output sections when expanded', () => {
@@ -423,7 +426,9 @@ describe('ToolCallPart execute renderer', () => {
     renderWithProviders(<ToolCallPart part={part} messageID="msg_1" onFileClick={onFileClick} />)
 
     fireEvent.click(screen.getByRole('button', { name: /read \[path=src\/app.ts\]/ }))
-    fireEvent.click(screen.getByTitle('Click to open src/app.ts'))
+    const reference = screen.getByRole('button', { name: 'Open src/app.ts' })
+    expect(reference).toHaveAttribute('title', 'Click to open src/app.ts')
+    fireEvent.click(reference)
 
     expect(onFileClick).toHaveBeenCalledWith('src/app.ts')
   })

@@ -20,17 +20,19 @@ export function FileReferenceText({ text, onFileClick }: FileReferenceTextProps)
       }
 
       segments.push(
-        <span
+        <button
           key={`ref-${index}`}
+          type="button"
           onClick={(e) => {
             e.stopPropagation()
             onFileClick?.(ref.filePath)
           }}
-          className="text-primary hover:text-primary-hover cursor-pointer underline decoration-dotted"
+          className="inline p-0 m-0 bg-transparent border-0 font-[inherit] text-left text-primary hover:text-primary-hover cursor-pointer underline decoration-dotted"
           title={`Click to open ${ref.filePath}`}
+          aria-label={`Open ${ref.filePath}`}
         >
           {ref.fullMatch}
-        </span>,
+        </button>,
       )
 
       lastIndex = ref.endIndex

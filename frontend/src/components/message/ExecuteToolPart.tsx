@@ -197,7 +197,9 @@ export function ExecuteToolPart({ part, isWaitingPermission, onFileClick }: Exec
     () => (displayOutput === output ? parseOutput(output) : undefined),
     [displayOutput, output],
   )
-  const failed = part.state.status === 'error' || metadata.error === true
+  const failed = part.state.status === 'error'
+    || metadata.error === true
+    || (part.state.status === 'completed' && calls.some((call) => call.status === 'error'))
   const status = part.state.status
 
   const statusLabel = (() => {
