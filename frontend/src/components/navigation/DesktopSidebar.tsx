@@ -2,6 +2,7 @@ import { useState } from 'react'
 import { useLocation, useNavigate } from 'react-router-dom'
 import { useDesktop } from '@/hooks/useDesktop'
 import { useSidebarCollapsed } from '@/hooks/useSidebarCollapsed'
+import { useSidebarWidth } from '@/hooks/useSidebarWidth'
 import { useAuth } from '@/hooks/useAuth'
 import { useUrlParams } from '@/hooks/useUrlParams'
 import { useOpenNavItem } from '@/hooks/useOpenNavItem'
@@ -23,6 +24,7 @@ export function DesktopSidebar() {
   const { updateParams } = useUrlParams()
   const openNavItem = useOpenNavItem()
   const [collapsed, toggle] = useSidebarCollapsed()
+  const [sidebarWidth, setSidebarWidth] = useSidebarWidth()
   const [repoSwitcherOpen, setRepoSwitcherOpen] = useState(false)
   const { isAuthenticated, isLoading, logout } = useAuth()
 
@@ -62,7 +64,13 @@ export function DesktopSidebar() {
 
   return (
     <>
-      <Sidebar collapsed={collapsed} onToggle={toggle} className='mt-2'>
+      <Sidebar
+        collapsed={collapsed}
+        onToggle={toggle}
+        width={sidebarWidth}
+        onWidthChange={setSidebarWidth}
+        className='mt-2'
+      >
         {primary.length > 0 && (
           <SidebarSection collapsed={collapsed}>
             {primary.map((item: NavPrimaryCta) => (
