@@ -4,7 +4,10 @@ import {
   REMOTE_REPO_ID_ENV,
   buildRemoteAttachEnv,
   readRemoteContext,
+  remoteDisplayName,
 } from '../src/remote-context.js'
+import type { RemoteContext } from '../src/remote-context.js'
+import type { OcmState } from '../src/state.js'
 
 describe('buildRemoteAttachEnv', () => {
   it('round-trips through readRemoteContext', () => {
@@ -76,5 +79,37 @@ describe('readRemoteContext', () => {
     const result = readRemoteContext(env)
 
     expect(result?.repoId).toBe(42)
+  })
+})
+
+describe('remoteDisplayName', () => {
+  const remote: RemoteContext = { managerUrl: 'https://mgr.example.com', managerHost: 'mgr.example.com' }
+
+  it('uses the saved manager name when the state matches the attached manager', () => {
+    const state: OcmState = { managerUrl: 'https://mgr.example.com', managerName: 'work' }
+
+    expect(remoteDisplayName(remote, state)).toBe('work')
+  })
+
+  it('ignores trailing slashes when matching the manager url', () => {
+    const state: OcmState = { managerUrl: 'https://mgr.example.com/', managerName: 'work' }
+
+    expect(remoteDisplayName(remote, state)).toBe('work')
+  })
+
+  it('falls back to the host when the state is for another manager', () => {
+    const state: OcmState = { managerUrl: 'https://other.example.com', managerName: 'work' }
+
+    expect(remoteDisplayName(remote, state)).toBe('mgr.example.com')
+  })
+
+  it('falls back to the host when no name is saved', () => {
+    const state: OcmState = { managerUrl: 'https://mgr.example.com' }
+
+    expect(remoteDisplayName(remote, state)).toBe('mgr.example.com')
+  })
+
+  it('falls back to the host without state', () => {
+    expect(remoteDisplayName(remote, null)).toBe('mgr.example.com')
   })
 })

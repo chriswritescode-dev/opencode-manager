@@ -6,7 +6,8 @@ import { showGoalDialog } from './tui-goal-dialog.js'
 import { showMultiRunLaunchDialog, showMultiRunsDialog } from './tui-multi-run-dialogs.js'
 import { formatMoveProgress } from './move-progress.js'
 import type { MoveProgress } from './move-progress.js'
-import { readRemoteContext } from './remote-context.js'
+import { readRemoteContext, remoteDisplayName } from './remote-context.js'
+import { readState } from './state.js'
 import { createGoalStore } from './goal-store.js'
 import type { GoalStore } from './goal-store.js'
 import { formatGoalStatus, goalOutcomeToast } from './tui-goal.js'
@@ -40,9 +41,10 @@ export default Plugin.define({
 
     const remote = readRemoteContext(process.env)
     if (remote) {
+      const managerLabel = remoteDisplayName(remote, readState())
       const indicator = () => (
         <box flexDirection="row" flexShrink={0} gap={1}>
-          <text fg={context.theme.hue.accent[200]}>{remote.managerHost}</text>
+          <text fg={context.theme.hue.orange?.[400] ?? context.theme.text.feedback.warning.base}>{managerLabel}</text>
           {remote.repoName && <text fg={context.theme.text.muted}> · {remote.repoName}</text>}
         </box>
       )
