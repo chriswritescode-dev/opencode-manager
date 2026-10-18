@@ -3,6 +3,7 @@ import type { FileDiffInfo, SessionMessageAssistantTool } from '@opencode-manage
 import { useSettings } from '@/hooks/useSettings'
 import { DiffStats } from './DiffStats'
 import { CodePreview } from './CodePreview'
+import { ToolContentFiles } from './ToolContentFiles'
 import { ChevronDown, ChevronUp } from 'lucide-react'
 
 function isFileDiff(data: unknown): data is FileDiffInfo {
@@ -121,6 +122,8 @@ function FileToolRender({ part, filediff, filePath, content, toolName, onFileCli
           )}
         </div>
       </button>
+
+      <ToolContentFiles part={part} className="px-3 pb-2 bg-card" />
 
       {expanded && hasExpandableContent && (
         <div className="bg-card p-0">

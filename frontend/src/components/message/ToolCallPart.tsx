@@ -34,6 +34,7 @@ import { getFileApiUrl } from '@/api/files'
 import { ArtifactPart } from './ArtifactPart'
 import { ExecuteToolPart } from './ExecuteToolPart'
 import { FileReferenceText } from './FileReferenceText'
+import { ToolContentFiles } from './ToolContentFiles'
 import type { WalkthroughSource } from '@opencode-manager/shared/schemas'
 
 function BoundedPre({ content, className }: { content: string; className: string }) {
@@ -376,6 +377,8 @@ export const ToolCallPart = memo(function ToolCallPart({ part, messageID, direct
           </Button>
         ) : null}
       </div>
+
+      <ToolContentFiles part={part} className="px-4 py-2 bg-card" />
 
       {expanded && (
         <div className="bg-card space-y-2 p-3">

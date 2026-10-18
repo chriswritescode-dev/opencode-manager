@@ -8,6 +8,7 @@ import { clampDisplayText } from '@/lib/clampDisplayText'
 import { markdownRehypePlugins } from '@/lib/markdownRehypePlugins'
 import { CopyButton } from '@/components/ui/copy-button'
 import { FileReferenceText } from './FileReferenceText'
+import { ToolContentFiles } from './ToolContentFiles'
 
 type ExecuteCallStatus = 'running' | 'completed' | 'error'
 
@@ -264,6 +265,8 @@ export function ExecuteToolPart({ part, isWaitingPermission, onFileClick }: Exec
           ))}
         </div>
       )}
+
+      <ToolContentFiles part={part} className="px-4 pb-2" />
 
       {!expanded && errorPreview.length > 0 && (
         <div className="px-4 pb-2 font-mono text-xs text-destructive">

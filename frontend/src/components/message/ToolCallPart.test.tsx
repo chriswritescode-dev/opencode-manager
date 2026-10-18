@@ -429,6 +429,84 @@ describe('ToolCallPart execute renderer', () => {
   })
 })
 
+describe('ToolCallPart file content', () => {
+  beforeEach(() => {
+    vi.clearAllMocks()
+    mocks.useSettings.mockReturnValue({
+      preferences: { expandToolCalls: false },
+      isLoading: false,
+      updateSettings: vi.fn(),
+      isUpdating: false,
+    })
+    mocks.useToolCallPermission.mockReturnValue(null)
+    useUserBash.setState({ userBashCommands: new Map() })
+  })
+
+  const screenshotUri = 'data:image/png;base64,aGVsbG8='
+
+  it('shows an execute screenshot while collapsed', () => {
+    const part: SessionMessageAssistantTool = {
+      type: 'tool',
+      id: 'call_exec_files',
+      name: 'execute',
+      time: { created: 1, ran: 2, completed: 3 },
+      state: {
+        status: 'completed',
+        input: { code: 'await tools.screenshot()' },
+        content: [
+          { type: 'text', text: 'Captured the window' },
+          { type: 'file', uri: screenshotUri, mime: 'image/png', name: 'screenshot.png' },
+        ],
+        metadata: {},
+      },
+    }
+
+    renderWithProviders(<ToolCallPart part={part} messageID="msg_1" />)
+
+    expect(screen.getByRole('button', { name: /execute/ })).toHaveAttribute('aria-expanded', 'false')
+    expect(screen.getByAltText('screenshot.png')).toHaveAttribute('src', screenshotUri)
+  })
+
+  it('shows a generic tool screenshot while collapsed', () => {
+    const part: SessionMessageAssistantTool = {
+      type: 'tool',
+      id: 'call_screenshot',
+      name: 'screenshot',
+      time: { created: 1, ran: 2, completed: 3 },
+      state: {
+        status: 'completed',
+        input: {},
+        content: [{ type: 'file', uri: screenshotUri, mime: 'image/png', name: 'screenshot.png' }],
+        metadata: {},
+      },
+    }
+
+    renderWithProviders(<ToolCallPart part={part} messageID="msg_1" />)
+
+    expect(screen.getByAltText('screenshot.png')).toHaveAttribute('src', screenshotUri)
+  })
+
+  it('does not render an empty file content wrapper', () => {
+    const part: SessionMessageAssistantTool = {
+      type: 'tool',
+      id: 'call_text_only',
+      name: 'screenshot',
+      time: { created: 1, ran: 2, completed: 3 },
+      state: {
+        status: 'completed',
+        input: {},
+        content: [{ type: 'text', text: 'no files' }],
+        metadata: {},
+      },
+    }
+
+    const { container } = renderWithProviders(<ToolCallPart part={part} messageID="msg_1" />)
+
+    expect(container.querySelector('img')).toBeNull()
+    expect(container.querySelector('.flex-wrap')).toBeNull()
+  })
+})
+
 describe('ToolCallPart open walkthrough action', () => {
   beforeEach(() => {
     vi.clearAllMocks()
