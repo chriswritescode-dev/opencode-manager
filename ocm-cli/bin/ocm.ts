@@ -24,7 +24,8 @@ Usage:
                             project id; inside a git repo with no match, launch
                             local opencode; outside a git repo, use the last
                             selected repo, else launch local opencode
-  ocm login <url> [token]   Save manager URL + token (token via stdin if omitted)
+  ocm login <url> [token] [--name <name>]
+                            Save manager URL + token (token via stdin if omitted)
   ocm logout                Forget saved token and state
   ocm status                Show current manager URL, repo, and whether token is set
   ocm list                  List ready repos from the manager
@@ -134,12 +135,34 @@ function findRepo(repos: ManagerRepo[], needle: string | number): ManagerRepo | 
   return repos.find((r) => r.name === needle) ?? repos.find((r) => r.name.toLowerCase() === needle.toLowerCase())
 }
 
+const LOGIN_USAGE = 'usage: ocm login <url> [token] [--name <name>]'
+
+function parseLoginArgs(args: string[]): { url: string; token?: string; managerName?: string } {
+  const positional: string[] = []
+  const managerNames: string[] = []
+  for (let index = 0; index < args.length; index++) {
+    const arg = args[index]
+    if (arg === '--name') {
+      const value = args[index + 1]
+      if (!value || value.startsWith('-')) die(LOGIN_USAGE)
+      managerNames.push(value)
+      index++
+      continue
+    }
+    if (arg.startsWith('-')) die(LOGIN_USAGE)
+    positional.push(arg)
+  }
+  if (managerNames.length > 1) die(LOGIN_USAGE)
+  const url = positional[0]
+  if (!url) die(LOGIN_USAGE)
+  return { url, token: positional[1], managerName: managerNames[0] }
+}
+
 export async function cmdLogin(args: string[]): Promise<void> {
-  const url = args[0]
-  if (!url) die('usage: ocm login <url> [token]')
+  const { url, token: providedToken, managerName } = parseLoginArgs(args)
   const normalisedUrl = normalizeManagerUrl(url)
 
-  let token = args[1]
+  let token = providedToken
   if (!token) {
     if (process.stdin.isTTY) {
       process.stderr.write('Paste token (input hidden): ')
@@ -167,9 +190,11 @@ export async function cmdLogin(args: string[]): Promise<void> {
   }
 
   const existing = readState()
+  const sameManager = existing ? normalizeManagerUrl(existing.managerUrl) === normalisedUrl : false
   writeState({
     ...existing,
     managerUrl: normalisedUrl,
+    managerName: managerName ?? (sameManager ? existing?.managerName : undefined),
   })
 
   const store = describeTokenWriteTarget()
@@ -229,6 +254,7 @@ export async function cmdStatus(): Promise<void> {
   }
   info(`version:      ${VERSION}`)
   info(`manager url:  ${state.managerUrl}`)
+  if (state.managerName) info(`manager name: ${state.managerName}`)
   info(`token:        ${await describeTokenPresence(state.managerUrl)}`)
   info(`token store:  ${store.kind} (${store.location})`)
   if (state.lastRepoId !== undefined) {

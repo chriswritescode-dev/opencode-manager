@@ -1,3 +1,6 @@
+import type { OcmState } from './state.js'
+import { normalizeManagerUrl } from './manager-auth.js'
+
 export const REMOTE_MANAGER_URL_ENV = 'OCM_REMOTE_MANAGER_URL'
 export const REMOTE_REPO_NAME_ENV = 'OCM_REMOTE_REPO_NAME'
 export const REMOTE_REPO_ID_ENV = 'OCM_REMOTE_REPO_ID'
@@ -36,4 +39,10 @@ export function readRemoteContext(env: NodeJS.ProcessEnv): RemoteContext | undef
   const repoId = Number.isInteger(repoIdValue) && repoIdValue > 0 ? repoIdValue : undefined
 
   return { managerUrl, managerHost, repoName, repoId }
+}
+
+/** Returns the saved manager name when it belongs to the attached manager, else the manager host. */
+export function remoteDisplayName(remote: RemoteContext, state: OcmState | null): string {
+  if (state?.managerName && normalizeManagerUrl(state.managerUrl) === normalizeManagerUrl(remote.managerUrl)) return state.managerName
+  return remote.managerHost
 }

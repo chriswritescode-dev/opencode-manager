@@ -5,6 +5,7 @@ import { readJsonFile, writeJsonFileAtomic } from './json-store.js'
 
 export interface OcmState {
   managerUrl: string
+  managerName?: string
   lastRepoId?: number
   lastRepoName?: string
   lastRepoDir?: string

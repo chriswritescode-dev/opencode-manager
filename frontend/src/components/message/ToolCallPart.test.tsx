@@ -1,5 +1,5 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest'
-import { act, fireEvent, render, screen, waitFor } from '@testing-library/react'
+import { act, fireEvent, render, screen, waitFor, within } from '@testing-library/react'
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
 import { MemoryRouter } from 'react-router-dom'
 import type { PermissionRequest, SessionMessageAssistantTool } from '@opencode-manager/shared/opencode'
@@ -289,6 +289,226 @@ describe('ToolCallPart background indicator', () => {
 
     const badge = screen.getByText('sandbox')
     expect(badge).toHaveAttribute('title', 'Executed inside the sandbox microVM')
+  })
+})
+
+describe('ToolCallPart execute renderer', () => {
+  beforeEach(() => {
+    vi.clearAllMocks()
+    mocks.useSettings.mockReturnValue({
+      preferences: { expandToolCalls: false },
+      isLoading: false,
+      updateSettings: vi.fn(),
+      isUpdating: false,
+    })
+    mocks.useToolCallPermission.mockReturnValue(null)
+  })
+
+  const completedExecute = (
+    metadata: Record<string, unknown>,
+    text = '{"windows":[{"title":"Untitled"}]}',
+  ): SessionMessageAssistantTool => ({
+    type: 'tool',
+    id: 'call_exec',
+    name: 'execute',
+    time: { created: 1, ran: 2, completed: 3 },
+    state: {
+      status: 'completed',
+      input: {
+        code: 'const result = await tools.listWindows({ app: "TextEdit" })\nconsole.log(result)',
+      },
+      content: [{ type: 'text', text }],
+      metadata,
+    },
+  })
+
+  const childCalls = [
+    { tool: 'cua-driver.list_windows', status: 'completed', input: { app: 'TextEdit' } },
+    { tool: 'cua-driver.click', status: 'error', input: { x: 10 } },
+  ]
+
+  it('lists child calls while collapsed and marks errors', () => {
+    renderWithProviders(<ToolCallPart part={completedExecute({ toolCalls: childCalls })} messageID="msg_1" />)
+
+    expect(screen.getByText('cua-driver.list_windows [app=TextEdit]')).toBeInTheDocument()
+    expect(screen.getByText('cua-driver.click [x=10]')).toBeInTheDocument()
+
+    const errorRow = screen.getByRole('button', { name: /cua-driver\.click/ })
+    expect(within(errorRow).getByText('✗')).toBeInTheDocument()
+    expect(screen.getByText(/Failed/)).toBeInTheDocument()
+  })
+
+  it('renders line-numbered code and output sections when expanded', () => {
+    mocks.useSettings.mockReturnValue({
+      preferences: { expandToolCalls: true },
+      isLoading: false,
+      updateSettings: vi.fn(),
+      isUpdating: false,
+    })
+
+    const { container } = renderWithProviders(
+      <ToolCallPart part={completedExecute({ toolCalls: childCalls })} messageID="msg_1" />,
+    )
+
+    expect(screen.getByText('Code')).toBeInTheDocument()
+    expect(screen.getByText('Output')).toBeInTheDocument()
+    expect(container.querySelector('code.language-ts')?.textContent).toContain('const result = await tools.listWindows')
+    expect(container.querySelector('code.language-json')?.textContent).toContain('"windows"')
+
+    const gutters = screen.getAllByTestId('execute-line-numbers')
+    expect(gutters[0].textContent).toBe('1\n2')
+    expect(gutters[1].textContent).toBe('1')
+    expect(gutters[0].style.width).toBe(gutters[1].style.width)
+  })
+
+  it('reports a completed script that failed at runtime', () => {
+    renderWithProviders(
+      <ToolCallPart
+        part={completedExecute({ error: true }, 'Error: tool not found\n    at execute')}
+        messageID="msg_1"
+      />,
+    )
+
+    expect(screen.getByText(/Failed/)).toBeInTheDocument()
+    expect(screen.getByText('↳ Error: tool not found')).toBeInTheDocument()
+    expect(screen.queryByText('Completed')).not.toBeInTheDocument()
+  })
+
+  const runningExecute = (): SessionMessageAssistantTool => ({
+    type: 'tool',
+    id: 'call_exec',
+    name: 'execute',
+    time: { created: 1, ran: 2 },
+    state: {
+      status: 'running',
+      input: { code: 'await tools.listWindows({ app: "TextEdit" })' },
+      metadata: {},
+    },
+  })
+
+  it('shows the waiting permission state while the script awaits permission', () => {
+    mocks.useToolCallPermission.mockReturnValue(
+      permissionFor({ type: 'tool', messageID: 'msg_1', id: 'call_exec' }),
+    )
+
+    renderWithProviders(<ToolCallPart part={runningExecute()} messageID="msg_1" />)
+
+    expect(screen.getByText('awaiting permission')).toBeInTheDocument()
+    expect(screen.queryByText('Running')).not.toBeInTheDocument()
+  })
+
+  it('toggles aria-expanded on the header button', () => {
+    renderWithProviders(<ToolCallPart part={completedExecute({ toolCalls: childCalls })} messageID="msg_1" />)
+
+    const header = screen.getByRole('button', { name: /execute/ })
+    expect(header).toHaveAttribute('aria-expanded', 'false')
+
+    fireEvent.click(header)
+
+    expect(header).toHaveAttribute('aria-expanded', 'true')
+  })
+
+  it('opens a file reference from an expanded child call input', () => {
+    const onFileClick = vi.fn()
+    const part: SessionMessageAssistantTool = {
+      type: 'tool',
+      id: 'call_exec',
+      name: 'execute',
+      time: { created: 1, ran: 2, completed: 3 },
+      state: {
+        status: 'completed',
+        input: { code: 'await tools.read({ path: "src/app.ts" })' },
+        content: [{ type: 'text', text: 'read ok' }],
+        metadata: { toolCalls: [{ tool: 'read', status: 'completed', input: { path: 'src/app.ts' } }] },
+      },
+    }
+
+    renderWithProviders(<ToolCallPart part={part} messageID="msg_1" onFileClick={onFileClick} />)
+
+    fireEvent.click(screen.getByRole('button', { name: /read \[path=src\/app.ts\]/ }))
+    const reference = screen.getByRole('button', { name: 'Open src/app.ts' })
+    expect(reference).toHaveAttribute('title', 'Click to open src/app.ts')
+    fireEvent.click(reference)
+
+    expect(onFileClick).toHaveBeenCalledWith('src/app.ts')
+  })
+})
+
+describe('ToolCallPart file content', () => {
+  beforeEach(() => {
+    vi.clearAllMocks()
+    mocks.useSettings.mockReturnValue({
+      preferences: { expandToolCalls: false },
+      isLoading: false,
+      updateSettings: vi.fn(),
+      isUpdating: false,
+    })
+    mocks.useToolCallPermission.mockReturnValue(null)
+    useUserBash.setState({ userBashCommands: new Map() })
+  })
+
+  const screenshotUri = 'data:image/png;base64,aGVsbG8='
+
+  it('shows an execute screenshot while collapsed', () => {
+    const part: SessionMessageAssistantTool = {
+      type: 'tool',
+      id: 'call_exec_files',
+      name: 'execute',
+      time: { created: 1, ran: 2, completed: 3 },
+      state: {
+        status: 'completed',
+        input: { code: 'await tools.screenshot()' },
+        content: [
+          { type: 'text', text: 'Captured the window' },
+          { type: 'file', uri: screenshotUri, mime: 'image/png', name: 'screenshot.png' },
+        ],
+        metadata: {},
+      },
+    }
+
+    renderWithProviders(<ToolCallPart part={part} messageID="msg_1" />)
+
+    expect(screen.getByRole('button', { name: /execute/ })).toHaveAttribute('aria-expanded', 'false')
+    expect(screen.getByAltText('screenshot.png')).toHaveAttribute('src', screenshotUri)
+  })
+
+  it('shows a generic tool screenshot while collapsed', () => {
+    const part: SessionMessageAssistantTool = {
+      type: 'tool',
+      id: 'call_screenshot',
+      name: 'screenshot',
+      time: { created: 1, ran: 2, completed: 3 },
+      state: {
+        status: 'completed',
+        input: {},
+        content: [{ type: 'file', uri: screenshotUri, mime: 'image/png', name: 'screenshot.png' }],
+        metadata: {},
+      },
+    }
+
+    renderWithProviders(<ToolCallPart part={part} messageID="msg_1" />)
+
+    expect(screen.getByAltText('screenshot.png')).toHaveAttribute('src', screenshotUri)
+  })
+
+  it('does not render an empty file content wrapper', () => {
+    const part: SessionMessageAssistantTool = {
+      type: 'tool',
+      id: 'call_text_only',
+      name: 'screenshot',
+      time: { created: 1, ran: 2, completed: 3 },
+      state: {
+        status: 'completed',
+        input: {},
+        content: [{ type: 'text', text: 'no files' }],
+        metadata: {},
+      },
+    }
+
+    const { container } = renderWithProviders(<ToolCallPart part={part} messageID="msg_1" />)
+
+    expect(container.querySelector('img')).toBeNull()
+    expect(container.querySelector('.flex-wrap')).toBeNull()
   })
 })
 

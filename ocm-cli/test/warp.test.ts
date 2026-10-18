@@ -78,10 +78,14 @@ describe('runPendingWarp', () => {
     takePendingWarp()
   })
 
+  const noExec = () => undefined
+
   it('is a no-op when nothing is pending', () => {
     const spawn = vi.fn()
-    runPendingWarp(spawn)
+    const exec = vi.fn(noExec)
+    runPendingWarp(spawn, exec)
     expect(spawn).not.toHaveBeenCalled()
+    expect(exec).not.toHaveBeenCalled()
   })
 
   it('calls spawn once with the correct args and env', () => {
@@ -89,7 +93,7 @@ describe('runPendingWarp', () => {
     setPendingWarp(sampleWarp)
     const invocation = buildAttachInvocation(sampleTarget)
 
-    runPendingWarp(spawn)
+    runPendingWarp(spawn, noExec)
 
     expect(spawn).toHaveBeenCalledOnce()
     expect(spawn).toHaveBeenCalledWith(
@@ -106,7 +110,7 @@ describe('runPendingWarp', () => {
     const spawn = vi.fn()
     setPendingWarp({ kind: 'local' })
 
-    runPendingWarp(spawn)
+    runPendingWarp(spawn, noExec)
 
     expect(spawn).toHaveBeenCalledWith('opencode', [], { stdio: 'inherit', env: buildLocalInvocation().env })
   })
@@ -115,8 +119,8 @@ describe('runPendingWarp', () => {
     const spawn = vi.fn()
     setPendingWarp(sampleWarp)
 
-    runPendingWarp(spawn)
-    runPendingWarp(spawn)
+    runPendingWarp(spawn, noExec)
+    runPendingWarp(spawn, noExec)
 
     expect(spawn).toHaveBeenCalledOnce()
   })
@@ -125,7 +129,29 @@ describe('runPendingWarp', () => {
     const spawn = vi.fn(() => { throw new Error('spawn failed') })
     setPendingWarp(sampleWarp)
 
-    expect(() => runPendingWarp(spawn)).not.toThrow()
+    expect(() => runPendingWarp(spawn, noExec)).not.toThrow()
     expect(spawn).toHaveBeenCalledOnce()
+  })
+
+  it('tries to exec opencode with the attach invocation before spawning', () => {
+    const spawn = vi.fn()
+    const exec = vi.fn(noExec)
+    setPendingWarp(sampleWarp)
+    const invocation = buildAttachInvocation(sampleTarget)
+
+    runPendingWarp(spawn, exec)
+
+    expect(exec).toHaveBeenCalledOnce()
+    expect(exec).toHaveBeenCalledWith('opencode', ['opencode', ...invocation.args], invocation.env)
+  })
+
+  it('falls back to spawn when exec throws', () => {
+    const spawn = vi.fn()
+    const exec = vi.fn(() => { throw new Error('exec failed') })
+    setPendingWarp(sampleWarp)
+    const invocation = buildAttachInvocation(sampleTarget)
+
+    expect(() => runPendingWarp(spawn, exec)).not.toThrow()
+    expect(spawn).toHaveBeenCalledWith('opencode', invocation.args, { stdio: 'inherit', env: invocation.env })
   })
 })

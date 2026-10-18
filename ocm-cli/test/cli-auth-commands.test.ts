@@ -160,6 +160,46 @@ describe('cli auth commands', () => {
     restore()
   })
 
+  const expectLoginUsageError = async (args: string[]) => {
+    const { cli, stderr, setToken, restore } = await loadCli()
+    const exitSpy = vi.spyOn(process, 'exit').mockImplementation(() => {
+      throw new Error('exit')
+    })
+    await expect(cli.cmdLogin(args)).rejects.toThrow('exit')
+    expect(stderr.join('')).toContain('usage: ocm login <url> [token] [--name <name>]')
+    expect(exitSpy).toHaveBeenCalledWith(1)
+    expect(setToken).not.toHaveBeenCalled()
+    restore()
+  }
+
+  it('ocm login rejects a repeated --name flag without saving a token', async () => {
+    await expectLoginUsageError(['https://manager.example.com', '--name', 'prod', '--name', 'staging'])
+  })
+
+  it('ocm login rejects a --name flag without a value', async () => {
+    await expectLoginUsageError(['https://manager.example.com', 'tok_xyz', '--name'])
+  })
+
+  it('ocm login rejects a --name value that looks like a flag', async () => {
+    await expectLoginUsageError(['https://manager.example.com', '--name', '--force'])
+  })
+
+  it('ocm login rejects an unknown flag', async () => {
+    await expectLoginUsageError(['https://manager.example.com', 'tok_xyz', '--force'])
+  })
+
+  it('ocm login accepts the token before or after --name', async () => {
+    const afterName = await loadCli()
+    await afterName.cli.cmdLogin(['https://manager.example.com', 'tok_xyz', '--name', 'prod'])
+    expect(afterName.setToken).toHaveBeenCalledWith('https://manager.example.com', 'tok_xyz')
+    afterName.restore()
+
+    const beforeName = await loadCli()
+    await beforeName.cli.cmdLogin(['https://manager.example.com', '--name', 'prod', 'tok_xyz'])
+    expect(beforeName.setToken).toHaveBeenCalledWith('https://manager.example.com', 'tok_xyz')
+    beforeName.restore()
+  })
+
   it('ocm logout reports removal', async () => {
     const { cli, written, restore } = await loadCli({ deleteTokenImpl: () => Promise.resolve(true) })
     await cli.cmdLogout()

@@ -55,8 +55,12 @@ directory entries and skips file entries.
 ## Login
 
 ```bash
-ocm login <manager-url> [token]
+ocm login <manager-url> [token] [--name <name>]
 ```
+
+Pass `--name` to label the manager; the attached TUI shows that name instead of
+the manager host. A name is dropped when you log in to a different manager URL
+without `--name`.
 
 The token is stored in a platform-specific token store:
 
@@ -86,7 +90,7 @@ If `[token]` is omitted, `ocm login` reads it from hidden TTY input (requires
 
 ```bash
 ocm
-ocm login <manager-url> [token]
+ocm login <manager-url> [token] [--name <name>]
 ocm status
 ocm list
 ocm use <repoId|name>
