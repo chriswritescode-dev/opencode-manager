@@ -23,6 +23,8 @@ export type WarpSpawn = (
   options: { stdio: 'inherit'; env: NodeJS.ProcessEnv },
 ) => unknown
 
+export type WarpExec = (binary: string, args: string[], env: NodeJS.ProcessEnv) => void
+
 const ATTACH_ENV_KEYS = ['OPENCODE_PASSWORD', REMOTE_MANAGER_URL_ENV, REMOTE_REPO_NAME_ENV, REMOTE_REPO_ID_ENV]
 
 let pending: PendingWarp | undefined
@@ -54,13 +56,25 @@ export function buildLocalInvocation(env: NodeJS.ProcessEnv = process.env): Atta
   }
 }
 
-export function runPendingWarp(spawn: WarpSpawn = spawnSync): void {
+export function runPendingWarp(spawn: WarpSpawn = spawnSync, exec: WarpExec | undefined = defaultExec): void {
   const warp = takePendingWarp()
   if (!warp) return
   try {
     const { args, env } = warp.kind === 'attach' ? buildAttachInvocation(warp.target) : buildLocalInvocation()
+    try {
+      exec?.('opencode', ['opencode', ...args], env)
+    } catch {
+      void 0
+    }
     spawn('opencode', args, { stdio: 'inherit', env })
   } catch {
     void 0
   }
+}
+
+function defaultExec(command: string, args: string[], env: NodeJS.ProcessEnv): void {
+  if (typeof Bun === 'undefined') return
+  const binary = Bun.which(command)
+  if (!binary || typeof process.execve !== 'function') return
+  process.execve(binary, args, env)
 }
