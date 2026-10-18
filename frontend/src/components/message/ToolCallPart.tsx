@@ -7,7 +7,7 @@ import { useChildLifecycleForSession } from '@/stores/sessionStatusStore'
 import { useToolCallPermission } from '@/contexts/EventContext'
 import { useChildSessionReconciliation } from '@/hooks/useOpenCode'
 import { useShell } from '@/hooks/useSessionShells'
-import { detectFileReferences } from '@/lib/fileReferences'
+import { clampDisplayText } from '@/lib/clampDisplayText'
 import { ExternalLink, Loader2, Shield } from 'lucide-react'
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
@@ -32,29 +32,9 @@ import { readShowArtifactCall } from '@/lib/artifactTool'
 import { getWorkspaceFilePath } from '@/lib/markdownLinks'
 import { getFileApiUrl } from '@/api/files'
 import { ArtifactPart } from './ArtifactPart'
+import { ExecuteToolPart } from './ExecuteToolPart'
+import { FileReferenceText } from './FileReferenceText'
 import type { WalkthroughSource } from '@opencode-manager/shared/schemas'
-
-const DISPLAY_LIMIT = 30_000
-const DISPLAY_HEAD_LENGTH = 20_000
-const DISPLAY_TAIL_LENGTH = 10_000
-
-function formatOmittedSize(size: number): string {
-  return size < 1024 * 1024
-    ? `${(size / 1024).toFixed(1)} KB`
-    : `${(size / (1024 * 1024)).toFixed(1)} MB`
-}
-
-function clampDisplayText(text: string): string {
-  if (text.length <= DISPLAY_LIMIT) return text
-  const headCut = text.lastIndexOf('\n', DISPLAY_HEAD_LENGTH)
-  const head = headCut === -1 ? text.slice(0, DISPLAY_HEAD_LENGTH) : text.slice(0, headCut)
-  const tailFrom = text.length - DISPLAY_TAIL_LENGTH
-  const tailCut = text.indexOf('\n', tailFrom)
-  const tail = tailCut === -1 ? text.slice(tailFrom) : text.slice(tailCut + 1)
-  const omitted = formatOmittedSize(text.length - head.length - tail.length)
-  const marker = `\n[… ${omitted} omitted — use the copy button for the full output …]\n`
-  return head + marker + tail
-}
 
 function BoundedPre({ content, className }: { content: string; className: string }) {
   const clamped = useMemo(() => clampDisplayText(content), [content])
@@ -85,42 +65,12 @@ function toolOutputText(part: SessionMessageAssistantTool): string {
 
 function ClickableJson({ json, onFileClick }: { json: unknown; onFileClick?: (filePath: string) => void }) {
   const jsonString = useMemo(() => JSON.stringify(json, null, 2), [json])
-  const references = useMemo(() => detectFileReferences(jsonString), [jsonString])
 
-  if (references.length === 0) {
-    return <pre className="bg-accent p-2 rounded text-xs overflow-x-auto whitespace-pre-wrap break-words">{jsonString}</pre>
-  }
-
-  const parts: React.ReactNode[] = []
-  let lastIndex = 0
-
-  references.forEach((ref, index) => {
-    if (ref.startIndex > lastIndex) {
-      parts.push(jsonString.slice(lastIndex, ref.startIndex))
-    }
-
-    parts.push(
-      <span
-        key={`ref-${index}`}
-        onClick={(e) => {
-          e.stopPropagation()
-          onFileClick?.(ref.filePath)
-        }}
-        className="text-primary hover:text-primary-hover cursor-pointer underline decoration-dotted"
-        title={`Click to open ${ref.filePath}`}
-      >
-        {ref.fullMatch}
-      </span>
-    )
-
-    lastIndex = ref.endIndex
-  })
-
-  if (lastIndex < jsonString.length) {
-    parts.push(jsonString.slice(lastIndex))
-  }
-
-  return <pre className="bg-accent p-2 rounded text-xs overflow-x-auto whitespace-pre-wrap break-words">{parts}</pre>
+  return (
+    <pre className="bg-accent p-2 rounded text-xs overflow-x-auto whitespace-pre-wrap break-words">
+      <FileReferenceText text={jsonString} onFileClick={onFileClick} />
+    </pre>
+  )
 }
 
 export const ToolCallPart = memo(function ToolCallPart({ part, messageID, directory, repoFullPath, repoLocalPath, shellOutcome, onFileClick, onChildSessionClick, onOpenWalkthrough }: ToolCallPartProps) {
@@ -325,6 +275,10 @@ export const ToolCallPart = memo(function ToolCallPart({ part, messageID, direct
         {content}
       </div>
     )
+  }
+
+  if (part.name === 'execute') {
+    return <ExecuteToolPart part={part} isWaitingPermission={isWaitingPermission} onFileClick={onFileClick} />
   }
 
   const toolSpecificRender = getToolSpecificRender(part, onFileClick)
