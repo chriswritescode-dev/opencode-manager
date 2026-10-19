@@ -1,23 +1,8 @@
 import { useState, useCallback } from 'react'
-
-function readStorage(key: string): string | null {
-  try {
-    return localStorage.getItem(key)
-  } catch {
-    return null
-  }
-}
-
-function writeStorage(key: string, value: unknown): void {
-  try {
-    localStorage.setItem(key, JSON.stringify(value))
-  } catch {
-    return
-  }
-}
+import { readStoredValue, writeStoredValue } from '@/lib/persistentStorage'
 
 function readStoredBoolean(key: string, fallback: boolean): boolean {
-  const stored = readStorage(key)
+  const stored = readStoredValue(key)
   if (stored === null) {
     return fallback
   }
@@ -39,7 +24,7 @@ export function usePersistentBoolean(key: string, fallback: boolean): [boolean, 
   const toggle = useCallback(() => {
     setValue((prev: boolean) => {
       const newValue = !prev
-      writeStorage(key, newValue)
+      writeStoredValue(key, newValue)
       return newValue
     })
   }, [key])

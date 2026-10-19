@@ -1,6 +1,11 @@
+import { useCallback, useRef, useState } from 'react'
 import type { LucideIcon } from 'lucide-react'
 import { ChevronLeft, ChevronRight } from 'lucide-react'
 import { cn } from '@/lib/utils'
+import {
+  SIDEBAR_MAX_WIDTH,
+  SIDEBAR_MIN_WIDTH,
+} from '@/hooks/useSidebarWidth'
 import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip'
 
 export interface SidebarProps {
@@ -11,6 +16,14 @@ export interface SidebarProps {
   className?: string
   children: React.ReactNode
   ariaLabel?: string
+  width?: number
+  onWidthChange?: (width: number) => void
+}
+
+interface SidebarDragState {
+  pointerId: number
+  startX: number
+  startWidth: number
 }
 
 export function Sidebar({
@@ -21,17 +34,112 @@ export function Sidebar({
   className,
   children,
   ariaLabel = 'Sidebar',
+  width,
+  onWidthChange,
 }: SidebarProps) {
+  const dragRef = useRef<SidebarDragState | null>(null)
+  const [isDragging, setIsDragging] = useState(false)
+
+  const handlePointerDown = useCallback(
+    (event: React.PointerEvent<HTMLDivElement>) => {
+      if (event.button !== 0 || width === undefined || !onWidthChange) {
+        return
+      }
+      event.preventDefault()
+      event.currentTarget.setPointerCapture?.(event.pointerId)
+      dragRef.current = {
+        pointerId: event.pointerId,
+        startX: event.clientX,
+        startWidth: width,
+      }
+      setIsDragging(true)
+    },
+    [onWidthChange, width]
+  )
+
+  const handlePointerMove = useCallback(
+    (event: React.PointerEvent<HTMLDivElement>) => {
+      const drag = dragRef.current
+      if (!drag || drag.pointerId !== event.pointerId || !onWidthChange) {
+        return
+      }
+      onWidthChange(drag.startWidth + event.clientX - drag.startX)
+    },
+    [onWidthChange]
+  )
+
+  const handlePointerEnd = useCallback((event: React.PointerEvent<HTMLDivElement>) => {
+    const drag = dragRef.current
+    if (!drag || drag.pointerId !== event.pointerId) {
+      return
+    }
+    if (event.currentTarget.hasPointerCapture?.(event.pointerId)) {
+      event.currentTarget.releasePointerCapture?.(event.pointerId)
+    }
+    dragRef.current = null
+    setIsDragging(false)
+  }, [])
+
+  const handleKeyDown = useCallback(
+    (event: React.KeyboardEvent<HTMLDivElement>) => {
+      if (!onWidthChange || width === undefined) {
+        return
+      }
+      const step = event.shiftKey ? 64 : 16
+      let nextWidth: number
+      switch (event.key) {
+        case 'ArrowLeft':
+          nextWidth = width - step
+          break
+        case 'ArrowRight':
+          nextWidth = width + step
+          break
+        case 'Home':
+          nextWidth = SIDEBAR_MIN_WIDTH
+          break
+        case 'End':
+          nextWidth = SIDEBAR_MAX_WIDTH
+          break
+        default:
+          return
+      }
+      event.preventDefault()
+      onWidthChange(nextWidth)
+    },
+    [onWidthChange, width]
+  )
+
+  const showResizeHandle = !collapsed && width !== undefined && onWidthChange !== undefined
+
   return (
     <aside
       className={cn(
-        'relative z-20 flex-shrink-0 border-r border-border bg-card/50 backdrop-blur-sm h-full flex flex-col pt-safe pb-safe transition-[width] duration-200',
-        collapsed ? collapsedWidthClass : widthClass,
+        'relative z-20 flex-shrink-0 border-r border-border bg-card/50 backdrop-blur-sm h-full flex flex-col pt-safe pb-safe',
+        isDragging ? 'transition-none select-none' : 'transition-[width] duration-200',
+        collapsed ? collapsedWidthClass : width === undefined ? widthClass : undefined,
         className
       )}
+      style={!collapsed && width !== undefined ? { width } : undefined}
       aria-label={ariaLabel}
     >
       {onToggle && <SidebarCollapseToggle collapsed={collapsed} onToggle={onToggle} />}
+      {showResizeHandle && (
+        <div
+          role="separator"
+          aria-orientation="vertical"
+          aria-label="Resize sidebar"
+          tabIndex={0}
+          aria-valuenow={width}
+          aria-valuemin={SIDEBAR_MIN_WIDTH}
+          aria-valuemax={SIDEBAR_MAX_WIDTH}
+          className="absolute inset-y-0 -right-1 z-10 w-2 cursor-col-resize touch-none bg-transparent hover:bg-highlight/30 focus-visible:bg-highlight/30 focus-visible:outline-none"
+          onPointerDown={handlePointerDown}
+          onPointerMove={handlePointerMove}
+          onPointerUp={handlePointerEnd}
+          onPointerCancel={handlePointerEnd}
+          onKeyDown={handleKeyDown}
+        />
+      )}
       {children}
     </aside>
   )
