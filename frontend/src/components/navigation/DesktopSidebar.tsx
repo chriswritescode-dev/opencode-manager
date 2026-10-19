@@ -6,9 +6,6 @@ import { useSidebarWidth } from '@/hooks/useSidebarWidth'
 import { useAuth } from '@/hooks/useAuth'
 import { useUrlParams } from '@/hooks/useUrlParams'
 import { useOpenNavItem } from '@/hooks/useOpenNavItem'
-import { useOpenCodeServers } from '@/hooks/useOpenCodeServers'
-import { useSidebarServerSelection } from '@/hooks/useSidebarServerSelection'
-import { LOCAL_OPENCODE_SERVER_ID } from '@opencode-manager/shared/schemas'
 import { buildNavModel, type MoreDrawerItem, type NavPrimaryCta } from '@/components/navigation/moreDrawerItems'
 import { RepoQuickSwitchSheet } from '@/components/navigation/RepoQuickSwitchSheet'
 import { DesktopSessionTree } from '@/components/navigation/DesktopSessionTree'
@@ -31,12 +28,6 @@ export function DesktopSidebar() {
   const [sidebarWidth, setSidebarWidth] = useSidebarWidth()
   const [repoSwitcherOpen, setRepoSwitcherOpen] = useState(false)
   const { isAuthenticated, isLoading, logout } = useAuth()
-  const [selectedServerId] = useSidebarServerSelection()
-  const { servers } = useOpenCodeServers()
-  const selectedServerName =
-    selectedServerId === LOCAL_OPENCODE_SERVER_ID
-      ? null
-      : servers.find((server) => server.id === selectedServerId)?.name ?? null
 
   const isDesktop = useDesktop()
 
@@ -115,11 +106,13 @@ export function DesktopSidebar() {
           </>
         ) : (
           <>
-            <LinkedServersNav />
+            <div className="px-2 py-1">
+              <LinkedServersNav />
+            </div>
 
             <section aria-label="Sessions" className="flex min-h-0 flex-1 flex-col border-t border-border">
               <h2 className="px-3 py-1.5 text-xs font-medium uppercase tracking-wider text-muted-foreground">
-                Sessions{selectedServerName ? ` · ${selectedServerName}` : ''}
+                Sessions
               </h2>
               <DesktopSessionTree />
             </section>

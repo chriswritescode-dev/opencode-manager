@@ -1,4 +1,5 @@
 import { render, screen, fireEvent, waitFor } from '@testing-library/react'
+import userEvent from '@testing-library/user-event'
 import { beforeEach, describe, it, expect, vi } from 'vitest'
 import { MemoryRouter, Route, Routes, useLocation } from 'react-router-dom'
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
@@ -990,7 +991,8 @@ describe('RepoQuickSwitchSheet', () => {
     expect(handleClose).toHaveBeenCalled()
   })
 
-  it('renders the Servers group with enabled linked servers', async () => {
+  it('renders the server switcher when enabled linked servers exist', async () => {
+    const user = userEvent.setup()
     vi.mocked(listRepos).mockResolvedValue([createRepo(1, 'repo1', '/path/to/repo1')])
     setLinkedServers([
       createLinkedServer('srv_kitchen', 'Kitchen'),
@@ -999,13 +1001,18 @@ describe('RepoQuickSwitchSheet', () => {
 
     render(<RepoQuickSwitchSheet isOpen onClose={vi.fn()} />, { wrapper: createWrapper() })
 
-    expect(await screen.findByRole('heading', { name: 'Servers' })).toBeInTheDocument()
-    expect(screen.getByRole('button', { name: /Kitchen/ })).toBeInTheDocument()
-    expect(screen.queryByRole('button', { name: /Office/ })).not.toBeInTheDocument()
+    const trigger = await screen.findByRole('button', { name: 'Switch server, current: Local' })
+    expect(trigger).toBeInTheDocument()
+    expect(screen.queryByRole('heading', { name: 'Servers' })).not.toBeInTheDocument()
+
+    await user.click(trigger)
+
+    expect(await screen.findByRole('menuitem', { name: /Kitchen/ })).toBeInTheDocument()
+    expect(screen.queryByRole('menuitem', { name: /Office/ })).not.toBeInTheDocument()
     expect(screen.getByRole('img', { name: 'Connected' })).toBeInTheDocument()
   })
 
-  it('hides the Servers group when no linked servers exist', async () => {
+  it('hides the server switcher when no linked servers exist', async () => {
     vi.mocked(listRepos).mockResolvedValue([createRepo(1, 'repo1', '/path/to/repo1')])
 
     render(<RepoQuickSwitchSheet isOpen onClose={vi.fn()} />, { wrapper: createWrapper() })
@@ -1014,10 +1021,11 @@ describe('RepoQuickSwitchSheet', () => {
       expect(screen.getByText('repo1')).toBeInTheDocument()
     })
 
-    expect(screen.queryByRole('heading', { name: 'Servers' })).toBeNull()
+    expect(screen.queryByRole('button', { name: /Switch server/ })).toBeNull()
   })
 
   it('switches to a linked server without navigating or closing the sheet', async () => {
+    const user = userEvent.setup()
     vi.mocked(listRepos).mockResolvedValue([createRepo(1, 'repo1', '/path/to/repo1')])
     vi.mocked(listProjects).mockResolvedValue([createProject('p1', 'Alpha', '/projects/alpha')])
     setLinkedServers([createLinkedServer('srv_kitchen', 'Kitchen')])
@@ -1041,7 +1049,8 @@ describe('RepoQuickSwitchSheet', () => {
       </QueryClientProvider>,
     )
 
-    fireEvent.click(await screen.findByRole('button', { name: /Kitchen/ }))
+    await user.click(await screen.findByRole('button', { name: 'Switch server, current: Local' }))
+    await user.click(await screen.findByRole('menuitem', { name: /Kitchen/ }))
 
     expect(await screen.findByText('Alpha')).toBeInTheDocument()
     expect(screen.queryByText('repo1')).not.toBeInTheDocument()
@@ -1051,6 +1060,7 @@ describe('RepoQuickSwitchSheet', () => {
   })
 
   it('opens a remote project from the sheet and closes it', async () => {
+    const user = userEvent.setup()
     vi.mocked(listRepos).mockResolvedValue([createRepo(1, 'repo1', '/path/to/repo1')])
     vi.mocked(listProjects).mockResolvedValue([createProject('p1', 'Alpha', '/projects/alpha')])
     setLinkedServers([createLinkedServer('srv_kitchen', 'Kitchen')])
@@ -1074,8 +1084,9 @@ describe('RepoQuickSwitchSheet', () => {
       </QueryClientProvider>,
     )
 
-    fireEvent.click(await screen.findByRole('button', { name: /Kitchen/ }))
-    fireEvent.click(await screen.findByRole('button', { name: /^Alpha/ }))
+    await user.click(await screen.findByRole('button', { name: 'Switch server, current: Local' }))
+    await user.click(await screen.findByRole('menuitem', { name: /Kitchen/ }))
+    await user.click(await screen.findByRole('button', { name: /^Alpha/ }))
 
     expect(screen.getByTestId('location')).toHaveTextContent(
       '/servers/srv_kitchen/projects?directory=%2Fprojects%2Falpha',

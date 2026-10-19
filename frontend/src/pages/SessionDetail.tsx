@@ -792,7 +792,14 @@ export function SessionDetail() {
               onChange={handleRenameSession}
               subtitle={
                 <span className="text-highlight">
-                  {workspaceDisplayName}
+                  {isRemoteServer ? (
+                    <>
+                      <span className="text-info">{linkedServer?.name ?? 'Linked server'}</span>
+                      {sessionDirectory && ` · ${getDirectoryName(sessionDirectory)}`}
+                    </>
+                  ) : (
+                    workspaceDisplayName
+                  )}
                   {sessionBranch && <span className="font-mono sm:hidden"> · {sessionBranch}</span>}
                 </span>
               }
@@ -823,7 +830,7 @@ export function SessionDetail() {
               isReconnecting={streamReconnecting}
               revertMessageID={revertMessageID}
             />
-            {!isRemoteServer && <SessionMoreButton />}
+            <SessionMoreButton />
           </Header.Actions>
         </Header>
 

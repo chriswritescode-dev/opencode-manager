@@ -104,7 +104,11 @@ export function RepoQuickSwitchSheet({ isOpen, onClose }: RepoQuickSwitchSheetPr
           </div>
         </BottomSheetHeader>
       <BottomSheetContent className="flex flex-col px-0 pt-0 gap-0">
-        {isOpen && <LinkedServersNav variant="sheet" />}
+        {isOpen && (
+          <div className="px-2 pt-1">
+            <LinkedServersNav variant="sheet" />
+          </div>
+        )}
         {isOpen && !searchQuery.trim() && (
           <CompactActivityList onNavigate={(path) => navigateAndClose(path)} />
         )}

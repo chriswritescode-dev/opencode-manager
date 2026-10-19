@@ -266,8 +266,9 @@ describe('SessionDetail remote server mode', () => {
     renderRemoteSession()
 
     await waitFor(() => {
-      expect(screen.getByText('Kitchen · app')).toBeInTheDocument()
+      expect(screen.getByText('Kitchen')).toHaveClass('text-info')
     })
+    expect(screen.getByText('Kitchen').parentElement).toHaveTextContent('Kitchen · app')
   })
 
   it('uses the session directory as the only directory source', async () => {
@@ -293,10 +294,20 @@ describe('SessionDetail remote server mode', () => {
     expect(mocks.RepoActionsDialog).not.toHaveBeenCalled()
     expect(mocks.ResetPermissionsDialog).not.toHaveBeenCalled()
     expect(mocks.ChangesWalkthroughSheet).not.toHaveBeenCalled()
-    expect(mocks.SessionMoreButton).not.toHaveBeenCalled()
+    expect(mocks.SessionMoreButton).toHaveBeenCalled()
     expect(vi.mocked(PendingActionsGroup).mock.calls.at(-1)?.[0]).toEqual(
       expect.objectContaining({ showScheduleReports: false }),
     )
+  })
+
+  it('renders the More button so the drawer stays reachable on a remote session', async () => {
+    renderRemoteSession()
+
+    await waitFor(() => {
+      expect(screen.getByTestId('message-thread')).toBeInTheDocument()
+    })
+
+    expect(mocks.SessionMoreButton).toHaveBeenCalled()
   })
 
   it('shows the session goal bar for a remote session', async () => {
