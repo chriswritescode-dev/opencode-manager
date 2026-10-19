@@ -211,7 +211,7 @@ export function ToolSidePanel({
     if (tool === 'activity') return <ActivityPanelBody />
     if (tool === 'terminal') {
       return terminalWorkspaceTarget
-        ? <TerminalWorkspace target={terminalWorkspaceTarget} directory={terminalDirectory ?? directory} isOpen />
+        ? <TerminalWorkspace target={terminalWorkspaceTarget} directory={terminalDirectory ?? directory} isOpen onLastTerminalExited={closePanel} />
         : null
     }
     if (tool === 'skills') {

@@ -33,7 +33,12 @@ vi.mock('@/components/source-control/RemoteSourceControlContent', () => ({
   ),
 }))
 vi.mock('@/components/terminal/TerminalPanel', () => ({
-  TerminalWorkspace: () => <div>terminal-tool</div>,
+  TerminalWorkspace: ({ onLastTerminalExited }: { onLastTerminalExited?: () => void }) => (
+    <div>
+      terminal-tool
+      <button type="button" onClick={onLastTerminalExited}>Exit last terminal</button>
+    </div>
+  ),
 }))
 vi.mock('@/components/preview/PreviewPanel', () => ({ PreviewWorkspace: () => <div>preview-tool</div> }))
 vi.mock('@/components/schedules/RepoSchedulesContent', () => ({
@@ -319,6 +324,16 @@ describe('ToolSidePanel', () => {
     await user.click(await screen.findByRole('button', { name: 'Files' }))
 
     await waitFor(() => expect(search().get('panel')).toBe('files'))
+    expect(search().has('terminal')).toBe(false)
+  })
+
+  it('closes the docked terminal panel when the last terminal exits', async () => {
+    const user = userEvent.setup()
+    renderAt('?panel=terminal&terminal=pty-1')
+
+    await user.click(await screen.findByRole('button', { name: 'Exit last terminal' }))
+
+    await waitFor(() => expect(search().has('panel')).toBe(false))
     expect(search().has('terminal')).toBe(false)
   })
 

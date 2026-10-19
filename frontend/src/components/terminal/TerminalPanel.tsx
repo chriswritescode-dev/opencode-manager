@@ -29,9 +29,10 @@ interface TerminalWorkspaceProps {
   target: TerminalTarget
   directory: string | undefined
   isOpen: boolean
+  onLastTerminalExited?: () => void
 }
 
-export function TerminalWorkspace({ target, directory, isOpen }: TerminalWorkspaceProps) {
+export function TerminalWorkspace({ target, directory, isOpen, onLastTerminalExited }: TerminalWorkspaceProps) {
   const isMobile = useMobile()
   const { searchParams, updateParams } = useUrlParams()
   const openPreview = useOpenPreview()
@@ -44,10 +45,14 @@ export function TerminalWorkspace({ target, directory, isOpen }: TerminalWorkspa
 
   const [ctrlArmed, setCtrlArmed] = useState(false)
   const [pendingClose, setPendingClose] = useState<TerminalInfo | null>(null)
+  const [dismissedTerminalIds, setDismissedTerminalIds] = useState<ReadonlySet<string>>(() => new Set())
   const viewHandlesRef = useRef(new Map<string, TerminalViewHandle>())
   const autoCreateCheckedDirectoryRef = useRef<string | null>(null)
 
-  const terminals = useMemo(() => data ?? [], [data])
+  const terminals = useMemo(
+    () => (data ?? []).filter((terminal) => !dismissedTerminalIds.has(terminal.id)),
+    [data, dismissedTerminalIds],
+  )
 
   const selectTerminal = useCallback((id: string) => {
     updateParams((params) => {
@@ -83,26 +88,62 @@ export function TerminalWorkspace({ target, directory, isOpen }: TerminalWorkspa
     )
   }, [createTerminal, directory, selectTerminal])
 
-  const performRemove = useCallback((terminal: TerminalInfo) => {
-    removeTerminal(
-      { ptyID: terminal.id, directory },
-      {
-        onSuccess: () => {
-          updateParams((params) => {
-            if (params.get('terminal') === terminal.id) params.delete('terminal')
-          }, 'replace')
+  const performRemove = useCallback(
+    (
+      terminalId: string,
+      options: { onRemoved?: () => void; onError?: () => void } = {},
+    ) => {
+      removeTerminal(
+        { ptyID: terminalId, directory },
+        {
+          onSuccess: () => {
+            updateParams((params) => {
+              if (params.get('terminal') === terminalId) params.delete('terminal')
+            }, 'replace')
+            options.onRemoved?.()
+          },
+          onError: options.onError,
         },
-      },
-    )
-  }, [removeTerminal, directory, updateParams])
+      )
+    },
+    [removeTerminal, directory, updateParams],
+  )
 
   const handleCloseTab = useCallback((terminal: TerminalInfo) => {
     if (terminal.status === 'running') {
       setPendingClose(terminal)
       return
     }
-    performRemove(terminal)
+    performRemove(terminal.id)
   }, [performRemove])
+
+  const handleTerminalExited = useCallback((terminalId: string) => {
+    const settleExit = async () => {
+      let latestTerminals: TerminalInfo[]
+      try {
+        const result = await refetch()
+        latestTerminals = result.data ?? []
+      } catch {
+        return
+      }
+      const exitCode = latestTerminals.find((terminal) => terminal.id === terminalId)?.exitCode
+      if (exitCode !== undefined && exitCode !== 0) return
+      setDismissedTerminalIds((ids) => new Set(ids).add(terminalId))
+      performRemove(terminalId, {
+        onRemoved: () => {
+          if (latestTerminals.every((terminal) => terminal.id === terminalId)) onLastTerminalExited?.()
+        },
+        onError: () => {
+          setDismissedTerminalIds((ids) => {
+            const next = new Set(ids)
+            next.delete(terminalId)
+            return next
+          })
+        },
+      })
+    }
+    void settleExit()
+  }, [refetch, performRemove, onLastTerminalExited])
 
   const handleKeySend = useCallback((input: string) => {
     if (!activeTerminalId) return
@@ -190,7 +231,7 @@ export function TerminalWorkspace({ target, directory, isOpen }: TerminalWorkspa
                 ctrlArmed={ctrlArmed}
                 onCtrlConsumed={handleCtrlConsumed}
                 onOpenLink={handleOpenLink}
-                onExited={() => { void refetch() }}
+                onExited={() => handleTerminalExited(terminal.id)}
               />
             ))}
           </Suspense>
@@ -205,7 +246,7 @@ export function TerminalWorkspace({ target, directory, isOpen }: TerminalWorkspa
         open={pendingClose !== null}
         onOpenChange={(open) => { if (!open) setPendingClose(null) }}
         onConfirm={() => {
-          if (pendingClose) performRemove(pendingClose)
+          if (pendingClose) performRemove(pendingClose.id)
           setPendingClose(null)
         }}
         onCancel={() => setPendingClose(null)}
@@ -251,7 +292,7 @@ export function TerminalPanel({ target, directory, isOpen, onClose }: TerminalPa
           )}
         </DialogHeader>
 
-        <TerminalWorkspace target={target} directory={directory} isOpen={isOpen} />
+        <TerminalWorkspace target={target} directory={directory} isOpen={isOpen} onLastTerminalExited={onClose} />
       </DialogContent>
     </Dialog>
   )
