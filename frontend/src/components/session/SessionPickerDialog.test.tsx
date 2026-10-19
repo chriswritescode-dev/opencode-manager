@@ -1,13 +1,15 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { useState } from 'react'
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
-import { render, screen, fireEvent, waitFor, act } from '@testing-library/react'
+import { render, screen, fireEvent, waitFor, act, within } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
+import { LOCAL_OPENCODE_SERVER_ID } from '@opencode-manager/shared/schemas'
 import type { Repo, Session } from '@/api/types'
 import type { ActiveWorkGroups, ActiveWorkItem, ActiveWorkState } from '@/lib/activeWork'
 import { stubMatchMedia } from '@/test/test-utils'
 import { DEFAULT_ACTIVITY_WINDOW_MINUTES } from '@/api/types/settings'
 import { KeyboardShortcutsProvider } from '@/contexts/KeyboardShortcutsContext'
+import { OpenCodeServerProvider } from '@/contexts/OpenCodeServerContext'
 import { SessionPickerDialog } from './SessionPickerDialog'
 
 const mocks = vi.hoisted(() => ({
@@ -21,6 +23,7 @@ const mocks = vi.hoisted(() => ({
   sessionsHook: vi.fn(),
   fetchNextPage: vi.fn(),
   deleteSessionMock: vi.fn(),
+  deletedSessionServerId: null as string | null,
   togglePinMock: vi.fn(),
   getOpenCodeLocation: vi.fn(),
   sessionPins: [] as Array<{ sessionId: string; directory: string; pinnedAt: number }>,
@@ -48,6 +51,7 @@ vi.mock('@/api/opencode', async (importOriginal) => {
 
 vi.mock('@/hooks/useOpenCode', async (importOriginal) => {
   const actual = await importOriginal<typeof import('@/hooks/useOpenCode')>()
+  const { useOpenCodeServerId } = await import('@/contexts/OpenCodeServerContext')
   return {
     ...actual,
     useSessionsAcrossDirectories: (
@@ -73,7 +77,16 @@ vi.mock('@/hooks/useOpenCode', async (importOriginal) => {
         isFetchNextPageError: false,
       }
     },
-    useDeleteSession: () => ({ mutateAsync: mocks.deleteSessionMock, isPending: false }),
+    useDeleteSession: () => {
+      const serverId = useOpenCodeServerId()
+      return {
+        mutateAsync: (target: unknown) => {
+          mocks.deletedSessionServerId = serverId
+          return mocks.deleteSessionMock(target)
+        },
+        isPending: false,
+      }
+    },
   }
 })
 
@@ -144,7 +157,7 @@ function activeWorkItem(
   }
 }
 
-function renderWithClient(ui: React.ReactElement) {
+function renderWithClient(ui: React.ReactElement, serverId?: string) {
   const queryClient = new QueryClient({ defaultOptions: { queries: { retry: false } } })
   const directory = mocks.repos[0]?.fullPath
   if (mocks.locationData && directory) {
@@ -152,7 +165,13 @@ function renderWithClient(ui: React.ReactElement) {
   }
   return render(
     <QueryClientProvider client={queryClient}>
-      <KeyboardShortcutsProvider>{ui}</KeyboardShortcutsProvider>
+      <KeyboardShortcutsProvider>
+        {serverId ? (
+          <OpenCodeServerProvider serverId={serverId}>{ui}</OpenCodeServerProvider>
+        ) : (
+          ui
+        )}
+      </KeyboardShortcutsProvider>
     </QueryClientProvider>,
   )
 }
@@ -192,6 +211,7 @@ describe('SessionPickerDialog', () => {
     stubMatchMedia(true)
     localStorage.clear()
     mocks.deleteSessionMock.mockResolvedValue(undefined)
+    mocks.deletedSessionServerId = null
     mocks.locationData = {
       directory: '/w/a',
       project: { id: 'global', directory: '/w/a', canonical: '/w/a' },
@@ -949,6 +969,42 @@ describe('SessionPickerDialog', () => {
         expect.objectContaining({ id: 'ses_remote' }),
         'srv_kitchen',
       )
+    })
+
+    it('deletes a local active work row through the local server', async () => {
+      const user = userEvent.setup()
+      mocks.activeWorkGroups = {
+        needsInput: [],
+        running: [activeWorkItem('ses_local', 'Local task', '/w/a', 'running')],
+        recent: [],
+      }
+      renderWithClient(
+        <SessionPickerDialog
+          open
+          onOpenChange={vi.fn()}
+          currentRepo={mocks.repos[0]}
+          onSelectSession={vi.fn()}
+          onDeleteActiveSession={vi.fn()}
+          onSelectRepo={vi.fn()}
+          onSelectRemoteSession={vi.fn()}
+          remote={{ serverId: 'srv_kitchen', serverName: 'Kitchen', projectDirectory: '/home/me/app' }}
+        />,
+        'srv_kitchen',
+      )
+      openActiveTab()
+
+      await screen.findByRole('option', { name: /Local task/ })
+
+      await user.click(screen.getByRole('button', { name: 'Session actions' }))
+      await user.click(await screen.findByText('Delete'))
+
+      const dialog = await screen.findByRole('dialog', { name: 'Delete Session' })
+      await user.click(within(dialog).getByRole('button', { name: 'Delete' }))
+
+      await waitFor(() =>
+        expect(mocks.deleteSessionMock).toHaveBeenCalledWith({ id: 'ses_local', directory: '/w/a' }),
+      )
+      expect(mocks.deletedSessionServerId).toBe(LOCAL_OPENCODE_SERVER_ID)
     })
   })
 })

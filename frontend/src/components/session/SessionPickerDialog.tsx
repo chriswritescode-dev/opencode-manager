@@ -2,8 +2,9 @@ import { memo, useCallback, useEffect, useId, useMemo, useRef, useState } from '
 import { useQuery } from '@tanstack/react-query'
 import { format, startOfDay } from 'date-fns'
 import { MoreHorizontal, Pin, PinOff } from 'lucide-react'
+import { LOCAL_OPENCODE_SERVER_ID } from '@opencode-manager/shared/schemas'
 import { getOpenCodeLocation } from '@/api/opencode'
-import { useOpenCodeServerId } from '@/contexts/OpenCodeServerContext'
+import { OpenCodeServerProvider, useOpenCodeServerId } from '@/contexts/OpenCodeServerContext'
 import { serverScopedKey } from '@/lib/serverScope'
 import type { Repo, Session } from '@/api/types'
 import { ACTIVE_WORK_GROUPS, MS_PER_MINUTE, formatActivityEmptyMessage } from '@/lib/activeWork'
@@ -1239,15 +1240,17 @@ export function SessionPickerDialog({
             value="active"
             className="mt-0 flex min-h-0 w-full min-w-0 flex-1 flex-col px-0"
           >
-            <ActivePickerContent
-              open={open}
-              activeSessionID={activeSessionID}
-              onSelectSession={onSelectSession}
-              onSelectRemoteSession={onSelectRemoteSession}
-              onDeleteActiveSession={onDeleteActiveSession}
-              switchHint={switchHint}
-              searchInputRef={activeSearchInputRef}
-            />
+            <OpenCodeServerProvider serverId={LOCAL_OPENCODE_SERVER_ID}>
+              <ActivePickerContent
+                open={open}
+                activeSessionID={activeSessionID}
+                onSelectSession={onSelectSession}
+                onSelectRemoteSession={onSelectRemoteSession}
+                onDeleteActiveSession={onDeleteActiveSession}
+                switchHint={switchHint}
+                searchInputRef={activeSearchInputRef}
+              />
+            </OpenCodeServerProvider>
           </TabsContent>
           <TabsContent
             value="sessions"
