@@ -1,11 +1,22 @@
 import type { Repo, Session } from '@/api/types'
+import { LOCAL_OPENCODE_SERVER_ID, parseServerDirectoryKey } from '@opencode-manager/shared/schemas'
 import type { ChildOutcome } from '@/lib/backgroundWork'
 import type { SessionStatusType } from '@/stores/sessionStatusStore'
 import { getSessionKey } from '@/lib/sessionKey'
-import { getSessionPath } from '@/lib/navigation'
+import { getServerSessionPath, getSessionPath } from '@/lib/navigation'
 import { getRepoBranchLabel } from '@/lib/utils'
 import { findRepoForDirectory, normalizeDirectory } from '@/components/navigation/sidebar-session-tree'
 import { isWorktreeSibling, type RepoSibling } from '@opencode-manager/shared/utils'
+
+/**
+ * The plain directory of a session-status directory value when it belongs to the local server,
+ * or null for a remote session's server-keyed directory.
+ */
+function localDirectoryOf(directory?: string | null): string | null {
+  if (!directory) return null
+  const { serverId, directory: parsed } = parseServerDirectoryKey(directory)
+  return serverId === LOCAL_OPENCODE_SERVER_ID ? parsed : null
+}
 
 export const MS_PER_MINUTE = 60_000
 
@@ -32,7 +43,12 @@ export type ActiveWorkState = 'needs-input' | 'running' | 'recent'
 export interface ActiveWorkItem {
   key: string
   session: Session
-  repo: Repo
+  /** The local repo the session runs in; null for a session owned by a linked server. */
+  repo: Repo | null
+  /** The linked server that owns the session; null for a local repo session. */
+  serverId: string | null
+  /** The owning linked server's display name; null for a local repo session. */
+  serverName: string | null
   state: ActiveWorkState
   updatedAt: number
   outcome?: ChildOutcome
@@ -116,12 +132,12 @@ function computeRepoActivityIndex(input: RepoActivityIndexInput): Map<string, 'n
   const index = new Map<string, 'needs-input' | 'running'>()
 
   const markNeedsInput = (directory?: string | null): void => {
-    const normalized = normalizeDirectory(directory)
+    const normalized = normalizeDirectory(localDirectoryOf(directory))
     if (normalized) index.set(normalized, 'needs-input')
   }
 
   const markRunning = (directory?: string | null): void => {
-    const normalized = normalizeDirectory(directory)
+    const normalized = normalizeDirectory(localDirectoryOf(directory))
     if (!normalized || index.get(normalized) === 'needs-input') return
     index.set(normalized, 'running')
   }
@@ -288,12 +304,14 @@ export function needsWorktreeLookup(input: {
   sessions: Session[]
   parents: ReadonlyMap<string, string | null>
   roots: { needsInput: Set<string>; running: Set<string> }
+  sessionServers?: ReadonlyMap<string, string>
 }): boolean {
-  const { now, windowMs, repos, sessions, parents, roots } = input
+  const { now, windowMs, repos, sessions, parents, roots, sessionServers } = input
   const windowStart = now - windowMs
 
   return sessions.some((session) => {
     if (session.time.archived) return false
+    if (sessionServers?.has(session.id)) return false
     if (findRepoForDirectory(repos, session.location.directory)) return false
     if (session.time.updated >= windowStart) return true
     const rootID = rootSessionID(session.id, parents)
@@ -303,10 +321,12 @@ export function needsWorktreeLookup(input: {
 
 /**
  * Groups the given sessions into needs-input, running, and recent roots. A session appears in
- * exactly one group (needs-input over running over recent) and only when it resolves to a repo.
- * A recent session in a schedule worktree is omitted so schedules only surface while they need
- * attention. The input may mix roots and children; children never become items, but their latest
- * update time rolls up into the root's `updatedAt` and decides the recent window and ordering.
+ * exactly one group (needs-input over running over recent) and only when it resolves to a local
+ * repo or to an owning linked server. A session owned by a linked server is only emitted while it
+ * needs input or is running, so remote work never fills the recent window. A recent session in a
+ * schedule worktree is omitted so schedules only surface while they need attention. The input may
+ * mix roots and children; children never become items, but their latest update time rolls up into
+ * the root's `updatedAt` and decides the recent window and ordering.
  */
 export function buildActiveWork(input: {
   now: number
@@ -317,8 +337,10 @@ export function buildActiveWork(input: {
   roots: { needsInput: Set<string>; running: Set<string> }
   outcomes: ReadonlyMap<string, ChildOutcome>
   worktrees?: ReadonlyArray<ActiveWorktree>
+  sessionServers?: ReadonlyMap<string, string>
+  serverNames?: ReadonlyMap<string, string>
 }): ActiveWorkGroups {
-  const { now, windowMs, repos, sessions, parents, roots, outcomes, worktrees } = input
+  const { now, windowMs, repos, sessions, parents, roots, outcomes, worktrees, sessionServers, serverNames } = input
   const windowStart = now - windowMs
 
   const worktreeByDirectory = new Map<string, ActiveWorktree>()
@@ -356,6 +378,27 @@ export function buildActiveWork(input: {
           : null
     if (!state) continue
 
+    const serverId = sessionServers?.get(session.id) ?? null
+    if (serverId) {
+      if (state === 'recent') continue
+      seen.add(session.id)
+      const item: ActiveWorkItem = {
+        key: getSessionKey(session),
+        session,
+        repo: null,
+        serverId,
+        serverName: serverNames?.get(serverId) ?? null,
+        state,
+        updatedAt,
+        outcome: outcomes.get(session.id),
+        worktreeBranch: null,
+        path: getServerSessionPath(serverId, session.id),
+      }
+      if (state === 'needs-input') needsInput.push(item)
+      else running.push(item)
+      continue
+    }
+
     const directory = normalizeDirectory(session.location.directory)
     const worktree = directory ? worktreeByDirectory.get(directory) : undefined
     const repo = worktree?.ownerRepo ?? findRepoForDirectory(repos, session.location.directory)
@@ -367,6 +410,8 @@ export function buildActiveWork(input: {
       key: getSessionKey(session),
       session,
       repo,
+      serverId: null,
+      serverName: null,
       state,
       updatedAt,
       outcome: outcomes.get(session.id),

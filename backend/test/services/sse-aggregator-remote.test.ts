@@ -140,9 +140,11 @@ describe('SSEAggregator remote envelope delivery', () => {
     sseAggregator.addClient('resync-b', otherServer.callback, otherServer.writeFrame, ['srv_b|/repo'])
     sseAggregator.addClient('resync-c', local.callback, local.writeFrame, ['/repo'])
 
-    sseAggregator.sendRemoteResync('srv_a', '{"timestamp":1}')
+    sseAggregator.sendRemoteResync('srv_a')
 
-    expect(subscribed.events).toEqual([{ event: 'resync', data: '{"timestamp":1}' }])
+    expect(subscribed.events).toHaveLength(1)
+    expect(subscribed.events[0]!.event).toBe('resync')
+    expect(JSON.parse(subscribed.events[0]!.data)).toEqual({ timestamp: expect.any(Number), serverId: 'srv_a' })
     expect(otherServer.events).toHaveLength(0)
     expect(local.events).toHaveLength(0)
     expect(subscribed.frames).toHaveLength(0)

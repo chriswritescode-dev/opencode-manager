@@ -1,8 +1,9 @@
 import { useMemo } from 'react'
 import { keepPreviousData, useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { locationAgentKey, useModelStore, type ActiveAgent, type ModelPick, type ModelSelection } from '@/stores/modelStore'
-import { useOpenCodeServerId } from '@/contexts/OpenCodeServerContext'
+import { isLocalOpenCodeServer, useOpenCodeServerId } from '@/contexts/OpenCodeServerContext'
 import { serverScopedKey } from '@/lib/serverScope'
+import { buildServerDirectoryKey } from '@opencode-manager/shared/schemas'
 import { useProviders } from './useProviders'
 import { isModelAvailable } from '@/lib/modelCatalog'
 import {
@@ -61,12 +62,13 @@ export function modelStateQueryKey() {
 }
 
 export function useOpenCodeModelState(_directory?: string, enabled = true) {
+  const serverId = useOpenCodeServerId()
   return useQuery({
-    queryKey: modelStateQueryKey(),
+    queryKey: serverScopedKey(modelStateQueryKey(), serverId),
     queryFn: () => getOpenCodeModelState(),
     staleTime: 30000,
     placeholderData: keepPreviousData,
-    enabled,
+    enabled: enabled && isLocalOpenCodeServer(serverId),
   })
 }
 
@@ -121,22 +123,23 @@ export function useModelStateMutation<TInput>(
   errorMessage: string,
 ) {
   const queryClient = useQueryClient()
+  const serverId = useOpenCodeServerId()
+  const queryKey = serverScopedKey(modelStateQueryKey(), serverId)
 
   return useMutation({
     mutationFn: fetcher,
     onMutate: async (input) => {
-      const queryKey = modelStateQueryKey()
       await queryClient.cancelQueries({ queryKey })
       const previousState = queryClient.getQueryData<OpenCodeModelState>(queryKey)
       if (previousState) queryClient.setQueryData(queryKey, applyOptimistic(previousState, input))
       return { previousState }
     },
     onSuccess: (state) => {
-      queryClient.setQueryData(modelStateQueryKey(), state)
+      queryClient.setQueryData(queryKey, state)
     },
     onError: (error, _input, context) => {
       if (context?.previousState) {
-        queryClient.setQueryData(modelStateQueryKey(), context.previousState)
+        queryClient.setQueryData(queryKey, context.previousState)
       }
       console.error(errorMessage, error)
     },
@@ -218,6 +221,8 @@ export function useModelSelection(
   session?: ModelSelectionSession,
 ): UseModelSelectionResult {
   const { data: catalog, isPlaceholderData: catalogIsPlaceholder } = useProviders(directory)
+  const serverId = useOpenCodeServerId()
+  const isLocalServer = isLocalOpenCodeServer(serverId)
 
   const activeAgent = useModelStore((state) => state.activeAgent)
   const newSessionPicks = useModelStore((state) => state.newSessionPicks)
@@ -226,13 +231,14 @@ export function useModelSelection(
   const setSessionPick = useModelStore((state) => state.setSessionPick)
   const setActiveAgent = useModelStore((state) => state.setActiveAgent)
 
-  const { data: modelState } = useOpenCodeModelState()
+  const { data: localModelState } = useOpenCodeModelState()
+  const modelState = isLocalServer ? localModelState : undefined
   const { data: configModelString } = useOpenCodeConfiguredModel(directory)
 
   const isModelReady = Boolean(
     catalog &&
       !catalogIsPlaceholder &&
-      modelState !== undefined &&
+      (!isLocalServer || modelState !== undefined) &&
       configModelString !== undefined,
   )
 
@@ -253,7 +259,7 @@ export function useModelSelection(
     [configModelString],
   )
 
-  const key = locationAgentKey(directory, activeAgent?.id)
+  const key = locationAgentKey(buildServerDirectoryKey(serverId, directory ?? ''), activeAgent?.id)
 
   const selection = useMemo(() => {
     if (!isModelReady || !catalog) return null
@@ -347,14 +353,16 @@ export function useModelSelection(
     } else {
       setNewSessionPick(key, nextModel)
     }
-    updateRecentModel.mutate(nextModel)
+    if (isLocalServer) updateRecentModel.mutate(nextModel)
   }
 
   const toggleFavorite = (nextModel: ModelSelection) => {
+    if (!isLocalServer) return
     updateFavoriteModel.mutate(nextModel)
   }
 
   const removeRecent = (nextModel: ModelSelection) => {
+    if (!isLocalServer) return
     removeRecentMutation.mutate(nextModel)
   }
 

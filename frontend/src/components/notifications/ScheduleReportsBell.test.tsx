@@ -14,10 +14,6 @@ vi.mock('@/hooks/useSchedules', () => ({
   useMarkAllScheduleRunsViewed: mocks.useMarkAllScheduleRunsViewed,
 }))
 
-vi.mock('@/hooks/useMobile', () => ({
-  useMobile: vi.fn(() => false),
-}))
-
 function renderBell() {
   return render(
     <MemoryRouter>
@@ -50,7 +46,7 @@ describe('ScheduleReportsBell', () => {
     mocks.useUnreadScheduleRuns.mockReturnValue({ data: { runs: [], total: 3, failed: 1 } })
     renderBell()
 
-    expect(screen.getByTestId('schedule-reports-count')).toHaveClass('bg-destructive')
+    expect(screen.getByText('3')).toHaveClass('bg-destructive')
   })
 
   it('renders nothing when there are no unread runs', () => {

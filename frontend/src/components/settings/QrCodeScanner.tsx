@@ -1,5 +1,4 @@
 import { useEffect, useRef, useState } from 'react'
-import jsQR from 'jsqr'
 import { AlertCircle, Loader2 } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import {
@@ -10,6 +9,11 @@ import {
   DialogHeader,
   DialogTitle,
 } from '@/components/ui/dialog'
+
+const MAX_SCAN_DIMENSION = 640
+const DECODE_INTERVAL_MS = 100
+
+type QrDecoder = typeof import('jsqr')['default']
 
 interface QrCodeScannerProps {
   open: boolean
@@ -32,8 +36,18 @@ function describeCameraError(error: unknown): string {
   return 'The camera could not be started. Paste the pairing link instead.'
 }
 
+function fitScanDimensions(width: number, height: number): { width: number; height: number } {
+  const longest = Math.max(width, height)
+  if (longest <= MAX_SCAN_DIMENSION) {
+    return { width, height }
+  }
+  const scale = MAX_SCAN_DIMENSION / longest
+  return { width: Math.round(width * scale), height: Math.round(height * scale) }
+}
+
 export function QrCodeScanner({ open, onOpenChange, onResult }: QrCodeScannerProps) {
   const videoRef = useRef<HTMLVideoElement>(null)
+  const decoderRef = useRef<QrDecoder | null>(null)
   const onResultRef = useRef(onResult)
   onResultRef.current = onResult
   const [error, setError] = useState<string | null>(null)
@@ -48,6 +62,9 @@ export function QrCodeScanner({ open, onOpenChange, onResult }: QrCodeScannerPro
     let frameId: number | null = null
     let cancelled = false
     let decoded = false
+    let lastDecodeAt = Number.NEGATIVE_INFINITY
+    let canvasWidth = 0
+    let canvasHeight = 0
     const canvas = document.createElement('canvas')
     const context = canvas.getContext('2d', { willReadFrequently: true })
 
@@ -60,18 +77,35 @@ export function QrCodeScanner({ open, onOpenChange, onResult }: QrCodeScannerPro
       stream = null
     }
 
-    const scanFrame = () => {
+    const scanFrame = (timestamp: number) => {
       if (cancelled || decoded) return
-      const video = videoRef.current
-      if (!video || !context || video.readyState < video.HAVE_ENOUGH_DATA) {
+      if (timestamp - lastDecodeAt < DECODE_INTERVAL_MS) {
         frameId = requestAnimationFrame(scanFrame)
         return
       }
-      canvas.width = video.videoWidth
-      canvas.height = video.videoHeight
-      context.drawImage(video, 0, 0, canvas.width, canvas.height)
-      const imageData = context.getImageData(0, 0, canvas.width, canvas.height)
-      const code = jsQR(imageData.data, imageData.width, imageData.height)
+      const video = videoRef.current
+      const decoder = decoderRef.current
+      if (!video || !context || !decoder || video.readyState < video.HAVE_ENOUGH_DATA) {
+        frameId = requestAnimationFrame(scanFrame)
+        return
+      }
+      const size = fitScanDimensions(video.videoWidth, video.videoHeight)
+      if (size.width < 1 || size.height < 1) {
+        frameId = requestAnimationFrame(scanFrame)
+        return
+      }
+      lastDecodeAt = timestamp
+      if (size.width !== canvasWidth || size.height !== canvasHeight) {
+        canvas.width = size.width
+        canvas.height = size.height
+        canvasWidth = size.width
+        canvasHeight = size.height
+      }
+      context.drawImage(video, 0, 0, size.width, size.height)
+      const imageData = context.getImageData(0, 0, size.width, size.height)
+      const code = decoder(imageData.data, imageData.width, imageData.height, {
+        inversionAttempts: 'dontInvert',
+      })
       if (code?.data) {
         decoded = true
         stopCamera()
@@ -80,6 +114,14 @@ export function QrCodeScanner({ open, onOpenChange, onResult }: QrCodeScannerPro
         return
       }
       frameId = requestAnimationFrame(scanFrame)
+    }
+
+    const loadDecoder = async (): Promise<QrDecoder> => {
+      if (!decoderRef.current) {
+        const module = await import('jsqr')
+        decoderRef.current = module.default
+      }
+      return decoderRef.current
     }
 
     const startCamera = async () => {
@@ -93,6 +135,15 @@ export function QrCodeScanner({ open, onOpenChange, onResult }: QrCodeScannerPro
         setIsStarting(false)
         return
       }
+      try {
+        await loadDecoder()
+      } catch {
+        if (cancelled) return
+        setError('The QR decoder could not be loaded. Paste the pairing link instead.')
+        setIsStarting(false)
+        return
+      }
+      if (cancelled) return
       try {
         stream = await navigator.mediaDevices.getUserMedia({
           video: { facingMode: 'environment' },

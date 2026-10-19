@@ -507,6 +507,72 @@ describe('buildActiveWork', () => {
 
     expect(runningGroups.running.map((item) => item.session.id)).toEqual(['sched'])
   })
+
+  it('emits a remote needs-input root with its server label and server session path', () => {
+    const sessions = [createSession('remote', NOW - 1000, '/home/me/app')]
+
+    const groups = buildActiveWork({
+      now: NOW,
+      windowMs: WINDOW_MS,
+      repos: [repoA],
+      sessions,
+      parents: new Map(),
+      roots: { needsInput: new Set(['remote']), running: new Set() },
+      outcomes: new Map(),
+      sessionServers: new Map([['remote', 'srv_kitchen']]),
+      serverNames: new Map([['srv_kitchen', 'Kitchen']]),
+    })
+
+    expect(groups.needsInput).toHaveLength(1)
+    expect(groups.needsInput[0].repo).toBeNull()
+    expect(groups.needsInput[0].serverId).toBe('srv_kitchen')
+    expect(groups.needsInput[0].serverName).toBe('Kitchen')
+    expect(groups.needsInput[0].path).toBe('/servers/srv_kitchen/sessions/remote')
+  })
+
+  it('emits a running remote root and rolls its remote child up to it', () => {
+    const parents = new Map<string, string | null>([
+      ['remote-root', null],
+      ['remote-child', 'remote-root'],
+    ])
+    const sessions = [
+      createSession('remote-root', NOW - 4000, '/home/me/app'),
+      createSession('remote-child', NOW - 1000, '/home/me/app', 'remote-root'),
+    ]
+
+    const groups = buildActiveWork({
+      now: NOW,
+      windowMs: WINDOW_MS,
+      repos: [repoA],
+      sessions,
+      parents,
+      roots: { needsInput: new Set(), running: new Set(['remote-root']) },
+      outcomes: new Map(),
+      sessionServers: new Map([['remote-root', 'srv_kitchen']]),
+      serverNames: new Map([['srv_kitchen', 'Kitchen']]),
+    })
+
+    expect(groups.running.map((item) => item.session.id)).toEqual(['remote-root'])
+    expect(groups.running[0].updatedAt).toBe(NOW - 1000)
+    expect(groups.recent).toEqual([])
+  })
+
+  it('never emits a recent row for a remote session', () => {
+    const sessions = [createSession('remote', NOW - 1000, '/home/me/app')]
+
+    const groups = buildActiveWork({
+      now: NOW,
+      windowMs: WINDOW_MS,
+      repos: [repoA],
+      sessions,
+      parents: new Map(),
+      roots: emptyRoots,
+      outcomes: new Map(),
+      sessionServers: new Map([['remote', 'srv_kitchen']]),
+    })
+
+    expect(groups).toEqual({ needsInput: [], running: [], recent: [] })
+  })
 })
 
 describe('needsWorktreeLookup', () => {

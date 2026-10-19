@@ -48,6 +48,8 @@ interface UseSessionsAcrossDirectoriesOptions {
   allDirectories?: boolean
   project?: { id: string; subpath: string }
   includeChildren?: boolean
+  /** Overrides the route's server for callers that always read a specific server, such as local active work. */
+  serverId?: string
 }
 
 type SessionDirectoryCursors = Record<string, string>
@@ -65,7 +67,8 @@ export const useSessionsAcrossDirectories = (
   directories: string[],
   options?: UseSessionsAcrossDirectoriesOptions,
 ) => {
-  const serverId = useOpenCodeServerId();
+  const routeServerId = useOpenCodeServerId();
+  const serverId = options?.serverId ?? routeServerId;
   const uniqueDirectories = useMemo(
     () => Array.from(new Set(directories.filter(Boolean))),
     [directories],

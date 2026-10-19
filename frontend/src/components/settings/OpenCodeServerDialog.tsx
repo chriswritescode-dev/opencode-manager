@@ -4,8 +4,10 @@ import { zodResolver } from '@hookform/resolvers/zod'
 import { z } from 'zod'
 import { AlertTriangle, CheckCircle2, Loader2, ScanLine, XCircle } from 'lucide-react'
 import {
-  OPENCODE_SERVER_DEFAULT_USERNAME,
+  OPENCODE_SERVER_LINK_VERSION,
+  OPENCODE_SERVER_USERNAME,
   parseOpenCodeServerLink,
+  readOpenCodeServerLinkVersion,
   type OpenCodeServer,
   type OpenCodeServerLink,
   type OpenCodeServerTestResult,
@@ -110,7 +112,7 @@ function buildDefaultValues(server?: OpenCodeServer | null): ServerFormValues {
   return {
     name: server?.name ?? '',
     baseUrl: server?.baseUrl ?? '',
-    username: server?.username ?? OPENCODE_SERVER_DEFAULT_USERNAME,
+    username: server?.username ?? OPENCODE_SERVER_USERNAME,
     password: '',
     enabled: server?.enabled ?? true,
   }
@@ -177,7 +179,10 @@ export function OpenCodeServerDialog({
   const applyPairingLink = (text: string) => {
     const link = parseOpenCodeServerLink(text)
     if (!link) {
-      setLinkError('That is not a valid OpenCode pairing link.')
+      const version = readOpenCodeServerLinkVersion(text)
+      setLinkError(version !== null && version !== OPENCODE_SERVER_LINK_VERSION
+        ? `This pairing link uses link version ${version}, but this Manager expects version ${OPENCODE_SERVER_LINK_VERSION}. Update the Manager or the ocm CLI and generate a new QR code.`
+        : 'That is not a valid OpenCode pairing link.')
       return
     }
     setPairingLink(link)
@@ -264,7 +269,7 @@ export function OpenCodeServerDialog({
                         setLinkInput(event.target.value)
                         setLinkError(null)
                       }}
-                      placeholder="ocm://link?v=1&kind=opencode&..."
+                      placeholder={`ocm://link?v=${OPENCODE_SERVER_LINK_VERSION}&kind=opencode&...`}
                       rows={2}
                       className="font-mono"
                     />

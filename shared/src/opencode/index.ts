@@ -1,4 +1,7 @@
 import { OpenCode } from '@opencode/client'
+import { OPENCODE_SERVER_USERNAME } from '../schemas/opencode-servers'
+
+export { OPENCODE_SERVER_USERNAME }
 
 export type {
   AgentInfo,
@@ -93,6 +96,23 @@ export type {
 } from './mcp'
 
 export {
+  createOpenCodePairingNonce,
+  createOpenCodePairingProof,
+  decryptOpenCodePairingCredentials,
+  encryptOpenCodePairingCredentials,
+  isOpenCodePairingCredentials,
+  isOpenCodePairingNonce,
+  verifyOpenCodePairingProof,
+} from './pairing'
+
+export type {
+  OpenCodePairingCredentials,
+  OpenCodePairingDecryptOptions,
+  OpenCodePairingEncryptedCredentials,
+  OpenCodePairingKeyOptions,
+} from './pairing'
+
+export {
   OPENCODE_PINNED_VERSION,
   OPENCODE_SUPPORTED_VERSION_RANGE,
   buildOpenCodeReleaseAsset,
@@ -109,8 +129,6 @@ export { OPENCODE_LIFECYCLE_STATES, OPENCODE_RECOVERY_ACTIONS } from './lifecycl
 
 export type { OpenCodeLifecycleState, OpenCodeLifecycleStatus, OpenCodeRecoveryAction } from './lifecycle'
 
-export const OPENCODE_SERVER_USERNAME = 'opencode'
-
 export type OpenCodeApi = ReturnType<typeof OpenCode.make>
 
 export interface OpenCodeApiOptions {
@@ -120,8 +138,8 @@ export interface OpenCodeApiOptions {
   headers?: Record<string, string>
 }
 
-export function buildOpenCodeBasicAuth(password: string): string {
-  const bytes = new TextEncoder().encode(`${OPENCODE_SERVER_USERNAME}:${password}`)
+export function buildOpenCodeBasicAuth(password: string, username: string = OPENCODE_SERVER_USERNAME): string {
+  const bytes = new TextEncoder().encode(`${username}:${password}`)
   let binary = ''
   for (const byte of bytes) binary += String.fromCharCode(byte)
   return `Basic ${btoa(binary)}`

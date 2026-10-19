@@ -32,10 +32,13 @@ import { formatActivityWindow } from '@/lib/activeWork'
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from '@/components/ui/tooltip'
 import { restoreOverlayFocus } from '@/lib/overlayFocus'
 import { cn } from '@/lib/utils'
+import { isLocalOpenCodeServer, useRouteOpenCodeServerId } from '@/contexts/OpenCodeServerContext'
 
 const PANEL_WIDTH_CLASSES: Partial<Record<PanelTool, string>> = {
   activity: 'w-80',
 }
+
+const REMOTE_TOOL_KEYS: ReadonlySet<string> = new Set(['activity', 'mcp', 'skills', 'terminal'])
 
 function ActivityWindowLabel() {
   const minutes = useActivityWindowMinutes()
@@ -86,7 +89,6 @@ interface ToolSidePanelProps {
   directory?: string
   terminalDirectory?: string
   terminalTarget?: TerminalTarget
-  allowedPanelTools?: readonly PanelTool[]
   repoDirectory?: string
   currentBranch?: string
   selectedFilePath?: string
@@ -150,7 +152,6 @@ export function ToolSidePanel({
   directory,
   terminalDirectory,
   terminalTarget,
-  allowedPanelTools,
   repoDirectory,
   currentBranch = 'main',
   selectedFilePath,
@@ -162,6 +163,7 @@ export function ToolSidePanel({
   const { activeTool, toggleTool, closePanel } = panel
   const location = useLocation()
   const openNavItem = useOpenNavItem()
+  const isRemoteRoute = !isLocalOpenCodeServer(useRouteOpenCodeServerId())
   const railRef = useRef<HTMLElement>(null)
   const previousActiveToolRef = useRef(activeTool)
 
@@ -180,13 +182,10 @@ export function ToolSidePanel({
   const terminalWorkspaceTarget: TerminalTarget | undefined =
     terminalTarget ?? (repoId === undefined ? undefined : { kind: 'repo', repoId })
   for (const item of buildToolItems(location.pathname)) {
+    if (isRemoteRoute && !REMOTE_TOOL_KEYS.has(item.key)) continue
     const tool = toolKeyOf(item)
-    if (isPanelTool(tool)) {
-      if (allowedPanelTools && !allowedPanelTools.includes(tool)) continue
-      panelTools.push({ item, tool })
-    } else {
-      actionItems.push(item)
-    }
+    if (isPanelTool(tool)) panelTools.push({ item, tool })
+    else actionItems.push(item)
   }
   const activeLabel = panelTools.find(({ tool }) => tool === activeTool)?.item.label
 

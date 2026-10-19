@@ -571,7 +571,7 @@ describe('SSEAggregator upstream resynchronization signal', () => {
 
     const resyncs = client.events.filter(event => event.event === 'resync')
     expect(resyncs).toHaveLength(2)
-    expect(JSON.parse(resyncs[0]!.data)).toMatchObject({ timestamp: expect.any(Number) })
+    expect(JSON.parse(resyncs[0]!.data)).toEqual({ timestamp: expect.any(Number) })
     expect(client.frames).toHaveLength(0)
   })
 

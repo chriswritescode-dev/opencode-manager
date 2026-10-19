@@ -9,7 +9,7 @@ vi.mock('../../src/utils/logger', () => ({
 }))
 
 import type { OpenCodeApi } from '@opencode-manager/shared/opencode'
-import type { OpenCodeServer } from '@opencode-manager/shared/schemas'
+import type { OpenCodeServer, OpenCodeServerTestResult } from '@opencode-manager/shared/schemas'
 import { sseAggregator } from '../../src/services/sse-aggregator'
 import {
   RemoteServerEventHub,
@@ -442,6 +442,16 @@ describe('RemoteServerEventHub reconnection', () => {
     vi.useRealTimers()
   })
 
+  async function openThenReconnect(): Promise<void> {
+    hub.start()
+    sources.sources[0]!.open()
+    await flushPromises()
+    sources.sources[0]!.fail({ message: 'connection lost' })
+    await vi.advanceTimersByTimeAsync(1000)
+    sources.sources[1]!.open()
+    await flushPromises()
+  }
+
   it('sends a resync to the subscribers of the server on connect', () => {
     const clientA = createCapturingClient()
     const clientB = createCapturingClient()
@@ -453,7 +463,7 @@ describe('RemoteServerEventHub reconnection', () => {
 
     const resyncs = clientA.events.filter(event => event.event === 'resync')
     expect(resyncs).toHaveLength(1)
-    expect(JSON.parse(resyncs[0]!.data)).toMatchObject({ timestamp: expect.any(Number) })
+    expect(JSON.parse(resyncs[0]!.data)).toEqual({ timestamp: expect.any(Number), serverId: 'srv_a' })
     expect(clientB.events.filter(event => event.event === 'resync')).toHaveLength(0)
   })
 
@@ -497,6 +507,75 @@ describe('RemoteServerEventHub reconnection', () => {
     expect(hub.getStatuses()).toEqual([
       { serverId: 'srv_a', connected: true, version: '2.0.15', error: null },
     ])
+  })
+
+  it('probes the version again after a rejected probe', async () => {
+    vi.useFakeTimers()
+    vi.mocked(fake.registry.test)
+      .mockRejectedValueOnce(new Error('no info endpoint'))
+      .mockResolvedValueOnce({ ok: true, version: '2.0.15', versionSupported: true, error: null })
+
+    await openThenReconnect()
+
+    expect(fake.registry.test).toHaveBeenCalledTimes(2)
+    expect(hub.getStatuses()).toEqual([
+      { serverId: 'srv_a', connected: true, version: '2.0.15', error: null },
+    ])
+  })
+
+  it('probes the version again after a probe without a version', async () => {
+    vi.useFakeTimers()
+    vi.mocked(fake.registry.test)
+      .mockResolvedValueOnce({ ok: false, version: null, versionSupported: false, error: 'unreachable' })
+      .mockResolvedValueOnce({ ok: true, version: '2.0.15', versionSupported: true, error: null })
+
+    await openThenReconnect()
+
+    expect(fake.registry.test).toHaveBeenCalledTimes(2)
+    expect(hub.getStatuses()).toEqual([
+      { serverId: 'srv_a', connected: true, version: '2.0.15', error: null },
+    ])
+  })
+
+  it('clears the version and probes again when the server is updated', async () => {
+    hub.start()
+    sources.sources[0]!.open()
+    await flushPromises()
+    expect(hub.getStatuses()[0]?.version).toBe('2.0.15')
+
+    vi.mocked(fake.registry.test).mockResolvedValueOnce({ ok: true, version: '2.1.0', versionSupported: true, error: null })
+    fake.emit({ type: 'upserted', serverId: 'srv_a' })
+
+    expect(hub.getStatuses()[0]?.version).toBeNull()
+
+    sources.sources[1]!.open()
+    await flushPromises()
+
+    expect(fake.registry.test).toHaveBeenCalledTimes(2)
+    expect(hub.getStatuses()[0]?.version).toBe('2.1.0')
+  })
+
+  it('ignores a probe that started before the server was updated', async () => {
+    let resolveFirstProbe: (result: OpenCodeServerTestResult) => void = () => {}
+    vi.mocked(fake.registry.test).mockImplementationOnce(() => new Promise((resolve) => {
+      resolveFirstProbe = resolve
+    }))
+
+    hub.start()
+    sources.sources[0]!.open()
+    await flushPromises()
+    expect(fake.registry.test).toHaveBeenCalledTimes(1)
+
+    vi.mocked(fake.registry.test).mockResolvedValueOnce({ ok: true, version: '2.1.0', versionSupported: true, error: null })
+    fake.emit({ type: 'upserted', serverId: 'srv_a' })
+    sources.sources[1]!.open()
+    await flushPromises()
+
+    resolveFirstProbe({ ok: true, version: '1.0.0', versionSupported: true, error: null })
+    await flushPromises()
+
+    expect(fake.registry.test).toHaveBeenCalledTimes(2)
+    expect(hub.getStatuses()[0]?.version).toBe('2.1.0')
   })
 
   it('closes and forgets the stream when the server is disabled', () => {
@@ -662,18 +741,6 @@ describe('RemoteServerEventHub failure handling', () => {
 
   it('keeps the version null when the version probe rejects', async () => {
     vi.mocked(fake.registry.test).mockRejectedValue(new Error('no info endpoint'))
-
-    hub.start()
-    sources.sources[0]!.open()
-    await flushPromises()
-
-    expect(hub.getStatuses()).toEqual([
-      { serverId: 'srv_a', connected: true, version: null, error: null },
-    ])
-  })
-
-  it('keeps the version null when the registry cannot test a server', async () => {
-    ;(fake.registry as unknown as { test?: unknown }).test = undefined
 
     hub.start()
     sources.sources[0]!.open()

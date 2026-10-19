@@ -221,7 +221,20 @@ describe('OpenCodeEventStream', () => {
     transport.resync()
 
     expect(onResync).toHaveBeenCalledTimes(1)
-    expect(onResync).toHaveBeenCalledWith(['/repo'])
+    expect(onResync).toHaveBeenCalledWith(['/repo'], undefined)
+  })
+
+  it('passes the server id of a remote resync to the global monitor', () => {
+    const transport = new TestEventStreamTransport()
+    const stream = new OpenCodeEventStream({ transport })
+    const onResync = vi.fn()
+
+    stream.subscribeGlobalMonitor({ directories: ['/repo'], onEvent: vi.fn(), onResync })
+    transport.openConnection()
+    transport.connected()
+    transport.resync({ timestamp: 1, serverId: 'srv_remote' })
+
+    expect(onResync).toHaveBeenCalledWith(['/repo'], 'srv_remote')
   })
 
   it('reports visibility through the transport adapter', async () => {

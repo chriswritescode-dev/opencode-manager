@@ -142,6 +142,44 @@ describe('opencode server proxy routes', () => {
     expect(fetchMock).not.toHaveBeenCalled()
   })
 
+  it('returns 400 for repeated encoded traversal that survives segment decoding', async () => {
+    const fetchMock = createFetchMock()
+    const app = buildApp(fetchMock as unknown as typeof fetch)
+
+    const res = await app.request('/api/opencode/servers/srv_1/api/%25252e%25252e/config')
+
+    expect(res.status).toBe(400)
+    expect(await res.json()).toEqual({ error: 'Invalid proxy path' })
+    expect(fetchMock).not.toHaveBeenCalled()
+  })
+
+  it('returns 400 when a prefixed base URL would be escaped by path normalization', async () => {
+    getConnectionMock.mockReturnValue({ baseUrl: 'http://remote.example:4096/prefix', authorization: basicAuth })
+    const fetchMock = createFetchMock()
+    const app = buildApp(fetchMock as unknown as typeof fetch)
+
+    const res = await app.request(
+      '/api/opencode/servers/srv_1/api/session/%25252e%25252e/%25252e%25252e/config',
+    )
+
+    expect(res.status).toBe(400)
+    expect(await res.json()).toEqual({ error: 'Invalid proxy path' })
+    expect(fetchMock).not.toHaveBeenCalled()
+  })
+
+  it('proxies a normal API path under a prefixed base URL unchanged', async () => {
+    getConnectionMock.mockReturnValue({ baseUrl: 'http://remote.example:4096/prefix', authorization: basicAuth })
+    const fetchMock = createFetchMock()
+    const app = buildApp(fetchMock as unknown as typeof fetch)
+
+    const res = await app.request('/api/opencode/servers/srv_1/api/session')
+
+    expect(res.status).toBe(200)
+    expect(fetchMock).toHaveBeenCalledTimes(1)
+    const [url] = fetchMock.mock.calls[0] as [string, RequestInit]
+    expect(url).toBe('http://remote.example:4096/prefix/api/session')
+  })
+
   it('returns 404 for upstream paths outside /api', async () => {
     const fetchMock = createFetchMock()
     const app = buildApp(fetchMock as unknown as typeof fetch)

@@ -7,6 +7,7 @@ import { useAuth } from '@/hooks/useAuth'
 import { useServerHealth } from '@/hooks/useServerHealth'
 import { getRepo } from '@/api/repos'
 import type { ActiveWorkItem } from '@/lib/activeWork'
+import type { UnreadScheduleRun } from '@/api/schedules'
 
 vi.mock('@/hooks/useAuth')
 vi.mock('@/hooks/useServerHealth')
@@ -30,6 +31,16 @@ vi.mock('@/hooks/useActiveWork', () => ({
   useActiveWork: activityMocks.useActiveWork,
   useActivityWindowMinutes: activityMocks.useActivityWindowMinutes,
   useRepoActivityState: () => null,
+}))
+
+const scheduleMocks = vi.hoisted(() => ({
+  useUnreadScheduleRuns: vi.fn(),
+  useMarkAllScheduleRunsViewed: vi.fn(),
+}))
+
+vi.mock('@/hooks/useSchedules', () => ({
+  useUnreadScheduleRuns: scheduleMocks.useUnreadScheduleRuns,
+  useMarkAllScheduleRunsViewed: scheduleMocks.useMarkAllScheduleRunsViewed,
 }))
 
 function createActiveWorkItem(): ActiveWorkItem {
@@ -58,6 +69,33 @@ function createActiveWorkItem(): ActiveWorkItem {
       cloneStatus: 'ready',
       clonedAt: 0,
     },
+  }
+}
+
+function createUnreadScheduleRun(): UnreadScheduleRun {
+  const now = Date.now()
+  return {
+    id: 1,
+    jobId: 1,
+    repoId: 1,
+    triggerSource: 'schedule',
+    status: 'completed',
+    startedAt: now - 60000,
+    finishedAt: now - 30000,
+    viewedAt: null,
+    createdAt: now - 60000,
+    sessionId: null,
+    sessionTitle: null,
+    logText: null,
+    responseText: null,
+    errorText: null,
+    runBranch: null,
+    commitHash: null,
+    worktreePath: null,
+    jobName: 'Nightly report',
+    repoName: 'repo1',
+    repoPath: '/path/to/repo1',
+    preview: 'Report ready',
   }
 }
 
@@ -158,6 +196,8 @@ describe('MoreDrawer', () => {
     })
     activityMocks.useActivityWindowMinutes.mockReturnValue(30)
     setActivityGroups({})
+    scheduleMocks.useUnreadScheduleRuns.mockReturnValue({ data: { runs: [], total: 0, failed: 0 } })
+    scheduleMocks.useMarkAllScheduleRunsViewed.mockReturnValue({ mutate: vi.fn(), isPending: false })
   })
 
   it('renders Settings and Logout menu items', () => {
@@ -361,7 +401,7 @@ describe('MoreDrawer', () => {
     expect(handleClose).not.toHaveBeenCalled()
   })
 
-  it('offers the terminal plus account items on a linked-server route', () => {
+  it('offers only the remote-capable project items on a linked-server route', () => {
     mockAuth()
     mockServerHealth()
     setActivityGroups({ recent: [createActiveWorkItem()] })
@@ -371,15 +411,35 @@ describe('MoreDrawer', () => {
     })
 
     expect(screen.getByText('Home')).toBeInTheDocument()
+    expect(screen.getByText('MCP')).toBeInTheDocument()
+    expect(screen.getByText('Skills')).toBeInTheDocument()
     expect(screen.getByText('Settings')).toBeInTheDocument()
     expect(screen.getByText('Logout')).toBeInTheDocument()
     expect(screen.getByText('Terminal')).toBeInTheDocument()
     expect(screen.queryByText('Files')).not.toBeInTheDocument()
     expect(screen.queryByText('Source Control')).not.toBeInTheDocument()
-    expect(screen.queryByText('MCP')).not.toBeInTheDocument()
+    expect(screen.queryByText('Preview')).not.toBeInTheDocument()
     expect(screen.queryByText('Schedules')).not.toBeInTheDocument()
+    expect(screen.queryByText('Reset Permissions')).not.toBeInTheDocument()
     expect(screen.queryByText('Repos')).not.toBeInTheDocument()
     expect(screen.queryByRole('button', { name: 'Assistant' })).not.toBeInTheDocument()
     expect(screen.queryByRole('heading', { name: 'Activity' })).not.toBeInTheDocument()
+  })
+
+  it('shows unread reports and marks them all read', () => {
+    const markAllReportsViewed = vi.fn()
+    mockAuth()
+    mockServerHealth()
+    scheduleMocks.useUnreadScheduleRuns.mockReturnValue({
+      data: { runs: [createUnreadScheduleRun()], total: 1, failed: 0 },
+    })
+    scheduleMocks.useMarkAllScheduleRunsViewed.mockReturnValue({ mutate: markAllReportsViewed, isPending: false })
+    renderMoreDrawer({ initialEntry: '/repos/1/sessions/session-1', routePath: '/repos/:id/sessions/:sessionId' })
+
+    expect(screen.getByText('Nightly report')).toBeInTheDocument()
+
+    fireEvent.click(screen.getByRole('button', { name: 'Mark all read' }))
+
+    expect(markAllReportsViewed).toHaveBeenCalledTimes(1)
   })
 })

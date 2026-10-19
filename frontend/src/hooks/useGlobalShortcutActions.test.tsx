@@ -129,6 +129,20 @@ describe('useGlobalShortcutActions', () => {
     await waitFor(() => expect(location()).toBe('/repos/5/sessions/session-new'))
   })
 
+  it('ignores the terminal and source-control shortcuts on a linked-server route', async () => {
+    const { location } = renderHarness('/servers/srv_kitchen/sessions/ses_1')
+
+    pressLeaderFollowUp('t')
+    pressLeaderFollowUp('b')
+
+    await act(async () => {
+      await Promise.resolve()
+    })
+
+    expect(location()).toBe('/servers/srv_kitchen/sessions/ses_1')
+    expect(mocks.getRepo).not.toHaveBeenCalled()
+  })
+
   it('does not swallow the follow-up key when the route has no new-session host', async () => {
     renderHarness('/')
 

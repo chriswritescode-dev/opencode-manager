@@ -1,7 +1,7 @@
 import { beforeAll, describe, expect, it, vi } from 'vitest'
 import { render, screen, waitFor } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
-import { buildOpenCodeServerLink, type OpenCodeServer, type OpenCodeServerTestResult } from '@opencode-manager/shared/schemas'
+import { buildOpenCodeServerLink, OPENCODE_SERVER_LINK_VERSION, type OpenCodeServer, type OpenCodeServerTestResult } from '@opencode-manager/shared/schemas'
 import { OpenCodeServerDialog, type OpenCodeServerFormValues } from './OpenCodeServerDialog'
 
 const testResult: OpenCodeServerTestResult = {
@@ -87,6 +87,20 @@ describe('OpenCodeServerDialog', () => {
     await user.click(screen.getByRole('button', { name: 'Use link' }))
 
     expect(screen.getByRole('alert')).toHaveTextContent('That is not a valid OpenCode pairing link.')
+    expect(screen.queryByText(/Pairing with/)).not.toBeInTheDocument()
+  })
+
+  it('explains that a pairing link from an unsupported version cannot be used', async () => {
+    const user = userEvent.setup()
+    renderDialog()
+
+    const outdated = pairingLink.replace(`v=${OPENCODE_SERVER_LINK_VERSION}`, 'v=1')
+    await user.type(screen.getByLabelText('Pairing link'), outdated)
+    await user.click(screen.getByRole('button', { name: 'Use link' }))
+
+    expect(screen.getByRole('alert')).toHaveTextContent(
+      `This pairing link uses link version 1, but this Manager expects version ${OPENCODE_SERVER_LINK_VERSION}. Update the Manager or the ocm CLI and generate a new QR code.`,
+    )
     expect(screen.queryByText(/Pairing with/)).not.toBeInTheDocument()
   })
 

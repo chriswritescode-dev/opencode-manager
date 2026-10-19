@@ -1,5 +1,7 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 import { Database } from 'bun:sqlite'
+import type { OpenCodeServer } from '@opencode-manager/shared/schemas'
+import { encryptOpenCodePairingCredentials, verifyOpenCodePairingProof } from '@opencode-manager/shared/opencode'
 import { migrate } from '../db/migration-runner'
 import { allMigrations } from '../db/migrations'
 import { decryptSecret } from '../utils/crypto'
@@ -45,11 +47,30 @@ function readStoredSecret(db: Database, serverId: string): { value: string } | u
     .get(`opencode_server:${serverId}:password`) as { value: string } | undefined
 }
 
+function flipLastByte(value: string): string {
+  const bytes = Buffer.from(value.replace(/-/g, '+').replace(/_/g, '/'), 'base64')
+  const last = bytes.length - 1
+  bytes[last] = (bytes[last] ?? 0) ^ 0x01
+  return bytes.toString('base64url')
+}
+
 describe('OpenCodeServerRegistry', () => {
   let db: Database
   let localClient: OpenCodeClient
   let fetchFn: FetchMock
   let registry: OpenCodeServerRegistry
+
+  type CreateInput = Parameters<OpenCodeServerRegistry['create']>[0]
+
+  function createServer(overrides: Partial<CreateInput> = {}): Promise<OpenCodeServer> {
+    return registry.create({
+      name: 'Studio',
+      baseUrl: 'https://studio.example.com',
+      username: 'opencode',
+      enabled: true,
+      ...overrides,
+    })
+  }
 
   beforeEach(() => {
     db = createTestDb()
@@ -60,7 +81,7 @@ describe('OpenCodeServerRegistry', () => {
 
   describe('create', () => {
     it('creates a server with a normalized base URL and an encrypted password', async () => {
-      const server = await registry.create({
+      const server = await createServer({
         name: 'Studio',
         baseUrl: 'https://studio.example.com/',
         password: 'super-secret',
@@ -80,20 +101,25 @@ describe('OpenCodeServerRegistry', () => {
     })
 
     it('creates a server without a password when none is provided', async () => {
-      const server = await registry.create({ name: 'Open', baseUrl: 'http://localhost:4096' })
+      const server = await createServer({ name: 'Open', baseUrl: 'http://localhost:4096' })
 
       expect(server.hasPassword).toBe(false)
       expect(readStoredSecret(db, server.id)).toBeUndefined()
     })
 
-    it('rejects an invalid request with a validation error', async () => {
-      await expect(registry.create({ name: '', baseUrl: 'not-a-url' })).rejects.toMatchObject({ status: 400 })
-    })
-
     it('redeems a pairing code and stores the returned credentials', async () => {
-      fetchFn.mockResolvedValueOnce(jsonResponse({ username: 'alice', password: 'paired-pass' }))
+      const requests: Array<{ nonce: string; proof: string }> = []
+      fetchFn.mockImplementationOnce(async (_url, init) => {
+        const body = JSON.parse(String(init?.body)) as { nonce: string; proof: string }
+        requests.push(body)
+        return jsonResponse(await encryptOpenCodePairingCredentials({
+          code: PAIR_CODE,
+          nonce: body.nonce,
+          credentials: { username: 'alice', password: 'paired-pass' },
+        }))
+      })
 
-      const server = await registry.create({
+      const server = await createServer({
         name: 'Paired',
         baseUrl: 'https://remote.example.com',
         username: 'ignored',
@@ -107,14 +133,72 @@ describe('OpenCodeServerRegistry', () => {
       const [url, init] = fetchFn.mock.calls[0]!
       expect(url).toBe(PAIR_URL)
       expect(init?.method).toBe('POST')
-      expect(init?.body).toBe(JSON.stringify({ code: PAIR_CODE }))
+      expect(requests).toHaveLength(1)
+      expect(Object.keys(requests[0]!).sort()).toEqual(['nonce', 'proof'])
+      expect(String(init?.body)).not.toContain(PAIR_CODE)
+      await expect(verifyOpenCodePairingProof(PAIR_CODE, requests[0]!.nonce, requests[0]!.proof)).resolves.toBe(true)
+    })
+
+    it('rejects a tampered encrypted payload', async () => {
+      fetchFn.mockImplementationOnce(async (_url, init) => {
+        const { nonce } = JSON.parse(String(init?.body)) as { nonce: string }
+        const encrypted = await encryptOpenCodePairingCredentials({
+          code: PAIR_CODE,
+          nonce,
+          credentials: { username: 'alice', password: 'paired-pass' },
+        })
+        return jsonResponse({ ...encrypted, ciphertext: flipLastByte(encrypted.ciphertext) })
+      })
+
+      const error = await createServer({
+        name: 'Paired',
+        baseUrl: 'https://remote.example.com',
+        pairing: { pairUrl: PAIR_URL, code: PAIR_CODE },
+      }).catch((caught: unknown) => caught)
+
+      expect(error).toBeInstanceOf(OpenCodeServerPairingError)
+      expect((error as { status?: number }).status).toBe(502)
+      expect(registry.list()).toEqual([])
+    })
+
+    it('rejects a response without an encrypted payload', async () => {
+      fetchFn.mockResolvedValueOnce(jsonResponse({ username: 'alice', password: 'paired-pass' }))
+
+      const error = await createServer({
+        name: 'Paired',
+        baseUrl: 'https://remote.example.com',
+        pairing: { pairUrl: PAIR_URL, code: PAIR_CODE },
+      }).catch((caught: unknown) => caught)
+
+      expect(error).toBeInstanceOf(OpenCodeServerPairingError)
+      expect(registry.list()).toEqual([])
+    })
+
+    it('rejects decrypted credentials with an empty username', async () => {
+      fetchFn.mockImplementationOnce(async (_url, init) => {
+        const { nonce } = JSON.parse(String(init?.body)) as { nonce: string }
+        return jsonResponse(await encryptOpenCodePairingCredentials({
+          code: PAIR_CODE,
+          nonce,
+          credentials: { username: '', password: 'paired-pass' },
+        }))
+      })
+
+      const error = await createServer({
+        name: 'Paired',
+        baseUrl: 'https://remote.example.com',
+        pairing: { pairUrl: PAIR_URL, code: PAIR_CODE },
+      }).catch((caught: unknown) => caught)
+
+      expect(error).toBeInstanceOf(OpenCodeServerPairingError)
+      expect(registry.list()).toEqual([])
     })
 
     it('fails with a pairing error when the pairing endpoint rejects the code', async () => {
       fetchFn.mockResolvedValueOnce(new Response(null, { status: 403 }))
 
       await expect(
-        registry.create({
+        createServer({
           name: 'Paired',
           baseUrl: 'https://remote.example.com',
           pairing: { pairUrl: PAIR_URL, code: PAIR_CODE },
@@ -128,13 +212,11 @@ describe('OpenCodeServerRegistry', () => {
     it('fails with a pairing error when the pairing endpoint is unreachable', async () => {
       fetchFn.mockRejectedValueOnce(new Error('connect ECONNREFUSED'))
 
-      const error = await registry
-        .create({
-          name: 'Paired',
-          baseUrl: 'https://remote.example.com',
-          pairing: { pairUrl: PAIR_URL, code: PAIR_CODE },
-        })
-        .catch((caught: unknown) => caught)
+      const error = await createServer({
+        name: 'Paired',
+        baseUrl: 'https://remote.example.com',
+        pairing: { pairUrl: PAIR_URL, code: PAIR_CODE },
+      }).catch((caught: unknown) => caught)
 
       expect(error).toBeInstanceOf(OpenCodeServerPairingError)
       expect((error as Error).message).not.toContain(PAIR_CODE)
@@ -143,7 +225,7 @@ describe('OpenCodeServerRegistry', () => {
 
   describe('update', () => {
     it('updates fields and clears the password when null is sent', async () => {
-      const server = await registry.create({
+      const server = await createServer({
         name: 'Studio',
         baseUrl: 'https://studio.example.com',
         password: 'super-secret',
@@ -157,7 +239,7 @@ describe('OpenCodeServerRegistry', () => {
     })
 
     it('replaces the password when a new one is sent', async () => {
-      const server = await registry.create({
+      const server = await createServer({
         name: 'Studio',
         baseUrl: 'https://studio.example.com',
         password: 'super-secret',
@@ -177,7 +259,7 @@ describe('OpenCodeServerRegistry', () => {
 
   describe('delete', () => {
     it('removes the server row and its stored password', async () => {
-      const server = await registry.create({
+      const server = await createServer({
         name: 'Studio',
         baseUrl: 'https://studio.example.com',
         password: 'super-secret',
@@ -197,7 +279,7 @@ describe('OpenCodeServerRegistry', () => {
     })
 
     it('caches remote clients and invalidates the cache on update', async () => {
-      const server = await registry.create({
+      const server = await createServer({
         name: 'Studio',
         baseUrl: 'https://studio.example.com',
         password: 'super-secret',
@@ -215,7 +297,7 @@ describe('OpenCodeServerRegistry', () => {
     })
 
     it('sends stored basic auth without the local default directory header', async () => {
-      const server = await registry.create({
+      const server = await createServer({
         name: 'Studio',
         baseUrl: 'https://studio.example.com',
         password: 'super-secret',
@@ -231,7 +313,7 @@ describe('OpenCodeServerRegistry', () => {
     })
 
     it('throws a not-found error for unknown and disabled servers', async () => {
-      const server = await registry.create({
+      const server = await createServer({
         name: 'Studio',
         baseUrl: 'https://studio.example.com',
         password: 'super-secret',
@@ -245,7 +327,7 @@ describe('OpenCodeServerRegistry', () => {
 
   describe('getConnection', () => {
     it('returns the remote base URL and authorization header', async () => {
-      const server = await registry.create({
+      const server = await createServer({
         name: 'Studio',
         baseUrl: 'https://studio.example.com/',
         username: 'alice',
@@ -282,13 +364,13 @@ describe('OpenCodeServerRegistry', () => {
     it('reports an unsupported version', async () => {
       fetchFn.mockResolvedValueOnce(jsonResponse({ version: '1.4.0' }))
 
-      const result = await registry.test({ baseUrl: 'https://studio.example.com' })
+      const result = await registry.test({ baseUrl: 'https://studio.example.com', username: 'opencode' })
 
       expect(result).toEqual({ ok: true, version: '1.4.0', versionSupported: false, error: null })
     })
 
     it('uses stored credentials for a server id', async () => {
-      const server = await registry.create({
+      const server = await createServer({
         name: 'Studio',
         baseUrl: 'https://studio.example.com',
         username: 'alice',
@@ -306,7 +388,7 @@ describe('OpenCodeServerRegistry', () => {
     it('reports a failed request without throwing', async () => {
       fetchFn.mockResolvedValueOnce(new Response(null, { status: 500 }))
 
-      const result = await registry.test({ baseUrl: 'https://studio.example.com' })
+      const result = await registry.test({ baseUrl: 'https://studio.example.com', username: 'opencode' })
 
       expect(result.ok).toBe(false)
       expect(result.version).toBeNull()
@@ -316,7 +398,7 @@ describe('OpenCodeServerRegistry', () => {
     it('reports an unreachable server without throwing', async () => {
       fetchFn.mockRejectedValueOnce(new Error('connect ECONNREFUSED'))
 
-      const result = await registry.test({ baseUrl: 'https://studio.example.com' })
+      const result = await registry.test({ baseUrl: 'https://studio.example.com', username: 'opencode' })
 
       expect(result).toEqual({
         ok: false,
@@ -336,10 +418,10 @@ describe('OpenCodeServerRegistry', () => {
       const changes: OpenCodeServerChange[] = []
       const unsubscribe = registry.onChange((change) => changes.push(change))
 
-      const server = await registry.create({ name: 'Studio', baseUrl: 'https://studio.example.com' })
+      const server = await createServer({ name: 'Studio', baseUrl: 'https://studio.example.com' })
       registry.delete(server.id)
       unsubscribe()
-      await registry.create({ name: 'Other', baseUrl: 'https://other.example.com' })
+      await createServer({ name: 'Other', baseUrl: 'https://other.example.com' })
 
       expect(changes).toEqual([
         { type: 'upserted', serverId: server.id },

@@ -10,7 +10,7 @@ import { SquareFill } from "@/components/ui/square-fill";
 import { Header } from "@/components/ui/header";
 import { Badge } from "@/components/ui/badge";
 import { SessionPickerDialog } from "@/components/session/SessionPickerDialog";
-import { getRepoPath, getServerPath, getSessionListPath, getSessionPath } from '@/lib/navigation'
+import { getRepoPath, getServerPath, getServerSessionPath, getSessionListPath, getSessionPath } from '@/lib/navigation'
 import { FetchError } from '@/api/fetchWrapper'
 
 import { FileBrowserSheet } from "@/components/file-browser/FileBrowserSheet";
@@ -47,9 +47,9 @@ import { ProjectActionsMenu } from "@/components/repo/ProjectActionsMenu";
 import { RepoActionsDialog } from "@/components/repo/RepoActionsDialog";
 import { ResetPermissionsDialog } from "@/components/repo/ResetPermissionsDialog";
 import { RepoSkillsDialog } from "@/components/repo/RepoSkillsDialog";
-import { compactSession, forkSession, listSessionMessages } from "@/api/opencode";
+import { compactSession, forkSession, listProjects, listSessionMessages } from "@/api/opencode";
 import { useOpenCodeServerId, isLocalOpenCodeServer } from "@/contexts/OpenCodeServerContext";
-import { useOpenCodeServers } from "@/hooks/useOpenCodeServers";
+import { useOpenCodeServers, useOpenCodeServerStatuses } from "@/hooks/useOpenCodeServers";
 import { serverScopedKey } from "@/lib/serverScope";
 import { useSessionStatus } from "@/stores/sessionStatusStore";
 import type { PageCommandActions } from "@/lib/builtinCommands";
@@ -81,7 +81,6 @@ const OLDER_HISTORY_SCROLL_THRESHOLD_PX = 200
 
 const PENDING_ACTION_SYNC_INTERVAL_MS = 30000
 const PROMPT_OVERLAY_CLEARANCE_PX = 16
-const REMOTE_SESSION_PANEL_TOOLS = ['terminal'] as const
 
 function applyRevertBoundary(
   messages: SessionMessageInfo[],
@@ -204,6 +203,21 @@ export function SessionDetail() {
 
   const { servers: linkedServers } = useOpenCodeServers({ enabled: isRemoteServer });
 
+  const { data: remoteProjects } = useQuery({
+    queryKey: serverScopedKey(['opencode', 'projects'], serverId),
+    queryFn: () => listProjects(serverId),
+    enabled: isRemoteServer,
+    retry: false,
+  });
+
+  const remoteProjectDirectory = useMemo(() => {
+    if (!isRemoteServer || !sessionDirectory) return undefined;
+    const project = remoteProjects?.find(
+      (entry) => sessionDirectory === entry.canonical || sessionDirectory.startsWith(`${entry.canonical}/`),
+    );
+    return project?.canonical ?? sessionDirectory;
+  }, [isRemoteServer, remoteProjects, sessionDirectory]);
+
   const sessionBranch = useMemo(
     () => (repo && !isAssistantSession ? resolveSessionBranch(repo, sessionDirectory, repoSiblings) : null),
     [repo, isAssistantSession, sessionDirectory, repoSiblings],
@@ -225,6 +239,10 @@ export function SessionDetail() {
   }, [sessionId, session?.location.directory]);
 
   const { isConnected, isReconnecting } = useSSE(sessionDirectory, sessionId);
+  const { statusById } = useOpenCodeServerStatuses({ enabled: isRemoteServer });
+  const remoteServerConnected = statusById[serverId]?.connected === true;
+  const streamConnected = isRemoteServer ? isConnected && remoteServerConnected : isConnected;
+  const streamReconnecting = isRemoteServer ? isReconnecting || !remoteServerConnected : isReconnecting;
 
   const {
     messages: transcriptMessages,
@@ -801,8 +819,8 @@ export function SessionDetail() {
             <ContextUsageIndicator
               directory={sessionDirectory}
               sessionID={sessionId}
-              isConnected={isConnected}
-              isReconnecting={isReconnecting}
+              isConnected={streamConnected}
+              isReconnecting={streamReconnecting}
               revertMessageID={revertMessageID}
             />
             {!isRemoteServer && <SessionMoreButton />}
@@ -892,7 +910,7 @@ export function SessionDetail() {
                   onMinimize={() => handleMinimizeForm(currentForm)}
                 />
               )}
-              <SessionSendErrorBanner sessionId={sessionId} isConnected={isConnected} isReconnecting={isReconnecting} />
+              <SessionSendErrorBanner sessionId={sessionId} isConnected={streamConnected} isReconnecting={streamReconnecting} />
               <SessionGoalBar sessionID={sessionId} />
               <BackgroundWorkBar
                 sessionID={sessionId}
@@ -925,9 +943,8 @@ export function SessionDetail() {
           filesBasePath={workspaceBasePath}
           currentBranch={repo?.currentBranch || repo?.branch || "main"}
           selectedFilePath={selectedFilePath}
-          repoDirectory={repoDirectory}
+          repoDirectory={isRemoteServer ? sessionDirectory : repoDirectory}
           terminalTarget={isRemoteServer ? { kind: 'server', serverId } : { kind: 'repo', repoId }}
-          allowedPanelTools={isRemoteServer ? REMOTE_SESSION_PANEL_TOOLS : undefined}
           onSkillLoaded={handleSkillLoaded}
           walkthroughSourceRequest={walkthroughSourceRequest}
           walkthroughModel={modelRef}
@@ -937,30 +954,37 @@ export function SessionDetail() {
       </div>
 
       {/* Sessions Picker */}
-      {!isRemoteServer && (
-        <SessionPickerDialog
-          open={sessionsDialogOpen}
-          onOpenChange={setSessionsDialogOpen}
-          currentRepo={repo}
-          activeSessionID={sessionId || undefined}
-          onSelectSession={(session, sessionRepo) => {
-            if (sessionRepo.id === repoId) {
-              navigate(`/repos/${repoId}/sessions/${session.id}${sessionRouteSuffix}`)
-            } else {
-              navigate(getSessionPath(sessionRepo.id, session.id))
-            }
-            setSessionsDialogOpen(false)
-          }}
-          onDeleteActiveSession={() => {
-            setSessionsDialogOpen(false)
-            handleCloseSession()
-          }}
-          onSelectRepo={(selectedRepo) => {
-            navigate(getRepoPath(selectedRepo.id))
-            setSessionsDialogOpen(false)
-          }}
-        />
-      )}
+      <SessionPickerDialog
+        open={sessionsDialogOpen}
+        onOpenChange={setSessionsDialogOpen}
+        currentRepo={isRemoteServer ? undefined : repo}
+        activeSessionID={sessionId || undefined}
+        remote={
+          isRemoteServer
+            ? { serverId, serverName: linkedServer?.name, projectDirectory: remoteProjectDirectory }
+            : undefined
+        }
+        onSelectSession={(session, sessionRepo) => {
+          if (!isRemoteServer && sessionRepo.id === repoId) {
+            navigate(`/repos/${repoId}/sessions/${session.id}${sessionRouteSuffix}`)
+          } else {
+            navigate(getSessionPath(sessionRepo.id, session.id))
+          }
+          setSessionsDialogOpen(false)
+        }}
+        onSelectRemoteSession={(session, targetServerId) => {
+          navigate(getServerSessionPath(targetServerId, session.id))
+          setSessionsDialogOpen(false)
+        }}
+        onDeleteActiveSession={() => {
+          setSessionsDialogOpen(false)
+          handleCloseSession()
+        }}
+        onSelectRepo={(selectedRepo) => {
+          navigate(getRepoPath(selectedRepo.id))
+          setSessionsDialogOpen(false)
+        }}
+      />
 
       {sideQuestion && sessionId && (
         <SideQuestionDialog
@@ -999,13 +1023,13 @@ export function SessionDetail() {
         />
       )}
 
-      {!isRemoteServer && sessionId && (
+      {sessionId && (
         <RepoSkillsDialog
           open={!docked && skillsDialogOpen}
           onOpenChange={setSkillsDialogOpen}
           repoId={repoId}
           sessionId={sessionId}
-          directory={repoDirectory}
+          directory={isRemoteServer ? sessionDirectory : repoDirectory}
           onSkillLoaded={handleSkillLoaded}
         />
       )}
@@ -1021,13 +1045,11 @@ export function SessionDetail() {
         />
       )}
 
-      {!isRemoteServer && (
-        <RepoMcpDialog
-          open={!docked && mcpDialogOpen}
-          onOpenChange={setMcpDialogOpen}
-          directory={repoDirectory}
-        />
-      )}
+      <RepoMcpDialog
+        open={!docked && mcpDialogOpen}
+        onOpenChange={setMcpDialogOpen}
+        directory={isRemoteServer ? sessionDirectory : repoDirectory}
+      />
 
       {!isAssistantSession && !isRemoteServer && (
         <RepoActionsDialog

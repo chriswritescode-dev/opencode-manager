@@ -12,7 +12,7 @@ export type OpenCodeServerStatusProvider = () => OpenCodeServerStatus[]
 
 export function createOpenCodeServerRoutes(
   registry: OpenCodeServerRegistry,
-  statusProvider?: OpenCodeServerStatusProvider,
+  statusProvider: OpenCodeServerStatusProvider,
 ) {
   const app = new Hono()
 
@@ -49,7 +49,6 @@ export function createOpenCodeServerRoutes(
   })
 
   app.get('/status', (c) => {
-    if (!statusProvider) return c.json({ statuses: [] })
     try {
       return c.json({ statuses: statusProvider() })
     } catch (error) {

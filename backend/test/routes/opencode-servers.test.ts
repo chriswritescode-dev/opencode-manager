@@ -34,7 +34,7 @@ describe('opencode server routes', () => {
     vi.clearAllMocks()
     registry.list.mockReturnValue([])
     registry.get.mockReturnValue(null)
-    app = createOpenCodeServerRoutes(registry as unknown as OpenCodeServerRegistry)
+    app = createOpenCodeServerRoutes(registry as unknown as OpenCodeServerRegistry, () => [])
   })
 
   it('lists servers', async () => {
@@ -105,6 +105,13 @@ describe('opencode server routes', () => {
 
     expect(response.status).toBe(201)
     expect(await response.json()).toEqual({ server: SERVER, test: TEST_RESULT })
+    expect(registry.create).toHaveBeenCalledWith({
+      name: 'Studio',
+      baseUrl: 'https://studio.example.com',
+      username: 'opencode',
+      password: 'super-secret',
+      enabled: true,
+    })
     expect(registry.test).toHaveBeenCalledWith({ serverId: 'srv_1' })
   })
 
@@ -201,13 +208,5 @@ describe('opencode server routes', () => {
 
     expect(response.status).toBe(200)
     expect(await response.json()).toEqual({ statuses })
-  })
-
-  it('returns an empty status list when no provider is configured', async () => {
-    const response = await app.request('/status')
-
-    expect(response.status).toBe(200)
-    expect(await response.json()).toEqual({ statuses: [] })
-    expect(registry.get).not.toHaveBeenCalled()
   })
 })

@@ -1,4 +1,9 @@
 import { describe, it, expect } from 'vitest'
+import {
+  createOpenCodePairingNonce,
+  createOpenCodePairingProof,
+  decryptOpenCodePairingCredentials,
+} from '@opencode-manager/shared/opencode'
 import { generatePairingCode, resolveDefaultBaseUrl, startPairingServer } from '../src/link'
 import type { PairingServerOptions } from '../src/link'
 import { buildOpenCodeServerLink, parseOpenCodeServerLink } from '@opencode-manager/shared/schemas'
@@ -20,6 +25,11 @@ function startPairing(overrides: Partial<PairingServerOptions> = {}) {
 
 function redeem(url: string, body: unknown, init: RequestInit = {}): Promise<Response> {
   return fetch(url, { method: 'POST', body: JSON.stringify(body), ...init })
+}
+
+async function createChallenge(code = CODE): Promise<{ nonce: string; proof: string }> {
+  const nonce = createOpenCodePairingNonce()
+  return { nonce, proof: await createOpenCodePairingProof(code, nonce) }
 }
 
 describe('generatePairingCode', () => {
@@ -47,36 +57,58 @@ describe('resolveDefaultBaseUrl', () => {
 })
 
 describe('startPairingServer', () => {
-  it('redeems a valid code, returns credentials, and resolves linked', async () => {
+  it('redeems a valid proof and returns credentials that decrypt with the code and nonce', async () => {
     const pairing = await startPairing()
+    const challenge = await createChallenge()
 
-    const response = await redeem(pairing.url, { code: CODE })
+    const response = await redeem(pairing.url, challenge)
+    const raw = await response.text()
 
     expect(response.status).toBe(200)
-    await expect(response.json()).resolves.toEqual(CREDENTIALS)
+    expect(raw).not.toContain(CREDENTIALS.password)
+    expect(raw).not.toContain(CODE)
+
+    const payload = JSON.parse(raw) as { iv: string; ciphertext: string }
+    await expect(decryptOpenCodePairingCredentials({
+      code: CODE,
+      nonce: challenge.nonce,
+      iv: payload.iv,
+      ciphertext: payload.ciphertext,
+    })).resolves.toEqual(CREDENTIALS)
     await expect(pairing.done).resolves.toBe('linked')
     await pairing.close()
   })
 
-  it('rejects a wrong code with 401 and rejects after three failures', async () => {
+  it('rejects a wrong proof with 401 and rejects after three failures', async () => {
     const pairing = await startPairing({ maxAttempts: 3 })
 
     for (let attempt = 0; attempt < 3; attempt++) {
-      const response = await redeem(pairing.url, { code: `${CODE}-wrong` })
+      const response = await redeem(pairing.url, await createChallenge(`${CODE}-wrong`))
       expect(response.status).toBe(401)
-      await expect(response.json()).resolves.toEqual({ error: 'invalid pairing code' })
+      await expect(response.json()).resolves.toEqual({ error: 'invalid pairing proof' })
     }
 
     await expect(pairing.done).resolves.toBe('rejected')
     await pairing.close()
   })
 
-  it('treats a missing code as a failed attempt', async () => {
+  it('rejects a malformed body with 400 and counts it as a failure', async () => {
     const pairing = await startPairing({ maxAttempts: 1 })
 
-    const response = await redeem(pairing.url, { notCode: CODE })
+    const response = await redeem(pairing.url, { nonce: 'not-a-nonce', proof: 'not-a-proof' })
 
-    expect(response.status).toBe(401)
+    expect(response.status).toBe(400)
+    await expect(response.json()).resolves.toEqual({ error: 'invalid pairing request' })
+    await expect(pairing.done).resolves.toBe('rejected')
+    await pairing.close()
+  })
+
+  it('treats a missing challenge as a failed attempt', async () => {
+    const pairing = await startPairing({ maxAttempts: 1 })
+
+    const response = await redeem(pairing.url, { notA: 'challenge' })
+
+    expect(response.status).toBe(400)
     await expect(pairing.done).resolves.toBe('rejected')
     await pairing.close()
   })
@@ -85,7 +117,7 @@ describe('startPairingServer', () => {
     const pairing = await startPairing({ ttlMs: 50 })
 
     await expect(pairing.done).resolves.toBe('expired')
-    await expect(redeem(pairing.url, { code: CODE })).rejects.toThrow()
+    await expect(redeem(pairing.url, await createChallenge())).rejects.toThrow()
     await pairing.close()
   })
 
@@ -112,6 +144,7 @@ describe('startPairingServer', () => {
       pairing: { pairUrl: pairing.url, code: CODE },
     })
 
+    expect(link).toContain('v=2')
     expect(parseOpenCodeServerLink(link)).toEqual({
       kind: 'opencode',
       name: 'build-host',
@@ -119,6 +152,21 @@ describe('startPairingServer', () => {
       pairing: { pairUrl: `http://127.0.0.1:${pairing.port}/redeem`, code: CODE },
     })
 
+    await pairing.close()
+  })
+
+  it('encrypts credentials under a key derived from the pairing code', async () => {
+    const pairing = await startPairing()
+    const challenge = await createChallenge()
+
+    const payload = await redeem(pairing.url, challenge).then((response) => response.json()) as { iv: string; ciphertext: string }
+
+    await expect(decryptOpenCodePairingCredentials({
+      code: `${CODE}-other`,
+      nonce: challenge.nonce,
+      iv: payload.iv,
+      ciphertext: payload.ciphertext,
+    })).rejects.toThrow()
     await pairing.close()
   })
 })

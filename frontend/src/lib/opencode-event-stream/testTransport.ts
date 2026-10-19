@@ -46,8 +46,8 @@ export class TestEventStreamTransport implements EventStreamTransport {
     this.handlers?.onHeartbeat()
   }
 
-  resync(): void {
-    this.handlers?.onResync()
+  resync(payload?: unknown): void {
+    this.handlers?.onResync(payload === undefined ? undefined : JSON.stringify(payload))
   }
 
   fail(): void {

@@ -183,11 +183,16 @@ password.
 
 Before showing the code it calls `GET <url>/api/info` with Basic auth and warns
 when the server is unreachable; a `401` stops the command. The command then
-listens on `0.0.0.0` for one `POST /redeem` carrying the pairing code, answers
-it with the credentials, prints `Linked`, and exits. A wrong code returns `401`
-and the third failure ends the command; the TTL ends it with
-`Pairing code expired`. The pairing listener is plain HTTP, so run it only on a
-private network.
+listens on `0.0.0.0` for one `POST /redeem`. The pairing code never crosses the
+network: the Manager sends a random nonce and an HMAC-SHA256 proof of the code,
+and the listener answers with the credentials encrypted with AES-256-GCM under a
+key derived from the code and the nonce (HKDF-SHA256). It then prints `Linked`
+and exits. A malformed request returns `400`, a wrong proof returns `401`, and
+the third failure ends the command; the TTL ends it with `Pairing code expired`.
+Links use version `v=2`; the Manager rejects older links with a message to
+update. The pairing listener and the OpenCode server itself still use plain HTTP
+unless you put them behind TLS, so use HTTPS or a private network for the
+server traffic.
 
 ## OpenCode TUI plugin
 

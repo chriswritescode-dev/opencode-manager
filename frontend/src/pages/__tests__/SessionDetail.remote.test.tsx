@@ -5,6 +5,8 @@ import { MemoryRouter, Route, Routes } from 'react-router-dom'
 import { OpenCodeServerProvider } from '@/contexts/OpenCodeServerContext'
 import { LocationCatcher } from '@/test/test-utils'
 import { MessageThread } from '@/components/message/MessageThread'
+import { ContextUsageIndicator } from '@/components/session/ContextUsageIndicator'
+import { SessionSendErrorBanner } from '@/components/session/SessionSendErrorBanner'
 import { PendingActionsGroup } from '@/components/notifications/PendingActionsGroup'
 import { SessionDetail } from '../SessionDetail'
 
@@ -25,6 +27,7 @@ const mocks = vi.hoisted(() => ({
   useDialogParam: vi.fn(),
   useTerminalDialogParam: vi.fn(),
   useOpenCodeServers: vi.fn(),
+  useOpenCodeServerStatuses: vi.fn(),
   getRepo: vi.fn(),
   useSessionStatus: vi.fn(),
   SourceControlPanel: vi.fn(() => null),
@@ -62,6 +65,7 @@ vi.mock('@/hooks/useSSE', () => ({ useSSE: mocks.useSSE }))
 
 vi.mock('@/hooks/useOpenCodeServers', () => ({
   useOpenCodeServers: mocks.useOpenCodeServers,
+  useOpenCodeServerStatuses: mocks.useOpenCodeServerStatuses,
 }))
 
 vi.mock('@/hooks/useModelSelection', () => ({
@@ -235,6 +239,11 @@ describe('SessionDetail remote server mode', () => {
     mocks.useTerminalDialogParam.mockReturnValue([false, vi.fn()])
     mocks.useSessionStatus.mockReturnValue({ setStatus: vi.fn() })
     mocks.useOpenCodeServers.mockReturnValue({ servers: [server], isLoading: false })
+    mocks.useOpenCodeServerStatuses.mockReturnValue({
+      statusById: {
+        [server.id]: { serverId: server.id, connected: true, version: null, error: null },
+      },
+    })
   })
 
   it('does not load the Manager repo for a remote session', async () => {
@@ -266,7 +275,7 @@ describe('SessionDetail remote server mode', () => {
     expect(mocks.useSessionTranscript).toHaveBeenLastCalledWith('ses_remote', '/home/me/app')
   })
 
-  it('hides Manager-only panels and actions', async () => {
+  it('hides Manager-only panels and actions while keeping the remote-capable tools', async () => {
     renderRemoteSession()
 
     await waitFor(() => {
@@ -279,10 +288,7 @@ describe('SessionDetail remote server mode', () => {
     expect(mocks.ProjectActionsMenu).not.toHaveBeenCalled()
     expect(mocks.RepoActionsDialog).not.toHaveBeenCalled()
     expect(mocks.ResetPermissionsDialog).not.toHaveBeenCalled()
-    expect(mocks.RepoSkillsDialog).not.toHaveBeenCalled()
-    expect(mocks.RepoMcpDialog).not.toHaveBeenCalled()
     expect(mocks.ChangesWalkthroughSheet).not.toHaveBeenCalled()
-    expect(mocks.SessionPickerDialog).not.toHaveBeenCalled()
     expect(mocks.SessionMoreButton).not.toHaveBeenCalled()
     expect(vi.mocked(PendingActionsGroup).mock.calls.at(-1)?.[0]).toEqual(
       expect.objectContaining({ showScheduleReports: false }),
@@ -320,9 +326,76 @@ describe('SessionDetail remote server mode', () => {
       expect.objectContaining({
         repoId: undefined,
         terminalTarget: { kind: 'server', serverId: 'srv_kitchen' },
-        allowedPanelTools: ['terminal'],
         directory: '/home/me/app',
       }),
+    )
+  })
+
+  it('offers the MCP and skills views scoped to the remote session directory', async () => {
+    renderRemoteSession()
+
+    await waitFor(() => {
+      expect(screen.getByTestId('message-thread')).toBeInTheDocument()
+    })
+
+    expect(vi.mocked(mocks.RepoMcpDialog).mock.calls.at(-1)?.[0]).toEqual(
+      expect.objectContaining({ directory: '/home/me/app' }),
+    )
+    expect(vi.mocked(mocks.RepoSkillsDialog).mock.calls.at(-1)?.[0]).toEqual(
+      expect.objectContaining({ sessionId: 'ses_remote', directory: '/home/me/app' }),
+    )
+    expect(vi.mocked(mocks.ToolSidePanel).mock.calls.at(-1)?.[0]).toEqual(
+      expect.objectContaining({ repoDirectory: '/home/me/app', sessionId: 'ses_remote' }),
+    )
+  })
+
+  it('treats the stream as disconnected when the remote server status is disconnected', async () => {
+    mocks.useOpenCodeServerStatuses.mockReturnValue({
+      statusById: {
+        [server.id]: { serverId: server.id, connected: false, version: null, error: null },
+      },
+    })
+
+    renderRemoteSession()
+
+    await waitFor(() => {
+      expect(screen.getByTestId('message-thread')).toBeInTheDocument()
+    })
+
+    expect(vi.mocked(ContextUsageIndicator).mock.calls.at(-1)?.[0]).toEqual(
+      expect.objectContaining({ isConnected: false, isReconnecting: true }),
+    )
+    expect(vi.mocked(SessionSendErrorBanner).mock.calls.at(-1)?.[0]).toEqual(
+      expect.objectContaining({ isConnected: false, isReconnecting: true }),
+    )
+  })
+
+  it('treats the stream as connected when both the Manager stream and remote server are connected', async () => {
+    renderRemoteSession()
+
+    await waitFor(() => {
+      expect(screen.getByTestId('message-thread')).toBeInTheDocument()
+    })
+
+    expect(vi.mocked(ContextUsageIndicator).mock.calls.at(-1)?.[0]).toEqual(
+      expect.objectContaining({ isConnected: true, isReconnecting: false }),
+    )
+    expect(vi.mocked(SessionSendErrorBanner).mock.calls.at(-1)?.[0]).toEqual(
+      expect.objectContaining({ isConnected: true, isReconnecting: false }),
+    )
+  })
+
+  it('treats the stream as disconnected when the Manager stream drops even if the remote server is connected', async () => {
+    mocks.useSSE.mockReturnValue({ isConnected: false, isReconnecting: true })
+
+    renderRemoteSession()
+
+    await waitFor(() => {
+      expect(screen.getByTestId('message-thread')).toBeInTheDocument()
+    })
+
+    expect(vi.mocked(ContextUsageIndicator).mock.calls.at(-1)?.[0]).toEqual(
+      expect.objectContaining({ isConnected: false, isReconnecting: true }),
     )
   })
 
@@ -342,6 +415,62 @@ describe('SessionDetail remote server mode', () => {
     })
 
     expect(capturedPathname.current).toBe('/servers/srv_kitchen/sessions/ses_child')
+  })
+
+  it('renders the session picker scoped to the linked server', async () => {
+    renderRemoteSession()
+
+    await waitFor(() => {
+      expect(screen.getByTestId('message-thread')).toBeInTheDocument()
+    })
+
+    const pickerProps = mocks.SessionPickerDialog.mock.calls.at(-1)?.[0]
+    expect(pickerProps).toEqual(
+      expect.objectContaining({
+        open: false,
+        currentRepo: undefined,
+        activeSessionID: 'ses_remote',
+        remote: {
+          serverId: 'srv_kitchen',
+          serverName: 'Kitchen',
+          projectDirectory: '/home/me/app',
+        },
+      }),
+    )
+  })
+
+  it('opens the session picker from the sessions shortcut on a remote route', async () => {
+    renderRemoteSession()
+
+    await waitFor(() => {
+      expect(screen.getByTestId('message-thread')).toBeInTheDocument()
+    })
+
+    const actions = mocks.useShortcutActions.mock.calls.at(-1)?.[0]
+    act(() => {
+      actions?.sessions?.()
+    })
+
+    await waitFor(() => {
+      expect(mocks.SessionPickerDialog.mock.calls.at(-1)?.[0]).toEqual(
+        expect.objectContaining({ open: true, remote: expect.objectContaining({ serverId: 'srv_kitchen' }) }),
+      )
+    })
+  })
+
+  it('navigates to a session chosen from the remote picker', async () => {
+    const { capturedPathname } = renderRemoteSession()
+
+    await waitFor(() => {
+      expect(screen.getByTestId('message-thread')).toBeInTheDocument()
+    })
+
+    const pickerProps = mocks.SessionPickerDialog.mock.calls.at(-1)?.[0]
+    act(() => {
+      pickerProps?.onSelectRemoteSession?.({ ...remoteSession, id: 'ses_other' }, 'srv_kitchen')
+    })
+
+    expect(capturedPathname.current).toBe('/servers/srv_kitchen/sessions/ses_other')
   })
 
   it('shows a loader until the session directory is available', async () => {

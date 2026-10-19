@@ -48,6 +48,7 @@ function getBaseItems(): MoreDrawerItem[] {
 }
 
 const SESSION_DETAIL_PATH = /^\/repos\/(\d+)\/sessions\/[^/]+$/
+const SERVER_SESSION_DETAIL_PATH = /^\/servers\/[^/]+\/sessions\/[^/]+$/
 
 export function isSessionDetailPath(pathname: string): boolean {
   return SESSION_DETAIL_PATH.test(pathname)
@@ -61,8 +62,6 @@ const MANAGER_ONLY_ITEM_KEYS: ReadonlySet<string> = new Set([
   'preview',
   'walkthrough',
   'actions',
-  'mcp',
-  'skills',
   'reset-permissions',
   'schedules',
   'all-schedules',
@@ -86,6 +85,18 @@ export function toolKeyOf(item: MoreDrawerItem): string | null {
 
 function buildRouteNavModel(pathname: string): NavModel {
   const baseItems = getBaseItems()
+
+  if (SERVER_SESSION_DETAIL_PATH.test(pathname)) {
+    return {
+      primary: [getAssistantNavItem()],
+      items: [
+        { key: 'mcp', label: 'MCP', icon: Plug, dialog: 'mcp' },
+        { key: 'skills', label: 'Skills', icon: Sparkles, dialog: 'skills' },
+        { key: 'terminal', label: 'Terminal', icon: SquareTerminal, dialog: 'terminal' },
+        ...baseItems,
+      ],
+    }
+  }
 
   const repoDetailMatch = /^\/repos\/(\d+)$/.exec(pathname)
   if (repoDetailMatch) {
@@ -132,17 +143,6 @@ function buildRouteNavModel(pathname: string): NavModel {
     return {
       primary: [getAssistantNavItem()],
       items,
-    }
-  }
-
-  const serverSessionMatch = /^\/servers\/[^/]+\/sessions\/[^/]+$/.exec(pathname)
-  if (serverSessionMatch) {
-    return {
-      primary: [],
-      items: [
-        { key: 'terminal', label: 'Terminal', icon: SquareTerminal, dialog: 'terminal' },
-        ...baseItems,
-      ],
     }
   }
 

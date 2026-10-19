@@ -18,5 +18,6 @@ export type SSEVisibilityRequest = z.infer<typeof SSEVisibilitySchema>;
 
 export interface SSEEventEnvelope {
   directory?: string | null;
+  serverId?: string;
   payload: V2Event;
 }

@@ -9,6 +9,8 @@ import { getRepo } from '@/api/repos'
 import { useRefreshOnOpen } from '@/hooks/useRefreshOnOpen'
 import { SideDrawer, SideDrawerContent } from '@/components/ui/side-drawer'
 import { CompactActivityList } from '@/components/activity/CompactActivityList'
+import { ScheduleReportsList } from '@/components/notifications/ScheduleReportsBell'
+import { useMarkAllScheduleRunsViewed, useUnreadScheduleRuns } from '@/hooks/useSchedules'
 import { buildMoreItems, buildNavModel, isManagerOnlyNavItem, isSessionDetailPath, type MoreDrawerItem } from './moreDrawerItems'
 import { useSwipeBack } from '@/hooks/useMobile'
 import { cn, getRepoDisplayName } from '@/lib/utils'
@@ -79,6 +81,9 @@ export function MoreDrawer({ isOpen, onClose }: MoreDrawerProps) {
   const isAssistantSession = isSessionDetail && searchParams.get('assistant') === '1'
   const isRemoteRoute = !isLocalOpenCodeServer(useRouteOpenCodeServerId())
   const { open: openMobileSheet } = useMobileTabBar()
+  const { data: unreadReports } = useUnreadScheduleRuns()
+  const markAllReportsViewed = useMarkAllScheduleRunsViewed()
+  const total = unreadReports?.total ?? 0
 
   useEffect(() => {
     if (isOpen && swipeRef.current) {
@@ -188,6 +193,18 @@ export function MoreDrawer({ isOpen, onClose }: MoreDrawerProps) {
           )}
         </div>
         <SideDrawerContent className="flex flex-col gap-4 pb-3">
+          {total > 0 && (
+            <div className="overflow-hidden rounded-lg border border-border">
+              <ScheduleReportsList
+                runs={unreadReports?.runs ?? []}
+                total={total}
+                rowClassName="py-3"
+                onMarkAllRead={() => markAllReportsViewed.mutate()}
+                markAllPending={markAllReportsViewed.isPending}
+                maxHeightClass=""
+              />
+            </div>
+          )}
           {isOpen && !isRemoteRoute && (
             <CompactActivityList onNavigate={(path) => navigate(path)} />
           )}

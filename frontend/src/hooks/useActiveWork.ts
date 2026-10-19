@@ -1,10 +1,13 @@
 import { useEffect, useMemo, useState } from 'react'
 import { useQueries, useQueryClient, type QueryClient } from '@tanstack/react-query'
+import { LOCAL_OPENCODE_SERVER_ID, parseServerDirectoryKey } from '@opencode-manager/shared/schemas'
 import type { SessionInfo } from '@opencode-manager/shared/opencode'
 import { sessionQueryOptions, useSessionsAcrossDirectories } from '@/hooks/useOpenCode'
 import { useNavigableRepos } from '@/hooks/useSidebarRepoGroups'
 import { usePendingInputSessionIDs, useRepoWorktreeList } from '@/contexts/RepoWorktreesContext'
 import { useSessionStatus } from '@/stores/sessionStatusStore'
+import { useOpenCodeServers } from '@/hooks/useOpenCodeServers'
+import { serverScopedKey } from '@/lib/serverScope'
 import { useSettings } from '@/hooks/useSettings'
 import { DEFAULT_ACTIVITY_WINDOW_MINUTES } from '@/api/types/settings'
 import { useRepoWorktrees } from '@/hooks/useRepoWorktrees'
@@ -77,24 +80,52 @@ export function useRepoActivityState(repo: Repo): 'needs-input' | 'running' | nu
   )
 }
 
+interface SessionScope {
+  serverId: string
+  directory: string | undefined
+}
+
+/**
+ * The owning server and plain directory of a session from the status store. A server-keyed
+ * directory names its owner, otherwise the session-server index does; everything else is local.
+ */
+function sessionScopeOf(
+  sessionID: string,
+  directories: ReadonlyMap<string, string>,
+  sessionServers: ReadonlyMap<string, string>,
+): SessionScope {
+  const directoryKey = directories.get(sessionID)
+  const parsed = directoryKey ? parseServerDirectoryKey(directoryKey) : null
+  const serverId =
+    parsed && parsed.serverId !== LOCAL_OPENCODE_SERVER_ID
+      ? parsed.serverId
+      : sessionServers.get(sessionID) ?? LOCAL_OPENCODE_SERVER_ID
+  return { serverId, directory: parsed?.directory }
+}
+
 /**
  * Walks a session's ancestor chain through the shared session cache, returning each link as
  * `[sessionID, parentID]` from the session down to its root. Stops at a root, a missing session,
- * or a cycle. Reusing `sessionQueryOptions` keeps these reads on the shared session cache.
+ * or a cycle. Remote sessions are read through their owning server, never the local API. Reusing
+ * `sessionQueryOptions` keeps these reads on the shared session cache.
  */
 async function fetchAncestorLinks(
   queryClient: QueryClient,
   sessionID: string,
   directories: ReadonlyMap<string, string>,
+  sessionServers: ReadonlyMap<string, string>,
 ): Promise<Array<[string, string | null]>> {
   const links: Array<[string, string | null]> = []
   const visited = new Set<string>()
+  const origin = sessionScopeOf(sessionID, directories, sessionServers)
   let currentID: string | null | undefined = sessionID
 
   while (currentID && !visited.has(currentID)) {
     visited.add(currentID)
+    const scope = sessionScopeOf(currentID, directories, sessionServers)
+    const directory = scope.serverId === origin.serverId ? scope.directory : undefined
     const session: SessionInfo = await queryClient.fetchQuery(
-      sessionQueryOptions(currentID, directories.get(currentID)),
+      sessionQueryOptions(currentID, directory, origin.serverId),
     )
     const parentID: string | null = session.parentID ?? null
     links.push([session.id, parentID])
@@ -135,6 +166,7 @@ export function useActiveWork(windowMs: number): {
     allDirectories: true,
     limit: ACTIVE_WORK_SESSION_LIMIT,
     includeChildren: true,
+    serverId: LOCAL_OPENCODE_SERVER_ID,
   })
 
   useEffect(() => {
@@ -163,6 +195,7 @@ export function useActiveWork(windowMs: number): {
   const runningShells = useSessionStatus((state) => state.runningShells)
   const outcomes = useSessionStatus((state) => state.outcomes)
   const sessionDirectories = useSessionStatus((state) => state.directories)
+  const sessionServers = useSessionStatus((state) => state.sessionServers)
   const pendingInputSessionIDs = usePendingInputSessionIDs()
 
   const parents = useMemo(() => {
@@ -204,11 +237,14 @@ export function useActiveWork(windowMs: number): {
   }, [sessions, parents, listedSessionIDs, roots, windowMs, now])
 
   const ancestorLinks = useQueries({
-    queries: missingRootIDs.map((sessionID) => ({
-      queryKey: ['opencode', 'session-ancestry', sessionID] as const,
-      queryFn: () => fetchAncestorLinks(queryClient, sessionID, sessionDirectories),
-      staleTime: Infinity,
-    })),
+    queries: missingRootIDs.map((sessionID) => {
+      const { serverId } = sessionScopeOf(sessionID, sessionDirectories, sessionServers)
+      return {
+        queryKey: serverScopedKey(['opencode', 'session-ancestry', sessionID], serverId),
+        queryFn: () => fetchAncestorLinks(queryClient, sessionID, sessionDirectories, sessionServers),
+        staleTime: Infinity,
+      }
+    }),
     combine: combineAncestorLinks,
   })
 
@@ -225,6 +261,35 @@ export function useActiveWork(windowMs: number): {
     [statuses, resolvedParents, runningShells, pendingInputSessionIDs],
   )
 
+  const resolvedSessionServers = useMemo(() => {
+    const merged = new Map(sessionServers)
+    for (const [sessionID, serverId] of sessionServers) {
+      const visited = new Set<string>()
+      let currentID: string | null | undefined = sessionID
+      while (currentID && !visited.has(currentID)) {
+        visited.add(currentID)
+        merged.set(currentID, serverId)
+        currentID = resolvedParents.get(currentID) ?? null
+      }
+    }
+    return merged
+  }, [sessionServers, resolvedParents])
+
+  const hasRemoteRoots = useMemo(
+    () =>
+      [...resolvedRoots.needsInput, ...resolvedRoots.running].some((sessionID) =>
+        resolvedSessionServers.has(sessionID),
+      ),
+    [resolvedRoots, resolvedSessionServers],
+  )
+
+  const { servers } = useOpenCodeServers({ enabled: hasRemoteRoots })
+
+  const serverNames = useMemo(() => {
+    if (!hasRemoteRoots || servers.length === 0) return undefined
+    return new Map(servers.map((server) => [server.id, server.name]))
+  }, [hasRemoteRoots, servers])
+
   const backfillRootIDs = useMemo(() => {
     const ids = new Set<string>()
     for (const sessionID of missingRootIDs) {
@@ -235,9 +300,10 @@ export function useActiveWork(windowMs: number): {
   }, [missingRootIDs, resolvedParents, listedSessionIDs])
 
   const fetchedSessions = useQueries({
-    queries: backfillRootIDs.map((sessionID) =>
-      sessionQueryOptions(sessionID, sessionDirectories.get(sessionID)),
-    ),
+    queries: backfillRootIDs.map((sessionID) => {
+      const { serverId, directory } = sessionScopeOf(sessionID, sessionDirectories, resolvedSessionServers)
+      return sessionQueryOptions(sessionID, directory, serverId)
+    }),
     combine: combineQuerySessions,
   })
 
@@ -255,8 +321,9 @@ export function useActiveWork(windowMs: number): {
         sessions: mergedSessions,
         parents: resolvedParents,
         roots: resolvedRoots,
+        sessionServers: resolvedSessionServers,
       }),
-    [now, windowMs, repos, mergedSessions, resolvedParents, resolvedRoots],
+    [now, windowMs, repos, mergedSessions, resolvedParents, resolvedRoots, resolvedSessionServers],
   )
 
   const {
@@ -276,8 +343,21 @@ export function useActiveWork(windowMs: number): {
         roots: resolvedRoots,
         outcomes,
         worktrees,
+        sessionServers: resolvedSessionServers,
+        serverNames,
       }),
-    [now, windowMs, repos, mergedSessions, resolvedParents, resolvedRoots, outcomes, worktrees],
+    [
+      now,
+      windowMs,
+      repos,
+      mergedSessions,
+      resolvedParents,
+      resolvedRoots,
+      outcomes,
+      worktrees,
+      resolvedSessionServers,
+      serverNames,
+    ],
   )
 
   return {
