@@ -29,6 +29,7 @@ const mocks = vi.hoisted(() => ({
 
   resolveOpenCodeModel: vi.fn(),
   onEvent: vi.fn(),
+  onServerConnected: vi.fn(),
   loggerError: vi.fn(),
   updateScheduleRunWorktree: vi.fn(),
   stubWorktreeManager: {
@@ -78,6 +79,7 @@ vi.mock('../../src/services/opencode-models', () => ({
 vi.mock('../../src/services/sse-aggregator', () => ({
   sseAggregator: {
     onEvent: mocks.onEvent,
+    onServerConnected: mocks.onServerConnected,
   },
 }))
 
@@ -161,6 +163,7 @@ describe('ScheduleService permission ruleset in session creation', () => {
     mocks.createScheduleRun.mockReturnValue(baseRun)
     mocks.resolveOpenCodeModel.mockResolvedValue({ providerID: 'openai', id: 'gpt-5-mini', model: 'openai/gpt-5-mini' })
     mocks.onEvent.mockReturnValue(vi.fn())
+    mocks.onServerConnected.mockReturnValue(vi.fn())
   })
 
   it('sends the default permission ruleset when job.permissionConfig is null', async () => {

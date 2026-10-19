@@ -2,11 +2,12 @@ import { beforeEach, describe, expect, it, vi } from 'vitest'
 import { Database } from 'bun:sqlite'
 import { migrate } from '../../src/db/migration-runner'
 import { allMigrations } from '../../src/db/migrations'
-import { getScheduleJobById, createScheduleRun, listScheduleRunsByJob } from '../../src/db/schedules'
+import { getScheduleJobById, createScheduleRun, getScheduleRunById, listScheduleRunsByJob } from '../../src/db/schedules'
 import type { OpenCodeApi } from '@opencode-manager/shared/opencode'
 import { ScheduleService } from '../../src/services/schedules'
+import { sseAggregator } from '../../src/services/sse-aggregator'
 import { createStubOpenCodeClient, stubLoadedModelCatalog } from '../helpers/stub-opencode-client'
-import { createStubScheduleApi } from '../helpers/stub-schedule-api'
+import { assistantMessage, createStubScheduleApi } from '../helpers/stub-schedule-api'
 
 vi.mock('../../src/utils/logger', () => ({
   logger: {
@@ -41,7 +42,20 @@ function createDatabase(): Database {
 function createClient() {
   const stub = createStubScheduleApi()
   const api = { ...stub.api, ...stubLoadedModelCatalog() } as unknown as OpenCodeApi
-  return { client: createStubOpenCodeClient({ api }), api: stub.api }
+  return { client: createStubOpenCodeClient({ api }), api: stub.api, state: stub.state }
+}
+
+function activeRunMonitor(jobId: number): { dispose(): void } | undefined {
+  const activeRuns = (ScheduleService as unknown as { activeRuns: Map<number, { sessionMonitor?: { dispose(): void } }> }).activeRuns
+  return activeRuns.get(jobId)?.sessionMonitor
+}
+
+function hasCancelInProgress(jobId: number): boolean {
+  return (ScheduleService as unknown as { pendingCancels: Map<number, unknown> }).pendingCancels.has(jobId)
+}
+
+function hasActiveRun(jobId: number): boolean {
+  return (ScheduleService as unknown as { activeRuns: Map<number, unknown> }).activeRuns.has(jobId)
 }
 
 function createService(db: Database, localClient: ReturnType<typeof createStubOpenCodeClient>, remoteClient: ReturnType<typeof createStubOpenCodeClient>, enabled = true, registered = true) {
@@ -120,6 +134,50 @@ describe('remote schedule targets', () => {
     expect(localClient.api.session.create).not.toHaveBeenCalled()
     expect(worktreeManager.prepare).not.toHaveBeenCalled()
     expect(worktreeManager.finalize).not.toHaveBeenCalled()
+  })
+
+  it('completes a remote run after a server reconnect when the settle event was missed', async () => {
+    const localClient = createClient().client
+    const { client, api, state } = createClient()
+    const { service } = createService(db, localClient, client)
+    const job = await service.createServerJob(REMOTE_SERVER.id, '/srv/projects/audit', baseRequest)
+
+    state.active = { 'ses-run-1': { type: 'running' } }
+    const run = await service.runServerJob(REMOTE_SERVER.id, job.id, 'manual')
+    await vi.waitFor(() => expect(api.session.active).toHaveBeenCalled())
+
+    state.active = {}
+    state.messages = [assistantMessage('Remote audit complete.', { completed: true })]
+    sseAggregator.notifyServerConnected(REMOTE_SERVER.id)
+
+    await vi.waitFor(() => {
+      expect(getScheduleRunById(db, null, job.id, run.id)).toMatchObject({
+        status: 'completed',
+        responseText: 'Remote audit complete.',
+      })
+    })
+  })
+
+  it('keeps waiting after a remote server reconnect while the session is still busy', async () => {
+    const localClient = createClient().client
+    const { client, api, state } = createClient()
+    const { service } = createService(db, localClient, client)
+    const job = await service.createServerJob(REMOTE_SERVER.id, '/srv/projects/audit', baseRequest)
+
+    state.active = { 'ses-run-1': { type: 'running' } }
+    const run = await service.runServerJob(REMOTE_SERVER.id, job.id, 'manual')
+    await vi.waitFor(() => expect(api.session.active).toHaveBeenCalled())
+    const activeChecks = vi.mocked(api.session.active).mock.calls.length
+
+    sseAggregator.notifyServerConnected(REMOTE_SERVER.id)
+
+    await vi.waitFor(() => {
+      expect(vi.mocked(api.session.active).mock.calls.length).toBeGreaterThan(activeChecks)
+    })
+    expect(getScheduleRunById(db, null, job.id, run.id)?.status).toBe('running')
+
+    activeRunMonitor(job.id)?.dispose()
+    await vi.waitFor(() => expect(hasActiveRun(job.id)).toBe(false))
   })
 
   it('records a failed run when the target server is disabled', async () => {
@@ -245,6 +303,42 @@ describe('remote schedule targets', () => {
     await createService(db, localClient, client, true, false).service.deleteServerRun(REMOTE_SERVER.id, job.id, runId)
 
     expect(listScheduleRunsByJob(db, null, job.id)).toEqual([])
+  })
+
+  it('cancels a running remote run while the target server is disabled', async () => {
+    const localClient = createClient().client
+    const { client } = createClient()
+    const { service } = createService(db, localClient, client)
+    const job = await service.createServerJob(REMOTE_SERVER.id, '/srv/projects/audit', baseRequest)
+    const run = await service.runServerJob(REMOTE_SERVER.id, job.id, 'manual')
+    const disabled = createService(db, localClient, client, false)
+
+    const cancelled = await disabled.service.cancelServerRun(REMOTE_SERVER.id, job.id, run.id)
+
+    expect(cancelled).toMatchObject({ id: run.id, status: 'cancelled', errorText: 'Run cancelled by user.' })
+    expect(hasActiveRun(job.id)).toBe(false)
+
+    await vi.waitFor(() => expect(hasCancelInProgress(job.id)).toBe(false))
+
+    expect(getScheduleRunById(db, null, job.id, run.id)).toMatchObject({ status: 'cancelled' })
+  })
+
+  it('cancels a running remote run when the target server is missing from the registry', async () => {
+    const localClient = createClient().client
+    const { client } = createClient()
+    const { service } = createService(db, localClient, client)
+    const job = await service.createServerJob(REMOTE_SERVER.id, '/srv/projects/audit', baseRequest)
+    const run = await service.runServerJob(REMOTE_SERVER.id, job.id, 'manual')
+    const unregistered = createService(db, localClient, client, true, false)
+
+    const cancelled = await unregistered.service.cancelServerRun(REMOTE_SERVER.id, job.id, run.id)
+
+    expect(cancelled).toMatchObject({ id: run.id, status: 'cancelled', errorText: 'Run cancelled by user.' })
+    expect(hasActiveRun(job.id)).toBe(false)
+
+    await vi.waitFor(() => expect(hasCancelInProgress(job.id)).toBe(false))
+
+    expect(getScheduleRunById(db, null, job.id, run.id)).toMatchObject({ status: 'cancelled' })
   })
 })
 

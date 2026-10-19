@@ -75,6 +75,8 @@ class ScheduleServiceError extends Error {
   }
 }
 
+class ServerUnavailableError extends ScheduleServiceError {}
+
 const SESSION_STOPPED_ERROR = 'The session stopped without producing an assistant response. This usually means OpenCode restarted mid-run or the session was interrupted. Open the linked session to inspect any partial output and rerun if needed.'
 
 const DELETION_RESERVATION_RUN_ID = -1
@@ -93,6 +95,7 @@ interface SessionMonitor {
 interface ActiveRun {
   runId: number
   abort: AbortController
+  sessionMonitor?: SessionMonitor
 }
 
 type CancelDecision = 'cancelled' | 'settled' | 'resume'
@@ -217,6 +220,12 @@ function createSessionMonitor(directory: string, sessionId: string, serverId: st
         handleEvent(event)
       })
 
+  const unsubscribeConnected = sseAggregator.onServerConnected((connectedServerId) => {
+    if (connectedServerId === serverId) {
+      push({ errorText: null, disposed: false })
+    }
+  })
+
   return {
     markSubmitted: () => {
       queued.length = 0
@@ -237,6 +246,7 @@ function createSessionMonitor(directory: string, sessionId: string, serverId: st
       }
       disposed = true
       unsubscribe()
+      unsubscribeConnected()
       push({ errorText: null, disposed: true })
     },
   }
@@ -335,6 +345,22 @@ export class ScheduleService {
     }
   }
 
+  private static attachSessionMonitor(jobId: number, runId: number, sessionMonitor: SessionMonitor): void {
+    const active = ScheduleService.activeRuns.get(jobId)
+    if (active?.runId === runId) {
+      active.sessionMonitor = sessionMonitor
+    }
+  }
+
+  private static disposeActiveRunMonitor(jobId: number, runId: number): void {
+    const active = ScheduleService.activeRuns.get(jobId)
+    if (active?.runId !== runId || !active.sessionMonitor) {
+      return
+    }
+    active.sessionMonitor.dispose()
+    active.sessionMonitor = undefined
+  }
+
   getActiveRunSessions(): ScheduledSessionRef[] {
     const refs: ScheduledSessionRef[] = []
 
@@ -362,10 +388,10 @@ export class ScheduleService {
   private assertServer(serverId: string) {
     const server = this.serverRegistry?.get(serverId)
     if (!server) {
-      throw new ScheduleServiceError('OpenCode server not found', 404)
+      throw new ServerUnavailableError('OpenCode server not found', 404)
     }
     if (!server.enabled) {
-      throw new ScheduleServiceError(`OpenCode server "${server.name}" is disabled`, 400)
+      throw new ServerUnavailableError(`OpenCode server "${server.name}" is disabled`, 400)
     }
     return server
   }
@@ -950,6 +976,7 @@ export class ScheduleService {
       }
 
       const sessionMonitor = createSessionMonitor(runDirectory, session.id, context.serverId)
+      ScheduleService.attachSessionMonitor(jobId, run.id, sessionMonitor)
 
       void this.submitPromptAndMonitor({
         repoId,
@@ -1029,7 +1056,17 @@ export class ScheduleService {
 
   private async cancelRunForTarget(target: ScheduleJobTarget, jobId: number, runId: number): Promise<ScheduleRun> {
     const job = this.loadJobForTarget(target, jobId)
-    const context = this.resolveTargetContext(target, job.directory)
+    let context: ScheduleTargetContext
+
+    try {
+      context = this.resolveTargetContext(target, job.directory)
+    } catch (error) {
+      if (target.kind !== 'server' || !(error instanceof ServerUnavailableError)) {
+        throw error
+      }
+      return this.cancelUnavailableServerRun(job, jobId, runId)
+    }
+
     const run = getScheduleRunById(this.db, context.repoId, jobId, runId)
 
     if (!run) {
@@ -1076,6 +1113,23 @@ export class ScheduleService {
       this.settleCancelFromState(context.repoId, jobId, runId)
       throw error
     }
+  }
+
+  private async cancelUnavailableServerRun(job: ScheduleJob, jobId: number, runId: number): Promise<ScheduleRun> {
+    const run = getScheduleRunById(this.db, null, jobId, runId)
+
+    if (!run) {
+      throw new ScheduleServiceError('Run not found', 404)
+    }
+
+    if (run.status !== 'running') {
+      throw new ScheduleServiceError('Only running schedule runs can be cancelled', 409)
+    }
+
+    ScheduleService.requestCancel(jobId, runId)
+    ScheduleService.abortActiveRun(jobId, runId)
+    ScheduleService.disposeActiveRunMonitor(jobId, runId)
+    return this.finalizeCancelledRun(null, job, run, null, jobId, runId)
   }
 
   private getRunById(repoId: number | null, jobId: number, runId: number): ScheduleRun {
@@ -1394,6 +1448,7 @@ export class ScheduleService {
 
       if (outcome.kind === 'busy') {
         const sessionMonitor = createSessionMonitor(runDirectory, run.sessionId, context.serverId)
+        ScheduleService.attachSessionMonitor(job.id, run.id, sessionMonitor)
         void this.monitorRunCompletion({
           sessionMonitor,
           repoId: run.repoId,

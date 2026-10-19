@@ -1250,6 +1250,7 @@ describe('SessionGoalService remote servers', () => {
     await vi.runAllTimersAsync()
 
     expect(restarted.getLatest('ses_remote', REMOTE_SERVER_ID)).toMatchObject({ status: 'active' })
+    expect(local.auditorCalls).toHaveLength(0)
     expect(remote.auditorCalls).toHaveLength(0)
   })
 })
