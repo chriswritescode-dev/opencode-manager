@@ -1,10 +1,17 @@
 import { fetchWrapper } from './fetchWrapper'
 import { API_BASE_URL } from '@/config'
-import type { SessionGoal, StartSessionGoalRequest } from '@opencode-manager/shared/schemas'
+import {
+  LOCAL_OPENCODE_SERVER_ID,
+  type SessionGoal,
+  type StartSessionGoalRequest,
+} from '@opencode-manager/shared/schemas'
 
-export async function getLatestSessionGoal(sessionId: string): Promise<SessionGoal | null> {
+export async function getLatestSessionGoal(
+  sessionId: string,
+  serverId: string = LOCAL_OPENCODE_SERVER_ID,
+): Promise<SessionGoal | null> {
   const res = await fetchWrapper<{ goal: SessionGoal | null }>(`${API_BASE_URL}/api/session-goals`, {
-    params: { sessionId },
+    params: { sessionId, serverId },
   })
   return res.goal
 }

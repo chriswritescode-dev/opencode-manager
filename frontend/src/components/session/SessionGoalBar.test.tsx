@@ -15,6 +15,7 @@ vi.mock('@/hooks/useSessionGoals')
 const baseGoal: SessionGoal = {
   id: 1,
   sessionId: 'ses_1',
+  serverId: 'local',
   directory: '/repo',
   objective: 'Ship the feature',
   status: 'active',

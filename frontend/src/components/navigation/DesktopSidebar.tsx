@@ -81,18 +81,21 @@ export function DesktopSidebar() {
         )}
 
         {collapsed ? (
-          <div className="flex flex-col gap-1 p-2 pt-0">
-            {collapsedItems.map((item: MoreDrawerItem) => (
-              <SidebarItem
-                key={item.key}
-                icon={item.icon}
-                label={item.label}
-                collapsed={collapsed}
-                onClick={() => handleItemClick(item)}
-                danger={item.danger}
-              />
-            ))}
-          </div>
+          <>
+            <div className="flex flex-col gap-1 p-2 pt-0">
+              {collapsedItems.map((item: MoreDrawerItem) => (
+                <SidebarItem
+                  key={item.key}
+                  icon={item.icon}
+                  label={item.label}
+                  collapsed={collapsed}
+                  onClick={() => handleItemClick(item)}
+                  danger={item.danger}
+                />
+              ))}
+            </div>
+            <LinkedServersNav variant="rail" />
+          </>
         ) : (
           <>
             <LinkedServersNav />

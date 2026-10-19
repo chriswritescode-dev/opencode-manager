@@ -5,6 +5,7 @@ import {
   type SessionMessageAssistant,
   type SessionMessageInfo,
 } from '@opencode-manager/shared/opencode'
+import { LOCAL_OPENCODE_SERVER_ID } from '@opencode-manager/shared/schemas'
 import { truncateText } from '../utils/text-truncate'
 import type { OpenCodeClient } from './opencode/client'
 import { sseAggregator, type SSEEvent } from './sse-aggregator'
@@ -47,7 +48,12 @@ export function sessionSettleSignal(event: SSEEvent, sessionId: string): Session
   }
 }
 
-export function waitForSessionSettled(client: OpenCodeClient, sessionId: string, timeoutMs: number): Promise<void> {
+export function waitForSessionSettled(
+  client: OpenCodeClient,
+  sessionId: string,
+  timeoutMs: number,
+  serverId: string = LOCAL_OPENCODE_SERVER_ID,
+): Promise<void> {
   if (timeoutMs <= 0) {
     return Promise.resolve()
   }
@@ -69,7 +75,10 @@ export function waitForSessionSettled(client: OpenCodeClient, sessionId: string,
       resolve()
     }
 
-    unsubscribe = sseAggregator.onEvent((_directory, event) => {
+    unsubscribe = sseAggregator.onServerEvent((eventServerId, _directory, event) => {
+      if (eventServerId !== serverId) {
+        return
+      }
       if (sessionSettleSignal(event, sessionId)) {
         finish()
       }

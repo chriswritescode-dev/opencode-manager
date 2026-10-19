@@ -10,6 +10,9 @@ import { encodeSSEFrame } from '../utils/sse-frame'
 type SSEClientCallback = (event: string, data: string) => void
 type SSEClientFrameWriter = (frame: Uint8Array) => void
 type SSEEventListener = (directory: string | null, event: SSEEvent) => void
+type ServerEventListener = (serverId: string, directory: string | null, event: SSEEvent) => void
+type ServerConnectedListener = (serverId: string) => void
+type RemoteSubagentResolver = (serverId: string, sessionId: string) => boolean
 
 export type RemoteReplayHandler = (clientId: string, serverId: string, directory: string) => void | Promise<void>
 
@@ -20,6 +23,7 @@ interface SSEClient {
   directories: Set<string>
   visible: boolean
   activeSessionId: string | null
+  activeServerId: string | null
 }
 
 export type SSEEvent = V2Event
@@ -54,7 +58,10 @@ class SSEAggregator {
   private activeSessions: Map<string, Set<string>> = new Map()
   private sessionDirectories: Map<string, string> = new Map()
   private eventListeners: Set<SSEEventListener> = new Set()
+  private serverEventListeners: Set<ServerEventListener> = new Set()
   private upstreamConnectedListeners: Set<() => void> = new Set()
+  private serverConnectedListeners: Set<ServerConnectedListener> = new Set()
+  private remoteSubagentResolver: RemoteSubagentResolver | null = null
   private subagentSessions: Map<string, Set<string>> = new Map()
   private upstream: EventSource | null = null
   private reconnectTimeout: ReturnType<typeof setTimeout> | null = null
@@ -122,7 +129,8 @@ class SSEAggregator {
       writeFrame,
       directories: new Set(directories),
       visible: false,
-      activeSessionId: null
+      activeSessionId: null,
+      activeServerId: null
     }
     this.clients.set(id, client)
     directories.forEach(dir => this.indexClientDirectory(id, dir))
@@ -436,6 +444,7 @@ class SSEAggregator {
     this.upstreamConnectedListeners.forEach(listener => {
       try { listener() } catch { /* ignore listener errors */ }
     })
+    this.notifyServerConnected(LOCAL_OPENCODE_SERVER_ID)
   }
 
   private broadcastResync(): void {
@@ -456,9 +465,35 @@ class SSEAggregator {
     return () => { this.eventListeners.delete(listener) }
   }
 
+  onServerEvent(listener: ServerEventListener): () => void {
+    this.serverEventListeners.add(listener)
+    return () => { this.serverEventListeners.delete(listener) }
+  }
+
   onUpstreamConnected(listener: () => void): () => void {
     this.upstreamConnectedListeners.add(listener)
     return () => { this.upstreamConnectedListeners.delete(listener) }
+  }
+
+  onServerConnected(listener: ServerConnectedListener): () => void {
+    this.serverConnectedListeners.add(listener)
+    return () => { this.serverConnectedListeners.delete(listener) }
+  }
+
+  notifyServerEvent(serverId: string, directory: string | null, event: SSEEvent): void {
+    this.serverEventListeners.forEach(listener => {
+      try { listener(serverId, directory, event) } catch { /* ignore listener errors */ }
+    })
+  }
+
+  notifyServerConnected(serverId: string): void {
+    this.serverConnectedListeners.forEach(listener => {
+      try { listener(serverId) } catch { /* ignore listener errors */ }
+    })
+  }
+
+  setRemoteSubagentResolver(resolver: RemoteSubagentResolver | null): void {
+    this.remoteSubagentResolver = resolver
   }
 
   private handleUpstreamMessage(data: string): void {
@@ -531,6 +566,7 @@ class SSEAggregator {
     this.eventListeners.forEach(listener => {
       try { listener(directory, event) } catch { /* ignore listener errors */ }
     })
+    this.notifyServerEvent(LOCAL_OPENCODE_SERVER_ID, directory, event)
   }
 
   private writeEnvelopeToClients(clientIds: Iterable<string>, directory: string | null, payloadJson: string): void {
@@ -692,7 +728,12 @@ class SSEAggregator {
     return this.clients.size
   }
 
-  setClientVisibility(id: string, visible: boolean, activeSessionId: string | null = null): boolean {
+  setClientVisibility(
+    id: string,
+    visible: boolean,
+    activeSessionId: string | null = null,
+    activeServerId: string | null = null
+  ): boolean {
     const client = this.clients.get(id)
     if (!client) {
       logger.warn(`setClientVisibility: client ${id} not found`)
@@ -700,19 +741,23 @@ class SSEAggregator {
     }
     client.visible = visible
     client.activeSessionId = visible ? activeSessionId : null
+    client.activeServerId = visible ? (activeServerId ?? LOCAL_OPENCODE_SERVER_ID) : null
     return true
   }
 
-  isSessionBeingViewed(sessionId: string): boolean {
+  isSessionBeingViewed(sessionId: string, serverId: string = LOCAL_OPENCODE_SERVER_ID): boolean {
     for (const client of this.clients.values()) {
-      if (client.visible && client.activeSessionId === sessionId) {
+      if (client.visible && client.activeSessionId === sessionId && client.activeServerId === serverId) {
         return true
       }
     }
     return false
   }
 
-  isSubagentSession(sessionId: string): boolean {
+  isSubagentSession(sessionId: string, serverId: string = LOCAL_OPENCODE_SERVER_ID): boolean {
+    if (serverId !== LOCAL_OPENCODE_SERVER_ID) {
+      return this.remoteSubagentResolver?.(serverId, sessionId) ?? false
+    }
     for (const sessions of this.subagentSessions.values()) {
       if (sessions.has(sessionId)) {
         return true
@@ -760,7 +805,10 @@ class SSEAggregator {
     this.directoryClients.clear()
     this.clients.clear()
     this.eventListeners.clear()
+    this.serverEventListeners.clear()
     this.upstreamConnectedListeners.clear()
+    this.serverConnectedListeners.clear()
+    this.remoteSubagentResolver = null
     this.remoteReplayHandler = null
   }
 

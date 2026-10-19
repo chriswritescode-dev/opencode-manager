@@ -22,6 +22,10 @@ export function buildSessionPath(
   return `/repos/${repoId}/sessions/${sessionId}${search ? `?${search}` : ''}`
 }
 
+export function buildServerSessionPath(serverId: string, sessionId: string): string {
+  return `/servers/${encodeURIComponent(serverId)}/sessions/${encodeURIComponent(sessionId)}`
+}
+
 function trimTrailingChar(value: string, char: string): string {
   let end = value.length
   while (end > 0 && value[end - 1] === char) end--

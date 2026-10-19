@@ -8,6 +8,8 @@ function createRun(overrides: Partial<MultiRun> = {}): MultiRun {
   return {
     id: 1,
     repoId: 1,
+    serverId: 'local',
+    directory: null,
     name: 'Sweep',
     prompt: 'go',
     isolated: true,
@@ -61,7 +63,27 @@ describe('multi-run routes', () => {
 
     expect(res.status).toBe(200)
     await expect(res.json()).resolves.toEqual({ runs: [createRun()] })
-    expect(service.list).toHaveBeenCalledWith(1)
+    expect(service.list).toHaveBeenCalledWith({ kind: 'repo', repoId: 1 })
+  })
+
+  it('GET returns the runs of a server directory', async () => {
+    service.list.mockReturnValue([])
+
+    const res = await app.request('/multi-runs?serverId=srv_kitchen&directory=%2Fsrv%2Fapp')
+
+    expect(res.status).toBe(200)
+    expect(service.list).toHaveBeenCalledWith({
+      kind: 'server',
+      serverId: 'srv_kitchen',
+      directory: '/srv/app',
+    })
+  })
+
+  it('GET rejects a server target without a directory with 400', async () => {
+    const res = await app.request('/multi-runs?serverId=srv_kitchen')
+
+    expect(res.status).toBe(400)
+    expect(service.list).not.toHaveBeenCalled()
   })
 
   it('GET rejects a missing repoId with 400', async () => {
@@ -89,6 +111,61 @@ describe('multi-run routes', () => {
       models: ['openai/a'],
       isolate: true,
     })
+  })
+
+  it('POST launches a run for a server directory', async () => {
+    service.launch.mockResolvedValue(createRun({ repoId: null, serverId: 'srv_kitchen', directory: '/srv/app' }))
+
+    const res = await app.request('/multi-runs', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        serverId: 'srv_kitchen',
+        directory: '/srv/app',
+        name: 'Sweep',
+        prompt: 'go',
+        models: ['openai/a'],
+        isolate: true,
+      }),
+    })
+
+    expect(res.status).toBe(201)
+    expect(service.launch).toHaveBeenCalledWith({
+      serverId: 'srv_kitchen',
+      directory: '/srv/app',
+      name: 'Sweep',
+      prompt: 'go',
+      models: ['openai/a'],
+      isolate: true,
+    })
+  })
+
+  it('POST rejects a launch with both a repository and a server target', async () => {
+    const res = await app.request('/multi-runs', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: launchBody({ serverId: 'srv_kitchen', directory: '/srv/app' }),
+    })
+
+    expect(res.status).toBe(400)
+    expect(service.launch).not.toHaveBeenCalled()
+  })
+
+  it('POST rejects a server target without a directory', async () => {
+    const res = await app.request('/multi-runs', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        serverId: 'srv_kitchen',
+        name: 'Sweep',
+        prompt: 'go',
+        models: ['openai/a'],
+        isolate: true,
+      }),
+    })
+
+    expect(res.status).toBe(400)
+    expect(service.launch).not.toHaveBeenCalled()
   })
 
   it('POST rejects more than five models with 400', async () => {

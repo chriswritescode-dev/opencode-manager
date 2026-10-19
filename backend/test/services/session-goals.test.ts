@@ -1100,3 +1100,156 @@ describe('SessionGoalService recovery', () => {
     expect(fake.auditorCalls).toHaveLength(0)
   })
 })
+
+describe('SessionGoalService remote servers', () => {
+  let db: Database
+
+  const REMOTE_SERVER_ID = 'srv_remote'
+
+  function createRemoteRegistry(
+    local: FakeSessionGoalClient,
+    remote: FakeSessionGoalClient,
+    options: { missing?: boolean; disabled?: boolean } = {},
+  ) {
+    return {
+      getClient: (serverId: string) =>
+        serverId === 'local' ? local.client : remote.client,
+      get: (serverId: string) => {
+        if (serverId === 'local') return { enabled: true }
+        if (options.missing) return null
+        return { enabled: !options.disabled }
+      },
+    }
+  }
+
+  beforeEach(() => {
+    vi.useFakeTimers()
+    db = createTestDb()
+  })
+
+  afterEach(() => {
+    vi.useRealTimers()
+    db.close()
+  })
+
+  it('continues a remote goal through the remote client while the auditor stays local', async () => {
+    const local = createFakeSessionGoalClient({ auditorReplies: ['{"verdict":"continue","reason":"keep going"}'] })
+    const remote = createFakeSessionGoalClient({
+      tokens: { ses_remote: { input: 10, output: 5, reasoning: 0 } },
+    })
+    const service = new SessionGoalService(db, createRemoteRegistry(local, remote), new SettingsService(db), {
+      quietMs: 0,
+    })
+
+    const goal = await service.start({
+      sessionId: 'ses_remote',
+      serverId: REMOTE_SERVER_ID,
+      directory: DIRECTORY,
+      objective: 'Remote work',
+    })
+
+    expect(goal.serverId).toBe(REMOTE_SERVER_ID)
+
+    await service.handleEvent(DIRECTORY, executionStarted('ses_remote'), REMOTE_SERVER_ID)
+    await service.handleEvent(DIRECTORY, sessionIdle('ses_remote'), REMOTE_SERVER_ID)
+    await vi.runAllTimersAsync()
+
+    expect(remote.promptCalls).toHaveLength(1)
+    expect(remote.promptCalls[0]?.sessionID).toBe('ses_remote')
+    expect(local.promptCalls).toHaveLength(0)
+    expect(local.auditorCalls).toHaveLength(1)
+    expect(remote.auditorCalls).toHaveLength(0)
+  })
+
+  it('keeps goal state scoped to the server that owns the session', async () => {
+    const local = createFakeSessionGoalClient()
+    const remote = createFakeSessionGoalClient({
+      tokens: { ses_shared: { input: 0, output: 0, reasoning: 0 } },
+    })
+    const service = new SessionGoalService(db, createRemoteRegistry(local, remote), new SettingsService(db))
+
+    await service.start({
+      sessionId: 'ses_shared',
+      serverId: REMOTE_SERVER_ID,
+      directory: DIRECTORY,
+      objective: 'Remote only',
+    })
+
+    expect(service.getLatest('ses_shared')).toBeNull()
+    expect(service.getLatest('ses_shared', REMOTE_SERVER_ID)?.objective).toBe('Remote only')
+  })
+
+  it('recovers a remote goal using the remote client', async () => {
+    const local = createFakeSessionGoalClient({ auditorReplies: ['{"verdict":"done","reason":"finished"}'] })
+    const remote = createFakeSessionGoalClient()
+    const starter = new SessionGoalService(db, createRemoteRegistry(local, remote), new SettingsService(db))
+    const goal = await starter.start({
+      sessionId: 'ses_remote',
+      serverId: REMOTE_SERVER_ID,
+      directory: DIRECTORY,
+      objective: 'Remote recovery',
+    })
+    transitionSessionGoal(db, goal.id, ['active'], { turnState: 'running' })
+
+    const restarted = new SessionGoalService(db, createRemoteRegistry(local, remote), new SettingsService(db), {
+      quietMs: 0,
+    })
+    await restarted.recoverOpenGoals()
+    await vi.runAllTimersAsync()
+
+    expect(local.auditorCalls).toHaveLength(1)
+    expect(remote.auditorCalls).toHaveLength(0)
+    expect(restarted.getLatest('ses_remote', REMOTE_SERVER_ID)?.status).toBe('completed')
+  })
+
+  it('leaves remote goals open when their server is missing', async () => {
+    const local = createFakeSessionGoalClient()
+    const remote = createFakeSessionGoalClient()
+    const starter = new SessionGoalService(db, createRemoteRegistry(local, remote), new SettingsService(db))
+    const goal = await starter.start({
+      sessionId: 'ses_remote',
+      serverId: REMOTE_SERVER_ID,
+      directory: DIRECTORY,
+      objective: 'Orphaned',
+    })
+    transitionSessionGoal(db, goal.id, ['active'], { turnState: 'running' })
+
+    const restarted = new SessionGoalService(
+      db,
+      createRemoteRegistry(local, remote, { missing: true }),
+      new SettingsService(db),
+      { quietMs: 0 },
+    )
+    await restarted.recoverOpenGoals()
+    await vi.runAllTimersAsync()
+
+    expect(restarted.getLatest('ses_remote', REMOTE_SERVER_ID)).toMatchObject({ status: 'active' })
+    expect(local.auditorCalls).toHaveLength(0)
+    expect(remote.auditorCalls).toHaveLength(0)
+  })
+
+  it('leaves remote goals open when their server is disabled', async () => {
+    const local = createFakeSessionGoalClient()
+    const remote = createFakeSessionGoalClient()
+    const starter = new SessionGoalService(db, createRemoteRegistry(local, remote), new SettingsService(db))
+    const goal = await starter.start({
+      sessionId: 'ses_remote',
+      serverId: REMOTE_SERVER_ID,
+      directory: DIRECTORY,
+      objective: 'Disabled',
+    })
+    transitionSessionGoal(db, goal.id, ['active'], { turnState: 'running' })
+
+    const restarted = new SessionGoalService(
+      db,
+      createRemoteRegistry(local, remote, { disabled: true }),
+      new SettingsService(db),
+      { quietMs: 0 },
+    )
+    await restarted.recoverOpenGoals()
+    await vi.runAllTimersAsync()
+
+    expect(restarted.getLatest('ses_remote', REMOTE_SERVER_ID)).toMatchObject({ status: 'active' })
+    expect(remote.auditorCalls).toHaveLength(0)
+  })
+})

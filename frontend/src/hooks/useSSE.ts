@@ -208,7 +208,7 @@ export const useSSE = (directory?: string | string[], currentSessionId?: string)
         setError(null)
         syncCurrentSession()
         invalidateShellCaches(queryClient)
-        eventStreamSubscriptionRef.current?.reportVisibility(document.visibilityState === 'visible', sessionIdRef.current)
+        eventStreamSubscriptionRef.current?.reportVisibility(document.visibilityState === 'visible', sessionIdRef.current, serverId)
       } else {
         setError('Connection lost. Reconnecting...')
       }
@@ -234,7 +234,7 @@ export const useSSE = (directory?: string | string[], currentSessionId?: string)
     }
 
     const handleVisibilityChange = () => {
-      subscription.reportVisibility(document.visibilityState === 'visible', sessionIdRef.current)
+      subscription.reportVisibility(document.visibilityState === 'visible', sessionIdRef.current, serverId)
     }
 
     document.addEventListener('visibilitychange', handleVisibilityChange)
@@ -246,7 +246,7 @@ export const useSSE = (directory?: string | string[], currentSessionId?: string)
       document.removeEventListener('visibilitychange', handleVisibilityChange)
       window.removeEventListener('focus', handleReconnect)
       window.removeEventListener('online', handleReconnect)
-      subscription.reportVisibility(false, undefined)
+      subscription.reportVisibility(false, undefined, serverId)
       subscription.dispose()
       if (eventStreamSubscriptionRef.current === subscription) {
         eventStreamSubscriptionRef.current = null
@@ -256,9 +256,9 @@ export const useSSE = (directory?: string | string[], currentSessionId?: string)
 
   useEffect(() => {
     if (isConnected && document.visibilityState === 'visible') {
-      eventStreamSubscriptionRef.current?.reportVisibility(true, currentSessionId)
+      eventStreamSubscriptionRef.current?.reportVisibility(true, currentSessionId, serverId)
     }
-  }, [currentSessionId, isConnected])
+  }, [currentSessionId, isConnected, serverId])
 
   return { isConnected, error, isReconnecting }
 }

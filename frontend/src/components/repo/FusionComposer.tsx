@@ -1,6 +1,7 @@
 import { useId, useState } from 'react'
 import { ArrowRight, ArrowUpRight, Combine, Loader2 } from 'lucide-react'
 import { Button } from '@/components/ui/button'
+import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
 import { Textarea } from '@/components/ui/textarea'
 import { ModelCombobox } from '@/components/model/ModelCombobox'
@@ -11,6 +12,7 @@ import {
   FusionRecoveredDetailsSchema,
   MULTI_RUN_FUSION_MIN_SOURCES,
   type MultiRun,
+  type MultiRunTarget,
 } from '@opencode-manager/shared/schemas'
 
 export interface FusionComposerSubmission {
@@ -20,7 +22,7 @@ export interface FusionComposerSubmission {
 }
 
 interface FusionComposerProps {
-  repoId: number
+  target: MultiRunTarget
   directory?: string
   run: MultiRun
   selectedEntryIds: number[]
@@ -38,7 +40,7 @@ function errorCode(error: unknown): string | undefined {
 }
 
 export function FusionComposer({
-  repoId,
+  target,
   directory,
   run,
   selectedEntryIds,
@@ -85,15 +87,26 @@ export function FusionComposer({
             Base ref
           </Label>
           <div className="min-w-0 flex-1">
-            <BranchCombobox
-              id="fusion-base-ref"
-              repoId={repoId}
-              value={baseRef}
-              onValueChange={setBaseRef}
-              placeholder="Current HEAD"
-              clearable
-              listClassName={UPWARD_LIST_CLASS}
-            />
+            {target.kind === 'repo' ? (
+              <BranchCombobox
+                id="fusion-base-ref"
+                repoId={target.repoId}
+                value={baseRef}
+                onValueChange={setBaseRef}
+                placeholder="Current HEAD"
+                clearable
+                listClassName={UPWARD_LIST_CLASS}
+              />
+            ) : (
+              <Input
+                id="fusion-base-ref"
+                value={baseRef}
+                onChange={(event) => setBaseRef(event.target.value)}
+                placeholder="Current HEAD"
+                autoComplete="off"
+                className="font-mono text-sm"
+              />
+            )}
           </div>
         </div>
 

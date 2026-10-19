@@ -2,27 +2,50 @@ import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import type { CreateScheduleJobRequest, ScheduleRunWorktreesMode, UpdateScheduleJobRequest } from '@opencode-manager/shared/types'
 import {
   cancelRepoScheduleRun,
+  cancelServerScheduleRun,
   clearRepoScheduleRuns,
+  clearServerScheduleRuns,
   createRepoSchedule,
+  createServerSchedule,
   deleteRepoSchedule,
   deleteRepoScheduleRun,
+  deleteServerSchedule,
+  deleteServerScheduleRun,
   getRepoSchedule,
   getRepoScheduleRun,
+  getServerSchedule,
+  getServerScheduleRun,
   listAllScheduleRuns,
   listAllSchedules,
   listRepoScheduleRuns,
+  listServerScheduleRuns,
   listScheduleWorktrees,
   listUnreadScheduleRuns,
   markAllScheduleRunsViewed,
   markScheduleRunViewed,
   removeScheduleWorktrees,
   runRepoSchedule,
+  runServerSchedule,
   updateRepoSchedule,
+  updateServerSchedule,
 } from '@/api/schedules'
 import { showToast } from '@/lib/toast'
 import type { ListAllRunsParams, ScheduleJobWithRepo, ScheduleRunWithContext } from '@/api/schedules'
 
 export const UNREAD_SCHEDULE_RUNS_QUERY_KEY = ['schedule-runs-unread'] as const
+
+export type ScheduleTargetRef =
+  | { kind: 'repo'; repoId: number }
+  | { kind: 'server'; serverId: string }
+
+function invalidateScheduleQueries(queryClient: ReturnType<typeof useQueryClient>): void {
+  queryClient.invalidateQueries({ queryKey: ['all-schedules'] })
+  queryClient.invalidateQueries({ queryKey: ['all-schedule-runs'] })
+  queryClient.invalidateQueries({ queryKey: ['repo-schedule'] })
+  queryClient.invalidateQueries({ queryKey: ['repo-schedule-runs'] })
+  queryClient.invalidateQueries({ queryKey: ['server-schedule'] })
+  queryClient.invalidateQueries({ queryKey: ['server-schedule-runs'] })
+}
 
 export function useAllSchedules() {
   return useQuery({
@@ -286,6 +309,245 @@ export function useRemoveScheduleWorktrees() {
     },
     onError: (error: unknown) => {
       showToast.error(`Failed to remove worktree: ${error instanceof Error ? error.message : String(error)}`)
+    },
+  })
+}
+
+export function useServerSchedule(serverId: string | undefined, jobId: number | null) {
+  return useQuery({
+    queryKey: ['server-schedule', serverId, jobId],
+    queryFn: async () => (await getServerSchedule(serverId!, jobId!)).job,
+    enabled: Boolean(serverId) && jobId !== null,
+    refetchInterval: jobId !== null ? 5000 : false,
+  })
+}
+
+export function useServerScheduleRuns(serverId: string | undefined, jobId: number | null, limit: number = 20) {
+  return useQuery({
+    queryKey: ['server-schedule-runs', serverId, jobId, limit],
+    queryFn: async () => (await listServerScheduleRuns(serverId!, jobId!, limit)).runs,
+    enabled: Boolean(serverId) && jobId !== null,
+    refetchInterval: jobId !== null ? 5000 : false,
+  })
+}
+
+export function useServerScheduleRun(serverId: string | undefined, jobId: number | null, runId: number | null) {
+  return useQuery({
+    queryKey: ['server-schedule-run', serverId, jobId, runId],
+    queryFn: async () => (await getServerScheduleRun(serverId!, jobId!, runId!)).run,
+    enabled: Boolean(serverId) && jobId !== null && runId !== null,
+    refetchInterval: runId !== null ? 5000 : false,
+  })
+}
+
+export function useScheduleRunDetail(run: { repoId: number | null; serverId?: string; jobId: number; id: number } | null) {
+  const serverId = run && run.repoId === null ? run.serverId : undefined
+  return useQuery({
+    queryKey: ['schedule-run-detail', run?.repoId ?? null, serverId ?? null, run?.jobId ?? null, run?.id ?? null],
+    queryFn: async () => {
+      if (!run) return null
+      if (run.repoId === null) {
+        if (!run.serverId) return null
+        return (await getServerScheduleRun(run.serverId, run.jobId, run.id)).run
+      }
+      return (await getRepoScheduleRun(run.repoId, run.jobId, run.id)).run
+    },
+    enabled: run !== null && (run.repoId !== null || Boolean(run.serverId)),
+    refetchInterval: run !== null ? 5000 : false,
+  })
+}
+
+export function useCreateServerSchedule(serverId: string) {
+  const queryClient = useQueryClient()
+
+  return useMutation({
+    mutationFn: async (data: CreateScheduleJobRequest) => (await createServerSchedule(serverId, data)).job,
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['all-schedules'] })
+      showToast.success('Schedule created')
+    },
+    onError: (error: unknown) => {
+      showToast.error(`Failed to create schedule: ${error instanceof Error ? error.message : String(error)}`)
+    },
+  })
+}
+
+export function useUpdateServerSchedule(serverId: string) {
+  const queryClient = useQueryClient()
+
+  return useMutation({
+    mutationFn: async ({ jobId, data }: { jobId: number; data: UpdateScheduleJobRequest }) =>
+      (await updateServerSchedule(serverId, jobId, data)).job,
+    onSuccess: (_data, variables) => {
+      queryClient.invalidateQueries({ queryKey: ['server-schedule', serverId, variables.jobId] })
+      queryClient.invalidateQueries({ queryKey: ['all-schedules'] })
+      showToast.success('Schedule updated')
+    },
+    onError: (error: unknown) => {
+      showToast.error(`Failed to update schedule: ${error instanceof Error ? error.message : String(error)}`)
+    },
+  })
+}
+
+export function useDeleteServerSchedule(serverId: string) {
+  const queryClient = useQueryClient()
+
+  return useMutation({
+    mutationFn: (jobId: number) => deleteServerSchedule(serverId, jobId),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['all-schedules'] })
+      showToast.success('Schedule deleted')
+    },
+    onError: (error: unknown) => {
+      showToast.error(`Failed to delete schedule: ${error instanceof Error ? error.message : String(error)}`)
+    },
+  })
+}
+
+export function useRunServerSchedule(serverId: string) {
+  const queryClient = useQueryClient()
+
+  return useMutation({
+    mutationFn: async (jobId: number) => (await runServerSchedule(serverId, jobId)).run,
+    onSuccess: (run) => {
+      queryClient.invalidateQueries({ queryKey: ['server-schedule-runs', serverId, run.jobId] })
+      queryClient.invalidateQueries({ queryKey: ['server-schedule', serverId, run.jobId] })
+      queryClient.invalidateQueries({ queryKey: ['all-schedules'] })
+      showToast.success(run.status === 'running' ? 'Schedule started' : 'Schedule run completed')
+    },
+    onError: (error: unknown) => {
+      showToast.error(`Failed to run schedule: ${error instanceof Error ? error.message : String(error)}`)
+    },
+  })
+}
+
+export function useCancelServerScheduleRun(serverId: string) {
+  const queryClient = useQueryClient()
+
+  return useMutation({
+    mutationFn: async ({ jobId, runId }: { jobId: number; runId: number }) =>
+      (await cancelServerScheduleRun(serverId, jobId, runId)).run,
+    onSuccess: (run) => {
+      queryClient.invalidateQueries({ queryKey: ['server-schedule-runs', serverId, run.jobId] })
+      queryClient.invalidateQueries({ queryKey: ['server-schedule-run', serverId, run.jobId, run.id] })
+      queryClient.invalidateQueries({ queryKey: ['all-schedules'] })
+      showToast.success('Schedule run cancelled')
+    },
+    onError: (error: unknown) => {
+      showToast.error(`Failed to cancel schedule run: ${error instanceof Error ? error.message : String(error)}`)
+    },
+  })
+}
+
+export function useClearServerScheduleRuns(serverId: string) {
+  const queryClient = useQueryClient()
+
+  return useMutation({
+    mutationFn: (jobId: number) => clearServerScheduleRuns(serverId, jobId),
+    onSuccess: (result, jobId) => {
+      queryClient.invalidateQueries({ queryKey: ['server-schedule-runs', serverId, jobId] })
+      queryClient.invalidateQueries({ queryKey: ['all-schedule-runs'] })
+      showToast.success(result.cleared > 0 ? `Cleared ${result.cleared} run${result.cleared === 1 ? '' : 's'}` : 'No runs to clear')
+    },
+    onError: (error: unknown) => {
+      showToast.error(`Failed to clear run history: ${error instanceof Error ? error.message : String(error)}`)
+    },
+  })
+}
+
+export function useDeleteServerScheduleRun(serverId: string) {
+  const queryClient = useQueryClient()
+
+  return useMutation({
+    mutationFn: ({ jobId, runId }: { jobId: number; runId: number }) => deleteServerScheduleRun(serverId, jobId, runId),
+    onSuccess: (_data, variables) => {
+      queryClient.invalidateQueries({ queryKey: ['server-schedule-runs', serverId, variables.jobId] })
+      queryClient.invalidateQueries({ queryKey: ['all-schedule-runs'] })
+      showToast.success('Run deleted')
+    },
+    onError: (error: unknown) => {
+      showToast.error(`Failed to delete run: ${error instanceof Error ? error.message : String(error)}`)
+    },
+  })
+}
+
+export function useUpdateScheduleTarget() {
+  const queryClient = useQueryClient()
+
+  return useMutation({
+    mutationFn: async ({ target, jobId, data }: { target: ScheduleTargetRef; jobId: number; data: UpdateScheduleJobRequest }) => {
+      const response = target.kind === 'repo'
+        ? await updateRepoSchedule(target.repoId, jobId, data)
+        : await updateServerSchedule(target.serverId, jobId, data)
+      return response.job
+    },
+    onSuccess: () => {
+      invalidateScheduleQueries(queryClient)
+      showToast.success('Schedule updated')
+    },
+    onError: (error: unknown) => {
+      showToast.error(`Failed to update schedule: ${error instanceof Error ? error.message : String(error)}`)
+    },
+  })
+}
+
+export function useDeleteScheduleTarget() {
+  const queryClient = useQueryClient()
+
+  return useMutation({
+    mutationFn: async ({ target, jobId }: { target: ScheduleTargetRef; jobId: number }) => {
+      if (target.kind === 'repo') {
+        await deleteRepoSchedule(target.repoId, jobId)
+        return
+      }
+      await deleteServerSchedule(target.serverId, jobId)
+    },
+    onSuccess: () => {
+      invalidateScheduleQueries(queryClient)
+      showToast.success('Schedule deleted')
+    },
+    onError: (error: unknown) => {
+      showToast.error(`Failed to delete schedule: ${error instanceof Error ? error.message : String(error)}`)
+    },
+  })
+}
+
+export function useRunScheduleTarget() {
+  const queryClient = useQueryClient()
+
+  return useMutation({
+    mutationFn: async ({ target, jobId }: { target: ScheduleTargetRef; jobId: number }) => {
+      const response = target.kind === 'repo'
+        ? await runRepoSchedule(target.repoId, jobId)
+        : await runServerSchedule(target.serverId, jobId)
+      return response.run
+    },
+    onSuccess: (run) => {
+      invalidateScheduleQueries(queryClient)
+      showToast.success(run.status === 'running' ? 'Schedule started' : 'Schedule run completed')
+    },
+    onError: (error: unknown) => {
+      showToast.error(`Failed to run schedule: ${error instanceof Error ? error.message : String(error)}`)
+    },
+  })
+}
+
+export function useCancelScheduleTargetRun() {
+  const queryClient = useQueryClient()
+
+  return useMutation({
+    mutationFn: async ({ target, jobId, runId }: { target: ScheduleTargetRef; jobId: number; runId: number }) => {
+      const response = target.kind === 'repo'
+        ? await cancelRepoScheduleRun(target.repoId, jobId, runId)
+        : await cancelServerScheduleRun(target.serverId, jobId, runId)
+      return response.run
+    },
+    onSuccess: () => {
+      invalidateScheduleQueries(queryClient)
+      showToast.success('Schedule run cancelled')
+    },
+    onError: (error) => {
+      showToast.error(`Failed to cancel schedule run: ${error instanceof Error ? error.message : String(error)}`)
     },
   })
 }

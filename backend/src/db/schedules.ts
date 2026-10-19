@@ -1,5 +1,6 @@
 import type { Database } from 'bun:sqlite'
 import {
+  LOCAL_OPENCODE_SERVER_ID,
   ScheduleJobSchema,
   ScheduleMcpServersSchema,
   SchedulePermissionConfigSchema,
@@ -20,7 +21,9 @@ import type { ScheduleJobPersistenceInput } from '../services/schedule-config'
 
 interface ScheduleJobRow {
   id: number
-  repo_id: number
+  repo_id: number | null
+  server_id: string
+  directory: string | null
   name: string
   description: string | null
   enabled: number
@@ -45,7 +48,8 @@ interface ScheduleJobRow {
 interface ScheduleRunRow {
   id: number
   job_id: number
-  repo_id: number
+  repo_id: number | null
+  server_id: string
   trigger_source: string
   status: string
   started_at: number
@@ -112,6 +116,8 @@ function rowToScheduleJob(row: ScheduleJobRow): ScheduleJob {
   return ScheduleJobSchema.parse({
     id: row.id,
     repoId: row.repo_id,
+    serverId: row.server_id ?? 'local',
+    directory: row.directory ?? null,
     name: row.name,
     description: row.description,
     enabled: Boolean(row.enabled),
@@ -139,6 +145,7 @@ function rowToScheduleRun(row: ScheduleRunRow): ScheduleRun {
     id: row.id,
     jobId: row.job_id,
     repoId: row.repo_id,
+    serverId: row.server_id ?? 'local',
     triggerSource: row.trigger_source,
     status: row.status,
     startedAt: row.started_at,
@@ -177,13 +184,19 @@ function serializeMcpServers(mcpServers: ScheduleJobPersistenceInput['mcpServers
 }
 
 export function listScheduleJobsByRepo(db: Database, repoId: number): ScheduleJob[] {
-  const stmt = db.prepare('SELECT * FROM schedule_jobs WHERE repo_id = ? ORDER BY created_at DESC')
+  const stmt = db.prepare('SELECT * FROM schedule_jobs WHERE repo_id IS ? ORDER BY created_at DESC')
   const rows = stmt.all(repoId) as ScheduleJobRow[]
   return rows.map(rowToScheduleJob)
 }
 
+export function listScheduleJobsByServer(db: Database, serverId: string): ScheduleJob[] {
+  const stmt = db.prepare('SELECT * FROM schedule_jobs WHERE server_id = ? ORDER BY created_at DESC')
+  const rows = stmt.all(serverId) as ScheduleJobRow[]
+  return rows.map(rowToScheduleJob)
+}
+
 export function listScheduleJobIdsByRepo(db: Database, repoId: number): number[] {
-  const stmt = db.prepare('SELECT id FROM schedule_jobs WHERE repo_id = ? ORDER BY created_at DESC')
+  const stmt = db.prepare('SELECT id FROM schedule_jobs WHERE repo_id IS ? ORDER BY created_at DESC')
   const rows = stmt.all(repoId) as Array<{ id: number }>
   return rows.map((row) => row.id)
 }
@@ -194,28 +207,35 @@ export function listEnabledScheduleJobs(db: Database): ScheduleJob[] {
   return rows.map(rowToScheduleJob)
 }
 
-export function getScheduleJobById(db: Database, repoId: number, jobId: number): ScheduleJob | null {
-  const stmt = db.prepare('SELECT * FROM schedule_jobs WHERE repo_id = ? AND id = ?')
+export function getScheduleJobById(db: Database, repoId: number | null, jobId: number): ScheduleJob | null {
+  const stmt = db.prepare('SELECT * FROM schedule_jobs WHERE repo_id IS ? AND id = ?')
   const row = stmt.get(repoId, jobId) as ScheduleJobRow | undefined
   return row ? rowToScheduleJob(row) : null
 }
 
-export function createScheduleJob(db: Database, repoId: number, input: ScheduleJobPersistenceInput): ScheduleJob {
+export function createScheduleJob(
+  db: Database,
+  repoId: number | null,
+  input: ScheduleJobPersistenceInput,
+  serverId: string = LOCAL_OPENCODE_SERVER_ID,
+): ScheduleJob {
   const now = Date.now()
   const stmt = db.prepare(`
     INSERT INTO schedule_jobs (
-      repo_id, name, description, enabled, schedule_mode, interval_minutes, cron_expression, timezone, agent_slug, prompt, model, skill_metadata,
+      repo_id, server_id, directory, name, description, enabled, schedule_mode, interval_minutes, cron_expression, timezone, agent_slug, prompt, model, skill_metadata,
       permission_config,
       mcp_servers,
       branch,
       workspace_mode,
       created_at, updated_at, last_run_at, next_run_at
     )
-    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
   `)
 
   const result = stmt.run(
     repoId,
+    serverId,
+    input.directory ?? null,
     input.name,
     input.description ?? null,
     input.enabled ? 1 : 0,
@@ -244,7 +264,7 @@ export function createScheduleJob(db: Database, repoId: number, input: ScheduleJ
   return job
 }
 
-export function updateScheduleJob(db: Database, repoId: number, jobId: number, input: ScheduleJobPersistenceInput): ScheduleJob | null {
+export function updateScheduleJob(db: Database, repoId: number | null, jobId: number, input: ScheduleJobPersistenceInput): ScheduleJob | null {
   const existing = getScheduleJobById(db, repoId, jobId)
   if (!existing) {
     return null
@@ -255,8 +275,8 @@ export function updateScheduleJob(db: Database, repoId: number, jobId: number, i
   const stmt = db.prepare(`
     UPDATE schedule_jobs
     SET name = ?, description = ?, enabled = ?, schedule_mode = ?, interval_minutes = ?, cron_expression = ?, timezone = ?,
-        agent_slug = ?, prompt = ?, model = ?, skill_metadata = ?, permission_config = ?, mcp_servers = ?, branch = ?, workspace_mode = ?, updated_at = ?, next_run_at = ?
-    WHERE repo_id = ? AND id = ?
+        agent_slug = ?, prompt = ?, model = ?, skill_metadata = ?, permission_config = ?, mcp_servers = ?, branch = ?, workspace_mode = ?, directory = ?, updated_at = ?, next_run_at = ?
+    WHERE repo_id IS ? AND id = ?
   `)
 
   stmt.run(
@@ -275,6 +295,7 @@ export function updateScheduleJob(db: Database, repoId: number, jobId: number, i
     serializeMcpServers(input.mcpServers),
     input.branch,
     input.workspaceMode,
+    input.directory ?? null,
     now,
     input.nextRunAt,
     repoId,
@@ -284,9 +305,9 @@ export function updateScheduleJob(db: Database, repoId: number, jobId: number, i
   return getScheduleJobById(db, repoId, jobId)
 }
 
-export function deleteScheduleJob(db: Database, repoId: number, jobId: number): boolean {
-  db.prepare('DELETE FROM schedule_runs WHERE repo_id = ? AND job_id = ?').run(repoId, jobId)
-  const stmt = db.prepare('DELETE FROM schedule_jobs WHERE repo_id = ? AND id = ?')
+export function deleteScheduleJob(db: Database, repoId: number | null, jobId: number): boolean {
+  db.prepare('DELETE FROM schedule_runs WHERE repo_id IS ? AND job_id = ?').run(repoId, jobId)
+  const stmt = db.prepare('DELETE FROM schedule_jobs WHERE repo_id IS ? AND id = ?')
   const result = stmt.run(repoId, jobId)
   return result.changes > 0
 }
@@ -298,9 +319,9 @@ export interface ScheduleRunArtifact {
   worktreePath: string | null
 }
 
-export function listScheduleRunArtifactsByJob(db: Database, repoId: number, jobId: number): ScheduleRunArtifact[] {
+export function listScheduleRunArtifactsByJob(db: Database, repoId: number | null, jobId: number): ScheduleRunArtifact[] {
   const rows = db
-    .prepare('SELECT id, status, run_branch, worktree_path FROM schedule_runs WHERE repo_id = ? AND job_id = ? ORDER BY id DESC')
+    .prepare('SELECT id, status, run_branch, worktree_path FROM schedule_runs WHERE repo_id IS ? AND job_id = ? ORDER BY id DESC')
     .all(repoId, jobId) as { id: number; status: string; run_branch: string | null; worktree_path: string | null }[]
   return rows.map((row) => ({
     id: row.id,
@@ -317,28 +338,28 @@ export interface ScheduleJobWorktreeOwner {
 }
 
 export function listScheduleJobWorktreeOwners(db: Database): ScheduleJobWorktreeOwner[] {
-  const rows = db.prepare('SELECT id, repo_id, name FROM schedule_jobs').all() as Array<{ id: number; repo_id: number; name: string }>
+  const rows = db.prepare('SELECT id, repo_id, name FROM schedule_jobs WHERE repo_id IS NOT NULL').all() as Array<{ id: number; repo_id: number; name: string }>
   return rows.map((row) => ({ id: row.id, repoId: row.repo_id, name: row.name }))
 }
 
-export function clearScheduleRunWorktreePath(db: Database, repoId: number, jobId: number, worktreePath: string): number {
+export function clearScheduleRunWorktreePath(db: Database, repoId: number | null, jobId: number, worktreePath: string): number {
   return db
-    .prepare('UPDATE schedule_runs SET worktree_path = NULL WHERE repo_id = ? AND job_id = ? AND worktree_path = ?')
+    .prepare('UPDATE schedule_runs SET worktree_path = NULL WHERE repo_id IS ? AND job_id = ? AND worktree_path = ?')
     .run(repoId, jobId, worktreePath).changes
 }
 
-export function deleteScheduleRunById(db: Database, repoId: number, jobId: number, runId: number): boolean {
+export function deleteScheduleRunById(db: Database, repoId: number | null, jobId: number, runId: number): boolean {
   const result = db
-    .prepare('DELETE FROM schedule_runs WHERE repo_id = ? AND job_id = ? AND id = ?')
+    .prepare('DELETE FROM schedule_runs WHERE repo_id IS ? AND job_id = ? AND id = ?')
     .run(repoId, jobId, runId)
   return result.changes > 0
 }
 
-export function deleteScheduleRunsByIds(db: Database, repoId: number, jobId: number, runIds: number[]): number {
+export function deleteScheduleRunsByIds(db: Database, repoId: number | null, jobId: number, runIds: number[]): number {
   if (runIds.length === 0) return 0
   const placeholders = runIds.map(() => '?').join(', ')
   const result = db
-    .prepare(`DELETE FROM schedule_runs WHERE repo_id = ? AND job_id = ? AND id IN (${placeholders})`)
+    .prepare(`DELETE FROM schedule_runs WHERE repo_id IS ? AND job_id = ? AND id IN (${placeholders})`)
     .run(repoId, jobId, ...runIds)
   return result.changes
 }
@@ -346,22 +367,22 @@ export function deleteScheduleRunsByIds(db: Database, repoId: number, jobId: num
 export function cleanupOrphanedSchedules(db: Database): { orphanedJobs: number; orphanedRuns: number } {
   const runStmt = db.prepare(`
     DELETE FROM schedule_runs
-    WHERE (repo_id != ? AND repo_id NOT IN (SELECT id FROM repos))
+    WHERE (repo_id IS NOT NULL AND repo_id != ? AND repo_id NOT IN (SELECT id FROM repos))
        OR job_id NOT IN (SELECT id FROM schedule_jobs)
   `)
   const orphanedRuns = runStmt.run(ASSISTANT_REPO_ID).changes
 
   const jobStmt = db.prepare(`
     DELETE FROM schedule_jobs
-    WHERE repo_id != ? AND repo_id NOT IN (SELECT id FROM repos)
+    WHERE repo_id IS NOT NULL AND repo_id != ? AND repo_id NOT IN (SELECT id FROM repos)
   `)
   const orphanedJobs = jobStmt.run(ASSISTANT_REPO_ID).changes
 
   return { orphanedJobs, orphanedRuns }
 }
 
-export function updateScheduleJobRunState(db: Database, repoId: number, jobId: number, values: { lastRunAt: number; nextRunAt?: number | null }): void {
-  const stmt = db.prepare('UPDATE schedule_jobs SET last_run_at = ?, next_run_at = ?, updated_at = ? WHERE repo_id = ? AND id = ?')
+export function updateScheduleJobRunState(db: Database, repoId: number | null, jobId: number, values: { lastRunAt: number; nextRunAt?: number | null }): void {
+  const stmt = db.prepare('UPDATE schedule_jobs SET last_run_at = ?, next_run_at = ?, updated_at = ? WHERE repo_id IS ? AND id = ?')
   stmt.run(values.lastRunAt, values.nextRunAt ?? null, Date.now(), repoId, jobId)
 }
 
@@ -374,7 +395,8 @@ export function createScheduleRun(
   db: Database,
   input: {
     jobId: number
-    repoId: number
+    repoId: number | null
+    serverId?: string
     triggerSource: ScheduleRunTriggerSource
     status: ScheduleRunStatus
     startedAt: number
@@ -382,13 +404,14 @@ export function createScheduleRun(
   },
 ): ScheduleRun {
   const stmt = db.prepare(`
-    INSERT INTO schedule_runs (job_id, repo_id, trigger_source, status, started_at, created_at)
-    VALUES (?, ?, ?, ?, ?, ?)
+    INSERT INTO schedule_runs (job_id, repo_id, server_id, trigger_source, status, started_at, created_at)
+    VALUES (?, ?, ?, ?, ?, ?, ?)
   `)
 
   const result = stmt.run(
     input.jobId,
     input.repoId,
+    input.serverId ?? LOCAL_OPENCODE_SERVER_ID,
     input.triggerSource,
     input.status,
     input.startedAt,
@@ -404,7 +427,7 @@ export function createScheduleRun(
 
 export function updateScheduleRun(
   db: Database,
-  repoId: number,
+  repoId: number | null,
   jobId: number,
   runId: number,
   input: {
@@ -420,7 +443,7 @@ export function updateScheduleRun(
   const stmt = db.prepare(`
     UPDATE schedule_runs
     SET status = ?, finished_at = ?, session_id = ?, session_title = ?, log_text = ?, response_text = ?, error_text = ?
-    WHERE repo_id = ? AND job_id = ? AND id = ?
+    WHERE repo_id IS ? AND job_id = ? AND id = ?
   `)
 
   stmt.run(
@@ -441,7 +464,7 @@ export function updateScheduleRun(
 
 export function updateScheduleRunMetadata(
   db: Database,
-  repoId: number,
+  repoId: number | null,
   jobId: number,
   runId: number,
   input: {
@@ -460,7 +483,7 @@ export function updateScheduleRunMetadata(
   const stmt = db.prepare(`
     UPDATE schedule_runs
     SET session_id = ?, session_title = ?, log_text = ?, response_text = ?, error_text = ?
-    WHERE repo_id = ? AND job_id = ? AND id = ?
+    WHERE repo_id IS ? AND job_id = ? AND id = ?
   `)
 
   stmt.run(
@@ -479,7 +502,7 @@ export function updateScheduleRunMetadata(
 
 export function updateScheduleRunWorktree(
   db: Database,
-  repoId: number,
+  repoId: number | null,
   jobId: number,
   runId: number,
   input: { worktreePath?: string | null; runBranch?: string | null; commitHash?: string | null },
@@ -492,7 +515,7 @@ export function updateScheduleRunWorktree(
   const stmt = db.prepare(`
     UPDATE schedule_runs
     SET worktree_path = ?, run_branch = ?, commit_hash = ?
-    WHERE repo_id = ? AND job_id = ? AND id = ?
+    WHERE repo_id IS ? AND job_id = ? AND id = ?
   `)
 
   stmt.run(
@@ -507,8 +530,8 @@ export function updateScheduleRunWorktree(
   return getScheduleRunById(db, repoId, jobId, runId)
 }
 
-export function getScheduleRunById(db: Database, repoId: number, jobId: number, runId: number): ScheduleRun | null {
-  const stmt = db.prepare('SELECT * FROM schedule_runs WHERE repo_id = ? AND job_id = ? AND id = ?')
+export function getScheduleRunById(db: Database, repoId: number | null, jobId: number, runId: number): ScheduleRun | null {
+  const stmt = db.prepare('SELECT * FROM schedule_runs WHERE repo_id IS ? AND job_id = ? AND id = ?')
   const row = stmt.get(repoId, jobId, runId) as ScheduleRunRow | undefined
   return row ? rowToScheduleRun(row) : null
 }
@@ -519,10 +542,10 @@ export function getScheduleRunBySessionId(db: Database, sessionId: string): Sche
   return row ? rowToScheduleRun(row) : null
 }
 
-export function getRunningScheduleRunByJob(db: Database, repoId: number, jobId: number): ScheduleRun | null {
+export function getRunningScheduleRunByJob(db: Database, repoId: number | null, jobId: number): ScheduleRun | null {
   const stmt = db.prepare(`
     SELECT * FROM schedule_runs
-    WHERE repo_id = ? AND job_id = ? AND status = 'running'
+    WHERE repo_id IS ? AND job_id = ? AND status = 'running'
     ORDER BY started_at DESC
     LIMIT 1
   `)
@@ -541,12 +564,13 @@ export function listRunningScheduleRuns(db: Database, limit: number = 100): Sche
   return rows.map(rowToScheduleRun)
 }
 
-export function listScheduleRunsByJob(db: Database, repoId: number, jobId: number, limit: number = 20): ScheduleRun[] {
+export function listScheduleRunsByJob(db: Database, repoId: number | null, jobId: number, limit: number = 20): ScheduleRun[] {
   const stmt = db.prepare(`
     SELECT
       id,
       job_id,
       repo_id,
+      server_id,
       trigger_source,
       status,
       started_at,
@@ -562,7 +586,7 @@ export function listScheduleRunsByJob(db: Database, repoId: number, jobId: numbe
       commit_hash,
       worktree_path
     FROM schedule_runs
-    WHERE repo_id = ? AND job_id = ?
+    WHERE repo_id IS ? AND job_id = ?
     ORDER BY started_at DESC
     LIMIT ?
   `)
@@ -583,6 +607,7 @@ export interface ScheduleJobWithRepo extends ScheduleJob {
   repoName: string
   repoPath: string
   repoUrl: string
+  serverName: string | null
   lastRun: ScheduleRunSummary | null
 }
 
@@ -591,6 +616,7 @@ interface ScheduleJobWithRepoRow extends ScheduleJobRow {
   repo_path: string | null
   repo_name: string | null
   repo_source_path: string | null
+  server_name: string | null
   last_run_id: number | null
   last_run_status: string | null
   last_run_started_at: number | null
@@ -601,14 +627,19 @@ interface ScheduleJobWithRepoRow extends ScheduleJobRow {
 }
 
 interface RepoDisplayRow {
-  repo_id: number
+  repo_id: number | null
   repo_path: string | null
   repo_name: string | null
   repo_url?: string | null
   repo_source_path?: string | null
+  directory?: string | null
+  server_name?: string | null
 }
 
 function resolveRepoDisplay(row: RepoDisplayRow): { repoName: string; repoPath: string } {
+  if (row.repo_id === null) {
+    return { repoName: row.server_name ?? 'Linked server', repoPath: row.directory ?? '' }
+  }
   if (row.repo_id === ASSISTANT_REPO_ID) {
     return { repoName: ASSISTANT_REPO_NAME, repoPath: ASSISTANT_REPO_PATH }
   }
@@ -641,6 +672,7 @@ function rowToScheduleJobWithRepo(row: ScheduleJobWithRepoRow): ScheduleJobWithR
     ...rowToScheduleJob(row),
     ...resolveRepoDisplay(row),
     repoUrl: row.repo_url ?? '',
+    serverName: row.server_name ?? null,
     lastRun: buildLastRunSummary(row),
   }
 }
@@ -649,6 +681,7 @@ export function listAllScheduleJobsWithRepos(db: Database): ScheduleJobWithRepo[
   const stmt = db.prepare(`
     SELECT
       sj.*, r.repo_url, r.local_path as repo_path, r.name as repo_name, r.source_path as repo_source_path,
+      os.name AS server_name,
       sr.id AS last_run_id,
       sr.status AS last_run_status,
       sr.started_at AS last_run_started_at,
@@ -658,10 +691,11 @@ export function listAllScheduleJobsWithRepos(db: Database): ScheduleJobWithRepo[
       substr(sr.response_text, 1, 600) AS last_run_response_head
     FROM schedule_jobs sj
     LEFT JOIN repos r ON sj.repo_id = r.id
+    LEFT JOIN opencode_servers os ON sj.server_id = os.id AND sj.server_id != 'local'
     LEFT JOIN schedule_runs sr ON sr.id = (
       SELECT id FROM schedule_runs WHERE job_id = sj.id ORDER BY started_at DESC LIMIT 1
     )
-    ORDER BY COALESCE(r.local_path, ''), sj.name
+    ORDER BY COALESCE(r.local_path, sj.directory, ''), sj.name
   `)
   const rows = stmt.all() as ScheduleJobWithRepoRow[]
   return rows.map(rowToScheduleJobWithRepo)
@@ -671,6 +705,7 @@ export interface ScheduleRunWithContext extends ScheduleRun {
   jobName: string
   repoName: string
   repoPath: string
+  serverName: string | null
 }
 
 interface ScheduleRunWithContextRow extends ScheduleRunRow {
@@ -679,12 +714,15 @@ interface ScheduleRunWithContextRow extends ScheduleRunRow {
   repo_name: string | null
   repo_url: string | null
   repo_source_path: string | null
+  directory?: string | null
+  server_name?: string | null
 }
 
 function rowToScheduleRunWithContext(row: ScheduleRunWithContextRow): ScheduleRunWithContext {
   return {
     ...rowToScheduleRun(row),
     jobName: row.job_name,
+    serverName: row.server_name ?? null,
     ...resolveRepoDisplay(row),
   }
 }
@@ -732,7 +770,7 @@ export function listAllScheduleRuns(db: Database, options: ListAllRunsOptions = 
   const searchTerm = search?.trim()
   if (searchTerm) {
     const pattern = `%${escapeLikePattern(searchTerm)}%`
-    const searchColumns = ['sj.name', 'sr.session_title', 'sr.error_text', 'sr.run_branch', 'r.name', 'r.local_path']
+    const searchColumns = ['sj.name', 'sr.session_title', 'sr.error_text', 'sr.run_branch', 'r.name', 'r.local_path', 'sj.directory', 'os.name']
     conditions.push(`(${searchColumns.map((column) => `${column} LIKE ? ESCAPE '\\'`).join(' OR ')})`)
     params.push(...searchColumns.map(() => pattern))
   }
@@ -741,17 +779,18 @@ export function listAllScheduleRuns(db: Database, options: ListAllRunsOptions = 
 
   const stmt = db.prepare(`
     SELECT
-      sr.id, sr.job_id, sr.repo_id, sr.trigger_source, sr.status,
+      sr.id, sr.job_id, sr.repo_id, sr.server_id, sr.trigger_source, sr.status,
       sr.started_at, sr.finished_at, sr.created_at,
       sr.session_id, sr.session_title,
       NULL AS log_text, NULL AS response_text, sr.error_text,
       sr.viewed_at,
       sr.run_branch, sr.commit_hash, sr.worktree_path,
-      sj.name AS job_name, r.local_path AS repo_path, r.name AS repo_name,
-      r.repo_url AS repo_url, r.source_path AS repo_source_path
+      sj.name AS job_name, sj.directory AS directory, r.local_path AS repo_path, r.name AS repo_name,
+      r.repo_url AS repo_url, r.source_path AS repo_source_path, os.name AS server_name
     FROM schedule_runs sr
     JOIN schedule_jobs sj ON sr.job_id = sj.id
     LEFT JOIN repos r ON sr.repo_id = r.id
+    LEFT JOIN opencode_servers os ON sj.server_id = os.id AND sj.server_id != 'local'
     ${whereClause}
     ORDER BY sr.started_at DESC
     LIMIT ? OFFSET ?
@@ -810,17 +849,18 @@ interface UnreadScheduleRunRow extends ScheduleRunWithContextRow {
 export function listUnreadScheduleRuns(db: Database, limit: number = 20): ScheduleRunWithUnreadPreview[] {
   const stmt = db.prepare(`
     SELECT
-      sr.id, sr.job_id, sr.repo_id, sr.trigger_source, sr.status,
+      sr.id, sr.job_id, sr.repo_id, sr.server_id, sr.trigger_source, sr.status,
       sr.started_at, sr.finished_at, sr.created_at,
       sr.session_id, sr.session_title, sr.viewed_at,
       NULL AS log_text, NULL AS response_text, sr.error_text,
       sr.run_branch, sr.commit_hash, sr.worktree_path,
-      sj.name AS job_name, r.local_path AS repo_path, r.name AS repo_name,
-      r.repo_url AS repo_url, r.source_path AS repo_source_path,
+      sj.name AS job_name, sj.directory AS directory, r.local_path AS repo_path, r.name AS repo_name,
+      r.repo_url AS repo_url, r.source_path AS repo_source_path, os.name AS server_name,
       substr(sr.response_text, 1, 600) AS response_head
     FROM schedule_runs sr
     JOIN schedule_jobs sj ON sr.job_id = sj.id
     LEFT JOIN repos r ON sr.repo_id = r.id
+    LEFT JOIN opencode_servers os ON sj.server_id = os.id AND sj.server_id != 'local'
     WHERE sr.status IN ('completed', 'failed') AND sr.viewed_at IS NULL
     ORDER BY (sr.status = 'failed') DESC, sr.finished_at DESC
     LIMIT ?

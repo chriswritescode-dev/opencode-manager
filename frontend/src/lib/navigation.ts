@@ -1,4 +1,4 @@
-import { ASSISTANT_REPO_ID, buildSessionPath } from '@opencode-manager/shared/utils';
+import { ASSISTANT_REPO_ID, buildServerSessionPath, buildSessionPath } from '@opencode-manager/shared/utils';
 import { LOCAL_OPENCODE_SERVER_ID } from '@opencode-manager/shared/schemas';
 
 export function getAssistantPath(): string {
@@ -33,7 +33,7 @@ export function getServerPath(serverId: string): string {
 }
 
 export function getServerSessionPath(serverId: string, sessionId: string): string {
-  return `${getServerPath(serverId)}/sessions/${encodeURIComponent(sessionId)}`;
+  return buildServerSessionPath(serverId, sessionId);
 }
 
 export function parseServerSessionRoute(pathname: string): { serverId: string; sessionId: string } | null {

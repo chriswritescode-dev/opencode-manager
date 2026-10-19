@@ -14,13 +14,13 @@ import {
 } from '../../src/services/session-reply'
 import { assistantMessage } from '../helpers/stub-schedule-api'
 
-const mockOnEvent = vi.fn()
+const mockOnServerEvent = vi.fn()
 vi.mock('../../src/services/sse-aggregator', () => ({
-  sseAggregator: { onEvent: (...args: unknown[]) => mockOnEvent(...args) },
+  sseAggregator: { onServerEvent: (...args: unknown[]) => mockOnServerEvent(...args) },
 }))
 
 beforeEach(() => {
-  mockOnEvent.mockReset()
+  mockOnServerEvent.mockReset()
 })
 
 function createFakeClient(messages: SessionMessageInfo[], active: Record<string, unknown> = {}): OpenCodeClient {
@@ -166,14 +166,14 @@ describe('sessionSettleSignal', () => {
 
 describe('waitForSessionSettled', () => {
   function captureListener() {
-    let listener: ((directory: string, event: unknown) => void) | undefined
+    let listener: ((serverId: string, directory: string | null, event: unknown) => void) | undefined
     const unsubscribe = vi.fn()
-    mockOnEvent.mockImplementation((callback: (directory: string, event: unknown) => void) => {
+    mockOnServerEvent.mockImplementation((callback: (serverId: string, directory: string | null, event: unknown) => void) => {
       listener = callback
       return unsubscribe
     })
     return {
-      emit: (event: unknown) => listener?.('', event),
+      emit: (event: unknown, serverId = 'local') => listener?.(serverId, null, event),
       unsubscribe,
     }
   }
@@ -182,7 +182,7 @@ describe('waitForSessionSettled', () => {
     const client = createFakeClient([], { 'ses-1': {} })
 
     await expect(waitForSessionSettled(client, 'ses-1', 0)).resolves.toBeUndefined()
-    expect(mockOnEvent).not.toHaveBeenCalled()
+    expect(mockOnServerEvent).not.toHaveBeenCalled()
   })
 
   it('resolves once the session settles and unsubscribes', async () => {
@@ -222,6 +222,19 @@ describe('waitForSessionSettled', () => {
     const { unsubscribe } = captureListener()
 
     await expect(waitForSessionSettled(client, 'ses-1', 20)).resolves.toBeUndefined()
+    expect(unsubscribe).toHaveBeenCalledTimes(1)
+  })
+
+  it('ignores settle events from other servers when a server id is provided', async () => {
+    const client = createFakeClient([], { 'ses-1': {} })
+    const { emit, unsubscribe } = captureListener()
+
+    const settled = waitForSessionSettled(client, 'ses-1', 1000, 'srv_a')
+    emit({ type: 'session.idle', data: { sessionID: 'ses-1' } }, 'local')
+    expect(unsubscribe).not.toHaveBeenCalled()
+
+    emit({ type: 'session.idle', data: { sessionID: 'ses-1' } }, 'srv_a')
+    await expect(settled).resolves.toBeUndefined()
     expect(unsubscribe).toHaveBeenCalledTimes(1)
   })
 })

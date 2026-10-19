@@ -1,6 +1,12 @@
 import type { Database } from 'bun:sqlite'
 import { existsSync } from 'node:fs'
-import type { FuseMultiRunRequest, LaunchMultiRunRequest, MultiRun } from '@opencode-manager/shared/schemas'
+import {
+  LOCAL_OPENCODE_SERVER_ID,
+  type FuseMultiRunRequest,
+  type LaunchMultiRunRequest,
+  type MultiRun,
+  type MultiRunTarget,
+} from '@opencode-manager/shared/schemas'
 import { ASSISTANT_REPO_ID } from '@opencode-manager/shared/utils'
 import {
   createMultiRunWithEntries,
@@ -16,7 +22,6 @@ import {
   type MultiRunRecord,
 } from '../db/multi-runs'
 import { getRepoById } from '../db/queries'
-import type { Repo } from '../types/repo'
 import { getErrorMessage } from '../utils/error-utils'
 import { logger } from '../utils/logger'
 import { ServiceError } from '../utils/service-error'
@@ -24,7 +29,15 @@ import { buildFusionPrompt, buildFusionSourcePermissionRuleset, collectFusionSou
 import type { OpenCodeClient } from './opencode/client'
 import { RepoWorkspaceError } from './repo'
 import type { RepoWorkspaceService } from './repo-workspace'
-import { requireReadyRepo, SessionLauncher, SessionLaunchError, type LaunchedSession } from './session-launcher'
+import {
+  resolveSessionTarget,
+  SessionLauncher,
+  SessionLaunchError,
+  sessionTargetInput,
+  sessionTargetOfRun,
+  type LaunchedSession,
+  type ResolvedSessionTarget,
+} from './session-launcher'
 import type { SessionPermissionModeService } from './session-permission-modes'
 
 const MULTI_RUN_LIST_LIMIT = 20
@@ -35,6 +48,8 @@ function toMultiRun(record: MultiRunRecord): MultiRun {
   return {
     id: record.id,
     repoId: record.repoId,
+    serverId: record.serverId,
+    directory: record.directory,
     name: record.name,
     prompt: record.prompt,
     isolated: record.isolated,
@@ -69,6 +84,22 @@ function toMultiRun(record: MultiRunRecord): MultiRun {
   }
 }
 
+function multiRunTargetFromRequest(
+  request: Pick<LaunchMultiRunRequest, 'repoId' | 'serverId' | 'directory'>,
+): MultiRunTarget {
+  if (request.serverId !== undefined) {
+    if (request.directory === undefined) {
+      throw new MultiRunError('A server multi-run needs a directory', 400)
+    }
+    return { kind: 'server', serverId: request.serverId, directory: request.directory }
+  }
+
+  if (request.repoId === undefined) {
+    throw new MultiRunError('A multi-run needs a repository or server target', 400)
+  }
+  return { kind: 'repo', repoId: request.repoId }
+}
+
 export class MultiRunService {
   private readonly sessionLauncher: SessionLauncher
   private readonly discardingEntries = new Set<number>()
@@ -78,22 +109,21 @@ export class MultiRunService {
     private readonly openCodeClient: OpenCodeClient,
     private readonly repoWorkspaces: RepoWorkspaceService,
     private readonly permissionModes: SessionPermissionModeService,
+    private readonly getServerClient?: (serverId: string) => OpenCodeClient,
   ) {
-    this.sessionLauncher = new SessionLauncher(db, openCodeClient, repoWorkspaces)
+    this.sessionLauncher = new SessionLauncher(db, openCodeClient, repoWorkspaces, getServerClient)
   }
 
   async launch(request: LaunchMultiRunRequest): Promise<MultiRun> {
-    let repo: Repo
-    try {
-      repo = requireReadyRepo(this.db, request.repoId)
-    } catch (error) {
-      throw new MultiRunError(getErrorMessage(error) || 'Repository unavailable', 404)
-    }
+    const target = multiRunTargetFromRequest(request)
+    const resolved = await this.resolveTarget(target)
 
     const record = createMultiRunWithEntries(
       this.db,
       {
-        repoId: request.repoId,
+        repoId: target.kind === 'repo' ? target.repoId : null,
+        serverId: target.kind === 'server' ? target.serverId : LOCAL_OPENCODE_SERVER_ID,
+        directory: target.kind === 'server' ? target.directory : null,
         name: request.name,
         prompt: request.prompt,
         isolated: request.isolate,
@@ -105,7 +135,7 @@ export class MultiRunService {
     const validations = await Promise.all(
       record.entries.map(async (entry) => {
         try {
-          await this.sessionLauncher.resolveModel(repo, entry.model)
+          await resolved.resolveModel(entry.model)
           return { entry, ok: true as const }
         } catch (error) {
           return { entry, ok: false as const, error }
@@ -127,7 +157,7 @@ export class MultiRunService {
     })
 
     const results = await Promise.allSettled(
-      launchable.map(({ entry, index }) => this.launchEntry(entry, index, request)),
+      launchable.map(({ entry, index }) => this.launchEntry(entry, index, request, target)),
     )
 
     results.forEach((result, resultIndex) => {
@@ -174,12 +204,11 @@ export class MultiRunService {
       })
     }
 
-    let repo: Repo
-    try {
-      repo = requireReadyRepo(this.db, record.repoId)
-    } catch (error) {
-      throw new MultiRunError(getErrorMessage(error) || 'Repository unavailable', 404)
+    const target = sessionTargetOfRun(record)
+    if (!target) {
+      throw new MultiRunError('Multi-run target is no longer available', 409)
     }
+    const resolved = await this.resolveTarget(target)
 
     const entriesById = new Map(record.entries.map((entry) => [entry.id, entry]))
     const selectedEntries = request.entryIds.map((entryId) => {
@@ -197,7 +226,7 @@ export class MultiRunService {
     )
 
     try {
-      await this.sessionLauncher.resolveModel(repo, request.model)
+      await resolved.resolveModel(request.model)
     } catch (error) {
       if (error instanceof SessionLaunchError) {
         throw new MultiRunError(error.message, error.status)
@@ -205,9 +234,9 @@ export class MultiRunService {
       throw new MultiRunError(getErrorMessage(error) || 'Failed to resolve model', 502)
     }
 
-    await this.reconcileUncertainFusions(record)
+    await this.reconcileUncertainFusions(record, resolved.client)
 
-    const collection = await collectFusionSources(this.openCodeClient, selectedEntries)
+    const collection = await collectFusionSources(resolved.client, selectedEntries)
     if (collection.unavailable.length > 0) {
       throw new MultiRunError('Some selected results are not ready to fuse', 409, {
         code: 'FUSION_SOURCES_UNAVAILABLE',
@@ -239,7 +268,7 @@ export class MultiRunService {
     let launched: LaunchedSession | null = null
     try {
       launched = await this.sessionLauncher.launch({
-        repoId: record.repoId,
+        ...sessionTargetInput(target),
         prompt: built.prompt,
         model: request.model,
         title: `${record.name} · fusion`,
@@ -269,7 +298,11 @@ export class MultiRunService {
 
     if (launched) {
       try {
-        await this.permissionModes.applyDefaultMode(launched.sessionId, launched.directory)
+        await this.permissionModes.applyDefaultMode(
+          launched.sessionId,
+          launched.directory,
+          target.kind === 'server' ? target.serverId : LOCAL_OPENCODE_SERVER_ID,
+        )
       } catch (error) {
         logger.error(`Failed to apply the default permission mode to fusion session ${launched.sessionId}:`, error)
       }
@@ -278,8 +311,8 @@ export class MultiRunService {
     return { run: this.reload(multiRunId), created: true }
   }
 
-  list(repoId: number): MultiRun[] {
-    return listMultiRuns(this.db, repoId, MULTI_RUN_LIST_LIMIT).map(toMultiRun)
+  list(target: MultiRunTarget): MultiRun[] {
+    return listMultiRuns(this.db, target, MULTI_RUN_LIST_LIMIT).map(toMultiRun)
   }
 
   async discard(multiRunId: number, entryId: number): Promise<MultiRun> {
@@ -303,18 +336,8 @@ export class MultiRunService {
     this.discardingEntries.add(entryId)
 
     try {
-      if (entry.isolated && entry.directory && existsSync(entry.directory)) {
-        const repo = getRepoById(this.db, record.repoId)
-        if (!repo) {
-          throw new MultiRunError('Repository not found', 404)
-        }
-
-        try {
-          await this.repoWorkspaces.remove(repo, entry.directory)
-        } catch (error) {
-          const status = error instanceof RepoWorkspaceError ? error.status : 502
-          throw new MultiRunError(getErrorMessage(error) || 'Failed to remove workspace', status)
-        }
+      if (entry.isolated && entry.directory) {
+        await this.removeEntryWorkspace(record, entry.directory)
       }
 
       const updated = updateMultiRunEntry(this.db, entryId, ['started', 'failed'], { status: 'discarded' })
@@ -328,13 +351,69 @@ export class MultiRunService {
     }
   }
 
+  private async removeEntryWorkspace(record: MultiRunRecord, directory: string): Promise<void> {
+    const target = sessionTargetOfRun(record)
+    if (!target) {
+      throw new MultiRunError('Multi-run target is no longer available', 409)
+    }
+
+    if (target.kind === 'repo') {
+      if (!existsSync(directory)) {
+        return
+      }
+
+      const repo = getRepoById(this.db, target.repoId)
+      if (!repo) {
+        throw new MultiRunError('Repository not found', 404)
+      }
+
+      try {
+        await this.repoWorkspaces.remove(repo, directory)
+      } catch (error) {
+        const status = error instanceof RepoWorkspaceError ? error.status : 502
+        throw new MultiRunError(getErrorMessage(error) || 'Failed to remove workspace', status)
+      }
+      return
+    }
+
+    try {
+      const resolved = await this.resolveTarget(target)
+      await resolved.removeWorkspace(directory)
+    } catch (error) {
+      if (error instanceof MultiRunError) {
+        throw error
+      }
+      throw new MultiRunError(getErrorMessage(error) || 'Failed to remove workspace', 502)
+    }
+  }
+
+  private async resolveTarget(target: MultiRunTarget): Promise<ResolvedSessionTarget> {
+    try {
+      return await resolveSessionTarget(
+        {
+          db: this.db,
+          openCodeClient: this.openCodeClient,
+          repoWorkspaces: this.repoWorkspaces,
+          ...(this.getServerClient ? { getServerClient: this.getServerClient } : {}),
+        },
+        target,
+      )
+    } catch (error) {
+      if (error instanceof SessionLaunchError || error instanceof ServiceError) {
+        throw new MultiRunError(error.message, error.status)
+      }
+      throw new MultiRunError(getErrorMessage(error) || 'Multi-run target is unavailable', 502)
+    }
+  }
+
   private async launchEntry(
     entry: MultiRunEntryRecord,
     index: number,
     request: LaunchMultiRunRequest,
+    target: MultiRunTarget,
   ): Promise<LaunchedSession> {
     return this.sessionLauncher.launch({
-      repoId: request.repoId,
+      ...sessionTargetInput(target),
       prompt: request.prompt,
       model: entry.model,
       title: `${request.name} · ${entry.model}`,
@@ -345,7 +424,7 @@ export class MultiRunService {
     })
   }
 
-  private async reconcileUncertainFusions(record: MultiRunRecord): Promise<void> {
+  private async reconcileUncertainFusions(record: MultiRunRecord, client: OpenCodeClient): Promise<void> {
     const uncertain = record.fusions.filter(
       (fusion): fusion is MultiRunFusionRecord & { sessionId: string } =>
         fusion.status === 'failed' && fusion.sessionId !== null,
@@ -358,7 +437,7 @@ export class MultiRunService {
       await Promise.all(
         uncertain.map(async (fusion) => {
           try {
-            const response = await this.openCodeClient.api.message.list({
+            const response = await client.api.message.list({
               sessionID: fusion.sessionId,
               type: 'user',
               order: 'asc',

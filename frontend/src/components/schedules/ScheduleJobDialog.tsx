@@ -9,6 +9,7 @@ import { settingsApi } from '@/api/settings'
 import { mcpApi } from '@/api/mcp'
 import { listRepos } from '@/api/repos'
 import type { Repo } from '@/api/types'
+import type { ScheduleServerTarget } from '@/api/schedules'
 import { Button } from '@/components/ui/button'
 import type { ComboboxOption } from '@/components/ui/combobox'
 import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from '@/components/ui/dialog'
@@ -45,9 +46,10 @@ type ScheduleJobDialogProps = {
   repoId?: number
   onRepoChange?: (repoId: number | undefined) => void
   isEditing?: boolean
+  serverTarget?: ScheduleServerTarget
 }
 
-export function ScheduleJobDialog({ open, onOpenChange, job, isSaving, onSubmit, showRepoSelector, repoId: selectedRepoId, onRepoChange }: ScheduleJobDialogProps) {
+export function ScheduleJobDialog({ open, onOpenChange, job, isSaving, onSubmit, showRepoSelector, repoId: selectedRepoId, onRepoChange, serverTarget }: ScheduleJobDialogProps) {
   const [schedulePreset, setSchedulePreset] = useState<SchedulePreset>('interval')
   const [name, setName] = useState('')
   const [description, setDescription] = useState('')
@@ -81,17 +83,19 @@ export function ScheduleJobDialog({ open, onOpenChange, job, isSaving, onSubmit,
   const { data: templates = EMPTY_TEMPLATES } = usePromptTemplates()
   const deleteTemplateMutation = useDeletePromptTemplate()
 
-  const effectiveRepoId = selectedRepoId ?? job?.repoId
-  const { scheduleTarget } = useScheduleTarget(open ? effectiveRepoId : undefined)
-  const scheduleDirectory = scheduleTarget?.fullPath
+  const serverTargetId = serverTarget?.serverId
+  const serverTargetDirectory = serverTarget?.directory
+  const effectiveRepoId = selectedRepoId ?? job?.repoId ?? undefined
+  const { scheduleTarget } = useScheduleTarget(serverTargetId ? undefined : (open ? effectiveRepoId : undefined))
+  const scheduleDirectory = serverTargetDirectory ?? scheduleTarget?.fullPath
 
-  const { availableModels } = useScheduleModels(open, scheduleDirectory)
+  const { availableModels } = useScheduleModels(open, scheduleDirectory, serverTargetId)
 
   const resolvedModel = useMemo(
     () => (modelDirty ? (model.trim() || null) : resolveScheduleModel(model, availableModels)),
     [model, modelDirty, availableModels],
   )
-  const { data: agents = [], isSuccess: agentsLoaded } = useAgents(scheduleDirectory, { enabled: !!scheduleDirectory })
+  const { data: agents = [], isSuccess: agentsLoaded } = useAgents(scheduleDirectory, { enabled: !!scheduleDirectory, serverId: serverTargetId })
 
   const { data: skills = [], isLoading: skillsLoading } = useQuery({
     queryKey: ['managed-skills'],
@@ -101,8 +105,10 @@ export function ScheduleJobDialog({ open, onOpenChange, job, isSaving, onSubmit,
   })
 
   const { data: mcpStatuses = {}, isLoading: mcpStatusesLoading } = useQuery({
-    queryKey: ['mcp-status', scheduleDirectory],
-    queryFn: () => mcpApi.getStatus(scheduleDirectory),
+    queryKey: ['mcp-status', scheduleDirectory, serverTargetId],
+    queryFn: () => (serverTargetId
+      ? mcpApi.getStatus(scheduleDirectory, serverTargetId)
+      : mcpApi.getStatus(scheduleDirectory)),
     enabled: open && !!scheduleDirectory,
   })
 
@@ -167,12 +173,12 @@ export function ScheduleJobDialog({ open, onOpenChange, job, isSaving, onSubmit,
     initialSkillSlugsRef.current = initialSkillSlugs
     initialSkillNotesRef.current = initialSkillNotes
     setMcpServers(job?.mcpServers ?? [])
-    setBranch(job?.branch ?? '')
-    setWorkspaceMode(job?.workspaceMode ?? 'worktree')
+    setBranch(serverTargetDirectory ? '' : (job?.branch ?? ''))
+    setWorkspaceMode(serverTargetDirectory ? 'in-place' : (job?.workspaceMode ?? 'worktree'))
     setAllowExternalDirectory(job?.permissionConfig?.allowExternalDirectory ?? false)
     setAllowQuestions(job?.permissionConfig?.allowQuestions ?? false)
     setBashDenyPatterns(job?.permissionConfig?.bashDenyPatterns ?? [...DEFAULT_DESTRUCTIVE_BASH_PATTERNS])
-  }, [job, open])
+  }, [job, open, serverTargetDirectory])
 
   useEffect(() => {
     if (!open) {
@@ -216,8 +222,9 @@ export function ScheduleJobDialog({ open, onOpenChange, job, isSaving, onSubmit,
       agentSlug: selectedAgentSlug.trim() || undefined,
       model: resolvedModel ?? undefined,
       prompt: prompt.trim(),
-      branch: branch.trim() || null,
-      workspaceMode,
+      branch: serverTargetDirectory ? null : (branch.trim() || null),
+      workspaceMode: serverTargetDirectory ? 'in-place' : workspaceMode,
+      ...(serverTargetDirectory ? { directory: serverTargetDirectory } : {}),
       mcpServers,
       permissionConfig: {
         allowExternalDirectory,
@@ -266,7 +273,7 @@ export function ScheduleJobDialog({ open, onOpenChange, job, isSaving, onSubmit,
         <DialogHeader className="shrink-0 space-y-1 border-b border-border px-3 sm:px-6 py-4">
           <DialogTitle>{job ? 'Edit schedule' : 'New schedule'}</DialogTitle>
           <DialogDescription className="mt-0">
-            Create a reusable repo job with a visual schedule builder, manual runs, and optional advanced metadata.
+            {serverTarget ? 'Create a reusable job for this remote project' : 'Create a reusable repo job'} with a visual schedule builder, manual runs, and optional advanced metadata.
           </DialogDescription>
         </DialogHeader>
 
@@ -296,10 +303,11 @@ export function ScheduleJobDialog({ open, onOpenChange, job, isSaving, onSubmit,
             onEnabledChange={setEnabled}
             branch={branch}
             onBranchChange={setBranch}
-            branchRepoId={open && effectiveRepoId !== ASSISTANT_REPO_ID ? effectiveRepoId : undefined}
+            branchRepoId={!serverTargetDirectory && open && effectiveRepoId !== undefined && effectiveRepoId !== ASSISTANT_REPO_ID ? effectiveRepoId : undefined}
             workspaceMode={workspaceMode}
             onWorkspaceModeChange={setWorkspaceMode}
-            showWorkspaceMode={effectiveRepoId !== ASSISTANT_REPO_ID}
+            showWorkspaceMode={!serverTargetDirectory && effectiveRepoId !== ASSISTANT_REPO_ID}
+            showBranch={!serverTargetDirectory}
             showRepoSelector={showRepoSelector}
             isEditing={!!job}
             repoId={selectedRepoId}

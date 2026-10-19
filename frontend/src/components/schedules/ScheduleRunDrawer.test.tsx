@@ -8,13 +8,13 @@ import type { ScheduleRunWithContext } from '@/api/schedules'
 import type { Repo } from '@/api/types'
 
 const mocks = vi.hoisted(() => ({
-  useRepoScheduleRun: vi.fn(),
+  useScheduleRunDetail: vi.fn(),
   useMarkScheduleRunViewed: vi.fn(),
   getRepo: vi.fn(),
 }))
 
 vi.mock('@/hooks/useSchedules', () => ({
-  useRepoScheduleRun: mocks.useRepoScheduleRun,
+  useScheduleRunDetail: mocks.useScheduleRunDetail,
   useMarkScheduleRunViewed: mocks.useMarkScheduleRunViewed,
 }))
 
@@ -85,7 +85,7 @@ function renderDrawer(props: Partial<ComponentProps<typeof ScheduleRunDrawer>> =
 describe('ScheduleRunDrawer', () => {
   beforeEach(() => {
     vi.clearAllMocks()
-    mocks.useRepoScheduleRun.mockReturnValue({ data: undefined, isLoading: false })
+    mocks.useScheduleRunDetail.mockReturnValue({ data: undefined, isLoading: false })
     mocks.useMarkScheduleRunViewed.mockReturnValue({ mutate: vi.fn(), isPending: false })
     mocks.getRepo.mockResolvedValue(repo)
   })

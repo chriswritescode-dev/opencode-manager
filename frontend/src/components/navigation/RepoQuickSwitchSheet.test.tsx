@@ -38,6 +38,16 @@ const activityMocks = vi.hoisted(() => ({
   useActivityWindowMinutes: vi.fn(),
 }))
 
+const serverMocks = vi.hoisted(() => ({
+  useOpenCodeServers: vi.fn(),
+  useOpenCodeServerStatuses: vi.fn(),
+}))
+
+vi.mock('@/hooks/useOpenCodeServers', () => ({
+  useOpenCodeServers: serverMocks.useOpenCodeServers,
+  useOpenCodeServerStatuses: serverMocks.useOpenCodeServerStatuses,
+}))
+
 vi.mock('@/hooks/useActiveWork', () => ({
   useActiveWork: activityMocks.useActiveWork,
   useActivityWindowMinutes: activityMocks.useActivityWindowMinutes,
@@ -132,6 +142,33 @@ function setActivityGroups(groups: {
   })
 }
 
+function createLinkedServer(id: string, name: string, enabled = true) {
+  return {
+    id,
+    name,
+    baseUrl: `https://${id}.example.com`,
+    username: 'opencode',
+    enabled,
+    hasPassword: true,
+    createdAt: 1,
+    updatedAt: 2,
+  }
+}
+
+function setLinkedServers(servers: Array<ReturnType<typeof createLinkedServer>>) {
+  serverMocks.useOpenCodeServers.mockReturnValue({ servers, isLoading: false })
+  serverMocks.useOpenCodeServerStatuses.mockReturnValue({
+    statuses: [],
+    statusById: Object.fromEntries(
+      servers.map((server) => [
+        server.id,
+        { serverId: server.id, connected: true, version: null, error: null },
+      ]),
+    ),
+    isLoading: false,
+  })
+}
+
 function createWrapper() {
   const queryClient = new QueryClient({
     defaultOptions: {
@@ -173,6 +210,7 @@ describe('RepoQuickSwitchSheet', () => {
     permissionSessions.current.clear()
     activityMocks.useActivityWindowMinutes.mockReturnValue(30)
     setActivityGroups({})
+    setLinkedServers([])
   })
 
   it('renders with loading state', async () => {
@@ -925,6 +963,62 @@ describe('RepoQuickSwitchSheet', () => {
 
     expect(createSessionDirectories).toEqual(['/path/to/repo2'])
     expect(pathname).toBe('/repos/2/sessions/new-session')
+    expect(handleClose).toHaveBeenCalled()
+  })
+
+  it('renders the Servers group with enabled linked servers', async () => {
+    vi.mocked(listRepos).mockResolvedValue([createRepo(1, 'repo1', '/path/to/repo1')])
+    setLinkedServers([
+      createLinkedServer('srv_kitchen', 'Kitchen'),
+      createLinkedServer('srv_office', 'Office', false),
+    ])
+
+    render(<RepoQuickSwitchSheet isOpen onClose={vi.fn()} />, { wrapper: createWrapper() })
+
+    expect(await screen.findByRole('heading', { name: 'Servers' })).toBeInTheDocument()
+    expect(screen.getByRole('button', { name: /Kitchen/ })).toBeInTheDocument()
+    expect(screen.queryByRole('button', { name: /Office/ })).not.toBeInTheDocument()
+    expect(screen.getByRole('img', { name: 'Connected' })).toBeInTheDocument()
+  })
+
+  it('hides the Servers group when no linked servers exist', async () => {
+    vi.mocked(listRepos).mockResolvedValue([createRepo(1, 'repo1', '/path/to/repo1')])
+
+    render(<RepoQuickSwitchSheet isOpen onClose={vi.fn()} />, { wrapper: createWrapper() })
+
+    await waitFor(() => {
+      expect(screen.getByText('repo1')).toBeInTheDocument()
+    })
+
+    expect(screen.queryByRole('heading', { name: 'Servers' })).toBeNull()
+  })
+
+  it('navigates to a linked server and closes the sheet', async () => {
+    vi.mocked(listRepos).mockResolvedValue([createRepo(1, 'repo1', '/path/to/repo1')])
+    setLinkedServers([createLinkedServer('srv_kitchen', 'Kitchen')])
+    const handleClose = vi.fn()
+
+    render(
+      <QueryClientProvider client={new QueryClient()}>
+        <MemoryRouter initialEntries={['/repos/1']}>
+          <Routes>
+            <Route
+              path="*"
+              element={
+                <>
+                  <RepoQuickSwitchSheet isOpen onClose={handleClose} />
+                  <LocationSpy />
+                </>
+              }
+            />
+          </Routes>
+        </MemoryRouter>
+      </QueryClientProvider>,
+    )
+
+    fireEvent.click(await screen.findByRole('button', { name: /Kitchen/ }))
+
+    expect(screen.getByTestId('location')).toHaveTextContent('/servers/srv_kitchen')
     expect(handleClose).toHaveBeenCalled()
   })
 })

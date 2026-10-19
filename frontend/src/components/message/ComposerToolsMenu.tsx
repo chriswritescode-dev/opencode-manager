@@ -9,6 +9,7 @@ import {
   DropdownMenuTrigger,
 } from '@/components/ui/dropdown-menu'
 import { getIconToggleButtonClassName } from '@/components/ui/icon-toggle-button'
+import { isLocalOpenCodeServer, useOpenCodeServerId } from '@/contexts/OpenCodeServerContext'
 import { usePermissionModeToggle } from '@/hooks/usePermissionModeToggle'
 import { useSandboxToggle } from '@/hooks/useSandboxToggle'
 import { shouldShowSandboxResources } from '@/lib/sandboxResources'
@@ -25,7 +26,6 @@ interface ComposerToolsMenuProps {
   onToggleGoal: () => void
   onAttachFile: () => void
   onDictate?: () => void
-  allowManagerTools?: boolean
 }
 
 export function ComposerToolsMenu({
@@ -37,10 +37,10 @@ export function ComposerToolsMenu({
   onToggleGoal,
   onAttachFile,
   onDictate,
-  allowManagerTools = true,
 }: ComposerToolsMenuProps) {
-  const permission = usePermissionModeToggle(sessionID, directory, { enabled: allowManagerTools })
-  const sandbox = useSandboxToggle(sessionID, { enabled: allowManagerTools })
+  const isLocalServer = isLocalOpenCodeServer(useOpenCodeServerId())
+  const permission = usePermissionModeToggle(sessionID, directory)
+  const sandbox = useSandboxToggle(sessionID, { enabled: isLocalServer })
   const [resourcesOpen, setResourcesOpen] = useState(false)
 
   return (
@@ -57,30 +57,28 @@ export function ComposerToolsMenu({
           </button>
         </DropdownMenuTrigger>
         <DropdownMenuContent side="top" align="end" collisionPadding={8} className="w-64">
-          {allowManagerTools ? (
-            <>
-              <DropdownMenuCheckboxItem
-                checked={permission.isAuto}
-                disabled={permission.disabled}
-                onCheckedChange={permission.toggle}
-              >
-                <ToolMenuItemContent
-                  icon={permission.isAuto ? <ShieldCheck className="h-4 w-4" /> : <Shield className="h-4 w-4" />}
-                  title="Accept all permissions"
-                  detail={permission.disabled ? permission.label : undefined}
-                />
-              </DropdownMenuCheckboxItem>
-              <SandboxMenuItems sandbox={sandbox} onOpenResources={() => setResourcesOpen(true)} />
-              <DropdownMenuCheckboxItem checked={goalArmed} disabled={goalDisabled} onCheckedChange={onToggleGoal}>
-                <ToolMenuItemContent
-                  icon={<Target className="h-4 w-4" />}
-                  title="Goal mode"
-                  detail={goalDisabled ? goalLabel : undefined}
-                />
-              </DropdownMenuCheckboxItem>
-              <DropdownMenuSeparator />
-            </>
-          ) : null}
+          <DropdownMenuCheckboxItem
+            checked={permission.isAuto}
+            disabled={permission.disabled}
+            onCheckedChange={permission.toggle}
+          >
+            <ToolMenuItemContent
+              icon={permission.isAuto ? <ShieldCheck className="h-4 w-4" /> : <Shield className="h-4 w-4" />}
+              title="Accept all permissions"
+              detail={permission.disabled ? permission.label : undefined}
+            />
+          </DropdownMenuCheckboxItem>
+          {isLocalServer && (
+            <SandboxMenuItems sandbox={sandbox} onOpenResources={() => setResourcesOpen(true)} />
+          )}
+          <DropdownMenuCheckboxItem checked={goalArmed} disabled={goalDisabled} onCheckedChange={onToggleGoal}>
+            <ToolMenuItemContent
+              icon={<Target className="h-4 w-4" />}
+              title="Goal mode"
+              detail={goalDisabled ? goalLabel : undefined}
+            />
+          </DropdownMenuCheckboxItem>
+          <DropdownMenuSeparator />
           <DropdownMenuItem onSelect={onAttachFile} className="pl-8">
             <ToolMenuItemContent icon={<Paperclip className="h-4 w-4" />} title="Attach image or PDF" />
           </DropdownMenuItem>

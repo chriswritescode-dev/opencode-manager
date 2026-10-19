@@ -9,6 +9,8 @@ import type {
 import {
   NotificationEventType,
   DEFAULT_NOTIFICATION_PREFERENCES,
+  LOCAL_OPENCODE_SERVER_ID,
+  type OpenCodeServer,
   type SessionGoal,
 } from "@opencode-manager/shared/schemas";
 import {
@@ -23,9 +25,13 @@ import { sseAggregator, type SSEEvent } from "./sse-aggregator";
 import { getRepoName } from "../db/queries";
 import { getScheduleRunBySessionId } from "../db/schedules";
 import type { Repo } from "../types/repo";
-import { buildSessionPath } from "@opencode-manager/shared/utils";
+import { buildServerSessionPath, buildSessionPath } from "@opencode-manager/shared/utils";
 import { sessionIDFromEvent } from "@opencode-manager/shared/opencode";
 import { resolveRepoForDirectory } from "./repo";
+
+export interface NotificationServerRegistry {
+  get(serverId: string): Pick<OpenCodeServer, "name" | "enabled"> | null;
+}
 
 interface VapidConfig {
   publicKey: string;
@@ -123,6 +129,8 @@ export function buildEventNotificationPayload(
   context: {
     repoName?: string;
     repoId?: number;
+    serverId?: string;
+    serverName?: string;
     sessionId?: string;
     directory?: string;
     url: string;
@@ -134,8 +142,9 @@ export function buildEventNotificationPayload(
   const title = config.titleFn(event.data);
 
   const detail = config.bodyFn(event.data);
-  const rawBody = context.repoName
-    ? `${context.repoName} · ${detail}`
+  const displayName = context.repoName ?? context.serverName;
+  const rawBody = displayName
+    ? `${displayName} · ${detail}`
     : detail;
   const body = truncateWithEllipsis(rawBody, MAX_BODY_LENGTH);
 
@@ -151,19 +160,28 @@ export function buildEventNotificationPayload(
       directory: context.directory,
       repoId: context.repoId,
       repoName: context.repoName,
+      serverId: context.serverId,
+      serverName: context.serverName,
       url: context.url,
     },
   };
 }
 
-type EventSuppressor = (event: SSEEvent, sessionId: string | undefined) => Promise<boolean>;
+type EventSuppressor = (
+  event: SSEEvent,
+  sessionId: string | undefined,
+  serverId: string
+) => Promise<boolean>;
 
 export class NotificationService {
   private vapidConfig: VapidConfig | null = null;
   private settingsService: SettingsService;
   private eventSuppressors: EventSuppressor[] = [];
 
-  constructor(private db: Database) {
+  constructor(
+    private db: Database,
+    private serverRegistry: NotificationServerRegistry | null = null
+  ) {
     this.settingsService = new SettingsService(db);
     this.initializePushSubscriptionsTable();
   }
@@ -335,17 +353,29 @@ export class NotificationService {
 
   async handleSSEEvent(
     directory: string | null,
-    event: SSEEvent
+    event: SSEEvent,
+    serverId: string = LOCAL_OPENCODE_SERVER_ID
   ): Promise<void> {
     const config = EVENT_CONFIG[event.type];
     if (!config) return;
 
     const sessionId = resolveEventSessionId(event);
-    if (sessionId && sseAggregator.isSessionBeingViewed(sessionId)) return;
-    if (sessionId && sseAggregator.isSubagentSession(sessionId)) return;
+    if (sessionId && sseAggregator.isSessionBeingViewed(sessionId, serverId)) return;
+    if (sessionId && sseAggregator.isSubagentSession(sessionId, serverId)) return;
 
     for (const suppressor of this.eventSuppressors) {
-      if (await suppressor(event, sessionId)) return;
+      if (await suppressor(event, sessionId, serverId)) return;
+    }
+
+    if (serverId !== LOCAL_OPENCODE_SERVER_ID) {
+      await this.deliverRemoteEvent(
+        serverId,
+        directory,
+        event,
+        sessionId,
+        config.preferencesKey
+      );
+      return;
     }
 
     const repo = directory ? await resolveRepoForDirectory(this.db, directory) : null;
@@ -371,19 +401,53 @@ export class NotificationService {
     );
   }
 
+  private async deliverRemoteEvent(
+    serverId: string,
+    directory: string | null,
+    event: SSEEvent,
+    sessionId: string | undefined,
+    preferencesKey: keyof typeof DEFAULT_NOTIFICATION_PREFERENCES.events
+  ): Promise<void> {
+    const server = this.serverRegistry?.get(serverId) ?? null;
+    if (!server || !server.enabled) return;
+
+    const url = sessionId
+      ? buildServerSessionPath(serverId, sessionId)
+      : `/servers/${encodeURIComponent(serverId)}`;
+
+    const payload = buildEventNotificationPayload(event, {
+      serverId,
+      serverName: server.name,
+      sessionId,
+      directory: directory ?? undefined,
+      url,
+    });
+    if (!payload) return;
+
+    await this.deliverToSubscribers(
+      payload,
+      (preferences) =>
+        preferences.enabled &&
+        preferences.events[preferencesKey] === true
+    );
+  }
+
   async notifyGoalOutcome(goal: SessionGoal): Promise<void> {
     if (goal.stopReason === "turn_error") return;
     if (goal.stopReason === "cancelled" || goal.stopReason === "user_paused") return;
-    if (sseAggregator.isSessionBeingViewed(goal.sessionId)) return;
+    if (sseAggregator.isSessionBeingViewed(goal.sessionId, goal.serverId)) return;
 
-    const repo = goal.directory
+    const isRemote = goal.serverId !== LOCAL_OPENCODE_SERVER_ID;
+    const repo = !isRemote && goal.directory
       ? await resolveRepoForDirectory(this.db, goal.directory)
       : null;
+    const server = isRemote ? this.serverRegistry?.get(goal.serverId) ?? null : null;
     const repoName = repo ? getRepoName(repo) : undefined;
+    const displayName = repoName ?? server?.name;
 
     const payload: PushNotificationPayload = {
       title: getGoalOutcomeTitle(goal.status),
-      body: buildGoalOutcomeBody(goal, repoName),
+      body: buildGoalOutcomeBody(goal, displayName),
       tag: `session-goal-${goal.id}`,
       timestamp: Date.now(),
       renotify: true,
@@ -393,7 +457,11 @@ export class NotificationService {
         directory: goal.directory,
         repoId: repo?.id,
         repoName,
-        url: buildNotificationUrl(repo, goal.sessionId),
+        serverId: goal.serverId,
+        serverName: server?.name,
+        url: isRemote
+          ? buildServerSessionPath(goal.serverId, goal.sessionId)
+          : buildNotificationUrl(repo, goal.sessionId),
       },
     };
 

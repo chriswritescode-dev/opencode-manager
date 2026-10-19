@@ -1,5 +1,5 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest'
-import { render, screen } from '@testing-library/react'
+import { render, screen, fireEvent } from '@testing-library/react'
 import { MemoryRouter } from 'react-router-dom'
 import { LinkedServersNav } from './LinkedServersNav'
 
@@ -30,6 +30,14 @@ function renderNav(pathname = '/') {
   return render(
     <MemoryRouter initialEntries={[pathname]}>
       <LinkedServersNav />
+    </MemoryRouter>,
+  )
+}
+
+function renderRail(pathname = '/') {
+  return render(
+    <MemoryRouter initialEntries={[pathname]}>
+      <LinkedServersNav variant="rail" />
     </MemoryRouter>,
   )
 }
@@ -74,5 +82,39 @@ describe('LinkedServersNav', () => {
 
     expect(screen.getByRole('link', { name: /Kitchen/ })).toBeInTheDocument()
     expect(screen.queryByRole('link', { name: /Office/ })).not.toBeInTheDocument()
+  })
+
+  it('renders enabled servers as icon links in the collapsed rail', () => {
+    mocks.useOpenCodeServers.mockReturnValue({ servers: [kitchen], isLoading: false })
+
+    renderRail('/servers/srv_kitchen/sessions/abc')
+
+    expect(screen.getByRole('link', { name: 'Kitchen' })).toHaveAttribute(
+      'aria-current',
+      'page',
+    )
+    expect(screen.queryByText('Servers')).not.toBeInTheDocument()
+  })
+
+  it('renders nothing in the collapsed rail when no linked servers exist', () => {
+    const { container } = renderRail()
+
+    expect(container).toBeEmptyDOMElement()
+  })
+
+  it('hands navigation to the caller in the sheet variant', () => {
+    mocks.useOpenCodeServers.mockReturnValue({ servers: [kitchen], isLoading: false })
+    const onNavigate = vi.fn()
+
+    render(
+      <MemoryRouter>
+        <LinkedServersNav variant="sheet" onNavigate={onNavigate} />
+      </MemoryRouter>,
+    )
+
+    expect(screen.getByRole('heading', { name: 'Servers' })).toBeInTheDocument()
+    fireEvent.click(screen.getByRole('button', { name: /Kitchen/ }))
+
+    expect(onNavigate).toHaveBeenCalledWith('/servers/srv_kitchen')
   })
 })

@@ -59,7 +59,7 @@ function renderView(overrides: Partial<ComponentProps<typeof TerminalView>> = {}
   const element = (
     <TerminalView
       ref={ref}
-      repoId={1}
+      target={{ kind: 'repo', repoId: 1 }}
       directory="/repo"
       ptyID="t1"
       active
@@ -106,7 +106,7 @@ describe('TerminalView input handling', () => {
     const ref = createRef<TerminalViewHandle>()
     const onCtrlConsumed = vi.fn()
     const props: ComponentProps<typeof TerminalView> = {
-      repoId: 1,
+      target: { kind: 'repo', repoId: 1 },
       directory: '/repo',
       ptyID: 't1',
       active: true,

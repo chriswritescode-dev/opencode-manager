@@ -11,6 +11,7 @@ import { FolderGit2, Plus } from 'lucide-react'
 import { useUrlParams } from '@/hooks/useUrlParams'
 import { getAssistantPath, getRepoPath } from '@/lib/navigation'
 import { NewSessionButton, RepoSessionNavList, SearchClearButton } from '@/components/navigation/RepoSessionNav'
+import { LinkedServersNav } from '@/components/navigation/LinkedServersNav'
 import { getActiveRepoId } from '@/components/navigation/sidebar-session-tree'
 import { useNavigableRepos } from '@/hooks/useSidebarRepoGroups'
 
@@ -96,6 +97,12 @@ export function RepoQuickSwitchSheet({ isOpen, onClose }: RepoQuickSwitchSheetPr
           </div>
         </BottomSheetHeader>
       <BottomSheetContent className="flex flex-col px-0 pt-0 gap-0">
+        {isOpen && (
+          <LinkedServersNav
+            variant="sheet"
+            onNavigate={(path) => navigateAndClose(path, { replace: true })}
+          />
+        )}
         {isOpen && !searchQuery.trim() && (
           <CompactActivityList onNavigate={(path) => navigateAndClose(path)} />
         )}

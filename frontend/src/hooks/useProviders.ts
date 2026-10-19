@@ -5,10 +5,12 @@ import { serverScopedKey } from '@/lib/serverScope'
 
 interface UseProvidersOptions {
   enabled?: boolean
+  serverId?: string
 }
 
 export function useProviders(directory?: string, options: UseProvidersOptions = {}) {
-  const serverId = useOpenCodeServerId()
+  const defaultServerId = useOpenCodeServerId()
+  const serverId = options.serverId ?? defaultServerId
 
   return useQuery({
     queryKey: serverScopedKey(['opencode', 'providers', directory], serverId),

@@ -164,6 +164,19 @@ describe('buildToolItems', () => {
     ])
   })
 
+  it('returns the linked server session tools without Manager-only entries', () => {
+    expect(buildToolItems('/servers/srv_kitchen/sessions/ses_1').map((item) => item.key)).toEqual([
+      'activity',
+      'terminal',
+    ])
+    expect(buildMoreItems('/servers/srv_kitchen/sessions/ses_1').map((item) => item.key)).toEqual([
+      'home',
+      'terminal',
+      'settings',
+      'logout',
+    ])
+  })
+
   it('returns the home route tools', () => {
     expect(buildToolItems('/').map((item) => item.key)).toEqual(['activity', 'all-schedules', 'files'])
   })

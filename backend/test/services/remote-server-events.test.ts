@@ -371,6 +371,51 @@ describe('RemoteServerEventHub event delivery', () => {
 
     expect(client.frames).toHaveLength(0)
   })
+
+  it('notifies server event listeners with the remote server id and resolved directory', () => {
+    const seen: Array<{ serverId: string; directory: string | null; type: string }> = []
+    sseAggregator.onServerEvent((serverId, directory, event) => {
+      seen.push({ serverId, directory, type: event.type })
+    })
+
+    hub.start()
+    const source = sources.sources[0]!
+    source.message(remoteEvent('session.created', { sessionID: 'ses_1' }, '/repo'))
+    source.message(remoteEvent('session.execution.succeeded', { sessionID: 'ses_1' }))
+
+    expect(seen).toEqual([
+      { serverId: 'srv_a', directory: '/repo', type: 'session.created' },
+      { serverId: 'srv_a', directory: '/repo', type: 'session.execution.succeeded' },
+    ])
+    expect(sseAggregator.getActiveSessions()).toEqual({})
+  })
+
+  it('tracks remote subagent sessions per server', () => {
+    hub.start()
+    const source = sources.sources[0]!
+
+    source.message(remoteEvent('session.created', { sessionID: 'ses_sub', parentID: 'ses_root' }, '/repo'))
+
+    expect(hub.isSubagentSession('srv_a', 'ses_sub')).toBe(true)
+    expect(sseAggregator.isSubagentSession('ses_sub', 'srv_a')).toBe(true)
+    expect(sseAggregator.isSubagentSession('ses_sub')).toBe(false)
+    expect(sseAggregator.isSubagentSession('ses_sub', 'srv_b')).toBe(false)
+
+    source.message(remoteEvent('session.deleted', { sessionID: 'ses_sub' }))
+
+    expect(hub.isSubagentSession('srv_a', 'ses_sub')).toBe(false)
+    expect(sseAggregator.isSubagentSession('ses_sub', 'srv_a')).toBe(false)
+  })
+
+  it('notifies server connected listeners when a remote stream opens', () => {
+    const seen: string[] = []
+    sseAggregator.onServerConnected(serverId => { seen.push(serverId) })
+
+    hub.start()
+    sources.sources[1]!.open()
+
+    expect(seen).toEqual(['srv_b'])
+  })
 })
 
 describe('RemoteServerEventHub reconnection', () => {

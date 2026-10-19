@@ -1,7 +1,16 @@
 import { useState, useMemo, useEffect, useRef, useCallback } from 'react'
 import { useNavigate } from 'react-router-dom'
-import { useAllSchedules, useAllScheduleRuns, useCancelRepoScheduleRun, useUnreadScheduleRuns } from '@/hooks/useSchedules'
-import { useDeleteRepoSchedule, useRunRepoSchedule, useUpdateRepoSchedule, useCreateRepoSchedule } from '@/hooks/useSchedules'
+import {
+  useAllSchedules,
+  useAllScheduleRuns,
+  useCancelScheduleTargetRun,
+  useCreateRepoSchedule,
+  useDeleteScheduleTarget,
+  useRunScheduleTarget,
+  useUnreadScheduleRuns,
+  useUpdateScheduleTarget,
+  type ScheduleTargetRef,
+} from '@/hooks/useSchedules'
 import { ScheduleJobDialog, PromptsTab, ScheduleJobsTable, ScheduleListToolbar, ScheduleRunDrawer, ScheduleRunsTable, ScheduleRepoSwitcher } from '@/components/schedules'
 import type { CreateScheduleJobRequest } from '@opencode-manager/shared/types'
 import { DELETE_SCHEDULE_DESCRIPTION, matchesScheduleJobSearch, toUpdateScheduleRequest } from '@/components/schedules/schedule-utils'
@@ -20,11 +29,25 @@ import { useDebouncedValue } from '@/hooks/useDebouncedValue'
 
 import type { ScheduleJobWithRepo, ScheduleRunWithContext } from '@/api/schedules'
 import { Combobox } from '@/components/ui/combobox'
-import { getRepoPath } from '@/lib/navigation'
+import { getRepoPath, getServerPath } from '@/lib/navigation'
 
 type StatusFilter = 'all' | 'enabled' | 'disabled'
 type ScheduleModeFilter = 'all' | 'cron' | 'interval'
 type SortOption = 'nextRun' | 'name' | 'repo'
+
+function jobBucket(job: ScheduleJobWithRepo): string {
+  return job.repoId === null ? `server:${job.serverId ?? ''}:${job.repoPath}` : job.repoPath
+}
+
+function targetForJob(job: ScheduleJobWithRepo): ScheduleTargetRef | null {
+  if (job.repoId !== null) return { kind: 'repo', repoId: job.repoId }
+  return job.serverId ? { kind: 'server', serverId: job.serverId } : null
+}
+
+function targetForRun(run: ScheduleRunWithContext): ScheduleTargetRef | null {
+  if (run.repoId !== null) return { kind: 'repo', repoId: run.repoId }
+  return run.serverId ? { kind: 'server', serverId: run.serverId } : null
+}
 
 export function GlobalSchedules() {
   const navigate = useNavigate()
@@ -46,7 +69,7 @@ export function GlobalSchedules() {
 
   const { scheduleTab, setScheduleTab, dialog, promptDialog, jobId, runId, templateId, openNewJob, openEditJob, openDeleteJob, openNewTemplate, openEditTemplate, openDeleteTemplate, openImportTemplate, closeDialog, closePromptDialog, selectRun } = useScheduleUrlState()
 
-  const cancelRunMutation = useCancelRepoScheduleRun()
+  const cancelRunMutation = useCancelScheduleTargetRun()
   const cancelRunPending = cancelRunMutation.isPending
 
   useEffect(() => {
@@ -100,9 +123,9 @@ export function GlobalSchedules() {
   }, [nextUnreadRun, selectRun])
 
   const createMutation = useCreateRepoSchedule()
-  const deleteMutation = useDeleteRepoSchedule()
-  const runMutation = useRunRepoSchedule()
-  const updateMutation = useUpdateRepoSchedule()
+  const deleteMutation = useDeleteScheduleTarget()
+  const runMutation = useRunScheduleTarget()
+  const updateMutation = useUpdateScheduleTarget()
 
   useEffect(() => {
     setRunOffset(0)
@@ -152,14 +175,15 @@ export function GlobalSchedules() {
   }, [runsForDisplay, runSortOption])
 
   const uniqueRepos = useMemo(() => {
-    const repoMap = new Map<string, { name: string; url: string }>()
+    const repoMap = new Map<string, { name: string; url: string; repoId: number | null }>()
     jobs.forEach((job) => {
-      repoMap.set(job.repoPath, { name: job.repoName, url: job.repoUrl })
+      repoMap.set(jobBucket(job), { name: job.repoName, url: job.repoUrl, repoId: job.repoId })
     })
-    return Array.from(repoMap.entries()).map(([path, info]) => ({
-      path,
+    return Array.from(repoMap.entries()).map(([bucket, info]) => ({
+      path: bucket,
       name: info.name,
       url: info.url,
+      repoId: info.repoId,
     }))
   }, [jobs])
 
@@ -179,7 +203,7 @@ export function GlobalSchedules() {
     }
 
     if (repoFilter !== 'all') {
-      filtered = filtered.filter((job) => job.repoPath === repoFilter)
+      filtered = filtered.filter((job) => jobBucket(job) === repoFilter)
     }
 
     filtered = filtered.filter((job) => matchesScheduleJobSearch(job, searchQuery))
@@ -207,7 +231,7 @@ export function GlobalSchedules() {
     ...uniqueRepos.map((repo) => ({
       value: repo.path,
       label: repo.name,
-      description: `${jobs.filter((j) => j.repoPath === repo.path).length} jobs`,
+      description: `${jobs.filter((j) => jobBucket(j) === repo.path).length} jobs`,
     })),
   ], [jobs, uniqueRepos])
 
@@ -251,38 +275,43 @@ export function GlobalSchedules() {
 
   const runRepoOptions = useMemo(() => [
     { value: 'all', label: 'All Repos', description: '' },
-    ...uniqueRepos.map((repo) => ({
-      value: `${jobs.find((j) => j.repoPath === repo.path)?.repoId ?? 0}|${repo.path}`,
+    ...uniqueRepos.filter((repo) => repo.repoId !== null).map((repo) => ({
+      value: `${repo.repoId}|${repo.path}`,
       label: repo.name,
       description: repo.path,
     })),
-  ], [uniqueRepos, jobs])
+  ], [uniqueRepos])
 
   const handleDelete = () => {
-    if (!deletingJob) {
+    const target = deletingJob ? targetForJob(deletingJob) : null
+    if (!deletingJob || !target) {
       return
     }
 
     deleteMutation.mutate(
-      { repoId: deletingJob.repoId, jobId: deletingJob.id },
+      { target, jobId: deletingJob.id },
       { onSuccess: () => closeDialog() }
     )
   }
 
-  const handleCancelRun = (repoId: number, jobId: number, runId: number) => {
-    cancelRunMutation.mutate({ repoId, jobId, runId })
+  const handleCancelRun = (target: ScheduleTargetRef, jobId: number, runId: number) => {
+    cancelRunMutation.mutate({ target, jobId, runId })
   }
 
   const handleToggleEnabled = (job: ScheduleJobWithRepo) => {
+    const target = targetForJob(job)
+    if (!target) return
     updateMutation.mutate({
-      repoId: job.repoId,
+      target,
       jobId: job.id,
       data: { enabled: !job.enabled },
     })
   }
 
   const handleRunNow = (job: ScheduleJobWithRepo) => {
-    runMutation.mutate({ repoId: job.repoId, jobId: job.id })
+    const target = targetForJob(job)
+    if (!target) return
+    runMutation.mutate({ target, jobId: job.id })
   }
 
   const handleEdit = (job: ScheduleJobWithRepo) => {
@@ -303,10 +332,11 @@ export function GlobalSchedules() {
   }
 
   const handleUpdate = (data: CreateScheduleJobRequest) => {
-    if (!editingJob) return
+    const target = editingJob ? targetForJob(editingJob) : null
+    if (!editingJob || !target) return
     updateMutation.mutate(
       {
-        repoId: editingJob.repoId,
+        target,
         jobId: editingJob.id,
         data: toUpdateScheduleRequest(data),
       },
@@ -319,12 +349,20 @@ export function GlobalSchedules() {
   }
 
   const handleNavigateToRepo = (repoPath: string) => {
-    const repoId = jobs.find((j) => j.repoPath === repoPath)?.repoId
-    if (repoId === undefined) return
-    navigate(getRepoPath(repoId))
+    const job = jobs.find((entry) => jobBucket(entry) === repoPath)
+    if (!job) return
+    if (job.repoId === null) {
+      if (job.serverId) navigate(getServerPath(job.serverId))
+      return
+    }
+    navigate(getRepoPath(job.repoId))
   }
 
   const handleOpenJobPage = (job: ScheduleJobWithRepo) => {
+    if (job.repoId === null) {
+      if (job.serverId) navigate(getServerPath(job.serverId))
+      return
+    }
     navigate(`/repos/${job.repoId}/schedules`)
   }
 
@@ -338,13 +376,15 @@ export function GlobalSchedules() {
   }
 
   const handleCancelJobRun = (job: ScheduleJobWithRepo) => {
-    if (!job.lastRun) return
-    handleCancelRun(job.repoId, job.id, job.lastRun.id)
+    const target = targetForJob(job)
+    if (!job.lastRun || !target) return
+    handleCancelRun(target, job.id, job.lastRun.id)
   }
 
   const handleCancelSelectedRun = () => {
-    if (!selectedRun) return
-    handleCancelRun(selectedRun.repoId, selectedRun.jobId, selectedRun.id)
+    const target = selectedRun ? targetForRun(selectedRun) : null
+    if (!selectedRun || !target) return
+    handleCancelRun(target, selectedRun.jobId, selectedRun.id)
   }
 
   const selectedRunIndex = runId !== null ? sortedRuns.findIndex((run) => run.id === runId) : -1
@@ -761,6 +801,9 @@ export function GlobalSchedules() {
         showRepoSelector
         repoId={selectedRepoId}
         onRepoChange={setSelectedRepoId}
+        serverTarget={editingJob && editingJob.repoId === null && editingJob.serverId && editingJob.directory
+          ? { serverId: editingJob.serverId, directory: editingJob.directory }
+          : undefined}
       />
 
       <DeleteDialog

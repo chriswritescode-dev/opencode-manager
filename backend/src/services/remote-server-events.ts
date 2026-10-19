@@ -24,6 +24,9 @@ export interface RemoteEventAggregator {
   sendRemoteResync(serverId: string, data: string): void
   hasClientDirectory(clientId: string, key: string): boolean
   setRemoteReplayHandler(handler: RemoteReplayHandler | null): void
+  notifyServerEvent(serverId: string, directory: string | null, event: V2Event): void
+  notifyServerConnected(serverId: string): void
+  setRemoteSubagentResolver(resolver: ((serverId: string, sessionId: string) => boolean) | null): void
 }
 
 export interface RemoteEventSource {
@@ -51,6 +54,7 @@ interface RemoteServerStream {
   version: string | null
   versionRequested: boolean
   sessionDirectories: Map<string, string>
+  subagentSessions: Set<string>
 }
 
 type RemoteReplayEventType = 'permission.asked' | 'form.created'
@@ -94,6 +98,7 @@ export class RemoteServerEventHub {
     this.started = true
     this.aggregator.setRemoteReplayHandler((clientId, serverId, directory) =>
       this.replayPendingActions(clientId, serverId, directory))
+    this.aggregator.setRemoteSubagentResolver((serverId, sessionId) => this.isSubagentSession(serverId, sessionId))
     this.unsubscribeRegistry = this.registry.onChange(change => this.handleRegistryChange(change))
     this.connectAll()
   }
@@ -108,6 +113,11 @@ export class RemoteServerEventHub {
       this.forgetStream(serverId)
     }
     this.aggregator.setRemoteReplayHandler(null)
+    this.aggregator.setRemoteSubagentResolver(null)
+  }
+
+  isSubagentSession(serverId: string, sessionId: string): boolean {
+    return this.streams.get(serverId)?.subagentSessions.has(sessionId) ?? false
   }
 
   getStatuses(): OpenCodeServerStatus[] {
@@ -254,6 +264,7 @@ export class RemoteServerEventHub {
     stream.error = null
     stream.reconnectDelay = this.reconnectDelayMs
     logger.info(`Remote event stream connected: ${serverId}`)
+    this.aggregator.notifyServerConnected(serverId)
     this.aggregator.sendRemoteResync(serverId, JSON.stringify({ timestamp: Date.now() }))
     void this.refreshVersion(serverId)
   }
@@ -308,10 +319,16 @@ export class RemoteServerEventHub {
 
       if (sessionID && event.type === 'session.deleted') {
         stream.sessionDirectories.delete(sessionID)
+        stream.subagentSessions.delete(sessionID)
       } else if (sessionID && rememberedDirectory) {
         stream.sessionDirectories.set(sessionID, rememberedDirectory)
       }
 
+      if (event.type === 'session.created' && event.data.parentID) {
+        stream.subagentSessions.add(event.data.sessionID)
+      }
+
+      this.aggregator.notifyServerEvent(serverId, resolvedDirectory ?? null, event)
       this.aggregator.deliverRemoteEnvelope(serverId, resolvedDirectory ?? null, payloadJson)
     } catch (error) {
       logger.error(`Remote event stream failed to handle ${event.type} for ${serverId}:`, error)
@@ -374,6 +391,7 @@ export class RemoteServerEventHub {
       version: null,
       versionRequested: false,
       sessionDirectories: new Map(),
+      subagentSessions: new Set(),
     }
     this.streams.set(serverId, stream)
     return stream

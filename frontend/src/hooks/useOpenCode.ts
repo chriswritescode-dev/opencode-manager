@@ -608,8 +608,9 @@ export const useSendShell = (directory?: string) => {
   });
 };
 
-export const useAgents = (directory?: string, options?: { enabled?: boolean }) => {
-  const serverId = useOpenCodeServerId();
+export const useAgents = (directory?: string, options?: { enabled?: boolean; serverId?: string }) => {
+  const defaultServerId = useOpenCodeServerId()
+  const serverId = options?.serverId ?? defaultServerId;
   return useQuery({
     queryKey: serverScopedKey(["opencode", "agents", directory], serverId),
     queryFn: () => listAgents(directory, serverId),

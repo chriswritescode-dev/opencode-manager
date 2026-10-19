@@ -8,10 +8,10 @@ const mocks = vi.hoisted(() => ({
   useAllSchedules: vi.fn(),
   useAllScheduleRuns: vi.fn(),
   useCreateRepoSchedule: vi.fn(),
-  useUpdateRepoSchedule: vi.fn(),
-  useDeleteRepoSchedule: vi.fn(),
-  useRunRepoSchedule: vi.fn(),
-  useCancelRepoScheduleRun: vi.fn(),
+  useUpdateScheduleTarget: vi.fn(),
+  useDeleteScheduleTarget: vi.fn(),
+  useRunScheduleTarget: vi.fn(),
+  useCancelScheduleTargetRun: vi.fn(),
   useUnreadScheduleRuns: vi.fn(),
   useScheduleUrlState: vi.fn(),
   ScheduleJobsTable: vi.fn(() => null),
@@ -23,10 +23,10 @@ vi.mock('@/hooks/useSchedules', () => ({
   useAllSchedules: mocks.useAllSchedules,
   useAllScheduleRuns: mocks.useAllScheduleRuns,
   useCreateRepoSchedule: mocks.useCreateRepoSchedule,
-  useUpdateRepoSchedule: mocks.useUpdateRepoSchedule,
-  useDeleteRepoSchedule: mocks.useDeleteRepoSchedule,
-  useRunRepoSchedule: mocks.useRunRepoSchedule,
-  useCancelRepoScheduleRun: mocks.useCancelRepoScheduleRun,
+  useUpdateScheduleTarget: mocks.useUpdateScheduleTarget,
+  useDeleteScheduleTarget: mocks.useDeleteScheduleTarget,
+  useRunScheduleTarget: mocks.useRunScheduleTarget,
+  useCancelScheduleTargetRun: mocks.useCancelScheduleTargetRun,
   useUnreadScheduleRuns: mocks.useUnreadScheduleRuns,
 }))
 
@@ -182,10 +182,10 @@ describe('GlobalSchedules run history', () => {
     )
     mocks.useAllSchedules.mockReturnValue({ data: [], isLoading: false, error: null })
     mocks.useCreateRepoSchedule.mockReturnValue({ mutate: vi.fn(), isPending: false })
-    mocks.useUpdateRepoSchedule.mockReturnValue({ mutate: vi.fn(), isPending: false })
-    mocks.useDeleteRepoSchedule.mockReturnValue({ mutate: vi.fn(), isPending: false })
-    mocks.useRunRepoSchedule.mockReturnValue({ mutate: vi.fn(), isPending: false })
-    mocks.useCancelRepoScheduleRun.mockReturnValue({ mutate: vi.fn(), isPending: false })
+    mocks.useUpdateScheduleTarget.mockReturnValue({ mutate: vi.fn(), isPending: false })
+    mocks.useDeleteScheduleTarget.mockReturnValue({ mutate: vi.fn(), isPending: false })
+    mocks.useRunScheduleTarget.mockReturnValue({ mutate: vi.fn(), isPending: false })
+    mocks.useCancelScheduleTargetRun.mockReturnValue({ mutate: vi.fn(), isPending: false })
     mocks.useUnreadScheduleRuns.mockReturnValue({ data: { runs: [], total: 0, failed: 0 } })
     mocks.useScheduleUrlState.mockReturnValue(createMockScheduleUrlState())
   })

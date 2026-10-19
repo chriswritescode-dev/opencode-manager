@@ -26,6 +26,7 @@ import { useOpenNavItem } from '@/hooks/useOpenNavItem'
 import { ActivityList } from '@/components/activity/ActivityList'
 import { ActivityCountPill } from '@/components/activity/ActivityCountPill'
 import { withQueryParam } from '@/lib/navigation'
+import type { TerminalTarget } from '@/lib/terminal-target'
 import { useActiveWorkCounts, useActivityWindowMinutes } from '@/hooks/useActiveWork'
 import { formatActivityWindow } from '@/lib/activeWork'
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from '@/components/ui/tooltip'
@@ -84,6 +85,8 @@ interface ToolSidePanelProps {
   sessionId?: string
   directory?: string
   terminalDirectory?: string
+  terminalTarget?: TerminalTarget
+  allowedPanelTools?: readonly PanelTool[]
   repoDirectory?: string
   currentBranch?: string
   selectedFilePath?: string
@@ -146,6 +149,8 @@ export function ToolSidePanel({
   sessionId,
   directory,
   terminalDirectory,
+  terminalTarget,
+  allowedPanelTools,
   repoDirectory,
   currentBranch = 'main',
   selectedFilePath,
@@ -172,10 +177,16 @@ export function ToolSidePanel({
 
   const panelTools: Array<{ item: MoreDrawerItem; tool: PanelTool }> = []
   const actionItems: MoreDrawerItem[] = []
+  const terminalWorkspaceTarget: TerminalTarget | undefined =
+    terminalTarget ?? (repoId === undefined ? undefined : { kind: 'repo', repoId })
   for (const item of buildToolItems(location.pathname)) {
     const tool = toolKeyOf(item)
-    if (isPanelTool(tool)) panelTools.push({ item, tool })
-    else actionItems.push(item)
+    if (isPanelTool(tool)) {
+      if (allowedPanelTools && !allowedPanelTools.includes(tool)) continue
+      panelTools.push({ item, tool })
+    } else {
+      actionItems.push(item)
+    }
   }
   const activeLabel = panelTools.find(({ tool }) => tool === activeTool)?.item.label
 
@@ -197,12 +208,15 @@ export function ToolSidePanel({
     if (tool === 'mcp') return repoDirectory ? <RepoMcpContent open directory={repoDirectory} /> : null
     if (tool === 'walkthrough') return sessionId ? <ChangesWalkthroughView /> : null
     if (tool === 'activity') return <ActivityPanelBody />
+    if (tool === 'terminal') {
+      return terminalWorkspaceTarget
+        ? <TerminalWorkspace target={terminalWorkspaceTarget} directory={terminalDirectory ?? directory} isOpen />
+        : null
+    }
     if (repoId === undefined) return null
     switch (tool) {
       case 'sourceControl':
         return <SourceControlContent repoId={repoId} isOpen currentBranch={currentBranch} compact />
-      case 'terminal':
-        return <TerminalWorkspace repoId={repoId} directory={terminalDirectory ?? directory} isOpen />
       case 'actions':
         return <RepoActionsContent repoId={repoId} directory={directory} open />
       case 'skills':

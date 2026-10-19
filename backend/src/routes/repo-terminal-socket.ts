@@ -7,19 +7,12 @@ import type { GitAuthService } from '../services/git-auth'
 import type { OpenCodeClient } from '../services/opencode/client'
 import type { TerminalService } from '../services/terminal'
 import { createBridgedSocketEvents, isAllowedUpgradeOrigin } from '../utils/websocket-bridge'
+import { parseTerminalCursor } from '../utils/terminal-cursor'
 import { resolveRepoRequestDirectory } from './repo-directory'
 
 interface RepoTerminalSocketVariables {
   terminalDirectory: string
   terminalCursor: number | undefined
-}
-
-function parseCursor(raw: string | undefined): number | undefined | null {
-  if (raw === undefined) return undefined
-  if (!/^-?\d+$/.test(raw)) return null
-  const parsed = Number(raw)
-  if (!Number.isSafeInteger(parsed) || parsed < -1) return null
-  return parsed
 }
 
 export function createRepoTerminalSocketRoutes(
@@ -38,7 +31,7 @@ export function createRepoTerminalSocketRoutes(
       return c.json({ error: 'Origin not allowed' }, 403)
     }
 
-    const cursor = parseCursor(c.req.query('cursor'))
+    const cursor = parseTerminalCursor(c.req.query('cursor'))
     if (cursor === null) {
       return c.json({ error: 'Invalid cursor' }, 400)
     }

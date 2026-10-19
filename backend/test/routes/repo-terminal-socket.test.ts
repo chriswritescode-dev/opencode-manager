@@ -1,6 +1,4 @@
 import { describe, it, expect, vi, beforeAll, afterAll } from 'vitest'
-import { randomBytes } from 'node:crypto'
-import { request as httpRequest } from 'node:http'
 import { Hono } from 'hono'
 import { cors } from 'hono/cors'
 import { createNodeWebSocket } from '@hono/node-ws'
@@ -12,6 +10,7 @@ import type { GitAuthService } from '../../src/services/git-auth'
 import type { OpenCodeClient } from '../../src/services/opencode/client'
 import type { CredentialProvider } from '../../src/services/credential-provider'
 import { startWebSocketServer, type WebSocketTestServer } from '../helpers/websocket-server'
+import { rawWebSocketHandshake } from '../helpers/raw-websocket-handshake'
 
 vi.mock('../../src/services/repo', () => ({
   resolveRepoOrAssistant: vi.fn(),
@@ -79,7 +78,10 @@ upstreamApp.get(
   }),
 )
 
-const terminalService = new TerminalService(openCodeClient, credentialProvider, () => upstreamBase)
+const terminalService = new TerminalService(
+  { client: openCodeClient, baseUrl: () => upstreamBase, includeLocalCredentials: true },
+  credentialProvider,
+)
 
 const managerApp = new Hono()
 const managerWs = createNodeWebSocket({ app: managerApp })
@@ -118,41 +120,6 @@ authenticatedApp.route(
 )
 
 let authenticatedPort = 0
-
-interface RawHandshakeResult {
-  upgraded: boolean
-  status?: number
-}
-
-function rawHandshake(options: { port: number; path: string; origin?: string; cookie?: string }): Promise<RawHandshakeResult> {
-  return new Promise((resolve, reject) => {
-    const headers: Record<string, string> = {
-      Connection: 'Upgrade',
-      Upgrade: 'websocket',
-      'Sec-WebSocket-Key': randomBytes(16).toString('base64'),
-      'Sec-WebSocket-Version': '13',
-    }
-    if (options.origin !== undefined) headers.Origin = options.origin
-    if (options.cookie) headers.Cookie = options.cookie
-
-    const request = httpRequest({ host: '127.0.0.1', port: options.port, path: options.path, method: 'GET', headers })
-    let settled = false
-    request.on('upgrade', (_res, socket) => {
-      settled = true
-      socket.destroy()
-      resolve({ upgraded: true })
-    })
-    request.on('response', (res) => {
-      settled = true
-      res.resume()
-      resolve({ upgraded: false, status: res.statusCode })
-    })
-    request.on('error', (error) => {
-      if (!settled) reject(error)
-    })
-    request.end()
-  })
-}
 
 function clientUrl(ptyID: string, directory = '/tmp/repo'): string {
   const url = new URL(`ws://127.0.0.1:${managerPort}/1/terminals/${ptyID}/connect`)
@@ -267,7 +234,7 @@ describe('Repo Terminal Socket Origin validation', () => {
   const path = `/1/terminals/pty-1/connect?directory=${encodeURIComponent('/tmp/repo')}`
 
   it('accepts a trusted Origin with a valid session cookie', async () => {
-    const outcome = await rawHandshake({
+    const outcome = await rawWebSocketHandshake({
       port: authenticatedPort,
       path,
       origin: TRUSTED_ORIGIN,
@@ -278,13 +245,13 @@ describe('Repo Terminal Socket Origin validation', () => {
   })
 
   it('allows a non-browser client without an Origin header', async () => {
-    const outcome = await rawHandshake({ port: authenticatedPort, path, cookie: 'session=valid' })
+    const outcome = await rawWebSocketHandshake({ port: authenticatedPort, path, cookie: 'session=valid' })
 
     expect(outcome).toEqual({ upgraded: true })
   })
 
   it('rejects an untrusted same-site Origin before the upgrade', async () => {
-    const outcome = await rawHandshake({
+    const outcome = await rawWebSocketHandshake({
       port: authenticatedPort,
       path,
       origin: 'http://localhost:5004',
@@ -295,7 +262,7 @@ describe('Repo Terminal Socket Origin validation', () => {
   })
 
   it('rejects a null Origin before the upgrade', async () => {
-    const outcome = await rawHandshake({
+    const outcome = await rawWebSocketHandshake({
       port: authenticatedPort,
       path,
       origin: 'null',
@@ -306,7 +273,7 @@ describe('Repo Terminal Socket Origin validation', () => {
   })
 
   it('rejects the upgrade without a session cookie', async () => {
-    const outcome = await rawHandshake({ port: authenticatedPort, path, origin: TRUSTED_ORIGIN })
+    const outcome = await rawWebSocketHandshake({ port: authenticatedPort, path, origin: TRUSTED_ORIGIN })
 
     expect(outcome).toEqual({ upgraded: false, status: 401 })
   })

@@ -252,7 +252,7 @@ export const PromptInput = memo(forwardRef<PromptInputHandle, PromptInputProps>(
 
   const sessionAgent = useSessionAgent(sessionID, directory)
   const hasBackgroundActivity = useHasBackgroundActivity(sessionID)
-  const allowManagerTools = isLocalOpenCodeServer(useOpenCodeServerId())
+  const isLocalServer = isLocalOpenCodeServer(useOpenCodeServerId())
   const currentMode = localMode ?? sessionAgent.agent
   const setStoredAgent = useSessionAgentStore((s) => s.setAgent)
   const sendPrompt = useSendPrompt(directory)
@@ -260,8 +260,8 @@ export const PromptInput = memo(forwardRef<PromptInputHandle, PromptInputProps>(
   const startGoal = useStartSessionGoal()
   const isPromptSubmitPending = sendPrompt.isPending || sendShell.isPending || startGoal.isPending
   const interruptSession = useInterruptSession()
-  const { data: sessionGoal } = useSessionGoal(sessionID, { enabled: allowManagerTools })
-  const { data: permissionMode } = useSessionPermissionMode(sessionID, { enabled: allowManagerTools })
+  const { data: sessionGoal } = useSessionGoal(sessionID)
+  const { data: permissionMode } = useSessionPermissionMode(sessionID)
   const { searchCommands, findCommand, recentNames } = useCommands({ directory })
   const recordCommand = useRecentCommandsStore((state) => state.recordCommand)
   const isExactCommandPrompt = (value: string) => {
@@ -1579,10 +1579,10 @@ return (
                 onAgentChange={handleAgentChange}
                 isBashMode={isBashMode}
               />
-              {directory && !isMobile && allowManagerTools ? (
+              {directory && !isMobile ? (
                 <>
                   <PermissionModeToggle sessionID={sessionID} directory={directory} />
-                  <SessionSandboxMenu sessionID={sessionID} />
+                  {isLocalServer && <SessionSandboxMenu sessionID={sessionID} />}
                   <IconToggleButton
                     active={isGoalArmed}
                     label={goalButtonLabel}
@@ -1664,7 +1664,6 @@ return (
               goalLabel={goalButtonLabel}
               onToggleGoal={toggleGoalArmed}
               onAttachFile={openFilePicker}
-              allowManagerTools={allowManagerTools}
               onDictate={canUseMobileVoice && hasPromptContent && !showVoiceFeedback ? () => void startVoiceRecording() : undefined}
             />
           )}

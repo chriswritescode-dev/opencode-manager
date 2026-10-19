@@ -1,38 +1,60 @@
 import type { Database } from 'bun:sqlite'
-import type { SessionPermissionMode } from '@opencode-manager/shared/schemas'
+import { LOCAL_OPENCODE_SERVER_ID, type SessionPermissionMode } from '@opencode-manager/shared/schemas'
 
 export function ensureSessionPermissionModesTable(db: Database): void {
   db.run(`
     CREATE TABLE IF NOT EXISTS session_permission_modes (
       session_id TEXT PRIMARY KEY,
+      server_id TEXT NOT NULL DEFAULT 'local',
       mode TEXT NOT NULL CHECK(mode IN ('ask','auto')),
       updated_at INTEGER NOT NULL
     )
   `)
 }
 
-export function getSessionPermissionMode(db: Database, sessionId: string): SessionPermissionMode | null {
+export function getSessionPermissionMode(
+  db: Database,
+  sessionId: string,
+  serverId: string = LOCAL_OPENCODE_SERVER_ID,
+): SessionPermissionMode | null {
   const row = db
-    .prepare('SELECT mode FROM session_permission_modes WHERE session_id = ?')
-    .get(sessionId) as { mode: SessionPermissionMode } | undefined
+    .prepare('SELECT mode FROM session_permission_modes WHERE server_id = ? AND session_id = ?')
+    .get(serverId, sessionId) as { mode: SessionPermissionMode } | undefined
   return row ? row.mode : null
 }
 
-export function setSessionPermissionMode(db: Database, sessionId: string, mode: SessionPermissionMode): void {
+export function setSessionPermissionMode(
+  db: Database,
+  sessionId: string,
+  mode: SessionPermissionMode,
+  serverId: string = LOCAL_OPENCODE_SERVER_ID,
+): void {
   db.prepare(`
-    INSERT INTO session_permission_modes(session_id, mode, updated_at)
-    VALUES(?,?,?)
-    ON CONFLICT(session_id) DO UPDATE SET mode=excluded.mode, updated_at=excluded.updated_at
-  `).run(sessionId, mode, Date.now())
+    INSERT INTO session_permission_modes(server_id, session_id, mode, updated_at)
+    VALUES(?,?,?,?)
+    ON CONFLICT(session_id) DO UPDATE SET
+      server_id=excluded.server_id,
+      mode=excluded.mode,
+      updated_at=excluded.updated_at
+  `).run(serverId, sessionId, mode, Date.now())
 }
 
-export function insertSessionPermissionModeIfAbsent(db: Database, sessionId: string, mode: SessionPermissionMode): void {
+export function insertSessionPermissionModeIfAbsent(
+  db: Database,
+  sessionId: string,
+  mode: SessionPermissionMode,
+  serverId: string = LOCAL_OPENCODE_SERVER_ID,
+): void {
   db.prepare(`
-    INSERT OR IGNORE INTO session_permission_modes(session_id, mode, updated_at)
-    VALUES(?,?,?)
-  `).run(sessionId, mode, Date.now())
+    INSERT OR IGNORE INTO session_permission_modes(server_id, session_id, mode, updated_at)
+    VALUES(?,?,?,?)
+  `).run(serverId, sessionId, mode, Date.now())
 }
 
-export function deleteSessionPermissionMode(db: Database, sessionId: string): void {
-  db.prepare('DELETE FROM session_permission_modes WHERE session_id = ?').run(sessionId)
+export function deleteSessionPermissionMode(
+  db: Database,
+  sessionId: string,
+  serverId: string = LOCAL_OPENCODE_SERVER_ID,
+): void {
+  db.prepare('DELETE FROM session_permission_modes WHERE server_id = ? AND session_id = ?').run(serverId, sessionId)
 }

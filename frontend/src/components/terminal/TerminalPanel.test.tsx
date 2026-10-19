@@ -80,7 +80,7 @@ function mockTerminalHooks(
 function renderPanel(initialEntry = '/repos/1?dialog=terminal', onClose = vi.fn()) {
   return render(
     <MemoryRouter initialEntries={[initialEntry]}>
-      <TerminalPanel repoId={1} directory="/repo" isOpen onClose={onClose} />
+      <TerminalPanel target={{ kind: 'repo', repoId: 1 }} directory="/repo" isOpen onClose={onClose} />
     </MemoryRouter>,
   )
 }
@@ -123,7 +123,7 @@ describe('TerminalPanel', () => {
     mockTerminalHooks([], { isSuccess: true })
     rerender(
       <MemoryRouter initialEntries={['/repos/1?dialog=terminal']}>
-        <TerminalPanel repoId={1} directory="/repo" isOpen onClose={vi.fn()} />
+        <TerminalPanel target={{ kind: 'repo', repoId: 1 }} directory="/repo" isOpen onClose={vi.fn()} />
       </MemoryRouter>,
     )
 
@@ -147,7 +147,7 @@ describe('TerminalPanel', () => {
     mockTerminalHooks([{ ...runningTerminal, status: 'exited', exitCode: 0 }])
     rerender(
       <MemoryRouter initialEntries={['/repos/1?dialog=terminal']}>
-        <TerminalPanel repoId={1} directory="/repo" isOpen onClose={vi.fn()} />
+        <TerminalPanel target={{ kind: 'repo', repoId: 1 }} directory="/repo" isOpen onClose={vi.fn()} />
       </MemoryRouter>,
     )
 
@@ -183,7 +183,7 @@ describe('TerminalPanel', () => {
     const panel = (isOpen: boolean) => (
       <QueryClientProvider client={queryClient}>
         <MemoryRouter initialEntries={['/repos/1?dialog=terminal&terminal=t2']}>
-          <TerminalPanel repoId={1} directory="/repo" isOpen={isOpen} onClose={vi.fn()} />
+          <TerminalPanel target={{ kind: 'repo', repoId: 1 }} directory="/repo" isOpen={isOpen} onClose={vi.fn()} />
         </MemoryRouter>
       </QueryClientProvider>
     )

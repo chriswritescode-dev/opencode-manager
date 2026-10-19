@@ -1,7 +1,7 @@
 import { Hono } from 'hono'
 import { stream } from 'hono/streaming'
 import { sseAggregator } from '../services/sse-aggregator'
-import { SSESubscribeSchema, SSEVisibilitySchema } from '@opencode-manager/shared/schemas'
+import { LOCAL_OPENCODE_SERVER_ID, SSESubscribeSchema, SSEVisibilitySchema } from '@opencode-manager/shared/schemas'
 import { logger } from '../utils/logger'
 import { DEFAULTS } from '@opencode-manager/shared/config'
 import { createQueuedSSEWriter } from './sse-writer'
@@ -92,7 +92,12 @@ export function createSSERoutes() {
     if (!result.success) {
       return c.json({ success: false, error: 'Invalid request', details: result.error.issues }, 400)
     }
-    const success = sseAggregator.setClientVisibility(result.data.clientId, result.data.visible, result.data.activeSessionId ?? null)
+    const success = sseAggregator.setClientVisibility(
+      result.data.clientId,
+      result.data.visible,
+      result.data.activeSessionId ?? null,
+      result.data.activeServerId ?? LOCAL_OPENCODE_SERVER_ID,
+    )
     if (!success) {
       return c.json({ success: false, error: 'Client not found' }, 404)
     }

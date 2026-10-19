@@ -30,6 +30,7 @@ type GeneralTabProps = {
   workspaceMode: ScheduleWorkspaceMode
   onWorkspaceModeChange: (value: ScheduleWorkspaceMode) => void
   showWorkspaceMode: boolean
+  showBranch?: boolean
   showRepoSelector?: boolean
   isEditing: boolean
   repoId?: number
@@ -74,6 +75,7 @@ export function GeneralTab({
   workspaceMode,
   onWorkspaceModeChange,
   showWorkspaceMode,
+  showBranch = true,
   showRepoSelector,
   isEditing,
   repoId,
@@ -171,10 +173,11 @@ export function GeneralTab({
                 name="schedule-workspace-mode"
                 value={workspaceMode}
                 onChange={onWorkspaceModeChange}
-                options={workspaceModeOptions}
+                options={workspaceModeOptions.filter((option) => option.value !== 'in-place')}
               />
             </div>
           )}
+          {showBranch && (
           <div className="space-y-2">
             <div className="flex items-center gap-2">
               <Label htmlFor="schedule-branch">Base branch</Label>
@@ -190,6 +193,7 @@ export function GeneralTab({
               clearable
             />
           </div>
+          )}
         </div>
 
         <div className="space-y-2">

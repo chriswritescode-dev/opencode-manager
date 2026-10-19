@@ -8,7 +8,10 @@ export function createSessionPermissionModeRoutes(service: SessionPermissionMode
 
   app.get('/:sessionId', async (c) => {
     try {
-      const state = await service.getEffectiveMode(c.req.param('sessionId'))
+      const state = await service.getEffectiveMode(
+        c.req.param('sessionId'),
+        c.req.query('serverId') || undefined,
+      )
       return c.json(state)
     } catch (error) {
       return handleServiceError(c, error, 'Failed to read session permission mode', SessionPermissionModeError)
@@ -22,7 +25,12 @@ export function createSessionPermissionModeRoutes(service: SessionPermissionMode
     }
 
     try {
-      const state = await service.setMode(c.req.param('sessionId'), parsed.data.mode, parsed.data.directory)
+      const state = await service.setMode(
+        c.req.param('sessionId'),
+        parsed.data.mode,
+        parsed.data.directory,
+        parsed.data.serverId,
+      )
       return c.json(state)
     } catch (error) {
       return handleServiceError(c, error, 'Failed to set session permission mode', SessionPermissionModeError)

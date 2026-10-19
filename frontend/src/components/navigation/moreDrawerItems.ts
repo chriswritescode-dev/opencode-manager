@@ -58,7 +58,6 @@ const NON_TOOL_ITEM_KEYS = new Set(['home', 'settings', 'logout'])
 const MANAGER_ONLY_ITEM_KEYS: ReadonlySet<string> = new Set([
   'files',
   'source-control',
-  'terminal',
   'preview',
   'walkthrough',
   'actions',
@@ -133,6 +132,17 @@ function buildRouteNavModel(pathname: string): NavModel {
     return {
       primary: [getAssistantNavItem()],
       items,
+    }
+  }
+
+  const serverSessionMatch = /^\/servers\/[^/]+\/sessions\/[^/]+$/.exec(pathname)
+  if (serverSessionMatch) {
+    return {
+      primary: [],
+      items: [
+        { key: 'terminal', label: 'Terminal', icon: SquareTerminal, dialog: 'terminal' },
+        ...baseItems,
+      ],
     }
   }
 

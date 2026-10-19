@@ -10,6 +10,7 @@ import { useOpenPreview } from '@/hooks/useOpenPreview'
 import { useUrlParams } from '@/hooks/useUrlParams'
 import { openUrlFromManager } from '@/lib/open-url'
 import { cn } from '@/lib/utils'
+import type { TerminalTarget } from '@/lib/terminal-target'
 import { TerminalKeyBar } from './TerminalKeyBar'
 import type { TerminalViewHandle } from './TerminalView'
 
@@ -18,28 +19,28 @@ const TerminalView = lazy(() =>
 )
 
 interface TerminalPanelProps {
-  repoId: number
+  target: TerminalTarget
   directory: string | undefined
   isOpen: boolean
   onClose: () => void
 }
 
 interface TerminalWorkspaceProps {
-  repoId: number
+  target: TerminalTarget
   directory: string | undefined
   isOpen: boolean
 }
 
-export function TerminalWorkspace({ repoId, directory, isOpen }: TerminalWorkspaceProps) {
+export function TerminalWorkspace({ target, directory, isOpen }: TerminalWorkspaceProps) {
   const isMobile = useMobile()
   const { searchParams, updateParams } = useUrlParams()
   const openPreview = useOpenPreview()
-  const { data, isLoading, isSuccess, isFetching, refetch, error } = useTerminals(repoId, directory, {
+  const { data, isLoading, isSuccess, isFetching, refetch, error } = useTerminals(target, directory, {
     enabled: isOpen && !!directory,
     refetchInterval: isOpen ? 5000 : false,
   })
-  const { mutate: createTerminal, isPending: isCreating } = useCreateTerminal(repoId)
-  const { mutate: removeTerminal, isPending: isRemoving } = useRemoveTerminal(repoId)
+  const { mutate: createTerminal, isPending: isCreating } = useCreateTerminal(target)
+  const { mutate: removeTerminal, isPending: isRemoving } = useRemoveTerminal(target)
 
   const [ctrlArmed, setCtrlArmed] = useState(false)
   const [pendingClose, setPendingClose] = useState<TerminalInfo | null>(null)
@@ -182,7 +183,7 @@ export function TerminalWorkspace({ repoId, directory, isOpen }: TerminalWorkspa
                   if (handle) viewHandlesRef.current.set(terminal.id, handle)
                   else viewHandlesRef.current.delete(terminal.id)
                 }}
-                repoId={repoId}
+                target={target}
                 directory={directory}
                 ptyID={terminal.id}
                 active={terminal.id === activeTerminalId}
@@ -218,7 +219,7 @@ export function TerminalWorkspace({ repoId, directory, isOpen }: TerminalWorkspa
   )
 }
 
-export function TerminalPanel({ repoId, directory, isOpen, onClose }: TerminalPanelProps) {
+export function TerminalPanel({ target, directory, isOpen, onClose }: TerminalPanelProps) {
   const isMobile = useMobile()
 
   return (
@@ -250,7 +251,7 @@ export function TerminalPanel({ repoId, directory, isOpen, onClose }: TerminalPa
           )}
         </DialogHeader>
 
-        <TerminalWorkspace repoId={repoId} directory={directory} isOpen={isOpen} />
+        <TerminalWorkspace target={target} directory={directory} isOpen={isOpen} />
       </DialogContent>
     </Dialog>
   )

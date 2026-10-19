@@ -4,6 +4,7 @@ import type { ReactNode } from 'react'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 import { useSessionGoal } from './useSessionGoals'
 import { getLatestSessionGoal } from '@/api/sessionGoals'
+import { OpenCodeServerProvider } from '@/contexts/OpenCodeServerContext'
 import type { SessionGoal, SessionGoalStatus } from '@opencode-manager/shared/schemas'
 
 vi.mock('@/api/sessionGoals', () => ({
@@ -21,6 +22,7 @@ vi.mock('@/lib/toast', () => ({
 const baseGoal: SessionGoal = {
   id: 1,
   sessionId: 'ses_1',
+  serverId: 'local',
   directory: '/repo',
   objective: 'Ship the feature',
   status: 'active',
@@ -38,9 +40,11 @@ const baseGoal: SessionGoal = {
   finishedAt: null,
 }
 
-function createWrapper(queryClient: QueryClient) {
+function createWrapper(queryClient: QueryClient, serverId?: string) {
   return ({ children }: { children: ReactNode }) => (
-    <QueryClientProvider client={queryClient}>{children}</QueryClientProvider>
+    <QueryClientProvider client={queryClient}>
+      {serverId ? <OpenCodeServerProvider serverId={serverId}>{children}</OpenCodeServerProvider> : children}
+    </QueryClientProvider>
   )
 }
 
@@ -68,5 +72,15 @@ describe('useSessionGoal', () => {
     expect(refetchInterval!({ state: { data: { status: 'blocked' } } })).toBe(false)
     expect(refetchInterval!({ state: { data: { status: 'stopped' } } })).toBe(false)
     expect(refetchInterval!({ state: {} })).toBe(false)
+  })
+
+  it('reads the goal for the current server and scopes its cache key', async () => {
+    vi.mocked(getLatestSessionGoal).mockResolvedValue({ ...baseGoal, serverId: 'srv_remote' })
+    const queryClient = new QueryClient({ defaultOptions: { queries: { retry: false } } })
+    renderHook(() => useSessionGoal('ses_1'), { wrapper: createWrapper(queryClient, 'srv_remote') })
+
+    await waitFor(() => expect(getLatestSessionGoal).toHaveBeenCalledWith('ses_1', 'srv_remote'))
+
+    expect(queryClient.getQueryCache().find({ queryKey: ['session-goal', 'ses_1', 'srv_remote'] })).toBeDefined()
   })
 })

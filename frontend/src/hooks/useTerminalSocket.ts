@@ -1,11 +1,12 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
+import { terminalConnectPath, type TerminalTarget } from '@/lib/terminal-target'
 import { TerminalFrameDecoder } from '@/lib/terminal-protocol'
 import { toWebSocketUrl } from '@/lib/websocket-url'
 
 export type TerminalSocketStatus = 'connecting' | 'open' | 'reconnecting' | 'closed'
 
 export interface UseTerminalSocketOptions {
-  repoId: number
+  target: TerminalTarget
   directory: string | undefined
   ptyID: string
   onOutput: (text: string) => void
@@ -17,8 +18,7 @@ const RECONNECT_DELAYS_MS = [1000, 2000, 5000, 5000, 5000]
 const TERMINAL_CLOSE_CODES = new Set([1000, 4404])
 
 function buildSocketUrl(
-  repoId: number,
-  ptyID: string,
+  connectPath: string,
   directory: string | undefined,
   cursor: number | undefined,
 ): string {
@@ -26,13 +26,11 @@ function buildSocketUrl(
   if (directory !== undefined) params.set('directory', directory)
   if (cursor !== undefined) params.set('cursor', String(cursor))
   const query = params.toString()
-  return toWebSocketUrl(
-    `/api/repos/${repoId}/terminals/${encodeURIComponent(ptyID)}/connect${query ? `?${query}` : ''}`,
-  )
+  return toWebSocketUrl(`${connectPath}${query ? `?${query}` : ''}`)
 }
 
 export function useTerminalSocket({
-  repoId,
+  target,
   directory,
   ptyID,
   onOutput,
@@ -45,6 +43,8 @@ export function useTerminalSocket({
   const onExitRef = useRef(onExit)
   onOutputRef.current = onOutput
   onExitRef.current = onExit
+
+  const connectPath = terminalConnectPath(target, ptyID)
 
   const [status, setStatus] = useState<TerminalSocketStatus>(enabled ? 'connecting' : 'closed')
 
@@ -71,7 +71,7 @@ export function useTerminalSocket({
       if (disposed) return
       setStatus(attempt === 0 ? 'connecting' : 'reconnecting')
 
-      const socket = new WebSocket(buildSocketUrl(repoId, ptyID, directory, cursorRef.current))
+      const socket = new WebSocket(buildSocketUrl(connectPath, directory, cursorRef.current))
       socket.binaryType = 'arraybuffer'
       socketRef.current = socket
 
@@ -129,7 +129,7 @@ export function useTerminalSocket({
         socket.close()
       }
     }
-  }, [repoId, directory, ptyID, enabled])
+  }, [connectPath, directory, enabled])
 
   return { send, status }
 }

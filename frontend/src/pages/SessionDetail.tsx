@@ -81,6 +81,7 @@ const OLDER_HISTORY_SCROLL_THRESHOLD_PX = 200
 
 const PENDING_ACTION_SYNC_INTERVAL_MS = 30000
 const PROMPT_OVERLAY_CLEARANCE_PX = 16
+const REMOTE_SESSION_PANEL_TOOLS = ['terminal'] as const
 
 function applyRevertBoundary(
   messages: SessionMessageInfo[],
@@ -892,7 +893,7 @@ export function SessionDetail() {
                 />
               )}
               <SessionSendErrorBanner sessionId={sessionId} isConnected={isConnected} isReconnecting={isReconnecting} />
-              {!isRemoteServer && <SessionGoalBar sessionID={sessionId} />}
+              <SessionGoalBar sessionID={sessionId} />
               <BackgroundWorkBar
                 sessionID={sessionId}
                 directory={sessionDirectory}
@@ -915,16 +916,18 @@ export function SessionDetail() {
           </div>
         )}
       </div>
-      {docked && !isRemoteServer && (
+      {docked && (
         <ToolSidePanel
           panel={sidePanel}
-          repoId={repoId}
+          repoId={isRemoteServer ? undefined : repoId}
           sessionId={sessionId}
           directory={sessionDirectory}
           filesBasePath={workspaceBasePath}
           currentBranch={repo?.currentBranch || repo?.branch || "main"}
           selectedFilePath={selectedFilePath}
           repoDirectory={repoDirectory}
+          terminalTarget={isRemoteServer ? { kind: 'server', serverId } : { kind: 'repo', repoId }}
+          allowedPanelTools={isRemoteServer ? REMOTE_SESSION_PANEL_TOOLS : undefined}
           onSkillLoaded={handleSkillLoaded}
           walkthroughSourceRequest={walkthroughSourceRequest}
           walkthroughModel={modelRef}
@@ -1045,14 +1048,12 @@ export function SessionDetail() {
         />
       )}
 
-      {!isRemoteServer && (
-        <TerminalPanel
-          repoId={repoId}
-          directory={sessionDirectory}
-          isOpen={!docked && terminalOpen}
-          onClose={() => setTerminalOpen(false)}
-        />
-      )}
+      <TerminalPanel
+        target={isRemoteServer ? { kind: 'server', serverId } : { kind: 'repo', repoId }}
+        directory={sessionDirectory}
+        isOpen={!docked && terminalOpen}
+        onClose={() => setTerminalOpen(false)}
+      />
 
       {!isRemoteServer && (
         <PreviewPanel

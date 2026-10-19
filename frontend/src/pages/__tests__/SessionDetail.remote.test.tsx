@@ -274,7 +274,6 @@ describe('SessionDetail remote server mode', () => {
     })
 
     expect(mocks.SourceControlPanel).not.toHaveBeenCalled()
-    expect(mocks.TerminalPanel).not.toHaveBeenCalled()
     expect(mocks.PreviewPanel).not.toHaveBeenCalled()
     expect(mocks.FileBrowserSheet).not.toHaveBeenCalled()
     expect(mocks.ProjectActionsMenu).not.toHaveBeenCalled()
@@ -283,12 +282,47 @@ describe('SessionDetail remote server mode', () => {
     expect(mocks.RepoSkillsDialog).not.toHaveBeenCalled()
     expect(mocks.RepoMcpDialog).not.toHaveBeenCalled()
     expect(mocks.ChangesWalkthroughSheet).not.toHaveBeenCalled()
-    expect(mocks.ToolSidePanel).not.toHaveBeenCalled()
-    expect(mocks.SessionGoalBar).not.toHaveBeenCalled()
     expect(mocks.SessionPickerDialog).not.toHaveBeenCalled()
     expect(mocks.SessionMoreButton).not.toHaveBeenCalled()
     expect(vi.mocked(PendingActionsGroup).mock.calls.at(-1)?.[0]).toEqual(
       expect.objectContaining({ showScheduleReports: false }),
+    )
+  })
+
+  it('shows the session goal bar for a remote session', async () => {
+    renderRemoteSession()
+
+    await waitFor(() => {
+      expect(screen.getByTestId('message-thread')).toBeInTheDocument()
+    })
+
+    expect(mocks.SessionGoalBar).toHaveBeenCalled()
+    expect(mocks.SessionGoalBar.mock.calls.at(-1)?.[0]).toEqual(
+      expect.objectContaining({ sessionID: 'ses_remote' }),
+    )
+  })
+
+  it('exposes terminals for the linked server', async () => {
+    renderRemoteSession()
+
+    await waitFor(() => {
+      expect(screen.getByTestId('message-thread')).toBeInTheDocument()
+    })
+
+    expect(mocks.TerminalPanel.mock.calls.at(-1)?.[0]).toEqual(
+      expect.objectContaining({
+        target: { kind: 'server', serverId: 'srv_kitchen' },
+        directory: '/home/me/app',
+        isOpen: false,
+      }),
+    )
+    expect(mocks.ToolSidePanel.mock.calls.at(-1)?.[0]).toEqual(
+      expect.objectContaining({
+        repoId: undefined,
+        terminalTarget: { kind: 'server', serverId: 'srv_kitchen' },
+        allowedPanelTools: ['terminal'],
+        directory: '/home/me/app',
+      }),
     )
   })
 

@@ -26,6 +26,8 @@ import { Button } from '@/components/ui/button'
 import { Card } from '@/components/ui/card'
 import { Input } from '@/components/ui/input'
 import { SessionStatusIndicator } from '@/components/ui/session-status-indicator'
+import { RemoteSchedulesButton } from '@/components/schedules/RemoteSchedulesButton'
+import { RemoteMultiRunButton } from '@/components/repo/RemoteMultiRunButton'
 
 function ConnectionStatus({ status, isLoading }: { status?: OpenCodeServerStatus; isLoading: boolean }) {
   if (isLoading) {
@@ -149,6 +151,8 @@ function ProjectRow({ project, serverId }: { project: OpenCodeProject; serverId:
           {createSession.isPending ? <Loader2 className="mr-1 h-4 w-4 animate-spin" /> : <Plus className="mr-1 h-4 w-4" />}
           New session
         </Button>
+        <RemoteSchedulesButton serverId={serverId} directory={project.canonical} />
+        <RemoteMultiRunButton serverId={serverId} directory={project.canonical} />
       </div>
       {expanded ? <ProjectSessions serverId={serverId} directory={project.canonical} /> : null}
     </Card>
