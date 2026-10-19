@@ -334,7 +334,7 @@ describe('useVariants', () => {
         ),
       })
 
-    it('keeps a remote session variant in the session pick without persisting it', async () => {
+    it('persists a remote session variant in the session pick and via saveOpenCodeModelVariant', async () => {
       selectAgentModel()
       const { result } = renderRemoteVariants(createQueryClient(), {
         id: 's1',
@@ -350,11 +350,15 @@ describe('useVariants', () => {
 
       expect(useModelStore.getState().sessionPicks.s1[AGENT_ID].variant).toBe('high')
       await waitFor(() => expect(result.current.currentVariant).toBe('high'))
-      expect(mockGetOpenCodeModelState).not.toHaveBeenCalled()
-      expect(mockSaveOpenCodeModelVariant).not.toHaveBeenCalled()
+      await waitFor(() => {
+        expect(mockSaveOpenCodeModelVariant).toHaveBeenCalledWith(
+          { providerID: PROVIDER_ID, modelID: MODEL_ID },
+          'high',
+        )
+      })
     })
 
-    it('does not persist a remote variant outside a session', async () => {
+    it('persists a remote variant outside a session and drives the selection from the preference', async () => {
       selectAgentModel()
       const { result } = renderRemoteVariants(createQueryClient())
 
@@ -364,9 +368,14 @@ describe('useVariants', () => {
         result.current.setVariant('high')
       })
 
-      expect(mockSaveOpenCodeModelVariant).not.toHaveBeenCalled()
+      await waitFor(() => expect(result.current.currentVariant).toBe('high'))
       expect(useModelStore.getState().newSessionPicks).toEqual({})
-      expect(result.current.currentVariant).toBeUndefined()
+      await waitFor(() => {
+        expect(mockSaveOpenCodeModelVariant).toHaveBeenCalledWith(
+          { providerID: PROVIDER_ID, modelID: MODEL_ID },
+          'high',
+        )
+      })
     })
   })
 })
