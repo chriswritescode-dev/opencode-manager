@@ -33,6 +33,11 @@ vi.mock('@/hooks/useSettingsDialog', () => ({
 
 vi.mock('@/hooks/useMobile', () => ({
   useMobile: () => mocks.isMobile,
+  useSwipeBack: () => ({
+    bind: vi.fn(),
+    swipeProgress: 0,
+    swipeStyles: {},
+  }),
 }))
 
 vi.mock('@/hooks/useActiveWork', () => ({
@@ -215,20 +220,67 @@ describe('RemoteProjectList', () => {
     expect(screen.queryByTestId('project-route')).not.toBeInTheDocument()
   })
 
-  it('opens a session in an arbitrary directory', async () => {
+  it('opens a session in an arbitrary directory from the dialog', async () => {
     const user = userEvent.setup()
     mocks.createSession.mockResolvedValue({ id: 'ses_other' })
     renderProjectList()
 
-    await user.type(screen.getByLabelText('Directory path'), '/srv/other')
+    await user.click(await screen.findByRole('button', { name: 'Open directory' }))
+    await user.type(screen.getByLabelText('Directory'), '/srv/other')
     await user.click(screen.getByRole('button', { name: /Start session/ }))
 
     await waitFor(() => {
-      expect(mocks.createSession).toHaveBeenCalledWith({ directory: '/srv/other' })
+      expect(mocks.useCreateSession).toHaveBeenCalledWith('/srv/other')
     })
+    expect(mocks.createSession).toHaveBeenCalledWith({ agent: undefined })
     await waitFor(() => {
       expect(screen.getByTestId('session-route')).toBeInTheDocument()
     })
+  })
+
+  it('does not render the open-directory form in the list until the dialog opens', async () => {
+    const user = userEvent.setup()
+    renderProjectList()
+
+    await screen.findByText('App')
+    expect(screen.queryByLabelText('Directory')).not.toBeInTheDocument()
+    expect(screen.queryByPlaceholderText('/absolute/path/on/the/server')).not.toBeInTheDocument()
+
+    await user.click(screen.getByRole('button', { name: 'Open directory' }))
+
+    expect(await screen.findByLabelText('Directory')).toBeInTheDocument()
+    expect(screen.queryByPlaceholderText('/absolute/path/on/the/server')).toBeInTheDocument()
+  })
+
+  it('disables Start session until a directory is entered', async () => {
+    const user = userEvent.setup()
+    renderProjectList()
+
+    await user.click(await screen.findByRole('button', { name: 'Open directory' }))
+
+    expect(screen.getByRole('button', { name: /Start session/ })).toBeDisabled()
+
+    await user.type(screen.getByLabelText('Directory'), '   ')
+    expect(screen.getByRole('button', { name: /Start session/ })).toBeDisabled()
+
+    await user.type(screen.getByLabelText('Directory'), '/srv/other')
+    expect(screen.getByRole('button', { name: /Start session/ })).toBeEnabled()
+  })
+
+  it('clears the directory when the dialog is cancelled', async () => {
+    const user = userEvent.setup()
+    renderProjectList()
+
+    await user.click(await screen.findByRole('button', { name: 'Open directory' }))
+    await user.type(screen.getByLabelText('Directory'), '/srv/other')
+    await user.click(screen.getByRole('button', { name: 'Cancel' }))
+
+    await waitFor(() => {
+      expect(screen.queryByLabelText('Directory')).not.toBeInTheDocument()
+    })
+
+    await user.click(screen.getByRole('button', { name: 'Open directory' }))
+    expect(await screen.findByLabelText('Directory')).toHaveValue('')
   })
 
   it('filters projects by name and path', async () => {

@@ -1,21 +1,20 @@
-import { useMemo, useState, type FormEvent } from 'react'
+import { useMemo, useState } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { useQuery } from '@tanstack/react-query'
-import { Folder, FolderGit2, GitBranch, Loader2, Plus, Search, Server } from 'lucide-react'
+import { Folder, FolderGit2, FolderPlus, GitBranch, Search, Server } from 'lucide-react'
 import { listProjects, type OpenCodeProject } from '@/api/opencode'
-import { useCreateSession } from '@/hooks/useOpenCode'
 import { useOpenCodeServers } from '@/hooks/useOpenCodeServers'
 import { useSettingsDialog } from '@/hooks/useSettingsDialog'
 import { useProjectActivityState } from '@/hooks/useActiveWork'
 import { serverScopedKey } from '@/lib/serverScope'
-import { getServerProjectPath, getServerSessionPath } from '@/lib/navigation'
+import { getServerProjectPath } from '@/lib/navigation'
 import { formatShortRelativeTime, getDirectoryName } from '@/lib/utils'
 import { OpenCodeServerProvider } from '@/contexts/OpenCodeServerContext'
 import { ActivityStateIndicator } from '@/components/activity/ActivityStateIndicator'
 import { Button } from '@/components/ui/button'
 import { Card } from '@/components/ui/card'
-import { Input } from '@/components/ui/input'
 import { LinkedServerStateCard } from '@/components/servers/LinkedServerStateCard'
+import { OpenDirectoryDialog } from '@/components/servers/OpenDirectoryDialog'
 import { RemoteProjectRowActions } from '@/components/servers/RemoteProjectRowActions'
 import { RepoCardShell } from '@/components/repo/RepoCardShell'
 import { RepoCardSkeleton } from '@/components/repo/RepoCardSkeleton'
@@ -53,6 +52,21 @@ function RemoteProjectCard({ project, serverId }: { project: OpenCodeProject; se
   )
 }
 
+function OpenDirectoryTrigger({ onClick }: { onClick: () => void }) {
+  return (
+    <Button
+      variant="ghost"
+      size="icon"
+      aria-label="Open directory"
+      title="Open directory"
+      className="h-9 w-9 shrink-0"
+      onClick={onClick}
+    >
+      <FolderPlus className="h-4 w-4" />
+    </Button>
+  )
+}
+
 function RemoteProjectListLoading() {
   return (
     <div className="flex flex-1 flex-col">
@@ -73,11 +87,9 @@ function RemoteProjectListLoading() {
 }
 
 function RemoteProjectListContent({ serverId }: { serverId: string }) {
-  const navigate = useNavigate()
   const { servers, isLoading: serversLoading } = useOpenCodeServers()
   const { openTab } = useSettingsDialog()
-  const createSession = useCreateSession()
-  const [openDirectory, setOpenDirectory] = useState('')
+  const [openDirectoryOpen, setOpenDirectoryOpen] = useState(false)
   const [searchQuery, setSearchQuery] = useState('')
 
   const server = servers.find((candidate) => candidate.id === serverId)
@@ -103,18 +115,6 @@ function RemoteProjectListContent({ serverId }: { serverId: string }) {
   }, [projects, searchQuery])
 
   const openSettings = () => openTab('servers')
-
-  const handleOpenDirectory = async (event: FormEvent) => {
-    event.preventDefault()
-    const directory = openDirectory.trim()
-    if (!directory) return
-    try {
-      const session = await createSession.mutateAsync({ directory })
-      navigate(getServerSessionPath(serverId, session.id))
-    } catch {
-      return
-    }
-  }
 
   return (
     <div className="flex h-full flex-col px-0 md:p-4">
@@ -163,18 +163,22 @@ function RemoteProjectListContent({ serverId }: { serverId: string }) {
             <FolderGit2 className="w-12 h-12 mx-auto mb-4 text-muted-foreground" />
             <p className="font-medium">No projects on this server yet</p>
             <p className="text-sm text-muted-foreground">
-              Start a session in a directory below to create one.
+              Start a session in a directory to create one.
             </p>
+            <div className="mt-4">
+              <OpenDirectoryTrigger onClick={() => setOpenDirectoryOpen(true)} />
+            </div>
           </div>
         ) : (
           <>
-            <div className="px-2 md:px-0">
+            <div className="flex items-center gap-2 px-2 md:px-0">
               <RepoSearchInput
                 value={searchQuery}
                 onValueChange={setSearchQuery}
                 placeholder="Search projects..."
                 name="remote-project-search"
               />
+              <OpenDirectoryTrigger onClick={() => setOpenDirectoryOpen(true)} />
             </div>
             <div className="mx-2 flex min-h-0 flex-1 md:mx-0">
               <div className="h-full w-full overflow-y-auto pt-4 md:pb-0 [mask-image:linear-gradient(to_bottom,transparent,black_16px,black)]">
@@ -203,28 +207,11 @@ function RemoteProjectListContent({ serverId }: { serverId: string }) {
       ) : null}
 
       {server && !isDisabled ? (
-        <section aria-label="Open directory" className="mt-4 flex shrink-0 flex-col gap-2 px-2 md:px-0">
-          <h2 className="text-xs font-medium uppercase tracking-wider text-muted-foreground">Open directory</h2>
-          <form onSubmit={handleOpenDirectory} className="flex items-center gap-2">
-            <Input
-              value={openDirectory}
-              onChange={(event) => setOpenDirectory(event.target.value)}
-              placeholder="/absolute/path/on/the/server"
-              aria-label="Directory path"
-              autoComplete="off"
-              name="remote-directory"
-              className="font-mono text-sm"
-            />
-            <Button type="submit" disabled={!openDirectory.trim() || createSession.isPending} className="shrink-0">
-              {createSession.isPending ? (
-                <Loader2 className="mr-1 h-4 w-4 animate-spin" />
-              ) : (
-                <Plus className="mr-1 h-4 w-4" />
-              )}
-              Start session
-            </Button>
-          </form>
-        </section>
+        <OpenDirectoryDialog
+          serverId={serverId}
+          open={openDirectoryOpen}
+          onOpenChange={setOpenDirectoryOpen}
+        />
       ) : null}
     </div>
   )
