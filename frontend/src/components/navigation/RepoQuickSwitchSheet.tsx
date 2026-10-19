@@ -1,5 +1,6 @@
 import { useState, useMemo } from 'react'
 import { useNavigate, useLocation } from 'react-router-dom'
+import { LOCAL_OPENCODE_SERVER_ID } from '@opencode-manager/shared/schemas'
 import { useRefreshOnOpen } from '@/hooks/useRefreshOnOpen'
 import { Input } from '@/components/ui/input'
 import { BottomSheet, BottomSheetHeader, BottomSheetContent } from '@/components/ui/bottom-sheet'
@@ -9,11 +10,13 @@ import { getRepoDisplayName } from '@/lib/utils'
 import { AddRepoDialog } from '@/components/repo/AddRepoDialog'
 import { FolderGit2, Plus } from 'lucide-react'
 import { useUrlParams } from '@/hooks/useUrlParams'
-import { getAssistantPath, getRepoPath } from '@/lib/navigation'
+import { getAssistantPath, getRepoPath, getSessionPath } from '@/lib/navigation'
 import { NewSessionButton, RepoSessionNavList, SearchClearButton } from '@/components/navigation/RepoSessionNav'
 import { LinkedServersNav } from '@/components/navigation/LinkedServersNav'
+import { RemoteProjectNavList } from '@/components/navigation/RemoteProjectNav'
 import { getActiveRepoId } from '@/components/navigation/sidebar-session-tree'
 import { useNavigableRepos } from '@/hooks/useSidebarRepoGroups'
+import { useSidebarServerSelection } from '@/hooks/useSidebarServerSelection'
 
 interface RepoQuickSwitchSheetProps {
   isOpen: boolean
@@ -26,6 +29,8 @@ export function RepoQuickSwitchSheet({ isOpen, onClose }: RepoQuickSwitchSheetPr
   const { searchParams } = useUrlParams()
   const [searchQuery, setSearchQuery] = useState('')
   const [addRepoOpen, setAddRepoOpen] = useState(false)
+  const [selectedServerId] = useSidebarServerSelection()
+  const isRemote = selectedServerId !== LOCAL_OPENCODE_SERVER_ID
   const activeRepoId = getActiveRepoId(location.pathname)
 
   const { repos, isLoading, refetch } = useNavigableRepos(isOpen)
@@ -81,32 +86,37 @@ export function RepoQuickSwitchSheet({ isOpen, onClose }: RepoQuickSwitchSheetPr
               />
               {searchQuery.length > 0 && <SearchClearButton onClear={() => setSearchQuery('')} />}
             </div>
-            <Button
-              type="button"
-              size="lg"
-              onClick={() => {
-                onClose()
-                setAddRepoOpen(true)
-              }}
-              className="flex-shrink-0"
-            >
-              <Plus className="h-4 w-4" />
-              <span className="hidden sm:inline">Repo</span>
-              <span className="sr-only">Add repository</span>
-            </Button>
+            {!isRemote && (
+              <Button
+                type="button"
+                size="lg"
+                onClick={() => {
+                  onClose()
+                  setAddRepoOpen(true)
+                }}
+                className="flex-shrink-0"
+              >
+                <Plus className="h-4 w-4" />
+                <span className="hidden sm:inline">Repo</span>
+                <span className="sr-only">Add repository</span>
+              </Button>
+            )}
           </div>
         </BottomSheetHeader>
       <BottomSheetContent className="flex flex-col px-0 pt-0 gap-0">
-        {isOpen && (
-          <LinkedServersNav
-            variant="sheet"
-            onNavigate={(path) => navigateAndClose(path, { replace: true })}
-          />
-        )}
+        {isOpen && <LinkedServersNav variant="sheet" />}
         {isOpen && !searchQuery.trim() && (
           <CompactActivityList onNavigate={(path) => navigateAndClose(path)} />
         )}
-        {isLoading ? (
+        {isRemote ? (
+          <RemoteProjectNavList
+            serverId={selectedServerId}
+            isVisible={isOpen}
+            search={searchQuery}
+            onOpenProject={(path) => navigateAndClose(path, { replace: true })}
+            onSelectSession={(path) => navigateAndClose(path)}
+          />
+        ) : isLoading ? (
           <div className="flex flex-col gap-2 px-4 pt-3">
             {Array.from({ length: 5 }).map((_, i) => (
               <div key={i} className="h-14 rounded-lg bg-muted animate-pulse" />
@@ -124,7 +134,14 @@ export function RepoQuickSwitchSheet({ isOpen, onClose }: RepoQuickSwitchSheetPr
             isVisible={isOpen}
             onOpenRepo={handleClick}
             onSelectSession={(path) => navigateAndClose(path)}
-            renderActions={(repo) => <NewSessionButton repo={repo} onOpenSession={(path) => navigateAndClose(path)} />}
+            renderActions={(repo) => (
+              <NewSessionButton
+                directory={repo.fullPath}
+                label={getRepoDisplayName(repo)}
+                sessionPath={(sessionId) => getSessionPath(repo.id, sessionId)}
+                onOpenSession={(path) => navigateAndClose(path)}
+              />
+            )}
           />
         )}
         <div aria-hidden="true" className="h-16 shrink-0" />

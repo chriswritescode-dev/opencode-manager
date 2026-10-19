@@ -36,6 +36,21 @@ export function getServerSessionPath(serverId: string, sessionId: string): strin
   return buildServerSessionPath(serverId, sessionId);
 }
 
+export function getServerProjectPath(serverId: string, directory: string): string {
+  return `/servers/${encodeURIComponent(serverId)}/projects?directory=${encodeURIComponent(directory)}`;
+}
+
+export function parseServerProjectRoute(
+  pathname: string,
+  search: string,
+): { serverId: string; directory: string } | null {
+  const match = /^\/servers\/([^/]+)\/projects$/.exec(pathname);
+  if (!match) return null;
+  const directory = new URLSearchParams(search).get('directory');
+  if (!directory) return null;
+  return { serverId: decodeURIComponent(match[1]), directory };
+}
+
 export function parseServerSessionRoute(pathname: string): { serverId: string; sessionId: string } | null {
   const match = /^\/servers\/([^/]+)\/sessions\/([^/]+)$/.exec(pathname);
   if (!match) return null;
@@ -90,6 +105,11 @@ export function getReturnToPath(search: string, fallback: string): string {
 }
 
 export function getSwipeBackTarget(pathname: string, search = ''): string | null {
+  const serverProject = parseServerProjectRoute(pathname, search);
+  if (serverProject) {
+    return getServerPath(serverProject.serverId);
+  }
+
   const serverSession = parseServerSessionRoute(pathname);
   if (serverSession) {
     return getServerPath(serverSession.serverId);

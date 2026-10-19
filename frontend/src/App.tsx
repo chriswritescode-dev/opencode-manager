@@ -7,6 +7,7 @@ import { Toaster } from 'sonner'
 import { Repos } from './pages/Repos'
 import { RepoDetail } from './pages/RepoDetail'
 import { RemoteServer } from './pages/RemoteServer'
+import { RemoteProject } from './pages/RemoteProject'
 import { SessionDetail } from './pages/SessionDetail'
 import { Schedules } from './pages/Schedules'
 import { GlobalSchedules } from './pages/GlobalSchedules'
@@ -317,6 +318,15 @@ const router = createBrowserRouter([
         element: (
           <ServerScope>
             <RemoteServer />
+          </ServerScope>
+        ),
+        loader: protectedLoader,
+      },
+      {
+        path: '/servers/:serverId/projects',
+        element: (
+          <ServerScope>
+            <RemoteProject />
           </ServerScope>
         ),
         loader: protectedLoader,

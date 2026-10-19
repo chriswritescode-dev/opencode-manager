@@ -5,7 +5,9 @@ import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
 import { MemoryRouter, useLocation } from 'react-router-dom'
 import type { ReactNode } from 'react'
 import { TooltipProvider } from '@/components/ui/tooltip'
+import { LOCAL_OPENCODE_SERVER_ID } from '@opencode-manager/shared/schemas'
 import { DesktopSessionTree } from './DesktopSessionTree'
+import { useSidebarServerStore } from '@/stores/sidebarServerStore'
 import type { Repo } from '@/api/types'
 
 type SessionFixture = {
@@ -90,6 +92,11 @@ vi.mock('@/hooks/useSessionPins', () => ({
   useSessionPins: () => ({ data: sessionPinsData.current }),
 }))
 
+vi.mock('@/hooks/useOpenCodeServers', () => ({
+  useOpenCodeServers: () => ({ servers: [], isLoading: false }),
+  useOpenCodeServerStatuses: () => ({ statuses: [], statusById: {}, isLoading: false }),
+}))
+
 vi.mock('@/contexts/EventContext', () => ({
   usePermissions: () => ({
     hasForSession: (sessionID: string) => permissionSessions.current.has(sessionID),
@@ -156,6 +163,8 @@ const fetchedDirectories = () => new Set(sessionsHookCalls.flatMap((call) => cal
 
 describe('DesktopSessionTree', () => {
   beforeEach(() => {
+    localStorage.clear()
+    useSidebarServerStore.setState({ serverId: LOCAL_OPENCODE_SERVER_ID })
     listReposMock.mockReset()
     listReposMock.mockResolvedValue([repoA, repoB, repoC])
     getRepoSiblingsMock.mockReset()

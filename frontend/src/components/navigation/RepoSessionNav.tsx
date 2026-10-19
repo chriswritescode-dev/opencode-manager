@@ -9,7 +9,7 @@ import { useRepoSiblings } from '@/hooks/useRepoSiblings'
 import { useSidebarRepoGroups } from '@/hooks/useSidebarRepoGroups'
 import { buildWorktreeActivity, type ActiveWorktree } from '@/lib/activeWork'
 import { cn, formatShortRelativeTime, getRepoBranchLabel, getRepoDisplayName } from '@/lib/utils'
-import { getRepoPath, getSessionPath } from '@/lib/navigation'
+import { getRepoPath } from '@/lib/navigation'
 import {
   isCurrentSessionItem,
   isRepoReady,
@@ -26,7 +26,6 @@ function OpenRepoRail() {
 }
 
 interface RepoNavGroupProps {
-  repo: Repo
   name: string
   branch?: string | null
   isWorktree?: boolean
@@ -34,12 +33,12 @@ interface RepoNavGroupProps {
   isCurrent: boolean
   onOpenRepo: () => void
   onToggle?: () => void
+  indicator?: ReactNode
   actions?: ReactNode
   children?: ReactNode
 }
 
 export function RepoNavGroup({
-  repo,
   name,
   branch,
   isWorktree,
@@ -47,6 +46,7 @@ export function RepoNavGroup({
   isCurrent,
   onOpenRepo,
   onToggle,
+  indicator,
   actions,
   children,
 }: RepoNavGroupProps) {
@@ -85,7 +85,7 @@ export function RepoNavGroup({
             <span className="truncate text-[15px] font-bold tracking-tight text-highlight">
               {name}
             </span>
-            <RepoActivityIndicator repo={repo} />
+            {indicator}
           </span>
           {branch && (
             <span
@@ -163,7 +163,7 @@ export function SessionNavStatus({ children }: { children: ReactNode }) {
   return <div className="flex h-10 items-center pl-4 text-xs text-muted-foreground">{children}</div>
 }
 
-function SessionNavLink({ children, onClick }: { children: ReactNode; onClick: () => void }) {
+export function SessionNavLink({ children, onClick }: { children: ReactNode; onClick: () => void }) {
   return (
     <button
       type="button"
@@ -276,7 +276,6 @@ export function RepoSessionNavList({
         return (
           <RepoNavGroup
             key={repo.id}
-            repo={repo}
             name={getRepoDisplayName(repo)}
             branch={getRepoBranchLabel(repo)}
             isWorktree={repo.isWorktree}
@@ -284,6 +283,7 @@ export function RepoSessionNavList({
             isCurrent={repo.id === activeRepoId}
             onOpenRepo={() => onOpenRepo(repo.id)}
             onToggle={() => setExpandedRepoId((current) => (current === repo.id ? null : repo.id))}
+            indicator={<RepoActivityIndicator repo={repo} />}
             actions={ready ? renderActions?.(repo) : undefined}
           >
             {ready ? (
@@ -298,16 +298,28 @@ export function RepoSessionNavList({
   )
 }
 
-export function NewSessionButton({
-  repo,
-  onOpenSession,
-}: {
-  repo: Repo
+interface NewSessionButtonProps {
+  directory: string
+  label: string
   onOpenSession: (path: string) => void
-}) {
-  const createSession = useCreateSession(repo.fullPath, (session) => {
-    onOpenSession(getSessionPath(repo.id, session.id))
-  })
+  sessionPath: (sessionId: string) => string
+  serverId?: string
+}
+
+export function NewSessionButton({
+  directory,
+  label,
+  onOpenSession,
+  sessionPath,
+  serverId,
+}: NewSessionButtonProps) {
+  const createSession = useCreateSession(
+    directory,
+    (session) => {
+      onOpenSession(sessionPath(session.id))
+    },
+    serverId,
+  )
 
   const isCreating = createSession.isPending
 
@@ -315,7 +327,7 @@ export function NewSessionButton({
     <button
       type="button"
       title="New session"
-      aria-label={`New session in ${getRepoDisplayName(repo)}`}
+      aria-label={`New session in ${label}`}
       aria-busy={isCreating}
       disabled={isCreating}
       onClick={() => createSession.mutate({ agent: undefined })}

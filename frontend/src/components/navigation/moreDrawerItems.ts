@@ -49,6 +49,7 @@ function getBaseItems(): MoreDrawerItem[] {
 
 const SESSION_DETAIL_PATH = /^\/repos\/(\d+)\/sessions\/[^/]+$/
 const SERVER_SESSION_DETAIL_PATH = /^\/servers\/[^/]+\/sessions\/[^/]+$/
+const SERVER_PROJECT_PATH = /^\/servers\/[^/]+\/projects$/
 
 export function isSessionDetailPath(pathname: string): boolean {
   return SESSION_DETAIL_PATH.test(pathname)
@@ -85,7 +86,7 @@ export function toolKeyOf(item: MoreDrawerItem): string | null {
 function buildRouteNavModel(pathname: string): NavModel {
   const baseItems = getBaseItems()
 
-  if (SERVER_SESSION_DETAIL_PATH.test(pathname)) {
+  if (SERVER_SESSION_DETAIL_PATH.test(pathname) || SERVER_PROJECT_PATH.test(pathname)) {
     return {
       primary: [getAssistantNavItem()],
       items: [

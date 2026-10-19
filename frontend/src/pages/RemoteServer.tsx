@@ -18,7 +18,7 @@ import { useOpenCodeServers, useOpenCodeServerStatuses } from '@/hooks/useOpenCo
 import { useSettingsDialog } from '@/hooks/useSettingsDialog'
 import { useSSE } from '@/hooks/useSSE'
 import { serverScopedKey } from '@/lib/serverScope'
-import { getServerSessionPath } from '@/lib/navigation'
+import { getServerProjectPath, getServerSessionPath } from '@/lib/navigation'
 import { getDirectoryName } from '@/lib/utils'
 import { Header } from '@/components/ui/header'
 import { Badge } from '@/components/ui/badge'
@@ -26,6 +26,7 @@ import { Button } from '@/components/ui/button'
 import { Card } from '@/components/ui/card'
 import { Input } from '@/components/ui/input'
 import { SessionStatusIndicator } from '@/components/ui/session-status-indicator'
+import { LinkedServerStateCard } from '@/components/servers/LinkedServerStateCard'
 import { RemoteSchedulesButton } from '@/components/schedules/RemoteSchedulesButton'
 import { RemoteMultiRunButton } from '@/components/repo/RemoteMultiRunButton'
 
@@ -123,15 +124,21 @@ function ProjectRow({ project, serverId }: { project: OpenCodeProject; serverId:
           type="button"
           onClick={() => setExpanded((current) => !current)}
           aria-expanded={expanded}
-          className="flex min-w-0 flex-1 items-center gap-2 rounded-md p-1 text-left transition-colors hover:bg-accent/50"
+          aria-label={`${expanded ? 'Collapse' : 'Expand'} ${name}`}
+          className="shrink-0 rounded-md p-1 text-muted-foreground transition-colors hover:bg-accent/50"
         >
           {expanded ? (
-            <ChevronDown className="h-4 w-4 shrink-0 text-muted-foreground" />
+            <ChevronDown className="h-4 w-4 shrink-0" />
           ) : (
-            <ChevronRight className="h-4 w-4 shrink-0 text-muted-foreground" />
+            <ChevronRight className="h-4 w-4 shrink-0" />
           )}
+        </button>
+        <Link
+          to={getServerProjectPath(serverId, project.canonical)}
+          className="flex min-w-0 flex-1 items-center gap-2 rounded-md p-1 text-left transition-colors hover:bg-accent/50"
+        >
           <FolderGit2 className="h-4 w-4 shrink-0 text-muted-foreground" />
-          <span className="min-w-0">
+          <span className="min-w-0 flex-1">
             <span className="block truncate text-sm font-semibold">{name}</span>
             <span className="block truncate font-mono text-xs text-muted-foreground">{project.canonical}</span>
           </span>
@@ -140,7 +147,7 @@ function ProjectRow({ project, serverId }: { project: OpenCodeProject; serverId:
               {project.vcs}
             </Badge>
           ) : null}
-        </button>
+        </Link>
         <Button
           size="sm"
           variant="outline"
@@ -214,33 +221,23 @@ function RemoteServerContent({ serverId }: { serverId: string }) {
 
       <div className="mx-auto flex w-full max-w-4xl flex-1 flex-col gap-4 overflow-y-auto p-3 pb-[calc(env(safe-area-inset-bottom)+60px)] sm:pb-4">
         {!serversLoading && !server ? (
-          <Card className="flex flex-col items-center gap-3 p-6 text-center">
-            <Server className="h-8 w-8 text-muted-foreground" />
-            <div>
-              <p className="font-medium">Server not found</p>
-              <p className="text-sm text-muted-foreground">
-                This linked server is no longer configured.
-              </p>
-            </div>
-            <Button variant="outline" size="sm" onClick={openSettings}>
-              Open server settings
-            </Button>
-          </Card>
+          <LinkedServerStateCard
+            icon={Server}
+            title="Server not found"
+            description="This linked server is no longer configured."
+            actionLabel="Open server settings"
+            onAction={openSettings}
+          />
         ) : null}
 
         {isDisabled ? (
-          <Card className="flex flex-col items-center gap-3 p-6 text-center">
-            <Server className="h-8 w-8 text-muted-foreground" />
-            <div>
-              <p className="font-medium">This server is disabled</p>
-              <p className="text-sm text-muted-foreground">
-                Enable it in Settings → Servers to browse its projects and sessions.
-              </p>
-            </div>
-            <Button variant="outline" size="sm" onClick={openSettings}>
-              Open server settings
-            </Button>
-          </Card>
+          <LinkedServerStateCard
+            icon={Server}
+            title="This server is disabled"
+            description="Enable it in Settings → Servers to browse its projects and sessions."
+            actionLabel="Open server settings"
+            onAction={openSettings}
+          />
         ) : null}
 
         {server && !isDisabled && projectsQuery.isError ? (

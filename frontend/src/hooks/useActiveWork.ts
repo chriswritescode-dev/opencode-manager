@@ -20,6 +20,7 @@ import {
   buildServerActivityIndex,
   collectActiveRoots,
   needsWorktreeLookup,
+  projectActivityFromIndex,
   repoActivityFromIndex,
   rootSessionID,
   serverActivityFromIndex,
@@ -96,6 +97,57 @@ export function useServerActivityState(serverId: string): 'needs-input' | 'runni
   return useSessionStatus((state) =>
     serverActivityFromIndex(
       serverId,
+      buildServerActivityIndex({
+        statuses: state.statuses,
+        parents: state.parents,
+        runningShells: state.runningShells,
+        directories: state.directories,
+        sessionServers: state.sessionServers,
+        pendingInputSessionIDs,
+      }),
+    ),
+  )
+}
+
+/**
+ * Whether any local session is active, returned as a primitive so the local switcher row only
+ * re-renders when it changes. Reads only the session-status store and the pending queues.
+ */
+export function useLocalActivityState(): 'needs-input' | 'running' | null {
+  const pendingInputSessionIDs = usePendingInputSessionIDs()
+
+  return useSessionStatus((state) => {
+    const index = buildRepoActivityIndex({
+      statuses: state.statuses,
+      parents: state.parents,
+      runningShells: state.runningShells,
+      directories: state.directories,
+      pendingInputSessionIDs,
+    })
+
+    let running = false
+    for (const activity of index.values()) {
+      if (activity === 'needs-input') return 'needs-input'
+      running = true
+    }
+    return running ? 'running' : null
+  })
+}
+
+/**
+ * Whether a project on a linked server has any active session, returned as a primitive so rows
+ * only re-render when it changes.
+ */
+export function useProjectActivityState(
+  serverId: string,
+  directory: string,
+): 'needs-input' | 'running' | null {
+  const pendingInputSessionIDs = usePendingInputSessionIDs()
+
+  return useSessionStatus((state) =>
+    projectActivityFromIndex(
+      serverId,
+      directory,
       buildServerActivityIndex({
         statuses: state.statuses,
         parents: state.parents,

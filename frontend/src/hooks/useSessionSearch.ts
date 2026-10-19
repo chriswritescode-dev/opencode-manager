@@ -10,6 +10,10 @@ export interface UseSessionSearchOptions {
   limit?: number
   allDirectories?: boolean
   project?: { id: string; subpath: string }
+  /** Searches a linked server instead of the route's server. */
+  serverId?: string
+  /** Seeds the search box, for callers that mount the hook after a query is already entered. */
+  initialQuery?: string
 }
 
 /**
@@ -20,7 +24,8 @@ export function useSessionSearch(directories: string[], options: UseSessionSearc
   const limit = options.limit ?? DEFAULT_LIMIT
   const allDirectories = options.allDirectories ?? false
   const project = options.project
-  const [query, setQuery] = useState('')
+  const serverId = options.serverId
+  const [query, setQuery] = useState(options.initialQuery ?? '')
   const trimmedQuery = query.trim()
   const debouncedQuery = useDebouncedValue(trimmedQuery, 150)
   const search = trimmedQuery ? debouncedQuery : ''
@@ -39,6 +44,7 @@ export function useSessionSearch(directories: string[], options: UseSessionSearc
     keepPreviousResults: true,
     allDirectories,
     project,
+    serverId,
   })
 
   const directorySet = useMemo(() => new Set(directories), [directories])

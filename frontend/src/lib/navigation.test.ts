@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { getSessionListPath, getSwipeBackTarget, getAssistantPath, getAssistantSessionListPath, isAssistantPath, getPathWithReturnTo, getReturnToPath, getRepoPath, getServerPath, getServerSessionPath, getSessionPath, parseRepoRoute, parseServerSessionRoute } from './navigation';
+import { getSessionListPath, getSwipeBackTarget, getAssistantPath, getAssistantSessionListPath, isAssistantPath, getPathWithReturnTo, getReturnToPath, getRepoPath, getServerPath, getServerProjectPath, getServerSessionPath, getSessionPath, parseRepoRoute, parseServerProjectRoute, parseServerSessionRoute } from './navigation';
 
 describe('getAssistantPath', () => {
   it('returns /assistant', () => {
@@ -141,6 +141,28 @@ describe('parseRepoRoute', () => {
   });
 });
 
+describe('linked server project paths', () => {
+  it('builds a project path with encoded server id and directory', () => {
+    expect(getServerProjectPath('srv_kitchen', '/home/me/app')).toBe(
+      '/servers/srv_kitchen/projects?directory=%2Fhome%2Fme%2Fapp'
+    );
+    expect(getServerProjectPath('srv a/b', '/srv/my app')).toBe(
+      '/servers/srv%20a%2Fb/projects?directory=%2Fsrv%2Fmy%20app'
+    );
+  });
+
+  it('parses the server id and decoded directory from a project route', () => {
+    expect(
+      parseServerProjectRoute('/servers/srv_kitchen/projects', '?directory=%2Fhome%2Fme%2Fapp')
+    ).toEqual({ serverId: 'srv_kitchen', directory: '/home/me/app' });
+  });
+
+  it('returns null without a directory or for other routes', () => {
+    expect(parseServerProjectRoute('/servers/srv_kitchen/projects', '')).toBeNull();
+    expect(parseServerProjectRoute('/servers/srv_kitchen', '?directory=%2Fhome%2Fme')).toBeNull();
+  });
+});
+
 describe('parseServerSessionRoute', () => {
   it('parses a linked-server session route', () => {
     expect(parseServerSessionRoute('/servers/srv_kitchen/sessions/ses_1')).toEqual({
@@ -216,6 +238,12 @@ describe('getSwipeBackTarget', () => {
 
     it('returns root for a server page', () => {
       expect(getSwipeBackTarget('/servers/srv_kitchen', '')).toBe('/');
+    });
+
+    it('returns the server page for a remote project page', () => {
+      expect(
+        getSwipeBackTarget('/servers/srv_kitchen/projects', '?directory=%2Fhome%2Fme%2Fapp')
+      ).toBe('/servers/srv_kitchen');
     });
   });
 

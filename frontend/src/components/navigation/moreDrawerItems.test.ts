@@ -75,6 +75,20 @@ describe('buildMoreItems', () => {
     ])
   })
 
+  it('returns only the server tools a linked server can serve for /servers/:id/projects', () => {
+    const items = buildMoreItems('/servers/srv_kitchen/projects')
+    expect(items.map((item) => item.key)).toEqual([
+      'home',
+      'mcp',
+      'skills',
+      'source-control',
+      'terminal',
+      'settings',
+      'logout',
+    ])
+    expect(items.find((item) => item.key === 'source-control')?.dialog).toBe('sourceControl')
+  })
+
   it('omits the Actions item for an Assistant session', () => {
     const items = buildMoreItems('/repos/0/sessions/abc')
     expect(items).toHaveLength(12)
@@ -179,6 +193,16 @@ describe('buildToolItems', () => {
 
   it('returns the linked-server session tools for the tool rail', () => {
     expect(buildToolItems('/servers/srv_kitchen/sessions/abc').map((item) => item.key)).toEqual([
+      'activity',
+      'mcp',
+      'skills',
+      'source-control',
+      'terminal',
+    ])
+  })
+
+  it('returns the linked-server project tools for the tool rail', () => {
+    expect(buildToolItems('/servers/srv_kitchen/projects').map((item) => item.key)).toEqual([
       'activity',
       'mcp',
       'skills',

@@ -1,11 +1,10 @@
-import { Link, useLocation } from 'react-router-dom'
-import { Server } from 'lucide-react'
-import type { OpenCodeServer } from '@opencode-manager/shared/schemas'
+import { Laptop, Server } from 'lucide-react'
+import { LOCAL_OPENCODE_SERVER_ID, type OpenCodeServer } from '@opencode-manager/shared/schemas'
 import { useOpenCodeServers, useOpenCodeServerStatuses } from '@/hooks/useOpenCodeServers'
-import { useServerActivityState } from '@/hooks/useActiveWork'
+import { useLocalActivityState, useServerActivityState } from '@/hooks/useActiveWork'
+import { useSidebarServerSelection } from '@/hooks/useSidebarServerSelection'
 import { ActivityStateIndicator } from '@/components/activity/ActivityStateIndicator'
 import { SidebarSection } from '@/components/ui/sidebar'
-import { getServerPath } from '@/lib/navigation'
 import { cn } from '@/lib/utils'
 
 export type LinkedServersVariant = 'sidebar' | 'rail' | 'sheet'
@@ -13,12 +12,6 @@ export type LinkedServersVariant = 'sidebar' | 'rail' | 'sheet'
 interface LinkedServersNavProps {
   /** `sidebar` renders the labelled section, `rail` the collapsed icon column, `sheet` the mobile sheet group. */
   variant?: LinkedServersVariant
-  /** When provided, each row is a button that hands navigation to the caller instead of rendering a link. */
-  onNavigate?: (path: string) => void
-}
-
-function isActiveServerPath(pathname: string, path: string) {
-  return pathname === path || pathname.startsWith(`${path}/`)
 }
 
 function ServerConnectionDot({ connected }: { connected: boolean }) {
@@ -34,57 +27,84 @@ function ServerConnectionDot({ connected }: { connected: boolean }) {
   )
 }
 
-interface LinkedServerRowProps {
-  server: OpenCodeServer
-  variant: 'sidebar' | 'sheet'
-  path: string
-  active: boolean
-  connected: boolean
-  onNavigate?: (path: string) => void
-}
-
-function LinkedServerRow({ server, variant, path, active, connected, onNavigate }: LinkedServerRowProps) {
-  const activity = useServerActivityState(server.id)
-  const className = cn(
+function rowClassName(active: boolean, variant: 'sidebar' | 'sheet') {
+  return cn(
     'flex items-center gap-3 rounded-md p-2.5 text-sm transition-colors duration-150',
     'focus:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 focus-visible:ring-offset-background',
     active ? 'bg-accent text-accent-foreground' : 'text-foreground hover:bg-accent/50',
     variant === 'sheet' && 'mx-2 p-2 text-left',
   )
-  const content = (
-    <>
+}
+
+function railClassName(active: boolean) {
+  return cn(
+    'flex items-center justify-center rounded-md p-2.5 transition-colors duration-150',
+    'focus:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 focus-visible:ring-offset-background',
+    active ? 'bg-accent text-accent-foreground' : 'text-foreground hover:bg-accent/50',
+  )
+}
+
+interface LocalServerRowProps {
+  variant: 'sidebar' | 'sheet'
+  active: boolean
+  onSelect: () => void
+}
+
+function LocalServerRow({ variant, active, onSelect }: LocalServerRowProps) {
+  const activity = useLocalActivityState()
+
+  return (
+    <button
+      type="button"
+      onClick={onSelect}
+      aria-pressed={active}
+      aria-current={active ? 'true' : undefined}
+      className={rowClassName(active, variant)}
+    >
+      <Laptop className="h-5 w-5 shrink-0" />
+      <span className="min-w-0 flex-1 truncate">Local</span>
+      <ActivityStateIndicator state={activity} />
+    </button>
+  )
+}
+
+interface LinkedServerRowProps {
+  server: OpenCodeServer
+  variant: 'sidebar' | 'sheet'
+  active: boolean
+  connected: boolean
+  onSelect: () => void
+}
+
+function LinkedServerRow({ server, variant, active, connected, onSelect }: LinkedServerRowProps) {
+  const activity = useServerActivityState(server.id)
+
+  return (
+    <button
+      type="button"
+      onClick={onSelect}
+      aria-pressed={active}
+      aria-current={active ? 'true' : undefined}
+      className={rowClassName(active, variant)}
+    >
       <Server className="h-5 w-5 shrink-0" />
       <span className="min-w-0 flex-1 truncate">{server.name}</span>
       <ActivityStateIndicator state={activity} />
       <ServerConnectionDot connected={connected} />
-    </>
-  )
-
-  if (onNavigate) {
-    return (
-      <button
-        type="button"
-        onClick={() => onNavigate(path)}
-        aria-current={active ? 'page' : undefined}
-        className={className}
-      >
-        {content}
-      </button>
-    )
-  }
-
-  return (
-    <Link to={path} className={className}>
-      {content}
-    </Link>
+    </button>
   )
 }
 
-export function LinkedServersNav({ variant = 'sidebar', onNavigate }: LinkedServersNavProps) {
-  const location = useLocation()
+/**
+ * The server switcher. Selecting a row changes which server's projects and sessions the sidebar
+ * lists; it never navigates. Hidden when no linked server is enabled.
+ */
+export function LinkedServersNav({ variant = 'sidebar' }: LinkedServersNavProps) {
   const { servers, isLoading } = useOpenCodeServers()
   const { statusById } = useOpenCodeServerStatuses()
+  const [selectedServerId, selectServer] = useSidebarServerSelection()
   const enabledServers = servers.filter((server) => server.enabled)
+  const localActive = selectedServerId === LOCAL_OPENCODE_SERVER_ID
 
   if (isLoading || enabledServers.length === 0) {
     return null
@@ -93,46 +113,57 @@ export function LinkedServersNav({ variant = 'sidebar', onNavigate }: LinkedServ
   if (variant === 'rail') {
     return (
       <div className="flex flex-col gap-1 px-2">
+        <button
+          type="button"
+          onClick={() => selectServer(LOCAL_OPENCODE_SERVER_ID)}
+          title="Local"
+          aria-pressed={localActive}
+          aria-current={localActive ? 'true' : undefined}
+          className={railClassName(localActive)}
+        >
+          <Laptop className="h-5 w-5 shrink-0" />
+          <span className="sr-only">Local</span>
+        </button>
         {enabledServers.map((server) => {
-          const path = getServerPath(server.id)
-          const active = isActiveServerPath(location.pathname, path)
+          const active = selectedServerId === server.id
 
           return (
-            <Link
+            <button
               key={server.id}
-              to={path}
+              type="button"
+              onClick={() => selectServer(server.id)}
               title={server.name}
-              aria-current={active ? 'page' : undefined}
-              className={cn(
-                'flex items-center justify-center rounded-md p-2.5 transition-colors duration-150',
-                'focus:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 focus-visible:ring-offset-background',
-                active ? 'bg-accent text-accent-foreground' : 'text-foreground hover:bg-accent/50',
-              )}
+              aria-pressed={active}
+              aria-current={active ? 'true' : undefined}
+              className={railClassName(active)}
             >
               <Server className="h-5 w-5 shrink-0" />
               <span className="sr-only">{server.name}</span>
-            </Link>
+            </button>
           )
         })}
       </div>
     )
   }
 
-  const rows = enabledServers.map((server) => {
-    const path = getServerPath(server.id)
-
-    return (
+  const rows = [
+    <LocalServerRow
+      key={LOCAL_OPENCODE_SERVER_ID}
+      variant={variant}
+      active={localActive}
+      onSelect={() => selectServer(LOCAL_OPENCODE_SERVER_ID)}
+    />,
+    ...enabledServers.map((server) => (
       <LinkedServerRow
         key={server.id}
         server={server}
         variant={variant}
-        path={path}
-        active={isActiveServerPath(location.pathname, path)}
+        active={selectedServerId === server.id}
         connected={statusById[server.id]?.connected ?? false}
-        onNavigate={onNavigate}
+        onSelect={() => selectServer(server.id)}
       />
-    )
-  })
+    )),
+  ]
 
   if (variant === 'sheet') {
     return (

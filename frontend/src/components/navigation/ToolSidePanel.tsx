@@ -225,7 +225,7 @@ export function ToolSidePanel({
           onDone={closePanel}
         />
       ) : (
-        <RepoSkillsContent open repoId={repoId} onDone={closePanel} />
+        <RepoSkillsContent open repoId={repoId} directory={repoDirectory} onDone={closePanel} />
       )
     }
     if (tool === 'sourceControl') {

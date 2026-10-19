@@ -291,6 +291,17 @@ export function serverActivityFromIndex(
 }
 
 /**
+ * A linked server project's activity from a prebuilt server index, keyed by server and directory.
+ */
+export function projectActivityFromIndex(
+  serverId: string,
+  directory: string,
+  index: ReadonlyMap<string, 'needs-input' | 'running'>,
+): 'needs-input' | 'running' | null {
+  return index.get(serverIndexKey(serverId, directory)) ?? null
+}
+
+/**
  * The repo's activity from a prebuilt index, checking each of its own paths and the directories of
  * the worktrees it owns. Needs-input outranks running.
  */

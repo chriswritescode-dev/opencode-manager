@@ -4,8 +4,11 @@ import { MemoryRouter, Route, Routes, useLocation } from 'react-router-dom'
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
 import { RepoQuickSwitchSheet } from './RepoQuickSwitchSheet'
 import { getRepoSiblings, listRepos } from '@/api/repos'
+import { listProjects, type OpenCodeProject } from '@/api/opencode'
 import { useMobileTabBar } from '@/hooks/useMobileTabBar'
 import { ASSISTANT_REPO_ID } from '@opencode-manager/shared/utils'
+import { LOCAL_OPENCODE_SERVER_ID } from '@opencode-manager/shared/schemas'
+import { useSidebarServerStore } from '@/stores/sidebarServerStore'
 import type { ActiveWorkItem } from '@/lib/activeWork'
 
 type SessionFixture = {
@@ -53,9 +56,16 @@ vi.mock('@/hooks/useActiveWork', () => ({
   useActivityWindowMinutes: activityMocks.useActivityWindowMinutes,
   useRepoActivityState: () => null,
   useServerActivityState: () => null,
+  useLocalActivityState: () => null,
+  useProjectActivityState: () => null,
 }))
 
 vi.mock('@/api/repos')
+
+vi.mock('@/api/opencode', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('@/api/opencode')>()
+  return { ...actual, listProjects: vi.fn() }
+})
 
 vi.mock('@/contexts/EventContext', () => ({
   usePermissions: () => ({
@@ -156,6 +166,16 @@ function createLinkedServer(id: string, name: string, enabled = true) {
   }
 }
 
+function createProject(id: string, name: string, canonical: string): OpenCodeProject {
+  return {
+    id,
+    canonical,
+    name,
+    time: { created: 1, updated: 2 },
+    sandboxes: [],
+  } as OpenCodeProject
+}
+
 function setLinkedServers(servers: Array<ReturnType<typeof createLinkedServer>>) {
   serverMocks.useOpenCodeServers.mockReturnValue({ servers, isLoading: false })
   serverMocks.useOpenCodeServerStatuses.mockReturnValue({
@@ -205,7 +225,10 @@ function MobileSheetHarness() {
 describe('RepoQuickSwitchSheet', () => {
   beforeEach(() => {
     vi.clearAllMocks()
+    localStorage.clear()
+    useSidebarServerStore.setState({ serverId: LOCAL_OPENCODE_SERVER_ID })
     vi.mocked(getRepoSiblings).mockResolvedValue([])
+    vi.mocked(listProjects).mockResolvedValue([])
     sessionsData.splice(0, sessionsData.length)
     sessionsHookCalls.splice(0, sessionsHookCalls.length)
     permissionSessions.current.clear()
@@ -994,8 +1017,9 @@ describe('RepoQuickSwitchSheet', () => {
     expect(screen.queryByRole('heading', { name: 'Servers' })).toBeNull()
   })
 
-  it('navigates to a linked server and closes the sheet', async () => {
+  it('switches to a linked server without navigating or closing the sheet', async () => {
     vi.mocked(listRepos).mockResolvedValue([createRepo(1, 'repo1', '/path/to/repo1')])
+    vi.mocked(listProjects).mockResolvedValue([createProject('p1', 'Alpha', '/projects/alpha')])
     setLinkedServers([createLinkedServer('srv_kitchen', 'Kitchen')])
     const handleClose = vi.fn()
 
@@ -1019,7 +1043,43 @@ describe('RepoQuickSwitchSheet', () => {
 
     fireEvent.click(await screen.findByRole('button', { name: /Kitchen/ }))
 
-    expect(screen.getByTestId('location')).toHaveTextContent('/servers/srv_kitchen')
+    expect(await screen.findByText('Alpha')).toBeInTheDocument()
+    expect(screen.queryByText('repo1')).not.toBeInTheDocument()
+    expect(screen.queryByRole('button', { name: /Add repository/ })).not.toBeInTheDocument()
+    expect(screen.getByTestId('location')).toHaveTextContent('/repos/1')
+    expect(handleClose).not.toHaveBeenCalled()
+  })
+
+  it('opens a remote project from the sheet and closes it', async () => {
+    vi.mocked(listRepos).mockResolvedValue([createRepo(1, 'repo1', '/path/to/repo1')])
+    vi.mocked(listProjects).mockResolvedValue([createProject('p1', 'Alpha', '/projects/alpha')])
+    setLinkedServers([createLinkedServer('srv_kitchen', 'Kitchen')])
+    const handleClose = vi.fn()
+
+    render(
+      <QueryClientProvider client={new QueryClient()}>
+        <MemoryRouter initialEntries={['/repos/1']}>
+          <Routes>
+            <Route
+              path="*"
+              element={
+                <>
+                  <RepoQuickSwitchSheet isOpen onClose={handleClose} />
+                  <LocationSpy />
+                </>
+              }
+            />
+          </Routes>
+        </MemoryRouter>
+      </QueryClientProvider>,
+    )
+
+    fireEvent.click(await screen.findByRole('button', { name: /Kitchen/ }))
+    fireEvent.click(await screen.findByRole('button', { name: /^Alpha/ }))
+
+    expect(screen.getByTestId('location')).toHaveTextContent(
+      '/servers/srv_kitchen/projects?directory=%2Fprojects%2Falpha',
+    )
     expect(handleClose).toHaveBeenCalled()
   })
 })

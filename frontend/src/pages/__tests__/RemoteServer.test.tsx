@@ -126,10 +126,20 @@ describe('RemoteServer', () => {
     expect(mocks.listProjects).toHaveBeenCalledWith('srv_kitchen')
   })
 
+  it('links the project name to the remote project page', async () => {
+    renderServer()
+
+    const link = await screen.findByRole('link', { name: /App/ })
+    expect(link).toHaveAttribute(
+      'href',
+      '/servers/srv_kitchen/projects?directory=%2Fhome%2Fme%2Fapp',
+    )
+  })
+
   it('links each expanded project session to the remote session route', async () => {
     renderServer()
 
-    fireEvent.click(await screen.findByRole('button', { name: /App/ }))
+    fireEvent.click(await screen.findByRole('button', { name: 'Expand App' }))
 
     const link = await screen.findByRole('link', { name: /Fix the bug/ })
     expect(link).toHaveAttribute('href', '/servers/srv_kitchen/sessions/ses_1')
