@@ -415,6 +415,13 @@ export class ScheduleService {
     }
   }
 
+  private resolveTargetPersistence(target: ScheduleJobTarget): { repo: Repo | null; repoId: number | null } {
+    if (target.kind === 'repo') {
+      return { repo: this.assertRepo(target.repoId), repoId: target.repoId }
+    }
+    return { repo: null, repoId: null }
+  }
+
   private targetForJob(job: ScheduleJob): ScheduleJobTarget {
     if (job.repoId !== null) {
       return { kind: 'repo', repoId: job.repoId }
@@ -570,7 +577,6 @@ export class ScheduleService {
   }
 
   listServerJobs(serverId: string): ScheduleJob[] {
-    this.assertServer(serverId)
     return listScheduleJobsByServer(this.db, serverId)
   }
 
@@ -672,13 +678,13 @@ export class ScheduleService {
 
   private async deleteJobForTarget(target: ScheduleJobTarget, jobId: number): Promise<void> {
     const job = this.loadJobForTarget(target, jobId)
-    const context = this.resolveTargetContext(target, job.directory)
+    const { repoId } = this.resolveTargetPersistence(target)
 
     if (ScheduleService.activeRuns.has(jobId)) {
       throw new ScheduleServiceError('Cannot delete a schedule while it is running. Cancel the run first.', 409)
     }
 
-    const runningRun = getRunningScheduleRunByJob(this.db, context.repoId, jobId)
+    const runningRun = getRunningScheduleRunByJob(this.db, repoId, jobId)
     if (runningRun) {
       throw new ScheduleServiceError('Cannot delete a schedule while it is running. Cancel the run first.', 409)
     }
@@ -691,7 +697,7 @@ export class ScheduleService {
         await this.removeWorktrees(target.repoId, jobId)
       }
 
-      const deleted = deleteScheduleJob(this.db, context.repoId, jobId)
+      const deleted = deleteScheduleJob(this.db, repoId, jobId)
       if (!deleted) {
         throw new ScheduleServiceError('Schedule not found', 404)
       }
@@ -781,17 +787,17 @@ export class ScheduleService {
 
   private async clearRunHistoryForTarget(target: ScheduleJobTarget, jobId: number, worktrees: ScheduleRunWorktreesMode = 'commit'): Promise<{ cleared: number }> {
     const job = this.loadJobForTarget(target, jobId)
-    const context = this.resolveTargetContext(target, job.directory)
+    const { repo, repoId } = this.resolveTargetPersistence(target)
 
-    const removable = listScheduleRunArtifactsByJob(this.db, context.repoId, jobId).filter((run) => run.status !== 'running')
+    const removable = listScheduleRunArtifactsByJob(this.db, repoId, jobId).filter((run) => run.status !== 'running')
     if (removable.length === 0) {
       return { cleared: 0 }
     }
 
-    if (context.repo) {
-      await this.worktreeManager.pruneRunArtifacts(context.repo, job, removable, worktrees)
+    if (repo) {
+      await this.worktreeManager.pruneRunArtifacts(repo, job, removable, worktrees)
     }
-    const cleared = deleteScheduleRunsByIds(this.db, context.repoId, jobId, removable.map((run) => run.id))
+    const cleared = deleteScheduleRunsByIds(this.db, repoId, jobId, removable.map((run) => run.id))
     return { cleared }
   }
 
@@ -811,8 +817,8 @@ export class ScheduleService {
 
   private async deleteRunForTarget(target: ScheduleJobTarget, jobId: number, runId: number, worktrees: ScheduleRunWorktreesMode = 'commit'): Promise<void> {
     const job = this.loadJobForTarget(target, jobId)
-    const context = this.resolveTargetContext(target, job.directory)
-    const run = getScheduleRunById(this.db, context.repoId, jobId, runId)
+    const { repo, repoId } = this.resolveTargetPersistence(target)
+    const run = getScheduleRunById(this.db, repoId, jobId, runId)
 
     if (!run) {
       throw new ScheduleServiceError('Run not found', 404)
@@ -821,10 +827,10 @@ export class ScheduleService {
       throw new ScheduleServiceError('Cannot delete a run while it is in progress. Cancel it first.', 409)
     }
 
-    if (context.repo) {
-      await this.worktreeManager.pruneRunArtifacts(context.repo, job, [{ runBranch: run.runBranch, worktreePath: run.worktreePath }], worktrees)
+    if (repo) {
+      await this.worktreeManager.pruneRunArtifacts(repo, job, [{ runBranch: run.runBranch, worktreePath: run.worktreePath }], worktrees)
     }
-    const deleted = deleteScheduleRunById(this.db, context.repoId, jobId, runId)
+    const deleted = deleteScheduleRunById(this.db, repoId, jobId, runId)
     if (!deleted) {
       throw new ScheduleServiceError('Run not found', 404)
     }

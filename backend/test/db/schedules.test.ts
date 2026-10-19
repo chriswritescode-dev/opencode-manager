@@ -544,6 +544,33 @@ describe('schedule database queries', () => {
     expect(run).toBeNull()
   })
 
+  it('scopes the run lookup by session id and server id', () => {
+    const stmt = {
+      get: vi.fn().mockReturnValue(makeRunRow({ server_id: 'srv_kitchen' })),
+    }
+    mockDb.prepare.mockReturnValue(stmt)
+
+    const run = schedulesDb.getScheduleRunBySessionId(mockDb, 'ses-1', 'srv_kitchen')
+
+    expect(mockDb.prepare).toHaveBeenCalledWith(
+      'SELECT * FROM schedule_runs WHERE server_id = ? AND session_id = ? ORDER BY started_at DESC LIMIT 1',
+    )
+    expect(stmt.get).toHaveBeenCalledWith('srv_kitchen', 'ses-1')
+    expect(run).toMatchObject({ id: 5, sessionId: 'ses-1' })
+  })
+
+  it('defaults the run lookup to the local server', () => {
+    const stmt = {
+      get: vi.fn().mockReturnValue(undefined),
+    }
+    mockDb.prepare.mockReturnValue(stmt)
+
+    const run = schedulesDb.getScheduleRunBySessionId(mockDb, 'ses-1')
+
+    expect(stmt.get).toHaveBeenCalledWith('local', 'ses-1')
+    expect(run).toBeNull()
+  })
+
   it('lists all runs with context and no filters', () => {
     const row = {
       ...makeRunRow(),

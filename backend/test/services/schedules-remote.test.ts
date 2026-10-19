@@ -2,7 +2,7 @@ import { beforeEach, describe, expect, it, vi } from 'vitest'
 import { Database } from 'bun:sqlite'
 import { migrate } from '../../src/db/migration-runner'
 import { allMigrations } from '../../src/db/migrations'
-import { getScheduleJobById, listScheduleRunsByJob } from '../../src/db/schedules'
+import { getScheduleJobById, createScheduleRun, listScheduleRunsByJob } from '../../src/db/schedules'
 import type { OpenCodeApi } from '@opencode-manager/shared/opencode'
 import { ScheduleService } from '../../src/services/schedules'
 import { createStubOpenCodeClient, stubLoadedModelCatalog } from '../helpers/stub-opencode-client'
@@ -44,7 +44,7 @@ function createClient() {
   return { client: createStubOpenCodeClient({ api }), api: stub.api }
 }
 
-function createService(db: Database, localClient: ReturnType<typeof createStubOpenCodeClient>, remoteClient: ReturnType<typeof createStubOpenCodeClient>, enabled = true) {
+function createService(db: Database, localClient: ReturnType<typeof createStubOpenCodeClient>, remoteClient: ReturnType<typeof createStubOpenCodeClient>, enabled = true, registered = true) {
   const worktreeManager = {
     prepare: vi.fn().mockResolvedValue(null),
     finalize: vi.fn().mockResolvedValue({ commitHash: null }),
@@ -53,7 +53,7 @@ function createService(db: Database, localClient: ReturnType<typeof createStubOp
     releaseWorktree: vi.fn().mockResolvedValue(undefined),
   }
   const registry = {
-    get: vi.fn(() => ({ ...REMOTE_SERVER, enabled })),
+    get: vi.fn(() => (registered ? { ...REMOTE_SERVER, enabled } : undefined)),
     getClient: vi.fn(() => remoteClient),
   }
   const service = new ScheduleService(db, localClient, worktreeManager as never, registry as never)
@@ -156,4 +156,106 @@ describe('remote schedule targets', () => {
     const runs = service.listAllRuns()
     expect(runs[0]).toMatchObject({ serverId: REMOTE_SERVER.id, serverName: REMOTE_SERVER.name })
   })
+
+  it('lists remote jobs for a disabled server and for an unregistered server', async () => {
+    const localClient = createClient().client
+    const { client } = createClient()
+    const { service } = createService(db, localClient, client)
+    const job = await service.createServerJob(REMOTE_SERVER.id, '/srv/projects/audit', baseRequest)
+
+    const disabled = createService(db, localClient, client, false)
+    expect(disabled.service.listServerJobs(REMOTE_SERVER.id).map((entry) => entry.id)).toEqual([job.id])
+
+    const unregistered = createService(db, localClient, client, true, false)
+    expect(unregistered.service.listServerJobs(REMOTE_SERVER.id).map((entry) => entry.id)).toEqual([job.id])
+  })
+
+  it('deletes a remote job while the target server is disabled', async () => {
+    const localClient = createClient().client
+    const { client } = createClient()
+    const { service } = createService(db, localClient, client)
+    const job = await service.createServerJob(REMOTE_SERVER.id, '/srv/projects/audit', baseRequest)
+    seedCompletedRun(db, job.id)
+
+    await createService(db, localClient, client, false).service.deleteServerJob(REMOTE_SERVER.id, job.id)
+
+    expect(getScheduleJobById(db, null, job.id)).toBeNull()
+    expect(listScheduleRunsByJob(db, null, job.id)).toEqual([])
+  })
+
+  it('deletes a remote job when the target server is missing from the registry', async () => {
+    const localClient = createClient().client
+    const { client } = createClient()
+    const { service } = createService(db, localClient, client)
+    const job = await service.createServerJob(REMOTE_SERVER.id, '/srv/projects/audit', baseRequest)
+    seedCompletedRun(db, job.id)
+
+    await createService(db, localClient, client, true, false).service.deleteServerJob(REMOTE_SERVER.id, job.id)
+
+    expect(getScheduleJobById(db, null, job.id)).toBeNull()
+    expect(listScheduleRunsByJob(db, null, job.id)).toEqual([])
+  })
+
+  it('clears remote run history while the target server is disabled', async () => {
+    const localClient = createClient().client
+    const { client } = createClient()
+    const { service } = createService(db, localClient, client)
+    const job = await service.createServerJob(REMOTE_SERVER.id, '/srv/projects/audit', baseRequest)
+    seedCompletedRun(db, job.id)
+    seedCompletedRun(db, job.id)
+
+    await expect(createService(db, localClient, client, false).service.clearServerRunHistory(REMOTE_SERVER.id, job.id))
+      .resolves.toEqual({ cleared: 2 })
+
+    expect(listScheduleRunsByJob(db, null, job.id)).toEqual([])
+  })
+
+  it('clears remote run history when the target server is missing from the registry', async () => {
+    const localClient = createClient().client
+    const { client } = createClient()
+    const { service } = createService(db, localClient, client)
+    const job = await service.createServerJob(REMOTE_SERVER.id, '/srv/projects/audit', baseRequest)
+    seedCompletedRun(db, job.id)
+
+    await expect(createService(db, localClient, client, true, false).service.clearServerRunHistory(REMOTE_SERVER.id, job.id))
+      .resolves.toEqual({ cleared: 1 })
+
+    expect(listScheduleRunsByJob(db, null, job.id)).toEqual([])
+  })
+
+  it('deletes a remote run while the target server is disabled', async () => {
+    const localClient = createClient().client
+    const { client } = createClient()
+    const { service } = createService(db, localClient, client)
+    const job = await service.createServerJob(REMOTE_SERVER.id, '/srv/projects/audit', baseRequest)
+    const runId = seedCompletedRun(db, job.id)
+
+    await createService(db, localClient, client, false).service.deleteServerRun(REMOTE_SERVER.id, job.id, runId)
+
+    expect(listScheduleRunsByJob(db, null, job.id)).toEqual([])
+  })
+
+  it('deletes a remote run when the target server is missing from the registry', async () => {
+    const localClient = createClient().client
+    const { client } = createClient()
+    const { service } = createService(db, localClient, client)
+    const job = await service.createServerJob(REMOTE_SERVER.id, '/srv/projects/audit', baseRequest)
+    const runId = seedCompletedRun(db, job.id)
+
+    await createService(db, localClient, client, true, false).service.deleteServerRun(REMOTE_SERVER.id, job.id, runId)
+
+    expect(listScheduleRunsByJob(db, null, job.id)).toEqual([])
+  })
 })
+
+function seedCompletedRun(db: Database, jobId: number): number {
+  return createScheduleRun(db, {
+    jobId,
+    repoId: null,
+    serverId: REMOTE_SERVER.id,
+    triggerSource: 'schedule',
+    status: 'completed',
+    startedAt: Date.now(),
+    createdAt: Date.now(),
+  }).id
+}

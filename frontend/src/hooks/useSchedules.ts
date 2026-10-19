@@ -41,10 +41,14 @@ export type ScheduleTargetRef =
 function invalidateScheduleQueries(queryClient: ReturnType<typeof useQueryClient>): void {
   queryClient.invalidateQueries({ queryKey: ['all-schedules'] })
   queryClient.invalidateQueries({ queryKey: ['all-schedule-runs'] })
+  queryClient.invalidateQueries({ queryKey: ['repo-schedules'] })
   queryClient.invalidateQueries({ queryKey: ['repo-schedule'] })
   queryClient.invalidateQueries({ queryKey: ['repo-schedule-runs'] })
+  queryClient.invalidateQueries({ queryKey: ['repo-schedule-run'] })
   queryClient.invalidateQueries({ queryKey: ['server-schedule'] })
   queryClient.invalidateQueries({ queryKey: ['server-schedule-runs'] })
+  queryClient.invalidateQueries({ queryKey: ['server-schedule-run'] })
+  queryClient.invalidateQueries({ queryKey: ['schedule-run-detail'] })
 }
 
 export function useAllSchedules() {

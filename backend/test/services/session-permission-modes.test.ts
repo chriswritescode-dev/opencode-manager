@@ -3,7 +3,7 @@ import { Database } from 'bun:sqlite'
 import { migrate } from '../../src/db/migration-runner'
 import { allMigrations } from '../../src/db/migrations'
 import { createRepo } from '../../src/db/queries'
-import { createScheduleRun, updateScheduleRunMetadata } from '../../src/db/schedules'
+import { createScheduleRun, getScheduleRunBySessionId, updateScheduleRunMetadata } from '../../src/db/schedules'
 import { getSessionPermissionMode, setSessionPermissionMode } from '../../src/db/session-permission-modes'
 import { SettingsService } from '../../src/services/settings'
 import { SessionPermissionModeService } from '../../src/services/session-permission-modes'
@@ -666,6 +666,57 @@ describe('SessionPermissionModeService', () => {
 
       await expect(service.getEffectiveMode('ses_scheduled')).resolves.toMatchObject({ lockedReason: 'schedule' })
       await expect(service.getEffectiveMode('ses_scheduled', 'srv_remote')).resolves.toMatchObject({
+        lockedReason: null,
+      })
+    })
+
+    it('reports the schedule lock for a remote scheduled session even with a stored auto mode', async () => {
+      const run = createScheduleRun(db, {
+        jobId: 1,
+        repoId: null,
+        serverId: 'srv_remote',
+        triggerSource: 'schedule',
+        status: 'running',
+        startedAt: Date.now(),
+        createdAt: Date.now(),
+      })
+      updateScheduleRunMetadata(db, null, 1, run.id, { sessionId: 'ses_scheduled' })
+      setSessionPermissionMode(db, 'ses_scheduled', 'auto', 'srv_remote')
+
+      const local = createFakeSessionPermissionClient({ parents: { ses_scheduled: null } })
+      const remote = createFakeSessionPermissionClient({ parents: { ses_scheduled: null } })
+      const service = createMultiServerService(db, { local, srv_remote: remote }, new SettingsService(db))
+
+      await expect(service.getEffectiveMode('ses_scheduled', 'srv_remote')).resolves.toEqual({
+        sessionId: 'ses_scheduled',
+        rootSessionId: 'ses_scheduled',
+        mode: 'ask',
+        lockedReason: 'schedule',
+      })
+      await expect(service.setMode('ses_scheduled', 'auto', DIRECTORY, 'srv_remote')).rejects.toMatchObject({ status: 409 })
+    })
+
+    it('does not lock a local session that matches only a remote schedule run', async () => {
+      const run = createScheduleRun(db, {
+        jobId: 1,
+        repoId: null,
+        serverId: 'srv_remote',
+        triggerSource: 'schedule',
+        status: 'running',
+        startedAt: Date.now(),
+        createdAt: Date.now(),
+      })
+      updateScheduleRunMetadata(db, null, 1, run.id, { sessionId: 'ses_scheduled' })
+
+      expect(getScheduleRunBySessionId(db, 'ses_scheduled')).toBeNull()
+
+      const local = createFakeSessionPermissionClient({ parents: { ses_scheduled: null } })
+      const service = createMultiServerService(db, { local, srv_remote: createFakeSessionPermissionClient() }, new SettingsService(db))
+
+      await expect(service.getEffectiveMode('ses_scheduled')).resolves.toEqual({
+        sessionId: 'ses_scheduled',
+        rootSessionId: 'ses_scheduled',
+        mode: 'ask',
         lockedReason: null,
       })
     })

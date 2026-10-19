@@ -536,9 +536,13 @@ export function getScheduleRunById(db: Database, repoId: number | null, jobId: n
   return row ? rowToScheduleRun(row) : null
 }
 
-export function getScheduleRunBySessionId(db: Database, sessionId: string): ScheduleRun | null {
-  const stmt = db.prepare('SELECT * FROM schedule_runs WHERE session_id = ? ORDER BY started_at DESC LIMIT 1')
-  const row = stmt.get(sessionId) as ScheduleRunRow | undefined
+export function getScheduleRunBySessionId(
+  db: Database,
+  sessionId: string,
+  serverId: string = LOCAL_OPENCODE_SERVER_ID,
+): ScheduleRun | null {
+  const stmt = db.prepare('SELECT * FROM schedule_runs WHERE server_id = ? AND session_id = ? ORDER BY started_at DESC LIMIT 1')
+  const row = stmt.get(serverId, sessionId) as ScheduleRunRow | undefined
   return row ? rowToScheduleRun(row) : null
 }
 

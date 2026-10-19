@@ -1,6 +1,6 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { Database } from 'bun:sqlite'
-import { buildSchedulePermissionRuleset } from '@opencode-manager/shared/schemas'
+import { buildSchedulePermissionRuleset, LOCAL_OPENCODE_SERVER_ID } from '@opencode-manager/shared/schemas'
 import { ASSISTANT_REPO_ID } from '@opencode-manager/shared/utils'
 import { createRepo, deleteRepo } from '../../src/db/queries'
 import { migrate } from '../../src/db/migration-runner'
@@ -330,6 +330,30 @@ describe('MultiRunService', () => {
 
     expect(error).toBeInstanceOf(MultiRunError)
     expect(error).toMatchObject({ status: 404 })
+  })
+
+  it('rejects a local server target because it stores no repository', async () => {
+    const repoId = readyRepo()
+    const { client, sessionCreate } = createClient()
+    const repoWorkspaces = createRepoWorkspaces()
+    const service = createService(client, repoWorkspaces.service)
+
+    const error = await service
+      .launch({
+        serverId: LOCAL_OPENCODE_SERVER_ID,
+        directory: REPO_DIR,
+        name: 'Sweep',
+        prompt: 'go',
+        models: ['openai/a'],
+        isolate: false,
+      })
+      .catch((caught: unknown) => caught)
+
+    expect(error).toBeInstanceOf(MultiRunError)
+    expect(error).toMatchObject({ status: 400 })
+    expect(sessionCreate).not.toHaveBeenCalled()
+    expect(repoWorkspaces.create).not.toHaveBeenCalled()
+    expect(service.list({ kind: 'repo', repoId })).toHaveLength(0)
   })
 
   it('removes the workspace when discarding an isolated entry', async () => {

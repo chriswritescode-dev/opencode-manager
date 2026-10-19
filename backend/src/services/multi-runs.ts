@@ -88,6 +88,9 @@ function multiRunTargetFromRequest(
   request: Pick<LaunchMultiRunRequest, 'repoId' | 'serverId' | 'directory'>,
 ): MultiRunTarget {
   if (request.serverId !== undefined) {
+    if (request.serverId === LOCAL_OPENCODE_SERVER_ID) {
+      throw new MultiRunError('Local multi-runs must target a repository', 400)
+    }
     if (request.directory === undefined) {
       throw new MultiRunError('A server multi-run needs a directory', 400)
     }

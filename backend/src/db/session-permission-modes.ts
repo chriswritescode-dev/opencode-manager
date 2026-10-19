@@ -4,10 +4,11 @@ import { LOCAL_OPENCODE_SERVER_ID, type SessionPermissionMode } from '@opencode-
 export function ensureSessionPermissionModesTable(db: Database): void {
   db.run(`
     CREATE TABLE IF NOT EXISTS session_permission_modes (
-      session_id TEXT PRIMARY KEY,
+      session_id TEXT NOT NULL,
       server_id TEXT NOT NULL DEFAULT 'local',
       mode TEXT NOT NULL CHECK(mode IN ('ask','auto')),
-      updated_at INTEGER NOT NULL
+      updated_at INTEGER NOT NULL,
+      PRIMARY KEY (server_id, session_id)
     )
   `)
 }
@@ -32,8 +33,7 @@ export function setSessionPermissionMode(
   db.prepare(`
     INSERT INTO session_permission_modes(server_id, session_id, mode, updated_at)
     VALUES(?,?,?,?)
-    ON CONFLICT(session_id) DO UPDATE SET
-      server_id=excluded.server_id,
+    ON CONFLICT(server_id, session_id) DO UPDATE SET
       mode=excluded.mode,
       updated_at=excluded.updated_at
   `).run(serverId, sessionId, mode, Date.now())

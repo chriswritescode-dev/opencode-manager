@@ -209,7 +209,7 @@ export class SessionPermissionModeService {
     rootSessionId: string,
     serverId: string,
   ): SessionLockReason | null {
-    if (serverId === LOCAL_OPENCODE_SERVER_ID && getScheduleRunBySessionId(this.db, rootSessionId)) {
+    if (getScheduleRunBySessionId(this.db, rootSessionId, serverId)) {
       return 'schedule'
     }
 
