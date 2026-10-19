@@ -1,6 +1,7 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 import { createOpenCodeServerRoutes } from '../../src/routes/opencode-servers'
 import {
+  OpenCodeServerCredentialsRequiredError,
   OpenCodeServerNotFoundError,
   OpenCodeServerPairingError,
   type OpenCodeServerRegistry,
@@ -144,6 +145,21 @@ describe('opencode server routes', () => {
     expect(registry.update).toHaveBeenCalledWith('srv_1', { name: 'Renamed' })
   })
 
+  it('returns 400 when an origin change would reuse the stored password', async () => {
+    registry.update.mockRejectedValue(new OpenCodeServerCredentialsRequiredError())
+
+    const response = await app.request('/srv_1', {
+      method: 'PATCH',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ baseUrl: 'https://other-host.example.com' }),
+    })
+
+    expect(response.status).toBe(400)
+    expect(await response.json()).toEqual({
+      error: 'Changing the server address requires re-entering the password or pairing again',
+    })
+  })
+
   it('returns 404 when updating an unknown server', async () => {
     registry.update.mockRejectedValue(new OpenCodeServerNotFoundError('srv_missing'))
 
@@ -195,6 +211,36 @@ describe('opencode server routes', () => {
     expect(response.status).toBe(200)
     expect(await response.json()).toEqual(TEST_RESULT)
     expect(registry.test).toHaveBeenCalledWith({ baseUrl: 'https://studio.example.com', username: 'opencode' })
+  })
+
+  it('tests a draft server against a saved server id', async () => {
+    registry.test.mockResolvedValue(TEST_RESULT)
+
+    const response = await app.request('/test', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ baseUrl: 'https://studio.example.com/opencode', serverId: 'srv_1' }),
+    })
+
+    expect(response.status).toBe(200)
+    expect(registry.test).toHaveBeenCalledWith({
+      baseUrl: 'https://studio.example.com/opencode',
+      username: 'opencode',
+      serverId: 'srv_1',
+    })
+  })
+
+  it('returns 404 when testing a draft against an unknown server id', async () => {
+    registry.test.mockRejectedValue(new OpenCodeServerNotFoundError('srv_missing'))
+
+    const response = await app.request('/test', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ baseUrl: 'https://studio.example.com', serverId: 'srv_missing' }),
+    })
+
+    expect(response.status).toBe(404)
+    expect(await response.json()).toEqual({ error: 'OpenCode server not found: srv_missing' })
   })
 
   it('returns the remote event statuses from the provider', async () => {

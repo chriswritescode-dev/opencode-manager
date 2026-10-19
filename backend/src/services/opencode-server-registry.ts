@@ -16,7 +16,7 @@ import {
   decryptOpenCodePairingCredentials,
   isSupportedOpenCodeVersion,
 } from '@opencode-manager/shared/opencode'
-import { trimUrlTrailingSlashes } from '@opencode-manager/shared/utils'
+import { haveSameUrlOrigin, trimUrlTrailingSlashes } from '@opencode-manager/shared/utils'
 import {
   deleteOpenCodeServer,
   getOpenCodeServer,
@@ -79,6 +79,22 @@ export class OpenCodeServerPairingError extends OpenCodeServerError {
   }
 }
 
+/** Raised when a server address change would reuse stored credentials on a different origin. */
+export class OpenCodeServerCredentialsRequiredError extends OpenCodeServerError {
+  constructor() {
+    super('Changing the server address requires re-entering the password or pairing again', 400)
+    this.name = 'OpenCodeServerCredentialsRequiredError'
+  }
+}
+
+function reusesStoredPasswordOnNewOrigin(server: OpenCodeServer, request: UpdateServerInput): boolean {
+  if (request.baseUrl === undefined) return false
+  if (!server.hasPassword) return false
+  if (request.pairing) return false
+  if (request.password !== undefined) return false
+  return !haveSameUrlOrigin(server.baseUrl, request.baseUrl)
+}
+
 export class OpenCodeServerRegistry {
   private readonly clients = new Map<string, OpenCodeClient>()
   private readonly listeners = new Set<OpenCodeServerChangeListener>()
@@ -113,7 +129,11 @@ export class OpenCodeServerRegistry {
   }
 
   async update(serverId: string, request: UpdateServerInput): Promise<OpenCodeServer> {
-    this.requireServer(serverId)
+    const existing = this.requireServer(serverId)
+    if (reusesStoredPasswordOnNewOrigin(existing, request)) {
+      throw new OpenCodeServerCredentialsRequiredError()
+    }
+
     const pairing = request.pairing ? await this.redeemPairing(request.pairing) : null
 
     const server = updateOpenCodeServer(this.db, serverId, {
@@ -229,7 +249,7 @@ export class OpenCodeServerRegistry {
   }
 
   private resolveTestTarget(input: TestServerSource): TestTarget {
-    if ('serverId' in input) {
+    if (!('baseUrl' in input)) {
       const server = this.requireServer(input.serverId)
       return {
         baseUrl: server.baseUrl,
@@ -238,10 +258,22 @@ export class OpenCodeServerRegistry {
       }
     }
 
+    const baseUrl = trimUrlTrailingSlashes(input.baseUrl)
+    if (input.password !== undefined || input.serverId === undefined) {
+      return {
+        baseUrl,
+        username: input.username,
+        password: input.password ?? null,
+      }
+    }
+
+    const server = this.requireServer(input.serverId)
     return {
-      baseUrl: trimUrlTrailingSlashes(input.baseUrl),
+      baseUrl,
       username: input.username,
-      password: input.password ?? null,
+      password: haveSameUrlOrigin(server.baseUrl, baseUrl)
+        ? readOpenCodeServerPassword(this.db, input.serverId)
+        : null,
     }
   }
 

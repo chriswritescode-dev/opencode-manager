@@ -28,7 +28,29 @@ export interface PendingReplayEvents {
   forms: V2Event[]
 }
 
+export interface SessionStatusReplayPlan {
+  idle: Array<{ sessionID: string; directory: string }>
+  busy: string[]
+}
+
 export type EventSourceInit = ConstructorParameters<typeof EventSource>[1]
+
+/**
+ * Partitions tracked sessions into those that must be replayed as idle and the
+ * active sessions that must be replayed as busy.
+ */
+export function planSessionStatusReplay(
+  active: Record<string, unknown>,
+  tracked: ReadonlyMap<string, string>,
+): SessionStatusReplayPlan {
+  const busy = Object.keys(active ?? {})
+  const busySet = new Set(busy)
+  const idle: Array<{ sessionID: string; directory: string }> = []
+  for (const [sessionID, directory] of tracked) {
+    if (!busySet.has(sessionID)) idle.push({ sessionID, directory })
+  }
+  return { idle, busy }
+}
 
 export function createReplayEventBuilder(idPrefix: string): ReplayEventBuilder {
   let count = 0

@@ -107,16 +107,13 @@ export function OpenCodeServersSettings() {
     }
   }
 
-  const handleTest = async (values: OpenCodeServerFormValues) => {
-    if (editingServer && !values.password) {
-      return testByIdAsync(editingServer.id)
-    }
-    return testAsync({
+  const handleTest = async (values: OpenCodeServerFormValues) =>
+    testAsync({
       baseUrl: values.baseUrl,
       username: values.username,
       password: values.password || undefined,
+      serverId: editingServer && !values.password && !values.clearPassword ? editingServer.id : undefined,
     })
-  }
 
   const toggleEnabled = async (server: OpenCodeServer, enabled: boolean) => {
     try {

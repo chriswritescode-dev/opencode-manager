@@ -6,6 +6,7 @@ import { migrate } from '../db/migration-runner'
 import { allMigrations } from '../db/migrations'
 import { decryptSecret } from '../utils/crypto'
 import {
+  OpenCodeServerCredentialsRequiredError,
   OpenCodeServerError,
   OpenCodeServerNotFoundError,
   OpenCodeServerPairingError,
@@ -255,6 +256,107 @@ describe('OpenCodeServerRegistry', () => {
         OpenCodeServerNotFoundError,
       )
     })
+
+    it('rejects an origin change that would reuse the stored password', async () => {
+      const server = await createServer({
+        name: 'Studio',
+        baseUrl: 'https://studio.example.com',
+        password: 'super-secret',
+      })
+
+      const error = await registry
+        .update(server.id, { baseUrl: 'https://other-host.example.com' })
+        .catch((caught: unknown) => caught)
+
+      expect(error).toBeInstanceOf(OpenCodeServerCredentialsRequiredError)
+      expect((error as { status?: number }).status).toBe(400)
+      expect((error as Error).message).toBe(
+        'Changing the server address requires re-entering the password or pairing again',
+      )
+      expect(decryptSecret(readStoredSecret(db, server.id)!.value)).toBe('super-secret')
+      expect(registry.get(server.id)?.baseUrl).toBe('https://studio.example.com')
+    })
+
+    it('allows a path change on the same origin without new credentials', async () => {
+      const server = await createServer({
+        name: 'Studio',
+        baseUrl: 'https://studio.example.com',
+        password: 'super-secret',
+      })
+
+      const updated = await registry.update(server.id, { baseUrl: 'https://studio.example.com/opencode/' })
+
+      expect(updated.baseUrl).toBe('https://studio.example.com/opencode')
+      expect(updated.hasPassword).toBe(true)
+      expect(decryptSecret(readStoredSecret(db, server.id)!.value)).toBe('super-secret')
+    })
+
+    it('allows an origin change with a new password', async () => {
+      const server = await createServer({
+        name: 'Studio',
+        baseUrl: 'https://studio.example.com',
+        password: 'super-secret',
+      })
+
+      const updated = await registry.update(server.id, {
+        baseUrl: 'https://other-host.example.com',
+        password: 'next-secret',
+      })
+
+      expect(updated.baseUrl).toBe('https://other-host.example.com')
+      expect(decryptSecret(readStoredSecret(db, server.id)!.value)).toBe('next-secret')
+    })
+
+    it('allows an origin change with an explicit password clear', async () => {
+      const server = await createServer({
+        name: 'Studio',
+        baseUrl: 'https://studio.example.com',
+        password: 'super-secret',
+      })
+
+      const updated = await registry.update(server.id, {
+        baseUrl: 'https://other-host.example.com',
+        password: null,
+      })
+
+      expect(updated.baseUrl).toBe('https://other-host.example.com')
+      expect(updated.hasPassword).toBe(false)
+      expect(readStoredSecret(db, server.id)).toBeUndefined()
+    })
+
+    it('allows an origin change when the server has no stored password', async () => {
+      const server = await createServer({ name: 'Open', baseUrl: 'https://studio.example.com' })
+
+      const updated = await registry.update(server.id, { baseUrl: 'https://other-host.example.com' })
+
+      expect(updated.baseUrl).toBe('https://other-host.example.com')
+      expect(updated.hasPassword).toBe(false)
+    })
+
+    it('allows an origin change with pairing credentials', async () => {
+      fetchFn.mockImplementationOnce(async (_url, init) => {
+        const { nonce } = JSON.parse(String(init?.body)) as { nonce: string }
+        return jsonResponse(await encryptOpenCodePairingCredentials({
+          code: PAIR_CODE,
+          nonce,
+          credentials: { username: 'alice', password: 'paired-pass' },
+        }))
+      })
+      const server = await createServer({
+        name: 'Studio',
+        baseUrl: 'https://studio.example.com',
+        password: 'super-secret',
+      })
+
+      const updated = await registry.update(server.id, {
+        baseUrl: 'https://other-host.example.com',
+        pairing: { pairUrl: PAIR_URL, code: PAIR_CODE },
+      })
+
+      expect(updated.baseUrl).toBe('https://other-host.example.com')
+      expect(updated.username).toBe('alice')
+      expect(decryptSecret(readStoredSecret(db, server.id)!.value)).toBe('paired-pass')
+    })
   })
 
   describe('delete', () => {
@@ -383,6 +485,76 @@ describe('OpenCodeServerRegistry', () => {
       expect(result.ok).toBe(true)
       const headers = new Headers(fetchFn.mock.calls[0]?.[1]?.headers)
       expect(headers.get('authorization')).toBe(`Basic ${btoa('alice:super-secret')}`)
+    })
+
+    it('reuses the stored password for a draft on the same origin', async () => {
+      const server = await createServer({
+        name: 'Studio',
+        baseUrl: 'https://studio.example.com',
+        password: 'super-secret',
+      })
+      fetchFn.mockResolvedValueOnce(jsonResponse({ version: '2.0.15' }))
+
+      const result = await registry.test({
+        baseUrl: 'https://studio.example.com/opencode',
+        username: 'alice',
+        serverId: server.id,
+      })
+
+      expect(result.ok).toBe(true)
+      expect(fetchFn.mock.calls[0]?.[0]).toBe('https://studio.example.com/opencode/api/info')
+      const headers = new Headers(fetchFn.mock.calls[0]?.[1]?.headers)
+      expect(headers.get('authorization')).toBe(`Basic ${btoa('alice:super-secret')}`)
+    })
+
+    it('does not send the stored password to a draft on a different origin', async () => {
+      const server = await createServer({
+        name: 'Studio',
+        baseUrl: 'https://studio.example.com',
+        password: 'super-secret',
+      })
+      fetchFn.mockResolvedValueOnce(jsonResponse({ version: '2.0.15' }))
+
+      const result = await registry.test({
+        baseUrl: 'https://relocated.example.com',
+        username: 'alice',
+        serverId: server.id,
+      })
+
+      expect(result.ok).toBe(true)
+      expect(fetchFn.mock.calls[0]?.[0]).toBe('https://relocated.example.com/api/info')
+      const headers = new Headers(fetchFn.mock.calls[0]?.[1]?.headers)
+      expect(headers.get('authorization')).toBeNull()
+    })
+
+    it('prefers an explicit draft password over the stored one', async () => {
+      const server = await createServer({
+        name: 'Studio',
+        baseUrl: 'https://studio.example.com',
+        password: 'super-secret',
+      })
+      fetchFn.mockResolvedValueOnce(jsonResponse({ version: '2.0.15' }))
+
+      await registry.test({
+        baseUrl: 'https://studio.example.com',
+        username: 'alice',
+        password: 'draft-secret',
+        serverId: server.id,
+      })
+
+      const headers = new Headers(fetchFn.mock.calls[0]?.[1]?.headers)
+      expect(headers.get('authorization')).toBe(`Basic ${btoa('alice:draft-secret')}`)
+    })
+
+    it('throws a not-found error for an unknown server id on a draft', async () => {
+      await expect(
+        registry.test({
+          baseUrl: 'https://studio.example.com',
+          username: 'opencode',
+          serverId: 'srv_missing',
+        }),
+      ).rejects.toBeInstanceOf(OpenCodeServerNotFoundError)
+      expect(fetchFn).not.toHaveBeenCalled()
     })
 
     it('reports a failed request without throwing', async () => {

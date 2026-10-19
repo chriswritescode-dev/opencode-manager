@@ -51,10 +51,21 @@ export function parseServerProjectRoute(
   return { serverId: decodeURIComponent(match[1]), directory };
 }
 
+function decodePathSegment(segment: string): string | null {
+  try {
+    return decodeURIComponent(segment);
+  } catch {
+    return null;
+  }
+}
+
 export function parseServerSessionRoute(pathname: string): { serverId: string; sessionId: string } | null {
   const match = /^\/servers\/([^/]+)\/sessions\/([^/]+)$/.exec(pathname);
   if (!match) return null;
-  return { serverId: decodeURIComponent(match[1]), sessionId: decodeURIComponent(match[2]) };
+  const serverId = decodePathSegment(match[1]);
+  const sessionId = decodePathSegment(match[2]);
+  if (serverId === null || sessionId === null) return null;
+  return { serverId, sessionId };
 }
 
 export function parseRepoRoute(pathname: string): { repoId: number | null; section: string | null; sessionId: string | null } {
