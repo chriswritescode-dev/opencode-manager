@@ -1,4 +1,5 @@
 import { useContextUsage } from '@/hooks/useContextUsage'
+import { useMobile } from '@/hooks/useMobile'
 
 interface ContextUsageIndicatorProps {
   directory?: string
@@ -22,6 +23,7 @@ export function ContextUsageIndicator({
   revertMessageID,
 }: ContextUsageIndicatorProps) {
   const { usage, isLoading } = useContextUsage(sessionID, directory, revertMessageID)
+  const isMobile = useMobile()
 
   if (isLoading) {
     return (
@@ -43,14 +45,18 @@ export function ContextUsageIndicator({
     return null
   }
 
-  const tokenText = usage.usagePercentage === null
+  const compactText = usage.usagePercentage === null
+    ? usage.totalTokens.toLocaleString()
+    : `${usage.usagePercentage}%`
+
+  const fullText = usage.usagePercentage === null
     ? usage.totalTokens.toLocaleString()
     : `${usage.totalTokens.toLocaleString()} (${usage.usagePercentage}%)`
 
   return (
     <div className="flex items-center gap-2">
       <span className={`text-xs font-medium whitespace-nowrap ${getUsageTextColor(usage.usagePercentage ?? 0)}`}>
-        {tokenText}
+        {isMobile ? compactText : fullText}
       </span>
     </div>
   )

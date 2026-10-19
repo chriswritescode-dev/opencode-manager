@@ -4,27 +4,10 @@ import { CheckCircle2, Inbox, XCircle } from 'lucide-react'
 import { formatDistanceToNow } from 'date-fns'
 import { Button } from '@/components/ui/button'
 import { DropdownMenu, DropdownMenuContent, DropdownMenuTrigger } from '@/components/ui/dropdown-menu'
-import { BottomSheet, BottomSheetContent, BottomSheetHeader } from '@/components/ui/bottom-sheet'
-import { useMobile } from '@/hooks/useMobile'
+import { ScheduleReportsBadge } from '@/components/notifications/ScheduleReportsBadge'
 import { useMarkAllScheduleRunsViewed, useUnreadScheduleRuns } from '@/hooks/useSchedules'
 import { cn } from '@/lib/utils'
 import type { UnreadScheduleRun } from '@/api/schedules'
-
-function ScheduleReportsCount({ total, failed }: { total: number; failed: number }) {
-  if (total <= 0) return null
-
-  return (
-    <span
-      data-testid="schedule-reports-count"
-      className={cn(
-        'absolute -top-1 -right-1 min-w-4 rounded-full px-1 text-center text-[10px] font-medium leading-4 text-primary-foreground',
-        failed > 0 ? 'bg-destructive' : 'bg-primary',
-      )}
-    >
-      {total > 9 ? '9+' : total}
-    </span>
-  )
-}
 
 function ScheduleReportRow({ run, rowClassName, onClick }: { run: UnreadScheduleRun; rowClassName?: string; onClick: () => void }) {
   const failed = run.status === 'failed'
@@ -66,9 +49,19 @@ interface ScheduleReportsListProps {
   markAllPending: boolean
   onNavigate?: () => void
   showTitle?: boolean
+  maxHeightClass?: string
 }
 
-function ScheduleReportsList({ runs, total, rowClassName, onMarkAllRead, markAllPending, onNavigate, showTitle = true }: ScheduleReportsListProps) {
+export function ScheduleReportsList({
+  runs,
+  total,
+  rowClassName,
+  onMarkAllRead,
+  markAllPending,
+  onNavigate,
+  showTitle = true,
+  maxHeightClass = 'max-h-[60vh]',
+}: ScheduleReportsListProps) {
   const navigate = useNavigate()
 
   const openRun = (runId: number) => {
@@ -99,7 +92,7 @@ function ScheduleReportsList({ runs, total, rowClassName, onMarkAllRead, markAll
           <p className="text-xs text-muted-foreground">New scheduled reports will show up here.</p>
         </div>
       ) : (
-        <div className="max-h-[60vh] overflow-y-auto">
+        <div className={cn('overflow-y-auto', maxHeightClass)}>
           {runs.map((run) => (
             <ScheduleReportRow key={run.id} run={run} rowClassName={rowClassName} onClick={() => openRun(run.id)} />
           ))}
@@ -117,7 +110,6 @@ function ScheduleReportsList({ runs, total, rowClassName, onMarkAllRead, markAll
 }
 
 export function ScheduleReportsBell() {
-  const isMobile = useMobile()
   const { data } = useUnreadScheduleRuns()
   const markAllViewed = useMarkAllScheduleRunsViewed()
   const [open, setOpen] = useState(false)
@@ -132,44 +124,19 @@ export function ScheduleReportsBell() {
 
   if (total === 0 && !open) return null
 
-  const trigger = (
-    <Button
-      variant="ghost"
-      size="icon"
-      aria-label={`Reports, ${total} unread`}
-      onClick={isMobile ? () => setOpen(true) : undefined}
-      className="relative h-10 w-10 text-muted-foreground transition-all duration-200 hover:bg-accent hover:text-foreground sm:h-8 sm:w-8"
-    >
-      <Inbox className="h-5 w-5 sm:h-4 sm:w-4" />
-      <ScheduleReportsCount total={total} failed={failed} />
-    </Button>
-  )
-
-  if (isMobile) {
-    return (
-      <>
-        {trigger}
-        <BottomSheet isOpen={open} onClose={() => setOpen(false)} ariaLabel="Reports">
-          <BottomSheetHeader title="Reports" />
-          <BottomSheetContent className="px-0 pt-0">
-            <ScheduleReportsList
-              runs={runs}
-              total={total}
-              rowClassName="py-3"
-              onMarkAllRead={markAllRead}
-              markAllPending={markAllViewed.isPending}
-              onNavigate={() => setOpen(false)}
-              showTitle={false}
-            />
-          </BottomSheetContent>
-        </BottomSheet>
-      </>
-    )
-  }
-
   return (
     <DropdownMenu open={open} onOpenChange={setOpen}>
-      <DropdownMenuTrigger asChild>{trigger}</DropdownMenuTrigger>
+      <DropdownMenuTrigger asChild>
+        <Button
+          variant="ghost"
+          size="icon"
+          aria-label={`Reports, ${total} unread`}
+          className="relative hidden h-10 w-10 text-muted-foreground transition-all duration-200 hover:bg-accent hover:text-foreground sm:h-8 sm:w-8 md:inline-flex"
+        >
+          <Inbox className="h-5 w-5 sm:h-4 sm:w-4" />
+          <ScheduleReportsBadge total={total} failed={failed} />
+        </Button>
+      </DropdownMenuTrigger>
       <DropdownMenuContent align="end" className="w-96 p-0">
         <ScheduleReportsList
           runs={runs}
