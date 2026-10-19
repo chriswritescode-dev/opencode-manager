@@ -53,6 +53,7 @@ export const TestOpenCodeServerRequestSchema = z.object({
   baseUrl: HttpUrlSchema,
   username: z.string().trim().min(1).max(100).default(OPENCODE_SERVER_USERNAME),
   password: z.string().max(1024).optional(),
+  serverId: z.string().trim().min(1).optional(),
 });
 
 export const OpenCodeServerTestResultSchema = z.object({

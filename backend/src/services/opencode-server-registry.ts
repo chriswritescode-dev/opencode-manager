@@ -249,7 +249,7 @@ export class OpenCodeServerRegistry {
   }
 
   private resolveTestTarget(input: TestServerSource): TestTarget {
-    if ('serverId' in input) {
+    if (!('baseUrl' in input)) {
       const server = this.requireServer(input.serverId)
       return {
         baseUrl: server.baseUrl,
@@ -258,10 +258,22 @@ export class OpenCodeServerRegistry {
       }
     }
 
+    const baseUrl = trimUrlTrailingSlashes(input.baseUrl)
+    if (input.password !== undefined || input.serverId === undefined) {
+      return {
+        baseUrl,
+        username: input.username,
+        password: input.password ?? null,
+      }
+    }
+
+    const server = this.requireServer(input.serverId)
     return {
-      baseUrl: trimUrlTrailingSlashes(input.baseUrl),
+      baseUrl,
       username: input.username,
-      password: input.password ?? null,
+      password: haveSameUrlOrigin(server.baseUrl, baseUrl)
+        ? readOpenCodeServerPassword(this.db, input.serverId)
+        : null,
     }
   }
 

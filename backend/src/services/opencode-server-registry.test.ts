@@ -487,6 +487,76 @@ describe('OpenCodeServerRegistry', () => {
       expect(headers.get('authorization')).toBe(`Basic ${btoa('alice:super-secret')}`)
     })
 
+    it('reuses the stored password for a draft on the same origin', async () => {
+      const server = await createServer({
+        name: 'Studio',
+        baseUrl: 'https://studio.example.com',
+        password: 'super-secret',
+      })
+      fetchFn.mockResolvedValueOnce(jsonResponse({ version: '2.0.15' }))
+
+      const result = await registry.test({
+        baseUrl: 'https://studio.example.com/opencode',
+        username: 'alice',
+        serverId: server.id,
+      })
+
+      expect(result.ok).toBe(true)
+      expect(fetchFn.mock.calls[0]?.[0]).toBe('https://studio.example.com/opencode/api/info')
+      const headers = new Headers(fetchFn.mock.calls[0]?.[1]?.headers)
+      expect(headers.get('authorization')).toBe(`Basic ${btoa('alice:super-secret')}`)
+    })
+
+    it('does not send the stored password to a draft on a different origin', async () => {
+      const server = await createServer({
+        name: 'Studio',
+        baseUrl: 'https://studio.example.com',
+        password: 'super-secret',
+      })
+      fetchFn.mockResolvedValueOnce(jsonResponse({ version: '2.0.15' }))
+
+      const result = await registry.test({
+        baseUrl: 'https://relocated.example.com',
+        username: 'alice',
+        serverId: server.id,
+      })
+
+      expect(result.ok).toBe(true)
+      expect(fetchFn.mock.calls[0]?.[0]).toBe('https://relocated.example.com/api/info')
+      const headers = new Headers(fetchFn.mock.calls[0]?.[1]?.headers)
+      expect(headers.get('authorization')).toBeNull()
+    })
+
+    it('prefers an explicit draft password over the stored one', async () => {
+      const server = await createServer({
+        name: 'Studio',
+        baseUrl: 'https://studio.example.com',
+        password: 'super-secret',
+      })
+      fetchFn.mockResolvedValueOnce(jsonResponse({ version: '2.0.15' }))
+
+      await registry.test({
+        baseUrl: 'https://studio.example.com',
+        username: 'alice',
+        password: 'draft-secret',
+        serverId: server.id,
+      })
+
+      const headers = new Headers(fetchFn.mock.calls[0]?.[1]?.headers)
+      expect(headers.get('authorization')).toBe(`Basic ${btoa('alice:draft-secret')}`)
+    })
+
+    it('throws a not-found error for an unknown server id on a draft', async () => {
+      await expect(
+        registry.test({
+          baseUrl: 'https://studio.example.com',
+          username: 'opencode',
+          serverId: 'srv_missing',
+        }),
+      ).rejects.toBeInstanceOf(OpenCodeServerNotFoundError)
+      expect(fetchFn).not.toHaveBeenCalled()
+    })
+
     it('reports a failed request without throwing', async () => {
       fetchFn.mockResolvedValueOnce(new Response(null, { status: 500 }))
 

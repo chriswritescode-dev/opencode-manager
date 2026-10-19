@@ -6,7 +6,6 @@ import type {
   OpenCodeServerTestResult,
   UpdateOpenCodeServerRequest,
 } from '@opencode-manager/shared/schemas'
-import { trimUrlTrailingSlashes } from '@opencode-manager/shared/utils'
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
 import { Switch } from '@/components/ui/switch'
@@ -108,23 +107,13 @@ export function OpenCodeServersSettings() {
     }
   }
 
-  const handleTest = async (values: OpenCodeServerFormValues) => {
-    const testsSavedServer =
-      editingServer !== null &&
-      trimUrlTrailingSlashes(values.baseUrl) === editingServer.baseUrl &&
-      values.username === editingServer.username &&
-      !values.password &&
-      !values.clearPassword &&
-      !values.pairing
-    if (editingServer && testsSavedServer) {
-      return testByIdAsync(editingServer.id)
-    }
-    return testAsync({
+  const handleTest = async (values: OpenCodeServerFormValues) =>
+    testAsync({
       baseUrl: values.baseUrl,
       username: values.username,
       password: values.password || undefined,
+      serverId: editingServer && !values.password && !values.clearPassword ? editingServer.id : undefined,
     })
-  }
 
   const toggleEnabled = async (server: OpenCodeServer, enabled: boolean) => {
     try {

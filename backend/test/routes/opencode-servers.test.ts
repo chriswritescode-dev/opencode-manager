@@ -213,6 +213,36 @@ describe('opencode server routes', () => {
     expect(registry.test).toHaveBeenCalledWith({ baseUrl: 'https://studio.example.com', username: 'opencode' })
   })
 
+  it('tests a draft server against a saved server id', async () => {
+    registry.test.mockResolvedValue(TEST_RESULT)
+
+    const response = await app.request('/test', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ baseUrl: 'https://studio.example.com/opencode', serverId: 'srv_1' }),
+    })
+
+    expect(response.status).toBe(200)
+    expect(registry.test).toHaveBeenCalledWith({
+      baseUrl: 'https://studio.example.com/opencode',
+      username: 'opencode',
+      serverId: 'srv_1',
+    })
+  })
+
+  it('returns 404 when testing a draft against an unknown server id', async () => {
+    registry.test.mockRejectedValue(new OpenCodeServerNotFoundError('srv_missing'))
+
+    const response = await app.request('/test', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ baseUrl: 'https://studio.example.com', serverId: 'srv_missing' }),
+    })
+
+    expect(response.status).toBe(404)
+    expect(await response.json()).toEqual({ error: 'OpenCode server not found: srv_missing' })
+  })
+
   it('returns the remote event statuses from the provider', async () => {
     const statuses = [{ serverId: 'srv_1', connected: true, version: '2.0.15', error: null }]
     const statusApp = createOpenCodeServerRoutes(

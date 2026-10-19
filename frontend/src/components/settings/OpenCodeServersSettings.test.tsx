@@ -67,16 +67,21 @@ describe('OpenCodeServersSettings', () => {
     mocks.testByIdAsync.mockResolvedValue(testResult)
   })
 
-  it('tests the saved server when the edited target and credentials are unchanged', async () => {
+  it('tests the draft with the saved server id when the password is left blank', async () => {
     const user = await openEditDialog()
 
     await user.click(screen.getByRole('button', { name: 'Test connection' }))
 
-    expect(mocks.testByIdAsync).toHaveBeenCalledWith('srv_1')
-    expect(mocks.testAsync).not.toHaveBeenCalled()
+    expect(mocks.testAsync).toHaveBeenCalledWith({
+      baseUrl: 'https://office.example.com',
+      username: 'opencode',
+      password: undefined,
+      serverId: 'srv_1',
+    })
+    expect(mocks.testByIdAsync).not.toHaveBeenCalled()
   })
 
-  it('tests the edited address when the base URL changes', async () => {
+  it('tests the edited address with the saved server id', async () => {
     const user = await openEditDialog()
 
     await user.clear(screen.getByLabelText('URL'))
@@ -87,11 +92,12 @@ describe('OpenCodeServersSettings', () => {
       baseUrl: 'https://relocated.example.com',
       username: 'opencode',
       password: undefined,
+      serverId: 'srv_1',
     })
     expect(mocks.testByIdAsync).not.toHaveBeenCalled()
   })
 
-  it('tests the edited address when the stored password is being cleared', async () => {
+  it('tests the edited address without the saved server id when the stored password is being cleared', async () => {
     const user = await openEditDialog()
 
     await user.click(screen.getByLabelText('Clear stored password'))
@@ -101,6 +107,7 @@ describe('OpenCodeServersSettings', () => {
       baseUrl: 'https://office.example.com',
       username: 'opencode',
       password: undefined,
+      serverId: undefined,
     })
     expect(mocks.testByIdAsync).not.toHaveBeenCalled()
   })
