@@ -1,8 +1,11 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest'
-import { render, screen, waitFor, act } from '@testing-library/react'
+import { render, screen, waitFor, act, fireEvent } from '@testing-library/react'
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
 import { MemoryRouter, Route, Routes } from 'react-router-dom'
+import { FetchError } from '@/api/fetchWrapper'
 import { OpenCodeServerProvider } from '@/contexts/OpenCodeServerContext'
+import { SwipeNavigationProvider, useSwipeNavigation } from '@/contexts/SwipeNavigationContext'
+import { getServerProjectPath } from '@/lib/navigation'
 import { LocationCatcher } from '@/test/test-utils'
 import { MessageThread } from '@/components/message/MessageThread'
 import { ContextUsageIndicator } from '@/components/session/ContextUsageIndicator'
@@ -183,23 +186,36 @@ function createQueryClient() {
   return new QueryClient({ defaultOptions: { queries: { retry: false } } })
 }
 
+type SwipeNavigation = ReturnType<typeof useSwipeNavigation>
+
+function SwipeNavigationProbe({ captured }: { captured: { current: SwipeNavigation } }) {
+  captured.current = useSwipeNavigation()
+  return null
+}
+
 function renderRemoteSession(sessionId = 'ses_remote') {
   const capturedPathname = { current: '' }
   const capturedSearch = { current: '' }
+  const capturedSwipeNavigation = { current: null as SwipeNavigation }
   const rendered = render(
     <OpenCodeServerProvider serverId="srv_kitchen">
-      <QueryClientProvider client={createQueryClient()}>
-        <MemoryRouter initialEntries={[`/servers/srv_kitchen/sessions/${sessionId}`]}>
-          <LocationCatcher capturedSearch={capturedSearch} capturedPathname={capturedPathname} />
-          <Routes>
-            <Route path="/servers/:serverId/sessions/:sessionId" element={<SessionDetail />} />
-          </Routes>
-        </MemoryRouter>
-      </QueryClientProvider>
+      <SwipeNavigationProvider>
+        <QueryClientProvider client={createQueryClient()}>
+          <MemoryRouter initialEntries={[`/servers/srv_kitchen/sessions/${sessionId}`]}>
+            <LocationCatcher capturedSearch={capturedSearch} capturedPathname={capturedPathname} />
+            <SwipeNavigationProbe captured={capturedSwipeNavigation} />
+            <Routes>
+              <Route path="/" element={null} />
+              <Route path="/servers/:serverId/projects" element={null} />
+              <Route path="/servers/:serverId/sessions/:sessionId" element={<SessionDetail />} />
+            </Routes>
+          </MemoryRouter>
+        </QueryClientProvider>
+      </SwipeNavigationProvider>
     </OpenCodeServerProvider>,
   )
 
-  return { ...rendered, capturedPathname }
+  return { ...rendered, capturedPathname, capturedSearch, capturedSwipeNavigation }
 }
 
 describe('SessionDetail remote server mode', () => {
@@ -269,6 +285,47 @@ describe('SessionDetail remote server mode', () => {
       expect(screen.getByText('Kitchen')).toHaveClass('text-info')
     })
     expect(screen.getByText('Kitchen').parentElement).toHaveTextContent('Kitchen · app')
+  })
+
+  it('returns to the project page from the header back button', async () => {
+    const { capturedPathname, capturedSearch } = renderRemoteSession()
+
+    await waitFor(() => {
+      expect(screen.getByText('Kitchen').parentElement).toHaveTextContent('Kitchen · app')
+    })
+
+    fireEvent.click(screen.getByRole('button', { name: 'Go back' }))
+
+    expect(capturedPathname.current).toBe('/servers/srv_kitchen/projects')
+    expect(capturedSearch.current).toBe('?directory=%2Fhome%2Fme%2Fapp')
+  })
+
+  it('registers the remote project page as the swipe-back target once the directory resolves', async () => {
+    const { capturedSwipeNavigation, unmount } = renderRemoteSession()
+
+    await waitFor(() => {
+      expect(capturedSwipeNavigation.current?.backTarget()).toBe(
+        getServerProjectPath('srv_kitchen', '/home/me/app'),
+      )
+    })
+
+    unmount()
+
+    expect(capturedSwipeNavigation.current?.backTarget()).toBeNull()
+  })
+
+  it('falls back to the projects list when the session is not found', async () => {
+    mocks.useSession.mockReturnValue({
+      data: undefined,
+      isLoading: false,
+      error: new FetchError('Session not found', 404),
+    })
+
+    const { capturedPathname } = renderRemoteSession()
+
+    fireEvent.click(await screen.findByRole('button', { name: 'Back to projects' }))
+
+    expect(capturedPathname.current).toBe('/')
   })
 
   it('uses the session directory as the only directory source', async () => {

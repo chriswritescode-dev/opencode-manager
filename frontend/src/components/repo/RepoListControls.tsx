@@ -1,7 +1,7 @@
 import { useState } from "react";
-import { Search, SlidersHorizontal, Trash2, X } from "lucide-react";
+import { SlidersHorizontal, Trash2, X } from "lucide-react";
 import { Button } from "@/components/ui/button";
-import { Input } from "@/components/ui/input";
+import { RepoSearchInput } from "./RepoSearchInput";
 import {
   DropdownMenu,
   DropdownMenuContent,
@@ -120,17 +120,7 @@ export function RepoListControls({
   return (
     <div className="px-2 md:px-0 space-y-2">
       <div className="flex items-center gap-2">
-        <div className="relative flex-1">
-          <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-muted-foreground" />
-          <Input
-            value={searchQuery}
-            onChange={(e) => onSearchChange(e.target.value)}
-            placeholder="Search repositories..."
-            className="pl-9 h-9"
-            autoComplete="off"
-            name="repo-search"
-          />
-        </div>
+        <RepoSearchInput value={searchQuery} onValueChange={onSearchChange} />
 
         {isMobile ? (
           <DropdownMenu open={showMenu} onOpenChange={setShowMenu}>

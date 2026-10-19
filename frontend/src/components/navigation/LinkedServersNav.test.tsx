@@ -4,6 +4,7 @@ import userEvent from '@testing-library/user-event'
 import { MemoryRouter, useLocation } from 'react-router-dom'
 import { LOCAL_OPENCODE_SERVER_ID } from '@opencode-manager/shared/schemas'
 import { LinkedServersNav } from './LinkedServersNav'
+import { useSidebarServerRouteSync } from '@/hooks/useSidebarServerSelection'
 import { useSidebarServerStore } from '@/stores/sidebarServerStore'
 
 const mocks = vi.hoisted(() => ({
@@ -41,9 +42,15 @@ function LocationDisplay() {
   return <div data-testid="location">{`${location.pathname}${location.search}`}</div>
 }
 
+function SidebarServerRouteSync() {
+  useSidebarServerRouteSync()
+  return null
+}
+
 function renderNav(pathname = '/', variant?: 'sidebar' | 'rail' | 'sheet') {
   return render(
     <MemoryRouter initialEntries={[pathname]}>
+      <SidebarServerRouteSync />
       <LinkedServersNav variant={variant} />
       <LocationDisplay />
     </MemoryRouter>,

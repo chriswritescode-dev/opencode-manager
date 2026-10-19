@@ -28,10 +28,6 @@ export function getSessionPath(repoId: number | string, sessionId: string, optio
   return buildSessionPath(repoId, sessionId, options);
 }
 
-export function getServerPath(serverId: string): string {
-  return `/servers/${encodeURIComponent(serverId)}`;
-}
-
 export function getServerSessionPath(serverId: string, sessionId: string): string {
   return buildServerSessionPath(serverId, sessionId);
 }
@@ -119,12 +115,12 @@ export function getReturnToPath(search: string, fallback: string): string {
 export function getSwipeBackTarget(pathname: string, search = ''): string | null {
   const serverProject = parseServerProjectRoute(pathname, search);
   if (serverProject) {
-    return getServerPath(serverProject.serverId);
+    return '/';
   }
 
   const serverSession = parseServerSessionRoute(pathname);
   if (serverSession) {
-    return getServerPath(serverSession.serverId);
+    return '/';
   }
 
   if (/^\/servers\/[^/]+$/.test(pathname)) {

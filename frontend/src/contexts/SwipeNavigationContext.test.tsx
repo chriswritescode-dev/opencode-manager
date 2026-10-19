@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest'
-import { renderHook } from '@testing-library/react'
+import { renderHook, act } from '@testing-library/react'
 import { SwipeNavigationProvider, useSwipeNavigation } from './SwipeNavigationContext'
 
 describe('SwipeNavigationContext', () => {
@@ -45,6 +45,24 @@ describe('SwipeNavigationContext', () => {
     current?.resume()
     rerender()
     expect(current?.isSuspended()).toBe(false)
+  })
+
+  it('round-trips a page back target', () => {
+    const { result } = renderHook(() => useSwipeNavigation(), {
+      wrapper: SwipeNavigationProvider,
+    })
+
+    expect(result.current?.backTarget()).toBeNull()
+
+    act(() => {
+      result.current?.setBackTarget('/servers/srv_kitchen/projects?directory=%2Fhome%2Fme%2Fapp')
+    })
+    expect(result.current?.backTarget()).toBe('/servers/srv_kitchen/projects?directory=%2Fhome%2Fme%2Fapp')
+
+    act(() => {
+      result.current?.setBackTarget(null)
+    })
+    expect(result.current?.backTarget()).toBeNull()
   })
 
   it('clamps resume below zero to zero', () => {

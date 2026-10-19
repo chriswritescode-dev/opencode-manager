@@ -1,8 +1,8 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 import { fireEvent, render, screen, waitFor } from '@testing-library/react'
-import { MemoryRouter, useNavigate } from 'react-router-dom'
+import { MemoryRouter, useLocation, useNavigate } from 'react-router-dom'
 import { LOCAL_OPENCODE_SERVER_ID } from '@opencode-manager/shared/schemas'
-import { useSidebarServerSelection } from './useSidebarServerSelection'
+import { useSidebarServerRouteSync, useSidebarServerSelection } from './useSidebarServerSelection'
 import { SIDEBAR_SERVER_STORAGE_KEY, useSidebarServerStore } from '@/stores/sidebarServerStore'
 
 const mocks = vi.hoisted(() => ({
@@ -27,12 +27,18 @@ const kitchen = {
 
 const office = { ...kitchen, id: 'srv_office', name: 'Office' }
 
-function SelectionHarness() {
+function RouteSync() {
+  useSidebarServerRouteSync()
+  return null
+}
+
+function SelectionHarness({ syncRoute = true }: { syncRoute?: boolean }) {
   const [serverId, selectServer] = useSidebarServerSelection()
   const navigate = useNavigate()
 
   return (
     <>
+      {syncRoute ? <RouteSync /> : null}
       <div data-testid="selected">{serverId}</div>
       <button type="button" onClick={() => selectServer('srv_kitchen')}>
         Select kitchen
@@ -47,30 +53,73 @@ function SelectionHarness() {
   )
 }
 
-function renderHarness(initialEntry = '/') {
+function RouteOnlyHarness() {
+  useSidebarServerRouteSync()
+  const navigate = useNavigate()
+  const { pathname } = useLocation()
+
+  return (
+    <>
+      <div data-testid="location">{pathname}</div>
+      <button
+        type="button"
+        onClick={() => navigate('/servers/srv_kitchen/projects?directory=%2Fprojects%2Falpha')}
+      >
+        Open remote project
+      </button>
+      <button type="button" onClick={() => navigate('/')}>
+        Go home
+      </button>
+    </>
+  )
+}
+
+function renderHarness(initialEntry = '/', options?: { syncRoute?: boolean }) {
   return render(
     <MemoryRouter initialEntries={[initialEntry]}>
-      <SelectionHarness />
+      <SelectionHarness syncRoute={options?.syncRoute} />
     </MemoryRouter>,
   )
 }
 
-describe('useSidebarServerSelection', () => {
-  beforeEach(() => {
-    localStorage.clear()
-    useSidebarServerStore.setState({ serverId: LOCAL_OPENCODE_SERVER_ID })
-    mocks.useOpenCodeServers.mockReturnValue({
-      servers: [kitchen, office],
-      isLoading: false,
-      isSuccess: true,
-    })
+function resetSelection() {
+  localStorage.clear()
+  useSidebarServerStore.setState({ serverId: LOCAL_OPENCODE_SERVER_ID })
+  mocks.useOpenCodeServers.mockReturnValue({
+    servers: [kitchen, office],
+    isLoading: false,
+    isSuccess: true,
   })
+}
+
+describe('useSidebarServerSelection', () => {
+  beforeEach(resetSelection)
 
   it('defaults to the local server', () => {
-    renderHarness()
+    renderHarness('/', { syncRoute: false })
 
     expect(screen.getByTestId('selected')).toHaveTextContent(LOCAL_OPENCODE_SERVER_ID)
   })
+
+  it('persists the selection', () => {
+    renderHarness('/', { syncRoute: false })
+
+    fireEvent.click(screen.getByRole('button', { name: 'Select kitchen' }))
+
+    expect(JSON.parse(localStorage.getItem(SIDEBAR_SERVER_STORAGE_KEY) ?? 'null')).toBe(
+      'srv_kitchen',
+    )
+  })
+
+  it('does not follow the route without the route sync', () => {
+    renderHarness('/servers/srv_kitchen', { syncRoute: false })
+
+    expect(screen.getByTestId('selected')).toHaveTextContent(LOCAL_OPENCODE_SERVER_ID)
+  })
+})
+
+describe('useSidebarServerRouteSync', () => {
+  beforeEach(resetSelection)
 
   it('selects the server named by a linked server route', async () => {
     renderHarness('/servers/srv_kitchen/projects?directory=%2Fprojects%2Falpha')
@@ -86,6 +135,14 @@ describe('useSidebarServerSelection', () => {
     await waitFor(() =>
       expect(screen.getByTestId('selected')).toHaveTextContent(LOCAL_OPENCODE_SERVER_ID),
     )
+  })
+
+  it('keeps a persisted linked selection on the home route', async () => {
+    useSidebarServerStore.setState({ serverId: 'srv_kitchen' })
+
+    renderHarness('/')
+
+    await waitFor(() => expect(screen.getByTestId('selected')).toHaveTextContent('srv_kitchen'))
   })
 
   it('keeps a manual selection while the local route stays unchanged', async () => {
@@ -158,13 +215,20 @@ describe('useSidebarServerSelection', () => {
     )
   })
 
-  it('persists the selection', () => {
-    renderHarness()
-
-    fireEvent.click(screen.getByRole('button', { name: 'Select kitchen' }))
-
-    expect(JSON.parse(localStorage.getItem(SIDEBAR_SERVER_STORAGE_KEY) ?? 'null')).toBe(
-      'srv_kitchen',
+  it('follows a linked server route with no sidebar consumer mounted', async () => {
+    render(
+      <MemoryRouter initialEntries={['/']}>
+        <RouteOnlyHarness />
+      </MemoryRouter>,
     )
+
+    fireEvent.click(screen.getByRole('button', { name: 'Open remote project' }))
+
+    await waitFor(() => expect(useSidebarServerStore.getState().serverId).toBe('srv_kitchen'))
+
+    fireEvent.click(screen.getByRole('button', { name: 'Go home' }))
+
+    await waitFor(() => expect(screen.getByTestId('location').textContent).toBe('/'))
+    expect(useSidebarServerStore.getState().serverId).toBe('srv_kitchen')
   })
 })

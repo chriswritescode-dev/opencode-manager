@@ -6,7 +6,7 @@ import { LOCAL_OPENCODE_SERVER_ID } from '@opencode-manager/shared/schemas'
 import { Toaster } from 'sonner'
 import { Repos } from './pages/Repos'
 import { RepoDetail } from './pages/RepoDetail'
-import { RemoteServer } from './pages/RemoteServer'
+import { LinkedServerRedirect } from './pages/LinkedServerRedirect'
 import { RemoteProject } from './pages/RemoteProject'
 import { SessionDetail } from './pages/SessionDetail'
 import { Schedules } from './pages/Schedules'
@@ -41,6 +41,7 @@ import { useAuth } from '@/hooks/useAuth'
 import { useOpenCodeFailureToast } from '@/hooks/useOpenCodeFailureToast'
 import { useOpenCodeServerActions } from '@/hooks/useOpenCodeServerActions'
 import { useGlobalShortcutActions } from '@/hooks/useGlobalShortcutActions'
+import { useSidebarServerRouteSync } from '@/hooks/useSidebarServerSelection'
 import { sessionQueryOptions } from '@/hooks/useOpenCode'
 import { RestartServerDialog } from '@/components/settings/RestartServerDialog'
 
@@ -164,11 +165,13 @@ function AppShell() {
   const rootRef = useRef<HTMLDivElement>(null)
   const { openSheet, open } = useMobileTabBar()
 
+  useSidebarServerRouteSync()
+
   const swipeNav = useSwipeNavigation()
 
   const getRouteSwipeBackTarget = useCallback(
-    () => getSwipeBackTarget(location.pathname, location.search),
-    [location.pathname, location.search]
+    () => swipeNav?.backTarget() ?? getSwipeBackTarget(location.pathname, location.search),
+    [swipeNav, location.pathname, location.search]
   )
 
   const canSwipeBack = useCallback(
@@ -315,11 +318,7 @@ const router = createBrowserRouter([
       },
       {
         path: '/servers/:serverId',
-        element: (
-          <ServerScope>
-            <RemoteServer />
-          </ServerScope>
-        ),
+        element: <LinkedServerRedirect />,
         loader: protectedLoader,
       },
       {

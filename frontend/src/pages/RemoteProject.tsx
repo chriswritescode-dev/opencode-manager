@@ -11,7 +11,7 @@ import { useToolPanel } from '@/hooks/useToolPanel'
 import { useDialogParam } from '@/hooks/useDialogParam'
 import { useTerminalDialogParam, useTerminalDirectoryParam } from '@/hooks/useOpenTerminal'
 import { serverScopedKey } from '@/lib/serverScope'
-import { getServerPath, getServerSessionPath } from '@/lib/navigation'
+import { getServerSessionPath } from '@/lib/navigation'
 import { getDirectoryName } from '@/lib/utils'
 import { Header } from '@/components/ui/header'
 import { Badge } from '@/components/ui/badge'
@@ -76,7 +76,7 @@ function RemoteProjectContent({ serverId, directory }: { serverId: string; direc
       <div className="flex h-full max-h-full min-w-0 flex-1 flex-col overflow-hidden bg-gradient-to-br from-background via-background to-background pb-[calc(env(safe-area-inset-bottom)+56px)] sm:pb-0">
         <Header>
           <div className="flex min-w-0 flex-1 items-center gap-2 sm:gap-3">
-            <Header.BackButton to={getServerPath(serverId)} />
+            <Header.BackButton to="/" />
             <Header.Title>{title}</Header.Title>
             <Badge variant="outline" className="hidden shrink-0 sm:inline-flex">
               <Server className="mr-1 h-3 w-3" />
@@ -152,8 +152,8 @@ function RemoteProjectContent({ serverId, directory }: { serverId: string; direc
                 icon={FolderGit2}
                 title="No project selected"
                 description="This project link is missing its directory on the server."
-                actionLabel="Back to server"
-                onAction={() => navigate(getServerPath(serverId))}
+                actionLabel="Back to projects"
+                onAction={() => navigate('/')}
               />
             </div>
           ) : isReady ? (

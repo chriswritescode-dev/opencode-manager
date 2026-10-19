@@ -82,8 +82,8 @@ function renderProject(path = '/servers/srv_kitchen/projects?directory=%2Fhome%2
     <QueryClientProvider client={createQueryClient()}>
       <MemoryRouter initialEntries={[path]}>
         <Routes>
+          <Route path="/" element={<div data-testid="home-route" />} />
           <Route path="/servers/:serverId/projects" element={<RemoteProject />} />
-          <Route path="/servers/:serverId" element={<div data-testid="server-route" />} />
           <Route path="/servers/:serverId/sessions/:sessionId" element={<div data-testid="session-route" />} />
         </Routes>
       </MemoryRouter>
@@ -164,6 +164,14 @@ describe('RemoteProject', () => {
     expect(screen.queryByTestId('session-list')).not.toBeInTheDocument()
   })
 
+  it('goes back to the projects list from the missing-directory state', async () => {
+    renderProject('/servers/srv_kitchen/projects')
+
+    fireEvent.click(await screen.findByRole('button', { name: 'Back to projects' }))
+
+    expect(screen.getByTestId('home-route')).toBeInTheDocument()
+  })
+
   it('shows the disabled state without loading projects', async () => {
     mocks.useOpenCodeServers.mockReturnValue({
       servers: [{ ...server, enabled: false }],
@@ -198,11 +206,11 @@ describe('RemoteProject', () => {
     expect(mocks.openTab).toHaveBeenCalledWith('servers')
   })
 
-  it('goes back to the linked server page', async () => {
+  it('goes back to the projects list', async () => {
     renderProject()
 
     fireEvent.click(await screen.findByRole('button', { name: 'Go back' }))
 
-    expect(screen.getByTestId('server-route')).toBeInTheDocument()
+    expect(screen.getByTestId('home-route')).toBeInTheDocument()
   })
 })

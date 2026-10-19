@@ -1,0 +1,300 @@
+import { describe, it, expect, vi, beforeEach } from 'vitest'
+import { render, screen, waitFor } from '@testing-library/react'
+import userEvent from '@testing-library/user-event'
+import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
+import { MemoryRouter, Route, Routes } from 'react-router-dom'
+import { RemoteProjectList } from '../RemoteProjectList'
+
+const mocks = vi.hoisted(() => ({
+  listProjects: vi.fn(),
+  useCreateSession: vi.fn(),
+  useOpenCodeServers: vi.fn(),
+  useSettingsDialog: vi.fn(),
+  openTab: vi.fn(),
+  createSession: vi.fn(),
+  isMobile: true,
+}))
+
+vi.mock('@/api/opencode', () => ({
+  listProjects: mocks.listProjects,
+}))
+
+vi.mock('@/hooks/useOpenCode', () => ({
+  useCreateSession: mocks.useCreateSession,
+}))
+
+vi.mock('@/hooks/useOpenCodeServers', () => ({
+  useOpenCodeServers: mocks.useOpenCodeServers,
+}))
+
+vi.mock('@/hooks/useSettingsDialog', () => ({
+  useSettingsDialog: mocks.useSettingsDialog,
+}))
+
+vi.mock('@/hooks/useMobile', () => ({
+  useMobile: () => mocks.isMobile,
+}))
+
+vi.mock('@/hooks/useActiveWork', () => ({
+  useProjectActivityState: () => null,
+}))
+
+vi.mock('@/components/schedules/ServerSchedulesDialog', () => ({
+  ServerSchedulesDialog: ({
+    open,
+    target,
+  }: {
+    open: boolean
+    target: { serverId: string; directory: string } | null
+  }) =>
+    open ? (
+      <div
+        data-testid="schedules-dialog"
+        data-server={target?.serverId}
+        data-directory={target?.directory}
+      />
+    ) : null,
+}))
+
+vi.mock('@/components/repo/MultiRunSheet', () => ({
+  MultiRunSheet: ({
+    open,
+    target,
+    directory,
+  }: {
+    open: boolean
+    target: { kind: string; serverId?: string; directory?: string }
+    directory?: string
+  }) => (
+    <div
+      data-testid="multi-run-sheet"
+      data-open={String(open)}
+      data-kind={target.kind}
+      data-server={target.serverId}
+      data-directory={directory}
+    />
+  ),
+}))
+
+const server = {
+  id: 'srv_kitchen',
+  name: 'Kitchen',
+  baseUrl: 'https://kitchen.example.com',
+  username: 'opencode',
+  enabled: true,
+  hasPassword: true,
+  createdAt: 1,
+  updatedAt: 2,
+}
+
+const project = {
+  id: 'prj_1',
+  canonical: '/home/me/app',
+  name: 'App',
+  vcs: 'git',
+  time: { created: Date.now() - 120_000, updated: Date.now() - 60_000, active: 2 },
+  sandboxes: [],
+}
+
+const otherProject = {
+  id: 'prj_2',
+  canonical: '/srv/other',
+  name: 'Other',
+  time: { created: Date.now() - 120_000, updated: Date.now() - 60_000, active: 2 },
+  sandboxes: [],
+}
+
+function createQueryClient() {
+  return new QueryClient({ defaultOptions: { queries: { retry: false } } })
+}
+
+function renderProjectList(serverId = 'srv_kitchen') {
+  return render(
+    <QueryClientProvider client={createQueryClient()}>
+      <MemoryRouter initialEntries={['/']}>
+        <Routes>
+          <Route path="/" element={<RemoteProjectList serverId={serverId} />} />
+          <Route path="/servers/:serverId/projects" element={<div data-testid="project-route" />} />
+          <Route path="/servers/:serverId/sessions/:sessionId" element={<div data-testid="session-route" />} />
+        </Routes>
+      </MemoryRouter>
+    </QueryClientProvider>,
+  )
+}
+
+describe('RemoteProjectList', () => {
+  beforeEach(() => {
+    vi.clearAllMocks()
+    mocks.isMobile = true
+    mocks.listProjects.mockResolvedValue([project])
+    mocks.useCreateSession.mockReturnValue({ mutateAsync: mocks.createSession, isPending: false })
+    mocks.useOpenCodeServers.mockReturnValue({ servers: [server], isLoading: false })
+    mocks.useSettingsDialog.mockReturnValue({ openTab: mocks.openTab })
+  })
+
+  it('lists projects from the remote server', async () => {
+    renderProjectList()
+
+    await waitFor(() => {
+      expect(screen.getByText('App')).toBeInTheDocument()
+    })
+    expect(screen.getByText('/home/me/app')).toBeInTheDocument()
+    expect(mocks.listProjects).toHaveBeenCalledWith('srv_kitchen')
+  })
+
+  it('opens the remote project page when a project card is clicked', async () => {
+    const user = userEvent.setup()
+    renderProjectList()
+
+    await user.click(await screen.findByText('App'))
+
+    await waitFor(() => {
+      expect(screen.getByTestId('project-route')).toBeInTheDocument()
+    })
+  })
+
+  it('creates a session in a project directory from the actions menu and navigates to it', async () => {
+    const user = userEvent.setup()
+    mocks.createSession.mockResolvedValue({ id: 'ses_new' })
+    renderProjectList()
+
+    await user.click(await screen.findByRole('button', { name: 'Project actions' }))
+    await user.click(await screen.findByRole('menuitem', { name: /New session/ }))
+
+    await waitFor(() => {
+      expect(mocks.createSession).toHaveBeenCalledWith({ agent: undefined })
+    })
+    await waitFor(() => {
+      expect(screen.getByTestId('session-route')).toBeInTheDocument()
+    })
+  })
+
+  it('opens the project schedules from the actions menu', async () => {
+    const user = userEvent.setup()
+    renderProjectList()
+
+    await user.click(await screen.findByRole('button', { name: 'Project actions' }))
+    await user.click(await screen.findByRole('menuitem', { name: /Schedules/ }))
+
+    const dialog = await screen.findByTestId('schedules-dialog')
+    expect(dialog).toHaveAttribute('data-server', 'srv_kitchen')
+    expect(dialog).toHaveAttribute('data-directory', '/home/me/app')
+
+    await user.click(dialog)
+    expect(screen.queryByTestId('project-route')).not.toBeInTheDocument()
+    expect(screen.getByTestId('schedules-dialog')).toBeInTheDocument()
+  })
+
+  it('opens multi-run for the project from the actions menu', async () => {
+    const user = userEvent.setup()
+    renderProjectList()
+
+    await user.click(await screen.findByRole('button', { name: 'Project actions' }))
+    await user.click(await screen.findByRole('menuitem', { name: /Multi-run/ }))
+
+    const sheet = await screen.findByTestId('multi-run-sheet')
+    expect(sheet).toHaveAttribute('data-open', 'true')
+    expect(sheet).toHaveAttribute('data-kind', 'server')
+    expect(sheet).toHaveAttribute('data-server', 'srv_kitchen')
+    expect(sheet).toHaveAttribute('data-directory', '/home/me/app')
+  })
+
+  it('shows inline project actions on desktop without opening the project', async () => {
+    const user = userEvent.setup()
+    mocks.isMobile = false
+    renderProjectList()
+
+    await screen.findByText('App')
+    expect(screen.queryByRole('button', { name: 'Project actions' })).not.toBeInTheDocument()
+    expect(screen.getByRole('button', { name: 'New session' })).toBeInTheDocument()
+    expect(screen.getByRole('button', { name: 'Multi-run' })).toBeInTheDocument()
+
+    await user.click(screen.getByRole('button', { name: 'Schedules' }))
+
+    expect(await screen.findByTestId('schedules-dialog')).toHaveAttribute('data-directory', '/home/me/app')
+    expect(screen.queryByTestId('project-route')).not.toBeInTheDocument()
+  })
+
+  it('opens a session in an arbitrary directory', async () => {
+    const user = userEvent.setup()
+    mocks.createSession.mockResolvedValue({ id: 'ses_other' })
+    renderProjectList()
+
+    await user.type(screen.getByLabelText('Directory path'), '/srv/other')
+    await user.click(screen.getByRole('button', { name: /Start session/ }))
+
+    await waitFor(() => {
+      expect(mocks.createSession).toHaveBeenCalledWith({ directory: '/srv/other' })
+    })
+    await waitFor(() => {
+      expect(screen.getByTestId('session-route')).toBeInTheDocument()
+    })
+  })
+
+  it('filters projects by name and path', async () => {
+    const user = userEvent.setup()
+    mocks.listProjects.mockResolvedValue([project, otherProject])
+    renderProjectList()
+
+    await screen.findByText('App')
+    const search = screen.getByPlaceholderText('Search projects...')
+
+    await user.type(search, '/srv/other')
+    expect(screen.queryByText('App')).not.toBeInTheDocument()
+    expect(screen.getByText('Other')).toBeInTheDocument()
+
+    await user.clear(search)
+    await user.type(search, 'app')
+    expect(screen.getByText('App')).toBeInTheDocument()
+    expect(screen.queryByText('Other')).not.toBeInTheDocument()
+  })
+
+  it('shows an empty search result state', async () => {
+    const user = userEvent.setup()
+    renderProjectList()
+
+    await screen.findByText('App')
+    await user.type(screen.getByPlaceholderText('Search projects...'), 'missing')
+
+    expect(screen.getByText('No projects found matching "missing"')).toBeInTheDocument()
+  })
+
+  it('shows the disabled state without loading projects', async () => {
+    mocks.useOpenCodeServers.mockReturnValue({
+      servers: [{ ...server, enabled: false }],
+      isLoading: false,
+    })
+
+    renderProjectList()
+
+    expect(screen.getByText('This server is disabled')).toBeInTheDocument()
+    expect(mocks.listProjects).not.toHaveBeenCalled()
+  })
+
+  it('shows a missing server state when the server is no longer configured', async () => {
+    mocks.useOpenCodeServers.mockReturnValue({ servers: [], isLoading: false })
+
+    renderProjectList('srv_gone')
+
+    expect(screen.getByText('Server not found')).toBeInTheDocument()
+    expect(mocks.listProjects).not.toHaveBeenCalled()
+  })
+
+  it('shows an empty state when the server has no projects', async () => {
+    mocks.listProjects.mockResolvedValue([])
+
+    renderProjectList()
+
+    await waitFor(() => {
+      expect(screen.getByText('No projects on this server yet')).toBeInTheDocument()
+    })
+  })
+
+  it('scopes the list to the given server rather than the route', async () => {
+    renderProjectList('srv_kitchen')
+
+    await waitFor(() => {
+      expect(mocks.listProjects).toHaveBeenCalledWith('srv_kitchen')
+    })
+  })
+})

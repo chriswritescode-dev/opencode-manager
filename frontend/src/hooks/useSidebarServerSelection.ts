@@ -10,11 +10,12 @@ function isLocalRoute(pathname: string): boolean {
 }
 
 /**
- * The linked server selected in the sidebar, defaulting to the local server. The route selects a
- * server when the location changes, selecting a row never navigates, and a selected server that is
- * missing or disabled in a successfully loaded list falls back to local.
+ * Keeps the sidebar server selection in step with the location and the linked server list: a linked
+ * server route selects that server, a local repo or assistant route selects local, and a selected
+ * server that is missing or disabled in a successfully loaded list falls back to local. Mounted once
+ * by the app shell so the selection follows the route even when no sidebar consumer is rendered.
  */
-export function useSidebarServerSelection(): [string, (serverId: string) => void] {
+export function useSidebarServerRouteSync(): void {
   const { pathname } = useLocation()
   const routeServerId = useMatch('/servers/:serverId/*')?.params.serverId
   const { servers, isSuccess } = useOpenCodeServers()
@@ -39,6 +40,15 @@ export function useSidebarServerSelection(): [string, (serverId: string) => void
       selectServer(LOCAL_OPENCODE_SERVER_ID)
     }
   }, [isSuccess, servers, serverId, selectServer])
+}
+
+/**
+ * The linked server selected in the sidebar, defaulting to the local server. Selecting a server
+ * never navigates; `useSidebarServerRouteSync` keeps the selection aligned with the route.
+ */
+export function useSidebarServerSelection(): [string, (serverId: string) => void] {
+  const serverId = useSidebarServerStore((state) => state.serverId)
+  const selectServer = useSidebarServerStore((state) => state.selectServer)
 
   return [serverId, selectServer]
 }

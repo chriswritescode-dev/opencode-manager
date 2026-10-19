@@ -10,7 +10,7 @@ import { SquareFill } from "@/components/ui/square-fill";
 import { Header } from "@/components/ui/header";
 import { Badge } from "@/components/ui/badge";
 import { SessionPickerDialog } from "@/components/session/SessionPickerDialog";
-import { getRepoPath, getServerPath, getServerSessionPath, getSessionListPath, getSessionPath } from '@/lib/navigation'
+import { getRepoPath, getServerProjectPath, getServerSessionPath, getSessionListPath, getSessionPath } from '@/lib/navigation'
 import { FetchError } from '@/api/fetchWrapper'
 
 import { FileBrowserSheet } from "@/components/file-browser/FileBrowserSheet";
@@ -49,6 +49,7 @@ import { ResetPermissionsDialog } from "@/components/repo/ResetPermissionsDialog
 import { RepoSkillsDialog } from "@/components/repo/RepoSkillsDialog";
 import { compactSession, forkSession, listProjects, listSessionMessages } from "@/api/opencode";
 import { useOpenCodeServerId, isLocalOpenCodeServer } from "@/contexts/OpenCodeServerContext";
+import { useSwipeNavigation } from "@/contexts/SwipeNavigationContext";
 import { useOpenCodeServers, useOpenCodeServerStatuses } from "@/hooks/useOpenCodeServers";
 import { serverScopedKey } from "@/lib/serverScope";
 import { useSessionStatus } from "@/stores/sessionStatusStore";
@@ -128,6 +129,7 @@ export function SessionDetail() {
   const { id, sessionId } = useParams<{ id: string; sessionId: string }>();
   const navigate = useNavigate();
   const location = useLocation();
+  const swipeNav = useSwipeNavigation();
   const repoId = Number(id) || 0;
   const isAssistantSession = new URLSearchParams(location.search).get('assistant') === '1';
   const { preferences, updateSettings } = useSettings();
@@ -198,6 +200,17 @@ export function SessionDetail() {
       : undefined
   );
   const sessionDirectory = isRemoteServer ? resolvedDirectory : resolvedDirectory ?? repoDirectory;
+  const remoteProjectBackPath = isRemoteServer && sessionDirectory
+    ? getServerProjectPath(serverId, sessionDirectory)
+    : '/';
+
+  useEffect(() => {
+    if (!isRemoteServer) return;
+    swipeNav?.setBackTarget(remoteProjectBackPath);
+    return () => {
+      swipeNav?.setBackTarget(null);
+    };
+  }, [isRemoteServer, remoteProjectBackPath, swipeNav]);
 
   const { data: repoSiblings } = useRepoSiblings(!isAssistantSession && !isRemoteServer && repo && !repo.isWorktree ? repoId : undefined);
 
@@ -501,12 +514,12 @@ export function SessionDetail() {
 
   const handleCloseSession = useCallback(() => {
     if (isRemoteServer) {
-      navigate(getServerPath(serverId))
+      navigate(remoteProjectBackPath)
       return
     }
     const tab = new URLSearchParams(location.search).get('repoTab') ?? undefined;
     navigate(getSessionListPath(repoId, isAssistantSession, tab))
-  }, [navigate, repoId, isAssistantSession, isRemoteServer, serverId, location.search])
+  }, [navigate, repoId, isAssistantSession, isRemoteServer, remoteProjectBackPath, location.search])
 
   const handleOpenModelDialog = useCallback(() => {
     promptInputRef.current?.openModelPicker();
@@ -716,8 +729,8 @@ export function SessionDetail() {
     return (
       <SessionRouteFallback
         message="Session not found"
-        backTo={isRemoteServer ? getServerPath(serverId) : getSessionListPath(repoId, isAssistantSession, listTab)}
-        backLabel={isRemoteServer ? 'Back to server' : 'Back to sessions'}
+        backTo={isRemoteServer ? remoteProjectBackPath : getSessionListPath(repoId, isAssistantSession, listTab)}
+        backLabel={isRemoteServer ? 'Back to projects' : 'Back to sessions'}
       />
     );
   }
@@ -727,8 +740,8 @@ export function SessionDetail() {
       return (
         <SessionRouteFallback
           message="Failed to load session"
-          backTo={getServerPath(serverId)}
-          backLabel="Back to server"
+          backTo={remoteProjectBackPath}
+          backLabel="Back to projects"
         />
       );
     }
@@ -755,7 +768,7 @@ export function SessionDetail() {
       : getRepoDisplayName(repo);
   const tabFromUrl = new URLSearchParams(location.search).get('repoTab') ?? undefined;
   const sessionBackPath = isRemoteServer
-    ? getServerPath(serverId)
+    ? remoteProjectBackPath
     : getSessionListPath(repoId, isAssistantSession, tabFromUrl);
 
   return (

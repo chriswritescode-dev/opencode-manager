@@ -7,6 +7,8 @@ import { useMobileTabBar } from '@/hooks/useMobileTabBar'
 import { useUrlParams } from '@/hooks/useUrlParams'
 import { useScheduleUrlState, type ScheduleTab } from '@/hooks/useScheduleUrlState'
 import { useUnreadScheduleRuns } from '@/hooks/useSchedules'
+import { useSidebarServerSelection } from '@/hooks/useSidebarServerSelection'
+import { LOCAL_OPENCODE_SERVER_ID } from '@opencode-manager/shared/schemas'
 import {
   getAssistantPath,
   isAssistantPath,
@@ -35,11 +37,12 @@ interface GlobalTabsArgs {
   serverScope: ServerRouteScope
   updateParams: ReturnType<typeof useUrlParams>['updateParams']
   unreadScheduleCount: number
+  localServerSelected: boolean
 }
 
 type TabBarMode = 'hidden' | 'global' | 'schedule'
 
-type ServerRouteScope = 'server' | 'project' | null
+type ServerRouteScope = 'project' | null
 
 interface MobileTabRouteState {
   mode: TabBarMode
@@ -48,17 +51,8 @@ interface MobileTabRouteState {
   serverScope: ServerRouteScope
 }
 
-const SERVER_PAGE_PATH = /^\/servers\/[^/]+$/
-const SERVER_PROJECT_PAGE_PATH = /^\/servers\/[^/]+\/projects$/
-
 function getServerRouteScope(pathname: string, search: string): ServerRouteScope {
-  if (SERVER_PROJECT_PAGE_PATH.test(pathname)) {
-    return parseServerProjectRoute(pathname, search) ? 'project' : 'server'
-  }
-  if (SERVER_PAGE_PATH.test(pathname)) {
-    return 'server'
-  }
-  return null
+  return parseServerProjectRoute(pathname, search) ? 'project' : null
 }
 
 function getMobileTabRouteState(pathname: string, search: string): MobileTabRouteState {
@@ -71,7 +65,7 @@ function getMobileTabRouteState(pathname: string, search: string): MobileTabRout
   }
 
   const serverScope = getServerRouteScope(pathname, search)
-  if (serverScope === 'server' || serverScope === 'project') {
+  if (serverScope !== null) {
     return { mode: 'global', isInsideRepo: false, repoId: null, serverScope }
   }
 
@@ -91,7 +85,7 @@ function getMobileTabRouteState(pathname: string, search: string): MobileTabRout
   }
 }
 
-function buildGlobalTabs({ pathname, openSheet, open, close, navigate, isInsideRepo, repoId, serverScope, updateParams, unreadScheduleCount }: GlobalTabsArgs): TabDef[] {
+function buildGlobalTabs({ pathname, openSheet, open, close, navigate, isInsideRepo, repoId, serverScope, updateParams, unreadScheduleCount, localServerSelected }: GlobalTabsArgs): TabDef[] {
   const openRepoDialog = (dialog: string) => {
     openDialogParam(updateParams, dialog)
   }
@@ -99,6 +93,7 @@ function buildGlobalTabs({ pathname, openSheet, open, close, navigate, isInsideR
   const inRepo = isInsideRepo && repoId !== null
   const inServerRoute = serverScope !== null
   const filesAreScoped = inRepo || isAssistantPath(pathname)
+  const showsFiles = !inServerRoute && (filesAreScoped || localServerSelected)
   const showsGit = inRepo || serverScope === 'project'
   const showsSchedules = !inRepo && serverScope !== 'project'
 
@@ -123,7 +118,7 @@ function buildGlobalTabs({ pathname, openSheet, open, close, navigate, isInsideR
       onClick: () => open('repos'),
       active: openSheet === 'repos' || (pathname === '/' && !openSheet),
     },
-    ...(!inServerRoute
+    ...(showsFiles
       ? [{
           key: 'files',
           label: 'Files',
@@ -237,6 +232,8 @@ export const MobileTabBar = memo(function MobileTabBar() {
   const { scheduleTab, setScheduleTab } = useScheduleUrlState()
   const { data: unreadRuns } = useUnreadScheduleRuns()
   const isMobile = useMobile()
+  const [selectedServerId] = useSidebarServerSelection()
+  const localServerSelected = selectedServerId === LOCAL_OPENCODE_SERVER_ID
   const routeState = useMemo(() => getMobileTabRouteState(pathname, search), [pathname, search])
   const unreadScheduleCount = unreadRuns?.total ?? 0
 
@@ -254,6 +251,7 @@ export const MobileTabBar = memo(function MobileTabBar() {
         serverScope: routeState.serverScope,
         updateParams,
         unreadScheduleCount,
+        localServerSelected,
       })),
     [
       routeState,
@@ -266,6 +264,7 @@ export const MobileTabBar = memo(function MobileTabBar() {
       navigate,
       updateParams,
       unreadScheduleCount,
+      localServerSelected,
     ],
   )
 

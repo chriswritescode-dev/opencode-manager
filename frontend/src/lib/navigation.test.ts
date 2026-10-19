@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { getSessionListPath, getSwipeBackTarget, getAssistantPath, getAssistantSessionListPath, isAssistantPath, getPathWithReturnTo, getReturnToPath, getRepoPath, getServerPath, getServerProjectPath, getServerSessionPath, getSessionPath, parseRepoRoute, parseServerProjectRoute, parseServerSessionRoute } from './navigation';
+import { getSessionListPath, getSwipeBackTarget, getAssistantPath, getAssistantSessionListPath, isAssistantPath, getPathWithReturnTo, getReturnToPath, getRepoPath, getServerProjectPath, getServerSessionPath, getSessionPath, parseRepoRoute, parseServerProjectRoute, parseServerSessionRoute } from './navigation';
 
 describe('getAssistantPath', () => {
   it('returns /assistant', () => {
@@ -97,7 +97,6 @@ describe('getSessionPath', () => {
 
 describe('linked server paths', () => {
   it('builds server and server session paths with encoded segments', () => {
-    expect(getServerPath('srv_kitchen')).toBe('/servers/srv_kitchen');
     expect(getServerSessionPath('srv_kitchen', 'ses_1')).toBe('/servers/srv_kitchen/sessions/ses_1');
     expect(getServerSessionPath('srv a/b', 'ses 1')).toBe('/servers/srv%20a%2Fb/sessions/ses%201');
   });
@@ -247,18 +246,18 @@ describe('getSwipeBackTarget', () => {
   });
 
   describe('linked server routes', () => {
-    it('returns the server page for a remote session detail', () => {
-      expect(getSwipeBackTarget('/servers/srv_kitchen/sessions/ses_1', '')).toBe('/servers/srv_kitchen');
+    it('returns root for a remote session detail', () => {
+      expect(getSwipeBackTarget('/servers/srv_kitchen/sessions/ses_1', '')).toBe('/');
     });
 
     it('returns root for a server page', () => {
       expect(getSwipeBackTarget('/servers/srv_kitchen', '')).toBe('/');
     });
 
-    it('returns the server page for a remote project page', () => {
+    it('returns root for a remote project page', () => {
       expect(
         getSwipeBackTarget('/servers/srv_kitchen/projects', '?directory=%2Fhome%2Fme%2Fapp')
-      ).toBe('/servers/srv_kitchen');
+      ).toBe('/');
     });
 
     it('does not throw for a malformed server session path', () => {

@@ -29,7 +29,7 @@ import { useDebouncedValue } from '@/hooks/useDebouncedValue'
 
 import type { ScheduleJobWithRepo, ScheduleRunWithContext } from '@/api/schedules'
 import { Combobox } from '@/components/ui/combobox'
-import { getRepoPath, getServerPath } from '@/lib/navigation'
+import { getRepoPath, getServerProjectPath } from '@/lib/navigation'
 
 type StatusFilter = 'all' | 'enabled' | 'disabled'
 type ScheduleModeFilter = 'all' | 'cron' | 'interval'
@@ -47,6 +47,10 @@ function targetForJob(job: ScheduleJobWithRepo): ScheduleTargetRef | null {
 function targetForRun(run: ScheduleRunWithContext): ScheduleTargetRef | null {
   if (run.repoId !== null) return { kind: 'repo', repoId: run.repoId }
   return run.serverId ? { kind: 'server', serverId: run.serverId } : null
+}
+
+function getLinkedServerJobPath(job: ScheduleJobWithRepo): string {
+  return job.serverId && job.directory ? getServerProjectPath(job.serverId, job.directory) : '/'
 }
 
 export function GlobalSchedules() {
@@ -352,7 +356,7 @@ export function GlobalSchedules() {
     const job = jobs.find((entry) => jobBucket(entry) === repoPath)
     if (!job) return
     if (job.repoId === null) {
-      if (job.serverId) navigate(getServerPath(job.serverId))
+      if (job.serverId) navigate(getLinkedServerJobPath(job))
       return
     }
     navigate(getRepoPath(job.repoId))
@@ -360,7 +364,7 @@ export function GlobalSchedules() {
 
   const handleOpenJobPage = (job: ScheduleJobWithRepo) => {
     if (job.repoId === null) {
-      if (job.serverId) navigate(getServerPath(job.serverId))
+      if (job.serverId) navigate(getLinkedServerJobPath(job))
       return
     }
     navigate(`/repos/${job.repoId}/schedules`)
