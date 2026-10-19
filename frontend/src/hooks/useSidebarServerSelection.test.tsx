@@ -59,7 +59,11 @@ describe('useSidebarServerSelection', () => {
   beforeEach(() => {
     localStorage.clear()
     useSidebarServerStore.setState({ serverId: LOCAL_OPENCODE_SERVER_ID })
-    mocks.useOpenCodeServers.mockReturnValue({ servers: [kitchen, office], isLoading: false })
+    mocks.useOpenCodeServers.mockReturnValue({
+      servers: [kitchen, office],
+      isLoading: false,
+      isSuccess: true,
+    })
   })
 
   it('defaults to the local server', () => {
@@ -116,6 +120,7 @@ describe('useSidebarServerSelection', () => {
     mocks.useOpenCodeServers.mockReturnValue({
       servers: [kitchen, { ...office, enabled: false }],
       isLoading: false,
+      isSuccess: true,
     })
 
     renderHarness()
@@ -125,6 +130,21 @@ describe('useSidebarServerSelection', () => {
     )
   })
 
+  it('keeps the persisted server when the server list fails to load', async () => {
+    useSidebarServerStore.setState({ serverId: 'srv_kitchen' })
+    mocks.useOpenCodeServers.mockReturnValue({
+      servers: [],
+      isLoading: false,
+      isSuccess: false,
+      error: new Error('offline'),
+    })
+
+    renderHarness()
+
+    await waitFor(() => expect(screen.getByTestId('selected')).toHaveTextContent('srv_kitchen'))
+    expect(localStorage.getItem(SIDEBAR_SERVER_STORAGE_KEY)).toBeNull()
+  })
+
   it('falls back to local when the selected server no longer exists', async () => {
     useSidebarServerStore.setState({ serverId: 'srv_gone' })
 
@@ -132,6 +152,9 @@ describe('useSidebarServerSelection', () => {
 
     await waitFor(() =>
       expect(screen.getByTestId('selected')).toHaveTextContent(LOCAL_OPENCODE_SERVER_ID),
+    )
+    expect(JSON.parse(localStorage.getItem(SIDEBAR_SERVER_STORAGE_KEY) ?? 'null')).toBe(
+      LOCAL_OPENCODE_SERVER_ID,
     )
   })
 

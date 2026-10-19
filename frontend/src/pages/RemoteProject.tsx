@@ -29,7 +29,7 @@ import { ToolSidePanel } from '@/components/navigation/ToolSidePanel'
 function RemoteProjectContent({ serverId, directory }: { serverId: string; directory?: string }) {
   const navigate = useNavigate()
   const { servers, isLoading: serversLoading } = useOpenCodeServers()
-  const { setActiveTab } = useSettingsDialog()
+  const { openTab } = useSettingsDialog()
   const [mcpDialogOpen, setMcpDialogOpen] = useDialogParam('mcp')
   const [skillsDialogOpen, setSkillsDialogOpen] = useDialogParam('skills')
   const [sourceControlOpen, setSourceControlOpen] = useDialogParam('sourceControl')
@@ -63,7 +63,7 @@ function RemoteProjectContent({ serverId, directory }: { serverId: string; direc
   const branch = vcsQuery.data?.branch.current ?? vcsQuery.data?.branch.default
   const title = project?.name?.trim() || (directory ? getDirectoryName(directory) : 'Project')
 
-  const openSettings = () => setActiveTab('servers')
+  const openSettings = () => openTab('servers')
 
   const handleCreateSession = () => {
     createSession.mutate({}, {

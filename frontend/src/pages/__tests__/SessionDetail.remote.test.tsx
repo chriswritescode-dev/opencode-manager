@@ -235,7 +235,7 @@ describe('SessionDetail remote server mode', () => {
       preferences: { expandToolCalls: false },
       updateSettings: vi.fn(),
     })
-    mocks.useSettingsDialog.mockReturnValue({ open: vi.fn(), setActiveTab: vi.fn() })
+    mocks.useSettingsDialog.mockReturnValue({ open: vi.fn(), openTab: vi.fn() })
     mocks.useMobile.mockReturnValue(false)
     mocks.useVisualViewport.mockReturnValue({ keyboardHeight: 0 })
     mocks.useAutoScroll.mockReturnValue({ scrollToBottom: vi.fn(), scrollByUser: vi.fn() })

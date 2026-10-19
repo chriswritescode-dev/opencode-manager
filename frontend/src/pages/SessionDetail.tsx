@@ -131,7 +131,7 @@ export function SessionDetail() {
   const repoId = Number(id) || 0;
   const isAssistantSession = new URLSearchParams(location.search).get('assistant') === '1';
   const { preferences, updateSettings } = useSettings();
-  const { open: openSettings, setActiveTab: setSettingsTab } = useSettingsDialog();
+  const { open: openSettings, openTab: openSettingsTab } = useSettingsDialog();
   const messageContainerRef = useRef<HTMLDivElement>(null);
   const promptInputRef = useRef<PromptInputHandle>(null);
   const [sessionsDialogOpen, setSessionsDialogOpen] = useState(false);
@@ -354,7 +354,7 @@ export function SessionDetail() {
       ? requestedWalkthroughSource
       : undefined;
   const handleSkillLoaded = useCallback((skill: SkillFileInfo) => showToast.success(`Loaded skill: ${skill.name}`), []);
-  const handleConnectProvider = useCallback(() => setSettingsTab('providers'), [setSettingsTab]);
+  const handleConnectProvider = useCallback(() => openSettingsTab('providers'), [openSettingsTab]);
 
   useAutoOpenWalkthrough({
     sessionId,

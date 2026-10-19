@@ -19,7 +19,7 @@ const mocks = vi.hoisted(() => ({
   useSSE: vi.fn(),
   createSession: vi.fn(),
   lastSessionListProps: { current: undefined as SessionListCapture | undefined },
-  setActiveTab: vi.fn(),
+  openTab: vi.fn(),
 }))
 
 vi.mock('@/api/opencode', () => ({
@@ -99,7 +99,7 @@ describe('RemoteProject', () => {
     mocks.getVcsInfo.mockResolvedValue({ branch: { current: 'main', default: 'main' } })
     mocks.useCreateSession.mockReturnValue({ mutate: mocks.createSession, isPending: false })
     mocks.useOpenCodeServers.mockReturnValue({ servers: [server], isLoading: false })
-    mocks.useSettingsDialog.mockReturnValue({ setActiveTab: mocks.setActiveTab })
+    mocks.useSettingsDialog.mockReturnValue({ openTab: mocks.openTab })
     mocks.useSSE.mockReturnValue({ isConnected: true, isReconnecting: false })
   })
 
@@ -195,7 +195,7 @@ describe('RemoteProject', () => {
 
     fireEvent.click(await screen.findByRole('button', { name: 'Open server settings' }))
 
-    expect(mocks.setActiveTab).toHaveBeenCalledWith('servers')
+    expect(mocks.openTab).toHaveBeenCalledWith('servers')
   })
 
   it('goes back to the linked server page', async () => {

@@ -58,6 +58,7 @@ export function useOpenCodeServers(options: { enabled?: boolean } = {}) {
   return {
     servers: serversQuery.data ?? [],
     isLoading: serversQuery.isLoading,
+    isSuccess: serversQuery.isSuccess,
     error: serversQuery.error,
     refetch: serversQuery.refetch,
     createAsync: createMutation.mutateAsync,

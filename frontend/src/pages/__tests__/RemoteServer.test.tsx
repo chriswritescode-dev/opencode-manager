@@ -12,7 +12,7 @@ const mocks = vi.hoisted(() => ({
   useOpenCodeServerStatuses: vi.fn(),
   useSettingsDialog: vi.fn(),
   useSSE: vi.fn(),
-  setActiveTab: vi.fn(),
+  openTab: vi.fn(),
   createSession: vi.fn(),
 }))
 
@@ -101,7 +101,7 @@ describe('RemoteServer', () => {
       },
       isLoading: false,
     })
-    mocks.useSettingsDialog.mockReturnValue({ setActiveTab: mocks.setActiveTab })
+    mocks.useSettingsDialog.mockReturnValue({ openTab: mocks.openTab })
     mocks.useSSE.mockReturnValue({ isConnected: true, isReconnecting: false })
   })
 
@@ -223,6 +223,6 @@ describe('RemoteServer', () => {
 
     fireEvent.click(screen.getByRole('button', { name: /Manage servers/ }))
 
-    expect(mocks.setActiveTab).toHaveBeenCalledWith('servers')
+    expect(mocks.openTab).toHaveBeenCalledWith('servers')
   })
 })

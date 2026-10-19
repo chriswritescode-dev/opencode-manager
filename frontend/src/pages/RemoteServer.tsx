@@ -170,7 +170,7 @@ function RemoteServerContent({ serverId }: { serverId: string }) {
   const navigate = useNavigate()
   const { servers, isLoading: serversLoading } = useOpenCodeServers()
   const { statusById, isLoading: statusLoading } = useOpenCodeServerStatuses()
-  const { setActiveTab } = useSettingsDialog()
+  const { openTab } = useSettingsDialog()
   const createSession = useCreateSession()
   const [openDirectory, setOpenDirectory] = useState('')
 
@@ -185,7 +185,7 @@ function RemoteServerContent({ serverId }: { serverId: string }) {
     retry: false,
   })
 
-  const openSettings = () => setActiveTab('servers')
+  const openSettings = () => openTab('servers')
 
   const handleOpenDirectory = async (event: FormEvent) => {
     event.preventDefault()

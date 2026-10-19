@@ -20,7 +20,7 @@ const mocks = vi.hoisted(() => ({
   useAutoScroll: vi.fn(),
   dialogSetters: {} as Record<string, ReturnType<typeof vi.fn>>,
   openSettings: vi.fn(),
-  setSettingsTab: vi.fn(),
+  openSettingsTab: vi.fn(),
   useSessionStatusForSession: vi.fn(),
   compactSession: vi.fn(),
   listSessionMessages: vi.fn(),
@@ -118,7 +118,7 @@ vi.mock('@/hooks/useSettings', () => ({
 }))
 
 vi.mock('@/hooks/useSettingsDialog', () => ({
-  useSettingsDialog: vi.fn(() => ({ open: mocks.openSettings, setActiveTab: mocks.setSettingsTab })),
+  useSettingsDialog: vi.fn(() => ({ open: mocks.openSettings, openTab: mocks.openSettingsTab })),
 }))
 
 vi.mock('@/hooks/useMobile', () => ({
@@ -733,7 +733,7 @@ describe('SessionDetail command actions', () => {
       await connectProvider()
     })
 
-    expect(mocks.setSettingsTab).toHaveBeenCalledWith('providers')
+    expect(mocks.openSettingsTab).toHaveBeenCalledWith('providers')
   })
 
   it('exports complete history across pages in oldest-first order without duplicates', async () => {

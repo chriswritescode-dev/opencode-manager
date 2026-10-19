@@ -51,7 +51,7 @@ function renderNav(pathname = '/', variant?: 'sidebar' | 'rail' | 'sheet') {
 }
 
 function setServers(servers: Array<typeof kitchen>) {
-  mocks.useOpenCodeServers.mockReturnValue({ servers, isLoading: false })
+  mocks.useOpenCodeServers.mockReturnValue({ servers, isLoading: false, isSuccess: true })
 }
 
 function triggerName(name: string) {

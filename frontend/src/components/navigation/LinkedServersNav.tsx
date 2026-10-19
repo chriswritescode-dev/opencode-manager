@@ -159,7 +159,7 @@ function LinkedServersMenuContent({
   statusById: Record<string, OpenCodeServerStatus>
   onSelect: (serverId: string) => void
 }) {
-  const { setActiveTab } = useSettingsDialog()
+  const { openTab } = useSettingsDialog()
 
   return (
     <DropdownMenuContent align="start" className="z-[300] w-56">
@@ -177,7 +177,7 @@ function LinkedServersMenuContent({
         />
       ))}
       <DropdownMenuSeparator />
-      <DropdownMenuItem onSelect={() => setActiveTab('servers')} className="gap-2">
+      <DropdownMenuItem onSelect={() => openTab('servers')} className="gap-2">
         <Settings2 className="h-4 w-4 shrink-0" />
         <span>Manage servers…</span>
       </DropdownMenuItem>

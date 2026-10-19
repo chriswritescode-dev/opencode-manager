@@ -12,12 +12,12 @@ function isLocalRoute(pathname: string): boolean {
 /**
  * The linked server selected in the sidebar, defaulting to the local server. The route selects a
  * server when the location changes, selecting a row never navigates, and a selected server that is
- * missing or disabled falls back to local.
+ * missing or disabled in a successfully loaded list falls back to local.
  */
 export function useSidebarServerSelection(): [string, (serverId: string) => void] {
   const { pathname } = useLocation()
   const routeServerId = useMatch('/servers/:serverId/*')?.params.serverId
-  const { servers, isLoading } = useOpenCodeServers()
+  const { servers, isSuccess } = useOpenCodeServers()
   const serverId = useSidebarServerStore((state) => state.serverId)
   const selectServer = useSidebarServerStore((state) => state.selectServer)
 
@@ -33,12 +33,12 @@ export function useSidebarServerSelection(): [string, (serverId: string) => void
   }, [pathname, routeServerId, selectServer])
 
   useEffect(() => {
-    if (isLoading || serverId === LOCAL_OPENCODE_SERVER_ID) return
+    if (!isSuccess || serverId === LOCAL_OPENCODE_SERVER_ID) return
     const server = servers.find((candidate) => candidate.id === serverId)
     if (!server || !server.enabled) {
       selectServer(LOCAL_OPENCODE_SERVER_ID)
     }
-  }, [isLoading, servers, serverId, selectServer])
+  }, [isSuccess, servers, serverId, selectServer])
 
   return [serverId, selectServer]
 }
