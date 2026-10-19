@@ -18,6 +18,8 @@ import {
 } from '@/components/ui/dropdown-menu'
 import { cn } from '@/lib/utils'
 
+const LOCAL_SERVER_LABEL = 'OC Manager'
+
 export type LinkedServersVariant = 'sidebar' | 'rail' | 'sheet'
 
 interface LinkedServersNavProps {
@@ -72,7 +74,7 @@ function AttentionDot({ activity, label }: { activity: ActivityState; label: str
 function LocalAttentionDot() {
   const activity = useLocalActivityState()
 
-  return <AttentionDot activity={activity} label="Local" />
+  return <AttentionDot activity={activity} label={LOCAL_SERVER_LABEL} />
 }
 
 function ServerAttentionDot({ server }: { server: OpenCodeServer }) {
@@ -113,7 +115,7 @@ function LocalServerMenuItem({ active, onSelect }: { active: boolean; onSelect: 
       className="gap-2"
     >
       <Laptop className="h-4 w-4 shrink-0" />
-      <span className="min-w-0 flex-1 truncate">Local</span>
+      <span className="min-w-0 flex-1 truncate">{LOCAL_SERVER_LABEL}</span>
       <ActivityStateIndicator state={activity} />
       {active && <Check className="h-4 w-4 shrink-0" />}
     </DropdownMenuItem>
@@ -202,7 +204,7 @@ export function LinkedServersNav({ variant = 'sidebar' }: LinkedServersNavProps)
 
   const selectedServer = enabledServers.find((server) => server.id === selectedServerId)
   const localActive = selectedServerId === LOCAL_OPENCODE_SERVER_ID
-  const selectedName = localActive ? 'Local' : selectedServer?.name ?? 'Local'
+  const selectedName = localActive ? LOCAL_SERVER_LABEL : selectedServer?.name ?? LOCAL_SERVER_LABEL
   const isRail = variant === 'rail'
   const connectionConnected = statusById[selectedServerId]?.connected ?? false
 

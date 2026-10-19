@@ -1001,7 +1001,7 @@ describe('RepoQuickSwitchSheet', () => {
 
     render(<RepoQuickSwitchSheet isOpen onClose={vi.fn()} />, { wrapper: createWrapper() })
 
-    const trigger = await screen.findByRole('button', { name: 'Switch server, current: Local' })
+    const trigger = await screen.findByRole('button', { name: 'Switch server, current: OC Manager' })
     expect(trigger).toBeInTheDocument()
     expect(screen.queryByRole('heading', { name: 'Servers' })).not.toBeInTheDocument()
 
@@ -1049,7 +1049,7 @@ describe('RepoQuickSwitchSheet', () => {
       </QueryClientProvider>,
     )
 
-    await user.click(await screen.findByRole('button', { name: 'Switch server, current: Local' }))
+    await user.click(await screen.findByRole('button', { name: 'Switch server, current: OC Manager' }))
     await user.click(await screen.findByRole('menuitem', { name: /Kitchen/ }))
 
     expect(await screen.findByText('Alpha')).toBeInTheDocument()
@@ -1084,7 +1084,7 @@ describe('RepoQuickSwitchSheet', () => {
       </QueryClientProvider>,
     )
 
-    await user.click(await screen.findByRole('button', { name: 'Switch server, current: Local' }))
+    await user.click(await screen.findByRole('button', { name: 'Switch server, current: OC Manager' }))
     await user.click(await screen.findByRole('menuitem', { name: /Kitchen/ }))
     await user.click(await screen.findByRole('button', { name: /^Alpha/ }))
 

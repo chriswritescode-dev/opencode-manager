@@ -95,7 +95,7 @@ describe('LinkedServersNav', () => {
 
     renderNav()
 
-    expect(screen.getByRole('button', { name: triggerName('Local') })).toBeInTheDocument()
+    expect(screen.getByRole('button', { name: triggerName('OC Manager') })).toBeInTheDocument()
     expect(screen.queryByRole('heading', { name: 'Servers' })).not.toBeInTheDocument()
   })
 
@@ -114,9 +114,9 @@ describe('LinkedServersNav', () => {
     setServers([kitchen, { ...office, enabled: false }])
 
     renderNav()
-    await user.click(screen.getByRole('button', { name: triggerName('Local') }))
+    await user.click(screen.getByRole('button', { name: triggerName('OC Manager') }))
 
-    expect(await screen.findByRole('menuitem', { name: /Local/ })).toHaveAttribute('aria-current', 'true')
+    expect(await screen.findByRole('menuitem', { name: /OC Manager/ })).toHaveAttribute('aria-current', 'true')
     expect(screen.getByRole('menuitem', { name: /Kitchen/ })).toBeInTheDocument()
     expect(screen.getByRole('img', { name: 'Connected' })).toBeInTheDocument()
     expect(screen.queryByRole('menuitem', { name: /Office/ })).not.toBeInTheDocument()
@@ -127,7 +127,7 @@ describe('LinkedServersNav', () => {
     setServers([kitchen, office])
 
     renderNav()
-    await user.click(screen.getByRole('button', { name: triggerName('Local') }))
+    await user.click(screen.getByRole('button', { name: triggerName('OC Manager') }))
     await user.click(await screen.findByRole('menuitem', { name: /Office/ }))
 
     expect(await screen.findByRole('button', { name: triggerName('Office') })).toBeInTheDocument()
@@ -142,9 +142,9 @@ describe('LinkedServersNav', () => {
 
     renderNav()
     await user.click(screen.getByRole('button', { name: triggerName('Kitchen') }))
-    await user.click(await screen.findByRole('menuitem', { name: /Local/ }))
+    await user.click(await screen.findByRole('menuitem', { name: /OC Manager/ }))
 
-    expect(await screen.findByRole('button', { name: triggerName('Local') })).toBeInTheDocument()
+    expect(await screen.findByRole('button', { name: triggerName('OC Manager') })).toBeInTheDocument()
     expect(screen.getByTestId('location')).toHaveTextContent('/')
   })
 
@@ -162,7 +162,7 @@ describe('LinkedServersNav', () => {
 
     renderNav()
 
-    expect(await screen.findByRole('button', { name: triggerName('Local') })).toBeInTheDocument()
+    expect(await screen.findByRole('button', { name: triggerName('OC Manager') })).toBeInTheDocument()
   })
 
   it('shows an attention dot for another server that needs input', async () => {
@@ -193,7 +193,7 @@ describe('LinkedServersNav', () => {
 
     renderNav()
 
-    expect(screen.getByRole('img', { name: 'Local needs input' })).toBeInTheDocument()
+    expect(screen.getByRole('img', { name: 'OC Manager needs input' })).toBeInTheDocument()
   })
 
   it('does not show an attention dot for the selected server', async () => {
@@ -215,7 +215,7 @@ describe('LinkedServersNav', () => {
     setServers([kitchen])
 
     renderNav()
-    await user.click(screen.getByRole('button', { name: triggerName('Local') }))
+    await user.click(screen.getByRole('button', { name: triggerName('OC Manager') }))
     await user.click(await screen.findByRole('menuitem', { name: /Manage servers/ }))
 
     expect(screen.getByTestId('location')).toHaveTextContent('/?settings=open&settingsTab=servers')
@@ -227,9 +227,9 @@ describe('LinkedServersNav', () => {
 
     renderNav('/', 'rail')
 
-    const trigger = screen.getByRole('button', { name: triggerName('Local') })
+    const trigger = screen.getByRole('button', { name: triggerName('OC Manager') })
     expect(trigger).toBeInTheDocument()
-    expect(screen.queryByText('Local')).not.toBeInTheDocument()
+    expect(screen.queryByText('OC Manager')).not.toBeInTheDocument()
 
     await user.click(trigger)
     expect(await screen.findByRole('menuitem', { name: /Kitchen/ })).toBeInTheDocument()
@@ -248,7 +248,7 @@ describe('LinkedServersNav', () => {
     renderNav('/', 'sheet')
 
     expect(screen.queryByRole('heading', { name: 'Servers' })).not.toBeInTheDocument()
-    await user.click(screen.getByRole('button', { name: triggerName('Local') }))
+    await user.click(screen.getByRole('button', { name: triggerName('OC Manager') }))
     await user.click(await screen.findByRole('menuitem', { name: /Kitchen/ }))
 
     expect(await screen.findByRole('button', { name: triggerName('Kitchen') })).toBeInTheDocument()
