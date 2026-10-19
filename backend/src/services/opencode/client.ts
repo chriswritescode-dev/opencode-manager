@@ -1,7 +1,7 @@
 import { logger } from '../../utils/logger'
 import { ENV } from '@opencode-manager/shared/config/env'
 import { createOpenCodeApi, type OpenCodeApi } from '@opencode-manager/shared/opencode'
-import { filterProxyHeaders } from '../../utils/proxy-headers'
+import { filterProxyHeaders, NULL_BODY_STATUSES } from '../../utils/proxy-headers'
 import { getOpenCodeBasicAuthHeader, type OpenCodePasswordResolver } from './auth'
 import { getOpenCodeUpstreamBaseUrl, withDefaultOpenCodeDirectory } from './upstream'
 
@@ -81,8 +81,7 @@ export class FetchOpenCodeClient implements OpenCodeClient {
 
       const filteredHeaders = filterProxyHeaders(response.headers)
 
-      const noBodyStatuses = new Set([101, 204, 205, 304])
-      if (noBodyStatuses.has(response.status)) {
+      if (NULL_BODY_STATUSES.has(response.status)) {
         return new Response(null, {
           status: response.status,
           statusText: response.statusText,

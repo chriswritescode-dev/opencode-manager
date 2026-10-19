@@ -5,37 +5,42 @@ import {
   LOCAL_OPENCODE_SERVER_ID,
   TestOpenCodeServerRequestSchema,
   UpdateOpenCodeServerRequestSchema,
-  type CreateOpenCodeServerRequest,
   type OpenCodeServer,
   type OpenCodeServerPairing,
   type OpenCodeServerTestResult,
-  type TestOpenCodeServerRequest,
-  type UpdateOpenCodeServerRequest,
 } from '@opencode-manager/shared/schemas'
-import { isSupportedOpenCodeVersion } from '@opencode-manager/shared/opencode'
+import {
+  buildOpenCodeBasicAuth,
+  createOpenCodePairingNonce,
+  createOpenCodePairingProof,
+  decryptOpenCodePairingCredentials,
+  isSupportedOpenCodeVersion,
+} from '@opencode-manager/shared/opencode'
+import { trimUrlTrailingSlashes } from '@opencode-manager/shared/utils'
 import {
   deleteOpenCodeServer,
   getOpenCodeServer,
   insertOpenCodeServer,
   listOpenCodeServers,
-  normalizeOpenCodeServerBaseUrl,
   readOpenCodeServerPassword,
   updateOpenCodeServer,
 } from '../db/opencode-servers'
 import { logger } from '../utils/logger'
 import { ServiceError } from '../utils/service-error'
-import { getOpenCodeServerBasicAuthHeader } from './opencode/auth'
 import { FetchOpenCodeClient, type OpenCodeClient } from './opencode/client'
 
 const PAIRING_TIMEOUT_MS = 10_000
 const TEST_TIMEOUT_MS = 5_000
 
-const PairingRedeemResponseSchema = z.object({
-  username: z.string().min(1),
-  password: z.string().min(1),
+const PairingEncryptedPayloadSchema = z.object({
+  iv: z.string().min(1),
+  ciphertext: z.string().min(1),
 })
 
+type CreateServerInput = z.output<typeof CreateOpenCodeServerRequestSchema>
+type UpdateServerInput = z.output<typeof UpdateOpenCodeServerRequestSchema>
 type TestServerInput = z.output<typeof TestOpenCodeServerRequestSchema>
+type TestServerSource = TestServerInput | { serverId: string }
 
 interface TestTarget {
   baseUrl: string
@@ -67,13 +72,6 @@ export class OpenCodeServerNotFoundError extends OpenCodeServerError {
   }
 }
 
-export class OpenCodeServerValidationError extends OpenCodeServerError {
-  constructor(message: string, details?: unknown) {
-    super(message, 400, { details })
-    this.name = 'OpenCodeServerValidationError'
-  }
-}
-
 export class OpenCodeServerPairingError extends OpenCodeServerError {
   constructor(message: string) {
     super(message, 502)
@@ -99,8 +97,7 @@ export class OpenCodeServerRegistry {
     return getOpenCodeServer(this.db, serverId)
   }
 
-  async create(input: CreateOpenCodeServerRequest): Promise<OpenCodeServer> {
-    const request = this.parse(CreateOpenCodeServerRequestSchema, input)
+  async create(request: CreateServerInput): Promise<OpenCodeServer> {
     const pairing = request.pairing ? await this.redeemPairing(request.pairing) : null
 
     const server = insertOpenCodeServer(this.db, {
@@ -115,9 +112,8 @@ export class OpenCodeServerRegistry {
     return server
   }
 
-  async update(serverId: string, input: UpdateOpenCodeServerRequest): Promise<OpenCodeServer> {
+  async update(serverId: string, request: UpdateServerInput): Promise<OpenCodeServer> {
     this.requireServer(serverId)
-    const request = this.parse(UpdateOpenCodeServerRequestSchema, input)
     const pairing = request.pairing ? await this.redeemPairing(request.pairing) : null
 
     const server = updateOpenCodeServer(this.db, serverId, {
@@ -149,13 +145,10 @@ export class OpenCodeServerRegistry {
     const cached = this.clients.get(serverId)
     if (cached) return cached
 
-    const server = this.requireServer(serverId)
-    if (!server.enabled) throw new OpenCodeServerNotFoundError(serverId, 'disabled')
-
-    const password = readOpenCodeServerPassword(this.db, serverId)
+    const connection = this.getConnection(serverId)
     const client = new FetchOpenCodeClient({
-      baseUrl: server.baseUrl,
-      basicAuth: password === null ? null : getOpenCodeServerBasicAuthHeader(server.username, password),
+      baseUrl: connection.baseUrl,
+      basicAuth: connection.authorization,
       defaultDirectory: false,
       fetchFn: this.fetchFn,
     })
@@ -175,15 +168,15 @@ export class OpenCodeServerRegistry {
     const password = readOpenCodeServerPassword(this.db, serverId)
     return {
       baseUrl: server.baseUrl,
-      authorization: password === null ? null : getOpenCodeServerBasicAuthHeader(server.username, password),
+      authorization: password === null ? null : buildOpenCodeBasicAuth(password, server.username),
     }
   }
 
-  async test(input: TestOpenCodeServerRequest | { serverId: string }): Promise<OpenCodeServerTestResult> {
+  async test(input: TestServerSource): Promise<OpenCodeServerTestResult> {
     const target = this.resolveTestTarget(input)
     const headers: Record<string, string> = { Accept: 'application/json' }
     if (target.password !== null) {
-      headers.Authorization = getOpenCodeServerBasicAuthHeader(target.username, target.password)
+      headers.Authorization = buildOpenCodeBasicAuth(target.password, target.username)
     }
 
     let response: Response
@@ -235,7 +228,7 @@ export class OpenCodeServerRegistry {
     }
   }
 
-  private resolveTestTarget(input: TestOpenCodeServerRequest | { serverId: string }): TestTarget {
+  private resolveTestTarget(input: TestServerSource): TestTarget {
     if ('serverId' in input) {
       const server = this.requireServer(input.serverId)
       return {
@@ -245,11 +238,10 @@ export class OpenCodeServerRegistry {
       }
     }
 
-    const request: TestServerInput = this.parse(TestOpenCodeServerRequestSchema, input)
     return {
-      baseUrl: normalizeOpenCodeServerBaseUrl(request.baseUrl),
-      username: request.username,
-      password: request.password ?? null,
+      baseUrl: trimUrlTrailingSlashes(input.baseUrl),
+      username: input.username,
+      password: input.password ?? null,
     }
   }
 
@@ -263,12 +255,15 @@ export class OpenCodeServerRegistry {
   }
 
   private async redeemPairing(pairing: OpenCodeServerPairing): Promise<{ username: string; password: string }> {
+    const nonce = createOpenCodePairingNonce()
+    const proof = await createOpenCodePairingProof(pairing.code, nonce)
+
     let response: Response
     try {
       response = await this.fetchFn(pairing.pairUrl, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ code: pairing.code }),
+        body: JSON.stringify({ nonce, proof }),
         signal: AbortSignal.timeout(PAIRING_TIMEOUT_MS),
       })
     } catch {
@@ -286,11 +281,21 @@ export class OpenCodeServerRegistry {
       throw new OpenCodeServerPairingError('Pairing returned an invalid response')
     }
 
-    const parsed = PairingRedeemResponseSchema.safeParse(payload)
+    const parsed = PairingEncryptedPayloadSchema.safeParse(payload)
     if (!parsed.success) {
       throw new OpenCodeServerPairingError('Pairing returned an invalid response')
     }
-    return parsed.data
+
+    try {
+      return await decryptOpenCodePairingCredentials({
+        code: pairing.code,
+        nonce,
+        iv: parsed.data.iv,
+        ciphertext: parsed.data.ciphertext,
+      })
+    } catch {
+      throw new OpenCodeServerPairingError('Pairing returned invalid credentials')
+    }
   }
 
   private requireServer(serverId: string): OpenCodeServer {
@@ -311,16 +316,5 @@ export class OpenCodeServerRegistry {
         logger.error('OpenCode server change listener failed', error)
       }
     }
-  }
-
-  private parse<T>(schema: z.ZodType<T>, input: unknown): T {
-    const parsed = schema.safeParse(input)
-    if (!parsed.success) {
-      throw new OpenCodeServerValidationError(
-        parsed.error.issues[0]?.message ?? 'Invalid OpenCode server request',
-        parsed.error.issues,
-      )
-    }
-    return parsed.data
   }
 }

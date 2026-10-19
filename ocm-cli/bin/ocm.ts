@@ -2,7 +2,8 @@ import { spawn, spawnSync } from 'child_process'
 import { hostname } from 'os'
 import { basename, dirname, resolve } from 'path'
 import { fileURLToPath } from 'url'
-import { buildOpenCodeServerLink, OPENCODE_SERVER_DEFAULT_USERNAME } from '@opencode-manager/shared/schemas'
+import { buildOpenCodeServerLink, OPENCODE_SERVER_USERNAME } from '@opencode-manager/shared/schemas'
+import { trimUrlTrailingSlashes } from '@opencode-manager/shared/utils'
 import { readState, writeState, clearState, getStatePath, writeInstallNotice, type OcmState } from '../src/state.js'
 import { installVendoredOcm, resolveOpenCodeConfigDir, InstallError, OCM_PLUGIN_SPEC } from '../src/vendor-install.js'
 import { setToken, deleteToken, hasStoredToken, describeTokenStore, describeTokenWriteTarget, envToken, TOKEN_ENV, TokenStoreError } from '../src/internal-token-store.js'
@@ -16,7 +17,7 @@ import { resolveTarget, formatRepoIdentities, parseRepoIdPositional, restrictMat
 import { buildAttachInvocation } from '../src/warp.js'
 import { type ManagerRepo, fetchRepos, toRemoteRepoSummaries } from '../src/manager-repos.js'
 import { OCM_VERSION as VERSION, warmRepoProxy } from '../src/repo-proxy.js'
-import { normalizeManagerUrl, resolveManagerAuth } from '../src/manager-auth.js'
+import { resolveManagerAuth } from '../src/manager-auth.js'
 import type { ManagerAuthOk } from '../src/manager-auth.js'
 import { generatePairingCode, probeOpenCodeServer, renderPairingQr, resolveDefaultBaseUrl, startPairingServer } from '../src/link.js'
 
@@ -171,7 +172,7 @@ function parseLoginArgs(args: string[]): { url: string; token?: string; managerN
 
 export async function cmdLogin(args: string[]): Promise<void> {
   const { url, token: providedToken, managerName } = parseLoginArgs(args)
-  const normalisedUrl = normalizeManagerUrl(url)
+  const normalisedUrl = trimUrlTrailingSlashes(url)
 
   let token = providedToken
   if (!token) {
@@ -201,7 +202,7 @@ export async function cmdLogin(args: string[]): Promise<void> {
   }
 
   const existing = readState()
-  const sameManager = existing ? normalizeManagerUrl(existing.managerUrl) === normalisedUrl : false
+  const sameManager = existing ? trimUrlTrailingSlashes(existing.managerUrl) === normalisedUrl : false
   writeState({
     ...existing,
     managerUrl: normalisedUrl,
@@ -683,7 +684,7 @@ function parseLinkArgs(args: string[]): LinkCommandOptions {
 
   return {
     baseUrl,
-    username: values.username ?? process.env.OPENCODE_SERVER_USERNAME ?? OPENCODE_SERVER_DEFAULT_USERNAME,
+    username: values.username ?? process.env.OPENCODE_SERVER_USERNAME ?? OPENCODE_SERVER_USERNAME,
     password,
     name: values.name ?? hostname(),
     pairHost: values.pairHost ?? new URL(baseUrl).hostname,

@@ -6,22 +6,29 @@ import {
   type OpenCodeServer,
   type OpenCodeServerStatus,
 } from '@opencode-manager/shared/schemas'
-import { openCodeLocation, sessionIDFromEvent, type OpenCodeApi, type V2Event } from '@opencode-manager/shared/opencode'
+import { type OpenCodeApi, type V2Event } from '@opencode-manager/shared/opencode'
 import { logger } from '../utils/logger'
 import type {
   OpenCodeServerChange,
   OpenCodeServerConnection,
   OpenCodeServerRegistry,
 } from './opencode-server-registry'
+import {
+  collectPendingReplayEvents,
+  createAuthorizedEventSourceInit,
+  createReplayEventBuilder,
+  nextBackoffDelay,
+  parseOpenCodeEvent,
+  type ReplayEventBuilder,
+} from './opencode-event-routing'
 import type { RemoteReplayHandler } from './sse-aggregator'
 
 const { RECONNECT_DELAY_MS, MAX_RECONNECT_DELAY_MS } = DEFAULTS.SSE
-const MULTILINE_PATTERN = /[\r\n]/
 
 export interface RemoteEventAggregator {
   deliverRemoteEnvelope(serverId: string, directory: string | null, payloadJson: string): void
   deliverRemoteEnvelopeToClient(clientId: string, serverId: string, directory: string, payloadJson: string): void
-  sendRemoteResync(serverId: string, data: string): void
+  sendRemoteResync(serverId: string): void
   hasClientDirectory(clientId: string, key: string): boolean
   setRemoteReplayHandler(handler: RemoteReplayHandler | null): void
 }
@@ -50,10 +57,9 @@ interface RemoteServerStream {
   error: string | null
   version: string | null
   versionRequested: boolean
+  versionProbeToken: number
   sessionDirectories: Map<string, string>
 }
-
-type RemoteReplayEventType = 'permission.asked' | 'form.created'
 
 function createDefaultEventSource(url: string, init?: RemoteEventSourceInit): RemoteEventSource {
   return new EventSource(url, init) as unknown as RemoteEventSource
@@ -77,7 +83,8 @@ export class RemoteServerEventHub {
   private readonly maxReconnectDelayMs: number
   private unsubscribeRegistry: (() => void) | null = null
   private started = false
-  private replayEventCount = 0
+  private versionProbeSequence = 0
+  private readonly buildReplayEvent: ReplayEventBuilder = createReplayEventBuilder('ocm_replay_remote_')
 
   constructor(
     private readonly registry: OpenCodeServerRegistry,
@@ -142,26 +149,16 @@ export class RemoteServerEventHub {
       return
     }
 
-    const [permissionsResult, formsResult] = await Promise.allSettled([
-      api.permission.request.list(openCodeLocation(directory)),
-      api.form.list(openCodeLocation(directory)),
-    ])
+    const events = await collectPendingReplayEvents({
+      api,
+      directory,
+      buildEvent: this.buildReplayEvent,
+      logScope: 'remote replay',
+      logTarget: key,
+    })
 
-    if (permissionsResult.status === 'rejected') {
-      logger.warn(`remote replay: failed to fetch pending permissions for ${key}: ${String(permissionsResult.reason)}`)
-    } else {
-      this.emitReplayEventsToClient(clientId, serverId, directory, permissionsResult.value.data.map(request =>
-        this.buildReplayEvent('permission.asked', directory, request)
-      ))
-    }
-
-    if (formsResult.status === 'rejected') {
-      logger.warn(`remote replay: failed to fetch pending forms for ${key}: ${String(formsResult.reason)}`)
-    } else {
-      this.emitReplayEventsToClient(clientId, serverId, directory, formsResult.value.data.map(form =>
-        this.buildReplayEvent('form.created', directory, { form })
-      ))
-    }
+    this.emitReplayEventsToClient(clientId, serverId, directory, events.permissions)
+    this.emitReplayEventsToClient(clientId, serverId, directory, events.forms)
   }
 
   private emitReplayEventsToClient(
@@ -173,17 +170,6 @@ export class RemoteServerEventHub {
     for (const event of events) {
       this.aggregator.deliverRemoteEnvelopeToClient(clientId, serverId, directory, JSON.stringify(event))
     }
-  }
-
-  private buildReplayEvent(type: RemoteReplayEventType, directory: string, data: unknown): V2Event {
-    this.replayEventCount += 1
-    return {
-      id: `ocm_replay_remote_${this.replayEventCount}`,
-      created: Date.now(),
-      type,
-      location: { directory },
-      data,
-    } as V2Event
   }
 
   private connectAll(): void {
@@ -215,18 +201,7 @@ export class RemoteServerEventHub {
     }
 
     const authorization = connection.authorization
-    const init: RemoteEventSourceInit | undefined = authorization
-      ? {
-          fetch: (input, fetchInit) =>
-            fetch(input, {
-              ...fetchInit,
-              headers: {
-                ...(fetchInit?.headers ?? {}),
-                Authorization: authorization,
-              },
-            }),
-        }
-      : undefined
+    const init: RemoteEventSourceInit = createAuthorizedEventSourceInit(authorization)
 
     const stream = this.ensureStream(serverId)
     let source: RemoteEventSource
@@ -254,7 +229,7 @@ export class RemoteServerEventHub {
     stream.error = null
     stream.reconnectDelay = this.reconnectDelayMs
     logger.info(`Remote event stream connected: ${serverId}`)
-    this.aggregator.sendRemoteResync(serverId, JSON.stringify({ timestamp: Date.now() }))
+    this.aggregator.sendRemoteResync(serverId)
     void this.refreshVersion(serverId)
   }
 
@@ -278,7 +253,7 @@ export class RemoteServerEventHub {
       const current = this.streams.get(serverId)
       if (!current) return
       current.reconnectTimeout = null
-      current.reconnectDelay = Math.min(current.reconnectDelay * 2, this.maxReconnectDelayMs)
+      current.reconnectDelay = nextBackoffDelay(current.reconnectDelay, this.maxReconnectDelayMs)
       this.connectServer(serverId)
     }, delay)
   }
@@ -287,34 +262,13 @@ export class RemoteServerEventHub {
     const stream = this.streams.get(serverId)
     if (!stream) return
 
-    let event: V2Event
-    try {
-      event = JSON.parse(data) as V2Event
-    } catch {
-      return
-    }
-
-    if (!event?.type) return
-
-    const payloadJson = MULTILINE_PATTERN.test(data) ? JSON.stringify(event) : data
-    const directory = event.location?.directory
-    const sessionID = sessionIDFromEvent(event)
-    const forkParentId = event.type === 'session.forked' ? event.data.parentID : undefined
-    const inheritedDirectory = forkParentId ? stream.sessionDirectories.get(forkParentId) : undefined
+    const routed = parseOpenCodeEvent(data, stream.sessionDirectories)
+    if (!routed) return
 
     try {
-      const rememberedDirectory = directory ?? inheritedDirectory
-      const resolvedDirectory = rememberedDirectory ?? (sessionID ? stream.sessionDirectories.get(sessionID) : undefined)
-
-      if (sessionID && event.type === 'session.deleted') {
-        stream.sessionDirectories.delete(sessionID)
-      } else if (sessionID && rememberedDirectory) {
-        stream.sessionDirectories.set(sessionID, rememberedDirectory)
-      }
-
-      this.aggregator.deliverRemoteEnvelope(serverId, resolvedDirectory ?? null, payloadJson)
+      this.aggregator.deliverRemoteEnvelope(serverId, routed.resolvedDirectory ?? null, routed.payloadJson)
     } catch (error) {
-      logger.error(`Remote event stream failed to handle ${event.type} for ${serverId}:`, error)
+      logger.error(`Remote event stream failed to handle ${routed.event.type} for ${serverId}:`, error)
     }
   }
 
@@ -341,24 +295,39 @@ export class RemoteServerEventHub {
     }
 
     const stream = this.streams.get(change.serverId)
-    if (stream) stream.reconnectDelay = this.reconnectDelayMs
+    if (stream) {
+      stream.reconnectDelay = this.reconnectDelayMs
+      stream.version = null
+      stream.versionRequested = false
+      stream.versionProbeToken = 0
+    }
     this.connectServer(change.serverId)
   }
 
   private async refreshVersion(serverId: string): Promise<void> {
     const stream = this.streams.get(serverId)
     if (!stream || stream.versionRequested) return
-    const test = this.registry.test
-    if (typeof test !== 'function') return
 
+    this.versionProbeSequence += 1
+    const token = this.versionProbeSequence
     stream.versionRequested = true
+    stream.versionProbeToken = token
+
+    let version: string | null = null
     try {
-      const result = await test.call(this.registry, { serverId })
-      const current = this.streams.get(serverId)
-      if (current && result.ok && result.version) current.version = result.version
+      const result = await this.registry.test({ serverId })
+      version = result.ok && result.version ? result.version : null
     } catch (error) {
       logger.warn(`Failed to read the version of OpenCode server ${serverId}: ${String(error)}`)
     }
+
+    const current = this.streams.get(serverId)
+    if (!current || current.versionProbeToken !== token) return
+    if (version) {
+      current.version = version
+      return
+    }
+    current.versionRequested = false
   }
 
   private ensureStream(serverId: string): RemoteServerStream {
@@ -373,6 +342,7 @@ export class RemoteServerEventHub {
       error: null,
       version: null,
       versionRequested: false,
+      versionProbeToken: 0,
       sessionDirectories: new Map(),
     }
     this.streams.set(serverId, stream)

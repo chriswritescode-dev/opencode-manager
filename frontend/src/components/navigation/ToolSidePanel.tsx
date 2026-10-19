@@ -31,10 +31,13 @@ import { formatActivityWindow } from '@/lib/activeWork'
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from '@/components/ui/tooltip'
 import { restoreOverlayFocus } from '@/lib/overlayFocus'
 import { cn } from '@/lib/utils'
+import { isLocalOpenCodeServer, useRouteOpenCodeServerId } from '@/contexts/OpenCodeServerContext'
 
 const PANEL_WIDTH_CLASSES: Partial<Record<PanelTool, string>> = {
   activity: 'w-80',
 }
+
+const REMOTE_TOOL_KEYS: ReadonlySet<string> = new Set(['activity', 'mcp', 'skills'])
 
 function ActivityWindowLabel() {
   const minutes = useActivityWindowMinutes()
@@ -157,6 +160,7 @@ export function ToolSidePanel({
   const { activeTool, toggleTool, closePanel } = panel
   const location = useLocation()
   const openNavItem = useOpenNavItem()
+  const isRemoteRoute = !isLocalOpenCodeServer(useRouteOpenCodeServerId())
   const railRef = useRef<HTMLElement>(null)
   const previousActiveToolRef = useRef(activeTool)
 
@@ -173,6 +177,7 @@ export function ToolSidePanel({
   const panelTools: Array<{ item: MoreDrawerItem; tool: PanelTool }> = []
   const actionItems: MoreDrawerItem[] = []
   for (const item of buildToolItems(location.pathname)) {
+    if (isRemoteRoute && !REMOTE_TOOL_KEYS.has(item.key)) continue
     const tool = toolKeyOf(item)
     if (isPanelTool(tool)) panelTools.push({ item, tool })
     else actionItems.push(item)

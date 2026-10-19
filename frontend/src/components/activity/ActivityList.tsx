@@ -2,7 +2,7 @@ import { useLocation } from 'react-router-dom'
 import { CircleAlert, CircleCheck, CircleX } from 'lucide-react'
 import { useActiveWork } from '@/hooks/useActiveWork'
 import { SessionStatusIndicator } from '@/components/ui/session-status-indicator'
-import { parseRepoRoute } from '@/lib/navigation'
+import { parseRepoRoute, parseServerSessionRoute } from '@/lib/navigation'
 import { cn, formatShortRelativeTime, getRepoBranchLabel, getRepoDisplayName } from '@/lib/utils'
 import {
   ACTIVE_WORK_GROUPS,
@@ -28,8 +28,27 @@ interface ActivityListProps {
   variant?: 'full' | 'compact'
 }
 
-function isCurrentItem(item: ActiveWorkItem, sessionID: string | null, repoID: number | null) {
-  return item.repo.id === repoID && item.session.id === sessionID
+function isCurrentItem(
+  item: ActiveWorkItem,
+  sessionID: string | null,
+  repoID: number | null,
+  serverID: string | null,
+) {
+  if (item.session.id !== sessionID) return false
+  if (item.serverId) return item.serverId === serverID
+  return item.repo?.id === repoID
+}
+
+/** The row's short label: the local repo's name or the owning linked server's name. */
+function activityItemLabel(item: ActiveWorkItem): string {
+  return item.repo ? getRepoDisplayName(item.repo) : item.serverName ?? item.serverId ?? ''
+}
+
+/** The row's identifying line: a local repo with its branch, or the owning linked server's name. */
+function activityItemLine(item: ActiveWorkItem): string {
+  if (!item.repo) return activityItemLabel(item)
+  const branch = item.worktreeBranch ?? getRepoBranchLabel(item.repo)
+  return branch ? `${getRepoDisplayName(item.repo)} · ${branch}` : getRepoDisplayName(item.repo)
 }
 
 function activityRowClass(isCurrent: boolean, compact: boolean) {
@@ -63,11 +82,6 @@ interface ActivityRowProps {
 }
 
 function ActivityRow({ item, isCurrent, onSelect }: ActivityRowProps) {
-  const branch = item.worktreeBranch ?? getRepoBranchLabel(item.repo)
-  const repoLine = branch
-    ? `${getRepoDisplayName(item.repo)} · ${branch}`
-    : getRepoDisplayName(item.repo)
-
   return (
     <button
       type="button"
@@ -82,7 +96,7 @@ function ActivityRow({ item, isCurrent, onSelect }: ActivityRowProps) {
         <span className="block truncate text-foreground">
           {item.session.title || UNTITLED_SESSION_TITLE}
         </span>
-        <span className="block truncate text-xs text-muted-foreground">{repoLine}</span>
+        <span className="block truncate text-xs text-muted-foreground">{activityItemLine(item)}</span>
       </span>
       <span className="shrink-0 text-xs text-muted-foreground">
         {formatShortRelativeTime(new Date(item.updatedAt))}
@@ -106,7 +120,7 @@ function CompactActivityRow({ item, isCurrent, onSelect }: ActivityRowProps) {
         {item.session.title || UNTITLED_SESSION_TITLE}
       </span>
       <span className="max-w-[35%] truncate text-xs text-muted-foreground">
-        {getRepoDisplayName(item.repo)}
+        {activityItemLabel(item)}
       </span>
       <span className="shrink-0 text-xs text-muted-foreground">
         {formatShortRelativeTime(new Date(item.updatedAt))}
@@ -120,10 +134,18 @@ interface ActivityGroupProps {
   items: ActiveWorkItem[]
   currentSessionID: string | null
   currentRepoId: number | null
+  currentServerId: string | null
   onSelect: (item: ActiveWorkItem) => void
 }
 
-function ActivityGroup({ heading, items, currentSessionID, currentRepoId, onSelect }: ActivityGroupProps) {
+function ActivityGroup({
+  heading,
+  items,
+  currentSessionID,
+  currentRepoId,
+  currentServerId,
+  onSelect,
+}: ActivityGroupProps) {
   if (items.length === 0) return null
 
   return (
@@ -133,7 +155,7 @@ function ActivityGroup({ heading, items, currentSessionID, currentRepoId, onSele
         <ActivityRow
           key={item.key}
           item={item}
-          isCurrent={isCurrentItem(item, currentSessionID, currentRepoId)}
+          isCurrent={isCurrentItem(item, currentSessionID, currentRepoId, currentServerId)}
           onSelect={onSelect}
         />
       ))}
@@ -152,6 +174,8 @@ export function ActivityList({
   const { groups, isLoading, isError } = useActiveWork(minutes * MS_PER_MINUTE)
 
   const route = parseRepoRoute(location.pathname)
+  const serverRoute = parseServerSessionRoute(location.pathname)
+  const currentSessionID = route.sessionId ?? serverRoute?.sessionId ?? null
 
   if (isLoading) {
     if (hideWhenEmpty) return null
@@ -199,7 +223,7 @@ export function ActivityList({
           <CompactActivityRow
             key={item.key}
             item={item}
-            isCurrent={isCurrentItem(item, route.sessionId, route.repoId)}
+            isCurrent={isCurrentItem(item, currentSessionID, route.repoId, serverRoute?.serverId ?? null)}
             onSelect={onNavigate}
           />
         ))
@@ -210,8 +234,9 @@ export function ActivityList({
               key={group.key}
               heading={group.heading}
               items={groups[group.key]}
-              currentSessionID={route.sessionId}
+              currentSessionID={currentSessionID}
               currentRepoId={route.repoId}
+              currentServerId={serverRoute?.serverId ?? null}
               onSelect={onNavigate}
             />
           ))}

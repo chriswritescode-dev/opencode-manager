@@ -12,7 +12,9 @@ export function createBrowserEventStreamTransport(): EventStreamTransport {
         handlers.onConnected((event as MessageEvent).data)
       })
       eventSource.addEventListener('heartbeat', handlers.onHeartbeat)
-      eventSource.addEventListener('resync', handlers.onResync)
+      eventSource.addEventListener('resync', (event) => {
+        handlers.onResync((event as MessageEvent).data)
+      })
 
       return {
         close: () => eventSource.close(),

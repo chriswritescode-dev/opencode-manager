@@ -136,6 +136,8 @@ function activeWorkItem(
     key: `${directory}:${id}`,
     session: itemSession,
     repo: itemRepo,
+    serverId: null,
+    serverName: null,
     state,
     updatedAt: itemSession.time.updated,
     path: `/repos/${itemRepo.id}/sessions/${id}`,
@@ -875,6 +877,78 @@ describe('SessionPickerDialog', () => {
       sessionId: 'ses_run',
       directory: '/w/b',
       pinned: true,
+    })
+  })
+
+  describe('linked-server mode', () => {
+    beforeEach(() => {
+      mocks.repos = [repo(1, 'alpha', '/w/a')]
+      mocks.sessionsData = [session('ses_remote', 'Remote session', '/home/me/app')]
+    })
+
+    it('lists the project sessions without Manager-only tabs and reports the chosen server session', async () => {
+      const onSelectRemoteSession = vi.fn()
+      renderPicker({
+        remote: {
+          serverId: 'srv_kitchen',
+          serverName: 'Kitchen',
+          projectDirectory: '/home/me/app',
+        },
+        onSelectRemoteSession,
+      })
+
+      expect(screen.queryByRole('tab', { name: 'Projects' })).not.toBeInTheDocument()
+      expect(screen.getByRole('tab', { name: 'Active' })).toBeInTheDocument()
+
+      const row = await screen.findByRole('option', { name: /Remote session/ })
+      expect(row).toHaveTextContent('Kitchen')
+
+      fireEvent.click(row)
+
+      expect(onSelectRemoteSession).toHaveBeenCalledWith(
+        expect.objectContaining({ id: 'ses_remote' }),
+        'srv_kitchen',
+      )
+    })
+
+    it('navigates a remote active work row through the owning server', async () => {
+      const onSelectRemoteSession = vi.fn()
+      mocks.activeWorkGroups = {
+        needsInput: [
+          {
+            key: '/home/me/app/ses_remote',
+            session: session('ses_remote', 'Remote pending', '/home/me/app'),
+            repo: null,
+            serverId: 'srv_kitchen',
+            serverName: 'Kitchen',
+            state: 'needs-input',
+            updatedAt: Date.now(),
+            path: '/servers/srv_kitchen/sessions/ses_remote',
+          },
+        ],
+        running: [],
+        recent: [],
+      }
+      renderPicker({
+        remote: {
+          serverId: 'srv_kitchen',
+          serverName: 'Kitchen',
+          projectDirectory: '/home/me/app',
+        },
+        onSelectRemoteSession,
+      })
+      openActiveTab()
+
+      const row = await screen.findByRole('option', { name: /Remote pending/ })
+      expect(row).toHaveTextContent('Kitchen')
+      expect(screen.queryByRole('button', { name: 'Session actions' })).not.toBeInTheDocument()
+
+      fireEvent.click(row)
+
+      expect(onSelectRemoteSession).toHaveBeenCalledWith(
+        expect.objectContaining({ id: 'ses_remote' }),
+        'srv_kitchen',
+      )
     })
   })
 })

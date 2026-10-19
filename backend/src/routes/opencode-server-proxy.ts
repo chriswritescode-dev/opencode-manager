@@ -6,13 +6,12 @@ import {
   type OpenCodeServerConnection,
   type OpenCodeServerRegistry,
 } from '../services/opencode-server-registry'
-import { filterProxyHeaders } from '../utils/proxy-headers'
+import { filterProxyHeaders, NULL_BODY_STATUSES } from '../utils/proxy-headers'
 import { logger } from '../utils/logger'
 
 const MOUNT_PREFIX = '/api/opencode/servers/'
 const REQUEST_EXCLUDED_HEADERS = new Set(['cookie', 'origin', 'referer'])
 const RESPONSE_EXCLUDED_HEADERS = new Set(['set-cookie'])
-const NULL_BODY_STATUSES = new Set([101, 204, 205, 304])
 
 type UpstreamPath = { ok: true; path: string } | { ok: false; status: 400 | 404 }
 
@@ -56,11 +55,27 @@ function resolveUpstreamPath(pathname: string): UpstreamPath {
   return path.startsWith('/api/') ? { ok: true, path } : { ok: false, status: 404 }
 }
 
-function buildUpstreamUrl(connection: OpenCodeServerConnection, path: string, search: string): URL {
+type UpstreamTarget = { basePath: string; url: URL }
+
+/**
+ * Builds the upstream URL for a resolved API path. The returned `basePath` is the
+ * connection base path without trailing slashes and is used to bound the final,
+ * URL-normalized pathname to the connection's own `/api/` space.
+ */
+function resolveUpstreamTarget(
+  connection: OpenCodeServerConnection,
+  path: string,
+  search: string,
+): UpstreamTarget {
   const url = new URL(connection.baseUrl)
-  url.pathname = `${url.pathname.replace(/\/+$/, '')}${path}`
+  const basePath = url.pathname.replace(/\/+$/, '')
+  url.pathname = `${basePath}${path}`
   url.search = search
-  return url
+  return { basePath, url }
+}
+
+function isWithinUpstreamApiPath(basePath: string, pathname: string): boolean {
+  return pathname.startsWith(`${basePath}/api/`)
 }
 
 export function createOpenCodeServerProxyRoutes(
@@ -90,16 +105,20 @@ export function createOpenCodeServerProxyRoutes(
       return c.json({ error: 'Failed to proxy request' }, 500)
     }
 
+    const upstream = resolveUpstreamTarget(connection, upstreamPath.path, url.search)
+    if (!isWithinUpstreamApiPath(upstream.basePath, upstream.url.pathname)) {
+      return c.json({ error: 'Invalid proxy path' }, 400)
+    }
+
     const headers = filterProxyHeaders(c.req.raw.headers, REQUEST_EXCLUDED_HEADERS)
     if (connection.authorization) {
       headers.Authorization = connection.authorization
     }
 
     const hasBody = c.req.method !== 'GET' && c.req.method !== 'HEAD'
-    const upstreamUrl = buildUpstreamUrl(connection, upstreamPath.path, url.search)
 
     try {
-      const upstreamResponse = await fetchFn(upstreamUrl.toString(), {
+      const upstreamResponse = await fetchFn(upstream.url.toString(), {
         method: c.req.method,
         headers,
         body: hasBody ? c.req.raw.body : undefined,
@@ -121,7 +140,7 @@ export function createOpenCodeServerProxyRoutes(
         headers: responseHeaders,
       })
     } catch (error) {
-      logger.warn(`OpenCode server proxy request failed: ${c.req.method} ${upstreamUrl.host}${upstreamPath.path}`, error)
+      logger.warn(`OpenCode server proxy request failed: ${c.req.method} ${upstream.url.host}${upstreamPath.path}`, error)
       return c.json({ error: 'Remote OpenCode server unreachable' }, 502)
     }
   })

@@ -18,7 +18,7 @@ export interface EventStreamTransportHandlers {
   onMessage(data: string): void
   onConnected(data: string): void
   onHeartbeat(): void
-  onResync(): void
+  onResync(data?: string): void
 }
 
 export interface EventStreamTransport {

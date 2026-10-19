@@ -413,6 +413,62 @@ describe('useSSE', () => {
     unmount()
   })
 
+  it('ignores a remote resync while the browser stream stays connected', async () => {
+    const queryClient = new QueryClient({
+      defaultOptions: {
+        queries: { retry: false },
+      },
+    })
+    const invalidateQueries = vi.spyOn(queryClient, 'invalidateQueries')
+
+    const { result, unmount } = renderHook(
+      () => useSSE('/repo', 'session-1'),
+      { wrapper: createWrapper(queryClient) }
+    )
+
+    await waitFor(() => expect(MockEventSource.instances).toHaveLength(1))
+    await connect(0, 'client-1')
+    await waitFor(() => expect(result.current.isConnected).toBe(true))
+    invalidateQueries.mockClear()
+
+    act(() => {
+      MockEventSource.instances[0].emit('resync', { timestamp: Date.now(), serverId: 'srv_remote' })
+    })
+
+    expect(invalidateQueries).not.toHaveBeenCalled()
+
+    unmount()
+  })
+
+  it('ignores a local resync on a remote server', async () => {
+    const queryClient = new QueryClient({
+      defaultOptions: {
+        queries: { retry: false },
+      },
+    })
+    const wrapper = ({ children }: { children: ReactNode }) => (
+      <QueryClientProvider client={queryClient}>
+        <OpenCodeServerProvider serverId="srv_remote">{children}</OpenCodeServerProvider>
+      </QueryClientProvider>
+    )
+    const invalidateQueries = vi.spyOn(queryClient, 'invalidateQueries')
+
+    const { result, unmount } = renderHook(() => useSSE('/repo', 'session-1'), { wrapper })
+
+    await waitFor(() => expect(MockEventSource.instances).toHaveLength(1))
+    await connect(0, 'client-1')
+    await waitFor(() => expect(result.current.isConnected).toBe(true))
+    invalidateQueries.mockClear()
+
+    act(() => {
+      MockEventSource.instances[0].emit('resync', { timestamp: Date.now() })
+    })
+
+    expect(invalidateQueries).not.toHaveBeenCalled()
+
+    unmount()
+  })
+
   it('tracks background shells from shell lifecycle events without dropping completed shells', async () => {
     const queryClient = new QueryClient({
       defaultOptions: {

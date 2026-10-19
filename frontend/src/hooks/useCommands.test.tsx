@@ -161,7 +161,7 @@ describe('useCommands', () => {
     expect(result.current.findCommand('und')).toBeUndefined()
   })
 
-  it('omits Manager-only built-ins for a linked server', () => {
+  it('keeps remote-capable built-ins and omits Manager-only ones for a linked server', () => {
     const { result } = renderHook(() => useCommands({ enabled: false }), {
       wrapper: createWrapper('srv_kitchen'),
     })
@@ -171,12 +171,12 @@ describe('useCommands', () => {
     expect(names).not.toContain('sessions')
     expect(names).not.toContain('resume')
     expect(names).not.toContain('continue')
-    expect(names).not.toContain('mcp')
-    expect(names).not.toContain('skills')
     expect(names).not.toContain('walkthrough')
+    expect(names).toContain('mcp')
+    expect(names).toContain('skills')
     expect(names).toContain('models')
     expect(names).toContain('compact')
-    expect(result.current.findCommand('mcp')).toBeUndefined()
+    expect(result.current.findCommand('mcp')).toBeDefined()
   })
 
   it('keeps Manager-only built-ins for the local server', () => {

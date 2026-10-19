@@ -149,6 +149,23 @@ function HomeHarness() {
   )
 }
 
+function RemoteHarness() {
+  const panel = useToolPanel(true)
+  return (
+    <>
+      <ToolSidePanel
+        panel={panel}
+        repoId={0}
+        sessionId="ses_remote"
+        directory="/home/me/app"
+        repoDirectory="/home/me/app"
+        filesBasePath={undefined}
+      />
+      <LocationProbe />
+    </>
+  )
+}
+
 beforeEach(() => {
   vi.clearAllMocks()
   activityMocks.useActiveWorkCounts.mockReturnValue({ needsInput: 0, running: 0 })
@@ -328,6 +345,25 @@ describe('ToolSidePanel', () => {
     const rail = screen.getByRole('navigation', { name: 'Tools' })
     const buttons = within(rail).getAllByRole('button')
     expect(buttons[0]).toHaveAccessibleName('Activity')
+  })
+
+  it('shows only the remote-capable tools on a linked-server route', async () => {
+    const user = userEvent.setup()
+    render(
+      <MemoryRouter initialEntries={['/servers/srv_kitchen/sessions/ses_remote']}>
+        <RemoteHarness />
+      </MemoryRouter>,
+    )
+
+    const rail = screen.getByRole('navigation', { name: 'Tools' })
+    expect(
+      within(rail)
+        .getAllByRole('button')
+        .map((button) => button.getAttribute('aria-label') ?? button.textContent?.trim()),
+    ).toEqual(['Activity', 'MCP', 'Skills'])
+
+    await user.click(screen.getByRole('button', { name: 'MCP' }))
+    expect(await screen.findByText('mcp-tool')).toBeInTheDocument()
   })
 
   it('opens the Activity panel with rows and the window label when clicked', async () => {

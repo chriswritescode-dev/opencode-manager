@@ -1,9 +1,9 @@
 import { z } from "zod";
 
 export const LOCAL_OPENCODE_SERVER_ID = "local";
-export const OPENCODE_SERVER_DEFAULT_USERNAME = "opencode";
+export const OPENCODE_SERVER_USERNAME = "opencode";
 export const OPENCODE_SERVER_LINK_PROTOCOL = "ocm:";
-export const OPENCODE_SERVER_LINK_VERSION = "1";
+export const OPENCODE_SERVER_LINK_VERSION = "2";
 
 const HttpUrlSchema = z
   .string()
@@ -31,7 +31,7 @@ export const CreateOpenCodeServerRequestSchema = z
   .object({
     name: z.string().trim().min(1).max(100),
     baseUrl: HttpUrlSchema,
-    username: z.string().trim().min(1).max(100).default(OPENCODE_SERVER_DEFAULT_USERNAME),
+    username: z.string().trim().min(1).max(100).default(OPENCODE_SERVER_USERNAME),
     password: z.string().min(1).max(1024).optional(),
     pairing: OpenCodeServerPairingSchema.optional(),
     enabled: z.boolean().default(true),
@@ -51,7 +51,7 @@ export const UpdateOpenCodeServerRequestSchema = z
 
 export const TestOpenCodeServerRequestSchema = z.object({
   baseUrl: HttpUrlSchema,
-  username: z.string().trim().min(1).max(100).default(OPENCODE_SERVER_DEFAULT_USERNAME),
+  username: z.string().trim().min(1).max(100).default(OPENCODE_SERVER_USERNAME),
   password: z.string().max(1024).optional(),
 });
 
@@ -100,13 +100,8 @@ export function buildOpenCodeServerLink(link: OpenCodeServerLink): string {
 
 /** Parses an `ocm://link` URL from a QR code or pasted text; returns null when it is not a valid link. */
 export function parseOpenCodeServerLink(text: string): OpenCodeServerLink | null {
-  let url: URL;
-  try {
-    url = new URL(text.trim());
-  } catch {
-    return null;
-  }
-  if (url.protocol !== OPENCODE_SERVER_LINK_PROTOCOL || url.hostname !== "link") return null;
+  const url = parseOpenCodeServerLinkUrl(text);
+  if (!url) return null;
   if (url.searchParams.get("v") !== OPENCODE_SERVER_LINK_VERSION) return null;
 
   const parsed = OpenCodeServerLinkSchema.safeParse({
@@ -116,6 +111,22 @@ export function parseOpenCodeServerLink(text: string): OpenCodeServerLink | null
     pairing: { pairUrl: url.searchParams.get("pair"), code: url.searchParams.get("code") },
   });
   return parsed.success ? parsed.data : null;
+}
+
+/** Reads the `v` parameter of an `ocm://link` URL, or null when the text is not an `ocm://link` URL. */
+export function readOpenCodeServerLinkVersion(text: string): string | null {
+  return parseOpenCodeServerLinkUrl(text)?.searchParams.get("v") ?? null;
+}
+
+function parseOpenCodeServerLinkUrl(text: string): URL | null {
+  let url: URL;
+  try {
+    url = new URL(text.trim());
+  } catch {
+    return null;
+  }
+  if (url.protocol !== OPENCODE_SERVER_LINK_PROTOCOL || url.hostname !== "link") return null;
+  return url;
 }
 
 const REMOTE_DIRECTORY_KEY_PATTERN = /^(srv_[A-Za-z0-9_-]+)\|(.+)$/s;

@@ -10,6 +10,7 @@ const resetStore = () => {
     outcomes: new Map(),
     parents: new Map(),
     directories: new Map(),
+    sessionServers: new Map(),
     runningShells: new Map(),
     shellRevisions: new Map(),
     shellRevision: 0,
@@ -43,6 +44,36 @@ describe('sessionStatusStore', () => {
     expect(useSessionStatus.getState().getStatus('session-a')).toEqual({ type: 'busy' })
 
     useSessionStatus.getState().clearStatus('session-a')
+  })
+
+  it('keeps a remote server session status across a local snapshot', () => {
+    const store = useSessionStatus.getState()
+    store.setSessionServer('session-remote', 'srv_remote')
+    store.setStatus('session-remote', { type: 'busy' })
+
+    const token = store.beginStatusSnapshot()
+    useSessionStatus.getState().replaceStatuses({}, token)
+
+    expect(useSessionStatus.getState().getStatus('session-remote')).toEqual({ type: 'busy' })
+    expect(useSessionStatus.getState().knownSessions.has('session-remote')).toBe(true)
+  })
+
+  it('does not record ownership for a local session server', () => {
+    const store = useSessionStatus.getState()
+    store.setSessionServer('session-local', 'local')
+
+    expect(useSessionStatus.getState().sessionServers.has('session-local')).toBe(false)
+  })
+
+  it('forgets the recorded server of a deleted session', () => {
+    const store = useSessionStatus.getState()
+    store.setSessionServer('session-remote', 'srv_remote')
+    store.setStatus('session-remote', { type: 'busy' })
+
+    store.forgetSession('session-remote')
+
+    expect(useSessionStatus.getState().sessionServers.has('session-remote')).toBe(false)
+    expect(useSessionStatus.getState().getStatus('session-remote')).toEqual({ type: 'idle' })
   })
 
   it('keeps a more specific live status when a snapshot reports the session as busy', () => {

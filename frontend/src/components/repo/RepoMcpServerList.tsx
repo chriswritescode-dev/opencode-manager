@@ -12,6 +12,7 @@ interface RepoMcpServerListProps {
   serverIds: string[]
   isLoadingStatus: boolean
   localStatus: Record<string, McpStatus>
+  oauthAvailable: boolean
   toggleMutation: {
     mutate: (variables: { serverId: string; enable: boolean }) => void
     isPending: boolean
@@ -29,6 +30,7 @@ export function RepoMcpServerList({
   serverIds,
   isLoadingStatus,
   localStatus,
+  oauthAvailable,
   toggleMutation,
   removeAuthMutation,
   onAuthClick,
@@ -56,7 +58,8 @@ export function RepoMcpServerList({
             const failed = status?.status === 'failed'
             const isOAuthServer = !!status?.integrationID
             const connectedWithOAuth = isOAuthServer && isConnected
-            const showAuthButton = needsAuth || (isOAuthServer && failed)
+            const showAuthButton = oauthAvailable && (needsAuth || (isOAuthServer && failed))
+            const showOAuthMenu = oauthAvailable && (showAuthButton || connectedWithOAuth)
 
             return (
               <div
@@ -68,7 +71,7 @@ export function RepoMcpServerList({
                     <p className="text-sm font-medium truncate">
                       {formatMcpServerName(serverId)}
                     </p>
-                    {(showAuthButton || connectedWithOAuth) ? (
+                    {showOAuthMenu ? (
                       <DropdownMenu>
                         <DropdownMenuTrigger asChild>
                           <button 

@@ -4,6 +4,7 @@ import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
 import type { ReactNode } from 'react'
 import { useVariants } from './useVariants'
 import { useModelStore } from '@/stores/modelStore'
+import { OpenCodeServerProvider } from '@/contexts/OpenCodeServerContext'
 import { modelStateQueryKey, useModelSelection, type ModelSelectionSession } from './useModelSelection'
 import * as providersApi from '@/api/providers'
 import type { Provider } from '@/api/providers'
@@ -319,5 +320,53 @@ describe('useVariants', () => {
 
     await waitFor(() => expect(result.current.variants.currentVariant).toBe('high'))
     expect(useModelStore.getState().sessionPicks.s1?.[AGENT_ID]).toBeUndefined()
+  })
+
+  describe('remote server', () => {
+    const REMOTE_SERVER_ID = 'srv_remote'
+
+    const renderRemoteVariants = (queryClient: QueryClient, session?: ModelSelectionSession) =>
+      renderHook(() => useVariants(DIRECTORY, session), {
+        wrapper: ({ children }) => (
+          <QueryClientProvider client={queryClient}>
+            <OpenCodeServerProvider serverId={REMOTE_SERVER_ID}>{children}</OpenCodeServerProvider>
+          </QueryClientProvider>
+        ),
+      })
+
+    it('keeps a remote session variant in the session pick without persisting it', async () => {
+      selectAgentModel()
+      const { result } = renderRemoteVariants(createQueryClient(), {
+        id: 's1',
+        agent: AGENT_ID,
+        model: { providerID: PROVIDER_ID, id: MODEL_ID },
+      })
+
+      await waitFor(() => expect(result.current.hasVariants).toBe(true))
+
+      act(() => {
+        result.current.setVariant('high')
+      })
+
+      expect(useModelStore.getState().sessionPicks.s1[AGENT_ID].variant).toBe('high')
+      await waitFor(() => expect(result.current.currentVariant).toBe('high'))
+      expect(mockGetOpenCodeModelState).not.toHaveBeenCalled()
+      expect(mockSaveOpenCodeModelVariant).not.toHaveBeenCalled()
+    })
+
+    it('does not persist a remote variant outside a session', async () => {
+      selectAgentModel()
+      const { result } = renderRemoteVariants(createQueryClient())
+
+      await waitFor(() => expect(result.current.hasVariants).toBe(true))
+
+      act(() => {
+        result.current.setVariant('high')
+      })
+
+      expect(mockSaveOpenCodeModelVariant).not.toHaveBeenCalled()
+      expect(useModelStore.getState().newSessionPicks).toEqual({})
+      expect(result.current.currentVariant).toBeUndefined()
+    })
   })
 })

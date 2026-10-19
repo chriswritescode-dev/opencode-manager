@@ -6,7 +6,8 @@ import { listSessionMessages, readSessionSnapshot } from '@/api/opencode'
 import { openCodeEventStream } from '@/lib/opencode-event-stream'
 import { sessionTranscriptQueryKey } from '@/lib/queryInvalidation'
 import { serverScopedKey } from '@/lib/serverScope'
-import { useOpenCodeServerId } from '@/contexts/OpenCodeServerContext'
+import { isLocalOpenCodeServer, useOpenCodeServerId } from '@/contexts/OpenCodeServerContext'
+import { useOpenCodeServerStatuses } from '@/hooks/useOpenCodeServers'
 import {
   applySessionEvents,
   emptySessionTranscript,
@@ -25,6 +26,7 @@ const TRANSCRIPT_FALLBACK_POLL_INTERVAL_MS = 5000
 
 export function useSessionTranscript(sessionID: string, directory: string) {
   const serverId = useOpenCodeServerId()
+  const isRemoteServer = !isLocalOpenCodeServer(serverId)
   const queryClient = useQueryClient()
   const queryKey = useMemo(
     () => serverScopedKey(sessionTranscriptQueryKey(sessionID), serverId),
@@ -39,6 +41,8 @@ export function useSessionTranscript(sessionID: string, directory: string) {
   const cursorGenerationRef = useRef(0)
   const latestNewestReadRef = useRef<Promise<TranscriptCache> | null>(null)
   const [isStreamConnected, setIsStreamConnected] = useState(false)
+  const { statusById } = useOpenCodeServerStatuses({ enabled: isRemoteServer })
+  const isStreamHealthy = isStreamConnected && (!isRemoteServer || statusById[serverId]?.connected === true)
 
   const performNewestPageRead = useCallback(async (): Promise<TranscriptCache> => {
     const generation = (newestReadGenerationRef.current += 1)
@@ -90,7 +94,7 @@ export function useSessionTranscript(sessionID: string, directory: string) {
     enabled: Boolean(sessionID && directory),
     staleTime: Infinity,
     refetchOnWindowFocus: false,
-    refetchInterval: isStreamConnected ? false : TRANSCRIPT_FALLBACK_POLL_INTERVAL_MS,
+    refetchInterval: isStreamHealthy ? false : TRANSCRIPT_FALLBACK_POLL_INTERVAL_MS,
   })
 
   const fetchOlder = useCallback(async () => {
@@ -159,7 +163,10 @@ export function useSessionTranscript(sessionID: string, directory: string) {
         if (!connected || wasConnected !== false) return
         refreshNewestPage()
       },
-      onResync: refreshNewestPage,
+      onResync: (_subscribedDirectories: string[], resyncServerId?: string) => {
+        if ((resyncServerId ?? LOCAL_OPENCODE_SERVER_ID) !== serverId) return
+        refreshNewestPage()
+      },
     })
 
     if (queryClient.getQueryData<TranscriptCache>(queryKey)) {

@@ -3,7 +3,8 @@ import { act, renderHook, waitFor } from '@testing-library/react'
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
 import { useModelSelection, useOpenCodeDefaultModel } from './useModelSelection'
 import { useProviders } from './useProviders'
-import { useModelStore, type ModelSelection } from '@/stores/modelStore'
+import { locationAgentKey, useModelStore, type ModelSelection } from '@/stores/modelStore'
+import { OpenCodeServerProvider } from '@/contexts/OpenCodeServerContext'
 import * as providersApi from '@/api/providers'
 import type { Provider } from '@/api/providers'
 import type { ModelInfo } from '@opencode-manager/shared/opencode'
@@ -479,6 +480,107 @@ describe('useModelSelection', () => {
 
       expect(useModelStore.getState().sessionPicks).toEqual({})
       expect(useModelStore.getState().newSessionPicks).toEqual({})
+    })
+  })
+
+  describe('remote server scoping', () => {
+    const REMOTE_SERVER_ID = 'srv_remote'
+    const catalog = {
+      providers: [
+        provider('anthropic', 'Anthropic', ['claude-sonnet-4']),
+        provider('openai', 'OpenAI', ['gpt-4o']),
+      ],
+      models: [modelInfo('anthropic', 'claude-sonnet-4'), modelInfo('openai', 'gpt-4o')],
+    }
+
+    const renderRemote = (directory = '/test') => {
+      const queryClient = createTestQueryClient()
+      return renderHook(
+        () => useModelSelection(directory),
+        {
+          wrapper: ({ children }) => (
+            <QueryClientProvider client={queryClient}>
+              <OpenCodeServerProvider serverId={REMOTE_SERVER_ID}>{children}</OpenCodeServerProvider>
+            </QueryClientProvider>
+          ),
+        },
+      )
+    }
+
+    beforeEach(() => {
+      mockGetProviders.mockResolvedValue(catalog)
+      useModelStore.getState().setActiveAgent({ id: 'build' })
+    })
+
+    it('keys new-session picks by the remote server and directory', async () => {
+      const { result } = renderRemote()
+
+      await waitFor(() => {
+        expect(result.current.model).not.toBeNull()
+      })
+
+      act(() => {
+        result.current.setModel({ providerID: 'openai', modelID: 'gpt-4o' })
+      })
+
+      expect(
+        useModelStore.getState().newSessionPicks[locationAgentKey(`${REMOTE_SERVER_ID}|/test`, 'build')],
+      ).toEqual({ providerID: 'openai', modelID: 'gpt-4o' })
+      expect(
+        useModelStore.getState().newSessionPicks[locationAgentKey('/test', 'build')],
+      ).toBeUndefined()
+    })
+
+    it('does not read or write the local model state', async () => {
+      const { result } = renderRemote()
+
+      await waitFor(() => {
+        expect(result.current.isModelReady).toBe(true)
+      })
+
+      act(() => {
+        result.current.setModel({ providerID: 'openai', modelID: 'gpt-4o' })
+        result.current.toggleFavorite({ providerID: 'openai', modelID: 'gpt-4o' })
+        result.current.removeRecentModel({ providerID: 'openai', modelID: 'gpt-4o' })
+      })
+
+      expect(mockGetOpenCodeModelState).not.toHaveBeenCalled()
+      expect(mockAddOpenCodeRecentModel).not.toHaveBeenCalled()
+      expect(mockToggleOpenCodeFavoriteModel).not.toHaveBeenCalled()
+      expect(mockRemoveOpenCodeRecentModel).not.toHaveBeenCalled()
+      expect(result.current.recentModels).toEqual([])
+      expect(result.current.favoriteModels).toEqual([])
+      expect(result.current.modelState).toBeUndefined()
+    })
+
+    it('ignores local recents in the selection order', async () => {
+      mockGetOpenCodeConfiguredModel.mockResolvedValue('anthropic/claude-sonnet-4')
+      mockGetOpenCodeModelState.mockResolvedValue({
+        recent: [{ providerID: 'openai', modelID: 'gpt-4o' }],
+        favorite: [],
+        variant: { 'openai/gpt-4o': 'high' },
+      })
+
+      const { result } = renderRemote()
+
+      await waitFor(() => {
+        expect(result.current.model).toEqual({ providerID: 'anthropic', modelID: 'claude-sonnet-4' })
+      })
+      expect(result.current.recentModels).toEqual([])
+    })
+
+    it('keeps the agent model ahead of the configured model', async () => {
+      mockGetOpenCodeConfiguredModel.mockResolvedValue('openai/gpt-4o')
+      useModelStore.getState().setActiveAgent({
+        id: 'build',
+        model: { providerID: 'anthropic', id: 'claude-sonnet-4' },
+      })
+
+      const { result } = renderRemote()
+
+      await waitFor(() => {
+        expect(result.current.model).toEqual({ providerID: 'anthropic', modelID: 'claude-sonnet-4' })
+      })
     })
   })
 

@@ -1,27 +1,31 @@
 /* eslint-disable react-refresh/only-export-components */
 import { createContext, useContext, useEffect, useState, useCallback, useMemo, useRef } from 'react'
 import { useLocation, useNavigate } from 'react-router-dom'
-import { useQueryClient, useQuery } from '@tanstack/react-query'
+import { useQueryClient, useQuery, useQueries } from '@tanstack/react-query'
 import {
   cancelForm,
   getSession,
   listActiveSessions,
   listPendingForms,
   listPendingPermissions,
+  listProjects,
   listShells,
   replyForm,
   replyPermission,
 } from '@/api/opencode'
 import { listRepos } from '@/api/repos'
 import { FetchError } from '@opencode-manager/shared'
-import { LOCAL_OPENCODE_SERVER_ID, parseServerDirectoryKey } from '@opencode-manager/shared/schemas'
+import { buildServerDirectoryKey, LOCAL_OPENCODE_SERVER_ID, parseServerDirectoryKey } from '@opencode-manager/shared/schemas'
 import { isLocalOpenCodeServer } from '@/contexts/OpenCodeServerContext'
+import { useAuth } from '@/hooks/useAuth'
+import { useOpenCodeServers } from '@/hooks/useOpenCodeServers'
 import type { FormAnswer, FormInfo, PermissionRequest, V2Event } from '@opencode-manager/shared/opencode'
 import type { PermissionResponse, SSHHostKeyRequest, Repo } from '@/api/types'
 import { showToast } from '@/lib/toast'
 import { openCodeEventStream, type EventStreamHealthState } from '@/lib/opencode-event-stream'
 import { addToSessionKeyedState, removeFromSessionKeyedState } from '@/lib/sessionKeyedState'
 import { getServerSessionPath, getSessionPath, parseRepoRoute, parseServerSessionRoute } from '@/lib/navigation'
+import { serverScopedKey } from '@/lib/serverScope'
 import { repoMatchesDirectory } from '@/components/navigation/sidebar-session-tree'
 import { changeWalkthroughQueryKey } from '@/hooks/useChangeWalkthrough'
 import { busyStatusesFromActiveSessions, useSessionStatus } from '@/stores/sessionStatusStore'
@@ -43,8 +47,8 @@ const LOCATION_CATALOG_QUERY_KEYS = [
 ] as const
 
 type ServerScoped<T> = T & { serverId: string }
-export type PendingPermission = ServerScoped<PermissionRequest>
-export type PendingForm = ServerScoped<FormInfo>
+type PendingPermission = ServerScoped<PermissionRequest>
+type PendingForm = ServerScoped<FormInfo>
 type PermissionsBySession = Record<string, PendingPermission[]>
 type FormsBySession = Record<string, PendingForm[]>
 type SSEHealthState = Pick<EventStreamHealthState, 'isConnected' | 'isHealthy' | 'isStalled'>
@@ -131,7 +135,7 @@ function usePinnedViewedItem<T extends SessionScopedItem>(
 
 function reconcileBySessionForDirectory<T extends SessionScopedItem & { serverId: string }>(
   prev: Record<string, T[]>,
-  directory: string,
+  directoryKey: string,
   serverId: string,
   items: T[],
   sessionDirectories: ReadonlyMap<string, string>,
@@ -141,7 +145,7 @@ function reconcileBySessionForDirectory<T extends SessionScopedItem & { serverId
 
   for (const sessionID of Object.keys(prev)) {
     if (grouped[sessionID]) continue
-    if (sessionDirectories.get(sessionID) !== directory) continue
+    if (sessionDirectories.get(sessionID) !== directoryKey) continue
     if ((prev[sessionID]?.[0]?.serverId ?? LOCAL_OPENCODE_SERVER_ID) === serverId) {
       delete next[sessionID]
     }
@@ -316,6 +320,28 @@ export function EventProvider({ children }: { children: React.ReactNode }) {
     queryFn: listRepos,
   })
 
+  const { isAuthenticated } = useAuth()
+  const { servers } = useOpenCodeServers({ enabled: isAuthenticated })
+  const enabledRemoteServers = useMemo(() => servers.filter((server) => server.enabled), [servers])
+  const remoteProjectQueries = useQueries({
+    queries: enabledRemoteServers.map((server) => ({
+      queryKey: serverScopedKey(['opencode', 'projects'], server.id),
+      queryFn: () => listProjects(server.id),
+      enabled: isAuthenticated,
+      retry: false,
+    })),
+  })
+  const remoteProjectDirectoriesKey = useMemo(() => {
+    if (!isAuthenticated) return ''
+    const keys = new Set<string>()
+    enabledRemoteServers.forEach((server, index) => {
+      for (const project of remoteProjectQueries[index]?.data ?? []) {
+        if (project.canonical) keys.add(buildServerDirectoryKey(server.id, project.canonical))
+      }
+    })
+    return [...keys].sort().join('\n')
+  }, [isAuthenticated, enabledRemoteServers, remoteProjectQueries])
+
   const allPermissions = useMemo(() => Object.values(permissionsBySession).flat(), [permissionsBySession])
   const allForms = useMemo(() => Object.values(formsBySession).flat(), [formsBySession])
 
@@ -331,9 +357,15 @@ export function EventProvider({ children }: { children: React.ReactNode }) {
 
   const currentForm = usePinnedViewedItem(allForms, viewedSessionId, sessionParents)
 
-  const rememberSessionDirectory = useCallback((sessionID: string, directory?: string) => {
+  const rememberSessionDirectory = useCallback((
+    sessionID: string,
+    directory?: string,
+    serverId: string = LOCAL_OPENCODE_SERVER_ID,
+  ) => {
     if (!directory) return
-    useSessionStatus.getState().setSessionDirectory(sessionID, directory)
+    const state = useSessionStatus.getState()
+    state.setSessionServer(sessionID, serverId)
+    state.setSessionDirectory(sessionID, buildServerDirectoryKey(serverId, directory))
   }, [])
 
   const findCachedSessionDirectory = useCallback((sessionID: string): string | null => {
@@ -382,19 +414,27 @@ export function EventProvider({ children }: { children: React.ReactNode }) {
     return directory ?? null
   }, [queryClient])
 
-  const findSessionDirectory = useCallback((sessionID: string): string | null => {
+  const findSessionDirectoryKey = useCallback((sessionID: string): string | null => {
     const remembered = useSessionStatus.getState().directories.get(sessionID)
     if (remembered) return remembered
     return findCachedSessionDirectory(sessionID)
   }, [findCachedSessionDirectory])
 
+  const findSessionDirectory = useCallback((sessionID: string): string | null => {
+    const key = findSessionDirectoryKey(sessionID)
+    return key ? parseServerDirectoryKey(key).directory : null
+  }, [findSessionDirectoryKey])
+
   const getRepoIdForSession = useCallback((sessionID: string): number | null => {
     if (!repos) return null
-    const directory = findSessionDirectory(sessionID)
-    if (!directory) return null
+    if (useSessionStatus.getState().sessionServers.has(sessionID)) return null
+    const key = findSessionDirectoryKey(sessionID)
+    if (!key) return null
+    const { serverId, directory } = parseServerDirectoryKey(key)
+    if (!isLocalOpenCodeServer(serverId)) return null
     const repo = repos.find(r => repoMatchesDirectory(r, directory))
     return repo?.id ?? null
-  }, [repos, findSessionDirectory])
+  }, [repos, findSessionDirectoryKey])
 
   const currentPermissionDirectory = useMemo(
     () => (currentPermission ? findSessionDirectory(currentPermission.sessionID) : null),
@@ -427,13 +467,13 @@ export function EventProvider({ children }: { children: React.ReactNode }) {
     serverId: string,
   ) => {
     permissions.forEach(permission => {
-      rememberSessionDirectory(permission.sessionID, directory)
+      rememberSessionDirectory(permission.sessionID, directory, serverId)
     })
 
     setPermissionsBySession(prev =>
       reconcileBySessionForDirectory(
         prev,
-        directory,
+        buildServerDirectoryKey(serverId, directory),
         serverId,
         permissions.map(permission => ({ ...permission, serverId })),
         useSessionStatus.getState().directories,
@@ -447,13 +487,13 @@ export function EventProvider({ children }: { children: React.ReactNode }) {
     serverId: string,
   ) => {
     forms.forEach(form => {
-      rememberSessionDirectory(form.sessionID, directory)
+      rememberSessionDirectory(form.sessionID, directory, serverId)
     })
 
     setFormsBySession(prev =>
       reconcileBySessionForDirectory(
         prev,
-        directory,
+        buildServerDirectoryKey(serverId, directory),
         serverId,
         forms.map(form => ({ ...form, serverId })),
         useSessionStatus.getState().directories,
@@ -613,7 +653,11 @@ export function EventProvider({ children }: { children: React.ReactNode }) {
         try {
           const session = await getSession(lookupID, serverId)
           useSessionStatus.getState().setSessionParent(lookupID, session.parentID ?? null)
-          useSessionStatus.getState().setSessionDirectory(lookupID, session.location.directory)
+          useSessionStatus.getState().setSessionServer(lookupID, serverId)
+          useSessionStatus.getState().setSessionDirectory(
+            lookupID,
+            buildServerDirectoryKey(serverId, session.location.directory),
+          )
           currentID = session.parentID ?? null
         } catch (error) {
           if (import.meta.env.DEV) {
@@ -640,7 +684,7 @@ export function EventProvider({ children }: { children: React.ReactNode }) {
           if (shell.status !== 'running' || typeof sessionID !== 'string') return []
           return [{ id: shell.id, sessionID }]
         })
-        useSessionStatus.getState().replaceRunningShells(directory, runningShells, token)
+        useSessionStatus.getState().replaceRunningShells(key, runningShells, token)
         await resolveSessionAncestry(runningShells.map((shell) => shell.sessionID), serverId)
       } catch (error) {
         useSessionStatus.getState().endShellSnapshot(token)
@@ -670,7 +714,9 @@ export function EventProvider({ children }: { children: React.ReactNode }) {
       }
       const busyBeforeSnapshot = new Set<string>()
       for (const [sessionID, status] of useSessionStatus.getState().statuses.entries()) {
-        if (status.type !== 'idle') busyBeforeSnapshot.add(sessionID)
+        if (status.type === 'idle') continue
+        if (useSessionStatus.getState().sessionServers.has(sessionID)) continue
+        busyBeforeSnapshot.add(sessionID)
       }
       useSessionStatus.getState().replaceStatuses(
         busyStatusesFromActiveSessions(active),
@@ -711,7 +757,7 @@ export function EventProvider({ children }: { children: React.ReactNode }) {
     serverId: string = LOCAL_OPENCODE_SERVER_ID,
   ) => {
     const pendingPermissions = await listPendingPermissions(directory, serverId)
-    rememberSessionDirectory(sessionID, directory)
+    rememberSessionDirectory(sessionID, directory, serverId)
     reconcilePermissionsForDirectory(directory, pendingPermissions, serverId)
   }, [rememberSessionDirectory, reconcilePermissionsForDirectory])
 
@@ -721,7 +767,7 @@ export function EventProvider({ children }: { children: React.ReactNode }) {
     serverId: string = LOCAL_OPENCODE_SERVER_ID,
   ) => {
     const pendingForms = await listPendingForms(directory, serverId)
-    rememberSessionDirectory(sessionID, directory)
+    rememberSessionDirectory(sessionID, directory, serverId)
     reconcileFormsForDirectory(directory, pendingForms, serverId)
   }, [rememberSessionDirectory, reconcileFormsForDirectory])
 
@@ -735,7 +781,7 @@ export function EventProvider({ children }: { children: React.ReactNode }) {
       switch (event.type) {
         case 'permission.asked': {
           const request = event.data
-          rememberSessionDirectory(request.sessionID, event.directory)
+          rememberSessionDirectory(request.sessionID, event.directory, serverId)
           addPermission(request, serverId)
           if (!useSessionStatus.getState().parents.has(request.sessionID)) {
             void resolveSessionAncestry([request.sessionID], serverId)
@@ -749,7 +795,7 @@ export function EventProvider({ children }: { children: React.ReactNode }) {
         }
         case 'form.created': {
           const form = event.data.form
-          rememberSessionDirectory(form.sessionID, event.directory)
+          rememberSessionDirectory(form.sessionID, event.directory, serverId)
           addForm(form, serverId)
           if (!useSessionStatus.getState().parents.has(form.sessionID)) {
             void resolveSessionAncestry([form.sessionID], serverId)
@@ -764,25 +810,25 @@ export function EventProvider({ children }: { children: React.ReactNode }) {
         }
         case 'session.status': {
           const { sessionID, status } = event.data
-          if (event.directory) {
-            useSessionStatus.getState().setSessionDirectory(sessionID, event.directory)
-          }
+          useSessionStatus.getState().setSessionServer(sessionID, serverId)
+          rememberSessionDirectory(sessionID, event.directory, serverId)
           useSessionStatus.getState().setStatus(sessionID, status)
           break
         }
         case 'session.idle': {
+          useSessionStatus.getState().setSessionServer(event.data.sessionID, serverId)
           useSessionStatus.getState().setStatus(event.data.sessionID, { type: 'idle' })
           break
         }
         case 'session.execution.started': {
-          if (event.directory) {
-            useSessionStatus.getState().setSessionDirectory(event.data.sessionID, event.directory)
-          }
+          useSessionStatus.getState().setSessionServer(event.data.sessionID, serverId)
+          rememberSessionDirectory(event.data.sessionID, event.directory, serverId)
           useSessionStatus.getState().clearOutcome(event.data.sessionID)
           useSessionStatus.getState().setStatus(event.data.sessionID, { type: 'busy' })
           break
         }
         case 'session.execution.succeeded': {
+          useSessionStatus.getState().setSessionServer(event.data.sessionID, serverId)
           useSessionStatus.getState().setOutcome(event.data.sessionID, 'succeeded')
           useSessionStatus.getState().setStatus(event.data.sessionID, { type: 'idle' })
           invalidateSessionListCachesDebounced(queryClient, event.directory)
@@ -790,6 +836,7 @@ export function EventProvider({ children }: { children: React.ReactNode }) {
           break
         }
         case 'session.execution.failed': {
+          useSessionStatus.getState().setSessionServer(event.data.sessionID, serverId)
           useSessionStatus.getState().setOutcome(event.data.sessionID, 'failed')
           useSessionStatus.getState().setStatus(event.data.sessionID, { type: 'idle' })
           invalidateSessionListCachesDebounced(queryClient, event.directory)
@@ -797,6 +844,7 @@ export function EventProvider({ children }: { children: React.ReactNode }) {
           break
         }
         case 'session.execution.interrupted': {
+          useSessionStatus.getState().setSessionServer(event.data.sessionID, serverId)
           useSessionStatus.getState().setOutcome(event.data.sessionID, 'interrupted')
           useSessionStatus.getState().setStatus(event.data.sessionID, { type: 'idle' })
           invalidateSessionListCachesDebounced(queryClient, event.directory)
@@ -809,6 +857,7 @@ export function EventProvider({ children }: { children: React.ReactNode }) {
           break
         }
         case 'session.created': {
+          useSessionStatus.getState().setSessionServer(event.data.sessionID, serverId)
           invalidateSessionListCachesDebounced(queryClient, event.directory)
           if (typeof event.data.parentID === 'string') {
             useSessionStatus.getState().setSessionParent(event.data.sessionID, event.data.parentID)
@@ -829,8 +878,12 @@ export function EventProvider({ children }: { children: React.ReactNode }) {
             event.directory
           ) {
             const sessionID = info.metadata.sessionID
-            useSessionStatus.getState().setShellRunning(info.id, sessionID, event.directory)
-            useSessionStatus.getState().setSessionDirectory(sessionID, event.directory)
+            useSessionStatus.getState().setShellRunning(
+              info.id,
+              sessionID,
+              buildServerDirectoryKey(serverId, event.directory),
+            )
+            rememberSessionDirectory(sessionID, event.directory, serverId)
             if (!useSessionStatus.getState().parents.has(sessionID)) {
               void resolveSessionAncestry([sessionID], serverId)
             }
@@ -906,7 +959,19 @@ export function EventProvider({ children }: { children: React.ReactNode }) {
       }
     }
 
-    const handleResync = (subscribedDirectories: string[]) => {
+    const handleResync = (subscribedDirectories: string[], serverId?: string) => {
+      if (serverId && !isLocalOpenCodeServer(serverId)) {
+        const directories = subscribedDirectories.filter(
+          (key) => parseServerDirectoryKey(key).serverId === serverId,
+        )
+        void reconcilePendingActionsForDirectories(directories)
+        void syncRunningShells(directories)
+        invalidateQueryKeysDebounced(
+          queryClient,
+          LOCATION_CATALOG_QUERY_KEYS.map((key) => serverScopedKey(key, serverId)),
+        )
+        return
+      }
       const directories = [...new Set([...collectTrackedDirectories(), ...subscribedDirectories])]
       void reconcilePendingActionsForDirectories(directories)
       void fetchInitialSessionStatuses()
@@ -943,8 +1008,11 @@ export function EventProvider({ children }: { children: React.ReactNode }) {
     for (const directory of activeSessionDirectoriesKey.split('\n')) {
       if (directory) directories.add(directory)
     }
+    for (const key of remoteProjectDirectoriesKey.split('\n')) {
+      if (key) directories.add(key)
+    }
     subscriptionRef.current?.updateDirectories([...directories])
-  }, [repos, activeSessionDirectoriesKey])
+  }, [repos, activeSessionDirectoriesKey, remoteProjectDirectoriesKey])
 
   useEffect(() => {
     if (!repos || repos.length === 0) return

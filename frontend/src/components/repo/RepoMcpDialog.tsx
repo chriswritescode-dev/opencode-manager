@@ -4,7 +4,7 @@ import { RepoMcpServerList } from './RepoMcpServerList'
 import { DeleteDialog } from '@/components/ui/delete-dialog'
 import { McpOAuthDialog } from '@/components/settings/McpOAuthDialog'
 import { mcpApi, type McpStatus, type McpAuthStartResponse } from '@/api/mcp'
-import { useOpenCodeServerId } from '@/contexts/OpenCodeServerContext'
+import { isLocalOpenCodeServer, useOpenCodeServerId } from '@/contexts/OpenCodeServerContext'
 import { useMutation, useQueryClient } from '@tanstack/react-query'
 import { invalidateSessionCaches } from '@/lib/queryInvalidation'
 import { showToast } from '@/lib/toast'
@@ -23,6 +23,7 @@ interface RepoMcpContentProps {
 
 export function RepoMcpContent({ open, directory }: RepoMcpContentProps) {
   const openCodeServerId = useOpenCodeServerId()
+  const isRemoteServer = !isLocalOpenCodeServer(openCodeServerId)
   const queryClient = useQueryClient()
   const [localStatus, setLocalStatus] = useState<Record<string, McpStatus>>({})
   const [isLoadingStatus, setIsLoadingStatus] = useState(false)
@@ -108,36 +109,41 @@ export function RepoMcpContent({ open, directory }: RepoMcpContentProps) {
         serverIds={serverIds}
         isLoadingStatus={isLoadingStatus}
         localStatus={localStatus}
+        oauthAvailable={!isRemoteServer}
         toggleMutation={toggleMutation}
         removeAuthMutation={removeAuthMutation}
         onAuthClick={setAuthDialogServerId}
         onRemoveAuthClick={setRemoveAuthConfirmServer}
       />
 
-      <DeleteDialog
-        open={!!removeAuthConfirmServer}
-        onOpenChange={() => setRemoveAuthConfirmServer(null)}
-        onConfirm={() => {
-          if (removeAuthConfirmServer) {
-            removeAuthMutation.mutate(removeAuthConfirmServer)
-          }
-        }}
-        onCancel={() => setRemoveAuthConfirmServer(null)}
-        title="Remove Authentication"
-        description="This will remove the OAuth credentials for this MCP server at this location. You will need to re-authenticate to use this server here again."
-        itemName={removeAuthConfirmServer ? formatMcpServerName(removeAuthConfirmServer) : ''}
-        isDeleting={removeAuthMutation.isPending}
-      />
+      {!isRemoteServer && (
+        <DeleteDialog
+          open={!!removeAuthConfirmServer}
+          onOpenChange={() => setRemoveAuthConfirmServer(null)}
+          onConfirm={() => {
+            if (removeAuthConfirmServer) {
+              removeAuthMutation.mutate(removeAuthConfirmServer)
+            }
+          }}
+          onCancel={() => setRemoveAuthConfirmServer(null)}
+          title="Remove Authentication"
+          description="This will remove the OAuth credentials for this MCP server at this location. You will need to re-authenticate to use this server here again."
+          itemName={removeAuthConfirmServer ? formatMcpServerName(removeAuthConfirmServer) : ''}
+          isDeleting={removeAuthMutation.isPending}
+        />
+      )}
 
-      <McpOAuthDialog
-        open={!!authDialogServerId}
-        onOpenChange={(o) => !o && setAuthDialogServerId(null)}
-        serverName={authDialogServerId || ''}
-        onStartAuth={handleOAuthStartAuth}
-        onCheckStatus={handleOAuthCheckStatus}
-        onSuccess={handleOAuthSuccess}
-        directory={directory}
-      />
+      {!isRemoteServer && (
+        <McpOAuthDialog
+          open={!!authDialogServerId}
+          onOpenChange={(o) => !o && setAuthDialogServerId(null)}
+          serverName={authDialogServerId || ''}
+          onStartAuth={handleOAuthStartAuth}
+          onCheckStatus={handleOAuthCheckStatus}
+          onSuccess={handleOAuthSuccess}
+          directory={directory}
+        />
+      )}
     </div>
   )
 }

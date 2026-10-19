@@ -2,6 +2,7 @@ import { readState } from './state.js'
 import { getToken, describeTokenStore } from './internal-token-store.js'
 import { TokenStoreError } from './token-store.js'
 import { ManagerApi } from './manager-api.js'
+import { trimUrlTrailingSlashes } from '@opencode-manager/shared/utils'
 
 export type ManagerAuthFailureReason = 'no-manager' | 'token-store' | 'no-token'
 
@@ -15,15 +16,11 @@ export type ResolveManagerApiResult =
   | { ok: true; auth: ManagerAuthOk; api: ManagerApi }
   | { ok: false; message: string }
 
-/** Canonical Manager URL form used as the token-store account: trimmed, without trailing slashes. */
-export function normalizeManagerUrl(url: string): string {
-  return url.trim().replace(/\/+$/, '')
-}
-
+/** Resolves the Manager URL and token used to authenticate CLI requests. */
 export async function resolveManagerAuth(
   rawManagerUrl: string | undefined = readState()?.managerUrl,
 ): Promise<ManagerAuth> {
-  const managerUrl = rawManagerUrl ? normalizeManagerUrl(rawManagerUrl) : ''
+  const managerUrl = rawManagerUrl ? trimUrlTrailingSlashes(rawManagerUrl) : ''
   if (!managerUrl) {
     return {
       ok: false,

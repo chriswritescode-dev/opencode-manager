@@ -1,4 +1,5 @@
 import { create } from 'zustand'
+import { LOCAL_OPENCODE_SERVER_ID } from '@opencode-manager/shared/schemas'
 import type { SessionInfo } from '@opencode-manager/shared/opencode'
 import { childLifecycle, type BackgroundTaskLifecycle, type ChildOutcome } from '@/lib/backgroundWork'
 
@@ -31,6 +32,7 @@ interface SessionStatusStore {
   outcomes: Map<string, ChildOutcome>
   parents: Map<string, string | null>
   directories: Map<string, string>
+  sessionServers: Map<string, string>
   runningShells: Map<string, RunningShell>
   shellRevisions: Map<string, number>
   shellRevision: number
@@ -47,6 +49,7 @@ interface SessionStatusStore {
   clearStatus: (sessionID: string) => void
   setSessionParent: (sessionID: string, parentID: string | null) => void
   setSessionDirectory: (sessionID: string, directory: string) => void
+  setSessionServer: (sessionID: string, serverId: string) => void
   setShellRunning: (shellID: string, sessionID: string, directory: string) => void
   clearShell: (shellID: string) => void
   replaceRunningShells: (directory: string, shells: Array<{ id: string; sessionID: string }>, token: ShellSnapshotToken) => void
@@ -240,6 +243,8 @@ export const useSessionStatus = create<SessionStatusStore>((set, get) => {
     return touched !== undefined && touched > captureRevision
   }
 
+  const isRemoteOwned = (sessionID: string): boolean => get().sessionServers.has(sessionID)
+
   return {
     statuses: new Map(),
     statusCache: new Map(),
@@ -248,6 +253,7 @@ export const useSessionStatus = create<SessionStatusStore>((set, get) => {
     outcomes: new Map(),
     parents: new Map(),
     directories: new Map(),
+    sessionServers: new Map(),
     runningShells: new Map(),
     shellRevisions: new Map(),
     shellRevision: 0,
@@ -358,7 +364,7 @@ export const useSessionStatus = create<SessionStatusStore>((set, get) => {
       const newCache = new Map<string, string>()
 
       for (const [sessionID, status] of currentStatuses.entries()) {
-        if (!isLiveAfterCapture(sessionID, captureRevision)) continue
+        if (!isLiveAfterCapture(sessionID, captureRevision) && !isRemoteOwned(sessionID)) continue
         newMap.set(sessionID, status)
         newCache.set(sessionID, getStatusHash(status))
       }
@@ -379,6 +385,9 @@ export const useSessionStatus = create<SessionStatusStore>((set, get) => {
       }
       for (const sessionID of optimisticActiveTimers.keys()) {
         nextKnownSessions.add(sessionID)
+      }
+      for (const sessionID of newMap.keys()) {
+        if (isRemoteOwned(sessionID)) nextKnownSessions.add(sessionID)
       }
       for (const sessionID of currentKnownSessions) {
         if (!currentStatuses.has(sessionID)) nextKnownSessions.add(sessionID)
@@ -457,6 +466,16 @@ export const useSessionStatus = create<SessionStatusStore>((set, get) => {
         const directories = new Map(state.directories)
         directories.set(sessionID, directory)
         return { directories }
+      })
+    },
+
+    setSessionServer: (sessionID: string, serverId: string) => {
+      if (serverId === LOCAL_OPENCODE_SERVER_ID) return
+      if (get().sessionServers.get(sessionID) === serverId) return
+      set((state) => {
+        const sessionServers = new Map(state.sessionServers)
+        sessionServers.set(sessionID, serverId)
+        return { sessionServers }
       })
     },
 
@@ -546,6 +565,7 @@ export const useSessionStatus = create<SessionStatusStore>((set, get) => {
         current.outcomes.has(sessionID) ||
         current.parents.has(sessionID) ||
         current.directories.has(sessionID) ||
+        current.sessionServers.has(sessionID) ||
         ownsShell
       if (!hasSession && inFlightSnapshots.size === 0) return
 
@@ -556,6 +576,7 @@ export const useSessionStatus = create<SessionStatusStore>((set, get) => {
         const outcomes = new Map(state.outcomes)
         const parents = new Map(state.parents)
         const directories = new Map(state.directories)
+        const sessionServers = new Map(state.sessionServers)
         const runningShells = new Map(state.runningShells)
         statuses.delete(sessionID)
         statusCache.delete(sessionID)
@@ -563,6 +584,7 @@ export const useSessionStatus = create<SessionStatusStore>((set, get) => {
         outcomes.delete(sessionID)
         parents.delete(sessionID)
         directories.delete(sessionID)
+        sessionServers.delete(sessionID)
         const removedShellIDs: string[] = []
         for (const [shellID, shell] of runningShells.entries()) {
           if (shell.sessionID !== sessionID) continue
@@ -576,6 +598,7 @@ export const useSessionStatus = create<SessionStatusStore>((set, get) => {
           outcomes,
           parents,
           directories,
+          sessionServers,
           runningShells,
           ...(shellTouchPatch(state, removedShellIDs) ?? {}),
           ...(recordRevisionPatch(state, sessionID) ?? {}),

@@ -71,12 +71,13 @@ export function useOpenCodeServers(options: { enabled?: boolean } = {}) {
   }
 }
 
-export function useOpenCodeServerStatuses() {
+export function useOpenCodeServerStatuses(options: { enabled?: boolean } = {}) {
   const statusesQuery = useQuery({
     queryKey: OPENCODE_SERVER_STATUSES_QUERY_KEY,
     queryFn: listOpenCodeServerStatuses,
     refetchInterval: SERVER_STATUS_POLL_INTERVAL_MS,
     retry: false,
+    enabled: options.enabled ?? true,
   })
 
   const statusById = (statusesQuery.data ?? []).reduce<Record<string, OpenCodeServerStatus>>(

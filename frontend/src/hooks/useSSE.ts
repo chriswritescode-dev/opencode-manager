@@ -214,8 +214,9 @@ export const useSSE = (directory?: string | string[], currentSessionId?: string)
       }
     }
 
-    const handleResync = () => {
+    const handleResync = (_subscribedDirectories: string[], resyncServerId?: string) => {
       if (!mountedRef.current) return
+      if ((resyncServerId ?? LOCAL_OPENCODE_SERVER_ID) !== serverId) return
       invalidateSessionListCaches(queryClient)
       invalidateShellCaches(queryClient)
       refreshCurrentSession()

@@ -1,16 +1,22 @@
-import { randomBytes, timingSafeEqual } from 'node:crypto'
+import { randomBytes } from 'node:crypto'
 import { createServer, type IncomingMessage, type ServerResponse } from 'node:http'
 import { networkInterfaces, type NetworkInterfaceInfo } from 'node:os'
 import { renderUnicodeCompact } from 'uqr'
+import {
+  buildOpenCodeBasicAuth,
+  encryptOpenCodePairingCredentials,
+  isOpenCodePairingNonce,
+  verifyOpenCodePairingProof,
+  type OpenCodePairingCredentials,
+  type OpenCodePairingEncryptedCredentials,
+} from '@opencode-manager/shared/opencode'
+import { trimUrlTrailingSlashes } from '@opencode-manager/shared/utils'
 
 const DEFAULT_OPENCODE_PORT = 4096
 const REDEEM_PATH = '/redeem'
 const MAX_BODY_BYTES = 4096
 
-export interface PairingCredentials {
-  username: string
-  password: string
-}
+export type PairingCredentials = OpenCodePairingCredentials
 
 export type PairingOutcome = 'linked' | 'expired' | 'rejected'
 
@@ -65,9 +71,9 @@ export async function probeOpenCodeServer(
   credentials: PairingCredentials,
   timeoutMs = 3000,
 ): Promise<OpenCodeServerProbe> {
-  const authorization = `Basic ${Buffer.from(`${credentials.username}:${credentials.password}`).toString('base64')}`
+  const authorization = buildOpenCodeBasicAuth(credentials.password, credentials.username)
   try {
-    const response = await fetch(`${baseUrl.replace(/\/+$/, '')}/api/info`, {
+    const response = await fetch(`${trimUrlTrailingSlashes(baseUrl)}/api/info`, {
       headers: { authorization },
       signal: AbortSignal.timeout(timeoutMs),
     })
@@ -125,21 +131,43 @@ export async function startPairingServer(options: PairingServerOptions): Promise
       return
     }
 
-    const provided = readPairingCode(await readJsonBody(request))
+    const challenge = readPairingChallenge(await readJsonBody(request))
     if (settled) {
       sendJson(response, 404, { error: 'not found' })
       return
     }
 
-    if (provided !== null && codesMatch(provided, code)) {
-      sendJson(response, 200, { username: credentials.username, password: credentials.password }, () => {
-        settle('linked')
-      })
+    if (challenge === null) {
+      rejectRequest(response, 400, 'invalid pairing request')
       return
     }
 
+    if (!(await verifyOpenCodePairingProof(code, challenge.nonce, challenge.proof))) {
+      rejectRequest(response, 401, 'invalid pairing proof')
+      return
+    }
+
+    let encrypted: OpenCodePairingEncryptedCredentials
+    try {
+      encrypted = await encryptOpenCodePairingCredentials({ code, nonce: challenge.nonce, credentials })
+    } catch {
+      sendJson(response, 500, { error: 'pairing encryption failed' })
+      return
+    }
+
+    if (settled) {
+      sendJson(response, 404, { error: 'not found' })
+      return
+    }
+
+    sendJson(response, 200, encrypted, () => {
+      settle('linked')
+    })
+  }
+
+  function rejectRequest(response: ServerResponse, status: number, error: string): void {
     failures += 1
-    sendJson(response, 401, { error: 'invalid pairing code' }, failures >= maxAttempts
+    sendJson(response, status, { error }, failures >= maxAttempts
       ? () => {
           settle('rejected')
         }
@@ -180,17 +208,16 @@ export async function startPairingServer(options: PairingServerOptions): Promise
   }
 }
 
-function codesMatch(provided: string, expected: string): boolean {
-  const providedBytes = Buffer.from(provided, 'utf8')
-  const expectedBytes = Buffer.from(expected, 'utf8')
-  if (providedBytes.length !== expectedBytes.length) return false
-  return timingSafeEqual(providedBytes, expectedBytes)
+interface PairingChallenge {
+  nonce: string
+  proof: string
 }
 
-function readPairingCode(body: unknown): string | null {
+function readPairingChallenge(body: unknown): PairingChallenge | null {
   if (typeof body !== 'object' || body === null) return null
-  const code = (body as { code?: unknown }).code
-  return typeof code === 'string' ? code : null
+  const { nonce, proof } = body as { nonce?: unknown; proof?: unknown }
+  if (!isOpenCodePairingNonce(nonce) || typeof proof !== 'string' || proof.length === 0) return null
+  return { nonce, proof }
 }
 
 function readJsonBody(request: IncomingMessage): Promise<unknown> {

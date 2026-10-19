@@ -1,3 +1,5 @@
+export const NULL_BODY_STATUSES: ReadonlySet<number> = new Set([101, 204, 205, 304])
+
 const HOP_BY_HOP_HEADERS = new Set([
   'connection',
   'keep-alive',

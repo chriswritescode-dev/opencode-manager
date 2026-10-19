@@ -11,6 +11,7 @@ import { useMobile } from '@/hooks/useMobile'
 import { useSettingsDialog } from '@/hooks/useSettingsDialog'
 import { useUrlParams } from '@/hooks/useUrlParams'
 import { toggleToolDialogParams, toggleToolPanelParams, type PanelTool } from '@/hooks/useToolPanel'
+import { isLocalOpenCodeServer, useRouteOpenCodeServerId } from '@/contexts/OpenCodeServerContext'
 import { getAssistantPath, getRepoPath, getSessionPath, isAssistantPath, parseRepoRoute } from '@/lib/navigation'
 
 /**
@@ -23,6 +24,7 @@ export function useGlobalShortcutActions(): void {
   const { updateParams } = useUrlParams()
   const { open: openSettings } = useSettingsDialog()
   const isMobile = useMobile()
+  const isRemoteRoute = !isLocalOpenCodeServer(useRouteOpenCodeServerId())
 
   const repoId = isAssistantPath(pathname) ? ASSISTANT_REPO_ID : parseRepoRoute(pathname).repoId
 
@@ -41,6 +43,7 @@ export function useGlobalShortcutActions(): void {
   const hasFilesTool = toolItems.some((item) => toolKeyOf(item) === 'files')
 
   const toggleRouteTool = useCallback((tool: PanelTool) => {
+    if (isRemoteRoute) return
     if (toolItems.some((item) => toolKeyOf(item) === tool)) {
       updateParams((params) => {
         if (isMobile) toggleToolDialogParams(params, tool)
@@ -51,7 +54,7 @@ export function useGlobalShortcutActions(): void {
     if (tool === 'files') return
     const host = repoId !== null ? getRepoPath(repoId) : getAssistantPath()
     navigate(`${host}${dialogSearch(tool)}`)
-  }, [toolItems, isMobile, updateParams, navigate, repoId])
+  }, [toolItems, isMobile, updateParams, navigate, repoId, isRemoteRoute])
 
   const newSession = repoId !== null && repo?.fullPath && !createSession.isPending
     ? () => createSession.mutate({})
