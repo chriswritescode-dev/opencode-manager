@@ -47,8 +47,9 @@ export function parseServerProjectRoute(
   const match = /^\/servers\/([^/]+)\/projects$/.exec(pathname);
   if (!match) return null;
   const directory = new URLSearchParams(search).get('directory');
-  if (!directory) return null;
-  return { serverId: decodeURIComponent(match[1]), directory };
+  const serverId = decodePathSegment(match[1]);
+  if (!directory || !serverId) return null;
+  return { serverId, directory };
 }
 
 function decodePathSegment(segment: string): string | null {

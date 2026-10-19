@@ -266,6 +266,7 @@ describe('getSwipeBackTarget', () => {
       expect(getSwipeBackTarget('/servers/%E0%A4%A/sessions/ses_1', '')).toBeNull();
       expect(() => getSwipeBackTarget('/servers/srv_kitchen/sessions/%E0%A4%A', '')).not.toThrow();
       expect(getSwipeBackTarget('/servers/srv_kitchen/sessions/%E0%A4%A', '')).toBeNull();
+      expect(() => getSwipeBackTarget('/servers/%E0%A4%A/projects', '?directory=%2Fa')).not.toThrow();
     });
   });
 
