@@ -168,9 +168,9 @@ describe('useCommands', () => {
 
     const names = result.current.searchCommands('').map(({ item }) => item.name)
 
-    expect(names).not.toContain('sessions')
-    expect(names).not.toContain('resume')
-    expect(names).not.toContain('continue')
+    expect(names).toContain('sessions')
+    expect(names).toContain('resume')
+    expect(names).toContain('continue')
     expect(names).not.toContain('walkthrough')
     expect(names).toContain('mcp')
     expect(names).toContain('skills')

@@ -37,6 +37,14 @@ export type OpenCodeLocationInfo = Awaited<ReturnType<OpenCodeApi['location']['g
 
 export type OpenCodeProject = Awaited<ReturnType<OpenCodeApi['project']['list']>>[number]
 
+export type VcsInfo = Awaited<ReturnType<OpenCodeApi['vcs']['get']>>['data']
+
+export type VcsFileStatus = Awaited<ReturnType<OpenCodeApi['vcs']['status']>>['data'][number]
+
+export type VcsFileDiff = Awaited<ReturnType<OpenCodeApi['vcs']['diff']>>['data'][number]
+
+export type VcsDiffMode = 'working' | 'branch' | 'committed'
+
 export interface SessionPage {
   items: SessionInfo[]
   nextCursor?: string
@@ -330,6 +338,28 @@ export async function listCommands(directory?: string, serverId?: string): Promi
 
 export async function listSkills(directory?: string, serverId?: string): Promise<SkillInfo[]> {
   const { data } = await callOpenCode((api) => api.skill.list(openCodeLocation(directory)), serverId)
+  return data
+}
+
+export async function getVcsInfo(directory: string, serverId?: string): Promise<VcsInfo> {
+  const { data } = await callOpenCode((api) => api.vcs.get(openCodeLocation(directory)), serverId)
+  return data
+}
+
+export async function listVcsStatus(directory: string, serverId?: string): Promise<VcsFileStatus[]> {
+  const { data } = await callOpenCode((api) => api.vcs.status(openCodeLocation(directory)), serverId)
+  return data
+}
+
+export async function getVcsDiff(
+  directory: string,
+  mode: VcsDiffMode,
+  serverId?: string,
+): Promise<VcsFileDiff[]> {
+  const { data } = await callOpenCode(
+    (api) => api.vcs.diff({ ...openCodeLocation(directory), mode }),
+    serverId,
+  )
   return data
 }
 

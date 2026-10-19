@@ -1,11 +1,12 @@
-import { render, screen, fireEvent } from '@testing-library/react'
+import { render, screen, fireEvent, waitFor } from '@testing-library/react'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
+import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
 import type { PermissionRequest } from '@opencode-manager/shared/opencode'
 
 const mocks = vi.hoisted(() => ({
   usePermissions: vi.fn(),
   getRepoIdForSession: vi.fn(),
-  useSession: vi.fn(),
+  sessionQueryOptions: vi.fn(),
   navigateToCurrent: vi.fn(),
   PermissionRequestDialog: vi.fn(),
 }))
@@ -15,7 +16,7 @@ vi.mock('@/contexts/EventContext', () => ({
   useEventContext: () => ({ getRepoIdForSession: mocks.getRepoIdForSession }),
 }))
 
-vi.mock('@/hooks/useOpenCode', () => ({ useSession: mocks.useSession }))
+vi.mock('@/hooks/useOpenCode', () => ({ sessionQueryOptions: mocks.sessionQueryOptions }))
 
 vi.mock('@/components/session/PermissionRequestDialog', () => ({
   PermissionRequestDialog: mocks.PermissionRequestDialog,
@@ -50,6 +51,7 @@ const localPermission: PendingPermission = {
 
 interface DialogProps {
   permission: PermissionRequest | null
+  sessionTitle?: string
   onOpenSession?: () => void
 }
 
@@ -66,7 +68,12 @@ function renderWrapper(permission: PendingPermission) {
     currentIsFromDifferentSession: false,
   })
 
-  render(<PermissionDialogWrapper />)
+  const queryClient = new QueryClient({ defaultOptions: { queries: { retry: false } } })
+  render(
+    <QueryClientProvider client={queryClient}>
+      <PermissionDialogWrapper />
+    </QueryClientProvider>,
+  )
 
   return mocks.PermissionRequestDialog.mock.calls.at(-1)?.[0] as DialogProps
 }
@@ -74,7 +81,11 @@ function renderWrapper(permission: PendingPermission) {
 describe('PermissionDialogWrapper', () => {
   beforeEach(() => {
     vi.clearAllMocks()
-    mocks.useSession.mockReturnValue({ data: undefined })
+    mocks.sessionQueryOptions.mockImplementation((sessionID: string | undefined, directory?: string, serverId?: string) => ({
+      queryKey: ['session', sessionID ?? null, directory ?? null, serverId ?? null],
+      queryFn: async () => ({ title: 'Kitchen deploy' }),
+      enabled: !!sessionID,
+    }))
     mocks.PermissionRequestDialog.mockReturnValue(<div data-testid="permission-dialog" />)
   })
 
@@ -86,7 +97,18 @@ describe('PermissionDialogWrapper', () => {
     expect(props.permission).toEqual(remotePermission)
     expect(props.onOpenSession).toBe(mocks.navigateToCurrent)
     expect(mocks.getRepoIdForSession).not.toHaveBeenCalled()
-    expect(mocks.useSession).toHaveBeenCalledWith(undefined, '/srv/app')
+    expect(mocks.sessionQueryOptions).toHaveBeenCalledWith('ses_remote', '/srv/app', 'srv_kitchen')
+  })
+
+  it('resolves the remote session title from the permission server', async () => {
+    mocks.getRepoIdForSession.mockReturnValue(null)
+
+    renderWrapper(remotePermission)
+
+    await waitFor(() => {
+      const latest = mocks.PermissionRequestDialog.mock.calls.at(-1)?.[0] as DialogProps
+      expect(latest.sessionTitle).toBe('Kitchen deploy')
+    })
   })
 
   it('offers the session for a local permission resolved through its Manager repo', () => {
@@ -96,7 +118,7 @@ describe('PermissionDialogWrapper', () => {
 
     expect(props.onOpenSession).toBe(mocks.navigateToCurrent)
     expect(mocks.getRepoIdForSession).toHaveBeenCalledWith('ses_local')
-    expect(mocks.useSession).toHaveBeenCalledWith('ses_local', '/srv/app')
+    expect(mocks.sessionQueryOptions).toHaveBeenCalledWith('ses_local', '/srv/app', 'local')
   })
 
   it('hides the session action for a local permission without a Manager repo', () => {

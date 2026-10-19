@@ -31,6 +31,7 @@ const mocks = vi.hoisted(() => ({
   getRepo: vi.fn(),
   useSessionStatus: vi.fn(),
   SourceControlPanel: vi.fn(() => null),
+  RemoteSourceControlPanel: vi.fn(() => null),
   TerminalPanel: vi.fn(() => null),
   PreviewPanel: vi.fn(() => null),
   FileBrowserSheet: vi.fn(() => null),
@@ -145,7 +146,10 @@ vi.mock('@/components/notifications/PendingActionsGroup', () => ({
 vi.mock('@/components/navigation/SessionMoreButton', () => ({ SessionMoreButton: mocks.SessionMoreButton }))
 vi.mock('@/components/navigation/ToolSidePanel', () => ({ ToolSidePanel: mocks.ToolSidePanel }))
 vi.mock('@/components/file-browser/FileBrowserSheet', () => ({ FileBrowserSheet: mocks.FileBrowserSheet }))
-vi.mock('@/components/source-control', () => ({ SourceControlPanel: mocks.SourceControlPanel }))
+vi.mock('@/components/source-control', () => ({
+  SourceControlPanel: mocks.SourceControlPanel,
+  RemoteSourceControlPanel: mocks.RemoteSourceControlPanel,
+}))
 vi.mock('@/components/terminal/TerminalPanel', () => ({ TerminalPanel: mocks.TerminalPanel }))
 vi.mock('@/components/preview/PreviewPanel', () => ({ PreviewPanel: mocks.PreviewPanel }))
 vi.mock('@/components/repo/ProjectActionsMenu', () => ({ ProjectActionsMenu: mocks.ProjectActionsMenu }))
@@ -346,6 +350,23 @@ describe('SessionDetail remote server mode', () => {
     )
     expect(vi.mocked(mocks.ToolSidePanel).mock.calls.at(-1)?.[0]).toEqual(
       expect.objectContaining({ repoDirectory: '/home/me/app', sessionId: 'ses_remote' }),
+    )
+  })
+
+  it('opens the remote source control panel instead of the Manager one', async () => {
+    renderRemoteSession()
+
+    await waitFor(() => {
+      expect(screen.getByTestId('message-thread')).toBeInTheDocument()
+    })
+
+    expect(mocks.SourceControlPanel).not.toHaveBeenCalled()
+    expect(mocks.RemoteSourceControlPanel.mock.calls.at(-1)?.[0]).toEqual(
+      expect.objectContaining({
+        serverId: 'srv_kitchen',
+        directory: '/home/me/app',
+        isOpen: false,
+      }),
     )
   })
 

@@ -52,6 +52,7 @@ vi.mock('@/hooks/useActiveWork', () => ({
   useActiveWork: activityMocks.useActiveWork,
   useActivityWindowMinutes: activityMocks.useActivityWindowMinutes,
   useRepoActivityState: () => null,
+  useServerActivityState: () => null,
 }))
 
 vi.mock('@/api/repos')

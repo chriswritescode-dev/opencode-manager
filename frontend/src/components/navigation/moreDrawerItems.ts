@@ -58,7 +58,6 @@ const NON_TOOL_ITEM_KEYS = new Set(['home', 'settings', 'logout'])
 
 const MANAGER_ONLY_ITEM_KEYS: ReadonlySet<string> = new Set([
   'files',
-  'source-control',
   'preview',
   'walkthrough',
   'actions',
@@ -92,6 +91,7 @@ function buildRouteNavModel(pathname: string): NavModel {
       items: [
         { key: 'mcp', label: 'MCP', icon: Plug, dialog: 'mcp' },
         { key: 'skills', label: 'Skills', icon: Sparkles, dialog: 'skills' },
+        { key: 'source-control', label: 'Source Control', icon: GitCommitHorizontal, dialog: 'sourceControl' },
         { key: 'terminal', label: 'Terminal', icon: SquareTerminal, dialog: 'terminal' },
         ...baseItems,
       ],

@@ -38,7 +38,7 @@ type RepoSkillsDialogProps = {
 
 type RepoSkillsContentProps = {
   open: boolean
-  repoId: number
+  repoId?: number
   onDone: () => void
 } & RepoSkillsSessionProps
 

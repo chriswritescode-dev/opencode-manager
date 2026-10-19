@@ -14,7 +14,7 @@ import { useMarkAllScheduleRunsViewed, useUnreadScheduleRuns } from '@/hooks/use
 import { buildMoreItems, buildNavModel, isManagerOnlyNavItem, isSessionDetailPath, type MoreDrawerItem } from './moreDrawerItems'
 import { useSwipeBack } from '@/hooks/useMobile'
 import { cn, getRepoDisplayName } from '@/lib/utils'
-import { getPathWithReturnTo, isAssistantPath } from '@/lib/navigation'
+import { getPathWithReturnTo, isAssistantPath, parseServerSessionRoute } from '@/lib/navigation'
 import { useMobileTabBar } from '@/hooks/useMobileTabBar'
 import { isLocalOpenCodeServer, useRouteOpenCodeServerId } from '@/contexts/OpenCodeServerContext'
 
@@ -77,6 +77,7 @@ export function MoreDrawer({ isOpen, onClose }: MoreDrawerProps) {
   const { logout } = useAuth()
   const { data: health } = useServerHealth()
   const isSessionDetail = isSessionDetailPath(location.pathname)
+  const isRemoteSessionDetail = parseServerSessionRoute(location.pathname) !== null
   const isAssistantRoute = isAssistantPath(location.pathname)
   const isAssistantSession = isSessionDetail && searchParams.get('assistant') === '1'
   const isRemoteRoute = !isLocalOpenCodeServer(useRouteOpenCodeServerId())
@@ -205,11 +206,11 @@ export function MoreDrawer({ isOpen, onClose }: MoreDrawerProps) {
               />
             </div>
           )}
-          {isOpen && !isRemoteRoute && (
+          {isOpen && (
             <CompactActivityList onNavigate={(path) => navigate(path)} />
           )}
           <MenuSection>
-            {isSessionDetail && !isRemoteRoute && (
+            {(isSessionDetail || isRemoteSessionDetail) && (
               <MenuRow icon={FolderGit2} label="Repos" onClick={() => openMobileSheet('repos')} trailing />
             )}
             {assistantCta?.to && (

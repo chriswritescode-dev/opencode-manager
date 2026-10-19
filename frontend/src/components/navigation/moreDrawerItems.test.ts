@@ -64,7 +64,15 @@ describe('buildMoreItems', () => {
 
   it('returns only the server tools a linked server can serve for /servers/:id/sessions/:sid', () => {
     const items = buildMoreItems('/servers/srv_kitchen/sessions/abc')
-    expect(items.map((item) => item.key)).toEqual(['home', 'mcp', 'skills', 'terminal', 'settings', 'logout'])
+    expect(items.map((item) => item.key)).toEqual([
+      'home',
+      'mcp',
+      'skills',
+      'source-control',
+      'terminal',
+      'settings',
+      'logout',
+    ])
   })
 
   it('omits the Actions item for an Assistant session', () => {
@@ -174,6 +182,7 @@ describe('buildToolItems', () => {
       'activity',
       'mcp',
       'skills',
+      'source-control',
       'terminal',
     ])
   })

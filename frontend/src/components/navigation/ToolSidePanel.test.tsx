@@ -27,6 +27,11 @@ vi.mock('@/components/file-browser/FileBrowser', () => ({
 vi.mock('@/components/source-control', () => ({
   SourceControlContent: () => <div>source-control-tool</div>,
 }))
+vi.mock('@/components/source-control/RemoteSourceControlContent', () => ({
+  RemoteSourceControlContent: ({ serverId, directory }: { serverId: string; directory: string }) => (
+    <div>remote-source-control-tool {serverId} {directory}</div>
+  ),
+}))
 vi.mock('@/components/terminal/TerminalPanel', () => ({
   TerminalWorkspace: () => <div>terminal-tool</div>,
 }))
@@ -360,10 +365,41 @@ describe('ToolSidePanel', () => {
       within(rail)
         .getAllByRole('button')
         .map((button) => button.getAttribute('aria-label') ?? button.textContent?.trim()),
-    ).toEqual(['Activity', 'MCP', 'Skills', 'Terminal'])
+    ).toEqual(['Activity', 'MCP', 'Skills', 'Source Control', 'Terminal'])
 
     await user.click(screen.getByRole('button', { name: 'MCP' }))
     expect(await screen.findByText('mcp-tool')).toBeInTheDocument()
+  })
+
+  it('opens the remote source control panel for a linked-server session', async () => {
+    const user = userEvent.setup()
+    render(
+      <MemoryRouter initialEntries={['/servers/srv_kitchen/sessions/ses_remote']}>
+        <RemoteHarness />
+      </MemoryRouter>,
+    )
+
+    await user.click(screen.getByRole('button', { name: 'Source Control' }))
+
+    expect(
+      await screen.findByText('remote-source-control-tool srv_kitchen /home/me/app'),
+    ).toBeInTheDocument()
+    expect(search().get('panel')).toBe('sourceControl')
+    expect(screen.queryByText('source-control-tool')).not.toBeInTheDocument()
+  })
+
+  it('opens the skills panel for a linked-server session', async () => {
+    const user = userEvent.setup()
+    render(
+      <MemoryRouter initialEntries={['/servers/srv_kitchen/sessions/ses_remote']}>
+        <RemoteHarness />
+      </MemoryRouter>,
+    )
+
+    await user.click(screen.getByRole('button', { name: 'Skills' }))
+
+    expect(await screen.findByText('skills-tool')).toBeInTheDocument()
+    expect(search().get('panel')).toBe('skills')
   })
 
   it('opens the Activity panel with rows and the window label when clicked', async () => {

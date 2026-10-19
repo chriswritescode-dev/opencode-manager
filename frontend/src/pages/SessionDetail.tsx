@@ -61,7 +61,7 @@ import { formatOpenCodeModelRef } from "@opencode-manager/shared/opencode";
 import { FormPrompt } from "@/components/session/FormPrompt";
 import { MinimizedFormIndicator } from "@/components/session/MinimizedFormIndicator";
 import { PendingActionsGroup } from "@/components/notifications/PendingActionsGroup";
-import { SourceControlPanel } from "@/components/source-control";
+import { SourceControlPanel, RemoteSourceControlPanel } from "@/components/source-control";
 import { TerminalPanel } from "@/components/terminal/TerminalPanel";
 import { PreviewPanel } from "@/components/preview/PreviewPanel";
 import { SessionSendErrorBanner } from "@/components/session/SessionSendErrorBanner";
@@ -1060,15 +1060,24 @@ export function SessionDetail() {
         />
       )}
 
-      {!isRemoteServer && (
-        <SourceControlPanel
-          repoId={repoId}
-          isOpen={!docked && sourceControlOpen}
-          onClose={() => setSourceControlOpen(false)}
-          currentBranch={repo?.currentBranch || repo?.branch || "main"}
-          repoName={workspaceDisplayName}
-        />
-      )}
+      {isRemoteServer
+        ? sessionDirectory && (
+          <RemoteSourceControlPanel
+            serverId={serverId}
+            directory={sessionDirectory}
+            isOpen={!docked && sourceControlOpen}
+            onClose={() => setSourceControlOpen(false)}
+          />
+        )
+        : (
+          <SourceControlPanel
+            repoId={repoId}
+            isOpen={!docked && sourceControlOpen}
+            onClose={() => setSourceControlOpen(false)}
+            currentBranch={repo?.currentBranch || repo?.branch || "main"}
+            repoName={workspaceDisplayName}
+          />
+        )}
 
       <TerminalPanel
         target={isRemoteServer ? { kind: 'server', serverId } : { kind: 'repo', repoId }}

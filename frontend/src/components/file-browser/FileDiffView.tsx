@@ -28,6 +28,19 @@ interface FileDiffViewProps {
   isMobile?: boolean;
 }
 
+export interface FileDiffContentProps {
+  filePath: string;
+  diff: string | null;
+  status: GitFileStatusType;
+  additions: number;
+  deletions: number;
+  isBinary?: boolean;
+  onBack?: () => void;
+  onClose?: () => void;
+  onOpenFile?: (path: string, lineNumber?: number) => void;
+  isMobile?: boolean;
+}
+
 const statusConfig: Record<
   GitFileStatusType,
   { icon: typeof FileText; color: string; bgColor: string; label: string }
@@ -70,54 +83,24 @@ const statusConfig: Record<
   },
 };
 
-export function FileDiffView({
-  repoId,
+export function FileDiffContent({
   filePath,
-  includeStaged,
-  commitHash,
+  diff,
+  status,
+  additions,
+  deletions,
+  isBinary = false,
   onBack,
   onClose,
   onOpenFile,
   isMobile = false,
-}: FileDiffViewProps) {
-  const workingDiff = useFileDiff(repoId, filePath, includeStaged);
-  const commitDiff = useCommitFileDiff(repoId, commitHash, filePath);
-  const { data: diffData, isLoading, error } = commitHash ? commitDiff : workingDiff;
-
+}: FileDiffContentProps) {
   const fileName = filePath.split("/").pop() || filePath;
   const dirPath = filePath.includes("/")
     ? filePath.substring(0, filePath.lastIndexOf("/"))
     : "";
 
-  if (isLoading) {
-    return (
-      <div className="flex items-center justify-center h-full py-8">
-        <Loader2 className="w-6 h-6 animate-spin text-muted-foreground" />
-      </div>
-    );
-  }
-
-  if (error) {
-    return (
-      <div className="flex flex-col items-center justify-center h-full py-8 text-muted-foreground">
-        <FileText className="w-8 h-8 mb-2 opacity-50" />
-        <p className="text-sm">Failed to load diff</p>
-        <p className="text-xs mt-1">{error.message}</p>
-        {onBack && (
-          <Button variant="ghost" size="sm" onClick={onBack} className="mt-4">
-            <ArrowLeft className="w-4 h-4 mr-2" />
-            Back
-          </Button>
-        )}
-      </div>
-    );
-  }
-
-  if (!diffData) {
-    return null;
-  }
-
-  const config = statusConfig[diffData.status];
+  const config = statusConfig[status];
   const Icon = config.icon;
 
   return (
@@ -178,15 +161,15 @@ export function FileDiffView({
           >
             {config.label}
           </span>
-          {!diffData.isBinary && (
+          {!isBinary && (
             <>
-              <span className="text-diff-add">+{diffData.additions}</span>
-              <span className="text-diff-delete">-{diffData.deletions}</span>
+              <span className="text-diff-add">+{additions}</span>
+              <span className="text-diff-delete">-{deletions}</span>
             </>
           )}
-          {diffData.diff && (
+          {diff && (
             <CopyButton
-              content={diffData.diff || ""}
+              content={diff}
               title="Copy diff"
               iconSize="sm"
               variant="ghost"
@@ -207,18 +190,18 @@ export function FileDiffView({
       </div>
 
       <div className="flex-1 overflow-y-auto overflow-x-hidden min-h-0">
-        {diffData.isBinary ? (
+        {isBinary ? (
           <div className="flex items-center justify-center h-full text-muted-foreground bg-muted/20">
             <p className="text-sm">Binary file - cannot display diff</p>
           </div>
-        ) : !diffData.diff ? (
+        ) : !diff ? (
           <div className="flex items-center justify-center h-full text-muted-foreground bg-muted/20">
             <p className="text-sm">No changes to display</p>
           </div>
         ) : (
           <div className="border-t border-border/30">
             <DiffLines
-              diff={diffData.diff}
+              diff={diff}
               showLineNumbers={!isMobile}
               onLineClick={
                 onOpenFile
@@ -230,5 +213,63 @@ export function FileDiffView({
         )}
       </div>
     </div>
+  );
+}
+
+export function FileDiffView({
+  repoId,
+  filePath,
+  includeStaged,
+  commitHash,
+  onBack,
+  onClose,
+  onOpenFile,
+  isMobile = false,
+}: FileDiffViewProps) {
+  const workingDiff = useFileDiff(repoId, filePath, includeStaged);
+  const commitDiff = useCommitFileDiff(repoId, commitHash, filePath);
+  const { data: diffData, isLoading, error } = commitHash ? commitDiff : workingDiff;
+
+  if (isLoading) {
+    return (
+      <div className="flex items-center justify-center h-full py-8">
+        <Loader2 className="w-6 h-6 animate-spin text-muted-foreground" />
+      </div>
+    );
+  }
+
+  if (error) {
+    return (
+      <div className="flex flex-col items-center justify-center h-full py-8 text-muted-foreground">
+        <FileText className="w-8 h-8 mb-2 opacity-50" />
+        <p className="text-sm">Failed to load diff</p>
+        <p className="text-xs mt-1">{error.message}</p>
+        {onBack && (
+          <Button variant="ghost" size="sm" onClick={onBack} className="mt-4">
+            <ArrowLeft className="w-4 h-4 mr-2" />
+            Back
+          </Button>
+        )}
+      </div>
+    );
+  }
+
+  if (!diffData) {
+    return null;
+  }
+
+  return (
+    <FileDiffContent
+      filePath={filePath}
+      diff={diffData.diff}
+      status={diffData.status}
+      additions={diffData.additions}
+      deletions={diffData.deletions}
+      isBinary={diffData.isBinary}
+      onBack={onBack}
+      onClose={onClose}
+      onOpenFile={onOpenFile}
+      isMobile={isMobile}
+    />
   );
 }

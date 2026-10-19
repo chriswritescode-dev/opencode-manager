@@ -1,5 +1,5 @@
 
-import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
+import { QueryClient, QueryClientProvider, useQuery } from '@tanstack/react-query'
 import { createBrowserRouter, RouterProvider, Outlet, useNavigate, useLocation, useParams, Navigate } from 'react-router-dom'
 import { useEffect, useRef, useCallback, type ReactNode } from 'react'
 import { LOCAL_OPENCODE_SERVER_ID } from '@opencode-manager/shared/schemas'
@@ -40,7 +40,7 @@ import { useAuth } from '@/hooks/useAuth'
 import { useOpenCodeFailureToast } from '@/hooks/useOpenCodeFailureToast'
 import { useOpenCodeServerActions } from '@/hooks/useOpenCodeServerActions'
 import { useGlobalShortcutActions } from '@/hooks/useGlobalShortcutActions'
-import { useSession } from '@/hooks/useOpenCode'
+import { sessionQueryOptions } from '@/hooks/useOpenCode'
 import { RestartServerDialog } from '@/components/settings/RestartServerDialog'
 
 const queryClient = new QueryClient({
@@ -115,9 +115,12 @@ export function PermissionDialogWrapper() {
   } = usePermissions()
   const { getRepoIdForSession } = useEventContext()
   const isRemotePermission = currentPermission !== null && !isLocalOpenCodeServer(currentPermission.serverId)
-  const { data: session } = useSession(
-    isRemotePermission ? undefined : currentPermission?.sessionID,
-    currentDirectory ?? undefined,
+  const { data: session } = useQuery(
+    sessionQueryOptions(
+      currentPermission?.sessionID,
+      currentDirectory ?? undefined,
+      currentPermission?.serverId ?? LOCAL_OPENCODE_SERVER_ID,
+    ),
   )
 
   const canOpenCurrentSession = currentPermission !== null

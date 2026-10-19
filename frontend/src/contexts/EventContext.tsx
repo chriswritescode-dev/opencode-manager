@@ -817,6 +817,7 @@ export function EventProvider({ children }: { children: React.ReactNode }) {
         }
         case 'session.idle': {
           useSessionStatus.getState().setSessionServer(event.data.sessionID, serverId)
+          rememberSessionDirectory(event.data.sessionID, event.directory, serverId)
           useSessionStatus.getState().setStatus(event.data.sessionID, { type: 'idle' })
           break
         }
@@ -831,7 +832,7 @@ export function EventProvider({ children }: { children: React.ReactNode }) {
           useSessionStatus.getState().setSessionServer(event.data.sessionID, serverId)
           useSessionStatus.getState().setOutcome(event.data.sessionID, 'succeeded')
           useSessionStatus.getState().setStatus(event.data.sessionID, { type: 'idle' })
-          invalidateSessionListCachesDebounced(queryClient, event.directory)
+          invalidateSessionListCachesDebounced(queryClient, event.directory, serverId)
           queryClient.invalidateQueries({ queryKey: changeWalkthroughQueryKey(event.data.sessionID) })
           break
         }
@@ -839,7 +840,7 @@ export function EventProvider({ children }: { children: React.ReactNode }) {
           useSessionStatus.getState().setSessionServer(event.data.sessionID, serverId)
           useSessionStatus.getState().setOutcome(event.data.sessionID, 'failed')
           useSessionStatus.getState().setStatus(event.data.sessionID, { type: 'idle' })
-          invalidateSessionListCachesDebounced(queryClient, event.directory)
+          invalidateSessionListCachesDebounced(queryClient, event.directory, serverId)
           queryClient.invalidateQueries({ queryKey: changeWalkthroughQueryKey(event.data.sessionID) })
           break
         }
@@ -847,18 +848,18 @@ export function EventProvider({ children }: { children: React.ReactNode }) {
           useSessionStatus.getState().setSessionServer(event.data.sessionID, serverId)
           useSessionStatus.getState().setOutcome(event.data.sessionID, 'interrupted')
           useSessionStatus.getState().setStatus(event.data.sessionID, { type: 'idle' })
-          invalidateSessionListCachesDebounced(queryClient, event.directory)
+          invalidateSessionListCachesDebounced(queryClient, event.directory, serverId)
           queryClient.invalidateQueries({ queryKey: changeWalkthroughQueryKey(event.data.sessionID) })
           break
         }
         case 'session.deleted': {
           useSessionStatus.getState().forgetSession(event.data.sessionID)
-          invalidateSessionListCachesDebounced(queryClient, event.directory)
+          invalidateSessionListCachesDebounced(queryClient, event.directory, serverId)
           break
         }
         case 'session.created': {
           useSessionStatus.getState().setSessionServer(event.data.sessionID, serverId)
-          invalidateSessionListCachesDebounced(queryClient, event.directory)
+          invalidateSessionListCachesDebounced(queryClient, event.directory, serverId)
           if (typeof event.data.parentID === 'string') {
             useSessionStatus.getState().setSessionParent(event.data.sessionID, event.data.parentID)
           }
@@ -868,7 +869,7 @@ export function EventProvider({ children }: { children: React.ReactNode }) {
         case 'session.renamed':
         case 'session.moved':
         case 'session.metadata.updated':
-          invalidateSessionListCachesDebounced(queryClient, event.directory)
+          invalidateSessionListCachesDebounced(queryClient, event.directory, serverId)
           break
         case 'shell.created': {
           const info = event.data.info
@@ -923,6 +924,7 @@ export function EventProvider({ children }: { children: React.ReactNode }) {
           setSSHHostKeyRequest(event.properties)
           break
         case 'vcs.branch.updated': {
+          if (!isLocalOpenCodeServer(serverId)) break
           const repo = reposRef.current?.find((candidate) => repoMatchesDirectory(candidate, event.directory))
           if (!repo) {
             queryClient.invalidateQueries({ queryKey: ['repo', 'siblings'] })
@@ -966,6 +968,7 @@ export function EventProvider({ children }: { children: React.ReactNode }) {
         )
         void reconcilePendingActionsForDirectories(directories)
         void syncRunningShells(directories)
+        invalidateSessionListCachesDebounced(queryClient, undefined, serverId)
         invalidateQueryKeysDebounced(
           queryClient,
           LOCATION_CATALOG_QUERY_KEYS.map((key) => serverScopedKey(key, serverId)),

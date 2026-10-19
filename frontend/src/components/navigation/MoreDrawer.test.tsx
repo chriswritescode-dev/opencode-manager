@@ -416,14 +416,14 @@ describe('MoreDrawer', () => {
     expect(screen.getByText('Settings')).toBeInTheDocument()
     expect(screen.getByText('Logout')).toBeInTheDocument()
     expect(screen.getByText('Terminal')).toBeInTheDocument()
+    expect(screen.getByRole('heading', { name: 'Activity' })).toBeInTheDocument()
+    expect(screen.getByText('Repos')).toBeInTheDocument()
     expect(screen.queryByText('Files')).not.toBeInTheDocument()
-    expect(screen.queryByText('Source Control')).not.toBeInTheDocument()
+    expect(screen.getByText('Source Control')).toBeInTheDocument()
     expect(screen.queryByText('Preview')).not.toBeInTheDocument()
     expect(screen.queryByText('Schedules')).not.toBeInTheDocument()
     expect(screen.queryByText('Reset Permissions')).not.toBeInTheDocument()
-    expect(screen.queryByText('Repos')).not.toBeInTheDocument()
     expect(screen.queryByRole('button', { name: 'Assistant' })).not.toBeInTheDocument()
-    expect(screen.queryByRole('heading', { name: 'Activity' })).not.toBeInTheDocument()
   })
 
   it('shows unread reports and marks them all read', () => {

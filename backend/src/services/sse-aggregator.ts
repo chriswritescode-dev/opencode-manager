@@ -520,12 +520,17 @@ class SSEAggregator {
     this.notifyServerEvent(LOCAL_OPENCODE_SERVER_ID, directory, event)
   }
 
-  private writeEnvelopeToClients(clientIds: Iterable<string>, directory: string | null, payloadJson: string): void {
+  private writeEnvelopeToClients(
+    clientIds: Iterable<string>,
+    directory: string | null,
+    payloadJson: string,
+    serverId?: string,
+  ): void {
     let frame: Uint8Array | null = null
     for (const clientId of clientIds) {
       const client = this.clients.get(clientId)
       if (!client) continue
-      frame ??= encodeSSEFrame('message', serializeEnvelope(directory, payloadJson))
+      frame ??= encodeSSEFrame('message', serializeEnvelope(directory, payloadJson, serverId))
       this.writeFrame(client, frame, 'Failed to send to client')
     }
   }
@@ -543,16 +548,7 @@ class SSEAggregator {
   }
 
   deliverRemoteEnvelope(serverId: string, directory: string | null, payloadJson: string): void {
-    const clientIds = directory === null
-      ? this.clientIdsForServer(serverId)
-      : Array.from(this.directoryClients.get(buildServerDirectoryKey(serverId, directory)) ?? [])
-    if (clientIds.length === 0) return
-    const frame = encodeSSEFrame('message', serializeEnvelope(directory, payloadJson, serverId))
-    for (const clientId of clientIds) {
-      const client = this.clients.get(clientId)
-      if (!client) continue
-      this.writeFrame(client, frame, 'Failed to send remote event to client')
-    }
+    this.writeEnvelopeToClients(this.clients.keys(), directory, payloadJson, serverId)
   }
 
   deliverRemoteEnvelopeToClient(clientId: string, serverId: string, directory: string, payloadJson: string): void {

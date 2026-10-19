@@ -75,24 +75,29 @@ describe('SSEAggregator remote envelope delivery', () => {
     sseAggregator.setScheduledSessionsResolver(() => [])
   })
 
-  it('delivers a remote envelope only to clients subscribed to that server and directory', () => {
+  it('broadcasts a located remote envelope to every connected client whatever they are subscribed to', () => {
     const subscribed = createCapturingClient()
     const otherDirectory = createCapturingClient()
+    const otherServer = createCapturingClient()
     const local = createCapturingClient()
+    const unsubscribed = createCapturingClient()
     sseAggregator.addClient('remote-key', subscribed.callback, subscribed.writeFrame, ['srv_a|/repo'])
     sseAggregator.addClient('other-dir', otherDirectory.callback, otherDirectory.writeFrame, ['srv_a|/other'])
+    sseAggregator.addClient('other-server', otherServer.callback, otherServer.writeFrame, ['srv_b|/repo'])
     sseAggregator.addClient('local-dir', local.callback, local.writeFrame, ['/repo'])
+    sseAggregator.addClient('no-directories', unsubscribed.callback, unsubscribed.writeFrame, [])
 
     sseAggregator.deliverRemoteEnvelope('srv_a', '/repo', PAYLOAD)
 
-    expect(subscribed.frames).toEqual([
-      `event: message\ndata: {"directory":"/repo","serverId":"srv_a","payload":${PAYLOAD}}\n\n`,
-    ])
-    expect(otherDirectory.frames).toHaveLength(0)
-    expect(local.frames).toHaveLength(0)
+    const expected = { directory: '/repo', serverId: 'srv_a', payload: JSON.parse(PAYLOAD) }
+    expect(subscribed.frames.map(parseFrame)).toEqual([expected])
+    expect(otherDirectory.frames.map(parseFrame)).toEqual([expected])
+    expect(otherServer.frames.map(parseFrame)).toEqual([expected])
+    expect(local.frames.map(parseFrame)).toEqual([expected])
+    expect(unsubscribed.frames.map(parseFrame)).toEqual([expected])
   })
 
-  it('broadcasts a directory-less remote envelope to every client holding any key of that server', () => {
+  it('broadcasts a directory-less remote envelope to every connected client', () => {
     const first = createCapturingClient()
     const second = createCapturingClient()
     const otherServer = createCapturingClient()
@@ -107,8 +112,8 @@ describe('SSEAggregator remote envelope delivery', () => {
     const expected = { directory: null, serverId: 'srv_a', payload: JSON.parse(PAYLOAD) }
     expect(first.frames.map(parseFrame)).toEqual([expected])
     expect(second.frames.map(parseFrame)).toEqual([expected])
-    expect(otherServer.frames).toHaveLength(0)
-    expect(local.frames).toHaveLength(0)
+    expect(otherServer.frames.map(parseFrame)).toEqual([expected])
+    expect(local.frames.map(parseFrame)).toEqual([expected])
   })
 
   it('skips a targeted remote envelope once the client unsubscribed', () => {

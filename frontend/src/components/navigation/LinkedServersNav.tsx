@@ -1,6 +1,9 @@
 import { Link, useLocation } from 'react-router-dom'
 import { Server } from 'lucide-react'
+import type { OpenCodeServer } from '@opencode-manager/shared/schemas'
 import { useOpenCodeServers, useOpenCodeServerStatuses } from '@/hooks/useOpenCodeServers'
+import { useServerActivityState } from '@/hooks/useActiveWork'
+import { ActivityStateIndicator } from '@/components/activity/ActivityStateIndicator'
 import { SidebarSection } from '@/components/ui/sidebar'
 import { getServerPath } from '@/lib/navigation'
 import { cn } from '@/lib/utils'
@@ -28,6 +31,52 @@ function ServerConnectionDot({ connected }: { connected: boolean }) {
       title={label}
       className={cn('h-2 w-2 shrink-0 rounded-full', connected ? 'bg-success' : 'bg-muted-foreground/40')}
     />
+  )
+}
+
+interface LinkedServerRowProps {
+  server: OpenCodeServer
+  variant: 'sidebar' | 'sheet'
+  path: string
+  active: boolean
+  connected: boolean
+  onNavigate?: (path: string) => void
+}
+
+function LinkedServerRow({ server, variant, path, active, connected, onNavigate }: LinkedServerRowProps) {
+  const activity = useServerActivityState(server.id)
+  const className = cn(
+    'flex items-center gap-3 rounded-md p-2.5 text-sm transition-colors duration-150',
+    'focus:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 focus-visible:ring-offset-background',
+    active ? 'bg-accent text-accent-foreground' : 'text-foreground hover:bg-accent/50',
+    variant === 'sheet' && 'mx-2 p-2 text-left',
+  )
+  const content = (
+    <>
+      <Server className="h-5 w-5 shrink-0" />
+      <span className="min-w-0 flex-1 truncate">{server.name}</span>
+      <ActivityStateIndicator state={activity} />
+      <ServerConnectionDot connected={connected} />
+    </>
+  )
+
+  if (onNavigate) {
+    return (
+      <button
+        type="button"
+        onClick={() => onNavigate(path)}
+        aria-current={active ? 'page' : undefined}
+        className={className}
+      >
+        {content}
+      </button>
+    )
+  }
+
+  return (
+    <Link to={path} className={className}>
+      {content}
+    </Link>
   )
 }
 
@@ -71,40 +120,17 @@ export function LinkedServersNav({ variant = 'sidebar', onNavigate }: LinkedServ
 
   const rows = enabledServers.map((server) => {
     const path = getServerPath(server.id)
-    const active = isActiveServerPath(location.pathname, path)
-    const connected = statusById[server.id]?.connected ?? false
-    const className = cn(
-      'flex items-center gap-3 rounded-md p-2.5 text-sm transition-colors duration-150',
-      'focus:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 focus-visible:ring-offset-background',
-      active ? 'bg-accent text-accent-foreground' : 'text-foreground hover:bg-accent/50',
-      variant === 'sheet' && 'mx-2 p-2 text-left',
-    )
-    const content = (
-      <>
-        <Server className="h-5 w-5 shrink-0" />
-        <span className="min-w-0 flex-1 truncate">{server.name}</span>
-        <ServerConnectionDot connected={connected} />
-      </>
-    )
-
-    if (onNavigate) {
-      return (
-        <button
-          key={server.id}
-          type="button"
-          onClick={() => onNavigate(path)}
-          aria-current={active ? 'page' : undefined}
-          className={className}
-        >
-          {content}
-        </button>
-      )
-    }
 
     return (
-      <Link key={server.id} to={path} className={className}>
-        {content}
-      </Link>
+      <LinkedServerRow
+        key={server.id}
+        server={server}
+        variant={variant}
+        path={path}
+        active={isActiveServerPath(location.pathname, path)}
+        connected={statusById[server.id]?.connected ?? false}
+        onNavigate={onNavigate}
+      />
     )
   })
 

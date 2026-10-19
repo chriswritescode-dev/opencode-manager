@@ -6,11 +6,16 @@ import { LinkedServersNav } from './LinkedServersNav'
 const mocks = vi.hoisted(() => ({
   useOpenCodeServers: vi.fn(),
   useOpenCodeServerStatuses: vi.fn(),
+  useServerActivityState: vi.fn(),
 }))
 
 vi.mock('@/hooks/useOpenCodeServers', () => ({
   useOpenCodeServers: mocks.useOpenCodeServers,
   useOpenCodeServerStatuses: mocks.useOpenCodeServerStatuses,
+}))
+
+vi.mock('@/hooks/useActiveWork', () => ({
+  useServerActivityState: mocks.useServerActivityState,
 }))
 
 const kitchen = {
@@ -46,6 +51,7 @@ describe('LinkedServersNav', () => {
   beforeEach(() => {
     vi.clearAllMocks()
     mocks.useOpenCodeServers.mockReturnValue({ servers: [], isLoading: false })
+    mocks.useServerActivityState.mockReturnValue(null)
     mocks.useOpenCodeServerStatuses.mockReturnValue({
       statuses: [],
       statusById: { srv_kitchen: { serverId: 'srv_kitchen', connected: true, version: null, error: null } },
@@ -116,5 +122,33 @@ describe('LinkedServersNav', () => {
     fireEvent.click(screen.getByRole('button', { name: /Kitchen/ }))
 
     expect(onNavigate).toHaveBeenCalledWith('/servers/srv_kitchen')
+  })
+
+  it('shows the activity indicator only for the server with an active session', () => {
+    mocks.useOpenCodeServers.mockReturnValue({ servers: [kitchen, office], isLoading: false })
+    mocks.useServerActivityState.mockImplementation((serverId: string) =>
+      serverId === 'srv_kitchen' ? 'needs-input' : null,
+    )
+
+    renderNav()
+
+    expect(mocks.useServerActivityState).toHaveBeenCalledWith('srv_kitchen')
+    expect(mocks.useServerActivityState).toHaveBeenCalledWith('srv_office')
+    expect(screen.getByRole('img', { name: 'Session needs input' })).toBeInTheDocument()
+    expect(screen.queryByRole('img', { name: 'Sessions running' })).not.toBeInTheDocument()
+    expect(screen.getByRole('img', { name: 'Connected' })).toBeInTheDocument()
+  })
+
+  it('shows the running indicator in the sheet variant', () => {
+    mocks.useOpenCodeServers.mockReturnValue({ servers: [kitchen], isLoading: false })
+    mocks.useServerActivityState.mockReturnValue('running')
+
+    render(
+      <MemoryRouter>
+        <LinkedServersNav variant="sheet" />
+      </MemoryRouter>,
+    )
+
+    expect(screen.getByRole('img', { name: 'Sessions running' })).toBeInTheDocument()
   })
 })

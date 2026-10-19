@@ -246,11 +246,17 @@ export const useChildSessionReconciliation = (sessionID: string | undefined) => 
   });
 };
 
+/**
+ * Creates a session in `directory` on the route's server, or on `serverIdOverride` for callers rendered
+ * outside the server scope that act on a linked server.
+ */
 export const useCreateSession = (
   directory?: string,
   onSuccess?: (session: { id: string }) => void,
+  serverIdOverride?: string,
 ) => {
-  const serverId = useOpenCodeServerId();
+  const routeServerId = useOpenCodeServerId();
+  const serverId = serverIdOverride ?? routeServerId;
   const queryClient = useQueryClient();
 
   return useMutation({

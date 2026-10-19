@@ -234,7 +234,7 @@ describe('RemoteServerEventHub event delivery', () => {
     expect(sources.sources[1]?.init).toBeUndefined()
   })
 
-  it('delivers a located event only to clients subscribed to that server and directory, with a serverId envelope', () => {
+  it('broadcasts a located event to every client with a serverId envelope', () => {
     const remoteClient = createCapturingClient()
     const otherServerClient = createCapturingClient()
     const localClient = createCapturingClient()
@@ -252,7 +252,7 @@ describe('RemoteServerEventHub event delivery', () => {
 
     source.message(remoteEvent('session.idle', { sessionID: 'ses_1' }, '/repo'))
 
-    expect(remoteClient.frames.map(parseFrame)).toEqual([{
+    const envelope = {
       directory: '/repo',
       serverId: 'srv_a',
       payload: {
@@ -262,9 +262,10 @@ describe('RemoteServerEventHub event delivery', () => {
         location: { directory: '/repo' },
         data: { sessionID: 'ses_1' },
       },
-    }])
-    expect(otherServerClient.frames).toHaveLength(0)
-    expect(localClient.frames).toHaveLength(0)
+    }
+    expect(remoteClient.frames.map(parseFrame)).toEqual([envelope])
+    expect(otherServerClient.frames.map(parseFrame)).toEqual([envelope])
+    expect(localClient.frames.map(parseFrame)).toEqual([envelope])
     expect(listener).not.toHaveBeenCalled()
     expect(sseAggregator.getActiveSessions()).toEqual({})
   })
@@ -321,7 +322,7 @@ describe('RemoteServerEventHub event delivery', () => {
     }])
   })
 
-  it('falls back to every client holding any key of the server when the directory is unknown', () => {
+  it('broadcasts to every client when the directory is unknown', () => {
     const subscribedA = createCapturingClient()
     const otherDirectoryA = createCapturingClient()
     const subscribedB = createCapturingClient()
@@ -339,7 +340,7 @@ describe('RemoteServerEventHub event delivery', () => {
     }
     expect(subscribedA.frames.map(parseFrame)).toEqual([envelope])
     expect(otherDirectoryA.frames.map(parseFrame)).toEqual([envelope])
-    expect(subscribedB.frames).toHaveLength(0)
+    expect(subscribedB.frames.map(parseFrame)).toEqual([envelope])
   })
 
   it('keeps the raw upstream payload in the remote envelope and re-serializes multi-line payloads', () => {

@@ -13,6 +13,7 @@ const WINDOW_MS = 60 * MS_PER_MINUTE
 
 const mocks = vi.hoisted(() => ({
   listSessionPage: vi.fn(),
+  listRemoteSessionPage: vi.fn(),
   getSession: vi.fn(),
   getRepoSiblings: vi.fn(),
   useNavigableRepos: vi.fn(),
@@ -23,7 +24,10 @@ vi.mock('@/api/opencode', async (importOriginal) => {
   const actual = await importOriginal<typeof import('@/api/opencode')>()
   return {
     ...actual,
-    listSessionPage: mocks.listSessionPage,
+    listSessionPage: (input: Parameters<typeof actual.listSessionPage>[0], serverId?: string) =>
+      serverId === undefined || serverId === 'local'
+        ? mocks.listSessionPage(input, serverId)
+        : mocks.listRemoteSessionPage(input, serverId),
     getSession: mocks.getSession,
   }
 })
@@ -103,6 +107,8 @@ const recentIDs = (groups: { recent: Array<{ session: SessionInfo }> }): string[
 describe('useActiveWork', () => {
   beforeEach(() => {
     mocks.listSessionPage.mockReset()
+    mocks.listRemoteSessionPage.mockReset()
+    mocks.listRemoteSessionPage.mockResolvedValue({ items: [] })
     mocks.getSession.mockReset()
     mocks.getRepoSiblings.mockReset()
     mocks.getRepoSiblings.mockResolvedValue([])
@@ -306,6 +312,69 @@ describe('useActiveWork', () => {
     expect(row.serverName).toBe('Kitchen')
     expect(row.repo).toBeNull()
     expect(row.path).toBe('/servers/srv_kitchen/sessions/ses_remote')
+  })
+
+  it('includes recent sessions from an enabled linked server with its server label and path', async () => {
+    const now = Date.now()
+    mocks.listSessionPage.mockResolvedValue({ items: [] })
+    mocks.listRemoteSessionPage.mockResolvedValue({
+      items: [session('ses_remote_recent', now - 500, null, '/home/me/app')],
+    })
+
+    const { result } = renderHook(() => useActiveWork(WINDOW_MS), {
+      wrapper: createWrapper(createQueryClient()),
+    })
+
+    await waitFor(() => expect(recentIDs(result.current.groups)).toContain('ses_remote_recent'))
+
+    const row = result.current.groups.recent[0]
+    expect(row.serverId).toBe('srv_kitchen')
+    expect(row.serverName).toBe('Kitchen')
+    expect(row.repo).toBeNull()
+    expect(row.path).toBe('/servers/srv_kitchen/sessions/ses_remote_recent')
+    expect(mocks.listRemoteSessionPage).toHaveBeenCalledWith(
+      { limit: 50, order: 'desc', includeChildren: true },
+      'srv_kitchen',
+    )
+    expect(result.current.isError).toBe(false)
+  })
+
+  it('rolls a listed remote child up to a root fetched from the same server', async () => {
+    const now = Date.now()
+    mocks.listSessionPage.mockResolvedValue({ items: [] })
+    mocks.listRemoteSessionPage.mockResolvedValue({
+      items: [session('ses_remote_child', now - 500, 'ses_remote_root', '/home/me/app')],
+    })
+    mocks.getSession.mockImplementation(async (id: string, serverId?: string) => {
+      if (serverId !== 'srv_kitchen') throw new Error('local lookup for a remote session')
+      if (id === 'ses_remote_root') return session('ses_remote_root', now - 1500, null, '/home/me/app')
+      throw new Error(`unexpected session ${id}`)
+    })
+
+    const { result } = renderHook(() => useActiveWork(WINDOW_MS), {
+      wrapper: createWrapper(createQueryClient()),
+    })
+
+    await waitFor(() => expect(result.current.groups.recent.map((item) => item.session.id)).toEqual(['ses_remote_root']))
+
+    expect(result.current.groups.recent[0].serverId).toBe('srv_kitchen')
+    expect(mocks.getSession).toHaveBeenCalledWith('ses_remote_root', 'srv_kitchen')
+    expect(mocks.getSession).not.toHaveBeenCalledWith('ses_remote_root', 'local')
+  })
+
+  it('keeps the local list when a linked server fails to load', async () => {
+    const now = Date.now()
+    mocks.listSessionPage.mockResolvedValue({ items: [session('local_recent', now - 500)] })
+    mocks.listRemoteSessionPage.mockRejectedValue(new Error('server unreachable'))
+
+    const { result } = renderHook(() => useActiveWork(WINDOW_MS), {
+      wrapper: createWrapper(createQueryClient()),
+    })
+
+    await waitFor(() => expect(recentIDs(result.current.groups)).toContain('local_recent'))
+
+    expect(result.current.isError).toBe(false)
+    expect(recentIDs(result.current.groups)).not.toContain('ses_remote_recent')
   })
 
   it('renders a running remote session row and resolves its ancestry on the owning server', async () => {
