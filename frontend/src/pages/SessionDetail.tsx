@@ -40,7 +40,7 @@ import { getMessagesContentVersion } from "./sessionContentVersion";
 import { useSpeakVisibleMessages } from "@/hooks/useSpeakVisibleMessages";
 import { showToast } from "@/lib/toast";
 import { getWorkspaceFilePath } from "@/lib/markdownLinks";
-import { getRepoDisplayName, getDirectoryName } from "@/lib/utils";
+import { getRepoDisplayName, getDirectoryName, cn } from "@/lib/utils";
 import { resolveSessionBranch } from "@/lib/activeWork";
 import { RepoMcpDialog } from "@/components/repo/RepoMcpDialog";
 import { ProjectActionsMenu } from "@/components/repo/ProjectActionsMenu";
@@ -59,6 +59,7 @@ import type { FormInfo, SessionMessageInfo } from "@opencode-manager/shared/open
 import type { SkillFileInfo } from "@opencode-manager/shared";
 import { formatOpenCodeModelRef } from "@opencode-manager/shared/opencode";
 import { FormPrompt } from "@/components/session/FormPrompt";
+import { clearFormDraft } from "@/lib/formDrafts";
 import { MinimizedFormIndicator } from "@/components/session/MinimizedFormIndicator";
 import { PendingActionsGroup } from "@/components/notifications/PendingActionsGroup";
 import { SourceControlPanel } from "@/components/source-control";
@@ -317,6 +318,7 @@ export function SessionDetail() {
   const { getForSession: getFormForSession, reply: replyToForm, cancel: cancelForm, syncForSession: syncFormsForSession } = useForms();
   const currentForm = sessionId ? getFormForSession(sessionId) : null;
   const minimizedForm = currentForm && currentForm.id === minimizedFormId ? currentForm : null;
+  const isFormSheetOpen = isMobile && !!currentForm && !minimizedForm;
 
   const lastAssistantMessage = messages.filter(m => m.type === 'assistant').at(-1);
   const lastAssistantText = getAssistantText(lastAssistantMessage);
@@ -376,6 +378,7 @@ export function SessionDetail() {
     if (!minimizedFormId) return
     try {
       await cancelForm(minimizedFormId)
+      clearFormDraft(minimizedFormId)
       setMinimizedFormId(null)
     } catch {
       showToast.error('Failed to dismiss form')
@@ -854,46 +857,57 @@ export function SessionDetail() {
         {sessionDirectory && !isEditingMessage && (
           <div
             ref={promptOverlayRef}
-            className="absolute left-0 right-0 flex justify-center"
+            data-testid="prompt-overlay"
+            className={cn(
+              "absolute left-0 right-0 flex justify-center",
+              isFormSheetOpen && "top-0 flex-col items-center justify-start",
+            )}
             style={{ bottom: inputBottomOffset }}
           >
-            <div className="relative w-[94%] md:max-w-4xl">
-              <div className="absolute bottom-full right-0 mb-2 z-50 flex flex-col items-end gap-2">
-                {ttsEnabled && !hasPromptContent && !isSessionActive && latestPlayableAssistant && (
-                  <FloatingTTSButton
-                    messageId={latestPlayableAssistant.messageId}
-                    content={latestPlayableAssistant.text}
-                    isScrolledUp={showScrollButton}
-                    onSpeakVisible={handleSpeakVisibleMessages}
-                  />
-                )}
-                {hasPromptContent && !isSessionActive && (
-                  <button
-                    onMouseDown={(e) => e.preventDefault()}
-                    onTouchEnd={(e) => {
-                      e.preventDefault()
-                      handleClearPrompt()
-                    }}
-                    onClick={handleClearPrompt}
-                    className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-destructive hover:bg-destructive/90 text-destructive-foreground border border-destructive/60 hover:border-destructive shadow-md shadow-destructive/30 hover:shadow-destructive/50 backdrop-blur-md transition-all duration-200 active:scale-95 hover:scale-105 ring-1 ring-destructive/20 hover:ring-destructive/40"
-                    aria-label="Clear"
-                  >
-                    <X className="w-5 h-5" />
-                    <span className="text-sm font-medium hidden sm:inline">Clear</span>
-                  </button>
-                )}
-                {isSessionActive && (
-                  <button
-                    type="button"
-                    onClick={handleInterruptSession}
-                    title="Stop"
-                    aria-label="Stop"
-                    className="md:hidden p-3 rounded-xl transition-all duration-200 active:scale-95 hover:scale-105 bg-destructive hover:bg-destructive/90 text-destructive-foreground border border-destructive/60 shadow-lg shadow-destructive/30"
-                  >
-                    <SquareFill className="w-5 h-5" />
-                  </button>
-                )}
-              </div>
+            <div
+              className={cn(
+                "relative",
+                isFormSheetOpen ? "flex w-full flex-1 min-h-0 flex-col" : "w-[94%] md:max-w-4xl",
+              )}
+            >
+              {!isFormSheetOpen && (
+                <div className="absolute bottom-full right-0 mb-2 z-50 flex flex-col items-end gap-2">
+                  {ttsEnabled && !hasPromptContent && !isSessionActive && latestPlayableAssistant && (
+                    <FloatingTTSButton
+                      messageId={latestPlayableAssistant.messageId}
+                      content={latestPlayableAssistant.text}
+                      isScrolledUp={showScrollButton}
+                      onSpeakVisible={handleSpeakVisibleMessages}
+                    />
+                  )}
+                  {hasPromptContent && !isSessionActive && (
+                    <button
+                      onMouseDown={(e) => e.preventDefault()}
+                      onTouchEnd={(e) => {
+                        e.preventDefault()
+                        handleClearPrompt()
+                      }}
+                      onClick={handleClearPrompt}
+                      className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-destructive hover:bg-destructive/90 text-destructive-foreground border border-destructive/60 hover:border-destructive shadow-md shadow-destructive/30 hover:shadow-destructive/50 backdrop-blur-md transition-all duration-200 active:scale-95 hover:scale-105 ring-1 ring-destructive/20 hover:ring-destructive/40"
+                      aria-label="Clear"
+                    >
+                      <X className="w-5 h-5" />
+                      <span className="text-sm font-medium hidden sm:inline">Clear</span>
+                    </button>
+                  )}
+                  {isSessionActive && (
+                    <button
+                      type="button"
+                      onClick={handleInterruptSession}
+                      title="Stop"
+                      aria-label="Stop"
+                      className="md:hidden p-3 rounded-xl transition-all duration-200 active:scale-95 hover:scale-105 bg-destructive hover:bg-destructive/90 text-destructive-foreground border border-destructive/60 shadow-lg shadow-destructive/30"
+                    >
+                      <SquareFill className="w-5 h-5" />
+                    </button>
+                  )}
+                </div>
+              )}
               {minimizedForm && (
                 <MinimizedFormIndicator
                   form={minimizedForm}
@@ -910,26 +924,28 @@ export function SessionDetail() {
                   onMinimize={() => handleMinimizeForm(currentForm)}
                 />
               )}
-              <SessionSendErrorBanner sessionId={sessionId} isConnected={streamConnected} isReconnecting={streamReconnecting} />
-              {!isRemoteServer && <SessionGoalBar sessionID={sessionId} />}
-              <BackgroundWorkBar
-                sessionID={sessionId}
-                directory={sessionDirectory}
-                messages={messages}
-                isSessionActive={isSessionActive}
-                onChildSessionClick={handleChildSessionClick}
-              />
-              <PromptInput
-                ref={promptInputRef}
-                directory={sessionDirectory}
-                sessionID={sessionId}
-                showScrollButton={showScrollButton && !hasPromptContent}
-                isSessionActive={isSessionActive}
-                isStreamingResponse={isStreamingResponse}
-                onScrollToBottom={scrollToBottom}
-                commandActions={commandActions}
-                onPromptChange={setHasPromptContent}
-              />
+              <div className={cn(isFormSheetOpen && "shrink-0 px-[3%]")}>
+                <SessionSendErrorBanner sessionId={sessionId} isConnected={streamConnected} isReconnecting={streamReconnecting} />
+                {!isRemoteServer && <SessionGoalBar sessionID={sessionId} />}
+                <BackgroundWorkBar
+                  sessionID={sessionId}
+                  directory={sessionDirectory}
+                  messages={messages}
+                  isSessionActive={isSessionActive}
+                  onChildSessionClick={handleChildSessionClick}
+                />
+                <PromptInput
+                  ref={promptInputRef}
+                  directory={sessionDirectory}
+                  sessionID={sessionId}
+                  showScrollButton={showScrollButton && !hasPromptContent}
+                  isSessionActive={isSessionActive}
+                  isStreamingResponse={isStreamingResponse}
+                  onScrollToBottom={scrollToBottom}
+                  commandActions={commandActions}
+                  onPromptChange={setHasPromptContent}
+                />
+              </div>
             </div>
           </div>
         )}
