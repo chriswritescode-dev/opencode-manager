@@ -311,6 +311,8 @@ export function EventProvider({ children }: { children: React.ReactNode }) {
   const initialFetchDoneRef = useRef(false)
   const statusSyncVersionRef = useRef(0)
   const remoteStatusSyncVersionsRef = useRef(new Map<string, number>())
+  const streamConnectedRef = useRef(false)
+  const reconciledRemoteServerIdsRef = useRef(new Set<string>())
   const statusPollIntervalRef = useRef<ReturnType<typeof setInterval> | null>(null)
   const subscriptionRef = useRef<ReturnType<typeof openCodeEventStream.subscribeGlobalMonitor> | null>(null)
   const reposRef = useRef<typeof repos>(null)
@@ -776,6 +778,24 @@ export function EventProvider({ children }: { children: React.ReactNode }) {
     }
   }, [resolveSessionAncestry])
 
+  const reconcileRemoteServersOnce = useCallback((serversToReconcile: Array<{ id: string }>) => {
+    const reconciled = reconciledRemoteServerIdsRef.current
+    for (const server of serversToReconcile) {
+      if (reconciled.has(server.id)) continue
+      reconciled.add(server.id)
+      void reconcileRemoteSessionStatuses(server.id)
+    }
+  }, [reconcileRemoteSessionStatuses])
+
+  useEffect(() => {
+    const enabledIds = new Set(enabledRemoteServers.map((server) => server.id))
+    for (const serverId of reconciledRemoteServerIdsRef.current) {
+      if (!enabledIds.has(serverId)) reconciledRemoteServerIdsRef.current.delete(serverId)
+    }
+    if (!streamConnectedRef.current) return
+    reconcileRemoteServersOnce(enabledRemoteServers)
+  }, [enabledRemoteServers, reconcileRemoteServersOnce])
+
   const stopStatusPoll = useCallback(() => {
     if (statusPollIntervalRef.current === null) return
     clearInterval(statusPollIntervalRef.current)
@@ -984,19 +1004,23 @@ export function EventProvider({ children }: { children: React.ReactNode }) {
       }
     }
 
+    const reconciledRemoteServerIds = reconciledRemoteServerIdsRef.current
+
     const handleStatusChange = (connected: boolean) => {
       if (connected) {
+        streamConnectedRef.current = true
+        reconciledRemoteServerIdsRef.current.clear()
         initialFetchDoneRef.current = false
         fetchInitialPendingData()
         fetchInitialSessionStatuses()
-        for (const server of enabledRemoteServersRef.current) {
-          void reconcileRemoteSessionStatuses(server.id)
-        }
+        reconcileRemoteServersOnce(enabledRemoteServersRef.current)
         void syncRunningShells(collectTrackedDirectories())
         invalidateChildSessionCaches(queryClient)
         invalidateQueryKeysDebounced(queryClient, LOCATION_CATALOG_QUERY_KEYS)
         startStatusPoll()
       } else {
+        streamConnectedRef.current = false
+        reconciledRemoteServerIdsRef.current.clear()
         statusSyncVersionRef.current += 1
         invalidateRemoteStatusSyncs()
         stopStatusPoll()
@@ -1041,13 +1065,15 @@ export function EventProvider({ children }: { children: React.ReactNode }) {
     subscriptionRef.current = subscription
     
     return () => {
+      streamConnectedRef.current = false
+      reconciledRemoteServerIds.clear()
       statusSyncVersionRef.current += 1
       invalidateRemoteStatusSyncs()
       stopStatusPoll()
       subscription.dispose()
       subscriptionRef.current = null
     }
-  }, [addPermission, removePermission, addForm, removeForm, rememberSessionDirectory, fetchInitialPendingData, fetchInitialSessionStatuses, startStatusPoll, stopStatusPoll, queryClient, handleHealthChange, reconcilePendingActionsForDirectories, collectTrackedDirectories, syncRunningShells, resolveSessionAncestry, reconcileRemoteSessionStatuses, invalidateRemoteStatusSyncs])
+  }, [addPermission, removePermission, addForm, removeForm, rememberSessionDirectory, fetchInitialPendingData, fetchInitialSessionStatuses, startStatusPoll, stopStatusPoll, queryClient, handleHealthChange, reconcilePendingActionsForDirectories, collectTrackedDirectories, syncRunningShells, resolveSessionAncestry, reconcileRemoteSessionStatuses, reconcileRemoteServersOnce, invalidateRemoteStatusSyncs])
 
   useEffect(() => {
     reposRef.current = repos
