@@ -12,6 +12,7 @@ import {
   type OpenCodeServerLink,
   type OpenCodeServerTestResult,
 } from '@opencode-manager/shared/schemas'
+import { haveSameUrlOrigin } from '@opencode-manager/shared/utils'
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
 import { Checkbox } from '@/components/ui/checkbox'
@@ -172,8 +173,14 @@ export function OpenCodeServerDialog({
   }, [open, server, form])
 
   const baseUrlValue = form.watch('baseUrl')
+  const passwordValue = form.watch('password')
   const transportWarning = sendsCredentialsInClear(baseUrlValue)
   const isEditing = Boolean(server)
+  const originChanged = Boolean(
+    server && isHttpUrl(baseUrlValue) && !haveSameUrlOrigin(server.baseUrl, baseUrlValue),
+  )
+  const needsCredentialsForOriginChange =
+    Boolean(server?.hasPassword) && originChanged && !passwordValue && !clearPassword && !pairingLink
   const isSubmitting = form.formState.isSubmitting
 
   const applyPairingLink = (text: string) => {
@@ -380,6 +387,13 @@ export function OpenCodeServerDialog({
                       </FormItem>
                     )}
                   />
+
+                  {needsCredentialsForOriginChange && (
+                    <div role="status" className="flex items-start gap-2 rounded-md border border-warning/40 p-2 text-sm text-warning">
+                      <AlertTriangle className="mt-0.5 h-4 w-4 shrink-0" />
+                      <span>Changing the server address requires re-entering the password or pairing again.</span>
+                    </div>
+                  )}
 
                   {isEditing && server?.hasPassword && (
                     <div className="flex items-center gap-2">

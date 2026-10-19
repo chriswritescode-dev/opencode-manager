@@ -6,6 +6,7 @@ import type {
   OpenCodeServerTestResult,
   UpdateOpenCodeServerRequest,
 } from '@opencode-manager/shared/schemas'
+import { trimUrlTrailingSlashes } from '@opencode-manager/shared/utils'
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
 import { Switch } from '@/components/ui/switch'
@@ -108,7 +109,14 @@ export function OpenCodeServersSettings() {
   }
 
   const handleTest = async (values: OpenCodeServerFormValues) => {
-    if (editingServer && !values.password) {
+    const testsSavedServer =
+      editingServer !== null &&
+      trimUrlTrailingSlashes(values.baseUrl) === editingServer.baseUrl &&
+      values.username === editingServer.username &&
+      !values.password &&
+      !values.clearPassword &&
+      !values.pairing
+    if (editingServer && testsSavedServer) {
       return testByIdAsync(editingServer.id)
     }
     return testAsync({

@@ -1,6 +1,7 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 import { createOpenCodeServerRoutes } from '../../src/routes/opencode-servers'
 import {
+  OpenCodeServerCredentialsRequiredError,
   OpenCodeServerNotFoundError,
   OpenCodeServerPairingError,
   type OpenCodeServerRegistry,
@@ -142,6 +143,21 @@ describe('opencode server routes', () => {
 
     expect(response.status).toBe(200)
     expect(registry.update).toHaveBeenCalledWith('srv_1', { name: 'Renamed' })
+  })
+
+  it('returns 400 when an origin change would reuse the stored password', async () => {
+    registry.update.mockRejectedValue(new OpenCodeServerCredentialsRequiredError())
+
+    const response = await app.request('/srv_1', {
+      method: 'PATCH',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ baseUrl: 'https://other-host.example.com' }),
+    })
+
+    expect(response.status).toBe(400)
+    expect(await response.json()).toEqual({
+      error: 'Changing the server address requires re-entering the password or pairing again',
+    })
   })
 
   it('returns 404 when updating an unknown server', async () => {

@@ -42,6 +42,7 @@ interface SessionStatusStore {
   clearOutcome: (sessionID: string) => void
   setOptimisticActive: (sessionID: string, timeoutMs?: number) => void
   replaceStatuses: (statuses: Record<string, SessionStatusType>, token: StatusSnapshotToken) => void
+  replaceServerStatuses: (serverId: string, statuses: Record<string, SessionStatusType>, token: StatusSnapshotToken) => void
   applySessionSnapshot: (sessionID: string, session: SessionInfo, token: StatusSnapshotToken) => void
   beginStatusSnapshot: () => StatusSnapshotToken
   endStatusSnapshot: (token: StatusSnapshotToken) => void
@@ -64,6 +65,7 @@ const optimisticActiveTimers = new Map<string, ReturnType<typeof setTimeout>>()
 const inFlightSnapshots = new Map<number, number>()
 let snapshotOrderCounter = 0
 let lastAppliedSnapshotOrder = 0
+const lastAppliedServerSnapshotOrders = new Map<string, number>()
 const inFlightShellSnapshots = new Map<number, number>()
 let shellSnapshotOrderCounter = 0
 
@@ -150,6 +152,21 @@ const markSessionKnown = (knownSessions: Set<string>, sessionID: string): Set<st
   if (knownSessions.has(sessionID)) return null
   const next = new Set(knownSessions)
   next.add(sessionID)
+  return next
+}
+
+const withServerOwnership = (
+  sessionServers: Map<string, string>,
+  sessionIDs: string[],
+  serverId: string,
+): Map<string, string> | null => {
+  if (serverId === LOCAL_OPENCODE_SERVER_ID) return null
+  let next: Map<string, string> | null = null
+  for (const sessionID of sessionIDs) {
+    if (sessionServers.get(sessionID) === serverId) continue
+    next ??= new Map(sessionServers)
+    next.set(sessionID, serverId)
+  }
   return next
 }
 
@@ -244,6 +261,80 @@ export const useSessionStatus = create<SessionStatusStore>((set, get) => {
   }
 
   const isRemoteOwned = (sessionID: string): boolean => get().sessionServers.has(sessionID)
+
+  const buildStatusSnapshotPatch = (
+    state: SessionStatusStore,
+    statuses: Record<string, SessionStatusType>,
+    captureRevision: number,
+    keepsCurrentStatus: (sessionID: string) => boolean,
+    snapshotServerId: string | null,
+  ): Partial<SessionStatusStore> | null => {
+    const currentStatuses = state.statuses
+    const currentRevisions = state.statusRevisions
+    const currentKnownSessions = state.knownSessions
+
+    const newMap = new Map<string, SessionStatusType>()
+    const newCache = new Map<string, string>()
+
+    for (const [sessionID, status] of currentStatuses.entries()) {
+      if (!keepsCurrentStatus(sessionID)) continue
+      newMap.set(sessionID, status)
+      newCache.set(sessionID, getStatusHash(status))
+    }
+
+    const snapshotSessionIDs: string[] = []
+    for (const [sessionID, status] of Object.entries(statuses)) {
+      if (isLiveAfterCapture(sessionID, captureRevision)) continue
+      if (status.type === 'idle') continue
+      const current = currentStatuses.get(sessionID)
+      const effective = status.type === 'busy' && current !== undefined && current.type !== 'idle' ? current : status
+      newMap.set(sessionID, effective)
+      newCache.set(sessionID, getStatusHash(effective))
+      snapshotSessionIDs.push(sessionID)
+    }
+
+    const nextRevisions = prunedRevisions(currentRevisions)
+    const nextKnownSessions = new Set<string>(Object.keys(statuses))
+    for (const [sessionID, revision] of currentRevisions.entries()) {
+      if (revision > captureRevision) nextKnownSessions.add(sessionID)
+    }
+    for (const sessionID of optimisticActiveTimers.keys()) {
+      nextKnownSessions.add(sessionID)
+    }
+    for (const sessionID of newMap.keys()) {
+      nextKnownSessions.add(sessionID)
+    }
+    for (const sessionID of currentKnownSessions) {
+      if (!currentStatuses.has(sessionID)) nextKnownSessions.add(sessionID)
+    }
+
+    const sessionServers = snapshotServerId === null
+      ? null
+      : withServerOwnership(state.sessionServers, snapshotSessionIDs, snapshotServerId)
+
+    if (
+      sessionServers === null &&
+      sameEntries(state.statusCache, newCache) &&
+      sameEntries(currentRevisions, nextRevisions) &&
+      sameSets(currentKnownSessions, nextKnownSessions)
+    ) return null
+
+    return {
+      statuses: newMap,
+      statusCache: newCache,
+      statusRevisions: nextRevisions,
+      knownSessions: nextKnownSessions,
+      ...(sessionServers === null ? {} : { sessionServers }),
+    }
+  }
+
+  const pruneRevisionsForRejectedSnapshot = (): void => {
+    const currentRevisions = get().statusRevisions
+    const nextRevisions = prunedRevisions(currentRevisions)
+    if (!sameEntries(currentRevisions, nextRevisions)) {
+      set({ statusRevisions: nextRevisions })
+    }
+  }
 
   return {
     statuses: new Map(),
@@ -342,11 +433,7 @@ export const useSessionStatus = create<SessionStatusStore>((set, get) => {
       releaseSnapshot(token)
 
       if (token.order < lastAppliedSnapshotOrder) {
-        const currentRevisions = get().statusRevisions
-        const nextRevisions = prunedRevisions(currentRevisions)
-        if (!sameEntries(currentRevisions, nextRevisions)) {
-          set({ statusRevisions: nextRevisions })
-        }
+        pruneRevisionsForRejectedSnapshot()
         return
       }
       lastAppliedSnapshotOrder = token.order
@@ -355,56 +442,37 @@ export const useSessionStatus = create<SessionStatusStore>((set, get) => {
         clearOptimisticActiveTimer(sessionID)
       }
 
-      const currentStatuses = get().statuses
-      const currentRevisions = get().statusRevisions
-      const currentKnownSessions = get().knownSessions
-      const captureRevision = token.revision
+      const patch = buildStatusSnapshotPatch(
+        get(),
+        statuses,
+        token.revision,
+        (sessionID) => isLiveAfterCapture(sessionID, token.revision) || isRemoteOwned(sessionID),
+        null,
+      )
+      if (patch) set(patch)
+    },
 
-      const newMap = new Map<string, SessionStatusType>()
-      const newCache = new Map<string, string>()
+    replaceServerStatuses: (serverId: string, statuses: Record<string, SessionStatusType>, token: StatusSnapshotToken) => {
+      releaseSnapshot(token)
 
-      for (const [sessionID, status] of currentStatuses.entries()) {
-        if (!isLiveAfterCapture(sessionID, captureRevision) && !isRemoteOwned(sessionID)) continue
-        newMap.set(sessionID, status)
-        newCache.set(sessionID, getStatusHash(status))
+      if (token.order < (lastAppliedServerSnapshotOrders.get(serverId) ?? 0)) {
+        pruneRevisionsForRejectedSnapshot()
+        return
+      }
+      lastAppliedServerSnapshotOrders.set(serverId, token.order)
+
+      for (const sessionID of Object.keys(statuses)) {
+        clearOptimisticActiveTimer(sessionID)
       }
 
-      for (const [sessionID, status] of Object.entries(statuses)) {
-        if (isLiveAfterCapture(sessionID, captureRevision)) continue
-        if (status.type === 'idle') continue
-        const current = currentStatuses.get(sessionID)
-        const effective = status.type === 'busy' && current !== undefined && current.type !== 'idle' ? current : status
-        newMap.set(sessionID, effective)
-        newCache.set(sessionID, getStatusHash(effective))
-      }
-
-      const nextRevisions = prunedRevisions(currentRevisions)
-      const nextKnownSessions = new Set<string>(Object.keys(statuses))
-      for (const [sessionID, revision] of currentRevisions.entries()) {
-        if (revision > captureRevision) nextKnownSessions.add(sessionID)
-      }
-      for (const sessionID of optimisticActiveTimers.keys()) {
-        nextKnownSessions.add(sessionID)
-      }
-      for (const sessionID of newMap.keys()) {
-        if (isRemoteOwned(sessionID)) nextKnownSessions.add(sessionID)
-      }
-      for (const sessionID of currentKnownSessions) {
-        if (!currentStatuses.has(sessionID)) nextKnownSessions.add(sessionID)
-      }
-
-      if (
-        sameEntries(get().statusCache, newCache) &&
-        sameEntries(currentRevisions, nextRevisions) &&
-        sameSets(currentKnownSessions, nextKnownSessions)
-      ) return
-
-      set({
-        statuses: newMap,
-        statusCache: newCache,
-        statusRevisions: nextRevisions,
-        knownSessions: nextKnownSessions,
-      })
+      const patch = buildStatusSnapshotPatch(
+        get(),
+        statuses,
+        token.revision,
+        (sessionID) => isLiveAfterCapture(sessionID, token.revision) || get().sessionServers.get(sessionID) !== serverId,
+        serverId,
+      )
+      if (patch) set(patch)
     },
 
     beginStatusSnapshot: () => {

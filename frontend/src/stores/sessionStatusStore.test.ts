@@ -65,6 +65,68 @@ describe('sessionStatusStore', () => {
     expect(useSessionStatus.getState().sessionServers.has('session-local')).toBe(false)
   })
 
+  it('removes a stale busy status owned by the reconciled server', () => {
+    const store = useSessionStatus.getState()
+    store.setSessionServer('session-remote', 'srv_remote')
+    store.setStatus('session-remote', { type: 'busy' })
+
+    const token = store.beginStatusSnapshot()
+    useSessionStatus.getState().replaceServerStatuses('srv_remote', {}, token)
+
+    expect(useSessionStatus.getState().getStatus('session-remote')).toEqual({ type: 'idle' })
+    expect(useSessionStatus.getState().knownSessions.has('session-remote')).toBe(false)
+  })
+
+  it('keeps statuses owned by another server or by the local server during a server snapshot', () => {
+    const store = useSessionStatus.getState()
+    store.setSessionServer('session-remote-a', 'srv_remote_a')
+    store.setStatus('session-remote-a', { type: 'busy' })
+    store.setSessionServer('session-remote-b', 'srv_remote_b')
+    store.setStatus('session-remote-b', { type: 'busy' })
+    store.setStatus('session-local', { type: 'busy' })
+
+    const token = store.beginStatusSnapshot()
+    useSessionStatus.getState().replaceServerStatuses('srv_remote_a', {}, token)
+
+    expect(useSessionStatus.getState().getStatus('session-remote-a')).toEqual({ type: 'idle' })
+    expect(useSessionStatus.getState().getStatus('session-remote-b')).toEqual({ type: 'busy' })
+    expect(useSessionStatus.getState().getStatus('session-local')).toEqual({ type: 'busy' })
+    expect(useSessionStatus.getState().knownSessions.has('session-remote-b')).toBe(true)
+    expect(useSessionStatus.getState().knownSessions.has('session-local')).toBe(true)
+  })
+
+  it('does not let a server snapshot clobber a live status update made after it began', () => {
+    const store = useSessionStatus.getState()
+    store.setSessionServer('session-remote', 'srv_remote')
+    store.setStatus('session-remote', { type: 'busy' })
+
+    const token = store.beginStatusSnapshot()
+    store.setStatus('session-remote', { type: 'idle' })
+
+    useSessionStatus.getState().replaceServerStatuses(
+      'srv_remote',
+      { 'session-remote': { type: 'busy' } },
+      token,
+    )
+
+    expect(useSessionStatus.getState().getStatus('session-remote')).toEqual({ type: 'idle' })
+    expect(useSessionStatus.getState().knownSessions.has('session-remote')).toBe(true)
+  })
+
+  it('records snapshot sessions as owned by the reconciled server', () => {
+    const token = useSessionStatus.getState().beginStatusSnapshot()
+
+    useSessionStatus.getState().replaceServerStatuses(
+      'srv_remote',
+      { 'session-remote': { type: 'busy' } },
+      token,
+    )
+
+    expect(useSessionStatus.getState().getStatus('session-remote')).toEqual({ type: 'busy' })
+    expect(useSessionStatus.getState().sessionServers.get('session-remote')).toBe('srv_remote')
+    expect(useSessionStatus.getState().knownSessions.has('session-remote')).toBe(true)
+  })
+
   it('forgets the recorded server of a deleted session', () => {
     const store = useSessionStatus.getState()
     store.setSessionServer('session-remote', 'srv_remote')

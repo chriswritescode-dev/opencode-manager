@@ -310,6 +310,7 @@ export function EventProvider({ children }: { children: React.ReactNode }) {
   const prevPermissionCountRef = useRef(0)
   const initialFetchDoneRef = useRef(false)
   const statusSyncVersionRef = useRef(0)
+  const remoteStatusSyncVersionsRef = useRef(new Map<string, number>())
   const statusPollIntervalRef = useRef<ReturnType<typeof setInterval> | null>(null)
   const subscriptionRef = useRef<ReturnType<typeof openCodeEventStream.subscribeGlobalMonitor> | null>(null)
   const reposRef = useRef<typeof repos>(null)
@@ -323,6 +324,10 @@ export function EventProvider({ children }: { children: React.ReactNode }) {
   const { isAuthenticated } = useAuth()
   const { servers } = useOpenCodeServers({ enabled: isAuthenticated })
   const enabledRemoteServers = useMemo(() => servers.filter((server) => server.enabled), [servers])
+  const enabledRemoteServersRef = useRef(enabledRemoteServers)
+  useEffect(() => {
+    enabledRemoteServersRef.current = enabledRemoteServers
+  }, [enabledRemoteServers])
   const remoteProjectQueries = useQueries({
     queries: enabledRemoteServers.map((server) => ({
       queryKey: serverScopedKey(['opencode', 'projects'], server.id),
@@ -738,6 +743,39 @@ export function EventProvider({ children }: { children: React.ReactNode }) {
     }
   }, [queryClient, resolveSessionAncestry])
 
+  const invalidateRemoteStatusSyncs = useCallback(() => {
+    const versions = remoteStatusSyncVersionsRef.current
+    for (const [serverId, version] of versions.entries()) {
+      versions.set(serverId, version + 1)
+    }
+  }, [])
+
+  const reconcileRemoteSessionStatuses = useCallback(async (serverId: string) => {
+    const versions = remoteStatusSyncVersionsRef.current
+    const syncVersion = (versions.get(serverId) ?? 0) + 1
+    versions.set(serverId, syncVersion)
+    const snapshotToken = useSessionStatus.getState().beginStatusSnapshot()
+
+    try {
+      const active = await listActiveSessions(serverId)
+      if (versions.get(serverId) !== syncVersion) {
+        useSessionStatus.getState().endStatusSnapshot(snapshotToken)
+        return
+      }
+      useSessionStatus.getState().replaceServerStatuses(
+        serverId,
+        busyStatusesFromActiveSessions(active),
+        snapshotToken,
+      )
+      await resolveSessionAncestry(Object.keys(active), serverId)
+    } catch (error) {
+      useSessionStatus.getState().endStatusSnapshot(snapshotToken)
+      if (import.meta.env.DEV) {
+        console.warn(`Failed to fetch active sessions for ${serverId}:`, error)
+      }
+    }
+  }, [resolveSessionAncestry])
+
   const stopStatusPoll = useCallback(() => {
     if (statusPollIntervalRef.current === null) return
     clearInterval(statusPollIntervalRef.current)
@@ -949,12 +987,16 @@ export function EventProvider({ children }: { children: React.ReactNode }) {
         initialFetchDoneRef.current = false
         fetchInitialPendingData()
         fetchInitialSessionStatuses()
+        for (const server of enabledRemoteServersRef.current) {
+          void reconcileRemoteSessionStatuses(server.id)
+        }
         void syncRunningShells(collectTrackedDirectories())
         invalidateChildSessionCaches(queryClient)
         invalidateQueryKeysDebounced(queryClient, LOCATION_CATALOG_QUERY_KEYS)
         startStatusPoll()
       } else {
         statusSyncVersionRef.current += 1
+        invalidateRemoteStatusSyncs()
         stopStatusPoll()
       }
     }
@@ -965,6 +1007,7 @@ export function EventProvider({ children }: { children: React.ReactNode }) {
           (key) => parseServerDirectoryKey(key).serverId === serverId,
         )
         void reconcilePendingActionsForDirectories(directories)
+        void reconcileRemoteSessionStatuses(serverId)
         void syncRunningShells(directories)
         invalidateQueryKeysDebounced(
           queryClient,
@@ -996,11 +1039,12 @@ export function EventProvider({ children }: { children: React.ReactNode }) {
     
     return () => {
       statusSyncVersionRef.current += 1
+      invalidateRemoteStatusSyncs()
       stopStatusPoll()
       subscription.dispose()
       subscriptionRef.current = null
     }
-  }, [addPermission, removePermission, addForm, removeForm, rememberSessionDirectory, fetchInitialPendingData, fetchInitialSessionStatuses, startStatusPoll, stopStatusPoll, queryClient, handleHealthChange, reconcilePendingActionsForDirectories, collectTrackedDirectories, syncRunningShells, resolveSessionAncestry])
+  }, [addPermission, removePermission, addForm, removeForm, rememberSessionDirectory, fetchInitialPendingData, fetchInitialSessionStatuses, startStatusPoll, stopStatusPoll, queryClient, handleHealthChange, reconcilePendingActionsForDirectories, collectTrackedDirectories, syncRunningShells, resolveSessionAncestry, reconcileRemoteSessionStatuses, invalidateRemoteStatusSyncs])
 
   useEffect(() => {
     reposRef.current = repos

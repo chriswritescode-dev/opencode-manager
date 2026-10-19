@@ -19,6 +19,7 @@ import {
   createReplayEventBuilder,
   nextBackoffDelay,
   parseOpenCodeEvent,
+  planSessionStatusReplay,
   type ReplayEventBuilder,
 } from './opencode-event-routing'
 import type { RemoteReplayHandler } from './sse-aggregator'
@@ -231,6 +232,7 @@ export class RemoteServerEventHub {
     logger.info(`Remote event stream connected: ${serverId}`)
     this.aggregator.sendRemoteResync(serverId)
     void this.refreshVersion(serverId)
+    void this.replaySessionStatuses(serverId, source)
   }
 
   private handleStreamError(serverId: string, source: RemoteEventSource, error: unknown): void {
@@ -302,6 +304,53 @@ export class RemoteServerEventHub {
       stream.versionProbeToken = 0
     }
     this.connectServer(change.serverId)
+  }
+
+  private isStreamCurrent(serverId: string, stream: RemoteServerStream, source: RemoteEventSource): boolean {
+    return this.streams.get(serverId) === stream && stream.source === source && stream.connected
+  }
+
+  private async replaySessionStatuses(serverId: string, source: RemoteEventSource): Promise<void> {
+    const stream = this.streams.get(serverId)
+    if (!stream || !this.isStreamCurrent(serverId, stream, source)) return
+
+    let api: OpenCodeApi
+    try {
+      api = this.registry.getClient(serverId).api
+    } catch (error) {
+      logger.warn(`remote status replay: no client for ${serverId}: ${String(error)}`)
+      return
+    }
+
+    let active: Record<string, unknown>
+    try {
+      active = await api.session.active()
+    } catch (error) {
+      logger.warn(`remote status replay: failed to fetch active sessions for ${serverId}: ${String(error)}`)
+      return
+    }
+
+    if (!this.isStreamCurrent(serverId, stream, source)) return
+
+    const plan = planSessionStatusReplay(active, stream.sessionDirectories)
+    let replayed = 0
+
+    for (const { sessionID, directory } of plan.idle) {
+      const event = this.buildReplayEvent('session.status', directory, { sessionID, status: { type: 'idle' } })
+      this.aggregator.deliverRemoteEnvelope(serverId, directory, JSON.stringify(event))
+      replayed++
+    }
+
+    for (const sessionID of plan.busy) {
+      const directory = stream.sessionDirectories.get(sessionID) ?? null
+      const event = this.buildReplayEvent('session.status', directory ?? '', { sessionID, status: { type: 'busy' } })
+      this.aggregator.deliverRemoteEnvelope(serverId, directory, JSON.stringify(event))
+      replayed++
+    }
+
+    if (replayed > 0) {
+      logger.info(`remote status replay: re-emitted ${replayed} session status(es) for ${serverId}`)
+    }
   }
 
   private async refreshVersion(serverId: string): Promise<void> {

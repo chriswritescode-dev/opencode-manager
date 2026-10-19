@@ -29,6 +29,8 @@ const savedServer: OpenCodeServer = {
   updatedAt: 2,
 }
 
+const originChangeWarning = 'Changing the server address requires re-entering the password or pairing again.'
+
 function renderDialog(options: {
   server?: OpenCodeServer | null
   onSubmit?: (values: OpenCodeServerFormValues) => Promise<void>
@@ -131,5 +133,48 @@ describe('OpenCodeServerDialog', () => {
     await waitFor(() => expect(onTest).toHaveBeenCalledTimes(1))
     expect(await screen.findByText('Connected — OpenCode 2.0.15')).toBeInTheDocument()
     expect(screen.getByText('Supported')).toBeInTheDocument()
+  })
+
+  it('warns that changing the server origin requires credentials', async () => {
+    const user = userEvent.setup()
+    renderDialog({ server: savedServer })
+
+    expect(screen.queryByText(originChangeWarning)).not.toBeInTheDocument()
+
+    await user.clear(screen.getByLabelText('URL'))
+    await user.type(screen.getByLabelText('URL'), 'https://relocated.example.com')
+
+    expect(screen.getByText(originChangeWarning)).toBeInTheDocument()
+  })
+
+  it('does not warn for a same-origin address change', async () => {
+    const user = userEvent.setup()
+    renderDialog({ server: savedServer })
+
+    await user.clear(screen.getByLabelText('URL'))
+    await user.type(screen.getByLabelText('URL'), 'https://office.example.com/api')
+
+    expect(screen.queryByText(originChangeWarning)).not.toBeInTheDocument()
+  })
+
+  it('does not warn once a password is entered for the new origin', async () => {
+    const user = userEvent.setup()
+    renderDialog({ server: savedServer })
+
+    await user.clear(screen.getByLabelText('URL'))
+    await user.type(screen.getByLabelText('URL'), 'https://relocated.example.com')
+    await user.type(screen.getByLabelText('Password'), 'new-password')
+
+    expect(screen.queryByText(originChangeWarning)).not.toBeInTheDocument()
+  })
+
+  it('does not warn about an origin change when no password is stored', async () => {
+    const user = userEvent.setup()
+    renderDialog({ server: { ...savedServer, hasPassword: false } })
+
+    await user.clear(screen.getByLabelText('URL'))
+    await user.type(screen.getByLabelText('URL'), 'https://relocated.example.com')
+
+    expect(screen.queryByText(originChangeWarning)).not.toBeInTheDocument()
   })
 })

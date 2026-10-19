@@ -12,6 +12,7 @@ import {
   createReplayEventBuilder,
   nextBackoffDelay,
   parseOpenCodeEvent,
+  planSessionStatusReplay,
   type ReplayEventBuilder,
 } from './opencode-event-routing'
 
@@ -297,18 +298,16 @@ class SSEAggregator {
     }
 
     const tracked = this.getTrackedSessions()
-    const runningIDs = Object.keys(running ?? {})
-    const runningSet = new Set(runningIDs)
+    const plan = planSessionStatusReplay(running, tracked)
 
     let replayed = 0
 
-    for (const [sessionID, directory] of tracked) {
-      if (runningSet.has(sessionID)) continue
+    for (const { sessionID, directory } of plan.idle) {
       this.deliverEvent(directory, this.buildReplayEvent('session.status', directory, { sessionID, status: { type: 'idle' } }))
       replayed++
     }
 
-    const runningDirectories = await Promise.all(runningIDs.map(async (sessionID) => ({
+    const runningDirectories = await Promise.all(plan.busy.map(async (sessionID) => ({
       sessionID,
       directory: tracked.get(sessionID) ?? await this.resolveSessionDirectory(fetcher, sessionID),
     })))

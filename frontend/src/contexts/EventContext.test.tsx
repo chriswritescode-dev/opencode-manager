@@ -2825,7 +2825,8 @@ describe('EventProvider permissions and forms', () => {
       expect(mocks.listPendingForms).toHaveBeenCalledWith('/remote/repo', 'srv_remote')
       expect(mocks.listShells).toHaveBeenCalledWith('/remote/repo', 'srv_remote')
     })
-    expect(mocks.listActiveSessions).not.toHaveBeenCalled()
+    expect(mocks.listActiveSessions).not.toHaveBeenCalledWith()
+    expect(mocks.listActiveSessions).toHaveBeenCalledWith('srv_remote')
     expect(mocks.listPendingPermissions).not.toHaveBeenCalledWith('/repo', 'local')
     expect(mocks.listShells).not.toHaveBeenCalledWith('/repo', 'local')
 
@@ -2834,6 +2835,65 @@ describe('EventProvider permissions and forms', () => {
       expect(invalidateQueries).toHaveBeenCalledWith({ queryKey: ['opencode', 'agents', 'srv_remote'] })
     })
     expect(invalidateQueries).not.toHaveBeenCalledWith({ queryKey: ['opencode', 'commands'] })
+  })
+
+  it('clears a stale remote busy status on a remote resync', async () => {
+    mocks.listRepos.mockResolvedValue([{ id: 123, fullPath: '/repo' }])
+    mocks.listActiveSessions.mockResolvedValue({})
+
+    render(<Harness />, { wrapper: createWrapper() })
+
+    await waitFor(() => expect(mocks.subscribeGlobalMonitor).toHaveBeenCalled())
+
+    act(() => {
+      useSessionStatus.getState().setSessionServer('remote-session', 'srv_remote')
+      useSessionStatus.getState().setStatus('remote-session', { type: 'busy' })
+    })
+
+    const lastSubscribeCall = mocks.subscribeGlobalMonitor.mock.calls[mocks.subscribeGlobalMonitor.mock.calls.length - 1]
+    const onResync = lastSubscribeCall[0].onResync as
+      | ((directories: string[], serverId?: string) => void)
+      | undefined
+
+    await act(async () => {
+      onResync?.(['srv_remote|/remote/repo'], 'srv_remote')
+    })
+
+    await waitFor(() => {
+      expect(mocks.listActiveSessions).toHaveBeenCalledWith('srv_remote')
+      expect(useSessionStatus.getState().getStatus('remote-session')).toEqual({ type: 'idle' })
+    })
+  })
+
+  it('reconciles every enabled remote server when the browser stream reconnects', async () => {
+    mocks.servers = [
+      { id: 'srv_remote', enabled: true },
+      { id: 'srv_disabled', enabled: false },
+    ]
+    mocks.listRepos.mockResolvedValue([{ id: 123, fullPath: '/repo' }])
+    mocks.listActiveSessions.mockResolvedValue({})
+
+    render(<Harness />, { wrapper: createWrapper() })
+
+    await waitFor(() => expect(mocks.subscribeGlobalMonitor).toHaveBeenCalled())
+
+    act(() => {
+      useSessionStatus.getState().setSessionServer('remote-session', 'srv_remote')
+      useSessionStatus.getState().setStatus('remote-session', { type: 'busy' })
+    })
+
+    const lastSubscribeCall = mocks.subscribeGlobalMonitor.mock.calls[mocks.subscribeGlobalMonitor.mock.calls.length - 1]
+    const handleStatusChange = lastSubscribeCall[0].onStatusChange as (connected: boolean) => void
+
+    act(() => {
+      handleStatusChange(true)
+    })
+
+    await waitFor(() => {
+      expect(mocks.listActiveSessions).toHaveBeenCalledWith('srv_remote')
+      expect(useSessionStatus.getState().getStatus('remote-session')).toEqual({ type: 'idle' })
+    })
+    expect(mocks.listActiveSessions).not.toHaveBeenCalledWith('srv_disabled')
   })
 
   it('subscribes the project directories of enabled remote servers', async () => {

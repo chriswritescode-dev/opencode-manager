@@ -103,6 +103,7 @@ function parseFrame(frame: string): {
 interface ApiFixture {
   permissions?: Record<string, unknown[]>
   forms?: Record<string, unknown[]>
+  active?: Record<string, { type: 'running' }>
 }
 
 function makeApi(fixture: ApiFixture = {}): OpenCodeApi {
@@ -122,6 +123,9 @@ function makeApi(fixture: ApiFixture = {}): OpenCodeApi {
         location: { directory: directoryOf(input) },
         data: fixture.forms?.[directoryOf(input)] ?? [],
       })),
+    },
+    session: {
+      active: vi.fn(async () => fixture.active ?? {}),
     },
   } as unknown as OpenCodeApi
 }
@@ -796,5 +800,119 @@ describe('RemoteServerEventHub pending action replay', () => {
     await flushPromises()
 
     expect(client.frames).toHaveLength(0)
+  })
+})
+
+describe('RemoteServerEventHub session status replay', () => {
+  let hub: RemoteServerEventHub
+  let fake: FakeRegistry
+  let sources: ReturnType<typeof createSourceFactory>
+
+  beforeEach(() => {
+    sseAggregator.shutdown()
+    sseAggregator.setPendingActionsFetcher(null)
+    sseAggregator.setScheduledSessionsResolver(() => [])
+    sources = createSourceFactory()
+  })
+
+  afterEach(() => {
+    hub.shutdown()
+    sseAggregator.shutdown()
+  })
+
+  function createHub(fixture: ApiFixture = {}): void {
+    fake = createRegistry([SERVER_A], fixture)
+    hub = new RemoteServerEventHub(fake.registry, sseAggregator, { eventSourceFactory: sources.factory })
+  }
+
+  function statusFrames(client: CapturedClient) {
+    return client.frames.map(parseFrame).filter(frame => frame.payload.type === 'session.status')
+  }
+
+  async function trackSessionThenReconnect(sessionID: string, directory: string): Promise<void> {
+    hub.start()
+    const first = sources.sources[0]!
+    first.open()
+    await flushPromises()
+    first.message(remoteEvent('session.created', { sessionID }, directory))
+    fake.emit({ type: 'upserted', serverId: 'srv_a' })
+    await flushPromises()
+  }
+
+  it('replays idle for a tracked session that is no longer active', async () => {
+    createHub()
+    await trackSessionThenReconnect('ses_1', '/repo')
+    const client = createCapturingClient()
+    sseAggregator.addClient('status-idle', client.callback, client.writeFrame, ['srv_a|/repo'])
+
+    sources.sources[1]!.open()
+    await flushPromises()
+
+    const statuses = statusFrames(client)
+    expect(statuses).toHaveLength(1)
+    expect(statuses[0]?.serverId).toBe('srv_a')
+    expect(statuses[0]?.directory).toBe('/repo')
+    expect(statuses[0]?.payload.id).toMatch(/^ocm_replay_remote_/)
+    expect(statuses[0]?.payload.data).toEqual({ sessionID: 'ses_1', status: { type: 'idle' } })
+  })
+
+  it('replays busy for active sessions, using a null directory when the session is untracked', async () => {
+    createHub({ active: { ses_1: { type: 'running' }, ses_2: { type: 'running' } } })
+    await trackSessionThenReconnect('ses_1', '/repo')
+    const client = createCapturingClient()
+    sseAggregator.addClient('status-busy', client.callback, client.writeFrame, ['srv_a|/repo'])
+
+    sources.sources[1]!.open()
+    await flushPromises()
+
+    const statuses = statusFrames(client)
+    expect(statuses.map(frame => frame.directory)).toEqual(['/repo', null])
+    expect(statuses.map(frame => frame.payload.data)).toEqual([
+      { sessionID: 'ses_1', status: { type: 'busy' } },
+      { sessionID: 'ses_2', status: { type: 'busy' } },
+    ])
+  })
+
+  it('does not replay or throw when the active session lookup fails', async () => {
+    createHub()
+    vi.mocked(fake.api.session.active).mockRejectedValue(new Error('sessions unavailable'))
+    await trackSessionThenReconnect('ses_1', '/repo')
+    const client = createCapturingClient()
+    sseAggregator.addClient('status-failure', client.callback, client.writeFrame, ['srv_a|/repo'])
+
+    sources.sources[1]!.open()
+    await flushPromises()
+
+    expect(fake.api.session.active).toHaveBeenCalledTimes(2)
+    expect(statusFrames(client)).toHaveLength(0)
+  })
+
+  it('skips the replay when the stream disconnects before the active sessions resolve', async () => {
+    createHub()
+    const client = createCapturingClient()
+    sseAggregator.addClient('status-stale', client.callback, client.writeFrame, ['srv_a|/repo'])
+
+    hub.start()
+    const first = sources.sources[0]!
+    first.open()
+    await flushPromises()
+    first.message(remoteEvent('session.created', { sessionID: 'ses_1' }, '/repo'))
+
+    let resolveActive: (value: Record<string, { type: 'running' }>) => void = () => {}
+    vi.mocked(fake.api.session.active).mockReturnValueOnce(new Promise<Record<string, { type: 'running' }>>((resolve) => {
+      resolveActive = resolve
+    }) as never)
+
+    fake.emit({ type: 'upserted', serverId: 'srv_a' })
+    const second = sources.sources[1]!
+    second.open()
+    await flushPromises()
+    expect(fake.api.session.active).toHaveBeenCalledTimes(2)
+
+    second.fail({ message: 'connection lost' })
+    resolveActive({})
+    await flushPromises()
+
+    expect(statusFrames(client)).toHaveLength(0)
   })
 })

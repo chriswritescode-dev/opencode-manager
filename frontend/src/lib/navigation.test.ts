@@ -153,6 +153,21 @@ describe('parseServerSessionRoute', () => {
     expect(parseServerSessionRoute('/servers/srv_kitchen')).toBeNull();
     expect(parseServerSessionRoute('/repos/5/sessions/ses_1')).toBeNull();
   });
+
+  it('returns null for a malformed server id segment', () => {
+    expect(parseServerSessionRoute('/servers/%E0%A4%A/sessions/ses_1')).toBeNull();
+  });
+
+  it('returns null for a malformed session id segment', () => {
+    expect(parseServerSessionRoute('/servers/srv_kitchen/sessions/%E0%A4%A')).toBeNull();
+  });
+
+  it('decodes valid encoded segments', () => {
+    expect(parseServerSessionRoute('/servers/srv%20a%2Fb/sessions/ses%201')).toEqual({
+      serverId: 'srv a/b',
+      sessionId: 'ses 1',
+    });
+  });
 });
 
 describe('return target helpers', () => {
@@ -216,6 +231,13 @@ describe('getSwipeBackTarget', () => {
 
     it('returns root for a server page', () => {
       expect(getSwipeBackTarget('/servers/srv_kitchen', '')).toBe('/');
+    });
+
+    it('does not throw for a malformed server session path', () => {
+      expect(() => getSwipeBackTarget('/servers/%E0%A4%A/sessions/ses_1', '')).not.toThrow();
+      expect(getSwipeBackTarget('/servers/%E0%A4%A/sessions/ses_1', '')).toBeNull();
+      expect(() => getSwipeBackTarget('/servers/srv_kitchen/sessions/%E0%A4%A', '')).not.toThrow();
+      expect(getSwipeBackTarget('/servers/srv_kitchen/sessions/%E0%A4%A', '')).toBeNull();
     });
   });
 
