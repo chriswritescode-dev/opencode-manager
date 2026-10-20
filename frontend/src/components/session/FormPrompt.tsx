@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useId, useRef, useState, type ReactNode } from 'react'
-import { X, ChevronDown, ChevronUp, Check, Loader2 } from 'lucide-react'
+import { X, ChevronDown, ChevronUp, Check, Loader2, MessageCircleQuestion } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import { Textarea } from '@/components/ui/textarea'
 import { ExternalFieldCard } from '@/components/ui/external-field-card'
@@ -62,9 +62,10 @@ interface FormPromptProps {
   onReply: (formID: string, answer: FormAnswer) => Promise<void>
   onCancel: (formID: string) => Promise<void>
   onMinimize?: () => void
+  onAskSideQuestion?: () => void
 }
 
-export function FormPrompt({ form, onReply, onCancel, onMinimize }: FormPromptProps) {
+export function FormPrompt({ form, onReply, onCancel, onMinimize, onAskSideQuestion }: FormPromptProps) {
   const candidateFields = form.fields.filter(isAnswerableField)
   const [state, setState] = useState<FormDraft>(() => loadFormDraft(form.id) ?? buildInitialState(candidateFields))
   const { answer, customValues, customDrafts } = state
@@ -397,7 +398,7 @@ export function FormPrompt({ form, onReply, onCancel, onMinimize }: FormPromptPr
         </div>
       )}
 
-      <div className="relative flex shrink-0 gap-2 px-4 pt-3 pb-3 before:pointer-events-none before:absolute before:-top-8 before:inset-x-0 before:h-8 before:bg-gradient-to-b before:from-transparent before:to-card md:border-t md:border-primary/20 md:px-3 md:py-3 md:before:hidden">
+      <div className="relative flex shrink-0 items-center gap-2 px-4 pt-3 pb-3 before:pointer-events-none before:absolute before:-top-8 before:inset-x-0 before:h-8 before:bg-gradient-to-b before:from-transparent before:to-card md:border-t md:border-primary/20 md:px-3 md:py-3 md:before:hidden">
         <Button
           size="sm"
           onClick={handleCancel}
@@ -406,11 +407,23 @@ export function FormPrompt({ form, onReply, onCancel, onMinimize }: FormPromptPr
         >
           Dismiss
         </Button>
+        {onAskSideQuestion && (
+          <button
+            type="button"
+            onClick={onAskSideQuestion}
+            disabled={isSubmitting}
+            aria-label="Ask a side question"
+            className="h-11 shrink-0 px-4 rounded-[14px] flex items-center gap-2 text-sm font-semibold bg-muted/60 hover:bg-muted text-foreground border border-border/60 md:hidden"
+          >
+            <MessageCircleQuestion className="w-4 h-4" />
+            BTW
+          </button>
+        )}
         <Button
           size="sm"
           onClick={handleSubmit}
           disabled={isSubmitting || !canSubmit}
-          className="flex-1 h-[52px] rounded-[14px] text-[17px] font-bold bg-success hover:bg-success/90 text-success-foreground md:h-10 md:rounded-md md:text-sm md:font-medium"
+          className="flex-1 h-11 rounded-[14px] text-base font-bold bg-success hover:bg-success/90 text-success-foreground md:h-10 md:rounded-md md:text-sm md:font-medium"
         >
           {isSubmitting ? <Loader2 className="w-3.5 h-3.5 md:w-4 md:h-4 animate-spin" /> : 'Submit'}
         </Button>

@@ -564,6 +564,30 @@ describe('FormPrompt', () => {
     })
   })
 
+  describe('side question button', () => {
+    it('opens the side question from the footer button', async () => {
+      const onAskSideQuestion = vi.fn()
+      render(
+        <FormPrompt
+          form={selectForm}
+          onReply={vi.fn()}
+          onCancel={vi.fn()}
+          onAskSideQuestion={onAskSideQuestion}
+        />
+      )
+
+      await userEvent.click(screen.getByRole('button', { name: 'Ask a side question' }))
+
+      expect(onAskSideQuestion).toHaveBeenCalledTimes(1)
+    })
+
+    it('omits the side question button when no handler is provided', () => {
+      render(<FormPrompt form={selectForm} onReply={vi.fn()} onCancel={vi.fn()} />)
+
+      expect(screen.queryByRole('button', { name: 'Ask a side question' })).not.toBeInTheDocument()
+    })
+  })
+
   describe('conditional and external fields', () => {
     const conditionalForm: FormInfo = {
       id: 'form-conditional',

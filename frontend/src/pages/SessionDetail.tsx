@@ -922,6 +922,7 @@ export function SessionDetail() {
                   onReply={replyToForm}
                   onCancel={cancelForm}
                   onMinimize={() => handleMinimizeForm(currentForm)}
+                  onAskSideQuestion={() => handleAskSideQuestion('')}
                 />
               )}
               <div className={cn(isFormSheetOpen && "shrink-0 px-[3%]")}>
