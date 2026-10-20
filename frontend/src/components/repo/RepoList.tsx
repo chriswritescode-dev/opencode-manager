@@ -308,12 +308,12 @@ export function RepoList() {
     switch (true) {
       case isLoading && !repos:
         return (
-          <div className="px-0 md:p-4 h-full flex flex-col">
+          <div className="px-0 md:px-4 md:pt-4 h-full flex flex-col">
             <div className="px-2 md:px-0">
               <div className="h-10 bg-muted/50 animate-pulse rounded w-full" />
             </div>
             <div className="mx-2 md:mx-0 flex-1 min-h-0">
-              <div className="h-full overflow-y-auto pt-4 pb-2 md:pb-0">
+              <div className="h-full overflow-y-auto pt-4 pb-2 md:pb-4">
                 <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-2 gap-3 md:gap-4 w-full">
                   {Array.from({ length: 6 }).map((_, i) => (
                     <div key={i} className="md:pl-8">
@@ -388,7 +388,7 @@ export function RepoList() {
 
   return (
     <>
-      <div className="px-0 md:p-4 h-full flex flex-col">
+      <div className="px-0 md:px-4 md:pt-4 h-full flex flex-col">
         <RepoListControls
           searchQuery={searchQuery}
           onSearchChange={setSearchQuery}
@@ -416,7 +416,7 @@ export function RepoList() {
         />
 
         <div className="mx-2 md:mx-0 flex-1 min-h-0">
-          <div className="h-full overflow-y-auto pt-4 md:pb-0 [mask-image:linear-gradient(to_bottom,transparent,black_16px,black)]">
+          <div className="h-full overflow-y-auto pt-4 md:pb-4 [mask-image:linear-gradient(to_bottom,transparent,black_16px,black)]">
             {(() => {
               switch (true) {
                 case sortedViewModels.length === 0:
