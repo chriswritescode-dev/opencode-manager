@@ -1,6 +1,6 @@
-import { render as renderRaw, screen, waitFor, within } from '@testing-library/react'
+import { fireEvent, render as renderRaw, screen, waitFor, within } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
-import { describe, expect, it, vi } from 'vitest'
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import type { ReactElement } from 'react'
 import type { FormInfo } from '@opencode-manager/shared/opencode'
 import { KeyboardShortcutsProvider, useShortcutActions } from '@/contexts/KeyboardShortcutsContext'
@@ -17,6 +17,10 @@ function render(ui: ReactElement) {
 function AbortLayer({ onAbort }: { onAbort: () => void }) {
   useShortcutActions({ abort: onAbort })
   return null
+}
+
+function getHeaderDismissButton() {
+  return screen.getAllByRole('button', { name: 'Dismiss' })[0]
 }
 
 const selectForm: FormInfo = {
@@ -37,6 +41,14 @@ const selectForm: FormInfo = {
 }
 
 describe('FormPrompt', () => {
+  beforeEach(() => {
+    sessionStorage.clear()
+  })
+
+  afterEach(() => {
+    sessionStorage.clear()
+  })
+
   it('submits the selected option keyed by field key', async () => {
     const onReply = vi.fn().mockResolvedValue(undefined)
     render(<FormPrompt form={selectForm} onReply={onReply} onCancel={vi.fn()} />)
@@ -84,7 +96,7 @@ describe('FormPrompt', () => {
     const onCancel = vi.fn().mockResolvedValue(undefined)
     render(<FormPrompt form={selectForm} onReply={vi.fn()} onCancel={onCancel} />)
 
-    await userEvent.click(screen.getByRole('button', { name: 'Dismiss' }))
+    await userEvent.click(getHeaderDismissButton())
 
     await waitFor(() => expect(onCancel).toHaveBeenCalledWith('form-1'))
   })
@@ -519,7 +531,60 @@ describe('FormPrompt', () => {
       expect(featuresAlpha).toHaveAttribute('aria-pressed', 'true')
 
       expect(screen.getByRole('button', { name: 'Dismiss form' })).toBeInTheDocument()
-      expect(screen.getByRole('button', { name: 'Dismiss' })).toBeInTheDocument()
+      expect(screen.getAllByRole('button', { name: 'Dismiss' })).toHaveLength(2)
+    })
+  })
+
+  describe('mobile sheet controls', () => {
+    it('minimizes from the grab handle', async () => {
+      const onMinimize = vi.fn()
+      render(<FormPrompt form={selectForm} onReply={vi.fn()} onCancel={vi.fn()} onMinimize={onMinimize} />)
+
+      await userEvent.click(screen.getByRole('button', { name: 'Drag to minimize' }))
+
+      expect(onMinimize).toHaveBeenCalledTimes(1)
+    })
+
+    it('minimizes from the mobile header control', async () => {
+      const onMinimize = vi.fn()
+      render(<FormPrompt form={selectForm} onReply={vi.fn()} onCancel={vi.fn()} onMinimize={onMinimize} />)
+
+      await userEvent.click(screen.getByRole('button', { name: 'Minimize form' }))
+
+      expect(onMinimize).toHaveBeenCalledTimes(1)
+    })
+
+    it('dismisses from the mobile header link', async () => {
+      const onCancel = vi.fn().mockResolvedValue(undefined)
+      render(<FormPrompt form={selectForm} onReply={vi.fn()} onCancel={onCancel} />)
+
+      await userEvent.click(getHeaderDismissButton())
+
+      await waitFor(() => expect(onCancel).toHaveBeenCalledWith('form-1'))
+    })
+  })
+
+  describe('side question button', () => {
+    it('opens the side question from the footer button', async () => {
+      const onAskSideQuestion = vi.fn()
+      render(
+        <FormPrompt
+          form={selectForm}
+          onReply={vi.fn()}
+          onCancel={vi.fn()}
+          onAskSideQuestion={onAskSideQuestion}
+        />
+      )
+
+      await userEvent.click(screen.getByRole('button', { name: 'Ask a side question' }))
+
+      expect(onAskSideQuestion).toHaveBeenCalledTimes(1)
+    })
+
+    it('omits the side question button when no handler is provided', () => {
+      render(<FormPrompt form={selectForm} onReply={vi.fn()} onCancel={vi.fn()} />)
+
+      expect(screen.queryByRole('button', { name: 'Ask a side question' })).not.toBeInTheDocument()
     })
   })
 
@@ -628,6 +693,75 @@ describe('FormPrompt', () => {
     })
   })
 
+  describe('draft persistence', () => {
+    const draftKey = 'opencode-manager:form-draft:form-1'
+
+    it('restores answers after unmount and remount', async () => {
+      const onReply = vi.fn().mockResolvedValue(undefined)
+      const first = render(<FormPrompt form={selectForm} onReply={onReply} onCancel={vi.fn()} />)
+
+      await userEvent.click(screen.getByRole('button', { name: 'Production' }))
+      first.unmount()
+
+      render(<FormPrompt form={selectForm} onReply={onReply} onCancel={vi.fn()} />)
+
+      expect(screen.getByRole('button', { name: 'Production' })).toHaveAttribute('aria-pressed', 'true')
+      await userEvent.click(screen.getByRole('button', { name: 'Submit' }))
+      await waitFor(() => expect(onReply).toHaveBeenCalledWith('form-1', { q0: 'production' }))
+    })
+
+    it('clears the draft after a successful submit', async () => {
+      const onReply = vi.fn().mockResolvedValue(undefined)
+      const first = render(<FormPrompt form={selectForm} onReply={onReply} onCancel={vi.fn()} />)
+
+      await userEvent.click(screen.getByRole('button', { name: 'Production' }))
+      await userEvent.click(screen.getByRole('button', { name: 'Submit' }))
+      await waitFor(() => expect(sessionStorage.getItem(draftKey)).toBeNull())
+      first.unmount()
+
+      render(<FormPrompt form={selectForm} onReply={onReply} onCancel={vi.fn()} />)
+
+      expect(screen.getByRole('button', { name: 'Production' })).toHaveAttribute('aria-pressed', 'false')
+    })
+
+    it('clears the draft after a successful dismiss', async () => {
+      const onCancel = vi.fn().mockResolvedValue(undefined)
+      render(<FormPrompt form={selectForm} onReply={vi.fn()} onCancel={onCancel} />)
+
+      await userEvent.click(screen.getByRole('button', { name: 'Production' }))
+      await userEvent.click(getHeaderDismissButton())
+
+      await waitFor(() => expect(onCancel).toHaveBeenCalledWith('form-1'))
+      await waitFor(() => expect(sessionStorage.getItem(draftKey)).toBeNull())
+    })
+
+    it('falls back to defaults when the stored draft is corrupt', () => {
+      const form: FormInfo = {
+        id: 'form-corrupt',
+        sessionID: 'session-1',
+        title: 'Choose',
+        fields: [
+          {
+            key: 'q0',
+            title: 'Environment',
+            type: 'string',
+            options: [
+              { value: 'staging', label: 'Staging' },
+              { value: 'production', label: 'Production' },
+            ],
+            default: 'staging',
+          },
+        ],
+      }
+      sessionStorage.setItem('opencode-manager:form-draft:form-corrupt', '{not json')
+
+      render(<FormPrompt form={form} onReply={vi.fn()} onCancel={vi.fn()} />)
+
+      expect(screen.getByRole('button', { name: 'Staging' })).toHaveAttribute('aria-pressed', 'true')
+      expect(screen.getByRole('button', { name: 'Production' })).toHaveAttribute('aria-pressed', 'false')
+    })
+  })
+
   describe('keyboard shortcuts', () => {
     it('minimizes once on Escape while expanded without triggering a registered session abort', async () => {
       const sessionAbort = vi.fn()
@@ -643,6 +777,24 @@ describe('FormPrompt', () => {
 
       expect(onMinimize).toHaveBeenCalledTimes(1)
       expect(sessionAbort).not.toHaveBeenCalled()
+    })
+
+    it('ignores Escape from inside a dialog but minimizes from the document body', () => {
+      const onMinimize = vi.fn()
+      render(
+        <>
+          <div role="dialog" data-state="open">
+            <button type="button">Dialog action</button>
+          </div>
+          <FormPrompt form={selectForm} onReply={vi.fn()} onCancel={vi.fn()} onMinimize={onMinimize} />
+        </>
+      )
+
+      fireEvent.keyDown(screen.getByRole('button', { name: 'Dialog action' }), { key: 'Escape' })
+      expect(onMinimize).not.toHaveBeenCalled()
+
+      fireEvent.keyDown(document.body, { key: 'Escape' })
+      expect(onMinimize).toHaveBeenCalledTimes(1)
     })
   })
 })

@@ -84,6 +84,7 @@ vi.mock('@/hooks/useSettingsDialog', () => ({
 vi.mock('@/hooks/useMobile', () => ({
   useMobile: mocks.useMobile,
   useSwipeBack: vi.fn(() => ({ ref: vi.fn() })),
+  useSwipeDismiss: vi.fn(() => ({ bind: vi.fn(), swipeProgress: 0, swipeStyles: {} })),
 }))
 
 vi.mock('@/hooks/useVisualViewport', () => ({
@@ -275,7 +276,7 @@ describe('SessionDetail form prompt session scoping', () => {
     render(renderTree())
 
     await waitFor(() => {
-      expect(screen.getByText('Continue A')).toBeInTheDocument()
+      expect(screen.getAllByText('Continue A')[0]).toBeInTheDocument()
     })
   })
 
@@ -294,7 +295,7 @@ describe('SessionDetail form prompt session scoping', () => {
 
     render(renderTree())
 
-    await waitFor(() => expect(screen.getByText('Continue A')).toBeInTheDocument())
+    await waitFor(() => expect(screen.getAllByText('Continue A')[0]).toBeInTheDocument())
     await userEvent.click(screen.getByRole('button', { name: 'Yes' }))
     await userEvent.click(screen.getByRole('button', { name: 'Submit' }))
 
@@ -307,7 +308,7 @@ describe('SessionDetail form prompt session scoping', () => {
     formsState.bySession[VIEWED_SESSION_ID] = viewedSessionForm
     const { rerender } = render(renderTree())
 
-    await waitFor(() => expect(screen.getByText('Continue A')).toBeInTheDocument())
+    await waitFor(() => expect(screen.getAllByText('Continue A')[0]).toBeInTheDocument())
     await userEvent.click(screen.getByRole('button', { name: 'Continue A' }))
     await waitFor(() => expect(screen.getByRole('button', { name: 'Dismiss form' })).toBeInTheDocument())
 
@@ -319,7 +320,7 @@ describe('SessionDetail form prompt session scoping', () => {
 
     formsState.bySession[VIEWED_SESSION_ID] = otherSessionForm
     rerender(renderTree())
-    await waitFor(() => expect(screen.getByText('Continue B')).toBeInTheDocument())
+    await waitFor(() => expect(screen.getAllByText('Continue B')[0]).toBeInTheDocument())
   })
 
   it('dismisses a minimized form locally and then opens the next form', async () => {
@@ -329,7 +330,7 @@ describe('SessionDetail form prompt session scoping', () => {
     })
     const { rerender } = render(renderTree())
 
-    await waitFor(() => expect(screen.getByText('Continue A')).toBeInTheDocument())
+    await waitFor(() => expect(screen.getAllByText('Continue A')[0]).toBeInTheDocument())
     await userEvent.click(screen.getByRole('button', { name: 'Continue A' }))
     await userEvent.click(screen.getByRole('button', { name: 'Dismiss form' }))
 
@@ -340,7 +341,7 @@ describe('SessionDetail form prompt session scoping', () => {
 
     formsState.bySession[VIEWED_SESSION_ID] = otherSessionForm
     rerender(renderTree())
-    await waitFor(() => expect(screen.getByText('Continue B')).toBeInTheDocument())
+    await waitFor(() => expect(screen.getAllByText('Continue B')[0]).toBeInTheDocument())
   })
 
   it('retains a minimized form and reports an error when dismissal fails', async () => {
@@ -348,7 +349,7 @@ describe('SessionDetail form prompt session scoping', () => {
     formsState.cancel.mockRejectedValue(new Error('boom'))
     render(renderTree())
 
-    await waitFor(() => expect(screen.getByText('Continue A')).toBeInTheDocument())
+    await waitFor(() => expect(screen.getAllByText('Continue A')[0]).toBeInTheDocument())
     await userEvent.click(screen.getByRole('button', { name: 'Continue A' }))
     await userEvent.click(screen.getByRole('button', { name: 'Dismiss form' }))
 
@@ -356,5 +357,33 @@ describe('SessionDetail form prompt session scoping', () => {
       expect(mocks.showToast.error).toHaveBeenCalledWith('Failed to dismiss form'),
     )
     expect(screen.getByRole('button', { name: 'Dismiss form' })).toBeInTheDocument()
+  })
+
+  it('fills the prompt overlay from the header to the prompt while a form is open on mobile', async () => {
+    mocks.useMobile.mockReturnValue(true)
+    formsState.bySession[VIEWED_SESSION_ID] = viewedSessionForm
+
+    render(renderTree())
+
+    await waitFor(() => expect(screen.getAllByText('Continue A')[0]).toBeInTheDocument())
+    expect(screen.getByTestId('prompt-overlay')).toHaveClass('top-0')
+  })
+
+  it('keeps the prompt overlay anchored without an open form or once the form is minimized', async () => {
+    mocks.useMobile.mockReturnValue(true)
+
+    const { rerender } = render(renderTree())
+    await waitFor(() => expect(screen.getByText('MockedPromptInput')).toBeInTheDocument())
+    expect(screen.getByTestId('prompt-overlay')).not.toHaveClass('top-0')
+
+    formsState.bySession[VIEWED_SESSION_ID] = viewedSessionForm
+    rerender(renderTree())
+
+    await waitFor(() => expect(screen.getAllByText('Continue A')[0]).toBeInTheDocument())
+    expect(screen.getByTestId('prompt-overlay')).toHaveClass('top-0')
+
+    await userEvent.click(screen.getByRole('button', { name: 'Continue A' }))
+
+    await waitFor(() => expect(screen.getByTestId('prompt-overlay')).not.toHaveClass('top-0'))
   })
 })
