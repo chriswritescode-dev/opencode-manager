@@ -17,18 +17,19 @@ import { ChangesWalkthroughSheet } from '@/components/session/ChangesWalkthrough
 import { useModelSections } from '@/hooks/useModelSections'
 import { useDiscardMultiRunEntry, useFuseMultiRun, useLaunchMultiRun, useMultiRuns } from '@/hooks/useMultiRuns'
 import { filterModelSections } from '@/lib/modelSections'
+import { getServerSessionPath, getSessionPath } from '@/lib/navigation'
 import { randomId } from '@/lib/utils'
-import { buildSessionPath } from '@opencode-manager/shared/utils'
 import {
   FusionUnavailableDetailsSchema,
   MULTI_RUN_MAX_MODELS,
   type FuseMultiRunRequest,
   type LaunchMultiRunRequest,
   type MultiRunEntry,
+  type MultiRunTarget,
 } from '@opencode-manager/shared/schemas'
 
 interface MultiRunSheetProps {
-  repoId: number
+  target: MultiRunTarget
   directory?: string
   defaultBaseRef?: string
   open: boolean
@@ -55,7 +56,14 @@ function unavailableReasonsFromError(error: unknown): ReadonlyMap<number, string
   return new Map(parsed.data.unavailableSources.map((source) => [source.entryId, source.message]))
 }
 
-export function MultiRunSheet({ repoId, directory, defaultBaseRef, open, onOpenChange }: MultiRunSheetProps) {
+function multiRunSessionPath(target: MultiRunTarget, sessionId: string, isolated: boolean): string {
+  if (target.kind === 'server') {
+    return getServerSessionPath(target.serverId, sessionId)
+  }
+  return getSessionPath(target.repoId, sessionId, isolated ? { repoTab: 'workspaces' } : undefined)
+}
+
+export function MultiRunSheet({ target, directory, defaultBaseRef, open, onOpenChange }: MultiRunSheetProps) {
   const navigate = useNavigate()
   const [activeTab, setActiveTab] = useState<SheetTab>('runs')
   const [expandedRuns, setExpandedRuns] = useState<Record<number, boolean>>({})
@@ -64,9 +72,9 @@ export function MultiRunSheet({ repoId, directory, defaultBaseRef, open, onOpenC
   const [pendingDiscard, setPendingDiscard] = useState<PendingDiscard | null>(null)
   const [walkthroughSessionId, setWalkthroughSessionId] = useState<string | null>(null)
 
-  const runsQuery = useMultiRuns(repoId, open)
-  const fuse = useFuseMultiRun(repoId)
-  const discard = useDiscardMultiRunEntry(repoId)
+  const runsQuery = useMultiRuns(target, open)
+  const fuse = useFuseMultiRun(target)
+  const discard = useDiscardMultiRunEntry(target)
   const resetFuse = fuse.reset
 
   useEffect(() => {
@@ -85,7 +93,7 @@ export function MultiRunSheet({ repoId, directory, defaultBaseRef, open, onOpenC
 
   const openSession = (sessionId: string, isolated: boolean) => {
     onOpenChange(false)
-    navigate(buildSessionPath(repoId, sessionId, isolated ? { repoTab: 'workspaces' } : undefined))
+    navigate(multiRunSessionPath(target, sessionId, isolated))
   }
 
   const startSelection = (runId: number) => {
@@ -197,7 +205,7 @@ export function MultiRunSheet({ repoId, directory, defaultBaseRef, open, onOpenC
                     onExitSelection={exitSelection}
                     onToggleEntry={toggleEntry}
                     onOpenSession={openSession}
-                    onWalkthrough={setWalkthroughSessionId}
+                    onWalkthrough={target.kind === 'repo' ? setWalkthroughSessionId : undefined}
                     onDiscard={(entry) => setPendingDiscard({ runId: run.id, entry })}
                   />
                 ))
@@ -207,7 +215,7 @@ export function MultiRunSheet({ repoId, directory, defaultBaseRef, open, onOpenC
             {selection && selectedRun ? (
               <FusionComposer
                 key={selectedRun.id}
-                repoId={repoId}
+                target={target}
                 directory={directory}
                 run={selectedRun}
                 selectedEntryIds={selection.entryIds}
@@ -222,7 +230,7 @@ export function MultiRunSheet({ repoId, directory, defaultBaseRef, open, onOpenC
 
           <TabsContent forceMount value="new" className="mt-0 flex min-h-0 flex-1 flex-col px-0 data-[state=inactive]:hidden">
             <NewRunForm
-              repoId={repoId}
+              target={target}
               directory={directory}
               defaultBaseRef={defaultBaseRef}
               open={open}
@@ -258,7 +266,7 @@ export function MultiRunSheet({ repoId, directory, defaultBaseRef, open, onOpenC
           onOpenChange={(next) => {
             if (!next) setWalkthroughSessionId(null)
           }}
-          onOpenSession={(id) => navigate(buildSessionPath(repoId, id))}
+          onOpenSession={(id) => navigate(multiRunSessionPath(target, id, false))}
         />
       ) : null}
     </>
@@ -266,14 +274,14 @@ export function MultiRunSheet({ repoId, directory, defaultBaseRef, open, onOpenC
 }
 
 interface NewRunFormProps {
-  repoId: number
+  target: MultiRunTarget
   directory?: string
   defaultBaseRef?: string
   open: boolean
   onLaunched: () => void
 }
 
-function NewRunForm({ repoId, directory, defaultBaseRef, open, onLaunched }: NewRunFormProps) {
+function NewRunForm({ target, directory, defaultBaseRef, open, onLaunched }: NewRunFormProps) {
   const [name, setName] = useState('')
   const [prompt, setPrompt] = useState('')
   const [selectedModels, setSelectedModels] = useState<string[]>([])
@@ -283,7 +291,7 @@ function NewRunForm({ repoId, directory, defaultBaseRef, open, onLaunched }: New
   const deferredModelSearch = useDeferredValue(modelSearch)
 
   const { sections: modelSections } = useModelSections(directory, { enabled: open })
-  const launch = useLaunchMultiRun(repoId)
+  const launch = useLaunchMultiRun(target)
 
   const visibleModelSections = useMemo(
     () => filterModelSections(modelSections, deferredModelSearch),
@@ -306,7 +314,9 @@ function NewRunForm({ repoId, directory, defaultBaseRef, open, onLaunched }: New
   const handleLaunch = () => {
     if (!canSubmit) return
     const request: LaunchMultiRunRequest = {
-      repoId,
+      ...(target.kind === 'repo'
+        ? { repoId: target.repoId }
+        : { serverId: target.serverId, directory: target.directory }),
       name: name.trim(),
       prompt: prompt.trim(),
       models: selectedModels,
@@ -378,14 +388,25 @@ function NewRunForm({ repoId, directory, defaultBaseRef, open, onLaunched }: New
       {isolate ? (
         <div className="space-y-1.5">
           <Label htmlFor="multi-run-base-ref">Start from</Label>
-          <BranchCombobox
-            id="multi-run-base-ref"
-            repoId={repoId}
-            value={baseRef}
-            onValueChange={setBaseRef}
-            placeholder="Current HEAD"
-            clearable
-          />
+          {target.kind === 'repo' ? (
+            <BranchCombobox
+              id="multi-run-base-ref"
+              repoId={target.repoId}
+              value={baseRef}
+              onValueChange={setBaseRef}
+              placeholder="Current HEAD"
+              clearable
+            />
+          ) : (
+            <Input
+              id="multi-run-base-ref"
+              value={baseRef}
+              onChange={(event) => setBaseRef(event.target.value)}
+              placeholder="Current HEAD"
+              autoComplete="off"
+              className="font-mono text-sm"
+            />
+          )}
           <p className="text-xs text-muted-foreground">Each isolated workspace starts from this branch.</p>
         </div>
       ) : null}

@@ -7,6 +7,7 @@ import { useGlobalShortcutActions } from './useGlobalShortcutActions'
 
 const mocks = vi.hoisted(() => ({
   getRepo: vi.fn(),
+  getSession: vi.fn(),
   createSession: vi.fn(),
   useMobile: vi.fn(),
 }))
@@ -27,6 +28,7 @@ vi.mock('@/api/repos', () => ({
 
 vi.mock('@/api/opencode', () => ({
   createSession: mocks.createSession,
+  getSession: mocks.getSession,
 }))
 
 function Harness() {
@@ -60,6 +62,7 @@ describe('useGlobalShortcutActions', () => {
     queryClient = new QueryClient({ defaultOptions: { queries: { retry: false } } })
     mocks.useMobile.mockReturnValue(false)
     mocks.getRepo.mockResolvedValue({ id: 5, fullPath: '/repo/five' })
+    mocks.getSession.mockResolvedValue({ id: 'ses_1', location: { directory: '/srv/kitchen' } })
     mocks.createSession.mockResolvedValue({ id: 'session-new' })
   })
 
@@ -125,8 +128,56 @@ describe('useGlobalShortcutActions', () => {
     pressKey({ key: 'o', ctrlKey: true })
     pressKey({ key: 'n' })
 
-    await waitFor(() => expect(mocks.createSession).toHaveBeenCalledWith({ directory: '/repo/five' }))
+    await waitFor(() => expect(mocks.createSession).toHaveBeenCalledWith({ directory: '/repo/five' }, 'local'))
     await waitFor(() => expect(location()).toBe('/repos/5/sessions/session-new'))
+  })
+
+  it('toggles a linked-server route tool without falling back to a Manager host', async () => {
+    const { location } = renderHarness('/servers/srv_kitchen/sessions/ses_1')
+
+    pressLeaderFollowUp('t')
+    await waitFor(() => expect(location()).toBe('/servers/srv_kitchen/sessions/ses_1?panel=terminal'))
+
+    pressLeaderFollowUp('t')
+    await waitFor(() => expect(location()).toBe('/servers/srv_kitchen/sessions/ses_1'))
+    expect(mocks.getRepo).not.toHaveBeenCalled()
+  })
+
+  it('does not fall back to a Manager host for a tool the linked-server route lacks', async () => {
+    const { location } = renderHarness('/servers/srv_kitchen/sessions/ses_1')
+
+    pressLeaderFollowUp('b')
+
+    await act(async () => {
+      await Promise.resolve()
+    })
+
+    expect(location()).toBe('/servers/srv_kitchen/sessions/ses_1')
+    expect(mocks.getRepo).not.toHaveBeenCalled()
+  })
+
+  it('toggles the terminal dialog on a linked-server route on mobile', async () => {
+    mocks.useMobile.mockReturnValue(true)
+    const { location } = renderHarness('/servers/srv_kitchen/sessions/ses_1')
+
+    pressLeaderFollowUp('t')
+
+    await waitFor(() => expect(location()).toBe('/servers/srv_kitchen/sessions/ses_1?dialog=terminal'))
+  })
+
+  it('creates a session in the linked server directory and navigates to the server session path', async () => {
+    const { location } = renderHarness('/servers/srv_kitchen/sessions/ses_1')
+
+    await waitFor(() => expect(mocks.getSession).toHaveBeenCalledWith('ses_1', 'srv_kitchen'))
+    await act(async () => {
+      await new Promise((resolve) => setTimeout(resolve, 0))
+    })
+
+    pressKey({ key: 'o', ctrlKey: true })
+    pressKey({ key: 'n' })
+
+    await waitFor(() => expect(mocks.createSession).toHaveBeenCalledWith({ directory: '/srv/kitchen' }, 'srv_kitchen'))
+    await waitFor(() => expect(location()).toBe('/servers/srv_kitchen/sessions/session-new'))
   })
 
   it('does not swallow the follow-up key when the route has no new-session host', async () => {

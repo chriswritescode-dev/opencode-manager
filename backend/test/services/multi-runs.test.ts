@@ -1,6 +1,6 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { Database } from 'bun:sqlite'
-import { buildSchedulePermissionRuleset } from '@opencode-manager/shared/schemas'
+import { buildSchedulePermissionRuleset, LOCAL_OPENCODE_SERVER_ID } from '@opencode-manager/shared/schemas'
 import { ASSISTANT_REPO_ID } from '@opencode-manager/shared/utils'
 import { createRepo, deleteRepo } from '../../src/db/queries'
 import { migrate } from '../../src/db/migration-runner'
@@ -332,6 +332,30 @@ describe('MultiRunService', () => {
     expect(error).toMatchObject({ status: 404 })
   })
 
+  it('rejects a local server target because it stores no repository', async () => {
+    const repoId = readyRepo()
+    const { client, sessionCreate } = createClient()
+    const repoWorkspaces = createRepoWorkspaces()
+    const service = createService(client, repoWorkspaces.service)
+
+    const error = await service
+      .launch({
+        serverId: LOCAL_OPENCODE_SERVER_ID,
+        directory: REPO_DIR,
+        name: 'Sweep',
+        prompt: 'go',
+        models: ['openai/a'],
+        isolate: false,
+      })
+      .catch((caught: unknown) => caught)
+
+    expect(error).toBeInstanceOf(MultiRunError)
+    expect(error).toMatchObject({ status: 400 })
+    expect(sessionCreate).not.toHaveBeenCalled()
+    expect(repoWorkspaces.create).not.toHaveBeenCalled()
+    expect(service.list({ kind: 'repo', repoId })).toHaveLength(0)
+  })
+
   it('removes the workspace when discarding an isolated entry', async () => {
     const repoId = readyRepo()
     const { client } = createClient()
@@ -473,7 +497,7 @@ describe('MultiRunService', () => {
     expect(error).toBeInstanceOf(MultiRunError)
     expect(error).toMatchObject({ status: 400 })
     expect(repoWorkspaces.remove).toHaveBeenCalledTimes(1)
-    expect(service.list(repoId)[0]!.entries[0]!.status).toBe('started')
+    expect(service.list({ kind: 'repo', repoId })[0]!.entries[0]!.status).toBe('started')
   })
 
   it('records the workspace of a failed isolated launch when prompting fails and removes it on discard', async () => {
@@ -585,7 +609,7 @@ describe('MultiRunService', () => {
     expect(error).toBeInstanceOf(MultiRunError)
     expect(error).toMatchObject({ status: 502 })
 
-    expect(service.list(repoId)[0]!.entries[0]!.status).toBe('started')
+    expect(service.list({ kind: 'repo', repoId })[0]!.entries[0]!.status).toBe('started')
 
     const discarded = await service.discard(run.id, entry.id)
 
@@ -602,7 +626,7 @@ describe('MultiRunService', () => {
     await service.launch({ repoId, name: 'First', prompt: 'go', models: ['openai/a'], isolate: false })
     await service.launch({ repoId, name: 'Second', prompt: 'go', models: ['openai/b'], isolate: false })
 
-    const runs = service.list(repoId)
+    const runs = service.list({ kind: 'repo', repoId })
 
     expect(runs.map((run) => run.name)).toEqual(['Second', 'First'])
   })
@@ -846,7 +870,7 @@ describe('MultiRunService', () => {
       unavailableSources: [expect.objectContaining({ reason: 'running' })],
     })
     expect(sessionCreate).not.toHaveBeenCalled()
-    expect(service.list(repoId)[0]!.fusions).toEqual([])
+    expect(service.list({ kind: 'repo', repoId })[0]!.fusions).toEqual([])
   })
 
   it('rejects fusion when the prompt exceeds the context limit', async () => {
@@ -872,7 +896,7 @@ describe('MultiRunService', () => {
     expect(error).toBeInstanceOf(FusionContextLimitError)
     expect(error).toMatchObject({ status: 413, code: 'FUSION_CONTEXT_LIMIT' })
     expect(sessionCreate).not.toHaveBeenCalled()
-    expect(service.list(repoId)[0]!.fusions).toEqual([])
+    expect(service.list({ kind: 'repo', repoId })[0]!.fusions).toEqual([])
   })
 
   it('rejects fusion with an unavailable synthesis model before creating a fusion', async () => {
@@ -899,7 +923,7 @@ describe('MultiRunService', () => {
     expect(error).toMatchObject({ status: 400 })
     expect((error as Error).message).toContain('not available')
     expect(sessionCreate).not.toHaveBeenCalled()
-    expect(service.list(repoId)[0]!.fusions).toEqual([])
+    expect(service.list({ kind: 'repo', repoId })[0]!.fusions).toEqual([])
   })
 
   it('records a failed fusion with the workspace directory when the launch fails', async () => {
@@ -1006,7 +1030,7 @@ describe('MultiRunService', () => {
     })
     expect(sessionCreate).not.toHaveBeenCalled()
 
-    const recovered = service.list(repoId)[0]!.fusions[0]!
+    const recovered = service.list({ kind: 'repo', repoId })[0]!.fusions[0]!
     expect(recovered.status).toBe('started')
     expect(recovered.error).toBeNull()
   })
@@ -1053,7 +1077,7 @@ describe('MultiRunService', () => {
     const service = createService(client, repoWorkspaces.service)
     const record = createMultiRunWithEntries(
       db,
-      { repoId: ASSISTANT_REPO_ID, name: 'Sweep', prompt: 'go', isolated: false, baseRef: null },
+      { repoId: ASSISTANT_REPO_ID, serverId: 'local', directory: null, name: 'Sweep', prompt: 'go', isolated: false, baseRef: null },
       ['openai/a', 'openai/b'],
     )
 
@@ -1096,7 +1120,7 @@ describe('MultiRunService', () => {
     expect(error).toMatchObject({ status: 400 })
     expect((error as Error).message).toBe('Unknown multi-run entry 9999')
     expect(sessionCreate).not.toHaveBeenCalled()
-    expect(service.list(repoId)[0]!.fusions).toEqual([])
+    expect(service.list({ kind: 'repo', repoId })[0]!.fusions).toEqual([])
   })
 
   it('persists the group and its entries in one transaction', () => {
@@ -1104,10 +1128,11 @@ describe('MultiRunService', () => {
     db.run(`CREATE TRIGGER fail_entry BEFORE INSERT ON multi_run_entries BEGIN SELECT RAISE(ABORT, 'nope'); END`)
 
     expect(() =>
-      createMultiRunWithEntries(db, { repoId, name: 'Sweep', prompt: 'go', isolated: false, baseRef: null }, [
-        'openai/a',
-        'openai/b',
-      ]),
+      createMultiRunWithEntries(
+        db,
+        { repoId, serverId: 'local', directory: null, name: 'Sweep', prompt: 'go', isolated: false, baseRef: null },
+        ['openai/a', 'openai/b'],
+      ),
     ).toThrow()
 
     const count = db.prepare('SELECT COUNT(*) AS count FROM multi_runs').get() as { count: number }

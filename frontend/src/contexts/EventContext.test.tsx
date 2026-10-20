@@ -9,7 +9,7 @@ import { FetchError } from '@opencode-manager/shared'
 import { showToast } from '@/lib/toast'
 import { useSessionStatus, hasBackgroundActivity } from '@/stores/sessionStatusStore'
 import { changeWalkthroughQueryKey } from '@/hooks/useChangeWalkthrough'
-import { EventProvider, useEventContext, useForms, usePermissions, useSSEHealth } from './EventContext'
+import { EventProvider, selectActiveSessionDirectoriesKey, useEventContext, useForms, usePermissions, useSSEHealth } from './EventContext'
 
 const mocks = vi.hoisted(() => ({
   listRepos: vi.fn(),
@@ -23,6 +23,8 @@ const mocks = vi.hoisted(() => ({
   cancelForm: vi.fn(),
   subscribeGlobalMonitor: vi.fn(),
   getHealth: vi.fn(),
+  listProjects: vi.fn(),
+  servers: [] as Array<{ id: string; enabled: boolean }>,
 }))
 
 vi.mock('@/api/repos', () => ({
@@ -33,11 +35,20 @@ vi.mock('@/api/opencode', () => ({
   listActiveSessions: mocks.listActiveSessions,
   listPendingPermissions: mocks.listPendingPermissions,
   listPendingForms: mocks.listPendingForms,
+  listProjects: mocks.listProjects,
   listShells: mocks.listShells,
   getSession: mocks.getSession,
   replyPermission: mocks.replyPermission,
   replyForm: mocks.replyForm,
   cancelForm: mocks.cancelForm,
+}))
+
+vi.mock('@/hooks/useAuth', () => ({
+  useAuth: () => ({ isAuthenticated: true }),
+}))
+
+vi.mock('@/hooks/useOpenCodeServers', () => ({
+  useOpenCodeServers: () => ({ servers: mocks.servers }),
 }))
 
 vi.mock('@/lib/opencode-event-stream', () => ({
@@ -231,6 +242,8 @@ describe('EventProvider permissions and forms', () => {
     vi.clearAllMocks()
     window.history.pushState({}, '', '/')
     mocks.listRepos.mockResolvedValue([])
+    mocks.listProjects.mockResolvedValue([])
+    mocks.servers = []
     mocks.listPendingPermissions.mockResolvedValue([])
     mocks.listPendingForms.mockResolvedValue([])
     mocks.listActiveSessions.mockResolvedValue({})
@@ -240,7 +253,7 @@ describe('EventProvider permissions and forms', () => {
     mocks.replyForm.mockResolvedValue(undefined)
     mocks.cancelForm.mockResolvedValue(undefined)
     mocks.getHealth.mockReturnValue({ isConnected: false, isHealthy: false, lastEventAt: null, isStalled: false })
-    useSessionStatus.setState({ statuses: new Map(), statusCache: new Map(), statusRevisions: new Map(), knownSessions: new Set(), outcomes: new Map(), parents: new Map(), directories: new Map(), runningShells: new Map(), shellRevisions: new Map(), shellRevision: 0, revision: 0 })
+    useSessionStatus.setState({ statuses: new Map(), statusCache: new Map(), statusRevisions: new Map(), knownSessions: new Set(), outcomes: new Map(), parents: new Map(), directories: new Map(), sessionServers: new Map(), runningShells: new Map(), shellRevisions: new Map(), shellRevision: 0, revision: 0 })
     mocks.subscribeGlobalMonitor.mockReturnValue({
       dispose: vi.fn(),
       updateDirectories: vi.fn(),
@@ -324,7 +337,7 @@ describe('EventProvider permissions and forms', () => {
 
     await waitFor(() => {
       expect(mocks.replyPermission).toHaveBeenCalledTimes(1)
-      expect(mocks.replyPermission).toHaveBeenCalledWith('session-1', 'permission-1', 'reject', undefined)
+      expect(mocks.replyPermission).toHaveBeenCalledWith('session-1', 'permission-1', 'reject', undefined, 'local')
       expect(screen.getByTestId('permission-count')).toHaveTextContent('1')
       expect(screen.getByTestId('permission-current')).toHaveTextContent('permission-2')
     })
@@ -424,7 +437,7 @@ describe('EventProvider permissions and forms', () => {
     await userEvent.click(screen.getByRole('button', { name: 'Reject Permission With Reason' }))
 
     await waitFor(() =>
-      expect(mocks.replyPermission).toHaveBeenCalledWith('session-1', 'permission-1', 'reject', 'not allowed'),
+      expect(mocks.replyPermission).toHaveBeenCalledWith('session-1', 'permission-1', 'reject', 'not allowed', 'local'),
     )
   })
 
@@ -509,6 +522,41 @@ describe('EventProvider permissions and forms', () => {
     })
   })
 
+  it('reconciles a linked server enabled after the browser stream connects', async () => {
+    const busySessionID = 'session-remote-busy'
+    mocks.listActiveSessions.mockImplementation((serverId?: string) =>
+      Promise.resolve(serverId === 'srv_remote' ? { [busySessionID]: {} } : {}),
+    )
+
+    const { rerender } = render(<Harness />, { wrapper: createWrapper() })
+
+    await waitFor(() => expect(mocks.subscribeGlobalMonitor).toHaveBeenCalled())
+    const lastSubscribeCall = mocks.subscribeGlobalMonitor.mock.calls[mocks.subscribeGlobalMonitor.mock.calls.length - 1]
+    const handleStatusChange = lastSubscribeCall[0].onStatusChange as (connected: boolean) => void
+
+    act(() => {
+      handleStatusChange(true)
+    })
+
+    expect(mocks.listActiveSessions).not.toHaveBeenCalledWith('srv_remote')
+
+    mocks.servers = [{ id: 'srv_remote', enabled: true }]
+    rerender(<Harness />)
+
+    await waitFor(() => {
+      expect(useSessionStatus.getState().statuses.get(busySessionID)).toEqual({ type: 'busy' })
+    })
+    const remoteFetches = () =>
+      mocks.listActiveSessions.mock.calls.filter(([serverId]) => serverId === 'srv_remote')
+    expect(remoteFetches()).toHaveLength(1)
+
+    await userEvent.click(screen.getByRole('button', { name: 'Sync' }))
+    mocks.servers = [{ id: 'srv_remote', enabled: true }]
+    rerender(<Harness />)
+
+    expect(remoteFetches()).toHaveLength(1)
+  })
+
   it('clears settled pending actions on an upstream resync while the browser stream stays connected', async () => {
     mocks.listRepos.mockResolvedValue([{ id: 123, fullPath: '/repo' }])
     mocks.listPendingPermissions.mockResolvedValue([])
@@ -517,8 +565,8 @@ describe('EventProvider permissions and forms', () => {
     render(<Harness />, { wrapper: createWrapper() })
 
     await waitFor(() => {
-      expect(mocks.listPendingPermissions).toHaveBeenCalledWith('/repo')
-      expect(mocks.listPendingForms).toHaveBeenCalledWith('/repo')
+      expect(mocks.listPendingPermissions).toHaveBeenCalledWith('/repo', 'local')
+      expect(mocks.listPendingForms).toHaveBeenCalledWith('/repo', 'local')
     })
     await act(async () => {
       await Promise.resolve()
@@ -591,8 +639,8 @@ describe('EventProvider permissions and forms', () => {
     render(<Harness />, { wrapper: createWrapper() })
 
     await waitFor(() => {
-      expect(mocks.listPendingPermissions).toHaveBeenCalledWith('/repo')
-      expect(mocks.listPendingForms).toHaveBeenCalledWith('/repo')
+      expect(mocks.listPendingPermissions).toHaveBeenCalledWith('/repo', 'local')
+      expect(mocks.listPendingForms).toHaveBeenCalledWith('/repo', 'local')
     })
     await act(async () => {
       await Promise.resolve()
@@ -615,7 +663,7 @@ describe('EventProvider permissions and forms', () => {
     })
 
     await waitFor(() => {
-      expect(mocks.listPendingPermissions).toHaveBeenCalledWith('/worktrees/wt-1')
+      expect(mocks.listPendingPermissions).toHaveBeenCalledWith('/worktrees/wt-1', 'local')
       expect(screen.getByTestId('permission-count')).toHaveTextContent('0')
     })
   })
@@ -644,7 +692,7 @@ describe('EventProvider permissions and forms', () => {
 
     render(<Harness />, { wrapper: createWrapper() })
 
-    await waitFor(() => expect(mocks.listPendingPermissions).toHaveBeenCalledWith('/assistant'))
+    await waitFor(() => expect(mocks.listPendingPermissions).toHaveBeenCalledWith('/assistant', 'local'))
 
     const lastSubscribeCall = mocks.subscribeGlobalMonitor.mock.calls[mocks.subscribeGlobalMonitor.mock.calls.length - 1]
     const onEvent = lastSubscribeCall[0].onEvent as (data: unknown) => void
@@ -670,7 +718,7 @@ describe('EventProvider permissions and forms', () => {
 
     render(<Harness />, { wrapper: createWrapper() })
 
-    await waitFor(() => expect(mocks.listPendingPermissions).toHaveBeenCalledWith('/repo'))
+    await waitFor(() => expect(mocks.listPendingPermissions).toHaveBeenCalledWith('/repo', 'local'))
 
     const lastSubscribeCall = mocks.subscribeGlobalMonitor.mock.calls[mocks.subscribeGlobalMonitor.mock.calls.length - 1]
     const onEvent = lastSubscribeCall[0].onEvent as (data: unknown) => void
@@ -691,6 +739,49 @@ describe('EventProvider permissions and forms', () => {
     expect(screen.getByTestId('search').textContent).toBe('')
   })
 
+  it('navigates a linked-server permission without a Manager repo for its directory', async () => {
+    render(<Harness />, { wrapper: createWrapper() })
+
+    const lastSubscribeCall = mocks.subscribeGlobalMonitor.mock.calls[mocks.subscribeGlobalMonitor.mock.calls.length - 1]
+    const onEvent = lastSubscribeCall[0].onEvent as (data: unknown) => void
+
+    act(() => {
+      onEvent({ type: 'permission.asked', data: pendingPermission, directory: '/srv/app', serverId: 'srv_kitchen' })
+    })
+
+    await waitFor(() => {
+      expect(screen.getByTestId('permission-current')).toHaveTextContent('permission-1')
+    })
+
+    await userEvent.click(screen.getByRole('button', { name: 'Navigate Permission' }))
+
+    await waitFor(() => {
+      expect(screen.getByTestId('path')).toHaveTextContent('/servers/srv_kitchen/sessions/session-1')
+    })
+    expect(screen.getByTestId('search').textContent).toBe('')
+  })
+
+  it('navigates a linked-server form to its server session route', async () => {
+    render(<Harness />, { wrapper: createWrapper() })
+
+    const lastSubscribeCall = mocks.subscribeGlobalMonitor.mock.calls[mocks.subscribeGlobalMonitor.mock.calls.length - 1]
+    const onEvent = lastSubscribeCall[0].onEvent as (data: unknown) => void
+
+    act(() => {
+      onEvent({ type: 'form.created', data: { form: pendingForm }, directory: '/srv/app', serverId: 'srv_kitchen' })
+    })
+
+    await waitFor(() => {
+      expect(screen.getByTestId('current')).toHaveTextContent('form-1')
+    })
+
+    await userEvent.click(screen.getByRole('button', { name: 'Navigate' }))
+
+    await waitFor(() => {
+      expect(screen.getByTestId('path')).toHaveTextContent('/servers/srv_kitchen/sessions/session-1')
+    })
+  })
+
   it('does not navigate when already on the target session path', async () => {
     mocks.listRepos.mockResolvedValue([{ id: 123, fullPath: '/repo' }])
     window.history.pushState({}, '', '/repos/123/sessions/session-1')
@@ -699,7 +790,7 @@ describe('EventProvider permissions and forms', () => {
       wrapper: createWrapper(createTestQueryClient(), '/repos/123/sessions/session-1'),
     })
 
-    await waitFor(() => expect(mocks.listPendingPermissions).toHaveBeenCalledWith('/repo'))
+    await waitFor(() => expect(mocks.listPendingPermissions).toHaveBeenCalledWith('/repo', 'local'))
 
     const lastSubscribeCall = mocks.subscribeGlobalMonitor.mock.calls[mocks.subscribeGlobalMonitor.mock.calls.length - 1]
     const onEvent = lastSubscribeCall[0].onEvent as (data: unknown) => void
@@ -754,7 +845,7 @@ describe('EventProvider permissions and forms', () => {
     await userEvent.click(screen.getByRole('button', { name: 'Dismiss' }))
 
     await waitFor(() => {
-      expect(mocks.cancelForm).toHaveBeenCalledWith('session-1', 'form-1')
+      expect(mocks.cancelForm).toHaveBeenCalledWith('session-1', 'form-1', 'local')
       expect(screen.getByTestId('count')).toHaveTextContent('0')
       expect(screen.getByTestId('current')).toHaveTextContent('none')
     })
@@ -774,7 +865,7 @@ describe('EventProvider permissions and forms', () => {
     await userEvent.click(screen.getByRole('button', { name: 'Reply' }))
 
     await waitFor(() => {
-      expect(mocks.replyForm).toHaveBeenCalledWith('session-1', 'form-1', { q0: 'Yes' })
+      expect(mocks.replyForm).toHaveBeenCalledWith('session-1', 'form-1', { q0: 'Yes' }, 'local')
       expect(screen.getByTestId('count')).toHaveTextContent('0')
       expect(screen.getByTestId('current')).toHaveTextContent('none')
     })
@@ -1147,7 +1238,7 @@ describe('EventProvider permissions and forms', () => {
     render(<Harness />, { wrapper: createWrapper() })
 
     await waitFor(() => {
-      expect(mocks.listPendingForms).toHaveBeenCalledWith('/repo-b')
+      expect(mocks.listPendingForms).toHaveBeenCalledWith('/repo-b', 'local')
     })
     await act(async () => {
       await Promise.resolve()
@@ -1170,10 +1261,10 @@ describe('EventProvider permissions and forms', () => {
       onResync?.([])
     })
 
-    expect(mocks.listPendingPermissions).toHaveBeenCalledWith('/repo-a')
-    expect(mocks.listPendingPermissions).toHaveBeenCalledWith('/repo-b')
-    expect(mocks.listPendingForms).toHaveBeenCalledWith('/repo-a')
-    expect(mocks.listPendingForms).toHaveBeenCalledWith('/repo-b')
+    expect(mocks.listPendingPermissions).toHaveBeenCalledWith('/repo-a', 'local')
+    expect(mocks.listPendingPermissions).toHaveBeenCalledWith('/repo-b', 'local')
+    expect(mocks.listPendingForms).toHaveBeenCalledWith('/repo-a', 'local')
+    expect(mocks.listPendingForms).toHaveBeenCalledWith('/repo-b', 'local')
 
     await act(async () => {
       pending.forEach((resolve) => resolve())
@@ -1533,7 +1624,7 @@ describe('EventProvider permissions and forms', () => {
     })
 
     await waitFor(() => {
-      expect(mocks.getSession).toHaveBeenCalledWith('child-1')
+      expect(mocks.getSession).toHaveBeenCalledWith('child-1', 'local')
       expect(useSessionStatus.getState().parents.get('child-1')).toBe('parent-1')
     })
     expect(screen.getByTestId('permission-current')).toHaveTextContent('permission-child')
@@ -1561,7 +1652,7 @@ describe('EventProvider permissions and forms', () => {
     })
 
     await waitFor(() => {
-      expect(mocks.getSession).toHaveBeenCalledWith('child-1')
+      expect(mocks.getSession).toHaveBeenCalledWith('child-1', 'local')
       expect(useSessionStatus.getState().parents.get('child-1')).toBe('parent-1')
     })
     expect(screen.getByTestId('current')).toHaveTextContent('form-child')
@@ -2367,7 +2458,7 @@ describe('EventProvider permissions and forms', () => {
 
     render(<Harness />, { wrapper: createWrapper() })
 
-    await waitFor(() => expect(mocks.listPendingForms).toHaveBeenCalledWith('/repo'))
+    await waitFor(() => expect(mocks.listPendingForms).toHaveBeenCalledWith('/repo', 'local'))
 
     const lastSubscribeCall = mocks.subscribeGlobalMonitor.mock.calls[mocks.subscribeGlobalMonitor.mock.calls.length - 1]
     const handleStatusChange = lastSubscribeCall[0].onStatusChange as (connected: boolean) => void
@@ -2377,7 +2468,7 @@ describe('EventProvider permissions and forms', () => {
     })
 
     await waitFor(() => {
-      expect(mocks.listShells).toHaveBeenCalledWith('/repo')
+      expect(mocks.listShells).toHaveBeenCalledWith('/repo', 'local')
       expect(useSessionStatus.getState().runningShells.get('shell-1')).toEqual({
         sessionID: 'session-1',
         directory: '/repo',
@@ -2403,7 +2494,7 @@ describe('EventProvider permissions and forms', () => {
       onDirectoriesSubscribed(['/repo'])
     })
 
-    await waitFor(() => expect(mocks.listShells).toHaveBeenCalledWith('/repo'))
+    await waitFor(() => expect(mocks.listShells).toHaveBeenCalledWith('/repo', 'local'))
 
     act(() => {
       onEvent({ type: 'shell.exited', data: { id: 'shell-1', status: 'exited' }, directory: '/repo' })
@@ -2434,7 +2525,7 @@ describe('EventProvider permissions and forms', () => {
       onDirectoriesSubscribed(['/repo'])
     })
 
-    await waitFor(() => expect(mocks.listShells).toHaveBeenCalledWith('/repo'))
+    await waitFor(() => expect(mocks.listShells).toHaveBeenCalledWith('/repo', 'local'))
 
     act(() => {
       onEvent({
@@ -2512,7 +2603,7 @@ describe('EventProvider permissions and forms', () => {
       expect(useSessionStatus.getState().parents.get('parent-1')).toBe('grandparent-1')
       expect(useSessionStatus.getState().parents.get('grandparent-1')).toBeNull()
     })
-    expect(mocks.getSession).toHaveBeenCalledWith('parent-1')
+    expect(mocks.getSession).toHaveBeenCalledWith('parent-1', 'local')
   })
 
   it('syncs running shells for a directory whose repo arrives after connect', async () => {
@@ -2543,7 +2634,7 @@ describe('EventProvider permissions and forms', () => {
       await reposDeferred.promise
     })
 
-    await waitFor(() => expect(mocks.listShells).toHaveBeenCalledWith('/repo'))
+    await waitFor(() => expect(mocks.listShells).toHaveBeenCalledWith('/repo', 'local'))
   })
 
   it('reconciles newly subscribed directories reported by the stream', async () => {
@@ -2567,9 +2658,9 @@ describe('EventProvider permissions and forms', () => {
     })
 
     await waitFor(() => {
-      expect(mocks.listShells).toHaveBeenCalledWith('/session-dir')
-      expect(mocks.listPendingPermissions).toHaveBeenCalledWith('/session-dir')
-      expect(mocks.listPendingForms).toHaveBeenCalledWith('/session-dir')
+      expect(mocks.listShells).toHaveBeenCalledWith('/session-dir', 'local')
+      expect(mocks.listPendingPermissions).toHaveBeenCalledWith('/session-dir', 'local')
+      expect(mocks.listPendingForms).toHaveBeenCalledWith('/session-dir', 'local')
     })
     expect(useSessionStatus.getState().runningShells.has('shell-stale')).toBe(false)
     expect(screen.getByTestId('permission-count').textContent).toBe('1')
@@ -2597,9 +2688,9 @@ describe('EventProvider permissions and forms', () => {
     })
 
     await waitFor(() => {
-      expect(mocks.listShells).toHaveBeenCalledWith('/unregistered-dir')
-      expect(mocks.listPendingPermissions).toHaveBeenCalledWith('/unregistered-dir')
-      expect(mocks.listPendingForms).toHaveBeenCalledWith('/unregistered-dir')
+      expect(mocks.listShells).toHaveBeenCalledWith('/unregistered-dir', 'local')
+      expect(mocks.listPendingPermissions).toHaveBeenCalledWith('/unregistered-dir', 'local')
+      expect(mocks.listPendingForms).toHaveBeenCalledWith('/unregistered-dir', 'local')
     })
     expect(useSessionStatus.getState().runningShells.has('shell-stale')).toBe(false)
     expect(screen.getByTestId('permission-count').textContent).toBe('1')
@@ -2643,5 +2734,228 @@ describe('EventProvider permissions and forms', () => {
       expect(lastDirectories).toContain('/repo')
       expect(lastDirectories).not.toContain('/repo/.worktrees/feature')
     })
+  })
+
+  it('selects the server-keyed directory of an active remote session', () => {
+    const key = selectActiveSessionDirectoriesKey({
+      statuses: new Map([['remote-session', { type: 'busy' as const }]]),
+      directories: new Map([['remote-session', 'srv_remote|/remote/repo']]),
+      runningShells: new Map([
+        ['shell-1', { sessionID: 'remote-session', directory: 'srv_remote|/remote/repo' }],
+      ]),
+    })
+
+    expect(key).toBe('srv_remote|/remote/repo')
+  })
+
+  it('keys a remote session directory and routes its lookups to the remote server', async () => {
+    mocks.listRepos.mockResolvedValue([{ id: 123, fullPath: '/repo' }])
+    const updateDirectories = vi.fn()
+    mocks.subscribeGlobalMonitor.mockReturnValue({
+      dispose: vi.fn(),
+      updateDirectories,
+      reconnect: vi.fn(),
+      reportVisibility: vi.fn(),
+    })
+
+    render(<Harness />, { wrapper: createWrapper() })
+
+    await waitFor(() => expect(mocks.subscribeGlobalMonitor).toHaveBeenCalled())
+
+    const lastSubscribeCall = mocks.subscribeGlobalMonitor.mock.calls[mocks.subscribeGlobalMonitor.mock.calls.length - 1]
+    const onEvent = lastSubscribeCall[0].onEvent as (data: unknown) => void
+
+    act(() => {
+      onEvent({
+        type: 'session.status',
+        serverId: 'srv_remote',
+        directory: '/remote/repo',
+        data: { sessionID: 'remote-session', status: { type: 'busy' } },
+      })
+    })
+
+    expect(useSessionStatus.getState().directories.get('remote-session')).toBe('srv_remote|/remote/repo')
+    expect(useSessionStatus.getState().getStatus('remote-session')).toEqual({ type: 'busy' })
+
+    await waitFor(() => {
+      expect(updateDirectories).toHaveBeenCalledWith(expect.arrayContaining(['srv_remote|/remote/repo']))
+    })
+
+    const onDirectoriesSubscribed = lastSubscribeCall[0].onDirectoriesSubscribed as (directories: string[]) => void
+    await act(async () => {
+      onDirectoriesSubscribed(['srv_remote|/remote/repo'])
+    })
+
+    await waitFor(() => {
+      expect(mocks.listPendingPermissions).toHaveBeenCalledWith('/remote/repo', 'srv_remote')
+      expect(mocks.listPendingForms).toHaveBeenCalledWith('/remote/repo', 'srv_remote')
+      expect(mocks.listShells).toHaveBeenCalledWith('/remote/repo', 'srv_remote')
+    })
+  })
+
+  it('keeps a remote session busy across a local active-session snapshot', async () => {
+    mocks.listRepos.mockResolvedValue([{ id: 123, fullPath: '/repo' }])
+    mocks.listActiveSessions.mockResolvedValue({})
+
+    render(<Harness />, { wrapper: createWrapper() })
+
+    await waitFor(() => expect(mocks.subscribeGlobalMonitor).toHaveBeenCalled())
+
+    const lastSubscribeCall = mocks.subscribeGlobalMonitor.mock.calls[mocks.subscribeGlobalMonitor.mock.calls.length - 1]
+    const onEvent = lastSubscribeCall[0].onEvent as (data: unknown) => void
+    const handleStatusChange = lastSubscribeCall[0].onStatusChange as (connected: boolean) => void
+
+    act(() => {
+      onEvent({
+        type: 'session.status',
+        serverId: 'srv_remote',
+        data: { sessionID: 'remote-session', status: { type: 'busy' } },
+      })
+    })
+
+    expect(useSessionStatus.getState().directories.has('remote-session')).toBe(false)
+
+    vi.useFakeTimers()
+    try {
+      act(() => {
+        handleStatusChange(true)
+      })
+      await act(async () => {
+        await vi.advanceTimersByTimeAsync(5000)
+      })
+
+      expect(mocks.listActiveSessions).toHaveBeenCalledTimes(2)
+      expect(useSessionStatus.getState().getStatus('remote-session')).toEqual({ type: 'busy' })
+      expect(useSessionStatus.getState().knownSessions.has('remote-session')).toBe(true)
+    } finally {
+      vi.useRealTimers()
+    }
+  })
+
+  it('scopes a remote resync to that server and skips the local snapshot', async () => {
+    const queryClient = createTestQueryClient()
+    const invalidateQueries = vi.spyOn(queryClient, 'invalidateQueries')
+
+    render(<Harness />, { wrapper: createWrapper(queryClient) })
+
+    await waitFor(() => expect(mocks.subscribeGlobalMonitor).toHaveBeenCalled())
+
+    mocks.listActiveSessions.mockClear()
+    mocks.listPendingPermissions.mockClear()
+    mocks.listPendingForms.mockClear()
+    mocks.listShells.mockClear()
+    invalidateQueries.mockClear()
+
+    const lastSubscribeCall = mocks.subscribeGlobalMonitor.mock.calls[mocks.subscribeGlobalMonitor.mock.calls.length - 1]
+    const onResync = lastSubscribeCall[0].onResync as
+      | ((directories: string[], serverId?: string) => void)
+      | undefined
+
+    await act(async () => {
+      onResync?.(['/repo', 'srv_remote|/remote/repo'], 'srv_remote')
+    })
+
+    await waitFor(() => {
+      expect(mocks.listPendingPermissions).toHaveBeenCalledWith('/remote/repo', 'srv_remote')
+      expect(mocks.listPendingForms).toHaveBeenCalledWith('/remote/repo', 'srv_remote')
+      expect(mocks.listShells).toHaveBeenCalledWith('/remote/repo', 'srv_remote')
+    })
+    expect(mocks.listActiveSessions).not.toHaveBeenCalledWith()
+    expect(mocks.listActiveSessions).toHaveBeenCalledWith('srv_remote')
+    expect(mocks.listPendingPermissions).not.toHaveBeenCalledWith('/repo', 'local')
+    expect(mocks.listShells).not.toHaveBeenCalledWith('/repo', 'local')
+
+    await waitFor(() => {
+      expect(invalidateQueries).toHaveBeenCalledWith({ queryKey: ['opencode', 'commands', 'srv_remote'] })
+      expect(invalidateQueries).toHaveBeenCalledWith({ queryKey: ['opencode', 'agents', 'srv_remote'] })
+    })
+    expect(invalidateQueries).not.toHaveBeenCalledWith({ queryKey: ['opencode', 'commands'] })
+  })
+
+  it('clears a stale remote busy status on a remote resync', async () => {
+    mocks.listRepos.mockResolvedValue([{ id: 123, fullPath: '/repo' }])
+    mocks.listActiveSessions.mockResolvedValue({})
+
+    render(<Harness />, { wrapper: createWrapper() })
+
+    await waitFor(() => expect(mocks.subscribeGlobalMonitor).toHaveBeenCalled())
+
+    act(() => {
+      useSessionStatus.getState().setSessionServer('remote-session', 'srv_remote')
+      useSessionStatus.getState().setStatus('remote-session', { type: 'busy' })
+    })
+
+    const lastSubscribeCall = mocks.subscribeGlobalMonitor.mock.calls[mocks.subscribeGlobalMonitor.mock.calls.length - 1]
+    const onResync = lastSubscribeCall[0].onResync as
+      | ((directories: string[], serverId?: string) => void)
+      | undefined
+
+    await act(async () => {
+      onResync?.(['srv_remote|/remote/repo'], 'srv_remote')
+    })
+
+    await waitFor(() => {
+      expect(mocks.listActiveSessions).toHaveBeenCalledWith('srv_remote')
+      expect(useSessionStatus.getState().getStatus('remote-session')).toEqual({ type: 'idle' })
+    })
+  })
+
+  it('reconciles every enabled remote server when the browser stream reconnects', async () => {
+    mocks.servers = [
+      { id: 'srv_remote', enabled: true },
+      { id: 'srv_disabled', enabled: false },
+    ]
+    mocks.listRepos.mockResolvedValue([{ id: 123, fullPath: '/repo' }])
+    mocks.listActiveSessions.mockResolvedValue({})
+
+    render(<Harness />, { wrapper: createWrapper() })
+
+    await waitFor(() => expect(mocks.subscribeGlobalMonitor).toHaveBeenCalled())
+
+    act(() => {
+      useSessionStatus.getState().setSessionServer('remote-session', 'srv_remote')
+      useSessionStatus.getState().setStatus('remote-session', { type: 'busy' })
+    })
+
+    const lastSubscribeCall = mocks.subscribeGlobalMonitor.mock.calls[mocks.subscribeGlobalMonitor.mock.calls.length - 1]
+    const handleStatusChange = lastSubscribeCall[0].onStatusChange as (connected: boolean) => void
+
+    act(() => {
+      handleStatusChange(true)
+    })
+
+    await waitFor(() => {
+      expect(mocks.listActiveSessions).toHaveBeenCalledWith('srv_remote')
+      expect(useSessionStatus.getState().getStatus('remote-session')).toEqual({ type: 'idle' })
+    })
+    expect(mocks.listActiveSessions).not.toHaveBeenCalledWith('srv_disabled')
+  })
+
+  it('subscribes the project directories of enabled remote servers', async () => {
+    mocks.servers = [{ id: 'srv_remote', enabled: true }]
+    mocks.listProjects.mockResolvedValue([{ id: 'proj-1', canonical: '/remote/repo' }])
+    const updateDirectories = vi.fn()
+    mocks.subscribeGlobalMonitor.mockReturnValue({
+      dispose: vi.fn(),
+      updateDirectories,
+      reconnect: vi.fn(),
+      reportVisibility: vi.fn(),
+    })
+
+    render(<Harness />, { wrapper: createWrapper() })
+
+    await waitFor(() => expect(mocks.listProjects).toHaveBeenCalledWith('srv_remote'))
+    await waitFor(() => {
+      expect(updateDirectories).toHaveBeenCalledWith(expect.arrayContaining(['srv_remote|/remote/repo']))
+    })
+  })
+
+  it('does not fetch projects for disabled remote servers', async () => {
+    mocks.servers = [{ id: 'srv_disabled', enabled: false }]
+
+    render(<Harness />, { wrapper: createWrapper() })
+
+    await waitFor(() => expect(mocks.subscribeGlobalMonitor).toHaveBeenCalled())
+    expect(mocks.listProjects).not.toHaveBeenCalled()
   })
 })

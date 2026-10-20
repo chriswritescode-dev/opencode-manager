@@ -2,7 +2,10 @@ import { memo, useCallback, useEffect, useId, useMemo, useRef, useState } from '
 import { useQuery } from '@tanstack/react-query'
 import { format, startOfDay } from 'date-fns'
 import { MoreHorizontal, Pin, PinOff } from 'lucide-react'
+import { LOCAL_OPENCODE_SERVER_ID } from '@opencode-manager/shared/schemas'
 import { getOpenCodeLocation } from '@/api/opencode'
+import { OpenCodeServerProvider, useOpenCodeServerId } from '@/contexts/OpenCodeServerContext'
+import { serverScopedKey } from '@/lib/serverScope'
 import type { Repo, Session } from '@/api/types'
 import { ACTIVE_WORK_GROUPS, MS_PER_MINUTE, formatActivityEmptyMessage } from '@/lib/activeWork'
 import { Button } from '@/components/ui/button'
@@ -46,6 +49,7 @@ const NEAR_BOTTOM_PX = 240
 type SessionPickerTab = 'active' | 'sessions' | 'projects'
 
 const SESSION_PICKER_TABS: SessionPickerTab[] = ['active', 'sessions', 'projects']
+const REMOTE_SESSION_PICKER_TABS: SessionPickerTab[] = ['active', 'sessions']
 
 const SESSION_PICKER_TAB_LABELS: Record<SessionPickerTab, string> = {
   active: 'Active',
@@ -53,9 +57,15 @@ const SESSION_PICKER_TAB_LABELS: Record<SessionPickerTab, string> = {
   projects: 'Projects',
 }
 
-function nextSessionPickerTab(tab: SessionPickerTab): SessionPickerTab {
-  const index = SESSION_PICKER_TABS.indexOf(tab)
-  return SESSION_PICKER_TABS[(index + 1) % SESSION_PICKER_TABS.length]
+function nextSessionPickerTab(tab: SessionPickerTab, tabs: SessionPickerTab[]): SessionPickerTab {
+  const index = tabs.indexOf(tab)
+  return tabs[(index + 1) % tabs.length]
+}
+
+interface RemotePickerScope {
+  serverId: string
+  serverName?: string
+  projectDirectory?: string
 }
 
 interface SessionPickerDialogProps {
@@ -64,14 +74,19 @@ interface SessionPickerDialogProps {
   currentRepo: Repo | undefined
   activeSessionID?: string
   onSelectSession: (session: Session, repo: Repo) => void
+  onSelectRemoteSession?: (session: Session, serverId: string) => void
   onDeleteActiveSession: () => void
   onSelectRepo: (repo: Repo) => void
+  /** Set on a linked-server route to list that server's sessions instead of Manager repos. */
+  remote?: RemotePickerScope
 }
 
 interface SessionPickerRow {
   key: string
   session: Session
-  repo: Repo
+  repo?: Repo
+  serverId?: string
+  serverName?: string
   updatedAt?: number
 }
 
@@ -85,14 +100,11 @@ function buildSections(
   sessions: Session[],
   pinnedKeys: ReadonlySet<string>,
   keyFn: (session: Session) => string,
-  resolveRepo: (session: Session) => Repo | undefined,
+  resolveRepo?: (session: Session) => Repo | undefined,
 ): SessionPickerSection[] {
   const { pinned, today, older } = partitionSessions(sessions, pinnedKeys, keyFn)
   const toRows = (group: Session[]): SessionPickerRow[] =>
-    group.flatMap((session) => {
-      const repo = resolveRepo(session)
-      return repo ? [{ key: keyFn(session), session, repo }] : []
-    })
+    group.map((session) => ({ key: keyFn(session), session, repo: resolveRepo?.(session) }))
 
   const sections: SessionPickerSection[] = []
   const pinnedRows = toRows(pinned)
@@ -187,6 +199,7 @@ interface SessionPickerRowItemProps {
   isPinned: boolean
   isPendingDelete: boolean
   showRepo: boolean
+  showActions: boolean
   label?: string
   onOpen: (row: SessionPickerRow) => void
   onHover: (index: number) => void
@@ -204,6 +217,7 @@ const SessionPickerRowItem = memo(function SessionPickerRowItem({
   isPinned,
   isPendingDelete,
   showRepo,
+  showActions,
   label,
   onOpen,
   onHover,
@@ -261,13 +275,18 @@ const SessionPickerRowItem = memo(function SessionPickerRowItem({
                 : 'text-muted-foreground',
           )}
         >
-          {showRepo && <span className="max-w-32 truncate">{getRepoDisplayName(row.repo)}</span>}
+          {showRepo && row.repo ? (
+            <span className="max-w-32 truncate">{getRepoDisplayName(row.repo)}</span>
+          ) : null}
+          {showRepo && !row.repo && (row.serverName || row.serverId) ? (
+            <span className="max-w-32 truncate">{row.serverName ?? row.serverId}</span>
+          ) : null}
           {!showRepo && label && <span className="max-w-32 truncate">{label}</span>}
           <span>{formatShortRelativeTime(new Date(row.updatedAt ?? row.session.time.updated))}</span>
         </span>
       </div>
       <div className="flex shrink-0 items-center pr-1">
-        <DropdownMenu>
+        {row.serverId || !showActions ? null : <DropdownMenu>
           <DropdownMenuTrigger asChild>
             <Button
               type="button"
@@ -289,7 +308,7 @@ const SessionPickerRowItem = memo(function SessionPickerRowItem({
             </DropdownMenuItem>
             <DropdownMenuItem onClick={() => onRequestDelete(row.session)}>Delete</DropdownMenuItem>
           </DropdownMenuContent>
-        </DropdownMenu>
+        </DropdownMenu>}
       </div>
     </div>
   )
@@ -299,6 +318,7 @@ interface SessionPickerRowActionsOptions {
   directories: string[]
   activeSessionID?: string
   onSelectSession: (session: Session, repo: Repo) => void
+  onSelectRemoteSession?: (session: Session, serverId: string) => void
   onDeleteActiveSession: () => void
 }
 
@@ -323,6 +343,7 @@ function useSessionPickerRowActions({
   directories,
   activeSessionID,
   onSelectSession,
+  onSelectRemoteSession,
   onDeleteActiveSession,
 }: SessionPickerRowActionsOptions): SessionPickerRowActions {
   const { data: sessionPins } = useSessionPins()
@@ -339,9 +360,13 @@ function useSessionPickerRowActions({
   const openRow = useCallback(
     (row: SessionPickerRow | undefined) => {
       if (!row) return
-      onSelectSession(row.session, row.repo)
+      if (row.serverId) {
+        onSelectRemoteSession?.(row.session, row.serverId)
+        return
+      }
+      if (row.repo) onSelectSession(row.session, row.repo)
     },
-    [onSelectSession],
+    [onSelectSession, onSelectRemoteSession],
   )
 
   const performDelete = useCallback(
@@ -356,7 +381,7 @@ function useSessionPickerRowActions({
 
   const deleteRow = useCallback(
     (row: SessionPickerRow | undefined) => {
-      if (!row) return
+      if (!row || row.serverId) return
       if (pendingDeleteKey !== row.key) {
         setPendingDeleteKey(row.key)
         return
@@ -370,6 +395,7 @@ function useSessionPickerRowActions({
 
   const handleTogglePin = useCallback(
     (row: SessionPickerRow) => {
+      if (row.serverId) return
       togglePin.mutate({
         sessionId: row.session.id,
         directory: row.session.location.directory,
@@ -429,6 +455,7 @@ interface SessionPickerListProps {
   pinnedKeys: ReadonlySet<string>
   pendingDeleteKey: string | null
   showRepo: boolean
+  showRowActions?: boolean
   labelFor?: (row: SessionPickerRow) => string | undefined
   emptyState: React.ReactNode
   onOpenRow: (row: SessionPickerRow) => void
@@ -453,6 +480,7 @@ function SessionPickerList({
   pinnedKeys,
   pendingDeleteKey,
   showRepo,
+  showRowActions = true,
   labelFor,
   emptyState,
   onOpenRow,
@@ -502,6 +530,7 @@ function SessionPickerList({
                     isPinned={pinnedKeys.has(row.key)}
                     isPendingDelete={pendingDeleteKey === row.key}
                     showRepo={showRepo}
+                    showActions={showRowActions}
                     label={labelFor?.(row)}
                     onOpen={onOpenRow}
                     onHover={onHoverRow}
@@ -525,6 +554,7 @@ interface SessionPickerContentProps {
   currentRepo: Repo | undefined
   activeSessionID?: string
   onSelectSession: (session: Session, repo: Repo) => void
+  onSelectRemoteSession?: (session: Session, serverId: string) => void
   onDeleteActiveSession: () => void
   switchHint: string
   searchInputRef: React.RefObject<HTMLInputElement | null>
@@ -536,6 +566,7 @@ function SessionPickerContent({
   currentRepo,
   activeSessionID,
   onSelectSession,
+  onSelectRemoteSession,
   onDeleteActiveSession,
   switchHint,
   searchInputRef,
@@ -553,9 +584,10 @@ function SessionPickerContent({
     return map
   }, [repos, currentRepo])
 
+  const serverId = useOpenCodeServerId()
   const locationQuery = useQuery({
-    queryKey: ['opencode', 'location', currentRepo?.fullPath],
-    queryFn: () => getOpenCodeLocation(currentRepo!.fullPath),
+    queryKey: serverScopedKey(['opencode', 'location', currentRepo?.fullPath], serverId),
+    queryFn: () => getOpenCodeLocation(currentRepo!.fullPath, serverId),
     enabled: !allProjects && Boolean(currentRepo?.fullPath),
     staleTime: 5 * 60 * 1000,
   })
@@ -613,11 +645,18 @@ function SessionPickerContent({
     directories,
     activeSessionID,
     onSelectSession,
+    onSelectRemoteSession,
     onDeleteActiveSession,
   })
 
   const sections = useMemo(
-    () => buildSections(filteredSessions, pinnedKeys, getSessionKey, resolveRepo),
+    () =>
+      buildSections(
+        filteredSessions.filter((session) => Boolean(resolveRepo(session))),
+        pinnedKeys,
+        getSessionKey,
+        resolveRepo,
+      ),
     [filteredSessions, pinnedKeys, resolveRepo],
   )
   const rows = useMemo(() => sections.flatMap((section) => section.rows), [sections])
@@ -784,6 +823,7 @@ interface ActivePickerContentProps {
   open: boolean
   activeSessionID?: string
   onSelectSession: (session: Session, repo: Repo) => void
+  onSelectRemoteSession?: (session: Session, serverId: string) => void
   onDeleteActiveSession: () => void
   switchHint: string
   searchInputRef: React.RefObject<HTMLInputElement | null>
@@ -793,6 +833,7 @@ function ActivePickerContent({
   open,
   activeSessionID,
   onSelectSession,
+  onSelectRemoteSession,
   onDeleteActiveSession,
   switchHint,
   searchInputRef,
@@ -812,7 +853,14 @@ function ActivePickerContent({
       const rows: SessionPickerRow[] = []
       for (const item of groups[definition.key]) {
         if (needle && !(item.session.title ?? '').toLowerCase().includes(needle)) continue
-        rows.push({ key: item.key, session: item.session, repo: item.repo, updatedAt: item.updatedAt })
+        rows.push({
+          key: item.key,
+          session: item.session,
+          repo: item.repo ?? undefined,
+          serverId: item.serverId ?? undefined,
+          serverName: item.serverName ?? undefined,
+          updatedAt: item.updatedAt,
+        })
       }
       return rows.length > 0 ? [{ id: definition.key, heading: definition.heading, rows }] : []
     })
@@ -835,7 +883,10 @@ function ActivePickerContent({
   } = usePickerCursor(rows, defaultCursorKey)
 
   const directories = useMemo(
-    () => Array.from(new Set(rows.map((row) => row.session.location.directory))),
+    () =>
+      Array.from(
+        new Set(rows.filter((row) => !row.serverId).map((row) => row.session.location.directory)),
+      ),
     [rows],
   )
 
@@ -852,6 +903,7 @@ function ActivePickerContent({
     directories,
     activeSessionID,
     onSelectSession,
+    onSelectRemoteSession,
     onDeleteActiveSession,
   })
 
@@ -931,14 +983,179 @@ function ActivePickerContent({
   )
 }
 
+const EMPTY_PINNED_KEYS: ReadonlySet<string> = new Set()
+
+interface RemoteSessionPickerContentProps {
+  open: boolean
+  serverName?: string
+  projectDirectory?: string
+  activeSessionID?: string
+  onSelectSession: (session: Session) => void
+  switchHint: string
+  searchInputRef: React.RefObject<HTMLInputElement | null>
+}
+
+function RemoteSessionPickerContent({
+  open,
+  serverName,
+  projectDirectory,
+  activeSessionID,
+  onSelectSession,
+  switchHint,
+  searchInputRef,
+}: RemoteSessionPickerContentProps) {
+  const listRef = useRef<HTMLDivElement>(null)
+  const listId = useId()
+  const optionBaseId = useId()
+
+  const {
+    query,
+    setQuery,
+    trimmedQuery,
+    filteredSessions,
+    isSearchPending,
+    isLoading,
+    fetchNextPage,
+    isFetchingNextPage,
+    isFetchNextPageError,
+    canFetchNextPage,
+  } = useSessionSearch(projectDirectory ? [projectDirectory] : [])
+
+  const sections = useMemo(
+    () => buildSections(filteredSessions, EMPTY_PINNED_KEYS, getSessionKey),
+    [filteredSessions],
+  )
+  const rows = useMemo(() => sections.flatMap((section) => section.rows), [sections])
+
+  const activeRow = useMemo(
+    () => rows.find((row) => row.session.id === activeSessionID),
+    [rows, activeSessionID],
+  )
+  const defaultCursorKey = !trimmedQuery && activeRow ? activeRow.key : rows[0]?.key ?? null
+
+  const {
+    rowIndexByKey,
+    cursorIndex,
+    cursorRow,
+    registerRef,
+    moveCursor,
+    resetCursor,
+  } = usePickerCursor(rows, defaultCursorKey)
+
+  const openRow = useCallback(
+    (row: SessionPickerRow | undefined) => {
+      if (row) onSelectSession(row.session)
+    },
+    [onSelectSession],
+  )
+
+  useEffect(() => {
+    resetCursor()
+  }, [trimmedQuery, resetCursor])
+
+  const handleSearchKeyDown = usePickerKeyNav({
+    rows,
+    cursorIndex,
+    cursorRow,
+    moveCursor,
+    onOpenRow: openRow,
+  })
+
+  const handleListScroll = useCallback(
+    (event: React.UIEvent<HTMLDivElement>) => {
+      const { scrollTop, scrollHeight, clientHeight } = event.currentTarget
+      if (scrollHeight - scrollTop - clientHeight <= NEAR_BOTTOM_PX && canFetchNextPage) {
+        void fetchNextPage()
+      }
+    },
+    [canFetchNextPage, fetchNextPage],
+  )
+
+  const labelFor = useCallback(() => serverName, [serverName])
+
+  return (
+    <div className="mt-4 flex min-h-0 flex-1 flex-col">
+      <PickerSearchBar
+        inputRef={searchInputRef}
+        listId={listId}
+        open={open}
+        activeDescendantId={cursorIndex >= 0 ? optionId(optionBaseId, cursorIndex) : undefined}
+        value={query}
+        onChange={setQuery}
+        onKeyDown={handleSearchKeyDown}
+        placeholder="Search sessions..."
+        name="remote-session-picker-search"
+      />
+
+      <SessionPickerList
+        listRef={listRef}
+        listId={listId}
+        optionBaseId={optionBaseId}
+        ariaLabel="Sessions"
+        sections={sections}
+        rows={rows}
+        rowIndexByKey={rowIndexByKey}
+        cursorIndex={cursorIndex}
+        activeSessionID={activeSessionID}
+        pinnedKeys={EMPTY_PINNED_KEYS}
+        pendingDeleteKey={null}
+        showRepo={false}
+        showRowActions={false}
+        labelFor={labelFor}
+        emptyState={
+          isLoading
+            ? 'Loading sessions...'
+            : isSearchPending
+              ? 'Searching sessions...'
+              : trimmedQuery
+                ? 'No sessions found'
+                : 'No sessions yet'
+        }
+        onOpenRow={openRow}
+        onHoverRow={moveCursor}
+        onTogglePin={() => undefined}
+        onRequestDelete={() => undefined}
+        registerRef={registerRef}
+        onScroll={handleListScroll}
+      >
+        {isFetchNextPageError && (
+          <div className="flex flex-col items-center gap-2 py-4">
+            <p className="text-sm text-muted-foreground">Failed to load more sessions</p>
+            <Button
+              variant="outline"
+              size="sm"
+              onClick={() => {
+                void fetchNextPage()
+              }}
+              disabled={isFetchingNextPage}
+            >
+              Retry
+            </Button>
+          </div>
+        )}
+        {isFetchingNextPage && rows.length > 0 && (
+          <div className="py-4 text-center text-sm text-muted-foreground">Loading more sessions...</div>
+        )}
+      </SessionPickerList>
+
+      <div className="mt-2 shrink-0 px-4 text-xs text-muted-foreground pointer-coarse:hidden sm:px-0">
+        ↑↓ move · Enter open
+        {switchHint ? ` · ${switchHint} sessions` : ''}
+      </div>
+    </div>
+  )
+}
+
 export function SessionPickerDialog({
   open,
   onOpenChange,
   currentRepo,
   activeSessionID,
   onSelectSession,
+  onSelectRemoteSession,
   onDeleteActiveSession,
   onSelectRepo,
+  remote,
 }: SessionPickerDialogProps) {
   const searchInputRef = useRef<HTMLInputElement>(null)
   const activeSearchInputRef = useRef<HTMLInputElement>(null)
@@ -957,6 +1174,8 @@ export function SessionPickerDialog({
     },
     [preferences],
   )
+  const isRemote = remote !== undefined
+  const pickerTabs = isRemote ? REMOTE_SESSION_PICKER_TABS : SESSION_PICKER_TABS
   const [tab, setTab] = useState<SessionPickerTab>('sessions')
   const [prevOpen, setPrevOpen] = useState(open)
 
@@ -965,10 +1184,12 @@ export function SessionPickerDialog({
     if (open) setTab('sessions')
   }
 
+  const activeTab: SessionPickerTab = isRemote && tab === 'projects' ? 'sessions' : tab
+
   const toggleTab = useCallback(() => {
     focusSearchAfterSwitchRef.current = true
-    setTab((current) => nextSessionPickerTab(current))
-  }, [])
+    setTab((current) => nextSessionPickerTab(current, pickerTabs))
+  }, [pickerTabs])
 
   useShortcutActions({ switchPickerTab: open ? toggleTab : undefined })
 
@@ -980,12 +1201,12 @@ export function SessionPickerDialog({
     if (!hasFinePointer && !focusSearchAfterSwitchRef.current) return
     const frame = requestAnimationFrame(() => {
       focusSearchAfterSwitchRef.current = false
-      if (tab === 'projects') projectSearchInputRef.current?.focus()
-      else if (tab === 'active') activeSearchInputRef.current?.focus()
+      if (activeTab === 'projects') projectSearchInputRef.current?.focus()
+      else if (activeTab === 'active') activeSearchInputRef.current?.focus()
       else searchInputRef.current?.focus()
     })
     return () => cancelAnimationFrame(frame)
-  }, [open, tab, hasFinePointer])
+  }, [open, activeTab, hasFinePointer])
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
@@ -1003,58 +1224,76 @@ export function SessionPickerDialog({
         }}
       >
         <Tabs
-          value={tab}
+          value={activeTab}
           onValueChange={(value) => setTab(value as SessionPickerTab)}
           className="flex min-h-0 w-full min-w-0 flex-1 flex-col gap-0"
         >
           <div className="shrink-0 px-4 pt-4 sm:px-0 sm:pt-6">
-            <DialogTitle className="sr-only">{SESSION_PICKER_TAB_LABELS[tab]}</DialogTitle>
+            <DialogTitle className="sr-only">{SESSION_PICKER_TAB_LABELS[activeTab]}</DialogTitle>
             <TabsList>
               <TabsTrigger value="active">Active</TabsTrigger>
               <TabsTrigger value="sessions">Sessions</TabsTrigger>
-              <TabsTrigger value="projects">Projects</TabsTrigger>
+              {isRemote ? null : <TabsTrigger value="projects">Projects</TabsTrigger>}
             </TabsList>
           </div>
           <TabsContent
             value="active"
             className="mt-0 flex min-h-0 w-full min-w-0 flex-1 flex-col px-0"
           >
-            <ActivePickerContent
-              open={open}
-              activeSessionID={activeSessionID}
-              onSelectSession={onSelectSession}
-              onDeleteActiveSession={onDeleteActiveSession}
-              switchHint={switchHint}
-              searchInputRef={activeSearchInputRef}
-            />
+            <OpenCodeServerProvider serverId={LOCAL_OPENCODE_SERVER_ID}>
+              <ActivePickerContent
+                open={open}
+                activeSessionID={activeSessionID}
+                onSelectSession={onSelectSession}
+                onSelectRemoteSession={onSelectRemoteSession}
+                onDeleteActiveSession={onDeleteActiveSession}
+                switchHint={switchHint}
+                searchInputRef={activeSearchInputRef}
+              />
+            </OpenCodeServerProvider>
           </TabsContent>
           <TabsContent
             value="sessions"
             className="mt-0 flex min-h-0 w-full min-w-0 flex-1 flex-col px-0"
           >
-            <SessionPickerContent
-              open={open}
-              currentRepo={currentRepo}
-              activeSessionID={activeSessionID}
-              onSelectSession={onSelectSession}
-              onDeleteActiveSession={onDeleteActiveSession}
-              switchHint={switchHint}
-              searchInputRef={searchInputRef}
-              hasFinePointer={hasFinePointer}
-            />
+            {remote ? (
+              <RemoteSessionPickerContent
+                open={open}
+                serverName={remote.serverName}
+                projectDirectory={remote.projectDirectory}
+                activeSessionID={activeSessionID}
+                onSelectSession={(session) => onSelectRemoteSession?.(session, remote.serverId)}
+                switchHint={switchHint}
+                searchInputRef={searchInputRef}
+              />
+            ) : (
+              <SessionPickerContent
+                open={open}
+                currentRepo={currentRepo}
+                activeSessionID={activeSessionID}
+                onSelectSession={onSelectSession}
+                onSelectRemoteSession={onSelectRemoteSession}
+                onDeleteActiveSession={onDeleteActiveSession}
+                switchHint={switchHint}
+                searchInputRef={searchInputRef}
+                hasFinePointer={hasFinePointer}
+              />
+            )}
           </TabsContent>
-          <TabsContent
-            value="projects"
-            className="mt-0 flex min-h-0 w-full min-w-0 flex-1 flex-col px-0"
-          >
-            <ProjectPickerContent
-              open={open}
-              currentRepo={currentRepo}
-              onSelectRepo={onSelectRepo}
-              switchHint={switchHint}
-              searchInputRef={projectSearchInputRef}
-            />
-          </TabsContent>
+          {isRemote ? null : (
+            <TabsContent
+              value="projects"
+              className="mt-0 flex min-h-0 w-full min-w-0 flex-1 flex-col px-0"
+            >
+              <ProjectPickerContent
+                open={open}
+                currentRepo={currentRepo}
+                onSelectRepo={onSelectRepo}
+                switchHint={switchHint}
+                searchInputRef={projectSearchInputRef}
+              />
+            </TabsContent>
+          )}
         </Tabs>
       </DialogContent>
     </Dialog>

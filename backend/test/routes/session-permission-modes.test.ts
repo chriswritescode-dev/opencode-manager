@@ -115,4 +115,21 @@ describe('session permission mode routes', () => {
     })
     expect(res.status).toBe(400)
   })
+
+  it('scopes PUT and GET by serverId', async () => {
+    const app = createTestApp(db, { ses_root: null })
+
+    const putRes = await app.request('/session-permission-modes/ses_root', {
+      method: 'PUT',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ directory: '/abs/repo', mode: 'auto', serverId: 'srv_remote' }),
+    })
+    expect(putRes.status).toBe(200)
+
+    const remoteRes = await app.request('/session-permission-modes/ses_root?serverId=srv_remote')
+    await expect(remoteRes.json()).resolves.toMatchObject({ mode: 'auto' })
+
+    const localRes = await app.request('/session-permission-modes/ses_root')
+    await expect(localRes.json()).resolves.toMatchObject({ mode: 'ask' })
+  })
 })

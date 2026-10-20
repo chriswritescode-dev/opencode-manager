@@ -1,42 +1,47 @@
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import type { CreateTerminalRequest, ResizeTerminalRequest, TerminalInfo } from '@opencode-manager/shared/types'
 import { API_BASE_URL } from '@/config'
+import { terminalCollectionPath, terminalItemPath, terminalTargetScope, type TerminalTarget } from '@/lib/terminal-target'
 import { fetchWrapper, fetchWrapperVoid } from './fetchWrapper'
 
-function terminalsQueryKey(repoId: number, directory: string | undefined) {
-  return ['terminals', repoId, directory ?? null] as const
+function terminalsQueryKey(target: TerminalTarget, directory: string | undefined) {
+  return ['terminals', terminalTargetScope(target), directory ?? null] as const
 }
 
-function terminalsRepoQueryKey(repoId: number) {
-  return ['terminals', repoId] as const
+function terminalsScopeQueryKey(target: TerminalTarget) {
+  return ['terminals', terminalTargetScope(target)] as const
 }
 
-async function listTerminals(repoId: number, directory?: string): Promise<TerminalInfo[]> {
+async function listTerminals(target: TerminalTarget, directory?: string): Promise<TerminalInfo[]> {
   const data = await fetchWrapper<{ terminals: TerminalInfo[] }>(
-    `${API_BASE_URL}/api/repos/${repoId}/terminals`,
+    `${API_BASE_URL}${terminalCollectionPath(target)}`,
     { params: { directory } },
   )
   return data.terminals
 }
 
-async function createTerminal(repoId: number, body: CreateTerminalRequest): Promise<TerminalInfo> {
-  return fetchWrapper<TerminalInfo>(`${API_BASE_URL}/api/repos/${repoId}/terminals`, {
+async function createTerminal(target: TerminalTarget, body: CreateTerminalRequest): Promise<TerminalInfo> {
+  return fetchWrapper<TerminalInfo>(`${API_BASE_URL}${terminalCollectionPath(target)}`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify(body),
   })
 }
 
-export async function resizeTerminal(repoId: number, ptyID: string, body: ResizeTerminalRequest): Promise<void> {
-  return fetchWrapperVoid(`${API_BASE_URL}/api/repos/${repoId}/terminals/${encodeURIComponent(ptyID)}`, {
+export async function resizeTerminal(
+  target: TerminalTarget,
+  ptyID: string,
+  body: ResizeTerminalRequest,
+): Promise<void> {
+  return fetchWrapperVoid(`${API_BASE_URL}${terminalItemPath(target, ptyID)}`, {
     method: 'PATCH',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify(body),
   })
 }
 
-async function removeTerminal(repoId: number, ptyID: string, directory?: string): Promise<void> {
-  return fetchWrapperVoid(`${API_BASE_URL}/api/repos/${repoId}/terminals/${encodeURIComponent(ptyID)}`, {
+async function removeTerminal(target: TerminalTarget, ptyID: string, directory?: string): Promise<void> {
+  return fetchWrapperVoid(`${API_BASE_URL}${terminalItemPath(target, ptyID)}`, {
     method: 'DELETE',
     params: { directory },
   })
@@ -47,21 +52,21 @@ interface UseTerminalsOptions {
   refetchInterval?: number | false
 }
 
-export function useTerminals(repoId: number, directory: string | undefined, options: UseTerminalsOptions) {
+export function useTerminals(target: TerminalTarget, directory: string | undefined, options: UseTerminalsOptions) {
   return useQuery({
-    queryKey: terminalsQueryKey(repoId, directory),
-    queryFn: () => listTerminals(repoId, directory),
+    queryKey: terminalsQueryKey(target, directory),
+    queryFn: () => listTerminals(target, directory),
     enabled: options.enabled,
     refetchInterval: options.refetchInterval,
   })
 }
 
-export function useCreateTerminal(repoId: number) {
+export function useCreateTerminal(target: TerminalTarget) {
   const queryClient = useQueryClient()
   return useMutation({
-    mutationFn: (body: CreateTerminalRequest) => createTerminal(repoId, body),
+    mutationFn: (body: CreateTerminalRequest) => createTerminal(target, body),
     onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: terminalsRepoQueryKey(repoId) })
+      queryClient.invalidateQueries({ queryKey: terminalsScopeQueryKey(target) })
     },
   })
 }
@@ -71,12 +76,12 @@ interface RemoveTerminalVariables {
   directory?: string
 }
 
-export function useRemoveTerminal(repoId: number) {
+export function useRemoveTerminal(target: TerminalTarget) {
   const queryClient = useQueryClient()
   return useMutation({
-    mutationFn: ({ ptyID, directory }: RemoveTerminalVariables) => removeTerminal(repoId, ptyID, directory),
+    mutationFn: ({ ptyID, directory }: RemoveTerminalVariables) => removeTerminal(target, ptyID, directory),
     onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: terminalsRepoQueryKey(repoId) })
+      queryClient.invalidateQueries({ queryKey: terminalsScopeQueryKey(target) })
     },
   })
 }

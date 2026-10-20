@@ -131,7 +131,7 @@ export function createInternalSessionRoutes(
       permissionModes.pinAsk(launched.sessionId)
 
       const url = buildSessionPath(
-        launched.repoId,
+        input.repoId,
         launched.sessionId,
         launched.workspaceDirectory ? { repoTab: 'workspaces' } : undefined,
       )

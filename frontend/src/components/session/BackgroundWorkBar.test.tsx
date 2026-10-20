@@ -150,7 +150,7 @@ describe('BackgroundWorkBar', () => {
 
   it('renders nothing when there is no running or background work', async () => {
     const { container } = renderBar([], false)
-    await waitFor(() => expect(api.listShells).toHaveBeenCalledWith('/repo'))
+    await waitFor(() => expect(api.listShells).toHaveBeenCalledWith('/repo', 'local'))
     expect(container).toBeEmptyDOMElement()
   })
 
@@ -159,7 +159,7 @@ describe('BackgroundWorkBar', () => {
 
     fireEvent.click(await screen.findByRole('button', { name: /Move to background/ }))
 
-    await waitFor(() => expect(api.backgroundSession).toHaveBeenCalledWith('session-1'))
+    await waitFor(() => expect(api.backgroundSession).toHaveBeenCalledWith('session-1', 'local'))
   })
 
   it('hides the background action once the session is idle', async () => {
@@ -180,7 +180,7 @@ describe('BackgroundWorkBar', () => {
 
     fireEvent.click(screen.getByRole('button', { name: 'Kill npm run dev' }))
 
-    await waitFor(() => expect(api.removeShell).toHaveBeenCalledWith('dev', '/repo'))
+    await waitFor(() => expect(api.removeShell).toHaveBeenCalledWith('dev', '/repo', 'local'))
     await waitFor(() => expect(container).toBeEmptyDOMElement())
     clearShellExitRecord('/repo', 'dev')
   })
@@ -443,7 +443,7 @@ describe('BackgroundWorkBar', () => {
     fireEvent.click(screen.getByRole('button', { name: 'Output' }))
 
     expect(await screen.findByText('server listening on 3000')).toBeInTheDocument()
-    expect(api.readShellOutput).toHaveBeenCalledWith('dev', '/repo', 0, 50_000)
+    expect(api.readShellOutput).toHaveBeenCalledWith('dev', '/repo', 0, 50_000, 'local')
   })
 
   it('reads the final output when the shell exits during an in-flight poll', async () => {

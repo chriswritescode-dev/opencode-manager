@@ -2,7 +2,8 @@ import { Database } from 'bun:sqlite'
 import { randomBytes } from 'node:crypto'
 import { logger } from '../utils/logger'
 import { parseJsonc } from '@opencode-manager/shared/utils'
-import { encryptSecret, decryptSecret } from '../utils/crypto'
+import { encryptSecret } from '../utils/crypto'
+import { deleteSecret, readEncryptedSecret, writeEncryptedSecret } from '../db/secrets'
 import { ENV } from '@opencode-manager/shared/config/env'
 import type {
   UserPreferences,
@@ -142,16 +143,7 @@ export class SettingsService {
   }
 
   private readSecret(key: string): string | null {
-    const row = this.db.prepare('SELECT value FROM app_secrets WHERE key = ?').get(key) as { value: string } | undefined
-    if (!row) {
-      return null
-    }
-    try {
-      return decryptSecret(row.value)
-    } catch (error) {
-      logger.error(`Failed to decrypt ${key}`, error)
-      return null
-    }
+    return readEncryptedSecret(this.db, key)
   }
 
   getOrCreateManagedOpenCodeServerPassword(): string {
@@ -218,15 +210,10 @@ export class SettingsService {
   }
 
   setOpenCodeServerPassword(password: string): void {
-    const now = Date.now()
-    const encrypted = encryptSecret(password)
-    this.db.prepare(`
-      INSERT INTO app_secrets (key, value, created_at, updated_at) VALUES (?, ?, ?, ?)
-      ON CONFLICT(key) DO UPDATE SET value = excluded.value, updated_at = excluded.updated_at
-    `).run(CUSTOM_OPENCODE_SERVER_PASSWORD_KEY, encrypted, now, now)
+    writeEncryptedSecret(this.db, CUSTOM_OPENCODE_SERVER_PASSWORD_KEY, password)
   }
 
   clearOpenCodeServerPassword(): void {
-    this.db.prepare('DELETE FROM app_secrets WHERE key = ?').run(CUSTOM_OPENCODE_SERVER_PASSWORD_KEY)
+    deleteSecret(this.db, CUSTOM_OPENCODE_SERVER_PASSWORD_KEY)
   }
 }

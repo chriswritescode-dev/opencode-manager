@@ -1,7 +1,7 @@
 import { logger } from '../../utils/logger'
 import { ENV } from '@opencode-manager/shared/config/env'
 import { createOpenCodeApi, type OpenCodeApi } from '@opencode-manager/shared/opencode'
-import { filterProxyHeaders } from '../../utils/proxy-headers'
+import { filterProxyHeaders, NULL_BODY_STATUSES } from '../../utils/proxy-headers'
 import { getOpenCodeBasicAuthHeader, type OpenCodePasswordResolver } from './auth'
 import { getOpenCodeUpstreamBaseUrl, withDefaultOpenCodeDirectory } from './upstream'
 
@@ -17,6 +17,7 @@ export interface FetchOpenCodeClientConfig {
   basicAuth: string | null
   passwordResolver?: OpenCodePasswordResolver
   fetchFn?: typeof fetch
+  defaultDirectory?: boolean
 }
 
 export class FetchOpenCodeClient implements OpenCodeClient {
@@ -45,8 +46,12 @@ export class FetchOpenCodeClient implements OpenCodeClient {
     return await getOpenCodeBasicAuthHeader(this.config.passwordResolver)
   }
 
+  private withDirectoryHeader(headers: Record<string, string>): Record<string, string> {
+    return this.config.defaultDirectory === false ? headers : withDefaultOpenCodeDirectory(headers)
+  }
+
   private async fetchWithResolvedAuth(input: Parameters<typeof fetch>[0], init?: Parameters<typeof fetch>[1]): Promise<Response> {
-    const headers = new Headers(withDefaultOpenCodeDirectory(Object.fromEntries(new Headers(init?.headers))))
+    const headers = new Headers(this.withDirectoryHeader(Object.fromEntries(new Headers(init?.headers))))
     const basicAuth = await this.getBasicAuth()
 
     if (basicAuth) {
@@ -59,7 +64,7 @@ export class FetchOpenCodeClient implements OpenCodeClient {
   private async request(req: { method: string; path: string; body?: string; headers?: Record<string, string> }): Promise<Response> {
     const url = new URL(this.resolveBaseUrl() + req.path)
 
-    const headers: Record<string, string> = withDefaultOpenCodeDirectory({ ...(req.headers ?? {}) })
+    const headers: Record<string, string> = this.withDirectoryHeader({ ...(req.headers ?? {}) })
 
     const basicAuth = await this.getBasicAuth()
 
@@ -76,8 +81,7 @@ export class FetchOpenCodeClient implements OpenCodeClient {
 
       const filteredHeaders = filterProxyHeaders(response.headers)
 
-      const noBodyStatuses = new Set([101, 204, 205, 304])
-      if (noBodyStatuses.has(response.status)) {
+      if (NULL_BODY_STATUSES.has(response.status)) {
         return new Response(null, {
           status: response.status,
           statusText: response.statusText,

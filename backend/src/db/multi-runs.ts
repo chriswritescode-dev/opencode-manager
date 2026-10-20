@@ -4,6 +4,7 @@ import {
   type MultiRunEntryStatus,
   type MultiRunFusionSource,
   type MultiRunFusionStatus,
+  type MultiRunTarget,
 } from '@opencode-manager/shared/schemas'
 
 export interface MultiRunEntryRecord {
@@ -37,7 +38,9 @@ export interface MultiRunFusionRecord {
 
 export interface MultiRunRecord {
   id: number
-  repoId: number
+  repoId: number | null
+  serverId: string
+  directory: string | null
   name: string
   prompt: string
   isolated: boolean
@@ -48,7 +51,9 @@ export interface MultiRunRecord {
 }
 
 export interface CreateMultiRunGroup {
-  repoId: number
+  repoId: number | null
+  serverId: string
+  directory: string | null
   name: string
   prompt: string
   isolated: boolean
@@ -81,7 +86,9 @@ export interface MultiRunFusionPatch {
 
 interface MultiRunRow {
   id: number
-  repo_id: number
+  repo_id: number | null
+  server_id: string
+  directory: string | null
   name: string
   prompt: string
   isolated: number
@@ -118,7 +125,7 @@ interface MultiRunFusionRow {
   updated_at: number
 }
 
-const MULTI_RUN_COLUMNS = 'id, repo_id, name, prompt, isolated, base_ref, created_at'
+const MULTI_RUN_COLUMNS = 'id, repo_id, server_id, directory, name, prompt, isolated, base_ref, created_at'
 
 const MULTI_RUN_ENTRY_COLUMNS = 'id, multi_run_id, model, status, session_id, directory, error, created_at, updated_at'
 
@@ -129,7 +136,9 @@ export function ensureMultiRunTables(db: Database): void {
   db.run(`
     CREATE TABLE IF NOT EXISTS multi_runs (
       id INTEGER PRIMARY KEY AUTOINCREMENT,
-      repo_id INTEGER NOT NULL,
+      repo_id INTEGER,
+      server_id TEXT NOT NULL DEFAULT 'local',
+      directory TEXT,
       name TEXT NOT NULL,
       prompt TEXT NOT NULL,
       isolated INTEGER NOT NULL,
@@ -157,6 +166,10 @@ export function ensureMultiRunTables(db: Database): void {
   db.run(`
     CREATE INDEX IF NOT EXISTS idx_multi_runs_repo
     ON multi_runs(repo_id, created_at DESC)
+  `)
+  db.run(`
+    CREATE INDEX IF NOT EXISTS idx_multi_runs_server
+    ON multi_runs(server_id, directory, created_at DESC)
   `)
 }
 
@@ -194,8 +207,20 @@ export function createMultiRunWithEntries(
   const now = Date.now()
   const create = db.transaction(() => {
     const result = db
-      .prepare(`INSERT INTO multi_runs(repo_id, name, prompt, isolated, base_ref, created_at) VALUES(?,?,?,?,?,?)`)
-      .run(group.repoId, group.name, group.prompt, group.isolated ? 1 : 0, group.baseRef, now)
+      .prepare(
+        `INSERT INTO multi_runs(repo_id, server_id, directory, name, prompt, isolated, base_ref, created_at)
+         VALUES(?,?,?,?,?,?,?,?)`,
+      )
+      .run(
+        group.repoId,
+        group.serverId,
+        group.directory,
+        group.name,
+        group.prompt,
+        group.isolated ? 1 : 0,
+        group.baseRef,
+        now,
+      )
     const multiRunId = Number(result.lastInsertRowid)
 
     const insertEntry = db.prepare(`
@@ -226,15 +251,20 @@ export function getMultiRun(db: Database, id: number): MultiRunRecord | null {
   return toMultiRunRecord(row, loadEntries(db, row.id), loadFusions(db, row.id))
 }
 
-export function listMultiRuns(db: Database, repoId: number, limit: number): MultiRunRecord[] {
+export function listMultiRuns(db: Database, target: MultiRunTarget, limit: number): MultiRunRecord[] {
+  const [where, params] =
+    target.kind === 'repo'
+      ? ['repo_id = ?', [target.repoId] as const]
+      : ['server_id = ? AND directory = ?', [target.serverId, target.directory] as const]
+
   const rows = db
     .prepare(`
       SELECT ${MULTI_RUN_COLUMNS} FROM multi_runs
-      WHERE repo_id = ?
+      WHERE ${where}
       ORDER BY created_at DESC, id DESC
       LIMIT ?
     `)
-    .all(repoId, limit) as MultiRunRow[]
+    .all(...params, limit) as MultiRunRow[]
   if (rows.length === 0) {
     return []
   }
@@ -445,6 +475,8 @@ function toMultiRunRecord(
   return {
     id: row.id,
     repoId: row.repo_id,
+    serverId: row.server_id,
+    directory: row.directory,
     name: row.name,
     prompt: row.prompt,
     isolated: row.isolated === 1,

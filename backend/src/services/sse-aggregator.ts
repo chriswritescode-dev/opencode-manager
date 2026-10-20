@@ -1,14 +1,29 @@
 import { EventSource } from 'eventsource'
 import { logger } from '../utils/logger'
 import { DEFAULTS } from '@opencode-manager/shared/config'
-import { openCodeLocation, sessionIDFromEvent, type OpenCodeApi, type V2Event } from '@opencode-manager/shared/opencode'
+import { buildServerDirectoryKey, LOCAL_OPENCODE_SERVER_ID, parseServerDirectoryKey } from '@opencode-manager/shared/schemas'
+import { type OpenCodeApi, type V2Event } from '@opencode-manager/shared/opencode'
 import { getOpenCodeBasicAuthHeader, type OpenCodePasswordResolver } from './opencode/auth'
 import { getOpenCodeUpstreamBaseUrl } from './opencode/upstream'
 import { encodeSSEFrame } from '../utils/sse-frame'
+import {
+  collectPendingReplayEvents,
+  createAuthorizedEventSourceInit,
+  createReplayEventBuilder,
+  nextBackoffDelay,
+  parseOpenCodeEvent,
+  planSessionStatusReplay,
+  type ReplayEventBuilder,
+} from './opencode-event-routing'
 
 type SSEClientCallback = (event: string, data: string) => void
 type SSEClientFrameWriter = (frame: Uint8Array) => void
 type SSEEventListener = (directory: string | null, event: SSEEvent) => void
+type ServerEventListener = (serverId: string, directory: string | null, event: SSEEvent) => void
+type ServerConnectedListener = (serverId: string) => void
+type RemoteSubagentResolver = (serverId: string, sessionId: string) => boolean
+
+export type RemoteReplayHandler = (clientId: string, serverId: string, directory: string) => void | Promise<void>
 
 interface SSEClient {
   id: string
@@ -17,6 +32,7 @@ interface SSEClient {
   directories: Set<string>
   visible: boolean
   activeSessionId: string | null
+  activeServerId: string | null
 }
 
 export type SSEEvent = V2Event
@@ -30,14 +46,12 @@ export interface ScheduledSessionRef {
   directory: string
 }
 
-type ReplayEventType = 'permission.asked' | 'form.created' | 'session.status'
-
 const { RECONNECT_DELAY_MS, MAX_RECONNECT_DELAY_MS } = DEFAULTS.SSE
-const MULTILINE_PATTERN = /[\r\n]/
 const LOCATION_CATALOG_EVENT_TYPES = new Set(['command.updated', 'agent.updated', 'skill.updated', 'model.updated', 'provider.updated', 'integration.updated'])
 
-function serializeEnvelope(directory: string | null, payloadJson: string): string {
-  return '{"directory":' + JSON.stringify(directory) + ',"payload":' + payloadJson + '}'
+function serializeEnvelope(directory: string | null, payloadJson: string, serverId?: string): string {
+  const serverField = serverId === undefined ? '' : ',"serverId":' + JSON.stringify(serverId)
+  return '{"directory":' + JSON.stringify(directory) + serverField + ',"payload":' + payloadJson + '}'
 }
 
 class SSEAggregator {
@@ -47,7 +61,10 @@ class SSEAggregator {
   private activeSessions: Map<string, Set<string>> = new Map()
   private sessionDirectories: Map<string, string> = new Map()
   private eventListeners: Set<SSEEventListener> = new Set()
+  private serverEventListeners: Set<ServerEventListener> = new Set()
   private upstreamConnectedListeners: Set<() => void> = new Set()
+  private serverConnectedListeners: Set<ServerConnectedListener> = new Set()
+  private remoteSubagentResolver: RemoteSubagentResolver | null = null
   private subagentSessions: Map<string, Set<string>> = new Map()
   private upstream: EventSource | null = null
   private reconnectTimeout: ReturnType<typeof setTimeout> | null = null
@@ -58,7 +75,8 @@ class SSEAggregator {
   private pendingActionsFetcher: PendingActionsFetcher | null = null
   private passwordResolver: OpenCodePasswordResolver | null = null
   private scheduledSessionsResolver: (() => ScheduledSessionRef[]) | null = null
-  private replayEventCount = 0
+  private remoteReplayHandler: RemoteReplayHandler | null = null
+  private readonly buildReplayEvent: ReplayEventBuilder = createReplayEventBuilder('ocm_replay_')
 
   private constructor() {}
 
@@ -72,6 +90,10 @@ class SSEAggregator {
 
   setScheduledSessionsResolver(resolver: () => ScheduledSessionRef[]): void {
     this.scheduledSessionsResolver = resolver
+  }
+
+  setRemoteReplayHandler(handler: RemoteReplayHandler | null): void {
+    this.remoteReplayHandler = handler
   }
 
   reconnect(): void {
@@ -110,7 +132,8 @@ class SSEAggregator {
       writeFrame,
       directories: new Set(directories),
       visible: false,
-      activeSessionId: null
+      activeSessionId: null,
+      activeServerId: null
     }
     this.clients.set(id, client)
     directories.forEach(dir => this.indexClientDirectory(id, dir))
@@ -118,7 +141,7 @@ class SSEAggregator {
     logger.info(`Client ${id} connected with directories: ${directories.length > 0 ? directories.join(', ') : '(none)'}`)
 
     if (directories.length > 0) {
-      void this.replayPendingActionsForClient(id, directories)
+      this.replayForDirectories(id, directories)
     }
 
     return () => this.removeClient(id)
@@ -127,7 +150,10 @@ class SSEAggregator {
   removeClient(id: string): void {
     const client = this.clients.get(id)
     if (client) {
-      client.directories.forEach(dir => this.deindexClientDirectory(id, dir))
+      for (const directory of Array.from(client.directories)) {
+        client.directories.delete(directory)
+        this.deindexClientDirectory(id, directory)
+      }
     }
     this.clients.delete(id)
   }
@@ -149,7 +175,7 @@ class SSEAggregator {
     logger.info(`Client ${clientId} subscribed to: ${directories.join(', ')}`)
 
     if (newDirectories.length > 0) {
-      void this.replayPendingActionsForClient(clientId, newDirectories)
+      this.replayForDirectories(clientId, newDirectories)
     }
 
     return true
@@ -185,6 +211,44 @@ class SSEAggregator {
     if (set.size === 0) this.directoryClients.delete(directory)
   }
 
+  private replayForDirectories(clientId: string, directories: string[]): void {
+    const localDirectories: string[] = []
+    const remoteDirectories: Array<{ serverId: string; directory: string }> = []
+
+    for (const directory of directories) {
+      const parsed = parseServerDirectoryKey(directory)
+      if (parsed.serverId === LOCAL_OPENCODE_SERVER_ID) {
+        localDirectories.push(directory)
+      } else {
+        remoteDirectories.push(parsed)
+      }
+    }
+
+    if (localDirectories.length > 0) {
+      void this.replayPendingActionsForClient(clientId, localDirectories)
+    }
+
+    const handler = this.remoteReplayHandler
+    if (!handler) return
+
+    for (const { serverId, directory } of remoteDirectories) {
+      void this.replayRemoteDirectory(clientId, serverId, directory, handler)
+    }
+  }
+
+  private async replayRemoteDirectory(
+    clientId: string,
+    serverId: string,
+    directory: string,
+    handler: RemoteReplayHandler,
+  ): Promise<void> {
+    try {
+      await handler(clientId, serverId, directory)
+    } catch (error) {
+      logger.warn(`remote replay: failed for ${buildServerDirectoryKey(serverId, directory)}: ${String(error)}`)
+    }
+  }
+
   private async replayPendingActionsForClient(clientId: string, directories: string[]): Promise<void> {
     const fetcher = this.pendingActionsFetcher
     if (!fetcher) return
@@ -199,26 +263,16 @@ class SSEAggregator {
     directory: string,
     fetcher: PendingActionsFetcher,
   ): Promise<void> {
-    const [permissionsResult, formsResult] = await Promise.allSettled([
-      fetcher.api.permission.request.list(openCodeLocation(directory)),
-      fetcher.api.form.list(openCodeLocation(directory)),
-    ])
+    const events = await collectPendingReplayEvents({
+      api: fetcher.api,
+      directory,
+      buildEvent: this.buildReplayEvent,
+      logScope: 'replay',
+      logTarget: directory,
+    })
 
-    if (permissionsResult.status === 'rejected') {
-      logger.warn(`replay: failed to fetch pending permissions for ${directory}: ${String(permissionsResult.reason)}`)
-    } else {
-      this.emitReplayEventsToClient(clientId, directory, permissionsResult.value.data.map(request =>
-        this.buildReplayEvent('permission.asked', directory, request)
-      ))
-    }
-
-    if (formsResult.status === 'rejected') {
-      logger.warn(`replay: failed to fetch pending forms for ${directory}: ${String(formsResult.reason)}`)
-    } else {
-      this.emitReplayEventsToClient(clientId, directory, formsResult.value.data.map(form =>
-        this.buildReplayEvent('form.created', directory, { form })
-      ))
-    }
+    this.emitReplayEventsToClient(clientId, directory, events.permissions)
+    this.emitReplayEventsToClient(clientId, directory, events.forms)
   }
 
   private emitReplayEventsToClient(clientId: string, directory: string, events: V2Event[]): void {
@@ -252,18 +306,16 @@ class SSEAggregator {
     }
 
     const tracked = this.getTrackedSessions()
-    const runningIDs = Object.keys(running ?? {})
-    const runningSet = new Set(runningIDs)
+    const plan = planSessionStatusReplay(running, tracked)
 
     let replayed = 0
 
-    for (const [sessionID, directory] of tracked) {
-      if (runningSet.has(sessionID)) continue
+    for (const { sessionID, directory } of plan.idle) {
       this.deliverEvent(directory, this.buildReplayEvent('session.status', directory, { sessionID, status: { type: 'idle' } }))
       replayed++
     }
 
-    const runningDirectories = await Promise.all(runningIDs.map(async (sessionID) => ({
+    const runningDirectories = await Promise.all(plan.busy.map(async (sessionID) => ({
       sessionID,
       directory: tracked.get(sessionID) ?? await this.resolveSessionDirectory(fetcher, sessionID),
     })))
@@ -302,17 +354,6 @@ class SSEAggregator {
     }
   }
 
-  private buildReplayEvent(type: ReplayEventType, directory: string, data: unknown): V2Event {
-    this.replayEventCount += 1
-    return {
-      id: `ocm_replay_${this.replayEventCount}`,
-      created: Date.now(),
-      type,
-      location: { directory },
-      data,
-    } as V2Event
-  }
-
   private async connectUpstream(): Promise<void> {
     if (!this.started) return
     if (this.upstream) {
@@ -330,18 +371,7 @@ class SSEAggregator {
 
     if (!this.started) return
 
-    const init: ConstructorParameters<typeof EventSource>[1] = authHeader
-      ? {
-          fetch: (input, fetchInit) =>
-            fetch(input, {
-              ...fetchInit,
-              headers: {
-                ...(fetchInit?.headers ?? {}),
-                Authorization: authHeader,
-              },
-            }),
-        }
-      : undefined
+    const init: ConstructorParameters<typeof EventSource>[1] = createAuthorizedEventSourceInit(authHeader)
 
     const es = new EventSource(url, init)
     this.upstream = es
@@ -383,6 +413,7 @@ class SSEAggregator {
     this.upstreamConnectedListeners.forEach(listener => {
       try { listener() } catch { /* ignore listener errors */ }
     })
+    this.notifyServerConnected(LOCAL_OPENCODE_SERVER_ID)
   }
 
   private broadcastResync(): void {
@@ -393,7 +424,7 @@ class SSEAggregator {
     if (!this.started || this.reconnectTimeout) return
     this.reconnectTimeout = setTimeout(() => {
       this.reconnectTimeout = null
-      this.reconnectDelay = Math.min(this.reconnectDelay * 2, MAX_RECONNECT_DELAY_MS)
+      this.reconnectDelay = nextBackoffDelay(this.reconnectDelay, MAX_RECONNECT_DELAY_MS)
       void this.connectUpstream()
     }, this.reconnectDelay)
   }
@@ -403,37 +434,44 @@ class SSEAggregator {
     return () => { this.eventListeners.delete(listener) }
   }
 
+  onServerEvent(listener: ServerEventListener): () => void {
+    this.serverEventListeners.add(listener)
+    return () => { this.serverEventListeners.delete(listener) }
+  }
+
   onUpstreamConnected(listener: () => void): () => void {
     this.upstreamConnectedListeners.add(listener)
     return () => { this.upstreamConnectedListeners.delete(listener) }
   }
 
+  onServerConnected(listener: ServerConnectedListener): () => void {
+    this.serverConnectedListeners.add(listener)
+    return () => { this.serverConnectedListeners.delete(listener) }
+  }
+
+  notifyServerEvent(serverId: string, directory: string | null, event: SSEEvent): void {
+    this.serverEventListeners.forEach(listener => {
+      try { listener(serverId, directory, event) } catch { /* ignore listener errors */ }
+    })
+  }
+
+  notifyServerConnected(serverId: string): void {
+    this.serverConnectedListeners.forEach(listener => {
+      try { listener(serverId) } catch { /* ignore listener errors */ }
+    })
+  }
+
+  setRemoteSubagentResolver(resolver: RemoteSubagentResolver | null): void {
+    this.remoteSubagentResolver = resolver
+  }
+
   private handleUpstreamMessage(data: string): void {
-    let event: V2Event
-    try {
-      event = JSON.parse(data) as V2Event
-    } catch {
-      return
-    }
+    const routed = parseOpenCodeEvent(data, this.sessionDirectories)
+    if (!routed) return
 
-    if (!event?.type) return
-
-    const payloadJson = MULTILINE_PATTERN.test(data) ? JSON.stringify(event) : data
-    const directory = event.location?.directory
-    const sessionID = sessionIDFromEvent(event)
-    const forkParentId = event.type === 'session.forked' ? event.data.parentID : undefined
-    const inheritedDirectory = forkParentId ? this.sessionDirectories.get(forkParentId) : undefined
+    const { event, payloadJson, directory, resolvedDirectory } = routed
 
     try {
-      const rememberedDirectory = directory ?? inheritedDirectory
-      const resolvedDirectory = rememberedDirectory ?? (sessionID ? this.sessionDirectories.get(sessionID) : undefined)
-
-      if (sessionID && event.type === 'session.deleted') {
-        this.sessionDirectories.delete(sessionID)
-      } else if (sessionID && rememberedDirectory) {
-        this.sessionDirectories.set(sessionID, rememberedDirectory)
-      }
-
       if (directory) {
         if (LOCATION_CATALOG_EVENT_TYPES.has(event.type)) {
           this.deliverResolvedEvent(directory, event, payloadJson)
@@ -478,20 +516,70 @@ class SSEAggregator {
     this.eventListeners.forEach(listener => {
       try { listener(directory, event) } catch { /* ignore listener errors */ }
     })
+    this.notifyServerEvent(LOCAL_OPENCODE_SERVER_ID, directory, event)
   }
 
-  private writeEnvelopeToClients(clientIds: Iterable<string>, directory: string | null, payloadJson: string): void {
+  private writeEnvelopeToClients(
+    clientIds: Iterable<string>,
+    directory: string | null,
+    payloadJson: string,
+    serverId?: string,
+  ): void {
     let frame: Uint8Array | null = null
     for (const clientId of clientIds) {
       const client = this.clients.get(clientId)
       if (!client) continue
-      frame ??= encodeSSEFrame('message', serializeEnvelope(directory, payloadJson))
+      frame ??= encodeSSEFrame('message', serializeEnvelope(directory, payloadJson, serverId))
+      this.writeFrame(client, frame, 'Failed to send to client')
+    }
+  }
+
+  private writeFrame(client: SSEClient, frame: Uint8Array, errorLabel: string): void {
+    try {
+      client.writeFrame(frame)
+    } catch (error) {
+      logger.error(`${errorLabel} ${client.id}:`, error)
+    }
+  }
+
+  hasClientDirectory(clientId: string, key: string): boolean {
+    return this.clients.get(clientId)?.directories.has(key) ?? false
+  }
+
+  deliverRemoteEnvelope(serverId: string, directory: string | null, payloadJson: string): void {
+    this.writeEnvelopeToClients(this.clients.keys(), directory, payloadJson, serverId)
+  }
+
+  deliverRemoteEnvelopeToClient(clientId: string, serverId: string, directory: string, payloadJson: string): void {
+    if (!this.hasClientDirectory(clientId, buildServerDirectoryKey(serverId, directory))) return
+    const client = this.clients.get(clientId)
+    if (!client) return
+    const frame = encodeSSEFrame('message', serializeEnvelope(directory, payloadJson, serverId))
+    this.writeFrame(client, frame, 'Failed to send remote event to client')
+  }
+
+  sendRemoteResync(serverId: string): void {
+    const data = JSON.stringify({ timestamp: Date.now(), serverId })
+    for (const clientId of this.clientIdsForServer(serverId)) {
+      const client = this.clients.get(clientId)
+      if (!client) continue
       try {
-        client.writeFrame(frame)
-      } catch (error) {
-        logger.error(`Failed to send to client ${client.id}:`, error)
+        client.callback('resync', data)
+      } catch { /* ignore resync errors */ }
+    }
+  }
+
+  private clientIdsForServer(serverId: string): string[] {
+    const clientIds: string[] = []
+    for (const client of this.clients.values()) {
+      for (const key of client.directories) {
+        if (parseServerDirectoryKey(key).serverId === serverId) {
+          clientIds.push(client.id)
+          break
+        }
       }
     }
+    return clientIds
   }
 
   private handleEvent(directory: string, event: SSEEvent): void {
@@ -583,7 +671,12 @@ class SSEAggregator {
     return this.clients.size
   }
 
-  setClientVisibility(id: string, visible: boolean, activeSessionId: string | null = null): boolean {
+  setClientVisibility(
+    id: string,
+    visible: boolean,
+    activeSessionId: string | null = null,
+    activeServerId: string | null = null
+  ): boolean {
     const client = this.clients.get(id)
     if (!client) {
       logger.warn(`setClientVisibility: client ${id} not found`)
@@ -591,19 +684,23 @@ class SSEAggregator {
     }
     client.visible = visible
     client.activeSessionId = visible ? activeSessionId : null
+    client.activeServerId = visible ? (activeServerId ?? LOCAL_OPENCODE_SERVER_ID) : null
     return true
   }
 
-  isSessionBeingViewed(sessionId: string): boolean {
+  isSessionBeingViewed(sessionId: string, serverId: string = LOCAL_OPENCODE_SERVER_ID): boolean {
     for (const client of this.clients.values()) {
-      if (client.visible && client.activeSessionId === sessionId) {
+      if (client.visible && client.activeSessionId === sessionId && client.activeServerId === serverId) {
         return true
       }
     }
     return false
   }
 
-  isSubagentSession(sessionId: string): boolean {
+  isSubagentSession(sessionId: string, serverId: string = LOCAL_OPENCODE_SERVER_ID): boolean {
+    if (serverId !== LOCAL_OPENCODE_SERVER_ID) {
+      return this.remoteSubagentResolver?.(serverId, sessionId) ?? false
+    }
     for (const sessions of this.subagentSessions.values()) {
       if (sessions.has(sessionId)) {
         return true
@@ -651,7 +748,11 @@ class SSEAggregator {
     this.directoryClients.clear()
     this.clients.clear()
     this.eventListeners.clear()
+    this.serverEventListeners.clear()
     this.upstreamConnectedListeners.clear()
+    this.serverConnectedListeners.clear()
+    this.remoteSubagentResolver = null
+    this.remoteReplayHandler = null
   }
 
   broadcastToAll(event: string, data: string): void {

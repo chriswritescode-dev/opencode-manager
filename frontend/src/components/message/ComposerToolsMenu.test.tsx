@@ -2,6 +2,7 @@ import { describe, it, expect, vi, beforeEach } from 'vitest'
 import { render, screen } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { ComposerToolsMenu } from './ComposerToolsMenu'
+import { OpenCodeServerProvider } from '@/contexts/OpenCodeServerContext'
 import { useSessionPermissionMode, useSetSessionPermissionMode } from '@/hooks/useSessionPermissionMode'
 import { useSessionSandbox, useSetSessionSandbox } from '@/hooks/useSessionSandbox'
 import { FetchError } from '@/api/fetchWrapper'
@@ -72,6 +73,25 @@ function renderMenu(overrides: Partial<React.ComponentProps<typeof ComposerTools
   return props
 }
 
+function renderRemoteMenu(overrides: Partial<React.ComponentProps<typeof ComposerToolsMenu>> = {}) {
+  const props = {
+    sessionID: 'ses_remote',
+    directory: '/remote/repo',
+    goalArmed: false,
+    goalDisabled: false,
+    goalLabel: 'Goal mode: the next message becomes the objective',
+    onToggleGoal: vi.fn(),
+    onAttachFile: vi.fn(),
+    ...overrides,
+  }
+  render(
+    <OpenCodeServerProvider serverId="srv_remote">
+      <ComposerToolsMenu {...props} />
+    </OpenCodeServerProvider>,
+  )
+  return props
+}
+
 describe('ComposerToolsMenu', () => {
   beforeEach(() => {
     vi.clearAllMocks()
@@ -110,6 +130,18 @@ describe('ComposerToolsMenu', () => {
     await user.click(item)
 
     expect(mutate).toHaveBeenCalledWith({ directory: '/repo', mode: 'auto' })
+  })
+
+  it('offers permission and goal controls on a remote server without sandbox controls', async () => {
+    const user = userEvent.setup()
+    mockPermissionMode()
+    renderRemoteMenu()
+
+    await user.click(screen.getByRole('button', { name: 'Composer options' }))
+
+    expect(await screen.findByRole('menuitemcheckbox', { name: /Accept all permissions/ })).toBeInTheDocument()
+    expect(screen.getByRole('menuitemcheckbox', { name: /Goal mode/ })).toBeInTheDocument()
+    expect(screen.queryByRole('menuitemcheckbox', { name: /Sandbox commands/ })).not.toBeInTheDocument()
   })
 
   it('shows why permissions cannot be changed', async () => {

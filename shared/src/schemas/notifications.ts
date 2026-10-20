@@ -70,6 +70,8 @@ export const PushNotificationPayloadSchema = z.object({
       directory: z.string().optional(),
       repoId: z.number().optional(),
       repoName: z.string().optional(),
+      serverId: z.string().optional(),
+      serverName: z.string().optional(),
       priority: z.enum(["normal", "high"]).optional(),
     })
     .optional(),

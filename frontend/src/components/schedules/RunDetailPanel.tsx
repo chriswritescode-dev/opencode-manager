@@ -9,7 +9,7 @@ import { FileBrowserSheet } from '@/components/file-browser/FileBrowserSheet'
 import { getRepo } from '@/api/repos'
 import { createSessionWithContext } from '@/api/opencode'
 import { getWorkspaceFilePath } from '@/lib/markdownLinks'
-import { getSessionPath } from '@/lib/navigation'
+import { getServerSessionPath, getSessionPath } from '@/lib/navigation'
 import { getRepoDisplayName } from '@/lib/utils'
 import { showToast } from '@/lib/toast'
 import { useMarkScheduleRunViewed } from '@/hooks/useSchedules'
@@ -17,20 +17,22 @@ import { Loader2 } from 'lucide-react'
 import type { ScheduleRun } from '@opencode-manager/shared/types'
 
 interface RunDetailPanelProps {
-  repoId: number
+  repoId: number | null
+  serverId?: string
   activeRun: ScheduleRun | null
   selectedRunLoading: boolean
   onCancelRun: () => void
   cancelRunPending: boolean
 }
 
-export function RunDetailPanel({ repoId, activeRun, selectedRunLoading, onCancelRun, cancelRunPending }: RunDetailPanelProps) {
+export function RunDetailPanel({ repoId, serverId, activeRun, selectedRunLoading, onCancelRun, cancelRunPending }: RunDetailPanelProps) {
   const navigate = useNavigate()
   const [selectedFilePath, setSelectedFilePath] = useState<string | null>(null)
   const [openingSession, setOpeningSession] = useState(false)
   const { data: repo, isPending: repoPending, isError: repoError, refetch: refetchRepo } = useQuery({
     queryKey: ['repo', repoId],
-    queryFn: () => getRepo(repoId),
+    queryFn: () => getRepo(repoId!),
+    enabled: repoId !== null,
   })
   const markRunViewed = useMarkScheduleRunViewed()
   const viewedRunIdRef = useRef<number | null>(null)
@@ -74,6 +76,10 @@ export function RunDetailPanel({ repoId, activeRun, selectedRunLoading, onCancel
   const opensNewRepoSession = Boolean(activeRun.runBranch) && !activeRun.worktreePath && activeRun.status !== 'running'
 
   const handleOpenSession = async () => {
+    if (repoId === null) {
+      if (sessionId && serverId) navigate(getServerSessionPath(serverId, sessionId))
+      return
+    }
     if (!opensNewRepoSession) {
       if (sessionId) navigate(getSessionPath(repoId, sessionId))
       return
@@ -130,10 +136,10 @@ export function RunDetailPanel({ repoId, activeRun, selectedRunLoading, onCancel
             <div className="flex items-center justify-center p-4"><Loader2 className="h-6 w-6 animate-spin text-muted-foreground" /></div>
           ) : activeRun.responseText ? (
             <>
-              {repoPending && (
+              {repoId !== null && repoPending && (
                 <div role="status" className="px-3 pt-2 text-xs text-muted-foreground">Loading repository details for local links.</div>
               )}
-              {repoError && (
+              {repoId !== null && repoError && (
                 <div role="alert" className="flex items-center gap-2 px-3 pt-2 text-xs text-destructive">
                   <span>Could not load repository details for local links.</span>
                   <Button variant="outline" size="sm" onClick={() => { void refetchRepo() }}>Retry</Button>
@@ -160,7 +166,7 @@ export function RunDetailPanel({ repoId, activeRun, selectedRunLoading, onCancel
         onClose={() => setSelectedFilePath(null)}
         basePath={repo?.localPath}
         repoName={repo ? getRepoDisplayName(repo) : undefined}
-        repoId={repoId}
+        repoId={repoId ?? undefined}
         initialSelectedFile={selectedFilePath ?? undefined}
       />
     </>

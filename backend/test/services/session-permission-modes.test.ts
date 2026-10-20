@@ -3,7 +3,7 @@ import { Database } from 'bun:sqlite'
 import { migrate } from '../../src/db/migration-runner'
 import { allMigrations } from '../../src/db/migrations'
 import { createRepo } from '../../src/db/queries'
-import { createScheduleRun, updateScheduleRunMetadata } from '../../src/db/schedules'
+import { createScheduleRun, getScheduleRunBySessionId, updateScheduleRunMetadata } from '../../src/db/schedules'
 import { getSessionPermissionMode, setSessionPermissionMode } from '../../src/db/session-permission-modes'
 import { SettingsService } from '../../src/services/settings'
 import { SessionPermissionModeService } from '../../src/services/session-permission-modes'
@@ -40,6 +40,21 @@ function createPermissionModeService(
   settingsService: SettingsService,
 ): SessionPermissionModeService {
   return new SessionPermissionModeService(db, client, settingsService, new SessionAncestry(client))
+}
+
+function createMultiServerService(
+  db: Database,
+  clients: { local: OpenCodeClient } & Record<string, OpenCodeClient>,
+  settingsService: SettingsService,
+): SessionPermissionModeService {
+  const local = clients.local
+  const resolve = (serverId: string) => (serverId === 'local' ? local : clients[serverId] ?? local)
+  return new SessionPermissionModeService(
+    db,
+    { getClient: resolve },
+    settingsService,
+    new SessionAncestry(resolve),
+  )
 }
 
 function permissionAskedEvent(sessionID: string, id: string): SSEEvent {
@@ -554,5 +569,168 @@ describe('SessionPermissionModeService', () => {
     await service.setMode('ses_root', 'ask', DIRECTORY)
 
     expect(client.replyPermission).not.toHaveBeenCalled()
+  })
+
+  describe('remote servers', () => {
+    it('scopes stored modes by server', async () => {
+      setSessionPermissionMode(db, 'ses_remote', 'auto', 'srv_remote')
+      const local = createFakeSessionPermissionClient({ parents: { ses_remote: null } })
+      const remote = createFakeSessionPermissionClient({ parents: { ses_remote: null } })
+      const service = createMultiServerService(db, { local, srv_remote: remote }, new SettingsService(db))
+
+      await expect(service.getEffectiveMode('ses_remote')).resolves.toMatchObject({ mode: 'ask' })
+      await expect(service.getEffectiveMode('ses_remote', 'srv_remote')).resolves.toMatchObject({ mode: 'auto' })
+
+      await service.setMode('ses_remote', 'auto', DIRECTORY, 'srv_remote')
+
+      expect(getSessionPermissionMode(db, 'ses_remote')).toBeNull()
+      expect(getSessionPermissionMode(db, 'ses_remote', 'srv_remote')).toBe('auto')
+      expect(remote.replyPermission).not.toHaveBeenCalled()
+    })
+
+    it('auto-accepts a remote permission request through the remote client', async () => {
+      setSessionPermissionMode(db, 'ses_root', 'auto', 'srv_remote')
+      const local = createFakeSessionPermissionClient({ parents: { ses_root: null } })
+      const remote = createFakeSessionPermissionClient({ parents: { ses_root: null } })
+      const service = createMultiServerService(db, { local, srv_remote: remote }, new SettingsService(db))
+
+      await service.handleEvent(DIRECTORY, permissionAskedEvent('ses_root', 'perm-remote'), 'srv_remote')
+
+      expect(remote.replyPermission).toHaveBeenCalledTimes(1)
+      expect(remote.replyPermission).toHaveBeenCalledWith({
+        sessionID: 'ses_root',
+        requestID: 'perm-remote',
+        decision: 'once',
+      })
+      expect(local.replyPermission).not.toHaveBeenCalled()
+    })
+
+    it('resolves remote session parents through the remote client', async () => {
+      setSessionPermissionMode(db, 'ses_root', 'auto', 'srv_remote')
+      const local = createFakeSessionPermissionClient()
+      const remote = createFakeSessionPermissionClient({ parents: { ses_child: 'ses_root', ses_root: null } })
+      const service = createMultiServerService(db, { local, srv_remote: remote }, new SettingsService(db))
+
+      await service.handleEvent(DIRECTORY, permissionAskedEvent('ses_child', 'perm-child'), 'srv_remote')
+
+      expect(remote.replyPermission).toHaveBeenCalledWith({
+        sessionID: 'ses_child',
+        requestID: 'perm-child',
+        decision: 'once',
+      })
+    })
+
+    it('accepts pending requests for active sessions on the remote server', async () => {
+      setSessionPermissionMode(db, 'ses_remote', 'auto', 'srv_remote')
+      const local = createFakeSessionPermissionClient()
+      const remote = createFakeSessionPermissionClient({
+        parents: { ses_remote: null },
+        directories: { ses_remote: DIRECTORY },
+        activeSessions: ['ses_remote'],
+        pendingRequests: { [DIRECTORY]: [{ id: 'perm-remote', sessionID: 'ses_remote' }] },
+      })
+      const service = createMultiServerService(db, { local, srv_remote: remote }, new SettingsService(db))
+
+      await service.acceptPendingRequestsForActiveSessions('srv_remote')
+
+      expect(remote.replyPermission).toHaveBeenCalledWith({
+        sessionID: 'ses_remote',
+        requestID: 'perm-remote',
+        decision: 'once',
+      })
+      expect(local.replyPermission).not.toHaveBeenCalled()
+    })
+
+    it('reports schedule locks only for the local server', async () => {
+      createRepo(db, {
+        localPath: 'repo-one',
+        sourcePath: '/abs/repo',
+        defaultBranch: 'main',
+        cloneStatus: 'ready',
+        clonedAt: Date.now(),
+        isLocal: true,
+      })
+      const run = createScheduleRun(db, {
+        jobId: 1,
+        repoId: 1,
+        triggerSource: 'schedule',
+        status: 'running',
+        startedAt: Date.now(),
+        createdAt: Date.now(),
+      })
+      updateScheduleRunMetadata(db, 1, 1, run.id, { sessionId: 'ses_scheduled' })
+
+      const local = createFakeSessionPermissionClient({ parents: { ses_scheduled: null } })
+      const remote = createFakeSessionPermissionClient({ parents: { ses_scheduled: null } })
+      const service = createMultiServerService(db, { local, srv_remote: remote }, new SettingsService(db))
+
+      await expect(service.getEffectiveMode('ses_scheduled')).resolves.toMatchObject({ lockedReason: 'schedule' })
+      await expect(service.getEffectiveMode('ses_scheduled', 'srv_remote')).resolves.toMatchObject({
+        lockedReason: null,
+      })
+    })
+
+    it('reports the schedule lock for a remote scheduled session even with a stored auto mode', async () => {
+      const run = createScheduleRun(db, {
+        jobId: 1,
+        repoId: null,
+        serverId: 'srv_remote',
+        triggerSource: 'schedule',
+        status: 'running',
+        startedAt: Date.now(),
+        createdAt: Date.now(),
+      })
+      updateScheduleRunMetadata(db, null, 1, run.id, { sessionId: 'ses_scheduled' })
+      setSessionPermissionMode(db, 'ses_scheduled', 'auto', 'srv_remote')
+
+      const local = createFakeSessionPermissionClient({ parents: { ses_scheduled: null } })
+      const remote = createFakeSessionPermissionClient({ parents: { ses_scheduled: null } })
+      const service = createMultiServerService(db, { local, srv_remote: remote }, new SettingsService(db))
+
+      await expect(service.getEffectiveMode('ses_scheduled', 'srv_remote')).resolves.toEqual({
+        sessionId: 'ses_scheduled',
+        rootSessionId: 'ses_scheduled',
+        mode: 'ask',
+        lockedReason: 'schedule',
+      })
+      await expect(service.setMode('ses_scheduled', 'auto', DIRECTORY, 'srv_remote')).rejects.toMatchObject({ status: 409 })
+    })
+
+    it('does not lock a local session that matches only a remote schedule run', async () => {
+      const run = createScheduleRun(db, {
+        jobId: 1,
+        repoId: null,
+        serverId: 'srv_remote',
+        triggerSource: 'schedule',
+        status: 'running',
+        startedAt: Date.now(),
+        createdAt: Date.now(),
+      })
+      updateScheduleRunMetadata(db, null, 1, run.id, { sessionId: 'ses_scheduled' })
+
+      expect(getScheduleRunBySessionId(db, 'ses_scheduled')).toBeNull()
+
+      const local = createFakeSessionPermissionClient({ parents: { ses_scheduled: null } })
+      const service = createMultiServerService(db, { local, srv_remote: createFakeSessionPermissionClient() }, new SettingsService(db))
+
+      await expect(service.getEffectiveMode('ses_scheduled')).resolves.toEqual({
+        sessionId: 'ses_scheduled',
+        rootSessionId: 'ses_scheduled',
+        mode: 'ask',
+        lockedReason: null,
+      })
+    })
+
+    it('suppresses permission notifications for remote auto sessions', async () => {
+      setSessionPermissionMode(db, 'ses_root', 'auto', 'srv_remote')
+      const local = createFakeSessionPermissionClient()
+      const remote = createFakeSessionPermissionClient({ parents: { ses_root: null } })
+      const service = createMultiServerService(db, { local, srv_remote: remote }, new SettingsService(db))
+      const event = permissionAskedEvent('ses_root', 'perm-remote')
+
+      await expect(service.suppressesPermissionNotification(event, 'ses_root', 'srv_remote')).resolves.toBe(true)
+      await expect(service.suppressesPermissionNotification(event, 'ses_root')).resolves.toBe(false)
+      await expect(service.suppressesPermissionNotification(event, undefined, 'srv_remote')).resolves.toBe(false)
+    })
   })
 })

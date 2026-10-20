@@ -1,16 +1,16 @@
-import { useCallback } from 'react'
+import { useCallback, useMemo } from 'react'
 import { useQuery } from '@tanstack/react-query'
 import { listCommands } from '@/api/opencode'
+import { isLocalOpenCodeServer, useOpenCodeServerId } from '@/contexts/OpenCodeServerContext'
+import { serverScopedKey } from '@/lib/serverScope'
 import type { CommandInfo } from '@opencode-manager/shared/opencode'
-import { BUILTIN_COMMANDS } from '@/lib/builtinCommands'
+import { getBuiltinCommands } from '@/lib/builtinCommands'
 import { rankByMatch } from '@/lib/fuzzyMatch'
 import { useRecentCommandsStore } from '@/stores/recentCommandsStore'
 
 function sortCommandsByName(commands: CommandInfo[]): CommandInfo[] {
   return [...commands].sort((a, b) => a.name.localeCompare(b.name))
 }
-
-const SORTED_BUILTIN_COMMANDS = sortCommandsByName([...BUILTIN_COMMANDS])
 
 interface UseCommandsOptions {
   directory?: string
@@ -19,20 +19,27 @@ interface UseCommandsOptions {
 
 export function useCommands(options: UseCommandsOptions = {}) {
   const { directory, enabled = true } = options
+  const serverId = useOpenCodeServerId()
   const recentNames = useRecentCommandsStore((state) => state.names)
 
+  const builtinCommands = useMemo(
+    () => getBuiltinCommands(isLocalOpenCodeServer(serverId)),
+    [serverId],
+  )
+  const sortedBuiltinCommands = useMemo(() => sortCommandsByName([...builtinCommands]), [builtinCommands])
+
   const { data: commands, isLoading: loading, error } = useQuery({
-    queryKey: ['opencode', 'commands', directory ?? null],
+    queryKey: serverScopedKey(['opencode', 'commands', directory ?? null], serverId),
     queryFn: async () => {
-      const loaded = await listCommands(directory)
-      const allCommands = [...loaded, ...BUILTIN_COMMANDS]
+      const loaded = await listCommands(directory, serverId)
+      const allCommands = [...loaded, ...builtinCommands]
       const uniqueCommands = allCommands.filter((command, index, self) =>
         index === self.findIndex((c) => c.name === command.name)
       )
       return sortCommandsByName(uniqueCommands)
     },
     enabled,
-    initialData: SORTED_BUILTIN_COMMANDS,
+    initialData: sortedBuiltinCommands,
     initialDataUpdatedAt: 0,
   })
 

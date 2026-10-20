@@ -4,6 +4,7 @@ import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
 import { MemoryRouter } from 'react-router-dom'
 import { MessagePart } from './MessagePart'
 import { getFileApiUrl } from '@/api/files'
+import { OpenCodeServerProvider } from '@/contexts/OpenCodeServerContext'
 import { applySessionEvent, emptySessionTranscript } from '@/lib/session-projection'
 import { promptSequence } from '@/test/fixtures/session-projection'
 import type {
@@ -509,6 +510,36 @@ describe('MessagePart', () => {
   })
 
   describe('file tools', () => {
+    it('renders a linked-server file name as plain text', () => {
+      const onFileClick = vi.fn()
+      const queryClient = new QueryClient()
+      render(
+        <QueryClientProvider client={queryClient}>
+          <MemoryRouter>
+            <OpenCodeServerProvider serverId="srv_kitchen">
+              <MessagePart
+                part={toolPart('read', {
+                  status: 'completed',
+                  input: { path: '/srv/app/src/a.ts' },
+                  content: [{ type: 'text', text: 'file contents' }],
+                  metadata: {},
+                })}
+                onFileClick={onFileClick}
+              />
+            </OpenCodeServerProvider>
+          </MemoryRouter>
+        </QueryClientProvider>,
+      )
+
+      const fileName = screen.getByText('/srv/app/src/a.ts')
+      expect(fileName.className).not.toContain('cursor-pointer')
+      expect(fileName.className).not.toContain('text-primary')
+
+      fireEvent.click(fileName)
+
+      expect(onFileClick).not.toHaveBeenCalled()
+    })
+
     it('renders an edit tool diff', () => {
       renderWithProviders(
         <MessagePart

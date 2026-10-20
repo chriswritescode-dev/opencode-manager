@@ -15,7 +15,7 @@ import { createTTSRoutes, cleanupExpiredCache } from './routes/tts';
 import { createSTTRoutes } from './routes/stt'
 import { createFileRoutes } from './routes/files'
 import { createFilesystemRoutes } from './routes/filesystem'
-import { createScheduleRoutes } from './routes/schedules'
+import { createScheduleRoutes, createServerScheduleRoutes } from './routes/schedules'
 
 async function getAppVersion(): Promise<string> {
   try {
@@ -51,7 +51,14 @@ import { createInternalRoutes } from './routes/internal'
 import { sweepStaleUploadSessions } from './routes/internal/repo-mirror-helpers'
 import { createOpenCodeProxyRoutes } from './routes/opencode-proxy'
 import { createAuthenticatedOpenCodeProxyRoutes } from './routes/opencode-auth-proxy'
+import { createOpenCodeServerProxyRoutes } from './routes/opencode-server-proxy'
+import { createOpenCodeServerRoutes } from './routes/opencode-servers'
+import {
+  createOpenCodeServerTerminalRoutes,
+  createOpenCodeServerTerminalSocketRoutes,
+} from './routes/opencode-server-terminals'
 import { sseAggregator } from './services/sse-aggregator'
+import { RemoteServerEventHub } from './services/remote-server-events'
 import { ensureDirectoryExists, writeFileContent, fileExists } from './services/file-operations'
 import { SettingsService } from './services/settings'
 import { SessionPermissionModeService } from './services/session-permission-modes'
@@ -62,6 +69,7 @@ import { MultiRunService } from './services/multi-runs'
 import { ChangeWalkthroughService } from './services/change-walkthroughs'
 import { opencodeServerManager } from './services/opencode-single-server'
 import { createOpenCodeClient } from './services/opencode/client'
+import { OpenCodeServerRegistry } from './services/opencode-server-registry'
 import { getOpenCodeUpstreamBaseUrl } from './services/opencode/upstream'
 import { NotificationService } from './services/notification'
 import { ScheduleRunner, ScheduleService } from './services/schedules'
@@ -89,7 +97,7 @@ import {
   getTrustedOrigins,
   ENV
 } from '@opencode-manager/shared/config/env'
-import { NotificationEventType } from '@opencode-manager/shared/schemas'
+import { LOCAL_OPENCODE_SERVER_ID, NotificationEventType } from '@opencode-manager/shared/schemas'
 
 
 const { PORT, HOST } = ENV.SERVER
@@ -127,6 +135,7 @@ const openCodeClient = createOpenCodeClient(
   () => new SettingsService(db).getOpenCodeServerPassword(),
   () => opencodeServerManager.getEffectiveServerHost(),
 )
+export const opencodeServerRegistry = new OpenCodeServerRegistry(db, openCodeClient)
 
 import { DEFAULT_AGENTS_MD } from './constants'
 
@@ -245,14 +254,25 @@ try {
 }
 
 const terminalService = new TerminalService(
-  openCodeClient,
+  {
+    client: openCodeClient,
+    baseUrl: () => getOpenCodeUpstreamBaseUrl(opencodeServerManager.getEffectiveServerHost()),
+    includeLocalCredentials: true,
+  },
   new CredentialProvider(db),
-  () => getOpenCodeUpstreamBaseUrl(opencodeServerManager.getEffectiveServerHost()),
 )
+const resolveServerTerminalService = (serverId: string): TerminalService => {
+  const connection = opencodeServerRegistry.getConnection(serverId)
+  return terminalService.forTarget({
+    client: opencodeServerRegistry.getClient(serverId),
+    baseUrl: () => connection.baseUrl,
+    includeLocalCredentials: false,
+  })
+}
 const gitService = createGitService(gitAuthService)
 const projectConfigService = new ProjectConfigService(db, gitService, gitAuthService)
 const scheduleWorktreeManager = new ScheduleWorktreeManager(gitAuthService, db)
-const scheduleService = new ScheduleService(db, openCodeClient, scheduleWorktreeManager)
+const scheduleService = new ScheduleService(db, openCodeClient, scheduleWorktreeManager, opencodeServerRegistry)
 scheduleService.setWorktreeRemovedHandler(async (directory) => {
   try {
     await terminalService.removeAll(directory)
@@ -263,36 +283,30 @@ scheduleService.setWorktreeRemovedHandler(async (directory) => {
 const repoWorkspaces = new RepoWorkspaceService(db, openCodeClient, gitAuthService, projectConfigService, terminalService, scheduleService)
 const scheduleRunnerInstance = new ScheduleRunner(scheduleService)
 
-const notificationService = new NotificationService(db)
+const notificationService = new NotificationService(db, opencodeServerRegistry)
 const sessionSettingsService = new SettingsService(db)
-const sessionAncestry = new SessionAncestry(openCodeClient)
-const sessionPermissionModeService = new SessionPermissionModeService(db, openCodeClient, sessionSettingsService, sessionAncestry)
+const sessionAncestry = new SessionAncestry((serverId) => opencodeServerRegistry.getClient(serverId))
+const sessionPermissionModeService = new SessionPermissionModeService(db, opencodeServerRegistry, sessionSettingsService, sessionAncestry)
 const sessionSandboxService = new SessionSandboxService(db, sessionAncestry, sessionSettingsService, {
   removeSessionSandbox: (rootSessionId) => new SandboxRuntimeService(db).removeSessionSandbox(rootSessionId),
 })
-const sessionGoalService = new SessionGoalService(db, openCodeClient, sessionSettingsService, {
+const sessionGoalService = new SessionGoalService(db, opencodeServerRegistry, sessionSettingsService, {
   onOutcome: (goal) => {
     void notificationService.notifyGoalOutcome(goal).catch((error) => {
       logger.error('Goal outcome notification error:', error)
     })
   },
-  resolveSessionLock: async (sessionId) =>
-    (await sessionPermissionModeService.getEffectiveMode(sessionId)).lockedReason,
+  resolveSessionLock: async (sessionId, serverId) =>
+    (await sessionPermissionModeService.getEffectiveMode(sessionId, serverId)).lockedReason,
 })
 sessionGoalService.loadOpenGoals()
 
-const multiRunService = new MultiRunService(db, openCodeClient, repoWorkspaces, sessionPermissionModeService)
+const multiRunService = new MultiRunService(db, openCodeClient, repoWorkspaces, sessionPermissionModeService, (serverId) => opencodeServerRegistry.getClient(serverId))
 const changeWalkthroughService = new ChangeWalkthroughService(db, openCodeClient, sessionSettingsService, gitAuthService, gitService)
 
 sseAggregator.onEvent((directory, event) => {
-  sessionPermissionModeService.handleEvent(directory, event).catch((err) => {
-    logger.error('Session permission mode event handling error:', err)
-  })
   sessionSandboxService.handleEvent(directory, event).catch((err) => {
     logger.error('Session sandbox event handling error:', err)
-  })
-  sessionGoalService.handleEvent(directory, event).catch((err) => {
-    logger.error('Session goal event handling error:', err)
   })
   try {
     changeWalkthroughService.handleEvent(event)
@@ -301,12 +315,21 @@ sseAggregator.onEvent((directory, event) => {
   }
 })
 
-notificationService.addEventSuppressor(async (event, sessionId) => {
-  if (event.type !== 'permission.asked' || !sessionId) return false
-  return (await sessionPermissionModeService.getEffectiveMode(sessionId)).mode === 'auto'
+sseAggregator.onServerEvent((serverId, directory, event) => {
+  sessionPermissionModeService.handleEvent(directory, event, serverId).catch((err) => {
+    logger.error('Session permission mode event handling error:', err)
+  })
+  sessionGoalService.handleEvent(directory, event, serverId).catch((err) => {
+    logger.error('Session goal event handling error:', err)
+  })
 })
 
-notificationService.addEventSuppressor(async (event, sessionId) => {
+notificationService.addEventSuppressor((event, sessionId, serverId) =>
+  sessionPermissionModeService.suppressesPermissionNotification(event, sessionId, serverId),
+)
+
+notificationService.addEventSuppressor(async (event, sessionId, serverId) => {
+  if (serverId !== LOCAL_OPENCODE_SERVER_ID) return false
   if (!sessionId) return false
   if (event.type !== NotificationEventType.SESSION_IDLE && event.type !== NotificationEventType.SESSION_FAILED) return false
   return getChangeWalkthroughByWalkthroughSession(db, sessionId) !== null
@@ -324,8 +347,8 @@ if (ENV.VAPID.PUBLIC_KEY && ENV.VAPID.PRIVATE_KEY) {
     privateKey: ENV.VAPID.PRIVATE_KEY,
     subject: ENV.VAPID.SUBJECT || 'mailto:push@localhost',
   })
-  sseAggregator.onEvent((directory, event) => {
-    notificationService.handleSSEEvent(directory, event).catch((err) => {
+  sseAggregator.onServerEvent((serverId, directory, event) => {
+    notificationService.handleSSEEvent(directory, event, serverId).catch((err) => {
       logger.error('Push notification dispatch error:', err)
     })
   })
@@ -333,12 +356,15 @@ if (ENV.VAPID.PUBLIC_KEY && ENV.VAPID.PRIVATE_KEY) {
 
 sseAggregator.setPendingActionsFetcher(openCodeClient)
 sseAggregator.setPasswordResolver(() => new SettingsService(db).getOpenCodeServerPassword())
-sseAggregator.onUpstreamConnected(() => {
-  void sessionPermissionModeService.acceptPendingRequestsForActiveSessions().catch((err) => {
-    logger.error('Failed to accept pending permission requests for active sessions:', err)
+sseAggregator.onServerConnected((serverId) => {
+  void sessionPermissionModeService.acceptPendingRequestsForActiveSessions(serverId).catch((err) => {
+    logger.error(`Failed to accept pending permission requests for server ${serverId}:`, err)
   })
 })
 sseAggregator.start()
+
+const remoteServerEvents = new RemoteServerEventHub(opencodeServerRegistry, sseAggregator)
+remoteServerEvents.start()
 
 void sessionGoalService.recoverOpenGoals().catch((error) => {
   logger.error('Session goal recovery error:', error)
@@ -379,6 +405,10 @@ protectedApi.route('/ssh', createSSHRoutes(gitAuthService))
 protectedApi.route('/notifications', createNotificationRoutes(notificationService))
 protectedApi.route('/prompt-templates', createPromptTemplateRoutes(db))
 protectedApi.route('/session-pins', createSessionPinRoutes(db))
+protectedApi.route('/opencode-servers/:serverId/schedules', createServerScheduleRoutes(scheduleService))
+protectedApi.route('/opencode-servers', createOpenCodeServerTerminalSocketRoutes(resolveServerTerminalService, upgradeWebSocket))
+protectedApi.route('/opencode-servers', createOpenCodeServerTerminalRoutes(resolveServerTerminalService))
+protectedApi.route('/opencode-servers', createOpenCodeServerRoutes(opencodeServerRegistry, () => remoteServerEvents.getStatuses()))
 protectedApi.route('/session-permission-modes', createSessionPermissionModeRoutes(sessionPermissionModeService))
 protectedApi.route('/session-sandbox', createSessionSandboxRoutes(sessionSandboxService))
 protectedApi.route('/session-goals', createSessionGoalRoutes(sessionGoalService))
@@ -390,6 +420,7 @@ protectedApi.route('/preview', createPreviewRoutes({ store: previewSessionStore,
 
 app.route('/api', protectedApi)
 
+app.route('/api/opencode/servers', createOpenCodeServerProxyRoutes(opencodeServerRegistry, requireAuth))
 app.route('/api/opencode', createAuthenticatedOpenCodeProxyRoutes(openCodeClient, requireAuth))
 
 const isProduction = ENV.SERVER.NODE_ENV === 'production'
@@ -468,6 +499,8 @@ const shutdown = async (signal: string) => {
 
   logger.info(`${signal} received, shutting down gracefully...`)
   try {
+    remoteServerEvents.shutdown()
+    logger.info('Remote server event hub stopped')
     sseAggregator.shutdown()
     logger.info('SSE Aggregator stopped')
     if (ipcServer) {

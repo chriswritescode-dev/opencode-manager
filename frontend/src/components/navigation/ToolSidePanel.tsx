@@ -4,6 +4,7 @@ import { X } from 'lucide-react'
 import { useLocation, useNavigate } from 'react-router-dom'
 import { FileBrowser } from '@/components/file-browser/FileBrowser'
 import { SourceControlContent } from '@/components/source-control'
+import { RemoteSourceControlContent } from '@/components/source-control/RemoteSourceControlContent'
 import { TerminalWorkspace } from '@/components/terminal/TerminalPanel'
 import {
   ChangesWalkthroughCancel,
@@ -26,15 +27,19 @@ import { useOpenNavItem } from '@/hooks/useOpenNavItem'
 import { ActivityList } from '@/components/activity/ActivityList'
 import { ActivityCountPill } from '@/components/activity/ActivityCountPill'
 import { withQueryParam } from '@/lib/navigation'
+import type { TerminalTarget } from '@/lib/terminal-target'
 import { useActiveWorkCounts, useActivityWindowMinutes } from '@/hooks/useActiveWork'
 import { formatActivityWindow } from '@/lib/activeWork'
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from '@/components/ui/tooltip'
 import { restoreOverlayFocus } from '@/lib/overlayFocus'
 import { cn } from '@/lib/utils'
+import { isLocalOpenCodeServer, useRouteOpenCodeServerId } from '@/contexts/OpenCodeServerContext'
 
 const PANEL_WIDTH_CLASSES: Partial<Record<PanelTool, string>> = {
   activity: 'w-80',
 }
+
+const REMOTE_TOOL_KEYS: ReadonlySet<string> = new Set(['activity', 'mcp', 'skills', 'source-control', 'terminal'])
 
 function ActivityWindowLabel() {
   const minutes = useActivityWindowMinutes()
@@ -84,6 +89,7 @@ interface ToolSidePanelProps {
   sessionId?: string
   directory?: string
   terminalDirectory?: string
+  terminalTarget?: TerminalTarget
   repoDirectory?: string
   currentBranch?: string
   selectedFilePath?: string
@@ -146,6 +152,7 @@ export function ToolSidePanel({
   sessionId,
   directory,
   terminalDirectory,
+  terminalTarget,
   repoDirectory,
   currentBranch = 'main',
   selectedFilePath,
@@ -157,6 +164,8 @@ export function ToolSidePanel({
   const { activeTool, toggleTool, closePanel } = panel
   const location = useLocation()
   const openNavItem = useOpenNavItem()
+  const routeServerId = useRouteOpenCodeServerId()
+  const isRemoteRoute = !isLocalOpenCodeServer(routeServerId)
   const railRef = useRef<HTMLElement>(null)
   const previousActiveToolRef = useRef(activeTool)
 
@@ -172,7 +181,10 @@ export function ToolSidePanel({
 
   const panelTools: Array<{ item: MoreDrawerItem; tool: PanelTool }> = []
   const actionItems: MoreDrawerItem[] = []
+  const terminalWorkspaceTarget: TerminalTarget | undefined =
+    terminalTarget ?? (repoId === undefined ? undefined : { kind: 'repo', repoId })
   for (const item of buildToolItems(location.pathname)) {
+    if (isRemoteRoute && !REMOTE_TOOL_KEYS.has(item.key)) continue
     const tool = toolKeyOf(item)
     if (isPanelTool(tool)) panelTools.push({ item, tool })
     else actionItems.push(item)
@@ -197,27 +209,39 @@ export function ToolSidePanel({
     if (tool === 'mcp') return repoDirectory ? <RepoMcpContent open directory={repoDirectory} /> : null
     if (tool === 'walkthrough') return sessionId ? <ChangesWalkthroughView /> : null
     if (tool === 'activity') return <ActivityPanelBody />
+    if (tool === 'terminal') {
+      return terminalWorkspaceTarget
+        ? <TerminalWorkspace target={terminalWorkspaceTarget} directory={terminalDirectory ?? directory} isOpen onLastTerminalExited={closePanel} />
+        : null
+    }
+    if (tool === 'skills') {
+      return sessionId ? (
+        <RepoSkillsContent
+          open
+          repoId={repoId}
+          sessionId={sessionId}
+          directory={repoDirectory}
+          onSkillLoaded={onSkillLoaded}
+          onDone={closePanel}
+        />
+      ) : (
+        <RepoSkillsContent open repoId={repoId} directory={repoDirectory} onDone={closePanel} />
+      )
+    }
+    if (tool === 'sourceControl') {
+      if (isRemoteRoute) {
+        return repoDirectory
+          ? <RemoteSourceControlContent serverId={routeServerId} directory={repoDirectory} compact />
+          : null
+      }
+      return repoId === undefined
+        ? null
+        : <SourceControlContent repoId={repoId} isOpen currentBranch={currentBranch} compact />
+    }
     if (repoId === undefined) return null
     switch (tool) {
-      case 'sourceControl':
-        return <SourceControlContent repoId={repoId} isOpen currentBranch={currentBranch} compact />
-      case 'terminal':
-        return <TerminalWorkspace repoId={repoId} directory={terminalDirectory ?? directory} isOpen />
       case 'actions':
         return <RepoActionsContent repoId={repoId} directory={directory} open />
-      case 'skills':
-        return sessionId ? (
-          <RepoSkillsContent
-            open
-            repoId={repoId}
-            sessionId={sessionId}
-            directory={repoDirectory}
-            onSkillLoaded={onSkillLoaded}
-            onDone={closePanel}
-          />
-        ) : (
-          <RepoSkillsContent open repoId={repoId} onDone={closePanel} />
-        )
       case 'schedules':
         return <RepoSchedulesContent repoId={repoId} embedded />
     }

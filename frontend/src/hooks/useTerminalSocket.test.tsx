@@ -57,7 +57,7 @@ function metaFrame(cursor: number): ArrayBuffer {
 function renderSocket(overrides: Partial<Parameters<typeof useTerminalSocket>[0]> = {}) {
   return renderHook(() =>
     useTerminalSocket({
-      repoId: 1,
+      target: { kind: 'repo', repoId: 1 },
       directory: '/work/repo',
       ptyID: 'pty-1',
       onOutput: vi.fn(),
@@ -84,6 +84,13 @@ describe('useTerminalSocket', () => {
     renderSocket()
     const url = new URL(FakeWebSocket.instances[0].url)
     expect(url.pathname).toBe('/api/repos/1/terminals/pty-1/connect')
+    expect(url.searchParams.get('directory')).toBe('/work/repo')
+  })
+
+  it('builds the connection url for a linked server target', () => {
+    renderSocket({ target: { kind: 'server', serverId: 'srv_kitchen' } })
+    const url = new URL(FakeWebSocket.instances[0].url)
+    expect(url.pathname).toBe('/api/opencode-servers/srv_kitchen/terminals/pty-1/connect')
     expect(url.searchParams.get('directory')).toBe('/work/repo')
   })
 

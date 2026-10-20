@@ -45,9 +45,12 @@ function createRepo(id: number, name: string): Repo {
 function createItem(
   overrides: Partial<ActiveWorkItem> & Pick<ActiveWorkItem, 'state' | 'session' | 'repo'>,
 ): ActiveWorkItem {
+  const repoId = overrides.repo?.id ?? 0
   return {
-    key: `${overrides.repo.id}:${overrides.session.id}`,
-    path: `/repos/${overrides.repo.id}/sessions/${overrides.session.id}`,
+    key: `${repoId}:${overrides.session.id}`,
+    serverId: null,
+    serverName: null,
+    path: `/repos/${repoId}/sessions/${overrides.session.id}`,
     updatedAt: overrides.session.time.updated,
     ...overrides,
   }
@@ -173,6 +176,24 @@ describe('ActivityList', () => {
 
     expect(screen.getByRole('button', { name: /Open session/ })).toHaveAttribute('aria-current', 'true')
     expect(screen.getByRole('button', { name: /Other session/ })).not.toHaveAttribute('aria-current')
+  })
+
+  it('labels a remote row with its server name and marks it current on its server route', () => {
+    const item = createItem({
+      state: 'needs-input',
+      session: createSession('s1', 'Remote session'),
+      repo: null,
+      serverId: 'srv_kitchen',
+      serverName: 'Kitchen',
+      path: '/servers/srv_kitchen/sessions/s1',
+    })
+    setGroups({ needsInput: [item] })
+
+    renderList(vi.fn(), '/servers/srv_kitchen/sessions/s1')
+
+    const row = screen.getByRole('button', { name: /Remote session/ })
+    expect(row).toHaveTextContent('Kitchen')
+    expect(row).toHaveAttribute('aria-current', 'true')
   })
 
   it('shows a loading state', () => {

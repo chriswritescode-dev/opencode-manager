@@ -11,11 +11,12 @@ import { SideDrawer, SideDrawerContent } from '@/components/ui/side-drawer'
 import { CompactActivityList } from '@/components/activity/CompactActivityList'
 import { ScheduleReportsList } from '@/components/notifications/ScheduleReportsBell'
 import { useMarkAllScheduleRunsViewed, useUnreadScheduleRuns } from '@/hooks/useSchedules'
-import { buildMoreItems, buildNavModel, isSessionDetailPath, type MoreDrawerItem } from './moreDrawerItems'
+import { buildMoreItems, buildNavModel, isManagerOnlyNavItem, isSessionDetailPath, type MoreDrawerItem } from './moreDrawerItems'
 import { useSwipeBack } from '@/hooks/useMobile'
 import { cn, getRepoDisplayName } from '@/lib/utils'
-import { getPathWithReturnTo, isAssistantPath } from '@/lib/navigation'
+import { getPathWithReturnTo, isAssistantPath, parseServerSessionRoute } from '@/lib/navigation'
 import { useMobileTabBar } from '@/hooks/useMobileTabBar'
+import { isLocalOpenCodeServer, useRouteOpenCodeServerId } from '@/contexts/OpenCodeServerContext'
 
 interface MoreDrawerProps {
   isOpen: boolean
@@ -76,8 +77,10 @@ export function MoreDrawer({ isOpen, onClose }: MoreDrawerProps) {
   const { logout } = useAuth()
   const { data: health } = useServerHealth()
   const isSessionDetail = isSessionDetailPath(location.pathname)
+  const isRemoteSessionDetail = parseServerSessionRoute(location.pathname) !== null
   const isAssistantRoute = isAssistantPath(location.pathname)
   const isAssistantSession = isSessionDetail && searchParams.get('assistant') === '1'
+  const isRemoteRoute = !isLocalOpenCodeServer(useRouteOpenCodeServerId())
   const { open: openMobileSheet } = useMobileTabBar()
   const { data: unreadReports } = useUnreadScheduleRuns()
   const markAllReportsViewed = useMarkAllScheduleRunsViewed()
@@ -141,11 +144,13 @@ export function MoreDrawer({ isOpen, onClose }: MoreDrawerProps) {
     }
   }
 
-  const items = buildMoreItems(location.pathname)
+  const items = buildMoreItems(location.pathname).filter(
+    (item) => !isRemoteRoute || !isManagerOnlyNavItem(item),
+  )
   const itemsInGroup = (keys: ReadonlySet<string>) => items.filter((item) => keys.has(item.key))
   const groupedKeys = new Set([...ACCOUNT_ITEM_KEYS, ...ITEM_GROUPS.flatMap(({ keys }) => [...keys])])
   const navigationItems = items.filter((item) => !groupedKeys.has(item.key))
-  const assistantCta = isSessionDetail && !isAssistantSession
+  const assistantCta = isSessionDetail && !isAssistantSession && !isRemoteRoute
     ? buildNavModel(location.pathname).primary.find((cta) => cta.key === 'assistant')
     : undefined
 
@@ -205,7 +210,7 @@ export function MoreDrawer({ isOpen, onClose }: MoreDrawerProps) {
             <CompactActivityList onNavigate={(path) => navigate(path)} />
           )}
           <MenuSection>
-            {isSessionDetail && (
+            {(isSessionDetail || isRemoteSessionDetail) && (
               <MenuRow icon={FolderGit2} label="Repos" onClick={() => openMobileSheet('repos')} trailing />
             )}
             {assistantCta?.to && (

@@ -67,3 +67,17 @@ export const BUILTIN_COMMANDS: readonly BuiltinCommand[] = [
 export function isBuiltinCommand(command: CommandInfo): command is BuiltinCommand {
   return 'action' in command
 }
+
+const MANAGER_ONLY_COMMAND_ACTIONS: ReadonlySet<BuiltinCommandAction> = new Set([
+  'showWalkthrough',
+])
+
+/**
+ * Built-in composer commands for a server scope. Commands backed by Manager-only features are omitted for
+ * linked OpenCode servers; MCP, skills, and the session picker stay because their views work against the
+ * linked server.
+ */
+export function getBuiltinCommands(isLocalServer: boolean): readonly BuiltinCommand[] {
+  if (isLocalServer) return BUILTIN_COMMANDS
+  return BUILTIN_COMMANDS.filter((command) => !MANAGER_ONLY_COMMAND_ACTIONS.has(command.action))
+}

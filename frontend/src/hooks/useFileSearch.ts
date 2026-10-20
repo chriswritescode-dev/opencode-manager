@@ -1,6 +1,8 @@
 import { useQuery } from '@tanstack/react-query'
 import { useDebouncedValue } from '@/hooks/useDebouncedValue'
 import { findFiles } from '@/api/opencode'
+import { useOpenCodeServerId } from '@/contexts/OpenCodeServerContext'
+import { serverScopedKey } from '@/lib/serverScope'
 
 export interface FileSearchResult {
   files: string[]
@@ -13,11 +15,12 @@ export function useFileSearch(
   enabled: boolean = true,
   directory?: string
 ): FileSearchResult {
+  const serverId = useOpenCodeServerId()
   const debouncedQuery = useDebouncedValue(query, 300)
 
   const { data, isLoading, error } = useQuery({
-    queryKey: ['file-search', debouncedQuery, directory],
-    queryFn: () => findFiles({ directory, query: debouncedQuery }),
+    queryKey: serverScopedKey(['file-search', debouncedQuery, directory], serverId),
+    queryFn: () => findFiles({ directory, query: debouncedQuery }, serverId),
     enabled: enabled && !!debouncedQuery,
     staleTime: 60000,
   })

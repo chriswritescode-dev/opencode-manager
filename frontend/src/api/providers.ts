@@ -59,11 +59,12 @@ function mapModelInfo(model: ModelInfo): Model {
   };
 }
 
-export async function getProviders(directory?: string): Promise<ProviderCatalog> {
+export async function getProviders(directory?: string, serverId?: string): Promise<ProviderCatalog> {
   try {
     const location = openCodeLocation(directory);
-    const [providerResult, modelResult] = await callOpenCode((api) =>
-      Promise.all([api.provider.list(location), api.model.list(location)]),
+    const [providerResult, modelResult] = await callOpenCode(
+      (api) => Promise.all([api.provider.list(location), api.model.list(location)]),
+      serverId,
     );
 
     const activeProviders = providerResult.data.filter(isActiveCatalogProvider);
@@ -100,9 +101,12 @@ export async function getProviders(directory?: string): Promise<ProviderCatalog>
   }
 }
 
-export async function getOpenCodeConfiguredModel(directory?: string): Promise<string | null> {
+export async function getOpenCodeConfiguredModel(
+  directory?: string,
+  serverId?: string,
+): Promise<string | null> {
   try {
-    const entries = await callOpenCode((api) => api.config.get(openCodeLocation(directory)));
+    const entries = await callOpenCode((api) => api.config.get(openCodeLocation(directory)), serverId);
     const ref = selectConfiguredModelRef(entries);
     return ref ? formatOpenCodeModelRef(ref) : null;
   } catch {
@@ -110,9 +114,12 @@ export async function getOpenCodeConfiguredModel(directory?: string): Promise<st
   }
 }
 
-export async function getOpenCodeServerDefaultModel(directory?: string): Promise<ModelRef | null> {
+export async function getOpenCodeServerDefaultModel(
+  directory?: string,
+  serverId?: string,
+): Promise<ModelRef | null> {
   try {
-    const result = await callOpenCode((api) => api.model.default(openCodeLocation(directory)));
+    const result = await callOpenCode((api) => api.model.default(openCodeLocation(directory)), serverId);
     const model = result.data;
     return model ? { providerID: model.providerID, id: model.id } : null;
   } catch {

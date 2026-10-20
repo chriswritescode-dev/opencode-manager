@@ -7,15 +7,18 @@ import type {
   LaunchMultiRunRequest,
   MultiRun,
   MultiRunFusion,
+  MultiRunTarget,
 } from '@opencode-manager/shared/schemas'
 
-function multiRunQueryKey(repoId: number) {
-  return ['multi-runs', repoId] as const
+function multiRunQueryKey(target: MultiRunTarget | undefined) {
+  return ['multi-runs', target] as const
 }
 
-function invalidateMultiRunCaches(queryClient: QueryClient, repoId: number) {
-  queryClient.invalidateQueries({ queryKey: multiRunQueryKey(repoId) })
-  queryClient.invalidateQueries({ queryKey: repoSiblingsQueryKey(repoId) })
+function invalidateMultiRunCaches(queryClient: QueryClient, target: MultiRunTarget) {
+  queryClient.invalidateQueries({ queryKey: multiRunQueryKey(target) })
+  if (target.kind === 'repo') {
+    queryClient.invalidateQueries({ queryKey: repoSiblingsQueryKey(target.repoId) })
+  }
 }
 
 function buildStartingFusion(run: MultiRun, request: FuseMultiRunRequest): MultiRunFusion {
@@ -45,22 +48,22 @@ function countEntries(run: MultiRun, status: MultiRun['entries'][number]['status
   return run.entries.filter((entry) => entry.status === status).length
 }
 
-export function useMultiRuns(repoId: number | undefined, enabled: boolean) {
+export function useMultiRuns(target: MultiRunTarget | undefined, enabled: boolean) {
   return useQuery({
-    queryKey: multiRunQueryKey(repoId ?? 0),
-    queryFn: () => listMultiRuns(repoId!),
-    enabled: enabled && !!repoId && repoId > 0,
+    queryKey: multiRunQueryKey(target),
+    queryFn: () => listMultiRuns(target!),
+    enabled: enabled && target !== undefined,
     staleTime: 10_000,
   })
 }
 
-export function useLaunchMultiRun(repoId: number) {
+export function useLaunchMultiRun(target: MultiRunTarget) {
   const queryClient = useQueryClient()
 
   return useMutation({
     mutationFn: (request: LaunchMultiRunRequest) => launchMultiRun(request),
     onSuccess: (run) => {
-      invalidateMultiRunCaches(queryClient, repoId)
+      invalidateMultiRunCaches(queryClient, target)
       const started = countEntries(run, 'started')
       const failed = countEntries(run, 'failed')
       if (failed === 0) {
@@ -77,14 +80,14 @@ export function useLaunchMultiRun(repoId: number) {
   })
 }
 
-export function useFuseMultiRun(repoId: number) {
+export function useFuseMultiRun(target: MultiRunTarget) {
   const queryClient = useQueryClient()
 
   return useMutation({
     mutationFn: ({ runId, request }: { runId: number; request: FuseMultiRunRequest }) =>
       fuseMultiRun(runId, request),
     onMutate: async ({ runId, request }) => {
-      const queryKey = multiRunQueryKey(repoId)
+      const queryKey = multiRunQueryKey(target)
       await queryClient.cancelQueries({ queryKey })
       queryClient.setQueryData<MultiRun[]>(queryKey, (runs) =>
         runs?.map((run) =>
@@ -95,10 +98,10 @@ export function useFuseMultiRun(repoId: number) {
       )
     },
     onSuccess: (run, variables) => {
-      queryClient.setQueryData<MultiRun[]>(multiRunQueryKey(repoId), (runs) =>
+      queryClient.setQueryData<MultiRun[]>(multiRunQueryKey(target), (runs) =>
         runs?.map((candidate) => (candidate.id === run.id ? run : candidate)),
       )
-      invalidateMultiRunCaches(queryClient, repoId)
+      invalidateMultiRunCaches(queryClient, target)
       const fusion = run.fusions.find((candidate) => candidate.requestId === variables.request.requestId)
       if (fusion?.status === 'started') {
         showToast.success('Fusion started')
@@ -107,19 +110,19 @@ export function useFuseMultiRun(repoId: number) {
       }
     },
     onError: () => {
-      invalidateMultiRunCaches(queryClient, repoId)
+      invalidateMultiRunCaches(queryClient, target)
     },
   })
 }
 
-export function useDiscardMultiRunEntry(repoId: number) {
+export function useDiscardMultiRunEntry(target: MultiRunTarget) {
   const queryClient = useQueryClient()
 
   return useMutation({
     mutationFn: ({ runId, entryId }: { runId: number; entryId: number }) =>
       discardMultiRunEntry(runId, entryId),
     onSuccess: () => {
-      invalidateMultiRunCaches(queryClient, repoId)
+      invalidateMultiRunCaches(queryClient, target)
       showToast.success('Run discarded')
     },
     onError: (error: unknown) => {

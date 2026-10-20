@@ -1,8 +1,8 @@
 import { useProviders } from '@/hooks/useProviders'
 import type { ModelInfo } from '@opencode-manager/shared/opencode'
 
-export function useScheduleModels(enabled: boolean, directory?: string) {
-  const providersQuery = useProviders(directory, { enabled })
+export function useScheduleModels(enabled: boolean, directory?: string, serverId?: string) {
+  const providersQuery = useProviders(directory, { enabled, serverId })
   const availableModels: ModelInfo[] | null =
     providersQuery.isSuccess && !providersQuery.isPlaceholderData
       ? providersQuery.data?.models ?? []

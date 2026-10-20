@@ -9,6 +9,7 @@ import {
   DropdownMenuTrigger,
 } from '@/components/ui/dropdown-menu'
 import { getIconToggleButtonClassName } from '@/components/ui/icon-toggle-button'
+import { isLocalOpenCodeServer, useOpenCodeServerId } from '@/contexts/OpenCodeServerContext'
 import { usePermissionModeToggle } from '@/hooks/usePermissionModeToggle'
 import { useSandboxToggle } from '@/hooks/useSandboxToggle'
 import { shouldShowSandboxResources } from '@/lib/sandboxResources'
@@ -37,8 +38,9 @@ export function ComposerToolsMenu({
   onAttachFile,
   onDictate,
 }: ComposerToolsMenuProps) {
+  const isLocalServer = isLocalOpenCodeServer(useOpenCodeServerId())
   const permission = usePermissionModeToggle(sessionID, directory)
-  const sandbox = useSandboxToggle(sessionID)
+  const sandbox = useSandboxToggle(sessionID, { enabled: isLocalServer })
   const [resourcesOpen, setResourcesOpen] = useState(false)
 
   return (
@@ -66,7 +68,9 @@ export function ComposerToolsMenu({
               detail={permission.disabled ? permission.label : undefined}
             />
           </DropdownMenuCheckboxItem>
-          <SandboxMenuItems sandbox={sandbox} onOpenResources={() => setResourcesOpen(true)} />
+          {isLocalServer && (
+            <SandboxMenuItems sandbox={sandbox} onOpenResources={() => setResourcesOpen(true)} />
+          )}
           <DropdownMenuCheckboxItem checked={goalArmed} disabled={goalDisabled} onCheckedChange={onToggleGoal}>
             <ToolMenuItemContent
               icon={<Target className="h-4 w-4" />}

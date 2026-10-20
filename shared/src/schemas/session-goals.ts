@@ -29,6 +29,7 @@ export type SessionGoalTurnState = z.infer<typeof SessionGoalTurnStateSchema>;
 export const SessionGoalSchema = z.object({
   id: z.number().int(),
   sessionId: z.string(),
+  serverId: z.string(),
   directory: z.string(),
   objective: z.string(),
   status: SessionGoalStatusSchema,
@@ -66,6 +67,7 @@ export function isTerminalSessionGoal(goal: SessionGoal | null | undefined): goa
 
 export const StartSessionGoalRequestSchema = z.object({
   sessionId: z.string().min(1),
+  serverId: z.string().min(1).optional(),
   directory: z.string().min(1),
   objective: z.string().trim().min(1).max(SESSION_PROMPT_MAX_LENGTH),
   maxContinuations: z.number().int().min(GOAL_MAX_CONTINUATIONS_MIN).max(GOAL_MAX_CONTINUATIONS_MAX).optional(),

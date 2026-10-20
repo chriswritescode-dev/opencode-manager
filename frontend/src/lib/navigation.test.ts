@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { getSessionListPath, getSwipeBackTarget, getAssistantPath, getAssistantSessionListPath, isAssistantPath, getPathWithReturnTo, getReturnToPath, getRepoPath, getSessionPath, parseRepoRoute } from './navigation';
+import { getSessionListPath, getSwipeBackTarget, getAssistantPath, getAssistantSessionListPath, isAssistantPath, getPathWithReturnTo, getReturnToPath, getRepoPath, getServerProjectPath, getServerSessionPath, getSessionPath, parseRepoRoute, parseServerProjectRoute, parseServerSessionRoute } from './navigation';
 
 describe('getAssistantPath', () => {
   it('returns /assistant', () => {
@@ -80,6 +80,26 @@ describe('getSessionPath', () => {
       '/repos/0/sessions/ses_1?assistant=1&repoTab=workspaces'
     );
   });
+
+  it('builds a linked server session path for a remote server id', () => {
+    expect(getSessionPath(0, 'ses_1', { serverId: 'srv_kitchen' })).toBe(
+      '/servers/srv_kitchen/sessions/ses_1'
+    );
+    expect(getSessionPath(5, 'ses_1', { repoTab: 'workspaces', serverId: 'srv_kitchen' })).toBe(
+      '/servers/srv_kitchen/sessions/ses_1'
+    );
+  });
+
+  it('keeps local repo paths when the server id is local', () => {
+    expect(getSessionPath(5, 'ses_1', { serverId: 'local' })).toBe('/repos/5/sessions/ses_1');
+  });
+});
+
+describe('linked server paths', () => {
+  it('builds server and server session paths with encoded segments', () => {
+    expect(getServerSessionPath('srv_kitchen', 'ses_1')).toBe('/servers/srv_kitchen/sessions/ses_1');
+    expect(getServerSessionPath('srv a/b', 'ses 1')).toBe('/servers/srv%20a%2Fb/sessions/ses%201');
+  });
 });
 
 describe('getRepoPath', () => {
@@ -117,6 +137,57 @@ describe('parseRepoRoute', () => {
 
   it('returns nulls for an unrelated route', () => {
     expect(parseRepoRoute('/')).toEqual({ repoId: null, section: null, sessionId: null });
+  });
+});
+
+describe('linked server project paths', () => {
+  it('builds a project path with encoded server id and directory', () => {
+    expect(getServerProjectPath('srv_kitchen', '/home/me/app')).toBe(
+      '/servers/srv_kitchen/projects?directory=%2Fhome%2Fme%2Fapp'
+    );
+    expect(getServerProjectPath('srv a/b', '/srv/my app')).toBe(
+      '/servers/srv%20a%2Fb/projects?directory=%2Fsrv%2Fmy%20app'
+    );
+  });
+
+  it('parses the server id and decoded directory from a project route', () => {
+    expect(
+      parseServerProjectRoute('/servers/srv_kitchen/projects', '?directory=%2Fhome%2Fme%2Fapp')
+    ).toEqual({ serverId: 'srv_kitchen', directory: '/home/me/app' });
+  });
+
+  it('returns null without a directory or for other routes', () => {
+    expect(parseServerProjectRoute('/servers/srv_kitchen/projects', '')).toBeNull();
+    expect(parseServerProjectRoute('/servers/srv_kitchen', '?directory=%2Fhome%2Fme')).toBeNull();
+  });
+});
+
+describe('parseServerSessionRoute', () => {
+  it('parses a linked-server session route', () => {
+    expect(parseServerSessionRoute('/servers/srv_kitchen/sessions/ses_1')).toEqual({
+      serverId: 'srv_kitchen',
+      sessionId: 'ses_1',
+    });
+  });
+
+  it('returns null for other routes', () => {
+    expect(parseServerSessionRoute('/servers/srv_kitchen')).toBeNull();
+    expect(parseServerSessionRoute('/repos/5/sessions/ses_1')).toBeNull();
+  });
+
+  it('returns null for a malformed server id segment', () => {
+    expect(parseServerSessionRoute('/servers/%E0%A4%A/sessions/ses_1')).toBeNull();
+  });
+
+  it('returns null for a malformed session id segment', () => {
+    expect(parseServerSessionRoute('/servers/srv_kitchen/sessions/%E0%A4%A')).toBeNull();
+  });
+
+  it('decodes valid encoded segments', () => {
+    expect(parseServerSessionRoute('/servers/srv%20a%2Fb/sessions/ses%201')).toEqual({
+      serverId: 'srv a/b',
+      sessionId: 'ses 1',
+    });
   });
 });
 
@@ -171,6 +242,30 @@ describe('getSwipeBackTarget', () => {
 
     it('returns root for legacy assistant route', () => {
       expect(getSwipeBackTarget('/repos/123/assistant', '')).toBe('/');
+    });
+  });
+
+  describe('linked server routes', () => {
+    it('returns root for a remote session detail', () => {
+      expect(getSwipeBackTarget('/servers/srv_kitchen/sessions/ses_1', '')).toBe('/');
+    });
+
+    it('returns root for a server page', () => {
+      expect(getSwipeBackTarget('/servers/srv_kitchen', '')).toBe('/');
+    });
+
+    it('returns root for a remote project page', () => {
+      expect(
+        getSwipeBackTarget('/servers/srv_kitchen/projects', '?directory=%2Fhome%2Fme%2Fapp')
+      ).toBe('/');
+    });
+
+    it('does not throw for a malformed server session path', () => {
+      expect(() => getSwipeBackTarget('/servers/%E0%A4%A/sessions/ses_1', '')).not.toThrow();
+      expect(getSwipeBackTarget('/servers/%E0%A4%A/sessions/ses_1', '')).toBeNull();
+      expect(() => getSwipeBackTarget('/servers/srv_kitchen/sessions/%E0%A4%A', '')).not.toThrow();
+      expect(getSwipeBackTarget('/servers/srv_kitchen/sessions/%E0%A4%A', '')).toBeNull();
+      expect(() => getSwipeBackTarget('/servers/%E0%A4%A/projects', '?directory=%2Fa')).not.toThrow();
     });
   });
 

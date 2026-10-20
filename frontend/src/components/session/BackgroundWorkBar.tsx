@@ -3,6 +3,7 @@ import { Bot, Check, ChevronDown, ChevronUp, ExternalLink, Loader2, MoveDownRigh
 import { useShallow } from 'zustand/react/shallow'
 import type { SessionMessageInfo } from '@opencode-manager/shared/opencode'
 import { readShellOutput } from '@/api/opencode'
+import { useOpenCodeServerId } from '@/contexts/OpenCodeServerContext'
 import { Button } from '@/components/ui/button'
 import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from '@/components/ui/dialog'
 import { useBackgroundSession, useChildSessionReconciliation } from '@/hooks/useOpenCode'
@@ -49,6 +50,7 @@ function appendShellOutput(previous: ShellOutputState, output: string, truncated
 }
 
 function useShellOutput(shellID: string, directory: string, running: boolean): ShellOutputState {
+  const serverId = useOpenCodeServerId()
   const [state, setState] = useState<ShellOutputState>({ output: '', truncated: false })
   const cursorRef = useRef(0)
 
@@ -64,7 +66,7 @@ function useShellOutput(shellID: string, directory: string, running: boolean): S
       let truncated = false
       try {
         for (;;) {
-          const chunk = await readShellOutput(shellID, directory, cursor, SHELL_OUTPUT_LIMIT)
+          const chunk = await readShellOutput(shellID, directory, cursor, SHELL_OUTPUT_LIMIT, serverId)
           output += chunk.output
           if (chunk.truncated) truncated = true
           if (chunk.cursor <= cursor) break
@@ -99,7 +101,7 @@ function useShellOutput(shellID: string, directory: string, running: boolean): S
       cancelled = true
       clearInterval(interval)
     }
-  }, [shellID, directory, running])
+  }, [shellID, directory, running, serverId])
 
   return state
 }

@@ -212,7 +212,7 @@ describe('PromptInput agent mention submission', () => {
       sessionID: 'test-session',
       text: 'ask @reviewer',
       agents: [{ name: 'reviewer', mention: { start: 4, end: 13, text: '@reviewer' } }],
-    }))
+    }), 'local')
     expect(mocks.switchSessionAgent).not.toHaveBeenCalled()
     expect(mocks.switchSessionModel).not.toHaveBeenCalled()
   })
@@ -231,7 +231,7 @@ describe('PromptInput agent mention submission', () => {
       text: 'ask @reviewer',
       agents: [{ name: 'reviewer', mention: { start: 4, end: 13, text: '@reviewer' } }],
       delivery: 'queue',
-    }))
+    }), 'local')
     expect(mocks.switchSessionAgent).not.toHaveBeenCalled()
   })
 
@@ -248,7 +248,7 @@ describe('PromptInput agent mention submission', () => {
       text: 'use @pr-review and @pr-review',
       agents: [],
       skills: [{ id: 'pr-review', mention: { start: 4, end: 14, text: '@pr-review' } }],
-    }))
+    }), 'local')
   })
 
   it('sends plain text without inferring an agent attachment or switching', async () => {
@@ -264,7 +264,7 @@ describe('PromptInput agent mention submission', () => {
       sessionID: 'test-session',
       text: 'plain text',
       agents: [],
-    }))
+    }), 'local')
     expect(mocks.switchSessionAgent).not.toHaveBeenCalled()
     expect(mocks.switchSessionModel).not.toHaveBeenCalled()
   })

@@ -35,6 +35,16 @@ export type ShellOutputChunk = Awaited<ReturnType<OpenCodeApi['shell']['output']
 
 export type OpenCodeLocationInfo = Awaited<ReturnType<OpenCodeApi['location']['get']>>
 
+export type OpenCodeProject = Awaited<ReturnType<OpenCodeApi['project']['list']>>[number]
+
+export type VcsInfo = Awaited<ReturnType<OpenCodeApi['vcs']['get']>>['data']
+
+export type VcsFileStatus = Awaited<ReturnType<OpenCodeApi['vcs']['status']>>['data'][number]
+
+export type VcsFileDiff = Awaited<ReturnType<OpenCodeApi['vcs']['diff']>>['data'][number]
+
+export type VcsDiffMode = 'working' | 'branch' | 'committed'
+
 export interface SessionPage {
   items: SessionInfo[]
   nextCursor?: string
@@ -97,7 +107,7 @@ function buildPromptFields(input: PromptFields) {
   }
 }
 
-export async function listSessionPage(input: SessionPageInput): Promise<SessionPage> {
+export async function listSessionPage(input: SessionPageInput, serverId?: string): Promise<SessionPage> {
   const { data, cursor } = await callOpenCode((api) =>
     api.session.list({
       ...(input.directory === undefined ? {} : { directory: input.directory }),
@@ -109,104 +119,130 @@ export async function listSessionPage(input: SessionPageInput): Promise<SessionP
       search: input.search,
       cursor: input.cursor,
     }),
+    serverId,
   )
   return { items: data, nextCursor: cursor.next ?? undefined }
 }
 
-export async function getOpenCodeLocation(directory: string): Promise<OpenCodeLocationInfo> {
-  return callOpenCode((api) => api.location.get(openCodeLocation(directory)))
+export async function getOpenCodeLocation(directory: string, serverId?: string): Promise<OpenCodeLocationInfo> {
+  return callOpenCode((api) => api.location.get(openCodeLocation(directory)), serverId)
 }
 
-export async function getSession(sessionID: string): Promise<SessionInfo> {
-  return callOpenCode((api) => api.session.get({ sessionID }))
+export async function listProjects(serverId?: string): Promise<OpenCodeProject[]> {
+  return callOpenCode((api) => api.project.list(), serverId)
 }
 
-export async function createSession(input: CreateSessionInput): Promise<SessionInfo> {
+export async function getSession(sessionID: string, serverId?: string): Promise<SessionInfo> {
+  return callOpenCode((api) => api.session.get({ sessionID }), serverId)
+}
+
+export async function createSession(input: CreateSessionInput, serverId?: string): Promise<SessionInfo> {
   const model = input.model ? parseOpenCodeModelRef(input.model) : undefined
-  return callOpenCode((api) =>
-    api.session.create({
-      ...(input.title !== undefined ? { title: input.title } : {}),
-      ...(input.agent !== undefined ? { agent: input.agent } : {}),
-      ...(model ? { model } : {}),
-      location: { directory: input.directory },
-    }),
+  return callOpenCode(
+    (api) =>
+      api.session.create({
+        ...(input.title !== undefined ? { title: input.title } : {}),
+        ...(input.agent !== undefined ? { agent: input.agent } : {}),
+        ...(model ? { model } : {}),
+        location: { directory: input.directory },
+      }),
+    serverId,
   )
 }
 
-export async function deleteSession(sessionID: string): Promise<void> {
-  await callOpenCode((api) => api.session.remove({ sessionID }))
+export async function deleteSession(sessionID: string, serverId?: string): Promise<void> {
+  await callOpenCode((api) => api.session.remove({ sessionID }), serverId)
 }
 
-export async function renameSession(sessionID: string, title: string): Promise<void> {
-  await callOpenCode((api) => api.session.update({ sessionID, title }))
+export async function renameSession(sessionID: string, title: string, serverId?: string): Promise<void> {
+  await callOpenCode((api) => api.session.update({ sessionID, title }), serverId)
 }
 
-export async function forkSession(sessionID: string, before?: string): Promise<SessionInfo> {
-  return callOpenCode((api) =>
-    api.session.fork({
-      sessionID,
-      ...(before ? { before } : {}),
-    }),
+export async function forkSession(sessionID: string, before?: string, serverId?: string): Promise<SessionInfo> {
+  return callOpenCode(
+    (api) =>
+      api.session.fork({
+        sessionID,
+        ...(before ? { before } : {}),
+      }),
+    serverId,
   )
 }
 
-export async function addSessionContext(sessionID: string, text: string): Promise<void> {
-  await callOpenCode((api) => api.session.synthetic({ sessionID, text, resume: false }))
+export async function addSessionContext(sessionID: string, text: string, serverId?: string): Promise<void> {
+  await callOpenCode((api) => api.session.synthetic({ sessionID, text, resume: false }), serverId)
 }
 
 async function createSessionThen(
   input: CreateSessionInput,
   step: (session: SessionInfo) => Promise<unknown>,
+  serverId?: string,
 ): Promise<SessionInfo> {
-  const session = await createSession(input)
+  const session = await createSession(input, serverId)
   try {
     await step(session)
   } catch (error) {
-    await deleteSession(session.id).catch(() => undefined)
+    await deleteSession(session.id, serverId).catch(() => undefined)
     throw error
   }
   return session
 }
 
-export async function createSessionWithContext(input: CreateSessionInput, context: string): Promise<SessionInfo> {
-  return createSessionThen(input, (session) => addSessionContext(session.id, context))
+export async function createSessionWithContext(
+  input: CreateSessionInput,
+  context: string,
+  serverId?: string,
+): Promise<SessionInfo> {
+  return createSessionThen(input, (session) => addSessionContext(session.id, context, serverId), serverId)
 }
 
-export async function createSessionWithPrompt(input: CreateSessionInput, text: string): Promise<SessionInfo> {
-  return createSessionThen(input, (session) => sendPrompt({ sessionID: session.id, text }))
+export async function createSessionWithPrompt(
+  input: CreateSessionInput,
+  text: string,
+  serverId?: string,
+): Promise<SessionInfo> {
+  return createSessionThen(
+    input,
+    (session) => sendPrompt({ sessionID: session.id, text }, serverId),
+    serverId,
+  )
 }
 
-export async function switchSessionModel(sessionID: string, model: ModelRef): Promise<void> {
-  await callOpenCode((api) => api.session.switchModel({ sessionID, model }))
+export async function switchSessionModel(sessionID: string, model: ModelRef, serverId?: string): Promise<void> {
+  await callOpenCode((api) => api.session.switchModel({ sessionID, model }), serverId)
 }
 
-export async function switchSessionAgent(sessionID: string, agent: string): Promise<void> {
-  await callOpenCode((api) => api.session.switchAgent({ sessionID, agent }))
+export async function switchSessionAgent(sessionID: string, agent: string, serverId?: string): Promise<void> {
+  await callOpenCode((api) => api.session.switchAgent({ sessionID, agent }), serverId)
 }
 
 /** Sends a session prompt with client metadata derived from the current viewport. */
-export async function sendPrompt(input: SendPromptInput): Promise<SessionInboxUser> {
-  return callOpenCode((api) =>
-    api.session.prompt({
-      sessionID: input.sessionID,
-      ...buildPromptFields(input),
-      metadata: { [MANAGER_PROMPT_CLIENT_METADATA_KEY]: isMobileViewport() ? 'mobile' : 'desktop' },
-    }),
+export async function sendPrompt(input: SendPromptInput, serverId?: string): Promise<SessionInboxUser> {
+  return callOpenCode(
+    (api) =>
+      api.session.prompt({
+        sessionID: input.sessionID,
+        ...buildPromptFields(input),
+        metadata: { [MANAGER_PROMPT_CLIENT_METADATA_KEY]: isMobileViewport() ? 'mobile' : 'desktop' },
+      }),
+    serverId,
   )
 }
 
-export async function runCommand(input: RunCommandInput): Promise<void> {
-  await callOpenCode((api) =>
-    api.session.command({
-      sessionID: input.sessionID,
-      name: input.name,
-      ...buildPromptFields(input),
-    }),
+export async function runCommand(input: RunCommandInput, serverId?: string): Promise<void> {
+  await callOpenCode(
+    (api) =>
+      api.session.command({
+        sessionID: input.sessionID,
+        name: input.name,
+        ...buildPromptFields(input),
+      }),
+    serverId,
   )
 }
 
-export async function runShell(sessionID: string, command: string): Promise<void> {
-  await callOpenCode((api) => api.session.shell({ sessionID, command }))
+export async function runShell(sessionID: string, command: string, serverId?: string): Promise<void> {
+  await callOpenCode((api) => api.session.shell({ sessionID, command }), serverId)
 }
 
 export const SIDE_QUESTION_INSTRUCTIONS =
@@ -216,26 +252,29 @@ export async function askSideQuestion(
   sessionID: string,
   question: string,
   signal?: AbortSignal,
+  serverId?: string,
 ): Promise<string> {
-  const result = await callOpenCode((api) =>
-    api.session.generate(
-      { sessionID, prompt: [SIDE_QUESTION_INSTRUCTIONS, question].join('\n\n') },
-      signal ? { signal } : undefined,
-    ),
+  const result = await callOpenCode(
+    (api) =>
+      api.session.generate(
+        { sessionID, prompt: [SIDE_QUESTION_INSTRUCTIONS, question].join('\n\n') },
+        signal ? { signal } : undefined,
+      ),
+    serverId,
   )
   return result.text.trim()
 }
 
-export async function interruptSession(sessionID: string): Promise<void> {
-  await callOpenCode((api) => api.session.interrupt({ sessionID }))
+export async function interruptSession(sessionID: string, serverId?: string): Promise<void> {
+  await callOpenCode((api) => api.session.interrupt({ sessionID }), serverId)
 }
 
-export async function backgroundSession(sessionID: string): Promise<void> {
-  await callOpenCode((api) => api.session.background({ sessionID }))
+export async function backgroundSession(sessionID: string, serverId?: string): Promise<void> {
+  await callOpenCode((api) => api.session.background({ sessionID }), serverId)
 }
 
-export async function listShells(directory: string): Promise<ShellInfo[]> {
-  const { data } = await callOpenCode((api) => api.shell.list(openCodeLocation(directory)))
+export async function listShells(directory: string, serverId?: string): Promise<ShellInfo[]> {
+  const { data } = await callOpenCode((api) => api.shell.list(openCodeLocation(directory)), serverId)
   return data
 }
 
@@ -244,60 +283,94 @@ export async function readShellOutput(
   directory: string,
   cursor: number,
   limit: number,
+  serverId?: string,
 ): Promise<ShellOutputChunk> {
-  const { data } = await callOpenCode((api) =>
-    api.shell.output({ id, cursor, limit, ...openCodeLocation(directory) }),
+  const { data } = await callOpenCode(
+    (api) => api.shell.output({ id, cursor, limit, ...openCodeLocation(directory) }),
+    serverId,
   )
   return data
 }
 
-export async function removeShell(id: string, directory: string): Promise<void> {
-  await callOpenCode((api) => api.shell.remove({ id, ...openCodeLocation(directory) }))
+export async function removeShell(id: string, directory: string, serverId?: string): Promise<void> {
+  await callOpenCode((api) => api.shell.remove({ id, ...openCodeLocation(directory) }), serverId)
 }
 
-export async function stageRevert(sessionID: string, messageID: string): Promise<SessionRevert> {
-  await interruptSession(sessionID)
-  await callOpenCode((api) => api.session.wait({ sessionID }))
-  return callOpenCode((api) => api.session.revert.stage({ sessionID, messageID }))
+export async function stageRevert(
+  sessionID: string,
+  messageID: string,
+  serverId?: string,
+): Promise<SessionRevert> {
+  await interruptSession(sessionID, serverId)
+  await callOpenCode((api) => api.session.wait({ sessionID }), serverId)
+  return callOpenCode((api) => api.session.revert.stage({ sessionID, messageID }), serverId)
 }
 
-export async function commitRevert(sessionID: string): Promise<void> {
-  await callOpenCode((api) => api.session.revert.commit({ sessionID }))
+export async function commitRevert(sessionID: string, serverId?: string): Promise<void> {
+  await callOpenCode((api) => api.session.revert.commit({ sessionID }), serverId)
 }
 
-export async function clearRevert(sessionID: string): Promise<void> {
-  await callOpenCode((api) => api.session.revert.clear({ sessionID }))
+export async function clearRevert(sessionID: string, serverId?: string): Promise<void> {
+  await callOpenCode((api) => api.session.revert.clear({ sessionID }), serverId)
 }
 
-export async function compactSession(sessionID: string): Promise<SessionInboxCompaction> {
-  return callOpenCode((api) => api.session.compact({ sessionID }))
+export async function compactSession(sessionID: string, serverId?: string): Promise<SessionInboxCompaction> {
+  return callOpenCode((api) => api.session.compact({ sessionID }), serverId)
 }
 
-export async function activateSkill(sessionID: string, id: string): Promise<void> {
-  await callOpenCode((api) => api.session.skill({ sessionID, id }))
+export async function activateSkill(sessionID: string, id: string, serverId?: string): Promise<void> {
+  await callOpenCode((api) => api.session.skill({ sessionID, id }), serverId)
 }
 
-export async function listActiveSessions(): Promise<ActiveSessions> {
-  return callOpenCode((api) => api.session.active())
+export async function listActiveSessions(serverId?: string): Promise<ActiveSessions> {
+  return callOpenCode((api) => api.session.active(), serverId)
 }
 
-export async function listAgents(directory?: string): Promise<AgentInfo[]> {
-  const { data } = await callOpenCode((api) => api.agent.list(openCodeLocation(directory)))
+export async function listAgents(directory?: string, serverId?: string): Promise<AgentInfo[]> {
+  const { data } = await callOpenCode((api) => api.agent.list(openCodeLocation(directory)), serverId)
   return data
 }
 
-export async function listCommands(directory?: string): Promise<CommandInfo[]> {
-  const { data } = await callOpenCode((api) => api.command.list(openCodeLocation(directory)))
+export async function listCommands(directory?: string, serverId?: string): Promise<CommandInfo[]> {
+  const { data } = await callOpenCode((api) => api.command.list(openCodeLocation(directory)), serverId)
   return data
 }
 
-export async function listSkills(directory?: string): Promise<SkillInfo[]> {
-  const { data } = await callOpenCode((api) => api.skill.list(openCodeLocation(directory)))
+export async function listSkills(directory?: string, serverId?: string): Promise<SkillInfo[]> {
+  const { data } = await callOpenCode((api) => api.skill.list(openCodeLocation(directory)), serverId)
   return data
 }
 
-export async function listPendingPermissions(directory: string): Promise<PermissionRequest[]> {
-  const { data } = await callOpenCode((api) => api.permission.request.list(openCodeLocation(directory)))
+export async function getVcsInfo(directory: string, serverId?: string): Promise<VcsInfo> {
+  const { data } = await callOpenCode((api) => api.vcs.get(openCodeLocation(directory)), serverId)
+  return data
+}
+
+export async function listVcsStatus(directory: string, serverId?: string): Promise<VcsFileStatus[]> {
+  const { data } = await callOpenCode((api) => api.vcs.status(openCodeLocation(directory)), serverId)
+  return data
+}
+
+export async function getVcsDiff(
+  directory: string,
+  mode: VcsDiffMode,
+  serverId?: string,
+): Promise<VcsFileDiff[]> {
+  const { data } = await callOpenCode(
+    (api) => api.vcs.diff({ ...openCodeLocation(directory), mode }),
+    serverId,
+  )
+  return data
+}
+
+export async function listPendingPermissions(
+  directory: string,
+  serverId?: string,
+): Promise<PermissionRequest[]> {
+  const { data } = await callOpenCode(
+    (api) => api.permission.request.list(openCodeLocation(directory)),
+    serverId,
+  )
   return data
 }
 
@@ -306,38 +379,48 @@ export async function replyPermission(
   requestID: string,
   decision: 'once' | 'always' | 'reject',
   message?: string,
+  serverId?: string,
 ): Promise<void> {
-  await callOpenCode((api) =>
-    api.permission.reply({
-      sessionID,
-      requestID,
-      decision,
-      ...(message ? { message } : {}),
-    }),
+  await callOpenCode(
+    (api) =>
+      api.permission.reply({
+        sessionID,
+        requestID,
+        decision,
+        ...(message ? { message } : {}),
+      }),
+    serverId,
   )
 }
 
-export async function listPendingForms(directory: string): Promise<FormInfo[]> {
-  const { data } = await callOpenCode((api) => api.form.list(openCodeLocation(directory)))
+export async function listPendingForms(directory: string, serverId?: string): Promise<FormInfo[]> {
+  const { data } = await callOpenCode((api) => api.form.list(openCodeLocation(directory)), serverId)
   return data
 }
 
-export async function replyForm(sessionID: string, formID: string, answer: FormAnswer): Promise<void> {
-  await callOpenCode((api) => api.session.form.reply({ sessionID, formID, answer }))
+export async function replyForm(
+  sessionID: string,
+  formID: string,
+  answer: FormAnswer,
+  serverId?: string,
+): Promise<void> {
+  await callOpenCode((api) => api.session.form.reply({ sessionID, formID, answer }), serverId)
 }
 
-export async function cancelForm(sessionID: string, formID: string): Promise<void> {
-  await callOpenCode((api) => api.session.form.cancel({ sessionID, formID }))
+export async function cancelForm(sessionID: string, formID: string, serverId?: string): Promise<void> {
+  await callOpenCode((api) => api.session.form.cancel({ sessionID, formID }), serverId)
 }
 
-export async function findFiles(input: FindFilesInput): Promise<string[]> {
-  const { data } = await callOpenCode((api) =>
-    api.file.find({
-      ...openCodeLocation(input.directory),
-      query: input.query,
-      type: 'file',
-      limit: input.limit,
-    }),
+export async function findFiles(input: FindFilesInput, serverId?: string): Promise<string[]> {
+  const { data } = await callOpenCode(
+    (api) =>
+      api.file.find({
+        ...openCodeLocation(input.directory),
+        query: input.query,
+        type: 'file',
+        limit: input.limit,
+      }),
+    serverId,
   )
   return data.map((entry) => entry.path)
 }
@@ -345,22 +428,25 @@ export async function findFiles(input: FindFilesInput): Promise<string[]> {
 export async function listSessionMessages(
   sessionID: string,
   input: SessionMessagesInput = {},
+  serverId?: string,
 ): Promise<SessionMessagesPage> {
-  const { data, cursor } = await callOpenCode((api) =>
-    api.message.list({
-      sessionID,
-      ...(input.limit === undefined ? {} : { limit: input.limit }),
-      ...(input.cursor === undefined ? { order: 'desc' as const } : { cursor: input.cursor }),
-    }),
+  const { data, cursor } = await callOpenCode(
+    (api) =>
+      api.message.list({
+        sessionID,
+        ...(input.limit === undefined ? {} : { limit: input.limit }),
+        ...(input.cursor === undefined ? { order: 'desc' as const } : { cursor: input.cursor }),
+      }),
+    serverId,
   )
   return { messages: [...data].reverse(), nextCursor: cursor.next ?? undefined }
 }
 
-export async function readSessionSnapshot(sessionID: string): Promise<SessionSnapshot> {
+export async function readSessionSnapshot(sessionID: string, serverId?: string): Promise<SessionSnapshot> {
   const [page, pending, active] = await Promise.all([
-    listSessionMessages(sessionID),
-    callOpenCode((api) => api.session.inbox.list({ sessionID })),
-    listActiveSessions(),
+    listSessionMessages(sessionID, {}, serverId),
+    callOpenCode((api) => api.session.inbox.list({ sessionID }), serverId),
+    listActiveSessions(serverId),
   ])
   return {
     messages: page.messages,

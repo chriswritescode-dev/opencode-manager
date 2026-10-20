@@ -4,7 +4,7 @@ import { migrate } from '../../src/db/migration-runner'
 import { allMigrations } from '../../src/db/migrations'
 import { createRepo } from '../../src/db/queries'
 import { createScheduleRun, updateScheduleRunMetadata } from '../../src/db/schedules'
-import { NotificationService } from '../../src/services/notification'
+import { NotificationService, type NotificationServerRegistry } from '../../src/services/notification'
 import { SettingsService } from '../../src/services/settings'
 import { sseAggregator, type SSEEvent } from '../../src/services/sse-aggregator'
 import type { PushNotificationPayload } from '@opencode-manager/shared/types'
@@ -47,7 +47,10 @@ function permissionAskedEvent(sessionID: string): SSEEvent {
   }
 }
 
-function createService(db = new Database(':memory:')): NotificationService {
+function createService(
+  db = new Database(':memory:'),
+  registry: NotificationServerRegistry | null = null,
+): NotificationService {
   migrate(db, allMigrations)
   createRepo(db, {
     localPath: 'repo-one',
@@ -58,7 +61,7 @@ function createService(db = new Database(':memory:')): NotificationService {
     isLocal: true,
   })
 
-  const service = new NotificationService(db)
+  const service = new NotificationService(db, registry)
   vi.spyOn(service, 'isConfigured').mockReturnValue(true)
   service.saveSubscription(USER_ID, 'https://push.example.com/sub-1', 'p256dh-key', 'auth-key')
   new SettingsService(db).updateSettings(
@@ -168,7 +171,7 @@ describe('NotificationService.handleSSEEvent session routing', () => {
 
     await service.handleSSEEvent(DIRECTORY, permissionAskedEvent('ses_perm'))
 
-    expect(suppressor).toHaveBeenCalledWith(expect.objectContaining({ type: 'permission.asked' }), 'ses_perm')
+    expect(suppressor).toHaveBeenCalledWith(expect.objectContaining({ type: 'permission.asked' }), 'ses_perm', 'local')
     expect(send).not.toHaveBeenCalled()
   })
 
@@ -195,6 +198,7 @@ describe('NotificationService goal outcomes', () => {
   const completedGoal: SessionGoal = {
     id: 1,
     sessionId: 'ses_goal',
+    serverId: 'local',
     directory: DIRECTORY,
     objective: 'Ship the feature',
     status: 'completed',
@@ -227,6 +231,27 @@ describe('NotificationService goal outcomes', () => {
     expect(payload.data?.eventType).toBe('session.goal.outcome')
     expect(payload.data?.sessionId).toBe('ses_goal')
     expect(payload.data?.url).toBe('/repos/1/sessions/ses_goal')
+  })
+
+  it('notifies a remote goal outcome with its server in the payload', async () => {
+    const service = createService(new Database(':memory:'), {
+      get: (serverId) => (serverId === 'srv_kitchen' ? { name: 'Kitchen', enabled: true } : null),
+    })
+    const send = vi.spyOn(service, 'sendToUser').mockResolvedValue(sendResult)
+
+    await service.notifyGoalOutcome({
+      ...completedGoal,
+      sessionId: 'ses_remote',
+      serverId: 'srv_kitchen',
+      directory: '/home/me/app',
+    })
+
+    expect(send).toHaveBeenCalledTimes(1)
+    const payload = send.mock.calls[0]?.[1] as PushNotificationPayload
+    expect(payload.body).toContain('Kitchen')
+    expect(payload.data?.serverId).toBe('srv_kitchen')
+    expect(payload.data?.serverName).toBe('Kitchen')
+    expect(payload.data?.url).toBe('/servers/srv_kitchen/sessions/ses_remote')
   })
 
   it('reports the stop reason instead of a stale verdict reason', async () => {

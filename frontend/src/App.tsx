@@ -1,10 +1,13 @@
 
-import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
-import { createBrowserRouter, RouterProvider, Outlet, useNavigate, useLocation } from 'react-router-dom'
-import { useEffect, useRef, useCallback } from 'react'
+import { QueryClient, QueryClientProvider, useQuery } from '@tanstack/react-query'
+import { createBrowserRouter, RouterProvider, Outlet, useNavigate, useLocation, useParams, Navigate } from 'react-router-dom'
+import { useEffect, useRef, useCallback, type ReactNode } from 'react'
+import { LOCAL_OPENCODE_SERVER_ID } from '@opencode-manager/shared/schemas'
 import { Toaster } from 'sonner'
 import { Repos } from './pages/Repos'
 import { RepoDetail } from './pages/RepoDetail'
+import { LinkedServerRedirect } from './pages/LinkedServerRedirect'
+import { RemoteProject } from './pages/RemoteProject'
 import { SessionDetail } from './pages/SessionDetail'
 import { Schedules } from './pages/Schedules'
 import { GlobalSchedules } from './pages/GlobalSchedules'
@@ -26,6 +29,7 @@ import { ThemeProvider, useThemeMode } from './contexts/ThemeContext'
 import { AuthProvider } from './contexts/AuthContext'
 import { KeyboardShortcutsProvider } from './contexts/KeyboardShortcutsContext'
 import { EventProvider, usePermissions, useEventContext } from '@/contexts/EventContext'
+import { OpenCodeServerProvider, isLocalOpenCodeServer } from '@/contexts/OpenCodeServerContext'
 import { RepoWorktreesProvider } from '@/contexts/RepoWorktreesContext'
 import { SwipeNavigationProvider, useSwipeNavigation } from '@/contexts/SwipeNavigationContext'
 import { PermissionRequestDialog } from './components/session/PermissionRequestDialog'
@@ -37,7 +41,8 @@ import { useAuth } from '@/hooks/useAuth'
 import { useOpenCodeFailureToast } from '@/hooks/useOpenCodeFailureToast'
 import { useOpenCodeServerActions } from '@/hooks/useOpenCodeServerActions'
 import { useGlobalShortcutActions } from '@/hooks/useGlobalShortcutActions'
-import { useSession } from '@/hooks/useOpenCode'
+import { useSidebarServerRouteSync } from '@/hooks/useSidebarServerSelection'
+import { sessionQueryOptions } from '@/hooks/useOpenCode'
 import { RestartServerDialog } from '@/components/settings/RestartServerDialog'
 
 const queryClient = new QueryClient({
@@ -98,7 +103,7 @@ function HealthMonitor() {
   )
 }
 
-function PermissionDialogWrapper() {
+export function PermissionDialogWrapper() {
   const {
     current: currentPermission,
     pendingCount,
@@ -111,10 +116,17 @@ function PermissionDialogWrapper() {
     currentIsFromDifferentSession,
   } = usePermissions()
   const { getRepoIdForSession } = useEventContext()
-  const { data: session } = useSession(currentPermission?.sessionID, currentDirectory ?? undefined)
+  const isRemotePermission = currentPermission !== null && !isLocalOpenCodeServer(currentPermission.serverId)
+  const { data: session } = useQuery(
+    sessionQueryOptions(
+      currentPermission?.sessionID,
+      currentDirectory ?? undefined,
+      currentPermission?.serverId ?? LOCAL_OPENCODE_SERVER_ID,
+    ),
+  )
 
   const canOpenCurrentSession = currentPermission !== null
-    && getRepoIdForSession(currentPermission.sessionID) !== null
+    && (isRemotePermission || getRepoIdForSession(currentPermission.sessionID) !== null)
     && (currentIsFromDifferentSession || viewedSessionId === null)
 
   return (
@@ -137,17 +149,29 @@ function GlobalShortcuts() {
   return null
 }
 
+function ServerScope({ children }: { children: ReactNode }) {
+  const { serverId } = useParams<{ serverId: string }>()
+
+  if (!serverId || serverId === LOCAL_OPENCODE_SERVER_ID) {
+    return <Navigate to="/" replace />
+  }
+
+  return <OpenCodeServerProvider serverId={serverId}>{children}</OpenCodeServerProvider>
+}
+
 function AppShell() {
   const navigate = useNavigate()
   const location = useLocation()
   const rootRef = useRef<HTMLDivElement>(null)
   const { openSheet, open } = useMobileTabBar()
 
+  useSidebarServerRouteSync()
+
   const swipeNav = useSwipeNavigation()
 
   const getRouteSwipeBackTarget = useCallback(
-    () => getSwipeBackTarget(location.pathname, location.search),
-    [location.pathname, location.search]
+    () => swipeNav?.backTarget() ?? getSwipeBackTarget(location.pathname, location.search),
+    [swipeNav, location.pathname, location.search]
   )
 
   const canSwipeBack = useCallback(
@@ -290,6 +314,29 @@ const router = createBrowserRouter([
       {
         path: '/schedules',
         element: <GlobalSchedules />,
+        loader: protectedLoader,
+      },
+      {
+        path: '/servers/:serverId',
+        element: <LinkedServerRedirect />,
+        loader: protectedLoader,
+      },
+      {
+        path: '/servers/:serverId/projects',
+        element: (
+          <ServerScope>
+            <RemoteProject />
+          </ServerScope>
+        ),
+        loader: protectedLoader,
+      },
+      {
+        path: '/servers/:serverId/sessions/:sessionId',
+        element: (
+          <ServerScope>
+            <SessionDetail />
+          </ServerScope>
+        ),
         loader: protectedLoader,
       },
     ],

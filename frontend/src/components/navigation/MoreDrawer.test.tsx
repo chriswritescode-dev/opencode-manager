@@ -401,6 +401,31 @@ describe('MoreDrawer', () => {
     expect(handleClose).not.toHaveBeenCalled()
   })
 
+  it('offers only the remote-capable project items on a linked-server route', () => {
+    mockAuth()
+    mockServerHealth()
+    setActivityGroups({ recent: [createActiveWorkItem()] })
+    renderMoreDrawer({
+      initialEntry: '/servers/srv_kitchen/sessions/ses_remote',
+      routePath: '/servers/:serverId/sessions/:sessionId',
+    })
+
+    expect(screen.getByText('Home')).toBeInTheDocument()
+    expect(screen.getByText('MCP')).toBeInTheDocument()
+    expect(screen.getByText('Skills')).toBeInTheDocument()
+    expect(screen.getByText('Settings')).toBeInTheDocument()
+    expect(screen.getByText('Logout')).toBeInTheDocument()
+    expect(screen.getByText('Terminal')).toBeInTheDocument()
+    expect(screen.getByRole('heading', { name: 'Activity' })).toBeInTheDocument()
+    expect(screen.getByText('Repos')).toBeInTheDocument()
+    expect(screen.queryByText('Files')).not.toBeInTheDocument()
+    expect(screen.getByText('Source Control')).toBeInTheDocument()
+    expect(screen.queryByText('Preview')).not.toBeInTheDocument()
+    expect(screen.queryByText('Schedules')).not.toBeInTheDocument()
+    expect(screen.queryByText('Reset Permissions')).not.toBeInTheDocument()
+    expect(screen.queryByRole('button', { name: 'Assistant' })).not.toBeInTheDocument()
+  })
+
   it('shows unread reports and marks them all read', () => {
     const markAllReportsViewed = vi.fn()
     mockAuth()

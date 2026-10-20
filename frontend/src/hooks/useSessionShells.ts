@@ -3,6 +3,8 @@ import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { listShells, removeShell } from '@/api/opencode'
 import { applyShellExit, recordShellExit, reconcileShellList, type ShellRecord } from '@/lib/backgroundWork'
 import { shellsQueryKey } from '@/lib/queryInvalidation'
+import { serverScopedKey } from '@/lib/serverScope'
+import { useOpenCodeServerId } from '@/contexts/OpenCodeServerContext'
 import { showToast } from '@/lib/toast'
 
 function useShellListQuery<TData = ShellRecord[]>(
@@ -10,14 +12,16 @@ function useShellListQuery<TData = ShellRecord[]>(
   enabled: boolean,
   select?: (shells: ShellRecord[]) => TData,
 ) {
+  const serverId = useOpenCodeServerId()
   const queryClient = useQueryClient()
+  const queryKey = serverScopedKey(shellsQueryKey(directory), serverId)
 
   return useQuery<ShellRecord[], Error, TData>({
-    queryKey: shellsQueryKey(directory),
+    queryKey,
     queryFn: async (): Promise<ShellRecord[]> => {
       const fetchStartedAt = Date.now()
-      const fetched = await listShells(directory ?? '')
-      const existing = queryClient.getQueryData<ShellRecord[]>(shellsQueryKey(directory)) ?? []
+      const fetched = await listShells(directory ?? '', serverId)
+      const existing = queryClient.getQueryData<ShellRecord[]>(queryKey) ?? []
       return reconcileShellList(existing, fetched, fetchStartedAt, directory ?? '')
     },
     enabled,
@@ -52,13 +56,14 @@ export function useShell(shellID: string | undefined, directory: string | undefi
 }
 
 export function useKillShell(directory: string | undefined) {
+  const serverId = useOpenCodeServerId()
   const queryClient = useQueryClient()
 
   return useMutation({
-    mutationFn: (id: string) => removeShell(id, directory ?? ''),
+    mutationFn: (id: string) => removeShell(id, directory ?? '', serverId),
     onSuccess: (_result, id) => {
       recordShellExit(directory ?? '', { id, status: 'killed' })
-      queryClient.setQueryData<ShellRecord[]>(shellsQueryKey(directory), (current) =>
+      queryClient.setQueryData<ShellRecord[]>(serverScopedKey(shellsQueryKey(directory), serverId), (current) =>
         current && applyShellExit(current, { id, status: 'killed' }),
       )
     },

@@ -1,9 +1,13 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { useQuery, useQueryClient } from '@tanstack/react-query'
 import { sessionIDFromEvent, type V2Event } from '@opencode-manager/shared/opencode'
+import { buildServerDirectoryKey, LOCAL_OPENCODE_SERVER_ID } from '@opencode-manager/shared/schemas'
 import { listSessionMessages, readSessionSnapshot } from '@/api/opencode'
 import { openCodeEventStream } from '@/lib/opencode-event-stream'
 import { sessionTranscriptQueryKey } from '@/lib/queryInvalidation'
+import { serverScopedKey } from '@/lib/serverScope'
+import { isLocalOpenCodeServer, useOpenCodeServerId } from '@/contexts/OpenCodeServerContext'
+import { useOpenCodeServerStatuses } from '@/hooks/useOpenCodeServers'
 import {
   applySessionEvents,
   emptySessionTranscript,
@@ -21,8 +25,13 @@ interface NewestPageRead {
 const TRANSCRIPT_FALLBACK_POLL_INTERVAL_MS = 5000
 
 export function useSessionTranscript(sessionID: string, directory: string) {
+  const serverId = useOpenCodeServerId()
+  const isRemoteServer = !isLocalOpenCodeServer(serverId)
   const queryClient = useQueryClient()
-  const queryKey = useMemo(() => sessionTranscriptQueryKey(sessionID), [sessionID])
+  const queryKey = useMemo(
+    () => serverScopedKey(sessionTranscriptQueryKey(sessionID), serverId),
+    [sessionID, serverId],
+  )
   const queuedEventsRef = useRef<V2Event[]>([])
   const frameRef = useRef<number | null>(null)
   const connectedRef = useRef<boolean | null>(null)
@@ -32,6 +41,8 @@ export function useSessionTranscript(sessionID: string, directory: string) {
   const cursorGenerationRef = useRef(0)
   const latestNewestReadRef = useRef<Promise<TranscriptCache> | null>(null)
   const [isStreamConnected, setIsStreamConnected] = useState(false)
+  const { statusById } = useOpenCodeServerStatuses({ enabled: isRemoteServer })
+  const isStreamHealthy = isStreamConnected && (!isRemoteServer || statusById[serverId]?.connected === true)
 
   const performNewestPageRead = useCallback(async (): Promise<TranscriptCache> => {
     const generation = (newestReadGenerationRef.current += 1)
@@ -42,7 +53,7 @@ export function useSessionTranscript(sessionID: string, directory: string) {
     newestReadRef.current = read
     let snapshot: SessionSnapshot
     try {
-      snapshot = await readSessionSnapshot(sessionID)
+      snapshot = await readSessionSnapshot(sessionID, serverId)
     } finally {
       if (newestReadRef.current === read) newestReadRef.current = null
     }
@@ -69,7 +80,7 @@ export function useSessionTranscript(sessionID: string, directory: string) {
     if (next.nextCursor !== current?.nextCursor) cursorGenerationRef.current += 1
     queryClient.setQueryData<TranscriptCache>(queryKey, next)
     return next
-  }, [queryClient, queryKey, sessionID])
+  }, [queryClient, queryKey, sessionID, serverId])
 
   const readNewestPage = useCallback((): Promise<TranscriptCache> => {
     const read = performNewestPageRead()
@@ -83,7 +94,7 @@ export function useSessionTranscript(sessionID: string, directory: string) {
     enabled: Boolean(sessionID && directory),
     staleTime: Infinity,
     refetchOnWindowFocus: false,
-    refetchInterval: isStreamConnected ? false : TRANSCRIPT_FALLBACK_POLL_INTERVAL_MS,
+    refetchInterval: isStreamHealthy ? false : TRANSCRIPT_FALLBACK_POLL_INTERVAL_MS,
   })
 
   const fetchOlder = useCallback(async () => {
@@ -92,7 +103,7 @@ export function useSessionTranscript(sessionID: string, directory: string) {
     fetchingOlderRef.current = true
     const generation = cursorGenerationRef.current
     try {
-      const page = await listSessionMessages(sessionID, { cursor })
+      const page = await listSessionMessages(sessionID, { cursor }, serverId)
       if (cursorGenerationRef.current !== generation) return
       queryClient.setQueryData<TranscriptCache>(queryKey, (current) => {
         if (!current) return current
@@ -109,7 +120,7 @@ export function useSessionTranscript(sessionID: string, directory: string) {
     } finally {
       fetchingOlderRef.current = false
     }
-  }, [queryClient, queryKey, sessionID])
+  }, [queryClient, queryKey, sessionID, serverId])
 
   useEffect(() => {
     if (!sessionID || !directory) return
@@ -134,9 +145,10 @@ export function useSessionTranscript(sessionID: string, directory: string) {
     }
 
     const subscription = openCodeEventStream.subscribeGlobalMonitor({
-      directories: [directory],
+      directories: [buildServerDirectoryKey(serverId, directory)],
       onEvent: (data) => {
-        const event = data as V2Event
+        const event = data as V2Event & { serverId?: string }
+        if ((event.serverId ?? LOCAL_OPENCODE_SERVER_ID) !== serverId) return
         if (sessionIDFromEvent(event) !== sessionID) return
         newestReadRef.current?.buffered.push(event)
         queuedEventsRef.current.push(event)
@@ -151,7 +163,10 @@ export function useSessionTranscript(sessionID: string, directory: string) {
         if (!connected || wasConnected !== false) return
         refreshNewestPage()
       },
-      onResync: refreshNewestPage,
+      onResync: (_subscribedDirectories: string[], resyncServerId?: string) => {
+        if ((resyncServerId ?? LOCAL_OPENCODE_SERVER_ID) !== serverId) return
+        refreshNewestPage()
+      },
     })
 
     if (queryClient.getQueryData<TranscriptCache>(queryKey)) {
@@ -170,7 +185,7 @@ export function useSessionTranscript(sessionID: string, directory: string) {
       newestReadRef.current = null
       subscription.dispose()
     }
-  }, [directory, queryClient, queryKey, readNewestPage, sessionID])
+  }, [directory, queryClient, queryKey, readNewestPage, sessionID, serverId])
 
   return {
     messages: query.data?.transcript.messages ?? [],

@@ -78,6 +78,7 @@ describe('SideQuestionDialog', () => {
       'ses_1',
       'what is the answer?',
       expect.any(AbortSignal),
+      'local',
     )
     expect(await screen.findByText('42')).toBeInTheDocument()
   })
@@ -95,7 +96,7 @@ describe('SideQuestionDialog', () => {
     fireEvent.click(screen.getByRole('button', { name: 'Ask' }))
 
     await waitFor(() =>
-      expect(mocks.askSideQuestion).toHaveBeenCalledWith('ses_1', 'why?', expect.any(AbortSignal)),
+      expect(mocks.askSideQuestion).toHaveBeenCalledWith('ses_1', 'why?', expect.any(AbortSignal), 'local'),
     )
     expect(await screen.findByText('because')).toBeInTheDocument()
   })
@@ -111,7 +112,7 @@ describe('SideQuestionDialog', () => {
     fireEvent.click(screen.getByRole('button', { name: 'Retry' }))
 
     await waitFor(() => expect(mocks.askSideQuestion).toHaveBeenCalledTimes(2))
-    expect(mocks.askSideQuestion).toHaveBeenLastCalledWith('ses_1', 'why?', expect.any(AbortSignal))
+    expect(mocks.askSideQuestion).toHaveBeenLastCalledWith('ses_1', 'why?', expect.any(AbortSignal), 'local')
     expect(await screen.findByText('retried answer')).toBeInTheDocument()
   })
 
@@ -132,6 +133,7 @@ describe('SideQuestionDialog', () => {
       'ses_1',
       'question A',
       expect.any(AbortSignal),
+      'local',
     )
   })
 
@@ -152,6 +154,7 @@ describe('SideQuestionDialog', () => {
       'ses_1',
       'question A',
       expect.any(AbortSignal),
+      'local',
     )
   })
 
@@ -189,6 +192,7 @@ describe('SideQuestionDialog', () => {
       'ses_1',
       'question B',
       expect.any(AbortSignal),
+      'local',
     )
     expect(signalB).toBeDefined()
     expect(signalA?.aborted).toBe(true)

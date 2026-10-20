@@ -455,6 +455,72 @@ describe('opencode-import service', () => {
     expect(mockRename).toHaveBeenCalledWith(stagedPath, targetPath)
   })
 
+  it('imports only durable host state entries and keeps nested directories named like excluded caches', async () => {
+    const { importOpenCodeStateDirectory } = await import('../../src/services/opencode-import')
+    const actualFs = await vi.importActual<typeof import('fs/promises')>('fs/promises')
+    const rootPath = await actualFs.mkdtemp(path.join(os.tmpdir(), 'opencode-import-test-'))
+    const sourcePath = path.join(rootPath, 'source')
+    const targetPath = path.join(rootPath, 'workspace', '.opencode', 'state', 'opencode')
+
+    const writeSourceFile = async (relativePath: string) => {
+      const filePath = path.join(sourcePath, relativePath)
+      await actualFs.mkdir(path.dirname(filePath), { recursive: true })
+      await actualFs.writeFile(filePath, relativePath)
+    }
+    const mockRm = vi.mocked(rm)
+
+    try {
+      await actualFs.mkdir(path.dirname(targetPath), { recursive: true })
+      for (const relativePath of [
+        'opencode.db',
+        'auth.json',
+        'storage/x',
+        'storage/log/y',
+        'project/project.json',
+        'plans/plan.json',
+        'forge/forge.json',
+        'forge.db',
+        'worktree/checkout/file',
+        'snapshot/snapshot',
+        'repos/repo',
+        'bin/binary',
+        'log/server',
+        'tool-output/output',
+        'shell/command',
+        'debug.log',
+      ]) {
+        await writeSourceFile(relativePath)
+      }
+
+      mockFileExists.mockImplementation(async (candidate: string) => candidate === path.join(sourcePath, 'opencode.db'))
+      mockEnsureDirectoryExists.mockResolvedValue(undefined)
+      mockReaddir.mockImplementation(actualFs.readdir)
+      mockMkdtemp.mockImplementation(actualFs.mkdtemp)
+      mockRename.mockImplementation(actualFs.rename)
+      mockRm.mockImplementation(actualFs.rm)
+      vi.mocked(cp).mockImplementation(actualFs.cp)
+
+      const result = await importOpenCodeStateDirectory(sourcePath, targetPath)
+
+      expect(result).toBe(true)
+      expect((await actualFs.readdir(targetPath)).sort()).toEqual(
+        ['auth.json', 'forge', 'forge.db', 'plans', 'project', 'storage'].sort()
+      )
+      expect(await actualFs.readFile(path.join(targetPath, 'storage', 'log', 'y'), 'utf8')).toBe('storage/log/y')
+      expect(MockSQLiteDatabase).toHaveBeenCalledWith(path.join(sourcePath, 'opencode.db'))
+    } finally {
+      await actualFs.rm(rootPath, { recursive: true, force: true })
+    }
+  })
+
+  it('skips the top-level entry that contains the import destination', async () => {
+    const { shouldImportOpenCodeStateEntry } = await import('../../src/services/opencode-import')
+
+    expect(shouldImportOpenCodeStateEntry('.opencode', '/host/opencode', '/host/opencode/.opencode/state/opencode')).toBe(false)
+    expect(shouldImportOpenCodeStateEntry('storage', '/host/opencode', '/host/opencode/.opencode/state/opencode')).toBe(true)
+    expect(shouldImportOpenCodeStateEntry('storage', '/host/opencode', '/elsewhere/.opencode/state/opencode')).toBe(true)
+  })
+
   it('cleans up the staged import directory when snapshotting fails', async () => {
     const { importOpenCodeStateDirectory } = await import('../../src/services/opencode-import')
 

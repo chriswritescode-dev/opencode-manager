@@ -18,7 +18,7 @@ export interface EventStreamTransportHandlers {
   onMessage(data: string): void
   onConnected(data: string): void
   onHeartbeat(): void
-  onResync(): void
+  onResync(data?: string): void
 }
 
 export interface EventStreamTransport {
@@ -29,7 +29,7 @@ export interface EventStreamTransport {
 export interface EventStreamSubscription {
   dispose(): void
   reconnect(): void
-  reportVisibility(visible: boolean, activeSessionId?: string): void
+  reportVisibility(visible: boolean, activeSessionId?: string, activeServerId?: string): void
 }
 
 export interface GlobalMonitorSubscription extends EventStreamSubscription {

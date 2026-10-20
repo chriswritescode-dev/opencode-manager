@@ -20,7 +20,7 @@ const mocks = vi.hoisted(() => ({
   useAutoScroll: vi.fn(),
   dialogSetters: {} as Record<string, ReturnType<typeof vi.fn>>,
   openSettings: vi.fn(),
-  setSettingsTab: vi.fn(),
+  openSettingsTab: vi.fn(),
   useSessionStatusForSession: vi.fn(),
   compactSession: vi.fn(),
   listSessionMessages: vi.fn(),
@@ -118,7 +118,7 @@ vi.mock('@/hooks/useSettings', () => ({
 }))
 
 vi.mock('@/hooks/useSettingsDialog', () => ({
-  useSettingsDialog: vi.fn(() => ({ open: mocks.openSettings, setActiveTab: mocks.setSettingsTab })),
+  useSettingsDialog: vi.fn(() => ({ open: mocks.openSettings, openTab: mocks.openSettingsTab })),
 }))
 
 vi.mock('@/hooks/useMobile', () => ({
@@ -361,7 +361,7 @@ describe('SessionDetail command actions', () => {
     })
 
     expect(mocks.setStatus).toHaveBeenCalledWith(SESSION_ID, { type: 'compact' })
-    expect(mocks.compactSession).toHaveBeenCalledWith(SESSION_ID)
+    expect(mocks.compactSession).toHaveBeenCalledWith(SESSION_ID, 'local')
     expect(mocks.showToast.loading).toHaveBeenCalledWith('Compacting session...', { id: `compact-${SESSION_ID}` })
     expect(mocks.showToast.success).toHaveBeenCalledWith('Compaction requested', { id: `compact-${SESSION_ID}` })
   })
@@ -444,8 +444,8 @@ describe('SessionDetail command actions', () => {
       await copyTranscript()
     })
 
-    expect(mocks.listSessionMessages).toHaveBeenCalledWith(SESSION_ID, {})
-    expect(mocks.listSessionMessages).toHaveBeenCalledWith(SESSION_ID, { cursor: 'cursor-1' })
+    expect(mocks.listSessionMessages).toHaveBeenCalledWith(SESSION_ID, {}, 'local')
+    expect(mocks.listSessionMessages).toHaveBeenCalledWith(SESSION_ID, { cursor: 'cursor-1' }, 'local')
     expect(mocks.copyTextToClipboard).toHaveBeenCalledTimes(1)
 
     const content = await (mocks.copyTextToClipboard.mock.calls[0][0] as Promise<string>)
@@ -525,7 +525,7 @@ describe('SessionDetail command actions', () => {
     })
 
     expect(await screen.findByText('history-only prompt')).toBeInTheDocument()
-    expect(mocks.listSessionMessages).toHaveBeenCalledWith(SESSION_ID, {})
+    expect(mocks.listSessionMessages).toHaveBeenCalledWith(SESSION_ID, {}, 'local')
   })
 
   it('forks before the chosen message and pre-fills the composer', async () => {
@@ -550,7 +550,7 @@ describe('SessionDetail command actions', () => {
 
     fireEvent.click(await screen.findByText('second prompt'))
 
-    await waitFor(() => expect(mocks.forkSession).toHaveBeenCalledWith(SESSION_ID, '2'))
+    await waitFor(() => expect(mocks.forkSession).toHaveBeenCalledWith(SESSION_ID, '2', 'local'))
     expect(mocks.setPromptValue).toHaveBeenCalledWith('second prompt')
     await waitFor(() => expect(captured.pathname.current).toBe('/repos/1/sessions/session-2'))
     expect(mocks.showToast.success).toHaveBeenCalledWith('Session forked')
@@ -574,7 +574,7 @@ describe('SessionDetail command actions', () => {
 
     fireEvent.click(await screen.findByText('history-only prompt'))
 
-    await waitFor(() => expect(mocks.forkSession).toHaveBeenCalledWith(SESSION_ID, '2'))
+    await waitFor(() => expect(mocks.forkSession).toHaveBeenCalledWith(SESSION_ID, '2', 'local'))
     expect(mocks.setPromptValue).toHaveBeenCalledWith('history-only prompt')
   })
 
@@ -590,7 +590,7 @@ describe('SessionDetail command actions', () => {
 
     fireEvent.click(await screen.findByText('Entire conversation'))
 
-    await waitFor(() => expect(mocks.forkSession).toHaveBeenCalledWith(SESSION_ID, undefined))
+    await waitFor(() => expect(mocks.forkSession).toHaveBeenCalledWith(SESSION_ID, undefined, 'local'))
     expect(mocks.setPromptValue).not.toHaveBeenCalled()
   })
 
@@ -733,7 +733,7 @@ describe('SessionDetail command actions', () => {
       await connectProvider()
     })
 
-    expect(mocks.setSettingsTab).toHaveBeenCalledWith('providers')
+    expect(mocks.openSettingsTab).toHaveBeenCalledWith('providers')
   })
 
   it('exports complete history across pages in oldest-first order without duplicates', async () => {
@@ -764,8 +764,8 @@ describe('SessionDetail command actions', () => {
       await handler()
     })
 
-    expect(mocks.listSessionMessages).toHaveBeenCalledWith(SESSION_ID, {})
-    expect(mocks.listSessionMessages).toHaveBeenCalledWith(SESSION_ID, { cursor: 'cursor-1' })
+    expect(mocks.listSessionMessages).toHaveBeenCalledWith(SESSION_ID, {}, 'local')
+    expect(mocks.listSessionMessages).toHaveBeenCalledWith(SESSION_ID, { cursor: 'cursor-1' }, 'local')
     expect(mocks.downloadMarkdown).toHaveBeenCalledTimes(1)
 
     const content = mocks.downloadMarkdown.mock.calls[0][0] as string

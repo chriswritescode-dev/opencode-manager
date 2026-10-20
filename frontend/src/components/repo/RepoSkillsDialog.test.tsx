@@ -4,10 +4,12 @@ import userEvent from '@testing-library/user-event'
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
 import type { ReactNode } from 'react'
 import { RepoSkillsDialog } from './RepoSkillsDialog'
+import { OpenCodeServerProvider } from '@/contexts/OpenCodeServerContext'
 import type { SkillFileInfo } from '@opencode-manager/shared'
 
 const mocks = vi.hoisted(() => ({
   listManagedSkills: vi.fn(),
+  listSkills: vi.fn(),
   activateSkill: vi.fn(),
 }))
 
@@ -20,6 +22,7 @@ vi.mock('@/api/settings', () => ({
 
 vi.mock('@/api/opencode', () => ({
   activateSkill: mocks.activateSkill,
+  listSkills: mocks.listSkills,
 }))
 
 vi.mock('@/lib/toast', () => ({
@@ -224,7 +227,7 @@ describe('RepoSkillsDialog', () => {
 
       expect(onOpenChange).toHaveBeenCalledWith(false)
       expect(onSkillLoaded).toHaveBeenCalledWith(mockSkills[0])
-      expect(mocks.activateSkill).toHaveBeenCalledWith('test-session', 'test-skill')
+      expect(mocks.activateSkill).toHaveBeenCalledWith('test-session', 'test-skill', 'local')
     })
 
     it('shows toast error on activateSkill failure', async () => {
@@ -257,6 +260,72 @@ describe('RepoSkillsDialog', () => {
         expect(showToast.error).toHaveBeenCalledWith('Failed to load')
       })
 
+      expect(onOpenChange).toHaveBeenCalledWith(false)
+    })
+  })
+
+  describe('linked server', () => {
+    const remoteSkill = {
+      id: 'sk_1',
+      name: 'remote-skill',
+      description: 'From the server',
+      path: '/home/me/app/.opencode/skills/remote-skill/SKILL.md',
+      content: 'Remote body',
+    }
+
+    const renderRemote = (onSkillLoaded = vi.fn(), onOpenChange = vi.fn()) =>
+      render(
+        <OpenCodeServerProvider serverId="srv_kitchen">
+          <RepoSkillsDialog
+            open
+            onOpenChange={onOpenChange}
+            repoId={0}
+            sessionId="ses_remote"
+            directory="/home/me/app"
+            onSkillLoaded={onSkillLoaded}
+          />
+        </OpenCodeServerProvider>,
+        { wrapper: createWrapper() },
+      )
+
+    it('lists skills from the linked server and hides install and delete actions', async () => {
+      mocks.listSkills.mockResolvedValue([remoteSkill])
+
+      renderRemote()
+
+      await waitFor(() => {
+        expect(screen.getByText('remote-skill')).toBeInTheDocument()
+      })
+
+      expect(mocks.listSkills).toHaveBeenCalledWith('/home/me/app', 'srv_kitchen')
+      expect(mocks.listManagedSkills).not.toHaveBeenCalled()
+      expect(screen.queryByRole('button', { name: /install skill/i })).not.toBeInTheDocument()
+      expect(screen.queryByRole('button', { name: 'Actions for remote-skill' })).not.toBeInTheDocument()
+    })
+
+    it('loads a linked-server skill into the current session', async () => {
+      mocks.listSkills.mockResolvedValue([remoteSkill])
+      mocks.activateSkill.mockReturnValue(new Promise(() => {}))
+      const onSkillLoaded = vi.fn()
+      const onOpenChange = vi.fn()
+      const user = userEvent.setup()
+
+      renderRemote(onSkillLoaded, onOpenChange)
+
+      await waitFor(() => {
+        expect(screen.getByText('remote-skill')).toBeInTheDocument()
+      })
+
+      await user.click(screen.getByText('remote-skill').closest('[class*="cursor-pointer"]')!)
+
+      expect(mocks.activateSkill).toHaveBeenCalledWith('ses_remote', 'remote-skill', 'srv_kitchen')
+      expect(onSkillLoaded).toHaveBeenCalledWith({
+        name: 'remote-skill',
+        description: 'From the server',
+        body: 'Remote body',
+        scope: 'project',
+        location: '/home/me/app/.opencode/skills/remote-skill/SKILL.md',
+      })
       expect(onOpenChange).toHaveBeenCalledWith(false)
     })
   })

@@ -67,6 +67,34 @@ describe('OpenCodeEventStream', () => {
     expect(onEvent).toHaveBeenNthCalledWith(2, { type: 'credential.updated', data: {} })
   })
 
+  it('copies the envelope server id onto remote events only', () => {
+    const transport = new TestEventStreamTransport()
+    const stream = new OpenCodeEventStream({ transport })
+    const onEvent = vi.fn()
+
+    stream.subscribeGlobalMonitor({ directories: ['/repo'], onEvent })
+    transport.openConnection()
+    transport.connected()
+    transport.message({
+      directory: '/repo',
+      serverId: 'srv_abc',
+      payload: { type: 'session.created', data: { sessionID: 'session-1' } },
+    })
+    transport.message({ directory: '/repo', payload: { type: 'session.idle', data: { sessionID: 'session-1' } } })
+
+    expect(onEvent).toHaveBeenNthCalledWith(1, {
+      type: 'session.created',
+      data: { sessionID: 'session-1' },
+      directory: '/repo',
+      serverId: 'srv_abc',
+    })
+    expect(onEvent).toHaveBeenNthCalledWith(2, {
+      type: 'session.idle',
+      data: { sessionID: 'session-1' },
+      directory: '/repo',
+    })
+  })
+
   it('publishes health through monitor output', () => {
     const transport = new TestEventStreamTransport()
     const stream = new OpenCodeEventStream({ transport })
@@ -193,7 +221,20 @@ describe('OpenCodeEventStream', () => {
     transport.resync()
 
     expect(onResync).toHaveBeenCalledTimes(1)
-    expect(onResync).toHaveBeenCalledWith(['/repo'])
+    expect(onResync).toHaveBeenCalledWith(['/repo'], undefined)
+  })
+
+  it('passes the server id of a remote resync to the global monitor', () => {
+    const transport = new TestEventStreamTransport()
+    const stream = new OpenCodeEventStream({ transport })
+    const onResync = vi.fn()
+
+    stream.subscribeGlobalMonitor({ directories: ['/repo'], onEvent: vi.fn(), onResync })
+    transport.openConnection()
+    transport.connected()
+    transport.resync({ timestamp: 1, serverId: 'srv_remote' })
+
+    expect(onResync).toHaveBeenCalledWith(['/repo'], 'srv_remote')
   })
 
   it('reports visibility through the transport adapter', async () => {
@@ -208,7 +249,23 @@ describe('OpenCodeEventStream', () => {
 
     expect(transport.posts).toContainEqual({
       path: '/api/sse/visibility',
-      body: { clientId: 'client-1', visible: true, activeSessionId: 'session-1' },
+      body: { clientId: 'client-1', visible: true, activeSessionId: 'session-1', activeServerId: 'local' },
+    })
+  })
+
+  it('reports the active server id for a remote server route', async () => {
+    const transport = new TestEventStreamTransport()
+    const stream = new OpenCodeEventStream({ transport })
+
+    const subscription = stream.subscribeGlobalMonitor({ directories: ['srv_a|/repo'], onEvent: vi.fn() })
+    transport.openConnection()
+    transport.connected('client-1')
+    subscription.reportVisibility(true, 'session-1', 'srv_a')
+    await Promise.resolve()
+
+    expect(transport.posts).toContainEqual({
+      path: '/api/sse/visibility',
+      body: { clientId: 'client-1', visible: true, activeSessionId: 'session-1', activeServerId: 'srv_a' },
     })
   })
 

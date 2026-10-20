@@ -52,7 +52,7 @@ describe('useLoadSkill', () => {
     })
 
     expect(mocks.activateSkill).toHaveBeenCalledTimes(1)
-    expect(mocks.activateSkill).toHaveBeenCalledWith('test-session-id', 'my-skill')
+    expect(mocks.activateSkill).toHaveBeenCalledWith('test-session-id', 'my-skill', 'local')
   })
 
   it('throws error when sessionID is undefined', async () => {

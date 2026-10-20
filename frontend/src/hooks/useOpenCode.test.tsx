@@ -95,13 +95,13 @@ describe('useSessionsAcrossDirectories', () => {
       limit: 25,
       order: 'desc',
       search: undefined,
-    })
+    }, 'local')
     expect(mocks.listSessionPage).toHaveBeenCalledWith({
       directory: '/w/b',
       limit: 25,
       order: 'desc',
       search: undefined,
-    })
+    }, 'local')
 
     await act(async () => {
       await result.current.fetchNextPage()
@@ -111,7 +111,7 @@ describe('useSessionsAcrossDirectories', () => {
       expect(result.current.data).toHaveLength(3)
     })
 
-    expect(mocks.listSessionPage).toHaveBeenCalledWith({ directory: '/w/a', cursor: 'cursor_a' })
+    expect(mocks.listSessionPage).toHaveBeenCalledWith({ directory: '/w/a', cursor: 'cursor_a' }, 'local')
     expect(result.current.data.map((session) => session.id)).toEqual(['ses_a1', 'ses_b1', 'ses_a2'])
   })
 
@@ -130,7 +130,7 @@ describe('useSessionsAcrossDirectories', () => {
         limit: 25,
         order: 'desc',
         search: 'deploy',
-      })
+      }, 'local')
     })
   })
 
@@ -157,7 +157,7 @@ describe('useSessionsAcrossDirectories', () => {
       limit: 25,
       order: 'desc',
       search: undefined,
-    })
+    }, 'local')
     expect(result.current.data.map((session) => session.id)).toEqual(['ses_all1'])
     expect(result.current.hasNextPage).toBe(true)
 
@@ -170,7 +170,7 @@ describe('useSessionsAcrossDirectories', () => {
     })
 
     expect(mocks.listSessionPage).toHaveBeenCalledTimes(2)
-    expect(mocks.listSessionPage).toHaveBeenLastCalledWith({ cursor: 'cursor_all' })
+    expect(mocks.listSessionPage).toHaveBeenLastCalledWith({ cursor: 'cursor_all' }, 'local')
     expect(result.current.data.map((session) => session.id)).toEqual(['ses_all1', 'ses_all2'])
   })
 
@@ -193,7 +193,7 @@ describe('useSessionsAcrossDirectories', () => {
       order: 'desc',
       search: undefined,
       includeChildren: true,
-    })
+    }, 'local')
     expect(queryClient.getQueryCache().getAll()[0]?.queryKey).toEqual([
       'opencode',
       'sessions',
@@ -254,7 +254,7 @@ describe('useSessionsAcrossDirectories', () => {
       search: undefined,
       project: 'proj_x',
       subpath: '',
-    })
+    }, 'local')
     expect(result.current.data.map((session) => session.id)).toEqual(['ses_root'])
     expect(result.current.hasNextPage).toBe(true)
 
@@ -267,7 +267,7 @@ describe('useSessionsAcrossDirectories', () => {
     })
 
     expect(mocks.listSessionPage).toHaveBeenCalledTimes(2)
-    expect(mocks.listSessionPage).toHaveBeenLastCalledWith({ cursor: 'cursor_project' })
+    expect(mocks.listSessionPage).toHaveBeenLastCalledWith({ cursor: 'cursor_project' }, 'local')
     expect(result.current.data.map((session) => session.id)).toEqual(['ses_root', 'ses_wt'])
   })
 
@@ -292,7 +292,7 @@ describe('useSessionsAcrossDirectories', () => {
       await result.current.mutateAsync({ id: 'ses_a1', directory: '/w/a' })
     })
 
-    expect(mocks.deleteSession).toHaveBeenCalledWith('ses_a1')
+    expect(mocks.deleteSession).toHaveBeenCalledWith('ses_a1', 'local')
     const cached = queryClient.getQueryData<{ pages: Array<{ items: SessionInfo[] }> }>(listKey)
     expect(cached?.pages[0].items.map((session) => session.id)).toEqual(['ses_a2'])
     expect(queryClient.getQueryState(listKey)?.isInvalidated).toBe(false)
@@ -464,7 +464,20 @@ describe('useCreateSession', () => {
       await result.current.mutateAsync({ agent: undefined })
     })
 
-    expect(mocks.createSession).toHaveBeenCalledWith({ directory: '/w/a', agent: undefined })
+    expect(mocks.createSession).toHaveBeenCalledWith({ directory: '/w/a', agent: undefined }, 'local')
+  })
+
+  it('creates a session on an explicit server for a caller outside the server scope', async () => {
+    const queryClient = createQueryClient()
+    const { result } = renderHook(() => useCreateSession('/srv/kitchen', undefined, 'srv_kitchen'), {
+      wrapper: createWrapper(queryClient),
+    })
+
+    await act(async () => {
+      await result.current.mutateAsync({ agent: undefined })
+    })
+
+    expect(mocks.createSession).toHaveBeenCalledWith({ directory: '/srv/kitchen', agent: undefined }, 'srv_kitchen')
   })
 })
 

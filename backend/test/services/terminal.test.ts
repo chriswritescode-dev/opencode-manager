@@ -31,8 +31,13 @@ function createTerminalService(
   provider: CredentialProvider,
   openSocket?: (url: string) => WebSocket,
   baseUrl = 'http://127.0.0.1:5551',
+  includeLocalCredentials = true,
 ): TerminalService {
-  return new TerminalService(client, provider, () => baseUrl, openSocket)
+  return new TerminalService(
+    { client, baseUrl: () => baseUrl, includeLocalCredentials },
+    provider,
+    openSocket,
+  )
 }
 
 class FakeUpstreamSocket {
@@ -164,6 +169,83 @@ describe('TerminalService', () => {
       expect(captured).not.toHaveProperty('command')
       expect(captured).not.toHaveProperty('args')
       expect(captured?.env).toEqual({})
+    })
+  })
+
+  describe('remote target', () => {
+    it('does not inject local GitHub credentials when creating a terminal', async () => {
+      const create = vi.fn(async () => ({
+        location: { directory: '/repo' },
+        data: createPty({ id: 'pty-remote', title: 'Terminal' }),
+      }))
+      const credentialProvider = createCredentialProvider({ GH_TOKEN: 'gh' })
+      const service = createTerminalService(
+        createClient({ create }),
+        credentialProvider,
+        undefined,
+        'https://remote.internal',
+        false,
+      )
+
+      await service.create('/repo', { kind: 'shell', name: 'Terminal', env: { FOO: 'bar' } })
+
+      expect(credentialProvider.getGhCliEnv).not.toHaveBeenCalled()
+      expect(create).toHaveBeenCalledWith(expect.objectContaining({ env: { FOO: 'bar' } }))
+    })
+
+    it('keeps a remote shell environment empty without input env', async () => {
+      let captured: Record<string, unknown> | undefined
+      const create = vi.fn(async (input: Record<string, unknown>) => {
+        captured = input
+        return { location: { directory: '/repo' }, data: createPty() }
+      })
+      const service = createTerminalService(
+        createClient({ create }),
+        createCredentialProvider({ GH_TOKEN: 'gh' }),
+        undefined,
+        'https://remote.internal',
+        false,
+      )
+
+      await service.create('/repo', { kind: 'shell', name: 'Terminal' })
+
+      expect(captured?.env).toEqual({})
+    })
+
+    it('builds the connect URL from the target base URL', async () => {
+      const list = vi.fn(async ({ location }: { location: { directory: string } }) => ({
+        location,
+        data: [createPty({ id: 'pty-1' })],
+      }))
+      const token = vi.fn(async () => ({
+        location: { directory: '/repo' },
+        data: { ticket: 'remote-ticket', expires_in: 60 },
+      }))
+      const remoteClient = createClient({ list, connect: { token } })
+      let opened: FakeUpstreamSocket | undefined
+      const service = createTerminalService(
+        createClient({}),
+        createCredentialProvider(),
+        (url) => {
+          opened = new FakeUpstreamSocket(url)
+          return opened as unknown as WebSocket
+        },
+        'https://local.internal',
+      )
+      const remote = service.forTarget({
+        client: remoteClient,
+        baseUrl: () => 'https://remote.internal',
+        includeLocalCredentials: false,
+      })
+
+      await remote.connect('/repo', 'pty-1', undefined, createPeer())
+
+      expect(list).toHaveBeenCalledWith({ location: { directory: '/repo' } })
+      const url = new URL(opened!.url)
+      expect(url.protocol).toBe('wss:')
+      expect(url.host).toBe('remote.internal')
+      expect(url.pathname).toBe('/api/pty/pty-1/connect')
+      expect(url.searchParams.get('ticket')).toBe('remote-ticket')
     })
   })
 

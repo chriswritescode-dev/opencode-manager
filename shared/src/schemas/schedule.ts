@@ -13,8 +13,10 @@ export type ScheduleMode = z.infer<typeof ScheduleModeSchema>
  * Where a scheduled run executes. `worktree` gives every run a fresh worktree that is
  * removed when the run ends, `kept-worktree` keeps each run's worktree afterwards, and
  * `shared-worktree` reuses one worktree and branch for every run of the schedule.
+ * `in-place` runs directly in the target directory and is the only mode available for a
+ * project on a linked remote OpenCode server, which has no local checkout to branch from.
  */
-export const ScheduleWorkspaceModeSchema = z.enum(['worktree', 'kept-worktree', 'shared-worktree'])
+export const ScheduleWorkspaceModeSchema = z.enum(['worktree', 'kept-worktree', 'shared-worktree', 'in-place'])
 export type ScheduleWorkspaceMode = z.infer<typeof ScheduleWorkspaceModeSchema>
 
 /**
@@ -171,7 +173,9 @@ export function buildSchedulePermissionRuleset(
 
 export const ScheduleJobSchema = z.object({
   id: z.number(),
-  repoId: z.number(),
+  repoId: z.number().nullable(),
+  serverId: z.string().optional(),
+  directory: z.string().nullable().optional(),
   name: z.string(),
   description: z.string().nullable(),
   enabled: z.boolean(),
@@ -197,7 +201,8 @@ export type ScheduleJob = z.infer<typeof ScheduleJobSchema>
 export const ScheduleRunSchema = z.object({
   id: z.number(),
   jobId: z.number(),
-  repoId: z.number(),
+  repoId: z.number().nullable(),
+  serverId: z.string().optional(),
   triggerSource: ScheduleRunTriggerSourceSchema,
   status: ScheduleRunStatusSchema,
   startedAt: z.number(),
@@ -227,6 +232,7 @@ const ScheduleJobBaseRequestSchema = z.object({
   mcpServers: ScheduleMcpServersSchema.optional(),
   branch: z.string().min(1).max(200).nullable().optional(),
   workspaceMode: ScheduleWorkspaceModeSchema.optional(),
+  directory: z.string().min(1).max(4096).optional(),
 })
 
 export const CreateScheduleJobRequestSchema = z.discriminatedUnion('scheduleMode', [
@@ -258,6 +264,7 @@ export const UpdateScheduleJobRequestSchema = z.object({
   mcpServers: ScheduleMcpServersSchema.optional(),
   branch: z.string().min(1).max(200).nullable().optional(),
   workspaceMode: ScheduleWorkspaceModeSchema.optional(),
+  directory: z.string().min(1).max(4096).nullable().optional(),
 })
 export type UpdateScheduleJobRequest = z.infer<typeof UpdateScheduleJobRequestSchema>
 

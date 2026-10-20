@@ -2,7 +2,7 @@ import type { Repo, Session } from '@/api/types'
 import { ASSISTANT_REPO_ID } from '@opencode-manager/shared/utils'
 import { getRepoBranchLabel, getRepoDisplayName } from '@/lib/utils'
 import { getSessionKey } from '@/lib/sessionKey'
-import { getSessionPath, isAssistantPath, parseRepoRoute } from '@/lib/navigation'
+import { getSessionPath, isAssistantPath, parseRepoRoute, parseServerSessionRoute } from '@/lib/navigation'
 import { partitionSessions, selectRootSessions } from '@/components/session/session-partition'
 import type { ActiveWorktree } from '@/lib/activeWork'
 
@@ -29,6 +29,8 @@ export interface SidebarSessionItem {
   key: string
   session: Session
   repoId: number
+  /** The linked server owning the session; absent for local repo sessions. */
+  serverId?: string
   repoLabel: string
   branchLabel: string | null
   /** Branch of the worktree the session runs in, when it runs in a worktree of the group's repo. */
@@ -46,6 +48,10 @@ export interface SidebarRepoGroup {
 }
 
 export function isCurrentSessionItem(item: SidebarSessionItem, pathname: string): boolean {
+  if (item.serverId) {
+    const selection = parseServerSessionRoute(pathname)
+    return selection?.serverId === item.serverId && item.session.id === selection.sessionId
+  }
   const selection = parseRepoRoute(pathname)
   return item.repoId === selection.repoId && item.session.id === selection.sessionId
 }

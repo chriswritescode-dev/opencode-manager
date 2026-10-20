@@ -28,6 +28,7 @@ export interface ScheduleJobPersistenceInput {
   mcpServers: ScheduleMcpServer[]
   branch: string | null
   workspaceMode: ScheduleWorkspaceMode
+  directory?: string | null
   nextRunAt: number | null
 }
 
@@ -104,6 +105,7 @@ export function buildCreateSchedulePersistenceInput(input: CreateScheduleJobRequ
     skillMetadata: input.skillMetadata,
     branch: input.branch?.trim() || null,
     workspaceMode: input.workspaceMode ?? 'worktree',
+    ...(input.directory !== undefined ? { directory: input.directory?.trim() || null } : {}),
   }
 
   const scheduleConfig = input.scheduleMode === 'cron'
@@ -166,6 +168,9 @@ export function buildUpdatedSchedulePersistenceInput(
     mcpServers: input.mcpServers ?? existing.mcpServers,
     branch: input.branch === undefined ? existing.branch : (input.branch?.trim() || null),
     workspaceMode: input.workspaceMode ?? existing.workspaceMode,
+    ...(input.directory !== undefined || existing.directory !== undefined
+      ? { directory: input.directory === undefined ? (existing.directory ?? null) : (input.directory?.trim() || null) }
+      : {}),
     nextRunAt,
   }
 }

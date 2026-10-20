@@ -1,11 +1,15 @@
-import { useMemo, useState } from 'react'
+import { useMemo, useState, type ReactNode } from 'react'
 import { useLocation, useNavigate } from 'react-router-dom'
 import { Search } from 'lucide-react'
+import { LOCAL_OPENCODE_SERVER_ID } from '@opencode-manager/shared/schemas'
 import type { Repo, Session } from '@/api/types'
 import { Input } from '@/components/ui/input'
+import { RepoActivityIndicator } from '@/components/activity/RepoActivityIndicator'
 import { useNavigableRepos, useSidebarRepoGroups } from '@/hooks/useSidebarRepoGroups'
 import { useSessionSearch } from '@/hooks/useSessionSearch'
 import { useSessionPins } from '@/hooks/useSessionPins'
+import { useSidebarServerSelection } from '@/hooks/useSidebarServerSelection'
+import { RemoteProjectNavList } from '@/components/navigation/RemoteProjectNav'
 import {
   NewSessionButton,
   RepoNavGroup,
@@ -21,7 +25,7 @@ import {
   isCurrentSessionItem,
   isRepoReady,
 } from '@/components/navigation/sidebar-session-tree'
-import { getRepoPath } from '@/lib/navigation'
+import { getRepoPath, getSessionPath } from '@/lib/navigation'
 import { getRepoDisplayName } from '@/lib/utils'
 import { buildPinnedSessionKeys } from '@/lib/sessionKey'
 
@@ -48,6 +52,28 @@ function SessionSearchInput({ value, onChange }: { value: string; onChange: (val
         className="h-8 pl-8 pr-9"
       />
       {value.length > 0 && <SearchClearButton onClear={clear} />}
+    </div>
+  )
+}
+
+function SessionTreeLayout({
+  draft,
+  onDraftChange,
+  children,
+}: {
+  draft: string
+  onDraftChange: (value: string) => void
+  children: ReactNode
+}) {
+  return (
+    <div className="flex min-h-0 flex-1 flex-col">
+      <div className="px-2 pb-2">
+        <SessionSearchInput value={draft} onChange={onDraftChange} />
+      </div>
+
+      <div role="region" aria-label="Session navigator" className="min-h-0 flex-1 overflow-y-auto pb-2">
+        {children}
+      </div>
     </div>
   )
 }
@@ -90,14 +116,21 @@ function SessionSearchResults({
       {matchingGroups.map((group) => (
         <RepoNavGroup
           key={group.repo.id}
-          repo={group.repo}
           name={group.label}
           branch={group.branchLabel}
           isWorktree={group.repo.isWorktree}
           isOpen
           isCurrent={group.repo.id === getActiveRepoId(location.pathname)}
           onOpenRepo={() => navigate(getRepoPath(group.repo.id))}
-          actions={<NewSessionButton repo={group.repo} onOpenSession={navigate} />}
+          indicator={<RepoActivityIndicator repo={group.repo} />}
+          actions={
+            <NewSessionButton
+              directory={group.repo.fullPath}
+              label={group.label}
+              sessionPath={(sessionId) => getSessionPath(group.repo.id, sessionId)}
+              onOpenSession={navigate}
+            />
+          }
         >
           {group.items.map((item) => (
             <SessionNavRow
@@ -113,7 +146,7 @@ function SessionSearchResults({
   )
 }
 
-export function DesktopSessionTree() {
+function LocalSessionTree() {
   const navigate = useNavigate()
   const location = useLocation()
   const { repos, isLoading } = useNavigableRepos()
@@ -147,33 +180,65 @@ export function DesktopSessionTree() {
   }
 
   return (
-    <div className="flex min-h-0 flex-1 flex-col">
-      <div className="px-2 pb-2">
-        <SessionSearchInput value={draft} onChange={handleSearchChange} />
-      </div>
-
-      <div role="region" aria-label="Session navigator" className="min-h-0 flex-1 overflow-y-auto pb-2">
-        {isLoading ? (
-          <SessionNavStatus>Loading repos...</SessionNavStatus>
-        ) : trimmedDraft ? (
-          <SessionSearchResults
-            nameMatchedRepos={nameMatchedRepos}
-            otherRepos={otherRepos}
-            sessions={filteredSessions}
-            isSearchLoading={isSearchLoading}
-            isSearchError={isSearchError}
-          />
-        ) : (
-          <RepoSessionNavList
-            repos={repos}
-            activeRepoId={getActiveRepoId(location.pathname)}
-            isVisible
-            onOpenRepo={(repoId) => navigate(getRepoPath(repoId))}
-            onSelectSession={navigate}
-            renderActions={(repo) => <NewSessionButton repo={repo} onOpenSession={navigate} />}
-          />
-        )}
-      </div>
-    </div>
+    <SessionTreeLayout draft={draft} onDraftChange={handleSearchChange}>
+      {isLoading ? (
+        <SessionNavStatus>Loading repos...</SessionNavStatus>
+      ) : trimmedDraft ? (
+        <SessionSearchResults
+          nameMatchedRepos={nameMatchedRepos}
+          otherRepos={otherRepos}
+          sessions={filteredSessions}
+          isSearchLoading={isSearchLoading}
+          isSearchError={isSearchError}
+        />
+      ) : (
+        <RepoSessionNavList
+          repos={repos}
+          activeRepoId={getActiveRepoId(location.pathname)}
+          isVisible
+          onOpenRepo={(repoId) => navigate(getRepoPath(repoId))}
+          onSelectSession={navigate}
+          renderActions={(repo) => (
+            <NewSessionButton
+              directory={repo.fullPath}
+              label={getRepoDisplayName(repo)}
+              sessionPath={(sessionId) => getSessionPath(repo.id, sessionId)}
+              onOpenSession={navigate}
+            />
+          )}
+        />
+      )}
+    </SessionTreeLayout>
   )
+}
+
+function RemoteSessionTree({ serverId }: { serverId: string }) {
+  const navigate = useNavigate()
+  const [draft, setDraft] = useState('')
+
+  return (
+    <SessionTreeLayout draft={draft} onDraftChange={setDraft}>
+      <RemoteProjectNavList
+        serverId={serverId}
+        isVisible
+        search={draft}
+        onOpenProject={navigate}
+        onSelectSession={navigate}
+      />
+    </SessionTreeLayout>
+  )
+}
+
+/**
+ * The sidebar session navigator. Follows the selected server: local repos for this machine, or the
+ * selected linked server's projects with the same rows and search behaviour.
+ */
+export function DesktopSessionTree() {
+  const [selectedServerId] = useSidebarServerSelection()
+
+  if (selectedServerId !== LOCAL_OPENCODE_SERVER_ID) {
+    return <RemoteSessionTree serverId={selectedServerId} />
+  }
+
+  return <LocalSessionTree />
 }

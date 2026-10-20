@@ -1,5 +1,5 @@
 import { DEFAULTS } from '@opencode-manager/shared/config'
-import type { SSEEventEnvelope } from '@opencode-manager/shared'
+import { LOCAL_OPENCODE_SERVER_ID, type SSEEventEnvelope } from '@opencode-manager/shared/schemas'
 import { createBrowserEventStreamTransport } from './browserTransport'
 import type {
   EventStreamHealthState,
@@ -14,7 +14,7 @@ interface Subscriber {
   onEvent: OpenCodeEventHandler
   onStatusChange?: EventStreamStatusHandler
   onHealthChange?: (state: EventStreamHealthState) => void
-  onResync?: (subscribedDirectories: string[]) => void
+  onResync?: (subscribedDirectories: string[], serverId?: string) => void
   onDirectoriesSubscribed?: (directories: string[]) => void
   directories: Set<string>
 }
@@ -24,7 +24,7 @@ interface SubscriberInput {
   onStatusChange?: EventStreamStatusHandler
   onHealthChange?: (state: EventStreamHealthState) => void
   directories: string[]
-  onResync?: (subscribedDirectories: string[]) => void
+  onResync?: (subscribedDirectories: string[], serverId?: string) => void
   onDirectoriesSubscribed?: (directories: string[]) => void
 }
 
@@ -76,7 +76,8 @@ export class OpenCodeEventStream {
     return {
       updateDirectories: (directories) => this.updateSubscriberDirectories(id, directories),
       reconnect: () => this.reconnect(),
-      reportVisibility: (visible, activeSessionId) => this.reportVisibility(visible, activeSessionId),
+      reportVisibility: (visible, activeSessionId, activeServerId) =>
+        this.reportVisibility(visible, activeSessionId, activeServerId),
       dispose: () => this.removeSubscriber(id),
     }
   }
@@ -213,7 +214,7 @@ export class OpenCodeEventStream {
       onMessage: (data) => this.handleMessage(data),
       onConnected: (data) => this.handleConnected(data),
       onHeartbeat: () => this.markActivity(),
-      onResync: () => this.handleResync(),
+      onResync: (data) => this.handleResync(data),
     })
     this.startConnectTimeout()
   }
@@ -413,12 +414,13 @@ export class OpenCodeEventStream {
     })
   }
 
-  private handleResync(): void {
+  private handleResync(data?: string): void {
     this.markActivity()
     const directories = Array.from(this.directoryRefCounts.keys())
+    const serverId = parseResyncServerId(data)
     this.subscribers.forEach((subscriber) => {
       try {
-        subscriber.onResync?.(directories)
+        subscriber.onResync?.(directories, serverId)
       } catch {
         void 0
       }
@@ -478,14 +480,25 @@ export class OpenCodeEventStream {
     void this.subscribeToRemoteDirectories(directories)
   }
 
-  private reportVisibility(visible: boolean, activeSessionId?: string): void {
+  private reportVisibility(visible: boolean, activeSessionId?: string, activeServerId?: string): void {
     if (!this.clientId || !this.connected) return
 
     void this.transport.post('/api/sse/visibility', {
       clientId: this.clientId,
       visible,
       activeSessionId: activeSessionId ?? null,
+      activeServerId: activeServerId ?? LOCAL_OPENCODE_SERVER_ID,
     })
+  }
+}
+
+function parseResyncServerId(data?: string): string | undefined {
+  if (!data) return undefined
+  try {
+    const parsed = JSON.parse(data) as { serverId?: unknown }
+    return typeof parsed.serverId === 'string' ? parsed.serverId : undefined
+  } catch {
+    return undefined
   }
 }
 
@@ -497,8 +510,12 @@ function flattenEventEnvelope(parsed: unknown): unknown {
     (parsed as { payload: unknown }).payload !== null &&
     typeof (parsed as { payload: unknown }).payload === 'object'
   ) {
-    const { payload, directory } = parsed as SSEEventEnvelope
-    return typeof directory === 'string' ? { ...payload, directory } : { ...payload }
+    const { payload, directory, serverId } = parsed as SSEEventEnvelope
+    return {
+      ...payload,
+      ...(typeof directory === 'string' ? { directory } : {}),
+      ...(typeof serverId === 'string' ? { serverId } : {}),
+    }
   }
   return parsed
 }

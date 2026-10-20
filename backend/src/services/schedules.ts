@@ -8,11 +8,12 @@ import {
   type ScheduleRun,
   type ScheduleRunTriggerSource,
   type ScheduleRunWorktreesMode,
+  type ScheduleWorkspaceMode,
   type ScheduleWorktree,
   type UpdateScheduleJobRequest,
 } from '@opencode-manager/shared/types'
 import { mcpStatusByName, openCodeLocation } from '@opencode-manager/shared/opencode'
-import { buildSchedulePermissionRuleset } from '@opencode-manager/shared/schemas'
+import { LOCAL_OPENCODE_SERVER_ID, buildSchedulePermissionRuleset } from '@opencode-manager/shared/schemas'
 import { getRepoById } from '../db/queries'
 import type { ScheduleJobWithRepo } from '../db/schedules'
 import {
@@ -36,6 +37,7 @@ import {
   listEnabledScheduleJobs,
   listScheduleJobIdsByRepo,
   listScheduleJobsByRepo,
+  listScheduleJobsByServer,
   listRunningScheduleRuns,
   listScheduleRunsByJob,
   updateScheduleJob,
@@ -53,6 +55,7 @@ import {
 import { resolveOpenCodeModel } from './opencode-models'
 import { isSessionBusy, readLatestAssistantReply, sessionSettleSignal, type AssistantReplyState } from './session-reply'
 import type { OpenCodeClient } from './opencode/client'
+import type { OpenCodeServerRegistry } from './opencode-server-registry'
 import type { ScheduleWorktreeManager } from './schedule-worktree'
 import type { Repo } from '../types/repo'
 import { sseAggregator, type ScheduledSessionRef } from './sse-aggregator'
@@ -72,6 +75,8 @@ class ScheduleServiceError extends Error {
   }
 }
 
+class ServerUnavailableError extends ScheduleServiceError {}
+
 const SESSION_STOPPED_ERROR = 'The session stopped without producing an assistant response. This usually means OpenCode restarted mid-run or the session was interrupted. Open the linked session to inspect any partial output and rerun if needed.'
 
 const DELETION_RESERVATION_RUN_ID = -1
@@ -90,6 +95,7 @@ interface SessionMonitor {
 interface ActiveRun {
   runId: number
   abort: AbortController
+  sessionMonitor?: SessionMonitor
 }
 
 type CancelDecision = 'cancelled' | 'settled' | 'resume'
@@ -175,7 +181,7 @@ function buildRunStartedLog(input: {
   ].join('\n')
 }
 
-function createSessionMonitor(directory: string, sessionId: string): SessionMonitor {
+function createSessionMonitor(directory: string, sessionId: string, serverId: string = LOCAL_OPENCODE_SERVER_ID): SessionMonitor {
   const queued: SessionSignal[] = []
   let waiting: ((signal: SessionSignal) => void) | null = null
   let disposed = false
@@ -190,14 +196,33 @@ function createSessionMonitor(directory: string, sessionId: string): SessionMoni
     queued.push(signal)
   }
 
-  const unsubscribe = sseAggregator.onEvent((eventDirectory, event) => {
-    if (eventDirectory !== directory) {
-      return
-    }
-
+  const handleEvent = (event: Parameters<typeof sessionSettleSignal>[0]): void => {
     const signal = sessionSettleSignal(event, sessionId)
     if (signal) {
       push({ errorText: signal.errorText, disposed: false })
+    }
+  }
+
+  const unsubscribe = serverId === LOCAL_OPENCODE_SERVER_ID
+    ? sseAggregator.onEvent((eventDirectory, event) => {
+        if (eventDirectory !== directory) {
+          return
+        }
+        handleEvent(event)
+      })
+    : sseAggregator.onServerEvent((eventServerId, eventDirectory, event) => {
+        if (eventServerId !== serverId) {
+          return
+        }
+        if (eventDirectory !== null && eventDirectory !== directory) {
+          return
+        }
+        handleEvent(event)
+      })
+
+  const unsubscribeConnected = sseAggregator.onServerConnected((connectedServerId) => {
+    if (connectedServerId === serverId) {
+      push({ errorText: null, disposed: false })
     }
   })
 
@@ -221,9 +246,22 @@ function createSessionMonitor(directory: string, sessionId: string): SessionMoni
       }
       disposed = true
       unsubscribe()
+      unsubscribeConnected()
       push({ errorText: null, disposed: true })
     },
   }
+}
+
+export type ScheduleJobTarget =
+  | { kind: 'repo'; repoId: number }
+  | { kind: 'server'; serverId: string; directory: string }
+
+interface ScheduleTargetContext {
+  repo: Repo | null
+  client: OpenCodeClient
+  directory: string
+  repoId: number | null
+  serverId: string
 }
 
 export class ScheduleService {
@@ -237,6 +275,7 @@ export class ScheduleService {
     private readonly db: Database,
     private readonly openCodeClient: OpenCodeClient,
     private readonly worktreeManager: ScheduleWorktreeManager,
+    private readonly serverRegistry: OpenCodeServerRegistry | null = null,
   ) {}
 
   setJobChangeHandler(handler: ((job: ScheduleJob | null, jobId: number) => void) | null): void {
@@ -306,11 +345,28 @@ export class ScheduleService {
     }
   }
 
+  private static attachSessionMonitor(jobId: number, runId: number, sessionMonitor: SessionMonitor): void {
+    const active = ScheduleService.activeRuns.get(jobId)
+    if (active?.runId === runId) {
+      active.sessionMonitor = sessionMonitor
+    }
+  }
+
+  private static disposeActiveRunMonitor(jobId: number, runId: number): void {
+    const active = ScheduleService.activeRuns.get(jobId)
+    if (active?.runId !== runId || !active.sessionMonitor) {
+      return
+    }
+    active.sessionMonitor.dispose()
+    active.sessionMonitor = undefined
+  }
+
   getActiveRunSessions(): ScheduledSessionRef[] {
     const refs: ScheduledSessionRef[] = []
 
     for (const run of listRunningScheduleRuns(this.db)) {
       if (!run.sessionId) continue
+      if (run.repoId === null) continue
 
       const directory = run.worktreePath ?? this.findRepoPath(run.repoId)
       if (!directory) continue
@@ -326,6 +382,103 @@ export class ScheduleService {
       return this.assertRepo(repoId).fullPath
     } catch {
       return null
+    }
+  }
+
+  private assertServer(serverId: string) {
+    const server = this.serverRegistry?.get(serverId)
+    if (!server) {
+      throw new ServerUnavailableError('OpenCode server not found', 404)
+    }
+    if (!server.enabled) {
+      throw new ServerUnavailableError(`OpenCode server "${server.name}" is disabled`, 400)
+    }
+    return server
+  }
+
+  private safeServerClient(serverId: string): OpenCodeClient {
+    try {
+      return this.serverClient(serverId)
+    } catch {
+      return this.openCodeClient
+    }
+  }
+
+  private serverClient(serverId: string): OpenCodeClient {
+    if (!this.serverRegistry) {
+      throw new ScheduleServiceError('Linked OpenCode servers are not available', 500)
+    }
+    try {
+      return this.serverRegistry.getClient(serverId)
+    } catch (error) {
+      throw new ScheduleServiceError(getErrorMessage(error) || 'OpenCode server is not available', 400)
+    }
+  }
+
+  private resolveTargetContext(target: ScheduleJobTarget, directory?: string | null): ScheduleTargetContext {
+    if (target.kind === 'repo') {
+      const repo = this.assertRepo(target.repoId)
+      return {
+        repo,
+        client: this.openCodeClient,
+        directory: repo.fullPath,
+        repoId: target.repoId,
+        serverId: LOCAL_OPENCODE_SERVER_ID,
+      }
+    }
+
+    this.assertServer(target.serverId)
+    const resolvedDirectory = directory ?? target.directory
+    if (!resolvedDirectory) {
+      throw new ScheduleServiceError('A remote schedule requires an absolute target directory', 400)
+    }
+    return {
+      repo: null,
+      client: this.serverClient(target.serverId),
+      directory: resolvedDirectory,
+      repoId: null,
+      serverId: target.serverId,
+    }
+  }
+
+  private resolveTargetPersistence(target: ScheduleJobTarget): { repo: Repo | null; repoId: number | null } {
+    if (target.kind === 'repo') {
+      return { repo: this.assertRepo(target.repoId), repoId: target.repoId }
+    }
+    return { repo: null, repoId: null }
+  }
+
+  private targetForJob(job: ScheduleJob): ScheduleJobTarget {
+    if (job.repoId !== null) {
+      return { kind: 'repo', repoId: job.repoId }
+    }
+    return {
+      kind: 'server',
+      serverId: job.serverId ?? LOCAL_OPENCODE_SERVER_ID,
+      directory: job.directory ?? '',
+    }
+  }
+
+  private loadJobForTarget(target: ScheduleJobTarget, jobId: number): ScheduleJob {
+    const job = getScheduleJobById(this.db, target.kind === 'repo' ? target.repoId : null, jobId)
+    if (!job) {
+      throw new ScheduleServiceError('Schedule not found', 404)
+    }
+    if (target.kind === 'server' && (job.serverId ?? LOCAL_OPENCODE_SERVER_ID) !== target.serverId) {
+      throw new ScheduleServiceError('Schedule not found', 404)
+    }
+    return job
+  }
+
+  private assertInPlaceWorkspace(target: ScheduleJobTarget, workspaceMode: ScheduleWorkspaceMode | undefined): void {
+    if (target.kind === 'server') {
+      if (workspaceMode !== undefined && workspaceMode !== 'in-place') {
+        throw new ScheduleServiceError('Schedules on a linked server run in place; worktree workspace modes are only available for local repositories.', 400)
+      }
+      return
+    }
+    if (workspaceMode === 'in-place') {
+      throw new ScheduleServiceError('In-place workspace mode is only available for schedules on a linked server.', 400)
     }
   }
 
@@ -449,16 +602,45 @@ export class ScheduleService {
     return listScheduleJobsByRepo(this.db, repoId)
   }
 
+  listServerJobs(serverId: string): ScheduleJob[] {
+    return listScheduleJobsByServer(this.db, serverId)
+  }
+
   getJob(repoId: number, jobId: number): ScheduleJob | null {
     return getScheduleJobById(this.db, repoId, jobId)
   }
 
+  getServerJob(serverId: string, jobId: number): ScheduleJob | null {
+    const job = getScheduleJobById(this.db, null, jobId)
+    return job && job.serverId === serverId ? job : null
+  }
+
   async createJob(repoId: number, input: CreateScheduleJobRequest): Promise<ScheduleJob> {
-    const repo = this.assertRepo(repoId)
-    await this.assertAgentAvailable(repo.fullPath, input.agentSlug?.trim() || null)
+    return this.createJobForTarget({ kind: 'repo', repoId }, input)
+  }
+
+  async createServerJob(serverId: string, directory: string, input: CreateScheduleJobRequest): Promise<ScheduleJob> {
+    if (!path.isAbsolute(directory)) {
+      throw new ScheduleServiceError('A remote schedule requires an absolute target directory', 400)
+    }
+    return this.createJobForTarget({ kind: 'server', serverId, directory }, input)
+  }
+
+  private async createJobForTarget(target: ScheduleJobTarget, input: CreateScheduleJobRequest): Promise<ScheduleJob> {
+    this.assertInPlaceWorkspace(target, input.workspaceMode)
+    const context = this.resolveTargetContext(target)
+    await this.assertAgentAvailable(context.client, context.directory, input.agentSlug?.trim() || null)
+    const request = target.kind === 'server'
+      ? { ...input, workspaceMode: 'in-place' as const, directory: context.directory, branch: null }
+      : { ...input, directory: undefined }
 
     try {
-      const job = createScheduleJob(this.db, repoId, buildCreateSchedulePersistenceInput(input))
+      const job = createScheduleJob(
+        this.db,
+        context.repoId,
+        buildCreateSchedulePersistenceInput(request),
+        context.serverId,
+      )
       this.onJobChange?.(job, job.id)
       return job
     } catch (error) {
@@ -467,23 +649,40 @@ export class ScheduleService {
   }
 
   async updateJob(repoId: number, jobId: number, input: UpdateScheduleJobRequest): Promise<ScheduleJob> {
-    const repo = this.assertRepo(repoId)
-    const existing = this.assertJob(repoId, jobId)
+    return this.updateJobForTarget({ kind: 'repo', repoId }, jobId, input)
+  }
+
+  async updateServerJob(serverId: string, jobId: number, input: UpdateScheduleJobRequest): Promise<ScheduleJob> {
+    if (input.directory !== undefined && input.directory !== null && !path.isAbsolute(input.directory)) {
+      throw new ScheduleServiceError('A remote schedule requires an absolute target directory', 400)
+    }
+    return this.updateJobForTarget({ kind: 'server', serverId, directory: '' }, jobId, input)
+  }
+
+  private async updateJobForTarget(target: ScheduleJobTarget, jobId: number, input: UpdateScheduleJobRequest): Promise<ScheduleJob> {
+    const existing = this.loadJobForTarget(target, jobId)
+    this.assertInPlaceWorkspace(target, input.workspaceMode)
+    const context = this.resolveTargetContext(target, input.directory ?? existing.directory)
+
     if (input.agentSlug !== undefined) {
-      await this.assertAgentAvailable(repo.fullPath, input.agentSlug?.trim() || null)
+      await this.assertAgentAvailable(context.client, context.directory, input.agentSlug?.trim() || null)
     }
 
     if (input.workspaceMode !== undefined && input.workspaceMode !== existing.workspaceMode) {
-      const running = ScheduleService.activeRuns.has(jobId) || getRunningScheduleRunByJob(this.db, repoId, jobId) !== null
+      const running = ScheduleService.activeRuns.has(jobId) || getRunningScheduleRunByJob(this.db, context.repoId, jobId) !== null
       if (running) {
         throw new ScheduleServiceError('Cannot change where runs execute while a run is in progress.', 409)
       }
     }
 
+    const request = target.kind === 'server'
+      ? { ...input, workspaceMode: 'in-place' as const, directory: input.directory ?? existing.directory ?? context.directory, branch: null }
+      : { ...input, directory: undefined }
+
     let job: ScheduleJob | null
 
     try {
-      job = updateScheduleJob(this.db, repoId, jobId, buildUpdatedSchedulePersistenceInput(existing, input))
+      job = updateScheduleJob(this.db, context.repoId, jobId, buildUpdatedSchedulePersistenceInput(existing, request))
     } catch (error) {
       throw new ScheduleServiceError(getErrorMessage(error), 400)
     }
@@ -496,8 +695,16 @@ export class ScheduleService {
   }
 
   async deleteJob(repoId: number, jobId: number): Promise<void> {
-    this.assertRepo(repoId)
-    const job = this.assertJob(repoId, jobId)
+    return this.deleteJobForTarget({ kind: 'repo', repoId }, jobId)
+  }
+
+  async deleteServerJob(serverId: string, jobId: number): Promise<void> {
+    return this.deleteJobForTarget({ kind: 'server', serverId, directory: '' }, jobId)
+  }
+
+  private async deleteJobForTarget(target: ScheduleJobTarget, jobId: number): Promise<void> {
+    const job = this.loadJobForTarget(target, jobId)
+    const { repoId } = this.resolveTargetPersistence(target)
 
     if (ScheduleService.activeRuns.has(jobId)) {
       throw new ScheduleServiceError('Cannot delete a schedule while it is running. Cancel the run first.', 409)
@@ -512,7 +719,9 @@ export class ScheduleService {
     ScheduleService.activeRuns.set(jobId, { runId: DELETION_RESERVATION_RUN_ID, abort: new AbortController() })
 
     try {
-      await this.removeWorktrees(repoId, jobId)
+      if (target.kind === 'repo') {
+        await this.removeWorktrees(target.repoId, jobId)
+      }
 
       const deleted = deleteScheduleJob(this.db, repoId, jobId)
       if (!deleted) {
@@ -564,9 +773,23 @@ export class ScheduleService {
     return listScheduleRunsByJob(this.db, repoId, jobId, limit)
   }
 
+  listServerRuns(serverId: string, jobId: number, limit: number = 20): ScheduleRun[] {
+    this.loadJobForTarget({ kind: 'server', serverId, directory: '' }, jobId)
+    return listScheduleRunsByJob(this.db, null, jobId, limit)
+  }
+
   getRun(repoId: number, jobId: number, runId: number): ScheduleRun {
     this.assertJob(repoId, jobId)
     const run = getScheduleRunById(this.db, repoId, jobId, runId)
+    if (!run) {
+      throw new ScheduleServiceError('Run not found', 404)
+    }
+    return run
+  }
+
+  getServerRun(serverId: string, jobId: number, runId: number): ScheduleRun {
+    this.loadJobForTarget({ kind: 'server', serverId, directory: '' }, jobId)
+    const run = getScheduleRunById(this.db, null, jobId, runId)
     if (!run) {
       throw new ScheduleServiceError('Run not found', 404)
     }
@@ -581,15 +804,25 @@ export class ScheduleService {
    * discarded along with its branch (`discard`).
    */
   async clearRunHistory(repoId: number, jobId: number, worktrees: ScheduleRunWorktreesMode = 'commit'): Promise<{ cleared: number }> {
-    const repo = this.assertRepo(repoId)
-    const job = this.assertJob(repoId, jobId)
+    return this.clearRunHistoryForTarget({ kind: 'repo', repoId }, jobId, worktrees)
+  }
+
+  async clearServerRunHistory(serverId: string, jobId: number): Promise<{ cleared: number }> {
+    return this.clearRunHistoryForTarget({ kind: 'server', serverId, directory: '' }, jobId)
+  }
+
+  private async clearRunHistoryForTarget(target: ScheduleJobTarget, jobId: number, worktrees: ScheduleRunWorktreesMode = 'commit'): Promise<{ cleared: number }> {
+    const job = this.loadJobForTarget(target, jobId)
+    const { repo, repoId } = this.resolveTargetPersistence(target)
 
     const removable = listScheduleRunArtifactsByJob(this.db, repoId, jobId).filter((run) => run.status !== 'running')
     if (removable.length === 0) {
       return { cleared: 0 }
     }
 
-    await this.worktreeManager.pruneRunArtifacts(repo, job, removable, worktrees)
+    if (repo) {
+      await this.worktreeManager.pruneRunArtifacts(repo, job, removable, worktrees)
+    }
     const cleared = deleteScheduleRunsByIds(this.db, repoId, jobId, removable.map((run) => run.id))
     return { cleared }
   }
@@ -601,15 +834,28 @@ export class ScheduleService {
    * discarded along with its branch (`discard`).
    */
   async deleteRun(repoId: number, jobId: number, runId: number, worktrees: ScheduleRunWorktreesMode = 'commit'): Promise<void> {
-    const repo = this.assertRepo(repoId)
-    const job = this.assertJob(repoId, jobId)
-    const run = this.getRun(repoId, jobId, runId)
+    return this.deleteRunForTarget({ kind: 'repo', repoId }, jobId, runId, worktrees)
+  }
 
+  async deleteServerRun(serverId: string, jobId: number, runId: number): Promise<void> {
+    return this.deleteRunForTarget({ kind: 'server', serverId, directory: '' }, jobId, runId)
+  }
+
+  private async deleteRunForTarget(target: ScheduleJobTarget, jobId: number, runId: number, worktrees: ScheduleRunWorktreesMode = 'commit'): Promise<void> {
+    const job = this.loadJobForTarget(target, jobId)
+    const { repo, repoId } = this.resolveTargetPersistence(target)
+    const run = getScheduleRunById(this.db, repoId, jobId, runId)
+
+    if (!run) {
+      throw new ScheduleServiceError('Run not found', 404)
+    }
     if (run.status === 'running') {
       throw new ScheduleServiceError('Cannot delete a run while it is in progress. Cancel it first.', 409)
     }
 
-    await this.worktreeManager.pruneRunArtifacts(repo, job, [{ runBranch: run.runBranch, worktreePath: run.worktreePath }], worktrees)
+    if (repo) {
+      await this.worktreeManager.pruneRunArtifacts(repo, job, [{ runBranch: run.runBranch, worktreePath: run.worktreePath }], worktrees)
+    }
     const deleted = deleteScheduleRunById(this.db, repoId, jobId, runId)
     if (!deleted) {
       throw new ScheduleServiceError('Run not found', 404)
@@ -617,8 +863,21 @@ export class ScheduleService {
   }
 
   async runJob(repoId: number, jobId: number, triggerSource: ScheduleRunTriggerSource): Promise<ScheduleRun> {
-    const repo = this.assertRepo(repoId)
-    const job = this.assertJob(repoId, jobId)
+    return this.runJobForTarget({ kind: 'repo', repoId }, jobId, triggerSource)
+  }
+
+  async runServerJob(serverId: string, jobId: number, triggerSource: ScheduleRunTriggerSource): Promise<ScheduleRun> {
+    return this.runJobForTarget({ kind: 'server', serverId, directory: '' }, jobId, triggerSource)
+  }
+
+  async runJobForJob(job: ScheduleJob, triggerSource: ScheduleRunTriggerSource): Promise<ScheduleRun> {
+    return this.runJobForTarget(this.targetForJob(job), job.id, triggerSource)
+  }
+
+  private async runJobForTarget(target: ScheduleJobTarget, jobId: number, triggerSource: ScheduleRunTriggerSource): Promise<ScheduleRun> {
+    const job = this.loadJobForTarget(target, jobId)
+    const repoId = target.kind === 'repo' ? target.repoId : null
+    const serverId = target.kind === 'repo' ? LOCAL_OPENCODE_SERVER_ID : target.serverId
 
     const existingRunningRun = getRunningScheduleRunByJob(this.db, repoId, jobId)
     if (existingRunningRun) {
@@ -633,6 +892,7 @@ export class ScheduleService {
     const run = createScheduleRun(this.db, {
       jobId,
       repoId,
+      serverId,
       triggerSource,
       status: 'running',
       startedAt,
@@ -641,42 +901,48 @@ export class ScheduleService {
 
     const abort = new AbortController()
     ScheduleService.activeRuns.set(jobId, { runId: run.id, abort })
+    let repo: Repo | null = null
 
     try {
-      // Prepare worktree for isolated runs
-      const wt = await this.worktreeManager.prepare(repo, job, run.id)
-      const runDirectory = wt?.directory ?? repo.fullPath
-      if (wt) {
-        updateScheduleRunWorktree(this.db, repoId, jobId, run.id, {
-          worktreePath: wt.worktreePath,
-          runBranch: wt.runBranch,
-        })
+      const context = this.resolveTargetContext(target, job.directory)
+      repo = context.repo
+
+      let runDirectory = context.directory
+      if (repo) {
+        const wt = await this.worktreeManager.prepare(repo, job, run.id)
+        if (wt) {
+          runDirectory = wt.directory
+          updateScheduleRunWorktree(this.db, repoId, jobId, run.id, {
+            worktreePath: wt.worktreePath,
+            runBranch: wt.runBranch,
+          })
+        }
       }
 
       if (abort.signal.aborted) {
-        return this.abandonCancelledStartup(repoId, jobId, run, job, repo)
+        return this.abandonCancelledStartup(context.client, repoId, jobId, run, job, repo)
       }
 
-      const runJob = { ...job, agentSlug: await this.resolveRunAgent(runDirectory, job.agentSlug) }
-      const model = await resolveOpenCodeModel(this.openCodeClient, runDirectory, {
+      const runJob = { ...job, agentSlug: await this.resolveRunAgent(context.client, runDirectory, job.agentSlug) }
+      const model = await resolveOpenCodeModel(context.client, runDirectory, {
         preferredModel: job.model,
         signal: abort.signal,
       })
 
       if (abort.signal.aborted) {
-        return this.abandonCancelledStartup(repoId, jobId, run, job, repo)
+        return this.abandonCancelledStartup(context.client, repoId, jobId, run, job, repo)
       }
 
-      await this.connectMcpServers(runDirectory, job.mcpServers)
+      await this.connectMcpServers(context.client, runDirectory, job.mcpServers)
 
       if (abort.signal.aborted) {
-        return this.abandonCancelledStartup(repoId, jobId, run, job, repo)
+        return this.abandonCancelledStartup(context.client, repoId, jobId, run, job, repo)
       }
 
       const sessionTitle = buildSessionTitle(job)
       let session: { id: string }
       try {
-        session = await this.openCodeClient.api.session.create({
+        session = await context.client.api.session.create({
           title: sessionTitle,
           agent: runJob.agentSlug ?? undefined,
           model: { providerID: model.providerID, id: model.id, variant: model.variant },
@@ -685,13 +951,13 @@ export class ScheduleService {
         })
       } catch (error) {
         if (abort.signal.aborted) {
-          return this.abandonCancelledStartup(repoId, jobId, run, job, repo)
+          return this.abandonCancelledStartup(context.client, repoId, jobId, run, job, repo)
         }
         throw new ScheduleServiceError(getErrorMessage(error) || 'Failed to create OpenCode session', 502)
       }
 
       if (abort.signal.aborted) {
-        return this.abandonCancelledStartup(repoId, jobId, run, job, repo, session.id)
+        return this.abandonCancelledStartup(context.client, repoId, jobId, run, job, repo, session.id)
       }
 
       const runWithSession = updateScheduleRunMetadata(this.db, repoId, jobId, run.id, {
@@ -709,10 +975,13 @@ export class ScheduleService {
         throw new ScheduleServiceError('Failed to attach session to run', 500)
       }
 
-      const sessionMonitor = createSessionMonitor(runDirectory, session.id)
+      const sessionMonitor = createSessionMonitor(runDirectory, session.id, context.serverId)
+      ScheduleService.attachSessionMonitor(jobId, run.id, sessionMonitor)
 
       void this.submitPromptAndMonitor({
         repoId,
+        repo,
+        client: context.client,
         job: runJob,
         runId: run.id,
         sessionId: session.id,
@@ -720,12 +989,20 @@ export class ScheduleService {
         triggerSource,
         sessionMonitor,
         directory: runDirectory,
+        serverId: context.serverId,
       })
 
       return runWithSession
     } catch (error) {
       if (abort.signal.aborted) {
-        return this.abandonCancelledStartup(repoId, jobId, run, job, repo)
+        return this.abandonCancelledStartup(
+          target.kind === 'repo' ? this.openCodeClient : this.safeServerClient(target.serverId),
+          repoId,
+          jobId,
+          run,
+          job,
+          repo,
+        )
       }
 
       const finishedAt = Date.now()
@@ -753,7 +1030,6 @@ export class ScheduleService {
         logger.error(`Failed to update job state for job ${jobId}:`, updateError)
       }
 
-      // Teardown worktree if one was created before the error
       await this.teardownWorktree(repoId, jobId, run.id, job, repo)
 
       ScheduleService.releaseActiveRun(jobId, run.id)
@@ -771,9 +1047,31 @@ export class ScheduleService {
   }
 
   async cancelRun(repoId: number, jobId: number, runId: number): Promise<ScheduleRun> {
-    const repo = this.assertRepo(repoId)
-    const job = this.assertJob(repoId, jobId)
-    const run = this.getRun(repoId, jobId, runId)
+    return this.cancelRunForTarget({ kind: 'repo', repoId }, jobId, runId)
+  }
+
+  async cancelServerRun(serverId: string, jobId: number, runId: number): Promise<ScheduleRun> {
+    return this.cancelRunForTarget({ kind: 'server', serverId, directory: '' }, jobId, runId)
+  }
+
+  private async cancelRunForTarget(target: ScheduleJobTarget, jobId: number, runId: number): Promise<ScheduleRun> {
+    const job = this.loadJobForTarget(target, jobId)
+    let context: ScheduleTargetContext
+
+    try {
+      context = this.resolveTargetContext(target, job.directory)
+    } catch (error) {
+      if (target.kind !== 'server' || !(error instanceof ServerUnavailableError)) {
+        throw error
+      }
+      return this.cancelUnavailableServerRun(job, jobId, runId)
+    }
+
+    const run = getScheduleRunById(this.db, context.repoId, jobId, runId)
+
+    if (!run) {
+      throw new ScheduleServiceError('Run not found', 404)
+    }
 
     if (run.status !== 'running') {
       throw new ScheduleServiceError('Only running schedule runs can be cancelled', 409)
@@ -781,7 +1079,7 @@ export class ScheduleService {
 
     if (!run.sessionId) {
       ScheduleService.abortActiveRun(jobId, runId)
-      return this.finalizeCancelledRun(repo, job, run, repoId, jobId, runId)
+      return this.finalizeCancelledRun(context.repo, job, run, context.repoId, jobId, runId)
     }
 
     ScheduleService.requestCancel(jobId, runId)
@@ -789,7 +1087,7 @@ export class ScheduleService {
     try {
       let outcome: AssistantOutcome
       try {
-        outcome = await this.readAssistantOutcome(run.sessionId)
+        outcome = await this.readAssistantOutcome(context.client, run.sessionId)
       } catch (error) {
         throw new ScheduleServiceError(getErrorMessage(error) || 'Failed to cancel schedule run', 502)
       }
@@ -799,25 +1097,50 @@ export class ScheduleService {
           status: outcome.errorText ? 'failed' : 'completed',
           responseText: outcome.responseText,
           errorText: outcome.errorText,
-        }, repo)
+        }, context.repo)
         ScheduleService.resolveCancel(jobId, runId, 'settled')
-        return this.getRun(repoId, jobId, runId)
+        return this.getRunById(context.repoId, jobId, runId)
       }
 
       try {
-        await this.openCodeClient.api.session.interrupt({ sessionID: run.sessionId })
+        await context.client.api.session.interrupt({ sessionID: run.sessionId })
       } catch (error) {
         throw new ScheduleServiceError(getErrorMessage(error) || 'Failed to cancel schedule run', 502)
       }
 
-      return await this.finalizeCancelledRun(repo, job, run, repoId, jobId, runId)
+      return await this.finalizeCancelledRun(context.repo, job, run, context.repoId, jobId, runId)
     } catch (error) {
-      this.settleCancelFromState(repoId, jobId, runId)
+      this.settleCancelFromState(context.repoId, jobId, runId)
       throw error
     }
   }
 
-  private settleCancelFromState(repoId: number, jobId: number, runId: number): void {
+  private async cancelUnavailableServerRun(job: ScheduleJob, jobId: number, runId: number): Promise<ScheduleRun> {
+    const run = getScheduleRunById(this.db, null, jobId, runId)
+
+    if (!run) {
+      throw new ScheduleServiceError('Run not found', 404)
+    }
+
+    if (run.status !== 'running') {
+      throw new ScheduleServiceError('Only running schedule runs can be cancelled', 409)
+    }
+
+    ScheduleService.requestCancel(jobId, runId)
+    ScheduleService.abortActiveRun(jobId, runId)
+    ScheduleService.disposeActiveRunMonitor(jobId, runId)
+    return this.finalizeCancelledRun(null, job, run, null, jobId, runId)
+  }
+
+  private getRunById(repoId: number | null, jobId: number, runId: number): ScheduleRun {
+    const run = getScheduleRunById(this.db, repoId, jobId, runId)
+    if (!run) {
+      throw new ScheduleServiceError('Run not found', 404)
+    }
+    return run
+  }
+
+  private settleCancelFromState(repoId: number | null, jobId: number, runId: number): void {
     let status: ScheduleRun['status'] | undefined
     try {
       status = getScheduleRunById(this.db, repoId, jobId, runId)?.status
@@ -829,10 +1152,10 @@ export class ScheduleService {
   }
 
   private async finalizeCancelledRun(
-    repo: Repo,
+    repo: Repo | null,
     job: ScheduleJob,
     run: ScheduleRun,
-    repoId: number,
+    repoId: number | null,
     jobId: number,
     runId: number,
   ): Promise<ScheduleRun> {
@@ -873,7 +1196,10 @@ export class ScheduleService {
   }
 
   private async submitPromptAndMonitor(input: {
-    repoId: number
+    repoId: number | null
+    repo: Repo | null
+    client: OpenCodeClient
+    serverId: string
     job: ScheduleJob
     runId: number
     sessionId: string
@@ -882,21 +1208,19 @@ export class ScheduleService {
     sessionMonitor: SessionMonitor
     directory: string
   }): Promise<void> {
-    const repo = this.assertRepo(input.repoId)
-
     try {
       if ((await ScheduleService.awaitCancelDecision(input.job.id, input.runId)) !== 'resume') {
         return
       }
 
-      const skills = await this.resolveSkillAttachments(input.directory, input.job.skillMetadata)
+      const skills = await this.resolveSkillAttachments(input.client, input.directory, input.job.skillMetadata)
 
       if ((await ScheduleService.awaitCancelDecision(input.job.id, input.runId)) !== 'resume') {
         return
       }
 
       const notes = input.job.skillMetadata?.notes?.trim()
-      await this.openCodeClient.api.session.prompt({
+      await input.client.api.session.prompt({
         sessionID: input.sessionId,
         text: notes ? `${input.job.prompt}\n\nSkill notes: ${notes}` : input.job.prompt,
         ...(skills.length > 0 ? { skills } : {}),
@@ -911,6 +1235,9 @@ export class ScheduleService {
       await this.monitorRunCompletion({
         sessionMonitor: input.sessionMonitor,
         repoId: input.repoId,
+        repo: input.repo,
+        client: input.client,
+        serverId: input.serverId,
         job: input.job,
         runId: input.runId,
         sessionId: input.sessionId,
@@ -955,7 +1282,7 @@ export class ScheduleService {
     } finally {
       await ScheduleService.awaitCancelDecision(input.job.id, input.runId)
       input.sessionMonitor.dispose()
-      await this.teardownWorktree(input.repoId, input.job.id, input.runId, input.job, repo)
+      await this.teardownWorktree(input.repoId, input.job.id, input.runId, input.job, input.repo)
       ScheduleService.releaseActiveRun(input.job.id, input.runId)
       ScheduleService.clearCancel(input.job.id, input.runId)
     }
@@ -963,7 +1290,10 @@ export class ScheduleService {
 
   private async monitorRunCompletion(input: {
     sessionMonitor: SessionMonitor
-    repoId: number
+    repoId: number | null
+    repo: Repo | null
+    client: OpenCodeClient
+    serverId: string
     job: ScheduleJob
     runId: number
     sessionId: string
@@ -971,8 +1301,7 @@ export class ScheduleService {
     triggerSource: ScheduleRunTriggerSource
   }): Promise<void> {
     try {
-      const repo = this.assertRepo(input.repoId)
-      const currentAssistantState = await this.readSettledAssistantState(input.sessionId)
+      const currentAssistantState = await this.readSettledAssistantState(input.client, input.sessionId)
       if (currentAssistantState) {
         if ((await ScheduleService.awaitCancelDecision(input.job.id, input.runId)) !== 'resume') {
           return
@@ -989,11 +1318,11 @@ export class ScheduleService {
           status: currentAssistantState.errorText ? 'failed' : 'completed',
           responseText: currentAssistantState.responseText,
           errorText: currentAssistantState.errorText,
-        }, repo)
+        }, input.repo)
         return
       }
 
-      const response = await this.waitForAssistantMessage(input.sessionId, input.sessionMonitor)
+      const response = await this.waitForAssistantMessage(input.client, input.sessionId, input.sessionMonitor)
 
       if ((await ScheduleService.awaitCancelDecision(input.job.id, input.runId)) !== 'resume') {
         return
@@ -1083,16 +1412,20 @@ export class ScheduleService {
     } finally {
       await ScheduleService.awaitCancelDecision(input.job.id, input.runId)
       input.sessionMonitor.dispose()
-      await this.teardownWorktree(input.repoId, input.job.id, input.runId, input.job, this.assertRepo(input.repoId))
+      await this.teardownWorktree(input.repoId, input.job.id, input.runId, input.job, input.repo)
       ScheduleService.releaseActiveRun(input.job.id, input.runId)
       ScheduleService.clearCancel(input.job.id, input.runId)
     }
   }
 
   private async recoverRunningRun(job: ScheduleJob, run: ScheduleRun): Promise<void> {
+    const target = this.targetForJob(job)
+    let repo: Repo | null = null
+
     try {
-      const repo = this.assertRepo(job.repoId)
-      const runDirectory = run.worktreePath ?? repo.fullPath
+      const context = this.resolveTargetContext(target, job.directory)
+      repo = context.repo
+      const runDirectory = run.worktreePath ?? context.directory
 
       if (!run.sessionId) {
         await this.finalizeRecoveredRun(job, run, {
@@ -1102,7 +1435,7 @@ export class ScheduleService {
         return
       }
 
-      const outcome = await this.readAssistantOutcome(run.sessionId)
+      const outcome = await this.readAssistantOutcome(context.client, run.sessionId)
 
       if (outcome.kind === 'settled') {
         await this.finalizeRecoveredRun(job, run, {
@@ -1114,10 +1447,14 @@ export class ScheduleService {
       }
 
       if (outcome.kind === 'busy') {
-        const sessionMonitor = createSessionMonitor(runDirectory, run.sessionId)
+        const sessionMonitor = createSessionMonitor(runDirectory, run.sessionId, context.serverId)
+        ScheduleService.attachSessionMonitor(job.id, run.id, sessionMonitor)
         void this.monitorRunCompletion({
           sessionMonitor,
           repoId: run.repoId,
+          repo,
+          client: context.client,
+          serverId: context.serverId,
           job,
           runId: run.id,
           sessionId: run.sessionId,
@@ -1138,7 +1475,7 @@ export class ScheduleService {
       await this.finalizeRecoveredRun(job, run, {
         status: 'failed',
         errorText,
-      }, this.assertRepo(job.repoId))
+      }, repo)
     }
   }
 
@@ -1150,7 +1487,7 @@ export class ScheduleService {
       responseText?: string | null
       errorText?: string | null
     },
-    repo: Repo,
+    repo: Repo | null,
   ): Promise<void> {
     const finishedAt = Date.now()
 
@@ -1181,28 +1518,29 @@ export class ScheduleService {
     ScheduleService.releaseActiveRun(job.id, run.id)
   }
 
-  private async interruptCancelledSession(sessionId: string): Promise<void> {
+  private async interruptCancelledSession(client: OpenCodeClient, sessionId: string): Promise<void> {
     try {
-      await this.openCodeClient.api.session.interrupt({ sessionID: sessionId })
+      await client.api.session.interrupt({ sessionID: sessionId })
     } catch (error) {
       logger.error(`Failed to interrupt cancelled schedule session ${sessionId}:`, error)
     }
   }
 
-  private loadRun(repoId: number, jobId: number, runId: number, fallback: ScheduleRun): ScheduleRun {
+  private loadRun(repoId: number | null, jobId: number, runId: number, fallback: ScheduleRun): ScheduleRun {
     return getScheduleRunById(this.db, repoId, jobId, runId) ?? fallback
   }
 
   private async abandonCancelledStartup(
-    repoId: number,
+    client: OpenCodeClient,
+    repoId: number | null,
     jobId: number,
     run: ScheduleRun,
     job: ScheduleJob,
-    repo: Repo,
+    repo: Repo | null,
     sessionId?: string,
   ): Promise<ScheduleRun> {
     if (sessionId) {
-      await this.interruptCancelledSession(sessionId)
+      await this.interruptCancelledSession(client, sessionId)
     }
     ScheduleService.clearCancel(jobId, run.id)
     await this.teardownWorktree(repoId, jobId, run.id, job, repo)
@@ -1210,7 +1548,8 @@ export class ScheduleService {
     return this.loadRun(repoId, jobId, run.id, run)
   }
 
-  private async teardownWorktree(repoId: number, jobId: number, runId: number, job: ScheduleJob, repo: Repo): Promise<void> {
+  private async teardownWorktree(repoId: number | null, jobId: number, runId: number, job: ScheduleJob, repo: Repo | null): Promise<void> {
+    if (!repo) return
     const key = `${repoId}:${jobId}:${runId}`
     if (ScheduleService.activeTeardowns.has(key)) return
     ScheduleService.activeTeardowns.add(key)
@@ -1241,12 +1580,12 @@ export class ScheduleService {
    * settles one message per tool call. Only a session that has gone idle has
    * finished, and only then is the final message guaranteed to carry its content.
    */
-  private async readAssistantOutcome(sessionId: string): Promise<AssistantOutcome> {
-    if (await this.isSessionActive(sessionId)) {
+  private async readAssistantOutcome(client: OpenCodeClient, sessionId: string): Promise<AssistantOutcome> {
+    if (await this.isSessionActive(client, sessionId)) {
       return { kind: 'busy' }
     }
 
-    const assistantState = await this.readAssistantReply(sessionId)
+    const assistantState = await this.readAssistantReply(client, sessionId)
     if (assistantState?.completed || assistantState?.errorText) {
       return { kind: 'settled', responseText: assistantState.responseText, errorText: assistantState.errorText }
     }
@@ -1255,15 +1594,17 @@ export class ScheduleService {
   }
 
   private async readSettledAssistantState(
+    client: OpenCodeClient,
     sessionId: string,
   ): Promise<{ responseText: string | null; errorText: string | null } | null> {
-    const outcome = await this.readAssistantOutcome(sessionId)
+    const outcome = await this.readAssistantOutcome(client, sessionId)
     return outcome.kind === 'settled'
       ? { responseText: outcome.responseText, errorText: outcome.errorText }
       : null
   }
 
   private async waitForAssistantMessage(
+    client: OpenCodeClient,
     sessionId: string,
     sessionMonitor: SessionMonitor,
   ): Promise<{ responseText: string | null; errorText: string | null }> {
@@ -1271,14 +1612,14 @@ export class ScheduleService {
       const signal = await sessionMonitor.nextSignal()
 
       if (signal.errorText || signal.disposed) {
-        const assistantState = await this.readAssistantReply(sessionId)
+        const assistantState = await this.readAssistantReply(client, sessionId)
         return {
           responseText: assistantState?.responseText ?? null,
           errorText: signal.errorText ?? SESSION_STOPPED_ERROR,
         }
       }
 
-      const outcome = await this.readAssistantOutcome(sessionId)
+      const outcome = await this.readAssistantOutcome(client, sessionId)
 
       if (outcome.kind === 'busy') {
         continue
@@ -1292,25 +1633,25 @@ export class ScheduleService {
     }
   }
 
-  private async readAssistantReply(sessionId: string): Promise<AssistantReplyState | null> {
+  private async readAssistantReply(client: OpenCodeClient, sessionId: string): Promise<AssistantReplyState | null> {
     try {
-      return await readLatestAssistantReply(this.openCodeClient, sessionId)
+      return await readLatestAssistantReply(client, sessionId)
     } catch (error) {
       throw new ScheduleServiceError(getErrorMessage(error) || 'Failed to fetch session messages', 502)
     }
   }
 
-  private async isSessionActive(sessionId: string): Promise<boolean> {
+  private async isSessionActive(client: OpenCodeClient, sessionId: string): Promise<boolean> {
     try {
-      return await isSessionBusy(this.openCodeClient, sessionId)
+      return await isSessionBusy(client, sessionId)
     } catch (error) {
       throw new ScheduleServiceError(getErrorMessage(error) || 'Failed to fetch active sessions', 502)
     }
   }
 
-  private async listAgentIds(directory: string): Promise<Set<string>> {
+  private async listAgentIds(client: OpenCodeClient, directory: string): Promise<Set<string>> {
     try {
-      const response = await this.openCodeClient.api.agent.list(openCodeLocation(directory))
+      const response = await client.api.agent.list(openCodeLocation(directory))
       return new Set(response.data.map((agent) => agent.id))
     } catch (error) {
       throw new ScheduleServiceError(getErrorMessage(error) || 'Failed to list agents', 502)
@@ -1321,12 +1662,12 @@ export class ScheduleService {
    * OpenCode admits a prompt for a session whose agent does not exist at its location
    * but never delivers it, so a scheduled run falls back to the default agent when its agent is gone.
    */
-  private async resolveRunAgent(directory: string, agentSlug: string | null): Promise<string | null> {
+  private async resolveRunAgent(client: OpenCodeClient, directory: string, agentSlug: string | null): Promise<string | null> {
     if (!agentSlug) {
       return null
     }
 
-    if ((await this.listAgentIds(directory)).has(agentSlug)) {
+    if ((await this.listAgentIds(client, directory)).has(agentSlug)) {
       return agentSlug
     }
 
@@ -1334,12 +1675,12 @@ export class ScheduleService {
     return null
   }
 
-  private async assertAgentAvailable(directory: string, agentSlug: string | null): Promise<void> {
+  private async assertAgentAvailable(client: OpenCodeClient, directory: string, agentSlug: string | null): Promise<void> {
     if (!agentSlug) {
       return
     }
 
-    if (!(await this.listAgentIds(directory)).has(agentSlug)) {
+    if (!(await this.listAgentIds(client, directory)).has(agentSlug)) {
       throw new ScheduleServiceError(
         `Agent "${agentSlug}" is not available in ${directory}. Choose an agent defined for this repo in the schedule settings, or clear the agent to use the default.`,
         400,
@@ -1352,12 +1693,12 @@ export class ScheduleService {
    * session starts. Schedule-only servers are added to that location, and configured servers
    * are connected even when their config disables them; both last until OpenCode restarts.
    */
-  private async connectMcpServers(directory: string, servers: ScheduleJob['mcpServers']): Promise<void> {
+  private async connectMcpServers(client: OpenCodeClient, directory: string, servers: ScheduleJob['mcpServers']): Promise<void> {
     if (servers.length === 0) {
       return
     }
 
-    const api = this.openCodeClient.api
+    const api = client.api
     const location = openCodeLocation(directory)
     const readStatuses = async () => mcpStatusByName((await api.mcp.list(location)).data)
 
@@ -1395,6 +1736,7 @@ export class ScheduleService {
   }
 
   private async resolveSkillAttachments(
+    client: OpenCodeClient,
     directory: string,
     skillMetadata: ScheduleJob['skillMetadata'],
   ): Promise<SkillAttachment[]> {
@@ -1405,7 +1747,7 @@ export class ScheduleService {
 
     let availableSkills: Set<string>
     try {
-      const response = await this.openCodeClient.api.skill.list(openCodeLocation(directory))
+      const response = await client.api.skill.list(openCodeLocation(directory))
       availableSkills = new Set(response.data.map((skill) => skill.id))
     } catch (error) {
       logger.warn('Failed to list skills for the scheduled run; continuing without skill attachments:', error)
@@ -1521,7 +1863,7 @@ export class ScheduleRunner {
       }
       const cron = new Cron(job.cronExpression, options, () => {
         logger.info(`Cron triggered for job ${job.id}: ${job.name}`)
-        void this.executeJob(job.repoId, job.id)
+        void this.executeJob(job)
       })
       this.cronJobs.set(job.id, cron)
       logger.info(`Cron job created for ${job.id}: next run at ${cron.nextRun()?.toISOString()}`)
@@ -1548,7 +1890,7 @@ export class ScheduleRunner {
       const now = new Date()
 
       if (nextRunDate <= now) {
-        void this.executeJob(job.repoId, job.id)
+        void this.executeJob(job)
       }
 
       const cronOptions = {
@@ -1557,7 +1899,7 @@ export class ScheduleRunner {
       }
       const cron = new Cron(cronExpression, cronOptions, () => {
         logger.info(`Cron triggered for job ${job.id}: ${job.name}`)
-        void this.executeJob(job.repoId, job.id)
+        void this.executeJob(job)
       })
       this.cronJobs.set(job.id, cron)
     } else {
@@ -1573,7 +1915,7 @@ export class ScheduleRunner {
           isRunning = true
           logger.info(`Interval timer triggered for job ${job.id}: ${job.name}`)
           try {
-            await this.executeJob(job.repoId, job.id)
+            await this.executeJob(job)
           } finally {
             isRunning = false
             scheduleNext()
@@ -1587,7 +1929,7 @@ export class ScheduleRunner {
           if (isStopped || isRunning) return
           isRunning = true
           logger.info(`Interval timer triggered for job ${job.id}: ${job.name}`)
-          void this.executeJob(job.repoId, job.id).finally(() => {
+          void this.executeJob(job).finally(() => {
             isRunning = false
             scheduleNext()
           })
@@ -1595,7 +1937,7 @@ export class ScheduleRunner {
       } else {
         if (!isStopped) {
           isRunning = true
-          void this.executeJob(job.repoId, job.id).finally(() => {
+          void this.executeJob(job).finally(() => {
             isRunning = false
             scheduleNext()
           })
@@ -1619,11 +1961,11 @@ export class ScheduleRunner {
     }
   }
 
-  private async executeJob(repoId: number, jobId: number): Promise<void> {
+  private async executeJob(job: ScheduleJob): Promise<void> {
     try {
-      await this.scheduleService.runJob(repoId, jobId, 'schedule')
+      await this.scheduleService.runJobForJob(job, 'schedule')
     } catch (error) {
-      logger.error(`Scheduled run failed for job ${jobId}:`, error)
+      logger.error(`Scheduled run failed for job ${job.id}:`, error)
     }
   }
 

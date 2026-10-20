@@ -41,6 +41,11 @@ export function shortenPath(path: string, maxSegments = 3): string {
   return `/.../${segments.slice(-maxSegments).join('/')}`
 }
 
+/** Returns the final segment of a directory path, or the path itself when it has none. */
+export function getDirectoryName(path: string): string {
+  return path.split('/').filter(Boolean).at(-1) ?? path
+}
+
 export function randomId(): string {
   if (typeof crypto !== 'undefined' && typeof crypto.randomUUID === 'function') {
     return crypto.randomUUID()

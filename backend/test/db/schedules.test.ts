@@ -66,7 +66,7 @@ describe('schedule database queries', () => {
 
     const jobs = schedulesDb.listScheduleJobsByRepo(mockDb, 42)
 
-    expect(mockDb.prepare).toHaveBeenCalledWith('SELECT * FROM schedule_jobs WHERE repo_id = ? ORDER BY created_at DESC')
+    expect(mockDb.prepare).toHaveBeenCalledWith('SELECT * FROM schedule_jobs WHERE repo_id IS ? ORDER BY created_at DESC')
     expect(jobs[0]).toMatchObject({
       id: 7,
       repoId: 42,
@@ -86,7 +86,7 @@ describe('schedule database queries', () => {
 
     const jobIds = schedulesDb.listScheduleJobIdsByRepo(mockDb, 42)
 
-    expect(mockDb.prepare).toHaveBeenCalledWith('SELECT id FROM schedule_jobs WHERE repo_id = ? ORDER BY created_at DESC')
+    expect(mockDb.prepare).toHaveBeenCalledWith('SELECT id FROM schedule_jobs WHERE repo_id IS ? ORDER BY created_at DESC')
     expect(stmt.all).toHaveBeenCalledWith(42)
     expect(jobIds).toEqual([7, 8])
   })
@@ -122,6 +122,8 @@ describe('schedule database queries', () => {
 
     expect(insertStmt.run).toHaveBeenCalledWith(
       42,
+      'local',
+      null,
       'Weekly engineering summary',
       'Summarize repo health and recent changes.',
       1,
@@ -196,6 +198,7 @@ describe('schedule database queries', () => {
       null,
       null,
       'worktree',
+      null,
       expect.any(Number),
       null,
       42,
@@ -222,9 +225,9 @@ describe('schedule database queries', () => {
 
     const deleted = schedulesDb.deleteScheduleJob(mockDb, 42, 7)
 
-    expect(mockDb.prepare).toHaveBeenNthCalledWith(1, 'DELETE FROM schedule_runs WHERE repo_id = ? AND job_id = ?')
+    expect(mockDb.prepare).toHaveBeenNthCalledWith(1, 'DELETE FROM schedule_runs WHERE repo_id IS ? AND job_id = ?')
     expect(deleteRunsStmt.run).toHaveBeenCalledWith(42, 7)
-    expect(mockDb.prepare).toHaveBeenNthCalledWith(2, 'DELETE FROM schedule_jobs WHERE repo_id = ? AND id = ?')
+    expect(mockDb.prepare).toHaveBeenNthCalledWith(2, 'DELETE FROM schedule_jobs WHERE repo_id IS ? AND id = ?')
     expect(deleteJobStmt.run).toHaveBeenCalledWith(42, 7)
     expect(deleted).toBe(true)
   })
@@ -341,7 +344,7 @@ describe('schedule database queries', () => {
       createdAt: Date.UTC(2026, 2, 9, 12, 0, 0),
     })
 
-    expect(insertStmt.run).toHaveBeenCalledWith(7, 42, 'manual', 'running', expect.any(Number), expect.any(Number))
+    expect(insertStmt.run).toHaveBeenCalledWith(7, 42, 'local', 'manual', 'running', expect.any(Number), expect.any(Number))
     expect(run.id).toBe(5)
   })
 
@@ -416,7 +419,7 @@ describe('schedule database queries', () => {
 
     const job = schedulesDb.getScheduleJobById(mockDb, 42, 7)
 
-    expect(mockDb.prepare).toHaveBeenCalledWith('SELECT * FROM schedule_jobs WHERE repo_id = ? AND id = ?')
+    expect(mockDb.prepare).toHaveBeenCalledWith('SELECT * FROM schedule_jobs WHERE repo_id IS ? AND id = ?')
     expect(stmt.get).toHaveBeenCalledWith(42, 7)
     expect(job).toMatchObject({ id: 7, repoId: 42, name: 'Weekly engineering summary', branch: null })
   })
@@ -451,7 +454,7 @@ describe('schedule database queries', () => {
 
     const result = schedulesDb.deleteScheduleJob(mockDb, 42, 7)
 
-    expect(mockDb.prepare).toHaveBeenCalledWith('DELETE FROM schedule_jobs WHERE repo_id = ? AND id = ?')
+    expect(mockDb.prepare).toHaveBeenCalledWith('DELETE FROM schedule_jobs WHERE repo_id IS ? AND id = ?')
     expect(stmt.run).toHaveBeenCalledWith(42, 7)
     expect(result).toBe(true)
   })
@@ -477,7 +480,7 @@ describe('schedule database queries', () => {
 
     schedulesDb.updateScheduleJobRunState(mockDb, 42, 7, { lastRunAt, nextRunAt })
 
-    expect(mockDb.prepare).toHaveBeenCalledWith('UPDATE schedule_jobs SET last_run_at = ?, next_run_at = ?, updated_at = ? WHERE repo_id = ? AND id = ?')
+    expect(mockDb.prepare).toHaveBeenCalledWith('UPDATE schedule_jobs SET last_run_at = ?, next_run_at = ?, updated_at = ? WHERE repo_id IS ? AND id = ?')
     expect(stmt.run).toHaveBeenCalledWith(lastRunAt, nextRunAt, expect.any(Number), 42, 7)
   })
 
@@ -525,7 +528,7 @@ describe('schedule database queries', () => {
 
     const run = schedulesDb.getScheduleRunById(mockDb, 42, 7, 5)
 
-    expect(mockDb.prepare).toHaveBeenCalledWith('SELECT * FROM schedule_runs WHERE repo_id = ? AND job_id = ? AND id = ?')
+    expect(mockDb.prepare).toHaveBeenCalledWith('SELECT * FROM schedule_runs WHERE repo_id IS ? AND job_id = ? AND id = ?')
     expect(stmt.get).toHaveBeenCalledWith(42, 7, 5)
     expect(run).toMatchObject({ id: 5, jobId: 7, repoId: 42, status: 'running', runBranch: null, commitHash: null, worktreePath: null })
   })
@@ -538,6 +541,33 @@ describe('schedule database queries', () => {
 
     const run = schedulesDb.getScheduleRunById(mockDb, 42, 7, 5)
 
+    expect(run).toBeNull()
+  })
+
+  it('scopes the run lookup by session id and server id', () => {
+    const stmt = {
+      get: vi.fn().mockReturnValue(makeRunRow({ server_id: 'srv_kitchen' })),
+    }
+    mockDb.prepare.mockReturnValue(stmt)
+
+    const run = schedulesDb.getScheduleRunBySessionId(mockDb, 'ses-1', 'srv_kitchen')
+
+    expect(mockDb.prepare).toHaveBeenCalledWith(
+      'SELECT * FROM schedule_runs WHERE server_id = ? AND session_id = ? ORDER BY started_at DESC LIMIT 1',
+    )
+    expect(stmt.get).toHaveBeenCalledWith('srv_kitchen', 'ses-1')
+    expect(run).toMatchObject({ id: 5, sessionId: 'ses-1' })
+  })
+
+  it('defaults the run lookup to the local server', () => {
+    const stmt = {
+      get: vi.fn().mockReturnValue(undefined),
+    }
+    mockDb.prepare.mockReturnValue(stmt)
+
+    const run = schedulesDb.getScheduleRunBySessionId(mockDb, 'ses-1')
+
+    expect(stmt.get).toHaveBeenCalledWith('local', 'ses-1')
     expect(run).toBeNull()
   })
 
@@ -629,7 +659,7 @@ describe('schedule database queries', () => {
     expect(sql).toContain("sj.name LIKE ? ESCAPE '\\'")
     expect(sql).toContain("r.local_path LIKE ? ESCAPE '\\'")
     const pattern = '%50\\%\\_off%'
-    expect(stmt.all).toHaveBeenCalledWith(pattern, pattern, pattern, pattern, pattern, pattern, 50, 0)
+    expect(stmt.all).toHaveBeenCalledWith(pattern, pattern, pattern, pattern, pattern, pattern, pattern, pattern, 50, 0)
   })
 
   it('ignores a blank search term', () => {
@@ -696,7 +726,7 @@ describe('schedule database queries', () => {
 
     const deleted = schedulesDb.deleteScheduleRunById(mockDb, 42, 7, 5)
 
-    expect(mockDb.prepare).toHaveBeenCalledWith('DELETE FROM schedule_runs WHERE repo_id = ? AND job_id = ? AND id = ?')
+    expect(mockDb.prepare).toHaveBeenCalledWith('DELETE FROM schedule_runs WHERE repo_id IS ? AND job_id = ? AND id = ?')
     expect(stmt.run).toHaveBeenCalledWith(42, 7, 5)
     expect(deleted).toBe(true)
   })
@@ -707,7 +737,7 @@ describe('schedule database queries', () => {
 
     const cleared = schedulesDb.deleteScheduleRunsByIds(mockDb, 42, 7, [3, 1])
 
-    expect(mockDb.prepare).toHaveBeenCalledWith('DELETE FROM schedule_runs WHERE repo_id = ? AND job_id = ? AND id IN (?, ?)')
+    expect(mockDb.prepare).toHaveBeenCalledWith('DELETE FROM schedule_runs WHERE repo_id IS ? AND job_id = ? AND id IN (?, ?)')
     expect(stmt.run).toHaveBeenCalledWith(42, 7, 3, 1)
     expect(cleared).toBe(2)
   })

@@ -7,7 +7,14 @@ import { useMobileTabBar } from '@/hooks/useMobileTabBar'
 import { useUrlParams } from '@/hooks/useUrlParams'
 import { useScheduleUrlState, type ScheduleTab } from '@/hooks/useScheduleUrlState'
 import { useUnreadScheduleRuns } from '@/hooks/useSchedules'
-import { getAssistantPath, isAssistantPath, parseRepoRoute } from '@/lib/navigation'
+import { useSidebarServerSelection } from '@/hooks/useSidebarServerSelection'
+import { LOCAL_OPENCODE_SERVER_ID } from '@opencode-manager/shared/schemas'
+import {
+  getAssistantPath,
+  isAssistantPath,
+  parseRepoRoute,
+  parseServerProjectRoute,
+} from '@/lib/navigation'
 import { openDialogParam } from '@/hooks/useDialogParam'
 
 interface TabDef {
@@ -27,50 +34,68 @@ interface GlobalTabsArgs {
   navigate: ReturnType<typeof useNavigate>
   isInsideRepo: boolean
   repoId: number | null
+  serverScope: ServerRouteScope
   updateParams: ReturnType<typeof useUrlParams>['updateParams']
   unreadScheduleCount: number
+  localServerSelected: boolean
 }
 
 type TabBarMode = 'hidden' | 'global' | 'schedule'
+
+type ServerRouteScope = 'project' | null
 
 interface MobileTabRouteState {
   mode: TabBarMode
   isInsideRepo: boolean
   repoId: number | null
+  serverScope: ServerRouteScope
 }
 
-function getMobileTabRouteState(pathname: string): MobileTabRouteState {
+function getServerRouteScope(pathname: string, search: string): ServerRouteScope {
+  return parseServerProjectRoute(pathname, search) ? 'project' : null
+}
+
+function getMobileTabRouteState(pathname: string, search: string): MobileTabRouteState {
   if (isAssistantPath(pathname)) {
-    return { mode: 'global', isInsideRepo: false, repoId: null }
+    return { mode: 'global', isInsideRepo: false, repoId: null, serverScope: null }
+  }
+
+  if (pathname === '/' || pathname === '/schedules') {
+    return { mode: 'global', isInsideRepo: false, repoId: null, serverScope: null }
+  }
+
+  const serverScope = getServerRouteScope(pathname, search)
+  if (serverScope !== null) {
+    return { mode: 'global', isInsideRepo: false, repoId: null, serverScope }
   }
 
   const { repoId, section: repoSection } = parseRepoRoute(pathname)
 
-  if (pathname === '/' || pathname === '/schedules') {
-    return { mode: 'global', isInsideRepo: false, repoId: null }
-  }
-
   if (repoId === null) {
-    return { mode: 'hidden', isInsideRepo: false, repoId: null }
+    return { mode: 'hidden', isInsideRepo: false, repoId: null, serverScope: null }
   }
 
   switch (repoSection) {
     case null:
-      return { mode: 'global', isInsideRepo: true, repoId }
+      return { mode: 'global', isInsideRepo: true, repoId, serverScope: null }
     case 'schedules':
-      return { mode: 'schedule', isInsideRepo: true, repoId }
+      return { mode: 'schedule', isInsideRepo: true, repoId, serverScope: null }
     default:
-      return { mode: 'hidden', isInsideRepo: false, repoId }
+      return { mode: 'hidden', isInsideRepo: false, repoId, serverScope: null }
   }
 }
 
-function buildGlobalTabs({ pathname, openSheet, open, close, navigate, isInsideRepo, repoId, updateParams, unreadScheduleCount }: GlobalTabsArgs): TabDef[] {
+function buildGlobalTabs({ pathname, openSheet, open, close, navigate, isInsideRepo, repoId, serverScope, updateParams, unreadScheduleCount, localServerSelected }: GlobalTabsArgs): TabDef[] {
   const openRepoDialog = (dialog: string) => {
     openDialogParam(updateParams, dialog)
   }
 
   const inRepo = isInsideRepo && repoId !== null
+  const inServerRoute = serverScope !== null
   const filesAreScoped = inRepo || isAssistantPath(pathname)
+  const showsFiles = !inServerRoute && (filesAreScoped || localServerSelected)
+  const showsGit = inRepo || serverScope === 'project'
+  const showsSchedules = !inRepo && serverScope !== 'project'
 
   const handleFilesClick = () => {
     if (filesAreScoped) {
@@ -93,14 +118,16 @@ function buildGlobalTabs({ pathname, openSheet, open, close, navigate, isInsideR
       onClick: () => open('repos'),
       active: openSheet === 'repos' || (pathname === '/' && !openSheet),
     },
-    {
-      key: 'files',
-      label: 'Files',
-      icon: FolderOpen,
-      onClick: handleFilesClick,
-      active: openSheet === 'files',
-    },
-    ...(inRepo
+    ...(showsFiles
+      ? [{
+          key: 'files',
+          label: 'Files',
+          icon: FolderOpen,
+          onClick: handleFilesClick,
+          active: openSheet === 'files',
+        }]
+      : []),
+    ...(showsGit
       ? [{
           key: 'source-control',
           label: 'Git',
@@ -116,7 +143,7 @@ function buildGlobalTabs({ pathname, openSheet, open, close, navigate, isInsideR
       onClick: handleAssistantClick,
       active: isAssistantPath(pathname) && !openSheet,
     },
-    ...(!inRepo
+    ...(showsSchedules
       ? [{
           key: 'schedules',
           label: 'Schedules',
@@ -198,14 +225,16 @@ const TabBarRow = memo(function TabBarRow({ tabs }: TabBarRowProps) {
 })
 
 export const MobileTabBar = memo(function MobileTabBar() {
-  const { pathname } = useLocation()
+  const { pathname, search } = useLocation()
   const navigate = useNavigate()
   const { openSheet, open, close } = useMobileTabBar()
   const { updateParams } = useUrlParams()
   const { scheduleTab, setScheduleTab } = useScheduleUrlState()
   const { data: unreadRuns } = useUnreadScheduleRuns()
   const isMobile = useMobile()
-  const routeState = useMemo(() => getMobileTabRouteState(pathname), [pathname])
+  const [selectedServerId] = useSidebarServerSelection()
+  const localServerSelected = selectedServerId === LOCAL_OPENCODE_SERVER_ID
+  const routeState = useMemo(() => getMobileTabRouteState(pathname, search), [pathname, search])
   const unreadScheduleCount = unreadRuns?.total ?? 0
 
   const tabs = useMemo<TabDef[]>(
@@ -219,8 +248,10 @@ export const MobileTabBar = memo(function MobileTabBar() {
         navigate,
         isInsideRepo: routeState.isInsideRepo,
         repoId: routeState.repoId,
+        serverScope: routeState.serverScope,
         updateParams,
         unreadScheduleCount,
+        localServerSelected,
       })),
     [
       routeState,
@@ -233,6 +264,7 @@ export const MobileTabBar = memo(function MobileTabBar() {
       navigate,
       updateParams,
       unreadScheduleCount,
+      localServerSelected,
     ],
   )
 

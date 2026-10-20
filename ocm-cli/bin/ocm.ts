@@ -1,6 +1,9 @@
 import { spawn, spawnSync } from 'child_process'
+import { hostname } from 'os'
 import { basename, dirname, resolve } from 'path'
 import { fileURLToPath } from 'url'
+import { buildOpenCodeServerLink, OPENCODE_SERVER_USERNAME } from '@opencode-manager/shared/schemas'
+import { trimUrlTrailingSlashes } from '@opencode-manager/shared/utils'
 import { readState, writeState, clearState, getStatePath, writeInstallNotice, type OcmState } from '../src/state.js'
 import { installVendoredOcm, resolveOpenCodeConfigDir, InstallError, OCM_PLUGIN_SPEC } from '../src/vendor-install.js'
 import { setToken, deleteToken, hasStoredToken, describeTokenStore, describeTokenWriteTarget, envToken, TOKEN_ENV, TokenStoreError } from '../src/internal-token-store.js'
@@ -14,8 +17,9 @@ import { resolveTarget, formatRepoIdentities, parseRepoIdPositional, restrictMat
 import { buildAttachInvocation } from '../src/warp.js'
 import { type ManagerRepo, fetchRepos, toRemoteRepoSummaries } from '../src/manager-repos.js'
 import { OCM_VERSION as VERSION, warmRepoProxy } from '../src/repo-proxy.js'
-import { normalizeManagerUrl, resolveManagerAuth } from '../src/manager-auth.js'
+import { resolveManagerAuth } from '../src/manager-auth.js'
 import type { ManagerAuthOk } from '../src/manager-auth.js'
+import { generatePairingCode, probeOpenCodeServer, renderPairingQr, resolveDefaultBaseUrl, startPairingServer } from '../src/link.js'
 
 const USAGE = `ocm v${VERSION} - OpenCode Manager workspace launcher
 
@@ -36,6 +40,10 @@ Usage:
                                                   Mirror the matching Manager repo over $PWD (fast patch sync by default)
   ocm install [--dir <path>] [--force] [--no-link]
                                                   Vendor the CLI + TUI plugin into the OpenCode config dir
+  ocm link [--url <url>] [--password <pw>] [--username <name>] [--name <name>]
+           [--pair-host <host>] [--pair-port <port>] [--ttl <seconds>] [--no-qr]
+                                                  Pair a Manager with this machine's opencode serve
+                                                  by scanning a QR code
   ocm --version             Show the installed ocm version
   ocm --help                Show this help
 `
@@ -47,6 +55,10 @@ function die(msg: string, code = 1): never {
 
 function info(msg: string): void {
   process.stdout.write(`${msg}\n`)
+}
+
+function warn(msg: string): void {
+  process.stderr.write(`ocm: warning: ${msg}\n`)
 }
 
 function promptYesNo(question: string): boolean {
@@ -160,7 +172,7 @@ function parseLoginArgs(args: string[]): { url: string; token?: string; managerN
 
 export async function cmdLogin(args: string[]): Promise<void> {
   const { url, token: providedToken, managerName } = parseLoginArgs(args)
-  const normalisedUrl = normalizeManagerUrl(url)
+  const normalisedUrl = trimUrlTrailingSlashes(url)
 
   let token = providedToken
   if (!token) {
@@ -190,7 +202,7 @@ export async function cmdLogin(args: string[]): Promise<void> {
   }
 
   const existing = readState()
-  const sameManager = existing ? normalizeManagerUrl(existing.managerUrl) === normalisedUrl : false
+  const sameManager = existing ? trimUrlTrailingSlashes(existing.managerUrl) === normalisedUrl : false
   writeState({
     ...existing,
     managerUrl: normalisedUrl,
@@ -601,6 +613,146 @@ export async function cmdInstall(args: string[]): Promise<void> {
   }
 }
 
+const LINK_USAGE = `usage: ocm link [--url <url>] [--password <pw>] [--username <name>] [--name <name>]
+                 [--pair-host <host>] [--pair-port <port>] [--ttl <seconds>] [--no-qr]`
+
+const LINK_FLAGS: Record<string, 'url' | 'password' | 'username' | 'name' | 'pairHost' | 'pairPort' | 'ttl'> = {
+  '--url': 'url',
+  '--password': 'password',
+  '--username': 'username',
+  '--name': 'name',
+  '--pair-host': 'pairHost',
+  '--pair-port': 'pairPort',
+  '--ttl': 'ttl',
+}
+
+const PAIRING_MAX_ATTEMPTS = 3
+
+interface LinkCommandOptions {
+  baseUrl: string
+  username: string
+  password: string
+  name: string
+  pairHost: string
+  pairPort: number
+  ttlMs: number
+  showQr: boolean
+}
+
+function parseLinkInteger(value: string, flag: string, min: number, max: number): number {
+  const parsed = Number(value)
+  if (!Number.isInteger(parsed) || parsed < min || parsed > max) {
+    die(`${flag} must be an integer between ${min} and ${max}`)
+  }
+  return parsed
+}
+
+function normalizeLinkBaseUrl(value: string): string {
+  let parsed: URL
+  try {
+    parsed = new URL(value)
+  } catch {
+    die(`invalid --url: ${value}`)
+  }
+  if (parsed.protocol !== 'http:' && parsed.protocol !== 'https:') {
+    die(`invalid --url: ${value} (expected http:// or https://)`)
+  }
+  return parsed.href.replace(/\/+$/, '')
+}
+
+function parseLinkArgs(args: string[]): LinkCommandOptions {
+  const values: Partial<Record<'url' | 'password' | 'username' | 'name' | 'pairHost' | 'pairPort' | 'ttl', string>> = {}
+  let showQr = true
+
+  for (let index = 0; index < args.length; index++) {
+    const arg = args[index]!
+    if (arg === '--no-qr') {
+      showQr = false
+      continue
+    }
+    const key = LINK_FLAGS[arg]
+    if (!key) die(`unknown option: ${arg}. run \`ocm --help\``)
+    const value = args[index + 1]
+    if (!value || value.startsWith('--')) die(LINK_USAGE)
+    values[key] = value
+    index++
+  }
+
+  const baseUrl = normalizeLinkBaseUrl(values.url ?? process.env.OPENCODE_SERVER_URL ?? resolveDefaultBaseUrl())
+  const password = values.password ?? process.env.OPENCODE_SERVER_PASSWORD
+  if (!password) die('no OpenCode password: pass --password or set OPENCODE_SERVER_PASSWORD')
+
+  return {
+    baseUrl,
+    username: values.username ?? process.env.OPENCODE_SERVER_USERNAME ?? OPENCODE_SERVER_USERNAME,
+    password,
+    name: values.name ?? hostname(),
+    pairHost: values.pairHost ?? new URL(baseUrl).hostname,
+    pairPort: parseLinkInteger(values.pairPort ?? '0', '--pair-port', 0, 65535),
+    ttlMs: parseLinkInteger(values.ttl ?? '300', '--ttl', 1, 86400) * 1000,
+    showQr,
+  }
+}
+
+export async function cmdLink(args: string[]): Promise<void> {
+  if (args.includes('--help') || args.includes('-h')) {
+    info(LINK_USAGE)
+    return
+  }
+
+  const options = parseLinkArgs(args)
+  const credentials = { username: options.username, password: options.password }
+
+  const probe = await probeOpenCodeServer(options.baseUrl, credentials)
+  if (probe.status === 'unauthorized') {
+    die(`OpenCode at ${options.baseUrl} rejected the credentials (401); check --username and --password`)
+  }
+  if (probe.status === 'unreachable') {
+    warn(`could not reach ${options.baseUrl} (${probe.message}); pairing anyway`)
+  } else {
+    info(`OpenCode${probe.version ? ` ${probe.version}` : ''} at ${options.baseUrl}`)
+  }
+
+  const code = generatePairingCode()
+  const pairing = await startPairingServer({
+    code,
+    credentials,
+    ttlMs: options.ttlMs,
+    maxAttempts: PAIRING_MAX_ATTEMPTS,
+    port: options.pairPort,
+    hostname: options.pairHost,
+  })
+
+  const link = buildOpenCodeServerLink({
+    kind: 'opencode',
+    name: options.name,
+    baseUrl: options.baseUrl,
+    pairing: { pairUrl: pairing.url, code },
+  })
+
+  const expiresAt = new Date(Date.now() + options.ttlMs)
+  if (options.showQr) {
+    info('')
+    info(renderPairingQr(link))
+  }
+  info('')
+  info(`Link: ${link}`)
+  info(`Pairing URL: ${pairing.url}`)
+  info(`Expires: ${expiresAt.toISOString()} (in ${Math.round(options.ttlMs / 1000)}s)`)
+  warn('the pairing listener uses plain HTTP; use it only on a private network.')
+  info('Waiting for OpenCode Manager to scan the code...')
+
+  const outcome = await pairing.done
+  await pairing.close()
+
+  if (outcome === 'linked') {
+    info('Linked')
+    return
+  }
+  if (outcome === 'expired') die('Pairing code expired')
+  die('too many invalid pairing attempts; no Manager was linked')
+}
+
 async function main(): Promise<void> {
   const [, , cmd, ...rest] = process.argv
 
@@ -644,6 +796,9 @@ async function main(): Promise<void> {
         break
       case 'install':
         await cmdInstall(rest)
+        break
+      case 'link':
+        await cmdLink(rest)
         break
       default:
         die(`unknown command: ${cmd}. run \`ocm --help\``)

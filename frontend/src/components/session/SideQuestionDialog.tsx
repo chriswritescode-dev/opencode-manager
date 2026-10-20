@@ -6,6 +6,7 @@ import { Input } from '@/components/ui/input'
 import { CopyButton } from '@/components/ui/copy-button'
 import { TextPart } from '@/components/message/TextPart'
 import { askSideQuestion } from '@/api/opencode'
+import { useOpenCodeServerId } from '@/contexts/OpenCodeServerContext'
 
 interface SideQuestionDialogProps {
   open: boolean
@@ -20,6 +21,7 @@ export function SideQuestionDialog({
   sessionID,
   initialQuestion = '',
 }: SideQuestionDialogProps) {
+  const serverId = useOpenCodeServerId()
   const [question, setQuestion] = useState(initialQuestion)
   const [answer, setAnswer] = useState('')
   const [error, setError] = useState(false)
@@ -43,7 +45,7 @@ export function SideQuestionDialog({
     setAnswer('')
 
     try {
-      const result = await askSideQuestion(sessionID, trimmed, controller.signal)
+      const result = await askSideQuestion(sessionID, trimmed, controller.signal, serverId)
       if (requestRef.current !== requestId || controller.signal.aborted) return
       setAnswer(result)
       setPending(false)
@@ -52,7 +54,7 @@ export function SideQuestionDialog({
       setError(true)
       setPending(false)
     }
-  }, [sessionID])
+  }, [sessionID, serverId])
 
   useEffect(() => {
     if (initialQuestion.trim()) {

@@ -33,6 +33,10 @@ import migration202610081200 from './202610081200-change-walkthrough-sources'
 import migration202610141200 from './202610141200-session-sandbox-modes'
 import migration202610151200 from './202610151200-change-walkthrough-sessions'
 import migration202610161200 from './202610161200-change-walkthrough-execution'
+import migration202610181200 from './202610181200-opencode-servers'
+import migration202610181300 from './202610181300-session-server-scope'
+import migration202610181310 from './202610181310-multi-run-targets'
+import migration202610181320 from './202610181320-remote-schedule-targets'
 
 export const allMigrations: Migration[] = [
   migration001,
@@ -69,4 +73,8 @@ export const allMigrations: Migration[] = [
   migration202610141200,
   migration202610151200,
   migration202610161200,
+  migration202610181200,
+  migration202610181300,
+  migration202610181310,
+  migration202610181320,
 ]

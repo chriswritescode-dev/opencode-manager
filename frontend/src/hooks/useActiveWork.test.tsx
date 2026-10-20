@@ -6,13 +6,14 @@ import type { SessionInfo } from '@opencode-manager/shared/opencode'
 import type { Repo } from '@/api/types'
 import { MS_PER_MINUTE } from '@/lib/activeWork'
 import { useSessionStatus } from '@/stores/sessionStatusStore'
-import { useActiveWork } from './useActiveWork'
+import { useActiveWork, useActiveWorkCounts } from './useActiveWork'
 
 const REPO_PATH = '/repo'
 const WINDOW_MS = 60 * MS_PER_MINUTE
 
 const mocks = vi.hoisted(() => ({
   listSessionPage: vi.fn(),
+  listRemoteSessionPage: vi.fn(),
   getSession: vi.fn(),
   getRepoSiblings: vi.fn(),
   useNavigableRepos: vi.fn(),
@@ -23,7 +24,10 @@ vi.mock('@/api/opencode', async (importOriginal) => {
   const actual = await importOriginal<typeof import('@/api/opencode')>()
   return {
     ...actual,
-    listSessionPage: mocks.listSessionPage,
+    listSessionPage: (input: Parameters<typeof actual.listSessionPage>[0], serverId?: string) =>
+      serverId === undefined || serverId === 'local'
+        ? mocks.listSessionPage(input, serverId)
+        : mocks.listRemoteSessionPage(input, serverId),
     getSession: mocks.getSession,
   }
 })
@@ -38,6 +42,13 @@ vi.mock('@/api/repos', async (importOriginal) => {
 
 vi.mock('@/hooks/useSidebarRepoGroups', () => ({
   useNavigableRepos: mocks.useNavigableRepos,
+}))
+
+vi.mock('@/hooks/useOpenCodeServers', () => ({
+  useOpenCodeServers: () => ({
+    servers: [{ id: 'srv_kitchen', name: 'Kitchen', enabled: true }],
+    isLoading: false,
+  }),
 }))
 
 vi.mock('@/contexts/EventContext', () => ({
@@ -96,11 +107,14 @@ const recentIDs = (groups: { recent: Array<{ session: SessionInfo }> }): string[
 describe('useActiveWork', () => {
   beforeEach(() => {
     mocks.listSessionPage.mockReset()
+    mocks.listRemoteSessionPage.mockReset()
+    mocks.listRemoteSessionPage.mockResolvedValue({ items: [] })
     mocks.getSession.mockReset()
     mocks.getRepoSiblings.mockReset()
     mocks.getRepoSiblings.mockResolvedValue([])
     mocks.useNavigableRepos.mockReset()
     mocks.useNavigableRepos.mockReturnValue({ repos: [repo], isLoading: false, refetch: vi.fn() })
+    mocks.pendingSessionIDs = []
     useSessionStatus.setState({
       statuses: new Map(),
       statusCache: new Map(),
@@ -109,6 +123,7 @@ describe('useActiveWork', () => {
       outcomes: new Map(),
       parents: new Map(),
       directories: new Map(),
+      sessionServers: new Map(),
       runningShells: new Map(),
       shellRevisions: new Map(),
       shellRevision: 0,
@@ -138,7 +153,7 @@ describe('useActiveWork', () => {
 
     await waitFor(() => expect(recentIDs(result.current.groups)).toContain('root2'))
 
-    expect(mocks.listSessionPage).toHaveBeenCalledWith({ cursor: 'page2', includeChildren: true })
+    expect(mocks.listSessionPage).toHaveBeenCalledWith({ cursor: 'page2', includeChildren: true }, 'local')
   })
 
   it('does not request another page when the oldest loaded session is outside the window', async () => {
@@ -272,5 +287,122 @@ describe('useActiveWork', () => {
     })
 
     expect(mocks.getRepoSiblings).not.toHaveBeenCalled()
+  })
+
+  it('counts a remote pending permission and shows one labelled remote row', async () => {
+    const now = Date.now()
+    mocks.pendingSessionIDs = ['ses_remote']
+    mocks.listSessionPage.mockResolvedValue({ items: [] })
+    mocks.getSession.mockResolvedValue(session('ses_remote', now - 500, null, '/home/me/app'))
+    useSessionStatus.setState({
+      sessionServers: new Map([['ses_remote', 'srv_kitchen']]),
+      directories: new Map([['ses_remote', 'srv_kitchen|/home/me/app']]),
+    })
+
+    const { result } = renderHook(
+      () => ({ work: useActiveWork(WINDOW_MS), counts: useActiveWorkCounts() }),
+      { wrapper: createWrapper(createQueryClient()) },
+    )
+
+    await waitFor(() => expect(result.current.work.groups.needsInput).toHaveLength(1))
+
+    const row = result.current.work.groups.needsInput[0]
+    expect(result.current.counts).toEqual({ needsInput: 1, running: 0 })
+    expect(row.serverId).toBe('srv_kitchen')
+    expect(row.serverName).toBe('Kitchen')
+    expect(row.repo).toBeNull()
+    expect(row.path).toBe('/servers/srv_kitchen/sessions/ses_remote')
+  })
+
+  it('includes recent sessions from an enabled linked server with its server label and path', async () => {
+    const now = Date.now()
+    mocks.listSessionPage.mockResolvedValue({ items: [] })
+    mocks.listRemoteSessionPage.mockResolvedValue({
+      items: [session('ses_remote_recent', now - 500, null, '/home/me/app')],
+    })
+
+    const { result } = renderHook(() => useActiveWork(WINDOW_MS), {
+      wrapper: createWrapper(createQueryClient()),
+    })
+
+    await waitFor(() => expect(recentIDs(result.current.groups)).toContain('ses_remote_recent'))
+
+    const row = result.current.groups.recent[0]
+    expect(row.serverId).toBe('srv_kitchen')
+    expect(row.serverName).toBe('Kitchen')
+    expect(row.repo).toBeNull()
+    expect(row.path).toBe('/servers/srv_kitchen/sessions/ses_remote_recent')
+    expect(mocks.listRemoteSessionPage).toHaveBeenCalledWith(
+      { limit: 50, order: 'desc', includeChildren: true },
+      'srv_kitchen',
+    )
+    expect(result.current.isError).toBe(false)
+  })
+
+  it('rolls a listed remote child up to a root fetched from the same server', async () => {
+    const now = Date.now()
+    mocks.listSessionPage.mockResolvedValue({ items: [] })
+    mocks.listRemoteSessionPage.mockResolvedValue({
+      items: [session('ses_remote_child', now - 500, 'ses_remote_root', '/home/me/app')],
+    })
+    mocks.getSession.mockImplementation(async (id: string, serverId?: string) => {
+      if (serverId !== 'srv_kitchen') throw new Error('local lookup for a remote session')
+      if (id === 'ses_remote_root') return session('ses_remote_root', now - 1500, null, '/home/me/app')
+      throw new Error(`unexpected session ${id}`)
+    })
+
+    const { result } = renderHook(() => useActiveWork(WINDOW_MS), {
+      wrapper: createWrapper(createQueryClient()),
+    })
+
+    await waitFor(() => expect(result.current.groups.recent.map((item) => item.session.id)).toEqual(['ses_remote_root']))
+
+    expect(result.current.groups.recent[0].serverId).toBe('srv_kitchen')
+    expect(mocks.getSession).toHaveBeenCalledWith('ses_remote_root', 'srv_kitchen')
+    expect(mocks.getSession).not.toHaveBeenCalledWith('ses_remote_root', 'local')
+  })
+
+  it('keeps the local list when a linked server fails to load', async () => {
+    const now = Date.now()
+    mocks.listSessionPage.mockResolvedValue({ items: [session('local_recent', now - 500)] })
+    mocks.listRemoteSessionPage.mockRejectedValue(new Error('server unreachable'))
+
+    const { result } = renderHook(() => useActiveWork(WINDOW_MS), {
+      wrapper: createWrapper(createQueryClient()),
+    })
+
+    await waitFor(() => expect(recentIDs(result.current.groups)).toContain('local_recent'))
+
+    expect(result.current.isError).toBe(false)
+    expect(recentIDs(result.current.groups)).not.toContain('ses_remote_recent')
+  })
+
+  it('renders a running remote session row and resolves its ancestry on the owning server', async () => {
+    const now = Date.now()
+    mocks.listSessionPage.mockResolvedValue({ items: [] })
+    mocks.getSession.mockImplementation(async (id: string, serverId?: string) => {
+      if (serverId !== 'srv_kitchen') throw new Error('local lookup for a remote session')
+      if (id === 'ses_child') return session('ses_child', now - 1000, 'ses_remote', '/home/me/app')
+      if (id === 'ses_remote') return session('ses_remote', now - 4000, null, '/home/me/app')
+      throw new Error(`unexpected session ${id}`)
+    })
+    useSessionStatus.setState({
+      statuses: new Map([['ses_child', { type: 'busy' }]]),
+      sessionServers: new Map([['ses_child', 'srv_kitchen']]),
+      directories: new Map([['ses_child', 'srv_kitchen|/home/me/app']]),
+    })
+
+    const { result } = renderHook(
+      () => ({ work: useActiveWork(WINDOW_MS), counts: useActiveWorkCounts() }),
+      { wrapper: createWrapper(createQueryClient()) },
+    )
+
+    await waitFor(() => expect(result.current.work.groups.running).toHaveLength(1))
+
+    expect(result.current.counts).toEqual({ needsInput: 0, running: 1 })
+    expect(result.current.work.groups.running[0].session.id).toBe('ses_remote')
+    expect(result.current.work.groups.running[0].serverName).toBe('Kitchen')
+    expect(mocks.getSession).toHaveBeenCalledWith('ses_child', 'srv_kitchen')
+    expect(mocks.getSession).not.toHaveBeenCalledWith('ses_child', 'local')
   })
 })

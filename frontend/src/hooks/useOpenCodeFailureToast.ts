@@ -12,7 +12,7 @@ export const OPENCODE_FAILURE_TOAST_ID = 'opencode-server-failure'
  */
 export function useOpenCodeFailureToast(enabled: boolean, onRestart: () => void) {
   const { data: health } = useServerHealth(enabled)
-  const { setActiveTab } = useSettingsDialog()
+  const { openTab } = useSettingsDialog()
   const notifiedFailureRef = useRef<string | null>(null)
 
   const issue = getOpenCodeServerIssue(health)
@@ -27,7 +27,7 @@ export function useOpenCodeFailureToast(enabled: boolean, onRestart: () => void)
         id: OPENCODE_FAILURE_TOAST_ID,
         duration: Infinity,
         description: failureMessage,
-        action: { label: 'View logs', onClick: () => setActiveTab('logs') },
+        action: { label: 'View logs', onClick: () => openTab('logs') },
         cancel: { label: 'Restart', onClick: onRestart },
       })
       return
@@ -38,5 +38,5 @@ export function useOpenCodeFailureToast(enabled: boolean, onRestart: () => void)
       showToast.dismiss(OPENCODE_FAILURE_TOAST_ID)
       showToast.success('OpenCode server is back online')
     }
-  }, [failureMessage, isHealthy, setActiveTab, onRestart])
+  }, [failureMessage, isHealthy, openTab, onRestart])
 }

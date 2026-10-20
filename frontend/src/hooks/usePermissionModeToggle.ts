@@ -1,7 +1,11 @@
 import { useSessionPermissionMode, useSetSessionPermissionMode } from '@/hooks/useSessionPermissionMode'
 
-export function usePermissionModeToggle(sessionID: string, directory: string) {
-  const { data, isError } = useSessionPermissionMode(sessionID)
+export function usePermissionModeToggle(
+  sessionID: string,
+  directory: string,
+  options: { enabled?: boolean } = {},
+) {
+  const { data, isError } = useSessionPermissionMode(sessionID, options)
   const setMode = useSetSessionPermissionMode(sessionID)
 
   const loaded = data !== undefined

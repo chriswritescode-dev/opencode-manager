@@ -1,14 +1,16 @@
 import type { Database } from 'bun:sqlite'
-import type {
-  SessionGoalStatus,
-  SessionGoalStopReason,
-  SessionGoalTurnState,
-  SessionGoalVerdict,
+import {
+  LOCAL_OPENCODE_SERVER_ID,
+  type SessionGoalStatus,
+  type SessionGoalStopReason,
+  type SessionGoalTurnState,
+  type SessionGoalVerdict,
 } from '@opencode-manager/shared/schemas'
 
 export interface SessionGoalRecord {
   id: number
   sessionId: string
+  serverId: string
   directory: string
   objective: string
   status: SessionGoalStatus
@@ -29,6 +31,7 @@ export interface SessionGoalRecord {
 
 export interface InsertSessionGoalInput {
   sessionId: string
+  serverId?: string
   directory: string
   objective: string
   maxContinuations: number
@@ -51,6 +54,7 @@ export interface SessionGoalPatch {
 interface SessionGoalRow {
   id: number
   session_id: string
+  server_id: string
   directory: string
   objective: string
   status: SessionGoalStatus
@@ -70,7 +74,7 @@ interface SessionGoalRow {
 }
 
 const SESSION_GOAL_COLUMNS = `
-  id, session_id, directory, objective, status, stop_reason, turn_state,
+  id, session_id, server_id, directory, objective, status, stop_reason, turn_state,
   continuation_count, max_continuations, token_budget, tokens_at_start, tokens_used,
   consecutive_blocked, last_verdict, last_reason, created_at, updated_at, finished_at
 `
@@ -80,6 +84,7 @@ export function ensureSessionGoalsTable(db: Database): void {
     CREATE TABLE IF NOT EXISTS session_goals (
       id INTEGER PRIMARY KEY AUTOINCREMENT,
       session_id TEXT NOT NULL,
+      server_id TEXT NOT NULL DEFAULT 'local',
       directory TEXT NOT NULL,
       objective TEXT NOT NULL,
       status TEXT NOT NULL CHECK(status IN ('active','paused','completed','blocked','stopped')),
@@ -100,7 +105,7 @@ export function ensureSessionGoalsTable(db: Database): void {
   `)
   db.run(`
     CREATE UNIQUE INDEX IF NOT EXISTS idx_session_goals_open
-    ON session_goals(session_id)
+    ON session_goals(server_id, session_id)
     WHERE status IN ('active','paused')
   `)
   db.run(`
@@ -114,12 +119,13 @@ export function insertSessionGoal(db: Database, input: InsertSessionGoalInput): 
   try {
     const result = db.prepare(`
       INSERT INTO session_goals(
-        session_id, directory, objective, status, stop_reason, turn_state,
+        session_id, server_id, directory, objective, status, stop_reason, turn_state,
         continuation_count, max_continuations, token_budget, tokens_at_start, tokens_used,
         consecutive_blocked, last_verdict, last_reason, created_at, updated_at, finished_at
-      ) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
+      ) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
     `).run(
       input.sessionId,
+      input.serverId ?? LOCAL_OPENCODE_SERVER_ID,
       input.directory,
       input.objective,
       'active',
@@ -153,10 +159,19 @@ export function getSessionGoalById(db: Database, id: number): SessionGoalRecord 
   return row ? mapSessionGoalRow(row) : null
 }
 
-export function getLatestSessionGoal(db: Database, sessionId: string): SessionGoalRecord | null {
+export function getLatestSessionGoal(
+  db: Database,
+  sessionId: string,
+  serverId: string = LOCAL_OPENCODE_SERVER_ID,
+): SessionGoalRecord | null {
   const row = db
-    .prepare(`SELECT ${SESSION_GOAL_COLUMNS} FROM session_goals WHERE session_id = ? ORDER BY created_at DESC, id DESC LIMIT 1`)
-    .get(sessionId) as SessionGoalRow | undefined
+    .prepare(`
+      SELECT ${SESSION_GOAL_COLUMNS} FROM session_goals
+      WHERE server_id = ? AND session_id = ?
+      ORDER BY created_at DESC, id DESC
+      LIMIT 1
+    `)
+    .get(serverId, sessionId) as SessionGoalRow | undefined
   return row ? mapSessionGoalRow(row) : null
 }
 
@@ -228,6 +243,7 @@ function mapSessionGoalRow(row: SessionGoalRow): SessionGoalRecord {
   return {
     id: row.id,
     sessionId: row.session_id,
+    serverId: row.server_id,
     directory: row.directory,
     objective: row.objective,
     status: row.status,

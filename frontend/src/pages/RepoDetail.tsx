@@ -37,6 +37,7 @@ import { PendingActionsGroup } from "@/components/notifications/PendingActionsGr
 import { getRepoDisplayName } from "@/lib/utils";
 import { notifyWorktreeSetup } from "@/lib/worktreeSetup";
 import { getRepoDirectoryNameError, isWorktreeSibling } from "@opencode-manager/shared/utils";
+import type { MultiRunTarget } from "@opencode-manager/shared/schemas";
 
 export function RepoDetail() {
   const { id } = useParams<{ id: string }>();
@@ -117,7 +118,8 @@ export function RepoDetail() {
   }, [baseDirectory, nonScheduleWorkspaceDirectories, activeScheduleDirectories]);
 
   const showWorktrees = activeTab === 'workspaces';
-  const { data: multiRuns } = useMultiRuns(repoId, showWorktrees);
+  const multiRunTarget = useMemo<MultiRunTarget>(() => ({ kind: 'repo', repoId }), [repoId]);
+  const { data: multiRuns } = useMultiRuns(repoId > 0 ? multiRunTarget : undefined, showWorktrees);
   const sessionListDirectories = useMemo(() => {
     if (!showWorktrees) return baseDirectory ? [baseDirectory] : [];
     return Array.from(new Set([...nonScheduleWorkspaceDirectories, ...activeScheduleDirectories]));
@@ -342,7 +344,7 @@ export function RepoDetail() {
       />
 
       <TerminalPanel
-        repoId={repoId}
+        target={{ kind: 'repo', repoId }}
         directory={terminalDirectory ?? baseDirectory}
         isOpen={!docked && terminalOpen}
         onClose={() => setTerminalOpen(false)}
@@ -361,7 +363,7 @@ export function RepoDetail() {
       />
 
       <MultiRunSheet
-        repoId={repoId}
+        target={multiRunTarget}
         directory={baseDirectory}
         defaultBaseRef={currentBranch}
         open={multiRunOpen}

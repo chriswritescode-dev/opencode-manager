@@ -1,6 +1,7 @@
 import { QueryClient } from '@tanstack/react-query'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import {
+  activeWorkSessionsQueryKey,
   invalidateConfigCaches,
   invalidateProviderCaches,
   invalidateProviderCachesDebounced,
@@ -205,6 +206,35 @@ describe('invalidateSessionListCachesDebounced', () => {
 
     expect(queryClient.getQueryState(sessionListKey('/a'))?.isInvalidated).toBe(true)
     expect(queryClient.getQueryState(sessionListKey('/b'))?.isInvalidated).toBe(true)
+  })
+
+  it('keeps a remote event directory from invalidating the local list with the same path', () => {
+    vi.useFakeTimers()
+    const queryClient = new QueryClient()
+    const remoteListKey = ['opencode', 'sessions', '/repo', { allDirectories: true }, 'srv_a']
+    queryClient.setQueryData(sessionListKey('/repo'), { pages: [], pageParams: [] })
+    queryClient.setQueryData(remoteListKey, { pages: [], pageParams: [] })
+
+    invalidateSessionListCachesDebounced(queryClient, '/repo', 'srv_a')
+    vi.advanceTimersByTime(200)
+
+    expect(queryClient.getQueryState(remoteListKey)?.isInvalidated).toBe(true)
+    expect(queryClient.getQueryState(sessionListKey('/repo'))?.isInvalidated).toBe(false)
+  })
+
+  it('invalidates the active-work list of the event server only', () => {
+    vi.useFakeTimers()
+    const queryClient = new QueryClient()
+    const localActiveWorkKey = activeWorkSessionsQueryKey('local')
+    const remoteActiveWorkKey = activeWorkSessionsQueryKey('srv_a')
+    queryClient.setQueryData(localActiveWorkKey, [])
+    queryClient.setQueryData(remoteActiveWorkKey, [])
+
+    invalidateSessionListCachesDebounced(queryClient, '/repo', 'srv_a')
+    vi.advanceTimersByTime(200)
+
+    expect(queryClient.getQueryState(remoteActiveWorkKey)?.isInvalidated).toBe(true)
+    expect(queryClient.getQueryState(localActiveWorkKey)?.isInvalidated).toBe(false)
   })
 })
 

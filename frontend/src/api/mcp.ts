@@ -22,27 +22,33 @@ type McpOAuthFlowStatus =
   | { status: 'unknown' }
 
 export const mcpApi = {
-  async getStatus(directory?: string): Promise<McpStatusMap> {
-    const { data } = await callOpenCode((api) => api.mcp.list(openCodeLocation(directory)))
+  async getStatus(directory?: string, serverId?: string): Promise<McpStatusMap> {
+    const { data } = await callOpenCode((api) => api.mcp.list(openCodeLocation(directory)), serverId)
     return mcpStatusByName(data)
   },
 
-  async removeServer(name: string): Promise<void> {
+  async removeServer(name: string, serverId?: string): Promise<void> {
     await callOpenCode(async (api) => {
       try {
         await api.mcp.remove({ server: name })
       } catch (error) {
         if (!isMcpServerNotFoundError(error)) throw error
       }
-    })
+    }, serverId)
   },
 
-  async connect(name: string, directory?: string): Promise<void> {
-    await callOpenCode((api) => api.mcp.connect({ server: name, ...openCodeLocation(directory) }))
+  async connect(name: string, directory?: string, serverId?: string): Promise<void> {
+    await callOpenCode(
+      (api) => api.mcp.connect({ server: name, ...openCodeLocation(directory) }),
+      serverId,
+    )
   },
 
-  async disconnect(name: string, directory?: string): Promise<void> {
-    await callOpenCode((api) => api.mcp.disconnect({ server: name, ...openCodeLocation(directory) }))
+  async disconnect(name: string, directory?: string, serverId?: string): Promise<void> {
+    await callOpenCode(
+      (api) => api.mcp.disconnect({ server: name, ...openCodeLocation(directory) }),
+      serverId,
+    )
   },
 
   async startAuth(name: string, directory?: string): Promise<McpAuthStartResponse> {

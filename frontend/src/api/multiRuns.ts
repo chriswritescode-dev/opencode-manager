@@ -1,10 +1,21 @@
 import { fetchWrapper } from './fetchWrapper'
 import { API_BASE_URL } from '@/config'
-import type { FuseMultiRunRequest, LaunchMultiRunRequest, MultiRun } from '@opencode-manager/shared/schemas'
+import type {
+  FuseMultiRunRequest,
+  LaunchMultiRunRequest,
+  MultiRun,
+  MultiRunTarget,
+} from '@opencode-manager/shared/schemas'
 
-export async function listMultiRuns(repoId: number): Promise<MultiRun[]> {
+function targetParams(target: MultiRunTarget): Record<string, string | number> {
+  return target.kind === 'repo'
+    ? { repoId: target.repoId }
+    : { serverId: target.serverId, directory: target.directory }
+}
+
+export async function listMultiRuns(target: MultiRunTarget): Promise<MultiRun[]> {
   const res = await fetchWrapper<{ runs: MultiRun[] }>(`${API_BASE_URL}/api/multi-runs`, {
-    params: { repoId },
+    params: targetParams(target),
   })
   return res.runs
 }

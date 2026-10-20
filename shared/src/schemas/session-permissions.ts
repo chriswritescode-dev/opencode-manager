@@ -11,6 +11,7 @@ export type SessionLockReason = z.infer<typeof SessionLockReasonSchema>;
 export const SetSessionPermissionModeRequestSchema = z.object({
   directory: z.string().min(1),
   mode: SessionPermissionModeSchema,
+  serverId: z.string().min(1).optional(),
 });
 
 export type SetSessionPermissionModeRequest = z.infer<typeof SetSessionPermissionModeRequestSchema>;

@@ -571,7 +571,7 @@ describe('SSEAggregator upstream resynchronization signal', () => {
 
     const resyncs = client.events.filter(event => event.event === 'resync')
     expect(resyncs).toHaveLength(2)
-    expect(JSON.parse(resyncs[0]!.data)).toMatchObject({ timestamp: expect.any(Number) })
+    expect(JSON.parse(resyncs[0]!.data)).toEqual({ timestamp: expect.any(Number) })
     expect(client.frames).toHaveLength(0)
   })
 
@@ -833,6 +833,96 @@ describe('SSEAggregator directory-less session event routing', () => {
     emitRawEvent({ type: 'session.execution.succeeded', data: { sessionID: 'ses_fork' } })
 
     expect(seen).toEqual([{ directory: '/r', type: 'session.execution.succeeded', sessionID: 'ses_fork' }])
+  })
+})
+
+describe('SSEAggregator server-aware event feed', () => {
+  beforeEach(() => {
+    sseAggregator.shutdown()
+    sseAggregator.setPendingActionsFetcher(null)
+    sseAggregator.setScheduledSessionsResolver(() => [])
+  })
+
+  it('notifies server listeners for local events with the local server id and resolved directory', () => {
+    const seen: Array<{ serverId: string; directory: string | null; type: string }> = []
+    sseAggregator.onServerEvent((serverId, directory, event) => {
+      seen.push({ serverId, directory, type: event.type })
+    })
+
+    emitRawEvent({ type: 'session.created', location: { directory: '/r' }, data: { sessionID: 'ses_1' } })
+    emitRawEvent({ type: 'session.execution.succeeded', data: { sessionID: 'ses_1' } })
+
+    expect(seen).toEqual([
+      { serverId: 'local', directory: '/r', type: 'session.created' },
+      { serverId: 'local', directory: '/r', type: 'session.execution.succeeded' },
+    ])
+  })
+
+  it('delivers remote events with the remote server id without touching local active or subagent state', () => {
+    const seen: Array<{ serverId: string; directory: string | null; type: string }> = []
+    sseAggregator.onServerEvent((serverId, directory, event) => {
+      seen.push({ serverId, directory, type: event.type })
+    })
+
+    sseAggregator.notifyServerEvent('srv_a', '/repo', {
+      id: 'evt_remote',
+      created: 1,
+      type: 'session.created',
+      location: { directory: '/repo' },
+      data: { sessionID: 'ses_remote', parentID: 'ses_parent' },
+    } as never)
+
+    expect(seen).toEqual([{ serverId: 'srv_a', directory: '/repo', type: 'session.created' }])
+    expect(sseAggregator.getActiveSessions()).toEqual({})
+    expect(sseAggregator.isSubagentSession('ses_remote')).toBe(false)
+    expect(sseAggregator.isSubagentSession('ses_remote', 'srv_a')).toBe(false)
+  })
+
+  it('isolates a throwing server event listener from the others', () => {
+    const throwing = vi.fn(() => { throw new Error('boom') })
+    const healthy = vi.fn()
+    sseAggregator.onServerEvent(throwing)
+    const unsubscribe = sseAggregator.onServerEvent(healthy)
+
+    sseAggregator.notifyServerEvent('srv_a', '/repo', { type: 'session.idle', data: { sessionID: 'ses_1' } } as never)
+
+    expect(throwing).toHaveBeenCalledTimes(1)
+    expect(healthy).toHaveBeenCalledTimes(1)
+
+    unsubscribe()
+    sseAggregator.notifyServerEvent('srv_a', '/repo', { type: 'session.idle', data: { sessionID: 'ses_1' } } as never)
+    expect(healthy).toHaveBeenCalledTimes(1)
+  })
+
+  it('notifies server-connected listeners for the local upstream and for remote streams', () => {
+    const seen: string[] = []
+    sseAggregator.onServerConnected(serverId => { seen.push(serverId) })
+
+    ;(sseAggregator as unknown as { handleUpstreamOpen(wasConnectedBefore: boolean): void }).handleUpstreamOpen(false)
+    sseAggregator.notifyServerConnected('srv_a')
+
+    expect(seen).toEqual(['local', 'srv_a'])
+  })
+
+  it('scopes session visibility to the active server id', () => {
+    sseAggregator.addClient('viewed-local', () => {}, () => {}, ['/r'])
+    sseAggregator.addClient('viewed-remote', () => {}, () => {}, ['srv_a|/r'])
+
+    sseAggregator.setClientVisibility('viewed-local', true, 'ses_1')
+    sseAggregator.setClientVisibility('viewed-remote', true, 'ses_2', 'srv_a')
+
+    expect(sseAggregator.isSessionBeingViewed('ses_1')).toBe(true)
+    expect(sseAggregator.isSessionBeingViewed('ses_1', 'srv_a')).toBe(false)
+    expect(sseAggregator.isSessionBeingViewed('ses_2', 'srv_a')).toBe(true)
+    expect(sseAggregator.isSessionBeingViewed('ses_2')).toBe(false)
+  })
+
+  it('clears the active server id when a client reports it is hidden', () => {
+    sseAggregator.addClient('viewed-hidden', () => {}, () => {}, ['srv_a|/r'])
+    sseAggregator.setClientVisibility('viewed-hidden', true, 'ses_1', 'srv_a')
+    sseAggregator.setClientVisibility('viewed-hidden', false)
+
+    expect(sseAggregator.isSessionBeingViewed('ses_1', 'srv_a')).toBe(false)
   })
 })
 

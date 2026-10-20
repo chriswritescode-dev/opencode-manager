@@ -47,7 +47,7 @@ export function createInternalRoutes(
   const app = new Hono()
   app.use('/*', createInternalTokenMiddleware(db))
   app.route('/schedules', createScheduleRoutes(scheduleService))
-  app.route('/session-goals', createSessionGoalRoutes(sessionGoals))
+  app.route('/session-goals', createSessionGoalRoutes(sessionGoals, { serverScoped: false }))
   app.route('/multi-runs', createMultiRunRoutes(multiRuns))
   app.route('/notifications', createInternalNotificationRoutes(notificationService))
   app.route('/settings', createInternalSettingsRoutes(settingsService))

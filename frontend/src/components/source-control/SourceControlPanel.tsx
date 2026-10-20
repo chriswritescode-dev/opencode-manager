@@ -1,4 +1,5 @@
 import { useState } from 'react'
+import type { ReactNode } from 'react'
 import { useQuery, useQueryClient } from '@tanstack/react-query'
 import { FetchError } from '@opencode-manager/shared'
 import { useGitStatus, getApiErrorMessage } from '@/api/git'
@@ -288,6 +289,32 @@ export function SourceControlPanel({
   const isMobile = useMobile()
 
   return (
+    <SourceControlDialog
+      isOpen={isOpen}
+      onClose={onClose}
+      title={isMobile && repoName ? repoName : 'Source Control'}
+    >
+      <SourceControlContent
+        repoId={repoId}
+        isOpen={isOpen}
+        currentBranch={currentBranch}
+        compact={isMobile}
+      />
+    </SourceControlDialog>
+  )
+}
+
+interface SourceControlDialogProps {
+  isOpen: boolean
+  onClose: () => void
+  title: string
+  children: ReactNode
+}
+
+export function SourceControlDialog({ isOpen, onClose, title, children }: SourceControlDialogProps) {
+  const isMobile = useMobile()
+
+  return (
     <Dialog open={isOpen} onOpenChange={(open) => !open && onClose()}>
       <DialogContent
         mobileFullscreen
@@ -303,7 +330,7 @@ export function SourceControlPanel({
         )}>
           <DialogTitle className="flex items-center gap-2">
             <GitBranch className="w-5 h-5" />
-            {isMobile && repoName ? repoName : 'Source Control'}
+            {title}
           </DialogTitle>
           {isMobile && (
             <Button
@@ -317,12 +344,7 @@ export function SourceControlPanel({
           )}
         </DialogHeader>
         <div className="flex-1 overflow-hidden pb-0">
-          <SourceControlContent
-            repoId={repoId}
-            isOpen={isOpen}
-            currentBranch={currentBranch}
-            compact={isMobile}
-          />
+          {children}
         </div>
       </DialogContent>
     </Dialog>
