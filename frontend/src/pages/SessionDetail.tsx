@@ -331,7 +331,8 @@ export function SessionDetail() {
   const { getForSession: getFormForSession, reply: replyToForm, cancel: cancelForm, syncForSession: syncFormsForSession } = useForms();
   const currentForm = sessionId ? getFormForSession(sessionId) : null;
   const minimizedForm = currentForm && currentForm.id === minimizedFormId ? currentForm : null;
-  const isFormSheetOpen = isMobile && !!currentForm && !minimizedForm;
+  const isFormOpen = !!currentForm && !minimizedForm;
+  const isFormSheetOpen = isMobile && isFormOpen;
 
   const lastAssistantMessage = messages.filter(m => m.type === 'assistant').at(-1);
   const lastAssistantText = getAssistantText(lastAssistantMessage);
@@ -876,18 +877,20 @@ export function SessionDetail() {
         </div>
         {sessionDirectory && !isEditingMessage && (
           <div
-            ref={promptOverlayRef}
             data-testid="prompt-overlay"
             className={cn(
               "absolute left-0 right-0 flex justify-center",
-              isFormSheetOpen && "top-0 flex-col items-center justify-start",
+              isFormOpen && "top-0 flex-col items-center justify-end pointer-events-none md:pt-3",
             )}
             style={{ bottom: inputBottomOffset }}
           >
             <div
+              ref={promptOverlayRef}
               className={cn(
-                "relative",
-                isFormSheetOpen ? "flex w-full flex-1 min-h-0 flex-col" : "w-[94%] md:max-w-4xl",
+                "relative pointer-events-auto",
+                isFormSheetOpen
+                  ? "flex w-full flex-1 min-h-0 flex-col"
+                  : cn("w-[94%] md:max-w-4xl", isFormOpen && "flex max-h-full min-h-0 flex-col"),
               )}
             >
               {!isFormSheetOpen && (
@@ -945,7 +948,7 @@ export function SessionDetail() {
                   onAskSideQuestion={() => handleAskSideQuestion('')}
                 />
               )}
-              <div className={cn(isFormSheetOpen && "shrink-0 px-[3%]")}>
+              <div className={cn(isFormSheetOpen && "shrink-0 bg-background px-[3%]")}>
                 <SessionSendErrorBanner sessionId={sessionId} isConnected={streamConnected} isReconnecting={streamReconnecting} />
                 <SessionGoalBar sessionID={sessionId} />
                 <BackgroundWorkBar

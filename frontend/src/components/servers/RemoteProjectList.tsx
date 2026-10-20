@@ -74,7 +74,7 @@ function RemoteProjectListLoading() {
         <div className="h-10 bg-muted/50 animate-pulse rounded w-full" />
       </div>
       <div className="mx-2 md:mx-0 flex-1 min-h-0">
-        <div className="h-full overflow-y-auto pt-4 pb-2 md:pb-0">
+        <div className="h-full overflow-y-auto pt-4 pb-2 md:pb-4">
           <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-2 gap-3 md:gap-4 w-full">
             {Array.from({ length: 6 }).map((_, index) => (
               <RepoCardSkeleton key={index} />
@@ -117,7 +117,7 @@ function RemoteProjectListContent({ serverId }: { serverId: string }) {
   const openSettings = () => openTab('servers')
 
   return (
-    <div className="flex h-full flex-col px-0 md:p-4">
+    <div className="flex h-full flex-col px-0 md:px-4 md:pt-4">
       {!serversLoading && !server ? (
         <LinkedServerStateCard
           icon={Server}
@@ -181,7 +181,7 @@ function RemoteProjectListContent({ serverId }: { serverId: string }) {
               <OpenDirectoryTrigger onClick={() => setOpenDirectoryOpen(true)} />
             </div>
             <div className="mx-2 flex min-h-0 flex-1 md:mx-0">
-              <div className="h-full w-full overflow-y-auto pt-4 md:pb-0 [mask-image:linear-gradient(to_bottom,transparent,black_16px,black)]">
+              <div className="h-full w-full overflow-y-auto pt-4 md:pb-4 [mask-image:linear-gradient(to_bottom,transparent,black_16px,black)]">
                 {filteredProjects.length === 0 ? (
                   <div className="text-center p-12">
                     <Search className="w-12 h-12 mx-auto mb-4 text-muted-foreground" />

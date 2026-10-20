@@ -369,6 +369,18 @@ describe('SessionDetail form prompt session scoping', () => {
     expect(screen.getByTestId('prompt-overlay')).toHaveClass('top-0')
   })
 
+  it('bounds the form card by the space above the prompt on desktop so its header stays visible', async () => {
+    mocks.useMobile.mockReturnValue(false)
+    formsState.bySession[VIEWED_SESSION_ID] = viewedSessionForm
+
+    render(renderTree())
+
+    await waitFor(() => expect(screen.getAllByText('Continue A')[0]).toBeInTheDocument())
+    const overlay = screen.getByTestId('prompt-overlay')
+    expect(overlay).toHaveClass('top-0', 'justify-end', 'pointer-events-none')
+    expect(overlay.firstElementChild).toHaveClass('max-h-full', 'min-h-0', 'pointer-events-auto')
+  })
+
   it('keeps the prompt overlay anchored without an open form or once the form is minimized', async () => {
     mocks.useMobile.mockReturnValue(true)
 
