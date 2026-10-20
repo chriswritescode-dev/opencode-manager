@@ -25,6 +25,7 @@ const mocks = vi.hoisted(() => ({
   getHealth: vi.fn(),
   listProjects: vi.fn(),
   servers: [] as Array<{ id: string; enabled: boolean }>,
+  serversLoaded: false,
 }))
 
 vi.mock('@/api/repos', () => ({
@@ -48,7 +49,7 @@ vi.mock('@/hooks/useAuth', () => ({
 }))
 
 vi.mock('@/hooks/useOpenCodeServers', () => ({
-  useOpenCodeServers: () => ({ servers: mocks.servers }),
+  useOpenCodeServers: () => ({ servers: mocks.servers, isSuccess: mocks.serversLoaded }),
 }))
 
 vi.mock('@/lib/opencode-event-stream', () => ({
@@ -244,6 +245,7 @@ describe('EventProvider permissions and forms', () => {
     mocks.listRepos.mockResolvedValue([])
     mocks.listProjects.mockResolvedValue([])
     mocks.servers = []
+    mocks.serversLoaded = false
     mocks.listPendingPermissions.mockResolvedValue([])
     mocks.listPendingForms.mockResolvedValue([])
     mocks.listActiveSessions.mockResolvedValue({})
@@ -517,6 +519,37 @@ describe('EventProvider permissions and forms', () => {
     handleStatusChange(true)
 
     await waitFor(() => {
+      expect(screen.getByTestId('count')).toHaveTextContent('0')
+      expect(screen.getByTestId('current')).toHaveTextContent('none')
+    })
+  })
+
+  it('reconciles a remembered remote directory on reconnect', async () => {
+    mocks.servers = [{ id: 'srv_remote', enabled: true }]
+    mocks.serversLoaded = true
+
+    render(<Harness />, { wrapper: createWrapper() })
+
+    await waitFor(() => expect(mocks.subscribeGlobalMonitor).toHaveBeenCalled())
+
+    const lastSubscribeCall = mocks.subscribeGlobalMonitor.mock.calls[mocks.subscribeGlobalMonitor.mock.calls.length - 1]
+    const onEvent = lastSubscribeCall[0].onEvent as (data: unknown) => void
+    const handleStatusChange = lastSubscribeCall[0].onStatusChange as (connected: boolean) => void
+
+    act(() => {
+      onEvent({ type: 'form.created', data: { form: pendingForm }, directory: '/srv/app', serverId: 'srv_remote' })
+    })
+
+    await waitFor(() => {
+      expect(screen.getByTestId('count')).toHaveTextContent('1')
+    })
+
+    act(() => {
+      handleStatusChange(true)
+    })
+
+    await waitFor(() => {
+      expect(mocks.listPendingForms).toHaveBeenCalledWith('/srv/app', 'srv_remote')
       expect(screen.getByTestId('count')).toHaveTextContent('0')
       expect(screen.getByTestId('current')).toHaveTextContent('none')
     })
@@ -989,6 +1022,36 @@ describe('EventProvider permissions and forms', () => {
     })
   })
 
+  it('clears pending forms and permissions for a deleted session', async () => {
+    render(<Harness />, { wrapper: createWrapper() })
+
+    await waitFor(() => expect(mocks.subscribeGlobalMonitor).toHaveBeenCalled())
+
+    const lastSubscribeCall = mocks.subscribeGlobalMonitor.mock.calls[mocks.subscribeGlobalMonitor.mock.calls.length - 1]
+    const onEvent = lastSubscribeCall[0].onEvent as (data: unknown) => void
+
+    act(() => {
+      onEvent({ type: 'form.created', data: { form: pendingForm }, directory: '/repo' })
+      onEvent({ type: 'permission.asked', data: pendingPermission, directory: '/repo' })
+    })
+
+    await waitFor(() => {
+      expect(screen.getByTestId('count')).toHaveTextContent('1')
+      expect(screen.getByTestId('permission-count')).toHaveTextContent('1')
+    })
+
+    act(() => {
+      onEvent({ type: 'session.deleted', data: { sessionID: 'session-1' }, directory: '/repo' })
+    })
+
+    await waitFor(() => {
+      expect(screen.getByTestId('count')).toHaveTextContent('0')
+      expect(screen.getByTestId('permission-count')).toHaveTextContent('0')
+      expect(screen.getByTestId('current')).toHaveTextContent('none')
+      expect(screen.getByTestId('permission-current')).toHaveTextContent('none')
+    })
+  })
+
   it('does not invalidate the transcript on form reply or cancel events', async () => {
     mocks.listRepos.mockResolvedValue([{ id: 123, fullPath: '/repo' }])
     mocks.listPendingForms.mockResolvedValue([pendingForm, secondPendingForm])
@@ -1455,7 +1518,7 @@ describe('EventProvider permissions and forms', () => {
     })
   })
 
-  it('keeps the shown permission when a viewed-session permission arrives, then advances once it is answered', async () => {
+  it('replaces a pinned out-of-view permission with the viewed-session one, then advances to the remaining pinned one', async () => {
     render(<Harness />, {
       wrapper: createWrapper(createTestQueryClient(), '/repos/123/sessions/session-view'),
     })
@@ -1479,21 +1542,53 @@ describe('EventProvider permissions and forms', () => {
 
     await waitFor(() => {
       expect(screen.getByTestId('permission-count')).toHaveTextContent('2')
+      expect(screen.getByTestId('permission-current')).toHaveTextContent('permission-view')
     })
-    expect(screen.getByTestId('permission-current')).toHaveTextContent('permission-other')
 
     act(() => {
       onEvent({
         type: 'permission.replied',
-        data: { sessionID: 'session-other', requestID: 'permission-other', reply: 'reject' },
+        data: { sessionID: 'session-view', requestID: 'permission-view', reply: 'reject' },
         directory: '/repo',
       })
     })
 
     await waitFor(() => {
       expect(screen.getByTestId('permission-count')).toHaveTextContent('1')
+      expect(screen.getByTestId('permission-current')).toHaveTextContent('permission-other')
+    })
+  })
+
+  it('keeps a shown in-view permission when another in-view permission arrives', async () => {
+    act(() => {
+      useSessionStatus.getState().setSessionParent('child-1', 'session-view')
+    })
+
+    render(<Harness />, {
+      wrapper: createWrapper(createTestQueryClient(), '/repos/123/sessions/session-view'),
+    })
+
+    await waitFor(() => expect(mocks.subscribeGlobalMonitor).toHaveBeenCalled())
+
+    const lastSubscribeCall = mocks.subscribeGlobalMonitor.mock.calls[mocks.subscribeGlobalMonitor.mock.calls.length - 1]
+    const onEvent = lastSubscribeCall[0].onEvent as (data: unknown) => void
+
+    act(() => {
+      onEvent({ type: 'permission.asked', data: viewedSessionPermission, directory: '/repo' })
+    })
+
+    await waitFor(() => {
       expect(screen.getByTestId('permission-current')).toHaveTextContent('permission-view')
     })
+
+    act(() => {
+      onEvent({ type: 'permission.asked', data: childSessionPermission, directory: '/repo' })
+    })
+
+    await waitFor(() => {
+      expect(screen.getByTestId('permission-count')).toHaveTextContent('2')
+    })
+    expect(screen.getByTestId('permission-current')).toHaveTextContent('permission-view')
   })
 
   it('prioritizes the viewed session form over an earlier unrelated one', async () => {
@@ -1562,7 +1657,7 @@ describe('EventProvider permissions and forms', () => {
     })
   })
 
-  it('keeps the shown form when a viewed-session form arrives, then advances once it is answered', async () => {
+  it('replaces a pinned out-of-view form with the viewed-session one, then advances to the remaining pinned one', async () => {
     render(<Harness />, {
       wrapper: createWrapper(createTestQueryClient(), '/repos/123/sessions/session-view'),
     })
@@ -1586,20 +1681,20 @@ describe('EventProvider permissions and forms', () => {
 
     await waitFor(() => {
       expect(screen.getByTestId('count')).toHaveTextContent('2')
+      expect(screen.getByTestId('current')).toHaveTextContent('form-view')
     })
-    expect(screen.getByTestId('current')).toHaveTextContent('form-other')
 
     act(() => {
       onEvent({
         type: 'form.cancelled',
-        data: { id: 'form-other', sessionID: 'session-other' },
+        data: { id: 'form-view', sessionID: 'session-view' },
         directory: '/repo',
       })
     })
 
     await waitFor(() => {
       expect(screen.getByTestId('count')).toHaveTextContent('1')
-      expect(screen.getByTestId('current')).toHaveTextContent('form-view')
+      expect(screen.getByTestId('current')).toHaveTextContent('form-other')
     })
   })
 
@@ -2931,6 +3026,37 @@ describe('EventProvider permissions and forms', () => {
     expect(mocks.listActiveSessions).not.toHaveBeenCalledWith('srv_disabled')
   })
 
+  it('purges pending actions from a server that is not enabled once servers load', async () => {
+    const { rerender } = render(<Harness />, { wrapper: createWrapper() })
+
+    await waitFor(() => expect(mocks.subscribeGlobalMonitor).toHaveBeenCalled())
+
+    const lastSubscribeCall = mocks.subscribeGlobalMonitor.mock.calls[mocks.subscribeGlobalMonitor.mock.calls.length - 1]
+    const onEvent = lastSubscribeCall[0].onEvent as (data: unknown) => void
+
+    act(() => {
+      onEvent({ type: 'form.created', data: { form: pendingForm }, directory: '/srv/app', serverId: 'srv_removed' })
+      onEvent({ type: 'form.created', data: { form: secondPendingForm }, directory: '/srv/app', serverId: 'srv_remote' })
+      onEvent({ type: 'permission.asked', data: pendingPermission, directory: '/srv/app', serverId: 'srv_removed' })
+    })
+
+    await waitFor(() => {
+      expect(screen.getByTestId('count')).toHaveTextContent('2')
+      expect(screen.getByTestId('permission-count')).toHaveTextContent('1')
+    })
+
+    mocks.servers = [{ id: 'srv_remote', enabled: true }]
+    mocks.serversLoaded = true
+    rerender(<Harness />)
+
+    await waitFor(() => {
+      expect(screen.getByTestId('count')).toHaveTextContent('1')
+      expect(screen.getByTestId('permission-count')).toHaveTextContent('0')
+    })
+    expect(screen.getByTestId('for-session-2')).toHaveTextContent('form-2')
+    expect(screen.getByTestId('for-session-1')).toHaveTextContent('none')
+  })
+
   it('subscribes the project directories of enabled remote servers', async () => {
     mocks.servers = [{ id: 'srv_remote', enabled: true }]
     mocks.listProjects.mockResolvedValue([{ id: 'proj-1', canonical: '/remote/repo' }])
@@ -2957,5 +3083,120 @@ describe('EventProvider permissions and forms', () => {
 
     await waitFor(() => expect(mocks.subscribeGlobalMonitor).toHaveBeenCalled())
     expect(mocks.listProjects).not.toHaveBeenCalled()
+  })
+
+  it('drops pending forms of a remote server that becomes unreachable', async () => {
+    render(<Harness />, { wrapper: createWrapper() })
+
+    await waitFor(() => expect(mocks.subscribeGlobalMonitor).toHaveBeenCalled())
+
+    const lastSubscribeCall = mocks.subscribeGlobalMonitor.mock.calls[mocks.subscribeGlobalMonitor.mock.calls.length - 1]
+    const onEvent = lastSubscribeCall[0].onEvent as (data: unknown) => void
+    const onDirectoriesSubscribed = lastSubscribeCall[0].onDirectoriesSubscribed as (directories: string[]) => void
+
+    act(() => {
+      onEvent({ type: 'form.created', data: { form: pendingForm }, directory: '/srv/app', serverId: 'srv_remote' })
+    })
+
+    await waitFor(() => expect(screen.getByTestId('count')).toHaveTextContent('1'))
+
+    mocks.listPendingForms.mockRejectedValue(new FetchError('Bad gateway', 502))
+
+    await act(async () => {
+      onDirectoriesSubscribed(['srv_remote|/srv/app'])
+    })
+
+    await waitFor(() => {
+      expect(screen.getByTestId('count')).toHaveTextContent('0')
+      expect(screen.getByTestId('current')).toHaveTextContent('none')
+    })
+  })
+
+  it('drops a pending remote form whose session no longer exists on reconnect', async () => {
+    mocks.servers = [{ id: 'srv_remote', enabled: true }]
+    mocks.getSession.mockRejectedValue(new FetchError('Session not found', 404))
+
+    render(<Harness />, { wrapper: createWrapper() })
+
+    await waitFor(() => expect(mocks.subscribeGlobalMonitor).toHaveBeenCalled())
+
+    const lastSubscribeCall = mocks.subscribeGlobalMonitor.mock.calls[mocks.subscribeGlobalMonitor.mock.calls.length - 1]
+    const onEvent = lastSubscribeCall[0].onEvent as (data: unknown) => void
+    const handleStatusChange = lastSubscribeCall[0].onStatusChange as (connected: boolean) => void
+
+    act(() => {
+      useSessionStatus.getState().setSessionParent('session-1', null)
+      onEvent({ type: 'form.created', data: { form: pendingForm }, serverId: 'srv_remote' })
+    })
+
+    await waitFor(() => expect(screen.getByTestId('count')).toHaveTextContent('1'))
+
+    act(() => {
+      handleStatusChange(true)
+    })
+
+    await waitFor(() => {
+      expect(mocks.getSession).toHaveBeenCalledWith('session-1', 'srv_remote')
+      expect(screen.getByTestId('count')).toHaveTextContent('0')
+      expect(screen.getByTestId('current')).toHaveTextContent('none')
+    })
+  })
+
+  it('resolves an unknown remote session directory on reconnect', async () => {
+    mocks.servers = [{ id: 'srv_remote', enabled: true }]
+    mocks.getSession.mockImplementation((sessionID: string) =>
+      sessionID === 'session-1'
+        ? Promise.resolve({ id: 'session-1', location: { directory: '/srv/resolved' } })
+        : Promise.reject(new FetchError('Session not found', 404)),
+    )
+
+    render(<Harness />, { wrapper: createWrapper() })
+
+    await waitFor(() => expect(mocks.subscribeGlobalMonitor).toHaveBeenCalled())
+
+    const lastSubscribeCall = mocks.subscribeGlobalMonitor.mock.calls[mocks.subscribeGlobalMonitor.mock.calls.length - 1]
+    const onEvent = lastSubscribeCall[0].onEvent as (data: unknown) => void
+    const handleStatusChange = lastSubscribeCall[0].onStatusChange as (connected: boolean) => void
+
+    act(() => {
+      useSessionStatus.getState().setSessionParent('session-1', null)
+      onEvent({ type: 'form.created', data: { form: pendingForm }, serverId: 'srv_remote' })
+    })
+
+    await waitFor(() => expect(screen.getByTestId('count')).toHaveTextContent('1'))
+    expect(useSessionStatus.getState().directories.has('session-1')).toBe(false)
+
+    act(() => {
+      handleStatusChange(true)
+    })
+
+    await waitFor(() => {
+      expect(mocks.listPendingForms).toHaveBeenCalledWith('/srv/resolved', 'srv_remote')
+      expect(useSessionStatus.getState().directories.get('session-1')).toBe('srv_remote|/srv/resolved')
+    })
+  })
+
+  it('reconciles pending actions for a remote server enabled after the browser stream connects', async () => {
+    const { rerender } = render(<Harness />, { wrapper: createWrapper() })
+
+    await waitFor(() => expect(mocks.subscribeGlobalMonitor).toHaveBeenCalled())
+
+    const lastSubscribeCall = mocks.subscribeGlobalMonitor.mock.calls[mocks.subscribeGlobalMonitor.mock.calls.length - 1]
+    const handleStatusChange = lastSubscribeCall[0].onStatusChange as (connected: boolean) => void
+
+    act(() => {
+      handleStatusChange(true)
+    })
+
+    act(() => {
+      useSessionStatus.getState().setSessionDirectory('remote-session', 'srv_remote|/remote/repo')
+    })
+
+    mocks.servers = [{ id: 'srv_remote', enabled: true }]
+    rerender(<Harness />)
+
+    await waitFor(() => {
+      expect(mocks.listPendingForms).toHaveBeenCalledWith('/remote/repo', 'srv_remote')
+    })
   })
 })

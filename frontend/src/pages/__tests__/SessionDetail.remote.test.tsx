@@ -245,6 +245,7 @@ describe('SessionDetail remote server mode', () => {
       hasFormsForSession: vi.fn(() => false),
       reply: vi.fn(),
       cancel: vi.fn(),
+      forgetPendingActionsForSession: vi.fn(),
       syncForSession: vi.fn(),
     })
     mocks.useSettings.mockReturnValue({

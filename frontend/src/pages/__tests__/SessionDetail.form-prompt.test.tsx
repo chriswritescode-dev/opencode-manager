@@ -4,6 +4,7 @@ import userEvent from '@testing-library/user-event'
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
 import { MemoryRouter, Route, Routes } from 'react-router-dom'
 import type { FormInfo } from '@opencode-manager/shared/opencode'
+import { FetchError } from '@/api/fetchWrapper'
 import { SessionDetail } from '../SessionDetail'
 
 const mocks = vi.hoisted(() => ({
@@ -26,6 +27,7 @@ const formsState = {
   bySession: {} as Record<string, FormInfo | null>,
   reply: vi.fn(),
   cancel: vi.fn(),
+  forgetPendingActionsForSession: vi.fn(),
 }
 
 vi.mock('@/config', () => ({
@@ -237,6 +239,7 @@ describe('SessionDetail form prompt session scoping', () => {
     formsState.bySession = {}
     formsState.reply = vi.fn().mockResolvedValue(undefined)
     formsState.cancel = vi.fn().mockResolvedValue(undefined)
+    formsState.forgetPendingActionsForSession = vi.fn()
 
     mocks.useSession.mockReturnValue({ data: undefined, isLoading: false })
     mocks.useSessionTranscript.mockReturnValue({
@@ -259,6 +262,7 @@ describe('SessionDetail form prompt session scoping', () => {
       pendingCount: 0,
       reply: formsState.reply,
       cancel: formsState.cancel,
+      forgetPendingActionsForSession: formsState.forgetPendingActionsForSession,
       syncForSession: vi.fn(),
     }))
     mocks.useSSEHealth.mockReturnValue({ isHealthy: true })
@@ -397,5 +401,18 @@ describe('SessionDetail form prompt session scoping', () => {
     await userEvent.click(screen.getByRole('button', { name: 'Continue A' }))
 
     await waitFor(() => expect(screen.getByTestId('prompt-overlay')).not.toHaveClass('top-0'))
+  })
+
+  it('forgets pending actions for a session that no longer exists', async () => {
+    mocks.useSession.mockReturnValue({
+      data: undefined,
+      isLoading: false,
+      error: new FetchError('Session not found', 404),
+    })
+
+    render(renderTree())
+
+    await waitFor(() => expect(screen.getByText('Session not found')).toBeInTheDocument())
+    expect(formsState.forgetPendingActionsForSession).toHaveBeenCalledWith(VIEWED_SESSION_ID)
   })
 })

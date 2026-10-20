@@ -21,9 +21,13 @@ const passThroughAuth: MiddlewareHandler = async (_c, next) => {
 function buildApp(
   fetchFn: typeof fetch,
   requireAuth: MiddlewareHandler = passThroughAuth,
+  upstreamHeadersTimeoutMs?: number,
 ): Hono {
   const app = new Hono()
-  app.route('/api/opencode/servers', createOpenCodeServerProxyRoutes(registry, requireAuth, fetchFn))
+  app.route(
+    '/api/opencode/servers',
+    createOpenCodeServerProxyRoutes(registry, requireAuth, fetchFn, upstreamHeadersTimeoutMs),
+  )
   return app
 }
 
@@ -198,6 +202,65 @@ describe('opencode server proxy routes', () => {
 
     expect(res.status).toBe(502)
     expect(await res.json()).toEqual({ error: 'Remote OpenCode server unreachable' })
+  })
+
+  it('returns 504 when a GET upstream does not send headers before the timeout', async () => {
+    const fetchMock = vi.fn((_url: string, init: RequestInit) => new Promise<Response>((_resolve, reject) => {
+      init.signal?.addEventListener('abort', () => {
+        reject(new DOMException('Aborted', 'AbortError'))
+      })
+    }))
+    const app = buildApp(fetchMock as unknown as typeof fetch, passThroughAuth, 20)
+
+    const res = await app.request('/api/opencode/servers/srv_1/api/session')
+
+    expect(res.status).toBe(504)
+    expect(await res.json()).toEqual({ error: 'Remote OpenCode server timed out' })
+  })
+
+  it('does not time out a POST that takes longer than the headers timeout', async () => {
+    let receivedSignal: AbortSignal | null | undefined
+    const fetchMock = vi.fn(async (_url: string, init: RequestInit) => {
+      receivedSignal = init.signal
+      await new Promise((resolve) => setTimeout(resolve, 40))
+      return new Response('ok', { status: 200 })
+    })
+    const app = buildApp(fetchMock as unknown as typeof fetch, passThroughAuth, 10)
+
+    const res = await app.request('/api/opencode/servers/srv_1/api/session/ses_1/message', {
+      method: 'POST',
+      body: '{}',
+    })
+
+    expect(res.status).toBe(200)
+    expect(receivedSignal?.aborted).toBe(false)
+  })
+
+  it('keeps streaming the upstream body after headers arrive', async () => {
+    const encoder = new TextEncoder()
+    let receivedSignal: AbortSignal | null | undefined
+    const fetchMock = vi.fn(async (_url: string, init: RequestInit) => {
+      receivedSignal = init.signal
+      const stream = new ReadableStream<Uint8Array>({
+        async start(controller) {
+          controller.enqueue(encoder.encode('data: one\n\n'))
+          await new Promise((resolve) => setTimeout(resolve, 40))
+          controller.enqueue(encoder.encode('data: two\n\n'))
+          controller.close()
+        },
+      })
+      return new Response(stream, {
+        status: 200,
+        headers: { 'content-type': 'text/event-stream' },
+      })
+    })
+    const app = buildApp(fetchMock as unknown as typeof fetch, passThroughAuth, 10)
+
+    const res = await app.request('/api/opencode/servers/srv_1/api/event')
+
+    expect(res.status).toBe(200)
+    expect(await res.text()).toBe('data: one\n\ndata: two\n\n')
+    expect(receivedSignal?.aborted).toBe(false)
   })
 
   it('streams the upstream response body and drops set-cookie', async () => {
